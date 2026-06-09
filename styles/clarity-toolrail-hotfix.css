@@ -1,0 +1,43 @@
+/* Clarity Caddie tool rail hotfix - 2026-06-10
+   Scope: hole selector placement, next-hole popout removal, admin-only arcade rail. */
+body.shell-gps .gdHoleStepper,
+body.gdGpsActive .gdHoleStepper,
+body.gps-active .gdHoleStepper{
+  top:calc(max(14px, env(safe-area-inset-top)) + 8px)!important;
+  right:clamp(96px, 14vw, 132px)!important;
+  left:auto!important;
+  bottom:auto!important;
+  transform:none!important;
+  z-index:1848!important;
+}
+@media (max-width:520px){
+  body.shell-gps .gdHoleStepper,
+  body.gdGpsActive .gdHoleStepper,
+  body.gps-active .gdHoleStepper{
+    top:calc(max(12px, env(safe-area-inset-top)) + 8px)!important;
+    right:88px!important;
+    left:auto!important;
+    bottom:auto!important;
+    transform:none!important;
+  }
+}
+#gdNextHolePopout{
+  display:none!important;
+  visibility:hidden!important;
+  pointer-events:none!important;
+}
+body:not([data-gd-permission="admin"]) #gdArcadeRailBtn,
+body:not(.gdArcadeAdminAllowed) #gdArcadeRailBtn{
+  display:none!important;
+  visibility:hidden!important;
+  pointer-events:none!important;
+}
+body:not([data-gd-permission="admin"]) #scorecardRailBtn,
+body:not(.gdArcadeAdminAllowed) #scorecardRailBtn,
+body:not([data-gd-permission="admin"]) #bagRailBtn,
+body:not(.gdArcadeAdminAllowed) #bagRailBtn{
+  order:initial!important;
+}
+.gdBagQuickWrap.gdBagQuickRecovered{
+  display:grid!important;
+}
