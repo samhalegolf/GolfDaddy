@@ -1,0 +1,16 @@
+body.shell-gps #gdV62GpsBadge,
+body.gdGpsActive #gdV62GpsBadge {
+  display: grid !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+
+#gdV62GpsBadge:empty {
+  grid-template-columns: 1fr !important;
+  min-height: 0 !important;
+}
+
+#gdV62GpsBadge:empty::before {
+  content: none !important;
+  display: none !important;
+}

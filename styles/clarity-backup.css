@@ -1,0 +1,169 @@
+.clarityBackupOverlay{
+  position:fixed;
+  inset:0;
+  z-index:100650;
+  display:none;
+  align-items:flex-end;
+  padding:12px;
+  box-sizing:border-box;
+  background:rgba(0,0,0,.44);
+  backdrop-filter:blur(5px);
+}
+.clarityBackupOverlay.open{display:flex}
+.clarityBackupSheet{
+  width:100%;
+  max-width:560px;
+  max-height:82vh;
+  margin:0 auto;
+  overflow:auto;
+  border-radius:24px;
+  background:rgba(5,9,7,.96);
+  border:1px solid rgba(255,255,255,.13);
+  box-shadow:0 24px 64px rgba(0,0,0,.55);
+  padding:14px;
+  box-sizing:border-box;
+}
+.clarityBackupHead{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:10px;
+  margin-bottom:10px;
+}
+.clarityBackupHead strong{
+  display:block;
+  color:#fff;
+  font-size:21px;
+  font-weight:950;
+  letter-spacing:-.03em;
+}
+.clarityBackupClose{
+  width:40px;
+  height:40px;
+  border-radius:14px;
+  background:rgba(255,255,255,.08);
+  color:#fff;
+  padding:0;
+}
+.clarityBackupCard{
+  margin:12px 0 14px;
+  padding:12px;
+  border-radius:20px;
+  background:linear-gradient(180deg,rgba(215,176,107,.12),rgba(255,255,255,.045));
+  border:1px solid rgba(215,176,107,.20);
+}
+.clarityBackupCard h3{
+  margin:0 0 4px;
+  font-size:17px;
+  letter-spacing:-.02em;
+}
+.clarityBackupCard p{
+  margin:0 0 10px;
+  color:rgba(255,255,255,.62);
+  font-size:12px;
+  font-weight:720;
+  line-height:1.35;
+}
+.clarityBackupStats{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:7px;
+  margin:0 0 10px;
+}
+.clarityBackupStat{
+  padding:9px 10px;
+  border-radius:14px;
+  background:rgba(0,0,0,.18);
+  border:1px solid rgba(255,255,255,.08);
+}
+.clarityBackupStat strong{
+  display:block;
+  color:#fff;
+  font-size:16px;
+  font-weight:950;
+}
+.clarityBackupStat span{
+  display:block;
+  margin-top:2px;
+  color:rgba(255,255,255,.56);
+  font-size:10px;
+  font-weight:900;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+}
+.clarityBackupActions{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:8px;
+  margin-top:10px;
+}
+.clarityBackupActions button,
+.clarityBackupFileLabel{
+  min-height:44px;
+  border:0;
+  border-radius:14px;
+  padding:11px 10px;
+  background:rgba(255,255,255,.09);
+  color:#fff;
+  font-size:13px;
+  font-weight:950;
+  text-align:center;
+  box-sizing:border-box;
+  display:grid;
+  place-items:center;
+}
+.clarityBackupActions .primary{
+  background:linear-gradient(180deg,#d7b06b,#b88d42);
+  color:#06100b;
+}
+.clarityBackupFileLabel{
+  cursor:pointer;
+}
+.clarityBackupFileLabel input{
+  position:fixed;
+  left:-10000px;
+  top:0;
+  width:1px;
+  height:1px;
+  opacity:0;
+  pointer-events:none;
+}
+.clarityBackupOption{
+  display:grid;
+  grid-template-columns:auto 1fr;
+  gap:9px;
+  align-items:start;
+  margin:10px 0 0;
+  padding:9px;
+  border-radius:14px;
+  background:rgba(0,0,0,.16);
+  border:1px solid rgba(255,255,255,.08);
+  color:rgba(255,255,255,.74);
+  font-size:12px;
+  font-weight:820;
+  line-height:1.3;
+}
+.clarityBackupOption input{
+  width:18px;
+  height:18px;
+  margin:0;
+  accent-color:#d7b06b;
+}
+.clarityBackupStatus{
+  min-height:18px;
+  margin-top:9px;
+  color:rgba(255,255,255,.66);
+  font-size:12px;
+  font-weight:820;
+  line-height:1.35;
+}
+.clarityBackupStatus.good{color:#1fd36d}
+.clarityBackupStatus.warn{color:#ffcf70}
+.clarityBackupStatus.bad{color:#ff6b6b}
+
+@media(max-width:520px){
+  .clarityBackupStats,
+  .clarityBackupActions{
+    grid-template-columns:1fr;
+  }
+}

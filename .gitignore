@@ -1,4 +1,5 @@
 node_modules/
+dist/
 .env
 .env.*
 .netlify/
@@ -9,3 +10,4 @@ yarn-error.log*
 coverage/
 .vite/
 .cache/
+supabase/.temp/

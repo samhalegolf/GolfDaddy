@@ -1,0 +1,44 @@
+[build]
+  publish = "dist"
+  command = "npm run build:netlify"
+  functions = "functions"
+
+[[redirects]]
+  from = "/api/email-notification"
+  to = "/.netlify/functions/email-notification"
+  status = 200
+
+[[redirects]]
+  from = "/api/support-ticket"
+  to = "/.netlify/functions/support-ticket"
+  status = 200
+
+[[redirects]]
+  from = "/api/course-maps"
+  to = "/.netlify/functions/course-maps"
+  status = 200
+
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
+[[headers]]
+  for = "/*.html"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
+[[headers]]
+  for = "/scripts/*"
+  [headers.values]
+    Cache-Control = "public, max-age=3600"
+
+[[headers]]
+  for = "/styles/*"
+  [headers.values]
+    Cache-Control = "public, max-age=3600"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=604800"
