@@ -1,0 +1,65 @@
+name: Unpack Clarity Caddie candidate
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - clarity-caddie-github-ready.zip
+      - .github/workflows/unpack-candidate.yml
+
+permissions:
+  contents: write
+
+jobs:
+  unpack:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Unpack candidate source bundle
+        run: |
+          set -euo pipefail
+          if [ ! -f clarity-caddie-github-ready.zip ]; then
+            echo "clarity-caddie-github-ready.zip was not found."
+            exit 1
+          fi
+          rm -rf /tmp/clarity-caddie-unpack
+          mkdir -p /tmp/clarity-caddie-unpack
+          unzip -q clarity-caddie-github-ready.zip -d /tmp/clarity-caddie-unpack
+          if [ ! -d /tmp/clarity-caddie-unpack/clarity_caddie_github_ready ]; then
+            echo "Expected inner folder clarity_caddie_github_ready was not found."
+            find /tmp/clarity-caddie-unpack -maxdepth 3 -type d -print
+            exit 1
+          fi
+          rsync -a \
+            --exclude '.git' \
+            --exclude '.github' \
+            --exclude 'dist' \
+            --exclude 'node_modules' \
+            --exclude '.netlify' \
+            --exclude '.env' \
+            --exclude '.env.*' \
+            /tmp/clarity-caddie-unpack/clarity_caddie_github_ready/ ./
+          rm -f clarity-caddie-github-ready.zip
+          rm -f PUSH_TO_GITHUB.sh
+          rm -f GITHUB_IMPORT_NOTES.md
+          git status --short
+
+      - name: Commit unpacked source
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          git commit -m "Unpack Clarity Caddie Phase 1 source"
+          git push
