@@ -3508,6 +3508,9 @@
     }catch(e){return false;}
   }
   function renderCourseHistoryPicker(){
+    // Course History now lives under Profile. The course picker still uses saved courses
+    // internally for suggestions, but it should not show a separate Recent Courses panel here.
+    return;
     try{
       const screen=document.getElementById('courseScreen');
       const assumed=document.getElementById('gdCourseAssumedOption');
@@ -3738,7 +3741,7 @@
 
   function profileCardHtml(){
     const count=savedHoleCount();
-    return `${count} saved course object${count===1?'':'s'}`;
+    return count ? `${count} saved course object${count===1?'':'s'}` : 'Recent courses and saved course memory';
   }
   function isCoachProfileCardView(){
     const kicker=document.querySelector('#gdProfileV67 .kicker');
@@ -3757,7 +3760,7 @@
     btn.id='gdProfileCoursesCard';
     btn.className='card';
     btn.type='button';
-    btn.innerHTML=`<div class="gdCourseGreenIcon" aria-hidden="true"></div><div><strong>Courses</strong><span>${profileCardHtml()}</span></div>`;
+    btn.innerHTML=`<div class="gdCourseGreenIcon" aria-hidden="true"></div><div><strong>Course History</strong><span>${profileCardHtml()}</span></div>`;
     btn.onclick=function(ev){ev.preventDefault();openCourseLibraryPanel();return false;};
     grid.appendChild(btn);
   }
@@ -3768,6 +3771,8 @@
       return;
     }
     if(card){
+      const title=card.querySelector('strong');
+      if(title)title.textContent='Course History';
       const old=card.querySelector('span');
       if(old)old.textContent=profileCardHtml();
     }
