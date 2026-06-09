@@ -6,7 +6,7 @@ on:
     branches:
       - main
     paths:
-      - clarity-caddie-github-ready.zip
+      - 'clarity-caddie-github-ready*.zip'
       - .github/workflows/unpack-candidate.yml
 
 permissions:
@@ -25,18 +25,23 @@ jobs:
       - name: Unpack candidate source bundle
         run: |
           set -euo pipefail
-          if [ ! -f clarity-caddie-github-ready.zip ]; then
-            echo "clarity-caddie-github-ready.zip was not found."
+          candidate_zip="$(find . -maxdepth 1 -type f -name 'clarity-caddie-github-ready*.zip' -print | sort | tail -n 1 | sed 's#^./##')"
+          if [ -z "${candidate_zip}" ]; then
+            echo "No clarity-caddie-github-ready*.zip bundle was found."
             exit 1
           fi
+          echo "Unpacking ${candidate_zip}"
+
           rm -rf /tmp/clarity-caddie-unpack
           mkdir -p /tmp/clarity-caddie-unpack
-          unzip -q clarity-caddie-github-ready.zip -d /tmp/clarity-caddie-unpack
+          unzip -q "${candidate_zip}" -d /tmp/clarity-caddie-unpack
+
           if [ ! -d /tmp/clarity-caddie-unpack/clarity_caddie_github_ready ]; then
             echo "Expected inner folder clarity_caddie_github_ready was not found."
             find /tmp/clarity-caddie-unpack -maxdepth 3 -type d -print
             exit 1
           fi
+
           rsync -a \
             --exclude '.git' \
             --exclude '.github' \
@@ -46,7 +51,8 @@ jobs:
             --exclude '.env' \
             --exclude '.env.*' \
             /tmp/clarity-caddie-unpack/clarity_caddie_github_ready/ ./
-          rm -f clarity-caddie-github-ready.zip
+
+          rm -f clarity-caddie-github-ready*.zip
           rm -f PUSH_TO_GITHUB.sh
           rm -f GITHUB_IMPORT_NOTES.md
           git status --short
@@ -61,5 +67,5 @@ jobs:
             echo "No changes to commit."
             exit 0
           fi
-          git commit -m "Unpack Clarity Caddie Phase 1 source"
+          git commit -m "Unpack Clarity Caddie candidate source"
           git push
