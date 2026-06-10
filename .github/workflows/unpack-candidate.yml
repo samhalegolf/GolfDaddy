@@ -18,27 +18,40 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           persist-credentials: true
 
       - name: Unpack candidate source bundle
         run: |
           set -euo pipefail
-          echo "Workflow refresh: 2026-06-10-mask-number-unpack"
-          candidate_zip="$(find . -maxdepth 1 -type f -name 'clarity-caddie-github-ready*.zip' -print | sort | tail -n 1 | sed 's#^./##')"
+          echo "Workflow refresh: 2026-06-11-node24-hardened-unpack"
+          echo "Looking for candidate bundles..."
+          find . -maxdepth 1 -type f -name 'clarity-caddie-github-ready*.zip' -print | sort
+
+          candidate_zip=""
+          while IFS= read -r zip_path; do
+            [ -n "${zip_path}" ] || continue
+            echo "Checking ${zip_path}"
+            if unzip -l "${zip_path}" | grep -q 'clarity_caddie_github_ready/'; then
+              candidate_zip="${zip_path#./}"
+              echo "Selected ${candidate_zip}"
+              break
+            fi
+            echo "Skipping ${zip_path}: does not contain clarity_caddie_github_ready/"
+          done < <(find . -maxdepth 1 -type f -name 'clarity-caddie-github-ready*.zip' -print | sort -r)
+
           if [ -z "${candidate_zip}" ]; then
-            echo "No clarity-caddie-github-ready*.zip bundle was found."
+            echo "No valid clarity-caddie-github-ready*.zip bundle with clarity_caddie_github_ready/ was found."
             exit 1
           fi
-          echo "Unpacking ${candidate_zip}"
 
           rm -rf /tmp/clarity-caddie-unpack
           mkdir -p /tmp/clarity-caddie-unpack
           unzip -q "${candidate_zip}" -d /tmp/clarity-caddie-unpack
 
           if [ ! -d /tmp/clarity-caddie-unpack/clarity_caddie_github_ready ]; then
-            echo "Expected inner folder clarity_caddie_github_ready was not found."
+            echo "Expected inner folder clarity_caddie_github_ready was not found after unzip."
             find /tmp/clarity-caddie-unpack -maxdepth 3 -type d -print
             exit 1
           fi
