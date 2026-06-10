@@ -1238,3 +1238,26 @@ body.shell-module .gdAssumedCourseBadge{
 }
 #gdProfileCoursesCard .gdCourseGreenIcon:before,
 #gdProfileCoursesCard .gdCourseGreenIcon:after{content:none!important;display:none!important;}
+
+/* Profile Course History tile correction: replace old GPS/course tab, do not duplicate Play. */
+#gdProfileCoursesCard{
+  grid-column:1 / -1;
+}
+#gdProfileCoursesCard .gdCourseGreenIcon{
+  flex:0 0 auto!important;
+  width:54px!important;
+  height:54px!important;
+  border-radius:16px!important;
+  background-color:#0e3f85!important;
+  background-image:linear-gradient(180deg,rgba(255,255,255,.08),rgba(0,0,0,.18)),url('../assets/brand/cg-gps-pin.png')!important;
+  background-repeat:no-repeat!important;
+  background-position:center!important;
+  background-size:84% 84%!important;
+  border:1px solid rgba(74,163,255,.56)!important;
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.10),0 10px 22px rgba(0,0,0,.34)!important;
+}
+#gdProfileCoursesCard .gdCourseGreenIcon:before,
+#gdProfileCoursesCard .gdCourseGreenIcon:after{content:none!important;display:none!important;}
+@media (min-width:720px){
+  #gdProfileCoursesCard{grid-column:1 / 2;}
+}
