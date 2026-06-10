@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "note": "Pricing intentionally left blank. Set stripePriceId later or use STRIPE_PRICE_* env vars in Netlify.",
+  "products": {
+    "round_pass": {
+      "label": "Round Pass",
+      "type": "one_time",
+      "priceDisplay": "",
+      "stripePriceEnv": "STRIPE_PRICE_ROUND_PASS",
+      "stripePriceId": ""
+    },
+    "unlimited_monthly": {
+      "label": "Unlimited Monthly",
+      "type": "subscription",
+      "priceDisplay": "",
+      "stripePriceEnv": "STRIPE_PRICE_UNLIMITED_MONTHLY",
+      "stripePriceId": ""
+    },
+    "unlimited_annual": {
+      "label": "Unlimited Annual",
+      "type": "subscription",
+      "priceDisplay": "",
+      "stripePriceEnv": "STRIPE_PRICE_UNLIMITED_ANNUAL",
+      "stripePriceId": ""
+    },
+    "founder_annual": {
+      "label": "Founder Annual",
+      "type": "subscription",
+      "priceDisplay": "",
+      "stripePriceEnv": "STRIPE_PRICE_FOUNDER_ANNUAL",
+      "stripePriceId": ""
+    },
+    "coach_monthly": {
+      "label": "Coach Monthly",
+      "type": "subscription",
+      "priceDisplay": "",
+      "stripePriceEnv": "STRIPE_PRICE_COACH_MONTHLY",
+      "stripePriceId": ""
+    }
+  }
+}
