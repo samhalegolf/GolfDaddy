@@ -25,6 +25,7 @@ jobs:
       - name: Unpack candidate source bundle
         run: |
           set -euo pipefail
+          echo "Workflow refresh: 2026-06-10-mask-number-unpack"
           candidate_zip="$(find . -maxdepth 1 -type f -name 'clarity-caddie-github-ready*.zip' -print | sort | tail -n 1 | sed 's#^./##')"
           if [ -z "${candidate_zip}" ]; then
             echo "No clarity-caddie-github-ready*.zip bundle was found."
