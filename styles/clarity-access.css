@@ -1,0 +1,54 @@
+:root[data-clarity-bubble-access="inactive"] .clarityPremiumOnly{
+  position:relative;
+}
+.clarityAccessLocked{
+  position:relative;
+  opacity:.72;
+}
+.clarityAccessLocked:after{
+  content:attr(data-clarity-lock-title);
+  display:none;
+  position:absolute;
+  left:12px;
+  right:12px;
+  bottom:10px;
+  z-index:4;
+  padding:10px 12px;
+  border-radius:14px;
+  border:1px solid rgba(255,255,255,.14);
+  background:rgba(0,0,0,.78);
+  color:rgba(255,255,255,.92);
+  font-size:12px;
+  font-weight:850;
+  line-height:1.25;
+  box-shadow:0 16px 35px rgba(0,0,0,.35);
+}
+.clarityAccessLocked:hover:after,
+.clarityAccessLocked:focus-within:after{
+  display:block;
+}
+.clarityAccessPill{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-height:30px;
+  padding:0 12px;
+  border-radius:999px;
+  border:1px solid rgba(255,255,255,.14);
+  background:rgba(255,255,255,.07);
+  color:rgba(255,255,255,.82);
+  font-size:11px;
+  font-weight:950;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+}
+.clarityAccessPill.is-active{
+  border-color:rgba(31,211,109,.40);
+  background:linear-gradient(180deg,rgba(31,211,109,.22),rgba(31,211,109,.08));
+  color:#eafff0;
+}
+.clarityAccessPill.is-locked{
+  border-color:rgba(255,184,64,.35);
+  background:linear-gradient(180deg,rgba(255,184,64,.16),rgba(255,184,64,.06));
+  color:#fff4d0;
+}
