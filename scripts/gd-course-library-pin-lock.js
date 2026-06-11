@@ -3411,23 +3411,7 @@
       try{if(typeof resetPlay==='function')resetPlay(true);}catch(e){}
       updateCourseLoading('Running auto mapping',38);
 	      try{await syncPublishedCourseMaps({quiet:true});}catch(e){}
-      try{saveCourseHistoryEntry(c,'course-open');}catch(e){}
 	      try{setMappedPlayMode('mapped',{skipFrame:true,silent:true});}catch(e){}
-      const savedCourse=loadUserCourseData(userId(),courseId(c));
-      if(courseHasSavedMemoryForHole(savedCourse,h)){
-        updateCourseLoading('Loading saved course memory',56);
-        await new Promise(resolve=>setTimeout(resolve,60));
-        let savedFramed=false;
-        try{savedFramed=!!focusMappedHoleOrSavedGreen(h,{quiet:true,frame:true,promptStart:true,allowAnyStart:true,course:c});}catch(e){}
-        if(savedFramed){
-          updateCourseLoading('Saved Hole 1 loaded',100);
-          markCourseOpenReady(c,h);
-          hideCourseLoading(220);
-          setTimeout(()=>checkClosestMappedHolePrompt(loadUserCourseData()),700);
-          return true;
-        }
-        updateCourseLoading('Saved course loaded · set position',78);
-      }
 	      const openFrameRun=nextMappedFrameRun();
 	      updateCourseLoading('Building fairway line',48);
 	      await new Promise(resolve=>setTimeout(resolve,80));
@@ -3445,7 +3429,7 @@
 	        setTimeout(()=>scheduleOsmAutoMapForPlay(c,{frame:false,delayMs:20}),700);
 	        setTimeout(()=>checkClosestMappedHolePrompt(loadUserCourseData()),900);
 	      }else{
-	        updateCourseLoading('Hole 1 loaded · set position',100);
+	        updateCourseLoading('Hole 1 ready',100);
 	        markCourseOpenReady(c,h);
 	        hideCourseLoading(220);
 	        setTimeout(()=>{
@@ -3472,84 +3456,6 @@
   window.gdFocusScorecardHoleOnGps=focusScorecardHoleOnGps;
   window.gdLockMappedGreenFromStart=forceLockMappedGreenFromStart;
   window.gdOpenCourseToFirstHole=openCourseToFirstHole;
-
-  function saveCourseHistoryEntry(course=courseObj(),source='course-open'){
-    try{
-      const c=sessionCourse(course);
-      if(!c||isManualGpsCourse(c))return null;
-      const uid=userId();
-      const cid=courseId(c);
-      const store=loadStore();
-      const saved=ensureCourse(store,uid,cid,courseName(c),c);
-      saved.historyKind='device-course-history';
-      saved.historySource=source;
-      saved.lastOpenedAt=nowIso();
-      saved.historyUpdatedAt=saved.lastOpenedAt;
-      saved.updatedAt=saved.lastOpenedAt;
-      const finder=courseFinderPoint(saved)||currentMapFinderPoint();
-      const lat=Number(finder?.lat),lng=Number(finder?.lng);
-      if(Number.isFinite(lat)&&Number.isFinite(lng)){
-        saved.finderLat=saved.courseFinderLat=lat;
-        saved.finderLng=saved.courseFinderLng=lng;
-      }
-      saveStore(store);
-      try{renderCourseHistoryPicker();}catch(e){}
-      try{gdCLRefreshProfileCard();}catch(e){}
-      return saved;
-    }catch(e){return null;}
-  }
-  function courseHasSavedMemoryForHole(course,hole=1){
-    try{
-      const c=course&&course.objects?course:loadUserCourseData(userId(),courseId(sessionCourse(course||courseObj())));
-      if(!c)return false;
-      const h=validHoleNumber(hole)||1;
-      if(confirmedGreenRecord(c,h)||legacyGreenRecord(c,h))return true;
-      return objectValues(c).some(object=>Number(object.holeNumber)===h&&(object.confirmed||object.type==='green'));
-    }catch(e){return false;}
-  }
-  function renderCourseHistoryPicker(){
-    // Course History now lives under Profile. The course picker still uses saved courses
-    // internally for suggestions, but it should not show a separate Recent Courses panel here.
-    return;
-    try{
-      const screen=document.getElementById('courseScreen');
-      const assumed=document.getElementById('gdCourseAssumedOption');
-      if(!screen||!assumed)return;
-      let panel=document.getElementById('gdCourseHistoryPicker');
-      if(!panel){
-        panel=document.createElement('div');
-        panel.id='gdCourseHistoryPicker';
-        panel.className='gdCourseHistoryPicker';
-        assumed.insertAdjacentElement('afterend',panel);
-      }
-      const courses=libraryCourses(userId())
-        .filter(course=>!isPublishedCourse(course)&&isUsefulCourseName(course.courseName||course.name))
-        .sort((a,b)=>String(b.historyUpdatedAt||b.lastOpenedAt||b.updatedAt||'').localeCompare(String(a.historyUpdatedAt||a.lastOpenedAt||a.updatedAt||'')))
-        .slice(0,4);
-      if(!courses.length){panel.innerHTML='';panel.classList.add('hidden');return;}
-      panel.classList.remove('hidden');
-      const rows=courses.map(course=>{
-        const summary=courseSummary(course);
-        const meta=[courseSummaryLine(summary),course.historyUpdatedAt||course.lastOpenedAt||course.updatedAt?`last used ${dateLabel(course.historyUpdatedAt||course.lastOpenedAt||course.updatedAt)}`:'saved on this device'].filter(Boolean).join(' · ');
-        return `<button type="button" class="gdCourseHistoryRow" data-course-history-open="${esc(course.id)}"><div><strong>${esc(course.courseName||'Saved course')}</strong><span>${esc(meta)}</span></div><em>Open</em></button>`;
-      }).join('');
-      panel.innerHTML=`<div class="gdCourseHistoryHead"><strong>Recent Courses</strong><span>Saved on this device</span></div>${rows}`;
-      panel.querySelectorAll('[data-course-history-open]').forEach(btn=>{
-        btn.onclick=ev=>{
-          ev.preventDefault();ev.stopPropagation();
-          const id=btn.getAttribute('data-course-history-open');
-          if(typeof window.gdCLOpenCourseFromLibrary==='function')window.gdCLOpenCourseFromLibrary(id,1,null,false);
-          else {
-            const course=findLibraryCourse(id);
-            if(course&&typeof openCourse==='function')openCourse({name:course.courseName,courseId:course.courseId,lat:course.finderLat||course.courseLat,lng:course.finderLng||course.courseLng});
-          }
-          return false;
-        };
-      });
-    }catch(e){}
-  }
-  window.gdSaveCourseHistoryEntry=saveCourseHistoryEntry;
-  window.gdRenderCourseHistoryPicker=renderCourseHistoryPicker;
 
   function wrapGpsFunctions(){
     if(!window.__gdCourseLibraryGpsWrapped){
@@ -3583,10 +3489,7 @@
           if(window.gdCourseChangeMode==='assumed-label'&&c&&isManualGpsCourse(c)){
             window.gdCourseChangeMode='';
           }
-          if(!isManualGpsCourse(c)){
-            saveCourseHistoryEntry(c,'course-open');
-            showCourseLoadingIfNeeded(c,1);
-          }
+          if(!isManualGpsCourse(c))showCourseLoadingIfNeeded(c,1);
           const res=oldOpen.apply(this,arguments);
           try{
             if(c&&!/^manual gps$/i.test(String(c.name||''))){
@@ -3741,7 +3644,7 @@
 
   function profileCardHtml(){
     const count=savedHoleCount();
-    return count ? `${count} saved course object${count===1?'':'s'}` : 'Recent courses and saved course memory';
+    return `${count} saved object${count===1?'':'s'}`;
   }
   function isCoachProfileCardView(){
     const kicker=document.querySelector('#gdProfileV67 .kicker');
@@ -3760,7 +3663,7 @@
     btn.id='gdProfileCoursesCard';
     btn.className='card';
     btn.type='button';
-    btn.innerHTML=`<div class="gdCourseGreenIcon" aria-hidden="true"></div><div><strong>Course History</strong><span>${profileCardHtml()}</span></div>`;
+    btn.innerHTML=`<div class="gdCourseGreenIcon" aria-hidden="true"></div><div><strong>Courses</strong><span>${profileCardHtml()}</span></div>`;
     btn.onclick=function(ev){ev.preventDefault();openCourseLibraryPanel();return false;};
     grid.appendChild(btn);
   }
@@ -3771,8 +3674,6 @@
       return;
     }
     if(card){
-      const title=card.querySelector('strong');
-      if(title)title.textContent='Course History';
       const old=card.querySelector('span');
       if(old)old.textContent=profileCardHtml();
     }
@@ -3809,7 +3710,7 @@
     el=document.createElement('div');
     el.id='gdCourseLibraryOverlay';
     el.className='gdCourseLibraryOverlay hidden';
-    el.innerHTML=`<div class="gdCourseLibrarySheet"><div class="gdCourseLibraryHead"><div><h2>Course History</h2><p>Saved on this device. Recent course objects load here first, so GPS does not have to rescan every time.</p></div><button class="gdSheetClose" type="button" onclick="closeCourseLibraryPanel()">×</button></div><div class="gdCourseLibrarySearch"><input id="gdCourseLibrarySearchInput" type="search" placeholder="Search course history"><button id="gdCourseLibraryFindCourseBtn" type="button">Find course</button></div><div id="gdCourseLibraryList"></div></div>`;
+    el.innerHTML=`<div class="gdCourseLibrarySheet"><div class="gdCourseLibraryHead"><div><h2>Saved Courses</h2><p>Objects are grouped by saved GPS course, with duplicates merged by course label.</p></div><button class="gdSheetClose" type="button" onclick="closeCourseLibraryPanel()">×</button></div><div class="gdCourseLibrarySearch"><input id="gdCourseLibrarySearchInput" type="search" placeholder="Search saved courses"><button id="gdCourseLibraryFindCourseBtn" type="button">Find course</button></div><div id="gdCourseLibraryList"></div></div>`;
     document.body.appendChild(el);
     el.addEventListener('click',ev=>{if(ev.target===el)closeCourseLibraryPanel();});
     el.querySelector('#gdCourseLibrarySearchInput').addEventListener('input',ev=>{
@@ -4039,7 +3940,7 @@
     const filter=normalizeCourseName(courseLibraryFilter);
     const courses=libraryCourses(uid)
       .filter(c=>!filter||normalizeCourseName(c.courseName).includes(filter))
-      .sort((a,b)=>String(b.historyUpdatedAt||b.lastOpenedAt||b.updatedAt||'').localeCompare(String(a.historyUpdatedAt||a.lastOpenedAt||a.updatedAt||''))||String(a.courseName).localeCompare(String(b.courseName))||(isPublishedCourse(a)?1:0)-(isPublishedCourse(b)?1:0));
+      .sort((a,b)=>String(a.courseName).localeCompare(String(b.courseName))||(isPublishedCourse(a)?1:0)-(isPublishedCourse(b)?1:0));
     if(!courses.length){
       list.innerHTML=`<div class="gdCourseCard"><strong>${filter?'No matching courses':'No saved courses yet'}</strong><span>${filter?'Try another search or find/select a course from GPS.':'Scan a green or save a mapper pin in GPS and it will appear here.'}</span></div>`;
       return;
@@ -4049,12 +3950,11 @@
       if(!course){renderCourseLibraryPanel();return;}
 	      const s=courseSummary(course);
 	      const finderSuffix=courseFinderPoint(course)?' · locator pin':'';
-	      const recentSuffix=course.historyUpdatedAt||course.lastOpenedAt||course.updatedAt?` · last used ${dateLabel(course.historyUpdatedAt||course.lastOpenedAt||course.updatedAt)}`:'';
 	      const published=isPublishedCourse(course);
 	      const hasPublished=hasPublishedCourseMap(course);
 	      const publishBtn=isAdminUser()&&!hasPublished?`<button type="button" onclick="gdCLPublishCourse('${esc(course.id)}')">Publish</button>`:'';
 	      const status=hasPublished?' · published':'';
-		      list.innerHTML=`<div class="gdCourseCard ${published?'published':''}"><strong>${esc(course.courseName)}</strong><span>${courseSummaryLine(s)}${finderSuffix}${recentSuffix}${status}</span><div class="gdCourseActions"><button type="button" onclick="renderCourseLibraryPanel()">Back</button><button type="button" onclick="gdCLOpenCourseFromLibrary('${esc(course.id)}')">Open Map</button><button class="primary" type="button" onclick="gdCLOpenCourseFromLibrary('${esc(course.id)}',1,null,true)">${published?'View Map':'Mapping Mode'}</button>${publishBtn}</div></div>`;
+		      list.innerHTML=`<div class="gdCourseCard ${published?'published':''}"><strong>${esc(course.courseName)}</strong><span>${courseSummaryLine(s)}${finderSuffix}${status}</span><div class="gdCourseActions"><button type="button" onclick="renderCourseLibraryPanel()">Back</button><button type="button" onclick="gdCLOpenCourseFromLibrary('${esc(course.id)}')">Open Map</button><button class="primary" type="button" onclick="gdCLOpenCourseFromLibrary('${esc(course.id)}',1,null,true)">${published?'View Map':'Mapping Mode'}</button>${publishBtn}</div></div>`;
 	      renderCourseFinderCard(list,course);
 	      const holes=mappedHoleNumbers(course,s);
 	      const loose=unassignedObjects(course);
@@ -4069,12 +3969,11 @@
     courses.forEach(course=>{
       const s=courseSummary(course);
       const finderSuffix=courseFinderPoint(course)?' · locator pin':'';
-      const recentSuffix=course.historyUpdatedAt||course.lastOpenedAt||course.updatedAt?` · last used ${dateLabel(course.historyUpdatedAt||course.lastOpenedAt||course.updatedAt)}`:'';
       const published=isPublishedCourse(course);
       const card=document.createElement('button');
       card.className=`gdCourseCard${published?' published':''}`;
       card.type='button';
-      card.innerHTML=`<strong>${esc(course.courseName)}</strong><span>${courseSummaryLine(s)}${finderSuffix}${recentSuffix}${hasPublishedCourseMap(course)?' · published':''}</span>`;
+      card.innerHTML=`<strong>${esc(course.courseName)}</strong><span>${courseSummaryLine(s)}${finderSuffix}${hasPublishedCourseMap(course)?' · published':''}</span>`;
       card.onclick=()=>renderCourseLibraryPanel(course.id);
       list.appendChild(card);
     });
@@ -4629,7 +4528,6 @@
     setTimeout(installMapperToolsButton,350);
     setTimeout(ensureAssumedCourseBadge,400);
     setTimeout(syncCoursePickerAssumption,450);
-    setTimeout(renderCourseHistoryPicker,500);
     setTimeout(installMapperToolsButton,1200);
     setTimeout(installMapperToolsButton,2500);
     setTimeout(()=>loadSavedGreenForActiveHole({quiet:true}),600);
@@ -4643,7 +4541,6 @@
   document.addEventListener('click',()=>setTimeout(installMappedPlayModeSetting,120),true);
   document.addEventListener('click',()=>setTimeout(ensureAssumedCourseBadge,120),true);
   document.addEventListener('click',()=>setTimeout(syncCoursePickerAssumption,130),true);
-  document.addEventListener('click',()=>setTimeout(renderCourseHistoryPicker,140),true);
   document.addEventListener('click',ev=>{
     if(ev.target?.closest?.('#gdMapperToolsBtn'))openMapperToolsDrawer(ev);
   },true);

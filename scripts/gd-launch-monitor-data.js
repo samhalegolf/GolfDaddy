@@ -236,8 +236,54 @@
     };
   }
 
+  function metricNameToken(value) {
+    return String(value || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  }
+
   function sameMetricName(value, name) {
-    return String(value || '').trim().toLowerCase() === String(name || '').trim().toLowerCase();
+    var a = metricNameToken(value);
+    var b = metricNameToken(name);
+    return !!a && !!b && a === b;
+  }
+
+  function aliasRegistry() {
+    return window.GolfDaddyLaunchMonitorAliasRegistry || window.ClarityCaddieLaunchMonitorAliasRegistry || window.LaunchMonitorAliasRegistry || null;
+  }
+
+  function uniqueNames(values) {
+    var seen = {};
+    var out = [];
+    (values || []).forEach(function (value) {
+      var text = String(value || '').trim();
+      if (!text) return;
+      var key = text.toLowerCase();
+      if (seen[key]) return;
+      seen[key] = true;
+      out.push(text);
+    });
+    return out;
+  }
+
+  function aliasMetricNames(key, fallback) {
+    var registry = aliasRegistry();
+    var names = registry && typeof registry.metricNames === 'function' ? registry.metricNames(key) : [];
+    return names && names.length ? names : uniqueNames(fallback || [key]);
+  }
+
+  function aliasMetricNamesForKeys(keys) {
+    var names = [];
+    (Array.isArray(keys) ? keys : [keys]).forEach(function (key) {
+      names = names.concat(aliasMetricNames(key));
+    });
+    return uniqueNames(names);
+  }
+
+  function metricValueFor(group, key, fallback) {
+    return metricValue(group, aliasMetricNames(key, fallback));
+  }
+
+  function metricConfidenceFor(group, key, fallback) {
+    return metricConfidence(group, Array.isArray(key) ? aliasMetricNamesForKeys(key) : aliasMetricNames(key, fallback));
   }
 
   function metricValue(group, names) {
@@ -279,28 +325,28 @@
   }
 
   function spinAxisFromMetrics(group) {
-    var direct = metricValue(group, ['spinAxis', 'spin axis', 'SpinAxis']);
+    var direct = metricValueFor(group, 'spinAxis', ['spinAxis', 'spin axis', 'SpinAxis']);
     if (hasNumber(direct)) {
       return {
         value: Number(direct),
         source: 'spin_axis',
-        confidence: metricConfidence(group, ['spinAxis', 'spin axis', 'SpinAxis'])
+        confidence: metricConfidenceFor(group, 'spinAxis', ['spinAxis', 'spin axis', 'SpinAxis'])
       };
     }
-    var sideSpin = metricValue(group, ['sideSpin', 'side spin', 'sidespin']);
-    var backspin = metricValue(group, ['totalSpin', 'total spin', 'spinRate', 'backspin', 'spin']);
+    var sideSpin = metricValueFor(group, 'sideSpin', ['sideSpin', 'side spin', 'sidespin']);
+    var backspin = metricValueFor(group, 'totalSpin', ['totalSpin', 'total spin', 'spinRate', 'backspin', 'spin']);
     if (hasNumber(sideSpin) && hasNumber(backspin) && Math.abs(Number(backspin)) > 100) {
       return {
         value: Math.atan2(Number(sideSpin), Math.abs(Number(backspin))) * 180 / Math.PI,
         source: 'side_spin',
-        confidence: metricConfidence(group, ['sideSpin', 'side spin', 'sidespin', 'totalSpin', 'total spin', 'backspin', 'spin', 'spinRate'])
+        confidence: metricConfidenceFor(group, ['sideSpin', 'totalSpin'])
       };
     }
     return null;
   }
 
   function ballSpeedMph(group) {
-    var raw = metricValue(group, ['ballSpeed', 'ball speed', 'BallSpeed', 'b speed', 'bspd', 'ball velocity', 'initial velocity', 'speed']);
+    var raw = metricValueFor(group, 'ballSpeed', ['ballSpeed', 'ball speed', 'BallSpeed', 'b speed', 'bspd', 'ball velocity', 'initial velocity', 'speed']);
     if (!hasNumber(raw)) return null;
     var value = Math.abs(Number(raw));
     return value > 0 && value < 90 ? value * 2.2369362921 : value;
@@ -316,10 +362,10 @@
         simulated: false,
         lateralM: directLateralM,
         normalizedDeg: Math.atan2(directLateralM, baseM) * 180 / Math.PI,
-        confidence: metricConfidence(group, ['offline', 'side', 'sideCarry', 'lateral', 'Offline', 'Side'])
+        confidence: metricConfidenceFor(group, 'offline', ['offline', 'side', 'sideCarry', 'lateral', 'Offline', 'Side'])
       };
     }
-    var directSideAngleDeg = metricValue(group, ['offlineAngle', 'sideAngle', 'side angle', 'lateralAngle', 'lateral angle', 'resultAngle', 'result angle']);
+    var directSideAngleDeg = metricValueFor(group, 'sideAngle', ['offlineAngle', 'sideAngle', 'side angle', 'lateralAngle', 'lateral angle', 'resultAngle', 'result angle']);
     if (hasNumber(directSideAngleDeg)) {
       var sideAngle = clamp(Number(directSideAngleDeg), -20, 20);
       return {
@@ -328,17 +374,17 @@
         simulated: false,
         lateralM: Math.tan(sideAngle * Math.PI / 180) * baseM,
         normalizedDeg: sideAngle,
-        confidence: metricConfidence(group, ['offlineAngle', 'sideAngle', 'side angle', 'lateralAngle', 'lateral angle', 'resultAngle', 'result angle'])
+        confidence: metricConfidenceFor(group, 'sideAngle', ['offlineAngle', 'sideAngle', 'side angle', 'lateralAngle', 'lateral angle', 'resultAngle', 'result angle'])
       };
     }
-    var launchDirectionDeg = metricValue(group, ['launchDirection', 'launch direction', 'launchDir', 'startDirection', 'start direction', 'startLine', 'start line', 'horizontalLaunch', 'horizontal launch', 'azimuth', 'direction', 'HLA']);
+    var launchDirectionDeg = metricValueFor(group, 'launchDirection', ['launchDirection', 'launch direction', 'launchDir', 'startDirection', 'start direction', 'startLine', 'start line', 'horizontalLaunch', 'horizontal launch', 'azimuth', 'direction', 'HLA']);
     var spinAxis = spinAxisFromMetrics(group);
     if (!hasNumber(carryM)) return { complete: false, source: 'missing_carry', simulated: false, reason: 'missing_carry' };
     var hasStartLine = hasNumber(launchDirectionDeg);
     if (!spinAxis || !hasNumber(spinAxis.value)) {
       if (hasStartLine) {
         var startOnlyDeg = clamp(Number(launchDirectionDeg), -20, 20);
-        var startOnlyConfidence = metricConfidence(group, ['launchDirection', 'launch direction', 'launchDir', 'startDirection', 'start direction', 'startLine', 'start line', 'horizontalLaunch', 'horizontal launch', 'azimuth', 'direction', 'HLA']) * 0.60;
+        var startOnlyConfidence = metricConfidenceFor(group, 'launchDirection', ['launchDirection', 'launch direction', 'launchDir', 'startDirection', 'start direction', 'startLine', 'start line', 'horizontalLaunch', 'horizontal launch', 'azimuth', 'direction', 'HLA']) * 0.60;
         return {
           complete: startOnlyConfidence >= Math.max(0.05, Number(cfg && cfg.simulatorMinPlotConfidence) || 0.35),
           source: 'simulated_start_line_only',
@@ -358,7 +404,7 @@
         reason: 'missing_spin_axis'
       };
     }
-    var totalSpin = metricValue(group, ['totalSpin', 'total spin', 'spinRate', 'backspin', 'spin']);
+    var totalSpin = metricValueFor(group, 'totalSpin', ['totalSpin', 'total spin', 'spinRate', 'backspin', 'spin']);
     var ballSpeed = ballSpeedMph(group);
     var speedProxy = hasNumber(ballSpeed) ? Number(ballSpeed) : (hasStartLine && hasNumber(carryM) ? clamp(Number(carryM) * 0.82, 55, 185) : null);
     if (!hasStartLine && (!hasNumber(totalSpin) || !hasNumber(speedProxy))) return {
@@ -377,9 +423,9 @@
     var startDeg = hasStartLine ? Number(launchDirectionDeg) : 0;
     var simulatedDeg = clamp(startDeg + curveDeg, -20, 20);
     var simulatedLateralM = Math.tan(simulatedDeg * Math.PI / 180) * baseM;
-    var launchConfidence = metricConfidence(group, ['launchDirection', 'launch direction', 'launchDir', 'startDirection', 'start direction', 'startLine', 'start line', 'horizontalLaunch', 'horizontal launch', 'azimuth', 'direction', 'HLA']);
-    var spinRateConfidence = metricConfidence(group, ['totalSpin', 'total spin', 'spinRate', 'backspin', 'spin']);
-    var speedConfidence = metricConfidence(group, ['ballSpeed', 'ball speed', 'BallSpeed', 'b speed', 'bspd', 'ball velocity', 'initial velocity', 'speed']);
+    var launchConfidence = metricConfidenceFor(group, 'launchDirection', ['launchDirection', 'launch direction', 'launchDir', 'startDirection', 'start direction', 'startLine', 'start line', 'horizontalLaunch', 'horizontal launch', 'azimuth', 'direction', 'HLA']);
+    var spinRateConfidence = metricConfidenceFor(group, 'totalSpin', ['totalSpin', 'total spin', 'spinRate', 'backspin', 'spin']);
+    var speedConfidence = metricConfidenceFor(group, 'ballSpeed', ['ballSpeed', 'ball speed', 'BallSpeed', 'b speed', 'bspd', 'ball velocity', 'initial velocity', 'speed']);
     var confidenceBase = hasStartLine ? (launchConfidence + spinAxis.confidence) / 2 : (spinAxis.confidence + spinRateConfidence + speedConfidence) / 3;
     var hasFullSpinRecipe = hasNumber(totalSpin) && hasNumber(ballSpeed);
     var confidence = Math.min(0.88, Math.max(0.05, confidenceBase * (hasStartLine ? (hasFullSpinRecipe ? 0.82 : 0.70) : 0.72)));
@@ -404,13 +450,13 @@
   function normalizeShot(group, session, capture) {
     group = group || {};
     var cfg = settings();
-    var carryM = metricValue(group, ['carryDistance', 'carry', 'Carry']);
-    var totalM = metricValue(group, ['totalDistance', 'total', 'Total']);
-    var offlineM = metricValue(group, ['offline', 'side', 'sideCarry', 'lateral', 'Offline', 'Side']);
-    var faceToPathDeg = metricValue(group, ['faceToPath', 'face to path', 'face path', 'face/path', 'FTP']);
-    var faceAngleDeg = metricValue(group, ['faceAngle', 'face to target', 'face target', 'face', 'Face Angle']);
-    var clubPathDeg = metricValue(group, ['clubPath', 'club path', 'path', 'Path']);
-    var swingDirectionDeg = metricValue(group, ['swingDirection', 'swing direction']);
+    var carryM = metricValueFor(group, 'carry', ['carryDistance', 'carry', 'Carry']);
+    var totalM = metricValueFor(group, 'total', ['totalDistance', 'total', 'Total']);
+    var offlineM = metricValueFor(group, 'offline', ['offline', 'side', 'sideCarry', 'lateral', 'Offline', 'Side']);
+    var faceToPathDeg = metricValueFor(group, 'faceToPath', ['faceToPath', 'face to path', 'face path', 'face/path', 'FTP']);
+    var faceAngleDeg = metricValueFor(group, 'faceAngle', ['faceAngle', 'face to target', 'face target', 'face', 'Face Angle']);
+    var clubPathDeg = metricValueFor(group, 'clubPath', ['clubPath', 'club path', 'path', 'Path']);
+    var swingDirectionDeg = metricValueFor(group, 'swingDirection', ['swingDirection', 'swing direction']);
     var deliverySignalDeg = hasNumber(faceToPathDeg) ? Number(faceToPathDeg) : null;
     if (!hasNumber(deliverySignalDeg) && hasNumber(faceAngleDeg) && hasNumber(clubPathDeg)) {
       deliverySignalDeg = Number(faceAngleDeg) - Number(clubPathDeg);
@@ -418,7 +464,7 @@
     if (!hasNumber(deliverySignalDeg) && hasNumber(faceAngleDeg)) {
       deliverySignalDeg = Number(faceAngleDeg);
     }
-    var deliveryConfidence = metricConfidence(group, ['faceToPath', 'face to path', 'faceAngle', 'face to target', 'clubPath', 'club path']);
+    var deliveryConfidence = metricConfidenceFor(group, ['faceToPath', 'faceAngle', 'clubPath']);
     var expectedM = Number.isFinite(Number(group.expectedDistanceM)) ? Number(group.expectedDistanceM) : carryM;
     var baseM = Number.isFinite(Number(expectedM)) && expectedM > 1 ? expectedM : Number.isFinite(Number(carryM)) ? carryM : 1;
     var plot = resolveShotPlot(group, carryM, expectedM, offlineM, cfg);
@@ -450,7 +496,7 @@
         signalDeg: hasNumber(deliverySignalDeg) ? Number(deliverySignalDeg) : null,
         confidence: deliveryConfidence
       },
-      confidence: Math.min(metricConfidence(group, ['carryDistance', 'carry', 'Carry']), plot.confidence || 0),
+      confidence: Math.min(metricConfidenceFor(group, 'carry', ['carryDistance', 'carry', 'Carry']), plot.confidence || 0),
       metrics: Array.isArray(group.metrics) ? group.metrics.slice() : [],
       rawGroup: group
     }, scope);
@@ -635,20 +681,20 @@
   function practiceQualityExclusionReason(shot, cfg) {
     var faceToPath = Number(shot && shot.delivery && shot.delivery.faceToPathDeg);
     if (Number.isFinite(faceToPath) && Math.abs(faceToPath) > Math.max(0.5, Number(cfg.faceToPathMaxAbsDeg) || 6)) return 'face_to_path';
-    var spinAxis = metricValue(shot, ['spinAxis']);
+    var spinAxis = metricValueFor(shot, 'spinAxis', ['spinAxis']);
     if (!Number.isFinite(spinAxis) && shot && shot.plot && Number.isFinite(Number(shot.plot.spinAxisDeg))) spinAxis = Number(shot.plot.spinAxisDeg);
     if (Number.isFinite(spinAxis) && Math.abs(spinAxis) > Math.max(1, Number(cfg.spinAxisMaxAbsDeg) || 12)) return 'spin_axis';
-    var smash = metricValue(shot, ['smashFactor', 'smash']);
+    var smash = metricValueFor(shot, 'smashFactor', ['smashFactor', 'smash']);
     var smashMin = Number.isFinite(Number(cfg.smashMin)) ? Number(cfg.smashMin) : 1.18;
     var smashMax = Number.isFinite(Number(cfg.smashMax)) ? Number(cfg.smashMax) : 1.52;
     if (Number.isFinite(smash) && (smash < smashMin || smash > smashMax)) return 'smash';
     var base = clubBaseline(shot && shot.club);
-    var spin = metricValue(shot, ['totalSpin', 'total spin', 'backspin', 'spin', 'spinRate']);
+    var spin = metricValueFor(shot, 'totalSpin', ['totalSpin', 'total spin', 'backspin', 'spin', 'spinRate']);
     var spinTolerance = Math.max(0.05, Number(cfg.spinTolerancePct) || 0.35);
     if (base && Number.isFinite(spin) && Math.abs(spin - base.spin) > base.spin * spinTolerance) return 'spin_amount';
-    var launch = metricValue(shot, ['launchAngle', 'launch']);
+    var launch = metricValueFor(shot, 'launch', ['launchAngle', 'launch']);
     if (base && Number.isFinite(launch) && Math.abs(launch - base.launch) > Math.max(1, Number(cfg.launchToleranceDeg) || 6)) return 'launch_angle';
-    var dynamicLoft = metricValue(shot, ['dynamicLoft']);
+    var dynamicLoft = metricValueFor(shot, 'dynamicLoft', ['dynamicLoft']);
     if (base && Number.isFinite(dynamicLoft) && Math.abs(dynamicLoft - base.dynamicLoft) > Math.max(1, Number(cfg.dynamicLoftToleranceDeg) || 8)) return 'dynamic_loft';
     return '';
   }

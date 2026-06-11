@@ -1,0 +1,18 @@
+.git
+.netlify
+.vercel
+node_modules
+.DS_Store
+work
+outputs
+
+# Keep deploy uploads focused on the runnable app surface. The repo root is
+# the publish directory, so docs and local-only diagnostics would otherwise
+# be publicly served as static files.
+*.md
+*.zip
+eng.traineddata
+data
+stats
+supabase
+package-lock.json

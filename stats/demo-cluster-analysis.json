@@ -1,0 +1,43 @@
+{
+  "description": "Example output shape for Bubble fit and cluster-hunter analysis. Values are illustrative only.",
+  "settings": {
+    "consistencyMinPct": 51,
+    "consistencyMaxPct": 80,
+    "consistencyDefaultPct": 68,
+    "distanceWindowPct": 0.18,
+    "viableDegreeAbs": 8,
+    "alignmentDegreeAbs": 10
+  },
+  "bubbleFitExample": {
+    "club": "7i",
+    "consistencyPct": 68,
+    "shots": 14,
+    "insidePresumedBubblePct": 64,
+    "resultBubble": {
+      "lateralOffsetM": 3.4,
+      "depthOffsetM": -1.1,
+      "widthM": 17.8,
+      "depthM": 22.6,
+      "normalizedDeg": 1.27
+    },
+    "status": "bubble_fit_check"
+  },
+  "clusterHunterExample": {
+    "crossClub": {
+      "clubs": ["4i", "7i", "PW"],
+      "shots": 3,
+      "meanDeg": 3.42,
+      "stdDeg": 0.31,
+      "rangeDeg": 0.7,
+      "status": "profile_offset_option"
+    },
+    "alignmentCheck": {
+      "club": "Driver",
+      "shots": 8,
+      "meanDeg": 12.8,
+      "stdDeg": 1.4,
+      "rangeDeg": 4.2,
+      "status": "alignment_check"
+    }
+  }
+}

@@ -1,0 +1,6 @@
+*.zip
+CODEX_HANDOFF.md
+GREEN_WAND_LOCK.md
+README.md
+node_modules
+.DS_Store

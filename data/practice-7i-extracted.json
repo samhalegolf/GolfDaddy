@@ -1,0 +1,263 @@
+{
+  "label": "Practice photo OCR - extracted 7i flat table",
+  "inputType": "photo-ocr-digitised-table",
+  "timestamp": "2026-06-05T12:00:00+12:00",
+  "sourceIdentity": {
+    "providerGuess": "photo_ocr_digitised_table",
+    "confidence": 0.72,
+    "evidence": [
+      "source: data/practice-7i-flattened.jpg",
+      "club assigned before import: 7i",
+      "row 01 skipped as header/partial OCR noise",
+      "raw rows preserved for Practice Data library; plot filter decides counted rows"
+    ]
+  },
+  "rawTextBlocks": [
+    "02 BallSpeed=94.4 LaunchAngle=11.2 SideAngle=3.7 Backspin=4596 SideSpin=176 DescentAngle=25.3 Offline=9.5 Peak=8.9 Carry=105 Total=122",
+    "03 BallSpeed=98.5 LaunchAngle=12.0 SideAngle=2.7 Backspin=4274 SideSpin=92 DescentAngle=20.3 Offline=MISS Peak=11.0 Carry=116 Total=133",
+    "04 BallSpeed=104.2 LaunchAngle=12.7 SideAngle=3.8 Backspin=4633 SideSpin=254 DescentAngle=32.5 Offline=12.8 Peak=14.0 Carry=128 Total=143",
+    "05 BallSpeed=98.9 LaunchAngle=12.6 SideAngle=3.4 Backspin=4179 SideSpin=28 L DescentAngle=29.0 Offline=8.4 Peak=12.0 Carry=MISS Total=139",
+    "06 BallSpeed=111.6 LaunchAngle=12.6 SideAngle=3.0 Backspin=4889 SideSpin=377 DescentAngle=35.3 Offline=23.0 Peak=17.0 Carry=142 Total=197",
+    "07 BallSpeed=111.7 LaunchAngle=12.3 SideAngle=0.8 Backspin=5366 SideSpin=888 DescentAngle=35.9 Offline=13.9 Peak=17.0 Carry=140 Total=132",
+    "08 BallSpeed=110.9 LaunchAngle=11.3 SideAngle=2.9 Backspin=MISS SideSpin=321 DescentAngle=33.4 Offline=1.0 Peak=15.0 Carry=138 Total=MISS",
+    "09 BallSpeed=115.6 LaunchAngle=10.8 SideAngle=0.1 Backspin=4399 SideSpin=307 DescentAngle=32.9 Offline=48.0 Peak=16.0 Carry=48 Total=184",
+    "10 BallSpeed=125.0 LaunchAngle=10.8 SideAngle=9.6 Backspin=4372 SideSpin=979 DescentAngle=23.0 Offline=6.4 Peak=8.3 Carry=MISS Total=130",
+    "11 BallSpeed=110.8 LaunchAngle=10.7 SideAngle=1.0 Backspin=5232 SideSpin=670 DescentAngle=32.4 Offline=MISS Peak=14.0 Carry=146 Total=MISS",
+    "12 BallSpeed=119.0 LaunchAngle=10.8 SideAngle=1.1 Backspin=4548 SideSpin=793 R DescentAngle=30.4 Offline=16.2 Peak=14.0 Carry=149 Total=186",
+    "13 BallSpeed=119.0 LaunchAngle=9.7 SideAngle=0.4 Backspin=4115 SideSpin=1018 DescentAngle=30.0 Offline=18.2 Peak=14.0 Carry=MISS Total=100"
+  ],
+  "clubGroups": [
+    {
+      "originClubLabel": "7i",
+      "candidateClub": "7i",
+      "expectedDistanceM": 140,
+      "timestamp": "2026-06-05T12:00:00+12:00",
+      "sourceMethod": "manual_digitised_flat_table",
+      "_debugRowIndex": 2,
+      "metrics": [
+        {"rawLabel":"BallSpeed","candidateMetric":"ballSpeed","rawValue":"94.4","value":94.4,"unit":"mph","confidence":0.58},
+        {"rawLabel":"Launch","candidateMetric":"launchAngle","rawValue":"11.2","value":11.2,"unit":"deg","confidence":0.58},
+        {"rawLabel":"SideAngle","candidateMetric":"sideAngle","rawValue":"3.7","value":3.7,"unit":"deg","confidence":0.62},
+        {"rawLabel":"Backspin","candidateMetric":"backspin","rawValue":"4596","value":4596,"unit":"rpm","confidence":0.52},
+        {"rawLabel":"SideSpin","candidateMetric":"sideSpin","rawValue":"176","value":176,"unit":"rpm","confidence":0.52},
+        {"rawLabel":"Descent","candidateMetric":"descentAngle","rawValue":"25.3","value":25.3,"unit":"deg","confidence":0.52},
+        {"rawLabel":"Offline","candidateMetric":"offline","rawValue":"9.5","value":9.5,"unit":"m","confidence":0.58},
+        {"rawLabel":"PeakHeight","candidateMetric":"peakHeight","rawValue":"8.9","value":8.9,"unit":"m","confidence":0.52},
+        {"rawLabel":"Carry","candidateMetric":"carryDistance","rawValue":"105","value":105,"unit":"m","confidence":0.68},
+        {"rawLabel":"Total","candidateMetric":"totalDistance","rawValue":"122","value":122,"unit":"m","confidence":0.62}
+      ]
+    },
+    {
+      "originClubLabel": "7i",
+      "candidateClub": "7i",
+      "expectedDistanceM": 140,
+      "timestamp": "2026-06-05T12:00:00+12:00",
+      "sourceMethod": "manual_digitised_flat_table",
+      "_debugRowIndex": 3,
+      "metrics": [
+        {"rawLabel":"BallSpeed","candidateMetric":"ballSpeed","rawValue":"98.5","value":98.5,"unit":"mph","confidence":0.58},
+        {"rawLabel":"Launch","candidateMetric":"launchAngle","rawValue":"12.0","value":12,"unit":"deg","confidence":0.58},
+        {"rawLabel":"SideAngle","candidateMetric":"sideAngle","rawValue":"2.7","value":2.7,"unit":"deg","confidence":0.62},
+        {"rawLabel":"Backspin","candidateMetric":"backspin","rawValue":"4274","value":4274,"unit":"rpm","confidence":0.52},
+        {"rawLabel":"SideSpin","candidateMetric":"sideSpin","rawValue":"92","value":92,"unit":"rpm","confidence":0.52},
+        {"rawLabel":"Descent","candidateMetric":"descentAngle","rawValue":"20.3","value":20.3,"unit":"deg","confidence":0.52},
+        {"rawLabel":"PeakHeight","candidateMetric":"peakHeight","rawValue":"11.0","value":11,"unit":"m","confidence":0.52},
+        {"rawLabel":"Carry","candidateMetric":"carryDistance","rawValue":"116","value":116,"unit":"m","confidence":0.68},
+        {"rawLabel":"Total","candidateMetric":"totalDistance","rawValue":"133","value":133,"unit":"m","confidence":0.62}
+      ]
+    },
+    {
+      "originClubLabel": "7i",
+      "candidateClub": "7i",
+      "expectedDistanceM": 140,
+      "timestamp": "2026-06-05T12:00:00+12:00",
+      "sourceMethod": "manual_digitised_flat_table",
+      "_debugRowIndex": 4,
+      "metrics": [
+        {"rawLabel":"BallSpeed","candidateMetric":"ballSpeed","rawValue":"104.2","value":104.2,"unit":"mph","confidence":0.58},
+        {"rawLabel":"Launch","candidateMetric":"launchAngle","rawValue":"12.7","value":12.7,"unit":"deg","confidence":0.58},
+        {"rawLabel":"SideAngle","candidateMetric":"sideAngle","rawValue":"3.8","value":3.8,"unit":"deg","confidence":0.62},
+        {"rawLabel":"Backspin","candidateMetric":"backspin","rawValue":"4633","value":4633,"unit":"rpm","confidence":0.52},
+        {"rawLabel":"SideSpin","candidateMetric":"sideSpin","rawValue":"254","value":254,"unit":"rpm","confidence":0.52},
+        {"rawLabel":"Descent","candidateMetric":"descentAngle","rawValue":"32.5","value":32.5,"unit":"deg","confidence":0.52},
+        {"rawLabel":"Offline","candidateMetric":"offline","rawValue":"12.8","value":12.8,"unit":"m","confidence":0.58},
+        {"rawLabel":"PeakHeight","candidateMetric":"peakHeight","rawValue":"14.0","value":14,"unit":"m","confidence":0.52},
+        {"rawLabel":"Carry","candidateMetric":"carryDistance","rawValue":"128","value":128,"unit":"m","confidence":0.68},
+        {"rawLabel":"Total","candidateMetric":"totalDistance","rawValue":"143","value":143,"unit":"m","confidence":0.62}
+      ]
+    },
+    {
+      "originClubLabel": "7i",
+      "candidateClub": "7i",
+      "expectedDistanceM": 140,
+      "timestamp": "2026-06-05T12:00:00+12:00",
+      "sourceMethod": "manual_digitised_flat_table",
+      "_debugRowIndex": 5,
+      "metrics": [
+        {"rawLabel":"BallSpeed","candidateMetric":"ballSpeed","rawValue":"98.9","value":98.9,"unit":"mph","confidence":0.58},
+        {"rawLabel":"Launch","candidateMetric":"launchAngle","rawValue":"12.6","value":12.6,"unit":"deg","confidence":0.58},
+        {"rawLabel":"SideAngle","candidateMetric":"sideAngle","rawValue":"3.4","value":3.4,"unit":"deg","confidence":0.62},
+        {"rawLabel":"Backspin","candidateMetric":"backspin","rawValue":"4179","value":4179,"unit":"rpm","confidence":0.52},
+        {"rawLabel":"SideSpin","candidateMetric":"sideSpin","rawValue":"28 L","value":-28,"unit":"rpm","confidence":0.52},
+        {"rawLabel":"Descent","candidateMetric":"descentAngle","rawValue":"29.0","value":29,"unit":"deg","confidence":0.52},
+        {"rawLabel":"Offline","candidateMetric":"offline","rawValue":"8.4","value":8.4,"unit":"m","confidence":0.58},
+        {"rawLabel":"PeakHeight","candidateMetric":"peakHeight","rawValue":"12.0","value":12,"unit":"m","confidence":0.52},
+        {"rawLabel":"Total","candidateMetric":"totalDistance","rawValue":"139","value":139,"unit":"m","confidence":0.62}
+      ]
+    },
+    {
+      "originClubLabel": "7i",
+      "candidateClub": "7i",
+      "expectedDistanceM": 140,
+      "timestamp": "2026-06-05T12:00:00+12:00",
+      "sourceMethod": "manual_digitised_flat_table",
+      "_debugRowIndex": 6,
+      "metrics": [
+        {"rawLabel":"BallSpeed","candidateMetric":"ballSpeed","rawValue":"111.6","value":111.6,"unit":"mph","confidence":0.58},
+        {"rawLabel":"Launch","candidateMetric":"launchAngle","rawValue":"12.6","value":12.6,"unit":"deg","confidence":0.58},
+        {"rawLabel":"SideAngle","candidateMetric":"sideAngle","rawValue":"3.0","value":3,"unit":"deg","confidence":0.62},
+        {"rawLabel":"Backspin","candidateMetric":"backspin","rawValue":"4889","value":4889,"unit":"rpm","confidence":0.52},
+        {"rawLabel":"SideSpin","candidateMetric":"sideSpin","rawValue":"377","value":377,"unit":"rpm","confidence":0.52},
+        {"rawLabel":"Descent","candidateMetric":"descentAngle","rawValue":"35.3","value":35.3,"unit":"deg","confidence":0.52},
+        {"rawLabel":"Offline","candidateMetric":"offline","rawValue":"23.0","value":23,"unit":"m","confidence":0.58},
+        {"rawLabel":"PeakHeight","candidateMetric":"peakHeight","rawValue":"17.0","value":17,"unit":"m","confidence":0.52},
+        {"rawLabel":"Carry","candidateMetric":"carryDistance","rawValue":"142","value":142,"unit":"m","confidence":0.68},
+        {"rawLabel":"Total","candidateMetric":"totalDistance","rawValue":"197","value":197,"unit":"m","confidence":0.62}
+      ]
+    },
+    {
+      "originClubLabel": "7i",
+      "candidateClub": "7i",
+      "expectedDistanceM": 140,
+      "timestamp": "2026-06-05T12:00:00+12:00",
+      "sourceMethod": "manual_digitised_flat_table",
+      "_debugRowIndex": 7,
+      "metrics": [
+        {"rawLabel":"BallSpeed","candidateMetric":"ballSpeed","rawValue":"111.7","value":111.7,"unit":"mph","confidence":0.58},
+        {"rawLabel":"Launch","candidateMetric":"launchAngle","rawValue":"12.3","value":12.3,"unit":"deg","confidence":0.58},
+        {"rawLabel":"SideAngle","candidateMetric":"sideAngle","rawValue":"0.8","value":0.8,"unit":"deg","confidence":0.62},
+        {"rawLabel":"Backspin","candidateMetric":"backspin","rawValue":"5366","value":5366,"unit":"rpm","confidence":0.52},
+        {"rawLabel":"SideSpin","candidateMetric":"sideSpin","rawValue":"888","value":888,"unit":"rpm","confidence":0.52},
+        {"rawLabel":"Descent","candidateMetric":"descentAngle","rawValue":"35.9","value":35.9,"unit":"deg","confidence":0.52},
+        {"rawLabel":"Offline","candidateMetric":"offline","rawValue":"13.9","value":13.9,"unit":"m","confidence":0.58},
+        {"rawLabel":"PeakHeight","candidateMetric":"peakHeight","rawValue":"17.0","value":17,"unit":"m","confidence":0.52},
+        {"rawLabel":"Carry","candidateMetric":"carryDistance","rawValue":"140","value":140,"unit":"m","confidence":0.68},
+        {"rawLabel":"Total","candidateMetric":"totalDistance","rawValue":"132","value":132,"unit":"m","confidence":0.62}
+      ]
+    },
+    {
+      "originClubLabel": "7i",
+      "candidateClub": "7i",
+      "expectedDistanceM": 140,
+      "timestamp": "2026-06-05T12:00:00+12:00",
+      "sourceMethod": "manual_digitised_flat_table",
+      "_debugRowIndex": 8,
+      "metrics": [
+        {"rawLabel":"BallSpeed","candidateMetric":"ballSpeed","rawValue":"110.9","value":110.9,"unit":"mph","confidence":0.58},
+        {"rawLabel":"Launch","candidateMetric":"launchAngle","rawValue":"11.3","value":11.3,"unit":"deg","confidence":0.58},
+        {"rawLabel":"SideAngle","candidateMetric":"sideAngle","rawValue":"2.9","value":2.9,"unit":"deg","confidence":0.62},
+        {"rawLabel":"SideSpin","candidateMetric":"sideSpin","rawValue":"321","value":321,"unit":"rpm","confidence":0.52},
+        {"rawLabel":"Descent","candidateMetric":"descentAngle","rawValue":"33.4","value":33.4,"unit":"deg","confidence":0.52},
+        {"rawLabel":"Offline","candidateMetric":"offline","rawValue":"1.0","value":1,"unit":"m","confidence":0.58},
+        {"rawLabel":"PeakHeight","candidateMetric":"peakHeight","rawValue":"15.0","value":15,"unit":"m","confidence":0.52},
+        {"rawLabel":"Carry","candidateMetric":"carryDistance","rawValue":"138","value":138,"unit":"m","confidence":0.68}
+      ]
+    },
+    {
+      "originClubLabel": "7i",
+      "candidateClub": "7i",
+      "expectedDistanceM": 140,
+      "timestamp": "2026-06-05T12:00:00+12:00",
+      "sourceMethod": "manual_digitised_flat_table",
+      "_debugRowIndex": 9,
+      "metrics": [
+        {"rawLabel":"BallSpeed","candidateMetric":"ballSpeed","rawValue":"115.6","value":115.6,"unit":"mph","confidence":0.58},
+        {"rawLabel":"Launch","candidateMetric":"launchAngle","rawValue":"10.8","value":10.8,"unit":"deg","confidence":0.58},
+        {"rawLabel":"SideAngle","candidateMetric":"sideAngle","rawValue":"0.1","value":0.1,"unit":"deg","confidence":0.62},
+        {"rawLabel":"Backspin","candidateMetric":"backspin","rawValue":"4399","value":4399,"unit":"rpm","confidence":0.52},
+        {"rawLabel":"SideSpin","candidateMetric":"sideSpin","rawValue":"307","value":307,"unit":"rpm","confidence":0.52},
+        {"rawLabel":"Descent","candidateMetric":"descentAngle","rawValue":"32.9","value":32.9,"unit":"deg","confidence":0.52},
+        {"rawLabel":"Offline","candidateMetric":"offline","rawValue":"48.0","value":48,"unit":"m","confidence":0.58},
+        {"rawLabel":"PeakHeight","candidateMetric":"peakHeight","rawValue":"16.0","value":16,"unit":"m","confidence":0.52},
+        {"rawLabel":"Carry","candidateMetric":"carryDistance","rawValue":"48","value":48,"unit":"m","confidence":0.68},
+        {"rawLabel":"Total","candidateMetric":"totalDistance","rawValue":"184","value":184,"unit":"m","confidence":0.62}
+      ]
+    },
+    {
+      "originClubLabel": "7i",
+      "candidateClub": "7i",
+      "expectedDistanceM": 140,
+      "timestamp": "2026-06-05T12:00:00+12:00",
+      "sourceMethod": "manual_digitised_flat_table",
+      "_debugRowIndex": 10,
+      "metrics": [
+        {"rawLabel":"BallSpeed","candidateMetric":"ballSpeed","rawValue":"125.0","value":125,"unit":"mph","confidence":0.58},
+        {"rawLabel":"Launch","candidateMetric":"launchAngle","rawValue":"10.8","value":10.8,"unit":"deg","confidence":0.58},
+        {"rawLabel":"SideAngle","candidateMetric":"sideAngle","rawValue":"9.6","value":9.6,"unit":"deg","confidence":0.62},
+        {"rawLabel":"Backspin","candidateMetric":"backspin","rawValue":"4372","value":4372,"unit":"rpm","confidence":0.52},
+        {"rawLabel":"SideSpin","candidateMetric":"sideSpin","rawValue":"979","value":979,"unit":"rpm","confidence":0.52},
+        {"rawLabel":"Descent","candidateMetric":"descentAngle","rawValue":"23.0","value":23,"unit":"deg","confidence":0.52},
+        {"rawLabel":"Offline","candidateMetric":"offline","rawValue":"6.4","value":6.4,"unit":"m","confidence":0.58},
+        {"rawLabel":"PeakHeight","candidateMetric":"peakHeight","rawValue":"8.3","value":8.3,"unit":"m","confidence":0.52},
+        {"rawLabel":"Total","candidateMetric":"totalDistance","rawValue":"130","value":130,"unit":"m","confidence":0.62}
+      ]
+    },
+    {
+      "originClubLabel": "7i",
+      "candidateClub": "7i",
+      "expectedDistanceM": 140,
+      "timestamp": "2026-06-05T12:00:00+12:00",
+      "sourceMethod": "manual_digitised_flat_table",
+      "_debugRowIndex": 11,
+      "metrics": [
+        {"rawLabel":"BallSpeed","candidateMetric":"ballSpeed","rawValue":"110.8","value":110.8,"unit":"mph","confidence":0.58},
+        {"rawLabel":"Launch","candidateMetric":"launchAngle","rawValue":"10.7","value":10.7,"unit":"deg","confidence":0.58},
+        {"rawLabel":"SideAngle","candidateMetric":"sideAngle","rawValue":"1.0","value":1,"unit":"deg","confidence":0.62},
+        {"rawLabel":"Backspin","candidateMetric":"backspin","rawValue":"5232","value":5232,"unit":"rpm","confidence":0.52},
+        {"rawLabel":"SideSpin","candidateMetric":"sideSpin","rawValue":"670","value":670,"unit":"rpm","confidence":0.52},
+        {"rawLabel":"Descent","candidateMetric":"descentAngle","rawValue":"32.4","value":32.4,"unit":"deg","confidence":0.52},
+        {"rawLabel":"PeakHeight","candidateMetric":"peakHeight","rawValue":"14.0","value":14,"unit":"m","confidence":0.52},
+        {"rawLabel":"Carry","candidateMetric":"carryDistance","rawValue":"146","value":146,"unit":"m","confidence":0.68}
+      ]
+    },
+    {
+      "originClubLabel": "7i",
+      "candidateClub": "7i",
+      "expectedDistanceM": 140,
+      "timestamp": "2026-06-05T12:00:00+12:00",
+      "sourceMethod": "manual_digitised_flat_table",
+      "_debugRowIndex": 12,
+      "metrics": [
+        {"rawLabel":"BallSpeed","candidateMetric":"ballSpeed","rawValue":"119.0","value":119,"unit":"mph","confidence":0.58},
+        {"rawLabel":"Launch","candidateMetric":"launchAngle","rawValue":"10.8","value":10.8,"unit":"deg","confidence":0.58},
+        {"rawLabel":"SideAngle","candidateMetric":"sideAngle","rawValue":"1.1","value":1.1,"unit":"deg","confidence":0.62},
+        {"rawLabel":"Backspin","candidateMetric":"backspin","rawValue":"4548","value":4548,"unit":"rpm","confidence":0.52},
+        {"rawLabel":"SideSpin","candidateMetric":"sideSpin","rawValue":"793 R","value":793,"unit":"rpm","confidence":0.52},
+        {"rawLabel":"Descent","candidateMetric":"descentAngle","rawValue":"30.4","value":30.4,"unit":"deg","confidence":0.52},
+        {"rawLabel":"Offline","candidateMetric":"offline","rawValue":"16.2","value":16.2,"unit":"m","confidence":0.58},
+        {"rawLabel":"PeakHeight","candidateMetric":"peakHeight","rawValue":"14.0","value":14,"unit":"m","confidence":0.52},
+        {"rawLabel":"Carry","candidateMetric":"carryDistance","rawValue":"149","value":149,"unit":"m","confidence":0.68},
+        {"rawLabel":"Total","candidateMetric":"totalDistance","rawValue":"186","value":186,"unit":"m","confidence":0.62}
+      ]
+    },
+    {
+      "originClubLabel": "7i",
+      "candidateClub": "7i",
+      "expectedDistanceM": 140,
+      "timestamp": "2026-06-05T12:00:00+12:00",
+      "sourceMethod": "manual_digitised_flat_table",
+      "_debugRowIndex": 13,
+      "metrics": [
+        {"rawLabel":"BallSpeed","candidateMetric":"ballSpeed","rawValue":"119.0","value":119,"unit":"mph","confidence":0.58},
+        {"rawLabel":"Launch","candidateMetric":"launchAngle","rawValue":"9.7","value":9.7,"unit":"deg","confidence":0.58},
+        {"rawLabel":"SideAngle","candidateMetric":"sideAngle","rawValue":"0.4","value":0.4,"unit":"deg","confidence":0.62},
+        {"rawLabel":"Backspin","candidateMetric":"backspin","rawValue":"4115","value":4115,"unit":"rpm","confidence":0.52},
+        {"rawLabel":"SideSpin","candidateMetric":"sideSpin","rawValue":"1018","value":1018,"unit":"rpm","confidence":0.52},
+        {"rawLabel":"Descent","candidateMetric":"descentAngle","rawValue":"30.0","value":30,"unit":"deg","confidence":0.52},
+        {"rawLabel":"Offline","candidateMetric":"offline","rawValue":"18.2","value":18.2,"unit":"m","confidence":0.58},
+        {"rawLabel":"PeakHeight","candidateMetric":"peakHeight","rawValue":"14.0","value":14,"unit":"m","confidence":0.52},
+        {"rawLabel":"Total","candidateMetric":"totalDistance","rawValue":"100","value":100,"unit":"m","confidence":0.62}
+      ]
+    }
+  ]
+}
