@@ -20,44 +20,6 @@
 body .claritySupportButton{
   display:none!important;
 }
-
-.clarityBetaFlag{
-  position:fixed;
-  left:12px;
-  bottom:calc(12px + env(safe-area-inset-bottom));
-  z-index:100480;
-  display:inline-flex;
-  align-items:center;
-  gap:5px;
-  min-height:28px;
-  border-radius:999px;
-  border:1px solid rgba(255,255,255,.10);
-  background:rgba(5,9,7,.54);
-  color:rgba(255,255,255,.70);
-  padding:5px 8px;
-  font:850 11px/1 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-  letter-spacing:.03em;
-  box-shadow:0 8px 22px rgba(0,0,0,.24);
-  backdrop-filter:blur(12px);
-  opacity:.68;
-}
-.clarityBetaFlag span{
-  font-size:13px;
-  line-height:1;
-}
-.clarityBetaFlag small{
-  color:rgba(255,255,255,.54);
-  font:850 10px/1 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-  letter-spacing:.04em;
-  text-transform:uppercase;
-}
-.clarityBetaFlag:hover,
-.clarityBetaFlag:focus-visible{
-  opacity:1;
-  color:#fff;
-  border-color:rgba(31,211,109,.42);
-  outline:0;
-}
 .claritySupportButton:focus-visible{
   outline:2px solid rgba(31,211,109,.82);
   outline-offset:2px;
@@ -182,10 +144,6 @@ body .claritySupportButton{
 @media(max-width:520px){
   .claritySupportButton{
     bottom:calc(84px + env(safe-area-inset-bottom));
-  }
-  .clarityBetaFlag{
-    left:10px;
-    bottom:calc(10px + env(safe-area-inset-bottom));
   }
   .claritySupportActions{
     grid-template-columns:1fr;

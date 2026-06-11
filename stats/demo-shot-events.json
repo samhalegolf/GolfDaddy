@@ -1,0 +1,138 @@
+{
+  "version": 1,
+  "updatedAt": "2026-05-17T09:30:00.000Z",
+  "ballEvents": [
+    {
+      "eventId": "bpe-demo-tee-01",
+      "roundId": "round-akarana-2026-05-17",
+      "holeId": "hole-1",
+      "source": "bubble_rendered",
+      "timestamp": "2026-05-17T09:00:00.000Z",
+      "lat": -36.92023,
+      "lng": 174.72991,
+      "gpsAccuracyM": 4.8,
+      "motionContext": "still",
+      "courseContext": "tee",
+      "confidence": "high",
+      "mergedEventIds": []
+    },
+    {
+      "eventId": "bpe-demo-fairway-01",
+      "roundId": "round-akarana-2026-05-17",
+      "holeId": "hole-1",
+      "source": "at_my_ball_button",
+      "timestamp": "2026-05-17T09:05:42.000Z",
+      "lat": -36.91886,
+      "lng": 174.73127,
+      "gpsAccuracyM": 5.6,
+      "motionContext": "still",
+      "courseContext": "fairway",
+      "confidence": "high",
+      "mergedEventIds": []
+    },
+    {
+      "eventId": "bpe-demo-approach-01",
+      "roundId": "round-akarana-2026-05-17",
+      "holeId": "hole-1",
+      "source": "bubble_rendered",
+      "timestamp": "2026-05-17T09:07:05.000Z",
+      "lat": -36.91886,
+      "lng": 174.73127,
+      "gpsAccuracyM": 5.2,
+      "motionContext": "still",
+      "courseContext": "fairway",
+      "confidence": "high",
+      "mergedEventIds": []
+    },
+    {
+      "eventId": "bpe-demo-green-01",
+      "roundId": "round-akarana-2026-05-17",
+      "holeId": "hole-1",
+      "source": "at_my_ball_button",
+      "timestamp": "2026-05-17T09:10:18.000Z",
+      "lat": -36.91821,
+      "lng": 174.73176,
+      "gpsAccuracyM": 4.3,
+      "motionContext": "still",
+      "courseContext": "green",
+      "confidence": "high",
+      "mergedEventIds": []
+    }
+  ],
+  "plannedShots": [
+    {
+      "shotId": "shot-demo-drive-01",
+      "roundId": "round-akarana-2026-05-17",
+      "holeId": "hole-1",
+      "originEventId": "bpe-demo-tee-01",
+      "origin": {
+        "lat": -36.92023,
+        "lng": 174.72991
+      },
+      "plannedBubble": {
+        "centerLat": -36.91888,
+        "centerLng": 174.73122,
+        "orientationDeg": 39,
+        "lengthYards": 58,
+        "widthYards": 42,
+        "shape": "oval"
+      },
+      "club": "Driver",
+      "expectedDistanceYards": 224,
+      "renderKey": "demo-drive-01",
+      "createdAt": "2026-05-17T09:00:00.000Z",
+      "pairedOutcomeId": "outcome-demo-drive-01"
+    },
+    {
+      "shotId": "shot-demo-approach-01",
+      "roundId": "round-akarana-2026-05-17",
+      "holeId": "hole-1",
+      "originEventId": "bpe-demo-approach-01",
+      "origin": {
+        "lat": -36.91886,
+        "lng": 174.73127
+      },
+      "plannedBubble": {
+        "centerLat": -36.91823,
+        "centerLng": 174.73174,
+        "orientationDeg": 33,
+        "lengthYards": 31,
+        "widthYards": 20,
+        "shape": "oval"
+      },
+      "club": "9i",
+      "expectedDistanceYards": 113,
+      "renderKey": "demo-approach-01",
+      "createdAt": "2026-05-17T09:07:05.000Z",
+      "pairedOutcomeId": "outcome-demo-approach-01"
+    }
+  ],
+  "outcomes": [
+    {
+      "outcomeId": "outcome-demo-drive-01",
+      "shotId": "shot-demo-drive-01",
+      "resultEventId": "bpe-demo-fairway-01",
+      "pairedConfidence": 0.9,
+      "insideBubble": true,
+      "relativeResult": "inside",
+      "lateralErrorYards": 3.1,
+      "distanceErrorYards": -5.4,
+      "gpsAccuracyM": 5.6,
+      "sourceConfidence": "high",
+      "computedAt": "2026-05-17T09:05:43.000Z"
+    },
+    {
+      "outcomeId": "outcome-demo-approach-01",
+      "shotId": "shot-demo-approach-01",
+      "resultEventId": "bpe-demo-green-01",
+      "pairedConfidence": 0.9,
+      "insideBubble": false,
+      "relativeResult": "short_right",
+      "lateralErrorYards": 8.7,
+      "distanceErrorYards": -13.2,
+      "gpsAccuracyM": 4.3,
+      "sourceConfidence": "high",
+      "computedAt": "2026-05-17T09:10:19.000Z"
+    }
+  ]
+}
