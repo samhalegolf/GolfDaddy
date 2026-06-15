@@ -11,7 +11,7 @@ const publicPaths = [
   "styles"
 ];
 
-const greenFocusShotEndGuard = '<script src="scripts/gd-green-focus-shot-end-guard.js?v=20260615-hard-h2-advance"></script>';
+const greenFocusShotEndGuard = '<script src="scripts/gd-green-focus-shot-end-guard.js?v=20260615-native-controls-no-fallback"></script>';
 
 function copyEntry(relativePath) {
   const source = path.join(root, relativePath);
@@ -31,6 +31,8 @@ function injectGreenFocusShotEndGuard() {
   const indexPath = path.join(dist, "index.html");
   let html = fs.readFileSync(indexPath, "utf8");
   if (html.includes("gd-green-focus-shot-end-guard.js")) {
+    html = html.replace(/<script src="scripts\/gd-green-focus-shot-end-guard\.js\?v=[^"]+"><\/script>/g, greenFocusShotEndGuard);
+    fs.writeFileSync(indexPath, html);
     return;
   }
   if (/<\/body>\s*<\/html>\s*$/i.test(html)) {
