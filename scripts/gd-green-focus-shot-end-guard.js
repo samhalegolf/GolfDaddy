@@ -5,6 +5,7 @@
   var FLAG_TTL=10000;
   var ENFORCE_DELAYS=[0,50,120,220,420,750,1100,1700,2600,4200,6500,9000];
   var WRAPPED_KEY="__gdGreenFocusShotEndGuardWrapped";
+  var lastNativeShotEndAt=0;
 
   function safe(fn,fallback){try{return fn()}catch(e){console.warn("[Clarity shot-end guard]",e);return fallback}}
   function now(){return Date.now()}
@@ -186,6 +187,9 @@
   }
 
   function shotEnd(){
+    var t=now();
+    if(t-lastNativeShotEndAt<700)return false;
+    lastNativeShotEndAt=t;
     var h=nextHole();
     var point=resultPoint();
     setForce(h);
@@ -210,6 +214,7 @@
     var el=node&&node.nodeType===1?node:node&&node.parentElement;
     for(var depth=0;el&&depth<8;depth++,el=el.parentElement){
       if(el===document.body||el===document.documentElement)break;
+      if(el.id==="gdNextHolePopout"||el.id==="scorecardRailBtn")return el;
       var label=(textOf(el)+" "+String(el.getAttribute&&el.getAttribute("aria-label")||"")).toLowerCase();
       if(label.length>180)continue;
       if(label.indexOf("shot end")!==-1||label.indexOf("end shot")!==-1)return el;
@@ -219,20 +224,26 @@
     return null;
   }
 
+  function blockNativeEvent(event){
+    event.preventDefault();
+    event.stopPropagation();
+    if(event.stopImmediatePropagation)event.stopImmediatePropagation();
+  }
+
   function interceptNativeAdvance(event){
     if(!isGps()||!isLocked())return;
     var candidate=nativeAdvanceCandidate(event.target);
     if(!candidate)return;
-    event.preventDefault();
-    event.stopPropagation();
-    if(event.stopImmediatePropagation)event.stopImmediatePropagation();
-    shotEnd();
+    blockNativeEvent(event);
+    if(event.type==="pointerdown"||event.type==="mousedown"||event.type==="touchstart"||event.type==="click"||event.type==="keydown")shotEnd();
   }
 
   function installEventCapture(){
     if(window.__gdGreenFocusShotEndCaptureInstalled)return;
     window.__gdGreenFocusShotEndCaptureInstalled=true;
-    document.addEventListener("click",interceptNativeAdvance,true);
+    ["pointerdown","pointerup","click","mousedown","mouseup","touchstart","touchend"].forEach(function(type){
+      document.addEventListener(type,interceptNativeAdvance,true);
+    });
     document.addEventListener("keydown",function(event){
       if((event.key==="Enter"||event.key===" ")&&nativeAdvanceCandidate(event.target))interceptNativeAdvance(event);
     },true);
