@@ -221,10 +221,10 @@
   function shotEndCandidate(node){
     var el=node&&node.nodeType===1?node:node&&node.parentElement;
     for(var depth=0;el&&depth<7;depth++,el=el.parentElement){
+      if(el===document.body||el===document.documentElement)break;
       if(el.id==="gdGreenFocusShotEndBtn")return el;
       var label=(textOf(el)+" "+String(el.getAttribute&&el.getAttribute("aria-label")||"")).toLowerCase();
-      if(label.indexOf("shot end")!==-1||label.indexOf("end shot")!==-1)return el;
-      if(el===document.body)break;
+      if(label.length<=160&&(label.indexOf("shot end")!==-1||label.indexOf("end shot")!==-1))return el;
     }
     return null;
   }
