@@ -11,7 +11,7 @@ const publicPaths = [
   "styles"
 ];
 
-const greenFocusShotEndGuard = '<script src="scripts/gd-green-focus-shot-end-guard.js?v=20260615-native-controls-no-fallback"></script>';
+const greenFocusShotEndGuard = '<script src="scripts/gd-green-focus-shot-end-guard.js?v=20260615-pointer-native-advance"></script>';
 
 function copyEntry(relativePath) {
   const source = path.join(root, relativePath);
