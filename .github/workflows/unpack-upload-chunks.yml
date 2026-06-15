@@ -1,0 +1,58 @@
+name: Unpack upload chunks
+
+on:
+  push:
+    paths:
+      - '01-root-files.zip'
+      - '02-app-folders.zip'
+      - '03-assets.zip'
+      - '.github/workflows/unpack-upload-chunks.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  unpack:
+    runs-on: ubuntu-latest
+    if: ${{ !contains(github.event.head_commit.message, 'Unpack uploaded source chunks') }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Unpack uploaded source chunks
+        run: |
+          set -euo pipefail
+          test -f 01-root-files.zip
+          test -f 02-app-folders.zip
+          test -f 03-assets.zip
+          unzip -o 01-root-files.zip -d .
+          unzip -o 02-app-folders.zip -d .
+          unzip -o 03-assets.zip -d .
+
+      - name: Verify current app markers
+        run: |
+          set -euo pipefail
+          grep -q 'payments-v1' index.html
+          grep -q 'tileStockMetric' index.html
+          grep -q 'width:188px' index.html
+          grep -q 'gdShotDistanceStackHtml' index.html
+
+      - name: Remove uploaded zip files from source tree
+        run: |
+          git rm -f 01-root-files.zip 02-app-folders.zip 03-assets.zip || true
+
+      - name: Commit unpacked source
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          if git diff --cached --quiet; then
+            echo 'No source changes to commit.'
+          else
+            git commit -m 'Unpack uploaded source chunks'
+            git push
+          fi
