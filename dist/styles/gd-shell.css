@@ -1,0 +1,39 @@
+/* Canonical shell nav: Back and Home stay text buttons in every route. */
+#shellTop #shellBackBtn,
+#shellTop #shellHomeBtn,
+#shellTop .homeTextBtn {
+  width: auto !important;
+  min-width: 66px !important;
+  height: 46px !important;
+  padding: 9px 14px !important;
+  border-radius: 999px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  font-size: 14px !important;
+  line-height: 1 !important;
+  font-weight: 950 !important;
+  letter-spacing: 0 !important;
+  color: #fff !important;
+  text-transform: none !important;
+  white-space: nowrap !important;
+}
+
+#shellTop #shellBackBtn::before,
+#shellTop #shellBackBtn::after,
+#shellTop #shellHomeBtn::before,
+#shellTop #shellHomeBtn::after,
+#shellTop .homeTextBtn::before,
+#shellTop .homeTextBtn::after {
+  content: none !important;
+  display: none !important;
+}
+
+#shellTop .shellLogoBtn,
+.topIcons,
+.topIcons .iconBtn {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+  opacity: 0 !important;
+}
