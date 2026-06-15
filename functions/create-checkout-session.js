@@ -1,109 +1,86 @@
-exports.handler = async function(event) {
-  if (event.httpMethod !== "POST") {
-    return json(405, { error: "Method not allowed" });
+"use strict";
+
+const {
+  PASS_CONFIG,
+  appUrl,
+  email,
+  env,
+  json,
+  passPriceId,
+  passType,
+  text
+} = require("./payment-utils");
+
+exports.handler = async function (event) {
+  if (event.httpMethod === "OPTIONS") return json(204, {});
+  if (event.httpMethod !== "POST") return json(405, { error: "Method not allowed" });
+
+  if (!env("STRIPE_SECRET_KEY")) {
+    return json(503, { error: "Stripe is not configured yet" });
   }
 
-  const stripeSecretKey = process.env.STRIPE_SECRET_KEY || "";
-  if (!stripeSecretKey) {
-    return json(503, {
-      error: "Stripe checkout is not configured yet.",
-      configured: false,
-      requiredEnv: [
-        "STRIPE_SECRET_KEY",
-        "STRIPE_PRICE_ROUND_PASS",
-        "STRIPE_PRICE_UNLIMITED_MONTHLY",
-        "STRIPE_PRICE_UNLIMITED_ANNUAL"
-      ]
-    });
-  }
-
-  let body = {};
+  let payload;
   try {
-    body = JSON.parse(event.body || "{}");
+    payload = JSON.parse(event.body || "{}");
   } catch (error) {
-    return json(400, { error: "Invalid JSON body" });
+    return json(400, { error: "Invalid JSON" });
   }
 
-  const productKey = String(body.productKey || "").trim();
-  const priceId = priceIdForProduct(productKey);
-  if (!priceId) {
-    return json(400, { error: "Unknown or unconfigured product", productKey });
+  const type = passType(payload.passType || payload.entitlementType || payload.product);
+  if (!type) return json(400, { error: "Choose a valid pass" });
+
+  const price = passPriceId(type);
+  if (!price) return json(503, { error: PASS_CONFIG[type].label + " is not configured yet" });
+
+  const accountEmail = email(payload.email || payload.accountEmail);
+  const accountId = text(payload.accountId || payload.userId, 120);
+  const accountName = text(payload.name || payload.accountName, 120);
+  if (!accountEmail && !accountId) {
+    return json(400, { error: "Sign in before buying a pass" });
   }
 
-  const siteUrl = process.env.CLARITY_SITE_URL || originFromEvent(event) || "https://caddy.claritygolf.app";
-  const successUrl = String(body.successUrl || `${siteUrl}?checkout=success`);
-  const cancelUrl = String(body.cancelUrl || siteUrl);
-  const mode = productKey === "round_pass" ? "payment" : "subscription";
-
+  const site = appUrl();
   const params = new URLSearchParams();
-  params.set("mode", mode);
-  params.set("success_url", successUrl);
-  params.set("cancel_url", cancelUrl);
-  params.set("line_items[0][price]", priceId);
-  params.set("line_items[0][quantity]", "1");
-  if (body.clientReferenceId) params.set("client_reference_id", String(body.clientReferenceId));
-  params.set("metadata[productKey]", productKey);
-  params.set("metadata[source]", "clarity-caddie");
-  if (body.metadata && typeof body.metadata === "object") {
-    Object.keys(body.metadata).slice(0, 20).forEach((key) => {
-      if (/^[a-zA-Z0-9_:-]{1,40}$/.test(key)) {
-        params.set(`metadata[${key}]`, String(body.metadata[key]).slice(0, 500));
-      }
-    });
-  }
+  params.append("mode", "payment");
+  params.append("client_reference_id", accountId || accountEmail);
+  params.append("line_items[0][price]", price);
+  params.append("line_items[0][quantity]", "1");
+  params.append("success_url", site + "/?payment=success&session_id={CHECKOUT_SESSION_ID}");
+  params.append("cancel_url", site + "/?payment=cancelled");
+  params.append("allow_promotion_codes", "true");
+  if (accountEmail) params.append("customer_email", accountEmail);
+  params.append("metadata[app]", "clarity-caddie");
+  params.append("metadata[entitlement_type]", type);
+  params.append("metadata[account_id]", accountId);
+  params.append("metadata[account_email]", accountEmail);
+  params.append("metadata[account_name]", accountName);
+  params.append("payment_intent_data[metadata][app]", "clarity-caddie");
+  params.append("payment_intent_data[metadata][entitlement_type]", type);
+  params.append("payment_intent_data[metadata][account_id]", accountId);
+  params.append("payment_intent_data[metadata][account_email]", accountEmail);
 
   try {
     const response = await fetch("https://api.stripe.com/v1/checkout/sessions", {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${stripeSecretKey}`,
-        "Content-Type": "application/x-www-form-urlencoded"
+        Authorization: "Bearer " + env("STRIPE_SECRET_KEY"),
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Stripe-Version": "2026-02-25.clover"
       },
-      body: params.toString()
+      body: params
     });
-
-    const data = await response.json();
-    if (!response.ok) {
-      return json(response.status, { error: data && data.error && data.error.message || "Stripe checkout failed" });
+    const session = await response.json().catch(function () { return null; });
+    if (!response.ok || !session || !session.url) {
+      const message = session && session.error && session.error.message || "Could not start checkout";
+      throw new Error(message);
     }
 
     return json(200, {
-      configured: true,
-      id: data.id,
-      url: data.url,
-      productKey
+      id: session.id,
+      url: session.url,
+      passType: type
     });
   } catch (error) {
-    return json(500, { error: error.message || "Checkout request failed" });
+    return json(502, { error: error && error.message ? error.message : "Could not start checkout" });
   }
 };
-
-function priceIdForProduct(productKey) {
-  const envMap = {
-    round_pass: "STRIPE_PRICE_ROUND_PASS",
-    unlimited_monthly: "STRIPE_PRICE_UNLIMITED_MONTHLY",
-    unlimited_annual: "STRIPE_PRICE_UNLIMITED_ANNUAL",
-    founder_annual: "STRIPE_PRICE_FOUNDER_ANNUAL",
-    coach_monthly: "STRIPE_PRICE_COACH_MONTHLY"
-  };
-  const envName = envMap[productKey];
-  return envName ? String(process.env[envName] || "").trim() : "";
-}
-
-function originFromEvent(event) {
-  const headers = event.headers || {};
-  const proto = headers["x-forwarded-proto"] || "https";
-  const host = headers.host || headers.Host;
-  return host ? `${proto}://${host}` : "";
-}
-
-function json(statusCode, body) {
-  return {
-    statusCode,
-    headers: {
-      "Content-Type": "application/json",
-      "Cache-Control": "no-store"
-    },
-    body: JSON.stringify(body)
-  };
-}

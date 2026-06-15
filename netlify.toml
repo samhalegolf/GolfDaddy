@@ -18,6 +18,21 @@
   to = "/.netlify/functions/course-maps"
   status = 200
 
+[[redirects]]
+  from = "/api/create-checkout-session"
+  to = "/.netlify/functions/create-checkout-session"
+  status = 200
+
+[[redirects]]
+  from = "/api/payment-entitlement"
+  to = "/.netlify/functions/payment-entitlement"
+  status = 200
+
+[[redirects]]
+  from = "/api/stripe-webhook"
+  to = "/.netlify/functions/stripe-webhook"
+  status = 200
+
 [[headers]]
   for = "/index.html"
   [headers.values]
