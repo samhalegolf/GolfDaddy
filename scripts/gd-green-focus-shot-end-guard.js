@@ -11,6 +11,8 @@
   function validHole(value){var h=Number(value);return Number.isFinite(h)&&h>=1&&h<=36?Math.round(h):null}
   function holeCount(){return safe(function(){return Array.isArray(scorecard&&scorecard.holes)&&scorecard.holes.length?scorecard.holes.length:18},18)||18}
   function textOf(node){return String((node&&node.textContent)||"").replace(/\s+/g," ").trim()}
+  function isGps(){return document.body.classList.contains("shell-gps")||document.body.classList.contains("gdGpsActive")||document.body.classList.contains("gps-active")}
+  function isLocked(){return safe(function(){return !!lockedFrame&&!!start&&!!target},false)}
 
   function activeHole(){
     return validHole(safe(function(){return currentPlayingHole},null))
@@ -77,6 +79,21 @@
     });
   }
 
+  function installNativeNextGuards(){
+    wrapFunction("gdPlayNextHole",function(old){
+      return function(){
+        if(isGps()&&isLocked())return shotEnd();
+        return old.apply(this,arguments);
+      };
+    });
+    wrapFunction("gdQueueScoreThenNext",function(old){
+      return function(){
+        if(isGps()&&isLocked())return shotEnd();
+        return old.apply(this,arguments);
+      };
+    });
+  }
+
   function removeLayer(layer){safe(function(){if(layer&&typeof map!=="undefined"&&map&&map.removeLayer)map.removeLayer(layer)})}
   function clearShotState(){
     safe(function(){window.gdPendingManualShotVerification=false});
@@ -110,6 +127,8 @@
     safe(function(){document.body.classList.remove("gd-replacing-green-centre","gd-frame-hard-locked","gdFullMappingMode")});
     safe(function(){var appEl=(typeof app!=="undefined"&&app)||document.getElementById("app");if(appEl)appEl.classList.remove("framed","gdPreLockFrame")});
     safe(function(){var tile=document.getElementById("shotTile");if(tile)tile.classList.remove("visible")});
+    safe(function(){var oldBtn=document.getElementById("gdGreenFocusShotEndBtn");if(oldBtn)oldBtn.remove()});
+    safe(function(){var oldCss=document.getElementById("gdGreenFocusShotEndGuardCss");if(oldCss)oldCss.remove()});
     safe(function(){if(typeof setMapGestures==="function")setMapGestures(true)});
     safe(function(){if(typeof gdSyncNewShotButtonState==="function")gdSyncNewShotButtonState()});
   }
@@ -186,52 +205,23 @@
     return false;
   }
 
-  function ensureButton(){
-    var btn=document.getElementById("gdGreenFocusShotEndBtn");
-    if(!btn){
-      btn=document.createElement("button");
-      btn.id="gdGreenFocusShotEndBtn";
-      btn.type="button";
-      btn.textContent="Shot End";
-      btn.setAttribute("aria-label","End shot and move to next hole");
-      document.body.appendChild(btn);
-    }
-    btn.onclick=function(event){
-      if(event){event.preventDefault();event.stopPropagation();if(event.stopImmediatePropagation)event.stopImmediatePropagation()}
-      return shotEnd();
-    };
-    return btn;
-  }
-
-  function installStyles(){
-    if(document.getElementById("gdGreenFocusShotEndGuardCss"))return;
-    var style=document.createElement("style");
-    style.id="gdGreenFocusShotEndGuardCss";
-    style.textContent="#gdGreenFocusShotEndBtn{position:fixed;right:14px;bottom:calc(150px + env(safe-area-inset-bottom));z-index:2600;display:none;min-width:92px;min-height:44px;border:1px solid rgba(55,242,141,.34);border-radius:999px;background:linear-gradient(180deg,rgba(55,242,141,.96),rgba(24,176,96,.96));color:#06110b;font:950 12px/1 Inter,system-ui,sans-serif;letter-spacing:.04em;text-transform:uppercase;box-shadow:0 16px 36px rgba(0,0,0,.34),inset 0 1px 0 rgba(255,255,255,.20);cursor:pointer}#gdGreenFocusShotEndBtn.visible{display:block;visibility:visible;pointer-events:auto}body:not(.shell-gps) #gdGreenFocusShotEndBtn,body.shell-home #gdGreenFocusShotEndBtn,body.shell-module #gdGreenFocusShotEndBtn{display:none!important}";
-    document.head.appendChild(style);
-  }
-
-  function isGps(){return document.body.classList.contains("shell-gps")||document.body.classList.contains("gdGpsActive")||document.body.classList.contains("gps-active")}
-  function isLocked(){return safe(function(){return !!lockedFrame&&!!start&&!!target},false)}
-  function syncButton(){
-    var btn=ensureButton();
-    btn.classList.toggle("visible",isGps()&&isLocked());
-  }
-
-  function shotEndCandidate(node){
+  function nativeAdvanceCandidate(node){
+    var next=nextHole();
     var el=node&&node.nodeType===1?node:node&&node.parentElement;
-    for(var depth=0;el&&depth<7;depth++,el=el.parentElement){
+    for(var depth=0;el&&depth<8;depth++,el=el.parentElement){
       if(el===document.body||el===document.documentElement)break;
-      if(el.id==="gdGreenFocusShotEndBtn")return el;
       var label=(textOf(el)+" "+String(el.getAttribute&&el.getAttribute("aria-label")||"")).toLowerCase();
-      if(label.length<=160&&(label.indexOf("shot end")!==-1||label.indexOf("end shot")!==-1))return el;
+      if(label.length>180)continue;
+      if(label.indexOf("shot end")!==-1||label.indexOf("end shot")!==-1)return el;
+      if(label.indexOf("next")!==-1&&label.indexOf("h"+next)!==-1)return el;
+      if(label.indexOf("next hole")!==-1)return el;
     }
     return null;
   }
 
-  function interceptExistingShotEnd(event){
+  function interceptNativeAdvance(event){
     if(!isGps()||!isLocked())return;
-    var candidate=shotEndCandidate(event.target);
+    var candidate=nativeAdvanceCandidate(event.target);
     if(!candidate)return;
     event.preventDefault();
     event.stopPropagation();
@@ -242,19 +232,19 @@
   function installEventCapture(){
     if(window.__gdGreenFocusShotEndCaptureInstalled)return;
     window.__gdGreenFocusShotEndCaptureInstalled=true;
-    document.addEventListener("click",interceptExistingShotEnd,true);
+    document.addEventListener("click",interceptNativeAdvance,true);
     document.addEventListener("keydown",function(event){
-      if((event.key==="Enter"||event.key===" ")&&shotEndCandidate(event.target))interceptExistingShotEnd(event);
+      if((event.key==="Enter"||event.key===" ")&&nativeAdvanceCandidate(event.target))interceptNativeAdvance(event);
     },true);
   }
 
   function install(){
     installHoleOneGuards();
-    installStyles();
+    installNativeNextGuards();
     installEventCapture();
     window.gdEndGreenFocusShot=shotEnd;
-    ensureButton();
-    syncButton();
+    safe(function(){var oldBtn=document.getElementById("gdGreenFocusShotEndBtn");if(oldBtn)oldBtn.remove()});
+    safe(function(){var oldCss=document.getElementById("gdGreenFocusShotEndGuardCss");if(oldCss)oldCss.remove()});
     enforceForcedHole();
   }
 
@@ -262,5 +252,5 @@
   setTimeout(install,120);
   setTimeout(install,600);
   setTimeout(install,1500);
-  setInterval(function(){installHoleOneGuards();syncButton();},700);
+  setInterval(function(){installHoleOneGuards();installNativeNextGuards();},700);
 })();
