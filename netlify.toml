@@ -33,6 +33,33 @@
   to = "/.netlify/functions/stripe-webhook"
   status = 200
 
+
+[[redirects]]
+  from = "/api/account-sync"
+  to = "/.netlify/functions/account-sync"
+  status = 200
+
+[[redirects]]
+  from = "/api/auth-signup"
+  to = "/.netlify/functions/auth-signup"
+  status = 200
+
+[[redirects]]
+  from = "/api/auth-login"
+  to = "/.netlify/functions/auth-login"
+  status = 200
+
+[[redirects]]
+  from = "/api/auth-update-account"
+  to = "/.netlify/functions/auth-update-account"
+  status = 200
+
+
+[[redirects]]
+  from = "/api/admin-diagnostics"
+  to = "/.netlify/functions/admin-diagnostics"
+  status = 200
+
 [[headers]]
   for = "/index.html"
   [headers.values]
