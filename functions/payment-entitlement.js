@@ -8,6 +8,7 @@ const {
   supabaseFetch,
   text
 } = require("./payment-utils");
+const { sendSystemAlert } = require("./alert-utils");
 
 exports.handler = async function (event) {
   if (event.httpMethod === "OPTIONS") return json(204, {});
@@ -21,11 +22,18 @@ exports.handler = async function (event) {
   }
 
   if (!hasSupabase()) {
-    return json(200, {
+    await sendSystemAlert({
+      eventType: "supabase_not_configured",
+      title: "Supabase payment storage is not configured",
+      detail: "Payment entitlement checking was blocked because Supabase environment variables are missing.",
+      accountEmail: payload.email || payload.accountEmail,
+      context: { endpoint: "payment-entitlement" }
+    });
+    return json(503, {
       configured: false,
       active: false,
       entitlements: [],
-      message: "Payment storage is not configured yet"
+      error: "Payment storage is not configured yet"
     });
   }
 
@@ -56,6 +64,13 @@ exports.handler = async function (event) {
       checkedAt: now
     });
   } catch (error) {
+    await sendSystemAlert({
+      eventType: "supabase_payment_check_failed",
+      title: "Supabase payment check failed",
+      detail: "The app could not confirm whether a user has an active entitlement. Paid access should remain locked until this succeeds.",
+      accountEmail: accountEmail,
+      context: { accountId, checkoutSessionId, status: error.status || null, details: error.body || error.message || String(error) }
+    });
     return json(error.status || 502, {
       error: "Could not check payment status",
       details: error.body || error.message || String(error)

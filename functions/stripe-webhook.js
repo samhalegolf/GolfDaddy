@@ -11,6 +11,7 @@ const {
   supabaseFetch,
   text
 } = require("./payment-utils");
+const { sendSystemAlert } = require("./alert-utils");
 
 exports.handler = async function (event) {
   if (event.httpMethod !== "POST") return json(405, { error: "Method not allowed" });
@@ -18,6 +19,12 @@ exports.handler = async function (event) {
     return json(503, { error: "Stripe webhook is not configured yet" });
   }
   if (!hasSupabase()) {
+    await sendSystemAlert({
+      eventType: "supabase_not_configured",
+      title: "Stripe webhook cannot reach Supabase",
+      detail: "A Stripe webhook was received but payment storage is not configured. Entitlements will not be granted.",
+      context: { endpoint: "stripe-webhook" }
+    });
     return json(503, { error: "Payment storage is not configured yet" });
   }
 
@@ -57,6 +64,12 @@ exports.handler = async function (event) {
 
     return json(200, { received: true });
   } catch (error) {
+    await sendSystemAlert({
+      eventType: "stripe_webhook_processing_failed",
+      title: "Stripe webhook processing failed",
+      detail: "A Stripe event could not be written to Supabase. Check payment_events and user_entitlements.",
+      context: { stripeEventId: stripeEvent && stripeEvent.id || null, stripeEventType: stripeEvent && stripeEvent.type || null, status: error.status || null, details: error.body || error.message || String(error) }
+    });
     return json(error.status || 502, {
       error: "Webhook processing failed",
       details: error.body || error.message || String(error)

@@ -1,0 +1,95 @@
+.clarityPaymentSection {
+  display: grid;
+  gap: 14px;
+}
+
+.clarityPaymentStatus {
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, .12);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, .05);
+}
+
+.clarityPaymentStatus strong {
+  color: #fff;
+  font-size: 16px;
+}
+
+.clarityPaymentStatus span {
+  color: rgba(255, 255, 255, .68);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.clarityPaymentStatus.active {
+  border-color: rgba(66, 182, 106, .48);
+  background: rgba(66, 182, 106, .12);
+}
+
+.clarityPaymentStatus.warning {
+  border-color: rgba(255, 159, 47, .42);
+  background: rgba(255, 159, 47, .10);
+}
+
+.clarityPaymentPassGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.clarityPaymentPass {
+  display: grid;
+  gap: 7px;
+  min-height: 118px;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, .12);
+  border-radius: 14px;
+  color: #fff;
+  text-align: left;
+  background: rgba(255, 255, 255, .06);
+}
+
+.clarityPaymentPass strong {
+  font-size: 17px;
+}
+
+.clarityPaymentPass span {
+  color: rgba(255, 255, 255, .66);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.clarityPaymentPass b {
+  align-self: end;
+  color: #06110b;
+  width: fit-content;
+  border-radius: 999px;
+  padding: 7px 10px;
+  font-size: 12px;
+  background: #ff9f2f;
+}
+
+.clarityPaymentActions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.clarityPaymentActions button {
+  flex: 1;
+  min-width: 130px;
+}
+
+.clarityPaymentNote {
+  color: rgba(255, 255, 255, .55);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+@media (max-width: 430px) {
+  .clarityPaymentPassGrid {
+    grid-template-columns: 1fr;
+  }
+}
