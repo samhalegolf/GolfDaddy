@@ -38,6 +38,15 @@
   to = "/.netlify/functions/stripe-webhook"
   status = 200
 
+[[redirects]]
+  from = "/api/admin-user-invite"
+  to = "/.netlify/functions/admin-user-invite"
+  status = 200
+
+[[redirects]]
+  from = "/api/auth-complete-password"
+  to = "/.netlify/functions/auth-complete-password"
+  status = 200
 
 [[redirects]]
   from = "/api/account-sync"
@@ -58,7 +67,6 @@
   from = "/api/auth-update-account"
   to = "/.netlify/functions/auth-update-account"
   status = 200
-
 
 [[redirects]]
   from = "/api/admin-diagnostics"
