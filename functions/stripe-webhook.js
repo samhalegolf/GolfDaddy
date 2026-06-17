@@ -7,6 +7,7 @@ const {
   env,
   hasSupabase,
   json,
+  normaliseProductKey,
   passType,
   supabaseFetch,
   text
@@ -110,11 +111,12 @@ function verifyStripeEvent(rawBody, signature, secret) {
 async function grantCheckoutEntitlement(session) {
   if (!session || session.payment_status !== "paid") return;
   const metadata = session.metadata || {};
-  const type = passType(metadata.entitlement_type);
+  const type = normaliseProductKey(metadata.entitlement_type || metadata.product_key) || passType(metadata.entitlement_type);
   if (!type) return;
 
   const createdMs = session.created ? Number(session.created) * 1000 : Date.now();
-  const window = entitlementWindow(type, createdMs);
+  const durationHours = Number(metadata.duration_hours);
+  const window = entitlementWindow(type, createdMs, durationHours);
   const accountEmail = email(metadata.account_email || session.customer_details && session.customer_details.email || session.customer_email);
   const accountId = text(metadata.account_id || session.client_reference_id, 120);
 
@@ -133,6 +135,10 @@ async function grantCheckoutEntitlement(session) {
       stripe_payment_intent_id: text(session.payment_intent, 200) || null,
       metadata: {
         account_name: text(metadata.account_name, 120),
+        product_key: text(metadata.product_key || type, 80),
+        product_name: text(metadata.product_name, 120),
+        product_kind: text(metadata.product_kind, 60),
+        duration_hours: Number.isFinite(durationHours) ? durationHours : null,
         amount_total: session.amount_total || null,
         currency: session.currency || "",
         payment_status: session.payment_status || ""

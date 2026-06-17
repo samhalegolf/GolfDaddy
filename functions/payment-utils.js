@@ -61,9 +61,33 @@ function passDurationHours(type) {
   return Number.isFinite(value) && value > 0 ? value : config.defaultHours;
 }
 
-function entitlementWindow(type, createdMs) {
+function normaliseProductKey(value) {
+  return String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_").replace(/[^a-z0-9_]/g, "");
+}
+
+async function paymentProduct(value) {
+  const key = normaliseProductKey(value);
+  if (!key || !hasSupabase()) return null;
+  const rows = await supabaseFetch("payment_products?select=*&product_key=eq." + encodeFilter(key) + "&active=eq.true&limit=1", { method: "GET" });
+  return Array.isArray(rows) && rows[0] || null;
+}
+
+function productPriceId(product, fallbackType) {
+  if (product && product.stripe_price_id) return product.stripe_price_id;
+  return passPriceId(fallbackType || product && product.product_key || "");
+}
+
+function productDurationHours(product, fallbackType) {
+  const value = Number(product && product.duration_hours);
+  if (Number.isFinite(value) && value > 0) return value;
+  return passDurationHours(fallbackType || product && product.product_key || "day_pass");
+}
+
+function entitlementWindow(type, createdMs, durationHours) {
   const starts = new Date(Number.isFinite(createdMs) ? createdMs : Date.now());
-  const expires = new Date(starts.getTime() + passDurationHours(type) * 60 * 60 * 1000);
+  const hours = Number(durationHours);
+  const cleanHours = Number.isFinite(hours) && hours > 0 ? hours : passDurationHours(type);
+  const expires = new Date(starts.getTime() + cleanHours * 60 * 60 * 1000);
   return {
     starts_at: starts.toISOString(),
     expires_at: expires.toISOString()
@@ -121,8 +145,12 @@ module.exports = {
   env,
   hasSupabase,
   json,
+  normaliseProductKey,
   passPriceId,
   passType,
+  paymentProduct,
+  productDurationHours,
+  productPriceId,
   supabaseFetch,
   text
 };
