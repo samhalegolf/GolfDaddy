@@ -1,3 +1,5 @@
+const { email: authEmail, supabaseAuth } = require("./auth-utils");
+
 exports.handler = async function(event){
   if(event.httpMethod !== "POST"){
     return json(405, {error: "Method not allowed"});
@@ -13,7 +15,7 @@ exports.handler = async function(event){
   var to = email(payload.to);
   if(!to)return json(400, {error: "Recipient email is required"});
 
-  var siteUrl = env("CLARITY_SITE_URL") || "https://clarity-caddie.netlify.app";
+  var siteUrl = env("CLARITY_SITE_URL") || "https://caddy.claritygolf.app";
   var message = {
     to: to,
     recipientName: text(payload.recipientName, 120) || "there",
@@ -25,6 +27,20 @@ exports.handler = async function(event){
     eventType: text(payload.eventType, 80) || "account_activity",
     logoUrl: safeUrl(payload.logoUrl, siteUrl) || new URL("/assets/brand/cg-logo-white-g.png", siteUrl).toString()
   };
+
+  try{
+    if(message.eventType === "account_created"){
+      var setupLink = await createSetupLinkForAccount(message.to, message.recipientName, message.actorName, siteUrl);
+      if(setupLink){
+        message.ctaLabel = "Set up your password";
+        message.ctaUrl = setupLink;
+        message.title = message.title || "Set up your Clarity account";
+        message.detail = "Your Clarity Caddie account has been created by " + (message.actorName || "your coach") + ". Use the secure button below to set your password. This link is unique to your account.";
+      }
+    }
+  }catch(error){
+    return json(error.status || 502, {error: "Could not create setup-password link", details: error.body || error.message});
+  }
 
   var rendered = renderEmail(message);
   var subject = text(payload.subject, 140) || subjectFor(message);
@@ -87,6 +103,37 @@ function email(value){
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input) ? input : "";
 }
 
+function tempPassword(){
+  return "Clarity-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10) + "!";
+}
+
+async function createSetupLinkForAccount(accountEmail, name, actorName, siteUrl){
+  accountEmail = authEmail(accountEmail);
+  if(!accountEmail)return "";
+  try{
+    await supabaseAuth("admin/users", {
+      method: "POST",
+      body: JSON.stringify({
+        email: accountEmail,
+        password: tempPassword(),
+        email_confirm: true,
+        user_metadata: {name: name || accountEmail.split("@")[0], role: "player", invited: true, invited_by: actorName || "Clarity"}
+      })
+    }, true);
+  }catch(error){
+    if(error.status !== 400 && error.status !== 422)throw error;
+  }
+  var generated = await supabaseAuth("admin/generate_link", {
+    method: "POST",
+    body: JSON.stringify({
+      type: "recovery",
+      email: accountEmail,
+      options: {redirect_to: String(siteUrl || "https://caddy.claritygolf.app").replace(/\/+$/, "") + "/?claritySetPassword=1"}
+    })
+  }, true);
+  return generated && (generated.action_link || generated.actionLink || generated.properties && generated.properties.action_link) || "";
+}
+
 function safeUrl(value, fallbackOrigin){
   if(!String(value || "").trim())return "";
   try{
@@ -109,7 +156,7 @@ function firstName(value){
 
 function subjectFor(message){
   if(message.eventType === "password_recovery")return "Reset your Clarity password";
-  if(message.eventType === "account_created")return "Your Clarity account is ready";
+  if(message.eventType === "account_created")return "Set up your Clarity account";
   return "Clarity update: " + message.title;
 }
 
