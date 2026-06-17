@@ -1,16 +1,26 @@
 {
-  "name": "clarity-caddie-core",
+  "name": "clarity-caddy-core",
   "version": "0.1.0",
   "private": true,
-  "description": "Clarity Caddie app baseline with locked Green Wand green-centred tile crop.",
+  "description": "Clarity Caddy app baseline prepared for Capacitor native GPS play shells.",
   "scripts": {
     "start": "python3 -m http.server 5173",
     "serve": "python3 -m http.server 5173",
-    "build:netlify": "node scripts/clarity-deploy-build.js"
+    "build": "npm run build:netlify",
+    "build:netlify": "node scripts/clarity-deploy-build.js",
+    "cap:init": "npx cap init \"Clarity Caddy\" com.claritygolf.caddy --web-dir dist",
+    "cap:add:ios": "npx cap add ios",
+    "cap:add:android": "npx cap add android",
+    "cap:sync": "npx cap sync",
+    "cap:open:ios": "npx cap open ios",
+    "cap:open:android": "npx cap open android"
   },
   "codex": {
     "entry": "index.html",
-    "lockedBaseline": "clarity-caddie-core",
+    "lockedBaseline": "clarity-caddy-core",
+    "nativeAppName": "Clarity Caddy",
+    "iosBundleId": "com.claritygolf.caddy",
+    "androidPackage": "com.claritygolf.caddy",
     "doNotModify": [
       "Green Wand sandbox engine",
       "green-centred Leaflet tile crop sample source",
@@ -20,6 +30,20 @@
     ]
   },
   "dependencies": {
+    "@capacitor/android": "latest",
+    "@capacitor/app": "latest",
+    "@capacitor/core": "latest",
+    "@capacitor/geolocation": "latest",
+    "@capacitor/haptics": "latest",
+    "@capacitor/ios": "latest",
+    "@capacitor/keyboard": "latest",
+    "@capacitor/network": "latest",
+    "@capacitor/preferences": "latest",
+    "@capacitor/splash-screen": "latest",
+    "@capacitor/status-bar": "latest",
     "@netlify/blobs": "^10.7.9"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "latest"
   }
 }
