@@ -44,8 +44,8 @@
   status = 200
 
 [[redirects]]
-  from = "/api/auth-complete-password"
-  to = "/.netlify/functions/auth-complete-password"
+  from = "/api/auth-public-config"
+  to = "/.netlify/functions/auth-public-config"
   status = 200
 
 [[redirects]]
