@@ -1,8 +1,16 @@
-# Clarity Caddie Core - Codex Package
+# Clarity Caddy Core - Codex Package
 
-This is the Clarity Caddie app build. The app is part of the Clarity Golf Systems brand architecture.
+This is the Clarity Caddy app build. The app is part of the Clarity Golf Systems brand architecture.
 
-Main entry:
+Native app target:
+
+```txt
+App name: Clarity Caddy
+iOS bundle ID: com.claritygolf.caddy
+Android package: com.claritygolf.caddy
+```
+
+Main web entry:
 
 ```txt
 index.html
@@ -21,6 +29,24 @@ Then open:
 ```txt
 http://localhost:5173
 ```
+
+## Native shell planning
+
+This branch prepares the first Capacitor path for internal iOS and Android testing only.
+
+Expected setup flow after dependencies are installed:
+
+```bash
+npm install
+npm run build:netlify
+npx cap sync
+npx cap add ios
+npx cap add android
+npx cap open ios
+npx cap open android
+```
+
+Do not submit publicly until real-course GPS testing has been completed.
 
 ## Locked Green Wand baseline
 
@@ -63,6 +89,8 @@ Unless specifically asked otherwise, Codex can work on:
 - Profile UI
 - Bag UI
 - Shell navigation styling
+- GPS Play mobile layout
+- Capacitor native shell configuration
 - Non-Wand app cleanup
 
 ## Important note
