@@ -122,6 +122,98 @@
     return commit(body, { activate: true });
   }
 
+  function parseRecoveryParams() {
+    var params = new URLSearchParams(location.search || "");
+    var hash = new URLSearchParams(String(location.hash || "").replace(/^#/, ""));
+    var accessToken = hash.get("access_token") || params.get("access_token") || "";
+    var refreshToken = hash.get("refresh_token") || params.get("refresh_token") || "";
+    var type = hash.get("type") || params.get("type") || "";
+    var requested = params.get("claritySetPassword") === "1" || params.get("clarityResetPassword") === "1" || type === "recovery" || !!accessToken;
+    return requested ? { accessToken: accessToken, refreshToken: refreshToken, type: type } : null;
+  }
+
+  async function publicAuthConfig() {
+    var response = await fetch("/api/auth-public-config", { cache: "no-store" });
+    var body = await response.json().catch(function () { return {}; });
+    if (!response.ok || !body.supabaseUrl || !body.supabaseAnonKey) throw new Error("Supabase public auth config is missing");
+    return body;
+  }
+
+  async function supabaseUser(config, accessToken) {
+    var response = await fetch(config.supabaseUrl.replace(/\/+$/, "") + "/auth/v1/user", {
+      method: "GET",
+      headers: { apikey: config.supabaseAnonKey, Authorization: "Bearer " + accessToken }
+    });
+    var body = await response.json().catch(function () { return {}; });
+    if (!response.ok) throw new Error(body.message || body.error_description || "Could not verify setup link");
+    return body;
+  }
+
+  async function setSupabasePassword(config, accessToken, nextPassword) {
+    var response = await fetch(config.supabaseUrl.replace(/\/+$/, "") + "/auth/v1/user", {
+      method: "PUT",
+      headers: { apikey: config.supabaseAnonKey, Authorization: "Bearer " + accessToken, "Content-Type": "application/json" },
+      body: JSON.stringify({ password: nextPassword })
+    });
+    var body = await response.json().catch(function () { return {}; });
+    if (!response.ok) throw new Error(body.message || body.error_description || "Could not set password");
+    return body;
+  }
+
+  function clearRecoveryUrl() {
+    safe(function () {
+      var clean = location.origin + location.pathname;
+      history.replaceState(null, document.title, clean);
+    });
+  }
+
+  function showPasswordSetup() {
+    var token = parseRecoveryParams();
+    if (!token || !token.accessToken) return false;
+    if (document.getElementById("clarityPasswordSetupOverlay")) return true;
+    var overlay = document.createElement("div");
+    overlay.id = "clarityPasswordSetupOverlay";
+    overlay.style.cssText = "position:fixed;inset:0;z-index:999999;background:rgba(3,8,5,.92);display:flex;align-items:center;justify-content:center;padding:20px;font-family:Arial,Helvetica,sans-serif;color:#fff";
+    overlay.innerHTML = [
+      "<div style='width:min(420px,100%);background:#101b15;border:1px solid rgba(255,255,255,.16);border-radius:22px;padding:22px;box-shadow:0 24px 80px rgba(0,0,0,.45)'>",
+      "<div style='color:#42b66a;font-weight:900;letter-spacing:.12em;text-transform:uppercase;font-size:12px;margin-bottom:10px'>Clarity Caddie</div>",
+      "<h1 style='font-size:28px;line-height:1.05;margin:0 0 10px'>Set your password</h1>",
+      "<p style='margin:0 0 16px;color:#c8d1cc;line-height:1.4'>Create a password for this Clarity account. This setup link can only be used with the email it was sent to.</p>",
+      "<input id='claritySetupPassword1' type='password' autocomplete='new-password' placeholder='New password' style='box-sizing:border-box;width:100%;margin:0 0 10px;padding:14px;border-radius:14px;border:1px solid rgba(255,255,255,.18);background:#07100b;color:#fff;font-size:16px'>",
+      "<input id='claritySetupPassword2' type='password' autocomplete='new-password' placeholder='Confirm password' style='box-sizing:border-box;width:100%;margin:0 0 14px;padding:14px;border-radius:14px;border:1px solid rgba(255,255,255,.18);background:#07100b;color:#fff;font-size:16px'>",
+      "<button id='claritySetupPasswordSave' style='width:100%;border:0;border-radius:999px;background:#ff9f2f;color:#06110b;font-weight:900;padding:13px 16px;font-size:15px'>Save password</button>",
+      "<p id='claritySetupPasswordStatus' style='min-height:20px;margin:14px 0 0;color:#c8d1cc;font-size:13px;line-height:1.35'></p>",
+      "</div>"
+    ].join("");
+    document.body.appendChild(overlay);
+    var status = document.getElementById("claritySetupPasswordStatus");
+    var button = document.getElementById("claritySetupPasswordSave");
+    button.onclick = async function () {
+      var p1 = document.getElementById("claritySetupPassword1").value || "";
+      var p2 = document.getElementById("claritySetupPassword2").value || "";
+      if (p1.length < 8) { status.textContent = "Password needs at least 8 characters."; return; }
+      if (p1 !== p2) { status.textContent = "Passwords do not match."; return; }
+      button.disabled = true;
+      status.textContent = "Saving password...";
+      try {
+        var config = await publicAuthConfig();
+        var user = await supabaseUser(config, token.accessToken);
+        var accountEmail = normalizeEmail(user && user.email || "");
+        await setSupabasePassword(config, token.accessToken, p1);
+        if (!accountEmail) throw new Error("Could not read account email from setup link");
+        await login(accountEmail, p1, { keepLoggedIn: true });
+        if (token.refreshToken) saveJson(SESSION_KEY, { access_token: token.accessToken, refresh_token: token.refreshToken, savedAt: nowISO() });
+        clearRecoveryUrl();
+        status.textContent = "Password saved. Opening Clarity...";
+        setTimeout(function () { overlay.remove(); location.reload(); }, 600);
+      } catch (error) {
+        button.disabled = false;
+        status.textContent = error && error.message || "Could not save password. Try the latest setup email link.";
+      }
+    };
+    return true;
+  }
+
   function wrap() {
     var api = window.GolfDaddyAccounts || window.ClarityCaddieAccounts;
     if (!api || api.__claritySupabaseAuthWrapped) return false;
@@ -140,8 +232,9 @@
     return true;
   }
 
-  window.ClaritySupabaseAuth = { signup: signup, login: login, updateAccount: updateAccount, commit: commit, wrap: wrap, session: function () { return loadJson(SESSION_KEY, null); } };
-  document.addEventListener("DOMContentLoaded", function () { setTimeout(wrap, 0); setTimeout(wrap, 600); });
+  window.ClaritySupabaseAuth = { signup: signup, login: login, updateAccount: updateAccount, commit: commit, wrap: wrap, showPasswordSetup: showPasswordSetup, session: function () { return loadJson(SESSION_KEY, null); } };
+  document.addEventListener("DOMContentLoaded", function () { setTimeout(wrap, 0); setTimeout(wrap, 600); setTimeout(showPasswordSetup, 50); });
   setTimeout(wrap, 0);
   setTimeout(wrap, 800);
+  setTimeout(showPasswordSetup, 900);
 })();
