@@ -12,13 +12,13 @@ const { sendSystemAlert } = require("./alert-utils");
 
 exports.handler = async function (event) {
   if (event.httpMethod === "OPTIONS") return json(204, {});
-  if (event.httpMethod !== "POST") return json(405, { error: "Method not allowed" });
+  if (event.httpMethod !== "POST") return json(405, { error: "Method not allowed", synced: false });
 
   let payload;
   try {
     payload = JSON.parse(event.body || "{}");
   } catch (error) {
-    return json(400, { error: "Invalid JSON" });
+    return json(400, { error: "Invalid JSON", synced: false });
   }
 
   const action = text(payload.action || "upsert_account", 80);
@@ -42,7 +42,7 @@ exports.handler = async function (event) {
       const result = await diagnostics(payload);
       return json(200, result);
     }
-    return json(400, { error: "Unsupported account sync action" });
+    return json(400, { error: "Unsupported account sync action", synced: false });
   } catch (error) {
     await sendSystemAlert({
       eventType: "supabase_account_sync_failed",
@@ -63,17 +63,15 @@ exports.handler = async function (event) {
 async function upsertAccount(payload, action) {
   const account = payload.account || {};
   const profile = payload.profile || {};
-  const accountId = text(account.accountId || account.id || payload.accountId, 120);
-  const profileId = text(account.profileId || profile.id || payload.profileId, 120);
+  const accountId = text(account.accountId || account.id || account.account_id || payload.accountId, 120);
+  const profileId = text(account.profileId || account.profile_id || profile.id || profile.profileId || profile.profile_id || payload.profileId || (accountId ? "profile_" + accountId : ""), 120);
   const accountEmail = email(account.email || profile.email || payload.email);
-  const name = text(account.name || profile.name, 160);
+  const name = text(account.name || profile.name || nameFromEmail(accountEmail) || "Clarity Player", 160);
   const role = normalRole(account.role || profile.accountPermission || profile.permission);
   const now = new Date().toISOString();
 
   if (!accountId) throw badRequest("Account id is required");
-  if (!profileId) throw badRequest("Profile id is required");
   if (!accountEmail) throw badRequest("Valid account email is required");
-  if (!name) throw badRequest("Account name is required");
 
   const duplicate = await supabaseFetch(
     "app_accounts?select=account_id,email&email=eq." + encodeFilter(accountEmail) + "&account_id=neq." + encodeFilter(accountId) + "&limit=1",
@@ -95,20 +93,21 @@ async function upsertAccount(payload, action) {
       email: accountEmail,
       name,
       role,
-      created_by_coach_id: text(account.createdByCoachId, 120) || null,
-      linked_coach_ids: Array.isArray(account.linkedCoachIds) ? account.linkedCoachIds : [],
-      linked_player_ids: Array.isArray(account.linkedPlayerIds) ? account.linkedPlayerIds : [],
-      requires_password_setup: !!account.requiresPasswordSetup,
-      auth_user_id: text(account.supabaseUserId || account.authUserId, 160) || null,
+      created_by_coach_id: text(account.createdByCoachId || account.created_by_coach_id, 120) || null,
+      linked_coach_ids: Array.isArray(account.linkedCoachIds) ? account.linkedCoachIds : (Array.isArray(account.linked_coach_ids) ? account.linked_coach_ids : []),
+      linked_player_ids: Array.isArray(account.linkedPlayerIds) ? account.linkedPlayerIds : (Array.isArray(account.linked_player_ids) ? account.linked_player_ids : []),
+      requires_password_setup: !!(account.requiresPasswordSetup || account.requires_password_setup),
+      auth_user_id: uuidOrNull(account.supabaseUserId || account.authUserId || account.auth_user_id),
       password_salt: null,
       password_hash: null,
-      last_login_at: account.lastLoginAt || null,
+      last_login_at: dateOrNull(account.lastLoginAt || account.last_login_at),
       metadata: stripUnsafe({
         source: "clarity-caddie-web",
         action,
         syncedFromBrowserAt: now,
-        createdAt: account.createdAt || null,
-        updatedAt: account.updatedAt || null
+        createdAt: account.createdAt || account.created_at || null,
+        updatedAt: account.updatedAt || account.updated_at || null,
+        profileWasDerived: !(account.profileId || account.profile_id || profile.id || profile.profileId || profile.profile_id || payload.profileId)
       }),
       updated_at: now
     })
@@ -120,7 +119,7 @@ async function upsertAccount(payload, action) {
     body: JSON.stringify({
       profile_id: profileId,
       account_id: accountId,
-      auth_user_id: text(account.supabaseUserId || account.authUserId || profile.supabaseUserId, 160) || null,
+      auth_user_id: uuidOrNull(account.supabaseUserId || account.authUserId || account.auth_user_id || profile.supabaseUserId || profile.authUserId || profile.auth_user_id),
       email: accountEmail,
       name,
       permission: normalPermission(profile.accountPermission || profile.permission || role),
@@ -157,7 +156,7 @@ async function upsertAccount(payload, action) {
 async function diagnostics(payload) {
   const accountId = text(payload.accountId, 120);
   const accountEmail = email(payload.email || payload.accountEmail);
-  const result = { configured: true, checkedAt: new Date().toISOString(), account: null, profile: null, entitlements: [] };
+  const result = { configured: true, synced: true, checkedAt: new Date().toISOString(), account: null, profile: null, entitlements: [] };
   if (accountId || accountEmail) {
     const accountFilters = [];
     if (accountId) accountFilters.push("account_id.eq." + encodeFilter(accountId));
@@ -195,9 +194,28 @@ function normalPermission(value) {
   return role === "subscribedPlayer" ? "subscribed" : "player";
 }
 
+function nameFromEmail(value) {
+  const clean = email(value);
+  if (!clean) return "";
+  const local = clean.split("@")[0].replace(/[._-]+/g, " ").trim();
+  return local ? local.replace(/\b\w/g, c => c.toUpperCase()) : "";
+}
+
+function uuidOrNull(value) {
+  const raw = text(value, 80);
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(raw) ? raw : null;
+}
+
+function dateOrNull(value) {
+  const raw = text(value, 80);
+  return raw && !Number.isNaN(Date.parse(raw)) ? new Date(raw).toISOString() : null;
+}
+
 function stripUnsafe(value) {
   const copy = JSON.parse(JSON.stringify(value || {}));
   delete copy.password;
   delete copy.passwordConfirm;
+  delete copy.password_hash;
+  delete copy.passwordSalt;
   return copy;
 }
