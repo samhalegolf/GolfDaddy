@@ -4,7 +4,7 @@ export const landingContent = {
     heading: "Better thoughts, on the course.",
     body: "Clarity Golf helps golfers make cleaner decisions by turning their real shot patterns into simple, visual course strategy.",
     primaryCta: {
-      label: "Open Clarity Caddie",
+      label: "Open Clarity Caddy",
       href: "/app"
     },
     secondaryCta: {
@@ -28,15 +28,15 @@ export const landingContent = {
       },
       {
         title: "Less mental clutter",
-        body: "Clarity Caddie holds the details for you so you can make confident decisions on the course."
+        body: "Clarity Caddy holds the details for you so you can make confident decisions on the course."
       }
     ]
   },
 
   products: {
-    eyebrow: "Clarity Caddie",
+    eyebrow: "Clarity Caddy",
     heading: "A course tool built around your game.",
-    body: "Clarity Caddie connects GPS, bag data, and personalised shot patterns into one simple playing experience.",
+    body: "Clarity Caddy connects GPS, bag data, and personalised shot patterns into one simple playing experience.",
     items: [
       {
         title: "Play Mode",
@@ -67,9 +67,9 @@ export const landingContent = {
 
   cta: {
     heading: "Start with clearer choices.",
-    body: "Open Clarity Caddie, build your bag, and start seeing your game in a way that helps you play smarter.",
+    body: "Open Clarity Caddy, build your bag, and start seeing your game in a way that helps you play smarter.",
     primaryCta: {
-      label: "Open Clarity Caddie",
+      label: "Open Clarity Caddy",
       href: "/app"
     },
     secondaryCta: {
