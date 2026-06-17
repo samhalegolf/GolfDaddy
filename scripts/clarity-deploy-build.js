@@ -16,7 +16,8 @@ function copyEntry(relativePath) {
   const target = path.join(dist, relativePath);
   const deployHelper = path.join(root, "scripts", "clarity-deploy-build.js");
   if (!fs.existsSync(source)) {
-    throw new Error(`Missing deploy asset: ${relativePath}`);
+    console.warn(`Skipping missing optional deploy asset: ${relativePath}`);
+    return;
   }
   fs.cpSync(source, target, {
     recursive: true,
@@ -30,4 +31,4 @@ fs.mkdirSync(dist, { recursive: true });
 publicPaths.forEach(copyEntry);
 
 console.log(`Prepared Netlify deploy output: ${path.relative(root, dist)}`);
-console.log(`Public entries: ${publicPaths.join(", ")}`);
+console.log(`Public entries: ${publicPaths.filter((entry) => fs.existsSync(path.join(root, entry))).join(", ")}`);
