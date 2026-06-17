@@ -6,8 +6,12 @@ const {
   email,
   env,
   json,
+  normaliseProductKey,
   passPriceId,
   passType,
+  paymentProduct,
+  productDurationHours,
+  productPriceId,
   text
 } = require("./payment-utils");
 
@@ -26,11 +30,20 @@ exports.handler = async function (event) {
     return json(400, { error: "Invalid JSON" });
   }
 
-  const type = passType(payload.passType || payload.entitlementType || payload.product);
-  if (!type) return json(400, { error: "Choose a valid pass" });
+  const requestedKey = normaliseProductKey(payload.productKey || payload.passType || payload.entitlementType || payload.product);
+  if (!requestedKey) return json(400, { error: "Choose a valid pass or membership" });
 
-  const price = passPriceId(type);
-  if (!price) return json(503, { error: PASS_CONFIG[type].label + " is not configured yet" });
+  let product = null;
+  try { product = await paymentProduct(requestedKey); } catch (_error) { product = null; }
+
+  const legacyType = passType(requestedKey);
+  if (!product && !legacyType) return json(400, { error: "Choose a valid active pass or membership" });
+
+  const price = productPriceId(product, legacyType);
+  if (!price) {
+    const label = product && product.name || PASS_CONFIG[legacyType] && PASS_CONFIG[legacyType].label || "This product";
+    return json(503, { error: label + " is not connected to a Stripe Price ID yet" });
+  }
 
   const accountEmail = email(payload.email || payload.accountEmail);
   const accountId = text(payload.accountId || payload.userId, 120);
@@ -39,9 +52,15 @@ exports.handler = async function (event) {
     return json(400, { error: "Sign in before buying a pass" });
   }
 
+  const productKey = product && product.product_key || legacyType;
+  const productKind = product && product.product_kind || legacyType;
+  const label = product && product.name || PASS_CONFIG[legacyType] && PASS_CONFIG[legacyType].label || productKey;
+  const durationHours = productDurationHours(product, legacyType);
+  const mode = productKind === "membership" || String(product && product.billing_schedule || "").toLowerCase().indexOf("subscription") !== -1 ? "subscription" : "payment";
+
   const site = appUrl();
   const params = new URLSearchParams();
-  params.append("mode", "payment");
+  params.append("mode", mode);
   params.append("client_reference_id", accountId || accountEmail);
   params.append("line_items[0][price]", price);
   params.append("line_items[0][quantity]", "1");
@@ -50,12 +69,18 @@ exports.handler = async function (event) {
   params.append("allow_promotion_codes", "true");
   if (accountEmail) params.append("customer_email", accountEmail);
   params.append("metadata[app]", "clarity-caddie");
-  params.append("metadata[entitlement_type]", type);
+  params.append("metadata[product_key]", productKey);
+  params.append("metadata[product_kind]", productKind);
+  params.append("metadata[product_name]", label);
+  params.append("metadata[entitlement_type]", productKey);
+  params.append("metadata[duration_hours]", String(durationHours));
   params.append("metadata[account_id]", accountId);
   params.append("metadata[account_email]", accountEmail);
   params.append("metadata[account_name]", accountName);
   params.append("payment_intent_data[metadata][app]", "clarity-caddie");
-  params.append("payment_intent_data[metadata][entitlement_type]", type);
+  params.append("payment_intent_data[metadata][product_key]", productKey);
+  params.append("payment_intent_data[metadata][entitlement_type]", productKey);
+  params.append("payment_intent_data[metadata][duration_hours]", String(durationHours));
   params.append("payment_intent_data[metadata][account_id]", accountId);
   params.append("payment_intent_data[metadata][account_email]", accountEmail);
 
@@ -78,7 +103,8 @@ exports.handler = async function (event) {
     return json(200, {
       id: session.id,
       url: session.url,
-      passType: type
+      productKey,
+      passType: productKey
     });
   } catch (error) {
     return json(502, { error: error && error.message ? error.message : "Could not start checkout" });

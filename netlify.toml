@@ -29,6 +29,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/payment-admin"
+  to = "/.netlify/functions/payment-admin"
+  status = 200
+
+[[redirects]]
   from = "/api/stripe-webhook"
   to = "/.netlify/functions/stripe-webhook"
   status = 200
