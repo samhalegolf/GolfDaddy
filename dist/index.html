@@ -3974,6 +3974,7 @@ body[data-gd-permission="admin"] #gdV62Home .gdHomeAdminSettings{display:inline-
 
 <div class="ghost" id="ghost">⚑</div><div class="pulseDrop" id="dropPulse"></div>
 <div class="shotTile" id="shotTile"><button class="gdShotHoleChip" id="gdShotHoleChip" type="button" data-gd-hole-picker-trigger title="Long press to pick hole" aria-label="Current hole">H1</button><div class="tileTop"></div><div class="tileBack" id="tileBack"></div><div class="tilePlays" id="tilePlays"></div><div class="tileMain"><div class="tileClub"><button class="gdSetBagLink" onclick="gdOpenBagFromGps(event)" aria-label="Open bag"><img src="assets/home/bag.png" alt=""></button></div><div class="tileDist" id="tileDist">—<span>m</span></div><div class="tileSub tilePrimary" id="tileSub"></div><div class="tileSub tileMeta" id="tileMeta"></div></div><div class="tileFront" id="tileFront"></div><div class="tileSub tilePinMetric" id="pinDiff" style="display:none">Pin —</div></div>
+<div class="gdLockedToolbar" id="gdLockedToolbar" aria-label="Locked shot controls"><button id="gdLandingZoomBtn" type="button" onclick="gdToggleLandingZoom()" title="Green / landing zoom" aria-label="Green / landing zoom">⌕</button><button id="gdLockedUnlockBtn" type="button" onclick="lockFrame(false)" title="Unlock shot frame" aria-label="Unlock shot frame">Unlock</button><button id="gdLockedResetBtn" type="button" onclick="gdGpsResetBubbleToStart()" title="Reset shot bubble" aria-label="Reset shot bubble">Reset</button><div class="gdLockedPlays" id="gdLockedPlays"></div></div>
 <div class="hint" id="hint"></div>
 	<div class="toast" id="toast"></div>
 <input accept="image/*" id="snapshotInput" onchange="loadSnapshotSource(event)" style="display:none" type="file"/>
@@ -15361,8 +15362,23 @@ function gdShotBagIconHtml(){
 }
 function gdShotPlaysData(origin,targetPoint,flatDistanceM){
   const data=gdSlopeAdjustedDistanceData(origin,targetPoint,flatDistanceM);
-  if(!data)return {metric:null,tone:""};
-  return {metric:data.adjusted,tone:data.relation==="over"?"slopeOver":(data.relation==="under"?"slopeUnder":"slopeLevel")};
+  if(!data)return {metric:null,tone:"",data:null};
+  return {
+    metric:data.adjusted,
+    tone:data.relation==="over"?"slopeOver":(data.relation==="under"?"slopeUnder":"slopeLevel"),
+    data
+  };
+}
+function gdRenderShotCardSlope(tilePlays,slopeData){
+  if(!tilePlays)return;
+  tilePlays.classList.remove("slopeOver","slopeUnder","slopeLevel","loading");
+  tilePlays.innerHTML="";
+  tilePlays.removeAttribute("title");
+  if(!slopeData)return;
+  const tone=slopeData.relation==="over"?"slopeOver":(slopeData.relation==="under"?"slopeUnder":"slopeLevel");
+  tilePlays.classList.add(tone);
+  tilePlays.title=`Slope adjusted: ${slopeData.label||"playing distance"}`;
+  tilePlays.innerHTML=gdShotMetricHtml("Slope",slopeData.adjusted);
 }
 function gdShotPinDiffData(){
   if(!start||!pin||!map)return null;
@@ -16332,25 +16348,22 @@ function renderShot(){
     else clubEl.innerHTML=gdShotBagIconHtml();
   }
   const edgeMetrics=isLayup?null:gdShotGreenEdgeMetrics();
-  const plays=isLayup?{metric:fd,tone:""}:gdShotPlaysData(start,bubbleCenter,bubbleCenterDistance);
+  const slopeData=isLayup?null:gdSlopeAdjustedDistanceData(start,bubbleCenter,bubbleCenterDistance);
   const pinDiffMetric=gdShotPinDiffData();
   if(tileBack)tileBack.innerHTML=isLayup?"":gdShotMetricHtml("Back",edgeMetrics?edgeMetrics.back:null);
   if(tileFront)tileFront.innerHTML=isLayup?"":gdShotMetricHtml("Front",edgeMetrics?edgeMetrics.front:null);
-  if(tilePlays){
-    tilePlays.classList.remove("slopeOver","slopeUnder","slopeLevel");
-    if(!isLayup&&plays.metric){
-      if(plays.tone)tilePlays.classList.add(plays.tone);
-      tilePlays.innerHTML=gdShotMetricHtml("Slope",plays.metric);
-    }else{
-      tilePlays.innerHTML="";
+  gdRenderShotCardSlope(tilePlays,slopeData);
+  try{
+    if(window.gdSlopeCardDebug){
+      console.debug("[slope-card]",{hasStart:!!start,hasBubbleCenter:!!bubbleCenter,bubbleCenterDistance,slopeData,elevationState:gdShotElevationState});
     }
-  }
+  }catch(e){}
   const tileDist=document.getElementById("tileDist");
   if(tileDist){
     tileDist.classList.remove("slopeOver","slopeUnder","slopeLevel");
     tileDist.innerHTML=gdShotDistanceStackHtml(fd,carryDistance);
   }
-  gdRenderSlopeAdjustedLine(tileMain,null);
+  // Slope now renders through #tilePlays; keep old inline slope line cleared only by gdResetShotDistanceDisplay().
   const clubComparisonDistance=gdShotClubComparisonDistance(bubbleCenterDistance);
   const totalDelta=readyBag?gdShotTotalDeltaData(gdb,clubComparisonDistance):null;
   if(tileSub){
@@ -38534,5 +38547,278 @@ body.gps-active #shotTile .tileCarryValue span{
   window.addEventListener("resize", function(){ setTimeout(positionGreenFocusBall, 80); }, true);
 })();
 </script>
+
+<style id="gdSlopeLandingZoomPatchCss">
+/* --- Slope / locked-in GPS patch --- */
+#app.framed #map,
+#app.gdLockedInUi #map,
+body.gd-frame-hard-locked #map{filter:none!important;}
+body.gd-frame-hard-locked .leaflet-tile,
+body.gd-frame-hard-locked .leaflet-tile-pane,
+body.gd-frame-hard-locked .leaflet-container img,
+#app.gdLockedInUi .leaflet-tile,
+#app.gdLockedInUi .leaflet-tile-pane,
+#app.gdLockedInUi .leaflet-container img{
+  filter:none!important;
+  mix-blend-mode:normal!important;
+  border:0!important;
+  outline:0!important;
+  box-shadow:none!important;
+}
+#app.gdLockedInUi::after,
+#app.framed.gdLockedInUi::after{
+  content:"";
+  position:absolute;
+  inset:0;
+  z-index:606;
+  pointer-events:none;
+  background:
+    radial-gradient(ellipse 48% 42% at 50% 47%,rgba(255,255,255,.035) 0%,rgba(255,255,255,.018) 28%,rgba(0,0,0,0) 48%),
+    radial-gradient(ellipse 86% 74% at 50% 50%,rgba(0,0,0,0) 0%,rgba(0,0,0,.04) 46%,rgba(0,0,0,.22) 74%,rgba(0,0,0,.38) 100%);
+  box-shadow:inset 0 0 58px rgba(0,0,0,.26),inset 0 0 132px rgba(0,0,0,.18);
+}
+#app.gdLandingZoomActive::after{
+  background:
+    radial-gradient(ellipse 58% 54% at 50% 47%,rgba(55,255,130,.055) 0%,rgba(255,255,255,.035) 35%,rgba(0,0,0,0) 58%),
+    radial-gradient(ellipse 90% 82% at 50% 50%,rgba(0,0,0,0) 0%,rgba(0,0,0,.03) 52%,rgba(0,0,0,.18) 80%,rgba(0,0,0,.32) 100%);
+}
+.gdLockedToolbar{
+  position:absolute;
+  left:50%;
+  bottom:calc(18px + env(safe-area-inset-bottom));
+  transform:translateX(-50%) translateY(18px);
+  z-index:2110;
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:8px;
+  border-radius:21px;
+  background:rgba(5,10,8,.78);
+  border:1px solid rgba(255,255,255,.12);
+  box-shadow:0 16px 36px rgba(0,0,0,.38);
+  backdrop-filter:blur(14px);
+  opacity:0;
+  pointer-events:none;
+  transition:opacity .18s ease,transform .18s ease;
+}
+body.gd-frame-hard-locked .gdLockedToolbar{opacity:1;pointer-events:auto;transform:translateX(-50%) translateY(0)}
+.gdLockedToolbar button{
+  min-width:46px;
+  height:42px;
+  padding:0 12px;
+  border-radius:15px;
+  border:1px solid rgba(255,255,255,.12);
+  background:rgba(255,255,255,.08);
+  color:#fff;
+  font-weight:950;
+  font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;
+}
+.gdLockedToolbar #gdLandingZoomBtn{
+  min-width:48px;
+  background:linear-gradient(180deg,#32e57e,#118d45);
+  color:#031108;
+  font-size:24px;
+  line-height:1;
+}
+body.gd-landing-zoom-active .gdLockedToolbar #gdLandingZoomBtn{box-shadow:0 0 0 3px rgba(50,229,126,.22),0 0 22px rgba(50,229,126,.36)}
+.gdLockedPlays{
+  min-width:48px;
+  min-height:36px;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  color:#fff;
+  text-align:center;
+  font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;
+}
+.gdLockedPlays .tileMetricLabel{display:block;font-size:8px;font-weight:900;color:rgba(246,248,251,.72);line-height:1;text-transform:none;}
+.gdLockedPlays .tileMetricValue{display:block;font-size:13px;font-weight:950;color:#fff;line-height:1;}
+.gdLockedPlays .tileMetricValue span{font-size:.45em;color:rgba(246,248,251,.72);margin-left:1px;}
+body.gd-frame-hard-locked .shotTile{display:none!important;}
+body.gd-frame-hard-locked .rightRail{opacity:.22;pointer-events:none;}
+body.gd-frame-hard-locked #gdV62GpsBadge{opacity:.82;}
+body.gd-frame-hard-locked .greenLabel,
+body.gd-frame-hard-locked .yardLabel.edgeLabel,
+body.gd-frame-hard-locked .remainingGreenLabel{display:none!important;}
+@media(max-width:420px){.gdLockedToolbar{left:8px;right:8px;transform:translateY(18px);justify-content:center}.gdLockedToolbar button{min-width:0;padding:0 10px}body.gd-frame-hard-locked .gdLockedToolbar{transform:translateY(0)}}
+</style>
+<script id="gdSlopeLandingZoomPatchJs">
+(function(){
+  function safe(fn,fallback){try{return fn()}catch(e){return fallback}}
+  function llPlain(ll){return ll&&Number.isFinite(Number(ll.lat))&&Number.isFinite(Number(ll.lng))?{lat:Number(ll.lat),lng:Number(ll.lng)}:null}
+  function toLatLng(v){return v&&window.L?L.latLng(Number(v.lat),Number(v.lng)):null}
+  function hasActiveShot(){return safe(function(){return !!(start&&target&&map)},false)}
+  function landingCenter(){
+    return safe(function(){
+      var payload=typeof getGpsBubblePayload==='function'&&start&&target?getGpsBubblePayload(map.distance(start,(typeof gdShotDisplayTarget==='function'&&gdShotDisplayTarget())||target)):null;
+      return (typeof gdBubbleRenderCenter==='function'&&gdBubbleRenderCenter(payload))||(typeof gdShotDisplayTarget==='function'&&gdShotDisplayTarget())||greenCentre||target;
+    },null);
+  }
+  function setLockedClasses(on){
+    var app=safe(function(){return document.getElementById('app')},null);
+    if(app)app.classList.toggle('gdLockedInUi',!!on);
+    document.body.classList.toggle('gd-locked-shot-ui',!!on);
+    if(!on){
+      if(app)app.classList.remove('gdLandingZoomActive');
+      document.body.classList.remove('gd-landing-zoom-active');
+      window.__gdLandingZoomActive=false;
+      window.__gdLandingZoomReturnView=null;
+    }
+  }
+  function syncLockedToolbar(){
+    var on=safe(function(){return !!lockedFrame},false)&&hasActiveShot();
+    setLockedClasses(on);
+    var src=document.getElementById('tilePlays');
+    var dst=document.getElementById('gdLockedPlays');
+    if(dst){
+      dst.className='gdLockedPlays';
+      if(src&&src.innerHTML){
+        ['slopeOver','slopeUnder','slopeLevel'].forEach(function(c){if(src.classList.contains(c))dst.classList.add(c)});
+        dst.innerHTML=src.innerHTML;
+        if(src.title)dst.title=src.title;
+      }else{
+        dst.innerHTML='';
+        dst.removeAttribute('title');
+      }
+    }
+    var btn=document.getElementById('gdLandingZoomBtn');
+    if(btn){
+      var active=!!window.__gdLandingZoomActive;
+      btn.classList.toggle('active',active);
+      btn.setAttribute('aria-pressed',String(active));
+    }
+  }
+  function saveView(){return safe(function(){var c=map.getCenter();return {center:llPlain(c),zoom:map.getZoom()};},null)}
+  function restoreView(view){
+    if(!view||!view.center)return false;
+    return safe(function(){map.setView(toLatLng(view.center),view.zoom,{animate:true,duration:.25});return true},false);
+  }
+  window.gdToggleLandingZoom=function(){
+    if(!hasActiveShot()||!safe(function(){return !!lockedFrame},false))return false;
+    var app=safe(function(){return document.getElementById('app')},null);
+    if(window.__gdLandingZoomActive){
+      window.__gdLandingZoomActive=false;
+      document.body.classList.remove('gd-landing-zoom-active');
+      if(app)app.classList.remove('gdLandingZoomActive');
+      restoreView(window.__gdLandingZoomReturnView);
+      syncLockedToolbar();
+      return false;
+    }
+    window.__gdLandingZoomReturnView=saveView();
+    window.__gdLandingZoomActive=true;
+    document.body.classList.add('gd-landing-zoom-active');
+    if(app)app.classList.add('gdLandingZoomActive');
+    safe(function(){
+      var c=landingCenter();
+      if(!c)return;
+      var pts=[c];
+      if(greenCentre)pts.push(greenCentre);
+      if(pin)pts.push(pin);
+      if(greenPolygon&&greenPolygon.length)greenPolygon.forEach(function(p){if(p)pts.push(p)});
+      var bounds=L.latLngBounds(pts);
+      var z=Math.max(map.getZoom?map.getZoom():18,19);
+      if(pts.length>1)map.fitBounds(bounds,{paddingTopLeft:[56,96],paddingBottomRight:[56,118],animate:true,duration:.25,maxZoom:20});
+      else map.setView(c,z,{animate:true,duration:.25});
+    });
+    syncLockedToolbar();
+    return false;
+  };
+  window.gdGpsResetBubbleToStart=function(){
+    if(!hasActiveShot())return false;
+    return safe(function(){
+      var resetTarget=greenCentre||target;
+      if(!resetTarget)return false;
+      if(typeof moveBubbleTo==='function')moveBubbleTo(resetTarget,true);
+      else target=resetTarget;
+      if(typeof renderShot==='function')renderShot();
+      if(window.__gdLandingZoomActive&&typeof gdToggleLandingZoom==='function'){gdToggleLandingZoom();setTimeout(gdToggleLandingZoom,80)}
+      return false;
+    },false);
+  };
+  var oldSetBubble=safe(function(){return setBubbleOnlyLock},null);
+  if(typeof oldSetBubble==='function'&&!oldSetBubble.__gdSlopeLandingWrapped){
+    var wrapped=function(on){var r=oldSetBubble.apply(this,arguments);syncLockedToolbar();return r};
+    wrapped.__gdSlopeLandingWrapped=true;
+    setBubbleOnlyLock=wrapped; window.setBubbleOnlyLock=wrapped;
+  }
+  var oldRender=safe(function(){return renderShot},null);
+  if(typeof oldRender==='function'&&!oldRender.__gdSlopeLandingWrapped){
+    var wrappedRender=function(){var r=oldRender.apply(this,arguments);syncLockedToolbar();return r};
+    wrappedRender.__gdSlopeLandingWrapped=true;
+    renderShot=wrappedRender; window.renderShot=wrappedRender;
+  }
+  var oldFrame=safe(function(){return frameShotView},null);
+  if(typeof oldFrame==='function'){
+    frameShotView=function(){
+      return safe(function(){
+        if(!start||!target||!map)return oldFrame.apply(this,arguments);
+        var c=landingCenter();
+        if(!c)return oldFrame.apply(this,arguments);
+        var display=(typeof gdShotDisplayTarget==='function'&&gdShotDisplayTarget())||target;
+        var axis=(typeof gdShotUpAxis==='function'&&gdShotUpAxis())||null;
+        var brg=axis&&Number.isFinite(axis.bearingRad)?axis.bearingRad:bearing(start,display||c);
+        var shotM=Math.max(1,map.distance(start,c));
+        var landingRadius=Math.max(42,Math.min(112,shotM*.24));
+        var forward=project(c,brg,Math.max(24,landingRadius*.62));
+        var back=project(c,brg+Math.PI,Math.max(18,landingRadius*.36));
+        var left=projectOffset(c,brg,0,-landingRadius);
+        var right=projectOffset(c,brg,0,landingRadius);
+        var pts=[c,forward,back,left,right];
+        if(greenCentre)pts.push(greenCentre);
+        if(pin)pts.push(pin);
+        if(greenPolygon&&greenPolygon.length)greenPolygon.forEach(function(p){if(p)pts.push(p)});
+        map.fitBounds(L.latLngBounds(pts.filter(Boolean)),{paddingTopLeft:[32,90],paddingBottomRight:[32,112],animate:true,duration:.32,maxZoom:20});
+        return true;
+      },oldFrame.apply(this,arguments));
+    };
+    window.frameShotView=frameShotView;
+  }
+  function markActive(){
+    safe(function(){
+      if(!hasActiveShot())return;
+      var session={version:1,lastActiveAt:Date.now(),mode:mode,lockedFrame:!!lockedFrame,selectedHole:selectedHole||currentPlayingHole||null,currentPlayingHole:currentPlayingHole||selectedHole||null,start:llPlain(start),target:llPlain(target),greenCentre:llPlain(greenCentre),pin:llPlain(pin),course:currentCourse||window.gdActiveCourse||null,zoom:safe(function(){return map.getZoom()},null),center:llPlain(safe(function(){return map.getCenter()},null)),landingZoomActive:!!window.__gdLandingZoomActive,landingZoomReturnView:window.__gdLandingZoomReturnView||null};
+      localStorage.setItem('gd_active_play_session_v2',JSON.stringify(session));
+      sessionStorage.setItem('gd_gps_session_activated','1');
+      if(session.currentPlayingHole)sessionStorage.setItem('gd_active_playing_hole',String(session.currentPlayingHole));
+    });
+  }
+  function tryRestoreSession(){
+    return safe(function(){
+      var raw=localStorage.getItem('gd_active_play_session_v2');
+      if(!raw)return false;
+      var session=JSON.parse(raw);
+      if(!session||!session.start&&!session.target)return false;
+      if(hasActiveShot())return true;
+      if(session.course){currentCourse=session.course;window.gdActiveCourse=session.course;}
+      if(session.currentPlayingHole){currentPlayingHole=session.currentPlayingHole;selectedHole=session.selectedHole||session.currentPlayingHole;sessionStorage.setItem('gd_active_playing_hole',String(session.currentPlayingHole));sessionStorage.setItem('gd_mapper_active_hole',String(session.currentPlayingHole));}
+      if(session.start)start=toLatLng(session.start);
+      if(session.target)target=toLatLng(session.target);
+      if(session.greenCentre)greenCentre=toLatLng(session.greenCentre);
+      if(session.pin)pin=toLatLng(session.pin);
+      if(start&&!startMarker&&typeof startIcon!=='undefined')startMarker=L.marker(start,{icon:startIcon,interactive:false}).addTo(map);
+      if(greenCentre&&!greenMarker)greenMarker=L.circleMarker(greenCentre,{radius:8,color:'#1fd36d',weight:2,opacity:.82,fillColor:'#1fd36d',fillOpacity:.08,interactive:false}).addTo(map);
+      if(target&&!targetMarker&&typeof createTargetMarker==='function')createTargetMarker(target);
+      if(pin&&!pinMarker&&typeof pinIcon!=='undefined'){pinMarker=L.marker(pin,{icon:pinIcon,draggable:false,autoPan:false}).addTo(map);safe(function(){gdInstallPinDrag(pinMarker)});}
+      mode=session.mode||((start&&target)?'aim':(start?'green':'start'));
+      lockedFrame=!!(session.lockedFrame&&start&&target);
+      document.getElementById('shotTile')?.classList.toggle('visible',!!(start&&target));
+      if(start&&target){if(lockedFrame)frameShotView(); else if(session.center)map.setView(toLatLng(session.center),session.zoom||map.getZoom(),{animate:false}); if(typeof renderShot==='function')renderShot(); if(lockedFrame&&typeof setBubbleOnlyLock==='function')setBubbleOnlyLock(true);}
+      return !!(start&&target);
+    },false);
+  }
+  var oldEnter=safe(function(){return window.enterGpsModule},null);
+  if(typeof oldEnter==='function'&&!oldEnter.__gdResumeWrapped){
+    var enterWrapped=function(opts){var r=oldEnter.apply(this,arguments);setTimeout(function(){tryRestoreSession();syncLockedToolbar();},120);return r};
+    enterWrapped.__gdResumeWrapped=true;
+    window.enterGpsModule=enterWrapped;
+  }
+  ['visibilitychange','pagehide','beforeunload'].forEach(function(ev){window.addEventListener(ev,markActive,true)});
+  document.addEventListener('click',function(){setTimeout(markActive,40);},true);
+  setInterval(function(){markActive();syncLockedToolbar();},1500);
+  setTimeout(function(){tryRestoreSession();syncLockedToolbar();},300);
+})();
+</script>
+
 </body>
 </html>
