@@ -90,7 +90,6 @@
       var expiry = formatDate(entitlement.expires_at);
       return expiry ? type + " active until " + expiry : type + " active";
     }
-    if (status && status.connectionIssue) return "Supabase check failed";
     if (status && status.configured === false) return "Payments not configured yet";
     return "No active pass";
   }
@@ -118,8 +117,13 @@
       pending = false; return saveStatus(body);
     } catch (error) {
       pending = false;
-      saveStatus(Object.assign({}, status, { active: false, entitlements: [], connectionIssue: true, error: error && error.message ? error.message : "Could not check payment status", checkedAt: new Date().toISOString() }));
-      safe(function () { return window.toast && window.toast(status.error || "Could not check payment status"); });
+      var message = error && error.message ? error.message : "Could not check payment status";
+      saveStatus(Object.assign({}, status, { active: false, entitlements: [], connectionIssue: true, error: message, checkedAt: new Date().toISOString() }));
+      if (opts.silent || opts.auto) {
+        safe(function () { console.warn("[ClarityPayments] payment status refresh skipped", message); });
+      } else {
+        safe(function () { return window.toast && window.toast(status.error || "Could not check payment status"); });
+      }
       return status;
     }
   }
@@ -185,7 +189,7 @@
     panel.id = "gdPlayerSettingsPaymentsSection";
     panel.hidden = true;
     panel.innerHTML = [
-      '<button class="gdPlayerSettingsSubBack" type="button" onclick="gdPlayerSettingsShowSection(\'menu\')">‹ Settings</button>',
+      '<button class="gdPlayerSettingsSubBack" type="button" onclick="gdPlayerSettingsShowSection(&quot;menu&quot;)">‹ Settings</button>',
       "<strong>Payments & Access</strong>",
       '<span id="clarityPaymentSectionLine">Passes, memberships and Stripe-linked access.</span>',
       '<div class="clarityPaymentSection" id="clarityPaymentSection"></div>'
@@ -214,7 +218,7 @@
     var menu = document.getElementById("gdPlayerSettingsMenu");
     if (panel) panel.hidden = name !== "payments";
     if (menu && name === "payments") menu.hidden = true;
-    if (name === "payments") { render(); loadAdminSettings(); }
+    if (name === "payments") { render(); refresh({ silent: true }); loadAdminSettings(); }
   }
 
   function render() {
@@ -245,7 +249,7 @@
   function renderProductCards() {
     var cards = products().filter(function (product) { return product.product_kind !== "free_pass"; }).map(function (product) {
       var price = moneyText(product.price_label) || (product.stripe_price_id ? "Buy" : "Not linked yet");
-      return '<button class="clarityPaymentPass" type="button" onclick="ClarityPayments.buy(\'' + escapeHTML(product.product_key) + '\')"><strong>' + escapeHTML(product.name) + '</strong><span>' + escapeHTML(product.description || durationLabel(product.duration_hours)) + '</span><small>' + escapeHTML(durationLabel(product.duration_hours)) + '</small><b>' + escapeHTML(price) + '</b></button>';
+      return '<button class="clarityPaymentPass" type="button" onclick="ClarityPayments.buy(&quot;' + escapeHTML(product.product_key) + '&quot;)"><strong>' + escapeHTML(product.name) + '</strong><span>' + escapeHTML(product.description || durationLabel(product.duration_hours)) + '</span><small>' + escapeHTML(durationLabel(product.duration_hours)) + '</small><b>' + escapeHTML(price) + '</b></button>';
     }).join("");
     return '<div class="clarityPaymentPassGrid">' + cards + '</div>';
   }
@@ -273,7 +277,7 @@
   function statusPill(label, ok) { return '<div class="clarityPaymentPill ' + (ok ? 'ok' : 'bad') + '"><b>' + escapeHTML(ok ? '✓' : '!') + '</b><span>' + escapeHTML(label) + '</span></div>'; }
 
   function renderAdminProduct(product) {
-    return '<div class="clarityPaymentProductRow"><div><strong>' + escapeHTML(product.name) + '</strong><span>' + escapeHTML(product.product_key + ' · ' + product.product_kind + ' · ' + durationLabel(product.duration_hours)) + '</span><em>' + escapeHTML(product.stripe_price_id || 'No Stripe Price ID') + '</em></div><button type="button" onclick="ClarityPayments.editProduct(\'' + escapeHTML(product.product_key) + '\')">Edit</button><button type="button" onclick="ClarityPayments.toggleProduct(\'' + escapeHTML(product.product_key) + '\',' + (product.active ? 'false' : 'true') + ')">' + (product.active ? 'Disable' : 'Enable') + '</button></div>';
+    return '<div class="clarityPaymentProductRow"><div><strong>' + escapeHTML(product.name) + '</strong><span>' + escapeHTML(product.product_key + ' · ' + product.product_kind + ' · ' + durationLabel(product.duration_hours)) + '</span><em>' + escapeHTML(product.stripe_price_id || 'No Stripe Price ID') + '</em></div><button type="button" onclick="ClarityPayments.editProduct(&quot;' + escapeHTML(product.product_key) + '&quot;)">Edit</button><button type="button" onclick="ClarityPayments.toggleProduct(&quot;' + escapeHTML(product.product_key) + '&quot;,' + (product.active ? 'false' : 'true') + ')">' + (product.active ? 'Disable' : 'Enable') + '</button></div>';
   }
 
   function renderProductForm() {
@@ -321,9 +325,9 @@
       return false;
     },
     saveProductFromForm: function (form) { var data = formData(form); adminAction("upsertProduct", { product: data }).then(function () { form.reset(); if (form.elements.active) form.elements.active.checked = true; }); return false; },
-    issueFreePassFromForm: function (form) { var data = formData(form); adminAction("issueFreePass", data).then(function () { form.reset(); if (form.elements.productKey) form.elements.productKey.value = "free_pass"; if (form.elements.durationHours) form.elements.durationHours.value = "24"; refresh(); }); return false; }
+    issueFreePassFromForm: function (form) { var data = formData(form); adminAction("issueFreePass", data).then(function () { form.reset(); if (form.elements.productKey) form.elements.productKey.value = "free_pass"; if (form.elements.durationHours) form.elements.durationHours.value = "24"; refresh({ silent: true }); }); return false; }
   };
 
-  document.addEventListener("DOMContentLoaded", function () { setTimeout(function () { install(); handleReturn(); refresh(); loadAdminSettings(); }, 150); });
-  window.addEventListener("clarity:session-changed", function () { setTimeout(function () { install(); refresh(); loadAdminSettings(); }, 50); });
+  document.addEventListener("DOMContentLoaded", function () { setTimeout(function () { install(); handleReturn(); refresh({ silent: true, auto: true }); }, 150); });
+  window.addEventListener("clarity:session-changed", function () { setTimeout(function () { install(); refresh({ silent: true, auto: true }); }, 50); });
 })();
