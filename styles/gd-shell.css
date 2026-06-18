@@ -37,3 +37,12 @@
   pointer-events: none !important;
   opacity: 0 !important;
 }
+
+/* Hole Frame nav hotfix: retire legacy top-centre hole switcher. */
+#gdNextHolePopout,
+.gdNextHolePopout {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+  opacity: 0 !important;
+}
