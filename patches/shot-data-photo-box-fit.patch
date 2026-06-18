@@ -1,0 +1,118 @@
+--- /mnt/data/orig/index.html	2026-06-15 10:10:41.000000000 +0000
++++ /mnt/data/work/index.html	2026-06-18 07:28:22.733393702 +0000
+@@ -481,8 +481,8 @@
+ .gdManualQuadHead strong{display:block;color:#fff;font-size:15px;font-weight:950}
+ .gdManualQuadHead span{display:block;margin-top:3px;color:rgba(255,255,255,.62);font-size:11px;font-weight:850;line-height:1.25}
+ .gdManualQuadBadge{flex:0 0 auto;border-radius:999px;padding:6px 8px;background:rgba(215,176,107,.16);border:1px solid rgba(215,176,107,.28);color:#ffd287;font:950 10px/1 ui-monospace,SFMono-Regular,Menlo,monospace;text-transform:uppercase;letter-spacing:.04em}
+-.gdManualQuadCanvasWrap{overflow:auto;border-radius:14px;background:#050806;border:1px solid rgba(255,255,255,.09);touch-action:none}
+-.gdManualQuadCanvasWrap canvas{display:block;width:100%;height:auto;min-width:640px;background:#050806;cursor:crosshair}
++.gdManualQuadCanvasWrap{overflow:hidden;border-radius:14px;background:#050806;border:1px solid rgba(255,255,255,.09);touch-action:none;display:flex;align-items:center;justify-content:center;max-height:min(68vh,620px);min-height:220px}
++.gdManualQuadCanvasWrap canvas{display:block;width:auto;height:auto;max-width:100%;max-height:min(68vh,620px);min-width:0;background:#050806;cursor:crosshair}
+ .gdManualQuadTool .gdPracticeScannerActions{grid-template-columns:repeat(auto-fit,minmax(96px,1fr))}
+ #practiceDataPanel.gdPracticePhotoProcessing .gdPracticeScanner,
+ #practiceDataPanel.gdPracticePhotoProcessing .gdManualQuadTool,
+@@ -11465,11 +11465,22 @@
+   const state=gdPracticeManualQuadState;
+   const canvas=document.getElementById("gdPracticeManualQuadCanvas");
+   if(!state||!canvas)return;
+-  const maxW=1200;
+-  const scale=Math.min(1,maxW/Math.max(1,state.sourceW));
++  const wrap=canvas.closest(".gdManualQuadCanvasWrap");
++  const rect=wrap?wrap.getBoundingClientRect():null;
++  const viewportH=Math.max(320,window.innerHeight||640);
++  const availableW=Math.max(260,Math.floor((rect&&rect.width?rect.width:canvas.parentElement?.clientWidth||window.innerWidth||360)-2));
++  const availableH=Math.max(220,Math.floor(Math.min(viewportH*.68,620)));
++  const cssScale=Math.min(1,availableW/Math.max(1,state.sourceW),availableH/Math.max(1,state.sourceH));
++  const dpr=Math.max(1,Math.min(2,window.devicePixelRatio||1));
++  const scale=cssScale*dpr;
+   state.scale=scale;
+   canvas.width=Math.max(1,Math.round(state.sourceW*scale));
+   canvas.height=Math.max(1,Math.round(state.sourceH*scale));
++  canvas.style.width=Math.max(1,Math.round(state.sourceW*cssScale))+"px";
++  canvas.style.height=Math.max(1,Math.round(state.sourceH*cssScale))+"px";
++  if(wrap){
++    wrap.style.height=Math.max(220,Math.round(state.sourceH*cssScale))+"px";
++  }
+   const ctx=canvas.getContext("2d");
+   ctx.clearRect(0,0,canvas.width,canvas.height);
+   ctx.drawImage(state.source,0,0,canvas.width,canvas.height);
+@@ -11606,14 +11617,20 @@
+   gdPracticeManualQuadStatus(checkpoint.manualFallback?"Frame the value table with the four pins, then scan.":"Pins loaded from the detected value shape. Stretch flat when the four corners look right.","ready");
+   gdBindPracticeManualQuadEvents();
+   gdRenderPracticeManualQuad();
++  clearTimeout(gdPracticeManualQuadState?.resizeTimer);
++  gdPracticeManualQuadState.resizeTimer=setTimeout(gdRenderPracticeManualQuad,80);
+   try{root.scrollIntoView({behavior:"smooth",block:"start"});}catch(e){}
+ }
+ function gdClosePracticeManualQuadTool(){
+   const root=document.getElementById("gdPracticeManualQuadTool");
++  const canvas=document.getElementById("gdPracticeManualQuadCanvas");
+   if(root){
+     root.classList.remove("active");
+     root.hidden=true;
++    const wrap=root.querySelector(".gdManualQuadCanvasWrap");
++    if(wrap)wrap.style.height="";
+   }
++  if(canvas){canvas.style.width="";canvas.style.height="";}
+   gdPracticeManualQuadState=null;
+ }
+ function gdResetPracticeManualQuad(){
+--- /mnt/data/orig/dist/index.html	2026-06-15 10:26:23.000000000 +0000
++++ /mnt/data/work/dist/index.html	2026-06-18 07:28:22.823030220 +0000
+@@ -481,8 +481,8 @@
+ .gdManualQuadHead strong{display:block;color:#fff;font-size:15px;font-weight:950}
+ .gdManualQuadHead span{display:block;margin-top:3px;color:rgba(255,255,255,.62);font-size:11px;font-weight:850;line-height:1.25}
+ .gdManualQuadBadge{flex:0 0 auto;border-radius:999px;padding:6px 8px;background:rgba(215,176,107,.16);border:1px solid rgba(215,176,107,.28);color:#ffd287;font:950 10px/1 ui-monospace,SFMono-Regular,Menlo,monospace;text-transform:uppercase;letter-spacing:.04em}
+-.gdManualQuadCanvasWrap{overflow:auto;border-radius:14px;background:#050806;border:1px solid rgba(255,255,255,.09);touch-action:none}
+-.gdManualQuadCanvasWrap canvas{display:block;width:100%;height:auto;min-width:640px;background:#050806;cursor:crosshair}
++.gdManualQuadCanvasWrap{overflow:hidden;border-radius:14px;background:#050806;border:1px solid rgba(255,255,255,.09);touch-action:none;display:flex;align-items:center;justify-content:center;max-height:min(68vh,620px);min-height:220px}
++.gdManualQuadCanvasWrap canvas{display:block;width:auto;height:auto;max-width:100%;max-height:min(68vh,620px);min-width:0;background:#050806;cursor:crosshair}
+ .gdManualQuadTool .gdPracticeScannerActions{grid-template-columns:repeat(auto-fit,minmax(96px,1fr))}
+ #practiceDataPanel.gdPracticePhotoProcessing .gdPracticeScanner,
+ #practiceDataPanel.gdPracticePhotoProcessing .gdManualQuadTool,
+@@ -11465,11 +11465,22 @@
+   const state=gdPracticeManualQuadState;
+   const canvas=document.getElementById("gdPracticeManualQuadCanvas");
+   if(!state||!canvas)return;
+-  const maxW=1200;
+-  const scale=Math.min(1,maxW/Math.max(1,state.sourceW));
++  const wrap=canvas.closest(".gdManualQuadCanvasWrap");
++  const rect=wrap?wrap.getBoundingClientRect():null;
++  const viewportH=Math.max(320,window.innerHeight||640);
++  const availableW=Math.max(260,Math.floor((rect&&rect.width?rect.width:canvas.parentElement?.clientWidth||window.innerWidth||360)-2));
++  const availableH=Math.max(220,Math.floor(Math.min(viewportH*.68,620)));
++  const cssScale=Math.min(1,availableW/Math.max(1,state.sourceW),availableH/Math.max(1,state.sourceH));
++  const dpr=Math.max(1,Math.min(2,window.devicePixelRatio||1));
++  const scale=cssScale*dpr;
+   state.scale=scale;
+   canvas.width=Math.max(1,Math.round(state.sourceW*scale));
+   canvas.height=Math.max(1,Math.round(state.sourceH*scale));
++  canvas.style.width=Math.max(1,Math.round(state.sourceW*cssScale))+"px";
++  canvas.style.height=Math.max(1,Math.round(state.sourceH*cssScale))+"px";
++  if(wrap){
++    wrap.style.height=Math.max(220,Math.round(state.sourceH*cssScale))+"px";
++  }
+   const ctx=canvas.getContext("2d");
+   ctx.clearRect(0,0,canvas.width,canvas.height);
+   ctx.drawImage(state.source,0,0,canvas.width,canvas.height);
+@@ -11606,14 +11617,20 @@
+   gdPracticeManualQuadStatus(checkpoint.manualFallback?"Frame the value table with the four pins, then scan.":"Pins loaded from the detected value shape. Stretch flat when the four corners look right.","ready");
+   gdBindPracticeManualQuadEvents();
+   gdRenderPracticeManualQuad();
++  clearTimeout(gdPracticeManualQuadState?.resizeTimer);
++  gdPracticeManualQuadState.resizeTimer=setTimeout(gdRenderPracticeManualQuad,80);
+   try{root.scrollIntoView({behavior:"smooth",block:"start"});}catch(e){}
+ }
+ function gdClosePracticeManualQuadTool(){
+   const root=document.getElementById("gdPracticeManualQuadTool");
++  const canvas=document.getElementById("gdPracticeManualQuadCanvas");
+   if(root){
+     root.classList.remove("active");
+     root.hidden=true;
++    const wrap=root.querySelector(".gdManualQuadCanvasWrap");
++    if(wrap)wrap.style.height="";
+   }
++  if(canvas){canvas.style.width="";canvas.style.height="";}
+   gdPracticeManualQuadState=null;
+ }
+ function gdResetPracticeManualQuad(){
