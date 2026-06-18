@@ -3,11 +3,11 @@
     appName: "Clarity Caddie",
     packageName: "clarity-caddie-core",
     version: "0.1.0-beta.1",
-    buildId: "2026-06-18-hole-frame-visual-zoom-001",
+    buildId: "2026-06-18-hole-nav-number-only-001",
     deployedAt: "2026-06-18",
     channel: "beta",
     betaLabel: "Beta",
-    cacheBust: "hole-frame-visual-zoom-001"
+    cacheBust: "hole-nav-number-only-001"
   };
 
   window.ClarityBuild = Object.assign({}, window.ClarityBuild || {}, build);
@@ -52,15 +52,51 @@
       safe(function(){document.body&&document.body.classList.add("gdPreLockBlackoutFrame");});
     }
 
+    function holeNumberFromText(text,fallback){
+      var raw=String(text||"").trim();
+      var match=raw.match(/H\s*(\d+)/i)||raw.match(/(\d+)/);
+      var n=match?Number(match[1]):Number(fallback||1);
+      if(!Number.isFinite(n)||n<1)n=1;
+      return String(Math.max(1,Math.min(18,Math.round(n))));
+    }
+
+    function activeHoleNumber(){
+      return safe(function(){
+        var keys=["gd_active_playing_hole","gd_mapper_active_hole","gd_selected_hole","gd_current_hole"];
+        for(var i=0;i<keys.length;i++){
+          var n=Number(sessionStorage.getItem(keys[i])||localStorage.getItem(keys[i])||0);
+          if(Number.isFinite(n)&&n>0)return String(Math.max(1,Math.min(18,Math.round(n))));
+        }
+        var visible=document.querySelector(".gdNextHolePopout .gdHoleNavNumber strong,#gdShotHoleChip,#gdHoleStepper strong");
+        return holeNumberFromText(visible&&visible.textContent,1);
+      },"1");
+    }
+
+    function writeNumber(el,fallback){
+      if(!el)return;
+      var n=holeNumberFromText(el.textContent, fallback || activeHoleNumber());
+      if(String(el.textContent||"").trim()!==n)el.textContent=n;
+      el.classList&&el.classList.add("gdHoleRailNumber");
+      return n;
+    }
+
     function normaliseHoleRailLabel(){
-      var rail=document.getElementById("gdHoleStepper");
-      if(!rail) return;
-      var label=rail.querySelector("strong");
-      if(label){
-        var txt=String(label.textContent||"").trim();
-        var m=txt.match(/(\d+)/);
-        if(m && txt!==m[1]) label.textContent=m[1];
-        label.classList.add("gdHoleRailNumber");
+      var current=activeHoleNumber();
+      writeNumber(document.querySelector("#gdHoleStepper strong"),current);
+      writeNumber(document.querySelector(".gdNextHolePopout .gdHoleNavNumber strong"),current);
+
+      var chip=document.getElementById("gdShotHoleChip");
+      var chipNumber=writeNumber(chip,current)||current;
+      if(chip){
+        chip.title="Long press to pick hole";
+        chip.setAttribute("aria-label","Current hole "+chipNumber+". Long press to pick hole.");
+      }
+
+      var pickerHead=document.querySelector(".gdHoleSelectHead strong");
+      if(pickerHead){
+        var headNumber=holeNumberFromText(pickerHead.textContent,current);
+        var headLabel="GPS "+headNumber;
+        if(String(pickerHead.textContent||"").trim()!==headLabel)pickerHead.textContent=headLabel;
       }
     }
 
@@ -87,15 +123,42 @@
       },false);
     }
 
+    var tickQueued=false;
+    function queueTick(){
+      if(tickQueued)return;
+      tickQueued=true;
+      setTimeout(function(){tickQueued=false;tick();},0);
+    }
+
+    function observeHoleNav(){
+      if(!document.body||window.__gdHoleNavNumberObserver)return;
+      window.__gdHoleNavNumberObserver=true;
+      safe(function(){
+        var observer=new MutationObserver(function(mutations){
+          for(var i=0;i<mutations.length;i++){
+            var target=mutations[i].target;
+            if(!target)continue;
+            var node=target.nodeType===1?target:target.parentElement;
+            if(node && node.closest && node.closest("#gdHoleStepper,.gdNextHolePopout,#gdShotHoleChip,.gdHoleSelectHead")){
+              queueTick();
+              return;
+            }
+          }
+        });
+        observer.observe(document.body,{childList:true,subtree:true,characterData:true});
+      },null);
+    }
+
     function tick(){
       ensureBlackoutDefault();
       normaliseHoleRailLabel();
       zoomFallback();
+      observeHoleNav();
     }
 
     if(document.readyState==="loading") document.addEventListener("DOMContentLoaded",tick);
     else tick();
-    setInterval(tick,650);
-    document.addEventListener("click",function(){setTimeout(tick,50);},true);
+    setInterval(tick,250);
+    document.addEventListener("click",function(){setTimeout(tick,0);setTimeout(tick,50);},true);
   }
 })();
