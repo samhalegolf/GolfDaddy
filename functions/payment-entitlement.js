@@ -25,15 +25,16 @@ exports.handler = async function (event) {
     await sendSystemAlert({
       eventType: "supabase_not_configured",
       title: "Supabase payment storage is not configured",
-      detail: "Payment entitlement checking was blocked because Supabase environment variables are missing.",
+      detail: "Payment entitlement checking was skipped because Supabase environment variables are missing.",
       accountEmail: payload.email || payload.accountEmail,
       context: { endpoint: "payment-entitlement" }
     });
-    return json(503, {
+    return json(200, {
       configured: false,
       active: false,
       entitlements: [],
-      error: "Payment storage is not configured yet"
+      checkedAt: new Date().toISOString(),
+      message: "Payment storage is not configured yet"
     });
   }
 
