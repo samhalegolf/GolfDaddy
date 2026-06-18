@@ -20424,7 +20424,7 @@ function renderScorecard(){
   document.getElementById("holeScore").textContent=h.score??"—";
 }
 function playSelectedHole(){const h=gdScorecardHoleAt(selectedHole);if(!h){toast("Select a course before choosing a hole");return false}const hv=gdScorecardHoleView(h);const par=gdScorecardKnownNumber(hv.par);currentPlayingHole=h.hole;try{sessionStorage.setItem("gd_active_playing_hole",String(h.hole));sessionStorage.setItem("gd_mapper_active_hole",String(h.hole));}catch(e){}try{window.gdRememberPlayingHole?.(h.hole)}catch(e){}setHole(par!==null?{hole:h.hole,par}:{hole:h.hole});setState(`Hole ${h.hole}`);renderScorecard();try{window.gdSyncPlayFlowRail?.()}catch(e){}return true}
-function setHole(h){const el=document.getElementById("holeLine");const skipRefresh=!!window.__gdHoleFrameSwitching;if(!h){el.style.display="none";try{if(!skipRefresh&&typeof gdV62Refresh==="function")setTimeout(gdV62Refresh,20)}catch(e){};return}const par=gdScorecardKnownNumber(typeof h==="object"?h.par:null);el.style.display="inline";el.textContent=par!==null?`Hole ${h.hole} · Par ${par}`:`Hole ${h.hole}`;try{if(!skipRefresh&&typeof gdV62Refresh==="function")setTimeout(gdV62Refresh,20)}catch(e){}}
+function setHole(h){const el=document.getElementById("holeLine");if(!h){el.style.display="none";try{if(typeof gdV62Refresh==="function")setTimeout(gdV62Refresh,20)}catch(e){};return}const par=gdScorecardKnownNumber(typeof h==="object"?h.par:null);el.style.display="inline";el.textContent=par!==null?`Hole ${h.hole} · Par ${par}`:`Hole ${h.hole}`;try{if(typeof gdV62Refresh==="function")setTimeout(gdV62Refresh,20)}catch(e){}}
 function gdPersistCurrentScorecard(){const key=scorecard.courseKey;if(!key)return;const cache=gdScorecardReadCache();cache[key]=Object.assign({},scorecard,{loading:false});gdScorecardWriteCache(cache)}
 function adjustHoleScore(d){const h=gdScorecardHoleAt(selectedHole);if(!h){toast("No hole selected");return}const hv=gdScorecardHoleView(h);const par=gdScorecardKnownNumber(hv.par);if(h.score==null)h.score=par??0;h.score=Math.max(0,h.score+d);gdPersistCurrentScorecard();renderScorecard()}
 function adjustHolePutts(d){const h=gdScorecardHoleAt(selectedHole);if(!h){toast("No hole selected");return}if(h.putts==null)h.putts=2;h.putts=Math.max(0,h.putts+d);gdPersistCurrentScorecard();renderScorecard()}
@@ -25803,24 +25803,10 @@ function gdWireManualGpsPlayButton(){
     window.gdWandAcceptedLive=false;
     syncWandLiveChrome();
   }
-  function gdGpsSurfaceAlreadyOpen(){
-    return !!(document.body.classList.contains('shell-gps')||document.body.classList.contains('gdGpsActive')||document.body.classList.contains('gps-active')||document.getElementById('app')&&!document.getElementById('app').classList.contains('hidden'));
-  }
   function returnGpsMap(){
     safe(()=>sessionStorage.removeItem('gd_return_from_bag_to_gps'));
     safe(()=>sessionStorage.removeItem('gd_return_from_scorecard'));
     safe(()=>document.querySelectorAll('.panel.open,.modulePanel.open').forEach(p=>p.classList.remove('open')));
-    if(gdGpsSurfaceAlreadyOpen()){
-      safe(()=>document.getElementById('courseScreen')?.classList.add('hidden'));
-      safe(()=>document.body.classList.remove('shell-home','shell-module'));
-      safe(()=>document.body.classList.add('shell-gps','gdGpsActive','gps-active'));
-      safe(()=>{if(typeof showShellChrome==='function')showShellChrome(true);});
-      safe(()=>{if(typeof setDockActive==='function')setDockActive('gps');});
-      safe(()=>{if(typeof map!=='undefined'&&map&&map.invalidateSize)setTimeout(()=>map.invalidateSize(),40);});
-      safe(()=>{if(typeof window.gdSyncPlayFlowRail==='function')window.gdSyncPlayFlowRail();});
-      safe(()=>{if(typeof window.gdHydrateGpsBadge==='function')window.gdHydrateGpsBadge(true);});
-      return false;
-    }
     safe(()=>{if(typeof enterGpsModule==='function') enterGpsModule({fromBack:true,preserve:true});});
     safe(()=>{if(typeof gdV62Refresh==='function') setTimeout(gdV62Refresh,80);});
   }
@@ -26630,38 +26616,12 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       setTimeout(()=>{gdBrowserRouteRestoring=false;},0);
     }
   }
-  function gdBrowserRouteIsHomeVisible(){
-    const shell=byId("shellHome");
-    const shellVisible=!!shell&&!shell.classList.contains("hidden");
-    return document.body.classList.contains("shell-home")||shellVisible;
-  }
-  function gdKeepHomeOnBrowserBack(){
-    safe(()=>clearProfileReturn());
-    window.__gdBackTarget="";
-    document.body.classList.add("shell-home");
-    safe(()=>restoreHomeSurface());
-    safe(()=>showShellChrome(false));
-    safe(()=>setDock(""));
-    safe(()=>setRouteLabel("Home"));
-    if(window.history&&typeof history.replaceState==="function"){
-      const current=history.state&&typeof history.state==="object"?history.state:{};
-      const homeState=Object.assign({},current,gdBrowserRouteState("home"));
-      const url=location.pathname+(location.search||"")+(location.hash||"");
-      safe(()=>history.replaceState(homeState,document.title,url));
-    }
-    return false;
-  }
   function gdInstallBrowserRouteBridge(){
     if(gdBrowserRouteInstalled||!window.history||typeof history.replaceState!=="function")return;
     gdBrowserRouteInstalled=true;
     gdRememberBrowserRoute(window.lastShellModule||"home",true);
     window.addEventListener("popstate",event=>{
       const state=event.state&&event.state[GD_BROWSER_ROUTE_STATE_KEY]?event.state:{[GD_BROWSER_ROUTE_STATE_KEY]:true,route:gdBrowserHasAccount()?"home":"auth"};
-      const route=String(state.route||"home");
-      if(gdBrowserRouteIsHomeVisible()&&route!=="home"&&route!=="auth"){
-        gdKeepHomeOnBrowserBack();
-        return;
-      }
       gdRestoreBrowserRoute(state);
     });
   }
@@ -34300,30 +34260,27 @@ body:not(.shell-gps):not(.gdGpsActive):not(.gps-active) .gdHoleSelectTray{
 }
 .gdHoleStepper{
   position:absolute;
-  left:calc(10px + env(safe-area-inset-left));
-  top:50%;
-  transform:translateY(-50%);
+  right:15px;
+  top:calc(max(16px,env(safe-area-inset-top)) + 50px);
   z-index:1844;
   display:none!important;
-  grid-template-columns:42px;
-  grid-auto-rows:42px;
+  grid-template-columns:42px auto 42px;
   align-items:center;
-  justify-items:center;
-  gap:7px;
-  padding:6px;
-  border-radius:20px;
+  gap:6px;
+  padding:5px;
+  border-radius:18px;
   border:1px solid rgba(255,255,255,.12);
-  background:rgba(4,9,7,.72);
+  background:rgba(4,9,7,.70);
   box-shadow:0 14px 30px rgba(0,0,0,.28);
   backdrop-filter:blur(14px);
   -webkit-backdrop-filter:blur(14px);
   color:#fff;
   pointer-events:auto;
 }
-body.shell-gps .gdHoleStepper:not(.hidden),
-body.gdGpsActive .gdHoleStepper:not(.hidden),
-body.gps-active .gdHoleStepper:not(.hidden){
-  display:grid!important;
+body.shell-gps .gdHoleStepper,
+body.gdGpsActive .gdHoleStepper,
+body.gps-active .gdHoleStepper{
+  display:none!important;
 }
 .gdHoleStepper.hidden{display:none!important}
 .gdHoleStepper button{
@@ -34358,11 +34315,10 @@ body.gps-active .gdHoleStepper:not(.hidden){
     bottom:calc(336px + env(safe-area-inset-bottom));
   }
   .gdHoleStepper{
-    left:calc(8px + env(safe-area-inset-left));
-    top:50%;
-    grid-template-columns:38px;
-    grid-auto-rows:38px;
-    gap:6px;
+    right:12px;
+    top:calc(max(14px,env(safe-area-inset-top)) + 48px);
+    grid-template-columns:38px auto 38px;
+    gap:5px;
   }
   .gdHoleStepper button{
     width:38px;
@@ -34442,18 +34398,6 @@ body.gps-active .gdHoleStepper:not(.hidden){
     closeHoleChooser();
     safe(function(){sessionStorage.removeItem("gd_return_from_scorecard");});
     safe(function(){document.querySelectorAll(".panel.open,.modulePanel.open").forEach(function(p){p.classList.remove("open")});});
-    var gpsOpen=safe(function(){return isGpsOpen&&isGpsOpen();},false)||document.body.classList.contains("shell-gps")||document.body.classList.contains("gdGpsActive")||document.body.classList.contains("gps-active");
-    if(gpsOpen){
-      safe(function(){document.getElementById("courseScreen")?.classList.add("hidden");});
-      safe(function(){document.body.classList.remove("shell-home","shell-module");});
-      safe(function(){document.body.classList.add("shell-gps","gdGpsActive","gps-active");});
-      safe(function(){if(typeof showShellChrome==="function")showShellChrome(true);});
-      safe(function(){if(typeof setDockActive==="function")setDockActive("gps");});
-      safe(function(){if(typeof map!=="undefined"&&map&&map.invalidateSize)setTimeout(function(){map.invalidateSize();},40);});
-      safe(function(){if(typeof window.gdSyncPlayFlowRail==="function")window.gdSyncPlayFlowRail();});
-      safe(function(){if(typeof window.gdHydrateGpsBadge==="function")window.gdHydrateGpsBadge(true);});
-      return false;
-    }
     safe(function(){if(typeof enterGpsModule==="function")enterGpsModule({fromBack:true,preserve:true,replace:true});});
     safe(function(){if(typeof gdV62Refresh==="function")setTimeout(gdV62Refresh,80);});
   }
@@ -34473,113 +34417,31 @@ body.gps-active .gdHoleStepper:not(.hidden){
       },delay);
     });
   }
-  function gdRoundSessionRead(){
-    return safe(function(){return JSON.parse(sessionStorage.getItem("gd_current_round_session")||"{}");},{} )||{};
-  }
-  function gdRoundSessionWrite(session){
-    safe(function(){sessionStorage.setItem("gd_current_round_session",JSON.stringify(session||{}));});
-  }
-  function gdLatLngSnapshot(ll){
-    return safe(function(){return ll?{lat:Number(ll.lat),lng:Number(ll.lng)}:null;},null);
-  }
-  function gdBuildHoleFrame(h,par){
-    return {
-      ready:true,
-      holeNumber:h,
-      camera:safe(function(){return (typeof map!=="undefined"&&map)?{bounds:map.getBounds&&map.getBounds().toBBoxString?map.getBounds().toBBoxString():null,zoom:map.getZoom?map.getZoom():null,bearing:null}:{};},{}),
-      startPoint:safe(function(){return gdLatLngSnapshot(typeof start!=="undefined"?start:null);},null),
-      targetPoint:safe(function(){return gdLatLngSnapshot((typeof target!=="undefined"&&target)||(typeof greenCentre!=="undefined"&&greenCentre)||null);},null),
-      green:{center:safe(function(){return gdLatLngSnapshot(typeof greenCentre!=="undefined"?greenCentre:null);},null),shape:safe(function(){return Array.isArray(window.gdAcceptedGreenShape)?window.gdAcceptedGreenShape:[];},[])},
-      aimLine:[],
-      labels:{hole:h,par:par,mode:"preLock"}
-    };
-  }
-  function gdEnsureHoleObject(h,par){
-    var session=gdRoundSessionRead();
-    session.holes=Array.isArray(session.holes)?session.holes:[];
-    var existing=session.holes.find(function(x){return Number(x&&x.holeNumber)===Number(h);});
-    if(!existing){
-      existing={holeNumber:h,mapping:{mappedStatus:"saved"},holeFrame:gdBuildHoleFrame(h,par),playState:{phase:"preLock",locked:false,pin:null,selectedClub:null,shotBubble:null,lockState:{lockedAt:null,startPoint:null,targetPoint:null}}};
-      session.holes.push(existing);
-    }else{
-      existing.holeNumber=h;
-      existing.mapping=existing.mapping||{mappedStatus:"saved"};
-      existing.holeFrame=existing.holeFrame&&existing.holeFrame.ready?existing.holeFrame:gdBuildHoleFrame(h,par);
-      existing.playState=existing.playState||{phase:"preLock",locked:false,lockState:{}};
-      if(!existing.playState.phase)existing.playState.phase=existing.playState.locked?"locked":"preLock";
-    }
-    session.activeHoleNumber=h;
-    session.updatedAt=new Date().toISOString();
-    gdRoundSessionWrite(session);
-    return existing;
-  }
-  function gdMarkActiveHoleLocked(){
-    var h=activeHole();
-    var par=parForHole(h);
-    var session=gdRoundSessionRead();
-    var hole=gdEnsureHoleObject(h,par);
-    hole.playState=hole.playState||{};
-    hole.playState.phase="locked";
-    hole.playState.locked=true;
-    hole.playState.lockState=Object.assign({},hole.playState.lockState||{},{lockedAt:new Date().toISOString(),startPoint:safe(function(){return gdLatLngSnapshot(typeof start!=="undefined"?start:null);},null),targetPoint:safe(function(){return gdLatLngSnapshot((typeof target!=="undefined"&&target)||(typeof greenCentre!=="undefined"&&greenCentre)||null);},null)});
-    session=gdRoundSessionRead();
-    session.holes=Array.isArray(session.holes)?session.holes:[];
-    var idx=session.holes.findIndex(function(x){return Number(x&&x.holeNumber)===Number(h);});
-    if(idx>=0)session.holes[idx]=hole;
-    session.activeHoleNumber=h;
-    gdRoundSessionWrite(session);
-    return hole;
-  }
-  function renderHoleFrame(hole,opts){
-    opts=opts||{};
-    if(!hole)return false;
-    if(typeof window.gdFocusMappedPreLockHole==="function"){
-      window.gdFocusMappedPreLockHole(hole.holeNumber,{source:opts.source||"hole-frame",par:hole.holeFrame&&hole.holeFrame.labels?hole.holeFrame.labels.par:null,preserveGpsSession:true,reenterGps:false,refreshGps:false});
-      return true;
-    }
-    return false;
-  }
-  function renderLockedHole(hole,opts){
-    opts=opts||{};
-    safe(function(){if(typeof renderShot==="function")renderShot();});
-    return renderHoleFrame(hole,Object.assign({},opts,{source:opts.source||"hole-frame-locked"}));
-  }
-  function renderActiveHole(hole,opts){
-    opts=opts||{};
-    if(!hole)return false;
-    var phase=hole.playState&&hole.playState.phase?hole.playState.phase:"preLock";
-    if(phase==="locked")return renderLockedHole(hole,opts);
-    return renderHoleFrame(hole,opts);
-  }
-  function setActiveHole(h,opts){
-    opts=opts||{};
-    h=rememberHole(h);
-    var par=parForHole(h);
-    var hole=gdEnsureHoleObject(h,par);
-    closeHoleChooser();
-    try{window.__gdHoleFrameSwitching=true;}catch(e){}
-    // Hole Frame navigation deliberately avoids the old broad normal-hole cleanup/re-entry path.
-    safe(function(){if(typeof setHole==="function")setHole(par!==null?{hole:h,par:par}:{hole:h});});
-    safe(function(){if(typeof setState==="function")setState("Hole "+h);});
-    safe(function(){if(typeof renderScorecard==="function")renderScorecard();});
-    safe(function(){if(typeof window.gdSyncPlayFlowRail==="function")window.gdSyncPlayFlowRail();});
-    safe(function(){if(typeof map!=="undefined"&&map&&map.invalidateSize)setTimeout(function(){map.invalidateSize();},40);});
-    setTimeout(function(){try{window.__gdHoleFrameSwitching=false;}catch(e){}},0);
-    safe(function(){renderActiveHole(hole,{source:opts.source||"hole-rail"});});
-    safe(function(){if(typeof toast==="function")toast("Hole "+h+" selected");});
-    setTimeout(syncRailButton,80);
-    setTimeout(syncRailButton,520);
-    return false;
-  }
-  window.gdSetActiveHoleFrame=setActiveHole;
-  window.gdRenderActiveHoleFrame=renderActiveHole;
-  window.gdMarkActiveHoleLocked=gdMarkActiveHoleLocked;
   function playHole(h,opts){
     opts=opts||{};
     nextPromptLatch=null;
     nextPromptLostAt=0;
     chooserOpen=false;
-    return setActiveHole(h,Object.assign({},opts,{source:opts.source||"play-hole"}));
+    safe(function(){
+      if(typeof window.gdBeginNormalHoleNavigation==="function")window.gdBeginNormalHoleNavigation(h,opts.source||"play-hole");
+    });
+    h=rememberHole(h);
+    var par=parForHole(h);
+    safe(function(){
+      if(typeof setHole==="function")setHole(par!==null?{hole:h,par:par}:{hole:h});
+    });
+    safe(function(){if(typeof setState==="function")setState("Hole "+h);});
+    safe(function(){if(typeof renderScorecard==="function")renderScorecard();});
+    returnGpsMap();
+    safe(function(){
+      if(typeof window.gdFocusMappedPreLockHole==="function"){
+        setTimeout(function(){window.gdFocusMappedPreLockHole(h,{source:opts.source||"play-hole",par:par});},120);
+      }
+    });
+    safe(function(){if(typeof toast==="function")toast("Hole "+h+" selected");});
+    setTimeout(syncRailButton,80);
+    setTimeout(syncRailButton,520);
+    return false;
   }
   function holeStepper(){
     var el=document.getElementById("gdHoleStepper");
@@ -34587,14 +34449,9 @@ body.gps-active .gdHoleStepper:not(.hidden){
       el=document.createElement("div");
       el.id="gdHoleStepper";
       el.className="gdHoleStepper hidden";
-      el.innerHTML='<button type="button" data-gd-hole-step="1" title="Next hole" aria-label="Next hole">›</button><button type="button" data-gd-hole-picker="1" title="Choose hole" aria-label="Choose hole"><strong>H1</strong></button><button type="button" data-gd-hole-step="-1" title="Previous hole" aria-label="Previous hole">‹</button>';
+      el.innerHTML='<button type="button" data-gd-hole-step="-1" title="Previous hole" aria-label="Previous hole">-</button><strong>H1</strong><button type="button" data-gd-hole-step="1" title="Next hole" aria-label="Next hole">+</button>';
       document.body.appendChild(el);
       el.addEventListener("click",function(event){
-        var picker=event.target&&event.target.closest&&event.target.closest("button[data-gd-hole-picker]");
-        if(picker){
-          blockEvent(event);
-          return toggleHoleChooser();
-        }
         var btn=event.target&&event.target.closest&&event.target.closest("button[data-gd-hole-step]");
         if(!btn)return;
         blockEvent(event);
