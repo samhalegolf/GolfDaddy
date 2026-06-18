@@ -294,23 +294,41 @@
       var raw = JSON.parse(localStorage.getItem("gd_player_profiles_v27") || "{}");
       var profiles = Array.isArray(raw.profiles) ? raw.profiles : [];
       var active = raw.activeId ? profiles.find(function(p){ return p && p.id === raw.activeId; }) : null;
-      var candidates = [];
-      if(active) candidates.push(active);
-      profiles.forEach(function(p){ if(p && candidates.indexOf(p) < 0) candidates.push(p); });
-      for(var i=0;i<candidates.length;i++){
-        var rows = collectRows(candidates[i]);
-        if(rows.length) return rows;
-      }
-      return [];
+      return active ? collectRows(active) : [];
     }, []);
   }
+  function ghostBagRows(seven){
+    return quickBag(seven || 145).map(function(row){ return Object.assign({}, row, { ghost:true, internalOnly:true }); });
+  }
+  function clearUntouchedDefaultBag(p){
+    if(!p || p.placeholderProfile) return p;
+    var touched = p.bagSlotsTouched === true || p.bagEdited === true || p.customBag === true;
+    if(!touched && p.bagSeededDefault && collectRows(p).length){
+      p.bag = [];
+      p.bagRows = [];
+      p.clubs = [];
+      p.clubBag = [];
+      p.bagSeededDefault = false;
+      p.ghostBagOnly = true;
+      p.updatedAt = new Date().toISOString();
+      safe(function(){ win.savePlayerProfiles(); }, null);
+    }
+    return p;
+  }
   function currentRows(){
-    var p = profile();
+    var p = clearUntouchedDefaultBag(profile());
     var rows = collectRows(p);
     if(rows.length) return rows;
     rows = readBagPanelSafe();
     if(rows.length) return rows;
     return storedProfileRows();
+  }
+  function bubbleRows(){
+    var rows = currentRows();
+    return rows.length ? rows : ghostBagRows();
+  }
+  function maxBagDistance(rows){
+    return Math.max(0, ...(Array.isArray(rows) ? rows : []).map(function(row){ return Number(row.totalM || row.baseCarry || row.carry || row.distance || 0); }).filter(function(n){ return Number.isFinite(n) && n > 0; }));
   }
   function sortRows(rows){
     var clean = (Array.isArray(rows) ? rows : []).map(function(row){ return normalise(row); }).filter(Boolean);
@@ -359,9 +377,8 @@
   }
   function totalLabel(){ return safe(function(){ return win.gdBagTotalLabel(); }, 'Total'); }
   function renderBagPanelHotfix(){
-    var p = profile();
+    var p = clearUntouchedDefaultBag(profile());
     var bag = collectRows(p);
-    if(!bag.length) bag = storedProfileRows();
     if(bag.length && p){ p.bag = bag; p.bagSeededDefault = false; }
     var box = document.getElementById('gdBagEditor');
     var sub = document.getElementById('gdBagPanelSub');
@@ -373,11 +390,11 @@
     if(quick) quick.value = (bag.find(function(c){ return c.club === '7i'; }) || {}).baseCarry || '';
     if(sub) sub.textContent = '';
     if(title) title.textContent = bag.length ? (bag.length + ' bag cells') : 'Build your bag';
-    if(text) text.textContent = bag.length ? (label + ' generated.') : 'Use Quick set, Add club, or New cell.';
+    if(text) text.textContent = bag.length ? (label + ' generated.') : 'Ghost bag is only a guide. Generate 12 clubs or add a club to build your real bag.';
     if(box){
       box.innerHTML = bag.length ? bag.map(function(c,i){
         return '<div class="gdBagEditRow" id="gdBagRow_'+i+'"><label class="gdBagField gdBagClubField"><span>Club</span><input id="gdBagClub_'+i+'" aria-label="Club name" value="'+esc(c.club)+'" readonly oninput="gdBagRefreshQuickTab()"></label><label class="gdBagField"><span>Carry</span><input id="gdBagCarry_'+i+'" aria-label="Carry metres" inputmode="numeric" type="number" min="1" step="1" value="'+(Number(c.baseCarry)||0)+'" readonly oninput="gdBagRefreshQuickTab()"></label><label class="gdBagField"><span>'+esc(label)+'</span><input id="gdBagTotal_'+i+'" aria-label="'+esc(label)+' metres" inputmode="numeric" type="number" min="1" step="1" value="'+(Number(c.totalM)||Number(c.baseCarry)||0)+'" readonly oninput="gdBagRefreshQuickTab()"></label><div class="gdBagRowActions"><button class="gdBagRowEdit" id="gdBagEdit_'+i+'" type="button" aria-label="Edit club" onclick="gdBagToggleRowEdit('+i+')">Edit</button><button class="gdBagRowDelete" id="gdBagDelete_'+i+'" type="button" aria-label="Delete club" onclick="gdBagDeleteClub('+i+')">×</button></div></div>';
-      }).join('') : '<div class="lockNotice">No clubs yet. Quick set and Add club are available below.</div>';
+      }).join('') : '<div class="lockNotice">Ghost bag active for visuals only. Generate 12 clubs or add your first club.</div>';
     }
     showQuickGenerator();
   }
@@ -393,10 +410,13 @@
   win.gdUsableBagRowsForProfile = collectRows;
   win.gdCurrentUsableBagRows = currentRows;
   win.gdHasUsableBag = function(){ return currentRows().length > 0; };
+  win.gdGhostBagRows = ghostBagRows;
+  win.gdBubbleSourceRows = bubbleRows;
+  win.gdCurrentBagMaxDistanceM = function(){ return maxBagDistance(currentRows()); };
+  win.gdCurrentBubbleMaxDistanceM = function(){ return maxBagDistance(bubbleRows()); };
   win.gdEnsureDefaultBagCells = function(p){
-    p = p || profile();
+    p = clearUntouchedDefaultBag(p || profile());
     var rows = collectRows(p);
-    if(!rows.length) rows = storedProfileRows();
     if(rows.length && p){ p.bag = rows; p.bagSeededDefault = false; return rows; }
     return [];
   };

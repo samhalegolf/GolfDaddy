@@ -14810,6 +14810,43 @@ function gdBubblePayloadForRender(input){
 function gdBubbleShotBearing(){
   return (start&&target)?bearing(start,target):0;
 }
+function gdBubbleRoofMaxDistanceM(){
+  try{
+    const max=typeof gdMaxPlayableCarryM==="function"?gdMaxPlayableCarryM():null;
+    return Number.isFinite(Number(max))&&Number(max)>0?Number(max):null;
+  }catch(e){return null}
+}
+function gdBubbleForwardDistanceFromStart(point,shotBrg=gdBubbleShotBearing()){
+  if(!start||!point||!map)return null;
+  try{
+    const distance=map.distance(start,point);
+    const angle=bearing(start,point);
+    const forward=Math.cos(normAng(angle-shotBrg))*distance;
+    return Number.isFinite(forward)?forward:null;
+  }catch(e){return null}
+}
+function gdBubbleDepthForRoof(payloadInput){
+  const payload=gdBubblePayloadForRender(payloadInput);
+  const visual=payload&&payload.visual&&typeof payload.visual==="object"?payload.visual:{};
+  const depth=gdFiniteNumber(payload.depthRadiusM,gdFiniteNumber(visual.visualDepthM,gdFiniteNumber(payload.radius,0)*2)/2);
+  return Math.max(1,Number(depth)||1);
+}
+function gdClampBubbleCenterToBagRoof(center,payloadInput){
+  if(!center||!start||!target||!map)return center;
+  if(typeof gdTournamentModeEnabled==="function"&&gdTournamentModeEnabled())return center;
+  const maxDistance=gdBubbleRoofMaxDistanceM();
+  if(!(maxDistance>0))return center;
+  const shotBrg=gdBubbleShotBearing();
+  const forward=gdBubbleForwardDistanceFromStart(center,shotBrg);
+  if(!Number.isFinite(forward))return center;
+  const roofDepth=gdBubbleDepthForRoof(payloadInput);
+  const overshoot=forward+roofDepth-maxDistance;
+  if(!(overshoot>.35))return center;
+  try{
+    const capBack=Math.max(0,forward-1);
+    return projectOffset(center,shotBrg,-Math.min(overshoot,capBack),0);
+  }catch(e){return center}
+}
 function gdBubbleRenderCenter(payloadInput){
   const renderTarget=gdShotDisplayTarget();
   if(!renderTarget)return null;
@@ -14818,7 +14855,8 @@ function gdBubbleRenderCenter(payloadInput){
   const sideLimit=Math.max(2,gdFiniteNumber(payload.lateralRadiusM,payload.radius)*.78);
   const sideOffset=gdClamp(gdFiniteNumber(payload.aimOffsetM,0),-sideLimit,sideLimit);
   const forwardBias=gdClamp(gdFiniteNumber(payload.visual&&payload.visual.visualYBias,0),-.18,.18)*Math.max(1,gdFiniteNumber(payload.depthRadiusM,payload.radius));
-  return projectOffset(renderTarget,shotBrg,forwardBias,sideOffset);
+  const rawCenter=projectOffset(renderTarget,shotBrg,forwardBias,sideOffset);
+  return gdClampBubbleCenterToBagRoof(rawCenter,payload);
 }
 function gdBubbleAxes(payloadInput,scale=1){
   const payload=gdBubblePayloadForRender(payloadInput);
@@ -19505,6 +19543,54 @@ function gdShotBubblePayloadForClub(club,baseDistance,offsetDeg){
   }
   return null;
 }
+
+function gdBubbleClubKeyForClamp(club){
+  return String(club||"").trim().toLowerCase().replace(/\s+/g,"");
+}
+function gdGhostBubbleBagRows(){
+  try{
+    if(typeof window.gdGhostBagRows === "function") return window.gdGhostBagRows();
+  }catch(e){}
+  const seven=145;
+  return [["Driver",seven+75],["3W",seven+50],["4H",seven+30],["5i",seven+18],["6i",seven+9],["7i",seven],["8i",seven-10],["9i",seven-22],["PW",seven-38],["GW",seven-52],["SW",seven-68],["LW",seven-82]].map(pair=>({club:pair[0],baseCarry:Math.max(35,Math.round(pair[1])),ghost:true,internalOnly:true}));
+}
+function gdBubbleRowsForClamp(){
+  const rows=gdShotBubbleSafe(()=>typeof window.gdBubbleSourceRows==="function"?window.gdBubbleSourceRows():null,null);
+  if(Array.isArray(rows)&&rows.length)return rows;
+  const real=gdShotBubbleSafe(()=>{
+    const p=typeof ensureProfile==="function"?ensureProfile():null;
+    const bag=Array.isArray(p?.bag)?p.bag:[];
+    return bag.filter(row=>Number(row?.baseCarry??row?.carry??row?.distance??row?.meters)>0);
+  },[]);
+  return real&&real.length?real:gdGhostBubbleBagRows();
+}
+function gdBubbleMaxDistanceForClamp(){
+  const explicit=gdShotBubbleSafe(()=>typeof window.gdCurrentBubbleMaxDistanceM==="function"?Number(window.gdCurrentBubbleMaxDistanceM()):NaN,NaN);
+  if(Number.isFinite(explicit)&&explicit>0)return explicit;
+  const values=gdBubbleRowsForClamp().map(row=>Number(row?.totalM??row?.total??row?.baseCarry??row?.carry??row?.distance??row?.meters)).filter(value=>Number.isFinite(value)&&value>0);
+  return values.length?Math.max(...values):220;
+}
+function gdClampBubbleDistanceToBagRoof(bubble){
+  if(!bubble||typeof bubble!=="object")return bubble;
+  const roof=gdBubbleMaxDistanceForClamp();
+  if(!Number.isFinite(roof)||roof<=0)return bubble;
+  const next=Object.assign({},bubble,{bagMaxDistanceM:roof});
+  const center=Number(next.centerDistanceM||next.baseDistanceM||0);
+  const depth=Math.max(1,Number(next.depthRadiusM||next.depthM/2)||1);
+  const front=center+depth;
+  if(Number.isFinite(front)&&front>roof){
+    const shifted=Math.max(0,roof-depth);
+    next.centerDistanceM=shifted;
+    next.bagRoofClamped=true;
+  }
+  const base=Number(next.baseDistanceM);
+  if(Number.isFinite(base)&&base>roof){
+    next.baseDistanceM=roof;
+    next.bagDistanceClamped=true;
+  }
+  return next;
+}
+
 function gdGeneratedShotBubbleForClub(club,baseDistance,offsetDeg){
   const payload=gdShotBubblePayloadForClub(club,baseDistance,offsetDeg);
   const fallbackProfile=gdShotBubbleSafe(()=>ensureProfile(),{})||{};
@@ -19523,7 +19609,7 @@ function gdGeneratedShotBubbleForClub(club,baseDistance,offsetDeg){
       : (Number.isFinite(payloadAimOffset)?payloadAimOffset:Math.tan(offset*Math.PI/180)*sourceDistance);
     const physicsTilt=Number.isFinite(offset)?offset:0;
     const visualTilt=Number(visual.visualTiltDeg??payload.clusterTiltDeg)||0;
-    return{
+    return gdClampBubbleDistanceToBagRoof({
       club:payload.club||club,
       baseDistanceM:sourceDistance,
       centerDistanceM:sourceDistance+centerForward,
@@ -19539,10 +19625,10 @@ function gdGeneratedShotBubbleForClub(club,baseDistance,offsetDeg){
       offsetDeg:offset,
       handedness:payload.handedness||fallbackProfile.handedness||"right",
       payload
-    };
+    });
   }
   const distance=Number(baseDistance)||155;
-  return{
+  return gdClampBubbleDistanceToBagRoof({
     club,
     baseDistanceM:distance,
     centerDistanceM:distance,
@@ -19557,7 +19643,7 @@ function gdGeneratedShotBubbleForClub(club,baseDistance,offsetDeg){
     offsetDeg:Number(offsetDeg)||0,
     handedness:fallbackProfile.handedness||"right",
     payload:null
-  };
+  });
 }
 function gdShotBubbleDisplayTiltDeg(bubble){
   return Number(bubble?.tiltDeg)||0;

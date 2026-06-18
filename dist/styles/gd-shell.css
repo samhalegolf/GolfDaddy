@@ -38,6 +38,7 @@
   opacity: 0 !important;
 }
 
+
 /* Hole Frame visual polish — 2026-06-18 */
 .gdHoleStepper button[data-gd-hole-picker],
 .gdHoleStepper button[data-gd-hole-picker] strong,
@@ -80,4 +81,41 @@ body.gdPreLockBlackoutFrame .gdPreLockFocusMask{
   visibility: hidden !important;
   pointer-events: none !important;
   opacity: 0 !important;
+}
+
+
+/* Bag/bubble cleanup patch — user-facing GPS polish */
+#gdV62NewShotBtn,
+#newShotUnlockBtn,
+button[aria-label*="Unlock"],
+button[title*="Unlock"]{
+  background:linear-gradient(180deg,#1fd36d,#12823f)!important;
+  color:#031009!important;
+  border-color:rgba(126,255,174,.56)!important;
+  box-shadow:0 14px 30px rgba(31,211,109,.22), inset 0 1px 0 rgba(255,255,255,.32)!important;
+}
+#gdGpsClearBtn,
+button[aria-label*="Clear shot"],
+button[aria-label*="Reset"],
+button[title*="Reset"]{
+  background:rgba(0,0,0,.42)!important;
+  color:#fff!important;
+  border-color:rgba(255,255,255,.16)!important;
+  box-shadow:0 12px 26px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.08)!important;
+}
+.leaflet-overlay-pane path[stroke="#1fd36d"],
+.leaflet-overlay-pane path[stroke="#28b96b"],
+.leaflet-overlay-pane path[stroke="#9cffbc"],
+.leaflet-overlay-pane path[stroke="#1f8f55"]{
+  stroke-opacity:0!important;
+}
+.leaflet-overlay-pane path[fill="#1fd36d"][stroke="#1fd36d"]{
+  opacity:0!important;
+  fill-opacity:0!important;
+  stroke-opacity:0!important;
+}
+body.gdDebugGreenMarkers .leaflet-overlay-pane path[fill="#1fd36d"][stroke="#1fd36d"]{
+  opacity:.18!important;
+  fill-opacity:.08!important;
+  stroke-opacity:.18!important;
 }
