@@ -90,7 +90,6 @@
       var expiry = formatDate(entitlement.expires_at);
       return expiry ? type + " active until " + expiry : type + " active";
     }
-    if (status && status.connectionIssue) return "Supabase check failed";
     if (status && status.configured === false) return "Payments not configured yet";
     return "No active pass";
   }
@@ -118,8 +117,13 @@
       pending = false; return saveStatus(body);
     } catch (error) {
       pending = false;
-      saveStatus(Object.assign({}, status, { active: false, entitlements: [], connectionIssue: true, error: error && error.message ? error.message : "Could not check payment status", checkedAt: new Date().toISOString() }));
-      safe(function () { return window.toast && window.toast(status.error || "Could not check payment status"); });
+      var message = error && error.message ? error.message : "Could not check payment status";
+      saveStatus(Object.assign({}, status, { active: false, entitlements: [], connectionIssue: true, error: message, checkedAt: new Date().toISOString() }));
+      if (opts.silent || opts.auto) {
+        safe(function () { console.warn("[ClarityPayments] payment status refresh skipped", message); });
+      } else {
+        safe(function () { return window.toast && window.toast(status.error || "Could not check payment status"); });
+      }
       return status;
     }
   }
@@ -214,7 +218,7 @@
     var menu = document.getElementById("gdPlayerSettingsMenu");
     if (panel) panel.hidden = name !== "payments";
     if (menu && name === "payments") menu.hidden = true;
-    if (name === "payments") { render(); loadAdminSettings(); }
+    if (name === "payments") { render(); refresh({ silent: true }); loadAdminSettings(); }
   }
 
   function render() {
@@ -321,9 +325,9 @@
       return false;
     },
     saveProductFromForm: function (form) { var data = formData(form); adminAction("upsertProduct", { product: data }).then(function () { form.reset(); if (form.elements.active) form.elements.active.checked = true; }); return false; },
-    issueFreePassFromForm: function (form) { var data = formData(form); adminAction("issueFreePass", data).then(function () { form.reset(); if (form.elements.productKey) form.elements.productKey.value = "free_pass"; if (form.elements.durationHours) form.elements.durationHours.value = "24"; refresh(); }); return false; }
+    issueFreePassFromForm: function (form) { var data = formData(form); adminAction("issueFreePass", data).then(function () { form.reset(); if (form.elements.productKey) form.elements.productKey.value = "free_pass"; if (form.elements.durationHours) form.elements.durationHours.value = "24"; refresh({ silent: true }); }); return false; }
   };
 
-  document.addEventListener("DOMContentLoaded", function () { setTimeout(function () { install(); handleReturn(); refresh(); loadAdminSettings(); }, 150); });
-  window.addEventListener("clarity:session-changed", function () { setTimeout(function () { install(); refresh(); loadAdminSettings(); }, 50); });
+  document.addEventListener("DOMContentLoaded", function () { setTimeout(function () { install(); handleReturn(); refresh({ silent: true, auto: true }); }, 150); });
+  window.addEventListener("clarity:session-changed", function () { setTimeout(function () { install(); refresh({ silent: true, auto: true }); }, 50); });
 })();
