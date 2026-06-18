@@ -1,23 +1,70 @@
 # Hole Frame Navigation Update Notes
 
-## Summary
+Source brief: `Caddy Update .md` / Codex Handover — Hole Frame Navigation Update + Recent Patch Verification.
 
-This update changes normal GPS hole movement so it switches the active Hole Frame rather than rebuilding or re-entering the GPS module.
+## What changed
 
-## Included changes
+- Kept the Home hard-boundary browser/device back guard so Home does not reopen stale internal routes.
+- Patched GPS return helpers so they avoid `enterGpsModule()` and broad `gdV62Refresh()` when GPS is already open.
+- Added a lightweight current-round Hole Frame session bridge in the existing play-flow script:
+  - `gdSetActiveHoleFrame(holeNumber, opts)`
+  - `gdRenderActiveHoleFrame(hole, opts)`
+  - `gdMarkActiveHoleLocked()`
+- Changed normal next/previous hole movement to switch the active Hole Frame rather than re-entering GPS.
+- Suppressed the normal `setHole()` refresh during Hole Frame switching via `window.__gdHoleFrameSwitching`.
+- Moved the hole navigation into a left-side vertical rail:
 
-- Home remains a browser/device back boundary.
-- Normal next/previous hole navigation avoids GPS re-entry where possible.
-- Hole Frame helper functions are present for active-hole switching.
-- The left-side Hole Rail is the intended hole navigation control.
-- The legacy top-centre hole switcher is hidden by a CSS safety rule.
-- Background automatic cloud sync failures on startup/session resume are kept silent so the play screen does not show a large connection warning.
-- Manual/account-critical sync actions can still show a blocking connection warning when needed.
+```text
+[ > ]
+[ H ]
+[ < ]
+```
 
-## Manual checks
+## Behaviour intent
 
-1. From Home, browser/device back should not reopen old GPS state.
-2. From GPS, Hole 2 back to Hole 1 should not visibly rebuild the GPS screen.
-3. Only the left-side Hole Rail should be visible.
-4. Startup should not show a large cloud/sync connection badge over the map.
-5. Manual account sync/login/signup errors should still surface when genuinely blocking.
+Normal hole navigation should now be:
+
+```text
+Tap next/previous
+→ active hole changes
+→ current round session updates
+→ Hole Frame renders
+→ GPS shell/map instance stays alive
+```
+
+It should not be:
+
+```text
+Tap next/previous
+→ returnGpsMap
+→ enterGpsModule
+→ gdV62Refresh
+→ visible GPS rebuild
+```
+
+## Validation performed
+
+- Confirmed `index.html` and `dist/index.html` were populated from the uploaded GitHub/main archive.
+- Applied the patch to root `index.html`.
+- Ran the Netlify build script to regenerate `dist/` from root files.
+- Ran inline JavaScript syntax validation across root `index.html` and `dist/index.html`.
+- Confirmed `dist/index.html` contains the Hole Frame update functions.
+
+## Manual acceptance checks still recommended on device
+
+1. Home browser/device back remains a hard boundary.
+2. GPS hole 2 → previous → hole 1 does not visibly rebuild/refresh GPS.
+3. Next/previous hole movement does not clear GPS/session memory.
+4. Pre-lock state still shows correctly after hole switch.
+5. Lock In still works and locked state can be restored after moving away and back.
+6. Left Hole Rail is clear of the player badge, club card, bottom dock, and right GPS tools.
+
+## Bag + Bubble Guardrail Patch
+
+- Bubble render centre now clamps backwards when the projected front/roof of the bubble would pass the maximum playable bag distance.
+- The clamp uses the active real bag where available, otherwise the ghost bag fallback, so both custom/account bubbles and generic GPS fallback bubbles share the same roof rule.
+- Ghost bag remains internal-only fallback data. Empty real bags render as a setup invitation rather than as the user's bag.
+- Untouched seeded/default bag rows are cleared back to an empty real bag state.
+- The bag generator creates a 12-club editable quick set.
+- User-facing green outlines and the blue/green centre marker are hidden in normal play; debug visibility can be restored with the debug body class.
+- Unlock is styled native green; Reset/Clear is translucent black with white text.
