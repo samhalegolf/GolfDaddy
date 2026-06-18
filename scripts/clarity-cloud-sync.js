@@ -31,6 +31,10 @@
     return status;
   }
 
+  function isAutomaticReason(reason) {
+    return ["startup", "session-changed", "resume", "visibility"].indexOf(String(reason || "")) !== -1;
+  }
+
   function outbox() {
     return safe(function () {
       var rows = JSON.parse(localStorage.getItem(OUTBOX_KEY) || "[]");
@@ -114,8 +118,10 @@
     } catch (error) {
       enqueue(payload, error);
       saveStatus({
-        state: "blocked",
-        label: "Supabase connection issue",
+        state: isAutomaticReason(reason) ? "pending" : "blocked",
+        label: isAutomaticReason(reason) ? "Pending sync" : "Supabase connection issue",
+        reason: reason || "required",
+        silent: isAutomaticReason(reason),
         error: error && error.message ? error.message : "Could not confirm account in Supabase"
       });
       throw error;
@@ -217,7 +223,8 @@
 
   function renderBadge() {
     var account = currentAccount();
-    var shouldShow = account && status && status.state && ["blocked", "pending", "checking"].indexOf(status.state) !== -1;
+    var silentAutoStatus = status && status.silent && isAutomaticReason(status.reason);
+    var shouldShow = account && !silentAutoStatus && status && status.state && ["blocked", "pending", "checking"].indexOf(status.state) !== -1;
     var existing = document.getElementById("clarityCloudSyncBadge");
     if (!shouldShow) {
       if (existing) existing.remove();
