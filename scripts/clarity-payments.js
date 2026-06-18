@@ -189,7 +189,7 @@
     panel.id = "gdPlayerSettingsPaymentsSection";
     panel.hidden = true;
     panel.innerHTML = [
-      '<button class="gdPlayerSettingsSubBack" type="button" onclick="gdPlayerSettingsShowSection(\'menu\')">‹ Settings</button>',
+      '<button class="gdPlayerSettingsSubBack" type="button" onclick="gdPlayerSettingsShowSection(&quot;menu&quot;)">‹ Settings</button>',
       "<strong>Payments & Access</strong>",
       '<span id="clarityPaymentSectionLine">Passes, memberships and Stripe-linked access.</span>',
       '<div class="clarityPaymentSection" id="clarityPaymentSection"></div>'
@@ -249,7 +249,7 @@
   function renderProductCards() {
     var cards = products().filter(function (product) { return product.product_kind !== "free_pass"; }).map(function (product) {
       var price = moneyText(product.price_label) || (product.stripe_price_id ? "Buy" : "Not linked yet");
-      return '<button class="clarityPaymentPass" type="button" onclick="ClarityPayments.buy(\'' + escapeHTML(product.product_key) + '\')"><strong>' + escapeHTML(product.name) + '</strong><span>' + escapeHTML(product.description || durationLabel(product.duration_hours)) + '</span><small>' + escapeHTML(durationLabel(product.duration_hours)) + '</small><b>' + escapeHTML(price) + '</b></button>';
+      return '<button class="clarityPaymentPass" type="button" onclick="ClarityPayments.buy(&quot;' + escapeHTML(product.product_key) + '&quot;)"><strong>' + escapeHTML(product.name) + '</strong><span>' + escapeHTML(product.description || durationLabel(product.duration_hours)) + '</span><small>' + escapeHTML(durationLabel(product.duration_hours)) + '</small><b>' + escapeHTML(price) + '</b></button>';
     }).join("");
     return '<div class="clarityPaymentPassGrid">' + cards + '</div>';
   }
@@ -277,7 +277,7 @@
   function statusPill(label, ok) { return '<div class="clarityPaymentPill ' + (ok ? 'ok' : 'bad') + '"><b>' + escapeHTML(ok ? '✓' : '!') + '</b><span>' + escapeHTML(label) + '</span></div>'; }
 
   function renderAdminProduct(product) {
-    return '<div class="clarityPaymentProductRow"><div><strong>' + escapeHTML(product.name) + '</strong><span>' + escapeHTML(product.product_key + ' · ' + product.product_kind + ' · ' + durationLabel(product.duration_hours)) + '</span><em>' + escapeHTML(product.stripe_price_id || 'No Stripe Price ID') + '</em></div><button type="button" onclick="ClarityPayments.editProduct(\'' + escapeHTML(product.product_key) + '\')">Edit</button><button type="button" onclick="ClarityPayments.toggleProduct(\'' + escapeHTML(product.product_key) + '\',' + (product.active ? 'false' : 'true') + ')">' + (product.active ? 'Disable' : 'Enable') + '</button></div>';
+    return '<div class="clarityPaymentProductRow"><div><strong>' + escapeHTML(product.name) + '</strong><span>' + escapeHTML(product.product_key + ' · ' + product.product_kind + ' · ' + durationLabel(product.duration_hours)) + '</span><em>' + escapeHTML(product.stripe_price_id || 'No Stripe Price ID') + '</em></div><button type="button" onclick="ClarityPayments.editProduct(&quot;' + escapeHTML(product.product_key) + '&quot;)">Edit</button><button type="button" onclick="ClarityPayments.toggleProduct(&quot;' + escapeHTML(product.product_key) + '&quot;,' + (product.active ? 'false' : 'true') + ')">' + (product.active ? 'Disable' : 'Enable') + '</button></div>';
   }
 
   function renderProductForm() {
