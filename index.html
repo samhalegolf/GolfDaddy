@@ -3524,12 +3524,22 @@ body.gd-frame-hard-locked .targetDot{width:18px;height:18px;border:0!important;b
 body.gd-frame-hard-locked .targetDot:after{content:none!important;display:none!important;}
 
 
+
+/* Target frame debug overlay: light dotted boxes for tuning Sam's behind-the-scenes camera frames. */
+.gdTargetFrameDebugOverlay{position:fixed;inset:0;z-index:7200;pointer-events:none;display:none;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;}
+body.gdShowTargetFrames .gdTargetFrameDebugOverlay{display:block;}
+.gdTargetFrameDebugBox{position:absolute;border:1.5px dotted rgba(235,248,255,.78);border-radius:2px;background:rgba(255,255,255,.035);box-shadow:0 0 0 1px rgba(0,0,0,.10),0 0 18px rgba(95,180,255,.08) inset;}
+.gdTargetFrameDebugBox::after{content:attr(data-label);position:absolute;left:8px;top:8px;padding:3px 7px;border-radius:999px;background:rgba(2,8,18,.48);color:rgba(238,248,255,.86);font-size:10px;font-weight:900;letter-spacing:.02em;text-transform:uppercase;text-shadow:0 1px 2px rgba(0,0,0,.65);}
+.gdTargetFrameDebugBox[data-kind="hole"]{border-color:rgba(120,205,255,.86);}
+.gdTargetFrameDebugBox[data-kind="lock"]{border-color:rgba(255,255,255,.74);}
+.gdTargetFrameDebugBox[data-kind="zoom"]{border-color:rgba(125,255,182,.78);}
+.gdTargetFrameDebugBox[data-kind="tee"]{border-color:rgba(255,228,135,.82);}
+
 /* Simple green zoom: one optional camera button, no separate locked toolbar/mode. */
 .rightRail .gdGreenZoomBtn{display:none!important;color:#1fd36d!important;}
 body.gdGpsActive .rightRail .gdGreenZoomBtn,
 body.shell-gps .rightRail .gdGreenZoomBtn{display:grid!important;}
 body.gd-green-zoom-active .rightRail .gdGreenZoomBtn{background:linear-gradient(180deg,rgba(31,211,109,.92),rgba(10,142,70,.86))!important;color:#061009!important;box-shadow:0 0 0 1px rgba(255,255,255,.22),0 14px 34px rgba(31,211,109,.34)!important;}
-body.gd-fairway-landing-mode .rightRail .gdGreenZoomBtn{color:#a8ff53!important;}
 /* Keep green geometry as a very subtle guide, not hidden and not visually dominant. */
 .gdSubtleGreenOutline{opacity:.22!important;stroke-width:.75!important;}
 .gdSubtleGreenSoft{opacity:.12!important;}
@@ -12355,8 +12365,6 @@ let greenOutline=null,greenSoft=null,greenLabel=null,frontLabel=null,backLabel=n
 let targetDragging=false;
 let lockedFrame=false, targetWasMoved=false, undoStack=[], currentCourse=null, gdCurrentPlannedShotId=null;
 let gdSimpleGreenZoomActive=false, gdSimpleGreenZoomReturnView=null;
-let gdCurrentShotTargetMode="greenTarget", gdLastShotTargetMode="greenTarget";
-let gdFairwayCameraNudgeState={lastAt:0};
 let units="m", showAim=true, showFilter=true, gpsWatch=null, gpsOk=false, shotTracking=false, trackedShots=[], shotId=0, currentShotLogged=false;
 let gdLastAutoNextShotAt=0;
 let gdWindActive=false, gdWindLevel=1, gdWindOriginAngle=null, gdWindLandingTarget=null;
@@ -12813,76 +12821,67 @@ function gdTargetFramePadding(kind="lock"){
   const f=gdScreenTargetFrameConfig(kind);
   return {paddingTopLeft:[f.left,f.top],paddingBottomRight:[f.right,f.bottom]};
 }
-function gdCurrentClubCanReachGreen(payload=null){
-  if(!start||!greenCentre||!map)return true;
+
+function gdEnsureTargetFrameDebugOverlay(){
+  let overlay=document.getElementById("gdTargetFrameDebugOverlay");
+  if(!overlay){
+    overlay=document.createElement("div");
+    overlay.id="gdTargetFrameDebugOverlay";
+    overlay.className="gdTargetFrameDebugOverlay";
+    overlay.setAttribute("aria-hidden","true");
+    document.body.appendChild(overlay);
+    ["zoom","lock","hole","tee"].forEach(kind=>{
+      const box=document.createElement("div");
+      box.className="gdTargetFrameDebugBox";
+      box.dataset.kind=kind;
+      box.dataset.label=kind==="zoom"?"green/landing zoom":kind==="lock"?"lock frame":kind==="hole"?"green/hole frame":"tee frame";
+      overlay.appendChild(box);
+    });
+  }
+  return overlay;
+}
+function gdUpdateTargetFrameDebugOverlay(){
   try{
-    const greenDistance=map.distance(start,greenCentre);
-    if(!Number.isFinite(greenDistance)||greenDistance<=0)return true;
-    const total=payload?Math.max(gdFiniteNumber(payload.totalM,0),gdFiniteNumber(payload.baseCarry,0)):gdMaxPlayableCarryM();
-    if(!(total>0))return true;
-    const previous=gdLastShotTargetMode||gdCurrentShotTargetMode||"greenTarget";
-    // Hysteresis: stop rapid green/fairway switching when the selected club is on the edge.
-    const toFairwayBuffer=10;
-    const backToGreenBuffer=4;
-    if(previous==="fairwayLanding")return total>=greenDistance-backToGreenBuffer;
-    return total>=greenDistance-toFairwayBuffer;
-  }catch(e){return true;}
+    const overlay=gdEnsureTargetFrameDebugOverlay();
+    const w=window.innerWidth||document.documentElement.clientWidth||390;
+    const h=window.innerHeight||document.documentElement.clientHeight||760;
+    overlay.querySelectorAll(".gdTargetFrameDebugBox").forEach(box=>{
+      const kind=box.dataset.kind||"lock";
+      const f=gdScreenTargetFrameConfig(kind);
+      box.style.left=f.left+"px";
+      box.style.top=f.top+"px";
+      box.style.width=Math.max(1,w-f.left-f.right)+"px";
+      box.style.height=Math.max(1,h-f.top-f.bottom)+"px";
+    });
+  }catch(e){}
 }
-function gdResolveShotTargetMode(payload=null,bubbleCenter=null){
-  if(!start||!target)return "greenTarget";
-  if(!greenCentre)return "greenTarget";
-  const layupByTarget=!!(typeof gdIsLayupTarget==="function"&&gdIsLayupTarget(greenCentre,gdShotDisplayTarget?.()||target));
-  const canReach=gdCurrentClubCanReachGreen(payload);
-  const next=(layupByTarget||!canReach)?"fairwayLanding":"greenTarget";
-  gdLastShotTargetMode=gdCurrentShotTargetMode||next;
-  gdCurrentShotTargetMode=next;
-  try{document.body.classList.toggle("gd-fairway-landing-mode",next==="fairwayLanding");}catch(e){}
-  return next;
+function gdSetTargetFrameDebug(on=true){
+  document.body.classList.toggle("gdShowTargetFrames",!!on);
+  gdUpdateTargetFrameDebugOverlay();
 }
-function gdShotFocusPoint(payload=null,bubbleCenter=null){
-  const mode=gdResolveShotTargetMode(payload,bubbleCenter);
-  const visible=(()=>{try{return typeof gdShotDisplayTarget==="function"?gdShotDisplayTarget():target;}catch(e){return target;}})();
-  if(mode==="fairwayLanding")return bubbleCenter||visible||target||greenCentre||pin||start;
-  return bubbleCenter||visible||pin||greenCentre||target||start;
-}
+window.gdSetTargetFrameDebug=gdSetTargetFrameDebug;
+try{window.addEventListener("resize",()=>gdUpdateTargetFrameDebugOverlay(),{passive:true});}catch(e){}
+try{window.addEventListener("orientationchange",()=>setTimeout(gdUpdateTargetFrameDebugOverlay,120),{passive:true});}catch(e){}
+try{setTimeout(()=>gdSetTargetFrameDebug(true),250);}catch(e){}
 function gdActiveGreenZoomTarget(){
   try{
-    const raw=(typeof getGpsBubblePayload==="function"&&start&&target)?getGpsBubblePayload(map.distance(start,gdShotDisplayTarget?.()||target)):null;
-    const center=raw&&typeof gdBubbleRenderCenter==="function"?gdBubbleRenderCenter(raw):null;
-    return gdShotFocusPoint(raw,center);
+    if(typeof gdShotDisplayTarget==="function"){
+      const shown=gdShotDisplayTarget();
+      if(shown)return shown;
+    }
   }catch(e){}
   return target||greenCentre||pin||start;
 }
-function gdFrameAroundPoint(point,kind="zoom",opts={}){
+function gdFrameAroundPoint(point,kind="zoom"){
   if(!map||!point)return false;
   const pad=gdTargetFramePadding(kind);
-  const baseZoom=map.getZoom?map.getZoom():18;
-  const targetZoom=Number.isFinite(Number(opts.zoom))?Number(opts.zoom):(kind==="zoom"?Math.min(20,Math.max(baseZoom+2,19)):baseZoom);
+  const zoom=Math.min(20,Math.max(map.getZoom?map.getZoom()+2:19,19));
   try{
-    map.setView(point,targetZoom,{animate:opts.animate!==false,duration:Number(opts.duration??.32),paddingTopLeft:pad.paddingTopLeft,paddingBottomRight:pad.paddingBottomRight});
+    map.setView(point,zoom,{animate:true,duration:.32,paddingTopLeft:pad.paddingTopLeft,paddingBottomRight:pad.paddingBottomRight});
   }catch(e){
-    try{map.setView(point,targetZoom,{animate:opts.animate!==false,duration:Number(opts.duration??.32)});}catch(_e){return false;}
+    try{map.setView(point,zoom,{animate:true,duration:.32});}catch(_e){return false;}
   }
   return true;
-}
-function gdFairwayFrameSafeZone(){
-  const w=window.innerWidth||document.documentElement.clientWidth||390;
-  const h=window.innerHeight||document.documentElement.clientHeight||760;
-  return {left:w*.22,right:w*.78,top:h*.25,bottom:h*.72};
-}
-function gdMaybeNudgeFairwayCamera(point){
-  if(!lockedFrame||!map||!point)return false;
-  if(gdCurrentShotTargetMode!=="fairwayLanding")return false;
-  const now=Date.now();
-  if(now-(gdFairwayCameraNudgeState.lastAt||0)<240)return false;
-  let p;
-  try{p=map.latLngToContainerPoint(point);}catch(e){return false;}
-  const z=gdFairwayFrameSafeZone();
-  const dx=p.x<z.left?p.x-z.left:(p.x>z.right?p.x-z.right:0);
-  const dy=p.y<z.top?p.y-z.top:(p.y>z.bottom?p.y-z.bottom:0);
-  if(Math.abs(dx)<1&&Math.abs(dy)<1)return false;
-  gdFairwayCameraNudgeState.lastAt=now;
-  try{map.panBy([dx*.38,dy*.38],{animate:true,duration:.22});return true;}catch(e){return false;}
 }
 function gdToggleSimpleGreenZoom(ev){
   if(ev){ev.preventDefault();ev.stopPropagation();if(ev.stopImmediatePropagation)ev.stopImmediatePropagation();}
@@ -12912,33 +12911,8 @@ window.gdToggleSimpleGreenZoom=gdToggleSimpleGreenZoom;
 function frameShotView(){
   if(!start||!target) return;
   const displayTarget=gdFrameDisplayTarget()||target;
-  const rawPayload=(()=>{try{return getGpsBubblePayload(map.distance(start,displayTarget));}catch(e){return null;}})();
-  const bubbleCenter=(()=>{try{return rawPayload?gdBubbleRenderCenter(rawPayload):null;}catch(e){return null;}})();
-  const targetMode=gdResolveShotTargetMode(rawPayload,bubbleCenter);
-  const frameTarget=gdShotFocusPoint(rawPayload,bubbleCenter)||gdFrameNorthTarget()||displayTarget;
+  const frameTarget=gdFrameNorthTarget()||displayTarget;
   if(!frameTarget)return;
-
-  // Fairway / layup mode is a stable workbench: frame once around the landing bubble, then do not chase it.
-  if(targetMode==="fairwayLanding"){
-    const shotBrg=start&&greenCentre?bearing(start,greenCentre):bearing(start,frameTarget);
-    const center=frameTarget;
-    const lateral=62;
-    const back=project(center,shotBrg+Math.PI,52);
-    const ahead=project(center,shotBrg,84);
-    const left=projectOffset(center,shotBrg,10,-lateral);
-    const right=projectOffset(center,shotBrg,10,lateral);
-    const points=[back,ahead,left,right,center,displayTarget];
-    const pad=gdTargetFramePadding("lock");
-    map.fitBounds(L.latLngBounds(points),{
-      paddingTopLeft:pad.paddingTopLeft,
-      paddingBottomRight:pad.paddingBottomRight,
-      animate:true,
-      duration:.42,
-      maxZoom:19
-    });
-    return;
-  }
-
   const axis=gdShotUpAxis();
   const shotBrg=axis&&Number.isFinite(axis.bearingRad)?axis.bearingRad:bearing(start,frameTarget);
   const shotM=Math.max(1,map.distance(start,displayTarget||frameTarget));
@@ -12962,7 +12936,6 @@ function frameShotView(){
     maxZoom:19
   });
 }
-
 function lockFrame(refit=true){
   if(!start||!target) return;
   if(refit && !lockedFrame){
@@ -14243,8 +14216,6 @@ function gdClearTargetArtifactsForFreshStart(){
   greenPolygon=null;
   gdWindLandingTarget=null;
   lockedFrame=false;
-  gdCurrentShotTargetMode="greenTarget";
-  gdLastShotTargetMode="greenTarget";
   targetWasMoved=false;
   currentShotLogged=false;
   gdCurrentPlannedShotId=null;
@@ -14266,8 +14237,6 @@ function clearPendingGreenTarget(){
   gdFocusFrameStart=gdFocusFrameTarget=null;
   gdWindLandingTarget=null;
   lockedFrame=false;
-  gdCurrentShotTargetMode="greenTarget";
-  gdLastShotTargetMode="greenTarget";
   targetWasMoved=false;
   currentShotLogged=false;
   gdCurrentPlannedShotId=null;
@@ -14522,7 +14491,6 @@ function gdQueueSmoothBubbleRender(marker,ll){
     gdMarkCurrentPlanDirty();
     marker.setLatLng(gdShotDisplayTarget()||target);
     renderShot();
-    try{gdMaybeNudgeFairwayCamera(gdShotFocusPoint(null,next)||next);}catch(e){}
   });
 }
 function gdInstallSmoothBubbleDrag(marker){
@@ -14588,7 +14556,7 @@ function gdInstallSmoothBubbleDrag(marker){
         if(hadMapDragging)map.dragging.enable();
         el.style.cursor="grab";
         renderShot();
-        if(lockedFrame){try{gdMaybeNudgeFairwayCamera(gdShotFocusPoint(null,gdShotDisplayTarget?.()||target)||target);}catch(e){}}
+        if(lockedFrame)setBubbleOnlyLock(true);
         if(greenActive){establishGreenFromBubble();scanGreen();}
         try{el.releasePointerCapture(endEv.pointerId);}catch(e){}
       };
@@ -16476,7 +16444,6 @@ function renderShot(){
   const bubbleCenterDistance=map.distance(start,bubbleCenter);
   if(!Number.isFinite(bubbleCenterDistance)||bubbleCenterDistance<=0){clearShot();gdResetShotDistanceDisplay();return;}
   const gdb=gdGpsBubbleDisplayPayload(rawGdb,d,bubbleCenter);
-  gdResolveShotTargetMode(gdb,bubbleCenter);
   clearShot({preserveAimLine:showAim});
   gdSyncBubbleDragHitArea(gdb);
   const fd=fmt(bubbleCenterDistance);
