@@ -1,17 +1,1 @@
-(function(){
-  var build = {
-    appName: "Clarity Caddie",
-    packageName: "clarity-caddie-core",
-    version: "0.1.0-beta.1",
-    buildId: "2026-06-09-phase1-beta-report-001",
-    deployedAt: "2026-06-09",
-    channel: "beta",
-    betaLabel: "Beta",
-    cacheBust: "phase1-beta-report-001"
-  };
-
-  window.ClarityBuild = Object.assign({}, window.ClarityBuild || {}, build);
-  window.GolfDaddy = window.GolfDaddy || {};
-  window.GolfDaddy.clarityBuild = window.ClarityBuild;
-})();
-
+(function(){var build={appName:"Clarity Caddie",packageName:"clarity-caddie-core",version:"0.1.0-beta.1",buildId:"2026-06-18-hole-frame-visual-zoom-001",deployedAt:"2026-06-18",channel:"beta",betaLabel:"Beta",cacheBust:"hole-frame-visual-zoom-001"};window.ClarityBuild=Object.assign({},window.ClarityBuild||{},build);window.GolfDaddy=window.GolfDaddy||{};window.GolfDaddy.clarityBuild=window.ClarityBuild;if(window.__gdHoleFrameVisualZoomHotfixV1)return;window.__gdHoleFrameVisualZoomHotfixV1=true;function safe(fn){try{return fn();}catch(e){return null;}}function setVisualDefault(){safe(function(){var k="golf_daddy_dev_tuning_v1",s=JSON.parse(localStorage.getItem(k)||"{}");s.gps=s.gps||{};if(s.gps.preLockBlackoutFrame==null){s.gps.preLockBlackoutFrame=1;localStorage.setItem(k,JSON.stringify(s));}});safe(function(){if(typeof window.gdPreLockBlackoutFrameEnabled==="function"&&!window.gdPreLockBlackoutFrameEnabled.__patched){var old=window.gdPreLockBlackoutFrameEnabled;window.gdPreLockBlackoutFrameEnabled=function(){var v=safe(function(){var s=JSON.parse(localStorage.getItem("golf_daddy_dev_tuning_v1")||"{}");return s&&s.gps?s.gps.preLockBlackoutFrame:null;});return v==null?true:Number(v)>=1;};window.gdPreLockBlackoutFrameEnabled.__old=old;window.gdPreLockBlackoutFrameEnabled.__patched=true;}});safe(function(){document.body&&document.body.classList.add("gdPreLockBlackoutFrame");});}function cleanHoleLabel(){var r=document.getElementById("gdHoleStepper");if(!r)return;var l=r.querySelector("strong");if(!l)return;var m=String(l.textContent||"").match(/(\d+)/);if(m)l.textContent=m[1];l.classList.add("gdHoleRailNumber");}function wireZoom(){var b=document.getElementById("gdGpsSnapZoomBtn");if(!b||b.__gdZoomBackup)return;b.__gdZoomBackup=true;b.addEventListener("click",function(ev){safe(function(){ev.preventDefault();ev.stopPropagation();});setTimeout(function(){safe(function(){if(window.gdFrameMappedPreLockPreset){var n=Number(window.__gdZoomBackupPreset||0);window.__gdZoomBackupPreset=(n+1)%3;window.gdFrameMappedPreLockPreset(window.__gdZoomBackupPreset,{animate:false,immediate:true});}else if(window.gdFocusMappedPreLockHole){var h=Number(sessionStorage.getItem("gd_active_playing_hole")||sessionStorage.getItem("gd_mapper_active_hole")||1)||1;window.gdFocusMappedPreLockHole(h,{source:"zoom-backup",reenterGps:false,refreshGps:false});}else if(window.map&&map.zoomIn){map.zoomIn(1,{animate:true});}});},0);},false);}function tick(){setVisualDefault();cleanHoleLabel();wireZoom();}if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",tick);else tick();setInterval(tick,650);document.addEventListener("click",function(){setTimeout(tick,50);},true);})();
