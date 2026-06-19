@@ -41370,3 +41370,248 @@ body.gdTargetFrameDebugOn #gdConfirmedGreenGateReadout{display:block;}
 
 </body>
 </html>
+
+<style id="gdStrictConfirmedGreenBridgeV18Css">
+/* V18: strict bridge. Loading owns waiting. Camera accepts only manual-confirmed or auto-mapper green with explicit green geometry. */
+body.gdWaitingForConfirmedGreen #gdConfirmedGreenLoadingGate{display:flex!important;z-index:99990!important;}
+body.gdWaitingForConfirmedGreen #gdConfirmedGreenGateReadout{display:block;z-index:99991!important;}
+</style>
+<script id="gdStrictConfirmedGreenBridgeV18">
+(function(){
+  if(window.__gdStrictConfirmedGreenBridgeV18)return;
+  window.__gdStrictConfirmedGreenBridgeV18=true;
+  var VERSION="V18_STRICT_CONFIRMED_GREEN_BRIDGE";
+  var nativeFit=null;
+  function safe(fn,fb){try{return fn();}catch(e){return fb;}}
+  function num(v,fb){v=Number(v);return Number.isFinite(v)?v:fb;}
+  function hasMap(){return typeof map!=="undefined"&&map&&typeof L!=="undefined";}
+  function asLL(p){
+    if(!p||!hasMap())return null;
+    if(p.lat!==undefined&&p.lng!==undefined)return L.latLng(num(p.lat,NaN),num(p.lng,NaN));
+    if(p.latitude!==undefined&&(p.longitude!==undefined||p.lon!==undefined))return L.latLng(num(p.latitude,NaN),num(p.longitude!==undefined?p.longitude:p.lon,NaN));
+    if(Array.isArray(p)&&p.length>=2)return L.latLng(num(p[0],NaN),num(p[1],NaN));
+    return null;
+  }
+  function validLL(p){return !!(p&&Number.isFinite(Number(p.lat))&&Number.isFinite(Number(p.lng)));}
+  function validBounds(b){return !!(b&&typeof b.isValid==="function"&&b.isValid()&&b.getCenter);}
+  function boundsFromPoints(points){
+    if(!hasMap())return null;
+    var arr=(Array.isArray(points)?points:[]).map(asLL).filter(validLL);
+    return arr.length?L.latLngBounds(arr):null;
+  }
+  function boundsSizeM(b){
+    if(!hasMap()||!validBounds(b))return {w:0,h:0,diag:0};
+    var sw=b.getSouthWest(), ne=b.getNorthEast(), nw=L.latLng(ne.lat,sw.lng);
+    var w=safe(function(){return map.distance(nw,ne);},0);
+    var h=safe(function(){return map.distance(nw,sw);},0);
+    return {w:w,h:h,diag:Math.sqrt(w*w+h*h)};
+  }
+  function goodGreenBounds(b){
+    if(!validBounds(b))return false;
+    var s=boundsSizeM(b);
+    return s.diag>=6&&s.diag<=95&&s.w>=3&&s.h>=3;
+  }
+  function markerLL(name){return safe(function(){var m=window[name]||eval(name);return m&&typeof m.getLatLng==="function"?m.getLatLng():null;},null);}
+  function manualGreen(){
+    var p=asLL(safe(function(){return target;},null))||asLL(safe(function(){return window.target;},null))||asLL(safe(function(){return greenCentre;},null))||asLL(safe(function(){return window.greenCentre;},null))||asLL(markerLL("targetMarker"))||asLL(markerLL("greenMarker"));
+    if(!validLL(p))return null;
+    var poly=safe(function(){return Array.isArray(greenPolygon)&&greenPolygon.length>=3?greenPolygon:null;},null)||[];
+    var b=boundsFromPoints(poly)||safe(function(){return greenOutline&&typeof greenOutline.getBounds==="function"?greenOutline.getBounds():null;},null);
+    return {version:VERSION,source:"manualConfirmedGreen",center:p,polygon:Array.isArray(poly)?poly:[],bounds:goodGreenBounds(b)?b:null,hole:safe(function(){return currentPlayingHole||selectedHole||gdMappedStartHoleNumber&&gdMappedStartHoleNumber();},null),at:Date.now()};
+  }
+  function mappedPoint(point){return safe(function(){return typeof gdMappedPointToLatLng==="function"?gdMappedPointToLatLng(point):asLL(point);},null)||asLL(point);}
+  function mappedPayload(){return safe(function(){return typeof gdActiveMappedHolePlayData==="function"&&gdActiveMappedHolePlayData();},null)||null;}
+  function mappedShape(data){
+    var shape=safe(function(){return typeof gdMappedGreenShapeLatLngs==="function"?gdMappedGreenShapeLatLngs(data):null;},null);
+    if(Array.isArray(shape)&&shape.length)return shape.map(asLL).filter(validLL);
+    var raw=data&&data.green&&(data.green.greenShape||data.green.shape||data.green.polygon||data.green.outline);
+    return (Array.isArray(raw)?raw:[]).map(mappedPoint).filter(validLL);
+  }
+  function explicitGreenCenter(data){
+    var g=data&&data.green;
+    if(!g||typeof g!=="object")return null;
+    return mappedPoint(g.center||g.centre||g.position||g.latLng||g.pin);
+  }
+  function autoGreen(){
+    var payload=mappedPayload();
+    var data=payload&&payload.data;
+    if(!data||!data.green||typeof data.green!=="object")return null;
+    var shape=mappedShape(data);
+    var b=boundsFromPoints(shape);
+    var hasShape=shape.length>=3&&goodGreenBounds(b);
+    var center=explicitGreenCenter(data);
+    // Strict rule: route-end, broad complete flags, and course payloads alone are not confirmation.
+    // Auto is accepted only when the mapper gives explicit green geometry, preferably polygon/shape.
+    if(!hasShape)return null;
+    if(!validLL(center))center=b.getCenter();
+    return {version:VERSION,source:"autoCourseMapperGreenShape",course:payload.course||null,hole:payload.hole||safe(function(){return gdMappedStartHoleNumber&&gdMappedStartHoleNumber();},null),center:center,polygon:shape,bounds:b,payload:payload,at:Date.now()};
+  }
+  function normalizeGreen(green){
+    if(!green)return null;
+    var center=asLL(green.center||green.latLng||green.point||green);
+    if(!validLL(center))return null;
+    var polygon=(Array.isArray(green.polygon)?green.polygon:(Array.isArray(green.polygonLatLngs)?green.polygonLatLngs:[])).map(asLL).filter(validLL);
+    var b=validBounds(green.bounds)?green.bounds:boundsFromPoints(polygon);
+    return {version:VERSION,source:green.source||"confirmed",course:green.course||null,hole:green.hole||null,center:center,polygon:polygon,bounds:goodGreenBounds(b)?b:null,payload:green.payload||null,confirmedAt:new Date().toISOString(),at:Date.now()};
+  }
+  function currentStored(){
+    var g=window.__gdV18CurrentConfirmedGreen||window.gdCurrentConfirmedGreen||window.__gdCurrentConfirmedGreen;
+    if(!g)return null;
+    // Re-validate old V17 auto records; reject point-only auto mapper confirmations.
+    if(String(g.source||"").indexOf("autoCourseMapper")>=0&&!goodGreenBounds(g.bounds))return null;
+    return normalizeGreen(g);
+  }
+  function setGreen(green){
+    var record=normalizeGreen(green);
+    if(!record)return null;
+    if(String(record.source||"").indexOf("auto")>=0&&!goodGreenBounds(record.bounds))return null;
+    window.__gdV18CurrentConfirmedGreen=record;
+    window.gdCurrentConfirmedGreen=record;
+    window.__gdCurrentConfirmedGreen=record;
+    safe(function(){document.body.classList.remove("gdWaitingForConfirmedGreen");});
+    readout("confirmed | "+record.source+" | "+record.center.lat.toFixed(6)+","+record.center.lng.toFixed(6));
+    return record;
+  }
+  window.gdSetCurrentConfirmedGreen=setGreen;
+  window.gdSetCurrentConfirmedGreenV18=setGreen;
+  function getGreen(){
+    var stored=currentStored(); if(stored)return stored;
+    var m=manualGreen(); if(m)return setGreen(m);
+    var a=autoGreen(); if(a)return setGreen(a);
+    return null;
+  }
+  window.gdGetCurrentConfirmedGreen=getGreen;
+  window.gdGetCurrentConfirmedGreenV18=getGreen;
+  function ensureOverlay(){
+    var el=document.getElementById("gdConfirmedGreenLoadingGate");
+    if(!el&&document.body){
+      el=document.createElement("div");
+      el.id="gdConfirmedGreenLoadingGate";
+      el.setAttribute("role","status");
+      el.setAttribute("aria-live","polite");
+      el.innerHTML='<div class="gdConfirmedGreenCard"><div class="gdConfirmedGreenSpinner"></div><h3>Scanning green</h3><p>Waiting for the course mapper to confirm the current hole green. The camera will not guess.</p><div class="gdConfirmedGreenDetail" id="gdConfirmedGreenLoadingDetail">waiting for green shape</div></div>';
+      document.body.appendChild(el);
+    }
+    return el;
+  }
+  function loadingText(text){ensureOverlay();var d=document.getElementById("gdConfirmedGreenLoadingDetail");if(d)d.textContent=text||"waiting for green shape";}
+  function readout(text){
+    var el=document.getElementById("gdConfirmedGreenGateReadout");
+    if(!el&&document.body){el=document.createElement("div");el.id="gdConfirmedGreenGateReadout";document.body.appendChild(el);}
+    if(el)el.textContent="v18 strict bridge | "+(text||"");
+  }
+  function showWaiting(reason){
+    safe(function(){document.body.classList.add("gdWaitingForConfirmedGreen");});
+    loadingText(reason||"waiting for confirmed green shape");
+    readout("waiting | "+(reason||"confirmed green shape"));
+    return false;
+  }
+  function forceRasterCap(reason){
+    if(!hasMap())return;
+    safe(function(){map.options.maxZoom=Math.max(num(map.options.maxZoom,22),23);map.options.zoomSnap=.01;map.options.zoomDelta=.25;});
+    safe(function(){map.eachLayer(function(layer){
+      if(layer&&layer._url&&typeof layer.setUrl==="function"){
+        layer.options.maxNativeZoom=Math.min(num(layer.options.maxNativeZoom,17),17);
+        layer.options.maxZoom=Math.max(num(layer.options.maxZoom,23),23);
+        layer.options.keepBuffer=Math.max(num(layer.options.keepBuffer,4),4);
+      }
+    });});
+    window.__gdV18RasterCap={cap:17,reason:reason||"v18",at:Date.now()};
+  }
+  function pointBounds(point,radiusM){
+    var c=asLL(point); if(!validLL(c)||!hasMap())return null;
+    var r=Math.max(5,num(radiusM,22));
+    var latRad=c.lat*Math.PI/180, dLat=r/111320, dLng=r/(111320*Math.max(.18,Math.cos(latRad)));
+    return L.latLngBounds([[c.lat-dLat,c.lng-dLng],[c.lat+dLat,c.lng+dLng]]);
+  }
+  function greenBounds(kind){
+    var g=getGreen(); if(!g)return null;
+    if(goodGreenBounds(g.bounds))return g.bounds;
+    // Manual centre is allowed; auto centre-only is not.
+    if(String(g.source||"").indexOf("manual")>=0)return pointBounds(g.center,kind==="hole"?22:18);
+    return null;
+  }
+  function fit(bounds,frame,padding,opts){
+    if(!hasMap()||!validBounds(bounds)||typeof window.gdFitObjectToFrame!=="function")return false;
+    forceRasterCap("before-"+frame);
+    var ok=window.gdFitObjectToFrame(bounds,frame,padding,Object.assign({animate:false,duration:.05,ownerMs:2600,maxZoom:frame==="zoom"?21.85:frame==="lock"?21.65:20.85,objectName:"v18ConfirmedGreen"},opts||{}));
+    setTimeout(function(){forceRasterCap("after-"+frame);},80);
+    return ok;
+  }
+  function setup(opts){
+    opts=opts||{};
+    var g=getGreen();
+    if(!g)return showWaiting("waiting for auto-mapper green shape");
+    var b=greenBounds("hole");
+    if(!validBounds(b))return showWaiting("confirmed green has no usable shape");
+    safe(function(){document.body.classList.remove("gdWaitingForConfirmedGreen","gdGreenArrivalMode","gd-green-zoom-active");document.body.classList.add("gdMappedStartPromptActive");});
+    var ok=fit(b,"hole",num(opts.padding,.025),{objectName:"v18ConfirmedGreen:"+g.source,animate:opts.animate===true});
+    readout((ok?"setup":"setup failed")+" | frame hole | "+g.source+" | shape "+(g.polygon?g.polygon.length:0));
+    return ok;
+  }
+  function lock(opts){
+    opts=opts||{};
+    var g=getGreen();
+    if(!g)return showWaiting("waiting for confirmed green before lock");
+    var b=safe(function(){return window.gdGetActiveShotObjectBounds&&window.gdGetActiveShotObjectBounds();},null);
+    if(!validBounds(b))b=greenBounds("lock");
+    if(!validBounds(b))return showWaiting("confirmed green has no lock object");
+    safe(function(){document.body.classList.remove("gdWaitingForConfirmedGreen","gdMappedStartPromptActive","gdGreenArrivalMode","gd-green-zoom-active");});
+    var ok=fit(b,"lock",num(opts.padding,.024),{objectName:"v18ActiveShotOrGreen",animate:opts.animate!==false});
+    readout((ok?"lock":"lock failed")+" | frame lock | "+g.source);
+    return ok;
+  }
+  function zoom(ev){
+    if(ev){ev.preventDefault();ev.stopPropagation();if(ev.stopImmediatePropagation)ev.stopImmediatePropagation();}
+    var g=getGreen();
+    if(!g)return showWaiting("waiting for confirmed green before zoom");
+    var b=safe(function(){return window.gdGetActiveShotObjectBounds&&window.gdGetActiveShotObjectBounds();},null);
+    if(!validBounds(b))b=greenBounds("zoom");
+    if(!validBounds(b))return showWaiting("confirmed green has no zoom object");
+    var ok=fit(b,"zoom",.018,{objectName:"v18TargetZoom",animate:true});
+    readout((ok?"target zoom":"target zoom failed")+" | "+g.source);
+    return ok;
+  }
+  function reset(){window.__gdV18CurrentConfirmedGreen=null;window.gdCurrentConfirmedGreen=null;window.__gdCurrentConfirmedGreen=null;showWaiting("fresh reset: waiting for auto-mapper green shape");}
+  window.gdResetConfirmedGreenFresh=reset;
+  window.gdResetConfirmedGreenFreshV18=reset;
+  function install(){
+    ensureOverlay();
+    forceRasterCap("install");
+    // Block any older confirmed-green fitter call when V18 does not have a strict green yet.
+    if(!nativeFit&&typeof window.gdFitObjectToFrame==="function"){
+      nativeFit=window.gdFitObjectToFrame;
+      window.gdFitObjectToFrame=function(bounds,frame,padding,opts){
+        opts=opts||{};
+        var name=String(opts.objectName||"");
+        if((name.indexOf("confirmedGreen")>=0||name.indexOf("v17")>=0)&&!getGreen()){
+          readout("blocked older fit without strict green | "+frame);
+          showWaiting("waiting for auto-mapper green shape");
+          return false;
+        }
+        return nativeFit.apply(this,arguments);
+      };
+    }
+    window.gdSimpleFrameSetup=setup;
+    window.gdFrameMappedPreLockPreset=function(index,opts){return setup(opts||{});};
+    window.gdFrameMappedPreLockHoleView=function(opts){return setup(opts||{});};
+    window.gdQueueMappedPreLockHoleFrame=function(opts){return setup(opts||{});};
+    window.gdFocusMappedPreLockHole=function(hole,opts){return setup(opts||{});};
+    window.gdSimpleFrameLock=lock;
+    window.gdHeadToTeeShotFrame=function(){return lock({animate:false});};
+    window.frameShotView=function(){return lock({animate:true});};
+    window.lockFrame=function(refit){if(refit!==false)lock({animate:true});safe(function(){lockedFrame=true;});safe(function(){setBubbleOnlyLock(true);});safe(function(){renderShot();});return true;};
+    window.gdToggleTargetZoom=zoom;
+    window.gdToggleSimpleGreenZoom=zoom;
+    safe(function(){lockFrame=window.lockFrame;frameShotView=window.frameShotView;gdHeadToTeeShotFrame=window.gdHeadToTeeShotFrame;});
+    if(!getGreen())showWaiting("waiting for auto-mapper green shape");
+    window.__gdV18Installed={version:VERSION,at:Date.now()};
+    readout("installed | "+(getGreen()?"green confirmed":"waiting"));
+    return true;
+  }
+  if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",function(){setTimeout(install,1500);});else setTimeout(install,1500);
+  setTimeout(install,2600);
+  setTimeout(install,4200);
+  safe(function(){window.addEventListener("resize",function(){setTimeout(function(){if(getGreen())setup({animate:false});else showWaiting("waiting for auto-mapper green shape");},160);},true);});
+})();
+</script>
