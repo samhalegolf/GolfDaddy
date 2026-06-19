@@ -3928,7 +3928,7 @@ body[data-gd-permission="admin"] #gdV62Home .gdHomeAdminSettings{display:inline-
 <button aria-label="Green Wand" class="railBtn greenBtn" data-gd-rail-button="final" data-gd-rail-icon="wand" id="greenToolBtn" title="Green Wand" type="button"></button>
 <button aria-label="Wind" class="railBtn gdWindToolBtn" data-gd-rail-button="final" id="windToolBtn" title="Wind" type="button" onclick="gdWindToolPressed(event)"><svg aria-hidden="true" viewBox="0 0 48 48"><path d="M9 17h20c4.4 0 6.6-5.4 3.5-8.5-2.4-2.4-6.5-1.5-7.6 1.7" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M8 25h28c5.2 0 7.8 6.3 4.1 10-2.9 2.9-7.8 1.7-9.1-2.1" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M13 33h11" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/></svg></button>
 <button aria-label="GPS locate" class="railBtn gdGpsRecenterBtn" data-gd-rail-button="final" data-gd-rail-icon="gps" id="gpsRailBtn" title="GPS locate" type="button"></button>
-<button aria-label="Green zoom" class="railBtn gdGreenZoomBtn" data-gd-rail-button="final" id="gdGreenZoomBtn" title="Green zoom" type="button" onclick="return gdToggleSimpleGreenZoom(event)"><svg aria-hidden="true" viewBox="0 0 48 48" fill="none"><circle cx="21" cy="21" r="10" stroke="currentColor" stroke-width="4"/><path d="M29 29l9 9" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M21 15v12M15 21h12" stroke="currentColor" stroke-width="3.4" stroke-linecap="round"/></svg></button>
+<button aria-label="Green zoom" class="railBtn gdGreenZoomBtn" data-gd-rail-button="final" id="gdGreenZoomBtn" title="Green zoom" type="button" onclick="return gdToggleTargetZoom(event)"><svg aria-hidden="true" viewBox="0 0 48 48" fill="none"><circle cx="21" cy="21" r="10" stroke="currentColor" stroke-width="4"/><path d="M29 29l9 9" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M21 15v12M15 21h12" stroke="currentColor" stroke-width="3.4" stroke-linecap="round"/></svg></button>
 <button aria-label="Arcade Mode" aria-hidden="true" class="railBtn gdArcadeRailBtn" data-gd-rail-button="final" id="gdArcadeRailBtn" title="Arcade Mode" type="button" onclick="return gdOpenArcadeEntry(event)"><svg aria-hidden="true" viewBox="0 0 48 48" fill="none"><path d="M14 19h20c4.4 0 8 3.6 8 8v3.5c0 3-2.4 5.5-5.5 5.5-1.8 0-3.5-.9-4.5-2.4L29.8 30H18.2L16 33.6c-1 1.5-2.7 2.4-4.5 2.4C8.4 36 6 33.5 6 30.5V27c0-4.4 3.6-8 8-8Z" stroke="currentColor" stroke-width="3.4" stroke-linejoin="round"/><path d="M15 25v6M12 28h6" stroke="currentColor" stroke-width="3.4" stroke-linecap="round"/><path d="M32 27h.1M37 31h.1" stroke="currentColor" stroke-width="4.2" stroke-linecap="round"/></svg></button>
 <button aria-label="Map tools" class="railBtn gdMapperToolsBtn" data-gd-rail-button="final" id="gdMapperToolsBtn" title="Map tools" type="button">MAP</button>
 <button aria-label="Scorecard" class="railBtn" data-gd-rail-button="final" data-gd-rail-icon="scorecard" id="scorecardRailBtn" title="Scorecard" type="button"></button>
@@ -38628,5 +38628,383 @@ body.gps-active #shotTile .tileCarryValue span{
   window.addEventListener("resize", function(){ setTimeout(positionGreenFocusBall, 80); }, true);
 })();
 </script>
+
+<style id="gdFramedBoxCameraSystemV2Css">
+/* Framed-box camera debug overlay: visible by default for live testing. */
+#gdTargetFrameDebugOverlay{
+  position:fixed;
+  inset:0;
+  z-index:560;
+  pointer-events:none;
+  display:none;
+  font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+}
+body.gdTargetFrameDebugOn #gdTargetFrameDebugOverlay{display:block;}
+.gdTargetFrameBox{
+  position:absolute;
+  border:1.5px dotted rgba(232,255,238,.82);
+  border-radius:18px;
+  box-shadow:0 0 0 1px rgba(31,211,109,.18), inset 0 0 24px rgba(31,211,109,.035);
+  background:rgba(31,211,109,.018);
+}
+.gdTargetFrameBox span{
+  position:absolute;
+  left:10px;
+  top:8px;
+  color:rgba(236,255,242,.84);
+  background:rgba(5,10,8,.48);
+  border:1px solid rgba(255,255,255,.12);
+  border-radius:999px;
+  padding:4px 8px;
+  font-size:9px;
+  font-weight:800;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+  text-shadow:0 1px 2px rgba(0,0,0,.65);
+  backdrop-filter:blur(4px);
+}
+.gdTargetFrameBox[data-frame="hole"]{border-color:rgba(191,255,216,.70);}
+.gdTargetFrameBox[data-frame="lock"]{border-color:rgba(255,255,255,.86);border-width:2px;}
+.gdTargetFrameBox[data-frame="zoom"]{border-color:rgba(255,201,120,.86);}
+.gdTargetFrameBox[data-frame="tee"]{border-color:rgba(165,210,255,.62);}
+.gdSubtleGreenOutline{stroke-width:1px!important;opacity:.25!important;}
+.gdSubtleGreenSoft{stroke-width:.65px!important;opacity:.12!important;}
+</style>
+<script id="gdFramedBoxCameraSystemV2">
+(function(){
+  if(window.__gdFramedBoxCameraSystemV2) return;
+  window.__gdFramedBoxCameraSystemV2 = true;
+
+  var TARGET_FRAMES = { hole:"hole", lock:"lock", zoom:"zoom", tee:"tee" };
+  var SHOT_TARGET_MODE = { GREEN_TARGET:"greenTarget", FAIRWAY_LANDING:"fairwayLanding" };
+  var FAIRWAY_CAMERA_SAFE_ZONE = { left:.22, right:.78, top:.24, bottom:.72 };
+  var lastShotTargetMode = null;
+  var lastFairwayNudgeAt = 0;
+
+  window.TARGET_FRAMES = Object.assign({}, window.TARGET_FRAMES || {}, TARGET_FRAMES);
+  window.SHOT_TARGET_MODE = Object.assign({}, window.SHOT_TARGET_MODE || {}, SHOT_TARGET_MODE);
+  window.FAIRWAY_CAMERA_SAFE_ZONE = FAIRWAY_CAMERA_SAFE_ZONE;
+
+  function safe(fn, fallback){ try{ return fn(); }catch(e){ return fallback; } }
+  function num(v, fallback){ var n=Number(v); return Number.isFinite(n)?n:fallback; }
+  function hasMap(){ return typeof map !== "undefined" && map && typeof L !== "undefined"; }
+  function asLatLng(p){
+    if(!p) return null;
+    if(hasMap() && p.lat != null && p.lng != null) return L.latLng(Number(p.lat), Number(p.lng));
+    return null;
+  }
+  function fallbackRadius(){
+    return Math.max(16, num(safe(function(){ return fallbackGreenRadius(); }, null), 22));
+  }
+  function pointBounds(point, radiusM){
+    if(!hasMap() || !point) return null;
+    var center=asLatLng(point);
+    if(!center) return null;
+    var r=Math.max(3, num(radiusM, 20));
+    return L.latLngBounds([
+      safe(function(){ return project(center,0,r); }, center),
+      safe(function(){ return project(center,Math.PI,r); }, center),
+      safe(function(){ return project(center,Math.PI/2,r); }, center),
+      safe(function(){ return project(center,Math.PI*1.5,r); }, center)
+    ]);
+  }
+  function validBounds(b){ return !!(b && typeof b.isValid === "function" && b.isValid()); }
+  function boundsFromPoints(points){
+    if(!hasMap() || !Array.isArray(points)) return null;
+    var pts=points.map(asLatLng).filter(Boolean);
+    if(pts.length<1) return null;
+    var b=L.latLngBounds(pts);
+    return validBounds(b)?b:null;
+  }
+
+  function gdScreenTargetFrameRect(kind){
+    var w=window.innerWidth || document.documentElement.clientWidth || 390;
+    var h=window.innerHeight || document.documentElement.clientHeight || 760;
+    // Higher, play-area based boxes. Ratios are screen-relative because these are real camera targets.
+    var spec={
+      hole:{x:.29,y:.135,w:.42,h:.255},
+      lock:{x:.205,y:.155,w:.59,h:.39},
+      zoom:{x:.105,y:.125,w:.79,h:.52},
+      tee:{x:.30,y:.64,w:.40,h:.20}
+    }[kind] || {x:.205,y:.155,w:.59,h:.39};
+    return {
+      left:Math.round(w*spec.x),
+      top:Math.round(h*spec.y),
+      right:Math.round(w*(spec.x+spec.w)),
+      bottom:Math.round(h*(spec.y+spec.h)),
+      width:Math.round(w*spec.w),
+      height:Math.round(h*spec.h)
+    };
+  }
+  window.gdScreenTargetFrameRect = gdScreenTargetFrameRect;
+
+  function gdScreenTargetFrameConfig(kind){
+    var r=gdScreenTargetFrameRect(kind);
+    var w=window.innerWidth || document.documentElement.clientWidth || 390;
+    var h=window.innerHeight || document.documentElement.clientHeight || 760;
+    return { left:r.left, right:Math.max(0,w-r.right), top:r.top, bottom:Math.max(0,h-r.bottom) };
+  }
+  window.gdScreenTargetFrameConfig = gdScreenTargetFrameConfig;
+
+  function gdTargetFramePadding(kind){
+    var f=gdScreenTargetFrameConfig(kind);
+    return { paddingTopLeft:[f.left,f.top], paddingBottomRight:[f.right,f.bottom] };
+  }
+  window.gdTargetFramePadding = gdTargetFramePadding;
+
+  function frameRectToMapPadding(kind, fillRatio){
+    if(!hasMap()) return { paddingTopLeft:[30,90], paddingBottomRight:[30,80] };
+    var container = map.getContainer && map.getContainer();
+    var mr = container && container.getBoundingClientRect ? container.getBoundingClientRect() : {left:0,top:0,right:window.innerWidth,bottom:window.innerHeight,width:window.innerWidth,height:window.innerHeight};
+    var fr = gdScreenTargetFrameRect(kind);
+    var inset = Math.max(0, 1 - num(fillRatio, .98));
+    var extraX = Math.round(fr.width * inset * .5);
+    var extraY = Math.round(fr.height * inset * .5);
+    return {
+      paddingTopLeft:[
+        Math.max(0, Math.round(fr.left - mr.left + extraX)),
+        Math.max(0, Math.round(fr.top - mr.top + extraY))
+      ],
+      paddingBottomRight:[
+        Math.max(0, Math.round(mr.right - fr.right + extraX)),
+        Math.max(0, Math.round(mr.bottom - fr.bottom + extraY))
+      ]
+    };
+  }
+
+  function gdEnsureTargetFrameDebugOverlay(){
+    var overlay=document.getElementById("gdTargetFrameDebugOverlay");
+    if(!overlay){
+      overlay=document.createElement("div");
+      overlay.id="gdTargetFrameDebugOverlay";
+      overlay.setAttribute("aria-hidden","true");
+      document.body.appendChild(overlay);
+    }
+    var labels={hole:"GREEN / HOLE FRAME",lock:"LOCK FRAME",zoom:"GREEN / LANDING ZOOM",tee:"TEE FRAME"};
+    overlay.innerHTML=["hole","lock","zoom","tee"].map(function(k){
+      var r=gdScreenTargetFrameRect(k);
+      return '<div class="gdTargetFrameBox" data-frame="'+k+'" style="left:'+r.left+'px;top:'+r.top+'px;width:'+r.width+'px;height:'+r.height+'px"><span>'+labels[k]+'</span></div>';
+    }).join("");
+    return overlay;
+  }
+  window.gdEnsureTargetFrameDebugOverlay = gdEnsureTargetFrameDebugOverlay;
+
+  function gdSetTargetFrameDebug(enabled){
+    window.gdTargetFrameDebug = !!enabled;
+    gdEnsureTargetFrameDebugOverlay();
+    document.body.classList.toggle("gdTargetFrameDebugOn", !!enabled);
+  }
+  window.gdSetTargetFrameDebug = gdSetTargetFrameDebug;
+
+  function gdFitObjectBoundsToScreenFrame(objectBounds, frameName, options){
+    if(!hasMap() || !validBounds(objectBounds)) return false;
+    var opts=options || {};
+    var pad=frameRectToMapPadding(frameName || "lock", opts.fillRatio == null ? .99 : opts.fillRatio);
+    try{
+      if(typeof map.stop === "function") map.stop();
+      map.fitBounds(objectBounds, {
+        paddingTopLeft:pad.paddingTopLeft,
+        paddingBottomRight:pad.paddingBottomRight,
+        animate:opts.animate !== false,
+        duration:num(opts.duration, .36),
+        maxZoom:num(opts.maxZoom, frameName === "zoom" ? 21 : 20)
+      });
+      return true;
+    }catch(e){
+      try{
+        var c=objectBounds.getCenter();
+        map.setView(c, Math.min(num(opts.maxZoom,20), Math.max(map.getZoom ? map.getZoom()+1 : 18, 18)), {animate:opts.animate!==false,duration:num(opts.duration,.28)});
+        return true;
+      }catch(_e){ return false; }
+    }
+  }
+  window.gdFitObjectBoundsToScreenFrame = gdFitObjectBoundsToScreenFrame;
+
+  function gdGetGreenObjectBounds(){
+    if(!hasMap()) return null;
+    var b=boundsFromPoints(safe(function(){ return greenPolygon; }, null));
+    if(validBounds(b)) return b;
+    b=safe(function(){ return greenOutline && typeof greenOutline.getBounds === "function" ? greenOutline.getBounds() : null; }, null);
+    if(validBounds(b)) return b;
+    var c=asLatLng(safe(function(){ return greenCentre; }, null)) || asLatLng(safe(function(){ return target; }, null));
+    return c ? pointBounds(c, fallbackRadius()) : null;
+  }
+  window.gdGetGreenObjectBounds = gdGetGreenObjectBounds;
+
+  function gdActiveBubblePayload(center){
+    if(!hasMap()) return null;
+    var c=asLatLng(center) || asLatLng(safe(function(){ return target; }, null));
+    var d=safe(function(){ return start && c ? map.distance(start,c) : 155; }, 155);
+    var raw=safe(function(){ return calculateShot(d).bubbleProfile; }, null);
+    var payload=safe(function(){ return gdGpsBubbleDisplayPayload(raw,d,c); }, null) || safe(function(){ return gdBubblePayloadForRender(raw); }, null) || raw;
+    return payload;
+  }
+
+  function gdGetBubbleObjectBounds(bubbleCenter, bubblePayload){
+    if(!hasMap()) return null;
+    var center=asLatLng(bubbleCenter) || asLatLng(safe(function(){ return (typeof gdShotDisplayTarget === "function" && gdShotDisplayTarget()) || target; }, null));
+    if(!center) return null;
+    var payload=bubblePayload || gdActiveBubblePayload(center);
+    var shape=safe(function(){ return buildBubbleShape(center, payload, Math.max(.98, num(dev("bubbleVisuals.mainScale"), 1))); }, null);
+    var b=boundsFromPoints(shape);
+    if(validBounds(b)) return b;
+    var visual=payload && payload.visual || {};
+    var radius=Math.max(
+      14,
+      num(payload && payload.radius, 0),
+      num(payload && payload.lateralRadiusM, 0),
+      num(payload && payload.depthRadiusM, 0),
+      num(visual.visualWidthM, 0)/2,
+      num(visual.visualDepthM, 0)/2
+    );
+    return pointBounds(center, radius || 24);
+  }
+  window.gdGetBubbleObjectBounds = gdGetBubbleObjectBounds;
+
+  function gdGetFallbackPointBounds(point, radiusM){ return pointBounds(point, radiusM); }
+  window.gdGetFallbackPointBounds = gdGetFallbackPointBounds;
+
+  function gdCurrentShotClubPlayableDistance(){
+    if(!hasMap()) return null;
+    var display=asLatLng(safe(function(){ return (typeof gdShotDisplayTarget === "function" && gdShotDisplayTarget()) || target; }, null));
+    var d=safe(function(){ return start && display ? map.distance(start,display) : null; }, null);
+    var profile=safe(function(){ return d ? calculateShot(d).bubbleProfile : null; }, null);
+    var total=num(profile && (profile.totalM || profile.total || profile.baseTotal), NaN);
+    var carry=num(profile && (profile.baseCarry || profile.carry || profile.distance), NaN);
+    var playable=Number.isFinite(total) && total>0 ? total : (Number.isFinite(carry) && carry>0 ? carry : null);
+    if(playable) return playable;
+    return num(safe(function(){ return gdMaxPlayableCarryM(); }, null), null);
+  }
+  window.gdCurrentShotClubPlayableDistance = gdCurrentShotClubPlayableDistance;
+
+  function gdResolveShotTargetMode(){
+    if(!hasMap()) return SHOT_TARGET_MODE.GREEN_TARGET;
+    var green=asLatLng(safe(function(){ return greenCentre; }, null)) || asLatLng(safe(function(){ return target; }, null));
+    if(!green || !safe(function(){ return start; }, null)) return SHOT_TARGET_MODE.FAIRWAY_LANDING;
+    var greenDistance=safe(function(){ return map.distance(start,green); }, null);
+    var playable=gdCurrentShotClubPlayableDistance();
+    if(!(greenDistance>0) || !(playable>0)) return SHOT_TARGET_MODE.GREEN_TARGET;
+    var modeNow=lastShotTargetMode;
+    var switchToFairwayTol=14;
+    var switchToGreenTol=6;
+    var next;
+    if(modeNow === SHOT_TARGET_MODE.FAIRWAY_LANDING){
+      next = playable >= greenDistance - switchToGreenTol ? SHOT_TARGET_MODE.GREEN_TARGET : SHOT_TARGET_MODE.FAIRWAY_LANDING;
+    }else{
+      next = playable >= greenDistance - switchToFairwayTol ? SHOT_TARGET_MODE.GREEN_TARGET : SHOT_TARGET_MODE.FAIRWAY_LANDING;
+    }
+    lastShotTargetMode=next;
+    return next;
+  }
+  window.gdResolveShotTargetMode = gdResolveShotTargetMode;
+
+  function gdGetActiveShotObjectBounds(){
+    if(!hasMap()) return null;
+    var shotMode=gdResolveShotTargetMode();
+    if(shotMode === SHOT_TARGET_MODE.GREEN_TARGET){
+      return gdGetGreenObjectBounds() || gdGetBubbleObjectBounds(null,null) || gdGetFallbackPointBounds(safe(function(){ return greenCentre || target; }, null), fallbackRadius());
+    }
+    var center=asLatLng(safe(function(){ return (typeof gdShotDisplayTarget === "function" && gdShotDisplayTarget()) || target; }, null));
+    return gdGetBubbleObjectBounds(center,null) || gdGetFallbackPointBounds(center, 28);
+  }
+  window.gdGetActiveShotObjectBounds = gdGetActiveShotObjectBounds;
+
+  function gdFrameActiveShot(frameName, opts){
+    var b=gdGetActiveShotObjectBounds();
+    return gdFitObjectBoundsToScreenFrame(b, frameName || "lock", Object.assign({animate:true,fillRatio:.995,maxZoom:frameName==="zoom"?21:20,duration:.36}, opts||{}));
+  }
+  window.gdFrameActiveShot = gdFrameActiveShot;
+
+  function gdToggleTargetZoom(ev){
+    if(ev){ ev.preventDefault(); ev.stopPropagation(); if(ev.stopImmediatePropagation) ev.stopImmediatePropagation(); }
+    if(!hasMap()) return false;
+    var btn=document.getElementById("gdGreenZoomBtn");
+    if(gdSimpleGreenZoomActive){
+      gdSimpleGreenZoomActive=false;
+      document.body.classList.remove("gd-green-zoom-active");
+      if(btn) btn.classList.remove("softActive");
+      var view=gdSimpleGreenZoomReturnView;
+      gdSimpleGreenZoomReturnView=null;
+      if(view && view.center) safe(function(){ map.setView(view.center, view.zoom, {animate:true,duration:.32}); });
+      return false;
+    }
+    var bounds=gdGetActiveShotObjectBounds();
+    if(!validBounds(bounds)){ safe(function(){ toast("Set a shot target first"); }); return false; }
+    gdSimpleGreenZoomReturnView=safe(function(){ return {center:map.getCenter(),zoom:map.getZoom()}; }, null);
+    gdSimpleGreenZoomActive=true;
+    document.body.classList.add("gd-green-zoom-active");
+    if(btn) btn.classList.add("softActive");
+    gdFitObjectBoundsToScreenFrame(bounds, "zoom", {animate:true,duration:.32,fillRatio:1,maxZoom:21});
+    return false;
+  }
+  window.gdToggleTargetZoom = gdToggleTargetZoom;
+  window.gdToggleSimpleGreenZoom = gdToggleTargetZoom;
+
+  var previousFrameShotView=safe(function(){ return frameShotView; }, null);
+  if(typeof previousFrameShotView === "function"){
+    frameShotView=function(){
+      if(!safe(function(){ return start && target && map; }, false)) return previousFrameShotView.apply(this, arguments);
+      var b=gdGetActiveShotObjectBounds();
+      if(validBounds(b)) return gdFitObjectBoundsToScreenFrame(b, "lock", {animate:true,duration:.34,fillRatio:1,maxZoom:20});
+      return previousFrameShotView.apply(this, arguments);
+    };
+    window.frameShotView=frameShotView;
+  }
+
+  var previousLockFrame=safe(function(){ return lockFrame; }, null);
+  if(typeof previousLockFrame === "function"){
+    lockFrame=function(refit){
+      if(!safe(function(){ return start && target; }, false)) return;
+      if(refit !== false){
+        var fitted=false;
+        try{ fitted=!!frameShotView(); }catch(e){ fitted=false; }
+        if(!fitted) safe(function(){ previousLockFrame.call(this, refit); });
+      }
+      safe(function(){ setBubbleOnlyLock(true); });
+      safe(function(){ renderShot(); });
+      return true;
+    };
+    window.lockFrame=lockFrame;
+  }
+
+  function gdMaybeNudgeFairwayCamera(center){
+    if(!hasMap() || !center) return false;
+    if(!safe(function(){ return lockedFrame; }, false)) return false;
+    if(gdResolveShotTargetMode() !== SHOT_TARGET_MODE.FAIRWAY_LANDING) return false;
+    if(Date.now()-lastFairwayNudgeAt < 220) return false;
+    var p=safe(function(){ return map.latLngToContainerPoint(center); }, null);
+    var c=map.getContainer && map.getContainer();
+    if(!p || !c) return false;
+    var w=c.clientWidth || 1, h=c.clientHeight || 1;
+    var safeZone=FAIRWAY_CAMERA_SAFE_ZONE;
+    var minX=w*safeZone.left, maxX=w*safeZone.right, minY=h*safeZone.top, maxY=h*safeZone.bottom;
+    if(p.x>=minX && p.x<=maxX && p.y>=minY && p.y<=maxY) return false;
+    var dx=0, dy=0;
+    if(p.x<minX) dx=p.x-minX; else if(p.x>maxX) dx=p.x-maxX;
+    if(p.y<minY) dy=p.y-minY; else if(p.y>maxY) dy=p.y-maxY;
+    lastFairwayNudgeAt=Date.now();
+    safe(function(){ map.panBy([dx,dy], {animate:true,duration:.18}); });
+    return true;
+  }
+  window.gdMaybeNudgeFairwayCamera=gdMaybeNudgeFairwayCamera;
+
+  var previousQueue=safe(function(){ return gdQueueSmoothBubbleRender; }, null);
+  if(typeof previousQueue === "function"){
+    gdQueueSmoothBubbleRender=function(marker,ll){
+      var result=previousQueue.apply(this, arguments);
+      safe(function(){ gdMaybeNudgeFairwayCamera(ll); });
+      return result;
+    };
+    window.gdQueueSmoothBubbleRender=gdQueueSmoothBubbleRender;
+  }
+
+  function refreshOverlay(){ if(window.gdTargetFrameDebug) gdEnsureTargetFrameDebugOverlay(); }
+  window.addEventListener("resize", function(){ setTimeout(refreshOverlay, 60); }, true);
+  window.addEventListener("orientationchange", function(){ setTimeout(refreshOverlay, 160); }, true);
+  document.addEventListener("DOMContentLoaded", function(){ setTimeout(function(){ gdSetTargetFrameDebug(window.gdTargetFrameDebug !== false); }, 80); });
+  if(document.body) setTimeout(function(){ gdSetTargetFrameDebug(window.gdTargetFrameDebug !== false); }, 80);
+})();
+</script>
+
 </body>
 </html>
