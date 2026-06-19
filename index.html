@@ -39217,5 +39217,200 @@ body.gdTargetFrameDebugOn #gdTargetFrameDebugOverlay{display:block;}
 })();
 </script>
 
+
+<style id="gdFramedBoxCameraSystemV5Css">
+/* V5: bold target-frame camera. No broad-hole fallback in lock/zoom paths. */
+body.gdTargetFrameDebugOn #gdTargetFrameDebugOverlay{display:block!important;}
+#gdTargetFrameDebugOverlay{position:fixed!important;inset:0!important;pointer-events:none!important;z-index:1450!important;}
+.gdTargetFrameBox{position:fixed!important;box-sizing:border-box!important;border:1.5px dotted rgba(255,255,255,.78)!important;border-radius:18px!important;pointer-events:none!important;background:rgba(31,211,109,.025)!important;box-shadow:0 0 0 1px rgba(0,0,0,.32), inset 0 0 28px rgba(31,211,109,.045)!important;color:rgba(255,255,255,.95)!important;font:800 9px/1.1 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif!important;letter-spacing:.13em!important;text-transform:uppercase!important;text-shadow:0 1px 3px rgba(0,0,0,.9)!important;}
+.gdTargetFrameBox span{position:absolute!important;left:50%!important;top:-13px!important;transform:translateX(-50%)!important;padding:3px 7px!important;border-radius:7px!important;background:rgba(8,13,10,.82)!important;white-space:nowrap!important;}
+.gdTargetFrameBox[data-frame="hole"]{border-color:rgba(191,255,216,.74)!important;}
+.gdTargetFrameBox[data-frame="lock"]{border-color:rgba(255,255,255,.95)!important;border-width:2px!important;background:rgba(255,255,255,.02)!important;}
+.gdTargetFrameBox[data-frame="zoom"]{border-color:rgba(255,213,128,.9)!important;background:rgba(255,213,128,.02)!important;}
+.gdTargetFrameBox[data-frame="tee"]{border-color:rgba(165,210,255,.68)!important;background:rgba(56,143,255,.02)!important;}
+.gdTargetFrameBox[data-frame="tee"] span{left:50%!important;top:8px!important;transform:translateX(-50%)!important;}
+</style>
+<script id="gdFramedBoxCameraSystemV5">
+(function(){
+  window.__gdFramedBoxCameraSystemV5 = true;
+
+  var lastMode = null;
+  var pendingTimers = [];
+  var SAFE_ZONE = {left:.20,right:.80,top:.20,bottom:.76};
+  var lastNudgeAt = 0;
+
+  function safe(fn,fallback){try{return fn();}catch(e){return fallback;}}
+  function num(v,fallback){var n=Number(v);return Number.isFinite(n)?n:fallback;}
+  function hasMap(){return typeof map!=="undefined" && map && typeof L!=="undefined";}
+  function validBounds(b){return !!(b && typeof b.isValid==="function" && b.isValid());}
+  function asLatLng(p){if(!hasMap()||!p||p.lat==null||p.lng==null)return null;return L.latLng(Number(p.lat),Number(p.lng));}
+  function currentTarget(){return asLatLng(safe(function(){return (typeof gdShotDisplayTarget==="function"&&gdShotDisplayTarget())||target||greenCentre;},null));}
+  function greenPoint(){return asLatLng(safe(function(){return greenCentre||target;},null));}
+  function pointBounds(point,radiusM){var c=asLatLng(point);if(!hasMap()||!c)return null;var r=Math.max(3,num(radiusM,12));return L.latLngBounds([safe(function(){return project(c,0,r);},c),safe(function(){return project(c,Math.PI,r);},c),safe(function(){return project(c,Math.PI/2,r);},c),safe(function(){return project(c,Math.PI*1.5,r);},c)]);}
+  function boundsFromPoints(points){if(!hasMap()||!Array.isArray(points)||!points.length)return null;var pts=points.map(asLatLng).filter(Boolean);if(!pts.length)return null;var b=L.latLngBounds(pts);return validBounds(b)?b:null;}
+  function boundsSizeM(b){if(!hasMap()||!validBounds(b))return {w:0,h:0,diag:0};var sw=b.getSouthWest(),ne=b.getNorthEast(),nw=L.latLng(ne.lat,sw.lng),se=L.latLng(sw.lat,ne.lng);var w=safe(function(){return map.distance(sw,se);},0);var h=safe(function(){return map.distance(sw,nw);},0);return {w:w,h:h,diag:Math.sqrt(w*w+h*h)};}
+
+  function frameRect(kind){
+    var w=window.innerWidth||document.documentElement.clientWidth||390;
+    var h=window.innerHeight||document.documentElement.clientHeight||760;
+    var spec={
+      hole:{x:.30,y:.135,w:.40,h:.235},
+      lock:{x:.205,y:.145,w:.60,h:.38},
+      zoom:{x:.10,y:.105,w:.80,h:.50},
+      tee:{x:.335,y:.795,w:.33,h:.105}
+    }[kind]||{x:.205,y:.145,w:.60,h:.38};
+    return {left:Math.round(w*spec.x),top:Math.round(h*spec.y),right:Math.round(w*(spec.x+spec.w)),bottom:Math.round(h*(spec.y+spec.h)),width:Math.round(w*spec.w),height:Math.round(h*spec.h)};
+  }
+  window.gdScreenTargetFrameRect=frameRect;
+  window.gdScreenTargetFrameConfig=function(kind){var r=frameRect(kind),w=window.innerWidth||390,h=window.innerHeight||760;return {left:r.left,top:r.top,right:Math.max(0,w-r.right),bottom:Math.max(0,h-r.bottom)};};
+  function ensureOverlay(){
+    if(!document.body)return null;
+    var overlay=document.getElementById("gdTargetFrameDebugOverlay");
+    if(!overlay){overlay=document.createElement("div");overlay.id="gdTargetFrameDebugOverlay";overlay.setAttribute("aria-hidden","true");document.body.appendChild(overlay);} 
+    var labels={hole:"GREEN / HOLE FRAME",lock:"LOCK FRAME",zoom:"GREEN / LANDING ZOOM",tee:"TEE FRAME"};
+    overlay.innerHTML=["hole","lock","zoom","tee"].map(function(k){var r=frameRect(k);return '<div class="gdTargetFrameBox" data-frame="'+k+'" style="left:'+r.left+'px;top:'+r.top+'px;width:'+r.width+'px;height:'+r.height+'px"><span>'+labels[k]+'</span></div>';}).join("");
+    return overlay;
+  }
+  window.gdEnsureTargetFrameDebugOverlay=ensureOverlay;
+  window.gdSetTargetFrameDebug=function(enabled){window.gdTargetFrameDebug=!!enabled;ensureOverlay();if(document.body)document.body.classList.toggle("gdTargetFrameDebugOn",!!enabled);};
+  window.gdTargetFramePadding=function(kind){var r=frameRect(kind||"lock"),w=window.innerWidth||390,h=window.innerHeight||760;return {paddingTopLeft:[r.left,r.top],paddingBottomRight:[Math.max(0,w-r.right),Math.max(0,h-r.bottom)]};};
+
+  function getGreenBounds(){
+    // No broad fallback: accept only a real/sensible green-sized object, otherwise use the known green centre as a tight green target.
+    var b=boundsFromPoints(safe(function(){return greenPolygon;},null));
+    if(!validBounds(b)) b=safe(function(){return greenOutline&&typeof greenOutline.getBounds==="function"?greenOutline.getBounds():null;},null);
+    if(validBounds(b)){
+      var s=boundsSizeM(b);
+      if(s.diag>0 && s.diag<=80 && s.w<=72 && s.h<=72) return b;
+    }
+    var c=greenPoint();
+    return c?pointBounds(c,14):null;
+  }
+  window.gdGetGreenObjectBounds=getGreenBounds;
+
+  function bubblePayload(center){
+    var c=asLatLng(center)||currentTarget(); if(!c)return null;
+    var d=safe(function(){return start&&c?map.distance(start,c):160;},160);
+    var raw=safe(function(){return calculateShot(d).bubbleProfile;},null)||{};
+    return safe(function(){return gdGpsBubbleDisplayPayload(raw,d,c);},null)||safe(function(){return gdBubblePayloadForRender(raw);},null)||raw;
+  }
+  function getBubbleBounds(center,payload){
+    var c=asLatLng(center)||currentTarget(); if(!c)return null;
+    var p=payload||bubblePayload(c)||{};
+    var shape=safe(function(){return buildBubbleShape(c,p,Math.max(1,num(dev("bubbleVisuals.mainScale"),1)));},null);
+    var b=boundsFromPoints(shape);
+    if(validBounds(b))return b;
+    var visual=(p&&p.visual)||{};
+    var radius=Math.max(18,num(p.radius,0),num(p.lateralRadiusM,0),num(p.depthRadiusM,0),num(visual.visualWidthM,0)/2,num(visual.visualDepthM,0)/2);
+    return pointBounds(c,radius);
+  }
+  window.gdGetBubbleObjectBounds=getBubbleBounds;
+  window.gdGetFallbackPointBounds=function(point,radiusM){return pointBounds(point,radiusM);};
+
+  function explicitLayup(){
+    var g=greenPoint(),t=currentTarget(); if(!g||!t)return false;
+    var builtIn=safe(function(){return typeof gdIsLayupTarget==="function"&&gdIsLayupTarget(g,t);},false);
+    if(builtIn)return true;
+    return safe(function(){return map.distance(g,t)>30;},false);
+  }
+  function resolveMode(){
+    // No broad reach fallback. Only use fairway mode when the shot target/bubble has genuinely moved off the green.
+    lastMode=explicitLayup()?"fairwayLanding":"greenTarget";
+    return lastMode;
+  }
+  window.gdResolveShotTargetMode=resolveMode;
+  function activeBounds(){
+    var mode=resolveMode();
+    if(mode==="fairwayLanding") return getBubbleBounds(currentTarget(),null);
+    // Green mode means frame the green target only; do not include tee/start and do not use whole-hole bounds.
+    return getGreenBounds() || getBubbleBounds(greenPoint(),null);
+  }
+  window.gdGetActiveShotObjectBounds=activeBounds;
+
+  function projectedPixelBounds(bounds,z){
+    var sw=bounds.getSouthWest(),ne=bounds.getNorthEast(),nw=L.latLng(ne.lat,sw.lng),se=L.latLng(sw.lat,ne.lng);
+    var pts=[sw,ne,nw,se].map(function(p){return map.project(p,z);});
+    var xs=pts.map(function(p){return p.x;}),ys=pts.map(function(p){return p.y;});
+    return {minX:Math.min.apply(null,xs),maxX:Math.max.apply(null,xs),minY:Math.min.apply(null,ys),maxY:Math.max.apply(null,ys)};
+  }
+  function fitObjectBoundsToFrame(bounds,frameName,options){
+    if(!hasMap()||!validBounds(bounds))return false;
+    var kind=frameName||"lock",opts=options||{},fr=frameRect(kind);
+    var fill=num(opts.fillRatio,kind==="zoom"?.94:.88);
+    var baseZ=num(safe(function(){return map.getZoom();},18),18);
+    var pb=projectedPixelBounds(bounds,baseZ);
+    var objW=Math.max(1,pb.maxX-pb.minX),objH=Math.max(1,pb.maxY-pb.minY);
+    var targetW=Math.max(32,fr.width*fill),targetH=Math.max(32,fr.height*fill);
+    // Bold framing: zoom until the object fills the frame on its limiting axis.
+    var scale=Math.min(targetW/objW,targetH/objH);
+    var z=baseZ + Math.log(Math.max(.01,scale))/Math.LN2;
+    z += num(opts.zoomBoost,kind==="zoom"?.35:.18);
+    z=Math.max(num(opts.minZoom,17),Math.min(num(opts.maxZoom,21.75),z));
+    safe(function(){map.options.zoomSnap=.01;map.options.zoomDelta=.25;if(typeof map.stop==="function")map.stop();});
+    var mapRect=safe(function(){return map.getContainer().getBoundingClientRect();},{left:0,top:0,width:window.innerWidth||390,height:window.innerHeight||760});
+    var screenCenter=L.point((mapRect.width||window.innerWidth||390)/2,(mapRect.height||window.innerHeight||760)/2);
+    var desired=L.point(fr.left-mapRect.left+fr.width/2,fr.top-mapRect.top+fr.height/2);
+    var objectCenter=bounds.getCenter();
+    var targetLayer=map.project(objectCenter,z);
+    var newCenterLayer=targetLayer.subtract(desired.subtract(screenCenter));
+    var newCenter=map.unproject(newCenterLayer,z);
+    map.setView(newCenter,z,{animate:opts.animate!==false,duration:num(opts.duration,.18)});
+    window.__gdLastTargetFrameFit={kind:kind,zoom:z,fill:fill,mode:lastMode,objectMeters:boundsSizeM(bounds)};
+    return true;
+  }
+  window.gdFitObjectBoundsToScreenFrame=fitObjectBoundsToFrame;
+  function frameActiveShot(kind,opts){var b=activeBounds(); if(!validBounds(b))return false; return fitObjectBoundsToFrame(b,kind||"lock",Object.assign({animate:true,duration:.18},opts||{}));}
+  window.gdFrameActiveShot=frameActiveShot;
+  function clearTimers(){pendingTimers.forEach(clearTimeout);pendingTimers=[];}
+  function refitLocked(){clearTimers();[0,55,140,260].forEach(function(ms){pendingTimers.push(setTimeout(function(){if(safe(function(){return lockedFrame&&start&&target;},false))frameActiveShot("lock",{animate:ms>0,duration:.12,fillRatio:.90,zoomBoost:.25});},ms));});}
+
+  // Kill broad old camera paths in shot lock/zoom. This is the replacement camera contract.
+  frameShotView=function(){return frameActiveShot("lock",{animate:true,duration:.16,fillRatio:.90,zoomBoost:.25});};
+  window.frameShotView=frameShotView;
+  lockFrame=function(refit){
+    if(!safe(function(){return start&&target&&map;},false))return false;
+    lockedFrame=true;
+    if(refit!==false)frameShotView();
+    safe(function(){setBubbleOnlyLock(true);});
+    safe(function(){renderShot();});
+    if(refit!==false)refitLocked();
+    return true;
+  };
+  window.lockFrame=lockFrame;
+  window.gdToggleTargetZoom=function(ev){
+    if(ev){ev.preventDefault();ev.stopPropagation();if(ev.stopImmediatePropagation)ev.stopImmediatePropagation();}
+    if(!hasMap())return false;
+    var btn=document.getElementById("gdGreenZoomBtn");
+    if(window.gdSimpleGreenZoomActive){
+      window.gdSimpleGreenZoomActive=false;document.body.classList.remove("gd-green-zoom-active");if(btn)btn.classList.remove("softActive");
+      var v=window.gdSimpleGreenZoomReturnView;window.gdSimpleGreenZoomReturnView=null;if(v&&v.center)safe(function(){map.setView(v.center,v.zoom,{animate:true,duration:.18});});return false;
+    }
+    var b=activeBounds(); if(!validBounds(b))return false;
+    window.gdSimpleGreenZoomReturnView=safe(function(){return {center:map.getCenter(),zoom:map.getZoom()};},null);
+    window.gdSimpleGreenZoomActive=true;document.body.classList.add("gd-green-zoom-active");if(btn)btn.classList.add("softActive");
+    fitObjectBoundsToFrame(b,"zoom",{animate:true,duration:.16,fillRatio:.96,zoomBoost:.45,maxZoom:21.75});
+    return false;
+  };
+  window.gdToggleSimpleGreenZoom=window.gdToggleTargetZoom;
+  var prevUndo=window.gdReframeShotAfterUndo;
+  window.gdReframeShotAfterUndo=function(opts){var out=safe(function(){return typeof prevUndo==="function"?prevUndo(opts||{}):false;},false);if(safe(function(){return lockedFrame;},false)&&(!opts||opts.refit!==false))refitLocked();return out;};
+  window.gdMaybeNudgeFairwayCamera=function(center){
+    if(!hasMap()||!center||!safe(function(){return lockedFrame;},false)||resolveMode()!=="fairwayLanding")return false;
+    if(Date.now()-lastNudgeAt<260)return false;
+    var p=safe(function(){return map.latLngToContainerPoint(center);},null);if(!p)return false;
+    var c=map.getContainer(),w=c.clientWidth||1,h=c.clientHeight||1,minX=w*SAFE_ZONE.left,maxX=w*SAFE_ZONE.right,minY=h*SAFE_ZONE.top,maxY=h*SAFE_ZONE.bottom;
+    if(p.x>=minX&&p.x<=maxX&&p.y>=minY&&p.y<=maxY)return false;
+    var dx=0,dy=0;if(p.x<minX)dx=p.x-minX;else if(p.x>maxX)dx=p.x-maxX;if(p.y<minY)dy=p.y-minY;else if(p.y>maxY)dy=p.y-maxY;
+    lastNudgeAt=Date.now();safe(function(){map.panBy([dx,dy],{animate:true,duration:.12});});return true;
+  };
+
+  function refresh(){if(window.gdTargetFrameDebug!==false)window.gdSetTargetFrameDebug(true);}
+  window.addEventListener("resize",function(){setTimeout(refresh,50);},true);
+  window.addEventListener("orientationchange",function(){setTimeout(refresh,150);},true);
+  document.addEventListener("DOMContentLoaded",function(){setTimeout(refresh,80);});
+  if(document.body)setTimeout(refresh,80);
+})();
+</script>
+
 </body>
 </html>
