@@ -3928,7 +3928,7 @@ body[data-gd-permission="admin"] #gdV62Home .gdHomeAdminSettings{display:inline-
 <button aria-label="Green Wand" class="railBtn greenBtn" data-gd-rail-button="final" data-gd-rail-icon="wand" id="greenToolBtn" title="Green Wand" type="button"></button>
 <button aria-label="Wind" class="railBtn gdWindToolBtn" data-gd-rail-button="final" id="windToolBtn" title="Wind" type="button" onclick="gdWindToolPressed(event)"><svg aria-hidden="true" viewBox="0 0 48 48"><path d="M9 17h20c4.4 0 6.6-5.4 3.5-8.5-2.4-2.4-6.5-1.5-7.6 1.7" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M8 25h28c5.2 0 7.8 6.3 4.1 10-2.9 2.9-7.8 1.7-9.1-2.1" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M13 33h11" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/></svg></button>
 <button aria-label="GPS locate" class="railBtn gdGpsRecenterBtn" data-gd-rail-button="final" data-gd-rail-icon="gps" id="gpsRailBtn" title="GPS locate" type="button"></button>
-<button aria-label="Green zoom" class="railBtn gdGreenZoomBtn" data-gd-rail-button="final" id="gdGreenZoomBtn" title="Green zoom" type="button" onclick="return gdToggleTargetZoom(event)"><svg aria-hidden="true" viewBox="0 0 48 48" fill="none"><circle cx="21" cy="21" r="10" stroke="currentColor" stroke-width="4"/><path d="M29 29l9 9" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M21 15v12M15 21h12" stroke="currentColor" stroke-width="3.4" stroke-linecap="round"/></svg></button>
+<button aria-label="Green zoom" class="railBtn gdGreenZoomBtn" data-gd-rail-button="final" id="gdGreenZoomBtn" title="Green zoom" type="button" onclick="return gdToggleSimpleGreenZoom(event)"><svg aria-hidden="true" viewBox="0 0 48 48" fill="none"><circle cx="21" cy="21" r="10" stroke="currentColor" stroke-width="4"/><path d="M29 29l9 9" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M21 15v12M15 21h12" stroke="currentColor" stroke-width="3.4" stroke-linecap="round"/></svg></button>
 <button aria-label="Arcade Mode" aria-hidden="true" class="railBtn gdArcadeRailBtn" data-gd-rail-button="final" id="gdArcadeRailBtn" title="Arcade Mode" type="button" onclick="return gdOpenArcadeEntry(event)"><svg aria-hidden="true" viewBox="0 0 48 48" fill="none"><path d="M14 19h20c4.4 0 8 3.6 8 8v3.5c0 3-2.4 5.5-5.5 5.5-1.8 0-3.5-.9-4.5-2.4L29.8 30H18.2L16 33.6c-1 1.5-2.7 2.4-4.5 2.4C8.4 36 6 33.5 6 30.5V27c0-4.4 3.6-8 8-8Z" stroke="currentColor" stroke-width="3.4" stroke-linejoin="round"/><path d="M15 25v6M12 28h6" stroke="currentColor" stroke-width="3.4" stroke-linecap="round"/><path d="M32 27h.1M37 31h.1" stroke="currentColor" stroke-width="4.2" stroke-linecap="round"/></svg></button>
 <button aria-label="Map tools" class="railBtn gdMapperToolsBtn" data-gd-rail-button="final" id="gdMapperToolsBtn" title="Map tools" type="button">MAP</button>
 <button aria-label="Scorecard" class="railBtn" data-gd-rail-button="final" data-gd-rail-icon="scorecard" id="scorecardRailBtn" title="Scorecard" type="button"></button>
@@ -38628,338 +38628,263 @@ body.gps-active #shotTile .tileCarryValue span{
   window.addEventListener("resize", function(){ setTimeout(positionGreenFocusBall, 80); }, true);
 })();
 </script>
-
-<style id="gdFramedBoxCameraSystemV2Css">
-/* Framed-box camera debug overlay: visible by default for live testing. */
-#gdTargetFrameDebugOverlay{
-  position:fixed;
-  inset:0;
-  z-index:560;
-  pointer-events:none;
-  display:none;
-  font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-}
-body.gdTargetFrameDebugOn #gdTargetFrameDebugOverlay{display:block;}
-.gdTargetFrameBox{
-  position:absolute;
-  border:1.5px dotted rgba(232,255,238,.82);
-  border-radius:18px;
-  box-shadow:0 0 0 1px rgba(31,211,109,.18), inset 0 0 24px rgba(31,211,109,.035);
-  background:rgba(31,211,109,.018);
-}
-.gdTargetFrameBox span{
-  position:absolute;
-  left:10px;
-  top:8px;
-  color:rgba(236,255,242,.84);
-  background:rgba(5,10,8,.48);
-  border:1px solid rgba(255,255,255,.12);
-  border-radius:999px;
-  padding:4px 8px;
-  font-size:9px;
-  font-weight:800;
-  letter-spacing:.08em;
-  text-transform:uppercase;
-  text-shadow:0 1px 2px rgba(0,0,0,.65);
-  backdrop-filter:blur(4px);
-}
-.gdTargetFrameBox[data-frame="hole"]{border-color:rgba(191,255,216,.70);}
-.gdTargetFrameBox[data-frame="lock"]{border-color:rgba(255,255,255,.86);border-width:2px;}
-.gdTargetFrameBox[data-frame="zoom"]{border-color:rgba(255,201,120,.86);}
-.gdTargetFrameBox[data-frame="tee"]{border-color:rgba(165,210,255,.62);}
-.gdSubtleGreenOutline{stroke-width:1px!important;opacity:.25!important;}
-.gdSubtleGreenSoft{stroke-width:.65px!important;opacity:.12!important;}
+<style id="gdFramedBoxCameraSystemV3Css">
+/* V3 frame placement correction: tee frame lives low and is only a hole-frame guide. */
+.gdTargetFrameBox[data-frame="tee"] span{left:50%;top:8px;transform:translateX(-50%);}
 </style>
-<script id="gdFramedBoxCameraSystemV2">
+<script id="gdFramedBoxCameraSystemV3">
 (function(){
-  if(window.__gdFramedBoxCameraSystemV2) return;
-  window.__gdFramedBoxCameraSystemV2 = true;
+  if(window.__gdFramedBoxCameraSystemV3) return;
+  window.__gdFramedBoxCameraSystemV3 = true;
 
   var TARGET_FRAMES = { hole:"hole", lock:"lock", zoom:"zoom", tee:"tee" };
   var SHOT_TARGET_MODE = { GREEN_TARGET:"greenTarget", FAIRWAY_LANDING:"fairwayLanding" };
-  var FAIRWAY_CAMERA_SAFE_ZONE = { left:.22, right:.78, top:.24, bottom:.72 };
-  var lastShotTargetMode = null;
-  var lastFairwayNudgeAt = 0;
-
-  window.TARGET_FRAMES = Object.assign({}, window.TARGET_FRAMES || {}, TARGET_FRAMES);
-  window.SHOT_TARGET_MODE = Object.assign({}, window.SHOT_TARGET_MODE || {}, SHOT_TARGET_MODE);
-  window.FAIRWAY_CAMERA_SAFE_ZONE = FAIRWAY_CAMERA_SAFE_ZONE;
+  var lastMode = null;
+  var lastNudgeAt = 0;
+  var SAFE_ZONE = { left:.22, right:.78, top:.24, bottom:.72 };
 
   function safe(fn, fallback){ try{ return fn(); }catch(e){ return fallback; } }
   function num(v, fallback){ var n=Number(v); return Number.isFinite(n)?n:fallback; }
   function hasMap(){ return typeof map !== "undefined" && map && typeof L !== "undefined"; }
-  function asLatLng(p){
-    if(!p) return null;
-    if(hasMap() && p.lat != null && p.lng != null) return L.latLng(Number(p.lat), Number(p.lng));
-    return null;
-  }
-  function fallbackRadius(){
-    return Math.max(16, num(safe(function(){ return fallbackGreenRadius(); }, null), 22));
-  }
-  function pointBounds(point, radiusM){
-    if(!hasMap() || !point) return null;
-    var center=asLatLng(point);
-    if(!center) return null;
-    var r=Math.max(3, num(radiusM, 20));
-    return L.latLngBounds([
-      safe(function(){ return project(center,0,r); }, center),
-      safe(function(){ return project(center,Math.PI,r); }, center),
-      safe(function(){ return project(center,Math.PI/2,r); }, center),
-      safe(function(){ return project(center,Math.PI*1.5,r); }, center)
-    ]);
-  }
+  function asLatLng(p){ if(!hasMap() || !p) return null; if(p.lat==null || p.lng==null) return null; return L.latLng(Number(p.lat), Number(p.lng)); }
   function validBounds(b){ return !!(b && typeof b.isValid === "function" && b.isValid()); }
+  function mapRect(){
+    var c=hasMap() && map.getContainer && map.getContainer();
+    return c && c.getBoundingClientRect ? c.getBoundingClientRect() : {left:0,top:0,right:window.innerWidth,bottom:window.innerHeight,width:window.innerWidth,height:window.innerHeight};
+  }
   function boundsFromPoints(points){
     if(!hasMap() || !Array.isArray(points)) return null;
     var pts=points.map(asLatLng).filter(Boolean);
-    if(pts.length<1) return null;
+    if(!pts.length) return null;
     var b=L.latLngBounds(pts);
     return validBounds(b)?b:null;
   }
-
-  function gdScreenTargetFrameRect(kind){
-    var w=window.innerWidth || document.documentElement.clientWidth || 390;
-    var h=window.innerHeight || document.documentElement.clientHeight || 760;
-    // Higher, play-area based boxes. Ratios are screen-relative because these are real camera targets.
-    var spec={
-      hole:{x:.29,y:.135,w:.42,h:.255},
-      lock:{x:.205,y:.155,w:.59,h:.39},
-      zoom:{x:.105,y:.125,w:.79,h:.52},
-      tee:{x:.30,y:.64,w:.40,h:.20}
-    }[kind] || {x:.205,y:.155,w:.59,h:.39};
-    return {
-      left:Math.round(w*spec.x),
-      top:Math.round(h*spec.y),
-      right:Math.round(w*(spec.x+spec.w)),
-      bottom:Math.round(h*(spec.y+spec.h)),
-      width:Math.round(w*spec.w),
-      height:Math.round(h*spec.h)
-    };
+  function pointBounds(point, radiusM){
+    if(!hasMap()) return null;
+    var c=asLatLng(point); if(!c) return null;
+    var r=Math.max(4, num(radiusM, 20));
+    return L.latLngBounds([
+      safe(function(){ return project(c,0,r); }, c),
+      safe(function(){ return project(c,Math.PI,r); }, c),
+      safe(function(){ return project(c,Math.PI/2,r); }, c),
+      safe(function(){ return project(c,Math.PI*1.5,r); }, c)
+    ]);
   }
-  window.gdScreenTargetFrameRect = gdScreenTargetFrameRect;
-
-  function gdScreenTargetFrameConfig(kind){
-    var r=gdScreenTargetFrameRect(kind);
-    var w=window.innerWidth || document.documentElement.clientWidth || 390;
-    var h=window.innerHeight || document.documentElement.clientHeight || 760;
-    return { left:r.left, right:Math.max(0,w-r.right), top:r.top, bottom:Math.max(0,h-r.bottom) };
+  function boundsSizeM(b){
+    if(!hasMap() || !validBounds(b)) return {w:0,h:0,diag:0};
+    var sw=b.getSouthWest(), ne=b.getNorthEast();
+    var nw=L.latLng(ne.lat, sw.lng), se=L.latLng(sw.lat, ne.lng);
+    var w=safe(function(){ return map.distance(sw,se); }, 0);
+    var h=safe(function(){ return map.distance(sw,nw); }, 0);
+    return {w:w,h:h,diag:Math.sqrt(w*w+h*h)};
   }
-  window.gdScreenTargetFrameConfig = gdScreenTargetFrameConfig;
-
-  function gdTargetFramePadding(kind){
-    var f=gdScreenTargetFrameConfig(kind);
-    return { paddingTopLeft:[f.left,f.top], paddingBottomRight:[f.right,f.bottom] };
-  }
-  window.gdTargetFramePadding = gdTargetFramePadding;
-
-  function frameRectToMapPadding(kind, fillRatio){
-    if(!hasMap()) return { paddingTopLeft:[30,90], paddingBottomRight:[30,80] };
-    var container = map.getContainer && map.getContainer();
-    var mr = container && container.getBoundingClientRect ? container.getBoundingClientRect() : {left:0,top:0,right:window.innerWidth,bottom:window.innerHeight,width:window.innerWidth,height:window.innerHeight};
-    var fr = gdScreenTargetFrameRect(kind);
-    var inset = Math.max(0, 1 - num(fillRatio, .98));
-    var extraX = Math.round(fr.width * inset * .5);
-    var extraY = Math.round(fr.height * inset * .5);
-    return {
-      paddingTopLeft:[
-        Math.max(0, Math.round(fr.left - mr.left + extraX)),
-        Math.max(0, Math.round(fr.top - mr.top + extraY))
-      ],
-      paddingBottomRight:[
-        Math.max(0, Math.round(mr.right - fr.right + extraX)),
-        Math.max(0, Math.round(mr.bottom - fr.bottom + extraY))
-      ]
-    };
-  }
-
-  function gdEnsureTargetFrameDebugOverlay(){
-    var overlay=document.getElementById("gdTargetFrameDebugOverlay");
-    if(!overlay){
-      overlay=document.createElement("div");
-      overlay.id="gdTargetFrameDebugOverlay";
-      overlay.setAttribute("aria-hidden","true");
-      document.body.appendChild(overlay);
+  function normalizeGreenBounds(b){
+    if(!validBounds(b)) return null;
+    var s=boundsSizeM(b);
+    // A green frame must never accidentally inherit a whole-hole/fairway shape.
+    // If it is too large to be a green, fall back to a tight green-centre radius.
+    if(s.diag > 95 || s.w > 82 || s.h > 82){
+      var c=asLatLng(safe(function(){ return greenCentre || target; }, null)) || b.getCenter();
+      return pointBounds(c, 22);
     }
+    return b;
+  }
+
+  function gdScreenTargetFrameRectV3(kind){
+    var w=window.innerWidth || document.documentElement.clientWidth || 390;
+    var h=window.innerHeight || document.documentElement.clientHeight || 760;
+    var spec={
+      hole:{x:.30,y:.135,w:.40,h:.235},
+      lock:{x:.205,y:.145,w:.60,h:.38},
+      zoom:{x:.10,y:.105,w:.80,h:.50},
+      // Tee frame is only a hole-frame setup reference and sits low, near the start/bottom area.
+      tee:{x:.335,y:.735,w:.33,h:.145}
+    }[kind] || {x:.205,y:.145,w:.60,h:.38};
+    return {left:Math.round(w*spec.x),top:Math.round(h*spec.y),right:Math.round(w*(spec.x+spec.w)),bottom:Math.round(h*(spec.y+spec.h)),width:Math.round(w*spec.w),height:Math.round(h*spec.h)};
+  }
+  window.gdScreenTargetFrameRect = gdScreenTargetFrameRectV3;
+
+  function framePadding(kind, fillRatio){
+    var mr=mapRect();
+    var fr=gdScreenTargetFrameRectV3(kind);
+    var inset=Math.max(0, 1-num(fillRatio,1));
+    var extraX=Math.round(fr.width*inset*.5), extraY=Math.round(fr.height*inset*.5);
+    return {
+      paddingTopLeft:[Math.max(0,Math.round(fr.left-mr.left+extraX)), Math.max(0,Math.round(fr.top-mr.top+extraY))],
+      paddingBottomRight:[Math.max(0,Math.round(mr.right-fr.right+extraX)), Math.max(0,Math.round(mr.bottom-fr.bottom+extraY))]
+    };
+  }
+  window.gdScreenTargetFrameConfig=function(kind){
+    var r=gdScreenTargetFrameRectV3(kind), w=window.innerWidth||390, h=window.innerHeight||760;
+    return {left:r.left,top:r.top,right:Math.max(0,w-r.right),bottom:Math.max(0,h-r.bottom)};
+  };
+  window.gdTargetFramePadding=function(kind){ return framePadding(kind||"lock", 1); };
+
+  function ensureOverlay(){
+    var overlay=document.getElementById("gdTargetFrameDebugOverlay");
+    if(!overlay){ overlay=document.createElement("div"); overlay.id="gdTargetFrameDebugOverlay"; overlay.setAttribute("aria-hidden","true"); document.body.appendChild(overlay); }
     var labels={hole:"GREEN / HOLE FRAME",lock:"LOCK FRAME",zoom:"GREEN / LANDING ZOOM",tee:"TEE FRAME"};
     overlay.innerHTML=["hole","lock","zoom","tee"].map(function(k){
-      var r=gdScreenTargetFrameRect(k);
+      var r=gdScreenTargetFrameRectV3(k);
       return '<div class="gdTargetFrameBox" data-frame="'+k+'" style="left:'+r.left+'px;top:'+r.top+'px;width:'+r.width+'px;height:'+r.height+'px"><span>'+labels[k]+'</span></div>';
     }).join("");
     return overlay;
   }
-  window.gdEnsureTargetFrameDebugOverlay = gdEnsureTargetFrameDebugOverlay;
+  window.gdEnsureTargetFrameDebugOverlay=ensureOverlay;
+  window.gdSetTargetFrameDebug=function(enabled){
+    window.gdTargetFrameDebug=!!enabled;
+    ensureOverlay();
+    if(document.body) document.body.classList.toggle("gdTargetFrameDebugOn", !!enabled);
+  };
 
-  function gdSetTargetFrameDebug(enabled){
-    window.gdTargetFrameDebug = !!enabled;
-    gdEnsureTargetFrameDebugOverlay();
-    document.body.classList.toggle("gdTargetFrameDebugOn", !!enabled);
-  }
-  window.gdSetTargetFrameDebug = gdSetTargetFrameDebug;
-
-  function gdFitObjectBoundsToScreenFrame(objectBounds, frameName, options){
-    if(!hasMap() || !validBounds(objectBounds)) return false;
-    var opts=options || {};
-    var pad=frameRectToMapPadding(frameName || "lock", opts.fillRatio == null ? .99 : opts.fillRatio);
-    try{
-      if(typeof map.stop === "function") map.stop();
-      map.fitBounds(objectBounds, {
-        paddingTopLeft:pad.paddingTopLeft,
-        paddingBottomRight:pad.paddingBottomRight,
-        animate:opts.animate !== false,
-        duration:num(opts.duration, .36),
-        maxZoom:num(opts.maxZoom, frameName === "zoom" ? 21 : 20)
-      });
-      return true;
-    }catch(e){
-      try{
-        var c=objectBounds.getCenter();
-        map.setView(c, Math.min(num(opts.maxZoom,20), Math.max(map.getZoom ? map.getZoom()+1 : 18, 18)), {animate:opts.animate!==false,duration:num(opts.duration,.28)});
-        return true;
-      }catch(_e){ return false; }
-    }
-  }
-  window.gdFitObjectBoundsToScreenFrame = gdFitObjectBoundsToScreenFrame;
-
-  function gdGetGreenObjectBounds(){
-    if(!hasMap()) return null;
+  function getGreenBounds(){
     var b=boundsFromPoints(safe(function(){ return greenPolygon; }, null));
-    if(validBounds(b)) return b;
+    if(validBounds(b)) return normalizeGreenBounds(b);
     b=safe(function(){ return greenOutline && typeof greenOutline.getBounds === "function" ? greenOutline.getBounds() : null; }, null);
-    if(validBounds(b)) return b;
-    var c=asLatLng(safe(function(){ return greenCentre; }, null)) || asLatLng(safe(function(){ return target; }, null));
-    return c ? pointBounds(c, fallbackRadius()) : null;
+    if(validBounds(b)) return normalizeGreenBounds(b);
+    var c=asLatLng(safe(function(){ return greenCentre || target; }, null));
+    return c ? pointBounds(c, 22) : null;
   }
-  window.gdGetGreenObjectBounds = gdGetGreenObjectBounds;
+  window.gdGetGreenObjectBounds=getGreenBounds;
 
-  function gdActiveBubblePayload(center){
-    if(!hasMap()) return null;
-    var c=asLatLng(center) || asLatLng(safe(function(){ return target; }, null));
-    var d=safe(function(){ return start && c ? map.distance(start,c) : 155; }, 155);
+  function bubblePayload(center){
+    var c=asLatLng(center) || asLatLng(safe(function(){ return (typeof gdShotDisplayTarget === "function" && gdShotDisplayTarget()) || target || greenCentre; }, null));
+    var d=safe(function(){ return start && c ? map.distance(start,c) : 160; }, 160);
     var raw=safe(function(){ return calculateShot(d).bubbleProfile; }, null);
-    var payload=safe(function(){ return gdGpsBubbleDisplayPayload(raw,d,c); }, null) || safe(function(){ return gdBubblePayloadForRender(raw); }, null) || raw;
-    return payload;
+    return safe(function(){ return gdGpsBubbleDisplayPayload(raw,d,c); }, null) || safe(function(){ return gdBubblePayloadForRender(raw); }, null) || raw || {};
   }
-
-  function gdGetBubbleObjectBounds(bubbleCenter, bubblePayload){
-    if(!hasMap()) return null;
-    var center=asLatLng(bubbleCenter) || asLatLng(safe(function(){ return (typeof gdShotDisplayTarget === "function" && gdShotDisplayTarget()) || target; }, null));
-    if(!center) return null;
-    var payload=bubblePayload || gdActiveBubblePayload(center);
-    var shape=safe(function(){ return buildBubbleShape(center, payload, Math.max(.98, num(dev("bubbleVisuals.mainScale"), 1))); }, null);
+  function getBubbleBounds(center, payload){
+    var c=asLatLng(center) || asLatLng(safe(function(){ return (typeof gdShotDisplayTarget === "function" && gdShotDisplayTarget()) || target || greenCentre; }, null));
+    if(!c) return null;
+    var p=payload || bubblePayload(c);
+    var shape=safe(function(){ return buildBubbleShape(c, p, Math.max(1, num(dev("bubbleVisuals.mainScale"), 1))); }, null);
     var b=boundsFromPoints(shape);
     if(validBounds(b)) return b;
-    var visual=payload && payload.visual || {};
-    var radius=Math.max(
-      14,
-      num(payload && payload.radius, 0),
-      num(payload && payload.lateralRadiusM, 0),
-      num(payload && payload.depthRadiusM, 0),
-      num(visual.visualWidthM, 0)/2,
-      num(visual.visualDepthM, 0)/2
-    );
-    return pointBounds(center, radius || 24);
+    var visual=p && p.visual || {};
+    var radius=Math.max(24, num(p.radius,0), num(p.lateralRadiusM,0), num(p.depthRadiusM,0), num(visual.visualWidthM,0)/2, num(visual.visualDepthM,0)/2);
+    return pointBounds(c, radius);
   }
-  window.gdGetBubbleObjectBounds = gdGetBubbleObjectBounds;
+  window.gdGetBubbleObjectBounds=getBubbleBounds;
+  window.gdGetFallbackPointBounds=pointBounds;
 
-  function gdGetFallbackPointBounds(point, radiusM){ return pointBounds(point, radiusM); }
-  window.gdGetFallbackPointBounds = gdGetFallbackPointBounds;
-
-  function gdCurrentShotClubPlayableDistance(){
-    if(!hasMap()) return null;
-    var display=asLatLng(safe(function(){ return (typeof gdShotDisplayTarget === "function" && gdShotDisplayTarget()) || target; }, null));
-    var d=safe(function(){ return start && display ? map.distance(start,display) : null; }, null);
-    var profile=safe(function(){ return d ? calculateShot(d).bubbleProfile : null; }, null);
-    var total=num(profile && (profile.totalM || profile.total || profile.baseTotal), NaN);
-    var carry=num(profile && (profile.baseCarry || profile.carry || profile.distance), NaN);
-    var playable=Number.isFinite(total) && total>0 ? total : (Number.isFinite(carry) && carry>0 ? carry : null);
-    if(playable) return playable;
+  function isLayupTarget(){
+    var g=asLatLng(safe(function(){ return greenCentre; }, null));
+    var t=asLatLng(safe(function(){ return (typeof gdShotDisplayTarget === "function" && gdShotDisplayTarget()) || target; }, null));
+    if(!g || !t) return false;
+    var builtIn=safe(function(){ return typeof gdIsLayupTarget === "function" && gdIsLayupTarget(g,t); }, false);
+    if(builtIn) return true;
+    var d=safe(function(){ return map.distance(g,t); }, 0);
+    return d > 28;
+  }
+  function playableDistance(){
+    var t=asLatLng(safe(function(){ return (typeof gdShotDisplayTarget === "function" && gdShotDisplayTarget()) || target || greenCentre; }, null));
+    var d=safe(function(){ return start && t ? map.distance(start,t) : null; }, null);
+    var profile=safe(function(){ return d ? calculateShot(d).bubbleProfile : null; }, null) || {};
+    var total=num(profile.totalM || profile.total || profile.baseTotal, NaN);
+    var carry=num(profile.baseCarry || profile.carry || profile.distance, NaN);
+    if(Number.isFinite(total) && total>0) return total;
+    if(Number.isFinite(carry) && carry>0) return carry;
     return num(safe(function(){ return gdMaxPlayableCarryM(); }, null), null);
   }
-  window.gdCurrentShotClubPlayableDistance = gdCurrentShotClubPlayableDistance;
-
-  function gdResolveShotTargetMode(){
+  function resolveMode(){
     if(!hasMap()) return SHOT_TARGET_MODE.GREEN_TARGET;
-    var green=asLatLng(safe(function(){ return greenCentre; }, null)) || asLatLng(safe(function(){ return target; }, null));
-    if(!green || !safe(function(){ return start; }, null)) return SHOT_TARGET_MODE.FAIRWAY_LANDING;
-    var greenDistance=safe(function(){ return map.distance(start,green); }, null);
-    var playable=gdCurrentShotClubPlayableDistance();
-    if(!(greenDistance>0) || !(playable>0)) return SHOT_TARGET_MODE.GREEN_TARGET;
-    var modeNow=lastShotTargetMode;
-    var switchToFairwayTol=14;
-    var switchToGreenTol=6;
-    var next;
-    if(modeNow === SHOT_TARGET_MODE.FAIRWAY_LANDING){
-      next = playable >= greenDistance - switchToGreenTol ? SHOT_TARGET_MODE.GREEN_TARGET : SHOT_TARGET_MODE.FAIRWAY_LANDING;
+    if(isLayupTarget()) { lastMode=SHOT_TARGET_MODE.FAIRWAY_LANDING; return lastMode; }
+    var g=asLatLng(safe(function(){ return greenCentre; }, null));
+    if(!g || !safe(function(){ return start; }, null)) { lastMode=SHOT_TARGET_MODE.GREEN_TARGET; return lastMode; }
+    var gd=safe(function(){ return map.distance(start,g); }, null);
+    var playable=playableDistance();
+    if(!(gd>0) || !(playable>0)) { lastMode=SHOT_TARGET_MODE.GREEN_TARGET; return lastMode; }
+    // Be deliberately less shy: do not switch away from green framing unless the green is clearly out of reach.
+    var toFairway=42, backToGreen=24;
+    if(lastMode===SHOT_TARGET_MODE.FAIRWAY_LANDING){
+      lastMode = playable >= gd - backToGreen ? SHOT_TARGET_MODE.GREEN_TARGET : SHOT_TARGET_MODE.FAIRWAY_LANDING;
     }else{
-      next = playable >= greenDistance - switchToFairwayTol ? SHOT_TARGET_MODE.GREEN_TARGET : SHOT_TARGET_MODE.FAIRWAY_LANDING;
+      lastMode = playable >= gd - toFairway ? SHOT_TARGET_MODE.GREEN_TARGET : SHOT_TARGET_MODE.FAIRWAY_LANDING;
     }
-    lastShotTargetMode=next;
-    return next;
+    return lastMode;
   }
-  window.gdResolveShotTargetMode = gdResolveShotTargetMode;
+  window.gdResolveShotTargetMode=resolveMode;
 
-  function gdGetActiveShotObjectBounds(){
-    if(!hasMap()) return null;
-    var shotMode=gdResolveShotTargetMode();
-    if(shotMode === SHOT_TARGET_MODE.GREEN_TARGET){
-      return gdGetGreenObjectBounds() || gdGetBubbleObjectBounds(null,null) || gdGetFallbackPointBounds(safe(function(){ return greenCentre || target; }, null), fallbackRadius());
+  function activeBounds(){
+    var mode=resolveMode();
+    if(mode===SHOT_TARGET_MODE.FAIRWAY_LANDING){
+      var c=asLatLng(safe(function(){ return (typeof gdShotDisplayTarget === "function" && gdShotDisplayTarget()) || target; }, null));
+      return getBubbleBounds(c, null) || pointBounds(c, 32);
     }
-    var center=asLatLng(safe(function(){ return (typeof gdShotDisplayTarget === "function" && gdShotDisplayTarget()) || target; }, null));
-    return gdGetBubbleObjectBounds(center,null) || gdGetFallbackPointBounds(center, 28);
+    return getGreenBounds() || getBubbleBounds(safe(function(){ return greenCentre || target; }, null), null) || pointBounds(safe(function(){ return greenCentre || target; }, null), 24);
   }
-  window.gdGetActiveShotObjectBounds = gdGetActiveShotObjectBounds;
+  window.gdGetActiveShotObjectBounds=activeBounds;
 
-  function gdFrameActiveShot(frameName, opts){
-    var b=gdGetActiveShotObjectBounds();
-    return gdFitObjectBoundsToScreenFrame(b, frameName || "lock", Object.assign({animate:true,fillRatio:.995,maxZoom:frameName==="zoom"?21:20,duration:.36}, opts||{}));
+  function desiredFrameCenterInContainer(kind){
+    var fr=gdScreenTargetFrameRectV3(kind), mr=mapRect();
+    return L.point(fr.left - mr.left + fr.width/2, fr.top - mr.top + fr.height/2);
   }
-  window.gdFrameActiveShot = gdFrameActiveShot;
+  function fitObjectBoundsToFrame(bounds, frameName, options){
+    if(!hasMap() || !validBounds(bounds)) return false;
+    var opts=options || {};
+    var kind=frameName || "lock";
+    var pad=framePadding(kind, opts.fillRatio == null ? 1 : opts.fillRatio);
+    var maxZoom=num(opts.maxZoom, kind==="zoom"?21:20);
+    var minZoom=num(opts.minZoom, kind==="hole"?16:18);
+    var z=safe(function(){ return map.getBoundsZoom(bounds, false, L.point(pad.paddingTopLeft[0]+pad.paddingBottomRight[0], pad.paddingTopLeft[1]+pad.paddingBottomRight[1])); }, null);
+    if(!Number.isFinite(z)) z=safe(function(){ return map.getZoom ? map.getZoom() : 18; }, 18);
+    // Push in hard. The target is allowed to nearly fill or slightly bleed the box.
+    var boost=num(opts.zoomBoost, kind==="zoom"?1:0.75);
+    z=Math.max(minZoom, Math.min(maxZoom, z + boost));
+    // Leaflet default zoomSnap can round away the boost. Relax it for this camera system.
+    safe(function(){ map.options.zoomSnap = Math.min(num(map.options.zoomSnap, .25), .25); });
+    var targetCenter=bounds.getCenter();
+    var mr=mapRect();
+    var mapCenter=L.point(mr.width/2, mr.height/2);
+    var desired=desiredFrameCenterInContainer(kind);
+    var targetLayer=safe(function(){ return map.project(targetCenter, z); }, null);
+    if(!targetLayer) return false;
+    var newCenterLayer=targetLayer.subtract(desired.subtract(mapCenter));
+    var newCenter=map.unproject(newCenterLayer, z);
+    safe(function(){ if(typeof map.stop === "function") map.stop(); });
+    map.setView(newCenter, z, {animate:opts.animate !== false, duration:num(opts.duration, .28)});
+    return true;
+  }
+  window.gdFitObjectBoundsToScreenFrame=fitObjectBoundsToFrame;
 
-  function gdToggleTargetZoom(ev){
+  function frameActiveShot(frameName, opts){ return fitObjectBoundsToFrame(activeBounds(), frameName || "lock", Object.assign({animate:true,duration:.28,fillRatio:1,maxZoom:frameName==="zoom"?21:20,zoomBoost:frameName==="zoom"?1.1:.85}, opts||{})); }
+  window.gdFrameActiveShot=frameActiveShot;
+
+  window.gdToggleTargetZoom=function(ev){
     if(ev){ ev.preventDefault(); ev.stopPropagation(); if(ev.stopImmediatePropagation) ev.stopImmediatePropagation(); }
     if(!hasMap()) return false;
     var btn=document.getElementById("gdGreenZoomBtn");
-    if(gdSimpleGreenZoomActive){
-      gdSimpleGreenZoomActive=false;
+    if(window.gdSimpleGreenZoomActive){
+      window.gdSimpleGreenZoomActive=false;
       document.body.classList.remove("gd-green-zoom-active");
       if(btn) btn.classList.remove("softActive");
-      var view=gdSimpleGreenZoomReturnView;
-      gdSimpleGreenZoomReturnView=null;
-      if(view && view.center) safe(function(){ map.setView(view.center, view.zoom, {animate:true,duration:.32}); });
+      var v=window.gdSimpleGreenZoomReturnView; window.gdSimpleGreenZoomReturnView=null;
+      if(v&&v.center) safe(function(){ map.setView(v.center,v.zoom,{animate:true,duration:.28}); });
       return false;
     }
-    var bounds=gdGetActiveShotObjectBounds();
-    if(!validBounds(bounds)){ safe(function(){ toast("Set a shot target first"); }); return false; }
-    gdSimpleGreenZoomReturnView=safe(function(){ return {center:map.getCenter(),zoom:map.getZoom()}; }, null);
-    gdSimpleGreenZoomActive=true;
+    var b=activeBounds();
+    if(!validBounds(b)){ safe(function(){ toast("Set a shot target first"); }); return false; }
+    window.gdSimpleGreenZoomReturnView=safe(function(){ return {center:map.getCenter(),zoom:map.getZoom()}; }, null);
+    window.gdSimpleGreenZoomActive=true;
     document.body.classList.add("gd-green-zoom-active");
     if(btn) btn.classList.add("softActive");
-    gdFitObjectBoundsToScreenFrame(bounds, "zoom", {animate:true,duration:.32,fillRatio:1,maxZoom:21});
+    fitObjectBoundsToFrame(b,"zoom",{animate:true,duration:.28,fillRatio:1,maxZoom:21,zoomBoost:1.15});
     return false;
-  }
-  window.gdToggleTargetZoom = gdToggleTargetZoom;
-  window.gdToggleSimpleGreenZoom = gdToggleTargetZoom;
+  };
+  window.gdToggleSimpleGreenZoom=window.gdToggleTargetZoom;
 
-  var previousFrameShotView=safe(function(){ return frameShotView; }, null);
-  if(typeof previousFrameShotView === "function"){
+  if(typeof frameShotView === "function"){
     frameShotView=function(){
-      if(!safe(function(){ return start && target && map; }, false)) return previousFrameShotView.apply(this, arguments);
-      var b=gdGetActiveShotObjectBounds();
-      if(validBounds(b)) return gdFitObjectBoundsToScreenFrame(b, "lock", {animate:true,duration:.34,fillRatio:1,maxZoom:20});
-      return previousFrameShotView.apply(this, arguments);
+      var b=activeBounds();
+      if(validBounds(b)) return fitObjectBoundsToFrame(b,"lock",{animate:true,duration:.30,fillRatio:1,maxZoom:20,zoomBoost:.95});
+      return false;
     };
     window.frameShotView=frameShotView;
   }
-
-  var previousLockFrame=safe(function(){ return lockFrame; }, null);
-  if(typeof previousLockFrame === "function"){
+  if(typeof lockFrame === "function"){
     lockFrame=function(refit){
-      if(!safe(function(){ return start && target; }, false)) return;
-      if(refit !== false){
-        var fitted=false;
-        try{ fitted=!!frameShotView(); }catch(e){ fitted=false; }
-        if(!fitted) safe(function(){ previousLockFrame.call(this, refit); });
-      }
+      if(!safe(function(){ return start && target && map; }, false)) return false;
+      if(refit !== false) frameShotView();
       safe(function(){ setBubbleOnlyLock(true); });
       safe(function(){ renderShot(); });
       return true;
@@ -38967,42 +38892,757 @@ body.gdTargetFrameDebugOn #gdTargetFrameDebugOverlay{display:block;}
     window.lockFrame=lockFrame;
   }
 
-  function gdMaybeNudgeFairwayCamera(center){
-    if(!hasMap() || !center) return false;
-    if(!safe(function(){ return lockedFrame; }, false)) return false;
-    if(gdResolveShotTargetMode() !== SHOT_TARGET_MODE.FAIRWAY_LANDING) return false;
-    if(Date.now()-lastFairwayNudgeAt < 220) return false;
-    var p=safe(function(){ return map.latLngToContainerPoint(center); }, null);
-    var c=map.getContainer && map.getContainer();
-    if(!p || !c) return false;
-    var w=c.clientWidth || 1, h=c.clientHeight || 1;
-    var safeZone=FAIRWAY_CAMERA_SAFE_ZONE;
-    var minX=w*safeZone.left, maxX=w*safeZone.right, minY=h*safeZone.top, maxY=h*safeZone.bottom;
-    if(p.x>=minX && p.x<=maxX && p.y>=minY && p.y<=maxY) return false;
-    var dx=0, dy=0;
-    if(p.x<minX) dx=p.x-minX; else if(p.x>maxX) dx=p.x-maxX;
-    if(p.y<minY) dy=p.y-minY; else if(p.y>maxY) dy=p.y-maxY;
-    lastFairwayNudgeAt=Date.now();
-    safe(function(){ map.panBy([dx,dy], {animate:true,duration:.18}); });
+  window.gdMaybeNudgeFairwayCamera=function(center){
+    if(!hasMap() || !center || !safe(function(){ return lockedFrame; }, false)) return false;
+    if(resolveMode()!==SHOT_TARGET_MODE.FAIRWAY_LANDING) return false;
+    if(Date.now()-lastNudgeAt<260) return false;
+    var p=safe(function(){ return map.latLngToContainerPoint(center); }, null); if(!p) return false;
+    var c=map.getContainer(); var w=c.clientWidth||1, h=c.clientHeight||1;
+    var minX=w*SAFE_ZONE.left, maxX=w*SAFE_ZONE.right, minY=h*SAFE_ZONE.top, maxY=h*SAFE_ZONE.bottom;
+    if(p.x>=minX&&p.x<=maxX&&p.y>=minY&&p.y<=maxY) return false;
+    var dx=0,dy=0; if(p.x<minX) dx=p.x-minX; else if(p.x>maxX) dx=p.x-maxX; if(p.y<minY) dy=p.y-minY; else if(p.y>maxY) dy=p.y-maxY;
+    lastNudgeAt=Date.now(); safe(function(){ map.panBy([dx,dy],{animate:true,duration:.16}); }); return true;
+  };
+
+  function refresh(){ if(window.gdTargetFrameDebug !== false) window.gdSetTargetFrameDebug(true); }
+  window.addEventListener("resize", function(){ setTimeout(refresh,60); }, true);
+  window.addEventListener("orientationchange", function(){ setTimeout(refresh,160); }, true);
+  document.addEventListener("DOMContentLoaded", function(){ setTimeout(refresh,90); });
+  if(document.body) setTimeout(refresh,90);
+})();
+</script>
+
+
+<style id="gdFramedBoxCameraSystemV4Css">
+/* V4: restore the actual debug-frame CSS. V3 moved the tee frame but accidentally relied on
+   older CSS that was not present in the packaged deploy, so the boxes could silently vanish. */
+#gdTargetFrameDebugOverlay{
+  position:fixed;
+  inset:0;
+  display:none;
+  pointer-events:none;
+  z-index:1450;
+}
+body.gdTargetFrameDebugOn #gdTargetFrameDebugOverlay{display:block;}
+.gdTargetFrameBox{
+  position:fixed;
+  box-sizing:border-box;
+  border:1.5px dotted rgba(255,255,255,.72);
+  border-radius:18px;
+  pointer-events:none;
+  background:rgba(31,211,109,.035);
+  box-shadow:0 0 0 1px rgba(0,0,0,.28), inset 0 0 32px rgba(31,211,109,.045);
+  color:rgba(255,255,255,.92);
+  font:800 9px/1.1 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  letter-spacing:.13em;
+  text-transform:uppercase;
+  text-shadow:0 1px 3px rgba(0,0,0,.88);
+}
+.gdTargetFrameBox span{
+  position:absolute;
+  left:50%;
+  top:-13px;
+  transform:translateX(-50%);
+  padding:3px 7px;
+  border-radius:7px;
+  background:rgba(8,13,10,.78);
+  white-space:nowrap;
+}
+.gdTargetFrameBox[data-frame="hole"]{border-color:rgba(191,255,216,.72);}
+.gdTargetFrameBox[data-frame="lock"]{border-color:rgba(255,255,255,.9);border-width:2px;background:rgba(255,255,255,.025);}
+.gdTargetFrameBox[data-frame="zoom"]{border-color:rgba(255,213,128,.88);background:rgba(255,213,128,.025);}
+.gdTargetFrameBox[data-frame="tee"]{border-color:rgba(165,210,255,.68);background:rgba(56,143,255,.025);}
+.gdTargetFrameBox[data-frame="tee"] span{left:50%;top:8px;transform:translateX(-50%);}
+</style>
+<script id="gdFramedBoxCameraSystemV4">
+(function(){
+  if(window.__gdFramedBoxCameraSystemV4) return;
+  window.__gdFramedBoxCameraSystemV4 = true;
+
+  var SAFE_ZONE = { left:.22, right:.78, top:.24, bottom:.72 };
+  var lastNudgeAt = 0;
+  var lastMode = null;
+  var pendingFitTimers = [];
+
+  function safe(fn, fallback){ try{ return fn(); }catch(e){ return fallback; } }
+  function num(v, fallback){ var n=Number(v); return Number.isFinite(n)?n:fallback; }
+  function hasMap(){ return typeof map !== "undefined" && map && typeof L !== "undefined"; }
+  function asLatLng(p){ if(!hasMap() || !p || p.lat==null || p.lng==null) return null; return L.latLng(Number(p.lat), Number(p.lng)); }
+  function validBounds(b){ return !!(b && typeof b.isValid === "function" && b.isValid()); }
+  function mapRect(){
+    var c=hasMap() && map.getContainer && map.getContainer();
+    return c && c.getBoundingClientRect ? c.getBoundingClientRect() : {left:0,top:0,right:window.innerWidth,bottom:window.innerHeight,width:window.innerWidth,height:window.innerHeight};
+  }
+  function pointBounds(point, radiusM){
+    var c=asLatLng(point); if(!hasMap() || !c) return null;
+    var r=Math.max(4, num(radiusM, 22));
+    return L.latLngBounds([
+      safe(function(){ return project(c,0,r); }, c),
+      safe(function(){ return project(c,Math.PI,r); }, c),
+      safe(function(){ return project(c,Math.PI/2,r); }, c),
+      safe(function(){ return project(c,Math.PI*1.5,r); }, c)
+    ]);
+  }
+  function boundsFromPoints(points){
+    if(!hasMap() || !Array.isArray(points)) return null;
+    var pts=points.map(asLatLng).filter(Boolean);
+    if(!pts.length) return null;
+    var b=L.latLngBounds(pts);
+    return validBounds(b)?b:null;
+  }
+  function boundsSizeM(b){
+    if(!hasMap() || !validBounds(b)) return {w:0,h:0,diag:0};
+    var sw=b.getSouthWest(), ne=b.getNorthEast();
+    var nw=L.latLng(ne.lat, sw.lng), se=L.latLng(sw.lat, ne.lng);
+    var w=safe(function(){ return map.distance(sw,se); }, 0);
+    var h=safe(function(){ return map.distance(sw,nw); }, 0);
+    return {w:w,h:h,diag:Math.sqrt(w*w+h*h)};
+  }
+  function frameRect(kind){
+    var w=window.innerWidth || document.documentElement.clientWidth || 390;
+    var h=window.innerHeight || document.documentElement.clientHeight || 760;
+    // These are viewport-relative because the screenshot/debug box contract is visual-screen based.
+    // Tee is deliberately low and only relevant to broad hole-frame/setup.
+    var spec={
+      hole:{x:.30,y:.135,w:.40,h:.235},
+      lock:{x:.205,y:.145,w:.60,h:.38},
+      zoom:{x:.10,y:.105,w:.80,h:.50},
+      tee:{x:.335,y:.785,w:.33,h:.115}
+    }[kind] || {x:.205,y:.145,w:.60,h:.38};
+    return {left:Math.round(w*spec.x),top:Math.round(h*spec.y),right:Math.round(w*(spec.x+spec.w)),bottom:Math.round(h*(spec.y+spec.h)),width:Math.round(w*spec.w),height:Math.round(h*spec.h)};
+  }
+  window.gdScreenTargetFrameRect = frameRect;
+  window.gdScreenTargetFrameConfig = function(kind){
+    var r=frameRect(kind), w=window.innerWidth||390, h=window.innerHeight||760;
+    return {left:r.left,top:r.top,right:Math.max(0,w-r.right),bottom:Math.max(0,h-r.bottom)};
+  };
+  function framePadding(kind, fillRatio){
+    var mr=mapRect(), fr=frameRect(kind);
+    var inset=Math.max(0, 1-num(fillRatio,1));
+    var extraX=Math.round(fr.width*inset*.5), extraY=Math.round(fr.height*inset*.5);
+    return {
+      paddingTopLeft:[Math.max(0,Math.round(fr.left-mr.left+extraX)), Math.max(0,Math.round(fr.top-mr.top+extraY))],
+      paddingBottomRight:[Math.max(0,Math.round(mr.right-fr.right+extraX)), Math.max(0,Math.round(mr.bottom-fr.bottom+extraY))]
+    };
+  }
+  window.gdTargetFramePadding=function(kind){ return framePadding(kind||"lock", 1); };
+  function ensureOverlay(){
+    if(!document.body) return null;
+    var overlay=document.getElementById("gdTargetFrameDebugOverlay");
+    if(!overlay){ overlay=document.createElement("div"); overlay.id="gdTargetFrameDebugOverlay"; overlay.setAttribute("aria-hidden","true"); document.body.appendChild(overlay); }
+    var labels={hole:"GREEN / HOLE FRAME",lock:"LOCK FRAME",zoom:"GREEN / LANDING ZOOM",tee:"TEE FRAME"};
+    overlay.innerHTML=["hole","lock","zoom","tee"].map(function(k){
+      var r=frameRect(k);
+      return '<div class="gdTargetFrameBox" data-frame="'+k+'" style="left:'+r.left+'px;top:'+r.top+'px;width:'+r.width+'px;height:'+r.height+'px"><span>'+labels[k]+'</span></div>';
+    }).join("");
+    return overlay;
+  }
+  window.gdEnsureTargetFrameDebugOverlay=ensureOverlay;
+  window.gdSetTargetFrameDebug=function(enabled){
+    window.gdTargetFrameDebug=!!enabled;
+    ensureOverlay();
+    if(document.body) document.body.classList.toggle("gdTargetFrameDebugOn", !!enabled);
+  };
+
+  function cleanGreenBounds(b){
+    if(!validBounds(b)) return null;
+    var s=boundsSizeM(b);
+    // Do not let a fairway/hole polygon become the "green" object. That was the main cause of shy wide views.
+    if(s.diag>90 || s.w>78 || s.h>78){
+      var c=asLatLng(safe(function(){ return greenCentre || target; }, null)) || b.getCenter();
+      return pointBounds(c, 20);
+    }
+    return b;
+  }
+  function getGreenBounds(){
+    var b=boundsFromPoints(safe(function(){ return greenPolygon; }, null));
+    if(validBounds(b)) return cleanGreenBounds(b);
+    b=safe(function(){ return greenOutline && typeof greenOutline.getBounds === "function" ? greenOutline.getBounds() : null; }, null);
+    if(validBounds(b)) return cleanGreenBounds(b);
+    var c=asLatLng(safe(function(){ return greenCentre || target; }, null));
+    return c ? pointBounds(c, 20) : null;
+  }
+  window.gdGetGreenObjectBounds=getGreenBounds;
+  function bubblePayload(center){
+    var c=asLatLng(center) || asLatLng(safe(function(){ return (typeof gdShotDisplayTarget === "function" && gdShotDisplayTarget()) || target || greenCentre; }, null));
+    var d=safe(function(){ return start && c ? map.distance(start,c) : 160; }, 160);
+    var raw=safe(function(){ return calculateShot(d).bubbleProfile; }, null) || {};
+    return safe(function(){ return gdGpsBubbleDisplayPayload(raw,d,c); }, null) || safe(function(){ return gdBubblePayloadForRender(raw); }, null) || raw;
+  }
+  function getBubbleBounds(center, payload){
+    var c=asLatLng(center) || asLatLng(safe(function(){ return (typeof gdShotDisplayTarget === "function" && gdShotDisplayTarget()) || target || greenCentre; }, null));
+    if(!c) return null;
+    var p=payload || bubblePayload(c);
+    var shape=safe(function(){ return buildBubbleShape(c, p, Math.max(1, num(dev("bubbleVisuals.mainScale"), 1))); }, null);
+    var b=boundsFromPoints(shape);
+    if(validBounds(b)) return b;
+    var visual=(p && p.visual) || {};
+    var radius=Math.max(22, num(p.radius,0), num(p.lateralRadiusM,0), num(p.depthRadiusM,0), num(visual.visualWidthM,0)/2, num(visual.visualDepthM,0)/2);
+    return pointBounds(c, radius);
+  }
+  window.gdGetBubbleObjectBounds=getBubbleBounds;
+  window.gdGetFallbackPointBounds=pointBounds;
+  function isLayupTarget(){
+    var g=asLatLng(safe(function(){ return greenCentre; }, null));
+    var t=asLatLng(safe(function(){ return (typeof gdShotDisplayTarget === "function" && gdShotDisplayTarget()) || target; }, null));
+    if(!g || !t) return false;
+    var builtIn=safe(function(){ return typeof gdIsLayupTarget === "function" && gdIsLayupTarget(g,t); }, false);
+    if(builtIn) return true;
+    return safe(function(){ return map.distance(g,t)>28; }, false);
+  }
+  function playableDistance(){
+    var t=asLatLng(safe(function(){ return (typeof gdShotDisplayTarget === "function" && gdShotDisplayTarget()) || target || greenCentre; }, null));
+    var d=safe(function(){ return start && t ? map.distance(start,t) : null; }, null);
+    var profile=safe(function(){ return d ? calculateShot(d).bubbleProfile : null; }, null) || {};
+    var total=num(profile.totalM || profile.total || profile.baseTotal, NaN);
+    var carry=num(profile.baseCarry || profile.carry || profile.distance, NaN);
+    if(Number.isFinite(total) && total>0) return total;
+    if(Number.isFinite(carry) && carry>0) return carry;
+    return num(safe(function(){ return gdMaxPlayableCarryM(); }, null), null);
+  }
+  function resolveMode(){
+    if(!hasMap()) return "greenTarget";
+    if(isLayupTarget()){ lastMode="fairwayLanding"; return lastMode; }
+    var g=asLatLng(safe(function(){ return greenCentre; }, null));
+    if(!g || !safe(function(){ return start; }, null)){ lastMode="greenTarget"; return lastMode; }
+    var gd=safe(function(){ return map.distance(start,g); }, null);
+    var playable=playableDistance();
+    if(!(gd>0) || !(playable>0)){ lastMode="greenTarget"; return lastMode; }
+    var toFairway=42, backToGreen=24;
+    if(lastMode==="fairwayLanding") lastMode = playable >= gd-backToGreen ? "greenTarget" : "fairwayLanding";
+    else lastMode = playable >= gd-toFairway ? "greenTarget" : "fairwayLanding";
+    return lastMode;
+  }
+  window.gdResolveShotTargetMode=resolveMode;
+  function activeBounds(){
+    var m=resolveMode();
+    if(m==="fairwayLanding"){
+      var c=asLatLng(safe(function(){ return (typeof gdShotDisplayTarget === "function" && gdShotDisplayTarget()) || target; }, null));
+      return getBubbleBounds(c,null) || pointBounds(c,30);
+    }
+    var green=getGreenBounds();
+    return green || getBubbleBounds(safe(function(){ return greenCentre || target; }, null), null) || pointBounds(safe(function(){ return greenCentre || target; }, null),20);
+  }
+  window.gdGetActiveShotObjectBounds=activeBounds;
+  function fitObjectBoundsToFrame(bounds, frameName, options){
+    if(!hasMap() || !validBounds(bounds)) return false;
+    var opts=options||{}, kind=frameName||"lock";
+    var pad=framePadding(kind, opts.fillRatio==null ? 1 : opts.fillRatio);
+    var maxZoom=num(opts.maxZoom, kind==="zoom"?21:20);
+    var minZoom=num(opts.minZoom, kind==="hole"?16:18);
+    // getBoundsZoom with equivalent outside-padding gives us the base zoom to place the object inside the target frame.
+    var z=safe(function(){ return map.getBoundsZoom(bounds, false, L.point(pad.paddingTopLeft[0]+pad.paddingBottomRight[0], pad.paddingTopLeft[1]+pad.paddingBottomRight[1])); }, null);
+    if(!Number.isFinite(z)) z=safe(function(){ return map.getZoom ? map.getZoom() : 18; }, 18);
+    z=Math.max(minZoom, Math.min(maxZoom, z + num(opts.zoomBoost, kind==="zoom"?1.2:1.05)));
+    safe(function(){ map.options.zoomSnap=Math.min(num(map.options.zoomSnap,.25), .25); map.options.zoomDelta=Math.min(num(map.options.zoomDelta,.25), .25); });
+    var mr=mapRect(), mapCenter=L.point(mr.width/2,mr.height/2), fr=frameRect(kind);
+    var desired=L.point(fr.left-mr.left+fr.width/2, fr.top-mr.top+fr.height/2);
+    var targetCenter=bounds.getCenter();
+    var targetLayer=safe(function(){ return map.project(targetCenter,z); }, null);
+    if(!targetLayer) return false;
+    var newCenterLayer=targetLayer.subtract(desired.subtract(mapCenter));
+    var newCenter=map.unproject(newCenterLayer,z);
+    safe(function(){ if(typeof map.stop==="function") map.stop(); });
+    map.setView(newCenter,z,{animate:opts.animate!==false,duration:num(opts.duration,.24)});
     return true;
   }
-  window.gdMaybeNudgeFairwayCamera=gdMaybeNudgeFairwayCamera;
-
-  var previousQueue=safe(function(){ return gdQueueSmoothBubbleRender; }, null);
-  if(typeof previousQueue === "function"){
-    gdQueueSmoothBubbleRender=function(marker,ll){
-      var result=previousQueue.apply(this, arguments);
-      safe(function(){ gdMaybeNudgeFairwayCamera(ll); });
-      return result;
-    };
-    window.gdQueueSmoothBubbleRender=gdQueueSmoothBubbleRender;
+  window.gdFitObjectBoundsToScreenFrame=fitObjectBoundsToFrame;
+  function frameActiveShot(frameName, opts){ return fitObjectBoundsToFrame(activeBounds(), frameName||"lock", Object.assign({animate:true,duration:.24,fillRatio:1,maxZoom:frameName==="zoom"?21:20,zoomBoost:frameName==="zoom"?1.2:1.05}, opts||{})); }
+  window.gdFrameActiveShot=frameActiveShot;
+  function clearPendingFits(){ pendingFitTimers.forEach(function(t){ clearTimeout(t); }); pendingFitTimers=[]; }
+  function fitLockedAfterRender(){
+    clearPendingFits();
+    [0,70,180].forEach(function(ms){ pendingFitTimers.push(setTimeout(function(){
+      if(safe(function(){ return lockedFrame && start && target; }, false)) frameActiveShot("lock", {animate:ms>0,duration:.18,zoomBoost:1.08});
+    }, ms)); });
   }
 
-  function refreshOverlay(){ if(window.gdTargetFrameDebug) gdEnsureTargetFrameDebugOverlay(); }
-  window.addEventListener("resize", function(){ setTimeout(refreshOverlay, 60); }, true);
-  window.addEventListener("orientationchange", function(){ setTimeout(refreshOverlay, 160); }, true);
-  document.addEventListener("DOMContentLoaded", function(){ setTimeout(function(){ gdSetTargetFrameDebug(window.gdTargetFrameDebug !== false); }, 80); });
-  if(document.body) setTimeout(function(){ gdSetTargetFrameDebug(window.gdTargetFrameDebug !== false); }, 80);
+  // Final global overrides. These are intentionally at the very end so older green-focus / broad-hole fitBounds paths cannot win.
+  frameShotView=function(){ return frameActiveShot("lock", {animate:true,duration:.24,zoomBoost:1.08}); };
+  window.frameShotView=frameShotView;
+  lockFrame=function(refit){
+    if(!safe(function(){ return start && target && map; }, false)) return false;
+    if(refit!==false) frameShotView();
+    safe(function(){ setBubbleOnlyLock(true); });
+    safe(function(){ renderShot(); });
+    if(refit!==false) fitLockedAfterRender();
+    return true;
+  };
+  window.lockFrame=lockFrame;
+  var previousReframe=window.gdReframeShotAfterUndo;
+  window.gdReframeShotAfterUndo=function(opts){
+    var out=safe(function(){ return typeof previousReframe==="function" ? previousReframe(opts||{}) : false; }, false);
+    if(safe(function(){ return lockedFrame; }, false) && (!opts || opts.refit!==false)) fitLockedAfterRender();
+    return out;
+  };
+  window.gdToggleTargetZoom=function(ev){
+    if(ev){ ev.preventDefault(); ev.stopPropagation(); if(ev.stopImmediatePropagation) ev.stopImmediatePropagation(); }
+    if(!hasMap()) return false;
+    var btn=document.getElementById("gdGreenZoomBtn");
+    if(window.gdSimpleGreenZoomActive){
+      window.gdSimpleGreenZoomActive=false;
+      document.body.classList.remove("gd-green-zoom-active");
+      if(btn) btn.classList.remove("softActive");
+      var v=window.gdSimpleGreenZoomReturnView; window.gdSimpleGreenZoomReturnView=null;
+      if(v&&v.center) safe(function(){ map.setView(v.center,v.zoom,{animate:true,duration:.24}); });
+      return false;
+    }
+    var b=activeBounds();
+    if(!validBounds(b)){ safe(function(){ toast("Set a shot target first"); }); return false; }
+    window.gdSimpleGreenZoomReturnView=safe(function(){ return {center:map.getCenter(),zoom:map.getZoom()}; }, null);
+    window.gdSimpleGreenZoomActive=true;
+    document.body.classList.add("gd-green-zoom-active");
+    if(btn) btn.classList.add("softActive");
+    fitObjectBoundsToFrame(b,"zoom",{animate:true,duration:.24,fillRatio:1,maxZoom:21,zoomBoost:1.25});
+    return false;
+  };
+  window.gdToggleSimpleGreenZoom=window.gdToggleTargetZoom;
+  window.gdMaybeNudgeFairwayCamera=function(center){
+    if(!hasMap() || !center || !safe(function(){ return lockedFrame; }, false)) return false;
+    if(resolveMode()!=="fairwayLanding") return false;
+    if(Date.now()-lastNudgeAt<260) return false;
+    var p=safe(function(){ return map.latLngToContainerPoint(center); }, null); if(!p) return false;
+    var c=map.getContainer(), w=c.clientWidth||1, h=c.clientHeight||1;
+    var minX=w*SAFE_ZONE.left, maxX=w*SAFE_ZONE.right, minY=h*SAFE_ZONE.top, maxY=h*SAFE_ZONE.bottom;
+    if(p.x>=minX&&p.x<=maxX&&p.y>=minY&&p.y<=maxY) return false;
+    var dx=0,dy=0; if(p.x<minX) dx=p.x-minX; else if(p.x>maxX) dx=p.x-maxX; if(p.y<minY) dy=p.y-minY; else if(p.y>maxY) dy=p.y-maxY;
+    lastNudgeAt=Date.now(); safe(function(){ map.panBy([dx,dy],{animate:true,duration:.16}); }); return true;
+  };
+
+  function refresh(){ if(window.gdTargetFrameDebug !== false) window.gdSetTargetFrameDebug(true); }
+  window.addEventListener("resize", function(){ setTimeout(refresh,60); }, true);
+  window.addEventListener("orientationchange", function(){ setTimeout(refresh,160); }, true);
+  document.addEventListener("DOMContentLoaded", function(){ setTimeout(refresh,80); });
+  if(document.body) setTimeout(refresh,80);
+})();
+</script>
+
+
+<style id="gdFramedBoxCameraSystemV5Css">
+/* V5: bold target-frame camera. No broad-hole fallback in lock/zoom paths. */
+body.gdTargetFrameDebugOn #gdTargetFrameDebugOverlay{display:block!important;}
+#gdTargetFrameDebugOverlay{position:fixed!important;inset:0!important;pointer-events:none!important;z-index:1450!important;}
+.gdTargetFrameBox{position:fixed!important;box-sizing:border-box!important;border:1.5px dotted rgba(255,255,255,.78)!important;border-radius:18px!important;pointer-events:none!important;background:rgba(31,211,109,.025)!important;box-shadow:0 0 0 1px rgba(0,0,0,.32), inset 0 0 28px rgba(31,211,109,.045)!important;color:rgba(255,255,255,.95)!important;font:800 9px/1.1 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif!important;letter-spacing:.13em!important;text-transform:uppercase!important;text-shadow:0 1px 3px rgba(0,0,0,.9)!important;}
+.gdTargetFrameBox span{position:absolute!important;left:50%!important;top:-13px!important;transform:translateX(-50%)!important;padding:3px 7px!important;border-radius:7px!important;background:rgba(8,13,10,.82)!important;white-space:nowrap!important;}
+.gdTargetFrameBox[data-frame="hole"]{border-color:rgba(191,255,216,.74)!important;}
+.gdTargetFrameBox[data-frame="lock"]{border-color:rgba(255,255,255,.95)!important;border-width:2px!important;background:rgba(255,255,255,.02)!important;}
+.gdTargetFrameBox[data-frame="zoom"]{border-color:rgba(255,213,128,.9)!important;background:rgba(255,213,128,.02)!important;}
+.gdTargetFrameBox[data-frame="tee"]{border-color:rgba(165,210,255,.68)!important;background:rgba(56,143,255,.02)!important;}
+.gdTargetFrameBox[data-frame="tee"] span{left:50%!important;top:8px!important;transform:translateX(-50%)!important;}
+</style>
+<script id="gdFramedBoxCameraSystemV5">
+(function(){
+  window.__gdFramedBoxCameraSystemV5 = true;
+
+  var lastMode = null;
+  var pendingTimers = [];
+  var SAFE_ZONE = {left:.20,right:.80,top:.20,bottom:.76};
+  var lastNudgeAt = 0;
+
+  function safe(fn,fallback){try{return fn();}catch(e){return fallback;}}
+  function num(v,fallback){var n=Number(v);return Number.isFinite(n)?n:fallback;}
+  function hasMap(){return typeof map!=="undefined" && map && typeof L!=="undefined";}
+  function validBounds(b){return !!(b && typeof b.isValid==="function" && b.isValid());}
+  function asLatLng(p){if(!hasMap()||!p||p.lat==null||p.lng==null)return null;return L.latLng(Number(p.lat),Number(p.lng));}
+  function currentTarget(){return asLatLng(safe(function(){return (typeof gdShotDisplayTarget==="function"&&gdShotDisplayTarget())||target||greenCentre;},null));}
+  function greenPoint(){return asLatLng(safe(function(){return greenCentre||target;},null));}
+  function pointBounds(point,radiusM){var c=asLatLng(point);if(!hasMap()||!c)return null;var r=Math.max(3,num(radiusM,12));return L.latLngBounds([safe(function(){return project(c,0,r);},c),safe(function(){return project(c,Math.PI,r);},c),safe(function(){return project(c,Math.PI/2,r);},c),safe(function(){return project(c,Math.PI*1.5,r);},c)]);}
+  function boundsFromPoints(points){if(!hasMap()||!Array.isArray(points)||!points.length)return null;var pts=points.map(asLatLng).filter(Boolean);if(!pts.length)return null;var b=L.latLngBounds(pts);return validBounds(b)?b:null;}
+  function boundsSizeM(b){if(!hasMap()||!validBounds(b))return {w:0,h:0,diag:0};var sw=b.getSouthWest(),ne=b.getNorthEast(),nw=L.latLng(ne.lat,sw.lng),se=L.latLng(sw.lat,ne.lng);var w=safe(function(){return map.distance(sw,se);},0);var h=safe(function(){return map.distance(sw,nw);},0);return {w:w,h:h,diag:Math.sqrt(w*w+h*h)};}
+
+  function frameRect(kind){
+    var w=window.innerWidth||document.documentElement.clientWidth||390;
+    var h=window.innerHeight||document.documentElement.clientHeight||760;
+    var spec={
+      hole:{x:.30,y:.135,w:.40,h:.235},
+      lock:{x:.205,y:.145,w:.60,h:.38},
+      zoom:{x:.10,y:.105,w:.80,h:.50},
+      tee:{x:.335,y:.795,w:.33,h:.105}
+    }[kind]||{x:.205,y:.145,w:.60,h:.38};
+    return {left:Math.round(w*spec.x),top:Math.round(h*spec.y),right:Math.round(w*(spec.x+spec.w)),bottom:Math.round(h*(spec.y+spec.h)),width:Math.round(w*spec.w),height:Math.round(h*spec.h)};
+  }
+  window.gdScreenTargetFrameRect=frameRect;
+  window.gdScreenTargetFrameConfig=function(kind){var r=frameRect(kind),w=window.innerWidth||390,h=window.innerHeight||760;return {left:r.left,top:r.top,right:Math.max(0,w-r.right),bottom:Math.max(0,h-r.bottom)};};
+  function ensureOverlay(){
+    if(!document.body)return null;
+    var overlay=document.getElementById("gdTargetFrameDebugOverlay");
+    if(!overlay){overlay=document.createElement("div");overlay.id="gdTargetFrameDebugOverlay";overlay.setAttribute("aria-hidden","true");document.body.appendChild(overlay);} 
+    var labels={hole:"GREEN / HOLE FRAME",lock:"LOCK FRAME",zoom:"GREEN / LANDING ZOOM",tee:"TEE FRAME"};
+    overlay.innerHTML=["hole","lock","zoom","tee"].map(function(k){var r=frameRect(k);return '<div class="gdTargetFrameBox" data-frame="'+k+'" style="left:'+r.left+'px;top:'+r.top+'px;width:'+r.width+'px;height:'+r.height+'px"><span>'+labels[k]+'</span></div>';}).join("");
+    return overlay;
+  }
+  window.gdEnsureTargetFrameDebugOverlay=ensureOverlay;
+  window.gdSetTargetFrameDebug=function(enabled){window.gdTargetFrameDebug=!!enabled;ensureOverlay();if(document.body)document.body.classList.toggle("gdTargetFrameDebugOn",!!enabled);};
+  window.gdTargetFramePadding=function(kind){var r=frameRect(kind||"lock"),w=window.innerWidth||390,h=window.innerHeight||760;return {paddingTopLeft:[r.left,r.top],paddingBottomRight:[Math.max(0,w-r.right),Math.max(0,h-r.bottom)]};};
+
+  function getGreenBounds(){
+    // No broad fallback: accept only a real/sensible green-sized object, otherwise use the known green centre as a tight green target.
+    var b=boundsFromPoints(safe(function(){return greenPolygon;},null));
+    if(!validBounds(b)) b=safe(function(){return greenOutline&&typeof greenOutline.getBounds==="function"?greenOutline.getBounds():null;},null);
+    if(validBounds(b)){
+      var s=boundsSizeM(b);
+      if(s.diag>0 && s.diag<=80 && s.w<=72 && s.h<=72) return b;
+    }
+    var c=greenPoint();
+    return c?pointBounds(c,14):null;
+  }
+  window.gdGetGreenObjectBounds=getGreenBounds;
+
+  function bubblePayload(center){
+    var c=asLatLng(center)||currentTarget(); if(!c)return null;
+    var d=safe(function(){return start&&c?map.distance(start,c):160;},160);
+    var raw=safe(function(){return calculateShot(d).bubbleProfile;},null)||{};
+    return safe(function(){return gdGpsBubbleDisplayPayload(raw,d,c);},null)||safe(function(){return gdBubblePayloadForRender(raw);},null)||raw;
+  }
+  function getBubbleBounds(center,payload){
+    var c=asLatLng(center)||currentTarget(); if(!c)return null;
+    var p=payload||bubblePayload(c)||{};
+    var shape=safe(function(){return buildBubbleShape(c,p,Math.max(1,num(dev("bubbleVisuals.mainScale"),1)));},null);
+    var b=boundsFromPoints(shape);
+    if(validBounds(b))return b;
+    var visual=(p&&p.visual)||{};
+    var radius=Math.max(18,num(p.radius,0),num(p.lateralRadiusM,0),num(p.depthRadiusM,0),num(visual.visualWidthM,0)/2,num(visual.visualDepthM,0)/2);
+    return pointBounds(c,radius);
+  }
+  window.gdGetBubbleObjectBounds=getBubbleBounds;
+  window.gdGetFallbackPointBounds=function(point,radiusM){return pointBounds(point,radiusM);};
+
+  function explicitLayup(){
+    var g=greenPoint(),t=currentTarget(); if(!g||!t)return false;
+    var builtIn=safe(function(){return typeof gdIsLayupTarget==="function"&&gdIsLayupTarget(g,t);},false);
+    if(builtIn)return true;
+    return safe(function(){return map.distance(g,t)>30;},false);
+  }
+  function resolveMode(){
+    // No broad reach fallback. Only use fairway mode when the shot target/bubble has genuinely moved off the green.
+    lastMode=explicitLayup()?"fairwayLanding":"greenTarget";
+    return lastMode;
+  }
+  window.gdResolveShotTargetMode=resolveMode;
+  function activeBounds(){
+    var mode=resolveMode();
+    if(mode==="fairwayLanding") return getBubbleBounds(currentTarget(),null);
+    // Green mode means frame the green target only; do not include tee/start and do not use whole-hole bounds.
+    return getGreenBounds() || getBubbleBounds(greenPoint(),null);
+  }
+  window.gdGetActiveShotObjectBounds=activeBounds;
+
+  function projectedPixelBounds(bounds,z){
+    var sw=bounds.getSouthWest(),ne=bounds.getNorthEast(),nw=L.latLng(ne.lat,sw.lng),se=L.latLng(sw.lat,ne.lng);
+    var pts=[sw,ne,nw,se].map(function(p){return map.project(p,z);});
+    var xs=pts.map(function(p){return p.x;}),ys=pts.map(function(p){return p.y;});
+    return {minX:Math.min.apply(null,xs),maxX:Math.max.apply(null,xs),minY:Math.min.apply(null,ys),maxY:Math.max.apply(null,ys)};
+  }
+  function fitObjectBoundsToFrame(bounds,frameName,options){
+    if(!hasMap()||!validBounds(bounds))return false;
+    var kind=frameName||"lock",opts=options||{},fr=frameRect(kind);
+    var fill=num(opts.fillRatio,kind==="zoom"?.94:.88);
+    var baseZ=num(safe(function(){return map.getZoom();},18),18);
+    var pb=projectedPixelBounds(bounds,baseZ);
+    var objW=Math.max(1,pb.maxX-pb.minX),objH=Math.max(1,pb.maxY-pb.minY);
+    var targetW=Math.max(32,fr.width*fill),targetH=Math.max(32,fr.height*fill);
+    // Bold framing: zoom until the object fills the frame on its limiting axis.
+    var scale=Math.min(targetW/objW,targetH/objH);
+    var z=baseZ + Math.log(Math.max(.01,scale))/Math.LN2;
+    z += num(opts.zoomBoost,kind==="zoom"?.35:.18);
+    z=Math.max(num(opts.minZoom,17),Math.min(num(opts.maxZoom,21.75),z));
+    safe(function(){map.options.zoomSnap=.01;map.options.zoomDelta=.25;if(typeof map.stop==="function")map.stop();});
+    var mapRect=safe(function(){return map.getContainer().getBoundingClientRect();},{left:0,top:0,width:window.innerWidth||390,height:window.innerHeight||760});
+    var screenCenter=L.point((mapRect.width||window.innerWidth||390)/2,(mapRect.height||window.innerHeight||760)/2);
+    var desired=L.point(fr.left-mapRect.left+fr.width/2,fr.top-mapRect.top+fr.height/2);
+    var objectCenter=bounds.getCenter();
+    var targetLayer=map.project(objectCenter,z);
+    var newCenterLayer=targetLayer.subtract(desired.subtract(screenCenter));
+    var newCenter=map.unproject(newCenterLayer,z);
+    map.setView(newCenter,z,{animate:opts.animate!==false,duration:num(opts.duration,.18)});
+    window.__gdLastTargetFrameFit={kind:kind,zoom:z,fill:fill,mode:lastMode,objectMeters:boundsSizeM(bounds)};
+    return true;
+  }
+  window.gdFitObjectBoundsToScreenFrame=fitObjectBoundsToFrame;
+  function frameActiveShot(kind,opts){var b=activeBounds(); if(!validBounds(b))return false; return fitObjectBoundsToFrame(b,kind||"lock",Object.assign({animate:true,duration:.18},opts||{}));}
+  window.gdFrameActiveShot=frameActiveShot;
+  function clearTimers(){pendingTimers.forEach(clearTimeout);pendingTimers=[];}
+  function refitLocked(){clearTimers();[0,55,140,260].forEach(function(ms){pendingTimers.push(setTimeout(function(){if(safe(function(){return lockedFrame&&start&&target;},false))frameActiveShot("lock",{animate:ms>0,duration:.12,fillRatio:.90,zoomBoost:.25});},ms));});}
+
+  // Kill broad old camera paths in shot lock/zoom. This is the replacement camera contract.
+  frameShotView=function(){return frameActiveShot("lock",{animate:true,duration:.16,fillRatio:.90,zoomBoost:.25});};
+  window.frameShotView=frameShotView;
+  lockFrame=function(refit){
+    if(!safe(function(){return start&&target&&map;},false))return false;
+    lockedFrame=true;
+    if(refit!==false)frameShotView();
+    safe(function(){setBubbleOnlyLock(true);});
+    safe(function(){renderShot();});
+    if(refit!==false)refitLocked();
+    return true;
+  };
+  window.lockFrame=lockFrame;
+  window.gdToggleTargetZoom=function(ev){
+    if(ev){ev.preventDefault();ev.stopPropagation();if(ev.stopImmediatePropagation)ev.stopImmediatePropagation();}
+    if(!hasMap())return false;
+    var btn=document.getElementById("gdGreenZoomBtn");
+    if(window.gdSimpleGreenZoomActive){
+      window.gdSimpleGreenZoomActive=false;document.body.classList.remove("gd-green-zoom-active");if(btn)btn.classList.remove("softActive");
+      var v=window.gdSimpleGreenZoomReturnView;window.gdSimpleGreenZoomReturnView=null;if(v&&v.center)safe(function(){map.setView(v.center,v.zoom,{animate:true,duration:.18});});return false;
+    }
+    var b=activeBounds(); if(!validBounds(b))return false;
+    window.gdSimpleGreenZoomReturnView=safe(function(){return {center:map.getCenter(),zoom:map.getZoom()};},null);
+    window.gdSimpleGreenZoomActive=true;document.body.classList.add("gd-green-zoom-active");if(btn)btn.classList.add("softActive");
+    fitObjectBoundsToFrame(b,"zoom",{animate:true,duration:.16,fillRatio:.96,zoomBoost:.45,maxZoom:21.75});
+    return false;
+  };
+  window.gdToggleSimpleGreenZoom=window.gdToggleTargetZoom;
+  var prevUndo=window.gdReframeShotAfterUndo;
+  window.gdReframeShotAfterUndo=function(opts){var out=safe(function(){return typeof prevUndo==="function"?prevUndo(opts||{}):false;},false);if(safe(function(){return lockedFrame;},false)&&(!opts||opts.refit!==false))refitLocked();return out;};
+  window.gdMaybeNudgeFairwayCamera=function(center){
+    if(!hasMap()||!center||!safe(function(){return lockedFrame;},false)||resolveMode()!=="fairwayLanding")return false;
+    if(Date.now()-lastNudgeAt<260)return false;
+    var p=safe(function(){return map.latLngToContainerPoint(center);},null);if(!p)return false;
+    var c=map.getContainer(),w=c.clientWidth||1,h=c.clientHeight||1,minX=w*SAFE_ZONE.left,maxX=w*SAFE_ZONE.right,minY=h*SAFE_ZONE.top,maxY=h*SAFE_ZONE.bottom;
+    if(p.x>=minX&&p.x<=maxX&&p.y>=minY&&p.y<=maxY)return false;
+    var dx=0,dy=0;if(p.x<minX)dx=p.x-minX;else if(p.x>maxX)dx=p.x-maxX;if(p.y<minY)dy=p.y-minY;else if(p.y>maxY)dy=p.y-maxY;
+    lastNudgeAt=Date.now();safe(function(){map.panBy([dx,dy],{animate:true,duration:.12});});return true;
+  };
+
+  function refresh(){if(window.gdTargetFrameDebug!==false)window.gdSetTargetFrameDebug(true);}
+  window.addEventListener("resize",function(){setTimeout(refresh,50);},true);
+  window.addEventListener("orientationchange",function(){setTimeout(refresh,150);},true);
+  document.addEventListener("DOMContentLoaded",function(){setTimeout(refresh,80);});
+  if(document.body)setTimeout(refresh,80);
+})();
+</script>
+
+<style id="gdFramedBoxCameraV6Css">
+/* V6: keep the debug boxes honest and push the tee setup frame down into the real tee/start zone. */
+body.gdTargetFrameDebugOn #gdTargetFrameDebugOverlay{display:block!important;}
+#gdTargetFrameDebugOverlay{position:fixed!important;inset:0!important;pointer-events:none!important;z-index:1450!important;}
+.gdTargetFrameBox{position:fixed!important;box-sizing:border-box!important;border:1.5px dotted rgba(255,255,255,.80)!important;border-radius:18px!important;pointer-events:none!important;background:rgba(31,211,109,.022)!important;box-shadow:0 0 0 1px rgba(0,0,0,.34), inset 0 0 30px rgba(31,211,109,.05)!important;color:rgba(255,255,255,.96)!important;font:800 9px/1.1 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif!important;letter-spacing:.13em!important;text-transform:uppercase!important;text-shadow:0 1px 3px rgba(0,0,0,.92)!important;}
+.gdTargetFrameBox span{position:absolute!important;left:50%!important;top:-13px!important;transform:translateX(-50%)!important;padding:3px 7px!important;border-radius:7px!important;background:rgba(8,13,10,.82)!important;white-space:nowrap!important;}
+.gdTargetFrameBox[data-frame="hole"]{border-color:rgba(191,255,216,.74)!important;}
+.gdTargetFrameBox[data-frame="lock"]{border-color:rgba(255,255,255,.97)!important;border-width:2px!important;background:rgba(255,255,255,.02)!important;}
+.gdTargetFrameBox[data-frame="zoom"]{border-color:rgba(255,213,128,.92)!important;background:rgba(255,213,128,.02)!important;}
+.gdTargetFrameBox[data-frame="tee"]{border-color:rgba(165,210,255,.78)!important;background:rgba(56,143,255,.03)!important;}
+.gdTargetFrameBox[data-frame="tee"] span{left:50%!important;top:8px!important;transform:translateX(-50%)!important;}
+</style>
+<script id="gdFramedBoxCameraRebuildV6">
+(function(){
+  window.__gdFramedBoxCameraSystemV6 = true;
+
+  var pendingTimers=[];
+  var lastMode=null;
+  var lastNudgeAt=0;
+  var SAFE_ZONE={left:.18,right:.82,top:.18,bottom:.78};
+  var oldFitBounds=null;
+  var oldSetView=null;
+
+  function safe(fn,fallback){try{return fn();}catch(e){return fallback;}}
+  function num(v,f){var n=Number(v);return Number.isFinite(n)?n:f;}
+  function hasMap(){return typeof map!=="undefined"&&map&&typeof L!=="undefined";}
+  function validBounds(b){return !!(b&&typeof b.isValid==="function"&&b.isValid());}
+  function asLatLng(p){if(!hasMap()||!p||p.lat==null||p.lng==null)return null;var lat=Number(p.lat),lng=Number(p.lng);return Number.isFinite(lat)&&Number.isFinite(lng)?L.latLng(lat,lng):null;}
+  function greenPoint(){return asLatLng(safe(function(){return greenCentre||target;},null));}
+  function currentTarget(){return asLatLng(safe(function(){return (typeof gdShotDisplayTarget==="function"&&gdShotDisplayTarget())||target||greenCentre;},null));}
+  function pointBounds(point,radiusM){var c=asLatLng(point);if(!hasMap()||!c)return null;var r=Math.max(1,num(radiusM,7));return L.latLngBounds([safe(function(){return project(c,0,r);},c),safe(function(){return project(c,Math.PI,r);},c),safe(function(){return project(c,Math.PI/2,r);},c),safe(function(){return project(c,Math.PI*1.5,r);},c)]);}
+  function boundsFromPoints(points){if(!hasMap()||!Array.isArray(points)||!points.length)return null;var pts=points.map(asLatLng).filter(Boolean);if(!pts.length)return null;var b=L.latLngBounds(pts);return validBounds(b)?b:null;}
+  function boundsSizeM(b){if(!hasMap()||!validBounds(b))return {w:0,h:0,diag:0};var sw=b.getSouthWest(),ne=b.getNorthEast(),nw=L.latLng(ne.lat,sw.lng),se=L.latLng(sw.lat,ne.lng);var w=safe(function(){return map.distance(sw,se);},0);var h=safe(function(){return map.distance(sw,nw);},0);return {w:w,h:h,diag:Math.sqrt(w*w+h*h)};}
+  function mapRect(){return safe(function(){return map.getContainer().getBoundingClientRect();},{left:0,top:0,width:window.innerWidth||390,height:window.innerHeight||760});}
+  function frameRect(kind){
+    var w=window.innerWidth||document.documentElement.clientWidth||390;
+    var h=window.innerHeight||document.documentElement.clientHeight||760;
+    // V6: lock/zoom are deliberately high and tight. Tee is much lower and belongs to setup only.
+    var spec={
+      hole:{x:.305,y:.145,w:.39,h:.225},
+      lock:{x:.205,y:.145,w:.60,h:.375},
+      zoom:{x:.085,y:.095,w:.83,h:.50},
+      tee:{x:.285,y:.825,w:.43,h:.125}
+    }[kind]||{x:.205,y:.145,w:.60,h:.375};
+    return {left:Math.round(w*spec.x),top:Math.round(h*spec.y),right:Math.round(w*(spec.x+spec.w)),bottom:Math.round(h*(spec.y+spec.h)),width:Math.round(w*spec.w),height:Math.round(h*spec.h)};
+  }
+  window.gdScreenTargetFrameRect=frameRect;
+  window.gdScreenTargetFrameConfig=function(kind){var r=frameRect(kind),w=window.innerWidth||390,h=window.innerHeight||760;return {left:r.left,top:r.top,right:Math.max(0,w-r.right),bottom:Math.max(0,h-r.bottom)};};
+  window.gdTargetFramePadding=function(kind){var r=frameRect(kind||"lock"),w=window.innerWidth||390,h=window.innerHeight||760;return {paddingTopLeft:[r.left,r.top],paddingBottomRight:[Math.max(0,w-r.right),Math.max(0,h-r.bottom)]};};
+  function ensureOverlay(){
+    if(!document.body)return null;
+    var overlay=document.getElementById("gdTargetFrameDebugOverlay");
+    if(!overlay){overlay=document.createElement("div");overlay.id="gdTargetFrameDebugOverlay";overlay.setAttribute("aria-hidden","true");document.body.appendChild(overlay);}
+    var labels={hole:"GREEN / HOLE FRAME",lock:"LOCK FRAME",zoom:"GREEN / LANDING ZOOM",tee:"TEE FRAME"};
+    overlay.innerHTML=["hole","lock","zoom","tee"].map(function(k){var r=frameRect(k);return '<div class="gdTargetFrameBox" data-frame="'+k+'" style="left:'+r.left+'px;top:'+r.top+'px;width:'+r.width+'px;height:'+r.height+'px"><span>'+labels[k]+'</span></div>';}).join("");
+    return overlay;
+  }
+  window.gdEnsureTargetFrameDebugOverlay=ensureOverlay;
+  window.gdSetTargetFrameDebug=function(enabled){window.gdTargetFrameDebug=!!enabled;ensureOverlay();if(document.body)document.body.classList.toggle("gdTargetFrameDebugOn",!!enabled);};
+
+  function allowOverZoom(){
+    if(!hasMap())return;
+    safe(function(){map.options.maxZoom=24;map.options.zoomSnap=.01;map.options.zoomDelta=.20;});
+    safe(function(){map.eachLayer(function(layer){if(layer&&layer.options){if(layer.options.maxZoom!=null)layer.options.maxZoom=24;if(layer.options.maxNativeZoom==null)layer.options.maxNativeZoom=21;}});});
+  }
+
+  function getGreenBounds(){
+    // V6 no fallback: the lock camera is based on the green centre as a tight target.
+    // The visible green outline can remain big/subtle, but it must not make the camera shy.
+    var c=greenPoint();
+    return c?pointBounds(c,6):null;
+  }
+  window.gdGetGreenObjectBounds=getGreenBounds;
+
+  function bubblePayload(center){
+    var c=asLatLng(center)||currentTarget(); if(!c)return null;
+    var d=safe(function(){return start&&c?map.distance(start,c):160;},160);
+    var raw=safe(function(){return calculateShot(d).bubbleProfile;},null)||{};
+    return safe(function(){return gdGpsBubbleDisplayPayload(raw,d,c);},null)||safe(function(){return gdBubblePayloadForRender(raw);},null)||raw;
+  }
+  function getBubbleBounds(center,payload){
+    var c=asLatLng(center)||currentTarget(); if(!c)return null;
+    var p=payload||bubblePayload(c)||{};
+    var scale=Math.max(1,num(safe(function(){return dev("bubbleVisuals.mainScale");},1),1));
+    var shape=safe(function(){return buildBubbleShape(c,p,scale);},null);
+    var b=boundsFromPoints(shape);
+    if(validBounds(b))return b;
+    var visual=(p&&p.visual)||{};
+    var radius=Math.max(10,num(p.radius,0),num(p.lateralRadiusM,0),num(p.depthRadiusM,0),num(visual.visualWidthM,0)/2,num(visual.visualDepthM,0)/2);
+    return pointBounds(c,radius);
+  }
+  window.gdGetBubbleObjectBounds=getBubbleBounds;
+  window.gdGetFallbackPointBounds=function(point,radiusM){return pointBounds(point,radiusM);};
+  function explicitLayup(){
+    var g=greenPoint(),t=currentTarget(); if(!g||!t)return false;
+    var built=safe(function(){return typeof gdIsLayupTarget==="function"&&gdIsLayupTarget(g,t);},false);
+    if(built)return true;
+    return safe(function(){return map.distance(g,t)>30;},false);
+  }
+  function resolveMode(){lastMode=explicitLayup()?"fairwayLanding":"greenTarget";return lastMode;}
+  window.gdResolveShotTargetMode=resolveMode;
+  function activeBounds(){return resolveMode()==="fairwayLanding"?getBubbleBounds(currentTarget(),null):getGreenBounds();}
+  window.gdGetActiveShotObjectBounds=activeBounds;
+
+  function projectedPixelBounds(bounds,z){var sw=bounds.getSouthWest(),ne=bounds.getNorthEast(),nw=L.latLng(ne.lat,sw.lng),se=L.latLng(sw.lat,ne.lng);var pts=[sw,ne,nw,se].map(function(p){return map.project(p,z);});var xs=pts.map(function(p){return p.x;}),ys=pts.map(function(p){return p.y;});return {minX:Math.min.apply(null,xs),maxX:Math.max.apply(null,xs),minY:Math.min.apply(null,ys),maxY:Math.max.apply(null,ys)};}
+  function fitObjectBoundsToFrame(bounds,frameName,options){
+    if(!hasMap()||!validBounds(bounds))return false;
+    allowOverZoom();
+    var kind=frameName||"lock",opts=options||{},fr=frameRect(kind),mr=mapRect();
+    var fill=num(opts.fillRatio,kind==="zoom"?1.28:1.18);
+    var boost=num(opts.zoomBoost,kind==="zoom"?.95:.75);
+    var baseZ=num(safe(function(){return map.getZoom();},18),18);
+    var pb=projectedPixelBounds(bounds,baseZ);
+    var objW=Math.max(1,pb.maxX-pb.minX),objH=Math.max(1,pb.maxY-pb.minY);
+    var targetW=Math.max(32,fr.width*fill),targetH=Math.max(32,fr.height*fill);
+    var scale=Math.min(targetW/objW,targetH/objH);
+    var z=baseZ+Math.log(Math.max(.01,scale))/Math.LN2+boost;
+    z=Math.max(num(opts.minZoom,18),Math.min(num(opts.maxZoom,23.25),z));
+    var screenCenter=L.point((mr.width||window.innerWidth||390)/2,(mr.height||window.innerHeight||760)/2);
+    var desired=L.point(fr.left-mr.left+fr.width/2,fr.top-mr.top+fr.height/2);
+    var targetLayer=map.project(bounds.getCenter(),z);
+    var newCenterLayer=targetLayer.subtract(desired.subtract(screenCenter));
+    var newCenter=map.unproject(newCenterLayer,z);
+    window.__gdFramedBoxCameraApplying=true;
+    safe(function(){if(typeof map.stop==="function")map.stop();});
+    safe(function(){map.setView(newCenter,z,{animate:opts.animate!==false,duration:num(opts.duration,.10)});});
+    setTimeout(function(){window.__gdFramedBoxCameraApplying=false;},40);
+    window.__gdLastTargetFrameFit={v:6,kind:kind,zoom:z,fill:fill,mode:lastMode,objectMeters:boundsSizeM(bounds),frame:fr};
+    return true;
+  }
+  window.gdFitObjectBoundsToScreenFrame=fitObjectBoundsToFrame;
+  function frameActiveShot(kind,opts){var b=activeBounds();return validBounds(b)?fitObjectBoundsToFrame(b,kind||"lock",Object.assign({animate:true,duration:.10,fillRatio:(kind==="zoom"?1.30:1.20),zoomBoost:(kind==="zoom"?1.05:.85),maxZoom:23.25},opts||{})):false;}
+  window.gdFrameActiveShot=frameActiveShot;
+  function clearTimers(){pendingTimers.forEach(clearTimeout);pendingTimers=[];}
+  function refitLocked(){clearTimers();[0,24,70,140,260,520,860].forEach(function(ms){pendingTimers.push(setTimeout(function(){if(safe(function(){return lockedFrame&&start&&target;},false))frameActiveShot("lock",{animate:ms>0,duration:.08,fillRatio:1.22,zoomBoost:.90,maxZoom:23.25});},ms));});}
+
+  function fitTwoPointsToTwoFrames(startPoint,greenPt,animate){
+    if(!hasMap())return false;
+    var tee=asLatLng(startPoint),green=asLatLng(greenPt);if(!tee||!green)return false;
+    allowOverZoom();
+    var teeFrame=frameRect("tee"),holeFrame=frameRect("hole"),mr=mapRect();
+    var teeDesired=L.point(teeFrame.left-mr.left+teeFrame.width/2, teeFrame.top-mr.top+teeFrame.height*.48);
+    var greenDesired=L.point(holeFrame.left-mr.left+holeFrame.width/2, holeFrame.top-mr.top+holeFrame.height/2);
+    var desiredVec=greenDesired.subtract(teeDesired);
+    var desiredDist=Math.max(80,Math.sqrt(desiredVec.x*desiredVec.x+desiredVec.y*desiredVec.y));
+    var baseZ=num(safe(function(){return map.getZoom();},17),17);
+    var teeP=map.project(tee,baseZ),greenP=map.project(green,baseZ);
+    var actualVec=greenP.subtract(teeP);
+    var actualDist=Math.max(1,Math.sqrt(actualVec.x*actualVec.x+actualVec.y*actualVec.y));
+    var z=baseZ+Math.log(desiredDist/actualDist)/Math.LN2;
+    z=Math.max(15,Math.min(21.5,z+.18));
+    var screenCenter=L.point((mr.width||window.innerWidth||390)/2,(mr.height||window.innerHeight||760)/2);
+    teeP=map.project(tee,z);greenP=map.project(green,z);
+    var c1=teeP.subtract(teeDesired.subtract(screenCenter));
+    var c2=greenP.subtract(greenDesired.subtract(screenCenter));
+    var centerLayer=L.point((c1.x+c2.x)/2,(c1.y+c2.y)/2);
+    var center=map.unproject(centerLayer,z);
+    window.__gdFramedBoxCameraApplying=true;
+    safe(function(){if(typeof map.stop==="function")map.stop();map.setView(center,z,{animate:animate!==false,duration:.14});});
+    setTimeout(function(){window.__gdFramedBoxCameraApplying=false;},40);
+    window.__gdLastHoleFrameFit={v:6,zoom:z,teeFrame:teeFrame,holeFrame:holeFrame,desiredDist:desiredDist,actualDist:actualDist};
+    return true;
+  }
+  window.gdFrameHoleSetupToTargetFrames=function(opts){opts=opts||{};var s=safe(function(){return start;},null);var g=greenPoint();return fitTwoPointsToTwoFrames(s,g,opts.animate!==false);};
+
+  // Replace old broad pre-lock fit with the framed tee/green contract. No broad route fit.
+  var oldPrelock=window.gdFrameMappedPreLockPreset;
+  window.gdFrameMappedPreLockPreset=function(index,opts){opts=opts||{};var ok=false;safe(function(){ok=window.gdFrameHoleSetupToTargetFrames({animate:opts.animate!==false});});if(ok)return true;return typeof oldPrelock==="function"?oldPrelock(index,opts):false;};
+  var oldRenderPrelock=window.gdRenderMappedPreLockHoleFrame;
+  window.gdRenderMappedPreLockHoleFrame=function(){var out=typeof oldRenderPrelock==="function"?oldRenderPrelock.apply(this,arguments):false;safe(function(){if(!lockedFrame)window.gdFrameHoleSetupToTargetFrames({animate:false});});setTimeout(function(){safe(function(){if(!lockedFrame)window.gdFrameHoleSetupToTargetFrames({animate:false});});},80);return out;};
+
+  // Lock/zoom: no old fallback, no tee/start, no whole-hole fit.
+  frameShotView=function(){return frameActiveShot("lock",{animate:true,duration:.09,fillRatio:1.24,zoomBoost:.95,maxZoom:23.25});};
+  window.frameShotView=frameShotView;
+  lockFrame=function(refit){
+    if(!safe(function(){return start&&target&&map;},false))return false;
+    lockedFrame=true;
+    if(refit!==false)frameShotView();
+    safe(function(){setBubbleOnlyLock(true);});
+    safe(function(){renderShot();});
+    if(refit!==false)refitLocked();
+    return true;
+  };
+  window.lockFrame=lockFrame;
+  window.gdToggleTargetZoom=function(ev){
+    if(ev){ev.preventDefault();ev.stopPropagation();if(ev.stopImmediatePropagation)ev.stopImmediatePropagation();}
+    if(!hasMap())return false;
+    var btn=document.getElementById("gdGreenZoomBtn");
+    if(window.gdSimpleGreenZoomActive){
+      window.gdSimpleGreenZoomActive=false;document.body.classList.remove("gd-green-zoom-active");if(btn)btn.classList.remove("softActive");
+      var v=window.gdSimpleGreenZoomReturnView;window.gdSimpleGreenZoomReturnView=null;if(v&&v.center)safe(function(){map.setView(v.center,v.zoom,{animate:true,duration:.12});});return false;
+    }
+    var b=activeBounds();if(!validBounds(b))return false;
+    window.gdSimpleGreenZoomReturnView=safe(function(){return {center:map.getCenter(),zoom:map.getZoom()};},null);
+    window.gdSimpleGreenZoomActive=true;document.body.classList.add("gd-green-zoom-active");if(btn)btn.classList.add("softActive");
+    fitObjectBoundsToFrame(b,"zoom",{animate:true,duration:.09,fillRatio:1.34,zoomBoost:1.15,maxZoom:23.5});
+    return false;
+  };
+  window.gdToggleSimpleGreenZoom=window.gdToggleTargetZoom;
+
+  // Stop the old broad camera calls from pulling out after the new lock fit. Setup/pre-lock is still allowed.
+  function patchMapCamera(){
+    if(!hasMap()||map.__gdFramedBoxCameraV6Patched)return;
+    map.__gdFramedBoxCameraV6Patched=true;
+    oldFitBounds=map.fitBounds.bind(map);
+    oldSetView=map.setView.bind(map);
+    map.fitBounds=function(bounds,opts){
+      if(safe(function(){return lockedFrame&&!window.__gdFramedBoxCameraApplying;},false)){
+        setTimeout(refitLocked,0);
+        return map;
+      }
+      return oldFitBounds(bounds,opts);
+    };
+  }
+  patchMapCamera();
+
+  window.gdMaybeNudgeFairwayCamera=function(center){
+    if(!hasMap()||!center||!safe(function(){return lockedFrame;},false)||resolveMode()!=="fairwayLanding")return false;
+    if(Date.now()-lastNudgeAt<240)return false;
+    var p=safe(function(){return map.latLngToContainerPoint(center);},null);if(!p)return false;
+    var c=map.getContainer(),w=c.clientWidth||1,h=c.clientHeight||1,minX=w*SAFE_ZONE.left,maxX=w*SAFE_ZONE.right,minY=h*SAFE_ZONE.top,maxY=h*SAFE_ZONE.bottom;
+    if(p.x>=minX&&p.x<=maxX&&p.y>=minY&&p.y<=maxY)return false;
+    var dx=0,dy=0;if(p.x<minX)dx=p.x-minX;else if(p.x>maxX)dx=p.x-maxX;if(p.y<minY)dy=p.y-minY;else if(p.y>maxY)dy=p.y-maxY;
+    lastNudgeAt=Date.now();safe(function(){map.panBy([dx,dy],{animate:true,duration:.10});});return true;
+  };
+
+  function refresh(){allowOverZoom();if(window.gdTargetFrameDebug!==false)window.gdSetTargetFrameDebug(true);if(safe(function(){return lockedFrame&&start&&target;},false))refitLocked();}
+  window.addEventListener("resize",function(){setTimeout(refresh,50);},true);
+  window.addEventListener("orientationchange",function(){setTimeout(refresh,150);},true);
+  document.addEventListener("DOMContentLoaded",function(){setTimeout(refresh,90);});
+  setTimeout(refresh,90);
 })();
 </script>
 
