@@ -40384,5 +40384,212 @@ body.gdHoleImageCameraOn .leaflet-control-container{visibility:hidden;}
 })();
 </script>
 
+
+<style id="gdHoleImageCameraV12Css">
+/* V12: final camera ownership layer. Leaflet remains the geo source; Hole Image Camera owns lock/target zoom when a geo manifest is valid. */
+#gdHoleImageCameraLayer{z-index:1320!important;background:transparent!important;contain:layout paint;}
+#gdHoleImageCameraLayer .gdHoleImageStage{position:absolute;left:0;top:0;transform-origin:0 0;will-change:transform;}
+#gdHoleImageCameraLayer .gdHoleImageTiles{transform-origin:0 0;will-change:transform;}
+#gdHoleImageCameraLayer svg.gdHoleImageVectorLayer{position:absolute;left:0;top:0;overflow:visible;pointer-events:none;}
+#gdHoleImageCameraLayer .gdHoleImageStatus{position:fixed;left:12px;top:calc(env(safe-area-inset-top,0px) + 70px);z-index:2;padding:7px 10px;border-radius:999px;background:rgba(4,8,6,.74);border:1px solid rgba(255,255,255,.16);color:rgba(255,255,255,.92);font:800 11px/1 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;letter-spacing:.08em;text-transform:uppercase;backdrop-filter:blur(10px);}
+body.gdHoleImageCameraOverlay #gdHoleImageCameraLayer{display:block!important;background:transparent!important;opacity:.56;mix-blend-mode:normal;}
+body.gdHoleImageCameraOverlay #map,body.gdHoleImageCameraOverlay .leaflet-control-container{visibility:visible!important;}
+body.gdHoleImageCameraImageOnly #gdHoleImageCameraLayer,body.gdHoleImageCameraShotLock #gdHoleImageCameraLayer{display:block!important;background:#060806!important;opacity:1;}
+body.gdHoleImageCameraImageOnly #map,body.gdHoleImageCameraShotLock #map{visibility:hidden!important;}
+body.gdHoleImageCameraImageOnly .leaflet-control-container,body.gdHoleImageCameraShotLock .leaflet-control-container{visibility:hidden!important;}
+body.gdHoleImageCameraShotLock .leaflet-marker-pane,body.gdHoleImageCameraShotLock .leaflet-overlay-pane{visibility:hidden!important;}
+.gdHoleImageGreenPolygon{fill:rgba(31,211,109,.13);stroke:rgba(31,211,109,.94);stroke-width:3;vector-effect:non-scaling-stroke;}
+.gdHoleImageActiveBounds{fill:rgba(255,255,255,.055);stroke:rgba(255,255,255,.95);stroke-width:2.5;stroke-dasharray:7 5;vector-effect:non-scaling-stroke;}
+.gdHoleImageAimLine{stroke:rgba(255,255,255,.78);stroke-width:2.4;stroke-dasharray:8 7;vector-effect:non-scaling-stroke;}
+.gdHoleImageBubbleEllipse{fill:rgba(255,255,255,.16);stroke:rgba(255,255,255,.92);stroke-width:2.25;vector-effect:non-scaling-stroke;}
+.gdHoleImagePin{fill:rgba(255,60,46,.96);stroke:rgba(255,255,255,.92);stroke-width:1.5;vector-effect:non-scaling-stroke;}
+</style>
+<script id="gdHoleImageCameraV12">
+(function(){
+  window.__gdHoleImageCameraV12=true;
+  var VERSION="V12";
+  var oldLock=window.lockFrame;
+  var oldFrame=window.frameShotView;
+  var oldZoom=window.gdToggleTargetZoom||window.gdToggleSimpleGreenZoom;
+  var previousShotTransform=null;
+  var cameraOwner="liveMap";
+  var testMode="off";
+  var cameraBlockUntil=0;
+  var blocked={setView:0,fitBounds:0,lastSetView:null,lastFitBounds:null};
+  window.GD_CAMERA_OWNER={LIVE_MAP:"liveMap",HOLE_FRAME_SETUP:"holeFrameSetup",SHOT_LOCK:"shotLock",TARGET_ZOOM:"targetZoom",HOLE_IMAGE_QA:"holeImageQa"};
+  window.SHOT_TARGET_MODE={GREEN_TARGET:"greenTarget",FAIRWAY_LANDING:"fairwayLanding"};
+  function safe(fn,fb){try{return fn();}catch(e){return fb;}}
+  function num(v,fb){v=Number(v);return Number.isFinite(v)?v:fb;}
+  function hasMap(){return typeof map!=="undefined"&&map&&typeof L!=="undefined";}
+  function asLL(p){if(!p||!hasMap())return null;if(p.lat!==undefined&&p.lng!==undefined)return L.latLng(num(p.lat,NaN),num(p.lng,NaN));if(Array.isArray(p)&&p.length>=2)return L.latLng(num(p[0],NaN),num(p[1],NaN));return null;}
+  function validLL(p){return !!(p&&Number.isFinite(p.lat)&&Number.isFinite(p.lng));}
+  function setOwner(owner,reason,ms){cameraOwner=owner||window.GD_CAMERA_OWNER.LIVE_MAP;cameraBlockUntil=Date.now()+num(ms,owner===window.GD_CAMERA_OWNER.LIVE_MAP?0:1400);window.__gdCameraOwnerV12={owner:cameraOwner,reason:reason||"",until:cameraBlockUntil,blocked:blocked};}
+  function ownsCamera(){return cameraOwner!==window.GD_CAMERA_OWNER.LIVE_MAP&&(Date.now()<cameraBlockUntil||safe(function(){return !!lockedFrame;},false)||testMode!=="off"||!!window.gdSimpleGreenZoomActive);}
+  function installGate(){
+    if(!hasMap()||map.__gdV12CameraGateInstalled)return;
+    map.__gdV12CameraGateInstalled=true;
+    var nativeSet=map.__gdV9NativeSetView||map.setView.bind(map);
+    var nativeFit=map.__gdV9NativeFitBounds||map.fitBounds.bind(map);
+    map.__gdV12NativeSetView=nativeSet;map.__gdV12NativeFitBounds=nativeFit;
+    map.setView=function(center,zoom,opts){opts=opts||{};if(ownsCamera()&&!opts.__gdV12Allow){blocked.setView++;blocked.lastSetView={owner:cameraOwner,zoom:zoom,at:Date.now(),stack:(new Error()).stack};window.__gdV12CameraBlocked=blocked;return map;}return nativeSet(center,zoom,opts);};
+    map.fitBounds=function(bounds,opts){opts=opts||{};if(ownsCamera()&&!opts.__gdV12Allow){blocked.fitBounds++;blocked.lastFitBounds={owner:cameraOwner,at:Date.now(),stack:(new Error()).stack};window.__gdV12CameraBlocked=blocked;return map;}return nativeFit(bounds,opts);};
+  }
+  function manifest(){return safe(function(){return window.gdLoadHoleImageCaptureManifest&&window.gdLoadHoleImageCaptureManifest();},null)||window.gdHoleImageCaptureManifest||safe(function(){return window.gdBuildHoleImageCaptureManifest&&window.gdBuildHoleImageCaptureManifest("v12");},null);}
+  function manifestValid(m){return !!(m&&m.originPx&&Number.isFinite(m.originPx.x)&&Number.isFinite(m.originPx.y)&&m.imageWidth>0&&m.imageHeight>0&&Array.isArray(m.tiles)&&m.tiles.length&&m.greenTruthCluster&&m.greenCenterPx);}
+  function ensureLayer(){
+    var el=document.getElementById("gdHoleImageCameraLayer");
+    if(!el){el=document.createElement("div");el.id="gdHoleImageCameraLayer";el.setAttribute("aria-hidden","true");document.body.appendChild(el);}
+    return el;
+  }
+  function esc(s){return String(s==null?"":s).replace(/[&<>\"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
+  function pxForLL(m,ll){if(!m||!hasMap()||!ll)return null;var z=num(m.captureZoom,m.capture&&m.capture.zoom||18);var p=map.project(asLL(ll),z);return p?{x:p.x-m.originPx.x,y:p.y-m.originPx.y}:null;}
+  function pxForBounds(m,b){
+    if(!m||!b||!b.getSouthWest)return null;
+    var sw=b.getSouthWest(),ne=b.getNorthEast(),nw=L.latLng(ne.lat,sw.lng),se=L.latLng(sw.lat,ne.lng);
+    var pts=[sw,nw,ne,se].map(function(p){return pxForLL(m,p);}).filter(Boolean);if(!pts.length)return null;
+    var xs=pts.map(function(p){return p.x;}),ys=pts.map(function(p){return p.y;});
+    return {minX:Math.min.apply(null,xs),maxX:Math.max.apply(null,xs),minY:Math.min.apply(null,ys),maxY:Math.max.apply(null,ys)};
+  }
+  function rectPath(r){return "M"+r.minX+" "+r.minY+"L"+r.maxX+" "+r.minY+"L"+r.maxX+" "+r.maxY+"L"+r.minX+" "+r.maxY+"Z";}
+  function polygonPoints(m){var pts=safe(function(){return (m.greenTruthCluster.greenPolygonLatLngs||[]).map(function(ll){return pxForLL(m,ll);}).filter(Boolean);},[]);return pts.map(function(p){return p.x.toFixed(1)+","+p.y.toFixed(1);}).join(" ");}
+  function activeBounds(){return safe(function(){return window.gdGetActiveShotObjectBounds&&window.gdGetActiveShotObjectBounds();},null)||safe(function(){return window.gdGetGreenObjectBounds&&window.gdGetGreenObjectBounds();},null)||safe(function(){return window.gdGreenTruthClusterBounds&&window.gdGreenTruthClusterBounds();},null);}
+  function targetMode(){return safe(function(){return window.gdResolveShotTargetMode&&window.gdResolveShotTargetMode();},"greenTarget")||"greenTarget";}
+  function bubblePxEllipse(m){
+    if(String(targetMode())!=="fairwayLanding")return "";
+    var b=activeBounds();var r=pxForBounds(m,b);if(!r)return "";
+    var cx=(r.minX+r.maxX)/2,cy=(r.minY+r.maxY)/2,rx=Math.max(12,(r.maxX-r.minX)/2),ry=Math.max(12,(r.maxY-r.minY)/2);
+    return '<ellipse class="gdHoleImageBubbleEllipse" cx="'+cx.toFixed(1)+'" cy="'+cy.toFixed(1)+'" rx="'+rx.toFixed(1)+'" ry="'+ry.toFixed(1)+'"/>';
+  }
+  function renderVectors(m,kind){
+    var active=pxForBounds(m,activeBounds());
+    var poly=polygonPoints(m);
+    var green=m.greenCenterPx||null;
+    var tee=m.teePx||null;
+    var pin=safe(function(){return pxForLL(m,pin);},null);
+    var out=[];
+    if(poly)out.push('<polygon class="gdHoleImageGreenPolygon" points="'+poly+'"/>');
+    if(tee&&green)out.push('<line class="gdHoleImageAimLine" x1="'+tee.x.toFixed(1)+'" y1="'+tee.y.toFixed(1)+'" x2="'+green.x.toFixed(1)+'" y2="'+green.y.toFixed(1)+'"/>');
+    if(active)out.push('<path class="gdHoleImageActiveBounds" d="'+rectPath(active)+'"/>');
+    out.push(bubblePxEllipse(m));
+    if(pin)out.push('<path class="gdHoleImagePin" d="M'+pin.x.toFixed(1)+' '+(pin.y-12).toFixed(1)+'L'+(pin.x+10).toFixed(1)+' '+(pin.y-6).toFixed(1)+'L'+pin.x.toFixed(1)+' '+pin.y.toFixed(1)+'Z"/>');
+    return '<svg class="gdHoleImageVectorLayer" width="'+m.imageWidth+'" height="'+m.imageHeight+'" viewBox="0 0 '+m.imageWidth+' '+m.imageHeight+'">'+out.join("")+'</svg>';
+  }
+  function renderBase(m,kind){
+    if(!manifestValid(m))return false;
+    var el=ensureLayer();
+    var tileHtml=(m.tiles||[]).map(function(t){return '<img class="gdHoleImageTile" src="'+esc(t.url)+'" style="left:'+Math.round(t.x)+'px;top:'+Math.round(t.y)+'px"/>';}).join("");
+    var markerHtml=(m.greenMarkersPx||[]).map(function(mm){if(!mm.px)return "";return '<i class="gdHoleTruthMarker" data-kind="'+esc(mm.type||"")+'" style="left:'+mm.px.x+'px;top:'+mm.px.y+'px"></i>';}).join("");
+    if(m.teePx)markerHtml+='<i class="gdHoleTruthMarker" data-kind="tee" style="left:'+m.teePx.x+'px;top:'+m.teePx.y+'px"></i>';
+    var status=(testMode!=="off")?'<div class="gdHoleImageStatus">Hole image '+esc(testMode)+'</div>':'';
+    el.innerHTML='<div class="gdHoleImageStage"><div class="gdHoleImageTiles" style="position:absolute;left:0;top:0;width:'+m.imageWidth+'px;height:'+m.imageHeight+'px">'+tileHtml+'<div class="gdHoleImageOverlay">'+markerHtml+renderVectors(m,kind)+'</div></div></div>'+status;
+    window.__gdHoleImageCameraRendered={version:VERSION,kind:kind||"",tiles:m.tiles.length,width:m.imageWidth,height:m.imageHeight,at:Date.now()};
+    return true;
+  }
+  function frameRect(kind){
+    if(typeof window.gdScreenTargetFrameRect==="function")return window.gdScreenTargetFrameRect(kind||"lock");
+    var w=innerWidth||390,h=innerHeight||760;var spec={hole:{x:.305,y:.300,w:.390,h:.255},lock:{x:.175,y:.235,w:.650,h:.430},zoom:{x:.090,y:.195,w:.820,h:.535},tee:{x:.230,y:.805,w:.540,h:.175}}[kind]||{x:.175,y:.235,w:.650,h:.430};
+    return {left:w*spec.x,top:h*spec.y,width:w*spec.w,height:h*spec.h,right:w*(spec.x+spec.w),bottom:h*(spec.y+spec.h)};
+  }
+  function applyTransform(transform){
+    var stage=document.querySelector("#gdHoleImageCameraLayer .gdHoleImageStage");
+    if(!stage)return false;
+    stage.style.transform="translate3d("+transform.x.toFixed(2)+"px,"+transform.y.toFixed(2)+"px,0) scale("+transform.scale.toFixed(6)+")";
+    window.__gdHoleImageCameraTransform=transform;
+    return true;
+  }
+  function liveMapTransform(m){
+    if(!hasMap()||!manifestValid(m))return null;
+    var z=num(m.captureZoom,18),cur=num(map.getZoom&&map.getZoom(),z),scale=Math.pow(2,cur-z);
+    var originLL=map.unproject(L.point(m.originPx.x,m.originPx.y),z);
+    var pt=map.latLngToContainerPoint(originLL);
+    return {mode:"liveMap",x:pt.x,y:pt.y,scale:scale};
+  }
+  function objectPxRect(m){
+    var b=activeBounds();var r=pxForBounds(m,b);
+    if(r&&Number.isFinite(r.minX)&&Number.isFinite(r.maxX)&&Math.abs(r.maxX-r.minX)>1&&Math.abs(r.maxY-r.minY)>1)return r;
+    var c=m.greenCenterPx||{x:m.imageWidth/2,y:m.imageHeight/2};var rad=36;return {minX:c.x-rad,maxX:c.x+rad,minY:c.y-rad,maxY:c.y+rad};
+  }
+  function fitImageObjectToFrame(m,kind,opts){
+    opts=opts||{};var r=objectPxRect(m);var fr=frameRect(kind||"lock");
+    var objW=Math.max(4,r.maxX-r.minX),objH=Math.max(4,r.maxY-r.minY);
+    var fill=num(opts.fillRatio,kind==="zoom"?1.34:1.16);
+    var scale=Math.min(fr.width/(objW/fill),fr.height/(objH/fill));
+    scale=Math.max(num(opts.minScale,.08),Math.min(num(opts.maxScale,6.5),scale));
+    var objCx=(r.minX+r.maxX)/2,objCy=(r.minY+r.maxY)/2,frCx=fr.left+fr.width/2,frCy=fr.top+fr.height/2;
+    return {mode:kind||"lock",x:frCx-objCx*scale,y:frCy-objCy*scale,scale:scale,objectPx:r,frame:fr,targetMode:targetMode()};
+  }
+  function showClass(mode){
+    if(!document.body)return;
+    document.body.classList.toggle("gdHoleImageCameraOverlay",mode==="overlay");
+    document.body.classList.toggle("gdHoleImageCameraImageOnly",mode==="imageOnly");
+    document.body.classList.toggle("gdHoleImageCameraShotLock",mode==="shotLock"||mode==="targetZoom");
+    document.body.classList.toggle("gdHoleImageCameraOn",mode!=="off");
+  }
+  function show(mode,kind,opts){
+    var m=manifest();if(!manifestValid(m))return false;
+    renderBase(m,kind||mode);
+    showClass(mode);
+    var t=(mode==="overlay")?liveMapTransform(m):fitImageObjectToFrame(m,kind||"lock",opts||{});
+    if(!t)return false;
+    applyTransform(t);
+    window.gdHoleImageCameraActive=mode!=="off";window.__gdHoleImageCameraState={version:VERSION,mode:mode,kind:kind,owner:cameraOwner,manifestKey:m.key,transform:t};
+    return true;
+  }
+  function hide(){showClass("off");window.gdHoleImageCameraActive=false;window.gdSimpleGreenZoomActive=false;cameraOwner=window.GD_CAMERA_OWNER.LIVE_MAP;testMode="off";previousShotTransform=null;safe(function(){document.getElementById("gdGreenZoomBtn")?.classList.remove("softActive");});}
+  window.gdSetHoleImageCameraTestMode=function(mode){
+    mode=String(mode||"off");if(["off","overlay","imageOnly"].indexOf(mode)<0)mode="off";testMode=mode;
+    if(mode==="off"){hide();return true;}
+    setOwner(window.GD_CAMERA_OWNER.HOLE_IMAGE_QA,"test-"+mode,3600);
+    var ok=show(mode,mode==="overlay"?"hole":"lock",{});
+    if(!ok){hide();return false;}
+    return true;
+  };
+  window.gdShowHoleImageCamera=function(on){return on?window.gdSetHoleImageCameraTestMode("imageOnly"):window.gdSetHoleImageCameraTestMode("off");};
+  window.gdRenderHoleImageCamera=function(m,opts){m=m||manifest();if(!manifestValid(m))return false;renderBase(m,opts&&opts.kind||"render");var t=liveMapTransform(m)||{x:0,y:0,scale:1};return applyTransform(t);};
+  window.gdFrameActiveShotOnHoleImage=function(kind,opts){var m=manifest();if(!manifestValid(m))return false;return show(kind==="zoom"?"targetZoom":"shotLock",kind||"lock",opts||{});};
+  window.frameShotView=function(){
+    installGate();
+    if(window.gdFrameActiveShotOnHoleImage("lock",{fillRatio:1.18})){setOwner(window.GD_CAMERA_OWNER.SHOT_LOCK,"frame-shot-view",4000);return true;}
+    return oldFrame?oldFrame.apply(this,arguments):false;
+  };
+  window.lockFrame=function(refit){
+    installGate();
+    safe(function(){window.gdBuildGreenTruthCluster&&window.gdBuildGreenTruthCluster("v12-lock");});
+    safe(function(){window.gdBuildHoleImageCaptureManifest&&window.gdBuildHoleImageCaptureManifest("v12-lock");});
+    if(safe(function(){return start&&target;},false)&&window.gdFrameActiveShotOnHoleImage("lock",{fillRatio:1.18})){
+      safe(function(){lockedFrame=true;});setOwner(window.GD_CAMERA_OWNER.SHOT_LOCK,"lock-frame",5000);
+      safe(function(){document.body.classList.remove("gdMappedStartPromptActive","gdGreenArrivalMode","gd-green-zoom-active");});
+      safe(function(){setBubbleOnlyLock(true);});
+      safe(function(){renderShot();});
+      safe(function(){app&&app.classList&&app.classList.toggle("framed",!!showFilter);});
+      return true;
+    }
+    return oldLock?oldLock.apply(this,arguments):false;
+  };
+  window.gdToggleTargetZoom=function(ev){
+    if(ev){ev.preventDefault();ev.stopPropagation();if(ev.stopImmediatePropagation)ev.stopImmediatePropagation();}
+    installGate();var btn=document.getElementById("gdGreenZoomBtn")||document.getElementById("gdGpsSnapZoomBtn");
+    if(window.gdSimpleGreenZoomActive){
+      window.gdSimpleGreenZoomActive=false;safe(function(){document.body.classList.remove("gd-green-zoom-active");});if(btn)btn.classList.remove("softActive");
+      if(previousShotTransform){applyTransform(previousShotTransform);showClass("shotLock");setOwner(window.GD_CAMERA_OWNER.SHOT_LOCK,"target-zoom-restore",4000);previousShotTransform=null;return false;}
+      return window.lockFrame(false);
+    }
+    var restoreTransform=window.__gdHoleImageCameraTransform||null;
+    if(window.gdFrameActiveShotOnHoleImage("zoom",{fillRatio:1.38})){
+      previousShotTransform=restoreTransform;window.gdSimpleGreenZoomActive=true;safe(function(){document.body.classList.add("gd-green-zoom-active");document.body.classList.remove("gdGreenArrivalMode");});if(btn)btn.classList.add("softActive");setOwner(window.GD_CAMERA_OWNER.TARGET_ZOOM,"target-zoom",5000);return false;
+    }
+    return oldZoom?oldZoom.apply(this,arguments):false;
+  };
+  window.gdToggleSimpleGreenZoom=window.gdToggleTargetZoom;
+  function unlockWrap(){hide();}
+  var oldUnlock=window.unlockFrameForReset;
+  if(typeof oldUnlock==="function"&&!oldUnlock.__gdV12Wrapped){window.unlockFrameForReset=function(){unlockWrap();return oldUnlock.apply(this,arguments);};window.unlockFrameForReset.__gdV12Wrapped=true;safe(function(){unlockFrameForReset=window.unlockFrameForReset;});}
+  function bind(){installGate();var btn=document.getElementById("gdGreenZoomBtn");if(btn&&!btn.__gdV12Bound){btn.__gdV12Bound=true;btn.onclick=function(e){return window.gdToggleTargetZoom(e);};}}
+  if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",function(){setTimeout(bind,100);});else setTimeout(bind,40);
+  setTimeout(bind,700);
+  safe(function(){window.addEventListener("resize",function(){if(testMode==="overlay")window.gdSetHoleImageCameraTestMode("overlay");else if(cameraOwner===window.GD_CAMERA_OWNER.SHOT_LOCK)window.gdFrameActiveShotOnHoleImage("lock",{fillRatio:1.18});else if(cameraOwner===window.GD_CAMERA_OWNER.TARGET_ZOOM)window.gdFrameActiveShotOnHoleImage("zoom",{fillRatio:1.38});},true);});
+})();
+</script>
+
 </body>
 </html>
