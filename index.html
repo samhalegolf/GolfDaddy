@@ -38912,5 +38912,310 @@ body.gps-active #shotTile .tileCarryValue span{
 })();
 </script>
 
+
+<style id="gdFramedBoxCameraSystemV4Css">
+/* V4: restore the actual debug-frame CSS. V3 moved the tee frame but accidentally relied on
+   older CSS that was not present in the packaged deploy, so the boxes could silently vanish. */
+#gdTargetFrameDebugOverlay{
+  position:fixed;
+  inset:0;
+  display:none;
+  pointer-events:none;
+  z-index:1450;
+}
+body.gdTargetFrameDebugOn #gdTargetFrameDebugOverlay{display:block;}
+.gdTargetFrameBox{
+  position:fixed;
+  box-sizing:border-box;
+  border:1.5px dotted rgba(255,255,255,.72);
+  border-radius:18px;
+  pointer-events:none;
+  background:rgba(31,211,109,.035);
+  box-shadow:0 0 0 1px rgba(0,0,0,.28), inset 0 0 32px rgba(31,211,109,.045);
+  color:rgba(255,255,255,.92);
+  font:800 9px/1.1 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  letter-spacing:.13em;
+  text-transform:uppercase;
+  text-shadow:0 1px 3px rgba(0,0,0,.88);
+}
+.gdTargetFrameBox span{
+  position:absolute;
+  left:50%;
+  top:-13px;
+  transform:translateX(-50%);
+  padding:3px 7px;
+  border-radius:7px;
+  background:rgba(8,13,10,.78);
+  white-space:nowrap;
+}
+.gdTargetFrameBox[data-frame="hole"]{border-color:rgba(191,255,216,.72);}
+.gdTargetFrameBox[data-frame="lock"]{border-color:rgba(255,255,255,.9);border-width:2px;background:rgba(255,255,255,.025);}
+.gdTargetFrameBox[data-frame="zoom"]{border-color:rgba(255,213,128,.88);background:rgba(255,213,128,.025);}
+.gdTargetFrameBox[data-frame="tee"]{border-color:rgba(165,210,255,.68);background:rgba(56,143,255,.025);}
+.gdTargetFrameBox[data-frame="tee"] span{left:50%;top:8px;transform:translateX(-50%);}
+</style>
+<script id="gdFramedBoxCameraSystemV4">
+(function(){
+  if(window.__gdFramedBoxCameraSystemV4) return;
+  window.__gdFramedBoxCameraSystemV4 = true;
+
+  var SAFE_ZONE = { left:.22, right:.78, top:.24, bottom:.72 };
+  var lastNudgeAt = 0;
+  var lastMode = null;
+  var pendingFitTimers = [];
+
+  function safe(fn, fallback){ try{ return fn(); }catch(e){ return fallback; } }
+  function num(v, fallback){ var n=Number(v); return Number.isFinite(n)?n:fallback; }
+  function hasMap(){ return typeof map !== "undefined" && map && typeof L !== "undefined"; }
+  function asLatLng(p){ if(!hasMap() || !p || p.lat==null || p.lng==null) return null; return L.latLng(Number(p.lat), Number(p.lng)); }
+  function validBounds(b){ return !!(b && typeof b.isValid === "function" && b.isValid()); }
+  function mapRect(){
+    var c=hasMap() && map.getContainer && map.getContainer();
+    return c && c.getBoundingClientRect ? c.getBoundingClientRect() : {left:0,top:0,right:window.innerWidth,bottom:window.innerHeight,width:window.innerWidth,height:window.innerHeight};
+  }
+  function pointBounds(point, radiusM){
+    var c=asLatLng(point); if(!hasMap() || !c) return null;
+    var r=Math.max(4, num(radiusM, 22));
+    return L.latLngBounds([
+      safe(function(){ return project(c,0,r); }, c),
+      safe(function(){ return project(c,Math.PI,r); }, c),
+      safe(function(){ return project(c,Math.PI/2,r); }, c),
+      safe(function(){ return project(c,Math.PI*1.5,r); }, c)
+    ]);
+  }
+  function boundsFromPoints(points){
+    if(!hasMap() || !Array.isArray(points)) return null;
+    var pts=points.map(asLatLng).filter(Boolean);
+    if(!pts.length) return null;
+    var b=L.latLngBounds(pts);
+    return validBounds(b)?b:null;
+  }
+  function boundsSizeM(b){
+    if(!hasMap() || !validBounds(b)) return {w:0,h:0,diag:0};
+    var sw=b.getSouthWest(), ne=b.getNorthEast();
+    var nw=L.latLng(ne.lat, sw.lng), se=L.latLng(sw.lat, ne.lng);
+    var w=safe(function(){ return map.distance(sw,se); }, 0);
+    var h=safe(function(){ return map.distance(sw,nw); }, 0);
+    return {w:w,h:h,diag:Math.sqrt(w*w+h*h)};
+  }
+  function frameRect(kind){
+    var w=window.innerWidth || document.documentElement.clientWidth || 390;
+    var h=window.innerHeight || document.documentElement.clientHeight || 760;
+    // These are viewport-relative because the screenshot/debug box contract is visual-screen based.
+    // Tee is deliberately low and only relevant to broad hole-frame/setup.
+    var spec={
+      hole:{x:.30,y:.135,w:.40,h:.235},
+      lock:{x:.205,y:.145,w:.60,h:.38},
+      zoom:{x:.10,y:.105,w:.80,h:.50},
+      tee:{x:.335,y:.785,w:.33,h:.115}
+    }[kind] || {x:.205,y:.145,w:.60,h:.38};
+    return {left:Math.round(w*spec.x),top:Math.round(h*spec.y),right:Math.round(w*(spec.x+spec.w)),bottom:Math.round(h*(spec.y+spec.h)),width:Math.round(w*spec.w),height:Math.round(h*spec.h)};
+  }
+  window.gdScreenTargetFrameRect = frameRect;
+  window.gdScreenTargetFrameConfig = function(kind){
+    var r=frameRect(kind), w=window.innerWidth||390, h=window.innerHeight||760;
+    return {left:r.left,top:r.top,right:Math.max(0,w-r.right),bottom:Math.max(0,h-r.bottom)};
+  };
+  function framePadding(kind, fillRatio){
+    var mr=mapRect(), fr=frameRect(kind);
+    var inset=Math.max(0, 1-num(fillRatio,1));
+    var extraX=Math.round(fr.width*inset*.5), extraY=Math.round(fr.height*inset*.5);
+    return {
+      paddingTopLeft:[Math.max(0,Math.round(fr.left-mr.left+extraX)), Math.max(0,Math.round(fr.top-mr.top+extraY))],
+      paddingBottomRight:[Math.max(0,Math.round(mr.right-fr.right+extraX)), Math.max(0,Math.round(mr.bottom-fr.bottom+extraY))]
+    };
+  }
+  window.gdTargetFramePadding=function(kind){ return framePadding(kind||"lock", 1); };
+  function ensureOverlay(){
+    if(!document.body) return null;
+    var overlay=document.getElementById("gdTargetFrameDebugOverlay");
+    if(!overlay){ overlay=document.createElement("div"); overlay.id="gdTargetFrameDebugOverlay"; overlay.setAttribute("aria-hidden","true"); document.body.appendChild(overlay); }
+    var labels={hole:"GREEN / HOLE FRAME",lock:"LOCK FRAME",zoom:"GREEN / LANDING ZOOM",tee:"TEE FRAME"};
+    overlay.innerHTML=["hole","lock","zoom","tee"].map(function(k){
+      var r=frameRect(k);
+      return '<div class="gdTargetFrameBox" data-frame="'+k+'" style="left:'+r.left+'px;top:'+r.top+'px;width:'+r.width+'px;height:'+r.height+'px"><span>'+labels[k]+'</span></div>';
+    }).join("");
+    return overlay;
+  }
+  window.gdEnsureTargetFrameDebugOverlay=ensureOverlay;
+  window.gdSetTargetFrameDebug=function(enabled){
+    window.gdTargetFrameDebug=!!enabled;
+    ensureOverlay();
+    if(document.body) document.body.classList.toggle("gdTargetFrameDebugOn", !!enabled);
+  };
+
+  function cleanGreenBounds(b){
+    if(!validBounds(b)) return null;
+    var s=boundsSizeM(b);
+    // Do not let a fairway/hole polygon become the "green" object. That was the main cause of shy wide views.
+    if(s.diag>90 || s.w>78 || s.h>78){
+      var c=asLatLng(safe(function(){ return greenCentre || target; }, null)) || b.getCenter();
+      return pointBounds(c, 20);
+    }
+    return b;
+  }
+  function getGreenBounds(){
+    var b=boundsFromPoints(safe(function(){ return greenPolygon; }, null));
+    if(validBounds(b)) return cleanGreenBounds(b);
+    b=safe(function(){ return greenOutline && typeof greenOutline.getBounds === "function" ? greenOutline.getBounds() : null; }, null);
+    if(validBounds(b)) return cleanGreenBounds(b);
+    var c=asLatLng(safe(function(){ return greenCentre || target; }, null));
+    return c ? pointBounds(c, 20) : null;
+  }
+  window.gdGetGreenObjectBounds=getGreenBounds;
+  function bubblePayload(center){
+    var c=asLatLng(center) || asLatLng(safe(function(){ return (typeof gdShotDisplayTarget === "function" && gdShotDisplayTarget()) || target || greenCentre; }, null));
+    var d=safe(function(){ return start && c ? map.distance(start,c) : 160; }, 160);
+    var raw=safe(function(){ return calculateShot(d).bubbleProfile; }, null) || {};
+    return safe(function(){ return gdGpsBubbleDisplayPayload(raw,d,c); }, null) || safe(function(){ return gdBubblePayloadForRender(raw); }, null) || raw;
+  }
+  function getBubbleBounds(center, payload){
+    var c=asLatLng(center) || asLatLng(safe(function(){ return (typeof gdShotDisplayTarget === "function" && gdShotDisplayTarget()) || target || greenCentre; }, null));
+    if(!c) return null;
+    var p=payload || bubblePayload(c);
+    var shape=safe(function(){ return buildBubbleShape(c, p, Math.max(1, num(dev("bubbleVisuals.mainScale"), 1))); }, null);
+    var b=boundsFromPoints(shape);
+    if(validBounds(b)) return b;
+    var visual=(p && p.visual) || {};
+    var radius=Math.max(22, num(p.radius,0), num(p.lateralRadiusM,0), num(p.depthRadiusM,0), num(visual.visualWidthM,0)/2, num(visual.visualDepthM,0)/2);
+    return pointBounds(c, radius);
+  }
+  window.gdGetBubbleObjectBounds=getBubbleBounds;
+  window.gdGetFallbackPointBounds=pointBounds;
+  function isLayupTarget(){
+    var g=asLatLng(safe(function(){ return greenCentre; }, null));
+    var t=asLatLng(safe(function(){ return (typeof gdShotDisplayTarget === "function" && gdShotDisplayTarget()) || target; }, null));
+    if(!g || !t) return false;
+    var builtIn=safe(function(){ return typeof gdIsLayupTarget === "function" && gdIsLayupTarget(g,t); }, false);
+    if(builtIn) return true;
+    return safe(function(){ return map.distance(g,t)>28; }, false);
+  }
+  function playableDistance(){
+    var t=asLatLng(safe(function(){ return (typeof gdShotDisplayTarget === "function" && gdShotDisplayTarget()) || target || greenCentre; }, null));
+    var d=safe(function(){ return start && t ? map.distance(start,t) : null; }, null);
+    var profile=safe(function(){ return d ? calculateShot(d).bubbleProfile : null; }, null) || {};
+    var total=num(profile.totalM || profile.total || profile.baseTotal, NaN);
+    var carry=num(profile.baseCarry || profile.carry || profile.distance, NaN);
+    if(Number.isFinite(total) && total>0) return total;
+    if(Number.isFinite(carry) && carry>0) return carry;
+    return num(safe(function(){ return gdMaxPlayableCarryM(); }, null), null);
+  }
+  function resolveMode(){
+    if(!hasMap()) return "greenTarget";
+    if(isLayupTarget()){ lastMode="fairwayLanding"; return lastMode; }
+    var g=asLatLng(safe(function(){ return greenCentre; }, null));
+    if(!g || !safe(function(){ return start; }, null)){ lastMode="greenTarget"; return lastMode; }
+    var gd=safe(function(){ return map.distance(start,g); }, null);
+    var playable=playableDistance();
+    if(!(gd>0) || !(playable>0)){ lastMode="greenTarget"; return lastMode; }
+    var toFairway=42, backToGreen=24;
+    if(lastMode==="fairwayLanding") lastMode = playable >= gd-backToGreen ? "greenTarget" : "fairwayLanding";
+    else lastMode = playable >= gd-toFairway ? "greenTarget" : "fairwayLanding";
+    return lastMode;
+  }
+  window.gdResolveShotTargetMode=resolveMode;
+  function activeBounds(){
+    var m=resolveMode();
+    if(m==="fairwayLanding"){
+      var c=asLatLng(safe(function(){ return (typeof gdShotDisplayTarget === "function" && gdShotDisplayTarget()) || target; }, null));
+      return getBubbleBounds(c,null) || pointBounds(c,30);
+    }
+    var green=getGreenBounds();
+    return green || getBubbleBounds(safe(function(){ return greenCentre || target; }, null), null) || pointBounds(safe(function(){ return greenCentre || target; }, null),20);
+  }
+  window.gdGetActiveShotObjectBounds=activeBounds;
+  function fitObjectBoundsToFrame(bounds, frameName, options){
+    if(!hasMap() || !validBounds(bounds)) return false;
+    var opts=options||{}, kind=frameName||"lock";
+    var pad=framePadding(kind, opts.fillRatio==null ? 1 : opts.fillRatio);
+    var maxZoom=num(opts.maxZoom, kind==="zoom"?21:20);
+    var minZoom=num(opts.minZoom, kind==="hole"?16:18);
+    // getBoundsZoom with equivalent outside-padding gives us the base zoom to place the object inside the target frame.
+    var z=safe(function(){ return map.getBoundsZoom(bounds, false, L.point(pad.paddingTopLeft[0]+pad.paddingBottomRight[0], pad.paddingTopLeft[1]+pad.paddingBottomRight[1])); }, null);
+    if(!Number.isFinite(z)) z=safe(function(){ return map.getZoom ? map.getZoom() : 18; }, 18);
+    z=Math.max(minZoom, Math.min(maxZoom, z + num(opts.zoomBoost, kind==="zoom"?1.2:1.05)));
+    safe(function(){ map.options.zoomSnap=Math.min(num(map.options.zoomSnap,.25), .25); map.options.zoomDelta=Math.min(num(map.options.zoomDelta,.25), .25); });
+    var mr=mapRect(), mapCenter=L.point(mr.width/2,mr.height/2), fr=frameRect(kind);
+    var desired=L.point(fr.left-mr.left+fr.width/2, fr.top-mr.top+fr.height/2);
+    var targetCenter=bounds.getCenter();
+    var targetLayer=safe(function(){ return map.project(targetCenter,z); }, null);
+    if(!targetLayer) return false;
+    var newCenterLayer=targetLayer.subtract(desired.subtract(mapCenter));
+    var newCenter=map.unproject(newCenterLayer,z);
+    safe(function(){ if(typeof map.stop==="function") map.stop(); });
+    map.setView(newCenter,z,{animate:opts.animate!==false,duration:num(opts.duration,.24)});
+    return true;
+  }
+  window.gdFitObjectBoundsToScreenFrame=fitObjectBoundsToFrame;
+  function frameActiveShot(frameName, opts){ return fitObjectBoundsToFrame(activeBounds(), frameName||"lock", Object.assign({animate:true,duration:.24,fillRatio:1,maxZoom:frameName==="zoom"?21:20,zoomBoost:frameName==="zoom"?1.2:1.05}, opts||{})); }
+  window.gdFrameActiveShot=frameActiveShot;
+  function clearPendingFits(){ pendingFitTimers.forEach(function(t){ clearTimeout(t); }); pendingFitTimers=[]; }
+  function fitLockedAfterRender(){
+    clearPendingFits();
+    [0,70,180].forEach(function(ms){ pendingFitTimers.push(setTimeout(function(){
+      if(safe(function(){ return lockedFrame && start && target; }, false)) frameActiveShot("lock", {animate:ms>0,duration:.18,zoomBoost:1.08});
+    }, ms)); });
+  }
+
+  // Final global overrides. These are intentionally at the very end so older green-focus / broad-hole fitBounds paths cannot win.
+  frameShotView=function(){ return frameActiveShot("lock", {animate:true,duration:.24,zoomBoost:1.08}); };
+  window.frameShotView=frameShotView;
+  lockFrame=function(refit){
+    if(!safe(function(){ return start && target && map; }, false)) return false;
+    if(refit!==false) frameShotView();
+    safe(function(){ setBubbleOnlyLock(true); });
+    safe(function(){ renderShot(); });
+    if(refit!==false) fitLockedAfterRender();
+    return true;
+  };
+  window.lockFrame=lockFrame;
+  var previousReframe=window.gdReframeShotAfterUndo;
+  window.gdReframeShotAfterUndo=function(opts){
+    var out=safe(function(){ return typeof previousReframe==="function" ? previousReframe(opts||{}) : false; }, false);
+    if(safe(function(){ return lockedFrame; }, false) && (!opts || opts.refit!==false)) fitLockedAfterRender();
+    return out;
+  };
+  window.gdToggleTargetZoom=function(ev){
+    if(ev){ ev.preventDefault(); ev.stopPropagation(); if(ev.stopImmediatePropagation) ev.stopImmediatePropagation(); }
+    if(!hasMap()) return false;
+    var btn=document.getElementById("gdGreenZoomBtn");
+    if(window.gdSimpleGreenZoomActive){
+      window.gdSimpleGreenZoomActive=false;
+      document.body.classList.remove("gd-green-zoom-active");
+      if(btn) btn.classList.remove("softActive");
+      var v=window.gdSimpleGreenZoomReturnView; window.gdSimpleGreenZoomReturnView=null;
+      if(v&&v.center) safe(function(){ map.setView(v.center,v.zoom,{animate:true,duration:.24}); });
+      return false;
+    }
+    var b=activeBounds();
+    if(!validBounds(b)){ safe(function(){ toast("Set a shot target first"); }); return false; }
+    window.gdSimpleGreenZoomReturnView=safe(function(){ return {center:map.getCenter(),zoom:map.getZoom()}; }, null);
+    window.gdSimpleGreenZoomActive=true;
+    document.body.classList.add("gd-green-zoom-active");
+    if(btn) btn.classList.add("softActive");
+    fitObjectBoundsToFrame(b,"zoom",{animate:true,duration:.24,fillRatio:1,maxZoom:21,zoomBoost:1.25});
+    return false;
+  };
+  window.gdToggleSimpleGreenZoom=window.gdToggleTargetZoom;
+  window.gdMaybeNudgeFairwayCamera=function(center){
+    if(!hasMap() || !center || !safe(function(){ return lockedFrame; }, false)) return false;
+    if(resolveMode()!=="fairwayLanding") return false;
+    if(Date.now()-lastNudgeAt<260) return false;
+    var p=safe(function(){ return map.latLngToContainerPoint(center); }, null); if(!p) return false;
+    var c=map.getContainer(), w=c.clientWidth||1, h=c.clientHeight||1;
+    var minX=w*SAFE_ZONE.left, maxX=w*SAFE_ZONE.right, minY=h*SAFE_ZONE.top, maxY=h*SAFE_ZONE.bottom;
+    if(p.x>=minX&&p.x<=maxX&&p.y>=minY&&p.y<=maxY) return false;
+    var dx=0,dy=0; if(p.x<minX) dx=p.x-minX; else if(p.x>maxX) dx=p.x-maxX; if(p.y<minY) dy=p.y-minY; else if(p.y>maxY) dy=p.y-maxY;
+    lastNudgeAt=Date.now(); safe(function(){ map.panBy([dx,dy],{animate:true,duration:.16}); }); return true;
+  };
+
+  function refresh(){ if(window.gdTargetFrameDebug !== false) window.gdSetTargetFrameDebug(true); }
+  window.addEventListener("resize", function(){ setTimeout(refresh,60); }, true);
+  window.addEventListener("orientationchange", function(){ setTimeout(refresh,160); }, true);
+  document.addEventListener("DOMContentLoaded", function(){ setTimeout(refresh,80); });
+  if(document.body) setTimeout(refresh,80);
+})();
+</script>
+
 </body>
 </html>
