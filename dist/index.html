@@ -40638,5 +40638,458 @@ body.gdTargetFrameDebugOn #gdSimpleFrameCameraReadout{display:block;}
 })();
 </script>
 
+<style id="gdSimpleCameraRebuildV14Css">
+/* V14: final simple camera owner. Readout is only visible with the frame debug overlay. */
+#gdSimpleFrameCameraReadout{max-width:min(360px,calc(100vw - 16px));white-space:normal;}
+body.gdTargetFrameDebugOn #gdSimpleFrameCameraReadout{display:block!important;}
+</style>
+<script id="gdSimpleCameraRebuildV14">
+(function(){
+  window.__gdSimpleCameraRebuildV14=true;
+  var VERSION="V14_SIMPLE_CAMERA_REBUILD";
+  var OWNER=window.GD_CAMERA_OWNER=Object.assign({},window.GD_CAMERA_OWNER||{},{
+    LIVE_MAP:"liveMap",
+    SETUP_GREEN_FRAME:"setupGreenFrame",
+    SHOT_LOCK:"shotLock",
+    TARGET_ZOOM:"targetZoom",
+    QA:"qa"
+  });
+  var FRAME_NAME={greenHoleFrame:"hole",holeFrame:"hole",hole:"hole",setup:"hole",setupGreenFrame:"hole",lockFrame:"lock",lock:"lock",shotLock:"lock",greenLandingZoom:"zoom",landingZoom:"zoom",targetZoom:"zoom",zoom:"zoom",teeFrame:"tee",tee:"tee"};
+  var savedSetItem=null;
+  var savedObjectsEnabled=false;
+  var returnTransform=null;
+  var originalLoadManifest=window.gdLoadHoleImageCaptureManifest;
+  var originalBuildManifest=window.gdBuildHoleImageCaptureManifest;
+  var firstInstallDone=false;
+  var unlockWrapped=false;
+  var cameraState={
+    version:VERSION,
+    owner:OWNER.LIVE_MAP,
+    frame:"none",
+    object:"none",
+    source:"fresh",
+    bounds:{w:0,h:0,diag:0},
+    scale:0,
+    zoom:null,
+    blockedOldCameraCalls:0,
+    ownerUntil:0,
+    lastReason:"boot"
+  };
+  function safe(fn,fb){try{return fn();}catch(e){return fb;}}
+  function num(v,fb){v=Number(v);return Number.isFinite(v)?v:fb;}
+  function hasMap(){return typeof map!=="undefined"&&map&&typeof L!=="undefined";}
+  function asLL(p){
+    if(!hasMap()||!p)return null;
+    if(p.lat!==undefined&&p.lng!==undefined)return L.latLng(num(p.lat,NaN),num(p.lng,NaN));
+    if(Array.isArray(p)&&p.length>=2)return L.latLng(num(p[0],NaN),num(p[1],NaN));
+    return null;
+  }
+  function validLL(p){return !!(p&&Number.isFinite(Number(p.lat))&&Number.isFinite(Number(p.lng)));}
+  function validBounds(b){return !!(b&&typeof b.isValid==="function"&&b.isValid()&&b.getCenter&&b.getNorthEast&&b.getSouthWest);}
+  function normalizeFrameName(name){return FRAME_NAME[String(name||"lock")]||"lock";}
+  function setOwner(owner,details){
+    details=details||{};
+    cameraState.owner=owner||OWNER.LIVE_MAP;
+    cameraState.frame=details.frame||cameraState.frame||"none";
+    cameraState.object=details.object||cameraState.object||"none";
+    cameraState.source=details.source||cameraState.source||"fresh";
+    cameraState.lastReason=details.reason||cameraState.lastReason||"camera";
+    cameraState.ownerUntil=Date.now()+num(details.ms,owner===OWNER.LIVE_MAP?0:1800);
+    window.__gdSimpleCameraState=Object.assign({},cameraState);
+    updateReadout();
+  }
+  function ownerActive(){
+    if(cameraState.owner===OWNER.LIVE_MAP)return false;
+    if(cameraState.owner===OWNER.TARGET_ZOOM&&window.gdSimpleGreenZoomActive)return true;
+    if(cameraState.owner===OWNER.SHOT_LOCK&&safe(function(){return !!lockedFrame;},false))return true;
+    if(cameraState.owner===OWNER.SETUP_GREEN_FRAME&&safe(function(){return document.body&&document.body.classList.contains("gdMappedStartPromptActive");},false))return true;
+    return Date.now()<cameraState.ownerUntil;
+  }
+  function blockOldCameraMove(reason){
+    cameraState.blockedOldCameraCalls+=1;
+    cameraState.lastBlocked={reason:reason||"old-camera",at:Date.now()};
+    window.__gdSimpleCameraBlockedOldCalls=cameraState.blockedOldCameraCalls;
+    window.__gdSimpleCameraLastBlocked=cameraState.lastBlocked;
+    updateReadout();
+    return false;
+  }
+  window.gdBlockOldCameraMove=blockOldCameraMove;
+  function installCameraGate(){
+    if(!hasMap()||map.__gdSimpleCameraV14GateInstalled)return;
+    map.__gdSimpleCameraV14GateInstalled=true;
+    var prevSetView=typeof map.setView==="function"?map.setView.bind(map):null;
+    var prevFitBounds=typeof map.fitBounds==="function"?map.fitBounds.bind(map):null;
+    var prevPanTo=typeof map.panTo==="function"?map.panTo.bind(map):null;
+    var prevFlyTo=typeof map.flyTo==="function"?map.flyTo.bind(map):null;
+    function allowed(opts){opts=opts||{};return !!(opts.__gdV14Allow||opts.__gdSimpleCameraAllow||opts.__gdUserNavigationReset||opts.__gdLiveMapAllow);}
+    function pass(opts){opts=opts||{};opts.__gdV14Allow=true;opts.__gdV13Allow=true;opts.__gdV9Allow=true;return opts;}
+    if(prevSetView)map.setView=function(center,zoom,opts){opts=opts||{};if(ownerActive()&&!allowed(opts)){blockOldCameraMove("setView");return map;}return prevSetView(center,zoom,pass(opts));};
+    if(prevFitBounds)map.fitBounds=function(bounds,opts){opts=opts||{};if(ownerActive()&&!allowed(opts)){blockOldCameraMove("fitBounds");return map;}return prevFitBounds(bounds,pass(opts));};
+    if(prevPanTo)map.panTo=function(center,opts){opts=opts||{};if(ownerActive()&&!allowed(opts)){blockOldCameraMove("panTo");return map;}return prevPanTo(center,pass(opts));};
+    if(prevFlyTo)map.flyTo=function(center,zoom,opts){opts=opts||{};if(ownerActive()&&!allowed(opts)){blockOldCameraMove("flyTo");return map;}return prevFlyTo(center,zoom,pass(opts));};
+  }
+  function mapSize(){
+    var s=safe(function(){return map.getSize();},null);
+    return s||L.point(window.innerWidth||390,window.innerHeight||760);
+  }
+  function frameRect(frameName){
+    var kind=normalizeFrameName(frameName);
+    var r=safe(function(){return typeof window.gdScreenTargetFrameRect==="function"?window.gdScreenTargetFrameRect(kind):null;},null);
+    if(r&&Number.isFinite(Number(r.left))&&Number.isFinite(Number(r.width))){
+      return {name:kind,left:num(r.left,0),top:num(r.top,0),width:num(r.width,0),height:num(r.height,0),right:num(r.right,num(r.left,0)+num(r.width,0)),bottom:num(r.bottom,num(r.top,0)+num(r.height,0))};
+    }
+    var f=safe(function(){return typeof window.gdScreenTargetFrameConfig==="function"?window.gdScreenTargetFrameConfig(kind):null;},null);
+    var w=window.innerWidth||document.documentElement.clientWidth||390;
+    var h=window.innerHeight||document.documentElement.clientHeight||760;
+    if(f&&Number.isFinite(Number(f.left))&&Number.isFinite(Number(f.top))){
+      var left=num(f.left,0),top=num(f.top,0),rightPad=num(f.right,0),bottomPad=num(f.bottom,0);
+      return {name:kind,left:left,top:top,width:Math.max(30,w-left-rightPad),height:Math.max(30,h-top-bottomPad),right:w-rightPad,bottom:h-bottomPad};
+    }
+    var spec={hole:{x:.30,y:.26,w:.40,h:.205},lock:{x:.185,y:.225,w:.63,h:.38},zoom:{x:.09,y:.112,w:.82,h:.535},tee:{x:.235,y:.79,w:.53,h:.17}}[kind]||{x:.185,y:.225,w:.63,h:.38};
+    return {name:kind,left:w*spec.x,top:h*spec.y,width:w*spec.w,height:h*spec.h,right:w*(spec.x+spec.w),bottom:h*(spec.y+spec.h)};
+  }
+  window.gdGetFrameRect=frameRect;
+  function screenCenter(){var s=mapSize();return L.point(s.x/2,s.y/2);}
+  function rotationDeg(){return num(safe(function(){return currentMapRotation;},0),0);}
+  function rotatePoint(p,c,deg){var r=deg*Math.PI/180,cos=Math.cos(r),sin=Math.sin(r),dx=p.x-c.x,dy=p.y-c.y;return L.point(c.x+dx*cos-dy*sin,c.y+dx*sin+dy*cos);}
+  function desiredFramePoint(frameName){
+    var r=frameRect(frameName);
+    var container=safe(function(){return map.getContainer().getBoundingClientRect();},{left:0,top:0});
+    var raw=L.point(r.left+r.width/2-container.left,r.top+r.height/2-container.top);
+    return rotatePoint(raw,screenCenter(),-rotationDeg());
+  }
+  function boundsFromPoints(points){
+    var pts=(Array.isArray(points)?points:[]).map(asLL).filter(validLL);
+    return pts.length?L.latLngBounds(pts):null;
+  }
+  function expandBounds(a,b){
+    if(!validBounds(a))return validBounds(b)?b:null;
+    if(validBounds(b))a.extend(b);
+    return a;
+  }
+  function projectPoint(origin,bearingRad,meters){return safe(function(){return project(origin,bearingRad,meters);},null);}
+  function pointBounds(point,radiusM){
+    var c=asLL(point);
+    if(!validLL(c))return null;
+    var r=Math.max(2,num(radiusM,14));
+    var pts=[0,Math.PI/2,Math.PI,Math.PI*1.5].map(function(a){return projectPoint(c,a,r);}).filter(validLL);
+    return pts.length?L.latLngBounds(pts.concat([c])):L.latLngBounds([c,c]);
+  }
+  function boundsSizeM(bounds){
+    if(!hasMap()||!validBounds(bounds))return {w:0,h:0,diag:0};
+    var sw=bounds.getSouthWest(),ne=bounds.getNorthEast(),nw=L.latLng(ne.lat,sw.lng);
+    var w=safe(function(){return map.distance(nw,ne);},0);
+    var h=safe(function(){return map.distance(nw,sw);},0);
+    return {w:+w.toFixed(1),h:+h.toFixed(1),diag:+Math.sqrt(w*w+h*h).toFixed(1)};
+  }
+  function projectedBounds(bounds,z){
+    var sw=bounds.getSouthWest(),ne=bounds.getNorthEast(),nw=L.latLng(ne.lat,sw.lng),se=L.latLng(sw.lat,ne.lng);
+    var pts=[sw,ne,nw,se].map(function(p){return map.project(p,z);});
+    var xs=pts.map(function(p){return p.x;}),ys=pts.map(function(p){return p.y;});
+    return {minX:Math.min.apply(null,xs),minY:Math.min.apply(null,ys),maxX:Math.max.apply(null,xs),maxY:Math.max.apply(null,ys)};
+  }
+  function greenCenter(){
+    return asLL(safe(function(){return greenCentre;},null))||asLL(safe(function(){return target;},null))||mappedGreenCenter()||asLL(safe(function(){return pin;},null));
+  }
+  function mappedPayload(){return safe(function(){return typeof gdActiveMappedHolePlayData==="function"&&gdActiveMappedHolePlayData();},null)||{};}
+  function mappedData(){return mappedPayload().data||null;}
+  function mappedGreenCenter(){
+    var data=mappedData();
+    return asLL(safe(function(){return gdMappedPointToLatLng(data&&data.green&&(data.green.greenCenter||data.green.center||data.green.centre||data.green.position||data.green.pin));},null))||
+      asLL(safe(function(){var shape=typeof gdMappedGreenShapeLatLngs==="function"?gdMappedGreenShapeLatLngs(data):[];if(!shape||!shape.length)return null;var lat=0,lng=0;shape.forEach(function(p){lat+=p.lat;lng+=p.lng;});return {lat:lat/shape.length,lng:lng/shape.length};},null));
+  }
+  function mappedTee(){
+    var data=mappedData();
+    return asLL(safe(function(){return gdMappedPointToLatLng(data&&data.tee&&data.tee.position);},null))||
+      asLL(safe(function(){return gdMappedPointToLatLng(data&&Array.isArray(data.route)&&data.route[0]);},null));
+  }
+  function liveGreenPolygonBounds(){
+    var candidates=[
+      safe(function(){return Array.isArray(greenPolygon)&&greenPolygon.length>=3?boundsFromPoints(greenPolygon):null;},null),
+      safe(function(){return greenOutline&&typeof greenOutline.getBounds==="function"?greenOutline.getBounds():null;},null),
+      safe(function(){var shape=typeof gdMappedGreenShapeLatLngs==="function"?gdMappedGreenShapeLatLngs(mappedData()):[];return shape&&shape.length>=3?boundsFromPoints(shape):null;},null)
+    ];
+    var centre=greenCenter();
+    for(var i=0;i<candidates.length;i++){
+      var b=candidates[i];
+      if(!validBounds(b))continue;
+      var size=boundsSizeM(b);
+      if(size.diag>=4&&size.diag<=80&&(!centre||safe(function(){return map.distance(centre,b.getCenter());},999)<=55))return b;
+    }
+    return null;
+  }
+  function freshGreenTruthBounds(){
+    if(!hasMap())return null;
+    if(savedObjectsEnabled){
+      var saved=safe(function(){return typeof gdGreenTruthClusterBounds==="function"&&gdGreenTruthClusterBounds({source:"saved"});},null);
+      if(validBounds(saved))return {bounds:saved,object:"greenCluster",source:"saved"};
+    }
+    var cluster=safe(function(){return typeof gdBuildGreenTruthCluster==="function"&&gdBuildGreenTruthCluster("v14-fresh-green");},null);
+    var b=safe(function(){return typeof gdGreenTruthClusterBounds==="function"&&gdGreenTruthClusterBounds({fresh:true});},null);
+    if(validBounds(b)){
+      var objectName=cluster&&cluster.source==="generated-green-shape"?"greenCluster":"greenCenterRadius";
+      return {bounds:b,object:objectName,source:"fresh"};
+    }
+    return null;
+  }
+  function resolveSetupGreenObject(){
+    var truth=freshGreenTruthBounds();
+    if(truth&&validBounds(truth.bounds))return truth;
+    var polygon=liveGreenPolygonBounds();
+    if(validBounds(polygon))return {bounds:polygon,object:"greenPolygon",source:"fresh"};
+    var centre=greenCenter();
+    if(validLL(centre))return {bounds:pointBounds(centre,22),object:"greenCenterRadius",source:"fallback"};
+    return {bounds:null,object:"none",source:"fallback"};
+  }
+  window.gdResolveSetupGreenObject=resolveSetupGreenObject;
+  function activeDisplayTarget(){return asLL(safe(function(){return typeof gdShotDisplayTarget==="function"&&(gdShotDisplayTarget()||target);},null))||asLL(safe(function(){return target;},null))||greenCenter();}
+  function greenReachable(){
+    var s=asLL(safe(function(){return start;},null)),g=greenCenter(),t=activeDisplayTarget();
+    if(g&&t&&safe(function(){return map.distance(g,t)<=6;},false))return true;
+    if(!s||!g)return false;
+    var maxCarry=num(safe(function(){return typeof gdMaxPlayableCarryM==="function"?gdMaxPlayableCarryM():null;},null),null);
+    if(!(maxCarry>0))return true;
+    return safe(function(){return map.distance(s,g)<=maxCarry+3;},false);
+  }
+  function bubbleBounds(center){
+    center=asLL(center)||activeDisplayTarget();
+    if(!validLL(center))return null;
+    var d=Math.max(1,num(safe(function(){return start?map.distance(start,center):140;},140),140));
+    var payload=safe(function(){return typeof getGpsBubblePayload==="function"?getGpsBubblePayload(d):(typeof calculateShot==="function"?calculateShot(d).bubbleProfile:null);},null);
+    var bubbleCenter=center;
+    if(center&&activeDisplayTarget()&&safe(function(){return map.distance(center,activeDisplayTarget())<3;},false)){
+      bubbleCenter=asLL(safe(function(){return typeof gdBubbleRenderCenter==="function"&&gdBubbleRenderCenter(payload);},null))||center;
+    }
+    var scale=num(safe(function(){return typeof dev==="function"?dev("bubbleVisuals.mainScale"):1;},1),1);
+    var shape=safe(function(){return typeof buildBubbleShape==="function"?buildBubbleShape(bubbleCenter,payload,scale):null;},null);
+    var b=boundsFromPoints(shape);
+    if(validBounds(b))return b;
+    var visual=payload&&payload.visual||{};
+    var radius=Math.max(10,num(payload&&payload.radius,0),num(payload&&payload.lateralRadiusM,0),num(payload&&payload.depthRadiusM,0),num(visual.visualWidthM,0)/2,num(visual.visualDepthM,0)/2);
+    return pointBounds(bubbleCenter,radius);
+  }
+  function resolveActiveShotObject(){
+    var reachable=greenReachable();
+    if(!reachable){
+      var landing=bubbleBounds(activeDisplayTarget());
+      return {bounds:landing,object:"landingBubble",source:validBounds(landing)?"fresh":"fallback",mode:"fairwayLanding"};
+    }
+    var green=resolveSetupGreenObject();
+    var bubble=bubbleBounds(activeDisplayTarget()||greenCenter());
+    var combined=expandBounds(validBounds(green.bounds)?L.latLngBounds([green.bounds.getSouthWest(),green.bounds.getNorthEast()]):null,bubble);
+    return {bounds:combined||green.bounds||bubble,object:validBounds(bubble)?"shotBubble":"greenCluster",source:green.source==="saved"?"saved":"fresh",mode:"greenTarget"};
+  }
+  window.gdResolveActiveShotObject=resolveActiveShotObject;
+  function calcTransform(objectBounds,frameName,opts){
+    if(!hasMap()||!validBounds(objectBounds))return null;
+    opts=opts||{};
+    var frame=frameRect(frameName);
+    var padding=Math.max(0,Math.min(.35,num(opts.padding,0)));
+    var baseZ=num(safe(function(){return map.getZoom();},18),18);
+    var px=projectedBounds(objectBounds,baseZ);
+    var objW=Math.max(1,px.maxX-px.minX),objH=Math.max(1,px.maxY-px.minY);
+    var usableW=Math.max(24,frame.width*(1-padding*2)),usableH=Math.max(24,frame.height*(1-padding*2));
+    var scale=Math.min(usableW/objW,usableH/objH);
+    var zoom=baseZ+(Math.log(Math.max(.01,scale))/Math.LN2)+num(opts.zoomBoost,0);
+    zoom=Math.max(num(opts.minZoom,15),Math.min(num(opts.maxZoom,23.1),zoom));
+    var screen=screenCenter();
+    var desired=desiredFramePoint(frame.name);
+    var targetPx=map.project(objectBounds.getCenter(),zoom);
+    var centerPx=targetPx.subtract(desired.subtract(screen));
+    var center=map.unproject(centerPx,zoom);
+    return {version:VERSION,center:center,zoom:zoom,scale:scale,translateX:desired.x-screen.x,translateY:desired.y-screen.y,frame:frame,objectPxBounds:px,objectMeters:boundsSizeM(objectBounds)};
+  }
+  function applySimpleCameraTransform(transform,owner,opts){
+    if(!transform||!hasMap())return false;
+    opts=opts||{};
+    installCameraGate();
+    setOwner(owner||OWNER.SHOT_LOCK,{frame:transform.frame&&transform.frame.name,object:opts.objectName,source:opts.source,reason:opts.reason,ms:num(opts.ownerMs,2200)});
+    safe(function(){map.options.zoomSnap=.01;map.options.zoomDelta=.25;if(typeof map.stop==="function")map.stop();});
+    map.setView(transform.center,transform.zoom,{animate:opts.animate!==false,duration:num(opts.duration,.09),__gdV14Allow:true,__gdSimpleCameraAllow:true});
+    cameraState.scale=+num(transform.scale,0).toFixed(3);
+    cameraState.zoom=+num(transform.zoom,0).toFixed(2);
+    cameraState.bounds=transform.objectMeters||{w:0,h:0,diag:0};
+    window.__gdLastSimpleCameraTransform=Object.assign({},transform,{center:{lat:+transform.center.lat,lng:+transform.center.lng}});
+    window.__gdSimpleCameraState=Object.assign({},cameraState);
+    updateReadout();
+    return true;
+  }
+  window.gdApplySimpleCameraTransform=applySimpleCameraTransform;
+  function gdFitObjectToFramePublic(objectBounds,frameName,opts){
+    frameName=normalizeFrameName(frameName&&frameName.name?frameName.name:frameName);
+    opts=opts||{};
+    var transform=calcTransform(objectBounds,frameName,opts);
+    if(transform&&opts.apply!==false)applySimpleCameraTransform(transform,opts.owner||OWNER.SHOT_LOCK,opts);
+    return transform;
+  }
+  window.gdFitObjectToFrame=gdFitObjectToFramePublic;
+  function fitResolved(res,frameName,owner,opts){
+    opts=opts||{};
+    if(!res||!validBounds(res.bounds))return false;
+    var transform=calcTransform(res.bounds,frameName,opts);
+    if(!transform)return false;
+    transform.resolvedObject=res;
+    return applySimpleCameraTransform(transform,owner,Object.assign({},opts,{objectName:res.object,source:res.source,reason:opts.reason||owner}));
+  }
+  function orientSetupToHole(){
+    var tee=asLL(safe(function(){return start;},null))||mappedTee();
+    var green=greenCenter();
+    if(tee&&green)safe(function(){if(typeof gdOrientGpsCameraToBearing==="function")gdOrientGpsCameraToBearing(bearing(tee,green),"v14-setup-green-frame",{immediate:true,animate:false});});
+  }
+  function enterSetupGreenFrame(opts){
+    opts=opts||{};
+    if(!hasMap())return false;
+    installCameraGate();
+    if(document.body)document.body.classList.add("gdMappedStartPromptActive");
+    window.gdSimpleGreenZoomActive=false;
+    if(document.body)document.body.classList.remove("gd-green-zoom-active","gdGreenArrivalMode");
+    orientSetupToHole();
+    var res=resolveSetupGreenObject();
+    return fitResolved(res,"hole",OWNER.SETUP_GREEN_FRAME,{animate:opts.animate===true,duration:num(opts.duration,.08),padding:num(opts.padding,.025),maxZoom:num(opts.maxZoom,22.1),zoomBoost:num(opts.zoomBoost,.10),ownerMs:2600,reason:"setup-green-frame"});
+  }
+  window.gdEnterSetupGreenFrame=enterSetupGreenFrame;
+  function enterShotLockFrame(opts){
+    opts=opts||{};
+    if(!hasMap())return false;
+    installCameraGate();
+    if(document.body)document.body.classList.remove("gdMappedStartPromptActive","gdGreenArrivalMode","gd-green-zoom-active");
+    window.gdSimpleGreenZoomActive=false;
+    var res=resolveActiveShotObject();
+    return fitResolved(res,"lock",OWNER.SHOT_LOCK,{animate:opts.animate!==false,duration:num(opts.duration,.09),padding:num(opts.padding,.015),maxZoom:num(opts.maxZoom,23.0),zoomBoost:num(opts.zoomBoost,.06),ownerMs:3200,reason:"shot-lock"});
+  }
+  window.gdEnterShotLockFrame=enterShotLockFrame;
+  function toggleTargetZoomSimple(ev){
+    if(ev){ev.preventDefault&&ev.preventDefault();ev.stopPropagation&&ev.stopPropagation();if(ev.stopImmediatePropagation)ev.stopImmediatePropagation();}
+    if(!hasMap())return false;
+    installCameraGate();
+    var btn=document.getElementById("gdGreenZoomBtn")||document.getElementById("gdGpsSnapZoomBtn");
+    if(window.gdSimpleGreenZoomActive){
+      window.gdSimpleGreenZoomActive=false;
+      if(document.body)document.body.classList.remove("gd-green-zoom-active","gdGreenArrivalMode");
+      if(btn)btn.classList.remove("softActive");
+      setOwner(OWNER.SHOT_LOCK,{frame:"lock",object:"restore",source:"fresh",reason:"target-zoom-restore",ms:1200});
+      var restore=returnTransform; returnTransform=null;
+      if(restore&&restore.center)map.setView(restore.center,restore.zoom,{animate:true,duration:.10,__gdV14Allow:true,__gdSimpleCameraAllow:true});
+      updateReadout();
+      return false;
+    }
+    returnTransform=safe(function(){return {center:map.getCenter(),zoom:map.getZoom()};},null);
+    window.gdSimpleGreenZoomActive=true;
+    if(document.body){document.body.classList.add("gd-green-zoom-active");document.body.classList.remove("gdMappedStartPromptActive","gdGreenArrivalMode");}
+    if(btn)btn.classList.add("softActive");
+    var res=resolveActiveShotObject();
+    fitResolved(res,"zoom",OWNER.TARGET_ZOOM,{animate:true,duration:.09,padding:.005,maxZoom:23.35,zoomBoost:.28,ownerMs:3600,reason:"target-zoom"});
+    return false;
+  }
+  window.gdToggleTargetZoomSimple=toggleTargetZoomSimple;
+  function updateReadout(){
+    var el=document.getElementById("gdSimpleFrameCameraReadout");
+    if(!el&&document.body){el=document.createElement("div");el.id="gdSimpleFrameCameraReadout";document.body.appendChild(el);}
+    if(!el)return;
+    var b=cameraState.bounds||{};
+    var parts=[
+      "camera owner: "+cameraState.owner,
+      "frame: "+cameraState.frame,
+      "object: "+cameraState.object,
+      "source: "+cameraState.source,
+      "fit bounds: "+num(b.w,0)+" x "+num(b.h,0)+"m",
+      "scale: "+num(cameraState.scale,0),
+      "blocked old camera calls: "+cameraState.blockedOldCameraCalls
+    ];
+    el.textContent=parts.join(" | ");
+  }
+  function purgeSavedCameraObjects(){
+    safe(function(){
+      var kill=[];
+      for(var i=0;i<localStorage.length;i++){
+        var key=localStorage.key(i)||"";
+        if(/green_truth_cluster_v1|hole_image_manifest_v1|simple_camera_state|mapped.*pre.?lock.*camera/i.test(key))kill.push(key);
+      }
+      kill.forEach(function(key){localStorage.removeItem(key);});
+      window.gdGreenTruthCluster=null;
+      window.gdHoleImageCaptureManifest=null;
+      window.__gdLastHoleImageCaptureManifest=null;
+      window.__gdSimpleCameraFreshReset={count:kill.length,at:Date.now(),keys:kill.slice(0,20)};
+    });
+  }
+  function blockSavedCameraStorage(){
+    if(savedSetItem||!window.localStorage||!localStorage.setItem)return;
+    savedSetItem=localStorage.setItem.bind(localStorage);
+    localStorage.setItem=function(key,value){
+      if(!savedObjectsEnabled&&/green_truth_cluster_v1|hole_image_manifest_v1|simple_camera_state|mapped.*pre.?lock.*camera/i.test(String(key||""))){
+        window.__gdSimpleCameraBlockedSavedWrite={key:String(key),at:Date.now()};
+        return;
+      }
+      return savedSetItem(key,value);
+    };
+  }
+  function useSavedObjects(enabled){
+    savedObjectsEnabled=!!enabled;
+    window.gdSimpleCameraUseSavedObjects=savedObjectsEnabled;
+    window.gdSimpleFrameFreshCamera=!savedObjectsEnabled;
+    window.gdSimpleFrameIgnoreSavedCourseObjects=!savedObjectsEnabled;
+    if(!savedObjectsEnabled)purgeSavedCameraObjects();
+    updateReadout();
+    return savedObjectsEnabled;
+  }
+  window.gdSimpleFrameUseSavedCourseObjects=useSavedObjects;
+  window.gdResetSimpleCameraFresh=function(){savedObjectsEnabled=false;window.gdSimpleCameraUseSavedObjects=false;window.gdSimpleFrameFreshCamera=true;purgeSavedCameraObjects();setOwner(OWNER.LIVE_MAP,{reason:"fresh-reset"});return true;};
+  window.gdResetHoleImageFresh=window.gdResetSimpleCameraFresh;
+  function installOverrides(){
+    if(!firstInstallDone){
+      firstInstallDone=true;
+      window.__gdSimpleCameraRebuildV14Installed=true;
+      blockSavedCameraStorage();
+      useSavedObjects(false);
+    }
+    installCameraGate();
+    window.gdFrameMappedPreLockPreset=function(index,opts){return enterSetupGreenFrame(opts||{});};
+    window.gdFrameMappedPreLockHoleView=function(opts){return enterSetupGreenFrame(opts||{});};
+    window.gdQueueMappedPreLockHoleFrame=function(opts){return setTimeout(function(){enterSetupGreenFrame(opts||{});},20),true;};
+    window.gdFocusMappedPreLockHole=function(hole,opts){return enterSetupGreenFrame(opts||{});};
+    window.gdReturnToPreLockPrompt=function(){safe(function(){lockedFrame=false;});returnTransform=null;window.gdSimpleGreenZoomActive=false;if(document.body)document.body.classList.remove("gd-green-zoom-active");setTimeout(function(){enterSetupGreenFrame({animate:false});},20);return true;};
+    window.gdFrameActiveShot=function(kind,opts){return kind==="zoom"?fitResolved(resolveActiveShotObject(),"zoom",OWNER.TARGET_ZOOM,opts||{}):enterShotLockFrame(opts||{});};
+    window.frameShotView=function(){return enterShotLockFrame({animate:true});};
+    window.lockFrame=function(refit){
+      if(!hasMap())return false;
+      if(!safe(function(){return start&&target;},false))return false;
+      safe(function(){lockedFrame=true;});
+      if(refit!==false)enterShotLockFrame({animate:true});
+      safe(function(){setBubbleOnlyLock(true);});
+      safe(function(){renderShot();});
+      return true;
+    };
+    safe(function(){lockFrame=window.lockFrame;frameShotView=window.frameShotView;});
+    window.gdToggleTargetZoom=toggleTargetZoomSimple;
+    window.gdToggleSimpleGreenZoom=toggleTargetZoomSimple;
+    window.gdSimpleFrameSetup=enterSetupGreenFrame;
+    window.gdSimpleFrameLock=enterShotLockFrame;
+    var oldUnlock=window.unlockFrameForReset||safe(function(){return unlockFrameForReset;},null);
+    if(typeof oldUnlock==="function"&&!unlockWrapped&&!oldUnlock.__gdV14Wrapped){
+      unlockWrapped=true;
+      window.unlockFrameForReset=function(){
+        setOwner(OWNER.LIVE_MAP,{reason:"unlock"});
+        returnTransform=null;
+        window.gdSimpleGreenZoomActive=false;
+        return oldUnlock.apply(this,arguments);
+      };
+      window.unlockFrameForReset.__gdV14Wrapped=true;
+      safe(function(){unlockFrameForReset=window.unlockFrameForReset;});
+    }
+    window.gdLoadHoleImageCaptureManifest=function(){return savedObjectsEnabled&&typeof originalLoadManifest==="function"?safe(function(){return originalLoadManifest.apply(this,arguments);},null):null;};
+    window.gdBuildHoleImageCaptureManifest=function(){if(savedObjectsEnabled&&typeof originalBuildManifest==="function")return safe(function(){return originalBuildManifest.apply(this,arguments);},null);window.__gdSimpleFrameManifestPaused={version:VERSION,reason:"fresh simple camera",at:Date.now()};return null;};
+  }
+  function boot(){
+    installOverrides();
+    if(window.gdTargetFrameDebug!==false&&typeof window.gdSetTargetFrameDebug==="function")window.gdSetTargetFrameDebug(true);
+    updateReadout();
+  }
+  if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",function(){setTimeout(boot,150);});
+  else setTimeout(boot,50);
+  setTimeout(boot,520);
+  safe(function(){window.addEventListener("resize",function(){setTimeout(function(){if(window.gdSimpleGreenZoomActive)fitResolved(resolveActiveShotObject(),"zoom",OWNER.TARGET_ZOOM,{animate:false,padding:.005,maxZoom:23.35,zoomBoost:.28,ownerMs:1800,reason:"resize-target-zoom"});else if(safe(function(){return lockedFrame;},false))enterShotLockFrame({animate:false});else if(document.body&&document.body.classList.contains("gdMappedStartPromptActive"))enterSetupGreenFrame({animate:false});},120);},true);});
+})();
+</script>
+
 </body>
 </html>
