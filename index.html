@@ -40929,5 +40929,172 @@ body.gdTargetFrameDebugOn #gdSafeRasterZoomReadout{display:block;}
 })();
 </script>
 
+
+
+<style id="gdManualTargetGreenCameraV16Css">
+/* V16: force setup camera to the current manual green/target and lower native raster cap. */
+#gdManualTargetGreenCameraReadout{position:fixed;left:8px;bottom:34px;z-index:2301;max-width:310px;padding:6px 8px;border-radius:10px;background:rgba(0,0,0,.72);border:1px solid rgba(31,211,109,.32);color:rgba(255,255,255,.84);font:800 9px/1.25 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.06em;text-transform:uppercase;pointer-events:none;display:none;}
+body.gdTargetFrameDebugOn #gdManualTargetGreenCameraReadout{display:block;}
+</style>
+<script id="gdManualTargetGreenCameraV16">
+(function(){
+  window.__gdManualTargetGreenCameraV16=true;
+  var VERSION="V16_MANUAL_TARGET_GREEN_CAMERA";
+  var SAFE_NATIVE_CAP=17;
+  var installed=false, bootCount=0;
+  function safe(fn,fb){try{return fn();}catch(e){return fb;}}
+  function num(v,fb){v=Number(v);return Number.isFinite(v)?v:fb;}
+  function hasMap(){return typeof map!=="undefined"&&map&&typeof L!=="undefined";}
+  function asLL(p){
+    if(!p||!hasMap())return null;
+    if(p.lat!==undefined&&p.lng!==undefined)return L.latLng(num(p.lat,NaN),num(p.lng,NaN));
+    if(p.latitude!==undefined&&(p.longitude!==undefined||p.lon!==undefined))return L.latLng(num(p.latitude,NaN),num(p.longitude!==undefined?p.longitude:p.lon,NaN));
+    if(Array.isArray(p)&&p.length>=2)return L.latLng(num(p[0],NaN),num(p[1],NaN));
+    return null;
+  }
+  function validLL(p){return !!(p&&Number.isFinite(p.lat)&&Number.isFinite(p.lng));}
+  function validBounds(b){return !!(b&&typeof b.isValid==="function"&&b.isValid&&b.isValid()&&b.getCenter);}
+  function markerLL(name){return safe(function(){var m=window[name]||eval(name);return m&&typeof m.getLatLng==="function"?m.getLatLng():null;},null);}
+  function currentGreenLL(){
+    // Current on-screen/manual target wins. Do not use mapped course payloads here.
+    return asLL(safe(function(){return target;},null)) ||
+           asLL(safe(function(){return window.target;},null)) ||
+           asLL(safe(function(){return greenCentre;},null)) ||
+           asLL(safe(function(){return window.greenCentre;},null)) ||
+           asLL(markerLL("targetMarker")) ||
+           asLL(markerLL("greenMarker"));
+  }
+  function circleBounds(c,r){
+    c=asLL(c); if(!validLL(c)||!hasMap())return null;
+    r=Math.max(4,num(r,22));
+    var latRad=c.lat*Math.PI/180;
+    var dLat=r/111320;
+    var dLng=r/(111320*Math.max(.18,Math.cos(latRad)));
+    return L.latLngBounds([
+      [c.lat-dLat,c.lng-dLng],
+      [c.lat+dLat,c.lng+dLng]
+    ]);
+  }
+  function distance(a,b){return safe(function(){return map.distance(a,b);},999999);}
+  function livePolygonBoundsNearCurrent(){
+    var c=currentGreenLL(); if(!validLL(c)||!hasMap())return null;
+    var candidates=[];
+    candidates.push(safe(function(){return Array.isArray(greenPolygon)&&greenPolygon.length>=3?L.latLngBounds(greenPolygon.map(asLL).filter(validLL)):null;},null));
+    candidates.push(safe(function(){return greenOutline&&typeof greenOutline.getBounds==="function"?greenOutline.getBounds():null;},null));
+    for(var i=0;i<candidates.length;i++){
+      var b=candidates[i]; if(!validBounds(b))continue;
+      var center=b.getCenter();
+      if(distance(c,center)<=32)return b;
+    }
+    return null;
+  }
+  function manualGreenBounds(kind){
+    // The setup frame should be current manual green first; polygon only if it clearly belongs to that same current point.
+    var poly=livePolygonBoundsNearCurrent();
+    if(validBounds(poly))return poly;
+    var c=currentGreenLL();
+    if(validLL(c))return circleBounds(c,kind==="hole"?21:18);
+    return null;
+  }
+  function updateReadout(info){
+    var el=document.getElementById("gdManualTargetGreenCameraReadout");
+    if(!el&&document.body){el=document.createElement("div");el.id="gdManualTargetGreenCameraReadout";document.body.appendChild(el);}
+    if(el)el.textContent="v16 current green only | "+(info||"");
+  }
+  function forceRasterCap(reason){
+    if(!hasMap())return false;
+    safe(function(){window.gdSafeRasterNativeZoomCap=SAFE_NATIVE_CAP;});
+    safe(function(){
+      if(window.L&&L.TileLayer&&L.TileLayer.prototype&&!L.TileLayer.prototype.__gdV16NativeCapPatched){
+        var proto=L.TileLayer.prototype, prev=proto._getZoomForUrl;
+        proto._getZoomForUrl=function(){var z=prev?prev.call(this):this._tileZoom;return Math.min(Number(z)||SAFE_NATIVE_CAP,SAFE_NATIVE_CAP);};
+        proto.__gdV16NativeCapPatched=true;
+      }
+    });
+    safe(function(){
+      map.options.maxZoom=Math.max(Number(map.options.maxZoom)||0,23.5);
+      map.eachLayer(function(layer){
+        if(!layer||!layer.options||!(layer._url||layer.getTileUrl))return;
+        layer.options.maxNativeZoom=SAFE_NATIVE_CAP;
+        layer.options.maxZoom=Math.max(Number(layer.options.maxZoom)||0,23.5);
+        layer.options.updateWhenZooming=false;
+        layer.options.keepBuffer=Math.max(Number(layer.options.keepBuffer)||0,4);
+        if(Number(layer._tileZoom)>SAFE_NATIVE_CAP)layer._tileZoom=SAFE_NATIVE_CAP;
+        if(typeof layer.redraw==="function")layer.redraw();
+      });
+    });
+    window.__gdV16RasterCap={version:VERSION,cap:SAFE_NATIVE_CAP,reason:reason||"manual",zoom:safe(function(){return map.getZoom();},null),at:Date.now()};
+    return true;
+  }
+  function fit(bounds,frame,padding,opts){
+    if(!hasMap()||!validBounds(bounds)||typeof window.gdFitObjectToFrame!=="function")return false;
+    forceRasterCap("before-fit-"+frame);
+    var ok=window.gdFitObjectToFrame(bounds,frame,padding,Object.assign({animate:false,duration:.05,ownerMs:1900,maxZoom:frame==="zoom"?22.7:frame==="lock"?22.3:21.15},opts||{}));
+    setTimeout(function(){forceRasterCap("after-fit-"+frame);},70);
+    return ok;
+  }
+  function orient(){
+    var tee=asLL(safe(function(){return start;},null))||asLL(safe(function(){return window.start;},null));
+    var green=currentGreenLL();
+    if(tee&&green)safe(function(){if(typeof gdOrientGpsCameraToBearing==="function"&&typeof bearing==="function")gdOrientGpsCameraToBearing(bearing(tee,green),"v16-current-green",{immediate:true,animate:false});});
+  }
+  function setup(opts){
+    if(!hasMap())return false; opts=opts||{};
+    if(document.body){document.body.classList.add("gdMappedStartPromptActive");document.body.classList.remove("gdGreenArrivalMode","gd-green-zoom-active");}
+    orient();
+    var b=manualGreenBounds("hole");
+    var ok=fit(b,"hole",num(opts.padding,.025),{objectName:"currentManualGreen",animate:opts.animate===true});
+    var c=currentGreenLL();
+    updateReadout(ok?"setup | frame hole | source target/green | "+(c?(c.lat.toFixed(6)+","+c.lng.toFixed(6)):"no point"):"waiting for current green/target");
+    window.__gdV16LastSetup={ok:ok,hasCurrentGreen:!!c,center:c?{lat:c.lat,lng:c.lng}:null,at:Date.now()};
+    return ok;
+  }
+  function lock(opts){
+    if(!hasMap())return false; opts=opts||{};
+    if(document.body)document.body.classList.remove("gdMappedStartPromptActive","gdGreenArrivalMode","gd-green-zoom-active");
+    var b=safe(function(){return window.gdGetActiveShotObjectBounds&&window.gdGetActiveShotObjectBounds();},null);
+    if(!validBounds(b))b=manualGreenBounds("lock");
+    var ok=fit(b,"lock",num(opts.padding,.024),{objectName:validBounds(b)?"activeShotOrCurrentGreen":"none",animate:opts.animate!==false,maxZoom:22.35,ownerMs:2400});
+    updateReadout(ok?"lock | frame lock | no tee/full-hole":"lock waiting for target");
+    return ok;
+  }
+  function targetZoom(ev){
+    if(ev){ev.preventDefault();ev.stopPropagation();if(ev.stopImmediatePropagation)ev.stopImmediatePropagation();}
+    forceRasterCap("target-zoom");
+    if(typeof window.gdToggleTargetZoomV16Native==="function")return window.gdToggleTargetZoomV16Native.apply(this,arguments);
+    return lock({animate:true});
+  }
+  function install(){
+    bootCount++;
+    if(!hasMap())return false;
+    forceRasterCap("boot");
+    if(!installed){
+      installed=true;
+      window.gdToggleTargetZoomV16Native=window.gdToggleTargetZoom;
+      window.gdSimpleFrameSetupV16Native=window.gdSimpleFrameSetup;
+      window.gdSimpleFrameLockV16Native=window.gdSimpleFrameLock;
+    }
+    window.gdCurrentManualGreenBoundsV16=function(){return manualGreenBounds("hole");};
+    window.gdCurrentManualGreenLLV16=currentGreenLL;
+    window.gdForceRasterCapV16=forceRasterCap;
+    window.gdSimpleFrameSetup=setup;
+    window.gdFrameMappedPreLockPreset=function(index,opts){return setup(opts||{});};
+    window.gdFrameMappedPreLockHoleView=function(opts){return setup(opts||{});};
+    window.gdQueueMappedPreLockHoleFrame=function(opts){setTimeout(function(){setup(opts||{});},30);return true;};
+    window.gdFocusMappedPreLockHole=function(hole,opts){return setup(opts||{});};
+    window.gdSimpleFrameLock=lock;
+    window.gdHeadToTeeShotFrame=function(){return lock({animate:false});};
+    window.frameShotView=function(){return lock({animate:true});};
+    window.lockFrame=function(refit){safe(function(){lockedFrame=true;}); if(refit!==false)lock({animate:true}); safe(function(){setBubbleOnlyLock(true);}); safe(function(){renderShot();}); return true;};
+    safe(function(){lockFrame=window.lockFrame;frameShotView=window.frameShotView;gdHeadToTeeShotFrame=window.gdHeadToTeeShotFrame;});
+    window.__gdV16Installed={version:VERSION,bootCount:bootCount,cap:SAFE_NATIVE_CAP,at:Date.now()};
+    return true;
+  }
+  if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",function(){setTimeout(install,900);});else setTimeout(install,900);
+  setTimeout(install,1600);
+  setTimeout(install,2800);
+  safe(function(){window.addEventListener("resize",function(){setTimeout(function(){if(document.body&&document.body.classList.contains("gdMappedStartPromptActive"))setup({animate:false});},120);},true);});
+})();
+</script>
 </body>
 </html>
