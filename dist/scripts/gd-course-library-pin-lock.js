@@ -3368,19 +3368,25 @@
         if(typeof setHole==='function')setHole(par!==null?{hole:h,par}:{hole:h});
       }catch(e){}
       try{if(typeof resetPlay==='function')resetPlay(true);}catch(e){}
-      updateCourseLoading('Running auto mapping',38);
-	      try{await syncPublishedCourseMaps({quiet:true});}catch(e){}
-	      try{setMappedPlayMode('mapped',{skipFrame:true,silent:true});}catch(e){}
-	      const openFrameRun=nextMappedFrameRun();
-	      updateCourseLoading('Building fairway line',48);
-	      await new Promise(resolve=>setTimeout(resolve,80));
-	      if(!mappedFrameRunActive(openFrameRun)){hideCourseLoading(0);return false;}
-	      let framed=false;
-	      const autoMapFrameRun=nextMappedFrameRun();
-	      try{await autoMapOsmCourse({quiet:true,frame:false,hole:h,promptStart:true,replaceExisting:true,fresh:true,course:c});}catch(e){}
-	      if(!mappedFrameRunActive(autoMapFrameRun)){hideCourseLoading(0);return false;}
-	      updateCourseLoading('Framing Hole 1',86);
-	      try{framed=!!focusMappedHoleOrSavedGreen(h,{quiet:true,frame:true,promptStart:true,allowAnyStart:true,course:c});}catch(e){}
+	      updateCourseLoading('Mapping full course',38);
+		      try{await syncPublishedCourseMaps({quiet:true});}catch(e){}
+		      try{setMappedPlayMode('mapped',{skipFrame:true,silent:true});}catch(e){}
+		      let autoMapResult=null;
+		      try{autoMapResult=await autoMapOsmCourse({quiet:true,frame:false,promptStart:true,fresh:true,course:c});}catch(e){}
+		      try{
+		        document.body.dataset.gdCourseAutoMappedHoles=String(autoMapResult?.holes||0);
+		        document.body.dataset.gdCourseAutoMapSaved=String(autoMapResult?.saved||0);
+		      }catch(e){}
+		      const openFrameRun=nextMappedFrameRun();
+		      updateCourseLoading('Building fairway line',48);
+		      await new Promise(resolve=>setTimeout(resolve,80));
+		      if(!mappedFrameRunActive(openFrameRun)){hideCourseLoading(0);return false;}
+		      let framed=false;
+		      const autoMapFrameRun=nextMappedFrameRun();
+		      if(!mappedFrameRunActive(autoMapFrameRun)){hideCourseLoading(0);return false;}
+		      updateCourseLoading('Framing Hole 1',86);
+		      const mappedCourse=loadUserCourseData(userId(),courseId(c))||c;
+		      try{framed=!!focusMappedHoleOrSavedGreen(h,{quiet:true,frame:true,promptStart:true,allowAnyStart:true,course:mappedCourse});}catch(e){}
 	      if(framed){
 	        updateCourseLoading('Hole 1 ready',100);
 	        markCourseOpenReady(c,h);
@@ -3499,14 +3505,18 @@
         };
         window.saveHoleScore=wrapped; try{saveHoleScore=wrapped;}catch(e){}
       }
-      const oldSetStart=typeof setStart==='function'?setStart:window.setStart;
-      if(typeof oldSetStart==='function'){
-        const wrapped=function(ll,saveUndo){
-          const res=oldSetStart.apply(this,arguments);
-          try{saveCourseFinderCoordinate(ll,'set-start');}catch(e){}
-          try{scheduleMappedOrSavedGreenAfterStart(ll,!!saveUndo,saveUndo?'manual-start':'gps-start');}catch(e){}
-          return res;
-        };
+	      const oldSetStart=typeof setStart==='function'?setStart:window.setStart;
+	      if(typeof oldSetStart==='function'){
+	        const wrapped=function(ll,saveUndo){
+	          const res=oldSetStart.apply(this,arguments);
+	          try{saveCourseFinderCoordinate(ll,'set-start');}catch(e){}
+	          try{
+	            const manualStanding=!!(document.body?.classList?.contains('gdManualStartPlacementActive')||Number(window.__gdManualStandingPlacementActiveUntil||0)>Date.now());
+	            const greenFocusActive=!!(document.body?.classList?.contains('gdGreenArrivalMode')||Number(window.__gdGreenFocusSettingBallUntil||0)>Date.now());
+	            if(!greenFocusActive&&(manualStanding||saveUndo)) scheduleMappedOrSavedGreenAfterStart(ll,!!saveUndo,'manual-start');
+	          }catch(e){}
+	          return res;
+	        };
         window.setStart=wrapped; try{setStart=wrapped;}catch(e){}
       }
       const oldSetGreen=typeof setGreenTarget==='function'?setGreenTarget:window.setGreenTarget;
@@ -4511,34 +4521,7 @@
   function safe(fn,fallback){try{return fn();}catch(_){return fallback;}}
 
   function ensureBlackoutDefault(){
-    safe(function(){
-      var key="golf_daddy_dev_tuning_v1";
-      var raw=localStorage.getItem(key);
-      var settings=raw?JSON.parse(raw):{};
-      settings.gps=settings.gps||{};
-      if(settings.gps.preLockBlackoutFrame===undefined || settings.gps.preLockBlackoutFrame===null){
-        settings.gps.preLockBlackoutFrame=1;
-        localStorage.setItem(key,JSON.stringify(settings));
-      }
-    });
-    safe(function(){
-      if(typeof window.gdPreLockBlackoutFrameEnabled==="function"){
-        var old=window.gdPreLockBlackoutFrameEnabled;
-        window.gdPreLockBlackoutFrameEnabled=function(){
-          try{
-            var key="golf_daddy_dev_tuning_v1";
-            var raw=localStorage.getItem(key);
-            var settings=raw?JSON.parse(raw):{};
-            if(settings && settings.gps && settings.gps.preLockBlackoutFrame!==undefined){
-              return Number(settings.gps.preLockBlackoutFrame)>=1;
-            }
-          }catch(_){ }
-          return true;
-        };
-        window.gdPreLockBlackoutFrameEnabled.__gdPrevious=old;
-      }
-    });
-    safe(function(){document.body&&document.body.classList.add("gdPreLockBlackoutFrame");});
+    safe(function(){document.body&&document.body.classList.remove("gdPreLockBlackoutFrame");});
   }
 
   function normaliseHoleRailLabel(){
@@ -4548,7 +4531,7 @@
     if(label){
       var txt=String(label.textContent||"").trim();
       var m=txt.match(/(\d+)/);
-      if(m && txt!==m[1]) label.textContent=m[1];
+      if(m && txt!=="H"+m[1]) label.textContent="H"+m[1];
       label.classList.add("gdHoleRailNumber");
     }
   }

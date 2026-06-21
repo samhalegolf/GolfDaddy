@@ -17,20 +17,74 @@
       document.body.classList.contains('gps-active');
   }
 
-  function storedProfile() {
+  function usablePersonName(value) {
+    const name = String(value || '').trim();
+    if (!name) return '';
+    return /^(demo player|player 1|placeholder player)$/i.test(name) ? '' : name;
+  }
+
+  function storedProfiles() {
     try {
       const raw = JSON.parse(localStorage.getItem('gd_player_profiles_v27') || '{}');
-      if (!Array.isArray(raw.profiles) || !raw.profiles.length) return null;
-      return raw.profiles.find((profile) => profile && profile.id === raw.activeId) || raw.profiles[0] || null;
+      const profiles = Array.isArray(raw.profiles) ? raw.profiles : [];
+      return { profiles, activeId: raw.activeId || '' };
     } catch (error) {
-      return null;
+      return { profiles: [], activeId: '' };
     }
   }
 
+  function storedProfileById(profileId) {
+    const store = storedProfiles();
+    if (profileId) return store.profiles.find((profile) => profile && profile.id === profileId) || null;
+    return store.profiles.find((profile) => profile && profile.id === store.activeId) || store.profiles[0] || null;
+  }
+
+  function profileById(profileId) {
+    if (!profileId) return null;
+    return safe(() => typeof window.gdProfileById === 'function' ? window.gdProfileById(profileId) : null) ||
+      storedProfileById(profileId);
+  }
+
+  function accountsApi() {
+    return window.GolfDaddyAccounts || window.ClarityCaddieAccounts || null;
+  }
+
+  function accountState() {
+    const api = accountsApi();
+    return safe(() => api && typeof api.state === 'function' ? api.state() : null) || {};
+  }
+
+  function currentAccount() {
+    const api = accountsApi();
+    return safe(() => api && typeof api.current === 'function' ? api.current() : null) || null;
+  }
+
+  function accountForProfile(profileId) {
+    const api = accountsApi();
+    return safe(() => api && typeof api.accountForProfile === 'function' ? api.accountForProfile(profileId) : null) || null;
+  }
+
   function activeProfile() {
+    const account = currentAccount();
+    const state = accountState();
+    if (account) {
+      const ownProfileId = account.profileId || '';
+      const viewedProfileId = state.viewingProfileId ||
+        (document.body && document.body.dataset && document.body.dataset.clarityViewedProfileId) ||
+        ownProfileId;
+      const profileId = viewedProfileId || ownProfileId;
+      const profile = profileById(profileId) || profileById(ownProfileId);
+      const owner = accountForProfile(profileId);
+      const viewingOther = !!(profileId && ownProfileId && profileId !== ownProfileId);
+      const name = viewingOther
+        ? (usablePersonName(owner && owner.name) || usablePersonName(profile && profile.name))
+        : (usablePersonName(account.name) || usablePersonName(profile && profile.name) || usablePersonName(owner && owner.name));
+      return Object.assign({}, profile || {}, { name });
+    }
+
     return safe(() => typeof activePlayerProfile === 'function' ? activePlayerProfile() : null) ||
-      storedProfile() ||
-      { name: 'Demo Player' };
+      storedProfileById(null) ||
+      { name: 'Player' };
   }
 
   function gpsMode() {
@@ -125,7 +179,7 @@
     const badge = document.getElementById('gdV62GpsBadge') ||
       document.body.appendChild(Object.assign(document.createElement('div'), { id: 'gdV62GpsBadge' }));
     const profile = activeProfile();
-    const name = (profile && profile.name) || 'Demo Player';
+    const name = usablePersonName(profile && profile.name) || 'Player';
     const mode = gpsMode();
     const sub = mode === 'live' ? 'Live' : '';
     const currentHoleLabel = holeLabel();
@@ -200,6 +254,7 @@
   }
 
   window.addEventListener('load', () => schedule(true));
+  window.addEventListener('clarity:session-changed', () => schedule(true));
   document.addEventListener('click', () => setTimeout(() => schedule(false), 80), true);
   safe(() => new MutationObserver(() => schedule(false)).observe(document.body, {
     attributes: true,
