@@ -3,11 +3,11 @@
     appName: "Clarity Caddie",
     packageName: "clarity-caddie-core",
     version: "0.1.0-beta.1",
-    buildId: "2026-06-18-hole-nav-number-only-001",
-    deployedAt: "2026-06-18",
+    buildId: "2026-06-20-tool-rail-tab-hole-label-001",
+    deployedAt: "2026-06-20",
     channel: "beta",
     betaLabel: "Beta",
-    cacheBust: "hole-nav-number-only-001"
+    cacheBust: "tool-rail-tab-hole-label-001"
   };
 
   window.ClarityBuild = Object.assign({}, window.ClarityBuild || {}, build);
@@ -21,35 +21,7 @@
     function safe(fn,fallback){try{return fn();}catch(_){return fallback;}}
 
     function ensureBlackoutDefault(){
-      safe(function(){
-        var key="golf_daddy_dev_tuning_v1";
-        var raw=localStorage.getItem(key);
-        var settings=raw?JSON.parse(raw):{};
-        settings.gps=settings.gps||{};
-        if(settings.gps.preLockBlackoutFrame===undefined || settings.gps.preLockBlackoutFrame===null){
-          settings.gps.preLockBlackoutFrame=1;
-          localStorage.setItem(key,JSON.stringify(settings));
-        }
-      });
-      safe(function(){
-        if(typeof window.gdPreLockBlackoutFrameEnabled==="function" && !window.gdPreLockBlackoutFrameEnabled.__gdBlackoutDefaultPatched){
-          var old=window.gdPreLockBlackoutFrameEnabled;
-          window.gdPreLockBlackoutFrameEnabled=function(){
-            try{
-              var key="golf_daddy_dev_tuning_v1";
-              var raw=localStorage.getItem(key);
-              var settings=raw?JSON.parse(raw):{};
-              if(settings && settings.gps && settings.gps.preLockBlackoutFrame!==undefined){
-                return Number(settings.gps.preLockBlackoutFrame)>=1;
-              }
-            }catch(_){ }
-            return true;
-          };
-          window.gdPreLockBlackoutFrameEnabled.__gdPrevious=old;
-          window.gdPreLockBlackoutFrameEnabled.__gdBlackoutDefaultPatched=true;
-        }
-      });
-      safe(function(){document.body&&document.body.classList.add("gdPreLockBlackoutFrame");});
+      safe(function(){document.body&&document.body.classList.remove("gdPreLockBlackoutFrame");});
     }
 
     function holeNumberFromText(text,fallback){
@@ -75,7 +47,8 @@
     function writeNumber(el,fallback){
       if(!el)return;
       var n=holeNumberFromText(el.textContent, fallback || activeHoleNumber());
-      if(String(el.textContent||"").trim()!==n)el.textContent=n;
+      var label="H"+n;
+      if(String(el.textContent||"").trim()!==label)el.textContent=label;
       el.classList&&el.classList.add("gdHoleRailNumber");
       return n;
     }
@@ -89,13 +62,13 @@
       var chipNumber=writeNumber(chip,current)||current;
       if(chip){
         chip.title="Long press to pick hole";
-        chip.setAttribute("aria-label","Current hole "+chipNumber+". Long press to pick hole.");
+        chip.setAttribute("aria-label","Current hole H"+chipNumber+". Long press to pick hole.");
       }
 
       var pickerHead=document.querySelector(".gdHoleSelectHead strong");
       if(pickerHead){
         var headNumber=holeNumberFromText(pickerHead.textContent,current);
-        var headLabel="GPS "+headNumber;
+        var headLabel="GPS H"+headNumber;
         if(String(pickerHead.textContent||"").trim()!==headLabel)pickerHead.textContent=headLabel;
       }
     }

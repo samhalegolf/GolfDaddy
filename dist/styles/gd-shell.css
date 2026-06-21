@@ -38,6 +38,49 @@
   opacity: 0 !important;
 }
 
+body.shell-gps #shellTop,
+body.gdGpsActive #shellTop,
+body.gps-active #shellTop {
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: none !important;
+}
+
+body.shell-gps #shellBackBtn,
+body.shell-gps #shellHomeBtn,
+body.gdGpsActive #shellBackBtn,
+body.gdGpsActive #shellHomeBtn,
+body.gps-active #shellBackBtn,
+body.gps-active #shellHomeBtn {
+  display: inline-flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  width: auto !important;
+  min-width: 66px !important;
+  height: 46px !important;
+  padding: 9px 14px !important;
+  font-size: 14px !important;
+  color: #fff !important;
+  pointer-events: auto !important;
+}
+
+body.shell-gps #shellBackBtn::before,
+body.shell-gps #shellBackBtn::after,
+body.shell-gps #shellHomeBtn::before,
+body.shell-gps #shellHomeBtn::after,
+body.gdGpsActive #shellBackBtn::before,
+body.gdGpsActive #shellBackBtn::after,
+body.gdGpsActive #shellHomeBtn::before,
+body.gdGpsActive #shellHomeBtn::after,
+body.gps-active #shellBackBtn::before,
+body.gps-active #shellBackBtn::after,
+body.gps-active #shellHomeBtn::before,
+body.gps-active #shellHomeBtn::after {
+  content: none !important;
+  display: none !important;
+}
+
 
 /* Hole Frame visual polish — 2026-06-18 */
 .gdHoleStepper button[data-gd-hole-picker],
@@ -69,9 +112,6 @@
   filter:blur(9px);
   transform-box:fill-box;
   transform-origin:center;
-}
-body.gdPreLockBlackoutFrame .gdPreLockFocusMask{
-  transition:fill-opacity .24s ease, filter .24s ease;
 }
 
 /* Hole Frame nav hotfix: retire legacy top-centre hole switcher. */
