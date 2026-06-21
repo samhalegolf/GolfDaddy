@@ -210,11 +210,12 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
   var nativeOpenChangeCourse=null;
   var captureManifest=null;
   var lastShotOverlayPayload=null;
-  var lastShotOverlayCenter=null;
-  var lockCameraFrozen=false;
-  function safe(fn,fb){try{return fn();}catch(e){return fb;}}
-  function num(v,fb){v=Number(v);return Number.isFinite(v)?v:fb;}
-  function hasMap(){return typeof map!=="undefined"&&map&&typeof L!=="undefined";}
+	  var lastShotOverlayCenter=null;
+	  var lockCameraFrozen=false;
+	  function safe(fn,fb){try{return fn();}catch(e){return fb;}}
+	  function num(v,fb){v=Number(v);return Number.isFinite(v)?v:fb;}
+	  function surfaceIdentity(value){return String(value||"").toLowerCase().replace(/[^a-z0-9]+/g,"");}
+	  function hasMap(){return typeof map!=="undefined"&&map&&typeof L!=="undefined";}
   function asLL(p){
     if(!p||!hasMap())return null;
     if(p.lat!==undefined&&p.lng!==undefined)return L.latLng(num(p.lat,NaN),num(p.lng,NaN));
@@ -367,6 +368,23 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	  function surfaceHoleNumber(){
 	    return safe(function(){return Number(currentPlayingHole||selectedHole||gdMappedStartHoleNumber&&gdMappedStartHoleNumber()||1)||1;},1);
 	  }
+	  function manifestMatchesActive(manifest){
+	    if(!manifest||!Array.isArray(manifest.tiles)||!manifest.originPx)return false;
+	    var manifestHole=Number(manifest.holeNumber);
+	    var activeHole=surfaceHoleNumber();
+	    if(Number.isFinite(manifestHole)&&Number.isFinite(activeHole)&&Math.round(manifestHole)!==Math.round(activeHole))return false;
+	    var manifestCourse=surfaceIdentity(manifest.courseKey||manifest.courseName);
+	    var activeCourse=surfaceIdentity(surfaceCourseKey()||surfaceCourseName());
+	    if(manifestCourse&&activeCourse&&manifestCourse!==activeCourse)return false;
+	    return true;
+	  }
+	  function publishCaptureManifest(manifest){
+	    if(!manifest)return manifest;
+	    window.gdHoleImageCaptureManifest=manifest;
+	    window.__gdLastHoleImageCaptureManifest=manifest;
+	    window.__gdV19CapturedHoleFrameManifest=manifest;
+	    return manifest;
+	  }
 	  function captureAnchorPins(){
 	    var data=safe(function(){return (mappedPayload()||{}).data||{};},{})||{};
 	    var route=mappedRoute(data).filter(validLL);
@@ -452,25 +470,41 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
     safe(function(){localStorage.setItem(storageKey(),JSON.stringify(manifest));});
     return manifest;
   }
-  function loadCaptureManifest(){
-    if(captureManifest)return captureManifest;
-    var m=safe(function(){return JSON.parse(localStorage.getItem(storageKey())||"null");},null);
-    if(!m&&typeof window.gdCapturedSurfaceReadManifest==="function")m=safe(function(){return window.gdCapturedSurfaceReadManifest(surfaceCourseKey(),surfaceHoleNumber());},null);
-    if(m&&Array.isArray(m.tiles)&&m.originPx&&m.surfaceModel!=="captured-surface-v1")m=null;
-    if(m&&Array.isArray(m.tiles)&&m.originPx){
-      captureManifest=safe(function(){return typeof window.gdCapturedSurfaceWriteScan==="function"?window.gdCapturedSurfaceWriteScan(m,{reason:m.reason||"load",storageKey:storageKey()}):m;},m)||m;
-      return captureManifest;
-    }
-    return null;
-  }
-  function renderCaptureManifest(manifest){
-    manifest=manifest||loadCaptureManifest();
-    if(!manifest)return false;
-    var el=document.getElementById("gdHoleImageCameraLayer");
-    if(!el){el=document.createElement("div");el.id="gdHoleImageCameraLayer";el.setAttribute("aria-hidden","true");document.body.appendChild(el);}
-	    var tiles=(manifest.tiles||[]).map(function(t){return '<img class="gdHoleImageTile" src="'+String(t.url).replace(/"/g,"&quot;")+'" style="left:'+Math.round(t.x)+'px;top:'+Math.round(t.y)+'px"/>';}).join("");
-	    el.innerHTML='<div class="gdHoleImageTiles" style="position:absolute;left:0;top:0;width:'+manifest.imageWidth+'px;height:'+manifest.imageHeight+'px;transform-origin:0 0">'+tiles+'<div class="gdHoleImageOverlay"></div></div>';
-	    el.dataset.gdIncludeTee=manifest.includeTee?"1":"0";
+	  function loadCaptureManifest(){
+	    if(captureManifest&&manifestMatchesActive(captureManifest))return publishCaptureManifest(captureManifest);
+	    if(captureManifest&&!manifestMatchesActive(captureManifest))captureManifest=null;
+	    var m=safe(function(){return JSON.parse(localStorage.getItem(storageKey())||"null");},null);
+	    if(!m&&typeof window.gdCapturedSurfaceReadManifest==="function")m=safe(function(){return window.gdCapturedSurfaceReadManifest(surfaceCourseKey(),surfaceHoleNumber());},null);
+	    if(m&&Array.isArray(m.tiles)&&m.originPx&&m.surfaceModel!=="captured-surface-v1")m=null;
+	    if(m&&!manifestMatchesActive(m))m=null;
+	    if(m&&Array.isArray(m.tiles)&&m.originPx){
+	      captureManifest=safe(function(){return typeof window.gdCapturedSurfaceWriteScan==="function"?window.gdCapturedSurfaceWriteScan(m,{reason:m.reason||"load",storageKey:storageKey()}):m;},m)||m;
+	      return publishCaptureManifest(captureManifest);
+	    }
+	    return null;
+	  }
+	  function ensureCurrentCaptureManifest(reason){
+	    var manifest=loadCaptureManifest();
+	    if(manifest&&manifestMatchesActive(manifest))return manifest;
+	    captureManifest=null;
+	    manifest=loadCaptureManifest();
+	    if(manifest&&manifestMatchesActive(manifest))return manifest;
+	    var bounds=activeBounds("hole")||greenBounds("hole");
+	    manifest=buildCaptureManifest(bounds,reason||"ensure-current");
+	    if(manifest&&manifestMatchesActive(manifest))renderCaptureManifest(manifest);
+	    return manifest&&manifestMatchesActive(manifest)?manifest:null;
+	  }
+	  function renderCaptureManifest(manifest){
+	    manifest=manifest||loadCaptureManifest();
+	    if(!manifest||!manifestMatchesActive(manifest))return false;
+	    var el=document.getElementById("gdHoleImageCameraLayer");
+	    if(!el){el=document.createElement("div");el.id="gdHoleImageCameraLayer";el.setAttribute("aria-hidden","true");document.body.appendChild(el);}
+		    var tiles=(manifest.tiles||[]).map(function(t){return '<img class="gdHoleImageTile" src="'+String(t.url).replace(/"/g,"&quot;")+'" style="left:'+Math.round(t.x)+'px;top:'+Math.round(t.y)+'px"/>';}).join("");
+		    el.innerHTML='<div class="gdHoleImageTiles" style="position:absolute;left:0;top:0;width:'+manifest.imageWidth+'px;height:'+manifest.imageHeight+'px;transform-origin:0 0">'+tiles+'<div class="gdHoleImageOverlay"></div></div>';
+		    el.dataset.gdCapturedSurfaceHole=String(manifest.holeNumber||"");
+		    el.dataset.gdCapturedSurfaceCourse=String(manifest.courseKey||manifest.courseName||"");
+		    el.dataset.gdCapturedSurfaceScanId=String(manifest.scanId||manifest.activeScanId||"");
+		    el.dataset.gdIncludeTee=manifest.includeTee?"1":"0";
 	    if(manifest.teeLatLng){el.dataset.gdTeeLat=String(manifest.teeLatLng.lat);el.dataset.gdTeeLng=String(manifest.teeLatLng.lng);}
 	    else{delete el.dataset.gdTeeLat;delete el.dataset.gdTeeLng;}
 	    return true;
@@ -958,9 +992,11 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
     safe(function(){window.gdSimpleFrameFreshCamera=false;});
     hideWaiting();
     if(!nativeFit&&typeof window.gdFitObjectToFrame==="function")nativeFit=window.gdFitObjectToFrame;
-    window.gdBuildHoleImageCaptureManifest=function(reason){var b=activeBounds("hole")||greenBounds("hole");return buildCaptureManifest(b,reason||"manual");};
-    window.gdLoadHoleImageCaptureManifest=function(){return loadCaptureManifest();};
-    window.gdRenderHoleImageCamera=function(manifest){return renderCaptureManifest(manifest||loadCaptureManifest());};
+	  window.gdBuildHoleImageCaptureManifest=function(reason){var b=activeBounds("hole")||greenBounds("hole");return buildCaptureManifest(b,reason||"manual");};
+	  window.gdLoadHoleImageCaptureManifest=function(){return loadCaptureManifest();};
+	  window.gdEnsureCurrentCapturedSurfaceManifest=function(reason){return ensureCurrentCaptureManifest(reason||"ensure-current");};
+	  window.gdCapturedSurfaceManifestMatchesActive=function(manifest){return manifestMatchesActive(manifest||captureManifest||window.gdHoleImageCaptureManifest||window.__gdLastHoleImageCaptureManifest||window.__gdV19CapturedHoleFrameManifest);};
+	  window.gdRenderHoleImageCamera=function(manifest){return renderCaptureManifest(manifest||loadCaptureManifest());};
 	    window.gdShowHoleImageCamera=function(on){if(on){var m=loadCaptureManifest()||window.gdBuildHoleImageCaptureManifest("show");if(m)renderCaptureManifest(m);}document.body.classList.toggle("gdCapturedHoleFrameCameraOn",!!on);document.body.classList.toggle("gdHoleImageCameraOn",!!on);return !!on;};
 		    window.gdFitCapturedHoleFrameToBoxV19=fitCaptured;
 		    window.gdFitHeadToTeeHoleFrameV19=headToTee;
@@ -1110,10 +1146,12 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
       manifest:manifest
     };
   }
-  function writeScan(manifest,opts){
-    if(!manifest||!Array.isArray(manifest.tiles)||!manifest.originPx)return manifest;
-    var scan=normalizeScan(manifest,opts||{});
-    var registry=readRegistry();
+	  function writeScan(manifest,opts){
+	    if(!manifest||!Array.isArray(manifest.tiles)||!manifest.originPx)return manifest;
+	    var scan=normalizeScan(manifest,opts||{});
+	    scan.manifest.scanId=scan.id;
+	    scan.manifest.activeScanId=scan.id;
+	    var registry=readRegistry();
     registry.scans=registry.scans.filter(function(item){
       return item&&item.id!==scan.id&&!(item.courseKey===scan.courseKey&&Number(item.holeNumber)===Number(scan.holeNumber)&&item.status&&item.status.latest===true);
     });
@@ -15397,10 +15435,13 @@ function gdGreenFocusFrame(point,green){
     try{map.setView(green,Math.max(19,map.getZoom?map.getZoom():19),{animate:true,duration:.25})}catch(_e){}
   }
 }
-function gdGreenFocusBallLatLngFromEvent(ev){
-  try{
-    if(typeof gdLiveLatLngFromClient==="function")return gdLiveLatLngFromClient(ev.clientX,ev.clientY);
-    const rect=map.getContainer().getBoundingClientRect();
+	function gdGreenFocusBallLatLngFromEvent(ev){
+	  try{
+	    if(document.body&&document.body.classList.contains("gdCapturedHoleFrameCameraOn")){
+	      return typeof window.gdCapturedLatLngFromClientStrict==="function"?window.gdCapturedLatLngFromClientStrict(ev.clientX,ev.clientY,"green-focus-ball"):null;
+	    }
+	    if(typeof gdLiveLatLngFromClient==="function")return gdLiveLatLngFromClient(ev.clientX,ev.clientY);
+	    const rect=map.getContainer().getBoundingClientRect();
     return map.containerPointToLatLng(L.point(ev.clientX-rect.left,ev.clientY-rect.top));
   }catch(e){return null}
 }
@@ -15714,26 +15755,20 @@ function gdSuppressMapPlacementClick(ms=450){
 function gdMapPlacementClickSuppressed(){
   return Date.now()<gdMapPlacementSuppressClickUntil;
 }
-function gdMapPlacementTapMoveLimit(type){
-  return type==="mouse"?4:8;
-}
-function gdCompleteTwoTapPlacement(ll){
-  if(!ll)return false;
-  if(!document.getElementById("courseScreen").classList.contains("hidden"))return false;
-  if(window.__gdMapperObjectCaptureActive)return false;
-  if(window.gdFullMappingMode||document.body.classList.contains("gdFullMappingMode"))return false;
-  if(placingPin){finishPinPlacement(ll);return true;}
-  if(lockedFrame)return false;
-  if(mode==="start"){
-    const tryGreenFocus=typeof window.gdTryEnterGreenFocusFromPoint==="function"?window.gdTryEnterGreenFocusFromPoint:(typeof gdTryEnterGreenFocusFromPoint==="function"?gdTryEnterGreenFocusFromPoint:null);
-    try{document.body.dataset.gdGreenGate="start:"+document.body.classList.contains("gdManualStartPlacementActive")+":"+typeof tryGreenFocus}catch(e){}
-    if(document.body.classList.contains("gdManualStartPlacementActive")&&typeof tryGreenFocus==="function"){
-      try{
-        if(tryGreenFocus(ll,"tap-where-standing",{allowPrompt:true})){try{document.body.dataset.gdGreenGate="entered"}catch(e){};return true;}
-      }catch(e){try{document.body.dataset.gdGreenGateError=String(e&&e.message||e)}catch(_e){}}
-    }
-    const verifying=!!window.gdPendingManualShotVerification;
-    const mappedCourseAssist=(()=>{try{return typeof window.gdMappedCourseAssistEnabled==="function"&&window.gdMappedCourseAssistEnabled()}catch(e){return document.body.classList.contains("gdMappedCourseMode")}})();
+	function gdMapPlacementTapMoveLimit(type){
+	  return type==="mouse"?4:8;
+	}
+	function gdCompleteStandingStartPlacement(ll,opts={}){
+	  if(!ll)return false;
+	    const tryGreenFocus=typeof window.gdTryEnterGreenFocusFromPoint==="function"?window.gdTryEnterGreenFocusFromPoint:(typeof gdTryEnterGreenFocusFromPoint==="function"?gdTryEnterGreenFocusFromPoint:null);
+	    try{document.body.dataset.gdGreenGate="start:"+document.body.classList.contains("gdManualStartPlacementActive")+":"+typeof tryGreenFocus}catch(e){}
+	    if(opts.allowGreenFocus!==false&&document.body.classList.contains("gdManualStartPlacementActive")&&typeof tryGreenFocus==="function"){
+	      try{
+	        if(tryGreenFocus(ll,opts.source||"tap-where-standing",{allowPrompt:true,hasShotToLog:opts.hasShotToLog===true})){try{document.body.dataset.gdGreenGate="entered"}catch(e){};return true;}
+	      }catch(e){try{document.body.dataset.gdGreenGateError=String(e&&e.message||e)}catch(_e){}}
+	    }
+	    const verifying=!!window.gdPendingManualShotVerification;
+	    const mappedCourseAssist=(()=>{try{return typeof window.gdMappedCourseAssistEnabled==="function"&&window.gdMappedCourseAssistEnabled()}catch(e){return document.body.classList.contains("gdMappedCourseMode")}})();
     if(!mappedCourseAssist)clearMapRotation();
     const previousPlacement=typeof gdShotStateSnapshot==="function"?gdShotStateSnapshot("before-place-start"):null;
     const placementHole=(()=>{try{return Number(currentPlayingHole||selectedHole||1)||1}catch(e){return 1}})();
@@ -15743,14 +15778,14 @@ function gdCompleteTwoTapPlacement(ll){
     setStart(ll,false);
     gdRememberTwoTapPlacement(ll);
     try{document.body.classList.remove("gdManualStartPlacementActive")}catch(e){}
-    let mappedLocked=false;
-    if(mappedCourseAssist)try{
-      if(typeof window.gdLockMappedGreenFromStart==="function")mappedLocked=!!window.gdLockMappedGreenFromStart(ll,"manual-start");
-    }catch(e){}
-    if(mappedLocked){
-      hideHint();
-      setState("Hole "+((typeof currentPlayingHole!=="undefined"&&currentPlayingHole)||(typeof selectedHole!=="undefined"&&selectedHole)||""));
-      toast(verifying?"Outcome logged":"Start set");
+	    let mappedLocked=false;
+	    if(mappedCourseAssist)try{
+	      if(typeof window.gdLockMappedGreenFromStart==="function")mappedLocked=!!window.gdLockMappedGreenFromStart(ll,opts.lockSource||"manual-start");
+	    }catch(e){}
+	    if(mappedLocked){
+	      hideHint();
+	      setState("Hole "+((typeof currentPlayingHole!=="undefined"&&currentPlayingHole)||(typeof selectedHole!=="undefined"&&selectedHole)||""));
+	      toast(verifying?"Outcome logged":"Start set");
       return true;
     }
     if(mappedCourseAssist){
@@ -15760,16 +15795,24 @@ function gdCompleteTwoTapPlacement(ll){
       return true;
     }
     mode="green";
-    showHint("Tap twice: ball then green");
-    setState("Manual: set green");
-    toast(verifying?"Outcome logged":"Start set");
-    return true;
-  }
-  if(mode==="green"){
-    if(gdIsTwoTapEchoClick(ll))return true;
-    setGreenTarget(ll,true);
-    return true;
-  }
+	    showHint("Tap twice: ball then green");
+	    setState("Manual: set green");
+	    toast(verifying?"Outcome logged":"Start set");
+	    return true;
+	}
+	function gdCompleteTwoTapPlacement(ll){
+	  if(!ll)return false;
+	  if(!document.getElementById("courseScreen").classList.contains("hidden"))return false;
+	  if(window.__gdMapperObjectCaptureActive)return false;
+	  if(window.gdFullMappingMode||document.body.classList.contains("gdFullMappingMode"))return false;
+	  if(placingPin){finishPinPlacement(ll);return true;}
+	  if(lockedFrame)return false;
+	  if(mode==="start")return gdCompleteStandingStartPlacement(ll,{source:"tap-where-standing",lockSource:"manual-start"});
+	  if(mode==="green"){
+	    if(gdIsTwoTapEchoClick(ll))return true;
+	    setGreenTarget(ll,true);
+	    return true;
+	  }
   return false;
 }
 map.on("click",e=>{
@@ -15781,7 +15824,9 @@ map.on("click",e=>{
   }
   if(gdMapPlacementClickSuppressed())return;
   if(e.originalEvent)gdRememberMapPlacementScreen(e.originalEvent);
-  gdCompleteTwoTapPlacement(gdLatLngFromClientEvent(e.originalEvent)||e.latlng);
+  const resolved=e.originalEvent?gdLatLngFromClientEvent(e.originalEvent):null;
+  if(resolved)gdCompleteTwoTapPlacement(resolved);
+  else if(!(document.body&&document.body.classList.contains("gdCapturedHoleFrameCameraOn")))gdCompleteTwoTapPlacement(e.latlng);
 });
 function gdMapPlacementActive(){
   if(window.gdFullMappingMode||document.body.classList.contains("gdFullMappingMode"))return false;
@@ -15797,25 +15842,12 @@ function gdIsMapPlacementSurfaceEvent(ev){
 function gdCompleteMapPlacementFromClientEvent(ev){
   if(!gdMapPlacementActive()||!gdIsMapPlacementSurfaceEvent(ev))return false;
   if(gdMapPlacementClickSuppressed())return false;
-  gdRememberMapPlacementScreen(ev);
-  const ll=gdLatLngFromClientEvent(ev);
-  if(!ll)return false;
-  const tryGreenFocus=typeof window.gdTryEnterGreenFocusFromPoint==="function"?window.gdTryEnterGreenFocusFromPoint:(typeof gdTryEnterGreenFocusFromPoint==="function"?gdTryEnterGreenFocusFromPoint:null);
-  try{document.body.dataset.gdGreenGateMap="map:"+document.body.classList.contains("gdManualStartPlacementActive")+":"+typeof tryGreenFocus}catch(e){}
-  if(document.body.classList.contains("gdManualStartPlacementActive")&&typeof tryGreenFocus==="function"){
-    try{
-      if(tryGreenFocus(ll,"tap-where-standing",{allowPrompt:true})){
-        try{document.body.dataset.gdGreenGateMap="entered"}catch(e){}
-        ev.preventDefault?.();
-        ev.stopPropagation?.();
-        if(ev.stopImmediatePropagation)ev.stopImmediatePropagation();
-        return true;
-      }
-    }catch(e){try{document.body.dataset.gdGreenGateMapError=String(e&&e.message||e)}catch(_e){}}
-  }
-  if(gdCompleteTwoTapPlacement(ll)){
-    ev.preventDefault?.();
-    ev.stopPropagation?.();
+	  gdRememberMapPlacementScreen(ev);
+	  const ll=gdLatLngFromClientEvent(ev);
+	  if(!ll)return false;
+	  if(gdCompleteTwoTapPlacement(ll)){
+	    ev.preventDefault?.();
+	    ev.stopPropagation?.();
     if(ev.stopImmediatePropagation)ev.stopImmediatePropagation();
     return true;
   }
@@ -16014,26 +16046,46 @@ function gdClientToMapContainerPoint(clientX,clientY){
     return null;
   }
 }
-function gdLiveLatLngFromClient(clientX,clientY){
-  const p=gdClientToMapContainerPoint(clientX,clientY);
-  if(!p)return null;
-  try{return map.containerPointToLatLng(p);}catch(e){return null;}
-}
-try{window.gdLiveLatLngFromClient=gdLiveLatLngFromClient;}catch(e){}
-function gdLatLngFromClientEvent(ev){
-  if(!ev)return null;
-  const live=gdLiveLatLngFromClient(ev.clientX,ev.clientY);
-  try{
-    const capturedActive=!!(document.body&&document.body.classList.contains("gdCapturedHoleFrameCameraOn"));
-	    if(capturedActive&&typeof window.gdCapturedClientToLatLng==="function"){
-	      const captured=window.gdCapturedClientToLatLng(ev.clientX,ev.clientY);
-	      if(typeof window.gdCapturedSurfaceAccuracyProbe==="function")window.__gdLastClientSurfaceProbe=window.gdCapturedSurfaceAccuracyProbe(ev.clientX,ev.clientY);
-	      if(captured)return captured;
-	      if(live)return live;
+	function gdLiveLatLngFromClient(clientX,clientY){
+	  const p=gdClientToMapContainerPoint(clientX,clientY);
+	  if(!p)return null;
+	  try{return map.containerPointToLatLng(p);}catch(e){return null;}
+	}
+	try{window.gdLiveLatLngFromClient=gdLiveLatLngFromClient;}catch(e){}
+	function gdCapturedLatLngFromClientStrict(clientX,clientY,reason="client-event"){
+	  const capturedActive=!!(document.body&&document.body.classList.contains("gdCapturedHoleFrameCameraOn"));
+	  if(!capturedActive)return null;
+	  try{
+	    if(typeof window.gdEnsureCurrentCapturedSurfaceManifest==="function"){
+	      const manifest=window.gdEnsureCurrentCapturedSurfaceManifest(reason);
+	      if(!manifest){
+	        if(document.body&&document.body.dataset)document.body.dataset.gdCapturedTapResolver="blocked-no-current-scan";
+	        return null;
+	      }
+	    }else if(typeof window.gdCapturedSurfaceManifestMatchesActive==="function"&&!window.gdCapturedSurfaceManifestMatchesActive()){
+	      if(document.body&&document.body.dataset)document.body.dataset.gdCapturedTapResolver="blocked-stale-scan";
+	      return null;
 	    }
-  }catch(e){}
-  return live;
-}
+	    if(typeof window.gdCapturedClientToLatLng!=="function"){
+	      if(document.body&&document.body.dataset)document.body.dataset.gdCapturedTapResolver="blocked-no-converter";
+	      return null;
+	    }
+	    const captured=window.gdCapturedClientToLatLng(clientX,clientY);
+	    if(typeof window.gdCapturedSurfaceAccuracyProbe==="function")window.__gdLastClientSurfaceProbe=window.gdCapturedSurfaceAccuracyProbe(clientX,clientY);
+	    if(document.body&&document.body.dataset)document.body.dataset.gdCapturedTapResolver=captured?"captured":"blocked-null-captured";
+	    return captured||null;
+	  }catch(e){
+	    if(document.body&&document.body.dataset)document.body.dataset.gdCapturedTapResolver="blocked-error";
+	    return null;
+	  }
+	}
+	try{window.gdCapturedLatLngFromClientStrict=gdCapturedLatLngFromClientStrict;}catch(e){}
+	function gdLatLngFromClientEvent(ev){
+	  if(!ev)return null;
+	  if(document.body&&document.body.classList.contains("gdCapturedHoleFrameCameraOn"))return gdCapturedLatLngFromClientStrict(ev.clientX,ev.clientY,"client-event");
+	  const live=gdLiveLatLngFromClient(ev.clientX,ev.clientY);
+	  return live;
+	}
 function gdLatLngFromBubblePointer(ev,offset){
   const p=gdClientToMapContainerPoint(ev.clientX,ev.clientY);
   if(!p)return null;
@@ -39723,10 +39775,11 @@ body.gps-active #shotTile .tileCarryValue span{
     document.body.classList.remove("gdMappedStartPromptActive", "gdManualStartPlacementActive", "gdToolRailOpen", "gdLockStateFrameActive", "gd-frame-hard-locked", "gdHeadToTeeFrameActive", "gdBubbleLongPressZoomActive");
     window.__gdManualStandingPlacementActiveUntil = 0;
     resetPendingManualFlow();
-    safe(function(){ greenCentre = green; });
-    safe(function(){ if(typeof hideHint === "function") hideHint(); });
-    safe(function(){ if(typeof setBubbleOnlyLock === "function") setBubbleOnlyLock(false); });
-    setGreenFocusBallPoint(point, accuracy, opts.source || (opts.point ? "click" : "gps"));
+	    safe(function(){ greenCentre = green; });
+	    safe(function(){ if(typeof hideHint === "function") hideHint(); });
+	    safe(function(){ if(typeof setBubbleOnlyLock === "function") setBubbleOnlyLock(false); });
+	    safe(function(){ document.getElementById("shotTile")?.classList.remove("visible"); });
+	    setGreenFocusBallPoint(point, accuracy, opts.source || (opts.point ? "click" : "gps"));
     frameGreenFocusSurface(greenFocusOutcomePoint);
     syncGreenFocusCleanVisuals();
     setStateSafe("On green · adjust ball then Shot End");
@@ -40494,11 +40547,13 @@ body.gps-active #shotTile .tileCarryValue span{
     return L.point(o.originScreen.x + dx * cos - dy * sin, o.originScreen.y + dx * sin + dy * cos);
   }
 
-  function capturedFrameManifest(){
-    return safe(function(){
-      return window.gdHoleImageCaptureManifest || window.__gdLastHoleImageCaptureManifest || window.__gdV19CapturedHoleFrameManifest || null;
-    }, null);
-  }
+	  function capturedFrameManifest(){
+	    return safe(function(){
+	      var manifest=window.gdHoleImageCaptureManifest || window.__gdLastHoleImageCaptureManifest || window.__gdV19CapturedHoleFrameManifest || null;
+	      if(manifest&&typeof window.gdCapturedSurfaceManifestMatchesActive==="function"&&!window.gdCapturedSurfaceManifestMatchesActive(manifest))return null;
+	      return manifest;
+	    }, null);
+	  }
 
   function capturedFrameMatrix(){
     var group = document.querySelector("#gdHoleImageCameraLayer .gdHoleImageTiles");
@@ -40820,13 +40875,16 @@ body.gps-active #shotTile .tileCarryValue span{
     }, null);
   }
 
-  function greenFocusLatLngFromClientEvent(event){
-    var captured = capturedClientToLatLng(event.clientX, event.clientY);
-    if(captured && isNearGreenPoint(captured)) return captured;
-    var live = liveLatLngFromClientEvent(event);
-    if(live && isNearGreenPoint(live)) return live;
-    return captured || live;
-  }
+	  function greenFocusLatLngFromClientEvent(event){
+	    var captured = typeof window.gdCapturedLatLngFromClientStrict === "function"
+	      ? window.gdCapturedLatLngFromClientStrict(event.clientX, event.clientY, "green-focus-event")
+	      : capturedClientToLatLng(event.clientX, event.clientY);
+	    if(document.body.classList.contains("gdCapturedHoleFrameCameraOn")) return captured;
+	    if(captured && isNearGreenPoint(captured)) return captured;
+	    var live = liveLatLngFromClientEvent(event);
+	    if(live && isNearGreenPoint(live)) return live;
+	    return captured || live;
+	  }
 
   function springGreenFocusGreen(){
     return safe(function(){
@@ -40941,11 +40999,12 @@ body.gps-active #shotTile .tileCarryValue span{
         var top = parseFloat(ball.style.top) || event.clientY;
         greenBallDrag = null;
         ball.classList.remove("dragging");
-        var ll = capturedClientToLatLng(left, top) || safe(function(){
-          if(typeof gdLatLngFromClientEvent === "function") return gdLatLngFromClientEvent({ clientX:left, clientY:top });
-          var rect = map.getContainer().getBoundingClientRect();
-          return map.containerPointToLatLng(L.point(left - rect.left, top - rect.top));
-        }, null);
+	        var ll = capturedClientToLatLng(left, top);
+	        if(!ll&&!document.body.classList.contains("gdCapturedHoleFrameCameraOn"))ll = safe(function(){
+	          if(typeof gdLatLngFromClientEvent === "function") return gdLatLngFromClientEvent({ clientX:left, clientY:top });
+	          var rect = map.getContainer().getBoundingClientRect();
+	          return map.containerPointToLatLng(L.point(left - rect.left, top - rect.top));
+	        }, null);
         if(ll){
           resetPendingManualFlow();
           setGreenFocusBallPoint(ll, null, "drag");
@@ -41773,16 +41832,16 @@ body:has(#courseScreen:not(.hidden)) .leaflet-marker-icon{display:none!important
   }
 	  function pointFromEvent(event){
 	    return safe(function(){
-	      var greenFocusPoint=typeof greenFocusLatLngFromClientEvent==="function"?greenFocusLatLngFromClientEvent(event):null;
-	      if(greenFocusPoint&&isNearGreenPoint(greenFocusPoint))return greenFocusPoint;
-	      var live=typeof window.gdLiveLatLngFromClient==="function"?window.gdLiveLatLngFromClient(event.clientX,event.clientY):null;
 	      if(document.body.classList.contains("gdCapturedHoleFrameCameraOn")&&typeof window.gdCapturedClientToLatLng==="function"){
-	        var captured=window.gdCapturedClientToLatLng(event.clientX,event.clientY);
+	        var captured=typeof window.gdCapturedLatLngFromClientStrict==="function"?window.gdCapturedLatLngFromClientStrict(event.clientX,event.clientY,"standing-tap"):window.gdCapturedClientToLatLng(event.clientX,event.clientY);
 	        if(captured){
 	          window.__gdLastManualStartSurfaceProbe=typeof window.gdCapturedSurfaceAccuracyProbe==="function"?window.gdCapturedSurfaceAccuracyProbe(event.clientX,event.clientY):{captured:point(captured),live:null,deltaM:null};
-	          return captured||live;
+	          return captured;
 	        }
+	        safe(function(){document.body.dataset.gdStandingPointComplete="blocked-captured-point"});
+	        return null;
 	      }
+	      var live=typeof window.gdLiveLatLngFromClient==="function"?window.gdLiveLatLngFromClient(event.clientX,event.clientY):null;
 	      if(live)return live;
 	      if(typeof gdLatLngFromClientEvent==="function")return gdLatLngFromClientEvent(event);
       var el=map&&map.getContainer?map.getContainer():byId("map");
@@ -41891,37 +41950,24 @@ body:has(#courseScreen:not(.hidden)) .leaflet-marker-icon{display:none!important
 				    rememberStandingPointAsGps(ll,"tap-where-standing");
 				    safe(function(){if(typeof gdSuppressMapPlacementClick==="function")gdSuppressMapPlacementClick(700)});
 				    safe(function(){document.body.dataset.gdStandingPointComplete="placing"});
-			    window.__gdManualStandingPlacementActiveUntil=Date.now()+2200;
-			    var screenGreen=springManualGreenScreenForEvent(event);
-			    var manualGreen=springManualGreenPoint();
-			    var manualGreenDistance=safe(function(){return ll&&manualGreen&&map&&map.distance?map.distance(ll,manualGreen):null},null);
-			    var manualGreenRadius=safe(function(){return typeof gdGreenFocusRadiusM==="function"?gdGreenFocusRadiusM():46},46);
-			    safe(function(){document.body.dataset.gdGreenFocusManualDistance=Number.isFinite(Number(manualGreenDistance))?String(Math.round(Number(manualGreenDistance))):""});
-			    if(screenGreen&&Number.isFinite(Number(manualGreenDistance))&&Number(manualGreenDistance)>manualGreenRadius){
-			      screenGreen=null;
-			      safe(function(){document.body.dataset.gdGreenFocusScreenDistance=(document.body.dataset.gdGreenFocusScreenDistance||"screen")+":geo-"+Math.round(Number(manualGreenDistance))});
-			    }
-			    if(!screenGreen&&Number.isFinite(Number(manualGreenDistance))&&Number(manualGreenDistance)<=manualGreenRadius){
-			      screenGreen=manualGreen;
-			      safe(function(){document.body.dataset.gdGreenFocusScreenDistance=(document.body.dataset.gdGreenFocusScreenDistance||"near")+":near-"+Math.round(Number(manualGreenDistance))});
-			    }
-			    var greenFocusPoint=screenGreen?ll:null;
-			    var focused=greenFocusPoint&&typeof window.gdEnterGreenFocusMode==="function"?safe(function(){return window.gdEnterGreenFocusMode({source:"tap-where-standing",point:greenFocusPoint,allowPrompt:true,requireNear:false,hasShotToLog:window.__gdManualStartHadShotToLog===true})},false):false;
-			    if(!focused&&typeof window.gdTryEnterGreenFocusFromPoint==="function"){
-			      focused=greenFocusPoint?safe(function(){return window.gdTryEnterGreenFocusFromPoint(greenFocusPoint,"tap-where-standing",{allowPrompt:true,hasShotToLog:window.__gdManualStartHadShotToLog===true,requireNear:false})},false):false;
-			      if(!focused)focused=safe(function(){return window.gdTryEnterGreenFocusFromPoint(ll,"tap-where-standing",{allowPrompt:true,hasShotToLog:window.__gdManualStartHadShotToLog===true})},false);
-		    }
-	    if(focused){
+				    window.__gdManualStandingPlacementActiveUntil=Date.now()+2200;
+				    var manualGreen=springManualGreenPoint();
+				    var manualGreenDistance=safe(function(){return ll&&manualGreen&&map&&map.distance?map.distance(ll,manualGreen):null},null);
+				    var manualGreenRadius=safe(function(){return typeof gdGreenFocusRadiusM==="function"?gdGreenFocusRadiusM():46},46);
+				    safe(function(){document.body.dataset.gdGreenFocusManualDistance=Number.isFinite(Number(manualGreenDistance))?String(Math.round(Number(manualGreenDistance))):""});
+		    safe(function(){lockedFrame=false;mode="start";gdMapPlacementSuppressClickUntil=0});
+	    var placed=safe(function(){
+	      if(typeof gdCompleteStandingStartPlacement==="function")return gdCompleteStandingStartPlacement(ll,{source:"tap-where-standing",lockSource:"manual-start",hasShotToLog:window.__gdManualStartHadShotToLog===true});
+	      return typeof gdCompleteTwoTapPlacement==="function"&&gdCompleteTwoTapPlacement(ll);
+	    },false);
+	    if(placed&&document.body&&!document.body.classList.contains("gdGreenArrivalMode"))lockAfterManualStart();
+	    if(placed){
 	      manualStartArmedAt=0;
 	      window.__gdManualStartHadShotToLog=false;
 	      window.__gdManualStandingPlacementActiveUntil=0;
-	      return true;
 	    }
-	    safe(function(){lockedFrame=false;mode="start";gdMapPlacementSuppressClickUntil=0});
-    var placed=safe(function(){return typeof gdCompleteTwoTapPlacement==="function"&&gdCompleteTwoTapPlacement(ll)},false);
-    if(placed)lockAfterManualStart();
-    return placed;
-  }
+	    return placed;
+	  }
   function startButton(event){return event.target&&event.target.closest&&event.target.closest("[data-gd-mapped-start-action='manual']")}
   function currentToolScreen(){return document.body&&document.body.dataset?document.body.dataset.gdToolScreen||"":""}
   function hiddenToolScreen(){var screen=currentToolScreen();return screen==="home"||screen==="module"||screen==="mapping"||document.body.classList.contains("gdCourseOpening")||pickerOpen()||homeOpen()||moduleOpen()}
@@ -42164,16 +42210,13 @@ body:has(#courseScreen:not(.hidden)) .leaflet-marker-icon{display:none!important
 	    if(startButton(event)){safe(function(){document.body.dataset.gdManualSurfaceEnd="blocked-start-button"});return;}
 	    completeStandingPointPlacement(event);
 	  }
-  window.addEventListener("pointerup",manualPlacementSurfaceEnd,true);
-  window.addEventListener("mouseup",manualPlacementSurfaceEnd,true);
-  window.addEventListener("click",manualPlacementSurfaceEnd,true);
-  document.addEventListener("click",function(event){
-    if(event.target&&event.target.closest&&event.target.closest("#shellHomeBtn")){if(Date.now()-lastHomeNavAt<650){stop(event);return false}lastHomeNavAt=Date.now();home(event);return false}
-    if(event.target&&event.target.closest&&event.target.closest("#shellBackBtn")){if(Date.now()-lastBackNavAt<650){stop(event);return false}lastBackNavAt=Date.now();back(event);return false}
-    if(event.target&&event.target.closest&&event.target.closest(".gdPlayTile")){return playTileOpen(event)}
-    if(startButton(event)){stop(event);if(Date.now()-manualStartArmedAt>700)armManualStart();return false}
-	    completeStandingPointPlacement(event);
-    if(event.target&&event.target.closest&&event.target.closest(".rightRail"))return;
+	  window.addEventListener("pointerup",manualPlacementSurfaceEnd,true);
+	  document.addEventListener("click",function(event){
+	    if(event.target&&event.target.closest&&event.target.closest("#shellHomeBtn")){if(Date.now()-lastHomeNavAt<650){stop(event);return false}lastHomeNavAt=Date.now();home(event);return false}
+	    if(event.target&&event.target.closest&&event.target.closest("#shellBackBtn")){if(Date.now()-lastBackNavAt<650){stop(event);return false}lastBackNavAt=Date.now();back(event);return false}
+	    if(event.target&&event.target.closest&&event.target.closest(".gdPlayTile")){return playTileOpen(event)}
+	    if(startButton(event)){stop(event);if(Date.now()-manualStartArmedAt>700)armManualStart();return false}
+	    if(event.target&&event.target.closest&&event.target.closest(".rightRail"))return;
     if(event.target&&event.target.closest&&event.target.closest("#gdToolRailTab"))return;
     if(document.body&&document.body.classList.contains("gdToolRailOpen"))setToolOpen(false);
     setTimeout(function(){if(pickerOpen())ensureResumePanel();else if(gpsOpen())writeResume("click");syncToolRail();guardSurface()},80);
