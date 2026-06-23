@@ -1,0 +1,289 @@
+/* Clarity Caddie Arcade Mode: course-play overlay. */
+body.gdArcadeMode #gdArcadeRailBtn{
+  border-color:rgba(255,207,112,.66)!important;
+  box-shadow:0 0 0 2px rgba(255,207,112,.18),0 14px 30px rgba(0,0,0,.30)!important;
+}
+
+#gdArcadeOverlay{
+  position:fixed;
+  inset:0;
+  z-index:1765;
+  pointer-events:none;
+  color:#fff;
+  font-family:inherit;
+}
+
+#gdArcadeOverlay[hidden]{
+  display:none!important;
+}
+
+.gdArcadeFlightLayer{
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  overflow:hidden;
+}
+
+.gdArcadeFlightSvg{
+  position:absolute;
+  inset:0;
+  width:100%;
+  height:100%;
+  overflow:visible;
+}
+
+.gdArcadeTrace{
+  fill:none;
+  stroke:rgba(255,255,255,.78);
+  stroke-width:3;
+  stroke-linecap:round;
+  stroke-dasharray:5 11;
+  opacity:0;
+  filter:drop-shadow(0 6px 10px rgba(0,0,0,.38));
+}
+
+.gdArcadeTrace.isVisible{
+  opacity:.74;
+}
+
+.gdArcadeBall{
+  position:absolute;
+  left:0;
+  top:0;
+  width:18px;
+  height:18px;
+  margin:-9px 0 0 -9px;
+  border-radius:999px;
+  background:radial-gradient(circle at 35% 28%,#fff 0 24%,#e9f0e7 25% 58%,#aeb8aa 59% 100%);
+  box-shadow:0 7px 16px rgba(0,0,0,.42),0 0 0 2px rgba(255,255,255,.42);
+  opacity:0;
+  transform:translate(-200px,-200px);
+}
+
+.gdArcadeBall.isVisible{
+  opacity:1;
+}
+
+.gdArcadeHud{
+  position:absolute;
+  left:18px;
+  right:18px;
+  bottom:144px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:10px;
+  pointer-events:none;
+}
+
+.gdArcadeHudInner{
+  min-width:min(560px,calc(100vw - 36px));
+  max-width:720px;
+  display:grid;
+  grid-template-columns:1fr auto;
+  gap:10px;
+  align-items:center;
+  border:1px solid rgba(255,255,255,.14);
+  border-radius:22px;
+  padding:10px 10px 10px 14px;
+  background:rgba(3,8,7,.82);
+  box-shadow:0 18px 46px rgba(0,0,0,.34);
+  backdrop-filter:blur(16px);
+  pointer-events:auto;
+}
+
+.gdArcadeHudTitle{
+  display:flex;
+  align-items:baseline;
+  gap:8px;
+  min-width:0;
+  font-weight:1000;
+  letter-spacing:.02em;
+}
+
+.gdArcadeHudTitle strong{
+  font-size:13px;
+  color:#ffcf70;
+  text-transform:uppercase;
+}
+
+.gdArcadeHudTitle span{
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  font-size:16px;
+}
+
+.gdArcadeHudMeta{
+  margin-top:3px;
+  color:rgba(255,255,255,.68);
+  font-size:12px;
+  font-weight:850;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+
+.gdArcadeHudActions{
+  display:flex;
+  gap:8px;
+  align-items:center;
+}
+
+.gdArcadeIconBtn{
+  width:44px;
+  height:44px;
+  display:grid;
+  place-items:center;
+  border:1px solid rgba(255,255,255,.16);
+  border-radius:14px;
+  background:rgba(255,255,255,.08);
+  color:#fff;
+  font-size:16px;
+  font-weight:1000;
+  cursor:pointer;
+}
+
+.gdArcadeIconBtn:hover{
+  background:rgba(255,255,255,.14);
+}
+
+.gdArcadeSwingStage{
+  position:absolute;
+  left:50%;
+  bottom:28px;
+  width:174px;
+  height:126px;
+  transform:translateX(-50%);
+  pointer-events:none;
+}
+
+.gdArcadePullPad{
+  position:absolute;
+  inset:0;
+  display:grid;
+  place-items:center;
+}
+
+.gdArcadePullGhost{
+  position:absolute;
+  left:50%;
+  top:43%;
+  width:88px;
+  height:88px;
+  margin:-44px 0 0 -44px;
+  border-radius:999px;
+  border:1px solid rgba(255,255,255,.18);
+  background:radial-gradient(circle,rgba(255,255,255,.12),rgba(255,255,255,.02) 66%,transparent 68%);
+  box-shadow:inset 0 0 0 1px rgba(0,0,0,.20);
+}
+
+.gdArcadeTetherSvg{
+  position:absolute;
+  inset:0;
+  width:100%;
+  height:100%;
+  overflow:visible;
+  pointer-events:none;
+}
+
+.gdArcadeTetherPath{
+  fill:none;
+  stroke:rgba(255,207,112,.72);
+  stroke-width:4;
+  stroke-linecap:round;
+  opacity:0;
+  filter:drop-shadow(0 4px 6px rgba(0,0,0,.32));
+}
+
+.gdArcadeSwingBall{
+  position:absolute;
+  left:50%;
+  top:43%;
+  width:66px;
+  height:66px;
+  margin:-33px 0 0 -33px;
+  border:0;
+  border-radius:999px;
+  background:linear-gradient(180deg,#f8fff7,#cbd9c8);
+  box-shadow:0 13px 26px rgba(0,0,0,.42),inset 0 -7px 0 rgba(0,0,0,.10),inset 0 5px 0 rgba(255,255,255,.92);
+  color:#101613;
+  font-size:12px;
+  font-weight:1000;
+  cursor:grab;
+  touch-action:none;
+  pointer-events:auto;
+}
+
+.gdArcadeSwingBall:active{
+  cursor:grabbing;
+}
+
+.gdArcadeMeters{
+  position:absolute;
+  left:50%;
+  bottom:2px;
+  width:160px;
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:6px;
+  transform:translateX(-50%);
+  pointer-events:none;
+}
+
+.gdArcadeMeter{
+  height:7px;
+  border-radius:99px;
+  background:rgba(255,255,255,.16);
+  overflow:hidden;
+}
+
+.gdArcadeMeter i{
+  display:block;
+  width:0%;
+  height:100%;
+  border-radius:inherit;
+  background:#22d06f;
+}
+
+.gdArcadeMeter[data-tone="shape"] i{
+  margin-left:50%;
+  width:0%;
+  background:#ffcf70;
+}
+
+body.gdArcadePlaying .gdArcadeSwingBall{
+  opacity:.45;
+  pointer-events:none;
+}
+
+body.gdArcadeDragging .gdArcadeTetherPath{
+  opacity:1;
+}
+
+body.gdArcadeDragging .gdArcadePullGhost{
+  border-color:rgba(255,207,112,.34);
+}
+
+@media (max-width:760px){
+  .gdArcadeHud{
+    left:12px;
+    right:12px;
+    bottom:132px;
+  }
+
+  .gdArcadeHudInner{
+    min-width:0;
+    grid-template-columns:1fr auto;
+    padding-left:12px;
+  }
+
+  .gdArcadeHudTitle span{
+    font-size:14px;
+  }
+
+  .gdArcadeHudMeta{
+    font-size:11px;
+  }
+}

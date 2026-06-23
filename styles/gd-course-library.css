@@ -1,0 +1,1184 @@
+.gdCourseLibraryOverlay,.gdPinLockOverlay,.gdMapperToolsDrawer,.gdCourseConfirmOverlay{
+  position:fixed;
+  inset:0;
+  z-index:100060;
+  background:rgba(0,0,0,.62);
+  display:flex;
+  align-items:flex-end;
+  justify-content:center;
+  padding:18px;
+  box-sizing:border-box;
+}
+.gdCourseLibraryOverlay.hidden,.gdPinLockOverlay.hidden,.gdMapperToolsDrawer.hidden,.gdCourseConfirmOverlay.hidden{display:none!important}
+.gdCourseLibrarySheet,.gdPinLockSheet,.gdMapperToolsSheet,.gdCourseConfirmSheet{
+  width:min(560px,100%);
+  max-height:88vh;
+  overflow:auto;
+  border-radius:22px;
+  border:1px solid rgba(255,255,255,.14);
+  background:linear-gradient(180deg,rgba(9,24,19,.98),rgba(2,10,7,.98));
+  box-shadow:0 22px 60px rgba(0,0,0,.5);
+  color:#fff;
+  padding:18px;
+}
+.gdCourseLibraryHead,.gdPinLockHead,.gdMapperToolsHead,.gdCourseConfirmHead{
+  display:flex;
+  justify-content:space-between;
+  gap:12px;
+  align-items:flex-start;
+  margin-bottom:14px;
+}
+.gdCourseLibraryHead h2,.gdPinLockHead h2,.gdMapperToolsHead h2,.gdCourseConfirmHead h2{margin:0;font-size:24px;line-height:1;font-weight:950}
+.gdCourseLibraryHead p,.gdPinLockHead p,.gdMapperToolsHead p,.gdCourseConfirmHead p{margin:7px 0 0;color:rgba(255,255,255,.68);font-size:13px;font-weight:800;line-height:1.25}
+.gdSheetClose{
+  width:46px;
+  height:46px;
+  border:1px solid rgba(255,255,255,.14);
+  border-radius:16px;
+  background:rgba(255,255,255,.07);
+  color:#fff;
+  font-size:24px;
+  font-weight:950;
+}
+.gdCourseCard,.gdCourseHoleRow,.gdPinChoice{
+  width:100%;
+  border:1px solid rgba(255,255,255,.12);
+  border-radius:18px;
+  background:rgba(255,255,255,.055);
+  color:#fff;
+  padding:14px;
+  text-align:left;
+  margin:10px 0;
+  box-sizing:border-box;
+}
+.gdCourseCard.published{
+  border-color:rgba(31,211,109,.34);
+  background:linear-gradient(180deg,rgba(31,211,109,.12),rgba(255,255,255,.05));
+}
+.gdCourseCard strong,.gdCourseHoleRow strong,.gdPinChoice strong{display:block;font-size:17px;font-weight:950}
+.gdCourseCard span,.gdCourseHoleRow span,.gdPinChoice span{display:block;color:rgba(255,255,255,.68);font-size:12px;font-weight:850;margin-top:4px}
+.gdCourseLibrarySearch{
+  display:grid;
+  grid-template-columns:1fr auto;
+  gap:8px;
+  align-items:center;
+  margin:8px 0 12px;
+}
+.gdCourseLibrarySearch input{
+  width:100%;
+  min-width:0;
+  height:46px;
+  border:1px solid rgba(255,255,255,.14);
+  border-radius:16px;
+  background:rgba(255,255,255,.07);
+  color:#fff;
+  padding:0 13px;
+  font-size:14px;
+  font-weight:850;
+  box-sizing:border-box;
+}
+.gdCourseLibrarySearch button{
+  height:46px;
+  border:1px solid rgba(31,211,109,.28);
+  border-radius:16px;
+  background:rgba(31,211,109,.16);
+  color:#d8ffe7;
+  padding:0 14px;
+  font-size:13px;
+  font-weight:950;
+  white-space:nowrap;
+}
+.gdCourseHoles{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.gdCourseHoleChip{
+  border:1px solid rgba(31,211,109,.28);
+  border-radius:999px;
+  background:rgba(31,211,109,.13);
+  color:#fff;
+  padding:8px 11px;
+  font-size:12px;
+  font-weight:950;
+}
+.gdCourseHoleGrid{
+  display:grid;
+  grid-template-columns:repeat(6,minmax(0,1fr));
+  gap:8px;
+  margin:12px 0;
+}
+.gdCourseHoleGrid button{
+  min-height:42px;
+  border:1px solid rgba(31,211,109,.26);
+  border-radius:14px;
+  background:rgba(31,211,109,.10);
+  color:#fff;
+  font-size:12px;
+  font-weight:950;
+}
+.gdCourseLibrarySection{
+  margin:16px 0 7px;
+  color:rgba(255,255,255,.58);
+  font-size:11px;
+  font-weight:950;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+}
+.gdCourseLibraryTabs{
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:7px;
+  margin:10px 0 8px;
+}
+.gdCourseLibraryTabs button{
+  min-height:38px;
+  border:1px solid rgba(255,255,255,.12);
+  border-radius:13px;
+  background:rgba(255,255,255,.06);
+  color:rgba(255,255,255,.72);
+  font-size:11px;
+  font-weight:950;
+  padding:0 6px;
+}
+.gdCourseLibraryTabs button.active{
+  border-color:rgba(31,211,109,.45);
+  background:rgba(31,211,109,.15);
+  color:#fff;
+}
+.gdCourseLibraryEmpty{
+  border:1px dashed rgba(255,255,255,.14);
+  border-radius:16px;
+  padding:12px;
+  color:rgba(255,255,255,.62);
+  font-size:12px;
+  font-weight:850;
+  line-height:1.35;
+}
+.gdCourseFinderCard{
+  margin:8px 0 10px;
+  padding:0;
+  border:1px solid rgba(31,211,109,.22);
+  border-radius:16px;
+  background:rgba(31,211,109,.075);
+  overflow:hidden;
+}
+.gdCourseFinderCard.empty{
+  border-color:rgba(255,255,255,.10);
+  background:rgba(255,255,255,.045);
+}
+.gdCourseFinderDetails summary{
+  display:grid;
+  grid-template-columns:1fr auto;
+  gap:10px;
+  align-items:center;
+  min-height:48px;
+  padding:10px 12px;
+  cursor:pointer;
+  list-style:none;
+}
+.gdCourseFinderDetails summary::-webkit-details-marker{display:none}
+.gdCourseFinderDetails summary > span{
+  color:#dfffe9;
+  font-size:12px;
+  font-weight:950;
+}
+.gdCourseFinderDetails[open] summary > span{color:#a8ff53}
+.gdCourseFinderDetails .gdCourseFinderTop{
+  padding:0 12px 2px;
+}
+.gdCourseFinderTop small{
+  display:block;
+  color:#a8ff53;
+  font-size:10px;
+  font-weight:950;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+}
+.gdCourseFinderTop strong{
+  display:block;
+  margin-top:4px;
+  color:#fff;
+  font-size:16px;
+  font-weight:950;
+}
+.gdCourseFinderTop span{
+  display:block;
+  margin-top:4px;
+  color:rgba(255,255,255,.64);
+  font-size:12px;
+  font-weight:820;
+  line-height:1.32;
+}
+.gdCourseFinderActions{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:8px;
+  margin:9px 12px 12px;
+}
+.gdCourseFinderActions button{
+  min-height:42px;
+  border:1px solid rgba(255,255,255,.13);
+  border-radius:14px;
+  background:rgba(255,255,255,.08);
+  color:#fff;
+  font-size:13px;
+  font-weight:950;
+}
+.gdCourseFinderActions .danger{color:#ffb0b0;border-color:rgba(255,100,100,.35)}
+@media(max-width:430px){
+  .gdCourseLibraryTabs{grid-template-columns:1fr 1fr}
+}
+.gdCourseActions,.gdPinLockActions{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(118px,1fr));
+  gap:10px;
+  margin-top:14px;
+}
+.gdCourseActions button,.gdPinLockActions button,.gdPinLockSheet .gdPrimaryAction{
+  min-height:46px;
+  border-radius:16px;
+  border:1px solid rgba(255,255,255,.13);
+  background:rgba(255,255,255,.08);
+  color:#fff;
+  font-weight:950;
+  font-size:14px;
+}
+.gdCourseActions .danger{color:#ffb0b0;border-color:rgba(255,100,100,.35)}
+.gdCourseActions .primary{
+  border-color:rgba(31,211,109,.34);
+  background:rgba(31,211,109,.15);
+  color:#dfffe9;
+}
+.gdPinLockActions .primary,.gdPinLockSheet .gdPrimaryAction{
+  background:linear-gradient(180deg,#25d977,#11964e);
+  color:#031209;
+}
+.gdPinLockActions button:disabled{
+  opacity:.45;
+  filter:saturate(.45);
+}
+.gdPinLockInput{
+  width:100%;
+  border:1px solid rgba(255,255,255,.14);
+  border-radius:16px;
+  background:rgba(255,255,255,.07);
+  color:#fff;
+  padding:14px;
+  font-size:20px;
+  font-weight:950;
+  box-sizing:border-box;
+}
+.gdPinLockGreenSection{
+  display:none!important;
+}
+.gdPinLockHoleRow{
+  display:grid;
+  grid-template-columns:auto 76px minmax(0,1fr);
+  gap:10px;
+  align-items:center;
+}
+.gdPinLockHoleRow span{
+  color:rgba(255,255,255,.68);
+  font-size:12px;
+  font-weight:950;
+  text-transform:uppercase;
+  letter-spacing:.08em;
+}
+.gdPinLockHoleRow b{
+  min-width:0;
+  color:rgba(255,255,255,.76);
+  font-size:12px;
+  line-height:1.2;
+  font-weight:850;
+}
+.gdPinLockHoleInput{
+  width:76px;
+  border:1px solid rgba(255,255,255,.14);
+  border-radius:14px;
+  background:rgba(255,255,255,.08);
+  color:#fff;
+  padding:10px 12px;
+  font-size:18px;
+  font-weight:950;
+  text-align:center;
+  box-sizing:border-box;
+}
+.gdPinLockLabel{
+  display:block;
+  color:rgba(255,255,255,.72);
+  font-size:12px;
+  font-weight:950;
+  text-transform:uppercase;
+  letter-spacing:.08em;
+  margin:14px 0 7px;
+}
+.gdPinLockPad{
+  width:176px;
+  height:176px;
+  margin:12px auto;
+  border-radius:50%;
+  border:2px solid rgba(31,211,109,.75);
+  background:
+    linear-gradient(90deg,transparent 49%,rgba(255,255,255,.22) 50%,transparent 51%),
+    linear-gradient(0deg,transparent 49%,rgba(255,255,255,.22) 50%,transparent 51%),
+    radial-gradient(circle at 50% 50%,rgba(31,211,109,.28),rgba(31,211,109,.08) 56%,rgba(0,0,0,.18));
+  position:relative;
+  touch-action:none;
+  cursor:crosshair;
+}
+.gdPinLockPad:before{content:"Front";position:absolute;left:50%;bottom:10px;transform:translateX(-50%);font-size:11px;font-weight:950;color:rgba(255,255,255,.62)}
+.gdPinLockPad:after{content:"Back";position:absolute;left:50%;top:10px;transform:translateX(-50%);font-size:11px;font-weight:950;color:rgba(255,255,255,.62)}
+.gdPinLockDot{
+  position:absolute;
+  width:24px;
+  height:24px;
+  border-radius:50%;
+  left:calc(50% - 12px);
+  top:calc(50% - 12px);
+  background:#ff3030;
+  border:3px solid #fff;
+  box-shadow:0 0 18px rgba(255,48,48,.55);
+  pointer-events:auto;
+  cursor:grab;
+  touch-action:none;
+}
+.gdPinLockPad.gdDragging .gdPinLockDot{
+  cursor:grabbing;
+  box-shadow:0 0 22px rgba(255,48,48,.72);
+}
+#gdPinChoiceSheet .gdPinChoice{cursor:pointer}
+#gdPinChoiceSheet .gdPinChoice:hover{border-color:rgba(31,211,109,.55)}
+.gdPinToolFlyout{
+  position:fixed;
+  z-index:100070;
+  display:flex;
+  gap:10px;
+  align-items:center;
+  transform:translateY(-50%);
+  pointer-events:auto;
+}
+.gdPinToolFlyout.hidden{display:none!important}
+.gdPinToolAction{
+  width:78px;
+  height:78px;
+  border:1px solid rgba(255,255,255,.16);
+  border-radius:22px;
+  background:linear-gradient(180deg,rgba(33,45,34,.94),rgba(10,18,10,.96));
+  box-shadow:0 14px 28px rgba(0,0,0,.38),inset 0 1px 0 rgba(255,255,255,.08);
+  color:#fff;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:4px;
+  font-weight:950;
+  cursor:pointer;
+  touch-action:manipulation;
+}
+.gdPinToolAction.primary{
+  background:linear-gradient(180deg,#28dd82,#13aa5b);
+  color:#03150a;
+}
+.gdPinToolAction .ico{
+  font-size:28px;
+  line-height:1;
+  filter:drop-shadow(0 4px 8px rgba(0,0,0,.32));
+}
+.gdPinToolAction .txt{
+  font-size:11px;
+  line-height:1.05;
+  letter-spacing:.02em;
+  text-align:center;
+}
+.gdMapperToolFlyout{
+  position:fixed;
+  z-index:100070;
+  display:flex;
+  gap:8px;
+  align-items:center;
+  transform:translateY(-50%);
+  pointer-events:auto;
+}
+.gdMapperToolFlyout.hidden{display:none!important}
+.gdMapperToolFlyout .gdFullMappingOnly{display:none!important}
+.gdMapperHoleStepper{
+  width:68px;
+  height:68px;
+  border:1px solid rgba(255,255,255,.16);
+  border-radius:20px;
+  background:linear-gradient(180deg,rgba(14,22,18,.96),rgba(4,10,7,.96));
+  box-shadow:0 14px 28px rgba(0,0,0,.38),inset 0 1px 0 rgba(255,255,255,.08);
+  display:grid;
+  grid-template-columns:18px 1fr 18px;
+  align-items:center;
+  overflow:hidden;
+}
+.gdMapperHoleStepper button{
+  height:100%;
+  border:0;
+  border-radius:0;
+  background:rgba(255,255,255,.06);
+  color:#fff;
+  font-size:18px;
+  font-weight:950;
+  padding:0;
+}
+.gdMapperHoleStepper strong{
+  text-align:center;
+  color:#b7ff3b;
+  font-size:16px;
+  font-weight:950;
+}
+.gdMapperFlyoutAction{
+  position:relative;
+  width:68px;
+  height:68px;
+  border:1px solid rgba(255,255,255,.16);
+  border-radius:20px;
+  background:linear-gradient(180deg,rgba(33,45,34,.94),rgba(10,18,10,.96));
+  box-shadow:0 14px 28px rgba(0,0,0,.38),inset 0 1px 0 rgba(255,255,255,.08);
+  color:#fff;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:3px;
+  font-weight:950;
+  cursor:pointer;
+  touch-action:manipulation;
+}
+.gdMapperFlyoutAction.primary{
+  background:linear-gradient(180deg,#28dd82,#13aa5b);
+  color:#03150a;
+}
+.gdMapperFlyoutAction.done{
+  border-color:rgba(31,211,109,.72);
+  background:linear-gradient(180deg,#2ee47e,#12964f);
+  color:#03150a;
+}
+.gdMapperFlyoutAction.done:after{
+  content:"✓";
+  position:absolute;
+  transform:translate(24px,-24px);
+  width:20px;
+  height:20px;
+  border-radius:50%;
+  display:grid;
+  place-items:center;
+  background:#03150a;
+  color:#9cffbc;
+  font-size:13px;
+  font-weight:950;
+}
+.gdMapperFlyoutAction.gdMapperSaveTool{
+  background:linear-gradient(180deg,#2ee47e,#11a452);
+  color:#03150a;
+}
+.gdMapperFlyoutAction .ico{font-size:24px;line-height:1}
+.gdMapperFlyoutAction .txt{
+  max-width:58px;
+  font-size:10px;
+  line-height:1.05;
+  text-align:center;
+  overflow-wrap:anywhere;
+}
+.gdMapperToolsBtn{
+  font-size:13px!important;
+  font-weight:950!important;
+  letter-spacing:.02em;
+}
+.gdMapperToolsBtn.gdMapperToolsSaving{
+  background:linear-gradient(180deg,#29df79,#11a452)!important;
+  color:#03150a!important;
+}
+body.gdMappedCourseMode:not(.gdFullMappingMode) #greenToolBtn,
+body.gdMappedCourseMode:not(.gdFullMappingMode) #gdMapperToolsBtn{
+  display:none!important;
+  visibility:hidden!important;
+  pointer-events:none!important;
+}
+.gdMapperGreenPin{
+  width:14px;
+  height:14px;
+  border-radius:50%;
+  border:2px solid rgba(51,210,117,.70);
+  background:rgba(5,34,17,.48);
+  box-shadow:none;
+  box-sizing:border-box;
+}
+.gdMapperGreenPinFix{
+  width:30px;
+  height:30px;
+  border:4px solid #f7fff9;
+  background:rgba(31,211,109,.22);
+  box-shadow:0 0 0 7px rgba(31,211,109,.30),0 0 22px rgba(31,211,109,.72),0 8px 20px rgba(0,0,0,.42);
+  position:relative;
+}
+.gdMapperGreenPinFix:before,
+.gdMapperGreenPinFix:after{
+  content:"";
+  position:absolute;
+  left:50%;
+  top:50%;
+  background:#f7fff9;
+  transform:translate(-50%,-50%);
+  border-radius:999px;
+}
+.gdMapperGreenPinFix:before{width:18px;height:3px}
+.gdMapperGreenPinFix:after{width:3px;height:18px}
+.gdMapperFairwayPin{
+  width:18px;
+  height:18px;
+  border-radius:50%;
+  border:3px solid #57c987;
+  background:#082615;
+  box-shadow:none;
+  box-sizing:border-box;
+}
+.gdMapperFairwayPin.bend{
+  width:13px;
+  height:13px;
+  border-width:2px;
+  background:rgba(7,36,18,.72);
+  box-shadow:none;
+}
+.gdMapperToolGrid{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:10px;
+}
+.gdMapperToolChoice{
+  min-height:86px;
+  border:1px solid rgba(255,255,255,.12);
+  border-radius:16px;
+  background:rgba(255,255,255,.06);
+  color:#fff;
+  text-align:left;
+  padding:12px;
+  font-weight:900;
+  box-sizing:border-box;
+}
+.gdMapperToolChoice strong{
+  display:block;
+  font-size:16px;
+  font-weight:950;
+}
+.gdMapperToolChoice span{
+  display:block;
+  margin-top:6px;
+  color:rgba(255,255,255,.62);
+  font-size:11px;
+  line-height:1.25;
+}
+.gdMapperToolChoice.primary{
+  border-color:rgba(31,211,109,.44);
+  background:rgba(31,211,109,.14);
+}
+.gdCourseHoleDetail{
+  margin:10px 0;
+  border:1px solid rgba(255,255,255,.12);
+  border-radius:18px;
+  background:rgba(255,255,255,.055);
+  padding:12px;
+}
+.gdCourseHoleDetail > summary{
+  list-style:none;
+  cursor:pointer;
+}
+.gdCourseHoleDetail > summary::-webkit-details-marker{display:none}
+.gdCourseHoleDetail > summary:after{
+  content:"Open";
+  justify-self:end;
+  align-self:center;
+  min-width:64px;
+  border:1px solid rgba(31,211,109,.26);
+  border-radius:999px;
+  background:rgba(31,211,109,.12);
+  color:#d9ffe6;
+  padding:8px 10px;
+  text-align:center;
+  font-size:11px;
+  font-weight:950;
+}
+.gdCourseHoleDetail[open] > summary:after{content:"Close"}
+.gdCourseHoleDetailHead{
+  display:grid;
+  grid-template-columns:1fr auto;
+  gap:10px;
+  align-items:center;
+}
+.gdCourseHoleDetailHead strong{
+  display:block;
+  color:#fff;
+  font-size:18px;
+  font-weight:950;
+}
+.gdCourseHoleDetailHead span{
+  display:block;
+  margin-top:4px;
+  color:rgba(255,255,255,.66);
+  font-size:12px;
+  font-weight:850;
+}
+.gdCourseHoleDetailHead button,.gdCourseHoleObject button{
+  min-height:38px;
+  border:1px solid rgba(31,211,109,.28);
+  border-radius:13px;
+  background:rgba(31,211,109,.13);
+  color:#fff;
+  font-size:12px;
+  font-weight:950;
+  padding:0 11px;
+}
+.gdCourseHoleObjects{
+  display:grid;
+  gap:8px;
+  margin-top:10px;
+}
+.gdCourseHoleObject{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) 76px auto auto auto;
+  gap:8px;
+  align-items:center;
+  padding:9px;
+  border:1px solid rgba(255,255,255,.10);
+  border-radius:14px;
+  background:rgba(0,0,0,.16);
+}
+.gdCourseUnassignedDetail{
+  border-color:rgba(255,255,255,.16);
+  background:rgba(255,255,255,.045);
+}
+.gdCourseUnassignedDetail .gdCourseHoleDetailHead strong:before{
+  content:"?";
+  display:inline-grid;
+  place-items:center;
+  width:24px;
+  height:24px;
+  margin-right:8px;
+  border-radius:50%;
+  background:rgba(255,255,255,.12);
+  color:#dfffe9;
+  font-size:13px;
+}
+.gdCourseHoleObject strong{
+  display:block;
+  color:#fff;
+  font-size:13px;
+  font-weight:950;
+}
+.gdCourseHoleObject span{
+  display:block;
+  margin-top:3px;
+  color:rgba(255,255,255,.6);
+  font-size:11px;
+  font-weight:800;
+}
+.gdCourseHoleObject label{
+  display:grid;
+  grid-template-columns:auto 1fr;
+  gap:5px;
+  align-items:center;
+  color:rgba(255,255,255,.68);
+  font-size:11px;
+  font-weight:950;
+}
+.gdCourseHoleObject input{
+  width:36px;
+  height:34px;
+  border:1px solid rgba(255,255,255,.14);
+  border-radius:11px;
+  background:rgba(255,255,255,.08);
+  color:#fff;
+  text-align:center;
+  font-size:14px;
+  font-weight:950;
+}
+.gdCourseHoleObject button.danger{
+  border-color:rgba(255,100,100,.35);
+  background:rgba(255,80,80,.10);
+  color:#ffb0b0;
+}
+body.gdFullMappingMode .gdMapperToolFlyout{
+  top:50%!important;
+  right:96px!important;
+  left:auto!important;
+  flex-direction:column;
+  align-items:center;
+  transform:translateY(-50%);
+  max-height:calc(100vh - 18px);
+  overflow:visible;
+}
+body.gdFullMappingMode .gdMapperToolFlyout .gdFullMappingOnly{display:flex!important}
+body.gdFullMappingMode .gdMapperHoleStepper,
+body.gdFullMappingMode .gdMapperFlyoutAction{
+  width:58px;
+  height:58px;
+  border-radius:16px;
+  border-color:rgba(255,255,255,.13);
+  background:rgba(5,15,9,.78);
+  box-shadow:none;
+  backdrop-filter:none;
+}
+body.gdFullMappingMode .gdMapperFlyoutAction.primary,
+body.gdFullMappingMode .gdMapperFlyoutAction.done,
+body.gdFullMappingMode .gdMapperFlyoutAction.gdMapperSaveTool{
+  background:rgba(31,211,109,.82);
+  border-color:rgba(31,211,109,.42);
+  color:#03150a;
+}
+body.gdFullMappingMode .gdMapperHoleStepper{
+  background:rgba(5,15,9,.80);
+}
+body.gdFullMappingMode .gdMapperToolFlyout{
+  gap:6px;
+}
+body.gdFullMappingMode .gdMapperHoleStepper{
+  grid-template-columns:15px 1fr 15px;
+}
+body.gdFullMappingMode .gdMapperHoleStepper button{
+  font-size:15px;
+}
+body.gdFullMappingMode .gdMapperHoleStepper strong{
+  font-size:14px;
+}
+body.gdFullMappingMode .gdMapperFlyoutAction .ico{
+  font-size:19px;
+}
+body.gdFullMappingMode .gdMapperFlyoutAction .txt{
+  font-size:8.5px;
+}
+body.gdFullMappingMode .gdMapperFlyoutAction.done:after{
+  transform:translate(20px,-20px);
+  width:17px;
+  height:17px;
+  font-size:11px;
+  box-shadow:none;
+  background:#073216;
+  color:#c8ffda;
+}
+.gdMapperHoleStrip{
+  position:fixed;
+  left:18px;
+  bottom:calc(84px + env(safe-area-inset-bottom));
+  z-index:100055;
+  display:none;
+  flex-wrap:wrap;
+  align-items:flex-end;
+  gap:6px;
+  max-width:min(330px,calc(100vw - 130px));
+  pointer-events:auto;
+}
+body.gdFullMappingMode.shell-gps .gdMapperHoleStrip:not(.hidden),
+body.gdFullMappingMode.gps-active .gdMapperHoleStrip:not(.hidden),
+body.gdFullMappingMode.gdGpsActive .gdMapperHoleStrip:not(.hidden){
+  display:flex;
+}
+.gdMapperHoleStrip.hidden{display:none!important}
+.gdMapperHoleStrip button{
+  width:46px;
+  height:48px;
+  border:1px solid rgba(255,255,255,.14);
+  border-radius:13px;
+  background:rgba(4,16,10,.80);
+  color:#fff;
+  display:grid;
+  grid-template-rows:auto auto auto;
+  align-items:center;
+  justify-items:center;
+  gap:0;
+  padding:3px;
+  box-shadow:0 10px 22px rgba(0,0,0,.34);
+  backdrop-filter:blur(14px);
+}
+.gdMapperHoleStrip button strong{
+  font-size:15px;
+  line-height:1;
+  font-weight:950;
+}
+.gdMapperHoleStrip button span{
+  font-size:8px;
+  line-height:1;
+  font-weight:950;
+  color:rgba(255,255,255,.68);
+}
+.gdMapperHoleStates{
+  display:flex;
+  gap:1px;
+  align-items:center;
+  justify-content:center;
+  width:100%;
+  font-style:normal;
+  font-size:6.5px;
+  line-height:1;
+  font-weight:950;
+  letter-spacing:0;
+}
+.gdMapperHoleStates i{
+  font-style:normal;
+}
+.gdMapperHoleStates .done{
+  color:#c8ffda;
+}
+.gdMapperHoleStates .missing{
+  color:rgba(255,255,255,.34);
+}
+.gdMapperHoleStrip button.hasData{
+  border-color:rgba(31,211,109,.45);
+  background:linear-gradient(180deg,rgba(31,211,109,.30),rgba(4,16,10,.82));
+}
+.gdMapperHoleStrip button.complete{
+  border-color:rgba(121,199,255,.62);
+}
+.gdMapperHoleStrip button.active{
+  outline:3px solid rgba(42,148,255,.95);
+  outline-offset:2px;
+}
+.gdMapperHoleGuide{
+  position:fixed;
+  left:50%;
+  bottom:calc(34px + env(safe-area-inset-bottom));
+  z-index:100056;
+  transform:translateX(-50%);
+  max-width:min(420px,calc(100vw - 118px));
+  border:1px solid rgba(121,199,255,.28);
+  border-radius:999px;
+  background:rgba(4,14,18,.78);
+  color:rgba(236,248,255,.86);
+  padding:8px 12px;
+  box-shadow:0 14px 30px rgba(0,0,0,.34);
+  backdrop-filter:blur(14px);
+  font-size:11px;
+  line-height:1.15;
+  font-weight:900;
+  text-align:center;
+  pointer-events:none;
+}
+.gdMapperHoleGuide.hidden{display:none!important}
+body:not(.gdFullMappingMode) .gdMapperHoleGuide,
+body:not(.gdFullMappingMode) .gdOsmGuideLabel{
+  display:none!important;
+  pointer-events:none!important;
+}
+.gdOsmGuideLabel{
+  display:grid;
+  place-items:center;
+}
+.gdOsmGuideLabel span{
+  display:grid;
+  place-items:center;
+  min-width:32px;
+  height:22px;
+  border-radius:999px;
+  background:rgba(121,199,255,.94);
+  border:2px solid rgba(4,14,18,.86);
+  color:#061019;
+  font-size:12px;
+  line-height:1;
+  font-weight:950;
+  box-shadow:0 8px 18px rgba(0,0,0,.35);
+}
+.gdMapperHoleStripDetail{
+  min-width:132px;
+  max-width:190px;
+  border:1px solid rgba(255,255,255,.14);
+  border-radius:15px;
+  background:rgba(4,14,9,.86);
+  color:#fff;
+  padding:9px 10px;
+  box-shadow:0 14px 28px rgba(0,0,0,.38);
+  backdrop-filter:blur(14px);
+}
+.gdMapperHoleStripDetail strong{
+  display:block;
+  margin-bottom:5px;
+  font-size:13px;
+  font-weight:950;
+}
+.gdMapperHoleStripDetail span{
+  display:block;
+  color:rgba(255,255,255,.70);
+  font-size:10px;
+  font-weight:850;
+  line-height:1.25;
+}
+body.gdFullMappingMode .dock,
+body.gdFullMappingMode .shotTile,
+body.gdFullMappingMode #gpsModeSwitch,
+body.gdFullMappingMode .scoreBlock,
+body.gdFullMappingMode #flagTool,
+body.gdFullMappingMode #greenToolBtn,
+body.gdFullMappingMode #gpsRailBtn,
+body.gdFullMappingMode #scorecardRailBtn,
+body.gdFullMappingMode #bagRailBtn,
+body.gdFullMappingMode #windToolBtn,
+body.gdFullMappingMode #gdV62NewShotBtn,
+body.gdFullMappingMode .dockGrid{
+  display:none!important;
+}
+body.gdFullMappingMode .playerBadge{
+  max-width:min(390px,calc(100vw - 120px));
+}
+body.gdFullMappingMode .hint{
+  bottom:22px!important;
+}
+@media(max-width:520px){
+  .gdCourseHoleDetailHead{grid-template-columns:1fr}
+  .gdCourseHoleObject{grid-template-columns:1fr 76px 1fr 1fr}
+  .gdCourseHoleObject .danger{grid-column:1/-1}
+  body.gdFullMappingMode .gdMapperToolFlyout{right:82px!important}
+  .gdMapperHoleStrip{
+    left:12px;
+    bottom:calc(72px + env(safe-area-inset-bottom));
+    max-width:calc(100vw - 112px);
+  }
+  .gdMapperHoleStrip button{
+    width:44px;
+    height:47px;
+    border-radius:12px;
+  }
+  body.gdFullMappingMode .gdMapperHoleStepper,
+  body.gdFullMappingMode .gdMapperFlyoutAction{
+    width:54px;
+    height:54px;
+    border-radius:15px;
+  }
+}
+@media(max-height:640px){
+  body.gdFullMappingMode .gdMapperToolFlyout{
+    top:10px!important;
+    right:70px!important;
+    transform:none!important;
+    display:grid!important;
+    grid-template-columns:repeat(2,46px);
+    align-items:center;
+    justify-content:center;
+    gap:5px;
+    max-height:calc(100vh - 20px);
+    overflow-y:auto;
+    scrollbar-width:none;
+  }
+  body.gdFullMappingMode .gdMapperToolFlyout::-webkit-scrollbar{display:none}
+  body.gdFullMappingMode .gdMapperHoleStepper{
+    grid-column:1 / -1;
+    width:97px;
+    height:46px;
+    border-radius:13px;
+  }
+  body.gdFullMappingMode .gdMapperFlyoutAction{
+    width:46px;
+    height:46px;
+    border-radius:13px;
+  }
+  body.gdFullMappingMode .gdMapperFlyoutAction .ico{
+    font-size:16px;
+  }
+  body.gdFullMappingMode .gdMapperFlyoutAction .txt{
+    font-size:7.5px;
+  }
+}
+.gdMapperCourseLine{
+  border:1px solid rgba(255,255,255,.10);
+  border-radius:14px;
+  background:rgba(255,255,255,.055);
+  color:rgba(255,255,255,.72);
+  padding:10px 12px;
+  margin:0 0 12px;
+  font-size:12px;
+  font-weight:850;
+}
+.gdMapperCourseLine strong{color:#fff;font-weight:950}
+.gdCourseCurrent{
+  border:1px solid rgba(31,211,109,.24);
+  border-radius:18px;
+  background:rgba(31,211,109,.10);
+  padding:14px;
+  margin-bottom:12px;
+}
+.gdCourseCurrent span,.gdCourseCandidateList p{
+  display:block;
+  margin:0 0 6px;
+  color:rgba(255,255,255,.58);
+  font-size:11px;
+  font-weight:950;
+  text-transform:uppercase;
+  letter-spacing:.10em;
+}
+.gdCourseCurrent strong{
+  display:block;
+  color:#fff;
+  font-size:19px;
+  line-height:1.1;
+  font-weight:950;
+}
+.gdCourseCurrent small{
+  display:block;
+  margin-top:6px;
+  color:rgba(255,255,255,.66);
+  font-size:12px;
+  font-weight:800;
+}
+.gdCourseCandidateList{display:grid;gap:8px;margin:12px 0}
+.gdCourseCandidate{
+  width:100%;
+  border:1px solid rgba(255,255,255,.12);
+  border-radius:16px;
+  background:rgba(255,255,255,.06);
+  color:#fff;
+  padding:12px;
+  text-align:left;
+}
+.gdCourseCandidate strong{
+  display:block;
+  font-size:15px;
+  font-weight:950;
+}
+.gdCourseCandidate span{
+  display:block;
+  margin-top:4px;
+  color:rgba(255,255,255,.62);
+  font-size:11px;
+  font-weight:850;
+}
+.gdCourseCandidateEmpty{
+  border:1px dashed rgba(255,255,255,.16);
+  border-radius:16px;
+  padding:12px;
+  color:rgba(255,255,255,.62);
+  font-size:12px;
+  font-weight:850;
+  line-height:1.35;
+}
+.gdCourseConfirmActions{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:10px;
+  margin-top:14px;
+}
+.gdCourseConfirmActions button{
+  min-height:46px;
+  border-radius:16px;
+  border:1px solid rgba(255,255,255,.13);
+  background:rgba(255,255,255,.08);
+  color:#fff;
+  font-size:14px;
+  font-weight:950;
+}
+.gdCourseConfirmActions button:last-child{
+  border-color:rgba(31,211,109,.32);
+  background:rgba(31,211,109,.17);
+  color:#d8ffe8;
+}
+.gdMapperToolChoice:disabled{
+  opacity:.43;
+}
+.gdCourseObjectBadge{
+  display:inline-flex!important;
+  align-items:center;
+  justify-content:center;
+  width:max-content;
+  border-radius:999px;
+  padding:5px 8px;
+  background:rgba(245,158,11,.16);
+  color:#ffd99b!important;
+  font-size:11px!important;
+  font-weight:950!important;
+  margin:0 0 0 6px!important;
+}
+#gdProfileCoursesCard .gdCourseGreenIcon{
+  width:40px;
+  height:40px;
+  border-radius:12px;
+  position:relative;
+  overflow:hidden;
+  background:
+    radial-gradient(ellipse at 50% 72%,rgba(55,230,123,.34) 0 42%,transparent 44%),
+    linear-gradient(180deg,rgba(7,18,12,.82),rgba(2,9,5,.94));
+  border:1px solid rgba(34,197,94,.22);
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.04),0 10px 18px rgba(0,0,0,.30);
+}
+#gdProfileCoursesCard .gdCourseGreenIcon:before{
+  content:"";
+  position:absolute;
+  left:10px;
+  right:9px;
+  bottom:10px;
+  height:10px;
+  border:2px solid rgba(226,255,234,.86);
+  border-radius:50%;
+  transform:rotate(-7deg);
+}
+#gdProfileCoursesCard .gdCourseGreenIcon:after{
+  content:"";
+  position:absolute;
+  left:21px;
+  top:8px;
+  width:2px;
+  height:20px;
+  background:rgba(255,255,255,.84);
+  box-shadow:6px 2px 0 -1px #ef263b;
+}
+.gdSavedGreenBadge{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  border-radius:999px;
+  padding:5px 8px;
+  background:rgba(31,211,109,.16);
+  color:#b8f8d1;
+  font-size:11px;
+  font-weight:950;
+  margin-left:6px;
+}
+.gdAssumedCourseBadge{
+  display:none!important;
+  position:fixed;
+  left:22px;
+  top:calc(max(12px,env(safe-area-inset-top)) + 224px);
+  z-index:100020;
+  grid-template-columns:1fr auto;
+  gap:2px 10px;
+  align-items:center;
+  min-width:218px;
+  max-width:min(390px,calc(100vw - 150px));
+  border:1px solid rgba(255,255,255,.14);
+  border-radius:16px;
+  background:rgba(4,14,10,.78);
+  color:#fff;
+  padding:9px 11px;
+  text-align:left;
+  box-shadow:0 12px 28px rgba(0,0,0,.38);
+  backdrop-filter:blur(14px);
+}
+.gdAssumedCourseBadge.hidden{display:none!important}
+.gdAssumedCourseBadge span{
+  grid-column:1;
+  color:rgba(255,255,255,.55);
+  font-size:10px;
+  font-weight:950;
+  text-transform:uppercase;
+  letter-spacing:.12em;
+}
+.gdAssumedCourseBadge strong{
+  grid-column:1;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  font-size:13px;
+  line-height:1.15;
+  font-weight:950;
+}
+.gdAssumedCourseBadge em{
+  grid-column:2;
+  grid-row:1 / span 2;
+  align-self:center;
+  border-radius:999px;
+  background:rgba(31,211,109,.18);
+  color:#c9ffdc;
+  padding:7px 9px;
+  font-style:normal;
+  font-size:11px;
+  font-weight:950;
+}
+body:not(.gdGpsActive):not(.gps-active):not(.shell-gps) .gdAssumedCourseBadge,
+body.shell-home .gdAssumedCourseBadge,
+body.shell-module .gdAssumedCourseBadge{
+  display:none!important;
+}

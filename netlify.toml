@@ -1,0 +1,99 @@
+[build]
+  publish = "dist"
+  command = "npm run build:netlify"
+  functions = "functions"
+
+[[redirects]]
+  from = "/api/email-notification"
+  to = "/.netlify/functions/email-notification"
+  status = 200
+
+[[redirects]]
+  from = "/api/support-ticket"
+  to = "/.netlify/functions/support-ticket"
+  status = 200
+
+[[redirects]]
+  from = "/api/course-maps"
+  to = "/.netlify/functions/course-maps"
+  status = 200
+
+[[redirects]]
+  from = "/api/create-checkout-session"
+  to = "/.netlify/functions/create-checkout-session"
+  status = 200
+
+[[redirects]]
+  from = "/api/payment-entitlement"
+  to = "/.netlify/functions/payment-entitlement"
+  status = 200
+
+[[redirects]]
+  from = "/api/payment-admin"
+  to = "/.netlify/functions/payment-admin"
+  status = 200
+
+[[redirects]]
+  from = "/api/stripe-webhook"
+  to = "/.netlify/functions/stripe-webhook"
+  status = 200
+
+[[redirects]]
+  from = "/api/admin-user-invite"
+  to = "/.netlify/functions/admin-user-invite"
+  status = 200
+
+[[redirects]]
+  from = "/api/auth-public-config"
+  to = "/.netlify/functions/auth-public-config"
+  status = 200
+
+[[redirects]]
+  from = "/api/account-sync"
+  to = "/.netlify/functions/account-sync"
+  status = 200
+
+[[redirects]]
+  from = "/api/auth-signup"
+  to = "/.netlify/functions/auth-signup"
+  status = 200
+
+[[redirects]]
+  from = "/api/auth-login"
+  to = "/.netlify/functions/auth-login"
+  status = 200
+
+[[redirects]]
+  from = "/api/auth-update-account"
+  to = "/.netlify/functions/auth-update-account"
+  status = 200
+
+[[redirects]]
+  from = "/api/admin-diagnostics"
+  to = "/.netlify/functions/admin-diagnostics"
+  status = 200
+
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
+[[headers]]
+  for = "/*.html"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
+[[headers]]
+  for = "/scripts/*"
+  [headers.values]
+    Cache-Control = "public, max-age=3600"
+
+[[headers]]
+  for = "/styles/*"
+  [headers.values]
+    Cache-Control = "public, max-age=3600"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=604800"

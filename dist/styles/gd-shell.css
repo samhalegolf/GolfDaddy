@@ -1,0 +1,161 @@
+/* Canonical shell nav: Back and Home stay text buttons in every route. */
+#shellTop #shellBackBtn,
+#shellTop #shellHomeBtn,
+#shellTop .homeTextBtn {
+  width: auto !important;
+  min-width: 66px !important;
+  height: 46px !important;
+  padding: 9px 14px !important;
+  border-radius: 999px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  font-size: 14px !important;
+  line-height: 1 !important;
+  font-weight: 950 !important;
+  letter-spacing: 0 !important;
+  color: #fff !important;
+  text-transform: none !important;
+  white-space: nowrap !important;
+}
+
+#shellTop #shellBackBtn::before,
+#shellTop #shellBackBtn::after,
+#shellTop #shellHomeBtn::before,
+#shellTop #shellHomeBtn::after,
+#shellTop .homeTextBtn::before,
+#shellTop .homeTextBtn::after {
+  content: none !important;
+  display: none !important;
+}
+
+#shellTop .shellLogoBtn,
+.topIcons,
+.topIcons .iconBtn {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+  opacity: 0 !important;
+}
+
+body.shell-gps #shellTop,
+body.gdGpsActive #shellTop,
+body.gps-active #shellTop {
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: none !important;
+}
+
+body.shell-gps #shellBackBtn,
+body.shell-gps #shellHomeBtn,
+body.gdGpsActive #shellBackBtn,
+body.gdGpsActive #shellHomeBtn,
+body.gps-active #shellBackBtn,
+body.gps-active #shellHomeBtn {
+  display: inline-flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  width: auto !important;
+  min-width: 66px !important;
+  height: 46px !important;
+  padding: 9px 14px !important;
+  font-size: 14px !important;
+  color: #fff !important;
+  pointer-events: auto !important;
+}
+
+body.shell-gps #shellBackBtn::before,
+body.shell-gps #shellBackBtn::after,
+body.shell-gps #shellHomeBtn::before,
+body.shell-gps #shellHomeBtn::after,
+body.gdGpsActive #shellBackBtn::before,
+body.gdGpsActive #shellBackBtn::after,
+body.gdGpsActive #shellHomeBtn::before,
+body.gdGpsActive #shellHomeBtn::after,
+body.gps-active #shellBackBtn::before,
+body.gps-active #shellBackBtn::after,
+body.gps-active #shellHomeBtn::before,
+body.gps-active #shellHomeBtn::after {
+  content: none !important;
+  display: none !important;
+}
+
+
+/* Hole Frame visual polish — 2026-06-18 */
+.gdHoleStepper button[data-gd-hole-picker],
+.gdHoleStepper button[data-gd-hole-picker] strong,
+.gdHoleStepper .gdHoleRailNumber{
+  background:linear-gradient(180deg,#3cff8d,#18bf63)!important;
+  color:#061109!important;
+  border-color:rgba(97,255,159,.55)!important;
+  box-shadow:0 10px 24px rgba(19,191,99,.22), inset 0 1px 0 rgba(255,255,255,.34)!important;
+  text-shadow:none!important;
+}
+.gdHoleStepper button[data-gd-hole-picker]{
+  border-radius:14px!important;
+  overflow:hidden!important;
+}
+.gdHoleStepper button[data-gd-hole-picker] strong{
+  display:grid!important;
+  place-items:center!important;
+  width:100%!important;
+  height:100%!important;
+  min-width:0!important;
+  font-size:16px!important;
+  font-weight:950!important;
+  letter-spacing:-.02em!important;
+}
+.gdGpsFocusMask,
+.gdPreLockFocusMask,
+.gdGpsFrameMask{
+  filter:blur(9px);
+  transform-box:fill-box;
+  transform-origin:center;
+}
+
+/* Hole Frame nav hotfix: retire legacy top-centre hole switcher. */
+#gdNextHolePopout,
+.gdNextHolePopout {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+  opacity: 0 !important;
+}
+
+
+/* Bag/bubble cleanup patch — user-facing GPS polish */
+#gdV62NewShotBtn,
+#newShotUnlockBtn,
+button[aria-label*="Unlock"],
+button[title*="Unlock"]{
+  background:linear-gradient(180deg,#1fd36d,#12823f)!important;
+  color:#031009!important;
+  border-color:rgba(126,255,174,.56)!important;
+  box-shadow:0 14px 30px rgba(31,211,109,.22), inset 0 1px 0 rgba(255,255,255,.32)!important;
+}
+#gdGpsClearBtn,
+button[aria-label*="Clear shot"],
+button[aria-label*="Reset"],
+button[title*="Reset"]{
+  background:rgba(0,0,0,.42)!important;
+  color:#fff!important;
+  border-color:rgba(255,255,255,.16)!important;
+  box-shadow:0 12px 26px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.08)!important;
+}
+.leaflet-overlay-pane path[stroke="#1fd36d"],
+.leaflet-overlay-pane path[stroke="#28b96b"],
+.leaflet-overlay-pane path[stroke="#9cffbc"],
+.leaflet-overlay-pane path[stroke="#1f8f55"]{
+  stroke-opacity:0!important;
+}
+.leaflet-overlay-pane path[fill="#1fd36d"][stroke="#1fd36d"]{
+  opacity:0!important;
+  fill-opacity:0!important;
+  stroke-opacity:0!important;
+}
+body.gdDebugGreenMarkers .leaflet-overlay-pane path[fill="#1fd36d"][stroke="#1fd36d"]{
+  opacity:.18!important;
+  fill-opacity:.08!important;
+  stroke-opacity:.18!important;
+}
