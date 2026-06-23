@@ -68,3 +68,30 @@ Unless specifically asked otherwise, Codex can work on:
 ## Important note
 
 Previous home-icons work caused routing conflicts by fighting the app shell. If rebuilding Home, prefer adapting the native shell/dashboard route instead of adding a second competing Home layer.
+
+---
+
+## Before Editing Code
+
+Before editing Clarity Caddy code, read:
+
+1. `docs/architecture/CLARITY_CADDY_TRUTH_FILE.md`
+2. `docs/architecture/SYSTEM_MAP.md`
+3. `docs/architecture/PROTECTED_SYSTEMS.md`
+
+Rules:
+
+- Do not assume Clarity Caddy is a generic GPS app.
+- Do not turn it into a statistics dashboard.
+- Do not add hidden fallbacks.
+- Do not revive legacy systems.
+- Do not touch protected systems unless explicitly scoped.
+- Prefer visible failure over silent fallback.
+- Keep raw/technical data behind intentional tabs or tools unless explicitly requested in the player UI.
+
+For GPS work, also read:
+
+- `docs/architecture/GPS_STABILISATION_PLAN.md`
+- `docs/architecture/GPS_PLAY_BEHAVIOUR.md`
+- `docs/reports/CLARITY_CADDY_GPS_SYSTEM_AUDIT_v1_0.md`
+

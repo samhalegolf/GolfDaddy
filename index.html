@@ -956,7 +956,7 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
     safe(function(){[targetMarker,greenMarker,pinMarker,pinDirectionLine,greenOutline,greenSoft,greenLabel,frontLabel,backLabel].forEach(removeLayer);});
     safe(function(){targetMarker=greenMarker=pinMarker=pinDirectionLine=greenOutline=greenSoft=greenLabel=frontLabel=backLabel=null;});
     safe(function(){start=target=greenCentre=pin=null;});
-    safe(function(){greenPolygon=null;gdWindLandingTarget=null;targetWasMoved=false;currentShotLogged=false;gdCurrentPlannedShotId=null;targetDragging=false;});
+    safe(function(){greenPolygon=null;gdWindLandingTarget=null;targetWasMoved=false;currentShotLogged=false;gdCurrentPlannedShotId=null;gdCurrentShotTransactionId=null;targetDragging=false;});
     safe(function(){mode="start";});
     safe(function(){var tile=document.getElementById("shotTile");if(tile){tile.classList.remove("visible");tile.hidden=false;}});
     safe(function(){var appEl=document.getElementById("app");if(appEl){appEl.classList.remove("framed");appEl.classList.add("gdPreLockFrame");}});
@@ -13566,7 +13566,7 @@ let gdFocusFrameStart=null,gdFocusFrameTarget=null;
 let gdWindEffectLine=null,gdWindAimMarker=null;
 let greenOutline=null,greenSoft=null,greenLabel=null,frontLabel=null,backLabel=null,greenPolygon=null;
 let targetDragging=false;
-let lockedFrame=false, targetWasMoved=false, undoStack=[], currentCourse=null, gdCurrentPlannedShotId=null;
+let lockedFrame=false, targetWasMoved=false, undoStack=[], currentCourse=null, gdCurrentPlannedShotId=null, gdCurrentShotTransactionId=null;
 let gdSimpleGreenZoomActive=false, gdSimpleGreenZoomReturnView=null;
 let gdCurrentShotTargetMode="greenTarget", gdLastShotTargetMode="greenTarget", gdFairwayCameraNudgeState={lastAt:0};
 let units="m", showAim=true, showFilter=true, gpsWatch=null, gpsOk=false, shotTracking=false, trackedShots=[], shotId=0, currentShotLogged=false;
@@ -15504,7 +15504,7 @@ function gdEnterActiveGreenFocus(point,source,opts={}){
     window.__gdLastGreenFocusAttempt={source:source||"tap-where-standing",point:{lat:Number(point.lat),lng:Number(point.lng)},green:green?{lat:Number(green.lat),lng:Number(green.lng)}:null,distanceM:Number.isFinite(Number(distance))?Number(distance):null,radiusM:gdGreenFocusRadiusM(),allowPrompt:allowedPrompt,result:false};
     return false;
   }
-  gdGreenFocusHadShotToLog=!screenFallback&&!!(gdPendingCourseShot()||target||gdCurrentPlannedShotId);
+  gdGreenFocusHadShotToLog=!screenFallback&&!!gdPendingCourseShot();
   gdGreenFocusOutcomePoint=L.latLng(point.lat,point.lng);
   gdGreenFocusOutcomeAccuracy=Number.isFinite(Number(opts.accuracy))?Number(opts.accuracy):null;
   gdGreenFocusScreenPoint=screenFallback;
@@ -15548,7 +15548,7 @@ function gdFinishActiveGreenFocus(reason="shot_end_green_focus"){
   try{if(typeof gdFocusMappedHoleOrSavedGreen==="function")gdFocusMappedHoleOrSavedGreen(next,{quiet:true,frame:true,promptStart:true,allowAnyStart:true,stablePreLock:true})}catch(e){}
   setState("Hole "+next);
   showHint(gdMappedStartHint());
-  toast((logged?"Shot saved":"Logged")+" · H"+next+" ready");
+  toast((gdCourseOutcomeSaved(logged)?"Shot saved":"No shot saved")+" · H"+next+" ready");
   try{gdSyncNewShotButtonState()}catch(e){}
   return false;
 }
@@ -15662,7 +15662,7 @@ window.gdMappedStartHint=gdMappedStartHint;
 window.gdMappedStartState=gdMappedStartState;
 window.gdShowMappedDropout=gdShowMappedDropout;
 window.gdUseMappedTeeAsStart=gdUseMappedTeeAsStart;
-function resetPlay(showManual){try{if(window.gdClearWandLive)window.gdClearWandLive();}catch(e){}unlockFrameForReset();clearAllLayers();mode="start";start=target=greenCentre=pin=null;gdWindLandingTarget=null;lockedFrame=false;targetWasMoved=false;currentShotLogged=false;gdCurrentPlannedShotId=null;window.gdPendingManualShotVerification=false;document.getElementById("shotTile").classList.remove("visible");app.classList.remove("framed","gdPreLockFrame");setState(gpsOk?"GPS ready":gdMappedStartState());if(showManual)showHint(gdMappedStartHint())}
+function resetPlay(showManual){try{if(window.gdClearWandLive)window.gdClearWandLive();}catch(e){}unlockFrameForReset();clearAllLayers();mode="start";start=target=greenCentre=pin=null;gdWindLandingTarget=null;lockedFrame=false;targetWasMoved=false;currentShotLogged=false;gdCurrentPlannedShotId=null;gdCurrentShotTransactionId=null;window.gdPendingManualShotVerification=false;document.getElementById("shotTile").classList.remove("visible");app.classList.remove("framed","gdPreLockFrame");setState(gpsOk?"GPS ready":gdMappedStartState());if(showManual)showHint(gdMappedStartHint())}
 function gdRemoveOrphanTargetMarkerDom(){
   const activeTargetEl=target&&targetMarker&&targetMarker.getElement?targetMarker.getElement():null;
   document.querySelectorAll(".targetDot,.gdBubbleDragHit").forEach(el=>{
@@ -15699,7 +15699,7 @@ function gdClearTargetArtifactsForFreshStart(){
   lockedFrame=false;
   targetWasMoved=false;
   currentShotLogged=false;
-  gdCurrentPlannedShotId=null;
+  gdCurrentPlannedShotId=null;gdCurrentShotTransactionId=null;
   targetDragging=false;
   shotLineAligned=false;
   gdRemoveOrphanTargetMarkerDom();
@@ -15720,7 +15720,7 @@ function clearPendingGreenTarget(){
   lockedFrame=false;
   targetWasMoved=false;
   currentShotLogged=false;
-  gdCurrentPlannedShotId=null;
+  gdCurrentPlannedShotId=null;gdCurrentShotTransactionId=null;
   targetDragging=false;
   shotLineAligned=false;
   document.getElementById("shotTile").classList.remove("visible");
@@ -15760,45 +15760,57 @@ function gdMapPlacementClickSuppressed(){
 	}
 	function gdCompleteStandingStartPlacement(ll,opts={}){
 	  if(!ll)return false;
-	    const tryGreenFocus=typeof window.gdTryEnterGreenFocusFromPoint==="function"?window.gdTryEnterGreenFocusFromPoint:(typeof gdTryEnterGreenFocusFromPoint==="function"?gdTryEnterGreenFocusFromPoint:null);
-	    try{document.body.dataset.gdGreenGate="start:"+document.body.classList.contains("gdManualStartPlacementActive")+":"+typeof tryGreenFocus}catch(e){}
-	    if(opts.allowGreenFocus!==false&&document.body.classList.contains("gdManualStartPlacementActive")&&typeof tryGreenFocus==="function"){
-	      try{
-	        if(tryGreenFocus(ll,opts.source||"tap-where-standing",{allowPrompt:true,hasShotToLog:opts.hasShotToLog===true})){try{document.body.dataset.gdGreenGate="entered"}catch(e){};return true;}
-	      }catch(e){try{document.body.dataset.gdGreenGateError=String(e&&e.message||e)}catch(_e){}}
-	    }
-	    const verifying=!!window.gdPendingManualShotVerification;
-	    const mappedCourseAssist=(()=>{try{return typeof window.gdMappedCourseAssistEnabled==="function"&&window.gdMappedCourseAssistEnabled()}catch(e){return document.body.classList.contains("gdMappedCourseMode")}})();
-    if(!mappedCourseAssist)clearMapRotation();
-    const previousPlacement=typeof gdShotStateSnapshot==="function"?gdShotStateSnapshot("before-place-start"):null;
-    const placementHole=(()=>{try{return Number(currentPlayingHole||selectedHole||1)||1}catch(e){return 1}})();
-    clearStaleTargetWhileSettingStart();
-    document.getElementById("shotTile")?.classList.remove("visible");
-    undoStack.push({type:"placeStart",previous:previousPlacement,mappedAutoLock:!!mappedCourseAssist,hole:placementHole,point:typeof gdUndoPlainLatLng==="function"?gdUndoPlainLatLng(ll):null});
-    setStart(ll,false);
-    gdRememberTwoTapPlacement(ll);
-    try{document.body.classList.remove("gdManualStartPlacementActive")}catch(e){}
-	    let mappedLocked=false;
-	    if(mappedCourseAssist)try{
-	      if(typeof window.gdLockMappedGreenFromStart==="function")mappedLocked=!!window.gdLockMappedGreenFromStart(ll,opts.lockSource||"manual-start");
-	    }catch(e){}
-	    if(mappedLocked){
-	      hideHint();
-	      setState("Hole "+((typeof currentPlayingHole!=="undefined"&&currentPlayingHole)||(typeof selectedHole!=="undefined"&&selectedHole)||""));
-	      toast(verifying?"Outcome logged":"Start set");
-      return true;
-    }
-    if(mappedCourseAssist){
-      try{if(typeof window.gdFocusMappedHoleOrSavedGreen==="function")window.gdFocusMappedHoleOrSavedGreen((typeof currentPlayingHole!=="undefined"&&currentPlayingHole)||(typeof selectedHole!=="undefined"&&selectedHole)||1,{quiet:true,frame:true,promptStart:true,allowAnyStart:true,stablePreLock:true});}catch(e){}
-      mode="ready";
-      gdShowMappedDropout();
-      return true;
-    }
-    mode="green";
-	    showHint("Tap twice: ball then green");
-	    setState("Manual: set green");
-	    toast(verifying?"Outcome logged":"Start set");
+	  const atomicPretendGps=opts.atomicPretendGps===true;
+	  const tryGreenFocus=typeof window.gdTryEnterGreenFocusFromPoint==="function"?window.gdTryEnterGreenFocusFromPoint:(typeof gdTryEnterGreenFocusFromPoint==="function"?gdTryEnterGreenFocusFromPoint:null);
+	  try{document.body.dataset.gdGreenGate="start:"+document.body.classList.contains("gdManualStartPlacementActive")+":"+typeof tryGreenFocus}catch(e){}
+	  if(!atomicPretendGps&&opts.allowGreenFocus!==false&&document.body.classList.contains("gdManualStartPlacementActive")&&typeof tryGreenFocus==="function"){
+	    try{
+	      if(tryGreenFocus(ll,opts.source||"tap-where-standing",{allowPrompt:true,hasShotToLog:opts.hasShotToLog===true})){try{document.body.dataset.gdGreenGate="entered"}catch(e){};return true;}
+	    }catch(e){try{document.body.dataset.gdGreenGateError=String(e&&e.message||e)}catch(_e){}}
+	  }
+	  const verifying=!atomicPretendGps&&!!window.gdPendingManualShotVerification;
+	  const mappedCourseAssist=(()=>{try{return typeof window.gdMappedCourseAssistEnabled==="function"&&window.gdMappedCourseAssistEnabled()}catch(e){return document.body.classList.contains("gdMappedCourseMode")}})();
+	  if(!mappedCourseAssist)clearMapRotation();
+	  const previousPlacement=typeof gdShotStateSnapshot==="function"?gdShotStateSnapshot("before-place-start"):null;
+	  const placementHole=(()=>{try{return Number(currentPlayingHole||selectedHole||1)||1}catch(e){return 1}})();
+	  clearStaleTargetWhileSettingStart();
+	  document.getElementById("shotTile")?.classList.remove("visible");
+	  undoStack.push({type:"placeStart",previous:previousPlacement,mappedAutoLock:!!mappedCourseAssist,hole:placementHole,point:typeof gdUndoPlainLatLng==="function"?gdUndoPlainLatLng(ll):null});
+	  if(atomicPretendGps){
+	    window.gdPendingManualShotVerification=false;
+	    window.gdPendingManualShotVerificationReason="";
+	  }
+	  setStart(ll,false);
+	  if(!atomicPretendGps)gdRememberTwoTapPlacement(ll);
+	  try{document.body.classList.remove("gdManualStartPlacementActive")}catch(e){}
+	  let mappedLocked=false;
+	  if(mappedCourseAssist)try{
+	    if(typeof window.gdLockMappedGreenFromStart==="function")mappedLocked=!!window.gdLockMappedGreenFromStart(ll,opts.lockSource||"manual-start");
+	  }catch(e){}
+	  if(mappedLocked){
+	    hideHint();
+	    setState("Hole "+((typeof currentPlayingHole!=="undefined"&&currentPlayingHole)||(typeof selectedHole!=="undefined"&&selectedHole)||""));
+	    toast(atomicPretendGps?"Position set":(verifying?"Outcome logged":"Start set"));
 	    return true;
+	  }
+	  if(atomicPretendGps){
+	    mode="ready";
+	    hideHint();
+	    setState(mappedCourseAssist?"Position set · mapped green unavailable":"Position set");
+	    toast("Position set");
+	    return true;
+	  }
+	  if(mappedCourseAssist){
+	    try{if(typeof window.gdFocusMappedHoleOrSavedGreen==="function")window.gdFocusMappedHoleOrSavedGreen((typeof currentPlayingHole!=="undefined"&&currentPlayingHole)||(typeof selectedHole!=="undefined"&&selectedHole)||1,{quiet:true,frame:true,promptStart:true,allowAnyStart:true,stablePreLock:true});}catch(e){}
+	    mode="ready";
+	    gdShowMappedDropout();
+	    return true;
+	  }
+	  mode="green";
+	  showHint("Tap twice: ball then green");
+	  setState("Manual: set green");
+	  toast(verifying?"Outcome logged":"Start set");
+	  return true;
 	}
 	function gdCompleteTwoTapPlacement(ll){
 	  if(!ll)return false;
@@ -15909,7 +15921,7 @@ function setStart(ll,saveUndo){
   if(!startMarker)startMarker=L.marker(start,{icon:startIcon,interactive:false}).addTo(map);else startMarker.setLatLng(start);
   try{if(window.gdPendingManualShotVerification&&typeof gdCompleteManualShotVerification==="function")gdCompleteManualShotVerification(ll);}catch(e){}
 }
-function setGreenTarget(ll,lock){try{if(window.gdClearWandLive)window.gdClearWandLive();}catch(e){}haptic(16);targetDragging=false;shotLineAligned=false;currentShotLogged=false;gdCurrentPlannedShotId=null;window.gdPendingManualShotVerification=false;
+function setGreenTarget(ll,lock){try{if(window.gdClearWandLive)window.gdClearWandLive();}catch(e){}haptic(16);targetDragging=false;shotLineAligned=false;currentShotLogged=false;gdCurrentPlannedShotId=null;gdCurrentShotTransactionId=null;window.gdPendingManualShotVerification=false;
   if(pinDirectionLine){map.removeLayer(pinDirectionLine);pinDirectionLine=null;}
   undoStack.push({type:"lockIn",prevGreen:greenCentre,prevTarget:target,prevMode:mode});greenCentre=ll;target=gdTargetForGreenCentre(ll);if(gdHasWindVector())gdSyncWindLandingFromAim();else gdWindLandingTarget=null;if(!greenMarker)greenMarker=L.circleMarker(greenCentre,{radius:8,color:"#1fd36d",weight:2,opacity:.82,fillColor:"#1fd36d",fillOpacity:.08,interactive:false}).addTo(map);else greenMarker.setLatLng(greenCentre);if(!targetMarker)createTargetMarker(target);else targetMarker.setLatLng(gdShotDisplayTarget()||target);mode="aim";document.getElementById("shotTile").classList.add("visible");setState(gdIsLayupTarget(greenCentre,target)?"Layup · move shot target":"Aim");renderShot();if(lock){
     if(lockedFrame && target && start){
@@ -17317,9 +17329,14 @@ function gdRefreshCourseDataSurfaces(){
 function gdDiscardCurrentPlannedShot(){
   try{
     const shotId=gdCurrentPlannedShotId;
+    const transactionId=gdCurrentShotTransactionId;
     const api=window.GolfDaddyShotEvents||window.GolfDaddy?.modules?.shotEvents;
-    if(api&&typeof api.clearPendingShot==="function"){
-      api.clearPendingShot();
+    if(api&&typeof api.clearPendingShot==="function"&&(shotId||transactionId)){
+      api.clearPendingShot({
+        shotId,
+        transactionId,
+        reason:"gps_plan_discarded"
+      });
       return;
     }
     if(!shotId)return;
@@ -17338,30 +17355,44 @@ function gdDiscardCurrentPlannedShot(){
   }catch(e){
     console.warn("[GolfDaddy] planned shot discard skipped",e);
   }finally{
-    gdCurrentPlannedShotId=null;
+    gdCurrentPlannedShotId=null;gdCurrentShotTransactionId=null;
     currentShotLogged=false;
+    try{
+      if(document.body?.dataset){
+        document.body.dataset.gdShotEndArmed="0";
+        delete document.body.dataset.gdActiveShotTransactionId;
+      }
+    }catch(e){}
     gdRefreshCourseDataSurfaces();
   }
 }
 function gdMarkCurrentPlanDirty(){
-  if(gdCurrentPlannedShotId)gdDiscardCurrentPlannedShot();
+  if(gdCurrentPlannedShotId||gdCurrentShotTransactionId)gdDiscardCurrentPlannedShot();
   currentShotLogged=false;
 }
 function gdCaptureCurrentPlannedShot(reason="lock-in"){
   if(typeof gdTournamentModeEnabled==="function"&&gdTournamentModeEnabled())return null;
   try{
     if(!start||!target)return null;
-    if(currentShotLogged&&gdCurrentPlannedShotId)return gdCurrentPlannedShotId;
+    if(currentShotLogged&&gdCurrentPlannedShotId&&gdCurrentShotTransactionId)return gdCurrentPlannedShotId;
     const d=map.distance(start,target);
     const shot=calculateShot(d);
     const payload=getGpsBubblePayload(d);
     const clubLabel=payload.club||shot.club||"GPS";
-	    const planned=gdCaptureShotStatsFromGps(d,payload,clubLabel,reason);
-    if(planned&&planned.shotId){
+    const planned=gdCaptureShotStatsFromGps(d,payload,clubLabel,reason);
+    if(planned&&planned.shotId&&planned.transactionId){
       gdCurrentPlannedShotId=planned.shotId;
+      gdCurrentShotTransactionId=planned.transactionId;
       currentShotLogged=true;
-      try{planned.captureReason=reason;}catch(e){}
+      try{
+        planned.captureReason=reason;
+        if(document.body?.dataset){
+          document.body.dataset.gdShotEndArmed="1";
+          document.body.dataset.gdActiveShotTransactionId=String(planned.transactionId);
+        }
+      }catch(e){}
       gdRefreshCourseDataSurfaces();
+      try{gdSyncNewShotButtonState();}catch(e){}
       return planned.shotId;
     }
   }catch(e){
@@ -17369,84 +17400,88 @@ function gdCaptureCurrentPlannedShot(reason="lock-in"){
   }
   return null;
 }
+function gdCourseOutcomeSaved(logged){
+  return !!(logged&&logged.saved===true&&logged.outcome&&logged.event&&logged.transactionId);
+}
+function gdCloseActiveCourseShotTransaction(logged){
+  if(!gdCourseOutcomeSaved(logged))return false;
+  const closedShotId=String(logged.shotId||logged.shot?.shotId||"");
+  const closedTransactionId=String(logged.transactionId||logged.shot?.transactionId||"");
+  gdCurrentPlannedShotId=null;gdCurrentShotTransactionId=null;
+  currentShotLogged=false;
+  window.gdPendingManualShotVerification=false;
+  window.gdPendingManualShotVerificationReason="";
+  window.__gdLastConsumedCourseShot={
+    shotId:closedShotId||null,
+    transactionId:closedTransactionId||null,
+    consumedAt:new Date().toISOString()
+  };
+  try{
+    if(document.body?.dataset){
+      document.body.dataset.gdShotEndArmed="0";
+      delete document.body.dataset.gdActiveShotTransactionId;
+      document.body.dataset.gdLastConsumedShotTransactionId=closedTransactionId;
+    }
+  }catch(e){}
+  try{
+    const shotEndButton=document.getElementById("gdV62LogShotBtn");
+    if(shotEndButton){
+      shotEndButton.disabled=true;
+      shotEndButton.classList.add("disabled");
+      shotEndButton.setAttribute("aria-disabled","true");
+      shotEndButton.title="Lock in a shot first";
+    }
+  }catch(e){}
+  try{gdSyncNewShotButtonState();}catch(e){}
+  return true;
+}
 function gdShotEventsApi(){
   const existing=window.GolfDaddyShotEvents||window.GolfDaddy?.modules?.shotEvents;
-  if(existing&&typeof existing.logBallPosition==="function")return existing;
-  const key="gd_shot_events_v1";
+  if(existing&&typeof existing.logOutcomeForPending==="function")return existing;
   const root=window.GolfDaddy=window.GolfDaddy||{};
   root.modules=root.modules||{};
-  const read=()=>{
-    try{return JSON.parse(localStorage.getItem(key)||"null")||{version:1,ballEvents:[],plannedShots:[],outcomes:[]};}
-    catch(e){return {version:1,ballEvents:[],plannedShots:[],outcomes:[]};}
-  };
-  const write=store=>{
-    store.ballEvents=Array.isArray(store.ballEvents)?store.ballEvents:[];
-    store.plannedShots=Array.isArray(store.plannedShots)?store.plannedShots:[];
-    store.outcomes=Array.isArray(store.outcomes)?store.outcomes:[];
-    store.updatedAt=new Date().toISOString();
-    try{localStorage.setItem(key,JSON.stringify(store));}catch(e){}
-    return store;
-  };
-  const api={
-    storageKey:key,
-    getStore:read,
-    listBallEvents:()=>read().ballEvents.slice(),
-    listPlannedShots:()=>read().plannedShots.slice(),
-    listOutcomes:()=>read().outcomes.slice(),
+  const unavailable={
+    storageKey:"gd_shot_events_v1",
+    getStore:()=>({version:1,pairingVersion:2,ballEvents:[],plannedShots:[],outcomes:[]}),
+    getScopedStore:()=>({version:1,pairingVersion:2,ballEvents:[],plannedShots:[],outcomes:[]}),
+    listBallEvents:()=>[],
+    listPlannedShots:()=>[],
+    listOutcomes:()=>[],
+    getPendingShot:()=>null,
+    clearPendingShot:()=>[],
     pairPendingShots:()=>[],
-    logBallPosition(input){
-      const store=read();
-      const event={
-        eventId:"bpe-"+Date.now().toString(36)+"-"+Math.random().toString(36).slice(2,8),
-        roundId:input?.roundId||gdStatsRoundId(),
-        holeId:input?.holeId||gdStatsHoleId(),
-        source:input?.source||"at_my_ball_button",
-        timestamp:input?.timestamp||new Date().toISOString(),
-        lat:Number(input?.lat),
-        lng:Number(input?.lng),
-        gpsAccuracyM:Number.isFinite(Number(input?.gpsAccuracyM))?Number(input.gpsAccuracyM):null,
-        motionContext:input?.motionContext||"outcome_log_button",
-        courseContext:input?.courseContext||"gps_course",
-        confidence:input?.confidence||"high",
-        mergedEventIds:[]
-      };
-      if(!Number.isFinite(event.lat)||!Number.isFinite(event.lng))throw new Error("Shot event needs a point");
-      store.ballEvents=Array.isArray(store.ballEvents)?store.ballEvents:[];
-      store.ballEvents.push(event);
-      write(store);
-      return {event,merged:false};
-    }
+    logBallPosition:()=>({saved:false,rejected:true,rejectedReason:"shot_events_unavailable"}),
+    logOutcomeForPending:()=>({saved:false,rejected:true,rejectedReason:"shot_events_unavailable"})
   };
-  root.modules.shotEvents=api;
-  window.GolfDaddyShotEvents=api;
-  window.ClarityCaddieShotEvents=api;
-  return api;
+  root.modules.shotEvents=unavailable;
+  window.GolfDaddyShotEvents=unavailable;
+  window.ClarityCaddieShotEvents=unavailable;
+  return unavailable;
 }
 function gdLogBallPositionForTracking(ll,reason="next_shot_button",gpsAccuracyM=null){
   if(typeof gdTournamentModeEnabled==="function"&&gdTournamentModeEnabled())return null;
   try{
     const stats=gdShotEventsApi();
-    if(!stats||!ll)return null;
-    const source=String(reason||"").includes("shake")?"phone_shake":"at_my_ball_button";
-    if(typeof stats.logOutcomeForPending==="function"){
-      const logged=stats.logOutcomeForPending({
-        roundId:gdStatsRoundId(),
-        holeId:gdStatsHoleId(),
-        source,
-        lat:ll.lat,
-        lng:ll.lng,
-        gpsAccuracyM:Number.isFinite(Number(gpsAccuracyM))?Number(gpsAccuracyM):null,
-        motionContext:reason,
-        courseContext:"gps_course",
-        confidence:source==="phone_shake"?"medium":"high"
-      });
-      gdRefreshCourseDataSurfaces();
-      return logged;
+    if(!stats||!ll||typeof stats.getPendingShot!=="function"||typeof stats.logOutcomeForPending!=="function"){
+      return {saved:false,rejected:true,rejectedReason:"shot_events_unavailable"};
     }
-    const result=stats.logBallPosition({
-      roundId:gdStatsRoundId(),
-      holeId:gdStatsHoleId(),
+    const roundId=gdStatsRoundId();
+    const holeId=gdStatsHoleId();
+    const criteria={roundId,holeId};
+    if(gdCurrentPlannedShotId)criteria.shotId=gdCurrentPlannedShotId;
+    if(gdCurrentShotTransactionId)criteria.transactionId=gdCurrentShotTransactionId;
+    const pending=stats.getPendingShot(criteria);
+    if(!pending||!pending.shotId||!pending.transactionId){
+      return {saved:false,rejected:true,rejectedReason:"no_valid_held_shot",roundId,holeId};
+    }
+    const source=String(reason||"").includes("shake")?"phone_shake":"at_my_ball_button";
+    const logged=stats.logOutcomeForPending({
+      shotId:pending.shotId,
+      transactionId:pending.transactionId,
+      roundId,
+      holeId,
       source,
+      eventType:source,
       lat:ll.lat,
       lng:ll.lng,
       gpsAccuracyM:Number.isFinite(Number(gpsAccuracyM))?Number(gpsAccuracyM):null,
@@ -17454,12 +17489,12 @@ function gdLogBallPositionForTracking(ll,reason="next_shot_button",gpsAccuracyM=
       courseContext:"gps_course",
       confidence:source==="phone_shake"?"medium":"high"
     });
-    try{stats.pairPendingShots&&stats.pairPendingShots();}catch(e){}
+    if(gdCourseOutcomeSaved(logged))gdCloseActiveCourseShotTransaction(logged);
     gdRefreshCourseDataSurfaces();
-    return result;
+    return logged;
   }catch(e){
     console.warn("[GolfDaddy] ball position log failed",e);
-    return null;
+    return {saved:false,rejected:true,rejectedReason:"shot_end_error"};
   }
 }
 function gdClearShotForNextStart(nextStart){
@@ -17474,7 +17509,7 @@ function gdClearShotForNextStart(nextStart){
   lockedFrame=false;
   targetWasMoved=false;
   currentShotLogged=false;
-  gdCurrentPlannedShotId=null;
+  gdCurrentPlannedShotId=null;gdCurrentShotTransactionId=null;
   targetDragging=false;
   undoStack=[];
   if(nextStart){
@@ -17494,18 +17529,31 @@ function gdClearShotForNextStart(nextStart){
 function gdPendingCourseShot(){
   try{
     const api=window.GolfDaddyShotEvents||window.GolfDaddy?.modules?.shotEvents;
-    return api&&typeof api.getPendingShot==="function"?api.getPendingShot():null;
+    if(!api||typeof api.getPendingShot!=="function")return null;
+    const criteria={roundId:gdStatsRoundId(),holeId:gdStatsHoleId()};
+    if(gdCurrentPlannedShotId)criteria.shotId=gdCurrentPlannedShotId;
+    if(gdCurrentShotTransactionId)criteria.transactionId=gdCurrentShotTransactionId;
+    const pending=api.getPendingShot(criteria);
+    if(pending&&pending.shotId&&pending.transactionId){
+      gdCurrentPlannedShotId=pending.shotId;
+      gdCurrentShotTransactionId=pending.transactionId;
+      currentShotLogged=true;
+      return pending;
+    }
+    return null;
   }catch(e){
     return null;
   }
 }
 function gdOutcomeLogMessage(logged){
-  if(!logged)return "No locked shot to log";
-  const reason=String(logged.excludedReason||logged.outcome?.excludedReason||"");
-  if(logged.excluded||logged.outcome?.excluded){
-    if(reason==="weak_gps")return "Shot saved but not counted: GPS was weak";
-    if(reason==="stale_outcome")return "Shot saved but not counted: too much time passed";
-    return "Shot saved but not counted";
+  if(!gdCourseOutcomeSaved(logged)){
+    const reason=String(logged?.rejectedReason||logged?.reason||"");
+    if(reason==="weak_gps")return "Shot not saved: GPS was too weak";
+    if(reason==="stale_outcome")return "Shot not saved: the held shot expired";
+    if(reason==="low_confidence"||reason==="low_pair_confidence")return "Shot not saved: endpoint confidence was too low";
+    if(reason==="hole_mismatch"||reason==="round_mismatch")return "Shot not saved: course position changed";
+    if(reason==="endpoint_reused"||reason==="transaction_consumed")return "Shot already saved";
+    return "No valid held shot to save";
   }
   return "Outcome logged";
 }
@@ -17558,12 +17606,9 @@ function gdMaybeAutoNextShotFromGps(here,accuracyM){
 function gdGpsNewShot(reason="next_shot_button"){
   if(document.body.classList.contains("gdGreenArrivalMode"))return gdFinishActiveGreenFocus(reason||"shot_end_green_focus");
   const pending=gdPendingCourseShot();
-  if(!pending&&!target){
+  if(!pending){
     toast("Lock in a shot first");
     return false;
-  }
-  if(target){
-    if(!currentShotLogged||!gdCurrentPlannedShotId)gdCaptureCurrentPlannedShot("next-shot");
   }
   const manualMode=typeof gdGpsPlayMode==="function"&&gdGpsPlayMode()!=="live";
   if(manualMode||!navigator.geolocation){
@@ -17586,7 +17631,7 @@ function gdSyncNewShotButtonState(){
   if(!unlockBtn&&!logBtn)return;
   const pending=!!window.gdPendingManualShotVerification;
   const greenFocusActive=!!document.body.classList.contains("gdGreenArrivalMode");
-  const hasLockedShot=greenFocusActive||!!(gdPendingCourseShot()||target);
+  const hasLockedShot=!!gdPendingCourseShot();
   const icon=`<svg class="gdLogShotIcon" viewBox="0 0 100 100" aria-hidden="true">
     <path class="gdShakeEcho faint" d="M25 25c-5 1-8 4-8 9l9 41c1 5 4 8 9 8h3"/>
     <path class="gdShakeEcho" d="M32 24c-5 1-8 4-8 9l5 42c1 5 4 8 9 8h4"/>
@@ -36610,7 +36655,7 @@ body.gps-active .gdHoleStepper:not(.hidden){
 	    safe(function(){if(typeof gdClearTargetArtifactsForFreshStart==="function")gdClearTargetArtifactsForFreshStart()});
 	    safe(function(){if(typeof clearShot==="function")clearShot()});
 	    safe(function(){if(typeof gdResetShotDistanceDisplay==="function")gdResetShotDistanceDisplay()});
-	    safe(function(){start=target=greenCentre=pin=null;mode="start";lockedFrame=false;targetWasMoved=false;targetDragging=false;currentShotLogged=false;gdCurrentPlannedShotId=null;gdWindLandingTarget=null});
+	    safe(function(){start=target=greenCentre=pin=null;mode="start";lockedFrame=false;targetWasMoved=false;targetDragging=false;currentShotLogged=false;gdCurrentPlannedShotId=null;gdCurrentShotTransactionId=null;gdWindLandingTarget=null});
 	    safe(function(){document.body.classList.remove("gdHeadToTeeFrameActive","gdLockStateFrameActive","gd-frame-hard-locked","gdGreenArrivalMode","gd-green-zoom-active","gdBubbleLongPressZoomActive","gdCapturedBubbleDragging")});
 	    safe(function(){var tile=document.getElementById("shotTile");if(tile)tile.classList.remove("visible")});
 	    safe(function(){if(typeof setState==="function")setState("Hole "+h)});
@@ -39761,6 +39806,10 @@ body.gps-active #shotTile .tileCarryValue span{
 
 	  function enterGreenFocus(opts){
 	    opts = opts || {};
+	    if(Date.now() < Number(window.__gdPretendGpsAtomicUntil || 0)){
+	      safe(function(){ document.body.dataset.gdGreenFocusAtomicBlock = String(opts.source || "green-focus"); });
+	      return false;
+	    }
 	    if(!gpsActive() || (document.body.classList.contains("gdMappedStartPromptActive") && !opts.allowPrompt)) return false;
 	    var green = greenFocusGreen();
 	    if(!green) return false;
@@ -39819,6 +39868,7 @@ body.gps-active #shotTile .tileCarryValue span{
   function maybeEnterGreenFocusFromGps(){
     if(!gpsActive() || document.body.classList.contains("gdGreenArrivalMode")) return false;
     if(document.body.classList.contains("gdMappedStartPromptActive")) return false;
+    if(!hasFreshRealGps()) return false;
     var gps = recentGpsPoint();
     if(!gps || !isNearGreenPoint(gps.ll)) return false;
     return enterGreenFocus({ source:"gps", point:gps.ll, accuracy:gps.accuracy, hasShotToLog:hasShotToLog() });
@@ -39831,6 +39881,13 @@ body.gps-active #shotTile .tileCarryValue span{
     safe(function(){ document.body.dataset.gdGreenFocusInstaller = "installed"; });
     document.addEventListener("click", function(event){
       safe(function(){ document.body.dataset.gdGreenFocusClick = "seen"; });
+      if(Date.now() < Number(window.__gdPretendGpsAtomicUntil || 0)){
+        event.preventDefault();
+        event.stopPropagation();
+        if(event.stopImmediatePropagation) event.stopImmediatePropagation();
+        safe(function(){ document.body.dataset.gdGreenFocusClick = "blocked-pretend-gps"; });
+        return;
+      }
       if(!gpsActive() || document.body.classList.contains("gdGreenArrivalMode")){ safe(function(){ document.body.dataset.gdGreenFocusClick = "blocked-state"; }); return; }
       if(document.body.classList.contains("gdMappedStartPromptActive")){ safe(function(){ document.body.dataset.gdGreenFocusClick = "blocked-prompt"; }); return; }
       var blocked = event.target && event.target.closest && event.target.closest("button,a,input,select,textarea,.rightRail,#gdV62UndoDock,#shotTile,#hint,.panel,.modulePanel");
@@ -39891,7 +39948,7 @@ body.gps-active #shotTile .tileCarryValue span{
       startMarker=targetMarker=greenMarker=pinMarker=pinDirectionLine=greenOutline=greenSoft=greenLabel=frontLabel=backLabel=null;
     });
     safe(function(){ start=target=greenCentre=pin=null; });
-    safe(function(){ currentShotLogged=false; gdCurrentPlannedShotId=null; targetWasMoved=false; gdWindLandingTarget=null; });
+    safe(function(){ currentShotLogged=false; gdCurrentPlannedShotId=null;gdCurrentShotTransactionId=null; targetWasMoved=false; gdWindLandingTarget=null; });
     safe(function(){ lockedFrame=false; });
     safe(function(){
       var tile = document.getElementById("shotTile");
@@ -40106,7 +40163,7 @@ body.gps-active #shotTile .tileCarryValue span{
 
   function hasShotToLog(){
     return !!safe(function(){
-      return (typeof gdPendingCourseShot === "function" && gdPendingCourseShot()) || target || gdCurrentPlannedShotId;
+      return typeof gdPendingCourseShot === "function" && gdPendingCourseShot();
     }, false);
   }
 
@@ -40135,11 +40192,6 @@ body.gps-active #shotTile .tileCarryValue span{
   function logPointOnly(ll, reason, accuracy){
     if(!ll) return null;
     resetPendingManualFlow();
-    safe(function(){
-      if(target && (!currentShotLogged || !gdCurrentPlannedShotId) && typeof gdCaptureCurrentPlannedShot === "function"){
-        gdCaptureCurrentPlannedShot(reason || "shot-end");
-      }
-    });
     var logged = safe(function(){
       return typeof gdLogBallPositionForTracking === "function"
         ? gdLogBallPositionForTracking(ll, reason || "shot_end_gps", accuracy)
@@ -40152,6 +40204,10 @@ body.gps-active #shotTile .tileCarryValue span{
 	  function quickShotEnd(reason){
 	    if(!gpsActive()) return false;
 	    resetPendingManualFlow();
+	    if(!hasShotToLog()){
+	      toastSafe("Lock in a shot first");
+	      return false;
+	    }
 	    var greenFocusActive = document.body.classList.contains("gdGreenArrivalMode");
 	    hapticSafe(reason === "phone_shake" ? 28 : 12);
 	    if(greenFocusActive){
@@ -40160,7 +40216,11 @@ body.gps-active #shotTile .tileCarryValue span{
 	        toastSafe("Place ball first");
 	        return false;
 	      }
-	      var loggedGreen = greenFocusHadShotToLog ? logPointOnly(outcome, reason || "shot_end_green_focus", greenFocusOutcomeAccuracy) : null;
+	      var loggedGreen = logPointOnly(outcome, reason || "shot_end_green_focus", greenFocusOutcomeAccuracy);
+	      if(!gdCourseOutcomeSaved(loggedGreen)){
+	        toastSafe(gdOutcomeLogMessage(loggedGreen));
+	        return false;
+	      }
 	      toastSafe("Logged");
 	      return finishGreenFocusShotEnd(loggedGreen);
 	    }
@@ -40171,20 +40231,15 @@ body.gps-active #shotTile .tileCarryValue span{
     }, null);
     if(fix){
       if(isNearGreenPoint(fix)){
-        enterGreenFocus({ source:reason || "shot_end_button", point:fix, accuracy:safe(function(){ return window.gdGpsState.lastFix.accuracy; }, null), hasShotToLog:hasShotToLog() });
+        enterGreenFocus({ source:reason || "shot_end_button", point:fix, accuracy:safe(function(){ return window.gdGpsState.lastFix.accuracy; }, null), hasShotToLog:true });
         if(document.body.classList.contains("gdGreenArrivalMode")) return false;
       }
-      if(!hasShotToLog()){
-        toastSafe("Lock in a shot first");
+      var logged = logPointOnly(fix, reason || "shot_end_gps", safe(function(){ return window.gdGpsState.lastFix.accuracy; }, null));
+      if(!gdCourseOutcomeSaved(logged)){
+        toastSafe(gdOutcomeLogMessage(logged));
         return false;
       }
-      var logged = logPointOnly(fix, reason || "shot_end_gps", safe(function(){ return window.gdGpsState.lastFix.accuracy; }, null));
-      if(greenFocusActive) return finishGreenFocusShotEnd(logged);
       toastSafe("Logged");
-      return false;
-    }
-    if(!hasShotToLog()){
-      toastSafe("Lock in a shot first");
       return false;
     }
     if(!navigator.geolocation){
@@ -40194,15 +40249,15 @@ body.gps-active #shotTile .tileCarryValue span{
     navigator.geolocation.getCurrentPosition(function(pos){
       var here = L.latLng(pos.coords.latitude, pos.coords.longitude);
       if(!greenFocusActive && isNearGreenPoint(here)){
-        enterGreenFocus({ source:reason || "shot_end_button", point:here, accuracy:pos.coords.accuracy, hasShotToLog:hasShotToLog() });
+        enterGreenFocus({ source:reason || "shot_end_button", point:here, accuracy:pos.coords.accuracy, hasShotToLog:true });
         if(document.body.classList.contains("gdGreenArrivalMode")) return;
       }
       var logged = logPointOnly(here, reason || "shot_end_gps", pos.coords.accuracy);
-      hapticSafe(16);
-      if(greenFocusActive){
-        finishGreenFocusShotEnd(logged);
+      if(!gdCourseOutcomeSaved(logged)){
+        toastSafe(gdOutcomeLogMessage(logged));
         return;
       }
+      hapticSafe(16);
       toastSafe("Logged");
       safe(function(){ if(typeof window.gdSyncNewShotButtonState === "function") window.gdSyncNewShotButtonState(); });
     }, function(){
@@ -40316,7 +40371,7 @@ body.gps-active #shotTile .tileCarryValue span{
 	      targetMarker=greenMarker=pinMarker=pinDirectionLine=greenOutline=greenSoft=greenLabel=frontLabel=backLabel=null;
 	    });
 	    safe(function(){ target=greenCentre=pin=null; });
-	    safe(function(){ greenPolygon=null; gdWindLandingTarget=null; targetWasMoved=false; currentShotLogged=false; gdCurrentPlannedShotId=null; targetDragging=false; });
+	    safe(function(){ greenPolygon=null; gdWindLandingTarget=null; targetWasMoved=false; currentShotLogged=false; gdCurrentPlannedShotId=null;gdCurrentShotTransactionId=null; targetDragging=false; });
 	    safe(function(){ document.getElementById("shotTile") && document.getElementById("shotTile").classList.remove("visible"); });
 	  }
 
@@ -40483,15 +40538,17 @@ body.gps-active #shotTile .tileCarryValue span{
   function bindShotEndButton(){
     var btn = document.getElementById("gdV62LogShotBtn");
     if(!btn) return;
-    btn.classList.remove("disabled");
-    btn.setAttribute("aria-disabled", "false");
+    var armed = hasShotToLog();
+    btn.classList.toggle("disabled", !armed);
+    btn.setAttribute("aria-disabled", armed ? "false" : "true");
+    btn.disabled = !armed;
     btn.innerHTML = shotEndIconMarkup() + '<span class="gdLogShotText gdShotEndText">Shot End</span>';
-    btn.title = hasShotToLog() ? "Tap to log GPS. Long press to place manually." : "Lock in a shot first";
+    btn.title = armed ? "Tap to log GPS. Long press to place manually." : "Lock in a shot first";
     btn.setAttribute("aria-label", btn.title);
     if(btn.__gdShotEndCaptureBound) return;
     btn.__gdShotEndCaptureBound = true;
     btn.addEventListener("pointerdown", function(event){
-      if(!gpsActive()) return;
+      if(!gpsActive() || !hasShotToLog()) return;
       shotEndLongPressed = false;
       clearTimeout(shotEndPressTimer);
       shotEndPressTimer = setTimeout(function(){
@@ -40511,6 +40568,10 @@ body.gps-active #shotTile .tileCarryValue span{
       if(event.stopImmediatePropagation) event.stopImmediatePropagation();
       if(shotEndLongPressed){
         shotEndLongPressed = false;
+        return false;
+      }
+      if(!hasShotToLog()){
+        toastSafe("Lock in a shot first");
         return false;
       }
       return quickShotEnd("shot_end_button");
@@ -41354,6 +41415,9 @@ body:has(#courseScreen:not(.hidden)) .leaflet-marker-icon{display:none!important
 	  var lastBackNavAt=0;
 	  var capturedGreenZoomActive=false;
 	  var gpsSurfaceRestoreBusy=false;
+  var PRETEND_GPS_ATOMIC_MS=1600;
+  var pretendGpsAtomicUntil=0;
+  var pretendGpsSuppressFollowOn=false;
   var oldEnter=window.enterGpsModule;
 	  var oldHome=window.gdCanonicalShellHome||window.showShellHome;
 	  var oldBack=window.gdCanonicalShellBack||window.shellBack;
@@ -41413,6 +41477,45 @@ body:has(#courseScreen:not(.hidden)) .leaflet-marker-icon{display:none!important
     var p=point(value);
     if(!p)return null;
     return safe(function(){return L.latLng(p.lat,p.lng)},p);
+  }
+  function pretendGpsSurfaceEvent(event){
+    if(!event)return false;
+    var mapEl=safe(function(){return map&&map.getContainer?map.getContainer():byId("map")},null);
+    if(!mapEl)return false;
+    var frameEl=byId("gdHoleImageCameraLayer");
+    if(event.target&&((mapEl.contains(event.target))||(frameEl&&frameEl.contains(event.target))))return true;
+    var x=Number(event.clientX),y=Number(event.clientY);
+    if(!Number.isFinite(x)||!Number.isFinite(y))return false;
+    var rect=mapEl.getBoundingClientRect();
+    return x>=rect.left&&x<=rect.right&&y>=rect.top&&y<=rect.bottom;
+  }
+  function armPretendGpsAtomicGuard(value){
+    var p=point(value);
+    pretendGpsAtomicUntil=Date.now()+PRETEND_GPS_ATOMIC_MS;
+    pretendGpsSuppressFollowOn=true;
+    window.__gdPretendGpsAtomicUntil=pretendGpsAtomicUntil;
+    window.__gdPretendGpsAtomicPoint=p;
+    window.__gdPretendGpsAtomicGesture={state:"armed",at:Date.now(),until:pretendGpsAtomicUntil,point:p};
+    safe(function(){gdMapPlacementPointer=null});
+    safe(function(){if(typeof gdSuppressMapPlacementClick==="function")gdSuppressMapPlacementClick(PRETEND_GPS_ATOMIC_MS)});
+    safe(function(){gdMapPlacementSuppressClickUntil=Math.max(gdMapPlacementSuppressClickUntil||0,pretendGpsAtomicUntil)});
+    safe(function(){
+      if(document.body&&document.body.dataset){
+        document.body.dataset.gdPretendGpsAtomic="armed";
+        document.body.dataset.gdPretendGpsAtomicUntil=String(pretendGpsAtomicUntil);
+      }
+    });
+    return pretendGpsAtomicUntil;
+  }
+  function consumePretendGpsFollowOn(event){
+    if(!pretendGpsSuppressFollowOn||Date.now()>=pretendGpsAtomicUntil)return false;
+    if(!pretendGpsSurfaceEvent(event))return false;
+    stop(event);
+    safe(function(){
+      window.__gdPretendGpsAtomicGesture={state:"consumed",at:Date.now(),until:pretendGpsAtomicUntil,point:window.__gdPretendGpsAtomicPoint||null,eventType:event&&event.type||"click"};
+      if(document.body&&document.body.dataset)document.body.dataset.gdPretendGpsAtomic="consumed:"+(event&&event.type||"click");
+    });
+    return true;
   }
   function course(){
     var c=safe(function(){return currentCourse},null)||safe(function(){return window.currentCourse},null)||safe(function(){return window.gdActiveCourse},null);
@@ -41815,7 +41918,7 @@ body:has(#courseScreen:not(.hidden)) .leaflet-marker-icon{display:none!important
     safe(function(){if(typeof setBubbleOnlyLock==="function")setBubbleOnlyLock(false)});
 	    safe(function(){lockedFrame=false});
 	    safe(function(){mode="start"});
-	    var hadActiveShot=safe(function(){return !!(target||gdCurrentPlannedShotId||(typeof gdPendingCourseShot==="function"&&gdPendingCourseShot()))},false);
+	    var hadActiveShot=safe(function(){return !!(typeof gdPendingCourseShot==="function"&&gdPendingCourseShot())},false);
 	    var greenFocusHint=safe(function(){return typeof greenFocusGreen==="function"?greenFocusGreen():null},null);
 	    window.__gdManualStartHadShotToLog=hadActiveShot;
 	    safe(function(){if(typeof window.gdClearCapturedHoleFrameShotOverlay==="function")window.gdClearCapturedHoleFrameShotOverlay()});
@@ -41944,30 +42047,30 @@ body:has(#courseScreen:not(.hidden)) .leaflet-marker-icon{display:none!important
     if(!mapEl||!event.target||!mapEl.contains(event.target)){safe(function(){document.body.dataset.gdStandingPointComplete="blocked-surface"});return false;}
     var blocked=event.target.closest&&event.target.closest("button,a,input,select,textarea,.rightRail,#gdV62UndoDock,#shotTile,#hint,.panel,.modulePanel");
     if(blocked){safe(function(){document.body.dataset.gdStandingPointComplete="blocked-control"});return false;}
-		    var ll=pointFromEvent(event);
-			    if(!ll){safe(function(){document.body.dataset.gdStandingPointComplete="blocked-point"});return false;}
-				    stop(event);
-				    rememberStandingPointAsGps(ll,"tap-where-standing");
-				    safe(function(){if(typeof gdSuppressMapPlacementClick==="function")gdSuppressMapPlacementClick(700)});
-				    safe(function(){document.body.dataset.gdStandingPointComplete="placing"});
-				    window.__gdManualStandingPlacementActiveUntil=Date.now()+2200;
-				    var manualGreen=springManualGreenPoint();
-				    var manualGreenDistance=safe(function(){return ll&&manualGreen&&map&&map.distance?map.distance(ll,manualGreen):null},null);
-				    var manualGreenRadius=safe(function(){return typeof gdGreenFocusRadiusM==="function"?gdGreenFocusRadiusM():46},46);
-				    safe(function(){document.body.dataset.gdGreenFocusManualDistance=Number.isFinite(Number(manualGreenDistance))?String(Math.round(Number(manualGreenDistance))):""});
-		    safe(function(){lockedFrame=false;mode="start";gdMapPlacementSuppressClickUntil=0});
+	    var ll=pointFromEvent(event);
+	    if(!ll){safe(function(){document.body.dataset.gdStandingPointComplete="blocked-point"});return false;}
+	    stop(event);
+	    armPretendGpsAtomicGuard(ll);
+	    rememberStandingPointAsGps(ll,"pretend-gps-position");
+	    safe(function(){document.body.dataset.gdStandingPointComplete="placing"});
+	    window.__gdManualStandingPlacementActiveUntil=pretendGpsAtomicUntil;
+	    safe(function(){lockedFrame=false;mode="start"});
 	    var placed=safe(function(){
-	      if(typeof gdCompleteStandingStartPlacement==="function")return gdCompleteStandingStartPlacement(ll,{source:"tap-where-standing",lockSource:"manual-start",hasShotToLog:window.__gdManualStartHadShotToLog===true});
-	      return typeof gdCompleteTwoTapPlacement==="function"&&gdCompleteTwoTapPlacement(ll);
+	      if(typeof gdCompleteStandingStartPlacement!=="function")return false;
+	      return gdCompleteStandingStartPlacement(ll,{source:"pretend-gps-position",lockSource:"pretend-gps-position",allowGreenFocus:false,hasShotToLog:false,atomicPretendGps:true});
 	    },false);
 	    if(placed&&document.body&&!document.body.classList.contains("gdGreenArrivalMode"))lockAfterManualStart();
 	    if(placed){
 	      manualStartArmedAt=0;
 	      window.__gdManualStartHadShotToLog=false;
-	      window.__gdManualStandingPlacementActiveUntil=0;
+	      window.__gdManualStandingPlacementActiveUntil=pretendGpsAtomicUntil;
+	      safe(function(){
+	        window.__gdPretendGpsAtomicGesture={state:"completed",at:Date.now(),until:pretendGpsAtomicUntil,point:point(ll),simulated:true};
+	        if(document.body&&document.body.dataset)document.body.dataset.gdPretendGpsAtomic="completed";
+	      });
 	    }
 	    return placed;
-	  }
+	}
   function startButton(event){return event.target&&event.target.closest&&event.target.closest("[data-gd-mapped-start-action='manual']")}
   function currentToolScreen(){return document.body&&document.body.dataset?document.body.dataset.gdToolScreen||"":""}
   function hiddenToolScreen(){var screen=currentToolScreen();return screen==="home"||screen==="module"||screen==="mapping"||document.body.classList.contains("gdCourseOpening")||pickerOpen()||homeOpen()||moduleOpen()}
@@ -42211,6 +42314,11 @@ body:has(#courseScreen:not(.hidden)) .leaflet-marker-icon{display:none!important
 	    completeStandingPointPlacement(event);
 	  }
 	  window.addEventListener("pointerup",manualPlacementSurfaceEnd,true);
+	  ["pointerdown","pointerup","touchstart","touchend","click","dblclick"].forEach(function(type){
+	    window.addEventListener(type,function(event){
+	      if(consumePretendGpsFollowOn(event))return false;
+	    },{capture:true,passive:false});
+	  });
 	  document.addEventListener("click",function(event){
 	    if(event.target&&event.target.closest&&event.target.closest("#shellHomeBtn")){if(Date.now()-lastHomeNavAt<650){stop(event);return false}lastHomeNavAt=Date.now();home(event);return false}
 	    if(event.target&&event.target.closest&&event.target.closest("#shellBackBtn")){if(Date.now()-lastBackNavAt<650){stop(event);return false}lastBackNavAt=Date.now();back(event);return false}
