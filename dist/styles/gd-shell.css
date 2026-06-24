@@ -47,12 +47,12 @@ body.gps-active #shellTop {
   pointer-events: none !important;
 }
 
-body.shell-gps #shellBackBtn,
-body.shell-gps #shellHomeBtn,
-body.gdGpsActive #shellBackBtn,
-body.gdGpsActive #shellHomeBtn,
-body.gps-active #shellBackBtn,
-body.gps-active #shellHomeBtn {
+body.shell-gps #shellTop #shellBackBtn,
+body.shell-gps #shellTop #shellHomeBtn,
+body.gdGpsActive #shellTop #shellBackBtn,
+body.gdGpsActive #shellTop #shellHomeBtn,
+body.gps-active #shellTop #shellBackBtn,
+body.gps-active #shellTop #shellHomeBtn {
   display: inline-flex !important;
   visibility: visible !important;
   opacity: 1 !important;
@@ -65,18 +65,18 @@ body.gps-active #shellHomeBtn {
   pointer-events: auto !important;
 }
 
-body.shell-gps #shellBackBtn::before,
-body.shell-gps #shellBackBtn::after,
-body.shell-gps #shellHomeBtn::before,
-body.shell-gps #shellHomeBtn::after,
-body.gdGpsActive #shellBackBtn::before,
-body.gdGpsActive #shellBackBtn::after,
-body.gdGpsActive #shellHomeBtn::before,
-body.gdGpsActive #shellHomeBtn::after,
-body.gps-active #shellBackBtn::before,
-body.gps-active #shellBackBtn::after,
-body.gps-active #shellHomeBtn::before,
-body.gps-active #shellHomeBtn::after {
+body.shell-gps #shellTop #shellBackBtn::before,
+body.shell-gps #shellTop #shellBackBtn::after,
+body.shell-gps #shellTop #shellHomeBtn::before,
+body.shell-gps #shellTop #shellHomeBtn::after,
+body.gdGpsActive #shellTop #shellBackBtn::before,
+body.gdGpsActive #shellTop #shellBackBtn::after,
+body.gdGpsActive #shellTop #shellHomeBtn::before,
+body.gdGpsActive #shellTop #shellHomeBtn::after,
+body.gps-active #shellTop #shellBackBtn::before,
+body.gps-active #shellTop #shellBackBtn::after,
+body.gps-active #shellTop #shellHomeBtn::before,
+body.gps-active #shellTop #shellHomeBtn::after {
   content: none !important;
   display: none !important;
 }
@@ -114,9 +114,9 @@ body.gps-active #shellHomeBtn::after {
   transform-origin:center;
 }
 
-/* Hole Frame nav hotfix: retire legacy top-centre hole switcher. */
-#gdNextHolePopout,
-.gdNextHolePopout {
+/* Hide the legacy top-centre hole switcher only when GPS is not in an active state. */
+body:not(.shell-gps):not(.gdGpsActive):not(.gps-active) #gdNextHolePopout,
+body:not(.shell-gps):not(.gdGpsActive):not(.gps-active) .gdNextHolePopout {
   display: none !important;
   visibility: hidden !important;
   pointer-events: none !important;
