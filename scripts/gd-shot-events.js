@@ -370,7 +370,6 @@
     var shotId = String(input.shotId || '').trim();
     var transactionId = String(input.transactionId || '').trim();
     var roundId = String(input.roundId || '').trim();
-    var holeId = input.holeId == null ? '' : String(input.holeId).trim();
 
     for (var i = store.plannedShots.length - 1; i >= 0; i -= 1) {
       var shot = store.plannedShots[i];
@@ -379,7 +378,6 @@
       if (shotId && shot.shotId !== shotId) continue;
       if (transactionId && shot.transactionId !== transactionId) continue;
       if (roundId && String(shot.roundId || '') !== roundId) continue;
-      if (holeId && String(shot.holeId || '') !== holeId) continue;
       return shot;
     }
     return null;
