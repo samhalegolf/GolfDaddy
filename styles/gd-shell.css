@@ -41,7 +41,15 @@
 body.shell-gps #shellTop,
 body.gdGpsActive #shellTop,
 body.gps-active #shellTop {
+  position: fixed !important;
+  left: max(12px, env(safe-area-inset-left)) !important;
+  right: max(12px, env(safe-area-inset-right)) !important;
+  top: max(10px, env(safe-area-inset-top)) !important;
+  z-index: 2800 !important;
   display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 10px !important;
   visibility: visible !important;
   opacity: 1 !important;
   pointer-events: none !important;
@@ -62,7 +70,11 @@ body.gps-active #shellTop #shellHomeBtn {
   padding: 9px 14px !important;
   font-size: 14px !important;
   color: #fff !important;
+  background: rgba(0,0,0,.58) !important;
+  border: 1px solid rgba(255,255,255,.22) !important;
+  box-shadow: 0 12px 28px rgba(0,0,0,.32), inset 0 1px 0 rgba(255,255,255,.12) !important;
   pointer-events: auto !important;
+  z-index: 2801 !important;
 }
 
 body.shell-gps #shellTop #shellBackBtn::before,
@@ -114,9 +126,15 @@ body.gps-active #shellTop #shellHomeBtn::after {
   transform-origin:center;
 }
 
-/* Hide the legacy top-centre hole switcher only when GPS is not in an active state. */
-body:not(.shell-gps):not(.gdGpsActive):not(.gps-active) #gdNextHolePopout,
-body:not(.shell-gps):not(.gdGpsActive):not(.gps-active) .gdNextHolePopout {
+/* GPS shell owns navigation. Retire the legacy top-centre hole switcher everywhere. */
+#gdNextHolePopout,
+.gdNextHolePopout,
+body.shell-gps #gdNextHolePopout,
+body.shell-gps .gdNextHolePopout,
+body.gdGpsActive #gdNextHolePopout,
+body.gdGpsActive .gdNextHolePopout,
+body.gps-active #gdNextHolePopout,
+body.gps-active .gdNextHolePopout {
   display: none !important;
   visibility: hidden !important;
   pointer-events: none !important;
