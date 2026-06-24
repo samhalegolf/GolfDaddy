@@ -1324,7 +1324,8 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
     .gdWindPickerCompass:before{width:1px;height:100%}
     .gdWindPickerCompass:after{width:100%;height:1px}
     .gdWindPickerLabel{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);padding:10px 14px;border-radius:999px;background:rgba(0,0,0,.44);border:1px solid rgba(255,255,255,.12);font-size:11px;font-weight:950;letter-spacing:.12em;text-transform:uppercase;color:rgba(255,255,255,.78);white-space:nowrap}
-    .gdWindAimDot{width:18px;height:18px;border-radius:50%;border:2px solid rgba(255,203,103,.96);background:rgba(255,203,103,.18);box-shadow:0 0 0 6px rgba(255,203,103,.08),0 7px 14px rgba(0,0,0,.35)}
+    .gdWindAimDot{width:12px;height:12px;border-radius:50%;border:1.5px solid rgba(255,203,103,.82);background:rgba(255,203,103,.16);box-shadow:0 0 0 4px rgba(255,203,103,.055),0 5px 10px rgba(0,0,0,.24)}
+    .gdWindLandingDot{width:10px;height:10px;border-radius:50%;border:1.5px solid rgba(102,220,255,.68);background:rgba(102,220,255,.12);box-shadow:0 0 0 4px rgba(102,220,255,.045),0 5px 10px rgba(0,0,0,.2)}
     .toolIcon{width:31px;height:31px;display:block}
     .greenBtn{background:#1fd36d!important;color:#071008!important}
     .greenBtn .scanLine{opacity:.48}
@@ -13563,7 +13564,7 @@ let startMarker=null,targetMarker=null,greenMarker=null,pinMarker=null;
 let aimLine=null,gdAimLineRenderKey="",aimPixelGlows=[],pinLine=null,pinLabel=null,remainingGreenLine=null,remainingGreenLabel=null,middleGuideLine=null,middleGuideLabel=null,bubbleOuter=null,bubbleMain=null,bubbleCore=null,bubbleMiss=null,bubbleShadow=null,bubbleShade=null,bubbleCarryLine=null,gdFocusMasks=[],bubbleTexture=[];
 let gdPreLockReferenceLayers=[],gdPreLockFocusMasks=[],gdLayupReferenceLayers=[];
 let gdFocusFrameStart=null,gdFocusFrameTarget=null;
-let gdWindEffectLine=null,gdWindAimMarker=null;
+let gdWindEffectLine=null,gdWindAimMarker=null,gdWindLandingMarker=null;
 let greenOutline=null,greenSoft=null,greenLabel=null,frontLabel=null,backLabel=null,greenPolygon=null;
 let targetDragging=false;
 let lockedFrame=false, targetWasMoved=false, undoStack=[], currentCourse=null, gdCurrentPlannedShotId=null, gdCurrentShotTransactionId=null;
@@ -14406,16 +14407,17 @@ function gdSetTargetFromDisplayedLanding(ll){
   }
 }
 function gdClearWindVisuals(){
-  [gdWindEffectLine,gdWindAimMarker].forEach(l=>{try{if(l)map.removeLayer(l)}catch(e){}});
-  gdWindEffectLine=gdWindAimMarker=null;
+  [gdWindEffectLine,gdWindAimMarker,gdWindLandingMarker].forEach(l=>{try{if(l)map.removeLayer(l)}catch(e){}});
+  gdWindEffectLine=gdWindAimMarker=gdWindLandingMarker=null;
 }
 function gdRenderWindEffect(){
   gdClearWindVisuals();
   if(!gdHasWindVector()||!target||!gdWindLandingTarget)return;
   const drift=map.distance(target,gdWindLandingTarget);
   if(!(drift>.5))return;
-  gdWindEffectLine=L.polyline([target,gdWindLandingTarget],{color:"#66dcff",weight:3,opacity:.82,dashArray:"6,8",interactive:false}).addTo(map);
-  gdWindAimMarker=L.marker(target,{interactive:false,icon:L.divIcon({className:"",html:'<div class="gdWindAimDot"></div>',iconSize:[18,18],iconAnchor:[9,9]})}).addTo(map);
+  gdWindEffectLine=L.polyline([target,gdWindLandingTarget],{color:"#66dcff",weight:2,opacity:.46,dashArray:"5,9",interactive:false}).addTo(map);
+  gdWindAimMarker=L.marker(target,{interactive:false,icon:L.divIcon({className:"",html:'<div class="gdWindAimDot"></div>',iconSize:[12,12],iconAnchor:[6,6]})}).addTo(map);
+  gdWindLandingMarker=L.marker(gdWindLandingTarget,{interactive:false,icon:L.divIcon({className:"",html:'<div class="gdWindLandingDot"></div>',iconSize:[10,10],iconAnchor:[5,5]})}).addTo(map);
 }
 function gdApplyWindToCurrentShot(render=true){
   if(!gdHasWindVector()||!target){gdWindLandingTarget=null;gdClearWindVisuals();gdSyncWindButton();return false;}
@@ -14440,8 +14442,9 @@ function gdCloseWindPicker(){
 }
 function gdSyncWindButton(){
   const btn=document.getElementById("windToolBtn");
-  if(!btn)return;
   const active=gdHasWindVector();
+  try{document.body&&document.body.classList.toggle("gdWindToolActive",active)}catch(e){}
+  if(!btn)return;
   const ready=!active&&gdLiveWindEnabled()&&gdLiveWindFresh();
   btn.classList.toggle("windActive",active);
   btn.classList.toggle("windReady",ready);
@@ -41319,6 +41322,12 @@ body.gps-active:not(.gdToolRailOpen) .rightRail > #gdV62ModeSwitch{display:none!
 body.shell-gps:not(.gdToolRailOpen) .rightRail > :is(#flagTool,#windToolBtn,#greenToolBtn,#gpsRailBtn,#gdGpsSnapZoomBtn,#gdGreenZoomBtn,#scorecardRailBtn,#bagRailBtn,#gdMapperToolsBtn),
 body.gdGpsActive:not(.gdToolRailOpen) .rightRail > :is(#flagTool,#windToolBtn,#greenToolBtn,#gpsRailBtn,#gdGpsSnapZoomBtn,#gdGreenZoomBtn,#scorecardRailBtn,#bagRailBtn,#gdMapperToolsBtn),
 body.gps-active:not(.gdToolRailOpen) .rightRail > :is(#flagTool,#windToolBtn,#greenToolBtn,#gpsRailBtn,#gdGpsSnapZoomBtn,#gdGreenZoomBtn,#scorecardRailBtn,#bagRailBtn,#gdMapperToolsBtn){display:none!important;visibility:hidden!important;opacity:0!important;pointer-events:none!important;}
+body.gdWindToolActive.shell-gps:not(.gdToolRailOpen) .rightRail,
+body.gdWindToolActive.gdGpsActive:not(.gdToolRailOpen) .rightRail,
+body.gdWindToolActive.gps-active:not(.gdToolRailOpen) .rightRail{position:fixed!important;right:calc(10px + env(safe-area-inset-right))!important;left:auto!important;top:calc(max(10px,env(safe-area-inset-top)) + 56px)!important;z-index:8210!important;max-height:54px!important;overflow:visible!important;opacity:1!important;visibility:visible!important;pointer-events:auto!important;transform:none!important;display:grid!important;grid-template-columns:1fr!important;gap:0!important;align-items:center!important;justify-items:center!important;width:44px!important;min-width:44px!important;padding:0!important;background:transparent!important;border:0!important;box-shadow:none!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important;}
+body.gdWindToolActive.shell-gps:not(.gdToolRailOpen) .rightRail > #windToolBtn,
+body.gdWindToolActive.gdGpsActive:not(.gdToolRailOpen) .rightRail > #windToolBtn,
+body.gdWindToolActive.gps-active:not(.gdToolRailOpen) .rightRail > #windToolBtn{display:grid!important;visibility:visible!important;opacity:1!important;pointer-events:auto!important;}
 body.gdToolRailOpen.shell-gps .rightRail > .railBtn,
 body.gdToolRailOpen.gdGpsActive .rightRail > .railBtn,
 body.gdToolRailOpen.gps-active .rightRail > .railBtn,
