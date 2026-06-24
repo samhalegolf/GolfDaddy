@@ -105,6 +105,16 @@ Rules:
 
 ---
 
+## Hole Picker / Next Hole Ownership
+
+GPS location may provide evidence to the Hole Picker / Next Hole owner, but GPS location must not silently change the active hole.
+
+Hole Picker / Next Hole owns hole progression. Shot End does not own hole progression.
+
+After save/reject, Shot End should hand off to the existing Next Hole owner/action. Manual hole selection wins.
+
+---
+
 ## Shot End
 
 Shot End should only save when Course Data Collection confirms a valid previous held Bubble/shot transaction.
@@ -113,9 +123,11 @@ Rules:
 - valid held shot saves once
 - second Shot End press saves nothing
 - no held shot saves nothing
+- rejected save retries nothing and fakes no planned shot
 - hole 1 cannot pair with hole 2
 - `bubble_rendered` cannot be an outcome
 - after success, transaction is consumed and cleared
+- after save, no-save, or reject, Shot End disarms and hands off to the existing Next Hole / Hole Picker action
 
 ---
 
