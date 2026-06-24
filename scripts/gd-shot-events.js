@@ -8,6 +8,9 @@
   var ROUND_KEY = 'gd_active_round_id';
   var MERGE_TIME_MS = 20000;
   var MERGE_DISTANCE_M = 5;
+  var MAX_ENDPOINT_AGE_MS = 45 * 60 * 1000;
+  var MAX_GPS_ACCURACY_M = 50;
+  var MIN_PAIRING_CONFIDENCE = 0.5;
   var SOURCE_PRIORITY = {
     bubble_rendered: 3,
     at_my_ball_button: 2,
@@ -204,6 +207,8 @@
       eventId: input.eventId || createId('bpe'),
       roundId: input.roundId || activeRoundId(),
       holeId: input.holeId || null,
+      transactionId: input.transactionId || null,
+      shotId: input.shotId || null,
       source: source,
       timestamp: input.timestamp || new Date().toISOString(),
       lat: asNumber(input.lat, 0),
@@ -212,14 +217,19 @@
       motionContext: input.motionContext || 'unknown',
       courseContext: input.courseContext || 'unknown',
       confidence: input.confidence || SOURCE_CONFIDENCE[source] || 'medium',
+      outcomeCandidate: input.outcomeCandidate === true,
+      consumedByShotId: input.consumedByShotId || null,
+      consumedByOutcomeId: input.consumedByOutcomeId || null,
       mergedEventIds: Array.isArray(input.mergedEventIds) ? input.mergedEventIds.slice() : []
     }, scope);
   }
 
   function findMergeCandidate(events, event) {
+    if (event.outcomeCandidate || event.transactionId || event.shotId) return null;
     var eventTime = Date.parse(event.timestamp);
     for (var i = events.length - 1; i >= 0; i -= 1) {
       var candidate = events[i];
+      if (candidate.outcomeCandidate || candidate.transactionId || candidate.shotId) continue;
       if (!samePlayerScope(candidate, event)) continue;
       if (candidate.roundId !== event.roundId) continue;
       var candidateTime = Date.parse(candidate.timestamp);
@@ -267,6 +277,8 @@
 
     return applyPlayerScope({
       shotId: input.shotId || createId('shot'),
+      transactionId: input.transactionId || originEvent.transactionId || createId('shot-tx'),
+      transactionState: 'active',
       roundId: input.roundId || originEvent.roundId || activeRoundId(),
       holeId: input.holeId || originEvent.holeId || null,
       originEventId: originEvent.eventId,
@@ -283,7 +295,12 @@
       expectedDistanceYards: Number.isFinite(Number(input.expectedDistanceYards)) ? Number(input.expectedDistanceYards) : null,
       renderKey: input.renderKey || plannedShotRenderKey(input, originEvent),
       createdAt: input.createdAt || new Date().toISOString(),
-      pairedOutcomeId: null
+      pairedOutcomeId: null,
+      consumedAt: null,
+      clearedAt: null,
+      rejectedAt: null,
+      rejectionReason: null,
+      transactionClosedAt: null
     }, scope);
   }
 
@@ -309,7 +326,7 @@
     var created = Date.parse(shot.createdAt);
     for (var i = store.plannedShots.length - 1; i >= 0; i -= 1) {
       var existing = store.plannedShots[i];
-      if (existing.renderKey !== shot.renderKey || existing.pairedOutcomeId) continue;
+      if (existing.renderKey !== shot.renderKey || existing.pairedOutcomeId || existing.transactionClosedAt) continue;
       var existingCreated = Date.parse(existing.createdAt);
       if (!Number.isFinite(created) || !Number.isFinite(existingCreated) || Math.abs(created - existingCreated) <= 30000) {
         existing.updatedAt = new Date().toISOString();
@@ -330,54 +347,94 @@
     return Math.max(0.1, Math.min(0.98, sourceScore - timePenalty - accuracyPenalty));
   }
 
-	  function outcomeExists(store, shotId) {
-	    return store.outcomes.some(function (outcome) {
-	      return outcome.shotId === shotId;
-	    });
-	  }
-
-  function pairPendingShots(store) {
-    var outcomeModule = root.modules.shotOutcomes;
-    if (!outcomeModule || typeof outcomeModule.computeShotOutcome !== 'function') {
-      return [];
-    }
-
-    var createdOutcomes = [];
-    store.plannedShots.forEach(function (shot) {
-      if (shot.pairedOutcomeId || outcomeExists(store, shot.shotId)) return;
-
-      var created = Date.parse(shot.createdAt);
-      var result = store.ballEvents
-        .filter(function (event) {
-	          var happened = Date.parse(event.timestamp);
-	          return event.roundId === shot.roundId &&
-	            samePlayerScope(shot, event) &&
-	            event.eventId !== shot.originEventId &&
-	            Number.isFinite(created) &&
-            Number.isFinite(happened) &&
-            happened >= created;
-        })
-        .sort(function (a, b) {
-          return Date.parse(a.timestamp) - Date.parse(b.timestamp);
-        })[0];
-
-      if (!result) return;
-
-      var outcomeId = createId('outcome');
-      var outcome = outcomeModule.computeShotOutcome(shot, result, {
-        outcomeId: outcomeId,
-        pairedConfidence: scorePair(shot, result)
-      });
-	      if (!outcome) return;
-
-	      outcome.outcomeId = outcomeId;
-	      applyPlayerScope(outcome, resolvePlayerScope(shot, result));
-	      shot.pairedOutcomeId = outcomeId;
-      store.outcomes.push(outcome);
-      createdOutcomes.push(outcome);
+  function outcomeExists(store, shotId) {
+    return store.outcomes.some(function (outcome) {
+      return outcome.shotId === shotId;
     });
+  }
 
-    return createdOutcomes;
+  function eventConsumed(store, eventId) {
+    if (!eventId) return false;
+    return (store.ballEvents || []).some(function (event) {
+      return event && event.eventId === eventId && (event.consumedByShotId || event.consumedByOutcomeId);
+    });
+  }
+
+  function shotIsPending(shot) {
+    return !!(shot && shot.transactionId && !shot.pairedOutcomeId && !shot.consumedAt && !shot.clearedAt && !shot.rejectedAt && !shot.transactionClosedAt);
+  }
+
+  function findPendingShotInStore(store, input) {
+    input = input || {};
+    var scope = resolvePlayerScope(input);
+    var shotId = String(input.shotId || '').trim();
+    var transactionId = String(input.transactionId || '').trim();
+    var roundId = String(input.roundId || '').trim();
+    var holeId = input.holeId == null ? '' : String(input.holeId).trim();
+
+    for (var i = store.plannedShots.length - 1; i >= 0; i -= 1) {
+      var shot = store.plannedShots[i];
+      if (!shotIsPending(shot)) continue;
+      if (!itemMatchesScope(shot, scope)) continue;
+      if (shotId && shot.shotId !== shotId) continue;
+      if (transactionId && shot.transactionId !== transactionId) continue;
+      if (roundId && String(shot.roundId || '') !== roundId) continue;
+      if (holeId && String(shot.holeId || '') !== holeId) continue;
+      return shot;
+    }
+    return null;
+  }
+
+  function rejectPendingShot(store, shot, reason) {
+    if (!shot) return null;
+    var now = new Date().toISOString();
+    shot.rejectedAt = now;
+    shot.rejectionReason = reason || 'rejected';
+    shot.transactionState = 'rejected';
+    shot.transactionClosedAt = now;
+    saveStore(store);
+    return { saved: false, rejected: true, reason: shot.rejectionReason, shot: shot, transactionId: shot.transactionId || null };
+  }
+
+  function clearPendingShot(input) {
+    var store = getStore();
+    var shot = findPendingShotInStore(store, input || {});
+    if (!shot) return { cleared: false, saved: false, reason: 'no_pending_shot' };
+    var now = new Date().toISOString();
+    shot.clearedAt = now;
+    shot.clearReason = input && input.reason || 'cleared';
+    shot.transactionState = 'cleared';
+    shot.transactionClosedAt = now;
+    saveStore(store);
+    return { cleared: true, saved: false, reason: shot.clearReason, shot: shot, transactionId: shot.transactionId || null };
+  }
+
+  function validateOutcomeCandidate(store, shot, event) {
+    var created = Date.parse(shot && shot.createdAt);
+    var happened = Date.parse(event && event.timestamp);
+    var confidence = scorePair(shot, event);
+    var gpsAccuracy = Number(event && event.gpsAccuracyM);
+
+    if (!shotIsPending(shot)) return 'no_pending_shot';
+    if (outcomeExists(store, shot.shotId) || shot.pairedOutcomeId) return 'shot_already_consumed';
+    if (!hasLatLng(event)) return 'invalid_endpoint_coordinates';
+    if (event.source === 'bubble_rendered') return 'bubble_rendered_cannot_be_outcome';
+    if (eventConsumed(store, event.eventId)) return 'endpoint_already_consumed';
+    if (!samePlayerScope(shot, event)) return 'player_scope_mismatch';
+    if (event.roundId !== shot.roundId) return 'round_mismatch';
+    if (String(event.holeId || '') !== String(shot.holeId || '')) return 'hole_mismatch';
+    if (event.transactionId !== shot.transactionId) return 'transaction_mismatch';
+    if (!Number.isFinite(created) || !Number.isFinite(happened)) return 'invalid_time';
+    if (happened < created) return 'endpoint_before_held_shot';
+    if ((happened - created) > MAX_ENDPOINT_AGE_MS) return 'endpoint_stale';
+    if (confidenceRank(event.confidence) < confidenceRank('medium')) return 'endpoint_low_confidence';
+    if (Number.isFinite(gpsAccuracy) && gpsAccuracy > MAX_GPS_ACCURACY_M) return 'endpoint_weak_gps';
+    if (confidence < MIN_PAIRING_CONFIDENCE) return 'pairing_low_confidence';
+    return null;
+  }
+
+  function pairPendingShots() {
+    return [];
   }
 
   function logBallPosition(input) {
@@ -386,20 +443,78 @@
     var mergeTarget = findMergeCandidate(store.ballEvents, event);
     if (mergeTarget) {
       mergeEvents(mergeTarget, event);
-      pairPendingShots(store);
       saveStore(store);
-      return { event: mergeTarget, merged: true };
+      return { event: mergeTarget, merged: true, saved: false };
     }
 
     store.ballEvents.push(event);
-    pairPendingShots(store);
     saveStore(store);
-    return { event: event, merged: false };
+    return { event: event, merged: false, saved: false };
+  }
+
+  function logOutcomeForPending(input) {
+    input = input || {};
+    var store = getStore();
+    var shot = findPendingShotInStore(store, input);
+    if (!shot) return { saved: false, rejected: true, reason: 'no_pending_shot' };
+
+    var point = input.point || input.outcomePoint || input.resultPoint || input;
+    if (!hasLatLng(point)) return rejectPendingShot(store, shot, 'invalid_endpoint_coordinates');
+
+    var event = createBallPositionEvent({
+      eventId: input.eventId,
+      roundId: input.roundId || shot.roundId,
+      holeId: input.holeId || shot.holeId,
+      transactionId: input.transactionId || shot.transactionId,
+      shotId: input.shotId || shot.shotId,
+      source: input.source || 'at_my_ball_button',
+      timestamp: input.timestamp || new Date().toISOString(),
+      lat: point.lat,
+      lng: point.lng,
+      gpsAccuracyM: input.gpsAccuracyM,
+      motionContext: input.motionContext || 'green_focus',
+      courseContext: input.courseContext || 'green_focus',
+      confidence: input.confidence || 'medium',
+      outcomeCandidate: true
+    });
+
+    var rejection = validateOutcomeCandidate(store, shot, event);
+    if (rejection) return rejectPendingShot(store, shot, rejection);
+
+    var outcomeModule = root.modules.shotOutcomes;
+    if (!outcomeModule || typeof outcomeModule.computeShotOutcome !== 'function') {
+      return rejectPendingShot(store, shot, 'outcome_module_unavailable');
+    }
+
+    var outcomeId = createId('outcome');
+    var outcome = outcomeModule.computeShotOutcome(shot, event, {
+      outcomeId: outcomeId,
+      pairedConfidence: scorePair(shot, event)
+    });
+    if (!outcome) return rejectPendingShot(store, shot, 'outcome_rejected');
+
+    outcome.outcomeId = outcomeId;
+    outcome.transactionId = shot.transactionId;
+    applyPlayerScope(outcome, resolvePlayerScope(shot, event));
+
+    var now = new Date().toISOString();
+    event.consumedByShotId = shot.shotId;
+    event.consumedByOutcomeId = outcomeId;
+    shot.pairedOutcomeId = outcomeId;
+    shot.consumedAt = now;
+    shot.transactionState = 'consumed';
+    shot.transactionClosedAt = now;
+
+    store.ballEvents.push(event);
+    store.outcomes.push(outcome);
+    saveStore(store);
+    return { saved: true, outcome: outcome, event: event, shot: shot, transactionId: shot.transactionId };
   }
 
   function logPlannedShot(input) {
     var store = getStore();
     input = input || {};
+    var transactionId = input.transactionId || createId('shot-tx');
     var originEvent = null;
 
     if (input.originEventId) {
@@ -412,6 +527,7 @@
       originEvent = createBallPositionEvent({
         roundId: input.roundId,
         holeId: input.holeId,
+        transactionId: transactionId,
         source: 'bubble_rendered',
         timestamp: input.createdAt,
         lat: input.origin.lat,
@@ -419,8 +535,12 @@
         confidence: 'high'
       });
       store.ballEvents.push(originEvent);
+    } else if (originEvent) {
+      transactionId = originEvent.transactionId || transactionId;
+      originEvent.transactionId = transactionId;
     }
 
+    input.transactionId = transactionId;
     var shot = buildPlannedShot(input, originEvent);
     var existingShot = findRecentPlannedShot(store, shot);
     if (existingShot) {
@@ -428,7 +548,6 @@
       return existingShot;
     }
     store.plannedShots.push(shot);
-    pairPendingShots(store);
     saveStore(store);
     return shot;
   }
@@ -439,22 +558,11 @@
       throw new Error('captureBubbleRendered requires origin lat/lng');
     }
 
-    var logged = logBallPosition({
-      roundId: input.roundId,
-      holeId: input.holeId,
-      source: 'bubble_rendered',
-      lat: input.origin.lat,
-      lng: input.origin.lng,
-      gpsAccuracyM: input.gpsAccuracyM,
-      courseContext: input.courseContext || 'unknown',
-      timestamp: input.createdAt || new Date().toISOString(),
-      confidence: 'high'
-    });
-
     return logPlannedShot({
       roundId: input.roundId,
       holeId: input.holeId,
-      originEventId: logged.event.eventId,
+      transactionId: input.transactionId,
+      origin: input.origin,
       plannedBubble: input.plannedBubble,
       club: input.club,
       expectedDistanceYards: input.expectedDistanceYards,
@@ -521,11 +629,13 @@
     logBallPosition: logBallPosition,
     logPlannedShot: logPlannedShot,
     captureBubbleRendered: captureBubbleRendered,
+    getPendingShot: function (input) {
+      return findPendingShotInStore(getStore(), input || {});
+    },
+    logOutcomeForPending: logOutcomeForPending,
+    clearPendingShot: clearPendingShot,
     pairPendingShots: function () {
-      var store = getStore();
-      var outcomes = pairPendingShots(store);
-      saveStore(store);
-      return outcomes;
+      return pairPendingShots(getStore());
     },
     getStore: getStore,
     getScopedStore: function () { return scopedCopy(getStore(), activePlayerScope()); },
