@@ -15534,23 +15534,7 @@ function gdFinishActiveGreenFocus(reason="shot_end_green_focus"){
   if(gdGreenFocusHadShotToLog&&gdGreenFocusOutcomePoint&&typeof gdLogBallPositionForTracking==="function"){
     try{logged=gdLogBallPositionForTracking(gdGreenFocusOutcomePoint,reason,gdGreenFocusOutcomeAccuracy)}catch(e){logged=null}
   }
-  gdGreenFocusOutcomePoint=null;gdGreenFocusOutcomeAccuracy=null;gdGreenFocusHadShotToLog=false;gdGreenFocusScreenPoint=null;
-  document.body.classList.remove("gdGreenArrivalMode","gd-green-zoom-active","gdLockStateFrameActive","gd-frame-hard-locked");
-  const ball=document.getElementById("gdGreenFocusScreenBall");
-  if(ball)ball.remove();
-  try{clearShot()}catch(e){}
-  target=greenCentre=pin=null;lockedFrame=false;mode="start";
-  const count=Array.isArray(scorecard&&scorecard.holes)?scorecard.holes.length:18;
-  const current=Number(currentPlayingHole||selectedHole||1)||1;
-  const next=Math.min(count,current+1);
-  currentPlayingHole=selectedHole=next;
-  try{sessionStorage.setItem("gd_active_playing_hole",String(next));sessionStorage.setItem("gd_mapper_active_hole",String(next))}catch(e){}
-  try{if(typeof gdFocusMappedHoleOrSavedGreen==="function")gdFocusMappedHoleOrSavedGreen(next,{quiet:true,frame:true,promptStart:true,allowAnyStart:true,stablePreLock:true})}catch(e){}
-  setState("Hole "+next);
-  showHint(gdMappedStartHint());
-  toast((logged?"Shot saved":"Logged")+" · H"+next+" ready");
-  try{gdSyncNewShotButtonState()}catch(e){}
-  return false;
+  return finishGreenFocusShotEnd(logged);
 }
 window.gdTryEnterGreenFocusFromPoint=gdTryEnterGreenFocusFromPoint;
 window.gdEnterGreenFocusMode=gdEnterActiveGreenFocus;
@@ -40044,9 +40028,15 @@ body.gps-active #shotTile .tileCarryValue span{
     }, false);
   }
 
+  function isGreenFocusShotSaved(logged){
+    if(!logged||typeof logged!=="object") return false;
+    if(logged.excluded||logged.excludedReason||logged.outcome?.excluded||logged.outcome?.excludedReason)return false;
+    return true;
+  }
   function finishGreenFocusShotEnd(logged){
-    var current = currentHoleNumber();
-    var next = nextHoleNumber(current);
+    var current=currentHoleNumber();
+    var next=nextHoleNumber(current);
+    var saved=isGreenFocusShotSaved(logged);
     freshHolePreparingUntil = Date.now() + 1600;
     document.body.classList.remove("gdGreenArrivalMode", "gd-green-zoom-active", "gdLockStateFrameActive", "gd-frame-hard-locked");
     resetPendingManualFlow();
@@ -40064,21 +40054,23 @@ body.gps-active #shotTile .tileCarryValue span{
         appEl.classList.add("gdPreLockFrame");
       }
     });
-    safe(function(){ selectedHole = next; currentPlayingHole = next; });
-    safe(function(){ sessionStorage.setItem("gd_active_playing_hole", String(next)); sessionStorage.setItem("gd_mapper_active_hole", String(next)); });
-    setTimeout(function(){
-      var advanced = false;
-      safe(function(){
-        if(typeof window.gdPlayHoleFromScorecard === "function"){
-          window.gdPlayHoleFromScorecard(next, { source:"shot-end-green-focus" });
-          advanced = true;
-        }
-      });
+    if(typeof window.gdPlayNextHole === "function"){
+      safe(function(){ window.gdPlayNextHole(); });
+    }else{
       setTimeout(function(){
-        if(typeof window.gdFocusMappedPreLockHole === "function") window.gdFocusMappedPreLockHole(next, { source:"shot-end-green-focus" });
-        else prepareFreshHoleScreen("shot-end-green-focus");
-      }, advanced ? 150 : 40);
-    }, 60);
+        var advanced = false;
+        safe(function(){
+          if(typeof window.gdPlayHoleFromScorecard === "function"){
+            window.gdPlayHoleFromScorecard(next, { source:"shot-end-green-focus" });
+            advanced = true;
+          }
+        });
+        setTimeout(function(){
+          if(typeof window.gdFocusMappedPreLockHole === "function") window.gdFocusMappedPreLockHole(next, { source:"shot-end-green-focus" });
+          else prepareFreshHoleScreen("shot-end-green-focus");
+        }, advanced ? 150 : 40);
+      }, 60);
+    }
     setTimeout(function(){
       document.body.classList.remove("gdGreenArrivalMode", "gd-green-zoom-active", "gdLockStateFrameActive", "gd-frame-hard-locked");
       safe(function(){ lockedFrame = false; });
@@ -40098,7 +40090,8 @@ body.gps-active #shotTile .tileCarryValue span{
         frameMappedPreLockOnly();
       }
     }, 1450);
-    toastSafe((logged ? "Shot saved" : "Logged") + " · H" + next + " ready");
+    toastSafe((saved ? "Shot saved" : "No shot saved") + " · H" + next + " ready");
+    try{gdSyncNewShotButtonState();}catch(e){}
     return false;
   }
 
@@ -40161,7 +40154,6 @@ body.gps-active #shotTile .tileCarryValue span{
 	        return false;
 	      }
 	      var loggedGreen = greenFocusHadShotToLog ? logPointOnly(outcome, reason || "shot_end_green_focus", greenFocusOutcomeAccuracy) : null;
-	      toastSafe("Logged");
 	      return finishGreenFocusShotEnd(loggedGreen);
 	    }
     var fix = safe(function(){
