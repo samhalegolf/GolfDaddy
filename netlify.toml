@@ -64,6 +64,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/auth-reset-password"
+  to = "/.netlify/functions/auth-reset-password"
+  status = 200
+
+[[redirects]]
   from = "/api/auth-update-account"
   to = "/.netlify/functions/auth-update-account"
   status = 200

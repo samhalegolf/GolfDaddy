@@ -12,6 +12,7 @@ function supabaseUrl() { return env("SUPABASE_URL").replace(/\/+$/, ""); }
 function serviceKey() { return env("SUPABASE_SERVICE_ROLE_KEY"); }
 function anonKey() { return env("SUPABASE_ANON_KEY") || env("VITE_SUPABASE_ANON_KEY") || env("SUPABASE_PUBLIC_ANON_KEY") || ""; }
 function hasAuth() { return !!(supabaseUrl() && serviceKey() && anonKey()); }
+function hasAuthWithServiceKey() { return !!(supabaseUrl() && serviceKey()); }
 async function supabaseRest(path, options) {
   if (!supabaseUrl() || !serviceKey()) throw new Error("Supabase is not configured");
   const headers = Object.assign({ apikey: serviceKey(), Authorization: "Bearer " + serviceKey(), "Content-Type": "application/json" }, options && options.headers || {});
@@ -87,4 +88,6 @@ async function upsertAccount(authUser, input) {
   }) });
   return pack;
 }
-module.exports = { anonKey, email, hasAuth, json, role, supabaseAuth, supabaseRest, text, upsertAccount };
+module.exports = {
+  anonKey, email, hasAuth, hasAuthWithServiceKey, json, role, supabaseAuth, supabaseRest, text, findAccountByEmail, upsertAccount
+};

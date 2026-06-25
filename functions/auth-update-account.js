@@ -9,8 +9,9 @@ exports.handler = async function(event) {
   if (!userId) return json(400, { error: "Missing Supabase user id" });
   const update = { user_metadata: { name, role: body.role || "player" } };
   if (accountEmail) update.email = accountEmail;
-  if (password) { if (password.length < 6) return json(400, { error: "Password needs at least 6 characters" }); update.password = password; }
+  const passwordUpdated = !!password;
+  if (password) { if (password.length < 8) return json(400, { error: "Password needs at least 8 characters" }); update.password = password; }
   const authUser = await supabaseAuth("admin/users/" + encodeURIComponent(userId), { method: "PUT", body: JSON.stringify(update) }, true);
   const pack = await upsertAccount(authUser && (authUser.user || authUser), { email: accountEmail, name, role: body.role, eventType: "supabase_auth_update" });
-  return json(200, { ok: true, account: pack.account, profile: pack.profile });
+  return json(200, { ok: true, passwordUpdated, account: pack.account, profile: pack.profile });
 };
