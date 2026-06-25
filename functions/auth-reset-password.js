@@ -1,6 +1,6 @@
 "use strict";
 
-const { email, hasAuthWithServiceKey, findAccountByEmail, json, supabaseAuth } = require("./auth-utils");
+const { email, hasAuthWithServiceKey, json, supabaseAuth } = require("./auth-utils");
 const { sendSystemAlert } = require("./alert-utils");
 
 function env(name) { return process.env[name] || ""; }
@@ -23,12 +23,13 @@ function safeOrigin(event) {
   const referer = toHeader(headers, ["referer", "origin"]);
   try { return new URL(referer || "").origin.replace(/\/+$/, ""); } catch (_error) { return ""; }
 }
-function ensureDeliveryConfigured() {
+function deliveryConfig() {
   const resendKey = env("RESEND_API_KEY");
-  const from = env("CLARITY_EMAIL_FROM");
   if (!resendKey) return null;
-  if (!from) return null;
-  return { resendKey, from: from };
+  return {
+    resendKey,
+    from: env("CLARITY_EMAIL_FROM") || "Clarity Golf Systems <notifications@claritygolf.systems>"
+  };
 }
 function escapeHtml(value) {
   return String(value == null ? "" : value).replace(/[&<>"']/g, function (char) {
@@ -61,7 +62,7 @@ async function sendRecoveryEmail(delivery, emailAddress, link, requestedAt) {
         "",
         "Use the button below to set a new password. This link expires soon.",
         link
-      ].join("\\n")
+      ].join("\n")
     })
   });
   const body = await response.json().catch(function () { return null; });
@@ -78,22 +79,20 @@ exports.handler = async function(event) {
   if (event.httpMethod === "OPTIONS") return json(204, {});
   if (event.httpMethod !== "POST") return json(405, { error: "Method not allowed" });
 
-  let payload = {}; 
+  let payload = {};
   try { payload = JSON.parse(event.body || "{}"); } catch (_error) { return json(400, { error: "Invalid JSON", code: "invalid_json" }); }
   const accountEmail = email(payload.email);
   if (!accountEmail) return json(400, { error: "Enter a valid email", code: "invalid_email" });
 
   if (!hasAuthWithServiceKey()) return json(503, { error: "Supabase Auth is not configured", code: "auth_not_configured" });
-  const delivery = ensureDeliveryConfigured();
-  if (!delivery) return json(503, { error: "Email delivery is not configured. Set RESEND_API_KEY and CLARITY_EMAIL_FROM.", code: "email_not_configured" });
+  const delivery = deliveryConfig();
+  if (!delivery) return json(503, { error: "Email delivery is not configured. Set RESEND_API_KEY in Netlify environment variables.", code: "email_not_configured" });
 
   try {
-    const existing = await findAccountByEmail(accountEmail);
-    if (!existing) return json(404, { error: "No Clarity account found for this email.", code: "account_not_found" });
-    const origin = safeOrigin(event) || "https://caddy.claritygolf.app";
-    const redirectTo = origin + "/?claritySetPassword=1";
+    const origin = safeOrigin(event) || env("CLARITY_SITE_URL") || "https://caddy.claritygolf.app";
+    const redirectTo = origin.replace(/\/+$/, "") + "/?claritySetPassword=1";
     const reset = await supabaseAuth("admin/generate_link", { method: "POST", body: JSON.stringify({ type: "recovery", email: accountEmail, options: { redirect_to: redirectTo } }) }, true);
-    const resetUrl = reset && (reset.action_link || (reset.properties && reset.properties.action_link) || "");
+    const resetUrl = reset && (reset.action_link || reset.actionLink || (reset.properties && reset.properties.action_link) || "");
     if (!resetUrl) return json(502, { error: "Could not generate a password reset link.", code: "reset_link_failed" });
     await sendRecoveryEmail(delivery, accountEmail, resetUrl, new Date().toISOString());
     return json(200, { ok: true, code: "password_reset_sent", sent: true });
