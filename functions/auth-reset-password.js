@@ -1,6 +1,6 @@
 "use strict";
 
-const { email, hasAuthWithServiceKey, json, supabaseAuth } = require("./auth-utils");
+const { email, json } = require("./auth-utils");
 const { sendSystemAlert } = require("./alert-utils");
 
 function env(name) { return process.env[name] || ""; }
@@ -33,6 +33,11 @@ function deliveryConfig() {
     resendKey,
     from: env("CLARITY_EMAIL_FROM") || "Clarity Golf Systems <notifications@claritygolf.systems>"
   };
+}
+function buildResetLink(emailAddress, event) {
+  const appBase = env("APP_URL") || env("CLARITY_SITE_URL") || safeOrigin(event);
+  if (!appBase) return "";
+  return appBase.replace(/\/+$/, "") + "/?clarityResetPassword=1&email=" + encodeURIComponent(emailAddress);
 }
 function escapeHtml(value) {
   return String(value == null ? "" : value).replace(/[&<>"']/g, function (char) {
@@ -87,15 +92,14 @@ exports.handler = async function(event) {
   const accountEmail = email(payload.email);
   if (!accountEmail) return json(400, { error: "Enter a valid email", code: "invalid_email" });
 
-  if (!hasAuthWithServiceKey()) return json(503, { error: "Supabase Auth is not configured", code: "auth_not_configured" });
   const delivery = deliveryConfig();
   if (!delivery) return json(503, { error: "Email delivery is not configured. Set RESEND_API_KEY in Netlify environment variables.", code: "email_not_configured" });
 
   try {
-    const redirectTo = configuredSiteUrl(event) + "/?claritySetPassword=1";
-    const reset = await supabaseAuth("admin/generate_link", { method: "POST", body: JSON.stringify({ type: "recovery", email: accountEmail, options: { redirect_to: redirectTo } }) }, true);
-    const resetUrl = reset && (reset.action_link || reset.actionLink || (reset.properties && reset.properties.action_link) || "");
-    if (!resetUrl) return json(502, { error: "Could not generate a password reset link.", code: "reset_link_failed" });
+    const resetUrl = buildResetLink(accountEmail, event);
+    if (!resetUrl) {
+      return json(502, { error: "Could not build a password reset link.", code: "reset_link_failed" });
+    }
     await sendRecoveryEmail(delivery, accountEmail, resetUrl, new Date().toISOString());
     return json(200, { ok: true, code: "password_reset_sent", sent: true });
   } catch (error) {
@@ -106,6 +110,10 @@ exports.handler = async function(event) {
       accountEmail,
       context: { status: error.status || null, details: error.body || error.message || String(error) }
     });
-    return json(error.status || 502, { error: error.message || "Could not send password reset email", code: "reset_request_failed", details: error.body || null });
+    return json(error.status || 502, {
+      error: error.message || "Could not send password reset email",
+      code: "reset_request_failed",
+      details: error.body || (error.message ? { error: error.message } : null)
+    });
   }
 };
