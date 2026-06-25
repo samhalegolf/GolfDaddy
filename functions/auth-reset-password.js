@@ -23,6 +23,9 @@ function safeOrigin(event) {
   const referer = toHeader(headers, ["referer", "origin"]);
   try { return new URL(referer || "").origin.replace(/\/+$/, ""); } catch (_error) { return ""; }
 }
+function configuredSiteUrl(event) {
+  return (env("CLARITY_SITE_URL") || env("APP_URL") || env("URL") || safeOrigin(event) || "https://clarity-caddie.netlify.app").replace(/\/+$/, "");
+}
 function deliveryConfig() {
   const resendKey = env("RESEND_API_KEY");
   if (!resendKey) return null;
@@ -89,8 +92,7 @@ exports.handler = async function(event) {
   if (!delivery) return json(503, { error: "Email delivery is not configured. Set RESEND_API_KEY in Netlify environment variables.", code: "email_not_configured" });
 
   try {
-    const origin = safeOrigin(event) || env("CLARITY_SITE_URL") || "https://caddy.claritygolf.app";
-    const redirectTo = origin.replace(/\/+$/, "") + "/?claritySetPassword=1";
+    const redirectTo = configuredSiteUrl(event) + "/?claritySetPassword=1";
     const reset = await supabaseAuth("admin/generate_link", { method: "POST", body: JSON.stringify({ type: "recovery", email: accountEmail, options: { redirect_to: redirectTo } }) }, true);
     const resetUrl = reset && (reset.action_link || reset.actionLink || (reset.properties && reset.properties.action_link) || "");
     if (!resetUrl) return json(502, { error: "Could not generate a password reset link.", code: "reset_link_failed" });
