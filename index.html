@@ -24649,10 +24649,15 @@ try{applyDevSettings();}catch(e){console.warn("Developer tuning init skipped",e)
 		    return true;
 		  }
 
-	  function loginFailureMessage(error) {
+		  function loginFailureMessage(error) {
+	    const code = String((error && error.code) || (error && error.body && error.body.code) || '').trim();
 	    const message = String(error && error.message || '').trim();
+	    if (code === 'account_not_found' || /account.*not found|not found/i.test(message)) return 'Account does not exist.';
+	    if (code === 'auth_not_configured' || /not configured/i.test(message)) return 'Supabase Auth is not configured.';
+	    if (code === 'password_changed_relogin_required') return 'Password changed in another session. Sign in again with your new password.';
+	    if (code === 'sign_in_failed' && /wrong|expired|invalid|stale|site/i.test(message)) return 'Sign in failed. Check your password, and if you recently changed it, sign in again with the new password.';
 	    if (/password/i.test(message)) return 'Incorrect password.';
-	    if (/account.*not found|not found/i.test(message)) return 'Account does not exist.';
+	    if (/local storage|signed out/i.test(message)) return 'A stale local session was found. Sign in again with your current password.';
 	    if (/valid email/i.test(message)) return 'Enter a valid email.';
 	    if (/account system/i.test(message)) return 'Login failed. Try again in a moment.';
 	    return 'Login failed.';
