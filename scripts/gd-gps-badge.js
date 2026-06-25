@@ -14,7 +14,87 @@
   function gpsVisible() {
     return document.body.classList.contains('shell-gps') ||
       document.body.classList.contains('gdGpsActive') ||
-      document.body.classList.contains('gps-active');
+      document.body.classList.contains('gps-active') ||
+      document.body.dataset.clarityRoute === 'gps' ||
+      gpsSurfaceVisible();
+  }
+
+  function gpsSurfaceVisible() {
+    const selectors = [
+      '#gdV62GpsBadge',
+      '.gdHoleStepper',
+      '.leaflet-container',
+      '#gdGpsMap',
+      '#gpsMap',
+      '#map'
+    ];
+
+    return selectors.some((selector) => {
+      const element = document.querySelector(selector);
+      if (!element) return false;
+      const style = window.getComputedStyle(element);
+      if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) return false;
+      const rect = element.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    });
+  }
+
+  function applyShellFrame() {
+    const active = gpsVisible();
+    const shellTop = document.getElementById('shellTop');
+    const shellBackBtn = document.getElementById('shellBackBtn');
+    const shellHomeBtn = document.getElementById('shellHomeBtn');
+
+    document.body.classList.toggle('gdGpsShellFrame', active);
+
+    if (!active) {
+      if (shellTop) {
+        shellTop.style.position = '';
+        shellTop.style.display = '';
+        shellTop.style.visibility = '';
+        shellTop.style.opacity = '';
+        shellTop.style.zIndex = '';
+        shellTop.style.pointerEvents = '';
+      }
+      if (shellBackBtn) {
+        shellBackBtn.style.display = '';
+        shellBackBtn.style.visibility = '';
+        shellBackBtn.style.opacity = '';
+        shellBackBtn.style.pointerEvents = '';
+        shellBackBtn.style.zIndex = '';
+      }
+      if (shellHomeBtn) {
+        shellHomeBtn.style.display = '';
+        shellHomeBtn.style.visibility = '';
+        shellHomeBtn.style.opacity = '';
+        shellHomeBtn.style.pointerEvents = '';
+        shellHomeBtn.style.zIndex = '';
+      }
+      return;
+    }
+
+    if (shellTop) {
+      shellTop.style.position = 'fixed';
+      shellTop.style.display = 'flex';
+      shellTop.style.visibility = 'visible';
+      shellTop.style.opacity = '1';
+      shellTop.style.zIndex = '2147483000';
+      shellTop.style.pointerEvents = 'none';
+    }
+    if (shellBackBtn) {
+      shellBackBtn.style.display = 'inline-flex';
+      shellBackBtn.style.visibility = 'visible';
+      shellBackBtn.style.opacity = '1';
+      shellBackBtn.style.pointerEvents = 'auto';
+      shellBackBtn.style.zIndex = '2147483001';
+    }
+    if (shellHomeBtn) {
+      shellHomeBtn.style.display = 'inline-flex';
+      shellHomeBtn.style.visibility = 'visible';
+      shellHomeBtn.style.opacity = '1';
+      shellHomeBtn.style.pointerEvents = 'auto';
+      shellHomeBtn.style.zIndex = '2147483001';
+    }
   }
 
   function usablePersonName(value) {
@@ -174,6 +254,7 @@
   }
 
   function hydrate(force) {
+    applyShellFrame();
     if (!gpsVisible()) return;
 
     const badge = document.getElementById('gdV62GpsBadge') ||
@@ -255,10 +336,16 @@
 
   window.addEventListener('load', () => schedule(true));
   window.addEventListener('clarity:session-changed', () => schedule(true));
-  document.addEventListener('click', () => setTimeout(() => schedule(false), 80), true);
+  document.addEventListener('click', () => {
+    schedule(true);
+    setTimeout(() => schedule(true), 80);
+    setTimeout(() => schedule(true), 240);
+  }, true);
   safe(() => new MutationObserver(() => schedule(false)).observe(document.body, {
     attributes: true,
-    attributeFilter: ['class'],
+    attributeFilter: ['class', 'data-clarity-route'],
+    subtree: true,
+    childList: true,
   }));
 
   ['enterGpsModule', 'setGpsPlayMode', 'refreshGPS'].forEach((name) => {
