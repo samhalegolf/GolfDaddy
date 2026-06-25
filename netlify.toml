@@ -44,6 +44,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/admin-auth-door"
+  to = "/.netlify/functions/admin-auth-door"
+  status = 200
+
+[[redirects]]
   from = "/api/auth-public-config"
   to = "/.netlify/functions/auth-public-config"
   status = 200
