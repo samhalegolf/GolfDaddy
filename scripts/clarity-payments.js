@@ -10,8 +10,11 @@
   var settings = loadSettings();
   var pending = false;
   var adminPending = false;
+  var entitlementQueryState = { accountId: "", accountEmail: "", entitlements: [], loading: false, error: "", lastChecked: "" };
+  var resolverTestState = { permissionKey: "gps_live_bubble", accountId: "", accountEmail: "", profileId: "", loading: false, result: null, error: "" };
   var originalShowSection = null;
   var lastRefreshKey = "";
+  var PERMISSION_KEYS = ["gps_round_start", "gps_round_pass", "gps_live_bubble", "practice_bubble_view", "my_bubble_view", "course_data_view", "course_bubble_view", "coach_admin_grant", "trial_access"];
 
   function safe(fn, fallback) { try { return fn(); } catch (_e) { return fallback; } }
   function escapeHTML(value) { return String(value == null ? "" : value).replace(/[&<>"']/g, function (ch) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]; }); }
@@ -269,9 +272,90 @@
       '<div class="clarityPaymentProductList">' + all.map(renderAdminProduct).join("") + '</div>',
       renderProductForm(),
       renderFreePassForm(),
+      renderEntitlementViewer(),
+      renderManualGrantForm(),
+      renderResolverTester(),
       '<div class="clarityPaymentNote">Use Stripe Product/Price IDs here, never secret keys. Create the product/price in Stripe, then paste the public-looking <code>price_...</code> ID into this settings page.</div>',
       '</div>'
     ].join("");
+  }
+
+  function renderEntitlementViewer() {
+    var rows = Array.isArray(entitlementQueryState.entitlements) ? entitlementQueryState.entitlements : [];
+    var rowsHTML = rows.map(function (row) {
+      var hasId = !!row.id;
+      var revokeButton = hasId
+        ? '<button type="button" class="secondary" onclick="ClarityPayments.adminRevokeManualEntitlement(&quot;' + escapeHTML(row.id) + '&quot;)">Revoke</button>'
+        : '<button type="button" class="secondary" disabled title="Load details again to capture entitlement ID">Revoke</button>';
+      return '<div class="gdShotAdminListRow"><strong>' + escapeHTML(row.entitlement_type || row.product_key || "entitlement") + '</strong><span>' + escapeHTML(row.status || "unknown") + '</span><em>' + escapeHTML((formatDate(row.starts_at) || "No start") + " - " + (formatDate(row.expires_at) || "No expiry")) + '</em><small>' + escapeHTML(row.user_id || row.account_email || "") + '</small>' + revokeButton + '</div>';
+    }).join("");
+    if (!rowsHTML) rowsHTML = '<div class="gdShotAdminEmpty">No entitlements found.</div>';
+    return [
+      '<div class="clarityPaymentAdminSection">',
+      '<strong>Admin entitlement viewer</strong>',
+      '<form class="clarityPaymentForm" onsubmit="return ClarityPayments.adminQueryEntitlements(this)">',
+      '<input name="accountId" placeholder="Account ID">',
+      '<input name="accountEmail" placeholder="Email">',
+      '<div class="clarityPaymentAdminActions">',
+      '<button type="submit">' + (entitlementQueryState.loading ? "Querying..." : "Load entitlements") + '</button>',
+      '<button type="button" onclick="ClarityPayments.resetEntitlementQuery()">Reset</button>',
+      '</div>',
+      '</form>',
+      entitlementQueryState.loading ? '<div class="clarityPaymentStatus">Loading entitlement data...</div>' : "",
+      entitlementQueryState.error ? '<div class="clarityPaymentStatus warning"><strong>Viewer error</strong><span>' + escapeHTML(entitlementQueryState.error) + '</span></div>' : "",
+      '<div class="gdShotAdminList" id="gdAdminEntitlementList">' + rowsHTML + '</div>',
+      '</div>'
+    ].join("");
+  }
+
+  function renderManualGrantForm() {
+    var options = PERMISSION_KEYS.map(function (value) {
+      return '<option value="' + escapeHTML(value) + '">' + escapeHTML(value) + '</option>';
+    }).join("");
+    return [
+      '<div class="clarityPaymentAdminSection">',
+      '<strong>Manual permission grant (skeleton)</strong>',
+      '<form class="clarityPaymentForm" onsubmit="return ClarityPayments.adminManualGrant(this)">',
+      '<label><span class="gdFieldLabel">Permission</span><select name="permissionKey">' + options + '</select></label>',
+      '<input name="accountId" placeholder="Account ID">',
+      '<input name="accountEmail" placeholder="Email">',
+      '<input name="profileId" placeholder="Profile ID">',
+      '<input name="durationHours" type="number" min="1" step="1" placeholder="Hours (optional)">',
+      '<textarea name="note" placeholder="Internal grant notes"></textarea>',
+      '<button type="submit">Create manual grant</button>',
+      '</form>',
+      '</div>'
+    ].join("");
+  }
+
+  function renderResolverTester() {
+    var selected = escapeHTML(resolverTestState.permissionKey || PERMISSION_KEYS[0]);
+    var options = PERMISSION_KEYS.map(function (value) {
+      return '<option value="' + escapeHTML(value) + '"' + (value === resolverTestState.permissionKey ? ' selected' : '') + '>' + escapeHTML(value) + '</option>';
+    }).join("");
+    return [
+      '<div class="clarityPaymentAdminSection">',
+      '<strong>Resolver test panel</strong>',
+      '<form class="clarityPaymentForm" onsubmit="return ClarityPayments.adminTestResolver(this)">',
+      '<label><span class="gdFieldLabel">Permission</span><select name="permissionKey">' + options + '</select></label>',
+      '<input name="accountId" placeholder="Account ID">',
+      '<input name="accountEmail" placeholder="Email">',
+      '<input name="profileId" placeholder="Profile ID">',
+      '<button type="submit">' + (resolverTestState.loading ? "Checking..." : "Run resolver") + '</button>',
+      '</form>',
+      resolverTestState.loading ? '<div class="clarityPaymentStatus">Running resolver check...</div>' : "",
+      resolverTestState.error ? '<div class="clarityPaymentStatus warning"><strong>Resolver error</strong><span>' + escapeHTML(resolverTestState.error) + '</span></div>' : "",
+      renderResolverResult(selected),
+      '</div>'
+    ].join("");
+  }
+
+  function renderResolverResult(permissionKey) {
+    if (!resolverTestState.result) return "";
+    var result = resolverTestState.result;
+    var allowedClass = result.allowed ? "ok" : "bad";
+    var lines = ["ok:" + (result.allowed ? " true" : " false"), "permission=" + escapeHTML(permissionKey || result.permissionKey || ""), "reasons=" + escapeHTML((Array.isArray(result.reasons) ? result.reasons.join(", ") : ""))];
+    return '<div class="clarityPaymentStatus ' + allowedClass + '"><strong>Resolver result</strong><span>' + escapeHTML(lines.join(" · ")) + '</span><pre style="margin-top:8px;white-space:pre-wrap;color:#d6f4ff;font-size:12px;">' + escapeHTML(JSON.stringify(result, null, 2)) + '</pre></div>';
   }
 
   function statusPill(label, ok) { return '<div class="clarityPaymentPill ' + (ok ? 'ok' : 'bad') + '"><b>' + escapeHTML(ok ? '✓' : '!') + '</b><span>' + escapeHTML(label) + '</span></div>'; }
@@ -289,6 +373,16 @@
   }
 
   function formData(form) { var data = {}; Array.prototype.forEach.call(new FormData(form).entries(), function (entry) { data[entry[0]] = entry[1]; }); data.active = !!form.elements.active && form.elements.active.checked; return data; }
+
+  function updateAdminQueryState(next) {
+    entitlementQueryState = Object.assign({}, entitlementQueryState, next || {});
+    render();
+  }
+
+  function updateResolverTestState(next) {
+    resolverTestState = Object.assign({}, resolverTestState, next || {});
+    render();
+  }
 
   function install() {
     installMenuRow(); section();
@@ -326,6 +420,101 @@
     },
     saveProductFromForm: function (form) { var data = formData(form); adminAction("upsertProduct", { product: data }).then(function () { form.reset(); if (form.elements.active) form.elements.active.checked = true; }); return false; },
     issueFreePassFromForm: function (form) { var data = formData(form); adminAction("issueFreePass", data).then(function () { form.reset(); if (form.elements.productKey) form.elements.productKey.value = "free_pass"; if (form.elements.durationHours) form.elements.durationHours.value = "24"; refresh({ silent: true }); }); return false; }
+    ,
+    adminQueryEntitlements: function (form) {
+      var data = formData(form);
+      entitlementQueryState = Object.assign({}, entitlementQueryState, {
+        accountId: data.accountId || "",
+        accountEmail: data.accountEmail || "",
+        lastChecked: "",
+        loading: true,
+        error: "",
+        entitlements: []
+      });
+      updateAdminQueryState({ loading: true, error: "", entitlements: [] });
+      adminAction("queryEntitlements", data)
+        .then(function (response) {
+          updateAdminQueryState({ loading: false, entitlements: (response && response.entitlements) || [], lastChecked: new Date().toISOString(), error: response && response.error ? response.error : "" });
+        })
+        .catch(function (error) {
+          updateAdminQueryState({ loading: false, error: error && error.message ? error.message : "Query failed" });
+        });
+      return false;
+    },
+    resetEntitlementQuery: function () { updateAdminQueryState({ accountId: "", accountEmail: "", entitlements: [], error: "", lastChecked: "" }); return false; },
+    adminManualGrant: function (form) {
+      var data = formData(form);
+      if (!data.accountId && !data.accountEmail) {
+        safe(function () { return window.toast && window.toast("Account ID or email is required"); });
+        return false;
+      }
+      if (!data.permissionKey) {
+        safe(function () { return window.toast && window.toast("Permission key is required"); });
+        return false;
+      }
+      adminAction("manualGrantPermission", data).then(function () {
+        form.reset();
+        if (entitlementQueryState.accountId || entitlementQueryState.accountEmail) {
+          adminAction("queryEntitlements", {
+            accountId: entitlementQueryState.accountId || data.accountId,
+            accountEmail: entitlementQueryState.accountEmail || data.accountEmail
+          }).then(function (response) {
+            updateAdminQueryState({ entitlements: (response && response.entitlements) || [], lastChecked: new Date().toISOString() });
+          });
+        }
+      });
+      return false;
+    },
+    adminRevokeManualEntitlement: function (entitlementId) {
+      if (!entitlementId) {
+        safe(function () { return window.toast && window.toast("entitlementId required"); });
+        return false;
+      }
+      adminAction("manualRevokePermission", { entitlementId: entitlementId }).then(function () {
+        if (entitlementQueryState.accountId || entitlementQueryState.accountEmail) {
+          adminAction("queryEntitlements", {
+            accountId: entitlementQueryState.accountId,
+            accountEmail: entitlementQueryState.accountEmail
+          }).then(function (response) {
+            updateAdminQueryState({ entitlements: (response && response.entitlements) || [], lastChecked: new Date().toISOString() });
+          });
+        }
+      });
+      return false;
+    },
+    adminTestResolver: function (form) {
+      var data = formData(form);
+      updateResolverTestState({
+        loading: true,
+        error: "",
+        permissionKey: String(data.permissionKey || PERMISSION_KEYS[0]),
+        accountId: String(data.accountId || ""),
+        accountEmail: String(data.accountEmail || ""),
+        profileId: String(data.profileId || "")
+      });
+      var permissionKey = String(data.permissionKey || PERMISSION_KEYS[0]).trim();
+      var resolveResult = window.ClarityPermissions && typeof window.ClarityPermissions.canUse === "function"
+        ? window.ClarityPermissions.canUse(permissionKey, { route: "admin_resolver_test", scope: "permission" }, data.accountId, data.accountEmail, data.profileId)
+        : Promise.resolve({
+          ok: false,
+          allowed: false,
+          permissionKey: permissionKey,
+          reasons: ["PERMISSIONS_HELPER_MISSING"],
+          entitlement: null,
+          raw: null,
+          error: "ClarityPermissions unavailable"
+        });
+      resolveResult.then(function (result) {
+        updateResolverTestState({
+          loading: false,
+          result: result || null,
+          error: result && result.error ? result.error : ""
+        });
+      }).catch(function (error) {
+        updateResolverTestState({ loading: false, result: null, error: error && error.message ? error.message : "Resolver request failed" });
+      });
+      return false;
+    }
   };
 
   document.addEventListener("DOMContentLoaded", function () { setTimeout(function () { install(); handleReturn(); refresh({ silent: true, auto: true }); }, 150); });

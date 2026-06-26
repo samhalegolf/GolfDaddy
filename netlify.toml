@@ -34,6 +34,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/permission-resolver"
+  to = "/.netlify/functions/permission-resolver"
+  status = 200
+
+[[redirects]]
   from = "/api/stripe-webhook"
   to = "/.netlify/functions/stripe-webhook"
   status = 200
