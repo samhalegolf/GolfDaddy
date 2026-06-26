@@ -32,6 +32,9 @@ exports.handler = async function (event) {
     if (payload.action === "upsertProduct") return await upsertProduct(payload.product, auth);
     if (payload.action === "setProductActive") return await setProductActive(payload.productKey, payload.active, auth);
     if (payload.action === "issueFreePass") return await issueFreePass(payload, auth);
+    if (payload.action === "queryEntitlements") return await queryEntitlements(payload, auth);
+    if (payload.action === "manualGrantPermission") return await manualGrantPermission(payload, auth);
+    if (payload.action === "manualRevokePermission") return await manualRevokePermission(payload, auth);
     if (payload.action === "seedDefaults") return await seedDefaults(auth);
 
     return json(400, { error: "Unknown payment admin action" });
@@ -153,6 +156,119 @@ async function setProductActive(productKey, active, auth) {
   });
   await logAdmin(auth, "set_product_active", { product_key: key, active: !!active });
   return await readSettings(auth);
+}
+
+async function queryEntitlements(payload, auth) {
+  const accountId = text(payload.accountId || payload.targetAccountId, 120);
+  const accountEmail = email(payload.accountEmail || payload.email || payload.targetEmail);
+  const limit = Number(payload.limit || 20);
+  const resolvedLimit = Number.isFinite(limit) && limit > 0 ? Math.min(limit, 200) : 20;
+  if (!accountId && !accountEmail) return json(400, { error: "Account ID or email is required" });
+
+  const filters = [];
+  if (accountId) filters.push("user_id=eq." + encodeFilter(accountId));
+  if (accountEmail) filters.push("account_email=eq." + encodeFilter(accountEmail));
+  const orFilter = "(" + filters.join(",") + ")";
+  const query = "user_entitlements?select=*&or=" + orFilter + "&order=created_at.desc&limit=" + resolvedLimit;
+
+  const entitlements = await supabaseFetch(query, { method: "GET" });
+  await logAdmin(auth, "query_entitlements", {
+    accountId,
+    accountEmail,
+    count: Array.isArray(entitlements) ? entitlements.length : 0
+  });
+  return json(200, {
+    ok: true,
+    target: { accountId: accountId, accountEmail: accountEmail },
+    entitlements: Array.isArray(entitlements) ? entitlements : []
+  });
+}
+
+async function manualGrantPermission(payload, auth) {
+  const accountId = text(payload.accountId || payload.targetAccountId, 120);
+  const accountEmail = email(payload.accountEmail || payload.email || payload.targetEmail);
+  const profileId = text(payload.profileId, 120);
+  const permissionKey = text(payload.permissionKey || payload.entitlementType, 120);
+  const notes = text(payload.notes || payload.note, 300);
+  const starts = payload.startsAt ? new Date(payload.startsAt) : new Date();
+  const hours = Number(payload.durationHours || payload.duration_hours || 0);
+  const cleanHours = Number.isFinite(hours) && hours > 0 ? hours : 0;
+  if (!accountId && !accountEmail) return json(400, { error: "Account ID or email is required" });
+  if (!permissionKey) return json(400, { error: "permissionKey is required" });
+  if (Number.isNaN(starts.getTime())) return json(400, { error: "Invalid startsAt" });
+  const expires = payload.expiresAt ? new Date(payload.expiresAt) : (cleanHours > 0 ? new Date(starts.getTime() + cleanHours * 60 * 60 * 1000) : null);
+  if (payload.expiresAt && Number.isNaN(expires.getTime())) return json(400, { error: "Invalid expiresAt" });
+
+  await supabaseFetch("user_entitlements", {
+    method: "POST",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify({
+      user_id: accountId || null,
+      account_email: accountEmail || null,
+      profile_id: profileId || null,
+      entitlement_type: permissionKey,
+      status: "active",
+      starts_at: starts.toISOString(),
+      expires_at: expires ? expires.toISOString() : null,
+      usage_count: 0,
+      metadata: {
+        source: "admin_manual_grant",
+        note: notes,
+        granted_by: auth.account && auth.account.email || "admin",
+        permission_key: permissionKey
+      }
+    })
+  });
+  await logAdmin(auth, "manual_grant_permission", {
+    accountId,
+    accountEmail,
+    profileId,
+    permissionKey,
+    notes
+  });
+  return json(200, { ok: true, message: "Manual grant created" });
+}
+
+async function manualRevokePermission(payload, auth) {
+  const entitlementId = text(payload.entitlementId, 120);
+  const accountId = text(payload.accountId || payload.targetAccountId, 120);
+  const accountEmail = email(payload.accountEmail || payload.email || payload.targetEmail);
+  const permissionKey = text(payload.permissionKey || payload.entitlementType, 120);
+  if (!entitlementId && (!accountId && !accountEmail)) return json(400, { error: "entitlementId or target account is required" });
+  if (!permissionKey && !entitlementId) return json(400, { error: "permissionKey is required when entitlementId is not supplied" });
+
+  let patchTarget = "";
+  if (entitlementId) {
+    patchTarget = "id=eq." + encodeFilter(entitlementId);
+  } else {
+    const filters = [];
+    if (accountId) filters.push("user_id=eq." + encodeFilter(accountId));
+    if (accountEmail) filters.push("account_email=eq." + encodeFilter(accountEmail));
+    if (permissionKey) filters.push("entitlement_type=eq." + encodeFilter(permissionKey));
+    patchTarget = "and=(" + filters.join(",") + ")";
+  }
+  if (!patchTarget) return json(400, { error: "Unable to identify entitlement to revoke" });
+
+  await supabaseFetch("user_entitlements?" + patchTarget, {
+    method: "PATCH",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify({
+      status: "revoked",
+      metadata: {
+        source: "admin_manual_revoke",
+        revoked_by: auth.account && auth.account.email || "admin",
+        revoked_at: new Date().toISOString(),
+        notes: text(payload.notes || payload.note, 300)
+      }
+    })
+  });
+  await logAdmin(auth, "manual_revoke_permission", {
+    entitlementId,
+    accountId,
+    accountEmail,
+    permissionKey
+  });
+  return json(200, { ok: true, message: "Manual revoke applied" });
 }
 
 async function issueFreePass(payload, auth) {

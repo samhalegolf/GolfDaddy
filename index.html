@@ -28314,6 +28314,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 <script src="scripts/clarity-supabase-auth.js?v=supabase-auth-001"></script>
 <script src="scripts/clarity-router.js?v=core-foundation-002"></script>
 <script src="scripts/clarity-player-settings.js?v=settings-extract-001"></script>
+<script src="scripts/clarity-permissions.js?v=permissions-v1"></script>
 <script src="scripts/clarity-payments.js?v=payments-v1"></script>
 <script src="scripts/gd-shot-outcomes.js"></script>
 <script src="scripts/gd-shot-events.js?v=deliberate-outcome-20260612"></script>
@@ -41351,6 +41352,7 @@ body:has(#courseScreen:not(.hidden)) .leaflet-marker-icon{display:none!important
 	  var lastBackNavAt=0;
 	  var capturedGreenZoomActive=false;
 	  var gpsSurfaceRestoreBusy=false;
+  var GPS_ROUND_START_PERMISSION_KEY="gps_round_start";
   var oldEnter=window.enterGpsModule;
 	  var oldHome=window.gdCanonicalShellHome||window.showShellHome;
 	  var oldBack=window.gdCanonicalShellBack||window.shellBack;
@@ -41427,6 +41429,10 @@ body:has(#courseScreen:not(.hidden)) .leaflet-marker-icon{display:none!important
     var values=[safe(function(){return currentPlayingHole},0),safe(function(){return selectedHole},0),safe(function(){return window.gdMapperActiveHole},0),safe(function(){return sessionStorage.getItem("gd_active_playing_hole")},0),safe(function(){return sessionStorage.getItem("gd_mapper_active_hole")},0)];
     for(var i=0;i<values.length;i++){var n=Number(values[i]);if(Number.isFinite(n)&&n>0)return Math.round(n)}
     return 1;
+  }
+  function shouldBypassGpsRoundStartPermission(options){
+    options=options||{};
+    return !!(options.fromResume || options.fromBack || options.preserve || options.preserveState);
   }
   function normalizeResume(raw,source){
     if(!raw||typeof raw!=="object")return null;
@@ -41738,10 +41744,29 @@ body:has(#courseScreen:not(.hidden)) .leaflet-marker-icon{display:none!important
     return home(event);
   }
   function enter(opts){
-    var result=typeof oldEnter==="function"?oldEnter.apply(this,arguments):false;
-    setTimeout(function(){if(pickerOpen())ensureResumePanel();else if(!(opts&&opts.fromResume))writeResume("enter-gps");guardSurface();syncToolRail()},140);
-    setTimeout(function(){if(pickerOpen())ensureResumePanel();guardSurface();syncToolRail()},520);
-    return result;
+    var options=opts||{};
+    if(shouldBypassGpsRoundStartPermission(options)){
+      var resumeResult=typeof oldEnter==="function"?oldEnter.apply(this,arguments):false;
+      setTimeout(function(){if(pickerOpen())ensureResumePanel();else if(!options.fromResume)writeResume("enter-gps");guardSurface();syncToolRail()},140);
+      setTimeout(function(){if(pickerOpen())ensureResumePanel();guardSurface();syncToolRail()},520);
+      return resumeResult;
+    }
+    var permissionCheck = window.ClarityPermissions && typeof window.ClarityPermissions.canUse==="function"
+      ? window.ClarityPermissions.canUse(GPS_ROUND_START_PERMISSION_KEY, { route: "gps_round_start", resourceId: "gps-entry" })
+      : Promise.resolve({ ok: false, allowed: false, permissionKey: GPS_ROUND_START_PERMISSION_KEY, reasons: ["PERMISSIONS_HELPER_MISSING"], entitlement: null, raw: null, error: "ClarityPermissions unavailable" });
+    permissionCheck.then(function(check){
+      if(check&&check.allowed){
+        if(typeof oldEnter==="function")oldEnter.call(window,options);
+      }else{
+        safe(function(){if(typeof toast==="function")toast("Start gate: active paid access is required for GPS rounds")});
+      }
+      setTimeout(function(){if(pickerOpen())ensureResumePanel();else if(!(options.fromResume))writeResume("enter-gps");guardSurface();syncToolRail()},140);
+      setTimeout(function(){if(pickerOpen())ensureResumePanel();guardSurface();syncToolRail()},520);
+    }).catch(function(){
+      safe(function(){if(typeof toast==="function")toast("Start gate check failed. Try again.")});
+      return false;
+    });
+    return false;
   }
   function openCourseWrapper(){
     setResumeActivated(true);
