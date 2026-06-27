@@ -481,7 +481,8 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	    window.__gdLastHoleImageCaptureManifest=manifest;
 	    window.__gdV19CapturedHoleFrameManifest=manifest;
 	    safe(function(){localStorage.setItem(storageKey(),JSON.stringify(manifest));});
-	    safe(function(){if(window.GDCoursePlayPipeline&&typeof window.GDCoursePlayPipeline.registerCoursePlayFrame==="function")window.GDCoursePlayPipeline.registerCoursePlayFrame(surfaceCourseKey(),surfaceHoleNumber(),manifest,{generatedFrom:"v19-captured-surface",manifestKey:storageKey(),status:"generated"});});
+	    gdRegisterCoursePlayFrameManifest(manifest,{generatedFrom:"v19-captured-surface",manifestKey:storageKey(),status:"generated"});
+	    safe(function(){if(capturedGpsPlayActive())gdCoursePlayDebugEvent("gps-play-generated-new-frame",{reason:reason,manifestKey:storageKey(),tileCount:tiles.length,captureZoom:z,imageWidth:width,imageHeight:height});});
 	    return manifest;
 	  }
 	  function loadCaptureManifest(){
@@ -493,6 +494,8 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	    if(m&&!manifestMatchesActive(m))m=null;
 	    if(m&&Array.isArray(m.tiles)&&m.originPx){
 	      captureManifest=safe(function(){return typeof window.gdCapturedSurfaceWriteScan==="function"?window.gdCapturedSurfaceWriteScan(m,{reason:m.reason||"load",storageKey:storageKey()}):m;},m)||m;
+	      gdRegisterCoursePlayFrameManifest(captureManifest,{generatedFrom:"v19-captured-surface-cache",manifestKey:storageKey(),status:"loaded"});
+	      safe(function(){if(capturedGpsPlayActive())gdCoursePlayDebugEvent("gps-play-loaded-from-existing-frame",{reason:m.reason||"load",manifestKey:storageKey(),tileCount:(m.tiles||[]).length});});
 	      return publishCaptureManifest(captureManifest);
 	    }
 	    return null;
@@ -686,6 +689,30 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	    if(validBounds(b))return b;
 	    return pointBounds(green,22);
 	  }
+	  function gdCoursePlayDebugEvent(type,detail){
+	    safe(function(){
+	      if(window.GDCoursePlayPipeline&&typeof window.GDCoursePlayPipeline.recordDebugEvent==="function"){
+	        window.GDCoursePlayPipeline.recordDebugEvent(type,Object.assign({
+	          courseId:surfaceCourseKey(),
+	          courseName:surfaceCourseName(),
+	          holeNumber:surfaceHoleNumber()
+	        },detail||{}));
+	      }
+	    });
+	  }
+	  function gdCoursePlayFrameCourseRef(){
+	    return safe(function(){
+	      var state=activePipelineHoleState();
+	      if(state&&(state.courseId||state.courseKey))return state.courseId||state.courseKey;
+	      return activeMappedCourse()||surfaceCourseKey();
+	    },surfaceCourseKey());
+	  }
+	  function gdRegisterCoursePlayFrameManifest(manifest,opts){
+	    return safe(function(){
+	      if(!window.GDCoursePlayPipeline||typeof window.GDCoursePlayPipeline.registerCoursePlayFrame!=="function")return null;
+	      return window.GDCoursePlayPipeline.registerCoursePlayFrame(gdCoursePlayFrameCourseRef(),surfaceHoleNumber(),manifest,opts||{});
+	    },null);
+	  }
 	  function gdRenderCoursePlayHoleFrame(courseId,holeNumber,holePlayData,opts){
 	    opts=opts||{};
 	    if(window.gdFullMappingMode||document.body&&document.body.classList.contains("gdFullMappingMode"))return false;
@@ -694,6 +721,7 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	    var bounds=coursePlayGreenBounds(data);
 	    if(!validBounds(bounds))return false;
 	    var manifest=loadCaptureManifest();
+	    var loadedExisting=!!(manifest&&manifestMatchesActive(manifest));
 	    if(!manifest||!manifestMatchesActive(manifest)){
 	      captureManifest=null;
 	      manifest=buildCaptureManifest(bounds,opts.reason||"course-play-pipeline");
@@ -708,6 +736,7 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	        document.body.dataset.gdCoursePlayFrameRenderedHole=String(holeNumber||surfaceHoleNumber());
 	        document.body.dataset.gdCoursePlayFrameRenderedAt=String(Date.now());
 	      });
+	      gdCoursePlayDebugEvent("gps-play-rendered-frame",{reason:opts.reason||"course-play-pipeline",manifestKey:manifest.key||manifest.storageKey||"",loadedExisting:loadedExisting,frameIndexKey:String(surfaceCourseKey()||"course")+":h"+String(surfaceHoleNumber()||1)});
 	    }
 	    return !!ok;
 	  }
@@ -800,6 +829,7 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	      }
 	      if(typeof setState==="function")setState(loadingMessage());
 	      window.__gdHoleFrameLoading={reason:reason||"frame-loading",context:context||{},hole:surfaceHoleNumber(),course:surfaceCourseKey(),at:Date.now()};
+	      gdCoursePlayDebugEvent("gps-play-showed-loading",{reason:reason||"frame-loading",status:activePipelineStatus(),visibleOwner:visiblePreparingOwner()});
 	      if(holeFrameLoadingKey!==key&&holeFrameLoadingTimer){clearTimeout(holeFrameLoadingTimer);holeFrameLoadingTimer=null;}
 	      holeFrameLoadingKey=key;
 	      if(!holeFrameLoadingTimer){
@@ -853,6 +883,7 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	        toast(unavailableMessage());
 	      }
 	      window.__gdCapturedFrameUnavailable={reason:reason||"missing-frame",context:context||{},hole:surfaceHoleNumber(),course:surfaceCourseKey(),at:Date.now()};
+	      gdCoursePlayDebugEvent("gps-play-fell-to-unavailable",{reason:reason||"missing-frame",status:activePipelineStatus(),visibleOwner:visiblePreparingOwner()});
 	      if(typeof window.gdApplyGpsMapVisibilityOwner==="function")window.gdApplyGpsMapVisibilityOwner("captured-frame-unavailable");
 	    });
 	    readout("frame unavailable | "+(reason||"missing-frame"));
@@ -1911,6 +1942,28 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
     .gdLmAdmin{margin:12px 0 14px;padding:12px;border-radius:20px;background:linear-gradient(180deg,rgba(14,165,233,.12),rgba(255,255,255,.045));border:1px solid rgba(96,165,250,.18)}
     .gdLmAdmin h3{margin:0 0 4px;font-size:16px;letter-spacing:-.02em}
     .gdLmAdmin p{margin:0 0 10px;color:rgba(255,255,255,.6);font-size:12px;font-weight:700;line-height:1.35}
+    .gdCoursePlayDebug{display:none;margin:12px 0 14px;padding:12px;border-radius:20px;background:linear-gradient(180deg,rgba(31,211,109,.10),rgba(255,255,255,.04));border:1px solid rgba(31,211,109,.18)}
+    body[data-gd-permission="admin"] .gdCoursePlayDebug,body.gdCoursePlayDebugOn .gdCoursePlayDebug{display:block}
+    .gdCoursePlayDebugHead{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:10px}
+    .gdCoursePlayDebugHead h3{margin:0;font-size:16px;letter-spacing:-.02em}
+    .gdCoursePlayDebugHead p{margin:3px 0 0;color:rgba(255,255,255,.58);font-size:11px;font-weight:750;line-height:1.35}
+    .gdCoursePlayDebugActions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+    .gdCoursePlayDebugActions button{border-radius:999px;padding:7px 10px;background:rgba(255,255,255,.09);color:#fff;font-size:11px;font-weight:950}
+    .gdCoursePlayDebugSummary{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:7px;margin:8px 0 10px}
+    .gdCoursePlayDebugMetric{min-width:0;padding:8px;border-radius:12px;background:rgba(0,0,0,.18);border:1px solid rgba(255,255,255,.07)}
+    .gdCoursePlayDebugMetric span{display:block;color:rgba(255,255,255,.52);font-size:9px;font-weight:950;text-transform:uppercase;letter-spacing:.06em}
+    .gdCoursePlayDebugMetric strong{display:block;margin-top:3px;color:#fff;font-size:13px;font-weight:950;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .gdCoursePlayDebugScroll{overflow:auto;border-radius:13px;border:1px solid rgba(255,255,255,.08);background:rgba(0,0,0,.16);margin-top:8px}
+    .gdCoursePlayDebugTable{min-width:960px;width:100%;border-collapse:collapse;font:800 10px/1.3 ui-monospace,SFMono-Regular,Menlo,monospace;color:rgba(255,255,255,.76)}
+    .gdCoursePlayDebugTable th,.gdCoursePlayDebugTable td{padding:7px 8px;border-bottom:1px solid rgba(255,255,255,.06);text-align:left;vertical-align:top}
+    .gdCoursePlayDebugTable th{position:sticky;top:0;background:#101713;color:rgba(255,255,255,.56);font-size:9px;text-transform:uppercase;letter-spacing:.05em;z-index:1}
+    .gdCoursePlayDebugFlag{display:inline-flex;align-items:center;justify-content:center;min-width:22px;border-radius:999px;padding:2px 6px;background:rgba(255,255,255,.08);color:rgba(255,255,255,.54);font-size:9px;font-weight:950}
+    .gdCoursePlayDebugFlag.ok{background:rgba(31,211,109,.15);color:#73ffae}
+    .gdCoursePlayDebugFlag.bad{background:rgba(255,94,94,.13);color:#ff9d9d}
+    .gdCoursePlayDebugTimeline{max-height:190px;overflow:auto;margin-top:8px;padding:8px;border-radius:13px;background:rgba(0,0,0,.18);border:1px solid rgba(255,255,255,.08);font:800 10px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;color:rgba(255,255,255,.78)}
+    .gdCoursePlayDebugEvent{padding:5px 0;border-bottom:1px solid rgba(255,255,255,.05)}
+    .gdCoursePlayDebugEvent:last-child{border-bottom:0}
+    .gdCoursePlayDebugEmpty{padding:9px;border-radius:12px;background:rgba(0,0,0,.16);color:rgba(255,255,255,.58);font-size:11px;font-weight:850}
     .gdLmActions{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px}
     .gdLmActions button{border-radius:14px;padding:11px 10px;background:rgba(255,255,255,.09);font-size:13px}
     .gdLmActions .primary{background:linear-gradient(180deg,#d7b06b,#c58d35);color:#071008}
@@ -5601,6 +5654,7 @@ body[data-gd-permission="admin"] #gdV62Home .gdHomeAdminSettings{display:inline-
 <div class="devIntro"><strong>Admin uses the Coach-facing app by default.</strong><br/>The only extra surface is this Admin Settings page, where permissions and tucked-away developer controls live.</div>
 <div class="gdAdminVisualCard" id="gdAdminPreLockFrameCard"><div><strong>Hole frame blackout</strong><span id="gdAdminPreLockFrameSub">Soft faded frame around the pre-lock hole view.</span></div><button id="gdAdminPreLockFrameToggle" type="button" onclick="gdTogglePreLockBlackoutFrame()">Soft</button></div>
 <div id="gdPermissionCard" class="gdPermissionCard"></div>
+<div class="gdCoursePlayDebug" id="gdCoursePlayDebugPanel"><div class="gdCoursePlayDebugHead"><div><h3>Course Play Pipeline</h3><p>Admin-only persistence/frame visibility. It reads local pipeline, frame-index, manifest, and sync-queue state.</p></div><div class="gdCoursePlayDebugActions"><button type="button" onclick="gdRenderCoursePlayPipelineDebug()">Refresh</button><button type="button" onclick="gdClearCoursePlayPipelineDebug()">Clear log</button></div></div><div id="gdCoursePlayDebugSummary" class="gdCoursePlayDebugSummary"></div><div id="gdCoursePlayDebugTable"></div><div id="gdCoursePlayDebugTimeline" class="gdCoursePlayDebugTimeline"></div></div>
 <details class="gdDeveloperSettings" id="gdDeveloperSettings"><summary><span>Developer Settings</span><small>Safe values only · formulas locked</small></summary><div class="gdDeveloperBody">
 <div class="gdLmAdmin"><h3>Launch Monitor Intake Test</h3><p>Admin-only test lane for captured practice data. Upload plain text to check the hidden cluster and face/path corroboration logic.</p><div class="gdLmActions"><button class="gdUploadFileButton" id="gdLmUploadLabel" type="button" onclick="gdPickLaunchMonitorFile()">Upload text file</button><button type="button" id="gdLmClearDemoBtn" onclick="gdClearLaunchMonitorDemo()">Clear launch data</button></div><input type="file" id="gdLmUploadInput" accept=".txt,.csv,.json,text/plain,text/csv,application/json"><div class="gdLmResult" id="gdLaunchMonitorAdminResult"></div></div>
 <div id="devTuningControls"></div>
@@ -5854,6 +5908,88 @@ function gdEscapeHTML(value){
     "'":"&#39;"
   }[ch]));
 }
+function gdCoursePlayDebugEnabled(){
+  try{
+    if(/[?&](gd_course_play_debug|debug-course-play)(=1|=true|=[^&]+|&|$)/i.test(location.search))return true;
+    return localStorage.getItem("gd_course_play_debug_enabled")==="1";
+  }catch(e){return false;}
+}
+function gdSetCoursePlayDebug(enabled){
+  try{localStorage.setItem("gd_course_play_debug_enabled",enabled?"1":"0");}catch(e){}
+  try{document.body.classList.toggle("gdCoursePlayDebugOn",!!enabled);}catch(e){}
+  gdRenderCoursePlayPipelineDebug();
+}
+function gdCoursePlayDebugFlag(value){
+  return `<span class="gdCoursePlayDebugFlag ${value?'ok':'bad'}">${value?'Yes':'No'}</span>`;
+}
+function gdCoursePlayDebugTime(value){
+  if(!value)return "";
+  const n=Number(value);
+  const date=Number.isFinite(n)&&String(value).length<14?new Date(n):new Date(value);
+  if(Number.isNaN(date.getTime()))return String(value);
+  return date.toLocaleTimeString([], {hour:"2-digit",minute:"2-digit",second:"2-digit"});
+}
+function gdCoursePlayDebugMetric(label,value){
+  return `<div class="gdCoursePlayDebugMetric"><span>${gdEscapeHTML(label)}</span><strong>${gdEscapeHTML(value ?? "")}</strong></div>`;
+}
+function gdRenderCoursePlayPipelineDebug(){
+  const summary=document.getElementById("gdCoursePlayDebugSummary");
+  const tableHost=document.getElementById("gdCoursePlayDebugTable");
+  const timelineHost=document.getElementById("gdCoursePlayDebugTimeline");
+  if(!summary||!tableHost||!timelineHost)return;
+  try{document.body.classList.toggle("gdCoursePlayDebugOn",gdCoursePlayDebugEnabled());}catch(e){}
+  const api=window.GDCoursePlayPipeline;
+  if(!api||typeof api.buildDebugSnapshot!=="function"){
+    summary.innerHTML='<div class="gdCoursePlayDebugEmpty">Course Play Pipeline debug data is not loaded yet.</div>';
+    tableHost.innerHTML="";
+    timelineHost.innerHTML="";
+    return;
+  }
+  const snap=api.buildDebugSnapshot();
+  summary.innerHTML=[
+    gdCoursePlayDebugMetric("Course",snap.activeCourseName||snap.activeCourseKey||""),
+    gdCoursePlayDebugMetric("Course key",snap.activeCourseKey||""),
+    gdCoursePlayDebugMetric("Active hole","H"+(snap.activeHole||"")),
+    gdCoursePlayDebugMetric("Pipeline status",snap.pipelineCourseStatus||"unknown"),
+    gdCoursePlayDebugMetric("Holes known",snap.totalHolesKnown||0),
+    gdCoursePlayDebugMetric("Play data ready",snap.holesWithPlayDataReady||0),
+    gdCoursePlayDebugMetric("Frame index",snap.holesWithFrameIndexEntries||0),
+    gdCoursePlayDebugMetric("Manifest present",snap.holesWithCapturedManifestsPresent||0),
+    gdCoursePlayDebugMetric("Sync queue",snap.syncQueueItemCount||0)
+  ].join("");
+  const rows=Array.isArray(snap.rows)?snap.rows:[];
+  if(rows.length){
+    tableHost.innerHTML=`<div class="gdCoursePlayDebugScroll"><table class="gdCoursePlayDebugTable"><thead><tr><th>Hole</th><th>State</th><th>Tee</th><th>Green</th><th>Route</th><th>Anchors</th><th>Frame index</th><th>Manifest key</th><th>Manifest</th><th>Last gen/render</th><th>Source</th><th>Sync</th><th>Updated</th><th>Reason</th></tr></thead><tbody>${rows.map(row=>`
+      <tr>
+        <td>H${gdEscapeHTML(row.holeNumber)}</td>
+        <td>${gdEscapeHTML(row.pipelineState||"")}</td>
+        <td>${gdCoursePlayDebugFlag(row.hasTee)}</td>
+        <td>${gdCoursePlayDebugFlag(row.hasGreen)}</td>
+        <td>${gdCoursePlayDebugFlag(row.hasRoute)}</td>
+        <td>${gdCoursePlayDebugFlag(row.hasFrameAnchors)}</td>
+        <td>${gdCoursePlayDebugFlag(row.hasFrameIndexEntry)}<br>${gdEscapeHTML(row.frameIndexKey||"")}</td>
+        <td>${gdEscapeHTML(row.capturedManifestKey||"")}</td>
+        <td>${gdCoursePlayDebugFlag(row.capturedManifestPresent)}</td>
+        <td>${gdEscapeHTML(gdCoursePlayDebugTime(row.lastGeneratedAt))}<br>${gdEscapeHTML(row.lastRenderedAt?gdCoursePlayDebugTime(row.lastRenderedAt):"")}</td>
+        <td>${gdEscapeHTML(row.source||"")}</td>
+        <td>${gdEscapeHTML(row.syncStatus||"")}</td>
+        <td>${gdEscapeHTML(gdCoursePlayDebugTime(row.updatedAt))}</td>
+        <td>${gdEscapeHTML(row.lastError||"")}</td>
+      </tr>`).join("")}</tbody></table></div>`;
+  }else{
+    tableHost.innerHTML='<div class="gdCoursePlayDebugEmpty">No known course-play holes yet.</div>';
+  }
+  const events=(Array.isArray(snap.timeline)?snap.timeline:[]).slice().reverse();
+  timelineHost.innerHTML=events.length?events.map(event=>{
+    const bits=[event.type,event.courseName||event.courseId,event.holeNumber?("H"+event.holeNumber):"",event.status||event.frameStatus||"",event.reason||event.source||""].filter(Boolean);
+    return `<div class="gdCoursePlayDebugEvent"><strong>${gdEscapeHTML(gdCoursePlayDebugTime(event.at))}</strong> ${gdEscapeHTML(bits.join(" · "))}</div>`;
+  }).join(""):'<div class="gdCoursePlayDebugEmpty">No runtime events yet.</div>';
+}
+function gdClearCoursePlayPipelineDebug(){
+  try{window.GDCoursePlayPipeline?.clearDebugTimeline?.();}catch(e){}
+  try{window.__gdClearCoursePlayDebugLog?.();}catch(e){}
+  gdRenderCoursePlayPipelineDebug();
+}
 function devMerge(base,patch){const out=devClone(base);function walk(t,s){Object.keys(s||{}).forEach(k=>{if(s[k]&&typeof s[k]==="object"&&!Array.isArray(s[k])){t[k]=t[k]||{};walk(t[k],s[k]);}else{t[k]=s[k];}})}walk(out,patch);return out;}
 let devSettings=devClone(DEV_DEFAULTS);
 try{devSettings=devMerge(DEV_DEFAULTS,JSON.parse(localStorage.getItem(DEV_SETTINGS_STORE)||"{}"));}catch(e){devSettings=devClone(DEV_DEFAULTS)}
@@ -5899,6 +6035,7 @@ function renderDevPanel(){
   gdRenderPermissionsAdmin();
   gdRenderLaunchMonitorAdmin();
   gdRenderAdminVisualSettings();
+  gdRenderCoursePlayPipelineDebug();
   root.innerHTML="";
   const groups=Object.keys(DEV_DEFS).sort((a,b)=>DEV_DEFS[a].label.localeCompare(DEV_DEFS[b].label));
   if(!groups.includes(activeDevGroup))activeDevGroup=groups[0];
@@ -5923,10 +6060,16 @@ function renderDevPanel(){
     input.onchange=()=>{let v=Number(input.value);const f=DEV_FIELDS[input.dataset.devPath];if(!Number.isFinite(v))v=devDefault(input.dataset.devPath);v=Math.max(f.min,Math.min(f.max,v));setDev(input.dataset.devPath,v);};
   });
 }
-function openDeveloperPanel(){gdRenderPermissionsAdmin();renderDevPanel();openPanel("developerPanel");}
+function openDeveloperPanel(){gdRenderPermissionsAdmin();renderDevPanel();gdRenderCoursePlayPipelineDebug();openPanel("developerPanel");}
 window.GolfDaddyDev={defaults:DEV_DEFAULTS,settings:devSettings,get:dev,set:setDev,reset:resetDevSettings,render:renderDevPanel};
 window.gdPreLockBlackoutFrameEnabled=gdPreLockBlackoutFrameEnabled;
 window.gdTogglePreLockBlackoutFrame=gdTogglePreLockBlackoutFrame;
+window.gdRenderCoursePlayPipelineDebug=gdRenderCoursePlayPipelineDebug;
+window.gdSetCoursePlayDebug=gdSetCoursePlayDebug;
+window.gdClearCoursePlayPipelineDebug=gdClearCoursePlayPipelineDebug;
+try{document.body.classList.toggle("gdCoursePlayDebugOn",gdCoursePlayDebugEnabled());}catch(e){}
+window.addEventListener("gd-course-play-debug-event",()=>{if(document.getElementById("developerPanel")?.classList.contains("open"))gdRenderCoursePlayPipelineDebug();});
+setInterval(()=>{if(document.getElementById("developerPanel")?.classList.contains("open"))gdRenderCoursePlayPipelineDebug();},2200);
 
 function gdLmMetric(rawLabel,candidateMetric,value,unit="m",confidence=.84){
   return {rawLabel,candidateMetric,rawValue:String(value),value,unit,confidence};
