@@ -132,7 +132,8 @@ body:not(.gdMappedStartPromptActive):not(.gd-frame-hard-locked):not(.gd-green-zo
     var spec={
       zoom:{x:.154,y:.205,w:.692,h:.315},
       lock:{x:.250,y:.208,w:.500,h:.218},
-      hole:{x:.310,y:.209,w:.375,h:.157}
+      hole:{x:.310,y:.209,w:.375,h:.157},
+      tee:{x:.230,y:.805,w:.540,h:.175}
     }[kind]||{x:.250,y:.208,w:.500,h:.218};
     return {left:w*spec.x,top:h*spec.y,right:w*(spec.x+spec.w),bottom:h*(spec.y+spec.h),width:w*spec.w,height:h*spec.h};
   }
@@ -160,7 +161,7 @@ body:not(.gdMappedStartPromptActive):not(.gd-frame-hard-locked):not(.gd-green-zo
     window.gdSetTargetFrameDebug=function(enabled){window.gdTargetFrameDebug=!!enabled;ensureOverlay();if(document.body)document.body.classList.toggle("gdTargetFrameDebugOn",!!enabled);};
     ensureOverlay();
     if(document.body)document.body.classList.toggle("gdTargetFrameDebugOn",window.gdTargetFrameDebug===true);
-    window.__gdHoleFrameGuideContractV20={version:VERSION,at:Date.now(),frames:{hole:frameRect("hole"),lock:frameRect("lock"),zoom:frameRect("zoom")}};
+    window.__gdHoleFrameGuideContractV20={version:VERSION,at:Date.now(),frames:{hole:frameRect("hole"),lock:frameRect("lock"),zoom:frameRect("zoom"),tee:frameRect("tee")}};
     safe(function(){if(document.body&&document.body.classList.contains("gdCapturedHoleFrameCameraOn")&&window.__gdV19LastCapturedFit&&typeof window.gdFitCapturedHoleFrameToBoxV19==="function"){var last=window.__gdV19LastCapturedFit;var b=window.gdGetActiveShotObjectBounds&&window.gdGetActiveShotObjectBounds();window.gdFitCapturedHoleFrameToBoxV19(b,last.frame||"hole",last.frame==="zoom"?.018:.025,{objectName:last.object||"guide-contract",reason:"guide-contract"});}});
     return true;
   }
@@ -546,6 +547,49 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	      center:rotatePx(px.center,angle)
 	    };
 	  }
+	  function centerOfRect(rect){
+	    return rect?{x:rect.left+rect.width/2,y:rect.top+rect.height/2}:null;
+	  }
+	  function anchorPoint(manifest,name){
+	    var pins=manifest&&manifest.anchorPins||{};
+	    if(name==="tee")return asLL(pins.tee||manifest.teeLatLng);
+	    if(name==="green")return asLL(pins.green)||currentGreenPoint();
+	    return null;
+	  }
+	  function holeDualAnchorFit(manifest,px,angle,fr,baseScale,fitRatio,opts){
+	    var tee=pointPx(manifest,anchorPoint(manifest,"tee"));
+	    var green=pointPx(manifest,anchorPoint(manifest,"green"))||px.center;
+	    if(!tee||!green)return null;
+	    var rTee=rotatePx(tee,angle);
+	    var rGreen=rotatePx(green,angle);
+	    var sourceDx=rGreen.x-rTee.x;
+	    var sourceDy=rGreen.y-rTee.y;
+	    var sourceLen=Math.sqrt(sourceDx*sourceDx+sourceDy*sourceDy);
+	    var desiredGreen=centerOfRect(fr);
+	    var desiredTee=centerOfRect(frameRect("tee"));
+	    if(!desiredGreen||!desiredTee||sourceLen<10)return null;
+	    var desiredDx=desiredGreen.x-desiredTee.x;
+	    var desiredDy=desiredGreen.y-desiredTee.y;
+	    var desiredLen=Math.sqrt(desiredDx*desiredDx+desiredDy*desiredDy);
+	    if(desiredLen<10)return null;
+	    var singleScale=baseScale*fitRatio;
+	    var axisScale=desiredLen/sourceLen;
+	    var scale=Math.max(.08,Math.min(num(opts.maxScale,4),singleScale,axisScale));
+	    var tx=desiredGreen.x-rGreen.x*scale;
+	    var ty=desiredGreen.y-rGreen.y*scale;
+	    var teeScreen={x:tx+rTee.x*scale,y:ty+rTee.y*scale};
+	    var errX=teeScreen.x-desiredTee.x;
+	    var errY=teeScreen.y-desiredTee.y;
+	    return {
+	      scale:scale,
+	      tx:tx,
+	      ty:ty,
+	      source:"tee-green",
+	      teeErrorPx:Math.sqrt(errX*errX+errY*errY),
+	      greenAnchor:"box-1",
+	      teeAnchor:"tee"
+	    };
+	  }
 	  function hideWaiting(){
 	    safe(function(){document.body.classList.remove("gdWaitingForConfirmedGreen","gdFrameCameraWaiting");});
 	  }
@@ -631,14 +675,24 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	    var rotatedCenter=rpx.center;
 	    var tx=desiredGreen.x-rotatedCenter.x*scale;
 	    var ty=desiredGreen.y-rotatedCenter.y*scale;
+	    var dualAnchor=null;
+	    if(frameName==="hole"){
+	      dualAnchor=holeDualAnchorFit(manifest,px,angle,fr,baseScale,fitRatio,opts);
+	      if(dualAnchor){
+	        scale=dualAnchor.scale;
+	        tx=dualAnchor.tx;
+	        ty=dualAnchor.ty;
+	        anchorMode="hole-dual-anchor";
+	      }
+	    }
 	    var group=document.querySelector("#gdHoleImageCameraLayer .gdHoleImageTiles");
 	    if(!group)return false;
 	    group.style.transform="translate("+tx.toFixed(2)+"px,"+ty.toFixed(2)+"px) rotate("+angle.toFixed(6)+"rad) scale("+scale.toFixed(4)+")";
 		    safe(function(){document.body.classList.add("gdCapturedHoleFrameCameraOn","gdHoleImageCameraOn");document.body.classList.remove("gdWaitingForConfirmedGreen","gdFrameCameraWaiting");});
 		    clearCapturedFrameUnavailable();
 		    var layer=document.getElementById("gdHoleImageCameraLayer");
-	    if(layer){layer.dataset.gdAnchorMode=anchorMode;layer.dataset.gdOrientationSource=orientation&&orientation.source||"none";layer.dataset.gdAxisBearingDeg=orientation&&Number.isFinite(orientation.bearingRad)?(orientation.bearingRad*180/Math.PI).toFixed(2):"";layer.dataset.gdRotationDeg=(angle*180/Math.PI).toFixed(2);layer.dataset.gdCameraFrozen=lockCameraFrozen?"1":"0";}
-			    var info={version:VERSION,frame:frame||"hole",object:opts.objectName||"activeObject",scale:+scale.toFixed(4),fitRatio:+fitRatio.toFixed(2),captureZoom:manifest.captureZoom,tiles:(manifest.tiles||[]).length,anchor:anchorMode,orientation:orientation&&orientation.source||"none",axisBearingDeg:orientation&&Number.isFinite(orientation.bearingRad)?+(orientation.bearingRad*180/Math.PI).toFixed(2):null,rotationDeg:+(angle*180/Math.PI).toFixed(2),objectMeters:boundsSizeM(bounds),at:Date.now()};
+	    if(layer){layer.dataset.gdAnchorMode=anchorMode;layer.dataset.gdOrientationSource=orientation&&orientation.source||"none";layer.dataset.gdAxisBearingDeg=orientation&&Number.isFinite(orientation.bearingRad)?(orientation.bearingRad*180/Math.PI).toFixed(2):"";layer.dataset.gdRotationDeg=(angle*180/Math.PI).toFixed(2);layer.dataset.gdCameraFrozen=lockCameraFrozen?"1":"0";layer.dataset.gdDualAnchor=dualAnchor?"1":"0";layer.dataset.gdTeeAnchorErrorPx=dualAnchor?dualAnchor.teeErrorPx.toFixed(1):"";}
+			    var info={version:VERSION,frame:frame||"hole",object:opts.objectName||"activeObject",scale:+scale.toFixed(4),fitRatio:+fitRatio.toFixed(2),captureZoom:manifest.captureZoom,tiles:(manifest.tiles||[]).length,anchor:anchorMode,dualAnchor:dualAnchor?{source:dualAnchor.source,teeErrorPx:+dualAnchor.teeErrorPx.toFixed(1),greenAnchor:dualAnchor.greenAnchor,teeAnchor:dualAnchor.teeAnchor}:null,orientation:orientation&&orientation.source||"none",axisBearingDeg:orientation&&Number.isFinite(orientation.bearingRad)?+(orientation.bearingRad*180/Math.PI).toFixed(2):null,rotationDeg:+(angle*180/Math.PI).toFixed(2),objectMeters:boundsSizeM(bounds),at:Date.now()};
 		    window.__gdV19LastCapturedFit=info;
 		    if(lastShotOverlayPayload&&lastShotOverlayCenter)renderShotOverlay(lastShotOverlayPayload,lastShotOverlayCenter,{remember:false});
 			    readout(info.frame+" | "+info.object+" | "+info.anchor+" | rot "+info.rotationDeg+" | z"+info.captureZoom+" | scale "+info.scale+" | fit "+info.fitRatio+" | tiles "+info.tiles);
