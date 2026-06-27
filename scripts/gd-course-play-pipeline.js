@@ -5,6 +5,7 @@
   var SCHEMA_VERSION=2;
   var STORE_KEY="gd_course_play_pipeline_v1";
   var FRAME_INDEX_KEY="gd_course_play_frame_index_v1";
+  var SYNC_QUEUE_KEY="gd_course_play_sync_queue_v1";
   var COURSE_STATES={
     not_prepared:"not_prepared",
     mapping:"mapping",
@@ -111,6 +112,29 @@
     index.updatedAt=now();
     safe(function(){localStorage.setItem(FRAME_INDEX_KEY,JSON.stringify(index));});
     return clone(index);
+  }
+  function emptySyncQueue(){
+    return {schema:"gd.course_play_pipeline.sync_queue",version:VERSION,schemaVersion:SCHEMA_VERSION,updatedAt:null,items:[]};
+  }
+  function normalizeSyncQueue(raw){
+    var queue=raw&&typeof raw==="object"?raw:emptySyncQueue();
+    queue.schema="gd.course_play_pipeline.sync_queue";
+    queue.version=VERSION;
+    queue.schemaVersion=SCHEMA_VERSION;
+    if(!Array.isArray(queue.items))queue.items=[];
+    return queue;
+  }
+  function loadSyncQueue(){
+    return normalizeSyncQueue(safe(function(){return JSON.parse(localStorage.getItem(SYNC_QUEUE_KEY)||"null");},null));
+  }
+  function saveSyncQueue(queue){
+    queue=normalizeSyncQueue(queue);
+    queue.updatedAt=now();
+    safe(function(){localStorage.setItem(SYNC_QUEUE_KEY,JSON.stringify(queue));});
+    var store=loadStore();
+    store.sync={status:queue.items.length?"pending":"local",pendingCount:queue.items.filter(function(item){return item&&item.status!=="synced";}).length,lastQueuedAt:queue.updatedAt};
+    saveStore(store);
+    return clone(queue);
   }
   function frameIndexKey(courseOrId,holeNumber){
     return courseIdFrom(courseOrId)+":h"+String(normalizeHoleNumber(holeNumber));
@@ -574,6 +598,45 @@
       payload:payload
     };
   }
+  function enqueueCoursePlaySync(courseOrId,opts){
+    opts=opts||{};
+    var envelope=buildCoursePlaySyncEnvelope(courseOrId||activeCourseFromApp()||"course");
+    var queue=loadSyncQueue();
+    var existing=queue.items.filter(function(item){return item&&item.courseId===envelope.courseId&&item.status!=="synced";})[0];
+    var item=Object.assign(existing||{},{
+      queueId:existing&&existing.queueId||stableId(),
+      status:"pending",
+      reason:String(opts.reason||"local-change"),
+      attempts:existing&&Number(existing.attempts)||0,
+      createdAt:existing&&existing.createdAt||now(),
+      updatedAt:now(),
+      courseId:envelope.courseId,
+      dataVersion:envelope.dataVersion,
+      envelope:envelope,
+      network:"not-configured",
+      localOnly:true
+    });
+    if(existing)queue.items=queue.items.map(function(row){return row&&row.queueId===item.queueId?item:row;});
+    else queue.items.push(item);
+    saveSyncQueue(queue);
+    markCoursePlaySyncPending(envelope.courseId,null,opts.reason||"queued");
+    return clone(item);
+  }
+  function markCoursePlaySyncQueueItem(queueId,status,detail){
+    var queue=loadSyncQueue();
+    queue.items=queue.items.map(function(item){
+      if(!item||item.queueId!==queueId)return item;
+      item.status=String(status||item.status||"pending");
+      item.updatedAt=now();
+      item.detail=detail||item.detail||null;
+      if(item.status==="synced")item.syncedAt=item.updatedAt;
+      return item;
+    });
+    return saveSyncQueue(queue);
+  }
+  function getCoursePlaySyncQueue(){
+    return loadSyncQueue();
+  }
   function futureSyncSnapshot(courseOrId){
     var course=getCoursePlayState(courseOrId);
     course.syncStatus=course.syncStatus||"local";
@@ -831,6 +894,7 @@
     schemaVersion:SCHEMA_VERSION,
     storageKey:STORE_KEY,
     frameIndexStorageKey:FRAME_INDEX_KEY,
+    syncQueueStorageKey:SYNC_QUEUE_KEY,
     courseStates:COURSE_STATES,
     holeStates:HOLE_STATES,
     prepareCourseForPlay:prepareCourseForPlay,
@@ -850,6 +914,9 @@
     buildHolePlayDbPayload:buildHolePlayDbPayload,
     buildCoursePlayDbPayload:buildCoursePlayDbPayload,
     buildCoursePlaySyncEnvelope:buildCoursePlaySyncEnvelope,
+    enqueueCoursePlaySync:enqueueCoursePlaySync,
+    getCoursePlaySyncQueue:getCoursePlaySyncQueue,
+    markCoursePlaySyncQueueItem:markCoursePlaySyncQueueItem,
     exportCoursePlayPayload:exportCoursePlayPayload,
     importCoursePlayPayload:importCoursePlayPayload,
     futureSyncSnapshot:futureSyncSnapshot,
