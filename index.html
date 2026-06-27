@@ -816,6 +816,7 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	      ev.preventDefault();
 	      ev.stopPropagation();
 	      if(ev.stopImmediatePropagation)ev.stopImmediatePropagation();
+	      safe(function(){if(typeof window.gdConsumeNextMapClick==="function")window.gdConsumeNextMapClick("captured-bubble-pointerdown",1400);});
 	      var centerPx=pointPx(captureManifest,lastShotOverlayCenter);
 	      var downLocal=capturedScreenToLocalPoint(ev.clientX,ev.clientY);
 	      if(!centerPx||!downLocal)return;
@@ -877,6 +878,8 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	        if(endEv.pointerId!==state.id)return;
 	        endEv.preventDefault();
 	        endEv.stopPropagation();
+	        if(endEv.stopImmediatePropagation)endEv.stopImmediatePropagation();
+	        safe(function(){if(typeof window.gdConsumeNextMapClick==="function")window.gdConsumeNextMapClick("captured-bubble-pointerup",1400);});
 	        clearLongPress();
 	        document.removeEventListener("pointermove",move);
 	        document.removeEventListener("pointerup",end);
@@ -15846,6 +15849,7 @@ function gdMapPlacementClickSuppressed(){
 	}
 	function gdCompleteStandingStartPlacement(ll,opts={}){
 	  if(!ll)return false;
+	    if(document.body&&document.body.classList.contains("gdManualStartPlacementActive")&&typeof window.gdMaySetLocationFromMapEvent==="function"&&opts.event&&!window.gdMaySetLocationFromMapEvent(opts.event,{source:opts.source||"standing-start"}))return false;
 	    const tryGreenFocus=typeof window.gdTryEnterGreenFocusFromPoint==="function"?window.gdTryEnterGreenFocusFromPoint:(typeof gdTryEnterGreenFocusFromPoint==="function"?gdTryEnterGreenFocusFromPoint:null);
 	    try{document.body.dataset.gdGreenGate="start:"+document.body.classList.contains("gdManualStartPlacementActive")+":"+typeof tryGreenFocus}catch(e){}
 	    if(opts.allowGreenFocus!==false&&document.body.classList.contains("gdManualStartPlacementActive")&&typeof tryGreenFocus==="function"){
@@ -15862,6 +15866,7 @@ function gdMapPlacementClickSuppressed(){
     document.getElementById("shotTile")?.classList.remove("visible");
     undoStack.push({type:"placeStart",previous:previousPlacement,mappedAutoLock:!!mappedCourseAssist,hole:placementHole,point:typeof gdUndoPlainLatLng==="function"?gdUndoPlainLatLng(ll):null});
     setStart(ll,false);
+    try{if(typeof window.gdDisarmLocationSet==="function")window.gdDisarmLocationSet(opts.source||"standing-start-set");}catch(e){}
     gdRememberTwoTapPlacement(ll);
     try{document.body.classList.remove("gdManualStartPlacementActive")}catch(e){}
 	    let mappedLocked=false;
@@ -15902,6 +15907,7 @@ function gdMapPlacementClickSuppressed(){
   return false;
 }
 map.on("click",e=>{
+  if(typeof window.gdMapClickConsumed==="function"&&window.gdMapClickConsumed())return;
   if(gdMapPlacementClickSuppressed()||!gdMapPlacementActive())return;
   if(e.originalEvent){
     gdRememberMapPlacementScreen(e.originalEvent);
@@ -15910,6 +15916,7 @@ map.on("click",e=>{
   }
   if(gdMapPlacementClickSuppressed())return;
   if(e.originalEvent)gdRememberMapPlacementScreen(e.originalEvent);
+  if((mode==="start"||document.body.classList.contains("gdManualStartPlacementActive"))&&typeof window.gdMaySetLocationFromMapEvent==="function"&&!window.gdMaySetLocationFromMapEvent(e.originalEvent||null,{source:"leaflet-map-click"}))return;
   const resolved=e.originalEvent?gdLatLngFromClientEvent(e.originalEvent):null;
   if(resolved)gdCompleteTwoTapPlacement(resolved);
   else if(!(document.body&&document.body.classList.contains("gdCapturedHoleFrameCameraOn")))gdCompleteTwoTapPlacement(e.latlng);
@@ -15927,6 +15934,8 @@ function gdIsMapPlacementSurfaceEvent(ev){
 }
 function gdCompleteMapPlacementFromClientEvent(ev){
   if(!gdMapPlacementActive()||!gdIsMapPlacementSurfaceEvent(ev))return false;
+  if(typeof window.gdMapClickConsumed==="function"&&window.gdMapClickConsumed())return false;
+  if((mode==="start"||document.body.classList.contains("gdManualStartPlacementActive"))&&typeof window.gdMaySetLocationFromMapEvent==="function"&&!window.gdMaySetLocationFromMapEvent(ev,{source:"map-placement"}))return false;
   if(gdMapPlacementClickSuppressed())return false;
 	  gdRememberMapPlacementScreen(ev);
 	  const ll=gdLatLngFromClientEvent(ev);
@@ -28070,6 +28079,160 @@ function gdWireManualGpsPlayButton(){
   if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",install);
   else install();
   [120,420,1100,2200].forEach(function(delay){setTimeout(install,delay);});
+})();
+</script>
+<script id="gdGpsLocationSetLockV1">
+(function(){
+  "use strict";
+  if(window.__gdGpsLocationSetLockV1)return;
+  window.__gdGpsLocationSetLockV1=true;
+  var consumeUntil=0;
+  var armedUntil=0;
+  var armed=false;
+  var locked=false;
+  var lastGesture=null;
+  function safe(fn,fb){try{return fn()}catch(e){return fb}}
+  function gpsPlayActive(){
+    return safe(function(){
+      return !!(document.body&&(
+        document.body.classList.contains("shell-gps")||
+        document.body.classList.contains("gdGpsActive")||
+        document.body.classList.contains("gps-active")||
+        document.body.dataset.clarityRoute==="gps"
+      ));
+    },false);
+  }
+  function explicitMappingMode(){
+    return safe(function(){
+      return !!(window.gdFullMappingMode||
+        window.__gdMapperObjectCaptureActive||
+        document.body.classList.contains("gdFullMappingMode")||
+        document.body.dataset.gdToolScreen==="mapping"||
+        document.body.classList.contains("gdCourseOpening"));
+    },false);
+  }
+  function locationClassActive(){
+    return safe(function(){return document.body.classList.contains("gdManualStartPlacementActive");},false);
+  }
+  function consume(reason,ms){
+    consumeUntil=Math.max(consumeUntil,Date.now()+Math.max(350,Number(ms)||900));
+    safe(function(){
+      document.body.dataset.gdLocationClickConsumed=String(reason||"gesture");
+      document.body.dataset.gdLocationClickConsumedAt=String(Date.now());
+    });
+    safe(function(){if(typeof gdSuppressMapPlacementClick==="function")gdSuppressMapPlacementClick(Math.max(350,Number(ms)||900));});
+    safe(function(){gdMapPlacementSuppressClickUntil=Math.max(gdMapPlacementSuppressClickUntil||0,Date.now()+Math.max(350,Number(ms)||900));});
+    return false;
+  }
+  function arm(reason){
+    armed=true;
+    locked=false;
+    armedUntil=Date.now()+15000;
+    consume(reason||"arm-location",420);
+    safe(function(){
+      document.body.dataset.gdLocationSetMode="armed";
+      document.body.dataset.gdLocationSetReason=String(reason||"manual");
+      document.body.dataset.gdLocationSetArmedAt=String(Date.now());
+    });
+    lockMapInteractions(true,reason||"arm-location");
+    return true;
+  }
+  function disarm(reason){
+    armed=false;
+    armedUntil=0;
+    locked=true;
+    safe(function(){
+      document.body.dataset.gdLocationSetMode="locked";
+      document.body.dataset.gdLocationSetLockedAt=String(Date.now());
+      document.body.dataset.gdLocationSetLockedReason=String(reason||"location-set");
+    });
+    consume(reason||"location-set",850);
+    lockMapInteractions(true,reason||"location-set");
+    return true;
+  }
+  function clear(reason){
+    armed=false;
+    armedUntil=0;
+    locked=false;
+    safe(function(){
+      document.body.dataset.gdLocationSetMode="";
+      document.body.dataset.gdLocationSetClearReason=String(reason||"clear");
+    });
+    lockMapInteractions(false,reason||"clear");
+    return true;
+  }
+  function eventMoved(event){
+    if(!lastGesture||!event)return false;
+    if(lastGesture.id!==event.pointerId)return false;
+    return Math.hypot(Number(event.clientX||0)-lastGesture.x,Number(event.clientY||0)-lastGesture.y)>Math.max(5,lastGesture.pointerType==="mouse"?4:8);
+  }
+  function maySet(event,context){
+    if(!gpsPlayActive())return true;
+    if(explicitMappingMode())return true;
+    if(Date.now()<consumeUntil)return false;
+    if(safe(function(){return document.body.classList.contains("gdCapturedBubbleDragging")||!!targetDragging;},false))return false;
+    if(event&&event.target&&event.target.closest&&event.target.closest("#gdCapturedBubbleDragHit,.gdBubbleDragHit,.targetDot,.gdCapturedShotBubble,.gdCapturedShotCore,#shotTile,.rightRail,#gdToolRailTab,#hint,.panel,.modulePanel"))return false;
+    if(eventMoved(event))return false;
+    if(!locationClassActive())return false;
+    if(!armed||Date.now()>armedUntil)return false;
+    return !locked;
+  }
+  function setHandlerState(name,enabled){
+    var m=safe(function(){return map;},null)||window.map;
+    var h=m&&m[name];
+    if(!h)return;
+    try{enabled?h.enable():h.disable();}catch(e){}
+  }
+  function lockMapInteractions(on,reason){
+    if(!gpsPlayActive()||explicitMappingMode())on=false;
+    ["dragging","touchZoom","doubleClickZoom","scrollWheelZoom","boxZoom","keyboard"].forEach(function(name){setHandlerState(name,!on);});
+    safe(function(){var m=map||window.map;if(m&&m.tap)on?m.tap.disable():m.tap.enable();});
+    safe(function(){
+      document.body.dataset.gdManualMapDragLocked=on?"1":"0";
+      document.body.dataset.gdManualMapDragLockReason=String(reason||"gps-play");
+    });
+    return true;
+  }
+  function wrapGestureEnable(name){
+    var m=safe(function(){return map;},null)||window.map;
+    var h=m&&m[name];
+    if(!h||typeof h.enable!=="function"||h.enable.__gdLocationSetLockWrapped)return false;
+    var old=h.enable;
+    h.enable=function(){
+      if(gpsPlayActive()&&!explicitMappingMode())return false;
+      return old.apply(this,arguments);
+    };
+    h.enable.__gdLocationSetLockWrapped=true;
+    return true;
+  }
+  function install(){
+    ["dragging","touchZoom","doubleClickZoom","scrollWheelZoom","boxZoom","keyboard"].forEach(wrapGestureEnable);
+    lockMapInteractions(gpsPlayActive()&&!explicitMappingMode(),"install");
+  }
+  document.addEventListener("pointerdown",function(event){
+    lastGesture={id:event.pointerId,x:Number(event.clientX||0),y:Number(event.clientY||0),pointerType:event.pointerType||"",at:Date.now()};
+    if(event.target&&event.target.closest&&event.target.closest("#gdCapturedBubbleDragHit,.gdBubbleDragHit,.targetDot,.gdCapturedShotBubble,.gdCapturedShotCore")){
+      consume("bubble-pointerdown",1200);
+    }
+  },true);
+  document.addEventListener("pointermove",function(event){
+    if(!lastGesture||lastGesture.id!==event.pointerId)return;
+    if(eventMoved(event))consume("pointer-move",700);
+  },true);
+  document.addEventListener("pointerup",function(event){
+    if(event.target&&event.target.closest&&event.target.closest("#gdCapturedBubbleDragHit,.gdBubbleDragHit,.targetDot,.gdCapturedShotBubble,.gdCapturedShotCore"))consume("bubble-pointerup",1200);
+  },true);
+  window.gdConsumeNextMapClick=consume;
+  window.gdMapClickConsumed=function(){return Date.now()<consumeUntil;};
+  window.gdArmLocationSet=arm;
+  window.gdDisarmLocationSet=disarm;
+  window.gdClearLocationSetLock=clear;
+  window.gdMaySetLocationFromMapEvent=maySet;
+  window.gdSetGpsPlayManualMapDragLocked=lockMapInteractions;
+  if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",install);
+  else install();
+  [120,500,1400,2600].forEach(function(delay){setTimeout(install,delay);});
+  setInterval(function(){lockMapInteractions(gpsPlayActive()&&!explicitMappingMode(),"tick");},700);
 })();
 </script>
 <style id="gdGpsViewportLockCssV1">
@@ -40983,6 +41146,7 @@ body.gps-active #shotTile .tileCarryValue span{
       var downLocal = capturedClientToLocal(event.clientX, event.clientY);
       if(!centerLocal || !downLocal) return;
       stop(event);
+      safe(function(){ if(typeof window.gdConsumeNextMapClick === "function") window.gdConsumeNextMapClick("spring-bubble-pointerdown", 1400); });
       var drag = {
         id:event.pointerId,
         offset:L.point(downLocal.x - centerLocal.x, downLocal.y - centerLocal.y),
@@ -41027,6 +41191,7 @@ body.gps-active #shotTile .tileCarryValue span{
       function end(endEvent){
         if(endEvent.pointerId !== drag.id) return;
         stop(endEvent);
+        safe(function(){ if(typeof window.gdConsumeNextMapClick === "function") window.gdConsumeNextMapClick("spring-bubble-pointerup", 1400); });
         document.removeEventListener("pointermove", move);
         document.removeEventListener("pointerup", end);
         document.removeEventListener("pointercancel", end);
@@ -42057,6 +42222,7 @@ body:has(#courseScreen:not(.hidden)) .leaflet-marker-icon{display:none!important
   }
   function cancelManualStart(reason){
     manualStartArmedAt=0;
+    safe(function(){if(typeof window.gdClearLocationSetLock==="function")window.gdClearLocationSetLock(reason||"cancel-manual-start");});
     manualStartVisual(false);
     restoreMappedStartPrompt(reason||"cancel-manual-start");
     [120,360].forEach(function(delay){
@@ -42071,6 +42237,7 @@ body:has(#courseScreen:not(.hidden)) .leaflet-marker-icon{display:none!important
   function cleanGpsTransient(reason){
     if(!document.body)return;
     manualStartArmedAt=0;
+    safe(function(){if(typeof window.gdClearLocationSetLock==="function")window.gdClearLocationSetLock(reason||"leave-gps");});
     document.body.classList.remove("gdManualStartPlacementActive","gdMappedStartPromptActive","gdMappedCourseMode","gdMappedSnapCameraActive","gdCourseOpening","gdToolRailOpen","gdGreenArrivalMode","gd-green-zoom-active","gdBubbleLongPressZoomActive","gdLockStateFrameActive","gdHeadToTeeFrameActive","gd-frame-hard-locked","gdCapturedBubbleDragging");
     clearCaptured(reason||"leave-gps");
     safe(function(){if(typeof window.gdClearCapturedHoleFrameShotOverlay==="function")window.gdClearCapturedHoleFrameShotOverlay()});
@@ -42099,6 +42266,7 @@ body:has(#courseScreen:not(.hidden)) .leaflet-marker-icon{display:none!important
 	    });
     safe(function(){if(typeof setState==="function")setState("Mapped: set position")});
     manualStartVisual(true);
+    safe(function(){if(typeof window.gdArmLocationSet==="function")window.gdArmLocationSet("set-start-point");});
     safe(function(){if(typeof gdQueueMappedPreLockHoleFrame==="function")gdQueueMappedPreLockHoleFrame({source:"manual-start-arm"})});
     safe(function(){if(typeof toast==="function")toast("Tap where you are standing")});
     syncToolRail();
@@ -42212,6 +42380,10 @@ body:has(#courseScreen:not(.hidden)) .leaflet-marker-icon{display:none!important
 	      safe(function(){document.body.dataset.gdStandingPointComplete="blocked-state"});
 	      return false;
 	    }
+	    if(typeof window.gdMaySetLocationFromMapEvent==="function"&&!window.gdMaySetLocationFromMapEvent(event,{source:"manual-start-pointerup"})){
+	      safe(function(){document.body.dataset.gdStandingPointComplete="blocked-location-guard"});
+	      return false;
+	    }
 	    safe(function(){document.body.dataset.gdStandingPointComplete="seen:"+(event&&event.type||"event")});
 	    if(Date.now()-manualStartArmedAt<620){safe(function(){document.body.dataset.gdStandingPointComplete="blocked-early"});return false;}
     var mapEl=safe(function(){return map&&map.getContainer?map.getContainer():byId("map")},null);
@@ -42230,13 +42402,14 @@ body:has(#courseScreen:not(.hidden)) .leaflet-marker-icon{display:none!important
 				    var manualGreenRadius=safe(function(){return typeof gdGreenFocusRadiusM==="function"?gdGreenFocusRadiusM():46},46);
 				    safe(function(){document.body.dataset.gdGreenFocusManualDistance=Number.isFinite(Number(manualGreenDistance))?String(Math.round(Number(manualGreenDistance))):""});
 		    safe(function(){lockedFrame=false;mode="start";gdMapPlacementSuppressClickUntil=0});
-	    var placed=safe(function(){
-	      if(typeof gdCompleteStandingStartPlacement==="function")return gdCompleteStandingStartPlacement(ll,{source:"tap-where-standing",lockSource:"manual-start",hasShotToLog:window.__gdManualStartHadShotToLog===true});
+		    var placed=safe(function(){
+	      if(typeof gdCompleteStandingStartPlacement==="function")return gdCompleteStandingStartPlacement(ll,{source:"tap-where-standing",lockSource:"manual-start",hasShotToLog:window.__gdManualStartHadShotToLog===true,event:event});
 	      return typeof gdCompleteTwoTapPlacement==="function"&&gdCompleteTwoTapPlacement(ll);
 	    },false);
 	    if(placed&&document.body&&!document.body.classList.contains("gdGreenArrivalMode"))lockAfterManualStart();
 	    if(placed){
 	      manualStartArmedAt=0;
+	      safe(function(){if(typeof window.gdDisarmLocationSet==="function")window.gdDisarmLocationSet("manual-start-complete");});
 	      window.__gdManualStartHadShotToLog=false;
 	      window.__gdManualStandingPlacementActiveUntil=0;
 	    }
