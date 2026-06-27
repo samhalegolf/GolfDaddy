@@ -198,8 +198,10 @@ body.gdCapturedHoleFrameCameraOn #map .leaflet-marker-pane{opacity:1!important;}
 #gdCapturedBubbleDragHit{position:fixed!important;left:-9999px;top:-9999px;width:1px;height:1px;z-index:1480!important;border-radius:999px!important;background:transparent!important;pointer-events:auto!important;touch-action:none!important;cursor:grab!important;display:none;}
 body.gdCapturedHoleFrameCameraOn:not(.gdMappedStartPromptActive) #gdCapturedBubbleDragHit{display:block;}
 body.gdTargetFrameDebugOn #gdCapturedBubbleDragHit{background:rgba(31,211,109,.08)!important;outline:1px solid rgba(31,211,109,.24)!important;}
-#gdCapturedFrameUnavailable{position:fixed;left:50%;bottom:calc(max(14px,env(safe-area-inset-bottom)) + 92px);transform:translateX(-50%);z-index:2403;max-width:min(330px,calc(100vw - 32px));padding:10px 14px;border-radius:999px;background:rgba(5,13,9,.92);border:1px solid rgba(255,255,255,.22);color:#fff;font:900 13px/1.2 Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;text-align:center;box-shadow:0 14px 34px rgba(0,0,0,.38);pointer-events:none;display:none;}
+#gdCapturedFrameUnavailable,
+#gdHoleFrameLoading{position:fixed;left:50%;bottom:calc(max(14px,env(safe-area-inset-bottom)) + 92px);transform:translateX(-50%);z-index:2403;max-width:min(330px,calc(100vw - 32px));padding:10px 14px;border-radius:999px;background:rgba(5,13,9,.92);border:1px solid rgba(255,255,255,.22);color:#fff;font:900 13px/1.2 Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;text-align:center;box-shadow:0 14px 34px rgba(0,0,0,.38);pointer-events:none;display:none;}
 body.gdCapturedFrameUnavailable #gdCapturedFrameUnavailable{display:block;}
+body.gdHoleFrameLoading #gdHoleFrameLoading{display:block;}
 #gdCapturedHoleFrameReadout{position:fixed;left:8px;bottom:84px;z-index:2402;max-width:330px;padding:6px 8px;border-radius:10px;background:rgba(0,0,0,.74);border:1px solid rgba(31,211,109,.34);color:rgba(255,255,255,.86);font:800 9px/1.25 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.06em;text-transform:uppercase;pointer-events:none;display:none;}
 body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 </style>
@@ -492,7 +494,7 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 		    captureManifest=null;
 		    manifest=loadCaptureManifest();
 		    if(manifest&&manifestMatchesActive(manifest))return manifest;
-		    if(capturedGpsPlayActive())return gdCapturedFrameUnavailable(reason||"ensure-current",{stage:"ensure-current"});
+		    if(capturedGpsPlayActive())return missingCapturedManifest(reason||"ensure-current",{stage:"ensure-current"});
 		    var bounds=activeBounds("hole")||greenBounds("hole");
 		    manifest=buildCaptureManifest(bounds,reason||"ensure-current");
 		    if(manifest&&manifestMatchesActive(manifest))renderCaptureManifest(manifest);
@@ -511,6 +513,7 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 		    el.dataset.gdIncludeTee=manifest.includeTee?"1":"0";
 		    if(manifest.teeLatLng){el.dataset.gdTeeLat=String(manifest.teeLatLng.lat);el.dataset.gdTeeLng=String(manifest.teeLatLng.lng);}
 		    else{delete el.dataset.gdTeeLat;delete el.dataset.gdTeeLng;}
+		    clearHoleFrameLoading();
 		    clearCapturedFrameUnavailable();
 		    return true;
 		  }
@@ -605,11 +608,80 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	  function unavailableMessage(){
 	    return "Frame unavailable - remap this hole";
 	  }
+	  var HOLE_FRAME_LOADING_TIMEOUT_MS=1700;
+	  var holeFrameLoadingTimer=null;
+	  var holeFrameLoadingKey="";
+	  function holeFrameKey(){
+	    return String(surfaceCourseKey()||"course")+":h"+String(surfaceHoleNumber()||1);
+	  }
+	  function loadingMessage(){
+	    return "Loading Hole "+String(surfaceHoleNumber()||1)+" frame...";
+	  }
+	  function activeMappedHoleData(){
+	    return safe(function(){
+	      var course=null;
+	      var h=surfaceHoleNumber();
+	      if(typeof loadUserCourseData==="function")course=loadUserCourseData();
+	      if(!course&&typeof window.loadUserCourseData==="function")course=window.loadUserCourseData();
+	      if(!course&&typeof currentCourse!=="undefined")course=currentCourse;
+	      var data=null;
+	      if(course&&typeof window.gdMappedHolePlayData==="function")data=window.gdMappedHolePlayData(course,h);
+	      else if(course&&typeof gdMappedHolePlayData==="function")data=gdMappedHolePlayData(course,h);
+	      return data||null;
+	    },null);
+	  }
+	  function mappedGeometryExistsForActiveHole(){
+	    var data=activeMappedHoleData();
+	    return !!(data&&Array.isArray(data.route)&&data.route.length>=2);
+	  }
+	  function clearHoleFrameLoading(){
+	    safe(function(){
+	      if(holeFrameLoadingTimer){clearTimeout(holeFrameLoadingTimer);holeFrameLoadingTimer=null;}
+	      if(document.body)document.body.classList.remove("gdHoleFrameLoading");
+	      delete window.__gdHoleFrameLoading;
+	    });
+	  }
 	  function clearCapturedFrameUnavailable(){
 	    safe(function(){document.body.classList.remove("gdCapturedFrameUnavailable");});
 	  }
+	  function gdHoleFrameLoading(reason,context){
+	    safe(function(){
+	      var key=holeFrameKey();
+	      var el=document.getElementById("gdHoleFrameLoading");
+	      if(!el&&document.body){el=document.createElement("div");el.id="gdHoleFrameLoading";el.setAttribute("role","status");el.setAttribute("aria-live","polite");document.body.appendChild(el);}
+	      if(el)el.textContent=loadingMessage();
+	      if(document.body){
+	        document.body.classList.add("gdHoleFrameLoading","gdGpsFramePreparing");
+	        document.body.classList.remove("gdCapturedFrameUnavailable","gdCapturedHoleFrameCameraOn","gdHoleImageCameraOn");
+	        document.body.dataset.gdHoleFrameLoadingReason=String(reason||"frame-loading");
+	        document.body.dataset.gdHoleFrameLoadingAt=String(Date.now());
+	      }
+	      if(typeof setState==="function")setState(loadingMessage());
+	      window.__gdHoleFrameLoading={reason:reason||"frame-loading",context:context||{},hole:surfaceHoleNumber(),course:surfaceCourseKey(),at:Date.now()};
+	      if(holeFrameLoadingKey!==key&&holeFrameLoadingTimer){clearTimeout(holeFrameLoadingTimer);holeFrameLoadingTimer=null;}
+	      holeFrameLoadingKey=key;
+	      if(!holeFrameLoadingTimer){
+	        holeFrameLoadingTimer=setTimeout(function(){
+	          holeFrameLoadingTimer=null;
+	          if(holeFrameKey()!==key||!document.body||!document.body.classList.contains("gdHoleFrameLoading"))return;
+	          var b=greenBounds("hole");
+	          var manifest=loadCaptureManifest();
+	          if(manifest&&validBounds(b)&&fitCaptured(b,"hole",.025,{objectName:"capturedGreenHoleFrame",reason:"loading-ready",maxScale:3.4,fitRatio:.56}))return;
+	          gdCapturedFrameUnavailable("frame-loading-timeout",Object.assign({stage:"loading-timeout"},context||{}));
+	        },HOLE_FRAME_LOADING_TIMEOUT_MS);
+	      }
+	      if(typeof window.gdApplyGpsMapVisibilityOwner==="function")window.gdApplyGpsMapVisibilityOwner("hole-frame-loading");
+	    });
+	    readout("frame loading | "+(reason||"frame-loading"));
+	    return true;
+	  }
+	  function missingCapturedManifest(reason,context){
+	    if(capturedGpsPlayActive()&&mappedGeometryExistsForActiveHole())return gdHoleFrameLoading(reason||"frame-loading",context||{});
+	    return !!gdCapturedFrameUnavailable(reason||"missing-frame",context||{});
+	  }
 	  function gdCapturedFrameUnavailable(reason,context){
 	    safe(function(){
+	      clearHoleFrameLoading();
 	      var el=document.getElementById("gdCapturedFrameUnavailable");
 	      if(!el&&document.body){el=document.createElement("div");el.id="gdCapturedFrameUnavailable";el.setAttribute("role","status");el.setAttribute("aria-live","polite");document.body.appendChild(el);}
 	      if(el)el.textContent=unavailableMessage();
@@ -625,12 +697,14 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	        toast(unavailableMessage());
 	      }
 	      window.__gdCapturedFrameUnavailable={reason:reason||"missing-frame",context:context||{},hole:surfaceHoleNumber(),course:surfaceCourseKey(),at:Date.now()};
+	      if(typeof window.gdApplyGpsMapVisibilityOwner==="function")window.gdApplyGpsMapVisibilityOwner("captured-frame-unavailable");
 	    });
 	    readout("frame unavailable | "+(reason||"missing-frame"));
 	    return null;
 	  }
 		  function hideCapturedCamera(){
 		    safe(function(){document.body.classList.remove("gdCapturedHoleFrameCameraOn","gdHoleImageCameraOn","gdHeadToTeeFrameActive","gdLockStateFrameActive");});
+		    clearHoleFrameLoading();
 		    clearCapturedFrameUnavailable();
 		    var group=document.querySelector("#gdHoleImageCameraLayer .gdHoleImageTiles");
 		    if(group)group.style.transform="";
@@ -648,7 +722,7 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	    hideWaiting();
 	    if(!hasMap()||!validBounds(bounds))return false;
 	    var manifest=opts.refreshCapture?null:loadCaptureManifest();
-	    if(!manifest&&capturedGpsPlayActive())return !!gdCapturedFrameUnavailable(opts.reason||frame,{stage:"fitCaptured",frame:frame||"hole",objectName:opts.objectName||""});
+	    if(!manifest&&capturedGpsPlayActive())return missingCapturedManifest(opts.reason||frame,{stage:"fitCaptured",frame:frame||"hole",objectName:opts.objectName||""});
 	    if(!manifest)manifest=buildCaptureManifest(bounds,opts.reason||frame)||loadCaptureManifest();
 	    if(!manifest||!renderCaptureManifest(manifest)){
 	      if(capturedGpsPlayActive())return !!gdCapturedFrameUnavailable(opts.reason||frame,{stage:"render",frame:frame||"hole",objectName:opts.objectName||""});
@@ -1103,7 +1177,7 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 		  window.gdCapturedFrameUnavailable=gdCapturedFrameUnavailable;
 		  window.gdCapturedSurfaceManifestMatchesActive=function(manifest){return manifestMatchesActive(manifest||captureManifest||window.gdHoleImageCaptureManifest||window.__gdLastHoleImageCaptureManifest||window.__gdV19CapturedHoleFrameManifest);};
 		  window.gdRenderHoleImageCamera=function(manifest){return renderCaptureManifest(manifest||loadCaptureManifest());};
-	    window.gdShowHoleImageCamera=function(on){if(on){var m=loadCaptureManifest();if(!m&&capturedGpsPlayActive())return !!gdCapturedFrameUnavailable("show",{stage:"show"});if(!m)m=window.gdBuildHoleImageCaptureManifest("show");if(m)renderCaptureManifest(m);}document.body.classList.toggle("gdCapturedHoleFrameCameraOn",!!on);document.body.classList.toggle("gdHoleImageCameraOn",!!on);if(on)clearCapturedFrameUnavailable();return !!on;};
+	    window.gdShowHoleImageCamera=function(on){if(on){var m=loadCaptureManifest();if(!m&&capturedGpsPlayActive())return missingCapturedManifest("show",{stage:"show"});if(!m)m=window.gdBuildHoleImageCaptureManifest("show");if(m)renderCaptureManifest(m);}document.body.classList.toggle("gdCapturedHoleFrameCameraOn",!!on);document.body.classList.toggle("gdHoleImageCameraOn",!!on);if(on)clearCapturedFrameUnavailable();return !!on;};
 		    window.gdFitCapturedHoleFrameToBoxV19=fitCaptured;
 		    window.gdFitHeadToTeeHoleFrameV19=headToTee;
 		    window.gdFitLockStateFrameV19=lockState;
@@ -27985,8 +28059,10 @@ function gdWireManualGpsPlayButton(){
     return gpsPlayActive()&&safe(function(){
       return document.body.classList.contains("gdCapturedHoleFrameCameraOn")||
         document.body.classList.contains("gdHoleImageCameraOn")||
+        document.body.classList.contains("gdHoleFrameLoading")||
         document.body.classList.contains("gdCapturedFrameUnavailable")||
         !!window.__gdV19LastCapturedFit||
+        !!window.__gdHoleFrameLoading||
         !!window.__gdCapturedFrameUnavailable;
     },false);
   }
@@ -41875,7 +41951,6 @@ body:has(#courseScreen:not(.hidden)) .leaflet-marker-icon{display:none!important
 	    return safe(function(){
 	      if(!gpsOpen())return true;
 	      if(gdGpsExplicitMapMode(reason))return true;
-	      if(document.body.classList.contains("gdCapturedFrameUnavailable"))return true;
 	      return gdGpsPresentationReady();
 	    },false);
 	  }
@@ -41892,7 +41967,7 @@ body:has(#courseScreen:not(.hidden)) .leaflet-marker-icon{display:none!important
 	        return true;
 	      }
 	      var mayExpose=gdGpsPlayMayExposeLiveMap(reason);
-	      var shouldSuppress=!mayExpose&&(document.body.classList.contains("gdGpsFramePreparing")||document.body.classList.contains("gdMappedStartPromptActive")||document.body.classList.contains("gdCourseOpening"));
+	      var shouldSuppress=!mayExpose&&(document.body.classList.contains("gdGpsFramePreparing")||document.body.classList.contains("gdMappedStartPromptActive")||document.body.classList.contains("gdCourseOpening")||document.body.classList.contains("gdHoleFrameLoading")||document.body.classList.contains("gdCapturedFrameUnavailable"));
 	      document.body.classList.toggle("gdGpsLiveMapSuppressed",!!shouldSuppress);
 	      document.body.dataset.gdGpsMapVisibilityOwner=String(reason||"gps-visibility");
 	      document.body.dataset.gdGpsMapVisibilityState=shouldSuppress?"suppressed":mayExpose?"exposed":"waiting";
