@@ -931,6 +931,24 @@
     installGpsPlayAdapter:installGpsPlayAdapter,
     syncGpsPipelineState:syncGpsPipelineState
   };
+  window.__gdDumpCoursePlayPersistence=function(courseId){
+    var course=courseId||activeCourseFromApp()||"course";
+    return {
+      storageKey:STORE_KEY,
+      frameIndexStorageKey:FRAME_INDEX_KEY,
+      syncQueueStorageKey:SYNC_QUEUE_KEY,
+      course:loadCoursePlayPipeline(course),
+      dbPayload:buildCoursePlayDbPayload(course),
+      frameIndex:getCoursePlayFrameIndex(course),
+      syncQueue:getCoursePlaySyncQueue()
+    };
+  };
+  window.__gdExportCoursePlayPayload=function(courseId){
+    return exportCoursePlayPayload(courseId||activeCourseFromApp()||"course");
+  };
+  window.__gdDumpCoursePlayFrameIndex=function(courseId,holeNumber){
+    return getCoursePlayFrameIndex(courseId,holeNumber);
+  };
   setTimeout(installCourseLibraryAdapter,0);
   setTimeout(installCourseLibraryAdapter,800);
   setTimeout(installGpsPlayAdapter,1200);
