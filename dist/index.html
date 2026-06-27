@@ -256,7 +256,13 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
     return {w:w,h:h,diag:Math.sqrt(w*w+h*h)};
   }
   function mappedPoint(point){return safe(function(){return typeof gdMappedPointToLatLng==="function"?gdMappedPointToLatLng(point):asLL(point);},null)||asLL(point);}
-  function mappedPayload(){return safe(function(){return typeof gdActiveMappedHolePlayData==="function"&&gdActiveMappedHolePlayData();},null)||null;}
+  function mappedPayload(){
+    var payload=safe(function(){return typeof gdActiveMappedHolePlayData==="function"&&gdActiveMappedHolePlayData();},null)||null;
+    if(payload&&payload.data&&Array.isArray(payload.data.route)&&payload.data.route.length>=2)return payload;
+    var data=safe(function(){return typeof activeMappedHoleData==="function"?activeMappedHoleData():null;},null);
+    if(data&&Array.isArray(data.route)&&data.route.length>=2)return {course:activeMappedCourse(),hole:surfaceHoleNumber(),data:data,source:"course-play-pipeline"};
+    return payload||null;
+  }
   function mappedShape(data){
     var shape=safe(function(){return typeof gdMappedGreenShapeLatLngs==="function"?gdMappedGreenShapeLatLngs(data):null;},null);
     if(Array.isArray(shape)&&shape.length)return shape.map(asLL).filter(validLL);
@@ -660,6 +666,55 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	    var data=activeMappedHoleData();
 	    return !!(data&&Array.isArray(data.route)&&data.route.length>=2);
 	  }
+	  function coursePlayPoint(value){
+	    return mappedPoint(value&&(value.position||value.center||value.centre||value.pin||value.greenCenter||value.greenCentre||value));
+	  }
+	  function coursePlayFrameData(){
+	    var state=activePipelineHoleState();
+	    if(String(state&&state.status||"")!=="play_data_ready")return null;
+	    var data=activeMappedHoleData();
+	    var route=mappedRoute(data);
+	    var green=coursePlayPoint(data&&data.green)||asLL(route[route.length-1]);
+	    if(route.length<2||!validLL(green))return null;
+	    return data;
+	  }
+	  function coursePlayGreenBounds(data){
+	    var shape=mappedShape(data);
+	    var green=coursePlayPoint(data&&data.green)||asLL((mappedRoute(data)||[]).slice(-1)[0]);
+	    var b=boundsFromPoints(shape);
+	    if(validBounds(b))return b;
+	    return pointBounds(green,22);
+	  }
+	  function gdRenderCoursePlayHoleFrame(courseId,holeNumber,holePlayData,opts){
+	    opts=opts||{};
+	    if(window.gdFullMappingMode||document.body&&document.body.classList.contains("gdFullMappingMode"))return false;
+	    var data=holePlayData||coursePlayFrameData();
+	    if(!data)return false;
+	    var bounds=coursePlayGreenBounds(data);
+	    if(!validBounds(bounds))return false;
+	    var manifest=loadCaptureManifest();
+	    if(!manifest||!manifestMatchesActive(manifest)){
+	      captureManifest=null;
+	      manifest=buildCaptureManifest(bounds,opts.reason||"course-play-pipeline");
+	    }
+	    if(!manifest||!manifestMatchesActive(manifest)||!renderCaptureManifest(manifest))return false;
+	    var ok=fitCaptured(bounds,"hole",.025,{objectName:"coursePlayPipelineHoleFrame",reason:opts.reason||"course-play-pipeline",maxScale:3.4,fitRatio:.56});
+	    if(ok){
+	      clearTerminalCapturedUnavailable("course-play-pipeline-rendered");
+	      clearStalePreparingOwners("course-play-pipeline-rendered");
+	      safe(function(){
+	        document.body.dataset.gdCoursePlayFrameRendered="1";
+	        document.body.dataset.gdCoursePlayFrameRenderedHole=String(holeNumber||surfaceHoleNumber());
+	        document.body.dataset.gdCoursePlayFrameRenderedAt=String(Date.now());
+	      });
+	    }
+	    return !!ok;
+	  }
+	  function gdEnsureCoursePlayFrameRendered(courseId,holeNumber){
+	    return gdRenderCoursePlayHoleFrame(courseId,holeNumber,null,{reason:"course-play-pipeline"});
+	  }
+	  window.gdRenderCoursePlayHoleFrame=gdRenderCoursePlayHoleFrame;
+	  window.gdEnsureCoursePlayFrameRendered=gdEnsureCoursePlayFrameRendered;
 	  function activePipelineStatus(){
 	    var state=activePipelineHoleState();
 	    return String(state&&state.status||"");
@@ -753,6 +808,7 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	          var b=greenBounds("hole");
 	          var manifest=loadCaptureManifest();
 	          if(manifest&&validBounds(b)&&fitCaptured(b,"hole",.025,{objectName:"capturedGreenHoleFrame",reason:"loading-ready",maxScale:3.4,fitRatio:.56}))return;
+	          if(pipelineReadyForActiveHole()&&gdEnsureCoursePlayFrameRendered(surfaceCourseKey(),surfaceHoleNumber()))return;
 	          if(pipelineReadyForActiveHole())return markTerminalCapturedUnavailable("pipeline-ready-captured-presentation-timeout",Object.assign({stage:"loading-timeout"},context||{}));
 	          gdCapturedFrameUnavailable("frame-loading-timeout",Object.assign({stage:"loading-timeout"},context||{}));
 	        },HOLE_FRAME_LOADING_TIMEOUT_MS);
@@ -769,6 +825,10 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	    if(capturedGpsPlayActive()&&pipelineStatus){
 	      if(pipelineStatus==="play_data_unavailable"||pipelineStatus==="needs_remap")return !!gdCapturedFrameUnavailable(reason||"pipeline-unavailable",Object.assign({stage:"pipeline",pipelineStatus:pipelineStatus},context||{}));
 	      if(pipelineStatus==="unknown"||pipelineStatus==="mapping"||pipelineStatus==="play_data_preparing")return gdHoleFrameLoading(reason||"pipeline-loading",Object.assign({stage:"pipeline",pipelineStatus:pipelineStatus},context||{}));
+	      if(pipelineStatus==="play_data_ready"){
+	        if(gdEnsureCoursePlayFrameRendered(surfaceCourseKey(),surfaceHoleNumber()))return true;
+	        return !!markTerminalCapturedUnavailable(reason||"pipeline-ready-render-adapter-failed",Object.assign({stage:"pipeline-render-adapter",pipelineStatus:pipelineStatus},context||{}));
+	      }
 	    }
 	    if(capturedGpsPlayActive()&&mappedGeometryExistsForActiveHole())return gdHoleFrameLoading(reason||"frame-loading",context||{});
 	    return !!gdCapturedFrameUnavailable(reason||"missing-frame",context||{});
@@ -804,6 +864,7 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	        courseKey:surfaceCourseKey(),
 	        hole:surfaceHoleNumber(),
 	        pipelineStatus:activePipelineStatus(),
+	        coursePlayFrameDataReady:!!coursePlayFrameData(),
 	        visiblePreparingOwner:visiblePreparingOwner(),
 	        holeFrameLoading:!!(document.body&&document.body.classList.contains("gdHoleFrameLoading")),
 	        capturedFrameUnavailable:!!(document.body&&document.body.classList.contains("gdCapturedFrameUnavailable")),
