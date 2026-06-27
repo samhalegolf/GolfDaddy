@@ -441,6 +441,153 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	    var minTx=Math.floor(rect.minX/256),maxTx=Math.floor((rect.maxX-1)/256),minTy=Math.floor(rect.minY/256),maxTy=Math.floor((rect.maxY-1)/256);
 	    return Math.max(0,maxTx-minTx+1)*Math.max(0,maxTy-minTy+1);
 	  }
+	  var mappedGeometryManifestBuilds={};
+	  function explicitCourseKey(course){
+	    var active=surfaceCourseKey();
+	    if(capturedGpsPlayActive()&&active)return active;
+	    return safe(function(){return course&&(course.key||course.id||course.name||course.courseName||course.courseId)||active||"course";},"course");
+	  }
+	  function explicitCourseName(course){
+	    return safe(function(){return course&&(course.name||course.title||course.courseName||course.key||course.id)||surfaceCourseName()||"Course";},"Course");
+	  }
+	  function explicitStorageKey(courseKey,hole){
+	    return "gd_captured_hole_frame_v19_"+String(String(courseKey||"course")+":h"+(Number(hole)||1)).replace(/[^a-z0-9:_-]+/gi,"_");
+	  }
+	  function mappedObjectPoint(object){
+	    return asLL(object&&(
+	      object.position||object.center||object.centre||object.pin||object.greenCenter||object.greenCentre||object
+	    ));
+	  }
+	  function mappedGreenShapeFromData(data){
+	    var raw=data&&data.green&&(data.green.greenShape||data.green.shape||data.green.polygon||data.green.outline);
+	    return (Array.isArray(raw)?raw:[]).map(mappedPoint).filter(validLL);
+	  }
+	  function routeLengthM(route){
+	    var pts=(Array.isArray(route)?route:[]).map(asLL).filter(validLL);
+	    var total=0;
+	    for(var i=1;i<pts.length;i++)total+=safe(function(){return map.distance(pts[i-1],pts[i]);},0)||0;
+	    return total;
+	  }
+	  function projectMappedFramePoint(origin,bearingRadValue,metres){
+	    var o=asLL(origin);
+	    if(!validLL(o)||!Number.isFinite(Number(bearingRadValue))||!Number.isFinite(Number(metres)))return null;
+	    return safe(function(){return typeof project==="function"?project(o,bearingRadValue,metres):null;},null)||L.latLng(
+	      o.lat+(Math.cos(bearingRadValue)*metres)/111320,
+	      o.lng+(Math.sin(bearingRadValue)*metres)/(111320*Math.max(.18,Math.cos(o.lat*Math.PI/180)))
+	    );
+	  }
+	  function projectMappedFrameOffset(origin,bearingRadValue,forwardM,sideM){
+	    var base=projectMappedFramePoint(origin,bearingRadValue,forwardM);
+	    return base?projectMappedFramePoint(base,bearingRadValue+Math.PI/2,sideM):null;
+	  }
+	  function mappedFrameProfile(route){
+	    var length=routeLengthM(route);
+	    if(length>=520)return {length:length,lateral:74,startBack:46,endBeyond:66};
+	    if(length>=360)return {length:length,lateral:54,startBack:32,endBeyond:46};
+	    if(length>=220)return {length:length,lateral:42,startBack:24,endBeyond:34};
+	    if(length>=120)return {length:length,lateral:32,startBack:18,endBeyond:26};
+	    return {length:length,lateral:24,startBack:12,endBeyond:18};
+	  }
+	  function explicitMappedHoleData(course,hole,data){
+	    data=data||safe(function(){
+	      var api=window.GolfDaddyCourseLibrary||window.ClarityCaddieCourseLibrary||{};
+	      if(course&&typeof api.mappedHolePlayData==="function")return api.mappedHolePlayData(course,hole);
+	      if(course&&typeof window.gdMappedHolePlayData==="function")return window.gdMappedHolePlayData(course,hole);
+	      return null;
+	    },null);
+	    if(!data)return null;
+	    var route=mappedRoute(data);
+	    var tee=mappedObjectPoint(data.tee)||asLL(route[0]);
+	    var green=mappedObjectPoint(data.green)||asLL(route[route.length-1]);
+	    var greenShape=mappedShape(data);
+	    if(!greenShape.length)greenShape=mappedGreenShapeFromData(data);
+	    return {data:data,route:route,tee:tee,green:green,greenShape:greenShape};
+	  }
+	  function mappedGeometryCapturePoints(payload){
+	    if(!payload||!Array.isArray(payload.route)||payload.route.length<2)return [];
+	    var pts=[].concat(payload.route||[],payload.greenShape||[]);
+	    if(validLL(payload.tee))pts.push(payload.tee);
+	    if(validLL(payload.green))pts.push(payload.green);
+	    var bearingValue=bearingRad(payload.route[0],payload.route[payload.route.length-1]);
+	    if(Number.isFinite(bearingValue)){
+	      var profile=mappedFrameProfile(payload.route);
+	      var tee=payload.route[0],green=payload.route[payload.route.length-1];
+	      [
+	        projectMappedFramePoint(tee,bearingValue+Math.PI,profile.startBack),
+	        projectMappedFramePoint(green,bearingValue,profile.endBeyond),
+	        projectMappedFrameOffset(tee,bearingValue,Math.max(20,profile.length*.24),-profile.lateral),
+	        projectMappedFrameOffset(tee,bearingValue,Math.max(20,profile.length*.24),profile.lateral),
+	        projectMappedFrameOffset(tee,bearingValue,Math.max(30,profile.length*.62),-profile.lateral),
+	        projectMappedFrameOffset(tee,bearingValue,Math.max(30,profile.length*.62),profile.lateral),
+	        projectMappedFrameOffset(tee,bearingValue,Math.max(40,profile.length*.9),-profile.lateral*.72),
+	        projectMappedFrameOffset(tee,bearingValue,Math.max(40,profile.length*.9),profile.lateral*.72)
+	      ].forEach(function(p){if(validLL(p))pts.push(p);});
+	    }
+	    return pts.map(asLL).filter(validLL);
+	  }
+	  function packPoint(point){
+	    point=asLL(point);
+	    return validLL(point)?{lat:+point.lat,lng:+point.lng}:null;
+	  }
+	  function readExplicitCaptureManifest(courseKey,hole){
+	    var key=explicitStorageKey(courseKey,hole);
+	    var manifest=safe(function(){return JSON.parse(localStorage.getItem(key)||"null");},null);
+	    if(!manifest&&typeof window.gdCapturedSurfaceReadManifest==="function")manifest=safe(function(){return window.gdCapturedSurfaceReadManifest(courseKey,hole);},null);
+	    return manifest&&Array.isArray(manifest.tiles)&&manifest.originPx?manifest:null;
+	  }
+	  function buildMappedGeometryCaptureManifest(course,hole,data,reason){
+	    if(!hasMap())return null;
+	    hole=Number(hole)||1;
+	    var payload=explicitMappedHoleData(course,hole,data);
+	    if(!payload||payload.route.length<2||!validLL(payload.green))return null;
+	    var points=mappedGeometryCapturePoints(payload);
+	    if(points.length<2)return null;
+	    var z=preferredCaptureZoom();
+	    var rect=pixelRectFor(points,z,2800);
+	    if(!rect)return null;
+	    while(z>18&&tileCountFor(rect)>320){
+	      z-=1;
+	      rect=pixelRectFor(points,z,2800);
+	    }
+	    var layer=tileLayer(),tiles=[];
+	    if(layer&&typeof layer.getTileUrl==="function"){
+	      var origin={x:rect.minX,y:rect.minY};
+	      var minTx=Math.floor(rect.minX/256),maxTx=Math.floor((rect.maxX-1)/256),minTy=Math.floor(rect.minY/256),maxTy=Math.floor((rect.maxY-1)/256);
+	      for(var ty=minTy;ty<=maxTy;ty++){
+	        for(var tx=minTx;tx<=maxTx;tx++){
+	          var url=templateTileUrl(layer,tx,ty,z);
+	          if(url)tiles.push({x:tx*256-origin.x,y:ty*256-origin.y,z:z,tileX:tx,tileY:ty,url:url});
+	        }
+	      }
+	    }
+	    if(!tiles.length)return null;
+	    var courseKey=explicitCourseKey(course);
+	    var key=explicitStorageKey(courseKey,hole);
+	    var pins={tee:packPoint(payload.tee)||packPoint(payload.route[0]),green:packPoint(payload.green)||packPoint(payload.route[payload.route.length-1]),route:payload.route.map(packPoint).filter(Boolean),greenShape:payload.greenShape.map(packPoint).filter(Boolean)};
+	    var manifest={version:VERSION,key:key,reason:reason||"mapped-geometry-bridge",surfaceModel:"captured-surface-v1",interactionOwner:"captured-surface",liveMapRole:"capture-source-diagnostic-reference",courseKey:courseKey,courseName:explicitCourseName(course),holeNumber:hole,captureZoom:z,imageWidth:Math.max(256,rect.maxX-rect.minX),imageHeight:Math.max(256,rect.maxY-rect.minY),originPx:{x:rect.minX,y:rect.minY},tiles:tiles,includeTee:!!pins.tee,teeLatLng:pins.tee||null,anchorPins:pins,createdAt:new Date().toISOString()};
+	    manifest=safe(function(){return typeof window.gdCapturedSurfaceWriteScan==="function"?window.gdCapturedSurfaceWriteScan(manifest,{reason:reason||"mapped-geometry-bridge",storageKey:key,courseKey:courseKey,holeNumber:hole}):manifest;},manifest)||manifest;
+	    safe(function(){localStorage.setItem(manifest.key||key,JSON.stringify(manifest));});
+	    if(manifestMatchesActive(manifest)){captureManifest=manifest;publishCaptureManifest(manifest);}
+	    return manifest;
+	  }
+	  function gdEnsureCapturedManifestForMappedHole(course,hole,opts){
+	    opts=opts||{};
+	    hole=Number(hole)||surfaceHoleNumber();
+	    var courseKey=explicitCourseKey(course);
+	    var existing=readExplicitCaptureManifest(courseKey,hole);
+	    if(existing)return Promise.resolve({ok:true,manifest:existing,existing:true});
+	    var buildKey=String(courseKey)+":h"+String(hole);
+	    if(mappedGeometryManifestBuilds[buildKey])return mappedGeometryManifestBuilds[buildKey];
+	    var timeoutMs=Math.max(300,Math.min(2500,num(opts.timeoutMs,1400)));
+	    var buildPromise=Promise.resolve().then(function(){
+	      var manifest=buildMappedGeometryCaptureManifest(course,hole,opts.data,opts.reason||"mapped-geometry-bridge");
+	      if(!manifest)throw new Error("mapped geometry manifest unavailable");
+	      return {ok:true,manifest:manifest,existing:false};
+	    });
+	    var timeoutPromise=new Promise(function(resolve,reject){setTimeout(function(){reject(new Error("mapped geometry manifest timeout"));},timeoutMs);});
+	    mappedGeometryManifestBuilds[buildKey]=Promise.race([buildPromise,timeoutPromise]).finally(function(){delete mappedGeometryManifestBuilds[buildKey];});
+	    return mappedGeometryManifestBuilds[buildKey];
+	  }
 	  function buildCaptureManifest(objectBounds,reason){
 	    if(!hasMap()||!validBounds(objectBounds))return null;
 	    reason=reason||"capture";
@@ -611,19 +758,26 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	  var HOLE_FRAME_LOADING_TIMEOUT_MS=1700;
 	  var holeFrameLoadingTimer=null;
 	  var holeFrameLoadingKey="";
+	  var holeFrameBridgeKey="";
 	  function holeFrameKey(){
 	    return String(surfaceCourseKey()||"course")+":h"+String(surfaceHoleNumber()||1);
 	  }
 	  function loadingMessage(){
 	    return "Loading Hole "+String(surfaceHoleNumber()||1)+" frame...";
 	  }
-	  function activeMappedHoleData(){
+	  function activeMappedCourse(){
 	    return safe(function(){
 	      var course=null;
-	      var h=surfaceHoleNumber();
 	      if(typeof loadUserCourseData==="function")course=loadUserCourseData();
 	      if(!course&&typeof window.loadUserCourseData==="function")course=window.loadUserCourseData();
 	      if(!course&&typeof currentCourse!=="undefined")course=currentCourse;
+	      return course||null;
+	    },null);
+	  }
+	  function activeMappedHoleData(){
+	    return safe(function(){
+	      var course=activeMappedCourse();
+	      var h=surfaceHoleNumber();
 	      var data=null;
 	      if(course&&typeof window.gdMappedHolePlayData==="function")data=window.gdMappedHolePlayData(course,h);
 	      else if(course&&typeof gdMappedHolePlayData==="function")data=gdMappedHolePlayData(course,h);
@@ -635,8 +789,9 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	    return !!(data&&Array.isArray(data.route)&&data.route.length>=2);
 	  }
 	  function clearHoleFrameLoading(){
-	    safe(function(){
+	      safe(function(){
 	      if(holeFrameLoadingTimer){clearTimeout(holeFrameLoadingTimer);holeFrameLoadingTimer=null;}
+	      holeFrameBridgeKey="";
 	      if(document.body)document.body.classList.remove("gdHoleFrameLoading");
 	      delete window.__gdHoleFrameLoading;
 	    });
@@ -669,6 +824,20 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	          if(manifest&&validBounds(b)&&fitCaptured(b,"hole",.025,{objectName:"capturedGreenHoleFrame",reason:"loading-ready",maxScale:3.4,fitRatio:.56}))return;
 	          gdCapturedFrameUnavailable("frame-loading-timeout",Object.assign({stage:"loading-timeout"},context||{}));
 	        },HOLE_FRAME_LOADING_TIMEOUT_MS);
+	      }
+	      if(holeFrameBridgeKey!==key&&typeof window.gdEnsureCapturedManifestForMappedHole==="function"){
+	        holeFrameBridgeKey=key;
+	        window.gdEnsureCapturedManifestForMappedHole(activeMappedCourse(),surfaceHoleNumber(),{reason:reason||"frame-loading",data:activeMappedHoleData(),timeoutMs:Math.max(500,HOLE_FRAME_LOADING_TIMEOUT_MS-180)}).then(function(result){
+	          if(holeFrameKey()!==key||!document.body||!document.body.classList.contains("gdHoleFrameLoading"))return;
+	          if(result&&result.manifest){
+	            var b=greenBounds("hole");
+	            if(validBounds(b)&&fitCaptured(b,"hole",.025,{objectName:"mappedGeometryCapturedFrame",reason:"mapped-geometry-ready",maxScale:3.4,fitRatio:.56}))return;
+	          }
+	          gdCapturedFrameUnavailable("mapped-geometry-fit-failed",Object.assign({stage:"bridge-fit"},context||{}));
+	        }).catch(function(){
+	          if(holeFrameKey()!==key||!document.body||!document.body.classList.contains("gdHoleFrameLoading"))return;
+	          gdCapturedFrameUnavailable("mapped-geometry-manifest-failed",Object.assign({stage:"bridge-build"},context||{}));
+	        });
 	      }
 	      if(typeof window.gdApplyGpsMapVisibilityOwner==="function")window.gdApplyGpsMapVisibilityOwner("hole-frame-loading");
 	    });
@@ -1172,6 +1341,8 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
     hideWaiting();
     if(!nativeFit&&typeof window.gdFitObjectToFrame==="function")nativeFit=window.gdFitObjectToFrame;
 		  window.gdBuildHoleImageCaptureManifest=function(reason){if(capturedGpsPlayActive())return gdCapturedFrameUnavailable(reason||"manual",{stage:"build"});var b=activeBounds("hole")||greenBounds("hole");return buildCaptureManifest(b,reason||"manual");};
+		  window.gdBuildMappedGeometryCaptureManifest=buildMappedGeometryCaptureManifest;
+		  window.gdEnsureCapturedManifestForMappedHole=gdEnsureCapturedManifestForMappedHole;
 		  window.gdLoadHoleImageCaptureManifest=function(){return loadCaptureManifest();};
 		  window.gdEnsureCurrentCapturedSurfaceManifest=function(reason){return ensureCurrentCaptureManifest(reason||"ensure-current");};
 		  window.gdCapturedFrameUnavailable=gdCapturedFrameUnavailable;
