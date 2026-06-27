@@ -2,7 +2,7 @@
   if(window.GDCoursePlayPipeline&&window.GDCoursePlayPipeline.version)return;
 
   var VERSION=1;
-  var SCHEMA_VERSION=1;
+  var SCHEMA_VERSION=2;
   var STORE_KEY="gd_course_play_pipeline_v1";
   var COURSE_STATES={
     not_prepared:"not_prepared",
@@ -30,6 +30,12 @@
   function safe(fn,fb){try{return fn();}catch(e){return fb;}}
   function clone(value){return safe(function(){return JSON.parse(JSON.stringify(value));},value);}
   function slug(value){return String(value||"course").replace(/[^a-z0-9:_-]+/gi,"_").slice(0,120)||"course";}
+  function stableId(){
+    return "cph_"+Date.now().toString(36)+"_"+Math.random().toString(36).slice(2,8);
+  }
+  function nextVersion(existing){
+    return Math.max(1,Number(existing&&existing.dataVersion||existing&&existing.versionId||0)||0)+1;
+  }
   function point(value){
     if(!value)return null;
     var lat=Number(value.lat!==undefined?value.lat:value.latitude);
@@ -65,7 +71,7 @@
     return String(courseOrId&&(courseOrId.name||courseOrId.title||courseOrId.courseName||courseOrId.key||courseOrId.id)||courseId||"Course");
   }
   function emptyStore(){
-    return {schema:"gd.course_play_pipeline.store",version:VERSION,schemaVersion:SCHEMA_VERSION,updatedAt:null,courses:{}};
+    return {schema:"gd.course_play_pipeline.store",version:VERSION,schemaVersion:SCHEMA_VERSION,updatedAt:null,courses:{},sync:{status:"local",pendingCount:0,lastQueuedAt:null}};
   }
   function normalizeStore(raw){
     var store=raw&&typeof raw==="object"?raw:emptyStore();
@@ -73,6 +79,7 @@
     store.version=VERSION;
     store.schemaVersion=SCHEMA_VERSION;
     if(!store.courses||typeof store.courses!=="object")store.courses={};
+    if(!store.sync||typeof store.sync!=="object")store.sync={status:"local",pendingCount:0,lastQueuedAt:null};
     return store;
   }
   function loadStore(){
@@ -104,11 +111,19 @@
       updatedAt:stamp,
       syncStatus:"local",
       remoteId:null,
-      lastError:null
+      lastError:null,
+      recordId:"course:"+courseId,
+      dataVersion:1,
+      invalidatedAt:null,
+      invalidationReason:null,
+      dbReady:true
     },existing);
     record.courseId=courseId;
     record.courseKey=record.courseKey||courseId;
     record.courseName=courseNameFrom(courseOrId,record.courseName||courseId);
+    record.recordId=record.recordId||("course:"+record.courseId);
+    record.dataVersion=Math.max(1,Number(record.dataVersion||1));
+    record.syncStatus=record.syncStatus||"local";
     record.status=VALID_COURSE_STATES[record.status]?record.status:COURSE_STATES.not_prepared;
     if(!record.holes||typeof record.holes!=="object")record.holes={};
     return record;
@@ -135,15 +150,53 @@
       fairwayPoints:[],
       routePoints:[],
       frameAnchors:{tee:null,green:null,route:[],greenShape:[]},
-      presentation:{capturedManifestKey:null,capturedSurfaceReady:false,owner:"gps-play"},
+      presentation:{capturedManifestKey:null,capturedSurfaceReady:false,owner:"gps-play",frameStatus:"not_generated",frameIndexKey:null},
       source:"local",
       confidence:"unknown",
       unavailableReason:null,
       createdAt:stamp,
       updatedAt:stamp,
       syncStatus:"local",
-      remoteId:null
+      remoteId:null,
+      recordId:"hole:"+course.courseId+":h"+holeNumber,
+      dataVersion:1,
+      invalidatedAt:null,
+      invalidationReason:null,
+      dbReady:true,
+      schemaNotes:"geometry-durable-frame-cache-separate"
     };
+  }
+  function normalizeHoleRecord(course,holeNumber,hole){
+    var record=Object.assign(emptyHoleRecord(course,holeNumber),hole||{});
+    record.schema="gd.course_play_pipeline.hole";
+    record.version=VERSION;
+    record.schemaVersion=SCHEMA_VERSION;
+    record.courseId=course.courseId;
+    record.courseKey=course.courseKey||course.courseId;
+    record.courseName=course.courseName;
+    record.holeNumber=normalizeHoleNumber(record.holeNumber||holeNumber);
+    record.status=VALID_HOLE_STATES[record.status]?record.status:HOLE_STATES.unknown;
+    record.teePoint=point(record.teePoint);
+    record.greenCentre=point(record.greenCentre);
+    record.greenShape=points(record.greenShape);
+    record.fairwayPoints=points(record.fairwayPoints);
+    record.routePoints=points(record.routePoints);
+    record.greenBounds=record.greenBounds||deriveBounds(record.greenShape,record.greenCentre);
+    record.frameAnchors=Object.assign({tee:null,green:null,route:[],greenShape:[]},record.frameAnchors||{});
+    record.frameAnchors.tee=point(record.frameAnchors.tee)||record.teePoint;
+    record.frameAnchors.green=point(record.frameAnchors.green)||record.greenCentre;
+    record.frameAnchors.route=points(record.frameAnchors.route&&record.frameAnchors.route.length?record.frameAnchors.route:record.routePoints);
+    record.frameAnchors.greenShape=points(record.frameAnchors.greenShape&&record.frameAnchors.greenShape.length?record.frameAnchors.greenShape:record.greenShape);
+    record.presentation=Object.assign({capturedManifestKey:null,capturedSurfaceReady:false,owner:"gps-play",frameStatus:"not_generated",frameIndexKey:null},record.presentation||{});
+    record.source=record.source||"local";
+    record.confidence=record.confidence||"unknown";
+    record.syncStatus=record.syncStatus||"local";
+    record.recordId=record.recordId||("hole:"+course.courseId+":h"+record.holeNumber);
+    record.dataVersion=Math.max(1,Number(record.dataVersion||1));
+    record.dbReady=record.dbReady!==false;
+    record.updatedAt=record.updatedAt||now();
+    record.createdAt=record.createdAt||record.updatedAt;
+    return record;
   }
   function deriveBounds(shape,centre){
     var pts=points(shape);
@@ -176,7 +229,7 @@
     record.fairwayPoints=fairwayPoints;
     record.routePoints=route;
     record.frameAnchors={tee:tee||null,green:green||null,route:route,greenShape:greenShape};
-    record.presentation={capturedManifestKey:null,capturedSurfaceReady:!!playable,owner:"gps-play"};
+    record.presentation={capturedManifestKey:null,capturedSurfaceReady:!!playable,owner:"gps-play",frameStatus:playable?"renderable":"not_generated",frameIndexKey:null};
     record.source=source||mappedData.source||"automap";
     record.confidence=playable?"mapped_geometry_ready_for_play":"incomplete";
     record.updatedAt=now();
@@ -196,6 +249,13 @@
   }
   function writeCourse(course,store){
     store=store||loadStore();
+    course=Object.assign(courseRecord(course,store),course||{});
+    course.recordId=course.recordId||("course:"+course.courseId);
+    course.dataVersion=Math.max(1,Number(course.dataVersion||1));
+    course.syncStatus=course.syncStatus||"local";
+    Object.keys(course.holes||{}).forEach(function(key){
+      course.holes[key]=normalizeHoleRecord(course,key,course.holes[key]);
+    });
     course.updatedAt=now();
     course.status=summarizeCourseStatus(course);
     store.courses[course.courseId]=course;
@@ -215,9 +275,13 @@
     var course=courseRecord(courseOrId,store);
     holeNumber=normalizeHoleNumber(holeNumber);
     var existing=course.holes[String(holeNumber)]||{};
-    var record=Object.assign(emptyHoleRecord(course,holeNumber),existing,normalizeMappedHoleData(course,holeNumber,mappedData,source));
+    var normalized=normalizeMappedHoleData(course,holeNumber,mappedData,source);
+    var record=Object.assign(emptyHoleRecord(course,holeNumber),existing,normalized);
     record.createdAt=existing.createdAt||record.createdAt;
     record.updatedAt=now();
+    record.dataVersion=nextVersion(existing);
+    record.syncStatus="pending";
+    record.dbReady=true;
     course.holes[String(holeNumber)]=record;
     delete preparingSince[String(course.courseId)+":h"+String(holeNumber)];
     return writeCourse(course,store).holes[String(holeNumber)];
@@ -228,7 +292,8 @@
     var holes=Array.isArray(mappedCourseData)?mappedCourseData:(mappedCourseData&&mappedCourseData.holes)||[];
     holes.forEach(function(item,index){
       var holeNumber=normalizeHoleNumber(item&&item.hole||item&&item.holeNumber||index+1);
-      course.holes[String(holeNumber)]=Object.assign(emptyHoleRecord(course,holeNumber),normalizeMappedHoleData(course,holeNumber,item,source));
+      var existing=course.holes[String(holeNumber)]||{};
+      course.holes[String(holeNumber)]=Object.assign(emptyHoleRecord(course,holeNumber),existing,normalizeMappedHoleData(course,holeNumber,item,source),{dataVersion:nextVersion(existing),syncStatus:"pending",dbReady:true});
     });
     return writeCourse(course,store);
   }
@@ -262,7 +327,7 @@
     var course=courseRecord(courseOrId,store);
     holeNumber=normalizeHoleNumber(holeNumber);
     var existing=course.holes[String(holeNumber)]||emptyHoleRecord(course,holeNumber);
-    var record=Object.assign(existing,clone(data||{}),{status:HOLE_STATES.play_data_ready,updatedAt:now(),unavailableReason:null});
+    var record=Object.assign(existing,clone(data||{}),{status:HOLE_STATES.play_data_ready,updatedAt:now(),unavailableReason:null,dataVersion:nextVersion(existing),syncStatus:"pending",dbReady:true});
     course.holes[String(holeNumber)]=record;
     delete preparingSince[String(course.courseId)+":h"+String(holeNumber)];
     return writeCourse(course,store).holes[String(holeNumber)];
@@ -275,6 +340,8 @@
     existing.status=HOLE_STATES.play_data_unavailable;
     existing.unavailableReason=String(reason||"unavailable");
     existing.updatedAt=now();
+    existing.dataVersion=nextVersion(existing);
+    existing.syncStatus="pending";
     course.holes[String(holeNumber)]=existing;
     delete preparingSince[String(course.courseId)+":h"+String(holeNumber)];
     return writeCourse(course,store).holes[String(holeNumber)];
@@ -297,6 +364,124 @@
   }
   function loadCoursePlayPipeline(courseOrId){
     return courseOrId?getCoursePlayState(courseOrId):loadStore();
+  }
+  function markCoursePlaySyncPending(courseOrId,holeNumber,reason){
+    var store=loadStore();
+    var course=courseRecord(courseOrId||activeCourseFromApp()||"course",store);
+    var stamp=now();
+    if(holeNumber){
+      var key=String(normalizeHoleNumber(holeNumber));
+      var hole=normalizeHoleRecord(course,key,course.holes[key]||emptyHoleRecord(course,normalizeHoleNumber(holeNumber)));
+      hole.syncStatus="pending";
+      hole.updatedAt=stamp;
+      hole.syncReason=String(reason||"manual");
+      course.holes[key]=hole;
+    }else{
+      course.syncStatus="pending";
+      course.syncReason=String(reason||"manual");
+      course.updatedAt=stamp;
+    }
+    store.courses[course.courseId]=course;
+    saveStore(store);
+    return holeNumber?clone(course.holes[String(normalizeHoleNumber(holeNumber))]):clone(course);
+  }
+  function buildHolePlayDbPayload(courseOrId,holeNumber){
+    var course=getCoursePlayState(courseOrId);
+    var hole=normalizeHoleRecord(course,holeNumber,getHolePlayState(course,holeNumber));
+    return {
+      schema:"gd.course_play_pipeline.db.hole",
+      schemaVersion:SCHEMA_VERSION,
+      recordId:hole.recordId,
+      courseId:course.courseId,
+      courseKey:course.courseKey,
+      courseName:course.courseName,
+      holeNumber:hole.holeNumber,
+      status:hole.status,
+      source:hole.source,
+      confidence:hole.confidence,
+      teePoint:hole.teePoint,
+      greenCentre:hole.greenCentre,
+      greenShape:hole.greenShape,
+      greenBounds:hole.greenBounds,
+      fairwayPoints:hole.fairwayPoints,
+      routePoints:hole.routePoints,
+      frameAnchors:hole.frameAnchors,
+      presentation:{
+        owner:hole.presentation&&hole.presentation.owner||"gps-play",
+        capturedSurfaceReady:!!(hole.presentation&&hole.presentation.capturedSurfaceReady),
+        frameStatus:hole.presentation&&hole.presentation.frameStatus||"unknown",
+        frameIndexKey:hole.presentation&&hole.presentation.frameIndexKey||null,
+        capturedManifestKey:hole.presentation&&hole.presentation.capturedManifestKey||null
+      },
+      dataVersion:hole.dataVersion,
+      invalidatedAt:hole.invalidatedAt||null,
+      invalidationReason:hole.invalidationReason||null,
+      syncStatus:hole.syncStatus||"local",
+      remoteId:hole.remoteId||null,
+      createdAt:hole.createdAt,
+      updatedAt:hole.updatedAt
+    };
+  }
+  function buildCoursePlayDbPayload(courseOrId){
+    var course=getCoursePlayState(courseOrId);
+    var holes=Object.keys(course.holes||{}).map(function(key){return buildHolePlayDbPayload(course,key);}).sort(function(a,b){return a.holeNumber-b.holeNumber;});
+    return {
+      schema:"gd.course_play_pipeline.db.course",
+      schemaVersion:SCHEMA_VERSION,
+      recordId:course.recordId,
+      courseId:course.courseId,
+      courseKey:course.courseKey,
+      courseName:course.courseName,
+      status:course.status,
+      source:course.source,
+      confidence:course.confidence,
+      dataVersion:course.dataVersion,
+      syncStatus:course.syncStatus||"local",
+      remoteId:course.remoteId||null,
+      invalidatedAt:course.invalidatedAt||null,
+      invalidationReason:course.invalidationReason||null,
+      createdAt:course.createdAt,
+      updatedAt:course.updatedAt,
+      holes:holes
+    };
+  }
+  function exportCoursePlayPayload(courseOrId){
+    var payload=buildCoursePlayDbPayload(courseOrId||activeCourseFromApp()||"course");
+    return {
+      schema:"gd.course_play_pipeline.export",
+      schemaVersion:SCHEMA_VERSION,
+      exportedAt:now(),
+      storageKey:STORE_KEY,
+      payload:payload
+    };
+  }
+  function importCoursePlayPayload(payload,opts){
+    opts=opts||{};
+    var source=payload&&payload.payload||payload;
+    if(!source||!source.courseId)return null;
+    var store=loadStore();
+    var course=courseRecord(source,store);
+    course=Object.assign(course,source,{holes:{}});
+    (source.holes||[]).forEach(function(hole){
+      var h=normalizeHoleNumber(hole&&hole.holeNumber);
+      course.holes[String(h)]=normalizeHoleRecord(course,h,Object.assign({},hole,{syncStatus:opts.markPending?"pending":hole.syncStatus||"imported"}));
+    });
+    store.courses[course.courseId]=course;
+    saveStore(store);
+    return getCoursePlayState(course);
+  }
+  function buildCoursePlaySyncEnvelope(courseOrId){
+    var payload=buildCoursePlayDbPayload(courseOrId||activeCourseFromApp()||"course");
+    return {
+      schema:"gd.course_play_pipeline.sync_envelope",
+      schemaVersion:SCHEMA_VERSION,
+      queueType:"course-play-upsert",
+      localOnly:true,
+      createdAt:now(),
+      courseId:payload.courseId,
+      dataVersion:payload.dataVersion,
+      payload:payload
+    };
   }
   function futureSyncSnapshot(courseOrId){
     var course=getCoursePlayState(courseOrId);
@@ -566,6 +751,12 @@
     loadCoursePlayPipeline:loadCoursePlayPipeline,
     markHolePlayDataReady:markHolePlayDataReady,
     markHolePlayDataUnavailable:markHolePlayDataUnavailable,
+    markCoursePlaySyncPending:markCoursePlaySyncPending,
+    buildHolePlayDbPayload:buildHolePlayDbPayload,
+    buildCoursePlayDbPayload:buildCoursePlayDbPayload,
+    buildCoursePlaySyncEnvelope:buildCoursePlaySyncEnvelope,
+    exportCoursePlayPayload:exportCoursePlayPayload,
+    importCoursePlayPayload:importCoursePlayPayload,
     futureSyncSnapshot:futureSyncSnapshot,
     normalizeMappedHoleData:normalizeMappedHoleData,
     ingestCourseLibraryCourse:ingestCourseLibraryCourse,
