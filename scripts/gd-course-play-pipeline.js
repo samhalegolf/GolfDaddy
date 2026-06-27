@@ -271,6 +271,97 @@
     course.schemaVersion=SCHEMA_VERSION;
     return course;
   }
+  function courseLibraryApi(){
+    return window.GolfDaddyCourseLibrary||window.ClarityCaddieCourseLibrary||{};
+  }
+  function resolveCourseFromLibrary(courseOrId){
+    if(courseOrId&&typeof courseOrId==="object")return courseOrId;
+    var api=courseLibraryApi();
+    return safe(function(){return typeof api.loadUserCourseData==="function"?api.loadUserCourseData():null;},null)||
+      safe(function(){return typeof window.loadUserCourseData==="function"?window.loadUserCourseData():null;},null)||
+      null;
+  }
+  function holeNumbersForCourse(course){
+    var found={};
+    if(course&&course.objects&&typeof course.objects==="object"){
+      Object.keys(course.objects).forEach(function(key){
+        var object=course.objects[key];
+        var h=Number(object&&object.holeNumber);
+        if(Number.isFinite(h)&&h>0)found[Math.round(h)]=true;
+      });
+    }
+    if(course&&course.holes&&typeof course.holes==="object"){
+      Object.keys(course.holes).forEach(function(key){
+        var row=course.holes[key];
+        var h=Number(row&&row.holeNumber||row&&row.hole||key);
+        if(Number.isFinite(h)&&h>0)found[Math.round(h)]=true;
+      });
+    }
+    var holes=Object.keys(found).map(function(key){return Number(key);}).filter(Boolean).sort(function(a,b){return a-b;});
+    if(!holes.length)holes=Array.from({length:18},function(_,index){return index+1;});
+    return holes;
+  }
+  function mappedHoleFromCourseLibrary(course,holeNumber){
+    var api=courseLibraryApi();
+    return safe(function(){return typeof api.mappedHolePlayData==="function"?api.mappedHolePlayData(course,holeNumber):null;},null)||
+      safe(function(){return typeof window.gdMappedHolePlayData==="function"?window.gdMappedHolePlayData(course,holeNumber):null;},null);
+  }
+  function ingestCourseLibraryCourse(courseOrId,opts){
+    opts=opts||{};
+    var course=resolveCourseFromLibrary(courseOrId);
+    if(!course)return prepareCourseForPlay(courseOrId||"course");
+    prepareCourseForPlay(course);
+    var holes=holeNumbersForCourse(course);
+    var ingested=0;
+    holes.forEach(function(holeNumber){
+      var mapped=mappedHoleFromCourseLibrary(course,holeNumber);
+      if(mapped&&(Array.isArray(mapped.route)&&mapped.route.length||mapped.green||mapped.tee)){
+        ingestMappedHole(course,holeNumber,mapped,opts.source||"course-library");
+        ingested+=1;
+      }
+    });
+    var state=getCoursePlayState(course);
+    state.adapter={source:opts.source||"course-library",holesChecked:holes.length,holesIngested:ingested,updatedAt:now()};
+    var store=loadStore();
+    store.courses[state.courseId]=state;
+    saveStore(store);
+    return getCoursePlayState(course);
+  }
+  function prepareCourseFromCourseLibrary(courseOrId,opts){
+    opts=opts||{};
+    var course=resolveCourseFromLibrary(courseOrId);
+    var prepared=prepareCourseForPlay(course||courseOrId||"course");
+    if(opts.ingest!==false)return ingestCourseLibraryCourse(course||courseOrId,{source:opts.source||"course-library-prepare"});
+    return prepared;
+  }
+  function installCourseLibraryAdapter(){
+    if(window.__gdCoursePlayPipelineCourseLibraryAdapter)return;
+    window.__gdCoursePlayPipelineCourseLibraryAdapter=true;
+    var originalAutoMap=window.gdAutoMapOsmCourse;
+    if(typeof originalAutoMap==="function"&&!originalAutoMap.__gdCoursePlayPipelineWrapped){
+      window.gdAutoMapOsmCourse=function(){
+        var args=arguments;
+        var opts=args&&args[0]||{};
+        var course=opts&&opts.course;
+        var result=originalAutoMap.apply(this,args);
+        var ingest=function(){safe(function(){ingestCourseLibraryCourse(course||resolveCourseFromLibrary(null),{source:"automap"});});};
+        if(result&&typeof result.then==="function")return result.finally(ingest);
+        setTimeout(ingest,0);
+        return result;
+      };
+      window.gdAutoMapOsmCourse.__gdCoursePlayPipelineWrapped=true;
+    }
+    var originalOpenCourseToFirstHole=window.gdOpenCourseToFirstHole;
+    if(typeof originalOpenCourseToFirstHole==="function"&&!originalOpenCourseToFirstHole.__gdCoursePlayPipelineWrapped){
+      window.gdOpenCourseToFirstHole=function(course){
+        safe(function(){prepareCourseForPlay(course||resolveCourseFromLibrary(null));});
+        var result=originalOpenCourseToFirstHole.apply(this,arguments);
+        setTimeout(function(){safe(function(){ingestCourseLibraryCourse(course||resolveCourseFromLibrary(null),{source:"course-selection"});});},350);
+        return result;
+      };
+      window.gdOpenCourseToFirstHole.__gdCoursePlayPipelineWrapped=true;
+    }
+  }
 
   window.GDCoursePlayPipeline={
     version:VERSION,
@@ -289,6 +380,11 @@
     markHolePlayDataReady:markHolePlayDataReady,
     markHolePlayDataUnavailable:markHolePlayDataUnavailable,
     futureSyncSnapshot:futureSyncSnapshot,
-    normalizeMappedHoleData:normalizeMappedHoleData
+    normalizeMappedHoleData:normalizeMappedHoleData,
+    ingestCourseLibraryCourse:ingestCourseLibraryCourse,
+    prepareCourseFromCourseLibrary:prepareCourseFromCourseLibrary,
+    installCourseLibraryAdapter:installCourseLibraryAdapter
   };
+  setTimeout(installCourseLibraryAdapter,0);
+  setTimeout(installCourseLibraryAdapter,800);
 })();
