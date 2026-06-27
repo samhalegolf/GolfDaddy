@@ -37788,6 +37788,28 @@ body.gdGpsLayoutRigOn .gdNextHolePopout{
   color:#031009;
   border-color:transparent;
 }
+.gdGpsNearestSuggestion{
+  position:fixed;
+  left:50%;
+  bottom:calc(164px + env(safe-area-inset-bottom));
+  transform:translateX(-50%);
+  z-index:3701;
+  display:none;
+  width:min(320px,calc(100vw - 32px));
+  min-height:44px;
+  border-radius:999px;
+  border:1px solid rgba(255,255,255,.16);
+  background:rgba(8,18,13,.96);
+  color:#fff;
+  box-shadow:0 14px 36px rgba(0,0,0,.42);
+  padding:0 18px;
+  font-size:13px;
+  line-height:1.2;
+  font-weight:950;
+}
+.gdGpsNearestSuggestion.open{
+  display:block;
+}
 </style>
 <script id="gdGpsAutoSessionV1">
 (function(){
@@ -37904,6 +37926,15 @@ body.gdGpsLayoutRigOn .gdNextHolePopout{
     }
     return best;
   }
+  function currentHoleNumber(){
+    return Number(safe(function(){
+      return currentPlayingHole||selectedHole||sessionStorage.getItem("gd_active_playing_hole")||sessionStorage.getItem("gd_mapper_active_hole")||1;
+    },1))||1;
+  }
+  function gdCanAutoSwitchHole(context){
+    return !!(context&&context.explicitUserAction===true);
+  }
+  window.gdCanAutoSwitchHole=gdCanAutoSwitchHole;
   function playHole(h,reason){
     if(!h)return false;
     safe(function(){sessionStorage.setItem("gd_active_playing_hole",String(h));sessionStorage.setItem("gd_mapper_active_hole",String(h));});
@@ -37918,12 +37949,39 @@ body.gdGpsLayoutRigOn .gdNextHolePopout{
     snapshot("nearest-hole-resume");
     return true;
   }
+  function ensureNearestSuggestion(){
+    var el=document.getElementById("gdGpsNearestSuggestion");
+    if(el)return el;
+    el=document.createElement("button");
+    el.id="gdGpsNearestSuggestion";
+    el.className="gdGpsNearestSuggestion";
+    el.type="button";
+    document.body.appendChild(el);
+    return el;
+  }
+  function showNearestHoleSuggestion(match,source){
+    var h=Number(match&&match.hole)||0;
+    if(!h||h===currentHoleNumber())return false;
+    var el=ensureNearestSuggestion();
+    el.textContent="Nearest hole found - tap to switch to H"+h;
+    el.dataset.hole=String(h);
+    el.dataset.source=source||"gps-auto-nearest";
+    el.onclick=function(event){
+      event.preventDefault();
+      event.stopPropagation();
+      el.classList.remove("open");
+      playHole(h,"nearest-hole-suggestion");
+    };
+    el.classList.add("open");
+    safe(function(){if(typeof toast==="function")toast("Nearest hole found - tap to switch to H"+h);});
+    return true;
+  }
 	  function autoResumeNearest(saved,here,age){
 	    if(window.__gdGpsLocateQuarantineV1!==false)return false;
 	    if(!saved||!here||age>RECENT_MS)return false;
 	    var nearest=nearestHoleTo(here);
     if(!nearest||!Number.isFinite(nearest.distance)||nearest.distance>ON_COURSE_M)return false;
-    return playHole(nearest.hole,"gps-auto-nearest");
+    return showNearestHoleSuggestion(nearest,"gps-auto-nearest");
   }
   function snapshot(reason){
     if(!isGps())return null;
