@@ -42410,14 +42410,12 @@ body:has(#courseScreen:not(.hidden)) .leaflet-marker-icon{display:none!important
     safe(function(){var hint=byId("hint");if(hint){hint.classList.remove("visible","gdMappedStartPill");hint.textContent=""}});
     setToolOpen(false);
   }
-	  function armManualStart(){
-	    if(!gpsOpen()&&!document.body.classList.contains("shell-gps"))return false;
-	    manualStartArmedAt=Date.now();
-	    window.__gdManualStandingPlacementActiveUntil=Date.now()+9000;
-	    safe(function(){if(typeof gdSuppressMapPlacementClick==="function")gdSuppressMapPlacementClick(720)});
-    safe(function(){gdMapPlacementSuppressClickUntil=Math.max(gdMapPlacementSuppressClickUntil||0,Date.now()+720)});
-    safe(function(){targetDragging=false});
-    safe(function(){if(typeof setBubbleOnlyLock==="function")setBubbleOnlyLock(false)});
+		  function armManualStart(){
+		    if(!gpsOpen()&&!document.body.classList.contains("shell-gps"))return false;
+		    manualStartArmedAt=Date.now();
+		    window.__gdManualStandingPlacementActiveUntil=Date.now()+9000;
+	    safe(function(){targetDragging=false});
+	    safe(function(){if(typeof setBubbleOnlyLock==="function")setBubbleOnlyLock(false)});
 	    safe(function(){lockedFrame=false});
 	    safe(function(){mode="start"});
 	    var hadActiveShot=safe(function(){return !!(target||gdCurrentPlannedShotId||(typeof gdPendingCourseShot==="function"&&gdPendingCourseShot()))},false);
@@ -42536,10 +42534,26 @@ body:has(#courseScreen:not(.hidden)) .leaflet-marker-icon{display:none!important
 		      safe(function(){if(typeof window.gdPaintCapturedShotOverlayOwner==="function")window.gdPaintCapturedShotOverlayOwner("manual-start-lock")});
 	      safe(function(){var hint=byId("hint");if(hint){hint.classList.remove("visible","gdMappedStartPill");hint.textContent=""}});
 	      writeResume("manual-start-lock");
-	    },120);
+		    },120);
+		  }
+	  function manualStartPresentationSurfaceEvent(event){
+	    return safe(function(){
+	      if(!event||!Number.isFinite(Number(event.clientX))||!Number.isFinite(Number(event.clientY)))return false;
+	      var target=event.target;
+	      var mapEl=map&&map.getContainer?map.getContainer():byId("map");
+	      var frameEl=byId("gdHoleImageCameraLayer");
+	      var appEl=byId("app");
+	      if(target&&target.closest&&target.closest("button,a,input,select,textarea,.leaflet-control,.rightRail,.shellBar,.dock,#gdV62UndoDock,#gdV62ModeSwitch,#shotTile,#gdV62GpsBadge,#hint,#toast,#gdWandPanel,#gdMapperToolFlyout,#gdMapperToolsDrawer,#gdMapperHoleStrip,.panel,.modulePanel,#courseScreen:not(.hidden)"))return false;
+	      if(target&&((mapEl&&mapEl.contains(target))||(frameEl&&frameEl.contains(target))))return true;
+	      var rectSource=mapEl||frameEl||appEl;
+	      if(!rectSource)return false;
+	      var rect=rectSource.getBoundingClientRect();
+	      if(!rect||rect.width<=0||rect.height<=0)return false;
+	      return Number(event.clientX)>=rect.left&&Number(event.clientX)<=rect.right&&Number(event.clientY)>=rect.top&&Number(event.clientY)<=rect.bottom&&(!target||(appEl&&appEl.contains(target))||target===document.body||target===document.documentElement);
+	    },false);
 	  }
-	  function completeStandingPointPlacement(event){
-	    if(!document.body||!document.body.classList.contains("gdManualStartPlacementActive")){
+		  function completeStandingPointPlacement(event){
+		    if(!document.body||!document.body.classList.contains("gdManualStartPlacementActive")){
 	      if(Date.now()-Number(document.body&&document.body.dataset&&document.body.dataset.gdStandingPointAt||0)<1600)return false;
 	      safe(function(){document.body.dataset.gdStandingPointComplete="blocked-state"});
 	      return false;
@@ -42551,11 +42565,10 @@ body:has(#courseScreen:not(.hidden)) .leaflet-marker-icon{display:none!important
 	    if(typeof window.gdMaySetLocationFromMapEvent==="function"&&!window.gdMaySetLocationFromMapEvent(event,{source:"manual-start-pointerup"})){
 	      safe(function(){document.body.dataset.gdStandingPointComplete="blocked-location-guard"});
 	      return false;
-	    }
-	    safe(function(){document.body.dataset.gdStandingPointComplete="seen:"+(event&&event.type||"event")});
-    var mapEl=safe(function(){return map&&map.getContainer?map.getContainer():byId("map")},null);
-    if(!mapEl||!event.target||!mapEl.contains(event.target)){safe(function(){document.body.dataset.gdStandingPointComplete="blocked-surface"});return false;}
-    var blocked=event.target.closest&&event.target.closest("button,a,input,select,textarea,.rightRail,#gdV62UndoDock,#shotTile,#hint,.panel,.modulePanel");
+		    }
+		    safe(function(){document.body.dataset.gdStandingPointComplete="seen:"+(event&&event.type||"event")});
+	    if(!manualStartPresentationSurfaceEvent(event)){safe(function(){document.body.dataset.gdStandingPointComplete="blocked-surface"});return false;}
+	    var blocked=event.target.closest&&event.target.closest("button,a,input,select,textarea,.rightRail,#gdV62UndoDock,#shotTile,#hint,.panel,.modulePanel,#courseScreen:not(.hidden)");
     if(blocked){safe(function(){document.body.dataset.gdStandingPointComplete="blocked-control"});return false;}
 		    var ll=pointFromEvent(event);
 			    if(!ll){safe(function(){document.body.dataset.gdStandingPointComplete="blocked-point"});return false;}
