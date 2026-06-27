@@ -617,16 +617,38 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	  function loadingMessage(){
 	    return "Loading Hole "+String(surfaceHoleNumber()||1)+" frame...";
 	  }
-	  function activeMappedHoleData(){
+	  function activeMappedCourse(){
 	    return safe(function(){
 	      var course=null;
-	      var h=surfaceHoleNumber();
 	      if(typeof loadUserCourseData==="function")course=loadUserCourseData();
 	      if(!course&&typeof window.loadUserCourseData==="function")course=window.loadUserCourseData();
 	      if(!course&&typeof currentCourse!=="undefined")course=currentCourse;
-	      var data=null;
+	      return course||null;
+	    },null);
+	  }
+	  function activePipelineHoleState(){
+	    return safe(function(){
+	      var pipeline=window.GDCoursePlayPipeline;
+	      if(!pipeline||typeof pipeline.getActiveHolePlayState!=="function")return null;
+	      var state=pipeline.getActiveHolePlayState(surfaceHoleNumber());
+	      if(document.body&&state){
+	        document.body.dataset.gdCoursePlayPipelineStatus=String(state.status||"unknown");
+	        document.body.dataset.gdCoursePlayPipelineHole=String(state.holeNumber||surfaceHoleNumber());
+	      }
+	      return state||null;
+	    },null);
+	  }
+	  function activeMappedHoleData(){
+	    return safe(function(){
+	      var pipeline=window.GDCoursePlayPipeline;
+	      var h=surfaceHoleNumber();
+	      var data=pipeline&&typeof pipeline.getActiveHoleMappedData==="function"?pipeline.getActiveHoleMappedData(h):null;
+	      if(data&&Array.isArray(data.route)&&data.route.length>=2)return data;
+	      var course=activeMappedCourse();
+	      data=null;
 	      if(course&&typeof window.gdMappedHolePlayData==="function")data=window.gdMappedHolePlayData(course,h);
 	      else if(course&&typeof gdMappedHolePlayData==="function")data=gdMappedHolePlayData(course,h);
+	      if(data&&pipeline&&typeof pipeline.ingestMappedHole==="function")safe(function(){pipeline.ingestMappedHole(course,h,data,"gps-play-read-fallback");});
 	      return data||null;
 	    },null);
 	  }
@@ -676,6 +698,12 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	    return true;
 	  }
 	  function missingCapturedManifest(reason,context){
+	    var pipelineState=activePipelineHoleState();
+	    var pipelineStatus=String(pipelineState&&pipelineState.status||"");
+	    if(capturedGpsPlayActive()&&pipelineStatus){
+	      if(pipelineStatus==="play_data_unavailable"||pipelineStatus==="needs_remap")return !!gdCapturedFrameUnavailable(reason||"pipeline-unavailable",Object.assign({stage:"pipeline",pipelineStatus:pipelineStatus},context||{}));
+	      if(pipelineStatus==="unknown"||pipelineStatus==="mapping"||pipelineStatus==="play_data_preparing")return gdHoleFrameLoading(reason||"pipeline-loading",Object.assign({stage:"pipeline",pipelineStatus:pipelineStatus},context||{}));
+	    }
 	    if(capturedGpsPlayActive()&&mappedGeometryExistsForActiveHole())return gdHoleFrameLoading(reason||"frame-loading",context||{});
 	    return !!gdCapturedFrameUnavailable(reason||"missing-frame",context||{});
 	  }

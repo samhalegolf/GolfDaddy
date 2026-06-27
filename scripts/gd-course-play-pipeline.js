@@ -334,6 +334,86 @@
     if(opts.ingest!==false)return ingestCourseLibraryCourse(course||courseOrId,{source:opts.source||"course-library-prepare"});
     return prepared;
   }
+  function holeRecordToMappedData(record){
+    if(!record)return null;
+    var route=points(record.routePoints);
+    var greenShape=points(record.greenShape);
+    var tee=point(record.teePoint)||point(route[0]);
+    var green=point(record.greenCentre)||point(route[route.length-1]);
+    var fairways=points(record.fairwayPoints).map(function(position,index){
+      return {type:"fairway",position:position,holeNumber:record.holeNumber,confirmed:true,source:"course-play-pipeline",index:index};
+    });
+    return {
+      hole:record.holeNumber,
+      pipelineStatus:record.status,
+      source:"course-play-pipeline",
+      tee:tee?{type:"tee",position:tee,holeNumber:record.holeNumber,confirmed:true}:null,
+      green:green?{type:"green",position:green,greenShape:greenShape,shape:greenShape,holeNumber:record.holeNumber,confirmed:true}:null,
+      fairways:fairways,
+      route:route,
+      complete:!!(green&&route.length>=2),
+      frameAnchors:clone(record.frameAnchors||{})
+    };
+  }
+  function activeCourseFromApp(){
+    return resolveCourseFromLibrary(null)||safe(function(){return window.gdActiveCourse||window.currentCourse||currentCourse||null;},null);
+  }
+  function activeHoleFromApp(fallback){
+    return normalizeHoleNumber(safe(function(){
+      return window.currentPlayingHole||window.selectedHole||currentPlayingHole||selectedHole||
+        sessionStorage.getItem("gd_active_playing_hole")||
+        sessionStorage.getItem("gd_mapper_active_hole")||
+        fallback||1;
+    },fallback||1));
+  }
+  function ensureActiveHolePlayData(holeNumber,opts){
+    opts=opts||{};
+    var course=activeCourseFromApp();
+    holeNumber=normalizeHoleNumber(holeNumber||activeHoleFromApp());
+    var state=getHolePlayState(course||"course",holeNumber);
+    if(state.status===HOLE_STATES.unknown||state.status===HOLE_STATES.mapping){
+      var mapped=mappedHoleFromCourseLibrary(course,holeNumber);
+      if(mapped)state=ingestMappedHole(course||"course",holeNumber,mapped,opts.source||"gps-play-read");
+      else prepareCourseForPlay(course||"course");
+    }
+    return Promise.resolve(getHolePlayState(course||"course",holeNumber));
+  }
+  function getActiveHolePlayState(holeNumber){
+    var course=activeCourseFromApp();
+    holeNumber=normalizeHoleNumber(holeNumber||activeHoleFromApp());
+    return getHolePlayState(course||"course",holeNumber);
+  }
+  function getActiveHoleMappedData(holeNumber){
+    var state=getActiveHolePlayState(holeNumber);
+    if(state.status===HOLE_STATES.unknown||state.status===HOLE_STATES.mapping){
+      var course=activeCourseFromApp();
+      var mapped=mappedHoleFromCourseLibrary(course,normalizeHoleNumber(holeNumber||activeHoleFromApp()));
+      if(mapped)state=ingestMappedHole(course||"course",normalizeHoleNumber(holeNumber||activeHoleFromApp()),mapped,"gps-play-read");
+    }
+    return holeRecordToMappedData(state);
+  }
+  function installGpsPlayAdapter(){
+    if(window.__gdCoursePlayPipelineGpsAdapterLocked)return;
+    var wrappedAny=false;
+    function wrap(name){
+      var original=window[name];
+      if(typeof original!=="function"||original.__gdCoursePlayPipelineWrapped)return;
+      var wrapped=function(holeOrDelta,opts){
+        var hole=normalizeHoleNumber(name==="gdPlayPreviousHole"||name==="gdPlayNextHole"?activeHoleFromApp():holeOrDelta||activeHoleFromApp());
+        if(name==="gdPlayNextHole")hole=normalizeHoleNumber(activeHoleFromApp()+1);
+        if(name==="gdPlayPreviousHole")hole=Math.max(1,normalizeHoleNumber(activeHoleFromApp()-1));
+        ensureActiveHolePlayData(hole,{source:name});
+        return original.apply(this,arguments);
+      };
+      wrapped.__gdCoursePlayPipelineWrapped=true;
+      window[name]=wrapped;
+      wrappedAny=true;
+    }
+    wrap("gdPlayHoleFromScorecard");
+    wrap("gdPlayNextHole");
+    wrap("gdPlayPreviousHole");
+    if(wrappedAny)window.__gdCoursePlayPipelineGpsAdapterLocked=true;
+  }
   function installCourseLibraryAdapter(){
     if(window.__gdCoursePlayPipelineCourseLibraryAdapter)return;
     window.__gdCoursePlayPipelineCourseLibraryAdapter=true;
@@ -383,8 +463,16 @@
     normalizeMappedHoleData:normalizeMappedHoleData,
     ingestCourseLibraryCourse:ingestCourseLibraryCourse,
     prepareCourseFromCourseLibrary:prepareCourseFromCourseLibrary,
-    installCourseLibraryAdapter:installCourseLibraryAdapter
+    installCourseLibraryAdapter:installCourseLibraryAdapter,
+    holeRecordToMappedData:holeRecordToMappedData,
+    ensureActiveHolePlayData:ensureActiveHolePlayData,
+    getActiveHolePlayState:getActiveHolePlayState,
+    getActiveHoleMappedData:getActiveHoleMappedData,
+    installGpsPlayAdapter:installGpsPlayAdapter
   };
   setTimeout(installCourseLibraryAdapter,0);
   setTimeout(installCourseLibraryAdapter,800);
+  setTimeout(installGpsPlayAdapter,1200);
+  setTimeout(installGpsPlayAdapter,2600);
+  setTimeout(installGpsPlayAdapter,5200);
 })();
