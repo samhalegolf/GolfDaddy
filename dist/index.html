@@ -478,11 +478,12 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 			    manifest=safe(function(){return typeof window.gdCapturedSurfaceWriteScan==="function"?window.gdCapturedSurfaceWriteScan(manifest,{reason:reason,storageKey:storageKey()}):manifest;},manifest)||manifest;
     captureManifest=manifest;
     window.gdHoleImageCaptureManifest=manifest;
-    window.__gdLastHoleImageCaptureManifest=manifest;
-    window.__gdV19CapturedHoleFrameManifest=manifest;
-    safe(function(){localStorage.setItem(storageKey(),JSON.stringify(manifest));});
-    return manifest;
-  }
+	    window.__gdLastHoleImageCaptureManifest=manifest;
+	    window.__gdV19CapturedHoleFrameManifest=manifest;
+	    safe(function(){localStorage.setItem(storageKey(),JSON.stringify(manifest));});
+	    safe(function(){if(window.GDCoursePlayPipeline&&typeof window.GDCoursePlayPipeline.registerCoursePlayFrame==="function")window.GDCoursePlayPipeline.registerCoursePlayFrame(surfaceCourseKey(),surfaceHoleNumber(),manifest,{generatedFrom:"v19-captured-surface",manifestKey:storageKey(),status:"generated"});});
+	    return manifest;
+	  }
 	  function loadCaptureManifest(){
 	    if(captureManifest&&manifestMatchesActive(captureManifest))return publishCaptureManifest(captureManifest);
 	    if(captureManifest&&!manifestMatchesActive(captureManifest))captureManifest=null;

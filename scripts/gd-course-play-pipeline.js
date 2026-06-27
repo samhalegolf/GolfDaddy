@@ -4,6 +4,7 @@
   var VERSION=1;
   var SCHEMA_VERSION=2;
   var STORE_KEY="gd_course_play_pipeline_v1";
+  var FRAME_INDEX_KEY="gd_course_play_frame_index_v1";
   var COURSE_STATES={
     not_prepared:"not_prepared",
     mapping:"mapping",
@@ -90,6 +91,29 @@
     store.updatedAt=now();
     safe(function(){localStorage.setItem(STORE_KEY,JSON.stringify(store));});
     return clone(store);
+  }
+  function emptyFrameIndex(){
+    return {schema:"gd.course_play_pipeline.frame_index",version:VERSION,schemaVersion:SCHEMA_VERSION,updatedAt:null,frames:{}};
+  }
+  function normalizeFrameIndex(raw){
+    var index=raw&&typeof raw==="object"?raw:emptyFrameIndex();
+    index.schema="gd.course_play_pipeline.frame_index";
+    index.version=VERSION;
+    index.schemaVersion=SCHEMA_VERSION;
+    if(!index.frames||typeof index.frames!=="object")index.frames={};
+    return index;
+  }
+  function loadFrameIndex(){
+    return normalizeFrameIndex(safe(function(){return JSON.parse(localStorage.getItem(FRAME_INDEX_KEY)||"null");},null));
+  }
+  function saveFrameIndex(index){
+    index=normalizeFrameIndex(index);
+    index.updatedAt=now();
+    safe(function(){localStorage.setItem(FRAME_INDEX_KEY,JSON.stringify(index));});
+    return clone(index);
+  }
+  function frameIndexKey(courseOrId,holeNumber){
+    return courseIdFrom(courseOrId)+":h"+String(normalizeHoleNumber(holeNumber));
   }
   function courseRecord(courseOrId,store){
     store=store||loadStore();
@@ -384,6 +408,73 @@
     store.courses[course.courseId]=course;
     saveStore(store);
     return holeNumber?clone(course.holes[String(normalizeHoleNumber(holeNumber))]):clone(course);
+  }
+  function registerCoursePlayFrame(courseOrId,holeNumber,manifest,opts){
+    opts=opts||{};
+    var course=getCoursePlayState(courseOrId||activeCourseFromApp()||"course");
+    holeNumber=normalizeHoleNumber(holeNumber||activeHoleFromApp());
+    var hole=normalizeHoleRecord(course,holeNumber,getHolePlayState(course,holeNumber));
+    var index=loadFrameIndex();
+    var key=frameIndexKey(course,holeNumber);
+    var stamp=now();
+    var manifestKey=String(opts.manifestKey||manifest&&manifest.key||manifest&&manifest.storageKey||manifest&&manifest.scanId||key);
+    var record={
+      schema:"gd.course_play_pipeline.frame",
+      schemaVersion:SCHEMA_VERSION,
+      frameIndexKey:key,
+      courseId:course.courseId,
+      courseKey:course.courseKey,
+      courseName:course.courseName,
+      holeNumber:holeNumber,
+      pipelineRecordId:hole.recordId,
+      pipelineDataVersion:hole.dataVersion,
+      manifestKey:manifestKey,
+      capturedManifestKey:manifestKey,
+      generatedFrom:opts.generatedFrom||"v19-captured-surface",
+      frameStatus:opts.status||"generated",
+      cacheStatus:opts.cacheStatus||"local-cache",
+      presentationOwner:"v19-captured-surface",
+      originPx:manifest&&manifest.originPx||null,
+      imageWidth:manifest&&manifest.imageWidth||null,
+      imageHeight:manifest&&manifest.imageHeight||null,
+      captureZoom:manifest&&manifest.captureZoom||null,
+      tileCount:Array.isArray(manifest&&manifest.tiles)?manifest.tiles.length:0,
+      anchorPins:clone(manifest&&manifest.anchorPins||{}),
+      tileMetadata:Array.isArray(manifest&&manifest.tiles)?manifest.tiles.map(function(tile){return {x:tile.x,y:tile.y,z:tile.z,tileX:tile.tileX,tileY:tile.tileY,url:tile.url};}):[],
+      createdAt:index.frames[key]&&index.frames[key].createdAt||stamp,
+      updatedAt:stamp,
+      dbShareable:false,
+      notes:"Local render cache. Durable DB sync should prefer course/hole geometry plus frame parameters."
+    };
+    index.frames[key]=record;
+    saveFrameIndex(index);
+    var store=loadStore();
+    var writable=courseRecord(course,store);
+    writable.holes=Object.assign({},course.holes||{});
+    writable.holes[String(holeNumber)]=Object.assign(hole,{
+      presentation:Object.assign({},hole.presentation||{},{
+        capturedManifestKey:manifestKey,
+        capturedSurfaceReady:true,
+        owner:"gps-play",
+        frameStatus:record.frameStatus,
+        frameIndexKey:key,
+        frameCacheStatus:record.cacheStatus,
+        generatedFrom:record.generatedFrom
+      }),
+      updatedAt:stamp
+    });
+    store.courses[writable.courseId]=writable;
+    writeCourse(writable,store);
+    return clone(record);
+  }
+  function getCoursePlayFrameIndex(courseOrId,holeNumber){
+    var index=loadFrameIndex();
+    if(courseOrId&&holeNumber)return clone(index.frames[frameIndexKey(courseOrId,holeNumber)]||null);
+    if(courseOrId){
+      var courseKey=courseIdFrom(courseOrId)+":h";
+      return Object.keys(index.frames||{}).filter(function(key){return key.indexOf(courseKey)===0;}).map(function(key){return clone(index.frames[key]);});
+    }
+    return clone(index);
   }
   function buildHolePlayDbPayload(courseOrId,holeNumber){
     var course=getCoursePlayState(courseOrId);
@@ -739,6 +830,7 @@
     version:VERSION,
     schemaVersion:SCHEMA_VERSION,
     storageKey:STORE_KEY,
+    frameIndexStorageKey:FRAME_INDEX_KEY,
     courseStates:COURSE_STATES,
     holeStates:HOLE_STATES,
     prepareCourseForPlay:prepareCourseForPlay,
@@ -752,6 +844,9 @@
     markHolePlayDataReady:markHolePlayDataReady,
     markHolePlayDataUnavailable:markHolePlayDataUnavailable,
     markCoursePlaySyncPending:markCoursePlaySyncPending,
+    registerCoursePlayFrame:registerCoursePlayFrame,
+    getCoursePlayFrameIndex:getCoursePlayFrameIndex,
+    loadCoursePlayFrameIndex:loadFrameIndex,
     buildHolePlayDbPayload:buildHolePlayDbPayload,
     buildCoursePlayDbPayload:buildCoursePlayDbPayload,
     buildCoursePlaySyncEnvelope:buildCoursePlaySyncEnvelope,
