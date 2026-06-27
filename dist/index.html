@@ -202,6 +202,8 @@ body.gdTargetFrameDebugOn #gdCapturedBubbleDragHit{background:rgba(31,211,109,.0
 #gdHoleFrameLoading{position:fixed;left:50%;bottom:calc(max(14px,env(safe-area-inset-bottom)) + 92px);transform:translateX(-50%);z-index:2403;max-width:min(330px,calc(100vw - 32px));padding:10px 14px;border-radius:999px;background:rgba(5,13,9,.92);border:1px solid rgba(255,255,255,.22);color:#fff;font:900 13px/1.2 Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;text-align:center;box-shadow:0 14px 34px rgba(0,0,0,.38);pointer-events:none;display:none;}
 body.gdCapturedFrameUnavailable #gdCapturedFrameUnavailable{display:block;}
 body.gdHoleFrameLoading #gdHoleFrameLoading{display:block;}
+#gdCoursePlayPipelineStatus{position:fixed;left:50%;bottom:calc(max(14px,env(safe-area-inset-bottom)) + 136px);transform:translateX(-50%);z-index:2403;max-width:min(330px,calc(100vw - 32px));padding:10px 14px;border-radius:999px;background:rgba(5,13,9,.92);border:1px solid rgba(255,255,255,.22);color:#fff;font:900 13px/1.2 Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;text-align:center;box-shadow:0 14px 34px rgba(0,0,0,.38);pointer-events:none;display:none;}
+body.gdCoursePlayPipelinePreparing #gdCoursePlayPipelineStatus{display:block;}
 #gdCapturedHoleFrameReadout{position:fixed;left:8px;bottom:84px;z-index:2402;max-width:330px;padding:6px 8px;border-radius:10px;background:rgba(0,0,0,.74);border:1px solid rgba(31,211,109,.34);color:rgba(255,255,255,.86);font:800 9px/1.25 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.06em;text-transform:uppercase;pointer-events:none;display:none;}
 body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 </style>
@@ -617,16 +619,38 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	  function loadingMessage(){
 	    return "Loading Hole "+String(surfaceHoleNumber()||1)+" frame...";
 	  }
-	  function activeMappedHoleData(){
+	  function activeMappedCourse(){
 	    return safe(function(){
 	      var course=null;
-	      var h=surfaceHoleNumber();
 	      if(typeof loadUserCourseData==="function")course=loadUserCourseData();
 	      if(!course&&typeof window.loadUserCourseData==="function")course=window.loadUserCourseData();
 	      if(!course&&typeof currentCourse!=="undefined")course=currentCourse;
-	      var data=null;
+	      return course||null;
+	    },null);
+	  }
+	  function activePipelineHoleState(){
+	    return safe(function(){
+	      var pipeline=window.GDCoursePlayPipeline;
+	      if(!pipeline||typeof pipeline.getActiveHolePlayState!=="function")return null;
+	      var state=pipeline.getActiveHolePlayState(surfaceHoleNumber());
+	      if(document.body&&state){
+	        document.body.dataset.gdCoursePlayPipelineStatus=String(state.status||"unknown");
+	        document.body.dataset.gdCoursePlayPipelineHole=String(state.holeNumber||surfaceHoleNumber());
+	      }
+	      return state||null;
+	    },null);
+	  }
+	  function activeMappedHoleData(){
+	    return safe(function(){
+	      var pipeline=window.GDCoursePlayPipeline;
+	      var h=surfaceHoleNumber();
+	      var data=pipeline&&typeof pipeline.getActiveHoleMappedData==="function"?pipeline.getActiveHoleMappedData(h):null;
+	      if(data&&Array.isArray(data.route)&&data.route.length>=2)return data;
+	      var course=activeMappedCourse();
+	      data=null;
 	      if(course&&typeof window.gdMappedHolePlayData==="function")data=window.gdMappedHolePlayData(course,h);
 	      else if(course&&typeof gdMappedHolePlayData==="function")data=gdMappedHolePlayData(course,h);
+	      if(data&&pipeline&&typeof pipeline.ingestMappedHole==="function")safe(function(){pipeline.ingestMappedHole(course,h,data,"gps-play-read-fallback");});
 	      return data||null;
 	    },null);
 	  }
@@ -676,6 +700,12 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	    return true;
 	  }
 	  function missingCapturedManifest(reason,context){
+	    var pipelineState=activePipelineHoleState();
+	    var pipelineStatus=String(pipelineState&&pipelineState.status||"");
+	    if(capturedGpsPlayActive()&&pipelineStatus){
+	      if(pipelineStatus==="play_data_unavailable"||pipelineStatus==="needs_remap")return !!gdCapturedFrameUnavailable(reason||"pipeline-unavailable",Object.assign({stage:"pipeline",pipelineStatus:pipelineStatus},context||{}));
+	      if(pipelineStatus==="unknown"||pipelineStatus==="mapping"||pipelineStatus==="play_data_preparing")return gdHoleFrameLoading(reason||"pipeline-loading",Object.assign({stage:"pipeline",pipelineStatus:pipelineStatus},context||{}));
+	    }
 	    if(capturedGpsPlayActive()&&mappedGeometryExistsForActiveHole())return gdHoleFrameLoading(reason||"frame-loading",context||{});
 	    return !!gdCapturedFrameUnavailable(reason||"missing-frame",context||{});
 	  }
@@ -28028,6 +28058,7 @@ function gdWireManualGpsPlayButton(){
 <link rel="stylesheet" href="styles/gd-arcade-mode.css?v=arcade-wiring-20260607">
 <script src="scripts/gd-windross-seed.js?v=windross-map-seed-20260525"></script>
 <script src="scripts/gd-course-library-pin-lock.js?v=tool-rail-tab-hole-label-20260620"></script>
+<script src="scripts/gd-course-play-pipeline.js?v=course-play-pipeline-001"></script>
 <script id="gdAutoMapHandoffQuarantineV1">
 (function(){
   "use strict";
