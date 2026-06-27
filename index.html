@@ -515,6 +515,7 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 		    el.dataset.gdIncludeTee=manifest.includeTee?"1":"0";
 		    if(manifest.teeLatLng){el.dataset.gdTeeLat=String(manifest.teeLatLng.lat);el.dataset.gdTeeLng=String(manifest.teeLatLng.lng);}
 		    else{delete el.dataset.gdTeeLat;delete el.dataset.gdTeeLng;}
+		    clearTerminalCapturedUnavailable("render-capture-manifest");
 		    clearHoleFrameLoading();
 		    clearCapturedFrameUnavailable();
 		    return true;
@@ -613,6 +614,7 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	  var HOLE_FRAME_LOADING_TIMEOUT_MS=1700;
 	  var holeFrameLoadingTimer=null;
 	  var holeFrameLoadingKey="";
+	  var terminalCapturedFrameUnavailableByKey={};
 	  function holeFrameKey(){
 	    return String(surfaceCourseKey()||"course")+":h"+String(surfaceHoleNumber()||1);
 	  }
@@ -658,6 +660,65 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	    var data=activeMappedHoleData();
 	    return !!(data&&Array.isArray(data.route)&&data.route.length>=2);
 	  }
+	  function activePipelineStatus(){
+	    var state=activePipelineHoleState();
+	    return String(state&&state.status||"");
+	  }
+	  function pipelineReadyForActiveHole(){
+	    return activePipelineStatus()==="play_data_ready";
+	  }
+	  function hideCourseOpeningOverlay(reason){
+	    safe(function(){
+	      var el=document.getElementById("gdCourseLoadingOverlay");
+	      if(el)el.classList.add("hidden");
+	      if(document.body){
+	        document.body.classList.remove("gdCourseOpening");
+	        document.body.dataset.gdCourseOpeningClearedBy=String(reason||"v19-handoff");
+	      }
+	    });
+	  }
+	  function visiblePreparingOwner(){
+	    return safe(function(){
+	      var overlay=document.getElementById("gdCourseLoadingOverlay");
+	      if(overlay&&!overlay.classList.contains("hidden")&&getComputedStyle(overlay).display!=="none")return "course-opening-overlay";
+	      if(document.body&&document.body.classList.contains("gdCoursePlayPipelinePreparing"))return "course-play-pipeline-pill";
+	      if(document.body&&document.body.classList.contains("gdHoleFrameLoading"))return "v19-hole-frame-loading";
+	      return "none";
+	    },"unknown");
+	  }
+	  function clearStalePreparingOwners(reason){
+	    hideCourseOpeningOverlay(reason);
+	    safe(function(){
+	      var status=activePipelineStatus();
+	      if(status&&status!=="unknown"&&status!=="mapping"&&status!=="play_data_preparing"){
+	        document.body.classList.remove("gdCoursePlayPipelinePreparing");
+	        var el=document.getElementById("gdCoursePlayPipelineStatus");
+	        if(el&&status==="play_data_ready")el.textContent="";
+	      }
+	    });
+	  }
+	  function terminalCapturedUnavailableActive(){
+	    var entry=terminalCapturedFrameUnavailableByKey[holeFrameKey()];
+	    return !!(entry&&pipelineReadyForActiveHole());
+	  }
+	  function markTerminalCapturedUnavailable(reason,context){
+	    var key=holeFrameKey();
+	    terminalCapturedFrameUnavailableByKey[key]={reason:reason||"pipeline-ready-captured-presentation-timeout",context:context||{},at:Date.now(),hole:surfaceHoleNumber(),course:surfaceCourseKey(),visibleOwner:visiblePreparingOwner()};
+	    window.__gdTerminalCapturedFrameUnavailable=terminalCapturedFrameUnavailableByKey[key];
+	    safe(function(){
+	      document.body.dataset.gdTerminalCapturedFrameUnavailableKey=key;
+	      document.body.dataset.gdTerminalCapturedFrameUnavailableReason=String(reason||"pipeline-ready-captured-presentation-timeout");
+	    });
+	    return gdCapturedFrameUnavailable(reason||"pipeline-ready-captured-presentation-timeout",Object.assign({stage:"terminal-v19-handoff",visibleOwner:visiblePreparingOwner()},context||{}));
+	  }
+	  function clearTerminalCapturedUnavailable(reason){
+	    safe(function(){
+	      delete terminalCapturedFrameUnavailableByKey[holeFrameKey()];
+	      delete window.__gdTerminalCapturedFrameUnavailable;
+	      delete document.body.dataset.gdTerminalCapturedFrameUnavailableKey;
+	      document.body.dataset.gdTerminalCapturedFrameUnavailableClearedBy=String(reason||"captured-presentation-ready");
+	    });
+	  }
 	  function clearHoleFrameLoading(){
 	    safe(function(){
 	      if(holeFrameLoadingTimer){clearTimeout(holeFrameLoadingTimer);holeFrameLoadingTimer=null;}
@@ -669,6 +730,7 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	    safe(function(){document.body.classList.remove("gdCapturedFrameUnavailable");});
 	  }
 	  function gdHoleFrameLoading(reason,context){
+	    if(capturedGpsPlayActive()&&terminalCapturedUnavailableActive())return !!gdCapturedFrameUnavailable("terminal-v19-handoff",Object.assign({stage:"terminal-v19-handoff-repeat",visibleOwner:visiblePreparingOwner()},context||{}));
 	    safe(function(){
 	      var key=holeFrameKey();
 	      var el=document.getElementById("gdHoleFrameLoading");
@@ -691,6 +753,7 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	          var b=greenBounds("hole");
 	          var manifest=loadCaptureManifest();
 	          if(manifest&&validBounds(b)&&fitCaptured(b,"hole",.025,{objectName:"capturedGreenHoleFrame",reason:"loading-ready",maxScale:3.4,fitRatio:.56}))return;
+	          if(pipelineReadyForActiveHole())return markTerminalCapturedUnavailable("pipeline-ready-captured-presentation-timeout",Object.assign({stage:"loading-timeout"},context||{}));
 	          gdCapturedFrameUnavailable("frame-loading-timeout",Object.assign({stage:"loading-timeout"},context||{}));
 	        },HOLE_FRAME_LOADING_TIMEOUT_MS);
 	      }
@@ -702,6 +765,7 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	  function missingCapturedManifest(reason,context){
 	    var pipelineState=activePipelineHoleState();
 	    var pipelineStatus=String(pipelineState&&pipelineState.status||"");
+	    if(capturedGpsPlayActive()&&terminalCapturedUnavailableActive())return !!gdCapturedFrameUnavailable(reason||"terminal-v19-handoff",Object.assign({stage:"terminal-v19-handoff",pipelineStatus:pipelineStatus},context||{}));
 	    if(capturedGpsPlayActive()&&pipelineStatus){
 	      if(pipelineStatus==="play_data_unavailable"||pipelineStatus==="needs_remap")return !!gdCapturedFrameUnavailable(reason||"pipeline-unavailable",Object.assign({stage:"pipeline",pipelineStatus:pipelineStatus},context||{}));
 	      if(pipelineStatus==="unknown"||pipelineStatus==="mapping"||pipelineStatus==="play_data_preparing")return gdHoleFrameLoading(reason||"pipeline-loading",Object.assign({stage:"pipeline",pipelineStatus:pipelineStatus},context||{}));
@@ -712,6 +776,7 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	  function gdCapturedFrameUnavailable(reason,context){
 	    safe(function(){
 	      clearHoleFrameLoading();
+	      clearStalePreparingOwners(reason||"captured-frame-unavailable");
 	      var el=document.getElementById("gdCapturedFrameUnavailable");
 	      if(!el&&document.body){el=document.createElement("div");el.id="gdCapturedFrameUnavailable";el.setAttribute("role","status");el.setAttribute("aria-live","polite");document.body.appendChild(el);}
 	      if(el)el.textContent=unavailableMessage();
@@ -732,7 +797,24 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	    readout("frame unavailable | "+(reason||"missing-frame"));
 	    return null;
 	  }
-		  function hideCapturedCamera(){
+	  window.__gdDumpGpsPlayReadiness=function(){
+	    return safe(function(){
+	      var manifest=loadCaptureManifest();
+	      return {
+	        courseKey:surfaceCourseKey(),
+	        hole:surfaceHoleNumber(),
+	        pipelineStatus:activePipelineStatus(),
+	        visiblePreparingOwner:visiblePreparingOwner(),
+	        holeFrameLoading:!!(document.body&&document.body.classList.contains("gdHoleFrameLoading")),
+	        capturedFrameUnavailable:!!(document.body&&document.body.classList.contains("gdCapturedFrameUnavailable")),
+	        gpsPresentationReady:!!(typeof window.gdGpsPresentationReady==="function"&&window.gdGpsPresentationReady()),
+	        capturedManifestKey:manifest&&(manifest.key||manifest.storageKey||manifest.scanId||manifest.activeScanId)||"",
+	        terminalUnavailable:!!terminalCapturedFrameUnavailableByKey[holeFrameKey()],
+	        bodyClasses:String(document.body&&document.body.className||"")
+	      };
+	    },null);
+	  };
+	  function hideCapturedCamera(){
 		    safe(function(){document.body.classList.remove("gdCapturedHoleFrameCameraOn","gdHoleImageCameraOn","gdHeadToTeeFrameActive","gdLockStateFrameActive");});
 		    clearHoleFrameLoading();
 		    clearCapturedFrameUnavailable();
@@ -796,9 +878,11 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 		    clearCapturedFrameUnavailable();
 		    var layer=document.getElementById("gdHoleImageCameraLayer");
 	    if(layer){layer.dataset.gdAnchorMode=anchorMode;layer.dataset.gdOrientationSource=orientation&&orientation.source||"none";layer.dataset.gdAxisBearingDeg=orientation&&Number.isFinite(orientation.bearingRad)?(orientation.bearingRad*180/Math.PI).toFixed(2):"";layer.dataset.gdRotationDeg=(angle*180/Math.PI).toFixed(2);layer.dataset.gdCameraFrozen=lockCameraFrozen?"1":"0";layer.dataset.gdDualAnchor=dualAnchor?"1":"0";layer.dataset.gdTeeAnchorErrorPx=dualAnchor?dualAnchor.teeErrorPx.toFixed(1):"";}
-			    var info={version:VERSION,frame:frame||"hole",object:opts.objectName||"activeObject",scale:+scale.toFixed(4),fitRatio:+fitRatio.toFixed(2),captureZoom:manifest.captureZoom,tiles:(manifest.tiles||[]).length,anchor:anchorMode,dualAnchor:dualAnchor?{source:dualAnchor.source,teeErrorPx:+dualAnchor.teeErrorPx.toFixed(1),greenAnchor:dualAnchor.greenAnchor,teeAnchor:dualAnchor.teeAnchor}:null,orientation:orientation&&orientation.source||"none",axisBearingDeg:orientation&&Number.isFinite(orientation.bearingRad)?+(orientation.bearingRad*180/Math.PI).toFixed(2):null,rotationDeg:+(angle*180/Math.PI).toFixed(2),objectMeters:boundsSizeM(bounds),at:Date.now()};
-			    window.__gdV19LastCapturedFit=info;
-			    safe(function(){if(typeof window.gdApplyGpsMapVisibilityOwner==="function")window.gdApplyGpsMapVisibilityOwner("fitCaptured");});
+				    var info={version:VERSION,frame:frame||"hole",object:opts.objectName||"activeObject",scale:+scale.toFixed(4),fitRatio:+fitRatio.toFixed(2),captureZoom:manifest.captureZoom,tiles:(manifest.tiles||[]).length,anchor:anchorMode,dualAnchor:dualAnchor?{source:dualAnchor.source,teeErrorPx:+dualAnchor.teeErrorPx.toFixed(1),greenAnchor:dualAnchor.greenAnchor,teeAnchor:dualAnchor.teeAnchor}:null,orientation:orientation&&orientation.source||"none",axisBearingDeg:orientation&&Number.isFinite(orientation.bearingRad)?+(orientation.bearingRad*180/Math.PI).toFixed(2):null,rotationDeg:+(angle*180/Math.PI).toFixed(2),objectMeters:boundsSizeM(bounds),at:Date.now()};
+				    window.__gdV19LastCapturedFit=info;
+				    clearTerminalCapturedUnavailable("fit-captured-ready");
+				    clearStalePreparingOwners("fit-captured-ready");
+				    safe(function(){if(typeof window.gdApplyGpsMapVisibilityOwner==="function")window.gdApplyGpsMapVisibilityOwner("fitCaptured");});
 		    if(lastShotOverlayPayload&&lastShotOverlayCenter)renderShotOverlay(lastShotOverlayPayload,lastShotOverlayCenter,{remember:false});
 			    readout(info.frame+" | "+info.object+" | "+info.anchor+" | rot "+info.rotationDeg+" | z"+info.captureZoom+" | scale "+info.scale+" | fit "+info.fitRatio+" | tiles "+info.tiles);
 	    return true;
