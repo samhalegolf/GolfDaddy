@@ -392,6 +392,48 @@
     }
     return holeRecordToMappedData(state);
   }
+  function gpsActive(){
+    return !!(document.body&&(
+      document.body.classList.contains("shell-gps")||
+      document.body.classList.contains("gdGpsActive")||
+      document.body.classList.contains("gps-active")
+    ));
+  }
+  function pipelineStatusElement(){
+    var el=document.getElementById("gdCoursePlayPipelineStatus");
+    if(!el&&document.body){
+      el=document.createElement("div");
+      el.id="gdCoursePlayPipelineStatus";
+      el.setAttribute("role","status");
+      el.setAttribute("aria-live","polite");
+      document.body.appendChild(el);
+    }
+    return el;
+  }
+  function preparingStatus(status){
+    return status===HOLE_STATES.unknown||status===HOLE_STATES.mapping||status===HOLE_STATES.play_data_preparing;
+  }
+  function unavailableStatus(status){
+    return status===HOLE_STATES.play_data_unavailable||status===HOLE_STATES.needs_remap;
+  }
+  function syncGpsPipelineState(reason,holeNumber){
+    if(!document.body)return null;
+    var hole=normalizeHoleNumber(holeNumber||activeHoleFromApp());
+    var state=getActiveHolePlayState(hole);
+    var status=String(state&&state.status||HOLE_STATES.unknown);
+    var preparing=gpsActive()&&preparingStatus(status);
+    var unavailable=gpsActive()&&unavailableStatus(status);
+    document.body.classList.toggle("gdCoursePlayPipelinePreparing",!!preparing);
+    document.body.classList.toggle("gdCoursePlayPipelineUnavailable",!!unavailable);
+    if(preparing)document.body.classList.add("gdGpsFramePreparing");
+    document.body.dataset.gdCoursePlayPipelineStatus=status;
+    document.body.dataset.gdCoursePlayPipelineHole=String(hole);
+    document.body.dataset.gdCoursePlayPipelineReason=String(reason||"sync");
+    var el=pipelineStatusElement();
+    if(el)el.textContent=preparing?"Preparing Hole "+hole+"...":unavailable?"Frame unavailable - remap this hole":"";
+    safe(function(){if(typeof window.gdApplyGpsMapVisibilityOwner==="function")window.gdApplyGpsMapVisibilityOwner("course-play-pipeline-"+(reason||"sync"));});
+    return state;
+  }
   function installGpsPlayAdapter(){
     if(window.__gdCoursePlayPipelineGpsAdapterLocked)return;
     var wrappedAny=false;
@@ -403,6 +445,7 @@
         if(name==="gdPlayNextHole")hole=normalizeHoleNumber(activeHoleFromApp()+1);
         if(name==="gdPlayPreviousHole")hole=Math.max(1,normalizeHoleNumber(activeHoleFromApp()-1));
         ensureActiveHolePlayData(hole,{source:name});
+        syncGpsPipelineState(name,hole);
         return original.apply(this,arguments);
       };
       wrapped.__gdCoursePlayPipelineWrapped=true;
@@ -435,11 +478,23 @@
     if(typeof originalOpenCourseToFirstHole==="function"&&!originalOpenCourseToFirstHole.__gdCoursePlayPipelineWrapped){
       window.gdOpenCourseToFirstHole=function(course){
         safe(function(){prepareCourseForPlay(course||resolveCourseFromLibrary(null));});
+        syncGpsPipelineState("open-course-to-first-hole",1);
         var result=originalOpenCourseToFirstHole.apply(this,arguments);
-        setTimeout(function(){safe(function(){ingestCourseLibraryCourse(course||resolveCourseFromLibrary(null),{source:"course-selection"});});},350);
+        setTimeout(function(){safe(function(){ingestCourseLibraryCourse(course||resolveCourseFromLibrary(null),{source:"course-selection"});syncGpsPipelineState("course-selection-ingested",1);});},350);
         return result;
       };
       window.gdOpenCourseToFirstHole.__gdCoursePlayPipelineWrapped=true;
+    }
+    var originalPickerCourse=window.gdOpenCoursePickerCourse;
+    if(typeof originalPickerCourse==="function"&&!originalPickerCourse.__gdCoursePlayPipelineWrapped){
+      window.gdOpenCoursePickerCourse=function(course){
+        safe(function(){prepareCourseForPlay(course||resolveCourseFromLibrary(null));});
+        syncGpsPipelineState("course-picker",1);
+        var result=originalPickerCourse.apply(this,arguments);
+        setTimeout(function(){safe(function(){ingestCourseLibraryCourse(course||resolveCourseFromLibrary(null),{source:"course-picker"});syncGpsPipelineState("course-picker-ingested",1);});},450);
+        return result;
+      };
+      window.gdOpenCoursePickerCourse.__gdCoursePlayPipelineWrapped=true;
     }
   }
 
@@ -468,11 +523,13 @@
     ensureActiveHolePlayData:ensureActiveHolePlayData,
     getActiveHolePlayState:getActiveHolePlayState,
     getActiveHoleMappedData:getActiveHoleMappedData,
-    installGpsPlayAdapter:installGpsPlayAdapter
+    installGpsPlayAdapter:installGpsPlayAdapter,
+    syncGpsPipelineState:syncGpsPipelineState
   };
   setTimeout(installCourseLibraryAdapter,0);
   setTimeout(installCourseLibraryAdapter,800);
   setTimeout(installGpsPlayAdapter,1200);
   setTimeout(installGpsPlayAdapter,2600);
   setTimeout(installGpsPlayAdapter,5200);
+  setInterval(function(){syncGpsPipelineState("interval");},1500);
 })();
