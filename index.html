@@ -28125,11 +28125,19 @@ function gdWireManualGpsPlayButton(){
     safe(function(){gdMapPlacementSuppressClickUntil=Math.max(gdMapPlacementSuppressClickUntil||0,Date.now()+Math.max(350,Number(ms)||900));});
     return false;
   }
+  function consumeButtonClick(reason,ms){
+    consumeUntil=Math.max(consumeUntil,Date.now()+Math.max(120,Number(ms)||260));
+    safe(function(){
+      document.body.dataset.gdLocationClickConsumed=String(reason||"button");
+      document.body.dataset.gdLocationClickConsumedAt=String(Date.now());
+    });
+    return false;
+  }
   function arm(reason){
     armed=true;
     locked=false;
     armedUntil=Date.now()+15000;
-    consume(reason||"arm-location",420);
+    consumeButtonClick(reason||"arm-location",260);
     safe(function(){
       document.body.dataset.gdLocationSetMode="armed";
       document.body.dataset.gdLocationSetReason=String(reason||"manual");
@@ -28170,7 +28178,7 @@ function gdWireManualGpsPlayButton(){
   function eventLooksLikePlayOverlay(event){
     var target=event&&event.target;
     if(!target||!target.closest)return false;
-    return !!target.closest("#gdCapturedBubbleDragHit,.gdBubbleDragHit,.gdBubbleDragHitIcon,.targetDot,.startDot,.gdCapturedShotBubble,.gdCapturedShotCore,.gdCapturedShotSvg,.gdCapturedAimLine,.gdAimRecognitionFleck,.gdMiddleGuideLabel,.remainingGreenLabel,.leaflet-marker-icon");
+    return !!target.closest("#gdCapturedBubbleDragHit,.gdBubbleDragHit,.gdBubbleDragHitIcon,.targetDot,.startDot,.gdCapturedShotBubble,.gdCapturedShotCore,.gdCapturedShotSvg,.gdCapturedAimLine,.gdAimRecognitionFleck,.gdMiddleGuideLabel,.remainingGreenLabel,.leaflet-marker-icon,.leaflet-interactive");
   }
   function maySet(event,context){
     if(!gpsPlayActive())return true;
@@ -28222,7 +28230,8 @@ function gdWireManualGpsPlayButton(){
       consume("overlay-"+phase,1400);
       return;
     }
-    if(phase==="pointerup"&&eventMoved(event))consume("pointerup-moved",1100);
+    if(safe(function(){return document.body.classList.contains("gdCapturedBubbleDragging")||!!targetDragging;},false))consume("bubble-drag-"+phase,1400);
+    else if(phase==="pointerup"&&eventMoved(event))consume("pointerup-moved",1100);
   }
   window.addEventListener("pointerdown",function(event){
     consumeOverlayGesture(event,"pointerdown");
@@ -40263,12 +40272,15 @@ body.gps-active #shotTile .tileCarryValue span{
     if(!mapEl || document.__gdGreenFocusClickInstalled) return;
     document.__gdGreenFocusClickInstalled = true;
     safe(function(){ document.body.dataset.gdGreenFocusInstaller = "installed"; });
-    document.addEventListener("click", function(event){
-      safe(function(){ document.body.dataset.gdGreenFocusClick = "seen"; });
-      if(!gpsActive() || document.body.classList.contains("gdGreenArrivalMode")){ safe(function(){ document.body.dataset.gdGreenFocusClick = "blocked-state"; }); return; }
-      if(document.body.classList.contains("gdMappedStartPromptActive")){ safe(function(){ document.body.dataset.gdGreenFocusClick = "blocked-prompt"; }); return; }
-      var blocked = event.target && event.target.closest && event.target.closest("button,a,input,select,textarea,.rightRail,#gdV62UndoDock,#shotTile,#hint,.panel,.modulePanel");
-      if(blocked){ safe(function(){ document.body.dataset.gdGreenFocusClick = "blocked-control"; }); return; }
+	    document.addEventListener("click", function(event){
+	      safe(function(){ document.body.dataset.gdGreenFocusClick = "seen"; });
+	      if(!gpsActive() || document.body.classList.contains("gdGreenArrivalMode")){ safe(function(){ document.body.dataset.gdGreenFocusClick = "blocked-state"; }); return; }
+	      if(document.body.classList.contains("gdMappedStartPromptActive")){ safe(function(){ document.body.dataset.gdGreenFocusClick = "blocked-prompt"; }); return; }
+	      if(typeof window.gdMapClickConsumed === "function" && window.gdMapClickConsumed()){ safe(function(){ document.body.dataset.gdGreenFocusClick = "blocked-consumed"; }); return; }
+	      if(typeof window.gdLocationEventIsPlayOverlay === "function" && window.gdLocationEventIsPlayOverlay(event)){ safe(function(){ document.body.dataset.gdGreenFocusClick = "blocked-overlay-helper"; }); return; }
+	      if(safe(function(){ return !!targetDragging || document.body.classList.contains("gdCapturedBubbleDragging"); }, false)){ safe(function(){ document.body.dataset.gdGreenFocusClick = "blocked-bubble-drag"; }); return; }
+	      var blocked = event.target && event.target.closest && event.target.closest("button,a,input,select,textarea,.rightRail,#gdV62UndoDock,#shotTile,#hint,.panel,.modulePanel,#gdCapturedBubbleDragHit,.gdBubbleDragHit,.gdBubbleDragHitIcon,.targetDot,.startDot,.gdCapturedShotBubble,.gdCapturedShotCore,.gdCapturedShotSvg,.gdCapturedAimLine,.gdHoleImageOverlay,.gdAimRecognitionFleck,.gdMiddleGuideLabel,.remainingGreenLabel,.leaflet-marker-icon,.leaflet-interactive");
+	      if(blocked){ safe(function(){ document.body.dataset.gdGreenFocusClick = "blocked-control"; }); return; }
       var frameEl = document.getElementById("gdHoleImageCameraLayer");
       var inMapSurface = safe(function(){
         if(mapEl.contains(event.target)) return true;
@@ -42470,7 +42482,6 @@ body:has(#courseScreen:not(.hidden)) .leaflet-marker-icon{display:none!important
 	      return false;
 	    }
 	    safe(function(){document.body.dataset.gdStandingPointComplete="seen:"+(event&&event.type||"event")});
-	    if(Date.now()-manualStartArmedAt<620){safe(function(){document.body.dataset.gdStandingPointComplete="blocked-early"});return false;}
     var mapEl=safe(function(){return map&&map.getContainer?map.getContainer():byId("map")},null);
     if(!mapEl||!event.target||!mapEl.contains(event.target)){safe(function(){document.body.dataset.gdStandingPointComplete="blocked-surface"});return false;}
     var blocked=event.target.closest&&event.target.closest("button,a,input,select,textarea,.rightRail,#gdV62UndoDock,#shotTile,#hint,.panel,.modulePanel");
