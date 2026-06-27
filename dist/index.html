@@ -197,6 +197,8 @@ body.gdCapturedHoleFrameCameraOn #map .leaflet-marker-pane{opacity:1!important;}
 #gdCapturedBubbleDragHit{position:fixed!important;left:-9999px;top:-9999px;width:1px;height:1px;z-index:1480!important;border-radius:999px!important;background:transparent!important;pointer-events:auto!important;touch-action:none!important;cursor:grab!important;display:none;}
 body.gdCapturedHoleFrameCameraOn:not(.gdMappedStartPromptActive) #gdCapturedBubbleDragHit{display:block;}
 body.gdTargetFrameDebugOn #gdCapturedBubbleDragHit{background:rgba(31,211,109,.08)!important;outline:1px solid rgba(31,211,109,.24)!important;}
+#gdCapturedFrameUnavailable{position:fixed;left:50%;bottom:calc(max(14px,env(safe-area-inset-bottom)) + 92px);transform:translateX(-50%);z-index:2403;max-width:min(330px,calc(100vw - 32px));padding:10px 14px;border-radius:999px;background:rgba(5,13,9,.92);border:1px solid rgba(255,255,255,.22);color:#fff;font:900 13px/1.2 Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;text-align:center;box-shadow:0 14px 34px rgba(0,0,0,.38);pointer-events:none;display:none;}
+body.gdCapturedFrameUnavailable #gdCapturedFrameUnavailable{display:block;}
 #gdCapturedHoleFrameReadout{position:fixed;left:8px;bottom:84px;z-index:2402;max-width:330px;padding:6px 8px;border-radius:10px;background:rgba(0,0,0,.74);border:1px solid rgba(31,211,109,.34);color:rgba(255,255,255,.86);font:800 9px/1.25 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.06em;text-transform:uppercase;pointer-events:none;display:none;}
 body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 </style>
@@ -483,17 +485,18 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	    }
 	    return null;
 	  }
-	  function ensureCurrentCaptureManifest(reason){
-	    var manifest=loadCaptureManifest();
-	    if(manifest&&manifestMatchesActive(manifest))return manifest;
-	    captureManifest=null;
-	    manifest=loadCaptureManifest();
-	    if(manifest&&manifestMatchesActive(manifest))return manifest;
-	    var bounds=activeBounds("hole")||greenBounds("hole");
-	    manifest=buildCaptureManifest(bounds,reason||"ensure-current");
-	    if(manifest&&manifestMatchesActive(manifest))renderCaptureManifest(manifest);
-	    return manifest&&manifestMatchesActive(manifest)?manifest:null;
-	  }
+		  function ensureCurrentCaptureManifest(reason){
+		    var manifest=loadCaptureManifest();
+		    if(manifest&&manifestMatchesActive(manifest))return manifest;
+		    captureManifest=null;
+		    manifest=loadCaptureManifest();
+		    if(manifest&&manifestMatchesActive(manifest))return manifest;
+		    if(capturedGpsPlayActive())return gdCapturedFrameUnavailable(reason||"ensure-current",{stage:"ensure-current"});
+		    var bounds=activeBounds("hole")||greenBounds("hole");
+		    manifest=buildCaptureManifest(bounds,reason||"ensure-current");
+		    if(manifest&&manifestMatchesActive(manifest))renderCaptureManifest(manifest);
+		    return manifest&&manifestMatchesActive(manifest)?manifest:null;
+		  }
 	  function renderCaptureManifest(manifest){
 	    manifest=manifest||loadCaptureManifest();
 	    if(!manifest||!manifestMatchesActive(manifest))return false;
@@ -505,10 +508,11 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 		    el.dataset.gdCapturedSurfaceCourse=String(manifest.courseKey||manifest.courseName||"");
 		    el.dataset.gdCapturedSurfaceScanId=String(manifest.scanId||manifest.activeScanId||"");
 		    el.dataset.gdIncludeTee=manifest.includeTee?"1":"0";
-	    if(manifest.teeLatLng){el.dataset.gdTeeLat=String(manifest.teeLatLng.lat);el.dataset.gdTeeLng=String(manifest.teeLatLng.lng);}
-	    else{delete el.dataset.gdTeeLat;delete el.dataset.gdTeeLng;}
-	    return true;
-	  }
+		    if(manifest.teeLatLng){el.dataset.gdTeeLat=String(manifest.teeLatLng.lat);el.dataset.gdTeeLng=String(manifest.teeLatLng.lng);}
+		    else{delete el.dataset.gdTeeLat;delete el.dataset.gdTeeLng;}
+		    clearCapturedFrameUnavailable();
+		    return true;
+		  }
 	  function boundsPx(manifest,bounds){
     if(!manifest||!validBounds(bounds)||!hasMap())return null;
     var pts=boundsCorners(bounds).map(function(p){var q=map.project(asLL(p),manifest.captureZoom);return {x:q.x-manifest.originPx.x,y:q.y-manifest.originPx.y};});
@@ -542,13 +546,50 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	      center:rotatePx(px.center,angle)
 	    };
 	  }
-  function hideWaiting(){
-    safe(function(){document.body.classList.remove("gdWaitingForConfirmedGreen","gdFrameCameraWaiting");});
-  }
-	  function hideCapturedCamera(){
-	    safe(function(){document.body.classList.remove("gdCapturedHoleFrameCameraOn","gdHoleImageCameraOn","gdHeadToTeeFrameActive","gdLockStateFrameActive");});
-	    var group=document.querySelector("#gdHoleImageCameraLayer .gdHoleImageTiles");
-	    if(group)group.style.transform="";
+	  function hideWaiting(){
+	    safe(function(){document.body.classList.remove("gdWaitingForConfirmedGreen","gdFrameCameraWaiting");});
+	  }
+	  function capturedGpsPlayActive(){
+	    return safe(function(){
+	      if(!document.body||window.gdFullMappingMode||document.body.classList.contains("gdFullMappingMode"))return false;
+	      if(window.__gdMapperObjectCaptureActive)return false;
+	      if(document.body.classList.contains("gdCourseOpening"))return false;
+	      if(document.getElementById("courseScreen")&&!document.getElementById("courseScreen").classList.contains("hidden"))return false;
+	      return document.body.classList.contains("shell-gps")||document.body.classList.contains("gdGpsActive")||document.body.classList.contains("gps-active")||document.body.dataset.clarityRoute==="gps";
+	    },false);
+	  }
+	  function unavailableMessage(){
+	    return "Frame unavailable - remap this hole";
+	  }
+	  function clearCapturedFrameUnavailable(){
+	    safe(function(){document.body.classList.remove("gdCapturedFrameUnavailable");});
+	  }
+	  function gdCapturedFrameUnavailable(reason,context){
+	    safe(function(){
+	      var el=document.getElementById("gdCapturedFrameUnavailable");
+	      if(!el&&document.body){el=document.createElement("div");el.id="gdCapturedFrameUnavailable";el.setAttribute("role","status");el.setAttribute("aria-live","polite");document.body.appendChild(el);}
+	      if(el)el.textContent=unavailableMessage();
+	      if(document.body){
+	        document.body.classList.add("gdCapturedFrameUnavailable");
+	        document.body.classList.remove("gdCapturedHoleFrameCameraOn","gdHoleImageCameraOn","gdFrameCameraWaiting","gdWaitingForConfirmedGreen");
+	        document.body.dataset.gdCapturedFrameUnavailableReason=String(reason||"missing-frame");
+	        document.body.dataset.gdCapturedFrameUnavailableAt=String(Date.now());
+	      }
+	      if(typeof setState==="function")setState("Frame unavailable");
+	      if(typeof toast==="function"&&(!window.__gdCapturedFrameUnavailableToastAt||Date.now()-Number(window.__gdCapturedFrameUnavailableToastAt||0)>1800)){
+	        window.__gdCapturedFrameUnavailableToastAt=Date.now();
+	        toast(unavailableMessage());
+	      }
+	      window.__gdCapturedFrameUnavailable={reason:reason||"missing-frame",context:context||{},hole:surfaceHoleNumber(),course:surfaceCourseKey(),at:Date.now()};
+	    });
+	    readout("frame unavailable | "+(reason||"missing-frame"));
+	    return null;
+	  }
+		  function hideCapturedCamera(){
+		    safe(function(){document.body.classList.remove("gdCapturedHoleFrameCameraOn","gdHoleImageCameraOn","gdHeadToTeeFrameActive","gdLockStateFrameActive");});
+		    clearCapturedFrameUnavailable();
+		    var group=document.querySelector("#gdHoleImageCameraLayer .gdHoleImageTiles");
+		    if(group)group.style.transform="";
 	    lockCameraFrozen=false;
 	    safe(function(){delete window.__gdV19LockCameraFrozen;});
 	    clearShotOverlay();
@@ -558,13 +599,17 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
     if(!el&&document.body){el=document.createElement("div");el.id="gdCapturedHoleFrameReadout";document.body.appendChild(el);}
     if(el)el.textContent="v19 captured hole frame | "+(text||"");
   }
-		  function fitCaptured(bounds,frame,padding,opts){
-    opts=opts||{};
-    hideWaiting();
-    if(!hasMap()||!validBounds(bounds))return false;
-    var manifest=opts.refreshCapture?null:loadCaptureManifest();
-    if(!manifest)manifest=buildCaptureManifest(bounds,opts.reason||frame)||loadCaptureManifest();
-    if(!manifest||!renderCaptureManifest(manifest))return false;
+			  function fitCaptured(bounds,frame,padding,opts){
+	    opts=opts||{};
+	    hideWaiting();
+	    if(!hasMap()||!validBounds(bounds))return false;
+	    var manifest=opts.refreshCapture?null:loadCaptureManifest();
+	    if(!manifest&&capturedGpsPlayActive())return !!gdCapturedFrameUnavailable(opts.reason||frame,{stage:"fitCaptured",frame:frame||"hole",objectName:opts.objectName||""});
+	    if(!manifest)manifest=buildCaptureManifest(bounds,opts.reason||frame)||loadCaptureManifest();
+	    if(!manifest||!renderCaptureManifest(manifest)){
+	      if(capturedGpsPlayActive())return !!gdCapturedFrameUnavailable(opts.reason||frame,{stage:"render",frame:frame||"hole",objectName:opts.objectName||""});
+	      return false;
+	    }
     var px=boundsPx(manifest,bounds);
     if(!px)return false;
     var fr=frameRect(frame||"hole");
@@ -589,8 +634,9 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	    var group=document.querySelector("#gdHoleImageCameraLayer .gdHoleImageTiles");
 	    if(!group)return false;
 	    group.style.transform="translate("+tx.toFixed(2)+"px,"+ty.toFixed(2)+"px) rotate("+angle.toFixed(6)+"rad) scale("+scale.toFixed(4)+")";
-	    safe(function(){document.body.classList.add("gdCapturedHoleFrameCameraOn","gdHoleImageCameraOn");document.body.classList.remove("gdWaitingForConfirmedGreen","gdFrameCameraWaiting");});
-	    var layer=document.getElementById("gdHoleImageCameraLayer");
+		    safe(function(){document.body.classList.add("gdCapturedHoleFrameCameraOn","gdHoleImageCameraOn");document.body.classList.remove("gdWaitingForConfirmedGreen","gdFrameCameraWaiting");});
+		    clearCapturedFrameUnavailable();
+		    var layer=document.getElementById("gdHoleImageCameraLayer");
 	    if(layer){layer.dataset.gdAnchorMode=anchorMode;layer.dataset.gdOrientationSource=orientation&&orientation.source||"none";layer.dataset.gdAxisBearingDeg=orientation&&Number.isFinite(orientation.bearingRad)?(orientation.bearingRad*180/Math.PI).toFixed(2):"";layer.dataset.gdRotationDeg=(angle*180/Math.PI).toFixed(2);layer.dataset.gdCameraFrozen=lockCameraFrozen?"1":"0";}
 			    var info={version:VERSION,frame:frame||"hole",object:opts.objectName||"activeObject",scale:+scale.toFixed(4),fitRatio:+fitRatio.toFixed(2),captureZoom:manifest.captureZoom,tiles:(manifest.tiles||[]).length,anchor:anchorMode,orientation:orientation&&orientation.source||"none",axisBearingDeg:orientation&&Number.isFinite(orientation.bearingRad)?+(orientation.bearingRad*180/Math.PI).toFixed(2):null,rotationDeg:+(angle*180/Math.PI).toFixed(2),objectMeters:boundsSizeM(bounds),at:Date.now()};
 		    window.__gdV19LastCapturedFit=info;
@@ -853,10 +899,11 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	    var layer=document.getElementById("gdHoleImageCameraLayer");
 	    if(layer)layer.dataset.gdCameraFrozen="1";
 	  }
-  function fallbackNative(bounds,frame,padding,opts){
-    if(typeof nativeFit!=="function"||!validBounds(bounds))return false;
-    return nativeFit(bounds,frame,padding,Object.assign({animate:false,duration:.05,ownerMs:1900,maxZoom:frame==="zoom"?21.85:frame==="lock"?21.65:20.85,objectName:"v19NativeFallback"},opts||{}));
-  }
+	  function fallbackNative(bounds,frame,padding,opts){
+	    if(capturedGpsPlayActive())return !!gdCapturedFrameUnavailable(opts&&opts.reason||frame,{stage:"native-fallback",frame:frame||"hole",objectName:opts&&opts.objectName||""});
+	    if(typeof nativeFit!=="function"||!validBounds(bounds))return false;
+	    return nativeFit(bounds,frame,padding,Object.assign({animate:false,duration:.05,ownerMs:1900,maxZoom:frame==="zoom"?21.85:frame==="lock"?21.65:20.85,objectName:"v19NativeFallback"},opts||{}));
+	  }
 	  function setup(opts){
 	    opts=opts||{};
 	    lockCameraFrozen=false;
@@ -992,12 +1039,13 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
     safe(function(){window.gdSimpleFrameFreshCamera=false;});
     hideWaiting();
     if(!nativeFit&&typeof window.gdFitObjectToFrame==="function")nativeFit=window.gdFitObjectToFrame;
-	  window.gdBuildHoleImageCaptureManifest=function(reason){var b=activeBounds("hole")||greenBounds("hole");return buildCaptureManifest(b,reason||"manual");};
-	  window.gdLoadHoleImageCaptureManifest=function(){return loadCaptureManifest();};
-	  window.gdEnsureCurrentCapturedSurfaceManifest=function(reason){return ensureCurrentCaptureManifest(reason||"ensure-current");};
-	  window.gdCapturedSurfaceManifestMatchesActive=function(manifest){return manifestMatchesActive(manifest||captureManifest||window.gdHoleImageCaptureManifest||window.__gdLastHoleImageCaptureManifest||window.__gdV19CapturedHoleFrameManifest);};
-	  window.gdRenderHoleImageCamera=function(manifest){return renderCaptureManifest(manifest||loadCaptureManifest());};
-	    window.gdShowHoleImageCamera=function(on){if(on){var m=loadCaptureManifest()||window.gdBuildHoleImageCaptureManifest("show");if(m)renderCaptureManifest(m);}document.body.classList.toggle("gdCapturedHoleFrameCameraOn",!!on);document.body.classList.toggle("gdHoleImageCameraOn",!!on);return !!on;};
+		  window.gdBuildHoleImageCaptureManifest=function(reason){if(capturedGpsPlayActive())return gdCapturedFrameUnavailable(reason||"manual",{stage:"build"});var b=activeBounds("hole")||greenBounds("hole");return buildCaptureManifest(b,reason||"manual");};
+		  window.gdLoadHoleImageCaptureManifest=function(){return loadCaptureManifest();};
+		  window.gdEnsureCurrentCapturedSurfaceManifest=function(reason){return ensureCurrentCaptureManifest(reason||"ensure-current");};
+		  window.gdCapturedFrameUnavailable=gdCapturedFrameUnavailable;
+		  window.gdCapturedSurfaceManifestMatchesActive=function(manifest){return manifestMatchesActive(manifest||captureManifest||window.gdHoleImageCaptureManifest||window.__gdLastHoleImageCaptureManifest||window.__gdV19CapturedHoleFrameManifest);};
+		  window.gdRenderHoleImageCamera=function(manifest){return renderCaptureManifest(manifest||loadCaptureManifest());};
+	    window.gdShowHoleImageCamera=function(on){if(on){var m=loadCaptureManifest();if(!m&&capturedGpsPlayActive())return !!gdCapturedFrameUnavailable("show",{stage:"show"});if(!m)m=window.gdBuildHoleImageCaptureManifest("show");if(m)renderCaptureManifest(m);}document.body.classList.toggle("gdCapturedHoleFrameCameraOn",!!on);document.body.classList.toggle("gdHoleImageCameraOn",!!on);if(on)clearCapturedFrameUnavailable();return !!on;};
 		    window.gdFitCapturedHoleFrameToBoxV19=fitCaptured;
 		    window.gdFitHeadToTeeHoleFrameV19=headToTee;
 		    window.gdFitLockStateFrameV19=lockState;
