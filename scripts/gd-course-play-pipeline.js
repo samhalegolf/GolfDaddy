@@ -23,6 +23,8 @@
   };
   var VALID_COURSE_STATES=Object.keys(COURSE_STATES).reduce(function(out,key){out[COURSE_STATES[key]]=true;return out;},{});
   var VALID_HOLE_STATES=Object.keys(HOLE_STATES).reduce(function(out,key){out[HOLE_STATES[key]]=true;return out;},{});
+  var PREPARING_TIMEOUT_MS=7000;
+  var preparingSince={};
 
   function now(){return new Date().toISOString();}
   function safe(fn,fb){try{return fn();}catch(e){return fb;}}
@@ -44,6 +46,19 @@
   function courseIdFrom(courseOrId){
     if(typeof courseOrId==="string"||typeof courseOrId==="number")return slug(courseOrId);
     return slug(courseOrId&&(courseOrId.key||courseOrId.id||courseOrId.name||courseOrId.courseName||courseOrId.courseId)||"course");
+  }
+  function courseIdCandidates(courseOrId){
+    if(typeof courseOrId==="string"||typeof courseOrId==="number")return [slug(courseOrId)];
+    var raw=[
+      courseOrId&&courseOrId.key,
+      courseOrId&&courseOrId.id,
+      courseOrId&&courseOrId.courseId,
+      courseOrId&&courseOrId.savedCourseId,
+      courseOrId&&courseOrId.canonicalKey,
+      courseOrId&&courseOrId.name,
+      courseOrId&&courseOrId.courseName
+    ].map(slug).filter(Boolean);
+    return raw.filter(function(value,index){return raw.indexOf(value)===index;});
   }
   function courseNameFrom(courseOrId,courseId){
     if(typeof courseOrId==="string"||typeof courseOrId==="number")return String(courseOrId||courseId||"Course");
@@ -152,7 +167,8 @@
     var greenShape=points(mappedData.green&&(mappedData.green.greenShape||mappedData.green.shape||mappedData.green.polygon||mappedData.green.outline));
     var fairwayPoints=points((mappedData.fairways||[]).map(function(fairway){return fairway&&fairway.position||fairway;}));
     if(!route.length)route=[tee].concat(fairwayPoints,[green]).filter(Boolean);
-    var record=emptyHoleRecord(course,holeNumber,route.length>=2&&green?HOLE_STATES.mapped_geometry_ready:HOLE_STATES.mapping);
+    var playable=route.length>=2&&green;
+    var record=emptyHoleRecord(course,holeNumber,playable?HOLE_STATES.play_data_ready:HOLE_STATES.mapping);
     record.teePoint=tee||null;
     record.greenCentre=green||null;
     record.greenShape=greenShape;
@@ -160,9 +176,9 @@
     record.fairwayPoints=fairwayPoints;
     record.routePoints=route;
     record.frameAnchors={tee:tee||null,green:green||null,route:route,greenShape:greenShape};
-    record.presentation={capturedManifestKey:null,capturedSurfaceReady:false,owner:"gps-play"};
+    record.presentation={capturedManifestKey:null,capturedSurfaceReady:!!playable,owner:"gps-play"};
     record.source=source||mappedData.source||"automap";
-    record.confidence=route.length>=2&&green?"mapped_geometry":"incomplete";
+    record.confidence=playable?"mapped_geometry_ready_for_play":"incomplete";
     record.updatedAt=now();
     return record;
   }
@@ -203,6 +219,7 @@
     record.createdAt=existing.createdAt||record.createdAt;
     record.updatedAt=now();
     course.holes[String(holeNumber)]=record;
+    delete preparingSince[String(course.courseId)+":h"+String(holeNumber)];
     return writeCourse(course,store).holes[String(holeNumber)];
   }
   function ingestMappedCourse(courseOrId,mappedCourseData,source){
@@ -217,7 +234,22 @@
   }
   function getCoursePlayState(courseOrId){
     var store=loadStore();
-    var course=store.courses[courseIdFrom(courseOrId)];
+    var candidates=courseIdCandidates(courseOrId);
+    var course=store.courses[courseIdFrom(courseOrId)]||null;
+    if(!course){
+      for(var i=0;i<candidates.length;i++){
+        course=store.courses[candidates[i]];
+        if(course)break;
+      }
+    }
+    if(!course&&candidates.length){
+      var wanted={};
+      candidates.forEach(function(key){wanted[key]=true;});
+      course=Object.keys(store.courses||{}).map(function(key){return store.courses[key];}).filter(function(record){
+        var recordKeys=courseIdCandidates(record);
+        return recordKeys.some(function(key){return wanted[key];});
+      }).sort(function(a,b){return String(b.updatedAt||"").localeCompare(String(a.updatedAt||""));})[0]||null;
+    }
     return course?clone(course):clone(courseRecord(courseOrId,store));
   }
   function getHolePlayState(courseOrId,holeNumber){
@@ -232,6 +264,7 @@
     var existing=course.holes[String(holeNumber)]||emptyHoleRecord(course,holeNumber);
     var record=Object.assign(existing,clone(data||{}),{status:HOLE_STATES.play_data_ready,updatedAt:now(),unavailableReason:null});
     course.holes[String(holeNumber)]=record;
+    delete preparingSince[String(course.courseId)+":h"+String(holeNumber)];
     return writeCourse(course,store).holes[String(holeNumber)];
   }
   function markHolePlayDataUnavailable(courseOrId,holeNumber,reason){
@@ -243,6 +276,7 @@
     existing.unavailableReason=String(reason||"unavailable");
     existing.updatedAt=now();
     course.holes[String(holeNumber)]=existing;
+    delete preparingSince[String(course.courseId)+":h"+String(holeNumber)];
     return writeCourse(course,store).holes[String(holeNumber)];
   }
   function ensureHolePlayData(courseOrId,holeNumber,opts){
@@ -419,8 +453,26 @@
   function syncGpsPipelineState(reason,holeNumber){
     if(!document.body)return null;
     var hole=normalizeHoleNumber(holeNumber||activeHoleFromApp());
+    var course=activeCourseFromApp();
     var state=getActiveHolePlayState(hole);
     var status=String(state&&state.status||HOLE_STATES.unknown);
+    if(preparingStatus(status)){
+      var mapped=mappedHoleFromCourseLibrary(course,hole);
+      if(mapped&&(Array.isArray(mapped.route)&&mapped.route.length>=2||mapped.green&&mapped.tee)){
+        state=ingestMappedHole(course||"course",hole,mapped,reason||"pipeline-sync");
+        status=String(state&&state.status||HOLE_STATES.unknown);
+      }
+    }
+    var key=String(state&&state.courseId||courseIdFrom(course||"course"))+":h"+String(hole);
+    if(preparingStatus(status)){
+      if(!preparingSince[key])preparingSince[key]=Date.now();
+      if(Date.now()-preparingSince[key]>=PREPARING_TIMEOUT_MS){
+        state=markHolePlayDataUnavailable(state&&state.courseId||course||"course",hole,"mapped geometry unavailable after pipeline timeout");
+        status=String(state&&state.status||HOLE_STATES.play_data_unavailable);
+      }
+    }else{
+      delete preparingSince[key];
+    }
     var preparing=gpsActive()&&preparingStatus(status);
     var unavailable=gpsActive()&&unavailableStatus(status);
     document.body.classList.toggle("gdCoursePlayPipelinePreparing",!!preparing);
