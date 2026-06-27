@@ -18184,24 +18184,41 @@ function initGPS(){
   navigator.geolocation.getCurrentPosition(p=>{
     gpsOk=true;setGps(true,"GPS");hideHint();
     const here=L.latLng(p.coords.latitude,p.coords.longitude);
-    if(mode==="start"){
-      setStart(here,false);
-      if(gdMappedCourseAssistActive()){
-        mode="ready";
-        setState("GPS fixed · press Lock");
-        try{gdClearMappedStartPromptChrome()}catch(e){}
-      }else{
-        mode="green";
-        setState("Set green");
-      }
-    }
-    startWatch();
-  },()=>{gpsOk=false;setGps(false,"Manual");showHint(gdMappedStartHint())},{enableHighAccuracy:true,maximumAge:3000,timeout:8000})
-}
-function pulseStartDot(){const el=document.querySelector(".startDot");if(el){el.classList.remove("pulse");void el.offsetWidth;el.classList.add("pulse")}}
-function updateGpsInsideLockedFrame(here,label="GPS live"){
-  if(!here||!start) return false;
-  const moved=map.distance(start,here);
+	    gdRememberLiveGpsOnly(here,p.coords.accuracy,"gps-init");
+	    startWatch();
+	  },()=>{gpsOk=false;setGps(false,"Manual");showHint(gdMappedStartHint())},{enableHighAccuracy:true,maximumAge:3000,timeout:8000})
+	}
+	function pulseStartDot(){const el=document.querySelector(".startDot");if(el){el.classList.remove("pulse");void el.offsetWidth;el.classList.add("pulse")}}
+	function gdRememberLiveGpsOnly(here,accuracy=null,source="gps-live"){
+	  window.__gdGpsLocateQuarantineV1=true;
+	  if(!here||!Number.isFinite(Number(here.lat))||!Number.isFinite(Number(here.lng)))return false;
+	  window.gdGpsState=window.gdGpsState||{};
+	  window.gdGpsState.permissionKnown=true;
+	  window.gdGpsState.permissionGranted=true;
+	  window.gdGpsState.lastError=null;
+	  window.gdGpsState.lastFix={lat:Number(here.lat),lng:Number(here.lng),accuracy:Number.isFinite(Number(accuracy))?Number(accuracy):null,source:source||"gps-live",simulated:false};
+	  window.gdGpsState.lastFixAt=Date.now();
+	  window.__gdLastLiveGpsPoint={lat:Number(here.lat),lng:Number(here.lng),accuracy:Number.isFinite(Number(accuracy))?Number(accuracy):null,source:source||"gps-live",at:Date.now()};
+	  try{if(document.body&&document.body.dataset){document.body.dataset.gdLiveGpsLat=String(Number(here.lat));document.body.dataset.gdLiveGpsLng=String(Number(here.lng));document.body.dataset.gdLiveGpsSource=source||"gps-live";document.body.dataset.gdLiveGpsAt=String(Date.now());}}catch(e){}
+	  try{
+	    if(typeof L!=="undefined"&&typeof map!=="undefined"&&map){
+	      const ll=L.latLng(Number(here.lat),Number(here.lng));
+	      if(!window.__gdLiveGpsMarker){
+	        window.__gdLiveGpsMarker=L.circleMarker(ll,{radius:6,color:"#1fd36d",weight:2,opacity:.95,fillColor:"#1fd36d",fillOpacity:.32,interactive:false}).addTo(map);
+	      }else if(window.__gdLiveGpsMarker.setLatLng){
+	        window.__gdLiveGpsMarker.setLatLng(ll);
+	      }
+	    }
+	  }catch(e){}
+	  try{gpsOk=true;}catch(e){}
+	  try{setGps(true,source==="gps-refresh"?"GPS refreshed":"GPS live");}catch(e){}
+	  return true;
+	}
+	window.gdRememberLiveGpsOnly=gdRememberLiveGpsOnly;
+	function updateGpsInsideLockedFrame(here,label="GPS live"){
+	  if(!here||!start) return false;
+	  gdRememberLiveGpsOnly(here,null,label);
+	  const moved=map.distance(start,here);
   if(moved>lockedGpsUpdateMaxM){
     setGps(true,"GPS moved");
     toast("GPS moved outside locked frame · reset for new shot");
@@ -18212,26 +18229,18 @@ function updateGpsInsideLockedFrame(here,label="GPS live"){
   return true;
 }
 function startWatch(){
-  if(gpsWatch||!navigator.geolocation)return;
-  gpsWatch=navigator.geolocation.watchPosition(p=>{
-    const here=L.latLng(p.coords.latitude,p.coords.longitude);
-    if(!start)return;
-    if(gdMaybeAutoNextShotFromGps(here,p.coords.accuracy))return;
-    const moved=map.distance(start,here);
-    try{if(typeof window.gdTryEnterGreenFocusFromPoint==="function"&&window.gdTryEnterGreenFocusFromPoint(here,"gps-live",{accuracy:p.coords.accuracy}))return;}catch(e){}
-    if(lockedFrame){
-      updateGpsInsideLockedFrame(here,"GPS live");
-      return;
-    }
-    if(moved>=dev("gps.movementUnlockM")){
-      undoStack.push({type:"start",value:L.latLng(start.lat,start.lng)});
-      setStart(here,false);
-      checkLeavingGreen();
-      setGps(true,"GPS live");
-    }
-  },()=>setGps(false,"GPS weak"),{enableHighAccuracy:true,maximumAge:3000,timeout:10000});
-}
-function refreshGPS(){if(!navigator.geolocation)return;navigator.geolocation.getCurrentPosition(p=>{const here=L.latLng(p.coords.latitude,p.coords.longitude);gpsOk=true;setGps(true,"GPS refreshed");try{if(typeof window.gdTryEnterGreenFocusFromPoint==="function"&&window.gdTryEnterGreenFocusFromPoint(here,"gps-refresh",{accuracy:p.coords.accuracy}))return;}catch(e){}if(lockedFrame){if(updateGpsInsideLockedFrame(here,"GPS refreshed"))toast("GPS refreshed");return;}if(start)undoStack.push({type:"start",value:L.latLng(start.lat,start.lng)});setStart(here,false);if(gdMappedCourseAssistActive()){mode="ready";hideHint();setState("GPS fixed · press Lock");try{gdClearMappedStartPromptChrome()}catch(e){}}else{mode="green";hideHint();setState("Set green")}startWatch();toast("GPS refreshed")},null,{enableHighAccuracy:true,maximumAge:0,timeout:8000})}
+	  if(gpsWatch||!navigator.geolocation)return;
+	  gpsWatch=navigator.geolocation.watchPosition(p=>{
+	    const here=L.latLng(p.coords.latitude,p.coords.longitude);
+	    gdRememberLiveGpsOnly(here,p.coords.accuracy,"gps-watch");
+	    if(!start)return;
+	    if(lockedFrame){
+	      updateGpsInsideLockedFrame(here,"GPS live");
+	      return;
+	    }
+	  },()=>setGps(false,"GPS weak"),{enableHighAccuracy:true,maximumAge:3000,timeout:10000});
+	}
+	function refreshGPS(){if(!navigator.geolocation)return;navigator.geolocation.getCurrentPosition(p=>{const here=L.latLng(p.coords.latitude,p.coords.longitude);gdRememberLiveGpsOnly(here,p.coords.accuracy,"gps-refresh");startWatch();toast("GPS refreshed")},null,{enableHighAccuracy:true,maximumAge:0,timeout:8000})}
 function centerOnPlayer(){if(lockedFrame){toast("Frame locked · GPS dot still live");pulseStartDot();return;}clearMapRotation();if(!start){refreshGPS();return}map.panTo(start,{animate:true,duration:.35});pulseStartDot()}
 
 /* ---------------- Flag ---------------- */
@@ -24167,34 +24176,22 @@ try{applyDevSettings();}catch(e){console.warn("Developer tuning init skipped",e)
     localStorage.setItem(MODE_KEY,'live');
     if(!navigator.geolocation){setGpsLabel(false,'GPS unavailable');safeToast('GPS unavailable');refresh();return}
     setGpsLabel(true,'GPS…');setStateLabel('Requesting GPS');hint('Allow location permission');
-    navigator.geolocation.getCurrentPosition(pos=>{
-      const here=L.latLng(pos.coords.latitude,pos.coords.longitude);
-      try{
-        gpsOk=true;
-        setGpsLabel(true,'GPS');
-        if(typeof window.gdGpsRememberFix==='function')window.gdGpsRememberFix(pos,'enter-live');
-        if(typeof window.gdTryEnterGreenFocusFromPoint==='function'&&window.gdTryEnterGreenFocusFromPoint(here,'gps-live',{accuracy:pos.coords.accuracy})){
-          refresh();
-          return;
-        }
-        if(typeof lockedFrame!=='undefined'&&lockedFrame){
-          if(typeof updateGpsInsideLockedFrame==='function'&&curStart())updateGpsInsideLockedFrame(here,'GPS live');
-          setStateLabel('Live locked');
-          hideHintSafe();
-        }else{
-          if(typeof setStart==='function')setStart(here,false);else start=here;
-          if(typeof map!=='undefined'&&map)map.setView(here,18,{animate:true});
-          if(window.gdMappedCourseAssistActive&&window.gdMappedCourseAssistActive()){
-            try{mode='ready'}catch(e){}
-            setStateLabel('GPS fixed · press Lock');
-            hideHintSafe();
-          }else{
-            try{mode='green'}catch(e){}
-            setStateLabel('Live: set green');
-            hint('Tap green centre');
-          }
-        }
-        if(typeof startWatch==='function')startWatch();
+	    navigator.geolocation.getCurrentPosition(pos=>{
+	      const here=L.latLng(pos.coords.latitude,pos.coords.longitude);
+	      try{
+	        gpsOk=true;
+	        setGpsLabel(true,'GPS');
+	        if(typeof window.gdGpsRememberFix==='function')window.gdGpsRememberFix(pos,'enter-live');
+	        if(typeof window.gdRememberLiveGpsOnly==='function')window.gdRememberLiveGpsOnly(here,pos.coords.accuracy,'gps-live');
+	        if(typeof lockedFrame!=='undefined'&&lockedFrame){
+	          if(typeof updateGpsInsideLockedFrame==='function'&&curStart())updateGpsInsideLockedFrame(here,'GPS live');
+	          setStateLabel('Live locked');
+	          hideHintSafe();
+	        }else{
+	          setStateLabel('GPS live');
+	          hideHintSafe();
+	        }
+	        if(typeof startWatch==='function')startWatch();
       }catch(e){console.warn(e)}
       refresh();
     },err=>{const denied=err&&err.code===1;setGpsLabel(false,denied?'GPS denied':'GPS weak');setStateLabel(denied?'GPS permission needed':'GPS is searching');if(denied)hideHintSafe();else hint('GPS is searching. Try again near the tee.');safeToast(err&&err.message?err.message:(denied?'Location permission needed':'GPS is searching'));refresh();},{enableHighAccuracy:true,maximumAge:0,timeout:15000});
@@ -26261,21 +26258,14 @@ try{applyDevSettings();}catch(e){console.warn("Developer tuning init skipped",e)
   function curTarget(){ try{return typeof target!=='undefined'&&target?target:null}catch(e){return null} }
   function isLocked(){ try{return !!lockedFrame}catch(e){return false} }
   function currentZoom(){ try{return (map&&map.getZoom)?map.getZoom():18}catch(e){return 18} }
-  function jumpCameraTo(here){
-    try{ if(typeof clearMapRotation==='function') clearMapRotation(); }catch(e){}
-    try{
-      if(typeof map!=='undefined'&&map){
-        const z=Math.max(18, currentZoom()||18);
-        if(map.setView) map.setView(here,z,{animate:true,duration:.25});
-        else if(map.panTo) map.panTo(here,{animate:true,duration:.25});
-      }
-    }catch(e){}
-  }
+	  function jumpCameraTo(here){
+	    return false;
+	  }
 	  function applyLiveGpsPosition(here, opts){
 	    opts=opts||{};
 	    setGpsLabelSafe(true,'GPS');
 	    try{ gpsOk=true; }catch(e){}
-	    try{ if(typeof window.gdTryEnterGreenFocusFromPoint==='function'&&window.gdTryEnterGreenFocusFromPoint(here,'gps-live',{accuracy:opts.accuracy})) return; }catch(e){}
+	    try{ if(typeof window.gdRememberLiveGpsOnly==='function')window.gdRememberLiveGpsOnly(here,opts.accuracy,opts.source||'gps-live'); }catch(e){}
 
 	    if(isLocked()){
 	      try{ if(typeof updateGpsInsideLockedFrame==='function'&&curStart()) updateGpsInsideLockedFrame(here, opts.label||'GPS live'); }catch(e){}
@@ -26285,21 +26275,10 @@ try{applyDevSettings();}catch(e){console.warn("Developer tuning init skipped",e)
 	      return;
 	    }
 
-	    try{ if(typeof setStart==='function') setStart(here,false); else start=here; }catch(e){}
-	    const mapped=!!(window.gdMappedCourseAssistActive&&window.gdMappedCourseAssistActive());
-	    if(opts.jump!==false) jumpCameraTo(here);
-
-	    if(mapped){
-	      try{ mode='ready'; }catch(e){}
-	      setStateSafe('GPS fixed · press Lock');
-	      hideHint();
-	    }else{
-	      try{ mode='green'; }catch(e){}
-	      setStateSafe('Live: set green');
-      showHintSafe('Tap green centre');
-    }
-    if(opts.toast) safeToast('GPS located');
-  }
+	    setStateSafe('GPS live');
+	    hideHint();
+	    if(opts.toast) safeToast('GPS located');
+	  }
   function requestLiveGps(opts){
     opts=opts||{};
     if(!navigator.geolocation){ setGpsLabelSafe(false,'GPS unavailable'); safeToast('GPS unavailable'); return; }
@@ -26404,23 +26383,15 @@ try{applyDevSettings();}catch(e){console.warn("Developer tuning init skipped",e)
   function cacheFresh(){
     return !!(window.gdGpsState.lastFix && (now()-window.gdGpsState.lastFixAt) < CACHE_MAX_MS);
   }
-  function jumpCameraTo(ll){
-    if(isLocked()) return;
-    try{ if(typeof clearMapRotation==='function') clearMapRotation(); }catch(e){}
-    try{
-      if(typeof map!=='undefined' && map){
-        const z = Math.max(18, map.getZoom ? map.getZoom() : 18);
-        if(map.setView) map.setView(ll, z, {animate:true, duration:.25});
-        else if(map.panTo) map.panTo(ll, {animate:true, duration:.25});
-      }
-    }catch(e){}
-  }
+	  function jumpCameraTo(ll){
+	    return false;
+	  }
 	  function applyFix(ll, opts){
 	    opts = opts || {};
 	    if(!ll) return false;
 	    setGpsLabelSafe(true, opts.label || 'GPS');
 	    try{ gpsOk=true; }catch(e){}
-	    try{ if(typeof window.gdTryEnterGreenFocusFromPoint==='function'&&window.gdTryEnterGreenFocusFromPoint(ll,'gps-live',{accuracy:opts.accuracy})) return true; }catch(e){}
+	    try{ if(typeof window.gdRememberLiveGpsOnly==='function')window.gdRememberLiveGpsOnly(ll,opts.accuracy,opts.cache?'gps-cache':'gps-live'); }catch(e){}
 
 	    if(isLocked()){
 	      try{ if(typeof updateGpsInsideLockedFrame==='function' && curStart()) updateGpsInsideLockedFrame(ll, opts.label || 'GPS live'); }catch(e){}
@@ -26430,22 +26401,11 @@ try{applyDevSettings();}catch(e){console.warn("Developer tuning init skipped",e)
 	      return true;
 	    }
 
-	    try{ if(typeof setStart==='function') setStart(ll,false); else start = ll; }catch(e){}
-	    const mapped=!!(window.gdMappedCourseAssistActive&&window.gdMappedCourseAssistActive());
-	    if(opts.jump !== false) jumpCameraTo(ll);
-
-	    if(mapped){
-	      try{ mode='ready'; }catch(e){}
-	      setStateSafe('GPS fixed · press Lock');
-	      hideHintSafe2();
-	    }else{
-	      try{ mode='green'; }catch(e){}
-	      setStateSafe('Live: set green');
-      hintSafe('Tap green centre');
-    }
-    if(opts.toast) safeToast(opts.cache ? 'GPS centred from recent fix' : 'GPS located');
-    return true;
-  }
+	    setStateSafe(opts.cache ? 'GPS cached' : 'GPS live');
+	    hideHintSafe2();
+	    if(opts.toast) safeToast(opts.cache ? 'GPS refreshed from recent fix' : 'GPS located');
+	    return true;
+	  }
 
   // Intercept every successful geolocation result, including old app code, so the whole app agrees permission is working.
   try{
@@ -37958,9 +37918,10 @@ body.gdGpsLayoutRigOn .gdNextHolePopout{
     snapshot("nearest-hole-resume");
     return true;
   }
-  function autoResumeNearest(saved,here,age){
-    if(!saved||!here||age>RECENT_MS)return false;
-    var nearest=nearestHoleTo(here);
+	  function autoResumeNearest(saved,here,age){
+	    if(window.__gdGpsLocateQuarantineV1!==false)return false;
+	    if(!saved||!here||age>RECENT_MS)return false;
+	    var nearest=nearestHoleTo(here);
     if(!nearest||!Number.isFinite(nearest.distance)||nearest.distance>ON_COURSE_M)return false;
     return playHole(nearest.hole,"gps-auto-nearest");
   }
