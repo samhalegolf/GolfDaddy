@@ -707,6 +707,17 @@
       safe(function(){return typeof window.loadUserCourseData==="function"?window.loadUserCourseData():null;},null)||
       null;
   }
+  function courseIdentityMatches(left,right){
+    var leftKeys=courseIdCandidates(left);
+    var rightKeys=courseIdCandidates(right);
+    if(!leftKeys.length||!rightKeys.length)return false;
+    return leftKeys.some(function(key){return rightKeys.indexOf(key)!==-1;});
+  }
+  function resolveFreshCourseForIngest(seed){
+    var fresh=resolveCourseFromLibrary(null);
+    if(fresh&&(!seed||courseIdentityMatches(seed,fresh)))return fresh;
+    return seed||fresh||null;
+  }
   function holeNumbersForCourse(course){
     var found={};
     if(course&&course.objects&&typeof course.objects==="object"){
@@ -932,7 +943,7 @@
         var result=originalAutoMap.apply(this,args);
         var ingest=function(){safe(function(){
           recordDebugEvent("automapper-ingest-started",{source:"automap"});
-          var state=ingestCourseLibraryCourse(course||resolveCourseFromLibrary(null),{source:"automap"});
+          var state=ingestCourseLibraryCourse(resolveFreshCourseForIngest(course),{source:"automap"});
           recordDebugEvent("automapper-completed",{courseId:state&&state.courseId,courseName:state&&state.courseName,status:state&&state.status,holesScanned:state&&state.adapter&&state.adapter.holesChecked,holesSaved:state&&state.adapter&&state.adapter.holesIngested,source:"automap"});
         });};
         if(result&&typeof result.then==="function")return result.finally(ingest);
@@ -947,7 +958,7 @@
         safe(function(){prepareCourseForPlay(course||resolveCourseFromLibrary(null));});
         syncGpsPipelineState("open-course-to-first-hole",1);
         var result=originalOpenCourseToFirstHole.apply(this,arguments);
-        setTimeout(function(){safe(function(){ingestCourseLibraryCourse(course||resolveCourseFromLibrary(null),{source:"course-selection"});syncGpsPipelineState("course-selection-ingested",1);});},350);
+        setTimeout(function(){safe(function(){ingestCourseLibraryCourse(resolveFreshCourseForIngest(course),{source:"course-selection"});syncGpsPipelineState("course-selection-ingested",1);});},350);
         return result;
       };
       window.gdOpenCourseToFirstHole.__gdCoursePlayPipelineWrapped=true;
@@ -958,7 +969,7 @@
         safe(function(){prepareCourseForPlay(course||resolveCourseFromLibrary(null));});
         syncGpsPipelineState("course-picker",1);
         var result=originalPickerCourse.apply(this,arguments);
-        setTimeout(function(){safe(function(){ingestCourseLibraryCourse(course||resolveCourseFromLibrary(null),{source:"course-picker"});syncGpsPipelineState("course-picker-ingested",1);});},450);
+        setTimeout(function(){safe(function(){ingestCourseLibraryCourse(resolveFreshCourseForIngest(course),{source:"course-picker"});syncGpsPipelineState("course-picker-ingested",1);});},450);
         return result;
       };
       window.gdOpenCoursePickerCourse.__gdCoursePlayPipelineWrapped=true;
