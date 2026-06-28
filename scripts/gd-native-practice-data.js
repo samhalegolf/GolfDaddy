@@ -389,6 +389,73 @@
     return shots;
   }
 
+  function buildPracticeGateInput(sessionId, opts) {
+    opts = opts || {};
+    var rows = loadNativePracticeShots({ sessionId: sessionId || '' }).filter(function (shot) {
+      if (opts.importBatchId && shot.importBatchId !== opts.importBatchId) return false;
+      return shot.status === 'ready_for_gate' || shot.status === 'native_valid';
+    });
+    var accepted = [];
+    var rejected = [];
+    rows.forEach(function (shot) {
+      var checked = validateNativePracticeShot(shot);
+      if (checked.errors.length) {
+        rejected.push({
+          shotId: shot.shotId,
+          club: shot.club || '',
+          errors: checked.errors,
+          warnings: checked.warnings
+        });
+        return;
+      }
+      var carryM = asNumber(shot.carryDistance);
+      var totalM = asNumber(shot.totalDistance);
+      var lateralM = asNumber(shot.offlineDistance);
+      var expectedM = carryM || totalM || null;
+      var normalizedDeg = Number.isFinite(Number(lateralM)) && Number.isFinite(Number(expectedM)) && Number(expectedM) > 0
+        ? Math.atan2(Number(lateralM), Number(expectedM)) * 180 / Math.PI
+        : null;
+      accepted.push({
+        shotId: shot.shotId,
+        sessionId: shot.sessionId,
+        importBatchId: shot.importBatchId,
+        playerId: shot.playerId || '',
+        playerName: shot.playerName || '',
+        accountId: shot.accountId || '',
+        club: shot.club || 'Unknown',
+        shotNumber: shot.shotNumber,
+        carryM: carryM,
+        totalM: totalM,
+        expectedM: expectedM,
+        lateralM: lateralM,
+        normalizedDeg: Number.isFinite(Number(normalizedDeg)) ? Math.round(Number(normalizedDeg) * 100) / 100 : null,
+        delivery: {
+          faceAngleDeg: asNumber(shot.faceAngle),
+          pathAngleDeg: asNumber(shot.pathAngle),
+          faceToPathDeg: asNumber(shot.faceToPath),
+          startDirectionDeg: asNumber(shot.startDirection)
+        },
+        sourceType: shot.sourceType,
+        sourceNative: true,
+        rawSource: shot.rawSource || null
+      });
+    });
+    return {
+      sessionId: sessionId || '',
+      importBatchId: opts.importBatchId || '',
+      storageKey: STORAGE_KEY,
+      schemaVersion: SCHEMA_VERSION,
+      accepted: accepted,
+      rejected: rejected,
+      counts: {
+        nativeRows: rows.length,
+        gateReady: accepted.length,
+        rejected: rejected.length
+      },
+      generatedAt: nowIso()
+    };
+  }
+
   function clearNativePracticeData() {
     return writeStore(emptyStore());
   }
@@ -405,6 +472,7 @@
     createPracticeImportBatch: createPracticeImportBatch,
     saveNativePracticeShots: saveNativePracticeShots,
     loadNativePracticeShots: loadNativePracticeShots,
+    buildPracticeGateInput: buildPracticeGateInput,
     clearNativePracticeData: clearNativePracticeData
   };
 
