@@ -39,7 +39,17 @@ Initial parsing supports pasted CSV or simple delimited text with headers. It re
 
 ## Practice Shot Data Gate
 
-The gate adapter reads native rows and returns a gate-ready summary without running Cluster Finder. It filters valid native rows, reports rejects, and maps the exact fields Cluster Finder can use later.
+The gate adapter is `GDPracticeDataImport.buildPracticeGateInput(sessionId, opts)`. It reads native rows and returns a gate-ready summary without running Cluster Finder. It filters valid native rows, reports rejects, and maps the exact fields Cluster Finder can use later:
+
+- `carryM`, `totalM`, `expectedM`, `lateralM`, `normalizedDeg`
+- `delivery.faceAngleDeg`, `delivery.pathAngleDeg`, `delivery.faceToPathDeg`, `delivery.startDirectionDeg`
+- player/session/import identity and raw source metadata
+
+The adapter does not call `GolfDaddyLaunchMonitorData.analyze()` and does not write to `gd_launch_monitor_data_v1`.
+
+## UI Location
+
+The review lane is inside Practice Data as `Native Practice Data Import`. It supports paste -> parse -> preview -> save valid rows -> reload saved native rows.
 
 ## Intentional Non-Changes
 
