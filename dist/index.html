@@ -2101,7 +2101,27 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
     .gdLmSummary.good strong{color:#21d07b}.gdLmSummary.warn strong{color:#ffcf70}.gdLmSummary.bad strong{color:#ff5a5f}
     .gdLmRows{display:grid;grid-template-columns:1fr 1fr;gap:8px}
     .gdLmRows .gdLmSummary strong{font-size:14px;text-align:right}
-    @media(max-width:520px){.gdLmRows,.gdLmActions{grid-template-columns:1fr}}
+    .gdNativePracticeImport{display:grid;gap:10px;margin-top:10px;padding:12px;border-radius:18px;background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.08)}
+    .gdNativePracticeHead{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+    .gdNativePracticeHead strong{display:block;color:#fff;font-size:14px;font-weight:950;line-height:1.1}
+    .gdNativePracticeHead span{display:block;margin-top:3px;color:rgba(255,255,255,.58);font-size:10px;font-weight:850;line-height:1.3}
+    .gdNativePracticeBadge{border-radius:999px;padding:5px 8px;background:rgba(33,208,123,.12);border:1px solid rgba(33,208,123,.22);color:#8cffbf;font-size:9px;font-weight:950;text-transform:uppercase;white-space:nowrap}
+    .gdNativePracticeInput{width:100%;box-sizing:border-box;min-height:118px;resize:vertical;border:1px solid rgba(255,255,255,.10);border-radius:14px;background:rgba(0,0,0,.22);color:#fff;padding:10px 11px;font:800 12px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace}
+    .gdNativePracticeButtons{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+    .gdNativePracticeButtons button{border:1px solid rgba(255,255,255,.10);border-radius:14px;padding:11px 10px;background:rgba(255,255,255,.09);color:#fff;font-size:12px;font-weight:950}
+    .gdNativePracticeButtons .primary{background:linear-gradient(180deg,#d7b06b,#b88d42);color:#06100b}
+    .gdNativePracticeButtons button:disabled{opacity:.46;cursor:not-allowed}
+    .gdNativePracticeSummary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}
+    .gdNativePracticeMetric{padding:8px;border-radius:12px;background:rgba(0,0,0,.18);border:1px solid rgba(255,255,255,.07)}
+    .gdNativePracticeMetric span{display:block;color:rgba(255,255,255,.52);font-size:9px;font-weight:950;text-transform:uppercase;letter-spacing:.06em}
+    .gdNativePracticeMetric strong{display:block;margin-top:3px;color:#fff;font-size:14px;font-weight:950}
+    .gdNativePracticeTableWrap{overflow:auto;border-radius:13px;border:1px solid rgba(255,255,255,.08);background:rgba(0,0,0,.16)}
+    .gdNativePracticeTable{min-width:760px;width:100%;border-collapse:collapse;font:800 10px/1.35 ui-monospace,SFMono-Regular,Menlo,monospace;color:rgba(255,255,255,.78)}
+    .gdNativePracticeTable th,.gdNativePracticeTable td{padding:7px 8px;border-bottom:1px solid rgba(255,255,255,.06);text-align:left;vertical-align:top}
+    .gdNativePracticeTable th{position:sticky;top:0;background:#101713;color:rgba(255,255,255,.56);font-size:9px;text-transform:uppercase;letter-spacing:.05em;z-index:1}
+    .gdNativePracticeTable tr.invalid td{color:#ffb3b3}
+    .gdNativePracticeEmpty{padding:9px;border-radius:12px;background:rgba(0,0,0,.16);color:rgba(255,255,255,.58);font-size:11px;font-weight:850}
+    @media(max-width:520px){.gdLmRows,.gdLmActions,.gdNativePracticeButtons,.gdNativePracticeSummary{grid-template-columns:1fr}.gdNativePracticeHead{display:grid}}
 
   
 
@@ -5617,6 +5637,14 @@ body[data-gd-permission="admin"] #gdV62Home .gdHomeAdminSettings{display:inline-
 <input class="gdUploadFileInput" id="gdPracticeCameraInput" type="file" accept="image/*" capture="environment">
 <button class="gdUploadFileButton" id="gdPracticeLoadExtracted7iBtn" type="button" onclick="gdLoadExtractedPractice7iData()" hidden>Import extracted 7i scan</button>
 </div>
+</div>
+<div class="gdNativePracticeImport" id="gdNativePracticeImportLane">
+<div class="gdNativePracticeHead"><div><strong>Native Practice Data Import</strong><span>Paste reviewed practice shots, parse to native rows, then save valid rows for the Practice Shot Data Gate.</span></div><div class="gdNativePracticeBadge">No Bubble</div></div>
+<textarea class="gdNativePracticeInput" id="gdNativePracticeImportText" spellcheck="false" wrap="off" placeholder="club,carry,total,offline,face,path,start&#10;7 Iron,142,151,-6,1.2,3.1,0.8"></textarea>
+<div class="gdNativePracticeButtons"><button type="button" onclick="gdParseNativePracticeImport()">Parse</button><button class="primary" type="button" id="gdNativePracticeSaveBtn" onclick="gdSaveNativePracticeImport()" disabled>Save valid rows</button><button type="button" onclick="gdRenderNativePracticeImportLane()">Reload saved</button></div>
+<div class="gdNativePracticeSummary" id="gdNativePracticeSummary"></div>
+<div id="gdNativePracticePreview"></div>
+<div id="gdNativePracticeSaved"></div>
 </div>
 <div class="gdPracticeScanner" id="gdPracticeScanner">
 <div class="gdPracticeScanFrame">
@@ -29509,6 +29537,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 <script src="scripts/gd-shot-events.js?v=deliberate-outcome-20260612"></script>
 <script src="scripts/gd-shot-cluster-analysis.js?v=deliberate-outcome-20260612"></script>
 <script src="scripts/gd-launch-monitor-data.js?v=practice-data-20260606"></script>
+<script src="scripts/gd-native-practice-data.js?v=native-practice-data-001"></script>
 <script id="gdCanonicalRouteAuditV1">
 (function(){
   "use strict";
@@ -30345,6 +30374,82 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     gdPracticeImportOpen=!gdPracticeImportOpen;
     try{localStorage.setItem(GD_PRACTICE_IMPORT_OPEN_KEY,gdPracticeImportOpen?"1":"0");}catch(e){}
     gdRenderPracticeImportPanel();
+    return false;
+  }
+  let gdNativePracticeImportPreview=null;
+  function gdNativePracticeApi(){
+    return window.GDPracticeDataImport||window.GolfDaddyNativePracticeData||null;
+  }
+  function gdNativePracticeSample(){
+    return "club,carry,total,offline,face,path,start\n7 Iron,142,151,-6,1.2,3.1,0.8\n7 Iron,146,154,-3,0.9,2.7,0.5\n7 Iron,139,148,-9,1.8,3.5,1.1\n7 Iron,144,152,-4,1.1,2.9,0.6";
+  }
+  function gdNativePracticeMetricHTML(label,value){
+    return `<div class="gdNativePracticeMetric"><span>${gdEscapeHTML(label)}</span><strong>${gdEscapeHTML(value)}</strong></div>`;
+  }
+  function gdNativePracticeRowsTable(rows,opts={}){
+    if(!rows||!rows.length)return `<div class="gdNativePracticeEmpty">${gdEscapeHTML(opts.empty||"No native practice rows yet.")}</div>`;
+    const limited=rows.slice(0,Number(opts.limit)||24);
+    const body=limited.map(row=>{
+      const invalid=Array.isArray(row.errors)&&row.errors.length;
+      const offline=Number.isFinite(Number(row.offlineDistance))?`${Number(row.offlineDistance).toFixed(1)}m`:"-";
+      const carry=Number.isFinite(Number(row.carryDistance))?`${Number(row.carryDistance).toFixed(0)}m`:"-";
+      const total=Number.isFinite(Number(row.totalDistance))?`${Number(row.totalDistance).toFixed(0)}m`:"-";
+      const status=invalid?row.errors.join(", "):(row.status||"native_valid");
+      const unknown=Object.keys(row.unknownFields||{}).join(", ");
+      return `<tr class="${invalid?"invalid":""}"><td>${gdEscapeHTML(row.shotNumber||"-")}</td><td>${gdEscapeHTML(row.club||"-")}</td><td>${gdEscapeHTML(carry)}</td><td>${gdEscapeHTML(total)}</td><td>${gdEscapeHTML(offline)}</td><td>${gdEscapeHTML(row.faceAngle??"-")}</td><td>${gdEscapeHTML(row.pathAngle??"-")}</td><td>${gdEscapeHTML(row.startDirection??"-")}</td><td>${gdEscapeHTML(status)}${unknown?` · unknown: ${gdEscapeHTML(unknown)}`:""}</td></tr>`;
+    }).join("");
+    return `<div class="gdNativePracticeTableWrap"><table class="gdNativePracticeTable"><thead><tr><th>#</th><th>Club</th><th>Carry</th><th>Total</th><th>Offline</th><th>Face</th><th>Path</th><th>Start</th><th>Status</th></tr></thead><tbody>${body}</tbody></table></div>`;
+  }
+  function gdRenderNativePracticeImportLane(){
+    const api=gdNativePracticeApi();
+    const text=byId("gdNativePracticeImportText");
+    const summary=byId("gdNativePracticeSummary");
+    const preview=byId("gdNativePracticePreview");
+    const saved=byId("gdNativePracticeSaved");
+    const saveBtn=byId("gdNativePracticeSaveBtn");
+    if(!summary||!preview||!saved)return;
+    if(text&&!text.value.trim())text.value=gdNativePracticeSample();
+    const savedRows=api&&typeof api.loadNativePracticeShots==="function"?api.loadNativePracticeShots({}):[];
+    const rows=gdNativePracticeImportPreview?.rows||[];
+    const valid=rows.filter(row=>!row.errors?.length).length;
+    const invalid=rows.filter(row=>row.errors?.length).length;
+    summary.innerHTML=[
+      gdNativePracticeMetricHTML("Parsed",rows.length||0),
+      gdNativePracticeMetricHTML("Valid",valid),
+      gdNativePracticeMetricHTML("Saved native",savedRows.length||0)
+    ].join("");
+    preview.innerHTML=rows.length?`<div class="gdNativePracticeHead"><div><strong>Review parsed rows</strong><span>${valid} valid · ${invalid} invalid · save writes only valid rows.</span></div></div>${gdNativePracticeRowsTable(rows,{empty:"No parsed rows."})}`:`<div class="gdNativePracticeEmpty">Paste CSV/text and parse to review native rows.</div>`;
+    saved.innerHTML=`<div class="gdNativePracticeHead"><div><strong>Saved native rows</strong><span>${savedRows.length} rows in gd_native_practice_shot_data_v1.</span></div></div>${gdNativePracticeRowsTable(savedRows.slice().reverse(),{empty:"No saved native practice rows yet.",limit:12})}`;
+    if(saveBtn)saveBtn.disabled=!valid;
+  }
+  function gdParseNativePracticeImport(){
+    const api=gdNativePracticeApi();
+    const text=byId("gdNativePracticeImportText")?.value||"";
+    if(!api||typeof api.parsePracticeImportText!=="function"||typeof api.createPracticeImportBatch!=="function"){
+      gdLmToast("Native Practice Data module is not ready");
+      return false;
+    }
+    const parsed=api.parsePracticeImportText(text,{sourceType:"csv",sourceName:"Practice Data paste"});
+    const batch=api.createPracticeImportBatch(parsed.rows,{sourceType:parsed.sourceType||"csv",sourceName:"Practice Data paste",rawText:text});
+    gdNativePracticeImportPreview=batch;
+    gdRenderNativePracticeImportLane();
+    gdLmToast(`Parsed ${batch.rows.length} native row${batch.rows.length===1?"":"s"}`);
+    return false;
+  }
+  function gdSaveNativePracticeImport(){
+    const api=gdNativePracticeApi();
+    if(!api||typeof api.saveNativePracticeShots!=="function"){
+      gdLmToast("Native Practice Data store is not ready");
+      return false;
+    }
+    if(!gdNativePracticeImportPreview||!gdNativePracticeImportPreview.rows?.length){
+      gdLmToast("Parse rows before saving");
+      return false;
+    }
+    const result=api.saveNativePracticeShots(gdNativePracticeImportPreview);
+    gdNativePracticeImportPreview=null;
+    gdRenderNativePracticeImportLane();
+    gdLmToast(`Saved ${Number(result?.savedCount)||0} native practice row${Number(result?.savedCount)===1?"":"s"}`);
     return false;
   }
   function gdPracticeProjectionControlsHTML(analysis){
@@ -32699,8 +32804,9 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 		    const api=window.GolfDaddyLaunchMonitorData;
 	    if(result)gdRenderPracticeAutoFlow(null);
 	    gdRenderPracticeMasterTolerance();
-	    gdRenderPracticeAdminChrome();
-	    gdRenderPracticeImportPanel();
+    gdRenderPracticeAdminChrome();
+    gdRenderPracticeImportPanel();
+    gdRenderNativePracticeImportLane();
     gdSyncPracticeSampleImportButton();
 	    if(!api||typeof api.analyze!=="function"){
 	      if(visual)visual.innerHTML=practiceSvg({acceptedShots:[],recommendation:{status:"module loading",offsetDeg:0}});
@@ -32709,6 +32815,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	      gdRenderPracticeRecommendations(null);
 	      gdRenderPracticeAutoFlow(null);
 	      gdRenderPracticeImportPanel();
+	      gdRenderNativePracticeImportLane();
 		      if(!skipTolerances&&gdPracticeAdminIsOpen())gdRenderPracticeToleranceControls();
 		      return;
 		    }
@@ -32726,6 +32833,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     gdRenderPracticeRecommendations(analysis);
 	    gdRenderPracticeMasterTolerance();
     gdRenderPracticeAdminChrome();
+    gdRenderNativePracticeImportLane();
     gdRenderPracticeExtractionCheckpoint();
     if(!skipTolerances&&gdPracticeAdminIsOpen())gdRenderPracticeToleranceControls();
   }
