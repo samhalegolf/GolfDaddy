@@ -208,6 +208,156 @@
     return { batch: batch, session: session, rows: nativeRows };
   }
 
+  function splitDelimitedLine(line) {
+    var cells = [];
+    var cell = '';
+    var quoted = false;
+    for (var i = 0; i < line.length; i += 1) {
+      var ch = line.charAt(i);
+      var next = line.charAt(i + 1);
+      if (ch === '"' && quoted && next === '"') {
+        cell += '"';
+        i += 1;
+      } else if (ch === '"') {
+        quoted = !quoted;
+      } else if (ch === ',' && !quoted) {
+        cells.push(cell.trim());
+        cell = '';
+      } else {
+        cell += ch;
+      }
+    }
+    cells.push(cell.trim());
+    return cells;
+  }
+
+  function splitPracticeLine(line, delimiter) {
+    if (delimiter === ',') return splitDelimitedLine(line);
+    return String(line || '').trim().split(/\t|\s{2,}|[|;]/).map(function (cell) { return cell.trim(); });
+  }
+
+  function fieldKey(value) {
+    return String(value || '').trim().toLowerCase().replace(/\([^)]*\)/g, '').replace(/[^a-z0-9]+/g, '');
+  }
+
+  var FIELD_ALIASES = {
+    club: 'club',
+    clubname: 'club',
+    shot: 'shotNumber',
+    shotno: 'shotNumber',
+    shotnumber: 'shotNumber',
+    ball: 'ballSpeed',
+    ballspeed: 'ballSpeed',
+    bs: 'ballSpeed',
+    clubspeed: 'clubSpeed',
+    chs: 'clubSpeed',
+    launch: 'launchAngle',
+    launchangle: 'launchAngle',
+    spin: 'spin',
+    backspin: 'spin',
+    totalspin: 'spin',
+    spinrate: 'spin',
+    carry: 'carryDistance',
+    carrydistance: 'carryDistance',
+    carrym: 'carryDistance',
+    total: 'totalDistance',
+    totaldistance: 'totalDistance',
+    totalm: 'totalDistance',
+    offline: 'offlineDistance',
+    offlinedistance: 'offlineDistance',
+    lr: 'offlineDistance',
+    left: 'offlineDistance',
+    right: 'offlineDistance',
+    side: 'side',
+    face: 'faceAngle',
+    faceangle: 'faceAngle',
+    path: 'pathAngle',
+    pathangle: 'pathAngle',
+    clubpath: 'pathAngle',
+    facetopath: 'faceToPath',
+    f2p: 'faceToPath',
+    start: 'startDirection',
+    startdirection: 'startDirection',
+    curve: 'curve',
+    target: 'targetLine',
+    targetline: 'targetLine'
+  };
+
+  function canonicalField(name) {
+    return FIELD_ALIASES[fieldKey(name)] || '';
+  }
+
+  function looksLikeHeader(cells) {
+    var known = 0;
+    cells.forEach(function (cell) {
+      if (canonicalField(cell)) known += 1;
+    });
+    return known >= 2 || (known >= 1 && cells.some(function (cell) { return /club|carry|total|offline|face|path/i.test(cell); }));
+  }
+
+  function inferHeaders(width) {
+    var defaults = ['club', 'carryDistance', 'totalDistance', 'offlineDistance', 'faceAngle', 'pathAngle', 'startDirection'];
+    var headers = [];
+    for (var i = 0; i < width; i += 1) headers.push(defaults[i] || 'unknown' + (i + 1));
+    return headers;
+  }
+
+  function normalizeHeaderCells(cells) {
+    return cells.map(function (cell, index) {
+      return canonicalField(cell) || ('unknown' + (index + 1));
+    });
+  }
+
+  function parsePracticeImportText(text, opts) {
+    opts = opts || {};
+    var rawText = String(text || '');
+    var lines = rawText.split(/\r?\n/).map(function (line) { return line.trim(); }).filter(Boolean);
+    var warnings = [];
+    if (!lines.length) return { rows: [], warnings: ['empty_input'], sourceType: opts.sourceType || 'text', rawText: rawText };
+    var delimiter = lines.some(function (line) { return line.indexOf(',') !== -1; }) ? ',' : 'auto';
+    var firstCells = splitPracticeLine(lines[0], delimiter);
+    var hasHeader = opts.headers === true || (opts.headers !== false && looksLikeHeader(firstCells));
+    var headers = hasHeader ? normalizeHeaderCells(firstCells) : inferHeaders(firstCells.length);
+    if (!hasHeader) warnings.push('header_inferred');
+    var dataLines = hasHeader ? lines.slice(1) : lines;
+    var rows = dataLines.map(function (line, index) {
+      var cells = splitPracticeLine(line, delimiter);
+      var rawSource = {};
+      var unknownFields = {};
+      var row = {
+        rawSource: {
+          line: line,
+          lineNumber: hasHeader ? index + 2 : index + 1
+        },
+        sourceType: opts.sourceType || 'text'
+      };
+      cells.forEach(function (cell, cellIndex) {
+        var key = headers[cellIndex] || ('unknown' + (cellIndex + 1));
+        rawSource[key] = cell;
+        if (key.indexOf('unknown') === 0) {
+          if (cell) unknownFields[key] = cell;
+          return;
+        }
+        row[key] = cell;
+      });
+      row.rawSource.cells = rawSource;
+      row.unknownFields = unknownFields;
+      row.warnings = Object.keys(unknownFields).length ? ['unknown_fields'] : [];
+      return row;
+    }).filter(function (row) {
+      return Object.keys(row.rawSource.cells || {}).some(function (key) { return cleanString(row.rawSource.cells[key]); });
+    });
+    return {
+      rows: rows,
+      warnings: warnings,
+      sourceType: opts.sourceType || 'text',
+      sourceName: opts.sourceName || '',
+      rawText: rawText,
+      hasHeader: hasHeader,
+      headers: headers
+    };
+  }
+
   function saveNativePracticeShots(batchPayload) {
     var payload = batchPayload || {};
     var store = readStore();
@@ -251,6 +401,7 @@
     activePlayerScope: activePlayerScope,
     normalizeNativeShot: normalizeNativeShot,
     validateNativePracticeShot: validateNativePracticeShot,
+    parsePracticeImportText: parsePracticeImportText,
     createPracticeImportBatch: createPracticeImportBatch,
     saveNativePracticeShots: saveNativePracticeShots,
     loadNativePracticeShots: loadNativePracticeShots,
