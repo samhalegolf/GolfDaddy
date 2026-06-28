@@ -928,8 +928,13 @@
         var args=arguments;
         var opts=args&&args[0]||{};
         var course=opts&&opts.course;
+        recordDebugEvent("automapper-started",{source:"automap"});
         var result=originalAutoMap.apply(this,args);
-        var ingest=function(){safe(function(){recordDebugEvent("automapper-ingest-started",{source:"automap"});ingestCourseLibraryCourse(course||resolveCourseFromLibrary(null),{source:"automap"});});};
+        var ingest=function(){safe(function(){
+          recordDebugEvent("automapper-ingest-started",{source:"automap"});
+          var state=ingestCourseLibraryCourse(course||resolveCourseFromLibrary(null),{source:"automap"});
+          recordDebugEvent("automapper-completed",{courseId:state&&state.courseId,courseName:state&&state.courseName,status:state&&state.status,holesScanned:state&&state.adapter&&state.adapter.holesChecked,holesSaved:state&&state.adapter&&state.adapter.holesIngested,source:"automap"});
+        });};
         if(result&&typeof result.then==="function")return result.finally(ingest);
         setTimeout(ingest,0);
         return result;
@@ -998,12 +1003,19 @@
       };
     });
     var syncQueue=getCoursePlaySyncQueue();
+    var timeline=loadDebugLog();
+    var adapter=course.adapter||{};
+    var lastAutoEvent=timeline.slice().reverse().filter(function(event){return /^automapper/.test(String(event&&event.type||""));})[0]||null;
+    var automapperStatus=adapter.holesChecked?"complete":lastAutoEvent&&lastAutoEvent.type==="automapper-started"?"running":lastAutoEvent&&lastAutoEvent.type==="automapper-ingest-started"?"running":lastAutoEvent&&lastAutoEvent.type==="automapper-completed"?"complete":"unknown";
     return {
       generatedAt:now(),
       storageKeys:{pipeline:STORE_KEY,frameIndex:FRAME_INDEX_KEY,syncQueue:SYNC_QUEUE_KEY,debugLog:DEBUG_LOG_KEY},
       activeCourseKey:course.courseKey||course.courseId,
       activeCourseName:course.courseName,
       activeHole:activeHoleFromApp(),
+      automapperStatus:automapperStatus,
+      holesScanned:Number(adapter.holesChecked||0)||rows.length,
+      holesSaved:Number(adapter.holesIngested||0)||rows.filter(function(row){return row.hasTee||row.hasGreen||row.hasRoute;}).length,
       pipelineCourseStatus:course.status,
       totalHolesKnown:rows.length,
       holesWithPlayDataReady:rows.filter(function(row){return row.pipelineState===HOLE_STATES.play_data_ready;}).length,
@@ -1011,7 +1023,7 @@
       holesWithCapturedManifestsPresent:rows.filter(function(row){return row.capturedManifestPresent;}).length,
       syncQueueItemCount:(syncQueue.items||[]).length,
       rows:rows,
-      timeline:loadDebugLog()
+      timeline:timeline
     };
   }
 

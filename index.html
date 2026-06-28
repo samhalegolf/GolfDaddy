@@ -1964,6 +1964,20 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
     .gdCoursePlayDebugEvent{padding:5px 0;border-bottom:1px solid rgba(255,255,255,.05)}
     .gdCoursePlayDebugEvent:last-child{border-bottom:0}
     .gdCoursePlayDebugEmpty{padding:9px;border-radius:12px;background:rgba(0,0,0,.16);color:rgba(255,255,255,.58);font-size:11px;font-weight:850}
+    #gdCoursePlayMonitor{display:none;position:fixed;left:max(10px,env(safe-area-inset-left));bottom:calc(max(10px,env(safe-area-inset-bottom)) + 10px);z-index:2600;width:min(318px,calc(100vw - 20px));max-height:min(46vh,360px);overflow:hidden;padding:10px 11px;border-radius:16px;background:rgba(5,13,9,.90);border:1px solid rgba(31,211,109,.24);box-shadow:0 18px 42px rgba(0,0,0,.38);backdrop-filter:blur(12px);color:#fff;pointer-events:none;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif}
+    body.gdCoursePlayDebugOn #gdCoursePlayMonitor{display:block}
+    #gdCoursePlayMonitor .gdCpmHead{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin-bottom:7px}
+    #gdCoursePlayMonitor .gdCpmHead strong{font-size:13px;font-weight:950;line-height:1.05}
+    #gdCoursePlayMonitor .gdCpmHead span{display:block;margin-top:2px;color:rgba(255,255,255,.58);font-size:10px;font-weight:850;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:205px}
+    #gdCoursePlayMonitor .gdCpmBadge{border-radius:999px;padding:3px 7px;background:rgba(31,211,109,.14);border:1px solid rgba(31,211,109,.24);color:#8dffbc;font-size:9px;font-weight:950;text-transform:uppercase;letter-spacing:.05em}
+    #gdCoursePlayMonitor .gdCpmGrid{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:7px}
+    #gdCoursePlayMonitor .gdCpmMetric{min-width:0;padding:6px 7px;border-radius:10px;background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.065)}
+    #gdCoursePlayMonitor .gdCpmMetric span{display:block;color:rgba(255,255,255,.48);font-size:8px;font-weight:950;text-transform:uppercase;letter-spacing:.055em}
+    #gdCoursePlayMonitor .gdCpmMetric strong{display:block;margin-top:2px;color:#fff;font-size:12px;font-weight:950;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    #gdCoursePlayMonitor .gdCpmLast{margin:0 0 6px;color:rgba(255,255,255,.74);font-size:10px;font-weight:850;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    #gdCoursePlayMonitor .gdCpmEvents{max-height:96px;overflow:hidden;border-top:1px solid rgba(255,255,255,.08);padding-top:5px}
+    #gdCoursePlayMonitor .gdCpmEvent{color:rgba(255,255,255,.66);font:800 10px/1.35 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    @media(max-width:520px){#gdCoursePlayMonitor{left:8px;bottom:calc(max(8px,env(safe-area-inset-bottom)) + 8px);width:min(286px,calc(100vw - 16px));padding:9px}#gdCoursePlayMonitor .gdCpmGrid{grid-template-columns:1fr 1fr}#gdCoursePlayMonitor .gdCpmMetric{padding:5px 6px}#gdCoursePlayMonitor .gdCpmHead span{max-width:170px}}
     .gdLmActions{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px}
     .gdLmActions button{border-radius:14px;padding:11px 10px;background:rgba(255,255,255,.09);font-size:13px}
     .gdLmActions .primary{background:linear-gradient(180deg,#d7b06b,#c58d35);color:#071008}
@@ -5918,6 +5932,7 @@ function gdSetCoursePlayDebug(enabled){
   try{localStorage.setItem("gd_course_play_debug_enabled",enabled?"1":"0");}catch(e){}
   try{document.body.classList.toggle("gdCoursePlayDebugOn",!!enabled);}catch(e){}
   gdRenderCoursePlayPipelineDebug();
+  gdRenderCoursePlayMonitor();
 }
 function gdCoursePlayDebugFlag(value){
   return `<span class="gdCoursePlayDebugFlag ${value?'ok':'bad'}">${value?'Yes':'No'}</span>`;
@@ -5931,6 +5946,76 @@ function gdCoursePlayDebugTime(value){
 }
 function gdCoursePlayDebugMetric(label,value){
   return `<div class="gdCoursePlayDebugMetric"><span>${gdEscapeHTML(label)}</span><strong>${gdEscapeHTML(value ?? "")}</strong></div>`;
+}
+function gdCoursePlayMonitorMetric(label,value){
+  return `<div class="gdCpmMetric"><span>${gdEscapeHTML(label)}</span><strong>${gdEscapeHTML(value ?? "")}</strong></div>`;
+}
+function gdCoursePlayMonitorEventText(event){
+  const type=String(event?.type||"event");
+  const hole=event?.holeNumber?`Hole ${event.holeNumber} `:"";
+  const labels={
+    "automapper-started":"AutoMapper started",
+    "automapper-ingest-started":"AutoMapper saving geometry",
+    "automapper-completed":"AutoMapper complete",
+    "course-opened":"Course opened",
+    "course-library-ingested-hole":`${hole}geometry saved`,
+    "pipeline-record-saved":`${hole}play data ready`,
+    "pipeline-course-ingested":"Course saved",
+    "frame-index-saved":`${hole}frame saved`,
+    "captured-manifest-registered":`${hole}manifest registered`,
+    "gps-play-requested-hole":`${hole}requested`,
+    "gps-play-loaded-existing-frame":`${hole}loaded saved frame`,
+    "gps-play-loaded-from-existing-frame":`${hole}loaded captured frame`,
+    "gps-play-generated-new-frame":`${hole}frame generated`,
+    "gps-play-rendered-frame":`${hole}rendered frame`,
+    "gps-play-showed-loading":`${hole}loading frame`,
+    "gps-play-fell-to-unavailable":`${hole}frame unavailable`,
+    "gps-play-data-ready-no-manifest":`${hole}ready, manifest missing`,
+    "debug-log-cleared":"Debug log cleared"
+  };
+  return labels[type]||[type.replace(/-/g," "),event?.courseName||"",event?.status||event?.reason||""].filter(Boolean).join(" · ");
+}
+function gdEnsureCoursePlayMonitor(){
+  let el=document.getElementById("gdCoursePlayMonitor");
+  if(!el&&document.body){
+    el=document.createElement("div");
+    el.id="gdCoursePlayMonitor";
+    el.setAttribute("aria-live","polite");
+    el.setAttribute("role","status");
+    document.body.appendChild(el);
+  }
+  return el;
+}
+function gdRenderCoursePlayMonitor(){
+  try{document.body.classList.toggle("gdCoursePlayDebugOn",gdCoursePlayDebugEnabled());}catch(e){}
+  const enabled=gdCoursePlayDebugEnabled();
+  const el=enabled?gdEnsureCoursePlayMonitor():document.getElementById("gdCoursePlayMonitor");
+  if(!el)return;
+  if(!enabled){el.innerHTML="";return;}
+  const api=window.GDCoursePlayPipeline;
+  if(!api||typeof api.buildDebugSnapshot!=="function"){
+    el.innerHTML='<div class="gdCpmHead"><div><strong>Course Play Monitor</strong><span>Waiting for pipeline</span></div><div class="gdCpmBadge">Debug</div></div>';
+    return;
+  }
+  const snap=api.buildDebugSnapshot();
+  const events=(Array.isArray(snap.timeline)?snap.timeline:[]).slice(-8).reverse();
+  const last=events[0];
+  const courseName=String(snap.activeCourseName||snap.activeCourseKey||"Course").replace(/\s+Golf\s+Club$/i,"");
+  el.innerHTML=[
+    `<div class="gdCpmHead"><div><strong>Course Play Monitor</strong><span>${gdEscapeHTML(courseName)}</span></div><div class="gdCpmBadge">${gdEscapeHTML(snap.automapperStatus||"debug")}</div></div>`,
+    `<div class="gdCpmGrid">${[
+      gdCoursePlayMonitorMetric("Active hole","H"+(snap.activeHole||"")),
+      gdCoursePlayMonitorMetric("AutoMapper",snap.automapperStatus||"unknown"),
+      gdCoursePlayMonitorMetric("Holes scanned",snap.holesScanned||0),
+      gdCoursePlayMonitorMetric("Holes saved",snap.holesSaved||0),
+      gdCoursePlayMonitorMetric("Play data ready",snap.holesWithPlayDataReady||0),
+      gdCoursePlayMonitorMetric("Frames ready",snap.holesWithFrameIndexEntries||0),
+      gdCoursePlayMonitorMetric("Manifest present",snap.holesWithCapturedManifestsPresent||0),
+      gdCoursePlayMonitorMetric("Sync queue",snap.syncQueueItemCount||0)
+    ].join("")}</div>`,
+    `<div class="gdCpmLast">Last event: ${gdEscapeHTML(last?gdCoursePlayMonitorEventText(last):"Waiting")}</div>`,
+    `<div class="gdCpmEvents">${events.map(event=>`<div class="gdCpmEvent">${gdEscapeHTML(gdCoursePlayDebugTime(event.at))} ${gdEscapeHTML(gdCoursePlayMonitorEventText(event))}</div>`).join("")||'<div class="gdCpmEvent">No events yet</div>'}</div>`
+  ].join("");
 }
 function gdRenderCoursePlayPipelineDebug(){
   const summary=document.getElementById("gdCoursePlayDebugSummary");
@@ -5989,6 +6074,7 @@ function gdClearCoursePlayPipelineDebug(){
   try{window.GDCoursePlayPipeline?.clearDebugTimeline?.();}catch(e){}
   try{window.__gdClearCoursePlayDebugLog?.();}catch(e){}
   gdRenderCoursePlayPipelineDebug();
+  gdRenderCoursePlayMonitor();
 }
 function devMerge(base,patch){const out=devClone(base);function walk(t,s){Object.keys(s||{}).forEach(k=>{if(s[k]&&typeof s[k]==="object"&&!Array.isArray(s[k])){t[k]=t[k]||{};walk(t[k],s[k]);}else{t[k]=s[k];}})}walk(out,patch);return out;}
 let devSettings=devClone(DEV_DEFAULTS);
@@ -6067,9 +6153,11 @@ window.gdTogglePreLockBlackoutFrame=gdTogglePreLockBlackoutFrame;
 window.gdRenderCoursePlayPipelineDebug=gdRenderCoursePlayPipelineDebug;
 window.gdSetCoursePlayDebug=gdSetCoursePlayDebug;
 window.gdClearCoursePlayPipelineDebug=gdClearCoursePlayPipelineDebug;
+window.gdRenderCoursePlayMonitor=gdRenderCoursePlayMonitor;
 try{document.body.classList.toggle("gdCoursePlayDebugOn",gdCoursePlayDebugEnabled());}catch(e){}
-window.addEventListener("gd-course-play-debug-event",()=>{if(document.getElementById("developerPanel")?.classList.contains("open"))gdRenderCoursePlayPipelineDebug();});
-setInterval(()=>{if(document.getElementById("developerPanel")?.classList.contains("open"))gdRenderCoursePlayPipelineDebug();},2200);
+gdRenderCoursePlayMonitor();
+window.addEventListener("gd-course-play-debug-event",()=>{if(document.getElementById("developerPanel")?.classList.contains("open"))gdRenderCoursePlayPipelineDebug();gdRenderCoursePlayMonitor();});
+setInterval(()=>{if(document.getElementById("developerPanel")?.classList.contains("open"))gdRenderCoursePlayPipelineDebug();gdRenderCoursePlayMonitor();},2200);
 
 function gdLmMetric(rawLabel,candidateMetric,value,unit="m",confidence=.84){
   return {rawLabel,candidateMetric,rawValue:String(value),value,unit,confidence};
