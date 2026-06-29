@@ -5692,14 +5692,25 @@ body[data-gd-permission="admin"] #gdV62Home .gdHomeAdminSettings{display:inline-
 <div class="gdPracticeImportBody">
 <label class="gdUploadFileButton" id="gdPracticeUploadLabel" for="gdPracticeUploadInput" onclick="gdNativePracticeTextFilePickerClicked()">Upload text file</label>
 <input class="gdUploadFileInput" id="gdPracticeUploadInput" type="file" accept=".txt,.csv,.json,text/plain,text/csv,application/json">
-<label class="gdUploadFileButton" id="gdPracticePhotoLabel" for="gdPracticePhotoInput" onclick="return gdPickPracticePhotoFile(event,'photo')">Upload photo</label>
+<label class="gdUploadFileButton" id="gdPracticePhotoLabel" for="gdPracticePhotoInput" onclick="window.gdPracticePhotoImportClick&&window.gdPracticePhotoImportClick('photo')">Upload photo</label>
 <input class="gdUploadFileInput" id="gdPracticePhotoInput" type="file" accept="image/*">
-<label class="gdUploadFileButton primary" id="gdPracticeCameraLabel" for="gdPracticeCameraInput" onclick="return gdPickPracticePhotoFile(event,'camera')">Take photo</label>
+<label class="gdUploadFileButton primary" id="gdPracticeCameraLabel" for="gdPracticeCameraInput" onclick="window.gdPracticePhotoImportClick&&window.gdPracticePhotoImportClick('camera')">Take photo</label>
 <input class="gdUploadFileInput" id="gdPracticeCameraInput" type="file" accept="image/*" capture="environment">
 <button class="gdUploadFileButton" id="gdPracticeLoadExtracted7iBtn" type="button" onclick="gdLoadExtractedPractice7iData()" hidden>Import extracted 7i scan</button>
 <div class="gdNativePracticeImport" id="gdNativePracticeImportLane">
 <div class="gdNativePracticeHead"><div><strong>Native Practice Data Import</strong><span>Paste reviewed practice shots, parse to native rows, then save valid rows for the Practice Shot Data Gate.</span></div><div class="gdNativePracticeBadge">No Bubble</div></div>
 <div id="gdNativePracticeFeedback"></div>
+<script>
+window.gdPracticePhotoImportClick=function(mode){
+  const isCamera=mode==="camera";
+  const feedback=document.getElementById("gdNativePracticeFeedback");
+  const now=new Date().toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"});
+  if(feedback){
+    feedback.innerHTML='<div class="gdNativePracticeFeedback"><div class="gdNativePracticeFeedbackHead"><div><span>Import Status</span><strong>Photo picker opened</strong></div><b class="gdNativePracticeStatusPill photo_selected">PHOTO</b></div><div class="gdNativePracticeFeedbackGrid"><div class="gdNativePracticeFeedbackItem"><span>Status</span><strong>Photo selected</strong></div><div class="gdNativePracticeFeedbackItem"><span>Last action</span><strong>'+(isCamera?"Take photo clicked":"Upload photo clicked")+'</strong></div><div class="gdNativePracticeFeedbackItem"><span>Parsed rows</span><strong>0</strong></div><div class="gdNativePracticeFeedbackItem"><span>Valid rows</span><strong>0</strong></div><div class="gdNativePracticeFeedbackItem"><span>Invalid rows</span><strong>0</strong></div><div class="gdNativePracticeFeedbackItem"><span>Updated</span><strong>'+now+'</strong></div></div><div class="gdNativePracticeFeedbackLists"><div class="warn"><b>Warnings:</b> Photo import placeholder only. Native photo extraction is not connected yet.</div><div class="error"><b>Errors:</b> none</div><div><b>Next step:</b> Choose a photo, then use the scan controls, or paste CSV/text for native saving.</div></div></div>';
+  }
+  return true;
+};
+</script>
 <textarea class="gdNativePracticeInput" id="gdNativePracticeImportText" spellcheck="false" wrap="off" oninput="gdNativePracticePasteChanged()" placeholder="club,carry,total,offline,face,path,start&#10;7 Iron,142,151,-6,1.2,3.1,0.8"></textarea>
 <div class="gdNativePracticeButtons"><button type="button" onclick="gdParseNativePracticeImport()">Parse pasted text</button><button class="primary" type="button" id="gdNativePracticeSaveBtn" onclick="gdSaveNativePracticeImport()" disabled>Save valid rows</button><button type="button" onclick="gdClearNativePracticePaste()">Clear</button></div>
 <div class="gdNativePracticeSummary" id="gdNativePracticeSummary"></div>
