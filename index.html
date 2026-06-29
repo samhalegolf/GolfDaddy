@@ -557,20 +557,27 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 		      });
 		    }
 		  }
+		  function prebuildAdapterFailure(step,reason,extra){
+		    step=String(step||"manifest_build_failed");
+		    reason=String(reason||step);
+		    var transient=/map|engine|tile|projection|storage|registration|timeout|unavailable|not_ready|returned_null|missing/i.test(step+" "+reason);
+		    return Object.assign({ok:false,status:"failed",step:step,reason:reason,transient:transient},extra||{});
+		  }
 		  function buildCaptureManifestForHoleData(courseRef,holeNumber,holePlayData,opts){
-		    if(!hasMap())return null;
 		    opts=opts||{};
+		    if(!hasMap())return prebuildAdapterFailure("map_engine_unavailable","active map engine unavailable",{courseRef:courseRef,holeNumber:holeNumber,transient:true});
 		    var data=holePlayData&&holePlayData.data?holePlayData.data:holePlayData||{};
 		    var ctx=explicitCoursePlayContext(courseRef,holeNumber,holePlayData,opts);
 		    var bounds=opts.objectBounds&&validBounds(opts.objectBounds)?opts.objectBounds:coursePlayGreenBounds(data);
-		    if(!validBounds(bounds))return null;
+		    if(!validBounds(bounds))return prebuildAdapterFailure("bounds_invalid","course play bounds invalid",{courseKey:ctx.courseKey,courseName:ctx.courseName,holeNumber:ctx.holeNumber,transient:false});
 		    var reason=opts.reason||"course-play-frame-prebuild";
 		    var z=preferredCaptureZoom();
 		    var points=captureSurfacePointsForData(bounds,data,reason);
+		    if(!points.length)return prebuildAdapterFailure("projection_points_missing","no capture points available",{courseKey:ctx.courseKey,courseName:ctx.courseName,holeNumber:ctx.holeNumber,transient:false});
 		    var pins=captureAnchorPinsForData(data);
 		    var bleed=/lock|zoom/i.test(String(reason))?2100:2800;
 		    var rect=pixelRectFor(points,z,bleed);
-		    if(!rect)return null;
+		    if(!rect)return prebuildAdapterFailure("projection_rect_missing","map projection did not return a capture rect",{courseKey:ctx.courseKey,courseName:ctx.courseName,holeNumber:ctx.holeNumber,transient:true});
 		    while(z>18&&tileCountFor(rect)>320){
 		      z-=1;
 		      rect=pixelRectFor(points,z,bleed);
@@ -578,6 +585,7 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 		    var origin={x:rect.minX,y:rect.minY};
 		    var width=Math.max(256,rect.maxX-rect.minX),height=Math.max(256,rect.maxY-rect.minY);
 		    var layer=tileLayer(),tiles=[];
+		    if(!layer||typeof layer.getTileUrl!=="function")return prebuildAdapterFailure("tile_layer_unavailable","capture tile layer unavailable",{courseKey:ctx.courseKey,courseName:ctx.courseName,holeNumber:ctx.holeNumber,transient:true});
 		    if(layer&&typeof layer.getTileUrl==="function"){
 		      var minTx=Math.floor(rect.minX/256),maxTx=Math.floor((rect.maxX-1)/256),minTy=Math.floor(rect.minY/256),maxTy=Math.floor((rect.maxY-1)/256);
 		      for(var ty=minTy;ty<=maxTy;ty++){
@@ -587,13 +595,16 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 		        }
 		      }
 		    }
+		    if(!tiles.length)return prebuildAdapterFailure("tile_urls_empty","capture tile layer returned no tile urls",{courseKey:ctx.courseKey,courseName:ctx.courseName,holeNumber:ctx.holeNumber,transient:true});
 		    var key=storageKeyFor(ctx.courseKey,ctx.holeNumber);
 		    var manifest={version:VERSION,key:key,storageKey:key,reason:reason,surfaceModel:"captured-surface-v1",interactionOwner:"captured-surface",liveMapRole:"capture-source-diagnostic-reference",courseKey:ctx.courseKey,courseName:ctx.courseName,holeNumber:ctx.holeNumber,captureZoom:z,imageWidth:width,imageHeight:height,originPx:origin,tiles:tiles,includeTee:!!pins.tee,teeLatLng:pins.tee||null,anchorPins:pins,createdAt:new Date().toISOString()};
 		    var snapshot=capturedSurfacePrebuildSnapshot();
 		    manifest=safe(function(){return typeof window.gdCapturedSurfaceWriteScan==="function"?window.gdCapturedSurfaceWriteScan(manifest,{reason:reason,storageKey:key,courseKey:ctx.courseKey,holeNumber:ctx.holeNumber}):manifest;},manifest)||manifest;
 		    safe(function(){localStorage.setItem(key,JSON.stringify(manifest));});
 		    restoreCapturedSurfacePrebuildSnapshot(snapshot);
-		    return manifest;
+		    var stored=safe(function(){return JSON.parse(localStorage.getItem(key)||"null");},null);
+		    if(!stored||!Array.isArray(stored.tiles)||!stored.originPx)return prebuildAdapterFailure("manifest_storage_write_failed","captured manifest storage write failed",{courseKey:ctx.courseKey,courseName:ctx.courseName,holeNumber:ctx.holeNumber,manifestKey:key,transient:true});
+		    return {ok:true,status:"manifest_written",step:"manifest_written",manifest:manifest,manifestKey:key,courseKey:ctx.courseKey,courseName:ctx.courseName,holeNumber:ctx.holeNumber,tileCount:tiles.length,captureZoom:z};
 		  }
 		  function loadCaptureManifest(){
 	    if(captureManifest&&manifestMatchesActive(captureManifest))return publishCaptureManifest(captureManifest);
@@ -917,17 +928,20 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 		  function gdPrebuildCoursePlayFrameManifest(courseRef,holeNumber,holePlayData,opts){
 		    opts=opts||{};
 		    var data=holePlayData&&holePlayData.data?holePlayData.data:holePlayData;
-		    if(!data)return null;
 		    var ctx=explicitCoursePlayContext(courseRef,holeNumber,holePlayData,opts);
-		    var manifest=buildCaptureManifestForHoleData(courseRef,ctx.holeNumber,data,Object.assign({},opts,{courseKey:ctx.courseKey,courseName:ctx.courseName,holeNumber:ctx.holeNumber,reason:opts.reason||"course-play-frame-prebuild"}));
-		    if(!manifest)return null;
+		    if(!data)return prebuildAdapterFailure("hole_play_data_missing","course play hole data missing",{courseKey:ctx.courseKey,courseName:ctx.courseName,holeNumber:ctx.holeNumber,transient:false});
+		    var built=buildCaptureManifestForHoleData(courseRef,ctx.holeNumber,data,Object.assign({},opts,{courseKey:ctx.courseKey,courseName:ctx.courseName,holeNumber:ctx.holeNumber,reason:opts.reason||"course-play-frame-prebuild"}));
+		    if(!built)return prebuildAdapterFailure("manifest_build_returned_null","manifest build returned null",{courseKey:ctx.courseKey,courseName:ctx.courseName,holeNumber:ctx.holeNumber,transient:true});
+		    if(built.ok===false)return built;
+		    var manifest=built.manifest||built;
 		    var frame=gdRegisterCoursePlayFrameManifest(manifest,{courseRef:courseRef||ctx.courseKey,courseId:ctx.courseKey,holeNumber:ctx.holeNumber,generatedFrom:"v19-captured-surface-prebuild",manifestKey:manifest.key||manifest.storageKey,status:"prebuilt",cacheStatus:"local-prebuilt"});
 		    safe(function(){
 		      if(window.GDCoursePlayPipeline&&typeof window.GDCoursePlayPipeline.recordDebugEvent==="function"){
 		        window.GDCoursePlayPipeline.recordDebugEvent("frame-prebuild-manifest-built",{courseId:ctx.courseKey,courseName:ctx.courseName,holeNumber:ctx.holeNumber,manifestKey:manifest.key||manifest.storageKey,tileCount:(manifest.tiles||[]).length,captureZoom:manifest.captureZoom,source:opts.source||"v19-prebuild"});
 		      }
 		    });
-		    return Object.assign({status:"complete",manifestKey:manifest.key||manifest.storageKey,frameIndexKey:frame&&frame.frameIndexKey||null},manifest);
+		    if(!frame)return Object.assign({},built,{ok:true,status:"manifest_written",step:"frame_index_registration_failed",reason:"registration_returned_null",transient:true,manifest:manifest,manifestKey:manifest.key||manifest.storageKey,frameIndexRegistered:false});
+		    return Object.assign({},built,{ok:true,status:"complete",step:"frame_index_registered",manifest:manifest,manifestKey:manifest.key||manifest.storageKey,frameIndexKey:frame&&frame.frameIndexKey||null,frameIndexRegistered:!!frame});
 		  }
 		  window.gdRenderCoursePlayHoleFrame=gdRenderCoursePlayHoleFrame;
 		  window.gdEnsureCoursePlayFrameRendered=gdEnsureCoursePlayFrameRendered;
@@ -2187,7 +2201,7 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
     .gdAdminCourseDetailHead h4{margin:0;color:#fff;font-size:15px;font-weight:950}
     .gdAdminCourseDetailHead span{display:block;margin-top:3px;color:rgba(255,255,255,.58);font-size:10px;font-weight:800;line-height:1.3}
     .gdAdminCourseHoleScroll{overflow:auto;border-radius:13px;border:1px solid rgba(255,255,255,.08);background:rgba(0,0,0,.16)}
-    .gdAdminCourseHoleTable{min-width:900px;width:100%;border-collapse:collapse;font:800 10px/1.3 ui-monospace,SFMono-Regular,Menlo,monospace;color:rgba(255,255,255,.76)}
+    .gdAdminCourseHoleTable{min-width:1080px;width:100%;border-collapse:collapse;font:800 10px/1.3 ui-monospace,SFMono-Regular,Menlo,monospace;color:rgba(255,255,255,.76)}
     .gdAdminCourseHoleTable th,.gdAdminCourseHoleTable td{padding:7px 8px;border-bottom:1px solid rgba(255,255,255,.06);text-align:left;vertical-align:top}
     .gdAdminCourseHoleTable th{position:sticky;top:0;background:#15120d;color:rgba(255,255,255,.56);font-size:9px;text-transform:uppercase;letter-spacing:.05em;z-index:1}
     .gdAdminPayloadPreview{display:none;margin-top:8px;padding:9px;border-radius:13px;background:rgba(0,0,0,.28);border:1px solid rgba(255,255,255,.08);max-height:280px;overflow:auto;color:rgba(255,255,255,.80);font:800 10px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;overflow-wrap:anywhere}
@@ -6242,7 +6256,17 @@ function gdAdminCourseDbHoleRows(course){
 	    const anchors=hole.frameAnchors||{};
 	    const presentation=hole.presentation||{};
 	    const manifestKey=frame&&frame.manifestKey||frame&&frame.capturedManifestKey||presentation.capturedManifestKey||null;
-	    const framePrebuild=[presentation.framePrebuildStatus,presentation.framePrebuildLastError].filter(Boolean).join(" - ");
+	    const frameIndexKey=frame&&frame.frameIndexKey||presentation.frameIndexKey||presentation.framePrebuildFrameIndexKey||"";
+	    const prebuildStatus=presentation.framePrebuildStatus||"not_started";
+	    const prebuildDetail=[
+	      prebuildStatus,
+	      presentation.framePrebuildLastStep&&`step ${presentation.framePrebuildLastStep}`,
+	      presentation.framePrebuildRetryCount?`retry ${presentation.framePrebuildRetryCount}`:"",
+	      presentation.framePrebuildManifestKey&&`manifest ${presentation.framePrebuildManifestKey}`,
+	      presentation.framePrebuildFrameIndexKey&&`frame ${presentation.framePrebuildFrameIndexKey}`,
+	      presentation.framePrebuildLastAt&&`at ${gdCoursePlayDebugTime(presentation.framePrebuildLastAt)}`,
+	      presentation.framePrebuildLastError&&`error ${presentation.framePrebuildLastError}`
+	    ].filter(Boolean).join(" · ");
 	    return {
 	      holeNumber:number,
 	      status:hole.status||"unknown",
@@ -6251,10 +6275,12 @@ function gdAdminCourseDbHoleRows(course){
       hasRoute:!!(hole.routePoints&&hole.routePoints.length>=2),
       hasFrameAnchor:!!(anchors.tee&&anchors.green&&(anchors.route&&anchors.route.length>=2||hole.routePoints&&hole.routePoints.length>=2)),
       hasFrameIndex:!!frame,
+	      frameIndexKey:frameIndexKey,
 	      hasManifest:gdAdminCourseDbManifestPresent(manifestKey),
 	      manifestKey:manifestKey,
 	      source:[hole.source,frame&&frame.generatedFrom].filter(Boolean).join(" / ")||"unknown",
-	      confidence:[hole.confidence,framePrebuild&&`Frame prebuild: ${framePrebuild}`].filter(Boolean).join(" · "),
+	      confidence:hole.confidence||"",
+	      prebuild:prebuildDetail,
 	      syncStatus:hole.syncStatus||"local",
 	      updatedAt:hole.updatedAt||frame&&frame.updatedAt||""
 	    };
@@ -6350,7 +6376,7 @@ function gdRenderAdminCourseDatabase(){
       gdAdminCourseDbMetric("Manifest count",selected.manifestCount),
       gdAdminCourseDbMetric("Updated",gdCoursePlayDebugTime(selected.updatedAt)||"")
     ].join("")}</div>`,
-    rows.length?`<div class="gdAdminCourseHoleScroll"><table class="gdAdminCourseHoleTable"><thead><tr><th>Hole</th><th>State</th><th>Tee</th><th>Green</th><th>Route</th><th>Frame anchor</th><th>Frame index</th><th>Manifest</th><th>Source / confidence</th><th>Sync</th><th>Updated</th></tr></thead><tbody>${rows.map(row=>`<tr><td>H${gdEscapeHTML(row.holeNumber)}</td><td>${gdEscapeHTML(row.status)}</td><td>${gdAdminCourseDbFlag(row.hasTee)}</td><td>${gdAdminCourseDbFlag(row.hasGreen)}</td><td>${gdAdminCourseDbFlag(row.hasRoute)}</td><td>${gdAdminCourseDbFlag(row.hasFrameAnchor)}</td><td>${gdAdminCourseDbFlag(row.hasFrameIndex)}</td><td>${gdAdminCourseDbFlag(row.hasManifest)}<br>${gdEscapeHTML(row.manifestKey||"")}</td><td>${gdEscapeHTML(row.source)}<br>${gdEscapeHTML(row.confidence)}</td><td>${gdEscapeHTML(row.syncStatus)}</td><td>${gdEscapeHTML(gdCoursePlayDebugTime(row.updatedAt))}</td></tr>`).join("")}</tbody></table></div>`:'<div class="gdCoursePlayDebugEmpty">No holes found for this course yet.</div>',
+    rows.length?`<div class="gdAdminCourseHoleScroll"><table class="gdAdminCourseHoleTable"><thead><tr><th>Hole</th><th>State</th><th>Tee</th><th>Green</th><th>Route</th><th>Frame anchor</th><th>Frame index</th><th>Manifest</th><th>Prebuild</th><th>Source / confidence</th><th>Sync</th><th>Updated</th></tr></thead><tbody>${rows.map(row=>`<tr><td>H${gdEscapeHTML(row.holeNumber)}</td><td>${gdEscapeHTML(row.status)}</td><td>${gdAdminCourseDbFlag(row.hasTee)}</td><td>${gdAdminCourseDbFlag(row.hasGreen)}</td><td>${gdAdminCourseDbFlag(row.hasRoute)}</td><td>${gdAdminCourseDbFlag(row.hasFrameAnchor)}</td><td>${gdAdminCourseDbFlag(row.hasFrameIndex)}<br>${gdEscapeHTML(row.frameIndexKey||"")}</td><td>${gdAdminCourseDbFlag(row.hasManifest)}<br>${gdEscapeHTML(row.manifestKey||"")}</td><td>${gdEscapeHTML(row.prebuild||"not_started")}</td><td>${gdEscapeHTML(row.source)}<br>${gdEscapeHTML(row.confidence)}</td><td>${gdEscapeHTML(row.syncStatus)}</td><td>${gdEscapeHTML(gdCoursePlayDebugTime(row.updatedAt))}</td></tr>`).join("")}</tbody></table></div>`:'<div class="gdCoursePlayDebugEmpty">No holes found for this course yet.</div>',
     `<pre class="gdAdminPayloadPreview" id="gdAdminCourseDbPayload">${gdEscapeHTML(JSON.stringify(payload,null,2))}</pre>`
   ].join("");
 }
@@ -6373,6 +6399,10 @@ function gdCoursePlayMonitorEventText(event){
 	    "frame-prebuild-queued":`Frame prebuild queued: ${event?.holesQueued ?? ""} holes`,
 	    "frame-prebuild-started":`${hole}prebuild started`,
 	    "frame-prebuild-manifest-built":`${hole}manifest prebuilt`,
+	    "frame-prebuild-manifest-written":`${hole}manifest written`,
+	    "frame-prebuild-frame-index-registered":`${hole}frame index registered`,
+	    "recovered-frame-index-from-manifest":`${hole}frame index recovered from manifest`,
+	    "frame-prebuild-retry-pending":`${hole}retry ${event?.retryCount ?? ""}: ${event?.step || event?.reason || "pending"}`,
 	    "frame-prebuild-hole-complete":`${hole}frame prebuilt`,
 	    "frame-prebuild-hole-failed":`${hole}prebuild failed`,
 	    "frame-prebuild-skipped":`${hole}prebuild skipped`,
@@ -6429,7 +6459,9 @@ function gdRenderCoursePlayMonitor(){
 	  const events=(Array.isArray(snap.timeline)?snap.timeline:[]).slice(-8).reverse();
 	  const last=events[0];
 	  const courseName=String(snap.activeCourseName||snap.activeCourseKey||"Course").replace(/\s+Golf\s+Club$/i,"");
-	  const prebuildLabel=snap.framePrebuildStatus==="running"&&snap.framePrebuildRunningHole?`H${snap.framePrebuildRunningHole}`:snap.framePrebuildQueued?`${snap.framePrebuildQueued} queued`:snap.holesWithFramePrebuildFailed?`${snap.holesWithFramePrebuildFailed} failed`:snap.framePrebuildStatus||"idle";
+	  const prebuildLabel=snap.framePrebuildSummary||(
+	    snap.framePrebuildStatus==="running"&&snap.framePrebuildRunningHole?`H${snap.framePrebuildRunningHole}`:snap.framePrebuildQueued?`${snap.framePrebuildQueued} queued`:snap.holesWithFramePrebuildFailed?`${snap.holesWithFramePrebuildFailed} failed`:snap.framePrebuildStatus||"idle"
+	  );
 	  if(collapsed){
 	    el.innerHTML=gdCoursePlayMonitorHeader(courseName,`H${snap.activeHole||""} · ${snap.holesWithPlayDataReady||0}/${snap.holesScanned||0}`,collapsed);
 	    return;
@@ -6465,7 +6497,9 @@ function gdRenderCoursePlayPipelineDebug(){
     return;
 	  }
 	  const snap=api.buildDebugSnapshot();
-	  const prebuildLabel=snap.framePrebuildStatus==="running"&&snap.framePrebuildRunningHole?`H${snap.framePrebuildRunningHole}`:snap.framePrebuildQueued?`${snap.framePrebuildQueued} queued`:snap.holesWithFramePrebuildFailed?`${snap.holesWithFramePrebuildFailed} failed`:snap.framePrebuildStatus||"idle";
+	  const prebuildLabel=snap.framePrebuildSummary||(
+	    snap.framePrebuildStatus==="running"&&snap.framePrebuildRunningHole?`H${snap.framePrebuildRunningHole}`:snap.framePrebuildQueued?`${snap.framePrebuildQueued} queued`:snap.holesWithFramePrebuildFailed?`${snap.holesWithFramePrebuildFailed} failed`:snap.framePrebuildStatus||"idle"
+	  );
 	  summary.innerHTML=[
 	    gdCoursePlayDebugMetric("Course",snap.activeCourseName||snap.activeCourseKey||""),
 	    gdCoursePlayDebugMetric("Course key",snap.activeCourseKey||""),
@@ -6491,7 +6525,7 @@ function gdRenderCoursePlayPipelineDebug(){
 	        <td>${gdCoursePlayDebugFlag(row.hasFrameIndexEntry)}<br>${gdEscapeHTML(row.frameIndexKey||"")}</td>
 	        <td>${gdEscapeHTML(row.capturedManifestKey||"")}</td>
 	        <td>${gdCoursePlayDebugFlag(row.capturedManifestPresent)}</td>
-	        <td>${gdEscapeHTML(row.framePrebuildStatus||"")}<br>${gdEscapeHTML(row.framePrebuildError||"")}</td>
+	        <td>${gdEscapeHTML(row.framePrebuildStatus||"not_started")}<br>${gdEscapeHTML([row.framePrebuildStep,row.framePrebuildRetryCount?("retry "+row.framePrebuildRetryCount):"",row.framePrebuildError].filter(Boolean).join(" · "))}<br>${gdEscapeHTML(row.framePrebuildLastAt?gdCoursePlayDebugTime(row.framePrebuildLastAt):"")}</td>
 	        <td>${gdEscapeHTML(gdCoursePlayDebugTime(row.lastGeneratedAt))}<br>${gdEscapeHTML(row.lastRenderedAt?gdCoursePlayDebugTime(row.lastRenderedAt):"")}</td>
         <td>${gdEscapeHTML(row.source||"")}</td>
         <td>${gdEscapeHTML(row.syncStatus||"")}</td>
@@ -28879,7 +28913,7 @@ function gdWireManualGpsPlayButton(){
 <link rel="stylesheet" href="styles/gd-arcade-mode.css?v=arcade-wiring-20260607">
 <script src="scripts/gd-windross-seed.js?v=windross-map-seed-20260525"></script>
 <script src="scripts/gd-course-library-pin-lock.js?v=tool-rail-tab-hole-label-20260620"></script>
-<script src="scripts/gd-course-play-pipeline.js?v=course-play-pipeline-001"></script>
+<script src="scripts/gd-course-play-pipeline.js?v=course-play-pipeline-002"></script>
 <script id="gdAutoMapHandoffQuarantineV1">
 (function(){
   "use strict";
