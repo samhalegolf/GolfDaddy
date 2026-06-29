@@ -34,8 +34,10 @@
   var lastDebugEventAt=0;
   var lastSyncStatusByKey={};
   var framePrebuildQueues={};
+  var frameManifestCacheStoppedByCourse={};
   var FRAME_PREBUILD_DELAY_MS=90;
   var FRAME_PREBUILD_RETRY_DELAYS_MS=[400,1000,2000];
+  var FRAME_PREBUILD_MANIFEST_CACHE_LIMIT=3;
   var FRAME_PREBUILD_TRANSIENT_REASONS={
     "prebuild-adapter-unavailable":true,
     "map-unavailable":true,
@@ -192,6 +194,9 @@
     if(!key)return false;
     return !!safe(function(){return localStorage.getItem(String(key));},null);
   }
+  function manifestPayloadBytes(manifest){
+    return Number(safe(function(){return JSON.stringify(manifest||{}).length;},0))||0;
+  }
   function readCapturedManifest(key){
     if(!key)return null;
     var manifest=safe(function(){return JSON.parse(localStorage.getItem(String(key))||"null");},null);
@@ -214,6 +219,12 @@
     if(Number(manifest.holeNumber||0)&&normalizeHoleNumber(manifest.holeNumber)!==normalizeHoleNumber(holeNumber))return false;
     var manifestCourse=manifest.courseKey||manifest.courseId||manifest.courseName||manifest.name||"";
     return !manifestCourse||courseKeyMatch(course,manifestCourse);
+  }
+  function frameHasManifestCache(frame){
+    return !!(frame&&frameManifestKey(frame)&&capturedManifestPresent(frameManifestKey(frame)));
+  }
+  function frameHasRecipe(frame){
+    return !!(frame&&(frame.frameRecipe||frame.recipe||frame.frameStatus==="recipe_ready"||frame.recipeStatus==="recipe_ready"||frame.cacheStatus==="manifest_cache_pending"||frame.cacheStatus==="manifest_cache_limited"||frame.cacheStatus==="manifest_cache_failed"||frame.cacheStatus==="manifest_cached"));
   }
   function saveSyncQueue(queue){
     queue=normalizeSyncQueue(queue);
@@ -532,7 +543,38 @@
     saveStore(store);
     return holeNumber?clone(course.holes[String(normalizeHoleNumber(holeNumber))]):clone(course);
   }
-  function registerCoursePlayFrame(courseOrId,holeNumber,manifest,opts){
+  function buildFrameRecipe(course,hole,source,opts){
+    opts=opts||{};
+    hole=normalizeHoleRecord(course,hole&&hole.holeNumber||opts.holeNumber||1,hole||emptyHoleRecord(course,opts.holeNumber||1));
+    var route=points(hole.routePoints);
+    var greenShape=points(hole.greenShape);
+    var allPoints=route.concat(greenShape,[hole.teePoint,hole.greenCentre]).map(point).filter(Boolean);
+    var frameBounds=deriveBounds(allPoints,hole.greenCentre)||hole.greenBounds||deriveBounds(greenShape,hole.greenCentre);
+    return {
+      schema:"gd.course_play_pipeline.frame_recipe",
+      schemaVersion:SCHEMA_VERSION,
+      status:"recipe_ready",
+      courseId:course.courseId,
+      courseKey:course.courseKey,
+      courseName:course.courseName,
+      holeNumber:hole.holeNumber,
+      pipelineRecordId:hole.recordId,
+      pipelineDataVersion:hole.dataVersion,
+      frameBounds:frameBounds,
+      greenBounds:hole.greenBounds||deriveBounds(greenShape,hole.greenCentre),
+      anchors:clone(hole.frameAnchors||{}),
+      teePoint:clone(hole.teePoint||null),
+      greenCentre:clone(hole.greenCentre||null),
+      routePointCount:route.length,
+      greenShapePointCount:greenShape.length,
+      fairwayPointCount:(hole.fairwayPoints||[]).length,
+      captureZoom:opts.captureZoom||null,
+      generatedFrom:String(source||opts.generatedFrom||"course-play-frame-recipe"),
+      createdAt:opts.createdAt||now(),
+      updatedAt:opts.updatedAt||now()
+    };
+  }
+  function registerCoursePlayFrameRecipe(courseOrId,holeNumber,recipe,opts){
     opts=opts||{};
     var course=getCoursePlayState(courseOrId||activeCourseFromApp()||"course");
     holeNumber=normalizeHoleNumber(holeNumber||activeHoleFromApp());
@@ -540,8 +582,17 @@
     var index=loadFrameIndex();
     var key=frameIndexKey(course,holeNumber);
     var stamp=now();
-    var manifestKey=String(opts.manifestKey||manifest&&manifest.key||manifest&&manifest.storageKey||manifest&&manifest.scanId||key);
-    var record={
+    var existing=index.frames[key]||{};
+    var frameRecipe=recipe&&recipe.schema==="gd.course_play_pipeline.frame_recipe"?clone(recipe):buildFrameRecipe(course,hole,opts.generatedFrom||"course-play-frame-recipe",Object.assign({},opts,{updatedAt:stamp}));
+    var manifest=opts.manifest||null;
+    var manifestKey=opts.manifestKey||manifest&&manifest.key||manifest&&manifest.storageKey||manifest&&manifest.scanId||existing.manifestKey||existing.capturedManifestKey||null;
+    var hasManifest=!!(manifestKey&&capturedManifestPresent(manifestKey));
+    var cacheStatus=String(opts.cacheStatus||opts.manifestCacheStatus||existing.cacheStatus||existing.manifestCacheStatus||"manifest_cache_pending");
+    if(hasManifest&&cacheStatus==="manifest_cache_pending")cacheStatus="manifest_cached";
+    var frameStatus=String(opts.status||existing.frameStatus||"recipe_ready");
+    if(hasManifest&&frameStatus==="recipe_ready")frameStatus="manifest_cached";
+    var manifestBytes=Number(opts.manifestBytes||manifestPayloadBytes(manifest)||existing.manifestBytes||0)||0;
+    var record=Object.assign({},existing,{
       schema:"gd.course_play_pipeline.frame",
       schemaVersion:SCHEMA_VERSION,
       frameIndexKey:key,
@@ -551,54 +602,73 @@
       holeNumber:holeNumber,
       pipelineRecordId:hole.recordId,
       pipelineDataVersion:hole.dataVersion,
-      manifestKey:manifestKey,
-      capturedManifestKey:manifestKey,
-      generatedFrom:opts.generatedFrom||"v19-captured-surface",
-      frameStatus:opts.status||"generated",
-      cacheStatus:opts.cacheStatus||"local-cache",
+      manifestKey:manifestKey||null,
+      capturedManifestKey:manifestKey||null,
+      generatedFrom:opts.generatedFrom||frameRecipe.generatedFrom||existing.generatedFrom||"course-play-frame-recipe",
+      frameStatus:frameStatus,
+      recipeStatus:"recipe_ready",
+      cacheStatus:cacheStatus,
+      manifestCacheStatus:cacheStatus,
+      manifestCacheReason:opts.manifestCacheReason||existing.manifestCacheReason||null,
+      manifestCacheError:opts.manifestCacheError||opts.error||existing.manifestCacheError||null,
+      manifestBytes:manifestBytes,
       presentationOwner:"v19-captured-surface",
-      originPx:manifest&&manifest.originPx||null,
-      imageWidth:manifest&&manifest.imageWidth||null,
-      imageHeight:manifest&&manifest.imageHeight||null,
-      captureZoom:manifest&&manifest.captureZoom||null,
-      tileCount:Array.isArray(manifest&&manifest.tiles)?manifest.tiles.length:0,
-      anchorPins:clone(manifest&&manifest.anchorPins||{}),
-      tileMetadata:Array.isArray(manifest&&manifest.tiles)?manifest.tiles.map(function(tile){return {x:tile.x,y:tile.y,z:tile.z,tileX:tile.tileX,tileY:tile.tileY,url:tile.url};}):[],
-      createdAt:index.frames[key]&&index.frames[key].createdAt||stamp,
+      frameRecipe:frameRecipe,
+      originPx:manifest&&manifest.originPx||existing.originPx||null,
+      imageWidth:manifest&&manifest.imageWidth||existing.imageWidth||null,
+      imageHeight:manifest&&manifest.imageHeight||existing.imageHeight||null,
+      captureZoom:manifest&&manifest.captureZoom||frameRecipe.captureZoom||existing.captureZoom||null,
+      tileCount:Array.isArray(manifest&&manifest.tiles)?manifest.tiles.length:Number(existing.tileCount||0)||0,
+      anchorPins:clone(manifest&&manifest.anchorPins||existing.anchorPins||frameRecipe.anchors||{}),
+      tileMetadata:[],
+      createdAt:existing.createdAt||stamp,
       updatedAt:stamp,
-      dbShareable:false,
-      notes:"Local render cache. Durable DB sync should prefer course/hole geometry plus frame parameters."
-    };
+      dbShareable:true,
+      notes:"Frame recipe is durable; captured tile manifest is optional local cache."
+    });
     index.frames[key]=record;
     saveFrameIndex(index);
-    recordDebugEvent("frame-index-saved",{courseId:course.courseId,courseName:course.courseName,holeNumber:holeNumber,frameIndexKey:key,manifestKey:manifestKey,frameStatus:record.frameStatus,generatedFrom:record.generatedFrom,tileCount:record.tileCount});
+    recordDebugEvent("frame-index-saved",{courseId:course.courseId,courseName:course.courseName,holeNumber:holeNumber,frameIndexKey:key,manifestKey:manifestKey,frameStatus:record.frameStatus,cacheStatus:record.cacheStatus,generatedFrom:record.generatedFrom,tileCount:record.tileCount,manifestBytes:record.manifestBytes});
     var store=loadStore();
     var writable=courseRecord(course,store);
     writable.holes=Object.assign({},course.holes||{});
     var nextPresentation=Object.assign({},hole.presentation||{},{
-        capturedManifestKey:manifestKey,
-        capturedSurfaceReady:true,
+        capturedManifestKey:manifestKey||hole.presentation&&hole.presentation.capturedManifestKey||null,
+        capturedSurfaceReady:hasManifest||frameStatus==="rendered"||frameStatus==="manifest_cached",
         owner:"gps-play",
         frameStatus:record.frameStatus,
         frameIndexKey:key,
         frameCacheStatus:record.cacheStatus,
+        manifestCacheStatus:record.manifestCacheStatus,
+        manifestCacheError:record.manifestCacheError,
+        frameRecipeStatus:"recipe_ready",
         generatedFrom:record.generatedFrom,
         framePrebuildStatus:"complete",
-        framePrebuildLastStep:/prebuild/i.test(String(record.generatedFrom||""))?"frame_index_registered":"lazy_frame_registered",
+        framePrebuildLastStep:opts.step||(/prebuild|recipe/i.test(String(record.generatedFrom||""))?"recipe_ready":"lazy_frame_registered"),
         framePrebuildLastAt:stamp,
         framePrebuildUpdatedAt:stamp,
-        framePrebuildManifestKey:manifestKey,
+        framePrebuildManifestKey:manifestKey||hole.presentation&&hole.presentation.framePrebuildManifestKey||null,
         framePrebuildFrameIndexKey:key
       });
-    delete nextPresentation.framePrebuildLastError;
+    if(record.manifestCacheError)nextPresentation.framePrebuildCacheError=record.manifestCacheError;
+    else delete nextPresentation.framePrebuildCacheError;
+    if(frameStatus!=="failed")delete nextPresentation.framePrebuildLastError;
     writable.holes[String(holeNumber)]=Object.assign(hole,{
       presentation:nextPresentation,
       updatedAt:stamp
     });
     store.courses[writable.courseId]=writable;
     writeCourse(writable,store);
-    recordDebugEvent("captured-manifest-registered",{courseId:writable.courseId,courseName:writable.courseName,holeNumber:holeNumber,manifestKey:manifestKey,manifestPresent:capturedManifestPresent(manifestKey),frameIndexKey:key,source:record.generatedFrom});
+    recordDebugEvent("frame-recipe-ready",{courseId:writable.courseId,courseName:writable.courseName,holeNumber:holeNumber,frameIndexKey:key,frameStatus:record.frameStatus,cacheStatus:record.cacheStatus,manifestKey:manifestKey,manifestPresent:capturedManifestPresent(manifestKey),source:record.generatedFrom});
     return clone(record);
+  }
+  function registerCoursePlayFrame(courseOrId,holeNumber,manifest,opts){
+    opts=opts||{};
+    var manifestKey=String(opts.manifestKey||manifest&&manifest.key||manifest&&manifest.storageKey||manifest&&manifest.scanId||"");
+    var status=opts.status||(/render/i.test(String(opts.generatedFrom||""))?"rendered":"manifest_cached");
+    var frame=registerCoursePlayFrameRecipe(courseOrId,holeNumber,null,Object.assign({},opts,{manifest:manifest,manifestKey:manifestKey||undefined,status:status,cacheStatus:opts.cacheStatus||"manifest_cached",manifestCacheStatus:opts.cacheStatus||"manifest_cached",manifestBytes:manifestPayloadBytes(manifest),step:opts.step||"manifest_cached"}));
+    recordDebugEvent("captured-manifest-registered",{courseId:frame.courseId,courseName:frame.courseName,holeNumber:frame.holeNumber,manifestKey:frame.manifestKey,manifestPresent:capturedManifestPresent(frame.manifestKey),frameIndexKey:frame.frameIndexKey,cacheStatus:frame.cacheStatus,source:frame.generatedFrom});
+    return frame;
   }
   function getCoursePlayFrameIndex(courseOrId,holeNumber){
     var index=loadFrameIndex();
@@ -612,6 +682,7 @@
   function buildHolePlayDbPayload(courseOrId,holeNumber){
     var course=getCoursePlayState(courseOrId);
     var hole=normalizeHoleRecord(course,holeNumber,getHolePlayState(course,holeNumber));
+    var frame=getCoursePlayFrameIndex(course,holeNumber);
     return {
       schema:"gd.course_play_pipeline.db.hole",
       schemaVersion:SCHEMA_VERSION,
@@ -635,7 +706,12 @@
         capturedSurfaceReady:!!(hole.presentation&&hole.presentation.capturedSurfaceReady),
         frameStatus:hole.presentation&&hole.presentation.frameStatus||"unknown",
         frameIndexKey:hole.presentation&&hole.presentation.frameIndexKey||null,
-        capturedManifestKey:hole.presentation&&hole.presentation.capturedManifestKey||null
+        capturedManifestKey:hole.presentation&&hole.presentation.capturedManifestKey||null,
+        frameRecipeStatus:frame&&frame.recipeStatus||hole.presentation&&hole.presentation.frameRecipeStatus||null,
+        frameRecipe:frame&&frame.frameRecipe?clone(frame.frameRecipe):null,
+        manifestCacheStatus:frame&&frame.manifestCacheStatus||hole.presentation&&hole.presentation.manifestCacheStatus||null,
+        manifestCacheError:frame&&frame.manifestCacheError||hole.presentation&&hole.presentation.manifestCacheError||null,
+        manifestCacheRequired:false
       },
       dataVersion:hole.dataVersion,
       invalidatedAt:hole.invalidatedAt||null,
@@ -851,8 +927,7 @@
   }
   function coursePlayFrameReady(courseOrId,holeNumber){
     var frame=getCoursePlayFrameIndex(courseOrId,holeNumber);
-    var key=frame&&frame.manifestKey||frame&&frame.capturedManifestKey||null;
-    return !!(frame&&capturedManifestPresent(key));
+    return !!(frame&&(frameHasRecipe(frame)||frameHasManifestCache(frame)));
   }
   function playablePrebuildHoles(course){
     return Object.keys(course&&course.holes||{}).map(function(key){
@@ -1083,6 +1158,39 @@
     recordDebugEvent("frame-prebuild-hole-failed",{courseId:course.courseId,courseName:course.courseName,holeNumber:holeNumber,status:"failed",step:step,reason:reason,retryCount:attempt,transient:transient,manifestKey:manifestKey,frameIndexKey:frameIndexKey,source:opts.source||"frame-prebuild"});
     return {status:"failed",courseId:course.courseId,holeNumber:holeNumber,step:step,reason:reason,transient:transient,retryCount:attempt,manifestKey:manifestKey,frameIndexKey:frameIndexKey};
   }
+  function manifestCacheCountForCourse(course){
+    return (getCoursePlayFrameIndex(course)||[]).filter(frameHasManifestCache).length;
+  }
+  function stopManifestCachePrebuild(course,reason,detail){
+    var entry={reason:String(reason||"manifest cache stopped"),detail:clone(detail||{})||{},at:now()};
+    frameManifestCacheStoppedByCourse[course.courseId]=entry;
+    recordDebugEvent("frame-prebuild-cache-stopped",{courseId:course.courseId,courseName:course.courseName,status:"cache_limited",reason:entry.reason,source:detail&&detail.source||"frame-prebuild"});
+    return entry;
+  }
+  function manifestCacheBudget(course,holeNumber,opts){
+    opts=opts||{};
+    if(opts.forceManifestCache===true)return {allowed:true,reason:"forced"};
+    if(opts.cacheFullManifest===false)return {allowed:false,status:"manifest_cache_limited",reason:"manifest cache disabled"};
+    var stopped=frameManifestCacheStoppedByCourse[course.courseId];
+    if(stopped)return {allowed:false,status:"manifest_cache_failed",reason:stopped.reason,stopped:stopped};
+    if(frameHasManifestCache(getCoursePlayFrameIndex(course,holeNumber)))return {allowed:false,status:"manifest_cached",reason:"manifest already cached"};
+    var limit=Number(opts.manifestCacheLimit!==undefined?opts.manifestCacheLimit:FRAME_PREBUILD_MANIFEST_CACHE_LIMIT);
+    if(Number.isFinite(limit)&&limit>=0&&manifestCacheCountForCourse(course)>=limit){
+      return {allowed:false,status:"manifest_cache_limited",reason:"prebuild manifest cache budget reached",limit:limit};
+    }
+    return {allowed:true,reason:"within budget",limit:limit};
+  }
+  function completeWithRecipe(course,holeNumber,frame,detail,opts){
+    detail=detail||{};
+    opts=opts||{};
+    var status=detail.status||"recipe_ready";
+    var cacheStatus=detail.cacheStatus||"manifest_cache_pending";
+    var reason=detail.reason||cacheStatus;
+    var updated=registerCoursePlayFrameRecipe(course,holeNumber,frame&&frame.frameRecipe||null,{generatedFrom:detail.generatedFrom||"course-play-frame-recipe",status:status,cacheStatus:cacheStatus,manifestCacheStatus:cacheStatus,manifestCacheReason:reason,manifestCacheError:detail.error||null,manifestKey:detail.manifestKey||frameManifestKey(frame)||null,step:detail.step||"recipe_ready"});
+    markFramePrebuildStatus(course,holeNumber,"complete",{step:detail.step||"recipe_ready",frameIndexKey:updated.frameIndexKey,manifestKey:frameManifestKey(updated),frameStatus:updated.frameStatus,cacheStatus:updated.cacheStatus,generatedFrom:updated.generatedFrom,retryCount:opts.attempt||0});
+    recordDebugEvent("frame-prebuild-hole-complete",{courseId:course.courseId,courseName:course.courseName,holeNumber:holeNumber,status:"complete",step:detail.step||"recipe_ready",frameIndexKey:updated.frameIndexKey,manifestKey:frameManifestKey(updated),manifestPresent:frameHasManifestCache(updated),cacheStatus:updated.cacheStatus,reason:reason,source:opts.source||"frame-prebuild"});
+    return {status:"complete",courseId:course.courseId,holeNumber:holeNumber,frameIndexKey:updated.frameIndexKey,manifestKey:frameManifestKey(updated),manifestPresent:frameHasManifestCache(updated),recipeReady:true,cacheStatus:updated.cacheStatus,reason:reason};
+  }
   function gdPrebuildCoursePlayFrame(courseOrId,holeNumber,opts){
     opts=opts||{};
     var attempt=Number(opts.attempt||0)||0;
@@ -1106,57 +1214,61 @@
       return Promise.resolve(failOrRetryPrebuild(course,holeNumber,{step:"route_green_invalid",reason:"missing-explicit-hole-data",transient:false},Object.assign({},opts,{attempt:attempt,source:source})));
     }
     var existingFrame=getCoursePlayFrameIndex(course,holeNumber);
+    var recipe=buildFrameRecipe(course,hole,"course-play-frame-recipe",{holeNumber:holeNumber});
+    var recipeFrame=registerCoursePlayFrameRecipe(course,holeNumber,recipe,{generatedFrom:"course-play-frame-recipe",status:existingFrame&&existingFrame.frameStatus||"recipe_ready",cacheStatus:existingFrame&&existingFrame.cacheStatus||"manifest_cache_pending",manifestKey:frameManifestKey(existingFrame),step:"recipe_ready"});
+    markFramePrebuildStatus(course,holeNumber,"frame_index_registered",{step:"recipe_ready",frameIndexKey:recipeFrame.frameIndexKey,manifestKey:frameManifestKey(recipeFrame),frameStatus:recipeFrame.frameStatus,cacheStatus:recipeFrame.cacheStatus,generatedFrom:recipeFrame.generatedFrom,retryCount:attempt});
     var existingManifest=findExistingManifestForHole(course,holeNumber,null,hole);
-    if(existingFrame&&capturedManifestPresent(frameManifestKey(existingFrame))){
-      markFramePrebuildStatus(course,holeNumber,"complete",{step:"existing_frame_ready",frameIndexKey:existingFrame.frameIndexKey,manifestKey:frameManifestKey(existingFrame),frameStatus:existingFrame.frameStatus,cacheStatus:existingFrame.cacheStatus,generatedFrom:existingFrame.generatedFrom,retryCount:attempt});
-      recordDebugEvent("frame-prebuild-hole-complete",{courseId:course.courseId,courseName:course.courseName,holeNumber:holeNumber,status:"complete",step:"existing_frame_ready",frameIndexKey:existingFrame.frameIndexKey,manifestKey:frameManifestKey(existingFrame),manifestPresent:true,source:source});
-      return Promise.resolve({status:"complete",courseId:course.courseId,holeNumber:holeNumber,frameIndexKey:existingFrame.frameIndexKey,manifestKey:frameManifestKey(existingFrame),manifestPresent:true});
+    if(frameHasManifestCache(recipeFrame)){
+      return Promise.resolve(completeWithRecipe(course,holeNumber,recipeFrame,{step:"manifest_cached",status:"manifest_cached",cacheStatus:"manifest_cached",manifestKey:frameManifestKey(recipeFrame),generatedFrom:recipeFrame.generatedFrom,reason:"manifest already cached"},{source:source,attempt:attempt}));
     }
-    if(!existingFrame&&existingManifest){
-      var recovered=recoverFrameIndexFromManifest(course,holeNumber,existingManifest,{source:source,retryCount:attempt});
-      if(recovered){
-        markFramePrebuildStatus(course,holeNumber,"complete",{step:"recovered_frame_index_from_manifest",frameIndexKey:recovered.frameIndexKey,manifestKey:frameManifestKey(recovered)||existingManifest.key,manifestCourseKey:existingManifest.courseKey,manifestHoleNumber:existingManifest.holeNumber,frameStatus:recovered.frameStatus,cacheStatus:recovered.cacheStatus,generatedFrom:recovered.generatedFrom,retryCount:attempt});
-        recordDebugEvent("frame-prebuild-hole-complete",{courseId:course.courseId,courseName:course.courseName,holeNumber:holeNumber,status:"complete",step:"recovered_frame_index_from_manifest",frameIndexKey:recovered.frameIndexKey,manifestKey:frameManifestKey(recovered)||existingManifest.key,manifestPresent:true,source:source});
-        return Promise.resolve({status:"complete",courseId:course.courseId,holeNumber:holeNumber,frameIndexKey:recovered.frameIndexKey,manifestKey:frameManifestKey(recovered)||existingManifest.key,manifestPresent:true,recovered:true});
-      }
+    if(existingManifest){
+      var recovered=registerCoursePlayFrame(course,holeNumber,existingManifest.manifest,{generatedFrom:"v19-captured-surface-prebuild-recovered",manifestKey:existingManifest.key,status:"manifest_cached",cacheStatus:"manifest_cached",step:"recovered_frame_index_from_manifest"});
+      recordDebugEvent("recovered-frame-index-from-manifest",{courseId:course.courseId,courseName:course.courseName,holeNumber:holeNumber,status:"complete",manifestKey:frameManifestKey(recovered)||existingManifest.key,frameIndexKey:recovered.frameIndexKey,manifestSource:existingManifest.source,source:source});
+      return Promise.resolve(completeWithRecipe(course,holeNumber,recovered,{step:"recovered_frame_index_from_manifest",status:"manifest_cached",cacheStatus:"manifest_cached",manifestKey:frameManifestKey(recovered)||existingManifest.key,generatedFrom:recovered.generatedFrom,reason:"existing manifest cache recovered"},{source:source,attempt:attempt}));
+    }
+    var budget=manifestCacheBudget(course,holeNumber,opts);
+    if(!budget.allowed){
+      return Promise.resolve(completeWithRecipe(course,holeNumber,recipeFrame,{step:budget.status==="manifest_cache_failed"?"manifest_cache_failed":"recipe_ready",status:"recipe_ready",cacheStatus:budget.status||"manifest_cache_limited",manifestKey:frameManifestKey(recipeFrame),generatedFrom:"course-play-frame-recipe",reason:budget.reason,error:budget.status==="manifest_cache_failed"?budget.reason:null},{source:source,attempt:attempt}));
     }
     var adapter=framePrebuildAdapter();
     if(typeof adapter!=="function"){
-      return Promise.resolve(failOrRetryPrebuild(course,holeNumber,{step:"adapter_unavailable",reason:"prebuild-adapter-unavailable",transient:true},Object.assign({},opts,{attempt:attempt,source:source})));
+      return Promise.resolve(completeWithRecipe(course,holeNumber,recipeFrame,{step:"manifest_cache_failed",status:"recipe_ready",cacheStatus:"manifest_cache_failed",generatedFrom:"course-play-frame-recipe",reason:"prebuild-adapter-unavailable",error:"prebuild-adapter-unavailable"},{source:source,attempt:attempt}));
     }
     markFramePrebuildStatus(course,holeNumber,"building_manifest",{step:"building_manifest",attempt:attempt,retryCount:attempt});
     recordDebugEvent("frame-prebuild-started",{courseId:course.courseId,courseName:course.courseName,holeNumber:holeNumber,status:"building_manifest",step:"building_manifest",attempt:attempt,source:source});
     return Promise.resolve().then(function(){
       return adapter(course,holeNumber,mapped,Object.assign({},opts,{source:source,reason:opts.reason||"course-play-frame-prebuild",attempt:attempt}));
     }).then(function(result){
-      if(!result)return failOrRetryPrebuild(course,holeNumber,{step:"manifest_build_returned_null",reason:"prebuild adapter returned no manifest",transient:true},Object.assign({},opts,{attempt:attempt,source:source}));
-      if(result&&result.ok===false)return failOrRetryPrebuild(course,holeNumber,{step:result.step||"manifest_build_failed",reason:result.reason||result.error||"manifest build failed",transient:result.transient,manifestKey:result.manifestKey,frameIndexKey:result.frameIndexKey,manifestCourseKey:result.courseKey,manifestHoleNumber:result.holeNumber},Object.assign({},opts,{attempt:attempt,source:source}));
+      if(!result)return completeWithRecipe(course,holeNumber,recipeFrame,{step:"manifest_cache_failed",status:"recipe_ready",cacheStatus:"manifest_cache_failed",generatedFrom:"course-play-frame-recipe",reason:"prebuild adapter returned no manifest",error:"prebuild adapter returned no manifest"},{source:source,attempt:attempt});
+      if(result&&result.ok===false){
+        var cacheReason=String(result.reason||result.error||result.step||"manifest cache failed");
+        if(String(result.step||"")==="manifest_storage_write_failed")stopManifestCachePrebuild(course,cacheReason,{source:source,holeNumber:holeNumber,manifestKey:result.manifestKey,manifestBytes:result.manifestBytes});
+        return completeWithRecipe(course,holeNumber,recipeFrame,{step:"manifest_cache_failed",status:"recipe_ready",cacheStatus:"manifest_cache_failed",manifestKey:result.manifestKey||frameManifestKey(recipeFrame),generatedFrom:"course-play-frame-recipe",reason:cacheReason,error:cacheReason},{source:source,attempt:attempt});
+      }
       var resultManifest=prebuildManifestFromResult(result);
       var manifestInfo=findExistingManifestForHole(course,holeNumber,result,hole);
       if(!manifestInfo&&resultManifest){
         var resultKey=prebuildResultManifestKey(result,null)||capturedManifestStorageKey(course.courseId,holeNumber);
         manifestInfo={manifest:resultManifest,key:resultKey,source:"adapter-result-unverified",courseKey:resultManifest.courseKey||course.courseId,holeNumber:normalizeHoleNumber(resultManifest.holeNumber||holeNumber)};
       }
-      if(!manifestInfo)return failOrRetryPrebuild(course,holeNumber,{step:"manifest_build_returned_null",reason:"manifest build returned no stored manifest",transient:true},Object.assign({},opts,{attempt:attempt,source:source}));
+      if(!manifestInfo)return completeWithRecipe(course,holeNumber,recipeFrame,{step:"manifest_cache_failed",status:"recipe_ready",cacheStatus:"manifest_cache_failed",generatedFrom:"course-play-frame-recipe",reason:"manifest build returned no stored manifest",error:"manifest build returned no stored manifest"},{source:source,attempt:attempt});
       var manifestKey=manifestInfo.key||prebuildResultManifestKey(result,null)||manifestInfo.manifest.key||manifestInfo.manifest.storageKey||manifestInfo.manifest.scanId||manifestInfo.manifest.activeScanId;
       markFramePrebuildStatus(course,holeNumber,"manifest_written",{step:"manifest_written",manifestKey:manifestKey,manifestCourseKey:manifestInfo.courseKey,manifestHoleNumber:manifestInfo.holeNumber,retryCount:attempt});
       recordDebugEvent("frame-prebuild-manifest-written",{courseId:course.courseId,courseName:course.courseName,holeNumber:holeNumber,status:"manifest_written",manifestKey:manifestKey,manifestSource:manifestInfo.source,tileCount:(manifestInfo.manifest.tiles||[]).length,source:source});
-      var frame=getCoursePlayFrameIndex(course,holeNumber);
-      if(!frame){
-        frame=recoverFrameIndexFromManifest(course,holeNumber,manifestInfo,{source:source,retryCount:attempt});
-      }
-      if(frame)recordDebugEvent("frame-prebuild-frame-index-registered",{courseId:course.courseId,courseName:course.courseName,holeNumber:holeNumber,status:"frame_index_registered",frameIndexKey:frame.frameIndexKey,manifestKey:frameManifestKey(frame)||manifestKey,source:source});
+      var frame=registerCoursePlayFrame(course,holeNumber,manifestInfo.manifest,{generatedFrom:"v19-captured-surface-prebuild",manifestKey:manifestKey,status:"manifest_cached",cacheStatus:"manifest_cached",step:"manifest_cached"});
+      recordDebugEvent("frame-prebuild-frame-index-registered",{courseId:course.courseId,courseName:course.courseName,holeNumber:holeNumber,status:"manifest_cached",frameIndexKey:frame.frameIndexKey,manifestKey:frameManifestKey(frame)||manifestKey,source:source});
       var finalManifestKey=frameManifestKey(frame)||manifestKey;
       var present=capturedManifestPresent(finalManifestKey);
-      if(!frame)return failOrRetryPrebuild(course,holeNumber,{step:"frame_index_registration_failed",reason:"frame index missing",transient:true,manifestKey:manifestKey,manifestCourseKey:manifestInfo.courseKey,manifestHoleNumber:manifestInfo.holeNumber},Object.assign({},opts,{attempt:attempt,source:source}));
-      if(!present)return failOrRetryPrebuild(course,holeNumber,{step:"manifest_storage_write_failed",reason:"captured manifest missing",transient:true,manifestKey:finalManifestKey,frameIndexKey:frame.frameIndexKey,manifestCourseKey:manifestInfo.courseKey,manifestHoleNumber:manifestInfo.holeNumber},Object.assign({},opts,{attempt:attempt,source:source}));
-      markFramePrebuildStatus(course,holeNumber,"frame_index_registered",{step:"frame_index_registered",frameIndexKey:frame.frameIndexKey,manifestKey:finalManifestKey,manifestCourseKey:manifestInfo.courseKey,manifestHoleNumber:manifestInfo.holeNumber,retryCount:attempt});
-      markFramePrebuildStatus(course,holeNumber,"complete",{step:"complete",frameIndexKey:frame.frameIndexKey,manifestKey:finalManifestKey,manifestCourseKey:manifestInfo.courseKey,manifestHoleNumber:manifestInfo.holeNumber,frameStatus:frame.frameStatus,cacheStatus:frame.cacheStatus,generatedFrom:frame.generatedFrom,retryCount:attempt});
-      recordDebugEvent("frame-prebuild-hole-complete",{courseId:course.courseId,courseName:course.courseName,holeNumber:holeNumber,status:"complete",step:"complete",frameIndexKey:frame.frameIndexKey,manifestKey:finalManifestKey,manifestPresent:present,source:source});
-      return {status:"complete",courseId:course.courseId,holeNumber:holeNumber,frameIndexKey:frame.frameIndexKey,manifestKey:finalManifestKey,manifestPresent:present};
+      if(!present){
+        stopManifestCachePrebuild(course,"captured manifest missing after write",{source:source,holeNumber:holeNumber,manifestKey:finalManifestKey,manifestBytes:manifestPayloadBytes(manifestInfo.manifest)});
+        return completeWithRecipe(course,holeNumber,frame,{step:"manifest_cache_failed",status:"recipe_ready",cacheStatus:"manifest_cache_failed",manifestKey:finalManifestKey,generatedFrom:"course-play-frame-recipe",reason:"captured manifest missing after write",error:"captured manifest missing after write"},{source:source,attempt:attempt});
+      }
+      markFramePrebuildStatus(course,holeNumber,"complete",{step:"manifest_cached",frameIndexKey:frame.frameIndexKey,manifestKey:finalManifestKey,manifestCourseKey:manifestInfo.courseKey,manifestHoleNumber:manifestInfo.holeNumber,frameStatus:frame.frameStatus,cacheStatus:frame.cacheStatus,generatedFrom:frame.generatedFrom,retryCount:attempt});
+      recordDebugEvent("frame-prebuild-hole-complete",{courseId:course.courseId,courseName:course.courseName,holeNumber:holeNumber,status:"complete",step:"manifest_cached",frameIndexKey:frame.frameIndexKey,manifestKey:finalManifestKey,manifestPresent:present,cacheStatus:frame.cacheStatus,source:source});
+      return {status:"complete",courseId:course.courseId,holeNumber:holeNumber,frameIndexKey:frame.frameIndexKey,manifestKey:finalManifestKey,manifestPresent:present,recipeReady:true,cacheStatus:frame.cacheStatus};
     }).then(null,function(error){
       var message=String(error&&error.message||error||"frame prebuild failed");
-      return failOrRetryPrebuild(course,holeNumber,{step:"unexpected_prebuild_error",reason:message,error:message,transient:isTransientPrebuildFailure({reason:message})},Object.assign({},opts,{attempt:attempt,source:source}));
+      return completeWithRecipe(course,holeNumber,recipeFrame,{step:"manifest_cache_failed",status:"recipe_ready",cacheStatus:"manifest_cache_failed",generatedFrom:"course-play-frame-recipe",reason:message,error:message},{source:source,attempt:attempt});
     });
   }
   function processFramePrebuildQueue(courseId){
@@ -1436,6 +1548,12 @@
         hasRoute:!!(hole.routePoints&&hole.routePoints.length>=2),
         hasFrameAnchors:!!(anchor.tee&&anchor.green&&(anchor.route&&anchor.route.length>=2||hole.routePoints&&hole.routePoints.length>=2)),
         hasFrameIndexEntry:!!frame,
+        hasFrameRecipe:frameHasRecipe(frame),
+        frameStatus:frame&&frame.frameStatus||presentation.frameStatus||"",
+        frameCacheStatus:frame&&frame.cacheStatus||presentation.frameCacheStatus||"",
+        manifestCacheStatus:frame&&frame.manifestCacheStatus||presentation.manifestCacheStatus||"",
+        manifestCacheError:frame&&frame.manifestCacheError||presentation.manifestCacheError||presentation.framePrebuildCacheError||"",
+        manifestBytes:Number(frame&&frame.manifestBytes||0)||0,
         frameIndexKey:frame&&frame.frameIndexKey||presentation.frameIndexKey||presentation.framePrebuildFrameIndexKey||null,
         capturedManifestKey:manifestKey,
         capturedManifestPresent:manifestPresent,
@@ -1453,7 +1571,7 @@
         source:hole.source||frame&&frame.generatedFrom||"unknown",
         syncStatus:hole.syncStatus||"local",
         updatedAt:hole.updatedAt||null,
-        lastError:presentation.framePrebuildLastError||hole.unavailableReason||hole.invalidationReason||course.lastError||null
+        lastError:presentation.framePrebuildLastError||presentation.manifestCacheError||presentation.framePrebuildCacheError||frame&&frame.manifestCacheError||hole.unavailableReason||hole.invalidationReason||course.lastError||null
       };
     });
     var syncQueue=getCoursePlaySyncQueue();
@@ -1461,14 +1579,21 @@
     var adapter=course.adapter||{};
     var frameQueue=framePrebuildQueues[course.courseId]||null;
     var completeRows=rows.filter(function(row){return row.framePrebuildStatus==="complete"||(row.hasFrameIndexEntry&&row.capturedManifestPresent);});
+    var recipeRows=rows.filter(function(row){return row.hasFrameRecipe;});
+    var manifestCacheFailedRows=rows.filter(function(row){return row.manifestCacheStatus==="manifest_cache_failed"||row.frameCacheStatus==="manifest_cache_failed";});
+    var manifestCacheLimitedRows=rows.filter(function(row){return row.manifestCacheStatus==="manifest_cache_limited"||row.frameCacheStatus==="manifest_cache_limited";});
     var retryRows=rows.filter(function(row){return row.framePrebuildStatus==="retry_pending";});
     var failedRows=rows.filter(function(row){return row.framePrebuildStatus==="failed";});
     var buildingRows=rows.filter(function(row){return ["queued","building_manifest","manifest_written","frame_index_registered"].indexOf(row.framePrebuildStatus)!==-1;});
-    var missingRows=rows.filter(function(row){return row.pipelineState===HOLE_STATES.play_data_ready&&!(row.hasFrameIndexEntry&&row.capturedManifestPresent)&&["queued","building_manifest","manifest_written","frame_index_registered","retry_pending","failed"].indexOf(row.framePrebuildStatus)===-1;});
+    var missingRows=rows.filter(function(row){return row.pipelineState===HOLE_STATES.play_data_ready&&!row.hasFrameRecipe&&["queued","building_manifest","manifest_written","frame_index_registered","retry_pending","failed"].indexOf(row.framePrebuildStatus)===-1;});
     var prebuildSummary=failedRows.length&&failedRows.length===1&&!retryRows.length&&!buildingRows.length?
       "complete except H"+failedRows[0].holeNumber+" - "+(failedRows[0].framePrebuildStep||"prebuild failed")+": "+(failedRows[0].framePrebuildError||failedRows[0].lastError||"unknown"):
       [
-        completeRows.length?(completeRows.length+" complete"):"",
+        recipeRows.length?(recipeRows.length+" recipes"):"",
+        completeRows.length&&completeRows.length!==recipeRows.length?(completeRows.length+" complete"):"",
+        rows.filter(function(row){return row.capturedManifestPresent;}).length?(rows.filter(function(row){return row.capturedManifestPresent;}).length+" cached"):"",
+        manifestCacheLimitedRows.length?(manifestCacheLimitedRows.length+" cache-limited"):"",
+        manifestCacheFailedRows.length?(manifestCacheFailedRows.length+" cache failed"):"",
         retryRows.length?(retryRows.length+" retrying"):"",
         failedRows.length?(failedRows.length+" failed"):"",
         buildingRows.length?(buildingRows.length+" building"):"",
@@ -1490,7 +1615,10 @@
       totalHolesKnown:rows.length,
       holesWithPlayDataReady:rows.filter(function(row){return row.pipelineState===HOLE_STATES.play_data_ready;}).length,
       holesWithFrameIndexEntries:rows.filter(function(row){return row.hasFrameIndexEntry;}).length,
+      holesWithFrameRecipesReady:recipeRows.length,
       holesWithCapturedManifestsPresent:rows.filter(function(row){return row.capturedManifestPresent;}).length,
+      holesWithManifestCacheFailed:manifestCacheFailedRows.length,
+      holesWithManifestCacheLimited:manifestCacheLimitedRows.length,
       holesWithFramePrebuildComplete:completeRows.length,
       holesWithFramePrebuildRetryPending:retryRows.length,
       holesWithFramePrebuildFailed:failedRows.length,

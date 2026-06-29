@@ -563,6 +563,16 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 		    var transient=/map|engine|tile|projection|storage|registration|timeout|unavailable|not_ready|returned_null|missing/i.test(step+" "+reason);
 		    return Object.assign({ok:false,status:"failed",step:step,reason:reason,transient:transient},extra||{});
 		  }
+		  function localStorageApproxBytes(){
+		    return safe(function(){
+		      var total=0;
+		      for(var i=0;i<localStorage.length;i++){
+		        var key=localStorage.key(i)||"";
+		        total+=key.length+String(localStorage.getItem(key)||"").length;
+		      }
+		      return total;
+		    },0)||0;
+		  }
 		  function buildCaptureManifestForHoleData(courseRef,holeNumber,holePlayData,opts){
 		    opts=opts||{};
 		    if(!hasMap())return prebuildAdapterFailure("map_engine_unavailable","active map engine unavailable",{courseRef:courseRef,holeNumber:holeNumber,transient:true});
@@ -598,13 +608,14 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 		    if(!tiles.length)return prebuildAdapterFailure("tile_urls_empty","capture tile layer returned no tile urls",{courseKey:ctx.courseKey,courseName:ctx.courseName,holeNumber:ctx.holeNumber,transient:true});
 		    var key=storageKeyFor(ctx.courseKey,ctx.holeNumber);
 		    var manifest={version:VERSION,key:key,storageKey:key,reason:reason,surfaceModel:"captured-surface-v1",interactionOwner:"captured-surface",liveMapRole:"capture-source-diagnostic-reference",courseKey:ctx.courseKey,courseName:ctx.courseName,holeNumber:ctx.holeNumber,captureZoom:z,imageWidth:width,imageHeight:height,originPx:origin,tiles:tiles,includeTee:!!pins.tee,teeLatLng:pins.tee||null,anchorPins:pins,createdAt:new Date().toISOString()};
+		    var manifestBytes=safe(function(){return JSON.stringify(manifest).length;},0)||0;
 		    var snapshot=capturedSurfacePrebuildSnapshot();
 		    manifest=safe(function(){return typeof window.gdCapturedSurfaceWriteScan==="function"?window.gdCapturedSurfaceWriteScan(manifest,{reason:reason,storageKey:key,courseKey:ctx.courseKey,holeNumber:ctx.holeNumber}):manifest;},manifest)||manifest;
 		    safe(function(){localStorage.setItem(key,JSON.stringify(manifest));});
 		    restoreCapturedSurfacePrebuildSnapshot(snapshot);
 		    var stored=safe(function(){return JSON.parse(localStorage.getItem(key)||"null");},null);
-		    if(!stored||!Array.isArray(stored.tiles)||!stored.originPx)return prebuildAdapterFailure("manifest_storage_write_failed","captured manifest storage write failed",{courseKey:ctx.courseKey,courseName:ctx.courseName,holeNumber:ctx.holeNumber,manifestKey:key,transient:true});
-		    return {ok:true,status:"manifest_written",step:"manifest_written",manifest:manifest,manifestKey:key,courseKey:ctx.courseKey,courseName:ctx.courseName,holeNumber:ctx.holeNumber,tileCount:tiles.length,captureZoom:z};
+		    if(!stored||!Array.isArray(stored.tiles)||!stored.originPx)return prebuildAdapterFailure("manifest_storage_write_failed","captured manifest storage write failed",{courseKey:ctx.courseKey,courseName:ctx.courseName,holeNumber:ctx.holeNumber,manifestKey:key,manifestBytes:manifestBytes,localStorageApproxBytes:localStorageApproxBytes(),tileCount:tiles.length,transient:true});
+		    return {ok:true,status:"manifest_written",step:"manifest_written",manifest:manifest,manifestKey:key,courseKey:ctx.courseKey,courseName:ctx.courseName,holeNumber:ctx.holeNumber,tileCount:tiles.length,captureZoom:z,manifestBytes:manifestBytes,localStorageApproxBytes:localStorageApproxBytes()};
 		  }
 		  function loadCaptureManifest(){
 	    if(captureManifest&&manifestMatchesActive(captureManifest))return publishCaptureManifest(captureManifest);
@@ -6257,15 +6268,19 @@ function gdAdminCourseDbHoleRows(course){
 	    const presentation=hole.presentation||{};
 	    const manifestKey=frame&&frame.manifestKey||frame&&frame.capturedManifestKey||presentation.capturedManifestKey||null;
 	    const frameIndexKey=frame&&frame.frameIndexKey||presentation.frameIndexKey||presentation.framePrebuildFrameIndexKey||"";
+	    const hasFrameRecipe=!!(frame&&(frame.frameRecipe||frame.recipeStatus==="recipe_ready"||frame.frameStatus==="recipe_ready"||frame.cacheStatus==="manifest_cache_pending"||frame.cacheStatus==="manifest_cache_limited"||frame.cacheStatus==="manifest_cache_failed"||frame.cacheStatus==="manifest_cached"));
+	    const manifestCacheStatus=frame&&frame.manifestCacheStatus||frame&&frame.cacheStatus||presentation.manifestCacheStatus||presentation.frameCacheStatus||"";
+	    const manifestCacheError=frame&&frame.manifestCacheError||presentation.manifestCacheError||presentation.framePrebuildCacheError||"";
 	    const prebuildStatus=presentation.framePrebuildStatus||"not_started";
 	    const prebuildDetail=[
 	      prebuildStatus,
 	      presentation.framePrebuildLastStep&&`step ${presentation.framePrebuildLastStep}`,
 	      presentation.framePrebuildRetryCount?`retry ${presentation.framePrebuildRetryCount}`:"",
+	      manifestCacheStatus&&`cache ${manifestCacheStatus}`,
 	      presentation.framePrebuildManifestKey&&`manifest ${presentation.framePrebuildManifestKey}`,
 	      presentation.framePrebuildFrameIndexKey&&`frame ${presentation.framePrebuildFrameIndexKey}`,
 	      presentation.framePrebuildLastAt&&`at ${gdCoursePlayDebugTime(presentation.framePrebuildLastAt)}`,
-	      presentation.framePrebuildLastError&&`error ${presentation.framePrebuildLastError}`
+	      (presentation.framePrebuildLastError||manifestCacheError)&&`error ${presentation.framePrebuildLastError||manifestCacheError}`
 	    ].filter(Boolean).join(" · ");
 	    return {
 	      holeNumber:number,
@@ -6275,9 +6290,12 @@ function gdAdminCourseDbHoleRows(course){
       hasRoute:!!(hole.routePoints&&hole.routePoints.length>=2),
       hasFrameAnchor:!!(anchors.tee&&anchors.green&&(anchors.route&&anchors.route.length>=2||hole.routePoints&&hole.routePoints.length>=2)),
       hasFrameIndex:!!frame,
+	      hasFrameRecipe:hasFrameRecipe,
 	      frameIndexKey:frameIndexKey,
 	      hasManifest:gdAdminCourseDbManifestPresent(manifestKey),
 	      manifestKey:manifestKey,
+	      manifestCacheStatus:manifestCacheStatus,
+	      manifestCacheError:manifestCacheError,
 	      source:[hole.source,frame&&frame.generatedFrom].filter(Boolean).join(" / ")||"unknown",
 	      confidence:hole.confidence||"",
 	      prebuild:prebuildDetail,
@@ -6307,8 +6325,11 @@ function gdAdminCourseDbSummaries(){
       holeCount:rows.length,
       geometryReadyCount:rows.filter(row=>row.hasTee&&row.hasGreen&&row.hasRoute).length,
       playReadyCount:rows.filter(row=>row.status==="play_data_ready").length,
+      frameRecipeCount:rows.filter(row=>row.hasFrameRecipe).length,
       framesIndexedCount:rows.filter(row=>row.hasFrameIndex).length,
       manifestCount:rows.filter(row=>row.hasManifest).length,
+      manifestCacheFailedCount:rows.filter(row=>row.manifestCacheStatus==="manifest_cache_failed").length,
+      manifestCacheLimitedCount:rows.filter(row=>row.manifestCacheStatus==="manifest_cache_limited").length,
       rows:rows
     };
   }).sort((a,b)=>String(b.updatedAt||"").localeCompare(String(a.updatedAt||"")));
@@ -6353,8 +6374,9 @@ function gdRenderAdminCourseDatabase(){
     gdAdminCourseDbMetric("Shown",filtered.length),
     gdAdminCourseDbMetric("Holes",all.reduce((sum,item)=>sum+item.holeCount,0)),
     gdAdminCourseDbMetric("Play ready",all.reduce((sum,item)=>sum+item.playReadyCount,0)),
-    gdAdminCourseDbMetric("Frames indexed",all.reduce((sum,item)=>sum+item.framesIndexedCount,0)),
-    gdAdminCourseDbMetric("Manifests",all.reduce((sum,item)=>sum+item.manifestCount,0))
+    gdAdminCourseDbMetric("Frame recipes",all.reduce((sum,item)=>sum+(item.frameRecipeCount||0),0)),
+    gdAdminCourseDbMetric("Manifest cache",all.reduce((sum,item)=>sum+item.manifestCount,0)),
+    gdAdminCourseDbMetric("Cache failed",all.reduce((sum,item)=>sum+(item.manifestCacheFailedCount||0),0))
   ].join("");
   if(!all.length){
     list.innerHTML='<div class="gdCoursePlayDebugEmpty">No course database records yet. Map a course to create a local course-play record.</div>';
@@ -6372,11 +6394,13 @@ function gdRenderAdminCourseDatabase(){
       gdAdminCourseDbMetric("Hole count",selected.holeCount),
       gdAdminCourseDbMetric("Tee/green/route",selected.geometryReadyCount),
       gdAdminCourseDbMetric("Play data ready",selected.playReadyCount),
-      gdAdminCourseDbMetric("Frames indexed",selected.framesIndexedCount),
-      gdAdminCourseDbMetric("Manifest count",selected.manifestCount),
+      gdAdminCourseDbMetric("Frame recipes",selected.frameRecipeCount||0),
+      gdAdminCourseDbMetric("Manifest cache",selected.manifestCount),
+      gdAdminCourseDbMetric("Cache failed",selected.manifestCacheFailedCount||0),
+      gdAdminCourseDbMetric("Cache limited",selected.manifestCacheLimitedCount||0),
       gdAdminCourseDbMetric("Updated",gdCoursePlayDebugTime(selected.updatedAt)||"")
     ].join("")}</div>`,
-    rows.length?`<div class="gdAdminCourseHoleScroll"><table class="gdAdminCourseHoleTable"><thead><tr><th>Hole</th><th>State</th><th>Tee</th><th>Green</th><th>Route</th><th>Frame anchor</th><th>Frame index</th><th>Manifest</th><th>Prebuild</th><th>Source / confidence</th><th>Sync</th><th>Updated</th></tr></thead><tbody>${rows.map(row=>`<tr><td>H${gdEscapeHTML(row.holeNumber)}</td><td>${gdEscapeHTML(row.status)}</td><td>${gdAdminCourseDbFlag(row.hasTee)}</td><td>${gdAdminCourseDbFlag(row.hasGreen)}</td><td>${gdAdminCourseDbFlag(row.hasRoute)}</td><td>${gdAdminCourseDbFlag(row.hasFrameAnchor)}</td><td>${gdAdminCourseDbFlag(row.hasFrameIndex)}<br>${gdEscapeHTML(row.frameIndexKey||"")}</td><td>${gdAdminCourseDbFlag(row.hasManifest)}<br>${gdEscapeHTML(row.manifestKey||"")}</td><td>${gdEscapeHTML(row.prebuild||"not_started")}</td><td>${gdEscapeHTML(row.source)}<br>${gdEscapeHTML(row.confidence)}</td><td>${gdEscapeHTML(row.syncStatus)}</td><td>${gdEscapeHTML(gdCoursePlayDebugTime(row.updatedAt))}</td></tr>`).join("")}</tbody></table></div>`:'<div class="gdCoursePlayDebugEmpty">No holes found for this course yet.</div>',
+    rows.length?`<div class="gdAdminCourseHoleScroll"><table class="gdAdminCourseHoleTable"><thead><tr><th>Hole</th><th>State</th><th>Tee</th><th>Green</th><th>Route</th><th>Frame anchor</th><th>Frame recipe</th><th>Manifest cache</th><th>Prebuild</th><th>Source / confidence</th><th>Sync</th><th>Updated</th></tr></thead><tbody>${rows.map(row=>`<tr><td>H${gdEscapeHTML(row.holeNumber)}</td><td>${gdEscapeHTML(row.status)}</td><td>${gdAdminCourseDbFlag(row.hasTee)}</td><td>${gdAdminCourseDbFlag(row.hasGreen)}</td><td>${gdAdminCourseDbFlag(row.hasRoute)}</td><td>${gdAdminCourseDbFlag(row.hasFrameAnchor)}</td><td>${gdAdminCourseDbFlag(row.hasFrameRecipe)}<br>${gdEscapeHTML(row.frameIndexKey||"")}</td><td>${gdAdminCourseDbFlag(row.hasManifest)}<br>${gdEscapeHTML(row.manifestCacheStatus||"")}<br>${gdEscapeHTML(row.manifestKey||"")}</td><td>${gdEscapeHTML(row.prebuild||"not_started")}</td><td>${gdEscapeHTML(row.source)}<br>${gdEscapeHTML(row.confidence)}</td><td>${gdEscapeHTML(row.syncStatus)}</td><td>${gdEscapeHTML(gdCoursePlayDebugTime(row.updatedAt))}</td></tr>`).join("")}</tbody></table></div>`:'<div class="gdCoursePlayDebugEmpty">No holes found for this course yet.</div>',
     `<pre class="gdAdminPayloadPreview" id="gdAdminCourseDbPayload">${gdEscapeHTML(JSON.stringify(payload,null,2))}</pre>`
   ].join("");
 }
@@ -6395,7 +6419,9 @@ function gdCoursePlayMonitorEventText(event){
     "pipeline-record-saved":`${hole}play data ready`,
 	    "pipeline-course-ingested":"Course saved",
 	    "frame-index-saved":`${hole}frame saved`,
+	    "frame-recipe-ready":`${hole}frame recipe ready`,
 	    "captured-manifest-registered":`${hole}manifest registered`,
+	    "frame-prebuild-cache-stopped":"Manifest cache prebuild stopped",
 	    "frame-prebuild-queued":`Frame prebuild queued: ${event?.holesQueued ?? ""} holes`,
 	    "frame-prebuild-started":`${hole}prebuild started`,
 	    "frame-prebuild-manifest-built":`${hole}manifest prebuilt`,
@@ -6472,10 +6498,11 @@ function gdRenderCoursePlayMonitor(){
       gdCoursePlayMonitorMetric("Active hole","H"+(snap.activeHole||"")),
       gdCoursePlayMonitorMetric("AutoMapper",snap.automapperStatus||"unknown"),
       gdCoursePlayMonitorMetric("Holes scanned",snap.holesScanned||0),
-      gdCoursePlayMonitorMetric("Holes saved",snap.holesSaved||0),
+	      gdCoursePlayMonitorMetric("Holes saved",snap.holesSaved||0),
 	      gdCoursePlayMonitorMetric("Play data ready",snap.holesWithPlayDataReady||0),
-	      gdCoursePlayMonitorMetric("Frames ready",snap.holesWithFrameIndexEntries||0),
-	      gdCoursePlayMonitorMetric("Manifest present",snap.holesWithCapturedManifestsPresent||0),
+	      gdCoursePlayMonitorMetric("Frame recipes",snap.holesWithFrameRecipesReady||snap.holesWithFrameIndexEntries||0),
+	      gdCoursePlayMonitorMetric("Manifest cache",snap.holesWithCapturedManifestsPresent||0),
+	      gdCoursePlayMonitorMetric("Cache failed",(snap.holesWithManifestCacheFailed||0)+(snap.holesWithManifestCacheLimited?` / ${snap.holesWithManifestCacheLimited} limited`:"")),
 	      gdCoursePlayMonitorMetric("Prebuild",prebuildLabel),
 	      gdCoursePlayMonitorMetric("Sync queue",snap.syncQueueItemCount||0)
 	    ].join("")}</div>`,
@@ -6505,16 +6532,17 @@ function gdRenderCoursePlayPipelineDebug(){
 	    gdCoursePlayDebugMetric("Course key",snap.activeCourseKey||""),
 	    gdCoursePlayDebugMetric("Active hole","H"+(snap.activeHole||"")),
     gdCoursePlayDebugMetric("Pipeline status",snap.pipelineCourseStatus||"unknown"),
-    gdCoursePlayDebugMetric("Holes known",snap.totalHolesKnown||0),
+	    gdCoursePlayDebugMetric("Holes known",snap.totalHolesKnown||0),
 	    gdCoursePlayDebugMetric("Play data ready",snap.holesWithPlayDataReady||0),
-	    gdCoursePlayDebugMetric("Frame index",snap.holesWithFrameIndexEntries||0),
-	    gdCoursePlayDebugMetric("Manifest present",snap.holesWithCapturedManifestsPresent||0),
+	    gdCoursePlayDebugMetric("Frame recipes",snap.holesWithFrameRecipesReady||snap.holesWithFrameIndexEntries||0),
+	    gdCoursePlayDebugMetric("Manifest cache",snap.holesWithCapturedManifestsPresent||0),
+	    gdCoursePlayDebugMetric("Cache failed",(snap.holesWithManifestCacheFailed||0)+(snap.holesWithManifestCacheLimited?` / ${snap.holesWithManifestCacheLimited} limited`:"")),
 	    gdCoursePlayDebugMetric("Prebuild",prebuildLabel),
 	    gdCoursePlayDebugMetric("Sync queue",snap.syncQueueItemCount||0)
 	  ].join("");
 	  const rows=Array.isArray(snap.rows)?snap.rows:[];
 	  if(rows.length){
-	    tableHost.innerHTML=`<div class="gdCoursePlayDebugScroll"><table class="gdCoursePlayDebugTable"><thead><tr><th>Hole</th><th>State</th><th>Tee</th><th>Green</th><th>Route</th><th>Anchors</th><th>Frame index</th><th>Manifest key</th><th>Manifest</th><th>Prebuild</th><th>Last gen/render</th><th>Source</th><th>Sync</th><th>Updated</th><th>Reason</th></tr></thead><tbody>${rows.map(row=>`
+	    tableHost.innerHTML=`<div class="gdCoursePlayDebugScroll"><table class="gdCoursePlayDebugTable"><thead><tr><th>Hole</th><th>State</th><th>Tee</th><th>Green</th><th>Route</th><th>Anchors</th><th>Frame recipe</th><th>Manifest key</th><th>Manifest cache</th><th>Prebuild</th><th>Last gen/render</th><th>Source</th><th>Sync</th><th>Updated</th><th>Reason</th></tr></thead><tbody>${rows.map(row=>`
 	      <tr>
 	        <td>H${gdEscapeHTML(row.holeNumber)}</td>
 	        <td>${gdEscapeHTML(row.pipelineState||"")}</td>
@@ -6522,9 +6550,9 @@ function gdRenderCoursePlayPipelineDebug(){
         <td>${gdCoursePlayDebugFlag(row.hasGreen)}</td>
         <td>${gdCoursePlayDebugFlag(row.hasRoute)}</td>
         <td>${gdCoursePlayDebugFlag(row.hasFrameAnchors)}</td>
-	        <td>${gdCoursePlayDebugFlag(row.hasFrameIndexEntry)}<br>${gdEscapeHTML(row.frameIndexKey||"")}</td>
+	        <td>${gdCoursePlayDebugFlag(row.hasFrameRecipe||row.hasFrameIndexEntry)}<br>${gdEscapeHTML(row.frameStatus||"")}<br>${gdEscapeHTML(row.frameIndexKey||"")}</td>
 	        <td>${gdEscapeHTML(row.capturedManifestKey||"")}</td>
-	        <td>${gdCoursePlayDebugFlag(row.capturedManifestPresent)}</td>
+	        <td>${gdCoursePlayDebugFlag(row.capturedManifestPresent)}<br>${gdEscapeHTML(row.manifestCacheStatus||row.frameCacheStatus||"")}<br>${gdEscapeHTML(row.manifestCacheError||"")}</td>
 	        <td>${gdEscapeHTML(row.framePrebuildStatus||"not_started")}<br>${gdEscapeHTML([row.framePrebuildStep,row.framePrebuildRetryCount?("retry "+row.framePrebuildRetryCount):"",row.framePrebuildError].filter(Boolean).join(" · "))}<br>${gdEscapeHTML(row.framePrebuildLastAt?gdCoursePlayDebugTime(row.framePrebuildLastAt):"")}</td>
 	        <td>${gdEscapeHTML(gdCoursePlayDebugTime(row.lastGeneratedAt))}<br>${gdEscapeHTML(row.lastRenderedAt?gdCoursePlayDebugTime(row.lastRenderedAt):"")}</td>
         <td>${gdEscapeHTML(row.source||"")}</td>
@@ -28913,7 +28941,7 @@ function gdWireManualGpsPlayButton(){
 <link rel="stylesheet" href="styles/gd-arcade-mode.css?v=arcade-wiring-20260607">
 <script src="scripts/gd-windross-seed.js?v=windross-map-seed-20260525"></script>
 <script src="scripts/gd-course-library-pin-lock.js?v=tool-rail-tab-hole-label-20260620"></script>
-<script src="scripts/gd-course-play-pipeline.js?v=course-play-pipeline-002"></script>
+<script src="scripts/gd-course-play-pipeline.js?v=course-play-pipeline-003"></script>
 <script id="gdAutoMapHandoffQuarantineV1">
 (function(){
   "use strict";
