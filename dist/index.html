@@ -7534,7 +7534,7 @@ function gdPickPracticePhotoFile(event,mode="photo"){
     warnings:["Photo import uses the existing photo scan tools; native photo extraction is not connected yet."],
     errors:[],
     photoAction:false,
-    nextStep:mode==="camera"?"Take a photo. The uploaded photo screen will appear after selection.":"Choose a photo. The uploaded photo screen will appear after selection."
+    nextStep:mode==="camera"?"Take a photo. The generated box adjustment will appear after selection.":"Choose a photo. The generated box adjustment will appear after selection."
   });
   gdPracticeFeedback(mode==="camera"?"Opening camera...":"Opening photo picker...");
   try{
@@ -7735,7 +7735,7 @@ function gdNativePracticeFeedbackBridge(patch){
   }
   return null;
 }
-function gdPracticePhotoScreenTarget(){
+function gdPracticeGeneratedBoxTarget(){
   const manual=document.getElementById("gdPracticeManualQuadTool");
   if(manual&&manual.classList.contains("active")&&!manual.hidden)return manual;
   const scanner=document.getElementById("gdPracticeScanner");
@@ -7744,13 +7744,22 @@ function gdPracticePhotoScreenTarget(){
   if(review&&review.classList.contains("active"))return review;
   return null;
 }
-function gdRevealPracticePhotoScreen(){
-  let target=gdPracticePhotoScreenTarget();
+function gdAdjustPracticeGeneratedBox(){
+  if(gdPracticePhotoBitmap&&typeof gdOpenPracticeManualQuadTool==="function")gdOpenPracticeManualQuadTool();
+  let target=gdPracticeGeneratedBoxTarget();
   if(!target&&gdPracticePhotoBitmap&&typeof gdOpenPracticeManualQuadTool==="function"){
     gdOpenPracticeManualQuadTool();
-    target=gdPracticePhotoScreenTarget();
+    target=gdPracticeGeneratedBoxTarget();
   }
   if(target){
+    gdNativePracticeFeedbackBridge({
+      status:"photo_selected",
+      lastAction:"Generated box adjustment opened",
+      warnings:["Photo import uses the existing photo scan tools; native photo extraction is not connected yet."],
+      errors:[],
+      photoAction:true,
+      nextStep:"Drag the four pins onto the value-grid corners, then Scan."
+    });
     try{target.scrollIntoView({behavior:"smooth",block:"start"});}catch(e){}
     return false;
   }
@@ -14262,7 +14271,7 @@ async function gdHandleLaunchMonitorPhoto(file){
       warnings:["Photo import uses the existing photo scan tools; native photo extraction is not connected yet."],
       errors:[],
       photoAction:true,
-      nextStep:"View the uploaded photo screen, adjust the square if needed, then Scan."
+      nextStep:"Adjust the generated box around the value grid, then Scan."
     });
     gdPracticeRefreshDebugTools();
   }catch(e){
@@ -14580,14 +14589,14 @@ document.addEventListener("change",event=>{
       warnings:["Photo selected - photo extraction is not connected to native practice storage yet."],
       errors:file?[]:["No photo selected"],
       photoAction:!!file,
-      nextStep:file?"View the uploaded photo screen, adjust the square if needed, then Scan.":"Select a photo, or paste CSV/text for the native workflow."
+      nextStep:file?"Adjust the generated box around the value grid, then Scan.":"Select a photo, or paste CSV/text for the native workflow."
     });
     gdHandleLaunchMonitorPhoto(file);
   }
   else gdHandleLaunchMonitorUpload(file);
   input.value="";
 },true);
-Object.assign(window,{gdLoadLaunchMonitorDemo,gdClearLaunchMonitorDemo,gdPickLaunchMonitorFile,gdPickPracticePhotoFile,gdRevealPracticePhotoScreen,gdHandleNativePracticeTextFile,gdHandleLaunchMonitorUpload,gdHandleLaunchMonitorPhoto,gdScanPracticePhotoCrop,gdOpenPracticeManualQuadTool,gdApplyPracticeManualQuad,gdRunDefaultPracticePhotoScan,gdRunDefaultPracticePhotoScanFromCheckpoint,gdSetPracticePhotoProcessing,gdPracticeRefreshDebugTools,gdContinuePracticePhotoScan,gdImportReviewedPracticeOcr,gdCancelPracticePhotoScan,gdCancelPracticeOcrReview,gdPracticeScanClubLabel,gdPracticeScanClubLabels,gdLoadExtractedPractice7iData,gdPracticeSetExtractionPreview,gdPracticeClearExtractionPreview,gdImportPracticeExtractionPreview,gdBuildLaunchMonitorTextCapture,gdCleanLaunchMonitorOcrText,gdLmCaptureToReviewText,gdAnalyzeFlatTableImage,gdFitFlatTableTemplateFromAnalysis,gdBuildFlatTableTemplateColumnScan,gdRunFlatTemplateBridgeFromCheckpoint,gdRunPracticeGridExperiment,gdRunFittedCellGridOcr,gdBuildFlatDigitizedTable,gdRenderFlatDigitizedTable,gdPickRawCourseDataFile,gdHandleRawCourseDataUpload,gdClearCourseShotData});
+Object.assign(window,{gdLoadLaunchMonitorDemo,gdClearLaunchMonitorDemo,gdPickLaunchMonitorFile,gdPickPracticePhotoFile,gdAdjustPracticeGeneratedBox,gdHandleNativePracticeTextFile,gdHandleLaunchMonitorUpload,gdHandleLaunchMonitorPhoto,gdScanPracticePhotoCrop,gdOpenPracticeManualQuadTool,gdApplyPracticeManualQuad,gdRunDefaultPracticePhotoScan,gdRunDefaultPracticePhotoScanFromCheckpoint,gdSetPracticePhotoProcessing,gdPracticeRefreshDebugTools,gdContinuePracticePhotoScan,gdImportReviewedPracticeOcr,gdCancelPracticePhotoScan,gdCancelPracticeOcrReview,gdPracticeScanClubLabel,gdPracticeScanClubLabels,gdLoadExtractedPractice7iData,gdPracticeSetExtractionPreview,gdPracticeClearExtractionPreview,gdImportPracticeExtractionPreview,gdBuildLaunchMonitorTextCapture,gdCleanLaunchMonitorOcrText,gdLmCaptureToReviewText,gdAnalyzeFlatTableImage,gdFitFlatTableTemplateFromAnalysis,gdBuildFlatTableTemplateColumnScan,gdRunFlatTemplateBridgeFromCheckpoint,gdRunPracticeGridExperiment,gdRunFittedCellGridOcr,gdBuildFlatDigitizedTable,gdRenderFlatDigitizedTable,gdPickRawCourseDataFile,gdHandleRawCourseDataUpload,gdClearCourseShotData});
 function gdLmStatusClass(status){
   if(["corroborated","cross_distance_verified","verified_by_result","cluster_candidate","delivery_only","result_only"].includes(status))return "good";
   if(["conflict_check","alignment_signal"].includes(status))return "warn";
@@ -31134,7 +31143,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
         <div class="warn"><b>Warnings:</b> ${gdEscapeHTML(warnings.join("; "))}</div>
         <div class="error"><b>Errors:</b> ${gdEscapeHTML(errors.join("; "))}</div>
         <div><b>Next step:</b> ${gdEscapeHTML(state.nextStep||"Upload a text file, paste CSV, or take/upload a photo.")}</div>
-        ${state.photoAction?`<div class="gdNativePracticeFeedbackAction"><button type="button" onclick="return gdRevealPracticePhotoScreen()">View uploaded photo</button></div>`:""}
+        ${state.photoAction?`<div class="gdNativePracticeFeedbackAction"><button type="button" onclick="return gdAdjustPracticeGeneratedBox()">Adjust generated box</button></div>`:""}
         <div><b>Accepted fields:</b> club, carry, total, offline, face, path, face-to-path, start direction, launch, spin, ball speed, club speed.</div>
         ${state.savedBatchId?`<div><b>Saved batch:</b> ${gdEscapeHTML(state.savedBatchId)} · <b>Session:</b> ${gdEscapeHTML(state.savedSessionId||"-")}</div>`:""}
       </div>
