@@ -8956,7 +8956,7 @@ function gdVisualNumberBoxTracks(numberBoxes,rowCount,medianH,colGap,width){
     best.boxes.push(box);
     best.cx=gdValueClusterMedian(best.boxes.map(item=>Number(item.cx)))||best.cx;
   });
-  const minRows=Math.max(3,Math.min(7,Math.round((Number(rowCount)||0)*.42)));
+  const minRows=(Number(rowCount)||0)<=3?2:Math.max(3,Math.min(7,Math.round((Number(rowCount)||0)*.42)));
   return tracks.map(track=>{
     const rows=new Set(track.boxes.map(box=>Number(box.rowIndex)).filter(Number.isFinite));
     return Object.assign(track,{
@@ -9221,11 +9221,16 @@ function gdFlatTableFail(reason,data={}){
   }catch(e){}
   return null;
 }
+function gdFlatTableMinimumAcceptedRows(){return 3;}
+function gdFlatTableMinimumTrackRows(rowCount){
+  const rows=Number(rowCount)||0;
+  return rows<=3?2:Math.max(3,Math.round(rows*.34));
+}
 function gdFlatTableReasonText(reason){
   return ({
     "flat-image-too-small":"The flat scan image is too small to read.",
     "flat-components-too-few":"The detector found too few dark value components.",
-    "flat-value-rows-too-few":"The detector found fewer than four accepted value rows.",
+    "flat-value-rows-too-few":"The detector found fewer than the required accepted value rows.",
     "flat-row-run-too-small":"The accepted value rows did not form a repeated run.",
     "flat-number-tracks-too-few":"The detector found rows, but not enough repeated number tracks.",
     "flat-template-not-enough-tracks":"The detector found too few column tracks for the template.",
@@ -9365,7 +9370,8 @@ function gdAnalyzeFlatTableImage(image,opts={}){
     return candidate;
   });
   const rawRows=rowCandidates.filter(row=>row.accepted);
-  if(rawRows.length<4)return gdFlatTableFail("flat-value-rows-too-few",{width,height,componentCount:comps.length,rawRowCount:rawRows.length,componentBoxes:comps.slice(0,360),rowCandidates:rowCandidates.slice(0,80),rawRows});
+  const requiredRows=gdFlatTableMinimumAcceptedRows();
+  if(rawRows.length<requiredRows)return gdFlatTableFail("flat-value-rows-too-few",{width,height,componentCount:comps.length,rawRowCount:rawRows.length,requiredRows,componentBoxes:comps.slice(0,360),rowCandidates:rowCandidates.slice(0,80),rawRows});
   const gaps=[];
   for(let index=1;index<rawRows.length;index+=1){
     const gap=rawRows[index].cy-rawRows[index-1].cy;
@@ -9392,7 +9398,7 @@ function gdAnalyzeFlatTableImage(image,opts={}){
     const bSpan=(b.at(-1)?.cy||0)-(b[0]?.cy||0);
     return (b.length*1000+bSpan)-(a.length*1000+aSpan);
   })[0]||[];
-  if(clusterRows.length<4)return gdFlatTableFail("flat-row-run-too-small",{width,height,componentCount:comps.length,rawRowCount:rawRows.length,runCount:runs.length,componentBoxes:comps.slice(0,360),rowCandidates:rowCandidates.slice(0,80),rawRows});
+  if(clusterRows.length<requiredRows)return gdFlatTableFail("flat-row-run-too-small",{width,height,componentCount:comps.length,rawRowCount:rawRows.length,requiredRows,runCount:runs.length,componentBoxes:comps.slice(0,360),rowCandidates:rowCandidates.slice(0,80),rawRows});
   const xGaps=[];
   clusterRows.forEach(row=>{
     const xs=row.comps.map(comp=>comp.cx).sort((a,b)=>a-b);
@@ -9405,7 +9411,7 @@ function gdAnalyzeFlatTableImage(image,opts={}){
   const numberRowInfos=gdVisualSupportedNumberRows(clusterRows,medianH,colGap,width);
   const numberBoxes=numberRowInfos.flatMap(info=>(Array.isArray(info.supportedBoxes)?info.supportedBoxes:[]).map(box=>Object.assign({},box,{rowIndex:info.rowIndex})));
   const numberTracks=gdVisualNumberBoxTracks(numberBoxes,clusterRows.length,medianH,colGap,width);
-  if(numberTracks.length<8)return gdFlatTableFail("flat-number-tracks-too-few",{width,height,componentCount:comps.length,rawRowCount:rawRows.length,rowCount:clusterRows.length,numberBoxCount:numberBoxes.length,trackCount:numberTracks.length,componentBoxes:comps.slice(0,360),rowCandidates:rowCandidates.slice(0,80),rawRows});
+  if(numberTracks.length<8)return gdFlatTableFail("flat-number-tracks-too-few",{width,height,componentCount:comps.length,rawRowCount:rawRows.length,requiredRows,rowCount:clusterRows.length,numberBoxCount:numberBoxes.length,trackCount:numberTracks.length,componentBoxes:comps.slice(0,360),rowCandidates:rowCandidates.slice(0,80),rawRows});
   const rowBands=clusterRows.map((row,index,array)=>{
     const prev=array[index-1];
     const next=array[index+1];
@@ -9457,9 +9463,10 @@ function gdFlatTableTrackStats(track){
   });
 }
 function gdFlatTableCandidateTracks(analysis){
+  const minTrackRows=gdFlatTableMinimumTrackRows(Number(analysis?.rowCount)||0);
   const raw=(Array.isArray(analysis?.numberTracks)?analysis.numberTracks:[])
     .map(gdFlatTableTrackStats)
-    .filter(track=>Number.isFinite(Number(track.cx))&&Number(track.rowCount)>=Math.max(3,Math.round((Number(analysis?.rowCount)||0)*.34)))
+    .filter(track=>Number.isFinite(Number(track.cx))&&Number(track.rowCount)>=minTrackRows)
     .sort((a,b)=>a.cx-b.cx);
   if(!raw.length)return [];
   const medianWidth=gdValueClusterMedian(raw.map(track=>track.width))||0;
@@ -9514,7 +9521,8 @@ function gdFitFlatTableTemplateFromAnalysis(analysis){
   const template=gdFlatTableTemplateColumns();
   const targetCount=template.length;
   const tracks=gdFlatTableCandidateTracks(analysis);
-  if(tracks.length<targetCount)return gdFlatTableFail("flat-template-not-enough-tracks",{width:Number(analysis?.width)||0,height:Number(analysis?.height)||0,componentCount:Number(analysis?.count)||0,rawRowCount:Number(analysis?.rawRows?.length)||Number(analysis?.rowCount)||0,rowCount:Number(analysis?.rowCount)||0,trackCount:tracks.length,targetCount,rowCandidates:Array.isArray(analysis?.rowCandidates)?analysis.rowCandidates.slice(0,80):[],rawRows:Array.isArray(analysis?.rawRows)?analysis.rawRows:[],componentBoxes:Array.isArray(analysis?.componentBoxes)?analysis.componentBoxes.slice(0,360):[]});
+  const minTrackRows=gdFlatTableMinimumTrackRows(Number(analysis?.rowCount)||0);
+  if(tracks.length<targetCount)return gdFlatTableFail("flat-template-not-enough-tracks",{width:Number(analysis?.width)||0,height:Number(analysis?.height)||0,componentCount:Number(analysis?.count)||0,rawRowCount:Number(analysis?.rawRows?.length)||Number(analysis?.rowCount)||0,requiredRows:gdFlatTableMinimumAcceptedRows(),rowCount:Number(analysis?.rowCount)||0,trackCount:tracks.length,minTrackRows,targetCount,rowCandidates:Array.isArray(analysis?.rowCandidates)?analysis.rowCandidates.slice(0,80):[],rawRows:Array.isArray(analysis?.rawRows)?analysis.rawRows:[],componentBoxes:Array.isArray(analysis?.componentBoxes)?analysis.componentBoxes.slice(0,360):[]});
   let best=null;
   let checked=0;
   const combo=[];
@@ -9536,7 +9544,7 @@ function gdFitFlatTableTemplateFromAnalysis(analysis){
     }
   };
   visit(0);
-  if(!best)return gdFlatTableFail("flat-template-fit-failed",{width:Number(analysis?.width)||0,height:Number(analysis?.height)||0,componentCount:Number(analysis?.count)||0,rawRowCount:Number(analysis?.rawRows?.length)||Number(analysis?.rowCount)||0,rowCount:Number(analysis?.rowCount)||0,trackCount:tracks.length,targetCount,checked,rowCandidates:Array.isArray(analysis?.rowCandidates)?analysis.rowCandidates.slice(0,80):[],rawRows:Array.isArray(analysis?.rawRows)?analysis.rawRows:[],componentBoxes:Array.isArray(analysis?.componentBoxes)?analysis.componentBoxes.slice(0,360):[]});
+  if(!best)return gdFlatTableFail("flat-template-fit-failed",{width:Number(analysis?.width)||0,height:Number(analysis?.height)||0,componentCount:Number(analysis?.count)||0,rawRowCount:Number(analysis?.rawRows?.length)||Number(analysis?.rowCount)||0,requiredRows:gdFlatTableMinimumAcceptedRows(),rowCount:Number(analysis?.rowCount)||0,trackCount:tracks.length,minTrackRows,targetCount,checked,rowCandidates:Array.isArray(analysis?.rowCandidates)?analysis.rowCandidates.slice(0,80):[],rawRows:Array.isArray(analysis?.rawRows)?analysis.rawRows:[],componentBoxes:Array.isArray(analysis?.componentBoxes)?analysis.componentBoxes.slice(0,360):[]});
   const result=Object.assign(best,{template,source:"flat-number-box-template",candidateTrackCount:tracks.length,checked});
   try{window.__gdFlatTableLastFit=result;}catch(e){}
   return result;
@@ -9615,7 +9623,7 @@ function gdBuildFlatTableTemplateColumnScan(image,checkpoint=null){
   if(!fit)return gdFlatTableFailureScan(image,checkpoint,window.__gdFlatTableLastDebug||null);
   const columns=gdFlatTableColumnsFromFit(analysis,fit);
   if(columns.length<gdFlatTableTemplateColumns().length){
-    gdFlatTableFail("flat-template-columns-incomplete",{width:Number(analysis?.width)||0,height:Number(analysis?.height)||0,componentCount:Number(analysis?.count)||0,rawRowCount:Number(analysis?.rawRows?.length)||Number(analysis?.rowCount)||0,rowCount:Number(analysis?.rowCount)||0,columnCount:columns.length,rowCandidates:Array.isArray(analysis?.rowCandidates)?analysis.rowCandidates.slice(0,80):[],rawRows:Array.isArray(analysis?.rawRows)?analysis.rawRows:[],componentBoxes:Array.isArray(analysis?.componentBoxes)?analysis.componentBoxes.slice(0,360):[]});
+    gdFlatTableFail("flat-template-columns-incomplete",{width:Number(analysis?.width)||0,height:Number(analysis?.height)||0,componentCount:Number(analysis?.count)||0,rawRowCount:Number(analysis?.rawRows?.length)||Number(analysis?.rowCount)||0,requiredRows:gdFlatTableMinimumAcceptedRows(),rowCount:Number(analysis?.rowCount)||0,columnCount:columns.length,rowCandidates:Array.isArray(analysis?.rowCandidates)?analysis.rowCandidates.slice(0,80):[],rawRows:Array.isArray(analysis?.rawRows)?analysis.rawRows:[],componentBoxes:Array.isArray(analysis?.componentBoxes)?analysis.componentBoxes.slice(0,360):[]});
     return gdFlatTableFailureScan(image,checkpoint,window.__gdFlatTableLastDebug||null);
   }
   const cluster=gdFlatTableClusterFromAnalysis(analysis);
@@ -12257,7 +12265,7 @@ function gdRenderFlatTableFailureWindow(columnScan){
     "Actual flat scan image passed to the row detector.",
     `Reason: ${gdFlatTableReasonText(debug.reason)}`,
     `Image: ${Math.round(sourceW)} x ${Math.round(sourceH)}`,
-    `Accepted rows: ${Number(debug.rawRowCount)||rows.filter(row=>row.accepted).length} / 4 required`,
+    `Accepted rows: ${Number(debug.rawRowCount)||rows.filter(row=>row.accepted).length} / ${Number(debug.requiredRows)||gdFlatTableMinimumAcceptedRows()} required`,
     `Detected components: ${Number(debug.componentCount)||0}`,
     rows.length?`Candidate row bands: ${rows.length}`:"Candidate row bands: none"
   ].join("\n");
@@ -12560,7 +12568,7 @@ function gdRenderFlatTableBridgeCheckpoint(columnScan){
   gdRenderPracticeScanCheckpoint({
     tone:rows&&columns?"ready":"warn",
     title:failed?"Flat table row detector stopped":(digitizedRows?"Digitised table ready":(rows&&columns?"Flat table grid ready":"Flat table grid not fitted")),
-    summary:failed?`${gdFlatTableReasonText(failure.reason)} The actual flat scan accepted ${Number(failure.rawRowCount)||0} row band${Number(failure.rawRowCount)===1?"":"s"}; 4 are required before cells can be OCR scanned.`:(digitizedRows?`Fitted cells were OCR scanned into an owned digitised table. Review ${flags} flagged/missing cells against the crops before importing.`:(rows&&columns?"Rows, columns, and cells were fitted on the straight flat image. OCR cleanup stays parked until this geometry is reliable.":"The flat image did not expose enough repeated number stacks. Retake with the table sharper and flatter.")),
+    summary:failed?`${gdFlatTableReasonText(failure.reason)} The actual flat scan accepted ${Number(failure.rawRowCount)||0} row band${Number(failure.rawRowCount)===1?"":"s"}; ${Number(failure.requiredRows)||gdFlatTableMinimumAcceptedRows()} are required before cells can be OCR scanned.`:(digitizedRows?`Fitted cells were OCR scanned into an owned digitised table. Review ${flags} flagged/missing cells against the crops before importing.`:(rows&&columns?"Rows, columns, and cells were fitted on the straight flat image. OCR cleanup stays parked until this geometry is reliable.":"The flat image did not expose enough repeated number stacks. Retake with the table sharper and flatter.")),
     stats:[
       {label:"Rows",value:failed?(Number(failure.rawRowCount)||0):(rows||"-")},
       {label:"Columns",value:columns||"-"},
