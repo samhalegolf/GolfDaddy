@@ -2301,6 +2301,13 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 .gdTemplateOutcomeStats{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
 .gdTemplateOutcomeStats b{border-radius:999px;padding:5px 7px;background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.09);color:rgba(255,255,255,.76);font:950 9px/1 ui-monospace,SFMono-Regular,Menlo,monospace}
 .gdTemplateOutcomeText{display:block;margin-top:8px;color:rgba(255,255,255,.62);font:850 10px/1.35 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap}
+.gdOcrHeaderCandidateDetails{margin-top:8px;border-radius:10px;background:rgba(0,0,0,.20);border:1px solid rgba(255,255,255,.09);overflow:hidden}
+.gdOcrHeaderCandidateDetails summary{cursor:pointer;padding:8px 10px;color:#ffe3a3;font:950 10px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.02em;text-transform:uppercase}
+.gdOcrHeaderCandidateDetails table{width:100%;border-collapse:collapse;font:850 9px/1.25 ui-monospace,SFMono-Regular,Menlo,monospace;color:rgba(255,255,255,.70)}
+.gdOcrHeaderCandidateDetails th,.gdOcrHeaderCandidateDetails td{padding:6px 7px;border-top:1px solid rgba(255,255,255,.07);vertical-align:top;text-align:left}
+.gdOcrHeaderCandidateDetails th{color:rgba(255,255,255,.45);text-transform:uppercase;letter-spacing:.04em}
+.gdOcrHeaderCandidateDetails tr.best td{background:rgba(255,211,116,.08);color:#fff2c7}
+.gdOcrHeaderCandidateText{max-width:420px;white-space:normal;overflow-wrap:anywhere}
 .gdFlatTemplatePreview>summary{color:#eafff2}
 .gdFlatFailurePreview{border-color:rgba(255,90,95,.28);background:rgba(255,90,95,.055)}
 .gdFlatFailurePreview>summary{color:#ffccd1}
@@ -6778,30 +6785,109 @@ function gdLmClubFromLine(line,opts={}){
   if(iron)return `${iron[1]}i`;
   return raw.replace("iron","i").toUpperCase();
 }
+const GD_LM_FALLBACK_ALIAS_ENTRIES=[
+  {key:"club",label:"Club",aliases:["club","club label","club name"]},
+  {key:"carry",label:"Carry",rawLabel:"Carry",candidateMetric:"carryDistance",unit:"m",confidence:.72,aliases:["carry","total carry","carry distance","carry dist","distance","carrydistance"]},
+  {key:"total",label:"Total",rawLabel:"Total",candidateMetric:"totalDistance",unit:"m",confidence:.68,aliases:["total","total distance","total dist","totaldistance"]},
+  {key:"offline",label:"Offline",rawLabel:"Offline",candidateMetric:"offline",unit:"m",confidence:.7,aliases:["offline","off line","off","side","side carry","side total","lateral","dispersion"]},
+  {key:"clubSpeed",label:"ClubSpeed",rawLabel:"ClubSpeed",candidateMetric:"clubSpeed",unit:"m/s",confidence:.42,aliases:["club speed","clubspeed","club head speed","clubhead speed","clubheadspeed","swing speed","swingspeed","chs"]},
+  {key:"attackAngle",label:"AttackAngle",rawLabel:"AttackAngle",candidateMetric:"attackAngle",unit:"deg",confidence:.42,aliases:["attack","attack angle","attack ang","attackangle","attackang","angle of attack","aoa"]},
+  {key:"sideAngle",label:"SideAngle",rawLabel:"SideAngle",candidateMetric:"sideAngle",unit:"deg",confidence:.66,aliases:["side angle","sideangle","side ang","sideang","offline angle","offlineangle","lateral angle","lateralangle","result angle","resultangle"]},
+  {key:"launchDirection",label:"LaunchDirection",rawLabel:"LaunchDirection",candidateMetric:"launchDirection",unit:"deg",confidence:.66,aliases:["launch direction","launch dir","launchdirection","launchdir","start direction","startdirection","start line","startline","horizontal launch","horizontal launch angle","horizontallaunch","azimuth","direction","hla"]},
+  {key:"ballSpeed",label:"BallSpeed",rawLabel:"BallSpeed",candidateMetric:"ballSpeed",unit:"mph",confidence:.58,aliases:["ball","ball speed","ballspeed","ball speed mph","ballspeedmph","ball spd","ballspd","b speed","bspeed","bspd","ball velocity","initial velocity","bs"],metricNames:["speed"]},
+  {key:"smashFactor",label:"Smash",rawLabel:"Smash",candidateMetric:"smashFactor",unit:"",confidence:.58,aliases:["smash","smash factor","smashfac","smashfactor"]},
+  {key:"spinAxis",label:"SpinAxis",rawLabel:"SpinAxis",candidateMetric:"spinAxis",unit:"deg",confidence:.54,aliases:["spin axis","spinaxis","axis"]},
+  {key:"sideSpin",label:"SideSpin",rawLabel:"SideSpin",candidateMetric:"sideSpin",unit:"rpm",confidence:.52,aliases:["side spin","sidespin","side spin rpm","sidespinrpm"]},
+  {key:"totalSpin",label:"TotalSpin",rawLabel:"TotalSpin",candidateMetric:"totalSpin",unit:"rpm",confidence:.5,aliases:["spin","spin rate","spinrate","spin rpm","spinrpm","total spin","totalspin"],metricNames:["backspin"]},
+  {key:"backspin",label:"Backspin",rawLabel:"Backspin",candidateMetric:"backspin",unit:"rpm",confidence:.48,aliases:["backspin","back spin"]},
+  {key:"faceToPath",label:"FaceToPath",rawLabel:"FaceToPath",candidateMetric:"faceToPath",unit:"deg",confidence:.74,aliases:["face to path","face/path","face path","facetopath","facepath","ftp"]},
+  {key:"swingDirection",label:"SwingDirection",rawLabel:"SwingDirection",candidateMetric:"swingDirection",unit:"deg",confidence:.52,aliases:["swing direction","swing dir","swingdirection","swingdir"]},
+  {key:"clubPath",label:"ClubPath",rawLabel:"ClubPath",candidateMetric:"clubPath",unit:"deg",confidence:.72,aliases:["club path","clubpath","path"]},
+  {key:"faceAngle",label:"FaceAngle",rawLabel:"FaceAngle",candidateMetric:"faceAngle",unit:"deg",confidence:.68,aliases:["face angle","face ang","faceangle","faceang","face to target","face target"]},
+  {key:"dynamicLoft",label:"DynamicLoft",rawLabel:"DynamicLoft",candidateMetric:"dynamicLoft",unit:"deg",confidence:.58,aliases:["dynamic loft","dynamicloft","dyn loft","dynloft"]},
+  {key:"launch",label:"Launch",rawLabel:"Launch",candidateMetric:"launchAngle",unit:"deg",confidence:.48,aliases:["launch","launch angle","launch ang","launchangle","launchang","vertical launch","vertical launch angle","vla"]},
+  {key:"peakHeight",label:"PeakHeight",rawLabel:"PeakHeight",candidateMetric:"peakHeight",unit:"ft",confidence:.42,aliases:["height","peak","peak height","peak ht","peakheight","peakht","apex","apex height","max height","maximum height"]},
+  {key:"descent",label:"Descent",rawLabel:"Descent",candidateMetric:"descentAngle",unit:"deg",confidence:.42,aliases:["descent","desc","descent angle","descentangle","land angle","landing angle","landangle","landingangle"]},
+  {key:"toPin",label:"To Pin",aliases:["to pin","topin","dist to pin","distance to pin","disttopin"]}
+];
+let gdLmFallbackAliasCache=null;
+function gdLmCompactAliasToken(value){
+  return String(value||"").trim().toLowerCase().replace(/[^a-z0-9]/g,"");
+}
+function gdLmFallbackAliasRegistry(){
+  if(gdLmFallbackAliasCache)return gdLmFallbackAliasCache;
+  const byKey={},byAlias={};
+  const unique=values=>[...new Set((values||[]).map(value=>String(value||"").trim()).filter(Boolean).map(value=>[value.toLowerCase(),value]).map(item=>item[1]))];
+  GD_LM_FALLBACK_ALIAS_ENTRIES.forEach(entry=>{
+    byKey[entry.key]=entry;
+    unique([entry.key,entry.label,entry.rawLabel,entry.candidateMetric].concat(entry.aliases||[],entry.headerAliases||[])).forEach(alias=>{
+      const token=gdLmCompactAliasToken(alias);
+      if(token)byAlias[token]=entry.key;
+    });
+  });
+  gdLmFallbackAliasCache={byKey,byAlias};
+  return gdLmFallbackAliasCache;
+}
+function gdLmFallbackEntryFor(keyOrAlias){
+  const registry=gdLmFallbackAliasRegistry();
+  const raw=String(keyOrAlias||"").trim();
+  if(!raw)return null;
+  return registry.byKey[raw]||registry.byKey[registry.byAlias[gdLmCompactAliasToken(raw)]]||null;
+}
+function gdLmFallbackCanonicalMetricKey(value){
+  const entry=gdLmFallbackEntryFor(value);
+  return entry?.key||"";
+}
+function gdLmFallbackMetricConfig(keyOrAlias){
+  const entry=gdLmFallbackEntryFor(keyOrAlias);
+  if(!entry||!entry.candidateMetric)return null;
+  return {
+    key:entry.key,
+    label:entry.rawLabel||entry.label||entry.key,
+    candidateMetric:entry.candidateMetric,
+    unit:entry.unit||"",
+    confidence:Number.isFinite(Number(entry.confidence))?Number(entry.confidence):.5
+  };
+}
 function gdLmAliasRegistry(){
   return window.GolfDaddyLaunchMonitorAliasRegistry||window.ClarityCaddieLaunchMonitorAliasRegistry||window.LaunchMonitorAliasRegistry||null;
 }
+function gdLmAliasRegistryStatus(){
+  const registry=gdLmAliasRegistry();
+  return registry&&typeof registry.canonicalKey==="function"?`alias registry ${registry.version||"loaded"}`:"fallback header aliases";
+}
 function gdLmCanonicalMetricKey(value){
   const registry=gdLmAliasRegistry();
-  return registry&&typeof registry.canonicalKey==="function"?registry.canonicalKey(value):"";
+  const key=registry&&typeof registry.canonicalKey==="function"?registry.canonicalKey(value):"";
+  return key||gdLmFallbackCanonicalMetricKey(value);
 }
 function gdLmHeaderLabelForKey(key){
   const registry=gdLmAliasRegistry();
-  return registry&&typeof registry.headerLabel==="function"?registry.headerLabel(key):String(key||"");
+  if(registry&&typeof registry.headerLabel==="function"){
+    const label=registry.headerLabel(key);
+    if(label&&String(label)!==String(key||""))return label;
+  }
+  const entry=gdLmFallbackEntryFor(key);
+  return entry?.label||String(key||"");
 }
 function gdLmLineAliasesForKey(key){
   const registry=gdLmAliasRegistry();
   const aliases=registry&&typeof registry.lineAliases==="function"?registry.lineAliases(key):[];
-  return aliases.length?aliases:[key];
+  if(aliases.length)return aliases;
+  const entry=gdLmFallbackEntryFor(key);
+  return entry?[entry.label,entry.rawLabel,entry.candidateMetric,entry.key].concat(entry.aliases||[]).filter(Boolean):[key];
 }
 function gdLmMetricNamesForKey(key){
   const registry=gdLmAliasRegistry();
   const names=registry&&typeof registry.metricNames==="function"?registry.metricNames(key):[];
-  return names.length?names:[key];
+  if(names.length)return names;
+  const entry=gdLmFallbackEntryFor(key);
+  return entry?[entry.candidateMetric,entry.rawLabel,entry.label,entry.key].concat(entry.metricNames||[],entry.aliases||[]).filter(Boolean):[key];
 }
 function gdLmMetricConfigForKey(key){
   const registry=gdLmAliasRegistry();
-  return registry&&typeof registry.metricConfig==="function"?registry.metricConfig(key):null;
+  const config=registry&&typeof registry.metricConfig==="function"?registry.metricConfig(key):null;
+  return config||gdLmFallbackMetricConfig(key);
 }
 function gdLmMetricImportKeys(){
   const registry=gdLmAliasRegistry();
@@ -6999,6 +7085,35 @@ function gdLmHeaderColumnAt(words,index){
   const token=gdLmNormalToken(word?.text);
   if(token==="speed")return span("ballSpeed","Ball Speed");
   return null;
+}
+function gdLmHeaderCandidateForLine(line,index){
+  const words=line?.words||[];
+  const columns=[];
+  for(let i=0;i<words.length;i++){
+    const column=gdLmHeaderColumnAt(words,i);
+    if(column){
+      columns.push(column);
+      i+=column.skip||0;
+    }
+  }
+  const unique=[...new Set(columns.map(column=>column.key).filter(key=>key&&key!=="club"))];
+  const score=unique.length+(unique.includes("carry")?1:0);
+  const text=String(line?.text||words.map(word=>String(word?.text||"").trim()).filter(Boolean).join(" ")).trim();
+  return {
+    index,
+    line,
+    text,
+    wordCount:words.length,
+    columns,
+    unique,
+    matchedLabels:columns.map(column=>`${String(column.label||column.key)}=${String(column.key)}`),
+    score,
+    accepted:score>=3,
+    reason:score>=3?"accepted header row":"needs at least 3 recognized metric headers"
+  };
+}
+function gdLmHeaderCandidatesFromLines(lines,limit=14){
+  return (Array.isArray(lines)?lines:[]).slice(0,limit).map((line,index)=>gdLmHeaderCandidateForLine(line,index));
 }
 function gdLmLaunchMonitorTemplateColumns(){
   return [
@@ -7252,20 +7367,10 @@ function gdLmUnitFromText(text){
   return "";
 }
 function gdLmBuildLayoutColumns(lines){
+  const candidates=gdLmHeaderCandidatesFromLines(lines);
   let best=null;
-  lines.slice(0,14).forEach((line,index)=>{
-    const words=line.words||[];
-    const columns=[];
-    for(let i=0;i<words.length;i++){
-      const column=gdLmHeaderColumnAt(words,i);
-      if(column){
-        columns.push(column);
-        i+=column.skip||0;
-      }
-    }
-    const unique=[...new Set(columns.map(column=>column.key).filter(key=>key&&key!=="club"))];
-    const score=unique.length+(unique.includes("carry")?1:0);
-    if(score>=3&&(!best||score>best.score))best={line,index,columns,score};
+  candidates.forEach(candidate=>{
+    if(candidate.score>=3&&(!best||candidate.score>best.score))best=candidate;
   });
   if(!best)return null;
   const detectedColumns=best.columns
@@ -7283,7 +7388,7 @@ function gdLmBuildLayoutColumns(lines){
       if(column)units[column.key]=unit;
     });
   }
-  return {headerIndex:best.index,headerLine:best.line,columns,units};
+  return {headerIndex:best.index,headerLine:best.line,columns,units,headerCandidates:candidates};
 }
 function gdLmDetectedSessionClub(lines){
   for(const line of lines.slice(0,10)){
@@ -12229,6 +12334,50 @@ function gdAppendTemplateOutcomePayloadTable(parent,payload,title="OCR rows"){
   details.append(summary,wrap,source);
   parent.append(details);
 }
+function gdAppendOcrHeaderCandidateDetails(parent,outcome){
+  if(!parent||String(outcome?.key||"")!=="ocr")return;
+  const candidates=Array.isArray(outcome?.headerCandidates)?outcome.headerCandidates:[];
+  if(!candidates.length)return;
+  const details=document.createElement("details");
+  details.className="gdOcrHeaderCandidateDetails";
+  details.open=!outcome?.layout?.headerLine;
+  const accepted=candidates.find(candidate=>candidate&&candidate.accepted);
+  const summary=document.createElement("summary");
+  summary.textContent=[
+    "OCR header candidates",
+    accepted?`accepted row ${Number(accepted.index)+1}`:"no accepted header",
+    outcome.aliasStatus||gdLmAliasRegistryStatus()
+  ].filter(Boolean).join(" - ");
+  const table=document.createElement("table");
+  const thead=document.createElement("thead");
+  const headRow=document.createElement("tr");
+  ["Line","Score","Matched","OCR text"].forEach(label=>{
+    const th=document.createElement("th");
+    th.textContent=label;
+    headRow.append(th);
+  });
+  thead.append(headRow);
+  const tbody=document.createElement("tbody");
+  candidates.slice(0,14).forEach(candidate=>{
+    const tr=document.createElement("tr");
+    if(candidate.accepted)tr.className="best";
+    [
+      String(Number(candidate.index)+1).padStart(2,"0"),
+      `${Number(candidate.score)||0} (${candidate.reason||""})`,
+      Array.isArray(candidate.matchedLabels)&&candidate.matchedLabels.length?candidate.matchedLabels.join(", "):"none",
+      candidate.text||"(blank)"
+    ].forEach((value,index)=>{
+      const td=document.createElement("td");
+      td.textContent=value;
+      if(index===3)td.className="gdOcrHeaderCandidateText";
+      tr.append(td);
+    });
+    tbody.append(tr);
+  });
+  table.append(thead,tbody);
+  details.append(summary,table);
+  parent.append(details);
+}
 function gdDrawOcrGeneratedTemplateOverlay(ctx,outcome,sourceW,sourceH,scale){
   const scan=outcome?.scan||{};
   const layout=outcome?.layout||scan?.layout||{};
@@ -12245,6 +12394,45 @@ function gdDrawOcrGeneratedTemplateOverlay(ctx,outcome,sourceW,sourceH,scale){
     ctx.lineWidth=2/Math.max(.001,scale);
     ctx.fillRect(0,y0,sourceW,Math.max(1,y1-y0));
     ctx.strokeRect(0,y0,sourceW,Math.max(1,y1-y0));
+  }
+  const headerCandidates=Array.isArray(outcome?.headerCandidates)&&outcome.headerCandidates.length
+    ?outcome.headerCandidates
+    :(Array.isArray(layout?.headerCandidates)&&layout.headerCandidates.length?layout.headerCandidates:gdLmHeaderCandidatesFromLines(lines));
+  if(!header?.bbox&&headerCandidates.length){
+    const ranked=headerCandidates
+      .map((candidate,order)=>Object.assign({order},candidate))
+      .sort((a,b)=>Number(b.score||0)-Number(a.score||0)||Number(a.index||0)-Number(b.index||0));
+    const shown=new Set(ranked.slice(0,6).map(candidate=>Number(candidate.index)));
+    headerCandidates.forEach((candidate,index)=>{
+      if(!shown.has(Number(candidate.index)))return;
+      const line=candidate.line||{};
+      const y0=Math.max(0,Math.min(sourceH,Number(line.bbox?.y0)||Number(line.cy)||0));
+      const y1=Math.max(y0+1,Math.min(sourceH,Number(line.bbox?.y1)||y0+Math.max(14,Number((line.words||[])[0]?.h)||18)));
+      const best=Number(candidate.score||0)===Number(ranked[0]?.score||0)&&Number(candidate.index)===Number(ranked[0]?.index);
+      ctx.fillStyle=best?"rgba(255,211,116,.15)":"rgba(255,255,255,.045)";
+      ctx.strokeStyle=best?"rgba(255,211,116,.90)":"rgba(255,255,255,.26)";
+      ctx.lineWidth=(best?2:1)/Math.max(.001,scale);
+      ctx.fillRect(0,y0,sourceW,Math.max(1,y1-y0));
+      ctx.strokeRect(0,y0,sourceW,Math.max(1,y1-y0));
+      const label=`header candidate ${Number(candidate.index)+1}: score ${Number(candidate.score)||0}`;
+      ctx.font=`${Math.max(9,11/Math.max(.001,scale))}px ui-monospace,Menlo,monospace`;
+      const pad=4/Math.max(.001,scale);
+      const metrics=ctx.measureText(label);
+      ctx.fillStyle="rgba(5,8,6,.86)";
+      ctx.fillRect(6/Math.max(.001,scale),y0+2/Math.max(.001,scale),metrics.width+pad*2,16/Math.max(.001,scale));
+      ctx.fillStyle=best?"#ffe3a3":"#ffffff";
+      ctx.textBaseline="middle";
+      ctx.fillText(label,6/Math.max(.001,scale)+pad,y0+10/Math.max(.001,scale));
+      (candidate.columns||[]).forEach(column=>{
+        const x0=Math.max(0,Math.min(sourceW,Number(column.x0)||Number(column.cx)||0));
+        const x1=Math.max(x0+1,Math.min(sourceW,Number(column.x1)||x0+1));
+        ctx.fillStyle="rgba(55,242,141,.16)";
+        ctx.strokeStyle="rgba(55,242,141,.88)";
+        ctx.lineWidth=1/Math.max(.001,scale);
+        ctx.fillRect(x0,y0,Math.max(1,x1-x0),Math.max(1,y1-y0));
+        ctx.strokeRect(x0,y0,Math.max(1,x1-x0),Math.max(1,y1-y0));
+      });
+    });
   }
   columns.forEach((column,index)=>{
     const left=Math.max(0,Math.min(sourceW,Number(column.left)||Number(column.x0)||0));
@@ -12371,6 +12559,7 @@ function gdAppendTemplateOutcomePanel(parent,outcome){
     outcome.nextStep?`Next: ${outcome.nextStep}`:""
   ].filter(Boolean).join("\n");
   if(summary.textContent)panel.append(summary);
+  gdAppendOcrHeaderCandidateDetails(panel,outcome);
   gdAppendTemplateOutcomePayloadTable(panel,outcome.payload||outcome.scan?.columnOrderPayload,String(outcome.label||"Template rows"));
   parent.append(panel);
 }
@@ -14780,27 +14969,40 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
   gdPracticeDebugCheckpointSafe("ocr_generated_template","running",{inputSummary:`${Number(scanImage.width)||0} x ${Number(scanImage.height)||0} flat image`});
   gdPracticeDebugCheckpointSafe("extraction_started","running",{inputSummary:"OCR generated layout fallback after fixed template failure"});
   try{
+    await gdEnsureLaunchMonitorAliasRegistry().catch(e=>{
+      console.warn("[GolfDaddy] launch monitor aliases unavailable; using inline fallback aliases",e);
+    });
     const Tesseract=await gdLoadTesseract();
     gdSetPracticeScanStatus("Reading headers and values for OCR-generated layout...");
     const fullResult=await gdRecognizeWithTesseract(Tesseract,scanImage,gdOcrGeneratedLayoutConfig(),"layout:ocr-generated");
     const ocrData=gdLmNormalizeOcrData(fullResult?.data||{text:"",words:[],lines:[]});
     const lines=gdLmLinesFromOcrData(ocrData);
+    const headerCandidates=gdLmHeaderCandidatesFromLines(lines);
     const layout=gdLmBuildLayoutColumns(lines);
     const wordCount=Number(ocrData.words?.length)||0;
     if(!layout){
-      const outcome=gdOcrGeneratedOutcomeFromFailure("OCR generated template could not find a header row.",scanImage,{wordCount});
-      gdPracticeDebugCheckpointSafe("ocr_generated_template","failed",{outputSummary:"OCR generated layout found no usable header",counts:{words:wordCount}});
+      const bestCandidate=headerCandidates.slice().sort((a,b)=>Number(b.score||0)-Number(a.score||0))[0]||null;
+      const outcome=gdOcrGeneratedOutcomeFromFailure("OCR generated template could not find a header row.",scanImage,{
+        wordCount,
+        ocrData,
+        headerCandidates,
+        aliasStatus:gdLmAliasRegistryStatus(),
+        summary:"The OCR-generated layout path ran, but none of the candidate header lines reached the score needed for usable columns.",
+        nextStep:"Open the OCR generated tab to inspect the highlighted header candidates and raw OCR words."
+      });
+      gdPracticeDebugCheckpointSafe("ocr_generated_template","failed",{outputSummary:"OCR generated layout found no usable header",counts:{words:wordCount,bestHeaderScore:Number(bestCandidate?.score)||0}});
       gdPracticeDebugCheckpointSafe("extraction_started","failed",{outputSummary:"OCR generated layout found no usable header"});
       gdRenderFlatTableFailureOutput(flatScan||gdFlatTableFailureScan(scanImage,checkpoint,gdFlatTableFailureDebug(flatScan)));
       gdRenderPracticeTemplateOutcomeTabs("ocr");
       return {payload:null,scan:null,outcome};
     }
     layout.lines=lines;
+    layout.headerCandidates=headerCandidates;
     const generatedRows=gdLmClusterColumnRows(gdLmColumnWordCandidates(ocrData,layout));
     const valueCluster=gdOcrGeneratedValueCluster(scanImage,flatScan,generatedRows);
     const stripScan=gdRunDirectColumnStripCrops(scanImage,layout,{shapeCrop:true,allowGrid:false,sourceMode:"ocr-generated-template"})||{};
     if(!Array.isArray(stripScan.results)||!stripScan.results.length){
-      const outcome=gdOcrGeneratedOutcomeFromFailure("OCR generated template found headers but could not create column crops.",scanImage,{wordCount,layout});
+      const outcome=gdOcrGeneratedOutcomeFromFailure("OCR generated template found headers but could not create column crops.",scanImage,{wordCount,layout,ocrData,headerCandidates,aliasStatus:gdLmAliasRegistryStatus()});
       gdPracticeDebugCheckpointSafe("ocr_generated_template","failed",{outputSummary:"OCR generated columns did not produce crops",counts:{words:wordCount,columns:Number(layout.columns?.length)||0}});
       gdPracticeDebugCheckpointSafe("extraction_started","failed",{outputSummary:"OCR generated columns did not produce crops"});
       gdRenderFlatTableFailureOutput(flatScan||gdFlatTableFailureScan(scanImage,checkpoint,gdFlatTableFailureDebug(flatScan)));
@@ -14823,6 +15025,7 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
       fullTableCanvas:checkpoint?.source||checkpoint?.fullTableSource||null,
       valueCluster,
       generatedOcrData:ocrData,
+      generatedHeaderCandidates:headerCandidates,
       generatedRowBands:generatedRows,
       ocrGeneratedTemplate:true,
       fallbackFrom:String(gdFlatTableFailureDebug(flatScan).reason||"flat-template")
@@ -14842,6 +15045,8 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
       scan:columnScan,
       layout,
       ocrData,
+      headerCandidates,
+      aliasStatus:gdLmAliasRegistryStatus(),
       payload:payload||null,
       wordCount,
       candidateCount:generatedRows.reduce((sum,row)=>sum+Number(row?.candidates?.length||0),0),
