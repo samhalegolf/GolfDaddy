@@ -7521,12 +7521,12 @@ function gdPickPracticePhotoFile(event,mode="photo"){
   event?.stopImmediatePropagation?.();
   const input=document.getElementById(mode==="camera"?"gdPracticeCameraInput":"gdPracticePhotoInput");
   if(!input){
-    gdNativePracticeFeedbackPatch({status:"failed",lastAction:"Photo picker failed",errors:["Photo picker is not ready"],nextStep:"Reopen Practice Data and try again."});
+    gdNativePracticeFeedbackBridge({status:"failed",lastAction:"Photo picker failed",errors:["Photo picker is not ready"],nextStep:"Reopen Practice Data and try again."});
     gdPracticeFeedback("Photo picker is not ready. Reopen Practice Data and try again.","error");
     return false;
   }
   try{input.value="";}catch(e){}
-  gdNativePracticeFeedbackPatch({
+  gdNativePracticeFeedbackBridge({
     status:"photo_selected",
     lastAction:mode==="camera"?"Take photo clicked":"Upload photo clicked",
     warnings:["Photo import uses the existing photo scan tools; native photo extraction is not connected yet."],
@@ -7540,7 +7540,7 @@ function gdPickPracticePhotoFile(event,mode="photo"){
   }catch(e){
     try{input.click();}
     catch(err){
-      gdNativePracticeFeedbackPatch({status:"failed",lastAction:"Photo picker failed",errors:["Photo picker could not open"],nextStep:"Try the other photo button or refresh the app."});
+      gdNativePracticeFeedbackBridge({status:"failed",lastAction:"Photo picker failed",errors:["Photo picker could not open"],nextStep:"Try the other photo button or refresh the app."});
       gdPracticeFeedback("Photo picker could not open. Try the other photo button or refresh the app.","error");
     }
   }
@@ -7723,11 +7723,20 @@ function gdGetLaunchMonitorUploadInput(){
   }
   return input;
 }
+function gdNativePracticeFeedbackBridge(patch){
+  try{
+    const fn=window.gdNativePracticeFeedbackPatch;
+    if(typeof fn==="function")return fn(patch);
+  }catch(e){
+    console.warn("[GolfDaddy] practice import feedback update skipped",e);
+  }
+  return null;
+}
 function gdPickLaunchMonitorFile(){
   const input=gdGetLaunchMonitorUploadInput();
   if(!input)return;
   try{input.value="";}catch(e){}
-  gdNativePracticeFeedbackPatch({status:"file_selected",lastAction:"Text file picker opened",warnings:[],errors:[],nextStep:"Choose a CSV/text file. It will be copied into the paste lane for review."});
+  gdNativePracticeFeedbackBridge({status:"file_selected",lastAction:"Text file picker opened",warnings:[],errors:[],nextStep:"Choose a CSV/text file. It will be copied into the paste lane for review."});
   try{
     if(typeof input.showPicker==="function")input.showPicker();
     else input.click();
@@ -7737,10 +7746,10 @@ function gdPickLaunchMonitorFile(){
 }
 async function gdHandleNativePracticeTextFile(file){
   if(!file){
-    gdNativePracticeFeedbackPatch({status:"failed",lastAction:"No text file selected",errors:["No file selected"],nextStep:"Choose a CSV/text file or paste rows manually."});
+    gdNativePracticeFeedbackBridge({status:"failed",lastAction:"No text file selected",errors:["No file selected"],nextStep:"Choose a CSV/text file or paste rows manually."});
     return false;
   }
-  gdNativePracticeFeedbackPatch({
+  gdNativePracticeFeedbackBridge({
     status:"file_selected",
     lastAction:`Text file selected: ${file.name||"plain text"}`,
     warnings:[],
@@ -7751,7 +7760,7 @@ async function gdHandleNativePracticeTextFile(file){
     const text=await file.text();
     const input=byId("gdNativePracticeImportText");
     if(input)input.value=text;
-    gdNativePracticeFeedbackPatch({
+    gdNativePracticeFeedbackBridge({
       status:"parsing",
       lastAction:`Text file received: ${file.name||"plain text"}`,
       warnings:[],
@@ -7761,7 +7770,7 @@ async function gdHandleNativePracticeTextFile(file){
     gdParseNativePracticeImport();
   }catch(e){
     console.warn("[GolfDaddy] native practice text file read failed",e);
-    gdNativePracticeFeedbackPatch({
+    gdNativePracticeFeedbackBridge({
       status:"failed",
       lastAction:"Text file read failed",
       errors:[e&&e.message?e.message:"Could not read file"],
@@ -7772,28 +7781,28 @@ async function gdHandleNativePracticeTextFile(file){
 }
 async function gdHandleLaunchMonitorUpload(file){
   if(!file)return;
-  gdNativePracticeFeedbackPatch({status:"file_selected",lastAction:`Legacy text upload selected: ${file.name||"plain text"}`,warnings:["This upload also feeds the existing launch-monitor intake path."],errors:[],nextStep:"Reading upload..."});
+  gdNativePracticeFeedbackBridge({status:"file_selected",lastAction:`Legacy text upload selected: ${file.name||"plain text"}`,warnings:["This upload also feeds the existing launch-monitor intake path."],errors:[],nextStep:"Reading upload..."});
   gdLmSetStatus("Status","Reading upload",file.name||"Plain text file","needs_more_data");
   try{
     const text=await file.text();
     const payload=gdBuildLaunchMonitorTextCapture(text,file.name||"Plain text launch monitor upload");
     if(!(payload.clubGroups||[]).length){
-      gdNativePracticeFeedbackPatch({status:"failed",lastAction:"Legacy upload parsed 0 rows",errors:["No rows detected"],nextStep:"Use pasted CSV with headers: club, carry, total, offline, face, path, start."});
+      gdNativePracticeFeedbackBridge({status:"failed",lastAction:"Legacy upload parsed 0 rows",errors:["No rows detected"],nextStep:"Use pasted CSV with headers: club, carry, total, offline, face, path, start."});
       gdLmSetStatus("Status","No usable shots found","Use lines like: 7i Carry 142 Offline 5 FaceToPath 1.6 ClubPath 0.2","conflict_check");
       gdLmToast("No launch monitor shots found");
       return;
     }
     if(gdPracticeToleranceCanEdit()){
-      gdNativePracticeFeedbackPatch({status:"parsed",lastAction:`Legacy upload parsed ${payload.clubGroups.length} row${payload.clubGroups.length===1?"":"s"}`,parsedCount:payload.clubGroups.length,validCount:payload.clubGroups.length,invalidCount:0,warnings:["Parsed into the existing launch-monitor review checkpoint, not native storage yet."],errors:[],nextStep:"Review the extraction checkpoint or use pasted CSV for native save."});
+      gdNativePracticeFeedbackBridge({status:"parsed",lastAction:`Legacy upload parsed ${payload.clubGroups.length} row${payload.clubGroups.length===1?"":"s"}`,parsedCount:payload.clubGroups.length,validCount:payload.clubGroups.length,invalidCount:0,warnings:["Parsed into the existing launch-monitor review checkpoint, not native storage yet."],errors:[],nextStep:"Review the extraction checkpoint or use pasted CSV for native save."});
       gdPracticeSetExtractionPreview(payload,`Uploaded text: ${file.name||"launch monitor file"}`);
       gdTogglePracticeAdmin(true);
       return;
     }
     await gdImportLaunchMonitorPayload(payload,"Uploaded launch monitor text");
-    gdNativePracticeFeedbackPatch({status:"saved",lastAction:`Legacy upload imported ${payload.clubGroups.length} row${payload.clubGroups.length===1?"":"s"}`,parsedCount:payload.clubGroups.length,validCount:payload.clubGroups.length,invalidCount:0,warnings:["Saved through existing launch-monitor intake, not the native row store."],errors:[],nextStep:"Use pasted CSV if you want rows in native practice storage."});
+    gdNativePracticeFeedbackBridge({status:"saved",lastAction:`Legacy upload imported ${payload.clubGroups.length} row${payload.clubGroups.length===1?"":"s"}`,parsedCount:payload.clubGroups.length,validCount:payload.clubGroups.length,invalidCount:0,warnings:["Saved through existing launch-monitor intake, not the native row store."],errors:[],nextStep:"Use pasted CSV if you want rows in native practice storage."});
   }catch(e){
     console.warn("[GolfDaddy] launch monitor upload failed",e);
-    gdNativePracticeFeedbackPatch({status:"failed",lastAction:"Text upload failed",errors:[e&&e.message?e.message:"Could not read file"],nextStep:"Try pasted CSV/text in the native import lane."});
+    gdNativePracticeFeedbackBridge({status:"failed",lastAction:"Text upload failed",errors:[e&&e.message?e.message:"Could not read file"],nextStep:"Try pasted CSV/text in the native import lane."});
     gdLmSetStatus("Status","Upload failed",e&&e.message?e.message:"Could not read file","conflict_check");
     gdLmToast("Launch monitor upload failed");
   }
@@ -14532,7 +14541,7 @@ document.addEventListener("change",event=>{
   const file=input.files&&input.files[0];
   if(input.id==="gdPracticeUploadInput")gdHandleNativePracticeTextFile(file);
   else if(input.id==="gdPracticePhotoInput"||input.id==="gdPracticeCameraInput"||file&&String(file.type||"").startsWith("image/")){
-    gdNativePracticeFeedbackPatch({
+    gdNativePracticeFeedbackBridge({
       status:"photo_selected",
       lastAction:file?`Photo selected: ${file.name||"camera image"}`:"Photo picker closed",
       warnings:["Photo selected - photo extraction is not connected to native practice storage yet."],
@@ -33994,6 +34003,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       gdToggleShotDataLibrary:gdToggleShotDataLibrary,
       gdToggleCourseImport:gdToggleCourseImport,
       gdTogglePracticeImport:gdTogglePracticeImport,
+      gdNativePracticeFeedbackPatch:gdNativePracticeFeedbackPatch,
       gdRenderNativePracticeImportLane:gdRenderNativePracticeImportLane,
       gdParseNativePracticeImport:gdParseNativePracticeImport,
       gdNativePracticePasteChanged:gdNativePracticePasteChanged,
