@@ -7115,6 +7115,9 @@ function gdLmHeaderCandidateForLine(line,index){
 function gdLmHeaderCandidatesFromLines(lines,limit=14){
   return (Array.isArray(lines)?lines:[]).slice(0,limit).map((line,index)=>gdLmHeaderCandidateForLine(line,index));
 }
+function gdLmLineValueWordCount(line){
+  return (Array.isArray(line?.words)?line.words:[]).filter(word=>gdLmLooksLikeOcrValue(word?.text)).length;
+}
 function gdLmLaunchMonitorTemplateColumns(){
   return [
     ["ballSpeed","Ball Speed"],
@@ -12342,10 +12345,12 @@ function gdAppendOcrHeaderCandidateDetails(parent,outcome){
   details.className="gdOcrHeaderCandidateDetails";
   details.open=!outcome?.layout?.headerLine;
   const accepted=candidates.find(candidate=>candidate&&candidate.accepted);
+  const probe=outcome?.headerProbe||null;
   const summary=document.createElement("summary");
   summary.textContent=[
     "OCR header candidates",
     accepted?`accepted row ${Number(accepted.index)+1}`:"no accepted header",
+    probe?.region?`probe y ${Math.round(Number(probe.region.y)||0)}-${Math.round((Number(probe.region.y)||0)+(Number(probe.region.height)||0))}`:"",
     outcome.aliasStatus||gdLmAliasRegistryStatus()
   ].filter(Boolean).join(" - ");
   const table=document.createElement("table");
@@ -12376,6 +12381,15 @@ function gdAppendOcrHeaderCandidateDetails(parent,outcome){
   });
   table.append(thead,tbody);
   details.append(summary,table);
+  if(Array.isArray(probe?.attempts)&&probe.attempts.length){
+    const probeNote=document.createElement("span");
+    probeNote.className="gdTemplateOutcomeText";
+    probeNote.textContent=[
+      `Header probe: ${probe.reason||"ran"}`,
+      ...probe.attempts.slice(0,6).map(item=>`${item.variant} ${item.mode}: ${Number(item.wordCount)||0} words${item.text?` - ${item.text}`:""}`)
+    ].join("\n");
+    details.append(probeNote);
+  }
   parent.append(details);
 }
 function gdDrawOcrGeneratedTemplateOverlay(ctx,outcome,sourceW,sourceH,scale){
@@ -12394,6 +12408,27 @@ function gdDrawOcrGeneratedTemplateOverlay(ctx,outcome,sourceW,sourceH,scale){
     ctx.lineWidth=2/Math.max(.001,scale);
     ctx.fillRect(0,y0,sourceW,Math.max(1,y1-y0));
     ctx.strokeRect(0,y0,sourceW,Math.max(1,y1-y0));
+  }
+  const probeRegion=outcome?.headerProbe?.region||null;
+  if(probeRegion){
+    const x=Math.max(0,Math.min(sourceW,Number(probeRegion.x)||0));
+    const y=Math.max(0,Math.min(sourceH,Number(probeRegion.y)||0));
+    const w=Math.max(1,Math.min(sourceW-x,Number(probeRegion.width)||sourceW));
+    const h=Math.max(1,Math.min(sourceH-y,Number(probeRegion.height)||1));
+    ctx.fillStyle="rgba(86,181,255,.07)";
+    ctx.strokeStyle="rgba(86,181,255,.88)";
+    ctx.lineWidth=2/Math.max(.001,scale);
+    ctx.fillRect(x,y,w,h);
+    ctx.strokeRect(x,y,w,h);
+    const label="header probe band";
+    ctx.font=`${Math.max(9,11/Math.max(.001,scale))}px ui-monospace,Menlo,monospace`;
+    const pad=4/Math.max(.001,scale);
+    const metrics=ctx.measureText(label);
+    ctx.fillStyle="rgba(5,8,6,.86)";
+    ctx.fillRect(x+6/Math.max(.001,scale),y+2/Math.max(.001,scale),metrics.width+pad*2,16/Math.max(.001,scale));
+    ctx.fillStyle="#cfe8ff";
+    ctx.textBaseline="middle";
+    ctx.fillText(label,x+6/Math.max(.001,scale)+pad,y+10/Math.max(.001,scale));
   }
   const headerCandidates=Array.isArray(outcome?.headerCandidates)&&outcome.headerCandidates.length
     ?outcome.headerCandidates
@@ -14896,6 +14931,121 @@ function gdOcrGeneratedLayoutConfig(){
     tessedit_pageseg_mode:"6"
   };
 }
+function gdOcrGeneratedHeaderConfig(mode="6"){
+  return {
+    preserve_interword_spaces:"1",
+    tessedit_pageseg_mode:String(mode||"6")
+  };
+}
+function gdOcrGeneratedHeaderProbeRegion(scanImage,lines){
+  const width=Number(scanImage?.width)||0;
+  const height=Number(scanImage?.height)||0;
+  if(width<40||height<40)return null;
+  const valueLines=(Array.isArray(lines)?lines:[])
+    .map((line,index)=>({line,index,valueCount:gdLmLineValueWordCount(line)}))
+    .filter(item=>item.valueCount>=3)
+    .sort((a,b)=>Number(a.line?.bbox?.y0||a.line?.cy||0)-Number(b.line?.bbox?.y0||b.line?.cy||0));
+  const first=valueLines[0]?.line||null;
+  const firstTop=Number(first?.bbox?.y0);
+  const anchor=Number.isFinite(firstTop)?firstTop:height*.22;
+  const bandTop=Math.max(0,Math.round(anchor-Math.max(84,height*.18)));
+  const bandBottom=Math.min(height,Math.max(bandTop+28,Math.round(anchor-Math.max(2,height*.004))));
+  if(bandBottom-bandTop<28)return null;
+  return {
+    x:0,
+    y:bandTop,
+    width,
+    height:bandBottom-bandTop,
+    anchorY:anchor,
+    valueLineIndex:Number.isFinite(Number(valueLines[0]?.index))?Number(valueLines[0].index):-1,
+    valueLineText:String(first?.text||"")
+  };
+}
+function gdOcrHeaderWhiteTextCanvas(source){
+  const width=Number(source?.width)||0;
+  const height=Number(source?.height)||0;
+  const canvas=document.createElement("canvas");
+  canvas.width=Math.max(1,width);
+  canvas.height=Math.max(1,height);
+  const ctx=canvas.getContext("2d",{willReadFrequently:true});
+  ctx.fillStyle="#fff";
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.drawImage(source,0,0,width,height);
+  const img=ctx.getImageData(0,0,canvas.width,canvas.height);
+  const data=img.data;
+  for(let i=0;i<data.length;i+=4){
+    const r=data[i],g=data[i+1],b=data[i+2];
+    const gray=r*.299+g*.587+b*.114;
+    const bright=gray>168&&Math.max(r,g,b)-Math.min(r,g,b)<92;
+    const headerWhite=gray>178;
+    const v=(bright||headerWhite)?0:255;
+    data[i]=data[i+1]=data[i+2]=v;
+    data[i+3]=255;
+  }
+  ctx.putImageData(img,0,0);
+  return canvas;
+}
+async function gdRunOcrGeneratedHeaderBandProbe(Tesseract,scanImage,baseOcrData,baseLines){
+  const region=gdOcrGeneratedHeaderProbeRegion(scanImage,baseLines);
+  const baseWordCount=Number(baseOcrData?.words?.length)||0;
+  if(!region)return {region:null,reason:"No value row anchor for header probe",attempts:[],wordCount:baseWordCount};
+  const crop=gdCropCanvasRegion(scanImage,region,3);
+  const variants=[
+    {label:"white text",canvas:gdOcrHeaderWhiteTextCanvas(crop.canvas)},
+    {label:"negative",canvas:gdColumnOcrVariantCanvas(crop.canvas,"negative")},
+    {label:"clean",canvas:gdColumnOcrVariantCanvas(crop.canvas,"clean")}
+  ];
+  const configs=[
+    {label:"psm6",config:gdOcrGeneratedHeaderConfig("6")},
+    {label:"psm7",config:gdOcrGeneratedHeaderConfig("7")}
+  ];
+  const probeResults=[];
+  const attempts=[];
+  for(const variant of variants){
+    for(const item of configs){
+      const result=await gdRecognizeWithTesseract(Tesseract,variant.canvas,item.config,`layout:ocr-header-${variant.label}-${item.label}`);
+      const data=gdOffsetOcrData(result?.data||{text:"",words:[],lines:[]},crop.x,crop.y,crop.scale);
+      const wordCount=Number(data.words?.length)||0;
+      attempts.push({
+        variant:variant.label,
+        mode:item.label,
+        wordCount,
+        text:String(data.text||"").trim().slice(0,160)
+      });
+      if(wordCount)probeResults.push(data);
+      const merged=gdLmNormalizeOcrData(gdMergeLaunchMonitorOcrData([baseOcrData].concat(probeResults))||baseOcrData);
+      const lines=gdLmLinesFromOcrData(merged);
+      const layout=gdLmBuildLayoutColumns(lines);
+      if(layout){
+        const headerCandidates=gdLmHeaderCandidatesFromLines(lines);
+        return {
+          region,
+          attempts,
+          ocrData:merged,
+          lines,
+          layout,
+          headerCandidates,
+          wordCount:Number(merged.words?.length)||0,
+          headerWordCount:probeResults.reduce((sum,item)=>sum+(Number(item.words?.length)||0),0),
+          reason:`Header probe accepted ${variant.label} ${item.label}`
+        };
+      }
+    }
+  }
+  const merged=probeResults.length?gdLmNormalizeOcrData(gdMergeLaunchMonitorOcrData([baseOcrData].concat(probeResults))||baseOcrData):baseOcrData;
+  const lines=gdLmLinesFromOcrData(merged);
+  return {
+    region,
+    attempts,
+    ocrData:merged,
+    lines,
+    layout:null,
+    headerCandidates:gdLmHeaderCandidatesFromLines(lines),
+    wordCount:Number(merged?.words?.length)||baseWordCount,
+    headerWordCount:probeResults.reduce((sum,item)=>sum+(Number(item.words?.length)||0),0),
+    reason:probeResults.length?"Header probe found words but no accepted header":"Header probe found no OCR words"
+  };
+}
 function gdOcrGeneratedValueCluster(scanImage,flatScan=null,generatedRows=[]){
   const failure=gdFlatTableFailureDebug(flatScan);
   const sourceW=Number(scanImage?.width)||Number(failure.width)||0;
@@ -14975,10 +15125,21 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
     const Tesseract=await gdLoadTesseract();
     gdSetPracticeScanStatus("Reading headers and values for OCR-generated layout...");
     const fullResult=await gdRecognizeWithTesseract(Tesseract,scanImage,gdOcrGeneratedLayoutConfig(),"layout:ocr-generated");
-    const ocrData=gdLmNormalizeOcrData(fullResult?.data||{text:"",words:[],lines:[]});
-    const lines=gdLmLinesFromOcrData(ocrData);
-    const headerCandidates=gdLmHeaderCandidatesFromLines(lines);
-    const layout=gdLmBuildLayoutColumns(lines);
+    let ocrData=gdLmNormalizeOcrData(fullResult?.data||{text:"",words:[],lines:[]});
+    let lines=gdLmLinesFromOcrData(ocrData);
+    let headerCandidates=gdLmHeaderCandidatesFromLines(lines);
+    let layout=gdLmBuildLayoutColumns(lines);
+    let headerProbe=null;
+    if(!layout){
+      gdSetPracticeScanStatus("OCR did not return the header row. Probing the header band above the first value row...");
+      headerProbe=await gdRunOcrGeneratedHeaderBandProbe(Tesseract,scanImage,ocrData,lines);
+      if(headerProbe?.ocrData){
+        ocrData=headerProbe.ocrData;
+        lines=headerProbe.lines||gdLmLinesFromOcrData(ocrData);
+        headerCandidates=headerProbe.headerCandidates||gdLmHeaderCandidatesFromLines(lines);
+        layout=headerProbe.layout||gdLmBuildLayoutColumns(lines);
+      }
+    }
     const wordCount=Number(ocrData.words?.length)||0;
     if(!layout){
       const bestCandidate=headerCandidates.slice().sort((a,b)=>Number(b.score||0)-Number(a.score||0))[0]||null;
@@ -14986,11 +15147,12 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
         wordCount,
         ocrData,
         headerCandidates,
+        headerProbe,
         aliasStatus:gdLmAliasRegistryStatus(),
         summary:"The OCR-generated layout path ran, but none of the candidate header lines reached the score needed for usable columns.",
         nextStep:"Open the OCR generated tab to inspect the highlighted header candidates and raw OCR words."
       });
-      gdPracticeDebugCheckpointSafe("ocr_generated_template","failed",{outputSummary:"OCR generated layout found no usable header",counts:{words:wordCount,bestHeaderScore:Number(bestCandidate?.score)||0}});
+      gdPracticeDebugCheckpointSafe("ocr_generated_template","failed",{outputSummary:"OCR generated layout found no usable header",counts:{words:wordCount,bestHeaderScore:Number(bestCandidate?.score)||0,headerProbeWords:Number(headerProbe?.headerWordCount)||0}});
       gdPracticeDebugCheckpointSafe("extraction_started","failed",{outputSummary:"OCR generated layout found no usable header"});
       gdRenderFlatTableFailureOutput(flatScan||gdFlatTableFailureScan(scanImage,checkpoint,gdFlatTableFailureDebug(flatScan)));
       gdRenderPracticeTemplateOutcomeTabs("ocr");
@@ -14998,11 +15160,12 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
     }
     layout.lines=lines;
     layout.headerCandidates=headerCandidates;
+    layout.headerProbe=headerProbe;
     const generatedRows=gdLmClusterColumnRows(gdLmColumnWordCandidates(ocrData,layout));
     const valueCluster=gdOcrGeneratedValueCluster(scanImage,flatScan,generatedRows);
     const stripScan=gdRunDirectColumnStripCrops(scanImage,layout,{shapeCrop:true,allowGrid:false,sourceMode:"ocr-generated-template"})||{};
     if(!Array.isArray(stripScan.results)||!stripScan.results.length){
-      const outcome=gdOcrGeneratedOutcomeFromFailure("OCR generated template found headers but could not create column crops.",scanImage,{wordCount,layout,ocrData,headerCandidates,aliasStatus:gdLmAliasRegistryStatus()});
+      const outcome=gdOcrGeneratedOutcomeFromFailure("OCR generated template found headers but could not create column crops.",scanImage,{wordCount,layout,ocrData,headerCandidates,headerProbe,aliasStatus:gdLmAliasRegistryStatus()});
       gdPracticeDebugCheckpointSafe("ocr_generated_template","failed",{outputSummary:"OCR generated columns did not produce crops",counts:{words:wordCount,columns:Number(layout.columns?.length)||0}});
       gdPracticeDebugCheckpointSafe("extraction_started","failed",{outputSummary:"OCR generated columns did not produce crops"});
       gdRenderFlatTableFailureOutput(flatScan||gdFlatTableFailureScan(scanImage,checkpoint,gdFlatTableFailureDebug(flatScan)));
@@ -15046,6 +15209,7 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
       layout,
       ocrData,
       headerCandidates,
+      headerProbe,
       aliasStatus:gdLmAliasRegistryStatus(),
       payload:payload||null,
       wordCount,
