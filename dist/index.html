@@ -7483,21 +7483,47 @@ function gdBuildLaunchMonitorTextCapture(text,label="Plain text launch monitor u
     clubGroups
   };
 }
+function gdPracticeDebugCurrentRun(){
+  try{return window.__gdPracticePhotoDebugRun||null;}catch(e){return null;}
+}
+function gdPracticeDebugBridge(name,args){
+  try{
+    const fn=window[name];
+    if(typeof fn==="function")return fn.apply(window,args||[]);
+  }catch(e){
+    console.warn("[GolfDaddy] practice photo debug helper skipped",e);
+  }
+  return null;
+}
+function gdPracticeDebugStartRunSafe(source){return gdPracticeDebugBridge("gdPracticeDebugStartRun",[source]);}
+function gdPracticeDebugEnsureRunSafe(source){return gdPracticeDebugBridge("gdPracticeDebugEnsureRun",[source]);}
+function gdPracticeDebugCheckpointSafe(id,status,details){return gdPracticeDebugBridge("gdPracticeDebugCheckpoint",[id,status,details]);}
+function gdPracticeDebugFailedSafe(id,error,details){return gdPracticeDebugBridge("gdPracticeDebugFailed",[id,error,details]);}
+function gdPracticeDebugFinishSafe(status,summary){return gdPracticeDebugBridge("gdPracticeDebugFinish",[status,summary]);}
+function gdPracticeReleaseProcessingControlsSafe(reason){
+  const released=gdPracticeDebugBridge("gdPracticeReleaseProcessingControls",[reason]);
+  if(released!==null)return released;
+  if(typeof gdSetPracticePhotoProcessing==="function"){
+    gdSetPracticePhotoProcessing(false);
+    return true;
+  }
+  return false;
+}
 async function gdImportLaunchMonitorPayload(payload,sourceLabel){
   const api=await gdEnsureLaunchMonitorApi();
-  if(gdPracticePhotoDebugRun){
-    gdPracticeDebugCheckpoint("save_started","running",{inputSummary:sourceLabel||payload?.label||"Launch monitor payload",counts:{rows:(payload?.clubGroups||[]).length}});
+  if(gdPracticeDebugCurrentRun()){
+    gdPracticeDebugCheckpointSafe("save_started","running",{inputSummary:sourceLabel||payload?.label||"Launch monitor payload",counts:{rows:(payload?.clubGroups||[]).length}});
   }
   if(payload?.replaceExisting===true&&typeof api.clearStore==="function")api.clearStore();
   try{
     api.importCapture(payload);
   }catch(e){
-    if(gdPracticePhotoDebugRun)gdPracticeDebugCheckpoint("save_failed","failed",{outputSummary:"Practice Data save failed",error:e,technicalDetails:e&&e.stack});
+    if(gdPracticeDebugCurrentRun())gdPracticeDebugCheckpointSafe("save_failed","failed",{outputSummary:"Practice Data save failed",error:e,technicalDetails:e&&e.stack});
     throw e;
   }
-  if(gdPracticePhotoDebugRun){
-    gdPracticeDebugCheckpoint("save_completed","success",{outputSummary:"Saved to launch monitor practice store",counts:{saved:(payload?.clubGroups||[]).length}});
-    gdPracticeDebugCheckpoint("practice_render_refresh","success",{outputSummary:"Practice Data render refresh requested",counts:{rows:(payload?.clubGroups||[]).length}});
+  if(gdPracticeDebugCurrentRun()){
+    gdPracticeDebugCheckpointSafe("save_completed","success",{outputSummary:"Saved to launch monitor practice store",counts:{saved:(payload?.clubGroups||[]).length}});
+    gdPracticeDebugCheckpointSafe("practice_render_refresh","success",{outputSummary:"Practice Data render refresh requested",counts:{rows:(payload?.clubGroups||[]).length}});
   }
   gdRenderLaunchMonitorAdmin();
   if(typeof window.gdRenderPracticeData==="function")window.gdRenderPracticeData();
@@ -12466,11 +12492,11 @@ async function gdRunFittedCellGridOcr(columnScan,opts={}){
   const cellGrid=columnScan?.cellGrid;
   const rows=Array.isArray(cellGrid?.cells)?cellGrid.cells:[];
   if(!rows.length){
-    gdPracticeDebugCheckpoint("rows_parsed","failed",{outputSummary:"No fitted cells available for OCR"});
+    gdPracticeDebugCheckpointSafe("rows_parsed","failed",{outputSummary:"No fitted cells available for OCR"});
     gdSetPracticeScanStatus("Fit the output grid before scanning fitted cells.");
     return null;
   }
-  gdPracticeDebugCheckpoint("extraction_started","running",{inputSummary:`Fitted cell OCR for ${rows.length} rows`});
+  gdPracticeDebugCheckpointSafe("extraction_started","running",{inputSummary:`Fitted cell OCR for ${rows.length} rows`});
   const Tesseract=await gdLoadTesseract();
   const totalRows=rows.length;
   for(const [rowIndex,row] of rows.entries()){
@@ -12492,28 +12518,30 @@ async function gdRunFittedCellGridOcr(columnScan,opts={}){
   columnScan.columnOrderPayload=payload;
   gdBuildFlatDigitizedTable(columnScan,payload);
   const digitized=columnScan?.digitizedTable||null;
-  gdPracticeDebugCheckpoint("extraction_completed","success",{outputSummary:"Fitted cell OCR completed",counts:{ocrRows:rows.length,nativeRows:Number(payload?.clubGroups?.length)||0}});
-  gdPracticeDebugCheckpoint("raw_values_detected","success",{outputSummary:"Digitized cell values collected",counts:{good:Number(digitized?.stats?.good)||0,flagged:Number(digitized?.stats?.flagged)||0,missing:Number(digitized?.stats?.missing)||0}});
-  gdPracticeDebugCheckpoint("rows_parsed",digitized?.rows?.length?"success":"warning",{outputSummary:`${Number(digitized?.rows?.length)||0} digitized rows`,counts:{rowsParsed:Number(digitized?.rows?.length)||0}});
+  gdPracticeDebugCheckpointSafe("extraction_completed","success",{outputSummary:"Fitted cell OCR completed",counts:{ocrRows:rows.length,nativeRows:Number(payload?.clubGroups?.length)||0}});
+  gdPracticeDebugCheckpointSafe("raw_values_detected","success",{outputSummary:"Digitized cell values collected",counts:{good:Number(digitized?.stats?.good)||0,flagged:Number(digitized?.stats?.flagged)||0,missing:Number(digitized?.stats?.missing)||0}});
+  gdPracticeDebugCheckpointSafe("rows_parsed",digitized?.rows?.length?"success":"warning",{outputSummary:`${Number(digitized?.rows?.length)||0} digitized rows`,counts:{rowsParsed:Number(digitized?.rows?.length)||0}});
   const rejectedCellCount=(Number(digitized?.stats?.flagged)||0)+(Number(digitized?.stats?.missing)||0);
-  gdPracticeDebugCheckpoint("rows_rejected",rejectedCellCount?"warning":"success",{
+  gdPracticeDebugCheckpointSafe("rows_rejected",rejectedCellCount?"warning":"success",{
     outputSummary:`${Number(digitized?.stats?.flagged)||0} flagged cells, ${Number(digitized?.stats?.missing)||0} missing cells`,
     counts:{flagged:Number(digitized?.stats?.flagged)||0,missing:Number(digitized?.stats?.missing)||0}
   });
-  if(gdPracticePhotoDebugRun&&digitized?.rows){
-    gdPracticePhotoDebugRun.raw.rejectedRows=digitized.rows
+  const debugRun=gdPracticeDebugCurrentRun();
+  if(debugRun&&digitized?.rows){
+    debugRun.raw=debugRun.raw||{};
+    debugRun.raw.rejectedRows=digitized.rows
       .filter(row=>Number(row.flaggedCount)||Number(row.missingCount))
       .map(row=>({index:row.index,reason:`${row.flaggedCount||0} flagged, ${row.missingCount||0} missing`,rawValue:JSON.stringify(row.rawValues||{}),mappedValue:JSON.stringify(row.values||{})}));
   }
   gdRenderFlatTableBridgeOutput(columnScan);
   if(!payload?.clubGroups?.length){
     const digitizedRows=Number(columnScan?.digitizedTable?.rows?.length)||0;
-    gdPracticeDebugCheckpoint("rows_accepted","failed",{outputSummary:"No Clarity Shot Library rows were usable",counts:{accepted:0,digitizedRows}});
+    gdPracticeDebugCheckpointSafe("rows_accepted","failed",{outputSummary:"No Clarity Shot Library rows were usable",counts:{accepted:0,digitizedRows}});
     gdSetPracticeScanStatus(digitizedRows?"Digitised table is ready, but no Clarity Shot Library shots were usable yet.":"Fitted cell OCR ran, but no Clarity Shot Library shots were usable yet.");
     return null;
   }
-  gdPracticeDebugCheckpoint("rows_accepted","success",{outputSummary:`${payload.clubGroups.length} usable OCR shots`,counts:{accepted:payload.clubGroups.length}});
-  gdPracticeDebugCheckpoint("practice_store_handoff","success",{outputSummary:"Photo extraction payload ready for Practice Data save",counts:{rows:payload.clubGroups.length}});
+  gdPracticeDebugCheckpointSafe("rows_accepted","success",{outputSummary:`${payload.clubGroups.length} usable OCR shots`,counts:{accepted:payload.clubGroups.length}});
+  gdPracticeDebugCheckpointSafe("practice_store_handoff","success",{outputSummary:"Photo extraction payload ready for Practice Data save",counts:{rows:payload.clubGroups.length}});
   if(opts.importToNative===true){
     gdPracticeExtractionPreviewState=null;
     try{gdRenderPracticeExtractionCheckpoint();}catch(e){}
@@ -14005,7 +14033,7 @@ async function gdApplyPracticeManualQuad(){
     return await gdRunDefaultPracticePhotoScanFromCheckpoint(checkpoint,{sourceLabel:gdPracticePhotoName||"Adjusted practice photo scan"});
   }catch(e){
     console.warn("[GolfDaddy] adjusted practice photo scan failed",e);
-    gdPracticeReleaseProcessingControls("adjusted-photo-scan-failed");
+    gdPracticeReleaseProcessingControlsSafe("adjusted-photo-scan-failed");
     gdSetPracticeScanStatus(e&&e.message?e.message:"Adjusted photo scan failed");
     return null;
   }
@@ -14075,21 +14103,21 @@ async function gdBuildPracticeClusterCheckpoint(){
 }
 async function gdRunFlatTemplateBridgeFromCheckpoint(checkpoint,opts={}){
   if(!checkpoint?.cluster)return null;
-  gdPracticeDebugCheckpoint("crop_cleanup","success",{outputSummary:"Flat table checkpoint available"});
+  gdPracticeDebugCheckpointSafe("crop_cleanup","success",{outputSummary:"Flat table checkpoint available"});
   const source=checkpoint.source||gdPracticeNormalizedCanvas||gdNormalizeLaunchMonitorTable(gdPracticePhotoBitmap)||gdPracticePhotoBitmap;
   const scanImage=checkpoint.scanImage||checkpoint.directColumnSource||checkpoint.cluster?.displayCutoutCanvas||checkpoint.cluster?.cutoutCanvas||source;
   if(!scanImage){
-    gdPracticeDebugCheckpoint("crop_cleanup","failed",{outputSummary:"Flat table image is not ready"});
+    gdPracticeDebugCheckpointSafe("crop_cleanup","failed",{outputSummary:"Flat table image is not ready"});
     gdSetPracticeScanStatus("Flat table image is not ready. Find the value shape first.");
     return null;
   }
   gdSetPracticeScanStatus("Fitting rows, columns and cells on the flat table image...");
-  gdPracticeDebugCheckpoint("table_detected","running",{inputSummary:`${Number(scanImage.width)||0} x ${Number(scanImage.height)||0} scan image`});
+  gdPracticeDebugCheckpointSafe("table_detected","running",{inputSummary:`${Number(scanImage.width)||0} x ${Number(scanImage.height)||0} scan image`});
   const columnScan=gdBuildFlatTableTemplateColumnScan(scanImage,checkpoint);
   if(!columnScan?.cellGrid){
     const debug=window.__gdFlatTableLastDebug||{};
     const reason=debug.reason?` (${debug.reason})`:"";
-    gdPracticeDebugCheckpoint("table_detected","failed",{outputSummary:`Flat table grid was not reliable${reason}`,technicalDetails:debug,raw:debug});
+    gdPracticeDebugCheckpointSafe("table_detected","failed",{outputSummary:`Flat table grid was not reliable${reason}`,technicalDetails:debug,raw:debug});
     gdSetPracticeScanStatus(`Flat table grid was not reliable${reason}. Retake with the value rows sharper.`);
     gdRenderFlatTableBridgeCheckpoint(columnScan||{});
     return null;
@@ -14103,7 +14131,7 @@ async function gdRunFlatTemplateBridgeFromCheckpoint(checkpoint,opts={}){
   gdRenderFlatTableBridgeOutput(columnScan);
   const rows=Number(columnScan.cellGrid.rows?.length)||0;
   const columns=Number(columnScan.cellGrid.columns?.length)||0;
-  gdPracticeDebugCheckpoint("table_detected","success",{outputSummary:`Flat table grid ready: ${rows} rows x ${columns} columns`,counts:{rows,columns,cells:Number(columnScan.cellGrid.cellCount)||0}});
+  gdPracticeDebugCheckpointSafe("table_detected","success",{outputSummary:`Flat table grid ready: ${rows} rows x ${columns} columns`,counts:{rows,columns,cells:Number(columnScan.cellGrid.cellCount)||0}});
   gdSetPracticeScanStatus(`Flat table grid ready: ${rows} rows x ${columns} columns. Review the output table before bringing OCR cleanup back.`);
   return columnScan;
 }
@@ -14129,7 +14157,7 @@ async function gdRunPracticeGridExperiment(kind="box-tracks",opts={}){
   };
   const method=methods[String(kind||"box-tracks")]||methods["box-tracks"];
   gdSetPracticeScanStatus(method.status);
-  gdPracticeDebugCheckpoint("extraction_started","running",{inputSummary:method.label});
+  gdPracticeDebugCheckpointSafe("extraction_started","running",{inputSummary:method.label});
   if(["cell-ocr","digitize-table"].includes(String(kind||""))){
     let columnScan=window.__gdPracticeColumnScan;
     if(!columnScan?.cellGrid){
@@ -14154,7 +14182,7 @@ async function gdRunPracticeGridExperiment(kind="box-tracks",opts={}){
 }
 async function gdRunDefaultPracticePhotoScanFromCheckpoint(checkpoint,opts={}){
   if(!checkpoint){
-    gdPracticeDebugFailed("crop_cleanup",new Error("Frame the table first, then scan to Practice Library."),{outputSummary:"No crop checkpoint"});
+    gdPracticeDebugFailedSafe("crop_cleanup",new Error("Frame the table first, then scan to Practice Library."),{outputSummary:"No crop checkpoint"});
     gdPracticeFeedback("Frame the table first, then scan to Practice Library.","error");
     return null;
   }
@@ -14179,18 +14207,18 @@ async function gdRunDefaultPracticePhotoScanFromCheckpoint(checkpoint,opts={}){
         gdCancelPracticePhotoScan(false);
       }
       gdPracticeFeedback(`Practice scan imported ${shots} shot${shots===1?"":"s"}.`,"ready");
-      gdPracticeDebugFinish("success",{dataSaved:true,errorMessage:""});
+      gdPracticeDebugFinishSafe("success",{dataSaved:true,errorMessage:""});
     }else{
       gdPracticeSetContinueScanReady(true);
       gdPracticeFeedback("Scan completed but no usable shots were found. Adjust the frame or try another image.","error");
-      gdPracticeDebugFailed("rows_accepted",new Error("No usable shots were found"),{outputSummary:"OCR completed but accepted row count was zero"});
+      gdPracticeDebugFailedSafe("rows_accepted",new Error("No usable shots were found"),{outputSummary:"OCR completed but accepted row count was zero"});
     }
     return payload;
   }catch(e){
-    gdPracticeDebugFailed("extraction_started",e,{outputSummary:"Practice photo scan failed",technicalDetails:e&&e.stack});
+    gdPracticeDebugFailedSafe("extraction_started",e,{outputSummary:"Practice photo scan failed",technicalDetails:e&&e.stack});
     throw e;
   }finally{
-    gdPracticeReleaseProcessingControls("photo-scan-finally");
+    gdPracticeReleaseProcessingControlsSafe("photo-scan-finally");
   }
 }
 async function gdRunDefaultPracticePhotoScan(){
@@ -14225,21 +14253,21 @@ async function gdRunPracticePhotoOcrFromCheckpoint(checkpoint){
 }
 async function gdHandleLaunchMonitorPhoto(file){
   if(!file){
-    gdPracticeDebugStartRun({sourceName:"Practice photo",sourceType:"image"});
-    gdPracticeDebugFailed("photo_selected",new Error("No image selected"),{outputSummary:"No image selected"});
+    gdPracticeDebugStartRunSafe({sourceName:"Practice photo",sourceType:"image"});
+    gdPracticeDebugFailedSafe("photo_selected",new Error("No image selected"),{outputSummary:"No image selected"});
     gdPracticeFeedback("No image selected. Choose a practice table photo to scan.","error");
     return;
   }
-  gdPracticeDebugStartRun({sourceName:file.name||"Photo shot data scan",sourceType:file.type||"image",fileName:file.name||"",fileSize:file.size||0});
-  gdPracticeDebugCheckpoint("photo_selected","running",{inputSummary:file.name||"Selected image"});
+  gdPracticeDebugStartRunSafe({sourceName:file.name||"Photo shot data scan",sourceType:file.type||"image",fileName:file.name||"",fileSize:file.size||0});
+  gdPracticeDebugCheckpointSafe("photo_selected","running",{inputSummary:file.name||"Selected image"});
   try{
     gdPracticePhotoBitmap=await createImageBitmap(file);
     gdPracticePhotoName=file.name||"Photo shot data scan";
-    gdPracticeDebugCheckpoint("photo_selected","success",{outputSummary:"Browser image bitmap created",counts:{bytes:file.size||0}});
-    gdPracticeDebugCheckpoint("image_metadata","success",{outputSummary:`${gdPracticePhotoBitmap.width} x ${gdPracticePhotoBitmap.height}`,counts:{width:gdPracticePhotoBitmap.width,height:gdPracticePhotoBitmap.height}});
-    gdPracticeDebugCheckpoint("image_preprocess","running",{inputSummary:"Normalize table image"});
+    gdPracticeDebugCheckpointSafe("photo_selected","success",{outputSummary:"Browser image bitmap created",counts:{bytes:file.size||0}});
+    gdPracticeDebugCheckpointSafe("image_metadata","success",{outputSummary:`${gdPracticePhotoBitmap.width} x ${gdPracticePhotoBitmap.height}`,counts:{width:gdPracticePhotoBitmap.width,height:gdPracticePhotoBitmap.height}});
+    gdPracticeDebugCheckpointSafe("image_preprocess","running",{inputSummary:"Normalize table image"});
     gdPracticeNormalizedCanvas=gdNormalizeLaunchMonitorTable(gdPracticePhotoBitmap);
-    gdPracticeDebugCheckpoint("image_preprocess","success",{outputSummary:`Prepared ${gdPracticeNormalizedCanvas?.width||0} x ${gdPracticeNormalizedCanvas?.height||0}`,counts:{width:gdPracticeNormalizedCanvas?.width||0,height:gdPracticeNormalizedCanvas?.height||0}});
+    gdPracticeDebugCheckpointSafe("image_preprocess","success",{outputSummary:`Prepared ${gdPracticeNormalizedCanvas?.width||0} x ${gdPracticeNormalizedCanvas?.height||0}`,counts:{width:gdPracticeNormalizedCanvas?.width||0,height:gdPracticeNormalizedCanvas?.height||0}});
     gdPracticeClusterCheckpoint=null;
     gdClosePracticeManualQuadTool();
     const preview=document.getElementById("gdPracticeScanPreview");
@@ -14252,18 +14280,18 @@ async function gdHandleLaunchMonitorPhoto(file){
     gdPracticeFeedback("Photo ready. Checking for a value table...");
     const smallMessage=gdPracticePhotoSmallMessage();
     if(smallMessage){
-      gdPracticeDebugFailed("image_metadata",new Error(smallMessage),{outputSummary:"Image too small for reliable scan"});
+      gdPracticeDebugFailedSafe("image_metadata",new Error(smallMessage),{outputSummary:"Image too small for reliable scan"});
       gdPracticeFeedback(smallMessage,"error");
       return;
     }
-    gdPracticeDebugCheckpoint("crop_cleanup","running",{inputSummary:"Finding value table / crop"});
+    gdPracticeDebugCheckpointSafe("crop_cleanup","running",{inputSummary:"Finding value table / crop"});
     const checkpoint=await gdBuildPracticeClusterCheckpoint();
     gdPracticeClusterCheckpoint=checkpoint;
     if(checkpoint){
-      gdPracticeDebugCheckpoint("crop_cleanup","success",{outputSummary:"Value table checkpoint created",counts:{hasCluster:checkpoint.cluster?1:0}});
+      gdPracticeDebugCheckpointSafe("crop_cleanup","success",{outputSummary:"Value table checkpoint created",counts:{hasCluster:checkpoint.cluster?1:0}});
       gdOpenPracticeManualQuadTool();
     }else{
-      gdPracticeDebugCheckpoint("crop_cleanup","warning",{outputSummary:"Auto table shape not found; manual corner stretch opened"});
+      gdPracticeDebugCheckpointSafe("crop_cleanup","warning",{outputSummary:"Auto table shape not found; manual corner stretch opened"});
       document.getElementById("gdPracticeScanner")?.classList.add("active");
       gdOpenPracticeManualQuadTool();
     }
@@ -14278,26 +14306,26 @@ async function gdHandleLaunchMonitorPhoto(file){
     gdPracticeRefreshDebugTools();
   }catch(e){
     console.warn("[GolfDaddy] launch monitor photo prepare failed",e);
-    gdPracticeDebugFailed("photo_selected",e,{outputSummary:"Could not open or prepare photo",technicalDetails:e&&e.stack});
+    gdPracticeDebugFailedSafe("photo_selected",e,{outputSummary:"Could not open or prepare photo",technicalDetails:e&&e.stack});
     gdPracticeFeedback(e&&e.message?e.message:"Could not open photo","error");
   }
 }
 async function gdScanPracticePhotoCrop(){
   try{
-    gdPracticeDebugEnsureRun({sourceName:gdPracticePhotoName||"Practice photo scan"});
-    gdPracticeDebugCheckpoint("crop_cleanup","running",{inputSummary:"Manual scan button"});
+    gdPracticeDebugEnsureRunSafe({sourceName:gdPracticePhotoName||"Practice photo scan"});
+    gdPracticeDebugCheckpointSafe("crop_cleanup","running",{inputSummary:"Manual scan button"});
     const checkpoint=await gdBuildPracticeClusterCheckpoint();
     gdPracticeClusterCheckpoint=checkpoint;
     if(!checkpoint){
-      gdPracticeDebugCheckpoint("crop_cleanup","warning",{outputSummary:"Auto value table not found; manual frame opened"});
+      gdPracticeDebugCheckpointSafe("crop_cleanup","warning",{outputSummary:"Auto value table not found; manual frame opened"});
       gdOpenPracticeManualQuadTool();
       return null;
     }
-    gdPracticeDebugCheckpoint("crop_cleanup","success",{outputSummary:"Value table checkpoint created from scan button"});
+    gdPracticeDebugCheckpointSafe("crop_cleanup","success",{outputSummary:"Value table checkpoint created from scan button"});
     gdOpenPracticeManualQuadTool();
   }catch(e){
     console.warn("[GolfDaddy] launch monitor photo cluster failed",e);
-    gdPracticeDebugFailed("crop_cleanup",e,{outputSummary:"Photo cluster failed",technicalDetails:e&&e.stack});
+    gdPracticeDebugFailedSafe("crop_cleanup",e,{outputSummary:"Photo cluster failed",technicalDetails:e&&e.stack});
     gdPracticeFeedback(e&&e.message?e.message:"Photo cluster failed. Frame it manually, then scan.","error");
     gdLmSetStatus("Status","Photo cluster failed",e&&e.message?e.message:"Could not find OCR cluster","conflict_check");
     gdOpenPracticeManualQuadTool();
@@ -14305,10 +14333,10 @@ async function gdScanPracticePhotoCrop(){
 }
 async function gdContinuePracticePhotoScan(){
   try{
-    gdPracticeDebugEnsureRun({sourceName:gdPracticePhotoName||"Practice photo scan"});
+    gdPracticeDebugEnsureRunSafe({sourceName:gdPracticePhotoName||"Practice photo scan"});
     const checkpoint=gdPracticeClusterCheckpoint||await gdBuildPracticeClusterCheckpoint();
     if(!checkpoint){
-      gdPracticeDebugFailed("crop_cleanup",new Error("No crop checkpoint available"),{outputSummary:"Manual frame needed before scan"});
+      gdPracticeDebugFailedSafe("crop_cleanup",new Error("No crop checkpoint available"),{outputSummary:"Manual frame needed before scan"});
       gdOpenPracticeManualQuadTool();
       return null;
     }
@@ -14316,7 +14344,7 @@ async function gdContinuePracticePhotoScan(){
     await gdRunDefaultPracticePhotoScanFromCheckpoint(checkpoint,{sourceLabel:gdPracticePhotoName||"Practice photo scan"});
   }catch(e){
     console.warn("[GolfDaddy] launch monitor photo scan failed",e);
-    gdPracticeDebugFailed("extraction_started",e,{outputSummary:"Photo scan failed",technicalDetails:e&&e.stack});
+    gdPracticeDebugFailedSafe("extraction_started",e,{outputSummary:"Photo scan failed",technicalDetails:e&&e.stack});
     gdPracticeFeedback(e&&e.message?e.message:"Photo scan failed. Adjust the frame and scan again.","error");
     gdLmSetStatus("Status","Photo scan failed",e&&e.message?e.message:"Could not read image","conflict_check");
   }
@@ -14343,7 +14371,7 @@ async function gdImportReviewedPracticeOcr(){
   gdCancelPracticePhotoScan(false);
 }
 function gdCancelPracticePhotoScan(clearStatus=true){
-  gdPracticeReleaseProcessingControls("photo-scan-cancel");
+  gdPracticeReleaseProcessingControlsSafe("photo-scan-cancel");
   gdPracticePhotoBitmap=null;
   gdPracticeNormalizedCanvas=null;
   gdPracticeClusterCheckpoint=null;
@@ -34060,11 +34088,19 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       gdNativePracticePasteChanged:gdNativePracticePasteChanged,
       gdNativePracticeTextFilePickerClicked:gdNativePracticeTextFilePickerClicked,
       gdClearNativePracticePaste:gdClearNativePracticePaste,
-	      gdSaveNativePracticeImport:gdSaveNativePracticeImport,
-	      gdRenderPracticePhotoDebugPanel:gdRenderPracticePhotoDebugPanel,
-	      gdRenderPracticePhotoDebugQaFixture:gdRenderPracticePhotoDebugQaFixture,
-	      gdPracticeRunPhotoDebugQaFixture:gdPracticeRunPhotoDebugQaFixture,
-	      gdPracticeClearPhotoDebugQaFixtureRows:gdPracticeClearPhotoDebugQaFixtureRows,
+      gdSaveNativePracticeImport:gdSaveNativePracticeImport,
+      gdRenderPracticePhotoDebugPanel:gdRenderPracticePhotoDebugPanel,
+      gdPracticeDebugStartRun:gdPracticeDebugStartRun,
+      gdPracticeDebugEnsureRun:gdPracticeDebugEnsureRun,
+      gdPracticeDebugCheckpoint:gdPracticeDebugCheckpoint,
+      gdPracticeDebugFailed:gdPracticeDebugFailed,
+      gdPracticeDebugFinish:gdPracticeDebugFinish,
+      gdPracticeReleaseProcessingControls:gdPracticeReleaseProcessingControls,
+      gdPracticeDebugRecordButtonState:gdPracticeDebugRecordButtonState,
+      gdPracticeDebugButtonSnapshot:gdPracticeDebugButtonSnapshot,
+      gdRenderPracticePhotoDebugQaFixture:gdRenderPracticePhotoDebugQaFixture,
+      gdPracticeRunPhotoDebugQaFixture:gdPracticeRunPhotoDebugQaFixture,
+      gdPracticeClearPhotoDebugQaFixtureRows:gdPracticeClearPhotoDebugQaFixtureRows,
 	      gdCopyPracticePhotoDebugJson:gdCopyPracticePhotoDebugJson,
       gdPracticeToggleProjector:gdPracticeToggleProjector,
 	      gdPracticeSetPlotMode:gdPracticeSetPlotMode,
