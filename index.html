@@ -7736,21 +7736,23 @@ function gdNativePracticeFeedbackBridge(patch){
   return null;
 }
 function gdPracticeGeneratedBoxTarget(){
+  const isVisible=el=>!!(el&&!el.hidden&&getComputedStyle(el).display!=="none"&&getComputedStyle(el).visibility!=="hidden");
   const manual=document.getElementById("gdPracticeManualQuadTool");
-  if(manual&&manual.classList.contains("active")&&!manual.hidden)return manual;
+  if(manual&&manual.classList.contains("active")&&isVisible(manual))return manual;
   const scanner=document.getElementById("gdPracticeScanner");
-  if(scanner&&scanner.classList.contains("active"))return scanner;
+  if(scanner&&scanner.classList.contains("active")&&isVisible(scanner))return scanner;
   const review=document.getElementById("gdPracticeOcrReview");
-  if(review&&review.classList.contains("active"))return review;
+  if(review&&review.classList.contains("active")&&isVisible(review))return review;
   return null;
 }
 function gdAdjustPracticeGeneratedBox(){
-  if(gdPracticePhotoBitmap&&typeof gdOpenPracticeManualQuadTool==="function")gdOpenPracticeManualQuadTool();
-  let target=gdPracticeGeneratedBoxTarget();
-  if(!target&&gdPracticePhotoBitmap&&typeof gdOpenPracticeManualQuadTool==="function"){
-    gdOpenPracticeManualQuadTool();
-    target=gdPracticeGeneratedBoxTarget();
+  if(typeof gdSetPracticePhotoProcessing==="function"&&(document.body.classList.contains("gdPracticePhotoProcessing")||document.getElementById("practiceDataPanel")?.classList.contains("gdPracticePhotoProcessing"))){
+    gdSetPracticePhotoProcessing(false);
   }
+  if(typeof gdOpenPracticeManualQuadTool==="function"){
+    gdOpenPracticeManualQuadTool();
+  }
+  const target=gdPracticeGeneratedBoxTarget();
   if(target){
     gdNativePracticeFeedbackBridge({
       status:"photo_selected",
