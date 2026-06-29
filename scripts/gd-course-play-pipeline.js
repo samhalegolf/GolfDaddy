@@ -33,6 +33,8 @@
   var lastDebugEventSig="";
   var lastDebugEventAt=0;
   var lastSyncStatusByKey={};
+  var framePrebuildQueues={};
+  var FRAME_PREBUILD_DELAY_MS=90;
 
   function now(){return new Date().toISOString();}
   function safe(fn,fb){try{return fn();}catch(e){return fb;}}
@@ -390,6 +392,7 @@
     });
     var saved=writeCourse(course,store);
     recordDebugEvent("pipeline-course-ingested",{courseId:saved.courseId,courseName:saved.courseName,status:saved.status,source:source||"automap",holesProcessed:holes.length,holesKnown:Object.keys(saved.holes||{}).length});
+    setTimeout(function(){safe(function(){queueFramePrebuild(saved.courseId,{source:source||"automap",reason:"bulk-ingest"});});},0);
     return saved;
   }
   function getCoursePlayState(courseOrId){
@@ -762,6 +765,7 @@
     var store=loadStore();
     store.courses[state.courseId]=state;
     saveStore(store);
+    if(opts.queueFramePrebuild!==false)setTimeout(function(){safe(function(){queueFramePrebuild(state.courseId,{source:opts.source||"course-library",reason:"post-ingest"});});},0);
     return getCoursePlayState(course);
   }
   function prepareCourseFromCourseLibrary(courseOrId,opts){
@@ -791,6 +795,171 @@
       complete:!!(green&&route.length>=2),
       frameAnchors:clone(record.frameAnchors||{})
     };
+  }
+  function coursePlayFrameReady(courseOrId,holeNumber){
+    var frame=getCoursePlayFrameIndex(courseOrId,holeNumber);
+    var key=frame&&frame.manifestKey||frame&&frame.capturedManifestKey||null;
+    return !!(frame&&capturedManifestPresent(key));
+  }
+  function playablePrebuildHoles(course){
+    return Object.keys(course&&course.holes||{}).map(function(key){
+      return normalizeHoleRecord(course,key,course.holes[key]);
+    }).filter(function(hole){
+      return hole&&hole.status===HOLE_STATES.play_data_ready;
+    }).sort(function(a,b){
+      return a.holeNumber-b.holeNumber;
+    });
+  }
+  function markFramePrebuildStatus(courseOrId,holeNumber,status,detail){
+    detail=detail||{};
+    var store=loadStore();
+    var course=courseRecord(courseOrId,store);
+    holeNumber=normalizeHoleNumber(holeNumber);
+    var key=String(holeNumber);
+    var hole=normalizeHoleRecord(course,holeNumber,course.holes[key]||emptyHoleRecord(course,holeNumber));
+    var presentation=Object.assign({},hole.presentation||{});
+    var attempts=Number(presentation.framePrebuildAttempts||0)||0;
+    if(status==="running")attempts+=1;
+    presentation.framePrebuildStatus=String(status||"unknown");
+    presentation.framePrebuildAttempts=attempts;
+    presentation.framePrebuildLastAt=now();
+    if(detail.frameIndexKey)presentation.frameIndexKey=detail.frameIndexKey;
+    if(detail.manifestKey)presentation.capturedManifestKey=detail.manifestKey;
+    if(status==="queued"&&!presentation.frameStatus)presentation.frameStatus="prebuild_queued";
+    if(status==="running")presentation.frameStatus="prebuilding";
+    if(status==="complete"){
+      presentation.frameStatus=detail.frameStatus||"generated";
+      presentation.capturedSurfaceReady=true;
+      presentation.frameCacheStatus=detail.cacheStatus||presentation.frameCacheStatus||"local-cache";
+      presentation.generatedFrom=detail.generatedFrom||presentation.generatedFrom||"v19-prebuild";
+      delete presentation.framePrebuildLastError;
+    }
+    if(status==="failed"){
+      presentation.frameStatus="prebuild_failed";
+      presentation.capturedSurfaceReady=false;
+      presentation.framePrebuildLastError=String(detail.error||detail.reason||"frame prebuild failed");
+    }
+    if(status==="skipped"&&detail.reason)presentation.framePrebuildSkipReason=String(detail.reason);
+    hole.presentation=presentation;
+    hole.updatedAt=now();
+    course.holes[key]=hole;
+    store.courses[course.courseId]=course;
+    writeCourse(course,store);
+    return getHolePlayState(course,holeNumber);
+  }
+  function framePrebuildAdapter(){
+    return safe(function(){
+      if(typeof window.gdPrebuildCoursePlayFrameManifest==="function")return window.gdPrebuildCoursePlayFrameManifest;
+      if(typeof window.gdPrebuildCoursePlayFrameFromData==="function")return window.gdPrebuildCoursePlayFrameFromData;
+      return null;
+    },null);
+  }
+  function prebuildResultManifestKey(result,frame){
+    return result&&(
+      result.manifestKey||
+      result.capturedManifestKey||
+      result.key||
+      result.storageKey||
+      result.scanId||
+      result.activeScanId
+    )||frame&&(
+      frame.manifestKey||
+      frame.capturedManifestKey
+    )||null;
+  }
+  function gdPrebuildCoursePlayFrame(courseOrId,holeNumber,opts){
+    opts=opts||{};
+    var course=getCoursePlayState(courseOrId||activeCourseFromApp()||"course");
+    holeNumber=normalizeHoleNumber(holeNumber);
+    var hole=normalizeHoleRecord(course,holeNumber,course.holes&&course.holes[String(holeNumber)]||emptyHoleRecord(course,holeNumber));
+    if(hole.status!==HOLE_STATES.play_data_ready){
+      recordDebugEvent("frame-prebuild-skipped",{courseId:course.courseId,courseName:course.courseName,holeNumber:holeNumber,status:hole.status,reason:"hole-not-play-data-ready",source:opts.source||"frame-prebuild"});
+      return Promise.resolve({status:"skipped",reason:"hole-not-play-data-ready",holeNumber:holeNumber});
+    }
+    if(!opts.force&&coursePlayFrameReady(course,holeNumber)){
+      markFramePrebuildStatus(course,holeNumber,"skipped",{reason:"already-indexed"});
+      recordDebugEvent("frame-prebuild-skipped",{courseId:course.courseId,courseName:course.courseName,holeNumber:holeNumber,status:"skipped",reason:"already-indexed",source:opts.source||"frame-prebuild"});
+      return Promise.resolve({status:"skipped",reason:"already-indexed",holeNumber:holeNumber});
+    }
+    var adapter=framePrebuildAdapter();
+    if(typeof adapter!=="function"){
+      markFramePrebuildStatus(course,holeNumber,"failed",{reason:"prebuild-adapter-unavailable"});
+      recordDebugEvent("frame-prebuild-hole-failed",{courseId:course.courseId,courseName:course.courseName,holeNumber:holeNumber,status:"failed",reason:"prebuild-adapter-unavailable",source:opts.source||"frame-prebuild"});
+      return Promise.resolve({status:"failed",reason:"prebuild-adapter-unavailable",holeNumber:holeNumber});
+    }
+    var mapped=holeRecordToMappedData(hole);
+    if(!mapped||!Array.isArray(mapped.route)||mapped.route.length<2||!mapped.green){
+      markFramePrebuildStatus(course,holeNumber,"failed",{reason:"missing-explicit-hole-data"});
+      recordDebugEvent("frame-prebuild-hole-failed",{courseId:course.courseId,courseName:course.courseName,holeNumber:holeNumber,status:"failed",reason:"missing-explicit-hole-data",source:opts.source||"frame-prebuild"});
+      return Promise.resolve({status:"failed",reason:"missing-explicit-hole-data",holeNumber:holeNumber});
+    }
+    markFramePrebuildStatus(course,holeNumber,"running",{});
+    recordDebugEvent("frame-prebuild-started",{courseId:course.courseId,courseName:course.courseName,holeNumber:holeNumber,status:"running",source:opts.source||"frame-prebuild"});
+    return Promise.resolve().then(function(){
+      return adapter(course,holeNumber,mapped,Object.assign({},opts,{source:opts.source||"frame-prebuild",reason:opts.reason||"course-play-frame-prebuild"}));
+    }).then(function(result){
+      if(!result)throw new Error("prebuild adapter returned no manifest");
+      var frame=getCoursePlayFrameIndex(course,holeNumber);
+      var manifestKey=prebuildResultManifestKey(result,frame);
+      if(!frame&&manifestKey&&capturedManifestPresent(manifestKey)){
+        frame=registerCoursePlayFrame(course,holeNumber,result,{generatedFrom:"v19-captured-surface-prebuild",manifestKey:manifestKey,status:"prebuilt",cacheStatus:"local-prebuilt"});
+      }
+      var present=capturedManifestPresent(manifestKey);
+      if(!frame||!present)throw new Error(!frame?"frame index missing":"captured manifest missing");
+      markFramePrebuildStatus(course,holeNumber,"complete",{frameIndexKey:frame.frameIndexKey,manifestKey:manifestKey,frameStatus:frame.frameStatus,cacheStatus:frame.cacheStatus,generatedFrom:frame.generatedFrom});
+      recordDebugEvent("frame-prebuild-hole-complete",{courseId:course.courseId,courseName:course.courseName,holeNumber:holeNumber,status:"complete",frameIndexKey:frame.frameIndexKey,manifestKey:manifestKey,manifestPresent:present,source:opts.source||"frame-prebuild"});
+      return {status:"complete",courseId:course.courseId,holeNumber:holeNumber,frameIndexKey:frame.frameIndexKey,manifestKey:manifestKey,manifestPresent:present};
+    }).then(null,function(error){
+      var message=String(error&&error.message||error||"frame prebuild failed");
+      markFramePrebuildStatus(course,holeNumber,"failed",{error:message});
+      recordDebugEvent("frame-prebuild-hole-failed",{courseId:course.courseId,courseName:course.courseName,holeNumber:holeNumber,status:"failed",reason:message,source:opts.source||"frame-prebuild"});
+      return {status:"failed",courseId:course.courseId,holeNumber:holeNumber,reason:message};
+    });
+  }
+  function processFramePrebuildQueue(courseId){
+    var queue=framePrebuildQueues[courseId];
+    if(!queue||queue.running)return;
+    if(!queue.holes.length){
+      recordDebugEvent("frame-prebuild-complete",{courseId:queue.courseId,courseName:queue.courseName,status:"complete",holesQueued:0,holesCompleted:queue.completed||0,holesSkipped:queue.skipped||0,holesFailed:queue.failed||0,source:queue.source||"frame-prebuild"});
+      delete framePrebuildQueues[courseId];
+      return;
+    }
+    var holeNumber=queue.holes.shift();
+    queue.running=true;
+    queue.runningHole=holeNumber;
+    gdPrebuildCoursePlayFrame(courseId,holeNumber,{source:queue.source||"frame-prebuild",reason:queue.reason||"post-scan-frame-prebuild"}).then(function(result){
+      if(result&&result.status==="complete")queue.completed=(queue.completed||0)+1;
+      else if(result&&result.status==="skipped")queue.skipped=(queue.skipped||0)+1;
+      else queue.failed=(queue.failed||0)+1;
+    },function(){
+      queue.failed=(queue.failed||0)+1;
+    }).then(function(){
+      queue.running=false;
+      queue.runningHole=null;
+      queue.timer=setTimeout(function(){queue.timer=null;processFramePrebuildQueue(courseId);},FRAME_PREBUILD_DELAY_MS);
+    });
+  }
+  function queueFramePrebuild(courseOrId,opts){
+    opts=opts||{};
+    var course=getCoursePlayState(courseOrId||activeCourseFromApp()||"course");
+    var readyHoles=playablePrebuildHoles(course);
+    var missing=readyHoles.filter(function(hole){return opts.force||!coursePlayFrameReady(course,hole.holeNumber);});
+    if(!missing.length){
+      recordDebugEvent("frame-prebuild-complete",{courseId:course.courseId,courseName:course.courseName,status:"complete",holesQueued:0,holesReady:readyHoles.length,source:opts.source||"frame-prebuild",reason:"nothing-missing"});
+      return {status:"complete",courseId:course.courseId,holesReady:readyHoles.length,holesQueued:0};
+    }
+    var queue=framePrebuildQueues[course.courseId]||{queueId:stableId(),courseId:course.courseId,courseName:course.courseName,holes:[],running:false,completed:0,failed:0,skipped:0,source:opts.source||"frame-prebuild",reason:opts.reason||"post-scan-frame-prebuild"};
+    missing.forEach(function(hole){
+      var h=normalizeHoleNumber(hole.holeNumber);
+      if(queue.holes.indexOf(h)===-1&&queue.runningHole!==h){
+        queue.holes.push(h);
+        markFramePrebuildStatus(course,h,"queued",{});
+      }
+    });
+    framePrebuildQueues[course.courseId]=queue;
+    recordDebugEvent("frame-prebuild-queued",{courseId:course.courseId,courseName:course.courseName,status:"queued",holesQueued:queue.holes.length,holesReady:readyHoles.length,holesMissing:missing.length,source:queue.source});
+    if(!queue.running&&!queue.timer)queue.timer=setTimeout(function(){queue.timer=null;processFramePrebuildQueue(course.courseId);},FRAME_PREBUILD_DELAY_MS);
+    return {status:"queued",courseId:course.courseId,holesReady:readyHoles.length,holesQueued:queue.holes.length,holes:queue.holes.slice()};
   }
   function activeCourseFromApp(){
     return resolveCourseFromLibrary(null)||safe(function(){return window.gdActiveCourse||window.currentCourse||currentCourse||null;},null);
@@ -1007,15 +1176,18 @@
         capturedManifestPresent:manifestPresent,
         lastGeneratedAt:frame&&frame.updatedAt||hole.updatedAt||null,
         lastRenderedAt:safe(function(){return document.body&&document.body.dataset.gdCoursePlayFrameRenderedHole===String(holeNumber)?document.body.dataset.gdCoursePlayFrameRenderedAt:null;},null),
+        framePrebuildStatus:hole.presentation&&hole.presentation.framePrebuildStatus||"",
+        framePrebuildError:hole.presentation&&hole.presentation.framePrebuildLastError||"",
         source:hole.source||frame&&frame.generatedFrom||"unknown",
         syncStatus:hole.syncStatus||"local",
         updatedAt:hole.updatedAt||null,
-        lastError:hole.unavailableReason||hole.invalidationReason||course.lastError||null
+        lastError:hole.presentation&&hole.presentation.framePrebuildLastError||hole.unavailableReason||hole.invalidationReason||course.lastError||null
       };
     });
     var syncQueue=getCoursePlaySyncQueue();
     var timeline=loadDebugLog();
     var adapter=course.adapter||{};
+    var frameQueue=framePrebuildQueues[course.courseId]||null;
     var lastAutoEvent=timeline.slice().reverse().filter(function(event){return /^automapper/.test(String(event&&event.type||""));})[0]||null;
     var automapperStatus=adapter.holesChecked?"complete":lastAutoEvent&&lastAutoEvent.type==="automapper-started"?"running":lastAutoEvent&&lastAutoEvent.type==="automapper-ingest-started"?"running":lastAutoEvent&&lastAutoEvent.type==="automapper-completed"?"complete":"unknown";
     return {
@@ -1032,6 +1204,12 @@
       holesWithPlayDataReady:rows.filter(function(row){return row.pipelineState===HOLE_STATES.play_data_ready;}).length,
       holesWithFrameIndexEntries:rows.filter(function(row){return row.hasFrameIndexEntry;}).length,
       holesWithCapturedManifestsPresent:rows.filter(function(row){return row.capturedManifestPresent;}).length,
+      holesWithFramePrebuildFailed:rows.filter(function(row){return row.framePrebuildStatus==="failed";}).length,
+      framePrebuildStatus:frameQueue?frameQueue.running?"running":"queued":"idle",
+      framePrebuildQueued:frameQueue&&frameQueue.holes?frameQueue.holes.length:0,
+      framePrebuildRunningHole:frameQueue&&frameQueue.runningHole||null,
+      framePrebuildCompleted:frameQueue&&frameQueue.completed||0,
+      framePrebuildFailed:frameQueue&&frameQueue.failed||0,
       syncQueueItemCount:(syncQueue.items||[]).length,
       rows:rows,
       timeline:timeline
@@ -1060,6 +1238,10 @@
     registerCoursePlayFrame:registerCoursePlayFrame,
     getCoursePlayFrameIndex:getCoursePlayFrameIndex,
     loadCoursePlayFrameIndex:loadFrameIndex,
+    prebuildCoursePlayFrame:gdPrebuildCoursePlayFrame,
+    gdPrebuildCoursePlayFrame:gdPrebuildCoursePlayFrame,
+    queueFramePrebuild:queueFramePrebuild,
+    gdQueueCoursePlayFramePrebuild:queueFramePrebuild,
     buildHolePlayDbPayload:buildHolePlayDbPayload,
     buildCoursePlayDbPayload:buildCoursePlayDbPayload,
     buildCoursePlaySyncEnvelope:buildCoursePlaySyncEnvelope,
@@ -1102,6 +1284,12 @@
   };
   window.__gdDumpCoursePlayFrameIndex=function(courseId,holeNumber){
     return getCoursePlayFrameIndex(courseId,holeNumber);
+  };
+  window.__gdQueueCoursePlayFramePrebuild=function(courseId,opts){
+    return queueFramePrebuild(courseId||activeCourseFromApp()||"course",opts||{source:"manual-debug"});
+  };
+  window.__gdPrebuildCoursePlayFrame=function(courseId,holeNumber,opts){
+    return gdPrebuildCoursePlayFrame(courseId||activeCourseFromApp()||"course",holeNumber||activeHoleFromApp(),opts||{source:"manual-debug",force:true});
   };
   window.__gdDumpCoursePlayTimeline=function(){
     return loadDebugLog();
