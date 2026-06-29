@@ -301,6 +301,160 @@
       east:Math.max.apply(null,lngs)
     };
   }
+  function roundCoord(value){
+    var number=Number(value);
+    return Number.isFinite(number)?Math.round(number*1000000)/1000000:null;
+  }
+  function sanitizePoint(value){
+    var p=point(value);
+    if(!p)return null;
+    return {lat:roundCoord(p.lat),lng:roundCoord(p.lng)};
+  }
+  function sanitizePoints(list){
+    return points(list).map(sanitizePoint).filter(Boolean);
+  }
+  function sanitizeBounds(value){
+    if(!value||typeof value!=="object")return null;
+    var south=roundCoord(value.south);
+    var west=roundCoord(value.west);
+    var north=roundCoord(value.north);
+    var east=roundCoord(value.east);
+    if([south,west,north,east].some(function(v){return v===null;}))return null;
+    return {south:south,west:west,north:north,east:east};
+  }
+  function stableStringify(value){
+    if(value===null||value===undefined)return "null";
+    if(typeof value!=="object")return JSON.stringify(value);
+    if(Array.isArray(value))return "["+value.map(stableStringify).join(",")+"]";
+    return "{"+Object.keys(value).sort().map(function(key){return JSON.stringify(key)+":"+stableStringify(value[key]);}).join(",")+"}";
+  }
+  function stableHash(value){
+    var input=typeof value==="string"?value:stableStringify(value);
+    var h=2166136261;
+    for(var i=0;i<input.length;i++){
+      h^=input.charCodeAt(i);
+      h+=(h<<1)+(h<<4)+(h<<7)+(h<<8)+(h<<24);
+    }
+    return ("00000000"+(h>>>0).toString(16)).slice(-8);
+  }
+  function normalizedFingerprintText(value){
+    return String(value||"").trim().toLowerCase().replace(/[^a-z0-9]+/g," ").replace(/\s+/g," ").trim();
+  }
+  function sanitizeFrameAnchors(value){
+    value=value&&typeof value==="object"?value:{};
+    return {
+      tee:sanitizePoint(value.tee),
+      green:sanitizePoint(value.green),
+      route:sanitizePoints(value.route),
+      greenShape:sanitizePoints(value.greenShape)
+    };
+  }
+  function sanitizePresentation(value){
+    value=value&&typeof value==="object"?value:{};
+    return {
+      owner:String(value.owner||"gps-play").slice(0,80),
+      capturedSurfaceReady:!!value.capturedSurfaceReady,
+      frameStatus:String(value.frameStatus||"unknown").slice(0,80)
+    };
+  }
+  function sanitizeCoursePlayHoleForSupabase(hole){
+    hole=hole&&typeof hole==="object"?hole:{};
+    var clean={
+      schema:"gd.course_play_supabase.hole",
+      schemaVersion:SCHEMA_VERSION,
+      recordId:String(hole.recordId||"").slice(0,180),
+      courseId:String(hole.courseId||"").slice(0,160),
+      courseKey:String(hole.courseKey||"").slice(0,160),
+      courseName:String(hole.courseName||"Course").slice(0,220),
+      holeNumber:normalizeHoleNumber(hole.holeNumber),
+      status:String(hole.status||"unknown").slice(0,80),
+      source:String(hole.source||"local").slice(0,100),
+      confidence:String(hole.confidence||"unknown").slice(0,160),
+      teePoint:sanitizePoint(hole.teePoint),
+      greenCentre:sanitizePoint(hole.greenCentre),
+      greenShape:sanitizePoints(hole.greenShape),
+      greenBounds:sanitizeBounds(hole.greenBounds),
+      fairwayPoints:sanitizePoints(hole.fairwayPoints),
+      routePoints:sanitizePoints(hole.routePoints),
+      frameAnchors:sanitizeFrameAnchors(hole.frameAnchors),
+      presentation:sanitizePresentation(hole.presentation),
+      dataVersion:Math.max(1,Number(hole.dataVersion||1)),
+      invalidatedAt:hole.invalidatedAt||null,
+      invalidationReason:hole.invalidationReason||null,
+      syncStatus:String(hole.syncStatus||"local").slice(0,80),
+      remoteId:hole.remoteId||null,
+      createdAt:hole.createdAt||null,
+      updatedAt:hole.updatedAt||null
+    };
+    clean.greenBounds=clean.greenBounds||deriveBounds(clean.greenShape,clean.greenCentre);
+    clean.holeFingerprint="gdh_"+stableHash([
+      normalizedFingerprintText(clean.courseName),
+      clean.holeNumber,
+      clean.teePoint,
+      clean.greenCentre,
+      clean.greenShape,
+      clean.routePoints,
+      clean.frameAnchors
+    ]);
+    clean.payloadHash="gdhp_"+stableHash(clean);
+    return clean;
+  }
+  function coursePlayBounds(holes){
+    var pts=[];
+    (Array.isArray(holes)?holes:[]).forEach(function(hole){
+      pts=pts.concat([hole.teePoint,hole.greenCentre]).concat(hole.greenShape||[],hole.fairwayPoints||[],hole.routePoints||[]);
+    });
+    return deriveBounds(pts,null);
+  }
+  function coursePlayCentre(bounds){
+    if(!bounds)return null;
+    return {lat:roundCoord((Number(bounds.south)+Number(bounds.north))/2),lng:roundCoord((Number(bounds.west)+Number(bounds.east))/2)};
+  }
+  function sanitizeCoursePlayPayloadForSupabase(payload){
+    payload=payload&&payload.payload||payload;
+    if(!payload||typeof payload!=="object")return null;
+    var holes=(Array.isArray(payload.holes)?payload.holes:[]).map(sanitizeCoursePlayHoleForSupabase).sort(function(a,b){return a.holeNumber-b.holeNumber;});
+    var bounds=coursePlayBounds(holes);
+    var clean={
+      schema:"gd.course_play_supabase.course",
+      schemaVersion:SCHEMA_VERSION,
+      sanitizedAt:now(),
+      recordId:String(payload.recordId||"").slice(0,180),
+      courseId:String(payload.courseId||payload.courseKey||"course").slice(0,160),
+      courseKey:String(payload.courseKey||payload.courseId||"course").slice(0,160),
+      courseName:String(payload.courseName||"Course").slice(0,220),
+      status:String(payload.status||"unknown").slice(0,80),
+      source:String(payload.source||"local").slice(0,100),
+      confidence:String(payload.confidence||"unknown").slice(0,160),
+      dataVersion:Math.max(1,Number(payload.dataVersion||1)),
+      syncStatus:String(payload.syncStatus||"local").slice(0,80),
+      remoteId:payload.remoteId||null,
+      invalidatedAt:payload.invalidatedAt||null,
+      invalidationReason:payload.invalidationReason||null,
+      createdAt:payload.createdAt||null,
+      updatedAt:payload.updatedAt||null,
+      holeCount:holes.length,
+      bounds:bounds,
+      centre:coursePlayCentre(bounds),
+      holes:holes
+    };
+    clean.courseFingerprint="gdc_"+stableHash([
+      normalizedFingerprintText(clean.courseName),
+      clean.holeCount,
+      holes.map(function(hole){
+        return {
+          n:hole.holeNumber,
+          tee:hole.teePoint,
+          green:hole.greenCentre,
+          shape:hole.greenShape,
+          route:hole.routePoints,
+          anchors:hole.frameAnchors
+        };
+      })
+    ]);
+    clean.payloadHash="gdcp_"+stableHash(Object.assign({},clean,{sanitizedAt:null}));
+    return clean;
+  }
   function normalizeMappedHoleData(course,holeNumber,mappedData,source){
     mappedData=mappedData||{};
     var route=points(mappedData.route);
@@ -612,6 +766,9 @@
       updatedAt:course.updatedAt,
       holes:holes
     };
+  }
+  function buildCoursePlaySupabasePayload(courseOrId){
+    return sanitizeCoursePlayPayloadForSupabase(buildCoursePlayDbPayload(courseOrId||activeCourseFromApp()||"course"));
   }
   function exportCoursePlayPayload(courseOrId){
     var payload=buildCoursePlayDbPayload(courseOrId||activeCourseFromApp()||"course");
@@ -1062,6 +1219,8 @@
     loadCoursePlayFrameIndex:loadFrameIndex,
     buildHolePlayDbPayload:buildHolePlayDbPayload,
     buildCoursePlayDbPayload:buildCoursePlayDbPayload,
+    sanitizeCoursePlayPayloadForSupabase:sanitizeCoursePlayPayloadForSupabase,
+    buildCoursePlaySupabasePayload:buildCoursePlaySupabasePayload,
     buildCoursePlaySyncEnvelope:buildCoursePlaySyncEnvelope,
     enqueueCoursePlaySync:enqueueCoursePlaySync,
     getCoursePlaySyncQueue:getCoursePlaySyncQueue,
@@ -1092,6 +1251,7 @@
       syncQueueStorageKey:SYNC_QUEUE_KEY,
       course:loadCoursePlayPipeline(course),
       dbPayload:buildCoursePlayDbPayload(course),
+      supabasePayload:buildCoursePlaySupabasePayload(course),
       frameIndex:getCoursePlayFrameIndex(course),
       syncQueue:getCoursePlaySyncQueue(),
       debugSnapshot:buildDebugSnapshot(course)
@@ -1099,6 +1259,9 @@
   };
   window.__gdExportCoursePlayPayload=function(courseId){
     return exportCoursePlayPayload(courseId||activeCourseFromApp()||"course");
+  };
+  window.__gdBuildCoursePlaySupabasePayload=function(courseId){
+    return buildCoursePlaySupabasePayload(courseId||activeCourseFromApp()||"course");
   };
   window.__gdDumpCoursePlayFrameIndex=function(courseId,holeNumber){
     return getCoursePlayFrameIndex(courseId,holeNumber);

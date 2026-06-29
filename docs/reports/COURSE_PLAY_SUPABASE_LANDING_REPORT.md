@@ -121,6 +121,53 @@ Admin opens Course Database, selects a local course record, dry-runs the sanitiz
 
 No automatic read-before-scan is included in this branch.
 
+## Implemented Files
+
+- `scripts/gd-course-play-pipeline.js`: adds `sanitizeCoursePlayPayloadForSupabase()` and `buildCoursePlaySupabasePayload()`.
+- `functions/course-play-sync.js`: adds `POST /api/course-play-sync`.
+- `netlify.toml`: routes `/api/course-play-sync` to the Netlify function.
+- `index.html`: adds manual Course Database dry-run and upload controls.
+- `dist/index.html` and `dist/scripts/gd-course-play-pipeline.js`: built Netlify mirrors.
+
+## Payload Sent
+
+The admin upload sends:
+
+- `courseFingerprint`
+- `payloadHash`
+- `courseId`, `courseKey`, `courseName`
+- schema/data/status/source/confidence fields
+- `bounds`, `centre`, `holeCount`
+- sanitized hole rows with tee, green, green shape, green bounds, fairway, route, frame anchors, and lightweight presentation state
+
+The upload strips local captured/cache fields:
+
+- `capturedManifestKey`
+- `frameIndexKey`
+- `manifestKey`
+- `tileMetadata`
+- `tiles`
+- `originPx`
+- `imageWidth`
+- `imageHeight`
+- `captureZoom`
+- local frame-index storage rows
+- debug timeline and sync queue data
+
+## Endpoint Response Modes
+
+- `dry_run`: validates and returns fingerprint/hash/hole count without requiring Supabase.
+- `not_configured`: returns HTTP 200 with `ok:false` when Supabase env vars are absent.
+- `uploaded`: upserts course and holes, then records contribution metadata.
+- `failed`: returns structured backend/Supabase error details without changing client GPS behavior.
+
 ## Validation Log
 
-Pending implementation.
+- Confirmed branch was created from latest `origin/main`, and `origin/main` includes PR #37 merge SHA `3693dceb53e05210b33df7e49de630223065915a`.
+- Local function dry-run returned HTTP 200 with `configured:false`, `courseFingerprint`, `payloadHash`, `holeCount`, and stripped-field list.
+- `npm run build:netlify` completed successfully.
+- `node --check functions/course-play-sync.js` passed.
+- `node --check scripts/gd-course-play-pipeline.js` passed.
+- `node --check dist/scripts/gd-course-play-pipeline.js` passed.
+- Inline script extraction/parse check passed for `index.html`.
+- Inline script extraction/parse check passed for `dist/index.html`.
