@@ -6785,17 +6785,16 @@ function gdLmClubMarkerKind(token){
   const value=String(token||"").trim().toLowerCase().replace(/[^a-z0-9|!\[\](){}]/g,"");
   if(!value)return "";
   if(/^(?:ball|speed|carry|total|spin|side|offline|launch|peak|height|dist|distance|row|raw|low|value|values|shot|shots|club)$/.test(value))return "";
-  if(/^(?:i|l|1|!|\||\[|\]|\(|\)|\{|\}|iron|irn)$/.test(value))return "i";
-  if(/^(?:i|l)[a-z]{1,2}$/.test(value))return "i";
-  if(/^[a-z]{0,2}(?:i|l)[a-z]?$/.test(value)&&/[il]/.test(value))return "i";
-  if(/^(?:h|hyb|hybrid)$/.test(value))return "h";
-  if(/^[a-z]{0,2}h[a-z]?$/.test(value))return "h";
-  if(/^(?:w|wood)$/.test(value))return "w";
-  if(/^[a-z]{0,2}w[a-z]?$/.test(value))return "w";
+  if(/^(?:pw|gw|aw|sw|lw)$/.test(value))return "";
+  if(/^(?:i|l|1|!|\||\[|\]|\(|\)|\{|\}|ie|ei|il|li|ir|ri|iron|irn)$/.test(value))return "i";
+  if(/^(?:h|hyb|hybrid|mh|hm)$/.test(value))return "h";
+  if(/^(?:w|wood|wd|mw|wm)$/.test(value))return "w";
   return "";
 }
 function gdLmClubLabelFromNumberMarker(number,marker){
   const digit=String(number||"").match(/[2-9]/)?.[0]||"";
+  const markerToken=String(marker||"").trim().toLowerCase().replace(/[^a-z0-9]/g,"");
+  if(/^(?:pw|gw|aw|sw|lw)$/.test(markerToken))return "";
   const kind=gdLmClubMarkerKind(marker);
   if(!digit||!kind)return "";
   if(kind==="i")return `${digit}i`;
@@ -6803,17 +6802,18 @@ function gdLmClubLabelFromNumberMarker(number,marker){
   if(kind==="w")return `${digit}W`;
   return "";
 }
+function gdLmNamedClubLabel(value){
+  const raw=String(value||"").trim().toLowerCase();
+  if(raw==="driver"||raw==="dr"||raw==="1w")return "Driver";
+  if(raw==="wedge")return "Wedge";
+  if(/^(?:pw|gw|aw|sw|lw)$/.test(raw))return raw.toUpperCase();
+  if(raw==="putter")return "PUTTER";
+  return "";
+}
 function gdLmNoisyClubFromText(line){
   const raw=String(line||"").trim();
   if(!raw)return "";
   const lower=raw.toLowerCase();
-  const named=lower.match(/\b(driver|dr|1w|putter|pw|gw|aw|sw|lw|wedge)\b/i);
-  if(named){
-    const value=String(named[1]||"").toLowerCase();
-    if(value==="driver"||value==="dr"||value==="1w")return "Driver";
-    if(value==="wedge")return "Wedge";
-    return value.toUpperCase();
-  }
   const tokens=(raw.match(/[a-z0-9|!\[\](){}]+/gi)||[]).map(token=>String(token||"").trim()).filter(Boolean);
   const compactTokens=tokens.map(token=>token.toLowerCase().replace(/[^a-z0-9|!\[\](){}]/g,""));
   for(const token of compactTokens){
@@ -6843,6 +6843,9 @@ function gdLmNoisyClubFromText(line){
       if(label)return label;
     }
   }
+  const named=lower.match(/\b(driver|dr|1w|putter|pw|gw|aw|sw|lw|wedge)\b/i);
+  const hasNumberedClubEvidence=compactTokens.some(token=>/[2-9]/.test(token));
+  if(named&&!hasNumberedClubEvidence)return gdLmNamedClubLabel(named[1]);
   return "";
 }
 function gdLmClubFromLine(line,opts={}){
@@ -6858,6 +6861,11 @@ function gdLmClubFromLine(line,opts={}){
   const match=line.match(/\b(driver|dr|1w|2w|3w|4w|5w|7w|[2-9]\s*h|[2-9]\s*(?:i|iron)|pw|gw|aw|sw|lw|wedge|putter)\b/i);
   if(!match)return "";
   const raw=match[1].replace(/\s+/g,"").toLowerCase();
+  if(/^(?:pw|gw|aw|sw|lw|wedge|putter)$/.test(raw)){
+    const before=String(line||"").slice(0,Number(match.index)||0);
+    const after=String(line||"").slice((Number(match.index)||0)+String(match[0]||"").length);
+    if(/\b\d*[2-9]\d*\b/.test(`${before} ${after}`))return "";
+  }
   if(raw==="driver"||raw==="dr"||raw==="1w")return "Driver";
   if(raw==="wedge")return "Wedge";
   const hybrid=raw.match(/^([2-9])h$/);
