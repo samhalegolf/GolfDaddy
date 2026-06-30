@@ -7162,6 +7162,9 @@ function gdLmAssignDetectedHeaderColumnBounds(columns){
   const fallbackGap=gdValueClusterMedian(gaps)||90;
   sorted.forEach((column,index)=>{
     const valueCx=Number.isFinite(Number(column.valueCx))?Number(column.valueCx):Number(column.cx);
+    const presetLeft=Number.isFinite(Number(column.dividerLeft))?Number(column.dividerLeft):Number(column.left);
+    const presetRight=Number.isFinite(Number(column.dividerRight))?Number(column.dividerRight):Number(column.right);
+    const hasPresetBounds=Number.isFinite(presetLeft)&&Number.isFinite(presetRight)&&presetRight>presetLeft+4;
     const prev=sorted[index-1];
     const next=sorted[index+1];
     const leftGap=prev?(Number(column.cx)-Number(prev.cx)):fallbackGap;
@@ -7169,14 +7172,14 @@ function gdLmAssignDetectedHeaderColumnBounds(columns){
     const wordLeft=Number(column.x0);
     const wordRight=Number(column.x1);
     const pad=Math.max(8,Math.min(24,Math.min(leftGap||fallbackGap,rightGap||fallbackGap)*.18));
-    let left=prev
+    let left=hasPresetBounds?presetLeft:(prev
       ?(Number(prev.cx)+Number(column.cx))/2
-      :(Number.isFinite(wordLeft)?wordLeft-pad:Number(column.cx)-(leftGap||fallbackGap)*.36);
-    let right=next
+      :(Number.isFinite(wordLeft)?wordLeft-pad:Number(column.cx)-(leftGap||fallbackGap)*.36));
+    let right=hasPresetBounds?presetRight:(next
       ?(Number(column.cx)+Number(next.cx))/2
-      :(Number.isFinite(wordRight)?wordRight+pad:Number(column.cx)+(rightGap||fallbackGap)*.36);
-    const minWidth=Math.max(24,(Number.isFinite(wordLeft)&&Number.isFinite(wordRight)?wordRight-wordLeft:0)+pad*2);
-    if(right-left<minWidth){
+      :(Number.isFinite(wordRight)?wordRight+pad:Number(column.cx)+(rightGap||fallbackGap)*.36));
+    const minWidth=hasPresetBounds?0:Math.max(24,(Number.isFinite(wordLeft)&&Number.isFinite(wordRight)?wordRight-wordLeft:0)+pad*2);
+    if(!hasPresetBounds&&right-left<minWidth){
       const mid=Number(column.cx);
       left=mid-minWidth/2;
       right=mid+minWidth/2;
@@ -7201,6 +7204,10 @@ function gdLmGenericGridColumnsFromColumns(columns,prefix="C"){
         label:`${prefix}${n}`,
         x0:Number(column.x0),
         x1:Number(column.x1),
+        left:Number.isFinite(Number(column.dividerLeft))?Number(column.dividerLeft):Number(column.left),
+        right:Number.isFinite(Number(column.dividerRight))?Number(column.dividerRight):Number(column.right),
+        dividerLeft:Number.isFinite(Number(column.dividerLeft))?Number(column.dividerLeft):Number(column.left),
+        dividerRight:Number.isFinite(Number(column.dividerRight))?Number(column.dividerRight):Number(column.right),
         cx:Number(column.cx),
         valueCx:Number.isFinite(Number(column.valueCx))?Number(column.valueCx):Number(column.cx),
         source:String(column.source||"generic_grid")
@@ -12082,7 +12089,7 @@ function gdRenderValueGridCropPreview(target){
           `Rows: ${Number(target?.cellGrid?.rows?.length)||Number(target?.valueCluster?.rowCount)||0}  Columns: ${Number(target?.cellGrid?.columns?.length)||Number(target?.layout?.columns?.length)||0}`,
           `Column cut source: ${String(target.layout.dividerSource||"flat-number-box-gaps")}`,
           isOcrGeneratedGrid
-            ?"Yellow lines feed the cell grid; blue lines mark value centres only. Header meanings and cell values have not been read yet."
+            ?"Column boxes come from detected screen dividers when available; value-centre marks are reference only. Header meanings and cell values have not been read yet."
             :`Fit error: ${(Number(target?.flatTemplateFit?.rms)||0).toFixed(1)} px rms / ${(Number(target?.flatTemplateFit?.maxResidual)||0).toFixed(1)} max`
         ].join("\n")
         :[
@@ -12961,7 +12968,7 @@ function gdRenderFlatTableOutputTable(columnScan){
     `${rows.length} rows`,
     `${columns.length} columns`,
     `${Number(cellGrid.cellCount)||0} cells`,
-    generatedGrid?"yellow dividers drive cells, blue centres only reference":`fit ${(Number(columnScan?.flatTemplateFit?.rms)||0).toFixed(1)} px rms`
+    generatedGrid?"screen dividers drive cells; value centres only reference":`fit ${(Number(columnScan?.flatTemplateFit?.rms)||0).toFixed(1)} px rms`
   ].join(" • ");
   details.append(summary,wrap,source);
   list.append(details);
@@ -13533,7 +13540,7 @@ function gdLmHeaderWordsForGrid(lines,layout){
     .filter(word=>!gdLmLooksLikeOcrValue(word.text))
     .filter(word=>String(word.text||"").trim().length>=2);
 }
-function gdLmGenericGridColumnsFromValueCandidates(candidates,headerWords=[]){
+function gdLmGridValueCandidateGroups(candidates){
   const groups=[];
   (Array.isArray(candidates)?candidates:[])
     .slice()
@@ -13554,16 +13561,86 @@ function gdLmGenericGridColumnsFromValueCandidates(candidates,headerWords=[]){
       group.items.push(candidate);
       group.cx=group.items.reduce((sum,item)=>sum+Number(item.cx||0),0)/group.items.length;
     });
+  return groups
+    .filter(group=>group.items.length>=2&&Number.isFinite(Number(group.cx)))
+    .sort((a,b)=>Number(a.cx)-Number(b.cx));
+}
+function gdLmHeaderTextNearGridX(headerWords,cx,maxDistance=86){
+  return (Array.isArray(headerWords)?headerWords:[])
+    .map(word=>({word,distance:Math.abs(Number(word.cx)-Number(cx))}))
+    .sort((a,b)=>a.distance-b.distance)
+    .filter(item=>item.distance<=maxDistance)
+    .slice(0,3)
+    .map(item=>String(item.word?.text||"").trim())
+    .filter(Boolean);
+}
+function gdLmGenericGridColumnsFromScreenDividers(image,candidates=[],headerWords=[]){
+  const valueGroups=gdLmGridValueCandidateGroups(candidates);
+  const headerAwareGroups=valueGroups
+    .map(group=>Object.assign(group,{rawHeaderText:[...new Set(gdLmHeaderTextNearGridX(headerWords,group.cx))].join(" ")}))
+    .filter(group=>!headerWords.length||group.rawHeaderText);
+  const targetCount=Math.max(4,Math.min(14,Number(headerAwareGroups.length)||Number(valueGroups.length)||gdFlatTableTemplateColumns().length||10));
+  const candidateCounts=[targetCount,gdFlatTableTemplateColumns().length||10]
+    .filter((count,index,array)=>Number.isFinite(count)&&count>=4&&array.indexOf(count)===index);
+  let dividers=[];
+  let source="";
+  for(const count of candidateCounts){
+    const structured=gdDetectStructuredColumnDividerXs(image,count);
+    if(Array.isArray(structured)&&structured.length>=count+1){
+      dividers=structured.slice(0,count+1);
+      source="screen-divider-grid";
+      break;
+    }
+    const basic=gdDetectColumnDividerXs(image,count);
+    if(Array.isArray(basic)&&basic.length>=count+1){
+      dividers=basic.slice(0,count+1);
+      source="screen-divider-grid-basic";
+      break;
+    }
+  }
+  const width=Number(image?.width)||0;
+  dividers=(Array.isArray(dividers)?dividers:[])
+    .map(Number)
+    .filter(Number.isFinite)
+    .sort((a,b)=>a-b)
+    .map(x=>Math.max(0,Math.min(width||x,x)));
+  if(dividers.length<5)return [];
+  const columns=[];
+  for(let index=0;index<dividers.length-1;index+=1){
+    const left=dividers[index];
+    const right=dividers[index+1];
+    if(!(right>left+6))continue;
+    const groupsInside=valueGroups.filter(group=>Number(group.cx)>=left&&Number(group.cx)<=right);
+    const valueCx=gdValueClusterMedian(groupsInside.flatMap(group=>group.items.map(item=>Number(item.cx)).filter(Number.isFinite)));
+    const valueXs=groupsInside.flatMap(group=>group.items.map(item=>Number(item.word?.cx)||Number(item.cx)).filter(Number.isFinite));
+    const headerText=[...new Set((Array.isArray(headerWords)?headerWords:[])
+      .filter(word=>Number(word.cx)>=left&&Number(word.cx)<=right)
+      .map(word=>String(word.text||"").trim())
+      .filter(Boolean))].join(" ");
+    const n=String(columns.length+1).padStart(2,"0");
+    columns.push({
+      key:`gridCol${n}`,
+      label:`C${n}`,
+      rawHeaderText:headerText,
+      x0:valueXs.length?Math.min(...valueXs):left,
+      x1:valueXs.length?Math.max(...valueXs):right,
+      left,
+      right,
+      dividerLeft:left,
+      dividerRight:right,
+      cx:(left+right)/2,
+      valueCx:Number.isFinite(valueCx)?valueCx:(left+right)/2,
+      valueGroupCount:groupsInside.length,
+      source
+    });
+  }
+  return columns;
+}
+function gdLmGenericGridColumnsFromValueCandidates(candidates,headerWords=[]){
+  const groups=gdLmGridValueCandidateGroups(candidates);
   const usable=groups
-    .filter(group=>group.items.length>=2)
     .map(group=>{
-      const nearest=(Array.isArray(headerWords)?headerWords:[])
-        .map(word=>({word,distance:Math.abs(Number(word.cx)-Number(group.cx))}))
-        .sort((a,b)=>a.distance-b.distance)
-        .filter(item=>item.distance<=86)
-        .slice(0,3)
-        .map(item=>String(item.word?.text||"").trim())
-        .filter(Boolean);
+      const nearest=gdLmHeaderTextNearGridX(headerWords,group.cx);
       return Object.assign(group,{rawHeaderText:[...new Set(nearest)].join(" ")});
     })
     .filter(group=>!headerWords.length||group.rawHeaderText);
@@ -13905,7 +13982,8 @@ function gdUpdatePracticeScanDebugSummary(columnScan){
     const rows=Number(columnScan?.cellGrid?.rows?.length)||0;
     const columns=Number(columnScan?.cellGrid?.columns?.length)||0;
     const cells=Number(columnScan?.cellGrid?.cellCount)||0;
-    summary.textContent=`OCR generated grid - ${rows} row bands - ${columns} generic columns - ${cells} cells - headers unallocated, values unread`;
+    const dividerSource=String(columnScan?.layout?.dividerSource||"unknown");
+    summary.textContent=`OCR generated grid - ${rows} row bands - ${columns} generic columns - ${cells} cells - cuts: ${dividerSource} - headers unallocated, values unread`;
     return;
   }
   if(String(columnScan?.layout?.cropMode||"")==="flat-template"){
@@ -15333,12 +15411,16 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
       return {payload:null,scan:null,outcome};
     }
     const headerWords=gdLmHeaderWordsForGrid(lines,layout);
-    const geometryColumns=gdLmGenericGridColumnsFromValueCandidates(valueCandidates,headerWords);
+    const screenGridColumns=gdLmGenericGridColumnsFromScreenDividers(scanImage,valueCandidates,headerWords);
+    const geometryColumns=screenGridColumns.length>=4
+      ?screenGridColumns
+      :gdLmGenericGridColumnsFromValueCandidates(valueCandidates,headerWords);
     const fallbackGridColumns=gdLmGenericGridColumnsFromColumns(Array.isArray(stripScan.layout?.columns)&&stripScan.layout.columns.length?stripScan.layout.columns:layout.columns);
+    const chosenGridColumns=geometryColumns.length>=4?geometryColumns:fallbackGridColumns;
     const columnScan=Object.assign({},stripScan,{
       layout:Object.assign({},stripScan.layout||{},layout,{
-        columns:geometryColumns.length>=4?geometryColumns:fallbackGridColumns,
-        dividerSource:"ocr-generated-header",
+        columns:chosenGridColumns,
+        dividerSource:screenGridColumns.length>=4?String(screenGridColumns[0]?.source||"screen-divider-grid"):(geometryColumns.length>=4?"ocr-value-centre-fallback":"ocr-layout-fallback"),
         cropMode:"ocr-generated-grid",
         normalizeMode:String(scanImage?.__gdNormalizeMode||"flat-table"),
         clusterMode:`OCR generated geometry grid`,
@@ -15379,7 +15461,7 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
       candidateCount,
       reason:gridReady?"":"OCR generated layout found headers but could not form a cell grid.",
       summary:gridReady
-        ?`OCR-generated layout produced a ${gridRows} x ${gridColumns} generic cell grid from header-band geometry and value-looking boxes. Header meanings and cell values were not read in this step.`
+        ?`OCR-generated layout produced a ${gridRows} x ${gridColumns} generic cell grid from detected screen dividers when available. Header meanings and cell values were not read in this step.`
         :`OCR-generated layout found the header band, but no usable value-row grid.`,
       nextStep:gridReady?"Review the OCR generated grid. Run fitted-cell OCR only after the geometry looks right.":"Tune the header and value-box evidence using the OCR generated tab."
     });
