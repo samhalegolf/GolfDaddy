@@ -7148,6 +7148,44 @@ function gdLmAssignColumnBounds(columns){
   });
   return sorted;
 }
+function gdLmAssignDetectedHeaderColumnBounds(columns){
+  const sorted=(Array.isArray(columns)?columns:[])
+    .filter(column=>column&&column.key&&Number.isFinite(Number(column.cx)))
+    .map(column=>Object.assign({},column))
+    .sort((a,b)=>Number(a.cx)-Number(b.cx));
+  if(!sorted.length)return [];
+  const gaps=[];
+  for(let index=1;index<sorted.length;index+=1){
+    const gap=Number(sorted[index].cx)-Number(sorted[index-1].cx);
+    if(gap>8)gaps.push(gap);
+  }
+  const fallbackGap=gdValueClusterMedian(gaps)||90;
+  sorted.forEach((column,index)=>{
+    const prev=sorted[index-1];
+    const next=sorted[index+1];
+    const leftGap=prev?(Number(column.cx)-Number(prev.cx)):fallbackGap;
+    const rightGap=next?(Number(next.cx)-Number(column.cx)):fallbackGap;
+    const wordLeft=Number(column.x0);
+    const wordRight=Number(column.x1);
+    const pad=Math.max(8,Math.min(24,Math.min(leftGap||fallbackGap,rightGap||fallbackGap)*.18));
+    let left=prev
+      ?(Number(prev.cx)+Number(column.cx))/2
+      :(Number.isFinite(wordLeft)?wordLeft-pad:Number(column.cx)-(leftGap||fallbackGap)*.36);
+    let right=next
+      ?(Number(column.cx)+Number(next.cx))/2
+      :(Number.isFinite(wordRight)?wordRight+pad:Number(column.cx)+(rightGap||fallbackGap)*.36);
+    const minWidth=Math.max(24,(Number.isFinite(wordLeft)&&Number.isFinite(wordRight)?wordRight-wordLeft:0)+pad*2);
+    if(right-left<minWidth){
+      const mid=Number(column.cx);
+      left=mid-minWidth/2;
+      right=mid+minWidth/2;
+    }
+    column.left=left;
+    column.right=right;
+    column.source=column.source||"ocr_detected_header";
+  });
+  return sorted;
+}
 function gdLmColumnsFromTemplateFit(intercept,slope,source="launch_monitor_row_fit"){
   return gdLmAssignColumnBounds(gdLmLaunchMonitorTemplateColumns().map(column=>{
     const cx=intercept+slope*column.templateRel;
@@ -7369,7 +7407,7 @@ function gdLmUnitFromText(text){
   if(token==="deg"||token==="degree"||token==="degrees")return "deg";
   return "";
 }
-function gdLmBuildLayoutColumns(lines){
+function gdLmBuildLayoutColumns(lines,opts={}){
   const candidates=gdLmHeaderCandidatesFromLines(lines);
   let best=null;
   candidates.forEach(candidate=>{
@@ -7379,7 +7417,10 @@ function gdLmBuildLayoutColumns(lines){
   const detectedColumns=best.columns
     .filter((column,index,array)=>array.findIndex(other=>other.key===column.key)===index)
     .sort((a,b)=>a.cx-b.cx);
-  const columns=gdLmTemplateCompleteColumns(detectedColumns);
+  const preserveDetectedOrder=opts?.preserveDetectedOrder===true;
+  const columns=preserveDetectedOrder
+    ?gdLmAssignDetectedHeaderColumnBounds(detectedColumns)
+    :gdLmTemplateCompleteColumns(detectedColumns);
   const units={};
   for(let i=best.index+1;i<Math.min(lines.length,best.index+5);i++){
     const line=lines[i];
@@ -14196,12 +14237,14 @@ function gdBuildPracticeCellGrid(columnScan){
   const image=columnScan?.sourceCanvas||columnScan?.preparedCanvas;
   const width=Number(image?.width)||0;
   const height=Number(image?.height)||0;
+  const cropMode=String(columnScan?.layout?.cropMode||"");
+  const includeToPin=cropMode==="ocr-generated-grid";
   const columns=(Array.isArray(columnScan?.layout?.columns)?columnScan.layout.columns:[])
-    .filter(column=>column&&column.key&&column.key!=="toPin")
+    .filter(column=>column&&column.key&&(includeToPin||column.key!=="toPin"))
     .slice(0,10);
   const rows=gdPracticeCellRowsFromCluster(columnScan);
   if(!image||width<10||height<10||columns.length<1||rows.length<1)return null;
-  const fullTableGridMode=String(columnScan?.layout?.cropMode||"")==="full-table-template";
+  const fullTableGridMode=cropMode==="full-table-template";
   const pixelSource=fullTableGridMode?gdPracticeImagePixelSource(image):null;
   const columnRows=columns.map(column=>fullTableGridMode&&pixelSource
     ?gdPracticeColumnRowSlotsFromLines(pixelSource,column,rows)
@@ -15033,7 +15076,7 @@ async function gdRunOcrGeneratedHeaderBandProbe(Tesseract,scanImage,baseOcrData,
       if(wordCount)probeResults.push(data);
       const merged=gdLmNormalizeOcrData(gdMergeLaunchMonitorOcrData([baseOcrData].concat(probeResults))||baseOcrData);
       const lines=gdLmLinesFromOcrData(merged);
-      const layout=gdLmBuildLayoutColumns(lines);
+      const layout=gdLmBuildLayoutColumns(lines,{preserveDetectedOrder:true});
       if(layout){
         const headerCandidates=gdLmHeaderCandidatesFromLines(lines);
         return {
@@ -15146,7 +15189,7 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
     let ocrData=gdLmNormalizeOcrData(fullResult?.data||{text:"",words:[],lines:[]});
     let lines=gdLmLinesFromOcrData(ocrData);
     let headerCandidates=gdLmHeaderCandidatesFromLines(lines);
-    let layout=gdLmBuildLayoutColumns(lines);
+    let layout=gdLmBuildLayoutColumns(lines,{preserveDetectedOrder:true});
     let headerProbe=null;
     if(!layout){
       gdSetPracticeScanStatus("OCR did not return the header row. Probing the header band above the first value row...");
@@ -15155,7 +15198,7 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
         ocrData=headerProbe.ocrData;
         lines=headerProbe.lines||gdLmLinesFromOcrData(ocrData);
         headerCandidates=headerProbe.headerCandidates||gdLmHeaderCandidatesFromLines(lines);
-        layout=headerProbe.layout||gdLmBuildLayoutColumns(lines);
+        layout=headerProbe.layout||gdLmBuildLayoutColumns(lines,{preserveDetectedOrder:true});
       }
     }
     const wordCount=Number(ocrData.words?.length)||0;
@@ -15192,7 +15235,7 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
     }
     const columnScan=Object.assign({},stripScan,{
       layout:Object.assign({},stripScan.layout||{},layout,{
-        columns:Array.isArray(stripScan.layout?.columns)?stripScan.layout.columns:layout.columns,
+        columns:Array.isArray(layout.columns)?layout.columns:[],
         dividerSource:"ocr-generated-header",
         cropMode:"ocr-generated-grid",
         normalizeMode:String(scanImage?.__gdNormalizeMode||"flat-table"),
