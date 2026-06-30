@@ -5762,7 +5762,7 @@ body[data-gd-permission="admin"] #gdV62Home .gdHomeAdminSettings{display:inline-
 <div class="gdPracticeScannerActions"><button id="gdPracticeClearPhotoBtn" type="button" onclick="gdCancelPracticePhotoScan()">Clear Photo</button><button class="primary" id="gdPracticeScanPhotoBtn" type="button" onclick="gdScanPracticePhotoCrop()">Scan</button><button class="primary" id="gdPracticeDefaultScanBtn" type="button" onclick="gdRunDefaultPracticePhotoScan()" hidden>Generate OCR grid</button><button id="gdPracticeManualQuadBtn" type="button" onclick="gdOpenPracticeManualQuadTool()" hidden>Adjust box</button><button id="gdPracticeContinueScanBtn" type="button" onclick="gdContinuePracticePhotoScan()" hidden>Generate OCR grid</button></div>
 <div class="gdPracticeGridExperiments" id="gdPracticeGridExperiments" hidden>
 <div class="gdPracticeGridExperimentHead"><strong>OCR grid tools</strong><span>The generated OCR grid is the live path.</span></div>
-<div class="gdPracticeScannerActions gdPracticeGridExperimentActions"><button class="primary" id="gdPracticeBoxTrackGridBtn" type="button" onclick="gdRunPracticeGridExperiment('ocr-generated')">OCR generated grid</button><button id="gdPracticeCellOcrGridBtn" type="button" onclick="gdRunPracticeGridExperiment('cell-ocr')" hidden>OCR fitted cells</button><button id="gdPracticeDigitizeTableBtn" type="button" onclick="gdRunPracticeGridExperiment('digitize-table')" hidden>Digitise table</button></div>
+<div class="gdPracticeScannerActions gdPracticeGridExperimentActions"><button class="primary" id="gdPracticeBoxTrackGridBtn" type="button" onclick="gdRunPracticeGridExperiment('ocr-generated')">OCR generated grid</button><button id="gdPracticeCellOcrGridBtn" type="button" onclick="gdRunPracticeGridExperiment('cell-ocr')" hidden>Read cell values</button><button id="gdPracticeDigitizeTableBtn" type="button" onclick="gdRunPracticeGridExperiment('digitize-table')" hidden>Digitise table</button></div>
 </div>
 <div class="gdPracticeScanStatus" id="gdPracticeScanStatus">Upload a practice photo, adjust the box, then generate the OCR grid.</div>
 </div>
@@ -12963,11 +12963,12 @@ function gdRenderFlatTableOutputTable(columnScan){
   if(!columns.length||!rows.length)return;
   const cropMode=String(columnScan?.layout?.cropMode||"");
   const generatedGrid=cropMode==="ocr-generated-grid";
+  const valuesRead=!!columnScan?.digitizedTable||cells.some(row=>(Array.isArray(row)?row:[]).some(cell=>cell?.ocrItem||String(cell?.ocrRaw||cell?.ocrText||"").trim()));
   const details=document.createElement("details");
   details.className=`gdColumnImagePreview gdFlatTemplateOutput ${generatedGrid?"gdParkedToolPreview":""}`.trim();
-  details.open=!generatedGrid;
+  details.open=!generatedGrid||valuesRead;
   const summary=document.createElement("summary");
-  summary.textContent=`${generatedGrid?"Parked cell crop preview - after geometry":"Flat output table"} (${rows.length} x ${columns.length})`;
+  summary.textContent=`${generatedGrid?(valuesRead?"Raw cell value table - after read":"Parked cell crop preview - after geometry"):"Flat output table"} (${rows.length} x ${columns.length})`;
   const wrap=document.createElement("div");
   wrap.className="gdColumnOcrTableWrap";
   const table=document.createElement("table");
@@ -12992,7 +12993,7 @@ function gdRenderFlatTableOutputTable(columnScan){
     tr.append(rowCell);
     row.forEach(cell=>{
       const td=document.createElement("td");
-      const raw=generatedGrid?"":String(cell?.ocrRaw||cell?.ocrText||"").trim();
+      const raw=String(cell?.ocrRaw||cell?.ocrText||"").trim();
       if(raw){
         const value=document.createElement("span");
         value.className=`gdCellOcrValue ${cell?.ocrItem?"":"warn"}`.trim();
@@ -13020,7 +13021,7 @@ function gdRenderFlatTableOutputTable(columnScan){
     `${rows.length} rows`,
     `${columns.length} columns`,
     `${Number(cellGrid.cellCount)||0} cells`,
-    generatedGrid?"collapsed by default; values unread; geometry evidence above is authoritative":`fit ${(Number(columnScan?.flatTemplateFit?.rms)||0).toFixed(1)} px rms`
+    generatedGrid?(valuesRead?"raw OCR values shown; header allocation/native mapping remain separate":"collapsed by default; values unread; geometry evidence above is authoritative"):`fit ${(Number(columnScan?.flatTemplateFit?.rms)||0).toFixed(1)} px rms`
   ].join(" • ");
   details.append(summary,wrap,source);
   list.append(details);
@@ -13034,14 +13035,32 @@ function gdFlatDigitizedCellDirection(cell,key){
   const item=cell?.ocrItem||null;
   return item?gdColumnOrderDirectionLabel(key,item):"";
 }
+function gdPracticeCellReadKey(cell,column=null){
+  return String(cell?.allocatedKey||column?.allocatedKey||cell?.readKey||cell?.key||column?.key||"");
+}
+function gdPracticeColumnReadDescriptor(column,index=0){
+  const genericKey=String(column?.key||`gridCol${String(index+1).padStart(2,"0")}`);
+  const readKey=String(column?.allocatedKey||genericKey);
+  const allocatedLabel=String(column?.allocatedLabel||"").trim();
+  const genericLabel=String(column?.label||genericKey);
+  const template=gdFlatTableTemplateColumns().find(item=>String(item.key||"")===readKey)||null;
+  return Object.assign({},template||{},column||{},{
+    key:readKey,
+    columnIndex:index,
+    genericKey,
+    genericLabel,
+    label:allocatedLabel||template?.label||genericLabel,
+    allocatedKey:String(column?.allocatedKey||""),
+    allocatedLabel
+  });
+}
 function gdBuildFlatDigitizedTable(columnScan,payload=null){
   const cellGrid=columnScan?.cellGrid;
   const cellRows=Array.isArray(cellGrid?.cells)?cellGrid.cells:[];
   if(!cellRows.length)return null;
   const sourceColumns=(Array.isArray(cellGrid?.columns)&&cellGrid.columns.length?cellGrid.columns:gdFlatTableTemplateColumns())
     .filter(column=>column&&column.key&&column.key!=="toPin");
-  const templateMap=new Map(gdFlatTableTemplateColumns().map(column=>[column.key,column]));
-  const columns=sourceColumns.map(column=>Object.assign({},templateMap.get(column.key)||{},column));
+  const columns=sourceColumns.map(gdPracticeColumnReadDescriptor);
   const rows=cellRows.map((cellRow,rowIndex)=>{
     const byKey=new Map((Array.isArray(cellRow)?cellRow:[]).map(cell=>[String(cell?.key||""),cell]));
     const rawValues={};
@@ -13049,7 +13068,7 @@ function gdBuildFlatDigitizedTable(columnScan,payload=null){
     const cells={};
     columns.forEach(column=>{
       const key=String(column.key||"");
-      const cell=byKey.get(key)||null;
+      const cell=(Array.isArray(cellRow)?cellRow[column.columnIndex]:null)||byKey.get(String(column.genericKey||""))||byKey.get(key)||null;
       const item=cell?.ocrItem||null;
       const raw=gdFlatDigitizedCellRaw(cell,key);
       const direction=gdFlatDigitizedCellDirection(cell,key);
@@ -13136,11 +13155,12 @@ function gdRenderFlatDigitizedTable(columnScan){
   if(!digitized?.rows?.length)return;
   const columns=Array.isArray(digitized.columns)?digitized.columns:[];
   if(!columns.length)return;
+  const generatedGrid=String(columnScan?.layout?.cropMode||"")==="ocr-generated-grid";
   const details=document.createElement("details");
   details.className="gdColumnImagePreview gdDigitizedTablePreview";
   details.open=true;
   const summary=document.createElement("summary");
-  summary.textContent=`Digitised table (${digitized.rows.length} rows)`;
+  summary.textContent=`${generatedGrid?"Raw cell values":"Digitised table"} (${digitized.rows.length} rows)`;
   const wrap=document.createElement("div");
   wrap.className="gdColumnOcrTableWrap";
   const table=document.createElement("table");
@@ -13215,7 +13235,8 @@ function gdRenderFlatDigitizedTable(columnScan){
   source.textContent=[
     String(digitized.label||"Digitised table"),
     String(columnScan?.layout?.cropMode||"flat-template"),
-    `fit ${(Number(columnScan?.flatTemplateFit?.rms)||0).toFixed(1)} px rms`
+    generatedGrid?`headers ${Number(columnScan?.columnCutoutAllocation?.allocatedCount)||0}/${Number(columnScan?.columnCutoutAllocation?.totalCount)||columns.length} allocated`:`fit ${(Number(columnScan?.flatTemplateFit?.rms)||0).toFixed(1)} px rms`,
+    generatedGrid?"native save parked until mapped columns are reviewable":""
   ].filter(Boolean).join(" - ");
   details.append(summary,wrap,stats,source);
   list.append(details);
@@ -13235,25 +13256,31 @@ function gdRenderFlatTableBridgeCheckpoint(columnScan){
   const digitizedRows=Number(columnScan?.digitizedTable?.rows?.length)||0;
   const nativeRows=Number(columnScan?.columnOrderPayload?.clubGroups?.length)||0;
   const flags=Number(columnScan?.digitizedTable?.stats?.flagged||0)+Number(columnScan?.digitizedTable?.stats?.missing||0);
-  const bodyNode=failed?document.createElement("button"):null;
+  const bodyNode=(failed||(isOcrGeneratedGrid&&rows&&columns&&!digitizedRows))?document.createElement("button"):null;
   if(bodyNode){
     bodyNode.type="button";
     bodyNode.className="gdPracticeScanCheckpointAction";
-    bodyNode.textContent="Open template comparison";
-    bodyNode.onclick=()=>gdOpenPracticeTemplateOutcomes("ocr");
+    if(failed){
+      bodyNode.textContent="Open template comparison";
+      bodyNode.onclick=()=>gdOpenPracticeTemplateOutcomes("ocr");
+    }else{
+      bodyNode.textContent="Read cell values";
+      bodyNode.onclick=()=>gdRunPracticeGridExperiment("cell-ocr");
+    }
   }
   gdRenderPracticeScanCheckpoint({
     tone:rows&&columns?"ready":"warn",
-    title:failed?gdFlatTableFailureTitle(failure.reason):(digitizedRows?"Digitised table ready":(rows&&columns?(isOcrGeneratedGrid?"OCR-generated grid ready":"Flat table grid ready"):(isOcrGeneratedGrid?"OCR-generated grid not ready":"Flat table grid not fitted"))),
+    title:failed?gdFlatTableFailureTitle(failure.reason):(digitizedRows?(isOcrGeneratedGrid?"Raw cell values read":"Digitised table ready"):(rows&&columns?(isOcrGeneratedGrid?"OCR-generated grid ready":"Flat table grid ready"):(isOcrGeneratedGrid?"OCR-generated grid not ready":"Flat table grid not fitted"))),
     summary:failed?(gdFlatTableFailureIsTemplate(failure.reason)
       ?`${gdFlatTableReasonText(failure.reason)} The row detector accepted ${Number(failure.rawRowCount)||0} row band${Number(failure.rawRowCount)===1?"":"s"}, but the fixed column template could not fit them.`
       :`${gdFlatTableReasonText(failure.reason)} The actual flat scan accepted ${Number(failure.rawRowCount)||0} row band${Number(failure.rawRowCount)===1?"":"s"}; ${Number(failure.requiredRows)||gdFlatTableMinimumAcceptedRows()} are required before cells can be OCR scanned.`)
-      :(digitizedRows?`Fitted cells were OCR scanned into an owned digitised table. Review ${flags} flagged/missing cells against the crops before importing.`:(rows&&columns?(isOcrGeneratedGrid?`Column and row cutouts were fitted on the straight flat image. ${allocatedCutouts}/${totalCutouts||columns} column cutouts matched header aliases; cell values remain unread.`:"Rows, columns, and cells were fitted on the straight flat image. OCR cleanup stays parked until this geometry is reliable."):"The flat image did not expose enough repeated number stacks. Retake with the table sharper and flatter.")),
+      :(digitizedRows?(isOcrGeneratedGrid?`Raw OCR scanned ${digitizedRows} row${digitizedRows===1?"":"s"} from the current cell cutouts. Review ${flags} flagged/missing cells; native save remains parked until enough column cutouts map to headers.`:`Fitted cells were OCR scanned into an owned digitised table. Review ${flags} flagged/missing cells against the crops before importing.`):(rows&&columns?(isOcrGeneratedGrid?`Column and row cutouts were fitted on the straight flat image. ${allocatedCutouts}/${totalCutouts||columns} column cutouts matched header aliases; cell values remain unread.`:"Rows, columns, and cells were fitted on the straight flat image. OCR cleanup stays parked until this geometry is reliable."):"The flat image did not expose enough repeated number stacks. Retake with the table sharper and flatter.")),
     stats:isOcrGeneratedGrid?[
       {label:"Rows",value:rows||"-"},
       {label:"Columns",value:columns||"-"},
       {label:"Cells",value:gridCells||"-"},
       {label:"Headers",value:totalCutouts?`${allocatedCutouts}/${totalCutouts}`:"-"},
+      {label:"Values",value:digitizedRows||"-"},
       {label:"OCR words",value:ocrWords||"-"}
     ]:[
       {label:"Rows",value:failed?(Number(failure.rawRowCount)||0):(rows||"-")},
@@ -13267,7 +13294,7 @@ function gdRenderFlatTableBridgeCheckpoint(columnScan){
       {label:"Photo",state:"done"},
       {label:"OCR grid",state:rows&&columns?"done":"active"},
       {label:"Headers",state:allocatedCutouts?"done":(rows&&columns?"active":"pending")},
-      {label:"Values",state:"pending"}
+      {label:"Values",state:digitizedRows?"done":"pending"}
     ]:[
       {label:"Photo",state:"done"},
       {label:"Flat grid",state:rows&&columns?"done":(failed?"failed":"active")},
@@ -13370,7 +13397,7 @@ function gdRenderFlatTableBridgeOutput(columnScan,activeTemplateKey="flat"){
     if(columnScan?.digitizedTable||columnScan?.columnOrderPayload)gdRenderFlatDigitizedTable(columnScan);
     gdRenderFlatTableOutputTable(columnScan);
     gdRenderColumnOrderOcrSummary(columnScan);
-    if(!generatedGrid)gdRenderFittedCellDirectionMarkerDebug(columnScan);
+    if(!generatedGrid||columnScan?.digitizedTable)gdRenderFittedCellDirectionMarkerDebug(columnScan);
     gdRenderPracticeTemplateOutcomeTabs(activeTemplateKey);
   }
   if(summary)gdUpdatePracticeScanDebugSummary(columnScan);
@@ -13393,7 +13420,7 @@ function gdBuildFittedCellOcrCapture(columnScan,label="Fitted cell OCR"){
     const values={};
     const directions={};
     cellRow.forEach(cell=>{
-      const key=String(cell?.key||"");
+      const key=gdPracticeCellReadKey(cell);
       if(!key||key==="toPin")return;
       const item=cell?.ocrItem||null;
       if(!item)return;
@@ -13450,30 +13477,33 @@ async function gdRunFittedCellGridOcr(columnScan,opts={}){
     gdSetPracticeScanStatus("Fit the output grid before scanning fitted cells.");
     return null;
   }
-  gdPracticeDebugCheckpointSafe("extraction_started","running",{inputSummary:`Fitted cell OCR for ${rows.length} rows`});
+  gdPracticeDebugCheckpointSafe("extraction_started","running",{inputSummary:`Raw fitted-cell OCR for ${rows.length} rows`});
   const Tesseract=await gdLoadTesseract();
   const totalRows=rows.length;
   for(const [rowIndex,row] of rows.entries()){
     gdSetPracticeScanStatus(`Reading fitted shot ${rowIndex+1}/${totalRows}...`);
     for(const cell of row){
-      const key=String(cell?.key||"");
+      const key=gdPracticeCellReadKey(cell);
       if(!key||key==="toPin"||!cell?.crop?.canvas)continue;
       const data=await gdRecognizeCellCrop(Tesseract,cell.crop,key);
       const sourceY=Number(cellGrid?.rows?.[rowIndex]?.cy)||rowIndex+1;
       const item=gdBestCellOcrItem(data,key,rowIndex+1,sourceY);
       if(item&&gdColumnNeedsDirection(key))await gdAttachFittedCellDirection(Tesseract,cell,item,key);
+      cell.readKey=key;
       cell.ocrData=data;
       cell.ocrItem=item;
       cell.ocrRaw=item?gdColumnOrderValueDisplayText(key,item):String(data?.text||"").trim().replace(/\s+/g," ");
       cell.ocrText=cell.ocrRaw;
     }
   }
-  const payload=gdBuildFittedCellOcrCapture(columnScan,opts.label||"Fitted cell OCR");
+  const payload=gdBuildFittedCellOcrCapture(columnScan,opts.label||"Raw cell value read");
   columnScan.columnOrderPayload=payload;
   gdBuildFlatDigitizedTable(columnScan,payload);
   const digitized=columnScan?.digitizedTable||null;
-  gdPracticeDebugCheckpointSafe("extraction_completed","success",{outputSummary:"Fitted cell OCR completed",counts:{ocrRows:rows.length,nativeRows:Number(payload?.clubGroups?.length)||0}});
-  gdPracticeDebugCheckpointSafe("raw_values_detected","success",{outputSummary:"Digitized cell values collected",counts:{good:Number(digitized?.stats?.good)||0,flagged:Number(digitized?.stats?.flagged)||0,missing:Number(digitized?.stats?.missing)||0}});
+  const allocated=Number(columnScan?.columnCutoutAllocation?.allocatedCount)||0;
+  const totalAllocated=Number(columnScan?.columnCutoutAllocation?.totalCount)||Number(cellGrid?.columns?.length)||0;
+  gdPracticeDebugCheckpointSafe("extraction_completed","success",{outputSummary:"Raw fitted-cell OCR completed",counts:{ocrRows:rows.length,nativeRows:Number(payload?.clubGroups?.length)||0}});
+  gdPracticeDebugCheckpointSafe("raw_values_detected","success",{outputSummary:"Raw cell values collected",counts:{good:Number(digitized?.stats?.good)||0,flagged:Number(digitized?.stats?.flagged)||0,missing:Number(digitized?.stats?.missing)||0,headersAllocated:allocated,headersTotal:totalAllocated}});
   gdPracticeDebugCheckpointSafe("rows_parsed",digitized?.rows?.length?"success":"warning",{outputSummary:`${Number(digitized?.rows?.length)||0} digitized rows`,counts:{rowsParsed:Number(digitized?.rows?.length)||0}});
   const rejectedCellCount=(Number(digitized?.stats?.flagged)||0)+(Number(digitized?.stats?.missing)||0);
   gdPracticeDebugCheckpointSafe("rows_rejected",rejectedCellCount?"warning":"success",{
@@ -13488,11 +13518,12 @@ async function gdRunFittedCellGridOcr(columnScan,opts={}){
       .map(row=>({index:row.index,reason:`${row.flaggedCount||0} flagged, ${row.missingCount||0} missing`,rawValue:JSON.stringify(row.rawValues||{}),mappedValue:JSON.stringify(row.values||{})}));
   }
   gdRenderFlatTableBridgeOutput(columnScan);
+  gdPracticeRefreshDebugTools();
   if(!payload?.clubGroups?.length){
     const digitizedRows=Number(columnScan?.digitizedTable?.rows?.length)||0;
-    gdPracticeDebugCheckpointSafe("rows_accepted","failed",{outputSummary:"No Clarity Shot Library rows were usable",counts:{accepted:0,digitizedRows}});
-    gdSetPracticeScanStatus(digitizedRows?"Digitised table is ready, but no Clarity Shot Library shots were usable yet.":"Fitted cell OCR ran, but no Clarity Shot Library shots were usable yet.");
-    return null;
+    gdPracticeDebugCheckpointSafe("rows_accepted","warning",{outputSummary:"Raw cell values read; native Practice rows remain parked until column headers map the cutouts",counts:{accepted:0,digitizedRows,headersAllocated:allocated,headersTotal:totalAllocated}});
+    gdSetPracticeScanStatus(digitizedRows?`Raw cell value read complete: ${digitizedRows} row${digitizedRows===1?"":"s"} scanned. Headers allocated ${allocated}/${totalAllocated}; native save remains parked.`:"Cell OCR ran, but no raw value rows were usable yet.");
+    return columnScan;
   }
   gdPracticeDebugCheckpointSafe("rows_accepted","success",{outputSummary:`${payload.clubGroups.length} usable OCR shots`,counts:{accepted:payload.clubGroups.length}});
   gdPracticeDebugCheckpointSafe("practice_store_handoff","success",{outputSummary:"Photo extraction payload ready for Practice Data save",counts:{rows:payload.clubGroups.length}});
@@ -13503,9 +13534,9 @@ async function gdRunFittedCellGridOcr(columnScan,opts={}){
     gdSetPracticeScanStatus(`Practice scan imported ${payload.clubGroups.length} shot${payload.clubGroups.length===1?"":"s"}.`);
     return payload;
   }
-  gdPracticeSetExtractionPreview(payload,opts.label||"Fitted cell OCR");
+  gdPracticeSetExtractionPreview(payload,opts.label||"Raw cell value read");
   if(typeof gdTogglePracticeAdmin==="function")gdTogglePracticeAdmin(true);
-  gdSetPracticeScanStatus(`Digitised table ready with ${Number(columnScan?.digitizedTable?.rows?.length)||0} shots; Clarity Shot Library ready with ${payload.clubGroups.length} OCR shots.`);
+  gdSetPracticeScanStatus(`Raw cell value read complete: ${Number(columnScan?.digitizedTable?.rows?.length)||0} rows scanned; Clarity Shot Library preview has ${payload.clubGroups.length} OCR shots. No native save has run.`);
   return payload;
 }
 async function gdRunColumnImageOrderOcr(columnScan){
@@ -14176,7 +14207,10 @@ function gdUpdatePracticeScanDebugSummary(columnScan){
     const dividerSource=String(columnScan?.layout?.dividerSource||"unknown");
     const allocated=Number(columnScan?.columnCutoutAllocation?.allocatedCount)||0;
     const total=Number(columnScan?.columnCutoutAllocation?.totalCount)||columns;
-    summary.textContent=`OCR generated grid - ${rows} row bands - ${columns} generic columns - ${cells} cells - cuts: ${dividerSource} - headers ${allocated}/${total} allocated, values unread`;
+    const digitizedRows=Number(columnScan?.digitizedTable?.rows?.length)||0;
+    summary.textContent=digitizedRows
+      ?`OCR generated grid - ${digitizedRows} raw value rows read - ${columns} columns - ${cells} cells - cuts: ${dividerSource} - headers ${allocated}/${total} allocated`
+      :`OCR generated grid - ${rows} row bands - ${columns} generic columns - ${cells} cells - cuts: ${dividerSource} - headers ${allocated}/${total} allocated, values unread`;
     return;
   }
   if(String(columnScan?.layout?.cropMode||"")==="flat-template"){
@@ -15099,7 +15133,16 @@ function gdPracticeRefreshDebugTools(){
 }
 function gdPracticeSetGridExperimentsReady(ready){
   const panel=document.getElementById("gdPracticeGridExperiments");
-  if(panel)panel.hidden=!(ready&&gdPracticeCanShowScanDebug());
+  const show=!!(ready&&gdPracticeCanShowScanDebug());
+  if(panel)panel.hidden=!show;
+  const readBtn=document.getElementById("gdPracticeCellOcrGridBtn");
+  const scan=window.__gdPracticeColumnScan||null;
+  const hasCellGrid=!!(scan?.cellGrid?.cellCount);
+  const hasValues=!!(scan?.digitizedTable?.rows?.length);
+  if(readBtn){
+    readBtn.hidden=!(show&&hasCellGrid);
+    readBtn.textContent=hasValues?"Re-read cell values":"Read cell values";
+  }
 }
 function gdRenderPracticeClusterCheckpoint(checkpoint,meta={}){
   const rows=Number(checkpoint?.cluster?.rowCount)||0;
@@ -16041,23 +16084,18 @@ async function gdRunFlatTemplateBridgeFromCheckpoint(checkpoint,opts={}){
   return result?.scan||null;
 }
 async function gdRunPracticeGridExperiment(kind="ocr-generated",opts={}){
-  const checkpoint=gdPracticeClusterCheckpoint||window.__gdPracticeClusterCheckpoint;
-  if(!checkpoint){
-    gdSetPracticeScanStatus("Find or stretch the flat table first, then run a grid experiment.");
-    return null;
-  }
   const methods={
     "ocr-generated":{
       label:"OCR generated grid",
-      status:"Generating OCR grid from header/value word geometry..."
+      status:"Generating OCR grid from number-box geometry..."
     },
     "box-tracks":{
       label:"Parked flat template",
       status:"Flat template grid is parked. Generating OCR grid instead..."
     },
     "cell-ocr":{
-      label:"Parked fitted cell OCR",
-      status:"Fitted cell OCR is parked. Generate and inspect the OCR grid first..."
+      label:"Raw cell value read",
+      status:"Reading raw values from the fitted OCR cell grid..."
     },
     "digitize-table":{
       label:"Parked digitised table",
@@ -16068,10 +16106,25 @@ async function gdRunPracticeGridExperiment(kind="ocr-generated",opts={}){
   const method=methods[requestedKind]||methods["ocr-generated"];
   gdSetPracticeScanStatus(method.status);
   gdPracticeDebugCheckpointSafe("extraction_started","running",{inputSummary:method.label});
+  if(requestedKind==="cell-ocr"){
+    const scan=window.__gdPracticeColumnScan||null;
+    const cells=Number(scan?.cellGrid?.cellCount)||0;
+    if(!scan||!cells){
+      gdPracticeFeedback("Generate the OCR grid before reading cell values.","warning");
+      gdSetPracticeScanStatus("Generate the OCR grid first, then read cell values.");
+      return null;
+    }
+    return gdRunFittedCellGridOcr(scan,{allowParkedFittedCellOcr:true,label:"Raw cell value read"});
+  }
+  const checkpoint=gdPracticeClusterCheckpoint||window.__gdPracticeClusterCheckpoint;
+  if(!checkpoint){
+    gdSetPracticeScanStatus("Find or stretch the flat table first, then run a grid experiment.");
+    return null;
+  }
   if(requestedKind!=="ocr-generated"){
     gdPracticeFeedback(`${method.label} is parked while the OCR-generated grid is tuned.`,"warning");
   }
-  if(["ocr-generated","box-tracks","cell-ocr","digitize-table"].includes(requestedKind)){
+  if(["ocr-generated","box-tracks","digitize-table"].includes(requestedKind)){
     const result=await gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,null,{label:method.label});
     return result?.scan||result?.payload||null;
   }
