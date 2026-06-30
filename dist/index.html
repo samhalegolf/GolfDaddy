@@ -7186,6 +7186,21 @@ function gdLmAssignDetectedHeaderColumnBounds(columns){
   });
   return sorted;
 }
+function gdLmGenericGridColumnsFromColumns(columns,prefix="C"){
+  return gdLmAssignDetectedHeaderColumnBounds((Array.isArray(columns)?columns:[])
+    .filter(column=>column&&Number.isFinite(Number(column.cx)))
+    .map((column,index)=>{
+      const n=String(index+1).padStart(2,"0");
+      return {
+        key:`gridCol${n}`,
+        label:`${prefix}${n}`,
+        x0:Number(column.x0),
+        x1:Number(column.x1),
+        cx:Number(column.cx),
+        source:String(column.source||"generic_grid")
+      };
+    }));
+}
 function gdLmColumnsFromTemplateFit(intercept,slope,source="launch_monitor_row_fit"){
   return gdLmAssignColumnBounds(gdLmLaunchMonitorTemplateColumns().map(column=>{
     const cx=intercept+slope*column.templateRel;
@@ -7407,7 +7422,7 @@ function gdLmUnitFromText(text){
   if(token==="deg"||token==="degree"||token==="degrees")return "deg";
   return "";
 }
-function gdLmBuildLayoutColumns(lines,opts={}){
+function gdLmBuildLayoutColumns(lines){
   const candidates=gdLmHeaderCandidatesFromLines(lines);
   let best=null;
   candidates.forEach(candidate=>{
@@ -7417,10 +7432,7 @@ function gdLmBuildLayoutColumns(lines,opts={}){
   const detectedColumns=best.columns
     .filter((column,index,array)=>array.findIndex(other=>other.key===column.key)===index)
     .sort((a,b)=>a.cx-b.cx);
-  const preserveDetectedOrder=opts?.preserveDetectedOrder===true;
-  const columns=preserveDetectedOrder
-    ?gdLmAssignDetectedHeaderColumnBounds(detectedColumns)
-    :gdLmTemplateCompleteColumns(detectedColumns);
+  const columns=gdLmTemplateCompleteColumns(detectedColumns);
   const units={};
   for(let i=best.index+1;i<Math.min(lines.length,best.index+5);i++){
     const line=lines[i];
@@ -12054,7 +12066,7 @@ function gdRenderValueGridCropPreview(target){
       open:!!isOutputGrid,
       className:isOutputGrid?"gdFlatTemplatePreview":"gdParkedToolPreview",
       cards:[
-        makeCard(isOcrGeneratedGrid?"Header columns + value row bands":(isFlatTemplate?"Fitted rows, columns, cells":"Old column cuts, parked"),flattened,(ctx,scale,sourceW,sourceH)=>{
+        makeCard(isOcrGeneratedGrid?"Generic columns + value row bands":(isFlatTemplate?"Fitted rows, columns, cells":"Old column cuts, parked"),flattened,(ctx,scale,sourceW,sourceH)=>{
           if(isOutputGrid)gdDrawFlatTableTemplateOverlay(ctx,target,sourceW,sourceH,scale);
           else gdDrawPracticeColumnSplitOverlay(ctx,target?.layout,sourceH,scale);
         })
@@ -12064,7 +12076,7 @@ function gdRenderValueGridCropPreview(target){
           `Rows: ${Number(target?.cellGrid?.rows?.length)||Number(target?.valueCluster?.rowCount)||0}  Columns: ${Number(target?.cellGrid?.columns?.length)||Number(target?.layout?.columns?.length)||0}`,
           `Column cut source: ${String(target.layout.dividerSource||"flat-number-box-gaps")}`,
           isOcrGeneratedGrid
-            ?"Rows are value-looking OCR boxes only; cell values have not been read yet."
+            ?"Columns are generic geometry only; header meanings and cell values have not been read yet."
             :`Fit error: ${(Number(target?.flatTemplateFit?.rms)||0).toFixed(1)} px rms / ${(Number(target?.flatTemplateFit?.maxResidual)||0).toFixed(1)} max`
         ].join("\n")
         :[
@@ -12943,7 +12955,7 @@ function gdRenderFlatTableOutputTable(columnScan){
     `${rows.length} rows`,
     `${columns.length} columns`,
     `${Number(cellGrid.cellCount)||0} cells`,
-    generatedGrid?"values unread":`fit ${(Number(columnScan?.flatTemplateFit?.rms)||0).toFixed(1)} px rms`
+    generatedGrid?"headers unallocated, values unread":`fit ${(Number(columnScan?.flatTemplateFit?.rms)||0).toFixed(1)} px rms`
   ].join(" • ");
   details.append(summary,wrap,source);
   list.append(details);
@@ -13167,7 +13179,7 @@ function gdRenderFlatTableBridgeCheckpoint(columnScan){
     summary:failed?(gdFlatTableFailureIsTemplate(failure.reason)
       ?`${gdFlatTableReasonText(failure.reason)} The row detector accepted ${Number(failure.rawRowCount)||0} row band${Number(failure.rawRowCount)===1?"":"s"}, but the fixed column template could not fit them.`
       :`${gdFlatTableReasonText(failure.reason)} The actual flat scan accepted ${Number(failure.rawRowCount)||0} row band${Number(failure.rawRowCount)===1?"":"s"}; ${Number(failure.requiredRows)||gdFlatTableMinimumAcceptedRows()} are required before cells can be OCR scanned.`)
-      :(digitizedRows?`Fitted cells were OCR scanned into an owned digitised table. Review ${flags} flagged/missing cells against the crops before importing.`:(rows&&columns?(isOcrGeneratedGrid?"Header columns and value-looking row bands were fitted on the straight flat image. Values have not been OCR-read yet.":"Rows, columns, and cells were fitted on the straight flat image. OCR cleanup stays parked until this geometry is reliable."):"The flat image did not expose enough repeated number stacks. Retake with the table sharper and flatter.")),
+      :(digitizedRows?`Fitted cells were OCR scanned into an owned digitised table. Review ${flags} flagged/missing cells against the crops before importing.`:(rows&&columns?(isOcrGeneratedGrid?"Generic columns and value-looking row bands were fitted on the straight flat image. Header meanings and values have not been OCR-read yet.":"Rows, columns, and cells were fitted on the straight flat image. OCR cleanup stays parked until this geometry is reliable."):"The flat image did not expose enough repeated number stacks. Retake with the table sharper and flatter.")),
     stats:[
       {label:"Rows",value:failed?(Number(failure.rawRowCount)||0):(rows||"-")},
       {label:"Columns",value:columns||"-"},
@@ -13247,7 +13259,7 @@ function gdRenderFlatTableBridgeOutput(columnScan,activeTemplateKey="flat"){
   const generatedGrid=cropMode==="ocr-generated-grid";
   const outputLabel=String(columnScan?.gridExperiment?.label||(generatedGrid?"OCR generated grid":"Flat table output"));
   if(text)text.value="";
-  if(subhead)subhead.textContent=generatedGrid?"OCR generated grid - cells not OCR-read":"Flat table template - output cells";
+  if(subhead)subhead.textContent=generatedGrid?"OCR generated grid - headers unallocated, cells unread":"Flat table template - output cells";
   if(mainCanvas&&sourceCanvas){
     const maxW=1200;
     const sourceW=Number(sourceCanvas.width)||1;
@@ -13491,6 +13503,82 @@ function gdLmColumnWordCandidates(ocrData,layout){
     candidates.push({word,column,key:column.key,value,cy:word.cy,cx:word.cx,h:word.h});
   });
   return candidates;
+}
+function gdLmGridValueCandidates(ocrData,layout){
+  const lines=gdLmLinesFromOcrData(ocrData);
+  const yRange=gdLmColumnDataYRange(lines,layout);
+  const words=lines.flatMap(line=>line.words||[]);
+  return words
+    .filter(word=>gdLmLooksLikeOcrValue(word.text))
+    .filter(word=>word.cy>=yRange.start&&word.cy<yRange.stop)
+    .map(word=>({word,key:"value",cy:word.cy,cx:word.cx,h:word.h}));
+}
+function gdLmHeaderWordsForGrid(lines,layout){
+  const header=layout?.headerLine||null;
+  if(!header)return [];
+  const y0=Number(header?.bbox?.y0);
+  const y1=Number(header?.bbox?.y1);
+  const cy=Number(header?.cy);
+  const top=Number.isFinite(y0)?y0:(Number.isFinite(cy)?cy-24:0);
+  const bottom=Number.isFinite(y1)?y1:(Number.isFinite(cy)?cy+24:Infinity);
+  return (Array.isArray(lines)?lines:[])
+    .flatMap(line=>Array.isArray(line?.words)?line.words:[])
+    .filter(word=>word&&word.cy>=top-14&&word.cy<=bottom+24)
+    .filter(word=>!gdLmLooksLikeOcrValue(word.text))
+    .filter(word=>String(word.text||"").trim().length>=2);
+}
+function gdLmGenericGridColumnsFromValueCandidates(candidates,headerWords=[]){
+  const groups=[];
+  (Array.isArray(candidates)?candidates:[])
+    .slice()
+    .sort((a,b)=>Number(a.cx)-Number(b.cx))
+    .forEach(candidate=>{
+      let group=null,best=Infinity;
+      groups.forEach(existing=>{
+        const distance=Math.abs(Number(existing.cx)-Number(candidate.cx));
+        if(distance<Math.max(22,Number(candidate.word?.w||0)*1.6)&&distance<best){
+          group=existing;
+          best=distance;
+        }
+      });
+      if(!group){
+        group={cx:Number(candidate.cx),items:[]};
+        groups.push(group);
+      }
+      group.items.push(candidate);
+      group.cx=group.items.reduce((sum,item)=>sum+Number(item.cx||0),0)/group.items.length;
+    });
+  const usable=groups
+    .filter(group=>group.items.length>=2)
+    .map(group=>{
+      const nearest=(Array.isArray(headerWords)?headerWords:[])
+        .map(word=>({word,distance:Math.abs(Number(word.cx)-Number(group.cx))}))
+        .sort((a,b)=>a.distance-b.distance)
+        .filter(item=>item.distance<=86)
+        .slice(0,3)
+        .map(item=>String(item.word?.text||"").trim())
+        .filter(Boolean);
+      return Object.assign(group,{rawHeaderText:[...new Set(nearest)].join(" ")});
+    })
+    .filter(group=>!headerWords.length||group.rawHeaderText);
+  if(usable.length<4)return [];
+  return gdLmAssignDetectedHeaderColumnBounds(usable
+    .sort((a,b)=>a.cx-b.cx)
+    .map((group,index)=>{
+      const n=String(index+1).padStart(2,"0");
+      const xs=group.items.map(item=>Number(item.word?.cx)||Number(item.cx)).filter(Number.isFinite);
+      const minX=xs.length?Math.min(...xs):Number(group.cx);
+      const maxX=xs.length?Math.max(...xs):Number(group.cx);
+      return {
+        key:`gridCol${n}`,
+        label:`C${n}`,
+        rawHeaderText:group.rawHeaderText,
+        x0:minX,
+        x1:maxX,
+        cx:Number(group.cx),
+        source:"value_box_grid"
+      };
+    }));
 }
 function gdLmClusterColumnRows(candidates){
   const rows=[];
@@ -13810,7 +13898,7 @@ function gdUpdatePracticeScanDebugSummary(columnScan){
     const rows=Number(columnScan?.cellGrid?.rows?.length)||0;
     const columns=Number(columnScan?.cellGrid?.columns?.length)||0;
     const cells=Number(columnScan?.cellGrid?.cellCount)||0;
-    summary.textContent=`OCR generated grid - ${rows} row bands - ${columns} columns - ${cells} cells - values unread`;
+    summary.textContent=`OCR generated grid - ${rows} row bands - ${columns} generic columns - ${cells} cells - headers unallocated, values unread`;
     return;
   }
   if(String(columnScan?.layout?.cropMode||"")==="flat-template"){
@@ -15076,7 +15164,7 @@ async function gdRunOcrGeneratedHeaderBandProbe(Tesseract,scanImage,baseOcrData,
       if(wordCount)probeResults.push(data);
       const merged=gdLmNormalizeOcrData(gdMergeLaunchMonitorOcrData([baseOcrData].concat(probeResults))||baseOcrData);
       const lines=gdLmLinesFromOcrData(merged);
-      const layout=gdLmBuildLayoutColumns(lines,{preserveDetectedOrder:true});
+      const layout=gdLmBuildLayoutColumns(lines);
       if(layout){
         const headerCandidates=gdLmHeaderCandidatesFromLines(lines);
         return {
@@ -15189,7 +15277,7 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
     let ocrData=gdLmNormalizeOcrData(fullResult?.data||{text:"",words:[],lines:[]});
     let lines=gdLmLinesFromOcrData(ocrData);
     let headerCandidates=gdLmHeaderCandidatesFromLines(lines);
-    let layout=gdLmBuildLayoutColumns(lines,{preserveDetectedOrder:true});
+    let layout=gdLmBuildLayoutColumns(lines);
     let headerProbe=null;
     if(!layout){
       gdSetPracticeScanStatus("OCR did not return the header row. Probing the header band above the first value row...");
@@ -15198,7 +15286,7 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
         ocrData=headerProbe.ocrData;
         lines=headerProbe.lines||gdLmLinesFromOcrData(ocrData);
         headerCandidates=headerProbe.headerCandidates||gdLmHeaderCandidatesFromLines(lines);
-        layout=headerProbe.layout||gdLmBuildLayoutColumns(lines,{preserveDetectedOrder:true});
+        layout=headerProbe.layout||gdLmBuildLayoutColumns(lines);
       }
     }
     const wordCount=Number(ocrData.words?.length)||0;
@@ -15222,7 +15310,8 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
     layout.lines=lines;
     layout.headerCandidates=headerCandidates;
     layout.headerProbe=headerProbe;
-    const generatedRows=gdLmClusterColumnRows(gdLmColumnWordCandidates(ocrData,layout));
+    const valueCandidates=gdLmGridValueCandidates(ocrData,layout);
+    const generatedRows=gdLmClusterColumnRows(valueCandidates);
     const valueCluster=gdOcrGeneratedValueCluster(scanImage,flatScan,generatedRows);
     const stripScan=gdRunDirectColumnStripCrops(scanImage,layout,{shapeCrop:true,allowGrid:false,sourceMode:"ocr-generated-template"})||{};
     if(!Array.isArray(stripScan.results)||!stripScan.results.length){
@@ -15233,13 +15322,16 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
       gdRenderPracticeTemplateOutcomeTabs("ocr");
       return {payload:null,scan:null,outcome};
     }
+    const headerWords=gdLmHeaderWordsForGrid(lines,layout);
+    const geometryColumns=gdLmGenericGridColumnsFromValueCandidates(valueCandidates,headerWords);
+    const fallbackGridColumns=gdLmGenericGridColumnsFromColumns(Array.isArray(stripScan.layout?.columns)&&stripScan.layout.columns.length?stripScan.layout.columns:layout.columns);
     const columnScan=Object.assign({},stripScan,{
       layout:Object.assign({},stripScan.layout||{},layout,{
-        columns:Array.isArray(layout.columns)?layout.columns:[],
+        columns:geometryColumns.length>=4?geometryColumns:fallbackGridColumns,
         dividerSource:"ocr-generated-header",
         cropMode:"ocr-generated-grid",
         normalizeMode:String(scanImage?.__gdNormalizeMode||"flat-table"),
-        clusterMode:`OCR generated ${Number(layout.columns?.length)||0} header columns`,
+        clusterMode:`OCR generated geometry grid`,
         valueCluster
       }),
       lines,
@@ -15252,6 +15344,7 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
       generatedOcrData:ocrData,
       generatedHeaderCandidates:headerCandidates,
       generatedRowBands:generatedRows,
+      generatedGridHeaderWords:headerWords,
       ocrGeneratedTemplate:true,
       fallbackFrom:String(gdFlatTableFailureDebug(flatScan).reason||"flat-template")
     });
@@ -15259,7 +15352,7 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
     const gridRows=Number(columnScan.cellGrid?.rows?.length)||0;
     const gridColumns=Number(columnScan.cellGrid?.columns?.length)||0;
     const gridCells=Number(columnScan.cellGrid?.cellCount)||0;
-    const candidateCount=generatedRows.reduce((sum,row)=>sum+Number(row?.candidates?.length||0),0);
+    const candidateCount=valueCandidates.length;
     const gridReady=!!(gridRows&&gridColumns&&gridCells);
     const outcome=gdPracticeSetTemplateOutcome("ocr",{
       label:"OCR generated",
@@ -15276,8 +15369,8 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
       candidateCount,
       reason:gridReady?"":"OCR generated layout found headers but could not form a cell grid.",
       summary:gridReady
-        ?`OCR-generated layout produced a ${gridRows} x ${gridColumns} cell grid from header columns and value-looking boxes. Values were not read in this step.`
-        :`OCR-generated layout found ${Number(layout.columns?.length)||0} header column${Number(layout.columns?.length)===1?"":"s"}, but no usable value row grid.`,
+        ?`OCR-generated layout produced a ${gridRows} x ${gridColumns} generic cell grid from header-band geometry and value-looking boxes. Header meanings and cell values were not read in this step.`
+        :`OCR-generated layout found the header band, but no usable value-row grid.`,
       nextStep:gridReady?"Review the OCR generated grid. Run fitted-cell OCR only after the geometry looks right.":"Tune the header and value-box evidence using the OCR generated tab."
     });
     if(!gridReady){
@@ -15290,8 +15383,8 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
     gdRenderFlatTableBridgeOutput(columnScan,"ocr");
     gdPracticeDebugCheckpointSafe("table_detected","success",{outputSummary:`OCR-generated grid ready: ${gridRows} rows x ${gridColumns} columns`,counts:{rows:gridRows,columns:gridColumns,cells:gridCells}});
     gdPracticeDebugCheckpointSafe("ocr_generated_template","success",{outputSummary:`OCR-generated grid ready: ${gridRows} rows x ${gridColumns} columns`,counts:{rows:gridRows,columns:gridColumns,cells:gridCells,words:wordCount,candidates:outcome.candidateCount}});
-    gdPracticeDebugCheckpointSafe("extraction_started","warning",{outputSummary:"Stopped at OCR-generated grid; fitted-cell value OCR has not run"});
-    gdSetPracticeScanStatus(`OCR-generated grid ready: ${gridRows} rows x ${gridColumns} columns. Values have not been read yet.`);
+    gdPracticeDebugCheckpointSafe("extraction_started","warning",{outputSummary:"Stopped at OCR-generated grid; header allocation and fitted-cell value OCR have not run"});
+    gdSetPracticeScanStatus(`OCR-generated grid ready: ${gridRows} rows x ${gridColumns} generic columns. Header meanings and values have not been read yet.`);
     return {payload:null,scan:columnScan,outcome};
   }catch(e){
     console.warn("[GolfDaddy] OCR generated template fallback failed",e);
@@ -15433,7 +15526,7 @@ async function gdRunDefaultPracticePhotoScanFromCheckpoint(checkpoint,opts={}){
       if(ocrGridReady){
         const rows=Number(ocrOutcome.scan.cellGrid.rows.length)||0;
         const columns=Number(ocrOutcome.scan.cellGrid.columns.length)||0;
-        gdPracticeFeedback(`OCR-generated grid ready: ${rows} rows x ${columns} columns. Values have not been read yet.`,"ready");
+        gdPracticeFeedback(`OCR-generated grid ready: ${rows} rows x ${columns} generic columns. Header meanings and values have not been read yet.`,"ready");
         gdPracticeDebugCheckpointSafe("rows_accepted","warning",{outputSummary:"Stopped at grid stage; no native rows should be accepted until fitted-cell OCR runs",counts:{accepted:0,gridRows:rows,gridColumns:columns}});
       }else{
         gdPracticeFeedback(flatFailed?"No usable shots were found. Open the template comparison to inspect the fixed template and OCR-generated fallback.":"Scan completed but no usable shots were found. Adjust the frame or try another image.","error");
