@@ -6605,6 +6605,10 @@ setInterval(()=>{if(document.getElementById("developerPanel")?.classList.contain
 function gdLmMetric(rawLabel,candidateMetric,value,unit="m",confidence=.84){
   return {rawLabel,candidateMetric,rawValue:String(value),value,unit,confidence};
 }
+function gdLmMetricListHasMetric(metrics,key){
+  const wanted=String(key||"").trim().toLowerCase();
+  return (Array.isArray(metrics)?metrics:[]).some(metric=>String(metric?.candidateMetric||metric?.rawLabel||"").trim().toLowerCase()===wanted);
+}
 function gdLmToast(message){
   try{
     const practiceOpen=document.getElementById("practiceDataPanel")?.classList.contains("open");
@@ -7304,13 +7308,33 @@ function gdLmValuesFromColumnWords(columnWords){
   });
   return values;
 }
+function gdLmDerivedSpinAxisFromValues(values){
+  const direct=gdLmParseNumber(values?.spinAxis,"spinAxis");
+  if(Number.isFinite(direct)&&gdLmMetricPlausible("spinAxis",direct))return null;
+  const sideSpin=gdLmParseNumber(values?.sideSpin,"sideSpin");
+  const backspinRaw=values?.backspin!=null?values.backspin:values?.totalSpin;
+  const backspin=gdLmParseNumber(backspinRaw,"backspin");
+  if(!Number.isFinite(sideSpin)||!Number.isFinite(backspin)||Math.abs(backspin)<=100)return null;
+  const axis=Math.atan2(sideSpin,Math.abs(backspin))*180/Math.PI;
+  return Number.isFinite(axis)&&gdLmMetricPlausible("spinAxis",axis)?axis:null;
+}
+function gdLmAddDerivedSpinAxisMetric(metrics,values){
+  if(gdLmMetricListHasMetric(metrics,"spinAxis"))return metrics;
+  const axis=gdLmDerivedSpinAxisFromValues(values);
+  if(!Number.isFinite(axis))return metrics;
+  const metric=gdLmMetric("SpinAxis","spinAxis",axis,"deg",.5);
+  metric.source="sideSpin_backspin";
+  metric.rawValue=`sideSpin=${String(values?.sideSpin??"")} backspin=${String((values?.backspin!=null?values.backspin:values?.totalSpin)??"")}`;
+  metrics.push(metric);
+  return metrics;
+}
 function gdLmMetricsFromLayoutValues(values,units){
   const metrics=[];
   ["clubSpeed","attackAngle","carry","total","offline","sideAngle","launchDirection","ballSpeed","smashFactor","spinAxis","sideSpin","totalSpin","faceToPath","swingDirection","clubPath","faceAngle","dynamicLoft","launch","backspin","peakHeight","descent"].forEach(key=>{
     const metric=gdLmMetricFromLayoutValue(key,values?.[key],units?.[key]);
     if(metric)metrics.push(metric);
   });
-  return metrics;
+  return gdLmAddDerivedSpinAxisMetric(metrics,values);
 }
 function gdLmLooksLikeClubMarker(text){
   return !!gdLmClubFromLine(text,{ignoreDegree:true});
@@ -7913,6 +7937,7 @@ function gdRenderPracticeExtractionCheckpoint(){
     ["Side Ang","sideAngle","°"],
     ["Backspin","backspin",""],
     ["SideSpin","sideSpin",""],
+    ["SpinAxis","spinAxis","°"],
     ["Descent","descent","°"],
     ["Offline","offline","m"],
     ["Peak","peak","m"],
@@ -13094,6 +13119,16 @@ function gdBuildFlatDigitizedTable(columnScan,payload=null){
       const key=String(column.key||"");
       const cell=cells[key];
       if(!cell||!cell.raw)return;
+      if(key==="club"){
+        const clubLabel=gdOcrClubLabelFromCutoutText(cell.raw);
+        normalizedValues[key]=clubLabel||cell.raw;
+        cell.value=clubLabel||cell.raw;
+        cell.displayValue=cell.value;
+        cell.parsed=NaN;
+        cell.plausible=!!clubLabel;
+        cell.status=clubLabel?"good":"bad";
+        return;
+      }
       const normalized=gdLmColumnCropNormalizedText(key,cell.raw,rawValues);
       normalizedValues[key]=normalized;
       const parsed=gdLmParseNumber(normalized,key);
@@ -13409,20 +13444,41 @@ function gdRenderFlatTableBridgeOutput(columnScan,activeTemplateKey="flat"){
   if(expanderTitle)expanderTitle.textContent=outputLabel;
   review?.classList.add("active","stripOnly");
 }
+function gdFittedRowClubRead(columnScan,cellRow){
+  const clubIndex=gdOcrClubIdColumnIndex(columnScan);
+  if(clubIndex<0)return null;
+  const cell=Array.isArray(cellRow)?cellRow[clubIndex]:null;
+  return cell?.clubIdRead||cell?.clubIdOcr||null;
+}
 function gdBuildFittedCellOcrCapture(columnScan,label="Fitted cell OCR"){
   const cellGrid=columnScan?.cellGrid;
   const rows=Array.isArray(cellGrid?.cells)?cellGrid.cells:[];
   const layout=columnScan?.layout||{units:{}};
-  const club=gdPracticeScanClubLabel();
+  const requiresClubId=String(columnScan?.layout?.cropMode||"")==="ocr-generated-grid";
+  const fallbackClub=gdPracticeScanClubLabel();
   if(!rows.length)return null;
   const groups=[];
   const evidence=[];
+  const rejectedRows=[];
   rows.forEach((cellRow,rowIndex)=>{
+    const clubRead=gdFittedRowClubRead(columnScan,cellRow);
+    const rowClub=String(clubRead?.label||"").trim();
+    if(requiresClubId&&!rowClub){
+      rejectedRows.push({
+        index:rowIndex+1,
+        reason:"club_id_not_read",
+        text:String(clubRead?.text||"").trim(),
+        attempts:Array.isArray(clubRead?.attempts)?clubRead.attempts.slice(0,4):[]
+      });
+      if(evidence.length<12)evidence.push(`row ${rowIndex+1}: rejected - club ID not read${clubRead?.text?` (${clubRead.text})`:""}`);
+      return;
+    }
+    const club=rowClub||fallbackClub;
     const values={};
     const directions={};
     cellRow.forEach(cell=>{
       const key=gdPracticeCellReadKey(cell);
-      if(!key||key==="toPin")return;
+      if(!key||key==="toPin"||key==="club")return;
       const item=cell?.ocrItem||null;
       if(!item)return;
       values[key]=gdColumnOrderValueText(key,item);
@@ -13442,6 +13498,8 @@ function gdBuildFittedCellOcrCapture(columnScan,label="Fitted cell OCR"){
       candidateClub:club,
       expectedDistanceM:expectedMetric?Number(expectedMetric.value):undefined,
       sourceMethod:"ocr_fitted_cell_grid",
+      clubIdSource:rowClub?"first_column_club_id":"manual_fallback",
+      _debugClubId:clubRead||null,
       _debugRowIndex:rowIndex,
       _debugRowY:Number(cellGrid?.rows?.[rowIndex]?.cy)||undefined,
       _debugColumnValues:values,
@@ -13450,6 +13508,7 @@ function gdBuildFittedCellOcrCapture(columnScan,label="Fitted cell OCR"){
     });
     if(evidence.length<12)evidence.push(`row ${rowIndex+1}: ${Object.keys(values).map(key=>`${key}=${gdDirectionalDisplayValue(key,values[key],directions[key])}`).join(" ")}`);
   });
+  columnScan.fittedRowRejects=rejectedRows;
   if(!groups.length)return null;
   return {
     label,
@@ -13481,11 +13540,23 @@ async function gdRunFittedCellGridOcr(columnScan,opts={}){
   gdPracticeDebugCheckpointSafe("extraction_started","running",{inputSummary:`Raw fitted-cell OCR for ${rows.length} rows`});
   const Tesseract=await gdLoadTesseract();
   const totalRows=rows.length;
+  gdEnsureOcrFirstColumnClubIdTarget(columnScan);
+  gdApplyOcrColumnCutoutAllocation(columnScan);
+  const clubColumnIndex=gdOcrClubIdColumnIndex(columnScan);
   for(const [rowIndex,row] of rows.entries()){
+    if(clubColumnIndex>=0&&row?.[clubColumnIndex]?.crop?.canvas){
+      gdSetPracticeScanStatus(`Reading club ID for fitted shot ${rowIndex+1}/${totalRows}...`);
+      const clubRead=await gdRecognizeClubIdCell(Tesseract,row[clubColumnIndex],rowIndex+1);
+      row[clubColumnIndex].clubIdRead=clubRead;
+      row[clubColumnIndex].clubIdOcr=clubRead;
+      row[clubColumnIndex].ocrData=clubRead.data;
+      row[clubColumnIndex].ocrRaw=clubRead.label||clubRead.text||"";
+      row[clubColumnIndex].ocrText=row[clubColumnIndex].ocrRaw;
+    }
     gdSetPracticeScanStatus(`Reading fitted shot ${rowIndex+1}/${totalRows}...`);
     for(const cell of row){
       const key=gdPracticeCellReadKey(cell);
-      if(!key||key==="toPin"||!cell?.crop?.canvas)continue;
+      if(!key||key==="toPin"||key==="club"||!cell?.crop?.canvas)continue;
       const data=await gdRecognizeCellCrop(Tesseract,cell.crop,key);
       const sourceY=Number(cellGrid?.rows?.[rowIndex]?.cy)||rowIndex+1;
       const item=gdBestCellOcrItem(data,key,rowIndex+1,sourceY);
@@ -13508,23 +13579,25 @@ async function gdRunFittedCellGridOcr(columnScan,opts={}){
   gdPracticeDebugCheckpointSafe("raw_values_detected","success",{outputSummary:"Raw cell values collected",counts:{good:Number(digitized?.stats?.good)||0,flagged:Number(digitized?.stats?.flagged)||0,missing:Number(digitized?.stats?.missing)||0,headersAllocated:allocated,headersTotal:totalAllocated}});
   gdPracticeDebugCheckpointSafe("rows_parsed",digitized?.rows?.length?"success":"warning",{outputSummary:`${Number(digitized?.rows?.length)||0} digitized rows`,counts:{rowsParsed:Number(digitized?.rows?.length)||0}});
   const rejectedCellCount=(Number(digitized?.stats?.flagged)||0)+(Number(digitized?.stats?.missing)||0);
-  gdPracticeDebugCheckpointSafe("rows_rejected",rejectedCellCount?"warning":"success",{
-    outputSummary:`${Number(digitized?.stats?.flagged)||0} flagged cells, ${Number(digitized?.stats?.missing)||0} missing cells`,
-    counts:{flagged:Number(digitized?.stats?.flagged)||0,missing:Number(digitized?.stats?.missing)||0}
+  const clubRejected=Number(columnScan?.fittedRowRejects?.length)||0;
+  gdPracticeDebugCheckpointSafe("rows_rejected",(rejectedCellCount||clubRejected)?"warning":"success",{
+    outputSummary:`${Number(digitized?.stats?.flagged)||0} flagged cells, ${Number(digitized?.stats?.missing)||0} missing cells, ${clubRejected} club-ID rejected rows`,
+    counts:{flagged:Number(digitized?.stats?.flagged)||0,missing:Number(digitized?.stats?.missing)||0,clubRejected}
   });
   const debugRun=gdPracticeDebugCurrentRun();
   if(debugRun&&digitized?.rows){
     debugRun.raw=debugRun.raw||{};
     debugRun.raw.rejectedRows=digitized.rows
       .filter(row=>Number(row.flaggedCount)||Number(row.missingCount))
-      .map(row=>({index:row.index,reason:`${row.flaggedCount||0} flagged, ${row.missingCount||0} missing`,rawValue:JSON.stringify(row.rawValues||{}),mappedValue:JSON.stringify(row.values||{})}));
+      .map(row=>({index:row.index,reason:`${row.flaggedCount||0} flagged, ${row.missingCount||0} missing`,rawValue:JSON.stringify(row.rawValues||{}),mappedValue:JSON.stringify(row.values||{})}))
+      .concat((Array.isArray(columnScan?.fittedRowRejects)?columnScan.fittedRowRejects:[]).map(row=>({index:row.index,reason:"C01 club ID was not read",rawValue:row.text||"",mappedValue:""})));
   }
   gdRenderFlatTableBridgeOutput(columnScan);
   gdPracticeRefreshDebugTools();
   if(!payload?.clubGroups?.length){
     const digitizedRows=Number(columnScan?.digitizedTable?.rows?.length)||0;
-    gdPracticeDebugCheckpointSafe("rows_accepted","warning",{outputSummary:"Raw cell values read; native Practice rows remain parked until column headers map the cutouts",counts:{accepted:0,digitizedRows,headersAllocated:allocated,headersTotal:totalAllocated}});
-    gdSetPracticeScanStatus(digitizedRows?`Raw cell value read complete: ${digitizedRows} row${digitizedRows===1?"":"s"} scanned. Headers allocated ${allocated}/${totalAllocated}; native save remains parked.`:"Cell OCR ran, but no raw value rows were usable yet.");
+    gdPracticeDebugCheckpointSafe("rows_accepted","warning",{outputSummary:clubRejected?"Rows scrapped because C01 club ID was not read":"Raw cell values read; native Practice rows remain parked until column headers map the cutouts",counts:{accepted:0,digitizedRows,headersAllocated:allocated,headersTotal:totalAllocated,clubRejected}});
+    gdSetPracticeScanStatus(digitizedRows?`Raw cell value read complete: ${digitizedRows} row${digitizedRows===1?"":"s"} scanned. ${clubRejected?`${clubRejected} row${clubRejected===1?"":"s"} rejected because C01 club ID was not read. `:""}Headers allocated ${allocated}/${totalAllocated}; native save remains parked.`:"Cell OCR ran, but no raw value rows were usable yet.");
     return columnScan;
   }
   gdPracticeDebugCheckpointSafe("rows_accepted","success",{outputSummary:`${payload.clubGroups.length} usable OCR shots`,counts:{accepted:payload.clubGroups.length}});
@@ -14817,6 +14890,59 @@ function gdOcrClubLabelFromCutoutText(text){
   }
   return "";
 }
+function gdOcrClubLabelFromOcrData(data){
+  const words=gdLmWordsFromOcrData(data);
+  const textParts=[String(data?.text||"").trim()]
+    .concat(words.map(word=>String(word?.text||"").trim()))
+    .concat(gdLmGroupWordsIntoRows(words).map(row=>String(row?.text||"").trim()))
+    .filter(Boolean);
+  for(const text of textParts){
+    const club=gdOcrClubLabelFromCutoutText(text);
+    if(club)return club;
+  }
+  return "";
+}
+function gdClubIdOcrConfig(mode="7"){
+  return {
+    preserve_interword_spaces:"1",
+    tessedit_pageseg_mode:String(mode||"7"),
+    tessedit_char_whitelist:"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 ./-°º"
+  };
+}
+async function gdRecognizeClubIdCell(Tesseract,cell,rowIndex=0){
+  const crop=cell?.crop;
+  if(!Tesseract||!crop?.canvas)return {label:"",text:"",data:{text:"",words:[],lines:[]},attempts:[],reason:"missing club cell crop"};
+  const configs=[
+    {label:"psm7",config:gdClubIdOcrConfig("7")},
+    {label:"psm8",config:gdClubIdOcrConfig("8")},
+    {label:"psm13",config:gdClubIdOcrConfig("13")}
+  ];
+  const variants=gdColumnOcrVariantCanvases(crop).filter(variant=>["original","clean","threshold"].includes(String(variant?.label||"")));
+  const attempts=[];
+  let best={label:"",text:"",data:null,score:-Infinity};
+  for(const variant of variants){
+    for(const item of configs){
+      const result=await gdRecognizeWithTesseract(Tesseract,variant.canvas,item.config,`club-id:row-${rowIndex}:${variant.label}:${item.label}`);
+      const data=gdOffsetOcrData(result?.data||{text:"",words:[],lines:[]},crop.x,crop.y,crop.scale);
+      const text=String(data.text||"").trim().replace(/\s+/g," ");
+      const label=gdOcrClubLabelFromOcrData(data);
+      const wordCount=gdLmWordsFromOcrData(data).length;
+      const confidence=Math.max(0,...gdLmWordsFromOcrData(data).map(word=>Number(word?.confidence)||0));
+      const score=(label?100:0)+confidence+Math.min(24,text.length*2)+wordCount*3;
+      attempts.push({variant:variant.label,mode:item.label,label,text:text.slice(0,80),wordCount,confidence:Math.round(confidence)});
+      if(score>best.score)best={label,text,data,score,confidence};
+      if(label&&confidence>=35)return {label,text,data,attempts,confidence,reason:"club alias matched"};
+    }
+  }
+  return {
+    label:best.label||"",
+    text:best.text||"",
+    data:best.data||{text:"",words:[],lines:[]},
+    attempts,
+    confidence:Number(best.confidence)||0,
+    reason:best.label?"club alias matched":"no club alias found"
+  };
+}
 function gdOcrClubLabelCandidatesForColumnScan(columnScan){
   const allocation=columnScan?.columnCutoutAllocation;
   const cutouts=Array.isArray(allocation?.cutouts)?allocation.cutouts:[];
@@ -14875,6 +15001,33 @@ function gdApplyOcrClubLabelCandidateAllocation(columnScan){
   }].concat(Array.isArray(cutout.matches)?cutout.matches:[]);
   allocation.allocatedCount=cutouts.filter(item=>item.allocatedKey).length;
   return true;
+}
+function gdEnsureOcrFirstColumnClubIdTarget(columnScan){
+  if(String(columnScan?.layout?.cropMode||"")!=="ocr-generated-grid")return false;
+  const allocation=columnScan?.columnCutoutAllocation;
+  const cutouts=Array.isArray(allocation?.cutouts)?allocation.cutouts:[];
+  if(!allocation||!cutouts.length||cutouts.some(cutout=>cutout?.allocatedKey==="club"))return false;
+  const first=cutouts[0];
+  if(!first)return false;
+  first.allocatedKey="club";
+  first.allocatedLabel="Club ID";
+  first.status="club-id-pass";
+  first.matches=[{
+    key:"club",
+    label:"Club ID",
+    phrase:"first column club-id pass",
+    score:1,
+    source:"club-id-column"
+  }].concat(Array.isArray(first.matches)?first.matches:[]);
+  allocation.allocatedCount=cutouts.filter(item=>item.allocatedKey).length;
+  allocation.clubIdColumnIndex=Number(first.columnIndex)||0;
+  return true;
+}
+function gdOcrClubIdColumnIndex(columnScan){
+  const cutouts=Array.isArray(columnScan?.columnCutoutAllocation?.cutouts)?columnScan.columnCutoutAllocation.cutouts:[];
+  const cutout=cutouts.find(item=>item?.allocatedKey==="club");
+  if(cutout&&Number.isFinite(Number(cutout.columnIndex)))return Number(cutout.columnIndex);
+  return String(columnScan?.layout?.cropMode||"")==="ocr-generated-grid"?0:-1;
 }
 function gdBuildOcrColumnCutoutAllocation(columnScan,opts={}){
   const image=columnScan?.sourceCanvas||columnScan?.preparedCanvas;
@@ -15070,6 +15223,7 @@ function gdApplyOcrColumnCutoutAllocation(columnScan){
   const cutouts=Array.isArray(allocation?.cutouts)?allocation.cutouts:[];
   const columns=Array.isArray(columnScan?.cellGrid?.columns)?columnScan.cellGrid.columns:[];
   if(!cutouts.length||!columns.length)return;
+  gdEnsureOcrFirstColumnClubIdTarget(columnScan);
   cutouts.forEach(cutout=>{
     const column=columns[cutout.columnIndex];
     if(!column)return;
@@ -15130,7 +15284,8 @@ function gdRenderOcrColumnCutoutAllocation(columnScan){
   club.className="gdColumnOcrSource";
   const clubCutout=cutouts.find(cutout=>cutout?.allocatedKey==="club");
   if(clubCutout){
-    club.textContent=`Club label pass: ${clubCutout.genericLabel} is allocated as Club. Club values stay separate from metric value reading.`;
+    const label=clubCutout.status==="club-id-pass"?"club-ID pass target":"Club";
+    club.textContent=`Club label pass: ${clubCutout.genericLabel} is allocated as ${label}. Rows without a readable club label are rejected before native output.`;
   }else if(clubCandidates.length){
     club.textContent=`Club label pass: ${clubCandidates.slice(0,4).map(candidate=>{
       const hits=(candidate.hits||[]).map(hit=>hit.label).filter(Boolean).join("/");
@@ -38390,10 +38545,10 @@ body.gdGpsActive #bagRailBtn{order:7!important}
 }
 .gdPracticeExtractRow{
   display:grid!important;
-  grid-template-columns:24px 44px repeat(10,minmax(58px,1fr)) minmax(76px,auto)!important;
+  grid-template-columns:24px 44px repeat(11,minmax(58px,1fr)) minmax(76px,auto)!important;
   gap:5px!important;
   align-items:center!important;
-  min-width:920px!important;
+  min-width:980px!important;
   border-radius:10px!important;
   background:rgba(0,0,0,.18)!important;
   border:1px solid rgba(255,255,255,.075)!important;
