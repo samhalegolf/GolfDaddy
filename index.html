@@ -14653,7 +14653,7 @@ function gdOcrHeaderMatchesForCutoutWords(words){
   const addMatch=(phrase,sourceWords,source)=>{
     const clean=String(phrase||"").trim().replace(/\s+/g," ");
     if(!clean)return;
-    const key=gdLmCanonicalMetricKey(clean);
+    const key=gdLmCanonicalMetricKey(clean)||(gdLmNormalToken(clean)==="speed"?"ballSpeed":"");
     if(!key)return;
     const wordCount=Array.isArray(sourceWords)?sourceWords.length:0;
     const score=clean.length+wordCount*4+(source==="row"?8:0);
@@ -14682,7 +14682,7 @@ function gdOcrHeaderMatchesForCutoutWords(words){
   }
   return [...matches.values()].sort((a,b)=>b.score-a.score||String(a.key).localeCompare(String(b.key)));
 }
-function gdBuildOcrColumnCutoutAllocation(columnScan){
+function gdBuildOcrColumnCutoutAllocation(columnScan,opts={}){
   const image=columnScan?.sourceCanvas||columnScan?.preparedCanvas;
   const cellGrid=columnScan?.cellGrid;
   const columns=Array.isArray(cellGrid?.columns)?cellGrid.columns:[];
@@ -14695,7 +14695,8 @@ function gdBuildOcrColumnCutoutAllocation(columnScan){
   const headerBottom=Number.isFinite(firstRowTop)
     ?Math.max(24,Math.min(height,firstRowTop))
     :Math.max(48,Math.min(height,Math.round(height*.24)));
-  const words=gdLmWordsFromOcrData(columnScan?.generatedOcrData||{});
+  const allocationOcrData=opts.ocrData||columnScan?.generatedHeaderAllocationOcrData||columnScan?.generatedOcrData||{};
+  const words=gdLmWordsFromOcrData(allocationOcrData);
   const headerBand={top:0,bottom:headerBottom};
   const cutouts=columns.map((column,index)=>{
     const left=Number.isFinite(Number(column.dividerLeft))?Number(column.dividerLeft):Number(column.left);
@@ -14731,6 +14732,7 @@ function gdBuildOcrColumnCutoutAllocation(columnScan){
       allocatedKey:assigned?.key||"",
       allocatedLabel:assigned?.label||"",
       status:assigned?"allocated":"unallocated",
+      scanSource:String(opts.source||columnScan?.headerTextScan?.source||"existing-ocr-words"),
       rawHeaderText:headerWords.map(word=>String(word.text||"").trim()).filter(Boolean).join(" "),
       matches,
       headerWords,
@@ -14743,13 +14745,103 @@ function gdBuildOcrColumnCutoutAllocation(columnScan){
   const allocatedCount=cutouts.filter(cutout=>cutout.allocatedKey).length;
   return {
     source:"ocr-column-cutouts",
+    scanSource:String(opts.source||columnScan?.headerTextScan?.source||"existing-ocr-words"),
     aliasStatus:gdLmAliasRegistryStatus(),
+    textScan:columnScan?.headerTextScan||null,
     headerBand,
     cutouts,
     allocatedCount,
     totalCount:cutouts.length,
     rowCount:rows.length,
     cellCount:cutouts.reduce((sum,cutout)=>sum+cutout.cells.length,0)
+  };
+}
+function gdHeaderTextScanConfig(mode="6"){
+  return {
+    preserve_interword_spaces:"1",
+    tessedit_pageseg_mode:String(mode||"6")
+  };
+}
+function gdHeaderTextScanVariants(crop,labels=["white-text","clean","original"]){
+  const source=crop?.canvas;
+  if(!source)return [];
+  const variants=[
+    {label:"white-text",canvas:gdOcrHeaderWhiteTextCanvas(source)},
+    {label:"clean",canvas:gdColumnOcrVariantCanvas(source,"clean")},
+    {label:"original",canvas:source}
+  ];
+  const allowed=new Set((Array.isArray(labels)?labels:[]).map(label=>String(label||"")));
+  return allowed.size?variants.filter(variant=>allowed.has(variant.label)):variants;
+}
+function gdHeaderTextScanWordCount(data){
+  return Number(gdLmWordsFromOcrData(data).filter(word=>/[a-z]/i.test(String(word?.text||""))).length)||0;
+}
+async function gdRecognizeHeaderTextCrop(Tesseract,crop,workerKey,configs,variantLabels){
+  const variants=gdHeaderTextScanVariants(crop,variantLabels);
+  const results=[];
+  const attempts=[];
+  for(const variant of variants){
+    for(const item of configs){
+      const result=await gdRecognizeWithTesseract(Tesseract,variant.canvas,item.config,`${workerKey}:${variant.label}:${item.label}`);
+      const data=gdOffsetOcrData(result?.data||{text:"",words:[],lines:[]},crop.x,crop.y,crop.scale);
+      const wordCount=gdHeaderTextScanWordCount(data);
+      attempts.push({
+        variant:variant.label,
+        mode:item.label,
+        wordCount,
+        text:String(data.text||"").trim().slice(0,140)
+      });
+      if(wordCount)results.push(data);
+    }
+  }
+  return {results,attempts};
+}
+async function gdRunOcrColumnCutoutHeaderTextScan(Tesseract,columnScan){
+  const image=columnScan?.sourceCanvas||columnScan?.preparedCanvas;
+  const allocation=columnScan?.columnCutoutAllocation||gdBuildOcrColumnCutoutAllocation(columnScan,{ocrData:{words:[],lines:[],text:""},source:"header-text-regions"});
+  const cutouts=Array.isArray(allocation?.cutouts)?allocation.cutouts:[];
+  const width=Number(image?.width)||0;
+  const height=Number(image?.height)||0;
+  if(!Tesseract||!image||width<10||height<10||!cutouts.length){
+    return {source:"header-text-ocr",ocrData:null,attempts:[],wordCount:0,reason:"No OCR header cutout regions"};
+  }
+  const configs=[
+    {label:"psm6",config:gdHeaderTextScanConfig("6")},
+    {label:"psm11",config:gdHeaderTextScanConfig("11")}
+  ];
+  const headerTop=Math.max(0,Number(allocation.headerBand?.top)||0);
+  const headerBottom=Math.max(headerTop+1,Math.min(height,Number(allocation.headerBand?.bottom)||Math.round(height*.24)));
+  const fullCrop=gdCropCanvasRegion(image,{x:0,y:headerTop,width,height:headerBottom-headerTop},3);
+  const attempts=[];
+  const results=[];
+  const fullScan=await gdRecognizeHeaderTextCrop(Tesseract,fullCrop,"layout:ocr-header-allocation-full",configs,["white-text","clean"]);
+  attempts.push(...fullScan.attempts.map(item=>Object.assign({scope:"full-header-band"},item)));
+  results.push(...fullScan.results);
+  let merged=gdLmNormalizeOcrData(gdMergeLaunchMonitorOcrData(results)||{text:"",words:[],lines:[]});
+  let previewAllocation=gdBuildOcrColumnCutoutAllocation(columnScan,{ocrData:merged,source:"header-text-ocr"});
+  const unallocated=(Array.isArray(previewAllocation?.cutouts)?previewAllocation.cutouts:cutouts)
+    .filter(cutout=>!cutout.allocatedKey)
+    .slice(0,12);
+  const cutoutConfigs=[
+    {label:"psm7",config:gdHeaderTextScanConfig("7")}
+  ];
+  for(const cutout of unallocated){
+    const region=cutout.headerRegion;
+    if(!region)continue;
+    const crop=gdCropCanvasRegion(image,region,3);
+    const scan=await gdRecognizeHeaderTextCrop(Tesseract,crop,`layout:ocr-header-allocation-${cutout.genericLabel}`,cutoutConfigs,["white-text","clean"]);
+    attempts.push(...scan.attempts.map(item=>Object.assign({scope:cutout.genericLabel},item)));
+    results.push(...scan.results);
+  }
+  merged=gdLmNormalizeOcrData(gdMergeLaunchMonitorOcrData(results)||{text:"",words:[],lines:[]});
+  return {
+    source:"header-text-ocr",
+    ocrData:merged,
+    attempts,
+    wordCount:gdHeaderTextScanWordCount(merged),
+    fullBandAttempts:fullScan.attempts.length,
+    cutoutAttempts:attempts.length-fullScan.attempts.length,
+    reason:results.length?"Header text OCR found words for cutout allocation":"Header text OCR found no usable text words"
   };
 }
 function gdApplyOcrColumnCutoutAllocation(columnScan){
@@ -14814,6 +14906,7 @@ function gdRenderOcrColumnCutoutAllocation(columnScan){
   source.className="gdColumnOcrSource";
   source.textContent=[
     "Column cutouts are made from the current OCR geometry cut lines.",
+    allocation.textScan?`Header text OCR: ${Number(allocation.textScan.wordCount)||0} text words, ${Number(allocation.textScan.attempts?.length)||0} attempts.`:"Header allocation is waiting for the dedicated text OCR scan.",
     "Headers are allocated by OCR words found inside each cutout.",
     "Row cutouts exist below this, but cell values are still unread.",
     allocation.aliasStatus
@@ -15819,13 +15912,22 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
       fallbackFrom:flatScan?String(gdFlatTableFailureDebug(flatScan).reason||"flat-template"):"ocr-generated-primary"
     };
     columnScan.cellGrid=gdBuildPracticeCellGrid(columnScan);
-    columnScan.columnCutoutAllocation=gdBuildOcrColumnCutoutAllocation(columnScan);
+    columnScan.columnCutoutAllocation=gdBuildOcrColumnCutoutAllocation(columnScan,{ocrData:{words:[],lines:[],text:""},source:"header-text-regions"});
+    gdSetPracticeScanStatus("Running header text OCR across the column cutouts...");
+    columnScan.headerTextScan=await gdRunOcrColumnCutoutHeaderTextScan(Tesseract,columnScan);
+    if(columnScan.headerTextScan?.ocrData)columnScan.generatedHeaderAllocationOcrData=columnScan.headerTextScan.ocrData;
+    columnScan.columnCutoutAllocation=gdBuildOcrColumnCutoutAllocation(columnScan,{
+      ocrData:columnScan.generatedHeaderAllocationOcrData||{words:[],lines:[],text:""},
+      source:"header-text-ocr"
+    });
     gdApplyOcrColumnCutoutAllocation(columnScan);
     const gridRows=Number(columnScan.cellGrid?.rows?.length)||0;
     const gridColumns=Number(columnScan.cellGrid?.columns?.length)||0;
     const gridCells=Number(columnScan.cellGrid?.cellCount)||0;
     const allocatedColumns=Number(columnScan.columnCutoutAllocation?.allocatedCount)||0;
     const cutoutColumns=Number(columnScan.columnCutoutAllocation?.totalCount)||gridColumns;
+    const headerTextWords=Number(columnScan.headerTextScan?.wordCount)||0;
+    const headerTextAttempts=Number(columnScan.headerTextScan?.attempts?.length)||0;
     const candidateCount=valueCandidates.length;
     const gridReady=!!(gridRows&&gridColumns&&gridCells);
     const outcome=gdPracticeSetTemplateOutcome("ocr",{
@@ -15843,9 +15945,11 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
       candidateCount,
       allocatedColumns,
       cutoutColumns,
+      headerTextWords,
+      headerTextAttempts,
       reason:gridReady?"":"OCR generated layout found headers but could not form a cell grid.",
       summary:gridReady
-        ?`OCR-generated layout produced a ${gridRows} x ${gridColumns} cutout grid from OCR word geometry. Header cutouts allocated ${allocatedColumns}/${cutoutColumns} columns; cell values were not read in this step.`
+        ?`OCR-generated layout produced a ${gridRows} x ${gridColumns} cutout grid from OCR word geometry. A dedicated header text OCR pass found ${headerTextWords} text words and allocated ${allocatedColumns}/${cutoutColumns} columns; cell values were not read in this step.`
         :`OCR-generated layout found the header band, but no usable value-row grid.`,
       nextStep:gridReady?"Review the column cutout allocation and cell cutouts. Value reading remains parked until the grid internals are deliberately enabled.":"Tune the header and value-box evidence using the OCR generated tab."
     });
@@ -15858,7 +15962,7 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
     }
     gdRenderFlatTableBridgeOutput(columnScan,"ocr");
     gdPracticeDebugCheckpointSafe("table_detected","success",{outputSummary:`OCR-generated grid ready: ${gridRows} rows x ${gridColumns} columns`,counts:{rows:gridRows,columns:gridColumns,cells:gridCells}});
-    gdPracticeDebugCheckpointSafe("ocr_generated_template","success",{outputSummary:`OCR-generated grid ready: ${gridRows} rows x ${gridColumns} columns; ${allocatedColumns}/${cutoutColumns} headers allocated`,counts:{rows:gridRows,columns:gridColumns,cells:gridCells,headersAllocated:allocatedColumns,headersTotal:cutoutColumns,words:wordCount,candidates:outcome.candidateCount}});
+    gdPracticeDebugCheckpointSafe("ocr_generated_template","success",{outputSummary:`OCR-generated grid ready: ${gridRows} rows x ${gridColumns} columns; ${allocatedColumns}/${cutoutColumns} headers allocated by dedicated text OCR`,counts:{rows:gridRows,columns:gridColumns,cells:gridCells,headersAllocated:allocatedColumns,headersTotal:cutoutColumns,headerTextWords,headerTextAttempts,words:wordCount,candidates:outcome.candidateCount}});
     gdPracticeDebugCheckpointSafe("extraction_started","warning",{outputSummary:"Stopped at OCR-generated cutout grid; fitted-cell value OCR has not run"});
     gdSetPracticeScanStatus(`OCR-generated grid ready: ${gridRows} rows x ${gridColumns} cutouts. Header cutouts allocated ${allocatedColumns}/${cutoutColumns}; values have not been read yet.`);
     return {payload:null,scan:columnScan,outcome};
