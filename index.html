@@ -12091,13 +12091,13 @@ function gdRenderValueGridCropPreview(target){
   };
   const panels=[];
   if(target?.layout&&flattened){
-    const evidenceBoxCount=Number(target?.generatedValueCandidates?.length)||Number(target?.valueCluster?.valueBoxes?.length)||0;
+    const evidenceBoxCount=Number(target?.generatedGeometryCandidates?.length)||Number(target?.generatedValueCandidates?.length)||Number(target?.valueCluster?.valueBoxes?.length)||0;
     const generatedBandCount=Number(target?.generatedRowBands?.length)||Number(target?.valueCluster?.rowBands?.length)||0;
     panels.push(makePanel(isOcrGeneratedGrid?"OCR geometry evidence":(isFlatTemplate?"Flat table template grid":"Parked column splitter tool"),{
       open:!!isOutputGrid,
       className:isOutputGrid?"gdFlatTemplatePreview":"gdParkedToolPreview",
       cards:[
-        makeCard(isOcrGeneratedGrid?"Full flat image + number-like OCR boxes":(isFlatTemplate?"Fitted rows, columns, cells":"Old column cuts, parked"),flattened,(ctx,scale,sourceW,sourceH)=>{
+        makeCard(isOcrGeneratedGrid?"Full flat image + OCR word/text boxes":(isFlatTemplate?"Fitted rows, columns, cells":"Old column cuts, parked"),flattened,(ctx,scale,sourceW,sourceH)=>{
           if(isOutputGrid)gdDrawFlatTableTemplateOverlay(ctx,target,sourceW,sourceH,scale);
           else gdDrawPracticeColumnSplitOverlay(ctx,target?.layout,sourceH,scale);
         })
@@ -12105,11 +12105,11 @@ function gdRenderValueGridCropPreview(target){
       metaText:isOutputGrid
         ?[
           `Rows: ${Number(target?.cellGrid?.rows?.length)||Number(target?.valueCluster?.rowCount)||0}  Columns: ${Number(target?.cellGrid?.columns?.length)||Number(target?.layout?.columns?.length)||0}`,
-          isOcrGeneratedGrid?`Number-like OCR boxes: ${evidenceBoxCount}  Row geometry bands: ${generatedBandCount}`:"",
+          isOcrGeneratedGrid?`OCR word/text boxes: ${evidenceBoxCount}  Row geometry bands: ${generatedBandCount}`:"",
           `Column cut source: ${String(target.layout.dividerSource||"flat-number-box-gaps")}`,
-          isOcrGeneratedGrid?`Row cut source: ${String(target.layout.rowDividerSource||"ocr-number-box-gaps")}`:"",
+          isOcrGeneratedGrid?`Row cut source: ${String(target.layout.rowDividerSource||"ocr-word-box-gaps")}`:"",
           isOcrGeneratedGrid
-            ?"This is geometry evidence only: OCR has identified number-like boxes, but header meanings and cell values have not been read yet."
+            ?"This is geometry evidence only: OCR has identified word/text boxes, but header meanings and cell values have not been read yet."
             :`Fit error: ${(Number(target?.flatTemplateFit?.rms)||0).toFixed(1)} px rms / ${(Number(target?.flatTemplateFit?.maxResidual)||0).toFixed(1)} max`
         ].filter(Boolean).join("\n")
         :[
@@ -13220,7 +13220,7 @@ function gdRenderFlatTableBridgeCheckpoint(columnScan){
     summary:failed?(gdFlatTableFailureIsTemplate(failure.reason)
       ?`${gdFlatTableReasonText(failure.reason)} The row detector accepted ${Number(failure.rawRowCount)||0} row band${Number(failure.rawRowCount)===1?"":"s"}, but the fixed column template could not fit them.`
       :`${gdFlatTableReasonText(failure.reason)} The actual flat scan accepted ${Number(failure.rawRowCount)||0} row band${Number(failure.rawRowCount)===1?"":"s"}; ${Number(failure.requiredRows)||gdFlatTableMinimumAcceptedRows()} are required before cells can be OCR scanned.`)
-      :(digitizedRows?`Fitted cells were OCR scanned into an owned digitised table. Review ${flags} flagged/missing cells against the crops before importing.`:(rows&&columns?(isOcrGeneratedGrid?"Generic columns and value-looking row bands were fitted on the straight flat image. Header meanings and values have not been OCR-read yet.":"Rows, columns, and cells were fitted on the straight flat image. OCR cleanup stays parked until this geometry is reliable."):"The flat image did not expose enough repeated number stacks. Retake with the table sharper and flatter.")),
+      :(digitizedRows?`Fitted cells were OCR scanned into an owned digitised table. Review ${flags} flagged/missing cells against the crops before importing.`:(rows&&columns?(isOcrGeneratedGrid?"Generic columns and OCR word row bands were fitted on the straight flat image. Header meanings and values have not been OCR-read yet.":"Rows, columns, and cells were fitted on the straight flat image. OCR cleanup stays parked until this geometry is reliable."):"The flat image did not expose enough repeated number stacks. Retake with the table sharper and flatter.")),
     stats:isOcrGeneratedGrid?[
       {label:"Rows",value:rows||"-"},
       {label:"Columns",value:columns||"-"},
@@ -13569,6 +13569,26 @@ function gdLmGridValueCandidates(ocrData,layout){
     .filter(word=>word.cy>=yRange.start&&word.cy<yRange.stop)
     .map(word=>({word,key:"value",cy:word.cy,cx:word.cx,h:word.h}));
 }
+function gdLmGridGeometryCandidates(ocrData){
+  const lines=gdLmLinesFromOcrData(ocrData);
+  const words=lines.flatMap(line=>line.words||[]);
+  return words
+    .map(word=>{
+      const box=gdLmWordBox(word);
+      if(!box||box.w<1||box.h<1)return null;
+      const isValue=gdLmLooksLikeOcrValue(box.text);
+      return {
+        word,
+        key:isValue?"number":"text",
+        kind:isValue?"number":"text",
+        cy:box.cy,
+        cx:box.cx,
+        h:box.h,
+        text:box.text
+      };
+    })
+    .filter(Boolean);
+}
 function gdLmHeaderWordsForGrid(lines,layout){
   const header=layout?.headerLine||null;
   if(!header)return [];
@@ -13689,7 +13709,7 @@ function gdLmNumberBoxColumnsFromCandidates(candidates,sourceWidth=0){
       cx:(left+right)/2,
       valueCx:Number(cluster.cx),
       valueBoxCount:cluster.items.length,
-      source:"ocr_number_box_gap"
+      source:"ocr_word_box_gap"
     };
   }).filter(column=>Number.isFinite(column.left)&&Number.isFinite(column.right)&&column.right>column.left+4);
   return columns.length>=4?gdLmAssignDetectedHeaderColumnBounds(columns):[];
@@ -13758,7 +13778,7 @@ function gdLmNumberBoxRowsFromCandidates(candidates,sourceHeight=0){
       bottom,
       count:cluster.items.length,
       detected:true,
-      source:"ocr_number_box_gap"
+      source:"ocr_word_box_gap"
     };
   }).filter(row=>Number.isFinite(row.top)&&Number.isFinite(row.bottom)&&row.bottom>row.top+4);
   return rows;
@@ -15457,7 +15477,7 @@ function gdOcrGeneratedValueCluster(scanImage,flatScan=null,generatedRows=[],val
         cy:word.cy,
         text:word.text,
         confidence:word.confidence,
-        source:"ocr-number-like"
+        source:String(candidate?.kind||candidate?.key||"")==="number"?"ocr-number-like":"ocr-text-like"
       };
     })
     .filter(Boolean);
@@ -15491,7 +15511,7 @@ function gdOcrGeneratedOutcomeFromFailure(reason,scanImage,extra={}){
     image:scanImage||null,
     reason:String(reason||"OCR generated layout failed"),
     summary:"The OCR-generated layout path ran, but it did not produce a usable grid.",
-    nextStep:"Open the OCR generated tab to inspect header words, columns and value-looking row candidates."
+    nextStep:"Open the OCR generated tab to inspect OCR word boxes, columns and row geometry."
   },extra||{}));
 }
 function gdRenderOcrGeneratedTemplateOutput(columnScan,activeKey="ocr"){
@@ -15516,7 +15536,7 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
       console.warn("[GolfDaddy] launch monitor aliases unavailable; using inline fallback aliases",e);
     });
     const Tesseract=await gdLoadTesseract();
-    gdSetPracticeScanStatus("Reading headers and value-looking boxes for OCR-generated layout...");
+    gdSetPracticeScanStatus("Reading OCR word/text boxes for generated geometry...");
     const fullResult=await gdRecognizeWithTesseract(Tesseract,scanImage,gdOcrGeneratedLayoutConfig(),"layout:ocr-generated");
     let ocrData=gdLmNormalizeOcrData(fullResult?.data||{text:"",words:[],lines:[]});
     let lines=gdLmLinesFromOcrData(ocrData);
@@ -15524,7 +15544,7 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
     let layout=gdLmBuildLayoutColumns(lines);
     let headerProbe=null;
     if(!layout){
-      gdSetPracticeScanStatus("OCR did not return the header row. Probing the header band above the first value row...");
+      gdSetPracticeScanStatus("OCR did not return enough text context yet. Probing the upper band for more OCR words...");
       headerProbe=await gdRunOcrGeneratedHeaderBandProbe(Tesseract,scanImage,ocrData,lines);
       if(headerProbe?.ocrData){
         ocrData=headerProbe.ocrData;
@@ -15534,40 +15554,42 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
       }
     }
     const wordCount=Number(ocrData.words?.length)||0;
-    if(!layout){
+    if(!layout&&!(Number(ocrData.words?.length)||0)){
       const bestCandidate=headerCandidates.slice().sort((a,b)=>Number(b.score||0)-Number(a.score||0))[0]||null;
-      const outcome=gdOcrGeneratedOutcomeFromFailure("OCR generated template could not find a header row.",scanImage,{
+      const outcome=gdOcrGeneratedOutcomeFromFailure("OCR generated template could not find OCR word boxes.",scanImage,{
         wordCount,
         ocrData,
         headerCandidates,
         headerProbe,
         aliasStatus:gdLmAliasRegistryStatus(),
-        summary:"The OCR-generated layout path ran, but none of the candidate header lines reached the score needed for usable columns.",
-        nextStep:"Open the OCR generated tab to inspect the highlighted header candidates and raw OCR words."
+        summary:"The OCR-generated layout path ran, but OCR did not return usable word/text boxes for geometry.",
+        nextStep:"Open the OCR generated tab to inspect the raw OCR words and probe output."
       });
-      gdPracticeDebugCheckpointSafe("ocr_generated_template","failed",{outputSummary:"OCR generated layout found no usable header",counts:{words:wordCount,bestHeaderScore:Number(bestCandidate?.score)||0,headerProbeWords:Number(headerProbe?.headerWordCount)||0}});
-      gdPracticeDebugCheckpointSafe("extraction_started","failed",{outputSummary:"OCR generated layout found no usable header"});
+      gdPracticeDebugCheckpointSafe("ocr_generated_template","failed",{outputSummary:"OCR generated layout found no usable word boxes",counts:{words:wordCount,bestHeaderScore:Number(bestCandidate?.score)||0,headerProbeWords:Number(headerProbe?.headerWordCount)||0}});
+      gdPracticeDebugCheckpointSafe("extraction_started","failed",{outputSummary:"OCR generated layout found no usable word boxes"});
       gdRenderPracticeTemplateOutcomeTabs("ocr");
       return {payload:null,scan:null,outcome};
     }
+    layout=layout||{headerIndex:-1,headerLine:null,columns:[],units:{},headerCandidates,headerProbe,geometryOnly:true};
     layout.lines=lines;
     layout.headerCandidates=headerCandidates;
     layout.headerProbe=headerProbe;
-    const valueCandidates=gdLmGridValueCandidates(ocrData,layout);
-    const numberBoxRows=gdLmNumberBoxRowsFromCandidates(valueCandidates,Number(scanImage?.height)||0);
-    const generatedRows=numberBoxRows.length?numberBoxRows:gdLmClusterColumnRows(valueCandidates);
-    const valueCluster=gdOcrGeneratedValueCluster(scanImage,flatScan,generatedRows,valueCandidates);
+    const geometryCandidates=gdLmGridGeometryCandidates(ocrData);
+    const valueCandidates=layout.headerLine?gdLmGridValueCandidates(ocrData,layout):[];
+    const wordBoxRows=gdLmNumberBoxRowsFromCandidates(geometryCandidates,Number(scanImage?.height)||0);
+    const generatedRows=wordBoxRows.length?wordBoxRows:gdLmClusterColumnRows(geometryCandidates);
+    const valueCluster=gdOcrGeneratedValueCluster(scanImage,flatScan,generatedRows,geometryCandidates);
     const headerWords=gdLmHeaderWordsForGrid(lines,layout);
-    const numberBoxColumns=gdLmNumberBoxColumnsFromCandidates(valueCandidates,Number(scanImage?.width)||0);
+    const wordBoxColumns=gdLmNumberBoxColumnsFromCandidates(geometryCandidates,Number(scanImage?.width)||0);
     const valueGeometryColumns=gdLmGenericGridColumnsFromValueCandidates(valueCandidates,headerWords);
     const fallbackGridColumns=gdLmGenericGridColumnsFromColumns(layout.columns);
-    const chosenGridColumns=numberBoxColumns.length>=4?numberBoxColumns:(valueGeometryColumns.length>=4?valueGeometryColumns:fallbackGridColumns);
-    const dividerSource=numberBoxColumns.length>=4
-      ?"ocr-number-box-gaps"
+    const chosenGridColumns=wordBoxColumns.length>=4?wordBoxColumns:(valueGeometryColumns.length>=4?valueGeometryColumns:fallbackGridColumns);
+    const dividerSource=wordBoxColumns.length>=4
+      ?"ocr-word-box-gaps"
       :(valueGeometryColumns.length>=4?"ocr-generated-value-geometry":"ocr-generated-header-geometry");
     if(chosenGridColumns.length<4){
-      const outcome=gdOcrGeneratedOutcomeFromFailure("OCR generated template found headers but could not create the generated grid.",scanImage,{wordCount,layout,ocrData,headerCandidates,headerProbe,aliasStatus:gdLmAliasRegistryStatus()});
-      gdPracticeDebugCheckpointSafe("ocr_generated_template","failed",{outputSummary:"OCR generated columns did not form a grid",counts:{words:wordCount,columns:Number(layout.columns?.length)||0,candidates:valueCandidates.length}});
+      const outcome=gdOcrGeneratedOutcomeFromFailure("OCR generated template could not create the generated grid from OCR word geometry.",scanImage,{wordCount,layout,ocrData,headerCandidates,headerProbe,aliasStatus:gdLmAliasRegistryStatus()});
+      gdPracticeDebugCheckpointSafe("ocr_generated_template","failed",{outputSummary:"OCR generated columns did not form a grid",counts:{words:wordCount,columns:Number(layout.columns?.length)||0,candidates:geometryCandidates.length}});
       gdPracticeDebugCheckpointSafe("extraction_started","failed",{outputSummary:"OCR generated layout stopped before grid output"});
       gdRenderPracticeTemplateOutcomeTabs("ocr");
       return {payload:null,scan:null,outcome};
@@ -15576,7 +15598,7 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
       layout:Object.assign({},layout,{
         columns:chosenGridColumns,
         dividerSource,
-        rowDividerSource:numberBoxRows.length?"ocr-number-box-gaps":"ocr-generated-row-bands",
+        rowDividerSource:wordBoxRows.length?"ocr-word-box-gaps":"ocr-generated-row-bands",
         cropMode:"ocr-generated-grid",
         normalizeMode:String(scanImage?.__gdNormalizeMode||"flat-table"),
         clusterMode:`OCR generated geometry grid`,
@@ -15592,8 +15614,9 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
       generatedOcrData:ocrData,
       generatedHeaderCandidates:headerCandidates,
       generatedRowBands:generatedRows,
-      generatedNumberBoxRows:numberBoxRows,
-      generatedValueCandidates:valueCandidates,
+      generatedNumberBoxRows:wordBoxRows,
+      generatedGeometryCandidates:geometryCandidates,
+      generatedValueCandidates:geometryCandidates,
       generatedGridHeaderWords:headerWords,
       ocrGeneratedTemplate:true,
       fallbackFrom:flatScan?String(gdFlatTableFailureDebug(flatScan).reason||"flat-template"):"ocr-generated-primary"
@@ -15602,7 +15625,7 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
     const gridRows=Number(columnScan.cellGrid?.rows?.length)||0;
     const gridColumns=Number(columnScan.cellGrid?.columns?.length)||0;
     const gridCells=Number(columnScan.cellGrid?.cellCount)||0;
-    const candidateCount=valueCandidates.length;
+    const candidateCount=geometryCandidates.length;
     const gridReady=!!(gridRows&&gridColumns&&gridCells);
     const outcome=gdPracticeSetTemplateOutcome("ocr",{
       label:"OCR generated",
@@ -15617,17 +15640,17 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
       payload:null,
       wordCount,
       candidateCount,
-      reason:gridReady?"":"OCR generated layout found headers but could not form a cell grid.",
+      reason:gridReady?"":"OCR generated word geometry could not form a cell grid.",
       summary:gridReady
         ?`OCR-generated layout produced a ${gridRows} x ${gridColumns} generic cell grid from OCR word geometry. Header meanings and cell values were not read in this step.`
-        :`OCR-generated layout found the header band, but no usable value-row grid.`,
-      nextStep:gridReady?"Review the OCR generated grid. Value reading remains parked until the grid internals are deliberately enabled.":"Tune the header and value-box evidence using the OCR generated tab."
+        :`OCR-generated layout found OCR words, but no usable geometry grid.`,
+      nextStep:gridReady?"Review the OCR generated grid. Header allocation and value reading remain parked until deliberately enabled.":"Tune the OCR word-box evidence using the OCR generated tab."
     });
     if(!gridReady){
       gdRenderOcrGeneratedTemplateOutput(columnScan,"ocr");
       gdPracticeDebugCheckpointSafe("ocr_generated_template","failed",{outputSummary:"OCR generated layout could not form an output grid",counts:{words:wordCount,columns:Number(layout.columns?.length)||0,candidates:Number(outcome.candidateCount)||0}});
       gdPracticeDebugCheckpointSafe("extraction_started","failed",{outputSummary:"OCR generated layout stopped before value extraction"});
-      gdSetPracticeScanStatus("OCR-generated layout found headers, but no cell grid yet. Open the OCR generated tab to tune it.");
+      gdSetPracticeScanStatus("OCR-generated geometry found OCR words, but no cell grid yet. Open the OCR generated tab to tune it.");
       return {payload:null,scan:columnScan,outcome};
     }
     gdRenderFlatTableBridgeOutput(columnScan,"ocr");
