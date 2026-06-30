@@ -7161,6 +7161,7 @@ function gdLmAssignDetectedHeaderColumnBounds(columns){
   }
   const fallbackGap=gdValueClusterMedian(gaps)||90;
   sorted.forEach((column,index)=>{
+    const valueCx=Number.isFinite(Number(column.valueCx))?Number(column.valueCx):Number(column.cx);
     const prev=sorted[index-1];
     const next=sorted[index+1];
     const leftGap=prev?(Number(column.cx)-Number(prev.cx)):fallbackGap;
@@ -7182,6 +7183,10 @@ function gdLmAssignDetectedHeaderColumnBounds(columns){
     }
     column.left=left;
     column.right=right;
+    column.dividerLeft=left;
+    column.dividerRight=right;
+    column.valueCx=Number.isFinite(valueCx)?valueCx:(left+right)/2;
+    column.cx=(left+right)/2;
     column.source=column.source||"ocr_detected_header";
   });
   return sorted;
@@ -7197,6 +7202,7 @@ function gdLmGenericGridColumnsFromColumns(columns,prefix="C"){
         x0:Number(column.x0),
         x1:Number(column.x1),
         cx:Number(column.cx),
+        valueCx:Number.isFinite(Number(column.valueCx))?Number(column.valueCx):Number(column.cx),
         source:String(column.source||"generic_grid")
       };
     }));
@@ -12076,7 +12082,7 @@ function gdRenderValueGridCropPreview(target){
           `Rows: ${Number(target?.cellGrid?.rows?.length)||Number(target?.valueCluster?.rowCount)||0}  Columns: ${Number(target?.cellGrid?.columns?.length)||Number(target?.layout?.columns?.length)||0}`,
           `Column cut source: ${String(target.layout.dividerSource||"flat-number-box-gaps")}`,
           isOcrGeneratedGrid
-            ?"Columns are generic geometry only; header meanings and cell values have not been read yet."
+            ?"Yellow lines feed the cell grid; blue lines mark value centres only. Header meanings and cell values have not been read yet."
             :`Fit error: ${(Number(target?.flatTemplateFit?.rms)||0).toFixed(1)} px rms / ${(Number(target?.flatTemplateFit?.maxResidual)||0).toFixed(1)} max`
         ].join("\n")
         :[
@@ -12528,26 +12534,26 @@ function gdDrawOcrGeneratedTemplateOverlay(ctx,outcome,sourceW,sourceH,scale){
     });
   }
   columns.forEach((column,index)=>{
-    const left=Math.max(0,Math.min(sourceW,Number(column.left)||Number(column.x0)||0));
-    const right=Math.max(left+1,Math.min(sourceW,Number(column.right)||Number(column.x1)||left+1));
-    const cx=Math.max(left,Math.min(right,Number(column.cx)||((left+right)/2)));
+    const left=Math.max(0,Math.min(sourceW,Number.isFinite(Number(column.dividerLeft))?Number(column.dividerLeft):(Number(column.left)||Number(column.x0)||0)));
+    const right=Math.max(left+1,Math.min(sourceW,Number.isFinite(Number(column.dividerRight))?Number(column.dividerRight):(Number(column.right)||Number(column.x1)||left+1)));
+    const cx=Math.max(left,Math.min(right,Number.isFinite(Number(column.valueCx))?Number(column.valueCx):(Number(column.cx)||((left+right)/2))));
     ctx.fillStyle=index%2?"rgba(86,181,255,.055)":"rgba(55,242,141,.045)";
     ctx.fillRect(left,0,Math.max(1,right-left),sourceH);
-    ctx.strokeStyle="rgba(86,181,255,.80)";
-    ctx.lineWidth=1.5/Math.max(.001,scale);
+    ctx.strokeStyle="rgba(255,211,116,.88)";
+    ctx.lineWidth=2/Math.max(.001,scale);
     [left,right].forEach(x=>{
       ctx.beginPath();
       ctx.moveTo(x,0);
       ctx.lineTo(x,sourceH);
       ctx.stroke();
     });
-    ctx.strokeStyle="rgba(55,242,141,.90)";
-    ctx.lineWidth=2/Math.max(.001,scale);
+    ctx.strokeStyle="rgba(86,181,255,.86)";
+    ctx.lineWidth=1.5/Math.max(.001,scale);
     ctx.beginPath();
     ctx.moveTo(cx,0);
     ctx.lineTo(cx,sourceH);
     ctx.stroke();
-    const label=String(column.key||column.label||index+1);
+    const label=String(column.label||column.key||index+1);
     ctx.font=`${Math.max(8,10/Math.max(.001,scale))}px ui-monospace,Menlo,monospace`;
     const metrics=ctx.measureText(label);
     const pad=3/Math.max(.001,scale);
@@ -12718,21 +12724,21 @@ function gdDrawFlatTableTemplateOverlay(ctx,columnScan,sourceW,sourceH,scale){
     ctx.stroke();
   });
   columns.forEach((column,index)=>{
-    const left=Math.max(0,Math.min(sourceW,Number(column.left)||0));
-    const right=Math.max(left,Math.min(sourceW,Number(column.right)||left));
+    const left=Math.max(0,Math.min(sourceW,Number.isFinite(Number(column.dividerLeft))?Number(column.dividerLeft):(Number(column.left)||0)));
+    const right=Math.max(left,Math.min(sourceW,Number.isFinite(Number(column.dividerRight))?Number(column.dividerRight):(Number(column.right)||left)));
     const cx=Math.max(0,Math.min(sourceW,Number(column.valueCx)||Number(column.cx)||((left+right)/2)));
     ctx.fillStyle="rgba(55,150,255,.055)";
     ctx.fillRect(left,0,Math.max(1,right-left),sourceH);
-    ctx.strokeStyle="rgba(86,181,255,.82)";
-    ctx.lineWidth=1.6/Math.max(.001,scale);
+    ctx.strokeStyle="rgba(255,211,116,.88)";
+    ctx.lineWidth=2.1/Math.max(.001,scale);
     [left,right].forEach(x=>{
       ctx.beginPath();
       ctx.moveTo(x,0);
       ctx.lineTo(x,sourceH);
       ctx.stroke();
     });
-    ctx.strokeStyle="rgba(255,211,116,.86)";
-    ctx.lineWidth=2.2/Math.max(.001,scale);
+    ctx.strokeStyle="rgba(86,181,255,.82)";
+    ctx.lineWidth=1.5/Math.max(.001,scale);
     ctx.beginPath();
     ctx.moveTo(cx,0);
     ctx.lineTo(cx,sourceH);
@@ -12740,7 +12746,7 @@ function gdDrawFlatTableTemplateOverlay(ctx,columnScan,sourceW,sourceH,scale){
     ctx.fillStyle="rgba(5,8,6,.86)";
     ctx.strokeStyle="rgba(255,211,116,.75)";
     ctx.lineWidth=1/Math.max(.001,scale);
-    const label=String(column.key||index+1);
+    const label=String(column.label||column.key||index+1);
     ctx.font=`${Math.max(8,10/Math.max(.001,scale))}px ui-monospace,Menlo,monospace`;
     const metrics=ctx.measureText(label);
     const pad=3/Math.max(.001,scale);
@@ -12955,7 +12961,7 @@ function gdRenderFlatTableOutputTable(columnScan){
     `${rows.length} rows`,
     `${columns.length} columns`,
     `${Number(cellGrid.cellCount)||0} cells`,
-    generatedGrid?"headers unallocated, values unread":`fit ${(Number(columnScan?.flatTemplateFit?.rms)||0).toFixed(1)} px rms`
+    generatedGrid?"yellow dividers drive cells, blue centres only reference":`fit ${(Number(columnScan?.flatTemplateFit?.rms)||0).toFixed(1)} px rms`
   ].join(" • ");
   details.append(summary,wrap,source);
   list.append(details);
@@ -13576,6 +13582,7 @@ function gdLmGenericGridColumnsFromValueCandidates(candidates,headerWords=[]){
         x0:minX,
         x1:maxX,
         cx:Number(group.cx),
+        valueCx:Number(group.cx),
         source:"value_box_grid"
       };
     }));
@@ -14340,8 +14347,8 @@ function gdBuildPracticeCellGrid(columnScan){
   const cells=rows.map((row,rowIndex)=>{
     return columns.map((column,columnIndex)=>{
       const rowSlot=columnRows[columnIndex]?.[rowIndex]||row;
-      const left=Number(column.left);
-      const right=Number(column.right);
+      const left=Number.isFinite(Number(column.dividerLeft))?Number(column.dividerLeft):Number(column.left);
+      const right=Number.isFinite(Number(column.dividerRight))?Number(column.dividerRight):Number(column.right);
       const colW=Math.max(1,right-left);
       const rowH=Math.max(1,Number(rowSlot.bottom)-Number(rowSlot.top));
       const fullTableCellMode=fullTableGridMode||rowSlot.template===true;
@@ -14366,6 +14373,9 @@ function gdBuildPracticeCellGrid(columnScan){
         rowIndex,
         columnIndex,
         key:String(column.key),
+        dividerLeft:left,
+        dividerRight:right,
+        valueCx:Number.isFinite(Number(column.valueCx))?Number(column.valueCx):Number(column.cx),
         crop:gdCropCanvasRegion(image,region,2)
       };
     });
