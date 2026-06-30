@@ -13601,6 +13601,89 @@ function gdLmGridValueCandidateGroups(candidates){
     .filter(group=>group.items.length>=2&&Number.isFinite(Number(group.cx)))
     .sort((a,b)=>Number(a.cx)-Number(b.cx));
 }
+function gdLmNumberBoxColumnsFromCandidates(candidates,sourceWidth=0){
+  const boxes=(Array.isArray(candidates)?candidates:[])
+    .map(candidate=>{
+      const word=gdLmWordBox(candidate?.word||candidate);
+      if(!word||word.w<1||word.h<1)return null;
+      return Object.assign({},word,{candidate});
+    })
+    .filter(Boolean)
+    .sort((a,b)=>a.cx-b.cx);
+  if(boxes.length<4)return [];
+  const clusters=[];
+  const updateCluster=cluster=>{
+    const items=cluster.items;
+    cluster.x0=Math.min(...items.map(item=>item.x0));
+    cluster.x1=Math.max(...items.map(item=>item.x1));
+    cluster.cx=gdValueClusterMedian(items.map(item=>item.cx))||((cluster.x0+cluster.x1)/2);
+    cluster.cy=gdValueClusterMedian(items.map(item=>item.cy))||0;
+    cluster.width=Math.max(1,cluster.x1-cluster.x0);
+  };
+  boxes.forEach(box=>{
+    let best=null;
+    let bestGap=Infinity;
+    clusters.forEach(cluster=>{
+      const overlap=Math.min(cluster.x1,box.x1)-Math.max(cluster.x0,box.x0);
+      const gap=overlap>=0?0:Math.max(cluster.x0,box.x0)-Math.min(cluster.x1,box.x1);
+      const narrowWidth=Math.max(1,Math.min(cluster.width||box.w,box.w));
+      const closeGap=Math.max(5,Math.min(14,narrowWidth*.45));
+      const centerDistance=Math.abs(Number(cluster.cx)-Number(box.cx));
+      const sameTrack=overlap>=Math.max(2,narrowWidth*.18)||gap<=closeGap;
+      if(sameTrack&&centerDistance<Math.max(cluster.width||0,box.w)*1.7&&gap<bestGap){
+        best=cluster;
+        bestGap=gap;
+      }
+    });
+    if(!best){
+      best={items:[box],x0:box.x0,x1:box.x1,cx:box.cx,cy:box.cy,width:box.w};
+      clusters.push(best);
+      return;
+    }
+    best.items.push(box);
+    updateCluster(best);
+  });
+  const sorted=clusters
+    .filter(cluster=>cluster.items.length&&Number.isFinite(Number(cluster.cx)))
+    .sort((a,b)=>a.cx-b.cx);
+  if(sorted.length<4)return [];
+  const sourceMax=Number(sourceWidth)||Math.max(...sorted.map(cluster=>cluster.x1),0);
+  const gaps=[];
+  for(let index=1;index<sorted.length;index+=1){
+    const gap=Number(sorted[index].x0)-Number(sorted[index-1].x1);
+    if(gap>3)gaps.push(gap);
+  }
+  const medianGap=gdValueClusterMedian(gaps)||0;
+  const medianWidth=gdValueClusterMedian(sorted.map(cluster=>cluster.width))||24;
+  const edgePad=Math.max(8,Math.min(56,(medianGap||medianWidth)*.55));
+  const columns=sorted.map((cluster,index)=>{
+    const prev=sorted[index-1];
+    const next=sorted[index+1];
+    const left=prev
+      ?(Number(prev.x1)+Number(cluster.x0))/2
+      :Math.max(0,Number(cluster.x0)-edgePad);
+    const right=next
+      ?(Number(cluster.x1)+Number(next.x0))/2
+      :Math.min(sourceMax||Number(cluster.x1)+edgePad,Number(cluster.x1)+edgePad);
+    const n=String(index+1).padStart(2,"0");
+    return {
+      key:`gridCol${n}`,
+      label:`C${n}`,
+      rawHeaderText:"",
+      x0:Number(cluster.x0),
+      x1:Number(cluster.x1),
+      left,
+      right,
+      dividerLeft:left,
+      dividerRight:right,
+      cx:(left+right)/2,
+      valueCx:Number(cluster.cx),
+      valueBoxCount:cluster.items.length,
+      source:"ocr_number_box_gap"
+    };
+  }).filter(column=>Number.isFinite(column.left)&&Number.isFinite(column.right)&&column.right>column.left+4);
+  return columns.length>=4?gdLmAssignDetectedHeaderColumnBounds(columns):[];
+}
 function gdLmHeaderTextNearGridX(headerWords,cx,maxDistance=86){
   return (Array.isArray(headerWords)?headerWords:[])
     .map(word=>({word,distance:Math.abs(Number(word.cx)-Number(cx))}))
@@ -15261,10 +15344,11 @@ function gdOcrGeneratedValueCluster(scanImage,flatScan=null,generatedRows=[],val
   const failure=flatScan?gdFlatTableFailureDebug(flatScan):{};
   const sourceW=Number(scanImage?.width)||Number(failure.width)||0;
   const sourceH=Number(scanImage?.height)||Number(failure.height)||0;
-  const failureRows=Array.isArray(failure.rawRows)&&failure.rawRows.length
+  const fallbackRows=Array.isArray(failure.rawRows)&&failure.rawRows.length
     ?failure.rawRows
     :gdFlatTableFailureRows(failure).filter(row=>row.accepted);
-  const rowBands=(failureRows.length?failureRows:generatedRows).map((row,index)=>{
+  const sourceRows=Array.isArray(generatedRows)&&generatedRows.length?generatedRows:fallbackRows;
+  const rowBands=sourceRows.map((row,index)=>{
     const cy=Number(row?.cy);
     const top=Number(row?.top ?? row?.y0);
     const bottom=Number(row?.bottom ?? row?.y1);
@@ -15276,8 +15360,8 @@ function gdOcrGeneratedValueCluster(scanImage,flatScan=null,generatedRows=[],val
       top:Number.isFinite(top)?top:y-h/2,
       bottom:Number.isFinite(bottom)?bottom:y+h/2,
       count:Number(row?.count)||Number(row?.candidates?.length)||0,
-      detected:failureRows.length?true:false,
-      template:!failureRows.length
+      detected:sourceRows===generatedRows,
+      template:sourceRows!==generatedRows
     };
   }).filter(row=>Number.isFinite(row.cy));
   const candidateBoxes=(Array.isArray(valueCandidates)?valueCandidates:[])
@@ -15302,10 +15386,10 @@ function gdOcrGeneratedValueCluster(scanImage,flatScan=null,generatedRows=[],val
   return {
     sourceWidth:sourceW,
     sourceHeight:sourceH,
-    rowCount:Number(failure.rawRowCount)||rowBands.length||generatedRows.length||0,
+    rowCount:rowBands.length||Number(failure.rawRowCount)||generatedRows.length||0,
     rowBands,
     componentBoxes:Array.isArray(failure.componentBoxes)?failure.componentBoxes:[],
-    valueBoxes:failureValueBoxes.length?failureValueBoxes:candidateBoxes
+    valueBoxes:candidateBoxes.length?candidateBoxes:failureValueBoxes
   };
 }
 function gdPracticeApplyScanClubToPayload(payload){
@@ -15394,9 +15478,13 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
     const generatedRows=gdLmClusterColumnRows(valueCandidates);
     const valueCluster=gdOcrGeneratedValueCluster(scanImage,flatScan,generatedRows,valueCandidates);
     const headerWords=gdLmHeaderWordsForGrid(lines,layout);
-    const geometryColumns=gdLmGenericGridColumnsFromValueCandidates(valueCandidates,headerWords);
+    const numberBoxColumns=gdLmNumberBoxColumnsFromCandidates(valueCandidates,Number(scanImage?.width)||0);
+    const valueGeometryColumns=gdLmGenericGridColumnsFromValueCandidates(valueCandidates,headerWords);
     const fallbackGridColumns=gdLmGenericGridColumnsFromColumns(layout.columns);
-    const chosenGridColumns=geometryColumns.length>=4?geometryColumns:fallbackGridColumns;
+    const chosenGridColumns=numberBoxColumns.length>=4?numberBoxColumns:(valueGeometryColumns.length>=4?valueGeometryColumns:fallbackGridColumns);
+    const dividerSource=numberBoxColumns.length>=4
+      ?"ocr-number-box-gaps"
+      :(valueGeometryColumns.length>=4?"ocr-generated-value-geometry":"ocr-generated-header-geometry");
     if(chosenGridColumns.length<4){
       const outcome=gdOcrGeneratedOutcomeFromFailure("OCR generated template found headers but could not create the generated grid.",scanImage,{wordCount,layout,ocrData,headerCandidates,headerProbe,aliasStatus:gdLmAliasRegistryStatus()});
       gdPracticeDebugCheckpointSafe("ocr_generated_template","failed",{outputSummary:"OCR generated columns did not form a grid",counts:{words:wordCount,columns:Number(layout.columns?.length)||0,candidates:valueCandidates.length}});
@@ -15407,7 +15495,7 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
     const columnScan={
       layout:Object.assign({},layout,{
         columns:chosenGridColumns,
-        dividerSource:geometryColumns.length>=4?"ocr-generated-value-geometry":"ocr-generated-header-geometry",
+        dividerSource,
         cropMode:"ocr-generated-grid",
         normalizeMode:String(scanImage?.__gdNormalizeMode||"flat-table"),
         clusterMode:`OCR generated geometry grid`,
