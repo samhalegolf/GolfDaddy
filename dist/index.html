@@ -6781,7 +6781,73 @@ function gdLmMetricFromLine(line,labels,key=""){
   }
   return NaN;
 }
+function gdLmClubMarkerKind(token){
+  const value=String(token||"").trim().toLowerCase().replace(/[^a-z0-9|!\[\](){}]/g,"");
+  if(!value)return "";
+  if(/^(?:ball|speed|carry|total|spin|side|offline|launch|peak|height|dist|distance|row|raw|low|value|values|shot|shots|club)$/.test(value))return "";
+  if(/^(?:i|l|1|!|\||\[|\]|\(|\)|\{|\}|iron|irn)$/.test(value))return "i";
+  if(/^(?:i|l)[a-z]{1,2}$/.test(value))return "i";
+  if(/^[a-z]{0,2}(?:i|l)[a-z]?$/.test(value)&&/[il]/.test(value))return "i";
+  if(/^(?:h|hyb|hybrid)$/.test(value))return "h";
+  if(/^[a-z]{0,2}h[a-z]?$/.test(value))return "h";
+  if(/^(?:w|wood)$/.test(value))return "w";
+  if(/^[a-z]{0,2}w[a-z]?$/.test(value))return "w";
+  return "";
+}
+function gdLmClubLabelFromNumberMarker(number,marker){
+  const digit=String(number||"").match(/[2-9]/)?.[0]||"";
+  const kind=gdLmClubMarkerKind(marker);
+  if(!digit||!kind)return "";
+  if(kind==="i")return `${digit}i`;
+  if(kind==="h")return `${digit}h`;
+  if(kind==="w")return `${digit}W`;
+  return "";
+}
+function gdLmNoisyClubFromText(line){
+  const raw=String(line||"").trim();
+  if(!raw)return "";
+  const lower=raw.toLowerCase();
+  const named=lower.match(/\b(driver|dr|1w|putter|pw|gw|aw|sw|lw|wedge)\b/i);
+  if(named){
+    const value=String(named[1]||"").toLowerCase();
+    if(value==="driver"||value==="dr"||value==="1w")return "Driver";
+    if(value==="wedge")return "Wedge";
+    return value.toUpperCase();
+  }
+  const tokens=(raw.match(/[a-z0-9|!\[\](){}]+/gi)||[]).map(token=>String(token||"").trim()).filter(Boolean);
+  const compactTokens=tokens.map(token=>token.toLowerCase().replace(/[^a-z0-9|!\[\](){}]/g,""));
+  for(const token of compactTokens){
+    if(!/[a-z|!\[\](){}]/.test(token))continue;
+    const after=[...token.matchAll(/([2-9])(?:[a-z]{0,2})?(?:iron|irn|i|l|1|!|\||\[|\]|\(|\)|\{|\}|hybrid|hyb|h|wood|w)(?:[a-z])?/g)].pop();
+    if(after){
+      const marker=token.slice(after.index+String(after[1]).length);
+      const label=gdLmClubLabelFromNumberMarker(after[1],marker);
+      if(label)return label;
+    }
+    const before=token.match(/(?:[a-z]{0,2})?(?:iron|irn|i|l|1|!|\||\[|\]|\(|\)|\{|\}|hybrid|hyb|h|wood|w)(?:[a-z])?([2-9])/);
+    if(before){
+      const marker=token.slice(0,before.index+String(before[0]).length-String(before[1]).length);
+      const label=gdLmClubLabelFromNumberMarker(before[1],marker);
+      if(label)return label;
+    }
+  }
+  for(let index=0;index<compactTokens.length;index+=1){
+    const token=compactTokens[index];
+    const marker=gdLmClubMarkerKind(token);
+    if(marker){
+      const prevDigits=String(compactTokens[index-1]||"").replace(/[^0-9]/g,"");
+      const nextDigits=String(compactTokens[index+1]||"").replace(/[^0-9]/g,"");
+      const prev=[...prevDigits].reverse().find(digit=>/[2-9]/.test(digit));
+      const next=[...nextDigits].find(digit=>/[2-9]/.test(digit));
+      const label=gdLmClubLabelFromNumberMarker(prev||next,marker);
+      if(label)return label;
+    }
+  }
+  return "";
+}
 function gdLmClubFromLine(line,opts={}){
+  const noisy=gdLmNoisyClubFromText(line);
+  if(noisy)return noisy;
   const compact=String(line||"").trim().toLowerCase().replace(/[^0-9a-z|!\[\](){}]/g,"");
   const ocrIron=compact.match(/^([2-9])(?:i|l|1|!|\||\[|\]|\(|\)|\{|\})$/);
   if(ocrIron)return `${ocrIron[1]}i`;
