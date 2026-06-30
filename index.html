@@ -12445,12 +12445,12 @@ function gdAppendOcrHeaderCandidateDetails(parent,outcome){
   if(!candidates.length)return;
   const details=document.createElement("details");
   details.className="gdOcrHeaderCandidateDetails";
-  details.open=!outcome?.layout?.headerLine;
+  details.open=!outcome?.scan?.columnCutoutAllocation&&!outcome?.layout?.headerLine;
   const accepted=candidates.find(candidate=>candidate&&candidate.accepted);
   const probe=outcome?.headerProbe||null;
   const summary=document.createElement("summary");
   summary.textContent=[
-    "OCR header candidates",
+    "Global header probe",
     accepted?`accepted row ${Number(accepted.index)+1}`:"no accepted header",
     probe?.region?`probe y ${Math.round(Number(probe.region.y)||0)}-${Math.round((Number(probe.region.y)||0)+(Number(probe.region.height)||0))}`:"",
     outcome.aliasStatus||gdLmAliasRegistryStatus()
@@ -12483,6 +12483,12 @@ function gdAppendOcrHeaderCandidateDetails(parent,outcome){
   });
   table.append(thead,tbody);
   details.append(summary,table);
+  if(outcome?.scan?.columnCutoutAllocation){
+    const note=document.createElement("span");
+    note.className="gdTemplateOutcomeText";
+    note.textContent="Diagnostic only: these global header lines do not allocate the cutouts. Column labels come from the Column cutouts - header allocation panel, which runs text OCR after the number-geometry grid exists.";
+    details.append(note);
+  }
   if(Array.isArray(probe?.attempts)&&probe.attempts.length){
     const probeNote=document.createElement("span");
     probeNote.className="gdTemplateOutcomeText";
@@ -12498,11 +12504,12 @@ function gdDrawOcrGeneratedTemplateOverlay(ctx,outcome,sourceW,sourceH,scale){
   const scan=outcome?.scan||{};
   const layout=outcome?.layout||scan?.layout||{};
   const columns=Array.isArray(layout?.columns)?layout.columns:[];
-  const ocrData=outcome?.ocrData||scan?.generatedOcrData||{};
+  const ocrData=outcome?.geometryOcrData||scan?.geometryOcrData||outcome?.ocrData||scan?.generatedOcrData||{};
   const lines=gdLmLinesFromOcrData(ocrData);
   ctx.save();
+  const showGlobalHeaderDiagnostic=!scan?.columnCutoutAllocation;
   const header=layout?.headerLine||null;
-  if(header?.bbox){
+  if(showGlobalHeaderDiagnostic&&header?.bbox){
     const y0=Math.max(0,Math.min(sourceH,Number(header.bbox.y0)||Number(header.cy)||0));
     const y1=Math.max(y0+1,Math.min(sourceH,Number(header.bbox.y1)||y0+22));
     ctx.fillStyle="rgba(255,211,116,.12)";
@@ -12512,7 +12519,7 @@ function gdDrawOcrGeneratedTemplateOverlay(ctx,outcome,sourceW,sourceH,scale){
     ctx.strokeRect(0,y0,sourceW,Math.max(1,y1-y0));
   }
   const probeRegion=outcome?.headerProbe?.region||null;
-  if(probeRegion){
+  if(showGlobalHeaderDiagnostic&&probeRegion){
     const x=Math.max(0,Math.min(sourceW,Number(probeRegion.x)||0));
     const y=Math.max(0,Math.min(sourceH,Number(probeRegion.y)||0));
     const w=Math.max(1,Math.min(sourceW-x,Number(probeRegion.width)||sourceW));
@@ -12535,7 +12542,7 @@ function gdDrawOcrGeneratedTemplateOverlay(ctx,outcome,sourceW,sourceH,scale){
   const headerCandidates=Array.isArray(outcome?.headerCandidates)&&outcome.headerCandidates.length
     ?outcome.headerCandidates
     :(Array.isArray(layout?.headerCandidates)&&layout.headerCandidates.length?layout.headerCandidates:gdLmHeaderCandidatesFromLines(lines));
-  if(!header?.bbox&&headerCandidates.length){
+  if(showGlobalHeaderDiagnostic&&!header?.bbox&&headerCandidates.length){
     const ranked=headerCandidates
       .map((candidate,order)=>Object.assign({order},candidate))
       .sort((a,b)=>Number(b.score||0)-Number(a.score||0)||Number(a.index||0)-Number(b.index||0));
@@ -12606,12 +12613,19 @@ function gdDrawOcrGeneratedTemplateOverlay(ctx,outcome,sourceW,sourceH,scale){
     ctx.textBaseline="middle";
     ctx.fillText(label,tx,ty);
   });
-  const words=lines.flatMap(line=>Array.isArray(line?.words)?line.words:[]).map(gdLmWordBox).filter(Boolean);
+  const geometryCandidateWords=(Array.isArray(scan?.generatedGeometryValueCandidates)&&scan.generatedGeometryValueCandidates.length
+    ?scan.generatedGeometryValueCandidates
+    :(Array.isArray(scan?.generatedValueCandidates)?scan.generatedValueCandidates:[]))
+    .map(candidate=>gdLmWordBox(candidate?.word||candidate))
+    .filter(Boolean);
+  const words=geometryCandidateWords.length
+    ?geometryCandidateWords
+    :lines.flatMap(line=>Array.isArray(line?.words)?line.words:[]).map(gdLmWordBox).filter(Boolean);
   const step=Math.max(1,Math.ceil(words.length/360));
   words.forEach((word,index)=>{
     if(index%step!==0)return;
     const valueWord=gdLmLooksLikeOcrValue(word.text);
-    const headerWord=header&&Math.abs(Number(word.cy)-Number(header.cy||0))<Math.max(18,Number(word.h||0)*1.6);
+    const headerWord=showGlobalHeaderDiagnostic&&header&&Math.abs(Number(word.cy)-Number(header.cy||0))<Math.max(18,Number(word.h||0)*1.6);
     if(!valueWord&&!headerWord)return;
     const x0=Math.max(0,Math.min(sourceW,Number(word.x0)||0));
     const y0=Math.max(0,Math.min(sourceH,Number(word.y0)||0));
@@ -13585,6 +13599,30 @@ function gdLmGridValueCandidates(ocrData,layout){
     .filter(word=>gdLmLooksLikeOcrValue(word.text))
     .filter(word=>word.cy>=yRange.start&&word.cy<yRange.stop)
     .map(word=>({word,key:"value",cy:word.cy,cx:word.cx,h:word.h}));
+}
+function gdLmGeometryValueCandidates(ocrData,sourceHeight=0){
+  const allCandidates=gdLmWordsFromOcrData(ocrData)
+    .filter(word=>gdLmLooksLikeOcrValue(word.text))
+    .filter(word=>{
+      const cy=Number(word.cy);
+      const height=Number(sourceHeight)||0;
+      return Number.isFinite(cy)&&cy>=0&&(!height||cy<=height);
+    })
+    .map(word=>({word,key:"value",cy:word.cy,cx:word.cx,h:word.h}));
+  if(allCandidates.length<4)return allCandidates;
+  const rows=gdLmNumberBoxRowsFromCandidates(allCandidates,sourceHeight);
+  const rowCandidates=rows.length?rows:gdLmClusterColumnRows(allCandidates).map(row=>({
+    top:Number(row.cy)-12,
+    bottom:Number(row.cy)+12,
+    cy:Number(row.cy),
+    count:Number(row.candidates?.length)||0
+  }));
+  const usableRows=rowCandidates
+    .filter(row=>Number(row.count)>=3)
+    .filter(row=>Number.isFinite(Number(row.top))&&Number.isFinite(Number(row.bottom)))
+    .sort((a,b)=>Number(a.cy)-Number(b.cy));
+  if(!usableRows.length)return allCandidates;
+  return allCandidates.filter(candidate=>usableRows.some(row=>candidate.cy>=Number(row.top)-4&&candidate.cy<=Number(row.bottom)+4));
 }
 function gdLmHeaderWordsForGrid(lines,layout){
   const header=layout?.headerLine||null;
@@ -15829,9 +15867,13 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
       console.warn("[GolfDaddy] launch monitor aliases unavailable; using inline fallback aliases",e);
     });
     const Tesseract=await gdLoadTesseract();
-    gdSetPracticeScanStatus("Reading headers and value-looking boxes for OCR-generated layout...");
+    gdSetPracticeScanStatus("Finding number-like OCR boxes for generated cutout geometry...");
     const fullResult=await gdRecognizeWithTesseract(Tesseract,scanImage,gdOcrGeneratedLayoutConfig(),"layout:ocr-generated");
-    let ocrData=gdLmNormalizeOcrData(fullResult?.data||{text:"",words:[],lines:[]});
+    const geometryOcrData=gdLmNormalizeOcrData(fullResult?.data||{text:"",words:[],lines:[]});
+    const geometryValueCandidates=gdLmGeometryValueCandidates(geometryOcrData,Number(scanImage?.height)||0);
+    const geometryRows=gdLmNumberBoxRowsFromCandidates(geometryValueCandidates,Number(scanImage?.height)||0);
+    const geometryColumns=gdLmNumberBoxColumnsFromCandidates(geometryValueCandidates,Number(scanImage?.width)||0);
+    let ocrData=geometryOcrData;
     let lines=gdLmLinesFromOcrData(ocrData);
     let headerCandidates=gdLmHeaderCandidatesFromLines(lines);
     let layout=gdLmBuildLayoutColumns(lines);
@@ -15847,39 +15889,52 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
       }
     }
     const wordCount=Number(ocrData.words?.length)||0;
+    if(!layout&&geometryColumns.length>=4){
+      layout={
+        headerIndex:-1,
+        headerLine:null,
+        columns:geometryColumns,
+        units:{},
+        layoutSource:"ocr-number-geometry-only"
+      };
+    }
     if(!layout){
       const bestCandidate=headerCandidates.slice().sort((a,b)=>Number(b.score||0)-Number(a.score||0))[0]||null;
-      const outcome=gdOcrGeneratedOutcomeFromFailure("OCR generated template could not find a header row.",scanImage,{
+      const outcome=gdOcrGeneratedOutcomeFromFailure("OCR generated template could not create number-box geometry.",scanImage,{
         wordCount,
         ocrData,
         headerCandidates,
         headerProbe,
+        geometryOcrData,
+        geometryValueCandidates,
+        geometryRows,
+        geometryColumns,
         aliasStatus:gdLmAliasRegistryStatus(),
-        summary:"The OCR-generated layout path ran, but none of the candidate header lines reached the score needed for usable columns.",
-        nextStep:"Open the OCR generated tab to inspect the highlighted header candidates and raw OCR words."
+        summary:"The OCR-generated layout path ran, but there were not enough number-like OCR boxes to build column cutouts.",
+        nextStep:"Open the OCR generated tab to inspect the number-box geometry evidence and raw OCR words."
       });
-      gdPracticeDebugCheckpointSafe("ocr_generated_template","failed",{outputSummary:"OCR generated layout found no usable header",counts:{words:wordCount,bestHeaderScore:Number(bestCandidate?.score)||0,headerProbeWords:Number(headerProbe?.headerWordCount)||0}});
-      gdPracticeDebugCheckpointSafe("extraction_started","failed",{outputSummary:"OCR generated layout found no usable header"});
+      gdPracticeDebugCheckpointSafe("ocr_generated_template","failed",{outputSummary:"OCR generated layout found no usable number-box geometry",counts:{words:wordCount,bestHeaderScore:Number(bestCandidate?.score)||0,headerProbeWords:Number(headerProbe?.headerWordCount)||0,numberBoxes:geometryValueCandidates.length,numberRows:geometryRows.length,numberColumns:geometryColumns.length}});
+      gdPracticeDebugCheckpointSafe("extraction_started","failed",{outputSummary:"OCR generated layout found no usable number-box geometry"});
       gdRenderPracticeTemplateOutcomeTabs("ocr");
       return {payload:null,scan:null,outcome};
     }
     layout.lines=lines;
     layout.headerCandidates=headerCandidates;
     layout.headerProbe=headerProbe;
-    const valueCandidates=gdLmGridValueCandidates(ocrData,layout);
-    const numberBoxRows=gdLmNumberBoxRowsFromCandidates(valueCandidates,Number(scanImage?.height)||0);
+    const headerFilteredCandidates=gdLmGridValueCandidates(ocrData,layout);
+    const valueCandidates=geometryValueCandidates;
+    const numberBoxRows=geometryRows.length?geometryRows:gdLmNumberBoxRowsFromCandidates(valueCandidates,Number(scanImage?.height)||0);
     const generatedRows=numberBoxRows.length?numberBoxRows:gdLmClusterColumnRows(valueCandidates);
     const valueCluster=gdOcrGeneratedValueCluster(scanImage,flatScan,generatedRows,valueCandidates);
-    const headerWords=gdLmHeaderWordsForGrid(lines,layout);
-    const numberBoxColumns=gdLmNumberBoxColumnsFromCandidates(valueCandidates,Number(scanImage?.width)||0);
-    const valueGeometryColumns=gdLmGenericGridColumnsFromValueCandidates(valueCandidates,headerWords);
-    const fallbackGridColumns=gdLmGenericGridColumnsFromColumns(layout.columns);
-    const chosenGridColumns=numberBoxColumns.length>=4?numberBoxColumns:(valueGeometryColumns.length>=4?valueGeometryColumns:fallbackGridColumns);
+    const headerWords=layout.headerLine?gdLmHeaderWordsForGrid(lines,layout):[];
+    const numberBoxColumns=geometryColumns.length>=4?geometryColumns:gdLmNumberBoxColumnsFromCandidates(valueCandidates,Number(scanImage?.width)||0);
+    const valueGeometryColumns=gdLmGenericGridColumnsFromValueCandidates(valueCandidates,[]);
+    const chosenGridColumns=numberBoxColumns.length>=4?numberBoxColumns:(valueGeometryColumns.length>=4?valueGeometryColumns:[]);
     const dividerSource=numberBoxColumns.length>=4
       ?"ocr-number-box-gaps"
-      :(valueGeometryColumns.length>=4?"ocr-generated-value-geometry":"ocr-generated-header-geometry");
+      :(valueGeometryColumns.length>=4?"ocr-generated-value-geometry":"ocr-number-geometry-missing");
     if(chosenGridColumns.length<4){
-      const outcome=gdOcrGeneratedOutcomeFromFailure("OCR generated template found headers but could not create the generated grid.",scanImage,{wordCount,layout,ocrData,headerCandidates,headerProbe,aliasStatus:gdLmAliasRegistryStatus()});
+      const outcome=gdOcrGeneratedOutcomeFromFailure("OCR generated template found OCR words but could not create the generated grid.",scanImage,{wordCount,layout,ocrData,headerCandidates,headerProbe,geometryOcrData,geometryValueCandidates,geometryRows,geometryColumns,aliasStatus:gdLmAliasRegistryStatus()});
       gdPracticeDebugCheckpointSafe("ocr_generated_template","failed",{outputSummary:"OCR generated columns did not form a grid",counts:{words:wordCount,columns:Number(layout.columns?.length)||0,candidates:valueCandidates.length}});
       gdPracticeDebugCheckpointSafe("extraction_started","failed",{outputSummary:"OCR generated layout stopped before grid output"});
       gdRenderPracticeTemplateOutcomeTabs("ocr");
@@ -15903,10 +15958,13 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
       valueCluster,
       gridExperiment:{key:"ocr-generated-grid",label:"OCR generated grid"},
       generatedOcrData:ocrData,
+      geometryOcrData,
       generatedHeaderCandidates:headerCandidates,
       generatedRowBands:generatedRows,
       generatedNumberBoxRows:numberBoxRows,
       generatedValueCandidates:valueCandidates,
+      generatedGeometryValueCandidates:geometryValueCandidates,
+      headerFilteredValueCandidates:headerFilteredCandidates,
       generatedGridHeaderWords:headerWords,
       ocrGeneratedTemplate:true,
       fallbackFrom:flatScan?String(gdFlatTableFailureDebug(flatScan).reason||"flat-template"):"ocr-generated-primary"
@@ -15947,11 +16005,11 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
       cutoutColumns,
       headerTextWords,
       headerTextAttempts,
-      reason:gridReady?"":"OCR generated layout found headers but could not form a cell grid.",
+      reason:gridReady?"":"OCR generated number-box geometry did not form a cell grid.",
       summary:gridReady
-        ?`OCR-generated layout produced a ${gridRows} x ${gridColumns} cutout grid from OCR word geometry. A dedicated header text OCR pass found ${headerTextWords} text words and allocated ${allocatedColumns}/${cutoutColumns} columns; cell values were not read in this step.`
-        :`OCR-generated layout found the header band, but no usable value-row grid.`,
-      nextStep:gridReady?"Review the column cutout allocation and cell cutouts. Value reading remains parked until the grid internals are deliberately enabled.":"Tune the header and value-box evidence using the OCR generated tab."
+        ?`OCR-generated layout produced a ${gridRows} x ${gridColumns} cutout grid from number-box OCR geometry. A dedicated header text OCR pass found ${headerTextWords} text words and allocated ${allocatedColumns}/${cutoutColumns} columns; cell values were not read in this step.`
+        :`OCR-generated layout found number-like boxes, but no usable cutout grid.`,
+      nextStep:gridReady?"Review the column cutout allocation and cell cutouts. Value reading remains parked until the grid internals are deliberately enabled.":"Tune the number-box geometry evidence using the OCR generated tab."
     });
     if(!gridReady){
       gdRenderOcrGeneratedTemplateOutput(columnScan,"ocr");
