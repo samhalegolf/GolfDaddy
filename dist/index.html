@@ -2324,6 +2324,17 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 .gdFlatTemplateOutput .gdColumnOcrTable td:first-child{padding:7px 8px}
 .gdFlatTemplateOutput .gdCellOcrValue{display:block;margin:0 0 3px;color:#37f28d;font:950 10px/1 ui-monospace,SFMono-Regular,Menlo,monospace;text-align:right}
 .gdFlatTemplateOutput .gdCellOcrValue.warn{color:#ffd287}
+.gdOcrColumnCutoutReview{border-color:rgba(55,242,141,.22);background:rgba(31,211,109,.055)}
+.gdOcrColumnCutoutReview>summary{color:#eafff2}
+.gdOcrColumnCutoutGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;padding:10px;overflow:auto}
+.gdOcrColumnCutoutCard{min-width:0;border-radius:10px;background:rgba(0,0,0,.24);border:1px solid rgba(255,255,255,.09);overflow:hidden}
+.gdOcrColumnCutoutCard[data-allocated="true"]{border-color:rgba(55,242,141,.28);background:rgba(31,211,109,.07)}
+.gdOcrColumnCutoutHead{display:flex;align-items:flex-start;justify-content:space-between;gap:6px;padding:7px 8px;border-bottom:1px solid rgba(255,255,255,.08);font:900 9px/1.15 ui-monospace,SFMono-Regular,Menlo,monospace;color:rgba(255,255,255,.74)}
+.gdOcrColumnCutoutHead b{color:#fff}
+.gdOcrColumnCutoutHead span{text-align:right;color:#37f28d}
+.gdOcrColumnCutoutCard[data-allocated="false"] .gdOcrColumnCutoutHead span{color:#ffd287}
+.gdOcrColumnCutoutCard img{display:block;width:100%;height:46px;object-fit:contain;background:#fff}
+.gdOcrColumnCutoutCard small{display:block;min-height:38px;padding:6px 7px;color:rgba(255,255,255,.58);font:850 8px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:normal;overflow-wrap:anywhere}
 .gdDigitizedTablePreview>summary{color:#eafff2}
 .gdDigitizedTablePreview .gdColumnOcrTable td.good .gdDigitizedValue{color:#37f28d}
 .gdDigitizedTablePreview .gdColumnOcrTable td.warn .gdDigitizedValue{color:#ffd287}
@@ -12109,7 +12120,7 @@ function gdRenderValueGridCropPreview(target){
           `Column cut source: ${String(target.layout.dividerSource||"flat-number-box-gaps")}`,
           isOcrGeneratedGrid?`Row cut source: ${String(target.layout.rowDividerSource||"ocr-number-box-gaps")}`:"",
           isOcrGeneratedGrid
-            ?"This is geometry evidence only: OCR has identified number-like boxes, but header meanings and cell values have not been read yet."
+            ?`This is geometry evidence only: OCR has identified number-like boxes. Header cutout allocation is shown below; cell values are not read yet.`
             :`Fit error: ${(Number(target?.flatTemplateFit?.rms)||0).toFixed(1)} px rms / ${(Number(target?.flatTemplateFit?.maxResidual)||0).toFixed(1)} max`
         ].filter(Boolean).join("\n")
         :[
@@ -12137,7 +12148,7 @@ function gdRenderValueGridCropPreview(target){
       cards:[makeCard("Flattened 4-corner stretch",flattened,null,1100)],
       metaText:[
         "This is the stable handoff image. Keep the squaring/stretch method as-is.",
-        "The generated OCR grid starts here; final header allocation and cell values are not read in this step."
+        "The generated OCR grid starts here; column cutouts are allocated after this, while cell values remain unread."
       ].join("\n")
     }));
   }
@@ -12954,7 +12965,8 @@ function gdRenderFlatTableOutputTable(columnScan){
   headRow.append(rowHead);
   columns.forEach(column=>{
     const th=document.createElement("th");
-    th.textContent=String(column.label||column.key||"").replace(/\s+/g,"");
+    const allocated=generatedGrid&&column.allocatedLabel?`${column.label||column.key} ${column.allocatedLabel}`:(column.label||column.key||"");
+    th.textContent=String(allocated).replace(/\s+/g,"");
     headRow.append(th);
   });
   thead.append(headRow);
@@ -13204,6 +13216,8 @@ function gdRenderFlatTableBridgeCheckpoint(columnScan){
   const tracks=Number(columnScan?.flatTemplateFit?.tracks?.length)||0;
   const gridCells=Number(columnScan?.cellGrid?.cellCount)||0;
   const ocrWords=Number(columnScan?.generatedOcrData?.words?.length)||Number(columnScan?.generatedOcrData?.wordCount)||0;
+  const allocatedCutouts=Number(columnScan?.columnCutoutAllocation?.allocatedCount)||0;
+  const totalCutouts=Number(columnScan?.columnCutoutAllocation?.totalCount)||0;
   const digitizedRows=Number(columnScan?.digitizedTable?.rows?.length)||0;
   const nativeRows=Number(columnScan?.columnOrderPayload?.clubGroups?.length)||0;
   const flags=Number(columnScan?.digitizedTable?.stats?.flagged||0)+Number(columnScan?.digitizedTable?.stats?.missing||0);
@@ -13220,11 +13234,12 @@ function gdRenderFlatTableBridgeCheckpoint(columnScan){
     summary:failed?(gdFlatTableFailureIsTemplate(failure.reason)
       ?`${gdFlatTableReasonText(failure.reason)} The row detector accepted ${Number(failure.rawRowCount)||0} row band${Number(failure.rawRowCount)===1?"":"s"}, but the fixed column template could not fit them.`
       :`${gdFlatTableReasonText(failure.reason)} The actual flat scan accepted ${Number(failure.rawRowCount)||0} row band${Number(failure.rawRowCount)===1?"":"s"}; ${Number(failure.requiredRows)||gdFlatTableMinimumAcceptedRows()} are required before cells can be OCR scanned.`)
-      :(digitizedRows?`Fitted cells were OCR scanned into an owned digitised table. Review ${flags} flagged/missing cells against the crops before importing.`:(rows&&columns?(isOcrGeneratedGrid?"Generic columns and value-looking row bands were fitted on the straight flat image. Header meanings and values have not been OCR-read yet.":"Rows, columns, and cells were fitted on the straight flat image. OCR cleanup stays parked until this geometry is reliable."):"The flat image did not expose enough repeated number stacks. Retake with the table sharper and flatter.")),
+      :(digitizedRows?`Fitted cells were OCR scanned into an owned digitised table. Review ${flags} flagged/missing cells against the crops before importing.`:(rows&&columns?(isOcrGeneratedGrid?`Column and row cutouts were fitted on the straight flat image. ${allocatedCutouts}/${totalCutouts||columns} column cutouts matched header aliases; cell values remain unread.`:"Rows, columns, and cells were fitted on the straight flat image. OCR cleanup stays parked until this geometry is reliable."):"The flat image did not expose enough repeated number stacks. Retake with the table sharper and flatter.")),
     stats:isOcrGeneratedGrid?[
       {label:"Rows",value:rows||"-"},
       {label:"Columns",value:columns||"-"},
       {label:"Cells",value:gridCells||"-"},
+      {label:"Headers",value:totalCutouts?`${allocatedCutouts}/${totalCutouts}`:"-"},
       {label:"OCR words",value:ocrWords||"-"}
     ]:[
       {label:"Rows",value:failed?(Number(failure.rawRowCount)||0):(rows||"-")},
@@ -13237,6 +13252,7 @@ function gdRenderFlatTableBridgeCheckpoint(columnScan){
     steps:isOcrGeneratedGrid?[
       {label:"Photo",state:"done"},
       {label:"OCR grid",state:rows&&columns?"done":"active"},
+      {label:"Headers",state:allocatedCutouts?"done":(rows&&columns?"active":"pending")},
       {label:"Values",state:"pending"}
     ]:[
       {label:"Photo",state:"done"},
@@ -13336,6 +13352,7 @@ function gdRenderFlatTableBridgeOutput(columnScan,activeTemplateKey="flat"){
   if(list){
     list.innerHTML="";
     gdRenderValueGridCropPreview(columnScan);
+    if(generatedGrid)gdRenderOcrColumnCutoutAllocation(columnScan);
     if(columnScan?.digitizedTable||columnScan?.columnOrderPayload)gdRenderFlatDigitizedTable(columnScan);
     gdRenderFlatTableOutputTable(columnScan);
     gdRenderColumnOrderOcrSummary(columnScan);
@@ -14119,7 +14136,9 @@ function gdUpdatePracticeScanDebugSummary(columnScan){
     const columns=Number(columnScan?.cellGrid?.columns?.length)||0;
     const cells=Number(columnScan?.cellGrid?.cellCount)||0;
     const dividerSource=String(columnScan?.layout?.dividerSource||"unknown");
-    summary.textContent=`OCR generated grid - ${rows} row bands - ${columns} generic columns - ${cells} cells - cuts: ${dividerSource} - headers unallocated, values unread`;
+    const allocated=Number(columnScan?.columnCutoutAllocation?.allocatedCount)||0;
+    const total=Number(columnScan?.columnCutoutAllocation?.totalCount)||columns;
+    summary.textContent=`OCR generated grid - ${rows} row bands - ${columns} generic columns - ${cells} cells - cuts: ${dividerSource} - headers ${allocated}/${total} allocated, values unread`;
     return;
   }
   if(String(columnScan?.layout?.cropMode||"")==="flat-template"){
@@ -14587,6 +14606,7 @@ function gdBuildPracticeCellGrid(columnScan){
         rowIndex,
         columnIndex,
         key:String(column.key),
+        region,
         dividerLeft:left,
         dividerRight:right,
         valueCx:Number.isFinite(Number(column.valueCx))?Number(column.valueCx):Number(column.cx),
@@ -14600,6 +14620,206 @@ function gdBuildPracticeCellGrid(columnScan){
     cells,
     cellCount:cells.reduce((sum,row)=>sum+row.length,0)
   };
+}
+function gdOcrCutoutClampRegion(region,width,height){
+  const x=Math.max(0,Math.min(Math.max(0,width-1),Number(region?.x)||0));
+  const y=Math.max(0,Math.min(Math.max(0,height-1),Number(region?.y)||0));
+  const maxW=Math.max(1,width-x);
+  const maxH=Math.max(1,height-y);
+  return {
+    x,
+    y,
+    width:Math.max(1,Math.min(maxW,Number(region?.width)||maxW)),
+    height:Math.max(1,Math.min(maxH,Number(region?.height)||maxH))
+  };
+}
+function gdOcrCutoutWordsInRegion(words,region,opts={}){
+  const x0=Number(region?.x)||0;
+  const y0=Number(region?.y)||0;
+  const x1=x0+(Number(region?.width)||0);
+  const y1=y0+(Number(region?.height)||0);
+  const padX=Number.isFinite(Number(opts.padX))?Number(opts.padX):5;
+  const padY=Number.isFinite(Number(opts.padY))?Number(opts.padY):3;
+  return (Array.isArray(words)?words:[])
+    .filter(word=>word&&Number.isFinite(Number(word.cx))&&Number.isFinite(Number(word.cy)))
+    .filter(word=>word.cx>=x0-padX&&word.cx<=x1+padX&&word.cy>=y0-padY&&word.cy<=y1+padY)
+    .sort((a,b)=>a.cy-b.cy||a.cx-b.cx);
+}
+function gdOcrHeaderMatchesForCutoutWords(words){
+  const textWords=(Array.isArray(words)?words:[])
+    .filter(word=>/[a-z]/i.test(String(word?.text||"")))
+    .filter(word=>!gdLmLooksLikeOcrValue(word?.text));
+  const matches=new Map();
+  const addMatch=(phrase,sourceWords,source)=>{
+    const clean=String(phrase||"").trim().replace(/\s+/g," ");
+    if(!clean)return;
+    const key=gdLmCanonicalMetricKey(clean);
+    if(!key)return;
+    const wordCount=Array.isArray(sourceWords)?sourceWords.length:0;
+    const score=clean.length+wordCount*4+(source==="row"?8:0);
+    const previous=matches.get(key);
+    if(previous&&previous.score>=score)return;
+    matches.set(key,{
+      key,
+      label:gdLmHeaderLabelForKey(key),
+      phrase:clean,
+      score,
+      source
+    });
+  };
+  gdLmGroupWordsIntoRows(textWords).forEach(row=>{
+    const rowWords=(Array.isArray(row?.words)?row.words:[]).slice().sort((a,b)=>a.cx-b.cx);
+    addMatch(rowWords.map(word=>word.text).join(" "),rowWords,"row");
+    rowWords.forEach((word,index)=>{
+      for(let size=1;size<=Math.min(4,rowWords.length-index);size+=1){
+        const span=rowWords.slice(index,index+size);
+        addMatch(span.map(item=>item.text).join(" "),span,"span");
+      }
+    });
+  });
+  if(textWords.length){
+    addMatch(textWords.map(word=>word.text).join(" "),textWords,"cutout");
+  }
+  return [...matches.values()].sort((a,b)=>b.score-a.score||String(a.key).localeCompare(String(b.key)));
+}
+function gdBuildOcrColumnCutoutAllocation(columnScan){
+  const image=columnScan?.sourceCanvas||columnScan?.preparedCanvas;
+  const cellGrid=columnScan?.cellGrid;
+  const columns=Array.isArray(cellGrid?.columns)?cellGrid.columns:[];
+  const rows=Array.isArray(cellGrid?.rows)?cellGrid.rows:[];
+  if(!image||!columns.length)return null;
+  const width=Number(image.width)||0;
+  const height=Number(image.height)||0;
+  if(width<10||height<10)return null;
+  const firstRowTop=rows.length?Math.min(...rows.map(row=>Number(row.top)).filter(Number.isFinite)):NaN;
+  const headerBottom=Number.isFinite(firstRowTop)
+    ?Math.max(24,Math.min(height,firstRowTop))
+    :Math.max(48,Math.min(height,Math.round(height*.24)));
+  const words=gdLmWordsFromOcrData(columnScan?.generatedOcrData||{});
+  const headerBand={top:0,bottom:headerBottom};
+  const cutouts=columns.map((column,index)=>{
+    const left=Number.isFinite(Number(column.dividerLeft))?Number(column.dividerLeft):Number(column.left);
+    const right=Number.isFinite(Number(column.dividerRight))?Number(column.dividerRight):Number(column.right);
+    const safeLeft=Math.max(0,Math.min(width,Number.isFinite(left)?left:0));
+    const safeRight=Math.max(safeLeft+1,Math.min(width,Number.isFinite(right)?right:safeLeft+1));
+    const columnRegion=gdOcrCutoutClampRegion({x:safeLeft,y:0,width:safeRight-safeLeft,height},width,height);
+    const headerRegion=gdOcrCutoutClampRegion({x:safeLeft,y:0,width:safeRight-safeLeft,height:headerBottom},width,height);
+    const headerWords=gdOcrCutoutWordsInRegion(words,headerRegion)
+      .filter(word=>/[a-z]/i.test(String(word?.text||"")))
+      .filter(word=>!gdLmLooksLikeOcrValue(word?.text));
+    const matches=gdOcrHeaderMatchesForCutoutWords(headerWords);
+    const assigned=matches[0]||null;
+    const genericLabel=String(column.label||column.key||`C${String(index+1).padStart(2,"0")}`);
+    const cells=rows.map((row,rowIndex)=>{
+      const existing=cellGrid?.cells?.[rowIndex]?.[index]||null;
+      const top=Number(row?.top)||0;
+      const bottom=Number(row?.bottom)||top+1;
+      const region=existing?.region||gdOcrCutoutClampRegion({x:safeLeft,y:top,width:safeRight-safeLeft,height:bottom-top},width,height);
+      return {
+        rowIndex,
+        columnIndex:index,
+        allocatedKey:assigned?.key||"",
+        genericKey:String(column.key||""),
+        region,
+        crop:existing?.crop||gdCropCanvasRegion(image,region,2)
+      };
+    });
+    return {
+      columnIndex:index,
+      genericKey:String(column.key||""),
+      genericLabel,
+      allocatedKey:assigned?.key||"",
+      allocatedLabel:assigned?.label||"",
+      status:assigned?"allocated":"unallocated",
+      rawHeaderText:headerWords.map(word=>String(word.text||"").trim()).filter(Boolean).join(" "),
+      matches,
+      headerWords,
+      columnRegion,
+      headerRegion,
+      headerCrop:gdCropCanvasRegion(image,headerRegion,2),
+      cells
+    };
+  });
+  const allocatedCount=cutouts.filter(cutout=>cutout.allocatedKey).length;
+  return {
+    source:"ocr-column-cutouts",
+    aliasStatus:gdLmAliasRegistryStatus(),
+    headerBand,
+    cutouts,
+    allocatedCount,
+    totalCount:cutouts.length,
+    rowCount:rows.length,
+    cellCount:cutouts.reduce((sum,cutout)=>sum+cutout.cells.length,0)
+  };
+}
+function gdApplyOcrColumnCutoutAllocation(columnScan){
+  const allocation=columnScan?.columnCutoutAllocation;
+  const cutouts=Array.isArray(allocation?.cutouts)?allocation.cutouts:[];
+  const columns=Array.isArray(columnScan?.cellGrid?.columns)?columnScan.cellGrid.columns:[];
+  if(!cutouts.length||!columns.length)return;
+  cutouts.forEach(cutout=>{
+    const column=columns[cutout.columnIndex];
+    if(!column)return;
+    column.allocatedKey=cutout.allocatedKey;
+    column.allocatedLabel=cutout.allocatedLabel;
+    column.allocationStatus=cutout.status;
+    column.headerCutoutText=cutout.rawHeaderText;
+    column.headerCutoutMatches=cutout.matches;
+  });
+  (Array.isArray(columnScan?.cellGrid?.cells)?columnScan.cellGrid.cells:[]).forEach(row=>{
+    (Array.isArray(row)?row:[]).forEach(cell=>{
+      const cutout=cutouts[cell.columnIndex];
+      if(!cutout)return;
+      cell.allocatedKey=cutout.allocatedKey;
+      cell.allocatedLabel=cutout.allocatedLabel;
+    });
+  });
+}
+function gdRenderOcrColumnCutoutAllocation(columnScan){
+  const list=document.getElementById("gdPracticeScanDebugList");
+  const allocation=columnScan?.columnCutoutAllocation;
+  const cutouts=Array.isArray(allocation?.cutouts)?allocation.cutouts:[];
+  if(!list||!cutouts.length)return;
+  const details=document.createElement("details");
+  details.className="gdColumnImagePreview gdOcrColumnCutoutReview";
+  details.open=true;
+  const summary=document.createElement("summary");
+  summary.textContent=`Column cutouts - header allocation (${Number(allocation.allocatedCount)||0}/${cutouts.length})`;
+  const grid=document.createElement("div");
+  grid.className="gdOcrColumnCutoutGrid";
+  cutouts.forEach(cutout=>{
+    const card=document.createElement("div");
+    card.className="gdOcrColumnCutoutCard";
+    card.dataset.allocated=cutout.allocatedKey?"true":"false";
+    const head=document.createElement("div");
+    head.className="gdOcrColumnCutoutHead";
+    const label=document.createElement("b");
+    label.textContent=cutout.genericLabel;
+    const allocated=document.createElement("span");
+    allocated.textContent=cutout.allocatedLabel||"unallocated";
+    head.append(label,allocated);
+    const img=document.createElement("img");
+    img.alt=`${cutout.genericLabel} header cutout`;
+    try{img.src=cutout.headerCrop?.canvas?.toDataURL("image/png")||"";}catch(e){img.alt+=" image unavailable";}
+    const meta=document.createElement("small");
+    const matchText=cutout.matches?.length?cutout.matches.slice(0,3).map(match=>`${match.phrase} -> ${match.key}`).join(" | "):"no alias match";
+    meta.textContent=[
+      cutout.rawHeaderText?`words: ${cutout.rawHeaderText}`:"words: none",
+      matchText
+    ].join("\n");
+    card.append(head,img,meta);
+    grid.append(card);
+  });
+  const source=document.createElement("span");
+  source.className="gdColumnOcrSource";
+  source.textContent=[
+    "Column cutouts are made from the current OCR geometry cut lines.",
+    "Headers are allocated by OCR words found inside each cutout.",
+    "Row cutouts exist below this, but cell values are still unread.",
+    allocation.aliasStatus
+  ].join(" ");
+  details.append(summary,grid,source);
+  list.prepend(details);
 }
 function gdRenderPracticeCellGridCards(columnScan){
   const list=document.getElementById("gdPracticeScanDebugList");
@@ -15599,9 +15819,13 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
       fallbackFrom:flatScan?String(gdFlatTableFailureDebug(flatScan).reason||"flat-template"):"ocr-generated-primary"
     };
     columnScan.cellGrid=gdBuildPracticeCellGrid(columnScan);
+    columnScan.columnCutoutAllocation=gdBuildOcrColumnCutoutAllocation(columnScan);
+    gdApplyOcrColumnCutoutAllocation(columnScan);
     const gridRows=Number(columnScan.cellGrid?.rows?.length)||0;
     const gridColumns=Number(columnScan.cellGrid?.columns?.length)||0;
     const gridCells=Number(columnScan.cellGrid?.cellCount)||0;
+    const allocatedColumns=Number(columnScan.columnCutoutAllocation?.allocatedCount)||0;
+    const cutoutColumns=Number(columnScan.columnCutoutAllocation?.totalCount)||gridColumns;
     const candidateCount=valueCandidates.length;
     const gridReady=!!(gridRows&&gridColumns&&gridCells);
     const outcome=gdPracticeSetTemplateOutcome("ocr",{
@@ -15617,11 +15841,13 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
       payload:null,
       wordCount,
       candidateCount,
+      allocatedColumns,
+      cutoutColumns,
       reason:gridReady?"":"OCR generated layout found headers but could not form a cell grid.",
       summary:gridReady
-        ?`OCR-generated layout produced a ${gridRows} x ${gridColumns} generic cell grid from OCR word geometry. Header meanings and cell values were not read in this step.`
+        ?`OCR-generated layout produced a ${gridRows} x ${gridColumns} cutout grid from OCR word geometry. Header cutouts allocated ${allocatedColumns}/${cutoutColumns} columns; cell values were not read in this step.`
         :`OCR-generated layout found the header band, but no usable value-row grid.`,
-      nextStep:gridReady?"Review the OCR generated grid. Value reading remains parked until the grid internals are deliberately enabled.":"Tune the header and value-box evidence using the OCR generated tab."
+      nextStep:gridReady?"Review the column cutout allocation and cell cutouts. Value reading remains parked until the grid internals are deliberately enabled.":"Tune the header and value-box evidence using the OCR generated tab."
     });
     if(!gridReady){
       gdRenderOcrGeneratedTemplateOutput(columnScan,"ocr");
@@ -15632,9 +15858,9 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
     }
     gdRenderFlatTableBridgeOutput(columnScan,"ocr");
     gdPracticeDebugCheckpointSafe("table_detected","success",{outputSummary:`OCR-generated grid ready: ${gridRows} rows x ${gridColumns} columns`,counts:{rows:gridRows,columns:gridColumns,cells:gridCells}});
-    gdPracticeDebugCheckpointSafe("ocr_generated_template","success",{outputSummary:`OCR-generated grid ready: ${gridRows} rows x ${gridColumns} columns`,counts:{rows:gridRows,columns:gridColumns,cells:gridCells,words:wordCount,candidates:outcome.candidateCount}});
-    gdPracticeDebugCheckpointSafe("extraction_started","warning",{outputSummary:"Stopped at OCR-generated grid; header allocation and fitted-cell value OCR have not run"});
-    gdSetPracticeScanStatus(`OCR-generated grid ready: ${gridRows} rows x ${gridColumns} generic columns. Header meanings and values have not been read yet.`);
+    gdPracticeDebugCheckpointSafe("ocr_generated_template","success",{outputSummary:`OCR-generated grid ready: ${gridRows} rows x ${gridColumns} columns; ${allocatedColumns}/${cutoutColumns} headers allocated`,counts:{rows:gridRows,columns:gridColumns,cells:gridCells,headersAllocated:allocatedColumns,headersTotal:cutoutColumns,words:wordCount,candidates:outcome.candidateCount}});
+    gdPracticeDebugCheckpointSafe("extraction_started","warning",{outputSummary:"Stopped at OCR-generated cutout grid; fitted-cell value OCR has not run"});
+    gdSetPracticeScanStatus(`OCR-generated grid ready: ${gridRows} rows x ${gridColumns} cutouts. Header cutouts allocated ${allocatedColumns}/${cutoutColumns}; values have not been read yet.`);
     return {payload:null,scan:columnScan,outcome};
   }catch(e){
     console.warn("[GolfDaddy] OCR generated template fallback failed",e);
