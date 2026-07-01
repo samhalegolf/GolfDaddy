@@ -1,0 +1,515 @@
+"use strict";
+
+const {
+  encodeFilter,
+  env,
+  hasSupabase,
+  json,
+  supabaseFetch,
+  text
+} = require("./payment-utils");
+const {
+  createId,
+  createPracticeImportBatch,
+  parsePracticeImportText
+} = require("./practice-data-parser");
+
+function cleanDomain(value) {
+  const clean = String(value || "").trim().toLowerCase().replace(/^@+/, "").replace(/[^a-z0-9.-]/g, "");
+  return clean && clean.includes(".") ? clean : "practice.claritygolf.systems";
+}
+
+function intakeDomain() {
+  return cleanDomain(env("CLARITY_PRACTICE_EMAIL_DOMAIN") || env("CLARITY_EMAIL_INTAKE_DOMAIN"));
+}
+
+function slug(value, fallback) {
+  const clean = String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return clean || fallback || "player";
+}
+
+function query(event) {
+  return event && event.queryStringParameters || {};
+}
+
+function header(event, name) {
+  const headers = event && event.headers || {};
+  const key = Object.keys(headers).find(function (item) {
+    return item.toLowerCase() === name.toLowerCase();
+  });
+  return key ? headers[key] : "";
+}
+
+function authorized(event) {
+  const secret = env("CLARITY_PRACTICE_EMAIL_SECRET");
+  if (!secret) return false;
+  return header(event, "x-clarity-email-secret") === secret || query(event).secret === secret;
+}
+
+function playerKey(input) {
+  return slug(
+    input.playerKey ||
+      input.player_key ||
+      input.profileId ||
+      input.profile_id ||
+      input.viewedProfileId ||
+      input.playerId ||
+      input.player_id ||
+      input.accountId ||
+      input.account_id ||
+      input.email ||
+      input.name,
+    "player"
+  );
+}
+
+function practiceEmailAddress(input) {
+  return "practice+" + playerKey(input || {}) + "@" + intakeDomain();
+}
+
+function parseBody(event) {
+  let raw = event && event.body || "";
+  if (event && event.isBase64Encoded) raw = Buffer.from(raw, "base64").toString("utf8");
+  const contentType = String(header(event, "content-type") || "").toLowerCase();
+  if (contentType.includes("application/x-www-form-urlencoded")) return parseForm(raw);
+  try {
+    return raw ? JSON.parse(raw) : {};
+  } catch (_error) {
+    return parseForm(raw);
+  }
+}
+
+function parseForm(raw) {
+  const parsed = {};
+  String(raw || "").split("&").forEach(function (pair) {
+    const index = pair.indexOf("=");
+    if (index < 0) return;
+    const key = decodeURIComponent(pair.slice(0, index).replace(/\+/g, " "));
+    const value = decodeURIComponent(pair.slice(index + 1).replace(/\+/g, " "));
+    if (!key) return;
+    parsed[key] = value;
+  });
+  return parsed;
+}
+
+function extractEmails(value) {
+  const input = Array.isArray(value) ? value.join(", ") : String(value || "");
+  const matches = input.match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi) || [];
+  return matches.map(function (item) { return item.toLowerCase(); });
+}
+
+function recipientEmails(payload) {
+  const envelopeTo = payload && payload.envelope && payload.envelope.to;
+  return Array.from(new Set([]
+    .concat(extractEmails(payload && payload.to))
+    .concat(extractEmails(payload && payload.recipient))
+    .concat(extractEmails(envelopeTo))));
+}
+
+function playerKeyFromRecipients(recipients) {
+  const domain = intakeDomain();
+  for (const address of recipients || []) {
+    const lower = String(address || "").toLowerCase();
+    const suffix = "@" + domain;
+    if (!lower.endsWith(suffix)) continue;
+    const local = lower.slice(0, -suffix.length);
+    const match = local.match(/^practice\+(.+)$/);
+    if (match && match[1]) return slug(match[1], "player");
+  }
+  return "";
+}
+
+function senderEmail(payload) {
+  const envelopeFrom = payload && payload.envelope && payload.envelope.from;
+  return extractEmails(payload && (payload.from || payload.sender) || envelopeFrom)[0] || "";
+}
+
+function attachmentList(payload) {
+  let candidates = payload.attachments || payload.attachment || payload.files || payload.file || payload.inboundAttachments || [];
+  if (typeof candidates === "string") {
+    try {
+      candidates = JSON.parse(candidates);
+    } catch (_error) {
+      candidates = [];
+    }
+  }
+  if (!Array.isArray(candidates)) candidates = candidates ? [candidates] : [];
+  return candidates.map(function (item, index) {
+    if (!item || typeof item !== "object") return null;
+    const filename = text(item.filename || item.fileName || item.name || item.originalname || ("attachment-" + (index + 1)), 180);
+    const contentType = text(item.contentType || item.content_type || item.type || item.mime || item.mimetype, 120).toLowerCase();
+    return {
+      index,
+      filename,
+      contentType,
+      content: typeof item.content === "string" ? item.content : (typeof item.data === "string" ? item.data : (typeof item.text === "string" ? item.text : "")),
+      base64: typeof item.base64 === "string" ? item.base64 : (typeof item.contentBase64 === "string" ? item.contentBase64 : (typeof item.content_base64 === "string" ? item.content_base64 : "")),
+      size: Number(item.size || item.length || 0) || 0,
+      url: text(item.url || item.href || "", 600)
+    };
+  }).filter(Boolean);
+}
+
+function laneForAttachment(item) {
+  const name = String(item && item.filename || "").toLowerCase();
+  const type = String(item && item.contentType || "").toLowerCase();
+  if (/(\.csv|\.txt|\.tsv)$/.test(name) || /text\/|csv|tab-separated/.test(type)) return { lane: "email_csv", reason: "text attachment" };
+  if (/(\.png|\.jpg|\.jpeg|\.webp|\.heic|\.gif)$/.test(name) || /^image\//.test(type)) return { lane: "email_photo", reason: "image attachment" };
+  if (/\.json$/.test(name) || /json/.test(type)) return { lane: "email_json", reason: "json attachment" };
+  return { lane: "unsupported", reason: "unsupported attachment type" };
+}
+
+function looksLikeCsvBody(value) {
+  const input = String(value || "").trim();
+  if (!input) return false;
+  const lines = input.split(/\r?\n/).map(function (line) { return line.trim(); }).filter(Boolean);
+  if (lines.length < 2) return false;
+  return /,|\t|\|/.test(lines[0]) && /(club|carry|total|offline|face|path|start|ball|spin)/i.test(lines[0]);
+}
+
+function decodeBase64(value) {
+  const raw = String(value || "");
+  if (!raw) return "";
+  try {
+    return Buffer.from(raw.includes(",") ? raw.split(",").pop() : raw, "base64").toString("utf8");
+  } catch (_error) {
+    return "";
+  }
+}
+
+function textFromAttachment(item) {
+  if (item.content) return String(item.content || "");
+  if (item.base64) return decodeBase64(item.base64);
+  return "";
+}
+
+function normalizeInbound(payload) {
+  const recipients = recipientEmails(payload);
+  const receivedAt = new Date().toISOString();
+  const bodyText = text(payload.text || payload.bodyText || payload.plain || payload.strippedText || payload.body || "", 200000);
+  const attachments = attachmentList(payload).map(function (item) {
+    return Object.assign({}, item, laneForAttachment(item));
+  });
+  if (!attachments.length && looksLikeCsvBody(bodyText)) {
+    attachments.push({
+      index: 0,
+      filename: "email-body.csv",
+      contentType: "text/plain",
+      content: bodyText,
+      base64: "",
+      size: bodyText.length,
+      url: "",
+      lane: "email_csv",
+      reason: "email body looks like CSV"
+    });
+  }
+  const key = playerKeyFromRecipients(recipients) || playerKey(payload);
+  return {
+    intakeId: text(payload.messageId || payload.message_id || payload["message-id"] || payload.id, 160) || createId("practice-email"),
+    receivedAt,
+    recipients,
+    to: recipients.join(", "),
+    from: senderEmail(payload),
+    subject: text(payload.subject, 240),
+    playerKey: key,
+    accountId: text(payload.accountId || payload.account_id, 120),
+    profileId: text(payload.profileId || payload.profile_id || payload.playerId || payload.player_id, 120),
+    playerName: text(payload.playerName || payload.player_name || payload.name, 160) || "Player",
+    attachments,
+    bodyText,
+    routing: {
+      email_csv: attachments.filter(function (item) { return item.lane === "email_csv" || item.lane === "email_json"; }).length,
+      email_photo: attachments.filter(function (item) { return item.lane === "email_photo"; }).length,
+      unsupported: attachments.filter(function (item) { return item.lane === "unsupported"; }).length
+    }
+  };
+}
+
+function parseAttachmentRows(inbound) {
+  const imports = [];
+  const pendingPhotos = [];
+  const unsupported = [];
+  const errors = [];
+
+  inbound.attachments.forEach(function (item) {
+    if (item.lane === "email_csv" || item.lane === "email_json") {
+      const content = textFromAttachment(item);
+      if (!content.trim()) {
+        errors.push((item.filename || "attachment") + " had no readable text");
+        return;
+      }
+      const parsed = parsePracticeImportText(content, { sourceType: item.lane, sourceName: item.filename || "practice email" });
+      const batch = createPracticeImportBatch(parsed.rows || [], {
+        sourceType: item.lane,
+        sourceName: item.filename || "practice email",
+        rawText: content
+      }, {
+        accountId: inbound.accountId,
+        profileId: inbound.profileId || inbound.playerKey,
+        playerId: inbound.profileId || inbound.playerKey,
+        playerName: inbound.playerName
+      });
+      imports.push({ attachment: item, parsed, batch });
+      if (!batch.rows.length) errors.push((item.filename || "attachment") + " produced no rows");
+      return;
+    }
+    if (item.lane === "email_photo") {
+      pendingPhotos.push(item);
+      return;
+    }
+    unsupported.push(item);
+  });
+
+  return { imports, pendingPhotos, unsupported, errors };
+}
+
+function eventStatus(parsed) {
+  const validRows = parsed.imports.reduce(function (sum, item) { return sum + Number(item.batch.batch.validCount || 0); }, 0);
+  const totalRows = parsed.imports.reduce(function (sum, item) { return sum + Number(item.batch.batch.rowCount || 0); }, 0);
+  if (validRows) return "staged";
+  if (totalRows || parsed.errors.length) return "needs_review";
+  if (parsed.pendingPhotos.length) return "pending_photo";
+  return "unsupported";
+}
+
+async function storeInbound(inbound, parsed) {
+  if (!hasSupabase()) {
+    const error = new Error("Supabase is not configured for practice email intake");
+    error.status = 503;
+    throw error;
+  }
+  const status = eventStatus(parsed);
+  const now = new Date().toISOString();
+  const eventRow = {
+    intake_id: inbound.intakeId,
+    account_id: inbound.accountId || null,
+    profile_id: inbound.profileId || null,
+    player_key: inbound.playerKey,
+    recipient_email: inbound.to || null,
+    sender_email: inbound.from || null,
+    subject: inbound.subject || null,
+    provider_message_id: inbound.intakeId,
+    status,
+    routing_json: Object.assign({}, inbound.routing, {
+      pendingPhotos: parsed.pendingPhotos.length,
+      unsupported: parsed.unsupported.length,
+      errors: parsed.errors
+    }),
+    payload_json: {
+      receivedAt: inbound.receivedAt,
+      attachments: inbound.attachments.map(function (item) {
+        return {
+          index: item.index,
+          filename: item.filename,
+          contentType: item.contentType,
+          size: item.size,
+          lane: item.lane,
+          reason: item.reason,
+          hasContent: !!(item.content || item.base64),
+          hasUrl: !!item.url
+        };
+      })
+    },
+    created_at: inbound.receivedAt,
+    updated_at: now
+  };
+
+  await supabaseFetch("practice_email_intake_events?on_conflict=intake_id", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify(eventRow)
+  });
+
+  for (const item of parsed.imports) {
+    const batch = item.batch.batch;
+    const session = item.batch.session;
+    await supabaseFetch("practice_import_batches?on_conflict=import_batch_id", {
+      method: "POST",
+      headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify({
+        import_batch_id: batch.importBatchId,
+        session_id: batch.sessionId,
+        intake_id: inbound.intakeId,
+        account_id: inbound.accountId || null,
+        profile_id: inbound.profileId || null,
+        player_key: inbound.playerKey,
+        player_id: session.playerId || inbound.profileId || inbound.playerKey,
+        player_name: session.playerName || inbound.playerName,
+        source_type: batch.sourceType,
+        source_name: batch.sourceName,
+        row_count: batch.rowCount,
+        valid_count: batch.validCount,
+        invalid_count: batch.invalidCount,
+        status: batch.validCount ? "staged" : "needs_review",
+        metadata: {
+          subject: inbound.subject,
+          from: inbound.from,
+          warnings: item.parsed.warnings || [],
+          parseErrors: item.parsed.errors || []
+        },
+        created_at: batch.createdAt,
+        updated_at: batch.updatedAt
+      })
+    });
+
+    const shotRows = item.batch.rows.map(function (row) {
+      return {
+        shot_id: row.shotId,
+        import_batch_id: row.importBatchId,
+        session_id: row.sessionId,
+        intake_id: inbound.intakeId,
+        account_id: inbound.accountId || null,
+        profile_id: inbound.profileId || null,
+        player_key: inbound.playerKey,
+        player_id: row.playerId || inbound.profileId || inbound.playerKey,
+        player_name: row.playerName || inbound.playerName,
+        club: row.club || null,
+        shot_number: Number.isFinite(Number(row.shotNumber)) ? Number(row.shotNumber) : null,
+        metrics_json: {
+          ballSpeed: row.ballSpeed,
+          clubSpeed: row.clubSpeed,
+          launchAngle: row.launchAngle,
+          spin: row.spin,
+          carryDistance: row.carryDistance,
+          totalDistance: row.totalDistance,
+          offlineDistance: row.offlineDistance,
+          side: row.side,
+          faceAngle: row.faceAngle,
+          pathAngle: row.pathAngle,
+          faceToPath: row.faceToPath,
+          startDirection: row.startDirection,
+          curve: row.curve,
+          targetLine: row.targetLine,
+          sideSpin: row.sideSpin,
+          totalSpin: row.totalSpin,
+          backspin: row.backspin,
+          spinAxis: row.spinAxis,
+          derivedMetrics: row.derivedMetrics || {}
+        },
+        raw_source_json: row.rawSource || {},
+        unknown_fields_json: row.unknownFields || {},
+        warnings_json: row.warnings || [],
+        errors_json: row.errors || [],
+        status: row.errors && row.errors.length ? "native_invalid" : "ready_for_gate",
+        source_type: row.sourceType,
+        schema_version: row.schemaVersion || 1,
+        created_at: row.createdAt,
+        updated_at: row.updatedAt
+      };
+    });
+    if (shotRows.length) {
+      await supabaseFetch("practice_native_shots?on_conflict=shot_id", {
+        method: "POST",
+        headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+        body: JSON.stringify(shotRows)
+      });
+    }
+  }
+
+  return { stored: true, status };
+}
+
+async function recentFor(params) {
+  const key = playerKey(params);
+  if (!hasSupabase()) return { configured: false, batches: [] };
+  const limit = Math.min(Math.max(Number(params.limit) || 8, 1), 20);
+  const batches = await supabaseFetch(
+    "practice_import_batches?select=*&player_key=eq." + encodeFilter(key) + "&order=created_at.desc&limit=" + limit,
+    { method: "GET" }
+  );
+  const batchIds = (Array.isArray(batches) ? batches : []).map(function (batch) { return batch.import_batch_id; }).filter(Boolean);
+  let shots = [];
+  if (batchIds.length) {
+    const inList = batchIds.map(function (id) {
+      return encodeURIComponent("\"" + id + "\"");
+    }).join(",");
+    shots = await supabaseFetch(
+      "practice_native_shots?select=*&import_batch_id=in.(" + inList + ")&order=shot_number.asc",
+      { method: "GET" }
+    );
+  }
+  const shotsByBatch = {};
+  (Array.isArray(shots) ? shots : []).forEach(function (shot) {
+    const id = shot.import_batch_id;
+    shotsByBatch[id] = shotsByBatch[id] || [];
+    shotsByBatch[id].push(shot);
+  });
+  return {
+    configured: true,
+    batches: (Array.isArray(batches) ? batches : []).map(function (batch) {
+      return Object.assign({}, batch, { shots: shotsByBatch[batch.import_batch_id] || [] });
+    })
+  };
+}
+
+exports.handler = async function (event) {
+  if (event.httpMethod === "OPTIONS") return json(204, {});
+  if (event.httpMethod === "GET") {
+    const params = query(event);
+    const input = {
+      playerKey: params.playerKey || params.player_key,
+      profileId: params.profileId || params.profile_id,
+      accountId: params.accountId || params.account_id,
+      email: params.email,
+      name: params.name
+    };
+    const response = {
+      address: practiceEmailAddress(input),
+      localPart: "practice+" + playerKey(input),
+      domain: intakeDomain(),
+      playerKey: playerKey(input),
+      configured: hasSupabase(),
+      status: hasSupabase() ? "ready" : "storage_not_configured"
+    };
+    if (params.recent === "1" || params.includeRecent === "1" || params.action === "recent") {
+      response.recent = await recentFor(input);
+    }
+    return json(200, response);
+  }
+  if (event.httpMethod !== "POST") return json(405, { error: "Method not allowed" });
+  if (!env("CLARITY_PRACTICE_EMAIL_SECRET")) return json(503, { error: "Practice email intake secret is not configured", code: "secret_not_configured" });
+  if (!authorized(event)) return json(401, { error: "Practice email intake is not authorized" });
+
+  try {
+    const payload = parseBody(event);
+    const inbound = normalizeInbound(payload);
+    const parsed = parseAttachmentRows(inbound);
+    const storage = await storeInbound(inbound, parsed);
+    const validRows = parsed.imports.reduce(function (sum, item) { return sum + Number(item.batch.batch.validCount || 0); }, 0);
+    const invalidRows = parsed.imports.reduce(function (sum, item) { return sum + Number(item.batch.batch.invalidCount || 0); }, 0);
+    return json(200, {
+      accepted: true,
+      stored: storage.stored,
+      status: storage.status,
+      playerKey: inbound.playerKey,
+      intakeId: inbound.intakeId,
+      counts: {
+        batches: parsed.imports.length,
+        validRows,
+        invalidRows,
+        pendingPhotos: parsed.pendingPhotos.length,
+        unsupported: parsed.unsupported.length,
+        errors: parsed.errors.length
+      },
+      batches: parsed.imports.map(function (item) {
+        return {
+          importBatchId: item.batch.batch.importBatchId,
+          sessionId: item.batch.batch.sessionId,
+          sourceName: item.batch.batch.sourceName,
+          rowCount: item.batch.batch.rowCount,
+          validCount: item.batch.batch.validCount,
+          invalidCount: item.batch.batch.invalidCount,
+          warnings: item.parsed.warnings || [],
+          errors: item.parsed.errors || []
+        };
+      }),
+      errors: parsed.errors
+    });
+  } catch (error) {
+    return json(error.status || 502, {
+      accepted: false,
+      error: error.message || "Practice email intake failed",
+      details: error.body || null
+    });
+  }
+};
