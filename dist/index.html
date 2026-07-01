@@ -37000,8 +37000,8 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	      if(Number.isFinite(dx)&&Number.isFinite(dy))myBubbleMotionStyle=`--gd-practice-adopt-x:${dx.toFixed(1)}px;--gd-practice-adopt-y:${dy.toFixed(1)}px;`;
 	    }
 	    const myBubbleKind=String(myBubbleState?.kind||"default");
-	    const myBubbleLabel=String(myBubbleState?.graphLabel||"MY");
 	    const myBubbleCombined=myBubbleKind==="pending"||myBubbleKind==="adopted-current"||adoptionMotionActive;
+	    const myBubbleLabel=myBubbleCombined?"My Bubble":String(myBubbleState?.graphLabel||"MY");
 	    const myBubbleLayer=hubRows.length&&gdPracticeHasBubbleOffset(hubOffset)?gdShotBubbleOverlayLayerMarkup([],plot,"practice",{
 	      referenceRows:hubRows,
 	      maxBubbles:hubRows.length,
@@ -37017,7 +37017,8 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	      offsetDeg:practiceBubbleOffset,
 	      groupClass:`gdShotBubbleOverlayLayer gdPracticeBubbleProjectionLayer ${myBubbleCombined?"gdPracticeBubbleProjectionLayer-combined":""} gdShotBubbleOverlayLens ${adoptionMotionActive?"gdPracticeBubbleAdoptionGhost":""}`,
 	      source:"practice-bubble-projection",
-	      labelText:"PRACTICE"
+	      labelText:"PRACTICE",
+	      label:!myBubbleCombined
 	    }):"";
 		    return `<svg viewBox="0 0 480 260" role="img" aria-label="Practice Data normalised plot" data-practice-offset-deg="${gdPracticeHasBubbleOffset(practiceBubbleOffset)?Number(practiceBubbleOffset).toFixed(2):""}" data-hub-offset-deg="${gdPracticeHasBubbleOffset(hubOffset)?Number(hubOffset).toFixed(2):""}">
 		      ${gdPracticeNormalisedBackdropSvg(normalisedPlot,"")}
