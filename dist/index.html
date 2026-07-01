@@ -37001,6 +37001,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	    }
 	    const myBubbleKind=String(myBubbleState?.kind||"default");
 	    const myBubbleLabel=String(myBubbleState?.graphLabel||"MY");
+	    const myBubbleCombined=myBubbleKind==="pending"||myBubbleKind==="adopted-current"||adoptionMotionActive;
 	    const myBubbleLayer=hubRows.length&&gdPracticeHasBubbleOffset(hubOffset)?gdShotBubbleOverlayLayerMarkup([],plot,"practice",{
 	      referenceRows:hubRows,
 	      maxBubbles:hubRows.length,
@@ -37014,7 +37015,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	      referenceRows:overlayRows,
 	      maxBubbles:overlayRows.length,
 	      offsetDeg:practiceBubbleOffset,
-	      groupClass:`gdShotBubbleOverlayLayer gdPracticeBubbleProjectionLayer gdShotBubbleOverlayLens ${adoptionMotionActive?"gdPracticeBubbleAdoptionGhost":""}`,
+	      groupClass:`gdShotBubbleOverlayLayer gdPracticeBubbleProjectionLayer ${myBubbleCombined?"gdPracticeBubbleProjectionLayer-combined":""} gdShotBubbleOverlayLens ${adoptionMotionActive?"gdPracticeBubbleAdoptionGhost":""}`,
 	      source:"practice-bubble-projection",
 	      labelText:"PRACTICE"
 	    }):"";
@@ -39650,6 +39651,17 @@ body.gdGpsActive #bagRailBtn{order:7!important}
   stroke-opacity:.82!important;
   stroke-width:1.55!important;
   filter:drop-shadow(0 0 12px rgba(98,210,255,.16))!important;
+}
+#gdPracticeDataVisual .gdPracticeBubbleProjectionLayer-combined{
+  mix-blend-mode:normal!important;
+}
+#gdPracticeDataVisual .gdPracticeBubbleProjectionLayer-combined .gdOffsetHubBubble{
+  fill:#37f28d!important;
+  fill-opacity:.34!important;
+  stroke:#37f28d!important;
+  stroke-opacity:1!important;
+  stroke-width:2.1!important;
+  filter:drop-shadow(0 0 18px rgba(55,242,141,.28))!important;
 }
 #gdPracticeDataVisual .gdPracticeMyBubbleAdopting{
   transform-box:view-box!important;
