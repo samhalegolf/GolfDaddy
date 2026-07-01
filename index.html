@@ -25184,7 +25184,8 @@ function gdGeneratedShotBubbleForClub(club,baseDistance,offsetDeg){
   const fallbackProfile=gdShotBubbleSafe(()=>ensureProfile(),{})||{};
   if(payload&&Number.isFinite(Number(payload.baseCarry))){
     const visual=payload.visual||{};
-    const sourceDistance=Number(payload.baseCarry)||baseDistance;
+    const requestedDistance=Number(baseDistance);
+    const sourceDistance=Number.isFinite(requestedDistance)&&requestedDistance>0?requestedDistance:(Number(payload.baseCarry)||baseDistance);
     const requestedOffset=Number(offsetDeg);
     const payloadOffset=Number(payload.faceAlignmentOffsetDeg??payload.faceOffsetDeg);
     const offset=Number.isFinite(requestedOffset)?requestedOffset:(Number.isFinite(payloadOffset)?payloadOffset:0);
@@ -34828,6 +34829,36 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     const selectedRows=selected.map(key=>byClub[key]).filter(row=>row&&Number.isFinite(Number(row.actualDistanceM))&&Number(row.actualDistanceM)>0);
     return selectedRows.length?selectedRows:gdShotBubbleOverlayReferenceRows(dataRows);
   }
+  function gdPracticeMyBubbleHubRows(dataRows,analysis){
+    const selectedNames=gdPracticeProjectionSelectedClubNames(analysis,dataRows);
+    const selectedKeys=selectedNames.map(gdShotBubbleOverlayClubKey).filter(Boolean);
+    const savedRows=gdPracticeSavedBagRows().filter(row=>Number.isFinite(Number(row.actualDistanceM))&&Number(row.actualDistanceM)>0);
+    const dataByClub={};
+    (dataRows||[]).forEach(row=>{
+      const key=gdShotBubbleOverlayClubKey(row.club);
+      if(key&&!dataByClub[key])dataByClub[key]=row;
+    });
+    const defaultRowForClub=(club,key)=>{
+      const label=club||dataByClub[key]?.club||key||"7i";
+      const carry=gdShotBubbleSafe(()=>typeof gdDefaultCarryForClub==="function"?gdDefaultCarryForClub(label):NaN,NaN);
+      const fallback=Number(dataByClub[key]?.actualDistanceM);
+      const actual=Number.isFinite(Number(carry))&&Number(carry)>0?Number(carry):(Number.isFinite(fallback)&&fallback>0?fallback:155);
+      return{club:label,actualDistanceM:actual,lateralM:0,projectionSource:"my-bubble-current-distance"};
+    };
+    if(gdPracticeProjectionMode()==="all"){
+      if(savedRows.length)return savedRows.map(row=>Object.assign({projectionSource:"my-bubble-saved-bag"},row));
+      const keys=Object.keys(dataByClub);
+      return keys.length?keys.map(key=>defaultRowForClub(dataByClub[key]?.club,key)):[defaultRowForClub("7i","7i")];
+    }
+    const byClub={};
+    savedRows.forEach(row=>{
+      const key=gdShotBubbleOverlayClubKey(row.club);
+      if(key&&!byClub[key])byClub[key]=Object.assign({projectionSource:"my-bubble-saved-bag"},row);
+    });
+    const keys=selectedKeys.length?selectedKeys:Object.keys(dataByClub).slice(0,1);
+    const rows=keys.map((key,index)=>byClub[key]||defaultRowForClub(selectedNames[index]||dataByClub[key]?.club,key));
+    return rows.filter(row=>row&&Number.isFinite(Number(row.actualDistanceM))&&Number(row.actualDistanceM)>0);
+  }
 	  function gdPracticePlotShots(analysis){
 	    const accepted=Array.isArray(analysis?.acceptedShots)?analysis.acceptedShots:[];
     const deselected=gdPracticePlotExcludedShotMap();
@@ -36447,9 +36478,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       const learned=learnedByClub[gdShotBubbleOverlayClubKey(row.club)];
       return learned?Object.assign({},row,{actualDistanceM:learned.actualDistanceM,projectionSource:"practice-distance-bubble"}):row;
     }):[];
-    const sourceDistanceMode=String(safe(()=>ensureProfile()?.practiceBubbleSource?.distanceMode,""));
-    const reviewDistanceOnly=currentBubbleAdopted&&sourceDistanceMode==="review";
-    const hubBaseRows=reviewDistanceOnly?gdShotBubbleOverlayReferenceRows(dataRows):projectionCtx.hubRows||[];
+    const hubBaseRows=gdPracticeMyBubbleHubRows(dataRows,analysis);
     const hubRows=gdPracticeHasBubbleOffset(myBubbleOffset)?hubBaseRows.filter(row=>Number.isFinite(Number(row.actualDistanceM))&&Number(row.actualDistanceM)>0):[];
     const hubOffset=gdPracticeHasBubbleOffset(myBubbleOffset)?myBubbleOffset:null;
     const domainRows=overlayRows
