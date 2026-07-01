@@ -19995,7 +19995,7 @@ const PLACEHOLDER_PLAYER_PROFILE={
   handedness:"right",
   // Clean app input for now: no user-facing face/path controls here.
   // This represents face relative to ACTUAL alignment line, not face-to-path.
-  baseCalibration:{club:"7i",baseCarry:155,faceAlignmentOffsetDeg:1.4,faceWindowDeg:.7,faceToPathToleranceDeg:.7,carryWindowPct:4.2,dispersionMultiplier:1,gdbTrust:1},
+  baseCalibration:{club:"7i",baseCarry:155,faceAlignmentOffsetDeg:0,faceWindowDeg:.7,faceToPathToleranceDeg:.7,carryWindowPct:4.2,dispersionMultiplier:1,gdbTrust:1},
   // Internal-only fallback used when GPS needs a safe generic bubble without showing bag placeholders.
   standInBag:gdDefaultStandInBag()
 };
@@ -20014,11 +20014,49 @@ function gdDeriveClusterTilt({faceAlignmentOffsetDeg=0,faceWindowDeg=.7,carryWin
 function calculateBubbleProfile(input={}){const club=input.club||"7i", baseCarry=Number(input.baseCarry??gdDefaultCarryForClub(club)), handedness=input.handedness||"right", faceAlignmentOffsetDeg=gdResolveFaceAlignmentOffsetDeg(input), dispersionMultiplier=Number(input.dispersionMultiplier??1), window=gdDerivePatternWindow({club,faceWindowDeg:input.faceWindowDeg,carryWindowPct:input.carryWindowPct}), size=gdDeriveBasePatternSize({club,baseCarry,dispersionMultiplier}), aim=gdDeriveAimOffset({faceAlignmentOffsetDeg,baseCarry}), distanceTendencyPct=gdDeriveDistanceTendency({faceDeltaFromPatternDeg:window.faceWindowDeg,handedness,club}), clusterTiltDeg=gdDeriveClusterTilt({faceAlignmentOffsetDeg,faceWindowDeg:window.faceWindowDeg,carryWindowPct:window.carryWindowPct,handedness,club});return{club,baseCarry:gdRound(baseCarry,1),totalM:Number.isFinite(Number(input.totalM))?gdRound(Number(input.totalM),1):null,faceAlignmentOffsetDeg:gdRound(faceAlignmentOffsetDeg,2),faceOffsetDeg:gdRound(faceAlignmentOffsetDeg,2),aimOffsetDeg:aim.aimOffsetDeg,aimOffsetM:aim.aimOffsetM,clusterWidthM:size.clusterWidthM,clusterDepthM:size.clusterDepthM,clusterTiltDeg,faceWindowDeg:window.faceWindowDeg,faceToPathToleranceDeg:gdRound(Number(input.faceToPathToleranceDeg??window.faceWindowDeg),2),carryWindowPct:window.carryWindowPct,distanceTendencyPct,dispersionMultiplier:size.dispersionMultiplier,gdbTrust:gdRound(Number(input.gdbTrust??1),2),faceToPathDeg:Number.isFinite(Number(input.faceToPathDeg))?gdRound(Number(input.faceToPathDeg),2):null,derivedAoADeg:Number.isFinite(Number(input.derivedAoADeg))?gdRound(Number(input.derivedAoADeg),2):null,impactStatus:"Baseline",shapeSource:"engine-derived",modelNote:"Offset places the shot data. Club/carry sizes it. Accepted delivery window shapes the tilt/depth realism."}}
 function calculateVisualBubbleRender(profile,options={}){const handedness=options.handedness||"right", hand=gdHandednessSign(handedness), offsetNorm=gdClamp((hand*profile.faceAlignmentOffsetDeg)/6,-1,1), windowNorm=gdClamp((profile.faceWindowDeg||.7)/1.5,0,1), carryNorm=gdClamp((profile.carryWindowPct||4.2)/8,0,1);return{visualWidthM:gdRound(profile.clusterWidthM*(1+windowNorm*.1+Math.abs(offsetNorm)*.06),1),visualDepthM:gdRound(profile.clusterDepthM*(1+carryNorm*.08+windowNorm*.06),1),visualTiltDeg:gdRound(profile.clusterTiltDeg+offsetNorm*1.5+windowNorm*1.2,2),visualSkewDeg:gdRound(offsetNorm*5,2),visualYBias:gdRound(Math.max(0,offsetNorm)*.04-Math.max(0,-offsetNorm)*.03,3)}}
 function gdNearestStandInClub(distance){return gdResolveShotBagClub(gdGhostShotBagRows(),"Bag",distance)||{club:"7i",baseCarry:155,totalM:gdBagTotalForCarry("7i",155)}}
-function gdProfileCentralOffset(p,fallback=1.4){const n=Number(p?.faceOffsetDeg??p?.centralFaceOffsetDeg??fallback);return Number.isFinite(n)?n:fallback}
+function gdProfileBubbleSourceLooksReal(source){
+  if(!source||typeof source!=="object")return false;
+  if(/placeholder|default|stand.?in|fallback/i.test(String(source.shapeSource||source.source||source.projectionSource||"")))return false;
+  const carry=Number(source.baseDistanceM??source.expectedDistanceM??source.meanExpectedM??source.baseCarry??source.carry??source.actualDistanceM);
+  const width=Number(source.bubbleWidthM??source.clusterWidthM??source.visualWidthM??source.lateralRadiusM);
+  const depth=Number(source.bubbleDepthM??source.clusterDepthM??source.visualDepthM??source.depthRadiusM);
+  const radius=Number(source.lateralRadiusDeg);
+  return Number.isFinite(carry)&&carry>0&&(
+    Number.isFinite(width)&&width>0||
+    Number.isFinite(depth)&&depth>0||
+    Number.isFinite(radius)&&radius>0
+  );
+}
+function gdProfileBubbleSources(p){
+  const sources=[];
+  if(!p||typeof p!=="object")return sources;
+  if(p.previewBubbleSet)sources.push(p.previewBubbleSet);
+  if(p.bubbleProfiles&&typeof p.bubbleProfiles==="object"){
+    try{Object.values(p.bubbleProfiles).forEach(source=>sources.push(source));}catch(e){}
+  }
+  return sources;
+}
+function gdProfileCentralOffset(p,fallback=0){
+  const adopted=Number(p?.practiceBubbleSource?.active?p.practiceBubbleSource.offsetDeg:NaN);
+  if(Number.isFinite(adopted))return adopted;
+  const safeFallback=Number.isFinite(Number(fallback))?Number(fallback):0;
+  if(!p||p.placeholderProfile)return 0;
+  const candidates=[
+    Number(p.faceOffsetDeg),
+    Number(p.centralFaceOffsetDeg),
+    Number(p.previewBubbleSet?.faceOffsetDeg??p.previewBubbleSet?.faceAlignmentOffsetDeg??p.previewBubbleSet?.offsetDeg)
+  ];
+  const hasRealSource=gdProfileBubbleSources(p).some(gdProfileBubbleSourceLooksReal);
+  if(hasRealSource||p.manualBubbleOffsetAt||p.bubbleOffsetUpdatedAt){
+    const value=candidates.find(Number.isFinite);
+    if(Number.isFinite(value))return value;
+  }
+  return safeFallback;
+}
 function gdProfileInputForClub(club,distance){
   const bag=gdPlayableShotBagRows();
   const base=PLACEHOLDER_PLAYER_PROFILE.baseCalibration, c=gdResolveShotBagClub(bag,club,distance)||gdNearestStandInClub(distance);
-  let offset=Number(base.faceAlignmentOffsetDeg??base.faceOffsetDeg??1.4);
+  let offset=Number(base.faceAlignmentOffsetDeg??base.faceOffsetDeg??0);
   try{const p=gdShotActiveProfile();offset=gdProfileCentralOffset(p,offset)}catch(e){}
   return{...base,club:c.club,baseCarry:c.baseCarry,totalM:gdTotalM(c),handedness:PLACEHOLDER_PLAYER_PROFILE.handedness,faceAlignmentOffsetDeg:offset,faceOffsetDeg:offset}
 }
@@ -24772,7 +24810,7 @@ function gdStatsCurrentModelOffsetDeg(){
   const editing=document.querySelector(".gdBubbleFaceOffsetInput[data-editing='1']");
   const live=gdParseOffsetValue(editing?.value);
   if(Number.isFinite(live))return live;
-  try{return gdBubbleCentralOffset(ensureProfile());}catch(e){return 1.4}
+  try{return gdBubbleCentralOffset(ensureProfile());}catch(e){return 0}
 }
 let gdStatsView={
   club:"all",
@@ -26576,7 +26614,7 @@ closePanel=function(id){
 const GD_PROFILE_STORE_KEY='gd_player_profiles_v27';
 const GD_PLACEHOLDER_PROFILE_ID='gd_placeholder_demo_player';
 const GD_PLACEHOLDER_SEED_KEY='gd_placeholder_profile_seed_v1';
-const GD_ONBOARDING_DRAFT={step:0,name:'',mode:'player',handedness:'right',consistency:'mid',bagChoice:'quick',sevenIron:155,faceOffsetDeg:1.4};
+const GD_ONBOARDING_DRAFT={step:0,name:'',mode:'player',handedness:'right',consistency:'mid',bagChoice:'quick',sevenIron:155,faceOffsetDeg:0};
 let GD_PROFILE_STATE={profiles:[],activeId:null,onboardingDraft:{...GD_ONBOARDING_DRAFT}};
 function gdNewId(prefix='p'){return prefix+'_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,7)}
 function gdConsistencyLabel(v){return({elite:'Very consistent',good:'Pretty consistent',mid:'Mixed',high:'Wild sometimes',beginner:'Very variable'})[v]||'Mixed'}
@@ -26721,16 +26759,16 @@ function gdRenderPermissionsAdmin(){
   const rows=[['Driver',a+90],['3W',a+55],['4H',a+35],['5i',a+20],['6i',a+10],['7i',a],['8i',a-10],['9i',a-22],['PW',a-40],['GW',a-55],['SW',a-72],['LW',a-88]];
   return rows.map(([club,baseCarry])=>{const carry=Math.max(35,Math.round(baseCarry));return{club,baseCarry:carry,totalM:gdBagTotalForCarry(club,carry)}});
 }
-function gdPlaceholderBubble(club,baseCarry,handedness='right',skillLevel='good',faceOffsetDeg=1.6){
+function gdPlaceholderBubble(club,baseCarry,handedness='right',skillLevel='good',faceOffsetDeg=0){
   try{return calculateCleanBubbleProfile({club,baseCarry,handedness,skillLevel,faceOffsetDeg})}
   catch(e){return{club,baseCarry,faceOffsetDeg,handedness,skillLevel,aimOffsetM:4.4,clusterWidthM:23.6,clusterDepthM:31.4,clusterTiltDeg:4.9,shapeSource:'placeholder'}}
 }
 function gdPlaceholderProfile(id=GD_PLACEHOLDER_PROFILE_ID){
   const now=new Date().toISOString();
   const bag=gdGenerateQuickBag(158);
-  const seven=gdPlaceholderBubble('7i',158,'right','good',1.6);
-  const driver=gdPlaceholderBubble('Driver',248,'right','good',1.6);
-  return{id,name:'Demo Player',handicap:'8.4',hcp:'8.4',permission:'player',accountPermission:'player',mode:'player',handedness:'right',consistency:'good',skillLevel:'good',faceOffsetDeg:1.6,bag,bubbleProfiles:{'7i':seven,'Driver':driver},previewBubbleSet:seven,onboardingComplete:true,placeholderProfile:true,createdAt:now,updatedAt:now}
+  const seven=gdPlaceholderBubble('7i',158,'right','good',0);
+  const driver=gdPlaceholderBubble('Driver',248,'right','good',0);
+  return{id,name:'Demo Player',handicap:'8.4',hcp:'8.4',permission:'player',accountPermission:'player',mode:'player',handedness:'right',consistency:'good',skillLevel:'good',faceOffsetDeg:0,bag,bubbleProfiles:{'7i':seven,'Driver':driver},previewBubbleSet:seven,onboardingComplete:true,placeholderProfile:true,createdAt:now,updatedAt:now}
 }
 function gdDefaultProfile(){return gdPlaceholderProfile(gdNewId())}
 function gdInstallPlaceholderProfile(force=false){
@@ -26785,7 +26823,7 @@ function syncCoreProfileFromActive(){
   PLACEHOLDER_PLAYER_PROFILE.handedness=p.handedness||'right';
   PLACEHOLDER_PLAYER_PROFILE.standInBag=(Array.isArray(p.bag)?p.bag:[]).map(c=>gdNormaliseBagRow(c)).filter(Boolean);
   const savedBubble=p.previewBubbleSet||Object.values(p.bubbleProfiles||{})[0];
-  const centralOffset=gdProfileCentralOffset(p,savedBubble?.faceOffsetDeg??savedBubble?.faceAlignmentOffsetDeg??1.4);
+  const centralOffset=gdProfileCentralOffset(p,savedBubble?.faceOffsetDeg??savedBubble?.faceAlignmentOffsetDeg??0);
   const baseClub=savedBubble?.club||'7i';
   const baseCarry=savedBubble?Number(savedBubble.baseCarry||gdDefaultCarryForClub(baseClub)):((PLACEHOLDER_PLAYER_PROFILE.standInBag.find(c=>c.club==='7i')?.baseCarry)||155);
   PLACEHOLDER_PLAYER_PROFILE.baseCalibration={...PLACEHOLDER_PLAYER_PROFILE.baseCalibration,club:baseClub,baseCarry,faceAlignmentOffsetDeg:centralOffset,faceOffsetDeg:centralOffset,dispersionMultiplier:1};
@@ -26899,7 +26937,7 @@ function readBagPanel(){const rows=[];document.querySelectorAll('#gdBagEditor [i
 function gdBagToggleRowEdit(index){const row=document.getElementById('gdBagRow_'+index),club=document.getElementById('gdBagClub_'+index),carry=document.getElementById('gdBagCarry_'+index),total=document.getElementById('gdBagTotal_'+index),btn=document.getElementById('gdBagEdit_'+index);if(!row||!club||!carry||!total||!btn)return;const editing=!row.classList.contains('editing');row.classList.toggle('editing',editing);club.readOnly=!editing;carry.readOnly=!editing;total.readOnly=!editing;btn.textContent=editing?'Done':'Edit';btn.setAttribute('aria-label',editing?'Save club':'Edit club');if(editing){club.focus();club.select?.();return}gdBagSave(true)}
 function gdBagGenerateQuick(){const raw=document.getElementById('gdBagQuick7i')?.value;const quick=Number(raw);if(!quick||quick<=0){toast('Enter your 7i carry first');return}gdBagPersistRows(gdGenerateQuickBag(quick),{silent:true});toast('Quick bag generated')}
 function gdBagSave(silent=false){const rows=gdBagSortRows(readBagPanel());if(!rows.length){toast('Add at least one club');return}gdBagPersistRows(rows,{silent});}
-function saveProfilePanel(){const p=ensureProfile();const v=id=>document.getElementById(id)?.value;p.name=v('profileNameInput')||p.name;p.permission=gdGetAccountPermission();p.accountPermission=p.permission;p.mode=gdPermissionToMode(p.permission);p.handedness=v('profileHandInput')||p.handedness;p.consistency=v('profileConsistencyInput')||p.consistency;p.skillLevel=p.consistency;p.bag=readProfileBagEditor();if(!Number.isFinite(Number(p.faceOffsetDeg)))p.faceOffsetDeg=Number(p.centralFaceOffsetDeg||1.4);p.onboardingComplete=true;p.updatedAt=new Date().toISOString();savePlayerProfiles();syncCoreProfileFromActive();toast('Profile saved');renderProfilePanel();}
+function saveProfilePanel(){const p=ensureProfile();const v=id=>document.getElementById(id)?.value;p.name=v('profileNameInput')||p.name;p.permission=gdGetAccountPermission();p.accountPermission=p.permission;p.mode=gdPermissionToMode(p.permission);p.handedness=v('profileHandInput')||p.handedness;p.consistency=v('profileConsistencyInput')||p.consistency;p.skillLevel=p.consistency;p.bag=readProfileBagEditor();if(!Number.isFinite(Number(p.faceOffsetDeg)))p.faceOffsetDeg=Number(p.centralFaceOffsetDeg||0);p.onboardingComplete=true;p.updatedAt=new Date().toISOString();savePlayerProfiles();syncCoreProfileFromActive();toast('Profile saved');renderProfilePanel();}
 function profileGenerateQuickBag(){const val=Number(document.getElementById('profile7iInput')?.value||155);const p=ensureProfile();p.bag=gdGenerateQuickBag(val);savePlayerProfiles();syncCoreProfileFromActive();renderProfilePanel();if(typeof renderShot==="function")renderShot();toast('Quick bag generated');}
 const GD_ACCOUNT_STORE_KEY='gd_accounts_v1';
 const GD_ACCOUNT_SIGNED_OUT_KEY='gd_account_signed_out_v1';
@@ -27042,8 +27080,8 @@ function gdAccountNewProfile(account,coachIds=[]){
     handedness:'right',
     consistency:'mid',
     skillLevel:'mid',
-    faceOffsetDeg:1.4,
-    centralFaceOffsetDeg:1.4,
+    faceOffsetDeg:0,
+    centralFaceOffsetDeg:0,
     bag:[],
     coachAccountIds:coachIds.slice(),
     onboardingComplete:true,
@@ -28235,7 +28273,7 @@ try{applyDevSettings();}catch(e){console.warn("Developer tuning init skipped",e)
     p.mode = p.mode || 'player';
     p.onboardingComplete = true;
     p.bag = Array.isArray(p.bag) ? p.bag : [];
-    p.faceOffsetDeg = Number.isFinite(Number(p.faceOffsetDeg)) ? Number(p.faceOffsetDeg) : Number(p.centralFaceOffsetDeg || 1.4);
+    p.faceOffsetDeg = Number.isFinite(Number(p.faceOffsetDeg)) ? Number(p.faceOffsetDeg) : Number(p.centralFaceOffsetDeg || 0);
     p.centralFaceOffsetDeg = p.faceOffsetDeg;
     p.__gdHasPlayerBubble = playerBubbleReady(p);
     return p;
@@ -34509,7 +34547,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	      p.updatedAt=new Date().toISOString();
 	      savePlayerProfiles();
 	      syncCoreProfileFromActive();
-	      document.querySelectorAll(".gdBubbleFaceOffsetInput").forEach(input=>{input.dataset.editing="0";input.readOnly=true;input.value="Current";});
+	      document.querySelectorAll(".gdBubbleFaceOffsetInput").forEach(input=>{input.dataset.editing="0";input.readOnly=true;input.value=gdMyBubbleDisplayLabel(gdMyBubbleState(p,analysis));});
 	      gdRenderBubbleOffsetHub();
 	      renderPracticeData(true);
 	      renderDataHubStatus();
@@ -34537,6 +34575,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	    }
 	    p.faceOffsetDeg=offset;
 	    p.centralFaceOffsetDeg=offset;
+	    p.placeholderProfile=false;
 	    p.practiceBubbleAdoptedAt=new Date().toISOString();
 	    const adoptedClub=source?.club||method?.anchorClub||gdCompareClub||"7i";
 	    const adoptedKey=gdShotBubbleOverlayClubKey(adoptedClub)||"7i";
@@ -34581,7 +34620,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	    const distanceResult=gdPracticeApplyDistanceLearning(analysis,{commit:adoptDistance});
 	    savePlayerProfiles();
 	    syncCoreProfileFromActive();
-	    document.querySelectorAll(".gdBubbleFaceOffsetInput").forEach(input=>{input.dataset.editing="0";input.readOnly=true;input.value="Current";});
+	    document.querySelectorAll(".gdBubbleFaceOffsetInput").forEach(input=>{input.dataset.editing="0";input.readOnly=true;input.value=gdMyBubbleDisplayLabel(gdMyBubbleState(p,analysis));});
 	    gdPracticeBubbleAdoptionMotion={
 	      at:Date.now(),
 	      fromOffset:Number.isFinite(Number(previousOffset))?Number(previousOffset):0,
@@ -34697,7 +34736,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     if(adoptedSource.active&&Number.isFinite(adoptedOffset)){
       return{offset:adoptedOffset,kind:currentAdopted?"adopted-current":"saved",label:currentAdopted?"My Bubble active":"My Bubble saved",graphLabel:"MY"};
     }
-    const defaultState={offset:0,kind:"default",label:"Default My Bubble 0.0°",graphLabel:"DEFAULT"};
+    const defaultState={offset:0,kind:"default",label:"Default My Bubble",graphLabel:"DEFAULT"};
     if(!p||p.placeholderProfile)return defaultState;
     const sources=[];
     if(p.previewBubbleSet)sources.push(p.previewBubbleSet);
@@ -34706,12 +34745,27 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     }
     if(!sources.some(gdPracticeBubbleSourceLooksReal))return defaultState;
     const offset=Number(p.faceOffsetDeg??p.centralFaceOffsetDeg??p.previewBubbleSet?.faceOffsetDeg??p.previewBubbleSet?.faceAlignmentOffsetDeg??p.previewBubbleSet?.offsetDeg);
-    return Number.isFinite(offset)?{offset,kind:"saved",label:`My Bubble ${gdOffsetLabel(offset)}`,graphLabel:"MY"}:defaultState;
+    return Number.isFinite(offset)?{offset,kind:"saved",label:"My Bubble saved",graphLabel:"MY"}:defaultState;
   }
   function gdPracticeMyBubbleOffsetDeg(profile){
     const state=gdPracticeMyBubbleState(profile,gdPracticeProjectionReadyAnalysis());
     const offset=Number(state?.offset);
     return Number.isFinite(offset)?offset:0;
+  }
+  function gdMyBubbleState(profile,analysis){
+    const p=profile||safe(()=>ensureProfile(),null)||{};
+    const state=gdPracticeMyBubbleState(p,analysis||gdPracticeProjectionReadyAnalysis());
+    if(state&&Number.isFinite(Number(state.offset)))return state;
+    const offset=gdProfileCentralOffset(p,0);
+    return{offset:Number.isFinite(Number(offset))?Number(offset):0,kind:"default",label:"Default My Bubble",graphLabel:"DEFAULT"};
+  }
+  function gdMyBubbleDisplayLabel(state,editing=false){
+    if(editing)return"Manual centre";
+    const kind=String(state?.kind||"");
+    if(kind==="default")return"Default";
+    if(kind==="adopted-current")return"My Bubble active";
+    if(kind==="saved")return"My Bubble saved";
+    return state?.label||"My Bubble";
   }
   function gdPracticeProjectionSelectedClubNames(analysis,dataRows){
     const names=new Set();
@@ -34901,8 +34955,8 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     return{p};
   }
   function gdBubbleCentralOffset(p){
-    const n=Number(p?.faceOffsetDeg??p?.centralFaceOffsetDeg??p?.previewBubbleSet?.faceOffsetDeg??p?.previewBubbleSet?.faceAlignmentOffsetDeg??1.4);
-    return Number.isFinite(n)?n:1.4;
+    const n=Number(gdMyBubbleState(p,gdPracticeProjectionReadyAnalysis()).offset);
+    return Number.isFinite(n)?n:0;
   }
   function gdCourseOffsetSuggestion(p){
     const n=Number(p?.pendingStatsOffsetSuggestion?.faceOffsetDeg??p?.pendingStatsOffsetSuggestion?.faceAlignmentOffsetDeg);
@@ -35228,14 +35282,9 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	    return{p,current,course,practice,courseBubble,practiceBubble,courseAnalysis,courseFiltered,courseRecords,practiceAnalysis,practiceShots:Number(practiceTotals.rawShots||0)};
 	  }
 	  function gdCompareProfileBubbleOffset(p){
-	    if(!p||p.placeholderProfile)return null;
-	    const direct=Number(p.faceOffsetDeg);
-	    if(Number.isFinite(direct))return direct;
-	    const central=Number(p.centralFaceOffsetDeg);
-	    if(Number.isFinite(central))return central;
-	    const preview=Number(p.previewBubbleSet?.faceOffsetDeg??p.previewBubbleSet?.faceAlignmentOffsetDeg);
-	    if(Number.isFinite(preview))return preview;
-	    return null;
+	    const state=gdMyBubbleState(p,gdPracticeProjectionReadyAnalysis());
+	    const offset=Number(state?.offset);
+	    return Number.isFinite(offset)?offset:0;
 	  }
   function gdPracticeBubbleSource(analysis){
     const method=gdPracticeBubbleMethod(analysis);
@@ -35494,7 +35543,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 		  }
 		  function gdCompareProfileBubbleSource(ctx,club){
 		    const p=ctx?.p;
-		    if(!p||p.placeholderProfile||!Number.isFinite(Number(ctx?.current)))return null;
+		    if(!p||(!p.practiceBubbleSource?.active&&p.placeholderProfile)||!Number.isFinite(Number(ctx?.current)))return null;
 		    const selected=gdCompareClubKey(club);
 		    const exact=selected&&p.bubbleProfiles&&typeof p.bubbleProfiles==="object"?p.bubbleProfiles[selected]:null;
 		    const preview=p.previewBubbleSet&&(!selected||gdCompareClubKey(p.previewBubbleSet.club)===selected)?p.previewBubbleSet:null;
@@ -35947,35 +35996,62 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       });
     });
   }
+  function gdMyBubbleHubSource(ctx,club,offset){
+    const current=safe(()=>gdCompareProfileBubbleSource(ctx,club),null);
+    if(current)return current;
+    const selected=gdCompareClubKey(club)||gdCompareClubKey(ctx?.p?.previewBubbleSet?.club)||"7i";
+    const bagRows=Array.isArray(ctx?.p?.bag)?ctx.p.bag:[];
+    const row=bagRows.find(item=>gdCompareClubKey(item?.club||item?.name).toLowerCase()===selected.toLowerCase())
+      ||bagRows.find(item=>gdCompareClubKey(item?.club||item?.name).toLowerCase()==="7i")
+      ||bagRows[0]
+      ||null;
+    const baseCarry=Number(row?.baseCarry??row?.carry??row?.carryM??row?.distance??row?.meters);
+    const baseDistance=Number.isFinite(baseCarry)&&baseCarry>0?baseCarry:gdShotBubbleSafe(()=>gdDefaultCarryForClub(selected),155);
+    return{
+      club:selected,
+      offsetDeg:Number.isFinite(Number(offset))?Number(offset):0,
+      faceOffsetDeg:Number.isFinite(Number(offset))?Number(offset):0,
+      faceAlignmentOffsetDeg:Number.isFinite(Number(offset))?Number(offset):0,
+      baseCarry:baseDistance,
+      baseDistanceM:baseDistance,
+      bubbleDepthM:Math.max(14,baseDistance*.18),
+      bubbleWidthM:Math.max(10,baseDistance*.14),
+      clusterDepthM:Math.max(14,baseDistance*.18),
+      clusterWidthM:Math.max(10,baseDistance*.14),
+      handedness:ctx?.p?.handedness||"right",
+      shapeSource:"my-bubble-default"
+    };
+  }
   function gdRenderBubbleOffsetHub(manual=false){
     gdInstallOffsetHubTabs();
     const {p}=gdBubbleDataContext();
     const faces=[...document.querySelectorAll(".gdBubbleFaceOffsetInput")];
     const sources=[...document.querySelectorAll(".gdBubbleOffsetSource")];
     const editing=faces.some(face=>face.dataset.editing==="1");
+    const state=gdMyBubbleState(p,gdPracticeProjectionReadyAnalysis());
+    const stateLabel=gdMyBubbleDisplayLabel(state,editing);
     faces.forEach(face=>{
       face.readOnly=!editing;
-      if(!manual&&!editing)face.value="Current";
+      if(!manual&&!editing)face.value=stateLabel;
     });
 	    const focusedFace=document.activeElement?.classList?.contains("gdBubbleFaceOffsetInput")?document.activeElement:null;
 	    const visibleFace=document.querySelector(".modulePanel.open .gdBubbleFaceOffsetInput")||document.querySelector("#statsPanel.open .gdBubbleFaceOffsetInput");
-	    const liveOffset=gdParseOffsetValue(focusedFace?.value??visibleFace?.value??faces.find(face=>face.dataset.editing==="1")?.value??faces[0]?.value,gdBubbleCentralOffset(p));
+	    const internalOffset=Number(state?.offset);
+	    const liveOffset=gdParseOffsetValue(focusedFace?.value??visibleFace?.value??faces.find(face=>face.dataset.editing==="1")?.value??faces[0]?.value,Number.isFinite(internalOffset)?internalOffset:gdBubbleCentralOffset(p));
 	    const ctx=gdComparisonContext();
 	    const club=safe(()=>gdCompareLoadClub(ctx),gdCompareClub)||"7i";
-	    const currentBubble=safe(()=>gdCompareProfileBubbleSource(ctx,club),null);
-	    const hubBubble=Object.assign({},currentBubble||gdOffsetHubBubbleSource(ctx),{previewKind:"playing"});
-	    const hubPreviewOffset=editing&&Number.isFinite(liveOffset)?liveOffset:Number(ctx?.current??hubBubble?.offsetDeg);
+	    const hubPreviewOffset=editing&&Number.isFinite(liveOffset)?liveOffset:(Number.isFinite(internalOffset)?internalOffset:0);
+	    const hubBubble=Object.assign({},gdMyBubbleHubSource(ctx,club,hubPreviewOffset),{previewKind:"playing"});
 	    document.querySelectorAll(".gdShotBubbleHubPreview").forEach(preview=>{
 	      preview.innerHTML=gdShotBubbleHubSvg(Number.isFinite(hubPreviewOffset)?hubPreviewOffset:0,hubBubble);
 	    });
-    const course=gdCourseOffsetSuggestion(p);
-    const practice=gdPracticeOffsetSuggestion();
     sources.forEach(source=>{
 	      if(!source.querySelector(".gdShotBubbleHubPreview")){
 		        source.innerHTML=`<div class="gdShotBubbleHubPreview">${gdShotBubbleHubSvg(Number.isFinite(hubPreviewOffset)?hubPreviewOffset:0,hubBubble)}</div>`;
 	      }
-      const label=editing?"Manual edit active":course!==null?`Course suggests ${gdOffsetLabel(course)}`:practice!==null?`Practice suggests ${gdOffsetLabel(practice)}`:"Current profile value";
-      source.setAttribute("aria-label",label);
+      source.dataset.gdBubbleState=stateLabel;
+      source.dataset.gdBubbleKind=String(state?.kind||"default");
+      source.setAttribute("aria-label",stateLabel);
     });
     if(manual){
       if(document.getElementById("statsPanel")?.classList.contains("open"))renderStats();
@@ -35989,7 +36065,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     const face=gdActiveOffsetInput();
     if(!face)return;
     const offset=gdParseOffsetValue(face.value,gdBubbleCentralOffset(gdBubbleDataContext().p));
-    document.querySelectorAll(".gdBubbleFaceOffsetInput").forEach(input=>{input.dataset.editing="1";input.readOnly=false;input.value=gdOffsetLabel(offset);});
+    document.querySelectorAll(".gdBubbleFaceOffsetInput").forEach(input=>{input.dataset.editing="1";input.readOnly=false;input.value=gdMyBubbleDisplayLabel(gdMyBubbleState(gdBubbleDataContext().p),true);});
     gdRenderBubbleOffsetHub(true);
     face.focus();
     face.select?.();
@@ -36022,7 +36098,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     p.updatedAt=new Date().toISOString();
     savePlayerProfiles();
     syncCoreProfileFromActive();
-    document.querySelectorAll(".gdBubbleFaceOffsetInput").forEach(input=>{input.dataset.editing="0";input.readOnly=true;input.value="Current";});
+    document.querySelectorAll(".gdBubbleFaceOffsetInput").forEach(input=>{input.dataset.editing="0";input.readOnly=true;input.value=gdMyBubbleDisplayLabel(gdMyBubbleState(p));});
     gdRenderBubbleOffsetHub();
     if(document.getElementById("statsPanel")?.classList.contains("open"))renderStats();
     renderCompareData();
@@ -38795,9 +38871,27 @@ body.gdGpsActive #bagRailBtn{order:7!important}
   border-radius:12px!important;
 }
 .gdBubbleOffsetSource{
+  position:relative!important;
   padding:0!important;
   overflow:hidden!important;
 }
+.gdBubbleOffsetSource[data-gd-bubble-state]:after{
+  content:attr(data-gd-bubble-state);
+  position:absolute;
+  left:12px;
+  top:10px;
+  z-index:2;
+  max-width:calc(100% - 24px);
+  color:rgba(238,245,242,.82);
+  font-size:10px;
+  font-weight:950;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+  pointer-events:none;
+}
+.gdBubbleOffsetSource[data-gd-bubble-kind="default"]:after{color:rgba(215,176,107,.88)}
+.gdBubbleOffsetSource[data-gd-bubble-kind="adopted-current"]:after{color:rgba(45,214,129,.9)}
+.gdBubbleOffsetSource[data-gd-bubble-kind="saved"]:after{color:rgba(45,214,129,.82)}
 .gdShotBubbleHubPreview{
   --gd-shot-zero-x:68%;
   --gd-shot-bubble-x:68%;
