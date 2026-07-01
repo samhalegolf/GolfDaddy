@@ -35186,17 +35186,31 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       <path d="${bubblePath}" fill="${fill}" stroke="${stroke}" stroke-width="${bubbleStroke}" stroke-linejoin="round"/>
     </g>`;
   }
+	  function gdMyBubbleLaneMaxDistance(){
+	    return 250;
+	  }
+	  function gdMyBubbleLaneMinDistance(club="7i",source={}){
+	    const sourceCarry=Number(source?.baseDistanceM||source?.expectedDistanceM||source?.meanExpectedM||source?.baseCarry);
+	    const fallbackCarry=gdShotBubbleSafe(()=>gdDefaultCarryForClub(club),155)||155;
+	    const carry=Number.isFinite(sourceCarry)&&sourceCarry>=40?sourceCarry:fallbackCarry;
+	    return gdShotBubbleOverlayClamp(Math.round(carry*.45),40,95);
+	  }
+	  function gdMyBubbleClampLaneDistance(distance,club="7i",source={}){
+	    const max=gdMyBubbleLaneMaxDistance();
+	    const min=gdMyBubbleLaneMinDistance(club,source);
+	    return gdShotBubbleOverlayClamp(Number(distance),min,max);
+	  }
 	  function gdShotBubblePlayingLaneSvg(offset,sizeOpts={}){
 	    const width=480;
 	    const height=132;
-	    const laneM=250;
 	    const source=sizeOpts||{};
 	    const club=source.club||"7i";
+	    const laneM=gdMyBubbleLaneMaxDistance();
 	    const requestedOffset=Number(offset);
 	    const liveOffset=Number.isFinite(requestedOffset)?requestedOffset:0;
 	    const sourceDistance=Number(source.baseDistanceM||source.expectedDistanceM||source.meanExpectedM||source.baseCarry);
 	    const fallbackDistance=gdShotBubbleSafe(()=>gdDefaultCarryForClub(club),155)||155;
-	    const baseDistance=gdShotBubbleOverlayClamp(Number.isFinite(sourceDistance)&&sourceDistance>0?sourceDistance:fallbackDistance,20,laneM);
+	    const baseDistance=gdMyBubbleClampLaneDistance(Number.isFinite(sourceDistance)&&sourceDistance>0?sourceDistance:fallbackDistance,club,source);
 	    const generated=gdShotBubbleSafe(()=>gdGeneratedShotBubbleForClub(club,baseDistance,liveOffset),null)||{};
 	    const drawableSource=Object.assign({},source,{
 	      club,
@@ -35213,7 +35227,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	        depthRadiusM:Math.max(5,baseDistance*.08),
 	        offsetDeg:liveOffset
 	      });
-	    const centerDistance=gdShotBubbleOverlayClamp(Number(drawable.centerDistanceM||drawable.baseDistanceM)||baseDistance,0,laneM);
+	    const centerDistance=baseDistance;
 	    const centerLateral=Math.tan(liveOffset*Math.PI/180)*baseDistance;
 	    const bubble=Object.assign({},drawable,{
 	      club,
@@ -35269,11 +35283,15 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	      <line x1="${plotLeft}" y1="${plotTop}" x2="${plotLeft}" y2="${plotBottom}" stroke="rgba(238,245,242,.10)" stroke-width="1"/>
 	      <line x1="${plotRight}" y1="${plotTop}" x2="${plotRight}" y2="${plotBottom}" stroke="rgba(238,245,242,.10)" stroke-width="1"/>
 	      <line x1="${originX.toFixed(1)}" y1="${originY.toFixed(1)}" x2="${plotRight}" y2="${originY.toFixed(1)}" stroke="rgba(238,245,242,.30)" stroke-width="1.2" stroke-dasharray="7 7" stroke-linecap="round"/>
-	      <line x1="${targetX.toFixed(1)}" y1="${(originY-24).toFixed(1)}" x2="${targetX.toFixed(1)}" y2="${(originY+24).toFixed(1)}" stroke="rgba(215,176,107,.34)" stroke-width="1.15" stroke-linecap="round"/>
-	      <circle cx="${targetX.toFixed(1)}" cy="${originY.toFixed(1)}" r="13.5" fill="none" stroke="rgba(215,176,107,.30)" stroke-width="1.1"/>
-	      <circle cx="${targetX.toFixed(1)}" cy="${originY.toFixed(1)}" r="3.3" fill="rgba(215,176,107,.62)"/>
+	      <line x1="${targetX.toFixed(1)}" y1="${originY.toFixed(1)}" x2="${bubbleX.toFixed(1)}" y2="${bubbleY.toFixed(1)}" stroke="rgba(215,176,107,.24)" stroke-width="1" stroke-dasharray="3 6" stroke-linecap="round"/>
 	      <line x1="${originX.toFixed(1)}" y1="${originY.toFixed(1)}" x2="${bubbleX.toFixed(1)}" y2="${bubbleY.toFixed(1)}" stroke="rgba(215,176,107,.42)" stroke-width="1.2" stroke-linecap="round"/>
 	      ${path?`<path class="gdShotBubbleHubBubble" d="${path}" fill="url(#gdMyBubbleLaneFill${idSuffix})" stroke="#d7b06b" stroke-width="1.35" stroke-opacity=".70" fill-opacity=".88"/>`:""}
+	      <g class="gdMyBubbleLandingHandle" data-gd-lane-drag-handle="1" data-distance-m="${baseDistance.toFixed(1)}" pointer-events="all">
+	        <circle cx="${bubbleX.toFixed(1)}" cy="${bubbleY.toFixed(1)}" r="22" fill="transparent" class="gdMyBubbleLandingHit"/>
+	        <circle cx="${bubbleX.toFixed(1)}" cy="${bubbleY.toFixed(1)}" r="14.5" fill="none" stroke="rgba(215,176,107,.72)" stroke-width="1.35"/>
+	        <circle cx="${bubbleX.toFixed(1)}" cy="${bubbleY.toFixed(1)}" r="3.5" fill="rgba(215,176,107,.82)"/>
+	        <path d="M ${(bubbleX-10).toFixed(1)} ${bubbleY.toFixed(1)} H ${(bubbleX+10).toFixed(1)} M ${bubbleX.toFixed(1)} ${(bubbleY-10).toFixed(1)} V ${(bubbleY+10).toFixed(1)}" stroke="rgba(215,176,107,.48)" stroke-width="1" stroke-linecap="round"/>
+	      </g>
 	      <circle cx="${originX.toFixed(1)}" cy="${originY.toFixed(1)}" r="6.6" fill="url(#gdMyBubbleLaneBall${idSuffix})" opacity=".96"/>
 	      <circle cx="${originX.toFixed(1)}" cy="${originY.toFixed(1)}" r="2.2" fill="rgba(255,255,255,.92)"/>
 	    </svg>`;
@@ -36202,8 +36220,8 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     return Math.round(pct*laneM*10)/10;
   }
   function gdMyBubbleStageLaneDistance(distance,opts={}){
-    const nextDistance=gdShotBubbleOverlayClamp(Number(distance),20,250);
-    if(!Number.isFinite(nextDistance)||nextDistance<=0)return false;
+    const requestedDistance=Number(distance);
+    if(!Number.isFinite(requestedDistance)||requestedDistance<=0)return false;
     const p=ensureProfile();
     const analysis=gdPracticeProjectionReadyAnalysis();
     const state=gdMyBubbleState(p,analysis);
@@ -36216,6 +36234,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     const club=safe(()=>gdCompareLoadClub(ctx),gdCompareClub)||p?.previewBubbleSet?.club||"7i";
     const baseSource=gdMyBubbleHubSource(ctx,club,offset)||{};
     const sourceClub=gdCompareClubKey(baseSource.club||club)||"7i";
+    const nextDistance=gdMyBubbleClampLaneDistance(requestedDistance,sourceClub,baseSource);
     const generated=gdShotBubbleSafe(()=>gdGeneratedShotBubbleForClub(sourceClub,nextDistance,offset),null)||{};
     const width=Number(generated.widthM)||Number(baseSource.bubbleWidthM)||Number(baseSource.clusterWidthM)||Math.max(10,nextDistance*.14);
     const depth=Number(generated.depthM)||Number(baseSource.bubbleDepthM)||Number(baseSource.clusterDepthM)||Math.max(14,nextDistance*.18);
@@ -36225,7 +36244,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       baseDistanceM:nextDistance,
       expectedDistanceM:nextDistance,
       meanExpectedM:nextDistance,
-      centerDistanceM:Number(generated.centerDistanceM)||nextDistance,
+      centerDistanceM:nextDistance,
       centerLateralM:Math.tan(offset*Math.PI/180)*nextDistance,
       faceOffsetDeg:offset,
       faceAlignmentOffsetDeg:offset,
@@ -36254,6 +36273,10 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       savePlayerProfiles();
       syncCoreProfileFromActive();
     }
+    if(opts.render==="preview"){
+      gdRenderBubbleOffsetHub();
+      return true;
+    }
     if(opts.render!==false){
       gdRenderBubbleOffsetHub();
       renderPracticeData(true);
@@ -36269,15 +36292,16 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     document.addEventListener("pointerdown",event=>{
       const svg=event.target?.closest?.("svg[data-gd-my-bubble-lane='1']");
       if(!svg)return;
+      const handle=event.target?.closest?.("[data-gd-lane-drag-handle='1']");
+      if(!handle)return;
       if(event.button&&event.button!==0)return;
       const distance=gdMyBubbleLaneDistanceFromEvent(svg,event);
       if(!Number.isFinite(Number(distance)))return;
       event.preventDefault();
       event.stopPropagation();
-      gdMyBubbleLaneDrag={pointerId:event.pointerId,svg,lastDistance:distance};
+      gdMyBubbleLaneDrag={pointerId:event.pointerId,svg,lastDistance:distance,startX:event.clientX,startY:event.clientY,active:false};
       svg.classList.add("dragging");
       try{svg.setPointerCapture(event.pointerId)}catch(e){}
-      gdMyBubbleStageLaneDistance(distance,{persist:false});
     },true);
     document.addEventListener("pointermove",event=>{
       const drag=gdMyBubbleLaneDrag;
@@ -36287,9 +36311,14 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       if(!Number.isFinite(Number(distance)))return;
       event.preventDefault();
       event.stopPropagation();
+      if(!drag.active){
+        const moved=Math.abs(Number(event.clientX)-Number(drag.startX));
+        if(moved<5)return;
+        drag.active=true;
+      }
       if(Math.abs(Number(distance)-Number(drag.lastDistance))<.5)return;
       drag.lastDistance=distance;
-      gdMyBubbleStageLaneDistance(distance,{persist:false});
+      gdMyBubbleStageLaneDistance(distance,{persist:false,render:"preview"});
     },true);
     const finish=event=>{
       const drag=gdMyBubbleLaneDrag;
@@ -36300,7 +36329,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       event.stopPropagation();
       if(svg)svg.classList.remove("dragging");
       gdMyBubbleLaneDrag=null;
-      if(Number.isFinite(Number(distance))&&gdMyBubbleStageLaneDistance(distance,{persist:true})){
+      if(drag.active&&Number.isFinite(Number(distance))&&gdMyBubbleStageLaneDistance(distance,{persist:true})){
         gdLmToast("My Bubble distance ready to save");
       }
     };
@@ -36346,7 +36375,8 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       const analysis=gdPracticeProjectionReadyAnalysis();
       const pendingBubble=pending.bubble&&typeof pending.bubble==="object"?pending.bubble:{};
       const club=pending.club||pendingBubble.club||gdCompareClub||"7i";
-      const baseDistance=Number(pendingBubble.baseDistanceM||pendingBubble.baseCarry||pendingBubble.expectedDistanceM)||gdShotBubbleSafe(()=>gdDefaultCarryForClub(club),155)||155;
+      const rawBaseDistance=Number(pendingBubble.baseDistanceM||pendingBubble.baseCarry||pendingBubble.expectedDistanceM)||gdShotBubbleSafe(()=>gdDefaultCarryForClub(club),155)||155;
+      const baseDistance=pending.distanceMode==="manual-preview"?gdMyBubbleClampLaneDistance(rawBaseDistance,club,pendingBubble):rawBaseDistance;
       const bubble=Object.assign({},pendingBubble,{
         club,
         baseCarry:baseDistance,
@@ -39267,9 +39297,13 @@ body.gdGpsActive #bagRailBtn{order:7!important}
   height:100%!important;
 }
 .gdShotBubbleHubPreview svg[data-gd-my-bubble-lane="1"]{
-  cursor:ew-resize!important;
+  cursor:default!important;
   touch-action:none!important;
   user-select:none!important;
+}
+.gdShotBubbleHubPreview svg[data-gd-my-bubble-lane="1"] .gdMyBubbleLandingHandle,
+.gdShotBubbleHubPreview svg[data-gd-my-bubble-lane="1"] .gdMyBubbleLandingHit{
+  cursor:ew-resize!important;
 }
 .gdShotBubbleHubPreview svg[data-gd-my-bubble-lane="1"].dragging{
   cursor:grabbing!important;
