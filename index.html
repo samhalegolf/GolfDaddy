@@ -25315,7 +25315,7 @@ function gdShotBubbleOverlayBubblePath(bubble,plot,xForDistance,yForLateral){
 }
 function gdShotBubbleOverlayTypeStyle(source,view){
   const key=String(source||"").toLowerCase();
-  if(key==="practice-bubble-projection")return{colour:"#37f28d",fillOpacity:".14",strokeOpacity:".80",strokeWidth:"1.55"};
+  if(key==="practice-bubble-projection")return{colour:"#62d2ff",fillOpacity:".13",strokeOpacity:".82",strokeWidth:"1.55"};
   if(key==="my-bubble")return{colour:"#d7b06b",fillOpacity:".16",strokeOpacity:".72",strokeWidth:"1.45"};
   if(key==="offset-hub-underlay")return{colour:"#d7b06b",fillOpacity:".075",strokeOpacity:".62",strokeWidth:"1.35"};
   if(key==="gps-bubble"||view==="compare")return{colour:"#d7b06b",fillOpacity:".075",strokeOpacity:".62",strokeWidth:"1.35"};
@@ -25343,7 +25343,8 @@ function gdShotBubbleOverlayLayerMarkup(rows,plot,view,opts={}){
   const fillOpacity=opts.fillOpacity||typeStyle.fillOpacity;
   const strokeOpacity=opts.strokeOpacity||typeStyle.strokeOpacity;
   const strokeWidth=opts.strokeWidth||typeStyle.strokeWidth;
-  return `<g class="${groupClass}" data-offset-deg="${Number(offsetDeg).toFixed(2)}">${hubLine}${bubbles.map(bubble=>{
+  const groupStyle=opts.groupStyle?` style="${gdStatsSvgText(opts.groupStyle)}"`:"";
+  return `<g class="${groupClass}" data-offset-deg="${Number(offsetDeg).toFixed(2)}"${groupStyle}>${hubLine}${bubbles.map(bubble=>{
     const club=bubble.club||bubble.row?.club||"Unknown";
     const path=gdShotBubbleOverlayBubblePath(bubble,plot,xForDistance,yForLateral);
     if(!path)return "";
@@ -32923,6 +32924,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
   let gdPracticeBagWidgetConfirm=false;
   let gdPracticeProjectorOpen=false;
   let gdPracticeProjectionUserTouched=false;
+  let gdPracticeBubbleAdoptionMotion=null;
   let gdPracticeImportOpen=false;
   let gdPracticeImportMode="photo";
   try{gdPracticeImportOpen=localStorage.getItem(GD_PRACTICE_IMPORT_OPEN_KEY)==="1";}catch(e){}
@@ -32987,6 +32989,92 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       const delta=(afterCarry||0)-(beforeCarry||0);
       return {club,type,before:beforeCarry,after:afterCarry,delta};
     }).filter(Boolean);
+  }
+  function gdPracticeDistanceLearningSummary(analysis){
+    const ready=gdPracticeProjectionReadyAnalysis(analysis);
+    const shots=Array.isArray(ready?.acceptedShots)?ready.acceptedShots:[];
+    const groups=new Map();
+    shots.forEach(shot=>{
+      const club=String(shot?.club||"").trim();
+      const carry=Number(shot?.carryM);
+      const actual=Number.isFinite(carry)?carry:gdPracticeShotActualDistance(shot);
+      if(!club||!Number.isFinite(actual)||actual<=0)return;
+      const key=gdShotBubbleOverlayClubKey(club);
+      if(!groups.has(key))groups.set(key,{club,values:[]});
+      groups.get(key).values.push(actual);
+    });
+    const currentRows=gdPracticeBagDraftRows();
+    const currentByClub=gdPracticeBagRowsByClub(currentRows);
+    const nextByClub=Object.assign({},currentByClub);
+    const learnings=[];
+    groups.forEach(group=>{
+      if(group.values.length<3)return;
+      const learned=Math.round(gdShotBubbleMedian(group.values));
+      if(!Number.isFinite(learned)||learned<=0)return;
+      const key=gdShotBubbleOverlayClubKey(group.club);
+      const current=nextByClub[key]||gdPracticeNormaliseBagRow({club:group.club,baseCarry:gdShotBubbleSafe(()=>gdDefaultCarryForClub(group.club),learned)},"practice-distance-default");
+      const before=Math.round(Number(current?.actualDistanceM)||0);
+      const delta=learned-before;
+      if(!before||Math.abs(delta)<1)return;
+      nextByClub[key]=Object.assign({},current,{club:current.club||group.club,actualDistanceM:learned,projectionSource:"practice-distance-learning"});
+      learnings.push({club:current.club||group.club,before,after:learned,delta,count:group.values.length});
+    });
+    const rows=Object.values(nextByClub).filter(Boolean).sort((a,b)=>Number(b.actualDistanceM||0)-Number(a.actualDistanceM||0));
+    const diffs=gdPracticeBagDiffRows(rows);
+    const primary=learnings.slice().sort((a,b)=>Math.abs(b.delta)-Math.abs(a.delta))[0]||null;
+    return {rows,diffs,learnings,primary};
+  }
+  function gdPracticeApplyDistanceLearning(analysis,opts={}){
+    const summary=gdPracticeDistanceLearningSummary(analysis);
+    if(!summary.diffs.length){
+      gdPracticeBagWidgetExpanded=false;
+      gdPracticeBagWidgetConfirm=false;
+      return {changed:false,summary};
+    }
+    if(opts.commit){
+      const bagRows=summary.rows.map(row=>{
+        const carry=Math.max(1,Math.round(Number(row.actualDistanceM)||0));
+        const total=gdShotBubbleSafe(()=>typeof gdBagTotalForCarry==="function"?gdBagTotalForCarry(row.club,carry):carry,carry);
+        return {club:row.club,baseCarry:carry,totalM:Math.max(carry,Math.round(Number(total)||carry))};
+      });
+      if(typeof gdBagPersistRows==="function")gdBagPersistRows(bagRows,{silent:true,render:false});
+      else safe(()=>{
+        const profile=ensureProfile();
+        profile.bag=bagRows;
+        savePlayerProfiles();
+        syncCoreProfileFromActive();
+      });
+      try{localStorage.removeItem(GD_PRACTICE_BAG_DRAFT_KEY);}catch(e){}
+      gdPracticeBagWidgetExpanded=false;
+      gdPracticeBagWidgetConfirm=false;
+      safe(()=>typeof renderBagPanel==="function"&&renderBagPanel());
+      safe(()=>typeof renderProfilePanel==="function"&&renderProfilePanel());
+      return {changed:true,committed:true,summary};
+    }
+    gdPracticeSaveBagDraftRows(summary.rows);
+    gdPracticeBagWidgetExpanded=true;
+    gdPracticeBagWidgetConfirm=false;
+    gdPracticeProjectorOpen=true;
+    return {changed:true,committed:false,summary};
+  }
+  function gdPracticeDistanceDeltaSvg(plot,summary){
+    const primary=summary?.primary;
+    if(!plot||!primary||!Number.isFinite(Number(primary.delta))||Math.abs(Number(primary.delta))<1)return "";
+    const halfWidth=(plot.plotRight-plot.plotLeft)/2;
+    const delta=Number(primary.delta);
+    const x0=plot.plotMidX;
+    const x1=plot.plotMidX+gdShotChartClamp(delta/plot.depthRange,-1,1)*halfWidth;
+    const y=plot.plotTop+13;
+    const label=`${delta>0?"+":""}${Math.round(delta)}m`;
+    const tone=delta>0?"longer":"shorter";
+    const colour=delta>0?"#62d2ff":"#8fb8ff";
+    const textX=gdShotChartClamp(x1,plot.plotLeft+24,plot.plotRight-24);
+    return `<g class="gdPracticeDistanceDelta ${tone}" data-club="${gdStatsSvgText(primary.club)}" data-delta-m="${Math.round(delta)}" aria-hidden="true">
+      <line x1="${x0.toFixed(1)}" y1="${y.toFixed(1)}" x2="${x1.toFixed(1)}" y2="${y.toFixed(1)}" stroke="${colour}" stroke-width="2" stroke-linecap="round" stroke-opacity=".82"/>
+      <circle cx="${x0.toFixed(1)}" cy="${y.toFixed(1)}" r="3.2" fill="rgba(215,176,107,.86)"/>
+      <circle cx="${x1.toFixed(1)}" cy="${y.toFixed(1)}" r="4.1" fill="${colour}" fill-opacity=".92"/>
+      <text x="${textX.toFixed(1)}" y="${(y-8).toFixed(1)}" text-anchor="middle" fill="${colour}" font-size="8.5" font-weight="950" letter-spacing="0">${gdStatsSvgText(label)}</text>
+    </g>`;
   }
   function gdPracticeBagDraftDirty(){
     return gdPracticeLoadBagDraftRows().length>0&&gdPracticeBagDiffRows().length>0;
@@ -34215,17 +34303,21 @@ body.gdAuthLocked #gdProfileV67 .topbar{
   function gdPracticeGenerateBubble(){
     const analysis=gdPracticeProjectionReadyAnalysis();
     const ctx=gdPracticeProjectionContext(analysis);
-    if(!ctx.canProject){
+    if(!ctx.canProject||gdPracticeCurrentBubbleWasAdopted(safe(()=>ensureProfile(),null),analysis)){
       gdLmToast("Practice Bubble not ready");
       return false;
     }
     gdPracticeProjectorOpen=false;
+    gdPracticeBubbleAdoptionMotion=null;
     gdPracticeSetProjectionOverlay(!ctx.visible,analysis);
     gdLmToast(ctx.visible?"Practice Bubble hidden":"Practice Bubble generated");
     return false;
   }
   function gdPracticeAdoptBubbleFromAction(){
-    return gdPracticeAdoptBubbleAsPlayingBubble();
+    return gdPracticeAdoptBubbleAsPlayingBubble("direction");
+  }
+  function gdPracticeAdoptBubbleWithDistance(){
+    return gdPracticeAdoptBubbleAsPlayingBubble("distance-direction");
   }
   function gdPracticeCanShowSandboxControls(){
     return gdPracticeAdminIsOpen()&&gdPracticeToleranceCanEdit();
@@ -34366,13 +34458,18 @@ body.gdAuthLocked #gdProfileV67 .topbar{
   function gdPracticeProjectionControlsHTML(analysis){
     const ctx=gdPracticeProjectionContext(analysis);
 	    const bagActive=gdPracticeBagWidgetExpanded||gdPracticeBagDraftDirty();
-	    const adopted=gdPracticePlayingBubbleIsAdopted(safe(()=>ensureProfile(),null));
-	    const generated=ctx.canProject&&ctx.visible;
-	    const generateDisabled=ctx.canProject?"":"disabled";
-	    const adoptDisabled=adopted||ctx.canProject&&ctx.visible?"":"disabled";
+	    const profile=safe(()=>ensureProfile(),null);
+	    const currentAdopted=gdPracticeCurrentBubbleWasAdopted(profile,analysis);
+	    const canGenerate=ctx.canProject&&!currentAdopted;
+	    const generated=canGenerate&&ctx.visible;
+	    const generateDisabled=canGenerate?"":"disabled";
+	    const adoptDisabled=currentAdopted||generated?"":"disabled";
 	    const generateLabel=generated?"Practice Bubble Generated":"Generate Bubble";
-	    const adoptLabel=adopted?"My Bubble Active":"Adopt Bubble";
-	    const actionDock=`<div class="gdPracticeActionDock ${generated?"generated":ctx.canProject?"ready":"waiting"} ${bagActive?"bagOpen":""}"><div class="gdPracticePrimaryActions"><button type="button" class="gdPracticeBubbleAction generate ${ctx.canProject?"ready":""} ${generated?"active":""}" aria-pressed="${generated?"true":"false"}" ${generateDisabled} onclick="return gdPracticeGenerateBubble()">${gdEscapeHTML(generateLabel)}</button><button type="button" class="gdPracticeBubbleAction adopt ${adopted?"adopted":""}" aria-pressed="${adopted?"true":"false"}" ${adoptDisabled} onclick="return gdPracticeAdoptBubbleFromAction()">${gdEscapeHTML(adoptLabel)}</button></div><button type="button" class="gdPracticeBagToggle gdPracticeBagAction ${bagActive?"active":""}" aria-label="Bag suggestions" aria-pressed="${gdPracticeBagWidgetExpanded?"true":"false"}" data-gd-practice-bag-toggle><img src="assets/home/bag.png" alt=""></button></div>`;
+	    const adoptLabel=currentAdopted?"My Bubble Active":"Adopt Bubble";
+	    const adoptControl=generated
+	      ? `<div class="gdPracticeAdoptSplit" role="group" aria-label="Adopt Practice Bubble"><button type="button" class="gdPracticeBubbleAction adopt split distance" onclick="return gdPracticeAdoptBubbleWithDistance()">Adopt Distance + Direction</button><button type="button" class="gdPracticeBubbleAction adopt split direction" onclick="return gdPracticeAdoptBubbleFromAction()">Adopt Direction</button></div>`
+	      : `<button type="button" class="gdPracticeBubbleAction adopt ${currentAdopted?"adopted":""}" aria-pressed="${currentAdopted?"true":"false"}" ${adoptDisabled} onclick="return gdPracticeAdoptBubbleFromAction()">${gdEscapeHTML(adoptLabel)}</button>`;
+	    const actionDock=`<div class="gdPracticeActionDock ${generated?"generated":canGenerate?"ready":"waiting"} ${bagActive?"bagOpen":""} ${currentAdopted?"myBubbleActive":""}"><div class="gdPracticePrimaryActions"><button type="button" class="gdPracticeBubbleAction generate ${canGenerate?"ready":""} ${generated?"active":""}" aria-pressed="${generated?"true":"false"}" ${generateDisabled} onclick="return gdPracticeGenerateBubble()">${gdEscapeHTML(generateLabel)}</button>${adoptControl}</div><button type="button" class="gdPracticeBagToggle gdPracticeBagAction ${bagActive?"active":""}" aria-label="Bag suggestions" aria-pressed="${gdPracticeBagWidgetExpanded?"true":"false"}" data-gd-practice-bag-toggle><img src="assets/home/bag.png" alt=""></button></div>`;
     return `${actionDock}${gdPracticeBagWidgetHTML(analysis,ctx)}${gdPracticeSandboxControlsHTML("compact")}`;
   }
 	  function gdRenderPracticeProjectionControls(analysis){
@@ -34391,7 +34488,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	  }
 	  function gdPracticePlayingBubbleActionLabel(){
 	    const p=safe(()=>ensureProfile(),null)||{};
-	    if(gdPracticePlayingBubbleIsAdopted(p))return "My Bubble Active";
+	    if(gdPracticeCurrentBubbleWasAdopted(p,gdPracticeProjectionReadyAnalysis()))return "My Bubble Active";
 	    return "Adopt Bubble";
 	  }
 	  function gdPracticePlayingBubbleIsAdopted(profile){
@@ -34411,9 +34508,11 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	    root.hidden=!html;
 	    root.innerHTML=html;
 	  }
-		  function gdPracticeAdoptBubbleAsPlayingBubble(){
+		  function gdPracticeAdoptBubbleAsPlayingBubble(mode="direction"){
 		    const p=ensureProfile();
-		    if(gdPracticePlayingBubbleIsAdopted(p)){
+		    const analysis=gdPracticeProjectionReadyAnalysis();
+		    const adoptDistance=String(mode||"direction")==="distance-direction";
+		    if(gdPracticeCurrentBubbleWasAdopted(p,analysis)){
 		      const previous=p.practiceBubblePreviousState||{};
 	      if(Object.prototype.hasOwnProperty.call(previous,"faceOffsetDeg"))p.faceOffsetDeg=previous.faceOffsetDeg;
 	      else delete p.faceOffsetDeg;
@@ -34434,12 +34533,12 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	      renderPracticeData(true);
 	      renderDataHubStatus();
 	      if(document.getElementById("statsPanel")?.classList.contains("open"))renderStats();
-	      renderCompareData();
-	      safe(()=>typeof renderShot==="function"&&renderShot());
+	    renderCompareData();
+	    safe(()=>typeof renderShot==="function"&&renderShot());
+	    gdPracticeBubbleAdoptionMotion=null;
 		      gdLmToast("My Bubble restored");
 		      return false;
 		    }
-		    const analysis=gdPracticeProjectionReadyAnalysis();
 		    const source=gdPracticeBubbleSource(analysis);
 		    const method=gdPracticeBubbleMethod(analysis);
 		    const offset=Number(source?.offsetDeg??method?.anchorDeg);
@@ -34447,11 +34546,14 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 		      gdLmToast("Practice Bubble not ready");
 		      return false;
 		    }
-	    p.practiceBubblePreviousState={};
-	    if(Object.prototype.hasOwnProperty.call(p,"faceOffsetDeg"))p.practiceBubblePreviousState.faceOffsetDeg=p.faceOffsetDeg;
-	    if(Object.prototype.hasOwnProperty.call(p,"centralFaceOffsetDeg"))p.practiceBubblePreviousState.centralFaceOffsetDeg=p.centralFaceOffsetDeg;
-	    if(Object.prototype.hasOwnProperty.call(p,"previewBubbleSet"))p.practiceBubblePreviousState.previewBubbleSet=p.previewBubbleSet;
-	    if(Object.prototype.hasOwnProperty.call(p,"bubbleProfiles"))p.practiceBubblePreviousState.bubbleProfiles=p.bubbleProfiles;
+	    const previousOffset=gdPracticeMyBubbleOffsetDeg(p);
+	    if(!p.practiceBubblePreviousState){
+	      p.practiceBubblePreviousState={};
+	      if(Object.prototype.hasOwnProperty.call(p,"faceOffsetDeg"))p.practiceBubblePreviousState.faceOffsetDeg=p.faceOffsetDeg;
+	      if(Object.prototype.hasOwnProperty.call(p,"centralFaceOffsetDeg"))p.practiceBubblePreviousState.centralFaceOffsetDeg=p.centralFaceOffsetDeg;
+	      if(Object.prototype.hasOwnProperty.call(p,"previewBubbleSet"))p.practiceBubblePreviousState.previewBubbleSet=p.previewBubbleSet;
+	      if(Object.prototype.hasOwnProperty.call(p,"bubbleProfiles"))p.practiceBubblePreviousState.bubbleProfiles=p.bubbleProfiles;
+	    }
 	    p.faceOffsetDeg=offset;
 	    p.centralFaceOffsetDeg=offset;
 	    p.practiceBubbleAdoptedAt=new Date().toISOString();
@@ -34460,7 +34562,9 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	      offsetDeg:Number(offset.toFixed(2)),
 	      status:method?.status||"",
 	      club:source?.club||method?.anchorClub||"",
-	      shots:Number(source?.shots||method?.countedShots||0)
+	      shots:Number(source?.shots||method?.countedShots||0),
+	      fingerprint:gdPracticeBubbleFingerprint(analysis),
+	      distanceMode:adoptDistance?"committed":"review"
 	    };
 	    const adoptedClub=source?.club||method?.anchorClub||gdCompareClub||"7i";
 	    const adoptedBase=Number(source?.baseDistanceM||source?.expectedDistanceM||source?.meanExpectedM)||gdShotBubbleSafe(()=>gdDefaultCarryForClub(adoptedClub),155);
@@ -34485,16 +34589,35 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	    p.bubbleProfiles=Object.assign({},p.bubbleProfiles||{});
 	    p.bubbleProfiles[gdCompareClubKey(adoptedClub)||"7i"]=adoptedBubble;
 	    p.updatedAt=new Date().toISOString();
+	    const distanceResult=gdPracticeApplyDistanceLearning(analysis,{commit:adoptDistance});
 	    savePlayerProfiles();
 	    syncCoreProfileFromActive();
 	    document.querySelectorAll(".gdBubbleFaceOffsetInput").forEach(input=>{input.dataset.editing="0";input.readOnly=true;input.value="Current";});
+	    gdPracticeBubbleAdoptionMotion={
+	      at:Date.now(),
+	      fromOffset:Number.isFinite(Number(previousOffset))?Number(previousOffset):0,
+	      toOffset:offset,
+	      fingerprint:gdPracticeBubbleFingerprint(analysis)
+	    };
+	    gdShotBubbleOverlayState.practice=false;
+	    window.gdShotBubbleOverlayState=gdShotBubbleOverlayState;
+	    document.documentElement.dataset.gdOverlayPractice="off";
 	    gdRenderBubbleOffsetHub();
 	    renderPracticeData(true);
 	    renderDataHubStatus();
 	    if(document.getElementById("statsPanel")?.classList.contains("open"))renderStats();
 	    renderCompareData();
 	    safe(()=>typeof renderShot==="function"&&renderShot());
-	    gdLmToast("Practice Bubble adopted as My Bubble");
+	    setTimeout(()=>{
+	      if(gdPracticeBubbleAdoptionMotion&&gdPracticeBubbleAdoptionMotion.fingerprint===gdPracticeBubbleFingerprint(gdPracticeProjectionReadyAnalysis())){
+	        gdPracticeBubbleAdoptionMotion=null;
+	        renderPracticeData(true);
+	      }
+	    },1500);
+	    const distanceLabel=distanceResult.changed
+	      ? adoptDistance?"Distance + direction adopted":"Direction adopted; distance sent to bag review"
+	      : "Direction adopted";
+	    gdLmToast(distanceLabel);
 	    return false;
 	  }
 	  function gdRenderComparePracticeProjector(ctx){
@@ -34546,20 +34669,57 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       Number.isFinite(radius)&&radius>0
     );
   }
-  function gdPracticeMyBubbleOffsetDeg(profile){
+  function gdPracticeBubbleFingerprint(analysis){
+    const ready=gdPracticeProjectionReadyAnalysis(analysis);
+    if(!ready)return "";
+    const method=gdPracticeBubbleMethod(ready);
+    const offset=gdPracticeBubbleOffsetDeg(ready);
+    const accepted=Array.isArray(ready.acceptedShots)?ready.acceptedShots:[];
+    const totals=ready.totals||{};
+    const timestamps=accepted.map(shot=>Date.parse(shot?.timestamp||shot?.startedAt||shot?.createdAt||"")).filter(Number.isFinite).sort((a,b)=>b-a);
+    const clubs=[...new Set(accepted.map(shot=>String(shot?.club||"").trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})).join(",");
+    return [
+      Number.isFinite(offset)?Number(offset).toFixed(2):"",
+      String(method?.anchorClub||""),
+      Number(method?.countedShots||method?.shots||0)||0,
+      Number(totals.rawShots||totals.acceptedShots||accepted.length||0)||0,
+      timestamps[0]||0,
+      clubs
+    ].join("|");
+  }
+  function gdPracticeCurrentBubbleWasAdopted(profile,analysis){
+    const p=profile||safe(()=>ensureProfile(),null)||{};
+    const source=p.practiceBubbleSource||{};
+    if(!gdPracticePlayingBubbleIsAdopted(p))return false;
+    const currentFingerprint=gdPracticeBubbleFingerprint(analysis);
+    if(source.fingerprint&&currentFingerprint)return source.fingerprint===currentFingerprint;
+    const currentOffset=gdPracticeBubbleOffsetDeg(gdPracticeProjectionReadyAnalysis(analysis));
+    const adoptedOffset=Number(source.offsetDeg);
+    return Number.isFinite(currentOffset)&&Number.isFinite(adoptedOffset)&&Math.abs(currentOffset-adoptedOffset)<.02;
+  }
+  function gdPracticeMyBubbleState(profile,analysis){
     const p=profile||safe(()=>ensureProfile(),null)||{};
     const adoptedSource=p.practiceBubbleSource||{};
     const adoptedOffset=Number(adoptedSource.offsetDeg);
-    if(adoptedSource.active&&Number.isFinite(adoptedOffset))return adoptedOffset;
-    if(!p||p.placeholderProfile)return null;
+    const currentAdopted=gdPracticeCurrentBubbleWasAdopted(p,analysis);
+    if(adoptedSource.active&&Number.isFinite(adoptedOffset)){
+      return{offset:adoptedOffset,kind:currentAdopted?"adopted-current":"saved",label:currentAdopted?"My Bubble active":"My Bubble saved",graphLabel:"MY"};
+    }
+    const defaultState={offset:0,kind:"default",label:"Default My Bubble 0.0°",graphLabel:"DEFAULT"};
+    if(!p||p.placeholderProfile)return defaultState;
     const sources=[];
     if(p.previewBubbleSet)sources.push(p.previewBubbleSet);
     if(p.bubbleProfiles&&typeof p.bubbleProfiles==="object"){
       try{Object.values(p.bubbleProfiles).forEach(source=>sources.push(source));}catch(e){}
     }
-    if(!sources.some(gdPracticeBubbleSourceLooksReal))return null;
+    if(!sources.some(gdPracticeBubbleSourceLooksReal))return defaultState;
     const offset=Number(p.faceOffsetDeg??p.centralFaceOffsetDeg??p.previewBubbleSet?.faceOffsetDeg??p.previewBubbleSet?.faceAlignmentOffsetDeg??p.previewBubbleSet?.offsetDeg);
-    return Number.isFinite(offset)?offset:null;
+    return Number.isFinite(offset)?{offset,kind:"saved",label:`My Bubble ${gdOffsetLabel(offset)}`,graphLabel:"MY"}:defaultState;
+  }
+  function gdPracticeMyBubbleOffsetDeg(profile){
+    const state=gdPracticeMyBubbleState(profile,gdPracticeProjectionReadyAnalysis());
+    const offset=Number(state?.offset);
+    return Number.isFinite(offset)?offset:0;
   }
   function gdPracticeProjectionSelectedClubNames(analysis,dataRows){
     const names=new Set();
@@ -36206,10 +36366,23 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     const dataRows=projectionCtx.dataRows;
     const explicitPracticeOffset=Number(analysis?.__practiceBubbleOffsetDeg);
     const practiceBubbleOffset=Number.isFinite(explicitPracticeOffset)?explicitPracticeOffset:projectionCtx.offset;
-    const myBubbleOffset=gdPracticeMyBubbleOffsetDeg();
+    const myBubbleState=gdPracticeMyBubbleState(null,analysis);
+    const myBubbleOffset=Number(myBubbleState?.offset);
+    const currentBubbleAdopted=gdPracticeCurrentBubbleWasAdopted(null,analysis);
+    const distanceSummary=gdPracticeDistanceLearningSummary(analysis);
+    const adoptionMotion=gdPracticeBubbleAdoptionMotion;
+    const adoptionMotionActive=!!(adoptionMotion&&currentBubbleAdopted&&Date.now()-Number(adoptionMotion.at||0)<1400&&adoptionMotion.fingerprint===gdPracticeBubbleFingerprint(analysis));
     const projectionActive=projectionCtx.visible&&gdPracticeHasBubbleOffset(practiceBubbleOffset)&&projectionCtx.overlayRows.length>0;
-    const overlayRows=projectionActive?projectionCtx.overlayRows:[];
-    const hubRows=gdPracticeHasBubbleOffset(myBubbleOffset)?(projectionCtx.hubRows||[]).filter(row=>Number.isFinite(Number(row.actualDistanceM))&&Number(row.actualDistanceM)>0):[];
+    const showPracticeLayer=(projectionActive||adoptionMotionActive)&&gdPracticeHasBubbleOffset(practiceBubbleOffset)&&projectionCtx.overlayRows.length>0;
+    const learnedByClub=gdPracticeBagRowsByClub(distanceSummary.rows||[]);
+    const overlayRows=showPracticeLayer?projectionCtx.overlayRows.map(row=>{
+      const learned=learnedByClub[gdShotBubbleOverlayClubKey(row.club)];
+      return learned?Object.assign({},row,{actualDistanceM:learned.actualDistanceM,projectionSource:"practice-distance-bubble"}):row;
+    }):[];
+    const sourceDistanceMode=String(safe(()=>ensureProfile()?.practiceBubbleSource?.distanceMode,""));
+    const reviewDistanceOnly=currentBubbleAdopted&&sourceDistanceMode==="review";
+    const hubBaseRows=reviewDistanceOnly?gdShotBubbleOverlayReferenceRows(dataRows):projectionCtx.hubRows||[];
+    const hubRows=gdPracticeHasBubbleOffset(myBubbleOffset)?hubBaseRows.filter(row=>Number.isFinite(Number(row.actualDistanceM))&&Number(row.actualDistanceM)>0):[];
     const hubOffset=gdPracticeHasBubbleOffset(myBubbleOffset)?myBubbleOffset:null;
     const domainRows=overlayRows
       .concat(hubRows)
@@ -36278,6 +36451,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     }
 	    const normalisedRows=gdPracticeNormalisedPlotRows(shots);
 	    const normalisedPlot=gdPracticeNormalisedPlotLayout(normalisedRows,{plotLeft:38,plotRight:458,plotTop,plotBottom});
+	    const distanceDeltaSvg=showPracticeLayer?gdPracticeDistanceDeltaSvg(normalisedPlot,distanceSummary):"";
 	    const clubKeySource=normalisedRows.length?normalisedRows:dataRows;
 	    const clubKey=[...new Set(clubKeySource.map(row=>row.club||"Unknown"))].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})).slice(0,6);
 	    const clubKeyDropdown=gdPracticeClubKeyDropdownHTML(clubKey);
@@ -36288,26 +36462,40 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	      const excluded=!!state.excluded||(!plotAll&&(row.shot?.rejected||practiceExclusionReason(row.shot)));
 	      const colour=excluded?"#8f9a96":gdStatsClubColor(row.club);
 	      const opacity=excluded?".16":row.hasLateral===false?".42":".72";
-	      return gdShotChartDotSvg(point,{fill:colour,opacity,radius:2.2,shape:"circle",stroke:point.clipped?"rgba(255,255,255,.26)":"",strokeWidth:"1"});
+      return gdShotChartDotSvg(point,{fill:colour,opacity,radius:2.2,shape:"circle",stroke:point.clipped?"rgba(255,255,255,.26)":"",strokeWidth:"1"});
 	    }).join("");
+	    let myBubbleMotionStyle="";
+	    if(adoptionMotionActive&&hubRows.length&&gdPracticeHasBubbleOffset(adoptionMotion.fromOffset)&&gdPracticeHasBubbleOffset(hubOffset)){
+	      const anchor=hubRows[0]||{};
+	      const baseDistance=Number(anchor.actualDistanceM||anchor.baseDistanceM||anchor.expectedDistanceM)||155;
+	      const fromLateral=Math.tan(Number(adoptionMotion.fromOffset)*Math.PI/180)*baseDistance;
+	      const toLateral=Math.tan(Number(hubOffset)*Math.PI/180)*baseDistance;
+	      const yForLateral=lateral=>plot.plotMidY+gdShotBubbleOverlayClamp(Number(lateral)/plot.lateralMax,-1,1)*((plot.plotBottom-plot.plotTop)/2);
+	      const dy=yForLateral(fromLateral)-yForLateral(toLateral);
+	      if(Number.isFinite(dy))myBubbleMotionStyle=`--gd-practice-adopt-y:${dy.toFixed(1)}px;`;
+	    }
+	    const myBubbleKind=String(myBubbleState?.kind||"default");
+	    const myBubbleLabel=String(myBubbleState?.graphLabel||"MY");
 	    const myBubbleLayer=hubRows.length&&gdPracticeHasBubbleOffset(hubOffset)?gdShotBubbleOverlayLayerMarkup([],plot,"practice",{
 	      referenceRows:hubRows,
 	      maxBubbles:hubRows.length,
 	      offsetDeg:hubOffset,
-	      groupClass:"gdShotBubbleOverlayLayer gdPracticeMyBubbleLayer gdShotBubbleOverlayLens",
+	      groupClass:`gdShotBubbleOverlayLayer gdPracticeMyBubbleLayer gdPracticeMyBubbleLayer-${myBubbleKind} gdShotBubbleOverlayLens ${adoptionMotionActive?"gdPracticeMyBubbleAdopting":""}`,
 	      source:"my-bubble",
-	      labelText:"MY"
+	      labelText:myBubbleLabel,
+	      groupStyle:myBubbleMotionStyle
 	    }):"";
-	    const practiceBubbleLayer=projectionActive?gdShotBubbleOverlayLayerMarkup([],plot,"practice",{
+	    const practiceBubbleLayer=showPracticeLayer?gdShotBubbleOverlayLayerMarkup([],plot,"practice",{
 	      referenceRows:overlayRows,
 	      maxBubbles:overlayRows.length,
 	      offsetDeg:practiceBubbleOffset,
-	      groupClass:"gdShotBubbleOverlayLayer gdPracticeBubbleProjectionLayer gdShotBubbleOverlayLens",
+	      groupClass:`gdShotBubbleOverlayLayer gdPracticeBubbleProjectionLayer gdShotBubbleOverlayLens ${adoptionMotionActive?"gdPracticeBubbleAdoptionGhost":""}`,
 	      source:"practice-bubble-projection",
 	      labelText:"PRACTICE"
 	    }):"";
 		    return `<svg viewBox="0 0 480 260" role="img" aria-label="Practice Data normalised plot" data-practice-offset-deg="${gdPracticeHasBubbleOffset(practiceBubbleOffset)?Number(practiceBubbleOffset).toFixed(2):""}" data-hub-offset-deg="${gdPracticeHasBubbleOffset(hubOffset)?Number(hubOffset).toFixed(2):""}">
 		      ${gdPracticeNormalisedBackdropSvg(normalisedPlot,"")}
+	      ${distanceDeltaSvg}
 	      ${pts}
 	      ${myBubbleLayer}
 	      ${practiceBubbleLayer}
@@ -37212,6 +37400,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 			      gdPracticeAdoptBubbleAsPlayingBubble:gdPracticeAdoptBubbleAsPlayingBubble,
 		      gdPracticeGenerateBubble:gdPracticeGenerateBubble,
 		      gdPracticeAdoptBubbleFromAction:gdPracticeAdoptBubbleFromAction,
+		      gdPracticeAdoptBubbleWithDistance:gdPracticeAdoptBubbleWithDistance,
 		      gdPracticeLoadSandboxNativeRows:gdPracticeLoadSandboxNativeRows,
 		      gdPracticeSimulateSandboxImport:gdPracticeSimulateSandboxImport,
 		      gdPracticeSetSandboxBag:gdPracticeSetSandboxBag,
@@ -38553,18 +38742,18 @@ body.gdGpsActive #bagRailBtn{order:7!important}
 }
 .gdShotDataHubCard.gdOffsetHubDetails{
   background:
-    radial-gradient(ellipse 52% 82% at 72% 54%,rgba(244,248,243,.17),rgba(244,248,243,.055) 46%,transparent 74%),
+    radial-gradient(ellipse 52% 82% at 72% 54%,rgba(215,176,107,.24),rgba(215,176,107,.07) 46%,transparent 74%),
     linear-gradient(180deg,rgba(20,35,34,.92),rgba(7,12,11,.98))!important;
-  border-color:rgba(244,248,243,.16)!important;
-  box-shadow:0 18px 42px rgba(0,0,0,.28),0 0 22px rgba(244,248,243,.08),inset 0 1px 0 rgba(255,255,255,.05)!important;
+  border-color:rgba(215,176,107,.28)!important;
+  box-shadow:0 18px 42px rgba(0,0,0,.28),0 0 22px rgba(215,176,107,.11),inset 0 1px 0 rgba(255,255,255,.05)!important;
 }
 .gdShotDataHubCard.gdOffsetHubDetails[open],
 .gdShotDataHubCard.gdOffsetHubDetails.open{
   background:
-    radial-gradient(ellipse 58% 92% at 72% 57%,rgba(244,248,243,.20),rgba(244,248,243,.065) 46%,transparent 74%),
+    radial-gradient(ellipse 58% 92% at 72% 57%,rgba(215,176,107,.28),rgba(215,176,107,.08) 46%,transparent 74%),
     linear-gradient(180deg,rgba(22,39,38,.94),rgba(7,12,11,.98))!important;
-  border-color:rgba(244,248,243,.24)!important;
-  box-shadow:0 18px 42px rgba(0,0,0,.30),0 0 30px rgba(244,248,243,.12),inset 0 1px 0 rgba(255,255,255,.06)!important;
+  border-color:rgba(215,176,107,.36)!important;
+  box-shadow:0 18px 42px rgba(0,0,0,.30),0 0 30px rgba(215,176,107,.14),inset 0 1px 0 rgba(255,255,255,.06)!important;
 }
 .gdShotDataHubCard.gdOffsetHubDetails[open] .gdOffsetHubSummary,
 .gdShotDataHubCard.gdOffsetHubDetails.open .gdOffsetHubSummary{
@@ -38862,13 +39051,45 @@ body.gdGpsActive #bagRailBtn{order:7!important}
   stroke-width:1.45!important;
   filter:drop-shadow(0 0 12px rgba(215,176,107,.16))!important;
 }
-#gdPracticeDataVisual .gdPracticeBubbleProjectionLayer .gdOffsetHubBubble{
+#gdPracticeDataVisual .gdPracticeMyBubbleLayer-adopted-current .gdOffsetHubBubble,
+#gdPracticeDataVisual .gdPracticeMyBubbleAdopting .gdOffsetHubBubble{
   fill:#37f28d!important;
-  fill-opacity:.14!important;
+  fill-opacity:.18!important;
   stroke:#37f28d!important;
+  stroke-opacity:.88!important;
+  stroke-width:1.65!important;
+  filter:drop-shadow(0 0 15px rgba(55,242,141,.24))!important;
+}
+#gdPracticeDataVisual .gdPracticeBubbleProjectionLayer .gdOffsetHubBubble{
+  fill:#62d2ff!important;
+  fill-opacity:.13!important;
+  stroke:#62d2ff!important;
   stroke-opacity:.82!important;
   stroke-width:1.55!important;
-  filter:drop-shadow(0 0 12px rgba(55,242,141,.14))!important;
+  filter:drop-shadow(0 0 12px rgba(98,210,255,.16))!important;
+}
+#gdPracticeDataVisual .gdPracticeMyBubbleAdopting{
+  transform-box:view-box!important;
+  transform-origin:center!important;
+  animation:gdPracticeMyBubbleAdoptTravel 1.35s cubic-bezier(.2,.72,.18,1) both!important;
+}
+#gdPracticeDataVisual .gdPracticeBubbleAdoptionGhost{
+  animation:gdPracticeBubbleAdoptionGhost 1.35s ease both!important;
+}
+#gdPracticeDataVisual .gdPracticeDistanceDelta line,
+#gdPracticeDataVisual .gdPracticeDistanceDelta circle,
+#gdPracticeDataVisual .gdPracticeDistanceDelta text{
+  filter:drop-shadow(0 0 8px rgba(98,210,255,.18))!important;
+}
+@keyframes gdPracticeMyBubbleAdoptTravel{
+  0%{transform:translateY(var(--gd-practice-adopt-y,0px));opacity:.88}
+  55%{opacity:.96}
+  100%{transform:translateY(0);opacity:1}
+}
+@keyframes gdPracticeBubbleAdoptionGhost{
+  0%{opacity:.88}
+  58%{opacity:.44}
+  100%{opacity:0}
 }
 .gdShotBubbleOverlayToggle{
   position:absolute!important;
@@ -40329,8 +40550,8 @@ body.gdGpsActive #bagRailBtn{order:7!important}
 		}
 		.gdPracticeBubbleAction.adopt:not(:disabled){
 		  color:#06100b!important;
-		  background:linear-gradient(180deg,#37f28d,#20bd69)!important;
-		  border-color:rgba(55,242,141,.58)!important;
+		  background:linear-gradient(180deg,#d7b06b,#b88d42)!important;
+		  border-color:rgba(215,176,107,.62)!important;
 		}
 		.gdPracticeBubbleAction.generate.active{
 		  color:#041426!important;
@@ -40339,8 +40560,33 @@ body.gdGpsActive #bagRailBtn{order:7!important}
 		}
 		.gdPracticeBubbleAction.adopt.adopted{
 		  color:#06100b!important;
-		  background:linear-gradient(180deg,#d7b06b,#a97932)!important;
-	  border-color:rgba(215,176,107,.58)!important;
+		  background:linear-gradient(180deg,#37f28d,#20bd69)!important;
+	  border-color:rgba(55,242,141,.58)!important;
+	}
+	.gdPracticeAdoptSplit{
+	  display:grid!important;
+	  grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important;
+	  gap:7px!important;
+	  min-width:0!important;
+	  animation:gdPracticeAdoptSplitIn .22s ease both!important;
+	}
+	.gdPracticeAdoptSplit .gdPracticeBubbleAction{
+	  min-height:42px!important;
+	  white-space:normal!important;
+	  line-height:1.08!important;
+	  padding:8px 9px!important;
+	}
+	.gdPracticeAdoptSplit .gdPracticeBubbleAction.distance{
+	  background:linear-gradient(180deg,#e4c47d,#b88d42)!important;
+	  border-color:rgba(215,176,107,.72)!important;
+	}
+	.gdPracticeAdoptSplit .gdPracticeBubbleAction.direction{
+	  background:linear-gradient(180deg,#d7b06b,#a97932)!important;
+	  border-color:rgba(215,176,107,.62)!important;
+	}
+	@keyframes gdPracticeAdoptSplitIn{
+	  from{opacity:0;transform:translateY(-3px) scaleY(.96)}
+	  to{opacity:1;transform:translateY(0) scaleY(1)}
 	}
 	.gdPracticeBubbleAction:disabled{
 	  opacity:.45!important;
