@@ -35174,15 +35174,18 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     const bubbleX=frame.x(aim.x);
     const bubbleY=frame.y(aim.y);
     const bubbleSize=gdShotBubbleSize(width,height,opts);
-    const bubblePath=gdShotBubbleSimulatedModelPath(frame,aim.x,aim.y,bubbleSize.rxModel,bubbleSize.ryModel,Object.assign({},opts,{tiltDeg:drawable?gdShotBubbleDisplayTiltDeg(drawable):aim.angle}));
+    const renderTilt=Number.isFinite(Number(opts.tiltDeg))?Number(opts.tiltDeg):(drawable?gdShotBubbleDisplayTiltDeg(drawable):aim.angle);
+    const bubblePath=gdShotBubbleSimulatedModelPath(frame,aim.x,aim.y,bubbleSize.rxModel,bubbleSize.ryModel,Object.assign({},opts,{tiltDeg:renderTilt}));
     const stroke=opts.stroke||"#ff9f2f";
     const fill=opts.fill||"rgba(239,68,68,.10)";
     const opacity=Number.isFinite(Number(opts.opacity))?Number(opts.opacity):.56;
     const className=opts.className||"gdShotBubbleGeneratedLayer";
     const lineWidth=Math.max(1.35,frame.len(frame.modelW*.0048));
     const bubbleStroke=Math.max(1.2,frame.len(frame.modelW*.004));
+    const lineEndY=opts.lineMode==="straight"?y:bubbleY;
+    const lineMarkup=opts.showAimLine===false?"":`<line x1="${startX}" y1="${y}" x2="${bubbleX}" y2="${lineEndY}" stroke="${stroke}" stroke-width="${lineWidth}" stroke-linecap="round"/>`;
     return `<g class="${className}" opacity="${opacity}">
-      <line x1="${startX}" y1="${y}" x2="${bubbleX}" y2="${bubbleY}" stroke="${stroke}" stroke-width="${lineWidth}" stroke-linecap="round"/>
+      ${lineMarkup}
       <path d="${bubblePath}" fill="${fill}" stroke="${stroke}" stroke-width="${bubbleStroke}" stroke-linejoin="round"/>
     </g>`;
   }
@@ -35200,6 +35203,14 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	    const min=gdMyBubbleLaneMinDistance(club,source);
 	    return gdShotBubbleOverlayClamp(Number(distance),min,max);
 	  }
+	  function gdMyBubbleScaledSourceMetric(source,keys,scale=1){
+	    const list=Array.isArray(keys)?keys:[keys];
+	    for(const key of list){
+	      const value=Number(source?.[key]);
+	      if(Number.isFinite(value)&&value>0)return value*Math.max(.1,Number(scale)||1);
+	    }
+	    return NaN;
+	  }
 	  function gdShotBubblePlayingLaneSvg(offset,sizeOpts={}){
 	    const width=480;
 	    const height=132;
@@ -35211,61 +35222,54 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	    const sourceDistance=Number(source.baseDistanceM||source.expectedDistanceM||source.meanExpectedM||source.baseCarry);
 	    const fallbackDistance=gdShotBubbleSafe(()=>gdDefaultCarryForClub(club),155)||155;
 	    const baseDistance=gdMyBubbleClampLaneDistance(Number.isFinite(sourceDistance)&&sourceDistance>0?sourceDistance:fallbackDistance,club,source);
-	    const generated=gdShotBubbleSafe(()=>gdGeneratedShotBubbleForClub(club,baseDistance,liveOffset),null)||{};
-	    const drawableSource=Object.assign({},source,{
-	      club,
-	      actualDistanceM:baseDistance,
-	      baseDistanceM:baseDistance,
-	      baseCarry:baseDistance
-	    });
-	    const drawable=generated&&Number.isFinite(Number(generated.baseDistanceM))
-	      ? gdShotBubbleNormaliseDrawable(generated,drawableSource,liveOffset)
-	      : Object.assign({},drawableSource,{
-	        centerDistanceM:baseDistance,
-	        centerLateralM:Math.tan(liveOffset*Math.PI/180)*baseDistance,
-	        lateralRadiusM:Math.max(3,baseDistance*.055),
-	        depthRadiusM:Math.max(5,baseDistance*.08),
-	        offsetDeg:liveOffset
-	      });
-	    const centerDistance=baseDistance;
-	    const centerLateral=Math.tan(liveOffset*Math.PI/180)*baseDistance;
-	    const bubble=Object.assign({},drawable,{
-	      club,
-	      baseDistanceM:baseDistance,
-	      centerDistanceM:centerDistance,
-	      centerLateralM:centerLateral,
-	      offsetDeg:liveOffset
-	    });
+	    const shapeScale=Number.isFinite(sourceDistance)&&sourceDistance>0?baseDistance/sourceDistance:1;
+	    const scaledWidth=gdMyBubbleScaledSourceMetric(source,["bubbleWidthM","clusterWidthM","visualWidthM","widthM"],shapeScale);
+	    const scaledDepth=gdMyBubbleScaledSourceMetric(source,["bubbleDepthM","clusterDepthM","visualDepthM","depthM"],shapeScale);
 	    const plotLeft=30;
 	    const plotRight=452;
 	    const plotTop=16;
 	    const plotBottom=116;
 	    const plotMidY=(plotTop+plotBottom)/2;
-	    const lateralRadius=Math.max(1,Number(bubble.lateralRadiusM)||Number(bubble.widthM)/2||1);
-	    const depthRadius=Math.max(1,Number(bubble.depthRadiusM)||Number(bubble.depthM)/2||1);
-	    const sameScaleHalfHeight=(laneM*((plotBottom-plotTop)/(plotRight-plotLeft)))/2;
-	    const neededHalfHeight=Math.max(16,Math.abs(centerLateral)+lateralRadius+Math.abs(Math.sin((Number(bubble.tiltDeg)||0)*Math.PI/180))*depthRadius+3);
-	    const lateralMax=Math.max(sameScaleHalfHeight,neededHalfHeight);
-	    const plot={
-	      plotLeft,
-	      plotRight,
-	      plotTop,
-	      plotBottom,
-	      plotMidY,
-	      minDistance:0,
-	      maxDistance:laneM,
-	      distanceRange:laneM,
-	      lateralMax
-	    };
-	    const xForDistance=distance=>plot.plotLeft+(gdShotBubbleOverlayClamp(distance,0,laneM)/laneM)*(plot.plotRight-plot.plotLeft);
-	    const yForLateral=lateral=>plot.plotMidY+gdShotBubbleOverlayClamp(lateral/plot.lateralMax,-1,1)*((plot.plotBottom-plot.plotTop)/2);
-	    const path=gdShotBubbleOverlayBubblePath(bubble,plot,xForDistance,yForLateral);
-	    const originX=xForDistance(0);
-	    const originY=plot.plotMidY;
-	    const targetX=xForDistance(baseDistance);
-	    const bubbleX=xForDistance(centerDistance);
-	    const bubbleY=yForLateral(centerLateral);
+	    const targetX=plotLeft+(baseDistance/laneM)*(plotRight-plotLeft);
+	    const assetWidth=Number.isFinite(scaledWidth)?scaledWidth:Number(source.bubbleWidthM||source.clusterWidthM||source.visualWidthM||source.widthM);
+	    const assetDepth=Number.isFinite(scaledDepth)?scaledDepth:Number(source.bubbleDepthM||source.clusterDepthM||source.visualDepthM||source.depthM);
+	    const sourceTilt=Number(source.tiltDeg??source.visual?.visualTiltDeg??source.visualTiltDeg??source.clusterTiltDeg);
+	    const sourceSkew=Number(source.skewDeg??source.visual?.visualSkewDeg??source.visualSkewDeg);
 	    const idSuffix=`${String(club).replace(/[^a-z0-9]+/gi,"").slice(0,10)||"club"}${Math.round(baseDistance)}${Math.round((liveOffset+90)*100)}`;
+	    const assetOpts=Object.assign({},source,{
+	      club,
+	      actualDistanceM:baseDistance,
+	      baseDistanceM:baseDistance,
+	      baseCarry:baseDistance,
+	      expectedDistanceM:baseDistance,
+	      meanExpectedM:baseDistance,
+	      offsetDeg:liveOffset,
+	      faceOffsetDeg:liveOffset,
+	      faceAlignmentOffsetDeg:liveOffset,
+	      bubbleWidthM:Number.isFinite(assetWidth)&&assetWidth>0?assetWidth:undefined,
+	      clusterWidthM:Number.isFinite(assetWidth)&&assetWidth>0?assetWidth:undefined,
+	      bubbleDepthM:Number.isFinite(assetDepth)&&assetDepth>0?assetDepth:undefined,
+	      clusterDepthM:Number.isFinite(assetDepth)&&assetDepth>0?assetDepth:undefined,
+	      tiltDeg:Number.isFinite(sourceTilt)?sourceTilt:undefined,
+	      skewDeg:Number.isFinite(sourceSkew)?sourceSkew:source.skewDeg,
+	      startXPct:plotLeft/width,
+	      basePct:targetX/width,
+	      yPct:plotMidY/height,
+	      modelWidth:width,
+	      modelHeight:height,
+	      lineMode:"straight",
+	      stroke:"rgba(215,176,107,.62)",
+	      fill:`url(#gdMyBubbleLaneFill${idSuffix})`,
+	      opacity:.96,
+	      className:"gdMyBubbleGpsAssetLayer"
+	    });
+	    const frame=gdShotBubbleFrame(width,height,assetOpts);
+	    const aim=gdShotBubbleModelEndpoint(liveOffset,frame);
+	    const originX=frame.x(frame.startXModel);
+	    const originY=frame.y(frame.yModel);
+	    const bubbleX=frame.x(aim.x);
+	    const bubbleY=frame.y(aim.y);
+	    const gpsBubbleMarkup=gdShotBubbleAimSvg(width,height,assetOpts);
 	    return `<svg class="gdMyBubbleLaneSvg" data-gd-my-bubble-lane="1" data-viewbox-width="${width}" data-lane-m="${laneM}" data-plot-left="${plotLeft}" data-plot-right="${plotRight}" data-base-distance-m="${baseDistance.toFixed(1)}" data-offset-deg="${liveOffset.toFixed(2)}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
 	      <defs>
 	        <radialGradient id="gdMyBubbleLaneBall${idSuffix}" cx="35%" cy="28%" r="70%">
@@ -35283,14 +35287,10 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	      <line x1="${plotLeft}" y1="${plotTop}" x2="${plotLeft}" y2="${plotBottom}" stroke="rgba(238,245,242,.10)" stroke-width="1"/>
 	      <line x1="${plotRight}" y1="${plotTop}" x2="${plotRight}" y2="${plotBottom}" stroke="rgba(238,245,242,.10)" stroke-width="1"/>
 	      <line x1="${originX.toFixed(1)}" y1="${originY.toFixed(1)}" x2="${plotRight}" y2="${originY.toFixed(1)}" stroke="rgba(238,245,242,.30)" stroke-width="1.2" stroke-dasharray="7 7" stroke-linecap="round"/>
-	      <line x1="${targetX.toFixed(1)}" y1="${originY.toFixed(1)}" x2="${bubbleX.toFixed(1)}" y2="${bubbleY.toFixed(1)}" stroke="rgba(215,176,107,.24)" stroke-width="1" stroke-dasharray="3 6" stroke-linecap="round"/>
-	      <line x1="${originX.toFixed(1)}" y1="${originY.toFixed(1)}" x2="${bubbleX.toFixed(1)}" y2="${bubbleY.toFixed(1)}" stroke="rgba(215,176,107,.42)" stroke-width="1.2" stroke-linecap="round"/>
-	      ${path?`<path class="gdShotBubbleHubBubble" d="${path}" fill="url(#gdMyBubbleLaneFill${idSuffix})" stroke="#d7b06b" stroke-width="1.35" stroke-opacity=".70" fill-opacity=".88"/>`:""}
+	      ${gpsBubbleMarkup}
 	      <g class="gdMyBubbleLandingHandle" data-gd-lane-drag-handle="1" data-distance-m="${baseDistance.toFixed(1)}" pointer-events="all">
 	        <circle cx="${bubbleX.toFixed(1)}" cy="${bubbleY.toFixed(1)}" r="22" fill="transparent" class="gdMyBubbleLandingHit"/>
-	        <circle cx="${bubbleX.toFixed(1)}" cy="${bubbleY.toFixed(1)}" r="14.5" fill="none" stroke="rgba(215,176,107,.72)" stroke-width="1.35"/>
-	        <circle cx="${bubbleX.toFixed(1)}" cy="${bubbleY.toFixed(1)}" r="3.5" fill="rgba(215,176,107,.82)"/>
-	        <path d="M ${(bubbleX-10).toFixed(1)} ${bubbleY.toFixed(1)} H ${(bubbleX+10).toFixed(1)} M ${bubbleX.toFixed(1)} ${(bubbleY-10).toFixed(1)} V ${(bubbleY+10).toFixed(1)}" stroke="rgba(215,176,107,.48)" stroke-width="1" stroke-linecap="round"/>
+	        <circle cx="${bubbleX.toFixed(1)}" cy="${bubbleY.toFixed(1)}" r="3.5" fill="rgba(255,235,170,.86)" stroke="rgba(8,12,8,.55)" stroke-width="1"/>
 	      </g>
 	      <circle cx="${originX.toFixed(1)}" cy="${originY.toFixed(1)}" r="6.6" fill="url(#gdMyBubbleLaneBall${idSuffix})" opacity=".96"/>
 	      <circle cx="${originX.toFixed(1)}" cy="${originY.toFixed(1)}" r="2.2" fill="rgba(255,255,255,.92)"/>
@@ -36236,9 +36236,13 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     const sourceClub=gdCompareClubKey(baseSource.club||club)||"7i";
     const nextDistance=gdMyBubbleClampLaneDistance(requestedDistance,sourceClub,baseSource);
     const generated=gdShotBubbleSafe(()=>gdGeneratedShotBubbleForClub(sourceClub,nextDistance,offset),null)||{};
-    const width=Number(generated.widthM)||Number(baseSource.bubbleWidthM)||Number(baseSource.clusterWidthM)||Math.max(10,nextDistance*.14);
-    const depth=Number(generated.depthM)||Number(baseSource.bubbleDepthM)||Number(baseSource.clusterDepthM)||Math.max(14,nextDistance*.18);
-    const pendingBubble=Object.assign({},baseSource,generated,{
+    const sourceDistance=Number(baseSource.baseDistanceM||baseSource.expectedDistanceM||baseSource.meanExpectedM||baseSource.baseCarry);
+    const shapeScale=Number.isFinite(sourceDistance)&&sourceDistance>0?nextDistance/sourceDistance:1;
+    const width=gdMyBubbleScaledSourceMetric(baseSource,["bubbleWidthM","clusterWidthM","visualWidthM","widthM"],shapeScale)||Number(generated.widthM)||Math.max(10,nextDistance*.14);
+    const depth=gdMyBubbleScaledSourceMetric(baseSource,["bubbleDepthM","clusterDepthM","visualDepthM","depthM"],shapeScale)||Number(generated.depthM)||Math.max(14,nextDistance*.18);
+    const baseTilt=Number(baseSource.tiltDeg??baseSource.visual?.visualTiltDeg??baseSource.visualTiltDeg??baseSource.clusterTiltDeg);
+    const baseSkew=Number(baseSource.skewDeg??baseSource.visual?.visualSkewDeg??baseSource.visualSkewDeg);
+    const pendingBubble=Object.assign({},generated,baseSource,{
       club:sourceClub,
       baseCarry:nextDistance,
       baseDistanceM:nextDistance,
@@ -36253,6 +36257,16 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       clusterWidthM:width,
       bubbleDepthM:depth,
       clusterDepthM:depth,
+      lateralRadiusM:width/2,
+      depthRadiusM:depth/2,
+      tiltDeg:Number.isFinite(baseTilt)?baseTilt:generated.tiltDeg,
+      skewDeg:Number.isFinite(baseSkew)?baseSkew:generated.skewDeg,
+      visual:Object.assign({},generated.visual||{},baseSource.visual||{},{
+        visualWidthM:width,
+        visualDepthM:depth,
+        visualTiltDeg:Number.isFinite(baseTilt)?baseTilt:(generated.visual?.visualTiltDeg??generated.tiltDeg),
+        visualSkewDeg:Number.isFinite(baseSkew)?baseSkew:(generated.visual?.visualSkewDeg??generated.skewDeg)
+      }),
       handedness:p.handedness||baseSource.handedness||"right",
       shapeSource:"my-bubble-distance-preview"
     });
