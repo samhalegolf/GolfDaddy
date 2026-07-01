@@ -9,6 +9,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/practice-email-intake"
+  to = "/.netlify/functions/practice-email-intake"
+  status = 200
+
+[[redirects]]
   from = "/api/support-ticket"
   to = "/.netlify/functions/support-ticket"
   status = 200
