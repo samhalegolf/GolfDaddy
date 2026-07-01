@@ -34516,6 +34516,10 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	    const adopted=Number(source.offsetDeg);
 	    return !!source.active&&Number.isFinite(current)&&Number.isFinite(adopted)&&Math.abs(current-adopted)<.02;
 	  }
+	  function gdPracticePendingBubbleIsActive(profile){
+	    const pending=(profile||safe(()=>ensureProfile(),null)||{}).practiceBubblePendingSource||{};
+	    return !!pending.active&&Number.isFinite(Number(pending.offsetDeg));
+	  }
 	  function gdPracticeAutoFlowHTML(analysis){
 	    return "";
 	  }
@@ -34530,33 +34534,6 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 		    const p=ensureProfile();
 		    const analysis=gdPracticeProjectionReadyAnalysis();
 		    const adoptDistance=String(mode||"direction")==="distance-direction";
-		    if(gdPracticeCurrentBubbleWasAdopted(p,analysis)){
-		      const previous=p.practiceBubblePreviousState||{};
-	      if(Object.prototype.hasOwnProperty.call(previous,"faceOffsetDeg"))p.faceOffsetDeg=previous.faceOffsetDeg;
-	      else delete p.faceOffsetDeg;
-	      if(Object.prototype.hasOwnProperty.call(previous,"centralFaceOffsetDeg"))p.centralFaceOffsetDeg=previous.centralFaceOffsetDeg;
-	      else delete p.centralFaceOffsetDeg;
-	      if(Object.prototype.hasOwnProperty.call(previous,"previewBubbleSet"))p.previewBubbleSet=previous.previewBubbleSet;
-	      else delete p.previewBubbleSet;
-	      if(Object.prototype.hasOwnProperty.call(previous,"bubbleProfiles"))p.bubbleProfiles=previous.bubbleProfiles;
-	      else delete p.bubbleProfiles;
-	      delete p.practiceBubblePreviousState;
-	      delete p.practiceBubbleSource;
-	      delete p.practiceBubbleAdoptedAt;
-	      p.updatedAt=new Date().toISOString();
-	      savePlayerProfiles();
-	      syncCoreProfileFromActive();
-	      document.querySelectorAll(".gdBubbleFaceOffsetInput").forEach(input=>{input.dataset.editing="0";input.readOnly=true;input.value=gdMyBubbleDisplayLabel(gdMyBubbleState(p,analysis));});
-	      gdRenderBubbleOffsetHub();
-	      renderPracticeData(true);
-	      renderDataHubStatus();
-	      if(document.getElementById("statsPanel")?.classList.contains("open"))renderStats();
-	    renderCompareData();
-	    safe(()=>typeof renderShot==="function"&&renderShot());
-	    gdPracticeBubbleAdoptionMotion=null;
-		      gdLmToast("My Bubble restored");
-		      return false;
-		    }
 		    const source=gdPracticeBubbleSource(analysis);
 		    const method=gdPracticeBubbleMethod(analysis);
 		    const offset=Number(source?.offsetDeg??method?.anchorDeg);
@@ -34565,17 +34542,6 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 		      return false;
 		    }
 	    const previousOffset=gdPracticeMyBubbleOffsetDeg(p);
-	    if(!p.practiceBubblePreviousState){
-	      p.practiceBubblePreviousState={};
-	      if(Object.prototype.hasOwnProperty.call(p,"faceOffsetDeg"))p.practiceBubblePreviousState.faceOffsetDeg=p.faceOffsetDeg;
-	      if(Object.prototype.hasOwnProperty.call(p,"centralFaceOffsetDeg"))p.practiceBubblePreviousState.centralFaceOffsetDeg=p.centralFaceOffsetDeg;
-	      if(Object.prototype.hasOwnProperty.call(p,"previewBubbleSet"))p.practiceBubblePreviousState.previewBubbleSet=p.previewBubbleSet;
-	      if(Object.prototype.hasOwnProperty.call(p,"bubbleProfiles"))p.practiceBubblePreviousState.bubbleProfiles=p.bubbleProfiles;
-	    }
-	    p.faceOffsetDeg=offset;
-	    p.centralFaceOffsetDeg=offset;
-	    p.placeholderProfile=false;
-	    p.practiceBubbleAdoptedAt=new Date().toISOString();
 	    const adoptedClub=source?.club||method?.anchorClub||gdCompareClub||"7i";
 	    const adoptedKey=gdShotBubbleOverlayClubKey(adoptedClub)||"7i";
 	    const distanceSummary=gdPracticeDistanceLearningSummary(analysis);
@@ -34585,7 +34551,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	    const sourceDistance=Number(source?.baseDistanceM||source?.expectedDistanceM||source?.meanExpectedM);
 	    const learnedDistance=Number(learnedRowsByClub[adoptedKey]?.actualDistanceM)||sourceDistance||beforeDistance;
 	    const motionToDistance=adoptDistance?learnedDistance:beforeDistance;
-	    p.practiceBubbleSource={
+	    const stagedSource={
 	      active:true,
 	      offsetDeg:Number(offset.toFixed(2)),
 	      status:method?.status||"",
@@ -34612,11 +34578,10 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	      handedness:p.handedness||"right",
 	      shapeSource:"practice-adopted"
 	    });
-	    p.previewBubbleSet=adoptedBubble;
-	    p.bubbleProfiles=Object.assign({},p.bubbleProfiles||{});
-	    p.bubbleProfiles[gdCompareClubKey(adoptedClub)||"7i"]=adoptedBubble;
+	    p.practiceBubblePendingSource=Object.assign({},stagedSource,{bubble:adoptedBubble});
+	    p.practiceBubblePendingAt=new Date().toISOString();
 	    p.updatedAt=new Date().toISOString();
-	    const distanceResult=gdPracticeApplyDistanceLearning(analysis,{commit:adoptDistance});
+	    const distanceResult=adoptDistance?{changed:(distanceSummary.diffs||[]).length>0,committed:false,summary:distanceSummary}:gdPracticeApplyDistanceLearning(analysis,{commit:false});
 	    savePlayerProfiles();
 	    syncCoreProfileFromActive();
 	    document.querySelectorAll(".gdBubbleFaceOffsetInput").forEach(input=>{input.dataset.editing="0";input.readOnly=true;input.value=gdMyBubbleDisplayLabel(gdMyBubbleState(p,analysis));});
@@ -34637,7 +34602,6 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	    renderDataHubStatus();
 	    if(document.getElementById("statsPanel")?.classList.contains("open"))renderStats();
 	    renderCompareData();
-	    safe(()=>typeof renderShot==="function"&&renderShot());
 	    setTimeout(()=>{
 	      if(gdPracticeBubbleAdoptionMotion&&gdPracticeBubbleAdoptionMotion.fingerprint===gdPracticeBubbleFingerprint(gdPracticeProjectionReadyAnalysis())){
 	        gdPracticeBubbleAdoptionMotion=null;
@@ -34645,8 +34609,8 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	      }
 	    },1500);
 	    const distanceLabel=distanceResult.changed
-	      ? adoptDistance?"Distance + direction adopted":"Direction adopted; distance sent to bag review"
-	      : "Direction adopted";
+	      ? adoptDistance?"Distance + direction ready to save":"Direction ready to save; distance sent to bag review"
+	      : "Direction ready to save";
 	    gdLmToast(distanceLabel);
 	    return false;
 	  }
@@ -34729,6 +34693,11 @@ body.gdAuthLocked #gdProfileV67 .topbar{
   }
   function gdPracticeMyBubbleState(profile,analysis){
     const p=profile||safe(()=>ensureProfile(),null)||{};
+    const pendingSource=p.practiceBubblePendingSource||{};
+    const pendingOffset=Number(pendingSource.offsetDeg);
+    if(pendingSource.active&&Number.isFinite(pendingOffset)){
+      return{offset:pendingOffset,kind:"pending",label:"Save My Bubble",graphLabel:"MY"};
+    }
     const adoptedSource=p.practiceBubbleSource||{};
     const adoptedOffset=Number(adoptedSource.offsetDeg);
     const currentAdopted=gdPracticeCurrentBubbleWasAdopted(p,analysis);
@@ -34762,6 +34731,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     if(editing)return"Manual centre";
     const kind=String(state?.kind||"");
     if(kind==="default")return"Default";
+    if(kind==="pending")return"Save My Bubble";
     if(kind==="adopted-current")return"My Bubble active";
     if(kind==="saved")return"My Bubble saved";
     return state?.label||"My Bubble";
@@ -35222,7 +35192,8 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	    const source=sizeOpts||{};
 	    const isPlayingPreview=source.previewKind==="playing";
 	    const club=source.club||"7i";
-	    const baseDistance=isPlayingPreview?155:(Number(source.baseDistanceM||source.expectedDistanceM||source.meanExpectedM||source.baseCarry)||gdShotBubbleSafe(()=>gdDefaultCarryForClub(club),155));
+	    const sourceDistance=Number(source.baseDistanceM||source.expectedDistanceM||source.meanExpectedM||source.baseCarry);
+	    const baseDistance=Number.isFinite(sourceDistance)&&sourceDistance>0?sourceDistance:gdShotBubbleSafe(()=>gdDefaultCarryForClub(club),155);
 	    const generated=gdShotBubbleSafe(()=>gdGeneratedShotBubbleForClub(club,baseDistance,offset),null)||{};
 	    const visualWidth=isPlayingPreview?NaN:Number(source.bubbleWidthM||source.clusterWidthM||source.visualWidthM||source.widthM);
 	    const visualDepth=isPlayingPreview?NaN:Number(source.bubbleDepthM||source.clusterDepthM||source.visualDepthM||source.depthM);
@@ -36026,10 +35997,13 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     });
   }
   function gdMyBubbleHubSource(ctx,club,offset){
-    const current=safe(()=>gdCompareProfileBubbleSource(ctx,club),null);
-    if(current)return current;
-    const selected=gdCompareClubKey(club)||gdCompareClubKey(ctx?.p?.previewBubbleSet?.club)||"7i";
-    const bagRows=Array.isArray(ctx?.p?.bag)?ctx.p.bag:[];
+    const p=ctx?.p||safe(()=>ensureProfile(),null)||{};
+    const pending=p.practiceBubblePendingSource||{};
+    if(pending.active&&pending.bubble&&Number.isFinite(Number(pending.offsetDeg))){
+      return Object.assign({},pending.bubble,{offsetDeg:Number(pending.offsetDeg),faceOffsetDeg:Number(pending.offsetDeg),faceAlignmentOffsetDeg:Number(pending.offsetDeg),shapeSource:"practice-pending-save"});
+    }
+    const selected=gdCompareClubKey(club)||gdCompareClubKey(p?.previewBubbleSet?.club)||"7i";
+    const bagRows=Array.isArray(p?.bag)?p.bag:[];
     const row=bagRows.find(item=>gdCompareClubKey(item?.club||item?.name).toLowerCase()===selected.toLowerCase())
       ||bagRows.find(item=>gdCompareClubKey(item?.club||item?.name).toLowerCase()==="7i")
       ||bagRows[0]
@@ -36047,7 +36021,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       bubbleWidthM:Math.max(10,baseDistance*.14),
       clusterDepthM:Math.max(14,baseDistance*.18),
       clusterWidthM:Math.max(10,baseDistance*.14),
-      handedness:ctx?.p?.handedness||"right",
+      handedness:p?.handedness||"right",
       shapeSource:"my-bubble-default"
     };
   }
@@ -36062,7 +36036,13 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     const stateKind=String(state?.kind||"default");
     document.querySelectorAll("[data-gd-offset-hub]").forEach(hub=>{
       hub.dataset.gdBubbleKind=stateKind;
-      hub.classList.toggle("gdMyBubbleActive",stateKind==="adopted-current");
+      hub.classList.toggle("gdMyBubbleActive",stateKind==="adopted-current"||stateKind==="pending");
+      const buttons=[...hub.querySelectorAll(".gdBubbleOffsetActions button")];
+      if(buttons[0])buttons[0].textContent=stateKind==="pending"?"Undo":"Edit";
+      if(buttons[1]){
+        buttons[1].textContent=stateKind==="pending"?"Save":"Apply";
+        buttons[1].classList.toggle("gdBubbleSaveReady",stateKind==="pending");
+      }
     });
     faces.forEach(face=>{
       face.readOnly=!editing;
@@ -36098,6 +36078,22 @@ body.gdAuthLocked #gdProfileV67 .topbar{
   function gdBubbleOffsetEdit(){
     const face=gdActiveOffsetInput();
     if(!face)return;
+    const {p}=gdBubbleDataContext();
+    if(gdPracticePendingBubbleIsActive(p)){
+      delete p.practiceBubblePendingSource;
+      delete p.practiceBubblePendingAt;
+      try{localStorage.removeItem(GD_PRACTICE_BAG_DRAFT_KEY);}catch(e){}
+      p.updatedAt=new Date().toISOString();
+      savePlayerProfiles();
+      syncCoreProfileFromActive();
+      gdPracticeBubbleAdoptionMotion=null;
+      gdRenderBubbleOffsetHub();
+      renderPracticeData(true);
+      renderDataHubStatus();
+      renderCompareData();
+      gdLmToast("Pending My Bubble cleared");
+      return;
+    }
     const offset=gdParseOffsetValue(face.value,gdBubbleCentralOffset(gdBubbleDataContext().p));
     document.querySelectorAll(".gdBubbleFaceOffsetInput").forEach(input=>{input.dataset.editing="1";input.readOnly=false;input.value=gdMyBubbleDisplayLabel(gdMyBubbleState(gdBubbleDataContext().p),true);});
     gdRenderBubbleOffsetHub(true);
@@ -36106,6 +36102,57 @@ body.gdAuthLocked #gdProfileV67 .topbar{
   }
   function gdBubbleOffsetSave(){
     const {p}=gdBubbleDataContext();
+    const pending=p.practiceBubblePendingSource||{};
+    if(pending.active&&Number.isFinite(Number(pending.offsetDeg))){
+      const offset=Number(pending.offsetDeg);
+      const analysis=gdPracticeProjectionReadyAnalysis();
+      const pendingBubble=pending.bubble&&typeof pending.bubble==="object"?pending.bubble:{};
+      const club=pending.club||pendingBubble.club||gdCompareClub||"7i";
+      const baseDistance=Number(pendingBubble.baseDistanceM||pendingBubble.baseCarry||pendingBubble.expectedDistanceM)||gdShotBubbleSafe(()=>gdDefaultCarryForClub(club),155)||155;
+      const bubble=Object.assign({},pendingBubble,{
+        club,
+        baseCarry:baseDistance,
+        baseDistanceM:baseDistance,
+        faceOffsetDeg:offset,
+        faceAlignmentOffsetDeg:offset,
+        offsetDeg:offset,
+        handedness:p.handedness||pendingBubble.handedness||"right",
+        shapeSource:pendingBubble.shapeSource||"practice-adopted"
+      });
+      if(pending.distanceMode==="committed")gdPracticeApplyDistanceLearning(analysis,{commit:true});
+      else if(pending.distanceMode==="review")gdPracticeApplyDistanceLearning(analysis,{commit:false});
+      p.faceOffsetDeg=offset;
+      p.centralFaceOffsetDeg=offset;
+      p.placeholderProfile=false;
+      p.previewBubbleSet=bubble;
+      p.bubbleProfiles=Object.assign({},p.bubbleProfiles||{});
+      p.bubbleProfiles[gdCompareClubKey(club)||"7i"]=bubble;
+      p.practiceBubbleSource={
+        active:true,
+        offsetDeg:Number(offset.toFixed(2)),
+        status:pending.status||"",
+        club,
+        shots:Number(pending.shots||0),
+        fingerprint:pending.fingerprint||gdPracticeBubbleFingerprint(analysis),
+        distanceMode:pending.distanceMode||"review"
+      };
+      p.practiceBubbleAdoptedAt=new Date().toISOString();
+      delete p.practiceBubblePendingSource;
+      delete p.practiceBubblePendingAt;
+      delete p.practiceBubblePreviousState;
+      p.updatedAt=new Date().toISOString();
+      savePlayerProfiles();
+      syncCoreProfileFromActive();
+      document.querySelectorAll(".gdBubbleFaceOffsetInput").forEach(input=>{input.dataset.editing="0";input.readOnly=true;input.value=gdMyBubbleDisplayLabel(gdMyBubbleState(p,analysis));});
+      gdRenderBubbleOffsetHub();
+      renderPracticeData(true);
+      renderDataHubStatus();
+      if(document.getElementById("statsPanel")?.classList.contains("open"))renderStats();
+      renderCompareData();
+      safe(()=>typeof renderShot==="function"&&renderShot());
+      gdLmToast("My Bubble saved");
+      return;
+    }
     const face=gdActiveOffsetInput();
     const offset=gdParseOffsetValue(face?.value,gdBubbleCentralOffset(p));
     if(!Number.isFinite(offset)){toast("Enter a face offset");return}
@@ -38893,16 +38940,19 @@ body.gdGpsActive #bagRailBtn{order:7!important}
 #dataHubPanel .gdOffsetHubBody .gdBubbleOffsetActions,
 #statsPanel .gdOffsetHubBody .gdBubbleOffsetActions,
 #dataHubPanel .gdOffsetHubBody .gdBubbleGenGrid label,
-#statsPanel .gdOffsetHubBody .gdBubbleGenGrid label{
+#statsPanel .gdOffsetHubBody .gdBubbleGenGrid label,
+#practiceDataPanel .gdOffsetHubBody .gdBubbleGenGrid label{
   display:none!important;
 }
 #dataHubPanel .gdOffsetHubBody .gdBubbleGenGrid,
-#statsPanel .gdOffsetHubBody .gdBubbleGenGrid{
+#statsPanel .gdOffsetHubBody .gdBubbleGenGrid,
+#practiceDataPanel .gdOffsetHubBody .gdBubbleGenGrid{
   grid-template-columns:1fr!important;
   margin-top:8px!important;
 }
 #dataHubPanel .gdOffsetHubBody .gdBubbleOffsetSource,
-#statsPanel .gdOffsetHubBody .gdBubbleOffsetSource{
+#statsPanel .gdOffsetHubBody .gdBubbleOffsetSource,
+#practiceDataPanel .gdOffsetHubBody .gdBubbleOffsetSource{
   min-height:132px!important;
   height:132px!important;
   background:
@@ -38936,6 +38986,7 @@ body.gdGpsActive #bagRailBtn{order:7!important}
   pointer-events:none;
 }
 .gdBubbleOffsetSource[data-gd-bubble-kind="default"]:after{color:rgba(215,176,107,.88)}
+.gdBubbleOffsetSource[data-gd-bubble-kind="pending"]:after,
 .gdBubbleOffsetSource[data-gd-bubble-kind="adopted-current"]:after{color:rgba(45,214,129,.9)}
 .gdBubbleOffsetSource[data-gd-bubble-kind="saved"]:after{color:rgba(45,214,129,.82)}
 .gdShotBubbleHubPreview{
