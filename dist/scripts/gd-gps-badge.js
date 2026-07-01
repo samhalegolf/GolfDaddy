@@ -11,10 +11,36 @@
     }
   }
 
+  function visibleElement(selector) {
+    const element = document.querySelector(selector);
+    if (!element) return false;
+    const style = window.getComputedStyle(element);
+    if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) return false;
+    const rect = element.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }
+
+  function gpsSurfaceVisible() {
+    return [
+      '#gdV62GpsBadge',
+      '.gdHoleStepper',
+      '.leaflet-container',
+      '#gdGpsMap',
+      '#gpsMap',
+      '#map'
+    ].some(visibleElement);
+  }
+
   function gpsVisible() {
     return document.body.classList.contains('shell-gps') ||
       document.body.classList.contains('gdGpsActive') ||
-      document.body.classList.contains('gps-active');
+      document.body.classList.contains('gps-active') ||
+      document.body.dataset.clarityRoute === 'gps' ||
+      gpsSurfaceVisible();
+  }
+
+  function syncVisualShellLabels() {
+    document.body.classList.toggle('gdGpsShellFrame', gpsVisible());
   }
 
   function usablePersonName(value) {
@@ -174,6 +200,7 @@
   }
 
   function hydrate(force) {
+    syncVisualShellLabels();
     if (!gpsVisible()) return;
 
     const badge = document.getElementById('gdV62GpsBadge') ||
@@ -232,6 +259,7 @@
     status.append(statusText, modeText);
 
     badge.replaceChildren(main, offset, status);
+    syncVisualShellLabels();
   }
 
   let queued = false;
@@ -258,7 +286,7 @@
   document.addEventListener('click', () => setTimeout(() => schedule(false), 80), true);
   safe(() => new MutationObserver(() => schedule(false)).observe(document.body, {
     attributes: true,
-    attributeFilter: ['class'],
+    attributeFilter: ['class', 'data-clarity-route']
   }));
 
   ['enterGpsModule', 'setGpsPlayMode', 'refreshGPS'].forEach((name) => {

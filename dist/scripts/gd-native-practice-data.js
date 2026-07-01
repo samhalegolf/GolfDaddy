@@ -132,7 +132,12 @@
       startDirection: asNumber(input.startDirection),
       curve: asNumber(input.curve),
       targetLine: cleanString(input.targetLine),
+      sideSpin: asNumber(input.sideSpin),
+      totalSpin: asNumber(input.totalSpin),
+      backspin: asNumber(input.backspin),
+      spinAxis: asNumber(input.spinAxis),
       rawSource: input.rawSource || null,
+      derivedMetrics: input.derivedMetrics && typeof input.derivedMetrics === 'object' ? Object.assign({}, input.derivedMetrics) : null,
       sourceType: cleanString(input.sourceType || context.sourceType || 'text') || 'text',
       importBatchId: cleanString(input.importBatchId || context.importBatchId),
       status: VALID_STATUSES[input.status] ? input.status : 'imported',
@@ -236,6 +241,134 @@
     return String(line || '').trim().split(/\t|\s{2,}|[|;]/).map(function (cell) { return cell.trim(); });
   }
 
+  function detectDelimiter(lines) {
+    var candidates = [',', '\t', ';', '|'];
+    var scores = {
+      ',': 0,
+      '\t': 0,
+      ';': 0,
+      '|': 0
+    };
+    (Array.isArray(lines) ? lines : []).slice(0, 25).forEach(function (line) {
+      if (!String(line).trim()) return;
+      var text = String(line);
+      candidates.forEach(function (candidate) {
+        scores[candidate] += text.split(candidate).length - 1;
+      });
+    });
+    var best = ',';
+    var bestScore = -1;
+    candidates.forEach(function (candidate) {
+      if (scores[candidate] > bestScore) {
+        bestScore = scores[candidate];
+        best = candidate;
+      }
+    });
+    return bestScore > 0 ? best : ',';
+  }
+
+  function fieldLabel(field) {
+    return ({
+      club: 'club',
+      shotNumber: 'shot',
+      carryDistance: 'carry',
+      totalDistance: 'total',
+      offlineDistance: 'offline',
+      ballSpeed: 'ball speed',
+      clubSpeed: 'club speed',
+      launchAngle: 'launch',
+      spin: 'spin',
+      sideSpin: 'side spin',
+      totalSpin: 'total spin',
+      backspin: 'backspin',
+      spinAxis: 'spin axis',
+      faceAngle: 'face',
+      pathAngle: 'path',
+      faceToPath: 'face-to-path',
+      startDirection: 'start',
+      curve: 'curve',
+      targetLine: 'target',
+      side: 'side'
+    })[field] || field;
+  }
+
+  function isNumericField(field) {
+    return !!{
+      shotNumber: true,
+      carryDistance: true,
+      totalDistance: true,
+      offlineDistance: true,
+      ballSpeed: true,
+      clubSpeed: true,
+      launchAngle: true,
+      spin: true,
+      sideSpin: true,
+      totalSpin: true,
+      backspin: true,
+      spinAxis: true,
+      faceAngle: true,
+      pathAngle: true,
+      faceToPath: true,
+      startDirection: true,
+      curve: true
+    }[field];
+  }
+
+  function parseNumericValue(value) {
+    if (!value && value !== 0) return null;
+    return asNumber(value);
+  }
+
+  function inferClubValue(value) {
+    var text = cleanString(value).toLowerCase();
+    if (!text) return '';
+    if (/\d/.test(text) && /[a-z]/i.test(text)) return cleanString(value);
+    if (/^(sw|lw|mw|rw|gw|pw|u|driver|iron|wedge|wood|hybrid|hyb|putter|fw|uw|iw|[0-9]+i?)$/i.test(text)) return cleanString(value);
+    if (/^[0-9]+\s*(i|w|iron|wedge|wood)$/i.test(text)) return cleanString(value);
+    return '';
+  }
+
+  function parseClub(value) {
+    var text = inferClubValue(value);
+    return text ? cleanString(text) : '';
+  }
+
+  function deriveRowMetrics(row) {
+    var derived = {};
+    if (Number.isFinite(Number(row.spinAxis))) return derived;
+    var sideSpin = parseNumericValue(row.sideSpin);
+    var backspin = parseNumericValue(row.backspin) || parseNumericValue(row.totalSpin);
+    if (!Number.isFinite(sideSpin) || !Number.isFinite(backspin) || Math.abs(backspin) <= 100) return derived;
+    var axis = Math.atan2(sideSpin, Math.abs(backspin)) * 180 / Math.PI;
+    if (Number.isFinite(axis)) {
+      derived.spinAxis = Number.isFinite(axis) ? Math.round(axis * 100) / 100 : null;
+    }
+    return derived;
+  }
+
+  function buildColumns(cells, useDefaults) {
+    var defaults = ['club', 'carryDistance', 'totalDistance', 'offlineDistance', 'faceAngle', 'pathAngle', 'startDirection'];
+    var columns = [];
+    var used = {};
+    for (var i = 0; i < (cells || []).length; i += 1) {
+      var rawHeader = cleanString(cells[i]);
+      var key = useDefaults ? (defaults[i] || ('unknown' + (i + 1))) : canonicalField(rawHeader);
+      if (!key) key = 'unknown' + (i + 1);
+      if (!useDefaults && used[key]) {
+        key = 'unknown' + (i + 1);
+      } else {
+        used[key] = true;
+      }
+      columns.push({
+        index: i,
+        key: key,
+        rawHeader: rawHeader,
+        assigned: key.indexOf('unknown') !== 0
+      });
+    }
+    return columns;
+  }
+
   function fieldKey(value) {
     return String(value || '').trim().toLowerCase().replace(/\([^)]*\)/g, '').replace(/[^a-z0-9]+/g, '');
   }
@@ -246,38 +379,55 @@
     shot: 'shotNumber',
     shotno: 'shotNumber',
     shotnumber: 'shotNumber',
+    shotid: 'shotNumber',
     ball: 'ballSpeed',
     ballspeed: 'ballSpeed',
     bs: 'ballSpeed',
+    ballspd: 'ballSpeed',
     clubspeed: 'clubSpeed',
     chs: 'clubSpeed',
+    clubspd: 'clubSpeed',
     launch: 'launchAngle',
     launchangle: 'launchAngle',
+    launchangledeg: 'launchAngle',
     spin: 'spin',
-    backspin: 'spin',
-    totalspin: 'spin',
     spinrate: 'spin',
+    backspin: 'backspin',
+    sidespin: 'sideSpin',
+    side_spin: 'sideSpin',
+    sidespinrpm: 'sideSpin',
+    totalspin: 'totalSpin',
+    total_spin: 'totalSpin',
+    spinaxis: 'spinAxis',
     carry: 'carryDistance',
     carrydistance: 'carryDistance',
+    carrydistancey: 'carryDistance',
     carrym: 'carryDistance',
     total: 'totalDistance',
     totaldistance: 'totalDistance',
+    totaldistm: 'totalDistance',
     totalm: 'totalDistance',
     offline: 'offlineDistance',
     offlinedistance: 'offlineDistance',
+    offdistance: 'offlineDistance',
+    offdist: 'offlineDistance',
     lr: 'offlineDistance',
     left: 'offlineDistance',
     right: 'offlineDistance',
     side: 'side',
     face: 'faceAngle',
     faceangle: 'faceAngle',
+    faceangledeg: 'faceAngle',
     path: 'pathAngle',
     pathangle: 'pathAngle',
     clubpath: 'pathAngle',
+    pathangledeg: 'pathAngle',
     facetopath: 'faceToPath',
     f2p: 'faceToPath',
     start: 'startDirection',
     startdirection: 'startDirection',
+    startdirectiondeg: 'startDirection',
+    startdir: 'startDirection',
     curve: 'curve',
     target: 'targetLine',
     targetline: 'targetLine'
@@ -302,51 +452,170 @@
     return headers;
   }
 
-  function normalizeHeaderCells(cells) {
-    return cells.map(function (cell, index) {
-      return canonicalField(cell) || ('unknown' + (index + 1));
+  function hasMappedHeaders(columns) {
+    return (Array.isArray(columns) ? columns : []).some(function (column) {
+      return column.assigned;
     });
   }
 
   function parsePracticeImportText(text, opts) {
     opts = opts || {};
     var rawText = String(text || '');
-    var lines = rawText.split(/\r?\n/).map(function (line) { return line.trim(); }).filter(Boolean);
-    var warnings = [];
-    if (!lines.length) return { rows: [], warnings: ['empty_input'], sourceType: opts.sourceType || 'text', rawText: rawText };
-    var delimiter = lines.some(function (line) { return line.indexOf(',') !== -1; }) ? ',' : 'auto';
-    var firstCells = splitPracticeLine(lines[0], delimiter);
-    var hasHeader = opts.headers === true || (opts.headers !== false && looksLikeHeader(firstCells));
-    var headers = hasHeader ? normalizeHeaderCells(firstCells) : inferHeaders(firstCells.length);
-    if (!hasHeader) warnings.push('header_inferred');
-    var dataLines = hasHeader ? lines.slice(1) : lines;
-    var rows = dataLines.map(function (line, index) {
-      var cells = splitPracticeLine(line, delimiter);
-      var rawSource = {};
-      var unknownFields = {};
-      var row = {
-        rawSource: {
-          line: line,
-          lineNumber: hasHeader ? index + 2 : index + 1
-        },
-        sourceType: opts.sourceType || 'text'
-      };
-      cells.forEach(function (cell, cellIndex) {
-        var key = headers[cellIndex] || ('unknown' + (cellIndex + 1));
-        rawSource[key] = cell;
-        if (key.indexOf('unknown') === 0) {
-          if (cell) unknownFields[key] = cell;
-          return;
-        }
-        row[key] = cell;
+    var sourceLines = rawText
+      .split(/\r?\n/)
+      .map(function (line, index) {
+        return { text: String(line || '').trim(), lineNumber: index + 1 };
+      })
+      .filter(function (line) {
+        return !!line.text;
       });
-      row.rawSource.cells = rawSource;
-      row.unknownFields = unknownFields;
-      row.warnings = Object.keys(unknownFields).length ? ['unknown_fields'] : [];
-      return row;
-    }).filter(function (row) {
-      return Object.keys(row.rawSource.cells || {}).some(function (key) { return cleanString(row.rawSource.cells[key]); });
-    });
+    var warnings = [];
+
+    if (!sourceLines.length) {
+      return {
+        rows: [],
+        warnings: ['empty_input'],
+        errors: ['No rows detected'],
+        sourceType: opts.sourceType || 'text',
+        rawText: rawText
+      };
+    }
+
+    var delimiter = detectDelimiter(sourceLines.map(function (line) {
+      return line.text;
+    }));
+    var firstCells = splitPracticeLine(sourceLines[0].text, delimiter);
+    var hasHeader = opts.headers === true || (opts.headers !== false && looksLikeHeader(firstCells));
+    var columns = buildColumns(firstCells, !hasHeader);
+    if (!hasHeader) warnings.push('header_inferred');
+
+    if (hasHeader && !hasMappedHeaders(columns)) {
+      warnings.push('Unknown headers');
+      hasHeader = false;
+      columns = buildColumns(firstCells, true);
+    }
+
+    var dataLines = hasHeader ? sourceLines.slice(1) : sourceLines;
+    var headers = columns.map(function (column) { return column.key; });
+
+    var rows = dataLines
+      .map(function (line, index) {
+        var cells = splitPracticeLine(line.text, delimiter);
+        if (!cells.length || !cells.some(function (cell) { return cleanString(cell); })) return null;
+
+        var rawSource = {
+          line: line.text,
+          lineNumber: line.lineNumber,
+          lineIndex: index,
+          rowIndex: hasHeader ? index + 2 : index + 1,
+          cells: {},
+          cutouts: []
+        };
+
+        var unknownFields = {};
+        var row = {
+          rawSource: rawSource,
+          sourceType: opts.sourceType || 'text',
+          rowIndex: line.lineNumber,
+          errors: [],
+          warnings: [],
+          derivedMetrics: {}
+        };
+        var knownFieldCount = 0;
+
+        columns.forEach(function (column, cellIndex) {
+          var rawValue = cleanString(cells[cellIndex]);
+          rawSource.cells[column.key] = rawValue;
+          rawSource.cutouts.push({
+            index: column.index,
+            key: column.key,
+            header: column.rawHeader,
+            raw: rawValue
+          });
+
+          if (!rawValue) return;
+
+          if (column.key.indexOf('unknown') === 0) {
+            unknownFields[column.key] = rawValue;
+            return;
+          }
+
+          if (column.key === 'club') {
+            knownFieldCount += 1;
+            row.club = parseClub(rawValue);
+            if (!row.club) row.club = rawValue;
+            return;
+          }
+
+          if (isNumericField(column.key)) {
+            var numericValue = parseNumericValue(rawValue);
+            if (numericValue === null) {
+              row.errors.push('Invalid ' + fieldLabel(column.key));
+              return;
+            }
+            row[column.key] = numericValue;
+            knownFieldCount += 1;
+            return;
+          }
+
+          knownFieldCount += 1;
+          row[column.key] = rawValue;
+        });
+
+        for (var extraIndex = columns.length; extraIndex < cells.length; extraIndex += 1) {
+          var extraValue = cleanString(cells[extraIndex]);
+          if (!extraValue) continue;
+          var extraKey = 'unknown' + (extraIndex + 1);
+          unknownFields[extraKey] = extraValue;
+          rawSource.cells[extraKey] = extraValue;
+          rawSource.cutouts.push({
+            index: extraIndex,
+            key: extraKey,
+            header: '',
+            raw: extraValue
+          });
+        }
+
+        if (!row.club) {
+          var inferredClub = parseClub(cells[0]);
+          if (inferredClub) {
+            row.club = inferredClub;
+            row.warnings.push('Club inferred from first column');
+          }
+        }
+
+        if (Object.keys(unknownFields).length) {
+          row.warnings.push('Unknown fields');
+          row.unknownFields = unknownFields;
+        }
+
+        if (!row.club || (!Number.isFinite(Number(row.carryDistance)) && !Number.isFinite(Number(row.totalDistance)))) {
+          row.errors.push('Missing required fields');
+        }
+
+        if (!knownFieldCount) {
+          row.errors.push('No valid row fields');
+        }
+
+        var derived = deriveRowMetrics(row);
+        if (Object.keys(derived).length) row.derivedMetrics = derived;
+
+        if (!row.errors.length && row.derivedMetrics && row.derivedMetrics.spinAxis === null) {
+          delete row.derivedMetrics.spinAxis;
+        }
+
+        row.errors = Array.from(new Set(row.errors));
+        row.warnings = Array.from(new Set(row.warnings));
+        if (!Object.keys(unknownFields).length) {
+          row.unknownFields = {};
+        }
+
+        return row;
+      })
+      .filter(function (row) {
+        return !!row;
+      });
+
     return {
       rows: rows,
       warnings: warnings,
@@ -354,7 +623,10 @@
       sourceName: opts.sourceName || '',
       rawText: rawText,
       hasHeader: hasHeader,
-      headers: headers
+      headers: headers,
+      columns: columns,
+      delimiter: delimiter,
+      errors: rows.length ? [] : ['No rows detected']
     };
   }
 
