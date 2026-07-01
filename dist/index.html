@@ -34350,8 +34350,8 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	  }
 	  function gdPracticePlayingBubbleActionLabel(){
 	    const p=safe(()=>ensureProfile(),null)||{};
-	    if(gdPracticePlayingBubbleIsAdopted(p))return "Restore My Bubble";
-	    return "Play With Practice Bubble";
+	    if(gdPracticePlayingBubbleIsAdopted(p))return "Bubble Adopted";
+	    return "Adopt Bubble";
 	  }
 	  function gdPracticePlayingBubbleIsAdopted(profile){
 	    const p=profile||safe(()=>ensureProfile(),null)||{};
@@ -34361,24 +34361,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	    return !!source.active&&Number.isFinite(current)&&Number.isFinite(adopted)&&Math.abs(current-adopted)<.02;
 	  }
 	  function gdPracticeAutoFlowHTML(analysis){
-	    const totals=analysis?.totals||{};
-	    const raw=Number(totals.rawShots||0);
-	    if(!raw)return "";
-	    const accepted=Number(totals.accepted||analysis?.acceptedShots?.length||0);
-	    const method=gdPracticeBubbleMethod(analysis);
-	    const source=gdPracticeBubbleSource(analysis);
-	    const offset=Number(source?.offsetDeg??method?.anchorDeg);
-	    const hasBubble=!!method&&Number.isFinite(offset);
-	    const adopted=gdPracticePlayingBubbleIsAdopted(safe(()=>ensureProfile(),null));
-	    const preview=hasBubble?`<div class="gdPracticeAutoBubblePreview">${gdShotBubbleHubSvg(offset,gdShotBubbleSizeSource(source,offset))}</div>`:"";
-	    const title=hasBubble?(adopted?"Using Practice Bubble":"Play with my Practice Bubble"):"Practice Bubble building";
-	    const meta=hasBubble
-	      ? (adopted?"Tap to switch back to My Bubble.":"Try it as My Bubble.")
-	      : "Clarity Pattern Finder needs more shots.";
-	    const action=hasBubble
-	      ? `<button type="button" class="gdPracticeAutoAdopt" onclick="return gdPracticeAdoptBubbleAsPlayingBubble()">${gdEscapeHTML(gdPracticePlayingBubbleActionLabel())}</button>`
-	      : `<button type="button" class="gdPracticeAutoAdopt" disabled>Practice Bubble not ready yet</button>`;
-	    return `<div class="gdPracticeAutoFlow ${hasBubble?"ready":"waiting"}">${preview}<div class="gdPracticeAutoCopy"><span>${gdEscapeHTML(title)}</span><strong>${gdEscapeHTML(meta)}</strong></div>${action}</div>`;
+	    return "";
 	  }
 	  function gdRenderPracticeAutoFlow(analysis){
 	    const root=byId("gdPracticeDataResult");
