@@ -34197,8 +34197,8 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       return false;
     }
     gdPracticeProjectorOpen=false;
-    gdPracticeSetProjectionOverlay(true,analysis);
-    gdLmToast("Practice Bubble generated");
+    gdPracticeSetProjectionOverlay(!ctx.visible,analysis);
+    gdLmToast(ctx.visible?"Practice Bubble hidden":"Practice Bubble generated");
     return false;
   }
   function gdPracticeAdoptBubbleFromAction(){
@@ -34342,13 +34342,14 @@ body.gdAuthLocked #gdProfileV67 .topbar{
   }
   function gdPracticeProjectionControlsHTML(analysis){
     const ctx=gdPracticeProjectionContext(analysis);
-    const bagActive=gdPracticeBagWidgetExpanded||gdPracticeBagDraftDirty();
-    const adopted=gdPracticePlayingBubbleIsAdopted(safe(()=>ensureProfile(),null));
-    const generated=ctx.canProject&&ctx.visible;
-    const generateDisabled=ctx.canProject?"":"disabled";
-    const adoptDisabled=ctx.canProject&&ctx.visible&&!adopted?"":"disabled";
-    const adoptLabel=adopted?"Bubble Adopted":"Adopt Bubble";
-    const actionDock=`<div class="gdPracticeActionDock ${generated?"generated":ctx.canProject?"ready":"waiting"} ${bagActive?"bagOpen":""}"><div class="gdPracticePrimaryActions"><button type="button" class="gdPracticeBubbleAction generate ${ctx.canProject?"ready":""} ${generated?"active":""}" aria-pressed="${generated?"true":"false"}" ${generateDisabled} onclick="return gdPracticeGenerateBubble()">Generate Bubble</button><button type="button" class="gdPracticeBubbleAction adopt ${adopted?"adopted":""}" aria-pressed="${adopted?"true":"false"}" ${adoptDisabled} onclick="return gdPracticeAdoptBubbleFromAction()">${gdEscapeHTML(adoptLabel)}</button></div><button type="button" class="gdPracticeBagToggle gdPracticeBagAction ${bagActive?"active":""}" aria-label="Bag suggestions" aria-pressed="${gdPracticeBagWidgetExpanded?"true":"false"}" data-gd-practice-bag-toggle><img src="assets/home/bag.png" alt=""></button></div>`;
+	    const bagActive=gdPracticeBagWidgetExpanded||gdPracticeBagDraftDirty();
+	    const adopted=gdPracticePlayingBubbleIsAdopted(safe(()=>ensureProfile(),null));
+	    const generated=ctx.canProject&&ctx.visible;
+	    const generateDisabled=ctx.canProject?"":"disabled";
+	    const adoptDisabled=adopted||ctx.canProject&&ctx.visible?"":"disabled";
+	    const generateLabel=generated?"Bubble Generated":"Generate Bubble";
+	    const adoptLabel=adopted?"Bubble Adopted":"Adopt Bubble";
+	    const actionDock=`<div class="gdPracticeActionDock ${generated?"generated":ctx.canProject?"ready":"waiting"} ${bagActive?"bagOpen":""}"><div class="gdPracticePrimaryActions"><button type="button" class="gdPracticeBubbleAction generate ${ctx.canProject?"ready":""} ${generated?"active":""}" aria-pressed="${generated?"true":"false"}" ${generateDisabled} onclick="return gdPracticeGenerateBubble()">${gdEscapeHTML(generateLabel)}</button><button type="button" class="gdPracticeBubbleAction adopt ${adopted?"adopted":""}" aria-pressed="${adopted?"true":"false"}" ${adoptDisabled} onclick="return gdPracticeAdoptBubbleFromAction()">${gdEscapeHTML(adoptLabel)}</button></div><button type="button" class="gdPracticeBagToggle gdPracticeBagAction ${bagActive?"active":""}" aria-label="Bag suggestions" aria-pressed="${gdPracticeBagWidgetExpanded?"true":"false"}" data-gd-practice-bag-toggle><img src="assets/home/bag.png" alt=""></button></div>`;
     return `${actionDock}${gdPracticeBagWidgetHTML(analysis,ctx)}${gdPracticeSandboxControlsHTML("compact")}`;
   }
 	  function gdRenderPracticeProjectionControls(analysis){
@@ -34387,18 +34388,10 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	    root.hidden=!html;
 	    root.innerHTML=html;
 	  }
-	  function gdPracticeAdoptBubbleAsPlayingBubble(){
-	    const analysis=gdPracticeProjectionReadyAnalysis();
-	    const source=gdPracticeBubbleSource(analysis);
-	    const method=gdPracticeBubbleMethod(analysis);
-	    const offset=Number(source?.offsetDeg??method?.anchorDeg);
-	    if(!Number.isFinite(offset)){
-	      gdLmToast("Practice Bubble not ready");
-	      return false;
-	    }
-	    const p=ensureProfile();
-	    if(gdPracticePlayingBubbleIsAdopted(p)){
-	      const previous=p.practiceBubblePreviousState||{};
+		  function gdPracticeAdoptBubbleAsPlayingBubble(){
+		    const p=ensureProfile();
+		    if(gdPracticePlayingBubbleIsAdopted(p)){
+		      const previous=p.practiceBubblePreviousState||{};
 	      if(Object.prototype.hasOwnProperty.call(previous,"faceOffsetDeg"))p.faceOffsetDeg=previous.faceOffsetDeg;
 	      else delete p.faceOffsetDeg;
 	      if(Object.prototype.hasOwnProperty.call(previous,"centralFaceOffsetDeg"))p.centralFaceOffsetDeg=previous.centralFaceOffsetDeg;
@@ -34420,9 +34413,17 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	      if(document.getElementById("statsPanel")?.classList.contains("open"))renderStats();
 	      renderCompareData();
 	      safe(()=>typeof renderShot==="function"&&renderShot());
-	      gdLmToast("My Bubble restored");
-	      return false;
-	    }
+		      gdLmToast("My Bubble restored");
+		      return false;
+		    }
+		    const analysis=gdPracticeProjectionReadyAnalysis();
+		    const source=gdPracticeBubbleSource(analysis);
+		    const method=gdPracticeBubbleMethod(analysis);
+		    const offset=Number(source?.offsetDeg??method?.anchorDeg);
+		    if(!Number.isFinite(offset)){
+		      gdLmToast("Practice Bubble not ready");
+		      return false;
+		    }
 	    p.practiceBubblePreviousState={};
 	    if(Object.prototype.hasOwnProperty.call(p,"faceOffsetDeg"))p.practiceBubblePreviousState.faceOffsetDeg=p.faceOffsetDeg;
 	    if(Object.prototype.hasOwnProperty.call(p,"centralFaceOffsetDeg"))p.practiceBubblePreviousState.centralFaceOffsetDeg=p.centralFaceOffsetDeg;
