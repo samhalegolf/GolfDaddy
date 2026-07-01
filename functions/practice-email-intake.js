@@ -1,5 +1,6 @@
 "use strict";
 
+const crypto = require("crypto");
 const {
   encodeFilter,
   env,
@@ -13,6 +14,9 @@ const {
   createPracticeImportBatch,
   parsePracticeImportText
 } = require("./practice-data-parser");
+
+const RESEND_API_BASE = "https://api.resend.com";
+const MAX_TEXT_ATTACHMENT_BYTES = 2 * 1024 * 1024;
 
 function cleanDomain(value) {
   const clean = String(value || "").trim().toLowerCase().replace(/^@+/, "").replace(/[^a-z0-9.-]/g, "");
@@ -40,10 +44,57 @@ function header(event, name) {
   return key ? headers[key] : "";
 }
 
+function rawBody(event) {
+  const raw = event && event.body || "";
+  if (event && event.isBase64Encoded) return Buffer.from(raw, "base64").toString("utf8");
+  return String(raw || "");
+}
+
+function safeEqual(left, right) {
+  const a = Buffer.from(String(left || ""));
+  const b = Buffer.from(String(right || ""));
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+function signatureCandidates(value) {
+  const candidates = [];
+  String(value || "").split(/\s+/).forEach(function (part) {
+    if (!part) return;
+    const pieces = part.split(",");
+    if (pieces.length >= 2 && pieces[0] === "v1") candidates.push(pieces[1]);
+    else candidates.push(part);
+  });
+  return candidates;
+}
+
+function verifyResendSignature(event) {
+  const secret = env("RESEND_WEBHOOK_SECRET");
+  if (!secret) return false;
+  const id = header(event, "svix-id");
+  const timestamp = header(event, "svix-timestamp");
+  const signature = header(event, "svix-signature");
+  if (!id || !timestamp || !signature) return false;
+  const timestampSeconds = Number(timestamp);
+  if (!Number.isFinite(timestampSeconds) || Math.abs(Math.floor(Date.now() / 1000) - timestampSeconds) > 10 * 60) return false;
+  const keyPart = secret.indexOf("whsec_") === 0 ? secret.slice("whsec_".length) : secret;
+  let secretBytes;
+  try {
+    secretBytes = Buffer.from(keyPart, "base64");
+  } catch (_error) {
+    return false;
+  }
+  if (!secretBytes.length) return false;
+  const signedContent = id + "." + timestamp + "." + rawBody(event);
+  const expected = crypto.createHmac("sha256", secretBytes).update(signedContent).digest("base64");
+  return signatureCandidates(signature).some(function (candidate) {
+    return safeEqual(candidate, expected);
+  });
+}
+
 function authorized(event) {
   const secret = env("CLARITY_PRACTICE_EMAIL_SECRET");
-  if (!secret) return false;
-  return header(event, "x-clarity-email-secret") === secret || query(event).secret === secret;
+  if (secret && (safeEqual(header(event, "x-clarity-email-secret"), secret) || safeEqual(query(event).secret, secret))) return true;
+  return verifyResendSignature(event);
 }
 
 function playerKey(input) {
@@ -68,8 +119,7 @@ function practiceEmailAddress(input) {
 }
 
 function parseBody(event) {
-  let raw = event && event.body || "";
-  if (event && event.isBase64Encoded) raw = Buffer.from(raw, "base64").toString("utf8");
+  const raw = rawBody(event);
   const contentType = String(header(event, "content-type") || "").toLowerCase();
   if (contentType.includes("application/x-www-form-urlencoded")) return parseForm(raw);
   try {
@@ -77,6 +127,133 @@ function parseBody(event) {
   } catch (_error) {
     return parseForm(raw);
   }
+}
+
+async function resendFetch(path) {
+  const apiKey = env("RESEND_API_KEY");
+  if (!apiKey) {
+    const error = new Error("RESEND_API_KEY is required to read Resend inbound email content");
+    error.status = 503;
+    throw error;
+  }
+  const response = await fetch(RESEND_API_BASE + path, {
+    method: "GET",
+    headers: {
+      Accept: "application/json",
+      Authorization: "Bearer " + apiKey
+    }
+  });
+  const bodyText = await response.text();
+  let body = null;
+  if (bodyText) {
+    try {
+      body = JSON.parse(bodyText);
+    } catch (_error) {
+      body = bodyText;
+    }
+  }
+  if (!response.ok) {
+    const error = new Error("Resend receiving API request failed");
+    error.status = response.status;
+    error.body = body;
+    throw error;
+  }
+  return body;
+}
+
+function isResendReceivedEvent(payload) {
+  return !!(payload && payload.type === "email.received" && payload.data && (payload.data.email_id || payload.data.id));
+}
+
+async function resendReceivedEmail(emailId) {
+  const body = await resendFetch("/emails/receiving/" + encodeURIComponent(emailId));
+  return body && body.data && body.data.id ? body.data : body;
+}
+
+async function resendReceivedAttachments(emailId) {
+  const body = await resendFetch("/emails/receiving/" + encodeURIComponent(emailId) + "/attachments");
+  if (Array.isArray(body)) return body;
+  if (body && Array.isArray(body.data)) return body.data;
+  return [];
+}
+
+async function downloadTextAttachment(url, filename) {
+  if (!url) return "";
+  const response = await fetch(url, { method: "GET" });
+  if (!response.ok) {
+    const error = new Error("Could not download Resend attachment " + (filename || ""));
+    error.status = response.status;
+    throw error;
+  }
+  const declaredSize = Number(response.headers && response.headers.get && response.headers.get("content-length"));
+  if (Number.isFinite(declaredSize) && declaredSize > MAX_TEXT_ATTACHMENT_BYTES) {
+    const error = new Error("Resend attachment is too large to parse as practice text");
+    error.status = 413;
+    throw error;
+  }
+  const buffer = Buffer.from(await response.arrayBuffer());
+  if (buffer.length > MAX_TEXT_ATTACHMENT_BYTES) {
+    const error = new Error("Resend attachment is too large to parse as practice text");
+    error.status = 413;
+    throw error;
+  }
+  return buffer.toString("utf8");
+}
+
+function resendRecipients(email, data) {
+  return []
+    .concat(email && email.to || [])
+    .concat(email && email.received_for || [])
+    .concat(data && data.to || [])
+    .concat(data && data.received_for || []);
+}
+
+function normalizeResendAttachment(item, index) {
+  return {
+    index,
+    id: text(item && item.id, 160),
+    filename: text(item && (item.filename || item.name) || ("attachment-" + (index + 1)), 180),
+    contentType: text(item && (item.content_type || item.contentType || item.type), 120).toLowerCase(),
+    content: "",
+    base64: "",
+    size: Number(item && item.size || 0) || 0,
+    url: text(item && (item.download_url || item.url || item.href), 1200)
+  };
+}
+
+async function normalizeResendPayload(payload) {
+  if (!isResendReceivedEvent(payload)) return payload;
+  const data = payload.data || {};
+  const emailId = text(data.email_id || data.id, 180);
+  const email = await resendReceivedEmail(emailId);
+  const attachmentSource = await resendReceivedAttachments(emailId).catch(function () {
+    return Array.isArray(email && email.attachments) ? email.attachments : (Array.isArray(data.attachments) ? data.attachments : []);
+  });
+  const attachments = [];
+  for (const source of attachmentSource) {
+    const normalized = normalizeResendAttachment(source, attachments.length);
+    const lane = laneForAttachment(normalized);
+    if ((lane.lane === "email_csv" || lane.lane === "email_json") && normalized.url) {
+      normalized.content = await downloadTextAttachment(normalized.url, normalized.filename);
+    }
+    attachments.push(Object.assign(normalized, lane));
+  }
+  return {
+    provider: "resend",
+    providerEmailId: emailId,
+    id: text(data.message_id || email && email.message_id || emailId, 180),
+    messageId: text(data.message_id || email && email.message_id || emailId, 180),
+    to: resendRecipients(email, data),
+    recipient: resendRecipients(email, data),
+    from: email && email.from || data.from || "",
+    sender: email && email.from || data.from || "",
+    subject: email && email.subject || data.subject || "",
+    text: email && email.text || data.text || "",
+    bodyText: email && email.text || data.text || "",
+    html: email && email.html || data.html || "",
+    headers: email && email.headers || data.headers || {},
+    attachments
+  };
 }
 
 function parseForm(raw) {
@@ -215,6 +392,8 @@ function normalizeInbound(payload) {
     accountId: text(payload.accountId || payload.account_id, 120),
     profileId: text(payload.profileId || payload.profile_id || payload.playerId || payload.player_id, 120),
     playerName: text(payload.playerName || payload.player_name || payload.name, 160) || "Player",
+    provider: text(payload.provider, 80),
+    providerEmailId: text(payload.providerEmailId || payload.provider_email_id, 180),
     attachments,
     bodyText,
     routing: {
@@ -296,6 +475,8 @@ async function storeInbound(inbound, parsed) {
       errors: parsed.errors
     }),
     payload_json: {
+      provider: inbound.provider || null,
+      providerEmailId: inbound.providerEmailId || null,
       receivedAt: inbound.receivedAt,
       attachments: inbound.attachments.map(function (item) {
         return {
@@ -467,11 +648,13 @@ exports.handler = async function (event) {
     return json(200, response);
   }
   if (event.httpMethod !== "POST") return json(405, { error: "Method not allowed" });
-  if (!env("CLARITY_PRACTICE_EMAIL_SECRET")) return json(503, { error: "Practice email intake secret is not configured", code: "secret_not_configured" });
+  if (!env("CLARITY_PRACTICE_EMAIL_SECRET") && !env("RESEND_WEBHOOK_SECRET")) {
+    return json(503, { error: "Practice email intake authorization is not configured", code: "secret_not_configured" });
+  }
   if (!authorized(event)) return json(401, { error: "Practice email intake is not authorized" });
 
   try {
-    const payload = parseBody(event);
+    const payload = await normalizeResendPayload(parseBody(event));
     const inbound = normalizeInbound(payload);
     const parsed = parseAttachmentRows(inbound);
     const storage = await storeInbound(inbound, parsed);
