@@ -35186,11 +35186,104 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       <path d="${bubblePath}" fill="${fill}" stroke="${stroke}" stroke-width="${bubbleStroke}" stroke-linejoin="round"/>
     </g>`;
   }
+	  function gdShotBubblePlayingLaneSvg(offset,sizeOpts={}){
+	    const width=480;
+	    const height=132;
+	    const laneM=250;
+	    const source=sizeOpts||{};
+	    const club=source.club||"7i";
+	    const requestedOffset=Number(offset);
+	    const liveOffset=Number.isFinite(requestedOffset)?requestedOffset:0;
+	    const sourceDistance=Number(source.baseDistanceM||source.expectedDistanceM||source.meanExpectedM||source.baseCarry);
+	    const fallbackDistance=gdShotBubbleSafe(()=>gdDefaultCarryForClub(club),155)||155;
+	    const baseDistance=gdShotBubbleOverlayClamp(Number.isFinite(sourceDistance)&&sourceDistance>0?sourceDistance:fallbackDistance,20,laneM);
+	    const generated=gdShotBubbleSafe(()=>gdGeneratedShotBubbleForClub(club,baseDistance,liveOffset),null)||{};
+	    const drawableSource=Object.assign({},source,{
+	      club,
+	      actualDistanceM:baseDistance,
+	      baseDistanceM:baseDistance,
+	      baseCarry:baseDistance
+	    });
+	    const drawable=generated&&Number.isFinite(Number(generated.baseDistanceM))
+	      ? gdShotBubbleNormaliseDrawable(generated,drawableSource,liveOffset)
+	      : Object.assign({},drawableSource,{
+	        centerDistanceM:baseDistance,
+	        centerLateralM:Math.tan(liveOffset*Math.PI/180)*baseDistance,
+	        lateralRadiusM:Math.max(3,baseDistance*.055),
+	        depthRadiusM:Math.max(5,baseDistance*.08),
+	        offsetDeg:liveOffset
+	      });
+	    const centerDistance=gdShotBubbleOverlayClamp(Number(drawable.centerDistanceM||drawable.baseDistanceM)||baseDistance,0,laneM);
+	    const centerLateral=Math.tan(liveOffset*Math.PI/180)*baseDistance;
+	    const bubble=Object.assign({},drawable,{
+	      club,
+	      baseDistanceM:baseDistance,
+	      centerDistanceM:centerDistance,
+	      centerLateralM:centerLateral,
+	      offsetDeg:liveOffset
+	    });
+	    const plotLeft=30;
+	    const plotRight=452;
+	    const plotTop=16;
+	    const plotBottom=116;
+	    const plotMidY=(plotTop+plotBottom)/2;
+	    const lateralRadius=Math.max(1,Number(bubble.lateralRadiusM)||Number(bubble.widthM)/2||1);
+	    const depthRadius=Math.max(1,Number(bubble.depthRadiusM)||Number(bubble.depthM)/2||1);
+	    const sameScaleHalfHeight=(laneM*((plotBottom-plotTop)/(plotRight-plotLeft)))/2;
+	    const neededHalfHeight=Math.max(16,Math.abs(centerLateral)+lateralRadius+Math.abs(Math.sin((Number(bubble.tiltDeg)||0)*Math.PI/180))*depthRadius+3);
+	    const lateralMax=Math.max(sameScaleHalfHeight,neededHalfHeight);
+	    const plot={
+	      plotLeft,
+	      plotRight,
+	      plotTop,
+	      plotBottom,
+	      plotMidY,
+	      minDistance:0,
+	      maxDistance:laneM,
+	      distanceRange:laneM,
+	      lateralMax
+	    };
+	    const xForDistance=distance=>plot.plotLeft+(gdShotBubbleOverlayClamp(distance,0,laneM)/laneM)*(plot.plotRight-plot.plotLeft);
+	    const yForLateral=lateral=>plot.plotMidY+gdShotBubbleOverlayClamp(lateral/plot.lateralMax,-1,1)*((plot.plotBottom-plot.plotTop)/2);
+	    const path=gdShotBubbleOverlayBubblePath(bubble,plot,xForDistance,yForLateral);
+	    const originX=xForDistance(0);
+	    const originY=plot.plotMidY;
+	    const targetX=xForDistance(baseDistance);
+	    const bubbleX=xForDistance(centerDistance);
+	    const bubbleY=yForLateral(centerLateral);
+	    const idSuffix=`${String(club).replace(/[^a-z0-9]+/gi,"").slice(0,10)||"club"}${Math.round(baseDistance)}${Math.round((liveOffset+90)*100)}`;
+	    return `<svg class="gdMyBubbleLaneSvg" data-gd-my-bubble-lane="1" data-viewbox-width="${width}" data-lane-m="${laneM}" data-plot-left="${plotLeft}" data-plot-right="${plotRight}" data-base-distance-m="${baseDistance.toFixed(1)}" data-offset-deg="${liveOffset.toFixed(2)}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+	      <defs>
+	        <radialGradient id="gdMyBubbleLaneBall${idSuffix}" cx="35%" cy="28%" r="70%">
+	          <stop offset="0" stop-color="#fff"/>
+	          <stop offset=".58" stop-color="#e6ebe8"/>
+	          <stop offset="1" stop-color="#87928e"/>
+	        </radialGradient>
+	        <radialGradient id="gdMyBubbleLaneFill${idSuffix}" cx="42%" cy="32%" r="78%">
+	          <stop offset="0" stop-color="#fff1be" stop-opacity=".30"/>
+	          <stop offset=".56" stop-color="#d7b06b" stop-opacity=".18"/>
+	          <stop offset="1" stop-color="#62d2ff" stop-opacity=".10"/>
+	        </radialGradient>
+	      </defs>
+	      <rect x="0" y="0" width="${width}" height="${height}" rx="16" fill="rgba(3,12,11,.34)"/>
+	      <line x1="${plotLeft}" y1="${plotTop}" x2="${plotLeft}" y2="${plotBottom}" stroke="rgba(238,245,242,.10)" stroke-width="1"/>
+	      <line x1="${plotRight}" y1="${plotTop}" x2="${plotRight}" y2="${plotBottom}" stroke="rgba(238,245,242,.10)" stroke-width="1"/>
+	      <line x1="${originX.toFixed(1)}" y1="${originY.toFixed(1)}" x2="${plotRight}" y2="${originY.toFixed(1)}" stroke="rgba(238,245,242,.30)" stroke-width="1.2" stroke-dasharray="7 7" stroke-linecap="round"/>
+	      <line x1="${targetX.toFixed(1)}" y1="${(originY-24).toFixed(1)}" x2="${targetX.toFixed(1)}" y2="${(originY+24).toFixed(1)}" stroke="rgba(215,176,107,.34)" stroke-width="1.15" stroke-linecap="round"/>
+	      <circle cx="${targetX.toFixed(1)}" cy="${originY.toFixed(1)}" r="13.5" fill="none" stroke="rgba(215,176,107,.30)" stroke-width="1.1"/>
+	      <circle cx="${targetX.toFixed(1)}" cy="${originY.toFixed(1)}" r="3.3" fill="rgba(215,176,107,.62)"/>
+	      <line x1="${originX.toFixed(1)}" y1="${originY.toFixed(1)}" x2="${bubbleX.toFixed(1)}" y2="${bubbleY.toFixed(1)}" stroke="rgba(215,176,107,.42)" stroke-width="1.2" stroke-linecap="round"/>
+	      ${path?`<path class="gdShotBubbleHubBubble" d="${path}" fill="url(#gdMyBubbleLaneFill${idSuffix})" stroke="#d7b06b" stroke-width="1.35" stroke-opacity=".70" fill-opacity=".88"/>`:""}
+	      <circle cx="${originX.toFixed(1)}" cy="${originY.toFixed(1)}" r="6.6" fill="url(#gdMyBubbleLaneBall${idSuffix})" opacity=".96"/>
+	      <circle cx="${originX.toFixed(1)}" cy="${originY.toFixed(1)}" r="2.2" fill="rgba(255,255,255,.92)"/>
+	    </svg>`;
+	  }
 	  function gdShotBubbleHubSvg(offset,sizeOpts={}){
+	    const source=sizeOpts||{};
+	    if(source.previewKind==="playing")return gdShotBubblePlayingLaneSvg(offset,source);
 	    const width=360;
 	    const height=72;
-	    const source=sizeOpts||{};
-	    const isPlayingPreview=source.previewKind==="playing";
+	    const isPlayingPreview=false;
 	    const club=source.club||"7i";
 	    const sourceDistance=Number(source.baseDistanceM||source.expectedDistanceM||source.meanExpectedM||source.baseCarry);
 	    const baseDistance=Number.isFinite(sourceDistance)&&sourceDistance>0?sourceDistance:gdShotBubbleSafe(()=>gdDefaultCarryForClub(club),155);
@@ -36003,6 +36096,28 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       return Object.assign({},pending.bubble,{offsetDeg:Number(pending.offsetDeg),faceOffsetDeg:Number(pending.offsetDeg),faceAlignmentOffsetDeg:Number(pending.offsetDeg),shapeSource:"practice-pending-save"});
     }
     const selected=gdCompareClubKey(club)||gdCompareClubKey(p?.previewBubbleSet?.club)||"7i";
+    const currentOffset=Number.isFinite(Number(offset))?Number(offset):0;
+    const exactKey=selected&&p?.bubbleProfiles&&typeof p.bubbleProfiles==="object"
+      ? Object.keys(p.bubbleProfiles).find(key=>gdCompareClubKey(key).toLowerCase()===String(selected).toLowerCase())
+      : "";
+    const exact=exactKey?p.bubbleProfiles[exactKey]:null;
+    const preview=p?.previewBubbleSet&&(!selected||gdCompareClubKey(p.previewBubbleSet.club)===selected)?p.previewBubbleSet:null;
+    const profileSource=exact||preview||gdCompareManualProfileBubbleSource(p,selected,currentOffset);
+    if(profileSource&&typeof profileSource==="object"){
+      const sourceClub=gdCompareClubKey(profileSource.club)||selected;
+      const baseCarry=Number(profileSource.baseDistanceM||profileSource.baseCarry||profileSource.expectedDistanceM||profileSource.meanExpectedM||profileSource.carry);
+      const baseDistance=Number.isFinite(baseCarry)&&baseCarry>0?baseCarry:gdShotBubbleSafe(()=>gdDefaultCarryForClub(sourceClub),155);
+      return Object.assign({},profileSource,{
+        club:sourceClub,
+        offsetDeg:currentOffset,
+        faceOffsetDeg:currentOffset,
+        faceAlignmentOffsetDeg:currentOffset,
+        baseCarry:baseDistance,
+        baseDistanceM:baseDistance,
+        handedness:profileSource.handedness||p?.handedness||"right",
+        shapeSource:profileSource.shapeSource||"my-bubble-current"
+      });
+    }
     const bagRows=Array.isArray(p?.bag)?p.bag:[];
     const row=bagRows.find(item=>gdCompareClubKey(item?.club||item?.name).toLowerCase()===selected.toLowerCase())
       ||bagRows.find(item=>gdCompareClubKey(item?.club||item?.name).toLowerCase()==="7i")
@@ -36012,9 +36127,9 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     const baseDistance=Number.isFinite(baseCarry)&&baseCarry>0?baseCarry:gdShotBubbleSafe(()=>gdDefaultCarryForClub(selected),155);
     return{
       club:selected,
-      offsetDeg:Number.isFinite(Number(offset))?Number(offset):0,
-      faceOffsetDeg:Number.isFinite(Number(offset))?Number(offset):0,
-      faceAlignmentOffsetDeg:Number.isFinite(Number(offset))?Number(offset):0,
+      offsetDeg:currentOffset,
+      faceOffsetDeg:currentOffset,
+      faceAlignmentOffsetDeg:currentOffset,
       baseCarry:baseDistance,
       baseDistanceM:baseDistance,
       bubbleDepthM:Math.max(14,baseDistance*.18),
@@ -36060,6 +36175,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	      preview.innerHTML=gdShotBubbleHubSvg(Number.isFinite(hubPreviewOffset)?hubPreviewOffset:0,hubBubble);
 	    });
     sources.forEach(source=>{
+	      source.classList.add("gdMyBubbleLaneSource");
 	      if(!source.querySelector(".gdShotBubbleHubPreview")){
 		        source.innerHTML=`<div class="gdShotBubbleHubPreview">${gdShotBubbleHubSvg(Number.isFinite(hubPreviewOffset)?hubPreviewOffset:0,hubBubble)}</div>`;
       }
@@ -36072,6 +36188,125 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       if(document.getElementById("dataHubPanel")?.classList.contains("open"))renderCompareData();
     }
   }
+  let gdMyBubbleLaneDrag=null;
+  function gdMyBubbleLaneDistanceFromEvent(svg,event){
+    if(!svg||!event)return null;
+    const rect=svg.getBoundingClientRect();
+    if(!rect||!rect.width)return null;
+    const viewWidth=Number(svg.dataset.viewboxWidth||svg.dataset.viewBoxWidth)||480;
+    const plotLeft=Number(svg.dataset.plotLeft)||30;
+    const plotRight=Number(svg.dataset.plotRight)||452;
+    const laneM=Number(svg.dataset.laneM)||250;
+    const x=((Number(event.clientX)-rect.left)/Math.max(1,rect.width))*viewWidth;
+    const pct=gdShotBubbleOverlayClamp((x-plotLeft)/Math.max(1,plotRight-plotLeft),0,1);
+    return Math.round(pct*laneM*10)/10;
+  }
+  function gdMyBubbleStageLaneDistance(distance,opts={}){
+    const nextDistance=gdShotBubbleOverlayClamp(Number(distance),20,250);
+    if(!Number.isFinite(nextDistance)||nextDistance<=0)return false;
+    const p=ensureProfile();
+    const analysis=gdPracticeProjectionReadyAnalysis();
+    const state=gdMyBubbleState(p,analysis);
+    const offset=Number(state?.offset);
+    if(!Number.isFinite(offset)){
+      gdLmToast("My Bubble not ready");
+      return false;
+    }
+    const ctx=gdComparisonContext();
+    const club=safe(()=>gdCompareLoadClub(ctx),gdCompareClub)||p?.previewBubbleSet?.club||"7i";
+    const baseSource=gdMyBubbleHubSource(ctx,club,offset)||{};
+    const sourceClub=gdCompareClubKey(baseSource.club||club)||"7i";
+    const generated=gdShotBubbleSafe(()=>gdGeneratedShotBubbleForClub(sourceClub,nextDistance,offset),null)||{};
+    const width=Number(generated.widthM)||Number(baseSource.bubbleWidthM)||Number(baseSource.clusterWidthM)||Math.max(10,nextDistance*.14);
+    const depth=Number(generated.depthM)||Number(baseSource.bubbleDepthM)||Number(baseSource.clusterDepthM)||Math.max(14,nextDistance*.18);
+    const pendingBubble=Object.assign({},baseSource,generated,{
+      club:sourceClub,
+      baseCarry:nextDistance,
+      baseDistanceM:nextDistance,
+      expectedDistanceM:nextDistance,
+      meanExpectedM:nextDistance,
+      centerDistanceM:Number(generated.centerDistanceM)||nextDistance,
+      centerLateralM:Math.tan(offset*Math.PI/180)*nextDistance,
+      faceOffsetDeg:offset,
+      faceAlignmentOffsetDeg:offset,
+      offsetDeg:offset,
+      bubbleWidthM:width,
+      clusterWidthM:width,
+      bubbleDepthM:depth,
+      clusterDepthM:depth,
+      handedness:p.handedness||baseSource.handedness||"right",
+      shapeSource:"my-bubble-distance-preview"
+    });
+    const current=p.practiceBubblePendingSource||{};
+    p.practiceBubblePendingSource={
+      active:true,
+      offsetDeg:Number(offset.toFixed(2)),
+      status:"distance_preview",
+      club:sourceClub,
+      shots:Number(current.shots||0),
+      fingerprint:current.fingerprint||"my-bubble-distance-preview",
+      distanceMode:"manual-preview",
+      bubble:pendingBubble
+    };
+    p.practiceBubblePendingAt=new Date().toISOString();
+    p.updatedAt=new Date().toISOString();
+    if(opts.persist){
+      savePlayerProfiles();
+      syncCoreProfileFromActive();
+    }
+    if(opts.render!==false){
+      gdRenderBubbleOffsetHub();
+      renderPracticeData(true);
+      renderDataHubStatus();
+      if(document.getElementById("statsPanel")?.classList.contains("open"))renderStats();
+      renderCompareData();
+    }
+    return true;
+  }
+  function gdWireMyBubbleLaneDrag(){
+    if(window.__gdMyBubbleLaneDragBound)return;
+    window.__gdMyBubbleLaneDragBound=true;
+    document.addEventListener("pointerdown",event=>{
+      const svg=event.target?.closest?.("svg[data-gd-my-bubble-lane='1']");
+      if(!svg)return;
+      if(event.button&&event.button!==0)return;
+      const distance=gdMyBubbleLaneDistanceFromEvent(svg,event);
+      if(!Number.isFinite(Number(distance)))return;
+      event.preventDefault();
+      event.stopPropagation();
+      gdMyBubbleLaneDrag={pointerId:event.pointerId,svg,lastDistance:distance};
+      svg.classList.add("dragging");
+      try{svg.setPointerCapture(event.pointerId)}catch(e){}
+      gdMyBubbleStageLaneDistance(distance,{persist:false});
+    },true);
+    document.addEventListener("pointermove",event=>{
+      const drag=gdMyBubbleLaneDrag;
+      if(!drag||drag.pointerId!==event.pointerId)return;
+      const svg=drag.svg?.isConnected?drag.svg:document.querySelector("svg[data-gd-my-bubble-lane='1']");
+      const distance=gdMyBubbleLaneDistanceFromEvent(svg,event);
+      if(!Number.isFinite(Number(distance)))return;
+      event.preventDefault();
+      event.stopPropagation();
+      if(Math.abs(Number(distance)-Number(drag.lastDistance))<.5)return;
+      drag.lastDistance=distance;
+      gdMyBubbleStageLaneDistance(distance,{persist:false});
+    },true);
+    const finish=event=>{
+      const drag=gdMyBubbleLaneDrag;
+      if(!drag||drag.pointerId!==event.pointerId)return;
+      const svg=drag.svg?.isConnected?drag.svg:document.querySelector("svg[data-gd-my-bubble-lane='1']");
+      const distance=gdMyBubbleLaneDistanceFromEvent(svg,event);
+      event.preventDefault();
+      event.stopPropagation();
+      if(svg)svg.classList.remove("dragging");
+      gdMyBubbleLaneDrag=null;
+      if(Number.isFinite(Number(distance))&&gdMyBubbleStageLaneDistance(distance,{persist:true})){
+        gdLmToast("My Bubble distance ready to save");
+      }
+    };
+    document.addEventListener("pointerup",finish,true);
+    document.addEventListener("pointercancel",finish,true);
+  }
   function gdActiveOffsetInput(){
     return document.querySelector(".modulePanel.open .gdBubbleFaceOffsetInput")||document.querySelector("#statsPanel.open .gdBubbleFaceOffsetInput")||document.querySelector(".gdBubbleFaceOffsetInput");
   }
@@ -36080,9 +36315,12 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     if(!face)return;
     const {p}=gdBubbleDataContext();
     if(gdPracticePendingBubbleIsActive(p)){
+      const pendingMode=String(p.practiceBubblePendingSource?.distanceMode||"");
       delete p.practiceBubblePendingSource;
       delete p.practiceBubblePendingAt;
-      try{localStorage.removeItem(GD_PRACTICE_BAG_DRAFT_KEY);}catch(e){}
+      if(pendingMode!=="manual-preview"){
+        try{localStorage.removeItem(GD_PRACTICE_BAG_DRAFT_KEY);}catch(e){}
+      }
       p.updatedAt=new Date().toISOString();
       savePlayerProfiles();
       syncCoreProfileFromActive();
@@ -37657,6 +37895,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     bindDirect("#gdPracticeAdminTabBtn",()=>gdTogglePracticeAdmin());
     bindDirect("[onclick*='gdBubbleOffsetEdit']",()=>gdBubbleOffsetEdit());
     bindDirect("[onclick*='gdBubbleOffsetSave']",()=>gdBubbleOffsetSave());
+    gdWireMyBubbleLaneDrag();
     const practiceMaster=byId("gdPracticeToleranceMaster");
     if(practiceMaster){
       practiceMaster.oninput=function(){gdPracticePreviewToleranceMaster(practiceMaster);};
@@ -38953,8 +39192,8 @@ body.gdGpsActive #bagRailBtn{order:7!important}
 #dataHubPanel .gdOffsetHubBody .gdBubbleOffsetSource,
 #statsPanel .gdOffsetHubBody .gdBubbleOffsetSource,
 #practiceDataPanel .gdOffsetHubBody .gdBubbleOffsetSource{
-  min-height:132px!important;
-  height:132px!important;
+  min-height:150px!important;
+  height:150px!important;
   background:
     radial-gradient(ellipse 34% 58% at 68% 52%,rgba(244,248,243,.13),rgba(244,248,243,.045) 44%,transparent 72%),
     linear-gradient(180deg,rgba(244,248,243,.025),rgba(244,248,243,.01))!important;
@@ -38989,6 +39228,9 @@ body.gdGpsActive #bagRailBtn{order:7!important}
 .gdBubbleOffsetSource[data-gd-bubble-kind="pending"]:after,
 .gdBubbleOffsetSource[data-gd-bubble-kind="adopted-current"]:after{color:rgba(45,214,129,.9)}
 .gdBubbleOffsetSource[data-gd-bubble-kind="saved"]:after{color:rgba(45,214,129,.82)}
+.gdBubbleOffsetSource.gdMyBubbleLaneSource:after{
+  display:none!important;
+}
 .gdShotBubbleHubPreview{
   --gd-shot-zero-x:68%;
   --gd-shot-bubble-x:68%;
@@ -39008,9 +39250,10 @@ body.gdGpsActive #bagRailBtn{order:7!important}
   box-shadow:none!important;
 }
 #dataHubPanel .gdOffsetHubBody .gdShotBubbleHubPreview,
-#statsPanel .gdOffsetHubBody .gdShotBubbleHubPreview{
-  min-height:132px!important;
-  height:132px!important;
+#statsPanel .gdOffsetHubBody .gdShotBubbleHubPreview,
+#practiceDataPanel .gdOffsetHubBody .gdShotBubbleHubPreview{
+  min-height:150px!important;
+  height:150px!important;
 }
 #dataHubPanel .gdOffsetHubDetails[open] .gdOffsetHubSummary span,
 #dataHubPanel .gdOffsetHubDetails.open .gdOffsetHubSummary span,
@@ -39022,6 +39265,14 @@ body.gdGpsActive #bagRailBtn{order:7!important}
   display:block!important;
   width:100%!important;
   height:100%!important;
+}
+.gdShotBubbleHubPreview svg[data-gd-my-bubble-lane="1"]{
+  cursor:ew-resize!important;
+  touch-action:none!important;
+  user-select:none!important;
+}
+.gdShotBubbleHubPreview svg[data-gd-my-bubble-lane="1"].dragging{
+  cursor:grabbing!important;
 }
 .gdShotBubbleLane{
   position:relative!important;
