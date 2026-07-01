@@ -2440,7 +2440,8 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
     #practiceDataPanel.open .moduleSheet{max-width:min(1080px,calc(100vw - 28px))}
     #practiceDataPanel.open .gdShotDataHubCard,#statsPanel.gdShotDataPanel.open .gdShotDataHubCard{grid-column:1/-1}
     #practiceDataPanel.open .gdShotDataTabs,#statsPanel.gdShotDataPanel.open .gdShotDataTabs{grid-column:1/-1}
-    #practiceDataPanel.open #gdPracticeDataVisual{grid-column:1;grid-row:2/span 8;margin:0;min-height:360px;height:auto}
+    #practiceDataPanel.open .gdPracticeVisualStack{grid-column:1;grid-row:2/span 8;display:flex;flex-direction:column;gap:8px;min-height:0;order:1}
+    #practiceDataPanel.open #gdPracticeDataVisual{margin:0;min-height:360px;height:auto}
     #statsPanel.gdShotDataPanel.open #gdStatsVisual{grid-column:1;grid-row:2/span 8;margin:0;min-height:360px;height:auto}
     #practiceDataPanel.open #gdPracticeDataVisual svg,#statsPanel.gdShotDataPanel.open #gdStatsVisual svg{min-height:360px;height:auto}
     #practiceDataPanel.open .gdPracticeActions,#practiceDataPanel.open .gdPracticeScanner,#practiceDataPanel.open .gdPracticeReview,#practiceDataPanel.open .gdManualQuadTool,#practiceDataPanel.open .gdPracticeProjectionControls,#practiceDataPanel.open .gdPracticeResult,#practiceDataPanel.open .gdPracticeExtractCheckpoint,#practiceDataPanel.open .gdPracticeEvidenceList,#practiceDataPanel.open .gdPracticeMasterTolerance,#practiceDataPanel.open .gdPracticeRecommendationsPanel,#practiceDataPanel.open .gdPracticeAdminExpander,#practiceDataPanel.open .gdPracticeTolerancePanel,#statsPanel.gdShotDataPanel.open .gdCourseDataLanding,#statsPanel.gdShotDataPanel.open .gdStatsLegend,#statsPanel.gdShotDataPanel.open .gdStatsControl,#statsPanel.gdShotDataPanel.open .gdStatsFilters,#statsPanel.gdShotDataPanel.open #shotLogList,#statsPanel.gdShotDataPanel.open .gdCourseAdminExpander,#statsPanel.gdShotDataPanel.open .gdShotDataAdminPanel{grid-column:2;margin-top:0}
@@ -2460,6 +2461,7 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
     #statsPanel.gdShotDataPanel.open .gdStatsFilters{grid-template-columns:1fr 1fr;gap:8px}
     @media(max-width:760px){
       #practiceDataPanel.open .moduleSheet,#statsPanel.gdShotDataPanel.open .sheet{grid-template-columns:1fr}
+      #practiceDataPanel.open .gdPracticeVisualStack{grid-column:1;grid-row:auto;min-height:0}
       #practiceDataPanel.open #gdPracticeDataVisual,#statsPanel.gdShotDataPanel.open #gdStatsVisual{grid-column:1;grid-row:auto;min-height:280px}
       #practiceDataPanel.open #gdPracticeDataVisual svg,#statsPanel.gdShotDataPanel.open #gdStatsVisual svg{min-height:280px}
 	      #practiceDataPanel.open .gdPracticeActions,#practiceDataPanel.open .gdPracticeScanner,#practiceDataPanel.open .gdPracticeReview,#practiceDataPanel.open .gdManualQuadTool,#practiceDataPanel.open .gdPracticeProjectionControls,#practiceDataPanel.open .gdPracticeResult,#practiceDataPanel.open .gdPracticeExtractCheckpoint,#practiceDataPanel.open .gdPracticeEvidenceList,#practiceDataPanel.open .gdPracticeMasterTolerance,#practiceDataPanel.open .gdPracticeRecommendationsPanel,#practiceDataPanel.open .gdPracticeAdminExpander,#practiceDataPanel.open .gdPracticeTolerancePanel,#statsPanel.gdShotDataPanel.open .gdCourseDataLanding,#statsPanel.gdShotDataPanel.open .gdStatsLegend,#statsPanel.gdShotDataPanel.open .gdStatsControl,#statsPanel.gdShotDataPanel.open .gdStatsFilters,#statsPanel.gdShotDataPanel.open #shotLogList,#statsPanel.gdShotDataPanel.open .gdCourseAdminExpander,#statsPanel.gdShotDataPanel.open .gdShotDataAdminPanel{grid-column:1}
@@ -5730,18 +5732,28 @@ body[data-gd-permission="admin"] #gdV62Home .gdHomeAdminSettings{display:inline-
 </div>
 </div>
 </details>
+<div class="gdPracticeVisualStack">
+<h2 class="gdPracticeVisualTitle" id="gdPracticeVisualTitle">Player - Practice Data</h2>
 <div class="gdPracticeVisual" id="gdPracticeDataVisual"></div>
+</div>
 <div class="gdPracticeProjectionControls" id="gdPracticeProjectionControls"></div>
 <div class="gdPracticeActions gdPracticeIntakeActions" id="gdPracticeImportPanel">
-<button class="gdPracticeImportToggle" type="button" aria-expanded="false" onclick="return gdTogglePracticeImport(event)"><span>Import</span><span class="gdPracticeImportChevron" aria-hidden="true">▾</span></button>
-<div class="gdPracticeImportBody">
-<label class="gdUploadFileButton" id="gdPracticeUploadLabel" for="gdPracticeUploadInput" onclick="gdNativePracticeTextFilePickerClicked()">Upload text file</label>
+<div class="gdPracticeImportIconPanel">
+<span class="gdPracticeImportTitle">Import</span>
+<div class="gdPracticeImportIcons" role="group" aria-label="Practice import options">
+<button class="gdPracticeImportIconButton gdPracticeImportToggle" type="button" aria-expanded="false" aria-controls="gdPracticeImportBody" aria-label="Camera import" title="Camera import" onclick="return gdTogglePracticeImport(event)"><span class="gdPracticeImportIconGlyph" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M6.5 7.5 8 5.5h8l1.5 2H20a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9.5a2 2 0 0 1 2-2h2.5Z"/><circle cx="12" cy="13" r="3.25"/></svg></span></button>
+<button class="gdPracticeImportIconButton email" type="button" aria-label="Email import" title="Email import" onclick="return gdPracticeEmailImportPending(event)"><span class="gdPracticeImportIconGlyph" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M4 6.5h16a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5H4A1.5 1.5 0 0 1 2.5 16V8A1.5 1.5 0 0 1 4 6.5Z"/><path d="m4 8 8 5.5L20 8"/></svg></span></button>
+</div>
+</div>
+<div class="gdPracticeImportBody" id="gdPracticeImportBody">
+<label class="gdUploadFileButton" id="gdPracticeUploadLabel" for="gdPracticeUploadInput" onclick="gdNativePracticeTextFilePickerClicked()">Upload CSV</label>
 <input class="gdUploadFileInput" id="gdPracticeUploadInput" type="file" accept=".txt,.csv,.json,text/plain,text/csv,application/json">
-<label class="gdUploadFileButton" id="gdPracticePhotoLabel" for="gdPracticePhotoInput" onclick="return gdPickPracticePhotoFile(event,'photo')">Upload photo</label>
+<label class="gdUploadFileButton" id="gdPracticePhotoLabel" for="gdPracticePhotoInput" onclick="return gdPickPracticePhotoFile(event,'photo')">Upload</label>
 <input class="gdUploadFileInput" id="gdPracticePhotoInput" type="file" accept="image/*">
 <label class="gdUploadFileButton primary" id="gdPracticeCameraLabel" for="gdPracticeCameraInput" onclick="return gdPickPracticePhotoFile(event,'camera')">Take photo</label>
 <input class="gdUploadFileInput" id="gdPracticeCameraInput" type="file" accept="image/*" capture="environment">
 <button class="gdUploadFileButton" id="gdPracticeLoadExtracted7iBtn" type="button" onclick="gdLoadExtractedPractice7iData()" hidden>Import extracted 7i scan</button>
+<div class="gdPracticeEmailBox" id="gdPracticeEmailBox"></div>
 <div class="gdNativePracticeImport" id="gdNativePracticeImportLane">
 <div class="gdNativePracticeHead"><div><strong>Native Practice Data Import</strong><span>Paste reviewed practice shots, parse to native rows, then save valid rows for the Practice Shot Data Gate.</span></div><div class="gdNativePracticeBadge">No Bubble</div></div>
 <div id="gdNativePracticeFeedback"></div>
@@ -5759,12 +5771,12 @@ body[data-gd-permission="admin"] #gdV62Home .gdHomeAdminSettings{display:inline-
 <div class="gdPracticeScanGuide" aria-hidden="true"><span>Keep the shot table inside this frame</span></div>
 </div>
 <label class="gdPracticeScanClubField" for="gdPracticeScanClubInput">Club<input id="gdPracticeScanClubInput" type="text" value="7i" placeholder="7i" autocomplete="off"></label>
-<div class="gdPracticeScannerActions"><button id="gdPracticeClearPhotoBtn" type="button" onclick="gdCancelPracticePhotoScan()">Clear Photo</button><button class="primary" id="gdPracticeScanPhotoBtn" type="button" onclick="gdScanPracticePhotoCrop()">Scan</button><button class="primary" id="gdPracticeDefaultScanBtn" type="button" onclick="gdRunDefaultPracticePhotoScan()" hidden>Generate OCR grid</button><button id="gdPracticeManualQuadBtn" type="button" onclick="gdOpenPracticeManualQuadTool()" hidden>Adjust box</button><button id="gdPracticeContinueScanBtn" type="button" onclick="gdContinuePracticePhotoScan()" hidden>Generate OCR grid</button></div>
+<div class="gdPracticeScannerActions"><button id="gdPracticeClearPhotoBtn" type="button" onclick="gdCancelPracticePhotoScan()" hidden>Clear Photo</button><button class="primary" id="gdPracticeScanPhotoBtn" type="button" onclick="gdScanPracticePhotoCrop()">Scan</button><button class="primary" id="gdPracticeDefaultScanBtn" type="button" onclick="gdRunDefaultPracticePhotoScan()" hidden>Scan to Clarity Shot Library</button><button id="gdPracticeManualQuadBtn" type="button" onclick="gdOpenPracticeManualQuadTool()" hidden>Adjust box</button><button id="gdPracticeContinueScanBtn" type="button" onclick="gdContinuePracticePhotoScan()" hidden>Scan cell values</button></div>
 <div class="gdPracticeGridExperiments" id="gdPracticeGridExperiments" hidden>
-<div class="gdPracticeGridExperimentHead"><strong>OCR grid tools</strong><span>The generated OCR grid is the live path.</span></div>
-<div class="gdPracticeScannerActions gdPracticeGridExperimentActions"><button class="primary" id="gdPracticeBoxTrackGridBtn" type="button" onclick="gdRunPracticeGridExperiment('ocr-generated')">OCR generated grid</button><button id="gdPracticeCellOcrGridBtn" type="button" onclick="gdRunPracticeGridExperiment('cell-ocr')" hidden>Read cell values</button><button id="gdPracticeDigitizeTableBtn" type="button" onclick="gdRunPracticeGridExperiment('digitize-table')" hidden>Digitise table</button></div>
+<div class="gdPracticeGridExperimentHead"><strong>Scan debug tools</strong><span>Header / cutout allocation and cell values share the default scanner path.</span></div>
+<div class="gdPracticeScannerActions gdPracticeGridExperimentActions"><button class="primary" id="gdPracticeBoxTrackGridBtn" type="button" onclick="gdRunPracticeGridExperiment('ocr-generated')">Header / cutout allocation</button><button id="gdPracticeCellOcrGridBtn" type="button" onclick="gdRunPracticeGridExperiment('cell-ocr')" hidden>Re-read cell values</button><button id="gdPracticeDigitizeTableBtn" type="button" onclick="gdRunPracticeGridExperiment('digitize-table')" hidden>Digitise table</button></div>
 </div>
-<div class="gdPracticeScanStatus" id="gdPracticeScanStatus">Upload a practice photo, adjust the box, then generate the OCR grid.</div>
+<div class="gdPracticeScanStatus" id="gdPracticeScanStatus">Upload a table photo or take one with your phone, then scan it into the Clarity Shot Library.</div>
 </div>
 <div class="gdManualQuadTool" id="gdPracticeManualQuadTool" hidden>
 <div class="gdManualQuadHead"><div><strong>Manual corner stretch</strong><span>Drag the four pins onto the value-grid corners. The area inside the pins is stretched flat; outside the lines is ignored.</span></div><div class="gdManualQuadBadge">4-corner stretch</div></div>
@@ -10137,6 +10149,13 @@ function gdColumnOcrVariantCanvas(source,mode){
     if(mode==="clean"){
       const boosted=Math.max(0,Math.min(255,(gray-128)*2.05+128));
       v=gray>214?255:boosted;
+    }else if(mode==="clean-strong"){
+      const boosted=Math.max(0,Math.min(255,(gray-118)*2.65+128));
+      v=gray>222?255:boosted;
+    }else if(mode==="threshold-light"){
+      v=gray<204?0:255;
+    }else if(mode==="threshold-dark"){
+      v=gray<146?0:255;
     }else if(mode==="threshold"){
       v=gray<178?0:255;
     }else if(mode==="negative"){
@@ -10148,10 +10167,13 @@ function gdColumnOcrVariantCanvas(source,mode){
   ctx.putImageData(img,0,0);
   return canvas;
 }
-function gdColumnOcrVariantCanvases(crop){
+function gdColumnOcrVariantCanvases(crop,opts={}){
   const source=crop?.canvas;
   if(!source)return [];
-  return ["original","clean","threshold","negative"].map(label=>({
+  const labels=opts?.intensive===true
+    ?["original","clean","clean-strong","threshold","threshold-light","threshold-dark","negative"]
+    :["original","clean","threshold","negative"];
+  return labels.map(label=>({
     label,
     canvas:gdColumnOcrVariantCanvas(source,label)
   }));
@@ -10525,6 +10547,8 @@ function gdBestCellOcrItem(data,key,rowPosition,sourceY){
         raw,
         value,
         rawValue:value,
+        plausible,
+        flags:plausible?[]:["outside_light_range"],
         confidence,
         cy:Number(sourceY),
         sourceY:Number(sourceY),
@@ -10542,7 +10566,7 @@ function gdBestCellOcrItem(data,key,rowPosition,sourceY){
       };
     }
   });
-  if(!best||!gdLmMetricPlausible(key,Number(best.value)))return null;
+  if(!best)return null;
   if(gdColumnNeedsDirection(key)){
     const valueCrop=data?.__gdFittedCellValueCrop||null;
     const scale=Number(valueCrop?.scale)||1;
@@ -10562,6 +10586,8 @@ function gdColumnOrderDirectionLabel(key,item){
   if(!gdColumnNeedsDirection(key))return "";
   const direction=String(item?.direction||"").trim().toUpperCase();
   if(direction==="L"||direction==="R")return direction;
+  const rawDirection=gdDirectionFromText(item?.raw);
+  if(rawDirection==="L"||rawDirection==="R")return rawDirection;
   const value=Number(item?.value);
   return Number.isFinite(value)&&value<0?"L":"";
 }
@@ -10655,7 +10681,7 @@ async function gdRecognizeCellCrop(Tesseract,cellCrop,key=""){
     Object.assign({},gdOcrConfig("cell",key),{tessedit_pageseg_mode:"8"}),
     Object.assign({},gdOcrConfig("cell",key),{tessedit_pageseg_mode:"13"})
   ];
-  const variants=gdColumnOcrVariantCanvases(scanCrop);
+  const variants=gdColumnOcrVariantCanvases(scanCrop,{intensive:gdColumnNeedsDirection(key)});
   let bestData=null,bestScore=-Infinity;
   for(const [variantIndex,variant] of variants.entries()){
     const variantConfigs=variantIndex===0?configs:[configs[0]];
@@ -13120,7 +13146,7 @@ function gdRenderFlatTableOutputTable(columnScan){
     `${rows.length} rows`,
     `${columns.length} columns`,
     `${Number(cellGrid.cellCount)||0} cells`,
-    generatedGrid?(valuesRead?"raw OCR values shown; header allocation/native mapping remain separate":"collapsed by default; values unread; geometry evidence above is authoritative"):`fit ${(Number(columnScan?.flatTemplateFit?.rms)||0).toFixed(1)} px rms`
+    generatedGrid?(valuesRead?"raw OCR values shown; header allocation and scanner result are available":"collapsed by default; value OCR runs from the main Scan path"):`fit ${(Number(columnScan?.flatTemplateFit?.rms)||0).toFixed(1)} px rms`
   ].join(" • ");
   details.append(summary,wrap,source);
   list.append(details);
@@ -13152,6 +13178,77 @@ function gdPracticeColumnReadDescriptor(column,index=0){
     allocatedKey:String(column?.allocatedKey||""),
     allocatedLabel
   });
+}
+function gdPracticeScannerCellFlags(cell,key){
+  const flags=[];
+  const raw=String(cell?.raw||"").trim();
+  const parsed=Number(cell?.parsed);
+  const status=String(cell?.status||"");
+  if(!raw)flags.push("raw_missing");
+  if(gdColumnNeedsDirection(key)){
+    const direction=String(cell?.direction||gdDirectionFromText(raw)||"").trim().toUpperCase();
+    if(direction!=="L"&&direction!=="R")flags.push("direction_missing");
+  }
+  if(status==="bad"&&!Number.isFinite(parsed))flags.push("parse_failed");
+  if(Number.isFinite(parsed)&&cell?.plausible===false)flags.push("outside_light_range");
+  if(status==="warn")flags.push("captured_unverified");
+  return flags;
+}
+function gdBuildPracticeScannerResult(columnScan,digitized,payload=null){
+  const columns=Array.isArray(digitized?.columns)?digitized.columns:[];
+  const digitizedRows=Array.isArray(digitized?.rows)?digitized.rows:[];
+  if(!digitizedRows.length)return null;
+  const fallbackClub=String(gdPracticeScanClubLabel()||"").trim();
+  const rows=digitizedRows.map(row=>{
+    const rowFlags=[];
+    const cells={};
+    const clubCell=row.cells?.club||null;
+    const clubFromCell=String(clubCell?.value||clubCell?.raw||"").trim();
+    const club=clubFromCell||fallbackClub||"Unknown club";
+    if(!clubFromCell&&fallbackClub)rowFlags.push("club_fallback");
+    if(!clubFromCell&&!fallbackClub)rowFlags.push("club_unknown");
+    columns.forEach(column=>{
+      const key=String(column?.key||"");
+      if(!key||key==="toPin")return;
+      const entry=row.cells?.[key]||{};
+      const raw=String(entry.raw||"").trim();
+      const parsed=Number(entry.parsed);
+      const directionRaw=gdColumnNeedsDirection(key)
+        ?String(entry.direction||gdDirectionFromText(raw)||"").trim().toUpperCase()
+        :"";
+      const flags=gdPracticeScannerCellFlags(entry,key);
+      cells[key]={
+        raw,
+        value:Number.isFinite(parsed)?parsed:String(entry.value||raw||"").trim(),
+        direction:gdColumnNeedsDirection(key)?(directionRaw==="L"||directionRaw==="R"?directionRaw:"unknown"):"",
+        source:entry.item?"ocr_cell":(raw?"ocr_text":"missing"),
+        flags
+      };
+    });
+    const allFlags=[...rowFlags];
+    Object.values(cells).forEach(cell=>{
+      (cell.flags||[]).forEach(flag=>{if(flag&&!allFlags.includes(flag))allFlags.push(flag);});
+    });
+    return {
+      index:row.index,
+      club,
+      cells,
+      flags:allFlags,
+      sourceY:row.sourceY
+    };
+  });
+  const flags=[];
+  if(rows.some(row=>(row.flags||[]).includes("club_fallback")))flags.push("club_fallback");
+  if(rows.some(row=>(row.flags||[]).includes("direction_missing")))flags.push("direction_missing");
+  const result={
+    source:"practice_photo_scanner",
+    grid:{rows:digitizedRows.length,columns:columns.length,cells:digitizedRows.length*columns.length},
+    flags,
+    rows
+  };
+  if(payload&&typeof payload==="object")payload.scannerResult=result;
+  columnScan.scannerResult=result;
+  return result;
 }
 function gdBuildFlatDigitizedTable(columnScan,payload=null){
   const cellGrid=columnScan?.cellGrid;
@@ -13211,7 +13308,7 @@ function gdBuildFlatDigitizedTable(columnScan,payload=null){
       cell.parsed=parsed;
       cell.plausible=plausible;
       cell.displayValue=gdDirectionalDisplayValue(key,normalized,cell.direction);
-      cell.status=plausible?"good":(Number.isFinite(parsed)?"warn":"bad");
+      cell.status=Number.isFinite(parsed)?(plausible?"good":"warn"):"bad";
     });
     const metrics=gdLmMetricsFromLayoutValues(normalizedValues,columnScan?.layout?.units||{});
     const counts=columns.reduce((acc,column)=>{
@@ -13255,6 +13352,7 @@ function gdBuildFlatDigitizedTable(columnScan,payload=null){
     }),
     createdAt:Date.now()
   };
+  gdBuildPracticeScannerResult(columnScan,digitized,payload);
   columnScan.digitizedTable=digitized;
   return digitized;
 }
@@ -13384,7 +13482,7 @@ function gdRenderFlatTableBridgeCheckpoint(columnScan){
     summary:failed?(gdFlatTableFailureIsTemplate(failure.reason)
       ?`${gdFlatTableReasonText(failure.reason)} The row detector accepted ${Number(failure.rawRowCount)||0} row band${Number(failure.rawRowCount)===1?"":"s"}, but the fixed column template could not fit them.`
       :`${gdFlatTableReasonText(failure.reason)} The actual flat scan accepted ${Number(failure.rawRowCount)||0} row band${Number(failure.rawRowCount)===1?"":"s"}; ${Number(failure.requiredRows)||gdFlatTableMinimumAcceptedRows()} are required before cells can be OCR scanned.`)
-      :(digitizedRows?(isOcrGeneratedGrid?`Raw OCR scanned ${digitizedRows} row${digitizedRows===1?"":"s"} from the current cell cutouts. Review ${flags} flagged/missing cells; native save remains parked until enough column cutouts map to headers.`:`Fitted cells were OCR scanned into an owned digitised table. Review ${flags} flagged/missing cells against the crops before importing.`):(rows&&columns?(isOcrGeneratedGrid?`Column and row cutouts were fitted on the straight flat image. ${allocatedCutouts}/${totalCutouts||columns} column cutouts matched header aliases; cell values remain unread.`:"Rows, columns, and cells were fitted on the straight flat image. OCR cleanup stays parked until this geometry is reliable."):"The flat image did not expose enough repeated number stacks. Retake with the table sharper and flatter.")),
+      :(digitizedRows?(isOcrGeneratedGrid?`Raw OCR scanned ${digitizedRows} row${digitizedRows===1?"":"s"} from the current cell cutouts. Review ${flags} flagged/missing cells; scanner result is ready for the next filter.`:`Fitted cells were OCR scanned into an owned digitised table. Review ${flags} flagged/missing cells against the crops before importing.`):(rows&&columns?(isOcrGeneratedGrid?`Column and row cutouts were fitted on the straight flat image. ${allocatedCutouts}/${totalCutouts||columns} column cutouts matched header aliases; the main Scan path continues into cell values.`:"Rows, columns, and cells were fitted on the straight flat image. OCR cleanup stays parked until this geometry is reliable."):"The flat image did not expose enough repeated number stacks. Retake with the table sharper and flatter.")),
     stats:isOcrGeneratedGrid?[
       {label:"Rows",value:rows||"-"},
       {label:"Columns",value:columns||"-"},
@@ -13528,26 +13626,17 @@ function gdBuildFittedCellOcrCapture(columnScan,label="Fitted cell OCR"){
   const cellGrid=columnScan?.cellGrid;
   const rows=Array.isArray(cellGrid?.cells)?cellGrid.cells:[];
   const layout=columnScan?.layout||{units:{}};
-  const requiresClubId=String(columnScan?.layout?.cropMode||"")==="ocr-generated-grid";
   const fallbackClub=gdPracticeScanClubLabel();
   if(!rows.length)return null;
   const groups=[];
   const evidence=[];
-  const rejectedRows=[];
+  const rowNotes=[];
   rows.forEach((cellRow,rowIndex)=>{
     const clubRead=gdFittedRowClubRead(columnScan,cellRow);
     const rowClub=String(clubRead?.label||"").trim();
-    if(requiresClubId&&!rowClub){
-      rejectedRows.push({
-        index:rowIndex+1,
-        reason:"club_id_not_read",
-        text:String(clubRead?.text||"").trim(),
-        attempts:Array.isArray(clubRead?.attempts)?clubRead.attempts.slice(0,4):[]
-      });
-      if(evidence.length<12)evidence.push(`row ${rowIndex+1}: rejected - club ID not read${clubRead?.text?` (${clubRead.text})`:""}`);
-      return;
-    }
-    const club=rowClub||fallbackClub;
+    const club=rowClub||fallbackClub||"Unknown club";
+    const flags=[];
+    if(!rowClub)flags.push("club_fallback");
     const values={};
     const directions={};
     cellRow.forEach(cell=>{
@@ -13558,12 +13647,22 @@ function gdBuildFittedCellOcrCapture(columnScan,label="Fitted cell OCR"){
       values[key]=gdColumnOrderValueText(key,item);
       const direction=gdColumnOrderDirectionLabel(key,item);
       if(direction)directions[key]=direction;
+      else if(gdColumnNeedsDirection(key))flags.push(`${key}_direction_missing`);
     });
     Object.keys(values).forEach(key=>{
       values[key]=gdLmColumnCropNormalizedText(key,values[key],values);
     });
     const metrics=gdLmMetricsFromLayoutValues(values,layout.units||{});
-    if(metrics.length<1)return;
+    if(metrics.length<1){
+      rowNotes.push({
+        index:rowIndex+1,
+        reason:"no_parseable_metrics",
+        text:Object.keys(values).map(key=>`${key}:${values[key]}`).join(" "),
+        flags
+      });
+      if(evidence.length<12)evidence.push(`row ${rowIndex+1}: captured with no parseable metrics`);
+      return;
+    }
     const carryMetric=metrics.find(metric=>metric.candidateMetric==="carryDistance");
     const totalMetric=metrics.find(metric=>metric.candidateMetric==="totalDistance");
     const expectedMetric=carryMetric||totalMetric;
@@ -13572,7 +13671,8 @@ function gdBuildFittedCellOcrCapture(columnScan,label="Fitted cell OCR"){
       candidateClub:club,
       expectedDistanceM:expectedMetric?Number(expectedMetric.value):undefined,
       sourceMethod:"ocr_fitted_cell_grid",
-      clubIdSource:rowClub?"first_column_club_id":"manual_fallback",
+      clubIdSource:rowClub?"club_alias":"manual_fallback",
+      flags,
       _debugClubId:clubRead||null,
       _debugRowIndex:rowIndex,
       _debugRowY:Number(cellGrid?.rows?.[rowIndex]?.cy)||undefined,
@@ -13582,8 +13682,21 @@ function gdBuildFittedCellOcrCapture(columnScan,label="Fitted cell OCR"){
     });
     if(evidence.length<12)evidence.push(`row ${rowIndex+1}: ${Object.keys(values).map(key=>`${key}=${gdDirectionalDisplayValue(key,values[key],directions[key])}`).join(" ")}`);
   });
-  columnScan.fittedRowRejects=rejectedRows;
-  if(!groups.length)return null;
+  columnScan.fittedRowRejects=rowNotes;
+  if(!groups.length){
+    return {
+      label,
+      inputType:"photo-ocr-fitted-cell-grid",
+      timestamp:new Date().toISOString(),
+      sourceIdentity:{
+        providerGuess:"photo_ocr_fitted_cell_grid",
+        confidence:.58,
+        evidence:[`fitted-cell rows: 0`, `grid: ${Number(cellGrid?.rows?.length)||0} x ${Number(cellGrid?.columns?.length)||0}`].concat(evidence.slice(0,4))
+      },
+      rawTextBlocks:evidence,
+      clubGroups:[]
+    };
+  }
   return {
     label,
     inputType:"photo-ocr-fitted-cell-grid",
@@ -13619,7 +13732,7 @@ async function gdRunFittedCellGridOcr(columnScan,opts={}){
   const clubColumnIndex=gdOcrClubIdColumnIndex(columnScan);
   for(const [rowIndex,row] of rows.entries()){
     if(clubColumnIndex>=0&&row?.[clubColumnIndex]?.crop?.canvas){
-      gdSetPracticeScanStatus(`Reading club ID for fitted shot ${rowIndex+1}/${totalRows}...`);
+      gdSetPracticeScanStatus(`Reading club alias for fitted shot ${rowIndex+1}/${totalRows}...`);
       const clubRead=await gdRecognizeClubIdCell(Tesseract,row[clubColumnIndex],rowIndex+1);
       row[clubColumnIndex].clubIdRead=clubRead;
       row[clubColumnIndex].clubIdOcr=clubRead;
@@ -13653,25 +13766,26 @@ async function gdRunFittedCellGridOcr(columnScan,opts={}){
   gdPracticeDebugCheckpointSafe("raw_values_detected","success",{outputSummary:"Raw cell values collected",counts:{good:Number(digitized?.stats?.good)||0,flagged:Number(digitized?.stats?.flagged)||0,missing:Number(digitized?.stats?.missing)||0,headersAllocated:allocated,headersTotal:totalAllocated}});
   gdPracticeDebugCheckpointSafe("rows_parsed",digitized?.rows?.length?"success":"warning",{outputSummary:`${Number(digitized?.rows?.length)||0} digitized rows`,counts:{rowsParsed:Number(digitized?.rows?.length)||0}});
   const rejectedCellCount=(Number(digitized?.stats?.flagged)||0)+(Number(digitized?.stats?.missing)||0);
-  const clubRejected=Number(columnScan?.fittedRowRejects?.length)||0;
-  gdPracticeDebugCheckpointSafe("rows_rejected",(rejectedCellCount||clubRejected)?"warning":"success",{
-    outputSummary:`${Number(digitized?.stats?.flagged)||0} flagged cells, ${Number(digitized?.stats?.missing)||0} missing cells, ${clubRejected} club-ID rejected rows`,
-    counts:{flagged:Number(digitized?.stats?.flagged)||0,missing:Number(digitized?.stats?.missing)||0,clubRejected}
+  const rowNoteCount=Number(columnScan?.fittedRowRejects?.length)||0;
+  gdPracticeDebugCheckpointSafe("rows_rejected",(rejectedCellCount||rowNoteCount)?"warning":"success",{
+    outputSummary:`${Number(digitized?.stats?.flagged)||0} flagged cells, ${Number(digitized?.stats?.missing)||0} missing cells, ${rowNoteCount} row notes`,
+    counts:{flagged:Number(digitized?.stats?.flagged)||0,missing:Number(digitized?.stats?.missing)||0,rowNotes:rowNoteCount}
   });
   const debugRun=gdPracticeDebugCurrentRun();
-  if(debugRun&&digitized?.rows){
-    debugRun.raw=debugRun.raw||{};
-    debugRun.raw.rejectedRows=digitized.rows
+	  if(debugRun&&digitized?.rows){
+	    debugRun.raw=debugRun.raw||{};
+	    debugRun.raw.scannerResult=columnScan?.scannerResult||null;
+	    debugRun.raw.rejectedRows=digitized.rows
       .filter(row=>Number(row.flaggedCount)||Number(row.missingCount))
       .map(row=>({index:row.index,reason:`${row.flaggedCount||0} flagged, ${row.missingCount||0} missing`,rawValue:JSON.stringify(row.rawValues||{}),mappedValue:JSON.stringify(row.values||{})}))
-      .concat((Array.isArray(columnScan?.fittedRowRejects)?columnScan.fittedRowRejects:[]).map(row=>({index:row.index,reason:"C01 club ID was not read",rawValue:row.text||"",mappedValue:""})));
+      .concat((Array.isArray(columnScan?.fittedRowRejects)?columnScan.fittedRowRejects:[]).map(row=>({index:row.index,reason:row.reason||"row flagged",rawValue:row.text||"",mappedValue:JSON.stringify(row.flags||[])})));
   }
   gdRenderFlatTableBridgeOutput(columnScan);
   gdPracticeRefreshDebugTools();
   if(!payload?.clubGroups?.length){
     const digitizedRows=Number(columnScan?.digitizedTable?.rows?.length)||0;
-    gdPracticeDebugCheckpointSafe("rows_accepted","warning",{outputSummary:clubRejected?"Rows scrapped because C01 club ID was not read":"Raw cell values read; native Practice rows remain parked until column headers map the cutouts",counts:{accepted:0,digitizedRows,headersAllocated:allocated,headersTotal:totalAllocated,clubRejected}});
-    gdSetPracticeScanStatus(digitizedRows?`Raw cell value read complete: ${digitizedRows} row${digitizedRows===1?"":"s"} scanned. ${clubRejected?`${clubRejected} row${clubRejected===1?"":"s"} rejected because C01 club ID was not read. `:""}Headers allocated ${allocated}/${totalAllocated}; native save remains parked.`:"Cell OCR ran, but no raw value rows were usable yet.");
+    gdPracticeDebugCheckpointSafe("rows_accepted","warning",{outputSummary:"Raw cell values read; scanner result is available for the next filter, but no native Practice rows were formed yet",counts:{accepted:0,digitizedRows,headersAllocated:allocated,headersTotal:totalAllocated,rowNotes:rowNoteCount}});
+    gdSetPracticeScanStatus(digitizedRows?`Raw cell value read complete: ${digitizedRows} row${digitizedRows===1?"":"s"} scanned. Headers allocated ${allocated}/${totalAllocated}; scanner result is ready for review.`:"Cell OCR ran, but no grid rows produced values yet.");
     return columnScan;
   }
   gdPracticeDebugCheckpointSafe("rows_accepted","success",{outputSummary:`${payload.clubGroups.length} usable OCR shots`,counts:{accepted:payload.clubGroups.length}});
@@ -14258,7 +14372,7 @@ function gdColumnCandidateBaseScore(key,item){
   return score;
 }
 function gdColumnDirectionFromWord(word){
-  return gdLetterDirectionFromText(word?.text);
+  return gdDirectionFromText(word?.text);
 }
 function gdColumnDirectionInfoForWord(word,words,directionWords=[]){
   const direct=gdColumnDirectionFromWord(word);
@@ -14319,7 +14433,7 @@ function gdNormalizeColumnOcrValues(key,values){
       directionConfidence:Number(item.directionConfidence)||0,
       directionScore:Number(item.directionScore)||0
     });
-  }).filter(item=>Number.isFinite(Number(item.value))&&gdLmMetricPlausible(key,Number(item.value)));
+  }).filter(item=>Number.isFinite(Number(item.value)));
 }
 function gdRepairColumnOcrValue(key,item){
   const raw=String(item?.raw||"").trim();
@@ -14359,7 +14473,7 @@ function gdUpdatePracticeScanDebugSummary(columnScan){
     const digitizedRows=Number(columnScan?.digitizedTable?.rows?.length)||0;
     summary.textContent=digitizedRows
       ?`OCR generated grid - ${digitizedRows} raw value rows read - ${columns} columns - ${cells} cells - cuts: ${dividerSource} - headers ${allocated}/${total} allocated`
-      :`OCR generated grid - ${rows} row bands - ${columns} generic columns - ${cells} cells - cuts: ${dividerSource} - headers ${allocated}/${total} allocated, values unread`;
+      :`OCR generated grid - ${rows} row bands - ${columns} generic columns - ${cells} cells - cuts: ${dividerSource} - headers ${allocated}/${total} allocated, values pending`;
     return;
   }
   if(String(columnScan?.layout?.cropMode||"")==="flat-template"){
@@ -15328,7 +15442,7 @@ function gdRenderOcrColumnCutoutAllocation(columnScan){
   details.className="gdColumnImagePreview gdOcrColumnCutoutReview";
   details.open=true;
   const summary=document.createElement("summary");
-  summary.textContent=`Column cutouts - header allocation (${Number(allocation.allocatedCount)||0}/${cutouts.length})`;
+  summary.textContent=`Header / cutout allocation (${Number(allocation.allocatedCount)||0}/${cutouts.length})`;
   const grid=document.createElement("div");
   grid.className="gdOcrColumnCutoutGrid";
   cutouts.forEach(cutout=>{
@@ -16425,6 +16539,10 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
     const headerTextAttempts=Number(columnScan.headerTextScan?.attempts?.length)||0;
     const candidateCount=valueCandidates.length;
     const gridReady=!!(gridRows&&gridColumns&&gridCells);
+    gdPracticeDebugCheckpointSafe("header_cutout_allocation",allocatedColumns?"success":"warning",{
+      outputSummary:`Header / cutout allocation matched ${allocatedColumns}/${cutoutColumns} columns`,
+      counts:{headersAllocated:allocatedColumns,headersTotal:cutoutColumns,headerTextWords,headerTextAttempts}
+    });
     const outcome=gdPracticeSetTemplateOutcome("ocr",{
       label:"OCR generated",
       state:gridReady?"success":"failed",
@@ -16444,9 +16562,9 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
       headerTextAttempts,
       reason:gridReady?"":"OCR generated number-box geometry did not form a cell grid.",
       summary:gridReady
-        ?`OCR-generated layout produced a ${gridRows} x ${gridColumns} cutout grid from number-box OCR geometry. A dedicated header text OCR pass found ${headerTextWords} text words and allocated ${allocatedColumns}/${cutoutColumns} columns; cell values were not read in this step.`
+        ?`OCR-generated layout produced a ${gridRows} x ${gridColumns} cutout grid from number-box OCR geometry. A dedicated header text OCR pass found ${headerTextWords} text words and allocated ${allocatedColumns}/${cutoutColumns} columns.`
         :`OCR-generated layout found number-like boxes, but no usable cutout grid.`,
-      nextStep:gridReady?"Review the column cutout allocation and cell cutouts. Value reading remains parked until the grid internals are deliberately enabled.":"Tune the number-box geometry evidence using the OCR generated tab."
+      nextStep:gridReady?"Review the header / cutout allocation and cell cutouts. The default scanner reads cell values next.":"Tune the number-box geometry evidence using the OCR generated tab."
     });
     if(!gridReady){
       gdRenderOcrGeneratedTemplateOutput(columnScan,"ocr");
@@ -16458,8 +16576,7 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
     gdRenderFlatTableBridgeOutput(columnScan,"ocr");
     gdPracticeDebugCheckpointSafe("table_detected","success",{outputSummary:`OCR-generated grid ready: ${gridRows} rows x ${gridColumns} columns`,counts:{rows:gridRows,columns:gridColumns,cells:gridCells}});
     gdPracticeDebugCheckpointSafe("ocr_generated_template","success",{outputSummary:`OCR-generated grid ready: ${gridRows} rows x ${gridColumns} columns; ${allocatedColumns}/${cutoutColumns} headers allocated by dedicated text OCR`,counts:{rows:gridRows,columns:gridColumns,cells:gridCells,headersAllocated:allocatedColumns,headersTotal:cutoutColumns,headerTextWords,headerTextAttempts,words:wordCount,candidates:outcome.candidateCount}});
-    gdPracticeDebugCheckpointSafe("extraction_started","warning",{outputSummary:"Stopped at OCR-generated cutout grid; fitted-cell value OCR has not run"});
-    gdSetPracticeScanStatus(`OCR-generated grid ready: ${gridRows} rows x ${gridColumns} cutouts. Header cutouts allocated ${allocatedColumns}/${cutoutColumns}; values have not been read yet.`);
+    gdSetPracticeScanStatus(`OCR-generated grid ready: ${gridRows} rows x ${gridColumns} cutouts. Header / cutout allocation ${allocatedColumns}/${cutoutColumns}.`);
     return {payload:null,scan:columnScan,outcome};
   }catch(e){
     console.warn("[GolfDaddy] OCR generated template fallback failed",e);
@@ -16546,13 +16663,17 @@ async function gdRunDefaultPracticePhotoScanFromCheckpoint(checkpoint,opts={}){
     const rows=Number(scan?.cellGrid?.rows?.length)||0;
     const columns=Number(scan?.cellGrid?.columns?.length)||0;
     if(rows&&columns){
-      gdPracticeSetContinueScanReady(true);
+      gdPracticeSetContinueScanReady(false);
       gdPracticeRefreshDebugTools();
-      gdPracticeFeedback(`OCR-generated grid ready for review: ${rows} rows x ${columns} generic columns. No Practice Data rows were saved because values have not been read yet.`,"warning");
-      gdPracticeDebugFailedSafe("rows_accepted",new Error("OCR-generated grid stopped before value reading"),{
-        outputSummary:"Stopped at generated grid stage; no native rows were accepted or saved",
-        counts:{accepted:0,gridRows:rows,gridColumns:columns},
-        raw:{ocrGenerated:result?.outcome||null}
+      gdPracticeFeedback(`OCR-generated grid ready: ${rows} rows x ${columns}. Reading cell values...`);
+      gdPracticeDebugCheckpointSafe("extraction_started","running",{
+        inputSummary:"OCR grid ready; fitted-cell value scan starting",
+        counts:{gridRows:rows,gridColumns:columns}
+      });
+      return await gdRunFittedCellGridOcr(scan,{
+        allowParkedFittedCellOcr:true,
+        label:"Practice photo scan",
+        sourceLabel:opts.sourceLabel||gdPracticePhotoName||"Practice photo scan"
       });
     }else{
       gdPracticeSetContinueScanReady(true);
@@ -32991,6 +33112,55 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     panel.classList.toggle("open",!!gdPracticeImportOpen);
     const button=panel.querySelector(".gdPracticeImportToggle");
     if(button)button.setAttribute("aria-expanded",gdPracticeImportOpen?"true":"false");
+    gdRenderPracticeEmailLane();
+  }
+  function gdPracticeEmailSlug(value,fallback="player"){
+    const raw=String(value||fallback||"player").trim().toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
+    return raw||fallback||"player";
+  }
+  function gdPracticeEmailIdentity(){
+    const profile=safe(()=>typeof ensureProfile==="function"?ensureProfile():null,null)||{};
+    const session=safe(()=>window.ClaritySession&&typeof window.ClaritySession.get==="function"?window.ClaritySession.get():null,null)||{};
+    return {
+      profileId:profile.id||session.profileId||"",
+      accountId:session.accountId||"",
+      email:profile.email||session.email||"",
+      name:profile.name||session.accountName||"player"
+    };
+  }
+  function gdPracticeEmailAddressLocal(identity){
+    const id=identity||gdPracticeEmailIdentity();
+    const owner=gdPracticeEmailSlug(id.profileId||id.accountId||id.email||id.name,"player");
+    return `practice+${owner}@clarity.local`;
+  }
+  function gdRenderPracticeEmailLane(){
+    const root=document.getElementById("gdPracticeEmailBox");
+    if(!root)return;
+    const address=gdPracticeEmailAddressLocal();
+    root.innerHTML=`<div class="gdPracticeEmailHead"><div><strong>Email receiver</strong><span>UI stub only in this pass</span></div><button type="button" onclick="return gdPracticeCopyEmailAddress()">Copy</button></div><div class="gdPracticeEmailAddress">${gdEscapeHTML(address)}</div>`;
+  }
+  function gdPracticeCopyEmailAddress(){
+    const address=gdPracticeEmailAddressLocal();
+    safe(()=>navigator?.clipboard?.writeText?.(address),null);
+    gdLmToast("Practice email address copied");
+    return false;
+  }
+  function gdPracticeEmailImportPending(event){
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    event?.stopImmediatePropagation?.();
+    gdPracticeImportOpen=true;
+    try{localStorage.setItem(GD_PRACTICE_IMPORT_OPEN_KEY,"1");}catch(e){}
+    gdRenderPracticeImportPanel();
+    gdNativePracticeFeedbackPatch({
+      status:"waiting",
+      lastAction:"Email import selected",
+      warnings:["Email intake is a UI stub in this pass."],
+      errors:[],
+      nextStep:"Use Upload CSV, Upload, Take photo, or paste reviewed rows for this build."
+    });
+    gdLmToast("Email intake is stubbed for this pass");
+    return false;
   }
   let gdPracticePhotoDebugRun=null;
   function gdPracticeDebugNow(){return new Date().toISOString();}
@@ -33052,6 +33222,8 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       crop_cleanup:"Crop / orientation / cleanup",
       extraction_started:"OCR / extraction started",
       extraction_completed:"OCR / extraction completed",
+      ocr_generated_template:"OCR grid generated",
+      header_cutout_allocation:"Header / cutout allocation",
       raw_values_detected:"Raw text / raw values detected",
       table_detected:"Table / CSV-like data detected",
       field_mapping:"Field mapping attempted",
@@ -33986,8 +34158,8 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     });
     return selected.map(key=>byClub[key]).filter(row=>row&&Number.isFinite(Number(row.actualDistanceM))&&Number(row.actualDistanceM)>0);
   }
-  function gdPracticePlotShots(analysis){
-    const accepted=Array.isArray(analysis?.acceptedShots)?analysis.acceptedShots:[];
+	  function gdPracticePlotShots(analysis){
+	    const accepted=Array.isArray(analysis?.acceptedShots)?analysis.acceptedShots:[];
     const deselected=gdPracticePlotExcludedShotMap();
     if(!gdPracticePlotAllRowsForTest())return accepted.filter(shot=>!deselected[shot?.shotId]);
     const rows=[];
@@ -33999,10 +34171,107 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     (Array.isArray(analysis?.rejectedShots)?analysis.rejectedShots:[]).forEach(shot=>{
       if(shot?.shotId&&seen.has(shot.shotId))return;
       rows.push(Object.assign({gdPracticePlotLane:"rejected",rejected:true},shot));
-    });
-    return rows.filter(shot=>!deselected[shot?.shotId]);
-  }
-  function gdPracticeDisplayShotCount(){
+	    });
+	    return rows.filter(shot=>!deselected[shot?.shotId]);
+	  }
+	  function gdPracticeNormalisedBaselineForShot(shot,actualDistance){
+	    const expected=Number(shot?.expectedM??shot?.expectedDistanceM);
+	    if(Number.isFinite(expected)&&expected>0)return expected;
+	    const clubDefault=Number(gdDefaultCarryForClub(shot?.club||""));
+	    if(Number.isFinite(clubDefault)&&clubDefault>0)return clubDefault;
+	    return Number.isFinite(actualDistance)&&actualDistance>0?actualDistance:NaN;
+	  }
+	  function gdPracticeNormalisedAngleForShot(shot,baselineDistance){
+	    const direct=Number(shot?.normalizedDeg??shot?.normalisedDeg??shot?.plot?.normalizedDeg??shot?.plot?.normalisedDeg);
+	    if(Number.isFinite(direct))return direct;
+	    const metric=typeof gdPracticeShotMetricValue==="function"?gdPracticeShotMetricValue(shot,["sideAngle","offlineAngle","resultAngle"]):NaN;
+	    if(Number.isFinite(metric))return metric;
+	    const lateral=gdShotChartLateralInfo(shot,baselineDistance);
+	    if(lateral.hasLateral!==false&&Number.isFinite(Number(lateral.value))&&Number.isFinite(baselineDistance)&&baselineDistance>0){
+	      return Math.atan2(Number(lateral.value),baselineDistance)*180/Math.PI;
+	    }
+	    return NaN;
+	  }
+	  function gdPracticeNormalisedPlotRows(shots){
+	    return (Array.isArray(shots)?shots:[]).map((shot,index)=>{
+	      const actual=gdPracticeShotActualDistance(shot);
+	      const expected=gdPracticeNormalisedBaselineForShot(shot,actual);
+	      if(!Number.isFinite(expected)||expected<=0)return null;
+	      const rawDepth=Number(shot?.depthM??shot?.normalisedDepthM??shot?.normalizedDepthM);
+	      const depth=Number.isFinite(rawDepth)?rawDepth:(Number.isFinite(actual)?actual-expected:0);
+	      const angle=gdPracticeNormalisedAngleForShot(shot,expected);
+	      return {
+	        club:shot?.club||"Unknown",
+	        actualDistanceM:Number.isFinite(actual)?actual:null,
+	        expectedDistanceM:expected,
+	        normalisedDepthM:depth,
+	        normalizedDeg:Number.isFinite(angle)?angle:0,
+	        hasLateral:Number.isFinite(angle),
+	        shot,
+	        index
+	      };
+	    }).filter(row=>row&&Number.isFinite(row.normalisedDepthM)&&Number.isFinite(row.normalizedDeg));
+	  }
+	  function gdPracticeNormalisedPlotLayout(rows,opts={}){
+	    const chartWidth=Number(opts.width)||480;
+	    const chartHeight=Number(opts.height)||260;
+	    const plotLeft=Number(opts.plotLeft)||38;
+	    const plotRight=Number(opts.plotRight)||458;
+	    const plotTop=Number(opts.plotTop)||82;
+	    const plotBottom=Number(opts.plotBottom)||224;
+	    const plotMidX=(plotLeft+plotRight)/2;
+	    const plotMidY=(plotTop+plotBottom)/2;
+	    const depthValues=(rows||[]).map(row=>Math.abs(Number(row?.normalisedDepthM))).filter(Number.isFinite);
+	    const angleValues=(rows||[]).filter(row=>row?.hasLateral!==false).map(row=>Math.abs(Number(row?.normalizedDeg))).filter(Number.isFinite);
+	    const depthBase=depthValues.length>=8?gdShotChartQuantile(depthValues,.94):Math.max(8,...depthValues);
+	    const angleBase=angleValues.length>=8?gdShotChartQuantile(angleValues,.94):Math.max(1.8,...angleValues);
+	    const depthMax=gdShotChartNiceMax(Math.min(Math.max(depthBase*1.25+3,14),Number(opts.maxDepthM)||60),4,14);
+	    const angleMax=gdShotChartNiceMax(Math.min(Math.max(angleBase*1.3+.4,2.5),Number(opts.maxAngleDeg)||12),4,2.5);
+	    return {chartWidth,chartHeight,plotLeft,plotRight,plotTop,plotBottom,plotMidX,plotMidY,depthMax,angleMax,depthRange:Math.max(1,depthMax),angleRange:Math.max(.5,angleMax)};
+	  }
+	  function gdPracticeNormalisedPlotPoint(plot,row,index=0){
+	    if(!plot||!row)return null;
+	    const depth=Number(row.normalisedDepthM);
+	    const angle=Number(row.normalizedDeg);
+	    if(!Number.isFinite(depth)||!Number.isFinite(angle))return null;
+	    const halfWidth=(plot.plotRight-plot.plotLeft)/2;
+	    const halfHeight=(plot.plotBottom-plot.plotTop)/2;
+	    const jitter=((Number(index)||0)%5-2)*.85;
+	    const x=plot.plotMidX+gdShotChartClamp(depth/plot.depthRange,-1,1)*halfWidth;
+	    const y=row.hasLateral===false
+	      ?plot.plotMidY+jitter
+	      :plot.plotMidY+gdShotChartClamp(angle/plot.angleRange,-1,1)*halfHeight+(Math.abs(angle)<.08?jitter:0);
+	    return {x,y,clipped:Math.abs(depth)>plot.depthRange||Math.abs(angle)>plot.angleRange};
+	  }
+	  function gdPracticeNormalisedBackdropSvg(plot,title){
+	    const width=Number(plot.chartWidth)||480;
+	    const height=Number(plot.chartHeight)||260;
+	    const grid=[
+	      {x:plot.plotLeft+(plot.plotRight-plot.plotLeft)*.25},
+	      {x:plot.plotLeft+(plot.plotRight-plot.plotLeft)*.75},
+	      {y:plot.plotTop+(plot.plotBottom-plot.plotTop)*.25},
+	      {y:plot.plotTop+(plot.plotBottom-plot.plotTop)*.75}
+	    ].map(item=>Number.isFinite(item.x)
+	      ?`<line x1="${item.x.toFixed(1)}" y1="${plot.plotTop}" x2="${item.x.toFixed(1)}" y2="${plot.plotBottom}" stroke="rgba(255,255,255,.055)" stroke-width="1"/>`
+	      :`<line x1="${plot.plotLeft}" y1="${item.y.toFixed(1)}" x2="${plot.plotRight}" y2="${item.y.toFixed(1)}" stroke="rgba(255,255,255,.055)" stroke-width="1"/>`
+	    ).join("");
+	    return `<rect width="${width}" height="${height}" fill="rgba(0,0,0,.08)"/>
+	      <text x="24" y="30" fill="rgba(255,255,255,.82)" font-size="14" font-weight="950">${gdStatsSvgText(title||"Practice Data")}</text>
+	      <text x="24" y="48" fill="rgba(255,255,255,.46)" font-size="9" font-weight="850">Depth against expected carry · lateral angle</text>
+	      <rect x="${(plot.plotLeft-8).toFixed(1)}" y="${(plot.plotTop-8).toFixed(1)}" width="${(plot.plotRight-plot.plotLeft+16).toFixed(1)}" height="${(plot.plotBottom-plot.plotTop+16).toFixed(1)}" rx="8" fill="rgba(255,255,255,.012)" stroke="rgba(255,255,255,.045)" stroke-width="1"/>
+	      ${grid}
+	      <line x1="${plot.plotMidX.toFixed(1)}" y1="${plot.plotTop}" x2="${plot.plotMidX.toFixed(1)}" y2="${plot.plotBottom}" stroke="rgba(255,255,255,.18)" stroke-width="1" stroke-dasharray="4 8" stroke-linecap="round"/>
+	      <line x1="${plot.plotLeft}" y1="${plot.plotMidY.toFixed(1)}" x2="${plot.plotRight}" y2="${plot.plotMidY.toFixed(1)}" stroke="rgba(248,250,247,.42)" stroke-width="1.55" stroke-dasharray="7 8" stroke-linecap="round"/>
+	      <path d="M ${(plot.plotLeft+7).toFixed(1)} ${plot.plotMidY.toFixed(1)} H ${(plot.plotLeft+48).toFixed(1)}" stroke="rgba(248,250,247,.76)" stroke-width="1.8" stroke-linecap="round"/>
+	      <circle cx="${plot.plotLeft}" cy="${plot.plotMidY.toFixed(1)}" r="6.4" fill="#f8faf7" stroke="rgba(0,0,0,.62)" stroke-width="1.45"/>
+	      <circle cx="${plot.plotLeft}" cy="${plot.plotMidY.toFixed(1)}" r="2.2" fill="#07100d"/>`;
+	  }
+	  function gdPracticeClubKeyDropdownHTML(clubs){
+	    const rows=(Array.isArray(clubs)?clubs:[]).filter(Boolean);
+	    if(!rows.length)return "";
+	    return `<details class="gdPracticeClubKeyDrop"><summary>Club key</summary><div class="gdPracticeClubKeyList">${rows.map(club=>`<span class="gdPracticeClubKeyItem"><i class="gdPracticeClubKeySwatch" style="background:${gdStatsClubColor(club)}"></i><span>${gdEscapeHTML(club)}</span></span>`).join("")}</div></details>`;
+	  }
+	  function gdPracticeDisplayShotCount(){
     const store=gdPracticeDisplayStore();
     return Array.isArray(store?.shots)?store.shots.length:0;
   }
@@ -35398,11 +35667,12 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	    remember("courseData",!!(opts&&opts.replace));
 	    return false;
 	  }
-  function practiceSvg(analysis){
-    const shots=gdPracticePlotShots(analysis||{});
-	    if(!shots.length){
-	      return gdShotBubbleOverlayStandaloneSvg("practice",gdShotDataGraphTitle("Practice Data"),480,260);
-    }
+	  function practiceSvg(analysis){
+	    const shots=gdPracticePlotShots(analysis||{});
+		    if(!shots.length){
+		      const emptyPlot=gdPracticeNormalisedPlotLayout([]);
+		      return `<svg viewBox="0 0 480 260" role="img" aria-label="Practice Data normalised plot">${gdPracticeNormalisedBackdropSvg(emptyPlot,`${gdShotDataPlayerLabel()} - Practice Data`)}</svg>${gdShotBubbleOverlayButton("practice")}`;
+	    }
     const plotAll=gdPracticePlotAllRowsForTest();
     const cfg=safe(()=>window.GolfDaddyLaunchMonitorData?.settings?.(),{})||{};
     const hunterPct=Math.max(.18,Math.min(.45,Number(cfg.clusterHunterPct)||.28));
@@ -35536,27 +35806,25 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       const ry=gdShotChartClamp((maxY-minY)/2+7,9,32);
       return `<ellipse class="gdPracticeClusterMarker gdShotChartClubOval practice" data-source="cluster-marker" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" rx="${rx.toFixed(1)}" ry="${ry.toFixed(1)}" fill="rgba(255,210,135,.82)" fill-opacity=".014" stroke="rgba(255,210,135,.82)" stroke-width=".7" stroke-opacity=".46" stroke-dasharray="1 5" stroke-linecap="round" pointer-events="none"/>`;
     }
-    const clubKey=[...new Set(dataRows.concat(overlayRows).concat(hubRows).map(row=>row.club||"Unknown"))].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})).slice(0,6);
-    const clubKeySvg=clubKey.map((club,i)=>`<circle cx="${26+i*48}" cy="58" r="4.2" fill="${gdStatsClubColor(club)}"/><text x="${34+i*48}" y="61" fill="rgba(255,255,255,.68)" font-size="9" font-weight="850">${gdStatsSvgText(club)}</text>`).join("");
-    const hubUnderlaySvg=hubRows.length?gdOffsetHubUnderlayLayer(hubRows,plot,"practice"):"";
-    const overlaySvg=projectionActive?gdShotBubbleOverlayLayerMarkup(dataRows,plot,"practice",{
-      referenceRows:overlayRows,
-      maxBubbles:overlayRows.length,
-      offsetDeg:practiceBubbleOffset,
-      groupClass:"gdShotBubbleOverlayLayer gdPracticeBubbleProjectionLayer",
-      source:"practice-bubble-projection"
-    }):"";
-    const clubOvals=practiceClusterMarkerSvg(pointModels);
-    const pts=pointModels.map(point=>point.svg).join("");
-	    return `<svg viewBox="0 0 480 260" role="img" aria-label="Practice Data cluster preview" data-practice-offset-deg="${gdPracticeHasBubbleOffset(practiceBubbleOffset)?Number(practiceBubbleOffset).toFixed(2):""}" data-hub-offset-deg="${Number.isFinite(Number(hubOffset))?Number(hubOffset).toFixed(2):""}">
-	      ${gdShotChartBackdropSvg(plot,gdShotDataGraphTitle("Practice Data"))}
-      ${hubUnderlaySvg}
-      ${overlaySvg}
-      ${clubOvals}
-      ${pts}
-      ${clubKeySvg}
-    </svg>${gdShotBubbleOverlayButton("practice")}`;
-  }
+	    const normalisedRows=gdPracticeNormalisedPlotRows(shots);
+	    const normalisedPlot=gdPracticeNormalisedPlotLayout(normalisedRows,{plotLeft:38,plotRight:458,plotTop,plotBottom});
+	    const clubKeySource=normalisedRows.length?normalisedRows:dataRows;
+	    const clubKey=[...new Set(clubKeySource.map(row=>row.club||"Unknown"))].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})).slice(0,6);
+	    const clubKeyDropdown=gdPracticeClubKeyDropdownHTML(clubKey);
+	    const pts=normalisedRows.slice(0,70).map(row=>{
+	      const point=gdPracticeNormalisedPlotPoint(normalisedPlot,row,row.index);
+	      if(!point)return "";
+	      const state=pointStateByIndex.get(row.index)||{};
+	      const excluded=!!state.excluded||(!plotAll&&(row.shot?.rejected||practiceExclusionReason(row.shot)));
+	      const colour=excluded?"#8f9a96":gdStatsClubColor(row.club);
+	      const opacity=excluded?".16":row.hasLateral===false?".42":".72";
+	      return gdShotChartDotSvg(point,{fill:colour,opacity,radius:2.2,shape:"circle",stroke:point.clipped?"rgba(255,255,255,.26)":"",strokeWidth:"1"});
+	    }).join("");
+		    return `<svg viewBox="0 0 480 260" role="img" aria-label="Practice Data normalised plot" data-practice-offset-deg="${gdPracticeHasBubbleOffset(practiceBubbleOffset)?Number(practiceBubbleOffset).toFixed(2):""}" data-hub-offset-deg="${Number.isFinite(Number(hubOffset))?Number(hubOffset).toFixed(2):""}">
+		      ${gdPracticeNormalisedBackdropSvg(normalisedPlot,`${gdShotDataPlayerLabel()} - Practice Data`)}
+	      ${pts}
+	    </svg>${clubKeyDropdown}${gdShotBubbleOverlayButton("practice")}`;
+	  }
   const gdPracticeBubbleToleranceFields=[
     "launchMonitorCluster.clusterHunterPct",
     "launchMonitorCluster.resultConsistencyPct",
@@ -36041,7 +36309,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	    if(!root)return;
 	    const rows=gdPracticeEvidenceRows(analysis);
 	      if(!rows.length){
-	      root.innerHTML=gdPracticeLibraryShellHTML(analysis,0,`<div class="gdPracticeEvidenceHead"><div><strong>Stored shots</strong><span>Imported practice shots will appear here after a scan or upload.</span></div></div>`);
+	      root.innerHTML=gdPracticeLibraryShellHTML(analysis,0,`<div class="gdPracticeEvidenceHead"><div><strong>Clarity Shot Data</strong><span>Imported practice shots will appear here after a scan or upload.</span></div></div>`);
 	      return;
 	    }
 	    const grouped={};
@@ -36050,23 +36318,11 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	      grouped[club]=grouped[club]||[];
 	      grouped[club].push(row);
 	    });
-	    const clusters=gdPracticeClusterByClub(analysis);
 	    const uploadMap=gdPracticeEvidenceUploadMap();
 	    const clubs=Object.keys(grouped).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
-	    if(!clubs.includes(gdPracticeEvidenceActiveClub))gdPracticeEvidenceActiveClub=clubs[0]||"";
-	    const selectedCount=Object.keys(gdPracticeEvidenceSelectedShots).length;
-	    const tabs=clubs.map(club=>{
-	      const clubRows=grouped[club]||[];
-	      const active=club===gdPracticeEvidenceActiveClub;
-	      return `<button type="button" class="gdPracticeEvidenceTab ${active?"active":""}" onclick="return gdPracticeSetEvidenceClubTab(${gdPracticeJsArg(club)})"><span>${gdEscapeHTML(club)}</span><strong>${clubRows.length}</strong></button>`;
-	    }).join("");
-	    const club=gdPracticeEvidenceActiveClub;
-	    const clubRows=grouped[club]||[];
-	      const countedRows=clubRows.filter(row=>row.counted&&!row.excluded);
-	      const offset=gdShotBubbleMedian((countedRows.length?countedRows:clubRows).map(row=>Number(row.normalizedDeg)));
+	    const clubSections=clubs.map(club=>{
+	      const clubRows=(grouped[club]||[]).slice().sort((a,b)=>gdPracticeEvidenceTime(b.timestamp)-gdPracticeEvidenceTime(a.timestamp));
 	      const carry=gdShotBubbleMedian(clubRows.map(row=>Number(row.actualDistanceM)).filter(Number.isFinite));
-	      const cluster=clusters[club]||{};
-	      const status=gdPracticeEvidenceStatus(cluster,countedRows.length,clubRows.length);
 	      const uploadGroups={};
 	      clubRows.forEach(row=>{
 	        const upload=gdPracticeEvidenceUploadForRow(row,uploadMap);
@@ -36074,40 +36330,36 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	        uploadGroups[id]=uploadGroups[id]||{upload,rows:[]};
 	        uploadGroups[id].rows.push(row);
 	      });
-	      const uploadSections=Object.values(uploadGroups).sort((a,b)=>(b.upload.time||0)-(a.upload.time||0)).map((group,index)=>{
-	        const uploadRows=group.rows;
-	        const selectableRows=uploadRows.filter(row=>row.shotId);
-	        const uploadSelected=selectableRows.filter(row=>gdPracticeEvidenceSelectedShots[row.shotId]).length;
-	        const uploadChecked=!!(selectableRows.length&&uploadSelected===selectableRows.length);
-		        const uploadLabel=gdPracticeEvidenceDateLabel(group.upload.timestamp);
-		        const uploadName=group.upload.label&&group.upload.label!=="Practice upload"?` · ${group.upload.label}`:"";
-		        const shotRows=uploadRows.slice().sort((a,b)=>a.index-b.index).map(row=>{
-		          const tone=row.plotDeselected?"excluded":row.excluded?"excluded":row.counted?"counted":"filtered";
-		          const statusClass=row.plotDeselected||row.excluded?"muted":row.counted?"focus":"stored";
-		          const carryText=Number.isFinite(Number(row.actualDistanceM))?`${Number(row.actualDistanceM).toFixed(0)}m`:"-";
-		          const offlineText=Number.isFinite(Number(row.lateralM))?`${Number(row.lateralM)>0?"R":Number(row.lateralM)<0?"L":""} ${Math.abs(Number(row.lateralM)).toFixed(1)}m`.trim():"-";
-		          const offsetText=Number.isFinite(Number(row.normalizedDeg))?gdOffsetLabel(row.normalizedDeg):"-";
-		          const plotLabel=gdPracticeEvidencePlotLabel(row);
-		          const rowStatus=row.plotDeselected?"plot off":row.excluded?"filtered":row.counted?"bubble fit":"stored";
-		          const checked=row.shotId&&gdPracticeEvidenceSelectedShots[row.shotId]?"checked":"";
-		          return `<div class="gdPracticeEvidenceShot ${tone}"><label class="gdPracticeEvidenceShotSelect"><input type="checkbox" value="${gdEscapeHTML(row.shotId)}" ${checked} onchange="return gdPracticeToggleEvidenceShot(this)"><span></span></label><span class="gdPracticeEvidenceIndex">${Number(row.index)+1}</span><strong>${gdEscapeHTML(carryText)}</strong><span>${gdEscapeHTML(offlineText)}</span><span>${gdEscapeHTML(offsetText)}</span><em><i class="gdPracticeEvidenceDot ${statusClass}" aria-hidden="true"></i>${gdEscapeHTML(plotLabel)} · ${gdEscapeHTML(rowStatus)}</em></div>`;
-		        }).join("");
-		        const tableHead=`<div class="gdPracticeEvidenceTableHead"><span></span><span>#</span><span>Carry</span><span>Offline</span><span>Offset</span><span>Status</span></div>`;
-		        return `<details class="gdPracticeEvidenceUpload" ${index===0?"open":""}><summary><label class="gdPracticeEvidenceUploadSelect" onclick="event.stopPropagation()"><input type="checkbox" ${uploadChecked?"checked":""} onchange="return gdPracticeSetEvidenceUploadSelection(${gdPracticeJsArg(group.upload.id)},this.checked)"><span></span></label><span>${gdEscapeHTML(uploadLabel)}${gdEscapeHTML(uploadName)}</span><strong>${uploadRows.length} shot${uploadRows.length===1?"":"s"}${uploadSelected?` · ${uploadSelected} sel`:""}</strong></summary><div class="gdPracticeEvidenceShots gdPracticeEvidenceTable">${tableHead}${shotRows}</div></details>`;
-		      }).join("");
-	    const clubSelectable=clubRows.filter(row=>row.shotId);
-	    const clubSelected=clubSelectable.filter(row=>gdPracticeEvidenceSelectedShots[row.shotId]).length;
-	    const clubChecked=!!(clubSelectable.length&&clubSelected===clubSelectable.length);
-	    const tools=`<div class="gdPracticeEvidenceTools"><label><input type="checkbox" ${clubChecked?"checked":""} onchange="return gdPracticeSetEvidenceClubSelection(${gdPracticeJsArg(club)},this.checked)">Select club</label><button type="button" onclick="return gdPracticeSetSelectedPlotExcluded(true)" ${selectedCount?"":"disabled"}>Deselect from plot</button><button type="button" onclick="return gdPracticeSetSelectedPlotExcluded(false)" ${selectedCount?"":"disabled"}>Restore to plot</button><button type="button" onclick="return gdPracticeClearEvidenceSelection()" ${selectedCount?"":"disabled"}>Clear</button><button class="danger" type="button" onclick="return gdPracticeDeleteSelectedEvidenceShots()" ${selectedCount?"":"disabled"}>Delete ${selectedCount||""}</button></div>`;
-	    const section=`<section class="gdPracticeEvidenceClub open" data-club="${gdEscapeHTML(club)}"><div class="gdPracticeEvidenceClubHead static"><div><span>${gdEscapeHTML(club)}</span><strong>${clubRows.length} stored shot${clubRows.length===1?"":"s"}</strong></div><small>${Number.isFinite(offset)?"Bubble ready":"Bubble not ready"} · ${carry?`${carry.toFixed(0)}m`:"-"} · ${gdEscapeHTML(status)}</small></div><div class="gdPracticeEvidenceClubBody">${uploadSections}</div></section>`;
-	    root.innerHTML=gdPracticeLibraryShellHTML(analysis,rows.length,`<div class="gdPracticeEvidenceHead"><div><strong>Stored shots</strong><span>Stored uploads grouped by club and upload date.</span></div></div>${gdPracticePlotModeControls()}<div class="gdPracticeEvidenceTabs">${tabs}</div>${tools}${section}`);
+		      const uploadSections=Object.values(uploadGroups).sort((a,b)=>(b.upload.time||0)-(a.upload.time||0)).map((group,index)=>{
+		        const uploadRows=group.rows;
+			        const uploadLabel=gdPracticeEvidenceDateLabel(group.upload.timestamp);
+			        const uploadName=group.upload.label&&group.upload.label!=="Practice upload"?` · ${group.upload.label}`:"";
+			        const shotRows=uploadRows.slice().sort((a,b)=>a.index-b.index).map(row=>{
+			          const tone=row.plotDeselected?"excluded":row.excluded?"excluded":row.counted?"counted":"filtered";
+			          const statusClass=row.plotDeselected||row.excluded?"muted":row.counted?"focus":"stored";
+			          const carryText=Number.isFinite(Number(row.actualDistanceM))?`${Number(row.actualDistanceM).toFixed(0)}m`:"-";
+			          const offlineText=Number.isFinite(Number(row.lateralM))?`${Number(row.lateralM)>0?"R":Number(row.lateralM)<0?"L":""} ${Math.abs(Number(row.lateralM)).toFixed(1)}m`.trim():"-";
+			          const offsetText=Number.isFinite(Number(row.normalizedDeg))?gdOffsetLabel(row.normalizedDeg):"-";
+			          const plotLabel=gdPracticeEvidencePlotLabel(row);
+			          const rowStatus=row.plotDeselected?"plot off":row.excluded?"filtered":row.counted?"bubble fit":"stored";
+			          return `<div class="gdPracticeEvidenceShot ${tone}"><span class="gdPracticeEvidenceIndex">${Number(row.index)+1}</span><strong>${gdEscapeHTML(carryText)}</strong><span>${gdEscapeHTML(offlineText)}</span><span>${gdEscapeHTML(offsetText)}</span><em><i class="gdPracticeEvidenceDot ${statusClass}" aria-hidden="true"></i>${gdEscapeHTML(plotLabel)} · ${gdEscapeHTML(rowStatus)}</em></div>`;
+			        }).join("");
+			        const tableHead=`<div class="gdPracticeEvidenceTableHead"><span>#</span><span>Carry</span><span>Offline</span><span>Offset</span><span>Status</span></div>`;
+			        return `<details class="gdPracticeEvidenceUpload" ${index===0?"open":""}><summary><span>${gdEscapeHTML(uploadLabel)}${gdEscapeHTML(uploadName)}</span><strong>${uploadRows.length} shot${uploadRows.length===1?"":"s"}</strong></summary><div class="gdPracticeEvidenceShots gdPracticeEvidenceTable">${tableHead}${shotRows}</div></details>`;
+			      }).join("");
+	      const open=!!gdPracticeEvidenceOpenClubs[club];
+	      return `<section class="gdPracticeEvidenceClub ${open?"open":""}" data-club="${gdEscapeHTML(club)}"><button type="button" class="gdPracticeEvidenceClubHead" onclick="return gdPracticeToggleEvidenceClub(this)" aria-expanded="${open?"true":"false"}"><div><span>${gdEscapeHTML(club)}</span><strong>${clubRows.length} shot${clubRows.length===1?"":"s"}</strong></div><small>${Number.isFinite(carry)&&carry?`${carry.toFixed(0)}m avg`:""}</small><b class="gdPracticeEvidenceChevron">${open?"-":"+"}</b></button><div class="gdPracticeEvidenceClubBody">${uploadSections||`<div class="gdPracticeEvidenceNoRows">No shots yet for this club.</div>`}</div></section>`;
+	    }).join("");
+	    root.innerHTML=gdPracticeLibraryShellHTML(analysis,rows.length,`${gdPracticePlotModeControls()}<div class="gdPracticeEvidenceClubRows${rows.length>18?" gdPracticeEvidenceClubRowsScrollable":""}">${clubSections}</div>`);
 	  }
-		  function renderPracticeData(skipTolerances=false){
-		    const visual=byId("gdPracticeDataVisual");
-		    const result=byId("gdPracticeDataResult");
-		    const evidenceList=byId("gdPracticeEvidenceList");
-		    const api=window.GolfDaddyLaunchMonitorData;
-	    if(result)gdRenderPracticeAutoFlow(null);
+			  function renderPracticeData(skipTolerances=false){
+			    const visual=byId("gdPracticeDataVisual");
+			    const visualTitle=byId("gdPracticeVisualTitle");
+			    const result=byId("gdPracticeDataResult");
+			    const evidenceList=byId("gdPracticeEvidenceList");
+			    const api=window.GolfDaddyLaunchMonitorData;
+			    if(visualTitle)visualTitle.textContent=`${gdShotDataPlayerLabel()} - Practice Data`;
+		    if(result)gdRenderPracticeAutoFlow(null);
 	    gdRenderPracticeMasterTolerance();
     gdRenderPracticeAdminChrome();
     gdRenderPracticeImportPanel();
@@ -36434,6 +36686,8 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       gdToggleShotDataLibrary:gdToggleShotDataLibrary,
       gdToggleCourseImport:gdToggleCourseImport,
       gdTogglePracticeImport:gdTogglePracticeImport,
+      gdPracticeEmailImportPending:gdPracticeEmailImportPending,
+      gdPracticeCopyEmailAddress:gdPracticeCopyEmailAddress,
       gdNativePracticeFeedbackPatch:gdNativePracticeFeedbackPatch,
       gdRenderNativePracticeImportLane:gdRenderNativePracticeImportLane,
       gdParseNativePracticeImport:gdParseNativePracticeImport,
@@ -40109,7 +40363,7 @@ body.gdGpsActive #bagRailBtn{order:7!important}
 .gdPracticeTolerancePanel label{
   border-radius:12px!important;
 }
-		#practiceDataPanel.open #gdPracticeDataVisual{order:1}
+			#practiceDataPanel.open .gdPracticeVisualStack{order:1}
 		#practiceDataPanel.open .gdPracticeProjectionControls{order:2}
 		.gdPracticeResult[hidden],#gdPracticeDataResult[hidden]{display:none!important}
 		#practiceDataPanel.open .gdPracticeResult{order:3}
@@ -40196,12 +40450,194 @@ body.gdGpsActive #bagRailBtn{order:7!important}
 #practiceDataPanel.open .gdPracticeIntakeActions.open .gdPracticeImportBody{
   display:grid!important;
 }
-#practiceDataPanel.open .gdPracticeIntakeActions .gdUploadFileButton{
-  min-height:48px!important;
-  border-radius:14px!important;
-  font-size:14px!important;
-}
-@media(max-width:760px){
+	#practiceDataPanel.open .gdPracticeIntakeActions .gdUploadFileButton{
+	  min-height:48px!important;
+	  border-radius:14px!important;
+	  font-size:14px!important;
+	}
+	#practiceDataPanel.open .gdPracticeVisualTitle{
+	  margin:0!important;
+	  color:#f4f7f5!important;
+	  font-size:17px!important;
+	  line-height:1.05!important;
+	  font-weight:950!important;
+	  letter-spacing:0!important;
+	}
+	#practiceDataPanel.open .gdPracticeImportIconPanel{
+	  display:grid!important;
+	  grid-template-columns:auto auto!important;
+	  align-items:center!important;
+	  gap:10px!important;
+	  width:max-content!important;
+	  max-width:100%!important;
+	  padding:8px!important;
+	  border-radius:14px!important;
+	  border:1px solid rgba(255,255,255,.085)!important;
+	  background:rgba(255,255,255,.035)!important;
+	  box-shadow:inset 0 1px 0 rgba(255,255,255,.045)!important;
+	}
+	#practiceDataPanel.open .gdPracticeImportTitle{
+	  color:rgba(255,255,255,.52)!important;
+	  font-size:10px!important;
+	  line-height:1!important;
+	  font-weight:900!important;
+	}
+	#practiceDataPanel.open .gdPracticeImportIcons{
+	  display:flex!important;
+	  align-items:center!important;
+	  gap:6px!important;
+	}
+	#practiceDataPanel.open .gdPracticeImportIconButton,
+	#practiceDataPanel.open .gdPracticeImportIconButton.gdPracticeImportToggle{
+	  appearance:none!important;
+	  display:grid!important;
+	  place-items:center!important;
+	  width:42px!important;
+	  height:42px!important;
+	  min-width:42px!important;
+	  min-height:42px!important;
+	  border-radius:12px!important;
+	  padding:0!important;
+	  border:1px solid rgba(255,255,255,.12)!important;
+	  background:linear-gradient(180deg,rgba(255,255,255,.075),rgba(255,255,255,.028))!important;
+	  color:#f4f7f5!important;
+	  box-shadow:inset 0 1px 0 rgba(255,255,255,.055),0 8px 18px rgba(0,0,0,.16)!important;
+	  cursor:pointer!important;
+	  font-size:0!important;
+	}
+	#practiceDataPanel.open .gdPracticeImportIconButton.email{
+	  color:rgba(244,247,245,.58)!important;
+	  border-color:rgba(255,255,255,.075)!important;
+	  background:rgba(255,255,255,.025)!important;
+	  box-shadow:none!important;
+	}
+	#practiceDataPanel.open .gdPracticeIntakeActions.open .gdPracticeImportIconButton.gdPracticeImportToggle{
+	  border-color:rgba(215,176,107,.54)!important;
+	  background:linear-gradient(180deg,#d7b06b,#b88d42)!important;
+	  color:#06100b!important;
+	}
+	#practiceDataPanel.open .gdPracticeImportIconGlyph,
+	#practiceDataPanel.open .gdPracticeImportIconGlyph svg{
+	  display:block!important;
+	}
+	#practiceDataPanel.open .gdPracticeImportIconGlyph svg{
+	  width:22px!important;
+	  height:22px!important;
+	  fill:none!important;
+	  stroke:currentColor!important;
+	  stroke-width:1.9!important;
+	  stroke-linecap:round!important;
+	  stroke-linejoin:round!important;
+	}
+	#practiceDataPanel.open .gdPracticeEmailBox{
+	  grid-column:1/-1!important;
+	  display:grid!important;
+	  gap:6px!important;
+	  min-width:0!important;
+	  border-top:1px solid rgba(255,255,255,.08)!important;
+	  padding-top:7px!important;
+	}
+	#practiceDataPanel.open .gdPracticeEmailHead{
+	  display:grid!important;
+	  grid-template-columns:minmax(0,1fr) auto!important;
+	  gap:8px!important;
+	  align-items:center!important;
+	}
+	#practiceDataPanel.open .gdPracticeEmailHead strong{
+	  display:block!important;
+	  color:#fff!important;
+	  font-size:12px!important;
+	  font-weight:950!important;
+	}
+	#practiceDataPanel.open .gdPracticeEmailHead span{
+	  display:block!important;
+	  margin-top:2px!important;
+	  color:rgba(255,255,255,.55)!important;
+	  font-size:10px!important;
+	  font-weight:820!important;
+	}
+	#practiceDataPanel.open .gdPracticeEmailHead button{
+	  min-height:30px!important;
+	  border-radius:9px!important;
+	  border:1px solid rgba(255,255,255,.10)!important;
+	  background:rgba(255,255,255,.08)!important;
+	  color:#fff!important;
+	  font-size:10px!important;
+	  font-weight:950!important;
+	  padding:6px 9px!important;
+	}
+	#practiceDataPanel.open .gdPracticeEmailAddress{
+	  min-width:0!important;
+	  overflow:auto!important;
+	  border-radius:10px!important;
+	  border:1px solid rgba(215,176,107,.18)!important;
+	  background:rgba(215,176,107,.08)!important;
+	  color:#ffe3a9!important;
+	  padding:8px 9px!important;
+	  font:850 11px/1.25 ui-monospace,SFMono-Regular,Menlo,monospace!important;
+	  white-space:nowrap!important;
+	}
+	#practiceDataPanel.open #gdNativePracticeImportLane{
+	  grid-column:1/-1!important;
+	}
+	.gdPracticeClubKeyDrop{
+	  margin-top:7px!important;
+	  width:max-content!important;
+	  max-width:100%!important;
+	  border-radius:10px!important;
+	  border:1px solid rgba(255,255,255,.08)!important;
+	  background:rgba(255,255,255,.035)!important;
+	  color:rgba(255,255,255,.72)!important;
+	  overflow:hidden!important;
+	}
+	.gdPracticeClubKeyDrop summary{
+	  cursor:pointer!important;
+	  padding:7px 9px!important;
+	  font-size:10px!important;
+	  font-weight:950!important;
+	  list-style:none!important;
+	}
+	.gdPracticeClubKeyDrop summary::-webkit-details-marker{display:none!important}
+	.gdPracticeClubKeyList{
+	  display:flex!important;
+	  flex-wrap:wrap!important;
+	  gap:6px!important;
+	  padding:0 9px 8px!important;
+	}
+	.gdPracticeClubKeyItem{
+	  display:inline-flex!important;
+	  align-items:center!important;
+	  gap:5px!important;
+	  color:rgba(255,255,255,.66)!important;
+	  font-size:10px!important;
+	  font-weight:850!important;
+	}
+	.gdPracticeClubKeySwatch{
+	  width:8px!important;
+	  height:8px!important;
+	  border-radius:999px!important;
+	  display:inline-block!important;
+	}
+	.gdPracticeEvidenceClubRows{
+	  display:grid!important;
+	  gap:8px!important;
+	}
+	.gdPracticeEvidenceClubRowsScrollable{
+	  max-height:440px!important;
+	  overflow:auto!important;
+	  padding-right:2px!important;
+	}
+	#practiceDataPanel.open .gdPracticeEvidenceUpload summary{
+	  grid-template-columns:minmax(0,1fr) auto!important;
+	}
+	#practiceDataPanel.open .gdPracticeEvidenceTableHead,
+	#practiceDataPanel.open .gdPracticeEvidenceShot{
+	  grid-template-columns:34px 54px 58px 64px minmax(88px,1fr)!important;
+	}
+	#practiceDataPanel.open .gdPracticeEvidenceTable{
+	  min-width:470px!important;
+	}
+	@media(max-width:760px){
   .gdShotDataAdminPanel{grid-column:1!important}
   .gdPracticeProjectorToggle{grid-template-columns:minmax(0,1fr) auto!important}
   .gdPracticeProjectorToggle small{grid-column:1/-1!important;grid-row:2!important;text-align:left!important;white-space:normal!important}

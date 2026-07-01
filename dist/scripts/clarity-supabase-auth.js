@@ -4,6 +4,7 @@
   var ACCOUNT_KEY = "gd_accounts_v1";
   var PROFILE_KEY = "gd_player_profiles_v27";
   var SESSION_KEY = "clarity:supabase-auth-session:v1";
+  var MIN_PASSWORD_LENGTH = 8;
   var INSTALLED_KEY = "__claritySupabaseAuthInstalled";
   if (window[INSTALLED_KEY]) return;
   window[INSTALLED_KEY] = true;
@@ -24,11 +25,19 @@
     var body = await response.json().catch(function () { return {}; });
     if (!response.ok || body.ok === false) {
       var error = new Error(body.error || "Supabase Auth request failed");
+      error.code = body.code || "request_failed";
       error.status = response.status;
       error.body = body;
       throw error;
     }
     return body;
+  }
+  function clearStaleAuthState() {
+    safe(function () { localStorage.removeItem(SESSION_KEY); });
+    safe(function () { localStorage.removeItem("gd_account_signed_out_v1"); });
+    safe(function () { localStorage.removeItem("gd_account_keep_logged_in_v1"); });
+    safe(function () { localStorage.removeItem("gd_account_session_login_v1"); });
+    safe(function () { sessionStorage.removeItem("gd_account_session_login_v1"); });
   }
 
   function normalisePack(account, profile) {
@@ -118,8 +127,24 @@
     var existing = currentAccount();
     if (!existing) throw new Error("Sign in first");
     if (!existing.supabaseUserId) throw new Error("This account is not linked to Supabase Auth yet. Sign out and sign back in with Supabase Auth.");
-    var body = await post("/api/auth-update-account", { supabaseUserId: existing.supabaseUserId, name: data && data.name, email: data && data.email, password: data && data.password, role: data && data.role || existing.role });
-    return commit(body, { activate: true });
+    var nextPassword = String(data && data.password || "");
+    var body = await post("/api/auth-update-account", { supabaseUserId: existing.supabaseUserId, name: data && data.name, email: data && data.email, password: nextPassword, role: data && data.role || existing.role });
+    var updated = commit(body, { activate: true });
+    if (body && body.passwordUpdated && nextPassword) {
+      clearStaleAuthState();
+      var nextEmail = normalizeEmail(data && data.email || existing.email);
+      if (!nextEmail) nextEmail = normalizeEmail(existing.email);
+      try {
+        return await login(nextEmail, nextPassword, { keepLoggedIn: true });
+      } catch (error) {
+        clearStaleAuthState();
+        var message = new Error("Password changed. Please sign in again with the new password.");
+        message.code = "password_changed_relogin_required";
+        message.body = error && error.body || null;
+        throw message;
+      }
+    }
+    return updated;
   }
 
   function parseRecoveryParams() {
@@ -128,8 +153,8 @@
     var accessToken = hash.get("access_token") || params.get("access_token") || "";
     var refreshToken = hash.get("refresh_token") || params.get("refresh_token") || "";
     var type = hash.get("type") || params.get("type") || "";
-    var requested = params.get("claritySetPassword") === "1" || params.get("clarityResetPassword") === "1" || type === "recovery" || !!accessToken;
-    return requested ? { accessToken: accessToken, refreshToken: refreshToken, type: type } : null;
+    var requested = params.get("claritySetPassword") === "1" || params.get("clarityResetPassword") === "1" || params.get("clarityAccountSetup") === "1" || type === "recovery" || !!accessToken;
+    return requested ? { accessToken: accessToken, refreshToken: refreshToken, type: type, raw: hash.get("error") || params.get("error") || "" } : null;
   }
 
   async function publicAuthConfig() {
@@ -189,9 +214,9 @@
     var status = document.getElementById("claritySetupPasswordStatus");
     var button = document.getElementById("claritySetupPasswordSave");
     button.onclick = async function () {
-      var p1 = document.getElementById("claritySetupPassword1").value || "";
-      var p2 = document.getElementById("claritySetupPassword2").value || "";
-      if (p1.length < 8) { status.textContent = "Password needs at least 8 characters."; return; }
+    var p1 = document.getElementById("claritySetupPassword1").value || "";
+    var p2 = document.getElementById("claritySetupPassword2").value || "";
+      if (p1.length < MIN_PASSWORD_LENGTH) { status.textContent = "Password needs at least " + MIN_PASSWORD_LENGTH + " characters."; return; }
       if (p1 !== p2) { status.textContent = "Passwords do not match."; return; }
       button.disabled = true;
       status.textContent = "Saving password...";
@@ -202,13 +227,16 @@
         await setSupabasePassword(config, token.accessToken, p1);
         if (!accountEmail) throw new Error("Could not read account email from setup link");
         await login(accountEmail, p1, { keepLoggedIn: true });
-        if (token.refreshToken) saveJson(SESSION_KEY, { access_token: token.accessToken, refresh_token: token.refreshToken, savedAt: nowISO() });
         clearRecoveryUrl();
         status.textContent = "Password saved. Opening Clarity...";
         setTimeout(function () { overlay.remove(); location.reload(); }, 600);
       } catch (error) {
         button.disabled = false;
-        status.textContent = error && error.message || "Could not save password. Try the latest setup email link.";
+        var message = error && error.message || "Could not save password. Try the latest setup email link.";
+        if (/access token|expired|invalid|wrong|site|wrong site/i.test(message)) message = "That reset link is invalid or from the wrong site. Request a new reset email from Sign in > Forgot password.";
+        status.textContent = message;
+      } finally {
+        clearRecoveryUrl();
       }
     };
     return true;

@@ -166,7 +166,7 @@
   }
   function passwordResetUrl(emailValue){
     var url = new URL(location.pathname || "/", location.origin);
-    url.searchParams.set("clarityResetPassword", "1");
+    url.searchParams.set("claritySetPassword", "1");
     url.searchParams.set("email", String(emailValue || "").trim());
     return url.toString();
   }
@@ -283,14 +283,22 @@
     return sendToRecipient(serviceEvent(recipient, options), recipient, true);
   }
   function sendPasswordRecovery(emailValue){
-    var account = accountByEmail(emailValue);
-    if(!account)return Promise.resolve({queued:false});
-    return sendServiceEmail(account, {
-      eventType:"password_recovery",
-      title:"Reset your Clarity password",
-      detail:"A password reset was requested for this Clarity account. Use the button below to set a new password.",
-      ctaLabel:"Set New Password",
-      ctaUrl:passwordResetUrl(account.email)
+    if (!emailValue || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(emailValue || "").trim())) {
+      return Promise.resolve({queued:false, error:"Enter a valid email"});
+    }
+    return fetch("/api/auth-reset-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: String(emailValue || "").trim() })
+    }).then(function (response) {
+      return response.json().catch(function () { return {}; }).then(function (body) {
+        if (!response.ok || body.ok === false) {
+          return Object.assign({}, body, { queued:false, status:response.status });
+        }
+        return Object.assign({}, body, { sent:true, queued: true });
+      });
+    }).catch(function () {
+      return { queued:false, error:"Password reset request failed." };
     });
   }
   function recordActivity(options){
@@ -415,6 +423,10 @@
           if(help && sendResult){
             if(sendResult.sent){
               help.textContent = "Password reset email sent.";
+            }else if(sendResult.code === "email_not_configured"){
+              help.textContent = "Email delivery is not configured. Contact support for password reset help.";
+            }else if(sendResult.code === "auth_not_configured"){
+              help.textContent = "Supabase Auth is not configured. Contact support.";
             }else if(sendResult.error || sendResult.status >= 400){
               help.textContent = "Password reset email could not be sent. Check the account uses a real email address.";
             }else if(sendResult.queued !== false){
