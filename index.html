@@ -8169,8 +8169,10 @@ async function gdHandleLaunchMonitorUpload(file){
   if(!file)return;
   gdNativePracticeFeedbackBridge({status:"file_selected",lastAction:`Legacy text upload selected: ${file.name||"plain text"}`,warnings:["This upload also feeds the existing launch-monitor intake path."],errors:[],nextStep:"Reading upload..."});
   gdLmSetStatus("Status","Reading upload",file.name||"Plain text file","needs_more_data");
+  gdSetPracticePhotoProcessing(true,{clubs:["Upload"],stageIndex:0,progress:12});
   try{
     const text=await file.text();
+    gdSetPracticePhotoProcessing(true,{clubs:["Upload"],stageIndex:1,progress:38});
     const payload=gdBuildLaunchMonitorTextCapture(text,file.name||"Plain text launch monitor upload");
     if(!(payload.clubGroups||[]).length){
       gdNativePracticeFeedbackBridge({status:"failed",lastAction:"Legacy upload parsed 0 rows",errors:["No rows detected"],nextStep:"Use pasted CSV with headers: club, carry, total, offline, face, path, start."});
@@ -8184,13 +8186,18 @@ async function gdHandleLaunchMonitorUpload(file){
       gdTogglePracticeAdmin(true);
       return;
     }
+    const clubs=[...new Set((payload.clubGroups||[]).map(group=>String(group?.candidateClub||group?.originClubLabel||"").trim()).filter(Boolean))];
+    gdSetPracticePhotoProcessing(true,{clubs:clubs.length?clubs:["Upload"],stageIndex:2,progress:72});
     await gdImportLaunchMonitorPayload(payload,"Uploaded launch monitor text");
+    gdSetPracticePhotoProcessing(true,{clubs:clubs.length?clubs:["Upload"],stageIndex:3,progress:96});
     gdNativePracticeFeedbackBridge({status:"saved",lastAction:`Legacy upload imported ${payload.clubGroups.length} row${payload.clubGroups.length===1?"":"s"}`,parsedCount:payload.clubGroups.length,validCount:payload.clubGroups.length,invalidCount:0,warnings:["Saved through existing launch-monitor intake, not the native row store."],errors:[],nextStep:"Use pasted CSV if you want rows in native practice storage."});
   }catch(e){
     console.warn("[GolfDaddy] launch monitor upload failed",e);
     gdNativePracticeFeedbackBridge({status:"failed",lastAction:"Text upload failed",errors:[e&&e.message?e.message:"Could not read file"],nextStep:"Try pasted CSV/text in the native import lane."});
     gdLmSetStatus("Status","Upload failed",e&&e.message?e.message:"Could not read file","conflict_check");
     gdLmToast("Launch monitor upload failed");
+  }finally{
+    gdSetPracticePhotoProcessing(false);
   }
 }
 function gdSetPracticeScanStatus(message){
@@ -13759,6 +13766,7 @@ async function gdRunFittedCellGridOcr(columnScan,opts={}){
   const payload=gdBuildFittedCellOcrCapture(columnScan,opts.label||"Raw cell value read");
   columnScan.columnOrderPayload=payload;
   gdBuildFlatDigitizedTable(columnScan,payload);
+  if(typeof gdSetPracticePhotoProcessing==="function")gdSetPracticePhotoProcessing(true,{stageIndex:2,progress:78,preserveClubs:true});
   const digitized=columnScan?.digitizedTable||null;
   const allocated=Number(columnScan?.columnCutoutAllocation?.allocatedCount)||0;
   const totalAllocated=Number(columnScan?.columnCutoutAllocation?.totalCount)||Number(cellGrid?.columns?.length)||0;
@@ -13790,6 +13798,7 @@ async function gdRunFittedCellGridOcr(columnScan,opts={}){
   }
   gdPracticeDebugCheckpointSafe("rows_accepted","success",{outputSummary:`${payload.clubGroups.length} usable OCR shots`,counts:{accepted:payload.clubGroups.length}});
   gdPracticeDebugCheckpointSafe("practice_store_handoff","success",{outputSummary:"Photo extraction payload ready for Practice Data save",counts:{rows:payload.clubGroups.length}});
+  if(typeof gdSetPracticePhotoProcessing==="function")gdSetPracticePhotoProcessing(true,{stageIndex:3,progress:96,preserveClubs:true});
   if(opts.importToNative===true){
     gdPracticeExtractionPreviewState=null;
     try{gdRenderPracticeExtractionCheckpoint();}catch(e){}
@@ -15473,7 +15482,7 @@ function gdRenderOcrColumnCutoutAllocation(columnScan){
   const clubCutout=cutouts.find(cutout=>cutout?.allocatedKey==="club");
   if(clubCutout){
     const label=clubCutout.status==="club-id-pass"?"club-ID pass target":"Club";
-    club.textContent=`Club label pass: ${clubCutout.genericLabel} is allocated as ${label}. Rows without a readable club label are rejected before native output.`;
+    club.textContent=`Club label pass: ${clubCutout.genericLabel} is allocated as ${label}. Rows without a readable club label use the manual club fallback and are flagged for review.`;
   }else if(clubCandidates.length){
     club.textContent=`Club label pass: ${clubCandidates.slice(0,4).map(candidate=>{
       const hits=(candidate.hits||[]).map(hit=>hit.label).filter(Boolean).join("/");
@@ -16652,9 +16661,10 @@ async function gdRunDefaultPracticePhotoScanFromCheckpoint(checkpoint,opts={}){
   gdPracticeClearTemplateOutcomes();
   gdPracticeSetContinueScanReady(false);
   gdClosePracticeManualQuadTool();
-  gdSetPracticePhotoProcessing(true);
+  gdSetPracticePhotoProcessing(true,{stageIndex:0,progress:10});
   gdPracticeFeedback("Generating OCR practice grid...");
   try{
+    gdSetPracticePhotoProcessing(true,{stageIndex:1,progress:34,preserveClubs:true});
     const result=await gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,null,{
       label:"Practice photo OCR generated grid",
       sourceLabel:opts.sourceLabel||gdPracticePhotoName||"Practice photo scan"
@@ -16665,6 +16675,7 @@ async function gdRunDefaultPracticePhotoScanFromCheckpoint(checkpoint,opts={}){
     if(rows&&columns){
       gdPracticeSetContinueScanReady(false);
       gdPracticeRefreshDebugTools();
+      gdSetPracticePhotoProcessing(true,{stageIndex:2,progress:72,preserveClubs:true});
       gdPracticeFeedback(`OCR-generated grid ready: ${rows} rows x ${columns}. Reading cell values...`);
       gdPracticeDebugCheckpointSafe("extraction_started","running",{
         inputSummary:"OCR grid ready; fitted-cell value scan starting",
@@ -24158,6 +24169,10 @@ var gdCourseImportOpen=false;
 var gdPracticePhotoProcessing=false;
 var gdPracticePhotoProcessingStartedAt=0;
 var gdPracticePhotoProcessingTimer=null;
+var gdPracticePhotoProcessingStopTimer=null;
+var gdPracticePhotoProcessingProgress=0;
+var gdPracticePhotoProcessingStageIndex=0;
+const GD_PRACTICE_PROCESSING_MIN_VISIBLE_MS=0;
 const GD_PRACTICE_PROCESSING_STAGES=[
   "Scanning",
   "Importing",
@@ -24169,6 +24184,16 @@ function gdPracticeProcessingElapsed(){
   return gdPracticePhotoProcessingStartedAt?Math.max(0,Date.now()-gdPracticePhotoProcessingStartedAt):0;
 }
 function gdPracticeProcessingStageState(){
+  if(gdPracticePhotoProcessing){
+    const explicitProgress=Number(gdPracticePhotoProcessingProgress);
+    const explicitIndex=Number(gdPracticePhotoProcessingStageIndex);
+    if(Number.isFinite(explicitProgress)&&explicitProgress>0){
+      return{
+        index:Number.isFinite(explicitIndex)?Math.max(0,Math.min(GD_PRACTICE_PROCESSING_STAGES.length-1,Math.round(explicitIndex))):0,
+        progress:Math.max(4,Math.min(98,Math.round(explicitProgress)))
+      };
+    }
+  }
   const elapsed=gdPracticeProcessingElapsed();
   const thresholds=[0,1400,3200,5400];
   let index=0;
@@ -24216,50 +24241,99 @@ function gdToggleShotDataLibrary(kind,event){
   event?.stopPropagation?.();
   event?.stopImmediatePropagation?.();
   const course=String(kind||"practice").toLowerCase()==="course";
-  gdSetShotDataLibraryOpen(course?"course":"practice",!gdShotDataLibraryIsOpen(course?"course":"practice"));
+  const resolvedKind=course?"course":"practice";
+  const nextOpen=!gdShotDataLibraryIsOpen(resolvedKind);
+  gdSetShotDataLibraryOpen(resolvedKind,nextOpen);
+  const shellSelector=course?".gdShotDataLibraryShell-course":".gdShotDataLibraryShell-practice";
+  const toggleSelector=course?".gdCourseLibraryTabs":".gdPracticeLibraryTabs";
+  document.querySelectorAll(shellSelector).forEach(shell=>shell.classList.toggle("open",nextOpen));
+  document.querySelectorAll(toggleSelector).forEach(toggle=>toggle.setAttribute("aria-expanded",nextOpen?"true":"false"));
   if(course&&typeof renderStats==="function")renderStats();
   else if(!course&&typeof renderPracticeData==="function")renderPracticeData(true);
   if(document.getElementById("dataHubPanel")?.classList.contains("open")&&typeof renderCompareData==="function")renderCompareData();
   return false;
 }
+if(!window.__gdShotDataLibraryToggleBound){
+  window.__gdShotDataLibraryToggleBound=true;
+  document.addEventListener("click",event=>{
+    const toggle=event.target&&event.target.closest&&event.target.closest("[data-gd-shot-library-kind]");
+    if(!toggle)return;
+    return gdToggleShotDataLibrary(toggle.dataset.gdShotLibraryKind||"practice",event);
+  },true);
+}
 function gdNativeShotDataProcessingTrackHTML(clubLabel=""){
   const state=gdPracticeProcessingStageState();
-  const stages=GD_PRACTICE_PROCESSING_STAGES.map((label,index)=>{
-    const tone=index<state.index?"done":(index===state.index?"active":"pending");
-    return `<span class="gdNativeProcessingNode ${tone}" aria-label="${gdEscapeHTML(label)}"><span>${index+1}</span></span>`;
-  }).join("");
   const label=GD_PRACTICE_PROCESSING_STAGES[state.index]||"Processing";
-  const club=String(clubLabel||"").trim();
-  return `<span class="gdNativeProcessingBadge" aria-live="polite">${club?`<span class="gdNativeProcessingClub">${gdEscapeHTML(club)}</span>`:""}<span class="gdNativeProcessingTrack" aria-hidden="true"><span class="gdNativeProcessingRail"></span><span class="gdNativeProcessingFill" style="width:${state.progress}%"></span>${stages}</span><span class="gdNativeProcessingLabel">${gdEscapeHTML(label)}</span></span>`;
+  const stages=GD_PRACTICE_PROCESSING_STAGES.map((stageLabel,index)=>{
+    const tone=index<state.index?"done":(index===state.index?"active":"pending");
+    return `<span class="gdNativeProcessingNode ${tone}" aria-label="${gdEscapeHTML(stageLabel)}"><span>${index+1}</span></span>`;
+  }).join("");
+  return `<span class="gdNativeProcessingBadge" aria-live="polite"><span class="gdNativeProcessingTrack" aria-hidden="true"><span class="gdNativeProcessingRail"></span><span class="gdNativeProcessingFill" style="width:${state.progress}%"></span><span class="gdNativeProcessingNodes">${stages}</span></span><span class="gdNativeProcessingLabel">${gdEscapeHTML(label)}</span></span>`;
 }
 function gdNativeShotDataProcessingHTML(){
-  const clubs=(Array.isArray(gdPracticePhotoProcessingClubs)?gdPracticePhotoProcessingClubs:[]).map(club=>String(club||"").trim()).filter(Boolean);
-  const unique=[...new Set(clubs.length?clubs:["7i"])];
-  return `<span class="gdNativeProcessingStack">${unique.map(club=>gdNativeShotDataProcessingTrackHTML(club)).join("")}</span>`;
+  return `<span class="gdNativeProcessingStack">${gdNativeShotDataProcessingTrackHTML()}</span>`;
 }
-function gdSetPracticePhotoProcessing(active){
+function gdSetPracticePhotoProcessing(active,opts={}){
   const wasProcessing=gdPracticePhotoProcessing;
+  const optionClubs=Array.isArray(opts?.clubs)?opts.clubs.map(club=>String(club||"").trim()).filter(Boolean):[];
+  if(active&&gdPracticePhotoProcessingStopTimer){
+    clearTimeout(gdPracticePhotoProcessingStopTimer);
+    gdPracticePhotoProcessingStopTimer=null;
+  }
+  if(!active&&gdPracticePhotoProcessing&&!opts?.immediate){
+    const remaining=GD_PRACTICE_PROCESSING_MIN_VISIBLE_MS-gdPracticeProcessingElapsed();
+    if(remaining>0){
+      if(gdPracticePhotoProcessingStopTimer)clearTimeout(gdPracticePhotoProcessingStopTimer);
+      gdPracticePhotoProcessingStopTimer=setTimeout(()=>{
+        gdPracticePhotoProcessingStopTimer=null;
+        gdSetPracticePhotoProcessing(false,Object.assign({},opts,{immediate:true}));
+      },remaining);
+      try{if(typeof renderPracticeData==="function")renderPracticeData(true);}catch(e){}
+      return;
+    }
+  }
+  if(!active&&gdPracticePhotoProcessingStopTimer){
+    clearTimeout(gdPracticePhotoProcessingStopTimer);
+    gdPracticePhotoProcessingStopTimer=null;
+  }
   gdPracticePhotoProcessing=!!active;
+  if(gdPracticePhotoProcessing){
+    const progress=Number(opts?.progress);
+    const stage=Number(opts?.stageIndex);
+    if(Number.isFinite(progress))gdPracticePhotoProcessingProgress=Math.max(1,Math.min(98,progress));
+    else if(!wasProcessing)gdPracticePhotoProcessingProgress=8;
+    if(Number.isFinite(stage))gdPracticePhotoProcessingStageIndex=Math.max(0,Math.min(GD_PRACTICE_PROCESSING_STAGES.length-1,Math.round(stage)));
+    else if(!wasProcessing)gdPracticePhotoProcessingStageIndex=0;
+  }else{
+    gdPracticePhotoProcessingProgress=0;
+    gdPracticePhotoProcessingStageIndex=0;
+  }
   if(gdPracticePhotoProcessing&&!wasProcessing)gdPracticeProcessingStart();
   if(!gdPracticePhotoProcessing&&wasProcessing)gdPracticeProcessingStop();
   const panel=document.getElementById("practiceDataPanel");
   panel?.classList.toggle("gdPracticePhotoProcessing",gdPracticePhotoProcessing);
   document.body.classList.toggle("gdPracticePhotoProcessing",gdPracticePhotoProcessing);
   if(gdPracticePhotoProcessing){
-    gdPracticePhotoProcessingClubs=typeof gdPracticeScanClubLabels==="function"?gdPracticeScanClubLabels():["7i"];
-    gdSetShotDataLibraryOpen("practice",false);
-    try{
-      if(typeof gdPracticeImportOpen!=="undefined"){
-        gdPracticeImportOpen=false;
-        localStorage.setItem(GD_PRACTICE_IMPORT_OPEN_KEY,"0");
-        gdRenderPracticeImportPanel();
-      }
-    }catch(e){}
-    document.getElementById("gdPracticeScanner")?.classList.remove("active");
-    document.getElementById("gdPracticeOcrReview")?.classList.remove("active","stripOnly");
-    gdClosePracticeManualQuadTool();
-    gdPracticeHideDebug();
-    gdPracticeClearScanCheckpoint();
+    gdPracticePhotoProcessingClubs=optionClubs.length
+      ? optionClubs
+      : (opts?.preserveClubs&&Array.isArray(gdPracticePhotoProcessingClubs)&&gdPracticePhotoProcessingClubs.length
+        ? gdPracticePhotoProcessingClubs
+        : (typeof gdPracticeScanClubLabels==="function"?gdPracticeScanClubLabels():["7i"]));
+    if(!wasProcessing){
+      gdSetShotDataLibraryOpen("practice",false);
+      try{
+        if(typeof gdPracticeImportOpen!=="undefined"){
+          gdPracticeImportOpen=false;
+          localStorage.setItem(GD_PRACTICE_IMPORT_OPEN_KEY,"0");
+          gdRenderPracticeImportPanel();
+        }
+      }catch(e){}
+      document.getElementById("gdPracticeScanner")?.classList.remove("active");
+      document.getElementById("gdPracticeOcrReview")?.classList.remove("active","stripOnly");
+      gdClosePracticeManualQuadTool();
+      gdPracticeHideDebug();
+      gdPracticeClearScanCheckpoint();
+    }
   }
   if(wasProcessing!==gdPracticePhotoProcessing&&typeof gdPracticeDebugRecordButtonState==="function"){
     gdPracticeDebugRecordButtonState(gdPracticePhotoProcessing,gdPracticePhotoProcessing?"photo-processing-start":"photo-processing-stop");
@@ -24410,6 +24484,9 @@ function gdShotDataPlayerLabel(){
 function gdShotDataGraphTitle(base){
   const name=gdShotDataPlayerLabel();
   return name?`${base} · ${name}`:base;
+}
+function gdPracticeDataGraphTitle(){
+  return `${gdShotDataPlayerLabel()} - Practice Data`;
 }
 function gdShotDataSubLabel(text){
   const name=gdShotDataPlayerLabel();
@@ -34088,6 +34165,157 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     }
     return false;
   }
+  function gdPracticeGenerateBubble(){
+    const analysis=gdPracticeProjectionReadyAnalysis();
+    const ctx=gdPracticeProjectionContext(analysis);
+    if(!ctx.canProject){
+      gdLmToast("Practice Bubble not ready");
+      return false;
+    }
+    gdPracticeProjectorOpen=false;
+    gdPracticeSetProjectionOverlay(true,analysis);
+    gdLmToast("Practice Bubble generated");
+    return false;
+  }
+  function gdPracticeAdoptBubbleFromAction(){
+    return gdPracticeAdoptBubbleAsPlayingBubble();
+  }
+  function gdPracticeCanShowSandboxControls(){
+    return gdPracticeAdminIsOpen()&&gdPracticeToleranceCanEdit();
+  }
+  function gdPracticeSandboxMetric(rawLabel,candidateMetric,value,unit="m",confidence=.92){
+    return{rawLabel,candidateMetric,value,unit,confidence};
+  }
+  function gdPracticeSandboxGroup(club,baseCarry,offsetDeg,index,opts={}){
+    const jitter=Array.isArray(opts.jitter)?opts.jitter:[-.42,.18,.36,-.2,.08,-.12,.28,-.32,.05];
+    const depth=Array.isArray(opts.depth)?opts.depth:[-2,1,3,-1,2,0,-3,1,4];
+    const shotOffset=Number(offsetDeg)+(jitter[index%jitter.length]||0);
+    const carry=Math.round(Number(baseCarry)+(depth[index%depth.length]||0));
+    const offline=Number((Math.tan(shotOffset*Math.PI/180)*Math.max(1,Number(baseCarry))).toFixed(1));
+    const faceToPath=Number((shotOffset*.42+((index%3)-1)*.12).toFixed(2));
+    const clubPath=Number((((index%5)-2)*.18).toFixed(2));
+    return{
+      shotId:`sandbox-${String(club).replace(/[^a-z0-9]/gi,"").toLowerCase()}-${Date.now()}-${index}-${Math.random().toString(16).slice(2,7)}`,
+      originClubLabel:club,
+      candidateClub:club,
+      expectedDistanceM:Number(baseCarry),
+      analysisLane:"cluster_hunt",
+      sourceMethod:"cluster_hunt",
+      simulatedShot:true,
+      metrics:[
+        gdPracticeSandboxMetric("Carry","carryDistance",carry,"m",.94),
+        gdPracticeSandboxMetric("Offline","offline",offline,"m",.93),
+        gdPracticeSandboxMetric("Face to Path","faceToPath",faceToPath,"deg",.84),
+        gdPracticeSandboxMetric("Club Path","clubPath",clubPath,"deg",.82)
+      ],
+      timestamp:opts.timestamp||new Date().toISOString()
+    };
+  }
+  function gdPracticeSandboxPayload(label,timestamp,specs){
+    const clubGroups=[];
+    (Array.isArray(specs)?specs:[]).forEach(spec=>{
+      const count=Math.max(1,Number(spec.count)||1);
+      for(let i=0;i<count;i++){
+        clubGroups.push(gdPracticeSandboxGroup(spec.club,spec.carry,spec.offsetDeg,i,{timestamp,jitter:spec.jitter,depth:spec.depth}));
+      }
+    });
+    return{
+      label,
+      timestamp,
+      startedAt:timestamp,
+      inputType:"generated-demo",
+      sourceIdentity:{providerGuess:"native_practice_sandbox",confidence:.98},
+      clubGroups
+    };
+  }
+  function gdPracticeSandboxScenarioSpecs(scenario){
+    const mode=String(scenario||"ready");
+    if(mode==="sparse")return[
+      {label:"Sparse native trial",daysAgo:0,specs:[{club:"7i",carry:154,offsetDeg:2.4,count:3}]}
+    ];
+    if(mode==="distance")return[
+      {label:"Native distance mismatch",daysAgo:2,specs:[{club:"7i",carry:170,offsetDeg:2.6,count:8},{club:"9i",carry:146,offsetDeg:2.3,count:7}]},
+      {label:"Native long-club check",daysAgo:0,specs:[{club:"Driver",carry:268,offsetDeg:2.7,count:6}]}
+    ];
+    return[
+      {label:"Native 7i / 9i upload",daysAgo:4,specs:[{club:"7i",carry:155,offsetDeg:2.4,count:8},{club:"9i",carry:133,offsetDeg:2.2,count:7}]},
+      {label:"Native Driver upload",daysAgo:0,specs:[{club:"Driver",carry:246,offsetDeg:2.6,count:6}]}
+    ];
+  }
+  function gdPracticeLoadSandboxNativeRows(scenario="ready"){
+    if(!gdPracticeCanShowSandboxControls())return false;
+    const api=window.GolfDaddyLaunchMonitorData;
+    if(!api||typeof api.importCapture!=="function"){
+      gdLmToast("Practice shot store is not ready");
+      return false;
+    }
+    if(typeof api.clearStore==="function")api.clearStore();
+    const now=Date.now();
+    gdPracticeSandboxScenarioSpecs(scenario).forEach(item=>{
+      const timestamp=new Date(now-(Number(item.daysAgo)||0)*86400000).toISOString();
+      api.importCapture(gdPracticeSandboxPayload(item.label,timestamp,item.specs));
+    });
+    gdSetPracticePhotoProcessing(true,{stageIndex:3,progress:96,preserveClubs:true});
+    gdSetPracticePhotoProcessing(false);
+    try{localStorage.setItem("gd_practice_plot_filter_mode","all");}catch(e){}
+    gdPracticeProjectionUserTouched=false;
+    renderPracticeData(true);
+    renderDataHubStatus();
+    gdLmToast("Sandbox practice data loaded");
+    return false;
+  }
+  function gdPracticeSimulateSandboxImport(scenario="ready"){
+    if(!gdPracticeCanShowSandboxControls())return false;
+    gdPracticePhotoProcessingClubs=gdPracticeSandboxScenarioSpecs(scenario).flatMap(item=>item.specs||[]).map(spec=>spec.club);
+    gdSetPracticePhotoProcessing(true,{preserveClubs:true,stageIndex:0,progress:12});
+    setTimeout(()=>gdSetPracticePhotoProcessing(true,{preserveClubs:true,stageIndex:1,progress:42}),650);
+    setTimeout(()=>gdSetPracticePhotoProcessing(true,{preserveClubs:true,stageIndex:2,progress:74}),1300);
+    setTimeout(()=>gdPracticeLoadSandboxNativeRows(scenario),1900);
+    return false;
+  }
+  function gdPracticeSetSandboxBag(mode){
+    if(!gdPracticeCanShowSandboxControls())return false;
+    const value=String(mode||"matched");
+    if(value==="empty"){
+      const p=safe(()=>typeof gdShotActiveProfile==="function"?gdShotActiveProfile():ensureProfile(),null)||ensureProfile();
+      p.bag=[];
+      p.bagSlotsTouched=false;
+      p.bagSeededDefault=false;
+      p.updatedAt=new Date().toISOString();
+      savePlayerProfiles();
+      syncCoreProfileFromActive();
+      gdPracticeBagWidgetExpanded=false;
+      gdLmToast("Sandbox bag cleared");
+    }else{
+      const seven=value==="different"?142:155;
+      gdBagPersistRows(gdGenerateQuickBag(seven),{silent:true,render:false});
+      gdPracticeBagWidgetExpanded=false;
+      gdLmToast(value==="different"?"Sandbox bag set different":"Sandbox bag matched");
+    }
+    safe(()=>typeof renderBagPanel==="function"&&renderBagPanel());
+    safe(()=>typeof renderShot==="function"&&renderShot());
+    return gdPracticeRefreshProjectionSurfaces();
+  }
+  function gdPracticeClearSandboxData(){
+    if(!gdPracticeCanShowSandboxControls())return false;
+    const api=window.GolfDaddyLaunchMonitorData;
+    if(api&&typeof api.clearStore==="function")api.clearStore();
+    gdShotBubbleOverlayState.practice=false;
+    window.gdShotBubbleOverlayState=gdShotBubbleOverlayState;
+    document.documentElement.dataset.gdOverlayPractice="off";
+    gdPracticeProjectionUserTouched=false;
+    gdPracticeProjectorOpen=false;
+    gdPracticeBagWidgetExpanded=false;
+    renderPracticeData(true);
+    renderDataHubStatus();
+    gdLmToast("Practice sandbox data cleared");
+    return false;
+  }
+  function gdPracticeSandboxControlsHTML(variant=""){
+    if(!gdPracticeCanShowSandboxControls())return "";
+    const compact=String(variant||"")==="compact";
+    return `<div class="gdPracticeSandboxControls ${compact?"compact":""}"><div><strong>Local test inputs</strong><span>${compact?"Admin-only native-shaped rows.":"Temporary admin-only native-shaped rows for UI testing."}</span></div><div class="gdPracticeSandboxButtons"><button type="button" data-gd-practice-sandbox-action="simulate" data-gd-practice-sandbox-scenario="ready">Simulate import</button><button type="button" data-gd-practice-sandbox-action="load" data-gd-practice-sandbox-scenario="ready">Ready rows</button><button type="button" data-gd-practice-sandbox-action="load" data-gd-practice-sandbox-scenario="sparse">Sparse rows</button><button type="button" data-gd-practice-sandbox-action="load" data-gd-practice-sandbox-scenario="distance">Distance mismatch</button><button type="button" data-gd-practice-sandbox-action="clear">Clear</button><button type="button" data-gd-practice-sandbox-action="bag" data-gd-practice-sandbox-mode="empty">Bag empty</button><button type="button" data-gd-practice-sandbox-action="bag" data-gd-practice-sandbox-mode="matched">Bag matched</button><button type="button" data-gd-practice-sandbox-action="bag" data-gd-practice-sandbox-mode="different">Bag differs</button></div></div>`;
+  }
   function gdPracticeProjectionControlsHTML(analysis){
     const mode=gdPracticeProjectionMode();
     const ctx=gdPracticeProjectionContext(analysis);
@@ -34097,7 +34325,14 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     const selectedActive=ctx.visible&&mode==="selected";
     const bagActive=gdPracticeBagWidgetExpanded||gdPracticeBagDraftDirty();
     const draftLabel=gdPracticeBagDraftDirty()?" - Draft bag":"";
-    return `<div class="gdPracticeProjector ${gdPracticeProjectorOpen?"open":""} ${ctx.visible?"active":""} ${ctx.canProject?"":"waiting"}"><button type="button" class="gdPracticeProjectorToggle" aria-expanded="${gdPracticeProjectorOpen?"true":"false"}" data-gd-practice-projector-toggle><span>Practice Bubble</span><small>${gdEscapeHTML(gdPracticeProjectorSummary(analysis,ctx))}</small><i aria-hidden="true">▾</i></button><div class="gdPracticeProjectorMenu"><button type="button" class="${selectedActive?"active":""}" aria-pressed="${selectedActive?"true":"false"}" ${disabled} data-gd-practice-projection-mode="selected">One club</button><button type="button" class="${allActive?"active":""}" aria-pressed="${allActive?"true":"false"}" ${disabled} data-gd-practice-projection-mode="all">All clubs</button><button type="button" class="gdPracticeBagToggle ${bagActive?"active":""}" aria-label="Bag widget" aria-pressed="${gdPracticeBagWidgetExpanded?"true":"false"}" data-gd-practice-bag-toggle><img src="assets/home/bag.png" alt=""></button><span class="gdPracticeProjectionStatus">${gdEscapeHTML(status+draftLabel)}</span></div>${gdPracticeBagWidgetHTML(analysis,ctx)}</div>`;
+    const adopted=gdPracticePlayingBubbleIsAdopted(safe(()=>ensureProfile(),null));
+    const generated=ctx.canProject&&ctx.visible;
+    const generateDisabled=ctx.canProject?"":"disabled";
+    const adoptDisabled=ctx.canProject&&ctx.visible&&!adopted?"":"disabled";
+    const adoptLabel=adopted?"Bubble Adopted":"Adopt Bubble";
+    const actionDock=`<div class="gdPracticeActionDock ${generated?"generated":ctx.canProject?"ready":"waiting"} ${bagActive?"bagOpen":""}"><div class="gdPracticePrimaryActions"><button type="button" class="gdPracticeBubbleAction generate ${ctx.canProject?"ready":""} ${generated?"active":""}" aria-pressed="${generated?"true":"false"}" ${generateDisabled} onclick="return gdPracticeGenerateBubble()">Generate Bubble</button><button type="button" class="gdPracticeBubbleAction adopt ${adopted?"adopted":""}" aria-pressed="${adopted?"true":"false"}" ${adoptDisabled} onclick="return gdPracticeAdoptBubbleFromAction()">${gdEscapeHTML(adoptLabel)}</button></div><button type="button" class="gdPracticeBagToggle gdPracticeBagAction ${bagActive?"active":""}" aria-label="Bag suggestions" aria-pressed="${gdPracticeBagWidgetExpanded?"true":"false"}" data-gd-practice-bag-toggle><img src="assets/home/bag.png" alt=""></button></div>`;
+    const projector=`<div class="gdPracticeProjector ${gdPracticeProjectorOpen?"open":""} ${ctx.visible?"active":""} ${ctx.canProject?"":"waiting"}"><button type="button" class="gdPracticeProjectorToggle" aria-expanded="${gdPracticeProjectorOpen?"true":"false"}" data-gd-practice-projector-toggle><span>Practice Bubble options</span><small>${gdEscapeHTML(gdPracticeProjectorSummary(analysis,ctx))}</small><i aria-hidden="true">▾</i></button><div class="gdPracticeProjectorMenu"><button type="button" class="${selectedActive?"active":""}" aria-pressed="${selectedActive?"true":"false"}" ${disabled} data-gd-practice-projection-mode="selected">One club</button><button type="button" class="${allActive?"active":""}" aria-pressed="${allActive?"true":"false"}" ${disabled} data-gd-practice-projection-mode="all">All clubs</button><span class="gdPracticeProjectionStatus">${gdEscapeHTML(status+draftLabel)}</span></div>${gdPracticeBagWidgetHTML(analysis,ctx)}</div>`;
+    return `${actionDock}${projector}${gdPracticeSandboxControlsHTML("compact")}`;
   }
 	  function gdRenderPracticeProjectionControls(analysis){
 	    const root=byId("gdPracticeProjectionControls");
@@ -35832,7 +36067,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	    const shots=gdPracticePlotShots(analysis||{});
 		    if(!shots.length){
 		      const emptyPlot=gdPracticeNormalisedPlotLayout([]);
-		      return `<svg viewBox="0 0 480 260" role="img" aria-label="Practice Data normalised plot">${gdPracticeNormalisedBackdropSvg(emptyPlot,`${gdShotDataPlayerLabel()} - Practice Data`)}</svg>${gdShotBubbleOverlayButton("practice")}`;
+		      return `<svg viewBox="0 0 480 260" role="img" aria-label="Practice Data normalised plot">${gdPracticeNormalisedBackdropSvg(emptyPlot,gdPracticeDataGraphTitle())}</svg>${gdShotBubbleOverlayButton("practice")}`;
 	    }
     const plotAll=gdPracticePlotAllRowsForTest();
     const cfg=safe(()=>window.GolfDaddyLaunchMonitorData?.settings?.(),{})||{};
@@ -35982,7 +36217,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	      return gdShotChartDotSvg(point,{fill:colour,opacity,radius:2.2,shape:"circle",stroke:point.clipped?"rgba(255,255,255,.26)":"",strokeWidth:"1"});
 	    }).join("");
 		    return `<svg viewBox="0 0 480 260" role="img" aria-label="Practice Data normalised plot" data-practice-offset-deg="${gdPracticeHasBubbleOffset(practiceBubbleOffset)?Number(practiceBubbleOffset).toFixed(2):""}" data-hub-offset-deg="${Number.isFinite(Number(hubOffset))?Number(hubOffset).toFixed(2):""}">
-		      ${gdPracticeNormalisedBackdropSvg(normalisedPlot,`${gdShotDataPlayerLabel()} - Practice Data`)}
+		      ${gdPracticeNormalisedBackdropSvg(normalisedPlot,gdPracticeDataGraphTitle())}
 	      ${pts}
 	    </svg>${clubKeyDropdown}${gdShotBubbleOverlayButton("practice")}`;
 	  }
@@ -36519,7 +36754,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 			    const result=byId("gdPracticeDataResult");
 			    const evidenceList=byId("gdPracticeEvidenceList");
 			    const api=window.GolfDaddyLaunchMonitorData;
-			    if(visualTitle)visualTitle.textContent=`${gdShotDataPlayerLabel()} - Practice Data`;
+			    if(visualTitle)visualTitle.textContent=gdPracticeDataGraphTitle();
 		    if(result)gdRenderPracticeAutoFlow(null);
 	    gdRenderPracticeMasterTolerance();
     gdRenderPracticeAdminChrome();
@@ -36882,15 +37117,22 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	      gdPracticeSetBagCarry:gdPracticeSetBagCarry,
 		      gdPracticeResetBagDraft:gdPracticeResetBagDraft,
 		      gdPracticeCommitBagDraft:gdPracticeCommitBagDraft,
-		      gdPracticeAdoptBubbleAsPlayingBubble:gdPracticeAdoptBubbleAsPlayingBubble,
-		      gdPracticeProjectionContext:gdPracticeProjectionContext,
+			      gdPracticeAdoptBubbleAsPlayingBubble:gdPracticeAdoptBubbleAsPlayingBubble,
+		      gdPracticeGenerateBubble:gdPracticeGenerateBubble,
+		      gdPracticeAdoptBubbleFromAction:gdPracticeAdoptBubbleFromAction,
+		      gdPracticeLoadSandboxNativeRows:gdPracticeLoadSandboxNativeRows,
+		      gdPracticeSimulateSandboxImport:gdPracticeSimulateSandboxImport,
+		      gdPracticeSetSandboxBag:gdPracticeSetSandboxBag,
+		      gdPracticeClearSandboxData:gdPracticeClearSandboxData,
+			      gdPracticeProjectionContext:gdPracticeProjectionContext,
 	      gdPracticeProjectionRows:gdPracticeProjectionRows,
 	      gdPracticeDisplayAnalysis:gdPracticeDisplayAnalysis,
 	      gdPracticeProjectionReadyAnalysis:gdPracticeProjectionReadyAnalysis,
 	      gdPracticeBubbleOffsetDeg:gdPracticeBubbleOffsetDeg,
 	      gdPracticeHasBubbleOffset:gdPracticeHasBubbleOffset,
 	      gdTogglePracticePlotAll:gdTogglePracticePlotAll,
-	      gdPracticeSetSelectedPlotExcluded:gdPracticeSetSelectedPlotExcluded,
+		      gdPracticeDataGraphTitle:gdPracticeDataGraphTitle,
+		      gdPracticeSetSelectedPlotExcluded:gdPracticeSetSelectedPlotExcluded,
 	      gdPracticeToggleEvidenceClub:gdPracticeToggleEvidenceClub,
 	      gdPracticeSetEvidenceClubTab:gdPracticeSetEvidenceClubTab,
 	      gdPracticeToggleEvidenceShot:gdPracticeToggleEvidenceShot,
@@ -37020,9 +37262,20 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	      event.stopImmediatePropagation();
 	      gdPracticeToggleEvidenceClub(target);
 	    },true);
-	    if(!window.__gdPracticeProjectionControlsBound){
-	      window.__gdPracticeProjectionControlsBound=true;
-	      document.addEventListener("click",event=>{
+	      if(!window.__gdPracticeProjectionControlsBound){
+	        window.__gdPracticeProjectionControlsBound=true;
+	        document.addEventListener("click",event=>{
+	        const sandboxAction=event.target&&event.target.closest&&event.target.closest("[data-gd-practice-sandbox-action]");
+	        if(sandboxAction){
+	          event.preventDefault();
+	          event.stopImmediatePropagation();
+	          const action=sandboxAction.dataset.gdPracticeSandboxAction||"";
+	          if(action==="simulate")return gdPracticeSimulateSandboxImport(sandboxAction.dataset.gdPracticeSandboxScenario||"ready");
+	          if(action==="load")return gdPracticeLoadSandboxNativeRows(sandboxAction.dataset.gdPracticeSandboxScenario||"ready");
+	          if(action==="clear")return gdPracticeClearSandboxData();
+	          if(action==="bag")return gdPracticeSetSandboxBag(sandboxAction.dataset.gdPracticeSandboxMode||"matched");
+	          return false;
+	        }
 	        const projectorToggle=event.target&&event.target.closest&&event.target.closest("[data-gd-practice-projector-toggle]");
 	        if(projectorToggle){
 	          event.preventDefault();
@@ -39845,7 +40098,7 @@ body.gdGpsActive #bagRailBtn{order:7!important}
 	}
 	.gdPracticeProjectorMenu{
 	  display:none!important;
-	  grid-template-columns:minmax(0,1fr) minmax(0,1fr) 32px!important;
+	  grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important;
 	  gap:7px!important;
 	  align-items:center!important;
 	  padding:10px!important;
@@ -39928,6 +40181,118 @@ body.gdGpsActive #bagRailBtn{order:7!important}
 		.gdPracticeProjectionControls.waiting .gdPracticeProjectionStatus{
 		  color:rgba(255,210,135,.78)!important;
 		}
+	.gdPracticeActionDock{
+	  display:grid!important;
+	  grid-template-columns:minmax(150px,1fr) max-content!important;
+	  gap:8px!important;
+	  align-items:start!important;
+	  min-width:0!important;
+	}
+	.gdPracticePrimaryActions{
+	  display:grid!important;
+	  grid-template-columns:minmax(0,1fr)!important;
+	  gap:7px!important;
+	  align-items:stretch!important;
+	  min-width:0!important;
+	}
+	.gdPracticeBubbleAction{
+	  min-height:40px!important;
+	  border-radius:12px!important;
+	  padding:9px 11px!important;
+	  font-size:12px!important;
+	  line-height:1!important;
+	  font-weight:950!important;
+	  border:1px solid rgba(255,255,255,.11)!important;
+	  background:rgba(255,255,255,.065)!important;
+	  color:rgba(255,255,255,.74)!important;
+	}
+	.gdPracticeBubbleAction.generate.ready,
+	.gdPracticeBubbleAction.adopt:not(:disabled){
+	  color:#06100b!important;
+	  background:linear-gradient(180deg,#37f28d,#20bd69)!important;
+	  border-color:rgba(55,242,141,.58)!important;
+	}
+	.gdPracticeBubbleAction.generate.active,
+	.gdPracticeBubbleAction.adopt.adopted{
+	  color:#06100b!important;
+	  background:linear-gradient(180deg,#d7b06b,#a97932)!important;
+	  border-color:rgba(215,176,107,.58)!important;
+	}
+	.gdPracticeBubbleAction:disabled{
+	  opacity:.45!important;
+	  cursor:not-allowed!important;
+	  filter:grayscale(.18)!important;
+	}
+	.gdPracticeActionDock .gdPracticeBagAction{
+	  width:52px!important;
+	  min-width:52px!important;
+	  height:52px!important;
+	  min-height:52px!important;
+	  border-radius:8px!important;
+	  padding:0!important;
+	  display:grid!important;
+	  place-items:center!important;
+	  background:linear-gradient(180deg,rgba(22,34,26,.96),rgba(4,9,6,.98))!important;
+	  border:1px solid rgba(255,255,255,.12)!important;
+	  box-shadow:0 12px 24px rgba(0,0,0,.34),inset 0 1px 0 rgba(255,255,255,.08)!important;
+	}
+	.gdPracticeActionDock .gdPracticeBagAction.active,
+	.gdPracticeActionDock.bagOpen .gdPracticeBagAction{
+	  border-color:rgba(215,176,107,.42)!important;
+	  box-shadow:0 12px 24px rgba(0,0,0,.34),0 0 0 2px rgba(215,176,107,.10),inset 0 1px 0 rgba(255,255,255,.08)!important;
+	}
+	.gdPracticeActionDock .gdPracticeBagAction img{
+	  width:50px!important;
+	  height:50px!important;
+	  object-fit:contain!important;
+	  transform:translateY(3px)!important;
+	  filter:drop-shadow(0 10px 12px rgba(0,0,0,.38))!important;
+	}
+	.gdPracticeSandboxControls{
+	  display:grid!important;
+	  gap:8px!important;
+	  margin:8px 0 0!important;
+	  padding:9px!important;
+	  border-radius:12px!important;
+	  background:rgba(255,255,255,.035)!important;
+	  border:1px dashed rgba(255,255,255,.14)!important;
+	}
+	.gdPracticeSandboxControls.compact{
+	  padding:8px!important;
+	  border-radius:10px!important;
+	  background:rgba(255,255,255,.028)!important;
+	}
+	.gdPracticeSandboxControls>div:first-child{
+	  display:grid!important;
+	  gap:2px!important;
+	}
+	.gdPracticeSandboxControls strong{
+	  color:#fff!important;
+	  font-size:11px!important;
+	  line-height:1!important;
+	  font-weight:950!important;
+	}
+	.gdPracticeSandboxControls span{
+	  color:rgba(255,255,255,.52)!important;
+	  font-size:10px!important;
+	  line-height:1.2!important;
+	  font-weight:850!important;
+	}
+	.gdPracticeSandboxButtons{
+	  display:flex!important;
+	  flex-wrap:wrap!important;
+	  gap:6px!important;
+	}
+	.gdPracticeSandboxButtons button{
+	  min-height:28px!important;
+	  border-radius:999px!important;
+	  padding:6px 8px!important;
+	  background:rgba(255,255,255,.06)!important;
+	  border:1px solid rgba(255,255,255,.10)!important;
+	  color:rgba(255,255,255,.74)!important;
+	  font-size:10px!important;
+	  font-weight:900!important;
+	}
 		.gdPracticeAutoFlow{
 		  display:grid!important;
 		  grid-template-columns:auto minmax(0,1fr) auto!important;
@@ -40858,7 +41223,8 @@ body.gdGpsActive #bagRailBtn{order:7!important}
   .gdPracticeProjectorToggle{grid-template-columns:minmax(0,1fr) auto!important}
   .gdPracticeProjectorToggle small{grid-column:1/-1!important;grid-row:2!important;text-align:left!important;white-space:normal!important}
   .gdPracticeProjectorToggle i{grid-column:2!important;grid-row:1/3!important}
-  .gdPracticeProjectorMenu{grid-template-columns:minmax(0,1fr) minmax(0,1fr) 32px!important}
+	  .gdPracticeProjectorMenu{grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important}
+	  .gdPracticeActionDock{grid-template-columns:minmax(0,1fr) 52px!important}
   .gdPracticeProjectionStatus{text-align:left!important;white-space:normal!important}
   .gdShotDataLibraryTabs,.gdPracticeLibraryTabs,.gdCourseLibraryTabs{grid-template-columns:minmax(0,1fr) auto!important}
   .gdShotDataLibraryDropdown>.gdShotDataLibraryTabs{grid-template-columns:1fr!important}
