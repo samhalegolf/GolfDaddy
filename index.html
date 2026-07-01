@@ -34317,22 +34317,15 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     return `<div class="gdPracticeSandboxControls ${compact?"compact":""}"><div><strong>Local test inputs</strong><span>${compact?"Admin-only native-shaped rows.":"Temporary admin-only native-shaped rows for UI testing."}</span></div><div class="gdPracticeSandboxButtons"><button type="button" data-gd-practice-sandbox-action="simulate" data-gd-practice-sandbox-scenario="ready">Simulate import</button><button type="button" data-gd-practice-sandbox-action="load" data-gd-practice-sandbox-scenario="ready">Ready rows</button><button type="button" data-gd-practice-sandbox-action="load" data-gd-practice-sandbox-scenario="sparse">Sparse rows</button><button type="button" data-gd-practice-sandbox-action="load" data-gd-practice-sandbox-scenario="distance">Distance mismatch</button><button type="button" data-gd-practice-sandbox-action="clear">Clear</button><button type="button" data-gd-practice-sandbox-action="bag" data-gd-practice-sandbox-mode="empty">Bag empty</button><button type="button" data-gd-practice-sandbox-action="bag" data-gd-practice-sandbox-mode="matched">Bag matched</button><button type="button" data-gd-practice-sandbox-action="bag" data-gd-practice-sandbox-mode="different">Bag differs</button></div></div>`;
   }
   function gdPracticeProjectionControlsHTML(analysis){
-    const mode=gdPracticeProjectionMode();
     const ctx=gdPracticeProjectionContext(analysis);
-    const disabled=ctx.canProject?"":"disabled";
-    const status=gdPracticeProjectionStatusText(analysis,ctx);
-    const allActive=ctx.visible&&mode==="all";
-    const selectedActive=ctx.visible&&mode==="selected";
     const bagActive=gdPracticeBagWidgetExpanded||gdPracticeBagDraftDirty();
-    const draftLabel=gdPracticeBagDraftDirty()?" - Draft bag":"";
     const adopted=gdPracticePlayingBubbleIsAdopted(safe(()=>ensureProfile(),null));
     const generated=ctx.canProject&&ctx.visible;
     const generateDisabled=ctx.canProject?"":"disabled";
     const adoptDisabled=ctx.canProject&&ctx.visible&&!adopted?"":"disabled";
     const adoptLabel=adopted?"Bubble Adopted":"Adopt Bubble";
     const actionDock=`<div class="gdPracticeActionDock ${generated?"generated":ctx.canProject?"ready":"waiting"} ${bagActive?"bagOpen":""}"><div class="gdPracticePrimaryActions"><button type="button" class="gdPracticeBubbleAction generate ${ctx.canProject?"ready":""} ${generated?"active":""}" aria-pressed="${generated?"true":"false"}" ${generateDisabled} onclick="return gdPracticeGenerateBubble()">Generate Bubble</button><button type="button" class="gdPracticeBubbleAction adopt ${adopted?"adopted":""}" aria-pressed="${adopted?"true":"false"}" ${adoptDisabled} onclick="return gdPracticeAdoptBubbleFromAction()">${gdEscapeHTML(adoptLabel)}</button></div><button type="button" class="gdPracticeBagToggle gdPracticeBagAction ${bagActive?"active":""}" aria-label="Bag suggestions" aria-pressed="${gdPracticeBagWidgetExpanded?"true":"false"}" data-gd-practice-bag-toggle><img src="assets/home/bag.png" alt=""></button></div>`;
-    const projector=`<div class="gdPracticeProjector ${gdPracticeProjectorOpen?"open":""} ${ctx.visible?"active":""} ${ctx.canProject?"":"waiting"}"><button type="button" class="gdPracticeProjectorToggle" aria-expanded="${gdPracticeProjectorOpen?"true":"false"}" data-gd-practice-projector-toggle><span>Practice Bubble options</span><small>${gdEscapeHTML(gdPracticeProjectorSummary(analysis,ctx))}</small><i aria-hidden="true">▾</i></button><div class="gdPracticeProjectorMenu"><button type="button" class="${selectedActive?"active":""}" aria-pressed="${selectedActive?"true":"false"}" ${disabled} data-gd-practice-projection-mode="selected">One club</button><button type="button" class="${allActive?"active":""}" aria-pressed="${allActive?"true":"false"}" ${disabled} data-gd-practice-projection-mode="all">All clubs</button><span class="gdPracticeProjectionStatus">${gdEscapeHTML(status+draftLabel)}</span></div>${gdPracticeBagWidgetHTML(analysis,ctx)}</div>`;
-    return `${actionDock}${projector}${gdPracticeSandboxControlsHTML("compact")}`;
+    return `${actionDock}${gdPracticeBagWidgetHTML(analysis,ctx)}${gdPracticeSandboxControlsHTML("compact")}`;
   }
 	  function gdRenderPracticeProjectionControls(analysis){
 	    const root=byId("gdPracticeProjectionControls");
@@ -34625,6 +34618,8 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	  function gdPracticeNormalisedBackdropSvg(plot,title){
 	    const width=Number(plot.chartWidth)||480;
 	    const height=Number(plot.chartHeight)||260;
+	    const titleText=String(title||"").trim();
+	    const subtitleY=titleText?48:30;
 	    const grid=[
 	      {x:plot.plotLeft+(plot.plotRight-plot.plotLeft)*.25},
 	      {x:plot.plotLeft+(plot.plotRight-plot.plotLeft)*.75},
@@ -34635,8 +34630,8 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	      :`<line x1="${plot.plotLeft}" y1="${item.y.toFixed(1)}" x2="${plot.plotRight}" y2="${item.y.toFixed(1)}" stroke="rgba(255,255,255,.055)" stroke-width="1"/>`
 	    ).join("");
 	    return `<rect width="${width}" height="${height}" fill="rgba(0,0,0,.08)"/>
-	      <text x="24" y="30" fill="rgba(255,255,255,.82)" font-size="14" font-weight="950">${gdStatsSvgText(title||"Practice Data")}</text>
-	      <text x="24" y="48" fill="rgba(255,255,255,.46)" font-size="9" font-weight="850">Depth against expected carry · lateral angle</text>
+	      ${titleText?`<text x="24" y="30" fill="rgba(255,255,255,.82)" font-size="14" font-weight="950">${gdStatsSvgText(titleText)}</text>`:""}
+	      <text x="24" y="${subtitleY}" fill="rgba(255,255,255,.46)" font-size="9" font-weight="850">Depth against expected carry · lateral angle</text>
 	      <rect x="${(plot.plotLeft-8).toFixed(1)}" y="${(plot.plotTop-8).toFixed(1)}" width="${(plot.plotRight-plot.plotLeft+16).toFixed(1)}" height="${(plot.plotBottom-plot.plotTop+16).toFixed(1)}" rx="8" fill="rgba(255,255,255,.012)" stroke="rgba(255,255,255,.045)" stroke-width="1"/>
 	      ${grid}
 	      <line x1="${plot.plotMidX.toFixed(1)}" y1="${plot.plotTop}" x2="${plot.plotMidX.toFixed(1)}" y2="${plot.plotBottom}" stroke="rgba(255,255,255,.18)" stroke-width="1" stroke-dasharray="4 8" stroke-linecap="round"/>
@@ -36050,7 +36045,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	    const shots=gdPracticePlotShots(analysis||{});
 		    if(!shots.length){
 		      const emptyPlot=gdPracticeNormalisedPlotLayout([]);
-		      return `<svg viewBox="0 0 480 260" role="img" aria-label="Practice Data normalised plot">${gdPracticeNormalisedBackdropSvg(emptyPlot,gdPracticeDataGraphTitle())}</svg>${gdShotBubbleOverlayButton("practice")}`;
+		      return `<svg viewBox="0 0 480 260" role="img" aria-label="Practice Data normalised plot">${gdPracticeNormalisedBackdropSvg(emptyPlot,"")}</svg>${gdShotBubbleOverlayButton("practice")}`;
 	    }
     const plotAll=gdPracticePlotAllRowsForTest();
     const cfg=safe(()=>window.GolfDaddyLaunchMonitorData?.settings?.(),{})||{};
@@ -36200,7 +36195,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	      return gdShotChartDotSvg(point,{fill:colour,opacity,radius:2.2,shape:"circle",stroke:point.clipped?"rgba(255,255,255,.26)":"",strokeWidth:"1"});
 	    }).join("");
 		    return `<svg viewBox="0 0 480 260" role="img" aria-label="Practice Data normalised plot" data-practice-offset-deg="${gdPracticeHasBubbleOffset(practiceBubbleOffset)?Number(practiceBubbleOffset).toFixed(2):""}" data-hub-offset-deg="${Number.isFinite(Number(hubOffset))?Number(hubOffset).toFixed(2):""}">
-		      ${gdPracticeNormalisedBackdropSvg(normalisedPlot,gdPracticeDataGraphTitle())}
+		      ${gdPracticeNormalisedBackdropSvg(normalisedPlot,"")}
 	      ${pts}
 	    </svg>${clubKeyDropdown}${gdShotBubbleOverlayButton("practice")}`;
 	  }
@@ -41141,10 +41136,19 @@ body.gdGpsActive #bagRailBtn{order:7!important}
 	  font-weight:950!important;
 	  white-space:nowrap!important;
 	}
-	#practiceDataPanel.open #gdNativePracticeImportLane{
-	  grid-column:1/-1!important;
-	}
-	.gdPracticeClubKeyDrop{
+		#practiceDataPanel.open #gdNativePracticeImportLane{
+		  grid-column:1/-1!important;
+		}
+		#practiceDataPanel.open:not(.gdPracticeAdminExpanded) #gdNativePracticeImportLane,
+		#practiceDataPanel.open:not(.gdPracticeAdminExpanded) #gdPracticeUploadLabel,
+		#practiceDataPanel.open:not(.gdPracticeAdminExpanded) #gdPracticeUploadInput,
+		#practiceDataPanel.open:not(.gdPracticeAdminExpanded) #gdPracticeLoadExtracted7iBtn{
+		  display:none!important;
+		}
+		#practiceDataPanel.open:not(.gdPracticeAdminExpanded) .gdPracticeImportBody{
+		  grid-template-columns:1fr 1fr!important;
+		}
+		.gdPracticeClubKeyDrop{
 	  margin-top:7px!important;
 	  width:max-content!important;
 	  max-width:100%!important;
