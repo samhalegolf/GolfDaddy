@@ -34663,6 +34663,54 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       Number.isFinite(radius)&&radius>0
     );
   }
+  function gdMyBubbleGpsSourceLooksRenderable(source){
+    if(!source||typeof source!=="object")return false;
+    const shapeSource=String(source.shapeSource||source.source||source.projectionSource||"");
+    if(/placeholder|default|stand.?in|fallback|ghost|manual-profile/i.test(shapeSource))return false;
+    const carry=Number(source.baseDistanceM??source.expectedDistanceM??source.meanExpectedM??source.baseCarry??source.carry??source.actualDistanceM);
+    const depth=Number(source.bubbleDepthM??source.clusterDepthM??source.visualDepthM??source.depthM);
+    const width=Number(source.bubbleWidthM??source.clusterWidthM??source.visualWidthM??source.widthM);
+    const radius=Number(source.lateralRadiusDeg);
+    return Number.isFinite(carry)&&carry>0&&
+      Number.isFinite(depth)&&depth>0&&
+      ((Number.isFinite(width)&&width>0)||(Number.isFinite(radius)&&radius>0));
+  }
+  function gdMyBubbleStrictGpsSource(source,opts={}){
+    if(!gdMyBubbleGpsSourceLooksRenderable(source))return null;
+    const offset=Number.isFinite(Number(opts.offsetDeg))?Number(opts.offsetDeg):Number(source.offsetDeg??source.faceOffsetDeg??source.faceAlignmentOffsetDeg);
+    const baseDistance=Number(source.baseDistanceM??source.expectedDistanceM??source.meanExpectedM??source.baseCarry??source.carry??source.actualDistanceM);
+    const depth=Number(source.bubbleDepthM??source.clusterDepthM??source.visualDepthM??source.depthM);
+    const width=Number(source.bubbleWidthM??source.clusterWidthM??source.visualWidthM??source.widthM);
+    const radius=Number(source.lateralRadiusDeg);
+    if(!Number.isFinite(offset)||!Number.isFinite(baseDistance)||baseDistance<=0||!Number.isFinite(depth)||depth<=0)return null;
+    if(!Number.isFinite(width)&&!Number.isFinite(radius))return null;
+    const club=gdCompareClubKey(source.club||opts.club)||gdCompareClubKey(opts.club)||"7i";
+    const next=Object.assign({},source,{
+      club,
+      offsetDeg:offset,
+      faceOffsetDeg:offset,
+      faceAlignmentOffsetDeg:offset,
+      baseCarry:baseDistance,
+      baseDistanceM:baseDistance,
+      expectedDistanceM:baseDistance,
+      meanExpectedM:baseDistance,
+      bubbleDepthM:depth,
+      clusterDepthM:depth,
+      handedness:source.handedness||opts.handedness||"right"
+    });
+    if(Number.isFinite(width)&&width>0){
+      next.bubbleWidthM=width;
+      next.clusterWidthM=width;
+    }else if(Number.isFinite(radius)&&radius>0){
+      next.lateralRadiusDeg=radius;
+      const computedWidth=Math.tan(radius*Math.PI/180)*baseDistance*2;
+      if(Number.isFinite(computedWidth)&&computedWidth>0){
+        next.bubbleWidthM=computedWidth;
+        next.clusterWidthM=computedWidth;
+      }
+    }
+    return next;
+  }
   function gdPracticeBubbleFingerprint(analysis){
     const ready=gdPracticeProjectionReadyAnalysis(analysis);
     if(!ready)return "";
@@ -34798,6 +34846,10 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     return selectedRows.length?selectedRows:gdShotBubbleOverlayReferenceRows(dataRows);
   }
   function gdPracticeMyBubbleHubRows(dataRows,analysis){
+    const p=safe(()=>ensureProfile(),null)||{};
+    const state=gdPracticeMyBubbleState(p,analysis);
+    const offset=Number(state?.offset);
+    if(!Number.isFinite(offset))return [];
     const selectedNames=gdPracticeProjectionSelectedClubNames(analysis,dataRows);
     const selectedKeys=selectedNames.map(gdShotBubbleOverlayClubKey).filter(Boolean);
     const savedRows=gdPracticeSavedBagRows().filter(row=>Number.isFinite(Number(row.actualDistanceM))&&Number(row.actualDistanceM)>0);
@@ -34806,22 +34858,65 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       const key=gdShotBubbleOverlayClubKey(row.club);
       if(key&&!dataByClub[key])dataByClub[key]=row;
     });
+    const sourceForClub=club=>{
+      const ctx={p};
+      return gdMyBubbleHubSource(ctx,club,offset)
+        || gdMyBubbleHubSource(ctx,gdCompareClubKey(p?.previewBubbleSet?.club),offset);
+    };
+    const applyBubbleSource=(row,source)=>{
+      const strict=gdMyBubbleStrictGpsSource(source,{offsetDeg:offset,club:row?.club,handedness:p?.handedness});
+      if(!row||!strict)return null;
+      const distance=Number(row.actualDistanceM);
+      const sourceDistance=Number(strict.baseDistanceM||strict.expectedDistanceM||strict.meanExpectedM||strict.baseCarry);
+      if(!Number.isFinite(distance)||distance<=0||!Number.isFinite(sourceDistance)||sourceDistance<=0)return null;
+      const scale=distance/sourceDistance;
+      const width=gdMyBubbleScaledSourceMetric(strict,["bubbleWidthM","clusterWidthM","visualWidthM","widthM"],scale);
+      const depth=gdMyBubbleScaledSourceMetric(strict,["bubbleDepthM","clusterDepthM","visualDepthM","depthM"],scale);
+      if(!Number.isFinite(depth)||depth<=0)return null;
+      const next=Object.assign({},row,{
+        baseDistanceM:distance,
+        expectedDistanceM:distance,
+        meanExpectedM:distance,
+        bubbleDepthM:depth,
+        clusterDepthM:depth,
+        depthRadiusM:depth/2,
+        offsetDeg:offset,
+        faceOffsetDeg:offset,
+        faceAlignmentOffsetDeg:offset,
+        handedness:strict.handedness||p?.handedness||"right",
+        tiltDeg:Number.isFinite(Number(strict.tiltDeg))?Number(strict.tiltDeg):strict.tiltDeg,
+        skewDeg:Number.isFinite(Number(strict.skewDeg))?Number(strict.skewDeg):strict.skewDeg,
+        shapeSource:strict.shapeSource||"my-bubble-graph-projection"
+      });
+      if(Number.isFinite(width)&&width>0){
+        next.bubbleWidthM=width;
+        next.clusterWidthM=width;
+        next.lateralRadiusM=width/2;
+      }else if(Number.isFinite(Number(strict.lateralRadiusDeg))&&Number(strict.lateralRadiusDeg)>0){
+        next.lateralRadiusDeg=Number(strict.lateralRadiusDeg);
+      }else{
+        return null;
+      }
+      return next;
+    };
     const defaultRowForClub=(club,key)=>{
       const label=club||dataByClub[key]?.club||key||"7i";
-      const carry=gdShotBubbleSafe(()=>typeof gdDefaultCarryForClub==="function"?gdDefaultCarryForClub(label):NaN,NaN);
+      const source=sourceForClub(label);
+      const sourceCarry=Number(source?.baseDistanceM||source?.expectedDistanceM||source?.meanExpectedM||source?.baseCarry);
+      const carry=Number.isFinite(sourceCarry)&&sourceCarry>0?sourceCarry:gdShotBubbleSafe(()=>typeof gdDefaultCarryForClub==="function"?gdDefaultCarryForClub(label):NaN,NaN);
       const fallback=Number(dataByClub[key]?.actualDistanceM);
       const actual=Number.isFinite(Number(carry))&&Number(carry)>0?Number(carry):(Number.isFinite(fallback)&&fallback>0?fallback:155);
-      return{club:label,actualDistanceM:actual,lateralM:0,projectionSource:"my-bubble-current-distance"};
+      return applyBubbleSource({club:label,actualDistanceM:actual,lateralM:0,projectionSource:"my-bubble-current-distance"},source);
     };
     if(gdPracticeProjectionMode()==="all"){
-      if(savedRows.length)return savedRows.map(row=>Object.assign({projectionSource:"my-bubble-saved-bag"},row));
+      if(savedRows.length)return savedRows.map(row=>applyBubbleSource(Object.assign({projectionSource:"my-bubble-saved-bag"},row),sourceForClub(row.club))).filter(Boolean);
       const keys=Object.keys(dataByClub);
-      return keys.length?keys.map(key=>defaultRowForClub(dataByClub[key]?.club,key)):[defaultRowForClub("7i","7i")];
+      return (keys.length?keys.map(key=>defaultRowForClub(dataByClub[key]?.club,key)):[defaultRowForClub(gdCompareClubKey(p?.previewBubbleSet?.club)||"7i","7i")]).filter(Boolean);
     }
     const byClub={};
     savedRows.forEach(row=>{
       const key=gdShotBubbleOverlayClubKey(row.club);
-      if(key&&!byClub[key])byClub[key]=Object.assign({projectionSource:"my-bubble-saved-bag"},row);
+      if(key&&!byClub[key])byClub[key]=applyBubbleSource(Object.assign({projectionSource:"my-bubble-saved-bag"},row),sourceForClub(row.club));
     });
     const keys=selectedKeys.length?selectedKeys:Object.keys(dataByClub).slice(0,1);
     const rows=keys.map((key,index)=>byClub[key]||defaultRowForClub(selectedNames[index]||dataByClub[key]?.club,key));
@@ -35214,25 +35309,29 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	  function gdShotBubblePlayingLaneSvg(offset,sizeOpts={}){
 	    const width=480;
 	    const height=132;
-	    const source=sizeOpts||{};
+	    const source=gdMyBubbleStrictGpsSource(sizeOpts,{offsetDeg:offset,club:sizeOpts?.club});
+	    if(!source)return "";
 	    const club=source.club||"7i";
 	    const laneM=gdMyBubbleLaneMaxDistance();
 	    const requestedOffset=Number(offset);
-	    const liveOffset=Number.isFinite(requestedOffset)?requestedOffset:0;
+	    const liveOffset=Number.isFinite(requestedOffset)?requestedOffset:Number(source.offsetDeg);
+	    if(!Number.isFinite(liveOffset))return "";
 	    const sourceDistance=Number(source.baseDistanceM||source.expectedDistanceM||source.meanExpectedM||source.baseCarry);
-	    const fallbackDistance=gdShotBubbleSafe(()=>gdDefaultCarryForClub(club),155)||155;
-	    const baseDistance=gdMyBubbleClampLaneDistance(Number.isFinite(sourceDistance)&&sourceDistance>0?sourceDistance:fallbackDistance,club,source);
+	    if(!Number.isFinite(sourceDistance)||sourceDistance<=0)return "";
+	    const baseDistance=gdMyBubbleClampLaneDistance(sourceDistance,club,source);
 	    const shapeScale=Number.isFinite(sourceDistance)&&sourceDistance>0?baseDistance/sourceDistance:1;
 	    const scaledWidth=gdMyBubbleScaledSourceMetric(source,["bubbleWidthM","clusterWidthM","visualWidthM","widthM"],shapeScale);
 	    const scaledDepth=gdMyBubbleScaledSourceMetric(source,["bubbleDepthM","clusterDepthM","visualDepthM","depthM"],shapeScale);
+	    if(!Number.isFinite(scaledDepth)||scaledDepth<=0)return "";
 	    const plotLeft=30;
 	    const plotRight=452;
 	    const plotTop=16;
 	    const plotBottom=116;
 	    const plotMidY=(plotTop+plotBottom)/2;
 	    const targetX=plotLeft+(baseDistance/laneM)*(plotRight-plotLeft);
-	    const assetWidth=Number.isFinite(scaledWidth)?scaledWidth:Number(source.bubbleWidthM||source.clusterWidthM||source.visualWidthM||source.widthM);
-	    const assetDepth=Number.isFinite(scaledDepth)?scaledDepth:Number(source.bubbleDepthM||source.clusterDepthM||source.visualDepthM||source.depthM);
+	    const assetWidth=Number.isFinite(scaledWidth)&&scaledWidth>0?scaledWidth:NaN;
+	    const assetDepth=Number.isFinite(scaledDepth)&&scaledDepth>0?scaledDepth:NaN;
+	    if(!Number.isFinite(assetDepth)||(!Number.isFinite(assetWidth)&&!Number.isFinite(Number(source.lateralRadiusDeg))))return "";
 	    const sourceTilt=Number(source.tiltDeg??source.visual?.visualTiltDeg??source.visualTiltDeg??source.clusterTiltDeg);
 	    const sourceSkew=Number(source.skewDeg??source.visual?.visualSkewDeg??source.visualSkewDeg);
 	    const idSuffix=`${String(club).replace(/[^a-z0-9]+/gi,"").slice(0,10)||"club"}${Math.round(baseDistance)}${Math.round((liveOffset+90)*100)}`;
@@ -35270,7 +35369,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	    const bubbleX=frame.x(aim.x);
 	    const bubbleY=frame.y(aim.y);
 	    const gpsBubbleMarkup=gdShotBubbleAimSvg(width,height,assetOpts);
-	    return `<svg class="gdMyBubbleLaneSvg" data-gd-my-bubble-lane="1" data-viewbox-width="${width}" data-lane-m="${laneM}" data-plot-left="${plotLeft}" data-plot-right="${plotRight}" data-base-distance-m="${baseDistance.toFixed(1)}" data-offset-deg="${liveOffset.toFixed(2)}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+	    return `<svg class="gdMyBubbleLaneSvg" data-gd-my-bubble-lane="1" data-viewbox-width="${width}" data-lane-m="${laneM}" data-plot-left="${plotLeft}" data-plot-right="${plotRight}" data-base-distance-m="${baseDistance.toFixed(1)}" data-offset-deg="${liveOffset.toFixed(2)}" data-shape-source="${gdStatsSvgText(source.shapeSource||"gps-bubble")}" data-bubble-width-m="${Number.isFinite(assetWidth)?assetWidth.toFixed(1):""}" data-bubble-depth-m="${Number.isFinite(assetDepth)?assetDepth.toFixed(1):""}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
 	      <defs>
 	        <radialGradient id="gdMyBubbleLaneBall${idSuffix}" cx="35%" cy="28%" r="70%">
 	          <stop offset="0" stop-color="#fff"/>
@@ -36111,7 +36210,8 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     const p=ctx?.p||safe(()=>ensureProfile(),null)||{};
     const pending=p.practiceBubblePendingSource||{};
     if(pending.active&&pending.bubble&&Number.isFinite(Number(pending.offsetDeg))){
-      return Object.assign({},pending.bubble,{offsetDeg:Number(pending.offsetDeg),faceOffsetDeg:Number(pending.offsetDeg),faceAlignmentOffsetDeg:Number(pending.offsetDeg),shapeSource:"practice-pending-save"});
+      const pendingSource=gdMyBubbleStrictGpsSource(pending.bubble,{offsetDeg:Number(pending.offsetDeg),club:pending.club,handedness:p?.handedness});
+      return pendingSource?Object.assign({},pendingSource,{shapeSource:pendingSource.shapeSource||"practice-pending-save"}):null;
     }
     const selected=gdCompareClubKey(club)||gdCompareClubKey(p?.previewBubbleSet?.club)||"7i";
     const currentOffset=Number.isFinite(Number(offset))?Number(offset):0;
@@ -36120,43 +36220,12 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       : "";
     const exact=exactKey?p.bubbleProfiles[exactKey]:null;
     const preview=p?.previewBubbleSet&&(!selected||gdCompareClubKey(p.previewBubbleSet.club)===selected)?p.previewBubbleSet:null;
-    const profileSource=exact||preview||gdCompareManualProfileBubbleSource(p,selected,currentOffset);
+    const profileSource=exact||preview;
     if(profileSource&&typeof profileSource==="object"){
-      const sourceClub=gdCompareClubKey(profileSource.club)||selected;
-      const baseCarry=Number(profileSource.baseDistanceM||profileSource.baseCarry||profileSource.expectedDistanceM||profileSource.meanExpectedM||profileSource.carry);
-      const baseDistance=Number.isFinite(baseCarry)&&baseCarry>0?baseCarry:gdShotBubbleSafe(()=>gdDefaultCarryForClub(sourceClub),155);
-      return Object.assign({},profileSource,{
-        club:sourceClub,
-        offsetDeg:currentOffset,
-        faceOffsetDeg:currentOffset,
-        faceAlignmentOffsetDeg:currentOffset,
-        baseCarry:baseDistance,
-        baseDistanceM:baseDistance,
-        handedness:profileSource.handedness||p?.handedness||"right",
-        shapeSource:profileSource.shapeSource||"my-bubble-current"
-      });
+      const strict=gdMyBubbleStrictGpsSource(profileSource,{offsetDeg:currentOffset,club:selected,handedness:p?.handedness});
+      return strict?Object.assign({},strict,{shapeSource:strict.shapeSource||"my-bubble-current"}):null;
     }
-    const bagRows=Array.isArray(p?.bag)?p.bag:[];
-    const row=bagRows.find(item=>gdCompareClubKey(item?.club||item?.name).toLowerCase()===selected.toLowerCase())
-      ||bagRows.find(item=>gdCompareClubKey(item?.club||item?.name).toLowerCase()==="7i")
-      ||bagRows[0]
-      ||null;
-    const baseCarry=Number(row?.baseCarry??row?.carry??row?.carryM??row?.distance??row?.meters);
-    const baseDistance=Number.isFinite(baseCarry)&&baseCarry>0?baseCarry:gdShotBubbleSafe(()=>gdDefaultCarryForClub(selected),155);
-    return{
-      club:selected,
-      offsetDeg:currentOffset,
-      faceOffsetDeg:currentOffset,
-      faceAlignmentOffsetDeg:currentOffset,
-      baseCarry:baseDistance,
-      baseDistanceM:baseDistance,
-      bubbleDepthM:Math.max(14,baseDistance*.18),
-      bubbleWidthM:Math.max(10,baseDistance*.14),
-      clusterDepthM:Math.max(14,baseDistance*.18),
-      clusterWidthM:Math.max(10,baseDistance*.14),
-      handedness:p?.handedness||"right",
-      shapeSource:"my-bubble-default"
-    };
+    return null;
   }
   function gdRenderBubbleOffsetHub(manual=false){
     gdInstallOffsetHubTabs();
@@ -36188,14 +36257,16 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	    const ctx=gdComparisonContext();
 	    const club=safe(()=>gdCompareLoadClub(ctx),gdCompareClub)||"7i";
 	    const hubPreviewOffset=editing&&Number.isFinite(liveOffset)?liveOffset:(Number.isFinite(internalOffset)?internalOffset:0);
-	    const hubBubble=Object.assign({},gdMyBubbleHubSource(ctx,club,hubPreviewOffset),{previewKind:"playing"});
+	    const hubBubbleSource=gdMyBubbleHubSource(ctx,club,hubPreviewOffset);
+	    const hubBubble=hubBubbleSource?Object.assign({},hubBubbleSource,{previewKind:"playing"}):null;
+	    const hubPreviewHTML=hubBubble?gdShotBubbleHubSvg(Number.isFinite(hubPreviewOffset)?hubPreviewOffset:Number(hubBubble.offsetDeg)||0,hubBubble):"";
 	    document.querySelectorAll(".gdShotBubbleHubPreview").forEach(preview=>{
-	      preview.innerHTML=gdShotBubbleHubSvg(Number.isFinite(hubPreviewOffset)?hubPreviewOffset:0,hubBubble);
+	      preview.innerHTML=hubPreviewHTML;
 	    });
     sources.forEach(source=>{
 	      source.classList.add("gdMyBubbleLaneSource");
 	      if(!source.querySelector(".gdShotBubbleHubPreview")){
-		        source.innerHTML=`<div class="gdShotBubbleHubPreview">${gdShotBubbleHubSvg(Number.isFinite(hubPreviewOffset)?hubPreviewOffset:0,hubBubble)}</div>`;
+		        source.innerHTML=`<div class="gdShotBubbleHubPreview">${hubPreviewHTML}</div>`;
       }
       source.dataset.gdBubbleState=stateLabel;
       source.dataset.gdBubbleKind=stateKind;
@@ -36230,23 +36301,34 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       gdLmToast("My Bubble not ready");
       return false;
     }
-    const ctx=gdComparisonContext();
-    const club=safe(()=>gdCompareLoadClub(ctx),gdCompareClub)||p?.previewBubbleSet?.club||"7i";
-    const baseSource=gdMyBubbleHubSource(ctx,club,offset)||{};
-    const sourceClub=gdCompareClubKey(baseSource.club||club)||"7i";
-    const nextDistance=gdMyBubbleClampLaneDistance(requestedDistance,sourceClub,baseSource);
-    const generated=gdShotBubbleSafe(()=>gdGeneratedShotBubbleForClub(sourceClub,nextDistance,offset),null)||{};
-    const sourceDistance=Number(baseSource.baseDistanceM||baseSource.expectedDistanceM||baseSource.meanExpectedM||baseSource.baseCarry);
-    const shapeScale=Number.isFinite(sourceDistance)&&sourceDistance>0?nextDistance/sourceDistance:1;
-    const width=gdMyBubbleScaledSourceMetric(baseSource,["bubbleWidthM","clusterWidthM","visualWidthM","widthM"],shapeScale)||Number(generated.widthM)||Math.max(10,nextDistance*.14);
-    const depth=gdMyBubbleScaledSourceMetric(baseSource,["bubbleDepthM","clusterDepthM","visualDepthM","depthM"],shapeScale)||Number(generated.depthM)||Math.max(14,nextDistance*.18);
-    const baseTilt=Number(baseSource.tiltDeg??baseSource.visual?.visualTiltDeg??baseSource.visualTiltDeg??baseSource.clusterTiltDeg);
-    const baseSkew=Number(baseSource.skewDeg??baseSource.visual?.visualSkewDeg??baseSource.visualSkewDeg);
-    const pendingBubble=Object.assign({},generated,baseSource,{
-      club:sourceClub,
-      baseCarry:nextDistance,
-      baseDistanceM:nextDistance,
-      expectedDistanceM:nextDistance,
+	    const ctx=gdComparisonContext();
+	    const club=safe(()=>gdCompareLoadClub(ctx),gdCompareClub)||p?.previewBubbleSet?.club||"7i";
+	    const baseSource=gdMyBubbleHubSource(ctx,club,offset);
+	    if(!baseSource){
+	      gdLmToast("GPS Bubble needed");
+	      return false;
+	    }
+	    const sourceClub=gdCompareClubKey(baseSource.club||club)||"7i";
+	    const nextDistance=gdMyBubbleClampLaneDistance(requestedDistance,sourceClub,baseSource);
+	    const sourceDistance=Number(baseSource.baseDistanceM||baseSource.expectedDistanceM||baseSource.meanExpectedM||baseSource.baseCarry);
+	    if(!Number.isFinite(sourceDistance)||sourceDistance<=0){
+	      gdLmToast("GPS Bubble needed");
+	      return false;
+	    }
+	    const shapeScale=Number.isFinite(sourceDistance)&&sourceDistance>0?nextDistance/sourceDistance:1;
+	    const width=gdMyBubbleScaledSourceMetric(baseSource,["bubbleWidthM","clusterWidthM","visualWidthM","widthM"],shapeScale);
+	    const depth=gdMyBubbleScaledSourceMetric(baseSource,["bubbleDepthM","clusterDepthM","visualDepthM","depthM"],shapeScale);
+	    if(!Number.isFinite(depth)||depth<=0||!Number.isFinite(width)||width<=0){
+	      gdLmToast("GPS Bubble needed");
+	      return false;
+	    }
+	    const baseTilt=Number(baseSource.tiltDeg??baseSource.visual?.visualTiltDeg??baseSource.visualTiltDeg??baseSource.clusterTiltDeg);
+	    const baseSkew=Number(baseSource.skewDeg??baseSource.visual?.visualSkewDeg??baseSource.visualSkewDeg);
+	    const pendingBubble=Object.assign({},baseSource,{
+	      club:sourceClub,
+	      baseCarry:nextDistance,
+	      baseDistanceM:nextDistance,
+	      expectedDistanceM:nextDistance,
       meanExpectedM:nextDistance,
       centerDistanceM:nextDistance,
       centerLateralM:Math.tan(offset*Math.PI/180)*nextDistance,
@@ -36258,17 +36340,17 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       bubbleDepthM:depth,
       clusterDepthM:depth,
       lateralRadiusM:width/2,
-      depthRadiusM:depth/2,
-      tiltDeg:Number.isFinite(baseTilt)?baseTilt:generated.tiltDeg,
-      skewDeg:Number.isFinite(baseSkew)?baseSkew:generated.skewDeg,
-      visual:Object.assign({},generated.visual||{},baseSource.visual||{},{
-        visualWidthM:width,
-        visualDepthM:depth,
-        visualTiltDeg:Number.isFinite(baseTilt)?baseTilt:(generated.visual?.visualTiltDeg??generated.tiltDeg),
-        visualSkewDeg:Number.isFinite(baseSkew)?baseSkew:(generated.visual?.visualSkewDeg??generated.skewDeg)
-      }),
-      handedness:p.handedness||baseSource.handedness||"right",
-      shapeSource:"my-bubble-distance-preview"
+	      depthRadiusM:depth/2,
+	      tiltDeg:Number.isFinite(baseTilt)?baseTilt:baseSource.tiltDeg,
+	      skewDeg:Number.isFinite(baseSkew)?baseSkew:baseSource.skewDeg,
+	      visual:Object.assign({},baseSource.visual||{},{
+	        visualWidthM:width,
+	        visualDepthM:depth,
+	        visualTiltDeg:Number.isFinite(baseTilt)?baseTilt:baseSource.tiltDeg,
+	        visualSkewDeg:Number.isFinite(baseSkew)?baseSkew:baseSource.skewDeg
+	      }),
+	      handedness:p.handedness||baseSource.handedness||"right",
+	      shapeSource:"my-bubble-distance-preview"
     });
     const current=p.practiceBubblePendingSource||{};
     p.practiceBubblePendingSource={
