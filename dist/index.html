@@ -2387,17 +2387,18 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 .gdPracticeDebugStatus{display:none;margin:0 0 10px}
 .gdPracticeDebugStatus.active{display:flex}
 .gdNativeProcessingStack{display:grid;gap:6px;width:100%;min-width:0}
-.gdNativeProcessingBadge{display:grid;grid-template-columns:minmax(150px,260px) auto;gap:8px;align-items:center;min-width:min(100%,340px);color:rgba(255,255,255,.84);font-size:10px;font-weight:950;text-transform:uppercase;letter-spacing:0}
+.gdNativeProcessingBadge{display:grid;grid-template-columns:minmax(132px,1fr) auto;gap:9px;align-items:center;min-width:0;width:100%;color:rgba(255,255,255,.84);font-size:10px;font-weight:950;text-transform:uppercase;letter-spacing:0}
 .gdNativeProcessingClub{justify-self:start;min-width:34px;padding:4px 7px;border-radius:999px;background:rgba(215,176,107,.14);border:1px solid rgba(215,176,107,.24);color:#ffd287;font-size:9px;font-weight:950;line-height:1;text-align:center;text-transform:none}
-.gdNativeProcessingTrack{position:relative;display:grid;grid-template-columns:repeat(4,1fr);align-items:center;height:18px}
+.gdNativeProcessingTrack{position:relative;display:block;align-items:center;height:20px;border-radius:999px;overflow:visible}
 .gdNativeProcessingRail,.gdNativeProcessingFill{position:absolute;left:8px;right:8px;top:50%;height:3px;border-radius:999px;transform:translateY(-50%)}
-.gdNativeProcessingRail{background:rgba(255,255,255,.16)}
-.gdNativeProcessingFill{right:auto;width:0;background:linear-gradient(90deg,#d7b06b,#37f28d);box-shadow:0 0 14px rgba(55,242,141,.24);transition:width .35s ease}
-.gdNativeProcessingNode{position:relative;z-index:1;justify-self:center;display:grid;place-items:center;width:18px;height:18px;border-radius:999px;border:1px solid rgba(255,255,255,.18);background:#111b16;color:rgba(255,255,255,.62);font-size:9px;line-height:1;font-weight:950}
+.gdNativeProcessingRail{background:rgba(255,255,255,.14);box-shadow:inset 0 0 0 1px rgba(255,255,255,.035)}
+.gdNativeProcessingFill{right:auto;width:0;background:linear-gradient(90deg,#1fbf68,#37f28d);box-shadow:0 0 14px rgba(55,242,141,.24);transition:width .35s ease}
+.gdNativeProcessingNodes{position:relative;z-index:2;display:grid;grid-template-columns:repeat(4,1fr);align-items:center;height:20px}
+.gdNativeProcessingNode{position:relative;z-index:1;justify-self:center;display:grid;place-items:center;width:18px;height:18px;border-radius:999px;border:1px solid rgba(255,255,255,.18);background:#101614;color:rgba(255,255,255,.62);font-size:9px;line-height:1;font-weight:950;box-shadow:0 0 0 3px rgba(0,0,0,.22)}
 .gdNativeProcessingNode.done{border-color:rgba(55,242,141,.52);background:#37f28d;color:#06100b}
 .gdNativeProcessingNode.done:after{content:"\2713"}
 .gdNativeProcessingNode.done span{display:none}
-.gdNativeProcessingNode.active{border-color:rgba(215,176,107,.72);background:#d7b06b;color:#06100b;box-shadow:0 0 0 4px rgba(215,176,107,.12)}
+.gdNativeProcessingNode.active{border-color:rgba(55,242,141,.76);background:#37f28d;color:#06100b;box-shadow:0 0 0 4px rgba(55,242,141,.12)}
 .gdNativeProcessingLabel{min-width:0;white-space:nowrap;color:rgba(255,255,255,.82)}
 .gdNativeProcessingSpinner{width:14px;height:14px;border-radius:50%;border:2px solid rgba(255,255,255,.22);border-top-color:#d7b06b;animation:gdPracticeSpin .72s linear infinite;flex:0 0 auto}
 @keyframes gdPracticeScanPulse{0%{box-shadow:0 0 0 0 rgba(215,176,107,.55)}100%{box-shadow:0 0 0 9px rgba(215,176,107,0)}}
@@ -24158,6 +24159,10 @@ var gdCourseImportOpen=false;
 var gdPracticePhotoProcessing=false;
 var gdPracticePhotoProcessingStartedAt=0;
 var gdPracticePhotoProcessingTimer=null;
+var gdPracticePhotoProcessingStopTimer=null;
+var gdPracticePhotoProcessingProgress=0;
+var gdPracticePhotoProcessingStageIndex=0;
+const GD_PRACTICE_PROCESSING_MIN_VISIBLE_MS=0;
 const GD_PRACTICE_PROCESSING_STAGES=[
   "Scanning",
   "Importing",
@@ -24169,6 +24174,16 @@ function gdPracticeProcessingElapsed(){
   return gdPracticePhotoProcessingStartedAt?Math.max(0,Date.now()-gdPracticePhotoProcessingStartedAt):0;
 }
 function gdPracticeProcessingStageState(){
+  if(gdPracticePhotoProcessing){
+    const explicitProgress=Number(gdPracticePhotoProcessingProgress);
+    const explicitIndex=Number(gdPracticePhotoProcessingStageIndex);
+    if(Number.isFinite(explicitProgress)&&explicitProgress>0){
+      return{
+        index:Number.isFinite(explicitIndex)?Math.max(0,Math.min(GD_PRACTICE_PROCESSING_STAGES.length-1,Math.round(explicitIndex))):0,
+        progress:Math.max(4,Math.min(98,Math.round(explicitProgress)))
+      };
+    }
+  }
   const elapsed=gdPracticeProcessingElapsed();
   const thresholds=[0,1400,3200,5400];
   let index=0;
@@ -24194,7 +24209,7 @@ function gdPracticeProcessingStop(){
 }
 try{
   gdPracticeLibraryOpen=false;
-  localStorage.removeItem("gd_practice_library_open");
+  localStorage.setItem("gd_practice_library_open","0");
   gdCourseLibraryOpen=localStorage.getItem("gd_course_library_open")==="1";
   gdCourseImportOpen=localStorage.getItem("gd_course_import_open")==="1";
 }catch(e){}
@@ -24207,7 +24222,7 @@ function gdSetShotDataLibraryOpen(kind,open){
   else gdPracticeLibraryOpen=!!open;
   try{
     if(course)localStorage.setItem("gd_course_library_open",open?"1":"0");
-    else localStorage.removeItem("gd_practice_library_open");
+    else localStorage.setItem("gd_practice_library_open",open?"1":"0");
   }catch(e){}
   return true;
 }
@@ -24216,38 +24231,84 @@ function gdToggleShotDataLibrary(kind,event){
   event?.stopPropagation?.();
   event?.stopImmediatePropagation?.();
   const course=String(kind||"practice").toLowerCase()==="course";
-  gdSetShotDataLibraryOpen(course?"course":"practice",!gdShotDataLibraryIsOpen(course?"course":"practice"));
+  const resolvedKind=course?"course":"practice";
+  const nextOpen=!gdShotDataLibraryIsOpen(resolvedKind);
+  gdSetShotDataLibraryOpen(resolvedKind,nextOpen);
+  const shellSelector=course?".gdShotDataLibraryShell-course":".gdShotDataLibraryShell-practice";
+  const toggleSelector=course?".gdCourseLibraryTabs":".gdPracticeLibraryTabs";
+  document.querySelectorAll(shellSelector).forEach(shell=>shell.classList.toggle("open",nextOpen));
+  document.querySelectorAll(toggleSelector).forEach(toggle=>toggle.setAttribute("aria-expanded",nextOpen?"true":"false"));
   if(course&&typeof renderStats==="function")renderStats();
   else if(!course&&typeof renderPracticeData==="function")renderPracticeData(true);
   if(document.getElementById("dataHubPanel")?.classList.contains("open")&&typeof renderCompareData==="function")renderCompareData();
   return false;
 }
+if(!window.__gdShotDataLibraryToggleBound){
+  window.__gdShotDataLibraryToggleBound=true;
+  document.addEventListener("click",event=>{
+    const toggle=event.target&&event.target.closest&&event.target.closest("[data-gd-shot-library-kind]");
+    if(!toggle)return;
+    return gdToggleShotDataLibrary(toggle.dataset.gdShotLibraryKind||"practice",event);
+  },true);
+}
 function gdNativeShotDataProcessingTrackHTML(clubLabel=""){
   const state=gdPracticeProcessingStageState();
-  const stages=GD_PRACTICE_PROCESSING_STAGES.map((label,index)=>{
-    const tone=index<state.index?"done":(index===state.index?"active":"pending");
-    return `<span class="gdNativeProcessingNode ${tone}" aria-label="${gdEscapeHTML(label)}"><span>${index+1}</span></span>`;
-  }).join("");
   const label=GD_PRACTICE_PROCESSING_STAGES[state.index]||"Processing";
-  const club=String(clubLabel||"").trim();
-  return `<span class="gdNativeProcessingBadge" aria-live="polite">${club?`<span class="gdNativeProcessingClub">${gdEscapeHTML(club)}</span>`:""}<span class="gdNativeProcessingTrack" aria-hidden="true"><span class="gdNativeProcessingRail"></span><span class="gdNativeProcessingFill" style="width:${state.progress}%"></span>${stages}</span><span class="gdNativeProcessingLabel">${gdEscapeHTML(label)}</span></span>`;
+  const stages=GD_PRACTICE_PROCESSING_STAGES.map((stageLabel,index)=>{
+    const tone=index<state.index?"done":(index===state.index?"active":"pending");
+    return `<span class="gdNativeProcessingNode ${tone}" aria-label="${gdEscapeHTML(stageLabel)}"><span>${index+1}</span></span>`;
+  }).join("");
+  return `<span class="gdNativeProcessingBadge" aria-live="polite"><span class="gdNativeProcessingTrack" aria-hidden="true"><span class="gdNativeProcessingRail"></span><span class="gdNativeProcessingFill" style="width:${state.progress}%"></span><span class="gdNativeProcessingNodes">${stages}</span></span><span class="gdNativeProcessingLabel">${gdEscapeHTML(label)}</span></span>`;
 }
 function gdNativeShotDataProcessingHTML(){
-  const clubs=(Array.isArray(gdPracticePhotoProcessingClubs)?gdPracticePhotoProcessingClubs:[]).map(club=>String(club||"").trim()).filter(Boolean);
-  const unique=[...new Set(clubs.length?clubs:["7i"])];
-  return `<span class="gdNativeProcessingStack">${unique.map(club=>gdNativeShotDataProcessingTrackHTML(club)).join("")}</span>`;
+  return `<span class="gdNativeProcessingStack">${gdNativeShotDataProcessingTrackHTML()}</span>`;
 }
-function gdSetPracticePhotoProcessing(active){
+function gdSetPracticePhotoProcessing(active,opts={}){
   const wasProcessing=gdPracticePhotoProcessing;
+  const optionClubs=Array.isArray(opts?.clubs)?opts.clubs.map(club=>String(club||"").trim()).filter(Boolean):[];
+  if(active&&gdPracticePhotoProcessingStopTimer){
+    clearTimeout(gdPracticePhotoProcessingStopTimer);
+    gdPracticePhotoProcessingStopTimer=null;
+  }
+  if(!active&&gdPracticePhotoProcessing&&!opts?.immediate){
+    const remaining=GD_PRACTICE_PROCESSING_MIN_VISIBLE_MS-gdPracticeProcessingElapsed();
+    if(remaining>0){
+      if(gdPracticePhotoProcessingStopTimer)clearTimeout(gdPracticePhotoProcessingStopTimer);
+      gdPracticePhotoProcessingStopTimer=setTimeout(()=>{
+        gdPracticePhotoProcessingStopTimer=null;
+        gdSetPracticePhotoProcessing(false,Object.assign({},opts,{immediate:true}));
+      },remaining);
+      try{if(typeof renderPracticeData==="function")renderPracticeData(true);}catch(e){}
+      return;
+    }
+  }
+  if(!active&&gdPracticePhotoProcessingStopTimer){
+    clearTimeout(gdPracticePhotoProcessingStopTimer);
+    gdPracticePhotoProcessingStopTimer=null;
+  }
   gdPracticePhotoProcessing=!!active;
+  if(gdPracticePhotoProcessing){
+    const progress=Number(opts?.progress);
+    const stage=Number(opts?.stageIndex);
+    if(Number.isFinite(progress))gdPracticePhotoProcessingProgress=Math.max(1,Math.min(98,progress));
+    else if(!wasProcessing)gdPracticePhotoProcessingProgress=8;
+    if(Number.isFinite(stage))gdPracticePhotoProcessingStageIndex=Math.max(0,Math.min(GD_PRACTICE_PROCESSING_STAGES.length-1,Math.round(stage)));
+    else if(!wasProcessing)gdPracticePhotoProcessingStageIndex=0;
+  }else{
+    gdPracticePhotoProcessingProgress=0;
+    gdPracticePhotoProcessingStageIndex=0;
+  }
   if(gdPracticePhotoProcessing&&!wasProcessing)gdPracticeProcessingStart();
   if(!gdPracticePhotoProcessing&&wasProcessing)gdPracticeProcessingStop();
   const panel=document.getElementById("practiceDataPanel");
   panel?.classList.toggle("gdPracticePhotoProcessing",gdPracticePhotoProcessing);
   document.body.classList.toggle("gdPracticePhotoProcessing",gdPracticePhotoProcessing);
   if(gdPracticePhotoProcessing){
-    gdPracticePhotoProcessingClubs=typeof gdPracticeScanClubLabels==="function"?gdPracticeScanClubLabels():["7i"];
-    gdSetShotDataLibraryOpen("practice",false);
+    gdPracticePhotoProcessingClubs=optionClubs.length
+      ? optionClubs
+      : (opts?.preserveClubs&&Array.isArray(gdPracticePhotoProcessingClubs)&&gdPracticePhotoProcessingClubs.length
+        ? gdPracticePhotoProcessingClubs
+        : (typeof gdPracticeScanClubLabels==="function"?gdPracticeScanClubLabels():["7i"]));
     try{
       if(typeof gdPracticeImportOpen!=="undefined"){
         gdPracticeImportOpen=false;
@@ -24260,9 +24321,6 @@ function gdSetPracticePhotoProcessing(active){
     gdClosePracticeManualQuadTool();
     gdPracticeHideDebug();
     gdPracticeClearScanCheckpoint();
-  }
-  if(wasProcessing!==gdPracticePhotoProcessing&&typeof gdPracticeDebugRecordButtonState==="function"){
-    gdPracticeDebugRecordButtonState(gdPracticePhotoProcessing,gdPracticePhotoProcessing?"photo-processing-start":"photo-processing-stop");
   }
   try{if(typeof renderPracticeData==="function")renderPracticeData(true);}catch(e){}
 }
@@ -32823,6 +32881,10 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	  let gdPracticeProjectorOpen=false;
 	  let gdPracticeProjectionUserTouched=false;
 	  let gdPracticeImportOpen=false;
+  let gdPracticeBagSuggestionOpen=false;
+  let gdPracticeBagAdaptOpen=false;
+  let gdPracticeBagAdaptUndoStack=[];
+  const GD_PRACTICE_BAG_SUGGESTION_SEEN_KEY="gd_practice_bag_suggestion_seen_v1";
   try{gdPracticeImportOpen=localStorage.getItem(GD_PRACTICE_IMPORT_OPEN_KEY)==="1";}catch(e){}
   function gdPracticeNormaliseBagRow(row,source="practice-bag"){
     const club=String(row?.club||row?.name||"").trim();
@@ -34088,17 +34150,400 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     }
     return false;
   }
-  function gdPracticeProjectionControlsHTML(analysis){
-    const mode=gdPracticeProjectionMode();
+  function gdPracticeGenerateBubble(){
+    const analysis=gdPracticeProjectionReadyAnalysis();
     const ctx=gdPracticeProjectionContext(analysis);
-    const disabled=ctx.canProject?"":"disabled";
-    const status=gdPracticeProjectionStatusText(analysis,ctx);
-    const allActive=ctx.visible&&mode==="all";
-    const selectedActive=ctx.visible&&mode==="selected";
-    const bagActive=gdPracticeBagWidgetExpanded||gdPracticeBagDraftDirty();
-    const draftLabel=gdPracticeBagDraftDirty()?" - Draft bag":"";
-    return `<div class="gdPracticeProjector ${gdPracticeProjectorOpen?"open":""} ${ctx.visible?"active":""} ${ctx.canProject?"":"waiting"}"><button type="button" class="gdPracticeProjectorToggle" aria-expanded="${gdPracticeProjectorOpen?"true":"false"}" data-gd-practice-projector-toggle><span>Practice Bubble</span><small>${gdEscapeHTML(gdPracticeProjectorSummary(analysis,ctx))}</small><i aria-hidden="true">▾</i></button><div class="gdPracticeProjectorMenu"><button type="button" class="${selectedActive?"active":""}" aria-pressed="${selectedActive?"true":"false"}" ${disabled} data-gd-practice-projection-mode="selected">One club</button><button type="button" class="${allActive?"active":""}" aria-pressed="${allActive?"true":"false"}" ${disabled} data-gd-practice-projection-mode="all">All clubs</button><button type="button" class="gdPracticeBagToggle ${bagActive?"active":""}" aria-label="Bag widget" aria-pressed="${gdPracticeBagWidgetExpanded?"true":"false"}" data-gd-practice-bag-toggle><img src="assets/home/bag.png" alt=""></button><span class="gdPracticeProjectionStatus">${gdEscapeHTML(status+draftLabel)}</span></div>${gdPracticeBagWidgetHTML(analysis,ctx)}</div>`;
+    if(!ctx.canProject){
+      gdLmToast(ctx.hasRealPracticeData?"Cluster finder needs more shots":"Add practice shot data first");
+      return false;
+    }
+    const source=gdPracticeBubbleSource(analysis);
+    try{
+      if(source?.club)localStorage.setItem(GD_PRACTICE_PROJECTION_SELECTED_CLUB_KEY,source.club);
+      localStorage.setItem("gd_practice_projection_mode_v1","selected");
+    }catch(e){}
+    gdPracticeProjectorOpen=false;
+    return gdPracticeSetProjectionOverlay(true,analysis);
   }
+  function gdPracticeToggleBagSuggestions(force){
+    const next=typeof force==="boolean"?force:!gdPracticeBagSuggestionOpen;
+    if(next)gdPracticeMarkBagSuggestionSeen();
+    gdPracticeBagSuggestionOpen=next;
+    if(!gdPracticeBagSuggestionOpen)gdPracticeBagAdaptOpen=false;
+    return gdPracticeRefreshProjectionSurfaces();
+  }
+  function gdPracticeAdoptBubbleFromAction(){
+    const analysis=gdPracticeProjectionReadyAnalysis();
+    const ctx=gdPracticeProjectionContext(analysis);
+    if(!ctx.canProject){
+      gdLmToast("Practice Bubble not ready");
+      return false;
+    }
+    if(!ctx.visible){
+      gdLmToast("Generate Practice Bubble first");
+      return false;
+    }
+    if(gdPracticePlayingBubbleIsAdopted(safe(()=>ensureProfile(),null))){
+      gdLmToast("Practice Bubble already adopted");
+      return false;
+    }
+    gdPracticeBagSuggestionOpen=false;
+    gdPracticeBagAdaptOpen=false;
+    gdPracticeAdoptBubbleAsPlayingBubble();
+    return false;
+  }
+  function gdPracticeProjectorSummary(analysis,ctx){
+    return ctx?.hasRealPracticeData&&ctx?.canProject?"Bubble ready":"Bubble not ready";
+  }
+  function gdPracticeRawSavedBagRows(){
+    const p=safe(()=>typeof gdShotActiveProfile==="function"?gdShotActiveProfile():ensureProfile(),null)||safe(()=>ensureProfile(),null)||{};
+    return (Array.isArray(p.bag)?p.bag:[]).map(row=>gdNormaliseBagRow(row)).filter(Boolean);
+  }
+  function gdPracticeHasUserBag(){
+    const p=safe(()=>typeof gdShotActiveProfile==="function"?gdShotActiveProfile():ensureProfile(),null)||safe(()=>ensureProfile(),null)||{};
+    const rows=gdPracticeRawSavedBagRows();
+    if(!rows.length)return false;
+    if(p.bagSeededDefault&&!p.bagSlotsTouched)return false;
+    return true;
+  }
+  function gdPracticeClubDefaultSevenCarry(club,carry){
+    const c=String(club||"").trim();
+    const n=Number(carry);
+    if(!c||!Number.isFinite(n)||n<=0)return NaN;
+    const defaultClub=gdShotBubbleSafe(()=>typeof gdDefaultCarryForClub==="function"?gdDefaultCarryForClub(c):NaN,NaN);
+    const defaultSeven=Number(typeof GD_DEFAULT_BAG_7I_CARRY!=="undefined"?GD_DEFAULT_BAG_7I_CARRY:155)||155;
+    if(!Number.isFinite(defaultClub)||defaultClub<=0)return NaN;
+    return n-(defaultClub-defaultSeven);
+  }
+  function gdPracticeTrueDistanceEvidenceRows(analysis){
+    const accepted=Array.isArray(analysis?.acceptedShots)?analysis.acceptedShots:[];
+    const fallback=accepted.length?[]:gdPracticeEvidenceRows(analysis).filter(row=>!row.excluded&&!row.plotDeselected);
+    const source=accepted.length?accepted:fallback;
+    const groups={};
+    source.forEach(shot=>{
+      const club=String(shot?.club||"Unknown").trim()||"Unknown";
+      const key=gdShotBubbleOverlayClubKey(club);
+      const carry=accepted.length?gdPracticeShotActualDistance(shot):Number(shot?.actualDistanceM);
+      if(!key||!Number.isFinite(carry)||carry<20||carry>330)return;
+      groups[key]=groups[key]||{club,values:[],shots:[]};
+      groups[key].values.push(Number(carry));
+      groups[key].shots.push(shot);
+    });
+    return Object.values(groups).map(group=>{
+      const values=group.values.slice().sort((a,b)=>a-b);
+      const carry=gdShotBubbleMedian(values);
+      const deviations=values.map(value=>Math.abs(value-carry));
+      return{
+        club:group.club,
+        clubKey:gdShotBubbleOverlayClubKey(group.club),
+        trueDistanceM:Math.round(carry),
+        count:values.length,
+        spreadM:Math.round(gdShotBubbleMedian(deviations)||0),
+        impliedSevenCarryM:Math.round(gdPracticeClubDefaultSevenCarry(group.club,carry)||0)
+      };
+    }).filter(row=>row.count>=2&&Number.isFinite(Number(row.trueDistanceM))).sort((a,b)=>(b.count-a.count)||a.club.localeCompare(b.club,undefined,{numeric:true}));
+  }
+  function gdPracticeEstimatedSevenCarryFromEvidence(evidenceRows){
+    const direct=(evidenceRows||[]).find(row=>gdShotBubbleOverlayClubKey(row.club)==="7i");
+    if(direct&&Number.isFinite(Number(direct.trueDistanceM)))return Math.round(Number(direct.trueDistanceM));
+    const implied=[];
+    (evidenceRows||[]).forEach(row=>{
+      const n=Number(row.impliedSevenCarryM);
+      const count=Math.max(1,Math.min(5,Number(row.count)||1));
+      if(Number.isFinite(n)&&n>=80&&n<=210){
+        for(let i=0;i<count;i++)implied.push(n);
+      }
+    });
+    const value=gdShotBubbleMedian(implied);
+    return Number.isFinite(value)&&value>0?Math.round(value):NaN;
+  }
+  const GD_PRACTICE_DISTANCE_LINK_CLUB_KEY="gd_practice_distance_link_club_v1";
+  function gdPracticeStoredDistanceLinkClub(){
+    try{return String(localStorage.getItem(GD_PRACTICE_DISTANCE_LINK_CLUB_KEY)||"").trim();}
+    catch(e){return"";}
+  }
+  function gdPracticeBestDistanceLink(analysis,evidenceRows=null){
+    const evidence=Array.isArray(evidenceRows)?evidenceRows:gdPracticeTrueDistanceEvidenceRows(analysis);
+    if(!evidence.length)return null;
+    const storedKey=gdShotBubbleOverlayClubKey(gdPracticeStoredDistanceLinkClub());
+    if(storedKey){
+      const stored=evidence.find(row=>gdShotBubbleOverlayClubKey(row.club)===storedKey);
+      if(stored)return stored;
+    }
+    const source=gdPracticeBubbleSource(analysis);
+    const anchorKey=gdShotBubbleOverlayClubKey(source?.club||analysis?.methods?.resultScaledCluster?.anchorClub);
+    if(anchorKey){
+      const anchor=evidence.find(row=>gdShotBubbleOverlayClubKey(row.club)===anchorKey);
+      if(anchor)return anchor;
+    }
+    return evidence.slice().sort((a,b)=>(b.count-a.count)||(a.spreadM-b.spreadM)||a.club.localeCompare(b.club,undefined,{numeric:true}))[0]||null;
+  }
+  function gdPracticeSetDistanceLinkClub(club){
+    const value=String(club||"").trim();
+    try{
+      if(value)localStorage.setItem(GD_PRACTICE_DISTANCE_LINK_CLUB_KEY,value);
+      else localStorage.removeItem(GD_PRACTICE_DISTANCE_LINK_CLUB_KEY);
+    }catch(e){}
+    gdPracticeBagSuggestionOpen=true;
+    return gdPracticeRefreshProjectionSurfaces();
+  }
+  function gdPracticeEstimatedBagRowsFromEvidence(analysis){
+    const evidence=gdPracticeTrueDistanceEvidenceRows(analysis);
+    const link=gdPracticeBestDistanceLink(analysis,evidence);
+    const seven=link?Number(link.impliedSevenCarryM):gdPracticeEstimatedSevenCarryFromEvidence(evidence);
+    if(!Number.isFinite(seven)||seven<=0)return{rows:[],evidence,sevenCarryM:null};
+    const base=gdShotBubbleSafe(()=>typeof gdGenerateQuickBag==="function"?gdGenerateQuickBag(seven):[],[])||[];
+    const rows=gdBagSortRows(base.map(row=>{
+      const carry=Math.max(1,Math.round(Number(row.baseCarry)||0));
+      return Object.assign({},row,{baseCarry:carry,totalM:gdBagTotalForCarry(row.club,carry)});
+    }));
+    return{rows,evidence,sevenCarryM:Math.round(seven),link};
+  }
+  function gdPracticeSuggestedCarryRows(analysis){
+    const estimate=gdPracticeEstimatedBagRowsFromEvidence(analysis);
+    const estimatedRows=estimate.rows||[];
+    if(!estimatedRows.length)return[];
+    const saved=gdPracticeHasUserBag()?gdPracticeRawSavedBagRows():[];
+    const savedByKey={};
+    saved.forEach(row=>{
+      const key=gdShotBubbleOverlayClubKey(row.club);
+      if(key)savedByKey[key]=row;
+    });
+    const directEvidenceByKey={};
+    (estimate.evidence||[]).forEach(row=>{
+      const key=gdShotBubbleOverlayClubKey(row.club);
+      if(key)directEvidenceByKey[key]=row;
+    });
+    return estimatedRows.map(row=>{
+      const key=gdShotBubbleOverlayClubKey(row.club);
+      const current=savedByKey[key];
+      const suggested=Math.round(Number(row.baseCarry)||0);
+      const currentCarry=current?Math.round(Number(current.baseCarry)||0):null;
+      const diff=currentCarry==null?null:suggested-currentCarry;
+      const evidence=directEvidenceByKey[key]||null;
+      const linkKey=gdShotBubbleOverlayClubKey(estimate.link?.club);
+      const shouldShow=!saved.length||currentCarry==null||Math.abs(diff)>=6||Math.abs(diff)/Math.max(1,currentCarry)>=.045||evidence;
+      if(!shouldShow)return null;
+      return{
+        club:row.club,
+        currentCarry,
+        suggestedCarry:suggested,
+        middleCarry:currentCarry==null?suggested:Math.round((currentCarry+suggested)/2),
+        diff,
+        evidenceCount:Number(evidence?.count||row.practiceEvidenceCount||0),
+        evidenceCarry:evidence?Number(evidence.trueDistanceM):null,
+        linkClub:estimate.link?.club||"",
+        linkDistanceM:Number(estimate.link?.trueDistanceM)||null,
+        isLink:!!(linkKey&&key===linkKey),
+        estimated:!evidence
+      };
+    }).filter(Boolean);
+  }
+  function gdPracticeSuggestionRowsForApply(mode){
+    const estimate=gdPracticeEstimatedBagRowsFromEvidence(gdPracticeProjectionReadyAnalysis());
+    const estimated=estimate.rows||[];
+    const saved=gdPracticeRawSavedBagRows();
+    const savedByKey={};
+    saved.forEach(row=>{
+      const key=gdShotBubbleOverlayClubKey(row.club);
+      if(key)savedByKey[key]=row;
+    });
+    if(mode==="middle"&&saved.length){
+      return gdBagSortRows(estimated.map(row=>{
+        const key=gdShotBubbleOverlayClubKey(row.club);
+        const current=savedByKey[key];
+        const suggested=Math.round(Number(row.baseCarry)||0);
+        const carry=current?Math.round((Math.round(Number(current.baseCarry)||suggested)+suggested)/2):suggested;
+        return{club:row.club,baseCarry:carry,totalM:gdBagTotalForCarry(row.club,carry)};
+      }));
+    }
+    return estimated.map(row=>({club:row.club,baseCarry:Math.round(Number(row.baseCarry)||0),totalM:gdBagTotalForCarry(row.club,Math.round(Number(row.baseCarry)||0))}));
+  }
+  function gdPracticePrefillRows(analysis){
+    const estimate=gdPracticeEstimatedBagRowsFromEvidence(analysis);
+    const rows=estimate.rows||[];
+    const saved=gdPracticeHasUserBag()?gdPracticeRawSavedBagRows():[];
+    const savedByKey={};
+    saved.forEach(row=>{
+      const key=gdShotBubbleOverlayClubKey(row.club);
+      if(key)savedByKey[key]=row;
+    });
+    return rows.map(row=>{
+      const key=gdShotBubbleOverlayClubKey(row.club);
+      const current=savedByKey[key]||null;
+      const suggested=Math.round(Number(row.baseCarry)||0);
+      const currentCarry=current?Math.round(Number(current.baseCarry)||0):null;
+      return{
+        club:row.club,
+        currentCarry,
+        suggestedCarry:suggested,
+        diff:currentCarry==null?null:suggested-currentCarry,
+        link:!!(key&&key===gdShotBubbleOverlayClubKey(estimate.link?.club))
+      };
+    });
+  }
+  function gdPracticeBagSuggestionSignature(estimate,prefillRows,hasBag){
+    const link=estimate?.link||{};
+    const linkPart=`${link.club||""}:${Math.round(Number(link.trueDistanceM)||0)}`;
+    const rowPart=(Array.isArray(prefillRows)?prefillRows:[]).map(row=>`${row.club}:${row.currentCarry??""}:${row.suggestedCarry}`).join("|");
+    return `${hasBag?"bag":"no-bag"}::${linkPart}::${rowPart}`;
+  }
+  function gdPracticeCurrentBagSuggestionSignature(){
+    const analysis=gdPracticeProjectionReadyAnalysis();
+    const estimate=gdPracticeEstimatedBagRowsFromEvidence(analysis);
+    const prefillRows=gdPracticePrefillRows(analysis);
+    if(!prefillRows.length)return"";
+    return gdPracticeBagSuggestionSignature(estimate,prefillRows,gdPracticeHasUserBag());
+  }
+  function gdPracticeBagSuggestionSeen(signature){
+    const value=String(signature||"");
+    if(!value)return true;
+    try{return localStorage.getItem(GD_PRACTICE_BAG_SUGGESTION_SEEN_KEY)===value;}
+    catch(e){return false;}
+  }
+  function gdPracticeMarkBagSuggestionSeen(signature=gdPracticeCurrentBagSuggestionSignature()){
+    const value=String(signature||"");
+    if(!value)return false;
+    try{localStorage.setItem(GD_PRACTICE_BAG_SUGGESTION_SEEN_KEY,value);}catch(e){}
+    return true;
+  }
+  function gdPracticeToggleBagAdapt(force){
+    gdPracticeBagSuggestionOpen=true;
+    gdPracticeBagAdaptOpen=typeof force==="boolean"?force:!gdPracticeBagAdaptOpen;
+    gdPracticeBagAdaptUndoStack=[];
+    return gdPracticeRefreshProjectionSurfaces();
+  }
+  function gdPracticeBagAdaptRemember(input){
+    if(!input)return false;
+    if(!Object.prototype.hasOwnProperty.call(input.dataset,"lastValue"))input.dataset.lastValue=String(input.value||"");
+    return false;
+  }
+  function gdPracticeBagAdaptChanged(input){
+    if(!input)return false;
+    const club=String(input.dataset.gdPracticeAdaptClub||"").trim();
+    const previous=Object.prototype.hasOwnProperty.call(input.dataset,"lastValue")?String(input.dataset.lastValue||""):"";
+    const next=String(input.value||"");
+    if(club&&previous!==next){
+      gdPracticeBagAdaptUndoStack.push({club,value:previous});
+      if(gdPracticeBagAdaptUndoStack.length>60)gdPracticeBagAdaptUndoStack.shift();
+      input.dataset.lastValue=next;
+    }
+    return false;
+  }
+  function gdPracticeUndoBagAdapt(){
+    const step=gdPracticeBagAdaptUndoStack.pop();
+    if(!step){
+      gdLmToast("Nothing to undo");
+      return false;
+    }
+    const input=[...document.querySelectorAll("[data-gd-practice-adapt-club]")].find(item=>String(item.dataset.gdPracticeAdaptClub||"")===step.club);
+    if(!input){
+      gdLmToast("Field no longer visible");
+      return false;
+    }
+    input.value=step.value;
+    input.dataset.lastValue=String(step.value||"");
+    input.focus();
+    try{input.select?.();}catch(e){}
+    return false;
+  }
+  function gdPracticeAdaptedBagRowsFromDOM(){
+    const rows=[];
+    document.querySelectorAll("[data-gd-practice-adapt-club]").forEach(input=>{
+      const club=String(input.dataset.gdPracticeAdaptClub||"").trim();
+      const carry=Math.round(Number(input.value)||0);
+      if(!club||carry<=0)return;
+      rows.push({club,baseCarry:carry,totalM:gdBagTotalForCarry(club,carry)});
+    });
+    return gdBagSortRows(rows);
+  }
+  function gdPracticeApplyBagSuggestions(mode){
+    const action=String(mode||"suggested");
+    if(action==="keep"){
+      gdPracticeBagSuggestionOpen=false;
+      gdPracticeBagAdaptOpen=false;
+      gdPracticeBagAdaptUndoStack=[];
+      gdLmToast("Bag left unchanged");
+      return gdPracticeRefreshProjectionSurfaces();
+    }
+    const rows=action==="adapted"?gdPracticeAdaptedBagRowsFromDOM():gdPracticeSuggestionRowsForApply(action);
+    if(!rows.length){
+      gdLmToast("No distance suggestion ready");
+      return false;
+    }
+    if(typeof gdBagPersistRows==="function")gdBagPersistRows(rows,{silent:true,render:false});
+    else safe(()=>{
+      const p=ensureProfile();
+      p.bag=rows;
+      p.bagSlotsTouched=true;
+      p.bagSeededDefault=false;
+      savePlayerProfiles();
+      syncCoreProfileFromActive();
+    });
+    gdPracticeBagSuggestionOpen=false;
+    gdPracticeBagAdaptOpen=false;
+    gdPracticeBagAdaptUndoStack=[];
+    safe(()=>typeof renderBagPanel==="function"&&renderBagPanel());
+    safe(()=>typeof renderProfilePanel==="function"&&renderProfilePanel());
+    safe(()=>typeof renderShot==="function"&&renderShot());
+    gdLmToast(action==="adapted"?"Adapted bag saved":"Bag distances adopted");
+    return gdPracticeRefreshProjectionSurfaces();
+  }
+  function gdPracticeBagSuggestionHTML(analysis){
+    const hasBag=gdPracticeHasUserBag();
+    const estimate=gdPracticeEstimatedBagRowsFromEvidence(analysis);
+    const prefillRows=gdPracticePrefillRows(analysis);
+    if(!prefillRows.length)return"";
+    const rows=gdPracticeSuggestedCarryRows(analysis);
+    const link=estimate.link||null;
+    const evidence=estimate.evidence||[];
+    const linkChoices=evidence.length>1?`<div class="gdPracticeDistanceLinkChoices">${evidence.map(row=>`<button type="button" class="${gdShotBubbleOverlayClubKey(row.club)===gdShotBubbleOverlayClubKey(link?.club)?"active":""}" onclick="return gdPracticeSetDistanceLinkClub(${gdPracticeJsArg(row.club)})">${gdEscapeHTML(row.club)} / ${Math.round(Number(row.trueDistanceM)||0)}m</button>`).join("")}</div>`:"";
+    const previewRows=prefillRows.slice(0,12);
+	    const signature=gdPracticeBagSuggestionSignature(estimate,prefillRows,hasBag);
+	    const notify=!gdPracticeBagSuggestionSeen(signature);
+	    if(!gdPracticeBagSuggestionOpen){
+	      return `<button type="button" class="gdPracticeBagSuggestionIcon ${notify?"unseen":""} ${hasBag?"hasBag":"noBag"}" aria-label="Open bag distance suggestions" onclick="return gdPracticeToggleBagSuggestions(true)"><span class="gdPracticeBagSuggestionIconFrame"><img src="assets/home/bag.png" alt=""></span></button>`;
+	    }
+    const body=previewRows.map(row=>{
+      const currentValue=row.currentCarry==null?"":String(Math.round(Number(row.currentCarry)||0));
+      const current=gdPracticeBagAdaptOpen
+        ? `<input type="number" min="1" step="1" value="${gdEscapeHTML(currentValue)}" placeholder="m" data-gd-practice-adapt-club="${gdEscapeHTML(row.club)}" aria-label="${gdEscapeHTML(row.club)} current bag distance" onfocus="gdPracticeBagAdaptRemember(this)" oninput="gdPracticeBagAdaptChanged(this)">`
+        : `<span class="gdPracticeCurrentCell ${row.currentCarry==null?"empty":"readonly"}">${gdEscapeHTML(row.currentCarry==null?"Empty":`${row.currentCarry}m`)}</span>`;
+      const suggestion=`<span class="gdPracticeSuggestedSide">${Math.round(Number(row.suggestedCarry)||0)}m</span>`;
+      const delta=Number.isFinite(Number(row.diff))?(row.diff>0?`+${row.diff}m`:`${row.diff}m`):"new";
+      return `<div class="gdPracticeBagSuggestionRow ${row.link?"link":""} ${gdPracticeBagAdaptOpen?"editable":"locked"}"><strong>${gdEscapeHTML(row.club)}</strong>${current}${suggestion}<b>${gdEscapeHTML(delta)}</b></div>`;
+    }).join("");
+    const actions=gdPracticeBagAdaptOpen
+      ? `<button type="button" onclick="return gdPracticeApplyBagSuggestions('adapted')">Save adapted</button><button type="button" onclick="return gdPracticeUndoBagAdapt()">Undo</button><button type="button" onclick="return gdPracticeToggleBagAdapt(false)">Back</button>`
+      : (hasBag
+        ? `<button type="button" onclick="return gdPracticeApplyBagSuggestions('suggested')">Adopt</button><button type="button" onclick="return gdPracticeToggleBagAdapt(true)">Adapt</button><button type="button" onclick="return gdPracticeApplyBagSuggestions('keep')">Not now</button>`
+        : `<button type="button" onclick="return gdPracticeApplyBagSuggestions('suggested')">Adopt</button><button type="button" onclick="return gdPracticeApplyBagSuggestions('keep')">Not now</button>`);
+	    const linkCopy=link?`<div class="gdPracticeDistanceLink"><span>Distance link</span><strong>${gdEscapeHTML(link.club)} / ${Math.round(Number(link.trueDistanceM)||0)}m</strong></div>`:"";
+	    return `<div class="gdPracticeBagSuggestionPanel ${hasBag?"hasBag":"noBag"} ${gdPracticeBagAdaptOpen?"adapt":""}"><div class="gdPracticeBagSuggestionHead"><div class="gdPracticeBagSuggestionTitle"><img src="assets/home/bag.png" alt=""><span>Bag</span></div><button type="button" aria-label="Close" onclick="return gdPracticeToggleBagSuggestions(false)">×</button></div>${linkCopy}${linkChoices}<div class="gdPracticeBagSuggestionGrid"><span>Club</span><span>${gdPracticeBagAdaptOpen?"Edit current":hasBag?"Current":"Bag"}</span><span>Suggested</span><span>Diff</span>${body}</div><div class="gdPracticeBagSuggestionActions">${actions}</div></div>`;
+	  }
+	  function gdPracticeBagSuggestionNoticeHTML(analysis){
+	    if(gdPracticeBagSuggestionOpen)return"";
+	    const hasBag=gdPracticeHasUserBag();
+	    const estimate=gdPracticeEstimatedBagRowsFromEvidence(analysis);
+	    const prefillRows=gdPracticePrefillRows(analysis);
+	    if(!prefillRows.length)return"";
+	    const signature=gdPracticeBagSuggestionSignature(estimate,prefillRows,hasBag);
+	    if(gdPracticeBagSuggestionSeen(signature))return"";
+	    return `<div class="gdPracticeBagSuggestionNoticeRow"><button type="button" class="gdPracticeBagSuggestionNotice ${hasBag?"hasBag":"noBag"}" onclick="return gdPracticeToggleBagSuggestions(true)">Distance Suggestion Available</button></div>`;
+	  }
+
+  function gdPracticeProjectionControlsHTML(analysis){
+    const ctx=gdPracticeProjectionContext(analysis);
+    const adopted=gdPracticePlayingBubbleIsAdopted(safe(()=>ensureProfile(),null));
+    const generated=ctx.canProject&&ctx.visible;
+    const generateDisabled=ctx.canProject?"":"disabled";
+    const adoptDisabled=ctx.canProject&&ctx.visible&&!adopted?"":"disabled";
+	    const tone=generated?"generated":ctx.canProject?"ready":"waiting";
+	    const adoptLabel=adopted?"Bubble Adopted":"Adopt Bubble";
+	    const bagSuggestion=gdPracticeBagSuggestionHTML(analysis);
+	    const bagNotice=gdPracticeBagSuggestionNoticeHTML(analysis);
+	    return `<div class="gdPracticeActionDock ${tone} ${bagSuggestion?"hasBagSuggestion":""} ${gdPracticeBagSuggestionOpen?"bagOpen":""}"><div class="gdPracticePrimaryActions"><button type="button" class="gdPracticeBubbleAction generate ${ctx.canProject?"ready":""} ${generated?"active":""}" aria-pressed="${generated?"true":"false"}" ${generateDisabled} onclick="return gdPracticeGenerateBubble()">Generate Bubble</button><button type="button" class="gdPracticeBubbleAction adopt ${adopted?"adopted":""}" aria-pressed="${adopted?"true":"false"}" ${adoptDisabled} onclick="return gdPracticeAdoptBubbleFromAction()">${gdEscapeHTML(adoptLabel)}</button></div>${bagSuggestion?`<div class="gdPracticeBagSuggestionSlot">${bagSuggestion}</div>`:""}</div>${gdPracticeSandboxControlsHTML("compact")}${bagNotice}`;
+	  }
 	  function gdRenderPracticeProjectionControls(analysis){
 	    const root=byId("gdPracticeProjectionControls");
 	    if(!root)return;
@@ -34126,24 +34571,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	    return !!source.active&&Number.isFinite(current)&&Number.isFinite(adopted)&&Math.abs(current-adopted)<.02;
 	  }
 	  function gdPracticeAutoFlowHTML(analysis){
-	    const totals=analysis?.totals||{};
-	    const raw=Number(totals.rawShots||0);
-	    if(!raw)return "";
-	    const accepted=Number(totals.accepted||analysis?.acceptedShots?.length||0);
-	    const method=gdPracticeBubbleMethod(analysis);
-	    const source=gdPracticeBubbleSource(analysis);
-	    const offset=Number(source?.offsetDeg??method?.anchorDeg);
-	    const hasBubble=!!method&&Number.isFinite(offset);
-	    const adopted=gdPracticePlayingBubbleIsAdopted(safe(()=>ensureProfile(),null));
-	    const preview=hasBubble?`<div class="gdPracticeAutoBubblePreview">${gdShotBubbleHubSvg(offset,gdShotBubbleSizeSource(source,offset))}</div>`:"";
-	    const title=hasBubble?(adopted?"Using Practice Bubble":"Play with my Practice Bubble"):"Practice Bubble building";
-	    const meta=hasBubble
-	      ? (adopted?"Tap to switch back to My Bubble.":"Try it as My Bubble.")
-	      : "Clarity Pattern Finder needs more shots.";
-	    const action=hasBubble
-	      ? `<button type="button" class="gdPracticeAutoAdopt" onclick="return gdPracticeAdoptBubbleAsPlayingBubble()">${gdEscapeHTML(gdPracticePlayingBubbleActionLabel())}</button>`
-	      : `<button type="button" class="gdPracticeAutoAdopt" disabled>Practice Bubble not ready yet</button>`;
-	    return `<div class="gdPracticeAutoFlow ${hasBubble?"ready":"waiting"}">${preview}<div class="gdPracticeAutoCopy"><span>${gdEscapeHTML(title)}</span><strong>${gdEscapeHTML(meta)}</strong></div>${action}</div>`;
+	    return "";
 	  }
 	  function gdRenderPracticeAutoFlow(analysis){
 	    const root=byId("gdPracticeDataResult");
@@ -36149,7 +36577,6 @@ body.gdAuthLocked #gdProfileV67 .topbar{
   }
   function gdPracticeLibraryShellHTML(analysis,totalRows,bodyHTML){
     const bubble=gdPracticeBubbleValueLabel(analysis);
-    const processing=!!gdPracticePhotoProcessing;
     return gdShotDataLibraryShellHTML({
       kind:"practice",
       title:"Clarity Shot Library",
@@ -36158,8 +36585,8 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       count:Number(totalRows)||0,
       bodyHTML,
       dropdown:true,
-      open:processing?false:gdShotDataLibraryIsOpen("practice"),
-      headerStatusHTML:processing?gdNativeShotDataProcessingHTML():""
+      open:gdShotDataLibraryIsOpen("practice"),
+      headerStatusHTML:gdNativeShotDataProcessingHTML()
     });
   }
   function gdPracticeRecommendationsHTML(analysis){
@@ -36384,7 +36811,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	    };
 	  }
 	  function gdPracticeToggleEvidenceClub(button){
-	    const section=button?.closest?.(".gdPracticeEvidenceClub");
+	    const section=button?.closest?.(".gdPracticeNativeClub,.gdPracticeEvidenceClub");
 	    if(!section)return false;
 	    const club=section.dataset.club||"";
 	    const open=!section.classList.contains("open");
@@ -36395,6 +36822,16 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	    if(marker)marker.textContent=open?"-":"+";
 	    return false;
 	  }
+    if(!window.__gdPracticeNativeClubToggleBound){
+      window.__gdPracticeNativeClubToggleBound=true;
+      document.addEventListener("click",event=>{
+        const target=event.target&&event.target.closest&&event.target.closest("[data-gd-practice-club-toggle]");
+        if(!target)return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return gdPracticeToggleEvidenceClub(target);
+      },true);
+    }
 	  function gdPracticeSetEvidenceClubTab(club){
 	    gdPracticeEvidenceActiveClub=String(club||"");
 	    try{localStorage.setItem("gd_practice_evidence_active_club",gdPracticeEvidenceActiveClub);}catch(e){}
@@ -36465,55 +36902,198 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	    if(total)return "collecting";
 	    return "empty";
 	  }
-	  function gdRenderPracticeEvidenceList(analysis){
-	    const root=byId("gdPracticeEvidenceList");
-	    if(!root)return;
-	    const rows=gdPracticeEvidenceRows(analysis);
-	      if(!rows.length){
-	      root.innerHTML=gdPracticeLibraryShellHTML(analysis,0,`<div class="gdPracticeEvidenceHead"><div><strong>Clarity Shot Data</strong><span>Imported practice shots will appear here after a scan or upload.</span></div></div>`);
-	      return;
-	    }
-	    const grouped={};
-	    rows.forEach(row=>{
-	      const club=row.club||"Unknown";
-	      grouped[club]=grouped[club]||[];
-	      grouped[club].push(row);
-	    });
-	    const uploadMap=gdPracticeEvidenceUploadMap();
-	    const clubs=Object.keys(grouped).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
-	    const clubSections=clubs.map(club=>{
-	      const clubRows=(grouped[club]||[]).slice().sort((a,b)=>gdPracticeEvidenceTime(b.timestamp)-gdPracticeEvidenceTime(a.timestamp));
-	      const carry=gdShotBubbleMedian(clubRows.map(row=>Number(row.actualDistanceM)).filter(Number.isFinite));
-	      const uploadGroups={};
-	      clubRows.forEach(row=>{
-	        const upload=gdPracticeEvidenceUploadForRow(row,uploadMap);
-	        const id=upload.id||"unknown";
-	        uploadGroups[id]=uploadGroups[id]||{upload,rows:[]};
-	        uploadGroups[id].rows.push(row);
-	      });
-		      const uploadSections=Object.values(uploadGroups).sort((a,b)=>(b.upload.time||0)-(a.upload.time||0)).map((group,index)=>{
-		        const uploadRows=group.rows;
-			        const uploadLabel=gdPracticeEvidenceDateLabel(group.upload.timestamp);
-			        const uploadName=group.upload.label&&group.upload.label!=="Practice upload"?` · ${group.upload.label}`:"";
-			        const shotRows=uploadRows.slice().sort((a,b)=>a.index-b.index).map(row=>{
-			          const tone=row.plotDeselected?"excluded":row.excluded?"excluded":row.counted?"counted":"filtered";
-			          const statusClass=row.plotDeselected||row.excluded?"muted":row.counted?"focus":"stored";
-			          const carryText=Number.isFinite(Number(row.actualDistanceM))?`${Number(row.actualDistanceM).toFixed(0)}m`:"-";
-			          const offlineText=Number.isFinite(Number(row.lateralM))?`${Number(row.lateralM)>0?"R":Number(row.lateralM)<0?"L":""} ${Math.abs(Number(row.lateralM)).toFixed(1)}m`.trim():"-";
-			          const offsetText=Number.isFinite(Number(row.normalizedDeg))?gdOffsetLabel(row.normalizedDeg):"-";
-			          const plotLabel=gdPracticeEvidencePlotLabel(row);
-			          const rowStatus=row.plotDeselected?"plot off":row.excluded?"filtered":row.counted?"bubble fit":"stored";
-			          return `<div class="gdPracticeEvidenceShot ${tone}"><span class="gdPracticeEvidenceIndex">${Number(row.index)+1}</span><strong>${gdEscapeHTML(carryText)}</strong><span>${gdEscapeHTML(offlineText)}</span><span>${gdEscapeHTML(offsetText)}</span><em><i class="gdPracticeEvidenceDot ${statusClass}" aria-hidden="true"></i>${gdEscapeHTML(plotLabel)} · ${gdEscapeHTML(rowStatus)}</em></div>`;
-			        }).join("");
-			        const tableHead=`<div class="gdPracticeEvidenceTableHead"><span>#</span><span>Carry</span><span>Offline</span><span>Offset</span><span>Status</span></div>`;
-			        return `<details class="gdPracticeEvidenceUpload" ${index===0?"open":""}><summary><span>${gdEscapeHTML(uploadLabel)}${gdEscapeHTML(uploadName)}</span><strong>${uploadRows.length} shot${uploadRows.length===1?"":"s"}</strong></summary><div class="gdPracticeEvidenceShots gdPracticeEvidenceTable">${tableHead}${shotRows}</div></details>`;
-			      }).join("");
-	      const open=!!gdPracticeEvidenceOpenClubs[club];
-	      return `<section class="gdPracticeEvidenceClub ${open?"open":""}" data-club="${gdEscapeHTML(club)}"><button type="button" class="gdPracticeEvidenceClubHead" onclick="return gdPracticeToggleEvidenceClub(this)" aria-expanded="${open?"true":"false"}"><div><span>${gdEscapeHTML(club)}</span><strong>${clubRows.length} shot${clubRows.length===1?"":"s"}</strong></div><small>${Number.isFinite(carry)&&carry?`${carry.toFixed(0)}m avg`:""}</small><b class="gdPracticeEvidenceChevron">${open?"-":"+"}</b></button><div class="gdPracticeEvidenceClubBody">${uploadSections||`<div class="gdPracticeEvidenceNoRows">No shots yet for this club.</div>`}</div></section>`;
-	    }).join("");
-	    root.innerHTML=gdPracticeLibraryShellHTML(analysis,rows.length,`${gdPracticePlotModeControls()}<div class="gdPracticeEvidenceClubRows${rows.length>18?" gdPracticeEvidenceClubRowsScrollable":""}">${clubSections}</div>`);
-	  }
-			  function renderPracticeData(skipTolerances=false){
+	  function gdPracticeSandboxMetric(rawLabel,candidateMetric,value,unit="m",confidence=.92){
+    return{rawLabel,candidateMetric,value,unit,confidence};
+  }
+  function gdPracticeSandboxGroup(club,baseCarry,offsetDeg,index,opts={}){
+    const jitter=Array.isArray(opts.jitter)?opts.jitter:[-.42,.18,.36,-.2,.08,-.12,.28,-.32,.05];
+    const depth=Array.isArray(opts.depth)?opts.depth:[-2,1,3,-1,2,0,-3,1,4];
+    const shotOffset=Number(offsetDeg)+(jitter[index%jitter.length]||0);
+    const carry=Math.round(Number(baseCarry)+(depth[index%depth.length]||0));
+    const offline=Number((Math.tan(shotOffset*Math.PI/180)*Math.max(1,Number(baseCarry))).toFixed(1));
+    const faceToPath=Number((shotOffset*.42+((index%3)-1)*.12).toFixed(2));
+    const clubPath=Number((((index%5)-2)*.18).toFixed(2));
+    return{
+      shotId:`sandbox-${String(club).replace(/[^a-z0-9]/gi,"").toLowerCase()}-${Date.now()}-${index}-${Math.random().toString(16).slice(2,7)}`,
+      originClubLabel:club,
+      candidateClub:club,
+      expectedDistanceM:Number(baseCarry),
+      analysisLane:"cluster_hunt",
+      sourceMethod:"cluster_hunt",
+      simulatedShot:true,
+      metrics:[
+        gdPracticeSandboxMetric("Carry","carryDistance",carry,"m",.94),
+        gdPracticeSandboxMetric("Offline","offline",offline,"m",.93),
+        gdPracticeSandboxMetric("Face to Path","faceToPath",faceToPath,"deg",.84),
+        gdPracticeSandboxMetric("Club Path","clubPath",clubPath,"deg",.82)
+      ],
+      timestamp:opts.timestamp||new Date().toISOString()
+    };
+  }
+  function gdPracticeSandboxPayload(label,timestamp,specs){
+    const clubGroups=[];
+    (Array.isArray(specs)?specs:[]).forEach(spec=>{
+      const count=Math.max(1,Number(spec.count)||1);
+      for(let i=0;i<count;i++){
+        clubGroups.push(gdPracticeSandboxGroup(spec.club,spec.carry,spec.offsetDeg,i,{timestamp,jitter:spec.jitter,depth:spec.depth}));
+      }
+    });
+    return{
+      label,
+      timestamp,
+      startedAt:timestamp,
+      inputType:"generated-demo",
+      sourceIdentity:{providerGuess:"native_practice_sandbox",confidence:.98},
+      clubGroups
+    };
+  }
+  function gdPracticeSandboxScenarioSpecs(scenario){
+    const mode=String(scenario||"ready");
+    if(mode==="sparse")return[
+      {label:"Sparse native trial",daysAgo:0,specs:[{club:"7i",carry:154,offsetDeg:2.4,count:3}]}
+    ];
+    if(mode==="distance")return[
+      {label:"Native distance mismatch",daysAgo:2,specs:[{club:"7i",carry:170,offsetDeg:2.6,count:8},{club:"9i",carry:146,offsetDeg:2.3,count:7}]},
+      {label:"Native long-club check",daysAgo:0,specs:[{club:"Driver",carry:268,offsetDeg:2.7,count:6}]}
+    ];
+    return[
+      {label:"Native 7i / 9i upload",daysAgo:4,specs:[{club:"7i",carry:155,offsetDeg:2.4,count:8},{club:"9i",carry:133,offsetDeg:2.2,count:7}]},
+      {label:"Native Driver upload",daysAgo:0,specs:[{club:"Driver",carry:246,offsetDeg:2.6,count:6}]}
+    ];
+  }
+  function gdPracticeLoadSandboxNativeRows(scenario="ready"){
+    const api=window.GolfDaddyLaunchMonitorData;
+    if(!api||typeof api.importCapture!=="function"){
+      gdLmToast("Native shot data store is not ready");
+      return false;
+    }
+    if(typeof api.clearStore==="function")api.clearStore();
+    const now=Date.now();
+    gdPracticeSandboxScenarioSpecs(scenario).forEach(item=>{
+      const timestamp=new Date(now-(Number(item.daysAgo)||0)*86400000).toISOString();
+      api.importCapture(gdPracticeSandboxPayload(item.label,timestamp,item.specs));
+    });
+    gdSetPracticePhotoProcessing(true,{stageIndex:3,progress:96,preserveClubs:true});
+    gdSetPracticePhotoProcessing(false);
+    try{localStorage.setItem("gd_practice_plot_filter_mode","all");}catch(e){}
+    gdPracticeProjectionUserTouched=false;
+    renderPracticeData(true);
+    renderDataHubStatus();
+    gdLmToast("Sandbox native practice data loaded");
+    return false;
+  }
+  function gdPracticeSimulateSandboxImport(scenario="ready"){
+    gdPracticePhotoProcessingClubs=gdPracticeSandboxScenarioSpecs(scenario).flatMap(item=>item.specs||[]).map(spec=>spec.club);
+    gdSetPracticePhotoProcessing(true,{preserveClubs:true,stageIndex:0,progress:12});
+    setTimeout(()=>gdSetPracticePhotoProcessing(true,{preserveClubs:true,stageIndex:1,progress:42}),650);
+    setTimeout(()=>gdSetPracticePhotoProcessing(true,{preserveClubs:true,stageIndex:2,progress:74}),1300);
+    setTimeout(()=>gdPracticeLoadSandboxNativeRows(scenario),1900);
+    return false;
+  }
+  function gdPracticeSetSandboxBag(mode){
+    const value=String(mode||"matched");
+    if(value==="empty"){
+      const p=safe(()=>typeof gdShotActiveProfile==="function"?gdShotActiveProfile():ensureProfile(),null)||ensureProfile();
+      p.bag=[];
+      p.bagSlotsTouched=false;
+      p.bagSeededDefault=false;
+      p.updatedAt=new Date().toISOString();
+      savePlayerProfiles();
+      syncCoreProfileFromActive();
+      gdPracticeBagSuggestionOpen=false;
+      gdLmToast("Sandbox bag cleared");
+    }else{
+      const seven=value==="different"?142:155;
+      gdBagPersistRows(gdGenerateQuickBag(seven),{silent:true,render:false});
+      gdPracticeBagSuggestionOpen=false;
+      gdLmToast(value==="different"?"Sandbox bag set different":"Sandbox bag matched");
+    }
+    safe(()=>typeof renderBagPanel==="function"&&renderBagPanel());
+    safe(()=>typeof renderShot==="function"&&renderShot());
+    return gdPracticeRefreshProjectionSurfaces();
+  }
+  function gdPracticeClearSandboxData(){
+    const api=window.GolfDaddyLaunchMonitorData;
+    if(api&&typeof api.clearStore==="function")api.clearStore();
+    gdShotBubbleOverlayState.practice=false;
+    window.gdShotBubbleOverlayState=gdShotBubbleOverlayState;
+    document.documentElement.dataset.gdOverlayPractice="off";
+    gdPracticeProjectionUserTouched=false;
+    gdPracticeBagSuggestionOpen=false;
+    renderPracticeData(true);
+    renderDataHubStatus();
+    gdLmToast("Practice sandbox data cleared");
+    return false;
+  }
+  function gdPracticeSandboxControlsHTML(variant=""){
+    const compact=String(variant||"")==="compact";
+    return `<div class="gdPracticeSandboxControls ${compact?"compact":""}"><div><strong>Local test inputs</strong><span>${compact?"Native-shaped sandbox rows.":"Temporary native-shaped rows for UI testing."}</span></div><div class="gdPracticeSandboxButtons"><button type="button" data-gd-practice-sandbox-action="simulate" data-gd-practice-sandbox-scenario="ready">Simulate import</button><button type="button" data-gd-practice-sandbox-action="load" data-gd-practice-sandbox-scenario="ready">Ready rows</button><button type="button" data-gd-practice-sandbox-action="load" data-gd-practice-sandbox-scenario="sparse">Sparse rows</button><button type="button" data-gd-practice-sandbox-action="load" data-gd-practice-sandbox-scenario="distance">Distance mismatch</button><button type="button" data-gd-practice-sandbox-action="clear">Clear</button><button type="button" data-gd-practice-sandbox-action="bag" data-gd-practice-sandbox-mode="empty">Bag empty</button><button type="button" data-gd-practice-sandbox-action="bag" data-gd-practice-sandbox-mode="matched">Bag matched</button><button type="button" data-gd-practice-sandbox-action="bag" data-gd-practice-sandbox-mode="different">Bag differs</button></div></div>`;
+  }
+  Object.assign(window,{gdPracticeLoadSandboxNativeRows,gdPracticeSimulateSandboxImport,gdPracticeSetSandboxBag,gdPracticeClearSandboxData,gdPracticeSetDistanceLinkClub,gdPracticeGenerateBubble,gdPracticeAdoptBubbleFromAction,gdPracticeApplyBagSuggestions,gdPracticeToggleBagSuggestions,gdPracticeToggleBagAdapt,gdPracticeBagAdaptRemember,gdPracticeBagAdaptChanged,gdPracticeUndoBagAdapt});
+
+ function gdRenderPracticeEvidenceList(analysis){
+    const root=byId("gdPracticeEvidenceList");
+    if(!root)return;
+    const rows=gdPracticeEvidenceRows(analysis);
+    if(!rows.length){
+      root.innerHTML=gdPracticeLibraryShellHTML(analysis,0,`<div class="gdPracticeEvidenceHead"><div><strong>Clarity Shot Data</strong><span>Imported practice shots will appear here after a scan or upload.</span></div></div>`);
+      return;
+    }
+    const grouped={};
+    rows.forEach(row=>{
+      const club=row.club||"Unknown";
+      grouped[club]=grouped[club]||[];
+      grouped[club].push(row);
+    });
+    const uploadMap=gdPracticeEvidenceUploadMap();
+    const clubs=Object.keys(grouped).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
+    let activeClub=gdPracticeEvidenceActiveClub||"";
+    const firstClub=clubs[0]||"";
+    if(!grouped[activeClub])activeClub=firstClub;
+    if(activeClub!==gdPracticeEvidenceActiveClub){
+      gdPracticeEvidenceActiveClub=activeClub;
+      try{localStorage.setItem("gd_practice_evidence_active_club",gdPracticeEvidenceActiveClub);}catch(e){}
+    }
+    const clubSections=clubs.map(club=>{
+      const clubRows=(grouped[club]||[]).slice().sort((a,b)=>gdPracticeEvidenceTime(b.timestamp)-gdPracticeEvidenceTime(a.timestamp));
+      const carry=gdShotBubbleMedian(clubRows.map(row=>Number(row.actualDistanceM)).filter(Number.isFinite));
+      const uploadGroups={};
+      clubRows.forEach(row=>{
+        const upload=gdPracticeEvidenceUploadForRow(row,uploadMap);
+        const id=upload.id||"unknown";
+        uploadGroups[id]=uploadGroups[id]||{upload,rows:[]};
+        uploadGroups[id].rows.push(row);
+      });
+      const uploadSections=Object.values(uploadGroups).sort((a,b)=>(b.upload.time||0)-(a.upload.time||0)).map((group,index)=>{
+        const uploadRows=group.rows;
+        const uploadLabel=gdPracticeEvidenceDateLabel(group.upload.timestamp);
+        const uploadName=group.upload.label&&group.upload.label!=="Practice upload"?` · ${group.upload.label}`:"";
+        const shotRows=uploadRows.slice().sort((a,b)=>a.index-b.index).map(row=>{
+          const tone=row.plotDeselected||row.excluded?"excluded":row.counted?"counted":"stored";
+          const carryText=Number.isFinite(Number(row.actualDistanceM))?`${Number(row.actualDistanceM).toFixed(0)}m`:"-";
+          const offlineText=Number.isFinite(Number(row.lateralM))?`${Number(row.lateralM)>0?"R":Number(row.lateralM)<0?"L":""} ${Math.abs(Number(row.lateralM)).toFixed(1)}m`.trim():"-";
+          const offsetText=Number.isFinite(Number(row.normalizedDeg))?gdOffsetLabel(row.normalizedDeg):"-";
+          return `<div class="gdPracticeNativeShot ${tone}" title="${gdEscapeHTML(row.rejectReason||"")}"><span class="gdPracticeNativeIndex">${Number(row.index)+1}</span><strong>${gdEscapeHTML(carryText)}</strong><span>${gdEscapeHTML(offlineText)}</span><span>${gdEscapeHTML(offsetText)}</span></div>`;
+        }).join("");
+        const tableHead=`<div class="gdPracticeNativeTableHead"><span>#</span><span>Carry</span><span>Offline</span><span>Offset</span></div>`;
+        return `<details class="gdPracticeNativeUpload"><summary><span>${gdEscapeHTML(uploadLabel)}${gdEscapeHTML(uploadName)}</span><strong>${uploadRows.length} shot${uploadRows.length===1?"":"s"}</strong></summary><div class="gdPracticeNativeShots">${tableHead}${shotRows}</div></details>`;
+      }).join("");
+      const open=!!gdPracticeEvidenceOpenClubs[club];
+      return `<section class="gdPracticeNativeClub ${open?"open":""}" data-club="${gdEscapeHTML(club)}">
+        <button type="button" class="gdPracticeNativeClubHead" data-gd-practice-club-toggle aria-expanded="${open?"true":"false"}">
+          <div><span>${gdEscapeHTML(club)}</span><strong>${clubRows.length} shot${clubRows.length===1?"":"s"}</strong></div>
+          <small>${Number.isFinite(carry)&&carry?`${carry.toFixed(0)}m avg`:""}</small>
+        </button>
+        <div class="gdPracticeNativeClubBody">${uploadSections||`<div class="gdPracticeEvidenceNoRows">No shots yet for this club.</div>`}</div>
+      </section>`;
+    }).join("");
+    root.innerHTML=gdPracticeLibraryShellHTML(
+      analysis,
+      rows.length,
+      `<div class="gdPracticeEvidenceClubRows${rows.length>18?" gdPracticeEvidenceClubRowsScrollable":""}">${clubSections}</div>`
+    );
+  }
+		  function renderPracticeData(skipTolerances=false){
 			    const visual=byId("gdPracticeDataVisual");
 			    const visualTitle=byId("gdPracticeVisualTitle");
 			    const result=byId("gdPracticeDataResult");
@@ -37023,6 +37603,23 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	    if(!window.__gdPracticeProjectionControlsBound){
 	      window.__gdPracticeProjectionControlsBound=true;
 	      document.addEventListener("click",event=>{
+          const evidenceClubTab=event.target&&event.target.closest&&event.target.closest("[data-gd-practice-evidence-tab]");
+          if(evidenceClubTab){
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            return gdPracticeSetEvidenceClubTab(evidenceClubTab.dataset.gdPracticeEvidenceClubTab||"");
+          }
+          const sandboxAction=event.target&&event.target.closest&&event.target.closest("[data-gd-practice-sandbox-action]");
+          if(sandboxAction){
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            const action=sandboxAction.dataset.gdPracticeSandboxAction||"";
+            if(action==="simulate")return gdPracticeSimulateSandboxImport(sandboxAction.dataset.gdPracticeSandboxScenario||"ready");
+            if(action==="load")return gdPracticeLoadSandboxNativeRows(sandboxAction.dataset.gdPracticeSandboxScenario||"ready");
+            if(action==="clear")return gdPracticeClearSandboxData();
+            if(action==="bag")return gdPracticeSetSandboxBag(sandboxAction.dataset.gdPracticeSandboxMode||"matched");
+            return false;
+          }
 	        const projectorToggle=event.target&&event.target.closest&&event.target.closest("[data-gd-practice-projector-toggle]");
 	        if(projectorToggle){
 	          event.preventDefault();
@@ -40902,6 +41499,907 @@ body.gdGpsActive #bagRailBtn{order:7!important}
   .gdShotBubbleTarget{width:110px!important;height:46px!important}
   .gdDataCard{min-height:122px!important}
 }
+
+/* Practice Data UI overrides */
+
+	.gdPracticeEvidenceList{
+	  display:grid!important;
+	  gap:8px!important;
+	  align-self:start!important;
+	  max-height:none!important;
+	  overflow:visible!important;
+	  padding:0!important;
+	  border:0!important;
+	  border-radius:0!important;
+	  background:transparent!important;
+	  box-shadow:none!important;
+	}
+	.gdShotDataLibraryShell{
+	  display:grid!important;
+	  gap:8px!important;
+	  min-width:0!important;
+	}
+	.gdShotDataLibraryTabs,
+	.gdPracticeLibraryTabs,
+	.gdCourseLibraryTabs{
+	  display:grid!important;
+	  grid-template-columns:minmax(0,1fr) auto auto!important;
+	  gap:7px!important;
+	  align-items:center!important;
+	  padding:7px!important;
+	  border-radius:13px!important;
+	  background:rgba(0,0,0,.16)!important;
+	  border:1px solid rgba(255,255,255,.075)!important;
+	}
+	.gdShotDataLibraryDropdownToggle{
+	  appearance:none!important;
+	  width:100%!important;
+	  color:inherit!important;
+	  font:inherit!important;
+	  text-align:inherit!important;
+	  cursor:pointer!important;
+	  user-select:none!important;
+	}
+	.gdShotDataLibraryDropdown>.gdShotDataLibraryTabs{
+	  grid-template-columns:1fr!important;
+	  padding:0!important;
+	  background:transparent!important;
+	  border:0!important;
+	}
+	.gdShotDataLibraryDropdown>.gdShotDataLibraryTabs>.gdShotDataLibraryTab{
+	  display:flex!important;
+	  align-items:center!important;
+	  justify-content:space-between!important;
+	  gap:12px!important;
+	  width:100%!important;
+	  min-height:46px!important;
+	  padding:12px 14px!important;
+	  text-align:left!important;
+	}
+	.gdShotDataLibraryTabMain{
+	  display:grid!important;
+	  grid-template-columns:minmax(0,1fr)!important;
+	  align-items:center!important;
+	  gap:7px!important;
+	  min-width:0!important;
+	  width:100%!important;
+	}
+	.gdShotDataLibraryTabMain>.gdNativeProcessingStack{display:none!important;margin-top:2px!important}
+	body.gdPracticePhotoProcessing .gdPracticeLibraryTabs .gdShotDataLibraryTabMain>.gdNativeProcessingStack{display:grid!important}
+	.gdShotDataLibraryTabMain .gdNativeProcessingBadge{
+	  grid-template-columns:minmax(126px,1fr) auto!important;
+	  min-width:0!important;
+	  width:100%!important;
+	}
+	.gdShotDataLibraryChevron{
+	  display:grid!important;
+	  place-items:center!important;
+	  width:24px!important;
+	  height:24px!important;
+	  border-radius:999px!important;
+	  border:1px solid rgba(255,255,255,.10)!important;
+	  background:rgba(255,255,255,.055)!important;
+	  color:rgba(255,255,255,.72)!important;
+	  font-size:11px!important;
+	  line-height:1!important;
+	  transition:transform .16s ease!important;
+	}
+	.gdShotDataLibraryDropdown.open>.gdShotDataLibraryTabs .gdShotDataLibraryChevron{
+	  transform:rotate(180deg)!important;
+	}
+	.gdShotDataLibraryTab,
+	.gdPracticeLibraryTab,
+	.gdCourseLibraryTab{
+	  appearance:none!important;
+	  width:100%!important;
+	  min-width:0!important;
+	  min-height:30px!important;
+	  border-radius:999px!important;
+	  padding:7px 10px!important;
+	  border:1px solid rgba(55,242,141,.38)!important;
+	  background:linear-gradient(180deg,#37f28d,#20bd69)!important;
+	  color:#06100b!important;
+	  font-size:11px!important;
+	  line-height:1!important;
+	  font-weight:950!important;
+	  text-align:left!important;
+	}
+	.gdShotDataLibraryShell-course .gdShotDataLibraryTab,
+	.gdCourseLibraryTab{
+	  border-color:rgba(98,210,255,.40)!important;
+	  background:linear-gradient(180deg,#62d2ff,#248dc0)!important;
+	  color:#041015!important;
+	}
+	.gdShotDataLibraryDropdown:not(.open)>.gdShotDataLibraryBody{
+	  display:none!important;
+	}
+	.gdShotDataLibraryDropdown>.gdShotDataLibraryTabs>.gdShotDataLibraryTab{
+	  min-height:54px!important;
+	  padding:14px 16px!important;
+	  border-color:rgba(255,255,255,.12)!important;
+	  background:linear-gradient(180deg,rgba(255,255,255,.075),rgba(255,255,255,.032))!important;
+	  color:#f4f7f5!important;
+	  box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 10px 24px rgba(0,0,0,.18)!important;
+	  cursor:pointer!important;
+	}
+	.gdShotDataLibraryDropdown.open>.gdShotDataLibraryTabs>.gdPracticeLibraryTab{
+	  border-color:rgba(255,255,255,.13)!important;
+	  background:linear-gradient(180deg,rgba(255,255,255,.075),rgba(255,255,255,.032))!important;
+	  color:#f4f7f5!important;
+	}
+	.gdShotDataLibraryDropdown.open>.gdShotDataLibraryTabs>.gdCourseLibraryTab{
+	  border-color:rgba(98,210,255,.50)!important;
+	  background:linear-gradient(180deg,#62d2ff,#248dc0)!important;
+	  color:#041015!important;
+	}
+		.gdShotDataLibraryDropdown.open>.gdShotDataLibraryBody{
+		  max-height:280px!important;
+		  overflow:auto!important;
+	  padding:12px!important;
+	  border-radius:16px!important;
+	  background:rgba(255,255,255,.045)!important;
+		  border:1px solid rgba(255,255,255,.085)!important;
+		  box-shadow:inset 0 1px 0 rgba(255,255,255,.035)!important;
+		}
+		#practiceDataPanel.open .gdPracticeLibraryShell.gdShotDataLibraryDropdown.open>.gdShotDataLibraryBody{
+		  max-height:none!important;
+		  overflow:visible!important;
+		}
+	.gdShotDataLibraryDropdown.open>.gdShotDataLibraryTabs>.gdPracticeLibraryTab .gdShotDataLibraryChevron,
+	.gdShotDataLibraryDropdown.open>.gdShotDataLibraryTabs>.gdCourseLibraryTab .gdShotDataLibraryChevron{
+	  border-color:rgba(0,0,0,.12)!important;
+	  background:rgba(0,0,0,.14)!important;
+	  color:rgba(0,0,0,.72)!important;
+	}
+	.gdShotDataLibraryBubble,
+	.gdPracticeLibraryBubble,
+	.gdCourseLibraryBubble{
+	  display:grid!important;
+	  gap:1px!important;
+	  min-width:88px!important;
+	  padding:5px 8px!important;
+	  border-radius:11px!important;
+	  background:rgba(55,242,141,.09)!important;
+	  border:1px solid rgba(55,242,141,.18)!important;
+	}
+	.gdShotDataLibraryShell-course .gdShotDataLibraryBubble,
+	.gdCourseLibraryBubble{
+	  background:rgba(98,210,255,.09)!important;
+	  border-color:rgba(98,210,255,.20)!important;
+	}
+	.gdShotDataLibraryBubble span,
+	.gdPracticeLibraryBubble span,
+	.gdCourseLibraryBubble span{
+	  color:rgba(255,255,255,.52)!important;
+	  font-size:8px!important;
+	  line-height:1!important;
+	  font-weight:950!important;
+	  text-transform:uppercase!important;
+	  letter-spacing:.06em!important;
+	  text-align:right!important;
+	}
+	.gdShotDataLibraryBubble strong,
+	.gdPracticeLibraryBubble strong,
+	.gdCourseLibraryBubble strong{
+	  color:#37f28d!important;
+	  font-size:13px!important;
+	  line-height:1!important;
+	  font-weight:950!important;
+	  text-align:right!important;
+	  white-space:nowrap!important;
+	}
+	.gdShotDataLibraryShell-course .gdShotDataLibraryBubble strong,
+	.gdCourseLibraryBubble strong{
+	  color:#62d2ff!important;
+	}
+	.gdShotDataLibraryTabs>b,
+	.gdPracticeLibraryTabs>b,
+	.gdCourseLibraryTabs>b{
+	  min-width:34px!important;
+	  border-radius:999px!important;
+	  padding:6px 8px!important;
+	  background:rgba(255,255,255,.055)!important;
+	  border:1px solid rgba(255,255,255,.10)!important;
+	  color:rgba(255,255,255,.78)!important;
+	  font-size:11px!important;
+	  line-height:1!important;
+	  text-align:center!important;
+	}
+	.gdShotDataLibraryBody,
+	.gdPracticeLibraryBody,
+	.gdCourseLibraryBody{
+	  display:grid!important;
+	  gap:8px!important;
+	}
+
+	.gdPracticeEvidenceHead{
+	  display:flex!important;
+	  justify-content:space-between!important;
+	  align-items:flex-start!important;
+	  gap:10px!important;
+	}
+	.gdPracticeEvidenceHead strong{
+	  display:block!important;
+	  color:#fff!important;
+	  font-size:14px!important;
+	  line-height:1.05!important;
+	  font-weight:950!important;
+	}
+	.gdPracticeEvidenceHead span{
+	  display:block!important;
+	  margin-top:3px!important;
+	  color:rgba(255,255,255,.56)!important;
+	  font-size:10px!important;
+	  line-height:1.2!important;
+	  font-weight:820!important;
+	}
+	.gdPracticeEvidenceHead b{
+	  min-width:34px!important;
+	  border-radius:999px!important;
+	  padding:5px 8px!important;
+	  background:rgba(255,255,255,.055)!important;
+	  border:1px solid rgba(255,255,255,.10)!important;
+	  color:rgba(255,255,255,.78)!important;
+	  font-size:11px!important;
+	  line-height:1!important;
+	  text-align:center!important;
+	}
+		.gdPracticeEvidenceTabs{
+		  display:flex!important;
+		  gap:6px!important;
+		  overflow:auto!important;
+		  padding-bottom:1px!important;
+		}
+		.gdPracticeEvidenceClubRows{
+		  display:grid!important;
+		  gap:0!important;
+		  margin-top:0!important;
+		  overflow:hidden!important;
+		  border-radius:13px!important;
+		  background:rgba(0,0,0,.14)!important;
+		  border:1px solid rgba(255,255,255,.075)!important;
+		}
+		.gdPracticeEvidenceClubRowsScrollable{
+		  max-height:240px!important;
+		  overflow:auto!important;
+		  overflow-x:hidden!important;
+		  padding-right:2px!important;
+		}
+		.gdPracticeEvidenceNoRows{
+		  padding:7px 8px!important;
+		  border-radius:10px!important;
+		  background:rgba(255,255,255,.04)!important;
+		  border:1px solid rgba(255,255,255,.07)!important;
+		  color:rgba(255,255,255,.48)!important;
+		  font-size:10px!important;
+		  line-height:1.25!important;
+		  font-weight:850!important;
+		}
+		.gdPracticeEvidenceTab{
+		  appearance:none!important;
+		  flex:0 0 auto!important;
+	  display:flex!important;
+	  align-items:center!important;
+	  gap:7px!important;
+	  min-height:30px!important;
+	  border-radius:999px!important;
+	  padding:6px 9px!important;
+	  border:1px solid rgba(255,255,255,.10)!important;
+	  background:rgba(255,255,255,.045)!important;
+	  color:rgba(255,255,255,.68)!important;
+	  cursor:pointer!important;
+	}
+	.gdPracticeEvidenceTab.active{
+	  color:#06100b!important;
+	  background:linear-gradient(180deg,#37f28d,#20bd69)!important;
+	  border-color:rgba(55,242,141,.58)!important;
+	}
+	.gdPracticeEvidenceTab span,
+	.gdPracticeEvidenceTab strong{
+	  font-size:10px!important;
+	  line-height:1!important;
+	  font-weight:950!important;
+	}
+	.gdPracticePlotMode{
+	  display:grid!important;
+	  grid-template-columns:auto auto minmax(0,1fr)!important;
+	  gap:6px!important;
+	  align-items:center!important;
+	  padding:7px!important;
+	  border-radius:12px!important;
+	  background:rgba(31,211,109,.045)!important;
+	  border:1px solid rgba(31,211,109,.12)!important;
+	}
+	.gdPracticePlotMode button{
+	  border:0!important;
+	  min-height:28px!important;
+	  border-radius:999px!important;
+	  padding:6px 9px!important;
+	  background:rgba(255,255,255,.065)!important;
+	  border:1px solid rgba(255,255,255,.10)!important;
+	  color:rgba(255,255,255,.72)!important;
+	  font-size:10px!important;
+	  line-height:1!important;
+	  font-weight:950!important;
+	}
+	.gdPracticePlotMode button.active,
+	.gdPracticePlotMode button[aria-pressed="true"]{
+	  background:linear-gradient(180deg,#37f28d,#20bd69)!important;
+	  border-color:rgba(55,242,141,.58)!important;
+	  color:#06100b!important;
+	}
+.gdPracticePlotMode span{
+	  min-width:0!important;
+	  color:rgba(255,255,255,.58)!important;
+	  font-size:10px!important;
+	  line-height:1.2!important;
+	  font-weight:850!important;
+	  text-align:right!important;
+	}
+
+	.gdPracticeProjectionControls{
+	  display:grid!important;
+	  grid-template-columns:1fr!important;
+	  gap:8px!important;
+	  align-items:stretch!important;
+	  padding:0!important;
+	  border-radius:0!important;
+	  background:transparent!important;
+	  border:0!important;
+	  box-shadow:none!important;
+	}
+
+	.gdPracticeActionDock{
+	  display:grid!important;
+	  grid-template-columns:minmax(150px,1fr) max-content!important;
+	  gap:8px!important;
+	  align-items:start!important;
+	}
+	.gdPracticePrimaryActions{
+	  display:grid!important;
+	  grid-template-columns:1fr!important;
+	  gap:7px!important;
+	  align-items:stretch!important;
+	  min-width:0!important;
+	}
+	.gdPracticeBagSuggestionSlot{
+	  justify-self:start!important;
+	  align-self:start!important;
+	  min-width:0!important;
+	}
+	.gdPracticeBubbleAction{
+	  min-height:40px!important;
+	  border-radius:12px!important;
+	  font-size:12px!important;
+	  line-height:1!important;
+	  font-weight:950!important;
+	  border:1px solid rgba(255,255,255,.11)!important;
+	  background:rgba(255,255,255,.065)!important;
+	  color:rgba(255,255,255,.74)!important;
+	}
+	.gdPracticeBubbleAction.generate.ready{
+	  color:#06100b!important;
+	  background:linear-gradient(180deg,#37f28d,#20bd69)!important;
+	  border-color:rgba(55,242,141,.58)!important;
+	}
+	.gdPracticeBubbleAction.generate.active,
+	.gdPracticeBubbleAction.adopt.adopted{
+	  color:#06100b!important;
+	  background:linear-gradient(180deg,#d7b06b,#a97932)!important;
+	  border-color:rgba(215,176,107,.58)!important;
+	}
+	.gdPracticeBubbleAction.adopt:not(:disabled){
+	  color:#06100b!important;
+	  background:linear-gradient(180deg,#37f28d,#20bd69)!important;
+	  border-color:rgba(55,242,141,.58)!important;
+	}
+	.gdPracticeBubbleAction:disabled{
+	  opacity:.45!important;
+	  cursor:not-allowed!important;
+	  filter:grayscale(.18)!important;
+	}
+		.gdPracticeBagSuggestionIcon{
+		  appearance:none!important;
+		  position:relative!important;
+	  justify-self:start!important;
+	  display:inline-grid!important;
+	  grid-template-columns:52px!important;
+	  grid-template-rows:52px auto!important;
+	  gap:7px!important;
+	  align-items:start!important;
+	  justify-items:start!important;
+	  width:max-content!important;
+	  min-height:52px!important;
+	  margin-top:0!important;
+	  border-radius:0!important;
+	  padding:0!important;
+	  background:transparent!important;
+	  border:0!important;
+		  color:#ffd287!important;
+		  box-shadow:none!important;
+		}
+		.gdPracticeProjectionControls button.gdPracticeBagSuggestionIcon{
+		  width:52px!important;
+		  min-width:52px!important;
+		  height:52px!important;
+		  min-height:52px!important;
+		  border-radius:0!important;
+		  padding:0!important;
+		  background:transparent!important;
+		  border:0!important;
+		  box-shadow:none!important;
+		  color:#ffd287!important;
+		}
+		.gdPracticeBagSuggestionIcon.active{
+		  background:transparent!important;
+		  border-color:transparent!important;
+	}
+	.gdPracticeBagSuggestionIcon.unseen{
+	  box-shadow:none!important;
+	}
+	.gdPracticeBagSuggestionIconFrame{
+	  display:grid!important;
+	  place-items:center!important;
+	  width:52px!important;
+	  height:52px!important;
+	  border-radius:8px!important;
+	  overflow:hidden!important;
+	  background:linear-gradient(180deg,rgba(22,34,26,.96),rgba(4,9,6,.98))!important;
+	  border:1px solid rgba(255,255,255,.12)!important;
+	  box-shadow:0 12px 24px rgba(0,0,0,.34),inset 0 1px 0 rgba(255,255,255,.08)!important;
+	}
+	.gdPracticeBagSuggestionIcon.unseen .gdPracticeBagSuggestionIconFrame{
+	  box-shadow:0 12px 24px rgba(0,0,0,.34),inset 0 1px 0 rgba(255,255,255,.08)!important;
+	}
+	.gdPracticeBagSuggestionIconFrame img{
+	  width:50px!important;
+	  height:50px!important;
+	  object-fit:contain!important;
+	  transform:translateY(3px)!important;
+	  filter:drop-shadow(0 10px 12px rgba(0,0,0,.38))!important;
+	}
+		.gdPracticeBagSuggestionNoticeRow{
+		  display:flex!important;
+		  justify-content:flex-end!important;
+		  align-items:center!important;
+		  min-height:24px!important;
+		  margin:5px 0 0!important;
+		  padding:0!important;
+		}
+		.gdPracticeBagSuggestionNotice{
+		  appearance:none!important;
+		  max-width:220px!important;
+		  overflow:hidden!important;
+		  text-overflow:ellipsis!important;
+		  white-space:nowrap!important;
+		  padding:6px 10px!important;
+		  border-radius:999px!important;
+		  background:rgba(0,0,0,.20)!important;
+		  border:1px solid rgba(215,176,107,.24)!important;
+		  color:#ffd287!important;
+		  font-size:10px!important;
+		  line-height:1!important;
+		  font-weight:950!important;
+		  text-align:right!important;
+		  box-shadow:none!important;
+		  cursor:pointer!important;
+		}
+		.gdPracticeBagSuggestionNotice::before{
+		  content:""!important;
+		  display:inline-block!important;
+		  width:18px!important;
+		  height:1px!important;
+		  margin:0 7px 3px 0!important;
+		  background:linear-gradient(90deg,transparent,rgba(215,176,107,.58))!important;
+		  vertical-align:middle!important;
+		}
+	.gdPracticeBagSuggestionPanel{
+	  display:grid!important;
+	  gap:8px!important;
+	  min-width:260px!important;
+	  max-width:min(420px,calc(100vw - 36px))!important;
+	  padding:10px!important;
+	  border-radius:13px!important;
+	  background:rgba(0,0,0,.20)!important;
+	  border:1px solid rgba(215,176,107,.22)!important;
+	  box-shadow:inset 0 1px 0 rgba(255,255,255,.04)!important;
+	}
+	.gdPracticeBagSuggestionHead{
+	  display:grid!important;
+	  grid-template-columns:max-content 28px!important;
+	  gap:8px!important;
+	  align-items:center!important;
+	  justify-content:space-between!important;
+	}
+	.gdPracticeBagSuggestionTitle{
+	  display:inline-flex!important;
+	  align-items:center!important;
+	  gap:7px!important;
+	  min-width:0!important;
+	}
+	.gdPracticeBagSuggestionTitle img{
+	  width:24px!important;
+	  height:24px!important;
+	  object-fit:contain!important;
+	  filter:drop-shadow(0 1px 1px rgba(0,0,0,.45))!important;
+	}
+	.gdPracticeBagSuggestionTitle span{
+	  min-width:0!important;
+	  color:#fff!important;
+	  font-size:12px!important;
+	  line-height:1!important;
+	  font-weight:950!important;
+	}
+	.gdPracticeBagSuggestionHead button{
+	  width:28px!important;
+	  height:28px!important;
+	  min-height:28px!important;
+	  padding:0!important;
+	  border-radius:9px!important;
+	}
+	.gdPracticeDistanceLink{
+	  display:grid!important;
+	  grid-template-columns:auto minmax(0,1fr)!important;
+	  gap:8px!important;
+	  align-items:center!important;
+	  padding:7px 8px!important;
+	  border-radius:10px!important;
+	  background:rgba(215,176,107,.10)!important;
+	  border:1px solid rgba(215,176,107,.18)!important;
+	}
+	.gdPracticeDistanceLink span{
+	  color:rgba(255,255,255,.56)!important;
+	  font-size:10px!important;
+	  font-weight:900!important;
+	}
+	.gdPracticeDistanceLink strong{
+	  color:#ffd287!important;
+	  font-size:12px!important;
+	  font-weight:950!important;
+	  text-align:right!important;
+	}
+	.gdPracticeDistanceLinkChoices{
+	  display:flex!important;
+	  flex-wrap:wrap!important;
+	  gap:6px!important;
+	}
+	.gdPracticeDistanceLinkChoices button{
+	  min-height:28px!important;
+	  border-radius:999px!important;
+	  padding:6px 9px!important;
+	  font-size:10px!important;
+	}
+	.gdPracticeDistanceLinkChoices button.active{
+	  color:#06100b!important;
+	  background:linear-gradient(180deg,#d7b06b,#a97932)!important;
+	  border-color:rgba(215,176,107,.58)!important;
+	}
+	.gdPracticeBagSuggestionGrid{
+	  display:grid!important;
+	  grid-template-columns:max-content max-content max-content max-content!important;
+	  justify-content:start!important;
+	  gap:3px 7px!important;
+	  align-items:center!important;
+	}
+	.gdPracticeBagSuggestionGrid>span{
+	  color:rgba(255,255,255,.48)!important;
+	  font-size:9px!important;
+	  font-weight:950!important;
+	  line-height:1!important;
+	  justify-self:end!important;
+	}
+	.gdPracticeBagSuggestionGrid>span:first-child{
+	  justify-self:start!important;
+	}
+	.gdPracticeBagSuggestionRow{
+	  display:contents!important;
+	}
+	.gdPracticeBagSuggestionRow strong,
+	.gdPracticeCurrentCell{
+	  min-width:0!important;
+	  width:max-content!important;
+	  padding:4px 6px!important;
+	  border-radius:6px!important;
+	  background:rgba(255,255,255,.045)!important;
+	  border:1px solid rgba(255,255,255,.055)!important;
+	  color:rgba(255,255,255,.82)!important;
+	  font-size:10px!important;
+	  line-height:1!important;
+	  font-weight:900!important;
+	}
+	.gdPracticeBagSuggestionRow strong{
+	  justify-self:start!important;
+	}
+	.gdPracticeBagSuggestionRow.link strong,
+	.gdPracticeBagSuggestionRow.link .gdPracticeCurrentCell{
+	  background:rgba(215,176,107,.10)!important;
+	  border-color:rgba(215,176,107,.16)!important;
+	}
+	.gdPracticeCurrentCell{
+	  text-align:right!important;
+	  justify-self:end!important;
+	}
+	.gdPracticeCurrentCell.readonly{
+	  background:rgba(255,255,255,.032)!important;
+	  border-color:rgba(255,255,255,.07)!important;
+	  color:rgba(255,255,255,.62)!important;
+	}
+	.gdPracticeCurrentCell.empty{
+	  background:rgba(0,0,0,.12)!important;
+	  border-color:rgba(255,255,255,.04)!important;
+	  color:rgba(255,255,255,.38)!important;
+	  font-style:italic!important;
+	}
+	.gdPracticeSuggestedSide,
+	.gdPracticeBagSuggestionRow b{
+	  min-width:0!important;
+	  width:max-content!important;
+	  padding:0 2px!important;
+	  background:transparent!important;
+	  border:0!important;
+	  border-radius:0!important;
+	  font-size:10px!important;
+	  line-height:1!important;
+	  font-weight:900!important;
+	  text-align:right!important;
+	  justify-self:end!important;
+	}
+	.gdPracticeSuggestedSide{
+	  color:#ffd287!important;
+	}
+	.gdPracticeBagSuggestionRow b{
+	  color:rgba(255,255,255,.46)!important;
+	}
+	.gdPracticeBagSuggestionRow input{
+	  box-sizing:border-box!important;
+	  width:54px!important;
+	  min-width:54px!important;
+	  height:25px!important;
+	  border-radius:7px!important;
+	  border:1px solid rgba(55,242,141,.42)!important;
+	  background:rgba(55,242,141,.075)!important;
+	  color:#fff!important;
+	  padding:0 6px!important;
+	  text-align:right!important;
+	  font-size:11px!important;
+	  font-weight:950!important;
+	  outline:none!important;
+	  box-shadow:inset 0 1px 0 rgba(255,255,255,.06)!important;
+	  justify-self:end!important;
+	}
+	.gdPracticeBagSuggestionRow input:focus{
+	  border-color:rgba(55,242,141,.74)!important;
+	  box-shadow:0 0 0 2px rgba(55,242,141,.14),inset 0 1px 0 rgba(255,255,255,.08)!important;
+	}
+	.gdPracticeBagSuggestionActions{
+	  display:flex!important;
+	  justify-content:flex-end!important;
+	  gap:7px!important;
+	  flex-wrap:wrap!important;
+	}
+	.gdPracticeBagSuggestionActions button{
+	  min-height:32px!important;
+	  border-radius:999px!important;
+	  padding:7px 10px!important;
+	  font-size:10px!important;
+	}
+	.gdPracticeBagSuggestionActions button:first-child{
+	  color:#06100b!important;
+	  background:linear-gradient(180deg,#37f28d,#20bd69)!important;
+	  border-color:rgba(55,242,141,.58)!important;
+	}
+	.gdPracticeSandboxControls{
+	  display:grid!important;
+	  gap:8px!important;
+	  margin-bottom:9px!important;
+	  padding:9px!important;
+	  border-radius:12px!important;
+	  background:rgba(255,255,255,.035)!important;
+	  border:1px dashed rgba(255,255,255,.14)!important;
+	}
+	.gdPracticeSandboxControls.compact{
+	  margin:8px 0 0!important;
+	  padding:8px!important;
+	  border-radius:10px!important;
+	  background:rgba(255,255,255,.028)!important;
+	}
+	.gdPracticeSandboxControls.compact>div:first-child{
+	  grid-template-columns:auto minmax(0,1fr)!important;
+	  align-items:center!important;
+	  gap:7px!important;
+	}
+	.gdPracticeSandboxControls>div:first-child{
+	  display:grid!important;
+	  gap:2px!important;
+	}
+	.gdPracticeSandboxControls strong{
+	  color:#fff!important;
+	  font-size:11px!important;
+	  line-height:1!important;
+	  font-weight:950!important;
+	}
+	.gdPracticeSandboxControls span{
+	  color:rgba(255,255,255,.52)!important;
+	  font-size:10px!important;
+	  line-height:1.2!important;
+	  font-weight:850!important;
+	}
+	.gdPracticeSandboxButtons{
+	  display:flex!important;
+	  flex-wrap:wrap!important;
+	  gap:6px!important;
+	}
+	.gdPracticeSandboxButtons button{
+	  min-height:28px!important;
+	  border-radius:999px!important;
+	  padding:6px 8px!important;
+	  background:rgba(255,255,255,.06)!important;
+	  border:1px solid rgba(255,255,255,.10)!important;
+	  color:rgba(255,255,255,.74)!important;
+	  font-size:10px!important;
+	  font-weight:900!important;
+	}
+	.gdPracticeSandboxControls.compact .gdPracticeSandboxButtons{
+	  gap:5px!important;
+	}
+	.gdPracticeSandboxControls.compact .gdPracticeSandboxButtons button{
+	  min-height:25px!important;
+	  padding:5px 7px!important;
+	  font-size:9px!important;
+	}
+	.gdPracticeNativeLibrary{
+	  display:grid!important;
+	  gap:10px!important;
+	}
+	.gdPracticeNativeClub{
+	  display:grid!important;
+	  gap:0!important;
+	  overflow:visible!important;
+	  border-radius:0!important;
+	  background:transparent!important;
+	  border:0!important;
+	  border-bottom:1px solid rgba(255,255,255,.07)!important;
+	}
+	.gdPracticeNativeClub:last-child{border-bottom:0!important}
+	.gdPracticeNativeClubHead{
+	  appearance:none!important;
+	  width:100%!important;
+	  border:0!important;
+	  display:grid!important;
+	  grid-template-columns:minmax(0,1fr) auto!important;
+	  gap:8px!important;
+	  align-items:center!important;
+	  padding:10px 11px!important;
+	  background:transparent!important;
+	  text-align:left!important;
+	  cursor:pointer!important;
+	}
+	.gdPracticeNativeClub.open .gdPracticeNativeClubHead{background:rgba(255,255,255,.032)!important}
+	.gdPracticeNativeClubHead span{
+	  display:block!important;
+	  color:rgba(255,255,255,.58)!important;
+	  font-size:10px!important;
+	  line-height:1!important;
+	  font-weight:950!important;
+	}
+	.gdPracticeNativeClubHead strong{
+	  display:block!important;
+	  margin-top:2px!important;
+	  color:#fff!important;
+	  font-size:13px!important;
+	  line-height:1!important;
+	  font-weight:950!important;
+	}
+	.gdPracticeNativeClubHead small{
+	  color:rgba(255,255,255,.54)!important;
+	  font-size:10px!important;
+	  font-weight:850!important;
+	}
+	.gdPracticeNativeClubBody{
+	  display:none!important;
+	  gap:0!important;
+	  padding:0 11px 10px!important;
+	}
+	.gdPracticeNativeClub.open .gdPracticeNativeClubBody{display:grid!important}
+	.gdPracticeNativeUpload{
+	  border-radius:0!important;
+	  background:transparent!important;
+	  border:0!important;
+	  border-top:1px solid rgba(255,255,255,.055)!important;
+	  overflow:visible!important;
+	}
+	.gdPracticeNativeUpload summary{
+	  display:grid!important;
+	  grid-template-columns:minmax(0,1fr) auto!important;
+	  gap:8px!important;
+	  align-items:center!important;
+	  padding:8px 0!important;
+	  cursor:pointer!important;
+	  list-style:none!important;
+	}
+	.gdPracticeNativeUpload summary::-webkit-details-marker{display:none!important}
+	.gdPracticeNativeUpload summary span{
+	  min-width:0!important;
+	  overflow:hidden!important;
+	  text-overflow:ellipsis!important;
+	  white-space:nowrap!important;
+	  color:rgba(255,255,255,.78)!important;
+	  font-size:11px!important;
+	  font-weight:900!important;
+	}
+	.gdPracticeNativeUpload summary strong{
+	  color:rgba(255,255,255,.54)!important;
+	  font-size:10px!important;
+	  font-weight:900!important;
+	}
+	.gdPracticeNativeShots{
+	  display:grid!important;
+	  gap:0!important;
+	  padding:0 0 8px!important;
+	}
+	.gdPracticeNativeUpload:not([open]) .gdPracticeNativeShots{display:none!important}
+	.gdPracticeNativeTableHead,
+	.gdPracticeNativeShot{
+	  display:grid!important;
+	  grid-template-columns:34px minmax(58px,.8fr) minmax(64px,1fr) minmax(64px,1fr)!important;
+	  gap:5px!important;
+	  align-items:center!important;
+	}
+	.gdPracticeNativeTableHead span{
+	  color:rgba(255,255,255,.42)!important;
+	  font-size:9px!important;
+	  line-height:1!important;
+	  font-weight:950!important;
+	}
+	.gdPracticeNativeShot{
+	  min-height:24px!important;
+	  border-radius:0!important;
+	  background:transparent!important;
+	  border-top:1px solid rgba(255,255,255,.04)!important;
+	  padding:4px 0!important;
+	}
+	.gdPracticeNativeShot.excluded{
+	  opacity:.52!important;
+	}
+	.gdPracticeNativeShot.counted{
+	  background:rgba(55,242,141,.035)!important;
+	}
+	.gdPracticeNativeShot span,
+	.gdPracticeNativeShot strong{
+	  min-width:0!important;
+	  color:rgba(255,255,255,.78)!important;
+	  font-size:11px!important;
+	  line-height:1!important;
+	  font-weight:900!important;
+	  overflow:hidden!important;
+	  text-overflow:ellipsis!important;
+	  white-space:nowrap!important;
+	}
+	.gdPracticeNativeShot strong{
+	  color:#fff!important;
+	}
+	@media(max-width:520px){
+	  .gdPracticeActionDock{
+	    grid-template-columns:1fr!important;
+	  }
+	  .gdPracticePrimaryActions{
+	    grid-template-columns:1fr!important;
+	  }
+	  .gdPracticeBagSuggestionSlot{
+	    justify-self:start!important;
+	  }
+	  .gdPracticeBagSuggestionGrid{
+	    grid-template-columns:max-content max-content max-content max-content!important;
+	    gap:3px 5px!important;
+	  }
+	  .gdPracticeBagSuggestionNotice{
+	    max-width:190px!important;
+	  }
+	  .gdPracticeNativeTableHead,
+	  .gdPracticeNativeShot{
+	    grid-template-columns:28px minmax(50px,.8fr) minmax(56px,1fr) minmax(56px,1fr)!important;
+	  }
+	}
 </style>
 <style id="gdMappingModeFinalRailCssV1">
 body.gdFullMappingMode #flagTool,
