@@ -90,6 +90,10 @@
     return item;
   }
 
+  function createId(prefix) {
+    return prefix + '-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+  }
+
   function itemPlayerId(item) {
     return String(item && (item.playerId || item.profileId || item.playerProfileId) || '').trim();
   }
@@ -97,6 +101,10 @@
   function itemMatchesScope(item, scope) {
     if (!scope || !scope.playerId) return true;
     return itemPlayerId(item) === scope.playerId;
+  }
+
+  function itemIsActive(item) {
+    return String(item && item.status || 'active').toLowerCase() !== 'deleted';
   }
 
   function ensureStoreOwnership(store) {
@@ -108,10 +116,10 @@
     var store = ensureStoreOwnership(sourceStore || readStore());
     return {
       version: store.version || 1,
-      sessions: (store.sessions || []).filter(function (session) { return itemMatchesScope(session, scope); }),
-      captures: (store.captures || []).filter(function (capture) { return itemMatchesScope(capture, scope); }),
-      shots: (store.shots || []).filter(function (shot) { return itemMatchesScope(shot, scope); }),
-      rejects: (store.rejects || []).filter(function (shot) { return itemMatchesScope(shot, scope); }),
+      sessions: (store.sessions || []).filter(function (session) { return itemMatchesScope(session, scope) && itemIsActive(session); }),
+      captures: (store.captures || []).filter(function (capture) { return itemMatchesScope(capture, scope) && itemIsActive(capture); }),
+      shots: (store.shots || []).filter(function (shot) { return itemMatchesScope(shot, scope) && itemIsActive(shot); }),
+      rejects: (store.rejects || []).filter(function (shot) { return itemMatchesScope(shot, scope) && itemIsActive(shot); }),
       updatedAt: store.updatedAt
     };
   }
@@ -150,10 +158,6 @@
       console.warn('[GolfDaddy] launch monitor data save failed', error);
     }
     return store;
-  }
-
-  function createId(prefix) {
-    return prefix + '-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
   }
 
   function asNumber(value, fallback) {
@@ -460,24 +464,43 @@
     payload = payload || {};
     var store = readStore();
     var scope = resolvePlayerScope(payload);
+    var importBatchId = String(payload.importBatchId || payload.importId || createId('practice-import')).trim();
     var session = applyPlayerScope({
       sessionId: payload.sessionId || createId('lm-session'),
+      importBatchId: importBatchId,
+      importId: importBatchId,
       label: payload.label || 'Launch monitor capture',
       sourceIdentity: payload.sourceIdentity || { providerGuess: 'unknown', confidence: 0 },
       startedAt: payload.startedAt || payload.timestamp || new Date().toISOString(),
-      importedAt: new Date().toISOString()
+      importedAt: new Date().toISOString(),
+      status: 'active',
+      deletedAt: '',
+      deletedBy: ''
     }, scope);
     var capture = applyPlayerScope({
       captureId: payload.captureId || createId('lm-capture'),
       sessionId: session.sessionId,
+      importBatchId: importBatchId,
+      importId: importBatchId,
       timestamp: payload.timestamp || session.startedAt,
       inputType: payload.inputType || 'unknown',
       displayLane: captureDisplayLane(payload.inputType),
       rawTextBlocks: Array.isArray(payload.rawTextBlocks) ? payload.rawTextBlocks.slice() : [],
-      sourceIdentity: payload.sourceIdentity || session.sourceIdentity
+      sourceIdentity: payload.sourceIdentity || session.sourceIdentity,
+      status: 'active',
+      deletedAt: '',
+      deletedBy: ''
     }, scope);
     var groups = Array.isArray(payload.clubGroups) ? payload.clubGroups : [];
-    var shots = groups.map(function (group) { return normalizeShot(group, session, capture); });
+    var shots = groups.map(function (group) {
+      return Object.assign(normalizeShot(group, session, capture), {
+        importBatchId: importBatchId,
+        importId: importBatchId,
+        status: 'active',
+        deletedAt: '',
+        deletedBy: ''
+      });
+    });
 
     store.sessions.push(session);
     store.captures.push(capture);
@@ -559,6 +582,84 @@
     compactEmptyPracticeUploads(store, scope);
     saveStore(store);
     return { deletedShots: deletedShots, deletedCaptures: deletedCaptures, store: store };
+  }
+
+  function importIdSet(values) {
+    return (Array.isArray(values) ? values : [values]).reduce(function (set, value) {
+      var id = String(value || '').trim();
+      if (id) set[id] = true;
+      return set;
+    }, {});
+  }
+
+  function recordImportId(item) {
+    return String(item && (item.importBatchId || item.importId || item.captureId || item.sessionId) || '').trim();
+  }
+
+  function softDeleteRecords(records, ids, scope, meta) {
+    var deleted = 0;
+    var next = (records || []).map(function (record) {
+      var id = recordImportId(record);
+      if (!id || !ids[id] || !itemMatchesScope(record, scope)) return record;
+      if (itemIsActive(record)) deleted += 1;
+      return Object.assign({}, record, {
+        status: 'deleted',
+        deletedAt: meta.deletedAt,
+        deletedBy: meta.deletedBy
+      });
+    });
+    return { records: next, deleted: deleted };
+  }
+
+  function deleteSelectedPracticeImports(importIds, opts) {
+    opts = opts || {};
+    var ids = importIdSet(importIds);
+    var scope = activePlayerScope();
+    var store = readStore();
+    var meta = {
+      deletedAt: opts.deletedAt || new Date().toISOString(),
+      deletedBy: String(opts.deletedBy || scope.accountId || scope.playerId || 'local').trim()
+    };
+    var sessions = softDeleteRecords(store.sessions, ids, scope, meta);
+    var captures = softDeleteRecords(store.captures, ids, scope, meta);
+    var shots = softDeleteRecords(store.shots, ids, scope, meta);
+    var rejects = softDeleteRecords(store.rejects, ids, scope, meta);
+    store.sessions = sessions.records;
+    store.captures = captures.records;
+    store.shots = shots.records;
+    store.rejects = rejects.records;
+    saveStore(store);
+    return {
+      deletedImports: Math.max(sessions.deleted, captures.deleted),
+      deletedSessions: sessions.deleted,
+      deletedCaptures: captures.deleted,
+      deletedShots: shots.deleted + rejects.deleted,
+      store: store
+    };
+  }
+
+  function deletePracticeImport(importId, opts) {
+    return deleteSelectedPracticeImports([importId], opts);
+  }
+
+  function clearPracticeLibraryForPlayer(playerId, opts) {
+    playerId = String(playerId || activePlayerScope().playerId || '').trim();
+    if (!playerId) return { deletedImports: 0, deletedSessions: 0, deletedCaptures: 0, deletedShots: 0, store: readStore(), error: 'missing_player_id' };
+    var store = readStore();
+    var ids = {};
+    (store.captures || []).forEach(function (capture) {
+      if (itemMatchesScope(capture, { playerId: playerId }) && itemIsActive(capture)) {
+        var id = recordImportId(capture);
+        if (id) ids[id] = true;
+      }
+    });
+    (store.sessions || []).forEach(function (session) {
+      if (itemMatchesScope(session, { playerId: playerId }) && itemIsActive(session)) {
+        var id = recordImportId(session);
+        if (id) ids[id] = true;
+      }
+    });
+    return deleteSelectedPracticeImports(Object.keys(ids), opts);
   }
 
   function exclusionReason(shot, cfg) {
@@ -984,6 +1085,9 @@
     clearStore: clearStore,
     deleteShots: deleteShots,
     deleteCaptures: deleteCaptures,
+    deletePracticeImport: deletePracticeImport,
+    deleteSelectedPracticeImports: deleteSelectedPracticeImports,
+    clearPracticeLibraryForPlayer: clearPracticeLibraryForPlayer,
     activePlayerScope: activePlayerScope,
     settings: settings,
     importCapture: importCapture,

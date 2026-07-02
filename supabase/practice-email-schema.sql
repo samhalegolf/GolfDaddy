@@ -10,9 +10,11 @@ create table if not exists public.practice_email_intake_events (
   sender_email text,
   subject text,
   provider_message_id text,
-  status text not null default 'received' check (status in ('received', 'staged', 'needs_review', 'pending_photo', 'unsupported', 'failed')),
+  status text not null default 'received' check (status in ('received', 'staged', 'needs_review', 'pending_photo', 'unsupported', 'failed', 'deleted')),
   routing_json jsonb not null default '{}'::jsonb,
   payload_json jsonb not null default '{}'::jsonb,
+  deleted_at timestamptz,
+  deleted_by text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -41,8 +43,10 @@ create table if not exists public.practice_import_batches (
   row_count integer not null default 0,
   valid_count integer not null default 0,
   invalid_count integer not null default 0,
-  status text not null default 'staged' check (status in ('staged', 'needs_review', 'imported', 'rejected')),
+  status text not null default 'staged' check (status in ('active', 'staged', 'needs_review', 'imported', 'rejected', 'deleted')),
   metadata jsonb not null default '{}'::jsonb,
+  deleted_at timestamptz,
+  deleted_by text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -71,9 +75,11 @@ create table if not exists public.practice_native_shots (
   unknown_fields_json jsonb not null default '{}'::jsonb,
   warnings_json jsonb not null default '[]'::jsonb,
   errors_json jsonb not null default '[]'::jsonb,
-  status text not null default 'ready_for_gate' check (status in ('ready_for_gate', 'native_valid', 'native_invalid', 'rejected', 'imported')),
+  status text not null default 'ready_for_gate' check (status in ('active', 'ready_for_gate', 'native_valid', 'native_invalid', 'rejected', 'imported', 'deleted')),
   source_type text,
   schema_version integer not null default 1,
+  deleted_at timestamptz,
+  deleted_by text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -83,6 +89,45 @@ on public.practice_native_shots (import_batch_id, shot_number);
 
 create index if not exists practice_native_shots_player_key_idx
 on public.practice_native_shots (player_key, created_at desc);
+
+create index if not exists practice_import_batches_player_status_idx
+on public.practice_import_batches (player_key, status, created_at desc);
+
+create index if not exists practice_native_shots_import_status_idx
+on public.practice_native_shots (import_batch_id, status);
+
+alter table public.practice_email_intake_events
+add column if not exists deleted_at timestamptz,
+add column if not exists deleted_by text;
+
+alter table public.practice_import_batches
+add column if not exists deleted_at timestamptz,
+add column if not exists deleted_by text;
+
+alter table public.practice_native_shots
+add column if not exists deleted_at timestamptz,
+add column if not exists deleted_by text;
+
+alter table public.practice_email_intake_events
+drop constraint if exists practice_email_intake_events_status_check;
+
+alter table public.practice_email_intake_events
+add constraint practice_email_intake_events_status_check
+check (status in ('received', 'staged', 'needs_review', 'pending_photo', 'unsupported', 'failed', 'deleted'));
+
+alter table public.practice_import_batches
+drop constraint if exists practice_import_batches_status_check;
+
+alter table public.practice_import_batches
+add constraint practice_import_batches_status_check
+check (status in ('active', 'staged', 'needs_review', 'imported', 'rejected', 'deleted'));
+
+alter table public.practice_native_shots
+drop constraint if exists practice_native_shots_status_check;
+
+alter table public.practice_native_shots
+add constraint practice_native_shots_status_check
+check (status in ('active', 'ready_for_gate', 'native_valid', 'native_invalid', 'rejected', 'imported', 'deleted'));
 
 alter table public.practice_email_intake_events enable row level security;
 alter table public.practice_import_batches enable row level security;
