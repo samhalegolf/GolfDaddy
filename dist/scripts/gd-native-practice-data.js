@@ -661,6 +661,79 @@
     return shots;
   }
 
+  function idSet(values) {
+    return (Array.isArray(values) ? values : [values]).reduce(function (set, value) {
+      var id = cleanString(value);
+      if (id) set[id] = true;
+      return set;
+    }, {});
+  }
+
+  function compactNativePracticeUploads(store) {
+    var liveSessions = {};
+    var liveBatches = {};
+    (store.shots || []).forEach(function (shot) {
+      if (shot && shot.sessionId) liveSessions[shot.sessionId] = true;
+      if (shot && shot.importBatchId) liveBatches[shot.importBatchId] = true;
+    });
+    store.sessions = (store.sessions || []).filter(function (session) {
+      return !(session && session.sessionId) || !!liveSessions[session.sessionId];
+    });
+    store.importBatches = (store.importBatches || []).filter(function (batch) {
+      return !(batch && batch.importBatchId) || !!liveBatches[batch.importBatchId];
+    });
+    return store;
+  }
+
+  function deleteNativePracticeShots(shotIds) {
+    var ids = idSet(shotIds);
+    var store = readStore();
+    var beforeSessions = (store.sessions || []).length;
+    var beforeBatches = (store.importBatches || []).length;
+    var deletedShots = 0;
+    store.shots = (store.shots || []).filter(function (shot) {
+      var remove = !!(shot && ids[shot.shotId]);
+      if (remove) deletedShots += 1;
+      return !remove;
+    });
+    compactNativePracticeUploads(store);
+    writeStore(store);
+    return {
+      deletedShots: deletedShots,
+      deletedSessions: beforeSessions - (store.sessions || []).length,
+      deletedBatches: beforeBatches - (store.importBatches || []).length,
+      store: store
+    };
+  }
+
+  function deleteNativePracticeUpload(criteria) {
+    criteria = criteria || {};
+    var batchIds = idSet(criteria.importBatchId || criteria.importBatchIds || []);
+    var sessionIds = idSet(criteria.sessionId || criteria.sessionIds || []);
+    var shotIds = idSet(criteria.shotId || criteria.shotIds || []);
+    var store = readStore();
+    var beforeSessions = (store.sessions || []).length;
+    var beforeBatches = (store.importBatches || []).length;
+    var deletedShots = 0;
+    store.shots = (store.shots || []).filter(function (shot) {
+      var remove = !!(shot && (
+        shotIds[shot.shotId] ||
+        batchIds[shot.importBatchId] ||
+        sessionIds[shot.sessionId]
+      ));
+      if (remove) deletedShots += 1;
+      return !remove;
+    });
+    compactNativePracticeUploads(store);
+    writeStore(store);
+    return {
+      deletedShots: deletedShots,
+      deletedSessions: beforeSessions - (store.sessions || []).length,
+      deletedBatches: beforeBatches - (store.importBatches || []).length,
+      store: store
+    };
+  }
+
   function buildPracticeGateInput(sessionId, opts) {
     opts = opts || {};
     var rows = loadNativePracticeShots({ sessionId: sessionId || '' }).filter(function (shot) {
@@ -744,6 +817,8 @@
     createPracticeImportBatch: createPracticeImportBatch,
     saveNativePracticeShots: saveNativePracticeShots,
     loadNativePracticeShots: loadNativePracticeShots,
+    deleteNativePracticeShots: deleteNativePracticeShots,
+    deleteNativePracticeUpload: deleteNativePracticeUpload,
     buildPracticeGateInput: buildPracticeGateInput,
     clearNativePracticeData: clearNativePracticeData
   };
