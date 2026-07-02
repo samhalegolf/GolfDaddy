@@ -24632,14 +24632,17 @@ function gdShotChartTicksSvg(plot){
     return `<line x1="${x.toFixed(1)}" y1="${plot.plotTop}" x2="${x.toFixed(1)}" y2="${plot.plotBottom}" stroke="rgba(255,255,255,${opacity})" stroke-width="1"/><line x1="${x.toFixed(1)}" y1="${plot.plotBottom}" x2="${x.toFixed(1)}" y2="${plot.plotBottom+4}" stroke="rgba(238,245,242,.24)" stroke-width="1"/><text x="${x.toFixed(1)}" y="${plot.plotBottom+18}" fill="rgba(238,245,242,.58)" font-size="9" font-weight="850" text-anchor="${anchor}">${Math.round(value)}m</text>`;
   }).join("");
 }
-function gdShotChartOfflineGridSvg(plot){
+function gdShotChartYForLateral(plot,lateral){
   const half=(plot.plotBottom-plot.plotTop)/2;
+  return plot.plotMidY-gdShotChartClamp((Number(lateral)||0)/Math.max(1,plot.lateralMax),-1,1)*half;
+}
+function gdShotChartOfflineGridSvg(plot){
   const step=Math.max(1,Number(plot.lateralStep)||gdShotChartLateralStep(plot.lateralMax));
   const maxStep=Math.floor((Number(plot.lateralMax)||0)/step)*step;
   const rows=[];
   for(let metres=step;metres<=maxStep;metres+=step){
     [-1,1].forEach(direction=>{
-      const y=plot.plotMidY+direction*(metres/Math.max(1,plot.lateralMax))*half;
+      const y=gdShotChartYForLateral(plot,direction*metres);
       if(y<=plot.plotTop+2||y>=plot.plotBottom-2)return;
       const major=metres%(step*2)===0;
       const label=direction<0?"L":"R";
@@ -24682,7 +24685,7 @@ function gdShotChartPoint(plot,distance,lateral,index,hasLateral=true){
   const half=(plot.plotBottom-plot.plotTop)/2;
   const y=hasLateral===false
     ? plot.plotMidY+Math.min(34,half*.48)+jitter
-    : plot.plotMidY+gdShotChartClamp((Number(lateral)||0)/plot.lateralMax,-1,1)*half+(Math.abs(Number(lateral)||0)<.25?jitter:0);
+    : gdShotChartYForLateral(plot,lateral)+(Math.abs(Number(lateral)||0)<.25?jitter:0);
   return{x,y,clipped:actual>plot.maxDistance};
 }
 function gdShotChartSourceShape(source){
@@ -24770,7 +24773,7 @@ function gdShotChartFitOvalsSvg(plot,fits,rows,opts={}){
       offsetDeg:offset
     });
     const xForDistance=distance=>plot.plotLeft+((distance-plot.minDistance)/plot.distanceRange)*(plot.plotRight-plot.plotLeft);
-    const yForLateral=value=>plot.plotMidY+gdShotBubbleOverlayClamp(value/plot.lateralMax,-1,1)*((plot.plotBottom-plot.plotTop)/2);
+    const yForLateral=value=>gdShotChartYForLateral(plot,value);
     const path=gdShotBubbleOverlayBubblePath(simulatedBubble,plot,xForDistance,yForLateral);
     if(!path)return "";
     const colour=opts.colour||opts.color||(source==="practice"?"#37f28d":"#d7b06b");
@@ -25178,6 +25181,12 @@ function gdClampBubbleDistanceToBagRoof(bubble){
   }
   return next;
 }
+function gdShotBubbleGpsLateralForOffset(offsetDeg,distanceM){
+  const offset=Number(offsetDeg);
+  const distance=Number(distanceM);
+  if(!Number.isFinite(offset)||!Number.isFinite(distance)||distance<=0)return 0;
+  return Math.tan(offset*Math.PI/180)*distance;
+}
 
 function gdGeneratedShotBubbleForClub(club,baseDistance,offsetDeg){
   const payload=gdShotBubblePayloadForClub(club,baseDistance,offsetDeg);
@@ -25295,7 +25304,14 @@ function gdShotBubbleOverlayBubbleParts(rows,offsetDeg){
     const distance=Number(row?.actualDistanceM);
     if(!Number.isFinite(distance)||distance<=0)return null;
     const bubble=gdGeneratedShotBubbleForClub(row.club,distance,offsetDeg);
-    return bubble&&Number.isFinite(Number(bubble.baseDistanceM))?gdShotBubbleNormaliseDrawable(bubble,row,offsetDeg):null;
+    if(!bubble||!Number.isFinite(Number(bubble.baseDistanceM)))return null;
+    const explicitLateral=Number(row?.centerLateralM);
+    const graphLateral=Number.isFinite(explicitLateral)?explicitLateral:gdShotBubbleGpsLateralForOffset(offsetDeg,distance);
+    const graphBubble=Object.assign({},bubble,{
+      centerLateralM:graphLateral,
+      aimOffsetM:graphLateral
+    });
+    return gdShotBubbleNormaliseDrawable(graphBubble,row,offsetDeg);
   }).filter(Boolean);
 }
 function gdShotBubbleOverlayLateralExtent(bubble){
@@ -25371,7 +25387,7 @@ function gdShotBubbleOverlayLayerMarkup(rows,plot,view,opts={}){
   const bubbles=gdShotBubbleOverlayBubbleParts(bubbleRows,offsetDeg);
   if(!bubbles.length)return "";
   const xForDistance=distance=>plot.plotLeft+((distance-plot.minDistance)/plot.distanceRange)*(plot.plotRight-plot.plotLeft);
-  const yForLateral=lateral=>plot.plotMidY+gdShotBubbleOverlayClamp(lateral/plot.lateralMax,-1,1)*((plot.plotBottom-plot.plotTop)/2);
+  const yForLateral=lateral=>gdShotChartYForLateral(plot,lateral);
   const lineEndDistance=Math.max(...bubbles.map(bubble=>Number(bubble.centerDistanceM||bubble.baseDistanceM)).filter(Number.isFinite),Number(plot.maxDistance)||0);
   const lineEnd=Math.min(Number(plot.maxDistance)||lineEndDistance,lineEndDistance);
   const hubLine=view==="compare"?`<line class="gdOffsetHubOverlayLine" data-source="gps-target-line" x1="${plot.plotLeft.toFixed(1)}" y1="${plot.plotMidY.toFixed(1)}" x2="${xForDistance(lineEnd).toFixed(1)}" y2="${plot.plotMidY.toFixed(1)}" stroke="rgba(215,176,107,.58)" stroke-width="1.15" stroke-dasharray="7 6" stroke-linecap="round"/>`:"";
@@ -35057,24 +35073,64 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	    const angleMax=gdShotChartNiceMax(Math.min(Math.max(angleBase*1.3+.4,2.5),Number(opts.maxAngleDeg)||12),4,2.5);
 	    return {chartWidth,chartHeight,plotLeft,plotRight,plotTop,plotBottom,plotMidX,plotMidY,depthMax,angleMax,depthRange:Math.max(1,depthMax),angleRange:Math.max(.5,angleMax)};
 	  }
+	  function gdPracticeGraphInternalGeometry(plot){
+	    if(!plot)return null;
+	    const halfWidth=(plot.plotRight-plot.plotLeft)/2;
+	    const halfHeight=(plot.plotBottom-plot.plotTop)/2;
+	    const originX=Number(plot.plotLeft)||38;
+	    const originY=Number(plot.plotMidY)||130;
+	    const targetX=Number(plot.plotMidX)||((Number(plot.plotLeft)||0)+(Number(plot.plotRight)||0))/2||240;
+	    const targetY=Number(plot.plotBottom)||224;
+	    return {
+	      originX,
+	      originY,
+	      xForDepth(depth){return plot.plotMidX+gdShotChartClamp((Number(depth)||0)/plot.depthRange,-1,1)*halfWidth;},
+	      yForAngle(angle){return plot.plotMidY-gdShotChartClamp((Number(angle)||0)/plot.angleRange,-1,1)*halfHeight;},
+	      yForUnknown(jitter=0){return plot.plotMidY+(Number(jitter)||0);},
+	      originBottomTransform(){
+	        const e=targetX+originY;
+	        const f=targetY+originX;
+	        return `matrix(0 -1 -1 0 ${e.toFixed(1)} ${f.toFixed(1)})`;
+	      }
+	    };
+	  }
 	  function gdPracticeNormalisedPlotPoint(plot,row,index=0){
 	    if(!plot||!row)return null;
 	    const depth=Number(row.normalisedDepthM);
 	    const angle=Number(row.normalizedDeg);
 	    if(!Number.isFinite(depth)||!Number.isFinite(angle))return null;
-	    const halfWidth=(plot.plotRight-plot.plotLeft)/2;
-	    const halfHeight=(plot.plotBottom-plot.plotTop)/2;
+	    const geo=gdPracticeGraphInternalGeometry(plot);
+	    if(!geo)return null;
 	    const jitter=((Number(index)||0)%5-2)*.85;
-	    const x=plot.plotMidX+gdShotChartClamp(depth/plot.depthRange,-1,1)*halfWidth;
+	    const x=geo.xForDepth(depth);
 	    const y=row.hasLateral===false
-	      ?plot.plotMidY+jitter
-	      :plot.plotMidY+gdShotChartClamp(angle/plot.angleRange,-1,1)*halfHeight+(Math.abs(angle)<.08?jitter:0);
+	      ?geo.yForUnknown(jitter)
+	      :geo.yForAngle(angle)+(Math.abs(angle)<.08?jitter:0);
 	    return {x,y,clipped:Math.abs(depth)>plot.depthRange||Math.abs(angle)>plot.angleRange};
 	  }
-	  function gdPracticeNormalisedBackdropSvg(plot,title){
+  const GD_PRACTICE_GRAPH_VIEW_KEY="gd_practice_graph_origin_bottom";
+  function gdPracticeGraphOriginBottom(){
+    return safe(()=>localStorage.getItem(GD_PRACTICE_GRAPH_VIEW_KEY)==="1",false);
+  }
+  function gdPracticeGraphOriginBottomTransform(plot){
+    if(!plot)return "";
+    const geo=gdPracticeGraphInternalGeometry(plot);
+    return geo?geo.originBottomTransform():"";
+  }
+  function gdPracticeToggleGraphOrigin(){
+    const next=!gdPracticeGraphOriginBottom();
+    safe(()=>localStorage.setItem(GD_PRACTICE_GRAPH_VIEW_KEY,next?"1":"0"),null);
+    renderPracticeData(true);
+    return false;
+  }
+  function gdPracticeGraphRotateControlHTML(active=false){
+    return `<button type="button" class="gdPracticeGraphRotateControl ${active?"active":""}" aria-pressed="${active?"true":"false"}" title="${active?"Show side-on graph":"Show shot origin at bottom"}" onclick="return gdPracticeToggleGraphOrigin()"><span aria-hidden="true">&#8635;</span></button>`;
+  }
+	  function gdPracticeNormalisedBackdropSvg(plot,title,opts={}){
 	    const width=Number(plot.chartWidth)||480;
 	    const height=Number(plot.chartHeight)||260;
 	    const titleText=String(title||"").trim();
+	    const hideText=opts.hideText===true;
 	    const subtitleY=titleText?48:30;
 	    const grid=[
 	      {x:plot.plotLeft+(plot.plotRight-plot.plotLeft)*.25},
@@ -35086,8 +35142,8 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	      :`<line x1="${plot.plotLeft}" y1="${item.y.toFixed(1)}" x2="${plot.plotRight}" y2="${item.y.toFixed(1)}" stroke="rgba(255,255,255,.055)" stroke-width="1"/>`
 	    ).join("");
 	    return `<rect width="${width}" height="${height}" fill="rgba(0,0,0,.08)"/>
-	      ${titleText?`<text x="24" y="30" fill="rgba(255,255,255,.82)" font-size="14" font-weight="950">${gdStatsSvgText(titleText)}</text>`:""}
-	      <text x="24" y="${subtitleY}" fill="rgba(255,255,255,.46)" font-size="9" font-weight="850">Depth against expected carry · lateral angle</text>
+	      ${titleText&&!hideText?`<text x="24" y="30" fill="rgba(255,255,255,.82)" font-size="14" font-weight="950">${gdStatsSvgText(titleText)}</text>`:""}
+	      ${hideText?"":`<text x="24" y="${subtitleY}" fill="rgba(255,255,255,.46)" font-size="9" font-weight="850">Depth against expected carry · lateral angle</text>`}
 	      <rect x="${(plot.plotLeft-8).toFixed(1)}" y="${(plot.plotTop-8).toFixed(1)}" width="${(plot.plotRight-plot.plotLeft+16).toFixed(1)}" height="${(plot.plotBottom-plot.plotTop+16).toFixed(1)}" rx="8" fill="rgba(255,255,255,.012)" stroke="rgba(255,255,255,.045)" stroke-width="1"/>
 	      ${grid}
 	      <line x1="${plot.plotMidX.toFixed(1)}" y1="${plot.plotTop}" x2="${plot.plotMidX.toFixed(1)}" y2="${plot.plotBottom}" stroke="rgba(255,255,255,.18)" stroke-width="1" stroke-dasharray="4 8" stroke-linecap="round"/>
@@ -35478,7 +35534,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	        : Number(generated.widthM)||Math.max(10,baseDistance*.14))*previewScale;
 	    const depthM=(Number.isFinite(visualDepth)&&visualDepth>0?visualDepth:Number(generated.depthM)||Math.max(14,baseDistance*.18))*previewScale;
 	    const standardAxes=gdStandardDispersionAxes(club,widthM/2,depthM/2);
-	    const centerLateral=Math.tan((Number(offset)||0)*Math.PI/180)*baseDistance;
+	    const centerLateral=gdShotBubbleGpsLateralForOffset(offset,baseDistance);
 	    const bubble=Object.assign({},generated,{
 	      club,
 	      baseDistanceM:baseDistance,
@@ -35515,7 +35571,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	    };
 	    plot.distanceRange=plot.maxDistance-plot.minDistance;
 	    const xForDistance=distance=>plot.plotLeft+((distance-plot.minDistance)/plot.distanceRange)*(plot.plotRight-plot.plotLeft);
-	    const yForLateral=lateral=>plot.plotMidY+gdShotBubbleOverlayClamp(lateral/plot.lateralMax,-1,1)*((plot.plotBottom-plot.plotTop)/2);
+	    const yForLateral=lateral=>gdShotChartYForLateral(plot,lateral);
 	    const path=gdShotBubbleOverlayBubblePath(bubble,plot,xForDistance,yForLateral);
 	    const originX=xForDistance(0);
 	    const originY=plot.plotMidY;
@@ -36393,7 +36449,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	      expectedDistanceM:nextDistance,
       meanExpectedM:nextDistance,
       centerDistanceM:nextDistance,
-      centerLateralM:Math.tan(offset*Math.PI/180)*nextDistance,
+      centerLateralM:gdShotBubbleGpsLateralForOffset(offset,nextDistance),
       faceOffsetDeg:offset,
       faceAlignmentOffsetDeg:offset,
       offsetDeg:offset,
@@ -36880,7 +36936,9 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	    const shots=gdPracticePlotShots(analysis||{});
 		    if(!shots.length){
 		      const emptyPlot=gdPracticeNormalisedPlotLayout([]);
-		      return `<svg viewBox="0 0 480 260" role="img" aria-label="Practice Data normalised plot">${gdPracticeNormalisedBackdropSvg(emptyPlot,"")}</svg>${gdShotBubbleOverlayButton("practice")}`;
+		      const emptyOriginBottom=gdPracticeGraphOriginBottom();
+		      const emptyTransform=emptyOriginBottom?gdPracticeGraphOriginBottomTransform(emptyPlot):"";
+		      return `<svg class="gdPracticeGraphSvg ${emptyOriginBottom?"originBottom":""}" viewBox="0 0 480 260" role="img" aria-label="Practice Data normalised plot" data-origin-bottom="${emptyOriginBottom?"1":"0"}"><g class="gdPracticeGraphCanvas"${emptyTransform?` transform="${emptyTransform}"`:""}>${gdPracticeNormalisedBackdropSvg(emptyPlot,"",{hideText:emptyOriginBottom})}</g></svg>${gdPracticeGraphRotateControlHTML(emptyOriginBottom)}${gdShotBubbleOverlayButton("practice")}`;
 	    }
     const plotAll=gdPracticePlotAllRowsForTest();
     const cfg=safe(()=>window.GolfDaddyLaunchMonitorData?.settings?.(),{})||{};
@@ -37041,6 +37099,8 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     }
 	    const normalisedRows=gdPracticeNormalisedPlotRows(shots);
 	    const normalisedPlot=gdPracticeNormalisedPlotLayout(normalisedRows,{plotLeft:38,plotRight:458,plotTop,plotBottom});
+	    const graphOriginBottom=gdPracticeGraphOriginBottom();
+	    const graphTransform=graphOriginBottom?gdPracticeGraphOriginBottomTransform(normalisedPlot):"";
 	    const clubKeySource=normalisedRows.length?normalisedRows:dataRows;
 	    const clubKey=[...new Set(clubKeySource.map(row=>row.club||"Unknown"))].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})).slice(0,6);
 	    const clubKeyDropdown=gdPracticeClubKeyDropdownHTML(clubKey);
@@ -37058,10 +37118,10 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	      const anchor=hubRows[0]||{};
 	      const fromDistance=Number(adoptionMotion.fromDistance)||Number(anchor.actualDistanceM||anchor.baseDistanceM||anchor.expectedDistanceM)||155;
 	      const toDistance=Number(adoptionMotion.toDistance)||Number(anchor.actualDistanceM||anchor.baseDistanceM||anchor.expectedDistanceM)||155;
-	      const fromLateral=Math.tan(Number(adoptionMotion.fromOffset)*Math.PI/180)*fromDistance;
-	      const toLateral=Math.tan(Number(hubOffset)*Math.PI/180)*toDistance;
+	      const fromLateral=gdShotBubbleGpsLateralForOffset(adoptionMotion.fromOffset,fromDistance);
+	      const toLateral=gdShotBubbleGpsLateralForOffset(hubOffset,toDistance);
 	      const xForDistance=distance=>plot.plotLeft+((Number(distance)-plot.minDistance)/plot.distanceRange)*(plot.plotRight-plot.plotLeft);
-	      const yForLateral=lateral=>plot.plotMidY+gdShotBubbleOverlayClamp(Number(lateral)/plot.lateralMax,-1,1)*((plot.plotBottom-plot.plotTop)/2);
+	      const yForLateral=lateral=>gdShotChartYForLateral(plot,lateral);
 	      const dx=xForDistance(fromDistance)-xForDistance(toDistance);
 	      const dy=yForLateral(fromLateral)-yForLateral(toLateral);
 	      if(Number.isFinite(dx)&&Number.isFinite(dy))myBubbleMotionStyle=`--gd-practice-adopt-x:${dx.toFixed(1)}px;--gd-practice-adopt-y:${dy.toFixed(1)}px;`;
@@ -37087,12 +37147,14 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	      labelText:"PRACTICE",
 	      label:!myBubbleCombined
 	    }):"";
-		    return `<svg viewBox="0 0 480 260" role="img" aria-label="Practice Data normalised plot" data-practice-offset-deg="${gdPracticeHasBubbleOffset(practiceBubbleOffset)?Number(practiceBubbleOffset).toFixed(2):""}" data-hub-offset-deg="${gdPracticeHasBubbleOffset(hubOffset)?Number(hubOffset).toFixed(2):""}">
-		      ${gdPracticeNormalisedBackdropSvg(normalisedPlot,"")}
+		    return `<svg class="gdPracticeGraphSvg ${graphOriginBottom?"originBottom":""}" viewBox="0 0 480 260" role="img" aria-label="Practice Data normalised plot" data-origin-bottom="${graphOriginBottom?"1":"0"}" data-practice-offset-deg="${gdPracticeHasBubbleOffset(practiceBubbleOffset)?Number(practiceBubbleOffset).toFixed(2):""}" data-hub-offset-deg="${gdPracticeHasBubbleOffset(hubOffset)?Number(hubOffset).toFixed(2):""}">
+		      <g class="gdPracticeGraphCanvas"${graphTransform?` transform="${graphTransform}"`:""}>
+		      ${gdPracticeNormalisedBackdropSvg(normalisedPlot,"",{hideText:graphOriginBottom})}
 	      ${pts}
 	      ${practiceBubbleLayer}
 	      ${myBubbleLayer}
-	    </svg>${clubKeyDropdown}${gdShotBubbleOverlayButton("practice")}`;
+	      </g>
+	    </svg>${gdPracticeGraphRotateControlHTML(graphOriginBottom)}${clubKeyDropdown}${gdShotBubbleOverlayButton("practice")}`;
 	  }
   const gdPracticeBubbleToleranceFields=[
     "launchMonitorCluster.clusterHunterPct",
@@ -37987,9 +38049,10 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	      gdPracticeToggleBagWidget:gdPracticeToggleBagWidget,
 	      gdPracticeToggleBagScaleAll:gdPracticeToggleBagScaleAll,
 	      gdPracticeSetProjectionSelectedClub:gdPracticeSetProjectionSelectedClub,
-	      gdPracticeSetBagCarry:gdPracticeSetBagCarry,
+      gdPracticeSetBagCarry:gdPracticeSetBagCarry,
 		      gdPracticeResetBagDraft:gdPracticeResetBagDraft,
 		      gdPracticeCommitBagDraft:gdPracticeCommitBagDraft,
+      gdPracticeToggleGraphOrigin:gdPracticeToggleGraphOrigin,
 			      gdPracticeAdoptBubbleAsPlayingBubble:gdPracticeAdoptBubbleAsPlayingBubble,
 		      gdPracticeGenerateBubble:gdPracticeGenerateBubble,
 		      gdPracticeAdoptBubbleFromAction:gdPracticeAdoptBubbleFromAction,
@@ -39671,6 +39734,30 @@ body.gdGpsActive #bagRailBtn{order:7!important}
   border:1px solid rgba(255,255,255,.10)!important;
   box-shadow:0 16px 36px rgba(0,0,0,.24),inset 0 1px 0 rgba(255,255,255,.045)!important;
   overflow:hidden!important;
+}
+.gdPracticeGraphRotateControl{
+  position:absolute!important;
+  right:10px!important;
+  top:10px!important;
+  z-index:5!important;
+  width:34px!important;
+  height:34px!important;
+  border-radius:50%!important;
+  border:1px solid rgba(255,255,255,.18)!important;
+  background:rgba(6,12,10,.78)!important;
+  color:rgba(238,245,242,.84)!important;
+  display:grid!important;
+  place-items:center!important;
+  padding:0!important;
+  font-size:17px!important;
+  font-weight:950!important;
+  line-height:1!important;
+  box-shadow:0 10px 24px rgba(0,0,0,.28),inset 0 1px 0 rgba(255,255,255,.08)!important;
+}
+.gdPracticeGraphRotateControl.active{
+  border-color:rgba(55,242,141,.62)!important;
+  background:linear-gradient(180deg,rgba(55,242,141,.94),rgba(24,176,96,.92))!important;
+  color:#06100b!important;
 }
 #bagPanel #gdBagPanelSub:empty{display:none!important}
 #bagPanel .row:has(#gdBagStatusTitle){display:none!important}
