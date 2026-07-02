@@ -94,6 +94,28 @@
     return String(value === null || value === undefined ? '' : value).trim();
   }
 
+  function activeStatus(item) {
+    return cleanString(item && item.status || 'active').toLowerCase() !== 'deleted';
+  }
+
+  function itemPlayerId(item) {
+    return cleanString(item && (item.playerId || item.profileId || item.player_id || item.player_key));
+  }
+
+  function itemMatchesPlayer(item, playerId) {
+    playerId = cleanString(playerId);
+    if (!playerId) return true;
+    return itemPlayerId(item) === playerId;
+  }
+
+  function importIdSet(values) {
+    return (Array.isArray(values) ? values : [values]).reduce(function (set, value) {
+      var id = cleanString(value);
+      if (id) set[id] = true;
+      return set;
+    }, {});
+  }
+
   function sideFromOffline(value, explicitSide) {
     var side = cleanString(explicitSide).toLowerCase();
     if (side === 'left' || side === 'l') return 'left';
@@ -188,13 +210,20 @@
     });
     var batch = {
       importBatchId: importBatchId,
+      importId: importBatchId,
       sessionId: sessionId,
+      playerId: scope.playerId || '',
+      playerName: scope.playerName || 'Player',
+      accountId: scope.accountId || '',
       sourceType: source.sourceType || 'text',
       sourceName: source.sourceName || '',
       rawText: source.rawText || '',
       rowCount: nativeRows.length,
       validCount: nativeRows.filter(function (row) { return !row.errors.length; }).length,
       invalidCount: nativeRows.filter(function (row) { return row.errors.length; }).length,
+      status: 'active',
+      deletedAt: '',
+      deletedBy: '',
       createdAt: createdAt,
       updatedAt: createdAt
     };
@@ -207,6 +236,9 @@
       sourceType: batch.sourceType,
       sourceName: batch.sourceName,
       shotCount: nativeRows.length,
+      status: 'active',
+      deletedAt: '',
+      deletedBy: '',
       createdAt: createdAt,
       updatedAt: createdAt
     };
@@ -638,6 +670,9 @@
     var rows = (payload.rows || []).filter(function (row) { return row && !row.errors.length; }).map(function (row) {
       return Object.assign({}, row, {
         status: 'ready_for_gate',
+        recordStatus: 'active',
+        deletedAt: '',
+        deletedBy: '',
         updatedAt: nowIso()
       });
     });
@@ -654,7 +689,9 @@
   function loadNativePracticeShots(opts) {
     opts = opts || {};
     var store = readStore();
-    var shots = store.shots.slice();
+    var shots = store.shots.filter(activeStatus).filter(function (shot) {
+      return cleanString(shot.recordStatus || 'active').toLowerCase() !== 'deleted';
+    });
     if (opts.sessionId) shots = shots.filter(function (shot) { return shot.sessionId === opts.sessionId; });
     if (opts.importBatchId) shots = shots.filter(function (shot) { return shot.importBatchId === opts.importBatchId; });
     if (opts.playerId) shots = shots.filter(function (shot) { return shot.playerId === opts.playerId; });
@@ -665,6 +702,7 @@
     opts = opts || {};
     var rows = loadNativePracticeShots({ sessionId: sessionId || '' }).filter(function (shot) {
       if (opts.importBatchId && shot.importBatchId !== opts.importBatchId) return false;
+      if (cleanString(shot.recordStatus || 'active').toLowerCase() === 'deleted') return false;
       return shot.status === 'ready_for_gate' || shot.status === 'native_valid';
     });
     var accepted = [];
@@ -732,6 +770,76 @@
     return writeStore(emptyStore());
   }
 
+  function softDeletePracticeImports(importIds, opts) {
+    opts = opts || {};
+    var ids = importIdSet(importIds);
+    var store = readStore();
+    var deletedAt = opts.deletedAt || nowIso();
+    var deletedBy = cleanString(opts.deletedBy) || cleanString(activePlayerScope().accountId || activePlayerScope().playerId || 'local');
+    var playerId = cleanString(opts.playerId);
+    var deletedImports = 0;
+    var deletedRows = 0;
+    var deletedSessions = 0;
+
+    store.importBatches = (store.importBatches || []).map(function (batch) {
+      var id = cleanString(batch && (batch.importBatchId || batch.importId));
+      if (!id || !ids[id] || !itemMatchesPlayer(batch, playerId)) return batch;
+      deletedImports += cleanString(batch.status).toLowerCase() === 'deleted' ? 0 : 1;
+      return Object.assign({}, batch, {
+        status: 'deleted',
+        deletedAt: deletedAt,
+        deletedBy: deletedBy,
+        updatedAt: deletedAt
+      });
+    });
+
+    store.sessions = (store.sessions || []).map(function (session) {
+      var id = cleanString(session && (session.importBatchId || session.importId));
+      if (!id || !ids[id] || !itemMatchesPlayer(session, playerId)) return session;
+      deletedSessions += cleanString(session.status).toLowerCase() === 'deleted' ? 0 : 1;
+      return Object.assign({}, session, {
+        status: 'deleted',
+        deletedAt: deletedAt,
+        deletedBy: deletedBy,
+        updatedAt: deletedAt
+      });
+    });
+
+    store.shots = (store.shots || []).map(function (shot) {
+      var id = cleanString(shot && (shot.importBatchId || shot.importId));
+      if (!id || !ids[id] || !itemMatchesPlayer(shot, playerId)) return shot;
+      deletedRows += cleanString(shot.recordStatus || 'active').toLowerCase() === 'deleted' ? 0 : 1;
+      return Object.assign({}, shot, {
+        recordStatus: 'deleted',
+        deletedAt: deletedAt,
+        deletedBy: deletedBy,
+        updatedAt: deletedAt
+      });
+    });
+
+    writeStore(store);
+    return { deletedImports: deletedImports, deletedSessions: deletedSessions, deletedRows: deletedRows, store: store };
+  }
+
+  function deletePracticeImport(importId, opts) {
+    return softDeletePracticeImports([importId], opts);
+  }
+
+  function deleteSelectedPracticeImports(importIds, opts) {
+    return softDeletePracticeImports(importIds, opts);
+  }
+
+  function clearPracticeLibraryForPlayer(playerId, opts) {
+    playerId = cleanString(playerId || activePlayerScope().playerId);
+    if (!playerId) return { deletedImports: 0, deletedSessions: 0, deletedRows: 0, store: readStore(), error: 'missing_player_id' };
+    var store = readStore();
+    var ids = (store.importBatches || [])
+      .filter(function (batch) { return itemMatchesPlayer(batch, playerId) && activeStatus(batch); })
+      .map(function (batch) { return cleanString(batch.importBatchId || batch.importId); })
+      .filter(Boolean);
+    return softDeletePracticeImports(ids, Object.assign({}, opts || {}, { playerId: playerId }));
+  }
+
   var api = {
     storageKey: STORAGE_KEY,
     schemaVersion: SCHEMA_VERSION,
@@ -745,7 +853,10 @@
     saveNativePracticeShots: saveNativePracticeShots,
     loadNativePracticeShots: loadNativePracticeShots,
     buildPracticeGateInput: buildPracticeGateInput,
-    clearNativePracticeData: clearNativePracticeData
+    clearNativePracticeData: clearNativePracticeData,
+    deletePracticeImport: deletePracticeImport,
+    deleteSelectedPracticeImports: deleteSelectedPracticeImports,
+    clearPracticeLibraryForPlayer: clearPracticeLibraryForPlayer
   };
 
   root.modules.nativePracticeData = api;

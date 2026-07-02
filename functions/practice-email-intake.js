@@ -595,7 +595,7 @@ async function recentFor(params) {
   if (!hasSupabase()) return { configured: false, batches: [] };
   const limit = Math.min(Math.max(Number(params.limit) || 8, 1), 20);
   const batches = await supabaseFetch(
-    "practice_import_batches?select=*&player_key=eq." + encodeFilter(key) + "&order=created_at.desc&limit=" + limit,
+    "practice_import_batches?select=*&player_key=eq." + encodeFilter(key) + "&status=neq.deleted&order=created_at.desc&limit=" + limit,
     { method: "GET" }
   );
   const batchIds = (Array.isArray(batches) ? batches : []).map(function (batch) { return batch.import_batch_id; }).filter(Boolean);
@@ -605,7 +605,7 @@ async function recentFor(params) {
       return encodeURIComponent("\"" + id + "\"");
     }).join(",");
     shots = await supabaseFetch(
-      "practice_native_shots?select=*&import_batch_id=in.(" + inList + ")&order=shot_number.asc",
+      "practice_native_shots?select=*&import_batch_id=in.(" + inList + ")&status=neq.deleted&order=shot_number.asc",
       { method: "GET" }
     );
   }
