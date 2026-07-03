@@ -16821,12 +16821,16 @@ async function gdRunDefaultPracticePhotoScanFromCheckpoint(checkpoint,opts={}){
         counts:{gridRows:rows,gridColumns:columns}
       });
       await gdPracticeYieldScanPaint();
-      const payload=await gdRunFittedCellGridOcr(scan,{
-        allowParkedFittedCellOcr:true,
-        importToNative:true,
-        label:"Practice photo scan",
-        sourceLabel:opts.sourceLabel||gdPracticePhotoName||"Practice photo scan"
-      });
+      const payload=await gdPracticeWithTimeout(
+        gdRunFittedCellGridOcr(scan,{
+          allowParkedFittedCellOcr:true,
+          importToNative:true,
+          label:"Practice photo scan",
+          sourceLabel:opts.sourceLabel||gdPracticePhotoName||"Practice photo scan"
+        }),
+        Number(opts.fittedCellOcrMaxMs)||45000,
+        "Practice photo cell OCR"
+      );
       if(!payload?.clubGroups?.length)gdPracticeFailImportJob(new Error("Cell OCR completed but no usable shots were formed"),"Cell OCR completed but no usable shots were formed. Review the scanner output.");
       return payload;
     }else{
