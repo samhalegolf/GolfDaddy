@@ -8262,6 +8262,7 @@ function gdSetPracticeScanStatus(message){
     if(id==="gdPracticeDebugStatus"&&text&&gdPracticeCanShowScanDebug())el.classList.add("active");
   });
   document.body.classList.toggle("gdPracticeScanRunning",state==="scanning");
+  try{gdPracticeSyncLibraryProcessingSurface();}catch(e){}
   if(state==="error")gdLmToast(message);
 }
 function gdPracticeQuietScanSurface(opts={}){
@@ -24798,7 +24799,8 @@ function gdPracticeClearLibraryProcessingSurface(){
 }
 function gdPracticeSyncLibraryProcessingSurface(){
   const job=gdPracticeHydrateImportJob();
-  const active=gdPracticeImportIsActive(job)||!!gdPracticePhotoProcessing;
+  const scanRunning=!!document.body?.classList.contains("gdPracticeScanRunning");
+  const active=gdPracticeImportIsActive(job)||!!gdPracticePhotoProcessing||scanRunning;
   if(!active){
     gdPracticeClearLibraryProcessingSurface();
     return false;
