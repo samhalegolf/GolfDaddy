@@ -2365,6 +2365,9 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 #practiceDataPanel.gdPracticePhotoProcessing .gdPracticeScanner,
 #practiceDataPanel.gdPracticePhotoProcessing .gdManualQuadTool,
 #practiceDataPanel.gdPracticePhotoProcessing .gdPracticeReview{display:none!important}
+#practiceDataPanel.gdPracticePhotoProcessing .gdNativePracticeDrawer,
+#practiceDataPanel.gdPracticePhotoProcessing .gdPracticeEmailBox,
+#practiceDataPanel.gdPracticePhotoProcessing .gdPracticeImportJob{display:none!important}
 #gdPracticeScanner .gdPracticeScanStatus,#gdPracticeManualQuadStatus{display:none!important}
 .gdPracticeReviewActions,.gdPracticeScannerActions{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-top:10px}
 .gdPracticeReviewActions button,.gdPracticeScannerActions button{border:0;border-radius:14px;padding:11px;font-weight:950;background:rgba(255,255,255,.09);color:#fff;border:1px solid rgba(255,255,255,.10)}
@@ -7839,7 +7842,7 @@ function gdPracticeReleaseProcessingControlsSafe(reason){
 async function gdImportLaunchMonitorPayload(payload,sourceLabel){
   const api=await gdEnsureLaunchMonitorApi();
   let job=gdPracticeHydrateImportJob();
-  if(!gdPracticeImportIsActive(job))job=gdPracticeStartImportJob("practice-save",sourceLabel||payload?.label||"Practice import",{status:"saving",stageIndex:2,progress:82});
+  if(!gdPracticeImportIsActive(job))job=gdPracticeStartImportJob("practice-save",sourceLabel||payload?.label||"Practice import",{status:"saving",stageIndex:3,progress:88});
   if(!job)return false;
   const count=(payload?.clubGroups||[]).length;
   const rejected=Array.isArray(payload?.rejectedRows)?payload.rejectedRows.length:0;
@@ -7850,8 +7853,8 @@ async function gdImportLaunchMonitorPayload(payload,sourceLabel){
     rejected,
     rawRows:count+rejected,
     clubs:gdPracticePayloadClubLabels(payload),
-    stageIndex:2,
-    progress:84
+    stageIndex:3,
+    progress:92
   });
   if(gdPracticeDebugCurrentRun()){
     gdPracticeDebugCheckpointSafe("save_started","running",{inputSummary:sourceLabel||payload?.label||"Launch monitor payload",counts:{rows:(payload?.clubGroups||[]).length}});
@@ -7893,6 +7896,7 @@ function gdPickPracticePhotoFile(event,mode="photo"){
   event?.preventDefault?.();
   event?.stopPropagation?.();
   event?.stopImmediatePropagation?.();
+  try{if(typeof gdPracticeReleaseInactiveProcessingSurface==="function")gdPracticeReleaseInactiveProcessingSurface();}catch(e){}
   const input=document.getElementById(mode==="camera"?"gdPracticeCameraInput":"gdPracticePhotoInput");
   if(!input){
     gdNativePracticeFeedbackBridge({status:"failed",lastAction:"Photo picker failed",errors:["Photo picker is not ready"],nextStep:"Reopen Practice Data and try again."});
@@ -8006,8 +8010,10 @@ function gdPracticeSetExtractionPreview(payload,sourceLabel){
   const rows=gdPracticeExtractionRows(payload);
   gdPracticeExtractionPreviewState={payload,sourceLabel:sourceLabel||payload?.label||"Practice extraction",rows,createdAt:Date.now()};
   gdRenderPracticeExtractionCheckpoint();
-  gdLmSetStatus("Status","Extraction ready",`${rows.length} shots waiting in Practice Admin checkpoint`,"needs_more_data");
-  gdLmToast(`Extraction checkpoint ready (${rows.length} shots)`);
+  if(gdPracticeAdminIsOpenSafe()){
+    gdLmSetStatus("Status","Extraction ready",`${rows.length} shots waiting in Practice Admin checkpoint`,"needs_more_data");
+    gdLmToast(`Extraction checkpoint ready (${rows.length} shots)`);
+  }
 }
 function gdPracticeAdminIsOpenSafe(){
   try{
@@ -8228,7 +8234,6 @@ async function gdHandleLaunchMonitorUpload(file){
       gdSetPracticePhotoProcessing(false,{skipJob:true});
       gdNativePracticeFeedbackBridge({status:"parsed",lastAction:`Legacy upload parsed ${payload.clubGroups.length} row${payload.clubGroups.length===1?"":"s"}`,parsedCount:payload.clubGroups.length,validCount:payload.clubGroups.length,invalidCount:0,warnings:["Parsed into the existing launch-monitor review checkpoint, not native storage yet."],errors:[],nextStep:"Review the extraction checkpoint or use pasted CSV for native save."});
       gdPracticeSetExtractionPreview(payload,`Uploaded text: ${file.name||"launch monitor file"}`);
-      gdTogglePracticeAdmin(true);
       return;
     }
     await gdImportLaunchMonitorPayload(payload,"Uploaded launch monitor text");
@@ -8257,7 +8262,7 @@ function gdSetPracticeScanStatus(message){
     if(id==="gdPracticeDebugStatus"&&text)el.classList.add("active");
   });
   document.body.classList.toggle("gdPracticeScanRunning",state==="scanning");
-  gdLmToast(message);
+  if(state==="error")gdLmToast(message);
 }
 function gdPracticeFeedback(message,tone=""){
   const text=String(message||"");
@@ -13935,7 +13940,6 @@ async function gdRunFittedCellGridOcr(columnScan,opts={}){
     return payload;
   }
   gdPracticeSetExtractionPreview(payload,opts.label||"Raw cell value read");
-  if(typeof gdTogglePracticeAdmin==="function")gdTogglePracticeAdmin(true);
   gdSetPracticeScanStatus(`Raw cell value read complete: ${Number(columnScan?.digitizedTable?.rows?.length)||0} rows scanned; Clarity Shot Library preview has ${payload.clubGroups.length} OCR shots. No native save has run.`);
   return payload;
 }
@@ -13983,7 +13987,6 @@ async function gdFinishPracticeColumnScan(columnScan,emptyMessage){
   const rowCount=Number(payload?.clubGroups?.length)||0;
   if(rowCount){
     gdPracticeSetExtractionPreview(payload,"Photo column image OCR");
-    if(typeof gdTogglePracticeAdmin==="function")gdTogglePracticeAdmin(true);
     gdSetPracticeScanStatus(`Column OCR ready (${rowCount} shots from ${stripCount} column images). Review the extraction checkpoint before importing.`);
     return columnScan;
   }
@@ -16793,7 +16796,7 @@ async function gdRunDefaultPracticePhotoScanFromCheckpoint(checkpoint,opts={}){
     return null;
   }
   if(!gdPracticeImportCanStart(opts.sourceLabel||gdPracticePhotoName||"Practice photo scan"))return null;
-  gdPracticeStartImportJob("practice-photo",opts.sourceLabel||gdPracticePhotoName||"Practice photo scan",{status:"scanning",checkpointText:"Generating OCR practice grid",stageIndex:0,progress:10,source:"photo",clubs:gdPracticeScanClubLabels()});
+  gdPracticeStartImportJob("practice-photo",opts.sourceLabel||gdPracticePhotoName||"Practice photo scan",{status:"scanning",checkpointText:"Scan started",stageIndex:0,progress:10,source:"photo",clubs:gdPracticeScanClubLabels()});
   gdPracticeClusterCheckpoint=checkpoint;
   window.__gdPracticeClusterCheckpoint=checkpoint;
   gdPracticeClearTemplateOutcomes();
@@ -16803,7 +16806,7 @@ async function gdRunDefaultPracticePhotoScanFromCheckpoint(checkpoint,opts={}){
   gdPracticeFeedback("Generating OCR practice grid...");
   await gdPracticeYieldScanPaint();
   try{
-    gdPracticeUpdateImportJob({status:"scanning",checkpointText:"Generating OCR practice grid",stageIndex:0,progress:22});
+    gdPracticeUpdateImportJob({status:"scanning",checkpointText:"Clarity Pattern Finder",stageIndex:1,progress:24});
     const result=await gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,null,{
       label:"Practice photo OCR generated grid",
       sourceLabel:opts.sourceLabel||gdPracticePhotoName||"Practice photo scan"
@@ -16812,7 +16815,7 @@ async function gdRunDefaultPracticePhotoScanFromCheckpoint(checkpoint,opts={}){
     const rows=Number(scan?.cellGrid?.rows?.length)||0;
     const columns=Number(scan?.cellGrid?.columns?.length)||0;
     if(rows&&columns){
-      gdPracticeUpdateImportJob({status:"parsing",checkpointText:`Reading OCR cells (${rows} x ${columns})`,stageIndex:1,progress:42});
+      gdPracticeUpdateImportJob({status:"parsing",checkpointText:`Reading values (${rows} x ${columns})`,stageIndex:2,progress:48});
       gdPracticeSetContinueScanReady(false);
       gdPracticeRefreshDebugTools();
       gdPracticeFeedback(`OCR-generated grid ready: ${rows} rows x ${columns}. Reading cell values...`);
@@ -17002,7 +17005,6 @@ async function gdImportReviewedPracticeOcr(){
   }
   if(gdPracticeToleranceCanEditSafe()){
     gdPracticeSetExtractionPreview(payload,"Reviewed photo scan");
-    gdTogglePracticeAdmin(true);
     gdSetPracticeScanStatus(`Extraction checkpoint ready with ${payload.clubGroups.length} shots`);
     return;
   }
@@ -24331,15 +24333,17 @@ var gdPracticePhotoProcessingProgress=0;
 var gdPracticePhotoProcessingStageIndex=0;
 const GD_PRACTICE_IMPORT_JOB_KEY="gd_practice_import_job_v1";
 const GD_PRACTICE_PROCESSING_MIN_VISIBLE_MS=0;
+const GD_PRACTICE_PROCESSING_COMPLETE_VISIBLE_MS=850;
 const GD_PRACTICE_IMPORT_ACTIVE_STALE_MS=90000;
 const GD_PRACTICE_IMPORT_STALE_DIAGNOSTIC="Active practice scan exceeded the OCR timeout window and was released automatically.";
 const GD_PRACTICE_PROCESSING_STAGES=[
-  "Scanning",
-  "Importing",
+  "Scan",
   "Clarity Pattern Finder",
-  "Generating Practice Bubble"
+  "Read values",
+  "Saved to library"
 ];
 var gdPracticePhotoProcessingClubs=["7i"];
+var gdPracticePhotoProcessingCompletedAt=0;
 var gdPracticeImportJob=gdPracticeReadImportJob();
 function gdPracticeNowISO(){return new Date().toISOString();}
 function gdPracticeReadImportJob(){
@@ -24364,6 +24368,7 @@ function gdPracticeReleaseStaleImportJob(){
     gdPracticePhotoProcessing=false;
     gdPracticePhotoProcessingProgress=0;
     gdPracticePhotoProcessingStageIndex=0;
+    gdPracticePhotoProcessingCompletedAt=0;
     document.body?.classList.remove("gdPracticePhotoProcessing");
     document.getElementById("practiceDataPanel")?.classList.remove("gdPracticePhotoProcessing");
   }catch(e){}
@@ -24388,6 +24393,21 @@ function gdPracticeHydrateImportJob(){
 function gdPracticeImportActiveStatuses(){return {queued:true,scanning:true,parsing:true,validating:true,saving:true};}
 function gdPracticeImportIsActive(job=gdPracticeImportJob){return !!(job&&gdPracticeImportActiveStatuses()[String(job.status||"")]);}
 function gdPracticeImportBlocksNew(job=gdPracticeImportJob){return gdPracticeImportIsActive(job);}
+function gdPracticeReleaseInactiveProcessingSurface(){
+  const job=gdPracticeHydrateImportJob();
+  if(gdPracticeImportIsActive(job))return false;
+  if(gdPracticePhotoProcessing&&gdPracticePhotoProcessingStartedAt&&gdPracticeProcessingElapsed()<=GD_PRACTICE_IMPORT_ACTIVE_STALE_MS)return false;
+  gdPracticePhotoProcessing=false;
+  gdPracticePhotoProcessingProgress=0;
+  gdPracticePhotoProcessingStageIndex=0;
+  gdPracticePhotoProcessingCompletedAt=0;
+  try{
+    gdPracticeProcessingStop();
+    document.body?.classList.remove("gdPracticePhotoProcessing");
+    document.getElementById("practiceDataPanel")?.classList.remove("gdPracticePhotoProcessing");
+  }catch(e){}
+  return true;
+}
 function gdPracticeImportStatusLabel(status){
   return ({
     queued:"Import queued",
@@ -24402,6 +24422,7 @@ function gdPracticeImportStatusLabel(status){
 }
 function gdPracticeImportCanStart(sourceLabel){
   const job=gdPracticeHydrateImportJob();
+  if(!gdPracticeImportBlocksNew(job))gdPracticeReleaseInactiveProcessingSurface();
   if(gdPracticeImportBlocksNew(job)){
     gdLmToast("Practice import already running");
     gdLmSetStatus("Status","Practice import already running",`${job.sourceLabel||sourceLabel||"Current import"} is ${String(job.status||"running")}. Review, cancel, or finish it before starting another.`,"needs_more_data");
@@ -24465,9 +24486,12 @@ function gdPracticeFailImportJob(error,userMessage){
 function gdPracticeCompleteImportJob(result,payload,extra={}){
   const groups=Array.isArray(payload?.clubGroups)?payload.clubGroups:[];
   const rejected=Array.isArray(payload?.rejectedRows)?payload.rejectedRows.length:0;
+  gdPracticePhotoProcessingProgress=100;
+  gdPracticePhotoProcessingStageIndex=GD_PRACTICE_PROCESSING_STAGES.length-1;
+  gdPracticePhotoProcessingCompletedAt=Date.now();
   return gdPracticeUpdateImportJob({
     status:"completed",
-    checkpointText:`Saved ${extra.nativeRows||groups.length} shot${(extra.nativeRows||groups.length)===1?"":"s"}`,
+    checkpointText:"Saved to Clarity Shot Library",
     accepted:groups.length||Number(extra.validCount)||0,
     rejected:rejected||Number(extra.invalidCount)||0,
     rawRows:groups.length+rejected||Number(extra.rawRows)||0,
@@ -24547,7 +24571,7 @@ function gdPracticeProcessingStageState(){
     if(Number.isFinite(explicitProgress)&&explicitProgress>0){
       return{
         index:Number.isFinite(explicitIndex)?Math.max(0,Math.min(GD_PRACTICE_PROCESSING_STAGES.length-1,Math.round(explicitIndex))):0,
-        progress:Math.max(4,Math.min(98,Math.round(explicitProgress)))
+        progress:Math.max(4,Math.min(100,Math.round(explicitProgress)))
       };
     }
   }
@@ -24636,7 +24660,10 @@ function gdNativeShotDataProcessingHTML(){
     gdPracticeSyncImportProcessing(job);
     return `<span class="gdNativeProcessingStack">${gdNativeShotDataProcessingTrackHTML()}</span>`;
   }
-  if(!gdPracticePhotoProcessing)return "";
+  if(!gdPracticePhotoProcessing){
+    gdPracticeReleaseInactiveProcessingSurface();
+    return "";
+  }
   if(!gdPracticePhotoProcessingStartedAt||gdPracticeProcessingElapsed()>GD_PRACTICE_IMPORT_ACTIVE_STALE_MS){
     gdPracticePhotoProcessing=false;
     gdPracticePhotoProcessingProgress=0;
@@ -24657,7 +24684,10 @@ function gdSetPracticePhotoProcessing(active,opts={}){
     gdPracticePhotoProcessingStopTimer=null;
   }
   if(!active&&gdPracticePhotoProcessing&&!opts?.immediate){
-    const remaining=GD_PRACTICE_PROCESSING_MIN_VISIBLE_MS-gdPracticeProcessingElapsed();
+    const completionRemaining=gdPracticePhotoProcessingCompletedAt
+      ? GD_PRACTICE_PROCESSING_COMPLETE_VISIBLE_MS-(Date.now()-gdPracticePhotoProcessingCompletedAt)
+      : 0;
+    const remaining=Math.max(GD_PRACTICE_PROCESSING_MIN_VISIBLE_MS-gdPracticeProcessingElapsed(),completionRemaining);
     if(remaining>0){
       if(gdPracticePhotoProcessingStopTimer)clearTimeout(gdPracticePhotoProcessingStopTimer);
       gdPracticePhotoProcessingStopTimer=setTimeout(()=>{
@@ -24683,6 +24713,7 @@ function gdSetPracticePhotoProcessing(active,opts={}){
   }else{
     gdPracticePhotoProcessingProgress=0;
     gdPracticePhotoProcessingStageIndex=0;
+    gdPracticePhotoProcessingCompletedAt=0;
   }
   if(gdPracticePhotoProcessing&&!wasProcessing)gdPracticeProcessingStart();
   if(!gdPracticePhotoProcessing&&wasProcessing)gdPracticeProcessingStop();
@@ -24704,6 +24735,11 @@ function gdSetPracticePhotoProcessing(active,opts={}){
         localStorage.removeItem(GD_PRACTICE_IMPORT_OPEN_KEY);
         gdRenderPracticeImportPanel();
       }
+      if(typeof gdTogglePracticeAdmin==="function")gdTogglePracticeAdmin(false);
+      const nativeDrawer=document.getElementById("gdNativePracticeImportDrawer");
+      if(nativeDrawer)nativeDrawer.open=false;
+      const feedback=document.getElementById("gdNativePracticeFeedback");
+      if(feedback)feedback.innerHTML="";
     }catch(e){}
     document.getElementById("gdPracticeScanner")?.classList.remove("active");
     document.getElementById("gdPracticeOcrReview")?.classList.remove("active","stripOnly");
@@ -33749,6 +33785,10 @@ body.gdAuthLocked #gdProfileV67 .topbar{
   function gdRenderPracticeImportPanel(){
     const panel=document.getElementById("gdPracticeImportPanel");
     if(!panel)return;
+    if(typeof gdPracticeAdminIsOpen==="function"&&!gdPracticeAdminIsOpen()){
+      const drawer=document.getElementById("gdNativePracticeImportDrawer");
+      if(drawer)drawer.open=false;
+    }
     panel.classList.toggle("open",!!gdPracticeImportOpen);
     panel.classList.toggle("email-open",!!gdPracticeEmailLaneOpen);
     const button=panel.querySelector(".gdPracticeImportToggle");
@@ -34520,7 +34560,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
   function gdRenderNativePracticeFeedback(){
     const root=byId("gdNativePracticeFeedback");
     if(!root)return;
-    if(!gdPracticeImportOpen){
+    if(!gdPracticeImportOpen||!gdPracticeAdminIsOpenSafe()){
       root.innerHTML="";
       return;
     }
@@ -38046,7 +38086,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     const active=gdPracticeImportIsActive(job);
     const failed=status==="failed";
     const completed=status==="completed";
-    if(completed)return "";
+    if(active||completed)return "";
     const title=gdPracticeImportStatusLabel(status);
     const source=job.sourceLabel||job.source||"Practice import";
     const date=job.importDate?gdPracticeEvidenceDateLabel(job.importDate):"Import date pending";
@@ -38856,8 +38896,9 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 			    }).join("");
 			    root.innerHTML=gdPracticeLibraryShellHTML(analysis,rows.length,`${gdPracticePlotModeControls()}${tools}<div class="gdPracticeShotLibrary${rows.length>18?" gdPracticeEvidenceClubRowsScrollable":""}">${clubSections}</div>`);
 			  }
-				  function renderPracticeData(skipTolerances=false){
-			    const visual=byId("gdPracticeDataVisual");
+  function renderPracticeData(skipTolerances=false){
+    gdPracticeReleaseInactiveProcessingSurface();
+    const visual=byId("gdPracticeDataVisual");
 			    const visualTitle=byId("gdPracticeVisualTitle");
 			    const result=byId("gdPracticeDataResult");
 			    const evidenceList=byId("gdPracticeEvidenceList");
@@ -43711,6 +43752,12 @@ body.gdGpsActive #bagRailBtn{order:7!important}
 	  border-radius:11px!important;
 	  font-size:11px!important;
 	  justify-self:start!important;
+	}
+	#practiceDataPanel.open:not(.gdPracticeAdminExpanded) .gdNativePracticeDrawer,
+	#practiceDataPanel.open:not(.gdPracticeAdminExpanded) .gdPracticeEmailBox:not(.active){
+	  display:none!important;
+	  visibility:hidden!important;
+	  pointer-events:none!important;
 	}
 	.gdPracticeClubKeyDrop{
 	  margin-top:7px!important;
