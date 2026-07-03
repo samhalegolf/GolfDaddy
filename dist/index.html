@@ -7838,25 +7838,43 @@ function gdPracticeReleaseProcessingControlsSafe(reason){
 }
 async function gdImportLaunchMonitorPayload(payload,sourceLabel){
   const api=await gdEnsureLaunchMonitorApi();
+  let job=gdPracticeHydrateImportJob();
+  if(!gdPracticeImportIsActive(job))job=gdPracticeStartImportJob("practice-save",sourceLabel||payload?.label||"Practice import",{status:"saving",stageIndex:2,progress:82});
+  if(!job)return false;
+  const count=(payload?.clubGroups||[]).length;
+  const rejected=Array.isArray(payload?.rejectedRows)?payload.rejectedRows.length:0;
+  gdPracticeUpdateImportJob({
+    status:"saving",
+    checkpointText:"Saving to Clarity Shot Library",
+    accepted:count,
+    rejected,
+    rawRows:count+rejected,
+    clubs:gdPracticePayloadClubLabels(payload),
+    stageIndex:2,
+    progress:84
+  });
   if(gdPracticeDebugCurrentRun()){
     gdPracticeDebugCheckpointSafe("save_started","running",{inputSummary:sourceLabel||payload?.label||"Launch monitor payload",counts:{rows:(payload?.clubGroups||[]).length}});
   }
-  if(payload?.replaceExisting===true&&typeof api.clearStore==="function")api.clearStore();
   try{
-    api.importCapture(payload);
+    gdPracticeAssertImportNotCanceled();
+    if(payload?.replaceExisting===true&&typeof api.clearStore==="function")api.clearStore();
+    const result=api.importCapture(payload);
+    gdPracticeCompleteImportJob(result,payload);
+    if(gdPracticeDebugCurrentRun()){
+      gdPracticeDebugCheckpointSafe("save_completed","success",{outputSummary:"Saved to launch monitor practice store",counts:{saved:(payload?.clubGroups||[]).length}});
+      gdPracticeDebugCheckpointSafe("practice_render_refresh","success",{outputSummary:"Practice Data render refresh requested",counts:{rows:(payload?.clubGroups||[]).length}});
+    }
+    gdRenderLaunchMonitorAdmin();
+    if(typeof window.gdRenderPracticeData==="function")window.gdRenderPracticeData();
+    if(typeof window.gdRenderDataHubStatus==="function")window.gdRenderDataHubStatus();
+    gdLmToast(`${sourceLabel||"Launch monitor data"} loaded (${count} shot${count===1?"":"s"})`);
+    return result;
   }catch(e){
     if(gdPracticeDebugCurrentRun())gdPracticeDebugCheckpointSafe("save_failed","failed",{outputSummary:"Practice Data save failed",error:e,technicalDetails:e&&e.stack});
+    gdPracticeFailImportJob(e,e&&e.message?e.message:"Practice save failed");
     throw e;
   }
-  if(gdPracticeDebugCurrentRun()){
-    gdPracticeDebugCheckpointSafe("save_completed","success",{outputSummary:"Saved to launch monitor practice store",counts:{saved:(payload?.clubGroups||[]).length}});
-    gdPracticeDebugCheckpointSafe("practice_render_refresh","success",{outputSummary:"Practice Data render refresh requested",counts:{rows:(payload?.clubGroups||[]).length}});
-  }
-  gdRenderLaunchMonitorAdmin();
-  if(typeof window.gdRenderPracticeData==="function")window.gdRenderPracticeData();
-  if(typeof window.gdRenderDataHubStatus==="function")window.gdRenderDataHubStatus();
-  const count=(payload.clubGroups||[]).length;
-  gdLmToast(`${sourceLabel||"Launch monitor data"} loaded (${count} shot${count===1?"":"s"})`);
 }
 function gdPracticeScanClubLabel(){
   const input=document.getElementById("gdPracticeScanClubInput");
@@ -8173,18 +8191,26 @@ async function gdHandleNativePracticeTextFile(file){
 }
 async function gdHandleLaunchMonitorUpload(file){
   if(!file)return;
+  if(!gdPracticeImportCanStart(file.name||"Plain text file"))return false;
+  gdPracticeStartImportJob("practice-file",file.name||"Plain text file",{status:"queued",checkpointText:"Queued file import",stageIndex:0,progress:8,source:"file"});
   gdNativePracticeFeedbackBridge({status:"file_selected",lastAction:`Legacy text upload selected: ${file.name||"plain text"}`,warnings:["This upload also feeds the existing launch-monitor intake path."],errors:[],nextStep:"Reading upload..."});
   gdLmSetStatus("Status","Reading upload",file.name||"Plain text file","needs_more_data");
+  gdSetPracticePhotoProcessing(true,{clubs:["Upload"],stageIndex:0,progress:12});
   try{
     const text=await file.text();
+    gdPracticeAssertImportNotCanceled();
+    gdPracticeUpdateImportJob({status:"parsing",checkpointText:"Parsing uploaded text",stageIndex:1,progress:38});
     const payload=gdBuildLaunchMonitorTextCapture(text,file.name||"Plain text launch monitor upload");
     if(!(payload.clubGroups||[]).length){
+      gdPracticeFailImportJob(new Error("No usable shots found"),"No usable shots found. Use pasted CSV with headers: club, carry, total, offline, face, path, start.");
       gdNativePracticeFeedbackBridge({status:"failed",lastAction:"Legacy upload parsed 0 rows",errors:["No rows detected"],nextStep:"Use pasted CSV with headers: club, carry, total, offline, face, path, start."});
       gdLmSetStatus("Status","No usable shots found","Use lines like: 7i Carry 142 Offline 5 FaceToPath 1.6 ClubPath 0.2","conflict_check");
       gdLmToast("No launch monitor shots found");
       return;
     }
     if(gdPracticeToleranceCanEdit()){
+      gdPracticeUpdateImportJob({status:"validating",checkpointText:"Extraction checkpoint ready",accepted:payload.clubGroups.length,rawRows:payload.clubGroups.length,clubs:gdPracticePayloadClubLabels(payload),progress:68});
+      gdSetPracticePhotoProcessing(false,{skipJob:true});
       gdNativePracticeFeedbackBridge({status:"parsed",lastAction:`Legacy upload parsed ${payload.clubGroups.length} row${payload.clubGroups.length===1?"":"s"}`,parsedCount:payload.clubGroups.length,validCount:payload.clubGroups.length,invalidCount:0,warnings:["Parsed into the existing launch-monitor review checkpoint, not native storage yet."],errors:[],nextStep:"Review the extraction checkpoint or use pasted CSV for native save."});
       gdPracticeSetExtractionPreview(payload,`Uploaded text: ${file.name||"launch monitor file"}`);
       gdTogglePracticeAdmin(true);
@@ -8194,9 +8220,12 @@ async function gdHandleLaunchMonitorUpload(file){
     gdNativePracticeFeedbackBridge({status:"saved",lastAction:`Legacy upload imported ${payload.clubGroups.length} row${payload.clubGroups.length===1?"":"s"}`,parsedCount:payload.clubGroups.length,validCount:payload.clubGroups.length,invalidCount:0,warnings:["Saved through existing launch-monitor intake, not the native row store."],errors:[],nextStep:"Use pasted CSV if you want rows in native practice storage."});
   }catch(e){
     console.warn("[GolfDaddy] launch monitor upload failed",e);
+    gdPracticeFailImportJob(e,e&&e.message?e.message:"Could not read file");
     gdNativePracticeFeedbackBridge({status:"failed",lastAction:"Text upload failed",errors:[e&&e.message?e.message:"Could not read file"],nextStep:"Try pasted CSV/text in the native import lane."});
     gdLmSetStatus("Status","Upload failed",e&&e.message?e.message:"Could not read file","conflict_check");
     gdLmToast("Launch monitor upload failed");
+  }finally{
+    gdSetPracticePhotoProcessing(false,{skipJob:true});
   }
 }
 function gdSetPracticeScanStatus(message){
@@ -16653,6 +16682,8 @@ async function gdRunDefaultPracticePhotoScanFromCheckpoint(checkpoint,opts={}){
     gdPracticeFeedback("Frame the value grid first, then generate the OCR grid.","error");
     return null;
   }
+  if(!gdPracticeImportCanStart(opts.sourceLabel||gdPracticePhotoName||"Practice photo scan"))return null;
+  gdPracticeStartImportJob("practice-photo",opts.sourceLabel||gdPracticePhotoName||"Practice photo scan",{status:"scanning",checkpointText:"Generating OCR practice grid",stageIndex:0,progress:10,source:"photo",clubs:gdPracticeScanClubLabels()});
   gdPracticeClusterCheckpoint=checkpoint;
   window.__gdPracticeClusterCheckpoint=checkpoint;
   gdPracticeClearTemplateOutcomes();
@@ -16661,6 +16692,7 @@ async function gdRunDefaultPracticePhotoScanFromCheckpoint(checkpoint,opts={}){
   gdSetPracticePhotoProcessing(true);
   gdPracticeFeedback("Generating OCR practice grid...");
   try{
+    gdPracticeUpdateImportJob({status:"scanning",checkpointText:"Generating OCR practice grid",stageIndex:0,progress:22});
     const result=await gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,null,{
       label:"Practice photo OCR generated grid",
       sourceLabel:opts.sourceLabel||gdPracticePhotoName||"Practice photo scan"
@@ -16669,6 +16701,7 @@ async function gdRunDefaultPracticePhotoScanFromCheckpoint(checkpoint,opts={}){
     const rows=Number(scan?.cellGrid?.rows?.length)||0;
     const columns=Number(scan?.cellGrid?.columns?.length)||0;
     if(rows&&columns){
+      gdPracticeUpdateImportJob({status:"parsing",checkpointText:`Reading OCR cells (${rows} x ${columns})`,stageIndex:1,progress:42});
       gdPracticeSetContinueScanReady(false);
       gdPracticeRefreshDebugTools();
       gdPracticeFeedback(`OCR-generated grid ready: ${rows} rows x ${columns}. Reading cell values...`);
@@ -16676,12 +16709,15 @@ async function gdRunDefaultPracticePhotoScanFromCheckpoint(checkpoint,opts={}){
         inputSummary:"OCR grid ready; fitted-cell value scan starting",
         counts:{gridRows:rows,gridColumns:columns}
       });
-      return await gdRunFittedCellGridOcr(scan,{
+      const payload=await gdRunFittedCellGridOcr(scan,{
         allowParkedFittedCellOcr:true,
         label:"Practice photo scan",
         sourceLabel:opts.sourceLabel||gdPracticePhotoName||"Practice photo scan"
       });
+      if(!payload?.clubGroups?.length)gdPracticeFailImportJob(new Error("Cell OCR completed but no usable shots were formed"),"Cell OCR completed but no usable shots were formed. Review the scanner output.");
+      return payload;
     }else{
+      gdPracticeFailImportJob(new Error("OCR-generated grid was not ready"),"OCR-generated grid was not ready. Inspect the header and value word evidence.");
       gdPracticeSetContinueScanReady(true);
       const ocrOutcome=gdPracticeTemplateOutcomeStore().ocr||null;
       gdPracticeFeedback("OCR-generated grid was not ready. Open the OCR generated tab to inspect the header and value word evidence.","error");
@@ -16693,8 +16729,10 @@ async function gdRunDefaultPracticePhotoScanFromCheckpoint(checkpoint,opts={}){
     return null;
   }catch(e){
     gdPracticeDebugFailedSafe("extraction_started",e,{outputSummary:"Practice photo scan failed",technicalDetails:e&&e.stack});
+    gdPracticeFailImportJob(e,e&&e.message?e.message:"Practice photo scan failed");
     throw e;
   }finally{
+    gdSetPracticePhotoProcessing(false,{skipJob:true});
     gdPracticeReleaseProcessingControlsSafe("photo-scan-finally");
   }
 }
@@ -24167,6 +24205,7 @@ var gdPracticePhotoProcessingTimer=null;
 var gdPracticePhotoProcessingStopTimer=null;
 var gdPracticePhotoProcessingProgress=0;
 var gdPracticePhotoProcessingStageIndex=0;
+const GD_PRACTICE_IMPORT_JOB_KEY="gd_practice_import_job_v1";
 const GD_PRACTICE_PROCESSING_MIN_VISIBLE_MS=0;
 const GD_PRACTICE_PROCESSING_STAGES=[
   "Scanning",
@@ -24175,10 +24214,178 @@ const GD_PRACTICE_PROCESSING_STAGES=[
   "Generating Practice Bubble"
 ];
 var gdPracticePhotoProcessingClubs=["7i"];
+var gdPracticeImportJob=gdPracticeReadImportJob();
+function gdPracticeNowISO(){return new Date().toISOString();}
+function gdPracticeReadImportJob(){
+  try{
+    const raw=localStorage.getItem(GD_PRACTICE_IMPORT_JOB_KEY);
+    if(!raw)return null;
+    const job=JSON.parse(raw);
+    return job&&typeof job==="object"&&job.id?job:null;
+  }catch(e){return null;}
+}
+function gdPracticeWriteImportJob(job){
+  gdPracticeImportJob=job||null;
+  try{
+    if(job)localStorage.setItem(GD_PRACTICE_IMPORT_JOB_KEY,JSON.stringify(job));
+    else localStorage.removeItem(GD_PRACTICE_IMPORT_JOB_KEY);
+  }catch(e){console.warn("[GolfDaddy] practice import job persistence failed",e);}
+  return gdPracticeImportJob;
+}
+function gdPracticeHydrateImportJob(){
+  const stored=gdPracticeReadImportJob();
+  if(!stored)return gdPracticeWriteImportJob(null);
+  const current=gdPracticeImportJob;
+  const storedTime=Date.parse(stored.updatedAt||stored.createdAt||"")||0;
+  const currentTime=Date.parse(current?.updatedAt||current?.createdAt||"")||0;
+  if(!current||storedTime>=currentTime)gdPracticeImportJob=stored;
+  return gdPracticeImportJob;
+}
+function gdPracticeImportActiveStatuses(){return {queued:true,scanning:true,parsing:true,validating:true,saving:true};}
+function gdPracticeImportIsActive(job=gdPracticeImportJob){return !!(job&&gdPracticeImportActiveStatuses()[String(job.status||"")]);}
+function gdPracticeImportBlocksNew(job=gdPracticeImportJob){return gdPracticeImportIsActive(job)||String(job?.status||"")==="failed";}
+function gdPracticeImportStatusLabel(status){
+  return ({
+    queued:"Import queued",
+    scanning:"Import running in background",
+    parsing:"Import running in background",
+    validating:"Import running in background",
+    saving:"Import saving",
+    completed:"Import completed",
+    failed:"Import failed - review",
+    canceled:"Import canceled"
+  })[String(status||"")]||"Import status";
+}
+function gdPracticeImportCanStart(sourceLabel){
+  const job=gdPracticeHydrateImportJob();
+  if(gdPracticeImportBlocksNew(job)){
+    gdLmToast("Practice import already running");
+    gdLmSetStatus("Status",String(job.status)==="failed"?"Practice import needs review":"Practice import already running",`${job.sourceLabel||sourceLabel||"Current import"} is ${String(job.status||"running")}. Review, discard, or finish it before starting another.`,"needs_more_data");
+    try{if(typeof renderPracticeData==="function")renderPracticeData(true);}catch(e){}
+    return false;
+  }
+  return true;
+}
+function gdPracticePayloadClubLabels(payload){
+  const groups=Array.isArray(payload?.clubGroups)?payload.clubGroups:[];
+  const clubs=groups.map(group=>String(group?.candidateClub||group?.originClubLabel||group?.club||"").trim()).filter(Boolean);
+  return [...new Set(clubs)].slice(0,8);
+}
+function gdPracticeStartImportJob(kind,sourceLabel,details={}){
+  if(!gdPracticeImportCanStart(sourceLabel))return null;
+  const now=gdPracticeNowISO();
+  const job={
+    id:`practice-import-${Date.now()}-${Math.random().toString(16).slice(2,8)}`,
+    kind:kind||"practice-import",
+    sourceLabel:sourceLabel||"Practice import",
+    source:details.source||kind||"practice-import",
+    importDate:details.importDate||now,
+    createdAt:now,
+    updatedAt:now,
+    status:details.status||"queued",
+    checkpointText:details.checkpointText||"Queued",
+    progress:Number(details.progress)||4,
+    stageIndex:Number(details.stageIndex)||0,
+    accepted:Number(details.accepted)||0,
+    rejected:Number(details.rejected)||0,
+    rawRows:Number(details.rawRows)||0,
+    nativeRows:Number(details.nativeRows)||0,
+    clubs:Array.isArray(details.clubs)?details.clubs.slice(0,8):[],
+    diagnostic:"",
+    userMessage:""
+  };
+  gdPracticeWriteImportJob(job);
+  gdPracticeSyncImportProcessing(job);
+  return job;
+}
+function gdPracticeUpdateImportJob(patch={}){
+  const current=gdPracticeHydrateImportJob();
+  if(!current)return null;
+  const next=Object.assign({},current,patch,{updatedAt:gdPracticeNowISO()});
+  gdPracticeWriteImportJob(next);
+  gdPracticeSyncImportProcessing(next);
+  try{if(typeof renderPracticeData==="function")renderPracticeData(true);}catch(e){}
+  return next;
+}
+function gdPracticeFailImportJob(error,userMessage){
+  const message=userMessage||error?.message||"Practice import failed";
+  return gdPracticeUpdateImportJob({
+    status:"failed",
+    checkpointText:message,
+    userMessage:message,
+    diagnostic:String(error?.stack||error?.message||error||message).slice(0,1200),
+    progress:100
+  });
+}
+function gdPracticeCompleteImportJob(result,payload,extra={}){
+  const groups=Array.isArray(payload?.clubGroups)?payload.clubGroups:[];
+  const rejected=Array.isArray(payload?.rejectedRows)?payload.rejectedRows.length:0;
+  return gdPracticeUpdateImportJob({
+    status:"completed",
+    checkpointText:`Saved ${extra.nativeRows||groups.length} shot${(extra.nativeRows||groups.length)===1?"":"s"}`,
+    accepted:groups.length||Number(extra.validCount)||0,
+    rejected:rejected||Number(extra.invalidCount)||0,
+    rawRows:groups.length+rejected||Number(extra.rawRows)||0,
+    nativeRows:Array.isArray(result?.shots)?result.shots.length:(Number(extra.nativeRows)||groups.length),
+    sessionId:result?.session?.sessionId||extra.sessionId||"",
+    captureId:result?.capture?.captureId||extra.captureId||"",
+    importBatchId:result?.session?.importBatchId||result?.capture?.importBatchId||extra.importBatchId||payload?.importBatchId||"",
+    importDate:result?.capture?.timestamp||payload?.timestamp||extra.importDate||gdPracticeImportJob?.importDate||gdPracticeNowISO(),
+    progress:100,
+    stageIndex:GD_PRACTICE_PROCESSING_STAGES.length-1
+  });
+}
+function gdPracticeClearImportJob(){
+  gdPracticeWriteImportJob(null);
+  gdSetPracticePhotoProcessing(false,{immediate:true,skipJob:true});
+  try{if(typeof renderPracticeData==="function")renderPracticeData(true);}catch(e){}
+  return false;
+}
+function gdPracticeCancelImportJob(){
+  const job=gdPracticeHydrateImportJob();
+  if(!job)return false;
+  if(String(job.status)==="saving"){
+    gdPracticeUpdateImportJob({checkpointText:"Save already started. The import will finish or become recoverable.",userMessage:"Save already started. The import will finish or become recoverable."});
+    gdLmToast("Import save already started");
+    return false;
+  }
+  gdPracticeUpdateImportJob({status:"canceled",checkpointText:"Canceled by user",userMessage:"Canceled by user",progress:100});
+  gdSetPracticePhotoProcessing(false,{immediate:true,skipJob:true});
+  return false;
+}
+function gdPracticeReviewImportJob(){
+  try{
+    gdSetShotDataLibraryOpen("practice",true);
+    gdTogglePracticeAdmin(true);
+    gdRenderPracticeImportPanel();
+    renderPracticeData(true);
+  }catch(e){}
+  return false;
+}
+function gdPracticeSyncImportProcessing(job=gdPracticeImportJob){
+  if(!gdPracticeImportIsActive(job))return;
+  gdPracticePhotoProcessing=true;
+  gdPracticePhotoProcessingProgress=Math.max(1,Math.min(98,Number(job.progress)||8));
+  gdPracticePhotoProcessingStageIndex=Math.max(0,Math.min(GD_PRACTICE_PROCESSING_STAGES.length-1,Math.round(Number(job.stageIndex)||0)));
+  if(!gdPracticePhotoProcessingStartedAt)gdPracticeProcessingStart();
+  document.body.classList.add("gdPracticePhotoProcessing");
+  document.getElementById("practiceDataPanel")?.classList.add("gdPracticePhotoProcessing");
+}
+function gdPracticeAssertImportNotCanceled(){
+  const job=gdPracticeHydrateImportJob();
+  if(job&&String(job.status)==="canceled")throw new Error("Practice import canceled");
+}
 function gdPracticeProcessingElapsed(){
   return gdPracticePhotoProcessingStartedAt?Math.max(0,Date.now()-gdPracticePhotoProcessingStartedAt):0;
 }
 function gdPracticeProcessingStageState(){
+  const activeJob=gdPracticeHydrateImportJob();
+  if(gdPracticeImportIsActive(activeJob)){
+    return{
+      index:Math.max(0,Math.min(GD_PRACTICE_PROCESSING_STAGES.length-1,Math.round(Number(activeJob.stageIndex)||0))),
+      progress:Math.max(4,Math.min(98,Math.round(Number(activeJob.progress)||8)))
+    };
+  }
   if(gdPracticePhotoProcessing){
     const explicitProgress=Number(gdPracticePhotoProcessingProgress);
     const explicitIndex=Number(gdPracticePhotoProcessingStageIndex);
@@ -24266,6 +24473,8 @@ function gdNativeShotDataProcessingTrackHTML(clubLabel=""){
   return `<span class="gdNativeProcessingBadge" aria-live="polite"><span class="gdNativeProcessingTrack" aria-hidden="true"><span class="gdNativeProcessingRail"></span><span class="gdNativeProcessingFill" style="width:${state.progress}%"></span><span class="gdNativeProcessingNodes">${stages}</span></span><span class="gdNativeProcessingLabel">${gdEscapeHTML(label)}</span></span>`;
 }
 function gdNativeShotDataProcessingHTML(){
+  const job=gdPracticeHydrateImportJob();
+  if(gdPracticeImportIsActive(job))gdPracticeSyncImportProcessing(job);
   return `<span class="gdNativeProcessingStack">${gdNativeShotDataProcessingTrackHTML()}</span>`;
 }
 function gdSetPracticePhotoProcessing(active,opts={}){
@@ -24326,6 +24535,20 @@ function gdSetPracticePhotoProcessing(active,opts={}){
     gdClosePracticeManualQuadTool();
     gdPracticeHideDebug();
     gdPracticeClearScanCheckpoint();
+  }
+  if(!opts?.skipJob){
+    const job=gdPracticeHydrateImportJob();
+    if(job&&gdPracticeImportIsActive(job)){
+      if(gdPracticePhotoProcessing){
+        gdPracticeUpdateImportJob({
+          progress:gdPracticePhotoProcessingProgress,
+          stageIndex:gdPracticePhotoProcessingStageIndex,
+          clubs:gdPracticePhotoProcessingClubs
+        });
+      }else if(String(job.status)!=="saving"){
+        gdPracticeUpdateImportJob({status:"failed",checkpointText:"Import stopped before it completed",userMessage:"Import stopped before it completed"});
+      }
+    }
   }
   try{if(typeof renderPracticeData==="function")renderPracticeData(true);}catch(e){}
 }
@@ -34223,6 +34446,12 @@ body.gdAuthLocked #gdProfileV67 .topbar{
   function gdParseNativePracticeImport(){
     const api=gdNativePracticeApi();
     const text=byId("gdNativePracticeImportText")?.value||"";
+    const existingJob=gdPracticeHydrateImportJob();
+    if(!existingJob||["completed","canceled"].includes(String(existingJob.status||"")))gdPracticeStartImportJob("practice-native","Native Practice Data paste",{status:"parsing",checkpointText:"Parsing native practice rows",stageIndex:1,progress:34,source:"native-paste"});
+    else if(String(existingJob.status)==="failed"){
+      gdPracticeImportCanStart("Native Practice Data paste");
+      return false;
+    }
     gdNativePracticeFeedbackPatch({
       status:"parsing",
       lastAction:"Parse started",
@@ -34233,6 +34462,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     gdPracticeDebugStartRun({sourceName:"Native Practice Data paste",sourceType:"csv",rawLength:text.length});
     gdPracticeDebugCheckpoint("native_csv_received","success",{outputSummary:"Paste input loaded",counts:{characters:text.length}});
     if(!api||typeof api.parsePracticeImportText!=="function"||typeof api.createPracticeImportBatch!=="function"){
+      gdPracticeFailImportJob(new Error("Native Practice Data module is not ready"),"Native Practice Data module is not ready. Refresh the app and try again.");
       gdNativePracticeFeedbackPatch({status:"failed",lastAction:"Parse failed",errors:["Native Practice Data module is not ready"],nextStep:"Refresh the app and try again."});
       gdPracticeDebugFailed("field_mapping",new Error("Native Practice Data module is not ready"),{outputSummary:"Parser API unavailable"});
       gdLmToast("Native Practice Data module is not ready");
@@ -34259,6 +34489,25 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       gdPracticePhotoDebugRun.raw.rejectedRows=invalid.map((row,index)=>({index:row.shotNumber||index+1,reason:(row.errors||[]).join(", "),rawValue:row.rawSource?.line||JSON.stringify(row.rawSource?.cells||{}),mappedValue:row.club||""}));
       gdPracticeDebugCheckpoint("practice_store_handoff","success",{outputSummary:"Preview is ready for Practice Data save path",counts:{valid:valid.length,rejected:invalid.length}});
       gdPracticeDebugFinish(valid.length?"success":"failed",{dataSaved:false,errorMessage:valid.length?"":"No valid native practice rows"});
+      if(valid.length){
+        gdPracticeUpdateImportJob({
+          status:"validating",
+          checkpointText:"Review native rows before saving",
+          accepted:valid.length,
+          rejected:invalid.length,
+          rawRows:batch.rows.length,
+          nativeRows:valid.length,
+          importBatchId:batch.batch?.importBatchId||"",
+          sessionId:batch.session?.sessionId||"",
+          importDate:batch.batch?.createdAt||batch.session?.createdAt||gdPracticeNowISO(),
+          stageIndex:1,
+          progress:68
+        });
+        gdSetPracticePhotoProcessing(false,{skipJob:true});
+      }else{
+        gdPracticeFailImportJob(new Error("No valid native practice rows"),"No valid native practice rows. Fix missing required fields or paste a cleaner CSV.");
+        gdSetPracticePhotoProcessing(false,{skipJob:true});
+      }
       gdNativePracticeImportPreview=batch;
       gdNativePracticeFeedbackPatch({
         status:valid.length?"ready_to_save":"failed",
@@ -34274,6 +34523,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       gdLmToast(`Parsed ${batch.rows.length} native row${batch.rows.length===1?"":"s"}`);
     }catch(e){
       console.warn("[GolfDaddy] native practice parse failed",e);
+      gdPracticeFailImportJob(e,e&&e.message?e.message:"Native Practice Data parse failed");
       gdNativePracticeImportPreview=null;
       gdNativePracticeFeedbackPatch({
         status:"failed",
@@ -34294,12 +34544,14 @@ body.gdAuthLocked #gdProfileV67 .topbar{
   function gdSaveNativePracticeImport(){
     const api=gdNativePracticeApi();
     if(!api||typeof api.saveNativePracticeShots!=="function"){
+      gdPracticeFailImportJob(new Error("Native Practice Data store is not ready"),"Native Practice Data store is not ready. Refresh the app and try again.");
       gdNativePracticeFeedbackPatch({status:"failed",lastAction:"Save failed",errors:["Native Practice Data store is not ready"],nextStep:"Refresh the app and try again."});
       gdPracticeDebugFailed("save_failed",new Error("Native Practice Data store is not ready"),{outputSummary:"Save API unavailable"});
       gdLmToast("Native Practice Data store is not ready");
       return false;
     }
     if(!gdNativePracticeImportPreview||!gdNativePracticeImportPreview.rows?.length){
+      gdPracticeFailImportJob(new Error("Parse rows before saving"),"Parse rows before saving.");
       gdNativePracticeFeedbackPatch({status:"failed",lastAction:"Save blocked",errors:["Parse rows before saving"],nextStep:"Paste or upload data, then parse it before saving."});
       gdPracticeDebugFailed("save_failed",new Error("Parse rows before saving"),{outputSummary:"No preview rows"});
       gdLmToast("Parse rows before saving");
@@ -34308,12 +34560,38 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     const saveBtn=byId("gdNativePracticeSaveBtn");
     try{
       gdPracticeDebugEnsureRun({sourceName:"Native Practice Data save"});
+      const validRows=(gdNativePracticeImportPreview.rows||[]).filter(row=>!row.errors?.length);
+      const invalidRows=(gdNativePracticeImportPreview.rows||[]).filter(row=>row.errors?.length);
+      if(!gdPracticeHydrateImportJob()||["completed","canceled"].includes(String(gdPracticeHydrateImportJob()?.status||"")))gdPracticeStartImportJob("practice-native","Native Practice Data save",{status:"saving",checkpointText:"Saving native rows",stageIndex:2,progress:82,source:"native-save"});
+      gdPracticeUpdateImportJob({
+        status:"saving",
+        checkpointText:"Saving valid native rows",
+        accepted:validRows.length,
+        rejected:invalidRows.length,
+        rawRows:gdNativePracticeImportPreview.rows.length,
+        nativeRows:validRows.length,
+        importBatchId:gdNativePracticeImportPreview.batch?.importBatchId||"",
+        sessionId:gdNativePracticeImportPreview.session?.sessionId||"",
+        importDate:gdNativePracticeImportPreview.batch?.createdAt||gdNativePracticeImportPreview.session?.createdAt||gdPracticeNowISO(),
+        stageIndex:2,
+        progress:84
+      });
       gdNativePracticeFeedbackPatch({status:"parsing",lastAction:"Saving native rows",warnings:[],errors:[],nextStep:"Saving valid rows to native storage..."});
       if(saveBtn)saveBtn.disabled=true;
       gdPracticeDebugRecordButtonState(true,"native-save-start");
       gdPracticeDebugCheckpoint("save_started","running",{inputSummary:`${gdNativePracticeImportPreview.rows.length} preview rows`});
+      gdPracticeAssertImportNotCanceled();
       if(gdPracticePhotoDebugQaForceSaveFailure)throw new Error("Admin QA fixture forced native save failure");
       const result=api.saveNativePracticeShots(gdNativePracticeImportPreview);
+      gdPracticeCompleteImportJob(null,null,{
+        nativeRows:Number(result?.savedCount)||0,
+        validCount:validRows.length,
+        invalidCount:Number(result?.rejectedCount)||invalidRows.length,
+        rawRows:gdNativePracticeImportPreview.rows.length,
+        importBatchId:gdNativePracticeImportPreview.batch?.importBatchId||"",
+        sessionId:gdNativePracticeImportPreview.session?.sessionId||"",
+        importDate:gdNativePracticeImportPreview.batch?.createdAt||gdNativePracticeImportPreview.session?.createdAt||gdPracticeNowISO()
+      });
       gdPracticeDebugCheckpoint("save_completed","success",{outputSummary:`Saved ${Number(result?.savedCount)||0} native rows`,counts:{saved:Number(result?.savedCount)||0,rejected:Number(result?.rejectedCount)||0}});
       const gate=typeof api.buildPracticeGateInput==="function"&&gdNativePracticeImportPreview?.session?.sessionId
         ?api.buildPracticeGateInput(gdNativePracticeImportPreview.session.sessionId,{importBatchId:gdNativePracticeImportPreview.batch?.importBatchId})
@@ -34338,11 +34616,13 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       gdLmToast(`Saved ${Number(result?.savedCount)||0} native practice row${Number(result?.savedCount)===1?"":"s"}`);
     }catch(e){
       console.warn("[GolfDaddy] native practice save failed",e);
+      gdPracticeFailImportJob(e,e&&e.message?e.message:"Native Practice Data save failed");
       gdNativePracticeFeedbackPatch({status:"failed",lastAction:"Save failed",errors:[e&&e.message?e.message:"Save failed"],nextStep:"Review valid rows and try saving again."});
       gdPracticeDebugFailed("save_failed",e,{inputSummary:"Native practice save",technicalDetails:e&&e.stack});
       gdLmToast("Native Practice Data save failed");
     }finally{
       gdRenderNativePracticeImportLane();
+      gdSetPracticePhotoProcessing(false,{skipJob:true});
       gdPracticeReleaseProcessingControls("native-save-finally");
     }
     return false;
@@ -37553,15 +37833,59 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     const offset=Number(method?.anchorDeg);
     return method&&Number.isFinite(offset)?"Bubble ready":"Bubble not ready";
   }
+  function gdPracticeImportJobHTML(){
+    const job=gdPracticeHydrateImportJob();
+    if(!job||String(job.status)==="canceled")return "";
+    const status=String(job.status||"");
+    const active=gdPracticeImportIsActive(job);
+    const failed=status==="failed";
+    const completed=status==="completed";
+    const title=gdPracticeImportStatusLabel(status);
+    const source=job.sourceLabel||job.source||"Practice import";
+    const date=job.importDate?gdPracticeEvidenceDateLabel(job.importDate):"Import date pending";
+    const counts=[
+      Number(job.accepted)?`${Number(job.accepted)} accepted`:"",
+      Number(job.rejected)?`${Number(job.rejected)} rejected`:"",
+      Number(job.nativeRows)?`${Number(job.nativeRows)} saved`:""
+    ].filter(Boolean).join(" · ");
+    const detail=job.userMessage||job.checkpointText||"Import progress is saved.";
+    const diagnostic=failed&&job.diagnostic?`<details class="gdPracticeImportJobDiagnostic"><summary>Diagnostic detail</summary><pre>${gdEscapeHTML(job.diagnostic)}</pre></details>`:"";
+    const actions=failed
+      ? `<button type="button" data-gd-practice-import-action="review">Resume/review import</button><button type="button" data-gd-practice-import-action="discard">Discard failed import</button>`
+      : active
+        ? (status==="saving"?`<button type="button" data-gd-practice-import-action="review">Review import</button>`:`<button type="button" data-gd-practice-import-action="review">Review import</button><button type="button" data-gd-practice-import-action="cancel">Cancel import</button>`)
+        : completed
+          ? `<button type="button" data-gd-practice-import-action="review">Open saved shots</button><button type="button" data-gd-practice-import-action="clear">Clear import status</button>`
+          : `<button type="button" data-gd-practice-import-action="clear">Clear import status</button>`;
+    return `<div class="gdPracticeImportJob ${active?"active":failed?"failed":"done"}">
+      <div class="gdPracticeImportJobMain"><strong>${gdEscapeHTML(title)}</strong><span>${gdEscapeHTML(detail)}</span><small>${gdEscapeHTML(source)} · ${gdEscapeHTML(date)}${counts?` · ${gdEscapeHTML(counts)}`:""}</small></div>
+      <div class="gdPracticeImportJobActions">${actions}</div>
+      ${diagnostic}
+    </div>`;
+  }
+  if(!window.__gdPracticeImportJobActionBound){
+    window.__gdPracticeImportJobActionBound=true;
+    document.addEventListener("click",event=>{
+      const target=event.target&&event.target.closest&&event.target.closest("[data-gd-practice-import-action]");
+      if(!target)return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const action=String(target.dataset.gdPracticeImportAction||"");
+      if(action==="cancel")return gdPracticeCancelImportJob();
+      if(action==="discard"||action==="clear")return gdPracticeClearImportJob();
+      if(action==="review")return gdPracticeReviewImportJob();
+    },true);
+  }
   function gdPracticeLibraryShellHTML(analysis,totalRows,bodyHTML){
     const bubble=gdPracticeBubbleValueLabel(analysis);
+    const jobHTML=gdPracticeImportJobHTML();
     return gdShotDataLibraryShellHTML({
       kind:"practice",
       title:"Clarity Shot Library",
       bubbleLabel:"Practice Bubble",
       bubbleValue:bubble,
       count:Number(totalRows)||0,
-      bodyHTML,
+      bodyHTML:jobHTML+bodyHTML,
       dropdown:true,
       open:gdShotDataLibraryIsOpen("practice"),
       headerStatusHTML:gdNativeShotDataProcessingHTML()
@@ -38662,6 +38986,11 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       gdPracticeCopyEmailAddress:gdPracticeCopyEmailAddress,
       gdPracticeRefreshEmailLane:gdPracticeRefreshEmailLane,
       gdPracticeLoadEmailBatch:gdPracticeLoadEmailBatch,
+      gdPracticeImportCanStart:gdPracticeImportCanStart,
+      gdPracticeStartImportJob:gdPracticeStartImportJob,
+      gdPracticeUpdateImportJob:gdPracticeUpdateImportJob,
+      gdPracticeClearImportJob:gdPracticeClearImportJob,
+      gdPracticeCancelImportJob:gdPracticeCancelImportJob,
       gdNativePracticeFeedbackPatch:gdNativePracticeFeedbackPatch,
       gdRenderNativePracticeImportLane:gdRenderNativePracticeImportLane,
       gdParseNativePracticeImport:gdParseNativePracticeImport,
@@ -41674,7 +42003,36 @@ body.gdGpsActive #bagRailBtn{order:7!important}
 	  line-height:1!important;
 	  text-align:center!important;
 	}
-	.gdPracticeEvidenceTabs{
+	.gdPracticeImportJob{
+	  display:grid!important;
+	  gap:10px!important;
+	  margin:0 0 12px!important;
+	  padding:12px!important;
+	  border:1px solid rgba(255,255,255,.10)!important;
+	  border-radius:8px!important;
+	  background:rgba(9,14,12,.82)!important;
+	  color:#fff!important;
+	}
+	.gdPracticeImportJob.active{border-color:rgba(55,242,141,.28)!important;box-shadow:inset 0 0 0 1px rgba(55,242,141,.08)!important}
+	.gdPracticeImportJob.failed{border-color:rgba(255,132,92,.38)!important;background:rgba(24,10,8,.86)!important}
+	.gdPracticeImportJob.done{border-color:rgba(215,176,107,.28)!important}
+	.gdPracticeImportJobMain{display:grid!important;gap:4px!important;min-width:0!important}
+	.gdPracticeImportJobMain strong{font-size:13px!important;font-weight:950!important;line-height:1.2!important}
+	.gdPracticeImportJobMain span{font-size:12px!important;line-height:1.35!important;color:rgba(255,255,255,.78)!important}
+	.gdPracticeImportJobMain small{font-size:10px!important;line-height:1.3!important;color:rgba(255,255,255,.55)!important}
+	.gdPracticeImportJobActions{display:flex!important;flex-wrap:wrap!important;gap:8px!important}
+	.gdPracticeImportJobActions button{
+	  border:1px solid rgba(255,255,255,.14)!important;
+	  border-radius:8px!important;
+	  background:rgba(255,255,255,.08)!important;
+	  color:#fff!important;
+	  padding:7px 10px!important;
+	  font-size:11px!important;
+	  font-weight:900!important;
+	}
+	.gdPracticeImportJobDiagnostic{font-size:11px!important;color:rgba(255,255,255,.68)!important}
+	.gdPracticeImportJobDiagnostic pre{max-height:120px!important;overflow:auto!important;white-space:pre-wrap!important;margin:8px 0 0!important;padding:8px!important;border-radius:6px!important;background:rgba(0,0,0,.28)!important}
+		.gdPracticeEvidenceTabs{
 	  display:flex!important;
 	  gap:6px!important;
 	  overflow:auto!important;
@@ -43447,6 +43805,35 @@ body.gdGpsActive #bagRailBtn{order:7!important}
 	  line-height:1!important;
 	  text-align:center!important;
 	}
+	.gdPracticeImportJob{
+	  display:grid!important;
+	  gap:10px!important;
+	  margin:0 0 12px!important;
+	  padding:12px!important;
+	  border:1px solid rgba(255,255,255,.10)!important;
+	  border-radius:8px!important;
+	  background:rgba(9,14,12,.82)!important;
+	  color:#fff!important;
+	}
+	.gdPracticeImportJob.active{border-color:rgba(55,242,141,.28)!important;box-shadow:inset 0 0 0 1px rgba(55,242,141,.08)!important}
+	.gdPracticeImportJob.failed{border-color:rgba(255,132,92,.38)!important;background:rgba(24,10,8,.86)!important}
+	.gdPracticeImportJob.done{border-color:rgba(215,176,107,.28)!important}
+	.gdPracticeImportJobMain{display:grid!important;gap:4px!important;min-width:0!important}
+	.gdPracticeImportJobMain strong{font-size:13px!important;font-weight:950!important;line-height:1.2!important}
+	.gdPracticeImportJobMain span{font-size:12px!important;line-height:1.35!important;color:rgba(255,255,255,.78)!important}
+	.gdPracticeImportJobMain small{font-size:10px!important;line-height:1.3!important;color:rgba(255,255,255,.55)!important}
+	.gdPracticeImportJobActions{display:flex!important;flex-wrap:wrap!important;gap:8px!important}
+	.gdPracticeImportJobActions button{
+	  border:1px solid rgba(255,255,255,.14)!important;
+	  border-radius:8px!important;
+	  background:rgba(255,255,255,.08)!important;
+	  color:#fff!important;
+	  padding:7px 10px!important;
+	  font-size:11px!important;
+	  font-weight:900!important;
+	}
+	.gdPracticeImportJobDiagnostic{font-size:11px!important;color:rgba(255,255,255,.68)!important}
+	.gdPracticeImportJobDiagnostic pre{max-height:120px!important;overflow:auto!important;white-space:pre-wrap!important;margin:8px 0 0!important;padding:8px!important;border-radius:6px!important;background:rgba(0,0,0,.28)!important}
 		.gdPracticeEvidenceTabs{
 		  display:flex!important;
 		  gap:6px!important;
