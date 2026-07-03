@@ -16947,19 +16947,32 @@ async function gdHandleLaunchMonitorPhoto(file){
   }
 }
 async function gdScanPracticePhotoCrop(){
+  let scanLoaderStarted=false;
+  const releaseScanLoader=()=>{
+    if(!scanLoaderStarted)return;
+    scanLoaderStarted=false;
+    if(typeof gdSetPracticePhotoProcessing==="function")gdSetPracticePhotoProcessing(false,{immediate:true,skipJob:true});
+  };
   try{
+    if(!gdPracticeImportCanStart(gdPracticePhotoName||"Practice photo scan"))return null;
+    gdSetPracticePhotoProcessing(true,{stageIndex:1,progress:16,preserveClubs:true});
+    scanLoaderStarted=true;
+    await gdPracticeYieldScanPaint();
     gdPracticeDebugEnsureRunSafe({sourceName:gdPracticePhotoName||"Practice photo scan"});
     gdPracticeDebugCheckpointSafe("crop_cleanup","running",{inputSummary:"Manual scan button"});
     const checkpoint=await gdBuildPracticeClusterCheckpoint();
     gdPracticeClusterCheckpoint=checkpoint;
     if(!checkpoint){
+      releaseScanLoader();
       gdPracticeDebugCheckpointSafe("crop_cleanup","warning",{outputSummary:"Auto value-grid shape not found; manual frame opened"});
       gdOpenPracticeManualQuadTool();
       return null;
     }
     gdPracticeDebugCheckpointSafe("crop_cleanup","success",{outputSummary:"Value-grid checkpoint created from scan button"});
+    releaseScanLoader();
     gdOpenPracticeManualQuadTool();
   }catch(e){
+    releaseScanLoader();
     console.warn("[GolfDaddy] launch monitor photo cluster failed",e);
     gdPracticeDebugFailedSafe("crop_cleanup",e,{outputSummary:"Photo cluster failed",technicalDetails:e&&e.stack});
     gdPracticeFeedback(e&&e.message?e.message:"Photo cluster failed. Frame it manually, then scan.","error");
@@ -42018,16 +42031,26 @@ body.gdGpsActive #bagRailBtn{order:7!important}
 	  display:grid!important;
 	  grid-template-columns:minmax(0,1fr)!important;
 	  align-items:center!important;
-	  gap:7px!important;
+	  gap:4px!important;
 	  min-width:0!important;
 	  width:100%!important;
 	}
-	.gdShotDataLibraryTabMain>.gdNativeProcessingStack{margin-top:2px!important}
+	.gdShotDataLibraryTabMain>.gdNativeProcessingStack{margin-top:0!important;gap:2px!important}
 	.gdShotDataLibraryTabMain .gdNativeProcessingBadge{
-	  grid-template-columns:minmax(34px,auto) minmax(126px,1fr) auto!important;
+	  grid-template-columns:minmax(74px,1fr) minmax(0,auto)!important;
+	  gap:5px!important;
 	  min-width:0!important;
 	  width:100%!important;
+	  font-size:8px!important;
+	  line-height:1!important;
 	}
+	.gdShotDataLibraryTabMain .gdNativeProcessingTrack,
+	.gdShotDataLibraryTabMain .gdNativeProcessingNodes{height:12px!important}
+	.gdShotDataLibraryTabMain .gdNativeProcessingRail,
+	.gdShotDataLibraryTabMain .gdNativeProcessingFill{left:5px!important;right:5px!important;height:2px!important}
+	.gdShotDataLibraryTabMain .gdNativeProcessingNode{width:10px!important;height:10px!important;font-size:6px!important;box-shadow:0 0 0 2px rgba(0,0,0,.18)!important}
+	.gdShotDataLibraryTabMain .gdNativeProcessingNode.active{box-shadow:0 0 0 3px rgba(55,242,141,.10)!important}
+	.gdShotDataLibraryTabMain .gdNativeProcessingLabel{max-width:104px!important;overflow:hidden!important;text-overflow:ellipsis!important}
 	.gdShotDataLibraryChevron{
 	  display:grid!important;
 	  place-items:center!important;
@@ -43938,16 +43961,26 @@ body.gdGpsActive #bagRailBtn{order:7!important}
 	  display:grid!important;
 	  grid-template-columns:minmax(0,1fr)!important;
 	  align-items:center!important;
-	  gap:7px!important;
+	  gap:4px!important;
 	  min-width:0!important;
 	  width:100%!important;
 	}
-	.gdShotDataLibraryTabMain>.gdNativeProcessingStack{display:grid!important;margin-top:2px!important}
+	.gdShotDataLibraryTabMain>.gdNativeProcessingStack{display:grid!important;margin-top:0!important;gap:2px!important}
 	.gdShotDataLibraryTabMain .gdNativeProcessingBadge{
-	  grid-template-columns:minmax(126px,1fr) auto!important;
+	  grid-template-columns:minmax(74px,1fr) minmax(0,auto)!important;
+	  gap:5px!important;
 	  min-width:0!important;
 	  width:100%!important;
+	  font-size:8px!important;
+	  line-height:1!important;
 	}
+	.gdShotDataLibraryTabMain .gdNativeProcessingTrack,
+	.gdShotDataLibraryTabMain .gdNativeProcessingNodes{height:12px!important}
+	.gdShotDataLibraryTabMain .gdNativeProcessingRail,
+	.gdShotDataLibraryTabMain .gdNativeProcessingFill{left:5px!important;right:5px!important;height:2px!important}
+	.gdShotDataLibraryTabMain .gdNativeProcessingNode{width:10px!important;height:10px!important;font-size:6px!important;box-shadow:0 0 0 2px rgba(0,0,0,.18)!important}
+	.gdShotDataLibraryTabMain .gdNativeProcessingNode.active{box-shadow:0 0 0 3px rgba(55,242,141,.10)!important}
+	.gdShotDataLibraryTabMain .gdNativeProcessingLabel{max-width:104px!important;overflow:hidden!important;text-overflow:ellipsis!important}
 	.gdShotDataLibraryChevron{
 	  display:grid!important;
 	  place-items:center!important;
