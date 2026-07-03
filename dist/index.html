@@ -24332,6 +24332,7 @@ var gdPracticePhotoProcessingStageIndex=0;
 const GD_PRACTICE_IMPORT_JOB_KEY="gd_practice_import_job_v1";
 const GD_PRACTICE_PROCESSING_MIN_VISIBLE_MS=0;
 const GD_PRACTICE_IMPORT_ACTIVE_STALE_MS=90000;
+const GD_PRACTICE_IMPORT_STALE_DIAGNOSTIC="Active practice scan exceeded the OCR timeout window and was released automatically.";
 const GD_PRACTICE_PROCESSING_STAGES=[
   "Scanning",
   "Importing",
@@ -24357,6 +24358,17 @@ function gdPracticeWriteImportJob(job){
   }catch(e){console.warn("[GolfDaddy] practice import job persistence failed",e);}
   return gdPracticeImportJob;
 }
+function gdPracticeReleaseStaleImportJob(){
+  gdPracticeWriteImportJob(null);
+  try{
+    gdPracticePhotoProcessing=false;
+    gdPracticePhotoProcessingProgress=0;
+    gdPracticePhotoProcessingStageIndex=0;
+    document.body?.classList.remove("gdPracticePhotoProcessing");
+    document.getElementById("practiceDataPanel")?.classList.remove("gdPracticePhotoProcessing");
+  }catch(e){}
+  return gdPracticeImportJob;
+}
 function gdPracticeHydrateImportJob(){
   const stored=gdPracticeReadImportJob();
   if(!stored)return gdPracticeWriteImportJob(null);
@@ -24364,24 +24376,12 @@ function gdPracticeHydrateImportJob(){
   const storedTime=Date.parse(stored.updatedAt||stored.createdAt||"")||0;
   const currentTime=Date.parse(current?.updatedAt||current?.createdAt||"")||0;
   if(!current||storedTime>=currentTime)gdPracticeImportJob=stored;
+  if(String(gdPracticeImportJob?.status||"")==="failed"&&String(gdPracticeImportJob?.diagnostic||"")===GD_PRACTICE_IMPORT_STALE_DIAGNOSTIC){
+    return gdPracticeReleaseStaleImportJob();
+  }
   const activeTime=Date.parse(gdPracticeImportJob?.updatedAt||gdPracticeImportJob?.createdAt||"")||0;
   if(gdPracticeImportIsActive(gdPracticeImportJob)&&activeTime&&Date.now()-activeTime>GD_PRACTICE_IMPORT_ACTIVE_STALE_MS){
-    gdPracticeImportJob=Object.assign({},gdPracticeImportJob,{
-      status:"failed",
-      checkpointText:"Practice scan timed out",
-      userMessage:"Practice scan timed out. Try the scan again with a tighter crop.",
-      diagnostic:"Active practice scan exceeded the OCR timeout window and was released automatically.",
-      progress:100,
-      updatedAt:gdPracticeNowISO()
-    });
-    gdPracticeWriteImportJob(gdPracticeImportJob);
-    try{
-      gdPracticePhotoProcessing=false;
-      gdPracticePhotoProcessingProgress=0;
-      gdPracticePhotoProcessingStageIndex=0;
-      document.body?.classList.remove("gdPracticePhotoProcessing");
-      document.getElementById("practiceDataPanel")?.classList.remove("gdPracticePhotoProcessing");
-    }catch(e){}
+    return gdPracticeReleaseStaleImportJob();
   }
   return gdPracticeImportJob;
 }
@@ -38056,7 +38056,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       Number(job.nativeRows)?`${Number(job.nativeRows)} saved`:""
     ].filter(Boolean).join(" · ");
     const detail=job.userMessage||job.checkpointText||"Import progress is saved.";
-    const diagnostic=failed&&job.diagnostic?`<details class="gdPracticeImportJobDiagnostic"><summary>Diagnostic detail</summary><pre>${gdEscapeHTML(job.diagnostic)}</pre></details>`:"";
+    const diagnostic="";
     const actions=failed
       ? `<button type="button" data-gd-practice-import-action="review">Resume/review import</button><button type="button" data-gd-practice-import-action="discard">Discard failed import</button>`
       : active
