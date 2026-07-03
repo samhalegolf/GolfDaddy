@@ -33312,7 +33312,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
   }
   function gdPracticePlotModeControls(){
     const mode=gdPracticePlotMode();
-    return `<div class="gdPracticePlotMode"><button type="button" class="${mode==="all"?"active":""}" aria-pressed="${mode==="all"?"true":"false"}" onclick="return gdPracticeSetPlotMode('all')">Show all</button><button type="button" class="${mode==="auto"?"active":""}" aria-pressed="${mode==="auto"?"true":"false"}" onclick="return gdPracticeSetPlotMode('auto')">Filter view</button><span>${mode==="all"?"Every stored shot is plotted.":"Filtered view is on."}</span></div>`;
+    return `<div class="gdPracticePlotMode"><button type="button" class="${mode==="all"?"active":""}" aria-pressed="${mode==="all"?"true":"false"}" data-gd-practice-plot-mode="all">Show all</button><button type="button" class="${mode==="auto"?"active":""}" aria-pressed="${mode==="auto"?"true":"false"}" data-gd-practice-plot-mode="auto">Filter view</button><span>${mode==="all"?"Every stored shot is plotted.":"Filtered view is on."}</span></div>`;
   }
   function gdPracticeShotActualDistance(shot){
     const carry=Number(shot?.carryM);
@@ -38420,7 +38420,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 		      const account=row.accountId||meta.accountId||"-";
 		      return `<div class="gdPracticeRawShotRow"><span>${Number(row.index)+1}</span><strong>${gdEscapeHTML(row.shotId||"-")}</strong><span>${gdEscapeHTML(gdPracticeRawValue(row.actualDistanceM))}</span><span>${gdEscapeHTML(offline)}</span><span>${gdEscapeHTML(offset)}</span><span>${gdEscapeHTML(status)}</span><span>${gdEscapeHTML(player)}</span><span>${gdEscapeHTML(account)}</span></div>`;
 		    }).join("");
-		    return `<div class="gdPracticeRawDrawer"><div class="gdPracticeRawHead"><div><strong>Raw shot data</strong><span>${gdEscapeHTML(club||"Unknown / Unmatched")} · ${gdEscapeHTML(date)} · ${gdEscapeHTML(source)}</span></div><button type="button" onclick="return gdPracticeToggleRawDetail(${gdPracticeJsArg(club)},${gdPracticeJsArg(importId)})">Close</button></div><div class="gdPracticeRawMeta"><span>Import <b>${gdEscapeHTML(importId||"unknown")}</b></span><span>${sorted.length} row${sorted.length===1?"":"s"}</span><span>Read-only</span></div><div class="gdPracticeRawScroll"><div class="gdPracticeRawShotTable"><div class="gdPracticeRawShotHead"><span>#</span><span>Shot ID</span><span>Carry</span><span>Offline</span><span>Offset</span><span>Status</span><span>Player</span><span>Account</span></div>${tableRows}</div></div></div>`;
+		    return `<div class="gdPracticeRawDrawer"><div class="gdPracticeRawHead"><div><strong>Raw shot data</strong><span>${gdEscapeHTML(club||"Unknown / Unmatched")} · ${gdEscapeHTML(date)} · ${gdEscapeHTML(source)}</span></div><button type="button" data-gd-practice-raw-club="${gdEscapeHTML(String(club||""))}" data-gd-practice-raw-import="${gdEscapeHTML(String(importId||""))}">Close</button></div><div class="gdPracticeRawMeta"><span>Import <b>${gdEscapeHTML(importId||"unknown")}</b></span><span>${sorted.length} row${sorted.length===1?"":"s"}</span><span>Read-only</span></div><div class="gdPracticeRawScroll"><div class="gdPracticeRawShotTable"><div class="gdPracticeRawShotHead"><span>#</span><span>Shot ID</span><span>Carry</span><span>Offline</span><span>Offset</span><span>Status</span><span>Player</span><span>Account</span></div>${tableRows}</div></div></div>`;
 		  }
 		  function gdPracticeToggleImportSelectMode(){
 		    gdPracticeImportSelectMode=!gdPracticeImportSelectMode;
@@ -38521,6 +38521,23 @@ body.gdAuthLocked #gdProfileV67 .topbar{
         event.preventDefault();
         event.stopImmediatePropagation();
         return gdPracticeToggleEvidenceClub(target);
+      },true);
+    }
+    if(!window.__gdPracticeLibraryActionBound){
+      window.__gdPracticeLibraryActionBound=true;
+      document.addEventListener("click",event=>{
+        const rawButton=event.target&&event.target.closest&&event.target.closest("[data-gd-practice-raw-import]");
+        if(rawButton){
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          return gdPracticeToggleRawDetail(rawButton.dataset.gdPracticeRawClub||"",rawButton.dataset.gdPracticeRawImport||"");
+        }
+        const plotButton=event.target&&event.target.closest&&event.target.closest("[data-gd-practice-plot-mode]");
+        if(plotButton){
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          return gdPracticeSetPlotMode(plotButton.dataset.gdPracticePlotMode||"all");
+        }
       },true);
     }
 	  function gdPracticeSetEvidenceClubTab(club){
@@ -38781,7 +38798,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 			        const detail=detailOpen?gdPracticeRawShotTableHTML(importRows,meta,club,importId):"";
 			        const statusLabel=importRows.some(row=>row.counted)?"bubble fit":(rejected?"needs review":"stored");
 			        const adminActions=adminOpen?`<button type="button" class="danger" onclick="return gdPracticeDeleteImports(${gdPracticeJsArg(importId)})">Delete entire import</button>`:"";
-			        return `<div class="gdPracticeUploadRow" data-import-id="${gdEscapeHTML(importId)}">${checkbox}<div class="gdPracticeUploadMeta"><strong>${gdEscapeHTML(dateLabel)}</strong><span>${gdEscapeHTML(sourceLabel)} · ${importRows.length} shot${importRows.length===1?"":"s"} · ${accepted} accepted${rejected?` · ${rejected} rejected`:""}</span></div><b>${gdEscapeHTML(statusLabel)}</b><div class="gdPracticeUploadActions"><button type="button" onclick="return gdPracticeToggleRawDetail(${gdPracticeJsArg(club)},${gdPracticeJsArg(importId)})">${detailOpen?"Hide raw data":"View raw data"}</button>${adminActions}</div>${detail}</div>`;
+			        return `<div class="gdPracticeUploadRow" data-import-id="${gdEscapeHTML(importId)}">${checkbox}<div class="gdPracticeUploadMeta"><strong>${gdEscapeHTML(dateLabel)}</strong><span>${gdEscapeHTML(sourceLabel)} · ${importRows.length} shot${importRows.length===1?"":"s"} · ${accepted} accepted${rejected?` · ${rejected} rejected`:""}</span></div><b>${gdEscapeHTML(statusLabel)}</b><div class="gdPracticeUploadActions"><button type="button" data-gd-practice-raw-club="${gdEscapeHTML(String(club||""))}" data-gd-practice-raw-import="${gdEscapeHTML(String(importId||""))}">${detailOpen?"Hide raw data":"View raw data"}</button>${adminActions}</div>${detail}</div>`;
 			      }).join("");
 			      return `<section class="gdPracticeShotClub ${open?"open":""}" data-club="${gdEscapeHTML(club)}"><button type="button" class="gdPracticeShotClubHead" data-gd-practice-club-toggle aria-expanded="${open?"true":"false"}"><div><span>${gdEscapeHTML(club)}</span><strong>${clubRows.length} shot${clubRows.length===1?"":"s"} · ${importCount} upload${importCount===1?"":"s"}</strong></div><small>${gdEscapeHTML(gdPracticeImportDate(latest))}${bubbleStatus?` · ${gdEscapeHTML(bubbleStatus)}`:""}</small><b class="gdPracticeEvidenceChevron">${open?"-":"+"}</b></button><div class="gdPracticeShotClubBody">${uploadRows}</div></section>`;
 			    }).join("");
