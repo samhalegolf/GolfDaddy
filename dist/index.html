@@ -13550,7 +13550,7 @@ function gdRenderFlatTableBridgeCheckpoint(columnScan){
       bodyNode.onclick=()=>gdOpenPracticeTemplateOutcomes("ocr");
     }else{
       bodyNode.textContent="Read cell values";
-      bodyNode.onclick=()=>gdRunPracticeGridExperiment("cell-ocr",{importToNative:true,sourceLabel:gdPracticePhotoName||"Practice photo scan"});
+      bodyNode.onclick=()=>gdRunPracticeGridExperiment("cell-ocr");
     }
   }
   gdRenderPracticeScanCheckpoint({
@@ -16548,37 +16548,6 @@ function gdRenderOcrGeneratedTemplateOutput(columnScan,activeKey="ocr"){
   if(expanderTitle)expanderTitle.textContent="Template comparison";
   gdRenderPracticeTemplateOutcomeTabs(activeKey);
 }
-async function gdRunPracticePhotoGridValueImport(columnScan,opts={}){
-  const rows=Number(columnScan?.cellGrid?.rows?.length)||0;
-  const columns=Number(columnScan?.cellGrid?.columns?.length)||0;
-  if(!rows||!columns)return null;
-  const sourceLabel=opts.sourceLabel||gdPracticePhotoName||"Practice photo scan";
-  if(opts.updateImportJob!==false){
-    gdPracticeUpdateImportJob({status:"parsing",checkpointText:`Reading OCR cells (${rows} x ${columns})`,stageIndex:1,progress:42});
-  }
-  gdPracticeSetContinueScanReady(false);
-  gdPracticeRefreshDebugTools();
-  gdPracticeFeedback(`OCR-generated grid ready: ${rows} rows x ${columns}. Reading cell values...`);
-  gdPracticeDebugCheckpointSafe("extraction_started","running",{
-    inputSummary:"OCR grid ready; fitted-cell value scan starting",
-    counts:{gridRows:rows,gridColumns:columns}
-  });
-  await gdPracticeYieldScanPaint();
-  const payload=await gdPracticeWithTimeout(
-    gdRunFittedCellGridOcr(columnScan,{
-      allowParkedFittedCellOcr:true,
-      importToNative:opts.importToNative===true,
-      label:opts.label||"Practice photo scan",
-      sourceLabel
-    }),
-    Number(opts.fittedCellOcrMaxMs)||45000,
-    "Practice photo cell OCR"
-  );
-  if(opts.importToNative===true&&!payload?.clubGroups?.length){
-    gdPracticeFailImportJob(new Error("Cell OCR completed but no usable shots were formed"),"Cell OCR completed but no usable shots were formed. Review the scanner output.");
-  }
-  return payload;
-}
 async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatScan=null,opts={}){
   const scanImage=flatScan?.sourceCanvas||flatScan?.preparedCanvas||flatScan?.directColumnSource||checkpoint?.scanImage||checkpoint?.directColumnSource||checkpoint?.cluster?.displayCutoutCanvas||checkpoint?.cluster?.cutoutCanvas||null;
   if(!scanImage){
@@ -16753,16 +16722,6 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
     gdPracticeDebugCheckpointSafe("table_detected","success",{outputSummary:`OCR-generated grid ready: ${gridRows} rows x ${gridColumns} columns`,counts:{rows:gridRows,columns:gridColumns,cells:gridCells}});
     gdPracticeDebugCheckpointSafe("ocr_generated_template","success",{outputSummary:`OCR-generated grid ready: ${gridRows} rows x ${gridColumns} columns; ${allocatedColumns}/${cutoutColumns} headers allocated by dedicated text OCR`,counts:{rows:gridRows,columns:gridColumns,cells:gridCells,headersAllocated:allocatedColumns,headersTotal:cutoutColumns,headerTextWords,headerTextAttempts,words:wordCount,candidates:outcome.candidateCount}});
     gdSetPracticeScanStatus(`OCR-generated grid ready: ${gridRows} rows x ${gridColumns} cutouts. Header / cutout allocation ${allocatedColumns}/${cutoutColumns}.`);
-    if(opts.autoReadValues===true){
-      const payload=await gdRunPracticePhotoGridValueImport(columnScan,{
-        importToNative:opts.importToNative===true,
-        sourceLabel:opts.sourceLabel||gdPracticePhotoName||"Practice photo scan",
-        label:opts.valueLabel||opts.label||"Practice photo scan",
-        fittedCellOcrMaxMs:opts.fittedCellOcrMaxMs
-      });
-      outcome.payload=payload||null;
-      return {payload,scan:columnScan,outcome};
-    }
     return {payload:null,scan:columnScan,outcome};
   }catch(e){
     console.warn("[GolfDaddy] OCR generated template fallback failed",e);
@@ -16811,12 +16770,7 @@ async function gdRunPracticeGridExperiment(kind="ocr-generated",opts={}){
       gdSetPracticeScanStatus("Generate the OCR grid first, then read cell values.");
       return null;
     }
-    return gdRunPracticePhotoGridValueImport(scan,{
-      importToNative:opts.importToNative===true,
-      sourceLabel:opts.sourceLabel||gdPracticePhotoName||"Practice photo scan",
-      label:"Raw cell value read",
-      updateImportJob:gdPracticeImportIsActive(gdPracticeHydrateImportJob())
-    });
+    return gdRunFittedCellGridOcr(scan,{allowParkedFittedCellOcr:true,label:"Raw cell value read"});
   }
   const checkpoint=gdPracticeClusterCheckpoint||window.__gdPracticeClusterCheckpoint;
   if(!checkpoint){
@@ -16852,17 +16806,33 @@ async function gdRunDefaultPracticePhotoScanFromCheckpoint(checkpoint,opts={}){
     gdPracticeUpdateImportJob({status:"scanning",checkpointText:"Generating OCR practice grid",stageIndex:0,progress:22});
     const result=await gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,null,{
       label:"Practice photo OCR generated grid",
-      valueLabel:"Practice photo scan",
-      sourceLabel:opts.sourceLabel||gdPracticePhotoName||"Practice photo scan",
-      autoReadValues:true,
-      importToNative:true,
-      fittedCellOcrMaxMs:Number(opts.fittedCellOcrMaxMs)||45000
+      sourceLabel:opts.sourceLabel||gdPracticePhotoName||"Practice photo scan"
     });
     const scan=result?.scan||result?.outcome?.scan||null;
     const rows=Number(scan?.cellGrid?.rows?.length)||0;
     const columns=Number(scan?.cellGrid?.columns?.length)||0;
     if(rows&&columns){
-      return result?.payload||null;
+      gdPracticeUpdateImportJob({status:"parsing",checkpointText:`Reading OCR cells (${rows} x ${columns})`,stageIndex:1,progress:42});
+      gdPracticeSetContinueScanReady(false);
+      gdPracticeRefreshDebugTools();
+      gdPracticeFeedback(`OCR-generated grid ready: ${rows} rows x ${columns}. Reading cell values...`);
+      gdPracticeDebugCheckpointSafe("extraction_started","running",{
+        inputSummary:"OCR grid ready; fitted-cell value scan starting",
+        counts:{gridRows:rows,gridColumns:columns}
+      });
+      await gdPracticeYieldScanPaint();
+      const payload=await gdPracticeWithTimeout(
+        gdRunFittedCellGridOcr(scan,{
+          allowParkedFittedCellOcr:true,
+          importToNative:true,
+          label:"Practice photo scan",
+          sourceLabel:opts.sourceLabel||gdPracticePhotoName||"Practice photo scan"
+        }),
+        Number(opts.fittedCellOcrMaxMs)||45000,
+        "Practice photo cell OCR"
+      );
+      if(!payload?.clubGroups?.length)gdPracticeFailImportJob(new Error("Cell OCR completed but no usable shots were formed"),"Cell OCR completed but no usable shots were formed. Review the scanner output.");
+      return payload;
     }else{
       gdPracticeFailImportJob(new Error("OCR-generated grid was not ready"),"OCR-generated grid was not ready. Inspect the header and value word evidence.");
       gdPracticeSetContinueScanReady(true);
