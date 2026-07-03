@@ -38734,6 +38734,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     return false;
   }
   function gdPracticeSandboxControlsHTML(variant=""){
+    if(!gdPracticeAdminIsOpen())return "";
     const compact=String(variant||"")==="compact";
     return `<div class="gdPracticeSandboxControls ${compact?"compact":""}"><div><strong>Local test inputs</strong><span>${compact?"Native-shaped sandbox rows.":"Temporary native-shaped rows for UI testing."}</span></div><div class="gdPracticeSandboxButtons"><button type="button" data-gd-practice-sandbox-action="simulate" data-gd-practice-sandbox-scenario="ready">Simulate import</button><button type="button" data-gd-practice-sandbox-action="load" data-gd-practice-sandbox-scenario="ready">Ready rows</button><button type="button" data-gd-practice-sandbox-action="load" data-gd-practice-sandbox-scenario="sparse">Sparse rows</button><button type="button" data-gd-practice-sandbox-action="load" data-gd-practice-sandbox-scenario="distance">Distance mismatch</button><button type="button" data-gd-practice-sandbox-action="clear">Clear</button><button type="button" data-gd-practice-sandbox-action="bag" data-gd-practice-sandbox-mode="empty">Bag empty</button><button type="button" data-gd-practice-sandbox-action="bag" data-gd-practice-sandbox-mode="matched">Bag matched</button><button type="button" data-gd-practice-sandbox-action="bag" data-gd-practice-sandbox-mode="different">Bag differs</button></div></div>`;
   }
