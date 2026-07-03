@@ -7833,6 +7833,10 @@ function gdPracticeDebugFinishSafe(status,summary){return gdPracticeDebugBridge(
 function gdPracticeReleaseProcessingControlsSafe(reason){
   const released=gdPracticeDebugBridge("gdPracticeReleaseProcessingControls",[reason]);
   if(released!==null)return released;
+  try{
+    document.body?.classList.remove("gdPracticeScanRunning");
+    document.getElementById("practiceDataPanel")?.classList.remove("gdPracticeScanRunning");
+  }catch(e){}
   if(typeof gdSetPracticePhotoProcessing==="function"){
     gdSetPracticePhotoProcessing(false);
     return true;
@@ -8252,7 +8256,7 @@ function gdSetPracticeScanStatus(message){
   const text=String(message||"");
   const state=/failed|could not|no column|too small|no usable/i.test(text)
     ?"error"
-    :(/ready|imported|checkpoint ready|complete|cluster found|column crops ready|columns cropped/i.test(text)?"ready":(/reading|finding|fitting|flattening|cropping|scan/i.test(text)?"scanning":"idle"));
+    :(/reading|finding|fitting|flattening|cropping|generating|checking|masking|scan started|scanning/i.test(text)?"scanning":(/ready|imported|checkpoint ready|complete|cluster found|column crops ready|columns cropped/i.test(text)?"ready":"idle"));
   ["gdPracticeScanStatus","gdPracticeDebugStatus"].forEach(id=>{
     const el=document.getElementById(id);
     if(!el)return;
@@ -8262,7 +8266,16 @@ function gdSetPracticeScanStatus(message){
     if(id==="gdPracticeDebugStatus"&&text&&gdPracticeCanShowScanDebug())el.classList.add("active");
   });
   document.body.classList.toggle("gdPracticeScanRunning",state==="scanning");
+  document.getElementById("practiceDataPanel")?.classList.toggle("gdPracticeScanRunning",state==="scanning");
+  if(state==="scanning"){
+    if(!gdPracticePhotoProcessingStartedAt)gdPracticeProcessingStart();
+    try{gdSetShotDataLibraryOpen("practice",true);}catch(e){}
+  }
   try{gdPracticeSyncLibraryProcessingSurface();}catch(e){}
+  if(state==="scanning"){
+    setTimeout(()=>{try{gdPracticeSyncLibraryProcessingSurface();}catch(e){}},0);
+    setTimeout(()=>{try{gdPracticeSyncLibraryProcessingSurface();}catch(e){}},120);
+  }
   if(state==="error")gdLmToast(message);
 }
 function gdPracticeQuietScanSurface(opts={}){
@@ -17057,6 +17070,12 @@ async function gdPracticePrimaryScanAction(){
   if(manual&&!manual.hidden&&manual.classList.contains("active")){
     return gdApplyPracticeManualQuad();
   }
+  const checkpoint=gdPracticeClusterCheckpoint||window.__gdPracticeClusterCheckpoint||null;
+  if(checkpoint){
+    gdSetPracticePhotoProcessing(true,{stageIndex:0,progress:8,preserveClubs:true});
+    await gdPracticeYieldScanPaint();
+    return gdRunDefaultPracticePhotoScanFromCheckpoint(checkpoint,{sourceLabel:gdPracticePhotoName||"Practice photo scan"});
+  }
   return gdScanPracticePhotoCrop();
 }
 async function gdContinuePracticePhotoScan(){
@@ -24506,7 +24525,9 @@ function gdPracticeReleaseStalledOcr(reason=""){
   try{gdPracticeResetTesseractWorkers(reason);}catch(e){}
   try{
     gdPracticeProcessingStop();
+    document.body?.classList.remove("gdPracticeScanRunning");
     document.body?.classList.remove("gdPracticePhotoProcessing");
+    document.getElementById("practiceDataPanel")?.classList.remove("gdPracticeScanRunning");
     document.getElementById("practiceDataPanel")?.classList.remove("gdPracticePhotoProcessing");
     gdPracticeClearLibraryProcessingSurface();
     gdPracticeQuietScanSurface({clearStatus:true});
@@ -24517,6 +24538,12 @@ function gdPracticeReleaseStalledOcr(reason=""){
 function gdPracticeReleaseInactiveProcessingSurface(){
   const job=gdPracticeHydrateImportJob();
   if(gdPracticeImportIsActive(job))return false;
+  const scanRunning=!!(document.body?.classList.contains("gdPracticeScanRunning")||document.getElementById("practiceDataPanel")?.classList.contains("gdPracticeScanRunning"));
+  if(scanRunning){
+    if(!gdPracticePhotoProcessingStartedAt||gdPracticeProcessingElapsed()<=GD_PRACTICE_CELL_OCR_WATCHDOG_MS)return false;
+    document.body?.classList.remove("gdPracticeScanRunning");
+    document.getElementById("practiceDataPanel")?.classList.remove("gdPracticeScanRunning");
+  }
   if(gdPracticePhotoProcessing&&gdPracticePhotoProcessingStartedAt&&gdPracticeProcessingElapsed()<=GD_PRACTICE_IMPORT_ACTIVE_STALE_MS)return false;
   gdPracticePhotoProcessing=false;
   gdPracticePhotoProcessingProgress=0;
@@ -24706,7 +24733,8 @@ function gdPracticeProcessingStageState(){
   return{index,progress};
 }
 function gdPracticeProcessingRefresh(){
-  if(!gdPracticePhotoProcessing)return;
+  const scanRunning=!!(document.body?.classList.contains("gdPracticeScanRunning")||document.getElementById("practiceDataPanel")?.classList.contains("gdPracticeScanRunning"));
+  if(!gdPracticePhotoProcessing&&!scanRunning)return;
   const job=gdPracticeHydrateImportJob();
   const elapsed=gdPracticeProcessingElapsed();
   if(gdPracticeImportIsActive(job)){
@@ -24799,13 +24827,16 @@ function gdPracticeClearLibraryProcessingSurface(){
 }
 function gdPracticeSyncLibraryProcessingSurface(){
   const job=gdPracticeHydrateImportJob();
-  const scanRunning=!!document.body?.classList.contains("gdPracticeScanRunning");
+  const scanRunning=!!(document.body?.classList.contains("gdPracticeScanRunning")||document.getElementById("practiceDataPanel")?.classList.contains("gdPracticeScanRunning"));
   const active=gdPracticeImportIsActive(job)||!!gdPracticePhotoProcessing||scanRunning;
   if(!active){
     gdPracticeClearLibraryProcessingSurface();
     return false;
   }
-  const body=document.querySelector(".gdShotDataLibraryShell-practice .gdPracticeLibraryBody");
+  const body=document.querySelector(".gdShotDataLibraryShell-practice .gdPracticeLibraryBody")
+    ||document.querySelector(".gdShotDataLibraryShell-practice")
+    ||document.getElementById("gdPracticeEvidenceList")
+    ||document.getElementById("practiceDataPanel");
   if(!body)return false;
   let surface=Array.from(body.children||[]).find(node=>node.classList&&node.classList.contains("gdPracticeLibraryProcessing"));
   if(!surface){
@@ -24813,6 +24844,7 @@ function gdPracticeSyncLibraryProcessingSurface(){
     surface.className="gdPracticeLibraryProcessing";
     body.prepend(surface);
   }
+  document.querySelectorAll(".gdPracticeLibraryProcessing").forEach(node=>{if(node!==surface)node.remove();});
   surface.innerHTML=`<span class="gdNativeProcessingStack">${gdNativeShotDataProcessingTrackHTML()}</span>`;
   return true;
 }
@@ -24820,6 +24852,11 @@ function gdNativeShotDataProcessingHTML(){
   const job=gdPracticeHydrateImportJob();
   if(gdPracticeImportIsActive(job)){
     gdPracticeSyncImportProcessing(job);
+    return `<span class="gdNativeProcessingStack">${gdNativeShotDataProcessingTrackHTML()}</span>`;
+  }
+  const scanRunning=!!(document.body?.classList.contains("gdPracticeScanRunning")||document.getElementById("practiceDataPanel")?.classList.contains("gdPracticeScanRunning"));
+  if(scanRunning){
+    if(!gdPracticePhotoProcessingStartedAt)gdPracticeProcessingStart();
     return `<span class="gdNativeProcessingStack">${gdNativeShotDataProcessingTrackHTML()}</span>`;
   }
   if(!gdPracticePhotoProcessing){
