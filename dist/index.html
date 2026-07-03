@@ -5775,7 +5775,7 @@ body[data-gd-permission="admin"] #gdV62Home .gdHomeAdminSettings{display:inline-
 <div class="gdPracticeScanGuide" aria-hidden="true"><span>Keep the shot table inside this frame</span></div>
 </div>
 <label class="gdPracticeScanClubField" for="gdPracticeScanClubInput">Club<input id="gdPracticeScanClubInput" type="text" value="7i" placeholder="7i" autocomplete="off"></label>
-<div class="gdPracticeScannerActions"><button id="gdPracticeClearPhotoBtn" type="button" onclick="gdCancelPracticePhotoScan()" hidden>Clear Photo</button><button class="primary" id="gdPracticeScanPhotoBtn" type="button" onclick="gdScanPracticePhotoCrop()">Scan</button><button class="primary" id="gdPracticeDefaultScanBtn" type="button" onclick="gdRunDefaultPracticePhotoScan()" hidden>Scan to Clarity Shot Library</button><button id="gdPracticeManualQuadBtn" type="button" onclick="gdOpenPracticeManualQuadTool()" hidden>Adjust box</button><button id="gdPracticeContinueScanBtn" type="button" onclick="gdContinuePracticePhotoScan()" hidden>Scan cell values</button></div>
+<div class="gdPracticeScannerActions"><button id="gdPracticeClearPhotoBtn" type="button" onclick="gdCancelPracticePhotoScan()" hidden>Clear Photo</button><button class="primary" id="gdPracticeScanPhotoBtn" type="button" onclick="gdPracticePrimaryScanAction()">Scan</button><button class="primary" id="gdPracticeDefaultScanBtn" type="button" onclick="gdRunDefaultPracticePhotoScan()" hidden>Scan to Clarity Shot Library</button><button id="gdPracticeManualQuadBtn" type="button" onclick="gdOpenPracticeManualQuadTool()" hidden>Adjust box</button><button id="gdPracticeContinueScanBtn" type="button" onclick="gdContinuePracticePhotoScan()" hidden>Scan cell values</button></div>
 <div class="gdPracticeGridExperiments" id="gdPracticeGridExperiments" hidden>
 <div class="gdPracticeGridExperimentHead"><strong>Scan debug tools</strong><span>Header / cutout allocation and cell values share the default scanner path.</span></div>
 <div class="gdPracticeScannerActions gdPracticeGridExperimentActions"><button class="primary" id="gdPracticeBoxTrackGridBtn" type="button" onclick="gdRunPracticeGridExperiment('ocr-generated')">Header / cutout allocation</button><button id="gdPracticeCellOcrGridBtn" type="button" onclick="gdRunPracticeGridExperiment('cell-ocr')" hidden>Re-read cell values</button><button id="gdPracticeDigitizeTableBtn" type="button" onclick="gdRunPracticeGridExperiment('digitize-table')" hidden>Digitise table</button></div>
@@ -16916,6 +16916,13 @@ async function gdScanPracticePhotoCrop(){
     gdOpenPracticeManualQuadTool();
   }
 }
+async function gdPracticePrimaryScanAction(){
+  const manual=document.getElementById("gdPracticeManualQuadTool");
+  if(manual&&!manual.hidden&&manual.classList.contains("active")){
+    return gdApplyPracticeManualQuad();
+  }
+  return gdScanPracticePhotoCrop();
+}
 async function gdContinuePracticePhotoScan(){
   try{
     gdPracticeDebugEnsureRunSafe({sourceName:gdPracticePhotoName||"Practice photo scan"});
@@ -17212,7 +17219,7 @@ document.addEventListener("change",event=>{
   else gdHandleLaunchMonitorUpload(file);
   input.value="";
 },true);
-Object.assign(window,{gdLoadLaunchMonitorDemo,gdClearLaunchMonitorDemo,gdPickLaunchMonitorFile,gdPickPracticePhotoFile,gdAdjustPracticeGeneratedBox,gdHandleNativePracticeTextFile,gdHandleLaunchMonitorUpload,gdHandleLaunchMonitorPhoto,gdScanPracticePhotoCrop,gdOpenPracticeManualQuadTool,gdApplyPracticeManualQuad,gdRunDefaultPracticePhotoScan,gdRunDefaultPracticePhotoScanFromCheckpoint,gdSetPracticePhotoProcessing,gdPracticeRefreshDebugTools,gdContinuePracticePhotoScan,gdImportReviewedPracticeOcr,gdCancelPracticePhotoScan,gdCancelPracticeOcrReview,gdPracticeScanClubLabel,gdPracticeScanClubLabels,gdLoadExtractedPractice7iData,gdPracticeSetExtractionPreview,gdPracticeClearExtractionPreview,gdImportPracticeExtractionPreview,gdBuildLaunchMonitorTextCapture,gdCleanLaunchMonitorOcrText,gdLmCaptureToReviewText,gdAnalyzeFlatTableImage,gdFitFlatTableTemplateFromAnalysis,gdBuildFlatTableTemplateColumnScan,gdOpenPracticeFlatTableFailureWindow,gdRenderFlatTableFailureWindow,gdOpenPracticeTemplateOutcomes,gdRunOcrGeneratedTemplateFallbackFromCheckpoint,gdRunFlatTemplateBridgeFromCheckpoint,gdRunPracticeGridExperiment,gdRunFittedCellGridOcr,gdBuildFlatDigitizedTable,gdRenderFlatDigitizedTable,gdPickRawCourseDataFile,gdHandleRawCourseDataUpload,gdClearCourseShotData});
+Object.assign(window,{gdLoadLaunchMonitorDemo,gdClearLaunchMonitorDemo,gdPickLaunchMonitorFile,gdPickPracticePhotoFile,gdAdjustPracticeGeneratedBox,gdHandleNativePracticeTextFile,gdHandleLaunchMonitorUpload,gdHandleLaunchMonitorPhoto,gdScanPracticePhotoCrop,gdPracticePrimaryScanAction,gdOpenPracticeManualQuadTool,gdApplyPracticeManualQuad,gdRunDefaultPracticePhotoScan,gdRunDefaultPracticePhotoScanFromCheckpoint,gdSetPracticePhotoProcessing,gdPracticeRefreshDebugTools,gdContinuePracticePhotoScan,gdImportReviewedPracticeOcr,gdCancelPracticePhotoScan,gdCancelPracticeOcrReview,gdPracticeScanClubLabel,gdPracticeScanClubLabels,gdLoadExtractedPractice7iData,gdPracticeSetExtractionPreview,gdPracticeClearExtractionPreview,gdImportPracticeExtractionPreview,gdBuildLaunchMonitorTextCapture,gdCleanLaunchMonitorOcrText,gdLmCaptureToReviewText,gdAnalyzeFlatTableImage,gdFitFlatTableTemplateFromAnalysis,gdBuildFlatTableTemplateColumnScan,gdOpenPracticeFlatTableFailureWindow,gdRenderFlatTableFailureWindow,gdOpenPracticeTemplateOutcomes,gdRunOcrGeneratedTemplateFallbackFromCheckpoint,gdRunFlatTemplateBridgeFromCheckpoint,gdRunPracticeGridExperiment,gdRunFittedCellGridOcr,gdBuildFlatDigitizedTable,gdRenderFlatDigitizedTable,gdPickRawCourseDataFile,gdHandleRawCourseDataUpload,gdClearCourseShotData});
 function gdLmStatusClass(status){
   if(["corroborated","cross_distance_verified","verified_by_result","cluster_candidate","delivery_only","result_only"].includes(status))return "good";
   if(["conflict_check","alignment_signal"].includes(status))return "warn";
