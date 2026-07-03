@@ -10680,6 +10680,25 @@ function gdAttachFittedCellOcrSource(data,valueCrop,scanCrop){
   }
   return data;
 }
+function gdPracticeOcrTimeoutError(label,ms){
+  const error=new Error(`${label||"OCR read"} timed out after ${Math.round(Number(ms)||0)}ms`);
+  error.code="GD_PRACTICE_OCR_TIMEOUT";
+  return error;
+}
+async function gdPracticeWithTimeout(promise,ms,label){
+  const limit=Math.max(1000,Number(ms)||1000);
+  let timer=null;
+  try{
+    return await Promise.race([
+      promise,
+      new Promise((resolve,reject)=>{
+        timer=setTimeout(()=>reject(gdPracticeOcrTimeoutError(label,limit)),limit);
+      })
+    ]);
+  }finally{
+    if(timer)clearTimeout(timer);
+  }
+}
 async function gdAttachFittedCellDirection(Tesseract,cell,item,key){
   if(!item||!gdColumnNeedsDirection(key)||!cell?.crop?.canvas)return item;
   // Direction masking must use the exact white value-box crop that fed the
@@ -10694,7 +10713,11 @@ async function gdAttachFittedCellDirection(Tesseract,cell,item,key){
     numberBox
   });
   try{gdSetPracticeScanStatus(`Masking number and checking L/R for ${key}...`);}catch(e){}
-  const rowDirection=await gdRecognizeColumnValueDirection(Tesseract,directionCrop,localItem,Number(canvas.height)||40,key);
+  const rowDirection=await gdPracticeWithTimeout(
+    gdRecognizeColumnValueDirection(Tesseract,directionCrop,localItem,Number(canvas.height)||40,key),
+    9000,
+    `Direction OCR for ${key}`
+  );
   item.directionDebug=rowDirection?.debug||null;
   if(rowDirection?.direction){
     const trusted=rowDirection.visual===true||rowDirection.direction==="R"||Number(rowDirection.confidence)>=50||Number(rowDirection.score)>=70;
@@ -10721,7 +10744,11 @@ async function gdRecognizeCellCrop(Tesseract,cellCrop,key=""){
   for(const [variantIndex,variant] of variants.entries()){
     const variantConfigs=variantIndex===0?configs:[configs[0]];
     for(const config of variantConfigs){
-      const result=await gdRecognizeWithTesseract(Tesseract,variant.canvas,config,"numeric:cell");
+      const result=await gdPracticeWithTimeout(
+        gdRecognizeWithTesseract(Tesseract,variant.canvas,config,"numeric:cell"),
+        9000,
+        `Cell OCR for ${key||"value"}`
+      );
       if(!result?.data)continue;
       const data=gdOffsetOcrData(result.data,scanCrop.x,scanCrop.y,scanCrop.scale);
       const score=gdCellOcrScore(data,key);
@@ -13762,33 +13789,56 @@ async function gdRunFittedCellGridOcr(columnScan,opts={}){
   gdPracticeDebugCheckpointSafe("extraction_started","running",{inputSummary:`Raw fitted-cell OCR for ${rows.length} rows`});
   const Tesseract=await gdLoadTesseract();
   const totalRows=rows.length;
+  const ocrStartedAt=Date.now();
+  const ocrMaxMs=Math.max(20000,Number(opts.ocrMaxMs)||90000);
+  function gdAssertFittedCellOcrBudget(label){
+    if(Date.now()-ocrStartedAt>ocrMaxMs)throw gdPracticeOcrTimeoutError(label||"Raw fitted-cell OCR",ocrMaxMs);
+  }
   gdEnsureOcrFirstColumnClubIdTarget(columnScan);
   gdApplyOcrColumnCutoutAllocation(columnScan);
   const clubColumnIndex=gdOcrClubIdColumnIndex(columnScan);
-  for(const [rowIndex,row] of rows.entries()){
-    if(clubColumnIndex>=0&&row?.[clubColumnIndex]?.crop?.canvas){
-      gdSetPracticeScanStatus(`Reading club alias for fitted shot ${rowIndex+1}/${totalRows}...`);
-      const clubRead=await gdRecognizeClubIdCell(Tesseract,row[clubColumnIndex],rowIndex+1);
-      row[clubColumnIndex].clubIdRead=clubRead;
-      row[clubColumnIndex].clubIdOcr=clubRead;
-      row[clubColumnIndex].ocrData=clubRead.data;
-      row[clubColumnIndex].ocrRaw=clubRead.label||clubRead.text||"";
-      row[clubColumnIndex].ocrText=row[clubColumnIndex].ocrRaw;
+  try{
+    for(const [rowIndex,row] of rows.entries()){
+      gdAssertFittedCellOcrBudget(`Raw fitted-cell OCR row ${rowIndex+1}`);
+      if(clubColumnIndex>=0&&row?.[clubColumnIndex]?.crop?.canvas){
+        gdSetPracticeScanStatus(`Reading club alias for fitted shot ${rowIndex+1}/${totalRows}...`);
+        const clubRead=await gdRecognizeClubIdCell(Tesseract,row[clubColumnIndex],rowIndex+1);
+        row[clubColumnIndex].clubIdRead=clubRead;
+        row[clubColumnIndex].clubIdOcr=clubRead;
+        row[clubColumnIndex].ocrData=clubRead.data;
+        row[clubColumnIndex].ocrRaw=clubRead.label||clubRead.text||"";
+        row[clubColumnIndex].ocrText=row[clubColumnIndex].ocrRaw;
+      }
+      gdSetPracticeScanStatus(`Reading fitted shot ${rowIndex+1}/${totalRows}...`);
+      for(const cell of row){
+        const key=gdPracticeCellReadKey(cell);
+        if(!key||key==="toPin"||key==="club"||!cell?.crop?.canvas)continue;
+        gdAssertFittedCellOcrBudget(`Raw fitted-cell OCR ${key} row ${rowIndex+1}`);
+        const data=await gdRecognizeCellCrop(Tesseract,cell.crop,key);
+        const sourceY=Number(cellGrid?.rows?.[rowIndex]?.cy)||rowIndex+1;
+        const item=gdBestCellOcrItem(data,key,rowIndex+1,sourceY);
+        if(item&&gdColumnNeedsDirection(key))await gdAttachFittedCellDirection(Tesseract,cell,item,key);
+        cell.readKey=key;
+        cell.ocrData=data;
+        cell.ocrItem=item;
+        cell.ocrRaw=item?gdColumnOrderValueDisplayText(key,item):String(data?.text||"").trim().replace(/\s+/g," ");
+        cell.ocrText=cell.ocrRaw;
+      }
+      gdPracticeDebugCheckpointSafe("extraction_started","running",{
+        inputSummary:`Raw fitted-cell OCR for ${rows.length} rows`,
+        outputSummary:`Completed row ${rowIndex+1}/${totalRows}`,
+        counts:{gridRows:totalRows,row:rowIndex+1}
+      });
     }
-    gdSetPracticeScanStatus(`Reading fitted shot ${rowIndex+1}/${totalRows}...`);
-    for(const cell of row){
-      const key=gdPracticeCellReadKey(cell);
-      if(!key||key==="toPin"||key==="club"||!cell?.crop?.canvas)continue;
-      const data=await gdRecognizeCellCrop(Tesseract,cell.crop,key);
-      const sourceY=Number(cellGrid?.rows?.[rowIndex]?.cy)||rowIndex+1;
-      const item=gdBestCellOcrItem(data,key,rowIndex+1,sourceY);
-      if(item&&gdColumnNeedsDirection(key))await gdAttachFittedCellDirection(Tesseract,cell,item,key);
-      cell.readKey=key;
-      cell.ocrData=data;
-      cell.ocrItem=item;
-      cell.ocrRaw=item?gdColumnOrderValueDisplayText(key,item):String(data?.text||"").trim().replace(/\s+/g," ");
-      cell.ocrText=cell.ocrRaw;
-    }
+  }catch(e){
+    gdPracticeDebugCheckpointSafe("extraction_started","failed",{
+      outputSummary:"Raw fitted-cell OCR stopped before value extraction completed",
+      error:e,
+      technicalDetails:e&&e.stack,
+      counts:{gridRows:totalRows}
+    });
+    gdPracticeFailImportJob(e,e&&e.message?e.message:"Raw fitted-cell OCR stopped before values were saved");
+    throw e;
   }
   if(gdApplyOcrClubLabelCandidateAllocation(columnScan))gdApplyOcrColumnCutoutAllocation(columnScan);
   const payload=gdBuildFittedCellOcrCapture(columnScan,opts.label||"Raw cell value read");
@@ -15145,7 +15195,11 @@ async function gdRecognizeClubIdCell(Tesseract,cell,rowIndex=0){
   let best={label:"",text:"",data:null,score:-Infinity};
   for(const variant of variants){
     for(const item of configs){
-      const result=await gdRecognizeWithTesseract(Tesseract,variant.canvas,item.config,`club-id:row-${rowIndex}:${variant.label}:${item.label}`);
+      const result=await gdPracticeWithTimeout(
+        gdRecognizeWithTesseract(Tesseract,variant.canvas,item.config,`club-id:row-${rowIndex}:${variant.label}:${item.label}`),
+        9000,
+        `Club OCR for row ${rowIndex||0}`
+      );
       const data=gdOffsetOcrData(result?.data||{text:"",words:[],lines:[]},crop.x,crop.y,crop.scale);
       const text=String(data.text||"").trim().replace(/\s+/g," ");
       const label=gdOcrClubLabelFromOcrData(data);
@@ -16711,6 +16765,7 @@ async function gdRunDefaultPracticePhotoScanFromCheckpoint(checkpoint,opts={}){
       });
       const payload=await gdRunFittedCellGridOcr(scan,{
         allowParkedFittedCellOcr:true,
+        importToNative:true,
         label:"Practice photo scan",
         sourceLabel:opts.sourceLabel||gdPracticePhotoName||"Practice photo scan"
       });
