@@ -16212,12 +16212,16 @@ async function gdApplyPracticeManualQuad(){
     gdPracticeManualQuadStatus("Manual shape is not ready.","error");
     return;
   }
+  if(!gdPracticeImportCanStart(gdPracticePhotoName||"Adjusted practice photo scan"))return null;
+  gdSetPracticePhotoProcessing(true,{stageIndex:0,progress:8});
+  await gdPracticeYieldScanPaint();
   const quad=state.quad.map(point=>({
     x:Math.max(0,Math.min(state.sourceW-1,Number(point.x))),
     y:Math.max(0,Math.min(state.sourceH-1,Number(point.y)))
   }));
   const flattened=gdWarpQuadToCanvas(state.source,quad,1800);
   if(!flattened){
+    gdSetPracticePhotoProcessing(false,{immediate:true,skipJob:true});
     gdPracticeManualQuadStatus("Could not stretch the manual shape flat.","error");
     return;
   }
@@ -16797,6 +16801,7 @@ async function gdRunDefaultPracticePhotoScanFromCheckpoint(checkpoint,opts={}){
   gdClosePracticeManualQuadTool();
   gdSetPracticePhotoProcessing(true);
   gdPracticeFeedback("Generating OCR practice grid...");
+  await gdPracticeYieldScanPaint();
   try{
     gdPracticeUpdateImportJob({status:"scanning",checkpointText:"Generating OCR practice grid",stageIndex:0,progress:22});
     const result=await gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,null,{
@@ -16815,6 +16820,7 @@ async function gdRunDefaultPracticePhotoScanFromCheckpoint(checkpoint,opts={}){
         inputSummary:"OCR grid ready; fitted-cell value scan starting",
         counts:{gridRows:rows,gridColumns:columns}
       });
+      await gdPracticeYieldScanPaint();
       const payload=await gdRunFittedCellGridOcr(scan,{
         allowParkedFittedCellOcr:true,
         importToNative:true,
@@ -24494,6 +24500,14 @@ function gdPracticeAssertImportNotCanceled(){
 }
 function gdPracticeProcessingElapsed(){
   return gdPracticePhotoProcessingStartedAt?Math.max(0,Date.now()-gdPracticePhotoProcessingStartedAt):0;
+}
+function gdPracticeYieldScanPaint(){
+  return new Promise(resolve=>{
+    let done=false;
+    const finish=()=>{if(done)return;done=true;resolve();};
+    try{requestAnimationFrame(()=>requestAnimationFrame(finish));}catch(e){}
+    setTimeout(finish,90);
+  });
 }
 function gdPracticeProcessingStageState(){
   const activeJob=gdPracticeHydrateImportJob();
