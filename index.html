@@ -7869,7 +7869,7 @@ async function gdImportLaunchMonitorPayload(payload,sourceLabel){
     if(typeof window.gdRenderPracticeData==="function")window.gdRenderPracticeData();
     if(typeof window.gdRenderDataHubStatus==="function")window.gdRenderDataHubStatus();
     if(typeof gdPracticeQuietPostImportSurface==="function")gdPracticeQuietPostImportSurface();
-    gdLmToast(`${sourceLabel||"Launch monitor data"} loaded (${count} shot${count===1?"":"s"})`);
+    if(payload?.quietImport!==true)gdLmToast(`${sourceLabel||"Launch monitor data"} loaded (${count} shot${count===1?"":"s"})`);
     return result;
   }catch(e){
     if(gdPracticeDebugCurrentRun())gdPracticeDebugCheckpointSafe("save_failed","failed",{outputSummary:"Practice Data save failed",error:e,technicalDetails:e&&e.stack});
@@ -13930,8 +13930,8 @@ async function gdRunFittedCellGridOcr(columnScan,opts={}){
   if(opts.importToNative===true){
     gdPracticeExtractionPreviewState=null;
     try{gdRenderPracticeExtractionCheckpoint();}catch(e){}
+    payload.quietImport=true;
     await gdImportLaunchMonitorPayload(payload,opts.sourceLabel||opts.label||"Practice photo scan");
-    gdSetPracticeScanStatus(`Practice scan imported ${payload.clubGroups.length} shot${payload.clubGroups.length===1?"":"s"}.`);
     return payload;
   }
   gdPracticeSetExtractionPreview(payload,opts.label||"Raw cell value read");
@@ -33311,6 +33311,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     return false;
   }
   function gdPracticePlotModeControls(){
+    if(!gdPracticeAdminIsOpen())return "";
     const mode=gdPracticePlotMode();
     return `<div class="gdPracticePlotMode"><button type="button" class="${mode==="all"?"active":""}" aria-pressed="${mode==="all"?"true":"false"}" data-gd-practice-plot-mode="all">Show all</button><button type="button" class="${mode==="auto"?"active":""}" aria-pressed="${mode==="auto"?"true":"false"}" data-gd-practice-plot-mode="auto">Filter view</button><span>${mode==="all"?"Every stored shot is plotted.":"Filtered view is on."}</span></div>`;
   }
@@ -33707,6 +33708,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     gdPracticeImportOpen=false;
     gdPracticeEmailLaneOpen=false;
     try{localStorage.removeItem(GD_PRACTICE_IMPORT_OPEN_KEY);}catch(e){}
+    try{gdSetShotDataLibraryOpen("practice",true);}catch(e){}
     try{
       if(typeof gdPracticeImportSelectMode!=="undefined")gdPracticeImportSelectMode=false;
       if(typeof gdPracticeImportSelected!=="undefined")Object.keys(gdPracticeImportSelected).forEach(id=>delete gdPracticeImportSelected[id]);
@@ -37993,6 +37995,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     const active=gdPracticeImportIsActive(job);
     const failed=status==="failed";
     const completed=status==="completed";
+    if(completed)return "";
     const title=gdPracticeImportStatusLabel(status);
     const source=job.sourceLabel||job.source||"Practice import";
     const date=job.importDate?gdPracticeEvidenceDateLabel(job.importDate):"Import date pending";
@@ -38007,9 +38010,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       ? `<button type="button" data-gd-practice-import-action="review">Resume/review import</button><button type="button" data-gd-practice-import-action="discard">Discard failed import</button>`
       : active
         ? (status==="saving"?`<button type="button" data-gd-practice-import-action="review">Review import</button>`:`<button type="button" data-gd-practice-import-action="review">Review import</button><button type="button" data-gd-practice-import-action="cancel">Cancel import</button>`)
-        : completed
-          ? `<button type="button" data-gd-practice-import-action="review">Open saved shots</button><button type="button" data-gd-practice-import-action="clear">Clear import status</button>`
-          : `<button type="button" data-gd-practice-import-action="clear">Clear import status</button>`;
+        : `<button type="button" data-gd-practice-import-action="clear">Clear import status</button>`;
     return `<div class="gdPracticeImportJob ${active?"active":failed?"failed":"done"}">
       <div class="gdPracticeImportJobMain"><strong>${gdEscapeHTML(title)}</strong><span>${gdEscapeHTML(detail)}</span><small>${gdEscapeHTML(source)} · ${gdEscapeHTML(date)}${counts?` · ${gdEscapeHTML(counts)}`:""}</small></div>
       <div class="gdPracticeImportJobActions">${actions}</div>
@@ -43843,8 +43844,7 @@ body.gdGpsActive #bagRailBtn{order:7!important}
 	  min-width:0!important;
 	  width:100%!important;
 	}
-	.gdShotDataLibraryTabMain>.gdNativeProcessingStack{display:none!important;margin-top:2px!important}
-	body.gdPracticePhotoProcessing .gdPracticeLibraryTabs .gdShotDataLibraryTabMain>.gdNativeProcessingStack{display:grid!important}
+	.gdShotDataLibraryTabMain>.gdNativeProcessingStack{display:grid!important;margin-top:2px!important}
 	.gdShotDataLibraryTabMain .gdNativeProcessingBadge{
 	  grid-template-columns:minmax(126px,1fr) auto!important;
 	  min-width:0!important;
