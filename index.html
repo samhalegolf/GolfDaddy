@@ -7868,6 +7868,7 @@ async function gdImportLaunchMonitorPayload(payload,sourceLabel){
     gdRenderLaunchMonitorAdmin();
     if(typeof window.gdRenderPracticeData==="function")window.gdRenderPracticeData();
     if(typeof window.gdRenderDataHubStatus==="function")window.gdRenderDataHubStatus();
+    if(typeof gdPracticeQuietPostImportSurface==="function")gdPracticeQuietPostImportSurface();
     gdLmToast(`${sourceLabel||"Launch monitor data"} loaded (${count} shot${count===1?"":"s"})`);
     return result;
   }catch(e){
@@ -24470,7 +24471,9 @@ function gdPracticeCancelImportJob(){
 function gdPracticeReviewImportJob(){
   try{
     gdSetShotDataLibraryOpen("practice",true);
-    gdTogglePracticeAdmin(true);
+    gdTogglePracticeAdmin(false);
+    if(typeof gdPracticeImportOpen!=="undefined")gdPracticeImportOpen=false;
+    if(typeof gdPracticeEmailLaneOpen!=="undefined")gdPracticeEmailLaneOpen=false;
     gdRenderPracticeImportPanel();
     renderPracticeData(true);
   }catch(e){}
@@ -24578,8 +24581,11 @@ if(!window.__gdShotDataLibraryToggleBound){
   },true);
 }
 function gdNativeShotDataProcessingTrackHTML(clubLabel=""){
+  const job=gdPracticeHydrateImportJob();
   const state=gdPracticeProcessingStageState();
-  const label=GD_PRACTICE_PROCESSING_STAGES[state.index]||"Processing";
+  const label=gdPracticeImportIsActive(job)&&job?.checkpointText
+    ?String(job.checkpointText)
+    :(GD_PRACTICE_PROCESSING_STAGES[state.index]||"Processing");
   const stages=GD_PRACTICE_PROCESSING_STAGES.map((stageLabel,index)=>{
     const tone=index<state.index?"done":(index===state.index?"active":"pending");
     return `<span class="gdNativeProcessingNode ${tone}" aria-label="${gdEscapeHTML(stageLabel)}"><span>${index+1}</span></span>`;
@@ -24588,7 +24594,11 @@ function gdNativeShotDataProcessingTrackHTML(clubLabel=""){
 }
 function gdNativeShotDataProcessingHTML(){
   const job=gdPracticeHydrateImportJob();
-  if(gdPracticeImportIsActive(job))gdPracticeSyncImportProcessing(job);
+  if(gdPracticeImportIsActive(job)){
+    gdPracticeSyncImportProcessing(job);
+    return `<span class="gdNativeProcessingStack">${gdNativeShotDataProcessingTrackHTML()}</span>`;
+  }
+  if(!gdPracticePhotoProcessing)return "";
   return `<span class="gdNativeProcessingStack">${gdNativeShotDataProcessingTrackHTML()}</span>`;
 }
 function gdSetPracticePhotoProcessing(active,opts={}){
@@ -33693,6 +33703,31 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     if(button)button.setAttribute("aria-expanded",gdPracticeImportOpen?"true":"false");
     gdRenderPracticeEmailLane();
   }
+  function gdPracticeQuietPostImportSurface(){
+    gdPracticeImportOpen=false;
+    gdPracticeEmailLaneOpen=false;
+    try{localStorage.removeItem(GD_PRACTICE_IMPORT_OPEN_KEY);}catch(e){}
+    try{
+      if(typeof gdPracticeImportSelectMode!=="undefined")gdPracticeImportSelectMode=false;
+      if(typeof gdPracticeImportSelected!=="undefined")Object.keys(gdPracticeImportSelected).forEach(id=>delete gdPracticeImportSelected[id]);
+    }catch(e){}
+    const practicePanel=byId("practiceDataPanel");
+    practicePanel?.classList.remove("gdPracticeAdminExpanded");
+    const scanner=byId("gdPracticeScanner");
+    scanner?.classList.remove("active");
+    byId("gdPracticeOcrReview")?.classList.remove("active","stripOnly");
+    try{gdPracticeClearScanCheckpoint();}catch(e){}
+    try{gdPracticeHideDebug();}catch(e){}
+    try{gdClosePracticeManualQuadTool();}catch(e){}
+    const feedback=byId("gdNativePracticeFeedback");
+    if(feedback)feedback.innerHTML="";
+    const debugPanel=byId("gdPracticePhotoDebugPanel");
+    if(debugPanel){debugPanel.hidden=true;debugPanel.innerHTML="";}
+    const qaPanel=byId("gdPracticePhotoDebugQaFixture");
+    if(qaPanel){qaPanel.hidden=true;qaPanel.innerHTML="";}
+    gdRenderPracticeImportPanel();
+    gdRenderPracticeAdminChrome();
+  }
   let gdPracticeEmailLaneState={address:"",playerKey:"",status:"Address generated locally",configured:false,batches:[],loading:false,error:""};
   function gdPracticeEmailSlug(value,fallback="player"){
     const raw=String(value||fallback||"player").trim().toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
@@ -34432,6 +34467,10 @@ body.gdAuthLocked #gdProfileV67 .topbar{
   function gdRenderNativePracticeFeedback(){
     const root=byId("gdNativePracticeFeedback");
     if(!root)return;
+    if(!gdPracticeImportOpen){
+      root.innerHTML="";
+      return;
+    }
     const state=gdNativePracticeFeedbackState||{};
     const status=state.status||"waiting";
     const updated=state.updatedAt?new Date(state.updatedAt):null;
@@ -38687,15 +38726,20 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 			    const root=byId("gdPracticeEvidenceList");
 			    if(!root)return;
 			    const rows=gdPracticeEvidenceRows(analysis);
+			    const adminOpen=gdPracticeAdminIsOpen();
 			    if(!rows.length){
-			      const adminClear=gdPracticeAdminIsOpen()?`<button type="button" class="danger" onclick="return gdPracticeClearLibraryForPlayer()">Clear player imports</button>`:"";
+			      const adminClear=adminOpen?`<button type="button" class="danger" onclick="return gdPracticeClearLibraryForPlayer()">Clear player imports</button>`:"";
 			      root.innerHTML=gdPracticeLibraryShellHTML(analysis,0,`<div class="gdPracticeEvidenceHead"><div><strong>Clarity Shot Library</strong><span>Imported practice shots will appear here after a scan or upload.</span></div>${adminClear}</div>`);
 			      return;
 			    }
 			    const importMeta=gdPracticeImportMetadataMap();
+			    if(!adminOpen&&gdPracticeImportSelectMode){
+			      gdPracticeImportSelectMode=false;
+			      Object.keys(gdPracticeImportSelected).forEach(id=>delete gdPracticeImportSelected[id]);
+			    }
 			    const selectedCount=gdPracticeSelectedImportIds().length;
-			    const adminClear=gdPracticeAdminIsOpen()?`<button type="button" class="danger" onclick="return gdPracticeClearLibraryForPlayer()">Clear player imports</button>`:"";
-			    const tools=`<div class="gdPracticeEvidenceTools gdPracticeShotLibraryTools"><button type="button" onclick="return gdPracticeToggleImportSelectMode()">${gdPracticeImportSelectMode?"Cancel Select":"Select imports"}</button><button type="button" class="danger" ${selectedCount?"":"disabled"} onclick="return gdPracticeDeleteSelectedImports()">Delete Selected${selectedCount?` (${selectedCount})`:""}</button>${adminClear}</div>`;
+			    const adminClear=adminOpen?`<button type="button" class="danger" onclick="return gdPracticeClearLibraryForPlayer()">Clear player imports</button>`:"";
+			    const tools=adminOpen?`<div class="gdPracticeEvidenceTools gdPracticeShotLibraryTools"><button type="button" onclick="return gdPracticeToggleImportSelectMode()">${gdPracticeImportSelectMode?"Cancel Select":"Select imports"}</button><button type="button" class="danger" ${selectedCount?"":"disabled"} onclick="return gdPracticeDeleteSelectedImports()">Delete Selected${selectedCount?` (${selectedCount})`:""}</button>${adminClear}</div>`:"";
 			    const groupedByClub={};
 			    rows.forEach(row=>{
 			      const club=String(row.club||"").trim()||"Unknown / Unmatched";
@@ -38732,11 +38776,12 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 			        const sourceLabel=gdPracticeImportLabel(meta.sourceType||meta.sourceName||meta.label||importRows[0]?.sourceType||importRows[0]?.providerGuess||"Practice import");
 			        const dateLabel=gdPracticeImportDate(meta.timestamp||importRows[0]?.timestamp||"");
 			        const selected=!!gdPracticeImportSelected[importId];
-			        const checkbox=gdPracticeImportSelectMode?`<label class="gdPracticeEvidenceUploadSelect" onclick="event.stopPropagation()"><input type="checkbox" value="${gdEscapeHTML(importId)}" ${selected?"checked":""} onchange="gdPracticeToggleImportSelection(this)"><span>Select</span></label>`:"";
+			        const checkbox=adminOpen&&gdPracticeImportSelectMode?`<label class="gdPracticeEvidenceUploadSelect" onclick="event.stopPropagation()"><input type="checkbox" value="${gdEscapeHTML(importId)}" ${selected?"checked":""} onchange="gdPracticeToggleImportSelection(this)"><span>Select</span></label>`:"";
 			        const detailOpen=gdPracticeRawDetailKey===gdPracticeRawDetailId(club,importId);
 			        const detail=detailOpen?gdPracticeRawShotTableHTML(importRows,meta,club,importId):"";
 			        const statusLabel=importRows.some(row=>row.counted)?"bubble fit":(rejected?"needs review":"stored");
-			        return `<div class="gdPracticeUploadRow" data-import-id="${gdEscapeHTML(importId)}">${checkbox}<div class="gdPracticeUploadMeta"><strong>${gdEscapeHTML(dateLabel)}</strong><span>${gdEscapeHTML(sourceLabel)} · ${importRows.length} shot${importRows.length===1?"":"s"} · ${accepted} accepted${rejected?` · ${rejected} rejected`:""}</span></div><b>${gdEscapeHTML(statusLabel)}</b><div class="gdPracticeUploadActions"><button type="button" onclick="return gdPracticeToggleRawDetail(${gdPracticeJsArg(club)},${gdPracticeJsArg(importId)})">${detailOpen?"Hide raw data":"View raw data"}</button><button type="button" class="danger" onclick="return gdPracticeDeleteImports(${gdPracticeJsArg(importId)})">Delete entire import</button></div>${detail}</div>`;
+			        const adminActions=adminOpen?`<button type="button" class="danger" onclick="return gdPracticeDeleteImports(${gdPracticeJsArg(importId)})">Delete entire import</button>`:"";
+			        return `<div class="gdPracticeUploadRow" data-import-id="${gdEscapeHTML(importId)}">${checkbox}<div class="gdPracticeUploadMeta"><strong>${gdEscapeHTML(dateLabel)}</strong><span>${gdEscapeHTML(sourceLabel)} · ${importRows.length} shot${importRows.length===1?"":"s"} · ${accepted} accepted${rejected?` · ${rejected} rejected`:""}</span></div><b>${gdEscapeHTML(statusLabel)}</b><div class="gdPracticeUploadActions"><button type="button" onclick="return gdPracticeToggleRawDetail(${gdPracticeJsArg(club)},${gdPracticeJsArg(importId)})">${detailOpen?"Hide raw data":"View raw data"}</button>${adminActions}</div>${detail}</div>`;
 			      }).join("");
 			      return `<section class="gdPracticeShotClub ${open?"open":""}" data-club="${gdEscapeHTML(club)}"><button type="button" class="gdPracticeShotClubHead" data-gd-practice-club-toggle aria-expanded="${open?"true":"false"}"><div><span>${gdEscapeHTML(club)}</span><strong>${clubRows.length} shot${clubRows.length===1?"":"s"} · ${importCount} upload${importCount===1?"":"s"}</strong></div><small>${gdEscapeHTML(gdPracticeImportDate(latest))}${bubbleStatus?` · ${gdEscapeHTML(bubbleStatus)}`:""}</small><b class="gdPracticeEvidenceChevron">${open?"-":"+"}</b></button><div class="gdPracticeShotClubBody">${uploadRows}</div></section>`;
 			    }).join("");
@@ -39100,11 +39145,18 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       gdPracticeCopyEmailAddress:gdPracticeCopyEmailAddress,
       gdPracticeRefreshEmailLane:gdPracticeRefreshEmailLane,
       gdPracticeLoadEmailBatch:gdPracticeLoadEmailBatch,
+      gdPracticeSetPlotMode:gdPracticeSetPlotMode,
       gdPracticeImportCanStart:gdPracticeImportCanStart,
       gdPracticeStartImportJob:gdPracticeStartImportJob,
       gdPracticeUpdateImportJob:gdPracticeUpdateImportJob,
       gdPracticeClearImportJob:gdPracticeClearImportJob,
       gdPracticeCancelImportJob:gdPracticeCancelImportJob,
+      gdPracticeToggleRawDetail:gdPracticeToggleRawDetail,
+      gdPracticeToggleImportSelectMode:gdPracticeToggleImportSelectMode,
+      gdPracticeToggleImportSelection:gdPracticeToggleImportSelection,
+      gdPracticeDeleteSelectedImports:gdPracticeDeleteSelectedImports,
+      gdPracticeDeleteImports:gdPracticeDeleteImports,
+      gdPracticeClearLibraryForPlayer:gdPracticeClearLibraryForPlayer,
       gdNativePracticeFeedbackPatch:gdNativePracticeFeedbackPatch,
       gdRenderNativePracticeImportLane:gdRenderNativePracticeImportLane,
       gdParseNativePracticeImport:gdParseNativePracticeImport,
@@ -43107,8 +43159,8 @@ body.gdGpsActive #bagRailBtn{order:7!important}
 	.gdPracticeEvidenceDot.stored{background:rgba(55,242,141,.76)!important}
 	.gdPracticeEvidenceShot.filtered,
 	.gdPracticeEvidenceShot.excluded{opacity:.66!important}
-	.gdPracticeAdminExpander,
-	.gdCourseAdminExpander{
+.gdPracticeAdminExpander,
+.gdCourseAdminExpander{
   margin-top:0!important;
   width:100%!important;
   max-width:100%!important;
@@ -43119,6 +43171,13 @@ body.gdGpsActive #bagRailBtn{order:7!important}
   color:rgba(255,255,255,.72)!important;
   font-size:12px!important;
   font-weight:950!important;
+}
+#practiceDataPanel:not(.gdPracticeAdminExpanded) .gdPracticeAdminExpander,
+#practiceDataPanel:not(.gdPracticeAdminExpanded) .gdPracticePhotoDebugPanel,
+#practiceDataPanel:not(.gdPracticeAdminExpanded) .gdPracticePhotoQaPanel{
+  display:none!important;
+  visibility:hidden!important;
+  pointer-events:none!important;
 }
 .gdPracticeAdminExpander.active,
 .gdCourseAdminExpander.active{
