@@ -24638,6 +24638,9 @@ function gdSetPracticePhotoProcessing(active,opts={}){
   }
   if(gdPracticePhotoProcessing&&!wasProcessing)gdPracticeProcessingStart();
   if(!gdPracticePhotoProcessing&&wasProcessing)gdPracticeProcessingStop();
+  if(gdPracticePhotoProcessing){
+    try{gdSetShotDataLibraryOpen("practice",true);}catch(e){}
+  }
   const panel=document.getElementById("practiceDataPanel");
   panel?.classList.toggle("gdPracticePhotoProcessing",gdPracticePhotoProcessing);
   document.body.classList.toggle("gdPracticePhotoProcessing",gdPracticePhotoProcessing);
@@ -38797,9 +38800,9 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 			        const selected=!!gdPracticeImportSelected[importId];
 			        const checkbox=adminOpen&&gdPracticeImportSelectMode?`<label class="gdPracticeEvidenceUploadSelect" onclick="event.stopPropagation()"><input type="checkbox" value="${gdEscapeHTML(importId)}" ${selected?"checked":""} onchange="gdPracticeToggleImportSelection(this)"><span>Select</span></label>`:"";
 			        const statusLabel=importRows.some(row=>row.counted)?"bubble fit":(rejected?"needs review":"stored");
-			        const adminActions=adminOpen?`<button type="button" class="danger" onclick="return gdPracticeDeleteImports(${gdPracticeJsArg(importId)})">Delete entire import</button>`:"";
+			        const importActions=`<button type="button" class="danger" onclick="return gdPracticeDeleteImports(${gdPracticeJsArg(importId)})">Delete entire import</button>`;
 			        const rawDetail=`<details class="gdPracticeRawDisclosure"><summary>View raw data</summary>${gdPracticeRawShotTableHTML(importRows,meta,club,importId)}</details>`;
-			        return `<div class="gdPracticeUploadRow" data-import-id="${gdEscapeHTML(importId)}">${checkbox}<div class="gdPracticeUploadMeta"><strong>${gdEscapeHTML(dateLabel)}</strong><span>${gdEscapeHTML(sourceLabel)} · ${importRows.length} shot${importRows.length===1?"":"s"} · ${accepted} accepted${rejected?` · ${rejected} rejected`:""}</span></div><b>${gdEscapeHTML(statusLabel)}</b><div class="gdPracticeUploadActions">${adminActions}</div>${rawDetail}</div>`;
+			        return `<div class="gdPracticeUploadRow" data-import-id="${gdEscapeHTML(importId)}">${checkbox}<div class="gdPracticeUploadMeta"><strong>${gdEscapeHTML(dateLabel)}</strong><span>${gdEscapeHTML(sourceLabel)} · ${importRows.length} shot${importRows.length===1?"":"s"} · ${accepted} accepted${rejected?` · ${rejected} rejected`:""}</span></div><b>${gdEscapeHTML(statusLabel)}</b><div class="gdPracticeUploadActions">${importActions}</div>${rawDetail}</div>`;
 			      }).join("");
 			      return `<section class="gdPracticeShotClub ${open?"open":""}" data-club="${gdEscapeHTML(club)}"><button type="button" class="gdPracticeShotClubHead" data-gd-practice-club-toggle aria-expanded="${open?"true":"false"}"><div><span>${gdEscapeHTML(club)}</span><strong>${clubRows.length} shot${clubRows.length===1?"":"s"} · ${importCount} upload${importCount===1?"":"s"}</strong></div><small>${gdEscapeHTML(gdPracticeImportDate(latest))}${bubbleStatus?` · ${gdEscapeHTML(bubbleStatus)}`:""}</small><b class="gdPracticeEvidenceChevron">${open?"-":"+"}</b></button><div class="gdPracticeShotClubBody">${uploadRows}</div></section>`;
 			    }).join("");
