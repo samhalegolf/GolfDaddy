@@ -8008,6 +8008,20 @@ function gdPracticeSetExtractionPreview(payload,sourceLabel){
   gdLmSetStatus("Status","Extraction ready",`${rows.length} shots waiting in Practice Admin checkpoint`,"needs_more_data");
   gdLmToast(`Extraction checkpoint ready (${rows.length} shots)`);
 }
+function gdPracticeAdminIsOpenSafe(){
+  try{
+    if(typeof gdPracticeAdminIsOpen==="function")return !!gdPracticeAdminIsOpen();
+  }catch(e){}
+  return !!document.getElementById("practiceDataPanel")?.classList.contains("gdPracticeAdminExpanded");
+}
+function gdPracticeToleranceCanEditSafe(){
+  try{
+    if(typeof gdPracticeToleranceCanEdit==="function")return !!gdPracticeToleranceCanEdit();
+  }catch(e){}
+  let permission="player";
+  try{permission=typeof gdGetAccountPermission==="function"?gdGetAccountPermission():"player";}catch(e){}
+  return permission==="admin"||permission==="coach";
+}
 function gdPracticeClearExtractionPreview(){
   gdPracticeExtractionPreviewState=null;
   gdRenderPracticeExtractionCheckpoint();
@@ -8028,7 +8042,7 @@ function gdRenderPracticeExtractionCheckpoint(){
   const root=document.getElementById("gdPracticeExtractCheckpoint");
   if(!root)return;
   const state=gdPracticeExtractionPreviewState;
-  const show=!!(state&&gdPracticeAdminIsOpen()&&gdPracticeToleranceCanEdit());
+  const show=!!(state&&gdPracticeAdminIsOpenSafe()&&gdPracticeToleranceCanEditSafe());
   root.hidden=!show;
   if(!show){
     root.innerHTML="";
@@ -8208,7 +8222,7 @@ async function gdHandleLaunchMonitorUpload(file){
       gdLmToast("No launch monitor shots found");
       return;
     }
-    if(gdPracticeToleranceCanEdit()){
+    if(gdPracticeToleranceCanEditSafe()){
       gdPracticeUpdateImportJob({status:"validating",checkpointText:"Extraction checkpoint ready",accepted:payload.clubGroups.length,rawRows:payload.clubGroups.length,clubs:gdPracticePayloadClubLabels(payload),progress:68});
       gdSetPracticePhotoProcessing(false,{skipJob:true});
       gdNativePracticeFeedbackBridge({status:"parsed",lastAction:`Legacy upload parsed ${payload.clubGroups.length} row${payload.clubGroups.length===1?"":"s"}`,parsedCount:payload.clubGroups.length,validCount:payload.clubGroups.length,invalidCount:0,warnings:["Parsed into the existing launch-monitor review checkpoint, not native storage yet."],errors:[],nextStep:"Review the extraction checkpoint or use pasted CSV for native save."});
@@ -16931,7 +16945,7 @@ async function gdImportReviewedPracticeOcr(){
     gdLmSetStatus("Status","No usable shots found","Review OCR text before importing.","conflict_check");
     return;
   }
-  if(gdPracticeToleranceCanEdit()){
+  if(gdPracticeToleranceCanEditSafe()){
     gdPracticeSetExtractionPreview(payload,"Reviewed photo scan");
     gdTogglePracticeAdmin(true);
     gdSetPracticeScanStatus(`Extraction checkpoint ready with ${payload.clubGroups.length} shots`);
