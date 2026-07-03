@@ -121,22 +121,7 @@
   }
 
   function render(){
-    if(document.getElementById("claritySupportButton")) return;
-    var button = document.createElement("button");
-    button.id = "claritySupportButton";
-    button.className = "claritySupportButton";
-    button.type = "button";
-    button.title = "Support";
-    button.setAttribute("aria-label", "Support");
-    button.textContent = "?";
-
-    var flag = document.createElement("button");
-    flag.id = "clarityBetaFlag";
-    flag.className = "clarityBetaFlag";
-    flag.type = "button";
-    flag.title = "Beta build · send debug report";
-    flag.setAttribute("aria-label", "Beta build, send debug report");
-    flag.innerHTML = '<span>β</span><small>report</small>';
+    if(document.getElementById("claritySupportOverlay")) return;
 
     var overlay = document.createElement("div");
     overlay.id = "claritySupportOverlay";
@@ -155,9 +140,7 @@
       '</div>'
     ].join("");
 
-    document.body.append(button, flag, overlay);
-    button.addEventListener("click", open);
-    flag.addEventListener("click", open);
+    document.body.append(overlay);
     overlay.querySelector(".claritySupportClose").addEventListener("click", close);
     overlay.querySelector(".claritySupportCloseAction").addEventListener("click", close);
     overlay.addEventListener("click", function(event){if(event.target === overlay) close();});
