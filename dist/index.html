@@ -24331,6 +24331,7 @@ var gdPracticePhotoProcessingProgress=0;
 var gdPracticePhotoProcessingStageIndex=0;
 const GD_PRACTICE_IMPORT_JOB_KEY="gd_practice_import_job_v1";
 const GD_PRACTICE_PROCESSING_MIN_VISIBLE_MS=0;
+const GD_PRACTICE_IMPORT_ACTIVE_STALE_MS=90000;
 const GD_PRACTICE_PROCESSING_STAGES=[
   "Scanning",
   "Importing",
@@ -24363,6 +24364,25 @@ function gdPracticeHydrateImportJob(){
   const storedTime=Date.parse(stored.updatedAt||stored.createdAt||"")||0;
   const currentTime=Date.parse(current?.updatedAt||current?.createdAt||"")||0;
   if(!current||storedTime>=currentTime)gdPracticeImportJob=stored;
+  const activeTime=Date.parse(gdPracticeImportJob?.updatedAt||gdPracticeImportJob?.createdAt||"")||0;
+  if(gdPracticeImportIsActive(gdPracticeImportJob)&&activeTime&&Date.now()-activeTime>GD_PRACTICE_IMPORT_ACTIVE_STALE_MS){
+    gdPracticeImportJob=Object.assign({},gdPracticeImportJob,{
+      status:"failed",
+      checkpointText:"Practice scan timed out",
+      userMessage:"Practice scan timed out. Try the scan again with a tighter crop.",
+      diagnostic:"Active practice scan exceeded the OCR timeout window and was released automatically.",
+      progress:100,
+      updatedAt:gdPracticeNowISO()
+    });
+    gdPracticeWriteImportJob(gdPracticeImportJob);
+    try{
+      gdPracticePhotoProcessing=false;
+      gdPracticePhotoProcessingProgress=0;
+      gdPracticePhotoProcessingStageIndex=0;
+      document.body?.classList.remove("gdPracticePhotoProcessing");
+      document.getElementById("practiceDataPanel")?.classList.remove("gdPracticePhotoProcessing");
+    }catch(e){}
+  }
   return gdPracticeImportJob;
 }
 function gdPracticeImportActiveStatuses(){return {queued:true,scanning:true,parsing:true,validating:true,saving:true};}
@@ -24617,6 +24637,16 @@ function gdNativeShotDataProcessingHTML(){
     return `<span class="gdNativeProcessingStack">${gdNativeShotDataProcessingTrackHTML()}</span>`;
   }
   if(!gdPracticePhotoProcessing)return "";
+  if(!gdPracticePhotoProcessingStartedAt||gdPracticeProcessingElapsed()>GD_PRACTICE_IMPORT_ACTIVE_STALE_MS){
+    gdPracticePhotoProcessing=false;
+    gdPracticePhotoProcessingProgress=0;
+    gdPracticePhotoProcessingStageIndex=0;
+    try{
+      document.body?.classList.remove("gdPracticePhotoProcessing");
+      document.getElementById("practiceDataPanel")?.classList.remove("gdPracticePhotoProcessing");
+    }catch(e){}
+    return "";
+  }
   return `<span class="gdNativeProcessingStack">${gdNativeShotDataProcessingTrackHTML()}</span>`;
 }
 function gdSetPracticePhotoProcessing(active,opts={}){
