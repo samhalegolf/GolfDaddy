@@ -14664,53 +14664,162 @@ function gdLmReindexGeneratedGridColumns(columns){
     });
   });
 }
-function gdLmNumberBoxColumnsFromCandidates(candidates,sourceWidth=0){
-  const boxes=gdLmNumberBoxesFromCandidates(candidates);
-  if(boxes.length<4)return [];
+function gdLmClearanceCorridorConfig(boxes,sourceWidth=0){
+  const widths=(Array.isArray(boxes)?boxes:[]).map(box=>Number(box.w)).filter(value=>Number.isFinite(value)&&value>0);
+  const medianWidth=gdValueClusterMedian(widths)||36;
+  const sourceMax=Number(sourceWidth)||Math.max(0,...(Array.isArray(boxes)?boxes:[]).map(box=>Number(box.x1)||0));
+  const sourceLimit=sourceMax?sourceMax*.028:44;
+  const corridorWidth=Math.max(18,Math.min(44,sourceLimit||44,medianWidth*.72));
+  return {
+    corridorWidth,
+    half:corridorWidth/2,
+    mergeGap:Math.max(7,Math.min(28,corridorWidth*.72)),
+    step:Math.max(1,Math.round(corridorWidth/6)),
+    minColumnWidth:Math.max(28,corridorWidth*1.35,sourceMax*.018),
+    edgeGuard:Math.max(12,corridorWidth*.65),
+    sourceMax
+  };
+}
+function gdLmMergeValueBoxIntervals(items,mergeGap){
+  const sorted=(Array.isArray(items)?items:[])
+    .filter(box=>Number.isFinite(Number(box.x0))&&Number.isFinite(Number(box.x1))&&Number(box.x1)>Number(box.x0))
+    .slice()
+    .sort((a,b)=>Number(a.x0)-Number(b.x0));
+  const intervals=[];
+  sorted.forEach(box=>{
+    const current=intervals[intervals.length-1];
+    if(current&&Number(box.x0)-Number(current.x1)<=mergeGap){
+      current.x1=Math.max(Number(current.x1),Number(box.x1));
+      current.x0=Math.min(Number(current.x0),Number(box.x0));
+      current.cx=(current.x0+current.x1)/2;
+      current.items.push(box);
+      return;
+    }
+    intervals.push({
+      x0:Number(box.x0),
+      x1:Number(box.x1),
+      cx:(Number(box.x0)+Number(box.x1))/2,
+      items:[box]
+    });
+  });
+  return intervals;
+}
+function gdLmClearanceRowsFromNumberBoxes(boxes,cfg){
   const rowTracks=gdLmNumberBoxTrackClusters(boxes,"y")
     .filter(cluster=>cluster.items.length>=3&&Number.isFinite(Number(cluster.cy)));
-  const supportThreshold=Math.max(2,Math.min(5,Math.ceil((rowTracks.length||8)*.22)));
-  const rawSkewers=gdLmNumberBoxTrackClusters(boxes,"x")
-    .filter(cluster=>Number.isFinite(Number(cluster.cx)));
-  const sorted=rawSkewers
-    .filter(cluster=>cluster.items.length>=supportThreshold)
-    .sort((a,b)=>a.cx-b.cx);
-  if(sorted.length<4)return [];
-  const sourceMax=Number(sourceWidth)||Math.max(...sorted.map(cluster=>cluster.x1),0);
-  const centerGaps=[];
-  const envelopeGaps=[];
-  for(let index=1;index<sorted.length;index+=1){
-    const centerGap=Number(sorted[index].cx)-Number(sorted[index-1].cx);
-    const envelopeGap=Number(sorted[index].x0)-Number(sorted[index-1].x1);
-    if(centerGap>8)centerGaps.push(centerGap);
-    if(envelopeGap>3)envelopeGaps.push(envelopeGap);
-  }
-  const medianGap=gdValueClusterMedian(envelopeGaps)||gdValueClusterMedian(centerGaps)||0;
-  const medianWidth=gdValueClusterMedian(sorted.map(cluster=>cluster.width))||24;
-  const edgePad=Math.max(8,Math.min(56,(medianGap||medianWidth)*.55));
-  const columns=sorted.map((cluster,index)=>{
-    const prev=sorted[index-1];
-    const next=sorted[index+1];
-    const fallbackLeft=Math.max(0,Number(cluster.x0)-edgePad);
-    let left=prev
-      ?gdLmSyntheticBorderBetweenSkewers(prev,cluster)
-      :fallbackLeft;
-    const right=next
-      ?gdLmSyntheticBorderBetweenSkewers(cluster,next)
-      :Math.min(sourceMax||Number(cluster.x1)+edgePad,Number(cluster.x1)+edgePad);
-    const n=String(index+1).padStart(2,"0");
-    const valueCx=Number(cluster.cx);
-    if(!prev&&next&&Number.isFinite(right)&&Number.isFinite(valueCx)){
-      const mirrorLeft=valueCx-Math.max(12,right-valueCx);
-      if(Number.isFinite(mirrorLeft)&&mirrorLeft>left)left=Math.min(valueCx-12,mirrorLeft);
+  return rowTracks
+    .map((row,index)=>{
+      const items=(Array.isArray(row.items)?row.items:[])
+        .filter(box=>Number.isFinite(Number(box.cx))&&Number.isFinite(Number(box.x0))&&Number.isFinite(Number(box.x1)))
+        .sort((a,b)=>Number(a.x0)-Number(b.x0));
+      return {
+        rowIndex:index,
+        cy:Number(row.cy),
+        top:Number(row.y0),
+        bottom:Number(row.y1),
+        count:items.length,
+        items,
+        intervals:gdLmMergeValueBoxIntervals(items,cfg.mergeGap)
+      };
+    })
+    .filter(row=>row.items.length>=3&&row.intervals.length>=2);
+}
+function gdLmClearanceCorridorBands(rows,cfg){
+  const sourceMax=Number(cfg?.sourceMax)||0;
+  if(!sourceMax||!Array.isArray(rows)||rows.length<3)return [];
+  const half=Number(cfg.half)||9;
+  const step=Math.max(1,Number(cfg.step)||3);
+  const minSupport=Math.max(3,Math.ceil(rows.length*.66));
+  const maxBlocked=Math.max(0,Math.floor(rows.length*.1));
+  const samples=[];
+  for(let x=0;x<=sourceMax;x+=step){
+    let support=0,blocked=0,clearRows=0;
+    rows.forEach(row=>{
+      const intervals=Array.isArray(row.intervals)?row.intervals:[];
+      const hit=intervals.some(interval=>Number(interval.x0)<x+half&&Number(interval.x1)>x-half);
+      if(hit){
+        blocked+=1;
+        return;
+      }
+      const hasLeft=intervals.some(interval=>Number(interval.x1)<=x-half);
+      const hasRight=intervals.some(interval=>Number(interval.x0)>=x+half);
+      if(hasLeft&&hasRight)support+=1;
+      clearRows+=1;
+    });
+    if(support>=minSupport&&blocked<=maxBlocked){
+      samples.push({x,support,blocked,clearRows,score:support*10-blocked*18+clearRows});
     }
-    const centerStatus=gdLmValueSkewerCenterStatus(left,right,valueCx);
-    return {
+  }
+  const bands=[];
+  let current=null;
+  samples.forEach(sample=>{
+    if(!current||sample.x-current.end>step*1.5){
+      if(current)bands.push(current);
+      current={start:sample.x,end:sample.x,best:sample,samples:[sample]};
+      return;
+    }
+    current.end=sample.x;
+    current.samples.push(sample);
+    if(sample.score>current.best.score)current.best=sample;
+  });
+  if(current)bands.push(current);
+  return bands
+    .map(band=>Object.assign({},band,{
+      x:Number(band.best?.x),
+      width:Math.max(step,Number(band.end)-Number(band.start)+step),
+      support:Number(band.best?.support)||0,
+      blocked:Number(band.best?.blocked)||0,
+      score:Number(band.best?.score)||0
+    }))
+    .filter(band=>Number.isFinite(Number(band.x))&&band.x>=cfg.edgeGuard&&band.x<=sourceMax-cfg.edgeGuard)
+    .sort((a,b)=>Number(a.x)-Number(b.x));
+}
+function gdLmPruneClearanceCuts(bands,cfg){
+  const minGap=Math.max(1,Number(cfg?.minColumnWidth)||32);
+  const cuts=[];
+  (Array.isArray(bands)?bands:[]).forEach(band=>{
+    const previous=cuts[cuts.length-1];
+    if(previous&&Number(band.x)-Number(previous.x)<minGap){
+      const bandScore=Number(band.score)+Number(band.width)*.2;
+      const previousScore=Number(previous.score)+Number(previous.width)*.2;
+      if(bandScore>previousScore)cuts[cuts.length-1]=band;
+      return;
+    }
+    cuts.push(band);
+  });
+  return cuts;
+}
+function gdLmColumnsFromClearanceCuts(rows,cuts,cfg){
+  const sourceMax=Number(cfg?.sourceMax)||0;
+  if(!sourceMax||!Array.isArray(rows)||rows.length<3||!Array.isArray(cuts)||!cuts.length)return [];
+  const boundaries=[0].concat(cuts.map(cut=>Number(cut.x)).filter(Number.isFinite),[sourceMax])
+    .filter((value,index,array)=>index===0||value>array[index-1]+1);
+  const minSupport=Math.max(2,Math.ceil(rows.length*.36));
+  const columns=[];
+  for(let index=0;index<boundaries.length-1;index+=1){
+    const left=Number(boundaries[index]);
+    const right=Number(boundaries[index+1]);
+    if(right-left<Math.max(12,Number(cfg.minColumnWidth)*.45))continue;
+    const rowHits=[];
+    const hits=[];
+    rows.forEach(row=>{
+      const rowItems=(Array.isArray(row.items)?row.items:[]).filter(box=>Number(box.cx)>left&&Number(box.cx)<right);
+      if(rowItems.length){
+        rowHits.push(row.rowIndex);
+        rowItems.forEach(box=>hits.push(box));
+      }
+    });
+    if(rowHits.length<minSupport||!hits.length)continue;
+    const x0=Math.min(...hits.map(box=>Number(box.x0)).filter(Number.isFinite));
+    const x1=Math.max(...hits.map(box=>Number(box.x1)).filter(Number.isFinite));
+    const valueCx=gdValueClusterMedian(hits.map(box=>Number(box.cx)).filter(Number.isFinite))||((left+right)/2);
+    const n=String(columns.length+1).padStart(2,"0");
+    columns.push({
       key:`gridCol${n}`,
       label:`C${n}`,
       rawHeaderText:"",
-      x0:Number(cluster.x0),
-      x1:Number(cluster.x1),
+      x0,
+      x1,
       left,
       right,
       dividerLeft:left,
@@ -14718,54 +14827,30 @@ function gdLmNumberBoxColumnsFromCandidates(candidates,sourceWidth=0){
       cx:(left+right)/2,
       valueCx,
       valueSkewerX:valueCx,
-      valueSkewerLeft:Number(cluster.x0),
-      valueSkewerRight:Number(cluster.x1),
-      valueBoxCount:cluster.items.length,
-      valueSkewerSupport:cluster.items.length,
-      valueSkewerRequired:supportThreshold,
-      valueSkewerStatus:centerStatus,
-      borderSource:"synthetic_from_value_box_skewers",
-      syntheticLeadingLeft:fallbackLeft,
-      source:"ocr_value_skewer_synthetic_borders"
-    };
-  }).filter(column=>Number.isFinite(column.left)&&Number.isFinite(column.right)&&column.right>column.left+4);
-  const first=columns[0];
-  if(first){
-    const offcutLeft=0;
-    const offcutRight=Math.max(offcutLeft,Number(first.left)||offcutLeft);
-    const offcutWidth=offcutRight-offcutLeft;
-    const firstWidth=Math.max(1,(Number(first.right)||0)-(Number(first.left)||0));
-    const sourceMaxSafe=Number(sourceMax)||0;
-    const valueSkewerX=Number(first.valueSkewerX);
-    const minOffcutWidth=Math.max(26,Math.min(120,firstWidth*.22));
-    const skewerFarEnough=Number.isFinite(valueSkewerX)&&valueSkewerX>Math.max(70,sourceMaxSafe*.065);
-    if(offcutWidth>=minOffcutWidth&&skewerFarEnough&&offcutRight<valueSkewerX-8){
-      columns.unshift({
-        key:"gridCol00",
-        label:"C00",
-        rawHeaderText:"",
-        x0:offcutLeft,
-        x1:offcutRight,
-        left:offcutLeft,
-        right:offcutRight,
-        dividerLeft:offcutLeft,
-        dividerRight:offcutRight,
-        cx:(offcutLeft+offcutRight)/2,
-        valueCx:(offcutLeft+offcutRight)/2,
-        valueBoxCount:0,
-        valueSkewerSupport:0,
-        valueSkewerStatus:"offcut",
-        borderSource:"synthetic_leading_offcut_before_first_value_skewer",
-        source:"ocr_leading_offcut"
-      });
-    }
+      valueBoxCount:hits.length,
+      valueSkewerSupport:rowHits.length,
+      valueSkewerRequired:minSupport,
+      valueSkewerStatus:"clearance-corridor",
+      borderSource:"vertical_value_clearance_corridor",
+      source:"ocr_value_clearance_corridor"
+    });
   }
-  const cleaned=gdLmReindexGeneratedGridColumns(columns.map(column=>{
-    const copy=Object.assign({},column);
-    delete copy.syntheticLeadingLeft;
-    return copy;
-  }));
+  return columns;
+}
+function gdLmNumberBoxColumnsFromClearanceCorridors(candidates,sourceWidth=0){
+  const boxes=gdLmNumberBoxesFromCandidates(candidates);
+  if(boxes.length<4)return [];
+  const cfg=gdLmClearanceCorridorConfig(boxes,sourceWidth);
+  const rows=gdLmClearanceRowsFromNumberBoxes(boxes,cfg);
+  if(rows.length<3)return [];
+  const bands=gdLmClearanceCorridorBands(rows,cfg);
+  const cuts=gdLmPruneClearanceCuts(bands,cfg);
+  const columns=gdLmColumnsFromClearanceCuts(rows,cuts,cfg);
+  const cleaned=gdLmReindexGeneratedGridColumns(columns);
   return cleaned.length>=4?gdLmAssignDetectedHeaderColumnBounds(cleaned):[];
+}
+function gdLmNumberBoxColumnsFromCandidates(candidates,sourceWidth=0){
+  return gdLmNumberBoxColumnsFromClearanceCorridors(candidates,sourceWidth);
 }
 function gdLmNumberBoxRowsFromCandidates(candidates,sourceHeight=0){
   const boxes=gdLmNumberBoxesFromCandidates(candidates).sort((a,b)=>a.cy-b.cy||a.cx-b.cx);
@@ -15933,105 +16018,39 @@ function gdEnsureOcrFirstColumnClubIdTarget(columnScan){
   allocation.clubIdColumnIndex=Number(first.columnIndex)||0;
   return true;
 }
-function gdOcrGeneratedCutoutActive(cutout){
-  if(!cutout)return false;
-  if(cutout.retired===true)return false;
-  return !/^retired/i.test(String(cutout.status||""));
-}
-function gdRetireGeneratedGridDuplicateHeaderSplits(columnScan,allocation){
-  if(String(columnScan?.layout?.cropMode||"")!=="ocr-generated-grid")return false;
-  const cutouts=Array.isArray(allocation?.cutouts)?allocation.cutouts:[];
-  if(cutouts.length<2)return false;
-  let changed=false;
-  const scoreCutout=cutout=>{
-    const left=Number(cutout?.dividerLeft);
-    const right=Number(cutout?.dividerRight);
-    const width=Number.isFinite(left)&&Number.isFinite(right)?Math.max(0,right-left):0;
-    const key=String(cutout?.allocatedKey||"");
-    const match=(Array.isArray(cutout?.matches)?cutout.matches:[]).find(item=>String(item?.key||"")===key)||(Array.isArray(cutout?.matches)?cutout.matches[0]:null);
-    const support=Number(cutout?.valueSkewerSupport)||Number(cutout?.valueBoxCount)||0;
-    const status=String(cutout?.valueSkewerStatus||"");
-    const centered=status==="centered"?8:(status==="watch"?2:(status==="suspicious"?-10:0));
-    return (Number(match?.score)||0)+Math.min(34,width*.18)+support*4+centered;
-  };
-  let index=0;
-  while(index<cutouts.length){
-    const key=String(cutouts[index]?.allocatedKey||"");
-    if(!gdPracticeIsReadableValueKey(key)){
-      index+=1;
-      continue;
-    }
-    const group=[cutouts[index]];
-    let next=index+1;
-    while(next<cutouts.length&&String(cutouts[next]?.allocatedKey||"")===key){
-      group.push(cutouts[next]);
-      next+=1;
-    }
-    if(group.length>1){
-      const keep=group
-        .slice()
-        .sort((a,b)=>scoreCutout(b)-scoreCutout(a)||Number(a.columnIndex)-Number(b.columnIndex))[0];
-      group.forEach(cutout=>{
-        if(cutout===keep)return;
-        cutout.retired=true;
-        cutout.retiredKey=key;
-        cutout.retiredReason="duplicate-adjacent-header-split";
-        cutout.status="retired-duplicate-header-split";
-        cutout.allocatedKey="";
-        cutout.allocatedLabel="";
-        (Array.isArray(cutout.cells)?cutout.cells:[]).forEach(cell=>{
-          cell.retired=true;
-          cell.retiredReason="duplicate-adjacent-header-split";
-          cell.allocatedKey="";
-          cell.allocatedLabel="";
-        });
-        changed=true;
-      });
-    }
-    index=next;
-  }
-  if(changed){
-    allocation.activeCount=cutouts.filter(gdOcrGeneratedCutoutActive).length;
-    allocation.allocatedCount=cutouts.filter(item=>gdOcrGeneratedCutoutActive(item)&&item.allocatedKey).length;
-    allocation.retiredCount=cutouts.filter(item=>item.retired===true).length;
-  }
-  return changed;
-}
 function gdApplyGeneratedGridColumnSequenceAllocation(columnScan,allocation){
   if(String(columnScan?.layout?.cropMode||"")!=="ocr-generated-grid")return false;
   const cutouts=Array.isArray(allocation?.cutouts)?allocation.cutouts:[];
   if(!cutouts.length)return false;
-  const activeCutouts=cutouts.filter(gdOcrGeneratedCutoutActive);
-  if(!activeCutouts.length)return false;
-  const firstClub=gdOcrGeneratedFirstColumnCanBeClub(columnScan)||String(activeCutouts[0]?.allocatedKey||"")==="club";
+  const firstClub=gdOcrGeneratedFirstColumnCanBeClub(columnScan)||String(cutouts[0]?.allocatedKey||"")==="club";
   const template=gdLmLaunchMonitorTemplateColumns();
   const startIndex=firstClub?1:0;
-  const visibleCount=Math.max(0,activeCutouts.length-startIndex);
+  const visibleCount=Math.max(0,cutouts.length-startIndex);
   if(!visibleCount)return false;
   const exactTemplateCount=visibleCount===template.length;
   if(!exactTemplateCount)return false;
   const alignedAnchors=template.slice(0,visibleCount).reduce((count,column,index)=>{
-    const current=String(activeCutouts[startIndex+index]?.allocatedKey||"");
+    const current=String(cutouts[startIndex+index]?.allocatedKey||"");
     return count+(current===column.key?1:0);
   },0);
   let changed=false;
-  if(firstClub&&activeCutouts[0]&&String(activeCutouts[0].allocatedKey||"")!=="club"){
-    activeCutouts[0].allocatedKey="club";
-    activeCutouts[0].allocatedLabel="Club ID";
-    activeCutouts[0].status="club-id-pass";
-    activeCutouts[0].matches=[{
+  if(firstClub&&cutouts[0]&&String(cutouts[0].allocatedKey||"")!=="club"){
+    cutouts[0].allocatedKey="club";
+    cutouts[0].allocatedLabel="Club ID";
+    cutouts[0].status="club-id-pass";
+    cutouts[0].matches=[{
       key:"club",
       label:"Club ID",
       phrase:"first column club-id pass",
       score:1,
       source:"club-id-column"
-    }].concat(Array.isArray(activeCutouts[0].matches)?activeCutouts[0].matches:[]);
-    (Array.isArray(activeCutouts[0].cells)?activeCutouts[0].cells:[]).forEach(cell=>{cell.allocatedKey="club";cell.allocatedLabel="Club ID";});
-    allocation.clubIdColumnIndex=Number(activeCutouts[0].columnIndex)||0;
+    }].concat(Array.isArray(cutouts[0].matches)?cutouts[0].matches:[]);
+    (Array.isArray(cutouts[0].cells)?cutouts[0].cells:[]).forEach(cell=>{cell.allocatedKey="club";cell.allocatedLabel="Club ID";});
+    allocation.clubIdColumnIndex=Number(cutouts[0].columnIndex)||0;
     changed=true;
   }
   template.slice(0,visibleCount).forEach((column,index)=>{
-    const cutout=activeCutouts[startIndex+index];
+    const cutout=cutouts[startIndex+index];
     if(!cutout)return;
     const previous=String(cutout.allocatedKey||"");
     cutout.allocatedKey=column.key;
@@ -16050,8 +16069,7 @@ function gdApplyGeneratedGridColumnSequenceAllocation(columnScan,allocation){
     });
     if(previous!==column.key)changed=true;
   });
-  allocation.activeCount=activeCutouts.length;
-  allocation.allocatedCount=cutouts.filter(item=>gdOcrGeneratedCutoutActive(item)&&item.allocatedKey).length;
+  allocation.allocatedCount=cutouts.filter(item=>item.allocatedKey).length;
   allocation.sequenceAllocation={
     source:"generated-grid-column-sequence",
     firstClub,
@@ -16186,7 +16204,6 @@ function gdBuildOcrColumnCutoutAllocation(columnScan,opts={}){
     rowCount:rows.length,
     cellCount:cutouts.reduce((sum,cutout)=>sum+cutout.cells.length,0)
   };
-  gdRetireGeneratedGridDuplicateHeaderSplits(columnScan,allocation);
   gdApplyGeneratedGridColumnSequenceAllocation(columnScan,allocation);
   return allocation;
 }
