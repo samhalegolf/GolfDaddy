@@ -13928,7 +13928,17 @@ function gdRenderFlatTableBridgeOutput(columnScan,activeTemplateKey="flat"){
   const generatedGrid=cropMode==="ocr-generated-grid";
   const outputLabel=String(columnScan?.gridExperiment?.label||(generatedGrid?"OCR generated grid":"Flat table output"));
   if(text)text.value="";
-  if(subhead)subhead.textContent=generatedGrid?"OCR generated grid - headers unallocated, cells unread":"Flat table template - output cells";
+  if(subhead){
+    if(generatedGrid){
+      const allocationState=gdPracticeHeaderAllocationReady(columnScan);
+      const digitizedRows=Number(columnScan?.digitizedTable?.rows?.length)||0;
+      subhead.textContent=digitizedRows
+        ?"OCR generated grid - raw values read"
+        :(allocationState.ready?"OCR generated grid - headers allocated, values pending":"OCR generated grid - header allocation blocked, cells unread");
+    }else{
+      subhead.textContent="Flat table template - output cells";
+    }
+  }
   if(mainCanvas&&sourceCanvas){
     const maxW=1200;
     const sourceW=Number(sourceCanvas.width)||1;
@@ -14005,10 +14015,32 @@ function gdPracticeTableScanOutcomeForDebug(columnScan){
     flagged:Number(digitized.stats?.flagged)||0,
     missing:Number(digitized.stats?.missing)||0,
     nativeRows:Number(scan.columnOrderPayload?.clubGroups?.length)||0,
+    headerScan:{
+      source:String(scan.headerTextScan?.source||allocation.scanSource||""),
+      wordCount:Number(scan.headerTextScan?.wordCount)||0,
+      attempts:Number(scan.headerTextScan?.attempts?.length)||0,
+      fullBandAttempts:Number(scan.headerTextScan?.fullBandAttempts)||0,
+      cutoutAttempts:Number(scan.headerTextScan?.cutoutAttempts)||0
+    },
     sourceSize:{
       width:Number(scan.sourceCanvas?.width||scan.preparedCanvas?.width||scan.directColumnSource?.width)||0,
       height:Number(scan.sourceCanvas?.height||scan.preparedCanvas?.height||scan.directColumnSource?.height)||0
     },
+    cutoutHeaders:(Array.isArray(allocation.cutouts)?allocation.cutouts:[]).slice(0,24).map((cutout,index)=>({
+      index:index+1,
+      genericLabel:String(cutout.genericLabel||`C${String(index+1).padStart(2,"0")}`),
+      allocatedKey:String(cutout.allocatedKey||""),
+      allocatedLabel:String(cutout.allocatedLabel||""),
+      status:String(cutout.status||""),
+      rawHeaderText:String(cutout.rawHeaderText||""),
+      localText:String(cutout.headerTextSource?.text||""),
+      localWordCount:Number(cutout.headerTextSource?.wordCount)||0,
+      matches:(Array.isArray(cutout.matches)?cutout.matches:[]).slice(0,3).map(match=>({
+        key:String(match.key||""),
+        phrase:String(match.phrase||""),
+        source:String(match.source||"")
+      }))
+    })),
     columnKeys:columns.slice(0,40).map((column,index)=>({
       index:index+1,
       key:String(column.key||column.metricKey||""),
@@ -14055,6 +14087,16 @@ function gdPracticeTableScanOutcomeHtml(outcome){
   const columns=(Array.isArray(outcome.columnKeys)?outcome.columnKeys:[]).slice(0,18)
     .map(column=>`<b>${gdEscapeHTML(column.index)}. ${gdEscapeHTML(column.key||column.label||"unmapped")}<small>${gdEscapeHTML(column.cx?`x ${column.cx}`:"")}</small></b>`)
     .join("");
+  const cutoutHeaders=(Array.isArray(outcome.cutoutHeaders)?outcome.cutoutHeaders:[]).slice(0,24)
+    .map(cutout=>{
+      const matchText=(Array.isArray(cutout.matches)?cutout.matches:[])
+        .map(match=>`${match.phrase} -> ${match.key}`)
+        .filter(Boolean)
+        .join(" | ");
+      const text=String(cutout.rawHeaderText||cutout.localText||"no header text");
+      return `<b>${gdEscapeHTML(cutout.genericLabel)} -> ${gdEscapeHTML(cutout.allocatedKey||"unmapped")}<small>${gdEscapeHTML(matchText?`${text} | ${matchText}`:text)}</small></b>`;
+    })
+    .join("");
   const rowBands=(Array.isArray(outcome.rowBands)?outcome.rowBands:[]).slice(0,18)
     .map(row=>`<b>${gdEscapeHTML(row.index)}<small>${gdEscapeHTML(row.top||row.bottom?`${row.top}-${row.bottom}`:`y ${row.cy}`)}</small></b>`)
     .join("");
@@ -14067,6 +14109,7 @@ function gdPracticeTableScanOutcomeHtml(outcome){
         ${metric("Headers",`${Number(outcome.headersAllocated)||0}/${Number(outcome.headersTotal)||0}`)}
         ${metric("Metric headers",`${Number(outcome.metricHeaders)||0}/${Number(outcome.minMetricHeaders)||0}`)}
         ${metric("Header words",Number(outcome.headerTextWords)||0)}
+        ${metric("Header scan",`${Number(outcome.headerScan?.cutoutAttempts)||0} cutout / ${Number(outcome.headerScan?.fullBandAttempts)||0} full`)}
         ${metric("Value candidates",Number(outcome.valueCandidates)||0)}
         ${metric("Number rows",Number(outcome.numberRows)||0)}
         ${metric("Digital rows",Number(outcome.digitizedRows)||0)}
@@ -14074,6 +14117,7 @@ function gdPracticeTableScanOutcomeHtml(outcome){
       </div>
       ${outcome.allocationReason?`<div><b>${gdEscapeHTML(outcome.headerReady?"Ready":"Blocked")}:</b> ${gdEscapeHTML(outcome.allocationReason)}</div>`:""}
       ${columns?`<div class="gdPracticePhotoDebugBody"><strong>Column allocation</strong><div class="gdPracticePhotoDebugSummary">${columns}</div></div>`:""}
+      ${cutoutHeaders?`<div class="gdPracticePhotoDebugBody"><strong>Per-cutout header reads</strong><div class="gdPracticePhotoDebugSummary">${cutoutHeaders}</div></div>`:""}
       ${rowBands?`<div class="gdPracticePhotoDebugBody"><strong>Detected row bands</strong><div class="gdPracticePhotoDebugSummary">${rowBands}</div></div>`:""}
     </div>
   </details>`;
@@ -15472,9 +15516,10 @@ function gdBuildPracticeCellGrid(columnScan){
   const height=Number(image?.height)||0;
   const cropMode=String(columnScan?.layout?.cropMode||"");
   const includeToPin=cropMode==="ocr-generated-grid";
+  const maxColumns=cropMode==="ocr-generated-grid"?12:10;
   const columns=(Array.isArray(columnScan?.layout?.columns)?columnScan.layout.columns:[])
     .filter(column=>column&&column.key&&(includeToPin||column.key!=="toPin"))
-    .slice(0,10);
+    .slice(0,maxColumns);
   const rows=gdPracticeCellRowsFromCluster(columnScan);
   if(!image||width<10||height<10||columns.length<1||rows.length<1)return null;
   const fullTableGridMode=cropMode==="full-table-template";
@@ -15951,7 +15996,7 @@ async function gdRunOcrColumnCutoutHeaderTextScan(Tesseract,columnScan){
     {label:"psm7",config:gdHeaderTextScanConfig("7")}
   ];
   for(const cutout of cutouts){
-    const region=cutout.headerRegion||cutout.headerSearchRegion;
+    const region=cutout.headerSearchRegion||cutout.headerRegion;
     if(!region)continue;
     const crop=gdCropCanvasRegion(image,region,3);
     const scan=await gdRecognizeHeaderTextCrop(Tesseract,crop,`layout:ocr-header-allocation-${cutout.genericLabel}`,cutoutConfigs,["original","clean"]);
@@ -16070,7 +16115,7 @@ function gdRenderOcrColumnCutoutAllocation(columnScan){
   source.textContent=[
     "Column cutouts are made from the current OCR geometry cut lines.",
     allocation.textScan?`Header text OCR: ${Number(allocation.textScan.wordCount)||0} text words, ${Number(allocation.textScan.attempts?.length)||0} attempts.`:"Header allocation is waiting for the dedicated text OCR scan.",
-    "Headers are allocated by OCR words found inside each cutout.",
+    "Headers are allocated by OCR words found inside each per-column header crop.",
     "Row cutouts exist below this, but cell values are still unread.",
     allocation.aliasStatus
   ].join(" ");
@@ -17156,7 +17201,7 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
       headerTextAttempts,
       reason:gridReady?"":"OCR generated number-box geometry did not form a cell grid.",
       summary:gridReady
-        ?`OCR-generated layout produced a ${gridRows} x ${gridColumns} cutout grid from number-box OCR geometry. A dedicated header text OCR pass found ${headerTextWords} text words and allocated ${allocatedColumns}/${cutoutColumns} columns.`
+        ?`OCR-generated layout produced a ${gridRows} x ${gridColumns} cutout grid from number-box OCR geometry. Per-column header OCR found ${headerTextWords} text words and mapped ${allocatedColumns}/${cutoutColumns} columns.`
         :`OCR-generated layout found number-like boxes, but no usable cutout grid.`,
       nextStep:gridReady?"Review the header / cutout allocation and cell cutouts. The default scanner reads cell values next.":"Tune the number-box geometry evidence using the OCR generated tab."
     });
@@ -17170,7 +17215,7 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
     }
     const readyScanOutcome=gdPracticePublishTableScanOutcome(columnScan,"ocr");
     gdPracticeDebugCheckpointSafe("table_detected","success",{outputSummary:`OCR-generated grid ready: ${gridRows} rows x ${gridColumns} columns`,counts:{rows:gridRows,columns:gridColumns,cells:gridCells},tableScanOutcome:readyScanOutcome});
-    gdPracticeDebugCheckpointSafe("ocr_generated_template","success",{outputSummary:`OCR-generated grid ready: ${gridRows} rows x ${gridColumns} columns; ${allocatedColumns}/${cutoutColumns} headers allocated by dedicated text OCR`,counts:{rows:gridRows,columns:gridColumns,cells:gridCells,headersAllocated:allocatedColumns,headersTotal:cutoutColumns,headerTextWords,headerTextAttempts,words:wordCount,candidates:outcome.candidateCount},tableScanOutcome:readyScanOutcome});
+    gdPracticeDebugCheckpointSafe("ocr_generated_template","success",{outputSummary:`OCR-generated grid ready: ${gridRows} rows x ${gridColumns} columns; per-column header OCR mapped ${allocatedColumns}/${cutoutColumns} cutouts`,counts:{rows:gridRows,columns:gridColumns,cells:gridCells,headersAllocated:allocatedColumns,headersTotal:cutoutColumns,headerTextWords,headerTextAttempts,words:wordCount,candidates:outcome.candidateCount},tableScanOutcome:readyScanOutcome});
     gdSetPracticeScanStatus(`OCR-generated grid ready: ${gridRows} rows x ${gridColumns} cutouts. Header / cutout allocation ${allocatedColumns}/${cutoutColumns}.`);
     return {payload:null,scan:columnScan,outcome};
   }catch(e){
