@@ -147,6 +147,52 @@
     return updated;
   }
 
+  function linkLocalCoachPlayer(coachId, player) {
+    if (!coachId || !player || !player.accountId) return player;
+    var s = state();
+    var p = profiles();
+    var coach = s.accounts.find(function (item) { return item && item.accountId === coachId; });
+    var storedPlayer = s.accounts.find(function (item) { return item && item.accountId === player.accountId; });
+    if (coach) {
+      coach.linkedPlayerIds = Array.isArray(coach.linkedPlayerIds) ? coach.linkedPlayerIds : [];
+      if (coach.linkedPlayerIds.indexOf(player.accountId) === -1) coach.linkedPlayerIds.push(player.accountId);
+      coach.updatedAt = nowISO();
+    }
+    if (storedPlayer) {
+      storedPlayer.linkedCoachIds = Array.isArray(storedPlayer.linkedCoachIds) ? storedPlayer.linkedCoachIds : [];
+      if (storedPlayer.linkedCoachIds.indexOf(coachId) === -1) storedPlayer.linkedCoachIds.push(coachId);
+      storedPlayer.updatedAt = nowISO();
+    }
+    p.profiles.forEach(function (profile) {
+      if (!profile || profile.accountId !== player.accountId) return;
+      profile.coachAccountIds = Array.isArray(profile.coachAccountIds) ? profile.coachAccountIds : [];
+      if (profile.coachAccountIds.indexOf(coachId) === -1) profile.coachAccountIds.push(coachId);
+      profile.linkedCoachIds = Array.isArray(profile.linkedCoachIds) ? profile.linkedCoachIds : [];
+      if (profile.linkedCoachIds.indexOf(coachId) === -1) profile.linkedCoachIds.push(coachId);
+      profile.updatedAt = nowISO();
+    });
+    saveJson(ACCOUNT_KEY, s);
+    saveJson(PROFILE_KEY, p);
+    safe(function () { if (window.GolfDaddyAccounts && typeof window.GolfDaddyAccounts.load === "function") window.GolfDaddyAccounts.load(); });
+    safe(function () { if (window.GolfDaddyAccounts && typeof window.GolfDaddyAccounts.apply === "function") window.GolfDaddyAccounts.apply({ silent: true }); });
+    return storedPlayer || player;
+  }
+
+  async function invitePlayer(data) {
+    var coach = currentAccount();
+    if (!coach || (role(coach.role) !== "coach" && role(coach.role) !== "admin")) throw new Error("Coach or admin account required");
+    var body = await post("/api/admin-user-invite", {
+      name: data && data.name,
+      email: data && data.email,
+      role: "player",
+      actorName: coach.name || coach.email || "your coach",
+      actorAccountId: coach.accountId || "",
+      targetAccountId: data && data.accountId || ""
+    });
+    var player = commit(body, { activate: false });
+    return linkLocalCoachPlayer(coach.accountId, player);
+  }
+
   function parseRecoveryParams() {
     var params = new URLSearchParams(location.search || "");
     var hash = new URLSearchParams(String(location.hash || "").replace(/^#/, ""));
@@ -249,6 +295,7 @@
     api.signup = function (data) { return signup(data, { activate: true }); };
     api.login = function (email, password, opts) { return login(email, password, opts); };
     api.update = function (data) { return updateAccount(data); };
+    api.addPlayer = function (data) { return invitePlayer(data); };
     api.logout = function () {
       safe(function () { localStorage.removeItem(SESSION_KEY); });
       return typeof oldLogout === "function" ? oldLogout.apply(this, arguments) : null;
@@ -260,7 +307,7 @@
     return true;
   }
 
-  window.ClaritySupabaseAuth = { signup: signup, login: login, updateAccount: updateAccount, commit: commit, wrap: wrap, showPasswordSetup: showPasswordSetup, session: function () { return loadJson(SESSION_KEY, null); } };
+  window.ClaritySupabaseAuth = { signup: signup, login: login, updateAccount: updateAccount, invitePlayer: invitePlayer, commit: commit, wrap: wrap, showPasswordSetup: showPasswordSetup, session: function () { return loadJson(SESSION_KEY, null); } };
   document.addEventListener("DOMContentLoaded", function () { setTimeout(wrap, 0); setTimeout(wrap, 600); setTimeout(showPasswordSetup, 50); });
   setTimeout(wrap, 0);
   setTimeout(wrap, 800);

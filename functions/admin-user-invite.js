@@ -1,6 +1,6 @@
 "use strict";
 
-const { email, hasAuth, json, role, supabaseAuth, text, upsertAccount } = require("./auth-utils");
+const { email, hasAuth, json, role, supabaseAuth, supabaseRest, text, upsertAccount } = require("./auth-utils");
 const { sendSystemAlert } = require("./alert-utils");
 
 function env(name) { return process.env[name] || ""; }
@@ -8,6 +8,15 @@ function siteUrl() { return (env("CLARITY_SITE_URL") || env("APP_URL") || "https
 function tempPassword() { return "Clarity-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10) + "!"; }
 function escapeHTML(value) { return String(value == null ? "" : value).replace(/[&<>"']/g, function(ch) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]; }); }
 function firstName(value) { return (String(value || "there").trim().split(/\s+/)[0] || "there").replace(/[^\w'-]/g, "") || "there"; }
+function cleanId(value) { return text(value, 120).replace(/[^a-zA-Z0-9_:-]/g, ""); }
+function unique(list) {
+  const out = [];
+  (Array.isArray(list) ? list : []).forEach(function(item) {
+    item = cleanId(item);
+    if (item && out.indexOf(item) === -1) out.push(item);
+  });
+  return out;
+}
 
 async function sendEmail(to, name, actorName, setupLink) {
   const resendKey = env("RESEND_API_KEY");
@@ -57,6 +66,32 @@ async function setupLink(accountEmail) {
   return String(link);
 }
 
+async function linkAccounts(coachId, playerId) {
+  coachId = cleanId(coachId);
+  playerId = cleanId(playerId);
+  if (!coachId || !playerId || coachId === playerId) return { linked: false };
+  const coachRows = await supabaseRest("app_accounts?select=account_id,linked_player_ids&account_id=eq." + encodeURIComponent(coachId) + "&limit=1", { method: "GET" });
+  const playerRows = await supabaseRest("app_accounts?select=account_id,linked_coach_ids&account_id=eq." + encodeURIComponent(playerId) + "&limit=1", { method: "GET" });
+  const coach = Array.isArray(coachRows) && coachRows[0];
+  const player = Array.isArray(playerRows) && playerRows[0];
+  const now = new Date().toISOString();
+  if (coach) {
+    await supabaseRest("app_accounts?account_id=eq." + encodeURIComponent(coachId), {
+      method: "PATCH",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({ linked_player_ids: unique([].concat(coach.linked_player_ids || [], [playerId])), updated_at: now })
+    });
+  }
+  if (player) {
+    await supabaseRest("app_accounts?account_id=eq." + encodeURIComponent(playerId), {
+      method: "PATCH",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({ linked_coach_ids: unique([].concat(player.linked_coach_ids || [], [coachId])), created_by_coach_id: coachId, updated_at: now })
+    });
+  }
+  return { linked: !!(coach && player) };
+}
+
 exports.handler = async function(event) {
   if (event.httpMethod === "OPTIONS") return json(204, {});
   if (event.httpMethod !== "POST") return json(405, { error: "Method not allowed" });
@@ -67,13 +102,21 @@ exports.handler = async function(event) {
   const name = text(body.name, 160) || (accountEmail ? accountEmail.split("@")[0] : "Player");
   const accountRole = role(body.role);
   const actorName = text(body.actorName, 120) || "your coach";
+  const actorAccountId = cleanId(body.actorAccountId || body.coachAccountId || "");
+  const targetAccountId = cleanId(body.targetAccountId || body.accountId || "");
   if (!accountEmail) return json(400, { error: "Enter a valid email" });
   try {
     const authUser = await createOrFindUser(accountEmail, name, accountRole);
-    const pack = await upsertAccount(authUser, { email: accountEmail, name, role: accountRole, eventType: "admin_user_invite" });
+    const pack = await upsertAccount(authUser, { accountId: targetAccountId, email: accountEmail, name, role: accountRole, coachId: actorAccountId || null, eventType: "admin_user_invite" });
+    const playerId = pack && pack.account && pack.account.accountId || targetAccountId;
+    const linkResult = accountRole === "player" ? await linkAccounts(actorAccountId, playerId) : { linked: false };
+    if (linkResult.linked && pack && pack.account) {
+      pack.account.linkedCoachIds = unique([].concat(pack.account.linkedCoachIds || [], [actorAccountId]));
+      pack.account.createdByCoachId = pack.account.createdByCoachId || actorAccountId;
+    }
     const link = await setupLink(accountEmail);
     const emailResult = await sendEmail(accountEmail, name, actorName, link);
-    return json(200, { ok: true, invited: true, email: accountEmail, emailResult, account: pack.account, profile: pack.profile });
+    return json(200, { ok: true, invited: true, linked: linkResult.linked, email: accountEmail, emailResult, account: pack.account, profile: pack.profile });
   } catch (error) {
     await sendSystemAlert({ eventType: "admin_user_invite_failed", title: "Clarity account invite failed", detail: "A user invite could not create a setup-password link.", accountEmail, context: { status: error.status || null, details: error.body || error.message } });
     return json(error.status || 502, { error: error.message || "Could not invite user", details: error.body || null });
