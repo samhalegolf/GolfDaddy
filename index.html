@@ -15822,8 +15822,10 @@ function gdBuildOcrColumnCutoutAllocation(columnScan,opts={}){
   const headerBottom=Number.isFinite(firstRowTop)
     ?Math.max(24,Math.min(height,firstRowTop))
     :Math.max(48,Math.min(height,Math.round(height*.24)));
+  const scanSource=String(opts.source||columnScan?.headerTextScan?.source||"existing-ocr-words");
   const allocationOcrData=opts.ocrData||columnScan?.generatedHeaderAllocationOcrData||columnScan?.generatedOcrData||{};
   const words=gdLmWordsFromOcrData(allocationOcrData);
+  const trustIsolatedHeaderCutouts=/cutout/i.test(scanSource);
   const headerBand={top:0,bottom:headerBottom};
   const cutouts=columns.map((column,index)=>{
     const genericLabel=String(column.label||column.key||`C${String(index+1).padStart(2,"0")}`);
@@ -15837,7 +15839,8 @@ function gdBuildOcrColumnCutoutAllocation(columnScan,opts={}){
     const searchPad=Math.max(12,Math.min(46,(safeRight-safeLeft)*.28));
     const headerSearchRegion=gdOcrCutoutClampRegion({x:safeLeft-searchPad,y:0,width:(safeRight-safeLeft)+searchPad*2,height:headerBottom},width,height);
     const localWords=gdLmWordsFromOcrData(cutoutResult?.ocrData||{});
-    const headerWords=gdOcrDedupHeaderWords(gdOcrCutoutWordsInRegion(words,headerSearchRegion,{padX:10,padY:6}).concat(localWords))
+    const sharedWords=trustIsolatedHeaderCutouts?[]:gdOcrCutoutWordsInRegion(words,headerSearchRegion,{padX:10,padY:6});
+    const headerWords=gdOcrDedupHeaderWords(localWords.concat(sharedWords))
       .filter(word=>/[a-z]/i.test(String(word?.text||"")))
       .filter(word=>!gdLmLooksLikeOcrValue(word?.text));
     const extraTexts=[cutoutResult?.text,cutoutResult?.ocrData?.text]
@@ -15866,7 +15869,7 @@ function gdBuildOcrColumnCutoutAllocation(columnScan,opts={}){
       allocatedKey:assigned?.key||"",
       allocatedLabel:assigned?.label||"",
       status:assigned?"allocated":"unallocated",
-      scanSource:String(opts.source||columnScan?.headerTextScan?.source||"existing-ocr-words"),
+      scanSource,
       rawHeaderText:headerWords.map(word=>String(word.text||"").trim()).filter(Boolean).join(" ")||extraTexts[0]||"",
       matches,
       headerWords,
@@ -15881,7 +15884,7 @@ function gdBuildOcrColumnCutoutAllocation(columnScan,opts={}){
   const allocatedCount=cutouts.filter(cutout=>cutout.allocatedKey).length;
   return {
     source:"ocr-column-cutouts",
-    scanSource:String(opts.source||columnScan?.headerTextScan?.source||"existing-ocr-words"),
+    scanSource,
     aliasStatus:gdLmAliasRegistryStatus(),
     textScan:columnScan?.headerTextScan||null,
     headerBand,
@@ -15939,31 +15942,16 @@ async function gdRunOcrColumnCutoutHeaderTextScan(Tesseract,columnScan){
   const width=Number(image?.width)||0;
   const height=Number(image?.height)||0;
   if(!Tesseract||!image||width<10||height<10||!cutouts.length){
-    return {source:"header-text-ocr",ocrData:null,cutoutResults:{},attempts:[],wordCount:0,reason:"No OCR header cutout regions"};
+    return {source:"header-cutout-ocr",ocrData:null,cutoutResults:{},attempts:[],wordCount:0,reason:"No OCR header cutout regions"};
   }
-  const configs=[
-    {label:"psm6",config:gdHeaderTextScanConfig("6")},
-    {label:"psm11",config:gdHeaderTextScanConfig("11")}
-  ];
-  const headerTop=Math.max(0,Number(allocation.headerBand?.top)||0);
-  const headerBottom=Math.max(headerTop+1,Math.min(height,Number(allocation.headerBand?.bottom)||Math.round(height*.24)));
-  const fullCrop=gdCropCanvasRegion(image,{x:0,y:headerTop,width,height:headerBottom-headerTop},3);
   const attempts=[];
   const results=[];
   const cutoutResults={};
-  const fullScan=await gdRecognizeHeaderTextCrop(Tesseract,fullCrop,"layout:ocr-header-allocation-full",configs,["original","clean","white-text"]);
-  attempts.push(...fullScan.attempts.map(item=>Object.assign({scope:"full-header-band"},item)));
-  results.push(...fullScan.results);
-  let merged=gdLmNormalizeOcrData(gdMergeLaunchMonitorOcrData(results)||{text:"",words:[],lines:[]});
-  let previewAllocation=gdBuildOcrColumnCutoutAllocation(columnScan,{ocrData:merged,source:"header-text-ocr"});
-  const unallocated=(Array.isArray(previewAllocation?.cutouts)?previewAllocation.cutouts:cutouts)
-    .filter(cutout=>!cutout.allocatedKey)
-    .slice(0,12);
   const cutoutConfigs=[
     {label:"psm7",config:gdHeaderTextScanConfig("7")}
   ];
-  for(const cutout of unallocated){
-    const region=cutout.headerSearchRegion||cutout.headerRegion;
+  for(const cutout of cutouts){
+    const region=cutout.headerRegion||cutout.headerSearchRegion;
     if(!region)continue;
     const crop=gdCropCanvasRegion(image,region,3);
     const scan=await gdRecognizeHeaderTextCrop(Tesseract,crop,`layout:ocr-header-allocation-${cutout.genericLabel}`,cutoutConfigs,["original","clean"]);
@@ -15989,16 +15977,16 @@ async function gdRunOcrColumnCutoutHeaderTextScan(Tesseract,columnScan){
       String(cutoutResult.columnIndex+1)
     ].filter(Boolean).forEach(key=>{cutoutResults[key]=cutoutResult;});
   }
-  merged=gdLmNormalizeOcrData(gdMergeLaunchMonitorOcrData(results)||{text:"",words:[],lines:[]});
+  const merged=gdLmNormalizeOcrData(gdMergeLaunchMonitorOcrData(results)||{text:"",words:[],lines:[]});
   return {
-    source:"header-text-ocr",
+    source:"header-cutout-ocr",
     ocrData:merged,
     cutoutResults,
     attempts,
     wordCount:gdHeaderTextScanWordCount(merged),
-    fullBandAttempts:fullScan.attempts.length,
-    cutoutAttempts:attempts.length-fullScan.attempts.length,
-    reason:results.length?"Header text OCR found words for cutout allocation":"Header text OCR found no usable text words"
+    fullBandAttempts:0,
+    cutoutAttempts:attempts.length,
+    reason:results.length?"Isolated header cutout OCR found words for cutout allocation":"Isolated header cutout OCR found no usable text words"
   };
 }
 function gdApplyOcrColumnCutoutAllocation(columnScan){
@@ -17127,7 +17115,7 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
     if(columnScan.headerTextScan?.ocrData)columnScan.generatedHeaderAllocationOcrData=columnScan.headerTextScan.ocrData;
     columnScan.columnCutoutAllocation=gdBuildOcrColumnCutoutAllocation(columnScan,{
       ocrData:columnScan.generatedHeaderAllocationOcrData||{words:[],lines:[],text:""},
-      source:"header-text-ocr"
+      source:columnScan.headerTextScan?.source||"header-cutout-ocr"
     });
     gdApplyOcrColumnCutoutAllocation(columnScan);
     const gridRows=Number(columnScan.cellGrid?.rows?.length)||0;
