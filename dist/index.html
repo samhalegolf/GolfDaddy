@@ -13032,7 +13032,8 @@ function gdDrawOcrGeneratedTemplateOverlay(ctx,outcome,sourceW,sourceH,scale){
   columns.forEach((column,index)=>{
     const left=Math.max(0,Math.min(sourceW,Number.isFinite(Number(column.dividerLeft))?Number(column.dividerLeft):(Number(column.left)||Number(column.x0)||0)));
     const right=Math.max(left+1,Math.min(sourceW,Number.isFinite(Number(column.dividerRight))?Number(column.dividerRight):(Number(column.right)||Number(column.x1)||left+1)));
-    const cx=Math.max(left,Math.min(right,Number.isFinite(Number(column.valueCx))?Number(column.valueCx):(Number(column.cx)||((left+right)/2))));
+    const skewerX=Number(column.valueSkewerX);
+    const cx=Number.isFinite(skewerX)?Math.max(left,Math.min(right,skewerX)):NaN;
     ctx.fillStyle=index%2?"rgba(86,181,255,.055)":"rgba(55,242,141,.045)";
     ctx.fillRect(left,0,Math.max(1,right-left),sourceH);
     ctx.strokeStyle="rgba(255,211,116,.88)";
@@ -13043,12 +13044,14 @@ function gdDrawOcrGeneratedTemplateOverlay(ctx,outcome,sourceW,sourceH,scale){
       ctx.lineTo(x,sourceH);
       ctx.stroke();
     });
-    ctx.strokeStyle="rgba(86,181,255,.86)";
-    ctx.lineWidth=1.5/Math.max(.001,scale);
-    ctx.beginPath();
-    ctx.moveTo(cx,0);
-    ctx.lineTo(cx,sourceH);
-    ctx.stroke();
+    if(Number.isFinite(cx)){
+      ctx.strokeStyle="rgba(86,181,255,.86)";
+      ctx.lineWidth=1.5/Math.max(.001,scale);
+      ctx.beginPath();
+      ctx.moveTo(cx,0);
+      ctx.lineTo(cx,sourceH);
+      ctx.stroke();
+    }
     const label=String(column.label||column.key||index+1);
     ctx.font=`${Math.max(8,10/Math.max(.001,scale))}px ui-monospace,Menlo,monospace`;
     const metrics=ctx.measureText(label);
@@ -13987,6 +13990,8 @@ function gdPracticeTableScanOutcomeForDebug(columnScan){
     headersTotal:Number(allocation.totalCount)||columns.length,
     metricHeaders:allocationState.metricCount,
     minMetricHeaders:allocationState.minMetrics,
+    hasDistanceHeader:allocationState.hasDistance,
+    requiresDistanceHeader:allocationState.requireDistance,
     headerReady:allocationState.ready,
     allocationReason:allocationState.reason,
     headerTextWords:Number(scan.headerTextScan?.wordCount)||0,
@@ -14020,6 +14025,11 @@ function gdPracticeTableScanOutcomeForDebug(columnScan){
       rawHeaderText:String(cutout.rawHeaderText||""),
       localText:String(cutout.headerTextSource?.text||""),
       localWordCount:Number(cutout.headerTextSource?.wordCount)||0,
+      left:Math.round(Number(cutout.dividerLeft ?? cutout.columnRegion?.x)||0),
+      right:Math.round(Number(cutout.dividerRight ?? (Number(cutout.columnRegion?.x)||0)+(Number(cutout.columnRegion?.width)||0))||0),
+      valueSkewerX:Number.isFinite(Number(cutout.valueSkewerX))?Math.round(Number(cutout.valueSkewerX)):0,
+      valueSkewerStatus:String(cutout.valueSkewerStatus||""),
+      borderSource:String(cutout.borderSource||""),
       matches:(Array.isArray(cutout.matches)?cutout.matches:[]).slice(0,3).map(match=>({
         key:String(match.key||""),
         phrase:String(match.phrase||""),
@@ -14033,7 +14043,7 @@ function gdPracticeTableScanOutcomeForDebug(columnScan){
       cx:Math.round(Number(column.cx)||0),
       left:Math.round(Number(column.dividerLeft ?? column.left)||0),
       right:Math.round(Number(column.dividerRight ?? column.right)||0),
-      valueSkewerX:Math.round(Number(column.valueSkewerX ?? column.valueCx ?? column.cx)||0),
+      valueSkewerX:Number.isFinite(Number(column.valueSkewerX))?Math.round(Number(column.valueSkewerX)):0,
       valueSkewerStatus:String(column.valueSkewerStatus||""),
       borderSource:String(column.borderSource||column.source||"")
     })),
@@ -14060,21 +14070,25 @@ function gdPracticeReadableValueKeys(columnScan){
 function gdPracticeHeaderAllocationReady(columnScan,opts={}){
   const columns=Number(columnScan?.cellGrid?.columns?.length)||0;
   const cutouts=Array.isArray(columnScan?.columnCutoutAllocation?.cutouts)?columnScan.columnCutoutAllocation.cutouts:[];
+  const cropMode=String(columnScan?.layout?.cropMode||"");
   const metricKeys=[...new Set(gdPracticeAllocatedMetricKeys(columnScan))];
   const minMetrics=Math.max(1,Number(opts.minMetrics)||1);
   const hasDistance=metricKeys.some(key=>key==="carry"||key==="total");
-  const ready=metricKeys.length>=minMetrics;
+  const requireDistance=opts.requireDistance== null ? cropMode==="ocr-generated-grid" : opts.requireDistance===true;
+  const ready=metricKeys.length>=minMetrics&&(!requireDistance||hasDistance);
+  let reason="Header allocation ready";
+  if(metricKeys.length<minMetrics)reason="Header allocation found no mapped value columns";
+  else if(requireDistance&&!hasDistance)reason="Header allocation needs a carry or total column before value import";
   return {
     ready,
     metricKeys,
     metricCount:metricKeys.length,
     minMetrics,
     hasDistance,
+    requireDistance,
     allocated:Number(columnScan?.columnCutoutAllocation?.allocatedCount)||0,
     total:Number(columnScan?.columnCutoutAllocation?.totalCount)||cutouts.length||columns,
-    reason:ready
-      ?"Header allocation ready"
-      :"Header allocation found no mapped value columns"
+    reason
   };
 }
 function gdPracticeTableScanOutcomeHtml(outcome){
@@ -14083,7 +14097,7 @@ function gdPracticeTableScanOutcomeHtml(outcome){
   const columns=(Array.isArray(outcome.columnKeys)?outcome.columnKeys:[]).slice(0,18)
     .map(column=>{
       const cut=column.left||column.right?`cut ${column.left}-${column.right}`:"";
-      const skewer=column.valueSkewerX?`skewer ${column.valueSkewerX}${column.valueSkewerStatus?` ${column.valueSkewerStatus}`:""}`:"";
+      const skewer=column.valueSkewerX?`skewer ${column.valueSkewerX}${column.valueSkewerStatus?` ${column.valueSkewerStatus}`:""}`:(column.valueSkewerStatus==="offcut"?"club/offcut":"");
       return `<b>${gdEscapeHTML(column.index)}. ${gdEscapeHTML(column.key||column.label||"unmapped")}<small>${gdEscapeHTML([cut,skewer].filter(Boolean).join(" | "))}</small></b>`;
     })
     .join("");
@@ -14094,7 +14108,8 @@ function gdPracticeTableScanOutcomeHtml(outcome){
         .filter(Boolean)
         .join(" | ");
       const text=String(cutout.rawHeaderText||cutout.localText||"no header text");
-      return `<b>${gdEscapeHTML(cutout.genericLabel)} -> ${gdEscapeHTML(cutout.allocatedKey||"unmapped")}<small>${gdEscapeHTML(matchText?`${text} | ${matchText}`:text)}</small></b>`;
+      const geometry=[cutout.left||cutout.right?`cut ${cutout.left}-${cutout.right}`:"",cutout.valueSkewerX?`skewer ${cutout.valueSkewerX}`:(cutout.valueSkewerStatus==="offcut"?"club/offcut":"")].filter(Boolean).join(" | ");
+      return `<b>${gdEscapeHTML(cutout.genericLabel)} -> ${gdEscapeHTML(cutout.allocatedKey||"unmapped")}<small>${gdEscapeHTML([geometry,matchText?`${text} | ${matchText}`:text].filter(Boolean).join(" :: "))}</small></b>`;
     })
     .join("");
   const rowBands=(Array.isArray(outcome.rowBands)?outcome.rowBands:[]).slice(0,18)
@@ -14108,6 +14123,7 @@ function gdPracticeTableScanOutcomeHtml(outcome){
         ${metric("Cells",Number(outcome.cells)||0)}
         ${metric("Headers",`${Number(outcome.headersAllocated)||0}/${Number(outcome.headersTotal)||0}`)}
         ${metric("Metric headers",`${Number(outcome.metricHeaders)||0}/${Number(outcome.minMetricHeaders)||0}`)}
+        ${metric("Distance header",outcome.requiresDistanceHeader?(outcome.hasDistanceHeader?"found":"missing"):"not required")}
         ${metric("Header words",Number(outcome.headerTextWords)||0)}
         ${metric("Header scan",`${Number(outcome.headerScan?.cutoutAttempts)||0} cutout / ${Number(outcome.headerScan?.fullBandAttempts)||0} full`)}
         ${metric("Value candidates",Number(outcome.valueCandidates)||0)}
@@ -14619,6 +14635,15 @@ function gdLmValueSkewerCenterStatus(left,right,valueCx){
   if(offsetRatio>.26)return "watch";
   return "centered";
 }
+function gdLmReindexGeneratedGridColumns(columns){
+  return (Array.isArray(columns)?columns:[]).map((column,index)=>{
+    const n=String(index+1).padStart(2,"0");
+    return Object.assign({},column,{
+      key:`gridCol${n}`,
+      label:`C${n}`
+    });
+  });
+}
 function gdLmNumberBoxColumnsFromCandidates(candidates,sourceWidth=0){
   const boxes=gdLmNumberBoxesFromCandidates(candidates);
   if(boxes.length<4)return [];
@@ -14646,14 +14671,19 @@ function gdLmNumberBoxColumnsFromCandidates(candidates,sourceWidth=0){
   const columns=sorted.map((cluster,index)=>{
     const prev=sorted[index-1];
     const next=sorted[index+1];
-    const left=prev
+    const fallbackLeft=Math.max(0,Number(cluster.x0)-edgePad);
+    let left=prev
       ?gdLmSyntheticBorderBetweenSkewers(prev,cluster)
-      :Math.max(0,Number(cluster.x0)-edgePad);
+      :fallbackLeft;
     const right=next
       ?gdLmSyntheticBorderBetweenSkewers(cluster,next)
       :Math.min(sourceMax||Number(cluster.x1)+edgePad,Number(cluster.x1)+edgePad);
     const n=String(index+1).padStart(2,"0");
     const valueCx=Number(cluster.cx);
+    if(!prev&&next&&Number.isFinite(right)&&Number.isFinite(valueCx)){
+      const mirrorLeft=valueCx-Math.max(12,right-valueCx);
+      if(Number.isFinite(mirrorLeft)&&mirrorLeft>left)left=Math.min(valueCx-12,mirrorLeft);
+    }
     const centerStatus=gdLmValueSkewerCenterStatus(left,right,valueCx);
     return {
       key:`gridCol${n}`,
@@ -14675,10 +14705,44 @@ function gdLmNumberBoxColumnsFromCandidates(candidates,sourceWidth=0){
       valueSkewerRequired:supportThreshold,
       valueSkewerStatus:centerStatus,
       borderSource:"synthetic_from_value_box_skewers",
+      syntheticLeadingLeft:fallbackLeft,
       source:"ocr_value_skewer_synthetic_borders"
     };
   }).filter(column=>Number.isFinite(column.left)&&Number.isFinite(column.right)&&column.right>column.left+4);
-  return columns.length>=4?gdLmAssignDetectedHeaderColumnBounds(columns):[];
+  const first=columns[0];
+  if(first){
+    const offcutLeft=Math.max(0,Number(first.syntheticLeadingLeft)||0);
+    const offcutRight=Math.max(offcutLeft,Number(first.left)||offcutLeft);
+    const offcutWidth=offcutRight-offcutLeft;
+    const firstWidth=Math.max(1,(Number(first.right)||0)-(Number(first.left)||0));
+    const minOffcutWidth=Math.max(34,Math.min(90,firstWidth*.42));
+    if(offcutWidth>=minOffcutWidth&&offcutRight<Number(first.valueSkewerX)-10){
+      columns.unshift({
+        key:"gridCol00",
+        label:"C00",
+        rawHeaderText:"",
+        x0:offcutLeft,
+        x1:offcutRight,
+        left:offcutLeft,
+        right:offcutRight,
+        dividerLeft:offcutLeft,
+        dividerRight:offcutRight,
+        cx:(offcutLeft+offcutRight)/2,
+        valueCx:(offcutLeft+offcutRight)/2,
+        valueBoxCount:0,
+        valueSkewerSupport:0,
+        valueSkewerStatus:"offcut",
+        borderSource:"synthetic_leading_offcut_before_first_value_skewer",
+        source:"ocr_leading_offcut"
+      });
+    }
+  }
+  const cleaned=gdLmReindexGeneratedGridColumns(columns.map(column=>{
+    const copy=Object.assign({},column);
+    delete copy.syntheticLeadingLeft;
+    return copy;
+  }));
+  return cleaned.length>=4?gdLmAssignDetectedHeaderColumnBounds(cleaned):[];
 }
 function gdLmNumberBoxRowsFromCandidates(candidates,sourceHeight=0){
   const boxes=gdLmNumberBoxesFromCandidates(candidates).sort((a,b)=>a.cy-b.cy||a.cx-b.cx);
@@ -15802,11 +15866,26 @@ function gdApplyOcrClubLabelCandidateAllocation(columnScan){
   allocation.allocatedCount=cutouts.filter(item=>item.allocatedKey).length;
   return true;
 }
+function gdOcrGeneratedFirstColumnCanBeClub(columnScan){
+  if(String(columnScan?.layout?.cropMode||"")!=="ocr-generated-grid")return false;
+  const columns=Array.isArray(columnScan?.cellGrid?.columns)&&columnScan.cellGrid.columns.length
+    ?columnScan.cellGrid.columns
+    :(Array.isArray(columnScan?.layout?.columns)?columnScan.layout.columns:[]);
+  const first=columns[0]||null;
+  if(!first)return false;
+  const sourceText=String(first.borderSource||first.source||"");
+  if(/offcut/i.test(sourceText)||String(first.valueSkewerStatus||"")==="offcut")return true;
+  const image=columnScan?.sourceCanvas||columnScan?.preparedCanvas;
+  const width=Number(image?.width)||Number(columnScan?.directColumnSource?.width)||0;
+  const valueSkewerX=Number(first.valueSkewerX);
+  return Number.isFinite(valueSkewerX)&&width>0&&valueSkewerX<=width*.08;
+}
 function gdEnsureOcrFirstColumnClubIdTarget(columnScan){
   if(String(columnScan?.layout?.cropMode||"")!=="ocr-generated-grid")return false;
   const allocation=columnScan?.columnCutoutAllocation;
   const cutouts=Array.isArray(allocation?.cutouts)?allocation.cutouts:[];
   if(!allocation||!cutouts.length||cutouts.some(cutout=>cutout?.allocatedKey==="club"))return false;
+  if(!gdOcrGeneratedFirstColumnCanBeClub(columnScan))return false;
   const first=cutouts[0];
   if(!first)return false;
   first.allocatedKey="club";
@@ -15827,7 +15906,7 @@ function gdOcrClubIdColumnIndex(columnScan){
   const cutouts=Array.isArray(columnScan?.columnCutoutAllocation?.cutouts)?columnScan.columnCutoutAllocation.cutouts:[];
   const cutout=cutouts.find(item=>item?.allocatedKey==="club");
   if(cutout&&Number.isFinite(Number(cutout.columnIndex)))return Number(cutout.columnIndex);
-  return String(columnScan?.layout?.cropMode||"")==="ocr-generated-grid"?0:-1;
+  return gdOcrGeneratedFirstColumnCanBeClub(columnScan)?0:-1;
 }
 function gdPracticeSummaryRowText(text){
   return /\b(average|avg|std\.?\s*dev|standard\s*deviation)\b/i.test(String(text||""));
@@ -15917,7 +15996,7 @@ function gdBuildOcrColumnCutoutAllocation(columnScan,opts={}){
       headerSearchRegion,
       dividerLeft:safeLeft,
       dividerRight:safeRight,
-      valueSkewerX:Number.isFinite(Number(column.valueSkewerX ?? column.valueCx))?Number(column.valueSkewerX ?? column.valueCx):null,
+      valueSkewerX:Number.isFinite(Number(column.valueSkewerX))?Number(column.valueSkewerX):null,
       valueSkewerStatus:String(column.valueSkewerStatus||""),
       borderSource:String(column.borderSource||column.source||""),
       headerCrop:gdCropCanvasRegion(image,headerRegion,2),
@@ -16093,7 +16172,7 @@ function gdRenderOcrColumnCutoutAllocation(columnScan){
       :"cut: unknown";
     const skewerText=Number.isFinite(Number(cutout.valueSkewerX))
       ?`skewer: ${Math.round(Number(cutout.valueSkewerX))}${cutout.valueSkewerStatus?` ${cutout.valueSkewerStatus}`:""}`
-      :"skewer: missing";
+      :(cutout.valueSkewerStatus==="offcut"?"skewer: club/offcut lane":"skewer: missing");
     meta.textContent=[
       cutText,
       skewerText,
@@ -16120,7 +16199,7 @@ function gdRenderOcrColumnCutoutAllocation(columnScan){
   const source=document.createElement("span");
   source.className="gdColumnOcrSource";
   source.textContent=[
-    "Column cutouts use synthetic borders made from value-box spacing; the blue value skewer is evidence, not the cut line.",
+    "Column cutouts use synthetic borders made from value-box spacing; the blue value skewer is evidence, not the cut line. A leading club/offcut lane may have no skewer.",
     allocation.textScan?`Header text OCR: ${Number(allocation.textScan.wordCount)||0} text words, ${Number(allocation.textScan.attempts?.length)||0} attempts.`:"Header allocation is waiting for the dedicated text OCR scan.",
     "Headers are allocated by OCR words found inside each per-column header crop.",
     "Row cutouts exist below this, but cell values are still unread.",
