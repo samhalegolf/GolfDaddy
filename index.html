@@ -17315,6 +17315,46 @@ function gdOcrGeneratedOutcomeFromFailure(reason,scanImage,extra={}){
     nextStep:"Open the OCR generated tab to inspect header words, columns and value-looking row candidates."
   },extra||{}));
 }
+function gdBuildFailedOcrGeneratedColumnScan(scanImage,layout,extra={}){
+  const ocrData=extra.ocrData||extra.geometryOcrData||{};
+  const valueCandidates=Array.isArray(extra.geometryValueCandidates)&&extra.geometryValueCandidates.length
+    ?extra.geometryValueCandidates
+    :(Array.isArray(extra.valueCandidates)?extra.valueCandidates:[]);
+  const generatedRows=Array.isArray(extra.geometryRows)&&extra.geometryRows.length
+    ?extra.geometryRows
+    :gdLmNumberBoxRowsFromCandidates(valueCandidates,Number(scanImage?.height)||0);
+  const valueCluster=gdOcrGeneratedValueCluster(scanImage,null,generatedRows,valueCandidates);
+  return {
+    layout:Object.assign({},layout||{},{
+      columns:[],
+      dividerSource:String(extra.dividerSource||"ocr-value-clearance-corridors-missing"),
+      rowDividerSource:generatedRows.length?"ocr-number-box-gaps":"ocr-generated-row-bands",
+      cropMode:"ocr-generated-grid",
+      normalizeMode:String(scanImage?.__gdNormalizeMode||"flat-table"),
+      clusterMode:"OCR generated geometry grid - column cutouts not ready",
+      valueCluster
+    }),
+    sourceCanvas:scanImage,
+    preparedCanvas:scanImage,
+    directColumnSource:scanImage,
+    fullTableCanvas:extra.fullTableCanvas||null,
+    valueCluster,
+    gridExperiment:{key:"ocr-generated-grid",label:"OCR generated grid"},
+    generatedOcrData:ocrData,
+    geometryOcrData:extra.geometryOcrData||ocrData,
+    generatedHeaderCandidates:Array.isArray(extra.headerCandidates)?extra.headerCandidates:[],
+    generatedRowBands:generatedRows,
+    generatedNumberBoxRows:generatedRows,
+    generatedValueCandidates:valueCandidates,
+    generatedGeometryValueCandidates:valueCandidates,
+    generatedGridHeaderWords:[],
+    valueGeometryColumns:Array.isArray(extra.valueGeometryColumns)?extra.valueGeometryColumns:[],
+    clearanceColumnCount:Number(extra.clearanceColumnCount)||0,
+    ocrGeneratedTemplate:true,
+    fallbackFrom:String(extra.fallbackFrom||"ocr-generated-primary"),
+    failureReason:String(extra.reason||"OCR-generated column cutouts were not ready")
+  };
+}
 function gdRenderOcrGeneratedTemplateOutput(columnScan,activeKey="ocr"){
   gdRenderPracticeColumnStripsOnly(columnScan);
   const expander=document.getElementById("gdPracticeScanDebugExpander");
@@ -17404,11 +17444,47 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
       ?"ocr-value-clearance-corridors"
       :"ocr-value-clearance-corridors-missing";
     if(chosenGridColumns.length<4){
-      const outcome=gdOcrGeneratedOutcomeFromFailure("OCR generated template found OCR words but could not create vertical value-clearance column cutouts.",scanImage,{wordCount,layout,ocrData,headerCandidates,headerProbe,geometryOcrData,geometryValueCandidates,geometryRows,geometryColumns,valueGeometryColumns,aliasStatus:gdLmAliasRegistryStatus()});
-      gdPracticeDebugCheckpointSafe("ocr_generated_template","failed",{outputSummary:"OCR generated vertical clearance did not form column cutouts",counts:{words:wordCount,columns:Number(layout.columns?.length)||0,clearanceColumns:numberBoxColumns.length,oldCenterGroups:valueGeometryColumns.length,candidates:valueCandidates.length}});
-      gdPracticeDebugCheckpointSafe("extraction_started","failed",{outputSummary:"OCR generated layout stopped before grid output"});
-      gdRenderPracticeTemplateOutcomeTabs("ocr");
-      return {payload:null,scan:null,outcome};
+      const failedColumnScan=gdBuildFailedOcrGeneratedColumnScan(scanImage,layout,{
+        dividerSource,
+        ocrData,
+        geometryOcrData,
+        geometryValueCandidates,
+        valueCandidates,
+        geometryRows,
+        headerCandidates,
+        valueGeometryColumns,
+        clearanceColumnCount:numberBoxColumns.length,
+        fullTableCanvas:checkpoint?.source||checkpoint?.fullTableSource||null,
+        fallbackFrom:flatScan?String(gdFlatTableFailureDebug(flatScan).reason||"flat-template"):"ocr-generated-primary",
+        reason:"OCR generated template found OCR words but could not create vertical value-clearance column cutouts."
+      });
+      window.__gdPracticeColumnScan=failedColumnScan;
+      const outcome=gdOcrGeneratedOutcomeFromFailure("OCR generated template found OCR words but could not create vertical value-clearance column cutouts.",scanImage,{
+        scan:failedColumnScan,
+        layout:failedColumnScan.layout,
+        wordCount,
+        candidateCount:valueCandidates.length,
+        ocrData,
+        headerCandidates,
+        headerProbe,
+        geometryOcrData,
+        geometryValueCandidates,
+        geometryRows,
+        geometryColumns,
+        valueGeometryColumns,
+        aliasStatus:gdLmAliasRegistryStatus(),
+        summary:"OCR found number-like value boxes, but the vertical clearance corridor did not create enough column cutouts.",
+        nextStep:"Open the OCR generated tab and inspect the value-box geometry. The old centre-group columns are debug evidence only; they are not used for header OCR."
+      });
+      const failedScanOutcome=gdPracticeTableScanOutcomeForDebug(failedColumnScan);
+      gdPracticeDebugCheckpointSafe("ocr_generated_template","failed",{
+        outputSummary:"OCR generated vertical clearance did not form column cutouts",
+        counts:{words:wordCount,columns:0,clearanceColumns:numberBoxColumns.length,oldCenterGroups:valueGeometryColumns.length,candidates:valueCandidates.length},
+        tableScanOutcome:failedScanOutcome
+      });
+      gdPracticeDebugCheckpointSafe("extraction_started","failed",{outputSummary:"OCR generated layout stopped before grid output",tableScanOutcome:failedScanOutcome});
+      gdRenderOcrGeneratedTemplateOutput(failedColumnScan,"ocr");
+      return {payload:null,scan:failedColumnScan,outcome};
     }
     const columnScan={
       layout:Object.assign({},layout,{
@@ -17639,12 +17715,14 @@ async function gdRunDefaultPracticePhotoScanFromCheckpoint(checkpoint,opts={}){
       if(!payload?.clubGroups?.length)gdPracticeFailImportJob(new Error("Cell OCR completed but no usable shots were formed"),"Cell OCR completed but no usable shots were formed. Review the scanner output.");
       return payload;
     }else{
-      gdPracticeFailImportJob(new Error("OCR-generated column cutouts were not ready"),"OCR-generated column cutouts were not ready. Inspect the header and value word evidence.");
+      const failedScanOutcome=scan?gdPracticePublishTableScanOutcome(scan,"ocr"):null;
+      gdPracticeFailImportJob(new Error("OCR-generated column cutouts were not ready"),"OCR-generated column cutouts were not ready. Open scan output to inspect vertical value-clearance geometry.");
       gdPracticeSetContinueScanReady(true);
       const ocrOutcome=gdPracticeTemplateOutcomeStore().ocr||null;
-      gdPracticeFeedback("OCR-generated column cutouts were not ready. Open the OCR generated tab to inspect the header and value word evidence.","error");
-      gdPracticeDebugFailedSafe("header_cutout_allocation",new Error("OCR-generated column cutouts were not ready"),{
+      gdPracticeFeedback("OCR-generated column cutouts were not ready. Open the OCR generated tab to inspect value-box geometry.","error");
+      gdPracticeDebugFailedSafe("ocr_generated_template",new Error("OCR-generated column cutouts were not ready"),{
         outputSummary:ocrOutcome?.reason||"OCR-generated grid did not produce usable geometry",
+        tableScanOutcome:failedScanOutcome,
         raw:{ocrGenerated:ocrOutcome}
       });
     }
