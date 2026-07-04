@@ -15600,10 +15600,9 @@ function gdBuildPracticeCellGrid(columnScan){
   const height=Number(image?.height)||0;
   const cropMode=String(columnScan?.layout?.cropMode||"");
   const includeToPin=cropMode==="ocr-generated-grid";
-  const maxColumns=cropMode==="ocr-generated-grid"?12:10;
-  const columns=(Array.isArray(columnScan?.layout?.columns)?columnScan.layout.columns:[])
-    .filter(column=>column&&column.key&&(includeToPin||column.key!=="toPin"))
-    .slice(0,maxColumns);
+  const sourceColumns=(Array.isArray(columnScan?.layout?.columns)?columnScan.layout.columns:[])
+    .filter(column=>column&&column.key&&(includeToPin||column.key!=="toPin"));
+  const columns=cropMode==="ocr-generated-grid"?sourceColumns:sourceColumns.slice(0,10);
   const rows=gdPracticeCellRowsFromCluster(columnScan);
   if(!image||width<10||height<10||columns.length<1||rows.length<1)return null;
   const fullTableGridMode=cropMode==="full-table-template";
@@ -15934,39 +15933,105 @@ function gdEnsureOcrFirstColumnClubIdTarget(columnScan){
   allocation.clubIdColumnIndex=Number(first.columnIndex)||0;
   return true;
 }
+function gdOcrGeneratedCutoutActive(cutout){
+  if(!cutout)return false;
+  if(cutout.retired===true)return false;
+  return !/^retired/i.test(String(cutout.status||""));
+}
+function gdRetireGeneratedGridDuplicateHeaderSplits(columnScan,allocation){
+  if(String(columnScan?.layout?.cropMode||"")!=="ocr-generated-grid")return false;
+  const cutouts=Array.isArray(allocation?.cutouts)?allocation.cutouts:[];
+  if(cutouts.length<2)return false;
+  let changed=false;
+  const scoreCutout=cutout=>{
+    const left=Number(cutout?.dividerLeft);
+    const right=Number(cutout?.dividerRight);
+    const width=Number.isFinite(left)&&Number.isFinite(right)?Math.max(0,right-left):0;
+    const key=String(cutout?.allocatedKey||"");
+    const match=(Array.isArray(cutout?.matches)?cutout.matches:[]).find(item=>String(item?.key||"")===key)||(Array.isArray(cutout?.matches)?cutout.matches[0]:null);
+    const support=Number(cutout?.valueSkewerSupport)||Number(cutout?.valueBoxCount)||0;
+    const status=String(cutout?.valueSkewerStatus||"");
+    const centered=status==="centered"?8:(status==="watch"?2:(status==="suspicious"?-10:0));
+    return (Number(match?.score)||0)+Math.min(34,width*.18)+support*4+centered;
+  };
+  let index=0;
+  while(index<cutouts.length){
+    const key=String(cutouts[index]?.allocatedKey||"");
+    if(!gdPracticeIsReadableValueKey(key)){
+      index+=1;
+      continue;
+    }
+    const group=[cutouts[index]];
+    let next=index+1;
+    while(next<cutouts.length&&String(cutouts[next]?.allocatedKey||"")===key){
+      group.push(cutouts[next]);
+      next+=1;
+    }
+    if(group.length>1){
+      const keep=group
+        .slice()
+        .sort((a,b)=>scoreCutout(b)-scoreCutout(a)||Number(a.columnIndex)-Number(b.columnIndex))[0];
+      group.forEach(cutout=>{
+        if(cutout===keep)return;
+        cutout.retired=true;
+        cutout.retiredKey=key;
+        cutout.retiredReason="duplicate-adjacent-header-split";
+        cutout.status="retired-duplicate-header-split";
+        cutout.allocatedKey="";
+        cutout.allocatedLabel="";
+        (Array.isArray(cutout.cells)?cutout.cells:[]).forEach(cell=>{
+          cell.retired=true;
+          cell.retiredReason="duplicate-adjacent-header-split";
+          cell.allocatedKey="";
+          cell.allocatedLabel="";
+        });
+        changed=true;
+      });
+    }
+    index=next;
+  }
+  if(changed){
+    allocation.activeCount=cutouts.filter(gdOcrGeneratedCutoutActive).length;
+    allocation.allocatedCount=cutouts.filter(item=>gdOcrGeneratedCutoutActive(item)&&item.allocatedKey).length;
+    allocation.retiredCount=cutouts.filter(item=>item.retired===true).length;
+  }
+  return changed;
+}
 function gdApplyGeneratedGridColumnSequenceAllocation(columnScan,allocation){
   if(String(columnScan?.layout?.cropMode||"")!=="ocr-generated-grid")return false;
   const cutouts=Array.isArray(allocation?.cutouts)?allocation.cutouts:[];
   if(!cutouts.length)return false;
-  const firstClub=gdOcrGeneratedFirstColumnCanBeClub(columnScan)||String(cutouts[0]?.allocatedKey||"")==="club";
+  const activeCutouts=cutouts.filter(gdOcrGeneratedCutoutActive);
+  if(!activeCutouts.length)return false;
+  const firstClub=gdOcrGeneratedFirstColumnCanBeClub(columnScan)||String(activeCutouts[0]?.allocatedKey||"")==="club";
   const template=gdLmLaunchMonitorTemplateColumns();
   const startIndex=firstClub?1:0;
-  const visibleCount=Math.max(0,cutouts.length-startIndex);
+  const visibleCount=Math.max(0,activeCutouts.length-startIndex);
   if(!visibleCount)return false;
   const exactTemplateCount=visibleCount===template.length;
+  if(!exactTemplateCount)return false;
   const alignedAnchors=template.slice(0,visibleCount).reduce((count,column,index)=>{
-    const current=String(cutouts[startIndex+index]?.allocatedKey||"");
+    const current=String(activeCutouts[startIndex+index]?.allocatedKey||"");
     return count+(current===column.key?1:0);
   },0);
-  if(alignedAnchors<2&&!exactTemplateCount&&!firstClub)return false;
   let changed=false;
-  if(firstClub&&cutouts[0]&&String(cutouts[0].allocatedKey||"")!=="club"){
-    cutouts[0].allocatedKey="club";
-    cutouts[0].allocatedLabel="Club ID";
-    cutouts[0].status="club-id-pass";
-    cutouts[0].matches=[{
+  if(firstClub&&activeCutouts[0]&&String(activeCutouts[0].allocatedKey||"")!=="club"){
+    activeCutouts[0].allocatedKey="club";
+    activeCutouts[0].allocatedLabel="Club ID";
+    activeCutouts[0].status="club-id-pass";
+    activeCutouts[0].matches=[{
       key:"club",
       label:"Club ID",
       phrase:"first column club-id pass",
       score:1,
       source:"club-id-column"
-    }].concat(Array.isArray(cutouts[0].matches)?cutouts[0].matches:[]);
-    (Array.isArray(cutouts[0].cells)?cutouts[0].cells:[]).forEach(cell=>{cell.allocatedKey="club";cell.allocatedLabel="Club ID";});
-    allocation.clubIdColumnIndex=Number(cutouts[0].columnIndex)||0;
+    }].concat(Array.isArray(activeCutouts[0].matches)?activeCutouts[0].matches:[]);
+    (Array.isArray(activeCutouts[0].cells)?activeCutouts[0].cells:[]).forEach(cell=>{cell.allocatedKey="club";cell.allocatedLabel="Club ID";});
+    allocation.clubIdColumnIndex=Number(activeCutouts[0].columnIndex)||0;
     changed=true;
   }
   template.slice(0,visibleCount).forEach((column,index)=>{
-    const cutout=cutouts[startIndex+index];
+    const cutout=activeCutouts[startIndex+index];
     if(!cutout)return;
     const previous=String(cutout.allocatedKey||"");
     cutout.allocatedKey=column.key;
@@ -15985,7 +16050,8 @@ function gdApplyGeneratedGridColumnSequenceAllocation(columnScan,allocation){
     });
     if(previous!==column.key)changed=true;
   });
-  allocation.allocatedCount=cutouts.filter(item=>item.allocatedKey).length;
+  allocation.activeCount=activeCutouts.length;
+  allocation.allocatedCount=cutouts.filter(item=>gdOcrGeneratedCutoutActive(item)&&item.allocatedKey).length;
   allocation.sequenceAllocation={
     source:"generated-grid-column-sequence",
     firstClub,
@@ -16100,6 +16166,8 @@ function gdBuildOcrColumnCutoutAllocation(columnScan,opts={}){
       dividerLeft:safeLeft,
       dividerRight:safeRight,
       valueSkewerX:Number.isFinite(Number(column.valueSkewerX))?Number(column.valueSkewerX):null,
+      valueSkewerSupport:Number(column.valueSkewerSupport)||Number(column.valueBoxCount)||0,
+      valueBoxCount:Number(column.valueBoxCount)||Number(column.valueSkewerSupport)||0,
       valueSkewerStatus:String(column.valueSkewerStatus||""),
       borderSource:String(column.borderSource||column.source||""),
       headerCrop:gdCropCanvasRegion(image,headerRegion,2),
@@ -16118,6 +16186,7 @@ function gdBuildOcrColumnCutoutAllocation(columnScan,opts={}){
     rowCount:rows.length,
     cellCount:cutouts.reduce((sum,cutout)=>sum+cutout.cells.length,0)
   };
+  gdRetireGeneratedGridDuplicateHeaderSplits(columnScan,allocation);
   gdApplyGeneratedGridColumnSequenceAllocation(columnScan,allocation);
   return allocation;
 }
