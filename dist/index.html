@@ -13517,6 +13517,17 @@ function gdFlatDigitizedCellDirection(cell,key){
 function gdPracticeCellReadKey(cell,column=null){
   return String(cell?.allocatedKey||column?.allocatedKey||cell?.readKey||cell?.key||column?.key||"");
 }
+function gdPracticeIsGridFallbackKey(key){
+  return /^gridCol/i.test(String(key||"").trim());
+}
+function gdPracticeIsReadableDigitizedKey(key){
+  const value=String(key||"").trim();
+  return !!value&&value!=="toPin"&&!gdPracticeIsGridFallbackKey(value);
+}
+function gdPracticeIsReadableValueKey(key){
+  const value=String(key||"").trim();
+  return gdPracticeIsReadableDigitizedKey(value)&&value!=="club";
+}
 function gdPracticeColumnReadDescriptor(column,index=0){
   const genericKey=String(column?.key||`gridCol${String(index+1).padStart(2,"0")}`);
   const readKey=String(column?.allocatedKey||genericKey);
@@ -13610,8 +13621,9 @@ function gdBuildFlatDigitizedTable(columnScan,payload=null){
   if(!cellRows.length)return null;
   if(gdApplyOcrClubLabelCandidateAllocation(columnScan))gdApplyOcrColumnCutoutAllocation(columnScan);
   const sourceColumns=(Array.isArray(cellGrid?.columns)&&cellGrid.columns.length?cellGrid.columns:gdFlatTableTemplateColumns())
-    .filter(column=>column&&column.key&&column.key!=="toPin");
-  const columns=sourceColumns.map(gdPracticeColumnReadDescriptor);
+    .map((column,index)=>gdPracticeColumnReadDescriptor(column,index))
+    .filter(column=>gdPracticeIsReadableDigitizedKey(column.key));
+  const columns=sourceColumns;
   const rows=cellRows.map((cellRow,rowIndex)=>{
     const byKey=new Map((Array.isArray(cellRow)?cellRow:[]).map(cell=>[String(cell?.key||""),cell]));
     const rawValues={};
@@ -14059,15 +14071,21 @@ function gdPracticeAllocatedMetricKeys(columnScan){
   const cutouts=Array.isArray(columnScan?.columnCutoutAllocation?.cutouts)?columnScan.columnCutoutAllocation.cutouts:[];
   return cutouts
     .map(cutout=>String(cutout?.allocatedKey||"").trim())
-    .filter(key=>key&&key!=="club"&&key!=="toPin"&&!/^gridCol/i.test(key));
+    .filter(gdPracticeIsReadableValueKey);
+}
+function gdPracticeReadableValueKeys(columnScan){
+  const columns=Array.isArray(columnScan?.cellGrid?.columns)?columnScan.cellGrid.columns:[];
+  return [...new Set(columns
+    .map((column,index)=>gdPracticeColumnReadDescriptor(column,index).key)
+    .filter(gdPracticeIsReadableValueKey))];
 }
 function gdPracticeHeaderAllocationReady(columnScan,opts={}){
   const columns=Number(columnScan?.cellGrid?.columns?.length)||0;
   const cutouts=Array.isArray(columnScan?.columnCutoutAllocation?.cutouts)?columnScan.columnCutoutAllocation.cutouts:[];
   const metricKeys=[...new Set(gdPracticeAllocatedMetricKeys(columnScan))];
-  const minMetrics=Math.max(2,Math.min(4,Number(opts.minMetrics)||Math.ceil(Math.max(columns,cutouts.length)*.35)||3));
+  const minMetrics=Math.max(1,Number(opts.minMetrics)||1);
   const hasDistance=metricKeys.some(key=>key==="carry"||key==="total");
-  const ready=metricKeys.length>=minMetrics&&hasDistance;
+  const ready=metricKeys.length>=minMetrics;
   return {
     ready,
     metricKeys,
@@ -14078,7 +14096,7 @@ function gdPracticeHeaderAllocationReady(columnScan,opts={}){
     total:Number(columnScan?.columnCutoutAllocation?.totalCount)||cutouts.length||columns,
     reason:ready
       ?"Header allocation ready"
-      :`Header allocation only mapped ${metricKeys.length}/${Math.max(1,cutouts.length||columns)} value columns${hasDistance?"":" and no carry/total column"}`
+      :"Header allocation found no mapped value columns"
   };
 }
 function gdPracticeTableScanOutcomeHtml(outcome){
@@ -14182,7 +14200,7 @@ function gdBuildFittedCellOcrCapture(columnScan,label="Fitted cell OCR"){
     const directions={};
     cellRow.forEach(cell=>{
       const key=gdPracticeCellReadKey(cell);
-      if(!key||key==="toPin"||key==="club")return;
+      if(!gdPracticeIsReadableValueKey(key))return;
       const item=cell?.ocrItem||null;
       if(!item)return;
       values[key]=gdColumnOrderValueText(key,item);
@@ -14329,7 +14347,7 @@ async function gdRunFittedCellGridOcr(columnScan,opts={}){
       for(const cell of row){
         if(importJobId)gdPracticeAssertCurrentImportJob(importJobId,"Practice photo cell OCR");
         const key=gdPracticeCellReadKey(cell);
-        if(!key||key==="toPin"||key==="club"||!cell?.crop?.canvas)continue;
+        if(!gdPracticeIsReadableValueKey(key)||!cell?.crop?.canvas)continue;
         if(gdFittedCellOcrBudgetExceeded()){
           gdStopFittedCellOcr(`Raw fitted-cell OCR reached the ${Math.round(ocrMaxMs/1000)}s scan limit on row ${rowIndex+1}`);
           break;
@@ -17328,13 +17346,15 @@ async function gdRunDefaultPracticePhotoScanFromCheckpoint(checkpoint,opts={}){
         gdPracticeFeedback(`${allocationState.reason}. Values were not read or saved.`,"error");
         return scan;
       }
-      gdPracticeUpdateImportJob({status:"parsing",checkpointText:`Reading aliases + values (${rows} x ${columns})`,stageIndex:2,progress:48});
+      const readableValueColumns=gdPracticeReadableValueKeys(scan).length;
+      const fittedCellOcrMaxMs=Math.max(90000,Number(opts.fittedCellOcrMaxMs)||90000);
+      gdPracticeUpdateImportJob({status:"parsing",checkpointText:`Reading aliases + values (${rows} x ${Math.max(1,readableValueColumns)})`,stageIndex:2,progress:48});
       gdPracticeSetContinueScanReady(false);
       gdPracticeRefreshDebugTools();
-      gdPracticeFeedback(`OCR-generated grid ready: ${rows} rows x ${columns}. Reading aliases and cell values...`);
+      gdPracticeFeedback(`OCR-generated grid ready: ${rows} rows x ${columns}. Reading ${readableValueColumns||"mapped"} value column${readableValueColumns===1?"":"s"}...`);
       gdPracticeDebugCheckpointSafe("extraction_started","running",{
         inputSummary:"OCR grid ready; fitted-cell value scan starting",
-        counts:{gridRows:rows,gridColumns:columns}
+        counts:{gridRows:rows,gridColumns:columns,valueColumns:readableValueColumns}
       });
       await gdPracticeYieldScanPaint();
       const payload=await gdPracticeWithTimeout(
@@ -17342,11 +17362,11 @@ async function gdRunDefaultPracticePhotoScanFromCheckpoint(checkpoint,opts={}){
           allowParkedFittedCellOcr:true,
           importToNative:true,
           jobId:importJobId,
-          ocrMaxMs:Number(opts.fittedCellOcrMaxMs)||45000,
+          ocrMaxMs:fittedCellOcrMaxMs,
           label:"Practice photo scan",
           sourceLabel:opts.sourceLabel||gdPracticePhotoName||"Practice photo scan"
         }),
-        Number(opts.fittedCellOcrMaxMs)||45000,
+        fittedCellOcrMaxMs+5000,
         "Practice photo cell OCR"
       );
       gdPracticeAssertCurrentImportJob(importJobId,"Practice photo cell OCR");
@@ -25299,6 +25319,10 @@ function gdNativeShotDataProcessingTrackHTML(clubLabel=""){
   }).join("");
   return `<span class="gdNativeProcessingBadge" aria-live="polite"><span class="gdNativeProcessingTrack" aria-hidden="true"><span class="gdNativeProcessingRail"></span><span class="gdNativeProcessingFill" style="width:${state.progress}%"></span><span class="gdNativeProcessingNodes">${stages}</span></span><span class="gdNativeProcessingLabel">${gdEscapeHTML(label)}</span></span>`;
 }
+function gdNativeShotDataProcessingStackHTML(extraClass=""){
+  const cls=`gdNativeProcessingStack${extraClass?` ${extraClass}`:""}`;
+  return `<span class="${cls}">${gdNativeShotDataProcessingTrackHTML()}</span>`;
+}
 function gdPracticeClearLibraryProcessingSurface(){
   document.querySelectorAll(".gdPracticeLibraryProcessing").forEach(node=>node.remove());
   document.querySelectorAll(".gdPracticeLibraryTabs .gdNativeProcessingStack").forEach(node=>node.remove());
@@ -25309,6 +25333,21 @@ function gdPracticeSyncLibraryProcessingSurface(){
   if(!active){
     gdPracticeClearLibraryProcessingSurface();
     return false;
+  }
+  try{gdSetShotDataLibraryOpen("practice",true);}catch(e){}
+  document.querySelectorAll(".gdShotDataLibraryShell-practice").forEach(shell=>shell.classList.add("open"));
+  document.querySelectorAll(".gdPracticeLibraryTabs").forEach(toggle=>toggle.setAttribute("aria-expanded","true"));
+  const tabMain=document.querySelector(".gdShotDataLibraryShell-practice .gdShotDataLibraryTabMain");
+  if(tabMain){
+    let headerSurface=Array.from(tabMain.children||[]).find(node=>node.classList&&node.classList.contains("gdNativeProcessingStack"));
+    if(!headerSurface){
+      headerSurface=document.createElement("span");
+      tabMain.append(headerSurface);
+    }
+    headerSurface.className="gdNativeProcessingStack gdPracticeLibraryHeaderProcessing";
+    headerSurface.innerHTML=gdNativeShotDataProcessingTrackHTML();
+    document.querySelectorAll(".gdPracticeLibraryProcessing").forEach(node=>node.remove());
+    return true;
   }
   const body=document.querySelector(".gdShotDataLibraryShell-practice .gdPracticeLibraryBody")
     ||document.querySelector(".gdShotDataLibraryShell-practice")
@@ -25322,18 +25361,18 @@ function gdPracticeSyncLibraryProcessingSurface(){
     body.prepend(surface);
   }
   document.querySelectorAll(".gdPracticeLibraryProcessing").forEach(node=>{if(node!==surface)node.remove();});
-  surface.innerHTML=`<span class="gdNativeProcessingStack">${gdNativeShotDataProcessingTrackHTML()}</span>`;
+  surface.innerHTML=gdNativeShotDataProcessingStackHTML();
   return true;
 }
 function gdNativeShotDataProcessingHTML(){
   const job=gdPracticeHydrateImportJob();
   if(gdPracticeImportIsActive(job)){
     gdPracticeSyncImportProcessing(job);
-    return `<span class="gdNativeProcessingStack">${gdNativeShotDataProcessingTrackHTML()}</span>`;
+    return gdNativeShotDataProcessingStackHTML("gdPracticeLibraryHeaderProcessing");
   }
   if(gdPracticeScanProgressIsActive()){
     if(!gdPracticePhotoProcessingStartedAt)gdPracticeProcessingStart();
-    return `<span class="gdNativeProcessingStack">${gdNativeShotDataProcessingTrackHTML()}</span>`;
+    return gdNativeShotDataProcessingStackHTML("gdPracticeLibraryHeaderProcessing");
   }
   if(!gdPracticePhotoProcessing){
     gdPracticeReleaseInactiveProcessingSurface();
@@ -25350,7 +25389,7 @@ function gdNativeShotDataProcessingHTML(){
     }catch(e){}
     return "";
   }
-  return `<span class="gdNativeProcessingStack">${gdNativeShotDataProcessingTrackHTML()}</span>`;
+  return gdNativeShotDataProcessingStackHTML("gdPracticeLibraryHeaderProcessing");
 }
 function gdSetPracticePhotoProcessing(active,opts={}){
   const wasProcessing=gdPracticePhotoProcessing;
@@ -38875,14 +38914,13 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     const bubble=gdPracticeBubbleValueLabel(analysis);
     const jobHTML=gdPracticeImportJobHTML();
     const processingHTML=gdNativeShotDataProcessingHTML();
-    const processingBody=processingHTML?`<div class="gdPracticeLibraryProcessing">${processingHTML}</div>`:"";
     return gdShotDataLibraryShellHTML({
       kind:"practice",
       title:"Clarity Shot Library",
       bubbleLabel:"Practice Bubble",
       bubbleValue:bubble,
       count:Number(totalRows)||0,
-      bodyHTML:processingBody+jobHTML+bodyHTML,
+      bodyHTML:jobHTML+bodyHTML,
       dropdown:true,
       open:gdShotDataLibraryIsOpen("practice"),
       headerStatusHTML:processingHTML
