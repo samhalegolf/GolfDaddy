@@ -2146,7 +2146,9 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
     .gdPracticeLiveDebugHead{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
     .gdPracticeLiveDebugHead strong{display:block;color:#fff;font-size:14px;font-weight:950;line-height:1.08}
     .gdPracticeLiveDebugHead span{display:block;margin-top:3px;color:rgba(255,255,255,.58);font-size:10px;font-weight:850;line-height:1.25}
+    .gdPracticeLiveDebugHeadActions{display:flex;align-items:center;justify-content:flex-end;gap:6px;flex-wrap:wrap}
     .gdPracticeLiveDebugBadge{border-radius:999px;padding:5px 8px;border:1px solid rgba(98,210,255,.20);background:rgba(98,210,255,.10);color:#bdefff;font-size:9px;font-weight:950;text-transform:uppercase;white-space:nowrap}
+    .gdPracticeHardStopButton{border:1px solid rgba(255,132,92,.30);border-radius:999px;padding:6px 9px;background:rgba(255,132,92,.12);color:#ffd7cb;font-size:9px;font-weight:950;line-height:1;text-transform:uppercase;white-space:nowrap}
     .gdPracticeLiveDebugFeed{display:grid;gap:6px;max-height:220px;overflow:auto}
     .gdPracticeLiveDebugEvent{display:grid;grid-template-columns:72px minmax(0,1fr) auto;gap:7px;align-items:start;padding:7px 8px;border-radius:11px;background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.075);color:rgba(255,255,255,.74);font:800 10px/1.32 ui-monospace,SFMono-Regular,Menlo,monospace}
     .gdPracticeLiveDebugEvent b{color:#fff;font-weight:950;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -2422,6 +2424,7 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 .gdNativeProcessingNode.done span{display:none}
 .gdNativeProcessingNode.active{border-color:rgba(55,242,141,.76);background:#37f28d;color:#06100b;box-shadow:0 0 0 4px rgba(55,242,141,.12)}
 .gdNativeProcessingLabel{min-width:0;white-space:nowrap;color:rgba(255,255,255,.82)}
+.gdNativeProcessingStop{justify-self:end;border:1px solid rgba(255,132,92,.30);border-radius:999px;padding:5px 9px;background:rgba(255,132,92,.12);color:#ffd7cb;font-size:9px;font-weight:950;line-height:1;text-transform:uppercase;white-space:nowrap}
 .gdNativeProcessingSpinner{width:14px;height:14px;border-radius:50%;border:2px solid rgba(255,255,255,.22);border-top-color:#d7b06b;animation:gdPracticeSpin .72s linear infinite;flex:0 0 auto}
 @keyframes gdPracticeScanPulse{0%{box-shadow:0 0 0 0 rgba(215,176,107,.55)}100%{box-shadow:0 0 0 9px rgba(215,176,107,0)}}
 @keyframes gdPracticeSpin{to{transform:rotate(360deg)}}
@@ -8432,12 +8435,15 @@ function gdRenderPracticeLiveDebugPanel(){
   if(!canShow)return;
   const latest=gdPracticeLiveDebugEvents[gdPracticeLiveDebugEvents.length-1]||null;
   const job=gdPracticeLiveDebugJobSnapshot();
+  const hardStop=gdPracticeScanProgressIsActive()
+    ? `<button type="button" class="gdPracticeHardStopButton" onclick="return gdPracticeHardStopScan('Manual stop from scan feedback')">Stop/clear scan</button>`
+    : "";
   const run=window.__gdPracticePhotoDebugRun||null;
   const feed=gdPracticeLiveDebugEvents.slice(-30).reverse().map(gdPracticeLiveDebugEventHtml).join("")
     ||`<div class="gdPracticeLiveDebugEvent"><b>--</b><span>Waiting for scan feedback.</span><small>idle</small></div>`;
   root.innerHTML=`<div class="gdPracticeLiveDebugHead">
     <div><strong>Scan Feedback</strong><span>${gdEscapeHTML(job?.checkpointText||latest?.message||"Waiting for Practice Data scan events")}</span></div>
-    <div class="gdPracticeLiveDebugBadge">${gdEscapeHTML(job?.status||run?.status||latest?.state||"idle")}</div>
+    <div class="gdPracticeLiveDebugHeadActions">${hardStop}<div class="gdPracticeLiveDebugBadge">${gdEscapeHTML(job?.status||run?.status||latest?.state||"idle")}</div></div>
   </div>
   <div class="gdPracticeLiveDebugFeed">${feed}</div>
   <details class="gdPracticeLiveDebugAdmin">
@@ -18088,7 +18094,7 @@ document.addEventListener("change",event=>{
   else gdHandleLaunchMonitorUpload(file);
   input.value="";
 },true);
-Object.assign(window,{gdLoadLaunchMonitorDemo,gdClearLaunchMonitorDemo,gdPickLaunchMonitorFile,gdPickPracticePhotoFile,gdAdjustPracticeGeneratedBox,gdHandleNativePracticeTextFile,gdHandleLaunchMonitorUpload,gdHandleLaunchMonitorPhoto,gdScanPracticePhotoCrop,gdPracticePrimaryScanAction,gdOpenPracticeManualQuadTool,gdApplyPracticeManualQuad,gdRunDefaultPracticePhotoScan,gdRunDefaultPracticePhotoScanFromCheckpoint,gdSetPracticePhotoProcessing,gdPracticeRefreshDebugTools,gdContinuePracticePhotoScan,gdImportReviewedPracticeOcr,gdCancelPracticePhotoScan,gdCancelPracticeOcrReview,gdPracticeScanClubLabel,gdPracticeScanClubLabels,gdLoadExtractedPractice7iData,gdPracticeSetExtractionPreview,gdPracticeClearExtractionPreview,gdImportPracticeExtractionPreview,gdBuildLaunchMonitorTextCapture,gdCleanLaunchMonitorOcrText,gdLmCaptureToReviewText,gdAnalyzeFlatTableImage,gdFitFlatTableTemplateFromAnalysis,gdBuildFlatTableTemplateColumnScan,gdOpenPracticeFlatTableFailureWindow,gdRenderFlatTableFailureWindow,gdOpenPracticeTemplateOutcomes,gdRunOcrGeneratedTemplateFallbackFromCheckpoint,gdRunFlatTemplateBridgeFromCheckpoint,gdRunPracticeGridExperiment,gdRunFittedCellGridOcr,gdBuildFlatDigitizedTable,gdRenderFlatDigitizedTable,gdPracticeOpenScanOutcomeFromDebug,gdPickRawCourseDataFile,gdHandleRawCourseDataUpload,gdClearCourseShotData});
+Object.assign(window,{gdLoadLaunchMonitorDemo,gdClearLaunchMonitorDemo,gdPickLaunchMonitorFile,gdPickPracticePhotoFile,gdAdjustPracticeGeneratedBox,gdHandleNativePracticeTextFile,gdHandleLaunchMonitorUpload,gdHandleLaunchMonitorPhoto,gdScanPracticePhotoCrop,gdPracticePrimaryScanAction,gdOpenPracticeManualQuadTool,gdApplyPracticeManualQuad,gdRunDefaultPracticePhotoScan,gdRunDefaultPracticePhotoScanFromCheckpoint,gdSetPracticePhotoProcessing,gdPracticeHardStopScan,gdPracticeRefreshDebugTools,gdContinuePracticePhotoScan,gdImportReviewedPracticeOcr,gdCancelPracticePhotoScan,gdCancelPracticeOcrReview,gdPracticeScanClubLabel,gdPracticeScanClubLabels,gdLoadExtractedPractice7iData,gdPracticeSetExtractionPreview,gdPracticeClearExtractionPreview,gdImportPracticeExtractionPreview,gdBuildLaunchMonitorTextCapture,gdCleanLaunchMonitorOcrText,gdLmCaptureToReviewText,gdAnalyzeFlatTableImage,gdFitFlatTableTemplateFromAnalysis,gdBuildFlatTableTemplateColumnScan,gdOpenPracticeFlatTableFailureWindow,gdRenderFlatTableFailureWindow,gdOpenPracticeTemplateOutcomes,gdRunOcrGeneratedTemplateFallbackFromCheckpoint,gdRunFlatTemplateBridgeFromCheckpoint,gdRunPracticeGridExperiment,gdRunFittedCellGridOcr,gdBuildFlatDigitizedTable,gdRenderFlatDigitizedTable,gdPracticeOpenScanOutcomeFromDebug,gdPickRawCourseDataFile,gdHandleRawCourseDataUpload,gdClearCourseShotData});
 function gdLmStatusClass(status){
   if(["corroborated","cross_distance_verified","verified_by_result","cluster_candidate","delivery_only","result_only"].includes(status))return "good";
   if(["conflict_check","alignment_signal"].includes(status))return "warn";
@@ -25282,6 +25288,45 @@ function gdPracticeReleaseStoppedScan(reason=""){
   }catch(e){}
   return true;
 }
+function gdPracticeHardStopScan(reason="Manual stop"){
+  const message=String(reason||"Manual stop").trim()||"Manual stop";
+  const job=gdPracticeHydrateImportJob();
+  const activeJob=gdPracticeImportIsActive(job);
+  try{
+    gdPracticeDebugCheckpointSafe("manual_hard_stop","warning",{
+      outputSummary:"Manual hard stop cleared the active practice scan state",
+      counts:{activeJob:activeJob?1:0,hadJob:job?1:0},
+      raw:{reason:message,jobId:job?.id||"",jobStatus:job?.status||""}
+    });
+  }catch(e){}
+  gdPracticeWriteImportJob(null);
+  gdPracticePhotoProcessing=false;
+  gdPracticePhotoProcessingProgress=0;
+  gdPracticePhotoProcessingStageIndex=0;
+  gdPracticePhotoProcessingCompletedAt=0;
+  if(gdPracticePhotoProcessingStopTimer){
+    clearTimeout(gdPracticePhotoProcessingStopTimer);
+    gdPracticePhotoProcessingStopTimer=null;
+  }
+  try{gdPracticeResetTesseractWorkers(message);}catch(e){}
+  try{gdPracticeProcessingStop();}catch(e){}
+  try{
+    document.body?.classList.remove("gdPracticeScanRunning");
+    document.body?.classList.remove("gdPracticePhotoProcessing");
+    document.getElementById("practiceDataPanel")?.classList.remove("gdPracticeScanRunning");
+    document.getElementById("practiceDataPanel")?.classList.remove("gdPracticePhotoProcessing");
+    gdPracticeClearLibraryProcessingSurface();
+  }catch(e){}
+  try{gdPracticeRecordLiveDebugEvent("manual_stop","Manual scan cleared. You can adjust the box or scan again.",{state:"cleared"});}catch(e){}
+  try{gdPracticeDebugFinishSafe("canceled",{dataSaved:false,errorMessage:"Manual scan cleared"});}catch(e){}
+  gdPracticeFeedback("Manual scan cleared. You can adjust the box or scan again.","warning");
+  try{gdNativePracticeFeedbackBridge({status:"canceled",lastAction:"Manual scan hard-stopped",warnings:["The in-flight scan job and loader were cleared."],errors:[],nextStep:"Adjust the box or scan again."});}catch(e){}
+  try{if(typeof gdPracticeSetContinueScanReady==="function")gdPracticeSetContinueScanReady(!!(gdPracticeClusterCheckpoint||window.__gdPracticeClusterCheckpoint));}catch(e){}
+  try{if(typeof gdPracticeRefreshDebugTools==="function")gdPracticeRefreshDebugTools();}catch(e){}
+  try{if(typeof renderPracticeData==="function")renderPracticeData(true);}catch(e){}
+  try{gdLmToast("Practice scan stopped");}catch(e){}
+  return false;
+}
 function gdPracticeReleaseInactiveProcessingSurface(){
   const job=gdPracticeHydrateImportJob();
   if(gdPracticeImportIsActive(job))return false;
@@ -25553,9 +25598,12 @@ function gdNativeShotDataProcessingTrackHTML(clubLabel=""){
   }).join("");
   return `<span class="gdNativeProcessingBadge" aria-live="polite"><span class="gdNativeProcessingTrack" aria-hidden="true"><span class="gdNativeProcessingRail"></span><span class="gdNativeProcessingFill" style="width:${state.progress}%"></span><span class="gdNativeProcessingNodes">${stages}</span></span><span class="gdNativeProcessingLabel">${gdEscapeHTML(label)}</span></span>`;
 }
+function gdNativeShotDataProcessingStopHTML(){
+  return `<button type="button" class="gdNativeProcessingStop" onclick="return gdPracticeHardStopScan('Manual stop from library progress')">Stop scan</button>`;
+}
 function gdNativeShotDataProcessingStackHTML(extraClass=""){
   const cls=`gdNativeProcessingStack${extraClass?` ${extraClass}`:""}`;
-  return `<span class="${cls}">${gdNativeShotDataProcessingTrackHTML()}</span>`;
+  return `<span class="${cls}">${gdNativeShotDataProcessingTrackHTML()}${gdNativeShotDataProcessingStopHTML()}</span>`;
 }
 function gdPracticeClearLibraryProcessingSurface(){
   document.querySelectorAll(".gdPracticeLibraryProcessing").forEach(node=>node.remove());
@@ -40285,6 +40333,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       gdPracticeUpdateImportJob:gdPracticeUpdateImportJob,
       gdPracticeClearImportJob:gdPracticeClearImportJob,
       gdPracticeCancelImportJob:gdPracticeCancelImportJob,
+      gdPracticeHardStopScan:gdPracticeHardStopScan,
       gdPracticeToggleRawDetail:gdPracticeToggleRawDetail,
       gdPracticeToggleImportSelectMode:gdPracticeToggleImportSelectMode,
       gdPracticeToggleImportSelection:gdPracticeToggleImportSelection,
@@ -43083,6 +43132,8 @@ body.gdGpsActive #bagRailBtn{order:7!important}
 	.gdPracticeLibraryProcessing .gdNativeProcessingFill{height:2px!important}
 	.gdPracticeLibraryProcessing .gdNativeProcessingNode{width:10px!important;height:10px!important;font-size:6px!important}
 	.gdPracticeLibraryProcessing .gdNativeProcessingLabel{max-width:120px!important;overflow:hidden!important;text-overflow:ellipsis!important}
+	.gdShotDataLibraryTabMain .gdNativeProcessingStop,
+	.gdPracticeLibraryProcessing .gdNativeProcessingStop{padding:4px 7px!important;font-size:7px!important}
 	.gdShotDataLibraryChevron{
 	  display:grid!important;
 	  place-items:center!important;
