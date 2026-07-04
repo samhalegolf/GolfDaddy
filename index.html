@@ -14030,7 +14030,12 @@ function gdPracticeTableScanOutcomeForDebug(columnScan){
       index:index+1,
       key:String(column.key||column.metricKey||""),
       label:String(column.label||column.title||""),
-      cx:Math.round(Number(column.cx)||0)
+      cx:Math.round(Number(column.cx)||0),
+      left:Math.round(Number(column.dividerLeft ?? column.left)||0),
+      right:Math.round(Number(column.dividerRight ?? column.right)||0),
+      valueSkewerX:Math.round(Number(column.valueSkewerX ?? column.valueCx ?? column.cx)||0),
+      valueSkewerStatus:String(column.valueSkewerStatus||""),
+      borderSource:String(column.borderSource||column.source||"")
     })),
     rowBands:rows.slice(0,30).map((row,index)=>({
       index:index+1,
@@ -14076,7 +14081,11 @@ function gdPracticeTableScanOutcomeHtml(outcome){
   if(!outcome)return "";
   const metric=(label,value)=>`<div class="gdPracticePhotoDebugMetric"><span>${gdEscapeHTML(label)}</span><strong>${gdEscapeHTML(value==null||value===""?"-":String(value))}</strong></div>`;
   const columns=(Array.isArray(outcome.columnKeys)?outcome.columnKeys:[]).slice(0,18)
-    .map(column=>`<b>${gdEscapeHTML(column.index)}. ${gdEscapeHTML(column.key||column.label||"unmapped")}<small>${gdEscapeHTML(column.cx?`x ${column.cx}`:"")}</small></b>`)
+    .map(column=>{
+      const cut=column.left||column.right?`cut ${column.left}-${column.right}`:"";
+      const skewer=column.valueSkewerX?`skewer ${column.valueSkewerX}${column.valueSkewerStatus?` ${column.valueSkewerStatus}`:""}`:"";
+      return `<b>${gdEscapeHTML(column.index)}. ${gdEscapeHTML(column.key||column.label||"unmapped")}<small>${gdEscapeHTML([cut,skewer].filter(Boolean).join(" | "))}</small></b>`;
+    })
     .join("");
   const cutoutHeaders=(Array.isArray(outcome.cutoutHeaders)?outcome.cutoutHeaders:[]).slice(0,24)
     .map(cutout=>{
@@ -14590,32 +14599,62 @@ function gdLmNumberBoxTrackClusters(boxes,axis="x"){
     .filter(cluster=>cluster.items.length&&Number.isFinite(Number(cluster.center)))
     .sort((a,b)=>Number(a.center)-Number(b.center));
 }
+function gdLmSyntheticBorderBetweenSkewers(leftSkewer,rightSkewer){
+  const leftEdge=Number(leftSkewer?.x1);
+  const rightEdge=Number(rightSkewer?.x0);
+  if(Number.isFinite(leftEdge)&&Number.isFinite(rightEdge)&&rightEdge>leftEdge+2){
+    return (leftEdge+rightEdge)/2;
+  }
+  const leftCx=Number(leftSkewer?.cx);
+  const rightCx=Number(rightSkewer?.cx);
+  if(Number.isFinite(leftCx)&&Number.isFinite(rightCx))return (leftCx+rightCx)/2;
+  return NaN;
+}
+function gdLmValueSkewerCenterStatus(left,right,valueCx){
+  const width=Number(right)-Number(left);
+  if(!Number.isFinite(width)||width<=0||!Number.isFinite(Number(valueCx)))return "unknown";
+  const mid=(Number(left)+Number(right))/2;
+  const offsetRatio=Math.abs(Number(valueCx)-mid)/width;
+  if(offsetRatio>.34)return "suspicious";
+  if(offsetRatio>.26)return "watch";
+  return "centered";
+}
 function gdLmNumberBoxColumnsFromCandidates(candidates,sourceWidth=0){
   const boxes=gdLmNumberBoxesFromCandidates(candidates);
   if(boxes.length<4)return [];
-  const sorted=gdLmNumberBoxTrackClusters(boxes,"x")
-    .filter(cluster=>cluster.items.length>=2&&Number.isFinite(Number(cluster.cx)))
+  const rowTracks=gdLmNumberBoxTrackClusters(boxes,"y")
+    .filter(cluster=>cluster.items.length>=3&&Number.isFinite(Number(cluster.cy)));
+  const supportThreshold=Math.max(2,Math.min(5,Math.ceil((rowTracks.length||8)*.22)));
+  const rawSkewers=gdLmNumberBoxTrackClusters(boxes,"x")
+    .filter(cluster=>Number.isFinite(Number(cluster.cx)));
+  const sorted=rawSkewers
+    .filter(cluster=>cluster.items.length>=supportThreshold)
     .sort((a,b)=>a.cx-b.cx);
   if(sorted.length<4)return [];
   const sourceMax=Number(sourceWidth)||Math.max(...sorted.map(cluster=>cluster.x1),0);
-  const gaps=[];
+  const centerGaps=[];
+  const envelopeGaps=[];
   for(let index=1;index<sorted.length;index+=1){
-    const gap=Number(sorted[index].x0)-Number(sorted[index-1].x1);
-    if(gap>3)gaps.push(gap);
+    const centerGap=Number(sorted[index].cx)-Number(sorted[index-1].cx);
+    const envelopeGap=Number(sorted[index].x0)-Number(sorted[index-1].x1);
+    if(centerGap>8)centerGaps.push(centerGap);
+    if(envelopeGap>3)envelopeGaps.push(envelopeGap);
   }
-  const medianGap=gdValueClusterMedian(gaps)||0;
+  const medianGap=gdValueClusterMedian(envelopeGaps)||gdValueClusterMedian(centerGaps)||0;
   const medianWidth=gdValueClusterMedian(sorted.map(cluster=>cluster.width))||24;
   const edgePad=Math.max(8,Math.min(56,(medianGap||medianWidth)*.55));
   const columns=sorted.map((cluster,index)=>{
     const prev=sorted[index-1];
     const next=sorted[index+1];
     const left=prev
-      ?(Number(prev.x1)+Number(cluster.x0))/2
+      ?gdLmSyntheticBorderBetweenSkewers(prev,cluster)
       :Math.max(0,Number(cluster.x0)-edgePad);
     const right=next
-      ?(Number(cluster.x1)+Number(next.x0))/2
+      ?gdLmSyntheticBorderBetweenSkewers(cluster,next)
       :Math.min(sourceMax||Number(cluster.x1)+edgePad,Number(cluster.x1)+edgePad);
     const n=String(index+1).padStart(2,"0");
+    const valueCx=Number(cluster.cx);
+    const centerStatus=gdLmValueSkewerCenterStatus(left,right,valueCx);
     return {
       key:`gridCol${n}`,
       label:`C${n}`,
@@ -14627,9 +14666,16 @@ function gdLmNumberBoxColumnsFromCandidates(candidates,sourceWidth=0){
       dividerLeft:left,
       dividerRight:right,
       cx:(left+right)/2,
-      valueCx:Number(cluster.cx),
+      valueCx,
+      valueSkewerX:valueCx,
+      valueSkewerLeft:Number(cluster.x0),
+      valueSkewerRight:Number(cluster.x1),
       valueBoxCount:cluster.items.length,
-      source:"ocr_number_box_gap"
+      valueSkewerSupport:cluster.items.length,
+      valueSkewerRequired:supportThreshold,
+      valueSkewerStatus:centerStatus,
+      borderSource:"synthetic_from_value_box_skewers",
+      source:"ocr_value_skewer_synthetic_borders"
     };
   }).filter(column=>Number.isFinite(column.left)&&Number.isFinite(column.right)&&column.right>column.left+4);
   return columns.length>=4?gdLmAssignDetectedHeaderColumnBounds(columns):[];
@@ -14697,14 +14743,19 @@ function gdLmGenericGridColumnsFromValueCandidates(candidates,headerWords=[]){
       const xs=group.items.map(item=>Number(item.word?.cx)||Number(item.cx)).filter(Number.isFinite);
       const minX=xs.length?Math.min(...xs):Number(group.cx);
       const maxX=xs.length?Math.max(...xs):Number(group.cx);
+      const valueCx=Number(group.cx);
       return {
         key:`gridCol${n}`,
         label:`C${n}`,
         rawHeaderText:group.rawHeaderText,
         x0:minX,
         x1:maxX,
-        cx:Number(group.cx),
-        valueCx:Number(group.cx),
+        cx:valueCx,
+        valueCx,
+        valueSkewerX:valueCx,
+        valueSkewerSupport:Number(group.items?.length)||0,
+        valueSkewerStatus:"unchecked",
+        borderSource:"synthetic_from_value_group_centers",
         source:"value_box_grid"
       };
     }));
@@ -15864,6 +15915,11 @@ function gdBuildOcrColumnCutoutAllocation(columnScan,opts={}){
       columnRegion,
       headerRegion,
       headerSearchRegion,
+      dividerLeft:safeLeft,
+      dividerRight:safeRight,
+      valueSkewerX:Number.isFinite(Number(column.valueSkewerX ?? column.valueCx))?Number(column.valueSkewerX ?? column.valueCx):null,
+      valueSkewerStatus:String(column.valueSkewerStatus||""),
+      borderSource:String(column.borderSource||column.source||""),
       headerCrop:gdCropCanvasRegion(image,headerRegion,2),
       cells
     };
@@ -15934,11 +15990,12 @@ async function gdRunOcrColumnCutoutHeaderTextScan(Tesseract,columnScan){
   const attempts=[];
   const results=[];
   const cutoutResults={};
+  const literalGeneratedGrid=String(columnScan?.layout?.cropMode||"")==="ocr-generated-grid";
   const cutoutConfigs=[
     {label:"psm7",config:gdHeaderTextScanConfig("7")}
   ];
   for(const cutout of cutouts){
-    const region=cutout.headerSearchRegion||cutout.headerRegion;
+    const region=literalGeneratedGrid?cutout.headerRegion:(cutout.headerSearchRegion||cutout.headerRegion);
     if(!region)continue;
     const crop=gdCropCanvasRegion(image,region,3);
     const scan=await gdRecognizeHeaderTextCrop(Tesseract,crop,`layout:ocr-header-allocation-${cutout.genericLabel}`,cutoutConfigs,["original","clean"]);
@@ -16031,7 +16088,15 @@ function gdRenderOcrColumnCutoutAllocation(columnScan){
     try{img.src=cutout.headerCrop?.canvas?.toDataURL("image/png")||"";}catch(e){img.alt+=" image unavailable";}
     const meta=document.createElement("small");
     const matchText=cutout.matches?.length?cutout.matches.slice(0,3).map(match=>`${match.phrase} -> ${match.key}`).join(" | "):"no alias match";
+    const cutText=Number.isFinite(Number(cutout.dividerLeft))&&Number.isFinite(Number(cutout.dividerRight))
+      ?`cut: ${Math.round(Number(cutout.dividerLeft))}-${Math.round(Number(cutout.dividerRight))}`
+      :"cut: unknown";
+    const skewerText=Number.isFinite(Number(cutout.valueSkewerX))
+      ?`skewer: ${Math.round(Number(cutout.valueSkewerX))}${cutout.valueSkewerStatus?` ${cutout.valueSkewerStatus}`:""}`
+      :"skewer: missing";
     meta.textContent=[
+      cutText,
+      skewerText,
       cutout.rawHeaderText?`words: ${cutout.rawHeaderText}`:"words: none",
       matchText
     ].join("\n");
@@ -16055,7 +16120,7 @@ function gdRenderOcrColumnCutoutAllocation(columnScan){
   const source=document.createElement("span");
   source.className="gdColumnOcrSource";
   source.textContent=[
-    "Column cutouts are made from the current OCR geometry cut lines.",
+    "Column cutouts use synthetic borders made from value-box spacing; the blue value skewer is evidence, not the cut line.",
     allocation.textScan?`Header text OCR: ${Number(allocation.textScan.wordCount)||0} text words, ${Number(allocation.textScan.attempts?.length)||0} attempts.`:"Header allocation is waiting for the dedicated text OCR scan.",
     "Headers are allocated by OCR words found inside each per-column header crop.",
     "Row cutouts exist below this, but cell values are still unread.",
@@ -17057,8 +17122,8 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
     const valueGeometryColumns=gdLmGenericGridColumnsFromValueCandidates(valueCandidates,[]);
     const chosenGridColumns=numberBoxColumns.length>=4?numberBoxColumns:(valueGeometryColumns.length>=4?valueGeometryColumns:[]);
     const dividerSource=numberBoxColumns.length>=4
-      ?"ocr-number-box-gaps"
-      :(valueGeometryColumns.length>=4?"ocr-generated-value-geometry":"ocr-number-geometry-missing");
+      ?"ocr-value-skewer-synthetic-borders"
+      :(valueGeometryColumns.length>=4?"ocr-value-geometry-synthetic-borders":"ocr-number-geometry-missing");
     if(chosenGridColumns.length<4){
       const outcome=gdOcrGeneratedOutcomeFromFailure("OCR generated template found OCR words but could not create the generated grid.",scanImage,{wordCount,layout,ocrData,headerCandidates,headerProbe,geometryOcrData,geometryValueCandidates,geometryRows,geometryColumns,aliasStatus:gdLmAliasRegistryStatus()});
       gdPracticeDebugCheckpointSafe("ocr_generated_template","failed",{outputSummary:"OCR generated columns did not form a grid",counts:{words:wordCount,columns:Number(layout.columns?.length)||0,candidates:valueCandidates.length}});
