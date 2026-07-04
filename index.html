@@ -8254,7 +8254,7 @@ async function gdHandleLaunchMonitorUpload(file){
 }
 function gdSetPracticeScanStatus(message){
   const text=String(message||"");
-  const state=/failed|could not|no column|too small|no usable/i.test(text)
+  const state=/failed|could not|no column|too small|no usable|timed out|timeout|stopped|nothing was saved/i.test(text)
     ?"error"
     :(/reading|finding|fitting|flattening|cropping|generating|checking|masking|scan started|scanning/i.test(text)?"scanning":(/ready|imported|checkpoint ready|complete|cluster found|column crops ready|columns cropped/i.test(text)?"ready":"idle"));
   ["gdPracticeScanStatus","gdPracticeDebugStatus"].forEach(id=>{
@@ -24515,6 +24515,13 @@ function gdPracticeAssertCurrentImportJob(jobId,label){
 function gdPracticeIsQuietScanStop(error){
   return error&&["GD_PRACTICE_IMPORT_STALE","GD_PRACTICE_OCR_TIMEOUT"].includes(String(error.code||""));
 }
+function gdPracticeScanStoppedMessage(reason=""){
+  const text=String(reason||"").trim();
+  if(/reading values|cell ocr|ocr|timeout|timed out|exceeded/i.test(text)){
+    return "Scan stopped while reading values. Nothing was saved. Try a tighter crop or clearer table photo.";
+  }
+  return "Scan stopped before values were saved. Try a tighter crop or clearer table photo.";
+}
 function gdPracticeReleaseStalledOcr(reason=""){
   console.warn("[GolfDaddy] releasing stalled practice OCR",reason);
   gdPracticeWriteImportJob(null);
@@ -24530,7 +24537,8 @@ function gdPracticeReleaseStalledOcr(reason=""){
     document.getElementById("practiceDataPanel")?.classList.remove("gdPracticeScanRunning");
     document.getElementById("practiceDataPanel")?.classList.remove("gdPracticePhotoProcessing");
     gdPracticeClearLibraryProcessingSurface();
-    gdPracticeQuietScanSurface({clearStatus:true});
+    gdPracticeQuietScanSurface({clearStatus:false});
+    gdSetPracticeScanStatus(gdPracticeScanStoppedMessage(reason));
     if(typeof renderPracticeData==="function")renderPracticeData(true);
   }catch(e){}
   return true;
