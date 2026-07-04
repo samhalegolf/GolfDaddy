@@ -13993,15 +13993,11 @@ function gdPracticeTableScanOutcomeForDebug(columnScan){
   const geometryRows=Array.isArray(scan.generatedNumberBoxRows)?scan.generatedNumberBoxRows:[];
   const geometryColumns=Array.isArray(scan.layout?.columns)?scan.layout.columns:[];
   const allocationState=gdPracticeHeaderAllocationReady(scan);
-  const columnState=gdPracticeGeneratedGridColumnState(scan);
   return {
     kind:String(layout.cropMode||scan.gridExperiment?.key||"table-scan"),
     rows:rows.length,
     columns:columns.length,
     cells:Number(cellGrid.cellCount)||0,
-    expectedColumns:columnState.expected,
-    columnReady:columnState.ready,
-    columnReason:columnState.ready?"":columnState.reason,
     headersAllocated:Number(allocation.allocatedCount)||0,
     headersTotal:Number(allocation.totalCount)||columns.length,
     metricHeaders:allocationState.metricCount,
@@ -14065,50 +14061,24 @@ function gdPracticeAllocatedMetricKeys(columnScan){
     .map(cutout=>String(cutout?.allocatedKey||"").trim())
     .filter(key=>key&&key!=="club"&&key!=="toPin"&&!/^gridCol/i.test(key));
 }
-function gdPracticeExpectedOcrGeneratedColumnCount(columnScan){
-  if(String(columnScan?.layout?.cropMode||"")!=="ocr-generated-grid")return 0;
-  return gdLmLaunchMonitorTemplateColumns().length+1;
-}
-function gdPracticeGeneratedGridColumnState(columnScan){
-  const expected=gdPracticeExpectedOcrGeneratedColumnCount(columnScan);
-  const cellColumns=Number(columnScan?.cellGrid?.columns?.length)||0;
-  const layoutColumns=Number(columnScan?.layout?.columns?.length)||0;
-  const cutoutColumns=Number(columnScan?.columnCutoutAllocation?.totalCount)||0;
-  const found=cellColumns||layoutColumns||cutoutColumns;
-  const ready=!expected||found>=expected;
-  return {
-    ready,
-    found,
-    expected,
-    reason:ready
-      ?"Generated grid columns ready"
-      :`OCR-generated grid formed ${found}/${expected} expected columns before value OCR. Header OCR is running on incomplete cutouts, so cell values were not read or saved.`
-  };
-}
 function gdPracticeHeaderAllocationReady(columnScan,opts={}){
   const columns=Number(columnScan?.cellGrid?.columns?.length)||0;
   const cutouts=Array.isArray(columnScan?.columnCutoutAllocation?.cutouts)?columnScan.columnCutoutAllocation.cutouts:[];
   const metricKeys=[...new Set(gdPracticeAllocatedMetricKeys(columnScan))];
-  const columnState=gdPracticeGeneratedGridColumnState(columnScan);
   const minMetrics=Math.max(2,Math.min(4,Number(opts.minMetrics)||Math.ceil(Math.max(columns,cutouts.length)*.35)||3));
   const hasDistance=metricKeys.some(key=>key==="carry"||key==="total");
-  const ready=columnState.ready&&metricKeys.length>=minMetrics&&hasDistance;
+  const ready=metricKeys.length>=minMetrics&&hasDistance;
   return {
     ready,
     metricKeys,
     metricCount:metricKeys.length,
     minMetrics,
     hasDistance,
-    columnReady:columnState.ready,
-    foundColumns:columnState.found,
-    expectedColumns:columnState.expected,
     allocated:Number(columnScan?.columnCutoutAllocation?.allocatedCount)||0,
     total:Number(columnScan?.columnCutoutAllocation?.totalCount)||cutouts.length||columns,
     reason:ready
       ?"Header allocation ready"
-      :(!columnState.ready?columnState.reason
       :`Header allocation only mapped ${metricKeys.length}/${Math.max(1,cutouts.length||columns)} value columns${hasDistance?"":" and no carry/total column"}`
-      )
   };
 }
 function gdPracticeTableScanOutcomeHtml(outcome){
@@ -14136,7 +14106,6 @@ function gdPracticeTableScanOutcomeHtml(outcome){
       <div class="gdPracticePhotoDebugSummary">
         ${metric("Grid",`${Number(outcome.rows)||0} x ${Number(outcome.columns)||0}`)}
         ${metric("Cells",Number(outcome.cells)||0)}
-        ${metric("Expected cols",Number(outcome.expectedColumns)||"-")}
         ${metric("Headers",`${Number(outcome.headersAllocated)||0}/${Number(outcome.headersTotal)||0}`)}
         ${metric("Metric headers",`${Number(outcome.metricHeaders)||0}/${Number(outcome.minMetricHeaders)||0}`)}
         ${metric("Header words",Number(outcome.headerTextWords)||0)}
@@ -14146,7 +14115,6 @@ function gdPracticeTableScanOutcomeHtml(outcome){
         ${metric("Digital rows",Number(outcome.digitizedRows)||0)}
         ${metric("Flags",`${Number(outcome.flagged)||0}/${Number(outcome.missing)||0}`)}
       </div>
-      ${outcome.columnReason?`<div><b>Column geometry blocked:</b> ${gdEscapeHTML(outcome.columnReason)}</div>`:""}
       ${outcome.allocationReason?`<div><b>${gdEscapeHTML(outcome.headerReady?"Ready":"Blocked")}:</b> ${gdEscapeHTML(outcome.allocationReason)}</div>`:""}
       ${columns?`<div class="gdPracticePhotoDebugBody"><strong>Column allocation</strong><div class="gdPracticePhotoDebugSummary">${columns}</div></div>`:""}
       ${cutoutHeaders?`<div class="gdPracticePhotoDebugBody"><strong>Per-cutout header reads</strong><div class="gdPracticePhotoDebugSummary">${cutoutHeaders}</div></div>`:""}
@@ -17344,23 +17312,18 @@ async function gdRunDefaultPracticePhotoScanFromCheckpoint(checkpoint,opts={}){
       const allocationState=gdPracticeHeaderAllocationReady(scan);
       if(!allocationState.ready){
         const tableScanOutcome=gdPracticePublishTableScanOutcome(scan,"ocr");
-        const headerGateWarning=allocationState.columnReady
-          ?"Cell OCR was not started because the generated grid columns are still unallocated."
-          :"Cell OCR was not started because the generated grid column geometry is incomplete.";
         gdPracticeDebugCheckpointSafe("header_cutout_allocation","failed",{
           outputSummary:allocationState.reason,
           counts:{
             headersAllocated:allocationState.allocated,
             headersTotal:allocationState.total,
             metricHeaders:allocationState.metricCount,
-            minMetricHeaders:allocationState.minMetrics,
-            columnsFound:allocationState.foundColumns,
-            columnsExpected:allocationState.expectedColumns
+            minMetricHeaders:allocationState.minMetrics
           },
-          warnings:[headerGateWarning],
+          warnings:["Cell OCR was not started because mapped value fields are not ready. Club is handled by the club-id pass and does not need a header."],
           tableScanOutcome
         });
-        gdPracticeFailImportJob(new Error(allocationState.columnReady?"Header allocation was not strong enough to read values":"OCR-generated grid columns were incomplete"),`${allocationState.reason} Open scan output to inspect the generated grid and per-cutout header reads.`);
+        gdPracticeFailImportJob(new Error("Mapped value fields were not strong enough to read values"),`${allocationState.reason}. Club is handled separately; open scan output to inspect per-cutout header reads.`);
         gdPracticeSetContinueScanReady(true);
         gdPracticeFeedback(`${allocationState.reason}. Values were not read or saved.`,"error");
         return scan;
@@ -24963,7 +24926,7 @@ function gdPracticeLegacyHeaderAllocationFailureMessage(text){
   if(!/Header allocation only mapped \d+\/\d+ value columns/i.test(raw))return "";
   const match=raw.match(/mapped\s+(\d+)\/(\d+)/i);
   const mapped=match?`${match[1]}/${match[2]}`:"incomplete";
-  return `Previous scan stopped before value OCR because generated grid/header evidence was incomplete (${mapped} value columns mapped). Resume/review import and open scan output for generated grid and per-cutout header reads. Nothing was saved.`;
+  return `Previous scan stopped before value OCR because mapped value fields were incomplete (${mapped} value columns mapped). Club is handled separately by the club-id pass. Resume/review import and open scan output for per-cutout header reads. Nothing was saved.`;
 }
 function gdPracticeHydrateImportJob(){
   const stored=gdPracticeReadImportJob();
