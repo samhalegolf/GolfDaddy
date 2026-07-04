@@ -24832,6 +24832,7 @@ function gdNativeShotDataProcessingTrackHTML(clubLabel=""){
 }
 function gdPracticeClearLibraryProcessingSurface(){
   document.querySelectorAll(".gdPracticeLibraryProcessing").forEach(node=>node.remove());
+  document.querySelectorAll(".gdPracticeLibraryTabs .gdNativeProcessingStack").forEach(node=>node.remove());
 }
 function gdPracticeSyncLibraryProcessingSurface(){
   const job=gdPracticeHydrateImportJob();
