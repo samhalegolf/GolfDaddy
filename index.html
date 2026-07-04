@@ -2365,6 +2365,9 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 #practiceDataPanel.gdPracticePhotoProcessing .gdPracticeScanner,
 #practiceDataPanel.gdPracticePhotoProcessing .gdManualQuadTool,
 #practiceDataPanel.gdPracticePhotoProcessing .gdPracticeReview{display:none!important}
+#practiceDataPanel.gdPracticeScanRunning .gdPracticeScanner,
+#practiceDataPanel.gdPracticeScanRunning .gdManualQuadTool,
+#practiceDataPanel.gdPracticeScanRunning .gdPracticeReview{display:none!important}
 #practiceDataPanel.gdPracticePhotoProcessing .gdNativePracticeDrawer,
 #practiceDataPanel.gdPracticePhotoProcessing .gdPracticeEmailBox,
 #practiceDataPanel.gdPracticePhotoProcessing .gdPracticeImportJob{display:none!important}
@@ -13872,7 +13875,7 @@ async function gdRunFittedCellGridOcr(columnScan,opts={}){
   function gdFittedCellOcrBudgetExceeded(){return Date.now()-ocrStartedAt>ocrMaxMs;}
   function gdStopFittedCellOcr(reason){
     partialStopReason=partialStopReason||String(reason||"OCR time budget reached");
-    gdSetPracticeScanStatus(partialStopReason);
+    gdSetPracticeScanStatus(opts.importToNative===true?gdPracticeScanStoppedMessage(partialStopReason):partialStopReason);
   }
   function gdFittedCellOcrJobProgress(rowIndex,phase=""){
     if(importJobId)gdPracticeAssertCurrentImportJob(importJobId,"Practice photo cell OCR");
@@ -16285,6 +16288,7 @@ function gdResetPracticeManualQuad(){
   gdRenderPracticeManualQuad();
 }
 async function gdApplyPracticeManualQuad(){
+  if(gdPracticeScanReentryBlocked())return null;
   const state=gdPracticeManualQuadState;
   if(!state?.source||!gdPracticeQuadPoints(state.quad)){
     gdPracticeManualQuadStatus("Manual shape is not ready.","error");
@@ -16942,6 +16946,7 @@ async function gdRunDefaultPracticePhotoScanFromCheckpoint(checkpoint,opts={}){
 }
 async function gdRunDefaultPracticePhotoScan(){
   try{
+    if(gdPracticeScanReentryBlocked())return null;
     const checkpoint=gdPracticeClusterCheckpoint||window.__gdPracticeClusterCheckpoint||await gdBuildPracticeClusterCheckpoint();
     if(!checkpoint){
       gdOpenPracticeManualQuadTool();
@@ -17039,6 +17044,7 @@ async function gdScanPracticePhotoCrop(){
     if(typeof gdSetPracticePhotoProcessing==="function")gdSetPracticePhotoProcessing(false,{immediate:true,skipJob:true});
   };
   try{
+    if(gdPracticeScanReentryBlocked())return null;
     if(!gdPracticeImportCanStart(gdPracticePhotoName||"Practice photo scan"))return null;
     gdSetPracticePhotoProcessing(true,{stageIndex:1,progress:16,preserveClubs:true});
     scanLoaderStarted=true;
@@ -17066,6 +17072,7 @@ async function gdScanPracticePhotoCrop(){
   }
 }
 async function gdPracticePrimaryScanAction(){
+  if(gdPracticeScanReentryBlocked())return null;
   const manual=document.getElementById("gdPracticeManualQuadTool");
   if(manual&&!manual.hidden&&manual.classList.contains("active")){
     return gdApplyPracticeManualQuad();
@@ -17080,6 +17087,7 @@ async function gdPracticePrimaryScanAction(){
 }
 async function gdContinuePracticePhotoScan(){
   try{
+    if(gdPracticeScanReentryBlocked())return null;
     gdPracticeDebugEnsureRunSafe({sourceName:gdPracticePhotoName||"Practice photo scan"});
     const checkpoint=gdPracticeClusterCheckpoint||await gdBuildPracticeClusterCheckpoint();
     if(!checkpoint){
@@ -24514,6 +24522,20 @@ function gdPracticeAssertCurrentImportJob(jobId,label){
 }
 function gdPracticeIsQuietScanStop(error){
   return error&&["GD_PRACTICE_IMPORT_STALE","GD_PRACTICE_OCR_TIMEOUT"].includes(String(error.code||""));
+}
+function gdPracticeScanSurfaceIsActive(){
+  const panel=document.getElementById("practiceDataPanel");
+  return !!(gdPracticeImportIsActive(gdPracticeHydrateImportJob())
+    ||gdPracticePhotoProcessing
+    ||document.body?.classList.contains("gdPracticeScanRunning")
+    ||document.body?.classList.contains("gdPracticePhotoProcessing")
+    ||panel?.classList.contains("gdPracticeScanRunning")
+    ||panel?.classList.contains("gdPracticePhotoProcessing"));
+}
+function gdPracticeScanReentryBlocked(){
+  if(!gdPracticeScanSurfaceIsActive())return false;
+  try{gdPracticeSyncLibraryProcessingSurface();}catch(e){}
+  return true;
 }
 function gdPracticeScanStoppedMessage(reason=""){
   const text=String(reason||"").trim();
