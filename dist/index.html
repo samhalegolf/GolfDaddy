@@ -14665,15 +14665,15 @@ function gdLmClearanceCorridorConfig(boxes,sourceWidth=0){
   const widths=(Array.isArray(boxes)?boxes:[]).map(box=>Number(box.w)).filter(value=>Number.isFinite(value)&&value>0);
   const medianWidth=gdValueClusterMedian(widths)||36;
   const sourceMax=Number(sourceWidth)||Math.max(0,...(Array.isArray(boxes)?boxes:[]).map(box=>Number(box.x1)||0));
-  const sourceLimit=sourceMax?sourceMax*.028:44;
-  const corridorWidth=Math.max(18,Math.min(44,sourceLimit||44,medianWidth*.72));
+  const sourceLimit=sourceMax?sourceMax*.018:28;
+  const corridorWidth=Math.max(8,Math.min(28,sourceLimit||28,medianWidth*.38));
   return {
     corridorWidth,
     half:corridorWidth/2,
-    mergeGap:Math.max(7,Math.min(28,corridorWidth*.72)),
-    step:Math.max(1,Math.round(corridorWidth/6)),
-    minColumnWidth:Math.max(28,corridorWidth*1.35,sourceMax*.018),
-    edgeGuard:Math.max(12,corridorWidth*.65),
+    mergeGap:Math.max(4,Math.min(16,corridorWidth*.65)),
+    step:Math.max(1,Math.round(corridorWidth/4)),
+    minColumnWidth:Math.max(42,corridorWidth*2.2,sourceMax*.024),
+    edgeGuard:Math.max(8,corridorWidth*.65),
     sourceMax
   };
 }
@@ -14726,8 +14726,8 @@ function gdLmClearanceCorridorBands(rows,cfg){
   if(!sourceMax||!Array.isArray(rows)||rows.length<3)return [];
   const half=Number(cfg.half)||9;
   const step=Math.max(1,Number(cfg.step)||3);
-  const minSupport=Math.max(3,Math.ceil(rows.length*.66));
-  const maxBlocked=Math.max(0,Math.floor(rows.length*.1));
+  const minSupport=Math.max(3,Math.ceil(rows.length*.52));
+  const maxBlocked=Math.max(1,Math.floor(rows.length*.2));
   const samples=[];
   for(let x=0;x<=sourceMax;x+=step){
     let support=0,blocked=0,clearRows=0;
@@ -14791,7 +14791,7 @@ function gdLmColumnsFromClearanceCuts(rows,cuts,cfg){
   if(!sourceMax||!Array.isArray(rows)||rows.length<3||!Array.isArray(cuts)||!cuts.length)return [];
   const boundaries=[0].concat(cuts.map(cut=>Number(cut.x)).filter(Number.isFinite),[sourceMax])
     .filter((value,index,array)=>index===0||value>array[index-1]+1);
-  const minSupport=Math.max(2,Math.ceil(rows.length*.36));
+  const minSupport=Math.max(2,Math.ceil(rows.length*.30));
   const columns=[];
   for(let index=0;index<boundaries.length-1;index+=1){
     const left=Number(boundaries[index]);
@@ -17399,13 +17399,13 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
     const headerWords=layout.headerLine?gdLmHeaderWordsForGrid(lines,layout):[];
     const numberBoxColumns=geometryColumns.length>=4?geometryColumns:gdLmNumberBoxColumnsFromCandidates(valueCandidates,Number(scanImage?.width)||0);
     const valueGeometryColumns=gdLmGenericGridColumnsFromValueCandidates(valueCandidates,[]);
-    const chosenGridColumns=numberBoxColumns.length>=4?numberBoxColumns:(valueGeometryColumns.length>=4?valueGeometryColumns:[]);
+    const chosenGridColumns=numberBoxColumns.length>=4?numberBoxColumns:[];
     const dividerSource=numberBoxColumns.length>=4
-      ?"ocr-value-skewer-synthetic-borders"
-      :(valueGeometryColumns.length>=4?"ocr-value-geometry-synthetic-borders":"ocr-number-geometry-missing");
+      ?"ocr-value-clearance-corridors"
+      :"ocr-value-clearance-corridors-missing";
     if(chosenGridColumns.length<4){
-      const outcome=gdOcrGeneratedOutcomeFromFailure("OCR generated template found OCR words but could not create the generated grid.",scanImage,{wordCount,layout,ocrData,headerCandidates,headerProbe,geometryOcrData,geometryValueCandidates,geometryRows,geometryColumns,aliasStatus:gdLmAliasRegistryStatus()});
-      gdPracticeDebugCheckpointSafe("ocr_generated_template","failed",{outputSummary:"OCR generated columns did not form a grid",counts:{words:wordCount,columns:Number(layout.columns?.length)||0,candidates:valueCandidates.length}});
+      const outcome=gdOcrGeneratedOutcomeFromFailure("OCR generated template found OCR words but could not create vertical value-clearance column cutouts.",scanImage,{wordCount,layout,ocrData,headerCandidates,headerProbe,geometryOcrData,geometryValueCandidates,geometryRows,geometryColumns,valueGeometryColumns,aliasStatus:gdLmAliasRegistryStatus()});
+      gdPracticeDebugCheckpointSafe("ocr_generated_template","failed",{outputSummary:"OCR generated vertical clearance did not form column cutouts",counts:{words:wordCount,columns:Number(layout.columns?.length)||0,clearanceColumns:numberBoxColumns.length,oldCenterGroups:valueGeometryColumns.length,candidates:valueCandidates.length}});
       gdPracticeDebugCheckpointSafe("extraction_started","failed",{outputSummary:"OCR generated layout stopped before grid output"});
       gdRenderPracticeTemplateOutcomeTabs("ocr");
       return {payload:null,scan:null,outcome};
