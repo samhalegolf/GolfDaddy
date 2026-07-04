@@ -30385,10 +30385,10 @@ try{applyDevSettings();}catch(e){console.warn("Developer tuning init skipped",e)
 	        setFieldFeedback('gd67CoachPlayerFeedback','Checking existing accounts...','info');
 	        await window.ClarityCloudSync.restoreAccounts('coach-add-player-merge');
 	      }
-	      const player = api.addPlayer({
-        name: document.getElementById('gd67CoachPlayerName')?.value,
-        email: document.getElementById('gd67CoachPlayerEmail')?.value,
-        password: document.getElementById('gd67CoachPlayerPassword')?.value
+		      const player = await api.addPlayer({
+		        name: document.getElementById('gd67CoachPlayerName')?.value,
+		        email: document.getElementById('gd67CoachPlayerEmail')?.value,
+		        password: document.getElementById('gd67CoachPlayerPassword')?.value
       });
 	      if (player && String(player.email || '').trim().toLowerCase() === String(document.getElementById('gd67CoachPlayerEmail')?.value || '').trim().toLowerCase()) {
 	        document.getElementById('gd67CoachPlayerName').value = '';

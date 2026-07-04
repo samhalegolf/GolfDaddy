@@ -369,49 +369,61 @@
     wrapped.__clarityEmailWrapped = true;
     window[name] = wrapped;
   }
-  function wrapAccounts(){
-    var api = accountsApi();
-    if(!api || api.__clarityEmailWrapped)return;
-    ["update","addPlayer","addCoach","connectCoachByCode","signup"].forEach(function(name){
-      var original = api[name];
-      if(typeof original !== "function")return;
-      api[name] = function(){
-        var actor = currentAccount();
-        var result = original.apply(api, arguments);
-        setTimeout(function(){
-          if(name === "signup"){
-            sendServiceEmail(result, {
-              eventType:"account_created",
-              title:"Your Clarity account is ready",
-              detail:"Your player account has been created. You can now add your bag, enter shot data, and connect to a coach from Settings.",
-              ctaLabel:"Open Clarity"
-            }).catch(function(){});
-            return;
-          }
-          if(name === "addPlayer" || name === "addCoach"){
-            sendServiceEmail(result, {
-              eventType:"account_created",
-              title:"Your Clarity account is ready",
-              detail:"Your account has been created by " + ((actor && actor.name) || "your coach") + ". Sign in with the temporary password, then open Settings to set your own password.",
-              ctaLabel:"Open Settings"
-            }).catch(function(){});
-            recordActivity({
-              kind:"profile",
-              actor:actor,
-              targetOwner:result,
-              title:name === "addPlayer" ? "A player account was created" : "A coach account was created",
-              detail:"A new account was created in Clarity Caddie."
-            }).catch(function(){});
-            return;
-          }
-          var kind = name === "update" ? "account" : "profile";
-          recordActivity({kind:kind}).catch(function(){});
-        }, 0);
-        return result;
-      };
-    });
-    api.__clarityEmailWrapped = true;
-  }
+	  function wrapAccounts(){
+	    var api = accountsApi();
+	    if(!api || api.__clarityEmailWrapped)return;
+	    ["update","addPlayer","addCoach","connectCoachByCode","signup"].forEach(function(name){
+	      var original = api[name];
+	      if(typeof original !== "function")return;
+	      api[name] = function(){
+	        var actor = currentAccount();
+	        var result = original.apply(api, arguments);
+	        setTimeout(function(){
+	          Promise.resolve(result).then(function(resolved){
+	            if(name === "signup"){
+	              sendServiceEmail(resolved, {
+	                eventType:"account_created",
+	                title:"Your Clarity account is ready",
+	                detail:"Your player account has been created. You can now add your bag, enter shot data, and connect to a coach from Settings.",
+	                ctaLabel:"Open Clarity"
+	              }).catch(function(){});
+	              return;
+	            }
+	            if(name === "addPlayer" || name === "addCoach"){
+	              if(name === "addPlayer" && api.authProvider === "supabase"){
+	                recordActivity({
+	                  kind:"profile",
+	                  actor:actor,
+	                  targetOwner:resolved,
+	                  title:"A player account was created",
+	                  detail:"A new player account was created in Clarity Caddie."
+	                }).catch(function(){});
+	                return;
+	              }
+	              sendServiceEmail(resolved, {
+	                eventType:"account_created",
+	                title:"Your Clarity account is ready",
+	                detail:"Your account has been created by " + ((actor && actor.name) || "your coach") + ". Sign in with the temporary password, then open Settings to set your own password.",
+	                ctaLabel:"Open Settings"
+	              }).catch(function(){});
+	              recordActivity({
+	                kind:"profile",
+	                actor:actor,
+	                targetOwner:resolved,
+	                title:name === "addPlayer" ? "A player account was created" : "A coach account was created",
+	                detail:"A new account was created in Clarity Caddie."
+	              }).catch(function(){});
+	              return;
+	            }
+	            var kind = name === "update" ? "account" : "profile";
+	            recordActivity({kind:kind}).catch(function(){});
+	          }).catch(function(){});
+	        }, 0);
+	        return result;
+	      };
+	    });
+	    api.__clarityEmailWrapped = true;
+	  }
   function wrapAuthHelpers(){
     var forgot = window.gd67ForgotPassword;
     if(typeof forgot === "function" && !forgot.__clarityEmailWrapped){
