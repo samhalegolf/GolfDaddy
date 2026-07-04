@@ -14551,43 +14551,60 @@ function gdLmNumberBoxesFromCandidates(candidates){
     .filter(Boolean)
     .sort((a,b)=>a.cx-b.cx);
 }
-function gdLmNumberBoxColumnsFromCandidates(candidates,sourceWidth=0){
-  const boxes=gdLmNumberBoxesFromCandidates(candidates);
-  if(boxes.length<4)return [];
+function gdLmNumberBoxTrackClusters(boxes,axis="x"){
+  const horizontal=axis==="x";
+  const centerKey=horizontal?"cx":"cy";
+  const sizeKey=horizontal?"w":"h";
+  const source=(Array.isArray(boxes)?boxes:[])
+    .filter(box=>box&&Number.isFinite(Number(box[centerKey]))&&Number(box[sizeKey])>0)
+    .slice()
+    .sort((a,b)=>Number(a[centerKey])-Number(b[centerKey]));
+  if(!source.length)return [];
+  const medianSize=gdValueClusterMedian(source.map(box=>Number(box[sizeKey])).filter(Number.isFinite))||(horizontal?24:16);
+  const tolerance=horizontal
+    ?Math.max(18,Math.min(48,medianSize*1.15))
+    :Math.max(9,Math.min(23,medianSize*.85));
   const clusters=[];
   const updateCluster=cluster=>{
     const items=cluster.items;
+    const centers=items.map(item=>Number(item[centerKey])).filter(Number.isFinite);
+    cluster.center=gdValueClusterMedian(centers)||centers.reduce((sum,item)=>sum+item,0)/Math.max(1,centers.length);
     cluster.x0=Math.min(...items.map(item=>item.x0));
     cluster.x1=Math.max(...items.map(item=>item.x1));
+    cluster.y0=Math.min(...items.map(item=>item.y0));
+    cluster.y1=Math.max(...items.map(item=>item.y1));
     cluster.cx=gdValueClusterMedian(items.map(item=>item.cx))||((cluster.x0+cluster.x1)/2);
-    cluster.cy=gdValueClusterMedian(items.map(item=>item.cy))||0;
+    cluster.cy=gdValueClusterMedian(items.map(item=>item.cy))||((cluster.y0+cluster.y1)/2);
     cluster.width=Math.max(1,cluster.x1-cluster.x0);
+    cluster.height=Math.max(1,cluster.y1-cluster.y0);
   };
-  boxes.forEach(box=>{
-    let best=null;
-    let bestGap=Infinity;
+  source.forEach(box=>{
+    let best=null,bestDistance=Infinity;
     clusters.forEach(cluster=>{
-      const overlap=Math.min(cluster.x1,box.x1)-Math.max(cluster.x0,box.x0);
-      const gap=overlap>=0?0:Math.max(cluster.x0,box.x0)-Math.min(cluster.x1,box.x1);
-      const narrowWidth=Math.max(1,Math.min(cluster.width||box.w,box.w));
-      const closeGap=Math.max(5,Math.min(14,narrowWidth*.45));
-      const centerDistance=Math.abs(Number(cluster.cx)-Number(box.cx));
-      const sameTrack=overlap>=Math.max(2,narrowWidth*.18)||gap<=closeGap;
-      if(sameTrack&&centerDistance<Math.max(cluster.width||0,box.w)*1.7&&gap<bestGap){
+      const distance=Math.abs(Number(cluster.center)-Number(box[centerKey]));
+      if(distance<=tolerance&&distance<bestDistance){
         best=cluster;
-        bestGap=gap;
+        bestDistance=distance;
       }
     });
     if(!best){
-      best={items:[box],x0:box.x0,x1:box.x1,cx:box.cx,cy:box.cy,width:box.w};
+      best={items:[box],center:Number(box[centerKey])};
+      updateCluster(best);
       clusters.push(best);
       return;
     }
     best.items.push(box);
     updateCluster(best);
   });
-  const sorted=clusters
-    .filter(cluster=>cluster.items.length&&Number.isFinite(Number(cluster.cx)))
+  return clusters
+    .filter(cluster=>cluster.items.length&&Number.isFinite(Number(cluster.center)))
+    .sort((a,b)=>Number(a.center)-Number(b.center));
+}
+function gdLmNumberBoxColumnsFromCandidates(candidates,sourceWidth=0){
+  const boxes=gdLmNumberBoxesFromCandidates(candidates);
+  if(boxes.length<4)return [];
+  const sorted=gdLmNumberBoxTrackClusters(boxes,"x")
+    .filter(cluster=>cluster.items.length>=2&&Number.isFinite(Number(cluster.cx)))
     .sort((a,b)=>a.cx-b.cx);
   if(sorted.length<4)return [];
   const sourceMax=Number(sourceWidth)||Math.max(...sorted.map(cluster=>cluster.x1),0);
@@ -14630,39 +14647,8 @@ function gdLmNumberBoxColumnsFromCandidates(candidates,sourceWidth=0){
 function gdLmNumberBoxRowsFromCandidates(candidates,sourceHeight=0){
   const boxes=gdLmNumberBoxesFromCandidates(candidates).sort((a,b)=>a.cy-b.cy||a.cx-b.cx);
   if(!boxes.length)return [];
-  const clusters=[];
-  const updateCluster=cluster=>{
-    const items=cluster.items;
-    cluster.y0=Math.min(...items.map(item=>item.y0));
-    cluster.y1=Math.max(...items.map(item=>item.y1));
-    cluster.cy=gdValueClusterMedian(items.map(item=>item.cy))||((cluster.y0+cluster.y1)/2);
-    cluster.height=Math.max(1,cluster.y1-cluster.y0);
-  };
-  boxes.forEach(box=>{
-    let best=null;
-    let bestGap=Infinity;
-    clusters.forEach(cluster=>{
-      const overlap=Math.min(cluster.y1,box.y1)-Math.max(cluster.y0,box.y0);
-      const gap=overlap>=0?0:Math.max(cluster.y0,box.y0)-Math.min(cluster.y1,box.y1);
-      const narrowHeight=Math.max(1,Math.min(cluster.height||box.h,box.h));
-      const closeGap=Math.max(4,Math.min(13,narrowHeight*.65));
-      const centerDistance=Math.abs(Number(cluster.cy)-Number(box.cy));
-      const sameBand=overlap>=Math.max(2,narrowHeight*.18)||gap<=closeGap;
-      if(sameBand&&centerDistance<Math.max(cluster.height||0,box.h)*1.8&&gap<bestGap){
-        best=cluster;
-        bestGap=gap;
-      }
-    });
-    if(!best){
-      best={items:[box],y0:box.y0,y1:box.y1,cy:box.cy,height:box.h};
-      clusters.push(best);
-      return;
-    }
-    best.items.push(box);
-    updateCluster(best);
-  });
-  const sorted=clusters
-    .filter(cluster=>cluster.items.length&&Number.isFinite(Number(cluster.cy)))
+  const sorted=gdLmNumberBoxTrackClusters(boxes,"y")
+    .filter(cluster=>cluster.items.length>=2&&Number.isFinite(Number(cluster.cy)))
     .sort((a,b)=>a.cy-b.cy);
   if(!sorted.length)return [];
   const sourceMax=Number(sourceHeight)||Math.max(...sorted.map(cluster=>cluster.y1),0);
