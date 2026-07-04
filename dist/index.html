@@ -8355,23 +8355,73 @@ function gdPracticeLiveDebugEventHtml(event){
     <small>${gdEscapeHTML(event.state||event.type||"")}</small>
   </div>`;
 }
+function gdPracticeLiveDebugMetric(label,value){
+  if(typeof gdPracticeDebugMetric==="function")return gdPracticeDebugMetric(label,value);
+  return `<div class="gdPracticePhotoDebugMetric"><span>${gdEscapeHTML(label)}</span><strong>${gdEscapeHTML(value==null||value===""?"-":String(value))}</strong></div>`;
+}
+function gdPracticeLiveDebugFormatMs(ms){
+  if(typeof gdPracticeDebugFormatMs==="function")return gdPracticeDebugFormatMs(ms);
+  const n=Number(ms);
+  if(!Number.isFinite(n))return "-";
+  return n<1000?`${Math.round(n)} ms`:`${(n/1000).toFixed(1)} s`;
+}
+function gdPracticeLiveDebugDetailRow(label,value){
+  if(value==null||value===""||(Array.isArray(value)&&!value.length))return "";
+  const text=Array.isArray(value)?value.join(", "):String(value);
+  return `<div><b>${gdEscapeHTML(label)}:</b> ${gdEscapeHTML(text)}</div>`;
+}
+function gdPracticeLiveDebugSnapshotHtml(snapshot,failed){
+  if(typeof gdPracticeDebugSnapshotHtml==="function")return gdPracticeDebugSnapshotHtml(snapshot,failed);
+  if(!snapshot?.url)return "";
+  return `<details class="gdPracticePhotoDebugSection" ${failed?"open":""}>
+    <summary><strong>Stage Snapshot</strong><span>${gdEscapeHTML(snapshot.label||"image")}</span></summary>
+    <div class="gdPracticePhotoDebugBody gdPracticeStageSnapshot">
+      <img src="${gdEscapeHTML(snapshot.url)}" alt="${gdEscapeHTML(snapshot.label||"Stage snapshot")}">
+      <small>${gdEscapeHTML(snapshot.width&&snapshot.height?`${snapshot.width} x ${snapshot.height}`:"snapshot")}</small>
+    </div>
+  </details>`;
+}
+function gdPracticeLiveDebugCheckpointHtml(checkpoint,run){
+  if(typeof gdPracticeDebugCheckpointHtml==="function")return gdPracticeDebugCheckpointHtml(checkpoint,run);
+  const failed=run?.failedCheckpointId===checkpoint.id||checkpoint.status==="failed";
+  const counts=checkpoint.counts?Object.entries(checkpoint.counts).map(([key,value])=>`${key}: ${value}`).join(", "):"";
+  const technical=checkpoint.technicalDetails||checkpoint.error?.stack||"";
+  return `<details class="gdPracticePhotoDebugSection ${failed?"failed":""}" ${failed?"open":""}>
+    <summary><strong>${gdEscapeHTML(checkpoint.label||checkpoint.id||"Checkpoint")}</strong><span class="${gdEscapeHTML(checkpoint.status||"pending")}">${gdEscapeHTML(checkpoint.status||"pending")}</span></summary>
+    <div class="gdPracticePhotoDebugBody">
+      ${gdPracticeLiveDebugDetailRow("Timestamp",checkpoint.startedAt||checkpoint.finishedAt)}
+      ${gdPracticeLiveDebugDetailRow("Duration",gdPracticeLiveDebugFormatMs(checkpoint.durationMs))}
+      ${gdPracticeLiveDebugDetailRow("Input",checkpoint.inputSummary)}
+      ${gdPracticeLiveDebugDetailRow("Output",checkpoint.outputSummary)}
+      ${gdPracticeLiveDebugDetailRow("Counts",counts)}
+      ${gdPracticeLiveDebugDetailRow("Warnings",checkpoint.warnings)}
+      ${gdPracticeLiveDebugDetailRow("Error",checkpoint.error?.message)}
+      ${gdPracticeLiveDebugSnapshotHtml(checkpoint.snapshot,failed)}
+      ${technical?`<details><summary>Technical details</summary><pre>${gdEscapeHTML(typeof technical==="string"?technical:JSON.stringify(technical,null,2))}</pre></details>`:""}
+    </div>
+  </details>`;
+}
+function gdPracticeLiveDebugRejectedRows(run){
+  if(typeof gdPracticeDebugRejectedRows==="function")return gdPracticeDebugRejectedRows(run);
+  return "";
+}
 function gdPracticeRenderLiveDebugAdminRun(run){
   if(!run)return `<div class="gdPracticePhotoDebugSection"><div class="gdPracticePhotoDebugBody">No processing run recorded yet.</div></div>`;
   const summary=run.summary||{};
   const failed=typeof gdPracticeDebugLabelForRunCheckpoint==="function"?gdPracticeDebugLabelForRunCheckpoint(run,run.failedCheckpointId):"";
   const lastOk=typeof gdPracticeDebugLabelForRunCheckpoint==="function"?gdPracticeDebugLabelForRunCheckpoint(run,run.lastSuccessfulCheckpointId):"";
-  const checkpoints=(run.checkpoints||[]).map(item=>gdPracticeDebugCheckpointHtml(item,run)).join("");
+  const checkpoints=(run.checkpoints||[]).map(item=>gdPracticeLiveDebugCheckpointHtml(item,run)).join("");
   const rawJson=JSON.stringify(run,null,2);
   return `<div class="gdPracticePhotoDebugSummary">
-    ${gdPracticeDebugMetric("Run",run.status||"idle")}
-    ${gdPracticeDebugMetric("Failed",failed||"None")}
-    ${gdPracticeDebugMetric("Last success",lastOk||"None")}
-    ${gdPracticeDebugMetric("Time",gdPracticeDebugFormatMs(summary.totalProcessingMs))}
-    ${gdPracticeDebugMetric("Saved",summary.dataSaved?"Yes":"No")}
-    ${gdPracticeDebugMetric("Error",summary.errorMessage||"None")}
+    ${gdPracticeLiveDebugMetric("Run",run.status||"idle")}
+    ${gdPracticeLiveDebugMetric("Failed",failed||"None")}
+    ${gdPracticeLiveDebugMetric("Last success",lastOk||"None")}
+    ${gdPracticeLiveDebugMetric("Time",gdPracticeLiveDebugFormatMs(summary.totalProcessingMs))}
+    ${gdPracticeLiveDebugMetric("Saved",summary.dataSaved?"Yes":"No")}
+    ${gdPracticeLiveDebugMetric("Error",summary.errorMessage||"None")}
   </div>
   ${checkpoints}
-  ${gdPracticeDebugRejectedRows(run)}
+  ${gdPracticeLiveDebugRejectedRows(run)}
   <details class="gdPracticePhotoDebugSection gdPracticePhotoDebugJson"><summary><strong>Raw Debug JSON</strong><button class="gdPracticePhotoDebugCopy" type="button" onclick="return gdCopyPracticePhotoDebugJson()">Copy</button></summary><div class="gdPracticePhotoDebugBody"><pre>${gdEscapeHTML(rawJson)}</pre></div></details>`;
 }
 function gdRenderPracticeLiveDebugPanel(){
@@ -8412,7 +8462,7 @@ function gdPracticeRecordLiveDebugEvent(type,message,extra={}){
   });
   if(gdPracticeLiveDebugEvents.length>80)gdPracticeLiveDebugEvents.splice(0,gdPracticeLiveDebugEvents.length-80);
   window.__gdPracticeLiveDebugEvents=gdPracticeLiveDebugEvents;
-  gdRenderPracticeLiveDebugPanel();
+  try{gdRenderPracticeLiveDebugPanel();}catch(e){console.warn("[GolfDaddy] practice live debug render skipped",e);}
 }
 function gdSetPracticeScanStatus(message,opts={}){
   const text=String(message||"");
@@ -24660,6 +24710,10 @@ function gdPracticeHydrateImportJob(){
   const currentTime=Date.parse(current?.updatedAt||current?.createdAt||"")||0;
   if(!current||storedTime>=currentTime)gdPracticeImportJob=stored;
   if(String(gdPracticeImportJob?.status||"")==="failed"&&String(gdPracticeImportJob?.diagnostic||"")===GD_PRACTICE_IMPORT_STALE_DIAGNOSTIC){
+    return gdPracticeReleaseStaleImportJob();
+  }
+  const failedImportText=String(gdPracticeImportJob?.checkpointText||gdPracticeImportJob?.userMessage||gdPracticeImportJob?.diagnostic||"");
+  if(String(gdPracticeImportJob?.status||"")==="failed"&&/gdPracticeDebug(?:CheckpointHtml|Metric|FormatMs|RejectedRows) is not defined/i.test(failedImportText)){
     return gdPracticeReleaseStaleImportJob();
   }
   const activeTime=Date.parse(gdPracticeImportJob?.updatedAt||gdPracticeImportJob?.createdAt||"")||0;
