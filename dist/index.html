@@ -25423,13 +25423,35 @@ function gdPracticeUpdateImportJob(patch={}){
 }
 function gdPracticeFailImportJob(error,userMessage){
   const message=userMessage||error?.message||"Practice import failed";
-  return gdPracticeUpdateImportJob({
+  const failedJob=gdPracticeUpdateImportJob({
     status:"failed",
     checkpointText:message,
     userMessage:message,
     diagnostic:String(error?.stack||error?.message||error||message).slice(0,1200),
     progress:100
   });
+  gdPracticeReleaseFailedImportSurface();
+  return failedJob;
+}
+function gdPracticeReleaseFailedImportSurface(){
+  gdPracticePhotoProcessing=false;
+  gdPracticePhotoProcessingProgress=0;
+  gdPracticePhotoProcessingStageIndex=0;
+  gdPracticePhotoProcessingCompletedAt=0;
+  if(gdPracticePhotoProcessingStopTimer){
+    clearTimeout(gdPracticePhotoProcessingStopTimer);
+    gdPracticePhotoProcessingStopTimer=null;
+  }
+  try{gdPracticeProcessingStop();}catch(e){}
+  try{
+    document.body?.classList.remove("gdPracticeScanRunning");
+    document.body?.classList.remove("gdPracticePhotoProcessing");
+    document.getElementById("practiceDataPanel")?.classList.remove("gdPracticeScanRunning");
+    document.getElementById("practiceDataPanel")?.classList.remove("gdPracticePhotoProcessing");
+    gdPracticeClearLibraryProcessingSurface();
+  }catch(e){}
+  try{if(typeof renderPracticeData==="function")renderPracticeData(true);}catch(e){}
+  return true;
 }
 function gdPracticeCompleteImportJob(result,payload,extra={}){
   const groups=Array.isArray(payload?.clubGroups)?payload.clubGroups:[];
