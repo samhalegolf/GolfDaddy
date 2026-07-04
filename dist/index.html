@@ -2384,11 +2384,9 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 .gdManualQuadCanvasWrap canvas{display:block;width:100%;height:auto;min-width:640px;background:#050806;cursor:crosshair}
 .gdManualQuadTool .gdPracticeScannerActions{grid-template-columns:repeat(auto-fit,minmax(96px,1fr))}
 #practiceDataPanel.gdPracticePhotoProcessing .gdPracticeScanner,
-#practiceDataPanel.gdPracticePhotoProcessing .gdManualQuadTool,
-#practiceDataPanel.gdPracticePhotoProcessing .gdPracticeReview{display:none!important}
+#practiceDataPanel.gdPracticePhotoProcessing .gdManualQuadTool{display:none!important}
 #practiceDataPanel.gdPracticePhotoProcessing .gdNativePracticeDrawer,
-#practiceDataPanel.gdPracticePhotoProcessing .gdPracticeEmailBox,
-#practiceDataPanel.gdPracticePhotoProcessing .gdPracticeImportJob{display:none!important}
+#practiceDataPanel.gdPracticePhotoProcessing .gdPracticeEmailBox{display:none!important}
 #gdPracticeScanner .gdPracticeScanStatus,#gdPracticeManualQuadStatus{display:none!important}
 .gdPracticeReviewActions,.gdPracticeScannerActions{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-top:10px}
 .gdPracticeReviewActions button,.gdPracticeScannerActions button{border:0;border-radius:14px;padding:11px;font-weight:950;background:rgba(255,255,255,.09);color:#fff;border:1px solid rgba(255,255,255,.10)}
@@ -8273,7 +8271,7 @@ async function gdHandleLaunchMonitorUpload(file){
   gdPracticeStartImportJob("practice-file",file.name||"Plain text file",{status:"queued",checkpointText:"Queued file import",stageIndex:0,progress:8,source:"file"});
   gdNativePracticeFeedbackBridge({status:"file_selected",lastAction:`Legacy text upload selected: ${file.name||"plain text"}`,warnings:["This upload also feeds the existing launch-monitor intake path."],errors:[],nextStep:"Reading upload..."});
   gdLmSetStatus("Status","Reading upload",file.name||"Plain text file","needs_more_data");
-  gdSetPracticePhotoProcessing(true,{clubs:["Upload"],stageIndex:0,progress:12});
+  gdSetPracticePhotoProcessing(true,{clubs:["Upload"],stageIndex:0,progress:12,quietScanSurface:true});
   try{
     const text=await file.text();
     gdPracticeAssertImportNotCanceled();
@@ -8386,6 +8384,7 @@ function gdPracticeLiveDebugCheckpointHtml(checkpoint,run){
   const failed=run?.failedCheckpointId===checkpoint.id||checkpoint.status==="failed";
   const counts=checkpoint.counts?Object.entries(checkpoint.counts).map(([key,value])=>`${key}: ${value}`).join(", "):"";
   const technical=checkpoint.technicalDetails||checkpoint.error?.stack||"";
+  const tableOutcome=checkpoint.tableScanOutcome||checkpoint.scanOutcome||null;
   return `<details class="gdPracticePhotoDebugSection ${failed?"failed":""}" ${failed?"open":""}>
     <summary><strong>${gdEscapeHTML(checkpoint.label||checkpoint.id||"Checkpoint")}</strong><span class="${gdEscapeHTML(checkpoint.status||"pending")}">${gdEscapeHTML(checkpoint.status||"pending")}</span></summary>
     <div class="gdPracticePhotoDebugBody">
@@ -8397,6 +8396,7 @@ function gdPracticeLiveDebugCheckpointHtml(checkpoint,run){
       ${gdPracticeLiveDebugDetailRow("Warnings",checkpoint.warnings)}
       ${gdPracticeLiveDebugDetailRow("Error",checkpoint.error?.message)}
       ${gdPracticeLiveDebugSnapshotHtml(checkpoint.snapshot,failed)}
+      ${gdPracticeTableScanOutcomeHtml(tableOutcome)}
       ${technical?`<details><summary>Technical details</summary><pre>${gdEscapeHTML(typeof technical==="string"?technical:JSON.stringify(technical,null,2))}</pre></details>`:""}
     </div>
   </details>`;
@@ -13970,6 +13970,106 @@ function gdRenderFlatTableBridgeOutput(columnScan,activeTemplateKey="flat"){
   if(expanderTitle)expanderTitle.textContent=outputLabel;
   review?.classList.add("active","stripOnly");
 }
+function gdPracticeTableScanOutcomeForDebug(columnScan){
+  const scan=columnScan||window.__gdPracticeColumnScan||null;
+  if(!scan)return null;
+  const cellGrid=scan.cellGrid||{};
+  const allocation=scan.columnCutoutAllocation||{};
+  const digitized=scan.digitizedTable||{};
+  const layout=scan.layout||{};
+  const columns=Array.isArray(cellGrid.columns)?cellGrid.columns:[];
+  const rows=Array.isArray(cellGrid.rows)?cellGrid.rows:[];
+  const valueCandidates=Array.isArray(scan.generatedValueCandidates)?scan.generatedValueCandidates:[];
+  const geometryRows=Array.isArray(scan.generatedNumberBoxRows)?scan.generatedNumberBoxRows:[];
+  const geometryColumns=Array.isArray(scan.layout?.columns)?scan.layout.columns:[];
+  return {
+    kind:String(layout.cropMode||scan.gridExperiment?.key||"table-scan"),
+    rows:rows.length,
+    columns:columns.length,
+    cells:Number(cellGrid.cellCount)||0,
+    headersAllocated:Number(allocation.allocatedCount)||0,
+    headersTotal:Number(allocation.totalCount)||columns.length,
+    headerTextWords:Number(scan.headerTextScan?.wordCount)||0,
+    headerTextAttempts:Number(scan.headerTextScan?.attempts?.length)||0,
+    valueCandidates:valueCandidates.length,
+    numberRows:geometryRows.length,
+    numberColumns:geometryColumns.length,
+    ocrWords:Number(scan.generatedOcrData?.words?.length)||Number(scan.generatedOcrData?.wordCount)||0,
+    digitizedRows:Number(digitized.rows?.length)||0,
+    good:Number(digitized.stats?.good)||0,
+    flagged:Number(digitized.stats?.flagged)||0,
+    missing:Number(digitized.stats?.missing)||0,
+    nativeRows:Number(scan.columnOrderPayload?.clubGroups?.length)||0,
+    sourceSize:{
+      width:Number(scan.sourceCanvas?.width||scan.preparedCanvas?.width||scan.directColumnSource?.width)||0,
+      height:Number(scan.sourceCanvas?.height||scan.preparedCanvas?.height||scan.directColumnSource?.height)||0
+    },
+    columnKeys:columns.slice(0,40).map((column,index)=>({
+      index:index+1,
+      key:String(column.key||column.metricKey||""),
+      label:String(column.label||column.title||""),
+      cx:Math.round(Number(column.cx)||0)
+    })),
+    rowBands:rows.slice(0,30).map((row,index)=>({
+      index:index+1,
+      cy:Math.round(Number(row.cy)||0),
+      top:Math.round(Number(row.top ?? row.y0)||0),
+      bottom:Math.round(Number(row.bottom ?? row.y1)||0)
+    }))
+  };
+}
+function gdPracticeTableScanOutcomeHtml(outcome){
+  if(!outcome)return "";
+  const metric=(label,value)=>`<div class="gdPracticePhotoDebugMetric"><span>${gdEscapeHTML(label)}</span><strong>${gdEscapeHTML(value==null||value===""?"-":String(value))}</strong></div>`;
+  const columns=(Array.isArray(outcome.columnKeys)?outcome.columnKeys:[]).slice(0,18)
+    .map(column=>`<b>${gdEscapeHTML(column.index)}. ${gdEscapeHTML(column.key||column.label||"unmapped")}<small>${gdEscapeHTML(column.cx?`x ${column.cx}`:"")}</small></b>`)
+    .join("");
+  const rowBands=(Array.isArray(outcome.rowBands)?outcome.rowBands:[]).slice(0,18)
+    .map(row=>`<b>${gdEscapeHTML(row.index)}<small>${gdEscapeHTML(row.top||row.bottom?`${row.top}-${row.bottom}`:`y ${row.cy}`)}</small></b>`)
+    .join("");
+  return `<details class="gdPracticePhotoDebugSection">
+    <summary><strong>Table scan outcome</strong><button class="gdPracticePhotoDebugCopy" type="button" onclick="event.stopPropagation();return gdPracticeOpenScanOutcomeFromDebug()">Open scan output</button></summary>
+    <div class="gdPracticePhotoDebugBody">
+      <div class="gdPracticePhotoDebugSummary">
+        ${metric("Grid",`${Number(outcome.rows)||0} x ${Number(outcome.columns)||0}`)}
+        ${metric("Cells",Number(outcome.cells)||0)}
+        ${metric("Headers",`${Number(outcome.headersAllocated)||0}/${Number(outcome.headersTotal)||0}`)}
+        ${metric("Header words",Number(outcome.headerTextWords)||0)}
+        ${metric("Value candidates",Number(outcome.valueCandidates)||0)}
+        ${metric("Number rows",Number(outcome.numberRows)||0)}
+        ${metric("Digital rows",Number(outcome.digitizedRows)||0)}
+        ${metric("Flags",`${Number(outcome.flagged)||0}/${Number(outcome.missing)||0}`)}
+      </div>
+      ${columns?`<div class="gdPracticePhotoDebugBody"><strong>Column allocation</strong><div class="gdPracticePhotoDebugSummary">${columns}</div></div>`:""}
+      ${rowBands?`<div class="gdPracticePhotoDebugBody"><strong>Detected row bands</strong><div class="gdPracticePhotoDebugSummary">${rowBands}</div></div>`:""}
+    </div>
+  </details>`;
+}
+function gdPracticePublishTableScanOutcome(columnScan,activeTemplateKey="ocr"){
+  if(!columnScan)return null;
+  window.__gdPracticeColumnScan=columnScan;
+  gdRenderFlatTableBridgeOutput(columnScan,activeTemplateKey);
+  gdPracticeRefreshDebugTools();
+  try{gdRenderPracticeLiveDebugPanel();}catch(e){}
+  return gdPracticeTableScanOutcomeForDebug(columnScan);
+}
+function gdPracticeOpenScanOutcomeFromDebug(){
+  const scan=window.__gdPracticeColumnScan||null;
+  if(scan){
+    try{gdPracticePublishTableScanOutcome(scan,String(scan?.layout?.cropMode||"")==="ocr-generated-grid"?"ocr":"flat");}catch(e){console.warn("[GolfDaddy] scan outcome reopen skipped",e);}
+  }
+  const review=document.getElementById("gdPracticeOcrReview");
+  const expander=document.getElementById("gdPracticeScanDebugExpander");
+  const panel=document.getElementById("gdPracticeScanDebug");
+  if(review)review.classList.add("active","stripOnly");
+  if(expander){
+    expander.hidden=false;
+    expander.open=true;
+  }
+  panel?.classList.add("active");
+  try{(expander||review)?.scrollIntoView({behavior:"smooth",block:"start"});}catch(e){}
+  return false;
+}
 function gdFittedRowClubRead(columnScan,cellRow){
   const clubIndex=gdOcrClubIdColumnIndex(columnScan);
   if(clubIndex<0)return null;
@@ -14096,7 +14196,7 @@ async function gdRunFittedCellGridOcr(columnScan,opts={}){
     const progress=Math.max(48,Math.min(86,48+Math.round((safeRow/Math.max(1,totalRows))*34)));
     gdPracticeUpdateImportJob({
       status:"parsing",
-      checkpointText:`Reading values (${Math.max(1,Math.min(totalRows,safeRow||1))}/${totalRows})${phase?` ${phase}`:""}`,
+      checkpointText:`Reading aliases + values (${Math.max(1,Math.min(totalRows,safeRow||1))}/${totalRows})${phase?` ${phase}`:""}`,
       stageIndex:2,
       progress
     });
@@ -14194,14 +14294,16 @@ async function gdRunFittedCellGridOcr(columnScan,opts={}){
   const digitized=columnScan?.digitizedTable||null;
   const allocated=Number(columnScan?.columnCutoutAllocation?.allocatedCount)||0;
   const totalAllocated=Number(columnScan?.columnCutoutAllocation?.totalCount)||Number(cellGrid?.columns?.length)||0;
-  gdPracticeDebugCheckpointSafe("extraction_completed","success",{outputSummary:"Raw fitted-cell OCR completed",counts:{ocrRows:rows.length,nativeRows:Number(payload?.clubGroups?.length)||0}});
-  gdPracticeDebugCheckpointSafe("raw_values_detected","success",{outputSummary:"Raw cell values collected",counts:{good:Number(digitized?.stats?.good)||0,flagged:Number(digitized?.stats?.flagged)||0,missing:Number(digitized?.stats?.missing)||0,headersAllocated:allocated,headersTotal:totalAllocated}});
-  gdPracticeDebugCheckpointSafe("rows_parsed",digitized?.rows?.length?"success":"warning",{outputSummary:`${Number(digitized?.rows?.length)||0} digitized rows`,counts:{rowsParsed:Number(digitized?.rows?.length)||0}});
+  const valueScanOutcome=gdPracticePublishTableScanOutcome(columnScan,String(columnScan?.layout?.cropMode||"")==="ocr-generated-grid"?"ocr":"flat");
+  gdPracticeDebugCheckpointSafe("extraction_completed","success",{outputSummary:"Raw fitted-cell OCR completed",counts:{ocrRows:rows.length,nativeRows:Number(payload?.clubGroups?.length)||0},tableScanOutcome:valueScanOutcome});
+  gdPracticeDebugCheckpointSafe("raw_values_detected","success",{outputSummary:"Raw cell values collected",counts:{good:Number(digitized?.stats?.good)||0,flagged:Number(digitized?.stats?.flagged)||0,missing:Number(digitized?.stats?.missing)||0,headersAllocated:allocated,headersTotal:totalAllocated},tableScanOutcome:valueScanOutcome});
+  gdPracticeDebugCheckpointSafe("rows_parsed",digitized?.rows?.length?"success":"warning",{outputSummary:`${Number(digitized?.rows?.length)||0} digitized rows`,counts:{rowsParsed:Number(digitized?.rows?.length)||0},tableScanOutcome:valueScanOutcome});
   const rejectedCellCount=(Number(digitized?.stats?.flagged)||0)+(Number(digitized?.stats?.missing)||0);
   const rowNoteCount=Number(columnScan?.fittedRowRejects?.length)||0;
   gdPracticeDebugCheckpointSafe("rows_rejected",(rejectedCellCount||rowNoteCount)?"warning":"success",{
     outputSummary:`${Number(digitized?.stats?.flagged)||0} flagged cells, ${Number(digitized?.stats?.missing)||0} missing cells, ${rowNoteCount} row notes`,
-    counts:{flagged:Number(digitized?.stats?.flagged)||0,missing:Number(digitized?.stats?.missing)||0,rowNotes:rowNoteCount}
+    counts:{flagged:Number(digitized?.stats?.flagged)||0,missing:Number(digitized?.stats?.missing)||0,rowNotes:rowNoteCount},
+    tableScanOutcome:valueScanOutcome
   });
   const debugRun=gdPracticeDebugCurrentRun();
 	  if(debugRun&&digitized?.rows){
@@ -14212,16 +14314,14 @@ async function gdRunFittedCellGridOcr(columnScan,opts={}){
       .map(row=>({index:row.index,reason:`${row.flaggedCount||0} flagged, ${row.missingCount||0} missing`,rawValue:JSON.stringify(row.rawValues||{}),mappedValue:JSON.stringify(row.values||{})}))
       .concat((Array.isArray(columnScan?.fittedRowRejects)?columnScan.fittedRowRejects:[]).map(row=>({index:row.index,reason:row.reason||"row flagged",rawValue:row.text||"",mappedValue:JSON.stringify(row.flags||[])})));
   }
-  gdRenderFlatTableBridgeOutput(columnScan);
-  gdPracticeRefreshDebugTools();
   if(!payload?.clubGroups?.length){
     const digitizedRows=Number(columnScan?.digitizedTable?.rows?.length)||0;
-    gdPracticeDebugCheckpointSafe("rows_accepted","warning",{outputSummary:"Raw cell values read; scanner result is available for the next filter, but no native Practice rows were formed yet",counts:{accepted:0,digitizedRows,headersAllocated:allocated,headersTotal:totalAllocated,rowNotes:rowNoteCount}});
+    gdPracticeDebugCheckpointSafe("rows_accepted","warning",{outputSummary:"Raw cell values read; scanner result is available for the next filter, but no native Practice rows were formed yet",counts:{accepted:0,digitizedRows,headersAllocated:allocated,headersTotal:totalAllocated,rowNotes:rowNoteCount},tableScanOutcome:valueScanOutcome});
     gdSetPracticeScanStatus(digitizedRows?`Raw cell value read complete: ${digitizedRows} row${digitizedRows===1?"":"s"} scanned. Headers allocated ${allocated}/${totalAllocated}; scanner result is ready for review.`:"Cell OCR ran, but no grid rows produced values yet.");
     return columnScan;
   }
-  gdPracticeDebugCheckpointSafe("rows_accepted","success",{outputSummary:`${payload.clubGroups.length} usable OCR shots`,counts:{accepted:payload.clubGroups.length}});
-  gdPracticeDebugCheckpointSafe("practice_store_handoff","success",{outputSummary:"Photo extraction payload ready for Practice Data save",counts:{rows:payload.clubGroups.length}});
+  gdPracticeDebugCheckpointSafe("rows_accepted","success",{outputSummary:`${payload.clubGroups.length} usable OCR shots`,counts:{accepted:payload.clubGroups.length},tableScanOutcome:valueScanOutcome});
+  gdPracticeDebugCheckpointSafe("practice_store_handoff","success",{outputSummary:"Photo extraction payload ready for Practice Data save",counts:{rows:payload.clubGroups.length},tableScanOutcome:valueScanOutcome});
   if(opts.importToNative===true){
     if(importJobId)gdPracticeAssertCurrentImportJob(importJobId,"Practice photo cell OCR");
     gdPracticeExtractionPreviewState=null;
@@ -16979,9 +17079,11 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
     const headerTextAttempts=Number(columnScan.headerTextScan?.attempts?.length)||0;
     const candidateCount=valueCandidates.length;
     const gridReady=!!(gridRows&&gridColumns&&gridCells);
+    const headerScanOutcome=gdPracticePublishTableScanOutcome(columnScan,"ocr");
     gdPracticeDebugCheckpointSafe("header_cutout_allocation",allocatedColumns?"success":"warning",{
       outputSummary:`Header / cutout allocation matched ${allocatedColumns}/${cutoutColumns} columns`,
-      counts:{headersAllocated:allocatedColumns,headersTotal:cutoutColumns,headerTextWords,headerTextAttempts}
+      counts:{headersAllocated:allocatedColumns,headersTotal:cutoutColumns,headerTextWords,headerTextAttempts},
+      tableScanOutcome:headerScanOutcome
     });
     const outcome=gdPracticeSetTemplateOutcome("ocr",{
       label:"OCR generated",
@@ -17008,14 +17110,15 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
     });
     if(!gridReady){
       gdRenderOcrGeneratedTemplateOutput(columnScan,"ocr");
-      gdPracticeDebugCheckpointSafe("ocr_generated_template","failed",{outputSummary:"OCR generated layout could not form an output grid",counts:{words:wordCount,columns:Number(layout.columns?.length)||0,candidates:Number(outcome.candidateCount)||0}});
-      gdPracticeDebugCheckpointSafe("extraction_started","failed",{outputSummary:"OCR generated layout stopped before value extraction"});
+      const failedScanOutcome=gdPracticeTableScanOutcomeForDebug(columnScan);
+      gdPracticeDebugCheckpointSafe("ocr_generated_template","failed",{outputSummary:"OCR generated layout could not form an output grid",counts:{words:wordCount,columns:Number(layout.columns?.length)||0,candidates:Number(outcome.candidateCount)||0},tableScanOutcome:failedScanOutcome});
+      gdPracticeDebugCheckpointSafe("extraction_started","failed",{outputSummary:"OCR generated layout stopped before value extraction",tableScanOutcome:failedScanOutcome});
       gdSetPracticeScanStatus("OCR-generated layout found headers, but no cell grid yet. Open the OCR generated tab to tune it.");
       return {payload:null,scan:columnScan,outcome};
     }
-    gdRenderFlatTableBridgeOutput(columnScan,"ocr");
-    gdPracticeDebugCheckpointSafe("table_detected","success",{outputSummary:`OCR-generated grid ready: ${gridRows} rows x ${gridColumns} columns`,counts:{rows:gridRows,columns:gridColumns,cells:gridCells}});
-    gdPracticeDebugCheckpointSafe("ocr_generated_template","success",{outputSummary:`OCR-generated grid ready: ${gridRows} rows x ${gridColumns} columns; ${allocatedColumns}/${cutoutColumns} headers allocated by dedicated text OCR`,counts:{rows:gridRows,columns:gridColumns,cells:gridCells,headersAllocated:allocatedColumns,headersTotal:cutoutColumns,headerTextWords,headerTextAttempts,words:wordCount,candidates:outcome.candidateCount}});
+    const readyScanOutcome=gdPracticePublishTableScanOutcome(columnScan,"ocr");
+    gdPracticeDebugCheckpointSafe("table_detected","success",{outputSummary:`OCR-generated grid ready: ${gridRows} rows x ${gridColumns} columns`,counts:{rows:gridRows,columns:gridColumns,cells:gridCells},tableScanOutcome:readyScanOutcome});
+    gdPracticeDebugCheckpointSafe("ocr_generated_template","success",{outputSummary:`OCR-generated grid ready: ${gridRows} rows x ${gridColumns} columns; ${allocatedColumns}/${cutoutColumns} headers allocated by dedicated text OCR`,counts:{rows:gridRows,columns:gridColumns,cells:gridCells,headersAllocated:allocatedColumns,headersTotal:cutoutColumns,headerTextWords,headerTextAttempts,words:wordCount,candidates:outcome.candidateCount},tableScanOutcome:readyScanOutcome});
     gdSetPracticeScanStatus(`OCR-generated grid ready: ${gridRows} rows x ${gridColumns} cutouts. Header / cutout allocation ${allocatedColumns}/${cutoutColumns}.`);
     return {payload:null,scan:columnScan,outcome};
   }catch(e){
@@ -17109,10 +17212,10 @@ async function gdRunDefaultPracticePhotoScanFromCheckpoint(checkpoint,opts={}){
     const rows=Number(scan?.cellGrid?.rows?.length)||0;
     const columns=Number(scan?.cellGrid?.columns?.length)||0;
     if(rows&&columns){
-      gdPracticeUpdateImportJob({status:"parsing",checkpointText:`Reading values (${rows} x ${columns})`,stageIndex:2,progress:48});
+      gdPracticeUpdateImportJob({status:"parsing",checkpointText:`Reading aliases + values (${rows} x ${columns})`,stageIndex:2,progress:48});
       gdPracticeSetContinueScanReady(false);
       gdPracticeRefreshDebugTools();
-      gdPracticeFeedback(`OCR-generated grid ready: ${rows} rows x ${columns}. Reading cell values...`);
+      gdPracticeFeedback(`OCR-generated grid ready: ${rows} rows x ${columns}. Reading aliases and cell values...`);
       gdPracticeDebugCheckpointSafe("extraction_started","running",{
         inputSummary:"OCR grid ready; fitted-cell value scan starting",
         counts:{gridRows:rows,gridColumns:columns}
@@ -17596,7 +17699,7 @@ document.addEventListener("change",event=>{
   else gdHandleLaunchMonitorUpload(file);
   input.value="";
 },true);
-Object.assign(window,{gdLoadLaunchMonitorDemo,gdClearLaunchMonitorDemo,gdPickLaunchMonitorFile,gdPickPracticePhotoFile,gdAdjustPracticeGeneratedBox,gdHandleNativePracticeTextFile,gdHandleLaunchMonitorUpload,gdHandleLaunchMonitorPhoto,gdScanPracticePhotoCrop,gdPracticePrimaryScanAction,gdOpenPracticeManualQuadTool,gdApplyPracticeManualQuad,gdRunDefaultPracticePhotoScan,gdRunDefaultPracticePhotoScanFromCheckpoint,gdSetPracticePhotoProcessing,gdPracticeRefreshDebugTools,gdContinuePracticePhotoScan,gdImportReviewedPracticeOcr,gdCancelPracticePhotoScan,gdCancelPracticeOcrReview,gdPracticeScanClubLabel,gdPracticeScanClubLabels,gdLoadExtractedPractice7iData,gdPracticeSetExtractionPreview,gdPracticeClearExtractionPreview,gdImportPracticeExtractionPreview,gdBuildLaunchMonitorTextCapture,gdCleanLaunchMonitorOcrText,gdLmCaptureToReviewText,gdAnalyzeFlatTableImage,gdFitFlatTableTemplateFromAnalysis,gdBuildFlatTableTemplateColumnScan,gdOpenPracticeFlatTableFailureWindow,gdRenderFlatTableFailureWindow,gdOpenPracticeTemplateOutcomes,gdRunOcrGeneratedTemplateFallbackFromCheckpoint,gdRunFlatTemplateBridgeFromCheckpoint,gdRunPracticeGridExperiment,gdRunFittedCellGridOcr,gdBuildFlatDigitizedTable,gdRenderFlatDigitizedTable,gdPickRawCourseDataFile,gdHandleRawCourseDataUpload,gdClearCourseShotData});
+Object.assign(window,{gdLoadLaunchMonitorDemo,gdClearLaunchMonitorDemo,gdPickLaunchMonitorFile,gdPickPracticePhotoFile,gdAdjustPracticeGeneratedBox,gdHandleNativePracticeTextFile,gdHandleLaunchMonitorUpload,gdHandleLaunchMonitorPhoto,gdScanPracticePhotoCrop,gdPracticePrimaryScanAction,gdOpenPracticeManualQuadTool,gdApplyPracticeManualQuad,gdRunDefaultPracticePhotoScan,gdRunDefaultPracticePhotoScanFromCheckpoint,gdSetPracticePhotoProcessing,gdPracticeRefreshDebugTools,gdContinuePracticePhotoScan,gdImportReviewedPracticeOcr,gdCancelPracticePhotoScan,gdCancelPracticeOcrReview,gdPracticeScanClubLabel,gdPracticeScanClubLabels,gdLoadExtractedPractice7iData,gdPracticeSetExtractionPreview,gdPracticeClearExtractionPreview,gdImportPracticeExtractionPreview,gdBuildLaunchMonitorTextCapture,gdCleanLaunchMonitorOcrText,gdLmCaptureToReviewText,gdAnalyzeFlatTableImage,gdFitFlatTableTemplateFromAnalysis,gdBuildFlatTableTemplateColumnScan,gdOpenPracticeFlatTableFailureWindow,gdRenderFlatTableFailureWindow,gdOpenPracticeTemplateOutcomes,gdRunOcrGeneratedTemplateFallbackFromCheckpoint,gdRunFlatTemplateBridgeFromCheckpoint,gdRunPracticeGridExperiment,gdRunFittedCellGridOcr,gdBuildFlatDigitizedTable,gdRenderFlatDigitizedTable,gdPracticeOpenScanOutcomeFromDebug,gdPickRawCourseDataFile,gdHandleRawCourseDataUpload,gdClearCourseShotData});
 function gdLmStatusClass(status){
   if(["corroborated","cross_distance_verified","verified_by_result","cluster_candidate","delivery_only","result_only"].includes(status))return "good";
   if(["conflict_check","alignment_signal"].includes(status))return "warn";
@@ -25183,7 +25286,8 @@ function gdSetPracticePhotoProcessing(active,opts={}){
       const feedback=document.getElementById("gdNativePracticeFeedback");
       if(feedback)feedback.innerHTML="";
     }catch(e){}
-    gdPracticeQuietScanSurface();
+    if(opts?.quietScanSurface)gdPracticeQuietScanSurface(typeof opts.quietScanSurface==="object"?opts.quietScanSurface:{});
+    else gdPracticeRefreshDebugTools();
   }
   if(!opts?.skipJob){
     const job=gdPracticeHydrateImportJob();
@@ -34582,7 +34686,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     const at=gdPracticeDebugNow();
     let checkpoint=run.checkpoints.find(item=>item.id===id);
     if(!checkpoint){
-      checkpoint={id,label:gdPracticeDebugCheckpointLabel(id),status:"pending",startedAt:null,finishedAt:null,durationMs:null,inputSummary:"",outputSummary:"",warnings:[],error:null,technicalDetails:null,counts:null};
+      checkpoint={id,label:gdPracticeDebugCheckpointLabel(id),status:"pending",startedAt:null,finishedAt:null,durationMs:null,inputSummary:"",outputSummary:"",warnings:[],error:null,technicalDetails:null,counts:null,tableScanOutcome:null};
       run.checkpoints.push(checkpoint);
     }
     if(status==="running"&&!checkpoint.startedAt)checkpoint.startedAt=at;
@@ -34600,6 +34704,13 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     if(details.counts&&typeof details.counts==="object")checkpoint.counts=Object.assign({},details.counts);
     const snapshot=gdPracticeDebugSnapshotForCheckpoint(id,details);
     if(snapshot)checkpoint.snapshot=snapshot;
+    if(details.tableScanOutcome!==undefined||details.scanOutcome!==undefined){
+      checkpoint.tableScanOutcome=details.tableScanOutcome||details.scanOutcome||null;
+    }else if(!checkpoint.tableScanOutcome&&/ocr_generated_template|header_cutout_allocation|table_detected|raw_values_detected|extraction_started|extraction_completed|rows_parsed|rows_accepted|rows_rejected/i.test(id)){
+      try{
+        if(typeof gdPracticeTableScanOutcomeForDebug==="function")checkpoint.tableScanOutcome=gdPracticeTableScanOutcomeForDebug(window.__gdPracticeColumnScan||null);
+      }catch(e){}
+    }
     if(details.raw!==undefined){
       run.raw=run.raw||{};
       run.raw[id]=details.raw;
@@ -34725,6 +34836,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     const failed=run?.failedCheckpointId===checkpoint.id||checkpoint.status==="failed";
     const counts=checkpoint.counts?Object.entries(checkpoint.counts).map(([key,value])=>`${key}: ${value}`).join(", "):"";
     const technical=checkpoint.technicalDetails||checkpoint.error?.stack||"";
+    const tableOutcome=checkpoint.tableScanOutcome||checkpoint.scanOutcome||null;
     return `<details class="gdPracticePhotoDebugSection ${failed?"failed":""}" ${failed?"open":""}>
       <summary><strong>${gdEscapeHTML(checkpoint.label)}</strong><span class="${gdEscapeHTML(checkpoint.status||"pending")}">${gdEscapeHTML(checkpoint.status||"pending")}</span></summary>
       <div class="gdPracticePhotoDebugBody">
@@ -34736,6 +34848,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
         ${gdPracticeDebugDetailRow("Warnings",checkpoint.warnings)}
         ${gdPracticeDebugDetailRow("Error",checkpoint.error?.message)}
           ${gdPracticeDebugSnapshotHtml(checkpoint.snapshot,failed)}
+        ${gdPracticeTableScanOutcomeHtml(tableOutcome)}
         ${technical?`<details><summary>Technical details</summary><pre>${gdEscapeHTML(typeof technical==="string"?technical:JSON.stringify(technical,null,2))}</pre></details>`:""}
       </div>
     </details>`;
