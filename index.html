@@ -14711,12 +14711,15 @@ function gdLmNumberBoxColumnsFromCandidates(candidates,sourceWidth=0){
   }).filter(column=>Number.isFinite(column.left)&&Number.isFinite(column.right)&&column.right>column.left+4);
   const first=columns[0];
   if(first){
-    const offcutLeft=Math.max(0,Number(first.syntheticLeadingLeft)||0);
+    const offcutLeft=0;
     const offcutRight=Math.max(offcutLeft,Number(first.left)||offcutLeft);
     const offcutWidth=offcutRight-offcutLeft;
     const firstWidth=Math.max(1,(Number(first.right)||0)-(Number(first.left)||0));
-    const minOffcutWidth=Math.max(34,Math.min(90,firstWidth*.42));
-    if(offcutWidth>=minOffcutWidth&&offcutRight<Number(first.valueSkewerX)-10){
+    const sourceMaxSafe=Number(sourceMax)||0;
+    const valueSkewerX=Number(first.valueSkewerX);
+    const minOffcutWidth=Math.max(26,Math.min(120,firstWidth*.22));
+    const skewerFarEnough=Number.isFinite(valueSkewerX)&&valueSkewerX>Math.max(70,sourceMaxSafe*.065);
+    if(offcutWidth>=minOffcutWidth&&skewerFarEnough&&offcutRight<valueSkewerX-8){
       columns.unshift({
         key:"gridCol00",
         label:"C00",
@@ -15682,10 +15685,12 @@ function gdOcrDedupHeaderWords(words){
   });
   return unique.sort((a,b)=>a.cy-b.cy||a.cx-b.cx);
 }
-function gdOcrHeaderMatchesForCutoutWords(words,extraTexts=[]){
+function gdOcrHeaderMatchesForCutoutWords(words,extraTexts=[],opts={}){
   const textWords=(Array.isArray(words)?words:[])
     .filter(word=>/[a-z]/i.test(String(word?.text||"")))
     .filter(word=>!gdLmLooksLikeOcrValue(word?.text));
+  const targetX=Number(opts.targetX);
+  const columnWidth=Math.max(1,Number(opts.columnWidth)||0);
   const matches=new Map();
   const addMatch=(phrase,sourceWords,source)=>{
     const clean=String(phrase||"").trim().replace(/\s+/g," ");
@@ -15693,7 +15698,14 @@ function gdOcrHeaderMatchesForCutoutWords(words,extraTexts=[]){
     const key=gdLmCanonicalMetricKey(clean)||(gdLmNormalToken(clean)==="speed"?"ballSpeed":"");
     if(!key)return;
     const wordCount=Array.isArray(sourceWords)?sourceWords.length:0;
-    const score=clean.length+wordCount*4+(source==="row"?8:0);
+    const wordCenters=(Array.isArray(sourceWords)?sourceWords:[])
+      .map(word=>Number(word?.cx))
+      .filter(Number.isFinite);
+    const spanCx=wordCenters.length?wordCenters.reduce((sum,value)=>sum+value,0)/wordCenters.length:NaN;
+    const geoScore=Number.isFinite(targetX)&&Number.isFinite(spanCx)&&columnWidth>0
+      ?Math.max(-14,18-(Math.abs(spanCx-targetX)/columnWidth)*32)
+      :0;
+    const score=clean.length+wordCount*4+(source==="row"?8:0)+geoScore;
     const previous=matches.get(key);
     if(previous&&previous.score>=score)return;
     matches.set(key,{
@@ -15943,6 +15955,7 @@ function gdBuildOcrColumnCutoutAllocation(columnScan,opts={}){
   const allocationOcrData=opts.ocrData||columnScan?.generatedHeaderAllocationOcrData||columnScan?.generatedOcrData||{};
   const words=gdLmWordsFromOcrData(allocationOcrData);
   const trustIsolatedHeaderCutouts=/cutout/i.test(scanSource);
+  const literalGeneratedGrid=String(columnScan?.layout?.cropMode||"")==="ocr-generated-grid";
   const headerBand={top:0,bottom:headerBottom};
   const cutouts=columns.map((column,index)=>{
     const genericLabel=String(column.label||column.key||`C${String(index+1).padStart(2,"0")}`);
@@ -15953,8 +15966,11 @@ function gdBuildOcrColumnCutoutAllocation(columnScan,opts={}){
     const safeRight=Math.max(safeLeft+1,Math.min(width,Number.isFinite(right)?right:safeLeft+1));
     const columnRegion=gdOcrCutoutClampRegion({x:safeLeft,y:0,width:safeRight-safeLeft,height},width,height);
     const headerRegion=gdOcrCutoutClampRegion({x:safeLeft,y:0,width:safeRight-safeLeft,height:headerBottom},width,height);
-    const searchPad=Math.max(12,Math.min(46,(safeRight-safeLeft)*.28));
+    const searchPad=literalGeneratedGrid
+      ?Math.max(18,Math.min(68,(safeRight-safeLeft)*.42))
+      :Math.max(12,Math.min(46,(safeRight-safeLeft)*.28));
     const headerSearchRegion=gdOcrCutoutClampRegion({x:safeLeft-searchPad,y:0,width:(safeRight-safeLeft)+searchPad*2,height:headerBottom},width,height);
+    const headerOcrRegion=literalGeneratedGrid?headerSearchRegion:headerRegion;
     const localWords=gdLmWordsFromOcrData(cutoutResult?.ocrData||{});
     const sharedWords=trustIsolatedHeaderCutouts?[]:gdOcrCutoutWordsInRegion(words,headerSearchRegion,{padX:10,padY:6});
     const headerWords=gdOcrDedupHeaderWords(localWords.concat(sharedWords))
@@ -15963,7 +15979,10 @@ function gdBuildOcrColumnCutoutAllocation(columnScan,opts={}){
     const extraTexts=[cutoutResult?.text,cutoutResult?.ocrData?.text]
       .map(text=>String(text||"").trim().replace(/\s+/g," "))
       .filter(Boolean);
-    const matches=gdOcrHeaderMatchesForCutoutWords(headerWords,extraTexts);
+    const matches=gdOcrHeaderMatchesForCutoutWords(headerWords,extraTexts,{
+      targetX:Number.isFinite(Number(column.valueSkewerX))?Number(column.valueSkewerX):(safeLeft+safeRight)/2,
+      columnWidth:safeRight-safeLeft
+    });
     const assigned=matches[0]||null;
     const cells=rows.map((row,rowIndex)=>{
       const existing=cellGrid?.cells?.[rowIndex]?.[index]||null;
@@ -15993,6 +16012,7 @@ function gdBuildOcrColumnCutoutAllocation(columnScan,opts={}){
       headerTextSource:cutoutResult||null,
       columnRegion,
       headerRegion,
+      headerOcrRegion,
       headerSearchRegion,
       dividerLeft:safeLeft,
       dividerRight:safeRight,
@@ -16074,7 +16094,7 @@ async function gdRunOcrColumnCutoutHeaderTextScan(Tesseract,columnScan){
     {label:"psm7",config:gdHeaderTextScanConfig("7")}
   ];
   for(const cutout of cutouts){
-    const region=literalGeneratedGrid?cutout.headerRegion:(cutout.headerSearchRegion||cutout.headerRegion);
+    const region=literalGeneratedGrid?(cutout.headerOcrRegion||cutout.headerSearchRegion||cutout.headerRegion):(cutout.headerSearchRegion||cutout.headerRegion);
     if(!region)continue;
     const crop=gdCropCanvasRegion(image,region,3);
     const scan=await gdRecognizeHeaderTextCrop(Tesseract,crop,`layout:ocr-header-allocation-${cutout.genericLabel}`,cutoutConfigs,["original","clean"]);
