@@ -12453,15 +12453,31 @@ function gdDrawPracticeColumnSplitOverlay(ctx,layout,sourceH,scale){
   });
 }
 function gdValueCorridorMappingBoxes(columnScan){
-  const cluster=columnScan?.valueCluster||columnScan?.layout?.valueCluster||{};
   const candidates=Array.isArray(columnScan?.generatedGeometryValueCandidates)&&columnScan.generatedGeometryValueCandidates.length
     ?columnScan.generatedGeometryValueCandidates
     :(Array.isArray(columnScan?.generatedValueCandidates)?columnScan.generatedValueCandidates:[]);
-  const candidateBoxes=candidates
+  return candidates
     .map(candidate=>gdLmWordBox(candidate?.word||candidate))
-    .filter(Boolean);
-  const clusterBoxes=Array.isArray(cluster?.valueBoxes)?cluster.valueBoxes:[];
-  return candidateBoxes.length?candidateBoxes:clusterBoxes;
+    .filter(gdLmConfirmedValueOverlayWord);
+}
+function gdLmConfirmedValueOverlayWord(word){
+  const text=String(word?.text||"").replace(/\s+/g,"");
+  if(!text||!/[0-9]/.test(text))return false;
+  if(!/^[0-9.,+\-°]+$/.test(text))return false;
+  for(let index=0;index<text.length;index+=1){
+    const char=text[index];
+    if(/[0-9]/.test(char))continue;
+    const prev=/[0-9]/.test(text[index-1]||"");
+    const next=/[0-9]/.test(text[index+1]||"");
+    if(!prev&&!next)return false;
+  }
+  const w=Math.max(0,Number(word?.w)||(Number(word?.x1)-Number(word?.x0))||0);
+  const h=Math.max(0,Number(word?.h)||(Number(word?.y1)-Number(word?.y0))||0);
+  if(w&&h){
+    if(w<Math.max(3,h*.16)&&text.length<=1)return false;
+    if(h<4||w/h>9||h/w>4.8)return false;
+  }
+  return true;
 }
 function gdTightDetectedValueOverlayBox(box,sourceW,sourceH){
   const rawX0=Math.max(0,Math.min(sourceW,Number(box?.x0)||0));
@@ -13170,7 +13186,7 @@ function gdDrawOcrGeneratedTemplateOverlay(ctx,outcome,sourceW,sourceH,scale){
   const step=Math.max(1,Math.ceil(words.length/360));
   words.forEach((word,index)=>{
     if(index%step!==0)return;
-    const valueWord=gdLmLooksLikeOcrValue(word.text);
+    const valueWord=gdLmConfirmedValueOverlayWord(word);
     const headerWord=showGlobalHeaderDiagnostic&&header&&Math.abs(Number(word.cy)-Number(header.cy||0))<Math.max(18,Number(word.h||0)*1.6);
     if(!valueWord&&!headerWord)return;
     const tight=valueWord?gdTightDetectedValueOverlayBox(word,sourceW,sourceH):null;
