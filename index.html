@@ -25255,6 +25255,7 @@ const GD_PRACTICE_PROCESSING_STAGES=[
 ];
 var gdPracticePhotoProcessingClubs=["7i"];
 var gdPracticePhotoProcessingCompletedAt=0;
+var gdPracticeManualStopUntil=Number(window.__gdPracticeManualStopUntil||0)||0;
 var gdPracticeImportJob=gdPracticeReadImportJob();
 function gdPracticeNowISO(){return new Date().toISOString();}
 function gdPracticeReadImportJob(){
@@ -25337,6 +25338,39 @@ function gdPracticeAssertCurrentImportJob(jobId,label){
 function gdPracticeIsQuietScanStop(error){
   return error&&String(error.code||"")==="GD_PRACTICE_IMPORT_STALE";
 }
+function gdPracticeMarkManualScanStop(ms=7000){
+  gdPracticeManualStopUntil=Date.now()+Math.max(1000,Number(ms)||7000);
+  window.__gdPracticeManualStopUntil=gdPracticeManualStopUntil;
+}
+function gdPracticeManualScanStopIsRecent(){
+  return Date.now()<Math.max(Number(gdPracticeManualStopUntil)||0,Number(window.__gdPracticeManualStopUntil)||0);
+}
+function gdPracticePersistStoppedScanFailure(reason=""){
+  const message=gdPracticeScanStoppedMessage(reason);
+  const existing=gdPracticeHydrateImportJob();
+  const base={
+    id:existing?.id||`practice-import-${Date.now()}-${Math.random().toString(16).slice(2,8)}`,
+    kind:existing?.kind||"practice-photo",
+    sourceLabel:existing?.sourceLabel||gdPracticePhotoName||"Practice photo scan",
+    source:existing?.source||"photo",
+    importDate:existing?.importDate||gdPracticeNowISO(),
+    createdAt:existing?.createdAt||gdPracticeNowISO(),
+    updatedAt:gdPracticeNowISO(),
+    status:"failed",
+    checkpointText:message,
+    userMessage:message,
+    diagnostic:String(reason||message).slice(0,1200),
+    progress:100,
+    stageIndex:2,
+    accepted:Number(existing?.accepted)||0,
+    rejected:Number(existing?.rejected)||0,
+    rawRows:Number(existing?.rawRows)||0,
+    nativeRows:Number(existing?.nativeRows)||0,
+    clubs:Array.isArray(existing?.clubs)?existing.clubs:[]
+  };
+  gdPracticeWriteImportJob(Object.assign({},existing||{},base));
+  return message;
+}
 function gdPracticeScanSurfaceIsActive(){
   return gdPracticeScanProgressIsActive();
 }
@@ -25354,7 +25388,9 @@ function gdPracticeScanStoppedMessage(reason=""){
 }
 function gdPracticeReleaseStoppedScan(reason=""){
   console.warn("[GolfDaddy] releasing stopped practice scan",reason);
-  gdPracticeWriteImportJob(null);
+  const manualStop=gdPracticeManualScanStopIsRecent();
+  const stoppedMessage=manualStop?gdPracticeScanStoppedMessage(reason):gdPracticePersistStoppedScanFailure(reason);
+  if(manualStop)gdPracticeWriteImportJob(null);
   gdPracticePhotoProcessing=false;
   gdPracticePhotoProcessingProgress=0;
   gdPracticePhotoProcessingStageIndex=0;
@@ -25368,13 +25404,14 @@ function gdPracticeReleaseStoppedScan(reason=""){
     document.getElementById("practiceDataPanel")?.classList.remove("gdPracticePhotoProcessing");
     gdPracticeClearLibraryProcessingSurface();
     gdPracticeQuietScanSurface({clearStatus:false});
-    gdSetPracticeScanStatus(gdPracticeScanStoppedMessage(reason));
+    gdSetPracticeScanStatus(stoppedMessage);
     if(typeof renderPracticeData==="function")renderPracticeData(true);
   }catch(e){}
   return true;
 }
 function gdPracticeHardStopScan(reason="Manual stop"){
   const message=String(reason||"Manual stop").trim()||"Manual stop";
+  gdPracticeMarkManualScanStop();
   const job=gdPracticeHydrateImportJob();
   const activeJob=gdPracticeImportIsActive(job);
   try{
@@ -25553,6 +25590,7 @@ function gdPracticeCompleteImportJob(result,payload,extra={}){
   });
 }
 function gdPracticeClearImportJob(){
+  gdPracticeMarkManualScanStop();
   gdPracticeWriteImportJob(null);
   try{gdPracticeReleaseFailedImportSurface();}catch(e){}
   gdSetPracticePhotoProcessing(false,{immediate:true,skipJob:true});
@@ -25563,6 +25601,7 @@ function gdPracticeClearImportJob(){
 function gdPracticeCancelImportJob(){
   const job=gdPracticeHydrateImportJob();
   if(!job)return false;
+  gdPracticeMarkManualScanStop();
   if(String(job.status)==="saving"){
     gdPracticeUpdateImportJob({checkpointText:"Save already started. The import will finish or become recoverable.",userMessage:"Save already started. The import will finish or become recoverable."});
     gdLmToast("Import save already started");
