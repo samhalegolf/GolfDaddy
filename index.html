@@ -25638,6 +25638,20 @@ function gdPracticeHandleImportJobAction(action,event){
   if(resolved==="review")return gdPracticeReviewImportJob();
   return false;
 }
+try{
+  Object.assign(window,{
+    gdPracticeHandleImportJobAction,
+    gdPracticeClearImportJob,
+    gdPracticeReviewImportJob,
+    gdPracticeCancelImportJob,
+    gdPracticeHardStopScan,
+    gdPracticePrimaryScanAction,
+    gdRunDefaultPracticePhotoScan,
+    gdRunDefaultPracticePhotoScanFromCheckpoint,
+    gdContinuePracticePhotoScan,
+    gdCancelPracticePhotoScan
+  });
+}catch(e){}
 function gdPracticeSyncImportProcessing(job=gdPracticeImportJob){
   if(!gdPracticeImportIsActive(job))return;
   gdPracticePhotoProcessing=true;
