@@ -5801,10 +5801,10 @@ body[data-gd-permission="admin"] #gdV62Home .gdHomeAdminSettings{display:inline-
 <div class="gdPracticeScanGuide" aria-hidden="true"><span>Keep the shot table inside this frame</span></div>
 </div>
 <label class="gdPracticeScanClubField" for="gdPracticeScanClubInput">Club<input id="gdPracticeScanClubInput" type="text" value="7i" placeholder="7i" autocomplete="off"></label>
-<div class="gdPracticeScannerActions"><button id="gdPracticeClearPhotoBtn" type="button" onclick="gdCancelPracticePhotoScan()" hidden>Clear Photo</button><button class="primary" id="gdPracticeScanPhotoBtn" type="button" onclick="gdPracticePrimaryScanAction()">Scan</button><button class="primary" id="gdPracticeDefaultScanBtn" type="button" onclick="gdRunDefaultPracticePhotoScan()" hidden>Scan to Clarity Shot Library</button><button id="gdPracticeManualQuadBtn" type="button" onclick="gdOpenPracticeManualQuadTool()" hidden>Adjust box</button><button id="gdPracticeContinueScanBtn" type="button" onclick="gdContinuePracticePhotoScan()" hidden>Scan cell values</button></div>
+<div class="gdPracticeScannerActions"><button id="gdPracticeClearPhotoBtn" type="button" onclick="gdCancelPracticePhotoScan()" hidden>Clear Photo</button><button class="primary" id="gdPracticeScanPhotoBtn" type="button" onclick="gdPracticePrimaryScanAction()">Scan</button><button class="primary" id="gdPracticeDefaultScanBtn" type="button" onclick="gdRunDefaultPracticePhotoScan()" hidden>Scan to Clarity Shot Library</button><button id="gdPracticeManualQuadBtn" type="button" onclick="gdOpenPracticeManualQuadTool()" hidden>Adjust box</button><button id="gdPracticeContinueScanBtn" type="button" onclick="gdContinuePracticePhotoScan()" hidden>Header strip scan</button></div>
 <div class="gdPracticeGridExperiments" id="gdPracticeGridExperiments" hidden>
-<div class="gdPracticeGridExperimentHead"><strong>Scan debug tools</strong><span>Header / cutout allocation and cell values share the default scanner path.</span></div>
-<div class="gdPracticeScannerActions gdPracticeGridExperimentActions"><button class="primary" id="gdPracticeBoxTrackGridBtn" type="button" onclick="gdRunPracticeGridExperiment('ocr-generated')">Header / cutout allocation</button><button id="gdPracticeCellOcrGridBtn" type="button" onclick="gdRunPracticeGridExperiment('cell-ocr')" hidden>Re-read cell values</button><button id="gdPracticeDigitizeTableBtn" type="button" onclick="gdRunPracticeGridExperiment('digitize-table')" hidden>Digitise table</button></div>
+<div class="gdPracticeGridExperimentHead"><strong>Scan debug tools</strong><span>Header Strip Scan and cell values run only after Value Corridor Mapping.</span></div>
+<div class="gdPracticeScannerActions gdPracticeGridExperimentActions"><button class="primary" id="gdPracticeBoxTrackGridBtn" type="button" onclick="gdRunPracticeGridExperiment('ocr-generated')">Header Strip Scan</button><button id="gdPracticeCellOcrGridBtn" type="button" onclick="gdRunPracticeGridExperiment('cell-ocr')" hidden>Re-read cell values</button><button id="gdPracticeDigitizeTableBtn" type="button" onclick="gdRunPracticeGridExperiment('digitize-table')" hidden>Digitise table</button></div>
 </div>
 <div class="gdPracticeScanStatus" id="gdPracticeScanStatus">Upload a table photo or take one with your phone, then scan it into the Clarity Shot Library.</div>
 </div>
@@ -12452,6 +12452,70 @@ function gdDrawPracticeColumnSplitOverlay(ctx,layout,sourceH,scale){
     }
   });
 }
+function gdValueCorridorMappingBoxes(columnScan){
+  const cluster=columnScan?.valueCluster||columnScan?.layout?.valueCluster||{};
+  const candidates=Array.isArray(columnScan?.generatedGeometryValueCandidates)&&columnScan.generatedGeometryValueCandidates.length
+    ?columnScan.generatedGeometryValueCandidates
+    :(Array.isArray(columnScan?.generatedValueCandidates)?columnScan.generatedValueCandidates:[]);
+  const candidateBoxes=candidates
+    .map(candidate=>gdLmWordBox(candidate?.word||candidate))
+    .filter(Boolean);
+  const clusterBoxes=Array.isArray(cluster?.valueBoxes)?cluster.valueBoxes:[];
+  return candidateBoxes.length?candidateBoxes:clusterBoxes;
+}
+function gdDrawValueCorridorMappingOverlay(ctx,columnScan,sourceW,sourceH,scale){
+  const columns=Array.isArray(columnScan?.layout?.columns)?columnScan.layout.columns:[];
+  const boxes=gdValueCorridorMappingBoxes(columnScan);
+  const step=Math.max(1,Math.ceil(boxes.length/380));
+  boxes.forEach((box,index)=>{
+    if(index%step!==0)return;
+    const x0=Math.max(0,Math.min(sourceW,Number(box.x0)||0));
+    const y0=Math.max(0,Math.min(sourceH,Number(box.y0)||0));
+    const x1=Math.max(x0+1,Math.min(sourceW,Number(box.x1)||x0+1));
+    const y1=Math.max(y0+1,Math.min(sourceH,Number(box.y1)||y0+1));
+    ctx.fillStyle="rgba(55,242,141,.14)";
+    ctx.strokeStyle="rgba(55,242,141,.82)";
+    ctx.lineWidth=1.1/Math.max(.001,scale);
+    ctx.fillRect(x0,y0,Math.max(1,x1-x0),Math.max(1,y1-y0));
+    ctx.strokeRect(x0,y0,Math.max(1,x1-x0),Math.max(1,y1-y0));
+  });
+  const cutXs=[];
+  columns.forEach((column,index)=>{
+    const left=Math.max(0,Math.min(sourceW,Number.isFinite(Number(column.dividerLeft))?Number(column.dividerLeft):(Number(column.left)||0)));
+    const right=Math.max(left+1,Math.min(sourceW,Number.isFinite(Number(column.dividerRight))?Number(column.dividerRight):(Number(column.right)||left+1)));
+    const valueCx=Math.max(left,Math.min(right,Number.isFinite(Number(column.valueCx))?Number(column.valueCx):(Number(column.cx)||((left+right)/2))));
+    ctx.fillStyle=index%2?"rgba(86,181,255,.055)":"rgba(55,242,141,.040)";
+    ctx.fillRect(left,0,Math.max(1,right-left),sourceH);
+    [left,right].forEach(x=>{
+      const rounded=Math.round(x*10)/10;
+      if(cutXs.some(item=>Math.abs(item-rounded)<.6))return;
+      cutXs.push(rounded);
+      ctx.strokeStyle="rgba(255,211,116,.94)";
+      ctx.lineWidth=2.1/Math.max(.001,scale);
+      ctx.beginPath();
+      ctx.moveTo(x,0);
+      ctx.lineTo(x,sourceH);
+      ctx.stroke();
+    });
+    ctx.strokeStyle="rgba(86,181,255,.86)";
+    ctx.lineWidth=1.2/Math.max(.001,scale);
+    ctx.beginPath();
+    ctx.moveTo(valueCx,0);
+    ctx.lineTo(valueCx,sourceH);
+    ctx.stroke();
+    const label=String(column.label||column.key||`C${index+1}`);
+    ctx.font=`${Math.max(8,10/Math.max(.001,scale))}px ui-monospace,Menlo,monospace`;
+    const metrics=ctx.measureText(label);
+    const pad=3/Math.max(.001,scale);
+    const tx=Math.max(3,Math.min(sourceW-metrics.width-pad*2-3,left+4/Math.max(.001,scale)));
+    const ty=12/Math.max(.001,scale);
+    ctx.fillStyle="rgba(5,8,6,.88)";
+    ctx.fillRect(tx-pad,ty-8/Math.max(.001,scale),metrics.width+pad*2,14/Math.max(.001,scale));
+    ctx.fillStyle="#fff";
+    ctx.textBaseline="middle";
+    ctx.fillText(label,tx,ty);
+  });
+}
 function gdPracticeClusterQuadMetaText(cluster,source){
   if(!cluster)return "";
   const sourceW=Number(source?.width)||Number(cluster?.sourceWidth)||0;
@@ -12512,7 +12576,8 @@ function gdRenderValueGridCropPreview(target){
   const cropMode=String(target?.layout?.cropMode||"");
   const isFlatTemplate=cropMode==="flat-template";
   const isOcrGeneratedGrid=cropMode==="ocr-generated-grid";
-  const isOutputGrid=isFlatTemplate||isOcrGeneratedGrid;
+  const isValueCorridorMap=cropMode==="value-corridor-map";
+  const isOutputGrid=isFlatTemplate||isOcrGeneratedGrid||isValueCorridorMap;
   const source=isOutputGrid?(flattened||target?.source||gdPracticeNormalizedCanvas):(target?.fullTableCanvas||target?.fullTableSource||target?.source||gdPracticeNormalizedCanvas||null);
   if(!cluster||(!source&&!flattened))return;
   const makeCard=(title,image,drawOverlay,maxW=980)=>{
@@ -12560,12 +12625,14 @@ function gdRenderValueGridCropPreview(target){
   const panels=[];
   if(target?.layout&&flattened){
     const evidenceBoxCount=Number(target?.generatedValueCandidates?.length)||Number(target?.valueCluster?.valueBoxes?.length)||0;
-    panels.push(makePanel(isOcrGeneratedGrid?"OCR geometry evidence":(isFlatTemplate?"Flat table template grid":"Parked column splitter tool"),{
+    const generatedBandCount=Number(target?.generatedRowBands?.length)||Number(target?.valueCluster?.rowBands?.length)||0;
+    panels.push(makePanel(isValueCorridorMap?"Value Corridor Mapping evidence":(isOcrGeneratedGrid?"OCR geometry evidence":(isFlatTemplate?"Flat table template grid":"Parked column splitter tool")),{
       open:!!isOutputGrid,
       className:isOutputGrid?"gdFlatTemplatePreview":"gdParkedToolPreview",
       cards:[
-        makeCard(isOcrGeneratedGrid?"Full flat image + number-like OCR boxes":(isFlatTemplate?"Fitted rows, columns, cells":"Old column cuts, parked"),flattened,(ctx,scale,sourceW,sourceH)=>{
-          if(isOutputGrid)gdDrawFlatTableTemplateOverlay(ctx,target,sourceW,sourceH,scale);
+        makeCard(isValueCorridorMap?"Full flat image + value boxes and corridor cuts":(isOcrGeneratedGrid?"Full flat image + number-like OCR boxes":(isFlatTemplate?"Fitted rows, columns, cells":"Old column cuts, parked")),flattened,(ctx,scale,sourceW,sourceH)=>{
+          if(isValueCorridorMap)gdDrawValueCorridorMappingOverlay(ctx,target,sourceW,sourceH,scale);
+          else if(isOutputGrid)gdDrawFlatTableTemplateOverlay(ctx,target,sourceW,sourceH,scale);
           else gdDrawPracticeColumnSplitOverlay(ctx,target?.layout,sourceH,scale);
         })
       ],
@@ -12574,9 +12641,12 @@ function gdRenderValueGridCropPreview(target){
           `Column cutouts: ${Number(target?.cellGrid?.columns?.length)||Number(target?.layout?.columns?.length)||0}`,
           isOcrGeneratedGrid?`Number-like OCR boxes: ${evidenceBoxCount}`:"",
           `Column cut source: ${String(target.layout.dividerSource||"flat-number-box-gaps")}`,
+          isOcrGeneratedGrid?`Row cut source: ${String(target.layout.rowDividerSource||"ocr-number-box-gaps")}`:"",
+          isValueCorridorMap?`Value boxes: ${evidenceBoxCount}  Row geometry bands: ${generatedBandCount}`:"",
+          isValueCorridorMap?`Protected stop: headers, cell values and native import have not run.`:"",
           isOcrGeneratedGrid
-            ?`This is column geometry evidence only: OCR has identified number-like boxes and built column cutouts. Header cutout allocation is shown below; value rows and cell values are handled later.`
-            :`Fit error: ${(Number(target?.flatTemplateFit?.rms)||0).toFixed(1)} px rms / ${(Number(target?.flatTemplateFit?.maxResidual)||0).toFixed(1)} max`
+            ?`This is geometry evidence only: OCR has identified number-like boxes. Header cutout allocation is shown below; cell values are not read yet.`
+            :(isValueCorridorMap?"OCR is used here only to detect value-like blobs and empty corridors. Header Strip Scan is the next explicit stage.":`Fit error: ${(Number(target?.flatTemplateFit?.rms)||0).toFixed(1)} px rms / ${(Number(target?.flatTemplateFit?.maxResidual)||0).toFixed(1)} max`)
         ].filter(Boolean).join("\n")
         :[
           target?.layout?.dividerSource?`Column cut source: ${String(target.layout.dividerSource)} / ${String(target.layout.cropMode||"")}`:"",
@@ -12603,7 +12673,7 @@ function gdRenderValueGridCropPreview(target){
       cards:[makeCard("Flattened 4-corner stretch",flattened,null,1100)],
       metaText:[
         "This is the stable handoff image. Keep the squaring/stretch method as-is.",
-        "The generated OCR grid starts here; column cutouts are allocated after this, while cell values remain unread."
+        isValueCorridorMap?"Value Corridor Mapping runs from this image and stops before header scan.":"The generated OCR grid starts here; column cutouts are allocated after this, while cell values remain unread."
       ].join("\n")
     }));
   }
@@ -13466,7 +13536,7 @@ function gdRenderFlatTableOutputTable(columnScan){
     `${rows.length} rows`,
     `${columns.length} columns`,
     `${Number(cellGrid.cellCount)||0} cells`,
-    generatedGrid?(valuesRead?"raw OCR values shown; header allocation and scanner result are available":"collapsed by default; value OCR runs from the main Scan path"):`fit ${(Number(columnScan?.flatTemplateFit?.rms)||0).toFixed(1)} px rms`
+    generatedGrid?(valuesRead?"raw OCR values shown; header allocation and scanner result are available":"collapsed by default; value OCR waits for the explicit Read cell values action"):`fit ${(Number(columnScan?.flatTemplateFit?.rms)||0).toFixed(1)} px rms`
   ].join(" • ");
   details.append(summary,wrap,source);
   list.append(details);
@@ -13785,6 +13855,7 @@ function gdRenderFlatTableBridgeCheckpoint(columnScan){
   const rows=Number(columnScan?.cellGrid?.rows?.length)||0;
   const columns=Number(columnScan?.cellGrid?.columns?.length)||0;
   const isOcrGeneratedGrid=String(columnScan?.layout?.cropMode||"")==="ocr-generated-grid";
+  const headerStripComplete=columnScan?.headerStripScanComplete===true;
   const failure=gdFlatTableFailureDebug(columnScan);
   const failed=!rows&&!columns&&!!failure?.reason;
   const boxes=Number(columnScan?.flatTableAnalysis?.valueBoxes?.length)||Number(failure?.componentCount)||0;
@@ -13811,22 +13882,18 @@ function gdRenderFlatTableBridgeCheckpoint(columnScan){
   }
   gdRenderPracticeScanCheckpoint({
     tone:(isOcrGeneratedGrid?cutoutColumns:(rows&&columns))?"ready":"warn",
-    title:failed?gdFlatTableFailureTitle(failure.reason):(digitizedRows?(isOcrGeneratedGrid?"Raw cell values read":"Digitised table ready"):((isOcrGeneratedGrid?cutoutColumns:(rows&&columns))?(isOcrGeneratedGrid?"OCR-generated column cutouts ready":"Flat table grid ready"):(isOcrGeneratedGrid?"OCR-generated cutouts not ready":"Flat table grid not fitted"))),
+    title:failed?gdFlatTableFailureTitle(failure.reason):(digitizedRows?(isOcrGeneratedGrid?"Raw cell values read":"Digitised table ready"):((isOcrGeneratedGrid?cutoutColumns:(rows&&columns))?(isOcrGeneratedGrid?(headerStripComplete?"Header Strip Scan complete":"OCR-generated column cutouts ready"):"Flat table grid ready"):(isOcrGeneratedGrid?"OCR-generated cutouts not ready":"Flat table grid not fitted"))),
     summary:failed?(gdFlatTableFailureIsTemplate(failure.reason)
       ?`${gdFlatTableReasonText(failure.reason)} The row detector accepted ${Number(failure.rawRowCount)||0} row band${Number(failure.rawRowCount)===1?"":"s"}, but the fixed column template could not fit them.`
       :`${gdFlatTableReasonText(failure.reason)} The actual flat scan accepted ${Number(failure.rawRowCount)||0} row band${Number(failure.rawRowCount)===1?"":"s"}; ${Number(failure.requiredRows)||gdFlatTableMinimumAcceptedRows()} are required before cells can be OCR scanned.`)
-      :(digitizedRows?(isOcrGeneratedGrid?`Raw OCR scanned ${digitizedRows} row${digitizedRows===1?"":"s"} from the current cell cutouts. Review ${flags} flagged/missing cells; scanner result is ready for the next filter.`:`Fitted cells were OCR scanned into an owned digitised table. Review ${flags} flagged/missing cells against the crops before importing.`):((isOcrGeneratedGrid?cutoutColumns:(rows&&columns))?(isOcrGeneratedGrid?`${allocatedCutouts}/${cutoutColumns} column cutouts matched header aliases. Row matching and cell-value OCR happen after this column/header stage.`:"Rows, columns, and cells were fitted on the straight flat image. OCR cleanup stays parked until this geometry is reliable."):"The flat image did not expose enough repeated number stacks. Retake with the table sharper and flatter.")),
-    stats:isOcrGeneratedGrid?(digitizedRows?[
-      {label:"Value rows",value:digitizedRows||"-"},
+      :(digitizedRows?(isOcrGeneratedGrid?`Raw OCR scanned ${digitizedRows} row${digitizedRows===1?"":"s"} from the current cell cutouts. Review ${flags} flagged/missing cells; scanner result is ready for the next filter.`:`Fitted cells were OCR scanned into an owned digitised table. Review ${flags} flagged/missing cells against the crops before importing.`):((isOcrGeneratedGrid?cutoutColumns:(rows&&columns))?(isOcrGeneratedGrid?`${headerStripComplete?"Header Strip Scan assigned":"Column cutouts fitted"} ${allocatedCutouts}/${cutoutColumns} column strip${cutoutColumns===1?"":"s"} to header aliases where possible. Cell values and native import are parked until an explicit continue action.`:"Rows, columns, and cells were fitted on the straight flat image. OCR cleanup stays parked until this geometry is reliable."):"The flat image did not expose enough repeated number stacks. Retake with the table sharper and flatter.")),
+    stats:isOcrGeneratedGrid?[
+      {label:"Rows",value:rows||"-"},
       {label:"Columns",value:columns||"-"},
       {label:"Cells",value:gridCells||"-"},
       {label:"Headers",value:cutoutColumns?`${allocatedCutouts}/${cutoutColumns}`:"-"},
       {label:"OCR words",value:ocrWords||"-"}
     ]:[
-      {label:"Column cutouts",value:cutoutColumns||"-"},
-      {label:"Headers",value:cutoutColumns?`${allocatedCutouts}/${cutoutColumns}`:"-"},
-      {label:"OCR words",value:ocrWords||"-"}
-    ]):[
       {label:"Rows",value:failed?(Number(failure.rawRowCount)||0):(rows||"-")},
       {label:"Columns",value:columns||"-"},
       {label:"Boxes",value:boxes||"-"},
@@ -13836,8 +13903,8 @@ function gdRenderFlatTableBridgeCheckpoint(columnScan){
     ],
     steps:isOcrGeneratedGrid?[
       {label:"Photo",state:"done"},
-      {label:"Columns",state:cutoutColumns?"done":"active"},
-      {label:"Headers",state:allocatedCutouts?"done":(cutoutColumns?"active":"pending")},
+      {label:"Value corridors",state:cutoutColumns?"done":"active"},
+      {label:"Headers",state:headerStripComplete?"done":(cutoutColumns?"active":"pending")},
       {label:"Values",state:digitizedRows?"done":"pending"}
     ]:[
       {label:"Photo",state:"done"},
@@ -13914,9 +13981,12 @@ function gdRenderFlatTableBridgeOutput(columnScan,activeTemplateKey="flat"){
     if(generatedGrid){
       const allocationState=gdPracticeHeaderAllocationReady(columnScan);
       const digitizedRows=Number(columnScan?.digitizedTable?.rows?.length)||0;
+      const headerStripComplete=columnScan?.headerStripScanComplete===true;
       subhead.textContent=digitizedRows
-        ?"OCR generated grid - raw values read"
-        :(allocationState.ready?"OCR generated grid - headers allocated, values pending":"OCR generated grid - header allocation blocked, cells unread");
+        ?"Header Strip Scan - raw values read"
+        :(headerStripComplete
+          ?(allocationState.ready?"Header Strip Scan - assigned strips, cells unread":"Header Strip Scan - allocation blocked, cells unread")
+          :"OCR generated grid - headers unallocated, cells unread");
     }else{
       subhead.textContent="Flat table template - output cells";
     }
@@ -14399,6 +14469,10 @@ async function gdRunFittedCellGridOcr(columnScan,opts={}){
       .map(row=>({index:row.index,reason:`${row.flaggedCount||0} flagged, ${row.missingCount||0} missing`,rawValue:JSON.stringify(row.rawValues||{}),mappedValue:JSON.stringify(row.values||{})}))
       .concat((Array.isArray(columnScan?.fittedRowRejects)?columnScan.fittedRowRejects:[]).map(row=>({index:row.index,reason:row.reason||"row flagged",rawValue:row.text||"",mappedValue:JSON.stringify(row.flags||[])})));
   }
+  gdRenderFlatTableBridgeOutput(columnScan);
+  gdPracticeSetProtectedScanStage("cells_read",columnScan);
+  gdPracticeSetContinueScanReady(false);
+  gdPracticeRefreshDebugTools();
   if(!payload?.clubGroups?.length){
     const digitizedRows=Number(columnScan?.digitizedTable?.rows?.length)||0;
     gdPracticeDebugCheckpointSafe("rows_accepted","warning",{outputSummary:"Column values read; scanner result is available for the next filter, but no native Practice rows were formed yet",counts:{accepted:0,digitizedRows,headersAllocated:allocated,headersTotal:totalAllocated,rowNotes:rowNoteCount},tableScanOutcome:valueScanOutcome});
@@ -15243,6 +15317,15 @@ function gdRepairColumnOcrValue(key,item){
 function gdUpdatePracticeScanDebugSummary(columnScan){
   const summary=document.getElementById("gdPracticeScanDebugSummary");
   if(!summary)return;
+  if(String(columnScan?.layout?.cropMode||"")==="value-corridor-map"){
+    const columns=Number(columnScan?.layout?.columns?.length)||0;
+    const strips=Array.isArray(columnScan?.results)?columnScan.results.length:0;
+    const boxes=gdValueCorridorMappingBoxes(columnScan).length;
+    const rows=Number(columnScan?.valueCluster?.rowCount)||Number(columnScan?.layout?.valueCluster?.rowCount)||0;
+    const dividerSource=String(columnScan?.layout?.dividerSource||"unknown");
+    summary.textContent=`Value Corridor Mapping - ${strips||columns} column strips - ${boxes} value boxes - ${rows||"-"} value rows - cuts: ${dividerSource} - headers pending`;
+    return;
+  }
   if(String(columnScan?.layout?.cropMode||"")==="ocr-generated-grid"){
     const rows=Number(columnScan?.cellGrid?.rows?.length)||0;
     const columns=Number(columnScan?.cellGrid?.columns?.length)||0;
@@ -15251,9 +15334,10 @@ function gdUpdatePracticeScanDebugSummary(columnScan){
     const allocated=Number(columnScan?.columnCutoutAllocation?.allocatedCount)||0;
     const total=Number(columnScan?.columnCutoutAllocation?.totalCount)||columns;
     const digitizedRows=Number(columnScan?.digitizedTable?.rows?.length)||0;
+    const label=columnScan?.headerStripScanComplete?"Header Strip Scan":"OCR generated grid";
     summary.textContent=digitizedRows
-      ?`OCR generated grid - ${digitizedRows} raw value rows read - ${columns} columns - ${cells} cells - cuts: ${dividerSource} - headers ${allocated}/${total} allocated`
-      :`OCR generated grid - ${rows} row bands - ${columns} generic columns - ${cells} cells - cuts: ${dividerSource} - headers ${allocated}/${total} allocated, values pending`;
+      ?`${label} - ${digitizedRows} raw value rows read - ${columns} columns - ${cells} cells - cuts: ${dividerSource} - headers ${allocated}/${total} allocated`
+      :`${label} - ${rows} row bands - ${columns} generic columns - ${cells} cells - cuts: ${dividerSource} - headers ${allocated}/${total} allocated, values pending`;
     return;
   }
   if(String(columnScan?.layout?.cropMode||"")==="flat-template"){
@@ -16348,7 +16432,7 @@ function gdRenderOcrColumnCutoutAllocation(columnScan){
   details.className="gdColumnImagePreview gdOcrColumnCutoutReview";
   details.open=true;
   const summary=document.createElement("summary");
-  summary.textContent=`Header / cutout allocation (${Number(allocation.allocatedCount)||0}/${cutouts.length})`;
+  summary.textContent=`Header Strip allocation (${Number(allocation.allocatedCount)||0}/${cutouts.length})`;
   const grid=document.createElement("div");
   grid.className="gdOcrColumnCutoutGrid";
   cutouts.forEach(cutout=>{
@@ -16474,6 +16558,36 @@ function gdRenderPracticeColumnCropCheckpoint(columnScan){
     ]
   });
 }
+function gdRenderValueCorridorMappingCheckpoint(columnScan){
+  const columns=Number(columnScan?.layout?.columns?.length)||0;
+  const strips=Array.isArray(columnScan?.results)?columnScan.results.length:0;
+  const boxes=gdValueCorridorMappingBoxes(columnScan).length;
+  const rows=Number(columnScan?.valueCluster?.rowCount)||Number(columnScan?.layout?.valueCluster?.rowCount)||0;
+  const dividerSource=String(columnScan?.layout?.dividerSource||"unknown");
+  const bodyNode=document.createElement("button");
+  bodyNode.type="button";
+  bodyNode.className="gdPracticeScanCheckpointAction";
+  bodyNode.textContent="Header strip scan";
+  bodyNode.onclick=()=>gdContinuePracticePhotoScan();
+  gdRenderPracticeScanCheckpoint({
+    tone:"ready",
+    title:"Value Corridor Mapping complete",
+    summary:"OCR has only detected value-like blobs and empty vertical corridors. Column strips are cut; headers, cell values and native import are still parked.",
+    stats:[
+      {label:"Strips",value:strips||columns||"-"},
+      {label:"Boxes",value:boxes||"-"},
+      {label:"Rows",value:rows||"-"},
+      {label:"Cuts",value:dividerSource}
+    ],
+    steps:[
+      {label:"Photo",state:"done"},
+      {label:"Flat image",state:"done"},
+      {label:"Value corridors",state:"done"},
+      {label:"Headers",state:"pending"}
+    ],
+    bodyNode
+  });
+}
 function gdRenderPracticeColumnStripsOnly(columnScan){
   const review=document.getElementById("gdPracticeOcrReview");
   const panel=document.getElementById("gdPracticeScanDebug");
@@ -16483,8 +16597,9 @@ function gdRenderPracticeColumnStripsOnly(columnScan){
   const subhead=panel?.querySelector(".gdPracticeScanDebugSubhead");
   const text=document.getElementById("gdPracticeOcrText");
   const stripCount=Array.isArray(columnScan?.results)?columnScan.results.length:0;
+  const isValueCorridorMap=String(columnScan?.layout?.cropMode||"")==="value-corridor-map";
   if(text)text.value="";
-  if(subhead)subhead.textContent="Flat image - before output table";
+  if(subhead)subhead.textContent=isValueCorridorMap?"Value Corridor Mapping - column strips only":"Flat image - before output table";
   const sourceCanvas=columnScan?.sourceCanvas||columnScan?.preparedCanvas;
   if(mainCanvas&&sourceCanvas){
     const maxW=1200;
@@ -16496,6 +16611,12 @@ function gdRenderPracticeColumnStripsOnly(columnScan){
     const ctx=mainCanvas.getContext("2d");
     ctx.clearRect(0,0,mainCanvas.width,mainCanvas.height);
     ctx.drawImage(sourceCanvas,0,0,mainCanvas.width,mainCanvas.height);
+    if(isValueCorridorMap){
+      ctx.save();
+      ctx.scale(scale,scale);
+      gdDrawValueCorridorMappingOverlay(ctx,columnScan,sourceW,sourceH,scale);
+      ctx.restore();
+    }
   }else if(mainCanvas){
     mainCanvas.width=1;
     mainCanvas.height=1;
@@ -16511,22 +16632,33 @@ function gdRenderPracticeColumnStripsOnly(columnScan){
   gdRenderColumnOrderOcrSummary(columnScan);
   gdUpdatePracticeScanDebugSummary(columnScan);
   gdRenderPracticeColumnCropCheckpoint(columnScan);
+  if(isValueCorridorMap)gdRenderValueCorridorMappingCheckpoint(columnScan);
   gdPracticeSetDebugAvailable(true);
   const expander=document.getElementById("gdPracticeScanDebugExpander");
   const expanderTitle=expander?.querySelector("summary strong");
-  if(expanderTitle)expanderTitle.textContent="Column crop output";
+  if(expanderTitle)expanderTitle.textContent=isValueCorridorMap?"Value Corridor Mapping":"Column crop output";
   review?.classList.add("active","stripOnly");
 }
-function gdPracticeSetContinueScanReady(ready){
+function gdPracticeSetContinueScanReady(ready,opts={}){
   const btn=document.getElementById("gdPracticeContinueScanBtn");
   const scanBtn=document.getElementById("gdPracticeScanPhotoBtn");
   const defaultBtn=document.getElementById("gdPracticeDefaultScanBtn");
   const manualBtn=document.getElementById("gdPracticeManualQuadBtn");
   if(defaultBtn)defaultBtn.hidden=true;
-  if(btn)btn.hidden=true;
   if(manualBtn)manualBtn.hidden=true;
   if(scanBtn)scanBtn.textContent="Scan";
-  gdPracticeSetGridExperimentsReady(false);
+  if(btn){
+    btn.hidden=!ready;
+    if(ready){
+      btn.textContent=String(opts.label||"Continue scan");
+      if(opts.stage)btn.dataset.gdPracticeScanStage=String(opts.stage);
+      else btn.removeAttribute("data-gd-practice-scan-stage");
+    }else{
+      btn.textContent="Header strip scan";
+      btn.removeAttribute("data-gd-practice-scan-stage");
+    }
+  }
+  gdPracticeSetGridExperimentsReady(!!opts.showGridTools);
 }
 function gdPracticeCanShowScanDebug(){
   let permission="";
@@ -17028,7 +17160,7 @@ async function gdApplyPracticeManualQuad(){
   gdPracticeClusterCheckpoint=checkpoint;
   window.__gdPracticeClusterCheckpoint=checkpoint;
   try{
-    return await gdRunDefaultPracticePhotoScanFromCheckpoint(checkpoint,{sourceLabel:gdPracticePhotoName||"Adjusted practice photo scan"});
+    return await gdRunValueCorridorMappingFromCheckpoint(checkpoint,{sourceLabel:gdPracticePhotoName||"Adjusted practice photo scan"});
   }catch(e){
     console.warn("[GolfDaddy] adjusted practice photo scan failed",e);
     gdPracticeReleaseProcessingControlsSafe("adjusted-photo-scan-failed");
@@ -17362,6 +17494,259 @@ function gdRenderOcrGeneratedTemplateOutput(columnScan,activeKey="ocr"){
   if(expanderTitle)expanderTitle.textContent="Template comparison";
   gdRenderPracticeTemplateOutcomeTabs(activeKey);
 }
+function gdPracticeSetProtectedScanStage(stage,columnScan=null){
+  const value=String(stage||"");
+  try{
+    window.__gdPracticePhotoScanStage=value;
+    if(document.body?.dataset)document.body.dataset.gdPracticePhotoScanStage=value;
+    if(columnScan)window.__gdPracticeColumnScan=columnScan;
+  }catch(e){}
+  return value;
+}
+function gdPracticeProtectedScanStage(){
+  try{return String(window.__gdPracticePhotoScanStage||document.body?.dataset?.gdPracticePhotoScanStage||"");}catch(e){return "";}
+}
+function gdValueCorridorStripResults(scanImage,columns,valueCluster){
+  const width=Number(scanImage?.width)||0;
+  const height=Number(scanImage?.height)||0;
+  if(!scanImage||width<10||height<10)return [];
+  const rows=Array.isArray(valueCluster?.rowBands)?valueCluster.rowBands:[];
+  const topCandidates=rows.map(row=>Number(row.top)).filter(Number.isFinite);
+  const bottomCandidates=rows.map(row=>Number(row.bottom)).filter(Number.isFinite);
+  const top=topCandidates.length?Math.max(0,Math.min(...topCandidates)):Math.max(0,height*.06);
+  const bottom=bottomCandidates.length?Math.min(height,Math.max(...bottomCandidates)):Math.min(height,height*.96);
+  return (Array.isArray(columns)?columns:[]).map((column,index)=>{
+    const label=String(column.label||`C${String(index+1).padStart(2,"0")}`);
+    const key=String(column.key||`gridCol${String(index+1).padStart(2,"0")}`);
+    const left=Number.isFinite(Number(column.dividerLeft))?Number(column.dividerLeft):Number(column.left);
+    const right=Number.isFinite(Number(column.dividerRight))?Number(column.dividerRight):Number(column.right);
+    if(!Number.isFinite(left)||!Number.isFinite(right)||right<=left+3)return null;
+    const colW=right-left;
+    const padX=Math.max(3,Math.min(14,colW*.06));
+    const padY=Math.max(6,Math.min(28,(bottom-top)*.025));
+    const x=Math.max(0,left-padX);
+    const y=Math.max(0,top-padY);
+    const r=Math.min(width,right+padX);
+    const b=Math.min(height,bottom+padY);
+    const crop=gdCropCanvasRegion(scanImage,{x,y,width:Math.max(1,r-x),height:Math.max(1,b-y)},1);
+    return {
+      key:label,
+      column:Object.assign({},column,{key,label,left,right,dividerLeft:left,dividerRight:right}),
+      acceptXGlobal:{left,right},
+      acceptXLocal:{left:left-crop.x,right:right-crop.x},
+      crop,
+      data:{text:"",words:[],lines:[]},
+      localData:{text:"",words:[],lines:[]},
+      values:[]
+    };
+  }).filter(Boolean);
+}
+function gdValueCorridorOutcomeFromFailure(reason,scanImage,extra={}){
+  return gdPracticeSetTemplateOutcome("ocr",Object.assign({
+    label:"Value Corridor Mapping",
+    state:"failed",
+    image:scanImage||null,
+    reason:String(reason||"Value Corridor Mapping failed"),
+    summary:"Value Corridor Mapping ran, but it could not produce reliable value-column strips.",
+    nextStep:"Adjust the corners or retake the photo before running header or cell stages."
+  },extra||{}));
+}
+function gdRenderValueCorridorMappingOutput(columnScan){
+  gdRenderPracticeColumnStripsOnly(columnScan);
+  gdPracticeSetContinueScanReady(true,{label:"Header strip scan",stage:"value_corridor_mapped",showGridTools:true});
+  gdPracticeRefreshDebugTools();
+}
+async function gdRunValueCorridorMappingFromCheckpoint(checkpoint,opts={}){
+  const scanImage=checkpoint?.scanImage||checkpoint?.directColumnSource||checkpoint?.cluster?.displayCutoutCanvas||checkpoint?.cluster?.cutoutCanvas||null;
+  if(!scanImage){
+    const outcome=gdValueCorridorOutcomeFromFailure("No flattened image was available for Value Corridor Mapping.",null);
+    gdRenderPracticeTemplateOutcomeTabs("ocr");
+    return {payload:null,scan:null,outcome};
+  }
+  gdPracticeClearTemplateOutcomes();
+  gdSetPracticePhotoProcessing(true,{progress:18,stageIndex:0,preserveClubs:true});
+  gdSetPracticeScanStatus("Value Corridor Mapping: scanning the flattened image for value-like blobs...");
+  gdPracticeDebugCheckpointSafe("value_corridor_mapping","running",{inputSummary:`${Number(scanImage.width)||0} x ${Number(scanImage.height)||0} flat image`});
+  try{
+    const Tesseract=await gdLoadTesseract();
+    const fullResult=await gdRecognizeWithTesseract(Tesseract,scanImage,gdOcrGeneratedLayoutConfig(),"layout:value-corridor-map");
+    const geometryOcrData=gdLmNormalizeOcrData(fullResult?.data||{text:"",words:[],lines:[]});
+    const valueCandidates=gdLmGeometryValueCandidates(geometryOcrData,Number(scanImage?.height)||0);
+    const geometryRows=gdLmNumberBoxRowsFromCandidates(valueCandidates,Number(scanImage?.height)||0);
+    const geometryColumns=gdLmNumberBoxColumnsFromCandidates(valueCandidates,Number(scanImage?.width)||0);
+    const valueGeometryColumns=gdLmGenericGridColumnsFromValueCandidates(valueCandidates,[]);
+    const chosenGridColumns=geometryColumns.length>=4?geometryColumns:(valueGeometryColumns.length>=4?valueGeometryColumns:[]);
+    const dividerSource=geometryColumns.length>=4
+      ?"ocr-number-box-gaps"
+      :(valueGeometryColumns.length>=4?"ocr-generated-value-geometry":"ocr-number-geometry-missing");
+    if(chosenGridColumns.length<4){
+      const outcome=gdValueCorridorOutcomeFromFailure("Value Corridor Mapping found value-like blobs but not enough empty vertical corridors.",scanImage,{
+        wordCount:Number(geometryOcrData.words?.length)||0,
+        candidateCount:valueCandidates.length,
+        geometryOcrData,
+        geometryRows,
+        geometryColumns,
+        summary:"OCR detection ran as geometry evidence only, but fewer than four reliable value-column strips were found.",
+        nextStep:"Adjust the corners so the value columns are vertical and separated, then scan again."
+      });
+      gdPracticeDebugCheckpointSafe("value_corridor_mapping","failed",{outputSummary:outcome.reason,counts:{words:Number(geometryOcrData.words?.length)||0,valueBoxes:valueCandidates.length,rows:geometryRows.length,columns:chosenGridColumns.length}});
+      gdRenderPracticeTemplateOutcomeTabs("ocr");
+      gdSetPracticeScanStatus("Value Corridor Mapping could not find enough vertical value corridors. Adjust the frame and scan again.");
+      return {payload:null,scan:null,outcome};
+    }
+    const generatedRows=geometryRows.length?geometryRows:gdLmClusterColumnRows(valueCandidates);
+    const valueCluster=gdOcrGeneratedValueCluster(scanImage,null,generatedRows,valueCandidates);
+    const columnScan={
+      layout:{
+        headerIndex:-1,
+        headerLine:null,
+        columns:chosenGridColumns,
+        dividerSource,
+        rowDividerSource:geometryRows.length?"ocr-number-box-gaps":"ocr-generated-row-bands",
+        cropMode:"value-corridor-map",
+        normalizeMode:String(scanImage?.__gdNormalizeMode||"flat-table"),
+        clusterMode:"Value Corridor Mapping",
+        valueCluster,
+        units:{}
+      },
+      lines:[],
+      sourceCanvas:scanImage,
+      preparedCanvas:scanImage,
+      directColumnSource:scanImage,
+      fullTableCanvas:checkpoint?.source||checkpoint?.fullTableSource||null,
+      valueCluster,
+      gridExperiment:{key:"value-corridor-map",label:"Value Corridor Mapping"},
+      generatedOcrData:geometryOcrData,
+      geometryOcrData,
+      generatedRowBands:generatedRows,
+      generatedNumberBoxRows:geometryRows,
+      generatedValueCandidates:valueCandidates,
+      generatedGeometryValueCandidates:valueCandidates,
+      valueCorridorMapping:true,
+      headerStripScanComplete:false,
+      fallbackFrom:String(opts.sourceLabel||checkpoint?.clusterMode||"manual-corner-flatten")
+    };
+    columnScan.results=gdValueCorridorStripResults(scanImage,chosenGridColumns,valueCluster);
+    const strips=columnScan.results.length;
+    const outcome=gdPracticeSetTemplateOutcome("ocr",{
+      label:"Value Corridor Mapping",
+      state:strips?"success":"failed",
+      image:scanImage,
+      scan:columnScan,
+      layout:columnScan.layout,
+      payload:null,
+      wordCount:Number(geometryOcrData.words?.length)||0,
+      candidateCount:valueCandidates.length,
+      summary:strips
+        ?`Value Corridor Mapping found ${valueCandidates.length} value-like OCR boxes and cut ${strips} column strip${strips===1?"":"s"} through empty vertical corridors.`
+        :"Value Corridor Mapping found corridors but did not produce strip crops.",
+      nextStep:strips?"Run Header Strip Scan to assign these strips to launch-monitor metrics.":"Adjust the frame and scan again."
+    });
+    gdPracticeSetProtectedScanStage(strips?"value_corridor_mapped":"",columnScan);
+    if(strips){
+      gdRenderValueCorridorMappingOutput(columnScan);
+      gdPracticeDebugCheckpointSafe("value_corridor_mapping","success",{outputSummary:`Value Corridor Mapping produced ${strips} column strips`,counts:{valueBoxes:valueCandidates.length,valueRows:generatedRows.length,columns:chosenGridColumns.length,strips}});
+      gdSetPracticeScanStatus(`Value Corridor Mapping complete: ${strips} column strip${strips===1?"":"s"} cut. Header Strip Scan is ready.`);
+    }else{
+      gdPracticeDebugCheckpointSafe("value_corridor_mapping","failed",{outputSummary:"Value Corridor Mapping produced no strip crops",counts:{valueBoxes:valueCandidates.length,columns:chosenGridColumns.length}});
+      gdSetPracticeScanStatus("Value Corridor Mapping found cut lines, but no column strips were created.");
+    }
+    return {payload:null,scan:columnScan,outcome};
+  }catch(e){
+    console.warn("[GolfDaddy] Value Corridor Mapping failed",e);
+    const outcome=gdValueCorridorOutcomeFromFailure(e&&e.message?e.message:"Value Corridor Mapping failed.",scanImage,{error:e&&e.stack});
+    gdPracticeDebugCheckpointSafe("value_corridor_mapping","failed",{outputSummary:outcome.reason,technicalDetails:e&&e.stack});
+    gdSetPracticeScanStatus(outcome.reason);
+    return {payload:null,scan:null,outcome};
+  }finally{
+    gdPracticeReleaseProcessingControlsSafe("value-corridor-finally");
+  }
+}
+async function gdRunPracticeHeaderStripScanFromColumnScan(columnScan=null,opts={}){
+  let scan=columnScan||window.__gdPracticeColumnScan||null;
+  if(!scan||String(scan.layout?.cropMode||"")!=="value-corridor-map"){
+    const checkpoint=gdPracticeClusterCheckpoint||window.__gdPracticeClusterCheckpoint||null;
+    if(!checkpoint){
+      gdSetPracticeScanStatus("Run Value Corridor Mapping before Header Strip Scan.");
+      return null;
+    }
+    const mapped=await gdRunValueCorridorMappingFromCheckpoint(checkpoint,{sourceLabel:opts.sourceLabel||gdPracticePhotoName||"Practice photo scan"});
+    scan=mapped?.scan||null;
+  }
+  if(!scan){
+    gdSetPracticeScanStatus("Value Corridor Mapping did not produce strips for Header Strip Scan.");
+    return null;
+  }
+  gdSetPracticePhotoProcessing(true,{progress:44,stageIndex:0,preserveClubs:true});
+  gdSetPracticeScanStatus("Header Strip Scan: reading the top of each value strip...");
+  gdPracticeDebugCheckpointSafe("header_strip_scan","running",{inputSummary:`${Number(scan?.layout?.columns?.length)||0} column strips`});
+  try{
+    await gdEnsureLaunchMonitorAliasRegistry().catch(e=>{
+      console.warn("[GolfDaddy] launch monitor aliases unavailable; using inline fallback aliases",e);
+    });
+    const Tesseract=await gdLoadTesseract();
+    scan.cellGrid={columns:Array.isArray(scan?.layout?.columns)?scan.layout.columns:[],rows:[],cells:[],cellCount:0};
+    scan.columnCutoutAllocation=gdBuildOcrColumnCutoutAllocation(scan,{ocrData:{words:[],lines:[],text:""},source:"header-strip-regions"});
+    scan.headerTextScan=await gdRunOcrColumnCutoutHeaderTextScan(Tesseract,scan);
+    if(scan.headerTextScan?.ocrData)scan.generatedHeaderAllocationOcrData=scan.headerTextScan.ocrData;
+    scan.columnCutoutAllocation=gdBuildOcrColumnCutoutAllocation(scan,{
+      ocrData:scan.generatedHeaderAllocationOcrData||{words:[],lines:[],text:""},
+      source:"header-strip-ocr"
+    });
+    gdApplyOcrColumnCutoutAllocation(scan);
+    scan.layout=Object.assign({},scan.layout,{
+      cropMode:"ocr-generated-grid",
+      clusterMode:"Header Strip Scan",
+      headerStripSource:"column-strip-header-ocr"
+    });
+    scan.gridExperiment={key:"header-strip-scan",label:"Header Strip Scan"};
+    scan.headerStripScanComplete=true;
+    scan.cellGrid=gdBuildPracticeCellGrid(scan);
+    gdApplyOcrColumnCutoutAllocation(scan);
+    const gridRows=Number(scan.cellGrid?.rows?.length)||0;
+    const gridColumns=Number(scan.cellGrid?.columns?.length)||0;
+    const gridCells=Number(scan.cellGrid?.cellCount)||0;
+    const allocatedColumns=Number(scan.columnCutoutAllocation?.allocatedCount)||0;
+    const cutoutColumns=Number(scan.columnCutoutAllocation?.totalCount)||gridColumns;
+    const headerTextWords=Number(scan.headerTextScan?.wordCount)||0;
+    const headerTextAttempts=Number(scan.headerTextScan?.attempts?.length)||0;
+    const outcome=gdPracticeSetTemplateOutcome("ocr",{
+      label:"Header Strip Scan",
+      state:gridRows&&gridColumns?"success":"failed",
+      image:scan.sourceCanvas,
+      scan,
+      layout:scan.layout,
+      aliasStatus:gdLmAliasRegistryStatus(),
+      payload:null,
+      allocatedColumns,
+      cutoutColumns,
+      headerTextWords,
+      headerTextAttempts,
+      reason:gridRows&&gridColumns?"":"Header Strip Scan assigned headers, but row/cell cuts are not ready.",
+      summary:gridRows&&gridColumns
+        ?`Header Strip Scan found ${headerTextWords} text words and allocated ${allocatedColumns}/${cutoutColumns} column strips to known launch-monitor metrics where possible.`
+        :`Header Strip Scan ran, but the value strips could not be converted into row/cell cuts.`,
+      nextStep:gridRows&&gridColumns?"Read cell values from the assigned row/cell cuts.":"Review the strip headers and adjust the frame before reading cell values."
+    });
+    gdPracticeSetProtectedScanStage(gridRows&&gridColumns?"headers_assigned":"value_corridor_mapped",scan);
+    gdRenderFlatTableBridgeOutput(scan,"ocr");
+    gdPracticeSetContinueScanReady(!!(gridRows&&gridColumns),{label:"Read cell values",stage:"headers_assigned",showGridTools:true});
+    gdPracticeRefreshDebugTools();
+    gdPracticeDebugCheckpointSafe("header_strip_scan",allocatedColumns?"success":"warning",{
+      outputSummary:`Header Strip Scan allocated ${allocatedColumns}/${cutoutColumns} columns`,
+      counts:{headersAllocated:allocatedColumns,headersTotal:cutoutColumns,headerTextWords,headerTextAttempts,gridRows,gridColumns,gridCells}
+    });
+    gdSetPracticeScanStatus(`Header Strip Scan complete: ${allocatedColumns}/${cutoutColumns} column strip${cutoutColumns===1?"":"s"} assigned. Cell values are parked until you continue.`);
+    return {payload:null,scan,outcome};
+  }catch(e){
+    console.warn("[GolfDaddy] Header Strip Scan failed",e);
+    gdPracticeDebugCheckpointSafe("header_strip_scan","failed",{outputSummary:e&&e.message?e.message:"Header Strip Scan failed",technicalDetails:e&&e.stack});
+    gdSetPracticeScanStatus(e&&e.message?e.message:"Header Strip Scan failed.");
+    return null;
+  }finally{
+    gdPracticeReleaseProcessingControlsSafe("header-strip-finally");
+  }
+}
 async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatScan=null,opts={}){
   const scanImage=flatScan?.sourceCanvas||flatScan?.preparedCanvas||flatScan?.directColumnSource||checkpoint?.scanImage||checkpoint?.directColumnSource||checkpoint?.cluster?.displayCutoutCanvas||checkpoint?.cluster?.cutoutCanvas||null;
   if(!scanImage){
@@ -17562,7 +17947,7 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
       summary:cutoutsReady
         ?`OCR-generated layout produced ${gridColumns} column cutouts from number-box OCR geometry. Per-column header OCR found ${headerTextWords} text words and mapped ${allocatedColumns}/${cutoutColumns} columns.`
         :`OCR-generated layout found number-like boxes, but no usable cutout grid.`,
-      nextStep:cutoutsReady?"Review the header / cutout allocation. Row matching and cell values run after this column/header stage.":"Tune the number-box geometry evidence using the OCR generated tab."
+      nextStep:cutoutsReady?"Review the header / cutout allocation and cell cutouts. Cell values wait for the explicit Read cell values action.":"Tune the number-box geometry evidence using the OCR generated tab."
     });
     if(!cutoutsReady){
       gdRenderOcrGeneratedTemplateOutput(columnScan,"ocr");
@@ -17587,17 +17972,17 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
   }
 }
 async function gdRunFlatTemplateBridgeFromCheckpoint(checkpoint,opts={}){
-  gdPracticeFeedback("Flat template bridge is parked; generating the OCR grid instead.","warning");
-  const result=await gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,null,{
-    label:String(opts?.experimentLabel||"OCR generated grid")
+  gdPracticeFeedback("Flat template bridge is parked; running Value Corridor Mapping instead.","warning");
+  const result=await gdRunValueCorridorMappingFromCheckpoint(checkpoint,{
+    sourceLabel:String(opts?.experimentLabel||"Value Corridor Mapping")
   });
   return result?.scan||null;
 }
 async function gdRunPracticeGridExperiment(kind="ocr-generated",opts={}){
   const methods={
     "ocr-generated":{
-      label:"OCR generated grid",
-      status:"Generating OCR grid from number-box geometry..."
+      label:"Header Strip Scan",
+      status:"Reading headers from the mapped column strips..."
     },
     "box-tracks":{
       label:"Parked flat template",
@@ -17619,9 +18004,9 @@ async function gdRunPracticeGridExperiment(kind="ocr-generated",opts={}){
   if(requestedKind==="cell-ocr"){
     const scan=window.__gdPracticeColumnScan||null;
     const cells=Number(scan?.cellGrid?.cellCount)||0;
-    if(!scan||!cells){
-      gdPracticeFeedback("Generate the OCR grid before reading cell values.","warning");
-      gdSetPracticeScanStatus("Generate the OCR grid first, then read cell values.");
+    if(!scan||!cells||gdPracticeProtectedScanStage()==="value_corridor_mapped"){
+      gdPracticeFeedback("Run Header Strip Scan before reading cell values.","warning");
+      gdSetPracticeScanStatus("Run Header Strip Scan first, then read cell values.");
       return null;
     }
     return gdRunFittedCellGridOcr(scan,{allowParkedFittedCellOcr:true,label:"Raw cell value read"});
@@ -17632,97 +18017,59 @@ async function gdRunPracticeGridExperiment(kind="ocr-generated",opts={}){
     return null;
   }
   if(requestedKind!=="ocr-generated"){
-    gdPracticeFeedback(`${method.label} is parked while the OCR-generated grid is tuned.`,"warning");
+    gdPracticeFeedback(`${method.label} is parked while Value Corridor Mapping and Header Strip Scan are staged.`,"warning");
   }
-  if(["ocr-generated","box-tracks","digitize-table"].includes(requestedKind)){
-    const result=await gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,null,{label:method.label});
+  if(requestedKind==="ocr-generated"){
+    const existing=window.__gdPracticeColumnScan||null;
+    if(existing&&String(existing.layout?.cropMode||"")==="value-corridor-map"){
+      const result=await gdRunPracticeHeaderStripScanFromColumnScan(existing,{label:method.label});
+      return result?.scan||null;
+    }
+    const mapped=await gdRunValueCorridorMappingFromCheckpoint(checkpoint,{sourceLabel:gdPracticePhotoName||"Practice photo scan"});
+    if(mapped?.scan){
+      const result=await gdRunPracticeHeaderStripScanFromColumnScan(mapped.scan,{label:method.label});
+      return result?.scan||null;
+    }
+    return mapped?.scan||null;
+  }
+  if(["box-tracks","digitize-table"].includes(requestedKind)){
+    const result=await gdRunValueCorridorMappingFromCheckpoint(checkpoint,{sourceLabel:gdPracticePhotoName||"Practice photo scan"});
     return result?.scan||result?.payload||null;
   }
   return null;
 }
 async function gdRunDefaultPracticePhotoScanFromCheckpoint(checkpoint,opts={}){
   if(!checkpoint){
-    gdPracticeDebugFailedSafe("crop_cleanup",new Error("Frame the value grid first, then generate the OCR grid."),{outputSummary:"No crop checkpoint"});
-    gdPracticeFeedback("Frame the value grid first, then generate the OCR grid.","error");
+    gdPracticeDebugFailedSafe("crop_cleanup",new Error("Frame the value grid first, then run Value Corridor Mapping."),{outputSummary:"No crop checkpoint"});
+    gdPracticeFeedback("Frame the value grid first, then run Value Corridor Mapping.","error");
     return null;
   }
   if(!gdPracticeImportCanStart(opts.sourceLabel||gdPracticePhotoName||"Practice photo scan"))return null;
-  const importJob=gdPracticeStartImportJob("practice-photo",opts.sourceLabel||gdPracticePhotoName||"Practice photo scan",{status:"scanning",checkpointText:"Scan started",stageIndex:0,progress:10,source:"photo",clubs:gdPracticeScanClubLabels()});
-  if(!importJob)return null;
-  const importJobId=importJob.id;
   gdPracticeClusterCheckpoint=checkpoint;
   window.__gdPracticeClusterCheckpoint=checkpoint;
   gdPracticeClearTemplateOutcomes();
   gdPracticeSetContinueScanReady(false);
   gdClosePracticeManualQuadTool();
-  gdSetPracticePhotoProcessing(true);
-  gdPracticeFeedback("Generating OCR practice grid...");
+  gdSetPracticePhotoProcessing(true,{stageIndex:0,progress:12,preserveClubs:true});
+  gdPracticeFeedback("Running Value Corridor Mapping...");
   await gdPracticeYieldScanPaint();
   try{
-    gdPracticeUpdateImportJob({status:"scanning",checkpointText:"Clarity Pattern Finder",stageIndex:1,progress:24});
-    const result=await gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,null,{
-      label:"Practice photo OCR generated grid",
+    gdPracticeDebugCheckpointSafe("extraction_started","running",{inputSummary:"Value Corridor Mapping"});
+    const result=await gdRunValueCorridorMappingFromCheckpoint(checkpoint,{
       sourceLabel:opts.sourceLabel||gdPracticePhotoName||"Practice photo scan"
     });
     const scan=result?.scan||result?.outcome?.scan||null;
-    const columns=Number(scan?.columnCutoutAllocation?.totalCount)||Number(scan?.layout?.columns?.length)||Number(scan?.cellGrid?.columns?.length)||0;
-    if(scan&&columns){
-      const allocationState=gdPracticeHeaderAllocationReady(scan,{minMetrics:6});
-      if(!allocationState.ready){
-        const tableScanOutcome=gdPracticePublishTableScanOutcome(scan,"ocr");
-        gdPracticeDebugCheckpointSafe("header_cutout_allocation","failed",{
-          outputSummary:allocationState.reason,
-          counts:{
-            headersAllocated:allocationState.allocated,
-            headersTotal:allocationState.total,
-            metricHeaders:allocationState.metricCount,
-            minMetricHeaders:allocationState.minMetrics
-          },
-          warnings:["Cell OCR was not started because mapped value fields are not ready. Club is handled by the club-id pass and does not need a header."],
-          tableScanOutcome
-        });
-        gdPracticeFailImportJob(new Error("Mapped value fields were not strong enough to read values"),`${allocationState.reason}. Club is handled separately; open scan output to inspect per-cutout header reads.`);
-        gdPracticeSetContinueScanReady(true);
-        gdPracticeFeedback(`${allocationState.reason}. Values were not read or saved.`,"error");
-        return scan;
-      }
-      if(!gdEnsurePracticeValueCellGrid(scan)){
-        gdPracticeFailImportJob(new Error("Column headers mapped, but value rows were not ready for cell OCR"),"Column headers mapped, but value rows were not ready for cell OCR. Open scan output to inspect the column cutouts.");
-        gdPracticeSetContinueScanReady(true);
-        gdPracticeFeedback("Column headers mapped, but value rows were not ready for cell OCR.","error");
-        return scan;
-      }
-      const valueRows=Number(scan?.cellGrid?.rows?.length)||0;
-      const readableValueColumns=gdPracticeReadableValueKeys(scan).length;
-      gdPracticeUpdateImportJob({status:"parsing",checkpointText:`Reading ${Math.max(1,readableValueColumns)} value columns`,stageIndex:2,progress:48});
-      gdPracticeSetContinueScanReady(false);
+    const strips=Array.isArray(scan?.results)?scan.results.length:0;
+    if(strips){
+      gdPracticeSetContinueScanReady(true,{label:"Header strip scan",stage:"value_corridor_mapped",showGridTools:true});
       gdPracticeRefreshDebugTools();
-      gdPracticeFeedback(`OCR-generated column cutouts ready: ${columns}. Reading ${readableValueColumns||"mapped"} value column${readableValueColumns===1?"":"s"}...`);
-      gdPracticeDebugCheckpointSafe("extraction_started","running",{
-        inputSummary:"Column cutouts ready; column-major fitted-cell value scan starting",
-        counts:{gridColumns:columns,valueRows,valueColumns:readableValueColumns}
-      });
-      await gdPracticeYieldScanPaint();
-      const fittedCellOpts={
-        allowParkedFittedCellOcr:true,
-        importToNative:true,
-        jobId:importJobId,
-        label:"Practice photo scan",
-        sourceLabel:opts.sourceLabel||gdPracticePhotoName||"Practice photo scan"
-      };
-      const payload=await gdRunFittedCellGridOcr(scan,fittedCellOpts);
-      gdPracticeAssertCurrentImportJob(importJobId,"Practice photo cell OCR");
-      if(!payload?.clubGroups?.length)gdPracticeFailImportJob(new Error("Cell OCR completed but no usable shots were formed"),"Cell OCR completed but no usable shots were formed. Review the scanner output.");
-      return payload;
+      return scan;
     }else{
-      const failedScanOutcome=scan?gdPracticePublishTableScanOutcome(scan,"ocr"):null;
-      gdPracticeFailImportJob(new Error("OCR-generated column cutouts were not ready"),"OCR-generated column cutouts were not ready. Open scan output to inspect vertical value-clearance geometry.");
-      gdPracticeSetContinueScanReady(true);
+      gdPracticeSetContinueScanReady(false);
       const ocrOutcome=gdPracticeTemplateOutcomeStore().ocr||null;
-      gdPracticeFeedback("OCR-generated column cutouts were not ready. Open the OCR generated tab to inspect value-box geometry.","error");
-      gdPracticeDebugFailedSafe("ocr_generated_template",new Error("OCR-generated column cutouts were not ready"),{
-        outputSummary:ocrOutcome?.reason||"OCR-generated grid did not produce usable geometry",
-        tableScanOutcome:failedScanOutcome,
+      gdPracticeFeedback("Value Corridor Mapping was not ready. Inspect the value-box and corridor evidence before running headers or cells.","error");
+      gdPracticeDebugFailedSafe("rows_accepted",new Error("Value Corridor Mapping was not ready"),{
+        outputSummary:ocrOutcome?.reason||"Value Corridor Mapping did not produce usable column strips",
         raw:{ocrGenerated:ocrOutcome}
       });
     }
@@ -17733,8 +18080,8 @@ async function gdRunDefaultPracticePhotoScanFromCheckpoint(checkpoint,opts={}){
       return null;
     }
     gdPracticeDebugFailedSafe("extraction_started",e,{outputSummary:"Practice photo scan failed",technicalDetails:e&&e.stack});
-    gdPracticeFailImportJob(e,e&&e.message?e.message:"Practice photo scan failed");
-    throw e;
+    gdPracticeFeedback(e&&e.message?e.message:"Practice photo scan failed. Adjust the frame and scan again.","error");
+    return null;
   }finally{
     gdSetPracticePhotoProcessing(false,{skipJob:true});
     gdPracticeReleaseProcessingControlsSafe("photo-scan-finally");
@@ -17760,7 +18107,7 @@ async function gdRunDefaultPracticePhotoScan(){
 async function gdRunPracticePhotoOcrFromCheckpoint(checkpoint){
   if(!checkpoint?.cluster?.quad)return null;
   if(checkpoint?.visualOnly||checkpoint?.directColumnSource){
-    return await gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,null,{label:"OCR generated grid"});
+    return await gdRunValueCorridorMappingFromCheckpoint(checkpoint,{sourceLabel:gdPracticePhotoName||"Practice photo scan"});
   }
   const source=checkpoint.source||gdPracticeNormalizedCanvas||gdNormalizeLaunchMonitorTable(gdPracticePhotoBitmap)||gdPracticePhotoBitmap;
   const prepared=checkpoint.prepared||source;
@@ -17770,7 +18117,7 @@ async function gdRunPracticePhotoOcrFromCheckpoint(checkpoint){
     return null;
   }
   checkpoint.scanImage=scanImage;
-  return await gdRunOcrGeneratedTemplateFallbackFromCheckpoint(Object.assign({},checkpoint,{source,prepared,scanImage,directColumnSource:scanImage}),null,{label:"OCR generated grid"});
+  return await gdRunValueCorridorMappingFromCheckpoint(Object.assign({},checkpoint,{source,prepared,scanImage,directColumnSource:scanImage}),{sourceLabel:gdPracticePhotoName||"Practice photo scan"});
 }
 async function gdHandleLaunchMonitorPhoto(file){
   if(!file){
@@ -17791,6 +18138,7 @@ async function gdHandleLaunchMonitorPhoto(file){
     gdPracticeNormalizedCanvas=gdNormalizeLaunchMonitorTable(gdPracticePhotoBitmap);
     gdPracticeDebugCheckpointSafe("image_preprocess","success",{outputSummary:`Prepared ${gdPracticeNormalizedCanvas?.width||0} x ${gdPracticeNormalizedCanvas?.height||0}`,counts:{width:gdPracticeNormalizedCanvas?.width||0,height:gdPracticeNormalizedCanvas?.height||0}});
     gdPracticeClusterCheckpoint=null;
+    gdPracticeSetProtectedScanStage("");
     gdClosePracticeManualQuadTool();
     const preview=document.getElementById("gdPracticeScanPreview");
     if(preview)preview.src=URL.createObjectURL(file);
@@ -17885,6 +18233,14 @@ async function gdContinuePracticePhotoScan(){
   try{
     if(gdPracticeScanReentryBlocked())return null;
     gdPracticeDebugEnsureRunSafe({sourceName:gdPracticePhotoName||"Practice photo scan"});
+    const stage=gdPracticeProtectedScanStage();
+    const scan=window.__gdPracticeColumnScan||null;
+    if(stage==="headers_assigned"&&scan?.cellGrid?.cellCount){
+      return await gdRunFittedCellGridOcr(scan,{allowParkedFittedCellOcr:true,label:"Raw cell value read",sourceLabel:gdPracticePhotoName||"Practice photo scan"});
+    }
+    if(stage==="value_corridor_mapped"&&scan){
+      return await gdRunPracticeHeaderStripScanFromColumnScan(scan,{sourceLabel:gdPracticePhotoName||"Practice photo scan"});
+    }
     const checkpoint=gdPracticeClusterCheckpoint||await gdBuildPracticeClusterCheckpoint();
     if(!checkpoint){
       gdPracticeDebugFailedSafe("crop_cleanup",new Error("No crop checkpoint available"),{outputSummary:"Manual frame needed before scan"});
@@ -17892,7 +18248,7 @@ async function gdContinuePracticePhotoScan(){
       return null;
     }
     gdPracticeClusterCheckpoint=checkpoint;
-    await gdRunDefaultPracticePhotoScanFromCheckpoint(checkpoint,{sourceLabel:gdPracticePhotoName||"Practice photo scan"});
+    return await gdRunValueCorridorMappingFromCheckpoint(checkpoint,{sourceLabel:gdPracticePhotoName||"Practice photo scan"});
   }catch(e){
     console.warn("[GolfDaddy] launch monitor photo scan failed",e);
     if(gdPracticeIsQuietScanStop(e))return null;
@@ -17927,6 +18283,7 @@ function gdCancelPracticePhotoScan(clearStatus=true){
   gdPracticePhotoBitmap=null;
   gdPracticeNormalizedCanvas=null;
   gdPracticeClusterCheckpoint=null;
+  gdPracticeSetProtectedScanStage("");
   gdClosePracticeManualQuadTool();
   gdPracticePhotoName="";
   document.getElementById("gdPracticeScanner")?.classList.remove("active");
@@ -18179,7 +18536,7 @@ document.addEventListener("change",event=>{
   else gdHandleLaunchMonitorUpload(file);
   input.value="";
 },true);
-Object.assign(window,{gdLoadLaunchMonitorDemo,gdClearLaunchMonitorDemo,gdPickLaunchMonitorFile,gdPickPracticePhotoFile,gdAdjustPracticeGeneratedBox,gdHandleNativePracticeTextFile,gdHandleLaunchMonitorUpload,gdHandleLaunchMonitorPhoto,gdScanPracticePhotoCrop,gdPracticePrimaryScanAction,gdOpenPracticeManualQuadTool,gdApplyPracticeManualQuad,gdRunDefaultPracticePhotoScan,gdRunDefaultPracticePhotoScanFromCheckpoint,gdSetPracticePhotoProcessing,gdPracticeHardStopScan,gdPracticeRefreshDebugTools,gdContinuePracticePhotoScan,gdImportReviewedPracticeOcr,gdCancelPracticePhotoScan,gdCancelPracticeOcrReview,gdPracticeScanClubLabel,gdPracticeScanClubLabels,gdLoadExtractedPractice7iData,gdPracticeSetExtractionPreview,gdPracticeClearExtractionPreview,gdImportPracticeExtractionPreview,gdBuildLaunchMonitorTextCapture,gdCleanLaunchMonitorOcrText,gdLmCaptureToReviewText,gdAnalyzeFlatTableImage,gdFitFlatTableTemplateFromAnalysis,gdBuildFlatTableTemplateColumnScan,gdOpenPracticeFlatTableFailureWindow,gdRenderFlatTableFailureWindow,gdOpenPracticeTemplateOutcomes,gdRunOcrGeneratedTemplateFallbackFromCheckpoint,gdRunFlatTemplateBridgeFromCheckpoint,gdRunPracticeGridExperiment,gdRunFittedCellGridOcr,gdBuildFlatDigitizedTable,gdRenderFlatDigitizedTable,gdPracticeOpenScanOutcomeFromDebug,gdPickRawCourseDataFile,gdHandleRawCourseDataUpload,gdClearCourseShotData,gdPracticeHandleImportJobAction});
+Object.assign(window,{gdLoadLaunchMonitorDemo,gdClearLaunchMonitorDemo,gdPickLaunchMonitorFile,gdPickPracticePhotoFile,gdAdjustPracticeGeneratedBox,gdHandleNativePracticeTextFile,gdHandleLaunchMonitorUpload,gdHandleLaunchMonitorPhoto,gdScanPracticePhotoCrop,gdPracticePrimaryScanAction,gdOpenPracticeManualQuadTool,gdApplyPracticeManualQuad,gdRunDefaultPracticePhotoScan,gdRunDefaultPracticePhotoScanFromCheckpoint,gdRunValueCorridorMappingFromCheckpoint,gdRunPracticeHeaderStripScanFromColumnScan,gdSetPracticePhotoProcessing,gdPracticeHardStopScan,gdPracticeRefreshDebugTools,gdContinuePracticePhotoScan,gdImportReviewedPracticeOcr,gdCancelPracticePhotoScan,gdCancelPracticeOcrReview,gdPracticeScanClubLabel,gdPracticeScanClubLabels,gdLoadExtractedPractice7iData,gdPracticeSetExtractionPreview,gdPracticeClearExtractionPreview,gdImportPracticeExtractionPreview,gdBuildLaunchMonitorTextCapture,gdCleanLaunchMonitorOcrText,gdLmCaptureToReviewText,gdAnalyzeFlatTableImage,gdFitFlatTableTemplateFromAnalysis,gdBuildFlatTableTemplateColumnScan,gdOpenPracticeFlatTableFailureWindow,gdRenderFlatTableFailureWindow,gdOpenPracticeTemplateOutcomes,gdRunOcrGeneratedTemplateFallbackFromCheckpoint,gdRunFlatTemplateBridgeFromCheckpoint,gdRunPracticeGridExperiment,gdRunFittedCellGridOcr,gdBuildFlatDigitizedTable,gdRenderFlatDigitizedTable,gdPracticeOpenScanOutcomeFromDebug,gdPickRawCourseDataFile,gdHandleRawCourseDataUpload,gdClearCourseShotData,gdPracticeHandleImportJobAction});
 function gdLmStatusClass(status){
   if(["corroborated","cross_distance_verified","verified_by_result","cluster_candidate","delivery_only","result_only"].includes(status))return "good";
   if(["conflict_check","alignment_signal"].includes(status))return "warn";
