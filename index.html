@@ -25554,7 +25554,9 @@ function gdPracticeCompleteImportJob(result,payload,extra={}){
 }
 function gdPracticeClearImportJob(){
   gdPracticeWriteImportJob(null);
+  try{gdPracticeReleaseFailedImportSurface();}catch(e){}
   gdSetPracticePhotoProcessing(false,{immediate:true,skipJob:true});
+  try{if(typeof gdPracticeSetContinueScanReady==="function")gdPracticeSetContinueScanReady(false);}catch(e){}
   try{if(typeof renderPracticeData==="function")renderPracticeData(true);}catch(e){}
   return false;
 }
@@ -25573,12 +25575,28 @@ function gdPracticeCancelImportJob(){
 function gdPracticeReviewImportJob(){
   try{
     gdSetShotDataLibraryOpen("practice",true);
-    gdTogglePracticeAdmin(false);
+    gdTogglePracticeAdmin(true);
     if(typeof gdPracticeImportOpen!=="undefined")gdPracticeImportOpen=false;
     if(typeof gdPracticeEmailLaneOpen!=="undefined")gdPracticeEmailLaneOpen=false;
     gdRenderPracticeImportPanel();
     renderPracticeData(true);
+    gdTogglePracticeAdmin(true);
+    gdRenderPracticeImportPanel();
   }catch(e){}
+  return false;
+}
+function gdPracticeHandleImportJobAction(action,event){
+  try{
+    if(event){
+      event.preventDefault();
+      event.stopPropagation();
+      if(event.stopImmediatePropagation)event.stopImmediatePropagation();
+    }
+  }catch(e){}
+  const resolved=String(action||"");
+  if(resolved==="cancel")return gdPracticeCancelImportJob();
+  if(resolved==="discard"||resolved==="clear")return gdPracticeClearImportJob();
+  if(resolved==="review")return gdPracticeReviewImportJob();
   return false;
 }
 function gdPracticeSyncImportProcessing(job=gdPracticeImportJob){
@@ -39276,10 +39294,10 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     const detail=job.userMessage||job.checkpointText||"Import progress is saved.";
     const diagnostic="";
     const actions=failed
-      ? `<button type="button" data-gd-practice-import-action="review">Resume/review import</button><button type="button" data-gd-practice-import-action="discard">Discard failed import</button>`
+      ? `<button type="button" data-gd-practice-import-action="review" onclick="return gdPracticeHandleImportJobAction('review',event)">Resume/review import</button><button type="button" data-gd-practice-import-action="discard" onclick="return gdPracticeHandleImportJobAction('discard',event)">Discard failed import</button>`
       : active
-        ? (status==="saving"?`<button type="button" data-gd-practice-import-action="review">Review import</button>`:`<button type="button" data-gd-practice-import-action="review">Review import</button><button type="button" data-gd-practice-import-action="cancel">Cancel import</button>`)
-        : `<button type="button" data-gd-practice-import-action="clear">Clear import status</button>`;
+        ? (status==="saving"?`<button type="button" data-gd-practice-import-action="review" onclick="return gdPracticeHandleImportJobAction('review',event)">Review import</button>`:`<button type="button" data-gd-practice-import-action="review" onclick="return gdPracticeHandleImportJobAction('review',event)">Review import</button><button type="button" data-gd-practice-import-action="cancel" onclick="return gdPracticeHandleImportJobAction('cancel',event)">Cancel import</button>`)
+        : `<button type="button" data-gd-practice-import-action="clear" onclick="return gdPracticeHandleImportJobAction('clear',event)">Clear import status</button>`;
     return `<div class="gdPracticeImportJob ${active?"active":failed?"failed":"done"}">
       <div class="gdPracticeImportJobMain"><strong>${gdEscapeHTML(title)}</strong><span>${gdEscapeHTML(detail)}</span><small>${gdEscapeHTML(source)} · ${gdEscapeHTML(date)}${counts?` · ${gdEscapeHTML(counts)}`:""}</small></div>
       <div class="gdPracticeImportJobActions">${actions}</div>
@@ -39294,9 +39312,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       event.preventDefault();
       event.stopImmediatePropagation();
       const action=String(target.dataset.gdPracticeImportAction||"");
-      if(action==="cancel")return gdPracticeCancelImportJob();
-      if(action==="discard"||action==="clear")return gdPracticeClearImportJob();
-      if(action==="review")return gdPracticeReviewImportJob();
+      return gdPracticeHandleImportJobAction(action,event);
     },true);
   }
   function gdPracticeLibraryShellHTML(analysis,totalRows,bodyHTML){
