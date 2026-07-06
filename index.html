@@ -18143,54 +18143,6 @@ function gdRenderValueCorridorMappingOutput(columnScan){
   gdPracticeSetContinueScanReady(true,{label:"Header strip scan",stage:"value_corridor_mapped",showGridTools:true});
   gdPracticeRefreshDebugTools();
 }
-function gdValueCorridorStripBoundarySummary(strip,index){
-  if(!strip)return null;
-  if(!Number.isFinite(Number(strip.x1))||!Number.isFinite(Number(strip.x2)))return null;
-  return {
-    index:Number.isFinite(Number(index))?Number(index)+1:0,
-    x1:Math.round(Number(strip.x1)),
-    x2:Math.round(Number(strip.x2)),
-    centerX:Math.round(Number.isFinite(Number(strip.centerX))?Number(strip.centerX):(Number(strip.x1)+Number(strip.x2))/2),
-    width:Math.max(0,Math.round(Number(strip.width)||0)),
-    y1:Number.isFinite(Number(strip.y1))?Math.round(Number(strip.y1)):null,
-    y2:Number.isFinite(Number(strip.y2))?Math.round(Number(strip.y2)):null
-  };
-}
-function gdBuildValueCorridorHandoff(scan,scanImage,checkpoint,opts={}){
-  const sourceImage=scan?.sourceCanvas||scan?.preparedCanvas||scan?.directColumnSource||scanImage||checkpoint?.scanImage||checkpoint?.source||checkpoint?.directColumnSource||null;
-  const valueRows=Array.isArray(opts.valueRows)?opts.valueRows:[];
-  const columns=Array.isArray(opts.columns)?opts.columns:[];
-  const results=Array.isArray(scan?.results)?scan.results:[];
-  const semantics=gdInferValueCorridorStripSemantics(scan);
-  const templateColumns=gdLmLaunchMonitorTemplateColumns();
-  const expectedLaneCount=templateColumns.length;
-  const expectedStripCount=Math.max(0,expectedLaneCount-1);
-  return {
-    stage:"value-corridor-mapping",
-    sourceLabel:String(opts.sourceLabel||"practice-photo-scan"),
-    sourceImageUrl:String(opts.sourceImageUrl||""),
-    producedAt:Date.now(),
-    sourceCanvas:sourceImage,
-    sourceWidth:Number(sourceImage?.width)||0,
-    sourceHeight:Number(sourceImage?.height)||0,
-    fullTableCanvas:scan?.fullTableCanvas||checkpoint?.source||checkpoint?.fullTableSource||null,
-    preparedCanvas:scan?.preparedCanvas||checkpoint?.prepared||null,
-    directColumnSource:scan?.directColumnSource||checkpoint?.directColumnSource||null,
-    valueCandidates:Array.isArray(opts.valueCandidates)?opts.valueCandidates:[],
-    valueRows,
-    valueBoxesCount:Number(opts.valueCandidates?.length)||0,
-    valueRowsCount:Number(valueRows.length)||0,
-    columns:columns,
-    columnsCount:Number(columns.length)||0,
-    results:results,
-    stripsCount:Number(results.length)||0,
-    semantics:Object.assign({expectedLaneCount,expectedStripCount},semantics||{}),
-    firstStrip:gdValueCorridorStripBoundarySummary(results[0],0),
-    lastStrip:gdValueCorridorStripBoundarySummary(results[results.length-1],results.length-1),
-    layoutSource:String(scan?.layout?.dividerSource||"ocr-value-corridor-map"),
-    rowDividerSource:String(scan?.layout?.rowDividerSource||"")
-  };
-}
 async function gdRunValueCorridorMappingFromCheckpoint(checkpoint,opts={}){
   const scanImage=checkpoint?.scanImage||checkpoint?.directColumnSource||checkpoint?.cluster?.displayCutoutCanvas||checkpoint?.cluster?.cutoutCanvas||null;
   if(!scanImage){
@@ -18263,21 +18215,17 @@ async function gdRunValueCorridorMappingFromCheckpoint(checkpoint,opts={}){
     };
     columnScan.results=gdValueCorridorStripResults(scanImage,chosenGridColumns,valueCluster);
     columnScan.__gdValueCorridorStripSemantics=gdInferValueCorridorStripSemantics(columnScan);
+    columnScan.valueCorridorMappingHandoff={
+      sourceStage:"value_corridor_mapping",
+      sourceCanvas:columnScan.sourceCanvas||columnScan.preparedCanvas||columnScan.directColumnSource||null,
+      layout:{columns:Array.isArray(columnScan.layout?.columns)?columnScan.layout.columns:[]},
+      strips:Array.isArray(columnScan.results)?columnScan.results:[],
+      summary:{valueCandidates:valueCandidates.length,valueRows:generatedRows.length,columns:chosenGridColumns.length,strips:Array.isArray(columnScan.results)?columnScan.results.length:0},
+      debugSummary:String(valueCandidates.length)+" value-boxes, "+String(generatedRows.length)+" value-rows, "+String(chosenGridColumns.length)+" columns",
+      sourceLabel:String(opts.sourceLabel||checkpoint?.clusterMode||"manual-corner-flatten")
+    };
     const strips=columnScan.results.length;
-    const expectedLaneCount=gdLmLaunchMonitorTemplateColumns().length;
-    const expectedStripCount=Math.max(0,expectedLaneCount-1);
-    const expectedShape=columnScan.__gdValueCorridorStripSemantics.objectType==="separator-strips" ? {expectedLanes:expectedLaneCount,expectedStrips:expectedStripCount} : {expectedLanes:expectedLaneCount,expectedStrips:strips};
-    const stripSemantics=columnScan.__gdValueCorridorStripSemantics;
-    const continuationWarning=(stripSemantics.objectType==="separator-strips"&&strips!==expectedStripCount) ? "Continuing with 10 corridor results; expected header count may differ." : "";
     const stripSemanticsText=gdValueCorridorStripSemanticsText(columnScan.__gdValueCorridorStripSemantics);
-    const handoff=gdBuildValueCorridorHandoff(columnScan,scanImage,checkpoint,{
-      sourceLabel:String(opts.sourceLabel||gdPracticePhotoName||"Practice photo scan"),
-      sourceImageUrl:String(scanImage?.src||""),
-      valueCandidates,
-      valueRows:generatedRows,
-      columns:chosenGridColumns
-    });
-    columnScan.valueCorridorMapping=handoff;
     const outcome=gdPracticeSetTemplateOutcome("ocr",{
       label:"Value Corridor Mapping",
       state:strips?"success":"failed",
@@ -18287,44 +18235,21 @@ async function gdRunValueCorridorMappingFromCheckpoint(checkpoint,opts={}){
       payload:null,
       wordCount:Number(geometryOcrData.words?.length)||0,
       candidateCount:valueCandidates.length,
-      valueCorridorMapping:handoff,
       summary:strips
         ?`Value Corridor Mapping found ${valueCandidates.length} value-like OCR boxes and ${stripSemanticsText.toLowerCase()}.`
         :"Value Corridor Mapping found corridors but did not produce strip crops.",
-      nextStep:strips?"Assigning detected strips to Header Strip Scan automatically.":"Adjust the frame and scan again."
+      nextStep:strips?"Run Header Strip Scan to assign these strips to launch-monitor metrics.":"Adjust the frame and scan again."
     });
-    gdPracticeSetProtectedScanStage(strips?"value_corridor_mapped":"",columnScan);
-    let handoffScan=null;
+      gdPracticeSetProtectedScanStage(strips?"value_corridor_mapped":"",columnScan);
     if(strips){
-      let bridgeResult=null;
       gdRenderValueCorridorMappingOutput(columnScan);
-      const firstStrip=columnScan.results[0]||null;
-      const lastStrip=columnScan.results[columnScan.results.length-1]||null;
-      const rangeText=firstStrip&&lastStrip
-        ?`first=${Math.round(Number(firstStrip.x1)||0}-${Math.round(Number(firstStrip.x2)||0)} last=${Math.round(Number(lastStrip.x1)||0)}-${Math.round(Number(lastStrip.x2)||0)}`
-        :"first/last unavailable";
-      const handoffSummary=`[Practice Pipeline] Passing Value Corridor Mapping to Header Strip Scan: valueBoxes=${valueCandidates.length}, valueRows=${generatedRows.length}, columns=${chosenGridColumns.length}, strips=${strips}; ${rangeText}`;
-      console.debug("[GolfDaddy] corridor handoff",handoffSummary,handoff);
-      if(opts.autoContinueHeaderStripScan!==false){
-        gdSetPracticeScanStatus(`Value Corridor Mapping complete. Passing ${strips} corridor results to Header Strip Scan${continuationWarning?` (${continuationWarning})`:""}.`);
-        const bridge=await gdRunPracticeHeaderStripScanFromColumnScan(columnScan,{sourceLabel:String(opts.sourceLabel||gdPracticePhotoName||"Practice photo scan"),expectedLaneCount,expectedStripCount,continuationWarning,autoContinuation:true});
-        bridgeResult=bridge;
-        handoffScan=bridge?.scan||null;
-        gdPracticeDebugCheckpointSafe("value_corridor_mapping","success",{outputSummary:`Value Corridor Mapping ${stripSemanticsText}`,counts:{valueBoxes:valueCandidates.length,valueRows:generatedRows.length,columns:chosenGridColumns.length,strips},handoff:continuationWarning?{warning:continuationWarning}:{},downstream:"gdRunPracticeHeaderStripScanFromColumnScan",expectedShape});
-      }else{
-        gdSetPracticeScanStatus(`Value Corridor Mapping complete: ${stripSemanticsText}. Header Strip Scan is ready.`);
-      }
-      if(!handoffScan){
-        const bridgeReason=(bridgeResult?.outcome?.reason)||"Value Corridor Mapping is not auto-advanced.";
-        gdPracticeDebugCheckpointSafe("value_corridor_mapping","warning",{outputSummary:"Header Strip Scan auto-run result unavailable",counts:{valueBoxes:valueCandidates.length,valueRows:generatedRows.length,columns:chosenGridColumns.length,strips,expectedColumns:expectedShape.expectedLanes,expectedStrips:expectedShape.expectedStrips},handoffReason:bridgeReason});
-        gdSetPracticeScanStatus(continuationWarning?`Value Corridor Mapping complete. ${continuationWarning}`:"Value Corridor Mapping complete. Header Strip Scan ready.");
-      }
-      gdPracticeSetProtectedScanStage(handoffScan?"ocr-generated-grid":"value_corridor_mapped",handoffScan||columnScan);
+      gdPracticeDebugCheckpointSafe("value_corridor_mapping","success",{outputSummary:`Value Corridor Mapping ${stripSemanticsText}`,counts:{valueBoxes:valueCandidates.length,valueRows:generatedRows.length,columns:chosenGridColumns.length,strips}});
+      gdSetPracticeScanStatus(`Value Corridor Mapping complete: ${stripSemanticsText}. Header Strip Scan is ready.`);
     }else{
       gdPracticeDebugCheckpointSafe("value_corridor_mapping","failed",{outputSummary:"Value Corridor Mapping produced no strip crops",counts:{valueBoxes:valueCandidates.length,columns:chosenGridColumns.length}});
       gdSetPracticeScanStatus("Value Corridor Mapping found cut lines, but no column strips were created.");
     }
-    return {payload:null,scan:handoffScan||columnScan,outcome};
+    return {payload:null,scan:columnScan,outcome};
   }catch(e){
     console.warn("[GolfDaddy] Value Corridor Mapping failed",e);
     const outcome=gdValueCorridorOutcomeFromFailure(e&&e.message?e.message:"Value Corridor Mapping failed.",scanImage,{error:e&&e.stack});
@@ -18337,44 +18262,75 @@ async function gdRunValueCorridorMappingFromCheckpoint(checkpoint,opts={}){
 }
 async function gdRunPracticeHeaderStripScanFromColumnScan(columnScan=null,opts={}){
   let scan=columnScan||window.__gdPracticeColumnScan||null;
-  const handoff=scan?.valueCorridorMapping||null;
-  const expectedLaneCount=Number(opts.expectedLaneCount)||Number(handoff?.semantics?.expectedLaneCount)||gdLmLaunchMonitorTemplateColumns().length;
-  const expectedStripCount=Number(opts.expectedStripCount)||Math.max(0,expectedLaneCount-1);
-  const continuationWarning=String(opts.continuationWarning||"");
-  if(!scan||String(scan.layout?.cropMode||"")!=="value-corridor-map"){
-    const checkpoint=gdPracticeClusterCheckpoint||window.__gdPracticeClusterCheckpoint||null;
-    if(!checkpoint){
-      const outcome={state:"failed",reason:"Run Value Corridor Mapping before Header Strip Scan.",missing:["layout","scan"],received:{cropMode:String(scan?.layout?.cropMode||"none"),columns:Number(scan?.layout?.columns?.length)||0,strips:Number(scan?.results?.length)||0},expected:{columns:expectedLaneCount,strips:expectedStripCount}};
-      gdSetPracticeScanStatus(outcome.reason);
-      gdPracticeDebugCheckpointSafe("header_strip_scan","failed",{outputSummary:outcome.reason,counts:{expectedColumns:expectedLaneCount,expectedStrips:expectedStripCount,receivedColumns:outcome.received.columns,receivedStrips:outcome.received.strips},outcome});
-      return {payload:null,scan:null,outcome};
-    }
-    const mapped=await gdRunValueCorridorMappingFromCheckpoint(checkpoint,{sourceLabel:opts.sourceLabel||gdPracticePhotoName||"Practice photo scan"});
-    scan=mapped?.scan||null;
+  const sourceLabel=String(opts?.sourceLabel||gdPracticePhotoName||"Practice photo scan");
+  const handoff=scan?.valueCorridorMappingHandoff||null;
+  const sourceCanvas=scan?.sourceCanvas||scan?.preparedCanvas||scan?.directColumnSource||scan?.fullTableCanvas||handoff?.sourceCanvas||null;
+  const columns=Array.isArray(scan?.layout?.columns)?scan.layout.columns:Array.isArray(handoff?.layout?.columns)?handoff.layout.columns:[];
+  const strips=Array.isArray(scan?.results)?scan.results:Array.isArray(handoff?.strips)?handoff.strips:[];
+  const requiredFns=[
+    ["gdEnsureLaunchMonitorAliasRegistry",typeof gdEnsureLaunchMonitorAliasRegistry],
+    ["gdLoadTesseract",typeof gdLoadTesseract],
+    ["gdBuildOcrColumnCutoutAllocation",typeof gdBuildOcrColumnCutoutAllocation],
+    ["gdRunOcrColumnCutoutHeaderTextScan",typeof gdRunOcrColumnCutoutHeaderTextScan],
+    ["gdApplyOcrColumnCutoutAllocation",typeof gdApplyOcrColumnCutoutAllocation],
+    ["gdBuildPracticeCellGrid",typeof gdBuildPracticeCellGrid],
+    ["gdPracticeSetTemplateOutcome",typeof gdPracticeSetTemplateOutcome]
+  ];
+  const hasTemplateOutcome=typeof gdPracticeSetTemplateOutcome==="function";
+  const missingFn=requiredFns.find(([,type])=>type!=="function");
+  const fail=(message,details={})=>{
+    const outcome=hasTemplateOutcome?gdPracticeSetTemplateOutcome("ocr",{
+      label:"Header Strip Scan",
+      state:"failed",
+      image:sourceCanvas,
+      scan,
+      payload:null,
+      summary:details.summary||"Header strip scan did not run.",
+      reason:message,
+      nextStep:details.nextStep||"Review the Value Corridor Mapping output, then continue from Header Strip Scan."
+    }):{
+      key:"ocr",
+      label:"Header Strip Scan",
+      state:"failed",
+      image:sourceCanvas,
+      scan,
+      payload:null,
+      summary:details.summary||"Header strip scan did not run.",
+      reason:message,
+      nextStep:details.nextStep||"Review the Value Corridor Mapping output, then continue from Header Strip Scan.",
+      updatedAt:Date.now()
+    };
+    if(details.outputSummary)gdPracticeDebugCheckpointSafe("header_strip_scan","failed",{outputSummary:details.outputSummary});
+    gdSetPracticeScanStatus(message);
+    return {payload:null,scan:scan||null,outcome};
+  };
+  if(!scan) return fail("Run Value Corridor Mapping before Header Strip Scan.");
+  if(!scan.layout) return fail("Header Strip Scan needs a mapped layout from Value Corridor Mapping.");
+  if(String(scan.layout?.cropMode||"")!=="value-corridor-map"){
+    const currentMode=String(scan.layout?.cropMode||"unknown");
+    return fail(`Header Strip Scan expects value-corridor-map layout, but stage is ${currentMode}.`);
   }
-  if(!scan){
-    const outcome={state:"failed",reason:"Value Corridor Mapping did not produce strips for Header Strip Scan.",missing:["scan"],received:{columns:Number(scan?.layout?.columns?.length)||0,strips:Number(scan?.results?.length)||0},expected:{columns:expectedLaneCount,strips:expectedStripCount}};
-    gdSetPracticeScanStatus(outcome.reason);
-    gdPracticeDebugCheckpointSafe("header_strip_scan","failed",{outputSummary:outcome.reason,counts:{expectedColumns:expectedLaneCount,expectedStrips:expectedStripCount,receivedColumns:outcome.received.columns,receivedStrips:outcome.received.strips},outcome});
-    return {payload:null,scan:null,outcome};
+  if(!Array.isArray(columns)||!columns.length){
+    return fail("Header Strip Scan found no corridor columns to assign. Re-run Value Corridor Mapping with a cleaner photo.");
   }
-  const handoffColumns=Array.isArray(handoff?.columns)&&handoff.columns.length?handoff.columns:Array.isArray(scan.layout?.columns)?scan.layout.columns:[];
-  const handoffResults=Array.isArray(handoff?.results)&&handoff.results.length?handoff.results:Array.isArray(scan.results)?scan.results:[];
-  if(!handoffColumns.length||!handoffResults.length){
-    const missing=[];
-    if(!handoffColumns.length)missing.push("columns");
-    if(!handoffResults.length)missing.push("results");
-    const outcome={state:"failed",reason:`Header Strip Scan rejected value corridor handoff: ${missing.join(" and ")} missing.`,missing,expected:{columns:expectedLaneCount,strips:expectedStripCount},received:{columns:Number(scan?.layout?.columns?.length)||0,strips:Number(scan?.results?.length)||0},handoff};
-    gdSetPracticeScanStatus(outcome.reason);
-    gdPracticeDebugCheckpointSafe("header_strip_scan","failed",{outputSummary:outcome.reason,counts:{expectedColumns:expectedLaneCount,expectedStrips:expectedStripCount,receivedColumns:outcome.received.columns,receivedStrips:outcome.received.strips},outcome});
-    return {payload:null,scan, outcome};
+  if(!Array.isArray(strips)||!strips.length){
+    return fail("Header Strip Scan found no value strips. Review the corridor mapping and scan again.");
   }
-  scan.layout.columns=handoffColumns;
-  scan.results=handoffResults;
+  if(!sourceCanvas&&!scan.fullTableCanvas){
+    return fail("Header Strip Scan missing a source image reference for strip header OCR.");
+  }
+  if(missingFn){
+    return fail(`Header Strip Scan prerequisite missing: ${missingFn[0]}.`);
+  }
+  if(strips.length!==columns.length){
+    gdPracticeFeedback(`Value Corridor Mapping produced ${strips.length} strips for ${columns.length} columns; continuing with best effort.`, "warning");
+  }
+  scan.results=strips;
+  if(!scan.sourceCanvas&&sourceCanvas)scan.sourceCanvas=sourceCanvas;
+  if(!scan.layout?.columns&&columns.length)scan.layout=Object.assign({},scan.layout,{columns});
   gdSetPracticePhotoProcessing(true,{progress:44,stageIndex:0,preserveClubs:true});
   gdSetPracticeScanStatus("Header Strip Scan: reading the top of each value strip...");
-  const strips=scan.results.length;
-  gdPracticeDebugCheckpointSafe("header_strip_scan","running",{inputSummary:`${Number(scan?.layout?.columns?.length)||0} column strips`,counts:{expectedColumns:expectedLaneCount,expectedStrips:expectedStripCount,receivedColumns:Number(scan?.layout?.columns?.length)||0,receivedStrips:strips}});
+  gdPracticeDebugCheckpointSafe("header_strip_scan","running",{inputSummary:`${Number(columns.length)||0} column strips`,debugSummary:handoff?.debugSummary});
   try{
     await gdEnsureLaunchMonitorAliasRegistry().catch(e=>{
       console.warn("[GolfDaddy] launch monitor aliases unavailable; using inline fallback aliases",e);
@@ -18431,17 +18387,24 @@ async function gdRunPracticeHeaderStripScanFromColumnScan(columnScan=null,opts={
       outputSummary:`Header Strip Scan allocated ${allocatedColumns}/${cutoutColumns} columns`,
       counts:{headersAllocated:allocatedColumns,headersTotal:cutoutColumns,headerTextWords,headerTextAttempts,gridRows,gridColumns,gridCells}
     });
-    if(continuationWarning||(expectedStripCount&&strips!==expectedStripCount)||scan.valueCorridorMapping?.semantics?.inferredLanes!==expectedLaneCount){
-      gdSetPracticeScanStatus(`Header Strip Scan running with ${strips} corridor results. Expected strip count may differ.`);
-    }
     gdSetPracticeScanStatus(`Header Strip Scan complete: ${allocatedColumns}/${cutoutColumns} column strip${cutoutColumns===1?"":"s"} assigned. Cell values are parked until you continue.`);
     return {payload:null,scan,outcome};
   }catch(e){
     console.warn("[GolfDaddy] Header Strip Scan failed",e);
-    const outcome={state:"failed",reason:e&&e.message?e.message:"Header Strip Scan failed",expected:{columns:expectedLaneCount,strips:expectedStripCount},received:{columns:Number(scan?.layout?.columns?.length)||0,strips:Number(scan?.results?.length)||0},source:"header-strip-scan",error:e&&e.message?e.message:""};
-    gdPracticeDebugCheckpointSafe("header_strip_scan","failed",{outputSummary:e&&e.message?e.message:"Header Strip Scan failed",technicalDetails:e&&e.stack});
+    const failureMessage=e&&e.message?e.message:"Header Strip Scan failed";
+    gdPracticeDebugCheckpointSafe("header_strip_scan","failed",{outputSummary:failureMessage,technicalDetails:e&&e.stack});
     gdSetPracticeScanStatus(e&&e.message?e.message:"Header Strip Scan failed.");
-    return {payload:null,scan, outcome};
+    const failureOutcome=gdPracticeSetTemplateOutcome("ocr",{
+      label:"Header Strip Scan",
+      state:"failed",
+      image:sourceCanvas,
+      scan:scan||null,
+      payload:null,
+      summary:failureMessage,
+      reason:failureMessage,
+      nextStep:"Review the strip geometry and rerun Value Corridor Mapping."
+    });
+    return {payload:null,scan:scan||null,outcome:failureOutcome};
   }finally{
     gdPracticeReleaseProcessingControlsSafe("header-strip-finally");
   }
@@ -18720,10 +18683,6 @@ async function gdRunPracticeGridExperiment(kind="ocr-generated",opts={}){
   }
   if(requestedKind==="ocr-generated"){
     const existing=window.__gdPracticeColumnScan||null;
-    if(existing&&String(existing.layout?.cropMode||"")==="ocr-generated-grid"){
-      gdPracticeFeedback("Header Strip Scan already assigned.","info");
-      return existing;
-    }
     if(existing&&String(existing.layout?.cropMode||"")==="value-corridor-map"){
       const result=await gdRunPracticeHeaderStripScanFromColumnScan(existing,{label:method.label});
       return result?.scan||null;
@@ -18764,13 +18723,7 @@ async function gdRunDefaultPracticePhotoScanFromCheckpoint(checkpoint,opts={}){
     const scan=result?.scan||result?.outcome?.scan||null;
     const strips=Array.isArray(scan?.results)?scan.results.length:0;
     if(strips){
-      if(String(scan?.layout?.cropMode||"")==="ocr-generated-grid"){
-        const headerRows=Number(scan?.cellGrid?.rows?.length)||0;
-        const headerColumns=Number(scan?.cellGrid?.columns?.length)||0;
-        gdPracticeSetContinueScanReady(headerRows&&headerColumns,{label:"Read cell values",stage:"headers_assigned",showGridTools:true});
-      }else{
-        gdPracticeSetContinueScanReady(false,{label:"Header strip scan",stage:"value_corridor_mapped",showGridTools:true});
-      }
+      gdPracticeSetContinueScanReady(true,{label:"Header strip scan",stage:"value_corridor_mapped",showGridTools:true});
       gdPracticeRefreshDebugTools();
       return scan;
     }else{
