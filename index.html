@@ -18244,7 +18244,20 @@ async function gdRunValueCorridorMappingFromCheckpoint(checkpoint,opts={}){
     if(strips){
       gdRenderValueCorridorMappingOutput(columnScan);
       gdPracticeDebugCheckpointSafe("value_corridor_mapping","success",{outputSummary:`Value Corridor Mapping ${stripSemanticsText}`,counts:{valueBoxes:valueCandidates.length,valueRows:generatedRows.length,columns:chosenGridColumns.length,strips}});
-      gdSetPracticeScanStatus(`Value Corridor Mapping complete: ${stripSemanticsText}. Header Strip Scan is ready.`);
+      const sourceLabel=String(opts?.sourceLabel||checkpoint?.clusterMode||"manual-corner-flatten");
+      gdSetPracticeScanStatus(`Value Corridor Mapping complete. Passing ${strips} corridor result${strips===1?"":"s"} to Header Strip Scan...`);
+      const headerStripResult=await gdRunPracticeHeaderStripScanFromColumnScan(columnScan,{
+        sourceLabel,
+        autoContinuation:true
+      });
+      if(headerStripResult?.scan?.layout?.cropMode==="ocr-generated-grid"){
+        gdSetPracticeScanStatus("Header Strip Scan complete from Value Corridor Mapping.");
+      }else{
+        const headerFailureReason=headerStripResult?.outcome?.reason||headerStripResult?.outcome?.summary||"Header Strip Scan did not produce a usable grid.";
+        gdPracticeSetProtectedScanStage("value_corridor_mapped",columnScan);
+        gdSetPracticeScanStatus(`Value Corridor Mapping complete, but Header Strip Scan is paused: ${headerFailureReason}`);
+        gdPracticeRefreshDebugTools();
+      }
     }else{
       gdPracticeDebugCheckpointSafe("value_corridor_mapping","failed",{outputSummary:"Value Corridor Mapping produced no strip crops",counts:{valueBoxes:valueCandidates.length,columns:chosenGridColumns.length}});
       gdSetPracticeScanStatus("Value Corridor Mapping found cut lines, but no column strips were created.");
