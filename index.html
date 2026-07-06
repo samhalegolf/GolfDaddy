@@ -18432,7 +18432,7 @@ async function gdRunPracticeHeaderStripScanFromColumnScan(columnScan=null,opts={
       counts:{headersAllocated:allocatedColumns,headersTotal:cutoutColumns,headerTextWords,headerTextAttempts,gridRows,gridColumns,gridCells}
     });
     if(continuationWarning||(expectedStripCount&&strips!==expectedStripCount)||scan.valueCorridorMapping?.semantics?.inferredLanes!==expectedLaneCount){
-      gdPracticeSetPracticeScanStatus(`Header Strip Scan running with ${strips} corridor results. Expected strip count may differ.`);
+      gdSetPracticeScanStatus(`Header Strip Scan running with ${strips} corridor results. Expected strip count may differ.`);
     }
     gdSetPracticeScanStatus(`Header Strip Scan complete: ${allocatedColumns}/${cutoutColumns} column strip${cutoutColumns===1?"":"s"} assigned. Cell values are parked until you continue.`);
     return {payload:null,scan,outcome};
