@@ -12632,11 +12632,151 @@ function gdPixelTightDetectedValueOverlayBoxes(image,box,sourceW,sourceH){
     .filter(Boolean);
   return boxes.slice(0,12);
 }
+function gdNormalizeValueCorridorHeader(value){
+  return String(value||"").replace(/\s+/g," ").trim();
+}
+function gdValueCorridorStripHeaderPairs(columnScan){
+  const headers=[];
+  const cutouts=Array.isArray(columnScan?.columnCutoutAllocation?.cutouts)?columnScan.columnCutoutAllocation.cutouts:[];
+  if(cutouts.length){
+    cutouts.forEach(cutout=>{
+      headers.push(gdNormalizeValueCorridorHeader(
+        cutout?.allocatedLabel||cutout?.rawHeaderText||cutout?.genericLabel
+      ));
+    });
+  }
+  if(!headers.some(Boolean)){
+    const columns=Array.isArray(columnScan?.layout?.columns)?columnScan.layout.columns:[];
+    columns.forEach((column,index)=>{
+      headers.push(gdNormalizeValueCorridorHeader(
+        column?.allocatedLabel||column?.rawHeaderText||column?.label||column?.key||`Column ${index+1}`
+      ));
+    });
+  }
+  if(!headers.some(Boolean)){
+    const template=Array.isArray(gdLmLaunchMonitorTemplateColumns)?gdLmLaunchMonitorTemplateColumns():[];
+    headers.push(...template.map(item=>gdNormalizeValueCorridorHeader(item?.label)));
+  }
+  return headers;
+}
+function gdInferValueCorridorStripSemantics(columnScan){
+  const strips=Array.isArray(columnScan?.results)?columnScan.results.length:Number(columnScan?.layout?.columns?.length)||0;
+  const columns=Array.isArray(columnScan?.layout?.columns)?columnScan.layout.columns:[];
+  const headers=gdValueCorridorStripHeaderPairs(columnScan).filter(Boolean);
+  const headerCount=headers.length;
+  const hasColumns=columns.length;
+  let objectType="value-column-regions";
+  let inferredLanes=strips;
+  let reason="default assumption: final objects are value-column regions";
+  if(strips>=2){
+    if(headerCount&&strips===Math.max(0,headerCount-1)){
+      objectType="separator-strips";
+      inferredLanes=headerCount;
+      reason="strip count is one less than mapped headers, consistent with separator geometry";
+    }else if(hasColumns&&strips===Math.max(0,hasColumns-1)){
+      objectType="separator-strips";
+      inferredLanes=hasColumns;
+      reason="strip count tracks gaps between generated column bounds";
+    }else if(hasColumns&&strips===hasColumns){
+      objectType="value-column-regions";
+      inferredLanes=strips;
+      reason="strip count matches generated column bounds count";
+    }else if(hasColumns&&strips===hasColumns+1){
+      objectType="separator-strips";
+      inferredLanes=hasColumns+1;
+      reason="strip count exceeds bounds by one, consistent with edge-inclusive header lanes";
+    }
+  }
+  return {
+    strips,
+    columns:hasColumns,
+    headerCount,
+    objectType,
+    inferredLanes:Math.max(0,inferredLanes),
+    reason
+  };
+}
+function gdValueCorridorStripSemanticsText(semantics){
+  if(!semantics||!Number.isFinite(Number(semantics.strips))) return "";
+  return semantics.objectType==="separator-strips"
+    ?`${Number(semantics.strips)} vertical separator strips found; ${Math.max(0,Number(semantics.inferredLanes))} value lanes inferred`
+    :`${Number(semantics.strips)} value column regions found`;
+}
+function gdValueCorridorStripEvidenceSummary(columnScan){
+  const strips=Array.isArray(columnScan?.results)?columnScan.results:[];
+  if(!strips.length)return "";
+  const semantics=gdInferValueCorridorStripSemantics(columnScan);
+  const headers=gdValueCorridorStripHeaderPairs(columnScan);
+  const format=(value)=>Number.isFinite(Number(value))?Math.round(Number(value)):"na";
+  const lines=strips.map((strip,index)=>{
+    const label=String(strip?.column?.label||strip?.key||`C${String(index+1).padStart(2,"0")}`);
+    const x1=format(strip?.x1);
+    const x2=format(strip?.x2);
+    const width=Number.isFinite(Number(strip?.x1))&&Number.isFinite(Number(strip?.x2))
+      ?Math.max(0,Math.round(Number(strip?.x2)-Number(strip?.x1)))
+      :"na";
+    const y1=format(strip?.y1);
+    const y2=format(strip?.y2);
+    const source=gdNormalizeValueCorridorHeader(strip?.source||strip?.column?.source||strip?.column?.borderSource||strip?.column?.valueSkewerStatus||"ocr-value-corridor");
+    const reason=gdNormalizeValueCorridorHeader(strip?.reason||"");
+    const debug=strip?.labelDebug||{};
+    const sourceTag=source||reason||"ocr-value-corridor";
+    const leftHeader=gdNormalizeValueCorridorHeader(headers[index]);
+    const rightHeader=gdNormalizeValueCorridorHeader(headers[index+1]);
+    const headerText=(leftHeader||`C${String(index+1).padStart(2,"0")}`)+" | "+(rightHeader||`C${String(index+2).padStart(2,"0")}`);
+    const labelState=debug.labelDrawn===false
+      ?`not drawn${debug.reason?`; ${debug.reason}`:""}`
+      :`drawn at (${format(debug.labelX)},${format(debug.labelY)})${debug.labelClampedX||debug.labelClampedY||debug.labelMovedDown?` [clamped/moved]`: ""}${debug.labelFallbackDrawn?`; fallback at (${format(debug.labelFallbackX)},${format(debug.labelFallbackY)})`: ""}`;
+    const reasonText=reason||debug.reason||"";
+    return `${label}: x=${x1}-${x2}, center=${format(strip?.centerX)}, width=${width}, y=${y1}-${y2}, source=${sourceTag}, between ${headerText}, ${labelState}${reasonText?`; source-reason=${reasonText}`:""}`;
+  });
+  return `Final ${semantics.objectType==="separator-strips"?"separator strips":"value column regions"} (${lines.length}):\n${lines.map(line=>`- ${line}`).join("\n")}`;
+}
 function gdDrawValueCorridorMappingOverlay(ctx,columnScan,sourceW,sourceH,scale){
   const columns=Array.isArray(columnScan?.layout?.columns)?columnScan.layout.columns:[];
-  const boxes=gdValueCorridorMappingBoxes(columnScan);
+  const results=Array.isArray(columnScan?.results)?columnScan.results:[];
+  const semantics=gdInferValueCorridorStripSemantics(columnScan);
   const sourceImage=columnScan?.sourceCanvas||columnScan?.preparedCanvas||columnScan?.directColumnSource||null;
+  const headerPairs=gdValueCorridorStripHeaderPairs(columnScan);
+  const debugEnabled=gdPracticeCanShowScanDebug();
+  const boxes=gdValueCorridorMappingBoxes(columnScan);
   const step=Math.max(1,Math.ceil(boxes.length/380));
+  const stripDebug=[];
+  const usedRects=[];
+  const reservedTop=Math.max(52,Math.round(sourceH*0.058),16);
+  const reservedBottom=Math.max(16,Math.round(sourceH*0.028));
+  const labelLineHeight=Math.max(12,Math.round(14/Math.max(.001,scale)));
+  const overlaps=(a,b)=>!(a.x+a.w<=b.x||b.x+b.w<=a.x||a.y+a.h<=b.y||b.y+b.h<=a.y);
+  const drawC01FallbackLabel=(rect,labelText,fallbackReason)=>{
+    if(!debugEnabled||labelText!=="C01"||!rect)return;
+    const fallbackText=`${labelText}*`;
+    const fallbackFont=`${Math.max(6,Math.round(10/Math.max(.001,scale)))}px ui-monospace,Menlo,monospace`;
+    ctx.font=fallbackFont;
+    const fallbackMetrics=ctx.measureText(fallbackText);
+    const fallbackPad=Math.max(2,Math.round(3/Math.max(.001,scale)));
+    const fallbackW=Math.max(1,Math.min(Math.round(sourceW||0)-4,Math.max(1,Math.round(fallbackMetrics.width+fallbackPad*2))));
+    const fallbackH=Math.max(1,Math.round(labelLineHeight*0.92));
+    const fallbackRect={
+      x:Math.max(2,Math.min(sourceW-2-fallbackW,Math.round(rect.x))),
+      y:Math.min(sourceH-reservedBottom-fallbackH,Math.max(reservedTop,rect.y+fallbackH*1.2)),
+      w:fallbackW,
+      h:fallbackH
+    };
+    const fallbackX=Math.max(fallbackPad,fallbackRect.x+fallbackPad);
+    const fallbackY=Math.round(fallbackRect.y+fallbackRect.h/2);
+    if(!Number.isFinite(fallbackRect.x)||!Number.isFinite(fallbackRect.y)||fallbackRect.w<1||fallbackRect.h<1||fallbackRect.y<reservedTop||fallbackRect.y+fallbackRect.h>sourceH-reservedBottom) return;
+    ctx.fillStyle="rgba(5,8,6,.66)";
+    ctx.fillRect(fallbackRect.x,fallbackRect.y,fallbackRect.w,fallbackRect.h);
+    ctx.fillStyle="#fff";
+    ctx.textBaseline="middle";
+    ctx.fillText(fallbackText,fallbackX,fallbackY);
+    if(rect.__gdDebug){
+      rect.__gdDebug.labelFallbackDrawn=true;
+      rect.__gdDebug.labelFallbackX=fallbackX;
+      rect.__gdDebug.labelFallbackY=fallbackY;
+      rect.__gdDebug.labelFallbackReason=fallbackReason||"";
+    }
+  };
   boxes.forEach((box,index)=>{
     if(index%step!==0)return;
     gdPixelTightDetectedValueOverlayBoxes(sourceImage,box,sourceW,sourceH).forEach(tight=>{
@@ -12650,6 +12790,8 @@ function gdDrawValueCorridorMappingOverlay(ctx,columnScan,sourceW,sourceH,scale)
   });
   const cutXs=[];
   columns.forEach((column,index)=>{
+    const result=results[index]||null;
+    const label=String(column.label||column.key||`C${String(index+1).padStart(2,"0")}`);
     const left=Math.max(0,Math.min(sourceW,Number.isFinite(Number(column.dividerLeft))?Number(column.dividerLeft):(Number(column.left)||0)));
     const right=Math.max(left+1,Math.min(sourceW,Number.isFinite(Number(column.dividerRight))?Number(column.dividerRight):(Number(column.right)||left+1)));
     const valueCx=Math.max(left,Math.min(right,Number.isFinite(Number(column.valueCx))?Number(column.valueCx):(Number(column.cx)||((left+right)/2))));
@@ -12672,18 +12814,155 @@ function gdDrawValueCorridorMappingOverlay(ctx,columnScan,sourceW,sourceH,scale)
     ctx.moveTo(valueCx,0);
     ctx.lineTo(valueCx,sourceH);
     ctx.stroke();
-    const label=String(column.label||column.key||`C${index+1}`);
+    const debug=Object.assign({
+      index:index+1,
+      label,
+      stripType:semantics.objectType,
+      source:gdNormalizeValueCorridorHeader(column?.source||column?.borderSource||column?.valueSkewerStatus||"ocr-value-corridor"),
+      sourceX1:left,
+      sourceX2:right,
+      x1:left,
+      x2:right,
+      centerX:(left+right)/2,
+      width:right-left,
+      y1:result?.y1,
+      y2:result?.y2,
+      leftHeader:gdNormalizeValueCorridorHeader(headerPairs[index]),
+      rightHeader:gdNormalizeValueCorridorHeader(headerPairs[index+1]),
+      labelDrawn:false,
+      labelX:undefined,
+      labelY:undefined,
+      labelClampedX:false,
+      labelClampedY:false,
+      movedDown:false,
+      labelMovedDown:false,
+      labelFallbackDrawn:false,
+      labelFallbackX:undefined,
+      labelFallbackY:undefined,
+      labelFallbackReason:"",
+      reason:"",
+      labelCollisionAvoided:false,
+      sourceSemantics:semantics.objectType
+    });
+    if(!Number.isFinite(left)||!Number.isFinite(right)||right<=left+1){
+      debug.reason="invalid strip geometry";
+      if(debugEnabled){
+        debug.labelDrawn=false;
+        stripDebug.push(Object.assign({},debug));
+      }
+      if(result)result.labelDebug=Object.assign({},debug);
+      return;
+    }
     ctx.font=`${Math.max(8,10/Math.max(.001,scale))}px ui-monospace,Menlo,monospace`;
     const metrics=ctx.measureText(label);
     const pad=3/Math.max(.001,scale);
-    const tx=Math.max(3,Math.min(sourceW-metrics.width-pad*2-3,left+4/Math.max(.001,scale)));
-    const ty=12/Math.max(.001,scale);
+    const baseY=Math.max(reservedTop,Math.round(14/Math.max(.001,scale)));
+    const safeMinX=Math.max(2,Math.round(pad*3));
+    const safeMaxX=Math.max(safeMinX,Math.max(0,Math.round((Number.isFinite(sourceW)?sourceW:0)-Math.max(0,metrics.width)-pad*2-2)));
+    const baseTx=Math.round((left+right)/2-metrics.width/2);
+    let tx=Math.max(safeMinX,Math.min(safeMaxX,baseTx));
+    let ty=Math.max(baseY,baseY);
+    let clampedX=tx!==baseTx;
+    let clampedY=ty!==baseY;
+    const rect={x:tx-pad,y:ty-labelLineHeight/2,w:Math.max(1,metrics.width+pad*2),h:labelLineHeight,__gdDebug:debug};
+    const maxRectW=Math.max(1,Math.max(0,sourceW-4));
+    if(rect.w>maxRectW){
+      rect.w=maxRectW;
+      rect.x=Math.max(2,Math.min(safeMaxX,Math.max(2,sourceW-rect.w-2)));
+      tx=Math.max(safeMinX,rect.x+pad);
+      clampedX=true;
+      debug.reason=(debug.reason?`${debug.reason}; `:"")+"label width exceeded image width";
+    }
+    if(rect.x<2){
+      rect.x=2;
+      tx=rect.x+pad;
+      clampedX=true;
+      debug.reason=(debug.reason?`${debug.reason}; `:"")+"clamped at left image edge";
+    }
+    if(rect.x+rect.w>sourceW-2){
+      rect.x=Math.max(2,Math.round(sourceW-2-rect.w));
+      tx=rect.x+pad;
+      clampedX=true;
+      debug.reason=(debug.reason?`${debug.reason}; `:"")+"clamped at right image edge";
+    }
+    if(rect.y<reservedTop){
+      rect.y=reservedTop;
+      ty=rect.y+rect.h/2;
+      clampedY=true;
+      debug.reason=(debug.reason?`${debug.reason}; `:"")+"moved down from top status/control area";
+    }
+    const maxY=Math.max(rect.h+1,sourceH-reservedBottom-1);
+    let collisionMoves=0;
+    while(usedRects.some(item=>overlaps(rect,item))){
+      rect.y=Math.round(rect.y+labelLineHeight*0.9);
+      ty=rect.y+rect.h/2;
+      clampedY=true;
+      debug.labelCollisionAvoided=true;
+      collisionMoves+=1;
+      if(rect.y+rect.h>=maxY)break;
+    }
+    if(rect.y+rect.h>maxY){
+      rect.y=Math.max(0,maxY-rect.h);
+      ty=rect.y+rect.h/2;
+      clampedY=true;
+      debug.reason=(debug.reason?`${debug.reason}; `:"")+"clamped inside image after collision resolution";
+    }
+    if(collisionMoves>0){
+      debug.reason=(debug.reason?`${debug.reason}; `:"")+`moved down ${collisionMoves} step${collisionMoves===1?"":"s"} to avoid overlap`;
+      if(rect.y+rect.h>maxY)debug.reason=(debug.reason?`${debug.reason}; `:"")+`collision could not fully avoid overlap`;
+    }
+    if(collisionMoves>0&&rect.y+rect.h>sourceH-reservedBottom-labelLineHeight){
+      debug.reason=(debug.reason?`${debug.reason}; `:"")+`label overlap risk with existing strips remains`;
+      if(label==="C01"&&debugEnabled){
+        drawC01FallbackLabel(rect,label,debug.reason);
+      }
+      if(result)result.labelDebug=Object.assign({},debug);
+      if(debugEnabled){
+        debug.labelDrawn=false;
+        stripDebug.push(Object.assign({},debug));
+      }
+      return;
+    }
+    if(!Number.isFinite(rect.x)||!Number.isFinite(rect.y)||!Number.isFinite(rect.w)||!Number.isFinite(rect.h)||rect.w<1||rect.h<1){
+      debug.reason="invalid label geometry";
+      if(label==="C01"&&debugEnabled){
+        drawC01FallbackLabel(rect,label,debug.reason);
+      }
+      if(result)result.labelDebug=Object.assign({},debug);
+      if(debugEnabled){
+        stripDebug.push(Object.assign({},debug));
+      }
+      return;
+    }
+    if(clampedX)debug.labelClampedX=true;
+    if(clampedY)debug.labelClampedY=true;
+    if(collisionMoves>0)debug.movedDown=true;
+    if(collisionMoves>0)debug.labelMovedDown=true;
+    if(debugEnabled&&debug.reason===""){
+      debug.reason=clampedX||clampedY?"label clamped":"";
+    }
+    debug.labelDrawn=true;
+    debug.labelX=Math.round(Math.min(sourceW-(metrics.width/2)-1,Math.max(0,tx)));
+    debug.labelY=Math.round(ty);
+    if(result)result.labelDebug=Object.assign({},debug);
     ctx.fillStyle="rgba(5,8,6,.88)";
-    ctx.fillRect(tx-pad,ty-8/Math.max(.001,scale),metrics.width+pad*2,14/Math.max(.001,scale));
+    ctx.fillRect(Math.max(0,Math.round(rect.x)),Math.max(0,Math.round(rect.y)),Math.max(1,Math.round(rect.w)),Math.max(1,Math.round(rect.h)));
     ctx.fillStyle="#fff";
     ctx.textBaseline="middle";
-    ctx.fillText(label,tx,ty);
+    ctx.fillText(label,Math.max(pad,rect.x+pad),Math.round(ty));
+    usedRects.push(rect);
+    stripDebug.push(Object.assign({},debug));
+    if(label==="C01"&&debugEnabled&&(debug.labelClampedX||debug.labelClampedY||debug.reason||debug.labelMovedDown||debug.labelCollisionAvoided)){
+      drawC01FallbackLabel(rect,label,debug.reason);
+    }
   });
+  if(debugEnabled){
+    columnScan.__gdValueCorridorStripDebug=stripDebug;
+    columnScan.__gdValueCorridorStripEvidence=gdValueCorridorStripEvidenceSummary(columnScan);
+    console.debug("[GolfDaddy] Value Corridor Mapping strip evidence",stripDebug);
+  }else{
+    columnScan.__gdValueCorridorStripDebug=stripDebug;
+  }
 }
 function gdPracticeClusterQuadMetaText(cluster,source){
   if(!cluster)return "";
@@ -12795,6 +13074,8 @@ function gdRenderValueGridCropPreview(target){
   if(target?.layout&&flattened){
     const evidenceBoxCount=Number(target?.generatedValueCandidates?.length)||Number(target?.valueCluster?.valueBoxes?.length)||0;
     const generatedBandCount=Number(target?.generatedRowBands?.length)||Number(target?.valueCluster?.rowBands?.length)||0;
+    const corridorEvidence=gdValueCorridorStripEvidenceSummary(target);
+    const corridorSemantics=gdInferValueCorridorStripSemantics(target);
     panels.push(makePanel(isValueCorridorMap?"Value Corridor Mapping evidence":(isOcrGeneratedGrid?"OCR geometry evidence":(isFlatTemplate?"Flat table template grid":"Parked column splitter tool")),{
       open:!!isOutputGrid,
       className:isOutputGrid?"gdFlatTemplatePreview":"gdParkedToolPreview",
@@ -12812,7 +13093,14 @@ function gdRenderValueGridCropPreview(target){
           `Column cut source: ${String(target.layout.dividerSource||"flat-number-box-gaps")}`,
           isOcrGeneratedGrid?`Row cut source: ${String(target.layout.rowDividerSource||"ocr-number-box-gaps")}`:"",
           isValueCorridorMap?`Value boxes: ${evidenceBoxCount}  Row geometry bands: ${generatedBandCount}`:"",
+          isValueCorridorMap
+            ?`Value corridor geometry: ${corridorSemantics.objectType==="separator-strips"?"separator strips between lanes":"value-column regions"}`
+            :``,
+          isValueCorridorMap&&corridorSemantics.objectType==="separator-strips"
+            ?`Inferred lanes: ${corridorSemantics.inferredLanes}`
+            :``,
           isValueCorridorMap?`Protected stop: headers, cell values and native import have not run.`:"",
+          corridorEvidence?`Evidence detail:\n${corridorEvidence}`:"",
           isOcrGeneratedGrid
             ?`This is geometry evidence only: OCR has identified number-like boxes. Header cutout allocation is shown below; cell values are not read yet.`
             :(isValueCorridorMap?"OCR is used here only to detect value-like blobs and empty corridors. Header Strip Scan is the next explicit stage.":`Fit error: ${(Number(target?.flatTemplateFit?.rms)||0).toFixed(1)} px rms / ${(Number(target?.flatTemplateFit?.maxResidual)||0).toFixed(1)} max`)
@@ -15597,7 +15885,11 @@ function gdUpdatePracticeScanDebugSummary(columnScan){
     const boxes=gdValueCorridorMappingBoxes(columnScan).length;
     const rows=Number(columnScan?.valueCluster?.rowCount)||Number(columnScan?.layout?.valueCluster?.rowCount)||0;
     const dividerSource=String(columnScan?.layout?.dividerSource||"unknown");
-    summary.textContent=`Value Corridor Mapping - ${strips||columns} column strips - ${boxes} value boxes - ${rows||"-"} value rows - cuts: ${dividerSource} - headers pending`;
+    const semantics=gdInferValueCorridorStripSemantics(columnScan);
+    const summaryText=semantics.objectType==="separator-strips"
+      ?`${semantics.strips} separator strips (inferred lanes: ${semantics.inferredLanes})`
+      :`${semantics.strips} value column regions`;
+    summary.textContent=`Value Corridor Mapping - ${summaryText} - ${boxes} value boxes - ${rows||"-"} value rows - cuts: ${dividerSource} - headers pending`;
     return;
   }
   if(String(columnScan?.layout?.cropMode||"")==="ocr-generated-grid"){
@@ -16838,6 +17130,7 @@ function gdRenderValueCorridorMappingCheckpoint(columnScan){
   const boxes=gdValueCorridorMappingBoxes(columnScan).length;
   const rows=Number(columnScan?.valueCluster?.rowCount)||Number(columnScan?.layout?.valueCluster?.rowCount)||0;
   const dividerSource=String(columnScan?.layout?.dividerSource||"unknown");
+  const semantics=gdInferValueCorridorStripSemantics(columnScan);
   const bodyNode=document.createElement("button");
   bodyNode.type="button";
   bodyNode.className="gdPracticeScanCheckpointAction";
@@ -16846,7 +17139,7 @@ function gdRenderValueCorridorMappingCheckpoint(columnScan){
   gdRenderPracticeScanCheckpoint({
     tone:"ready",
     title:"Value Corridor Mapping complete",
-    summary:"OCR has only detected value-like blobs and empty vertical corridors. Column strips are cut; headers, cell values and native import are still parked.",
+    summary:`OCR has only detected value-like blobs and empty vertical corridors. ${semantics.objectType==="separator-strips"?"Separator strips are visible and lane count was inferred from headers.":"Value strips were found as column regions."} Headers, cell values and native import are still parked.`,
     stats:[
       {label:"Strips",value:strips||columns||"-"},
       {label:"Boxes",value:boxes||"-"},
@@ -16873,7 +17166,14 @@ function gdRenderPracticeColumnStripsOnly(columnScan){
   const stripCount=Array.isArray(columnScan?.results)?columnScan.results.length:0;
   const isValueCorridorMap=String(columnScan?.layout?.cropMode||"")==="value-corridor-map";
   if(text)text.value="";
-  if(subhead)subhead.textContent=isValueCorridorMap?"Value Corridor Mapping - column strips only":"Flat image - before output table";
+  if(subhead){
+    const semantics=gdInferValueCorridorStripSemantics(columnScan);
+    subhead.textContent=isValueCorridorMap
+      ?(semantics.objectType==="separator-strips"
+        ?`Value Corridor Mapping - ${semantics.strips} separator strips; ${semantics.inferredLanes} lanes`
+        :`Value Corridor Mapping - ${semantics.strips} value-column regions`)
+      :"Flat image - before output table";
+  }
   const sourceCanvas=columnScan?.sourceCanvas||columnScan?.preparedCanvas;
   if(mainCanvas&&sourceCanvas){
     const maxW=1200;
@@ -17795,19 +18095,32 @@ function gdValueCorridorStripResults(scanImage,columns,valueCluster){
     const left=Number.isFinite(Number(column.dividerLeft))?Number(column.dividerLeft):Number(column.left);
     const right=Number.isFinite(Number(column.dividerRight))?Number(column.dividerRight):Number(column.right);
     if(!Number.isFinite(left)||!Number.isFinite(right)||right<=left+3)return null;
-    const colW=right-left;
+    const x1=left;
+    const x2=right;
+    const colWidth=Number.isFinite(Number(x2-x1))?Math.max(0,Number(x2-x1)):0;
+    const colW=colWidth;
     const padX=Math.max(3,Math.min(14,colW*.06));
     const padY=Math.max(6,Math.min(28,(bottom-top)*.025));
-    const x=Math.max(0,left-padX);
+    const x=Math.max(0,x1-padX);
     const y=Math.max(0,top-padY);
-    const r=Math.min(width,right+padX);
+    const r=Math.min(width,x2+padX);
     const b=Math.min(height,bottom+padY);
+    const source=gdNormalizeValueCorridorHeader(column?.source||column?.borderSource||column?.valueSkewerStatus||"ocr-value-clearance-corridor");
+    const reason="column strip crop from detected corridor bounds";
     const crop=gdCropCanvasRegion(scanImage,{x,y,width:Math.max(1,r-x),height:Math.max(1,b-y)},1);
     return {
-      key:label,
+      key,
+      source,
+      reason,
       column:Object.assign({},column,{key,label,left,right,dividerLeft:left,dividerRight:right}),
-      acceptXGlobal:{left,right},
-      acceptXLocal:{left:left-crop.x,right:right-crop.x},
+      acceptXGlobal:{left:x1,right:x2},
+      acceptXLocal:{left:x1-crop.x,right:x2-crop.x},
+      x1:x1,
+      x2:x2,
+      centerX:(x1+x2)/2,
+      width:colWidth,
+      y1:y,
+      y2:b,
       crop,
       data:{text:"",words:[],lines:[]},
       localData:{text:"",words:[],lines:[]},
@@ -17901,7 +18214,9 @@ async function gdRunValueCorridorMappingFromCheckpoint(checkpoint,opts={}){
       fallbackFrom:String(opts.sourceLabel||checkpoint?.clusterMode||"manual-corner-flatten")
     };
     columnScan.results=gdValueCorridorStripResults(scanImage,chosenGridColumns,valueCluster);
+    columnScan.__gdValueCorridorStripSemantics=gdInferValueCorridorStripSemantics(columnScan);
     const strips=columnScan.results.length;
+    const stripSemanticsText=gdValueCorridorStripSemanticsText(columnScan.__gdValueCorridorStripSemantics);
     const outcome=gdPracticeSetTemplateOutcome("ocr",{
       label:"Value Corridor Mapping",
       state:strips?"success":"failed",
@@ -17912,15 +18227,15 @@ async function gdRunValueCorridorMappingFromCheckpoint(checkpoint,opts={}){
       wordCount:Number(geometryOcrData.words?.length)||0,
       candidateCount:valueCandidates.length,
       summary:strips
-        ?`Value Corridor Mapping found ${valueCandidates.length} value-like OCR boxes and cut ${strips} column strip${strips===1?"":"s"} through empty vertical corridors.`
+        ?`Value Corridor Mapping found ${valueCandidates.length} value-like OCR boxes and ${stripSemanticsText.toLowerCase()}.`
         :"Value Corridor Mapping found corridors but did not produce strip crops.",
       nextStep:strips?"Run Header Strip Scan to assign these strips to launch-monitor metrics.":"Adjust the frame and scan again."
     });
-    gdPracticeSetProtectedScanStage(strips?"value_corridor_mapped":"",columnScan);
+      gdPracticeSetProtectedScanStage(strips?"value_corridor_mapped":"",columnScan);
     if(strips){
       gdRenderValueCorridorMappingOutput(columnScan);
-      gdPracticeDebugCheckpointSafe("value_corridor_mapping","success",{outputSummary:`Value Corridor Mapping produced ${strips} column strips`,counts:{valueBoxes:valueCandidates.length,valueRows:generatedRows.length,columns:chosenGridColumns.length,strips}});
-      gdSetPracticeScanStatus(`Value Corridor Mapping complete: ${strips} column strip${strips===1?"":"s"} cut. Header Strip Scan is ready.`);
+      gdPracticeDebugCheckpointSafe("value_corridor_mapping","success",{outputSummary:`Value Corridor Mapping ${stripSemanticsText}`,counts:{valueBoxes:valueCandidates.length,valueRows:generatedRows.length,columns:chosenGridColumns.length,strips}});
+      gdSetPracticeScanStatus(`Value Corridor Mapping complete: ${stripSemanticsText}. Header Strip Scan is ready.`);
     }else{
       gdPracticeDebugCheckpointSafe("value_corridor_mapping","failed",{outputSummary:"Value Corridor Mapping produced no strip crops",counts:{valueBoxes:valueCandidates.length,columns:chosenGridColumns.length}});
       gdSetPracticeScanStatus("Value Corridor Mapping found cut lines, but no column strips were created.");
