@@ -203,6 +203,7 @@
       type === 'plain-text-upload' ||
       type === 'photo-ocr-reviewed' ||
       type === 'photo-ocr-fitted-cell-grid' ||
+      type === 'photo-ocr-column-image-order' ||
       type === 'photo-ocr-digitised-table' ||
       type === 'screenshot' ||
       type === 'generated-demo'
