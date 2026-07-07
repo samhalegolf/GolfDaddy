@@ -18844,7 +18844,11 @@ async function gdRunDefaultPracticePhotoScanFromCheckpoint(checkpoint,opts={}){
       return scan;
     }
     gdPracticeFeedback("Scanning: reading column values...");
-    const readResult=await gdRunPracticeColumnStripValueScan(scan,{importToNative:true,sourceLabel,label:sourceLabel});
+    // Stop short of the native save here on purpose: this shows the real,
+    // per-cell OCR read (Column OCR table + extraction checkpoint) so it can
+    // be verified against the photo before anything commits to the Shot
+    // Library. Saving is a separate, explicit action from that checkpoint.
+    const readResult=await gdRunPracticeColumnStripValueScan(scan,{sourceLabel,label:sourceLabel});
     const rowCount=Number(readResult?.clubGroups?.length)||0;
     if(!readResult||!rowCount){
       gdPracticeSetContinueScanReady(true,{label:"Read column values",stage:"headers_assigned",showGridTools:true});
@@ -18852,9 +18856,8 @@ async function gdRunDefaultPracticePhotoScanFromCheckpoint(checkpoint,opts={}){
       if(readResult)gdPracticeFeedback("Column values didn't line up into usable rows yet - check the Column OCR table below.","warning");
       return scan;
     }
-    gdSetPracticeScanStatus(`Scan complete: ${rowCount} shot${rowCount===1?"":"s"} saved to the Clarity Shot Library.`);
-    gdCancelPracticePhotoScan(false);
-    try{gdSetShotDataLibraryOpen("practice",true);}catch(e){}
+    gdSetPracticeScanStatus(`Scan complete: ${rowCount} shot${rowCount===1?"":"s"} read from the photo. Review the values below, then save to the Clarity Shot Library.`);
+    gdPracticeFeedback(`Read ${rowCount} shot${rowCount===1?"":"s"} - review before saving.`,"warning");
     return scan;
   }catch(e){
     if(gdPracticeIsQuietScanStop(e)){
