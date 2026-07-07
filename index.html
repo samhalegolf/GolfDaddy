@@ -16846,7 +16846,7 @@ function gdBuildOcrColumnCutoutAllocation(columnScan,opts={}){
       valueBoxCount:Number(column.valueBoxCount)||Number(column.valueSkewerSupport)||0,
       valueSkewerStatus:String(column.valueSkewerStatus||""),
       borderSource:String(column.borderSource||column.source||""),
-      headerCrop:gdCropCanvasRegion(image,headerRegion,2),
+      headerCrop:gdCropCanvasRegion(image,headerSearchRegion,2),
       cells
     };
   });
@@ -16919,6 +16919,7 @@ async function gdRunOcrColumnCutoutHeaderTextScan(Tesseract,columnScan){
   const cutoutResults={};
   const literalGeneratedGrid=String(columnScan?.layout?.cropMode||"")==="ocr-generated-grid";
   const cutoutConfigs=[
+    {label:"psm6",config:gdHeaderTextScanConfig("6")},
     {label:"psm7",config:gdHeaderTextScanConfig("7")}
   ];
   for(const cutout of cutouts){
@@ -18445,19 +18446,13 @@ async function gdRunOcrGeneratedTemplateFallbackFromCheckpoint(checkpoint,flatSc
     const geometryColumns=gdLmNumberBoxColumnsFromCandidates(geometryValueCandidates,Number(scanImage?.width)||0,scanImage,Number(scanImage?.height)||0);
     let ocrData=geometryOcrData;
     let lines=gdLmLinesFromOcrData(ocrData);
-    let headerCandidates=gdLmHeaderCandidatesFromLines(lines);
-    let layout=gdLmBuildLayoutColumns(lines);
-    let headerProbe=null;
-    if(!layout){
-      gdSetPracticeScanStatus("OCR did not return the header row. Probing the header band above the first value row...");
-      headerProbe=await gdRunOcrGeneratedHeaderBandProbe(Tesseract,scanImage,ocrData,lines);
-      if(headerProbe?.ocrData){
-        ocrData=headerProbe.ocrData;
-        lines=headerProbe.lines||gdLmLinesFromOcrData(ocrData);
-        headerCandidates=headerProbe.headerCandidates||gdLmHeaderCandidatesFromLines(lines);
-        layout=headerProbe.layout||gdLmBuildLayoutColumns(lines);
-      }
-    }
+    // Header identity is decided solely by the per-cutout Header Strip Scan
+    // (gdBuildOcrColumnCutoutAllocation + gdRunOcrColumnCutoutHeaderTextScan) below.
+    // This stage only needs column geometry, so it no longer runs its own
+    // header-text detection (gdLmBuildLayoutColumns / gdRunOcrGeneratedHeaderBandProbe).
+    let headerCandidates=[];
+    let layout=null;
+    const headerProbe=null;
     const wordCount=Number(ocrData.words?.length)||0;
     if(!layout&&geometryColumns.length>=4){
       layout={
