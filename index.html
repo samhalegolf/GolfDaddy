@@ -15482,6 +15482,102 @@ function gdLmPruneClearanceCuts(bands,cfg){
   });
   return cuts;
 }
+function gdLmOutlierCorridorSplitCuts(rows,columns,cfg){
+  // Re-splits corridors that came out anomalously wide vs the median corridor.
+  // Root cause: cfg.mergeGap can glue value boxes from adjacent-but-distinct
+  // columns into one interval, and cfg.half can mark a real-but-narrow gap as
+  // blocked, so no cut is ever placed there (e.g. Ball Speed / Launch Angle /
+  // Side Angle merging into one 400px+ corridor). This pass re-runs the gap
+  // search inside just the outlier span with a tighter mergeGap AND a narrower
+  // corridor half-width. Additive only: normal-width corridors are untouched.
+  const list=Array.isArray(columns)?columns:[];
+  if(list.length<3||!Array.isArray(rows)||rows.length<3)return [];
+  const widths=list.map(column=>Number(column.right)-Number(column.left)).filter(value=>Number.isFinite(value)&&value>0);
+  const medianWidth=gdValueClusterMedian(widths)||0;
+  if(!medianWidth)return [];
+  const extraCuts=[];
+  list.forEach(column=>{
+    const left=Number(column.left);
+    const right=Number(column.right);
+    const width=right-left;
+    if(!Number.isFinite(width)||width<=medianWidth*1.6)return;
+    const localMergeGap=Math.max(2,Number(cfg.mergeGap)*.4);
+    const localHalf=Math.max(2,Number(cfg.half)*.5);
+    const localRows=rows
+      .map(row=>{
+        const items=(Array.isArray(row.items)?row.items:[]).filter(box=>Number(box.cx)>left&&Number(box.cx)<right);
+        return {items,intervals:gdLmMergeValueBoxIntervals(items,localMergeGap)};
+      })
+      .filter(row=>row.intervals.length);
+    if(localRows.length<3)return;
+    const minSupport=Math.max(3,Math.ceil(localRows.length*.52));
+    const maxBlocked=Math.max(1,Math.floor(localRows.length*.2));
+    const guard=Math.max(6,localHalf);
+    const samples=[];
+    for(let x=Math.ceil(left+guard);x<=right-guard;x+=1){
+      let support=0,blocked=0,clearRows=0;
+      localRows.forEach(row=>{
+        const hit=row.intervals.some(interval=>Number(interval.x0)<x+localHalf&&Number(interval.x1)>x-localHalf);
+        if(hit){
+          blocked+=1;
+          return;
+        }
+        const hasLeft=row.intervals.some(interval=>Number(interval.x1)<=x-localHalf);
+        const hasRight=row.intervals.some(interval=>Number(interval.x0)>=x+localHalf);
+        if(hasLeft&&hasRight)support+=1;
+        clearRows+=1;
+      });
+      if(support>=minSupport&&blocked<=maxBlocked){
+        samples.push({x,support,blocked,clearRows,score:support*10-blocked*18+clearRows});
+      }
+    }
+    if(!samples.length)return;
+    const bands=[];
+    let current=null;
+    samples.forEach(sample=>{
+      if(!current||sample.x-current.end>3){
+        if(current)bands.push(current);
+        current={start:sample.x,end:sample.x,best:sample};
+        return;
+      }
+      current.end=sample.x;
+      if(sample.score>current.best.score)current.best=sample;
+    });
+    if(current)bands.push(current);
+    const localMinGap=Math.max(24,medianWidth*.55,(Number(cfg.minColumnWidth)||42)*.45+2);
+    const accepted=[];
+    bands
+      .sort((a,b)=>Number(a.best.x)-Number(b.best.x))
+      .forEach(band=>{
+        const cut={
+          x:Number(band.best.x),
+          width:Math.max(1,Number(band.end)-Number(band.start)+1),
+          support:Number(band.best.support)||0,
+          blocked:Number(band.best.blocked)||0,
+          score:Number(band.best.score)||0,
+          source:"outlier-corridor-resplit"
+        };
+        if(!Number.isFinite(cut.x)||cut.x-left<localMinGap||right-cut.x<localMinGap)return;
+        const previous=accepted[accepted.length-1];
+        if(previous&&cut.x-Number(previous.x)<localMinGap){
+          if(cut.score>Number(previous.score))accepted[accepted.length-1]=cut;
+          return;
+        }
+        accepted.push(cut);
+      });
+    if(accepted.length&&gdPracticeCanShowScanDebug()){
+      console.debug("[GolfDaddy] Outlier corridor re-split",{
+        span:{left:Math.round(left),right:Math.round(right),width:Math.round(width)},
+        medianWidth:Math.round(medianWidth),
+        localMergeGap:Math.round(localMergeGap*10)/10,
+        localHalf:Math.round(localHalf*10)/10,
+        cuts:accepted.map(cut=>Math.round(cut.x))
+      });
+    }
+    accepted.forEach(cut=>extraCuts.push(cut));
+  });
+  return extraCuts;
+}
 function gdLmColumnsFromClearanceCuts(rows,cuts,cfg){
   const sourceMax=Number(cfg?.sourceMax)||0;
   if(!sourceMax||!Array.isArray(rows)||rows.length<3||!Array.isArray(cuts)||!cuts.length)return [];
@@ -15548,7 +15644,12 @@ function gdLmNumberBoxColumnsFromClearanceCorridors(candidates,sourceWidth=0,sou
   }
   const bands=gdLmClearanceCorridorBands(rows,cfg);
   const cuts=gdLmPruneClearanceCuts(bands,cfg);
-  const columns=gdLmColumnsFromClearanceCuts(rows,cuts,cfg);
+  let columns=gdLmColumnsFromClearanceCuts(rows,cuts,cfg);
+  const extraCuts=gdLmOutlierCorridorSplitCuts(rows,columns,cfg);
+  if(extraCuts.length){
+    const allCuts=cuts.concat(extraCuts).sort((a,b)=>Number(a.x)-Number(b.x));
+    columns=gdLmColumnsFromClearanceCuts(rows,allCuts,cfg);
+  }
   const cleaned=gdLmReindexGeneratedGridColumns(columns);
   return cleaned.length>=4?gdLmAssignDetectedHeaderColumnBounds(cleaned):[];
 }
