@@ -15058,7 +15058,7 @@ async function gdRunPracticeColumnStripValueScan(columnScan,opts={}){
       return columnScan;
     }
     if(opts.importToNative===true){
-      payload.quietImport=true;
+      gdSetPracticeScanStatus(`Saving ${rowCount} shot${rowCount===1?"":"s"} to the Clarity Shot Library...`);
       await gdImportLaunchMonitorPayload(payload,opts.sourceLabel||opts.label||"Practice photo scan");
       return payload;
     }
@@ -18719,6 +18719,16 @@ async function gdRunFlatTemplateBridgeFromCheckpoint(checkpoint,opts={}){
   return result?.scan||null;
 }
 async function gdRunPracticeGridExperiment(kind="ocr-generated",opts={}){
+  // Debug-panel triggers must respect the same reentry guard as the main
+  // continue-scan button, otherwise a click here can launch a second,
+  // concurrent run on the same shared scan object while an automatic
+  // continuation (corridor mapping -> header strip scan) is still in
+  // flight - that produces exactly the "looks like it restarted" symptom.
+  if(gdPracticeScanReentryBlocked()){
+    gdPracticeFeedback("Still finishing the previous step - try again in a moment.","warning");
+    gdSetPracticeScanStatus("Still finishing the previous step - try again in a moment.");
+    return null;
+  }
   const methods={
     "ocr-generated":{
       label:"Header Strip Scan",
@@ -18781,32 +18791,32 @@ async function gdRunPracticeGridExperiment(kind="ocr-generated",opts={}){
   return null;
 }
 async function gdRunDefaultPracticePhotoScanFromCheckpoint(checkpoint,opts={}){
+  // Primary path: one Scan click runs corridor mapping -> header strip scan
+  // (already chained internally) -> column value read -> native save, straight
+  // through with no button clicks in between. If any stage doesn't produce
+  // usable output, it stops and falls back to the manual continue button/debug
+  // tools instead of guessing or forcing bad data through.
   if(!checkpoint){
     gdPracticeDebugFailedSafe("crop_cleanup",new Error("Frame the value grid first, then run Value Corridor Mapping."),{outputSummary:"No crop checkpoint"});
     gdPracticeFeedback("Frame the value grid first, then run Value Corridor Mapping.","error");
     return null;
   }
   if(!gdPracticeImportCanStart(opts.sourceLabel||gdPracticePhotoName||"Practice photo scan"))return null;
+  const sourceLabel=opts.sourceLabel||gdPracticePhotoName||"Practice photo scan";
   gdPracticeClusterCheckpoint=checkpoint;
   window.__gdPracticeClusterCheckpoint=checkpoint;
   gdPracticeClearTemplateOutcomes();
   gdPracticeSetContinueScanReady(false);
   gdClosePracticeManualQuadTool();
   gdSetPracticePhotoProcessing(true,{stageIndex:0,progress:12,preserveClubs:true});
-  gdPracticeFeedback("Running Value Corridor Mapping...");
+  gdPracticeFeedback("Scanning: mapping value corridors...");
   await gdPracticeYieldScanPaint();
   try{
     gdPracticeDebugCheckpointSafe("extraction_started","running",{inputSummary:"Value Corridor Mapping"});
-    const result=await gdRunValueCorridorMappingFromCheckpoint(checkpoint,{
-      sourceLabel:opts.sourceLabel||gdPracticePhotoName||"Practice photo scan"
-    });
-    const scan=result?.scan||result?.outcome?.scan||null;
+    const corridorResult=await gdRunValueCorridorMappingFromCheckpoint(checkpoint,{sourceLabel});
+    const scan=corridorResult?.scan||corridorResult?.outcome?.scan||null;
     const strips=Array.isArray(scan?.results)?scan.results.length:0;
-    if(strips){
-      gdPracticeSetContinueScanReady(true,{label:"Header strip scan",stage:"value_corridor_mapped",showGridTools:true});
-      gdPracticeRefreshDebugTools();
-      return scan;
-    }else{
+    if(!strips){
       gdPracticeSetContinueScanReady(false);
       const ocrOutcome=gdPracticeTemplateOutcomeStore().ocr||null;
       gdPracticeFeedback("Value Corridor Mapping was not ready. Inspect the value-box and corridor evidence before running headers or cells.","error");
@@ -18814,8 +18824,34 @@ async function gdRunDefaultPracticePhotoScanFromCheckpoint(checkpoint,opts={}){
         outputSummary:ocrOutcome?.reason||"Value Corridor Mapping did not produce usable column strips",
         raw:{ocrGenerated:ocrOutcome}
       });
+      return null;
     }
-    return null;
+    // Header Strip Scan already ran automatically inside the corridor mapping call above.
+    const currentStage=gdPracticeProtectedScanStage()||"value_corridor_mapped";
+    const headersReady=currentStage==="headers_assigned"&&!!scan?.cellGrid?.cellCount;
+    if(!headersReady){
+      gdPracticeSetContinueScanReady(true,{
+        label:currentStage==="headers_assigned"?"Read column values":"Header strip scan",
+        stage:currentStage,
+        showGridTools:true
+      });
+      gdPracticeRefreshDebugTools();
+      gdPracticeFeedback("Header Strip Scan needs a look before reading values - check the strip allocation below.","warning");
+      return scan;
+    }
+    gdPracticeFeedback("Scanning: reading column values...");
+    const readResult=await gdRunPracticeColumnStripValueScan(scan,{importToNative:true,sourceLabel,label:sourceLabel});
+    const rowCount=Number(readResult?.clubGroups?.length)||0;
+    if(!readResult||!rowCount){
+      gdPracticeSetContinueScanReady(true,{label:"Read column values",stage:"headers_assigned",showGridTools:true});
+      gdPracticeRefreshDebugTools();
+      if(readResult)gdPracticeFeedback("Column values didn't line up into usable rows yet - check the Column OCR table below.","warning");
+      return scan;
+    }
+    gdSetPracticeScanStatus(`Scan complete: ${rowCount} shot${rowCount===1?"":"s"} saved to the Clarity Shot Library.`);
+    gdCancelPracticePhotoScan(false);
+    try{gdSetShotDataLibraryOpen("practice",true);}catch(e){}
+    return scan;
   }catch(e){
     if(gdPracticeIsQuietScanStop(e)){
       gdPracticeReleaseStoppedScan(e.message||"Practice photo scan stopped");
@@ -18973,7 +19009,11 @@ async function gdPracticePrimaryScanAction(){
 }
 async function gdContinuePracticePhotoScan(){
   try{
-    if(gdPracticeScanReentryBlocked())return null;
+    if(gdPracticeScanReentryBlocked()){
+      gdPracticeFeedback("Still finishing the previous step - try again in a moment.","warning");
+      gdSetPracticeScanStatus("Still finishing the previous step - try again in a moment.");
+      return null;
+    }
     gdPracticeDebugEnsureRunSafe({sourceName:gdPracticePhotoName||"Practice photo scan"});
     const stage=gdPracticeProtectedScanStage();
     const scan=window.__gdPracticeColumnScan||null;
