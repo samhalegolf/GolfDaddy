@@ -5804,7 +5804,7 @@ body[data-gd-permission="admin"] #gdV62Home .gdHomeAdminSettings{display:inline-
 <div class="gdPracticeScannerActions"><button id="gdPracticeClearPhotoBtn" type="button" onclick="gdCancelPracticePhotoScan()" hidden>Clear Photo</button><button class="primary" id="gdPracticeScanPhotoBtn" type="button" onclick="gdPracticePrimaryScanAction()">Scan</button><button class="primary" id="gdPracticeDefaultScanBtn" type="button" onclick="gdRunDefaultPracticePhotoScan()" hidden>Scan to Clarity Shot Library</button><button id="gdPracticeManualQuadBtn" type="button" onclick="gdOpenPracticeManualQuadTool()" hidden>Adjust box</button><button id="gdPracticeContinueScanBtn" type="button" onclick="gdContinuePracticePhotoScan()" hidden>Header strip scan</button></div>
 <div class="gdPracticeGridExperiments" id="gdPracticeGridExperiments" hidden>
 <div class="gdPracticeGridExperimentHead"><strong>Scan debug tools</strong><span>Header Strip Scan and cell values run only after Value Corridor Mapping.</span></div>
-<div class="gdPracticeScannerActions gdPracticeGridExperimentActions"><button class="primary" id="gdPracticeBoxTrackGridBtn" type="button" onclick="gdRunPracticeGridExperiment('ocr-generated')">Header Strip Scan</button><button id="gdPracticeCellOcrGridBtn" type="button" onclick="gdRunPracticeGridExperiment('cell-ocr')" hidden>Re-read cell values</button><button id="gdPracticeDigitizeTableBtn" type="button" onclick="gdRunPracticeGridExperiment('digitize-table')" hidden>Digitise table</button></div>
+<div class="gdPracticeScannerActions gdPracticeGridExperimentActions"><button class="primary" id="gdPracticeBoxTrackGridBtn" type="button" onclick="gdRunPracticeGridExperiment('ocr-generated')">Header Strip Scan</button><button id="gdPracticeCellOcrGridBtn" type="button" onclick="gdRunPracticeGridExperiment('cell-ocr')" hidden>Re-read column values</button><button id="gdPracticeDigitizeTableBtn" type="button" onclick="gdRunPracticeGridExperiment('digitize-table')" hidden>Digitise table</button></div>
 </div>
 <div class="gdPracticeScanStatus" id="gdPracticeScanStatus">Upload a table photo or take one with your phone, then scan it into the Clarity Shot Library.</div>
 </div>
@@ -11475,7 +11475,9 @@ async function gdAttachColumnValueDirections(Tesseract,result){
     if(gap>8)gaps.push(gap);
   });
   const gap=gdLmMedianGap(gaps)||48;
-  for(const item of result.values){
+  const directionLabel=String(result?.column?.label||result?.key||"").trim();
+  for(const [itemIndex,item] of result.values.entries()){
+    try{gdSetPracticeScanStatus(`Masking number and checking L/R for ${directionLabel} (${itemIndex+1}/${result.values.length})...`);}catch(e){}
     const rowDirection=await gdRecognizeColumnValueDirection(Tesseract,result.crop,item,gap,result.key);
     item.directionDebug=rowDirection?.debug||null;
     if(rowDirection?.direction){
@@ -14337,7 +14339,7 @@ function gdRenderFlatTableBridgeCheckpoint(columnScan){
       bodyNode.textContent="Open template comparison";
       bodyNode.onclick=()=>gdOpenPracticeTemplateOutcomes("ocr");
     }else{
-      bodyNode.textContent="Read cell values";
+      bodyNode.textContent="Read column values";
       bodyNode.onclick=()=>gdRunPracticeGridExperiment("cell-ocr");
     }
   }
@@ -14961,7 +14963,9 @@ async function gdRunColumnImageOrderOcr(columnScan){
   for(const [index,result] of results.entries()){
     const key=String(result?.key||"");
     if(!key||key==="toPin"||!result?.crop?.canvas)continue;
-    gdSetPracticeScanStatus(`Reading ${key} column image (${index+1}/${results.length})...`);
+    const columnLabel=String(result?.column?.label||key);
+    gdSetPracticeScanStatus(`Reading ${columnLabel} column image (${index+1}/${results.length})...`);
+    try{gdSetPracticePhotoProcessing(true,{progress:Math.min(84,56+Math.round((index/Math.max(1,results.length))*28)),preserveClubs:true});}catch(e){}
     const localData=await gdRecognizeColumnCrop(Tesseract,result.crop,key,{acceptXLocal:result.acceptXLocal});
     result.localData=localData;
     result.data=gdOffsetOcrData(localData,result.crop.x,result.crop.y,result.crop.scale);
@@ -17336,7 +17340,7 @@ function gdPracticeSetGridExperimentsReady(ready){
   const hasValues=!!(scan?.digitizedTable?.rows?.length);
   if(readBtn){
     readBtn.hidden=!(show&&hasCellGrid);
-    readBtn.textContent=hasValues?"Re-read cell values":"Read cell values";
+    readBtn.textContent=hasValues?"Re-read column values":"Read column values";
   }
 }
 function gdRenderPracticeClusterCheckpoint(checkpoint,meta={}){
@@ -18725,8 +18729,8 @@ async function gdRunPracticeGridExperiment(kind="ocr-generated",opts={}){
       status:"Flat template grid is parked. Generating OCR grid instead..."
     },
     "cell-ocr":{
-      label:"Raw cell value read",
-      status:"Reading raw values from the fitted OCR cell grid..."
+      label:"Column strip value read",
+      status:"Reading each column strip top to bottom..."
     },
     "digitize-table":{
       label:"Parked digitised table",
@@ -18741,11 +18745,13 @@ async function gdRunPracticeGridExperiment(kind="ocr-generated",opts={}){
     const scan=window.__gdPracticeColumnScan||null;
     const cells=Number(scan?.cellGrid?.cellCount)||0;
     if(!scan||!cells||gdPracticeProtectedScanStage()==="value_corridor_mapped"){
-      gdPracticeFeedback("Run Header Strip Scan before reading cell values.","warning");
-      gdSetPracticeScanStatus("Run Header Strip Scan first, then read cell values.");
+      gdPracticeFeedback("Run Header Strip Scan before reading column values.","warning");
+      gdSetPracticeScanStatus("Run Header Strip Scan first, then read column values.");
       return null;
     }
-    return gdRunFittedCellGridOcr(scan,{allowParkedFittedCellOcr:true,label:"Raw cell value read"});
+    // Column strip value read is the only value-read method going forward -
+    // the old fitted-cell-grid OCR (gdRunFittedCellGridOcr) is retired.
+    return gdRunPracticeColumnStripValueScan(scan,{label:"Column strip value read"});
   }
   const checkpoint=gdPracticeClusterCheckpoint||window.__gdPracticeClusterCheckpoint;
   if(!checkpoint){
