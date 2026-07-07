@@ -8644,6 +8644,15 @@ function gdSplitTesseractConfig(config={}){
 }
 async function gdRecognizeWithTesseract(Tesseract,image,config={},workerKey="general"){
   if(!Tesseract||!image)return {data:{text:"",words:[],lines:[]}};
+  // Guard against degenerate crops (e.g. a masked-remainder sliver a couple
+  // pixels wide). Tesseract's own wasm core just warns and returns nothing
+  // useful for these, so skip the call instead of wasting a round trip on it.
+  const imgW=Number(image?.width)||0;
+  const imgH=Number(image?.height)||0;
+  if(imgW>0&&imgH>0&&(imgW<8||imgH<8)){
+    console.warn(`[GolfDaddy] skipped OCR call on degenerate ${imgW}x${imgH} image (workerKey=${workerKey})`);
+    return {data:{text:"",words:[],lines:[]}};
+  }
   const split=gdSplitTesseractConfig(config);
   if(!Tesseract.createWorker){
     return gdLmNormalizeOcrResult(await Tesseract.recognize(image,"eng",Object.assign({},split.params,split.options),split.output));
@@ -11466,6 +11475,55 @@ async function gdRecognizeColumnValueDirection(Tesseract,crop,item,gap,key){
   }
   return {direction:"",data:{text:"",words:[],lines:[]},debug};
 }
+function gdColumnRowBandCrop(crop,item,gap){
+  // The whole-column-strip pipeline never runs its crops through
+  // gdCellValueBoxCrop (that's the old fitted-cell-grid path), so
+  // gdRecognizeColumnValueDirection's crop.valueBox===true gate never
+  // passes and masking silently no-ops for every row. We already know
+  // exactly where each row's number sits in the column strip (item.cy +
+  // item.wordBox from the column OCR pass), so instead of re-deriving a
+  // value box via density detection we just cut a tight per-row band out
+  // of the column strip directly around that known position and hand
+  // masking the same shape of input the fitted-cell path always gave it.
+  const source=crop?.canvas;
+  const width=Number(source?.width)||0;
+  const fullHeight=Number(source?.height)||0;
+  const cy=Number(item?.cy);
+  if(!source||width<8||fullHeight<8||!Number.isFinite(cy)||!gdDirectionBoxIsValid(item?.wordBox)){
+    return {crop,item};
+  }
+  const band=Math.max(28,Number(gap)||48);
+  const padY=Math.round(band*.6);
+  const y0=Math.max(0,Math.floor(cy-padY));
+  const y1=Math.min(fullHeight,Math.ceil(cy+padY));
+  const boxH=y1-y0;
+  if(boxH<14)return {crop,item};
+  const localScale=2;
+  const region=gdCropCanvasRegion(source,{x:0,y:y0,width,height:boxH},localScale);
+  const parentScale=Number(crop.scale)||1;
+  const rowBandCrop={
+    canvas:region.canvas,
+    x:(Number(crop.x)||0)+region.x/parentScale,
+    y:(Number(crop.y)||0)+(y0+region.y)/parentScale,
+    scale:parentScale*(Number(region.scale)||1),
+    valueBox:true,
+    valueBoxSource:"column-row-band",
+    parentCrop:crop
+  };
+  const wordBox=item.wordBox;
+  const shifted=Object.assign({},wordBox,{
+    x0:Number(wordBox.x0)*localScale,
+    x1:Number(wordBox.x1)*localScale,
+    y0:(Number(wordBox.y0)-y0)*localScale,
+    y1:(Number(wordBox.y1)-y0)*localScale
+  });
+  const numberBox=gdClampDirectionBox(shifted,region.canvas.width,region.canvas.height);
+  const rowBandItem=Object.assign({},item,{
+    numberBox,
+    numberBoxSource:numberBox?"column-row-band-word-box":"missing-number-bbox"
+  });
+  return {crop:rowBandCrop,item:rowBandItem};
+}
 async function gdAttachColumnValueDirections(Tesseract,result){
   if(!gdColumnNeedsDirection(result?.key)||!Array.isArray(result?.values)||!result.values.length)return result?.values||[];
   const gaps=[];
@@ -11478,7 +11536,8 @@ async function gdAttachColumnValueDirections(Tesseract,result){
   const directionLabel=String(result?.column?.label||result?.key||"").trim();
   for(const [itemIndex,item] of result.values.entries()){
     try{gdSetPracticeScanStatus(`Masking number and checking L/R for ${directionLabel} (${itemIndex+1}/${result.values.length})...`);}catch(e){}
-    const rowDirection=await gdRecognizeColumnValueDirection(Tesseract,result.crop,item,gap,result.key);
+    const rowBand=gdColumnRowBandCrop(result.crop,item,gap);
+    const rowDirection=await gdRecognizeColumnValueDirection(Tesseract,rowBand.crop,rowBand.item,gap,result.key);
     item.directionDebug=rowDirection?.debug||null;
     if(rowDirection?.direction){
       const visualLTrusted=rowDirection.visual===true&&rowDirection.direction==="L"&&Number(rowDirection.confidence)>=38&&Number(rowDirection.score)>=48;
