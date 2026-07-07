@@ -15004,6 +15004,72 @@ async function gdFinishPracticeColumnScan(columnScan,emptyMessage){
   gdSetPracticeScanStatus(`Column crops ready (${stripCount} columns). Column OCR did not find usable shots yet.`);
   return columnScan;
 }
+function gdSyncColumnStripAllocatedKeys(columnScan){
+  // Header Strip Scan only writes allocatedKey onto cellGrid.columns/cells.
+  // The column-strip value read works off columnScan.results (the whole-strip
+  // crops from Value Corridor Mapping), so copy the real allocated key across
+  // by index - both arrays are built from the same ordered column list.
+  const allocation=columnScan?.columnCutoutAllocation;
+  const cutouts=Array.isArray(allocation?.cutouts)?allocation.cutouts:[];
+  const results=Array.isArray(columnScan?.results)?columnScan.results:[];
+  results.forEach((result,index)=>{
+    if(!result)return;
+    const cutout=cutouts[index]||null;
+    const key=String(cutout?.allocatedKey||"");
+    const label=String(cutout?.allocatedLabel||"");
+    result.key=key;
+    result.column=Object.assign({},result.column,{key,label:label||result.column?.label||""});
+  });
+  return results;
+}
+async function gdRunPracticeColumnStripValueScan(columnScan,opts={}){
+  if(!columnScan){
+    gdSetPracticeScanStatus("Run Header Strip Scan before reading column values.");
+    return null;
+  }
+  gdSyncColumnStripAllocatedKeys(columnScan);
+  const readableResults=(Array.isArray(columnScan.results)?columnScan.results:[])
+    .filter(result=>result&&result.key&&result.key!=="toPin");
+  if(!readableResults.length){
+    gdPracticeDebugCheckpointSafe("extraction_started","warning",{outputSummary:"No allocated column strips to read; assign headers first"});
+    gdSetPracticeScanStatus("No column strips are allocated to a known metric yet. Review Header Strip Scan before reading values.");
+    return null;
+  }
+  gdSetPracticePhotoProcessing(true,{progress:56,stageIndex:1,preserveClubs:true});
+  gdSetPracticeScanStatus(`Reading ${readableResults.length} column strip${readableResults.length===1?"":"s"} top to bottom...`);
+  gdPracticeDebugCheckpointSafe("extraction_started","running",{inputSummary:`${readableResults.length} allocated column strips`});
+  try{
+    const payload=await gdRunColumnImageOrderOcr(columnScan);
+    const rowCount=Number(payload?.clubGroups?.length)||0;
+    gdRenderPracticeColumnStripsOnly(columnScan);
+    gdPracticeDebugCheckpointSafe("extraction_completed",rowCount?"success":"warning",{
+      outputSummary:rowCount?`Column strip read produced ${rowCount} rows`:"Column strip read produced no aligned rows",
+      counts:{columns:readableResults.length,rows:rowCount}
+    });
+    gdPracticeSetProtectedScanStage("cells_read",columnScan);
+    gdPracticeSetContinueScanReady(false);
+    gdPracticeRefreshDebugTools();
+    if(!rowCount){
+      gdSetPracticeScanStatus("Column strip read ran, but no rows lined up across columns yet. Check the Column OCR table in scan debug.");
+      return columnScan;
+    }
+    if(opts.importToNative===true){
+      payload.quietImport=true;
+      await gdImportLaunchMonitorPayload(payload,opts.sourceLabel||opts.label||"Practice photo scan");
+      return payload;
+    }
+    gdPracticeSetExtractionPreview(payload,opts.label||"Column strip value read");
+    gdSetPracticeScanStatus(`Column strip read complete: ${rowCount} row${rowCount===1?"":"s"} found across ${readableResults.length} allocated columns. Review the extraction checkpoint before saving to the Shot Library.`);
+    return payload;
+  }catch(e){
+    console.warn("[GolfDaddy] Column strip value scan failed",e);
+    gdPracticeDebugCheckpointSafe("extraction_started","failed",{outputSummary:"Column strip value read failed",error:e,technicalDetails:e&&e.stack});
+    gdSetPracticeScanStatus(e&&e.message?e.message:"Column strip value read failed.");
+    return null;
+  }finally{
+    gdPracticeReleaseProcessingControlsSafe("column-strip-value-finally");
+  }
+}
 function gdLmColumnDataYRange(lines,layout){
   const headerBottom=Number(layout?.headerLine?.bbox?.y1)||0;
   let start=headerBottom+8;
@@ -18391,11 +18457,11 @@ async function gdRunPracticeHeaderStripScanFromColumnScan(columnScan=null,opts={
       summary:gridRows&&gridColumns
         ?`Header Strip Scan found ${headerTextWords} text words and allocated ${allocatedColumns}/${cutoutColumns} column strips to known launch-monitor metrics where possible.`
         :`Header Strip Scan ran, but the value strips could not be converted into row/cell cuts.`,
-      nextStep:gridRows&&gridColumns?"Read cell values from the assigned row/cell cuts.":"Review the strip headers and adjust the frame before reading cell values."
+      nextStep:gridRows&&gridColumns?"Read column values from the assigned strips.":"Review the strip headers and adjust the frame before reading column values."
     });
     gdPracticeSetProtectedScanStage(gridRows&&gridColumns?"headers_assigned":"value_corridor_mapped",scan);
     gdRenderFlatTableBridgeOutput(scan,"ocr");
-    gdPracticeSetContinueScanReady(!!(gridRows&&gridColumns),{label:"Read cell values",stage:"headers_assigned",showGridTools:true});
+    gdPracticeSetContinueScanReady(!!(gridRows&&gridColumns),{label:"Read column values",stage:"headers_assigned",showGridTools:true});
     gdPracticeRefreshDebugTools();
     gdPracticeDebugCheckpointSafe("header_strip_scan",allocatedColumns?"success":"warning",{
       outputSummary:`Header Strip Scan allocated ${allocatedColumns}/${cutoutColumns} columns`,
@@ -18906,7 +18972,7 @@ async function gdContinuePracticePhotoScan(){
     const stage=gdPracticeProtectedScanStage();
     const scan=window.__gdPracticeColumnScan||null;
     if(stage==="headers_assigned"&&scan?.cellGrid?.cellCount){
-      return await gdRunFittedCellGridOcr(scan,{allowParkedFittedCellOcr:true,label:"Raw cell value read",sourceLabel:gdPracticePhotoName||"Practice photo scan"});
+      return await gdRunPracticeColumnStripValueScan(scan,{label:"Column strip value read",sourceLabel:gdPracticePhotoName||"Practice photo scan"});
     }
     if(stage==="value_corridor_mapped"&&scan){
       return await gdRunPracticeHeaderStripScanFromColumnScan(scan,{sourceLabel:gdPracticePhotoName||"Practice photo scan"});
@@ -19206,7 +19272,7 @@ document.addEventListener("change",event=>{
   else gdHandleLaunchMonitorUpload(file);
   input.value="";
 },true);
-Object.assign(window,{gdLoadLaunchMonitorDemo,gdClearLaunchMonitorDemo,gdPickLaunchMonitorFile,gdPickPracticePhotoFile,gdAdjustPracticeGeneratedBox,gdHandleNativePracticeTextFile,gdHandleLaunchMonitorUpload,gdHandleLaunchMonitorPhoto,gdScanPracticePhotoCrop,gdPracticePrimaryScanAction,gdOpenPracticeManualQuadTool,gdApplyPracticeManualQuad,gdRunDefaultPracticePhotoScan,gdRunDefaultPracticePhotoScanFromCheckpoint,gdRunValueCorridorMappingFromCheckpoint,gdRunPracticeHeaderStripScanFromColumnScan,gdSetPracticePhotoProcessing,gdPracticeHardStopScan,gdPracticeRefreshDebugTools,gdContinuePracticePhotoScan,gdImportReviewedPracticeOcr,gdCancelPracticePhotoScan,gdCancelPracticeOcrReview,gdPracticeScanClubLabel,gdPracticeScanClubLabels,gdLoadExtractedPractice7iData,gdPracticeSetExtractionPreview,gdPracticeClearExtractionPreview,gdImportPracticeExtractionPreview,gdBuildLaunchMonitorTextCapture,gdCleanLaunchMonitorOcrText,gdLmCaptureToReviewText,gdAnalyzeFlatTableImage,gdFitFlatTableTemplateFromAnalysis,gdBuildFlatTableTemplateColumnScan,gdOpenPracticeFlatTableFailureWindow,gdRenderFlatTableFailureWindow,gdOpenPracticeTemplateOutcomes,gdRunOcrGeneratedTemplateFallbackFromCheckpoint,gdRunFlatTemplateBridgeFromCheckpoint,gdRunPracticeGridExperiment,gdRunFittedCellGridOcr,gdBuildFlatDigitizedTable,gdRenderFlatDigitizedTable,gdPracticeOpenScanOutcomeFromDebug,gdPickRawCourseDataFile,gdHandleRawCourseDataUpload,gdClearCourseShotData,gdPracticeHandleImportJobAction});
+Object.assign(window,{gdLoadLaunchMonitorDemo,gdClearLaunchMonitorDemo,gdPickLaunchMonitorFile,gdPickPracticePhotoFile,gdAdjustPracticeGeneratedBox,gdHandleNativePracticeTextFile,gdHandleLaunchMonitorUpload,gdHandleLaunchMonitorPhoto,gdScanPracticePhotoCrop,gdPracticePrimaryScanAction,gdOpenPracticeManualQuadTool,gdApplyPracticeManualQuad,gdRunDefaultPracticePhotoScan,gdRunDefaultPracticePhotoScanFromCheckpoint,gdRunValueCorridorMappingFromCheckpoint,gdRunPracticeHeaderStripScanFromColumnScan,gdRunPracticeColumnStripValueScan,gdSetPracticePhotoProcessing,gdPracticeHardStopScan,gdPracticeRefreshDebugTools,gdContinuePracticePhotoScan,gdImportReviewedPracticeOcr,gdCancelPracticePhotoScan,gdCancelPracticeOcrReview,gdPracticeScanClubLabel,gdPracticeScanClubLabels,gdLoadExtractedPractice7iData,gdPracticeSetExtractionPreview,gdPracticeClearExtractionPreview,gdImportPracticeExtractionPreview,gdBuildLaunchMonitorTextCapture,gdCleanLaunchMonitorOcrText,gdLmCaptureToReviewText,gdAnalyzeFlatTableImage,gdFitFlatTableTemplateFromAnalysis,gdBuildFlatTableTemplateColumnScan,gdOpenPracticeFlatTableFailureWindow,gdRenderFlatTableFailureWindow,gdOpenPracticeTemplateOutcomes,gdRunOcrGeneratedTemplateFallbackFromCheckpoint,gdRunFlatTemplateBridgeFromCheckpoint,gdRunPracticeGridExperiment,gdRunFittedCellGridOcr,gdBuildFlatDigitizedTable,gdRenderFlatDigitizedTable,gdPracticeOpenScanOutcomeFromDebug,gdPickRawCourseDataFile,gdHandleRawCourseDataUpload,gdClearCourseShotData,gdPracticeHandleImportJobAction});
 function gdLmStatusClass(status){
   if(["corroborated","cross_distance_verified","verified_by_result","cluster_candidate","delivery_only","result_only"].includes(status))return "good";
   if(["conflict_check","alignment_signal"].includes(status))return "warn";
