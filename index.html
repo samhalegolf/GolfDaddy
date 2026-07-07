@@ -15541,99 +15541,128 @@ function gdLmPruneClearanceCuts(bands,cfg){
   });
   return cuts;
 }
+function gdLmOutlierCorridorScanSpan(rows,left,right,pass){
+  const half=Number(pass.half);
+  const localRows=rows
+    .map(row=>{
+      const items=(Array.isArray(row.items)?row.items:[]).filter(box=>Number(box.cx)>left&&Number(box.cx)<right);
+      return {items,intervals:gdLmMergeValueBoxIntervals(items,pass.mergeGap)};
+    })
+    .filter(row=>row.intervals.length);
+  if(localRows.length<3)return {bands:[],rowCount:localRows.length};
+  const minSupport=Math.max(3,Math.ceil(localRows.length*pass.supportRatio));
+  const maxBlocked=Math.max(1,Math.floor(localRows.length*pass.blockedRatio));
+  const guard=Math.max(6,half);
+  const samples=[];
+  for(let x=Math.ceil(left+guard);x<=right-guard;x+=1){
+    let support=0,blocked=0,clearRows=0;
+    localRows.forEach(row=>{
+      const hit=row.intervals.some(interval=>Number(interval.x0)<x+half&&Number(interval.x1)>x-half);
+      if(hit){
+        blocked+=1;
+        return;
+      }
+      const hasLeft=row.intervals.some(interval=>Number(interval.x1)<=x-half);
+      const hasRight=row.intervals.some(interval=>Number(interval.x0)>=x+half);
+      if(hasLeft&&hasRight)support+=1;
+      clearRows+=1;
+    });
+    if(support>=minSupport&&blocked<=maxBlocked){
+      samples.push({x,support,blocked,clearRows,score:support*10-blocked*18+clearRows});
+    }
+  }
+  const bands=[];
+  let current=null;
+  samples.forEach(sample=>{
+    if(!current||sample.x-current.end>3){
+      if(current)bands.push(current);
+      current={start:sample.x,end:sample.x,best:sample};
+      return;
+    }
+    current.end=sample.x;
+    if(sample.score>current.best.score)current.best=sample;
+  });
+  if(current)bands.push(current);
+  return {bands,rowCount:localRows.length};
+}
+function gdLmAcceptOutlierCutBands(bands,left,right,localMinGap){
+  const accepted=[];
+  bands
+    .slice()
+    .sort((a,b)=>Number(a.best.x)-Number(b.best.x))
+    .forEach(band=>{
+      const cut={
+        x:Number(band.best.x),
+        width:Math.max(1,Number(band.end)-Number(band.start)+1),
+        support:Number(band.best.support)||0,
+        blocked:Number(band.best.blocked)||0,
+        score:Number(band.best.score)||0,
+        source:"outlier-corridor-resplit"
+      };
+      if(!Number.isFinite(cut.x)||cut.x-left<localMinGap||right-cut.x<localMinGap)return;
+      const previous=accepted[accepted.length-1];
+      if(previous&&cut.x-Number(previous.x)<localMinGap){
+        if(cut.score>Number(previous.score))accepted[accepted.length-1]=cut;
+        return;
+      }
+      accepted.push(cut);
+    });
+  return accepted;
+}
 function gdLmOutlierCorridorSplitCuts(rows,columns,cfg){
   // Re-splits corridors that came out anomalously wide vs the median corridor.
   // Root cause: cfg.mergeGap can glue value boxes from adjacent-but-distinct
   // columns into one interval, and cfg.half can mark a real-but-narrow gap as
-  // blocked, so no cut is ever placed there (e.g. Ball Speed / Launch Angle /
-  // Side Angle merging into one 400px+ corridor). This pass re-runs the gap
-  // search inside just the outlier span with a tighter mergeGap AND a narrower
-  // corridor half-width. Additive only: normal-width corridors are untouched.
+  // blocked, so no cut is ever placed there (e.g. Launch Angle / Side Angle
+  // merging into one 280px+ corridor). This pass re-runs the gap search inside
+  // just the outlier span, progressively tightening mergeGap / corridor
+  // half-width / support until the expected number of sub-columns is
+  // recovered. Later passes tolerate more "blocked" rows because the failure
+  // mode itself (OCR fusing two adjacent values into one word box) produces
+  // rows whose interval spans the true boundary. Cuts are still required to
+  // leave sub-columns at least localMinGap wide, so a single value can never
+  // be split in half. Additive only: normal-width corridors are untouched.
   const list=Array.isArray(columns)?columns:[];
   if(list.length<3||!Array.isArray(rows)||rows.length<3)return [];
   const widths=list.map(column=>Number(column.right)-Number(column.left)).filter(value=>Number.isFinite(value)&&value>0);
   const medianWidth=gdValueClusterMedian(widths)||0;
   if(!medianWidth)return [];
+  const passes=[
+    {mergeGap:Math.max(2,Number(cfg.mergeGap)*.4),half:Math.max(2,Number(cfg.half)*.5),supportRatio:.52,blockedRatio:.2},
+    {mergeGap:Math.max(2,Number(cfg.mergeGap)*.25),half:Math.max(2,Number(cfg.half)*.3),supportRatio:.4,blockedRatio:.3},
+    {mergeGap:2,half:2,supportRatio:.35,blockedRatio:.5}
+  ];
   const extraCuts=[];
   list.forEach(column=>{
     const left=Number(column.left);
     const right=Number(column.right);
     const width=right-left;
     if(!Number.isFinite(width)||width<=medianWidth*1.6)return;
-    const localMergeGap=Math.max(2,Number(cfg.mergeGap)*.4);
-    const localHalf=Math.max(2,Number(cfg.half)*.5);
-    const localRows=rows
-      .map(row=>{
-        const items=(Array.isArray(row.items)?row.items:[]).filter(box=>Number(box.cx)>left&&Number(box.cx)<right);
-        return {items,intervals:gdLmMergeValueBoxIntervals(items,localMergeGap)};
-      })
-      .filter(row=>row.intervals.length);
-    if(localRows.length<3)return;
-    const minSupport=Math.max(3,Math.ceil(localRows.length*.52));
-    const maxBlocked=Math.max(1,Math.floor(localRows.length*.2));
-    const guard=Math.max(6,localHalf);
-    const samples=[];
-    for(let x=Math.ceil(left+guard);x<=right-guard;x+=1){
-      let support=0,blocked=0,clearRows=0;
-      localRows.forEach(row=>{
-        const hit=row.intervals.some(interval=>Number(interval.x0)<x+localHalf&&Number(interval.x1)>x-localHalf);
-        if(hit){
-          blocked+=1;
-          return;
-        }
-        const hasLeft=row.intervals.some(interval=>Number(interval.x1)<=x-localHalf);
-        const hasRight=row.intervals.some(interval=>Number(interval.x0)>=x+localHalf);
-        if(hasLeft&&hasRight)support+=1;
-        clearRows+=1;
-      });
-      if(support>=minSupport&&blocked<=maxBlocked){
-        samples.push({x,support,blocked,clearRows,score:support*10-blocked*18+clearRows});
+    const expected=Math.max(2,Math.round(width/medianWidth));
+    const pitch=width/expected;
+    const localMinGap=Math.max(24,(Number(cfg.minColumnWidth)||42)*.45+2,Math.min(medianWidth*.55,pitch*.6));
+    let best=null;
+    let bestPass=-1;
+    for(let passIndex=0;passIndex<passes.length;passIndex+=1){
+      const scan=gdLmOutlierCorridorScanSpan(rows,left,right,passes[passIndex]);
+      const accepted=gdLmAcceptOutlierCutBands(scan.bands,left,right,localMinGap);
+      if(!best||accepted.length>best.length){
+        best=accepted;
+        bestPass=passIndex;
       }
+      if(best.length>=expected-1)break;
     }
-    if(!samples.length)return;
-    const bands=[];
-    let current=null;
-    samples.forEach(sample=>{
-      if(!current||sample.x-current.end>3){
-        if(current)bands.push(current);
-        current={start:sample.x,end:sample.x,best:sample};
-        return;
-      }
-      current.end=sample.x;
-      if(sample.score>current.best.score)current.best=sample;
-    });
-    if(current)bands.push(current);
-    const localMinGap=Math.max(24,medianWidth*.55,(Number(cfg.minColumnWidth)||42)*.45+2);
-    const accepted=[];
-    bands
-      .sort((a,b)=>Number(a.best.x)-Number(b.best.x))
-      .forEach(band=>{
-        const cut={
-          x:Number(band.best.x),
-          width:Math.max(1,Number(band.end)-Number(band.start)+1),
-          support:Number(band.best.support)||0,
-          blocked:Number(band.best.blocked)||0,
-          score:Number(band.best.score)||0,
-          source:"outlier-corridor-resplit"
-        };
-        if(!Number.isFinite(cut.x)||cut.x-left<localMinGap||right-cut.x<localMinGap)return;
-        const previous=accepted[accepted.length-1];
-        if(previous&&cut.x-Number(previous.x)<localMinGap){
-          if(cut.score>Number(previous.score))accepted[accepted.length-1]=cut;
-          return;
-        }
-        accepted.push(cut);
-      });
-    if(accepted.length&&gdPracticeCanShowScanDebug()){
+    if(gdPracticeCanShowScanDebug()){
       console.debug("[GolfDaddy] Outlier corridor re-split",{
         span:{left:Math.round(left),right:Math.round(right),width:Math.round(width)},
         medianWidth:Math.round(medianWidth),
-        localMergeGap:Math.round(localMergeGap*10)/10,
-        localHalf:Math.round(localHalf*10)/10,
-        cuts:accepted.map(cut=>Math.round(cut.x))
+        expectedColumns:expected,
+        localMinGap:Math.round(localMinGap),
+        passUsed:bestPass,
+        cuts:(best||[]).map(cut=>Math.round(cut.x))
       });
     }
-    accepted.forEach(cut=>extraCuts.push(cut));
+    (best||[]).forEach(cut=>extraCuts.push(cut));
   });
   return extraCuts;
 }
@@ -15704,9 +15733,11 @@ function gdLmNumberBoxColumnsFromClearanceCorridors(candidates,sourceWidth=0,sou
   const bands=gdLmClearanceCorridorBands(rows,cfg);
   const cuts=gdLmPruneClearanceCuts(bands,cfg);
   let columns=gdLmColumnsFromClearanceCuts(rows,cuts,cfg);
-  const extraCuts=gdLmOutlierCorridorSplitCuts(rows,columns,cfg);
-  if(extraCuts.length){
-    const allCuts=cuts.concat(extraCuts).sort((a,b)=>Number(a.x)-Number(b.x));
+  let allCuts=cuts.slice();
+  for(let attempt=0;attempt<3;attempt+=1){
+    const extraCuts=gdLmOutlierCorridorSplitCuts(rows,columns,cfg);
+    if(!extraCuts.length)break;
+    allCuts=allCuts.concat(extraCuts).sort((a,b)=>Number(a.x)-Number(b.x));
     columns=gdLmColumnsFromClearanceCuts(rows,allCuts,cfg);
   }
   const cleaned=gdLmReindexGeneratedGridColumns(columns);
