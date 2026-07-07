@@ -17764,6 +17764,7 @@ async function gdApplyPracticeManualQuad(){
     return;
   }
   if(!gdPracticeImportCanStart(gdPracticePhotoName||"Adjusted practice photo scan"))return null;
+  gdClosePracticeManualQuadTool();
   gdSetPracticePhotoProcessing(true,{stageIndex:0,progress:8});
   await gdPracticeYieldScanPaint();
   const quad=state.quad.map(point=>({
@@ -17805,7 +17806,10 @@ async function gdApplyPracticeManualQuad(){
   gdPracticeClusterCheckpoint=checkpoint;
   window.__gdPracticeClusterCheckpoint=checkpoint;
   try{
-    return await gdRunValueCorridorMappingFromCheckpoint(checkpoint,{sourceLabel:gdPracticePhotoName||"Adjusted practice photo scan"});
+    // Route through the same primary chain as the Scan button (corridor
+    // mapping -> header strip scan -> column value read -> native save) so
+    // confirming the manual frame doesn't stop short at corridor mapping.
+    return await gdRunDefaultPracticePhotoScanFromCheckpoint(checkpoint,{sourceLabel:gdPracticePhotoName||"Adjusted practice photo scan"});
   }catch(e){
     console.warn("[GolfDaddy] adjusted practice photo scan failed",e);
     gdPracticeReleaseProcessingControlsSafe("adjusted-photo-scan-failed");
