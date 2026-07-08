@@ -1728,6 +1728,8 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 <script>window.L=window.L||window.leaflet;</script>
 <script src="scripts/clarity-build.js?v=tool-rail-tab-hole-label-20260620"></script>
 <script src="scripts/gd-launch-monitor-alias-registry.js?v=practice-alias-registry-20260612"></script>
+<script src="scripts/clarity-table-ocr.js?v=table-ocr-module-20260708"></script>
+<script src="scripts/clarity-table-ocr-pixels.js?v=table-ocr-module-20260708"></script>
 <style>
 	    *,*::before,*::after{box-sizing:border-box}
 	    :where(input,select,textarea,button){max-width:100%}
@@ -5801,7 +5803,7 @@ body[data-gd-permission="admin"] #gdV62Home .gdHomeAdminSettings{display:inline-
 <div class="gdPracticeScanGuide" aria-hidden="true"><span>Keep the shot table inside this frame</span></div>
 </div>
 <label class="gdPracticeScanClubField" for="gdPracticeScanClubInput">Club<input id="gdPracticeScanClubInput" type="text" value="7i" placeholder="7i" autocomplete="off"></label>
-<div class="gdPracticeScannerActions"><button id="gdPracticeClearPhotoBtn" type="button" onclick="gdCancelPracticePhotoScan()" hidden>Clear Photo</button><button class="primary" id="gdPracticeScanPhotoBtn" type="button" onclick="gdPracticePrimaryScanAction()">Scan</button><button id="gdPracticeManualQuadBtn" type="button" onclick="gdOpenPracticeManualQuadTool()" hidden>Adjust box</button></div>
+<div class="gdPracticeScannerActions"><button id="gdPracticeClearPhotoBtn" type="button" onclick="gdCancelPracticePhotoScan()" hidden>Clear Photo</button><button class="primary" id="gdPracticeScanPhotoBtn" type="button" onclick="gdPracticePrimaryScanAction()">Scan</button><button id="gdPracticeManualQuadBtn" type="button" onclick="gdOpenPracticeManualQuadTool()" hidden>Adjust box</button><button id="gdPracticeExportFlatBtn" type="button" onclick="gdDownloadFlattenedGrid()" title="Export the flattened value-grid image for the OCR test harness">Export flat grid</button></div>
 <div class="gdPracticeScanStatus" id="gdPracticeScanStatus">Upload a table photo or take one with your phone, then scan it into the Clarity Shot Library.</div>
 </div>
 <div class="gdManualQuadTool" id="gdPracticeManualQuadTool" hidden>
@@ -19019,80 +19021,120 @@ async function gdRunPracticeGridExperiment(kind="ocr-generated",opts={}){
   }
   return null;
 }
-async function gdRunDefaultPracticePhotoScanFromCheckpoint(checkpoint,opts={}){
-  // Primary path: one Scan click runs corridor mapping -> header strip scan
-  // (already chained internally) -> column value read -> native save, straight
-  // through with no button clicks in between. If any stage doesn't produce
-  // usable output, it stops and falls back to the manual continue button/debug
-  // tools instead of guessing or forcing bad data through.
-  if(!checkpoint){
-    gdPracticeDebugFailedSafe("crop_cleanup",new Error("Frame the value grid first, then run Value Corridor Mapping."),{outputSummary:"No crop checkpoint"});
-    gdPracticeFeedback("Frame the value grid first, then run Value Corridor Mapping.","error");
+async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
+  // Rebuilt scan path. Hands the flattened value-grid image (output of the kept
+  // 4-corner stretch) to the isolated Clarity Table OCR module:
+  //   Stage 1 split (anti-fusion + de-fuse) -> Stage 2 header allocation ->
+  //   Stage 3 per-cell read + validation -> library import.
+  // The old in-file corridor/header/column pipeline is no longer on this path.
+  const OCR=window.ClarityTableOcr, PIX=window.ClarityTableOcrPixels, REG=window.LaunchMonitorAliasRegistry;
+  const sourceLabel=opts.sourceLabel||gdPracticePhotoName||"Practice photo scan";
+  const flat=checkpoint?.scanImage||checkpoint?.directColumnSource||checkpoint?.cluster?.displayCutoutCanvas||checkpoint?.cluster?.cutoutCanvas||gdPracticeNormalizedCanvas||null;
+  if(!OCR||!PIX||!REG){
+    gdPracticeFeedback("Clarity Table OCR module is not loaded.","error");
     return null;
   }
-  if(!gdPracticeImportCanStart(opts.sourceLabel||gdPracticePhotoName||"Practice photo scan"))return null;
-  const sourceLabel=opts.sourceLabel||gdPracticePhotoName||"Practice photo scan";
+  if(!flat||typeof flat.width!=="number"){
+    gdPracticeFeedback("No flattened value grid available. Re-frame and scan again.","error");
+    gdOpenPracticeManualQuadTool();
+    return null;
+  }
+  if(!gdPracticeImportCanStart(sourceLabel))return null;
   gdPracticeClusterCheckpoint=checkpoint;
   window.__gdPracticeClusterCheckpoint=checkpoint;
-  gdPracticeClearTemplateOutcomes();
-  gdPracticeSetContinueScanReady(false);
   gdClosePracticeManualQuadTool();
   gdSetPracticePhotoProcessing(true,{stageIndex:0,progress:12,preserveClubs:true});
-  gdPracticeFeedback("Scanning: mapping value corridors...");
+  gdPracticeFeedback("Scanning: splitting columns...");
   await gdPracticeYieldScanPaint();
   try{
-    gdPracticeDebugCheckpointSafe("extraction_started","running",{inputSummary:"Value Corridor Mapping"});
-    const corridorResult=await gdRunValueCorridorMappingFromCheckpoint(checkpoint,{sourceLabel});
-    const scan=corridorResult?.scan||corridorResult?.outcome?.scan||null;
-    const strips=Array.isArray(scan?.results)?scan.results.length:0;
-    if(!strips){
-      gdPracticeSetContinueScanReady(false);
-      const ocrOutcome=gdPracticeTemplateOutcomeStore().ocr||null;
-      gdPracticeFeedback("Value Corridor Mapping was not ready. Inspect the value-box and corridor evidence before running headers or cells.","error");
-      gdPracticeDebugFailedSafe("rows_accepted",new Error("Value Corridor Mapping was not ready"),{
-        outputSummary:ocrOutcome?.reason||"Value Corridor Mapping did not produce usable column strips",
-        raw:{ocrGenerated:ocrOutcome}
-      });
-      return null;
-    }
-    // Header allocation ran chained inside the column split above and wrote its
-    // own stage marker. If it did not produce an assigned grid, stop cleanly and
-    // send the user back to the frame tool rather than parking on a button.
-    const currentStage=gdPracticeProtectedScanStage()||"value_corridor_mapped";
-    const headersReady=currentStage==="headers_assigned"&&!!scan?.cellGrid?.cellCount;
-    if(!headersReady){
-      gdPracticeFeedback("Header allocation could not assign the value strips. Re-frame the value grid and scan again.","error");
-      gdSetPracticeScanStatus("Header allocation could not assign the strips. Adjust the corners and scan again.");
+    // Stage 1 — column split from the flattened pixels.
+    gdPracticeDebugCheckpointSafe("value_corridor_mapping","running",{inputSummary:`${flat.width}x${flat.height} flat image`});
+    const detected=PIX.detectNumberBoxes(flat);
+    const columns=OCR.splitColumns(detected.boxes,{sourceWidth:flat.width});
+    const rows=Array.isArray(detected.rows)?detected.rows:[];
+    gdPracticeDebugCheckpointSafe("value_corridor_mapping",columns.length>=4?"success":"failed",{outputSummary:`${columns.length} columns from ${detected.boxes.length} value-boxes across ${rows.length} rows`,counts:{columns:columns.length,valueBoxes:detected.boxes.length,rows:rows.length}});
+    if(columns.length<4||rows.length<2){
+      gdPracticeFeedback("Column split did not find a usable grid. Re-frame and scan again.","error");
       gdOpenPracticeManualQuadTool();
       return null;
     }
-    gdPracticeFeedback("Scanning: reading and saving column values...");
-    // Straight through: read the per-cell values and commit them to the Shot
-    // Library in one pass. The Extraction marker keeps a read-only record of
-    // exactly what was saved so it can still be inspected after the fact.
-    const readResult=await gdRunPracticeColumnStripValueScan(scan,{sourceLabel,label:sourceLabel,importToNative:true});
-    const rowCount=Number(readResult?.clubGroups?.length)||0;
-    if(!readResult||!rowCount){
-      gdPracticeFeedback("Column values didn't line up into usable rows. Re-frame the value grid and scan again.","error");
-      gdSetPracticeScanStatus("No usable rows were read. Adjust the corners and scan again.");
+    // Stage 2 — header allocation via OCR of each column's top band.
+    gdSetPracticePhotoProcessing(true,{stageIndex:0,progress:40,preserveClubs:true});
+    gdPracticeDebugCheckpointSafe("header_strip_scan","running",{inputSummary:`${columns.length} columns`});
+    const Tesseract=await gdLoadTesseract();
+    const headerRow=rows[0],dataRows=rows.slice(1);
+    const headerTexts=[];
+    for(const col of columns){
+      const crop=PIX.cropCanvas(flat,col.left,headerRow.y0,col.right,headerRow.y1,4);
+      const res=await gdRecognizeWithTesseract(Tesseract,crop,{tessedit_char_whitelist:"ABCDEFGHIJKLMNOPQRSTUVWXYZ ",tessedit_pageseg_mode:"7"},"clarity-header");
+      headerTexts.push(String(res?.data?.text||"").trim());
+    }
+    const allocated=OCR.allocateHeaders(columns,headerTexts,{resolver:REG.canonicalKey});
+    const keys=allocated.map(col=>col.metricKey);
+    const allocatedCount=keys.filter(Boolean).length;
+    gdPracticeDebugCheckpointSafe("header_strip_scan",allocatedCount>=4?"success":"failed",{outputSummary:`Allocated ${allocatedCount}/${columns.length} headers: ${headerTexts.join(" | ")}`,counts:{allocated:allocatedCount,columns:columns.length}});
+    if(allocatedCount<4){
+      gdPracticeFeedback("Header allocation could not identify the columns. Re-frame and scan again.","error");
       gdOpenPracticeManualQuadTool();
       return null;
     }
+    // Stage 3 — per-cell read + validation, then import via the shared bridge.
+    gdSetPracticePhotoProcessing(true,{stageIndex:1,progress:56,preserveClubs:true});
+    gdPracticeDebugCheckpointSafe("extraction_started","running",{inputSummary:`${dataRows.length} rows x ${allocatedCount} columns`});
+    const clubLabel=(typeof gdPracticeScanClubLabel==="function"?gdPracticeScanClubLabel():"7i")||"7i";
+    const headerLine=["Club"].concat(keys.map(key=>key?REG.headerLabel(key):null).filter(Boolean)).join(",");
+    const lines=[headerLine];
+    for(let r=0;r<dataRows.length;r+=1){
+      const band=dataRows[r];
+      const cells=[clubLabel];
+      for(let c=0;c<columns.length;c+=1){
+        const key=keys[c];
+        if(!key)continue;
+        const needsDir=OCR._internals&&typeof OCR._internals.needsDirection==="function"&&OCR._internals.needsDirection(key);
+        const crop=PIX.cropCanvas(flat,columns[c].left,band.y0,columns[c].right,band.y1,4);
+        const res=await gdRecognizeWithTesseract(Tesseract,crop,{tessedit_char_whitelist:needsDir?"0123456789.-LR ":"0123456789.,°ºOo-",tessedit_pageseg_mode:"7"},"clarity-cell");
+        const cell=OCR.parseCell(String(res?.data?.text||"").trim(),key);
+        cells.push(cell.valid?(String(cell.value)+(cell.direction?(" "+cell.direction):"")):"");
+      }
+      lines.push(cells.join(","));
+      gdSetPracticePhotoProcessing(true,{stageIndex:2,progress:Math.min(88,56+Math.round((r/Math.max(1,dataRows.length))*30)),preserveClubs:true});
+    }
+    const payload=gdBuildLaunchMonitorTextCapture(lines.join("\n"),sourceLabel);
+    payload.inputType="clarity-table-ocr";
+    const rowCount=Number(payload?.clubGroups?.length)||0;
+    gdPracticeDebugCheckpointSafe("extraction_completed",rowCount?"success":"failed",{outputSummary:`Read ${rowCount} shots`,counts:{rows:rowCount}});
+    if(!rowCount){
+      gdPracticeFeedback("No usable rows were read. Re-frame the value grid and scan again.","error");
+      gdOpenPracticeManualQuadTool();
+      return null;
+    }
+    gdPracticeSetExtractionPreview(payload,sourceLabel);
+    await gdImportLaunchMonitorPayload(payload,sourceLabel);
     gdSetPracticeScanStatus(`Scan complete: saved ${rowCount} shot${rowCount===1?"":"s"} to the Clarity Shot Library.`);
     gdPracticeFeedback(`Saved ${rowCount} shot${rowCount===1?"":"s"} to the Shot Library.`,"ready");
-    return scan;
+    return payload;
   }catch(e){
-    if(gdPracticeIsQuietScanStop(e)){
+    if(typeof gdPracticeIsQuietScanStop==="function"&&gdPracticeIsQuietScanStop(e)){
       gdPracticeReleaseStoppedScan(e.message||"Practice photo scan stopped");
       return null;
     }
-    gdPracticeDebugFailedSafe("extraction_started",e,{outputSummary:"Practice photo scan failed",technicalDetails:e&&e.stack});
-    gdPracticeFeedback(e&&e.message?e.message:"Practice photo scan failed. Adjust the frame and scan again.","error");
+    console.warn("[GolfDaddy] Clarity table OCR scan failed",e);
+    gdPracticeDebugFailedSafe("extraction_started",e,{outputSummary:"Clarity table OCR failed",technicalDetails:e&&e.stack});
+    gdPracticeFeedback(e&&e.message?e.message:"Table OCR scan failed. Adjust the frame and scan again.","error");
     return null;
   }finally{
     gdSetPracticePhotoProcessing(false,{skipJob:true});
-    gdPracticeReleaseProcessingControlsSafe("photo-scan-finally");
+    gdPracticeReleaseProcessingControlsSafe("clarity-table-ocr-finally");
   }
+}
+async function gdRunDefaultPracticePhotoScanFromCheckpoint(checkpoint,opts={}){
+  // Rebuilt path: delegate to the isolated Clarity Table OCR module. The old
+  // corridor/header/column pipeline is bypassed (kept as dead code for now).
+  if(!checkpoint){
+    gdPracticeFeedback("Frame the value grid first, then scan.","error");
+    return null;
+  }
+  return gdClarityTableOcrScanFromCheckpoint(checkpoint,opts);
 }
 async function gdRunPracticePhotoOcrFromCheckpoint(checkpoint){
   if(!checkpoint?.cluster?.quad)return null;
@@ -19238,6 +19280,26 @@ async function gdImportReviewedPracticeOcr(){
   await gdImportLaunchMonitorPayload(payload,"Reviewed photo scan");
   gdSetPracticeScanStatus(`Reviewed scan imported ${payload.clubGroups.length} shot${payload.clubGroups.length===1?"":"s"}`);
   gdCancelPracticePhotoScan(false);
+}
+function gdDownloadFlattenedGrid(){
+  // Dev hook: export the flattened value-grid image (post 4-corner stretch) so
+  // it can be fed to the standalone Clarity Table OCR harness for testing.
+  const cp=window.__gdPracticeClusterCheckpoint||(typeof gdPracticeClusterCheckpoint!=="undefined"?gdPracticeClusterCheckpoint:null);
+  const canvas=cp?.scanImage||cp?.directColumnSource||cp?.cluster?.displayCutoutCanvas||cp?.cluster?.cutoutCanvas||gdPracticeNormalizedCanvas||null;
+  if(!canvas||typeof canvas.toDataURL!=="function"){
+    gdPracticeFeedback("No flattened grid yet - upload a photo and frame the value grid first.","error");
+    return false;
+  }
+  try{
+    const a=document.createElement("a");
+    a.href=canvas.toDataURL("image/png");
+    a.download=`clarity-flattened-grid-${Date.now()}.png`;
+    document.body.appendChild(a);a.click();a.remove();
+    gdPracticeFeedback(`Exported flattened grid (${canvas.width}x${canvas.height}).`,"ready");
+  }catch(e){
+    gdPracticeFeedback("Could not export flattened grid: "+(e&&e.message?e.message:e),"error");
+  }
+  return false;
 }
 function gdCancelPracticePhotoScan(clearStatus=true){
   gdPracticeReleaseProcessingControlsSafe("photo-scan-cancel");
@@ -19498,7 +19560,7 @@ document.addEventListener("change",event=>{
   else gdHandleLaunchMonitorUpload(file);
   input.value="";
 },true);
-Object.assign(window,{gdLoadLaunchMonitorDemo,gdClearLaunchMonitorDemo,gdPickLaunchMonitorFile,gdPickPracticePhotoFile,gdAdjustPracticeGeneratedBox,gdHandleNativePracticeTextFile,gdHandleLaunchMonitorUpload,gdHandleLaunchMonitorPhoto,gdScanPracticePhotoCrop,gdPracticePrimaryScanAction,gdOpenPracticeManualQuadTool,gdApplyPracticeManualQuad,gdRunDefaultPracticePhotoScanFromCheckpoint,gdRunValueCorridorMappingFromCheckpoint,gdRunPracticeHeaderStripScanFromColumnScan,gdRunPracticeColumnStripValueScan,gdSetPracticePhotoProcessing,gdPracticeHardStopScan,gdPracticeRefreshDebugTools,gdImportReviewedPracticeOcr,gdCancelPracticePhotoScan,gdCancelPracticeOcrReview,gdPracticeScanClubLabel,gdPracticeScanClubLabels,gdLoadExtractedPractice7iData,gdPracticeSetExtractionPreview,gdPracticeClearExtractionPreview,gdImportPracticeExtractionPreview,gdBuildLaunchMonitorTextCapture,gdCleanLaunchMonitorOcrText,gdLmCaptureToReviewText,gdAnalyzeFlatTableImage,gdFitFlatTableTemplateFromAnalysis,gdBuildFlatTableTemplateColumnScan,gdOpenPracticeFlatTableFailureWindow,gdRenderFlatTableFailureWindow,gdOpenPracticeTemplateOutcomes,gdRunOcrGeneratedTemplateFallbackFromCheckpoint,gdRunFlatTemplateBridgeFromCheckpoint,gdRunPracticeGridExperiment,gdRunFittedCellGridOcr,gdBuildFlatDigitizedTable,gdRenderFlatDigitizedTable,gdPracticeOpenScanOutcomeFromDebug,gdPickRawCourseDataFile,gdHandleRawCourseDataUpload,gdClearCourseShotData,gdPracticeHandleImportJobAction});
+Object.assign(window,{gdLoadLaunchMonitorDemo,gdClearLaunchMonitorDemo,gdPickLaunchMonitorFile,gdPickPracticePhotoFile,gdAdjustPracticeGeneratedBox,gdHandleNativePracticeTextFile,gdHandleLaunchMonitorUpload,gdHandleLaunchMonitorPhoto,gdScanPracticePhotoCrop,gdPracticePrimaryScanAction,gdOpenPracticeManualQuadTool,gdApplyPracticeManualQuad,gdRunDefaultPracticePhotoScanFromCheckpoint,gdClarityTableOcrScanFromCheckpoint,gdRunValueCorridorMappingFromCheckpoint,gdRunPracticeHeaderStripScanFromColumnScan,gdRunPracticeColumnStripValueScan,gdSetPracticePhotoProcessing,gdPracticeHardStopScan,gdPracticeRefreshDebugTools,gdImportReviewedPracticeOcr,gdDownloadFlattenedGrid,gdCancelPracticePhotoScan,gdCancelPracticeOcrReview,gdPracticeScanClubLabel,gdPracticeScanClubLabels,gdLoadExtractedPractice7iData,gdPracticeSetExtractionPreview,gdPracticeClearExtractionPreview,gdImportPracticeExtractionPreview,gdBuildLaunchMonitorTextCapture,gdCleanLaunchMonitorOcrText,gdLmCaptureToReviewText,gdAnalyzeFlatTableImage,gdFitFlatTableTemplateFromAnalysis,gdBuildFlatTableTemplateColumnScan,gdOpenPracticeFlatTableFailureWindow,gdRenderFlatTableFailureWindow,gdOpenPracticeTemplateOutcomes,gdRunOcrGeneratedTemplateFallbackFromCheckpoint,gdRunFlatTemplateBridgeFromCheckpoint,gdRunPracticeGridExperiment,gdRunFittedCellGridOcr,gdBuildFlatDigitizedTable,gdRenderFlatDigitizedTable,gdPracticeOpenScanOutcomeFromDebug,gdPickRawCourseDataFile,gdHandleRawCourseDataUpload,gdClearCourseShotData,gdPracticeHandleImportJobAction});
 function gdLmStatusClass(status){
   if(["corroborated","cross_distance_verified","verified_by_result","cluster_candidate","delivery_only","result_only"].includes(status))return "good";
   if(["conflict_check","alignment_signal"].includes(status))return "warn";
