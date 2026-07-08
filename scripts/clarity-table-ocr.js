@@ -474,6 +474,55 @@
     return reindex(columns);
   }
 
+  // ---------- OCR word helpers (number filtering before the cut) ----------
+  // Normalise a Tesseract word ({text, bbox:{x0,y0,x1,y1}} or flat) to a box.
+  function wordBox(word) {
+    var b = (word && word.bbox) ? word.bbox : word || {};
+    var x0 = Number(b.x0), y0 = Number(b.y0), x1 = Number(b.x1), y1 = Number(b.y1);
+    return { x0: x0, y0: y0, x1: x1, y1: y1, cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, w: x1 - x0, h: y1 - y0, text: String((word && word.text) || "").trim() };
+  }
+
+  // Keep only number-like words — this is the "filter to number-like BEFORE the
+  // cut" step. Header labels (letters) and stray marks are dropped, so they can
+  // never distort the column geometry. Whatever letters remain on a strip are
+  // the header, read separately in Stage 2.
+  function numberBoxesFromWords(words) {
+    return (Array.isArray(words) ? words : [])
+      .map(wordBox)
+      .filter(function (b) { return Number.isFinite(b.x0) && Number.isFinite(b.y0) && b.x1 > b.x0 && looksLikeValue(b.text); });
+  }
+
+  // Assign the leftover NON-number words to whichever column contains them, and
+  // join per column -> that column's header text. opts.headerBottom limits to
+  // the header band above the data so direction markers (R/L) don't leak in.
+  function headerTextForColumns(columns, words, opts) {
+    opts = opts || {};
+    var maxY = Number.isFinite(Number(opts.headerBottom)) ? Number(opts.headerBottom) : Infinity;
+    var cols = Array.isArray(columns) ? columns : [];
+    var textWords = (Array.isArray(words) ? words : []).map(wordBox)
+      .filter(function (b) { return b.text && !looksLikeValue(b.text) && b.cy <= maxY; });
+    return cols.map(function (col) {
+      return textWords
+        .filter(function (w) { return w.cx >= Number(col.left) && w.cx <= Number(col.right); })
+        .sort(function (a, b) { return a.x0 - b.x0; })
+        .map(function (w) { return w.text; })
+        .join(" ").trim();
+    });
+  }
+
+  // Summary rows (AVERAGE / STD DEV) carry these labels in the left margin and
+  // are not shots — used to drop them before import.
+  function isSummaryLabel(text) {
+    return /(average|avg|std|dev|deviation|mean)/i.test(String(text || ""));
+  }
+
+  // Cluster number-boxes into value rows by vertical centre.
+  function clusterValueRows(boxes) {
+    var tracks = trackClusters(boxes, "y").filter(function (c) { return c.items.length >= 2; });
+    return tracks.map(function (t) { return { cy: t.cy, y0: t.y0, y1: t.y1, items: t.items }; })
+      .sort(function (a, b) { return a.cy - b.cy; });
+  }
+
   // ---------- header allocation (Stage 2) ----------
   // Resolve a column's header text to a launch-monitor metric key using the
   // shared alias registry (window/globalThis.LaunchMonitorAliasRegistry). The
@@ -583,6 +632,10 @@
     splitColumns: splitColumns,
     allocateHeaders: allocateHeaders,
     parseCell: parseCell,
+    numberBoxesFromWords: numberBoxesFromWords,
+    headerTextForColumns: headerTextForColumns,
+    clusterValueRows: clusterValueRows,
+    isSummaryLabel: isSummaryLabel,
     groupComponentsIntoValues: groupComponentsIntoValues,
     _internals: {
       median: median, trackClusters: trackClusters, clearanceConfig: clearanceConfig,

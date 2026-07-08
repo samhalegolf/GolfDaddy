@@ -19047,58 +19047,62 @@ async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
   gdPracticeFeedback("Scanning: splitting columns...");
   await gdPracticeYieldScanPaint();
   try{
-    // Stage 1 — column split from the flattened pixels.
+    // One OCR pass over the flattened grid, then pure geometry. Filter to
+    // number-like words BEFORE the cut so header labels never distort columns.
+    const Tesseract=await gdLoadTesseract();
     gdPracticeDebugCheckpointSafe("value_corridor_mapping","running",{inputSummary:`${flat.width}x${flat.height} flat image`});
-    const detected=PIX.detectNumberBoxes(flat);
-    const columns=OCR.splitColumns(detected.boxes,{sourceWidth:flat.width});
-    const rows=Array.isArray(detected.rows)?detected.rows:[];
-    gdPracticeDebugCheckpointSafe("value_corridor_mapping",columns.length>=4?"success":"failed",{outputSummary:`${columns.length} columns from ${detected.boxes.length} value-boxes across ${rows.length} rows`,counts:{columns:columns.length,valueBoxes:detected.boxes.length,rows:rows.length}});
-    if(columns.length<4||rows.length<2){
+    const fullRes=await gdRecognizeWithTesseract(Tesseract,flat,{tessedit_char_whitelist:"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,°ºLR-+ ",tessedit_pageseg_mode:"6"},"clarity-full");
+    const words=gdLmLinesFromOcrData(fullRes?.data).flatMap(line=>Array.isArray(line?.words)?line.words:[]);
+    const numberBoxes=OCR.numberBoxesFromWords(words);
+    const columns=OCR.splitColumns(numberBoxes,{sourceWidth:flat.width});
+    const valueRows=OCR.clusterValueRows(numberBoxes);
+    gdPracticeDebugCheckpointSafe("value_corridor_mapping",columns.length>=4?"success":"failed",{outputSummary:`${columns.length} columns from ${numberBoxes.length} number words across ${valueRows.length} value rows`,counts:{columns:columns.length,numberWords:numberBoxes.length,rows:valueRows.length}});
+    if(columns.length<4||valueRows.length<1){
       gdPracticeFeedback("Column split did not find a usable grid. Re-frame and scan again.","error");
       gdOpenPracticeManualQuadTool();
       return null;
     }
-    // Stage 2 — header allocation via OCR of each column's top band.
-    gdSetPracticePhotoProcessing(true,{stageIndex:0,progress:40,preserveClubs:true});
-    gdPracticeDebugCheckpointSafe("header_strip_scan","running",{inputSummary:`${columns.length} columns`});
-    const Tesseract=await gdLoadTesseract();
-    const headerRow=rows[0],dataRows=rows.slice(1);
-    const headerTexts=[];
-    for(const col of columns){
-      const crop=PIX.cropCanvas(flat,col.left,headerRow.y0,col.right,headerRow.y1,4);
-      const res=await gdRecognizeWithTesseract(Tesseract,crop,{tessedit_char_whitelist:"ABCDEFGHIJKLMNOPQRSTUVWXYZ ",tessedit_pageseg_mode:"7"},"clarity-header");
-      headerTexts.push(String(res?.data?.text||"").trim());
-    }
+    // Stage 2 — header allocation: the leftover (non-number) words on each strip,
+    // taken from the band above the first data row (runs after the cut).
+    gdSetPracticePhotoProcessing(true,{stageIndex:0,progress:45,preserveClubs:true});
+    const headerBottom=Math.max(1,Number(valueRows[0].y0));
+    gdPracticeDebugCheckpointSafe("header_strip_scan","running",{inputSummary:`${columns.length} strips, header band 0-${Math.round(headerBottom)}`});
+    const headerTexts=OCR.headerTextForColumns(columns,words,{headerBottom});
     const allocated=OCR.allocateHeaders(columns,headerTexts,{resolver:REG.canonicalKey});
     const keys=allocated.map(col=>col.metricKey);
     const allocatedCount=keys.filter(Boolean).length;
-    gdPracticeDebugCheckpointSafe("header_strip_scan",allocatedCount>=4?"success":"failed",{outputSummary:`Allocated ${allocatedCount}/${columns.length} headers: ${headerTexts.join(" | ")}`,counts:{allocated:allocatedCount,columns:columns.length}});
+    gdPracticeDebugCheckpointSafe("header_strip_scan",allocatedCount>=4?"success":"failed",{outputSummary:`Allocated ${allocatedCount}/${columns.length}: ${headerTexts.join(" | ")}`,counts:{allocated:allocatedCount,columns:columns.length}});
     if(allocatedCount<4){
       gdPracticeFeedback("Header allocation could not identify the columns. Re-frame and scan again.","error");
       gdOpenPracticeManualQuadTool();
       return null;
     }
-    // Stage 3 — per-cell read + validation, then import via the shared bridge.
-    gdSetPracticePhotoProcessing(true,{stageIndex:1,progress:56,preserveClubs:true});
-    gdPracticeDebugCheckpointSafe("extraction_started","running",{inputSummary:`${dataRows.length} rows x ${allocatedCount} columns`});
+    // Stage 3 — assign each word to its cell (same OCR pass), parse + validate.
+    gdSetPracticePhotoProcessing(true,{stageIndex:1,progress:62,preserveClubs:true});
+    gdPracticeDebugCheckpointSafe("extraction_started","running",{inputSummary:`${valueRows.length} rows x ${allocatedCount} columns`});
     const clubLabel=(typeof gdPracticeScanClubLabel==="function"?gdPracticeScanClubLabel():"7i")||"7i";
+    const cellWords=words.filter(word=>String(word?.text||"").trim()&&Number.isFinite(Number(word?.cx))&&Number.isFinite(Number(word?.cy)));
     const headerLine=["Club"].concat(keys.map(key=>key?REG.headerLabel(key):null).filter(Boolean)).join(",");
     const lines=[headerLine];
-    for(let r=0;r<dataRows.length;r+=1){
-      const band=dataRows[r];
+    const firstColLeft=Number(columns[0].left);
+    valueRows.forEach(row=>{
+      // Skip AVERAGE / STD DEV summary rows (labelled in the left margin).
+      const marginText=cellWords.filter(word=>Number(word.cx)<firstColLeft&&Number(word.cy)>=row.y0&&Number(word.cy)<=row.y1).map(word=>String(word.text||"")).join(" ");
+      if(OCR.isSummaryLabel(marginText))return;
       const cells=[clubLabel];
       for(let c=0;c<columns.length;c+=1){
         const key=keys[c];
         if(!key)continue;
-        const needsDir=OCR._internals&&typeof OCR._internals.needsDirection==="function"&&OCR._internals.needsDirection(key);
-        const crop=PIX.cropCanvas(flat,columns[c].left,band.y0,columns[c].right,band.y1,4);
-        const res=await gdRecognizeWithTesseract(Tesseract,crop,{tessedit_char_whitelist:needsDir?"0123456789.-LR ":"0123456789.,°ºOo-",tessedit_pageseg_mode:"7"},"clarity-cell");
-        const cell=OCR.parseCell(String(res?.data?.text||"").trim(),key);
+        const cellText=cellWords
+          .filter(word=>Number(word.cx)>=columns[c].left&&Number(word.cx)<=columns[c].right&&Number(word.cy)>=row.y0&&Number(word.cy)<=row.y1)
+          .sort((a,b)=>Number(a.x0)-Number(b.x0))
+          .map(word=>String(word.text||"").trim())
+          .join(" ");
+        const cell=OCR.parseCell(cellText,key);
         cells.push(cell.valid?(String(cell.value)+(cell.direction?(" "+cell.direction):"")):"");
       }
       lines.push(cells.join(","));
-      gdSetPracticePhotoProcessing(true,{stageIndex:2,progress:Math.min(88,56+Math.round((r/Math.max(1,dataRows.length))*30)),preserveClubs:true});
-    }
+    });
     const payload=gdBuildLaunchMonitorTextCapture(lines.join("\n"),sourceLabel);
     payload.inputType="clarity-table-ocr";
     const rowCount=Number(payload?.clubGroups?.length)||0;
