@@ -16918,6 +16918,10 @@ function gdEnsureOcrFirstColumnClubIdTarget(columnScan){
   const allocation=columnScan?.columnCutoutAllocation;
   const cutouts=Array.isArray(allocation?.cutouts)?allocation.cutouts:[];
   if(!allocation||!cutouts.length||cutouts.some(cutout=>cutout?.allocatedKey==="club"))return false;
+  // Sequence allocation already decided column 0 is a metric column (e.g. the
+  // 11-column case where ballSpeed shares its corridor with the club labels);
+  // do not let the firstClub heuristic overwrite it afterwards.
+  if(allocation.sequenceAllocation&&Number(allocation.sequenceAllocation.startIndex)===0)return false;
   if(!gdOcrGeneratedFirstColumnCanBeClub(columnScan))return false;
   const first=cutouts[0];
   if(!first)return false;
@@ -16939,17 +16943,29 @@ function gdApplyGeneratedGridColumnSequenceAllocation(columnScan,allocation){
   if(String(columnScan?.layout?.cropMode||"")!=="ocr-generated-grid")return false;
   const cutouts=Array.isArray(allocation?.cutouts)?allocation.cutouts:[];
   if(!cutouts.length)return false;
-  const firstClub=gdOcrGeneratedFirstColumnCanBeClub(columnScan)||String(cutouts[0]?.allocatedKey||"")==="club";
   const template=gdLmLaunchMonitorTemplateColumns();
-  const startIndex=firstClub?1:0;
-  const visibleCount=Math.max(0,cutouts.length-startIndex);
-  if(!visibleCount)return false;
-  const exactTemplateCount=visibleCount===template.length;
-  if(!exactTemplateCount)return false;
+  const heuristicFirstClub=gdOcrGeneratedFirstColumnCanBeClub(columnScan)||String(cutouts[0]?.allocatedKey||"")==="club";
+  // Derive the club-column offset from the cutout count when it is unambiguous:
+  // exactly template.length cutouts can only be the metric columns, and
+  // template.length+1 can only be club + metrics. The firstClub heuristic
+  // (valueSkewerX near the left edge) misfires when club-label glyphs OCR as
+  // value boxes; previously that skipped sequence allocation entirely and let
+  // stray per-cutout header matches stand (e.g. the To Pin column labelled
+  // ballSpeed by a fuzzy alias hit).
+  let startIndex;
+  if(cutouts.length===template.length)startIndex=0;
+  else if(cutouts.length===template.length+1)startIndex=1;
+  else return false;
+  const firstClub=startIndex===1;
+  const visibleCount=cutouts.length-startIndex;
   const alignedAnchors=template.slice(0,visibleCount).reduce((count,column,index)=>{
     const current=String(cutouts[startIndex+index]?.allocatedKey||"");
     return count+(current===column.key?1:0);
   },0);
+  // When the count-derived offset contradicts the heuristic, require some
+  // per-cutout header matches to already agree with the template order before
+  // force-assigning, so a genuinely unusual grid is left to text matching.
+  if(firstClub!==heuristicFirstClub&&alignedAnchors<3)return false;
   let changed=false;
   if(firstClub&&cutouts[0]&&String(cutouts[0].allocatedKey||"")!=="club"){
     cutouts[0].allocatedKey="club";
@@ -18365,11 +18381,28 @@ function gdValueCorridorStripResults(scanImage,columns,valueCluster){
     const x2=right;
     const colWidth=Number.isFinite(Number(x2-x1))?Math.max(0,Number(x2-x1)):0;
     const colW=colWidth;
+    // Crop from the column's own value-box extents rather than raw divider
+    // bounds. Divider bounds run to the image edge for the first/last corridor
+    // (pulling club labels into the ballSpeed strip) and hug narrow gaps after
+    // an outlier re-split (leaving e.g. the Side Angle strip with ~0px margin).
+    // acceptXGlobal/acceptXLocal stay on divider bounds so value acceptance is
+    // unchanged and neighbour digits inside the padding are still rejected.
+    const extentLeft=Number(column.x0);
+    const extentRight=Number(column.x1);
+    let boundLeft=x1;
+    let boundRight=x2;
+    if(Number.isFinite(extentLeft)&&Number.isFinite(extentRight)&&extentRight>extentLeft){
+      const slack=Math.max(10,Math.min(30,(extentRight-extentLeft)*.14));
+      if(extentLeft-boundLeft>slack*2.5)boundLeft=extentLeft-slack*2;
+      if(boundRight-extentRight>slack*2.5)boundRight=extentRight+slack*2;
+      boundLeft=Math.min(boundLeft,Math.max(0,extentLeft-slack));
+      boundRight=Math.max(boundRight,Math.min(width,extentRight+slack));
+    }
     const padX=Math.max(3,Math.min(14,colW*.06));
     const padY=Math.max(6,Math.min(28,(bottom-top)*.025));
-    const x=Math.max(0,x1-padX);
+    const x=Math.max(0,boundLeft-padX);
     const y=Math.max(0,top-padY);
-    const r=Math.min(width,x2+padX);
+    const r=Math.min(width,boundRight+padX);
     const b=Math.min(height,bottom+padY);
     const source=gdNormalizeValueCorridorHeader(column?.source||column?.borderSource||column?.valueSkewerStatus||"ocr-value-clearance-corridor");
     const reason="column strip crop from detected corridor bounds";
