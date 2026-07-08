@@ -16939,8 +16939,16 @@ function gdEnsureOcrFirstColumnClubIdTarget(columnScan){
   allocation.clubIdColumnIndex=Number(first.columnIndex)||0;
   return true;
 }
+function gdLmIsGeneratedGridCropMode(columnScan){
+  // Header Strip Scan builds the cutout allocation while layout.cropMode is
+  // still "value-corridor-map" and only flips it to "ocr-generated-grid"
+  // afterwards, so the sequence pass must accept both spellings of the same
+  // generated-grid flow or it never runs.
+  const mode=String(columnScan?.layout?.cropMode||"");
+  return mode==="ocr-generated-grid"||mode==="value-corridor-map";
+}
 function gdApplyGeneratedGridColumnSequenceAllocation(columnScan,allocation){
-  if(String(columnScan?.layout?.cropMode||"")!=="ocr-generated-grid")return false;
+  if(!gdLmIsGeneratedGridCropMode(columnScan))return false;
   const cutouts=Array.isArray(allocation?.cutouts)?allocation.cutouts:[];
   if(!cutouts.length)return false;
   const template=gdLmLaunchMonitorTemplateColumns();
