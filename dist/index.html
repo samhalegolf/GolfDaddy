@@ -19091,16 +19091,25 @@ async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
       gdOpenPracticeManualQuadTool();
       return null;
     }
-    // Stage 2 — header per strip: leftover text boxes above the first data row.
+    // Stage 2 — header per strip: leftover text boxes in the top header row.
     gdPracticeUpdateImportJob({checkpointText:"Allocating headers",stageIndex:1,progress:56});
     gdSetPracticePhotoProcessing(true,{stageIndex:1,progress:56,preserveClubs:true});
-    const headerBottom=Math.max(1,Number(valueRows[0].y0));
+    // Self-locating header band: the topmost text-box row (the first-data-row
+    // boundary can collapse to a sliver if noise gets read as a value).
+    const firstRowCy=Number(valueRows[0].cy);
+    const headerRowBoxes=textBoxes.filter(box=>Number(box.cy)<firstRowCy);
+    const headerBottom=headerRowBoxes.length?(Math.max.apply(null,headerRowBoxes.map(box=>Number(box.y1)))+3):Math.max(1,Number(valueRows[0].y0));
     gdPracticeDebugCheckpointSafe("header_strip_scan","running",{inputSummary:`${columns.length} strips, header band 0-${Math.round(headerBottom)}`});
-    const headerTexts=columns.map(col=>textBoxes.filter(box=>Number(box.cx)>=col.left&&Number(box.cx)<=col.right&&Number(box.cy)<headerBottom).sort((a,b)=>Number(a.x0)-Number(b.x0)).map(box=>box.text).join(" ").trim());
-    const allocated=OCR.allocateHeaders(columns,headerTexts,{resolver:REG.canonicalKey});
-    const keys=allocated.map(col=>col.metricKey);
+    const headerTexts=columns.map(col=>textBoxes.filter(box=>Number(box.cx)>=col.left&&Number(box.cx)<=col.right&&Number(box.cy)<=headerBottom).sort((a,b)=>Number(a.x0)-Number(b.x0)).map(box=>box.text).join(" ").trim());
+    let allocated=OCR.allocateHeaders(columns,headerTexts,{resolver:REG.canonicalKey,registry:REG});
+    // Drop phantom club/margin columns that resolved to no metric (realigns the
+    // "7i read as 7 -> extra left column" shift).
+    const trimmed=OCR.trimUnresolvedEdges(allocated);
+    if(trimmed.length>=4&&trimmed.length<allocated.length)allocated=trimmed;
+    const activeColumns=allocated;
+    const keys=activeColumns.map(col=>col.metricKey);
     const allocatedCount=keys.filter(Boolean).length;
-    gdPracticeDebugCheckpointSafe("header_strip_scan",allocatedCount>=4?"success":"failed",{outputSummary:`Allocated ${allocatedCount}/${columns.length}: ${headerTexts.join(" | ")}`,counts:{allocated:allocatedCount,columns:columns.length}});
+    gdPracticeDebugCheckpointSafe("header_strip_scan",allocatedCount>=4?"success":"failed",{outputSummary:`Allocated ${allocatedCount}/${activeColumns.length}: ${activeColumns.map(col=>col.headerText).join(" | ")}`,counts:{allocated:allocatedCount,columns:activeColumns.length}});
     if(allocatedCount<4){
       gdPracticeFeedback("Header allocation could not identify the columns. Re-frame and scan again.","error");
       gdOpenPracticeManualQuadTool();
@@ -19113,17 +19122,17 @@ async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
     const clubLabel=(typeof gdPracticeScanClubLabel==="function"?gdPracticeScanClubLabel():"7i")||"7i";
     const headerLine=["Club"].concat(keys.map(key=>key?REG.headerLabel(key):null).filter(Boolean)).join(",");
     const lines=[headerLine];
-    const firstColLeft=Number(columns[0].left);
+    const firstColLeft=Number(activeColumns[0].left);
     valueRows.forEach(row=>{
       // Skip AVERAGE / STD DEV summary rows (labelled in the left margin).
       const marginText=textBoxes.filter(box=>Number(box.cx)<firstColLeft&&Number(box.cy)>=row.y0&&Number(box.cy)<=row.y1).map(box=>String(box.text||"")).join(" ");
       if(OCR.isSummaryLabel(marginText))return;
       const cells=[clubLabel];
-      for(let c=0;c<columns.length;c+=1){
+      for(let c=0;c<activeColumns.length;c+=1){
         const key=keys[c];
         if(!key)continue;
         const cellText=numberBoxes
-          .filter(box=>Number(box.cx)>=columns[c].left&&Number(box.cx)<=columns[c].right&&Number(box.cy)>=row.y0&&Number(box.cy)<=row.y1)
+          .filter(box=>Number(box.cx)>=activeColumns[c].left&&Number(box.cx)<=activeColumns[c].right&&Number(box.cy)>=row.y0&&Number(box.cy)<=row.y1)
           .sort((a,b)=>Number(a.x0)-Number(b.x0))
           .map(box=>String(box.text||"").trim())
           .join(" ");

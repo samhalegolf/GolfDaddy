@@ -23,6 +23,15 @@ const expectedKeys = ["ballSpeed", "launch", "sideAngle", "backspin", "sideSpin"
 const cols = ocr.allocateHeaders(headers.map(() => ({})), headers, { resolver });
 check("header allocation (11 real headers)", cols.map(c => c.metricKey), expectedKeys);
 
+// Fuzzy: OCR typos still resolve.
+const typos = ["BALL SPEED", "LAUNEH ANGLE", "SIOE ANGLE", "BACKSPlN"];
+const fuzzy = ocr.allocateHeaders(typos.map(() => ({})), typos, { registry: globalThis.LaunchMonitorAliasRegistry });
+check("fuzzy header resolve (typos)", fuzzy.map(c => c.metricKey), ["ballSpeed", "launch", "sideAngle", "backspin"]);
+
+// Trim: a phantom club column on the left (no metric) is dropped.
+const withClub = [{ metricKey: "" }, { metricKey: "ballSpeed" }, { metricKey: "launch" }, { metricKey: "carry" }];
+check("trim phantom club/edge columns", ocr.trimUnresolvedEdges(withClub).map(c => c.metricKey), ["ballSpeed", "launch", "carry"]);
+
 // ---- Stage 3: cell parsing + validation ----
 function cell(text, key) { const r = ocr.parseCell(text, key); return { v: r.value, d: r.direction, valid: r.valid }; }
 

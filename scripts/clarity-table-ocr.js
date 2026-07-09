@@ -524,29 +524,81 @@
   }
 
   // ---------- header allocation (Stage 2) ----------
-  // Resolve a column's header text to a launch-monitor metric key using the
-  // shared alias registry (window/globalThis.LaunchMonitorAliasRegistry). The
-  // registry is injectable via opts.resolver so the module stays testable.
-  function resolveMetricKey(headerText, resolver) {
-    var fn = resolver ||
-      (typeof globalThis !== "undefined" && globalThis.LaunchMonitorAliasRegistry && globalThis.LaunchMonitorAliasRegistry.canonicalKey) || null;
+  function compactToken(value) { return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]/g, ""); }
+
+  function levenshtein(a, b) {
+    a = String(a || ""); b = String(b || "");
+    if (a === b) return 0;
+    if (!a.length) return b.length;
+    if (!b.length) return a.length;
+    var prev = [], i, j;
+    for (j = 0; j <= b.length; j += 1) prev[j] = j;
+    for (i = 1; i <= a.length; i += 1) {
+      var cur = [i];
+      for (j = 1; j <= b.length; j += 1) {
+        var cost = a.charAt(i - 1) === b.charAt(j - 1) ? 0 : 1;
+        cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost);
+      }
+      prev = cur;
+    }
+    return prev[b.length];
+  }
+
+  // Resolve header text -> metric key. Tries the registry's exact token match,
+  // then a fuzzy fallback so OCR typos (e.g. "LAUNEH ANGLE") still resolve.
+  function resolveMetricKey(headerText, resolver, registry) {
+    var reg = registry || (typeof globalThis !== "undefined" && globalThis.LaunchMonitorAliasRegistry) || null;
+    var fn = resolver || (reg && reg.canonicalKey) || null;
     var text = String(headerText || "").trim();
-    if (!text || typeof fn !== "function") return "";
-    var key = fn(text);
-    if (key) return key;
-    var cleaned = text.replace(/\b(mph|rpm|deg|ft)\b/gi, "").replace(/[°º]/g, "").trim();
-    return (cleaned && cleaned !== text) ? (fn(cleaned) || "") : "";
+    if (!text) return "";
+    if (typeof fn === "function") {
+      var key = fn(text);
+      if (key) return key;
+      var cleaned = text.replace(/\b(mph|rpm|deg|ft|m)\b/gi, "").replace(/[°º]/g, "").trim();
+      if (cleaned && cleaned !== text) { var k2 = fn(cleaned); if (k2) return k2; }
+    }
+    // Fuzzy fallback against the registry's alias tokens.
+    if (reg && Array.isArray(reg.entries)) {
+      var token = compactToken(text);
+      if (token.length < 3) return "";
+      var best = "", bestDist = Infinity;
+      reg.entries.forEach(function (entry) {
+        [entry.key, entry.label, entry.rawLabel, entry.candidateMetric]
+          .concat(entry.aliases || [], entry.headerAliases || [])
+          .forEach(function (alias) {
+            var at = compactToken(alias);
+            if (at.length < 3) return;
+            var d = levenshtein(token, at);
+            var tol = Math.max(1, Math.floor(Math.max(token.length, at.length) * 0.25));
+            if (d <= tol && d < bestDist) { bestDist = d; best = entry.key; }
+          });
+      });
+      return best;
+    }
+    return "";
   }
 
   function allocateHeaders(columns, headerTexts, opts) {
     opts = opts || {};
     var cols = Array.isArray(columns) ? columns : [];
     var texts = Array.isArray(headerTexts) ? headerTexts : [];
+    var reg = opts.registry || (typeof globalThis !== "undefined" && globalThis.LaunchMonitorAliasRegistry) || null;
     return cols.map(function (col, i) {
       var headerText = texts[i] != null ? texts[i] : ((col && col.rawHeaderText) || "");
-      var metricKey = resolveMetricKey(headerText, opts.resolver);
+      var metricKey = resolveMetricKey(headerText, opts.resolver, reg);
       return Object.assign({}, col, { headerText: String(headerText || ""), metricKey: metricKey });
     });
+  }
+
+  // Trim spurious columns (club marker / margins) from the LEFT and RIGHT edges
+  // that resolved to no metric, keeping the contiguous run of real columns. This
+  // undoes the "7i read as 7 -> phantom left column" shift.
+  function trimUnresolvedEdges(allocatedColumns) {
+    var list = Array.isArray(allocatedColumns) ? allocatedColumns : [];
+    var lo = 0, hi = list.length - 1;
+    while (lo <= hi && !(list[lo] && list[lo].metricKey)) lo += 1;
+    while (hi >= lo && !(list[hi] && list[hi].metricKey)) hi -= 1;
+    return lo <= hi ? list.slice(lo, hi + 1) : [];
   }
 
   // ---------- cell value parsing + validation (Stage 3) ----------
@@ -631,6 +683,7 @@
   var api = {
     splitColumns: splitColumns,
     allocateHeaders: allocateHeaders,
+    trimUnresolvedEdges: trimUnresolvedEdges,
     parseCell: parseCell,
     numberBoxesFromWords: numberBoxesFromWords,
     headerTextForColumns: headerTextForColumns,
