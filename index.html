@@ -19047,27 +19047,36 @@ async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
   gdPracticeFeedback("Scanning: splitting columns...");
   await gdPracticeYieldScanPaint();
   try{
-    // One OCR pass over the flattened grid, then pure geometry. Filter to
-    // number-like words BEFORE the cut so header labels never distort columns.
+    // Detect boxes from pixels (reliable geometry, no misses), then OCR EACH box
+    // with a small crop. Whole-image OCR missed ~a third of values and garbled
+    // the headers; isolated crops read cleanly. Number-like boxes feed the cut;
+    // the leftover text boxes are the headers (the only words left per strip).
     const Tesseract=await gdLoadTesseract();
     gdPracticeDebugCheckpointSafe("value_corridor_mapping","running",{inputSummary:`${flat.width}x${flat.height} flat image`});
-    const fullRes=await gdRecognizeWithTesseract(Tesseract,flat,{tessedit_char_whitelist:"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,°ºLR-+ ",tessedit_pageseg_mode:"6"},"clarity-full");
-    const words=gdLmLinesFromOcrData(fullRes?.data).flatMap(line=>Array.isArray(line?.words)?line.words:[]);
-    const numberBoxes=OCR.numberBoxesFromWords(words);
+    const detected=PIX.detectNumberBoxes(flat);
+    const boxCfg={tessedit_char_whitelist:"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,°ºLR-+ ",tessedit_pageseg_mode:"7"};
+    const looksNum=OCR._internals&&OCR._internals.looksLikeValue;
+    const readBoxes=[];
+    for(const box of detected.boxes){
+      const crop=PIX.cropCanvas(flat,box.x0,box.y0,box.x1,box.y1,3);
+      const res=await gdRecognizeWithTesseract(Tesseract,crop,boxCfg,"clarity-box");
+      readBoxes.push(Object.assign({},box,{text:String(res?.data?.text||"").trim()}));
+    }
+    const numberBoxes=readBoxes.filter(box=>box.text&&looksNum(box.text));
+    const textBoxes=readBoxes.filter(box=>box.text&&!looksNum(box.text));
     const columns=OCR.splitColumns(numberBoxes,{sourceWidth:flat.width});
     const valueRows=OCR.clusterValueRows(numberBoxes);
-    gdPracticeDebugCheckpointSafe("value_corridor_mapping",columns.length>=4?"success":"failed",{outputSummary:`${columns.length} columns from ${numberBoxes.length} number words across ${valueRows.length} value rows`,counts:{columns:columns.length,numberWords:numberBoxes.length,rows:valueRows.length}});
+    gdPracticeDebugCheckpointSafe("value_corridor_mapping",columns.length>=4?"success":"failed",{outputSummary:`${columns.length} columns from ${numberBoxes.length} number boxes (${readBoxes.length} read) across ${valueRows.length} value rows`,counts:{columns:columns.length,numberBoxes:numberBoxes.length,textBoxes:textBoxes.length,rows:valueRows.length}});
     if(columns.length<4||valueRows.length<1){
       gdPracticeFeedback("Column split did not find a usable grid. Re-frame and scan again.","error");
       gdOpenPracticeManualQuadTool();
       return null;
     }
-    // Stage 2 — header allocation: the leftover (non-number) words on each strip,
-    // taken from the band above the first data row (runs after the cut).
-    gdSetPracticePhotoProcessing(true,{stageIndex:0,progress:45,preserveClubs:true});
+    // Stage 2 — header per strip: leftover text boxes above the first data row.
+    gdSetPracticePhotoProcessing(true,{stageIndex:0,progress:52,preserveClubs:true});
     const headerBottom=Math.max(1,Number(valueRows[0].y0));
     gdPracticeDebugCheckpointSafe("header_strip_scan","running",{inputSummary:`${columns.length} strips, header band 0-${Math.round(headerBottom)}`});
-    const headerTexts=OCR.headerTextForColumns(columns,words,{headerBottom});
+    const headerTexts=columns.map(col=>textBoxes.filter(box=>Number(box.cx)>=col.left&&Number(box.cx)<=col.right&&Number(box.cy)<headerBottom).sort((a,b)=>Number(a.x0)-Number(b.x0)).map(box=>box.text).join(" ").trim());
     const allocated=OCR.allocateHeaders(columns,headerTexts,{resolver:REG.canonicalKey});
     const keys=allocated.map(col=>col.metricKey);
     const allocatedCount=keys.filter(Boolean).length;
@@ -19077,26 +19086,25 @@ async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
       gdOpenPracticeManualQuadTool();
       return null;
     }
-    // Stage 3 — assign each word to its cell (same OCR pass), parse + validate.
-    gdSetPracticePhotoProcessing(true,{stageIndex:1,progress:62,preserveClubs:true});
+    // Stage 3 — cells from the already-read number boxes; skip summary rows.
+    gdSetPracticePhotoProcessing(true,{stageIndex:1,progress:72,preserveClubs:true});
     gdPracticeDebugCheckpointSafe("extraction_started","running",{inputSummary:`${valueRows.length} rows x ${allocatedCount} columns`});
     const clubLabel=(typeof gdPracticeScanClubLabel==="function"?gdPracticeScanClubLabel():"7i")||"7i";
-    const cellWords=words.filter(word=>String(word?.text||"").trim()&&Number.isFinite(Number(word?.cx))&&Number.isFinite(Number(word?.cy)));
     const headerLine=["Club"].concat(keys.map(key=>key?REG.headerLabel(key):null).filter(Boolean)).join(",");
     const lines=[headerLine];
     const firstColLeft=Number(columns[0].left);
     valueRows.forEach(row=>{
       // Skip AVERAGE / STD DEV summary rows (labelled in the left margin).
-      const marginText=cellWords.filter(word=>Number(word.cx)<firstColLeft&&Number(word.cy)>=row.y0&&Number(word.cy)<=row.y1).map(word=>String(word.text||"")).join(" ");
+      const marginText=textBoxes.filter(box=>Number(box.cx)<firstColLeft&&Number(box.cy)>=row.y0&&Number(box.cy)<=row.y1).map(box=>String(box.text||"")).join(" ");
       if(OCR.isSummaryLabel(marginText))return;
       const cells=[clubLabel];
       for(let c=0;c<columns.length;c+=1){
         const key=keys[c];
         if(!key)continue;
-        const cellText=cellWords
-          .filter(word=>Number(word.cx)>=columns[c].left&&Number(word.cx)<=columns[c].right&&Number(word.cy)>=row.y0&&Number(word.cy)<=row.y1)
+        const cellText=numberBoxes
+          .filter(box=>Number(box.cx)>=columns[c].left&&Number(box.cx)<=columns[c].right&&Number(box.cy)>=row.y0&&Number(box.cy)<=row.y1)
           .sort((a,b)=>Number(a.x0)-Number(b.x0))
-          .map(word=>String(word.text||"").trim())
+          .map(box=>String(box.text||"").trim())
           .join(" ");
         const cell=OCR.parseCell(cellText,key);
         cells.push(cell.valid?(String(cell.value)+(cell.direction?(" "+cell.direction):"")):"");
