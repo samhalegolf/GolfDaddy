@@ -19028,6 +19028,37 @@ function gdClarityOcrWithTimeout(promise,ms){
     new Promise(resolve=>setTimeout(()=>resolve({data:{text:"",words:[],lines:[]},__gdTimedOut:true}),Math.max(1000,Number(ms)||9000)))
   ]);
 }
+// Render a debug overlay on the flattened image so each stage shows what it saw:
+// value boxes (green), text boxes (blue), column cuts (yellow=resolved,
+// red=unresolved), the header-band line (pink), and the resolved metric per
+// column. Returned canvas is passed as details.snapshot -> Stage Snapshot.
+function gdClarityScanOverlay(flat,layers){
+  layers=layers||{};
+  const maxW=900;
+  const scale=Math.min(1,maxW/Math.max(1,Number(flat.width)||1));
+  const c=document.createElement("canvas");
+  c.width=Math.max(1,Math.round((Number(flat.width)||1)*scale));
+  c.height=Math.max(1,Math.round((Number(flat.height)||1)*scale));
+  const ctx=c.getContext("2d");
+  try{ctx.drawImage(flat,0,0,c.width,c.height);}catch(e){}
+  const rect=(b,stroke)=>{ctx.strokeStyle=stroke;ctx.lineWidth=1;ctx.strokeRect(Number(b.x0)*scale,Number(b.y0)*scale,(Number(b.x1)-Number(b.x0))*scale,(Number(b.y1)-Number(b.y0))*scale);};
+  (layers.textBoxes||[]).forEach(b=>rect(b,"rgba(86,181,255,.55)"));
+  (layers.numberBoxes||[]).forEach(b=>rect(b,"rgba(55,242,141,.75)"));
+  if(Number.isFinite(Number(layers.headerBottom))){
+    ctx.strokeStyle="rgba(255,120,220,.95)";ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.moveTo(0,Number(layers.headerBottom)*scale);ctx.lineTo(c.width,Number(layers.headerBottom)*scale);ctx.stroke();
+  }
+  (layers.columns||[]).forEach(col=>{
+    const resolved=!!col.metricKey;
+    ctx.strokeStyle=resolved?"rgba(255,211,116,.95)":"rgba(255,90,90,.95)";
+    ctx.lineWidth=1.5;
+    [Number(col.left),Number(col.right)].forEach(x=>{ctx.beginPath();ctx.moveTo(x*scale,0);ctx.lineTo(x*scale,c.height);ctx.stroke();});
+    ctx.fillStyle=resolved?"#37f28d":"#ff8a8a";
+    ctx.font="11px ui-monospace,Menlo,monospace";
+    ctx.fillText(String(col.metricKey||col.headerText||"?").slice(0,12),Number(col.left)*scale+3,12);
+  });
+  return c;
+}
 // THE SINGLE CHECKPOINT between the scanner and the Shot Library.
 // Input  (scanner-preferred format): rows of { club, cells:[{key,value,direction,valid}] }.
 // Output (Shot Library landing point): { label, inputType, clubGroups:[{originClubLabel,
@@ -19126,7 +19157,7 @@ async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
     const textBoxes=readBoxes.filter(box=>box.text&&!looksNum(box.text));
     const columns=OCR.splitColumns(numberBoxes,{sourceWidth:flat.width});
     const valueRows=OCR.clusterValueRows(numberBoxes);
-    gdPracticeDebugCheckpointSafe("value_corridor_mapping",columns.length>=4?"success":"failed",{outputSummary:`${columns.length} columns from ${numberBoxes.length} number boxes (${readBoxes.length} read) across ${valueRows.length} value rows`,counts:{columns:columns.length,numberBoxes:numberBoxes.length,textBoxes:textBoxes.length,rows:valueRows.length}});
+    gdPracticeDebugCheckpointSafe("value_corridor_mapping",columns.length>=4?"success":"failed",{outputSummary:`${columns.length} columns from ${numberBoxes.length} number boxes (${readBoxes.length} read) across ${valueRows.length} value rows`,counts:{columns:columns.length,numberBoxes:numberBoxes.length,textBoxes:textBoxes.length,rows:valueRows.length},snapshot:{canvas:gdClarityScanOverlay(flat,{numberBoxes:numberBoxes,textBoxes:textBoxes,columns:columns}),label:"Column split: value boxes green, text boxes blue, cuts yellow"}});
     if(columns.length<4||valueRows.length<1){
       gdPracticeFeedback("Column split did not find a usable grid. Re-frame and scan again.","error");
       gdOpenPracticeManualQuadTool();
@@ -19135,11 +19166,22 @@ async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
     // Stage 2 — header per strip: leftover text boxes in the top header row.
     gdPracticeUpdateImportJob({checkpointText:"Allocating headers",stageIndex:1,progress:56});
     gdSetPracticePhotoProcessing(true,{stageIndex:1,progress:56,preserveClubs:true});
-    // Self-locating header band: the topmost text-box row (the first-data-row
-    // boundary can collapse to a sliver if noise gets read as a value).
+    // Header band = the TOPMOST row of text boxes (the header labels). Taking all
+    // text above the first data row swallowed the units row (MPH/RPM) and the
+    // "BALL: STANDARD" label, garbling headers. Keep only boxes within ~1.6 line
+    // heights of the topmost text box.
     const firstRowCy=Number(valueRows[0].cy);
-    const headerRowBoxes=textBoxes.filter(box=>Number(box.cy)<firstRowCy);
-    const headerBottom=headerRowBoxes.length?(Math.max.apply(null,headerRowBoxes.map(box=>Number(box.y1)))+3):Math.max(1,Number(valueRows[0].y0));
+    const aboveData=textBoxes.filter(box=>Number(box.cy)<firstRowCy).sort((a,b)=>Number(a.y0)-Number(b.y0));
+    let headerBottom;
+    if(aboveData.length){
+      const topY0=Number(aboveData[0].y0);
+      const heights=aboveData.map(box=>Number(box.y1)-Number(box.y0)).filter(v=>v>0).sort((a,b)=>a-b);
+      const rowH=heights.length?heights[Math.floor(heights.length/2)]:16;
+      const headerRow=aboveData.filter(box=>Number(box.y0)<=topY0+rowH*1.6);
+      headerBottom=Math.max.apply(null,headerRow.map(box=>Number(box.y1)))+2;
+    }else{
+      headerBottom=Math.max(1,Number(valueRows[0].y0));
+    }
     gdPracticeDebugCheckpointSafe("header_strip_scan","running",{inputSummary:`${columns.length} strips, header band 0-${Math.round(headerBottom)}`});
     const headerTexts=columns.map(col=>textBoxes.filter(box=>Number(box.cx)>=col.left&&Number(box.cx)<=col.right&&Number(box.cy)<=headerBottom).sort((a,b)=>Number(a.x0)-Number(b.x0)).map(box=>box.text).join(" ").trim());
     let allocated=OCR.allocateHeaders(columns,headerTexts,{resolver:REG.canonicalKey,registry:REG});
@@ -19150,7 +19192,7 @@ async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
     const activeColumns=allocated;
     const keys=activeColumns.map(col=>col.metricKey);
     const allocatedCount=keys.filter(Boolean).length;
-    gdPracticeDebugCheckpointSafe("header_strip_scan",allocatedCount>=4?"success":"failed",{outputSummary:`Allocated ${allocatedCount}/${activeColumns.length}: ${activeColumns.map(col=>col.headerText).join(" | ")}`,counts:{allocated:allocatedCount,columns:activeColumns.length}});
+    gdPracticeDebugCheckpointSafe("header_strip_scan",allocatedCount>=4?"success":"failed",{outputSummary:`Allocated ${allocatedCount}/${activeColumns.length}: ${activeColumns.map(col=>col.headerText).join(" | ")}`,counts:{allocated:allocatedCount,columns:activeColumns.length},snapshot:{canvas:gdClarityScanOverlay(flat,{textBoxes:textBoxes,columns:activeColumns,headerBottom:headerBottom}),label:"Header band pink; columns green=resolved, red=unresolved"}});
     if(allocatedCount<4){
       gdPracticeFeedback("Header allocation could not identify the columns. Re-frame and scan again.","error");
       gdOpenPracticeManualQuadTool();
@@ -19185,7 +19227,7 @@ async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
     // Single checkpoint: scanner output -> Shot Library landing structure.
     const payload=gdClarityScanResultToPayload(scanRows,{label:sourceLabel,club:clubLabel});
     const rowCount=Number(payload?.clubGroups?.length)||0;
-    gdPracticeDebugCheckpointSafe("extraction_completed",rowCount?"success":"failed",{outputSummary:`Read ${rowCount} shots`,counts:{rows:rowCount}});
+    gdPracticeDebugCheckpointSafe("extraction_completed",rowCount?"success":"failed",{outputSummary:`Read ${rowCount} shots (${scanRows.length} rows x ${allocatedCount} metrics)`,counts:{rows:rowCount,scanRows:scanRows.length},snapshot:{canvas:gdClarityScanOverlay(flat,{numberBoxes:numberBoxes,columns:activeColumns,headerBottom:headerBottom}),label:`Extraction: ${rowCount} shots from ${scanRows.length} rows`}});
     if(!rowCount){
       gdPracticeFeedback("No usable rows were read. Re-frame the value grid and scan again.","error");
       gdOpenPracticeManualQuadTool();
