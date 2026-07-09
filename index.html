@@ -19028,6 +19028,47 @@ function gdClarityOcrWithTimeout(promise,ms){
     new Promise(resolve=>setTimeout(()=>resolve({data:{text:"",words:[],lines:[]},__gdTimedOut:true}),Math.max(1000,Number(ms)||9000)))
   ]);
 }
+// THE SINGLE CHECKPOINT between the scanner and the Shot Library.
+// Input  (scanner-preferred format): rows of { club, cells:[{key,value,direction,valid}] }.
+// Output (Shot Library landing point): { label, inputType, clubGroups:[{originClubLabel,
+//         candidateClub, expectedDistanceM, metrics:[gdLmMetric...]}] }.
+// The alias/normalisation step is gdLmMetricForKey (key+value -> native metric).
+// Direction convention (from the working pipeline, index.html ~12042): direction
+// columns encode Left as negative, Right as positive.
+function gdClarityScanResultToPayload(scanRows,opts={}){
+  const rows=Array.isArray(scanRows)?scanRows:[];
+  const clubGroups=[];
+  rows.forEach(row=>{
+    const club=String(row&&row.club||opts.club||"7i").trim()||"7i";
+    const metrics=[];
+    let carry;
+    (Array.isArray(row&&row.cells)?row.cells:[]).forEach(cell=>{
+      const key=cell&&cell.key;
+      if(!key||!cell.valid||!Number.isFinite(Number(cell.value)))return;
+      let value=Number(cell.value);
+      if(typeof gdColumnNeedsDirection==="function"&&gdColumnNeedsDirection(key)){
+        value=String(cell.direction||"").toUpperCase()==="L"?-Math.abs(value):Math.abs(value);
+      }
+      const metric=gdLmMetricForKey(key,value,{strict:false});
+      if(metric){metrics.push(metric);if(String(key)==="carry")carry=Number(metric.value);}
+    });
+    if(metrics.length){
+      clubGroups.push({
+        originClubLabel:club,
+        candidateClub:club,
+        expectedDistanceM:Number.isFinite(carry)?carry:undefined,
+        metrics
+      });
+    }
+  });
+  return {
+    label:opts.label||"Clarity table scan",
+    inputType:"clarity-table-ocr",
+    timestamp:new Date().toISOString(),
+    sourceIdentity:{providerGuess:"clarity_table_ocr",confidence:.8,evidence:["Clarity Table OCR module scan"]},
+    clubGroups
+  };
+}
 async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
   // Rebuilt scan path. Hands the flattened value-grid image (output of the kept
   // 4-corner stretch) to the isolated Clarity Table OCR module:
@@ -19120,14 +19161,14 @@ async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
     gdSetPracticePhotoProcessing(true,{stageIndex:2,progress:74,preserveClubs:true});
     gdPracticeDebugCheckpointSafe("extraction_started","running",{inputSummary:`${valueRows.length} rows x ${allocatedCount} columns`});
     const clubLabel=(typeof gdPracticeScanClubLabel==="function"?gdPracticeScanClubLabel():"7i")||"7i";
-    const headerLine=["Club"].concat(keys.map(key=>key?REG.headerLabel(key):null).filter(Boolean)).join(",");
-    const lines=[headerLine];
     const firstColLeft=Number(activeColumns[0].left);
+    // Scanner-preferred output: structured rows, no text round-trip.
+    const scanRows=[];
     valueRows.forEach(row=>{
       // Skip AVERAGE / STD DEV summary rows (labelled in the left margin).
       const marginText=textBoxes.filter(box=>Number(box.cx)<firstColLeft&&Number(box.cy)>=row.y0&&Number(box.cy)<=row.y1).map(box=>String(box.text||"")).join(" ");
       if(OCR.isSummaryLabel(marginText))return;
-      const cells=[clubLabel];
+      const cells=[];
       for(let c=0;c<activeColumns.length;c+=1){
         const key=keys[c];
         if(!key)continue;
@@ -19137,12 +19178,12 @@ async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
           .map(box=>String(box.text||"").trim())
           .join(" ");
         const cell=OCR.parseCell(cellText,key);
-        cells.push(cell.valid?(String(cell.value)+(cell.direction?(" "+cell.direction):"")):"");
+        cells.push({key:key,value:cell.value,direction:cell.direction,valid:cell.valid});
       }
-      lines.push(cells.join(","));
+      if(cells.some(cell=>cell.valid))scanRows.push({club:clubLabel,cells:cells});
     });
-    const payload=gdBuildLaunchMonitorTextCapture(lines.join("\n"),sourceLabel);
-    payload.inputType="clarity-table-ocr";
+    // Single checkpoint: scanner output -> Shot Library landing structure.
+    const payload=gdClarityScanResultToPayload(scanRows,{label:sourceLabel,club:clubLabel});
     const rowCount=Number(payload?.clubGroups?.length)||0;
     gdPracticeDebugCheckpointSafe("extraction_completed",rowCount?"success":"failed",{outputSummary:`Read ${rowCount} shots`,counts:{rows:rowCount}});
     if(!rowCount){
