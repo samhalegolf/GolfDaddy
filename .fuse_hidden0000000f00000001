@@ -1728,8 +1728,8 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 <script>window.L=window.L||window.leaflet;</script>
 <script src="scripts/clarity-build.js?v=tool-rail-tab-hole-label-20260620"></script>
 <script src="scripts/gd-launch-monitor-alias-registry.js?v=practice-alias-registry-20260612"></script>
-<script src="scripts/clarity-table-ocr.js?v=table-ocr-merge-20260710p"></script>
-<script src="scripts/clarity-table-ocr-pixels.js?v=table-ocr-merge-20260710p"></script>
+<script src="scripts/clarity-table-ocr.js?v=table-ocr-phantom-20260710n"></script>
+<script src="scripts/clarity-table-ocr-pixels.js?v=table-ocr-phantom-20260710n"></script>
 <style>
 	    *,*::before,*::after{box-sizing:border-box}
 	    :where(input,select,textarea,button){max-width:100%}
@@ -19093,8 +19093,12 @@ function gdClarityScanResultToPayload(scanRows,opts={}){
     let carry;
     (Array.isArray(row&&row.cells)?row.cells:[]).forEach(cell=>{
       const key=cell&&cell.key;
+<<<<<<< HEAD
       // cell.value===null must NOT pass: Number(null) is 0, which is finite.
       if(!key||cell.value==null||!Number.isFinite(Number(cell.value)))return;
+=======
+      if(!key||!Number.isFinite(Number(cell.value)))return;
+>>>>>>> 4dee27a83dc9a281853ad6f83d81fb7394ef89a1
       // Adapter cleanup: the scanner keeps liberal reads to hold row alignment;
       // here we drop implausible misreads so they don't reach the library.
       if(cell.plausible===false)return;
@@ -19188,15 +19192,19 @@ async function gdClarityReadStripsIntoRows(strips,dataRows,Tesseract,opts){
   const OCR=window.ClarityTableOcr, PIX=window.ClarityTableOcrPixels;
   const named=strips.filter(s=>s.metricKey);
   const dataBottom=dataRows.length?Math.max.apply(null,dataRows.map(r=>Number(r.y1))):0;
+<<<<<<< HEAD
   const dataTop=dataRows.length?Math.min.apply(null,dataRows.map(r=>Number(r.y0))):0;
   // Band centres, in order. Used for EXCLUSIVE line->band assignment below.
   const centers=dataRows.map(r=>(Number(r.y0)+Number(r.y1))/2);
+=======
+>>>>>>> 4dee27a83dc9a281853ad6f83d81fb7394ef89a1
   const perStrip=[];
   for(let i=0;i<named.length;i+=1){
     if(typeof gdPracticeAssertImportNotCanceled==="function")gdPracticeAssertImportNotCanceled();
     const strip=named[i];
     const prof=gdClarityStripProfile(strip.metricKey);
     const FACTOR=2.6;
+<<<<<<< HEAD
     // Intensive scan: upscale the strip's DATA REGION (just above the first data
     // row down to the last) and read it as one block. Starting below the header
     // matters: header glyphs forced through the digit whitelist would otherwise
@@ -19259,6 +19267,35 @@ async function gdClarityReadStripsIntoRows(strips,dataRows,Tesseract,opts){
       // is 0 (finite), so the old `Number.isFinite(Number(cell.value))` marked
       // garbage as valid. Check null explicitly.
       const hasNumber=cell.value!=null&&Number.isFinite(cell.value);
+=======
+    // Intensive scan: upscale the whole strip (top down to the last data row) and
+    // read it as one block. Best quality Tesseract can give on small glyphs. No
+    // confidence gating — any numeric read is kept as the row's value.
+    const crop=PIX.cropCanvas(strip.canvas,0,0,strip.canvas.width,Math.max(2,dataBottom+4),1);
+    const big=gdClarityUpscaleCanvas(crop,FACTOR);
+    const res=await gdClarityOcrWithTimeout(gdRecognizeWithTesseract(Tesseract,big,{tessedit_char_whitelist:prof.whitelist,tessedit_pageseg_mode:"6"},"clarity-strip-read"),16000);
+    const lines=(typeof gdLmLinesFromOcrData==="function"?gdLmLinesFromOcrData(res&&res.data):[]).filter(l=>l&&String(l.text||"").trim());
+    const cells=[];
+    for(const row of dataRows){
+      const y0=Number(row.y0),y1=Number(row.y1),mid=(y0+y1)/2,tol=Math.max(6,(y1-y0)*0.75);
+      // OCR cy is in upscaled coords — divide by FACTOR back to strip/flat coords.
+      let best=null,bestD=Infinity;
+      lines.forEach(l=>{const cy=Number(l.cy)/FACTOR;if(cy>=y0-tol&&cy<=y1+tol){const d=Math.abs(cy-mid);if(d<bestD){bestD=d;best=l;}}});
+      let text=best?String(best.text||"").trim():"";
+      // Extra trick: any row the block scan missed gets a targeted single-line
+      // re-scan — a tight crop of just that row band, upscaled harder, psm 7.
+      if(!text){
+        const ry0=Math.max(0,y0-2),ry1=Math.min(strip.canvas.height,y1+2);
+        const cellImg=gdClarityUpscaleCanvas(PIX.cropCanvas(strip.canvas,0,ry0,strip.canvas.width,ry1,1),3.4);
+        const r2=await gdClarityOcrWithTimeout(gdRecognizeWithTesseract(Tesseract,cellImg,{tessedit_char_whitelist:prof.whitelist,tessedit_pageseg_mode:"7"},"clarity-cell-rescan"),8000);
+        text=String(r2&&r2.data&&r2.data.text||"").trim();
+      }
+      if(!text){cells.push({key:strip.metricKey,value:null,direction:"",valid:false,plausible:false});continue;}
+      const cell=OCR.parseCell(text,strip.metricKey);
+      // Keep any numeric read even if implausible — it holds the row slot (a
+      // misread still serves as a placeholder) and the review step is the gate.
+      const hasNumber=Number.isFinite(Number(cell.value));
+>>>>>>> 4dee27a83dc9a281853ad6f83d81fb7394ef89a1
       cells.push({key:strip.metricKey,value:hasNumber?cell.value:null,direction:cell.direction,valid:hasNumber,plausible:!!cell.valid});
     }
     perStrip.push({metricKey:strip.metricKey,cells:cells});
