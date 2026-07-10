@@ -1728,8 +1728,8 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 <script>window.L=window.L||window.leaflet;</script>
 <script src="scripts/clarity-build.js?v=tool-rail-tab-hole-label-20260620"></script>
 <script src="scripts/gd-launch-monitor-alias-registry.js?v=practice-alias-registry-20260612"></script>
-<script src="scripts/clarity-table-ocr.js?v=table-ocr-geo-20260710k"></script>
-<script src="scripts/clarity-table-ocr-pixels.js?v=table-ocr-geo-20260710k"></script>
+<script src="scripts/clarity-table-ocr.js?v=table-ocr-coldiag-20260710m"></script>
+<script src="scripts/clarity-table-ocr-pixels.js?v=table-ocr-coldiag-20260710m"></script>
 <style>
 	    *,*::before,*::after{box-sizing:border-box}
 	    :where(input,select,textarea,button){max-width:100%}
@@ -19252,32 +19252,6 @@ async function gdClarityDetectClubFromStrips(strips,Tesseract){
   Object.keys(votes).forEach(k=>{if(votes[k]>bestN){bestN=votes[k];best=k;}});
   return {club:best,votes:votes};
 }
-// Classify value boxes by GEOMETRY, no OCR. Stage 1 only needs column geometry;
-// the box text is thrown away (strips re-scanned in Stage 3), so OCR-ing every
-// box (~0.45s x ~370 = ~170s) is pure waste. Pixel boxes already carry geometry:
-// keep the ones inside the dense grid band that are wide enough to be a real
-// multi-glyph value, which drops the lone ~1-glyph L/R and degree markers (they
-// each cost an OCR call and can spawn a thin phantom column). Returns null if the
-// grid looks too sparse to trust, so the caller can fall back to the OCR path.
-function gdClarityValueBoxesGeometric(detected){
-  const boxes=(detected&&Array.isArray(detected.boxes))?detected.boxes:[];
-  const rows=(detected&&Array.isArray(detected.rows))?detected.rows:[];
-  if(boxes.length<40||rows.length<6)return null;
-  const hs=boxes.map(b=>Number(b.h)).filter(v=>v>0).sort((a,b)=>a-b);
-  const glyphH=hs.length?hs[Math.floor(hs.length/2)]:16;
-  const counts=rows.map(r=>Array.isArray(r.items)?r.items.length:0);
-  const maxCount=Math.max.apply(null,[0].concat(counts));
-  if(maxCount<6)return null;
-  // Grid rows = the busy rows (>=55% of the busiest). Header/unit rows are sparser.
-  const gridRows=rows.filter(r=>(Array.isArray(r.items)?r.items.length:0)>=Math.max(4,maxCount*0.55));
-  if(gridRows.length<6)return null;
-  const top=Math.min.apply(null,gridRows.map(r=>Number(r.y0)));
-  const bot=Math.max.apply(null,gridRows.map(r=>Number(r.y1)));
-  // Value box = inside the grid band + at least ~0.72 glyph wide (multi-glyph
-  // number or a club label like "7i"); lone L/R and degree markers are narrower.
-  const numberBoxes=boxes.filter(b=>Number(b.cy)>=top-glyphH*0.6&&Number(b.cy)<=bot+glyphH*0.6&&Number(b.w)>=glyphH*0.72);
-  return numberBoxes.length>=40?{numberBoxes:numberBoxes}:null;
-}
 async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
   // Rebuilt scan path. Hands the flattened value-grid image (output of the kept
   // 4-corner stretch) to the isolated Clarity Table OCR module:
@@ -19316,49 +19290,33 @@ async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
     const Tesseract=await gdLoadTesseract();
     gdPracticeDebugCheckpointSafe("value_corridor_mapping","running",{inputSummary:`${flat.width}x${flat.height} flat image`});
     const detected=PIX.detectNumberBoxes(flat);
+    const boxCfg={tessedit_char_whitelist:"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,°ºLR-+ ",tessedit_pageseg_mode:"7"};
     const looksNum=OCR._internals&&OCR._internals.looksLikeValue;
-    let numberBoxes,textBoxes=[],columns,valueRows,geoMode=false;
-    // Fast path: classify value boxes by GEOMETRY (no per-box OCR). Stage 1 only
-    // needs column geometry — the box text is discarded (strips re-scanned later).
-    const geo=gdClarityValueBoxesGeometric(detected);
-    if(geo){
-      const cols=OCR.splitColumns(geo.numberBoxes,{sourceWidth:flat.width});
-      if(cols.length>=10){
-        numberBoxes=geo.numberBoxes;columns=cols;valueRows=OCR.clusterValueRows(geo.numberBoxes);geoMode=true;
-        // Summary rows (AVERAGE / STD DEV) are labelled in the leftmost column —
-        // OCR ONLY those few boxes so they can still be dropped downstream.
-        const clubLeft=Number(columns[0].left),clubRight=Number(columns[0].right);
-        const marginBoxes=detected.boxes.filter(b=>Number(b.cx)>=clubLeft&&Number(b.cx)<=clubRight);
-        for(const b of marginBoxes){
-          gdPracticeAssertImportNotCanceled();
-          const crop=PIX.cropCanvas(flat,b.x0,b.y0,b.x1,b.y1,3);
-          const r=await gdClarityOcrWithTimeout(gdRecognizeWithTesseract(Tesseract,crop,{tessedit_char_whitelist:"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789. ",tessedit_pageseg_mode:"7"},"clarity-margin"),9000);
-          textBoxes.push(Object.assign({},b,{text:String(r?.data?.text||"").trim()}));
-        }
+    const readBoxes=[];
+    const totalBoxes=detected.boxes.length;
+    for(let bi=0;bi<totalBoxes;bi+=1){
+      gdPracticeAssertImportNotCanceled();
+      const box=detected.boxes[bi];
+      const crop=PIX.cropCanvas(flat,box.x0,box.y0,box.x1,box.y1,3);
+      const res=await gdClarityOcrWithTimeout(gdRecognizeWithTesseract(Tesseract,crop,boxCfg,"clarity-box"),9000);
+      readBoxes.push(Object.assign({},box,{text:String(res?.data?.text||"").trim()}));
+      if(bi%12===0){
+        gdPracticeUpdateImportJob({checkpointText:`Reading boxes ${bi+1}/${totalBoxes}`,stageIndex:0,progress:Math.min(48,10+Math.round((bi/Math.max(1,totalBoxes))*38))});
+        await gdPracticeYieldScanPaint();
       }
     }
-    if(!geoMode){
-      // Fallback: OCR every box to classify number vs text (robust but slow).
-      const boxCfg={tessedit_char_whitelist:"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,°ºLR-+ ",tessedit_pageseg_mode:"7"};
-      const readBoxes=[];
-      const totalBoxes=detected.boxes.length;
-      for(let bi=0;bi<totalBoxes;bi+=1){
-        gdPracticeAssertImportNotCanceled();
-        const box=detected.boxes[bi];
-        const crop=PIX.cropCanvas(flat,box.x0,box.y0,box.x1,box.y1,3);
-        const res=await gdClarityOcrWithTimeout(gdRecognizeWithTesseract(Tesseract,crop,boxCfg,"clarity-box"),9000);
-        readBoxes.push(Object.assign({},box,{text:String(res?.data?.text||"").trim()}));
-        if(bi%12===0){
-          gdPracticeUpdateImportJob({checkpointText:`Reading boxes ${bi+1}/${totalBoxes}`,stageIndex:0,progress:Math.min(48,10+Math.round((bi/Math.max(1,totalBoxes))*38))});
-          await gdPracticeYieldScanPaint();
-        }
-      }
-      numberBoxes=readBoxes.filter(box=>box.text&&looksNum(box.text));
-      textBoxes=readBoxes.filter(box=>box.text&&!looksNum(box.text));
-      columns=OCR.splitColumns(numberBoxes,{sourceWidth:flat.width});
-      valueRows=OCR.clusterValueRows(numberBoxes);
-    }
-    gdPracticeDebugCheckpointSafe("value_corridor_mapping",columns.length>=4?"success":"failed",{outputSummary:`${columns.length} columns from ${numberBoxes.length} number boxes (${geoMode?"geometry":"ocr"} mode) across ${valueRows.length} value rows`,counts:{columns:columns.length,numberBoxes:numberBoxes.length,textBoxes:textBoxes.length,rows:valueRows.length},snapshot:{canvas:gdClarityScanOverlay(flat,{numberBoxes:numberBoxes,textBoxes:textBoxes,columns:columns}),label:`Column split (${geoMode?"geometry":"ocr"}): value boxes green, cuts yellow`}});
+    const numberBoxes=readBoxes.filter(box=>box.text&&looksNum(box.text));
+    const textBoxes=readBoxes.filter(box=>box.text&&!looksNum(box.text));
+    const columns=OCR.splitColumns(numberBoxes,{sourceWidth:flat.width});
+    const valueRows=OCR.clusterValueRows(numberBoxes);
+    // Diagnostic: what does each column actually contain? Lists the box count and a
+    // few sample reads per column so a phantom column (e.g. an L/R marker band or a
+    // split club column) is obvious at a glance instead of guessed at.
+    const columnBreakdown=columns.map((c,ci)=>{
+      const inCol=numberBoxes.filter(b=>Number(b.cx)>=Number(c.left)&&Number(b.cx)<=Number(c.right));
+      return `c${ci}[${inCol.length}]:${inCol.slice(0,5).map(b=>String(b.text||"").trim()).join(",")}`;
+    }).join("  |  ");
+    gdPracticeDebugCheckpointSafe("value_corridor_mapping",columns.length>=4?"success":"failed",{outputSummary:`${columns.length} columns from ${numberBoxes.length} number boxes (${readBoxes.length} read) across ${valueRows.length} value rows\nPer-column: ${columnBreakdown}`,counts:{columns:columns.length,numberBoxes:numberBoxes.length,textBoxes:textBoxes.length,rows:valueRows.length},snapshot:{canvas:gdClarityScanOverlay(flat,{numberBoxes:numberBoxes,textBoxes:textBoxes,columns:columns}),label:"Column split: value boxes green, text boxes blue, cuts yellow"}});
     if(columns.length<4||valueRows.length<1){
       gdPracticeFeedback("Column split did not find a usable grid. Re-frame and scan again.","error");
       gdOpenPracticeManualQuadTool();
@@ -19372,7 +19330,13 @@ async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
     // above the first data row. Each strip is its OWN image, so reading its top
     // only sees THAT column's header (+ its units, which the resolver strips) —
     // no cross-strip mixing, no need to be precise about the band.
-    const headerBottom=Math.max(8,Number(valueRows[0].y0));
+    // Anchor the header band to the first FULL value row, not just the topmost
+    // detected row. A stray 2-box row near the top would otherwise collapse the
+    // band to a sliver and every header would read as garbage (the 0/12 failure).
+    const rowCounts=valueRows.map(r=>Array.isArray(r.items)?r.items.length:0);
+    const maxRowBoxes=Math.max.apply(null,[0].concat(rowCounts));
+    const firstDataRow=valueRows.find(r=>(Array.isArray(r.items)?r.items.length:0)>=Math.max(4,maxRowBoxes*0.5))||valueRows[0];
+    const headerBottom=Math.max(8,Number(firstDataRow.y0));
     let strips=gdClarityCutStrips(flat,columns);
     gdPracticeDebugCheckpointSafe("header_strip_scan","running",{inputSummary:`${strips.length} strips cut, header band 0-${Math.round(headerBottom)}`});
     // Name each strip by reading the text near its top and matching a metric.
