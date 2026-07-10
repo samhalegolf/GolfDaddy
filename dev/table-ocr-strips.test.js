@@ -14,17 +14,19 @@ function check(name, got, expected) {
   if (!ok) allOk = false;
 }
 
-// Three narrow value columns centred at 100 / 250 / 400 in a 500-wide image.
+// Columns as the splitter produces them: left/right are the CUT bounds (tile
+// gap-to-gap); x0/x1 are the tight value extent inside each.
 const columns = [
-  { left: 85, right: 115, metricKey: "ballSpeed" },
-  { left: 235, right: 265, metricKey: "launch" },
-  { left: 385, right: 415, metricKey: "carry" }
+  { left: 0,   right: 150, x0: 85,  x1: 115, metricKey: "ballSpeed" },
+  { left: 150, right: 300, x0: 235, x1: 265, metricKey: "launch" },
+  { left: 300, right: 450, x0: 385, x1: 415, metricKey: "carry" }
 ];
 const strips = OCR.stripBoundaries(columns, 500);
 
-// Boundaries should tile at the midpoints (175, 325) with symmetric edges.
+// Strips must be the splitter's OWN cut bounds — not re-derived midpoints.
 check("strip count", strips.length, 3);
-check("strip spans (midpoint tiling)", strips.map(s => `${s.left}-${s.right}`), ["25-175", "175-325", "325-475"]);
+check("strip spans = column cut bounds", strips.map(s => `${s.left}-${s.right}`), ["0-150", "150-300", "300-450"]);
+check("tight value bounds carried", strips.map(s => `${s.valLeft}-${s.valRight}`), ["85-115", "235-265", "385-415"]);
 check("no gaps/overlaps between strips", strips.slice(1).every((s, i) => s.left === strips[i].right), true);
 check("names carried through", strips.map(s => s.metricKey), ["ballSpeed", "launch", "carry"]);
 
