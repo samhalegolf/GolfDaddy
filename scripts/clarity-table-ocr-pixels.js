@@ -85,11 +85,15 @@
     var minH = Math.max(4, medianH * 0.4);
     var minArea = Math.max(4, medianH * 0.9);
     return comps.filter(function (c) {
-      var horizontalLine = c.h <= Math.max(2, medianH * 0.18) && c.w > medianH * 2.2;
-      var verticalLine = c.w <= 2 && c.h > medianH * 1.8;
+      // Reject table GRID LINES so the column split cuts on value gaps, not on
+      // ink lines. A grid line is much taller than a digit and thin (or a very
+      // high aspect ratio); a horizontal rule is short and wide.
+      var horizontalLine = c.h <= Math.max(2, medianH * 0.22) && c.w > medianH * 1.8;
+      var verticalLine = (c.h > medianH * 1.6 && c.w <= Math.max(3, medianH * 0.55)) ||
+                         (c.w > 0 && c.h / c.w > 5.5 && c.h > medianH * 1.2);
       if (horizontalLine || verticalLine) return false;
       if (c.h < minH || c.area < minArea) return false;
-      if (c.w / c.h > 8 || c.h / c.w > 9) return false;
+      if (c.w / c.h > 8) return false;
       return true;
     });
   }
