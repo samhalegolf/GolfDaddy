@@ -599,41 +599,28 @@
     });
   }
 
-  // Strip boundaries: cut each column at the MIDPOINT between adjacent column
-  // centres, so each strip is a self-contained image that owns its full header
-  // (wider than the values), its values, and the direction marker to the right —
-  // with no bleed into neighbours (the midpoint sits in the whitespace gap).
+  // Strip boundaries: use the SPLITTER'S OWN cut bounds (col.left/col.right) so a
+  // strip is exactly the column the splitter drew — do NOT re-derive midpoints
+  // between centres, which "splits the difference" and can put a strip edge where
+  // no cut was ever made. valLeft/valRight are the tight value extent (col.x0/x1)
+  // for an optional tighter extraction crop.
   function stripBoundaries(columns, sourceWidth) {
     var cols = Array.isArray(columns) ? columns : [];
     if (!cols.length) return [];
     var W = Number(sourceWidth) || 0;
-    var centers = cols.map(function (c) { return (Number(c.left) + Number(c.right)) / 2; });
-    var out = [];
-    for (var i = 0; i < cols.length; i += 1) {
-      var left, right;
-      if (cols.length === 1) {
-        left = Number(cols[i].left); right = W || Number(cols[i].right);
-      } else if (i === 0) {
-        right = (centers[0] + centers[1]) / 2;
-        left = Math.max(0, centers[0] - (right - centers[0]));
-      } else if (i === cols.length - 1) {
-        left = (centers[i - 1] + centers[i]) / 2;
-        right = centers[i] + (centers[i] - left);
-        if (W) right = Math.min(W, right);
-      } else {
-        left = (centers[i - 1] + centers[i]) / 2;
-        right = (centers[i] + centers[i + 1]) / 2;
-      }
-      out.push({
+    return cols.map(function (c, i) {
+      var left = Number(c.left), right = Number(c.right);
+      var vl = Number.isFinite(Number(c.x0)) ? Number(c.x0) : left;
+      var vr = Number.isFinite(Number(c.x1)) ? Number(c.x1) : right;
+      return {
         index: i,
-        // Wide bounds (strip image + header): cut at the midpoints.
-        left: Math.max(0, Math.round(left)), right: Math.round(right),
-        // Tight bounds (the value column itself) for a tighter extraction crop.
-        valLeft: Number(cols[i].left), valRight: Number(cols[i].right),
-        cx: centers[i], metricKey: cols[i].metricKey, headerText: cols[i].headerText
-      });
-    }
-    return out;
+        left: Math.max(0, Math.round(left)),
+        right: Math.round(W ? Math.min(W, right) : right),
+        valLeft: vl, valRight: vr,
+        cx: (left + right) / 2,
+        metricKey: c.metricKey, headerText: c.headerText
+      };
+    });
   }
 
   // Trim spurious columns (club marker / margins) from the LEFT and RIGHT edges
