@@ -19183,7 +19183,7 @@ async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
       headerBottom=Math.max(1,Number(valueRows[0].y0));
     }
     gdPracticeDebugCheckpointSafe("header_strip_scan","running",{inputSummary:`${columns.length} strips, header band 0-${Math.round(headerBottom)}`});
-    const headerTexts=columns.map(col=>textBoxes.filter(box=>Number(box.cx)>=col.left&&Number(box.cx)<=col.right&&Number(box.cy)<=headerBottom).sort((a,b)=>Number(a.x0)-Number(b.x0)).map(box=>box.text).join(" ").trim());
+    const headerTexts=OCR.headerTextForColumns(columns,textBoxes,{headerBottom:headerBottom});
     let allocated=OCR.allocateHeaders(columns,headerTexts,{resolver:REG.canonicalKey,registry:REG});
     // Drop phantom club/margin columns that resolved to no metric (realigns the
     // "7i read as 7 -> extra left column" shift).
