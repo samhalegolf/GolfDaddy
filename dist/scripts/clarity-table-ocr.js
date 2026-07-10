@@ -492,21 +492,27 @@
       .filter(function (b) { return Number.isFinite(b.x0) && Number.isFinite(b.y0) && b.x1 > b.x0 && looksLikeValue(b.text); });
   }
 
-  // Assign the leftover NON-number words to whichever column contains them, and
-  // join per column -> that column's header text. opts.headerBottom limits to
-  // the header band above the data so direction markers (R/L) don't leak in.
+  // Assign each leftover NON-number word to the column whose CENTRE it is
+  // nearest to (header labels are wider than the narrow value columns, so a
+  // multi-word header like "LAUNCH ANGLE" would otherwise split across strips).
+  // opts.headerBottom limits to the header band so direction markers (R/L) and
+  // the units row don't leak in.
   function headerTextForColumns(columns, words, opts) {
     opts = opts || {};
     var maxY = Number.isFinite(Number(opts.headerBottom)) ? Number(opts.headerBottom) : Infinity;
     var cols = Array.isArray(columns) ? columns : [];
+    if (!cols.length) return [];
+    var centers = cols.map(function (c) { return (Number(c.left) + Number(c.right)) / 2; });
     var textWords = (Array.isArray(words) ? words : []).map(wordBox)
       .filter(function (b) { return b.text && !looksLikeValue(b.text) && b.cy <= maxY; });
-    return cols.map(function (col) {
-      return textWords
-        .filter(function (w) { return w.cx >= Number(col.left) && w.cx <= Number(col.right); })
-        .sort(function (a, b) { return a.x0 - b.x0; })
-        .map(function (w) { return w.text; })
-        .join(" ").trim();
+    var buckets = cols.map(function () { return []; });
+    textWords.forEach(function (w) {
+      var best = 0, bestD = Infinity;
+      centers.forEach(function (cc, i) { var d = Math.abs(w.cx - cc); if (d < bestD) { bestD = d; best = i; } });
+      buckets[best].push(w);
+    });
+    return buckets.map(function (bucket) {
+      return bucket.sort(function (a, b) { return a.x0 - b.x0; }).map(function (w) { return w.text; }).join(" ").trim();
     });
   }
 
