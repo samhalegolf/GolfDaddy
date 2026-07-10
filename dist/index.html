@@ -1728,8 +1728,8 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 <script>window.L=window.L||window.leaflet;</script>
 <script src="scripts/clarity-build.js?v=tool-rail-tab-hole-label-20260620"></script>
 <script src="scripts/gd-launch-monitor-alias-registry.js?v=practice-alias-registry-20260612"></script>
-<script src="scripts/clarity-table-ocr.js?v=table-ocr-merge-20260710p"></script>
-<script src="scripts/clarity-table-ocr-pixels.js?v=table-ocr-merge-20260710p"></script>
+<script src="scripts/clarity-table-ocr.js?v=table-ocr-inkscan-20260710q"></script>
+<script src="scripts/clarity-table-ocr-pixels.js?v=table-ocr-inkscan-20260710q"></script>
 <style>
 	    *,*::before,*::after{box-sizing:border-box}
 	    :where(input,select,textarea,button){max-width:100%}
@@ -6701,7 +6701,7 @@ function gdEnsureLaunchMonitorApi(){
       return;
     }
     const script=document.createElement("script");
-    script.src="scripts/gd-launch-monitor-data.js?v=practice-data-20260606";
+    script.src="scripts/gd-launch-monitor-data.js?v=practice-data-20260710r";
     script.onload=finish;
     script.onerror=()=>reject(new Error("Launch monitor module failed to load"));
     document.body.appendChild(script);
@@ -19184,93 +19184,77 @@ function gdClarityUpscaleCanvas(src,factor){
 // value self-aligns (a blank is inserted where it belongs) with no flagging and
 // nothing downstream shifts. Rows then reassemble cleanly by index.
 async function gdClarityReadStripsIntoRows(strips,dataRows,Tesseract,opts){
+  // NO ROW GRID. Each strip is scanned for whatever values are actually inked
+  // on it: the strip's own pixels say where its values are (connected-component
+  // row bands), and EVERY band inside the data corridor gets its own tight-crop
+  // OCR (binarised + upscaled, psm 7, psm 13 retry). dataRows is used only as a
+  // vertical CORRIDOR (skip the header above the first shot and the AVERAGE /
+  // STD DEV summary rows below the last) — never as slots. Rows are then lined
+  // up across strips purely by the y-position of the reads themselves: when the
+  // counts match they align 1:1; a strip that misses one leaves a blank at that
+  // spot and nothing shifts.
   opts=opts||{};
   const OCR=window.ClarityTableOcr, PIX=window.ClarityTableOcrPixels;
   const named=strips.filter(s=>s.metricKey);
-  const dataBottom=dataRows.length?Math.max.apply(null,dataRows.map(r=>Number(r.y1))):0;
+  const dataBottom=dataRows.length?Math.max.apply(null,dataRows.map(r=>Number(r.y1))):Infinity;
   const dataTop=dataRows.length?Math.min.apply(null,dataRows.map(r=>Number(r.y0))):0;
-  // Band centres, in order. Used for EXCLUSIVE line->band assignment below.
-  const centers=dataRows.map(r=>(Number(r.y0)+Number(r.y1))/2);
-  const perStrip=[];
+  const rowHeights=dataRows.map(r=>Number(r.y1)-Number(r.y0)).filter(v=>v>0).sort((a,b)=>a-b);
+  const medRowH=rowHeights.length?rowHeights[Math.floor(rowHeights.length/2)]:16;
+  const corridorPad=Math.max(6,medRowH*0.75);
+  const binarize=c=>(PIX.binarizeCanvas?PIX.binarizeCanvas(c):c);
+  const perStrip=[]; // [{metricKey, reads:[{cy,text,cell}]}]
   for(let i=0;i<named.length;i+=1){
     if(typeof gdPracticeAssertImportNotCanceled==="function")gdPracticeAssertImportNotCanceled();
     const strip=named[i];
     const prof=gdClarityStripProfile(strip.metricKey);
-    const FACTOR=2.6;
-    // Intensive scan: upscale the strip's DATA REGION (just above the first data
-    // row down to the last) and read it as one block. Starting below the header
-    // matters: header glyphs forced through the digit whitelist would otherwise
-    // become garbage lines that can capture the top band. No confidence gating —
-    // any numeric read is kept as the row's value.
-    const cropTop=Math.max(0,Math.floor(dataTop-6));
-    const crop=PIX.cropCanvas(strip.canvas,0,cropTop,strip.canvas.width,Math.max(cropTop+2,dataBottom+4),0);
-    const big=gdClarityUpscaleCanvas(crop,FACTOR);
-    const res=await gdClarityOcrWithTimeout(gdRecognizeWithTesseract(Tesseract,big,{tessedit_char_whitelist:prof.whitelist,tessedit_pageseg_mode:"6"},"clarity-strip-read"),16000);
-    const lines=(typeof gdLmLinesFromOcrData==="function"?gdLmLinesFromOcrData(res&&res.data):[]).filter(l=>l&&String(l.text||"").trim());
-    // EXCLUSIVE assignment: each OCR line goes to its single nearest band (or
-    // none), and each band keeps only its nearest line. Previously every band
-    // independently grabbed the nearest line within a generous tolerance, so one
-    // line could fill TWO adjacent rows (the duplicated-value bug) and a line
-    // Tesseract merged across rows still occupied a slot as garbage.
-    const bandLine=new Array(dataRows.length).fill(null);
-    const bandDist=new Array(dataRows.length).fill(Infinity);
-    lines.forEach(l=>{
-      // OCR cy is in upscaled CROP coords — divide by FACTOR, add crop offset.
-      const cy=Number(l.cy)/FACTOR+cropTop;
-      let bi=-1,bd=Infinity;
-      centers.forEach((cc,ci)=>{const d=Math.abs(cy-cc);if(d<bd){bd=d;bi=ci;}});
-      if(bi<0)return;
-      const row=dataRows[bi];
-      const tol=Math.max(6,(Number(row.y1)-Number(row.y0))*0.75);
-      if(bd>tol)return; // far from every band (stray mark) — ignore
-      if(bd<bandDist[bi]){bandDist[bi]=bd;bandLine[bi]=l;}
-    });
-    const cells=[];
-    for(let r=0;r<dataRows.length;r+=1){
-      const row=dataRows[r];
-      const y0=Number(row.y0),y1=Number(row.y1);
-      let text=bandLine[r]?String(bandLine[r].text||"").trim():"";
-      let cell=text?OCR.parseCell(text,strip.metricKey):null;
-      const parsedOk=c=>!!c&&c.value!=null&&Number.isFinite(c.value);
-      // Targeted single-line re-scan for any band the block pass MISSED or
-      // GARBLED (e.g. two rows merged into one line -> unparseable text). The
-      // old gate was `if(!text)` only, so exactly the rows that needed the
-      // re-scan — non-empty garbage — never got it.
-      if(!parsedOk(cell)){
-        const ry0=Math.max(0,y0-3),ry1=Math.min(strip.canvas.height,y1+3);
-        const cellImg=gdClarityUpscaleCanvas(PIX.cropCanvas(strip.canvas,0,ry0,strip.canvas.width,ry1,1),3.4);
-        const r2=await gdClarityOcrWithTimeout(gdRecognizeWithTesseract(Tesseract,cellImg,{tessedit_char_whitelist:prof.whitelist,tessedit_pageseg_mode:"7"},"clarity-cell-rescan"),12000);
-        const text2=String(r2&&r2.data&&r2.data.text||"").trim();
-        const cell2=text2?OCR.parseCell(text2,strip.metricKey):null;
-        if(parsedOk(cell2)||!cell){cell=cell2;text=text2;}
-        // Last resort: raw-line mode (psm 13) skips Tesseract's line-finding
-        // heuristics entirely — often reads a clean single value psm 7 refuses.
-        if(!parsedOk(cell)){
-          const r3=await gdClarityOcrWithTimeout(gdRecognizeWithTesseract(Tesseract,cellImg,{tessedit_char_whitelist:prof.whitelist,tessedit_pageseg_mode:"13"},"clarity-cell-rescan-raw"),12000);
-          const text3=String(r3&&r3.data&&r3.data.text||"").trim();
-          const cell3=text3?OCR.parseCell(text3,strip.metricKey):null;
-          if(parsedOk(cell3)||!cell){cell=cell3;text=text3;}
-        }
+    // THIS strip's own ink bands — where its values physically are.
+    const comps=PIX.connectedComponents(PIX.inkMask(PIX.imageData(strip.canvas)));
+    const bands=PIX.clusterRows(comps)
+      .filter(b=>Number(b.cy)>=dataTop-corridorPad&&Number(b.cy)<=dataBottom+corridorPad)
+      .sort((a,b)=>Number(a.cy)-Number(b.cy));
+    const reads=[];
+    for(const b of bands){
+      const y0=Number(b.y0),y1=Number(b.y1);
+      const cellImg=binarize(gdClarityUpscaleCanvas(PIX.cropCanvas(strip.canvas,0,Math.max(0,y0-3),strip.canvas.width,Math.min(strip.canvas.height,y1+3),1),3.4));
+      const readOnce=async psm=>{
+        const rr=await gdClarityOcrWithTimeout(gdRecognizeWithTesseract(Tesseract,cellImg,{tessedit_char_whitelist:prof.whitelist,tessedit_pageseg_mode:psm},"clarity-cell-read-"+psm),12000);
+        const t=String(rr&&rr.data&&rr.data.text||"").trim();
+        return {text:t,cell:t?OCR.parseCell(t,strip.metricKey):null};
+      };
+      let got=await readOnce("7");
+      if(!(got.cell&&got.cell.valid)){
+        const raw=await readOnce("13");
+        // Prefer the plausible read; else the parseable one; else keep whichever
+        // has any text at all as a placeholder.
+        if((raw.cell&&raw.cell.valid)||(!got.cell&&raw.cell)||(!got.text&&raw.text))got=raw;
       }
-      if(!cell){cells.push({key:strip.metricKey,value:null,direction:"",valid:false,plausible:false});continue;}
-      // Keep any numeric read even if implausible — it holds the row slot (a
-      // misread still serves as a placeholder) and the review step is the gate.
-      // NOTE: parseCell returns value:null on a failed parse, and Number(null)
-      // is 0 (finite), so the old `Number.isFinite(Number(cell.value))` marked
-      // garbage as valid. Check null explicitly.
-      const hasNumber=cell.value!=null&&Number.isFinite(cell.value);
-      cells.push({key:strip.metricKey,value:hasNumber?cell.value:null,direction:cell.direction,valid:hasNumber,plausible:!!cell.valid});
+      reads.push({cy:Number(b.cy),text:got.text,cell:got.cell});
     }
-    perStrip.push({metricKey:strip.metricKey,cells:cells});
+    perStrip.push({metricKey:strip.metricKey,reads:reads});
     if(typeof opts.onStrip==="function")opts.onStrip(i,named.length);
   }
-  // Every strip now has exactly dataRows.length cells (blanks where missed).
+  // Rows are LISTS SIDE BY SIDE — no geometry at all past this point. The
+  // 4-corner stretch can shift each strip's pixels slightly, so cross-strip y
+  // is meaningless; each strip just contributes its ORDERED list of reads (top
+  // to bottom on its own image), and row r is the r-th item of every list.
+  // When the counts match they line up 1:1 — a misread still occupies its slot
+  // as a placeholder, so counts stay right even when a value garbles. A short
+  // list pads with blanks at its tail; nothing ever shifts sideways.
+  const expectedRows=Math.max.apply(null,[0].concat(perStrip.map(s=>s.reads.length)));
   const scanRows=[];
-  for(let r=0;r<dataRows.length;r+=1){
-    const cells=perStrip.map(s=>s.cells[r]).filter(Boolean);
+  for(let r=0;r<expectedRows;r+=1){
+    const cells=perStrip.map(s=>{
+      const rd=s.reads[r]||null;
+      const cell=rd?rd.cell:null;
+      if(!cell)return {key:s.metricKey,value:null,direction:"",valid:false,plausible:false};
+      // NOTE: parseCell returns value:null on a failed parse, and Number(null)
+      // is 0 (finite) — check null explicitly so garbage is not marked valid.
+      const hasNumber=cell.value!=null&&Number.isFinite(cell.value);
+      return {key:s.metricKey,value:hasNumber?cell.value:null,direction:cell.direction,valid:hasNumber,plausible:!!cell.valid};
+    });
     if(cells.some(c=>c&&c.valid))scanRows.push({club:opts.club||"7i",cells:cells});
   }
-  return {scanRows:scanRows,expectedRows:dataRows.length};
+  return {scanRows:scanRows,expectedRows:expectedRows};
 }
 // Mine the UNALLOCATED offcut strips (no metricKey — typically the club/margin
 // column at the far left) for the club. One club is described the same way on
@@ -35772,7 +35756,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 <script src="scripts/gd-shot-outcomes.js"></script>
 <script src="scripts/gd-shot-events.js?v=deliberate-outcome-20260612"></script>
 <script src="scripts/gd-shot-cluster-analysis.js?v=deliberate-outcome-20260612"></script>
-<script src="scripts/gd-launch-monitor-data.js?v=practice-data-20260606"></script>
+<script src="scripts/gd-launch-monitor-data.js?v=practice-data-20260710r"></script>
 <script src="scripts/gd-native-practice-data.js?v=native-practice-data-001"></script>
 <script id="gdCanonicalRouteAuditV1">
 (function(){
