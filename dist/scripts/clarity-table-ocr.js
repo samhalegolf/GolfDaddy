@@ -566,10 +566,21 @@
       var cleaned = text.replace(/\b(mph|rpm|deg|ft|m)\b/gi, "").replace(/[°º]/g, "").trim();
       if (cleaned && cleaned !== text) { var k2 = fn(cleaned); if (k2) return k2; }
     }
-    // Fuzzy fallback against the registry's alias tokens.
     if (reg && Array.isArray(reg.entries)) {
       var token = compactToken(text);
       if (token.length < 3) return "";
+      // Substring pass: the LONGEST known alias contained in the header text.
+      // Handles noise words mixed into the crop (e.g. "BALL: STANDARD" landing in
+      // the Ball Speed header -> "ballstandardballspeed" still contains "ballspeed").
+      var subKey = "", subLen = 0;
+      reg.entries.forEach(function (entry) {
+        [entry.key, entry.label, entry.rawLabel, entry.candidateMetric].concat(entry.aliases || [], entry.headerAliases || []).forEach(function (alias) {
+          var at = compactToken(alias);
+          if (at.length >= 4 && token.indexOf(at) >= 0 && at.length > subLen) { subLen = at.length; subKey = entry.key; }
+        });
+      });
+      if (subKey) return subKey;
+      // Fuzzy fallback against the registry's alias tokens.
       var best = "", bestDist = Infinity;
       reg.entries.forEach(function (entry) {
         [entry.key, entry.label, entry.rawLabel, entry.candidateMetric]
