@@ -19240,7 +19240,22 @@ async function gdClarityReadStripsIntoRows(strips,dataRows,Tesseract,opts){
   // When the counts match they line up 1:1 — a misread still occupies its slot
   // as a placeholder, so counts stay right even when a value garbles. A short
   // list pads with blanks at its tail; nothing ever shifts sideways.
-  const expectedRows=Math.max.apply(null,[0].concat(perStrip.map(s=>s.reads.length)));
+  //
+  // CONSENSUS COUNT: some strips pick up their own header/units ink as extra
+  // LEADING bands (measured on the strip debug image: BALL SPEED+MPH = 3
+  // extras, RPM = 2, most strips 1). Junk always sits ABOVE the data, so the
+  // expected row count is the count most strips agree on, and a longer list
+  // drops its surplus entries from the HEAD. Without this, one strip's header
+  // bands shift its whole list and every row pairs misaligned (the 0.0m-tail /
+  // 21-rows-for-13-shots symptom).
+  const counts=perStrip.map(s=>s.reads.length).filter(n=>n>0);
+  const freq={};counts.forEach(n=>{freq[n]=(freq[n]||0)+1;});
+  let expectedRows=0,bestF=0;
+  Object.keys(freq).forEach(k=>{const n=Number(k),f=freq[k];if(f>bestF||(f===bestF&&n<expectedRows)){bestF=f;expectedRows=n;}});
+  if(!expectedRows)expectedRows=Math.max.apply(null,[0].concat(counts));
+  perStrip.forEach(s=>{
+    if(s.reads.length>expectedRows)s.reads=s.reads.slice(s.reads.length-expectedRows);
+  });
   const scanRows=[];
   for(let r=0;r<expectedRows;r+=1){
     const cells=perStrip.map(s=>{
@@ -19254,7 +19269,7 @@ async function gdClarityReadStripsIntoRows(strips,dataRows,Tesseract,opts){
     });
     if(cells.some(c=>c&&c.valid))scanRows.push({club:opts.club||"7i",cells:cells});
   }
-  return {scanRows:scanRows,expectedRows:expectedRows};
+  return {scanRows:scanRows,expectedRows:expectedRows,stripCounts:perStrip.map(s=>s.metricKey+"["+s.reads.length+"]")};
 }
 // Mine the UNALLOCATED offcut strips (no metricKey — typically the club/margin
 // column at the far left) for the club. One club is described the same way on
@@ -19416,7 +19431,7 @@ async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
     // Single checkpoint (adapter): scanner output -> Shot Library, cleaning misreads.
     const payload=gdClarityScanResultToPayload(scanRows,{label:sourceLabel,club:clubLabel});
     const rowCount=Number(payload?.clubGroups?.length)||0;
-    gdPracticeDebugCheckpointSafe("extraction_completed",rowCount?"success":"failed",{outputSummary:`Read ${rowCount} shots (${scanRows.length} rows x ${allocatedCount} strips)\n${readDump}`,counts:{rows:rowCount,scanRows:scanRows.length},snapshot:{canvas:gdClarityStripsMontage(namedStrips),label:`Extraction: ${rowCount} shots read from ${namedStrips.length} physical strips`}});
+    gdPracticeDebugCheckpointSafe("extraction_completed",rowCount?"success":"failed",{outputSummary:`Read ${rowCount} shots (${scanRows.length} rows x ${allocatedCount} strips)\nPer-strip band counts (after head-trim to consensus): ${(readResult.stripCounts||[]).join(" ")}\n${readDump}`,counts:{rows:rowCount,scanRows:scanRows.length},snapshot:{canvas:gdClarityStripsMontage(namedStrips),label:`Extraction: ${rowCount} shots read from ${namedStrips.length} physical strips`}});
     if(!rowCount){
       gdPracticeFeedback("No usable rows were read. Re-frame the value grid and scan again.","error");
       gdOpenPracticeManualQuadTool();
