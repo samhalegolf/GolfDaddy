@@ -7432,13 +7432,10 @@ function gdLmDerivedSpinAxisFromValues(values){
   return Number.isFinite(axis)&&gdLmMetricPlausible("spinAxis",axis)?axis:null;
 }
 function gdLmAddDerivedSpinAxisMetric(metrics,values){
-  if(gdLmMetricListHasMetric(metrics,"spinAxis"))return metrics;
-  const axis=gdLmDerivedSpinAxisFromValues(values);
-  if(!Number.isFinite(axis))return metrics;
-  const metric=gdLmMetric("SpinAxis","spinAxis",axis,"deg",.5);
-  metric.source="sideSpin_backspin";
-  metric.rawValue=`sideSpin=${String(values?.sideSpin??"")} backspin=${String((values?.backspin!=null?values.backspin:values?.totalSpin)??"")}`;
-  metrics.push(metric);
+  // Auto-deriving spin axis from sideSpin + backspin is intentionally DISABLED.
+  // It was silently injecting a spinAxis metric during import and confusing
+  // things. If we want it, it should be an explicit, opt-in step in the Clarity
+  // Table OCR adapter later. gdLmDerivedSpinAxisFromValues is kept for that.
   return metrics;
 }
 function gdLmMetricsFromLayoutValues(values,units){
@@ -19100,6 +19097,51 @@ function gdClarityScanResultToPayload(scanRows,opts={}){
     clubGroups
   };
 }
+// ===========================================================================
+// PASS 2 — adaptive per-strip re-scan. This is the ONLY part we keep iterating.
+// Everything that feeds it (the frozen `grid`: column positions + metric labels
+// + data rows) is locked. Pass 1's OCR was used only to FIND the geometry and is
+// thrown away here; each strip is re-cropped from the flat image and read with a
+// profile tuned to its metric, so we squeeze every drop of data (and direction)
+// out of it instead of reusing the throwaway geometry reads.
+// ===========================================================================
+function gdClarityStripProfile(metricKey){
+  const direction=typeof gdColumnNeedsDirection==="function"&&gdColumnNeedsDirection(metricKey);
+  // Per-metric reading profile. Tune these per column for accuracy.
+  return {
+    metricKey:metricKey,
+    direction:!!direction,
+    whitelist:direction?"0123456789.,°ºLRlr-+ ":"0123456789.,°ºOo-+ ",
+    padRight:direction?20:4
+  };
+}
+async function gdClarityRescanStrips(flat,grid,Tesseract,opts){
+  opts=opts||{};
+  const PIX=window.ClarityTableOcrPixels, OCR=window.ClarityTableOcr;
+  const columns=Array.isArray(grid&&grid.columns)?grid.columns:[];
+  const rows=Array.isArray(grid&&grid.valueRows)?grid.valueRows:[];
+  const club=String(grid&&grid.club||"7i");
+  const scanRows=[];
+  for(let r=0;r<rows.length;r+=1){
+    if(typeof gdPracticeAssertImportNotCanceled==="function")gdPracticeAssertImportNotCanceled();
+    const row=rows[r];
+    const cells=[];
+    for(let c=0;c<columns.length;c+=1){
+      const col=columns[c];
+      const key=col&&col.metricKey;
+      if(!key)continue;
+      const prof=gdClarityStripProfile(key);
+      const x1=Number(col.right)+(prof.direction?prof.padRight:0);
+      const crop=PIX.cropCanvas(flat,Number(col.left),Number(row.y0),x1,Number(row.y1),2);
+      const res=await gdClarityOcrWithTimeout(gdRecognizeWithTesseract(Tesseract,crop,{tessedit_char_whitelist:prof.whitelist,tessedit_pageseg_mode:"7"},"clarity-rescan"),9000);
+      const cell=OCR.parseCell(String(res&&res.data&&res.data.text||"").trim(),key);
+      cells.push({key:key,value:cell.value,direction:cell.direction,valid:cell.valid});
+    }
+    if(cells.some(cell=>cell.valid))scanRows.push({club:club,cells:cells});
+    if(typeof opts.onRow==="function")opts.onRow(r,rows.length);
+  }
+  return scanRows;
+}
 async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
   // Rebuilt scan path. Hands the flattened value-grid image (output of the kept
   // 4-corner stretch) to the isolated Clarity Table OCR module:
@@ -19198,32 +19240,23 @@ async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
       gdOpenPracticeManualQuadTool();
       return null;
     }
-    // Stage 3 — cells from the already-read number boxes; skip summary rows.
+    // ===== GEOMETRY FROZEN ABOVE. Below is Pass 2 (extraction) — the tunable
+    // part. Everything above produced the grid: column positions + metric labels
+    // + data rows. It should not keep changing; only the re-scan does. =====
     gdPracticeUpdateImportJob({checkpointText:"Reading values",stageIndex:2,progress:74});
     gdSetPracticePhotoProcessing(true,{stageIndex:2,progress:74,preserveClubs:true});
-    gdPracticeDebugCheckpointSafe("extraction_started","running",{inputSummary:`${valueRows.length} rows x ${allocatedCount} columns`});
     const clubLabel=(typeof gdPracticeScanClubLabel==="function"?gdPracticeScanClubLabel():"7i")||"7i";
     const firstColLeft=Number(activeColumns[0].left);
-    // Scanner-preferred output: structured rows, no text round-trip.
-    const scanRows=[];
-    valueRows.forEach(row=>{
-      // Skip AVERAGE / STD DEV summary rows (labelled in the left margin).
+    // Data rows only (drop AVERAGE / STD DEV summary rows, labelled at left margin).
+    const dataRows=valueRows.filter(row=>{
       const marginText=textBoxes.filter(box=>Number(box.cx)<firstColLeft&&Number(box.cy)>=row.y0&&Number(box.cy)<=row.y1).map(box=>String(box.text||"")).join(" ");
-      if(OCR.isSummaryLabel(marginText))return;
-      const cells=[];
-      for(let c=0;c<activeColumns.length;c+=1){
-        const key=keys[c];
-        if(!key)continue;
-        const cellText=numberBoxes
-          .filter(box=>Number(box.cx)>=activeColumns[c].left&&Number(box.cx)<=activeColumns[c].right&&Number(box.cy)>=row.y0&&Number(box.cy)<=row.y1)
-          .sort((a,b)=>Number(a.x0)-Number(b.x0))
-          .map(box=>String(box.text||"").trim())
-          .join(" ");
-        const cell=OCR.parseCell(cellText,key);
-        cells.push({key:key,value:cell.value,direction:cell.direction,valid:cell.valid});
-      }
-      if(cells.some(cell=>cell.valid))scanRows.push({club:clubLabel,cells:cells});
+      return !OCR.isSummaryLabel(marginText);
     });
+    // The frozen geometry handoff. Pass 2 reads ONLY from this.
+    const grid={flat:flat,columns:activeColumns,valueRows:dataRows,club:clubLabel};
+    gdPracticeDebugCheckpointSafe("extraction_started","running",{inputSummary:`Re-scan ${dataRows.length} rows x ${allocatedCount} strips (geometry frozen; Pass-1 reads dumped)`});
+    // Pass 2: dump the geometry reads, re-scan each strip tuned to its metric.
+    const scanRows=await gdClarityRescanStrips(flat,grid,Tesseract,{onRow:(i,n)=>{try{gdPracticeUpdateImportJob({checkpointText:`Re-scanning row ${i+1}/${n}`,stageIndex:2,progress:Math.min(96,74+Math.round((i/Math.max(1,n))*22))});}catch(e){}}});
     // Single checkpoint: scanner output -> Shot Library landing structure.
     const payload=gdClarityScanResultToPayload(scanRows,{label:sourceLabel,club:clubLabel});
     const rowCount=Number(payload?.clubGroups?.length)||0;
