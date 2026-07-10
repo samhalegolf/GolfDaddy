@@ -152,10 +152,31 @@
     return out;
   }
 
+  // Binarise a canvas with the SAME ink mask used for box detection: ink ->
+  // black, everything else -> white. Proven on the strip-montage test image:
+  // Tesseract reads a clean B/W band far better than the low-contrast photo
+  // background (multiple hard-fail cells flipped to clean reads).
+  function binarizeCanvas(source) {
+    var canvas = toCanvas(source);
+    var id = canvas.getContext("2d", { willReadFrequently: true }).getImageData(0, 0, canvas.width, canvas.height);
+    var m = inkMask(id);
+    var out = document.createElement("canvas");
+    out.width = canvas.width; out.height = canvas.height;
+    var octx = out.getContext("2d");
+    var oid = octx.createImageData(out.width, out.height);
+    for (var i = 0; i < m.mask.length; i += 1) {
+      var v = m.mask[i] ? 0 : 255;
+      oid.data[i * 4] = v; oid.data[i * 4 + 1] = v; oid.data[i * 4 + 2] = v; oid.data[i * 4 + 3] = 255;
+    }
+    octx.putImageData(oid, 0, 0);
+    return out;
+  }
+
   global.ClarityTableOcrPixels = {
     toCanvas: toCanvas, imageData: imageData, inkMask: inkMask,
     connectedComponents: connectedComponents, clusterRows: clusterRows,
-    detectNumberBoxes: detectNumberBoxes, cropCanvas: cropCanvas
+    detectNumberBoxes: detectNumberBoxes, cropCanvas: cropCanvas,
+    binarizeCanvas: binarizeCanvas
   };
   if (typeof module !== "undefined" && module.exports) module.exports = global.ClarityTableOcrPixels;
 })(typeof globalThis !== "undefined" ? globalThis : this);
