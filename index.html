@@ -1728,8 +1728,8 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 <script>window.L=window.L||window.leaflet;</script>
 <script src="scripts/clarity-build.js?v=tool-rail-tab-hole-label-20260620"></script>
 <script src="scripts/gd-launch-monitor-alias-registry.js?v=practice-alias-registry-20260612"></script>
-<script src="scripts/clarity-table-ocr.js?v=table-ocr-usecuts-20260710h"></script>
-<script src="scripts/clarity-table-ocr-pixels.js?v=table-ocr-usecuts-20260710h"></script>
+<script src="scripts/clarity-table-ocr.js?v=table-ocr-allstrips-20260710i"></script>
+<script src="scripts/clarity-table-ocr-pixels.js?v=table-ocr-allstrips-20260710i"></script>
 <style>
 	    *,*::before,*::after{box-sizing:border-box}
 	    :where(input,select,textarea,button){max-width:100%}
@@ -19281,9 +19281,9 @@ async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
     gdPracticeDebugCheckpointSafe("header_strip_scan","running",{inputSummary:`${strips.length} strips cut, header band 0-${Math.round(headerBottom)}`});
     // Name each strip by reading the text near its top and matching a metric.
     strips=await gdClarityNameStrips(strips,headerBottom,Tesseract);
-    // Drop phantom club/margin strips that named to no metric.
-    const trimmedStrips=OCR.trimUnresolvedEdges(strips);
-    if(trimmedStrips.length>=4&&trimmedStrips.length<strips.length)strips=trimmedStrips;
+    // Hand over ALL strips (no edge trimming). Unnamed strips carry no metricKey,
+    // so they contribute nothing to a metric, but stay visible in the montage so
+    // misreads are inspectable. The club/margin column is handled separately.
     const namedStrips=strips.filter(s=>s.metricKey);
     const allocatedCount=namedStrips.length;
     gdPracticeDebugCheckpointSafe("header_strip_scan",allocatedCount>=4?"success":"failed",{outputSummary:`Named ${allocatedCount}/${strips.length}: ${strips.map(s=>s.metricKey||("?"+(s.headerText?"["+s.headerText+"]":""))).join(" | ")}`,counts:{allocated:allocatedCount,strips:strips.length},snapshot:{canvas:gdClarityStripsMontage(strips),label:"Physical strips: green=named, red=unnamed"}});

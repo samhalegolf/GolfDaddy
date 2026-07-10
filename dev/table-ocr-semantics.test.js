@@ -28,6 +28,10 @@ const typos = ["BALL SPEED", "LAUNEH ANGLE", "SIOE ANGLE", "BACKSPlN"];
 const fuzzy = ocr.allocateHeaders(typos.map(() => ({})), typos, { registry: globalThis.LaunchMonitorAliasRegistry });
 check("fuzzy header resolve (typos)", fuzzy.map(c => c.metricKey), ["ballSpeed", "launch", "sideAngle", "backspin"]);
 
+// Noisy header (BALL: STANDARD label bleeds into the Ball Speed header crop).
+const noisy = ocr.allocateHeaders([{}], ["BALL STANDARD BALL SPEED MPH"], { registry: globalThis.LaunchMonitorAliasRegistry });
+check("noisy header still resolves (substring match)", noisy[0].metricKey, "ballSpeed");
+
 // Trim: a phantom club column on the left (no metric) is dropped.
 const withClub = [{ metricKey: "" }, { metricKey: "ballSpeed" }, { metricKey: "launch" }, { metricKey: "carry" }];
 check("trim phantom club/edge columns", ocr.trimUnresolvedEdges(withClub).map(c => c.metricKey), ["ballSpeed", "launch", "carry"]);
