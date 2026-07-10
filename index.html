@@ -19205,6 +19205,25 @@ async function gdClarityReadStripsIntoRows(strips,dataRows,Tesseract,opts){
   }
   return {scanRows:scanRows,expectedRows:dataRows.length};
 }
+// Mine the UNALLOCATED offcut strips (no metricKey — typically the club/margin
+// column at the far left) for the club. One club is described the same way on
+// every row, so we read the whole offcut, resolve a club per line, tally, and
+// take the MAJORITY vote — robust to per-row OCR misreads. No aliases baked into
+// code: this reuses the app's own club-from-text resolver.
+async function gdClarityDetectClubFromStrips(strips,Tesseract){
+  const offcuts=(Array.isArray(strips)?strips:[]).filter(s=>s&&!s.metricKey&&s.canvas);
+  if(!offcuts.length||typeof gdLmClubFromLine!=="function")return {club:"",votes:{}};
+  const votes={};
+  for(const strip of offcuts){
+    if(typeof gdPracticeAssertImportNotCanceled==="function")gdPracticeAssertImportNotCanceled();
+    const res=await gdClarityOcrWithTimeout(gdRecognizeWithTesseract(Tesseract,strip.canvas,{tessedit_char_whitelist:"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 ",tessedit_pageseg_mode:"6"},"clarity-club-offcut"),10000);
+    const lines=(typeof gdLmLinesFromOcrData==="function"?gdLmLinesFromOcrData(res&&res.data):[]).filter(l=>l&&String(l.text||"").trim());
+    lines.forEach(l=>{const club=gdLmClubFromLine(String(l.text||"").trim());if(club)votes[club]=(votes[club]||0)+1;});
+  }
+  let best="",bestN=0;
+  Object.keys(votes).forEach(k=>{if(votes[k]>bestN){bestN=votes[k];best=k;}});
+  return {club:best,votes:votes};
+}
 async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
   // Rebuilt scan path. Hands the flattened value-grid image (output of the kept
   // 4-corner stretch) to the isolated Clarity Table OCR module:
@@ -19286,7 +19305,12 @@ async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
     // misreads are inspectable. The club/margin column is handled separately.
     const namedStrips=strips.filter(s=>s.metricKey);
     const allocatedCount=namedStrips.length;
-    gdPracticeDebugCheckpointSafe("header_strip_scan",allocatedCount>=4?"success":"failed",{outputSummary:`Named ${allocatedCount}/${strips.length}: ${strips.map(s=>s.metricKey||("?"+(s.headerText?"["+s.headerText+"]":""))).join(" | ")}`,counts:{allocated:allocatedCount,strips:strips.length},snapshot:{canvas:gdClarityStripsMontage(strips),label:"Physical strips: green=named, red=unnamed"}});
+    // Club: mine the unallocated offcut(s) for the repeated club pattern (majority
+    // vote). Detection drives the club; the manual field / 7i is only a fallback.
+    const clubScan=await gdClarityDetectClubFromStrips(strips,Tesseract);
+    const manualClub=(typeof gdPracticeScanClubLabel==="function"?gdPracticeScanClubLabel():"7i")||"7i";
+    const clubLabel=clubScan.club||manualClub;
+    gdPracticeDebugCheckpointSafe("header_strip_scan",allocatedCount>=4?"success":"failed",{outputSummary:`Named ${allocatedCount}/${strips.length} | club: ${clubLabel}${clubScan.club?" (offcut)":" (manual)"}: ${strips.map(s=>s.metricKey||("?"+(s.headerText?"["+s.headerText+"]":""))).join(" | ")}`,counts:{allocated:allocatedCount,strips:strips.length},snapshot:{canvas:gdClarityStripsMontage(strips),label:"Physical strips: green=named, red=unnamed"}});
     if(allocatedCount<4){
       gdPracticeFeedback("Header allocation could not identify the columns. Re-frame and scan again.","error");
       gdOpenPracticeManualQuadTool();
@@ -19296,7 +19320,6 @@ async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
     // each strip top-to-bottom and slots values into rows by position. =====
     gdPracticeUpdateImportJob({checkpointText:"Reading strips",stageIndex:2,progress:74});
     gdSetPracticePhotoProcessing(true,{stageIndex:2,progress:74,preserveClubs:true});
-    const clubLabel=(typeof gdPracticeScanClubLabel==="function"?gdPracticeScanClubLabel():"7i")||"7i";
     const firstColLeft=Number(strips[0].left);
     // Data rows only (drop AVERAGE / STD DEV summary rows, labelled at left margin).
     const dataRows=valueRows.filter(row=>{
