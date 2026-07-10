@@ -1728,8 +1728,8 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 <script>window.L=window.L||window.leaflet;</script>
 <script src="scripts/clarity-build.js?v=tool-rail-tab-hole-label-20260620"></script>
 <script src="scripts/gd-launch-monitor-alias-registry.js?v=practice-alias-registry-20260612"></script>
-<script src="scripts/clarity-table-ocr.js?v=table-ocr-coldiag-20260710m"></script>
-<script src="scripts/clarity-table-ocr-pixels.js?v=table-ocr-coldiag-20260710m"></script>
+<script src="scripts/clarity-table-ocr.js?v=table-ocr-phantom-20260710n"></script>
+<script src="scripts/clarity-table-ocr-pixels.js?v=table-ocr-phantom-20260710n"></script>
 <style>
 	    *,*::before,*::after{box-sizing:border-box}
 	    :where(input,select,textarea,button){max-width:100%}
@@ -19366,8 +19366,14 @@ async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
     // that all strips hand over, leaving no margin and letting AVERAGE/STD DEV
     // summary rows leak through as extra shots.
     const firstColLeft=Number((namedStrips[0]||strips[0]).left);
-    // Data rows only (drop AVERAGE / STD DEV summary rows, labelled at left margin).
+    // A real data row spans most of the columns. Drop SPARSE stray rows (e.g. a
+    // couple of edge-noise boxes near the top) — otherwise that stray becomes a
+    // phantom shot as row 1 and shifts every real row down a slot (the "extra
+    // line"). Also drop AVERAGE / STD DEV summary rows (labelled at the margin).
+    const rowBoxMax=Math.max.apply(null,[0].concat(valueRows.map(r=>Array.isArray(r.items)?r.items.length:0)));
     const dataRows=valueRows.filter(row=>{
+      const boxes=Array.isArray(row.items)?row.items.length:0;
+      if(boxes<Math.max(4,rowBoxMax*0.5))return false;
       const marginText=textBoxes.filter(box=>Number(box.cx)<firstColLeft&&Number(box.cy)>=row.y0&&Number(box.cy)<=row.y1).map(box=>String(box.text||"")).join(" ");
       return !OCR.isSummaryLabel(marginText);
     });
@@ -19377,10 +19383,17 @@ async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
     // self-insert where a value is missed).
     const readResult=await gdClarityReadStripsIntoRows(strips,dataRows,Tesseract,{club:clubLabel,onStrip:(i,n)=>{try{gdPracticeUpdateImportJob({checkpointText:`Reading strip ${i+1}/${n}`,stageIndex:2,progress:Math.min(96,74+Math.round((i/Math.max(1,n))*22))});}catch(e){}}});
     const scanRows=readResult.scanRows;
+    // Diagnostic: dump what each strip actually READ, per metric, down the rows —
+    // so the read values can be compared directly against the visible strips (a
+    // blank cell prints as "·"). This makes a bad read or a misalignment obvious.
+    const readDump=namedStrips.map(s=>{
+      const vals=scanRows.map(r=>{const c=(r.cells||[]).find(x=>x&&x.key===s.metricKey);return c&&c.value!=null?String(c.value)+(c.direction||""):"·";});
+      return `${s.metricKey}: ${vals.join(",")}`;
+    }).join("\n");
     // Single checkpoint (adapter): scanner output -> Shot Library, cleaning misreads.
     const payload=gdClarityScanResultToPayload(scanRows,{label:sourceLabel,club:clubLabel});
     const rowCount=Number(payload?.clubGroups?.length)||0;
-    gdPracticeDebugCheckpointSafe("extraction_completed",rowCount?"success":"failed",{outputSummary:`Read ${rowCount} shots (${scanRows.length} rows x ${allocatedCount} strips)`,counts:{rows:rowCount,scanRows:scanRows.length},snapshot:{canvas:gdClarityStripsMontage(namedStrips),label:`Extraction: ${rowCount} shots read from ${namedStrips.length} physical strips`}});
+    gdPracticeDebugCheckpointSafe("extraction_completed",rowCount?"success":"failed",{outputSummary:`Read ${rowCount} shots (${scanRows.length} rows x ${allocatedCount} strips)\n${readDump}`,counts:{rows:rowCount,scanRows:scanRows.length},snapshot:{canvas:gdClarityStripsMontage(namedStrips),label:`Extraction: ${rowCount} shots read from ${namedStrips.length} physical strips`}});
     if(!rowCount){
       gdPracticeFeedback("No usable rows were read. Re-frame the value grid and scan again.","error");
       gdOpenPracticeManualQuadTool();
