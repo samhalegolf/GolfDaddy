@@ -596,6 +596,39 @@
     });
   }
 
+  // Strip boundaries: cut each column at the MIDPOINT between adjacent column
+  // centres, so each strip is a self-contained image that owns its full header
+  // (wider than the values), its values, and the direction marker to the right —
+  // with no bleed into neighbours (the midpoint sits in the whitespace gap).
+  function stripBoundaries(columns, sourceWidth) {
+    var cols = Array.isArray(columns) ? columns : [];
+    if (!cols.length) return [];
+    var W = Number(sourceWidth) || 0;
+    var centers = cols.map(function (c) { return (Number(c.left) + Number(c.right)) / 2; });
+    var out = [];
+    for (var i = 0; i < cols.length; i += 1) {
+      var left, right;
+      if (cols.length === 1) {
+        left = Number(cols[i].left); right = W || Number(cols[i].right);
+      } else if (i === 0) {
+        right = (centers[0] + centers[1]) / 2;
+        left = Math.max(0, centers[0] - (right - centers[0]));
+      } else if (i === cols.length - 1) {
+        left = (centers[i - 1] + centers[i]) / 2;
+        right = centers[i] + (centers[i] - left);
+        if (W) right = Math.min(W, right);
+      } else {
+        left = (centers[i - 1] + centers[i]) / 2;
+        right = (centers[i] + centers[i + 1]) / 2;
+      }
+      out.push({
+        index: i, left: Math.max(0, Math.round(left)), right: Math.round(right),
+        cx: centers[i], metricKey: cols[i].metricKey, headerText: cols[i].headerText
+      });
+    }
+    return out;
+  }
+
   // Trim spurious columns (club marker / margins) from the LEFT and RIGHT edges
   // that resolved to no metric, keeping the contiguous run of real columns. This
   // undoes the "7i read as 7 -> phantom left column" shift.
@@ -690,6 +723,7 @@
     splitColumns: splitColumns,
     allocateHeaders: allocateHeaders,
     trimUnresolvedEdges: trimUnresolvedEdges,
+    stripBoundaries: stripBoundaries,
     parseCell: parseCell,
     numberBoxesFromWords: numberBoxesFromWords,
     headerTextForColumns: headerTextForColumns,
