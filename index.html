@@ -1728,8 +1728,8 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 <script>window.L=window.L||window.leaflet;</script>
 <script src="scripts/clarity-build.js?v=tool-rail-tab-hole-label-20260620"></script>
 <script src="scripts/gd-launch-monitor-alias-registry.js?v=practice-alias-registry-20260612"></script>
-<script src="scripts/clarity-table-ocr.js?v=table-ocr-strips-20260710e"></script>
-<script src="scripts/clarity-table-ocr-pixels.js?v=table-ocr-strips-20260710e"></script>
+<script src="scripts/clarity-table-ocr.js?v=table-ocr-gridlines-20260710f"></script>
+<script src="scripts/clarity-table-ocr-pixels.js?v=table-ocr-gridlines-20260710f"></script>
 <style>
 	    *,*::before,*::after{box-sizing:border-box}
 	    :where(input,select,textarea,button){max-width:100%}
@@ -19145,7 +19145,7 @@ function gdClarityCutStrips(flat,columns){
   const OCR=window.ClarityTableOcr, PIX=window.ClarityTableOcrPixels;
   const bounds=OCR.stripBoundaries(columns,flat.width);
   return bounds.map(b=>({
-    index:b.index,left:b.left,right:b.right,metricKey:"",headerText:"",
+    index:b.index,left:b.left,right:b.right,valLeft:b.valLeft,valRight:b.valRight,metricKey:"",headerText:"",
     canvas:PIX.cropCanvas(flat,b.left,0,b.right,flat.height,0)
   }));
 }
