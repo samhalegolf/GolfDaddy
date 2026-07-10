@@ -19072,7 +19072,10 @@ function gdClarityScanResultToPayload(scanRows,opts={}){
     let carry;
     (Array.isArray(row&&row.cells)?row.cells:[]).forEach(cell=>{
       const key=cell&&cell.key;
-      if(!key||!cell.valid||!Number.isFinite(Number(cell.value)))return;
+      if(!key||!Number.isFinite(Number(cell.value)))return;
+      // Adapter cleanup: the scanner keeps liberal reads to hold row alignment;
+      // here we drop implausible misreads so they don't reach the library.
+      if(cell.plausible===false)return;
       let value=Number(cell.value);
       if(typeof gdColumnNeedsDirection==="function"&&gdColumnNeedsDirection(key)){
         value=String(cell.direction||"").toUpperCase()==="L"?-Math.abs(value):Math.abs(value);
@@ -19115,32 +19118,69 @@ function gdClarityStripProfile(metricKey){
     padRight:direction?20:4
   };
 }
-async function gdClarityRescanStrips(flat,grid,Tesseract,opts){
-  opts=opts||{};
-  const PIX=window.ClarityTableOcrPixels, OCR=window.ClarityTableOcr;
-  const columns=Array.isArray(grid&&grid.columns)?grid.columns:[];
-  const rows=Array.isArray(grid&&grid.valueRows)?grid.valueRows:[];
-  const club=String(grid&&grid.club||"7i");
-  const scanRows=[];
-  for(let r=0;r<rows.length;r+=1){
+// Cut each column into its OWN full-height strip image (named later). Midpoint
+// boundaries keep each strip's full header, values and R/L marker together.
+function gdClarityCutStrips(flat,columns){
+  const OCR=window.ClarityTableOcr, PIX=window.ClarityTableOcrPixels;
+  const bounds=OCR.stripBoundaries(columns,flat.width);
+  return bounds.map(b=>({
+    index:b.index,left:b.left,right:b.right,metricKey:"",headerText:"",
+    canvas:PIX.cropCanvas(flat,b.left,0,b.right,flat.height,0)
+  }));
+}
+// Name each strip by reading the header off the TOP of its own image. Each strip
+// is self-contained — it knows nothing about the others.
+async function gdClarityNameStrips(strips,headerBottom,Tesseract){
+  const OCR=window.ClarityTableOcr, PIX=window.ClarityTableOcrPixels, REG=window.LaunchMonitorAliasRegistry;
+  for(const strip of strips){
     if(typeof gdPracticeAssertImportNotCanceled==="function")gdPracticeAssertImportNotCanceled();
-    const row=rows[r];
-    const cells=[];
-    for(let c=0;c<columns.length;c+=1){
-      const col=columns[c];
-      const key=col&&col.metricKey;
-      if(!key)continue;
-      const prof=gdClarityStripProfile(key);
-      const x1=Number(col.right)+(prof.direction?prof.padRight:0);
-      const crop=PIX.cropCanvas(flat,Number(col.left),Number(row.y0),x1,Number(row.y1),2);
-      const res=await gdClarityOcrWithTimeout(gdRecognizeWithTesseract(Tesseract,crop,{tessedit_char_whitelist:prof.whitelist,tessedit_pageseg_mode:"7"},"clarity-rescan"),9000);
-      const cell=OCR.parseCell(String(res&&res.data&&res.data.text||"").trim(),key);
-      cells.push({key:key,value:cell.value,direction:cell.direction,valid:cell.valid});
-    }
-    if(cells.some(cell=>cell.valid))scanRows.push({club:club,cells:cells});
-    if(typeof opts.onRow==="function")opts.onRow(r,rows.length);
+    const crop=PIX.cropCanvas(strip.canvas,0,0,strip.canvas.width,Math.max(8,Number(headerBottom)||18),0);
+    const res=await gdClarityOcrWithTimeout(gdRecognizeWithTesseract(Tesseract,crop,{tessedit_char_whitelist:"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz ",tessedit_pageseg_mode:"7"},"clarity-strip-name"),9000);
+    strip.headerText=String(res&&res.data&&res.data.text||"").trim();
+    strip.metricKey=(OCR._internals&&OCR._internals.resolveMetricKey)?OCR._internals.resolveMetricKey(strip.headerText,REG.canonicalKey,REG):"";
   }
-  return scanRows;
+  return strips;
+}
+// Read each NAMED strip top-to-bottom, then SLOT each read value into the known
+// row band by its vertical position. An empty band just stays blank, so a missed
+// value self-aligns (a blank is inserted where it belongs) with no flagging and
+// nothing downstream shifts. Rows then reassemble cleanly by index.
+async function gdClarityReadStripsIntoRows(strips,dataRows,Tesseract,opts){
+  opts=opts||{};
+  const OCR=window.ClarityTableOcr, PIX=window.ClarityTableOcrPixels;
+  const named=strips.filter(s=>s.metricKey);
+  const dataBottom=dataRows.length?Math.max.apply(null,dataRows.map(r=>Number(r.y1))):0;
+  const perStrip=[];
+  for(let i=0;i<named.length;i+=1){
+    if(typeof gdPracticeAssertImportNotCanceled==="function")gdPracticeAssertImportNotCanceled();
+    const strip=named[i];
+    const prof=gdClarityStripProfile(strip.metricKey);
+    // Read from the top of the strip down to the last data row (summary rows
+    // sit below dataBottom and are excluded). y stays in strip/flat coords.
+    const crop=PIX.cropCanvas(strip.canvas,0,0,strip.canvas.width,Math.max(2,dataBottom+4),1);
+    const res=await gdClarityOcrWithTimeout(gdRecognizeWithTesseract(Tesseract,crop,{tessedit_char_whitelist:prof.whitelist,tessedit_pageseg_mode:"6"},"clarity-strip-read"),12000);
+    const lines=(typeof gdLmLinesFromOcrData==="function"?gdLmLinesFromOcrData(res&&res.data):[]).filter(l=>l&&String(l.text||"").trim());
+    const cells=dataRows.map(row=>{
+      const y0=Number(row.y0),y1=Number(row.y1),mid=(y0+y1)/2,tol=Math.max(6,(y1-y0)*0.75);
+      let best=null,bestD=Infinity;
+      lines.forEach(l=>{const cy=Number(l.cy);if(cy>=y0-tol&&cy<=y1+tol){const d=Math.abs(cy-mid);if(d<bestD){bestD=d;best=l;}}});
+      if(!best)return {key:strip.metricKey,value:null,direction:"",valid:false,plausible:false};
+      const cell=OCR.parseCell(String(best.text||"").trim(),strip.metricKey);
+      // Keep any numeric read even if implausible — it holds the row slot (a
+      // misread still serves as a placeholder) and the review step is the gate.
+      const hasNumber=Number.isFinite(Number(cell.value));
+      return {key:strip.metricKey,value:hasNumber?cell.value:null,direction:cell.direction,valid:hasNumber,plausible:!!cell.valid};
+    });
+    perStrip.push({metricKey:strip.metricKey,cells:cells});
+    if(typeof opts.onStrip==="function")opts.onStrip(i,named.length);
+  }
+  // Every strip now has exactly dataRows.length cells (blanks where missed).
+  const scanRows=[];
+  for(let r=0;r<dataRows.length;r+=1){
+    const cells=perStrip.map(s=>s.cells[r]).filter(Boolean);
+    if(cells.some(c=>c&&c.valid))scanRows.push({club:opts.club||"7i",cells:cells});
+  }
+  return {scanRows:scanRows,expectedRows:dataRows.length};
 }
 async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
   // Rebuilt scan path. Hands the flattened value-grid image (output of the kept
@@ -19205,13 +19245,12 @@ async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
       gdOpenPracticeManualQuadTool();
       return null;
     }
-    // Stage 2 — header per strip: leftover text boxes in the top header row.
-    gdPracticeUpdateImportJob({checkpointText:"Allocating headers",stageIndex:1,progress:56});
+    // Stage 2 — CUT each column into its own strip image, then NAME each strip by
+    // reading the header off the top of THAT strip. Each strip is self-contained.
+    gdPracticeUpdateImportJob({checkpointText:"Cutting + naming strips",stageIndex:1,progress:56});
     gdSetPracticePhotoProcessing(true,{stageIndex:1,progress:56,preserveClubs:true});
-    // Header band = the TOPMOST row of text boxes (the header labels). Taking all
-    // text above the first data row swallowed the units row (MPH/RPM) and the
-    // "BALL: STANDARD" label, garbling headers. Keep only boxes within ~1.6 line
-    // heights of the topmost text box.
+    // Header band = the topmost row of text boxes (labels), so a strip's header
+    // crop covers its label but not the units row / "BALL: STANDARD".
     const firstRowCy=Number(valueRows[0].cy);
     const aboveData=textBoxes.filter(box=>Number(box.cy)<firstRowCy).sort((a,b)=>Number(a.y0)-Number(b.y0));
     let headerBottom;
@@ -19224,43 +19263,42 @@ async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
     }else{
       headerBottom=Math.max(1,Number(valueRows[0].y0));
     }
-    gdPracticeDebugCheckpointSafe("header_strip_scan","running",{inputSummary:`${columns.length} strips, header band 0-${Math.round(headerBottom)}`});
-    const headerTexts=OCR.headerTextForColumns(columns,textBoxes,{headerBottom:headerBottom});
-    let allocated=OCR.allocateHeaders(columns,headerTexts,{resolver:REG.canonicalKey,registry:REG});
-    // Drop phantom club/margin columns that resolved to no metric (realigns the
-    // "7i read as 7 -> extra left column" shift).
-    const trimmed=OCR.trimUnresolvedEdges(allocated);
-    if(trimmed.length>=4&&trimmed.length<allocated.length)allocated=trimmed;
-    const activeColumns=allocated;
-    const keys=activeColumns.map(col=>col.metricKey);
-    const allocatedCount=keys.filter(Boolean).length;
-    gdPracticeDebugCheckpointSafe("header_strip_scan",allocatedCount>=4?"success":"failed",{outputSummary:`Allocated ${allocatedCount}/${activeColumns.length}: ${activeColumns.map(col=>col.headerText).join(" | ")}`,counts:{allocated:allocatedCount,columns:activeColumns.length},snapshot:{canvas:gdClarityScanOverlay(flat,{textBoxes:textBoxes,columns:activeColumns,headerBottom:headerBottom}),label:"Header band pink; columns green=resolved, red=unresolved"}});
+    let strips=gdClarityCutStrips(flat,columns);
+    gdPracticeDebugCheckpointSafe("header_strip_scan","running",{inputSummary:`${strips.length} strips cut, header band 0-${Math.round(headerBottom)}`});
+    strips=await gdClarityNameStrips(strips,headerBottom,Tesseract);
+    // Drop phantom club/margin strips that named to no metric (realigns the
+    // "7i read as 7 -> extra left strip" shift).
+    const trimmedStrips=OCR.trimUnresolvedEdges(strips);
+    if(trimmedStrips.length>=4&&trimmedStrips.length<strips.length)strips=trimmedStrips;
+    const namedStrips=strips.filter(s=>s.metricKey);
+    const allocatedCount=namedStrips.length;
+    gdPracticeDebugCheckpointSafe("header_strip_scan",allocatedCount>=4?"success":"failed",{outputSummary:`Named ${allocatedCount}/${strips.length}: ${strips.map(s=>s.metricKey||("?"+(s.headerText?"["+s.headerText+"]":""))).join(" | ")}`,counts:{allocated:allocatedCount,strips:strips.length},snapshot:{canvas:gdClarityScanOverlay(flat,{textBoxes:textBoxes,columns:strips,headerBottom:headerBottom}),label:"Strips: green=named, red=unnamed; pink=header band"}});
     if(allocatedCount<4){
       gdPracticeFeedback("Header allocation could not identify the columns. Re-frame and scan again.","error");
       gdOpenPracticeManualQuadTool();
       return null;
     }
-    // ===== GEOMETRY FROZEN ABOVE. Below is Pass 2 (extraction) — the tunable
-    // part. Everything above produced the grid: column positions + metric labels
-    // + data rows. It should not keep changing; only the re-scan does. =====
-    gdPracticeUpdateImportJob({checkpointText:"Reading values",stageIndex:2,progress:74});
+    // ===== GEOMETRY FROZEN. Strips are cut + named. Extraction below just reads
+    // each strip top-to-bottom and slots values into rows by position. =====
+    gdPracticeUpdateImportJob({checkpointText:"Reading strips",stageIndex:2,progress:74});
     gdSetPracticePhotoProcessing(true,{stageIndex:2,progress:74,preserveClubs:true});
     const clubLabel=(typeof gdPracticeScanClubLabel==="function"?gdPracticeScanClubLabel():"7i")||"7i";
-    const firstColLeft=Number(activeColumns[0].left);
+    const firstColLeft=Number(strips[0].left);
     // Data rows only (drop AVERAGE / STD DEV summary rows, labelled at left margin).
     const dataRows=valueRows.filter(row=>{
       const marginText=textBoxes.filter(box=>Number(box.cx)<firstColLeft&&Number(box.cy)>=row.y0&&Number(box.cy)<=row.y1).map(box=>String(box.text||"")).join(" ");
       return !OCR.isSummaryLabel(marginText);
     });
-    // The frozen geometry handoff. Pass 2 reads ONLY from this.
-    const grid={flat:flat,columns:activeColumns,valueRows:dataRows,club:clubLabel};
-    gdPracticeDebugCheckpointSafe("extraction_started","running",{inputSummary:`Re-scan ${dataRows.length} rows x ${allocatedCount} strips (geometry frozen; Pass-1 reads dumped)`});
-    // Pass 2: dump the geometry reads, re-scan each strip tuned to its metric.
-    const scanRows=await gdClarityRescanStrips(flat,grid,Tesseract,{onRow:(i,n)=>{try{gdPracticeUpdateImportJob({checkpointText:`Re-scanning row ${i+1}/${n}`,stageIndex:2,progress:Math.min(96,74+Math.round((i/Math.max(1,n))*22))});}catch(e){}}});
-    // Single checkpoint: scanner output -> Shot Library landing structure.
+    // extraction_completed marked RUNNING so its duration spans the strip reads.
+    gdPracticeDebugCheckpointSafe("extraction_completed","running",{inputSummary:`Read ${namedStrips.length} named strips into ${dataRows.length} rows`});
+    // Read each strip top-to-bottom, slot values into rows by position (blanks
+    // self-insert where a value is missed).
+    const readResult=await gdClarityReadStripsIntoRows(strips,dataRows,Tesseract,{club:clubLabel,onStrip:(i,n)=>{try{gdPracticeUpdateImportJob({checkpointText:`Reading strip ${i+1}/${n}`,stageIndex:2,progress:Math.min(96,74+Math.round((i/Math.max(1,n))*22))});}catch(e){}}});
+    const scanRows=readResult.scanRows;
+    // Single checkpoint (adapter): scanner output -> Shot Library, cleaning misreads.
     const payload=gdClarityScanResultToPayload(scanRows,{label:sourceLabel,club:clubLabel});
     const rowCount=Number(payload?.clubGroups?.length)||0;
-    gdPracticeDebugCheckpointSafe("extraction_completed",rowCount?"success":"failed",{outputSummary:`Read ${rowCount} shots (${scanRows.length} rows x ${allocatedCount} metrics)`,counts:{rows:rowCount,scanRows:scanRows.length},snapshot:{canvas:gdClarityScanOverlay(flat,{numberBoxes:numberBoxes,columns:activeColumns,headerBottom:headerBottom}),label:`Extraction: ${rowCount} shots from ${scanRows.length} rows`}});
+    gdPracticeDebugCheckpointSafe("extraction_completed",rowCount?"success":"failed",{outputSummary:`Read ${rowCount} shots (${scanRows.length} rows x ${allocatedCount} strips)`,counts:{rows:rowCount,scanRows:scanRows.length},snapshot:{canvas:gdClarityScanOverlay(flat,{columns:strips,headerBottom:headerBottom}),label:`Extraction: ${rowCount} shots from ${scanRows.length} rows`}});
     if(!rowCount){
       gdPracticeFeedback("No usable rows were read. Re-frame the value grid and scan again.","error");
       gdOpenPracticeManualQuadTool();
