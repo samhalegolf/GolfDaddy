@@ -233,7 +233,10 @@
     return bands
       .map(function (band) {
         return Object.assign({}, band, {
-          x: Number(band.best && band.best.x),
+          // Cut through the MIDDLE of the clear corridor (centre of the gap), not
+          // band.best.x — every x in a clear gap scores the same, so best.x ties
+          // to the leftmost sample and the cut hugs the right edge of the value.
+          x: Math.round((Number(band.start) + Number(band.end)) / 2),
           width: Math.max(step, Number(band.end) - Number(band.start) + step),
           support: Number(band.best && band.best.support) || 0,
           blocked: Number(band.best && band.best.blocked) || 0,
@@ -309,7 +312,7 @@
       .sort(function (a, b) { return Number(a.best.x) - Number(b.best.x); })
       .forEach(function (band) {
         var cut = {
-          x: Number(band.best.x),
+          x: Math.round((Number(band.start) + Number(band.end)) / 2),
           width: Math.max(1, Number(band.end) - Number(band.start) + 1),
           support: Number(band.best.support) || 0,
           blocked: Number(band.best.blocked) || 0,
