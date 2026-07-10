@@ -41229,18 +41229,35 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 		    return String(value);
 		  }
 		  function gdPracticeRawShotTableHTML(rows,meta,club,importId){
+		    // A NORMAL shot table: one row per shot, one column per scanned metric.
+		    // No shot IDs, no accepted/rejected status, no player/account plumbing —
+		    // those live in debug tooling, not the library.
 		    const sorted=(Array.isArray(rows)?rows:[]).slice().sort((a,b)=>a.index-b.index);
-		    const source=gdPracticeImportLabel(meta.sourceType||meta.sourceName||meta.label||sorted[0]?.sourceType||sorted[0]?.providerGuess||"Practice import");
-		    const date=gdPracticeImportDate(meta.timestamp||sorted[0]?.timestamp||"");
-		    const tableRows=sorted.map(row=>{
-		      const offline=Number.isFinite(Number(row.lateralM))?`${Number(row.lateralM)>0?"R":Number(row.lateralM)<0?"L":""} ${Math.abs(Number(row.lateralM)).toFixed(1)}m`.trim():"-";
-		      const offset=Number.isFinite(Number(row.normalizedDeg))?gdOffsetLabel(row.normalizedDeg):"-";
-		      const status=gdPracticeRowStatus(row);
-		      const player=row.playerId||meta.playerId||"-";
-		      const account=row.accountId||meta.accountId||"-";
-		      return `<div class="gdPracticeRawShotRow"><span>${Number(row.index)+1}</span><strong>${gdEscapeHTML(row.shotId||"-")}</strong><span>${gdEscapeHTML(gdPracticeRawValue(row.actualDistanceM))}</span><span>${gdEscapeHTML(offline)}</span><span>${gdEscapeHTML(offset)}</span><span>${gdEscapeHTML(status)}</span><span>${gdEscapeHTML(player)}</span><span>${gdEscapeHTML(account)}</span></div>`;
-		    }).join("");
-		    return `<div class="gdPracticeRawDrawer"><div class="gdPracticeRawHead"><div><strong>Raw shot data</strong><span>${gdEscapeHTML(club||"Unknown / Unmatched")} · ${gdEscapeHTML(date)} · ${gdEscapeHTML(source)}</span></div></div><div class="gdPracticeRawMeta"><span>Import <b>${gdEscapeHTML(importId||"unknown")}</b></span><span>${sorted.length} row${sorted.length===1?"":"s"}</span><span>Read-only</span></div><div class="gdPracticeRawScroll"><div class="gdPracticeRawShotTable"><div class="gdPracticeRawShotHead"><span>#</span><span>Shot ID</span><span>Carry</span><span>Offline</span><span>Offset</span><span>Status</span><span>Player</span><span>Account</span></div>${tableRows}</div></div></div>`;
+		    const TEMPLATE=[["ballSpeed","Ball mph"],["launchAngle","Launch"],["sideAngle","Side"],["backspin","Backspin"],["sideSpin","Side Spin"],["descentAngle","Descent"],["offline","Offline"],["peakHeight","Peak"],["carryDistance","Carry"],["totalDistance","Total"]];
+		    const DIRECTIONAL=["sideAngle","sideSpin","offline"];
+		    const metricOf=(row,key)=>{
+		      const list=row&&row.rawSource&&Array.isArray(row.rawSource.metrics)?row.rawSource.metrics:[];
+		      const m=list.find(item=>String(item&&item.candidateMetric||"")===key);
+		      if(m&&Number.isFinite(Number(m.value)))return Number(m.value);
+		      if(key==="carryDistance"&&Number.isFinite(Number(row.actualDistanceM)))return Number(row.actualDistanceM);
+		      if(key==="offline"&&Number.isFinite(Number(row.lateralM)))return Number(row.lateralM);
+		      return null;
+		    };
+		    const fmt=(key,v)=>{
+		      if(v==null)return "-";
+		      if(DIRECTIONAL.includes(key)){
+		        const side=v<0?"L ":v>0?"R ":"";
+		        return side+(Math.abs(v)>=100?Math.round(Math.abs(v)):Math.abs(v).toFixed(1)).toString();
+		      }
+		      return Math.abs(v)>=100?String(Math.round(v)):String(Number(v.toFixed(1)));
+		    };
+		    const cols=TEMPLATE.filter(([key])=>sorted.some(row=>metricOf(row,key)!=null));
+		    const gridStyle=`grid-template-columns:26px repeat(${cols.length},minmax(54px,1fr))`;
+		    const head=`<div class="gdPracticeRawShotHead" style="${gridStyle}"><span>#</span>${cols.map(([,label])=>`<span>${gdEscapeHTML(label)}</span>`).join("")}</div>`;
+		    const tableRows=sorted.map((row,i)=>
+		      `<div class="gdPracticeRawShotRow" style="${gridStyle}"><span>${i+1}</span>${cols.map(([key])=>`<span>${gdEscapeHTML(fmt(key,metricOf(row,key)))}</span>`).join("")}</div>`
+		    ).join("");
+		    return `<div class="gdPracticeRawShotTable">${head}${tableRows}</div>`;
 		  }
 		  function gdPracticeToggleImportSelectMode(){
 		    gdPracticeImportSelectMode=!gdPracticeImportSelectMode;
@@ -45826,14 +45843,14 @@ body.gdGpsActive #bagRailBtn{order:7!important}
 		  padding:0 8px 8px!important;
 		}
 		.gdPracticeRawShotTable{
-		  min-width:760px!important;
+		  min-width:520px!important;
 		  display:grid!important;
 		  gap:0!important;
 		}
 		.gdPracticeRawShotHead,
 		.gdPracticeRawShotRow{
 		  display:grid!important;
-		  grid-template-columns:30px minmax(130px,1.4fr) 54px 64px 64px 76px minmax(92px,1fr) minmax(92px,1fr)!important;
+		  /* column layout comes from the inline style (dynamic metric columns) */
 		  gap:6px!important;
 		  align-items:center!important;
 		}
@@ -46990,7 +47007,7 @@ body.gdGpsActive #bagRailBtn{order:7!important}
 		  border:1px solid rgba(255,255,255,.075)!important;
 		}
 		.gdPracticeEvidenceClubRowsScrollable{
-		  max-height:240px!important;
+		  max-height:440px!important;
 		  overflow:auto!important;
 		  overflow-x:hidden!important;
 		  padding-right:2px!important;
