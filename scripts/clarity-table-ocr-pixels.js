@@ -85,11 +85,15 @@
     var minH = Math.max(4, medianH * 0.4);
     var minArea = Math.max(4, medianH * 0.9);
     return comps.filter(function (c) {
-      var horizontalLine = c.h <= Math.max(2, medianH * 0.18) && c.w > medianH * 2.2;
-      var verticalLine = c.w <= 2 && c.h > medianH * 1.8;
+      // Reject table GRID LINES so the column split cuts on value gaps, not on
+      // ink lines. A grid line is much taller than a digit and thin (or a very
+      // high aspect ratio); a horizontal rule is short and wide.
+      var horizontalLine = c.h <= Math.max(2, medianH * 0.22) && c.w > medianH * 1.8;
+      var verticalLine = (c.h > medianH * 1.6 && c.w <= Math.max(3, medianH * 0.55)) ||
+                         (c.w > 0 && c.h / c.w > 5.5 && c.h > medianH * 1.2);
       if (horizontalLine || verticalLine) return false;
       if (c.h < minH || c.area < minArea) return false;
-      if (c.w / c.h > 8 || c.h / c.w > 9) return false;
+      if (c.w / c.h > 8) return false;
       return true;
     });
   }
@@ -148,10 +152,31 @@
     return out;
   }
 
+  // Binarise a canvas with the SAME ink mask used for box detection: ink ->
+  // black, everything else -> white. Proven on the strip-montage test image:
+  // Tesseract reads a clean B/W band far better than the low-contrast photo
+  // background (multiple hard-fail cells flipped to clean reads).
+  function binarizeCanvas(source) {
+    var canvas = toCanvas(source);
+    var id = canvas.getContext("2d", { willReadFrequently: true }).getImageData(0, 0, canvas.width, canvas.height);
+    var m = inkMask(id);
+    var out = document.createElement("canvas");
+    out.width = canvas.width; out.height = canvas.height;
+    var octx = out.getContext("2d");
+    var oid = octx.createImageData(out.width, out.height);
+    for (var i = 0; i < m.mask.length; i += 1) {
+      var v = m.mask[i] ? 0 : 255;
+      oid.data[i * 4] = v; oid.data[i * 4 + 1] = v; oid.data[i * 4 + 2] = v; oid.data[i * 4 + 3] = 255;
+    }
+    octx.putImageData(oid, 0, 0);
+    return out;
+  }
+
   global.ClarityTableOcrPixels = {
     toCanvas: toCanvas, imageData: imageData, inkMask: inkMask,
     connectedComponents: connectedComponents, clusterRows: clusterRows,
-    detectNumberBoxes: detectNumberBoxes, cropCanvas: cropCanvas
+    detectNumberBoxes: detectNumberBoxes, cropCanvas: cropCanvas,
+    binarizeCanvas: binarizeCanvas
   };
   if (typeof module !== "undefined" && module.exports) module.exports = global.ClarityTableOcrPixels;
 })(typeof globalThis !== "undefined" ? globalThis : this);

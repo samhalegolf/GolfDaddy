@@ -233,7 +233,10 @@
     return bands
       .map(function (band) {
         return Object.assign({}, band, {
-          x: Number(band.best && band.best.x),
+          // Cut through the MIDDLE of the clear corridor (centre of the gap), not
+          // band.best.x — every x in a clear gap scores the same, so best.x ties
+          // to the leftmost sample and the cut hugs the right edge of the value.
+          x: Math.round((Number(band.start) + Number(band.end)) / 2),
           width: Math.max(step, Number(band.end) - Number(band.start) + step),
           support: Number(band.best && band.best.support) || 0,
           blocked: Number(band.best && band.best.blocked) || 0,
@@ -309,7 +312,7 @@
       .sort(function (a, b) { return Number(a.best.x) - Number(b.best.x); })
       .forEach(function (band) {
         var cut = {
-          x: Number(band.best.x),
+          x: Math.round((Number(band.start) + Number(band.end)) / 2),
           width: Math.max(1, Number(band.end) - Number(band.start) + 1),
           support: Number(band.best.support) || 0,
           blocked: Number(band.best.blocked) || 0,
@@ -492,21 +495,27 @@
       .filter(function (b) { return Number.isFinite(b.x0) && Number.isFinite(b.y0) && b.x1 > b.x0 && looksLikeValue(b.text); });
   }
 
-  // Assign the leftover NON-number words to whichever column contains them, and
-  // join per column -> that column's header text. opts.headerBottom limits to
-  // the header band above the data so direction markers (R/L) don't leak in.
+  // Assign each leftover NON-number word to the column whose CENTRE it is
+  // nearest to (header labels are wider than the narrow value columns, so a
+  // multi-word header like "LAUNCH ANGLE" would otherwise split across strips).
+  // opts.headerBottom limits to the header band so direction markers (R/L) and
+  // the units row don't leak in.
   function headerTextForColumns(columns, words, opts) {
     opts = opts || {};
     var maxY = Number.isFinite(Number(opts.headerBottom)) ? Number(opts.headerBottom) : Infinity;
     var cols = Array.isArray(columns) ? columns : [];
+    if (!cols.length) return [];
+    var centers = cols.map(function (c) { return (Number(c.left) + Number(c.right)) / 2; });
     var textWords = (Array.isArray(words) ? words : []).map(wordBox)
       .filter(function (b) { return b.text && !looksLikeValue(b.text) && b.cy <= maxY; });
-    return cols.map(function (col) {
-      return textWords
-        .filter(function (w) { return w.cx >= Number(col.left) && w.cx <= Number(col.right); })
-        .sort(function (a, b) { return a.x0 - b.x0; })
-        .map(function (w) { return w.text; })
-        .join(" ").trim();
+    var buckets = cols.map(function () { return []; });
+    textWords.forEach(function (w) {
+      var best = 0, bestD = Infinity;
+      centers.forEach(function (cc, i) { var d = Math.abs(w.cx - cc); if (d < bestD) { bestD = d; best = i; } });
+      buckets[best].push(w);
+    });
+    return buckets.map(function (bucket) {
+      return bucket.sort(function (a, b) { return a.x0 - b.x0; }).map(function (w) { return w.text; }).join(" ").trim();
     });
   }
 
@@ -557,10 +566,25 @@
       var cleaned = text.replace(/\b(mph|rpm|deg|ft|m)\b/gi, "").replace(/[°º]/g, "").trim();
       if (cleaned && cleaned !== text) { var k2 = fn(cleaned); if (k2) return k2; }
     }
-    // Fuzzy fallback against the registry's alias tokens.
     if (reg && Array.isArray(reg.entries)) {
       var token = compactToken(text);
       if (token.length < 3) return "";
+      // Substring pass: the LONGEST known alias contained in the header text.
+      // Handles noise words mixed into the crop (e.g. "BALL: STANDARD" landing in
+      // the Ball Speed header -> "ballstandardballspeed" still contains "ballspeed").
+      var subKey = "", subLen = 0;
+      reg.entries.forEach(function (entry) {
+        [entry.key, entry.label, entry.rawLabel, entry.candidateMetric].concat(entry.aliases || [], entry.headerAliases || []).forEach(function (alias) {
+          var at = compactToken(alias);
+          // Floor of 5 so generic 4-char fragments (ball, side, spin, peak, path,
+          // axis, desc) can't hijack a noisy header — e.g. the club column
+          // "BALL: STANDARD" must NOT match ballSpeed via "ball". Real metric names
+          // (carry, total, topin, ballspeed, sideangle, ...) are all >= 5.
+          if (at.length >= 5 && token.indexOf(at) >= 0 && at.length > subLen) { subLen = at.length; subKey = entry.key; }
+        });
+      });
+      if (subKey) return subKey;
+      // Fuzzy fallback against the registry's alias tokens.
       var best = "", bestDist = Infinity;
       reg.entries.forEach(function (entry) {
         [entry.key, entry.label, entry.rawLabel, entry.candidateMetric]
@@ -587,6 +611,30 @@
       var headerText = texts[i] != null ? texts[i] : ((col && col.rawHeaderText) || "");
       var metricKey = resolveMetricKey(headerText, opts.resolver, reg);
       return Object.assign({}, col, { headerText: String(headerText || ""), metricKey: metricKey });
+    });
+  }
+
+  // Strip boundaries: use the SPLITTER'S OWN cut bounds (col.left/col.right) so a
+  // strip is exactly the column the splitter drew — do NOT re-derive midpoints
+  // between centres, which "splits the difference" and can put a strip edge where
+  // no cut was ever made. valLeft/valRight are the tight value extent (col.x0/x1)
+  // for an optional tighter extraction crop.
+  function stripBoundaries(columns, sourceWidth) {
+    var cols = Array.isArray(columns) ? columns : [];
+    if (!cols.length) return [];
+    var W = Number(sourceWidth) || 0;
+    return cols.map(function (c, i) {
+      var left = Number(c.left), right = Number(c.right);
+      var vl = Number.isFinite(Number(c.x0)) ? Number(c.x0) : left;
+      var vr = Number.isFinite(Number(c.x1)) ? Number(c.x1) : right;
+      return {
+        index: i,
+        left: Math.max(0, Math.round(left)),
+        right: Math.round(W ? Math.min(W, right) : right),
+        valLeft: vl, valRight: vr,
+        cx: (left + right) / 2,
+        metricKey: c.metricKey, headerText: c.headerText
+      };
     });
   }
 
@@ -684,6 +732,7 @@
     splitColumns: splitColumns,
     allocateHeaders: allocateHeaders,
     trimUnresolvedEdges: trimUnresolvedEdges,
+    stripBoundaries: stripBoundaries,
     parseCell: parseCell,
     numberBoxesFromWords: numberBoxesFromWords,
     headerTextForColumns: headerTextForColumns,
