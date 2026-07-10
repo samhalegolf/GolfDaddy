@@ -576,7 +576,11 @@
       reg.entries.forEach(function (entry) {
         [entry.key, entry.label, entry.rawLabel, entry.candidateMetric].concat(entry.aliases || [], entry.headerAliases || []).forEach(function (alias) {
           var at = compactToken(alias);
-          if (at.length >= 4 && token.indexOf(at) >= 0 && at.length > subLen) { subLen = at.length; subKey = entry.key; }
+          // Floor of 5 so generic 4-char fragments (ball, side, spin, peak, path,
+          // axis, desc) can't hijack a noisy header — e.g. the club column
+          // "BALL: STANDARD" must NOT match ballSpeed via "ball". Real metric names
+          // (carry, total, topin, ballspeed, sideangle, ...) are all >= 5.
+          if (at.length >= 5 && token.indexOf(at) >= 0 && at.length > subLen) { subLen = at.length; subKey = entry.key; }
         });
       });
       if (subKey) return subKey;
