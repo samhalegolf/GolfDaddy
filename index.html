@@ -41609,18 +41609,18 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 			        const importId=group.id;
 			        const importRows=group.rows.slice().sort((a,b)=>a.index-b.index);
 			        const meta=group.meta||{};
-			        const accepted=importRows.filter(row=>!row.excluded&&!row.plotDeselected&&!row.errors?.length).length;
-			        const rejected=importRows.length-accepted;
-			        const sourceLabel=gdPracticeImportLabel(meta.sourceType||meta.sourceName||meta.label||importRows[0]?.sourceType||importRows[0]?.providerGuess||"Practice import");
 			        const dateLabel=gdPracticeImportDate(meta.timestamp||importRows[0]?.timestamp||"");
 			        const selected=!!gdPracticeImportSelected[importId];
 			        const checkbox=adminOpen&&gdPracticeImportSelectMode?`<label class="gdPracticeEvidenceUploadSelect" onclick="event.stopPropagation()"><input type="checkbox" value="${gdEscapeHTML(importId)}" ${selected?"checked":""} onchange="gdPracticeToggleImportSelection(this)"><span>Select</span></label>`:"";
-			        const statusLabel=importRows.some(row=>row.counted)?"bubble fit":(rejected?"needs review":"stored");
 			        const importActions=`<button type="button" class="danger gdPracticeDeleteX" title="Delete this import" aria-label="Delete this import" onclick="return gdPracticeDeleteImports(${gdPracticeJsArg(importId)})">&times;</button>`;
 			        const rawDetail=adminOpen?`<details class="gdPracticeRawDisclosure"><summary>View raw data</summary>${gdPracticeRawShotTableHTML(importRows,meta,club,importId)}</details>`:"";
-			        return `<div class="gdPracticeUploadRow" data-import-id="${gdEscapeHTML(importId)}">${checkbox}<div class="gdPracticeUploadMeta"><strong>${gdEscapeHTML(dateLabel)}</strong><span>${gdEscapeHTML(sourceLabel)} · ${importRows.length} shot${importRows.length===1?"":"s"} · ${accepted} accepted${rejected?` · ${rejected} rejected`:""}</span></div><b>${gdEscapeHTML(statusLabel)}</b><div class="gdPracticeUploadActions">${importActions}</div>${rawDetail}</div>`;
+			        // Quiet row: just the upload date (club is the section header). Counts,
+			        // source label and bubble-status badges live in admin raw data only.
+			        return `<div class="gdPracticeUploadRow" data-import-id="${gdEscapeHTML(importId)}">${checkbox}<div class="gdPracticeUploadMeta"><strong>${gdEscapeHTML(dateLabel)}</strong></div><div class="gdPracticeUploadActions">${importActions}</div>${rawDetail}</div>`;
 			      }).join("");
-			      return `<section class="gdPracticeShotClub ${open?"open":""}" data-club="${gdEscapeHTML(club)}"><button type="button" class="gdPracticeShotClubHead" data-gd-practice-club-toggle aria-expanded="${open?"true":"false"}"><div><span>${gdEscapeHTML(club)}</span><strong>${clubRows.length} shot${clubRows.length===1?"":"s"} · ${importCount} upload${importCount===1?"":"s"}</strong></div><small>${gdEscapeHTML(gdPracticeImportDate(latest))}${bubbleStatus?` · ${gdEscapeHTML(bubbleStatus)}`:""}</small><b class="gdPracticeEvidenceChevron">${open?"-":"+"}</b></button><div class="gdPracticeShotClubBody">${uploadRows}</div></section>`;
+			      // Quiet header: club label + latest upload date only. Shot/upload counts
+			      // and bubble status are admin/raw-data concerns, not library chrome.
+			      return `<section class="gdPracticeShotClub ${open?"open":""}" data-club="${gdEscapeHTML(club)}"><button type="button" class="gdPracticeShotClubHead" data-gd-practice-club-toggle aria-expanded="${open?"true":"false"}"><div><span>${gdEscapeHTML(club)}</span></div><small>${gdEscapeHTML(gdPracticeImportDate(latest))}</small><b class="gdPracticeEvidenceChevron">${open?"-":"+"}</b></button><div class="gdPracticeShotClubBody">${uploadRows}</div></section>`;
 			    }).join("");
 			    root.innerHTML=gdPracticeLibraryShellHTML(analysis,rows.length,`${gdPracticePlotModeControls()}${tools}<div class="gdPracticeShotLibrary${rows.length>18?" gdPracticeEvidenceClubRowsScrollable":""}">${clubSections}</div>`);
 			  }
@@ -45606,8 +45606,8 @@ body.gdGpsActive #bagRailBtn{order:7!important}
 		}
 		.gdPracticeShotClubHead span{
 		  display:block!important;
-		  color:rgba(255,255,255,.58)!important;
-		  font-size:10px!important;
+		  color:#fff!important;
+		  font-size:13px!important;
 		  font-weight:950!important;
 		  text-transform:uppercase!important;
 		  letter-spacing:.06em!important;
