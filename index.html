@@ -19056,6 +19056,27 @@ function gdClarityScanOverlay(flat,layers){
   });
   return c;
 }
+// Render the ACTUAL cut strips side by side (each its own image), labelled with
+// its name — so you can literally see the physical strips, not lines on a page.
+function gdClarityStripsMontage(strips){
+  const list=Array.isArray(strips)?strips:[];
+  if(!list.length){const e=document.createElement("canvas");e.width=10;e.height=10;return e;}
+  const gap=6,labelH=14,dispH=440;
+  const items=list.map(s=>{const w=Number(s.canvas&&s.canvas.width)||8,h=Number(s.canvas&&s.canvas.height)||8,sc=dispH/Math.max(1,h);return {s:s,dw:Math.max(6,Math.round(w*sc)),dh:dispH};});
+  const totalW=items.reduce((a,it)=>a+it.dw+gap,gap);
+  const c=document.createElement("canvas");c.width=Math.max(1,totalW);c.height=dispH+labelH+gap*2;
+  const ctx=c.getContext("2d");ctx.fillStyle="#0b0f0d";ctx.fillRect(0,0,c.width,c.height);
+  let x=gap;
+  items.forEach(it=>{
+    const named=!!it.s.metricKey;
+    try{if(it.s.canvas)ctx.drawImage(it.s.canvas,x,labelH+gap,it.dw,it.dh);}catch(e){}
+    ctx.strokeStyle=named?"#37f28d":"#ff6a6a";ctx.lineWidth=2;ctx.strokeRect(x,labelH+gap,it.dw,it.dh);
+    ctx.fillStyle=named?"#37f28d":"#ff8a8a";ctx.font="10px ui-monospace,Menlo,monospace";
+    ctx.fillText(String(it.s.metricKey||it.s.headerText||"?").slice(0,9),x,11);
+    x+=it.dw+gap;
+  });
+  return c;
+}
 // THE SINGLE CHECKPOINT between the scanner and the Shot Library.
 // Input  (scanner-preferred format): rows of { club, cells:[{key,value,direction,valid}] }.
 // Output (Shot Library landing point): { label, inputType, clubGroups:[{originClubLabel,
@@ -19135,8 +19156,10 @@ async function gdClarityNameStrips(strips,headerBottom,Tesseract){
   for(const strip of strips){
     if(typeof gdPracticeAssertImportNotCanceled==="function")gdPracticeAssertImportNotCanceled();
     const crop=PIX.cropCanvas(strip.canvas,0,0,strip.canvas.width,Math.max(8,Number(headerBottom)||18),0);
-    const res=await gdClarityOcrWithTimeout(gdRecognizeWithTesseract(Tesseract,crop,{tessedit_char_whitelist:"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz ",tessedit_pageseg_mode:"7"},"clarity-strip-name"),9000);
-    strip.headerText=String(res&&res.data&&res.data.text||"").trim();
+    // Block mode (psm 6) so a multi-word / stacked header (e.g. "LAUNCH ANGLE",
+    // "BALL SPEED\nMPH") is read as one blob; the resolver strips units + fuzzies.
+    const res=await gdClarityOcrWithTimeout(gdRecognizeWithTesseract(Tesseract,crop,{tessedit_char_whitelist:"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz ",tessedit_pageseg_mode:"6"},"clarity-strip-name"),9000);
+    strip.headerText=String(res&&res.data&&res.data.text||"").replace(/\s+/g," ").trim();
     strip.metricKey=(OCR._internals&&OCR._internals.resolveMetricKey)?OCR._internals.resolveMetricKey(strip.headerText,REG.canonicalKey,REG):"";
   }
   return strips;
@@ -19249,30 +19272,21 @@ async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
     // reading the header off the top of THAT strip. Each strip is self-contained.
     gdPracticeUpdateImportJob({checkpointText:"Cutting + naming strips",stageIndex:1,progress:56});
     gdSetPracticePhotoProcessing(true,{stageIndex:1,progress:56,preserveClubs:true});
-    // Header band = the topmost row of text boxes (labels), so a strip's header
-    // crop covers its label but not the units row / "BALL: STANDARD".
-    const firstRowCy=Number(valueRows[0].cy);
-    const aboveData=textBoxes.filter(box=>Number(box.cy)<firstRowCy).sort((a,b)=>Number(a.y0)-Number(b.y0));
-    let headerBottom;
-    if(aboveData.length){
-      const topY0=Number(aboveData[0].y0);
-      const heights=aboveData.map(box=>Number(box.y1)-Number(box.y0)).filter(v=>v>0).sort((a,b)=>a-b);
-      const rowH=heights.length?heights[Math.floor(heights.length/2)]:16;
-      const headerRow=aboveData.filter(box=>Number(box.y0)<=topY0+rowH*1.6);
-      headerBottom=Math.max.apply(null,headerRow.map(box=>Number(box.y1)))+2;
-    }else{
-      headerBottom=Math.max(1,Number(valueRows[0].y0));
-    }
+    // Header = just the text near the top of each strip. Generous band: anything
+    // above the first data row. Each strip is its OWN image, so reading its top
+    // only sees THAT column's header (+ its units, which the resolver strips) —
+    // no cross-strip mixing, no need to be precise about the band.
+    const headerBottom=Math.max(8,Number(valueRows[0].y0));
     let strips=gdClarityCutStrips(flat,columns);
     gdPracticeDebugCheckpointSafe("header_strip_scan","running",{inputSummary:`${strips.length} strips cut, header band 0-${Math.round(headerBottom)}`});
+    // Name each strip by reading the text near its top and matching a metric.
     strips=await gdClarityNameStrips(strips,headerBottom,Tesseract);
-    // Drop phantom club/margin strips that named to no metric (realigns the
-    // "7i read as 7 -> extra left strip" shift).
+    // Drop phantom club/margin strips that named to no metric.
     const trimmedStrips=OCR.trimUnresolvedEdges(strips);
     if(trimmedStrips.length>=4&&trimmedStrips.length<strips.length)strips=trimmedStrips;
     const namedStrips=strips.filter(s=>s.metricKey);
     const allocatedCount=namedStrips.length;
-    gdPracticeDebugCheckpointSafe("header_strip_scan",allocatedCount>=4?"success":"failed",{outputSummary:`Named ${allocatedCount}/${strips.length}: ${strips.map(s=>s.metricKey||("?"+(s.headerText?"["+s.headerText+"]":""))).join(" | ")}`,counts:{allocated:allocatedCount,strips:strips.length},snapshot:{canvas:gdClarityScanOverlay(flat,{textBoxes:textBoxes,columns:strips,headerBottom:headerBottom}),label:"Strips: green=named, red=unnamed; pink=header band"}});
+    gdPracticeDebugCheckpointSafe("header_strip_scan",allocatedCount>=4?"success":"failed",{outputSummary:`Named ${allocatedCount}/${strips.length}: ${strips.map(s=>s.metricKey||("?"+(s.headerText?"["+s.headerText+"]":""))).join(" | ")}`,counts:{allocated:allocatedCount,strips:strips.length},snapshot:{canvas:gdClarityStripsMontage(strips),label:"Physical strips: green=named, red=unnamed"}});
     if(allocatedCount<4){
       gdPracticeFeedback("Header allocation could not identify the columns. Re-frame and scan again.","error");
       gdOpenPracticeManualQuadTool();
