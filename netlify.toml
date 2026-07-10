@@ -24,6 +24,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/course-play-sync"
+  to = "/.netlify/functions/course-play-sync"
+  status = 200
+
+[[redirects]]
   from = "/api/create-checkout-session"
   to = "/.netlify/functions/create-checkout-session"
   status = 200
