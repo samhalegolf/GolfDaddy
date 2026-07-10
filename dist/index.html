@@ -1728,8 +1728,8 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 <script>window.L=window.L||window.leaflet;</script>
 <script src="scripts/clarity-build.js?v=tool-rail-tab-hole-label-20260620"></script>
 <script src="scripts/gd-launch-monitor-alias-registry.js?v=practice-alias-registry-20260612"></script>
-<script src="scripts/clarity-table-ocr.js?v=table-ocr-module-20260708"></script>
-<script src="scripts/clarity-table-ocr-pixels.js?v=table-ocr-module-20260708"></script>
+<script src="scripts/clarity-table-ocr.js?v=table-ocr-inkscan-20260710q"></script>
+<script src="scripts/clarity-table-ocr-pixels.js?v=table-ocr-inkscan-20260710q"></script>
 <style>
 	    *,*::before,*::after{box-sizing:border-box}
 	    :where(input,select,textarea,button){max-width:100%}
@@ -6701,7 +6701,7 @@ function gdEnsureLaunchMonitorApi(){
       return;
     }
     const script=document.createElement("script");
-    script.src="scripts/gd-launch-monitor-data.js?v=practice-data-20260606";
+    script.src="scripts/gd-launch-monitor-data.js?v=practice-data-20260710r";
     script.onload=finish;
     script.onerror=()=>reject(new Error("Launch monitor module failed to load"));
     document.body.appendChild(script);
@@ -7432,13 +7432,10 @@ function gdLmDerivedSpinAxisFromValues(values){
   return Number.isFinite(axis)&&gdLmMetricPlausible("spinAxis",axis)?axis:null;
 }
 function gdLmAddDerivedSpinAxisMetric(metrics,values){
-  if(gdLmMetricListHasMetric(metrics,"spinAxis"))return metrics;
-  const axis=gdLmDerivedSpinAxisFromValues(values);
-  if(!Number.isFinite(axis))return metrics;
-  const metric=gdLmMetric("SpinAxis","spinAxis",axis,"deg",.5);
-  metric.source="sideSpin_backspin";
-  metric.rawValue=`sideSpin=${String(values?.sideSpin??"")} backspin=${String((values?.backspin!=null?values.backspin:values?.totalSpin)??"")}`;
-  metrics.push(metric);
+  // Auto-deriving spin axis from sideSpin + backspin is intentionally DISABLED.
+  // It was silently injecting a spinAxis metric during import and confusing
+  // things. If we want it, it should be an explicit, opt-in step in the Clarity
+  // Table OCR adapter later. gdLmDerivedSpinAxisFromValues is kept for that.
   return metrics;
 }
 function gdLmMetricsFromLayoutValues(values,units){
@@ -19028,6 +19025,271 @@ function gdClarityOcrWithTimeout(promise,ms){
     new Promise(resolve=>setTimeout(()=>resolve({data:{text:"",words:[],lines:[]},__gdTimedOut:true}),Math.max(1000,Number(ms)||9000)))
   ]);
 }
+// Render a debug overlay on the flattened image so each stage shows what it saw:
+// value boxes (green), text boxes (blue), column cuts (yellow=resolved,
+// red=unresolved), the header-band line (pink), and the resolved metric per
+// column. Returned canvas is passed as details.snapshot -> Stage Snapshot.
+function gdClarityScanOverlay(flat,layers){
+  layers=layers||{};
+  const maxW=900;
+  const scale=Math.min(1,maxW/Math.max(1,Number(flat.width)||1));
+  const c=document.createElement("canvas");
+  c.width=Math.max(1,Math.round((Number(flat.width)||1)*scale));
+  c.height=Math.max(1,Math.round((Number(flat.height)||1)*scale));
+  const ctx=c.getContext("2d");
+  try{ctx.drawImage(flat,0,0,c.width,c.height);}catch(e){}
+  const rect=(b,stroke)=>{ctx.strokeStyle=stroke;ctx.lineWidth=1;ctx.strokeRect(Number(b.x0)*scale,Number(b.y0)*scale,(Number(b.x1)-Number(b.x0))*scale,(Number(b.y1)-Number(b.y0))*scale);};
+  (layers.textBoxes||[]).forEach(b=>rect(b,"rgba(86,181,255,.55)"));
+  (layers.numberBoxes||[]).forEach(b=>rect(b,"rgba(55,242,141,.75)"));
+  if(Number.isFinite(Number(layers.headerBottom))){
+    ctx.strokeStyle="rgba(255,120,220,.95)";ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.moveTo(0,Number(layers.headerBottom)*scale);ctx.lineTo(c.width,Number(layers.headerBottom)*scale);ctx.stroke();
+  }
+  (layers.columns||[]).forEach(col=>{
+    const resolved=!!col.metricKey;
+    ctx.strokeStyle=resolved?"rgba(255,211,116,.95)":"rgba(255,90,90,.95)";
+    ctx.lineWidth=1.5;
+    [Number(col.left),Number(col.right)].forEach(x=>{ctx.beginPath();ctx.moveTo(x*scale,0);ctx.lineTo(x*scale,c.height);ctx.stroke();});
+    ctx.fillStyle=resolved?"#37f28d":"#ff8a8a";
+    ctx.font="11px ui-monospace,Menlo,monospace";
+    ctx.fillText(String(col.metricKey||col.headerText||"?").slice(0,12),Number(col.left)*scale+3,12);
+  });
+  return c;
+}
+// Render the ACTUAL cut strips side by side (each its own image), labelled with
+// its name — so you can literally see the physical strips, not lines on a page.
+function gdClarityStripsMontage(strips){
+  const list=Array.isArray(strips)?strips:[];
+  if(!list.length){const e=document.createElement("canvas");e.width=10;e.height=10;return e;}
+  const gap=6,labelH=14,dispH=440;
+  const items=list.map(s=>{const w=Number(s.canvas&&s.canvas.width)||8,h=Number(s.canvas&&s.canvas.height)||8,sc=dispH/Math.max(1,h);return {s:s,dw:Math.max(6,Math.round(w*sc)),dh:dispH};});
+  const totalW=items.reduce((a,it)=>a+it.dw+gap,gap);
+  const c=document.createElement("canvas");c.width=Math.max(1,totalW);c.height=dispH+labelH+gap*2;
+  const ctx=c.getContext("2d");ctx.fillStyle="#0b0f0d";ctx.fillRect(0,0,c.width,c.height);
+  let x=gap;
+  items.forEach(it=>{
+    const named=!!it.s.metricKey;
+    try{if(it.s.canvas)ctx.drawImage(it.s.canvas,x,labelH+gap,it.dw,it.dh);}catch(e){}
+    ctx.strokeStyle=named?"#37f28d":"#ff6a6a";ctx.lineWidth=2;ctx.strokeRect(x,labelH+gap,it.dw,it.dh);
+    ctx.fillStyle=named?"#37f28d":"#ff8a8a";ctx.font="10px ui-monospace,Menlo,monospace";
+    ctx.fillText(String(it.s.metricKey||it.s.headerText||"?").slice(0,9),x,11);
+    x+=it.dw+gap;
+  });
+  return c;
+}
+// THE SINGLE CHECKPOINT between the scanner and the Shot Library.
+// Input  (scanner-preferred format): rows of { club, cells:[{key,value,direction,valid}] }.
+// Output (Shot Library landing point): { label, inputType, clubGroups:[{originClubLabel,
+//         candidateClub, expectedDistanceM, metrics:[gdLmMetric...]}] }.
+// The alias/normalisation step is gdLmMetricForKey (key+value -> native metric).
+// Direction convention (from the working pipeline, index.html ~12042): direction
+// columns encode Left as negative, Right as positive.
+function gdClarityScanResultToPayload(scanRows,opts={}){
+  const rows=Array.isArray(scanRows)?scanRows:[];
+  const clubGroups=[];
+  rows.forEach(row=>{
+    const club=String(row&&row.club||opts.club||"7i").trim()||"7i";
+    const metrics=[];
+    let carry;
+    (Array.isArray(row&&row.cells)?row.cells:[]).forEach(cell=>{
+      const key=cell&&cell.key;
+      // cell.value===null must NOT pass: Number(null) is 0, which is finite.
+      if(!key||cell.value==null||!Number.isFinite(Number(cell.value)))return;
+      // Adapter cleanup: the scanner keeps liberal reads to hold row alignment;
+      // here we drop implausible misreads so they don't reach the library.
+      if(cell.plausible===false)return;
+      let value=Number(cell.value);
+      if(typeof gdColumnNeedsDirection==="function"&&gdColumnNeedsDirection(key)){
+        value=String(cell.direction||"").toUpperCase()==="L"?-Math.abs(value):Math.abs(value);
+      }
+      const metric=gdLmMetricForKey(key,value,{strict:false});
+      if(metric){metrics.push(metric);if(String(key)==="carry")carry=Number(metric.value);}
+    });
+    if(metrics.length){
+      clubGroups.push({
+        originClubLabel:club,
+        candidateClub:club,
+        expectedDistanceM:Number.isFinite(carry)?carry:undefined,
+        metrics
+      });
+    }
+  });
+  return {
+    label:opts.label||"Clarity table scan",
+    inputType:"clarity-table-ocr",
+    timestamp:new Date().toISOString(),
+    sourceIdentity:{providerGuess:"clarity_table_ocr",confidence:.8,evidence:["Clarity Table OCR module scan"]},
+    clubGroups
+  };
+}
+// ===========================================================================
+// PASS 2 — adaptive per-strip re-scan. This is the ONLY part we keep iterating.
+// Everything that feeds it (the frozen `grid`: column positions + metric labels
+// + data rows) is locked. Pass 1's OCR was used only to FIND the geometry and is
+// thrown away here; each strip is re-cropped from the flat image and read with a
+// profile tuned to its metric, so we squeeze every drop of data (and direction)
+// out of it instead of reusing the throwaway geometry reads.
+// ===========================================================================
+function gdClarityStripProfile(metricKey){
+  const direction=typeof gdColumnNeedsDirection==="function"&&gdColumnNeedsDirection(metricKey);
+  // Per-metric reading profile. Tune these per column for accuracy.
+  return {
+    metricKey:metricKey,
+    direction:!!direction,
+    whitelist:direction?"0123456789.,°ºLRlr-+ ":"0123456789.,°ºOo-+ ",
+    padRight:direction?20:4
+  };
+}
+// Cut each column into its OWN full-height strip image (named later). Midpoint
+// boundaries keep each strip's full header, values and R/L marker together.
+function gdClarityCutStrips(flat,columns){
+  const OCR=window.ClarityTableOcr, PIX=window.ClarityTableOcrPixels;
+  const bounds=OCR.stripBoundaries(columns,flat.width);
+  return bounds.map(b=>({
+    index:b.index,left:b.left,right:b.right,valLeft:b.valLeft,valRight:b.valRight,metricKey:"",headerText:"",
+    canvas:PIX.cropCanvas(flat,b.left,0,b.right,flat.height,0)
+  }));
+}
+// Name each strip by reading the header off the TOP of its own image. Each strip
+// is self-contained — it knows nothing about the others.
+async function gdClarityNameStrips(strips,headerBottom,Tesseract){
+  const OCR=window.ClarityTableOcr, PIX=window.ClarityTableOcrPixels, REG=window.LaunchMonitorAliasRegistry;
+  for(const strip of strips){
+    if(typeof gdPracticeAssertImportNotCanceled==="function")gdPracticeAssertImportNotCanceled();
+    const crop=PIX.cropCanvas(strip.canvas,0,0,strip.canvas.width,Math.max(8,Number(headerBottom)||18),0);
+    // Block mode (psm 6) so a multi-word / stacked header (e.g. "LAUNCH ANGLE",
+    // "BALL SPEED\nMPH") is read as one blob; the resolver strips units + fuzzies.
+    const res=await gdClarityOcrWithTimeout(gdRecognizeWithTesseract(Tesseract,crop,{tessedit_char_whitelist:"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz ",tessedit_pageseg_mode:"6"},"clarity-strip-name"),9000);
+    strip.headerText=String(res&&res.data&&res.data.text||"").replace(/\s+/g," ").trim();
+    strip.metricKey=(OCR._internals&&OCR._internals.resolveMetricKey)?OCR._internals.resolveMetricKey(strip.headerText,REG.canonicalKey,REG):"";
+  }
+  return strips;
+}
+// Upscale a canvas with smooth interpolation. Small strip glyphs OCR far more
+// reliably at 2-3x, so the per-strip scan is done on an enlarged copy. Pure
+// resample — no cropping or repositioning, so coordinates just scale by factor.
+function gdClarityUpscaleCanvas(src,factor){
+  factor=Math.max(1,Number(factor)||1);
+  if(factor<=1||!src||!src.width)return src;
+  const out=document.createElement("canvas");
+  out.width=Math.max(1,Math.round(src.width*factor));
+  out.height=Math.max(1,Math.round(src.height*factor));
+  const ctx=out.getContext("2d");
+  ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality="high";
+  ctx.drawImage(src,0,0,out.width,out.height);
+  return out;
+}
+// Read each NAMED strip top-to-bottom, then SLOT each read value into the known
+// row band by its vertical position. An empty band just stays blank, so a missed
+// value self-aligns (a blank is inserted where it belongs) with no flagging and
+// nothing downstream shifts. Rows then reassemble cleanly by index.
+async function gdClarityReadStripsIntoRows(strips,dataRows,Tesseract,opts){
+  // NO ROW GRID. Each strip is scanned for whatever values are actually inked
+  // on it: the strip's own pixels say where its values are (connected-component
+  // row bands), and EVERY band inside the data corridor gets its own tight-crop
+  // OCR (binarised + upscaled, psm 7, psm 13 retry). dataRows is used only as a
+  // vertical CORRIDOR (skip the header above the first shot and the AVERAGE /
+  // STD DEV summary rows below the last) — never as slots. Rows are then lined
+  // up across strips purely by the y-position of the reads themselves: when the
+  // counts match they align 1:1; a strip that misses one leaves a blank at that
+  // spot and nothing shifts.
+  opts=opts||{};
+  const OCR=window.ClarityTableOcr, PIX=window.ClarityTableOcrPixels;
+  const named=strips.filter(s=>s.metricKey);
+  const dataBottom=dataRows.length?Math.max.apply(null,dataRows.map(r=>Number(r.y1))):Infinity;
+  const dataTop=dataRows.length?Math.min.apply(null,dataRows.map(r=>Number(r.y0))):0;
+  const rowHeights=dataRows.map(r=>Number(r.y1)-Number(r.y0)).filter(v=>v>0).sort((a,b)=>a-b);
+  const medRowH=rowHeights.length?rowHeights[Math.floor(rowHeights.length/2)]:16;
+  const corridorPad=Math.max(6,medRowH*0.75);
+  const binarize=c=>(PIX.binarizeCanvas?PIX.binarizeCanvas(c):c);
+  const perStrip=[]; // [{metricKey, reads:[{cy,text,cell}]}]
+  for(let i=0;i<named.length;i+=1){
+    if(typeof gdPracticeAssertImportNotCanceled==="function")gdPracticeAssertImportNotCanceled();
+    const strip=named[i];
+    const prof=gdClarityStripProfile(strip.metricKey);
+    // THIS strip's own ink bands — where its values physically are.
+    const comps=PIX.connectedComponents(PIX.inkMask(PIX.imageData(strip.canvas)));
+    const bands=PIX.clusterRows(comps)
+      .filter(b=>Number(b.cy)>=dataTop-corridorPad&&Number(b.cy)<=dataBottom+corridorPad)
+      .sort((a,b)=>Number(a.cy)-Number(b.cy));
+    const reads=[];
+    for(const b of bands){
+      const y0=Number(b.y0),y1=Number(b.y1);
+      const cellImg=binarize(gdClarityUpscaleCanvas(PIX.cropCanvas(strip.canvas,0,Math.max(0,y0-3),strip.canvas.width,Math.min(strip.canvas.height,y1+3),1),3.4));
+      const readOnce=async psm=>{
+        const rr=await gdClarityOcrWithTimeout(gdRecognizeWithTesseract(Tesseract,cellImg,{tessedit_char_whitelist:prof.whitelist,tessedit_pageseg_mode:psm},"clarity-cell-read-"+psm),12000);
+        const t=String(rr&&rr.data&&rr.data.text||"").trim();
+        return {text:t,cell:t?OCR.parseCell(t,strip.metricKey):null};
+      };
+      let got=await readOnce("7");
+      if(!(got.cell&&got.cell.valid)){
+        const raw=await readOnce("13");
+        // Prefer the plausible read; else the parseable one; else keep whichever
+        // has any text at all as a placeholder.
+        if((raw.cell&&raw.cell.valid)||(!got.cell&&raw.cell)||(!got.text&&raw.text))got=raw;
+      }
+      reads.push({cy:Number(b.cy),text:got.text,cell:got.cell});
+    }
+    perStrip.push({metricKey:strip.metricKey,reads:reads});
+    if(typeof opts.onStrip==="function")opts.onStrip(i,named.length);
+  }
+  // Rows are LISTS SIDE BY SIDE — no geometry at all past this point. The
+  // 4-corner stretch can shift each strip's pixels slightly, so cross-strip y
+  // is meaningless; each strip just contributes its ORDERED list of reads (top
+  // to bottom on its own image), and row r is the r-th item of every list.
+  // When the counts match they line up 1:1 — a misread still occupies its slot
+  // as a placeholder, so counts stay right even when a value garbles. A short
+  // list pads with blanks at its tail; nothing ever shifts sideways.
+  //
+  // CONSENSUS COUNT: some strips pick up their own header/units ink as extra
+  // LEADING bands (measured on the strip debug image: BALL SPEED+MPH = 3
+  // extras, RPM = 2, most strips 1). Junk always sits ABOVE the data, so the
+  // expected row count is the count most strips agree on, and a longer list
+  // drops its surplus entries from the HEAD. Without this, one strip's header
+  // bands shift its whole list and every row pairs misaligned (the 0.0m-tail /
+  // 21-rows-for-13-shots symptom).
+  const counts=perStrip.map(s=>s.reads.length).filter(n=>n>0);
+  const freq={};counts.forEach(n=>{freq[n]=(freq[n]||0)+1;});
+  let expectedRows=0,bestF=0;
+  Object.keys(freq).forEach(k=>{const n=Number(k),f=freq[k];if(f>bestF||(f===bestF&&n<expectedRows)){bestF=f;expectedRows=n;}});
+  if(!expectedRows)expectedRows=Math.max.apply(null,[0].concat(counts));
+  perStrip.forEach(s=>{
+    if(s.reads.length>expectedRows)s.reads=s.reads.slice(s.reads.length-expectedRows);
+  });
+  const scanRows=[];
+  for(let r=0;r<expectedRows;r+=1){
+    const cells=perStrip.map(s=>{
+      const rd=s.reads[r]||null;
+      const cell=rd?rd.cell:null;
+      if(!cell)return {key:s.metricKey,value:null,direction:"",valid:false,plausible:false};
+      // NOTE: parseCell returns value:null on a failed parse, and Number(null)
+      // is 0 (finite) — check null explicitly so garbage is not marked valid.
+      const hasNumber=cell.value!=null&&Number.isFinite(cell.value);
+      return {key:s.metricKey,value:hasNumber?cell.value:null,direction:cell.direction,valid:hasNumber,plausible:!!cell.valid};
+    });
+    if(cells.some(c=>c&&c.valid))scanRows.push({club:opts.club||"7i",cells:cells});
+  }
+  return {scanRows:scanRows,expectedRows:expectedRows,stripCounts:perStrip.map(s=>s.metricKey+"["+s.reads.length+"]")};
+}
+// Mine the UNALLOCATED offcut strips (no metricKey — typically the club/margin
+// column at the far left) for the club. One club is described the same way on
+// every row, so we read the whole offcut, resolve a club per line, tally, and
+// take the MAJORITY vote — robust to per-row OCR misreads. No aliases baked into
+// code: this reuses the app's own club-from-text resolver.
+async function gdClarityDetectClubFromStrips(strips,Tesseract){
+  const offcuts=(Array.isArray(strips)?strips:[]).filter(s=>s&&!s.metricKey&&s.canvas);
+  if(!offcuts.length||typeof gdLmClubFromLine!=="function")return {club:"",votes:{}};
+  const votes={};
+  for(const strip of offcuts){
+    if(typeof gdPracticeAssertImportNotCanceled==="function")gdPracticeAssertImportNotCanceled();
+    const res=await gdClarityOcrWithTimeout(gdRecognizeWithTesseract(Tesseract,strip.canvas,{tessedit_char_whitelist:"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 ",tessedit_pageseg_mode:"6"},"clarity-club-offcut"),10000);
+    const lines=(typeof gdLmLinesFromOcrData==="function"?gdLmLinesFromOcrData(res&&res.data):[]).filter(l=>l&&String(l.text||"").trim());
+    lines.forEach(l=>{const club=gdLmClubFromLine(String(l.text||"").trim());if(club)votes[club]=(votes[club]||0)+1;});
+  }
+  let best="",bestN=0;
+  Object.keys(votes).forEach(k=>{if(votes[k]>bestN){bestN=votes[k];best=k;}});
+  return {club:best,votes:votes};
+}
 async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
   // Rebuilt scan path. Hands the flattened value-grid image (output of the kept
   // 4-corner stretch) to the isolated Clarity Table OCR module:
@@ -19085,66 +19347,91 @@ async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
     const textBoxes=readBoxes.filter(box=>box.text&&!looksNum(box.text));
     const columns=OCR.splitColumns(numberBoxes,{sourceWidth:flat.width});
     const valueRows=OCR.clusterValueRows(numberBoxes);
-    gdPracticeDebugCheckpointSafe("value_corridor_mapping",columns.length>=4?"success":"failed",{outputSummary:`${columns.length} columns from ${numberBoxes.length} number boxes (${readBoxes.length} read) across ${valueRows.length} value rows`,counts:{columns:columns.length,numberBoxes:numberBoxes.length,textBoxes:textBoxes.length,rows:valueRows.length}});
+    // Diagnostic: what does each column actually contain? Lists the box count and a
+    // few sample reads per column so a phantom column (e.g. an L/R marker band or a
+    // split club column) is obvious at a glance instead of guessed at.
+    const columnBreakdown=columns.map((c,ci)=>{
+      const inCol=numberBoxes.filter(b=>Number(b.cx)>=Number(c.left)&&Number(b.cx)<=Number(c.right));
+      return `c${ci}[${inCol.length}]:${inCol.slice(0,5).map(b=>String(b.text||"").trim()).join(",")}`;
+    }).join("  |  ");
+    gdPracticeDebugCheckpointSafe("value_corridor_mapping",columns.length>=4?"success":"failed",{outputSummary:`${columns.length} columns from ${numberBoxes.length} number boxes (${readBoxes.length} read) across ${valueRows.length} value rows\nPer-column: ${columnBreakdown}`,counts:{columns:columns.length,numberBoxes:numberBoxes.length,textBoxes:textBoxes.length,rows:valueRows.length},snapshot:{canvas:gdClarityScanOverlay(flat,{numberBoxes:numberBoxes,textBoxes:textBoxes,columns:columns}),label:"Column split: value boxes green, text boxes blue, cuts yellow"}});
     if(columns.length<4||valueRows.length<1){
       gdPracticeFeedback("Column split did not find a usable grid. Re-frame and scan again.","error");
       gdOpenPracticeManualQuadTool();
       return null;
     }
-    // Stage 2 — header per strip: leftover text boxes in the top header row.
-    gdPracticeUpdateImportJob({checkpointText:"Allocating headers",stageIndex:1,progress:56});
+    // Stage 2 — CUT each column into its own strip image, then NAME each strip by
+    // reading the header off the top of THAT strip. Each strip is self-contained.
+    gdPracticeUpdateImportJob({checkpointText:"Cutting + naming strips",stageIndex:1,progress:56});
     gdSetPracticePhotoProcessing(true,{stageIndex:1,progress:56,preserveClubs:true});
-    // Self-locating header band: the topmost text-box row (the first-data-row
-    // boundary can collapse to a sliver if noise gets read as a value).
-    const firstRowCy=Number(valueRows[0].cy);
-    const headerRowBoxes=textBoxes.filter(box=>Number(box.cy)<firstRowCy);
-    const headerBottom=headerRowBoxes.length?(Math.max.apply(null,headerRowBoxes.map(box=>Number(box.y1)))+3):Math.max(1,Number(valueRows[0].y0));
-    gdPracticeDebugCheckpointSafe("header_strip_scan","running",{inputSummary:`${columns.length} strips, header band 0-${Math.round(headerBottom)}`});
-    const headerTexts=columns.map(col=>textBoxes.filter(box=>Number(box.cx)>=col.left&&Number(box.cx)<=col.right&&Number(box.cy)<=headerBottom).sort((a,b)=>Number(a.x0)-Number(b.x0)).map(box=>box.text).join(" ").trim());
-    let allocated=OCR.allocateHeaders(columns,headerTexts,{resolver:REG.canonicalKey,registry:REG});
-    // Drop phantom club/margin columns that resolved to no metric (realigns the
-    // "7i read as 7 -> extra left column" shift).
-    const trimmed=OCR.trimUnresolvedEdges(allocated);
-    if(trimmed.length>=4&&trimmed.length<allocated.length)allocated=trimmed;
-    const activeColumns=allocated;
-    const keys=activeColumns.map(col=>col.metricKey);
-    const allocatedCount=keys.filter(Boolean).length;
-    gdPracticeDebugCheckpointSafe("header_strip_scan",allocatedCount>=4?"success":"failed",{outputSummary:`Allocated ${allocatedCount}/${activeColumns.length}: ${activeColumns.map(col=>col.headerText).join(" | ")}`,counts:{allocated:allocatedCount,columns:activeColumns.length}});
+    // Header = just the text near the top of each strip. Generous band: anything
+    // above the first data row. Each strip is its OWN image, so reading its top
+    // only sees THAT column's header (+ its units, which the resolver strips) —
+    // no cross-strip mixing, no need to be precise about the band.
+    // Anchor the header band to the first FULL value row, not just the topmost
+    // detected row. A stray 2-box row near the top would otherwise collapse the
+    // band to a sliver and every header would read as garbage (the 0/12 failure).
+    const rowCounts=valueRows.map(r=>Array.isArray(r.items)?r.items.length:0);
+    const maxRowBoxes=Math.max.apply(null,[0].concat(rowCounts));
+    const firstDataRow=valueRows.find(r=>(Array.isArray(r.items)?r.items.length:0)>=Math.max(4,maxRowBoxes*0.5))||valueRows[0];
+    const headerBottom=Math.max(8,Number(firstDataRow.y0));
+    let strips=gdClarityCutStrips(flat,columns);
+    gdPracticeDebugCheckpointSafe("header_strip_scan","running",{inputSummary:`${strips.length} strips cut, header band 0-${Math.round(headerBottom)}`});
+    // Name each strip by reading the text near its top and matching a metric.
+    strips=await gdClarityNameStrips(strips,headerBottom,Tesseract);
+    // Hand over ALL strips (no edge trimming). Unnamed strips carry no metricKey,
+    // so they contribute nothing to a metric, but stay visible in the montage so
+    // misreads are inspectable. The club/margin column is handled separately.
+    const namedStrips=strips.filter(s=>s.metricKey);
+    const allocatedCount=namedStrips.length;
+    // Club: mine the unallocated offcut(s) for the repeated club pattern (majority
+    // vote). Detection drives the club; the manual field / 7i is only a fallback.
+    const clubScan=await gdClarityDetectClubFromStrips(strips,Tesseract);
+    const manualClub=(typeof gdPracticeScanClubLabel==="function"?gdPracticeScanClubLabel():"7i")||"7i";
+    const clubLabel=clubScan.club||manualClub;
+    gdPracticeDebugCheckpointSafe("header_strip_scan",allocatedCount>=4?"success":"failed",{outputSummary:`Named ${allocatedCount}/${strips.length} | club: ${clubLabel}${clubScan.club?" (offcut)":" (manual)"}: ${strips.map(s=>s.metricKey||("?"+(s.headerText?"["+s.headerText+"]":""))).join(" | ")}`,counts:{allocated:allocatedCount,strips:strips.length},snapshot:{canvas:gdClarityStripsMontage(strips),label:"Physical strips: green=named, red=unnamed"}});
     if(allocatedCount<4){
       gdPracticeFeedback("Header allocation could not identify the columns. Re-frame and scan again.","error");
       gdOpenPracticeManualQuadTool();
       return null;
     }
-    // Stage 3 — cells from the already-read number boxes; skip summary rows.
-    gdPracticeUpdateImportJob({checkpointText:"Reading values",stageIndex:2,progress:74});
+    // ===== GEOMETRY FROZEN. Strips are cut + named. Extraction below just reads
+    // each strip top-to-bottom and slots values into rows by position. =====
+    gdPracticeUpdateImportJob({checkpointText:"Reading strips",stageIndex:2,progress:74});
     gdSetPracticePhotoProcessing(true,{stageIndex:2,progress:74,preserveClubs:true});
-    gdPracticeDebugCheckpointSafe("extraction_started","running",{inputSummary:`${valueRows.length} rows x ${allocatedCount} columns`});
-    const clubLabel=(typeof gdPracticeScanClubLabel==="function"?gdPracticeScanClubLabel():"7i")||"7i";
-    const headerLine=["Club"].concat(keys.map(key=>key?REG.headerLabel(key):null).filter(Boolean)).join(",");
-    const lines=[headerLine];
-    const firstColLeft=Number(activeColumns[0].left);
-    valueRows.forEach(row=>{
-      // Skip AVERAGE / STD DEV summary rows (labelled in the left margin).
+    // Margin = everything left of the first NAMED metric strip (the club column
+    // + true page margin). Using strips[0] would be the club column itself now
+    // that all strips hand over, leaving no margin and letting AVERAGE/STD DEV
+    // summary rows leak through as extra shots.
+    const firstColLeft=Number((namedStrips[0]||strips[0]).left);
+    // A real data row spans most of the columns. Drop SPARSE stray rows (e.g. a
+    // couple of edge-noise boxes near the top) — otherwise that stray becomes a
+    // phantom shot as row 1 and shifts every real row down a slot (the "extra
+    // line"). Also drop AVERAGE / STD DEV summary rows (labelled at the margin).
+    const rowBoxMax=Math.max.apply(null,[0].concat(valueRows.map(r=>Array.isArray(r.items)?r.items.length:0)));
+    const dataRows=valueRows.filter(row=>{
+      const boxes=Array.isArray(row.items)?row.items.length:0;
+      if(boxes<Math.max(4,rowBoxMax*0.5))return false;
       const marginText=textBoxes.filter(box=>Number(box.cx)<firstColLeft&&Number(box.cy)>=row.y0&&Number(box.cy)<=row.y1).map(box=>String(box.text||"")).join(" ");
-      if(OCR.isSummaryLabel(marginText))return;
-      const cells=[clubLabel];
-      for(let c=0;c<activeColumns.length;c+=1){
-        const key=keys[c];
-        if(!key)continue;
-        const cellText=numberBoxes
-          .filter(box=>Number(box.cx)>=activeColumns[c].left&&Number(box.cx)<=activeColumns[c].right&&Number(box.cy)>=row.y0&&Number(box.cy)<=row.y1)
-          .sort((a,b)=>Number(a.x0)-Number(b.x0))
-          .map(box=>String(box.text||"").trim())
-          .join(" ");
-        const cell=OCR.parseCell(cellText,key);
-        cells.push(cell.valid?(String(cell.value)+(cell.direction?(" "+cell.direction):"")):"");
-      }
-      lines.push(cells.join(","));
+      return !OCR.isSummaryLabel(marginText);
     });
-    const payload=gdBuildLaunchMonitorTextCapture(lines.join("\n"),sourceLabel);
-    payload.inputType="clarity-table-ocr";
+    // extraction_completed marked RUNNING so its duration spans the strip reads.
+    gdPracticeDebugCheckpointSafe("extraction_completed","running",{inputSummary:`Read ${namedStrips.length} named strips into ${dataRows.length} rows`});
+    // Read each strip top-to-bottom, slot values into rows by position (blanks
+    // self-insert where a value is missed).
+    const readResult=await gdClarityReadStripsIntoRows(strips,dataRows,Tesseract,{club:clubLabel,onStrip:(i,n)=>{try{gdPracticeUpdateImportJob({checkpointText:`Reading strip ${i+1}/${n}`,stageIndex:2,progress:Math.min(96,74+Math.round((i/Math.max(1,n))*22))});}catch(e){}}});
+    const scanRows=readResult.scanRows;
+    // Diagnostic: dump what each strip actually READ, per metric, down the rows —
+    // so the read values can be compared directly against the visible strips (a
+    // blank cell prints as "·"). This makes a bad read or a misalignment obvious.
+    const readDump=namedStrips.map(s=>{
+      const vals=scanRows.map(r=>{const c=(r.cells||[]).find(x=>x&&x.key===s.metricKey);return c&&c.value!=null?String(c.value)+(c.direction||""):"·";});
+      return `${s.metricKey}: ${vals.join(",")}`;
+    }).join("\n");
+    // Single checkpoint (adapter): scanner output -> Shot Library, cleaning misreads.
+    const payload=gdClarityScanResultToPayload(scanRows,{label:sourceLabel,club:clubLabel});
     const rowCount=Number(payload?.clubGroups?.length)||0;
-    gdPracticeDebugCheckpointSafe("extraction_completed",rowCount?"success":"failed",{outputSummary:`Read ${rowCount} shots`,counts:{rows:rowCount}});
+    gdPracticeDebugCheckpointSafe("extraction_completed",rowCount?"success":"failed",{outputSummary:`Read ${rowCount} shots (${scanRows.length} rows x ${allocatedCount} strips)\nPer-strip band counts (after head-trim to consensus): ${(readResult.stripCounts||[]).join(" ")}\n${readDump}`,counts:{rows:rowCount,scanRows:scanRows.length},snapshot:{canvas:gdClarityStripsMontage(namedStrips),label:`Extraction: ${rowCount} shots read from ${namedStrips.length} physical strips`}});
     if(!rowCount){
       gdPracticeFeedback("No usable rows were read. Re-frame the value grid and scan again.","error");
       gdOpenPracticeManualQuadTool();
@@ -35484,7 +35771,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 <script src="scripts/gd-shot-outcomes.js"></script>
 <script src="scripts/gd-shot-events.js?v=deliberate-outcome-20260612"></script>
 <script src="scripts/gd-shot-cluster-analysis.js?v=deliberate-outcome-20260612"></script>
-<script src="scripts/gd-launch-monitor-data.js?v=practice-data-20260606"></script>
+<script src="scripts/gd-launch-monitor-data.js?v=practice-data-20260710r"></script>
 <script src="scripts/gd-native-practice-data.js?v=native-practice-data-001"></script>
 <script id="gdCanonicalRouteAuditV1">
 (function(){
@@ -36000,7 +36287,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
   function gdPracticePlotModeControls(){
     if(!gdPracticeAdminIsOpen())return "";
     const mode=gdPracticePlotMode();
-    return `<div class="gdPracticePlotMode"><button type="button" class="${mode==="all"?"active":""}" aria-pressed="${mode==="all"?"true":"false"}" data-gd-practice-plot-mode="all">Show all</button><button type="button" class="${mode==="auto"?"active":""}" aria-pressed="${mode==="auto"?"true":"false"}" data-gd-practice-plot-mode="auto">Filter view</button><span>${mode==="all"?"Every stored shot is plotted.":"Filtered view is on."}</span></div>`;
+    return `<div class="gdPracticePlotMode"><button type="button" class="${mode==="all"?"active":""}" aria-pressed="${mode==="all"?"true":"false"}" data-gd-practice-plot-mode="all">Show all</button><button type="button" class="${mode==="auto"?"active":""}" aria-pressed="${mode==="auto"?"true":"false"}" data-gd-practice-plot-mode="auto">Filter view</button>${mode==="auto"?`<span>Filtered view is on.</span>`:""}</div>`;
   }
   function gdPracticeShotActualDistance(shot){
     const carry=Number(shot?.carryM);
@@ -40942,18 +41229,35 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 		    return String(value);
 		  }
 		  function gdPracticeRawShotTableHTML(rows,meta,club,importId){
+		    // A NORMAL shot table: one row per shot, one column per scanned metric.
+		    // No shot IDs, no accepted/rejected status, no player/account plumbing —
+		    // those live in debug tooling, not the library.
 		    const sorted=(Array.isArray(rows)?rows:[]).slice().sort((a,b)=>a.index-b.index);
-		    const source=gdPracticeImportLabel(meta.sourceType||meta.sourceName||meta.label||sorted[0]?.sourceType||sorted[0]?.providerGuess||"Practice import");
-		    const date=gdPracticeImportDate(meta.timestamp||sorted[0]?.timestamp||"");
-		    const tableRows=sorted.map(row=>{
-		      const offline=Number.isFinite(Number(row.lateralM))?`${Number(row.lateralM)>0?"R":Number(row.lateralM)<0?"L":""} ${Math.abs(Number(row.lateralM)).toFixed(1)}m`.trim():"-";
-		      const offset=Number.isFinite(Number(row.normalizedDeg))?gdOffsetLabel(row.normalizedDeg):"-";
-		      const status=gdPracticeRowStatus(row);
-		      const player=row.playerId||meta.playerId||"-";
-		      const account=row.accountId||meta.accountId||"-";
-		      return `<div class="gdPracticeRawShotRow"><span>${Number(row.index)+1}</span><strong>${gdEscapeHTML(row.shotId||"-")}</strong><span>${gdEscapeHTML(gdPracticeRawValue(row.actualDistanceM))}</span><span>${gdEscapeHTML(offline)}</span><span>${gdEscapeHTML(offset)}</span><span>${gdEscapeHTML(status)}</span><span>${gdEscapeHTML(player)}</span><span>${gdEscapeHTML(account)}</span></div>`;
-		    }).join("");
-		    return `<div class="gdPracticeRawDrawer"><div class="gdPracticeRawHead"><div><strong>Raw shot data</strong><span>${gdEscapeHTML(club||"Unknown / Unmatched")} · ${gdEscapeHTML(date)} · ${gdEscapeHTML(source)}</span></div></div><div class="gdPracticeRawMeta"><span>Import <b>${gdEscapeHTML(importId||"unknown")}</b></span><span>${sorted.length} row${sorted.length===1?"":"s"}</span><span>Read-only</span></div><div class="gdPracticeRawScroll"><div class="gdPracticeRawShotTable"><div class="gdPracticeRawShotHead"><span>#</span><span>Shot ID</span><span>Carry</span><span>Offline</span><span>Offset</span><span>Status</span><span>Player</span><span>Account</span></div>${tableRows}</div></div></div>`;
+		    const TEMPLATE=[["ballSpeed","Ball mph"],["launchAngle","Launch"],["sideAngle","Side"],["backspin","Backspin"],["sideSpin","Side Spin"],["descentAngle","Descent"],["offline","Offline"],["peakHeight","Peak"],["carryDistance","Carry"],["totalDistance","Total"]];
+		    const DIRECTIONAL=["sideAngle","sideSpin","offline"];
+		    const metricOf=(row,key)=>{
+		      const list=row&&row.rawSource&&Array.isArray(row.rawSource.metrics)?row.rawSource.metrics:[];
+		      const m=list.find(item=>String(item&&item.candidateMetric||"")===key);
+		      if(m&&Number.isFinite(Number(m.value)))return Number(m.value);
+		      if(key==="carryDistance"&&Number.isFinite(Number(row.actualDistanceM)))return Number(row.actualDistanceM);
+		      if(key==="offline"&&Number.isFinite(Number(row.lateralM)))return Number(row.lateralM);
+		      return null;
+		    };
+		    const fmt=(key,v)=>{
+		      if(v==null)return "-";
+		      if(DIRECTIONAL.includes(key)){
+		        const side=v<0?"L ":v>0?"R ":"";
+		        return side+(Math.abs(v)>=100?Math.round(Math.abs(v)):Math.abs(v).toFixed(1)).toString();
+		      }
+		      return Math.abs(v)>=100?String(Math.round(v)):String(Number(v.toFixed(1)));
+		    };
+		    const cols=TEMPLATE.filter(([key])=>sorted.some(row=>metricOf(row,key)!=null));
+		    const gridStyle=`grid-template-columns:26px repeat(${cols.length},minmax(54px,1fr))`;
+		    const head=`<div class="gdPracticeRawShotHead" style="${gridStyle}"><span>#</span>${cols.map(([,label])=>`<span>${gdEscapeHTML(label)}</span>`).join("")}</div>`;
+		    const tableRows=sorted.map((row,i)=>
+		      `<div class="gdPracticeRawShotRow" style="${gridStyle}"><span>${i+1}</span>${cols.map(([key])=>`<span>${gdEscapeHTML(fmt(key,metricOf(row,key)))}</span>`).join("")}</div>`
+		    ).join("");
+		    return `<div class="gdPracticeRawShotTable">${head}${tableRows}</div>`;
 		  }
 		  function gdPracticeToggleImportSelectMode(){
 		    gdPracticeImportSelectMode=!gdPracticeImportSelectMode;
@@ -41322,18 +41626,18 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 			        const importId=group.id;
 			        const importRows=group.rows.slice().sort((a,b)=>a.index-b.index);
 			        const meta=group.meta||{};
-			        const accepted=importRows.filter(row=>!row.excluded&&!row.plotDeselected&&!row.errors?.length).length;
-			        const rejected=importRows.length-accepted;
-			        const sourceLabel=gdPracticeImportLabel(meta.sourceType||meta.sourceName||meta.label||importRows[0]?.sourceType||importRows[0]?.providerGuess||"Practice import");
 			        const dateLabel=gdPracticeImportDate(meta.timestamp||importRows[0]?.timestamp||"");
 			        const selected=!!gdPracticeImportSelected[importId];
 			        const checkbox=adminOpen&&gdPracticeImportSelectMode?`<label class="gdPracticeEvidenceUploadSelect" onclick="event.stopPropagation()"><input type="checkbox" value="${gdEscapeHTML(importId)}" ${selected?"checked":""} onchange="gdPracticeToggleImportSelection(this)"><span>Select</span></label>`:"";
-			        const statusLabel=importRows.some(row=>row.counted)?"bubble fit":(rejected?"needs review":"stored");
-			        const importActions=`<button type="button" class="danger" onclick="return gdPracticeDeleteImports(${gdPracticeJsArg(importId)})">Delete entire import</button>`;
-			        const rawDetail=`<details class="gdPracticeRawDisclosure"><summary>View raw data</summary>${gdPracticeRawShotTableHTML(importRows,meta,club,importId)}</details>`;
-			        return `<div class="gdPracticeUploadRow" data-import-id="${gdEscapeHTML(importId)}">${checkbox}<div class="gdPracticeUploadMeta"><strong>${gdEscapeHTML(dateLabel)}</strong><span>${gdEscapeHTML(sourceLabel)} · ${importRows.length} shot${importRows.length===1?"":"s"} · ${accepted} accepted${rejected?` · ${rejected} rejected`:""}</span></div><b>${gdEscapeHTML(statusLabel)}</b><div class="gdPracticeUploadActions">${importActions}</div>${rawDetail}</div>`;
+			        const importActions=`<button type="button" class="danger gdPracticeDeleteX" title="Delete this import" aria-label="Delete this import" onclick="return gdPracticeDeleteImports(${gdPracticeJsArg(importId)})">&times;</button>`;
+			        // Quiet row: just the upload date (club is the section header). Clicking
+			        // the row expands the import's raw data table directly beneath it.
+			        // (Buttons/inputs inside <summary> activate themselves, not the toggle.)
+			        return `<details class="gdPracticeUploadRow" data-import-id="${gdEscapeHTML(importId)}"><summary>${checkbox}<div class="gdPracticeUploadMeta"><strong>${gdEscapeHTML(dateLabel)}</strong></div><div class="gdPracticeUploadActions">${importActions}</div></summary><div class="gdPracticeUploadRaw">${gdPracticeRawShotTableHTML(importRows,meta,club,importId)}</div></details>`;
 			      }).join("");
-			      return `<section class="gdPracticeShotClub ${open?"open":""}" data-club="${gdEscapeHTML(club)}"><button type="button" class="gdPracticeShotClubHead" data-gd-practice-club-toggle aria-expanded="${open?"true":"false"}"><div><span>${gdEscapeHTML(club)}</span><strong>${clubRows.length} shot${clubRows.length===1?"":"s"} · ${importCount} upload${importCount===1?"":"s"}</strong></div><small>${gdEscapeHTML(gdPracticeImportDate(latest))}${bubbleStatus?` · ${gdEscapeHTML(bubbleStatus)}`:""}</small><b class="gdPracticeEvidenceChevron">${open?"-":"+"}</b></button><div class="gdPracticeShotClubBody">${uploadRows}</div></section>`;
+			      // Quiet header: club label + latest upload date only. Shot/upload counts
+			      // and bubble status are admin/raw-data concerns, not library chrome.
+			      return `<section class="gdPracticeShotClub ${open?"open":""}" data-club="${gdEscapeHTML(club)}"><button type="button" class="gdPracticeShotClubHead" data-gd-practice-club-toggle aria-expanded="${open?"true":"false"}"><div><span>${gdEscapeHTML(club)}</span></div><small>${gdEscapeHTML(gdPracticeImportDate(latest))}</small><b class="gdPracticeEvidenceChevron">${open?"-":"+"}</b></button><div class="gdPracticeShotClubBody">${uploadRows}</div></section>`;
 			    }).join("");
 			    root.innerHTML=gdPracticeLibraryShellHTML(analysis,rows.length,`${gdPracticePlotModeControls()}${tools}<div class="gdPracticeShotLibrary${rows.length>18?" gdPracticeEvidenceClubRowsScrollable":""}">${clubSections}</div>`);
 			  }
@@ -45305,10 +45609,10 @@ body.gdGpsActive #bagRailBtn{order:7!important}
 		  border:0!important;
 		  width:100%!important;
 		  display:grid!important;
-		  grid-template-columns:minmax(0,1fr) auto 24px!important;
-		  gap:8px!important;
+		  grid-template-columns:minmax(0,1fr) auto 20px!important;
+		  gap:6px!important;
 		  align-items:center!important;
-		  padding:9px!important;
+		  padding:6px 8px!important;
 		  background:rgba(255,255,255,.025)!important;
 		  color:#fff!important;
 		  text-align:left!important;
@@ -45319,18 +45623,18 @@ body.gdGpsActive #bagRailBtn{order:7!important}
 		}
 		.gdPracticeShotClubHead span{
 		  display:block!important;
-		  color:rgba(255,255,255,.58)!important;
-		  font-size:10px!important;
+		  color:#fff!important;
+		  font-size:13px!important;
 		  font-weight:950!important;
 		  text-transform:uppercase!important;
 		  letter-spacing:.06em!important;
 		}
 		.gdPracticeShotClubHead strong{
 		  display:block!important;
-		  margin-top:3px!important;
+		  margin-top:2px!important;
 		  min-width:0!important;
 		  color:#fff!important;
-		  font-size:13px!important;
+		  font-size:12px!important;
 		  line-height:1.12!important;
 		  font-weight:950!important;
 		  overflow:hidden!important;
@@ -45347,22 +45651,37 @@ body.gdGpsActive #bagRailBtn{order:7!important}
 		}
 		.gdPracticeShotClubBody{
 		  display:none!important;
-		  gap:6px!important;
-		  padding:7px!important;
+		  gap:5px!important;
+		  padding:5px!important;
 		}
 		.gdPracticeShotClub.open .gdPracticeShotClubBody{
 		  display:grid!important;
 		}
 		.gdPracticeUploadRow{
-		  display:grid!important;
-		  grid-template-columns:auto minmax(0,1fr) auto auto!important;
-		  gap:8px!important;
-		  align-items:center!important;
+		  display:block!important;
 		  min-width:0!important;
-		  border-radius:10px!important;
+		  border-radius:9px!important;
 		  background:rgba(255,255,255,.035)!important;
 		  border:1px solid rgba(255,255,255,.065)!important;
-		  padding:7px!important;
+		  padding:0!important;
+		  overflow:hidden!important;
+		}
+		.gdPracticeUploadRow>summary{
+		  display:grid!important;
+		  grid-template-columns:auto minmax(0,1fr) auto!important;
+		  gap:6px!important;
+		  align-items:center!important;
+		  padding:5px 7px!important;
+		  cursor:pointer!important;
+		  list-style:none!important;
+		}
+		.gdPracticeUploadRow>summary::-webkit-details-marker{display:none!important}
+		.gdPracticeUploadRow[open]>summary{background:rgba(255,255,255,.03)!important}
+		.gdPracticeUploadRaw{
+		  padding:6px 7px!important;
+		  border-top:1px solid rgba(255,255,255,.06)!important;
+		  min-width:0!important;
+		  overflow-x:auto!important;
 		}
 		.gdPracticeUploadMeta{
 		  display:grid!important;
@@ -45416,6 +45735,26 @@ body.gdGpsActive #bagRailBtn{order:7!important}
 		  background:rgba(255,107,122,.14)!important;
 		  border-color:rgba(255,107,122,.25)!important;
 		  color:#ffb5bd!important;
+		}
+		/* Tiny red cross for deleting an import — replaces the loud pill. */
+		.gdPracticeUploadActions button.gdPracticeDeleteX{
+		  width:18px!important;
+		  height:18px!important;
+		  padding:0!important;
+		  border-radius:50%!important;
+		  display:inline-flex!important;
+		  align-items:center!important;
+		  justify-content:center!important;
+		  font-size:12px!important;
+		  line-height:1!important;
+		  font-weight:900!important;
+		  background:rgba(255,107,122,.16)!important;
+		  border:1px solid rgba(255,107,122,.32)!important;
+		  color:#ff8a96!important;
+		}
+		.gdPracticeUploadActions button.gdPracticeDeleteX:hover{
+		  background:rgba(255,107,122,.30)!important;
+		  color:#fff!important;
 		}
 		.gdPracticeUploadActions:empty{display:none!important}
 		.gdPracticeRawDisclosure{
@@ -45504,14 +45843,14 @@ body.gdGpsActive #bagRailBtn{order:7!important}
 		  padding:0 8px 8px!important;
 		}
 		.gdPracticeRawShotTable{
-		  min-width:760px!important;
+		  min-width:520px!important;
 		  display:grid!important;
 		  gap:0!important;
 		}
 		.gdPracticeRawShotHead,
 		.gdPracticeRawShotRow{
 		  display:grid!important;
-		  grid-template-columns:30px minmax(130px,1.4fr) 54px 64px 64px 76px minmax(92px,1fr) minmax(92px,1fr)!important;
+		  /* column layout comes from the inline style (dynamic metric columns) */
 		  gap:6px!important;
 		  align-items:center!important;
 		}
@@ -45783,7 +46122,9 @@ body.gdGpsActive #bagRailBtn{order:7!important}
 }
 #practiceDataPanel:not(.gdPracticeAdminExpanded) .gdPracticeLiveDebugPanel,
 #practiceDataPanel:not(.gdPracticeAdminExpanded) .gdPracticePhotoDebugPanel,
-#practiceDataPanel:not(.gdPracticeAdminExpanded) .gdPracticePhotoQaPanel{
+#practiceDataPanel:not(.gdPracticeAdminExpanded) .gdPracticePhotoQaPanel,
+#practiceDataPanel:not(.gdPracticeAdminExpanded) #gdPracticeLoadExtracted7iBtn,
+#practiceDataPanel:not(.gdPracticeAdminExpanded) .gdPracticeSandboxControls{
   display:none!important;
   visibility:hidden!important;
   pointer-events:none!important;
@@ -46307,9 +46648,7 @@ body.gdGpsActive #bagRailBtn{order:7!important}
 		  .gdPracticeShotClubHead{grid-template-columns:minmax(0,1fr) 22px!important}
 		  .gdPracticeShotClubHead small{grid-column:1/-1!important;grid-row:2!important;text-align:left!important}
 		  .gdPracticeShotClubHead .gdPracticeEvidenceChevron{grid-column:2!important;grid-row:1/3!important}
-		  .gdPracticeUploadRow{grid-template-columns:auto minmax(0,1fr)!important}
-		  .gdPracticeUploadRow>b{grid-column:2!important}
-		  .gdPracticeUploadActions{grid-column:1/-1!important;justify-content:flex-start!important}
+		  .gdPracticeUploadRow>summary{grid-template-columns:auto minmax(0,1fr) auto!important}
 		  .gdPracticeRawDrawer{max-height:300px!important}
 		  .gdPracticeRawHead{grid-template-columns:1fr!important}
 		  .gdPracticeRawScroll{max-height:214px!important}
@@ -46668,7 +47007,7 @@ body.gdGpsActive #bagRailBtn{order:7!important}
 		  border:1px solid rgba(255,255,255,.075)!important;
 		}
 		.gdPracticeEvidenceClubRowsScrollable{
-		  max-height:240px!important;
+		  max-height:440px!important;
 		  overflow:auto!important;
 		  overflow-x:hidden!important;
 		  padding-right:2px!important;

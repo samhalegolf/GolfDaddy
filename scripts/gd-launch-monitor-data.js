@@ -205,6 +205,7 @@
       type === 'photo-ocr-fitted-cell-grid' ||
       type === 'photo-ocr-column-image-order' ||
       type === 'photo-ocr-digitised-table' ||
+      type === 'clarity-table-ocr' ||
       type === 'screenshot' ||
       type === 'generated-demo'
     ) return 'practice_evidence';
