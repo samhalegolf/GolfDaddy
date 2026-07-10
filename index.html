@@ -19320,7 +19320,11 @@ async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
     // each strip top-to-bottom and slots values into rows by position. =====
     gdPracticeUpdateImportJob({checkpointText:"Reading strips",stageIndex:2,progress:74});
     gdSetPracticePhotoProcessing(true,{stageIndex:2,progress:74,preserveClubs:true});
-    const firstColLeft=Number(strips[0].left);
+    // Margin = everything left of the first NAMED metric strip (the club column
+    // + true page margin). Using strips[0] would be the club column itself now
+    // that all strips hand over, leaving no margin and letting AVERAGE/STD DEV
+    // summary rows leak through as extra shots.
+    const firstColLeft=Number((namedStrips[0]||strips[0]).left);
     // Data rows only (drop AVERAGE / STD DEV summary rows, labelled at left margin).
     const dataRows=valueRows.filter(row=>{
       const marginText=textBoxes.filter(box=>Number(box.cx)<firstColLeft&&Number(box.cy)>=row.y0&&Number(box.cy)<=row.y1).map(box=>String(box.text||"")).join(" ");
@@ -19335,7 +19339,7 @@ async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
     // Single checkpoint (adapter): scanner output -> Shot Library, cleaning misreads.
     const payload=gdClarityScanResultToPayload(scanRows,{label:sourceLabel,club:clubLabel});
     const rowCount=Number(payload?.clubGroups?.length)||0;
-    gdPracticeDebugCheckpointSafe("extraction_completed",rowCount?"success":"failed",{outputSummary:`Read ${rowCount} shots (${scanRows.length} rows x ${allocatedCount} strips)`,counts:{rows:rowCount,scanRows:scanRows.length},snapshot:{canvas:gdClarityScanOverlay(flat,{columns:strips,headerBottom:headerBottom}),label:`Extraction: ${rowCount} shots from ${scanRows.length} rows`}});
+    gdPracticeDebugCheckpointSafe("extraction_completed",rowCount?"success":"failed",{outputSummary:`Read ${rowCount} shots (${scanRows.length} rows x ${allocatedCount} strips)`,counts:{rows:rowCount,scanRows:scanRows.length},snapshot:{canvas:gdClarityStripsMontage(namedStrips),label:`Extraction: ${rowCount} shots read from ${namedStrips.length} physical strips`}});
     if(!rowCount){
       gdPracticeFeedback("No usable rows were read. Re-frame the value grid and scan again.","error");
       gdOpenPracticeManualQuadTool();
