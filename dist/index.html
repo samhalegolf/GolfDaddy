@@ -36287,7 +36287,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
   function gdPracticePlotModeControls(){
     if(!gdPracticeAdminIsOpen())return "";
     const mode=gdPracticePlotMode();
-    return `<div class="gdPracticePlotMode"><button type="button" class="${mode==="all"?"active":""}" aria-pressed="${mode==="all"?"true":"false"}" data-gd-practice-plot-mode="all">Show all</button><button type="button" class="${mode==="auto"?"active":""}" aria-pressed="${mode==="auto"?"true":"false"}" data-gd-practice-plot-mode="auto">Filter view</button><span>${mode==="all"?"Every stored shot is plotted.":"Filtered view is on."}</span></div>`;
+    return `<div class="gdPracticePlotMode"><button type="button" class="${mode==="all"?"active":""}" aria-pressed="${mode==="all"?"true":"false"}" data-gd-practice-plot-mode="all">Show all</button><button type="button" class="${mode==="auto"?"active":""}" aria-pressed="${mode==="auto"?"true":"false"}" data-gd-practice-plot-mode="auto">Filter view</button>${mode==="auto"?`<span>Filtered view is on.</span>`:""}</div>`;
   }
   function gdPracticeShotActualDistance(shot){
     const carry=Number(shot?.carryM);
@@ -41616,8 +41616,8 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 			        const selected=!!gdPracticeImportSelected[importId];
 			        const checkbox=adminOpen&&gdPracticeImportSelectMode?`<label class="gdPracticeEvidenceUploadSelect" onclick="event.stopPropagation()"><input type="checkbox" value="${gdEscapeHTML(importId)}" ${selected?"checked":""} onchange="gdPracticeToggleImportSelection(this)"><span>Select</span></label>`:"";
 			        const statusLabel=importRows.some(row=>row.counted)?"bubble fit":(rejected?"needs review":"stored");
-			        const importActions=`<button type="button" class="danger" onclick="return gdPracticeDeleteImports(${gdPracticeJsArg(importId)})">Delete entire import</button>`;
-			        const rawDetail=`<details class="gdPracticeRawDisclosure"><summary>View raw data</summary>${gdPracticeRawShotTableHTML(importRows,meta,club,importId)}</details>`;
+			        const importActions=`<button type="button" class="danger gdPracticeDeleteX" title="Delete this import" aria-label="Delete this import" onclick="return gdPracticeDeleteImports(${gdPracticeJsArg(importId)})">&times;</button>`;
+			        const rawDetail=adminOpen?`<details class="gdPracticeRawDisclosure"><summary>View raw data</summary>${gdPracticeRawShotTableHTML(importRows,meta,club,importId)}</details>`:"";
 			        return `<div class="gdPracticeUploadRow" data-import-id="${gdEscapeHTML(importId)}">${checkbox}<div class="gdPracticeUploadMeta"><strong>${gdEscapeHTML(dateLabel)}</strong><span>${gdEscapeHTML(sourceLabel)} · ${importRows.length} shot${importRows.length===1?"":"s"} · ${accepted} accepted${rejected?` · ${rejected} rejected`:""}</span></div><b>${gdEscapeHTML(statusLabel)}</b><div class="gdPracticeUploadActions">${importActions}</div>${rawDetail}</div>`;
 			      }).join("");
 			      return `<section class="gdPracticeShotClub ${open?"open":""}" data-club="${gdEscapeHTML(club)}"><button type="button" class="gdPracticeShotClubHead" data-gd-practice-club-toggle aria-expanded="${open?"true":"false"}"><div><span>${gdEscapeHTML(club)}</span><strong>${clubRows.length} shot${clubRows.length===1?"":"s"} · ${importCount} upload${importCount===1?"":"s"}</strong></div><small>${gdEscapeHTML(gdPracticeImportDate(latest))}${bubbleStatus?` · ${gdEscapeHTML(bubbleStatus)}`:""}</small><b class="gdPracticeEvidenceChevron">${open?"-":"+"}</b></button><div class="gdPracticeShotClubBody">${uploadRows}</div></section>`;
@@ -45592,10 +45592,10 @@ body.gdGpsActive #bagRailBtn{order:7!important}
 		  border:0!important;
 		  width:100%!important;
 		  display:grid!important;
-		  grid-template-columns:minmax(0,1fr) auto 24px!important;
-		  gap:8px!important;
+		  grid-template-columns:minmax(0,1fr) auto 20px!important;
+		  gap:6px!important;
 		  align-items:center!important;
-		  padding:9px!important;
+		  padding:6px 8px!important;
 		  background:rgba(255,255,255,.025)!important;
 		  color:#fff!important;
 		  text-align:left!important;
@@ -45614,10 +45614,10 @@ body.gdGpsActive #bagRailBtn{order:7!important}
 		}
 		.gdPracticeShotClubHead strong{
 		  display:block!important;
-		  margin-top:3px!important;
+		  margin-top:2px!important;
 		  min-width:0!important;
 		  color:#fff!important;
-		  font-size:13px!important;
+		  font-size:12px!important;
 		  line-height:1.12!important;
 		  font-weight:950!important;
 		  overflow:hidden!important;
@@ -45634,8 +45634,8 @@ body.gdGpsActive #bagRailBtn{order:7!important}
 		}
 		.gdPracticeShotClubBody{
 		  display:none!important;
-		  gap:6px!important;
-		  padding:7px!important;
+		  gap:5px!important;
+		  padding:5px!important;
 		}
 		.gdPracticeShotClub.open .gdPracticeShotClubBody{
 		  display:grid!important;
@@ -45643,13 +45643,13 @@ body.gdGpsActive #bagRailBtn{order:7!important}
 		.gdPracticeUploadRow{
 		  display:grid!important;
 		  grid-template-columns:auto minmax(0,1fr) auto auto!important;
-		  gap:8px!important;
+		  gap:6px!important;
 		  align-items:center!important;
 		  min-width:0!important;
-		  border-radius:10px!important;
+		  border-radius:9px!important;
 		  background:rgba(255,255,255,.035)!important;
 		  border:1px solid rgba(255,255,255,.065)!important;
-		  padding:7px!important;
+		  padding:5px 7px!important;
 		}
 		.gdPracticeUploadMeta{
 		  display:grid!important;
@@ -45703,6 +45703,26 @@ body.gdGpsActive #bagRailBtn{order:7!important}
 		  background:rgba(255,107,122,.14)!important;
 		  border-color:rgba(255,107,122,.25)!important;
 		  color:#ffb5bd!important;
+		}
+		/* Tiny red cross for deleting an import — replaces the loud pill. */
+		.gdPracticeUploadActions button.gdPracticeDeleteX{
+		  width:18px!important;
+		  height:18px!important;
+		  padding:0!important;
+		  border-radius:50%!important;
+		  display:inline-flex!important;
+		  align-items:center!important;
+		  justify-content:center!important;
+		  font-size:12px!important;
+		  line-height:1!important;
+		  font-weight:900!important;
+		  background:rgba(255,107,122,.16)!important;
+		  border:1px solid rgba(255,107,122,.32)!important;
+		  color:#ff8a96!important;
+		}
+		.gdPracticeUploadActions button.gdPracticeDeleteX:hover{
+		  background:rgba(255,107,122,.30)!important;
+		  color:#fff!important;
 		}
 		.gdPracticeUploadActions:empty{display:none!important}
 		.gdPracticeRawDisclosure{
@@ -46070,7 +46090,9 @@ body.gdGpsActive #bagRailBtn{order:7!important}
 }
 #practiceDataPanel:not(.gdPracticeAdminExpanded) .gdPracticeLiveDebugPanel,
 #practiceDataPanel:not(.gdPracticeAdminExpanded) .gdPracticePhotoDebugPanel,
-#practiceDataPanel:not(.gdPracticeAdminExpanded) .gdPracticePhotoQaPanel{
+#practiceDataPanel:not(.gdPracticeAdminExpanded) .gdPracticePhotoQaPanel,
+#practiceDataPanel:not(.gdPracticeAdminExpanded) #gdPracticeLoadExtracted7iBtn,
+#practiceDataPanel:not(.gdPracticeAdminExpanded) .gdPracticeSandboxControls{
   display:none!important;
   visibility:hidden!important;
   pointer-events:none!important;
