@@ -622,7 +622,11 @@
         right = (centers[i] + centers[i + 1]) / 2;
       }
       out.push({
-        index: i, left: Math.max(0, Math.round(left)), right: Math.round(right),
+        index: i,
+        // Wide bounds (strip image + header): cut at the midpoints.
+        left: Math.max(0, Math.round(left)), right: Math.round(right),
+        // Tight bounds (the value column itself) for a tighter extraction crop.
+        valLeft: Number(cols[i].left), valRight: Number(cols[i].right),
         cx: centers[i], metricKey: cols[i].metricKey, headerText: cols[i].headerText
       });
     }
