@@ -167,14 +167,19 @@ hang or a 0-shot bounce. Next: deploy the branch, scan, diff against
   skipped value-null cells and whole columns without saying so). Cells are
   matched back to scan rows by stored band geometry, not index. Montage shows
   each blanked strip with the marker column boxed and a per-row result rail.
-- **Club ID is its own stage** (`club_id` checkpoint, "2.5 · Club ID (offcut)",
-  after header allocation): one club per scan, so each offcut ROW CELL is read
-  individually (native-res crop, psm 7; binarised retry only if the raw read
-  resolves nothing), resolved via `gdLmClubFromLine`, and the MAJORITY wins.
-  Replaces the old whole-strip psm-6 `gdClarityDetectClubFromStrips` (deleted),
-  which misread 7i as 2i/5i. The checkpoint reports every row read, the vote
-  spread, dissenting reads, and a montage of the exact cells read; falls back
-  to the manual club with a "warning" status when nothing resolves.
+- **Club ID + summary rows come from ONE whole-offcut read**
+  (`gdClarityOffcutScan`, `club_id` checkpoint): the entire offcut (everything
+  left of the first named column) is rendered at native resolution and OCR'd
+  once — no per-row cutting; it does not matter where anything sits on the
+  strip, only that it is on it. Lines resolving to a club vote for the club
+  (majority; one club per scan); lines matching AVERAGE / STD DEV mark their
+  y-positions, and the data-row filter drops the bands those labels sit in
+  (replaces the old per-row margin-box matching, which relied on the box pass
+  having OCR'd the label and let the AVERAGE row import as a 14th shot). The
+  checkpoint prints every offcut line with its y and resolution, the vote
+  spread, the summary label positions, and a montage of the offcut with each
+  line labelled at its own height. Falls back to the manual club (warning
+  status, summary rows unfiltered) when the offcut read fails.
 
 ## How to verify
 - Headless: `node dev/table-ocr-split.test.js` (and boxes/semantics/words). All
