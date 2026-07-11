@@ -176,5 +176,15 @@ check("deep scan cell with NO marker -> no direction (never guesses)", deepNone.
 const cm = cropMask(cellR, 0, 0, 4, 4);
 check("cropMask size", [cm.w, cm.h], [5, 5]);
 
+// ---- isSummaryLabel: OCR-garbled summary labels must still be caught ----
+check("summary: AVERAGE", ocr.isSummaryLabel("AVERAGE"), true);
+check("summary: AVERACE (garbled)", ocr.isSummaryLabel("AVERACE"), true);
+check("summary: AVFRAGE (garbled)", ocr.isSummaryLabel("AVFRAGE"), true);
+check("summary: SID DEV (garbled)", ocr.isSummaryLabel("SID DEV"), true);
+check("summary: STD. DEV", ocr.isSummaryLabel("STD. DEV"), true);
+check("not summary: 7i", ocr.isSummaryLabel("7i"), false);
+check("not summary: Driver", ocr.isSummaryLabel("Driver"), false);
+check("not summary: empty", ocr.isSummaryLabel(""), false);
+
 console.log(allOk ? "\nALL PASS" : "\nFAILURES PRESENT");
 process.exit(allOk ? 0 : 1);
