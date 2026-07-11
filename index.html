@@ -6064,9 +6064,12 @@ const DEV_DEFAULTS={
   launchMonitorCluster:{
     minCarryM:20,
     maxCarryM:330,
-    carryWindowPct:.18,
-    carryWindowMinM:8,
-    carryWindowMaxM:38,
+    // The carry gate is a GARBAGE guard (not-real / so-bad-it's-irrelevant
+    // shots), not a data narrower — the cluster hunter is trusted to do the
+    // real filtering. Wide by design: a thin/fat but real shot must plot.
+    carryWindowPct:.40,
+    carryWindowMinM:15,
+    carryWindowMaxM:90,
     maxAbsOfflineM:70,
     viableDegreeAbs:8,
     alignmentDegreeAbs:10,
@@ -6169,9 +6172,9 @@ const DEV_FIELDS={
   "statsCluster.maxClusterRangeDeg":{label:"Max cluster range",step:.25,min:1,max:16,unit:"°",help:"Maximum total degree range for a strong cluster."},
   "launchMonitorCluster.minCarryM":{label:"LM min carry",step:1,min:1,max:80,unit:"m",help:"Practice shots below this are scrapped."},
   "launchMonitorCluster.maxCarryM":{label:"LM max carry",step:1,min:100,max:380,unit:"m",help:"Practice shots above this are scrapped."},
-  "launchMonitorCluster.carryWindowPct":{label:"LM carry window %",step:.01,min:.03,max:.45,help:"Expected carry percentage gate before clustering."},
-  "launchMonitorCluster.carryWindowMinM":{label:"LM carry window min",step:.5,min:1,max:30,unit:"m",help:"Minimum carry gate for short clubs."},
-  "launchMonitorCluster.carryWindowMaxM":{label:"LM carry window max",step:.5,min:10,max:80,unit:"m",help:"Maximum carry gate for long clubs."},
+  "launchMonitorCluster.carryWindowPct":{label:"LM carry window %",step:.01,min:.03,max:.60,help:"Garbage gate vs expected carry: only scraps not-real shots. Keep wide - the cluster hunter does the real filtering."},
+  "launchMonitorCluster.carryWindowMinM":{label:"LM carry window min",step:.5,min:1,max:40,unit:"m",help:"Minimum carry gate for short clubs."},
+  "launchMonitorCluster.carryWindowMaxM":{label:"LM carry window max",step:.5,min:10,max:150,unit:"m",help:"Maximum carry gate for long clubs (caps the % window - keep generous)."},
   "launchMonitorCluster.maxAbsOfflineM":{label:"LM max offline",step:1,min:5,max:140,unit:"m",help:"Practice shots wider than this are scrapped."},
   "launchMonitorCluster.viableDegreeAbs":{label:"LM viable degree",step:.25,min:1,max:20,unit:"°",help:"Clusters inside this can become shot-data candidates."},
   "launchMonitorCluster.alignmentDegreeAbs":{label:"LM alignment degree",step:.25,min:2,max:30,unit:"°",help:"Strong clusters beyond this become alignment signals."},
@@ -6701,7 +6704,7 @@ function gdEnsureLaunchMonitorApi(){
       return;
     }
     const script=document.createElement("script");
-    script.src="scripts/gd-launch-monitor-data.js?v=practice-data-20260710r";
+    script.src="scripts/gd-launch-monitor-data.js?v=practice-data-20260712a";
     script.onload=finish;
     script.onerror=()=>reject(new Error("Launch monitor module failed to load"));
     document.body.appendChild(script);
@@ -36225,7 +36228,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 <script src="scripts/gd-shot-outcomes.js"></script>
 <script src="scripts/gd-shot-events.js?v=deliberate-outcome-20260612"></script>
 <script src="scripts/gd-shot-cluster-analysis.js?v=deliberate-outcome-20260612"></script>
-<script src="scripts/gd-launch-monitor-data.js?v=practice-data-20260710r"></script>
+<script src="scripts/gd-launch-monitor-data.js?v=practice-data-20260712a"></script>
 <script src="scripts/gd-native-practice-data.js?v=native-practice-data-001"></script>
 <script id="gdCanonicalRouteAuditV1">
 (function(){

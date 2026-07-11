@@ -8,9 +8,11 @@
   var DEFAULTS = {
     minCarryM: 20,
     maxCarryM: 330,
-    carryWindowPct: 0.18,
-    carryWindowMinM: 8,
-    carryWindowMaxM: 38,
+    // Garbage guard only (not-real / so-bad-it's-irrelevant shots) — wide by
+    // design; the cluster hunter does the real filtering downstream.
+    carryWindowPct: 0.40,
+    carryWindowMinM: 15,
+    carryWindowMaxM: 90,
     maxAbsOfflineM: 70,
     viableDegreeAbs: 8,
     alignmentDegreeAbs: 10,
