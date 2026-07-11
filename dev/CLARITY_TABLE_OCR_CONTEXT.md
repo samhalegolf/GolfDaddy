@@ -123,6 +123,64 @@ hang or a 0-shot bounce. Next: deploy the branch, scan, diff against
    boxes by x0 only; multi-line headers can interleave. Sort row-then-x if it
    misreads.
 
+## Deep scan (Stage 3.5) + warp quality — branch `deep-scan-direction-stage`
+- **Warp quality**: `gdWarpQuadToCanvas` now samples BILINEAR (was nearest-
+  neighbour — it aliased thin strokes). The manual corner-stretch no longer
+  re-warps the already-warped 1800px canvas: corners are mapped back through
+  the stored quad (`gdFlatPointToWarpSourcePoint`) and warped ONCE from the
+  original photo. The flat canvas keeps `__gdWarpSource` + `__gdFlattenedQuad`
+  so any stage can re-crop original pixels.
+- **Deep scan stage** (`deep_scan` checkpoint, between extraction and payload):
+  for each direction cell (sideAngle/sideSpin/offline) it re-crops THAT box —
+  at native photo resolution via the inverse warp when metadata exists — and
+  runs the BLANKING METHOD: partition ink into value cluster vs marker
+  candidates (`partitionDirectionCell`), blank the value, then classify the
+  remainder two independent ways: pure shape classification
+  (`classifyGlyphMask`: 3x3 fill grid + hole topology; L/R/+/-) and OCR of the
+  blanked, binarised image (whitelist `LRlr+-`, psm 10). Agreement wins;
+  lone-shape accepted; lone-OCR accepted only if marker ink exists; conflict =
+  nothing applied (reported). Only `cell.direction` is ever written — row
+  structure is frozen; the stage failing falls back to strip-read directions.
+- Pure logic lives in `scripts/clarity-table-ocr.js` (`deepScanDirectionCell` +
+  internals), tested headlessly in `dev/table-ocr-deepscan.test.js`. Browser
+  glue: `gdClarityDeepCropCell`, `gdClarityDeepScanCell`,
+  `gdClarityDeepScanDirections`, `gdClarityDeepScanMontage` (index.html). The
+  debug checkpoint reports per-cell method + crop source (`native` vs `flat`)
+  truthfully and snapshots the exact blanked images that were classified.
+- **Native-res crops everywhere** (second pass on this branch): the box-OCR
+  classification pass, header naming, and the per-cell strip value reads all
+  route their OCR input through `gdClarityDeepCropCell` now — geometry stays
+  in flat coordinates, only the pixels improve. `gdWarpQuadToCanvas` caches the
+  source ImageData per photo (WeakMap) so dozens of small region warps are
+  cheap. Header crops are NOT binarised (headers can be light-on-dark).
+- **Deep scan v2 — STRIP-LEVEL collective blanking** (replaced the per-cell
+  partition, which left number fragments behind and missed markers): per
+  direction strip, `findMarkerColumn` (module) finds the marker column ONCE by
+  cross-row alignment — markers occupy the same narrow x-range on every row
+  while value fragments land anywhere; needs >=3 aligned rows (or 25% of
+  bands). Then everything outside that column is whited out down the whole
+  strip in one stroke and the remaining sliver is read band by band (shape
+  classifier + psm-10 OCR, same agree/conflict rules). Windows are generous by
+  principle: we never claim to know exactly where the marker is, only that it
+  is definitely inside the padded window. EVERY data band of every direction
+  strip is examined and reported (no silent skips — the old per-cell pass
+  skipped value-null cells and whole columns without saying so). Cells are
+  matched back to scan rows by stored band geometry, not index. Montage shows
+  each blanked strip with the marker column boxed and a per-row result rail.
+- **Club ID + summary rows come from ONE whole-offcut read**
+  (`gdClarityOffcutScan`, `club_id` checkpoint): the entire offcut (everything
+  left of the first named column) is rendered at native resolution and OCR'd
+  once — no per-row cutting; it does not matter where anything sits on the
+  strip, only that it is on it. Lines resolving to a club vote for the club
+  (majority; one club per scan); lines matching AVERAGE / STD DEV mark their
+  y-positions, and the data-row filter drops the bands those labels sit in
+  (replaces the old per-row margin-box matching, which relied on the box pass
+  having OCR'd the label and let the AVERAGE row import as a 14th shot). The
+  checkpoint prints every offcut line with its y and resolution, the vote
+  spread, the summary label positions, and a montage of the offcut with each
+  line labelled at its own height. Falls back to the manual club (warning
+  status, summary rows unfiltered) when the offcut read fails.
+
 ## How to verify
 - Headless: `node dev/table-ocr-split.test.js` (and boxes/semantics/words). All
   pass today.
