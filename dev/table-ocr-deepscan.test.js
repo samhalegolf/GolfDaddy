@@ -176,6 +176,45 @@ check("deep scan cell with NO marker -> no direction (never guesses)", deepNone.
 const cm = cropMask(cellR, 0, 0, 4, 4);
 check("cropMask size", [cm.w, cm.h], [5, 5]);
 
+// ---- findMarkerColumn: strip-level cross-row alignment ----
+// Markers align in the same x-range on every row; number fragments land at
+// varying x. The column must come from the aligned cluster only.
+function band(groups) { return { y0: 0, y1: 10, groups }; }
+function grp(x0, x1, ink) { return { x0, x1, cx: (x0 + x1) / 2, ink }; }
+const CH = 10; // charHeight
+// 13 bands: value cluster (heavy ink), marker at x 44-50 on 10 bands,
+// stray fragments at varying x on a few bands.
+const alignedBands = [];
+for (let i = 0; i < 13; i += 1) {
+  const groups = [grp(4, 4 + 8 + (i % 5), 300)]; // value width varies per row
+  if (i < 10) groups.push(grp(44, 50, 30));      // aligned marker
+  if (i % 4 === 0) groups.push(grp(16 + i, 20 + i, 8)); // wandering fragment, far from the marker
+  alignedBands.push(band(groups));
+}
+const col = ocr.findMarkerColumn(alignedBands, { charHeight: CH });
+check("marker column found", !!col, true);
+check("marker column support", col ? col.support : 0, 10);
+check("marker column covers the marker", col ? (col.x0 <= 44 && col.x1 >= 50) : false, true);
+check("marker column excludes wandering fragments", col ? col.x0 >= 40 : false, true);
+
+// No markers at all -> no column (fragments alone must not align)
+const noMarkerBands = [];
+for (let i = 0; i < 13; i += 1) {
+  const groups = [grp(4, 24 + (i % 5), 300)];
+  if (i % 5 === 0) groups.push(grp(28 + i * 2, 32 + i * 2, 8)); // scattered junk
+  noMarkerBands.push(band(groups));
+}
+check("no aligned markers -> null", ocr.findMarkerColumn(noMarkerBands, { charHeight: CH }), null);
+
+// Only 2 bands agreeing -> below the support floor -> null
+const sparseBands = [];
+for (let i = 0; i < 13; i += 1) {
+  const groups = [grp(4, 24, 300)];
+  if (i < 2) groups.push(grp(44, 50, 30));
+  sparseBands.push(band(groups));
+}
+check("2 aligned rows is not a column", ocr.findMarkerColumn(sparseBands, { charHeight: CH }), null);
+
 // ---- isSummaryLabel: OCR-garbled summary labels must still be caught ----
 check("summary: AVERAGE", ocr.isSummaryLabel("AVERAGE"), true);
 check("summary: AVERACE (garbled)", ocr.isSummaryLabel("AVERACE"), true);
