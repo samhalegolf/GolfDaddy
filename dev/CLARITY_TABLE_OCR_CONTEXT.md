@@ -147,6 +147,20 @@ hang or a 0-shot bounce. Next: deploy the branch, scan, diff against
   `gdClarityDeepScanDirections`, `gdClarityDeepScanMontage` (index.html). The
   debug checkpoint reports per-cell method + crop source (`native` vs `flat`)
   truthfully and snapshots the exact blanked images that were classified.
+- **Native-res crops everywhere** (second pass on this branch): the box-OCR
+  classification pass, header naming, and the per-cell strip value reads all
+  route their OCR input through `gdClarityDeepCropCell` now — geometry stays
+  in flat coordinates, only the pixels improve. `gdWarpQuadToCanvas` caches the
+  source ImageData per photo (WeakMap) so dozens of small region warps are
+  cheap. Header crops are NOT binarised (headers can be light-on-dark).
+- **Club ID is its own stage** (`club_id` checkpoint, "2.5 · Club ID (offcut)",
+  after header allocation): one club per scan, so each offcut ROW CELL is read
+  individually (native-res crop, psm 7; binarised retry only if the raw read
+  resolves nothing), resolved via `gdLmClubFromLine`, and the MAJORITY wins.
+  Replaces the old whole-strip psm-6 `gdClarityDetectClubFromStrips` (deleted),
+  which misread 7i as 2i/5i. The checkpoint reports every row read, the vote
+  spread, dissenting reads, and a montage of the exact cells read; falls back
+  to the manual club with a "warning" status when nothing resolves.
 
 ## How to verify
 - Headless: `node dev/table-ocr-split.test.js` (and boxes/semantics/words). All

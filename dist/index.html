@@ -1728,8 +1728,8 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 <script>window.L=window.L||window.leaflet;</script>
 <script src="scripts/clarity-build.js?v=tool-rail-tab-hole-label-20260620"></script>
 <script src="scripts/gd-launch-monitor-alias-registry.js?v=practice-alias-registry-20260612"></script>
-<script src="scripts/clarity-table-ocr.js?v=table-ocr-deepscan-20260711a"></script>
-<script src="scripts/clarity-table-ocr-pixels.js?v=table-ocr-deepscan-20260711a"></script>
+<script src="scripts/clarity-table-ocr.js?v=table-ocr-deepscan-20260711b"></script>
+<script src="scripts/clarity-table-ocr-pixels.js?v=table-ocr-deepscan-20260711b"></script>
 <style>
 	    *,*::before,*::after{box-sizing:border-box}
 	    :where(input,select,textarea,button){max-width:100%}
@@ -8406,7 +8406,7 @@ function gdPracticeRenderLiveDebugAdminRun(run){
   const summary=run.summary||{};
   const failed=typeof gdPracticeDebugLabelForRunCheckpoint==="function"?gdPracticeDebugLabelForRunCheckpoint(run,run.failedCheckpointId):"";
   const lastOk=typeof gdPracticeDebugLabelForRunCheckpoint==="function"?gdPracticeDebugLabelForRunCheckpoint(run,run.lastSuccessfulCheckpointId):"";
-  const coreStageIds=["value_corridor_mapping","header_strip_scan","extraction_completed","deep_scan","save_completed"];
+  const coreStageIds=["value_corridor_mapping","header_strip_scan","club_id","extraction_completed","deep_scan","save_completed"];
   const checkpoints=(run.checkpoints||[])
     .filter(item=>coreStageIds.includes(item.id)||item.status==="failed"||run?.failedCheckpointId===item.id)
     .map(item=>gdPracticeLiveDebugCheckpointHtml(item,run)).join("");
@@ -8977,6 +8977,23 @@ function gdProjectiveUnitToQuad(points){
     return {x:(a*u+b*v+c)/denom,y:(d*u+e*v+f)/denom};
   };
 }
+// Cache the decoded ImageData per warp source. Every gdWarpQuadToCanvas call
+// used to redraw + getImageData the ENTIRE source (a 4000px photo is ~48MB per
+// read) — fine once per scan, ruinous now that per-cell native re-crops warp
+// dozens of small regions from the same photo.
+const gdWarpSourceDataCache=new WeakMap();
+function gdWarpSourceData(source){
+  const cached=gdWarpSourceDataCache.get(source);
+  if(cached)return cached;
+  const srcCanvas=document.createElement("canvas");
+  srcCanvas.width=Number(source.width)||1;
+  srcCanvas.height=Number(source.height)||1;
+  const srcCtx=srcCanvas.getContext("2d",{willReadFrequently:true});
+  srcCtx.drawImage(source,0,0,srcCanvas.width,srcCanvas.height);
+  const data={src:srcCtx.getImageData(0,0,srcCanvas.width,srcCanvas.height),w:srcCanvas.width,h:srcCanvas.height};
+  gdWarpSourceDataCache.set(source,data);
+  return data;
+}
 function gdWarpQuadToCanvas(source,quad,targetW=1800,dims={}){
   const points=(Array.isArray(quad)?quad:[]).map(point=>({x:Number(point.x),y:Number(point.y)}));
   if(points.length!==4||points.some(point=>!Number.isFinite(point.x)||!Number.isFinite(point.y)))return null;
@@ -8996,12 +9013,8 @@ function gdWarpQuadToCanvas(source,quad,targetW=1800,dims={}){
   const outW=Math.max(minW,Math.round(Number(targetW)||1800));
   const aspect=((left+right)/2)/Math.max(1,(top+bottom)/2);
   const outH=Math.max(minH,Math.min(maxH,Math.round(outW*aspect)));
-  const srcCanvas=document.createElement("canvas");
-  srcCanvas.width=Number(source.width)||1;
-  srcCanvas.height=Number(source.height)||1;
-  const srcCtx=srcCanvas.getContext("2d",{willReadFrequently:true});
-  srcCtx.drawImage(source,0,0,srcCanvas.width,srcCanvas.height);
-  const src=srcCtx.getImageData(0,0,srcCanvas.width,srcCanvas.height);
+  const sourceData=gdWarpSourceData(source);
+  const src=sourceData.src;
   const out=document.createElement("canvas");
   out.width=outW;
   out.height=outH;
@@ -9011,7 +9024,7 @@ function gdWarpQuadToCanvas(source,quad,targetW=1800,dims={}){
   // strokes (decimal points, the small R/L markers) into jagged, broken pixels;
   // every later stage then upscaled that damage. Interpolating the 4 neighbours
   // preserves the stroke shape when the photo is resampled down to the flat grid.
-  const sw=srcCanvas.width,sh=srcCanvas.height;
+  const sw=sourceData.w,sh=sourceData.h;
   const sample=(x,y,channel)=>{
     const fx=Math.max(0,Math.min(sw-1,x));
     const fy=Math.max(0,Math.min(sh-1,y));
@@ -19201,11 +19214,18 @@ function gdClarityCutStrips(flat,columns){
 }
 // Name each strip by reading the header off the TOP of its own image. Each strip
 // is self-contained — it knows nothing about the others.
-async function gdClarityNameStrips(strips,headerBottom,Tesseract){
+async function gdClarityNameStrips(strips,headerBottom,Tesseract,flat){
   const OCR=window.ClarityTableOcr, PIX=window.ClarityTableOcrPixels, REG=window.LaunchMonitorAliasRegistry;
   for(const strip of strips){
     if(typeof gdPracticeAssertImportNotCanceled==="function")gdPracticeAssertImportNotCanceled();
-    const crop=PIX.cropCanvas(strip.canvas,0,0,strip.canvas.width,Math.max(8,Number(headerBottom)||18),0);
+    // Native-resolution header crop when the flat carries warp metadata (same
+    // band, same strip x-range — only the pixel quality changes). NOT
+    // binarised: header bands are often light text on a dark fill, which the
+    // ink mask would wipe out.
+    const bandBottom=Math.max(8,Number(headerBottom)||18);
+    const crop=(flat&&flat.__gdWarpSource)
+      ?gdClarityDeepCropCell(flat,{x0:strip.left,y0:0,x1:strip.right,y1:bandBottom}).canvas
+      :PIX.cropCanvas(strip.canvas,0,0,strip.canvas.width,bandBottom,0);
     // Block mode (psm 6) so a multi-word / stacked header (e.g. "LAUNCH ANGLE",
     // "BALL SPEED\nMPH") is read as one blob; the resolver strips units + fuzzies.
     const res=await gdClarityOcrWithTimeout(gdRecognizeWithTesseract(Tesseract,crop,{tessedit_char_whitelist:"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz ",tessedit_pageseg_mode:"6"},"clarity-strip-name"),9000);
@@ -19264,7 +19284,12 @@ async function gdClarityReadStripsIntoRows(strips,dataRows,Tesseract,opts){
     const reads=[];
     for(const b of bands){
       const y0=Number(b.y0),y1=Number(b.y1);
-      const cellImg=binarize(gdClarityUpscaleCanvas(PIX.cropCanvas(strip.canvas,0,Math.max(0,y0-3),strip.canvas.width,Math.min(strip.canvas.height,y1+3),1),3.4));
+      // Native-resolution cell crop via the inverse warp (falls back to the
+      // upscaled flat crop without metadata). Band geometry is still derived
+      // from the strip's own flat-image pixels — only the OCR input improves.
+      const cellImg=binarize(opts.flat&&opts.flat.__gdWarpSource
+        ?gdClarityDeepCropCell(opts.flat,{x0:strip.left,y0:y0-3,x1:strip.right,y1:y1+3}).canvas
+        :gdClarityUpscaleCanvas(PIX.cropCanvas(strip.canvas,0,Math.max(0,y0-3),strip.canvas.width,Math.min(strip.canvas.height,y1+3),1),3.4));
       const readOnce=async psm=>{
         const rr=await gdClarityOcrWithTimeout(gdRecognizeWithTesseract(Tesseract,cellImg,{tessedit_char_whitelist:prof.whitelist,tessedit_pageseg_mode:psm},"clarity-cell-read-"+psm),12000);
         const t=String(rr&&rr.data&&rr.data.text||"").trim();
@@ -19327,24 +19352,68 @@ async function gdClarityReadStripsIntoRows(strips,dataRows,Tesseract,opts){
   }
   return {scanRows:scanRows,expectedRows:expectedRows,stripCounts:perStrip.map(s=>s.metricKey+"["+s.reads.length+"]")};
 }
-// Mine the UNALLOCATED offcut strips (no metricKey — typically the club/margin
-// column at the far left) for the club. One club is described the same way on
-// every row, so we read the whole offcut, resolve a club per line, tally, and
-// take the MAJORITY vote — robust to per-row OCR misreads. No aliases baked into
-// code: this reuses the app's own club-from-text resolver.
-async function gdClarityDetectClubFromStrips(strips,Tesseract){
+// ===========================================================================
+// CLUB ID (Stage 2.5) — its own stage. The user shoots ONE club per scan, and
+// that club repeats on every row of the offcut column, so this is a repeated
+// text/number combo hunt: read each ROW CELL of the offcut individually (a
+// focused box, native resolution — not one psm-6 pass down the whole strip,
+// which is how 7i was misread as 2i/5i), resolve each read to a club, and take
+// the MAJORITY. No aliases baked in: reuses the app's club-from-text resolver.
+// ===========================================================================
+async function gdClarityClubIdScan(flat,strips,valueRows,Tesseract){
+  const PIX=window.ClarityTableOcrPixels;
   const offcuts=(Array.isArray(strips)?strips:[]).filter(s=>s&&!s.metricKey&&s.canvas);
-  if(!offcuts.length||typeof gdLmClubFromLine!=="function")return {club:"",votes:{}};
-  const votes={};
+  const rows=(Array.isArray(valueRows)?valueRows:[]).filter(r=>r&&Number.isFinite(Number(r.y0))&&Number.isFinite(Number(r.y1)));
+  const out={club:"",votes:{},entries:[],offcuts:offcuts.length,rowBands:rows.length};
+  if(!offcuts.length||!rows.length||typeof gdLmClubFromLine!=="function")return out;
+  const cfg={tessedit_char_whitelist:"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789° ",tessedit_pageseg_mode:"7"};
   for(const strip of offcuts){
-    if(typeof gdPracticeAssertImportNotCanceled==="function")gdPracticeAssertImportNotCanceled();
-    const res=await gdClarityOcrWithTimeout(gdRecognizeWithTesseract(Tesseract,strip.canvas,{tessedit_char_whitelist:"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 ",tessedit_pageseg_mode:"6"},"clarity-club-offcut"),10000);
-    const lines=(typeof gdLmLinesFromOcrData==="function"?gdLmLinesFromOcrData(res&&res.data):[]).filter(l=>l&&String(l.text||"").trim());
-    lines.forEach(l=>{const club=gdLmClubFromLine(String(l.text||"").trim());if(club)votes[club]=(votes[club]||0)+1;});
+    for(let ri=0;ri<rows.length;ri+=1){
+      if(typeof gdPracticeAssertImportNotCanceled==="function")gdPracticeAssertImportNotCanceled();
+      const row=rows[ri];
+      const crop=gdClarityDeepCropCell(flat,{x0:strip.left,y0:Number(row.y0)-3,x1:strip.right,y1:Number(row.y1)+3});
+      // Raw read first (club cells can be light-on-dark, which binarising would
+      // wipe); binarised retry only when the raw read resolves nothing.
+      let text="",club="";
+      try{
+        const res=await gdClarityOcrWithTimeout(gdRecognizeWithTesseract(Tesseract,crop.canvas,cfg,"clarity-club-cell"),9000);
+        text=String(res&&res.data&&res.data.text||"").replace(/\s+/g," ").trim();
+        club=text?gdLmClubFromLine(text):"";
+        if(!club){
+          const res2=await gdClarityOcrWithTimeout(gdRecognizeWithTesseract(Tesseract,PIX.binarizeCanvas(crop.canvas),cfg,"clarity-club-cell-bin"),9000);
+          const text2=String(res2&&res2.data&&res2.data.text||"").replace(/\s+/g," ").trim();
+          if(text2){club=gdLmClubFromLine(text2);if(club)text=text2;}
+        }
+      }catch(e){text="(ocr error: "+(e&&e.message||e)+")";}
+      if(club)out.votes[club]=(out.votes[club]||0)+1;
+      out.entries.push({row:ri+1,text:text,club:club,cropSource:crop.source,canvas:crop.canvas});
+    }
   }
   let best="",bestN=0;
-  Object.keys(votes).forEach(k=>{if(votes[k]>bestN){bestN=votes[k];best=k;}});
-  return {club:best,votes:votes};
+  Object.keys(out.votes).forEach(k=>{if(out.votes[k]>bestN){bestN=out.votes[k];best=k;}});
+  out.club=best;
+  return out;
+}
+// Montage for the feedback window: every offcut row cell as read, labelled with
+// the raw text and the club it resolved to (or nothing).
+function gdClarityClubIdMontage(entries){
+  const list=(Array.isArray(entries)?entries:[]).filter(e=>e&&e.canvas);
+  if(!list.length){const e=document.createElement("canvas");e.width=10;e.height=10;return e;}
+  const cols=Math.max(1,Math.min(5,Math.ceil(Math.sqrt(list.length))));
+  const rowsN=Math.ceil(list.length/cols);
+  const cellW=150,cellH=56,labelH=13,gap=6;
+  const c=document.createElement("canvas");
+  c.width=cols*(cellW+gap)+gap;c.height=rowsN*(cellH+labelH+gap)+gap;
+  const ctx=c.getContext("2d");ctx.fillStyle="#0b0f0d";ctx.fillRect(0,0,c.width,c.height);
+  list.forEach((e,i)=>{
+    const cx=gap+(i%cols)*(cellW+gap),cy=gap+Math.floor(i/cols)*(cellH+labelH+gap);
+    const sc=Math.min(cellW/Math.max(1,e.canvas.width),cellH/Math.max(1,e.canvas.height));
+    try{ctx.drawImage(e.canvas,cx,cy+labelH,Math.max(4,Math.round(e.canvas.width*sc)),Math.max(4,Math.round(e.canvas.height*sc)));}catch(err){}
+    ctx.fillStyle=e.club?"#37f28d":"#8fa39a";
+    ctx.font="10px ui-monospace,Menlo,monospace";
+    ctx.fillText(`r${e.row}: "${e.text||"·"}" -> ${e.club||"·"}`.slice(0,26),cx,cy+10);
+  });
+  return c;
 }
 // ===========================================================================
 // DEEP SCAN (Stage 3.5) — targeted re-read of direction markers (R/L/+/-).
@@ -19547,7 +19616,10 @@ async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
     for(let bi=0;bi<totalBoxes;bi+=1){
       gdPracticeAssertImportNotCanceled();
       const box=detected.boxes[bi];
-      const crop=PIX.cropCanvas(flat,box.x0,box.y0,box.x1,box.y1,3);
+      // Native-resolution crop (falls back to the flat crop without warp
+      // metadata). Box GEOMETRY stays in flat coordinates — only the pixels
+      // handed to OCR get the quality upgrade.
+      const crop=gdClarityDeepCropCell(flat,{x0:box.x0-3,y0:box.y0-3,x1:box.x1+3,y1:box.y1+3}).canvas;
       const res=await gdClarityOcrWithTimeout(gdRecognizeWithTesseract(Tesseract,crop,boxCfg,"clarity-box"),9000);
       readBoxes.push(Object.assign({},box,{text:String(res?.data?.text||"").trim()}));
       if(bi%12===0){
@@ -19590,22 +19662,46 @@ async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
     let strips=gdClarityCutStrips(flat,columns);
     gdPracticeDebugCheckpointSafe("header_strip_scan","running",{inputSummary:`${strips.length} strips cut, header band 0-${Math.round(headerBottom)}`});
     // Name each strip by reading the text near its top and matching a metric.
-    strips=await gdClarityNameStrips(strips,headerBottom,Tesseract);
+    strips=await gdClarityNameStrips(strips,headerBottom,Tesseract,flat);
     // Hand over ALL strips (no edge trimming). Unnamed strips carry no metricKey,
     // so they contribute nothing to a metric, but stay visible in the montage so
     // misreads are inspectable. The club/margin column is handled separately.
     const namedStrips=strips.filter(s=>s.metricKey);
     const allocatedCount=namedStrips.length;
-    // Club: mine the unallocated offcut(s) for the repeated club pattern (majority
-    // vote). Detection drives the club; the manual field / 7i is only a fallback.
-    const clubScan=await gdClarityDetectClubFromStrips(strips,Tesseract);
-    const manualClub=(typeof gdPracticeScanClubLabel==="function"?gdPracticeScanClubLabel():"7i")||"7i";
-    const clubLabel=clubScan.club||manualClub;
-    gdPracticeDebugCheckpointSafe("header_strip_scan",allocatedCount>=4?"success":"failed",{outputSummary:`Named ${allocatedCount}/${strips.length} | club: ${clubLabel}${clubScan.club?" (offcut)":" (manual)"}: ${strips.map(s=>s.metricKey||("?"+(s.headerText?"["+s.headerText+"]":""))).join(" | ")}`,counts:{allocated:allocatedCount,strips:strips.length},snapshot:{canvas:gdClarityStripsMontage(strips),label:"Physical strips: green=named, red=unnamed"}});
+    gdPracticeDebugCheckpointSafe("header_strip_scan",allocatedCount>=4?"success":"failed",{outputSummary:`Named ${allocatedCount}/${strips.length}: ${strips.map(s=>s.metricKey||("?"+(s.headerText?"["+s.headerText+"]":""))).join(" | ")}`,counts:{allocated:allocatedCount,strips:strips.length},snapshot:{canvas:gdClarityStripsMontage(strips),label:"Physical strips: green=named, red=unnamed"}});
     if(allocatedCount<4){
       gdPracticeFeedback("Header allocation could not identify the columns. Re-frame and scan again.","error");
       gdOpenPracticeManualQuadTool();
       return null;
+    }
+    // ===== Stage 2.5 — CLUB ID. Own stage: read each offcut ROW CELL at native
+    // resolution, resolve each to a club, majority vote (one club per scan).
+    // Detection drives the club; the manual field / 7i is only a fallback.
+    gdPracticeUpdateImportJob({checkpointText:"Identifying club",stageIndex:1,progress:64});
+    const offcutCount=strips.filter(s=>s&&!s.metricKey).length;
+    gdPracticeDebugCheckpointSafe("club_id","running",{inputSummary:`${offcutCount} offcut strip(s) x ${valueRows.length} row bands`});
+    let clubScan={club:"",votes:{},entries:[]};
+    try{
+      clubScan=await gdClarityClubIdScan(flat,strips,valueRows,Tesseract);
+    }catch(e){
+      if(typeof gdPracticeIsQuietScanStop==="function"&&gdPracticeIsQuietScanStop(e))throw e;
+      console.warn("[GolfDaddy] Club ID stage failed",e);
+      gdPracticeDebugCheckpointSafe("club_id","failed",{outputSummary:`Club ID failed — falling back to the manual club. ${e&&e.message?e.message:e}`,technicalDetails:e&&e.stack});
+    }
+    const manualClub=(typeof gdPracticeScanClubLabel==="function"?gdPracticeScanClubLabel():"7i")||"7i";
+    const clubLabel=clubScan.club||manualClub;
+    if(clubScan.entries&&clubScan.entries.length){
+      const voteText=Object.keys(clubScan.votes).map(k=>`${k}: ${clubScan.votes[k]}`).join(", ")||"none";
+      const readText=clubScan.entries.map(e=>`r${e.row}: "${e.text||"·"}" -> ${e.club||"·"} [${e.cropSource}]`).join("\n");
+      const totalVotes=Object.values(clubScan.votes).reduce((a,b)=>a+b,0);
+      const winnerVotes=clubScan.club?clubScan.votes[clubScan.club]:0;
+      gdPracticeDebugCheckpointSafe("club_id",clubScan.club?"success":"warning",{
+        outputSummary:`${clubScan.club?`Club: ${clubScan.club} (${winnerVotes}/${clubScan.entries.length} row reads agree)`:`No club resolved from ${clubScan.entries.length} row reads — using ${manualClub} (manual/default)`}. Votes: ${voteText}. ${totalVotes-winnerVotes>0?`${totalVotes-winnerVotes} dissenting read${totalVotes-winnerVotes===1?"":"s"}.`:""}\n${readText}`,
+        counts:{offcuts:clubScan.offcuts||0,rowsRead:clubScan.entries.length,votes:totalVotes,winnerVotes:winnerVotes},
+        snapshot:{canvas:gdClarityClubIdMontage(clubScan.entries),label:`Club ID: offcut row cells as read (label = raw text -> resolved club); result ${clubLabel}`}
+      });
+    }else if(!clubScan.club){
+      gdPracticeDebugCheckpointSafe("club_id","warning",{outputSummary:`No offcut strip or row bands to read (${offcutCount} offcuts) — using ${manualClub} (manual/default).`,counts:{offcuts:offcutCount,rowsRead:0}});
     }
     // ===== GEOMETRY FROZEN. Strips are cut + named. Extraction below just reads
     // each strip top-to-bottom and slots values into rows by position. =====
@@ -19631,7 +19727,7 @@ async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
     gdPracticeDebugCheckpointSafe("extraction_completed","running",{inputSummary:`Read ${namedStrips.length} named strips into ${dataRows.length} rows`});
     // Read each strip top-to-bottom, slot values into rows by position (blanks
     // self-insert where a value is missed).
-    const readResult=await gdClarityReadStripsIntoRows(strips,dataRows,Tesseract,{club:clubLabel,onStrip:(i,n)=>{try{gdPracticeUpdateImportJob({checkpointText:`Reading strip ${i+1}/${n}`,stageIndex:2,progress:Math.min(96,74+Math.round((i/Math.max(1,n))*22))});}catch(e){}}});
+    const readResult=await gdClarityReadStripsIntoRows(strips,dataRows,Tesseract,{club:clubLabel,flat:flat,onStrip:(i,n)=>{try{gdPracticeUpdateImportJob({checkpointText:`Reading strip ${i+1}/${n}`,stageIndex:2,progress:Math.min(96,74+Math.round((i/Math.max(1,n))*22))});}catch(e){}}});
     const scanRows=readResult.scanRows;
     // Diagnostic: dump what each strip actually READ, per metric, down the rows —
     // so the read values can be compared directly against the visible strips (a
@@ -37211,6 +37307,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       crop_cleanup:"Crop / orientation / cleanup",
       value_corridor_mapping:"1 · Column splitter",
       header_strip_scan:"2 · Header allocation",
+      club_id:"2.5 · Club ID (offcut)",
       extraction_started:"3 · Extraction",
       extraction_completed:"3 · Extraction",
       deep_scan:"3.5 · Deep scan (direction markers)",
