@@ -42284,6 +42284,9 @@ body.gdAuthLocked #gdProfileV67 .topbar{
   function openPracticeData(opts){
     openModulePanel("practiceDataPanel","Practice Data","",opts);
     gdSetPracticeDataTab(opts&&opts.adminTab?"admin":"data");
+    // Self-heal: re-align any bubble sources frozen at pre-adoption distances
+    // (e.g. distances adopted before source syncing existed).
+    safe(()=>gdPracticeSyncBubbleSourcesToBag({skipRender:true}));
     gdRenderBubbleOffsetHub();
     renderPracticeData();
     return false;
