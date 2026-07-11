@@ -1728,8 +1728,8 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 <script>window.L=window.L||window.leaflet;</script>
 <script src="scripts/clarity-build.js?v=tool-rail-tab-hole-label-20260620"></script>
 <script src="scripts/gd-launch-monitor-alias-registry.js?v=practice-alias-registry-20260612"></script>
-<script src="scripts/clarity-table-ocr.js?v=table-ocr-deepscan-20260711e"></script>
-<script src="scripts/clarity-table-ocr-pixels.js?v=table-ocr-deepscan-20260711e"></script>
+<script src="scripts/clarity-table-ocr.js?v=table-ocr-deepscan-20260711f"></script>
+<script src="scripts/clarity-table-ocr-pixels.js?v=table-ocr-deepscan-20260711f"></script>
 <style>
 	    *,*::before,*::after{box-sizing:border-box}
 	    :where(input,select,textarea,button){max-width:100%}
@@ -19304,21 +19304,25 @@ async function gdClarityReadStripsIntoRows(strips,dataRows,Tesseract,opts){
       // from the strip's own flat-image pixels — only the OCR input improves.
       // The white margin (gdClarityPadCanvas) stops Tesseract dropping glyphs
       // that touch the crop border (the "111.6 -> 11.6" leading-digit loss).
-      const cellImg=gdClarityPadCanvas(binarize(opts.flat&&opts.flat.__gdWarpSource
+      const rawCell=opts.flat&&opts.flat.__gdWarpSource
         ?gdClarityDeepCropCell(opts.flat,{x0:strip.left-2,y0:y0-3,x1:strip.right+2,y1:y1+3}).canvas
-        :gdClarityUpscaleCanvas(PIX.cropCanvas(strip.canvas,0,Math.max(0,y0-3),strip.canvas.width,Math.min(strip.canvas.height,y1+3),1),3.4)),14);
-      const readOnce=async psm=>{
-        const rr=await gdClarityOcrWithTimeout(gdRecognizeWithTesseract(Tesseract,cellImg,{tessedit_char_whitelist:prof.whitelist,tessedit_pageseg_mode:psm},"clarity-cell-read-"+psm),12000);
+        :gdClarityUpscaleCanvas(PIX.cropCanvas(strip.canvas,0,Math.max(0,y0-3),strip.canvas.width,Math.min(strip.canvas.height,y1+3),1),3.4);
+      const cellImg=gdClarityPadCanvas(binarize(rawCell),14);
+      const readOnce=async(psm,img)=>{
+        const rr=await gdClarityOcrWithTimeout(gdRecognizeWithTesseract(Tesseract,img||cellImg,{tessedit_char_whitelist:prof.whitelist,tessedit_pageseg_mode:psm},"clarity-cell-read-"+psm),12000);
         const t=String(rr&&rr.data&&rr.data.text||"").trim();
         return {text:t,cell:t?OCR.parseCell(t,strip.metricKey):null};
       };
+      // Prefer the plausible read; else the parseable one; else keep whichever
+      // has any text at all as a placeholder.
+      const better=(cur,alt)=>((alt.cell&&alt.cell.valid)||(!cur.cell&&alt.cell)||(!cur.text&&alt.text))?alt:cur;
       let got=await readOnce("7");
-      if(!(got.cell&&got.cell.valid)){
-        const raw=await readOnce("13");
-        // Prefer the plausible read; else the parseable one; else keep whichever
-        // has any text at all as a placeholder.
-        if((raw.cell&&raw.cell.valid)||(!got.cell&&raw.cell)||(!got.text&&raw.text))got=raw;
-      }
+      if(!(got.cell&&got.cell.valid))got=better(got,await readOnce("13"));
+      // Last resort: the RAW (non-binarised) crop. The hard ink threshold can
+      // erase strokes under glare — Tesseract on the untouched pixels sometimes
+      // recovers exactly those rows. Only runs when both binarised reads failed,
+      // so working cells are never disturbed.
+      if(!(got.cell&&got.cell.valid))got=better(got,await readOnce("7",gdClarityPadCanvas(rawCell,14)));
       // Keep the band's flat-image geometry with the read: the deep scan stage
       // re-crops this exact box (at native resolution) — it never re-derives
       // rows, so row alignment cannot shift.
@@ -19532,8 +19536,17 @@ async function gdClarityDeepScanDirections(flat,scanRows,strips,dataRows,Tessera
       const inBand=comps.filter(c=>{const cy=(c.y0+c.y1)/2;return cy>=y0-bandPad&&cy<=y1+bandPad;});
       return {y0:y0,y1:y1,groups:OCR.groupComponentsIntoValues(inBand,{charHeight:charHeight}),comps:inBand};
     });
-    const markerCol=OCR.findMarkerColumn(bands,{charHeight:charHeight});
-    const entry={metricKey:strip.metricKey,cropSource:cropSource,canvas:bin,markerCol:null,support:0,bands:[]};
+    // DECIDER: letter markers (R/L) live in a column RIGHT of the value —
+    // try that first. Monitors that print signed values instead (+/-) put the
+    // sign LEFT of the number, so when no right column aligns, fall back to
+    // the basic sign mode on the left. Signs mode only ever accepts + or -.
+    let markerCol=OCR.findMarkerColumn(bands,{charHeight:charHeight,side:"right"});
+    let markerMode=markerCol?"letters":"";
+    if(!markerCol){
+      markerCol=OCR.findMarkerColumn(bands,{charHeight:charHeight,side:"left"});
+      if(markerCol)markerMode="signs";
+    }
+    const entry={metricKey:strip.metricKey,cropSource:cropSource,canvas:bin,markerCol:null,support:0,mode:markerMode,bands:[]};
     if(!markerCol){
       // Honest: no aligned marker column found — every band reported unread,
       // strip-read directions stay untouched.
@@ -19562,11 +19575,15 @@ async function gdClarityDeepScanDirections(flat,scanRows,strips,dataRows,Tessera
       if(typeof gdPracticeAssertImportNotCanceled==="function")gdPracticeAssertImportNotCanceled();
       const b=bands[r];
       const markerComps=b.comps.filter(c=>{const cx=(c.x0+c.x1)/2;return cx>=mx0&&cx<=mx1;});
-      // shape route: classify each remaining component, best score wins
+      // shape route: classify each remaining component, best score wins. Signs
+      // mode is restricted to + and - (a fragment shaped like a letter must
+      // not become a direction there).
       let shapeGlyph="",shapeScore=0;
       markerComps.forEach(c=>{
         const cls=OCR.classifyGlyphMask(OCR.cropMask(maskObj,c.x0,c.y0,c.x1,c.y1));
-        if(cls.glyph&&cls.score>shapeScore){shapeGlyph=cls.glyph;shapeScore=cls.score;}
+        if(!cls.glyph)return;
+        if(markerMode==="signs"&&cls.glyph!=="+"&&cls.glyph!=="-")return;
+        if(cls.score>shapeScore){shapeGlyph=cls.glyph;shapeScore=cls.score;}
       });
       const shapeDir=shapeGlyph?(OCR._internals.markerGlyphToDirection(shapeGlyph)||""):"";
       // ocr route: read the blanked sliver band (only run when ink remains)
@@ -19574,7 +19591,7 @@ async function gdClarityDeepScanDirections(flat,scanRows,strips,dataRows,Tessera
       if(markerComps.length){
         try{
           const bandCrop=PIX.cropCanvas(bin,mx0,Math.max(0,Math.floor(b.y0-bandPad)),mx1,Math.min(bin.height,Math.ceil(b.y1+bandPad)),0);
-          const res=await gdClarityOcrWithTimeout(gdRecognizeWithTesseract(Tesseract,gdClarityPadCanvas(bandCrop,12),{tessedit_char_whitelist:"LRlr+-",tessedit_pageseg_mode:"10"},"clarity-deep-scan"),9000);
+          const res=await gdClarityOcrWithTimeout(gdRecognizeWithTesseract(Tesseract,gdClarityPadCanvas(bandCrop,12),{tessedit_char_whitelist:markerMode==="signs"?"+-":"LRlr+-",tessedit_pageseg_mode:"10"},"clarity-deep-scan"),9000);
           ocrText=String(res&&res.data&&res.data.text||"").trim();
           ocrDir=OCR._internals.directionFromText(ocrText)||"";
         }catch(e){ocrText="(ocr error: "+(e&&e.message||e)+")";}
@@ -19632,7 +19649,7 @@ function gdClarityDeepScanMontage(stripEntries){
     }
     ctx.font="10px ui-monospace,Menlo,monospace";
     ctx.fillStyle=e.markerCol?"#37f28d":"#ff8a8a";
-    ctx.fillText(`${e.metricKey} (${e.cropSource}${e.markerCol?`, ${e.support} rows aligned`:", no column"})`.slice(0,40),x,11);
+    ctx.fillText(`${e.metricKey} (${e.cropSource}${e.markerCol?`, ${e.mode||"letters"}, ${e.support} aligned`:", no column"})`.slice(0,42),x,11);
     (e.bands||[]).forEach(b=>{
       const by=labelH+gap+((b.y0!=null?b.y0:0))*sc;
       const cy=labelH+gap+(((b.y0||0)+(b.y1||0))/2)*sc;
@@ -19757,15 +19774,21 @@ async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
     // phantom shot as row 1 and shifts every real row down a slot (the "extra
     // line"). Also drop AVERAGE / STD DEV summary rows (labelled at the margin).
     const rowBoxMax=Math.max.apply(null,[0].concat(valueRows.map(r=>Array.isArray(r.items)?r.items.length:0)));
-    const dataRows=valueRows.filter(row=>{
+    // rowFilterLog: honest per-row record of WHY each detected row was kept or
+    // dropped (margin text seen, box count) — printed in the extraction
+    // checkpoint so a summary row leaking through is diagnosable, not a mystery.
+    const rowFilterLog=[];
+    const dataRows=valueRows.filter((row,ri)=>{
       const boxes=Array.isArray(row.items)?row.items.length:0;
-      if(boxes<Math.max(4,rowBoxMax*0.5))return false;
+      if(boxes<Math.max(4,rowBoxMax*0.5)){rowFilterLog.push(`band${ri+1}(y${Math.round(row.y0)}): DROPPED sparse (${boxes} boxes)`);return false;}
       // Padded window: the AVERAGE / STD DEV label can sit slightly taller or
       // offset from the value band, so a strict cy-in-band test misses it and
       // the summary row imports as an extra shot.
       const rowPad=(Number(row.y1)-Number(row.y0))*0.5;
       const marginText=textBoxes.filter(box=>Number(box.cx)<firstColLeft&&Number(box.cy)>=Number(row.y0)-rowPad&&Number(box.cy)<=Number(row.y1)+rowPad).map(box=>String(box.text||"")).join(" ");
-      return !OCR.isSummaryLabel(marginText);
+      const summary=OCR.isSummaryLabel(marginText);
+      rowFilterLog.push(`band${ri+1}(y${Math.round(row.y0)}): ${summary?"DROPPED summary":"kept"} margin="${marginText||"(no margin text)"}" (${boxes} boxes)`);
+      return !summary;
     });
     // ===== Stage 2.5 — CLUB ID. Own stage: read each offcut ROW CELL at native
     // resolution, resolve each to a club, majority vote (one club per scan).
@@ -19827,7 +19850,7 @@ async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
       gdPracticeDebugCheckpointSafe("deep_scan","running",{inputSummary:`${directionKeys.length} direction strips (${directionKeys.join(", ")||"none"}) x ${dataRows.length} data bands`});
       const deep=await gdClarityDeepScanDirections(flat,scanRows,namedStrips,dataRows,Tesseract,{onStrip:(n,total)=>{try{gdPracticeUpdateImportJob({checkpointText:`Deep scan strip ${n}/${total}`,stageIndex:2,progress:Math.min(95,90+Math.round((n/Math.max(1,total))*5))});}catch(e){}}});
       const deepDump=deep.stripEntries.map(e=>{
-        const head=`${e.metricKey} [${e.cropSource}] ${e.markerCol?`marker column found (${e.support} rows aligned)`:"NO marker column aligned — nothing applied"}`;
+        const head=`${e.metricKey} [${e.cropSource}] ${e.markerCol?`marker column found (mode: ${e.mode==="signs"?"+/- signs, left of value":"R/L letters, right of value"}, ${e.support} rows aligned)`:"NO marker column aligned (letters nor signs) — nothing applied"}`;
         const bandText=(e.bands||[]).map(b=>`r${b.row}:${b.final||"·"}${b.method&&b.method!=="none"&&b.method!=="no-column"?`[${b.method}]`:""}${b.hasCell===false&&b.final?"(no cell)":""}${b.prev&&b.prev!==b.final?`(was ${b.prev})`:""}`).join(" ");
         return `${head}\n  ${bandText}`;
       }).join("\n");
@@ -19844,7 +19867,7 @@ async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
     // Single checkpoint (adapter): scanner output -> Shot Library, cleaning misreads.
     const payload=gdClarityScanResultToPayload(scanRows,{label:sourceLabel,club:clubLabel});
     const rowCount=Number(payload?.clubGroups?.length)||0;
-    gdPracticeDebugCheckpointSafe("extraction_completed",rowCount?"success":"failed",{outputSummary:`Read ${rowCount} shots (${scanRows.length} rows x ${allocatedCount} strips)\nPer-strip band counts (after head-trim to consensus): ${(readResult.stripCounts||[]).join(" ")}\n${readDump}`,counts:{rows:rowCount,scanRows:scanRows.length},snapshot:{canvas:gdClarityStripsMontage(namedStrips),label:`Extraction: ${rowCount} shots read from ${namedStrips.length} physical strips`}});
+    gdPracticeDebugCheckpointSafe("extraction_completed",rowCount?"success":"failed",{outputSummary:`Read ${rowCount} shots (${scanRows.length} rows x ${allocatedCount} strips)\nPer-strip band counts (after head-trim to consensus): ${(readResult.stripCounts||[]).join(" ")}\n${readDump}\nRow filter (summary/sparse):\n${rowFilterLog.join("\n")}`,counts:{rows:rowCount,scanRows:scanRows.length},snapshot:{canvas:gdClarityStripsMontage(namedStrips),label:`Extraction: ${rowCount} shots read from ${namedStrips.length} physical strips`}});
     if(!rowCount){
       gdPracticeFeedback("No usable rows were read. Re-frame the value grid and scan again.","error");
       gdOpenPracticeManualQuadTool();
