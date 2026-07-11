@@ -1728,8 +1728,8 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 <script>window.L=window.L||window.leaflet;</script>
 <script src="scripts/clarity-build.js?v=tool-rail-tab-hole-label-20260620"></script>
 <script src="scripts/gd-launch-monitor-alias-registry.js?v=practice-alias-registry-20260612"></script>
-<script src="scripts/clarity-table-ocr.js?v=table-ocr-deepscan-20260711g"></script>
-<script src="scripts/clarity-table-ocr-pixels.js?v=table-ocr-deepscan-20260711g"></script>
+<script src="scripts/clarity-table-ocr.js?v=table-ocr-deepscan-20260712a"></script>
+<script src="scripts/clarity-table-ocr-pixels.js?v=table-ocr-deepscan-20260712a"></script>
 <style>
 	    *,*::before,*::after{box-sizing:border-box}
 	    :where(input,select,textarea,button){max-width:100%}
@@ -7068,7 +7068,9 @@ function gdLmBuildTableGroups(lines){
     groups.push({
       originClubLabel:club,
       candidateClub:club,
-      expectedDistanceM:Number.isFinite(Number(row.carry))?Number(row.carry):undefined,
+      // Baseline (bag distance), NOT the row's own carry — carry-as-expected
+      // zeroes every depth and flat-lines the practice plot.
+      expectedDistanceM:gdClarityClubBaselineM(club),
       metrics
     });
     if(evidence.length<8)evidence.push(line);
@@ -7815,7 +7817,9 @@ function gdBuildLaunchMonitorTextCapture(text,label="Plain text launch monitor u
       clubGroups.push({
         originClubLabel:club||"Unknown",
         candidateClub:club||"Unknown",
-        expectedDistanceM:Number.isFinite(carry)?carry:undefined,
+        // Baseline (bag distance), NOT the row's own carry — carry-as-expected
+        // zeroes every depth and flat-lines the practice plot.
+        expectedDistanceM:gdClarityClubBaselineM(club||"Unknown"),
         metrics
       });
       if(rawEvidence.length<8)rawEvidence.push(line);
@@ -19147,6 +19151,22 @@ function gdClarityStripsMontage(strips){
   });
   return c;
 }
+// Club BASELINE distance (the bag distance): the player's saved bag first,
+// the app defaults second. This is what shots are measured AGAINST — depth on
+// the practice plot is carry minus THIS, and the distance-viability gate and
+// bag suggestion logic both key off it. It must never be the shot's own carry
+// (that collapses every depth to 0 — the "dots in a straight line" bug).
+function gdClarityClubBaselineM(club){
+  try{
+    const p=typeof ensureProfile==="function"?ensureProfile():null;
+    const key=String(club||"").trim().toLowerCase();
+    const row=(Array.isArray(p?.bag)?p.bag:[]).find(item=>String(item?.club||item?.name||"").trim().toLowerCase()===key);
+    const bag=Number(row?.baseCarry);
+    if(Number.isFinite(bag)&&bag>0)return bag;
+  }catch(e){}
+  const fallback=typeof gdDefaultCarryForClub==="function"?Number(gdDefaultCarryForClub(club)):NaN;
+  return Number.isFinite(fallback)&&fallback>0?fallback:155;
+}
 // THE SINGLE CHECKPOINT between the scanner and the Shot Library.
 // Input  (scanner-preferred format): rows of { club, cells:[{key,value,direction,valid}] }.
 // Output (Shot Library landing point): { label, inputType, clubGroups:[{originClubLabel,
@@ -19179,7 +19199,11 @@ function gdClarityScanResultToPayload(scanRows,opts={}){
       clubGroups.push({
         originClubLabel:club,
         candidateClub:club,
-        expectedDistanceM:Number.isFinite(carry)?carry:undefined,
+        // BASELINE, not the shot's own carry. expectedDistanceM feeds depth
+        // (carry - expected), the distance-viability gate, and the plot's
+        // %-of-bag scaling; setting it to carry zeroed every depth and drew
+        // the shots in a vertical line.
+        expectedDistanceM:gdClarityClubBaselineM(club),
         metrics
       });
     }
