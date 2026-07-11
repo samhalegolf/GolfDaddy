@@ -1728,8 +1728,8 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 <script>window.L=window.L||window.leaflet;</script>
 <script src="scripts/clarity-build.js?v=tool-rail-tab-hole-label-20260620"></script>
 <script src="scripts/gd-launch-monitor-alias-registry.js?v=practice-alias-registry-20260612"></script>
-<script src="scripts/clarity-table-ocr.js?v=table-ocr-deepscan-20260711f"></script>
-<script src="scripts/clarity-table-ocr-pixels.js?v=table-ocr-deepscan-20260711f"></script>
+<script src="scripts/clarity-table-ocr.js?v=table-ocr-deepscan-20260711g"></script>
+<script src="scripts/clarity-table-ocr-pixels.js?v=table-ocr-deepscan-20260711g"></script>
 <style>
 	    *,*::before,*::after{box-sizing:border-box}
 	    :where(input,select,textarea,button){max-width:100%}
@@ -19381,58 +19381,59 @@ async function gdClarityReadStripsIntoRows(strips,dataRows,Tesseract,opts){
 // which is how 7i was misread as 2i/5i), resolve each read to a club, and take
 // the MAJORITY. No aliases baked in: reuses the app's club-from-text resolver.
 // ===========================================================================
-async function gdClarityClubIdScan(flat,strips,valueRows,Tesseract){
-  const PIX=window.ClarityTableOcrPixels;
-  const offcuts=(Array.isArray(strips)?strips:[]).filter(s=>s&&!s.metricKey&&s.canvas);
-  const rows=(Array.isArray(valueRows)?valueRows:[]).filter(r=>r&&Number.isFinite(Number(r.y0))&&Number.isFinite(Number(r.y1)));
-  const out={club:"",votes:{},entries:[],offcuts:offcuts.length,rowBands:rows.length};
-  if(!offcuts.length||!rows.length||typeof gdLmClubFromLine!=="function")return out;
-  const cfg={tessedit_char_whitelist:"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789° ",tessedit_pageseg_mode:"7"};
-  for(const strip of offcuts){
-    for(let ri=0;ri<rows.length;ri+=1){
-      if(typeof gdPracticeAssertImportNotCanceled==="function")gdPracticeAssertImportNotCanceled();
-      const row=rows[ri];
-      const crop=gdClarityDeepCropCell(flat,{x0:strip.left,y0:Number(row.y0)-3,x1:strip.right,y1:Number(row.y1)+3});
-      // Raw read first (club cells can be light-on-dark, which binarising would
-      // wipe); binarised retry only when the raw read resolves nothing.
-      let text="",club="";
-      try{
-        const res=await gdClarityOcrWithTimeout(gdRecognizeWithTesseract(Tesseract,gdClarityPadCanvas(crop.canvas,12),cfg,"clarity-club-cell"),9000);
-        text=String(res&&res.data&&res.data.text||"").replace(/\s+/g," ").trim();
-        club=text?gdLmClubFromLine(text):"";
-        if(!club){
-          const res2=await gdClarityOcrWithTimeout(gdRecognizeWithTesseract(Tesseract,gdClarityPadCanvas(PIX.binarizeCanvas(crop.canvas),12),cfg,"clarity-club-cell-bin"),9000);
-          const text2=String(res2&&res2.data&&res2.data.text||"").replace(/\s+/g," ").trim();
-          if(text2){club=gdLmClubFromLine(text2);if(club)text=text2;}
-        }
-      }catch(e){text="(ocr error: "+(e&&e.message||e)+")";}
-      if(club)out.votes[club]=(out.votes[club]||0)+1;
-      out.entries.push({row:ri+1,text:text,club:club,cropSource:crop.source,canvas:crop.canvas});
-    }
-  }
+// ONE read of the WHOLE offcut (everything left of the first named column) at
+// native resolution. No per-row cutting: it does not matter where anything is,
+// only that it is on this strip. The lines that come back drive BOTH:
+//   - the club (majority over lines that resolve to a club), and
+//   - the summary rows (AVERAGE / STD DEV lines mark their y-positions, which
+//     the row filter uses to drop those bands — replaces the fragile per-row
+//     margin-box matching that let the AVERAGE row leak in as a 14th shot).
+async function gdClarityOffcutScan(flat,firstColLeft,Tesseract){
+  const PIX=window.ClarityTableOcrPixels,OCR=window.ClarityTableOcr;
+  const width=Math.max(0,Math.floor(Number(firstColLeft)||0));
+  const out={club:"",votes:{},lines:[],summaryYs:[],canvas:null,cropSource:"flat",width:width,flatHeight:Number(flat&&flat.height)||0};
+  if(width<8||typeof gdLmClubFromLine!=="function")return out;
+  let canvas=null,cropSource="native";
+  try{canvas=gdClarityNativeStripCanvas(flat,{left:0,right:width});}catch(e){canvas=null;}
+  if(!canvas){canvas=gdClarityUpscaleCanvas(PIX.cropCanvas(flat,0,0,width,flat.height,0),2.5);cropSource="flat";}
+  out.canvas=canvas;out.cropSource=cropSource;
+  const sy=canvas.height/Math.max(1,Number(flat.height));
+  const res=await gdClarityOcrWithTimeout(gdRecognizeWithTesseract(Tesseract,canvas,{tessedit_char_whitelist:"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.° ",tessedit_pageseg_mode:"6"},"clarity-offcut"),15000);
+  const lines=(typeof gdLmLinesFromOcrData==="function"?gdLmLinesFromOcrData(res&&res.data):[]).filter(l=>l&&String(l.text||"").trim());
+  lines.forEach(l=>{
+    const text=String(l.text||"").replace(/\s+/g," ").trim();
+    const flatY=Number(l.cy)/Math.max(0.0001,sy);
+    const club=gdLmClubFromLine(text)||"";
+    const summary=OCR.isSummaryLabel(text);
+    if(club&&!summary)out.votes[club]=(out.votes[club]||0)+1;
+    if(summary)out.summaryYs.push(flatY);
+    out.lines.push({text:text,flatY:flatY,club:club,summary:summary});
+  });
   let best="",bestN=0;
   Object.keys(out.votes).forEach(k=>{if(out.votes[k]>bestN){bestN=out.votes[k];best=k;}});
   out.club=best;
   return out;
 }
-// Montage for the feedback window: every offcut row cell as read, labelled with
-// the raw text and the club it resolved to (or nothing).
-function gdClarityClubIdMontage(entries){
-  const list=(Array.isArray(entries)?entries:[]).filter(e=>e&&e.canvas);
-  if(!list.length){const e=document.createElement("canvas");e.width=10;e.height=10;return e;}
-  const cols=Math.max(1,Math.min(5,Math.ceil(Math.sqrt(list.length))));
-  const rowsN=Math.ceil(list.length/cols);
-  const cellW=150,cellH=56,labelH=13,gap=6;
+// Feedback image: the offcut strip exactly as read, each OCR line labelled at
+// its own height with what it resolved to (club / SUMMARY / nothing).
+function gdClarityOffcutMontage(offcut){
+  const canvas=offcut&&offcut.canvas;
+  if(!canvas){const e=document.createElement("canvas");e.width=10;e.height=10;return e;}
+  const gap=8,labelW=220,dispH=700;
+  const sc=dispH/Math.max(1,canvas.height);
+  const imgW=Math.max(10,Math.round(canvas.width*sc));
+  const flatH=Number(offcut.flatHeight)||0;
   const c=document.createElement("canvas");
-  c.width=cols*(cellW+gap)+gap;c.height=rowsN*(cellH+labelH+gap)+gap;
+  c.width=imgW+labelW+gap*3;c.height=dispH+gap*2;
   const ctx=c.getContext("2d");ctx.fillStyle="#0b0f0d";ctx.fillRect(0,0,c.width,c.height);
-  list.forEach((e,i)=>{
-    const cx=gap+(i%cols)*(cellW+gap),cy=gap+Math.floor(i/cols)*(cellH+labelH+gap);
-    const sc=Math.min(cellW/Math.max(1,e.canvas.width),cellH/Math.max(1,e.canvas.height));
-    try{ctx.drawImage(e.canvas,cx,cy+labelH,Math.max(4,Math.round(e.canvas.width*sc)),Math.max(4,Math.round(e.canvas.height*sc)));}catch(err){}
-    ctx.fillStyle=e.club?"#37f28d":"#8fa39a";
-    ctx.font="10px ui-monospace,Menlo,monospace";
-    ctx.fillText(`r${e.row}: "${e.text||"·"}" -> ${e.club||"·"}`.slice(0,26),cx,cy+10);
+  ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality="high";
+  try{ctx.drawImage(canvas,gap,gap,imgW,dispH);}catch(e){}
+  ctx.strokeStyle="#37f28d";ctx.lineWidth=1.5;ctx.strokeRect(gap,gap,imgW,dispH);
+  ctx.font="10px ui-monospace,Menlo,monospace";
+  (offcut.lines||[]).forEach((l,i)=>{
+    const yy=gap+(flatH>0?Math.max(8,Math.min(dispH-2,(Number(l.flatY)/flatH)*dispH)):8+i*12);
+    ctx.fillStyle=l.summary?"#ffb84a":(l.club?"#37f28d":"#8fa39a");
+    ctx.fillText(`${l.summary?"SUMMARY":(l.club||"·")} "${l.text}"`.slice(0,36),gap*2+imgW,yy);
   });
   return c;
 }
@@ -19765,62 +19766,55 @@ async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
       return null;
     }
     // Margin = everything left of the first NAMED metric strip (the club column
-    // + true page margin). Using strips[0] would be the club column itself now
-    // that all strips hand over, leaving no margin and letting AVERAGE/STD DEV
-    // summary rows leak through as extra shots.
+    // + true page margin).
     const firstColLeft=Number((namedStrips[0]||strips[0]).left);
-    // A real data row spans most of the columns. Drop SPARSE stray rows (e.g. a
-    // couple of edge-noise boxes near the top) — otherwise that stray becomes a
-    // phantom shot as row 1 and shifts every real row down a slot (the "extra
-    // line"). Also drop AVERAGE / STD DEV summary rows (labelled at the margin).
-    const rowBoxMax=Math.max.apply(null,[0].concat(valueRows.map(r=>Array.isArray(r.items)?r.items.length:0)));
-    // rowFilterLog: honest per-row record of WHY each detected row was kept or
-    // dropped (margin text seen, box count) — printed in the extraction
-    // checkpoint so a summary row leaking through is diagnosable, not a mystery.
-    const rowFilterLog=[];
-    const dataRows=valueRows.filter((row,ri)=>{
-      const boxes=Array.isArray(row.items)?row.items.length:0;
-      if(boxes<Math.max(4,rowBoxMax*0.5)){rowFilterLog.push(`band${ri+1}(y${Math.round(row.y0)}): DROPPED sparse (${boxes} boxes)`);return false;}
-      // Padded window: the AVERAGE / STD DEV label can sit slightly taller or
-      // offset from the value band, so a strict cy-in-band test misses it and
-      // the summary row imports as an extra shot.
-      const rowPad=(Number(row.y1)-Number(row.y0))*0.5;
-      const marginText=textBoxes.filter(box=>Number(box.cx)<firstColLeft&&Number(box.cy)>=Number(row.y0)-rowPad&&Number(box.cy)<=Number(row.y1)+rowPad).map(box=>String(box.text||"")).join(" ");
-      const summary=OCR.isSummaryLabel(marginText);
-      rowFilterLog.push(`band${ri+1}(y${Math.round(row.y0)}): ${summary?"DROPPED summary":"kept"} margin="${marginText||"(no margin text)"}" (${boxes} boxes)`);
-      return !summary;
-    });
-    // ===== Stage 2.5 — CLUB ID. Own stage: read each offcut ROW CELL at native
-    // resolution, resolve each to a club, majority vote (one club per scan).
-    // Detection drives the club; the manual field / 7i is only a fallback.
-    // Votes come from DATA rows only — summary rows and stray bands would just
-    // add garbage reads to the vote.
-    gdPracticeUpdateImportJob({checkpointText:"Identifying club",stageIndex:1,progress:64});
-    const offcutCount=strips.filter(s=>s&&!s.metricKey).length;
-    gdPracticeDebugCheckpointSafe("club_id","running",{inputSummary:`${offcutCount} offcut strip(s) x ${dataRows.length} data-row bands`});
-    let clubScan={club:"",votes:{},entries:[]};
+    // ===== Stage 2.5 — CLUB ID + SUMMARY ROWS, from ONE whole-offcut read.
+    // No per-row cutting: it does not matter where anything sits on the offcut,
+    // only that it is on it. The lines that come back give the club (majority
+    // over lines resolving to a club — one club per scan) and the y-positions
+    // of AVERAGE / STD DEV labels, which the row filter below uses.
+    gdPracticeUpdateImportJob({checkpointText:"Reading the offcut (club + summary rows)",stageIndex:1,progress:64});
+    gdPracticeDebugCheckpointSafe("club_id","running",{inputSummary:`Whole offcut 0-${Math.round(firstColLeft)} x ${flat.height}`});
+    let clubScan={club:"",votes:{},lines:[],summaryYs:[]};
     try{
-      clubScan=await gdClarityClubIdScan(flat,strips,dataRows,Tesseract);
+      clubScan=await gdClarityOffcutScan(flat,firstColLeft,Tesseract);
     }catch(e){
       if(typeof gdPracticeIsQuietScanStop==="function"&&gdPracticeIsQuietScanStop(e))throw e;
       console.warn("[GolfDaddy] Club ID stage failed",e);
-      gdPracticeDebugCheckpointSafe("club_id","failed",{outputSummary:`Club ID failed — falling back to the manual club. ${e&&e.message?e.message:e}`,technicalDetails:e&&e.stack});
+      gdPracticeDebugCheckpointSafe("club_id","failed",{outputSummary:`Offcut read failed — falling back to the manual club; summary rows unfiltered. ${e&&e.message?e.message:e}`,technicalDetails:e&&e.stack});
     }
     const manualClub=(typeof gdPracticeScanClubLabel==="function"?gdPracticeScanClubLabel():"7i")||"7i";
     const clubLabel=clubScan.club||manualClub;
-    if(clubScan.entries&&clubScan.entries.length){
+    if(clubScan.lines&&clubScan.lines.length){
       const voteText=Object.keys(clubScan.votes).map(k=>`${k}: ${clubScan.votes[k]}`).join(", ")||"none";
-      const readText=clubScan.entries.map(e=>`r${e.row}: "${e.text||"·"}" -> ${e.club||"·"} [${e.cropSource}]`).join("\n");
+      const lineText=clubScan.lines.map(l=>`y${Math.round(l.flatY)}: "${l.text}" -> ${l.summary?"SUMMARY":(l.club||"·")}`).join("\n");
       const totalVotes=Object.values(clubScan.votes).reduce((a,b)=>a+b,0);
       const winnerVotes=clubScan.club?clubScan.votes[clubScan.club]:0;
       gdPracticeDebugCheckpointSafe("club_id",clubScan.club?"success":"warning",{
-        outputSummary:`${clubScan.club?`Club: ${clubScan.club} (${winnerVotes}/${clubScan.entries.length} row reads agree)`:`No club resolved from ${clubScan.entries.length} row reads — using ${manualClub} (manual/default)`}. Votes: ${voteText}. ${totalVotes-winnerVotes>0?`${totalVotes-winnerVotes} dissenting read${totalVotes-winnerVotes===1?"":"s"}.`:""}\n${readText}`,
-        counts:{offcuts:clubScan.offcuts||0,rowsRead:clubScan.entries.length,votes:totalVotes,winnerVotes:winnerVotes},
-        snapshot:{canvas:gdClarityClubIdMontage(clubScan.entries),label:`Club ID: offcut row cells as read (label = raw text -> resolved club); result ${clubLabel}`}
+        outputSummary:`${clubScan.club?`Club: ${clubScan.club} (${winnerVotes}/${totalVotes} club votes)`:`No club resolved from ${clubScan.lines.length} offcut lines — using ${manualClub} (manual/default)`}. Votes: ${voteText}. ${clubScan.summaryYs.length} summary label${clubScan.summaryYs.length===1?"":"s"} found (y: ${clubScan.summaryYs.map(y=>Math.round(y)).join(", ")||"none"}) [${clubScan.cropSource||"?"}].\n${lineText}`,
+        counts:{lines:clubScan.lines.length,votes:totalVotes,winnerVotes:winnerVotes,summaryLabels:clubScan.summaryYs.length},
+        snapshot:{canvas:gdClarityOffcutMontage(clubScan),label:`Offcut as read: green = club vote, amber = summary label; result ${clubLabel}`}
       });
     }else if(!clubScan.club){
-      gdPracticeDebugCheckpointSafe("club_id","warning",{outputSummary:`No offcut strip or row bands to read (${offcutCount} offcuts) — using ${manualClub} (manual/default).`,counts:{offcuts:offcutCount,rowsRead:0}});
+      gdPracticeDebugCheckpointSafe("club_id","warning",{outputSummary:`Offcut produced no readable lines (width ${Math.round(firstColLeft)}px) — using ${manualClub} (manual/default); summary rows unfiltered.`,counts:{lines:0}});
     }
+    // A real data row spans most of the columns. Drop SPARSE stray rows (e.g. a
+    // couple of edge-noise boxes near the top) — otherwise that stray becomes a
+    // phantom shot as row 1 and shifts every real row down a slot. Summary rows
+    // (AVERAGE / STD DEV) are dropped by the offcut label y-positions above.
+    const rowBoxMax=Math.max.apply(null,[0].concat(valueRows.map(r=>Array.isArray(r.items)?r.items.length:0)));
+    // rowFilterLog: honest per-row record of WHY each detected row was kept or
+    // dropped — printed in the extraction checkpoint.
+    const rowFilterLog=[];
+    const summaryYs=Array.isArray(clubScan.summaryYs)?clubScan.summaryYs:[];
+    const dataRows=valueRows.filter((row,ri)=>{
+      const boxes=Array.isArray(row.items)?row.items.length:0;
+      if(boxes<Math.max(4,rowBoxMax*0.5)){rowFilterLog.push(`band${ri+1}(y${Math.round(row.y0)}): DROPPED sparse (${boxes} boxes)`);return false;}
+      const rowPad=(Number(row.y1)-Number(row.y0))*0.6;
+      const summaryHit=summaryYs.find(y=>Number(y)>=Number(row.y0)-rowPad&&Number(y)<=Number(row.y1)+rowPad);
+      rowFilterLog.push(`band${ri+1}(y${Math.round(row.y0)}): ${summaryHit!=null?`DROPPED summary (label at y${Math.round(summaryHit)})`:"kept"} (${boxes} boxes)`);
+      return summaryHit==null;
+    });
     // ===== GEOMETRY FROZEN. Strips are cut + named. Extraction below just reads
     // each strip top-to-bottom and slots values into rows by position. =====
     gdPracticeUpdateImportJob({checkpointText:"Reading strips",stageIndex:2,progress:74});
