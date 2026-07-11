@@ -69,6 +69,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/shot-library-sync"
+  to = "/.netlify/functions/shot-library-sync"
+  status = 200
+
+[[redirects]]
   from = "/api/auth-signup"
   to = "/.netlify/functions/auth-signup"
   status = 200
