@@ -153,6 +153,20 @@ hang or a 0-shot bounce. Next: deploy the branch, scan, diff against
   in flat coordinates, only the pixels improve. `gdWarpQuadToCanvas` caches the
   source ImageData per photo (WeakMap) so dozens of small region warps are
   cheap. Header crops are NOT binarised (headers can be light-on-dark).
+- **Deep scan v2 — STRIP-LEVEL collective blanking** (replaced the per-cell
+  partition, which left number fragments behind and missed markers): per
+  direction strip, `findMarkerColumn` (module) finds the marker column ONCE by
+  cross-row alignment — markers occupy the same narrow x-range on every row
+  while value fragments land anywhere; needs >=3 aligned rows (or 25% of
+  bands). Then everything outside that column is whited out down the whole
+  strip in one stroke and the remaining sliver is read band by band (shape
+  classifier + psm-10 OCR, same agree/conflict rules). Windows are generous by
+  principle: we never claim to know exactly where the marker is, only that it
+  is definitely inside the padded window. EVERY data band of every direction
+  strip is examined and reported (no silent skips — the old per-cell pass
+  skipped value-null cells and whole columns without saying so). Cells are
+  matched back to scan rows by stored band geometry, not index. Montage shows
+  each blanked strip with the marker column boxed and a per-row result rail.
 - **Club ID is its own stage** (`club_id` checkpoint, "2.5 · Club ID (offcut)",
   after header allocation): one club per scan, so each offcut ROW CELL is read
   individually (native-res crop, psm 7; binarised retry only if the raw read

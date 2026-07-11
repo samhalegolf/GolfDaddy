@@ -938,6 +938,64 @@
     return { valueBox: valueGroup, markerComponents: markerComponents, charHeight: charHeight };
   }
 
+  // Find the MARKER COLUMN of a direction strip from per-band component groups.
+  // The insight (strip-level, not cell-level): value widths vary row to row, so
+  // number fragments land at unpredictable x — but the R/L/+/- markers occupy
+  // the same narrow x-range on EVERY row. Collect each band's narrow trailing
+  // groups (right of its widest ink cluster), cluster their centres, and the
+  // x-cluster supported by the most bands is the marker column. Returns
+  // { x0, x1, support, bandsWithTrailing } or null when no column aligns.
+  function findMarkerColumn(bands, opts) {
+    opts = opts || {};
+    var charHeight = Number(opts.charHeight) || 16;
+    var list = Array.isArray(bands) ? bands : [];
+    var candidates = []; // {cx, x0, x1, band}
+    var bandsWithTrailing = 0;
+    list.forEach(function (band, bi) {
+      var groups = Array.isArray(band && band.groups) ? band.groups.slice() : [];
+      if (groups.length < 2) return;
+      var value = groups.reduce(function (best, g) { return (Number(g.ink) || 0) > (Number(best.ink) || 0) ? g : best; }, groups[0]);
+      var trailing = groups.filter(function (g) {
+        if (g === value) return false;
+        if (Number(g.x0) <= Number(value.x1)) return false;         // right of the value only
+        if ((Number(g.x1) - Number(g.x0)) > charHeight * 1.9) return false; // marker-narrow
+        if ((Number(g.ink) || 0) < 4) return false;                  // not dust
+        return true;
+      });
+      if (trailing.length) bandsWithTrailing += 1;
+      trailing.forEach(function (g) {
+        candidates.push({ cx: (Number(g.x0) + Number(g.x1)) / 2, x0: Number(g.x0), x1: Number(g.x1), band: bi });
+      });
+    });
+    if (!candidates.length) return null;
+    // 1-D cluster of candidate centres: sort, split on gaps wider than ~a glyph.
+    candidates.sort(function (a, b) { return a.cx - b.cx; });
+    var clusters = [];
+    var cluster = null;
+    candidates.forEach(function (c) {
+      if (cluster && (c.cx - cluster.items[cluster.items.length - 1].cx) <= charHeight * 0.9) {
+        cluster.items.push(c);
+      } else {
+        cluster = { items: [c] };
+        clusters.push(cluster);
+      }
+    });
+    var best = null, bestSupport = 0;
+    clusters.forEach(function (cl) {
+      var bandsSeen = {};
+      cl.items.forEach(function (c) { bandsSeen[c.band] = 1; });
+      var support = Object.keys(bandsSeen).length;
+      if (support > bestSupport) { bestSupport = support; best = cl; }
+    });
+    // Alignment demands agreement: a couple of stray fragments must not become
+    // a "column". At least 3 bands, or a quarter of the bands, must line up.
+    var required = Math.max(3, Math.ceil(list.length * 0.25));
+    if (!best || bestSupport < required) return null;
+    var x0 = Math.min.apply(null, best.items.map(function (c) { return c.x0; }));
+    var x1 = Math.max.apply(null, best.items.map(function (c) { return c.x1; }));
+    return { x0: x0, x1: x1, support: bestSupport, bandsWithTrailing: bandsWithTrailing };
+  }
+
   // Full deep-scan analysis of one direction cell: blank the value, classify the
   // remainder. Returns everything the caller (and the debug window) needs:
   //   { direction, glyph, score, valueBox, candidates:[{box, glyph, score, grid}] }
@@ -976,6 +1034,9 @@
     isSummaryLabel: isSummaryLabel,
     groupComponentsIntoValues: groupComponentsIntoValues,
     deepScanDirectionCell: deepScanDirectionCell,
+    findMarkerColumn: findMarkerColumn,
+    classifyGlyphMask: classifyGlyphMask,
+    cropMask: cropMask,
     _internals: {
       median: median, trackClusters: trackClusters, clearanceConfig: clearanceConfig,
       mergeIntervals: mergeIntervals, clearanceRows: clearanceRows, corridorBands: corridorBands,

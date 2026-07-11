@@ -1728,8 +1728,8 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 <script>window.L=window.L||window.leaflet;</script>
 <script src="scripts/clarity-build.js?v=tool-rail-tab-hole-label-20260620"></script>
 <script src="scripts/gd-launch-monitor-alias-registry.js?v=practice-alias-registry-20260612"></script>
-<script src="scripts/clarity-table-ocr.js?v=table-ocr-deepscan-20260711d"></script>
-<script src="scripts/clarity-table-ocr-pixels.js?v=table-ocr-deepscan-20260711d"></script>
+<script src="scripts/clarity-table-ocr.js?v=table-ocr-deepscan-20260711e"></script>
+<script src="scripts/clarity-table-ocr-pixels.js?v=table-ocr-deepscan-20260711e"></script>
 <style>
 	    *,*::before,*::after{box-sizing:border-box}
 	    :where(input,select,textarea,button){max-width:100%}
@@ -19495,123 +19495,151 @@ function gdClarityNativeStripCanvas(flat,strip){
   const targetW=Math.round(Math.min(520,Math.max(120,(x1-x0)*2.2)));
   return gdWarpQuadToCanvas(flat.__gdWarpSource,corners.map(p=>({x:p.x,y:p.y})),targetW,{minW:64,minH:120,maxH:3400});
 }
-// Run the blanking method on one direction cell crop. Returns an honest record
-// of everything that happened; `direction` is "" when neither route produced a
-// confident answer (the caller then keeps the strip-read direction).
-async function gdClarityDeepScanCell(cellCanvas,Tesseract){
-  const OCR=window.ClarityTableOcr,PIX=window.ClarityTableOcrPixels;
-  const maskObj=PIX.inkMask(PIX.imageData(cellCanvas));
-  const comps=PIX.connectedComponents(maskObj);
-  const analysis=OCR.deepScanDirectionCell(maskObj,comps,{});
-  const record={
-    shapeDirection:analysis.direction||"",
-    shapeGlyph:analysis.glyph||"",
-    shapeScore:Number(analysis.score)||0,
-    candidates:analysis.candidates.length,
-    valueBox:analysis.valueBox?{x0:analysis.valueBox.x0,y0:analysis.valueBox.y0,x1:analysis.valueBox.x1,y1:analysis.valueBox.y1}:null,
-    markerBox:analysis.candidates.length&&analysis.candidates[0].glyph?analysis.candidates[0].box:null,
-    ocrDirection:"",ocrText:"",
-    blankedCanvas:null,
-    direction:"",method:""
-  };
-  // Blank the value: binarised copy of the cell with the value cluster painted
-  // out. This is the exact image the OCR route reads — kept for the debug view.
-  if(analysis.valueBox){
-    const blanked=PIX.binarizeCanvas(cellCanvas);
-    const ctx=blanked.getContext("2d");
-    const padX=Math.max(2,Math.round((analysis.valueBox.x1-analysis.valueBox.x0)*0.06));
-    const padY=Math.max(2,Math.round((analysis.valueBox.y1-analysis.valueBox.y0)*0.14));
-    ctx.fillStyle="#fff";
-    ctx.fillRect(analysis.valueBox.x0-padX,analysis.valueBox.y0-padY,(analysis.valueBox.x1-analysis.valueBox.x0)+padX*2,(analysis.valueBox.y1-analysis.valueBox.y0)+padY*2);
-    record.blankedCanvas=blanked;
-    // OCR route: only worth running when some ink REMAINS after blanking —
-    // otherwise Tesseract hallucinates on an empty image.
-    if(analysis.candidates.length){
-      try{
-        const res=await gdClarityOcrWithTimeout(gdRecognizeWithTesseract(Tesseract,gdClarityPadCanvas(blanked,12),{tessedit_char_whitelist:"LRlr+-",tessedit_pageseg_mode:"10"},"clarity-deep-scan"),9000);
-        record.ocrText=String(res&&res.data&&res.data.text||"").trim();
-        record.ocrDirection=OCR._internals.directionFromText(record.ocrText)||"";
-      }catch(e){record.ocrText="(ocr error: "+(e&&e.message||e)+")";}
-    }
-  }
-  // Decision. Agreement wins outright; a lone confident shape read is accepted
-  // (it is the purpose-built classifier); a lone OCR read is accepted only when
-  // the shape route at least found marker ink to read.
-  if(record.shapeDirection&&record.ocrDirection&&record.shapeDirection===record.ocrDirection){
-    record.direction=record.shapeDirection;record.method="agree";
-  }else if(record.shapeDirection&&!record.ocrDirection){
-    record.direction=record.shapeDirection;record.method="shape";
-  }else if(!record.shapeDirection&&record.ocrDirection&&record.candidates>0){
-    record.direction=record.ocrDirection;record.method="ocr";
-  }else if(record.shapeDirection&&record.ocrDirection){
-    // The two routes disagree — that is NOT a confident read. Report it, apply nothing.
-    record.method="conflict";
-  }
-  return record;
-}
-// The stage runner: walks the direction cells of the already-assembled rows and
-// updates ONLY their direction fields. Returns {entries, updated, examined,...}
-// for the debug checkpoint.
-async function gdClarityDeepScanDirections(flat,scanRows,Tesseract,opts){
+// The stage runner, STRIP-LEVEL (v2). Per direction strip:
+//   1. one hi-res render of the whole strip (native via inverse warp),
+//   2. find the MARKER COLUMN once, by cross-row alignment — markers occupy the
+//      same narrow x-range on every row, while value fragments land anywhere,
+//   3. COLLECTIVE BLANKING: white out everything outside that column all the
+//      way down the strip in one stroke (no per-cell value guessing),
+//   4. read the remaining sliver band by band (shape classifier + OCR).
+// Windows are deliberately GENEROUS: we never claim to know exactly where a
+// marker is, only that it is definitely inside the padded window we read.
+// Every data band of every direction strip is reported — none skipped silently.
+// Only cell.direction is ever written; rows are never added/removed/shifted.
+async function gdClarityDeepScanDirections(flat,scanRows,strips,dataRows,Tesseract,opts){
   opts=opts||{};
-  const entries=[];
-  let updated=0,agreed=0,shapeOnly=0,ocrOnly=0,conflicts=0,noMarker=0;
-  for(let r=0;r<scanRows.length;r+=1){
-    const cells=Array.isArray(scanRows[r]&&scanRows[r].cells)?scanRows[r].cells:[];
-    for(const cell of cells){
-      if(!cell||!cell.geom||cell.value==null)continue;
-      if(typeof gdColumnNeedsDirection!=="function"||!gdColumnNeedsDirection(cell.key))continue;
+  const OCR=window.ClarityTableOcr,PIX=window.ClarityTableOcrPixels;
+  const dirStrips=(Array.isArray(strips)?strips:[]).filter(s=>s&&s.metricKey&&typeof gdColumnNeedsDirection==="function"&&gdColumnNeedsDirection(s.metricKey));
+  const rows=(Array.isArray(dataRows)?dataRows:[]).filter(r=>r&&Number.isFinite(Number(r.y0))&&Number.isFinite(Number(r.y1)));
+  const out={stripEntries:[],examined:0,updated:0,agreed:0,shapeOnly:0,ocrOnly:0,conflicts:0,noMarker:0,noColumn:0,strips:dirStrips.length};
+  let done=0;
+  for(const strip of dirStrips){
+    if(typeof gdPracticeAssertImportNotCanceled==="function")gdPracticeAssertImportNotCanceled();
+    // 1. Hi-res strip render (native photo pixels when warp metadata exists).
+    let canvas=null,cropSource="native";
+    try{canvas=gdClarityNativeStripCanvas(flat,strip);}catch(e){canvas=null;}
+    if(!canvas){canvas=gdClarityUpscaleCanvas(strip.canvas,2.5);cropSource="flat";}
+    const bin=PIX.binarizeCanvas(canvas);
+    const sy=bin.height/Math.max(1,Number(flat.height));
+    const maskObj=PIX.inkMask(PIX.imageData(bin));
+    const comps=PIX.connectedComponents(maskObj);
+    const heights=comps.map(c=>c.h).filter(h=>h>2).sort((a,b)=>a-b);
+    const charHeight=heights.length?heights[Math.floor(heights.length/2)]:16;
+    // 2. Per data band (scaled into this strip's pixel space), group components.
+    const bandPad=Math.max(2,charHeight*0.25);
+    const bands=rows.map(r=>{
+      const y0=Number(r.y0)*sy,y1=Number(r.y1)*sy;
+      const inBand=comps.filter(c=>{const cy=(c.y0+c.y1)/2;return cy>=y0-bandPad&&cy<=y1+bandPad;});
+      return {y0:y0,y1:y1,groups:OCR.groupComponentsIntoValues(inBand,{charHeight:charHeight}),comps:inBand};
+    });
+    const markerCol=OCR.findMarkerColumn(bands,{charHeight:charHeight});
+    const entry={metricKey:strip.metricKey,cropSource:cropSource,canvas:bin,markerCol:null,support:0,bands:[]};
+    if(!markerCol){
+      // Honest: no aligned marker column found — every band reported unread,
+      // strip-read directions stay untouched.
+      out.noColumn+=1;
+      entry.bands=bands.map((b,r)=>({row:r+1,final:"",method:"no-column",prev:"",hasCell:false,y0:b.y0,y1:b.y1}));
+      out.examined+=bands.length;out.noMarker+=bands.length;
+      out.stripEntries.push(entry);
+      done+=1;if(typeof opts.onStrip==="function")opts.onStrip(done,dirStrips.length);
+      continue;
+    }
+    // Generous sliver: the marker is DEFINITELY inside [mx0,mx1] padded.
+    const pad=Math.max(3,Math.round(charHeight*0.45));
+    const mx0=Math.max(0,Math.floor(markerCol.x0-pad)),mx1=Math.min(bin.width,Math.ceil(markerCol.x1+pad));
+    entry.markerCol={x0:mx0,x1:mx1};entry.support=markerCol.support;
+    // 3. COLLECTIVE BLANKING: everything outside the marker column, full height.
+    const bctx=bin.getContext("2d");
+    bctx.fillStyle="#fff";
+    if(mx0>0)bctx.fillRect(0,0,mx0,bin.height);
+    if(mx1<bin.width)bctx.fillRect(mx1,0,bin.width-mx1,bin.height);
+    // 4. Read the sliver band by band.
+    // Cells are matched by GEOMETRY (the reader stored each cell's band), not by
+    // index — scanRows can legitimately have fewer rows than dataRows.
+    const stripCells=[];
+    scanRows.forEach((row,ri)=>{(row.cells||[]).forEach(cell=>{if(cell&&cell.key===strip.metricKey&&cell.geom)stripCells.push({cell:cell,scanRow:ri});});});
+    for(let r=0;r<bands.length;r+=1){
       if(typeof gdPracticeAssertImportNotCanceled==="function")gdPracticeAssertImportNotCanceled();
-      const rect={x0:cell.geom.x0,y0:Number(cell.geom.y0)-3,x1:cell.geom.x1,y1:Number(cell.geom.y1)+3};
-      const crop=gdClarityDeepCropCell(flat,rect);
-      const rec=await gdClarityDeepScanCell(crop.canvas,Tesseract);
-      const prev=String(cell.direction||"");
-      if(rec.direction){
-        if(rec.direction!==prev)updated+=1;
-        cell.direction=rec.direction;
-        cell.directionSource="deep-scan-"+rec.method;
-      }
-      if(rec.method==="agree")agreed+=1;
-      else if(rec.method==="shape")shapeOnly+=1;
-      else if(rec.method==="ocr")ocrOnly+=1;
-      else if(rec.method==="conflict")conflicts+=1;
-      else noMarker+=1;
-      entries.push({
-        key:cell.key,row:r+1,prev:prev,final:String(cell.direction||""),
-        method:rec.method||"none",cropSource:crop.source,
-        shapeGlyph:rec.shapeGlyph,shapeScore:Math.round(rec.shapeScore*100),
-        ocrText:rec.ocrText,candidates:rec.candidates,
-        canvas:rec.blankedCanvas||crop.canvas,
-        markerBox:rec.markerBox
+      const b=bands[r];
+      const markerComps=b.comps.filter(c=>{const cx=(c.x0+c.x1)/2;return cx>=mx0&&cx<=mx1;});
+      // shape route: classify each remaining component, best score wins
+      let shapeGlyph="",shapeScore=0;
+      markerComps.forEach(c=>{
+        const cls=OCR.classifyGlyphMask(OCR.cropMask(maskObj,c.x0,c.y0,c.x1,c.y1));
+        if(cls.glyph&&cls.score>shapeScore){shapeGlyph=cls.glyph;shapeScore=cls.score;}
       });
-      if(typeof opts.onCell==="function")opts.onCell(entries.length);
+      const shapeDir=shapeGlyph?(OCR._internals.markerGlyphToDirection(shapeGlyph)||""):"";
+      // ocr route: read the blanked sliver band (only run when ink remains)
+      let ocrText="",ocrDir="";
+      if(markerComps.length){
+        try{
+          const bandCrop=PIX.cropCanvas(bin,mx0,Math.max(0,Math.floor(b.y0-bandPad)),mx1,Math.min(bin.height,Math.ceil(b.y1+bandPad)),0);
+          const res=await gdClarityOcrWithTimeout(gdRecognizeWithTesseract(Tesseract,gdClarityPadCanvas(bandCrop,12),{tessedit_char_whitelist:"LRlr+-",tessedit_pageseg_mode:"10"},"clarity-deep-scan"),9000);
+          ocrText=String(res&&res.data&&res.data.text||"").trim();
+          ocrDir=OCR._internals.directionFromText(ocrText)||"";
+        }catch(e){ocrText="(ocr error: "+(e&&e.message||e)+")";}
+      }
+      // decision: agreement wins; lone shape accepted; lone OCR accepted when
+      // marker ink exists; disagreement applies NOTHING and is reported.
+      let final="",method="none";
+      if(shapeDir&&ocrDir&&shapeDir===ocrDir){final=shapeDir;method="agree";}
+      else if(shapeDir&&!ocrDir){final=shapeDir;method="shape";}
+      else if(!shapeDir&&ocrDir){final=ocrDir;method="ocr";}
+      else if(shapeDir&&ocrDir){method="conflict";}
+      // attach to the scan row whose stored band overlaps this dataRow band
+      const flatY0=Number(rows[r].y0),flatY1=Number(rows[r].y1);
+      const match=stripCells.find(sc=>{const g=sc.cell.geom;const cy=(Number(g.y0)+Number(g.y1))/2;return cy>=flatY0-3&&cy<=flatY1+3;});
+      const prev=match?String(match.cell.direction||""):"";
+      if(final&&match){
+        if(final!==prev)out.updated+=1;
+        match.cell.direction=final;
+        match.cell.directionSource="deep-scan-"+method;
+      }
+      if(method==="agree")out.agreed+=1;
+      else if(method==="shape")out.shapeOnly+=1;
+      else if(method==="ocr")out.ocrOnly+=1;
+      else if(method==="conflict")out.conflicts+=1;
+      else out.noMarker+=1;
+      out.examined+=1;
+      entry.bands.push({row:r+1,final:final,method:method,prev:prev,hasCell:!!match,shapeGlyph:shapeGlyph,shapeScore:Math.round(shapeScore*100),ocrText:ocrText,markerInk:markerComps.length,y0:b.y0,y1:b.y1});
     }
+    out.stripEntries.push(entry);
+    done+=1;if(typeof opts.onStrip==="function")opts.onStrip(done,dirStrips.length);
   }
-  return {entries:entries,updated:updated,agreed:agreed,shapeOnly:shapeOnly,ocrOnly:ocrOnly,conflicts:conflicts,noMarker:noMarker,examined:entries.length};
+  return out;
 }
-// Montage for the feedback window: the BLANKED image each cell was actually
-// classified from, marker box outlined, labelled with the decision.
-function gdClarityDeepScanMontage(entries){
-  const list=(Array.isArray(entries)?entries:[]).filter(e=>e&&e.canvas);
+// Montage for the feedback window: each direction strip AFTER collective
+// blanking — the actual sliver that was read — marker column boxed, one result
+// letter per band. One tall image per strip: readable at a glance.
+function gdClarityDeepScanMontage(stripEntries){
+  const list=(Array.isArray(stripEntries)?stripEntries:[]).filter(e=>e&&e.canvas);
   if(!list.length){const e=document.createElement("canvas");e.width=10;e.height=10;return e;}
-  const cols=Math.max(1,Math.min(6,Math.ceil(Math.sqrt(list.length))));
-  const rows=Math.ceil(list.length/cols);
-  const cellW=190,cellH=64,labelH=13,gap=6;
-  const c=document.createElement("canvas");
-  c.width=cols*(cellW+gap)+gap;c.height=rows*(cellH+labelH+gap)+gap;
+  const gap=10,labelH=14,dispH=700,resultW=34;
+  const items=list.map(e=>{const sc=dispH/Math.max(1,e.canvas.height);return {e:e,sc:sc,dw:Math.max(10,Math.round(e.canvas.width*sc))+resultW,dh:dispH};});
+  const totalW=items.reduce((a,it)=>a+it.dw+gap,gap);
+  const c=document.createElement("canvas");c.width=Math.max(1,totalW);c.height=dispH+labelH+gap*2;
   const ctx=c.getContext("2d");ctx.fillStyle="#0b0f0d";ctx.fillRect(0,0,c.width,c.height);
-  list.forEach((e,i)=>{
-    const cx=gap+(i%cols)*(cellW+gap),cy=gap+Math.floor(i/cols)*(cellH+labelH+gap);
-    const sc=Math.min(cellW/Math.max(1,e.canvas.width),cellH/Math.max(1,e.canvas.height));
-    const dw=Math.max(4,Math.round(e.canvas.width*sc)),dh=Math.max(4,Math.round(e.canvas.height*sc));
-    try{ctx.drawImage(e.canvas,cx,cy+labelH,dw,dh);}catch(err){}
-    if(e.markerBox){
-      ctx.strokeStyle="#37f28d";ctx.lineWidth=1.5;
-      ctx.strokeRect(cx+e.markerBox.x0*sc,cy+labelH+e.markerBox.y0*sc,Math.max(2,(e.markerBox.x1-e.markerBox.x0)*sc),Math.max(2,(e.markerBox.y1-e.markerBox.y0)*sc));
+  ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality="high";
+  let x=gap;
+  items.forEach(it=>{
+    const e=it.e,sc=it.sc,imgW=it.dw-resultW;
+    try{ctx.drawImage(e.canvas,x,labelH+gap,imgW,it.dh);}catch(err){}
+    ctx.strokeStyle=e.markerCol?"#37f28d":"#ff6a6a";ctx.lineWidth=1.5;
+    ctx.strokeRect(x,labelH+gap,imgW,it.dh);
+    if(e.markerCol){
+      ctx.strokeStyle="#62d2ff";
+      ctx.strokeRect(x+e.markerCol.x0*sc,labelH+gap,Math.max(2,(e.markerCol.x1-e.markerCol.x0)*sc),it.dh);
     }
-    ctx.fillStyle=e.final?"#37f28d":(e.method==="conflict"?"#ffb84a":"#8fa39a");
     ctx.font="10px ui-monospace,Menlo,monospace";
-    ctx.fillText(`${e.key} r${e.row}: ${e.final||"·"} (${e.method},${e.cropSource})`.slice(0,34),cx,cy+10);
+    ctx.fillStyle=e.markerCol?"#37f28d":"#ff8a8a";
+    ctx.fillText(`${e.metricKey} (${e.cropSource}${e.markerCol?`, ${e.support} rows aligned`:", no column"})`.slice(0,40),x,11);
+    (e.bands||[]).forEach(b=>{
+      const by=labelH+gap+((b.y0!=null?b.y0:0))*sc;
+      const cy=labelH+gap+(((b.y0||0)+(b.y1||0))/2)*sc;
+      ctx.fillStyle=b.final?"#37f28d":(b.method==="conflict"?"#ffb84a":"#5f6f68");
+      ctx.fillText(`${b.row}:${b.final||"·"}`,x+imgW+3,Number.isFinite(cy)&&cy>labelH?cy:labelH+gap+12*b.row);
+    });
+    x+=it.dw+gap;
   });
   return c;
 }
@@ -19787,23 +19815,26 @@ async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
       const vals=scanRows.map(r=>{const c=(r.cells||[]).find(x=>x&&x.key===s.metricKey);return c&&c.value!=null?String(c.value)+(c.direction||""):"·";});
       return `${s.metricKey}: ${vals.join(",")}`;
     }).join("\n");
-    // ===== Stage 3.5 — DEEP SCAN. Targeted re-read of the direction markers
-    // (R/L/+/-) using the blanking method on per-cell crops (native photo
-    // resolution where possible). Only direction fields are touched — row
-    // structure is frozen. A deep scan failure is reported honestly but never
-    // kills the scan: directions then stay as the strip read left them.
+    // ===== Stage 3.5 — DEEP SCAN (strip-level). Per direction strip: find the
+    // marker column once by cross-row alignment, COLLECTIVELY BLANK everything
+    // outside it all the way down, then read the remaining sliver band by band.
+    // Every data band is examined and reported — no silent skips. Only
+    // direction fields are touched; a failure falls back to strip-read
+    // directions without killing the scan.
     gdPracticeUpdateImportJob({checkpointText:"Deep scanning direction markers",stageIndex:2,progress:90});
     try{
       const directionKeys=namedStrips.map(s=>s.metricKey).filter(k=>typeof gdColumnNeedsDirection==="function"&&gdColumnNeedsDirection(k));
-      const targetCount=scanRows.reduce((n,row)=>n+(row.cells||[]).filter(c=>c&&c.geom&&c.value!=null&&directionKeys.includes(c.key)).length,0);
-      gdPracticeDebugCheckpointSafe("deep_scan","running",{inputSummary:`${targetCount} direction cells across ${directionKeys.length} columns (${directionKeys.join(", ")||"none"})`});
-      const deep=await gdClarityDeepScanDirections(flat,scanRows,Tesseract,{onCell:n=>{try{gdPracticeUpdateImportJob({checkpointText:`Deep scan ${n}/${targetCount}`,stageIndex:2,progress:Math.min(95,90+Math.round((n/Math.max(1,targetCount))*5))});}catch(e){}}});
-      const deepDump=deep.entries.map(e=>`${e.key} r${e.row}: ${e.final||"·"} [${e.method}] crop=${e.cropSource} shape=${e.shapeGlyph||"·"}(${e.shapeScore}) ocr="${e.ocrText||"·"}"${e.prev!==e.final?` (was ${e.prev||"·"})`:""}`).join("\n");
-      const nativeCrops=deep.entries.filter(e=>e.cropSource==="native").length;
+      gdPracticeDebugCheckpointSafe("deep_scan","running",{inputSummary:`${directionKeys.length} direction strips (${directionKeys.join(", ")||"none"}) x ${dataRows.length} data bands`});
+      const deep=await gdClarityDeepScanDirections(flat,scanRows,namedStrips,dataRows,Tesseract,{onStrip:(n,total)=>{try{gdPracticeUpdateImportJob({checkpointText:`Deep scan strip ${n}/${total}`,stageIndex:2,progress:Math.min(95,90+Math.round((n/Math.max(1,total))*5))});}catch(e){}}});
+      const deepDump=deep.stripEntries.map(e=>{
+        const head=`${e.metricKey} [${e.cropSource}] ${e.markerCol?`marker column found (${e.support} rows aligned)`:"NO marker column aligned — nothing applied"}`;
+        const bandText=(e.bands||[]).map(b=>`r${b.row}:${b.final||"·"}${b.method&&b.method!=="none"&&b.method!=="no-column"?`[${b.method}]`:""}${b.hasCell===false&&b.final?"(no cell)":""}${b.prev&&b.prev!==b.final?`(was ${b.prev})`:""}`).join(" ");
+        return `${head}\n  ${bandText}`;
+      }).join("\n");
       gdPracticeDebugCheckpointSafe("deep_scan",deep.examined?"success":"warning",{
-        outputSummary:`Examined ${deep.examined} cells: ${deep.agreed} agree (shape+ocr), ${deep.shapeOnly} shape-only, ${deep.ocrOnly} ocr-only, ${deep.conflicts} conflict (not applied), ${deep.noMarker} no marker found. ${deep.updated} direction${deep.updated===1?"":"s"} changed. Crops: ${nativeCrops}/${deep.examined} native-resolution.\n${deepDump||"No direction cells to scan."}`,
-        counts:{examined:deep.examined,updated:deep.updated,agreed:deep.agreed,shapeOnly:deep.shapeOnly,ocrOnly:deep.ocrOnly,conflicts:deep.conflicts,noMarker:deep.noMarker,nativeCrops:nativeCrops},
-        snapshot:{canvas:gdClarityDeepScanMontage(deep.entries),label:"Deep scan: blanked cells as classified (marker boxed green; label = final [method, crop source])"}
+        outputSummary:`${deep.strips} direction strips, ${deep.examined} bands examined: ${deep.agreed} agree (shape+ocr), ${deep.shapeOnly} shape-only, ${deep.ocrOnly} ocr-only, ${deep.conflicts} conflict (not applied), ${deep.noMarker} no marker. ${deep.noColumn} strip(s) without an aligned marker column. ${deep.updated} direction${deep.updated===1?"":"s"} changed.\n${deepDump||"No direction strips to scan."}`,
+        counts:{strips:deep.strips,examined:deep.examined,updated:deep.updated,agreed:deep.agreed,shapeOnly:deep.shapeOnly,ocrOnly:deep.ocrOnly,conflicts:deep.conflicts,noMarker:deep.noMarker,noColumn:deep.noColumn},
+        snapshot:{canvas:gdClarityDeepScanMontage(deep.stripEntries),label:"Deep scan: strips after collective blanking (blue = marker column read; right rail = per-row result)"}
       });
     }catch(e){
       if(typeof gdPracticeIsQuietScanStop==="function"&&gdPracticeIsQuietScanStop(e))throw e;
