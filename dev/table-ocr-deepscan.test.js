@@ -215,6 +215,19 @@ for (let i = 0; i < 13; i += 1) {
 }
 check("2 aligned rows is not a column", ocr.findMarkerColumn(sparseBands, { charHeight: CH }), null);
 
+// side:"left" — +/- sign prefixes align LEFT of the value
+const signBands = [];
+for (let i = 0; i < 13; i += 1) {
+  const groups = [grp(20, 20 + 12 + (i % 4), 300)]; // value
+  if (i % 2 === 0) groups.push(grp(8, 13, 12));     // aligned '-' sign (negatives only)
+  signBands.push(band(groups));
+}
+const leftCol = ocr.findMarkerColumn(signBands, { charHeight: CH, side: "left" });
+check("signs mode: left column found", !!leftCol, true);
+check("signs mode: covers the sign", leftCol ? (leftCol.x0 <= 8 && leftCol.x1 >= 13) : false, true);
+check("signs mode ignores right-side markers", ocr.findMarkerColumn(alignedBands, { charHeight: CH, side: "left" }), null);
+check("letters mode ignores left-side signs", ocr.findMarkerColumn(signBands, { charHeight: CH, side: "right" }), null);
+
 // ---- isSummaryLabel: OCR-garbled summary labels must still be caught ----
 check("summary: AVERAGE", ocr.isSummaryLabel("AVERAGE"), true);
 check("summary: AVERACE (garbled)", ocr.isSummaryLabel("AVERACE"), true);

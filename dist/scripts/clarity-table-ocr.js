@@ -941,13 +941,15 @@
   // Find the MARKER COLUMN of a direction strip from per-band component groups.
   // The insight (strip-level, not cell-level): value widths vary row to row, so
   // number fragments land at unpredictable x — but the R/L/+/- markers occupy
-  // the same narrow x-range on EVERY row. Collect each band's narrow trailing
-  // groups (right of its widest ink cluster), cluster their centres, and the
+  // the same narrow x-range on EVERY row. Collect each band's narrow groups on
+  // the chosen side of its widest ink cluster (opts.side: "right" for letter
+  // markers, "left" for +/- sign prefixes), cluster their centres, and the
   // x-cluster supported by the most bands is the marker column. Returns
   // { x0, x1, support, bandsWithTrailing } or null when no column aligns.
   function findMarkerColumn(bands, opts) {
     opts = opts || {};
     var charHeight = Number(opts.charHeight) || 16;
+    var side = opts.side === "left" ? "left" : "right";
     var list = Array.isArray(bands) ? bands : [];
     var candidates = []; // {cx, x0, x1, band}
     var bandsWithTrailing = 0;
@@ -957,7 +959,11 @@
       var value = groups.reduce(function (best, g) { return (Number(g.ink) || 0) > (Number(best.ink) || 0) ? g : best; }, groups[0]);
       var trailing = groups.filter(function (g) {
         if (g === value) return false;
-        if (Number(g.x0) <= Number(value.x1)) return false;         // right of the value only
+        if (side === "right") {
+          if (Number(g.x0) <= Number(value.x1)) return false;       // right of the value only
+        } else {
+          if (Number(g.x1) >= Number(value.x0)) return false;       // left of the value only
+        }
         if ((Number(g.x1) - Number(g.x0)) > charHeight * 1.9) return false; // marker-narrow
         if ((Number(g.ink) || 0) < 4) return false;                  // not dust
         return true;
