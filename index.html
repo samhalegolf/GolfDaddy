@@ -30744,6 +30744,7 @@ function gdBagPersistRows(rows,{silent=false,render=true}={}){
   p.updatedAt=new Date().toISOString();
   savePlayerProfiles();
   syncCoreProfileFromActive();
+  if(typeof window.gdPracticeSyncBubbleSourcesToBag==="function"){try{window.gdPracticeSyncBubbleSourcesToBag();}catch(e){}}
   if(render){renderBagPanel();renderProfilePanel();if(typeof renderShot==="function")renderShot();}
   if(!silent)toast('Bag saved');
   return p.bag;
@@ -36938,6 +36939,72 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     const primary=learnings.slice().sort((a,b)=>Math.abs(b.delta)-Math.abs(a.delta))[0]||null;
     return {rows,diffs,learnings,primary};
   }
+  function gdPracticeRescaleBubbleSourceToCarry(bubble,newCarry){
+    if(!bubble||typeof bubble!=="object")return null;
+    const next=Number(newCarry);
+    const old=Number(bubble.baseDistanceM||bubble.baseCarry||bubble.expectedDistanceM);
+    if(!Number.isFinite(next)||next<=0||!Number.isFinite(old)||old<=0)return null;
+    if(Math.abs(next-old)<.5)return null;
+    const ratio=next/old;
+    const scaled=Object.assign({},bubble);
+    ["bubbleWidthM","clusterWidthM","visualWidthM","widthM","bubbleDepthM","clusterDepthM","visualDepthM","depthM","lateralRadiusM","depthRadiusM","radiusM"].forEach(key=>{
+      const value=Number(scaled[key]);
+      if(Number.isFinite(value)&&value>0)scaled[key]=value*ratio;
+    });
+    ["expectedDistanceM","meanExpectedM"].forEach(key=>{
+      if(Number.isFinite(Number(scaled[key])))scaled[key]=next;
+    });
+    scaled.baseCarry=next;
+    scaled.baseDistanceM=next;
+    if(Number.isFinite(Number(scaled.centerDistanceM)))scaled.centerDistanceM=next+(Number(bubble.centerDistanceM)-old)*ratio;
+    const offset=Number(scaled.offsetDeg??scaled.faceAlignmentOffsetDeg??scaled.faceOffsetDeg);
+    if(Number.isFinite(offset)){
+      const aim=Math.tan(offset*Math.PI/180)*next;
+      if(scaled.aimOffsetM!==undefined)scaled.aimOffsetM=aim;
+      if(scaled.centerLateralM!==undefined)scaled.centerLateralM=aim;
+    }
+    scaled.distanceSyncedAt=new Date().toISOString();
+    return scaled;
+  }
+  function gdPracticeSyncBubbleSourcesToBag(opts={}){
+    const p=safe(()=>ensureProfile(),null);
+    if(!p)return false;
+    const bagByClub=gdPracticeBagRowsByClub(gdPracticeSavedBagRows());
+    const carryFor=club=>{
+      const row=bagByClub[gdShotBubbleOverlayClubKey(club)];
+      const carry=Number(row?.actualDistanceM);
+      return Number.isFinite(carry)&&carry>0?carry:NaN;
+    };
+    let changed=false;
+    const syncBubble=bubble=>{
+      const scaled=gdPracticeRescaleBubbleSourceToCarry(bubble,carryFor(bubble?.club));
+      if(scaled)changed=true;
+      return scaled||bubble;
+    };
+    if(p.previewBubbleSet)p.previewBubbleSet=syncBubble(p.previewBubbleSet);
+    if(p.bubbleProfiles&&typeof p.bubbleProfiles==="object"){
+      Object.keys(p.bubbleProfiles).forEach(key=>{p.bubbleProfiles[key]=syncBubble(p.bubbleProfiles[key]);});
+    }
+    if(p.practiceBubblePendingSource?.bubble){
+      const syncedPending=syncBubble(p.practiceBubblePendingSource.bubble);
+      if(syncedPending!==p.practiceBubblePendingSource.bubble)p.practiceBubblePendingSource=Object.assign({},p.practiceBubblePendingSource,{bubble:syncedPending});
+    }
+    if(!changed)return false;
+    p.updatedAt=new Date().toISOString();
+    savePlayerProfiles();
+    syncCoreProfileFromActive();
+    if(!opts.skipRender){
+      safe(()=>typeof gdRenderBubbleOffsetHub==="function"&&gdRenderBubbleOffsetHub());
+      safe(()=>{
+        if(document.getElementById("practiceDataPanel")?.classList.contains("open")&&typeof renderPracticeData==="function")renderPracticeData(true);
+      });
+      safe(()=>{
+        if(document.getElementById("dataHubPanel")?.classList.contains("open")&&typeof renderCompareData==="function")renderCompareData();
+      });
+    }
+    return true;
+  }
+  window.gdPracticeSyncBubbleSourcesToBag=gdPracticeSyncBubbleSourcesToBag;
   function gdPracticeApplyDistanceLearning(analysis,opts={}){
     const summary=gdPracticeDistanceLearningSummary(analysis);
     if(!summary.diffs.length){
@@ -36959,6 +37026,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
         syncCoreProfileFromActive();
       });
       try{localStorage.removeItem(GD_PRACTICE_BAG_DRAFT_KEY);}catch(e){}
+      gdPracticeSyncBubbleSourcesToBag({skipRender:true});
       gdPracticeBagWidgetExpanded=false;
       gdPracticeBagWidgetConfirm=false;
       safe(()=>typeof renderBagPanel==="function"&&renderBagPanel());
@@ -38458,6 +38526,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       savePlayerProfiles();
       syncCoreProfileFromActive();
     });
+    gdPracticeSyncBubbleSourcesToBag({skipRender:true});
     gdPracticeBagSuggestionOpen=false;
     gdPracticeBagAdaptOpen=false;
     gdPracticeBagAdaptUndoStack=[];
@@ -38613,6 +38682,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 		      shots:Number(source?.shots||method?.countedShots||0),
 		      fingerprint:gdPracticeBubbleFingerprint(analysis),
 		      distanceMode:adoptDistance?"committed":"review",
+		      practiceDistanceM:Number.isFinite(learnedDistance)&&learnedDistance>0?Math.round(learnedDistance*10)/10:null,
 		      importBatchIds:Array.isArray(source?.importBatchIds)?source.importBatchIds.slice():[]
 		    };
 		    const adoptedBase=motionToDistance;
@@ -38631,6 +38701,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	      bubbleDepthM:adoptedDepth,
 	      clusterDepthM:adoptedDepth,
 	      handedness:p.handedness||"right",
+	      practiceDistanceM:Number.isFinite(learnedDistance)&&learnedDistance>0?Math.round(learnedDistance*10)/10:null,
 	      shapeSource:"practice-adopted"
 	    });
 	    p.practiceBubblePendingSource=Object.assign({},stagedSource,{bubble:adoptedBubble});
@@ -40637,7 +40708,8 @@ body.gdAuthLocked #gdProfileV67 .topbar{
         club,
         shots:Number(pending.shots||0),
         fingerprint:pending.fingerprint||gdPracticeBubbleFingerprint(analysis),
-        distanceMode:pending.distanceMode||"review"
+        distanceMode:pending.distanceMode||"review",
+        practiceDistanceM:Number(pending.practiceDistanceM)||null
       };
       p.practiceBubbleAdoptedAt=new Date().toISOString();
       delete p.practiceBubblePendingSource;
