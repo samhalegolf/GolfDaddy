@@ -1728,8 +1728,8 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 <script>window.L=window.L||window.leaflet;</script>
 <script src="scripts/clarity-build.js?v=tool-rail-tab-hole-label-20260620"></script>
 <script src="scripts/gd-launch-monitor-alias-registry.js?v=practice-alias-registry-20260612"></script>
-<script src="scripts/clarity-table-ocr.js?v=table-ocr-inkscan-20260710q"></script>
-<script src="scripts/clarity-table-ocr-pixels.js?v=table-ocr-inkscan-20260710q"></script>
+<script src="scripts/clarity-table-ocr.js?v=table-ocr-deepscan-20260711a"></script>
+<script src="scripts/clarity-table-ocr-pixels.js?v=table-ocr-deepscan-20260711a"></script>
 <style>
 	    *,*::before,*::after{box-sizing:border-box}
 	    :where(input,select,textarea,button){max-width:100%}
@@ -8406,7 +8406,7 @@ function gdPracticeRenderLiveDebugAdminRun(run){
   const summary=run.summary||{};
   const failed=typeof gdPracticeDebugLabelForRunCheckpoint==="function"?gdPracticeDebugLabelForRunCheckpoint(run,run.failedCheckpointId):"";
   const lastOk=typeof gdPracticeDebugLabelForRunCheckpoint==="function"?gdPracticeDebugLabelForRunCheckpoint(run,run.lastSuccessfulCheckpointId):"";
-  const coreStageIds=["value_corridor_mapping","header_strip_scan","extraction_completed","save_completed"];
+  const coreStageIds=["value_corridor_mapping","header_strip_scan","extraction_completed","deep_scan","save_completed"];
   const checkpoints=(run.checkpoints||[])
     .filter(item=>coreStageIds.includes(item.id)||item.status==="failed"||run?.failedCheckpointId===item.id)
     .map(item=>gdPracticeLiveDebugCheckpointHtml(item,run)).join("");
@@ -8977,7 +8977,7 @@ function gdProjectiveUnitToQuad(points){
     return {x:(a*u+b*v+c)/denom,y:(d*u+e*v+f)/denom};
   };
 }
-function gdWarpQuadToCanvas(source,quad,targetW=1800){
+function gdWarpQuadToCanvas(source,quad,targetW=1800,dims={}){
   const points=(Array.isArray(quad)?quad:[]).map(point=>({x:Number(point.x),y:Number(point.y)}));
   if(points.length!==4||points.some(point=>!Number.isFinite(point.x)||!Number.isFinite(point.y)))return null;
   const [tl,tr,br,bl]=points;
@@ -8987,9 +8987,15 @@ function gdWarpQuadToCanvas(source,quad,targetW=1800){
   const bottom=Math.hypot(br.x-bl.x,br.y-bl.y);
   const left=Math.hypot(bl.x-tl.x,bl.y-tl.y);
   const right=Math.hypot(br.x-tr.x,br.y-tr.y);
-  const outW=Math.max(320,Math.round(Number(targetW)||1800));
+  // dims lets SMALL region warps (deep scan cell crops) opt out of the
+  // full-page minimums, which would otherwise stretch a 22px-tall cell to 180px
+  // and distort every glyph. Full-table callers keep the original clamps.
+  const minW=Number.isFinite(Number(dims.minW))?Number(dims.minW):320;
+  const minH=Number.isFinite(Number(dims.minH))?Number(dims.minH):180;
+  const maxH=Number.isFinite(Number(dims.maxH))?Number(dims.maxH):2600;
+  const outW=Math.max(minW,Math.round(Number(targetW)||1800));
   const aspect=((left+right)/2)/Math.max(1,(top+bottom)/2);
-  const outH=Math.max(180,Math.min(2600,Math.round(outW*aspect)));
+  const outH=Math.max(minH,Math.min(maxH,Math.round(outW*aspect)));
   const srcCanvas=document.createElement("canvas");
   srcCanvas.width=Number(source.width)||1;
   srcCanvas.height=Number(source.height)||1;
@@ -9001,10 +9007,22 @@ function gdWarpQuadToCanvas(source,quad,targetW=1800){
   out.height=outH;
   const outCtx=out.getContext("2d",{willReadFrequently:true});
   const dst=outCtx.createImageData(outW,outH);
+  // BILINEAR sampling. The old nearest-neighbour (Math.round) snap aliased thin
+  // strokes (decimal points, the small R/L markers) into jagged, broken pixels;
+  // every later stage then upscaled that damage. Interpolating the 4 neighbours
+  // preserves the stroke shape when the photo is resampled down to the flat grid.
+  const sw=srcCanvas.width,sh=srcCanvas.height;
   const sample=(x,y,channel)=>{
-    const ix=Math.max(0,Math.min(srcCanvas.width-1,Math.round(x)));
-    const iy=Math.max(0,Math.min(srcCanvas.height-1,Math.round(y)));
-    return src.data[(iy*srcCanvas.width+ix)*4+channel];
+    const fx=Math.max(0,Math.min(sw-1,x));
+    const fy=Math.max(0,Math.min(sh-1,y));
+    const x0=Math.floor(fx),y0=Math.floor(fy);
+    const x1=Math.min(sw-1,x0+1),y1=Math.min(sh-1,y0+1);
+    const tx=fx-x0,ty=fy-y0;
+    const p00=src.data[(y0*sw+x0)*4+channel];
+    const p10=src.data[(y0*sw+x1)*4+channel];
+    const p01=src.data[(y1*sw+x0)*4+channel];
+    const p11=src.data[(y1*sw+x1)*4+channel];
+    return (p00*(1-tx)+p10*tx)*(1-ty)+(p01*(1-tx)+p11*tx)*ty;
   };
   for(let y=0;y<outH;y+=1){
     const v=outH<=1?0:y/(outH-1);
@@ -9022,7 +9040,25 @@ function gdWarpQuadToCanvas(source,quad,targetW=1800){
   }
   outCtx.putImageData(dst,0,0);
   out.__gdFlattenedQuad=quad;
+  // Keep a reference to what was actually warped so later stages (deep scan)
+  // can map flat coordinates back and re-crop the ORIGINAL pixels at native
+  // resolution instead of upscaling the 1800px resample.
+  out.__gdWarpSource=source;
   return out;
+}
+// Map a point on a flattened (warped) canvas back to the coordinate space of the
+// image it was warped FROM. Uses the same projective mapping as the warp itself.
+// Returns null when the canvas carries no warp metadata.
+function gdFlatPointToWarpSourcePoint(flatCanvas,x,y){
+  const quad=flatCanvas&&flatCanvas.__gdFlattenedQuad;
+  const w=Number(flatCanvas&&flatCanvas.width)||0;
+  const h=Number(flatCanvas&&flatCanvas.height)||0;
+  if(!Array.isArray(quad)||quad.length!==4||w<2||h<2)return null;
+  const mapPoint=gdProjectiveUnitToQuad(quad.map(p=>({x:Number(p.x),y:Number(p.y)})));
+  if(!mapPoint)return null;
+  const u=Math.max(0,Math.min(1,Number(x)/(w-1)));
+  const v=Math.max(0,Math.min(1,Number(y)/(h-1)));
+  return mapPoint(u,v);
 }
 function gdTrimWarpedTableCanvas(source,targetW=1800){
   const width=Number(source?.width)||0;
@@ -17978,7 +18014,20 @@ async function gdApplyPracticeManualQuad(){
     x:Math.max(0,Math.min(state.sourceW-1,Number(point.x))),
     y:Math.max(0,Math.min(state.sourceH-1,Number(point.y)))
   }));
-  const flattened=gdWarpQuadToCanvas(state.source,quad,1800);
+  // SINGLE-WARP QUALITY FIX. state.source is usually the already-warped 1800px
+  // normalized canvas, so warping it again resamples the photo twice (two
+  // generations of loss before any OCR). When the source carries warp metadata,
+  // map the manual corners BACK to the original photo and warp once from there.
+  let warpSource=state.source;
+  let warpQuad=quad;
+  if(state.source&&state.source.__gdFlattenedQuad&&state.source.__gdWarpSource){
+    const mappedQuad=quad.map(point=>gdFlatPointToWarpSourcePoint(state.source,point.x,point.y));
+    if(mappedQuad.every(point=>point&&Number.isFinite(point.x)&&Number.isFinite(point.y))){
+      warpSource=state.source.__gdWarpSource;
+      warpQuad=mappedQuad;
+    }
+  }
+  const flattened=gdWarpQuadToCanvas(warpSource,warpQuad,1800);
   if(!flattened){
     gdSetPracticePhotoProcessing(false,{immediate:true,skipJob:true});
     gdPracticeManualQuadStatus("Could not stretch the manual shape flat.","error");
@@ -19228,9 +19277,12 @@ async function gdClarityReadStripsIntoRows(strips,dataRows,Tesseract,opts){
         // has any text at all as a placeholder.
         if((raw.cell&&raw.cell.valid)||(!got.cell&&raw.cell)||(!got.text&&raw.text))got=raw;
       }
-      reads.push({cy:Number(b.cy),text:got.text,cell:got.cell});
+      // Keep the band's flat-image geometry with the read: the deep scan stage
+      // re-crops this exact box (at native resolution) — it never re-derives
+      // rows, so row alignment cannot shift.
+      reads.push({cy:Number(b.cy),y0:y0,y1:y1,text:got.text,cell:got.cell});
     }
-    perStrip.push({metricKey:strip.metricKey,reads:reads});
+    perStrip.push({metricKey:strip.metricKey,left:Number(strip.left),right:Number(strip.right),reads:reads});
     if(typeof opts.onStrip==="function")opts.onStrip(i,named.length);
   }
   // Rows are LISTS SIDE BY SIDE — no geometry at all past this point. The
@@ -19261,11 +19313,15 @@ async function gdClarityReadStripsIntoRows(strips,dataRows,Tesseract,opts){
     const cells=perStrip.map(s=>{
       const rd=s.reads[r]||null;
       const cell=rd?rd.cell:null;
-      if(!cell)return {key:s.metricKey,value:null,direction:"",valid:false,plausible:false};
+      // geom = the box this value physically occupies on the flat image (strip
+      // x-range + band y-range). Carried for the deep scan stage; ignored by
+      // the payload adapter.
+      const geom=rd?{x0:s.left,x1:s.right,y0:Number(rd.y0),y1:Number(rd.y1)}:null;
+      if(!cell)return {key:s.metricKey,value:null,direction:"",valid:false,plausible:false,geom:geom};
       // NOTE: parseCell returns value:null on a failed parse, and Number(null)
       // is 0 (finite) — check null explicitly so garbage is not marked valid.
       const hasNumber=cell.value!=null&&Number.isFinite(cell.value);
-      return {key:s.metricKey,value:hasNumber?cell.value:null,direction:cell.direction,valid:hasNumber,plausible:!!cell.valid};
+      return {key:s.metricKey,value:hasNumber?cell.value:null,direction:cell.direction,valid:hasNumber,plausible:!!cell.valid,geom:geom};
     });
     if(cells.some(c=>c&&c.valid))scanRows.push({club:opts.club||"7i",cells:cells});
   }
@@ -19289,6 +19345,162 @@ async function gdClarityDetectClubFromStrips(strips,Tesseract){
   let best="",bestN=0;
   Object.keys(votes).forEach(k=>{if(votes[k]>bestN){bestN=votes[k];best=k;}});
   return {club:best,votes:votes};
+}
+// ===========================================================================
+// DEEP SCAN (Stage 3.5) — targeted re-read of direction markers (R/L/+/-).
+// Each direction cell is a KNOWN box holding a number plus (maybe) one small
+// marker that can only be 1 of 4 glyphs. The stage re-crops that one box —
+// at native photo resolution when the warp metadata allows it — then applies
+// the BLANKING METHOD: remove the value cluster from the image and read what
+// remains, by two independent routes (pure shape classification + OCR of the
+// blanked image on clean white). It only ever updates the `direction` field
+// of existing cells: rows are never added, removed, or shifted here.
+// ===========================================================================
+// Re-crop one flat-image rect at the best available quality. Prefers mapping
+// the rect back through the warp to the ORIGINAL photo (native pixels); falls
+// back to upscaling the flat crop when no warp metadata exists. Returns
+// {canvas, source:"native"|"flat", scale} — source is reported truthfully in
+// the debug output.
+function gdClarityDeepCropCell(flat,rect){
+  const PIX=window.ClarityTableOcrPixels;
+  const x0=Math.max(0,Math.floor(Number(rect.x0))),y0=Math.max(0,Math.floor(Number(rect.y0)));
+  const x1=Math.min(Number(flat.width)-1,Math.ceil(Number(rect.x1))),y1=Math.min(Number(flat.height)-1,Math.ceil(Number(rect.y1)));
+  const cellW=Math.max(1,x1-x0),cellH=Math.max(1,y1-y0);
+  const warpSource=flat.__gdWarpSource||null;
+  if(warpSource&&Array.isArray(flat.__gdFlattenedQuad)){
+    const corners=[[x0,y0],[x1,y0],[x1,y1],[x0,y1]].map(p=>gdFlatPointToWarpSourcePoint(flat,p[0],p[1]));
+    if(corners.every(p=>p&&Number.isFinite(p.x)&&Number.isFinite(p.y))){
+      const srcW=(Math.hypot(corners[1].x-corners[0].x,corners[1].y-corners[0].y)+Math.hypot(corners[2].x-corners[3].x,corners[2].y-corners[3].y))/2;
+      // Render at ~2.5x the native source width (clamped) so thin marker
+      // strokes survive binarisation; never below 2x the flat size.
+      const targetW=Math.round(Math.min(1200,Math.max(cellW*2,srcW*2.5,120)));
+      const canvas=gdWarpQuadToCanvas(warpSource,corners.map(p=>({x:p.x,y:p.y})),targetW,{minW:32,minH:16,maxH:480});
+      if(canvas)return {canvas:canvas,source:"native",scale:targetW/cellW};
+    }
+  }
+  const upscale=3.4;
+  const cropped=PIX.cropCanvas(flat,x0,y0,x1,y1,0);
+  return {canvas:gdClarityUpscaleCanvas(cropped,upscale),source:"flat",scale:upscale};
+}
+// Run the blanking method on one direction cell crop. Returns an honest record
+// of everything that happened; `direction` is "" when neither route produced a
+// confident answer (the caller then keeps the strip-read direction).
+async function gdClarityDeepScanCell(cellCanvas,Tesseract){
+  const OCR=window.ClarityTableOcr,PIX=window.ClarityTableOcrPixels;
+  const maskObj=PIX.inkMask(PIX.imageData(cellCanvas));
+  const comps=PIX.connectedComponents(maskObj);
+  const analysis=OCR.deepScanDirectionCell(maskObj,comps,{});
+  const record={
+    shapeDirection:analysis.direction||"",
+    shapeGlyph:analysis.glyph||"",
+    shapeScore:Number(analysis.score)||0,
+    candidates:analysis.candidates.length,
+    valueBox:analysis.valueBox?{x0:analysis.valueBox.x0,y0:analysis.valueBox.y0,x1:analysis.valueBox.x1,y1:analysis.valueBox.y1}:null,
+    markerBox:analysis.candidates.length&&analysis.candidates[0].glyph?analysis.candidates[0].box:null,
+    ocrDirection:"",ocrText:"",
+    blankedCanvas:null,
+    direction:"",method:""
+  };
+  // Blank the value: binarised copy of the cell with the value cluster painted
+  // out. This is the exact image the OCR route reads — kept for the debug view.
+  if(analysis.valueBox){
+    const blanked=PIX.binarizeCanvas(cellCanvas);
+    const ctx=blanked.getContext("2d");
+    const padX=Math.max(2,Math.round((analysis.valueBox.x1-analysis.valueBox.x0)*0.06));
+    const padY=Math.max(2,Math.round((analysis.valueBox.y1-analysis.valueBox.y0)*0.14));
+    ctx.fillStyle="#fff";
+    ctx.fillRect(analysis.valueBox.x0-padX,analysis.valueBox.y0-padY,(analysis.valueBox.x1-analysis.valueBox.x0)+padX*2,(analysis.valueBox.y1-analysis.valueBox.y0)+padY*2);
+    record.blankedCanvas=blanked;
+    // OCR route: only worth running when some ink REMAINS after blanking —
+    // otherwise Tesseract hallucinates on an empty image.
+    if(analysis.candidates.length){
+      try{
+        const res=await gdClarityOcrWithTimeout(gdRecognizeWithTesseract(Tesseract,blanked,{tessedit_char_whitelist:"LRlr+-",tessedit_pageseg_mode:"10"},"clarity-deep-scan"),9000);
+        record.ocrText=String(res&&res.data&&res.data.text||"").trim();
+        record.ocrDirection=OCR._internals.directionFromText(record.ocrText)||"";
+      }catch(e){record.ocrText="(ocr error: "+(e&&e.message||e)+")";}
+    }
+  }
+  // Decision. Agreement wins outright; a lone confident shape read is accepted
+  // (it is the purpose-built classifier); a lone OCR read is accepted only when
+  // the shape route at least found marker ink to read.
+  if(record.shapeDirection&&record.ocrDirection&&record.shapeDirection===record.ocrDirection){
+    record.direction=record.shapeDirection;record.method="agree";
+  }else if(record.shapeDirection&&!record.ocrDirection){
+    record.direction=record.shapeDirection;record.method="shape";
+  }else if(!record.shapeDirection&&record.ocrDirection&&record.candidates>0){
+    record.direction=record.ocrDirection;record.method="ocr";
+  }else if(record.shapeDirection&&record.ocrDirection){
+    // The two routes disagree — that is NOT a confident read. Report it, apply nothing.
+    record.method="conflict";
+  }
+  return record;
+}
+// The stage runner: walks the direction cells of the already-assembled rows and
+// updates ONLY their direction fields. Returns {entries, updated, examined,...}
+// for the debug checkpoint.
+async function gdClarityDeepScanDirections(flat,scanRows,Tesseract,opts){
+  opts=opts||{};
+  const entries=[];
+  let updated=0,agreed=0,shapeOnly=0,ocrOnly=0,conflicts=0,noMarker=0;
+  for(let r=0;r<scanRows.length;r+=1){
+    const cells=Array.isArray(scanRows[r]&&scanRows[r].cells)?scanRows[r].cells:[];
+    for(const cell of cells){
+      if(!cell||!cell.geom||cell.value==null)continue;
+      if(typeof gdColumnNeedsDirection!=="function"||!gdColumnNeedsDirection(cell.key))continue;
+      if(typeof gdPracticeAssertImportNotCanceled==="function")gdPracticeAssertImportNotCanceled();
+      const rect={x0:cell.geom.x0,y0:Number(cell.geom.y0)-3,x1:cell.geom.x1,y1:Number(cell.geom.y1)+3};
+      const crop=gdClarityDeepCropCell(flat,rect);
+      const rec=await gdClarityDeepScanCell(crop.canvas,Tesseract);
+      const prev=String(cell.direction||"");
+      if(rec.direction){
+        if(rec.direction!==prev)updated+=1;
+        cell.direction=rec.direction;
+        cell.directionSource="deep-scan-"+rec.method;
+      }
+      if(rec.method==="agree")agreed+=1;
+      else if(rec.method==="shape")shapeOnly+=1;
+      else if(rec.method==="ocr")ocrOnly+=1;
+      else if(rec.method==="conflict")conflicts+=1;
+      else noMarker+=1;
+      entries.push({
+        key:cell.key,row:r+1,prev:prev,final:String(cell.direction||""),
+        method:rec.method||"none",cropSource:crop.source,
+        shapeGlyph:rec.shapeGlyph,shapeScore:Math.round(rec.shapeScore*100),
+        ocrText:rec.ocrText,candidates:rec.candidates,
+        canvas:rec.blankedCanvas||crop.canvas,
+        markerBox:rec.markerBox
+      });
+      if(typeof opts.onCell==="function")opts.onCell(entries.length);
+    }
+  }
+  return {entries:entries,updated:updated,agreed:agreed,shapeOnly:shapeOnly,ocrOnly:ocrOnly,conflicts:conflicts,noMarker:noMarker,examined:entries.length};
+}
+// Montage for the feedback window: the BLANKED image each cell was actually
+// classified from, marker box outlined, labelled with the decision.
+function gdClarityDeepScanMontage(entries){
+  const list=(Array.isArray(entries)?entries:[]).filter(e=>e&&e.canvas);
+  if(!list.length){const e=document.createElement("canvas");e.width=10;e.height=10;return e;}
+  const cols=Math.max(1,Math.min(6,Math.ceil(Math.sqrt(list.length))));
+  const rows=Math.ceil(list.length/cols);
+  const cellW=190,cellH=64,labelH=13,gap=6;
+  const c=document.createElement("canvas");
+  c.width=cols*(cellW+gap)+gap;c.height=rows*(cellH+labelH+gap)+gap;
+  const ctx=c.getContext("2d");ctx.fillStyle="#0b0f0d";ctx.fillRect(0,0,c.width,c.height);
+  list.forEach((e,i)=>{
+    const cx=gap+(i%cols)*(cellW+gap),cy=gap+Math.floor(i/cols)*(cellH+labelH+gap);
+    const sc=Math.min(cellW/Math.max(1,e.canvas.width),cellH/Math.max(1,e.canvas.height));
+    const dw=Math.max(4,Math.round(e.canvas.width*sc)),dh=Math.max(4,Math.round(e.canvas.height*sc));
+    try{ctx.drawImage(e.canvas,cx,cy+labelH,dw,dh);}catch(err){}
+    if(e.markerBox){
+      ctx.strokeStyle="#37f28d";ctx.lineWidth=1.5;
+      ctx.strokeRect(cx+e.markerBox.x0*sc,cy+labelH+e.markerBox.y0*sc,Math.max(2,(e.markerBox.x1-e.markerBox.x0)*sc),Math.max(2,(e.markerBox.y1-e.markerBox.y0)*sc));
+    }
+    ctx.fillStyle=e.final?"#37f28d":(e.method==="conflict"?"#ffb84a":"#8fa39a");
+    ctx.font="10px ui-monospace,Menlo,monospace";
+    ctx.fillText(`${e.key} r${e.row}: ${e.final||"·"} (${e.method},${e.cropSource})`.slice(0,34),cx,cy+10);
+  });
+  return c;
 }
 async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
   // Rebuilt scan path. Hands the flattened value-grid image (output of the kept
@@ -19428,6 +19640,29 @@ async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
       const vals=scanRows.map(r=>{const c=(r.cells||[]).find(x=>x&&x.key===s.metricKey);return c&&c.value!=null?String(c.value)+(c.direction||""):"·";});
       return `${s.metricKey}: ${vals.join(",")}`;
     }).join("\n");
+    // ===== Stage 3.5 — DEEP SCAN. Targeted re-read of the direction markers
+    // (R/L/+/-) using the blanking method on per-cell crops (native photo
+    // resolution where possible). Only direction fields are touched — row
+    // structure is frozen. A deep scan failure is reported honestly but never
+    // kills the scan: directions then stay as the strip read left them.
+    gdPracticeUpdateImportJob({checkpointText:"Deep scanning direction markers",stageIndex:2,progress:90});
+    try{
+      const directionKeys=namedStrips.map(s=>s.metricKey).filter(k=>typeof gdColumnNeedsDirection==="function"&&gdColumnNeedsDirection(k));
+      const targetCount=scanRows.reduce((n,row)=>n+(row.cells||[]).filter(c=>c&&c.geom&&c.value!=null&&directionKeys.includes(c.key)).length,0);
+      gdPracticeDebugCheckpointSafe("deep_scan","running",{inputSummary:`${targetCount} direction cells across ${directionKeys.length} columns (${directionKeys.join(", ")||"none"})`});
+      const deep=await gdClarityDeepScanDirections(flat,scanRows,Tesseract,{onCell:n=>{try{gdPracticeUpdateImportJob({checkpointText:`Deep scan ${n}/${targetCount}`,stageIndex:2,progress:Math.min(95,90+Math.round((n/Math.max(1,targetCount))*5))});}catch(e){}}});
+      const deepDump=deep.entries.map(e=>`${e.key} r${e.row}: ${e.final||"·"} [${e.method}] crop=${e.cropSource} shape=${e.shapeGlyph||"·"}(${e.shapeScore}) ocr="${e.ocrText||"·"}"${e.prev!==e.final?` (was ${e.prev||"·"})`:""}`).join("\n");
+      const nativeCrops=deep.entries.filter(e=>e.cropSource==="native").length;
+      gdPracticeDebugCheckpointSafe("deep_scan",deep.examined?"success":"warning",{
+        outputSummary:`Examined ${deep.examined} cells: ${deep.agreed} agree (shape+ocr), ${deep.shapeOnly} shape-only, ${deep.ocrOnly} ocr-only, ${deep.conflicts} conflict (not applied), ${deep.noMarker} no marker found. ${deep.updated} direction${deep.updated===1?"":"s"} changed. Crops: ${nativeCrops}/${deep.examined} native-resolution.\n${deepDump||"No direction cells to scan."}`,
+        counts:{examined:deep.examined,updated:deep.updated,agreed:deep.agreed,shapeOnly:deep.shapeOnly,ocrOnly:deep.ocrOnly,conflicts:deep.conflicts,noMarker:deep.noMarker,nativeCrops:nativeCrops},
+        snapshot:{canvas:gdClarityDeepScanMontage(deep.entries),label:"Deep scan: blanked cells as classified (marker boxed green; label = final [method, crop source])"}
+      });
+    }catch(e){
+      if(typeof gdPracticeIsQuietScanStop==="function"&&gdPracticeIsQuietScanStop(e))throw e;
+      console.warn("[GolfDaddy] Deep scan stage failed",e);
+      gdPracticeDebugCheckpointSafe("deep_scan","failed",{outputSummary:`Deep scan failed — directions fall back to the strip read. ${e&&e.message?e.message:e}`,technicalDetails:e&&e.stack});
+    }
     // Single checkpoint (adapter): scanner output -> Shot Library, cleaning misreads.
     const payload=gdClarityScanResultToPayload(scanRows,{label:sourceLabel,club:clubLabel});
     const rowCount=Number(payload?.clubGroups?.length)||0;
@@ -36978,6 +37213,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       header_strip_scan:"2 · Header allocation",
       extraction_started:"3 · Extraction",
       extraction_completed:"3 · Extraction",
+      deep_scan:"3.5 · Deep scan (direction markers)",
       ocr_generated_template:"OCR grid generated",
       header_cutout_allocation:"Header / cutout allocation",
       raw_values_detected:"Raw text / raw values detected",

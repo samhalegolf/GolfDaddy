@@ -728,6 +728,236 @@
     return { raw: String(text || ""), value: Number.isFinite(value) ? value : null, direction: direction, valid: valid };
   }
 
+  // ---------- deep scan (Stage 3.5): blanking method for direction markers ----------
+  // A direction cell is a NUMBER plus a small marker glyph that is one of exactly
+  // four shapes: L, R, + or -. The blanking method removes the number (the value
+  // cluster) from consideration and classifies whatever ink remains. All pure
+  // mask/geometry work lives here; the browser glue only supplies pixels.
+
+  // Crop a sub-rectangle out of a {mask,w,h} ink mask (clamped, inclusive bounds).
+  function cropMask(maskObj, x0, y0, x1, y1) {
+    var w = Number(maskObj && maskObj.w) || 0, h = Number(maskObj && maskObj.h) || 0;
+    var cx0 = Math.max(0, Math.floor(Math.min(x0, x1)));
+    var cy0 = Math.max(0, Math.floor(Math.min(y0, y1)));
+    var cx1 = Math.min(w - 1, Math.ceil(Math.max(x0, x1)));
+    var cy1 = Math.min(h - 1, Math.ceil(Math.max(y0, y1)));
+    var cw = Math.max(0, cx1 - cx0 + 1), ch = Math.max(0, cy1 - cy0 + 1);
+    var out = new Uint8Array(cw * ch);
+    for (var y = 0; y < ch; y += 1) {
+      for (var x = 0; x < cw; x += 1) {
+        out[y * cw + x] = maskObj.mask[(cy0 + y) * w + (cx0 + x)] ? 1 : 0;
+      }
+    }
+    return { mask: out, w: cw, h: ch };
+  }
+
+  // Fraction-of-ink fill grid (rows x cols) over a glyph mask, normalised so the
+  // densest cell is 1. The classifier reasons about WHERE the strokes are, not
+  // how thick they are.
+  function glyphFillGrid(maskObj, rows, cols) {
+    rows = rows || 3; cols = cols || 3;
+    var w = maskObj.w, h = maskObj.h, mask = maskObj.mask;
+    var grid = [];
+    for (var r = 0; r < rows; r += 1) { grid.push([]); for (var c = 0; c < cols; c += 1) grid[r].push(0); }
+    if (!w || !h) return grid;
+    for (var y = 0; y < h; y += 1) {
+      var gr = Math.min(rows - 1, Math.floor((y / h) * rows));
+      for (var x = 0; x < w; x += 1) {
+        if (!mask[y * w + x]) continue;
+        var gc = Math.min(cols - 1, Math.floor((x / w) * cols));
+        grid[gr][gc] += 1;
+      }
+    }
+    var max = 0;
+    for (r = 0; r < rows; r += 1) for (c = 0; c < cols; c += 1) if (grid[r][c] > max) max = grid[r][c];
+    if (max > 0) for (r = 0; r < rows; r += 1) for (c = 0; c < cols; c += 1) grid[r][c] = grid[r][c] / max;
+    return grid;
+  }
+
+  // Count fully ENCLOSED background regions (holes) in a glyph mask. Cheap and
+  // decisive: L / + / - have 0 holes, R has exactly 1 (its bowl), while closed
+  // digits like 8 (2 holes) and 0 (1 hole, but a closed bottom) are the false
+  // positives this guards against.
+  function countMaskHoles(maskObj) {
+    var w = maskObj.w, h = maskObj.h, mask = maskObj.mask;
+    if (!w || !h) return 0;
+    var seen = new Uint8Array(w * h);
+    var queue = [];
+    function pushBg(x, y) {
+      var i = y * w + x;
+      if (x < 0 || y < 0 || x >= w || y >= h || mask[i] || seen[i]) return;
+      seen[i] = 1; queue.push(i);
+    }
+    for (var x = 0; x < w; x += 1) { pushBg(x, 0); pushBg(x, h - 1); }
+    for (var y = 0; y < h; y += 1) { pushBg(0, y); pushBg(w - 1, y); }
+    while (queue.length) {
+      var cur = queue.pop();
+      var cx = cur % w, cy = (cur - cx) / w;
+      pushBg(cx - 1, cy); pushBg(cx + 1, cy); pushBg(cx, cy - 1); pushBg(cx, cy + 1);
+    }
+    var holes = [];
+    for (var i = 0; i < mask.length; i += 1) {
+      if (mask[i] || seen[i]) continue;
+      // flood this hole so it counts once, tracking its bounding box — WHERE a
+      // hole sits separates R (bowl hole in the top half) from 0/O (hole spans
+      // nearly the full height).
+      var hx0 = i % w, hy0 = (i - hx0) / w, hx1 = hx0, hy1 = hy0;
+      queue.push(i); seen[i] = 1;
+      while (queue.length) {
+        var c = queue.pop();
+        var hx = c % w, hy = (c - hx) / w;
+        if (hx < hx0) hx0 = hx; if (hx > hx1) hx1 = hx;
+        if (hy < hy0) hy0 = hy; if (hy > hy1) hy1 = hy;
+        [[hx - 1, hy], [hx + 1, hy], [hx, hy - 1], [hx, hy + 1]].forEach(function (p) {
+          var px = p[0], py = p[1], pi = py * w + px;
+          if (px < 0 || py < 0 || px >= w || py >= h || mask[pi] || seen[pi]) return;
+          seen[pi] = 1; queue.push(pi);
+        });
+      }
+      holes.push({ x0: hx0, y0: hy0, x1: hx1, y1: hy1 });
+    }
+    return { count: holes.length, boxes: holes };
+  }
+
+  // Classify a single glyph mask (TIGHT bounding-box crop of one component) as
+  // one of the four possible markers. Returns { glyph:"L"|"R"|"+"|"-"|"",
+  // score:0..1, grid, holes } — grid + holes are kept so the debug window can
+  // show exactly what the classifier saw.
+  function classifyGlyphMask(maskObj) {
+    var w = Number(maskObj && maskObj.w) || 0, h = Number(maskObj && maskObj.h) || 0;
+    var mask = maskObj && maskObj.mask;
+    var none = { glyph: "", score: 0, grid: null, holes: 0 };
+    if (!mask || w < 2 || h < 2) return none;
+    var ink = 0;
+    for (var i = 0; i < mask.length; i += 1) if (mask[i]) ink += 1;
+    if (ink < 6) return none;
+    var aspect = w / h;
+    var density = ink / (w * h);
+    var holeInfo = countMaskHoles(maskObj);
+    var holes = holeInfo.count;
+    var grid = glyphFillGrid(maskObj, 3, 3);
+    // Raw thirds (fractions of TOTAL ink, not normalised) for the +/- checks.
+    var rowThirds = [0, 0, 0], colThirds = [0, 0, 0], corners = 0;
+    for (var y = 0; y < h; y += 1) {
+      var rt = Math.min(2, Math.floor((y / h) * 3));
+      for (var x = 0; x < w; x += 1) {
+        if (!mask[y * w + x]) continue;
+        var ct = Math.min(2, Math.floor((x / w) * 3));
+        rowThirds[rt] += 1; colThirds[ct] += 1;
+        if ((rt === 0 || rt === 2) && (ct === 0 || ct === 2)) corners += 1;
+      }
+    }
+    var midRow = rowThirds[1] / ink, midCol = colThirds[1] / ink, cornerFrac = corners / ink;
+    // '-' : a tight crop of a dash is a solid, wide, flat block.
+    if (holes === 0 && aspect >= 1.7 && density >= 0.7) {
+      return { glyph: "-", score: Math.min(1, 0.6 + density * 0.4), grid: grid, holes: holes };
+    }
+    // '+' : roughly square cross — ink lives in the middle row band + middle
+    // column band, corners empty.
+    if (holes === 0 && aspect >= 0.55 && aspect <= 1.8 && cornerFrac <= 0.10 && (midRow + midCol) >= 1.0 && midRow >= 0.3 && midCol >= 0.3) {
+      return { glyph: "+", score: Math.min(1, 0.55 + (1 - cornerFrac) * 0.35), grid: grid, holes: holes };
+    }
+    // Letters. Both L and R have a full-height stroke on the LEFT; the main
+    // difference is ink in the TOP-RIGHT (R's bar + bowl) vs none (L). Holes
+    // arbitrate against look-alike digits: 8 (2 holes) is never a letter, a
+    // closed 0 (1 hole) has a full bottom-middle where R has a gap between its
+    // legs, and L can never contain a hole.
+    if (holes <= 1 && aspect >= 0.3 && aspect <= 1.25) {
+      var leftCol = (grid[0][0] + grid[1][0] + grid[2][0]) / 3;
+      var topRight = (grid[0][1] + grid[0][2] + grid[1][2]) / 3;
+      var bottomBar = (grid[2][1] + grid[2][2]) / 2;
+      var bottomRight = grid[2][2];
+      var bottomMid = grid[2][1];
+      if (leftCol >= 0.35) {
+        var lScore = leftCol * 0.45 + bottomBar * 0.35 + (1 - topRight) * 0.20;
+        var rScore = leftCol * 0.35 + topRight * 0.45 + bottomRight * 0.20;
+        // Hole evidence: a single hole confined to the TOP half is R's bowl —
+        // strong evidence. A hole reaching into the bottom third means a closed
+        // digit (0/O/6), which is never a direction marker.
+        var holeBox = holes === 1 ? holeInfo.boxes[0] : null;
+        var holeIsTopBowl = !!holeBox && (holeBox.y1 / Math.max(1, h - 1)) <= 0.65;
+        if (holes === 1 && !holeIsTopBowl) return { glyph: "", score: 0, grid: grid, holes: holes };
+        if (holes === 1) rScore += 0.15; else rScore -= 0.10; // closed bowl is strong R evidence
+        if (holes === 0 && topRight <= 0.22 && bottomBar >= 0.3 && lScore >= rScore) {
+          return { glyph: "L", score: Math.min(1, lScore), grid: grid, holes: holes };
+        }
+        if (topRight >= 0.30 && bottomMid <= 0.5 && rScore > lScore) {
+          return { glyph: "R", score: Math.min(1, rScore), grid: grid, holes: holes };
+        }
+      }
+    }
+    return { glyph: "", score: 0, grid: grid, holes: holes };
+  }
+
+  function markerGlyphToDirection(glyph) {
+    var g = String(glyph || "");
+    if (g === "L" || g === "-") return "L";
+    if (g === "R" || g === "+") return "R";
+    return "";
+  }
+
+  // Partition a direction cell's components into the VALUE cluster (the number —
+  // the group with the most ink) and MARKER candidates (glyph-sized components
+  // outside it). This is the "blanking": everything in the value cluster is
+  // removed from consideration before classification.
+  function partitionDirectionCell(components, opts) {
+    opts = opts || {};
+    var comps = (Array.isArray(components) ? components : []).filter(function (c) {
+      return c && Number.isFinite(Number(c.x0)) && Number.isFinite(Number(c.x1));
+    });
+    if (!comps.length) return { valueBox: null, markerComponents: [] };
+    var charHeight = Number(opts.charHeight) ||
+      median(comps.map(function (c) { return Number(c.y1) - Number(c.y0); }).filter(function (v) { return v > 0; })) || 16;
+    var groups = groupComponentsIntoValues(comps, { charHeight: charHeight });
+    if (!groups.length) return { valueBox: null, markerComponents: [] };
+    var valueGroup = groups.reduce(function (best, g) { return (Number(g.ink) || 0) > (Number(best.ink) || 0) ? g : best; }, groups[0]);
+    var valueH = Math.max(1, Number(valueGroup.y1) - Number(valueGroup.y0));
+    var markerComponents = comps.filter(function (c) {
+      // outside the value cluster's box (with a small pad)…
+      var pad = Math.max(1, charHeight * 0.12);
+      var insideValue = Number(c.x0) >= Number(valueGroup.x0) - pad && Number(c.x1) <= Number(valueGroup.x1) + pad;
+      if (insideValue) return false;
+      // …and plausibly a marker glyph, not dust or a table artefact. Letters
+      // (L/R/+) are digit-sized; a '-' dash is much FLATTER than a digit but
+      // clearly wide, so wide-flat components stay in.
+      var ch = Number(c.y1) - Number(c.y0), cw = Number(c.x1) - Number(c.x0);
+      var letterSized = ch >= valueH * 0.3;
+      var dashShaped = cw >= valueH * 0.35 && ch >= Math.max(1, valueH * 0.06) && cw / Math.max(1, ch) >= 1.7;
+      if (!letterSized && !dashShaped) return false;
+      if (ch > valueH * 1.5) return false;
+      if (cw > charHeight * 1.8) return false;
+      if ((Number(c.area) || (cw * ch)) < 6) return false;
+      return true;
+    });
+    return { valueBox: valueGroup, markerComponents: markerComponents, charHeight: charHeight };
+  }
+
+  // Full deep-scan analysis of one direction cell: blank the value, classify the
+  // remainder. Returns everything the caller (and the debug window) needs:
+  //   { direction, glyph, score, valueBox, candidates:[{box, glyph, score, grid}] }
+  // direction is "" when nothing classifies confidently — the caller decides the
+  // fallback, this function never guesses.
+  function deepScanDirectionCell(maskObj, components, opts) {
+    opts = opts || {};
+    var minScore = Number.isFinite(Number(opts.minScore)) ? Number(opts.minScore) : 0.55;
+    var parts = partitionDirectionCell(components, opts);
+    var out = { direction: "", glyph: "", score: 0, valueBox: parts.valueBox || null, candidates: [] };
+    if (!parts.valueBox || !parts.markerComponents.length || !maskObj) return out;
+    parts.markerComponents.forEach(function (c) {
+      var crop = cropMask(maskObj, Number(c.x0), Number(c.y0), Number(c.x1), Number(c.y1));
+      var cls = classifyGlyphMask(crop);
+      out.candidates.push({ box: { x0: c.x0, y0: c.y0, x1: c.x1, y1: c.y1 }, glyph: cls.glyph, score: cls.score, grid: cls.grid });
+    });
+    out.candidates.sort(function (a, b) { return Number(b.score) - Number(a.score); });
+    var best = out.candidates[0];
+    if (best && best.glyph && Number(best.score) >= minScore) {
+      out.glyph = best.glyph;
+      out.score = Number(best.score);
+      out.direction = markerGlyphToDirection(best.glyph);
+    }
+    return out;
+  }
+
   var api = {
     splitColumns: splitColumns,
     allocateHeaders: allocateHeaders,
@@ -739,6 +969,7 @@
     clusterValueRows: clusterValueRows,
     isSummaryLabel: isSummaryLabel,
     groupComponentsIntoValues: groupComponentsIntoValues,
+    deepScanDirectionCell: deepScanDirectionCell,
     _internals: {
       median: median, trackClusters: trackClusters, clearanceConfig: clearanceConfig,
       mergeIntervals: mergeIntervals, clearanceRows: clearanceRows, corridorBands: corridorBands,
@@ -746,7 +977,9 @@
       valueGapThreshold: valueGapThreshold, positionalDefuse: positionalDefuse,
       resolveMetricKey: resolveMetricKey, parseNumber: parseNumber,
       metricPlausible: metricPlausible, directionFromText: directionFromText,
-      needsDirection: needsDirection, looksLikeValue: looksLikeValue
+      needsDirection: needsDirection, looksLikeValue: looksLikeValue,
+      cropMask: cropMask, glyphFillGrid: glyphFillGrid, classifyGlyphMask: classifyGlyphMask, countMaskHoles: countMaskHoles,
+      partitionDirectionCell: partitionDirectionCell, markerGlyphToDirection: markerGlyphToDirection
     }
   };
 
