@@ -1728,8 +1728,8 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 <script>window.L=window.L||window.leaflet;</script>
 <script src="scripts/clarity-build.js?v=tool-rail-tab-hole-label-20260620"></script>
 <script src="scripts/gd-launch-monitor-alias-registry.js?v=practice-alias-registry-20260612"></script>
-<script src="scripts/clarity-table-ocr.js?v=table-ocr-deepscan-20260711b"></script>
-<script src="scripts/clarity-table-ocr-pixels.js?v=table-ocr-deepscan-20260711b"></script>
+<script src="scripts/clarity-table-ocr.js?v=table-ocr-deepscan-20260711c"></script>
+<script src="scripts/clarity-table-ocr-pixels.js?v=table-ocr-deepscan-20260711c"></script>
 <style>
 	    *,*::before,*::after{box-sizing:border-box}
 	    :where(input,select,textarea,button){max-width:100%}
@@ -19123,15 +19123,18 @@ function gdClarityScanOverlay(flat,layers){
 function gdClarityStripsMontage(strips){
   const list=Array.isArray(strips)?strips:[];
   if(!list.length){const e=document.createElement("canvas");e.width=10;e.height=10;return e;}
-  const gap=6,labelH=14,dispH=440;
-  const items=list.map(s=>{const w=Number(s.canvas&&s.canvas.width)||8,h=Number(s.canvas&&s.canvas.height)||8,sc=dispH/Math.max(1,h);return {s:s,dw:Math.max(6,Math.round(w*sc)),dh:dispH};});
+  const gap=6,labelH=14,dispH=880;
+  // Prefer the native-resolution display render so the montage shows the same
+  // quality the reads used (falls back to the flat cut without warp metadata).
+  const items=list.map(s=>{const cv=s.displayCanvas||s.canvas;const w=Number(cv&&cv.width)||8,h=Number(cv&&cv.height)||8,sc=dispH/Math.max(1,h);return {s:s,cv:cv,dw:Math.max(6,Math.round(w*sc)),dh:dispH};});
   const totalW=items.reduce((a,it)=>a+it.dw+gap,gap);
   const c=document.createElement("canvas");c.width=Math.max(1,totalW);c.height=dispH+labelH+gap*2;
   const ctx=c.getContext("2d");ctx.fillStyle="#0b0f0d";ctx.fillRect(0,0,c.width,c.height);
+  ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality="high";
   let x=gap;
   items.forEach(it=>{
     const named=!!it.s.metricKey;
-    try{if(it.s.canvas)ctx.drawImage(it.s.canvas,x,labelH+gap,it.dw,it.dh);}catch(e){}
+    try{if(it.cv)ctx.drawImage(it.cv,x,labelH+gap,it.dw,it.dh);}catch(e){}
     ctx.strokeStyle=named?"#37f28d":"#ff6a6a";ctx.lineWidth=2;ctx.strokeRect(x,labelH+gap,it.dw,it.dh);
     ctx.fillStyle=named?"#37f28d":"#ff8a8a";ctx.font="10px ui-monospace,Menlo,monospace";
     ctx.fillText(String(it.s.metricKey||it.s.headerText||"?").slice(0,9),x,11);
@@ -19207,10 +19210,17 @@ function gdClarityStripProfile(metricKey){
 function gdClarityCutStrips(flat,columns){
   const OCR=window.ClarityTableOcr, PIX=window.ClarityTableOcrPixels;
   const bounds=OCR.stripBoundaries(columns,flat.width);
-  return bounds.map(b=>({
-    index:b.index,left:b.left,right:b.right,valLeft:b.valLeft,valRight:b.valRight,metricKey:"",headerText:"",
-    canvas:PIX.cropCanvas(flat,b.left,0,b.right,flat.height,0)
-  }));
+  return bounds.map(b=>{
+    const strip={
+      index:b.index,left:b.left,right:b.right,valLeft:b.valLeft,valRight:b.valRight,metricKey:"",headerText:"",
+      canvas:PIX.cropCanvas(flat,b.left,0,b.right,flat.height,0)
+    };
+    // Native-resolution render for the debug montages (null without warp
+    // metadata — montages then fall back to the flat cut). Geometry and band
+    // detection keep using the flat `canvas`.
+    try{strip.displayCanvas=gdClarityNativeStripCanvas(flat,strip);}catch(e){strip.displayCanvas=null;}
+    return strip;
+  });
 }
 // Name each strip by reading the header off the TOP of its own image. Each strip
 // is self-contained — it knows nothing about the others.
@@ -19287,9 +19297,11 @@ async function gdClarityReadStripsIntoRows(strips,dataRows,Tesseract,opts){
       // Native-resolution cell crop via the inverse warp (falls back to the
       // upscaled flat crop without metadata). Band geometry is still derived
       // from the strip's own flat-image pixels — only the OCR input improves.
-      const cellImg=binarize(opts.flat&&opts.flat.__gdWarpSource
-        ?gdClarityDeepCropCell(opts.flat,{x0:strip.left,y0:y0-3,x1:strip.right,y1:y1+3}).canvas
-        :gdClarityUpscaleCanvas(PIX.cropCanvas(strip.canvas,0,Math.max(0,y0-3),strip.canvas.width,Math.min(strip.canvas.height,y1+3),1),3.4));
+      // The white margin (gdClarityPadCanvas) stops Tesseract dropping glyphs
+      // that touch the crop border (the "111.6 -> 11.6" leading-digit loss).
+      const cellImg=gdClarityPadCanvas(binarize(opts.flat&&opts.flat.__gdWarpSource
+        ?gdClarityDeepCropCell(opts.flat,{x0:strip.left-2,y0:y0-3,x1:strip.right+2,y1:y1+3}).canvas
+        :gdClarityUpscaleCanvas(PIX.cropCanvas(strip.canvas,0,Math.max(0,y0-3),strip.canvas.width,Math.min(strip.canvas.height,y1+3),1),3.4)),14);
       const readOnce=async psm=>{
         const rr=await gdClarityOcrWithTimeout(gdRecognizeWithTesseract(Tesseract,cellImg,{tessedit_char_whitelist:prof.whitelist,tessedit_pageseg_mode:psm},"clarity-cell-read-"+psm),12000);
         const t=String(rr&&rr.data&&rr.data.text||"").trim();
@@ -19376,11 +19388,11 @@ async function gdClarityClubIdScan(flat,strips,valueRows,Tesseract){
       // wipe); binarised retry only when the raw read resolves nothing.
       let text="",club="";
       try{
-        const res=await gdClarityOcrWithTimeout(gdRecognizeWithTesseract(Tesseract,crop.canvas,cfg,"clarity-club-cell"),9000);
+        const res=await gdClarityOcrWithTimeout(gdRecognizeWithTesseract(Tesseract,gdClarityPadCanvas(crop.canvas,12),cfg,"clarity-club-cell"),9000);
         text=String(res&&res.data&&res.data.text||"").replace(/\s+/g," ").trim();
         club=text?gdLmClubFromLine(text):"";
         if(!club){
-          const res2=await gdClarityOcrWithTimeout(gdRecognizeWithTesseract(Tesseract,PIX.binarizeCanvas(crop.canvas),cfg,"clarity-club-cell-bin"),9000);
+          const res2=await gdClarityOcrWithTimeout(gdRecognizeWithTesseract(Tesseract,gdClarityPadCanvas(PIX.binarizeCanvas(crop.canvas),12),cfg,"clarity-club-cell-bin"),9000);
           const text2=String(res2&&res2.data&&res2.data.text||"").replace(/\s+/g," ").trim();
           if(text2){club=gdLmClubFromLine(text2);if(club)text=text2;}
         }
@@ -19451,6 +19463,33 @@ function gdClarityDeepCropCell(flat,rect){
   const cropped=PIX.cropCanvas(flat,x0,y0,x1,y1,0);
   return {canvas:gdClarityUpscaleCanvas(cropped,upscale),source:"flat",scale:upscale};
 }
+// Surround a crop with a white margin before OCR. Tesseract silently DROPS
+// glyphs that touch the image border (the "111.6 read as 11.6" leading-digit
+// failure) — a clean margin around the text is the standard fix.
+function gdClarityPadCanvas(src,margin){
+  margin=Math.max(0,Math.round(Number(margin)||0));
+  if(!src||!src.width||!margin)return src;
+  const out=document.createElement("canvas");
+  out.width=src.width+margin*2;
+  out.height=src.height+margin*2;
+  const ctx=out.getContext("2d");
+  ctx.fillStyle="#fff";
+  ctx.fillRect(0,0,out.width,out.height);
+  ctx.drawImage(src,margin,margin);
+  return out;
+}
+// Full-height native-resolution render of one strip, for the DEBUG MONTAGES —
+// so the feedback window shows the same quality the per-cell reads actually
+// used, not the 1800px flat cut. Returns null without warp metadata (montage
+// then falls back to the flat strip canvas).
+function gdClarityNativeStripCanvas(flat,strip){
+  if(!flat||!flat.__gdWarpSource||!Array.isArray(flat.__gdFlattenedQuad))return null;
+  const x0=Math.max(0,Math.floor(Number(strip.left))),x1=Math.min(Number(flat.width)-1,Math.ceil(Number(strip.right)));
+  const corners=[[x0,0],[x1,0],[x1,flat.height-1],[x0,flat.height-1]].map(p=>gdFlatPointToWarpSourcePoint(flat,p[0],p[1]));
+  if(!corners.every(p=>p&&Number.isFinite(p.x)&&Number.isFinite(p.y)))return null;
+  const targetW=Math.round(Math.min(520,Math.max(120,(x1-x0)*2.2)));
+  return gdWarpQuadToCanvas(flat.__gdWarpSource,corners.map(p=>({x:p.x,y:p.y})),targetW,{minW:64,minH:120,maxH:3400});
+}
 // Run the blanking method on one direction cell crop. Returns an honest record
 // of everything that happened; `direction` is "" when neither route produced a
 // confident answer (the caller then keeps the strip-read direction).
@@ -19484,7 +19523,7 @@ async function gdClarityDeepScanCell(cellCanvas,Tesseract){
     // otherwise Tesseract hallucinates on an empty image.
     if(analysis.candidates.length){
       try{
-        const res=await gdClarityOcrWithTimeout(gdRecognizeWithTesseract(Tesseract,blanked,{tessedit_char_whitelist:"LRlr+-",tessedit_pageseg_mode:"10"},"clarity-deep-scan"),9000);
+        const res=await gdClarityOcrWithTimeout(gdRecognizeWithTesseract(Tesseract,gdClarityPadCanvas(blanked,12),{tessedit_char_whitelist:"LRlr+-",tessedit_pageseg_mode:"10"},"clarity-deep-scan"),9000);
         record.ocrText=String(res&&res.data&&res.data.text||"").trim();
         record.ocrDirection=OCR._internals.directionFromText(record.ocrText)||"";
       }catch(e){record.ocrText="(ocr error: "+(e&&e.message||e)+")";}
@@ -19618,8 +19657,9 @@ async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
       const box=detected.boxes[bi];
       // Native-resolution crop (falls back to the flat crop without warp
       // metadata). Box GEOMETRY stays in flat coordinates — only the pixels
-      // handed to OCR get the quality upgrade.
-      const crop=gdClarityDeepCropCell(flat,{x0:box.x0-3,y0:box.y0-3,x1:box.x1+3,y1:box.y1+3}).canvas;
+      // handed to OCR get the quality upgrade. White margin so no glyph
+      // touches the border (Tesseract drops edge glyphs).
+      const crop=gdClarityPadCanvas(gdClarityDeepCropCell(flat,{x0:box.x0-3,y0:box.y0-3,x1:box.x1+3,y1:box.y1+3}).canvas,12);
       const res=await gdClarityOcrWithTimeout(gdRecognizeWithTesseract(Tesseract,crop,boxCfg,"clarity-box"),9000);
       readBoxes.push(Object.assign({},box,{text:String(res?.data?.text||"").trim()}));
       if(bi%12===0){
