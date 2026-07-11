@@ -6562,8 +6562,73 @@ try{devSettings=devMerge(DEV_DEFAULTS,JSON.parse(localStorage.getItem(DEV_SETTIN
 let activeDevGroup=localStorage.getItem("golf_daddy_active_dev_group")||"launchMonitorCluster";
 function dev(path){return path.split(".").reduce((o,k)=>o&&o[k],devSettings);}
 function devDefault(path){return path.split(".").reduce((o,k)=>o&&o[k],DEV_DEFAULTS);}
-function setDev(path,value){const parts=path.split(".");let o=devSettings;for(let i=0;i<parts.length-1;i++){o=o[parts[i]];}o[parts.at(-1)]=value;localStorage.setItem(DEV_SETTINGS_STORE,JSON.stringify(devSettings));applyDevSettings();renderDevPanel();}
-function resetDevSettings(group){if(group){devSettings[group]=devClone(DEV_DEFAULTS[group]);}else{devSettings=devClone(DEV_DEFAULTS);}localStorage.setItem(DEV_SETTINGS_STORE,JSON.stringify(devSettings));applyDevSettings();renderDevPanel();toast(group?`Reset ${DEV_DEFS[group].label}`:"Developer defaults restored");}
+function setDev(path,value){const parts=path.split(".");let o=devSettings;for(let i=0;i<parts.length-1;i++){o=o[parts[i]];}o[parts.at(-1)]=value;gdPersistAdminTuning();applyDevSettings();renderDevPanel();}
+function resetDevSettings(group){if(group){devSettings[group]=devClone(DEV_DEFAULTS[group]);}else{devSettings=devClone(DEV_DEFAULTS);}gdPersistAdminTuning();applyDevSettings();renderDevPanel();toast(group?`Reset ${DEV_DEFS[group].label}`:"Developer defaults restored");}
+// ===========================================================================
+// SUPABASE-BASED ADMIN TUNING. Admin settings are account-level tuning, not
+// per-device state: the DIFF from defaults is stored on the player profile,
+// which already rides the existing account sync into app_profiles.profile_json.
+// On startup / sign-in the cloud copy is pulled back (last write wins by
+// timestamp). Only the DIFF is persisted — locally too — so untouched values
+// always track new app defaults instead of being pinned by stale snapshots.
+// ===========================================================================
+function devDiff(base,current){
+  const out={};
+  Object.keys(current||{}).forEach(k=>{
+    const c=current[k],b=base?base[k]:undefined;
+    if(c&&typeof c==="object"&&!Array.isArray(c)){
+      const child=devDiff(b||{},c);
+      if(Object.keys(child).length)out[k]=child;
+    }else if(b!==c){out[k]=c;}
+  });
+  return out;
+}
+function gdAdminTuningSnapshot(){return devDiff(DEV_DEFAULTS,devSettings);}
+function gdPersistAdminTuning(){
+  try{localStorage.setItem(DEV_SETTINGS_STORE,JSON.stringify(gdAdminTuningSnapshot()));}catch(e){}
+  gdQueueAdminTuningCloudPush();
+}
+let gdAdminTuningCloudTimer=null;
+function gdQueueAdminTuningCloudPush(){
+  clearTimeout(gdAdminTuningCloudTimer);
+  gdAdminTuningCloudTimer=setTimeout(()=>{
+    try{
+      const p=typeof ensureProfile==="function"?ensureProfile():null;
+      if(!p)return;
+      p.adminTuning=gdAdminTuningSnapshot();
+      p.adminTuningUpdatedAt=new Date().toISOString();
+      try{window.GolfDaddyProfiles?.save?.();}catch(e){}
+      // Rides the existing account sync (profile_json upsert); offline changes
+      // land in the sync outbox and flush when the connection returns.
+      Promise.resolve(window.ClarityCloudSync?.syncNow?.("admin-tuning")).catch(()=>{});
+    }catch(e){}
+  },1200);
+}
+async function gdPullAdminTuningFromCloud(){
+  try{
+    if(!window.ClarityCloudSync||typeof window.ClarityCloudSync.diagnostics!=="function")return;
+    const res=await window.ClarityCloudSync.diagnostics();
+    const cloudProfile=res&&res.profile&&res.profile.profile_json||null;
+    const tuning=cloudProfile&&cloudProfile.adminTuning;
+    if(!tuning||typeof tuning!=="object")return;
+    const cloudAt=Date.parse(cloudProfile.adminTuningUpdatedAt||"")||0;
+    const local=typeof ensureProfile==="function"?ensureProfile():null;
+    const localAt=Date.parse(local&&local.adminTuningUpdatedAt||"")||0;
+    if(localAt>cloudAt){gdQueueAdminTuningCloudPush();return;}
+    if(cloudAt&&cloudAt===localAt)return;
+    devSettings=devMerge(DEV_DEFAULTS,tuning);
+    try{localStorage.setItem(DEV_SETTINGS_STORE,JSON.stringify(devDiff(DEV_DEFAULTS,devSettings)));}catch(e){}
+    if(local){
+      local.adminTuning=devClone(tuning);
+      local.adminTuningUpdatedAt=cloudProfile.adminTuningUpdatedAt||new Date().toISOString();
+      try{window.GolfDaddyProfiles?.save?.();}catch(e){}
+    }
+    applyDevSettings();
+    try{renderDevPanel();}catch(e){}
+  }catch(e){}
+}
+window.addEventListener("clarity:session-changed",()=>{setTimeout(()=>{gdPullAdminTuningFromCloud();},1200);});
+document.addEventListener("DOMContentLoaded",()=>{setTimeout(()=>{gdPullAdminTuningFromCloud();},2000);});
 function gdPreLockBlackoutFrameEnabled(){
   return false;
 }
@@ -40691,7 +40756,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     let target=devSettings;
     for(let i=0;i<parts.length-1;i++)target=target[parts[i]];
     target[parts.at(-1)]=value;
-    localStorage.setItem(DEV_SETTINGS_STORE,JSON.stringify(devSettings));
+    gdPersistAdminTuning();
     if(path.startsWith("statsCluster.")){
       gdStatsConsistencyPct=gdStatsClampConsistency(gdStatsConsistencyPct);
       try{localStorage.setItem("gd_stats_consistency_pct",String(gdStatsConsistencyPct))}catch(e){}
