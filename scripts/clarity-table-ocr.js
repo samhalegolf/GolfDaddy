@@ -520,9 +520,15 @@
   }
 
   // Summary rows (AVERAGE / STD DEV) carry these labels in the left margin and
-  // are not shots — used to drop them before import.
+  // are not shots — used to drop them before import. Matches OCR-garbled
+  // variants too ("AVERACE", "AVFRAGE", "SID DEV"): full-word matching let a
+  // single misread character import the AVERAGE row as a 14th shot.
   function isSummaryLabel(text) {
-    return /(average|avg|std|dev|deviation|mean)/i.test(String(text || ""));
+    var raw = String(text || "");
+    if (/(aver|avg|std|dev|deviation|mean)/i.test(raw)) return true;
+    // a?er?ge / de? style: 4+ letter run that is 1 edit from AVERAGE
+    var words = raw.toUpperCase().replace(/[^A-Z ]/g, " ").split(/\s+/).filter(function (w) { return w.length >= 4; });
+    return words.some(function (w) { return levenshtein(w, "AVERAGE") <= 2 || levenshtein(w, "DEVIATION") <= 2; });
   }
 
   // Cluster number-boxes into value rows by vertical centre.

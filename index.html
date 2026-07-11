@@ -1728,8 +1728,8 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 <script>window.L=window.L||window.leaflet;</script>
 <script src="scripts/clarity-build.js?v=tool-rail-tab-hole-label-20260620"></script>
 <script src="scripts/gd-launch-monitor-alias-registry.js?v=practice-alias-registry-20260612"></script>
-<script src="scripts/clarity-table-ocr.js?v=table-ocr-deepscan-20260711c"></script>
-<script src="scripts/clarity-table-ocr-pixels.js?v=table-ocr-deepscan-20260711c"></script>
+<script src="scripts/clarity-table-ocr.js?v=table-ocr-deepscan-20260711d"></script>
+<script src="scripts/clarity-table-ocr-pixels.js?v=table-ocr-deepscan-20260711d"></script>
 <style>
 	    *,*::before,*::after{box-sizing:border-box}
 	    :where(input,select,textarea,button){max-width:100%}
@@ -8022,6 +8022,8 @@ function gdPracticeMetricValue(group,names){
   return null;
 }
 function gdPracticeMetricDisplay(value,suffix="",decimals=1){
+  // Number(null) is 0 — a MISSING metric must show "-", not a fake "0.0".
+  if(value==null||value==="")return "-";
   const n=Number(value);
   if(!Number.isFinite(n))return "-";
   const abs=Math.abs(n);
@@ -8050,9 +8052,12 @@ function gdPracticeExtractionRows(payload){
     const peak=gdPracticeMetricValue(group,["peakHeight","peak","height"]);
     const totalSpin=gdPracticeMetricValue(group,["totalSpin","spin","spin rate"]);
     const club=String(group?.candidateClub||group?.originClubLabel||"Unknown").trim()||"Unknown";
+    // Same Number(null)=0 trap as the display: a null metric must count as
+    // MISSING, or absent carry/direction rows are marked "ready" with 0 flags.
+    const present=v=>v!=null&&Number.isFinite(Number(v));
     const missing=[];
-    if(!Number.isFinite(Number(carry)))missing.push("carry");
-    const hasBallDirection=Number.isFinite(Number(offline))||Number.isFinite(Number(sideAngle))||Number.isFinite(Number(launchDirection))||Number.isFinite(Number(spinAxis));
+    if(!present(carry))missing.push("carry");
+    const hasBallDirection=present(offline)||present(sideAngle)||present(launchDirection)||present(spinAxis);
     if(!hasBallDirection)missing.push("ball direction");
     return {index:index+1,club,ballSpeed,launch,sideAngle,backspin,sideSpin,descent,offline,peak,carry,total,launchDirection,faceToPath,clubPath,faceAngle,spinAxis,smash,dynamicLoft,totalSpin,missing};
   });
@@ -19714,15 +19719,37 @@ async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
       gdOpenPracticeManualQuadTool();
       return null;
     }
+    // Margin = everything left of the first NAMED metric strip (the club column
+    // + true page margin). Using strips[0] would be the club column itself now
+    // that all strips hand over, leaving no margin and letting AVERAGE/STD DEV
+    // summary rows leak through as extra shots.
+    const firstColLeft=Number((namedStrips[0]||strips[0]).left);
+    // A real data row spans most of the columns. Drop SPARSE stray rows (e.g. a
+    // couple of edge-noise boxes near the top) — otherwise that stray becomes a
+    // phantom shot as row 1 and shifts every real row down a slot (the "extra
+    // line"). Also drop AVERAGE / STD DEV summary rows (labelled at the margin).
+    const rowBoxMax=Math.max.apply(null,[0].concat(valueRows.map(r=>Array.isArray(r.items)?r.items.length:0)));
+    const dataRows=valueRows.filter(row=>{
+      const boxes=Array.isArray(row.items)?row.items.length:0;
+      if(boxes<Math.max(4,rowBoxMax*0.5))return false;
+      // Padded window: the AVERAGE / STD DEV label can sit slightly taller or
+      // offset from the value band, so a strict cy-in-band test misses it and
+      // the summary row imports as an extra shot.
+      const rowPad=(Number(row.y1)-Number(row.y0))*0.5;
+      const marginText=textBoxes.filter(box=>Number(box.cx)<firstColLeft&&Number(box.cy)>=Number(row.y0)-rowPad&&Number(box.cy)<=Number(row.y1)+rowPad).map(box=>String(box.text||"")).join(" ");
+      return !OCR.isSummaryLabel(marginText);
+    });
     // ===== Stage 2.5 — CLUB ID. Own stage: read each offcut ROW CELL at native
     // resolution, resolve each to a club, majority vote (one club per scan).
     // Detection drives the club; the manual field / 7i is only a fallback.
+    // Votes come from DATA rows only — summary rows and stray bands would just
+    // add garbage reads to the vote.
     gdPracticeUpdateImportJob({checkpointText:"Identifying club",stageIndex:1,progress:64});
     const offcutCount=strips.filter(s=>s&&!s.metricKey).length;
-    gdPracticeDebugCheckpointSafe("club_id","running",{inputSummary:`${offcutCount} offcut strip(s) x ${valueRows.length} row bands`});
+    gdPracticeDebugCheckpointSafe("club_id","running",{inputSummary:`${offcutCount} offcut strip(s) x ${dataRows.length} data-row bands`});
     let clubScan={club:"",votes:{},entries:[]};
     try{
-      clubScan=await gdClarityClubIdScan(flat,strips,valueRows,Tesseract);
+      clubScan=await gdClarityClubIdScan(flat,strips,dataRows,Tesseract);
     }catch(e){
       if(typeof gdPracticeIsQuietScanStop==="function"&&gdPracticeIsQuietScanStop(e))throw e;
       console.warn("[GolfDaddy] Club ID stage failed",e);
@@ -19747,22 +19774,6 @@ async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
     // each strip top-to-bottom and slots values into rows by position. =====
     gdPracticeUpdateImportJob({checkpointText:"Reading strips",stageIndex:2,progress:74});
     gdSetPracticePhotoProcessing(true,{stageIndex:2,progress:74,preserveClubs:true});
-    // Margin = everything left of the first NAMED metric strip (the club column
-    // + true page margin). Using strips[0] would be the club column itself now
-    // that all strips hand over, leaving no margin and letting AVERAGE/STD DEV
-    // summary rows leak through as extra shots.
-    const firstColLeft=Number((namedStrips[0]||strips[0]).left);
-    // A real data row spans most of the columns. Drop SPARSE stray rows (e.g. a
-    // couple of edge-noise boxes near the top) — otherwise that stray becomes a
-    // phantom shot as row 1 and shifts every real row down a slot (the "extra
-    // line"). Also drop AVERAGE / STD DEV summary rows (labelled at the margin).
-    const rowBoxMax=Math.max.apply(null,[0].concat(valueRows.map(r=>Array.isArray(r.items)?r.items.length:0)));
-    const dataRows=valueRows.filter(row=>{
-      const boxes=Array.isArray(row.items)?row.items.length:0;
-      if(boxes<Math.max(4,rowBoxMax*0.5))return false;
-      const marginText=textBoxes.filter(box=>Number(box.cx)<firstColLeft&&Number(box.cy)>=row.y0&&Number(box.cy)<=row.y1).map(box=>String(box.text||"")).join(" ");
-      return !OCR.isSummaryLabel(marginText);
-    });
     // extraction_completed marked RUNNING so its duration spans the strip reads.
     gdPracticeDebugCheckpointSafe("extraction_completed","running",{inputSummary:`Read ${namedStrips.length} named strips into ${dataRows.length} rows`});
     // Read each strip top-to-bottom, slot values into rows by position (blanks
