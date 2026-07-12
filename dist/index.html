@@ -372,11 +372,14 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	    var z=Math.floor(num(safe(function(){return map.getZoom();},17),17));
 	    return Math.max(15,Math.min(17,z));
 	  }
-	  function storageKey(){
-	    var course=safe(function(){return (currentCourse&&(currentCourse.key||currentCourse.name||currentCourse.id))||document.body.dataset.gdActiveCourseName||"course";},"course");
-	    var hole=safe(function(){return currentPlayingHole||selectedHole||gdMappedStartHoleNumber&&gdMappedStartHoleNumber()||1;},1);
-	    return "gd_captured_hole_frame_v19_"+String(course+":h"+hole).replace(/[^a-z0-9:_-]+/gi,"_");
-	  }
+		  function storageKey(){
+		    var course=safe(function(){return (currentCourse&&(currentCourse.key||currentCourse.name||currentCourse.id))||document.body.dataset.gdActiveCourseName||"course";},"course");
+		    var hole=safe(function(){return currentPlayingHole||selectedHole||gdMappedStartHoleNumber&&gdMappedStartHoleNumber()||1;},1);
+		    return storageKeyFor(course,hole);
+		  }
+		  function storageKeyFor(courseKey,holeNumber){
+		    return "gd_captured_hole_frame_v19_"+String(String(courseKey||"course")+":h"+(Number(holeNumber)||1)).replace(/[^a-z0-9:_-]+/gi,"_");
+		  }
 	  function surfaceCourseKey(){
 	    return safe(function(){return (currentCourse&&(currentCourse.key||currentCourse.id||currentCourse.name))||document.body.dataset.gdActiveCourseName||"course";},"course");
 	  }
@@ -403,10 +406,10 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	    window.__gdV19CapturedHoleFrameManifest=manifest;
 	    return manifest;
 	  }
-	  function captureAnchorPins(){
-	    var data=safe(function(){return (mappedPayload()||{}).data||{};},{})||{};
-	    var route=mappedRoute(data).filter(validLL);
-	    var shape=mappedShape(data).filter(validLL);
+		  function captureAnchorPins(){
+		    var data=safe(function(){return (mappedPayload()||{}).data||{};},{})||{};
+		    var route=mappedRoute(data).filter(validLL);
+		    var shape=mappedShape(data).filter(validLL);
 	    var tee=safe(function(){return typeof gdActiveMappedTeeStartPoint==="function"?gdActiveMappedTeeStartPoint():null;},null);
 	    var green=currentGreenPoint();
 	    function pack(p){p=asLL(p);return validLL(p)?{lat:+p.lat,lng:+p.lng}:null;}
@@ -414,12 +417,26 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	      tee:pack(tee)||pack(route[0]),
 	      green:pack(green)||pack(route[route.length-1]),
 	      route:route.map(pack).filter(Boolean),
-	      greenShape:shape.map(pack).filter(Boolean)
-	    };
-	  }
-	  function captureSurfacePoints(objectBounds,reason){
-	    var points=validBounds(objectBounds)?boundsCorners(objectBounds):[];
-	    var data=safe(function(){return (mappedPayload()||{}).data||{};},{})||{};
+		      greenShape:shape.map(pack).filter(Boolean)
+		    };
+		  }
+		  function captureAnchorPinsForData(data){
+		    data=data||{};
+		    var route=mappedRoute(data).filter(validLL);
+		    var shape=mappedShape(data).filter(validLL);
+		    var tee=coursePlayPoint(data&&data.tee)||asLL(route[0]);
+		    var green=coursePlayPoint(data&&data.green)||asLL(route[route.length-1]);
+		    function pack(p){p=asLL(p);return validLL(p)?{lat:+p.lat,lng:+p.lng}:null;}
+		    return {
+		      tee:pack(tee)||pack(route[0]),
+		      green:pack(green)||pack(route[route.length-1]),
+		      route:route.map(pack).filter(Boolean),
+		      greenShape:shape.map(pack).filter(Boolean)
+		    };
+		  }
+		  function captureSurfacePoints(objectBounds,reason){
+		    var points=validBounds(objectBounds)?boundsCorners(objectBounds):[];
+		    var data=safe(function(){return (mappedPayload()||{}).data||{};},{})||{};
 	    var route=mappedRoute(data);
 	    var shape=mappedShape(data);
 	    var includeWholeHole=!/lock|zoom/i.test(String(reason||""));
@@ -428,9 +445,22 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	    var tee=safe(function(){return typeof gdActiveMappedTeeStartPoint==="function"?gdActiveMappedTeeStartPoint():null;},null);
 	    if(includeWholeHole&&validLL(tee))points.push(tee);
 	    var holeB=greenBounds("hole");
-	    if(validBounds(holeB))points=points.concat(boundsCorners(holeB));
-	    return points.map(asLL).filter(validLL);
-	  }
+		    if(validBounds(holeB))points=points.concat(boundsCorners(holeB));
+		    return points.map(asLL).filter(validLL);
+		  }
+		  function captureSurfacePointsForData(objectBounds,data,reason){
+		    data=data||{};
+		    var points=validBounds(objectBounds)?boundsCorners(objectBounds):[];
+		    var route=mappedRoute(data);
+		    var shape=mappedShape(data);
+		    var includeWholeHole=!/lock|zoom/i.test(String(reason||""));
+		    if(includeWholeHole&&route.length)points=points.concat(route);
+		    if(includeWholeHole&&shape.length)points=points.concat(shape);
+		    var pins=captureAnchorPinsForData(data);
+		    if(includeWholeHole&&validLL(pins.tee))points.push(pins.tee);
+		    if(validLL(pins.green))points.push(pins.green);
+		    return points.map(asLL).filter(validLL);
+		  }
 	  function preferredCaptureZoom(){
 	    var layer=tileLayer();
 	    var native=num(safe(function(){return layer&&layer.options&&layer.options.maxNativeZoom;},NaN),NaN);
@@ -487,10 +517,107 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	    window.__gdV19CapturedHoleFrameManifest=manifest;
 	    safe(function(){localStorage.setItem(storageKey(),JSON.stringify(manifest));});
 	    gdRegisterCoursePlayFrameManifest(manifest,{generatedFrom:"v19-captured-surface",manifestKey:storageKey(),status:"generated"});
-	    safe(function(){if(capturedGpsPlayActive())gdCoursePlayDebugEvent("gps-play-generated-new-frame",{reason:reason,manifestKey:storageKey(),tileCount:tiles.length,captureZoom:z,imageWidth:width,imageHeight:height});});
-	    return manifest;
-	  }
-	  function loadCaptureManifest(){
+		    safe(function(){if(capturedGpsPlayActive())gdCoursePlayDebugEvent("gps-play-generated-new-frame",{reason:reason,manifestKey:storageKey(),tileCount:tiles.length,captureZoom:z,imageWidth:width,imageHeight:height});});
+		    return manifest;
+		  }
+		  function explicitCoursePlayContext(courseRef,holeNumber,holePlayData,opts){
+		    opts=opts||{};
+		    var ref=courseRef&&typeof courseRef==="object"?courseRef:{};
+		    var dataRef=holePlayData&&holePlayData.course&&typeof holePlayData.course==="object"?holePlayData.course:{};
+		    var courseKey=opts.courseKey||ref.courseKey||ref.courseId||ref.key||ref.id||ref.savedCourseId||ref.canonicalKey||ref.name||ref.courseName||dataRef.courseKey||dataRef.courseId||dataRef.key||dataRef.id||dataRef.name||dataRef.courseName||surfaceCourseKey();
+		    var courseName=opts.courseName||ref.courseName||ref.name||ref.title||ref.courseKey||ref.courseId||dataRef.courseName||dataRef.name||dataRef.title||courseKey||surfaceCourseName();
+		    var hole=Number(holeNumber||holePlayData&&holePlayData.hole||holePlayData&&holePlayData.holeNumber||opts.holeNumber||surfaceHoleNumber())||1;
+		    return {courseKey:String(courseKey||"course"),courseName:String(courseName||courseKey||"Course"),holeNumber:Math.max(1,Math.round(hole))};
+		  }
+		  function capturedSurfacePrebuildSnapshot(){
+		    var keys=["gdCapturedSurfaceOwner","gdLiveMapRole","gdCapturedSurfaceScanId","gdCapturedSurfaceHole","gdCapturedSurfaceRoutePins"];
+		    var bodyData={};
+		    keys.forEach(function(key){
+		      bodyData[key]={has:!!(document.body&&Object.prototype.hasOwnProperty.call(document.body.dataset,key)),value:document.body&&document.body.dataset[key]};
+		    });
+		    return {
+		      hasActiveScan:Object.prototype.hasOwnProperty.call(window,"gdCapturedSurfaceActiveScan"),
+		      activeScan:window.gdCapturedSurfaceActiveScan,
+		      hasActiveManifest:Object.prototype.hasOwnProperty.call(window,"gdCapturedSurfaceActiveManifest"),
+		      activeManifest:window.gdCapturedSurfaceActiveManifest,
+		      bodyData:bodyData
+		    };
+		  }
+		  function restoreCapturedSurfacePrebuildSnapshot(snapshot){
+		    if(!snapshot)return;
+		    if(snapshot.hasActiveScan)window.gdCapturedSurfaceActiveScan=snapshot.activeScan;
+		    else delete window.gdCapturedSurfaceActiveScan;
+		    if(snapshot.hasActiveManifest)window.gdCapturedSurfaceActiveManifest=snapshot.activeManifest;
+		    else delete window.gdCapturedSurfaceActiveManifest;
+		    if(document.body&&snapshot.bodyData){
+		      Object.keys(snapshot.bodyData).forEach(function(key){
+		        var entry=snapshot.bodyData[key]||{};
+		        if(entry.has)document.body.dataset[key]=entry.value;
+		        else delete document.body.dataset[key];
+		      });
+		    }
+		  }
+		  function prebuildAdapterFailure(step,reason,extra){
+		    step=String(step||"manifest_build_failed");
+		    reason=String(reason||step);
+		    var transient=/map|engine|tile|projection|storage|registration|timeout|unavailable|not_ready|returned_null|missing/i.test(step+" "+reason);
+		    return Object.assign({ok:false,status:"failed",step:step,reason:reason,transient:transient},extra||{});
+		  }
+		  function localStorageApproxBytes(){
+		    return safe(function(){
+		      var total=0;
+		      for(var i=0;i<localStorage.length;i++){
+		        var key=localStorage.key(i)||"";
+		        total+=key.length+String(localStorage.getItem(key)||"").length;
+		      }
+		      return total;
+		    },0)||0;
+		  }
+		  function buildCaptureManifestForHoleData(courseRef,holeNumber,holePlayData,opts){
+		    opts=opts||{};
+		    if(!hasMap())return prebuildAdapterFailure("map_engine_unavailable","active map engine unavailable",{courseRef:courseRef,holeNumber:holeNumber,transient:true});
+		    var data=holePlayData&&holePlayData.data?holePlayData.data:holePlayData||{};
+		    var ctx=explicitCoursePlayContext(courseRef,holeNumber,holePlayData,opts);
+		    var bounds=opts.objectBounds&&validBounds(opts.objectBounds)?opts.objectBounds:coursePlayGreenBounds(data);
+		    if(!validBounds(bounds))return prebuildAdapterFailure("bounds_invalid","course play bounds invalid",{courseKey:ctx.courseKey,courseName:ctx.courseName,holeNumber:ctx.holeNumber,transient:false});
+		    var reason=opts.reason||"course-play-frame-prebuild";
+		    var z=preferredCaptureZoom();
+		    var points=captureSurfacePointsForData(bounds,data,reason);
+		    if(!points.length)return prebuildAdapterFailure("projection_points_missing","no capture points available",{courseKey:ctx.courseKey,courseName:ctx.courseName,holeNumber:ctx.holeNumber,transient:false});
+		    var pins=captureAnchorPinsForData(data);
+		    var bleed=/lock|zoom/i.test(String(reason))?2100:2800;
+		    var rect=pixelRectFor(points,z,bleed);
+		    if(!rect)return prebuildAdapterFailure("projection_rect_missing","map projection did not return a capture rect",{courseKey:ctx.courseKey,courseName:ctx.courseName,holeNumber:ctx.holeNumber,transient:true});
+		    while(z>18&&tileCountFor(rect)>320){
+		      z-=1;
+		      rect=pixelRectFor(points,z,bleed);
+		    }
+		    var origin={x:rect.minX,y:rect.minY};
+		    var width=Math.max(256,rect.maxX-rect.minX),height=Math.max(256,rect.maxY-rect.minY);
+		    var layer=tileLayer(),tiles=[];
+		    if(!layer||typeof layer.getTileUrl!=="function")return prebuildAdapterFailure("tile_layer_unavailable","capture tile layer unavailable",{courseKey:ctx.courseKey,courseName:ctx.courseName,holeNumber:ctx.holeNumber,transient:true});
+		    if(layer&&typeof layer.getTileUrl==="function"){
+		      var minTx=Math.floor(rect.minX/256),maxTx=Math.floor((rect.maxX-1)/256),minTy=Math.floor(rect.minY/256),maxTy=Math.floor((rect.maxY-1)/256);
+		      for(var ty=minTy;ty<=maxTy;ty++){
+		        for(var tx=minTx;tx<=maxTx;tx++){
+		          var url=templateTileUrl(layer,tx,ty,z);
+		          if(url)tiles.push({x:tx*256-origin.x,y:ty*256-origin.y,z:z,tileX:tx,tileY:ty,url:url});
+		        }
+		      }
+		    }
+		    if(!tiles.length)return prebuildAdapterFailure("tile_urls_empty","capture tile layer returned no tile urls",{courseKey:ctx.courseKey,courseName:ctx.courseName,holeNumber:ctx.holeNumber,transient:true});
+		    var key=storageKeyFor(ctx.courseKey,ctx.holeNumber);
+		    var manifest={version:VERSION,key:key,storageKey:key,reason:reason,surfaceModel:"captured-surface-v1",interactionOwner:"captured-surface",liveMapRole:"capture-source-diagnostic-reference",courseKey:ctx.courseKey,courseName:ctx.courseName,holeNumber:ctx.holeNumber,captureZoom:z,imageWidth:width,imageHeight:height,originPx:origin,tiles:tiles,includeTee:!!pins.tee,teeLatLng:pins.tee||null,anchorPins:pins,createdAt:new Date().toISOString()};
+		    var manifestBytes=safe(function(){return JSON.stringify(manifest).length;},0)||0;
+		    var snapshot=capturedSurfacePrebuildSnapshot();
+		    manifest=safe(function(){return typeof window.gdCapturedSurfaceWriteScan==="function"?window.gdCapturedSurfaceWriteScan(manifest,{reason:reason,storageKey:key,courseKey:ctx.courseKey,holeNumber:ctx.holeNumber}):manifest;},manifest)||manifest;
+		    safe(function(){localStorage.setItem(key,JSON.stringify(manifest));});
+		    restoreCapturedSurfacePrebuildSnapshot(snapshot);
+		    var stored=safe(function(){return JSON.parse(localStorage.getItem(key)||"null");},null);
+		    if(!stored||!Array.isArray(stored.tiles)||!stored.originPx)return prebuildAdapterFailure("manifest_storage_write_failed","captured manifest storage write failed",{courseKey:ctx.courseKey,courseName:ctx.courseName,holeNumber:ctx.holeNumber,manifestKey:key,manifestBytes:manifestBytes,localStorageApproxBytes:localStorageApproxBytes(),tileCount:tiles.length,transient:true});
+		    return {ok:true,status:"manifest_written",step:"manifest_written",manifest:manifest,manifestKey:key,courseKey:ctx.courseKey,courseName:ctx.courseName,holeNumber:ctx.holeNumber,tileCount:tiles.length,captureZoom:z,manifestBytes:manifestBytes,localStorageApproxBytes:localStorageApproxBytes()};
+		  }
+		  function loadCaptureManifest(){
 	    if(captureManifest&&manifestMatchesActive(captureManifest))return publishCaptureManifest(captureManifest);
 	    if(captureManifest&&!manifestMatchesActive(captureManifest))captureManifest=null;
 	    var m=safe(function(){return JSON.parse(localStorage.getItem(storageKey())||"null");},null);
@@ -772,12 +899,13 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	      return activeMappedCourse()||surfaceCourseKey();
 	    },surfaceCourseKey());
 	  }
-	  function gdRegisterCoursePlayFrameManifest(manifest,opts){
-	    return safe(function(){
-	      if(!window.GDCoursePlayPipeline||typeof window.GDCoursePlayPipeline.registerCoursePlayFrame!=="function")return null;
-	      return window.GDCoursePlayPipeline.registerCoursePlayFrame(gdCoursePlayFrameCourseRef(),surfaceHoleNumber(),manifest,opts||{});
-	    },null);
-	  }
+		  function gdRegisterCoursePlayFrameManifest(manifest,opts){
+		    return safe(function(){
+		      if(!window.GDCoursePlayPipeline||typeof window.GDCoursePlayPipeline.registerCoursePlayFrame!=="function")return null;
+		      opts=opts||{};
+		      return window.GDCoursePlayPipeline.registerCoursePlayFrame(opts.courseRef||opts.courseId||gdCoursePlayFrameCourseRef(),opts.holeNumber||surfaceHoleNumber(),manifest,opts);
+		    },null);
+		  }
 	  function gdRenderCoursePlayHoleFrame(courseId,holeNumber,holePlayData,opts){
 	    opts=opts||{};
 	    if(window.gdFullMappingMode||document.body&&document.body.classList.contains("gdFullMappingMode"))return false;
@@ -805,12 +933,32 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	    }
 	    return !!ok;
 	  }
-	  function gdEnsureCoursePlayFrameRendered(courseId,holeNumber){
-	    return gdRenderCoursePlayHoleFrame(courseId,holeNumber,null,{reason:"course-play-pipeline"});
-	  }
-	  window.gdRenderCoursePlayHoleFrame=gdRenderCoursePlayHoleFrame;
-	  window.gdEnsureCoursePlayFrameRendered=gdEnsureCoursePlayFrameRendered;
-	  function activePipelineStatus(){
+		  function gdEnsureCoursePlayFrameRendered(courseId,holeNumber){
+		    return gdRenderCoursePlayHoleFrame(courseId,holeNumber,null,{reason:"course-play-pipeline"});
+		  }
+		  function gdPrebuildCoursePlayFrameManifest(courseRef,holeNumber,holePlayData,opts){
+		    opts=opts||{};
+		    var data=holePlayData&&holePlayData.data?holePlayData.data:holePlayData;
+		    var ctx=explicitCoursePlayContext(courseRef,holeNumber,holePlayData,opts);
+		    if(!data)return prebuildAdapterFailure("hole_play_data_missing","course play hole data missing",{courseKey:ctx.courseKey,courseName:ctx.courseName,holeNumber:ctx.holeNumber,transient:false});
+		    var built=buildCaptureManifestForHoleData(courseRef,ctx.holeNumber,data,Object.assign({},opts,{courseKey:ctx.courseKey,courseName:ctx.courseName,holeNumber:ctx.holeNumber,reason:opts.reason||"course-play-frame-prebuild"}));
+		    if(!built)return prebuildAdapterFailure("manifest_build_returned_null","manifest build returned null",{courseKey:ctx.courseKey,courseName:ctx.courseName,holeNumber:ctx.holeNumber,transient:true});
+		    if(built.ok===false)return built;
+		    var manifest=built.manifest||built;
+		    var frame=gdRegisterCoursePlayFrameManifest(manifest,{courseRef:courseRef||ctx.courseKey,courseId:ctx.courseKey,holeNumber:ctx.holeNumber,generatedFrom:"v19-captured-surface-prebuild",manifestKey:manifest.key||manifest.storageKey,status:"prebuilt",cacheStatus:"local-prebuilt"});
+		    safe(function(){
+		      if(window.GDCoursePlayPipeline&&typeof window.GDCoursePlayPipeline.recordDebugEvent==="function"){
+		        window.GDCoursePlayPipeline.recordDebugEvent("frame-prebuild-manifest-built",{courseId:ctx.courseKey,courseName:ctx.courseName,holeNumber:ctx.holeNumber,manifestKey:manifest.key||manifest.storageKey,tileCount:(manifest.tiles||[]).length,captureZoom:manifest.captureZoom,source:opts.source||"v19-prebuild"});
+		      }
+		    });
+		    if(!frame)return Object.assign({},built,{ok:true,status:"manifest_written",step:"frame_index_registration_failed",reason:"registration_returned_null",transient:true,manifest:manifest,manifestKey:manifest.key||manifest.storageKey,frameIndexRegistered:false});
+		    return Object.assign({},built,{ok:true,status:"complete",step:"frame_index_registered",manifest:manifest,manifestKey:manifest.key||manifest.storageKey,frameIndexKey:frame&&frame.frameIndexKey||null,frameIndexRegistered:!!frame});
+		  }
+		  window.gdRenderCoursePlayHoleFrame=gdRenderCoursePlayHoleFrame;
+		  window.gdEnsureCoursePlayFrameRendered=gdEnsureCoursePlayFrameRendered;
+		  window.gdPrebuildCoursePlayFrameManifest=gdPrebuildCoursePlayFrameManifest;
+		  window.gdPrebuildCoursePlayFrameFromData=gdPrebuildCoursePlayFrameManifest;
+		  function activePipelineStatus(){
 	    var state=activePipelineHoleState();
 	    return String(state&&state.status||"");
 	  }
@@ -2066,7 +2214,7 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
     .gdAdminCourseDetailHead h4{margin:0;color:#fff;font-size:15px;font-weight:950}
     .gdAdminCourseDetailHead span{display:block;margin-top:3px;color:rgba(255,255,255,.58);font-size:10px;font-weight:800;line-height:1.3}
     .gdAdminCourseHoleScroll{overflow:auto;border-radius:13px;border:1px solid rgba(255,255,255,.08);background:rgba(0,0,0,.16)}
-    .gdAdminCourseHoleTable{min-width:900px;width:100%;border-collapse:collapse;font:800 10px/1.3 ui-monospace,SFMono-Regular,Menlo,monospace;color:rgba(255,255,255,.76)}
+    .gdAdminCourseHoleTable{min-width:1080px;width:100%;border-collapse:collapse;font:800 10px/1.3 ui-monospace,SFMono-Regular,Menlo,monospace;color:rgba(255,255,255,.76)}
     .gdAdminCourseHoleTable th,.gdAdminCourseHoleTable td{padding:7px 8px;border-bottom:1px solid rgba(255,255,255,.06);text-align:left;vertical-align:top}
     .gdAdminCourseHoleTable th{position:sticky;top:0;background:#15120d;color:rgba(255,255,255,.56);font-size:9px;text-transform:uppercase;letter-spacing:.05em;z-index:1}
     .gdAdminPayloadPreview{display:none;margin-top:8px;padding:9px;border-radius:13px;background:rgba(0,0,0,.28);border:1px solid rgba(255,255,255,.08);max-height:280px;overflow:auto;color:rgba(255,255,255,.80);font:800 10px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;overflow-wrap:anywhere}
@@ -6292,27 +6440,47 @@ function gdAdminCourseDbHoleRows(course){
   const seen={};
   Object.keys(course.holes||{}).forEach(key=>{seen[String(Number(key)||Number(course.holes[key]?.holeNumber)||0)]=true;});
   frames.forEach(frame=>{seen[String(Number(frame&&frame.holeNumber)||0)]=true;});
-  return Object.keys(seen).map(Number).filter(Boolean).sort((a,b)=>a-b).map(number=>{
-    const hole=course.holes&&course.holes[String(number)]||{};
-    const frame=frameByHole[String(number)]||null;
-    const anchors=hole.frameAnchors||{};
-    const presentation=hole.presentation||{};
-    const manifestKey=frame&&frame.manifestKey||frame&&frame.capturedManifestKey||presentation.capturedManifestKey||null;
-    return {
-      holeNumber:number,
-      status:hole.status||"unknown",
+	  return Object.keys(seen).map(Number).filter(Boolean).sort((a,b)=>a-b).map(number=>{
+	    const hole=course.holes&&course.holes[String(number)]||{};
+	    const frame=frameByHole[String(number)]||null;
+	    const anchors=hole.frameAnchors||{};
+	    const presentation=hole.presentation||{};
+	    const manifestKey=frame&&frame.manifestKey||frame&&frame.capturedManifestKey||presentation.capturedManifestKey||null;
+	    const frameIndexKey=frame&&frame.frameIndexKey||presentation.frameIndexKey||presentation.framePrebuildFrameIndexKey||"";
+	    const hasFrameRecipe=!!(frame&&(frame.frameRecipe||frame.recipeStatus==="recipe_ready"||frame.frameStatus==="recipe_ready"||frame.cacheStatus==="manifest_cache_pending"||frame.cacheStatus==="manifest_cache_limited"||frame.cacheStatus==="manifest_cache_failed"||frame.cacheStatus==="manifest_cached"));
+	    const manifestCacheStatus=frame&&frame.manifestCacheStatus||frame&&frame.cacheStatus||presentation.manifestCacheStatus||presentation.frameCacheStatus||"";
+	    const manifestCacheError=frame&&frame.manifestCacheError||presentation.manifestCacheError||presentation.framePrebuildCacheError||"";
+	    const prebuildStatus=presentation.framePrebuildStatus||"not_started";
+	    const prebuildDetail=[
+	      prebuildStatus,
+	      presentation.framePrebuildLastStep&&`step ${presentation.framePrebuildLastStep}`,
+	      presentation.framePrebuildRetryCount?`retry ${presentation.framePrebuildRetryCount}`:"",
+	      manifestCacheStatus&&`cache ${manifestCacheStatus}`,
+	      presentation.framePrebuildManifestKey&&`manifest ${presentation.framePrebuildManifestKey}`,
+	      presentation.framePrebuildFrameIndexKey&&`frame ${presentation.framePrebuildFrameIndexKey}`,
+	      presentation.framePrebuildLastAt&&`at ${gdCoursePlayDebugTime(presentation.framePrebuildLastAt)}`,
+	      (presentation.framePrebuildLastError||manifestCacheError)&&`error ${presentation.framePrebuildLastError||manifestCacheError}`
+	    ].filter(Boolean).join(" · ");
+	    return {
+	      holeNumber:number,
+	      status:hole.status||"unknown",
       hasTee:!!hole.teePoint,
       hasGreen:!!hole.greenCentre,
       hasRoute:!!(hole.routePoints&&hole.routePoints.length>=2),
       hasFrameAnchor:!!(anchors.tee&&anchors.green&&(anchors.route&&anchors.route.length>=2||hole.routePoints&&hole.routePoints.length>=2)),
       hasFrameIndex:!!frame,
-      hasManifest:gdAdminCourseDbManifestPresent(manifestKey),
-      manifestKey:manifestKey,
-      source:[hole.source,frame&&frame.generatedFrom].filter(Boolean).join(" / ")||"unknown",
-      confidence:hole.confidence||"",
-      syncStatus:hole.syncStatus||"local",
-      updatedAt:hole.updatedAt||frame&&frame.updatedAt||""
-    };
+	      hasFrameRecipe:hasFrameRecipe,
+	      frameIndexKey:frameIndexKey,
+	      hasManifest:gdAdminCourseDbManifestPresent(manifestKey),
+	      manifestKey:manifestKey,
+	      manifestCacheStatus:manifestCacheStatus,
+	      manifestCacheError:manifestCacheError,
+	      source:[hole.source,frame&&frame.generatedFrom].filter(Boolean).join(" / ")||"unknown",
+	      confidence:hole.confidence||"",
+	      prebuild:prebuildDetail,
+	      syncStatus:hole.syncStatus||"local",
+	      updatedAt:hole.updatedAt||frame&&frame.updatedAt||""
+	    };
   });
 }
 function gdAdminCourseDbSummaries(){
@@ -6336,8 +6504,11 @@ function gdAdminCourseDbSummaries(){
       holeCount:rows.length,
       geometryReadyCount:rows.filter(row=>row.hasTee&&row.hasGreen&&row.hasRoute).length,
       playReadyCount:rows.filter(row=>row.status==="play_data_ready").length,
+      frameRecipeCount:rows.filter(row=>row.hasFrameRecipe).length,
       framesIndexedCount:rows.filter(row=>row.hasFrameIndex).length,
       manifestCount:rows.filter(row=>row.hasManifest).length,
+      manifestCacheFailedCount:rows.filter(row=>row.manifestCacheStatus==="manifest_cache_failed").length,
+      manifestCacheLimitedCount:rows.filter(row=>row.manifestCacheStatus==="manifest_cache_limited").length,
       rows:rows
     };
   }).sort((a,b)=>String(b.updatedAt||"").localeCompare(String(a.updatedAt||"")));
@@ -6382,8 +6553,9 @@ function gdRenderAdminCourseDatabase(){
     gdAdminCourseDbMetric("Shown",filtered.length),
     gdAdminCourseDbMetric("Holes",all.reduce((sum,item)=>sum+item.holeCount,0)),
     gdAdminCourseDbMetric("Play ready",all.reduce((sum,item)=>sum+item.playReadyCount,0)),
-    gdAdminCourseDbMetric("Frames indexed",all.reduce((sum,item)=>sum+item.framesIndexedCount,0)),
-    gdAdminCourseDbMetric("Manifests",all.reduce((sum,item)=>sum+item.manifestCount,0))
+    gdAdminCourseDbMetric("Frame recipes",all.reduce((sum,item)=>sum+(item.frameRecipeCount||0),0)),
+    gdAdminCourseDbMetric("Manifest cache",all.reduce((sum,item)=>sum+item.manifestCount,0)),
+    gdAdminCourseDbMetric("Cache failed",all.reduce((sum,item)=>sum+(item.manifestCacheFailedCount||0),0))
   ].join("");
   if(!all.length){
     list.innerHTML='<div class="gdCoursePlayDebugEmpty">No course database records yet. Map a course to create a local course-play record.</div>';
@@ -6401,11 +6573,13 @@ function gdRenderAdminCourseDatabase(){
       gdAdminCourseDbMetric("Hole count",selected.holeCount),
       gdAdminCourseDbMetric("Tee/green/route",selected.geometryReadyCount),
       gdAdminCourseDbMetric("Play data ready",selected.playReadyCount),
-      gdAdminCourseDbMetric("Frames indexed",selected.framesIndexedCount),
-      gdAdminCourseDbMetric("Manifest count",selected.manifestCount),
+      gdAdminCourseDbMetric("Frame recipes",selected.frameRecipeCount||0),
+      gdAdminCourseDbMetric("Manifest cache",selected.manifestCount),
+      gdAdminCourseDbMetric("Cache failed",selected.manifestCacheFailedCount||0),
+      gdAdminCourseDbMetric("Cache limited",selected.manifestCacheLimitedCount||0),
       gdAdminCourseDbMetric("Updated",gdCoursePlayDebugTime(selected.updatedAt)||"")
     ].join("")}</div>`,
-    rows.length?`<div class="gdAdminCourseHoleScroll"><table class="gdAdminCourseHoleTable"><thead><tr><th>Hole</th><th>State</th><th>Tee</th><th>Green</th><th>Route</th><th>Frame anchor</th><th>Frame index</th><th>Manifest</th><th>Source / confidence</th><th>Sync</th><th>Updated</th></tr></thead><tbody>${rows.map(row=>`<tr><td>H${gdEscapeHTML(row.holeNumber)}</td><td>${gdEscapeHTML(row.status)}</td><td>${gdAdminCourseDbFlag(row.hasTee)}</td><td>${gdAdminCourseDbFlag(row.hasGreen)}</td><td>${gdAdminCourseDbFlag(row.hasRoute)}</td><td>${gdAdminCourseDbFlag(row.hasFrameAnchor)}</td><td>${gdAdminCourseDbFlag(row.hasFrameIndex)}</td><td>${gdAdminCourseDbFlag(row.hasManifest)}<br>${gdEscapeHTML(row.manifestKey||"")}</td><td>${gdEscapeHTML(row.source)}<br>${gdEscapeHTML(row.confidence)}</td><td>${gdEscapeHTML(row.syncStatus)}</td><td>${gdEscapeHTML(gdCoursePlayDebugTime(row.updatedAt))}</td></tr>`).join("")}</tbody></table></div>`:'<div class="gdCoursePlayDebugEmpty">No holes found for this course yet.</div>',
+    rows.length?`<div class="gdAdminCourseHoleScroll"><table class="gdAdminCourseHoleTable"><thead><tr><th>Hole</th><th>State</th><th>Tee</th><th>Green</th><th>Route</th><th>Frame anchor</th><th>Frame recipe</th><th>Manifest cache</th><th>Prebuild</th><th>Source / confidence</th><th>Sync</th><th>Updated</th></tr></thead><tbody>${rows.map(row=>`<tr><td>H${gdEscapeHTML(row.holeNumber)}</td><td>${gdEscapeHTML(row.status)}</td><td>${gdAdminCourseDbFlag(row.hasTee)}</td><td>${gdAdminCourseDbFlag(row.hasGreen)}</td><td>${gdAdminCourseDbFlag(row.hasRoute)}</td><td>${gdAdminCourseDbFlag(row.hasFrameAnchor)}</td><td>${gdAdminCourseDbFlag(row.hasFrameRecipe)}<br>${gdEscapeHTML(row.frameIndexKey||"")}</td><td>${gdAdminCourseDbFlag(row.hasManifest)}<br>${gdEscapeHTML(row.manifestCacheStatus||"")}<br>${gdEscapeHTML(row.manifestKey||"")}</td><td>${gdEscapeHTML(row.prebuild||"not_started")}</td><td>${gdEscapeHTML(row.source)}<br>${gdEscapeHTML(row.confidence)}</td><td>${gdEscapeHTML(row.syncStatus)}</td><td>${gdEscapeHTML(gdCoursePlayDebugTime(row.updatedAt))}</td></tr>`).join("")}</tbody></table></div>`:'<div class="gdCoursePlayDebugEmpty">No holes found for this course yet.</div>',
     `<pre class="gdAdminPayloadPreview" id="gdAdminCourseDbPayload">${gdEscapeHTML(JSON.stringify(payload,null,2))}</pre>`
   ].join("");
 }
@@ -6422,10 +6596,23 @@ function gdCoursePlayMonitorEventText(event){
     "course-opened":"Course opened",
     "course-library-ingested-hole":`${hole}geometry saved`,
     "pipeline-record-saved":`${hole}play data ready`,
-    "pipeline-course-ingested":"Course saved",
-    "frame-index-saved":`${hole}frame saved`,
-    "captured-manifest-registered":`${hole}manifest registered`,
-    "gps-play-requested-hole":`${hole}requested`,
+	    "pipeline-course-ingested":"Course saved",
+	    "frame-index-saved":`${hole}frame saved`,
+	    "frame-recipe-ready":`${hole}frame recipe ready`,
+	    "captured-manifest-registered":`${hole}manifest registered`,
+	    "frame-prebuild-cache-stopped":"Manifest cache prebuild stopped",
+	    "frame-prebuild-queued":`Frame prebuild queued: ${event?.holesQueued ?? ""} holes`,
+	    "frame-prebuild-started":`${hole}prebuild started`,
+	    "frame-prebuild-manifest-built":`${hole}manifest prebuilt`,
+	    "frame-prebuild-manifest-written":`${hole}manifest written`,
+	    "frame-prebuild-frame-index-registered":`${hole}frame index registered`,
+	    "recovered-frame-index-from-manifest":`${hole}frame index recovered from manifest`,
+	    "frame-prebuild-retry-pending":`${hole}retry ${event?.retryCount ?? ""}: ${event?.step || event?.reason || "pending"}`,
+	    "frame-prebuild-hole-complete":`${hole}frame prebuilt`,
+	    "frame-prebuild-hole-failed":`${hole}prebuild failed`,
+	    "frame-prebuild-skipped":`${hole}prebuild skipped`,
+	    "frame-prebuild-complete":"Frame prebuild complete",
+	    "gps-play-requested-hole":`${hole}requested`,
     "gps-play-loaded-existing-frame":`${hole}loaded saved frame`,
     "gps-play-loaded-from-existing-frame":`${hole}loaded captured frame`,
     "gps-play-generated-new-frame":`${hole}frame generated`,
@@ -6474,12 +6661,15 @@ function gdRenderCoursePlayMonitor(){
     return;
   }
   const snap=api.buildDebugSnapshot();
-  const events=(Array.isArray(snap.timeline)?snap.timeline:[]).slice(-8).reverse();
-  const last=events[0];
-  const courseName=String(snap.activeCourseName||snap.activeCourseKey||"Course").replace(/\s+Golf\s+Club$/i,"");
-  if(collapsed){
-    el.innerHTML=gdCoursePlayMonitorHeader(courseName,`H${snap.activeHole||""} · ${snap.holesWithPlayDataReady||0}/${snap.holesScanned||0}`,collapsed);
-    return;
+	  const events=(Array.isArray(snap.timeline)?snap.timeline:[]).slice(-8).reverse();
+	  const last=events[0];
+	  const courseName=String(snap.activeCourseName||snap.activeCourseKey||"Course").replace(/\s+Golf\s+Club$/i,"");
+	  const prebuildLabel=snap.framePrebuildSummary||(
+	    snap.framePrebuildStatus==="running"&&snap.framePrebuildRunningHole?`H${snap.framePrebuildRunningHole}`:snap.framePrebuildQueued?`${snap.framePrebuildQueued} queued`:snap.holesWithFramePrebuildFailed?`${snap.holesWithFramePrebuildFailed} failed`:snap.framePrebuildStatus||"idle"
+	  );
+	  if(collapsed){
+	    el.innerHTML=gdCoursePlayMonitorHeader(courseName,`H${snap.activeHole||""} · ${snap.holesWithPlayDataReady||0}/${snap.holesScanned||0}`,collapsed);
+	    return;
   }
   el.innerHTML=[
     gdCoursePlayMonitorHeader(courseName,snap.automapperStatus||"debug",collapsed),
@@ -6487,12 +6677,14 @@ function gdRenderCoursePlayMonitor(){
       gdCoursePlayMonitorMetric("Active hole","H"+(snap.activeHole||"")),
       gdCoursePlayMonitorMetric("AutoMapper",snap.automapperStatus||"unknown"),
       gdCoursePlayMonitorMetric("Holes scanned",snap.holesScanned||0),
-      gdCoursePlayMonitorMetric("Holes saved",snap.holesSaved||0),
-      gdCoursePlayMonitorMetric("Play data ready",snap.holesWithPlayDataReady||0),
-      gdCoursePlayMonitorMetric("Frames ready",snap.holesWithFrameIndexEntries||0),
-      gdCoursePlayMonitorMetric("Manifest present",snap.holesWithCapturedManifestsPresent||0),
-      gdCoursePlayMonitorMetric("Sync queue",snap.syncQueueItemCount||0)
-    ].join("")}</div>`,
+	      gdCoursePlayMonitorMetric("Holes saved",snap.holesSaved||0),
+	      gdCoursePlayMonitorMetric("Play data ready",snap.holesWithPlayDataReady||0),
+	      gdCoursePlayMonitorMetric("Frame recipes",snap.holesWithFrameRecipesReady||snap.holesWithFrameIndexEntries||0),
+	      gdCoursePlayMonitorMetric("Manifest cache",snap.holesWithCapturedManifestsPresent||0),
+	      gdCoursePlayMonitorMetric("Cache failed",(snap.holesWithManifestCacheFailed||0)+(snap.holesWithManifestCacheLimited?` / ${snap.holesWithManifestCacheLimited} limited`:"")),
+	      gdCoursePlayMonitorMetric("Prebuild",prebuildLabel),
+	      gdCoursePlayMonitorMetric("Sync queue",snap.syncQueueItemCount||0)
+	    ].join("")}</div>`,
     `<div class="gdCpmLast">Last event: ${gdEscapeHTML(last?gdCoursePlayMonitorEventText(last):"Waiting")}</div>`,
     `<div class="gdCpmEvents">${events.map(event=>`<div class="gdCpmEvent">${gdEscapeHTML(gdCoursePlayDebugTime(event.at))} ${gdEscapeHTML(gdCoursePlayMonitorEventText(event))}</div>`).join("")||'<div class="gdCpmEvent">No events yet</div>'}</div>`
   ].join("");
@@ -6509,33 +6701,39 @@ function gdRenderCoursePlayPipelineDebug(){
     tableHost.innerHTML="";
     timelineHost.innerHTML="";
     return;
-  }
-  const snap=api.buildDebugSnapshot();
-  summary.innerHTML=[
-    gdCoursePlayDebugMetric("Course",snap.activeCourseName||snap.activeCourseKey||""),
-    gdCoursePlayDebugMetric("Course key",snap.activeCourseKey||""),
-    gdCoursePlayDebugMetric("Active hole","H"+(snap.activeHole||"")),
+	  }
+	  const snap=api.buildDebugSnapshot();
+	  const prebuildLabel=snap.framePrebuildSummary||(
+	    snap.framePrebuildStatus==="running"&&snap.framePrebuildRunningHole?`H${snap.framePrebuildRunningHole}`:snap.framePrebuildQueued?`${snap.framePrebuildQueued} queued`:snap.holesWithFramePrebuildFailed?`${snap.holesWithFramePrebuildFailed} failed`:snap.framePrebuildStatus||"idle"
+	  );
+	  summary.innerHTML=[
+	    gdCoursePlayDebugMetric("Course",snap.activeCourseName||snap.activeCourseKey||""),
+	    gdCoursePlayDebugMetric("Course key",snap.activeCourseKey||""),
+	    gdCoursePlayDebugMetric("Active hole","H"+(snap.activeHole||"")),
     gdCoursePlayDebugMetric("Pipeline status",snap.pipelineCourseStatus||"unknown"),
-    gdCoursePlayDebugMetric("Holes known",snap.totalHolesKnown||0),
-    gdCoursePlayDebugMetric("Play data ready",snap.holesWithPlayDataReady||0),
-    gdCoursePlayDebugMetric("Frame index",snap.holesWithFrameIndexEntries||0),
-    gdCoursePlayDebugMetric("Manifest present",snap.holesWithCapturedManifestsPresent||0),
-    gdCoursePlayDebugMetric("Sync queue",snap.syncQueueItemCount||0)
-  ].join("");
-  const rows=Array.isArray(snap.rows)?snap.rows:[];
-  if(rows.length){
-    tableHost.innerHTML=`<div class="gdCoursePlayDebugScroll"><table class="gdCoursePlayDebugTable"><thead><tr><th>Hole</th><th>State</th><th>Tee</th><th>Green</th><th>Route</th><th>Anchors</th><th>Frame index</th><th>Manifest key</th><th>Manifest</th><th>Last gen/render</th><th>Source</th><th>Sync</th><th>Updated</th><th>Reason</th></tr></thead><tbody>${rows.map(row=>`
-      <tr>
-        <td>H${gdEscapeHTML(row.holeNumber)}</td>
-        <td>${gdEscapeHTML(row.pipelineState||"")}</td>
+	    gdCoursePlayDebugMetric("Holes known",snap.totalHolesKnown||0),
+	    gdCoursePlayDebugMetric("Play data ready",snap.holesWithPlayDataReady||0),
+	    gdCoursePlayDebugMetric("Frame recipes",snap.holesWithFrameRecipesReady||snap.holesWithFrameIndexEntries||0),
+	    gdCoursePlayDebugMetric("Manifest cache",snap.holesWithCapturedManifestsPresent||0),
+	    gdCoursePlayDebugMetric("Cache failed",(snap.holesWithManifestCacheFailed||0)+(snap.holesWithManifestCacheLimited?` / ${snap.holesWithManifestCacheLimited} limited`:"")),
+	    gdCoursePlayDebugMetric("Prebuild",prebuildLabel),
+	    gdCoursePlayDebugMetric("Sync queue",snap.syncQueueItemCount||0)
+	  ].join("");
+	  const rows=Array.isArray(snap.rows)?snap.rows:[];
+	  if(rows.length){
+	    tableHost.innerHTML=`<div class="gdCoursePlayDebugScroll"><table class="gdCoursePlayDebugTable"><thead><tr><th>Hole</th><th>State</th><th>Tee</th><th>Green</th><th>Route</th><th>Anchors</th><th>Frame recipe</th><th>Manifest key</th><th>Manifest cache</th><th>Prebuild</th><th>Last gen/render</th><th>Source</th><th>Sync</th><th>Updated</th><th>Reason</th></tr></thead><tbody>${rows.map(row=>`
+	      <tr>
+	        <td>H${gdEscapeHTML(row.holeNumber)}</td>
+	        <td>${gdEscapeHTML(row.pipelineState||"")}</td>
         <td>${gdCoursePlayDebugFlag(row.hasTee)}</td>
         <td>${gdCoursePlayDebugFlag(row.hasGreen)}</td>
         <td>${gdCoursePlayDebugFlag(row.hasRoute)}</td>
         <td>${gdCoursePlayDebugFlag(row.hasFrameAnchors)}</td>
-        <td>${gdCoursePlayDebugFlag(row.hasFrameIndexEntry)}<br>${gdEscapeHTML(row.frameIndexKey||"")}</td>
-        <td>${gdEscapeHTML(row.capturedManifestKey||"")}</td>
-        <td>${gdCoursePlayDebugFlag(row.capturedManifestPresent)}</td>
-        <td>${gdEscapeHTML(gdCoursePlayDebugTime(row.lastGeneratedAt))}<br>${gdEscapeHTML(row.lastRenderedAt?gdCoursePlayDebugTime(row.lastRenderedAt):"")}</td>
+	        <td>${gdCoursePlayDebugFlag(row.hasFrameRecipe||row.hasFrameIndexEntry)}<br>${gdEscapeHTML(row.frameStatus||"")}<br>${gdEscapeHTML(row.frameIndexKey||"")}</td>
+	        <td>${gdEscapeHTML(row.capturedManifestKey||"")}</td>
+	        <td>${gdCoursePlayDebugFlag(row.capturedManifestPresent)}<br>${gdEscapeHTML(row.manifestCacheStatus||row.frameCacheStatus||"")}<br>${gdEscapeHTML(row.manifestCacheError||"")}</td>
+	        <td>${gdEscapeHTML(row.framePrebuildStatus||"not_started")}<br>${gdEscapeHTML([row.framePrebuildStep,row.framePrebuildRetryCount?("retry "+row.framePrebuildRetryCount):"",row.framePrebuildError].filter(Boolean).join(" · "))}<br>${gdEscapeHTML(row.framePrebuildLastAt?gdCoursePlayDebugTime(row.framePrebuildLastAt):"")}</td>
+	        <td>${gdEscapeHTML(gdCoursePlayDebugTime(row.lastGeneratedAt))}<br>${gdEscapeHTML(row.lastRenderedAt?gdCoursePlayDebugTime(row.lastRenderedAt):"")}</td>
         <td>${gdEscapeHTML(row.source||"")}</td>
         <td>${gdEscapeHTML(row.syncStatus||"")}</td>
         <td>${gdEscapeHTML(gdCoursePlayDebugTime(row.updatedAt))}</td>
@@ -35529,7 +35727,7 @@ function gdWireManualGpsPlayButton(){
 <link rel="stylesheet" href="styles/gd-arcade-mode.css?v=arcade-wiring-20260607">
 <script src="scripts/gd-windross-seed.js?v=windross-map-seed-20260525"></script>
 <script src="scripts/gd-course-library-pin-lock.js?v=tool-rail-tab-hole-label-20260620"></script>
-<script src="scripts/gd-course-play-pipeline.js?v=course-play-pipeline-001"></script>
+<script src="scripts/gd-course-play-pipeline.js?v=course-play-pipeline-003"></script>
 <script id="gdAutoMapHandoffQuarantineV1">
 (function(){
   "use strict";

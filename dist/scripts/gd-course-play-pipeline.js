@@ -33,6 +33,32 @@
   var lastDebugEventSig="";
   var lastDebugEventAt=0;
   var lastSyncStatusByKey={};
+  var framePrebuildQueues={};
+  var frameManifestCacheStoppedByCourse={};
+  var FRAME_PREBUILD_DELAY_MS=90;
+  var FRAME_PREBUILD_RETRY_DELAYS_MS=[400,1000,2000];
+  var FRAME_PREBUILD_MANIFEST_CACHE_LIMIT=3;
+  var FRAME_PREBUILD_TRANSIENT_REASONS={
+    "prebuild-adapter-unavailable":true,
+    "map-unavailable":true,
+    "map_engine_unavailable":true,
+    "tile-layer-unavailable":true,
+    "tile_layer_unavailable":true,
+    "tile-urls-empty":true,
+    "tile_urls_empty":true,
+    "projection-rect-missing":true,
+    "projection_rect_missing":true,
+    "manifest-build-returned-null":true,
+    "manifest_build_returned_null":true,
+    "manifest-storage-write-failed":true,
+    "manifest_storage_write_failed":true,
+    "frame-index-missing":true,
+    "frame_index_missing":true,
+    "frame-index-registration-failed":true,
+    "frame_index_registration_failed":true,
+    "captured-manifest-missing":true,
+    "captured_manifest_missing":true
+  };
 
   function now(){return new Date().toISOString();}
   function safe(fn,fb){try{return fn();}catch(e){return fb;}}
@@ -167,6 +193,38 @@
   function capturedManifestPresent(key){
     if(!key)return false;
     return !!safe(function(){return localStorage.getItem(String(key));},null);
+  }
+  function manifestPayloadBytes(manifest){
+    return Number(safe(function(){return JSON.stringify(manifest||{}).length;},0))||0;
+  }
+  function readCapturedManifest(key){
+    if(!key)return null;
+    var manifest=safe(function(){return JSON.parse(localStorage.getItem(String(key))||"null");},null);
+    return manifest&&Array.isArray(manifest.tiles)&&manifest.originPx?manifest:null;
+  }
+  function capturedManifestStorageKey(courseKey,holeNumber){
+    return "gd_captured_hole_frame_v19_"+String(String(courseKey||"course")+":h"+String(normalizeHoleNumber(holeNumber))).replace(/[^a-z0-9:_-]+/gi,"_");
+  }
+  function captureRegistryKey(courseKey,holeNumber){
+    return "gd_captured_surface_active_v1_"+slug(courseKey)+":h"+String(normalizeHoleNumber(holeNumber));
+  }
+  function courseKeyMatch(course,candidate){
+    if(candidate===undefined||candidate===null)return false;
+    var wanted=courseIdCandidates(course);
+    var key=slug(candidate);
+    return wanted.indexOf(key)!==-1;
+  }
+  function manifestMatchesHole(course,holeNumber,manifest){
+    if(!manifest)return false;
+    if(Number(manifest.holeNumber||0)&&normalizeHoleNumber(manifest.holeNumber)!==normalizeHoleNumber(holeNumber))return false;
+    var manifestCourse=manifest.courseKey||manifest.courseId||manifest.courseName||manifest.name||"";
+    return !manifestCourse||courseKeyMatch(course,manifestCourse);
+  }
+  function frameHasManifestCache(frame){
+    return !!(frame&&frameManifestKey(frame)&&capturedManifestPresent(frameManifestKey(frame)));
+  }
+  function frameHasRecipe(frame){
+    return !!(frame&&(frame.frameRecipe||frame.recipe||frame.frameStatus==="recipe_ready"||frame.recipeStatus==="recipe_ready"||frame.cacheStatus==="manifest_cache_pending"||frame.cacheStatus==="manifest_cache_limited"||frame.cacheStatus==="manifest_cache_failed"||frame.cacheStatus==="manifest_cached"));
   }
   function saveSyncQueue(queue){
     queue=normalizeSyncQueue(queue);
@@ -390,6 +448,7 @@
     });
     var saved=writeCourse(course,store);
     recordDebugEvent("pipeline-course-ingested",{courseId:saved.courseId,courseName:saved.courseName,status:saved.status,source:source||"automap",holesProcessed:holes.length,holesKnown:Object.keys(saved.holes||{}).length});
+    setTimeout(function(){safe(function(){queueFramePrebuild(saved.courseId,{source:source||"automap",reason:"bulk-ingest"});});},0);
     return saved;
   }
   function getCoursePlayState(courseOrId){
@@ -484,7 +543,38 @@
     saveStore(store);
     return holeNumber?clone(course.holes[String(normalizeHoleNumber(holeNumber))]):clone(course);
   }
-  function registerCoursePlayFrame(courseOrId,holeNumber,manifest,opts){
+  function buildFrameRecipe(course,hole,source,opts){
+    opts=opts||{};
+    hole=normalizeHoleRecord(course,hole&&hole.holeNumber||opts.holeNumber||1,hole||emptyHoleRecord(course,opts.holeNumber||1));
+    var route=points(hole.routePoints);
+    var greenShape=points(hole.greenShape);
+    var allPoints=route.concat(greenShape,[hole.teePoint,hole.greenCentre]).map(point).filter(Boolean);
+    var frameBounds=deriveBounds(allPoints,hole.greenCentre)||hole.greenBounds||deriveBounds(greenShape,hole.greenCentre);
+    return {
+      schema:"gd.course_play_pipeline.frame_recipe",
+      schemaVersion:SCHEMA_VERSION,
+      status:"recipe_ready",
+      courseId:course.courseId,
+      courseKey:course.courseKey,
+      courseName:course.courseName,
+      holeNumber:hole.holeNumber,
+      pipelineRecordId:hole.recordId,
+      pipelineDataVersion:hole.dataVersion,
+      frameBounds:frameBounds,
+      greenBounds:hole.greenBounds||deriveBounds(greenShape,hole.greenCentre),
+      anchors:clone(hole.frameAnchors||{}),
+      teePoint:clone(hole.teePoint||null),
+      greenCentre:clone(hole.greenCentre||null),
+      routePointCount:route.length,
+      greenShapePointCount:greenShape.length,
+      fairwayPointCount:(hole.fairwayPoints||[]).length,
+      captureZoom:opts.captureZoom||null,
+      generatedFrom:String(source||opts.generatedFrom||"course-play-frame-recipe"),
+      createdAt:opts.createdAt||now(),
+      updatedAt:opts.updatedAt||now()
+    };
+  }
+  function registerCoursePlayFrameRecipe(courseOrId,holeNumber,recipe,opts){
     opts=opts||{};
     var course=getCoursePlayState(courseOrId||activeCourseFromApp()||"course");
     holeNumber=normalizeHoleNumber(holeNumber||activeHoleFromApp());
@@ -492,8 +582,17 @@
     var index=loadFrameIndex();
     var key=frameIndexKey(course,holeNumber);
     var stamp=now();
-    var manifestKey=String(opts.manifestKey||manifest&&manifest.key||manifest&&manifest.storageKey||manifest&&manifest.scanId||key);
-    var record={
+    var existing=index.frames[key]||{};
+    var frameRecipe=recipe&&recipe.schema==="gd.course_play_pipeline.frame_recipe"?clone(recipe):buildFrameRecipe(course,hole,opts.generatedFrom||"course-play-frame-recipe",Object.assign({},opts,{updatedAt:stamp}));
+    var manifest=opts.manifest||null;
+    var manifestKey=opts.manifestKey||manifest&&manifest.key||manifest&&manifest.storageKey||manifest&&manifest.scanId||existing.manifestKey||existing.capturedManifestKey||null;
+    var hasManifest=!!(manifestKey&&capturedManifestPresent(manifestKey));
+    var cacheStatus=String(opts.cacheStatus||opts.manifestCacheStatus||existing.cacheStatus||existing.manifestCacheStatus||"manifest_cache_pending");
+    if(hasManifest&&cacheStatus==="manifest_cache_pending")cacheStatus="manifest_cached";
+    var frameStatus=String(opts.status||existing.frameStatus||"recipe_ready");
+    if(hasManifest&&frameStatus==="recipe_ready")frameStatus="manifest_cached";
+    var manifestBytes=Number(opts.manifestBytes||manifestPayloadBytes(manifest)||existing.manifestBytes||0)||0;
+    var record=Object.assign({},existing,{
       schema:"gd.course_play_pipeline.frame",
       schemaVersion:SCHEMA_VERSION,
       frameIndexKey:key,
@@ -503,46 +602,73 @@
       holeNumber:holeNumber,
       pipelineRecordId:hole.recordId,
       pipelineDataVersion:hole.dataVersion,
-      manifestKey:manifestKey,
-      capturedManifestKey:manifestKey,
-      generatedFrom:opts.generatedFrom||"v19-captured-surface",
-      frameStatus:opts.status||"generated",
-      cacheStatus:opts.cacheStatus||"local-cache",
+      manifestKey:manifestKey||null,
+      capturedManifestKey:manifestKey||null,
+      generatedFrom:opts.generatedFrom||frameRecipe.generatedFrom||existing.generatedFrom||"course-play-frame-recipe",
+      frameStatus:frameStatus,
+      recipeStatus:"recipe_ready",
+      cacheStatus:cacheStatus,
+      manifestCacheStatus:cacheStatus,
+      manifestCacheReason:opts.manifestCacheReason||existing.manifestCacheReason||null,
+      manifestCacheError:opts.manifestCacheError||opts.error||existing.manifestCacheError||null,
+      manifestBytes:manifestBytes,
       presentationOwner:"v19-captured-surface",
-      originPx:manifest&&manifest.originPx||null,
-      imageWidth:manifest&&manifest.imageWidth||null,
-      imageHeight:manifest&&manifest.imageHeight||null,
-      captureZoom:manifest&&manifest.captureZoom||null,
-      tileCount:Array.isArray(manifest&&manifest.tiles)?manifest.tiles.length:0,
-      anchorPins:clone(manifest&&manifest.anchorPins||{}),
-      tileMetadata:Array.isArray(manifest&&manifest.tiles)?manifest.tiles.map(function(tile){return {x:tile.x,y:tile.y,z:tile.z,tileX:tile.tileX,tileY:tile.tileY,url:tile.url};}):[],
-      createdAt:index.frames[key]&&index.frames[key].createdAt||stamp,
+      frameRecipe:frameRecipe,
+      originPx:manifest&&manifest.originPx||existing.originPx||null,
+      imageWidth:manifest&&manifest.imageWidth||existing.imageWidth||null,
+      imageHeight:manifest&&manifest.imageHeight||existing.imageHeight||null,
+      captureZoom:manifest&&manifest.captureZoom||frameRecipe.captureZoom||existing.captureZoom||null,
+      tileCount:Array.isArray(manifest&&manifest.tiles)?manifest.tiles.length:Number(existing.tileCount||0)||0,
+      anchorPins:clone(manifest&&manifest.anchorPins||existing.anchorPins||frameRecipe.anchors||{}),
+      tileMetadata:[],
+      createdAt:existing.createdAt||stamp,
       updatedAt:stamp,
-      dbShareable:false,
-      notes:"Local render cache. Durable DB sync should prefer course/hole geometry plus frame parameters."
-    };
+      dbShareable:true,
+      notes:"Frame recipe is durable; captured tile manifest is optional local cache."
+    });
     index.frames[key]=record;
     saveFrameIndex(index);
-    recordDebugEvent("frame-index-saved",{courseId:course.courseId,courseName:course.courseName,holeNumber:holeNumber,frameIndexKey:key,manifestKey:manifestKey,frameStatus:record.frameStatus,generatedFrom:record.generatedFrom,tileCount:record.tileCount});
+    recordDebugEvent("frame-index-saved",{courseId:course.courseId,courseName:course.courseName,holeNumber:holeNumber,frameIndexKey:key,manifestKey:manifestKey,frameStatus:record.frameStatus,cacheStatus:record.cacheStatus,generatedFrom:record.generatedFrom,tileCount:record.tileCount,manifestBytes:record.manifestBytes});
     var store=loadStore();
     var writable=courseRecord(course,store);
     writable.holes=Object.assign({},course.holes||{});
-    writable.holes[String(holeNumber)]=Object.assign(hole,{
-      presentation:Object.assign({},hole.presentation||{},{
-        capturedManifestKey:manifestKey,
-        capturedSurfaceReady:true,
+    var nextPresentation=Object.assign({},hole.presentation||{},{
+        capturedManifestKey:manifestKey||hole.presentation&&hole.presentation.capturedManifestKey||null,
+        capturedSurfaceReady:hasManifest||frameStatus==="rendered"||frameStatus==="manifest_cached",
         owner:"gps-play",
         frameStatus:record.frameStatus,
         frameIndexKey:key,
         frameCacheStatus:record.cacheStatus,
-        generatedFrom:record.generatedFrom
-      }),
+        manifestCacheStatus:record.manifestCacheStatus,
+        manifestCacheError:record.manifestCacheError,
+        frameRecipeStatus:"recipe_ready",
+        generatedFrom:record.generatedFrom,
+        framePrebuildStatus:"complete",
+        framePrebuildLastStep:opts.step||(/prebuild|recipe/i.test(String(record.generatedFrom||""))?"recipe_ready":"lazy_frame_registered"),
+        framePrebuildLastAt:stamp,
+        framePrebuildUpdatedAt:stamp,
+        framePrebuildManifestKey:manifestKey||hole.presentation&&hole.presentation.framePrebuildManifestKey||null,
+        framePrebuildFrameIndexKey:key
+      });
+    if(record.manifestCacheError)nextPresentation.framePrebuildCacheError=record.manifestCacheError;
+    else delete nextPresentation.framePrebuildCacheError;
+    if(frameStatus!=="failed")delete nextPresentation.framePrebuildLastError;
+    writable.holes[String(holeNumber)]=Object.assign(hole,{
+      presentation:nextPresentation,
       updatedAt:stamp
     });
     store.courses[writable.courseId]=writable;
     writeCourse(writable,store);
-    recordDebugEvent("captured-manifest-registered",{courseId:writable.courseId,courseName:writable.courseName,holeNumber:holeNumber,manifestKey:manifestKey,manifestPresent:capturedManifestPresent(manifestKey),frameIndexKey:key,source:record.generatedFrom});
+    recordDebugEvent("frame-recipe-ready",{courseId:writable.courseId,courseName:writable.courseName,holeNumber:holeNumber,frameIndexKey:key,frameStatus:record.frameStatus,cacheStatus:record.cacheStatus,manifestKey:manifestKey,manifestPresent:capturedManifestPresent(manifestKey),source:record.generatedFrom});
     return clone(record);
+  }
+  function registerCoursePlayFrame(courseOrId,holeNumber,manifest,opts){
+    opts=opts||{};
+    var manifestKey=String(opts.manifestKey||manifest&&manifest.key||manifest&&manifest.storageKey||manifest&&manifest.scanId||"");
+    var status=opts.status||(/render/i.test(String(opts.generatedFrom||""))?"rendered":"manifest_cached");
+    var frame=registerCoursePlayFrameRecipe(courseOrId,holeNumber,null,Object.assign({},opts,{manifest:manifest,manifestKey:manifestKey||undefined,status:status,cacheStatus:opts.cacheStatus||"manifest_cached",manifestCacheStatus:opts.cacheStatus||"manifest_cached",manifestBytes:manifestPayloadBytes(manifest),step:opts.step||"manifest_cached"}));
+    recordDebugEvent("captured-manifest-registered",{courseId:frame.courseId,courseName:frame.courseName,holeNumber:frame.holeNumber,manifestKey:frame.manifestKey,manifestPresent:capturedManifestPresent(frame.manifestKey),frameIndexKey:frame.frameIndexKey,cacheStatus:frame.cacheStatus,source:frame.generatedFrom});
+    return frame;
   }
   function getCoursePlayFrameIndex(courseOrId,holeNumber){
     var index=loadFrameIndex();
@@ -556,6 +682,7 @@
   function buildHolePlayDbPayload(courseOrId,holeNumber){
     var course=getCoursePlayState(courseOrId);
     var hole=normalizeHoleRecord(course,holeNumber,getHolePlayState(course,holeNumber));
+    var frame=getCoursePlayFrameIndex(course,holeNumber);
     return {
       schema:"gd.course_play_pipeline.db.hole",
       schemaVersion:SCHEMA_VERSION,
@@ -579,7 +706,12 @@
         capturedSurfaceReady:!!(hole.presentation&&hole.presentation.capturedSurfaceReady),
         frameStatus:hole.presentation&&hole.presentation.frameStatus||"unknown",
         frameIndexKey:hole.presentation&&hole.presentation.frameIndexKey||null,
-        capturedManifestKey:hole.presentation&&hole.presentation.capturedManifestKey||null
+        capturedManifestKey:hole.presentation&&hole.presentation.capturedManifestKey||null,
+        frameRecipeStatus:frame&&frame.recipeStatus||hole.presentation&&hole.presentation.frameRecipeStatus||null,
+        frameRecipe:frame&&frame.frameRecipe?clone(frame.frameRecipe):null,
+        manifestCacheStatus:frame&&frame.manifestCacheStatus||hole.presentation&&hole.presentation.manifestCacheStatus||null,
+        manifestCacheError:frame&&frame.manifestCacheError||hole.presentation&&hole.presentation.manifestCacheError||null,
+        manifestCacheRequired:false
       },
       dataVersion:hole.dataVersion,
       invalidatedAt:hole.invalidatedAt||null,
@@ -762,6 +894,7 @@
     var store=loadStore();
     store.courses[state.courseId]=state;
     saveStore(store);
+    if(opts.queueFramePrebuild!==false)setTimeout(function(){safe(function(){queueFramePrebuild(state.courseId,{source:opts.source||"course-library",reason:"post-ingest"});});},0);
     return getCoursePlayState(course);
   }
   function prepareCourseFromCourseLibrary(courseOrId,opts){
@@ -791,6 +924,418 @@
       complete:!!(green&&route.length>=2),
       frameAnchors:clone(record.frameAnchors||{})
     };
+  }
+  function coursePlayFrameReady(courseOrId,holeNumber){
+    var frame=getCoursePlayFrameIndex(courseOrId,holeNumber);
+    return !!(frame&&(frameHasRecipe(frame)||frameHasManifestCache(frame)));
+  }
+  function playablePrebuildHoles(course){
+    return Object.keys(course&&course.holes||{}).map(function(key){
+      return normalizeHoleRecord(course,key,course.holes[key]);
+    }).filter(function(hole){
+      return hole&&hole.status===HOLE_STATES.play_data_ready;
+    }).sort(function(a,b){
+      return a.holeNumber-b.holeNumber;
+    });
+  }
+  function markFramePrebuildStatus(courseOrId,holeNumber,status,detail){
+    detail=detail||{};
+    var store=loadStore();
+    var course=courseRecord(courseOrId,store);
+    holeNumber=normalizeHoleNumber(holeNumber);
+    var key=String(holeNumber);
+    var hole=normalizeHoleRecord(course,holeNumber,course.holes[key]||emptyHoleRecord(course,holeNumber));
+    var presentation=Object.assign({},hole.presentation||{});
+    var attempts=Number(presentation.framePrebuildAttempts||0)||0;
+    var stamp=now();
+    if(status==="building_manifest")attempts=Math.max(attempts,Number(detail.attempt||0)+1);
+    presentation.framePrebuildStatus=String(status||"unknown");
+    presentation.framePrebuildAttempts=attempts;
+    presentation.framePrebuildRetryCount=Number(detail.retryCount!==undefined?detail.retryCount:presentation.framePrebuildRetryCount||0)||0;
+    presentation.framePrebuildLastAt=stamp;
+    presentation.framePrebuildUpdatedAt=stamp;
+    presentation.framePrebuildLastStep=String(detail.step||status||"unknown");
+    if(detail.frameIndexKey){
+      presentation.frameIndexKey=detail.frameIndexKey;
+      presentation.framePrebuildFrameIndexKey=detail.frameIndexKey;
+    }
+    if(detail.manifestKey){
+      presentation.capturedManifestKey=detail.manifestKey;
+      presentation.framePrebuildManifestKey=detail.manifestKey;
+    }
+    if(detail.manifestCourseKey)presentation.framePrebuildManifestCourseKey=detail.manifestCourseKey;
+    if(detail.manifestHoleNumber)presentation.framePrebuildManifestHoleNumber=normalizeHoleNumber(detail.manifestHoleNumber);
+    if(status==="queued"&&!presentation.frameStatus)presentation.frameStatus="prebuild_queued";
+    if(status==="queued")presentation.frameStatus=presentation.frameStatus||"prebuild_queued";
+    if(status==="building_manifest")presentation.frameStatus="prebuilding_manifest";
+    if(status==="manifest_written")presentation.frameStatus="manifest_written";
+    if(status==="frame_index_registered")presentation.frameStatus="frame_index_registered";
+    if(status==="complete"){
+      presentation.frameStatus=detail.frameStatus||"generated";
+      presentation.capturedSurfaceReady=true;
+      presentation.frameCacheStatus=detail.cacheStatus||presentation.frameCacheStatus||"local-cache";
+      presentation.generatedFrom=detail.generatedFrom||presentation.generatedFrom||"v19-prebuild";
+      presentation.framePrebuildCompletedAt=stamp;
+      delete presentation.framePrebuildLastError;
+    }
+    if(status==="retry_pending"){
+      presentation.frameStatus="prebuild_retry_pending";
+      presentation.framePrebuildLastError=String(detail.error||detail.reason||"transient frame prebuild failure");
+      presentation.framePrebuildNextRetryAt=detail.nextRetryAt||null;
+    }
+    if(status==="failed"){
+      presentation.frameStatus="prebuild_failed";
+      presentation.capturedSurfaceReady=false;
+      presentation.framePrebuildLastError=String(detail.error||detail.reason||"frame prebuild failed");
+    }
+    if(status!=="retry_pending"&&status!=="failed")delete presentation.framePrebuildNextRetryAt;
+    if(status==="skipped"&&detail.reason)presentation.framePrebuildSkipReason=String(detail.reason);
+    hole.presentation=presentation;
+    hole.updatedAt=stamp;
+    course.holes[key]=hole;
+    store.courses[course.courseId]=course;
+    writeCourse(course,store);
+    return getHolePlayState(course,holeNumber);
+  }
+  function uniqueStrings(values){
+    var found={};
+    return (values||[]).map(function(value){return value===undefined||value===null?"":String(value);}).filter(Boolean).filter(function(value){
+      if(found[value])return false;
+      found[value]=true;
+      return true;
+    });
+  }
+  function prebuildManifestFromResult(result){
+    if(result&&result.manifest&&Array.isArray(result.manifest.tiles)&&result.manifest.originPx)return result.manifest;
+    if(result&&Array.isArray(result.tiles)&&result.originPx)return result;
+    return null;
+  }
+  function frameManifestKey(frame){
+    return frame&&(frame.manifestKey||frame.capturedManifestKey)||null;
+  }
+  function manifestKeyCandidates(course,holeNumber,result,hole){
+    var presentation=hole&&hole.presentation||{};
+    var manifest=prebuildManifestFromResult(result)||result||{};
+    var courseKeys=courseIdCandidates(course);
+    var raw=[
+      result&&result.manifestKey,
+      result&&result.capturedManifestKey,
+      result&&result.key,
+      result&&result.storageKey,
+      result&&result.scanId,
+      result&&result.activeScanId,
+      manifest&&manifest.manifestKey,
+      manifest&&manifest.capturedManifestKey,
+      manifest&&manifest.key,
+      manifest&&manifest.storageKey,
+      manifest&&manifest.scanId,
+      manifest&&manifest.activeScanId,
+      presentation.capturedManifestKey,
+      presentation.framePrebuildManifestKey
+    ];
+    courseKeys.forEach(function(courseKey){
+      raw.push(capturedManifestStorageKey(courseKey,holeNumber));
+      raw.push(capturedManifestStorageKey(String(courseKey).replace(/_/g," "),holeNumber));
+    });
+    return uniqueStrings(raw);
+  }
+  function scanManifestMatchesCourseHole(course,holeNumber,scan){
+    if(!scan)return false;
+    var scanHole=normalizeHoleNumber(scan.holeNumber||scan.manifest&&scan.manifest.holeNumber);
+    if(scanHole!==normalizeHoleNumber(holeNumber))return false;
+    return courseKeyMatch(course,scan.courseKey||scan.manifest&&scan.manifest.courseKey||scan.courseName||scan.manifest&&scan.manifest.courseName);
+  }
+  function findExistingManifestForHole(course,holeNumber,result,hole){
+    var manifest=prebuildManifestFromResult(result);
+    var key=prebuildResultManifestKey(result,null);
+    if(manifest&&manifestMatchesHole(course,holeNumber,manifest)){
+      return {manifest:manifest,key:key||manifest.key||manifest.storageKey||manifest.scanId||manifest.activeScanId||capturedManifestStorageKey(course.courseId,holeNumber),source:"adapter-result",courseKey:manifest.courseKey||course.courseId,holeNumber:normalizeHoleNumber(manifest.holeNumber||holeNumber)};
+    }
+    var keys=manifestKeyCandidates(course,holeNumber,result,hole);
+    for(var i=0;i<keys.length;i++){
+      var stored=readCapturedManifest(keys[i]);
+      if(stored&&manifestMatchesHole(course,holeNumber,stored)){
+        return {manifest:stored,key:keys[i],source:"manifest-key",courseKey:stored.courseKey||course.courseId,holeNumber:normalizeHoleNumber(stored.holeNumber||holeNumber)};
+      }
+    }
+    var registry=safe(function(){return JSON.parse(localStorage.getItem("gd_captured_surface_scans_v1")||"null");},null);
+    var scans=registry&&Array.isArray(registry.scans)?registry.scans:[];
+    var courseKeys=courseIdCandidates(course);
+    for(var s=0;s<scans.length;s++){
+      var scan=scans[s];
+      if(scanManifestMatchesCourseHole(course,holeNumber,scan)&&scan.manifest&&Array.isArray(scan.manifest.tiles)&&scan.manifest.originPx){
+        return {manifest:scan.manifest,key:scan.storage&&scan.storage.legacyManifestKey||scan.manifest.key||scan.manifest.storageKey||scan.id,source:"captured-surface-registry",courseKey:scan.courseKey||scan.manifest.courseKey||course.courseId,holeNumber:normalizeHoleNumber(scan.holeNumber||holeNumber),scanId:scan.id};
+      }
+    }
+    for(var c=0;c<courseKeys.length;c++){
+      var activeId=safe(function(courseKey){return localStorage.getItem(captureRegistryKey(courseKey,holeNumber));}.bind(null,courseKeys[c]),null);
+      if(!activeId)continue;
+      var active=scans.filter(function(scan){return scan&&scan.id===activeId;})[0]||null;
+      if(active&&active.manifest&&Array.isArray(active.manifest.tiles)&&active.manifest.originPx){
+        return {manifest:active.manifest,key:active.storage&&active.storage.legacyManifestKey||active.manifest.key||active.manifest.storageKey||active.id,source:"captured-surface-active-key",courseKey:active.courseKey||active.manifest.courseKey||course.courseId,holeNumber:normalizeHoleNumber(active.holeNumber||holeNumber),scanId:active.id};
+      }
+    }
+    return null;
+  }
+  function framePrebuildAdapter(){
+    return safe(function(){
+      if(typeof window.gdPrebuildCoursePlayFrameManifest==="function")return window.gdPrebuildCoursePlayFrameManifest;
+      if(typeof window.gdPrebuildCoursePlayFrameFromData==="function")return window.gdPrebuildCoursePlayFrameFromData;
+      return null;
+    },null);
+  }
+  function prebuildResultManifestKey(result,frame){
+    var manifest=prebuildManifestFromResult(result);
+    return result&&(
+      result.manifestKey||
+      result.capturedManifestKey||
+      result.key||
+      result.storageKey||
+      result.scanId||
+      result.activeScanId
+    )||manifest&&(
+      manifest.manifestKey||
+      manifest.capturedManifestKey||
+      manifest.key||
+      manifest.storageKey||
+      manifest.scanId||
+      manifest.activeScanId
+    )||frame&&(
+      frame.manifestKey||
+      frame.capturedManifestKey
+    )||null;
+  }
+  function normalizeFailureReason(result,fb){
+    return String(result&&(
+      result.reason||
+      result.error||
+      result.message||
+      result.step
+    )||fb||"frame prebuild failed").replace(/\s+/g,"_").toLowerCase();
+  }
+  function isTransientPrebuildFailure(detail){
+    var reason=normalizeFailureReason(detail,"");
+    if(detail&&detail.transient===false)return false;
+    if(detail&&detail.transient===true)return true;
+    if(FRAME_PREBUILD_TRANSIENT_REASONS[reason])return true;
+    return /adapter|map|engine|tile|projection|manifest.*null|storage.*write|frame.*index.*missing|registration.*failed|captured.*manifest.*missing|timeout|not.*ready/i.test(String(reason));
+  }
+  function retryDelayFor(attempt){
+    var index=Math.max(0,Math.min(FRAME_PREBUILD_RETRY_DELAYS_MS.length-1,Number(attempt||1)-1));
+    return FRAME_PREBUILD_RETRY_DELAYS_MS[index]||FRAME_PREBUILD_RETRY_DELAYS_MS[FRAME_PREBUILD_RETRY_DELAYS_MS.length-1]||400;
+  }
+  function recoverFrameIndexFromManifest(course,holeNumber,manifestInfo,opts){
+    if(!manifestInfo||!manifestInfo.manifest)return null;
+    var manifestKey=manifestInfo.key||manifestInfo.manifest.key||manifestInfo.manifest.storageKey||manifestInfo.manifest.scanId||manifestInfo.manifest.activeScanId||capturedManifestStorageKey(course.courseId,holeNumber);
+    markFramePrebuildStatus(course,holeNumber,"manifest_written",{step:"existing_manifest_found",manifestKey:manifestKey,manifestCourseKey:manifestInfo.courseKey,manifestHoleNumber:manifestInfo.holeNumber||holeNumber,retryCount:opts&&opts.retryCount||0});
+    var frame=registerCoursePlayFrame(course,holeNumber,manifestInfo.manifest,{generatedFrom:"v19-captured-surface-prebuild-recovered",manifestKey:manifestKey,status:"recovered",cacheStatus:"local-prebuilt-recovered"});
+    var verified=getCoursePlayFrameIndex(course,holeNumber)||frame;
+    if(verified&&capturedManifestPresent(frameManifestKey(verified)||manifestKey)){
+      recordDebugEvent("recovered-frame-index-from-manifest",{courseId:course.courseId,courseName:course.courseName,holeNumber:holeNumber,status:"complete",manifestKey:manifestKey,frameIndexKey:verified.frameIndexKey,manifestSource:manifestInfo.source,source:opts&&opts.source||"frame-prebuild"});
+      return verified;
+    }
+    return null;
+  }
+  function failOrRetryPrebuild(course,holeNumber,detail,opts){
+    opts=opts||{};
+    detail=detail||{};
+    var attempt=Number(opts.attempt||0)||0;
+    var maxRetries=Number(opts.maxRetries!==undefined?opts.maxRetries:FRAME_PREBUILD_RETRY_DELAYS_MS.length);
+    var transient=isTransientPrebuildFailure(detail);
+    var reason=String(detail.reason||detail.error||detail.message||detail.step||"frame prebuild failed");
+    var step=String(detail.step||reason||"frame_prebuild_failed");
+    var manifestKey=detail.manifestKey||null;
+    var frameIndexKey=detail.frameIndexKey||null;
+    if(transient&&attempt<maxRetries){
+      var retryCount=attempt+1;
+      var delay=retryDelayFor(retryCount);
+      var nextRetryAt=new Date(Date.now()+delay).toISOString();
+      markFramePrebuildStatus(course,holeNumber,"retry_pending",{step:step,reason:reason,error:reason,retryCount:retryCount,nextRetryAt:nextRetryAt,manifestKey:manifestKey,frameIndexKey:frameIndexKey,manifestCourseKey:detail.manifestCourseKey,manifestHoleNumber:detail.manifestHoleNumber});
+      recordDebugEvent("frame-prebuild-retry-pending",{courseId:course.courseId,courseName:course.courseName,holeNumber:holeNumber,status:"retry_pending",step:step,reason:reason,retryCount:retryCount,nextRetryAt:nextRetryAt,retryAfterMs:delay,manifestKey:manifestKey,frameIndexKey:frameIndexKey,source:opts.source||"frame-prebuild"});
+      return {status:"retry_pending",courseId:course.courseId,holeNumber:holeNumber,step:step,reason:reason,transient:true,retryCount:retryCount,retryAfterMs:delay,manifestKey:manifestKey,frameIndexKey:frameIndexKey};
+    }
+    markFramePrebuildStatus(course,holeNumber,"failed",{step:step,reason:reason,error:reason,retryCount:attempt,manifestKey:manifestKey,frameIndexKey:frameIndexKey,manifestCourseKey:detail.manifestCourseKey,manifestHoleNumber:detail.manifestHoleNumber});
+    recordDebugEvent("frame-prebuild-hole-failed",{courseId:course.courseId,courseName:course.courseName,holeNumber:holeNumber,status:"failed",step:step,reason:reason,retryCount:attempt,transient:transient,manifestKey:manifestKey,frameIndexKey:frameIndexKey,source:opts.source||"frame-prebuild"});
+    return {status:"failed",courseId:course.courseId,holeNumber:holeNumber,step:step,reason:reason,transient:transient,retryCount:attempt,manifestKey:manifestKey,frameIndexKey:frameIndexKey};
+  }
+  function manifestCacheCountForCourse(course){
+    return (getCoursePlayFrameIndex(course)||[]).filter(frameHasManifestCache).length;
+  }
+  function stopManifestCachePrebuild(course,reason,detail){
+    var entry={reason:String(reason||"manifest cache stopped"),detail:clone(detail||{})||{},at:now()};
+    frameManifestCacheStoppedByCourse[course.courseId]=entry;
+    recordDebugEvent("frame-prebuild-cache-stopped",{courseId:course.courseId,courseName:course.courseName,status:"cache_limited",reason:entry.reason,source:detail&&detail.source||"frame-prebuild"});
+    return entry;
+  }
+  function manifestCacheBudget(course,holeNumber,opts){
+    opts=opts||{};
+    if(opts.forceManifestCache===true)return {allowed:true,reason:"forced"};
+    if(opts.cacheFullManifest===false)return {allowed:false,status:"manifest_cache_limited",reason:"manifest cache disabled"};
+    var stopped=frameManifestCacheStoppedByCourse[course.courseId];
+    if(stopped)return {allowed:false,status:"manifest_cache_failed",reason:stopped.reason,stopped:stopped};
+    if(frameHasManifestCache(getCoursePlayFrameIndex(course,holeNumber)))return {allowed:false,status:"manifest_cached",reason:"manifest already cached"};
+    var limit=Number(opts.manifestCacheLimit!==undefined?opts.manifestCacheLimit:FRAME_PREBUILD_MANIFEST_CACHE_LIMIT);
+    if(Number.isFinite(limit)&&limit>=0&&manifestCacheCountForCourse(course)>=limit){
+      return {allowed:false,status:"manifest_cache_limited",reason:"prebuild manifest cache budget reached",limit:limit};
+    }
+    return {allowed:true,reason:"within budget",limit:limit};
+  }
+  function completeWithRecipe(course,holeNumber,frame,detail,opts){
+    detail=detail||{};
+    opts=opts||{};
+    var status=detail.status||"recipe_ready";
+    var cacheStatus=detail.cacheStatus||"manifest_cache_pending";
+    var reason=detail.reason||cacheStatus;
+    var updated=registerCoursePlayFrameRecipe(course,holeNumber,frame&&frame.frameRecipe||null,{generatedFrom:detail.generatedFrom||"course-play-frame-recipe",status:status,cacheStatus:cacheStatus,manifestCacheStatus:cacheStatus,manifestCacheReason:reason,manifestCacheError:detail.error||null,manifestKey:detail.manifestKey||frameManifestKey(frame)||null,step:detail.step||"recipe_ready"});
+    markFramePrebuildStatus(course,holeNumber,"complete",{step:detail.step||"recipe_ready",frameIndexKey:updated.frameIndexKey,manifestKey:frameManifestKey(updated),frameStatus:updated.frameStatus,cacheStatus:updated.cacheStatus,generatedFrom:updated.generatedFrom,retryCount:opts.attempt||0});
+    recordDebugEvent("frame-prebuild-hole-complete",{courseId:course.courseId,courseName:course.courseName,holeNumber:holeNumber,status:"complete",step:detail.step||"recipe_ready",frameIndexKey:updated.frameIndexKey,manifestKey:frameManifestKey(updated),manifestPresent:frameHasManifestCache(updated),cacheStatus:updated.cacheStatus,reason:reason,source:opts.source||"frame-prebuild"});
+    return {status:"complete",courseId:course.courseId,holeNumber:holeNumber,frameIndexKey:updated.frameIndexKey,manifestKey:frameManifestKey(updated),manifestPresent:frameHasManifestCache(updated),recipeReady:true,cacheStatus:updated.cacheStatus,reason:reason};
+  }
+  function gdPrebuildCoursePlayFrame(courseOrId,holeNumber,opts){
+    opts=opts||{};
+    var attempt=Number(opts.attempt||0)||0;
+    var source=opts.source||"frame-prebuild";
+    var course=getCoursePlayState(courseOrId||activeCourseFromApp()||"course");
+    holeNumber=normalizeHoleNumber(holeNumber);
+    var hole=normalizeHoleRecord(course,holeNumber,course.holes&&course.holes[String(holeNumber)]||emptyHoleRecord(course,holeNumber));
+    if(hole.status!==HOLE_STATES.play_data_ready){
+      markFramePrebuildStatus(course,holeNumber,"skipped",{step:"hole_play_data_missing",reason:"hole-not-play-data-ready",retryCount:attempt});
+      recordDebugEvent("frame-prebuild-skipped",{courseId:course.courseId,courseName:course.courseName,holeNumber:holeNumber,status:hole.status,step:"hole_play_data_missing",reason:"hole-not-play-data-ready",source:source});
+      return Promise.resolve({status:"skipped",reason:"hole-not-play-data-ready",holeNumber:holeNumber});
+    }
+    if(!opts.force&&coursePlayFrameReady(course,holeNumber)){
+      var readyFrame=getCoursePlayFrameIndex(course,holeNumber);
+      markFramePrebuildStatus(course,holeNumber,"complete",{step:"already_indexed",reason:"already-indexed",frameIndexKey:readyFrame&&readyFrame.frameIndexKey,manifestKey:frameManifestKey(readyFrame),frameStatus:readyFrame&&readyFrame.frameStatus,cacheStatus:readyFrame&&readyFrame.cacheStatus,generatedFrom:readyFrame&&readyFrame.generatedFrom,retryCount:attempt});
+      recordDebugEvent("frame-prebuild-skipped",{courseId:course.courseId,courseName:course.courseName,holeNumber:holeNumber,status:"complete",step:"already_indexed",reason:"already-indexed",source:source});
+      return Promise.resolve({status:"skipped",reason:"already-indexed",holeNumber:holeNumber});
+    }
+    var mapped=holeRecordToMappedData(hole);
+    if(!mapped||!Array.isArray(mapped.route)||mapped.route.length<2||!mapped.green){
+      return Promise.resolve(failOrRetryPrebuild(course,holeNumber,{step:"route_green_invalid",reason:"missing-explicit-hole-data",transient:false},Object.assign({},opts,{attempt:attempt,source:source})));
+    }
+    var existingFrame=getCoursePlayFrameIndex(course,holeNumber);
+    var recipe=buildFrameRecipe(course,hole,"course-play-frame-recipe",{holeNumber:holeNumber});
+    var recipeFrame=registerCoursePlayFrameRecipe(course,holeNumber,recipe,{generatedFrom:"course-play-frame-recipe",status:existingFrame&&existingFrame.frameStatus||"recipe_ready",cacheStatus:existingFrame&&existingFrame.cacheStatus||"manifest_cache_pending",manifestKey:frameManifestKey(existingFrame),step:"recipe_ready"});
+    markFramePrebuildStatus(course,holeNumber,"frame_index_registered",{step:"recipe_ready",frameIndexKey:recipeFrame.frameIndexKey,manifestKey:frameManifestKey(recipeFrame),frameStatus:recipeFrame.frameStatus,cacheStatus:recipeFrame.cacheStatus,generatedFrom:recipeFrame.generatedFrom,retryCount:attempt});
+    var existingManifest=findExistingManifestForHole(course,holeNumber,null,hole);
+    if(frameHasManifestCache(recipeFrame)){
+      return Promise.resolve(completeWithRecipe(course,holeNumber,recipeFrame,{step:"manifest_cached",status:"manifest_cached",cacheStatus:"manifest_cached",manifestKey:frameManifestKey(recipeFrame),generatedFrom:recipeFrame.generatedFrom,reason:"manifest already cached"},{source:source,attempt:attempt}));
+    }
+    if(existingManifest){
+      var recovered=registerCoursePlayFrame(course,holeNumber,existingManifest.manifest,{generatedFrom:"v19-captured-surface-prebuild-recovered",manifestKey:existingManifest.key,status:"manifest_cached",cacheStatus:"manifest_cached",step:"recovered_frame_index_from_manifest"});
+      recordDebugEvent("recovered-frame-index-from-manifest",{courseId:course.courseId,courseName:course.courseName,holeNumber:holeNumber,status:"complete",manifestKey:frameManifestKey(recovered)||existingManifest.key,frameIndexKey:recovered.frameIndexKey,manifestSource:existingManifest.source,source:source});
+      return Promise.resolve(completeWithRecipe(course,holeNumber,recovered,{step:"recovered_frame_index_from_manifest",status:"manifest_cached",cacheStatus:"manifest_cached",manifestKey:frameManifestKey(recovered)||existingManifest.key,generatedFrom:recovered.generatedFrom,reason:"existing manifest cache recovered"},{source:source,attempt:attempt}));
+    }
+    var budget=manifestCacheBudget(course,holeNumber,opts);
+    if(!budget.allowed){
+      return Promise.resolve(completeWithRecipe(course,holeNumber,recipeFrame,{step:budget.status==="manifest_cache_failed"?"manifest_cache_failed":"recipe_ready",status:"recipe_ready",cacheStatus:budget.status||"manifest_cache_limited",manifestKey:frameManifestKey(recipeFrame),generatedFrom:"course-play-frame-recipe",reason:budget.reason,error:budget.status==="manifest_cache_failed"?budget.reason:null},{source:source,attempt:attempt}));
+    }
+    var adapter=framePrebuildAdapter();
+    if(typeof adapter!=="function"){
+      return Promise.resolve(completeWithRecipe(course,holeNumber,recipeFrame,{step:"manifest_cache_failed",status:"recipe_ready",cacheStatus:"manifest_cache_failed",generatedFrom:"course-play-frame-recipe",reason:"prebuild-adapter-unavailable",error:"prebuild-adapter-unavailable"},{source:source,attempt:attempt}));
+    }
+    markFramePrebuildStatus(course,holeNumber,"building_manifest",{step:"building_manifest",attempt:attempt,retryCount:attempt});
+    recordDebugEvent("frame-prebuild-started",{courseId:course.courseId,courseName:course.courseName,holeNumber:holeNumber,status:"building_manifest",step:"building_manifest",attempt:attempt,source:source});
+    return Promise.resolve().then(function(){
+      return adapter(course,holeNumber,mapped,Object.assign({},opts,{source:source,reason:opts.reason||"course-play-frame-prebuild",attempt:attempt}));
+    }).then(function(result){
+      if(!result)return completeWithRecipe(course,holeNumber,recipeFrame,{step:"manifest_cache_failed",status:"recipe_ready",cacheStatus:"manifest_cache_failed",generatedFrom:"course-play-frame-recipe",reason:"prebuild adapter returned no manifest",error:"prebuild adapter returned no manifest"},{source:source,attempt:attempt});
+      if(result&&result.ok===false){
+        var cacheReason=String(result.reason||result.error||result.step||"manifest cache failed");
+        if(String(result.step||"")==="manifest_storage_write_failed")stopManifestCachePrebuild(course,cacheReason,{source:source,holeNumber:holeNumber,manifestKey:result.manifestKey,manifestBytes:result.manifestBytes});
+        return completeWithRecipe(course,holeNumber,recipeFrame,{step:"manifest_cache_failed",status:"recipe_ready",cacheStatus:"manifest_cache_failed",manifestKey:result.manifestKey||frameManifestKey(recipeFrame),generatedFrom:"course-play-frame-recipe",reason:cacheReason,error:cacheReason},{source:source,attempt:attempt});
+      }
+      var resultManifest=prebuildManifestFromResult(result);
+      var manifestInfo=findExistingManifestForHole(course,holeNumber,result,hole);
+      if(!manifestInfo&&resultManifest){
+        var resultKey=prebuildResultManifestKey(result,null)||capturedManifestStorageKey(course.courseId,holeNumber);
+        manifestInfo={manifest:resultManifest,key:resultKey,source:"adapter-result-unverified",courseKey:resultManifest.courseKey||course.courseId,holeNumber:normalizeHoleNumber(resultManifest.holeNumber||holeNumber)};
+      }
+      if(!manifestInfo)return completeWithRecipe(course,holeNumber,recipeFrame,{step:"manifest_cache_failed",status:"recipe_ready",cacheStatus:"manifest_cache_failed",generatedFrom:"course-play-frame-recipe",reason:"manifest build returned no stored manifest",error:"manifest build returned no stored manifest"},{source:source,attempt:attempt});
+      var manifestKey=manifestInfo.key||prebuildResultManifestKey(result,null)||manifestInfo.manifest.key||manifestInfo.manifest.storageKey||manifestInfo.manifest.scanId||manifestInfo.manifest.activeScanId;
+      markFramePrebuildStatus(course,holeNumber,"manifest_written",{step:"manifest_written",manifestKey:manifestKey,manifestCourseKey:manifestInfo.courseKey,manifestHoleNumber:manifestInfo.holeNumber,retryCount:attempt});
+      recordDebugEvent("frame-prebuild-manifest-written",{courseId:course.courseId,courseName:course.courseName,holeNumber:holeNumber,status:"manifest_written",manifestKey:manifestKey,manifestSource:manifestInfo.source,tileCount:(manifestInfo.manifest.tiles||[]).length,source:source});
+      var frame=registerCoursePlayFrame(course,holeNumber,manifestInfo.manifest,{generatedFrom:"v19-captured-surface-prebuild",manifestKey:manifestKey,status:"manifest_cached",cacheStatus:"manifest_cached",step:"manifest_cached"});
+      recordDebugEvent("frame-prebuild-frame-index-registered",{courseId:course.courseId,courseName:course.courseName,holeNumber:holeNumber,status:"manifest_cached",frameIndexKey:frame.frameIndexKey,manifestKey:frameManifestKey(frame)||manifestKey,source:source});
+      var finalManifestKey=frameManifestKey(frame)||manifestKey;
+      var present=capturedManifestPresent(finalManifestKey);
+      if(!present){
+        stopManifestCachePrebuild(course,"captured manifest missing after write",{source:source,holeNumber:holeNumber,manifestKey:finalManifestKey,manifestBytes:manifestPayloadBytes(manifestInfo.manifest)});
+        return completeWithRecipe(course,holeNumber,frame,{step:"manifest_cache_failed",status:"recipe_ready",cacheStatus:"manifest_cache_failed",manifestKey:finalManifestKey,generatedFrom:"course-play-frame-recipe",reason:"captured manifest missing after write",error:"captured manifest missing after write"},{source:source,attempt:attempt});
+      }
+      markFramePrebuildStatus(course,holeNumber,"complete",{step:"manifest_cached",frameIndexKey:frame.frameIndexKey,manifestKey:finalManifestKey,manifestCourseKey:manifestInfo.courseKey,manifestHoleNumber:manifestInfo.holeNumber,frameStatus:frame.frameStatus,cacheStatus:frame.cacheStatus,generatedFrom:frame.generatedFrom,retryCount:attempt});
+      recordDebugEvent("frame-prebuild-hole-complete",{courseId:course.courseId,courseName:course.courseName,holeNumber:holeNumber,status:"complete",step:"manifest_cached",frameIndexKey:frame.frameIndexKey,manifestKey:finalManifestKey,manifestPresent:present,cacheStatus:frame.cacheStatus,source:source});
+      return {status:"complete",courseId:course.courseId,holeNumber:holeNumber,frameIndexKey:frame.frameIndexKey,manifestKey:finalManifestKey,manifestPresent:present,recipeReady:true,cacheStatus:frame.cacheStatus};
+    }).then(null,function(error){
+      var message=String(error&&error.message||error||"frame prebuild failed");
+      return completeWithRecipe(course,holeNumber,recipeFrame,{step:"manifest_cache_failed",status:"recipe_ready",cacheStatus:"manifest_cache_failed",generatedFrom:"course-play-frame-recipe",reason:message,error:message},{source:source,attempt:attempt});
+    });
+  }
+  function processFramePrebuildQueue(courseId){
+    var queue=framePrebuildQueues[courseId];
+    if(!queue||queue.running)return;
+    if(!queue.holes.length){
+      var status=(queue.failed||0)>0?"complete_with_failures":"complete";
+      recordDebugEvent("frame-prebuild-complete",{courseId:queue.courseId,courseName:queue.courseName,status:status,holesQueued:0,holesCompleted:queue.completed||0,holesSkipped:queue.skipped||0,holesFailed:queue.failed||0,holesRetried:queue.retried||0,source:queue.source||"frame-prebuild"});
+      delete framePrebuildQueues[courseId];
+      return;
+    }
+    var item=queue.holes.shift();
+    if(typeof item==="number"||typeof item==="string")item={holeNumber:normalizeHoleNumber(item),attempt:0};
+    item=item||{};
+    var holeNumber=normalizeHoleNumber(item.holeNumber);
+    var attempt=Number(item.attempt||0)||0;
+    queue.running=true;
+    queue.runningHole=holeNumber;
+    queue.runningAttempt=attempt;
+    var nextDelay=FRAME_PREBUILD_DELAY_MS;
+    gdPrebuildCoursePlayFrame(courseId,holeNumber,{source:queue.source||"frame-prebuild",reason:queue.reason||"post-scan-frame-prebuild",attempt:attempt,maxRetries:FRAME_PREBUILD_RETRY_DELAYS_MS.length}).then(function(result){
+      if(result&&result.status==="complete")queue.completed=(queue.completed||0)+1;
+      else if(result&&result.status==="skipped")queue.skipped=(queue.skipped||0)+1;
+      else if(result&&result.status==="retry_pending"){
+        queue.retried=(queue.retried||0)+1;
+        queue.holes.unshift({holeNumber:holeNumber,attempt:attempt+1});
+        nextDelay=Number(result.retryAfterMs||retryDelayFor(attempt+1))||FRAME_PREBUILD_DELAY_MS;
+      }
+      else queue.failed=(queue.failed||0)+1;
+    },function(){
+      queue.failed=(queue.failed||0)+1;
+    }).then(function(){
+      queue.running=false;
+      queue.runningHole=null;
+      queue.runningAttempt=0;
+      queue.timer=setTimeout(function(){queue.timer=null;processFramePrebuildQueue(courseId);},nextDelay);
+    });
+  }
+  function framePrebuildQueueHasHole(queue,holeNumber){
+    holeNumber=normalizeHoleNumber(holeNumber);
+    if(queue.runningHole===holeNumber)return true;
+    return (queue.holes||[]).some(function(item){
+      var h=typeof item==="number"||typeof item==="string"?item:item&&item.holeNumber;
+      return normalizeHoleNumber(h)===holeNumber;
+    });
+  }
+  function queueFramePrebuild(courseOrId,opts){
+    opts=opts||{};
+    var course=getCoursePlayState(courseOrId||activeCourseFromApp()||"course");
+    var readyHoles=playablePrebuildHoles(course);
+    var missing=readyHoles.filter(function(hole){return opts.force||!coursePlayFrameReady(course,hole.holeNumber);});
+    if(!missing.length){
+      recordDebugEvent("frame-prebuild-complete",{courseId:course.courseId,courseName:course.courseName,status:"complete",holesQueued:0,holesReady:readyHoles.length,source:opts.source||"frame-prebuild",reason:"nothing-missing"});
+      return {status:"complete",courseId:course.courseId,holesReady:readyHoles.length,holesQueued:0};
+    }
+    var queue=framePrebuildQueues[course.courseId]||{queueId:stableId(),courseId:course.courseId,courseName:course.courseName,holes:[],running:false,completed:0,failed:0,skipped:0,retried:0,source:opts.source||"frame-prebuild",reason:opts.reason||"post-scan-frame-prebuild"};
+    missing.forEach(function(hole){
+      var h=normalizeHoleNumber(hole.holeNumber);
+      if(!framePrebuildQueueHasHole(queue,h)){
+        queue.holes.push({holeNumber:h,attempt:0});
+        markFramePrebuildStatus(course,h,"queued",{step:"queued",retryCount:0});
+      }
+    });
+    framePrebuildQueues[course.courseId]=queue;
+    recordDebugEvent("frame-prebuild-queued",{courseId:course.courseId,courseName:course.courseName,status:"queued",holesQueued:queue.holes.length,holesReady:readyHoles.length,holesMissing:missing.length,source:queue.source});
+    if(!queue.running&&!queue.timer)queue.timer=setTimeout(function(){queue.timer=null;processFramePrebuildQueue(course.courseId);},FRAME_PREBUILD_DELAY_MS);
+    return {status:"queued",courseId:course.courseId,holesReady:readyHoles.length,holesQueued:queue.holes.length,holes:queue.holes.map(function(item){return normalizeHoleNumber(item&&item.holeNumber||item);})};
   }
   function activeCourseFromApp(){
     return resolveCourseFromLibrary(null)||safe(function(){return window.gdActiveCourse||window.currentCourse||currentCourse||null;},null);
@@ -991,7 +1536,8 @@
     var rows=holes.map(function(holeNumber){
       var hole=normalizeHoleRecord(course,holeNumber,course.holes&&course.holes[String(holeNumber)]||emptyHoleRecord(course,holeNumber));
       var frame=frameByHole[String(holeNumber)]||null;
-      var manifestKey=frame&&frame.manifestKey||hole.presentation&&hole.presentation.capturedManifestKey||null;
+      var presentation=hole.presentation||{};
+      var manifestKey=frame&&frame.manifestKey||presentation.capturedManifestKey||presentation.framePrebuildManifestKey||null;
       var manifestPresent=capturedManifestPresent(manifestKey);
       var anchor=hole.frameAnchors||{};
       return {
@@ -1002,20 +1548,58 @@
         hasRoute:!!(hole.routePoints&&hole.routePoints.length>=2),
         hasFrameAnchors:!!(anchor.tee&&anchor.green&&(anchor.route&&anchor.route.length>=2||hole.routePoints&&hole.routePoints.length>=2)),
         hasFrameIndexEntry:!!frame,
-        frameIndexKey:frame&&frame.frameIndexKey||hole.presentation&&hole.presentation.frameIndexKey||null,
+        hasFrameRecipe:frameHasRecipe(frame),
+        frameStatus:frame&&frame.frameStatus||presentation.frameStatus||"",
+        frameCacheStatus:frame&&frame.cacheStatus||presentation.frameCacheStatus||"",
+        manifestCacheStatus:frame&&frame.manifestCacheStatus||presentation.manifestCacheStatus||"",
+        manifestCacheError:frame&&frame.manifestCacheError||presentation.manifestCacheError||presentation.framePrebuildCacheError||"",
+        manifestBytes:Number(frame&&frame.manifestBytes||0)||0,
+        frameIndexKey:frame&&frame.frameIndexKey||presentation.frameIndexKey||presentation.framePrebuildFrameIndexKey||null,
         capturedManifestKey:manifestKey,
         capturedManifestPresent:manifestPresent,
         lastGeneratedAt:frame&&frame.updatedAt||hole.updatedAt||null,
         lastRenderedAt:safe(function(){return document.body&&document.body.dataset.gdCoursePlayFrameRenderedHole===String(holeNumber)?document.body.dataset.gdCoursePlayFrameRenderedAt:null;},null),
+        framePrebuildStatus:presentation.framePrebuildStatus||"not_started",
+        framePrebuildStep:presentation.framePrebuildLastStep||"",
+        framePrebuildError:presentation.framePrebuildLastError||"",
+        framePrebuildRetryCount:Number(presentation.framePrebuildRetryCount||0)||0,
+        framePrebuildAttempts:Number(presentation.framePrebuildAttempts||0)||0,
+        framePrebuildLastAt:presentation.framePrebuildLastAt||presentation.framePrebuildUpdatedAt||null,
+        framePrebuildNextRetryAt:presentation.framePrebuildNextRetryAt||null,
+        framePrebuildManifestKey:presentation.framePrebuildManifestKey||presentation.capturedManifestKey||null,
+        framePrebuildFrameIndexKey:presentation.framePrebuildFrameIndexKey||presentation.frameIndexKey||null,
         source:hole.source||frame&&frame.generatedFrom||"unknown",
         syncStatus:hole.syncStatus||"local",
         updatedAt:hole.updatedAt||null,
-        lastError:hole.unavailableReason||hole.invalidationReason||course.lastError||null
+        lastError:presentation.framePrebuildLastError||presentation.manifestCacheError||presentation.framePrebuildCacheError||frame&&frame.manifestCacheError||hole.unavailableReason||hole.invalidationReason||course.lastError||null
       };
     });
     var syncQueue=getCoursePlaySyncQueue();
     var timeline=loadDebugLog();
     var adapter=course.adapter||{};
+    var frameQueue=framePrebuildQueues[course.courseId]||null;
+    var completeRows=rows.filter(function(row){return row.framePrebuildStatus==="complete"||(row.hasFrameIndexEntry&&row.capturedManifestPresent);});
+    var recipeRows=rows.filter(function(row){return row.hasFrameRecipe;});
+    var manifestCacheFailedRows=rows.filter(function(row){return row.manifestCacheStatus==="manifest_cache_failed"||row.frameCacheStatus==="manifest_cache_failed";});
+    var manifestCacheLimitedRows=rows.filter(function(row){return row.manifestCacheStatus==="manifest_cache_limited"||row.frameCacheStatus==="manifest_cache_limited";});
+    var retryRows=rows.filter(function(row){return row.framePrebuildStatus==="retry_pending";});
+    var failedRows=rows.filter(function(row){return row.framePrebuildStatus==="failed";});
+    var buildingRows=rows.filter(function(row){return ["queued","building_manifest","manifest_written","frame_index_registered"].indexOf(row.framePrebuildStatus)!==-1;});
+    var missingRows=rows.filter(function(row){return row.pipelineState===HOLE_STATES.play_data_ready&&!row.hasFrameRecipe&&["queued","building_manifest","manifest_written","frame_index_registered","retry_pending","failed"].indexOf(row.framePrebuildStatus)===-1;});
+    var prebuildSummary=failedRows.length&&failedRows.length===1&&!retryRows.length&&!buildingRows.length?
+      "complete except H"+failedRows[0].holeNumber+" - "+(failedRows[0].framePrebuildStep||"prebuild failed")+": "+(failedRows[0].framePrebuildError||failedRows[0].lastError||"unknown"):
+      [
+        recipeRows.length?(recipeRows.length+" recipes"):"",
+        completeRows.length&&completeRows.length!==recipeRows.length?(completeRows.length+" complete"):"",
+        rows.filter(function(row){return row.capturedManifestPresent;}).length?(rows.filter(function(row){return row.capturedManifestPresent;}).length+" cached"):"",
+        manifestCacheLimitedRows.length?(manifestCacheLimitedRows.length+" cache-limited"):"",
+        manifestCacheFailedRows.length?(manifestCacheFailedRows.length+" cache failed"):"",
+        retryRows.length?(retryRows.length+" retrying"):"",
+        failedRows.length?(failedRows.length+" failed"):"",
+        buildingRows.length?(buildingRows.length+" building"):"",
+        missingRows.length?(missingRows.length+" missing"):""
+      ].filter(Boolean).join(", ");
+    if(!prebuildSummary)prebuildSummary=frameQueue?frameQueue.running?"running":"queued":"idle";
     var lastAutoEvent=timeline.slice().reverse().filter(function(event){return /^automapper/.test(String(event&&event.type||""));})[0]||null;
     var automapperStatus=adapter.holesChecked?"complete":lastAutoEvent&&lastAutoEvent.type==="automapper-started"?"running":lastAutoEvent&&lastAutoEvent.type==="automapper-ingest-started"?"running":lastAutoEvent&&lastAutoEvent.type==="automapper-completed"?"complete":"unknown";
     return {
@@ -1031,7 +1615,23 @@
       totalHolesKnown:rows.length,
       holesWithPlayDataReady:rows.filter(function(row){return row.pipelineState===HOLE_STATES.play_data_ready;}).length,
       holesWithFrameIndexEntries:rows.filter(function(row){return row.hasFrameIndexEntry;}).length,
+      holesWithFrameRecipesReady:recipeRows.length,
       holesWithCapturedManifestsPresent:rows.filter(function(row){return row.capturedManifestPresent;}).length,
+      holesWithManifestCacheFailed:manifestCacheFailedRows.length,
+      holesWithManifestCacheLimited:manifestCacheLimitedRows.length,
+      holesWithFramePrebuildComplete:completeRows.length,
+      holesWithFramePrebuildRetryPending:retryRows.length,
+      holesWithFramePrebuildFailed:failedRows.length,
+      holesWithFramePrebuildBuilding:buildingRows.length,
+      holesWithFramePrebuildMissing:missingRows.length,
+      framePrebuildSummary:prebuildSummary,
+      framePrebuildStatus:frameQueue?frameQueue.running?"running":"queued":"idle",
+      framePrebuildQueued:frameQueue&&frameQueue.holes?frameQueue.holes.length:0,
+      framePrebuildRunningHole:frameQueue&&frameQueue.runningHole||null,
+      framePrebuildRunningAttempt:frameQueue&&frameQueue.runningAttempt||0,
+      framePrebuildCompleted:frameQueue&&frameQueue.completed||0,
+      framePrebuildFailed:frameQueue&&frameQueue.failed||0,
+      framePrebuildRetried:frameQueue&&frameQueue.retried||0,
       syncQueueItemCount:(syncQueue.items||[]).length,
       rows:rows,
       timeline:timeline
@@ -1060,6 +1660,10 @@
     registerCoursePlayFrame:registerCoursePlayFrame,
     getCoursePlayFrameIndex:getCoursePlayFrameIndex,
     loadCoursePlayFrameIndex:loadFrameIndex,
+    prebuildCoursePlayFrame:gdPrebuildCoursePlayFrame,
+    gdPrebuildCoursePlayFrame:gdPrebuildCoursePlayFrame,
+    queueFramePrebuild:queueFramePrebuild,
+    gdQueueCoursePlayFramePrebuild:queueFramePrebuild,
     buildHolePlayDbPayload:buildHolePlayDbPayload,
     buildCoursePlayDbPayload:buildCoursePlayDbPayload,
     buildCoursePlaySyncEnvelope:buildCoursePlaySyncEnvelope,
@@ -1102,6 +1706,12 @@
   };
   window.__gdDumpCoursePlayFrameIndex=function(courseId,holeNumber){
     return getCoursePlayFrameIndex(courseId,holeNumber);
+  };
+  window.__gdQueueCoursePlayFramePrebuild=function(courseId,opts){
+    return queueFramePrebuild(courseId||activeCourseFromApp()||"course",opts||{source:"manual-debug"});
+  };
+  window.__gdPrebuildCoursePlayFrame=function(courseId,holeNumber,opts){
+    return gdPrebuildCoursePlayFrame(courseId||activeCourseFromApp()||"course",holeNumber||activeHoleFromApp(),opts||{source:"manual-debug",force:true});
   };
   window.__gdDumpCoursePlayTimeline=function(){
     return loadDebugLog();
