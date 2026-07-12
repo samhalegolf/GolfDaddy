@@ -6047,6 +6047,17 @@ const DEV_DEFAULTS={
     unstableFacePathThresholdDeg:6,
     trustPenaltyPerDeg:6
   },
+  bubbleGeometry:{
+    widthScale:1,
+    depthScale:1,
+    tiltScale:1,
+    tiltMaxDeg:8,
+    gpsMaxLateralPct:.13,
+    gpsMaxDepthPct:.18,
+    gpsMaxLateralM:28,
+    gpsMaxDepthM:38,
+    gpsPixelCapScale:1
+  },
   statsCluster:{
     consistencyMinPct:51,
     consistencyMaxPct:80,
@@ -6097,7 +6108,11 @@ const DEV_DEFAULTS={
     smashMax:1.52,
     launchToleranceDeg:6,
     dynamicLoftToleranceDeg:8,
-    spinTolerancePct:.35
+    spinTolerancePct:.35,
+    bagSyncEnabled:1,
+    bagSyncMinDeltaM:.5,
+    bagSyncMinRatio:.55,
+    bagSyncMaxRatio:1.7
   }
 };
 const DEV_DEFS={
@@ -6109,6 +6124,7 @@ const DEV_DEFS={
   wand:{label:"Wand Integration",desc:"Default wand display/sensitivity values for GPS handoff."},
   clubScaling:{label:"Club Scaling",desc:"Small tuning values for generated/stand-in preview sets."},
   calibrationTrust:{label:"Calibration Trust",desc:"Trust score thresholds for guided/coach calibration."},
+  bubbleGeometry:{label:"Bubble Geometry",desc:"The shared bubble maths. Size and tilt multipliers over the per-club ratios - every bubble (GPS, practice, preview, ghost) is backed by these."},
   statsCluster:{label:"Shot Data Cluster Hunter",desc:"Shot-result pattern gates. These decide what is counted, ignored, or treated as alignment feedback."},
   launchMonitorCluster:{label:"Launch Monitor Intake",desc:"Behind-the-curtain practice data gates. These scrap noisy shots and only surface useful clusters."}
 };
@@ -6158,6 +6174,15 @@ const DEV_FIELDS={
   "calibrationTrust.previewTrustCap":{label:"Preview trust cap",step:1,min:0,max:100,unit:"%",help:"Ceiling for generated preview bubbles."},
   "calibrationTrust.unstableFacePathThresholdDeg":{label:"Unstable face/path threshold",step:.1,min:1,max:12,unit:"°",help:"When guided calibration starts warning."},
   "calibrationTrust.trustPenaltyPerDeg":{label:"Trust penalty per degree",step:.1,min:0,max:15,help:"Small tuning for future trust scoring."},
+  "bubbleGeometry.widthScale":{label:"Bubble width scale",step:.01,min:.5,max:1.8,help:"Global multiplier on bubble width (carry x club width ratio). 1 = current sizing."},
+  "bubbleGeometry.depthScale":{label:"Bubble depth scale",step:.01,min:.5,max:1.8,help:"Global multiplier on bubble depth (carry x club depth ratio). 1 = current sizing."},
+  "bubbleGeometry.tiltScale":{label:"Bubble tilt scale",step:.05,min:0,max:2,help:"Global multiplier on derived bubble tilt. 0 = no tilt, 1 = current behaviour."},
+  "bubbleGeometry.tiltMaxDeg":{label:"Bubble tilt clamp",step:.5,min:2,max:20,unit:"°",help:"Hard limit on bubble tilt either side of the shot line."},
+  "bubbleGeometry.gpsMaxLateralPct":{label:"GPS max width % of shot",step:.005,min:.05,max:.35,help:"GPS display cap: bubble half-width as a share of shot distance. Raise this if a widened bubble stops growing on the map."},
+  "bubbleGeometry.gpsMaxDepthPct":{label:"GPS max depth % of shot",step:.005,min:.06,max:.45,help:"GPS display cap: bubble half-depth as a share of shot distance."},
+  "bubbleGeometry.gpsMaxLateralM":{label:"GPS max width cap",step:1,min:10,max:80,unit:"m",help:"Absolute ceiling on GPS bubble half-width regardless of distance."},
+  "bubbleGeometry.gpsMaxDepthM":{label:"GPS max depth cap",step:1,min:12,max:100,unit:"m",help:"Absolute ceiling on GPS bubble half-depth regardless of distance."},
+  "bubbleGeometry.gpsPixelCapScale":{label:"GPS screen-size cap scale",step:.05,min:.5,max:2.5,help:"Multiplier on the on-screen pixel cap that stops the bubble dominating the map. 1 = current behaviour."},
   "statsCluster.consistencyMinPct":{label:"Consistency slider min",step:1,min:40,max:75,unit:"%",help:"Lowest result-shot containment setting."},
   "statsCluster.consistencyMaxPct":{label:"Consistency slider max",step:1,min:60,max:90,unit:"%",help:"Highest result-shot containment setting."},
   "statsCluster.consistencyDefaultPct":{label:"Default consistency",step:1,min:51,max:80,unit:"%",help:"Default containment setting for Shot Data fit checks."},
@@ -6170,12 +6195,12 @@ const DEV_FIELDS={
   "statsCluster.minSuggestionClubs":{label:"Minimum suggestion clubs",step:1,min:1,max:8,help:"Fewest club clusters before a profile-level offset option appears."},
   "statsCluster.maxClusterStdDeg":{label:"Max cluster spread",step:.1,min:.5,max:8,unit:"°",help:"Maximum standard deviation for a strong degree cluster."},
   "statsCluster.maxClusterRangeDeg":{label:"Max cluster range",step:.25,min:1,max:16,unit:"°",help:"Maximum total degree range for a strong cluster."},
-  "launchMonitorCluster.minCarryM":{label:"LM min carry",step:1,min:1,max:80,unit:"m",help:"Practice shots below this are scrapped."},
-  "launchMonitorCluster.maxCarryM":{label:"LM max carry",step:1,min:100,max:380,unit:"m",help:"Practice shots above this are scrapped."},
-  "launchMonitorCluster.carryWindowPct":{label:"LM carry window %",step:.01,min:.03,max:.60,help:"Garbage gate vs expected carry: only scraps not-real shots. Keep wide - the cluster hunter does the real filtering."},
-  "launchMonitorCluster.carryWindowMinM":{label:"LM carry window min",step:.5,min:1,max:40,unit:"m",help:"Minimum carry gate for short clubs."},
-  "launchMonitorCluster.carryWindowMaxM":{label:"LM carry window max",step:.5,min:10,max:150,unit:"m",help:"Maximum carry gate for long clubs (caps the % window - keep generous)."},
-  "launchMonitorCluster.maxAbsOfflineM":{label:"LM max offline",step:1,min:5,max:140,unit:"m",help:"Practice shots wider than this are scrapped."},
+  "launchMonitorCluster.minCarryM":{label:"LM min carry (absolute)",step:1,min:1,max:80,unit:"m",help:"Garbage gate: shots carrying under this absolute distance are scrapped."},
+  "launchMonitorCluster.maxCarryM":{label:"LM max carry (absolute)",step:1,min:100,max:380,unit:"m",help:"Garbage gate: shots carrying over this absolute distance are scrapped."},
+  "launchMonitorCluster.carryWindowPct":{label:"LM carry miss vs bag %",step:.01,min:.03,max:.60,help:"Max carry miss as a % of the club's bag (expected) number. A shot further than this from the bag carry is scrapped. Garbage gate only - keep wide, the cluster hunter does the real filtering."},
+  "launchMonitorCluster.carryWindowMinM":{label:"LM carry miss floor",step:.5,min:1,max:40,unit:"m",help:"Smallest carry-miss window vs the bag number (protects short clubs from an over-tight % window)."},
+  "launchMonitorCluster.carryWindowMaxM":{label:"LM carry miss cap",step:.5,min:10,max:150,unit:"m",help:"Largest carry-miss window vs the bag number (caps the % window for long clubs - keep generous)."},
+  "launchMonitorCluster.maxAbsOfflineM":{label:"LM max offline (absolute)",step:1,min:5,max:140,unit:"m",help:"Shots more than this many metres offline (either side of the target line) are scrapped."},
   "launchMonitorCluster.viableDegreeAbs":{label:"LM viable degree",step:.25,min:1,max:20,unit:"°",help:"Clusters inside this can become shot-data candidates."},
   "launchMonitorCluster.alignmentDegreeAbs":{label:"LM alignment degree",step:.25,min:2,max:30,unit:"°",help:"Strong clusters beyond this become alignment signals."},
   "launchMonitorCluster.minClusterShots":{label:"LM min cluster shots",step:1,min:2,max:40,help:"Fewest accepted practice shots before a cluster can speak."},
@@ -6200,7 +6225,11 @@ const DEV_FIELDS={
   "launchMonitorCluster.smashMax":{label:"LM smash max",step:.01,min:.8,max:2,help:"Practice shots above this smash factor are scrapped before cluster hunting."},
   "launchMonitorCluster.launchToleranceDeg":{label:"LM launch tolerance",step:.25,min:1,max:20,unit:"°",help:"Allowed launch-angle gap around the club baseline."},
   "launchMonitorCluster.dynamicLoftToleranceDeg":{label:"LM dyn loft tolerance",step:.25,min:1,max:25,unit:"°",help:"Allowed dynamic-loft gap around the club baseline."},
-  "launchMonitorCluster.spinTolerancePct":{label:"LM spin tolerance",step:.05,min:.05,max:1,unit:"%",help:"Allowed spin gap around the club baseline."}
+  "launchMonitorCluster.spinTolerancePct":{label:"LM spin tolerance",step:.05,min:.05,max:1,unit:"%",help:"Allowed spin gap around the club baseline."},
+  "launchMonitorCluster.bagSyncEnabled":{label:"Bag-sync scaling",step:1,min:0,max:1,help:"1 = saved bubbles rescale automatically when bag numbers change. 0 = bubbles keep their original size until regenerated."},
+  "launchMonitorCluster.bagSyncMinDeltaM":{label:"Bag-sync min delta",step:.1,min:.1,max:10,unit:"m",help:"Smallest bag-number change (metres) before a bubble is rescaled."},
+  "launchMonitorCluster.bagSyncMinRatio":{label:"Bag-sync min ratio",step:.05,min:.3,max:1,help:"Floor for how far a bubble may shrink when rescaled (0.55 = never below 55% of original size)."},
+  "launchMonitorCluster.bagSyncMaxRatio":{label:"Bag-sync max ratio",step:.05,min:1,max:3,help:"Ceiling for how far a bubble may grow when rescaled (1.7 = never above 170% of original size)."}
 };
 function devClone(o){return JSON.parse(JSON.stringify(o));}
 function gdEscapeHTML(value){
@@ -6769,7 +6798,7 @@ function gdEnsureLaunchMonitorApi(){
       return;
     }
     const script=document.createElement("script");
-    script.src="scripts/gd-launch-monitor-data.js?v=practice-data-20260712a";
+    script.src="scripts/gd-launch-monitor-data.js?v=practice-data-20260712b";
     script.onload=finish;
     script.onerror=()=>reject(new Error("Launch monitor module failed to load"));
     document.body.appendChild(script);
@@ -23310,12 +23339,31 @@ function gdHandednessSign(handedness="right"){return handedness==="left"?-1:1}
 function gdGetClubGroup(club="7i"){if(GD_CLUB_GROUPS.driver.test(club))return"driver";if(GD_CLUB_GROUPS.woodHybrid.test(club))return"woodHybrid";if(GD_CLUB_GROUPS.wedge.test(club))return"wedge";return"iron"}
 function gdDefaultCarryForClub(club="7i"){return GD_DEFAULT_CLUB_CARRY_M[club]??155}
 function gdGetClubPatternDefaults(club="7i"){return GD_CLUB_PATTERN_RATIOS[gdGetClubGroup(club)]}
+// Single maths board for bubble geometry. EVERY bubble (GPS projection,
+// practice, preview, ghost bag) must derive size/tilt through these tunables
+// so the control board is always respected. Defaults are identity (=today's
+// behaviour).
+function gdBubbleGeometryTuning(){
+  const get=path=>{try{return typeof dev==="function"?Number(dev(path)):NaN;}catch(e){return NaN;}};
+  const num=(value,fallback)=>Number.isFinite(value)?value:fallback;
+  return{
+    widthScale:gdClamp(num(get("bubbleGeometry.widthScale"),1),.3,2.5),
+    depthScale:gdClamp(num(get("bubbleGeometry.depthScale"),1),.3,2.5),
+    tiltScale:gdClamp(num(get("bubbleGeometry.tiltScale"),1),0,3),
+    tiltMaxDeg:gdClamp(num(get("bubbleGeometry.tiltMaxDeg"),8),1,25),
+    gpsMaxLateralPct:gdClamp(num(get("bubbleGeometry.gpsMaxLateralPct"),.13),.03,.5),
+    gpsMaxDepthPct:gdClamp(num(get("bubbleGeometry.gpsMaxDepthPct"),.18),.04,.6),
+    gpsMaxLateralM:gdClamp(num(get("bubbleGeometry.gpsMaxLateralM"),28),8,120),
+    gpsMaxDepthM:gdClamp(num(get("bubbleGeometry.gpsMaxDepthM"),38),10,150),
+    gpsPixelCapScale:gdClamp(num(get("bubbleGeometry.gpsPixelCapScale"),1),.3,3)
+  };
+}
 function gdResolveFaceAlignmentOffsetDeg(input={}){return Number(input.faceAlignmentOffsetDeg??input.faceOffsetDeg??0)}
 function gdDeriveAimOffset({faceAlignmentOffsetDeg=0,baseCarry=155}){const deg=Number(faceAlignmentOffsetDeg)||0, carry=Number(baseCarry)||155;return{aimOffsetDeg:gdRound(deg,2),aimOffsetM:gdRound(Math.tan((deg*Math.PI)/180)*carry,2)}}
-function gdDeriveBasePatternSize({club="7i",baseCarry=gdDefaultCarryForClub(club),dispersionMultiplier=1}){const carry=Number(baseCarry)||gdDefaultCarryForClub(club), ratios=gdGetClubPatternDefaults(club), m=gdClamp(dispersionMultiplier,.6,1.8);return{clusterWidthM:gdRound(carry*ratios.width*m,1),clusterDepthM:gdRound(carry*ratios.depth*m,1),dispersionMultiplier:gdRound(m,2)}}
+function gdDeriveBasePatternSize({club="7i",baseCarry=gdDefaultCarryForClub(club),dispersionMultiplier=1}){const carry=Number(baseCarry)||gdDefaultCarryForClub(club), ratios=gdGetClubPatternDefaults(club), m=gdClamp(dispersionMultiplier,.6,1.8), geo=gdBubbleGeometryTuning();return{clusterWidthM:gdRound(carry*ratios.width*m*geo.widthScale,1),clusterDepthM:gdRound(carry*ratios.depth*m*geo.depthScale,1),dispersionMultiplier:gdRound(m,2)}}
 function gdDeriveDistanceTendency({faceDeltaFromPatternDeg=0,handedness="right",club="7i"}){const hand=gdHandednessSign(handedness), openSide=hand*(Number(faceDeltaFromPatternDeg)||0), group=gdGetClubGroup(club), strength={driver:.42,woodHybrid:.36,iron:.30,wedge:.18}[group];return gdRound(gdClamp(-openSide*strength,-5,5),2)}
 function gdDerivePatternWindow({club="7i",faceWindowDeg,carryWindowPct}){const defaults=gdGetClubPatternDefaults(club);return{faceWindowDeg:gdRound(Number(faceWindowDeg??defaults.faceWindowDeg),2),carryWindowPct:gdRound(Number(carryWindowPct??defaults.carryWindowPct),2)}}
-function gdDeriveClusterTilt({faceAlignmentOffsetDeg=0,faceWindowDeg=.7,carryWindowPct=4.2,handedness="right",club="7i"}){const hand=gdHandednessSign(handedness), defaults=gdGetClubPatternDefaults(club), offsetInfluence=Math.abs(Number(faceAlignmentOffsetDeg)||0)*.12, windowInfluence=Math.abs(Number(faceWindowDeg)||0)*.9, carryInfluence=Math.abs(Number(carryWindowPct)||0)*.08;return gdRound(gdClamp(hand*(defaults.tiltBaseDeg+offsetInfluence+windowInfluence+carryInfluence),-8,8),2)}
+function gdDeriveClusterTilt({faceAlignmentOffsetDeg=0,faceWindowDeg=.7,carryWindowPct=4.2,handedness="right",club="7i"}){const hand=gdHandednessSign(handedness), defaults=gdGetClubPatternDefaults(club), geo=gdBubbleGeometryTuning(), offsetInfluence=Math.abs(Number(faceAlignmentOffsetDeg)||0)*.12, windowInfluence=Math.abs(Number(faceWindowDeg)||0)*.9, carryInfluence=Math.abs(Number(carryWindowPct)||0)*.08;return gdRound(gdClamp(hand*(defaults.tiltBaseDeg+offsetInfluence+windowInfluence+carryInfluence)*geo.tiltScale,-geo.tiltMaxDeg,geo.tiltMaxDeg),2)}
 function calculateBubbleProfile(input={}){const club=input.club||"7i", baseCarry=Number(input.baseCarry??gdDefaultCarryForClub(club)), handedness=input.handedness||"right", faceAlignmentOffsetDeg=gdResolveFaceAlignmentOffsetDeg(input), dispersionMultiplier=Number(input.dispersionMultiplier??1), window=gdDerivePatternWindow({club,faceWindowDeg:input.faceWindowDeg,carryWindowPct:input.carryWindowPct}), size=gdDeriveBasePatternSize({club,baseCarry,dispersionMultiplier}), aim=gdDeriveAimOffset({faceAlignmentOffsetDeg,baseCarry}), distanceTendencyPct=gdDeriveDistanceTendency({faceDeltaFromPatternDeg:window.faceWindowDeg,handedness,club}), clusterTiltDeg=gdDeriveClusterTilt({faceAlignmentOffsetDeg,faceWindowDeg:window.faceWindowDeg,carryWindowPct:window.carryWindowPct,handedness,club});return{club,baseCarry:gdRound(baseCarry,1),totalM:Number.isFinite(Number(input.totalM))?gdRound(Number(input.totalM),1):null,faceAlignmentOffsetDeg:gdRound(faceAlignmentOffsetDeg,2),faceOffsetDeg:gdRound(faceAlignmentOffsetDeg,2),aimOffsetDeg:aim.aimOffsetDeg,aimOffsetM:aim.aimOffsetM,clusterWidthM:size.clusterWidthM,clusterDepthM:size.clusterDepthM,clusterTiltDeg,faceWindowDeg:window.faceWindowDeg,faceToPathToleranceDeg:gdRound(Number(input.faceToPathToleranceDeg??window.faceWindowDeg),2),carryWindowPct:window.carryWindowPct,distanceTendencyPct,dispersionMultiplier:size.dispersionMultiplier,gdbTrust:gdRound(Number(input.gdbTrust??1),2),faceToPathDeg:Number.isFinite(Number(input.faceToPathDeg))?gdRound(Number(input.faceToPathDeg),2):null,derivedAoADeg:Number.isFinite(Number(input.derivedAoADeg))?gdRound(Number(input.derivedAoADeg),2):null,impactStatus:"Baseline",shapeSource:"engine-derived",modelNote:"Offset places the shot data. Club/carry sizes it. Accepted delivery window shapes the tilt/depth realism."}}
 function calculateVisualBubbleRender(profile,options={}){const handedness=options.handedness||"right", hand=gdHandednessSign(handedness), offsetNorm=gdClamp((hand*profile.faceAlignmentOffsetDeg)/6,-1,1), windowNorm=gdClamp((profile.faceWindowDeg||.7)/1.5,0,1), carryNorm=gdClamp((profile.carryWindowPct||4.2)/8,0,1);return{visualWidthM:gdRound(profile.clusterWidthM*(1+windowNorm*.1+Math.abs(offsetNorm)*.06),1),visualDepthM:gdRound(profile.clusterDepthM*(1+carryNorm*.08+windowNorm*.06),1),visualTiltDeg:gdRound(profile.clusterTiltDeg+offsetNorm*1.5+windowNorm*1.2,2),visualSkewDeg:gdRound(offsetNorm*5,2),visualYBias:gdRound(Math.max(0,offsetNorm)*.04-Math.max(0,-offsetNorm)*.03,3)}}
 function gdNearestStandInClub(distance){return gdResolveShotBagClub(gdGhostShotBagRows(),"Bag",distance)||{club:"7i",baseCarry:155,totalM:gdBagTotalForCarry("7i",155)}}
@@ -23365,8 +23413,9 @@ function gdFallbackGpsBubblePayload(distance=155){
   const d=Math.max(1,gdFiniteNumber(distance,155));
   const minRadius=Math.max(1,gdFiniteNumber(dev("shotEngine.minimumBubbleRadiusM"),7));
   const baseRadius=Math.max(minRadius,d*gdFiniteNumber(dev("shotEngine.bubbleRadiusPct"),.082));
-  const visualWidthM=Math.max(minRadius*2,baseRadius*1.72);
-  const visualDepthM=Math.max(minRadius*2,baseRadius*2.12);
+  const geo=typeof gdBubbleGeometryTuning==="function"?gdBubbleGeometryTuning():{widthScale:1,depthScale:1};
+  const visualWidthM=Math.max(minRadius*2,baseRadius*1.72*geo.widthScale);
+  const visualDepthM=Math.max(minRadius*2,baseRadius*2.12*geo.depthScale);
   const radius=Math.max(minRadius,visualWidthM/2,visualDepthM/2);
   return{
     club:"GPS",
@@ -23460,8 +23509,11 @@ function gdGpsBubbleDisplayPayload(payload,distance=155,center=null){
   let lateral=Math.max(1,gdFiniteNumber(p.lateralRadiusM,gdFiniteNumber(p.visual&&p.visual.visualWidthM,p.radius*2)/2));
   let depth=Math.max(1,gdFiniteNumber(p.depthRadiusM,gdFiniteNumber(p.visual&&p.visual.visualDepthM,p.radius*2)/2));
   const fallbackLike=p.engineAvailable===false||p.source==="gps-default"||p.shapeSource==="gps-fallback-default";
-  const maxLateral=gdClamp(d*(fallbackLike ? .10 : .13),9,28);
-  const maxDepth=gdClamp(d*(fallbackLike ? .14 : .18),12,38);
+  // Projection clamps are tunable from the Bubble Geometry board. Fallback
+  // bubbles keep their legacy proportion of the tuned caps (10/13, 14/18).
+  const geo=typeof gdBubbleGeometryTuning==="function"?gdBubbleGeometryTuning():{gpsMaxLateralPct:.13,gpsMaxDepthPct:.18,gpsMaxLateralM:28,gpsMaxDepthM:38,gpsPixelCapScale:1};
+  const maxLateral=gdClamp(d*geo.gpsMaxLateralPct*(fallbackLike?10/13:1),9,geo.gpsMaxLateralM);
+  const maxDepth=gdClamp(d*geo.gpsMaxDepthPct*(fallbackLike?14/18:1),12,geo.gpsMaxDepthM);
   const minLateral=gdClamp(d*.028,3.8,7.5);
   const minDepth=gdClamp(d*.038,5.2,11);
   let scale=Math.min(1,maxLateral/lateral,maxDepth/depth);
@@ -23478,7 +23530,7 @@ function gdGpsBubbleDisplayPayload(payload,distance=155,center=null){
   try{
     if(map&&center&&typeof projectOffset==="function"){
       const size=map.getSize&&map.getSize();
-      const maxPx=size?Math.max(42,Math.min(size.x<=560?86:138,size.x*(size.x<=560 ? .22 : .18),size.y*.18)):0;
+      const maxPx=size?Math.max(42,Math.min(size.x<=560?86:138,size.x*(size.x<=560 ? .22 : .18),size.y*.18))*geo.gpsPixelCapScale:0;
       if(maxPx>0){
         const c=map.latLngToLayerPoint(center);
         const shotBrg=gdBubbleShotBearing();
@@ -30426,8 +30478,11 @@ function calculateCleanBubbleProfile(input={}){
   const distanceStrength={driver:.42,woodHybrid:.36,iron:.30,wedge:.18}[group]??.30;
   const distanceTendencyPct=gdRound(gdClamp(-openSide*distanceStrength,-5,5),2);
   const tiltBase={driver:5,woodHybrid:4.5,iron:4,wedge:2.5}[group]??4;
-  const clusterTiltDeg=gdRound(gdClamp(gdHandednessSign(handedness)*(tiltBase+Math.abs(faceOffsetDeg)*.28+Math.abs(distanceTendencyPct)*.14),-8,8),2);
-  return{club,baseCarry:gdRound(baseCarry,1),faceOffsetDeg:gdRound(faceOffsetDeg,2),faceAlignmentOffsetDeg:gdRound(faceOffsetDeg,2),aimOffsetDeg:aim.aimOffsetDeg,aimOffsetM:aim.aimOffsetM,clusterWidthM:gdRound(baseCarry*ratios.width*skill,1),clusterDepthM:gdRound(baseCarry*ratios.depth*skill,1),clusterTiltDeg,distanceTendencyPct,dispersionMultiplier:1,impactStatus:"Baseline",shapeSource:"engine-derived",skillLevel,handedness};
+  // Same maths board as the main engine: bubbleGeometry tunables govern this
+  // (ghost/preview) copy too, so there is no separately-tuned bubble logic.
+  const geo=typeof gdBubbleGeometryTuning==="function"?gdBubbleGeometryTuning():{widthScale:1,depthScale:1,tiltScale:1,tiltMaxDeg:8};
+  const clusterTiltDeg=gdRound(gdClamp(gdHandednessSign(handedness)*(tiltBase+Math.abs(faceOffsetDeg)*.28+Math.abs(distanceTendencyPct)*.14)*geo.tiltScale,-geo.tiltMaxDeg,geo.tiltMaxDeg),2);
+  return{club,baseCarry:gdRound(baseCarry,1),faceOffsetDeg:gdRound(faceOffsetDeg,2),faceAlignmentOffsetDeg:gdRound(faceOffsetDeg,2),aimOffsetDeg:aim.aimOffsetDeg,aimOffsetM:aim.aimOffsetM,clusterWidthM:gdRound(baseCarry*ratios.width*skill*geo.widthScale,1),clusterDepthM:gdRound(baseCarry*ratios.depth*skill*geo.depthScale,1),clusterTiltDeg,distanceTendencyPct,dispersionMultiplier:1,impactStatus:"Baseline",shapeSource:"engine-derived",skillLevel,handedness};
 }
 function calculateCleanVisualBubbleRender(profile){
   const hand=gdHandednessSign(profile.handedness||"right");
@@ -36294,8 +36349,9 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 <script src="scripts/gd-shot-outcomes.js"></script>
 <script src="scripts/gd-shot-events.js?v=deliberate-outcome-20260612"></script>
 <script src="scripts/gd-shot-cluster-analysis.js?v=deliberate-outcome-20260612"></script>
-<script src="scripts/gd-launch-monitor-data.js?v=practice-data-20260712a"></script>
+<script src="scripts/gd-launch-monitor-data.js?v=practice-data-20260712b"></script>
 <script src="scripts/gd-shot-library-sync.js?v=shot-library-supabase-001"></script>
+<script src="scripts/gd-captured-surface-sync.js?v=captured-surface-supabase-001"></script>
 <script src="scripts/gd-native-practice-data.js?v=native-practice-data-001"></script>
 <script id="gdCanonicalRouteAuditV1">
 (function(){
@@ -36762,9 +36818,11 @@ body.gdAuthLocked #gdProfileV67 .topbar{
   function gdPracticePlotAllRowsForTest(){
     return gdPracticePlotMode()==="all";
   }
+  // HARD INTAKE GATE: the intake gates decide graph membership. Rejected
+  // shots never plot. The mode is pinned to "auto" so no stale localStorage
+  // flag can silently reintroduce rejected rows.
   function gdPracticePlotMode(){
-    try{return localStorage.getItem("gd_practice_plot_filter_mode")==="auto"?"auto":"all";}
-    catch(e){return "all";}
+    return "auto";
   }
   function gdPracticeSetPlotMode(mode){
     const next=String(mode||"all")==="auto"?"auto":"all";
@@ -36810,8 +36868,8 @@ body.gdAuthLocked #gdProfileV67 .topbar{
   }
   function gdPracticePlotModeControls(){
     if(!gdPracticeAdminIsOpen())return "";
-    const mode=gdPracticePlotMode();
-    return `<div class="gdPracticePlotMode"><button type="button" class="${mode==="all"?"active":""}" aria-pressed="${mode==="all"?"true":"false"}" data-gd-practice-plot-mode="all">Show all</button><button type="button" class="${mode==="auto"?"active":""}" aria-pressed="${mode==="auto"?"true":"false"}" data-gd-practice-plot-mode="auto">Filter view</button>${mode==="auto"?`<span>Filtered view is on.</span>`:""}</div>`;
+    // Plot mode is hard-gated: intake gates decide graph membership.
+    return `<div class="gdPracticePlotMode"><span>Intake gate active — rejected shots never plot.</span></div>`;
   }
   function gdPracticeShotActualDistance(shot){
     const carry=Number(shot?.carryM);
@@ -36939,13 +36997,25 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     const primary=learnings.slice().sort((a,b)=>Math.abs(b.delta)-Math.abs(a.delta))[0]||null;
     return {rows,diffs,learnings,primary};
   }
+  function gdPracticeBagSyncSettings(){
+    const cfg=safe(()=>window.GolfDaddyLaunchMonitorData?.settings?.(),null)||safe(()=>dev("launchMonitorCluster"),null)||{};
+    const num=(value,fallback)=>Number.isFinite(Number(value))?Number(value):fallback;
+    return {
+      enabled:num(cfg.bagSyncEnabled,1)!==0,
+      minDeltaM:Math.max(.1,num(cfg.bagSyncMinDeltaM,.5)),
+      minRatio:Math.min(1,Math.max(.2,num(cfg.bagSyncMinRatio,.55))),
+      maxRatio:Math.max(1,num(cfg.bagSyncMaxRatio,1.7))
+    };
+  }
   function gdPracticeRescaleBubbleSourceToCarry(bubble,newCarry){
     if(!bubble||typeof bubble!=="object")return null;
+    const sync=gdPracticeBagSyncSettings();
+    if(!sync.enabled)return null;
     const next=Number(newCarry);
     const old=Number(bubble.baseDistanceM||bubble.baseCarry||bubble.expectedDistanceM);
     if(!Number.isFinite(next)||next<=0||!Number.isFinite(old)||old<=0)return null;
-    if(Math.abs(next-old)<.5)return null;
-    const ratio=next/old;
+    if(Math.abs(next-old)<sync.minDeltaM)return null;
+    const ratio=Math.min(sync.maxRatio,Math.max(sync.minRatio,next/old));
     const scaled=Object.assign({},bubble);
     ["bubbleWidthM","clusterWidthM","visualWidthM","widthM","bubbleDepthM","clusterDepthM","visualDepthM","depthM","lateralRadiusM","depthRadiusM","radiusM"].forEach(key=>{
       const value=Number(scaled[key]);
@@ -39091,20 +39161,11 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     return rows.filter(row=>row&&Number.isFinite(Number(row.actualDistanceM))&&Number(row.actualDistanceM)>0);
   }
 	  function gdPracticePlotShots(analysis){
+	    // Hard intake gate: only shots that pass the intake gates
+	    // (analysis.acceptedShots) ever reach the graph.
 	    const accepted=Array.isArray(analysis?.acceptedShots)?analysis.acceptedShots:[];
-    const deselected=gdPracticePlotExcludedShotMap();
-    if(!gdPracticePlotAllRowsForTest())return accepted.filter(shot=>!deselected[shot?.shotId]);
-    const rows=[];
-    const seen=new Set();
-    accepted.forEach(shot=>{
-      if(shot?.shotId)seen.add(shot.shotId);
-      rows.push(Object.assign({gdPracticePlotLane:"accepted"},shot));
-    });
-    (Array.isArray(analysis?.rejectedShots)?analysis.rejectedShots:[]).forEach(shot=>{
-      if(shot?.shotId&&seen.has(shot.shotId))return;
-      rows.push(Object.assign({gdPracticePlotLane:"rejected",rejected:true},shot));
-	    });
-	    return rows.filter(shot=>!deselected[shot?.shotId]);
+	    const deselected=gdPracticePlotExcludedShotMap();
+	    return accepted.filter(shot=>!deselected[shot?.shotId]);
 	  }
 	  function gdPracticeNormalisedBaselineForShot(shot,actualDistance){
 	    const expected=Number(shot?.expectedM??shot?.expectedDistanceM);
@@ -41329,10 +41390,13 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     "launchMonitorCluster.viableDegreeAbs",
     "launchMonitorCluster.alignmentDegreeAbs"
   ];
-  const gdPracticeVerificationToleranceFields=[
-    "launchMonitorCluster.replicationDegreeTolerance",
-    "launchMonitorCluster.minVerificationClubs",
-    "launchMonitorCluster.distanceScaleWeight"
+  // Cross-club verification is retired as a tunable gate (bag-sync scaling
+  // superseded it). This tab now tunes how bubbles rescale to bag numbers.
+  const gdPracticeScalingToleranceFields=[
+    "launchMonitorCluster.bagSyncEnabled",
+    "launchMonitorCluster.bagSyncMinDeltaM",
+    "launchMonitorCluster.bagSyncMinRatio",
+    "launchMonitorCluster.bagSyncMaxRatio"
   ];
   const gdPracticeIntakeToleranceFields=[
     "launchMonitorCluster.minCarryM",
@@ -41345,7 +41409,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
   ];
   const gdPracticeToleranceSections=[
     {label:"Practice Bubble",meta:"Single cluster",fields:gdPracticeBubbleToleranceFields},
-    {label:"Bubble verification",meta:"Across clubs",fields:gdPracticeVerificationToleranceFields},
+    {label:"Bubble scaling",meta:"Bag-number sync",fields:gdPracticeScalingToleranceFields},
     {label:"Intake gates",meta:"Before cluster",fields:gdPracticeIntakeToleranceFields}
   ];
   const gdPracticeToleranceFields=gdPracticeToleranceSections.flatMap(section=>section.fields);
@@ -41410,12 +41474,12 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     const labels={
       "launchMonitorCluster.clusterHunterPct":"Bubble sample",
       "launchMonitorCluster.resultConsistencyPct":"Bubble fit",
-      "launchMonitorCluster.minCarryM":"Min carry",
-      "launchMonitorCluster.maxCarryM":"Max carry",
-      "launchMonitorCluster.carryWindowPct":"Carry %",
-      "launchMonitorCluster.carryWindowMinM":"Carry min",
-      "launchMonitorCluster.carryWindowMaxM":"Carry max",
-      "launchMonitorCluster.maxAbsOfflineM":"Max offline",
+      "launchMonitorCluster.minCarryM":"Min carry (abs)",
+      "launchMonitorCluster.maxCarryM":"Max carry (abs)",
+      "launchMonitorCluster.carryWindowPct":"Miss vs bag %",
+      "launchMonitorCluster.carryWindowMinM":"Miss floor",
+      "launchMonitorCluster.carryWindowMaxM":"Miss cap",
+      "launchMonitorCluster.maxAbsOfflineM":"Max offline (abs)",
       "launchMonitorCluster.minMetricConfidence":"Extract conf",
       "launchMonitorCluster.viableDegreeAbs":"Viable deg",
       "launchMonitorCluster.alignmentDegreeAbs":"Align deg",
@@ -41423,6 +41487,10 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       "launchMonitorCluster.replicationDegreeTolerance":"Verify tol",
       "launchMonitorCluster.minVerificationClubs":"Verify clubs",
       "launchMonitorCluster.distanceScaleWeight":"Anchor weight",
+      "launchMonitorCluster.bagSyncEnabled":"Bag sync",
+      "launchMonitorCluster.bagSyncMinDeltaM":"Sync delta",
+      "launchMonitorCluster.bagSyncMinRatio":"Shrink limit",
+      "launchMonitorCluster.bagSyncMaxRatio":"Grow limit",
       "launchMonitorCluster.maxClusterStdDeg":"Spread",
       "launchMonitorCluster.maxClusterRangeDeg":"Range",
       "launchMonitorCluster.deliveryMinShots":"Delivery shots",
@@ -41456,12 +41524,16 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       "launchMonitorCluster.replicationDegreeTolerance":"How close another club's bubble centre must be to verify this one.",
       "launchMonitorCluster.minVerificationClubs":"Number of matching clubs needed to mark the bubble verified.",
       "launchMonitorCluster.distanceScaleWeight":"Boosts longer-club clusters when choosing the anchor bubble.",
-      "launchMonitorCluster.minCarryM":"Rows below this carry are rejected before clustering.",
-      "launchMonitorCluster.maxCarryM":"Rows above this carry are rejected before clustering.",
-      "launchMonitorCluster.carryWindowPct":"Allowed carry miss as a percent of expected club carry.",
-      "launchMonitorCluster.carryWindowMinM":"Smallest carry miss window used for short clubs.",
-      "launchMonitorCluster.carryWindowMaxM":"Largest carry miss window used for long clubs.",
-      "launchMonitorCluster.maxAbsOfflineM":"Rows wider than this offline value are rejected.",
+      "launchMonitorCluster.bagSyncEnabled":"1 = bubbles rescale automatically when bag numbers change. 0 = frozen until regenerated.",
+      "launchMonitorCluster.bagSyncMinDeltaM":"Smallest bag-number change in metres before a rescale fires.",
+      "launchMonitorCluster.bagSyncMinRatio":"Bubbles never shrink below this share of their original size.",
+      "launchMonitorCluster.bagSyncMaxRatio":"Bubbles never grow beyond this multiple of their original size.",
+      "launchMonitorCluster.minCarryM":"Absolute floor: shots carrying under this many metres never plot.",
+      "launchMonitorCluster.maxCarryM":"Absolute ceiling: shots carrying over this many metres never plot.",
+      "launchMonitorCluster.carryWindowPct":"Max carry miss as a % of the club's bag number. Not absolute distance - it measures how far the shot flew vs what the bag says it should.",
+      "launchMonitorCluster.carryWindowMinM":"Smallest allowed miss-vs-bag window (protects short clubs).",
+      "launchMonitorCluster.carryWindowMaxM":"Largest allowed miss-vs-bag window (caps the % for long clubs).",
+      "launchMonitorCluster.maxAbsOfflineM":"Shots wider than this many metres from the target line never plot.",
       "launchMonitorCluster.minMetricConfidence":"Minimum extraction confidence for imported metrics."
     };
     return help[path]||fallback||"";
