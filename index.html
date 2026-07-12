@@ -2431,18 +2431,29 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 @keyframes gdPracticeScanPulse{0%{box-shadow:0 0 0 0 rgba(215,176,107,.55)}100%{box-shadow:0 0 0 9px rgba(215,176,107,0)}}
 @keyframes gdPracticeSpin{to{transform:rotate(360deg)}}
 @media(max-width:520px){.gdDataSplit{grid-template-columns:1fr}.gdDataCard{min-height:124px}.gdPracticeActions{grid-template-columns:1fr}}
-/* === Data Hub accordion: three sections expand/squash in place === */
+/* === Data Hub accordion: three sections expand/squash in place. ===
+   The .gdHubSection wrapper IS the border of an expanded section - the tab
+   card becomes its header, the content lives inside the same rounded box. */
+.gdHubSection{display:grid;min-width:0;align-content:start}
+.gdHubSection>.gdDataCard{width:100%;box-sizing:border-box}
+.gdHubSection[data-hub-section="compare"]{grid-column:1/-1}
+#dataHubPanel.gdHubSectionExpanded .gdHubSection{grid-column:1/-1}
 .gdHubAccordion .gdDataCard{transition:min-height .3s ease,padding .3s ease,opacity .3s ease}
-#dataHubPanel.gdHubSectionExpanded .gdDataSplit{grid-template-columns:1fr}
-#dataHubPanel.gdHubSectionExpanded .gdDataCard{min-height:0;padding:11px 14px;flex-direction:row;align-items:center;gap:10px;justify-content:flex-start;cursor:pointer}
+#dataHubPanel.gdHubSectionExpanded .gdDataSplit{grid-template-columns:1fr !important;grid-template-areas:none !important}
+#dataHubPanel.gdHubSectionExpanded .gdDataCard{min-height:0;padding:12px 16px;flex-direction:row;align-items:center;gap:10px;justify-content:flex-start;cursor:pointer}
 #dataHubPanel.gdHubSectionExpanded .gdDataCard .ico{font-size:18px}
 #dataHubPanel.gdHubSectionExpanded .gdDataCard span,#dataHubPanel.gdHubSectionExpanded .gdDataCard small{display:none}
 #dataHubPanel.gdHubSectionExpanded .gdDataCard strong{font-size:15px}
-#dataHubPanel.gdHubSectionExpanded .gdDataCard:not(.active){opacity:.6}
-#dataHubPanel.gdHubSectionExpanded .gdDataCard.active{opacity:1;border-color:rgba(98,210,255,.34);box-shadow:0 18px 44px rgba(0,0,0,.30),inset 0 0 0 1px rgba(98,210,255,.10)}
-.gdHubSectionBody{grid-column:1/-1;overflow:hidden;max-height:0;opacity:0;transition:max-height .36s ease,opacity .3s ease}
+#dataHubPanel.gdHubSectionExpanded .gdHubSection:not(.gdHubActive) .gdDataCard{opacity:.6}
+.gdHubSection.gdHubActive{border:1px solid rgba(98,210,255,.32);border-radius:22px;background:linear-gradient(180deg,rgba(18,32,27,.96),rgba(7,13,10,.98));box-shadow:0 18px 44px rgba(0,0,0,.30)}
+.gdHubSection.gdHubActive>.gdDataCard{opacity:1;border:0;border-radius:22px 22px 0 0;background:transparent;box-shadow:none;min-height:0}
+.gdHubSection.gdHubActive>.gdHubSectionBody{padding:0 12px 12px}
+.gdHubSectionBody{overflow:hidden;max-height:0;opacity:0;transition:max-height .36s ease,opacity .3s ease}
 .gdHubSectionBody[hidden]{display:none}
 .gdHubSectionBody.gdHubSectionOpen{max-height:12000px;opacity:1;overflow:visible}
+/* The active wrapper already draws the border - strip the legacy attached
+   chrome from the compare expansion so it doesn't double up. */
+#dataHubPanel .gdHubSection.gdHubActive #gdHubCompareExpansion{border:0 !important;box-shadow:none !important;background:transparent !important;border-radius:0 !important;overflow:visible !important}
 .gdCompareSourceSwitch{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0 2px}
 .gdCompareSourceSwitch button{border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:10px;font-weight:900;font-size:12px;background:rgba(255,255,255,.06);color:rgba(255,255,255,.72)}
 .gdCompareSourceSwitch button.active{background:linear-gradient(180deg,rgba(33,59,73,.92),rgba(8,18,17,.98));border-color:rgba(98,210,255,.34);color:#fff}
@@ -2454,22 +2465,38 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 .gdHubEmbedded>.sheet,.gdHubEmbedded>.moduleSheet{max-width:none;margin:0;display:block !important}
 .gdHubEmbedded .sheetHeader{display:none}
 .gdHubEmbedded [data-gd-offset-hub]{display:none}
+/* Custom club/ball data gates */
+.gdPracticeGateList{display:grid;gap:6px;margin-top:8px}
+.gdPracticeGateRow{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 11px;border:1px solid rgba(255,255,255,.10);border-radius:14px;background:rgba(255,255,255,.045);font-size:12px;font-weight:800}
+.gdPracticeGateRow.off{opacity:.45}
+.gdPracticeGateRowActions{display:flex;gap:6px;align-items:center}
+.gdPracticeGateToggle{border:1px solid rgba(255,255,255,.14);border-radius:10px;padding:4px 10px;background:rgba(255,255,255,.06);color:rgba(255,255,255,.7);font-weight:900;font-size:11px}
+.gdPracticeGateToggle.on{background:rgba(55,242,141,.16);border-color:rgba(55,242,141,.4);color:#9df5c4}
+.gdPracticeGateEmpty{padding:10px 12px;border:1px dashed rgba(255,255,255,.14);border-radius:14px;color:rgba(255,255,255,.55);font-size:12px;line-height:1.35}
+.gdPracticeGateForm{display:grid;gap:8px;margin-top:10px;padding:11px;border:1px solid rgba(255,255,255,.10);border-radius:16px;background:rgba(255,255,255,.035)}
+.gdPracticeGateFormRow{display:flex;flex-wrap:wrap;gap:7px;align-items:center}
+.gdPracticeGateFormRow select,.gdPracticeGateFormRow input[type=number]{flex:1;min-width:96px;border:1px solid rgba(255,255,255,.12);border-radius:12px;background:rgba(0,0,0,.28);color:#fff;padding:9px 10px;font-size:12px;font-weight:800}
+.gdPracticeGateFormRow [data-gd-gate-val2]{flex:1;min-width:96px}
+.gdPracticeGateFormRow [data-gd-gate-val2][hidden]{display:none}
+.gdPracticeGateFormRow [data-gd-gate-val2] input{width:100%;box-sizing:border-box;border:1px solid rgba(255,255,255,.12);border-radius:12px;background:rgba(0,0,0,.28);color:#fff;padding:9px 10px;font-size:12px;font-weight:800}
+.gdPracticeGateAbs{display:flex;gap:6px;align-items:center;color:rgba(255,255,255,.7);font-size:12px;font-weight:800}
+.gdPracticeGateForm button.primary{border:0;border-radius:12px;padding:10px 16px;font-weight:900;background:linear-gradient(180deg,#d7b06b,#b88d42);color:#06100b}
+.gdPracticeGateClubs summary{cursor:pointer;color:rgba(255,255,255,.66);font-size:12px;font-weight:850;list-style:none}
+.gdPracticeGateClubs summary::-webkit-details-marker{display:none}
+.gdPracticeGateClubGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(76px,1fr));gap:6px;margin-top:8px}
+.gdPracticeGateClub{display:flex;gap:5px;align-items:center;padding:6px 8px;border:1px solid rgba(255,255,255,.10);border-radius:10px;background:rgba(255,255,255,.045);font-size:11px;font-weight:850}
+.gdPracticeUploadSource{display:inline-block;margin-left:8px;padding:2px 8px;border-radius:999px;border:1px solid rgba(98,210,255,.28);background:rgba(98,210,255,.10);color:#9fdcf5;font-size:10px;font-weight:900;letter-spacing:.03em}
 .gdCourseLibraryClub{border:0;margin:0}
 .gdCourseLibraryClub summary{list-style:none;cursor:pointer}
 .gdCourseLibraryClub summary::-webkit-details-marker{display:none}
 .gdCourseLibraryClubRows{display:grid;gap:4px;margin:4px 0 8px;padding-left:6px}
 .gdClubShotRow.filtered{opacity:.5}
     #dataHubPanel .moduleSheet{max-width:760px}
-    #dataHubPanel:not(.gdCompareExpanded) .gdDataSplit{grid-template-columns:repeat(3,minmax(0,1fr));align-items:stretch}
-    #dataHubPanel:not(.gdCompareExpanded) .gdDataCard{min-height:136px;padding:14px}
-    #dataHubPanel:not(.gdCompareExpanded) .gdDataCard.compare{grid-column:auto;min-height:136px}
-    #dataHubPanel.gdCompareExpanded.gdCompareSourcePractice .gdDataSplit{grid-template-columns:minmax(108px,.5fr) minmax(300px,1fr) minmax(220px,.72fr)}
-    #dataHubPanel.gdCompareExpanded.gdCompareSourceCourse .gdDataSplit{grid-template-columns:minmax(220px,.72fr) minmax(300px,1fr) minmax(108px,.5fr)}
-    #dataHubPanel.gdCompareExpanded .gdDataSplit{align-items:start;grid-template-areas:"course compareTitle practice" "course compareVisual practice"}
-    #dataHubPanel.gdCompareExpanded #gdCourseDataOpenBtn{grid-area:course}
-    #dataHubPanel.gdCompareExpanded #gdPracticeDataOpenBtn{grid-area:practice}
-    #dataHubPanel.gdCompareExpanded #gdCompareDataOpenBtn{grid-area:compareTitle}
-    #dataHubPanel.gdCompareExpanded #gdHubCompareExpansion{grid-area:compareVisual;margin-top:0}
+    #dataHubPanel:not(.gdHubSectionExpanded) .gdDataSplit{grid-template-columns:repeat(3,minmax(0,1fr));align-items:stretch}
+    #dataHubPanel:not(.gdHubSectionExpanded) .gdDataCard{min-height:136px;padding:14px}
+    #dataHubPanel:not(.gdHubSectionExpanded) .gdDataCard.compare{grid-column:auto;min-height:136px}
+    #dataHubPanel:not(.gdHubSectionExpanded) .gdHubSection[data-hub-section="compare"]{grid-column:auto}
+    #dataHubPanel.gdCompareExpanded #gdHubCompareExpansion{margin-top:0}
     #dataHubPanel.gdCompareExpanded .gdDataCard.compare{grid-column:auto}
     #dataHubPanel.gdCompareExpanded .gdDataCard.compare.title{padding:4px 0 0}
     #dataHubPanel.gdCompareExpanded .gdDataCard.compare.title .ico{font-size:15px}
@@ -5768,16 +5795,22 @@ body[data-gd-permission="admin"] #gdV62Home .gdHomeAdminSettings{display:inline-
 </div>
 </details>
 <div class="gdDataSplit gdHubAccordion">
+<div class="gdHubSection" data-hub-section="course">
 <div class="gdDataCard primary" id="gdCourseDataOpenBtn" role="button" tabindex="0" onclick="gdDataHubCourseAction()"><div class="ico">⛳</div><div><strong>Course Data</strong><span>GPS and scorecard shot data filed under a course label. This is the on-course truth layer.</span></div></div>
 <div class="gdHubSectionBody" id="gdHubCourseHost" hidden></div>
+</div>
+<div class="gdHubSection" data-hub-section="compare">
 <button class="gdDataCard compare" id="gdCompareDataOpenBtn" type="button" onclick="gdOpenCompareData()"><div class="ico">↔</div><div><strong>Comparison</strong><span>View Course and Practice recommendation values together. Jump back to each source to change the evidence.</span></div></button>
 <div class="gdHubCompareExpansion gdHubSectionBody" id="gdHubCompareExpansion" hidden>
 <div class="gdCompareSourceSwitch" id="gdCompareSourceSwitch"><button type="button" data-src="course" onclick="return gdCompareSetSource('course')">Course Library</button><button type="button" data-src="practice" onclick="return gdCompareSetSource('practice')">Practice Library</button></div>
 <div class="gdCompareVisual" id="gdHubCompareDataVisual"></div>
 <div class="gdComparePracticeProjector" id="gdComparePracticeProjector" hidden></div>
 </div>
+</div>
+<div class="gdHubSection" data-hub-section="practice">
 <div class="gdDataCard" id="gdPracticeDataOpenBtn" role="button" tabindex="0" onclick="gdDataHubPracticeAction()"><div class="ico">◉</div><div><strong>Practice Data</strong><span>Launch monitor captures and Clarity Pattern Finder evidence. Kept separate from course rounds.</span></div></div>
 <div class="gdHubSectionBody" id="gdHubPracticeHost" hidden></div>
+</div>
 </div>
 </div></div>
 <div class="modulePanel gdShotDataPanel" id="practiceDataPanel"><div class="moduleSheet">
@@ -6144,7 +6177,9 @@ const DEV_DEFAULTS={
     bagSyncEnabled:1,
     bagSyncMinDeltaM:.5,
     bagSyncMinRatio:.55,
-    bagSyncMaxRatio:1.7
+    bagSyncMaxRatio:1.7,
+    customGates:"",
+    sourceTrust:'[{"id":"preload-r10-ftp","source":"garmin_r10","metric":"faceToPath","enabled":true,"preload":true},{"id":"preload-r10-aoa","source":"garmin_r10","metric":"attackAngle","enabled":true,"preload":true},{"id":"preload-skytrak-smash","source":"skytrak","metric":"smash","enabled":true,"preload":true},{"id":"preload-toptracer-spin","source":"toptracer","metric":"totalSpin","enabled":true,"preload":true}]'
   }
 };
 const DEV_DEFS={
@@ -6830,7 +6865,7 @@ function gdEnsureLaunchMonitorApi(){
       return;
     }
     const script=document.createElement("script");
-    script.src="scripts/gd-launch-monitor-data.js?v=practice-data-20260712b";
+    script.src="scripts/gd-launch-monitor-data.js?v=practice-data-20260712c";
     script.onload=finish;
     script.onerror=()=>reject(new Error("Launch monitor module failed to load"));
     document.body.appendChild(script);
@@ -36397,7 +36432,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 <script src="scripts/gd-shot-outcomes.js"></script>
 <script src="scripts/gd-shot-events.js?v=deliberate-outcome-20260612"></script>
 <script src="scripts/gd-shot-cluster-analysis.js?v=deliberate-outcome-20260612"></script>
-<script src="scripts/gd-launch-monitor-data.js?v=practice-data-20260712b"></script>
+<script src="scripts/gd-launch-monitor-data.js?v=practice-data-20260712c"></script>
 <script src="scripts/gd-shot-library-sync.js?v=shot-library-supabase-001"></script>
 <script src="scripts/gd-captured-surface-sync.js?v=captured-surface-supabase-001"></script>
 <script src="scripts/gd-native-practice-data.js?v=native-practice-data-001"></script>
@@ -40287,6 +40322,9 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       btn.setAttribute("aria-expanded",expanded&&key===active?"true":"false");
       btn.innerHTML=gdDataHubCardCopy[key];
     });
+    document.querySelectorAll("#dataHubPanel .gdHubSection").forEach(section=>{
+      section.classList.toggle("gdHubActive",expanded&&section.dataset.hubSection===active);
+    });
     const sourceSwitch=byId("gdCompareSourceSwitch");
     sourceSwitch?.querySelectorAll("button").forEach(btn=>{
       btn.classList.toggle("active",btn.dataset.src===gdCompareExpandedSource);
@@ -41353,6 +41391,12 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     }
     function practiceExclusionReason(shot){
       if(plotAll)return "";
+      // Single source of truth: the engine's quality gates (built-ins,
+      // custom data gates AND source don't-trust rules) decide what the
+      // graph marks as excluded - no duplicated maths here.
+      const engineReason=safe(()=>window.GolfDaddyLaunchMonitorData?.practiceQualityExclusionReason?.(shot),null);
+      if(typeof engineReason==="string")return engineReason;
+      // Fallback (engine not loaded yet): legacy inline checks.
       const faceToPath=Number(shot?.delivery?.faceToPathDeg);
       if(Number.isFinite(faceToPath)&&Math.abs(faceToPath)>faceToPathLimit)return "face_to_path";
 	      const spinAxisMetric=metricValue(shot,"spinAxis");
@@ -41812,6 +41856,163 @@ body.gdAuthLocked #gdProfileV67 .topbar{
   function gdPracticeWriteTolerance(path,value){
     gdWriteDataTuning(path,value);
   }
+  // === Custom club/ball data gates (admin-authored exclusion rules) ===
+  const GD_PRACTICE_GATE_METRICS=[["carry","Carry"],["total","Total"],["offline","Offline"],["ballSpeed","Ball Speed"],["clubSpeed","Club Speed"],["smash","Smash Factor"],["totalSpin","Total Spin"],["spinAxis","Spin Axis"],["launchAngle","Launch Angle"],["launchDirection","Launch Direction"],["faceAngle","Face Angle"],["clubPath","Club Path"],["faceToPath","Face to Path"],["attackAngle","Attack Angle"],["dynamicLoft","Dynamic Loft"],["apexHeight","Apex Height"],["descentAngle","Descent Angle"]];
+  const GD_PRACTICE_GATE_OPS=[["gt","greater than"],["lt","less than"],["eq","equal to"],["between","between"],["outside","outside"]];
+  function gdPracticeCustomGates(){
+    try{
+      const raw=dev("launchMonitorCluster.customGates");
+      const parsed=typeof raw==="string"&&raw.trim()?JSON.parse(raw):(Array.isArray(raw)?raw:[]);
+      return Array.isArray(parsed)?parsed:[];
+    }catch(e){return [];}
+  }
+  function gdPracticeSaveCustomGates(rules){
+    setDev("launchMonitorCluster.customGates",JSON.stringify(Array.isArray(rules)?rules:[]));
+    gdRenderPracticeToleranceControls();
+    renderPracticeData(true);
+    return false;
+  }
+  function gdPracticeGateClubOptions(){
+    const set=new Set();
+    safe(()=>{(typeof gdPracticeSavedBagRows==="function"?gdPracticeSavedBagRows():[]).forEach(row=>{const c=String(row?.club||"").trim();if(c)set.add(c);});});
+    safe(()=>{const analysis=gdPracticeDisplayAnalysis({quiet:true});(analysis?.acceptedShots||[]).concat(analysis?.rejectedShots||[]).forEach(shot=>{const c=String(shot?.club||"").trim();if(c)set.add(c);});});
+    if(!set.size)["Driver","3w","5i","6i","7i","8i","9i","PW","SW"].forEach(c=>set.add(c));
+    return [...set].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
+  }
+  function gdPracticeGateRuleLabel(rule){
+    const metricLabel=(GD_PRACTICE_GATE_METRICS.find(m=>m[0]===rule.metric)||[])[1]||rule.metric;
+    const unit=rule.unit==="pct"?"% of bag carry":"";
+    const opText={gt:">",lt:"<",eq:"=",between:"between",outside:"outside"}[rule.op]||rule.op;
+    const val=(rule.op==="between"||rule.op==="outside")?`${rule.value} – ${rule.value2}${unit?` ${unit}`:""}`:`${rule.value}${unit?` ${unit}`:""}`;
+    const clubs=Array.isArray(rule.clubs)&&rule.clubs.length?rule.clubs.join(", "):"All clubs";
+    return `${clubs} · ${metricLabel} ${rule.abs?"|±| ":""}${opText} ${val}`;
+  }
+  function gdPracticeGateOpChanged(select){
+    const wrap=select?.closest(".gdPracticeGateForm");
+    const second=wrap?.querySelector("[data-gd-gate-val2]");
+    const needsTwo=select?.value==="between"||select?.value==="outside";
+    if(second)second.hidden=!needsTwo;
+    return false;
+  }
+  function gdPracticeAddCustomGate(button){
+    const form=button?.closest(".gdPracticeGateForm");
+    if(!form)return false;
+    const metric=form.querySelector("[data-gd-gate-metric]")?.value||"";
+    const op=form.querySelector("[data-gd-gate-op]")?.value||"gt";
+    const value=Number(form.querySelector("[data-gd-gate-val1]")?.value);
+    const value2=Number(form.querySelector("[data-gd-gate-val2] input")?.value);
+    const abs=!!form.querySelector("[data-gd-gate-abs]")?.checked;
+    const unit=form.querySelector("[data-gd-gate-unit]")?.value==="pct"?"pct":"raw";
+    const clubs=[...form.querySelectorAll("[data-gd-gate-club]:checked")].map(input=>String(input.value||"").trim()).filter(Boolean);
+    if(!metric||!Number.isFinite(value)){gdLmToast("Pick a metric and a value first");return false;}
+    if((op==="between"||op==="outside")&&!Number.isFinite(value2)){gdLmToast("Between needs two values");return false;}
+    const rules=gdPracticeCustomGates();
+    rules.push({id:`gate-${Date.now()}-${Math.floor(Math.random()*1e4)}`,metric,op,value,value2:Number.isFinite(value2)?value2:null,abs,unit,clubs,enabled:true});
+    return gdPracticeSaveCustomGates(rules);
+  }
+  function gdPracticeRemoveCustomGate(id){
+    return gdPracticeSaveCustomGates(gdPracticeCustomGates().filter(rule=>rule.id!==id));
+  }
+  function gdPracticeToggleCustomGate(id){
+    return gdPracticeSaveCustomGates(gdPracticeCustomGates().map(rule=>rule.id===id?Object.assign({},rule,{enabled:rule.enabled===false}):rule));
+  }
+  function gdPracticeCustomGatesSectionHTML(canEdit){
+    const rules=gdPracticeCustomGates();
+    const rows=rules.map(rule=>{
+      const on=rule.enabled!==false;
+      const controls=canEdit?`<button type="button" class="gdPracticeGateToggle ${on?"on":""}" title="${on?"Disable":"Enable"} this gate" onclick="return gdPracticeToggleCustomGate('${gdEscapeHTML(rule.id)}')">${on?"On":"Off"}</button><button type="button" class="danger gdPracticeDeleteX" title="Delete this gate" onclick="return gdPracticeRemoveCustomGate('${gdEscapeHTML(rule.id)}')">&times;</button>`:"";
+      return `<div class="gdPracticeGateRow ${on?"":"off"}"><span>${gdEscapeHTML(gdPracticeGateRuleLabel(rule))}</span><div class="gdPracticeGateRowActions">${controls}</div></div>`;
+    }).join("")||`<div class="gdPracticeGateEmpty">No custom gates yet. Shots matching a gate are excluded from cluster consideration (they still plot).</div>`;
+    const metricOptions=GD_PRACTICE_GATE_METRICS.map(([key,label])=>`<option value="${key}">${gdEscapeHTML(label)}</option>`).join("");
+    const opOptions=GD_PRACTICE_GATE_OPS.map(([key,label])=>`<option value="${key}">${gdEscapeHTML(label)}</option>`).join("");
+    const clubChecks=gdPracticeGateClubOptions().map(club=>`<label class="gdPracticeGateClub"><input type="checkbox" data-gd-gate-club value="${gdEscapeHTML(club)}"><span>${gdEscapeHTML(club)}</span></label>`).join("");
+    const form=canEdit?`<div class="gdPracticeGateForm">
+      <div class="gdPracticeGateFormRow">
+        <select data-gd-gate-metric aria-label="Metric">${metricOptions}</select>
+        <select data-gd-gate-op aria-label="Condition" onchange="return gdPracticeGateOpChanged(this)">${opOptions}</select>
+        <input data-gd-gate-val1 type="number" step="any" inputmode="decimal" placeholder="Value" aria-label="Value">
+        <span data-gd-gate-val2 hidden><input type="number" step="any" inputmode="decimal" placeholder="and" aria-label="Second value"></span>
+      </div>
+      <div class="gdPracticeGateFormRow">
+        <select data-gd-gate-unit aria-label="Unit"><option value="raw">Native units</option><option value="pct">% of bag carry</option></select>
+        <label class="gdPracticeGateAbs"><input type="checkbox" data-gd-gate-abs><span>± either side</span></label>
+        <button type="button" class="primary" onclick="return gdPracticeAddCustomGate(this)">Add gate</button>
+      </div>
+      <details class="gdPracticeGateClubs"><summary>Apply to clubs (default: all)</summary><div class="gdPracticeGateClubGrid">${clubChecks}</div></details>
+    </div>`:"";
+    return `<section class="gdPracticeToleranceSection gdPracticeCustomGates"><div class="gdPracticeToleranceSectionHead"><strong>Custom data gates</strong><span>Club &amp; ball data</span></div><div class="gdPracticeGateList">${rows}</div>${form}</section>`;
+  }
+  // === Launch monitor source trust (don't-trust rules) ===
+  const GD_PRACTICE_SOURCE_LABELS={trackman:"Trackman",foresight:"Foresight (GCQuad/GC3)",flightscope:"FlightScope / Mevo",garmin_r10:"Garmin R10",skytrak:"SkyTrak",toptracer:"Toptracer",uneekor:"Uneekor",fullswing:"Full Swing",rapsodo:"Rapsodo MLM",awesome_golf:"Awesome Golf",unknown:"Unknown"};
+  function gdPracticeSourceLabel(key){
+    return GD_PRACTICE_SOURCE_LABELS[String(key||"").trim().toLowerCase()]||String(key||"Unknown");
+  }
+  function gdPracticeSourceTrustRules(){
+    try{
+      const raw=dev("launchMonitorCluster.sourceTrust");
+      const parsed=typeof raw==="string"&&raw.trim()?JSON.parse(raw):(Array.isArray(raw)?raw:[]);
+      return Array.isArray(parsed)?parsed:[];
+    }catch(e){return [];}
+  }
+  function gdPracticeSaveSourceTrust(rules){
+    setDev("launchMonitorCluster.sourceTrust",JSON.stringify(Array.isArray(rules)?rules:[]));
+    gdRenderPracticeToleranceControls();
+    renderPracticeData(true);
+    return false;
+  }
+  function gdPracticeAddSourceTrust(button){
+    const form=button?.closest(".gdPracticeSourceTrustForm");
+    if(!form)return false;
+    const source=form.querySelector("[data-gd-trust-source]")?.value||"";
+    const metric=form.querySelector("[data-gd-trust-metric]")?.value||"all";
+    if(!source){gdLmToast("Pick a source first");return false;}
+    const rules=gdPracticeSourceTrustRules();
+    if(rules.some(rule=>rule.source===source&&String(rule.metric||"all")===metric)){gdLmToast("That rule already exists");return false;}
+    rules.push({id:`trust-${Date.now()}-${Math.floor(Math.random()*1e4)}`,source,metric,enabled:true});
+    return gdPracticeSaveSourceTrust(rules);
+  }
+  function gdPracticeRemoveSourceTrust(id){
+    return gdPracticeSaveSourceTrust(gdPracticeSourceTrustRules().filter(rule=>rule.id!==id));
+  }
+  function gdPracticeToggleSourceTrust(id){
+    return gdPracticeSaveSourceTrust(gdPracticeSourceTrustRules().map(rule=>rule.id===id?Object.assign({},rule,{enabled:rule.enabled===false}):rule));
+  }
+  function gdPracticeRescanSources(){
+    const changed=safe(()=>window.GolfDaddyLaunchMonitorData?.retagProviders?.(),0)||0;
+    gdLmToast(changed?`Re-tagged ${changed} import${changed===1?"":"s"}`:"No source changes found");
+    gdRenderPracticeToleranceControls();
+    renderPracticeData(true);
+    return false;
+  }
+  function gdPracticeDetectedSources(){
+    const set=new Set();
+    safe(()=>{const analysis=gdPracticeDisplayAnalysis({quiet:true});(analysis?.acceptedShots||[]).concat(analysis?.rejectedShots||[]).forEach(shot=>{const p=String(shot?.providerGuess||"").trim().toLowerCase();if(p&&p!=="unknown")set.add(p);});});
+    return [...set];
+  }
+  function gdPracticeSourceTrustSectionHTML(canEdit){
+    const rules=gdPracticeSourceTrustRules();
+    const rows=rules.map(rule=>{
+      const on=rule.enabled!==false;
+      const metricLabel=rule.metric==="all"?"All exclusion gates":((GD_PRACTICE_GATE_METRICS.find(m=>m[0]===rule.metric)||[])[1]||rule.metric);
+      const controls=canEdit?`<button type="button" class="gdPracticeGateToggle ${on?"on":""}" title="${on?"Disable":"Enable"} this rule" onclick="return gdPracticeToggleSourceTrust('${gdEscapeHTML(rule.id)}')">${on?"On":"Off"}</button><button type="button" class="danger gdPracticeDeleteX" title="Delete this rule" onclick="return gdPracticeRemoveSourceTrust('${gdEscapeHTML(rule.id)}')">&times;</button>`:"";
+      return `<div class="gdPracticeGateRow ${on?"":"off"}"><span>${gdEscapeHTML(gdPracticeSourceLabel(rule.source))} · don't apply ${gdEscapeHTML(metricLabel)}${rule.preload?" · preset":""}</span><div class="gdPracticeGateRowActions">${controls}</div></div>`;
+    }).join("")||`<div class="gdPracticeGateEmpty">No source rules. Add one to stop unreliable launch monitor data triggering exclusions.</div>`;
+    const detected=gdPracticeDetectedSources();
+    const known=safe(()=>window.GolfDaddyLaunchMonitorData?.providerSignatures?.(),null)||Object.keys(GD_PRACTICE_SOURCE_LABELS).filter(key=>key!=="unknown").map(key=>({key,label:GD_PRACTICE_SOURCE_LABELS[key]}));
+    const sourceOptions=known.map(sig=>`<option value="${gdEscapeHTML(sig.key)}">${gdEscapeHTML(sig.label)}${detected.includes(sig.key)?" · in library":""}</option>`).join("");
+    const metricOptions=[`<option value="all">All exclusion gates</option>`].concat(GD_PRACTICE_GATE_METRICS.map(([key,label])=>`<option value="${key}">${gdEscapeHTML(label)}</option>`)).join("");
+    const form=canEdit?`<div class="gdPracticeGateForm gdPracticeSourceTrustForm">
+      <div class="gdPracticeGateFormRow">
+        <select data-gd-trust-source aria-label="Launch monitor source">${sourceOptions}</select>
+        <select data-gd-trust-metric aria-label="Gate to skip">${metricOptions}</select>
+        <button type="button" class="primary" onclick="return gdPracticeAddSourceTrust(this)">Add rule</button>
+      </div>
+      <div class="gdPracticeGateFormRow">
+        <button type="button" onclick="return gdPracticeRescanSources()">Re-scan import sources</button>
+      </div>
+    </div>`:"";
+    return `<section class="gdPracticeToleranceSection gdPracticeSourceTrust"><div class="gdPracticeToleranceSectionHead"><strong>Source trust</strong><span>Don't-trust rules</span></div><div class="gdPracticeGateList">${rows}</div>${form}</section>`;
+  }
 	  function gdRenderPracticeToleranceControls(){
 	    const root=byId("gdPracticeTolerancePanel");
 	    if(!root||typeof dev!=="function"||typeof setDev!=="function")return;
@@ -41827,7 +42028,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     root.classList.toggle("locked",!canEdit);
     root.innerHTML=[
       `<div class="gdPracticeToleranceHead"><div><strong>Practice Bubble controls</strong></div><div class="gdPracticeToleranceBadge">${canEdit?"Admin":"Locked"}</div></div>`,
-      `<div class="gdPracticeToleranceSections">${gdPracticeToleranceSections.map(section=>`<section class="gdPracticeToleranceSection"><div class="gdPracticeToleranceSectionHead"><strong>${gdEscapeHTML(section.label)}</strong><span>${gdEscapeHTML(section.meta||"")}</span></div><div class="gdPracticeToleranceGrid">${section.fields.map(rowHTML).join("")}</div></section>`).join("")}</div>`
+      `<div class="gdPracticeToleranceSections">${gdPracticeToleranceSections.map(section=>`<section class="gdPracticeToleranceSection"><div class="gdPracticeToleranceSectionHead"><strong>${gdEscapeHTML(section.label)}</strong><span>${gdEscapeHTML(section.meta||"")}</span></div><div class="gdPracticeToleranceGrid">${section.fields.map(rowHTML).join("")}</div></section>`).join("")}${gdPracticeCustomGatesSectionHTML(canEdit)}${gdPracticeSourceTrustSectionHTML(canEdit)}</div>`
     ].join("");
     root.querySelectorAll("[data-tolerance-path]").forEach(input=>{
       input.oninput=()=>{
@@ -42518,7 +42719,9 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 			        // Quiet row: just the upload date (club is the section header). Clicking
 			        // the row expands the import's raw data table directly beneath it.
 			        // (Buttons/inputs inside <summary> activate themselves, not the toggle.)
-			        return `<details class="gdPracticeUploadRow" data-import-id="${gdEscapeHTML(importId)}"><summary>${checkbox}<div class="gdPracticeUploadMeta"><strong>${gdEscapeHTML(dateLabel)}</strong></div><div class="gdPracticeUploadActions">${importActions}</div></summary><div class="gdPracticeUploadRaw">${gdPracticeRawShotTableHTML(importRows,meta,club,importId)}</div></details>`;
+			        const providerKey=String(importRows[0]?.providerGuess||"").trim().toLowerCase();
+		        const providerBadge=providerKey&&providerKey!=="unknown"?`<span class="gdPracticeUploadSource">${gdEscapeHTML(gdPracticeSourceLabel(providerKey))}</span>`:"";
+		        return `<details class="gdPracticeUploadRow" data-import-id="${gdEscapeHTML(importId)}"><summary>${checkbox}<div class="gdPracticeUploadMeta"><strong>${gdEscapeHTML(dateLabel)}</strong>${providerBadge}</div><div class="gdPracticeUploadActions">${importActions}</div></summary><div class="gdPracticeUploadRaw">${gdPracticeRawShotTableHTML(importRows,meta,club,importId)}</div></details>`;
 			      }).join("");
 			      // Quiet header: club label + latest upload date only. Shot/upload counts
 			      // and bubble status are admin/raw-data concerns, not library chrome.
@@ -42865,6 +43068,14 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       gdHubSetSection:gdHubSetSection,
       gdInitDataHubAccordion:gdInitDataHubAccordion,
       gdCompareSetSource:gdCompareSetSource,
+      gdPracticeAddCustomGate:gdPracticeAddCustomGate,
+      gdPracticeRemoveCustomGate:gdPracticeRemoveCustomGate,
+      gdPracticeToggleCustomGate:gdPracticeToggleCustomGate,
+      gdPracticeGateOpChanged:gdPracticeGateOpChanged,
+      gdPracticeAddSourceTrust:gdPracticeAddSourceTrust,
+      gdPracticeRemoveSourceTrust:gdPracticeRemoveSourceTrust,
+      gdPracticeToggleSourceTrust:gdPracticeToggleSourceTrust,
+      gdPracticeRescanSources:gdPracticeRescanSources,
 	      gdOpenCompareData:openCompareData,
 	      gdRenderPracticeData:renderPracticeData,
 	      gdRenderCompareData:renderCompareData,
