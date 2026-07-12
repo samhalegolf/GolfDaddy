@@ -40,7 +40,14 @@
     smashMax: 1.52,
     launchToleranceDeg: 6,
     dynamicLoftToleranceDeg: 8,
-    spinTolerancePct: 0.35
+    spinTolerancePct: 0.35,
+    // Bag-sync bubble scaling (replaces the retired cross-club verification
+    // gate as the tunable surface): how saved bubbles rescale when bag
+    // numbers change.
+    bagSyncEnabled: 1,
+    bagSyncMinDeltaM: 0.5,
+    bagSyncMinRatio: 0.55,
+    bagSyncMaxRatio: 1.7
   };
 
   function activePlayerScope() {
@@ -666,6 +673,27 @@
     return deleteSelectedPracticeImports(Object.keys(ids), opts);
   }
 
+  // Re-derives plot coordinates from the stored raw metric group with the
+  // CURRENT settings. Import-time plots are only a cache: any admin change to
+  // sim curve / references / confidence floors must move already-imported
+  // shots the next time analyze() runs. Shots without a rawGroup keep their
+  // stored plot.
+  function refreshShotPlot(shot, cfg) {
+    var group = shot && shot.rawGroup;
+    if (!group || typeof group !== 'object') return shot;
+    var carryM = Number.isFinite(Number(shot.carryM)) ? Number(shot.carryM) : metricValue(group, ['carryDistance', 'carry', 'Carry']);
+    var expectedM = Number.isFinite(Number(shot.expectedM)) ? Number(shot.expectedM) : carryM;
+    var offlineM = metricValue(group, ['offline', 'side', 'sideCarry', 'lateral', 'Offline', 'Side']);
+    var plot = resolveShotPlot(group, carryM, expectedM, offlineM, cfg);
+    var baseM = Number.isFinite(Number(expectedM)) && expectedM > 1 ? expectedM : Number.isFinite(Number(carryM)) && carryM > 1 ? carryM : 1;
+    var next = Object.assign({}, shot);
+    next.plot = Object.assign({ baseDistanceM: baseM }, plot);
+    next.lateralM = plot.complete && Number.isFinite(Number(plot.lateralM)) ? plot.lateralM : null;
+    next.normalizedDeg = plot.complete && Number.isFinite(Number(plot.normalizedDeg)) ? plot.normalizedDeg : null;
+    next.confidence = Math.min(metricConfidence(group, ['carryDistance', 'carry', 'Carry']), plot.confidence || 0);
+    return next;
+  }
+
   function exclusionReason(shot, cfg) {
     if (!Number.isFinite(Number(shot.carryM))) return 'missing_carry';
     if (shot.carryM < cfg.minCarryM || shot.carryM > cfg.maxCarryM) return 'carry_out_of_range';
@@ -1026,7 +1054,8 @@
     var store = options && options.store || scopedStore(readStore(), activePlayerScope());
     var accepted = [];
     var rejected = [];
-    (store.shots || []).forEach(function (shot) {
+    var refreshedShots = (store.shots || []).map(function (shot) { return refreshShotPlot(shot, cfg); });
+    refreshedShots.forEach(function (shot) {
       var reason = exclusionReason(shot, cfg);
       if (reason) rejected.push(Object.assign({ rejectReason: reason }, shot));
       else accepted.push(shot);
@@ -1036,7 +1065,7 @@
       return summarizeCluster(club, groups[club], cfg);
     });
     var resultMethod = analyzeResultScaledClusters(accepted, cfg);
-    var deliveryMethod = analyzeDeliveryClusters(store.shots || [], cfg, resultMethod);
+    var deliveryMethod = analyzeDeliveryClusters(refreshedShots, cfg, resultMethod);
     var recommendation = combineMethods(resultMethod, deliveryMethod, cfg);
     return {
       settings: cfg,
