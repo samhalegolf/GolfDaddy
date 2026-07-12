@@ -41021,6 +41021,84 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	    remember("courseData",!!(opts&&opts.replace));
 	    return false;
 	  }
+	  // The practice dots plot in a normalised frame (x: depth vs expected carry,
+	  // y: lateral angle). Bubbles must live in the SAME frame or they land in a
+	  // meaningless spot relative to the dots. These helpers convert bubble
+	  // geometry (absolute carry + lateral metres) into that normalised frame.
+	  function gdPracticeNormalisedClubBaselines(shots){
+	    const byClub={};
+	    (Array.isArray(shots)?shots:[]).forEach(shot=>{
+	      const key=gdShotBubbleOverlayClubKey(shot?.club);
+	      if(!key)return;
+	      const actual=gdPracticeShotActualDistance(shot);
+	      const expected=gdPracticeNormalisedBaselineForShot(shot,actual);
+	      if(!Number.isFinite(expected)||expected<=0)return;
+	      (byClub[key]=byClub[key]||[]).push(expected);
+	    });
+	    const map={};
+	    Object.keys(byClub).forEach(key=>{map[key]=gdShotBubbleMedian(byClub[key]);});
+	    return map;
+	  }
+	  function gdPracticeNormalisedBubbleParts(rows,offsetDeg,baselines){
+	    const scale=gdShotBubbleOverlayScale();
+	    return gdShotBubbleOverlayBubbleParts(rows,offsetDeg).map(bubble=>{
+	      const carry=Number(bubble.centerDistanceM)||Number(bubble.baseDistanceM)||0;
+	      if(!Number.isFinite(carry)||carry<=0)return null;
+	      const key=gdShotBubbleOverlayClubKey(bubble.club||bubble.row?.club);
+	      const baselineRaw=Number(baselines&&baselines[key]);
+	      const baseline=Number.isFinite(baselineRaw)&&baselineRaw>0?baselineRaw:carry;
+	      const lateralRadius=Math.max(1,Number(bubble.lateralRadiusM)||Number(bubble.widthM)/2||1)*scale;
+	      const depthRadius=Math.max(1,Number(bubble.depthRadiusM)||Number(bubble.depthM)/2||1)*scale;
+	      const angle=Number.isFinite(Number(bubble.offsetDeg))?Number(bubble.offsetDeg):Math.atan2(Number(bubble.centerLateralM)||0,carry)*180/Math.PI;
+	      return{
+	        club:bubble.club||bubble.row?.club||"Unknown",
+	        depthM:carry-baseline,
+	        depthRadiusM:depthRadius,
+	        angleDeg:angle,
+	        angleRadiusDeg:Math.max(.4,Math.atan2(lateralRadius,Math.max(1,carry))*180/Math.PI),
+	        tiltDeg:Number(bubble.tiltDeg)||0,
+	        baseDistanceM:Number(bubble.baseDistanceM)||carry
+	      };
+	    }).filter(Boolean);
+	  }
+	  function gdPracticeNormalisedBubbleExtentRows(parts){
+	    const rows=[];
+	    (parts||[]).forEach(part=>{
+	      rows.push({normalisedDepthM:part.depthM-part.depthRadiusM,normalizedDeg:part.angleDeg,hasLateral:true});
+	      rows.push({normalisedDepthM:part.depthM+part.depthRadiusM,normalizedDeg:part.angleDeg,hasLateral:true});
+	      rows.push({normalisedDepthM:part.depthM,normalizedDeg:part.angleDeg-part.angleRadiusDeg,hasLateral:true});
+	      rows.push({normalisedDepthM:part.depthM,normalizedDeg:part.angleDeg+part.angleRadiusDeg,hasLateral:true});
+	    });
+	    return rows;
+	  }
+	  function gdPracticeNormalisedBubbleLayerMarkup(parts,plot,opts={}){
+	    if(!Array.isArray(parts)||!parts.length)return "";
+	    const geo=gdPracticeGraphInternalGeometry(plot);
+	    if(!geo)return "";
+	    const halfWidth=(plot.plotRight-plot.plotLeft)/2;
+	    const halfHeight=(plot.plotBottom-plot.plotTop)/2;
+	    const typeStyle=gdShotBubbleOverlayTypeStyle(opts.source,"practice");
+	    const colour=opts.colour||typeStyle.colour;
+	    const fillOpacity=opts.fillOpacity||typeStyle.fillOpacity;
+	    const strokeOpacity=opts.strokeOpacity||typeStyle.strokeOpacity;
+	    const strokeWidth=opts.strokeWidth||typeStyle.strokeWidth;
+	    const offsetDeg=Number(opts.offsetDeg)||0;
+	    const groupStyle=opts.groupStyle?` style="${gdStatsSvgText(opts.groupStyle)}"`:"";
+	    const groupClass=opts.groupClass||"gdShotBubbleOverlayLayer";
+	    return `<g class="${groupClass}" data-offset-deg="${offsetDeg.toFixed(2)}"${groupStyle}>${parts.map(part=>{
+	      const cx=geo.xForDepth(part.depthM);
+	      const cy=geo.yForAngle(part.angleDeg);
+	      const rx=Math.max(3,(part.depthRadiusM/Math.max(1,plot.depthRange))*halfWidth);
+	      const ry=Math.max(3,(part.angleRadiusDeg/Math.max(.5,plot.angleRange))*halfHeight);
+	      const label=(opts.labelText&&opts.label!==false&&parts.length===1)?(()=>{
+	        const fontSize=Math.max(5.2,Math.min(7.4,ry*.44));
+	        const isMy=String(opts.source||"").toLowerCase()==="my-bubble";
+	        const line=(word,dx,dy,fill)=>`<text x="${(cx+dx).toFixed(1)}" y="${(cy+dy).toFixed(1)}" text-anchor="middle" dominant-baseline="middle" fill="${fill}" font-size="${fontSize.toFixed(1)}" font-weight="950">${gdStatsSvgText(word)}</text>`;
+	        return `<g class="gdPracticeBubbleEmbossLabel" data-source="practice-bubble-label" pointer-events="none" aria-hidden="true">${line(opts.labelText,-.55,-.55,"rgba(0,0,0,.58)")}${line(opts.labelText,.55,.6,isMy?"rgba(255,236,181,.24)":"rgba(160,255,201,.20)")}${line(opts.labelText,0,0,isMy?"rgba(28,17,2,.86)":"rgba(0,14,8,.84)")}</g>`;
+	      })():"";
+	      return `<ellipse class="gdOffsetHubBubble" data-club="${gdStatsSvgText(part.club)}" data-source="${gdStatsSvgText(opts.source||"")}" data-offset-deg="${Number(part.angleDeg).toFixed(2)}" data-base-distance-m="${Number(part.baseDistanceM).toFixed(1)}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" rx="${rx.toFixed(1)}" ry="${ry.toFixed(1)}"${part.tiltDeg?` transform="rotate(${(-part.tiltDeg).toFixed(1)} ${cx.toFixed(1)} ${cy.toFixed(1)})"`:""} fill="${colour}" fill-opacity="${fillOpacity}" stroke="${colour}" stroke-width="${strokeWidth}" stroke-opacity="${strokeOpacity}"/>${label}`;
+	    }).join("")}</g>`;
+	  }
 	  function practiceSvg(analysis){
 	    const shots=gdPracticePlotShots(analysis||{});
 		    if(!shots.length){
@@ -41187,7 +41265,10 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       return `<ellipse class="gdPracticeClusterMarker gdShotChartClubOval practice" data-source="cluster-marker" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" rx="${rx.toFixed(1)}" ry="${ry.toFixed(1)}" fill="rgba(255,210,135,.82)" fill-opacity=".014" stroke="rgba(255,210,135,.82)" stroke-width=".7" stroke-opacity=".46" stroke-dasharray="1 5" stroke-linecap="round" pointer-events="none"/>`;
     }
 	    const normalisedRows=gdPracticeNormalisedPlotRows(shots);
-	    const normalisedPlot=gdPracticeNormalisedPlotLayout(normalisedRows,{plotLeft:38,plotRight:458,plotTop,plotBottom});
+	    const normalisedBaselines=gdPracticeNormalisedClubBaselines(shots);
+	    const myBubbleParts=hubRows.length&&gdPracticeHasBubbleOffset(hubOffset)?gdPracticeNormalisedBubbleParts(hubRows,hubOffset,normalisedBaselines):[];
+	    const practiceBubbleParts=showPracticeLayer?gdPracticeNormalisedBubbleParts(overlayRows,practiceBubbleOffset,normalisedBaselines):[];
+	    const normalisedPlot=gdPracticeNormalisedPlotLayout(normalisedRows.concat(gdPracticeNormalisedBubbleExtentRows(myBubbleParts.concat(practiceBubbleParts))),{plotLeft:38,plotRight:458,plotTop,plotBottom});
 	    const graphOriginBottom=gdPracticeGraphOriginBottom();
 	    const graphTransform=graphOriginBottom?gdPracticeGraphOriginBottomTransform(normalisedPlot):"";
 	    const clubKeySource=normalisedRows.length?normalisedRows:dataRows;
@@ -41203,33 +41284,27 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       return gdShotChartDotSvg(point,{fill:colour,opacity,radius:2.2,shape:"circle",stroke:point.clipped?"rgba(255,255,255,.26)":"",strokeWidth:"1"});
 	    }).join("");
 	    let myBubbleMotionStyle="";
-	    if(adoptionMotionActive&&hubRows.length&&gdPracticeHasBubbleOffset(adoptionMotion.fromOffset)&&gdPracticeHasBubbleOffset(hubOffset)){
-	      const anchor=hubRows[0]||{};
-	      const fromDistance=Number(adoptionMotion.fromDistance)||Number(anchor.actualDistanceM||anchor.baseDistanceM||anchor.expectedDistanceM)||155;
-	      const toDistance=Number(adoptionMotion.toDistance)||Number(anchor.actualDistanceM||anchor.baseDistanceM||anchor.expectedDistanceM)||155;
-	      const fromLateral=gdShotBubbleGpsLateralForOffset(adoptionMotion.fromOffset,fromDistance);
-	      const toLateral=gdShotBubbleGpsLateralForOffset(hubOffset,toDistance);
-	      const xForDistance=distance=>plot.plotLeft+((Number(distance)-plot.minDistance)/plot.distanceRange)*(plot.plotRight-plot.plotLeft);
-	      const yForLateral=lateral=>gdShotChartYForLateral(plot,lateral);
-	      const dx=xForDistance(fromDistance)-xForDistance(toDistance);
-	      const dy=yForLateral(fromLateral)-yForLateral(toLateral);
+	    if(adoptionMotionActive&&myBubbleParts.length&&gdPracticeHasBubbleOffset(adoptionMotion.fromOffset)&&gdPracticeHasBubbleOffset(hubOffset)){
+	      const geo=gdPracticeGraphInternalGeometry(normalisedPlot);
+	      const anchor=myBubbleParts[0];
+	      const toDistance=Number(adoptionMotion.toDistance)||Number(anchor.baseDistanceM)||155;
+	      const fromDistance=Number(adoptionMotion.fromDistance)||toDistance;
+	      const anchorBaseline=(Number(anchor.baseDistanceM)||toDistance)-anchor.depthM;
+	      const dx=geo?geo.xForDepth(fromDistance-anchorBaseline)-geo.xForDepth(anchor.depthM):NaN;
+	      const dy=geo?geo.yForAngle(Number(adoptionMotion.fromOffset)||0)-geo.yForAngle(Number(hubOffset)||0):NaN;
 	      if(Number.isFinite(dx)&&Number.isFinite(dy))myBubbleMotionStyle=`--gd-practice-adopt-x:${dx.toFixed(1)}px;--gd-practice-adopt-y:${dy.toFixed(1)}px;`;
 	    }
 	    const myBubbleKind=String(myBubbleState?.kind||"default");
 	    const myBubbleCombined=myBubbleKind==="pending"||myBubbleKind==="adopted-current"||adoptionMotionActive;
 	    const myBubbleLabel=myBubbleCombined?"My Bubble":String(myBubbleState?.graphLabel||"MY");
-	    const myBubbleLayer=hubRows.length&&gdPracticeHasBubbleOffset(hubOffset)?gdShotBubbleOverlayLayerMarkup([],plot,"practice",{
-	      referenceRows:hubRows,
-	      maxBubbles:hubRows.length,
+	    const myBubbleLayer=myBubbleParts.length?gdPracticeNormalisedBubbleLayerMarkup(myBubbleParts,normalisedPlot,{
 	      offsetDeg:hubOffset,
 	      groupClass:`gdShotBubbleOverlayLayer gdPracticeMyBubbleLayer gdPracticeMyBubbleLayer-${myBubbleKind} gdShotBubbleOverlayLens ${adoptionMotionActive?"gdPracticeMyBubbleAdopting":""}`,
 	      source:"my-bubble",
 	      labelText:myBubbleLabel,
 	      groupStyle:myBubbleMotionStyle
 	    }):"";
-	    const practiceBubbleLayer=showPracticeLayer&&(!myBubbleCombined||adoptionMotionActive)?gdShotBubbleOverlayLayerMarkup([],plot,"practice",{
-	      referenceRows:overlayRows,
-	      maxBubbles:overlayRows.length,
+	    const practiceBubbleLayer=practiceBubbleParts.length&&(!myBubbleCombined||adoptionMotionActive)?gdPracticeNormalisedBubbleLayerMarkup(practiceBubbleParts,normalisedPlot,{
 	      offsetDeg:practiceBubbleOffset,
 	      groupClass:`gdShotBubbleOverlayLayer gdPracticeBubbleProjectionLayer gdShotBubbleOverlayLens ${myBubbleCombined?"gdPracticeBubbleProjectionLayer-combined":""} ${adoptionMotionActive?"gdPracticeBubbleAdoptionGhost":""}`,
 	      source:"practice-bubble-projection",
