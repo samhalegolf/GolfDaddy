@@ -2431,6 +2431,34 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 @keyframes gdPracticeScanPulse{0%{box-shadow:0 0 0 0 rgba(215,176,107,.55)}100%{box-shadow:0 0 0 9px rgba(215,176,107,0)}}
 @keyframes gdPracticeSpin{to{transform:rotate(360deg)}}
 @media(max-width:520px){.gdDataSplit{grid-template-columns:1fr}.gdDataCard{min-height:124px}.gdPracticeActions{grid-template-columns:1fr}}
+/* === Data Hub accordion: three sections expand/squash in place === */
+.gdHubAccordion .gdDataCard{transition:min-height .3s ease,padding .3s ease,opacity .3s ease}
+#dataHubPanel.gdHubSectionExpanded .gdDataSplit{grid-template-columns:1fr}
+#dataHubPanel.gdHubSectionExpanded .gdDataCard{min-height:0;padding:11px 14px;flex-direction:row;align-items:center;gap:10px;justify-content:flex-start;cursor:pointer}
+#dataHubPanel.gdHubSectionExpanded .gdDataCard .ico{font-size:18px}
+#dataHubPanel.gdHubSectionExpanded .gdDataCard span,#dataHubPanel.gdHubSectionExpanded .gdDataCard small{display:none}
+#dataHubPanel.gdHubSectionExpanded .gdDataCard strong{font-size:15px}
+#dataHubPanel.gdHubSectionExpanded .gdDataCard:not(.active){opacity:.6}
+#dataHubPanel.gdHubSectionExpanded .gdDataCard.active{opacity:1;border-color:rgba(98,210,255,.34);box-shadow:0 18px 44px rgba(0,0,0,.30),inset 0 0 0 1px rgba(98,210,255,.10)}
+.gdHubSectionBody{grid-column:1/-1;overflow:hidden;max-height:0;opacity:0;transition:max-height .36s ease,opacity .3s ease}
+.gdHubSectionBody[hidden]{display:none}
+.gdHubSectionBody.gdHubSectionOpen{max-height:12000px;opacity:1;overflow:visible}
+.gdCompareSourceSwitch{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0 2px}
+.gdCompareSourceSwitch button{border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:10px;font-weight:900;font-size:12px;background:rgba(255,255,255,.06);color:rgba(255,255,255,.72)}
+.gdCompareSourceSwitch button.active{background:linear-gradient(180deg,rgba(33,59,73,.92),rgba(8,18,17,.98));border-color:rgba(98,210,255,.34);color:#fff}
+.gdComparePracticeProjector{margin-top:10px}
+.gdComparePracticeProjector[hidden]{display:none}
+/* Embedded course/practice panels living inside the hub accordion */
+.gdHubEmbedded{position:static !important;inset:auto !important;display:none;padding:0 !important;background:transparent !important;overflow:visible !important;z-index:auto !important}
+.gdHubEmbedded.open{display:block}
+.gdHubEmbedded>.sheet,.gdHubEmbedded>.moduleSheet{max-width:none;margin:0;display:block !important}
+.gdHubEmbedded .sheetHeader{display:none}
+.gdHubEmbedded [data-gd-offset-hub]{display:none}
+.gdCourseLibraryClub{border:0;margin:0}
+.gdCourseLibraryClub summary{list-style:none;cursor:pointer}
+.gdCourseLibraryClub summary::-webkit-details-marker{display:none}
+.gdCourseLibraryClubRows{display:grid;gap:4px;margin:4px 0 8px;padding-left:6px}
+.gdClubShotRow.filtered{opacity:.5}
     #dataHubPanel .moduleSheet{max-width:760px}
     #dataHubPanel:not(.gdCompareExpanded) .gdDataSplit{grid-template-columns:repeat(3,minmax(0,1fr));align-items:stretch}
     #dataHubPanel:not(.gdCompareExpanded) .gdDataCard{min-height:136px;padding:14px}
@@ -5739,13 +5767,17 @@ body[data-gd-permission="admin"] #gdV62Home .gdHomeAdminSettings{display:inline-
 </div>
 </div>
 </details>
-<div class="gdDataSplit">
+<div class="gdDataSplit gdHubAccordion">
 <div class="gdDataCard primary" id="gdCourseDataOpenBtn" role="button" tabindex="0" onclick="gdDataHubCourseAction()"><div class="ico">⛳</div><div><strong>Course Data</strong><span>GPS and scorecard shot data filed under a course label. This is the on-course truth layer.</span></div></div>
+<div class="gdHubSectionBody" id="gdHubCourseHost" hidden></div>
 <button class="gdDataCard compare" id="gdCompareDataOpenBtn" type="button" onclick="gdOpenCompareData()"><div class="ico">↔</div><div><strong>Comparison</strong><span>View Course and Practice recommendation values together. Jump back to each source to change the evidence.</span></div></button>
-<div class="gdHubCompareExpansion" id="gdHubCompareExpansion" hidden>
+<div class="gdHubCompareExpansion gdHubSectionBody" id="gdHubCompareExpansion" hidden>
+<div class="gdCompareSourceSwitch" id="gdCompareSourceSwitch"><button type="button" data-src="course" onclick="return gdCompareSetSource('course')">Course Library</button><button type="button" data-src="practice" onclick="return gdCompareSetSource('practice')">Practice Library</button></div>
 <div class="gdCompareVisual" id="gdHubCompareDataVisual"></div>
+<div class="gdComparePracticeProjector" id="gdComparePracticeProjector" hidden></div>
 </div>
 <div class="gdDataCard" id="gdPracticeDataOpenBtn" role="button" tabindex="0" onclick="gdDataHubPracticeAction()"><div class="ico">◉</div><div><strong>Practice Data</strong><span>Launch monitor captures and Clarity Pattern Finder evidence. Kept separate from course rounds.</span></div></div>
+<div class="gdHubSectionBody" id="gdHubPracticeHost" hidden></div>
 </div>
 </div></div>
 <div class="modulePanel gdShotDataPanel" id="practiceDataPanel"><div class="moduleSheet">
@@ -29665,22 +29697,34 @@ function gdStatsVisualSummary(analysis, filteredRecords, filteredAnalysis){
       ${gdStatsView.colourMode==="time"?timeKeySvg:clubKeySvg}
     </svg>${gdShotBubbleOverlayButton("course")}`;
 }
+// Course Shot Library: same organisation as the practice Clarity Shot
+// Library - a shell with club sections that expand to show individual shots
+// (with their round/hole provenance), instead of the old flat filter list.
+const gdCourseLibraryOpenClubs={};
+function gdCourseLibraryToggleClub(el){
+  const club=el?.dataset?.gdCourseClub;
+  if(club)gdCourseLibraryOpenClubs[club]=!!el.open;
+}
+function gdCourseShotDateLabel(record){
+  const t=safe(()=>typeof gdStatsShotTime==="function"?gdStatsShotTime(record):Date.parse(record?.at||record?.time||record?.timestamp||0),0)||0;
+  if(!t)return "";
+  try{return new Date(t).toLocaleDateString(undefined,{day:"numeric",month:"short"});}catch(e){return "";}
+}
 function gdRenderCourseClubGroups(list, records, filteredAnalysis, cfg){
-  const selected=gdStatsView.club||"all";
   const rows=records||[];
+  const bubbleValue=safe(()=>gdCourseBubbleValueLabel(filteredAnalysis,filteredAnalysis,rows),"-");
   if(!rows.length){
-    const empty=document.createElement("div");
-    empty.className="bagRow gdCourseLibraryEmpty";
-    empty.innerHTML=`<span>Course shots will appear here after paired GPS results.</span><strong>0</strong>`;
-    list.appendChild(empty);
+    list.innerHTML=gdShotDataLibraryShellHTML({
+      kind:"course",
+      title:"Course Shot Library",
+      bubbleLabel:"Course Bubble",
+      bubbleValue,
+      count:0,
+      bodyHTML:`<div class="gdPracticeEvidenceHead"><div><strong>Course Shot Library</strong><span>Paired GPS course shots will appear here, filed by club.</span></div></div>`,
+      dropdown:true,
+      open:gdShotDataLibraryIsOpen("course")
+    });
     return;
-  }
-  if(selected!=="all"){
-    const all=document.createElement("div");
-    all.className="bagRow gdClubGroupRow";
-    all.onclick=()=>gdStatsSelectClub("all");
-    all.innerHTML=`<span>Show all clubs</span><strong>All</strong>`;
-    list.appendChild(all);
   }
   const grouped={};
   rows.forEach(record=>{
@@ -29692,26 +29736,30 @@ function gdRenderCourseClubGroups(list, records, filteredAnalysis, cfg){
   (filteredAnalysis?.bubbleFit||[]).forEach(item=>{fitsByClub[item.club]=item;});
   const clustersByClub={};
   (filteredAnalysis?.clusterHunter?.byClub||[]).forEach(item=>{clustersByClub[item.club]=item;});
-  Object.keys(grouped).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})).forEach(club=>{
-    const clubRows=grouped[club];
+  const clubs=Object.keys(grouped).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
+  const sections=clubs.map((club,index)=>{
+    const clubRows=grouped[club].slice().sort((a,b)=>gdStatsShotTime(b)-gdStatsShotTime(a));
     const fit=fitsByClub[club]||{};
     const cluster=clustersByClub[club]||{};
     const counted=clubRows.filter(row=>row.counted).length;
     const offset=Number.isFinite(Number(cluster.meanDeg))?cluster.meanDeg:Number(fit.resultBubble?.normalizedDeg||0);
-    const row=document.createElement("div");
-    row.className=`bagRow gdClubGroupRow ${selected===club?"active":""}`;
-    row.onclick=()=>gdStatsSelectClub(club);
-    row.innerHTML=`<span>${gdEscapeHTML(club)} · ${counted}/${clubRows.length} counted${fit.shots?` · ${Math.round(fit.consistencyPct||gdStatsConsistencyPct)}% fit`:""}</span><strong>${gdOffsetLabel(offset||0)}</strong>`;
-    list.appendChild(row);
+    const open=gdCourseLibraryOpenClubs[club]!==undefined?!!gdCourseLibraryOpenClubs[club]:index===0;
+    const shotRows=clubRows.map(record=>{
+      const meta=[gdCourseShotDateLabel(record),record.holeId||record.roundId||""].filter(Boolean).join(" · ");
+      return `<div class="bagRow gdClubShotRow ${record.counted?"":"filtered"}"><span>${Number(record.actualDistanceM||0).toFixed(0)}m · ${record.counted?"counted":"filtered"}${meta?` · ${gdEscapeHTML(meta)}`:""}</span><strong>${gdOffsetLabel(record.normalizedDeg||0)}</strong></div>`;
+    }).join("");
+    return `<details class="gdCourseLibraryClub" data-gd-course-club="${gdEscapeHTML(club)}" ${open?"open":""} ontoggle="gdCourseLibraryToggleClub(this)"><summary class="bagRow gdClubGroupRow"><span>${gdEscapeHTML(club)} · ${counted}/${clubRows.length} counted${fit.shots?` · ${Math.round(fit.consistencyPct||gdStatsConsistencyPct)}% fit`:""}</span><strong>${gdOffsetLabel(offset||0)}</strong></summary><div class="gdCourseLibraryClubRows">${shotRows}</div></details>`;
+  }).join("");
+  list.innerHTML=gdShotDataLibraryShellHTML({
+    kind:"course",
+    title:"Course Shot Library",
+    bubbleLabel:"Course Bubble",
+    bubbleValue,
+    count:rows.length,
+    bodyHTML:sections,
+    dropdown:true,
+    open:gdShotDataLibraryIsOpen("course")
   });
-  if(selected!=="all"){
-    rows.slice().sort((a,b)=>gdStatsShotTime(b)-gdStatsShotTime(a)).forEach(record=>{
-      const row=document.createElement("div");
-      row.className="bagRow gdClubShotRow";
-      row.innerHTML=`<span>${gdEscapeHTML(record.club)} · ${Number(record.actualDistanceM||0).toFixed(0)}m · ${record.counted?"counted":"filtered"}</span><strong>${gdOffsetLabel(record.normalizedDeg||0)}</strong>`;
-      list.appendChild(row);
-    });
-  }
 }
 function gdRenderStatsAnalysis(list){
   try{
@@ -38813,10 +38861,20 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	  function gdRenderComparePracticeProjector(ctx){
     const root=byId("gdComparePracticeProjector");
     if(!root)return false;
-    root.hidden=true;
-    root.classList.remove("waiting");
-    root.innerHTML="";
-    return false;
+    const open=gdDataHubCompareOpen&&!!byId("dataHubPanel")?.classList.contains("open");
+    if(!open||!ctx){
+      root.hidden=true;
+      root.classList.remove("waiting");
+      root.innerHTML="";
+      return false;
+    }
+    // The adopt controls in the comparison are the PRACTICE ones (Generate /
+    // Adopt Bubble + bag suggestions) - same maths and handlers as the
+    // practice screen. The course-only view intentionally has no adopt dock.
+    const analysis=ctx.practiceAnalysis||safe(()=>typeof gdPracticeDisplayAnalysis==="function"?gdPracticeDisplayAnalysis():null,null);
+    root.hidden=false;
+    root.innerHTML=`<div class="gdCompareAdoptDock">${gdPracticeProjectionControlsHTML(analysis)}</div>`;
+    return true;
   }
   function gdPracticeBubbleMethod(analysis){
     const method=analysis?.methods?.resultScaledCluster||null;
@@ -40124,7 +40182,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	    const courseSource=ctx.courseBubble||null;
 	    const practiceSource=ctx.practiceBubble||null;
 	    const items=[
-		      {kind:"playing",label:"Playing Bubble",offset:Number(ctx.current),source:currentSource,stroke:"#f4f8f3",fillOpacity:".10",strokeOpacity:".78"},
+		      {kind:"playing",label:"My Bubble",offset:Number(ctx.current),source:currentSource,stroke:"#f4f8f3",fillOpacity:".10",strokeOpacity:".78"},
 		      {kind:"course",label:"Course Bubble",offset:Number(ctx.course),source:courseSource,stroke:"#37f28d",fillOpacity:".13",strokeOpacity:".84"},
 		      {kind:"practice",label:"Practice Bubble",offset:Number(ctx.practice),source:practiceSource,stroke:"#62d2ff",fillOpacity:".13",strokeOpacity:".84"}
 		    ];
@@ -40145,13 +40203,60 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	    const bubbleSvg=items.map(item=>gdCompareBubbleSvg(item,plot,club)).join("");
 	    const options=gdCompareClubOptions(club,ctx);
 	    const select=options?`<div class="gdCompareClubPick" data-gd-card-control><span>Club</span><select aria-label="Comparison bubble club" onchange="gdCompareSetClub(this.value)">${options}</select></div>`:"";
-	    return `${select}<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Playing, Course and Practice bubble comparison">
+	    return `${select}<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="My Bubble, Course and Practice bubble comparison">
 	      ${gdShotChartBackdropSvg(plot,gdShotDataGraphTitle("Comparison"))}
 	      ${bubbleSvg}
 	    </svg>`;
 	  }
   let gdCompareExpandedSource="practice";
   let gdDataHubCompareOpen=false;
+  // === Data Hub accordion ===
+  // The hub owns three sections: course / compare / practice. Course and
+  // Practice are the original module panels physically embedded as section
+  // bodies (all their ids, classes and render functions keep working).
+  let gdDataHubActiveSection=null;
+  const GD_HUB_SECTIONS={
+    course:{host:"gdHubCourseHost",panel:"statsPanel",btn:"gdCourseDataOpenBtn"},
+    compare:{host:"gdHubCompareExpansion",panel:"",btn:"gdCompareDataOpenBtn"},
+    practice:{host:"gdHubPracticeHost",panel:"practiceDataPanel",btn:"gdPracticeDataOpenBtn"}
+  };
+  function gdInitDataHubAccordion(){
+    const courseHost=byId("gdHubCourseHost");
+    const practiceHost=byId("gdHubPracticeHost");
+    const stats=byId("statsPanel");
+    const practice=byId("practiceDataPanel");
+    if(courseHost&&stats&&stats.parentElement!==courseHost){stats.classList.add("gdHubEmbedded");courseHost.appendChild(stats);}
+    if(practiceHost&&practice&&practice.parentElement!==practiceHost){practice.classList.add("gdHubEmbedded");practiceHost.appendChild(practice);}
+  }
+  function gdHubSetSection(section,opts={}){
+    gdInitDataHubAccordion();
+    const requested=GD_HUB_SECTIONS[section]?section:null;
+    const next=(gdDataHubActiveSection===requested&&!opts.force)?null:requested;
+    gdDataHubActiveSection=next;
+    gdDataHubCompareOpen=next==="compare";
+    Object.keys(GD_HUB_SECTIONS).forEach(key=>{
+      const def=GD_HUB_SECTIONS[key];
+      const host=byId(def.host);
+      const active=key===next;
+      host?.toggleAttribute("hidden",!active);
+      host?.classList.toggle("gdHubSectionOpen",active);
+      if(def.panel)byId(def.panel)?.classList.toggle("open",active);
+    });
+    gdRenderDataHubCards();
+    if(next==="course"){
+      document.body.classList.add("gdShotDataOpen");
+      safe(()=>typeof renderStats==="function"&&renderStats());
+      safe(()=>typeof gdRenderCourseDataSurfaceFallback==="function"&&gdRenderCourseDataSurfaceFallback());
+    }else if(next==="practice"){
+      safe(()=>gdPracticeSyncBubbleSourcesToBag({skipRender:true}));
+      safe(()=>typeof renderPracticeData==="function"&&renderPracticeData());
+    }else if(next==="compare"){
+      gdSyncDataHubCompare();
+      safe(()=>typeof renderCompareData==="function"&&renderCompareData());
+    }
+    if(next!=="compare")gdRenderComparePracticeProjector(null);
+    return false;
+  }
   const gdDataHubCardCopy={
     course:`<div class="ico">⛳</div><div><strong>Course Data</strong><span>GPS and scorecard shot data filed under a course label. This is the on-course truth layer.</span></div>`,
     practice:`<div class="ico">◉</div><div><strong>Practice Data</strong><span>Launch monitor captures and Clarity Pattern Finder evidence. Kept separate from course rounds.</span></div>`,
@@ -40159,49 +40264,33 @@ body.gdAuthLocked #gdProfileV67 .topbar{
   };
   function gdCompareSetSource(source){
     gdCompareExpandedSource=source==="course"?"course":"practice";
+    if(gdDataHubActiveSection!=="compare")return gdHubSetSection("compare",{force:true});
     gdDataHubCompareOpen=true;
     gdSyncDataHubCompare();
     renderCompareData();
+    return false;
   }
   function gdRenderDataHubCards(){
-    const courseBtn=byId("gdCourseDataOpenBtn");
-    const practiceBtn=byId("gdPracticeDataOpenBtn");
-    const compareBtn=byId("gdCompareDataOpenBtn");
-    if(!courseBtn||!practiceBtn)return;
-    const expanded=!!gdDataHubCompareOpen&&!!byId("dataHubPanel")?.classList.contains("open");
     const panel=byId("dataHubPanel");
-    panel?.classList.toggle("gdCompareExpanded",expanded);
-    panel?.classList.toggle("gdCompareSourceCourse",expanded&&gdCompareExpandedSource==="course");
-    panel?.classList.toggle("gdCompareSourcePractice",expanded&&gdCompareExpandedSource!=="course");
-    byId("gdHubCompareExpansion")?.toggleAttribute("hidden",!expanded);
-    compareBtn?.classList.toggle("active",expanded);
-    compareBtn?.classList.toggle("title",expanded);
-    if(compareBtn){
-      compareBtn.setAttribute("aria-disabled",expanded?"true":"false");
-      compareBtn.innerHTML=expanded?`<div class="ico">↔</div><div><strong>Comparison</strong><span>Course and Practice evidence share this visual space.</span></div>`:gdDataHubCardCopy.compare;
-    }
-    [courseBtn,practiceBtn].forEach(btn=>btn.classList.toggle("widget",expanded));
-    courseBtn.classList.toggle("active",expanded&&gdCompareExpandedSource==="course");
-    practiceBtn.classList.toggle("active",expanded&&gdCompareExpandedSource==="practice");
-    if(!expanded){
-      courseBtn.innerHTML=gdDataHubCardCopy.course;
-      practiceBtn.innerHTML=gdDataHubCardCopy.practice;
-      return;
-    }
-    const ctx=gdComparisonContext();
-    const practiceAnalysis=ctx.practiceAnalysis||{};
-    const practiceTotals=practiceAnalysis.totals||{};
-    const practiceRec=practiceAnalysis.recommendation||{};
-    const practiceEvidence=Array.isArray(practiceRec.evidence)?practiceRec.evidence:[];
-    const hasPracticeOffset=!!practiceRec.showToUser&&practiceEvidence.includes("result_scaled_cluster")&&Number.isFinite(Number(practiceRec.offsetDeg));
-    const practicePoints=gdComparePracticePoints(ctx);
-    const practiceTotal=practicePoints.length||Number(practiceTotals.rawShots||0);
-    const courseOpen=gdCompareExpandedSource==="course";
-    const practiceOpen=gdCompareExpandedSource==="practice";
-    courseBtn.dataset.gdCompareOffset="";
-    practiceBtn.dataset.gdCompareOffset="";
-    courseBtn.innerHTML=gdCompareSourceTab("course","Course Library","",courseOpen);
-	    practiceBtn.innerHTML=gdCompareSourceTab("practice","Practice Library","",practiceOpen);
+    const active=gdDataHubActiveSection;
+    const expanded=!!active&&!!panel?.classList.contains("open");
+    const compareExpanded=expanded&&active==="compare";
+    panel?.classList.toggle("gdHubSectionExpanded",expanded);
+    panel?.classList.toggle("gdCompareExpanded",compareExpanded);
+    panel?.classList.toggle("gdCompareSourceCourse",compareExpanded&&gdCompareExpandedSource==="course");
+    panel?.classList.toggle("gdCompareSourcePractice",compareExpanded&&gdCompareExpandedSource!=="course");
+    Object.keys(GD_HUB_SECTIONS).forEach(key=>{
+      const btn=byId(GD_HUB_SECTIONS[key].btn);
+      if(!btn)return;
+      btn.classList.toggle("active",expanded&&key===active);
+      btn.classList.remove("widget","title");
+      btn.setAttribute("aria-expanded",expanded&&key===active?"true":"false");
+      btn.innerHTML=gdDataHubCardCopy[key];
+    });
+    const sourceSwitch=byId("gdCompareSourceSwitch");
+    sourceSwitch?.querySelectorAll("button").forEach(btn=>{
+      btn.classList.toggle("active",btn.dataset.src===gdCompareExpandedSource);
+    });
   }
   function gdSyncDataHubCompare(){
     const expanded=!!gdDataHubCompareOpen&&!!byId("dataHubPanel")?.classList.contains("open");
@@ -40216,18 +40305,17 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     }
   }
   function gdCloseDataHubCompare(){
+    if(gdDataHubActiveSection==="compare")gdHubSetSection(null);
     gdDataHubCompareOpen=false;
     gdSyncDataHubCompare();
     renderDataHubStatus();
     return false;
   }
   function gdDataHubCourseAction(){
-    if(gdDataHubCompareOpen&&byId("dataHubPanel")?.classList.contains("open"))return gdCompareSetSource("course");
-    return openCourseData();
+    return gdHubSetSection("course");
   }
   function gdDataHubPracticeAction(){
-    if(gdDataHubCompareOpen&&byId("dataHubPanel")?.classList.contains("open"))return gdCompareSetSource("practice");
-    return openPracticeData();
+    return gdHubSetSection("practice");
   }
   function gdCompareSourceTab(source,title,control,active=false){
     const openButton=`<button class="gdCompareSourceOpen" data-gd-card-control type="button" onclick="return gdOpenCompareSourcePage('${source}',event)">Open</button>`;
@@ -40238,9 +40326,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     event?.preventDefault?.();
     event?.stopPropagation?.();
     event?.stopImmediatePropagation?.();
-    gdDataHubCompareOpen=false;
-    if(source==="course")return openCourseData({replace:true});
-    return openPracticeData({replace:true});
+    return gdHubSetSection(source==="course"?"course":"practice",{force:true});
   }
   function gdCompareCourseCompact(){
     const ctx=gdComparisonContext();
@@ -40903,15 +40989,70 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     }
     if(!opts.skipShotRender&&typeof renderShot==="function")renderShot();
   }
+  // Course data gates mirror the practice admin layout: sectioned sliders
+  // (same CSS classes as the practice tolerance panel) instead of one flat
+  // "Cluster settings" grid.
+  const gdCourseToleranceSections=[
+    {label:"Course Bubble",meta:"Single cluster",fields:[
+      "statsCluster.minClusterShots",
+      "statsCluster.maxClusterStdDeg",
+      "statsCluster.maxClusterRangeDeg",
+      "statsCluster.viableDegreeAbs",
+      "statsCluster.alignmentDegreeAbs",
+      "statsCluster.minSuggestionClubs"
+    ]},
+    {label:"Consistency",meta:"Fit slider",fields:[
+      "statsCluster.consistencyMinPct",
+      "statsCluster.consistencyMaxPct",
+      "statsCluster.consistencyDefaultPct"
+    ]},
+    {label:"Intake gates",meta:"Before cluster",fields:[
+      "statsCluster.distanceWindowPct",
+      "statsCluster.distanceWindowMinM",
+      "statsCluster.distanceWindowMaxM"
+    ]}
+  ];
+  const gdCourseToleranceCompactLabels={
+    "statsCluster.minClusterShots":"Min shots",
+    "statsCluster.maxClusterStdDeg":"Spread",
+    "statsCluster.maxClusterRangeDeg":"Range",
+    "statsCluster.viableDegreeAbs":"Viable deg",
+    "statsCluster.alignmentDegreeAbs":"Align deg",
+    "statsCluster.minSuggestionClubs":"Suggest clubs",
+    "statsCluster.consistencyMinPct":"Slider min",
+    "statsCluster.consistencyMaxPct":"Slider max",
+    "statsCluster.consistencyDefaultPct":"Default fit",
+    "statsCluster.distanceWindowPct":"Miss vs bag %",
+    "statsCluster.distanceWindowMinM":"Miss floor",
+    "statsCluster.distanceWindowMaxM":"Miss cap"
+  };
+  const gdCourseToleranceCompactHelp={
+    "statsCluster.minClusterShots":"Fewest counted course shots before a cluster can speak.",
+    "statsCluster.maxClusterStdDeg":"Maximum standard deviation allowed in the course cluster.",
+    "statsCluster.maxClusterRangeDeg":"Maximum left/right angle range allowed in the course cluster.",
+    "statsCluster.viableDegreeAbs":"Offset limit for a cluster to become a Course Bubble candidate.",
+    "statsCluster.alignmentDegreeAbs":"Beyond this, a strong cluster is flagged as an alignment signal.",
+    "statsCluster.minSuggestionClubs":"Clubs needed before profile suggestions are made.",
+    "statsCluster.consistencyMinPct":"Lowest selectable containment setting.",
+    "statsCluster.consistencyMaxPct":"Highest selectable containment setting.",
+    "statsCluster.consistencyDefaultPct":"Default containment for Shot Data fit checks.",
+    "statsCluster.distanceWindowPct":"Max distance miss as a % of the club's bag number. Not absolute distance - deviation from the expected carry.",
+    "statsCluster.distanceWindowMinM":"Smallest allowed miss-vs-bag window (protects short clubs).",
+    "statsCluster.distanceWindowMaxM":"Largest allowed miss-vs-bag window (caps the % for long clubs)."
+  };
   function gdRenderCourseDataTuningHTML(){
     const canEdit=gdCourseDataAdminCanManage();
-    const panel=(title,fields,sub="Admin")=>`<div class="gdDataTuningPanel ${canEdit?"":"locked"}"><div class="gdDataTuningHead"><strong>${title}</strong><span>${canEdit?sub:"Locked"}</span></div><div class="gdDataTuningGrid">${fields.map(path=>{
+    const rowHTML=path=>{
       const f=DEV_FIELDS[path]||{};
       const value=Number(dev(path));
       const id=`gdCourseTol_${path.replace(/[^a-z0-9]/gi,"_")}`;
-      return `<div class="gdDataTuningRow"><label for="${id}">${gdEscapeHTML(gdCourseDataTuningLabel(path,f.label))}</label><input id="${id}" type="range" min="${f.min}" max="${f.max}" step="${f.step}" value="${Number.isFinite(value)?value:devDefault(path)}" data-course-tuning-path="${path}" ${canEdit?"":"disabled"}><output>${gdDataTuningDisplay(path,value)}</output></div>`;
-    }).join("")}</div></div>`;
-    return `${panel("Cluster settings",gdCourseDataTuningFields)}`;
+      const label=gdCourseToleranceCompactLabels[path]||f.label||path;
+      const help=gdCourseToleranceCompactHelp[path]||f.help||"";
+      return `<div class="gdPracticeTolerance" title="${gdEscapeHTML(help)}"><label for="${id}"><span>${gdEscapeHTML(label)}</span>${help?`<small>${gdEscapeHTML(help)}</small>`:""}</label><input id="${id}" type="range" min="${f.min}" max="${f.max}" step="${f.step}" value="${Number.isFinite(value)?value:devDefault(path)}" data-course-tuning-path="${path}" ${canEdit?"":"disabled"}><output>${gdDataTuningDisplay(path,value)}</output></div>`;
+    };
+    return `<div class="gdPracticeTolerancePanel gdCourseTolerancePanel ${canEdit?"":"locked"}">`+
+      `<div class="gdPracticeToleranceHead"><div><strong>Course Bubble controls</strong></div><div class="gdPracticeToleranceBadge">${canEdit?"Admin":"Locked"}</div></div>`+
+      `<div class="gdPracticeToleranceSections">${gdCourseToleranceSections.map(section=>`<section class="gdPracticeToleranceSection"><div class="gdPracticeToleranceSectionHead"><strong>${gdEscapeHTML(section.label)}</strong><span>${gdEscapeHTML(section.meta||"")}</span></div><div class="gdPracticeToleranceGrid">${section.fields.map(rowHTML).join("")}</div></section>`).join("")}</div></div>`;
   }
   function gdRenderCourseDataUploadHTML(){
     const canEdit=gdCourseDataAdminCanManage();
@@ -41065,19 +41206,19 @@ body.gdAuthLocked #gdProfileV67 .topbar{
   function openDataHub(opts){
     rememberProfileReturn(opts);
     openModulePanel("dataHubPanel","Data","",opts);
+    gdInitDataHubAccordion();
     gdRenderBubbleOffsetHub();
     renderDataHubStatus();
     gdSyncDataHubCompare();
+    gdRenderDataHubCards();
     return false;
   }
 	  function openCourseData(opts){
 	    rememberProfileReturn(opts);
-	    openModulePanel("statsPanel","Course Data","",opts);
+	    openModulePanel("dataHubPanel","Course Data","",opts);
+	    gdHubSetSection("course",{force:true});
 	    gdSetCourseDataTab(opts&&opts.adminTab?"admin":"data",!!(opts&&opts.adminTab));
-	    document.body.classList.add("gdShotDataOpen");
 	    gdRenderBubbleOffsetHub();
-	    safe(()=>typeof renderStats==="function"&&renderStats());
-	    gdRenderCourseDataSurfaceFallback();
 	    setTimeout(gdRenderCourseDataSurfaceFallback,60);
 	    remember("courseData",!!(opts&&opts.replace));
 	    return false;
@@ -42429,21 +42570,17 @@ body.gdAuthLocked #gdProfileV67 .topbar{
     if(!skipTolerances&&gdPracticeAdminIsOpen())gdRenderPracticeToleranceControls();
   }
   function openPracticeData(opts){
-    openModulePanel("practiceDataPanel","Practice Data","",opts);
+    openModulePanel("dataHubPanel","Practice Data","",opts);
+    gdHubSetSection("practice",{force:true});
     gdSetPracticeDataTab(opts&&opts.adminTab?"admin":"data");
-    // Self-heal: re-align any bubble sources frozen at pre-adoption distances
-    // (e.g. distances adopted before source syncing existed).
-    safe(()=>gdPracticeSyncBubbleSourcesToBag({skipRender:true}));
     gdRenderBubbleOffsetHub();
-    renderPracticeData();
     return false;
   }
   function openCompareData(opts){
-    gdDataHubCompareOpen=true;
     openDataHub(opts);
+    gdHubSetSection("compare",{force:true});
     setRouteLabel("Shot Data");
     gdRenderBubbleOffsetHub();
-    renderCompareData();
     return false;
   }
   async function loadPracticeDemo(){
@@ -42725,6 +42862,9 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       gdPracticeSetToleranceMaster:gdPracticeSetToleranceMaster,
       gdDataHubCourseAction:gdDataHubCourseAction,
       gdDataHubPracticeAction:gdDataHubPracticeAction,
+      gdHubSetSection:gdHubSetSection,
+      gdInitDataHubAccordion:gdInitDataHubAccordion,
+      gdCompareSetSource:gdCompareSetSource,
 	      gdOpenCompareData:openCompareData,
 	      gdRenderPracticeData:renderPracticeData,
 	      gdRenderCompareData:renderCompareData,
@@ -42881,9 +43021,9 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       const homeContext=document.body.classList.contains("shell-home")||!!event?.target?.closest?.("#gdV62Home");
       return openProfileStable({fromGps:gpsContext&&!homeContext,fromHome:homeContext||!gpsContext,replace:homeContext});
     });
-    bindDirect("#gdCourseDataOpenBtn",()=>gdDataHubCompareOpen&&byId("dataHubPanel")?.classList.contains("open")?gdCompareSetSource("course"):openCourseData());
-    bindDirect("#gdPracticeDataOpenBtn",()=>gdDataHubCompareOpen&&byId("dataHubPanel")?.classList.contains("open")?gdCompareSetSource("practice"):openPracticeData());
-    bindDirect("#gdCompareDataOpenBtn",()=>openCompareData());
+    bindDirect("#gdCourseDataOpenBtn",()=>gdHubSetSection("course"));
+    bindDirect("#gdPracticeDataOpenBtn",()=>gdHubSetSection("practice"));
+    bindDirect("#gdCompareDataOpenBtn",()=>gdHubSetSection("compare"));
     bindDirect("#gdPracticeAdminTabBtn",()=>gdTogglePracticeAdmin());
     bindDirect("[onclick*='gdBubbleOffsetEdit']",()=>gdBubbleOffsetEdit());
     bindDirect("[onclick*='gdBubbleOffsetSave']",()=>gdBubbleOffsetSave());
@@ -43036,9 +43176,9 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	      }
       if(target.id==="dockBubble"||target.classList.contains("gdBubbleTile")){event.preventDefault();event.stopImmediatePropagation();openBubbleStable();return;}
       if(target.id==="dockGreen"){event.preventDefault();event.stopImmediatePropagation();openWandStable(event);return;}
-      if(target.id==="gdCourseDataOpenBtn"){event.preventDefault();event.stopImmediatePropagation();if(gdDataHubCompareOpen&&byId("dataHubPanel")?.classList.contains("open"))gdCompareSetSource("course");else openCourseData();return;}
-      if(target.id==="gdPracticeDataOpenBtn"){event.preventDefault();event.stopImmediatePropagation();if(gdDataHubCompareOpen&&byId("dataHubPanel")?.classList.contains("open"))gdCompareSetSource("practice");else openPracticeData();return;}
-      if(target.id==="gdCompareDataOpenBtn"){event.preventDefault();event.stopImmediatePropagation();openCompareData();return;}
+      if(target.id==="gdCourseDataOpenBtn"){event.preventDefault();event.stopImmediatePropagation();gdHubSetSection("course");return;}
+      if(target.id==="gdPracticeDataOpenBtn"){event.preventDefault();event.stopImmediatePropagation();gdHubSetSection("practice");return;}
+      if(target.id==="gdCompareDataOpenBtn"){event.preventDefault();event.stopImmediatePropagation();gdHubSetSection("compare");return;}
       if(on.includes("gdBubbleOffsetEdit")){event.preventDefault();event.stopImmediatePropagation();gdBubbleOffsetEdit();return;}
       if(on.includes("gdBubbleOffsetSave")){event.preventDefault();event.stopImmediatePropagation();gdBubbleOffsetSave();return;}
       if(target.classList.contains("gdProfileTile")){
