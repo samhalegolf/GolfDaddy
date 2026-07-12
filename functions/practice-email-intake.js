@@ -20,7 +20,7 @@ const MAX_TEXT_ATTACHMENT_BYTES = 2 * 1024 * 1024;
 
 function cleanDomain(value) {
   const clean = String(value || "").trim().toLowerCase().replace(/^@+/, "").replace(/[^a-z0-9.-]/g, "");
-  return clean && clean.includes(".") ? clean : "practice.claritygolf.systems";
+  return clean && clean.includes(".") ? clean : "claritygolf.app";
 }
 
 function intakeDomain() {
