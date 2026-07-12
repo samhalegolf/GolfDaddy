@@ -22,7 +22,7 @@ exports.handler = async function (event) {
   }
 
   try {
-    const account = await resolveAccount(payload);
+    const account = await resolveAccount(payload, { event, requireAuth: true });
     const customer = await ensureStripeCustomer(account);
     if (!customer || !customer.id) return json(404, { error: "No Stripe customer found for this account" });
 

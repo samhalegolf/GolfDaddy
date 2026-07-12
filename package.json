@@ -6,7 +6,8 @@
   "scripts": {
     "start": "python3 -m http.server 5173",
     "serve": "python3 -m http.server 5173",
-    "build:netlify": "node scripts/clarity-deploy-build.js"
+    "build:netlify": "node scripts/clarity-deploy-build.js",
+    "test:payments": "node dev/payment-rollout-tests.js"
   },
   "codex": {
     "entry": "index.html",
