@@ -4,14 +4,17 @@ create table if not exists public.user_entitlements (
   id uuid primary key default gen_random_uuid(),
   user_id text,
   account_email text,
-  entitlement_type text not null check (entitlement_type in ('day_pass', 'round_pass', 'subscription')),
-  status text not null default 'active' check (status in ('active', 'expired', 'refunded', 'cancelled')),
+  profile_id text,
+  entitlement_type text not null,
+  product_key text,
+  status text not null default 'active',
   starts_at timestamptz not null default now(),
   expires_at timestamptz,
   stripe_customer_id text,
   stripe_checkout_session_id text unique,
   stripe_payment_intent_id text,
   stripe_subscription_id text,
+  usage_count integer not null default 0,
   metadata jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -42,12 +45,14 @@ grant usage on schema public to service_role;
 grant select, insert, update, delete on public.user_entitlements to service_role;
 grant select, insert, update, delete on public.payment_events to service_role;
 
+drop policy if exists "service role can manage user entitlements" on public.user_entitlements;
 create policy "service role can manage user entitlements"
 on public.user_entitlements
 for all
 using (auth.role() = 'service_role')
 with check (auth.role() = 'service_role');
 
+drop policy if exists "service role can manage payment events" on public.payment_events;
 create policy "service role can manage payment events"
 on public.payment_events
 for all
@@ -69,6 +74,7 @@ create table if not exists public.app_accounts (
   password_salt text,
   password_hash text,
   last_login_at timestamptz,
+  stripe_customer_id text,
   metadata jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -119,18 +125,21 @@ grant select, insert, update, delete on public.app_accounts to service_role;
 grant select, insert, update, delete on public.app_profiles to service_role;
 grant select, insert, update, delete on public.app_sync_events to service_role;
 
+drop policy if exists "service role can manage app accounts" on public.app_accounts;
 create policy "service role can manage app accounts"
 on public.app_accounts
 for all
 using (auth.role() = 'service_role')
 with check (auth.role() = 'service_role');
 
+drop policy if exists "service role can manage app profiles" on public.app_profiles;
 create policy "service role can manage app profiles"
 on public.app_profiles
 for all
 using (auth.role() = 'service_role')
 with check (auth.role() = 'service_role');
 
+drop policy if exists "service role can manage app sync events" on public.app_sync_events;
 create policy "service role can manage app sync events"
 on public.app_sync_events
 for all
@@ -158,12 +167,28 @@ alter table if exists public.user_entitlements
   drop constraint if exists user_entitlements_entitlement_type_check;
 
 alter table if exists public.user_entitlements
+  drop constraint if exists user_entitlements_status_check;
+
+alter table if exists public.user_entitlements
   add column if not exists product_key text;
+
+alter table if exists public.user_entitlements
+  add column if not exists profile_id text;
+
+alter table if exists public.user_entitlements
+  add column if not exists usage_count integer not null default 0;
+
+alter table if exists public.app_accounts
+  add column if not exists stripe_customer_id text;
+
+create unique index if not exists app_accounts_stripe_customer_id_unique
+on public.app_accounts (stripe_customer_id)
+where stripe_customer_id is not null;
 
 create table if not exists public.payment_products (
   id uuid primary key default gen_random_uuid(),
   product_key text not null unique,
-  product_kind text not null default 'day_pass' check (product_kind in ('day_pass', 'round_pass', 'membership', 'free_pass')),
+  product_kind text not null default 'month_pass' check (product_kind in ('month_pass', 'day_pass', 'round_pass', 'membership', 'free_pass')),
   name text not null,
   description text not null default '',
   stripe_product_id text,
@@ -179,8 +204,57 @@ create table if not exists public.payment_products (
   updated_at timestamptz not null default now()
 );
 
+alter table if exists public.payment_products
+  drop constraint if exists payment_products_product_kind_check;
+
+alter table if exists public.payment_products
+  add constraint payment_products_product_kind_check
+  check (product_kind in ('month_pass', 'day_pass', 'round_pass', 'membership', 'free_pass'));
+
 create index if not exists payment_products_active_idx on public.payment_products(active, sort_order);
 create index if not exists payment_products_kind_idx on public.payment_products(product_kind);
+
+create table if not exists public.caddie_memberships (
+  id uuid primary key default gen_random_uuid(),
+  user_id text not null unique,
+  account_email text,
+  stripe_customer_id text,
+  stripe_subscription_id text unique,
+  stripe_price_id text,
+  status text not null default 'incomplete',
+  access_until timestamptz,
+  grace_until timestamptz,
+  first_payment_failed_at timestamptz,
+  cancel_at_period_end boolean not null default false,
+  current_period_start timestamptz,
+  current_period_end timestamptz,
+  last_paid_invoice_id text,
+  last_stripe_event_created_at timestamptz,
+  last_synced_at timestamptz,
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists caddie_memberships_customer_idx on public.caddie_memberships(stripe_customer_id);
+create index if not exists caddie_memberships_status_idx on public.caddie_memberships(status);
+create index if not exists caddie_memberships_access_until_idx on public.caddie_memberships(access_until);
+create index if not exists caddie_memberships_grace_until_idx on public.caddie_memberships(grace_until);
+
+create table if not exists public.stripe_webhook_events (
+  id uuid primary key default gen_random_uuid(),
+  stripe_event_id text not null unique,
+  event_type text not null,
+  stripe_created_at timestamptz,
+  processed_at timestamptz,
+  processing_status text not null default 'processing',
+  error_message text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists stripe_webhook_events_status_idx on public.stripe_webhook_events(processing_status, updated_at desc);
+create index if not exists stripe_webhook_events_type_idx on public.stripe_webhook_events(event_type, stripe_created_at desc);
 
 create table if not exists public.payment_admin_events (
   id uuid primary key default gen_random_uuid(),
@@ -195,18 +269,38 @@ create index if not exists payment_admin_events_created_at_idx on public.payment
 
 alter table public.payment_products enable row level security;
 alter table public.payment_admin_events enable row level security;
+alter table public.caddie_memberships enable row level security;
+alter table public.stripe_webhook_events enable row level security;
 
 grant select, insert, update, delete on public.payment_products to service_role;
 grant select, insert, update, delete on public.payment_admin_events to service_role;
+grant select, insert, update, delete on public.caddie_memberships to service_role;
+grant select, insert, update, delete on public.stripe_webhook_events to service_role;
 
+drop policy if exists "service role can manage payment products" on public.payment_products;
 create policy "service role can manage payment products"
 on public.payment_products
 for all
 using (auth.role() = 'service_role')
 with check (auth.role() = 'service_role');
 
+drop policy if exists "service role can manage payment admin events" on public.payment_admin_events;
 create policy "service role can manage payment admin events"
 on public.payment_admin_events
+for all
+using (auth.role() = 'service_role')
+with check (auth.role() = 'service_role');
+
+drop policy if exists "service role can manage caddie memberships" on public.caddie_memberships;
+create policy "service role can manage caddie memberships"
+on public.caddie_memberships
+for all
+using (auth.role() = 'service_role')
+with check (auth.role() = 'service_role');
+
+drop policy if exists "service role can manage stripe webhook events" on public.stripe_webhook_events;
+create policy "service role can manage stripe webhook events"
+on public.stripe_webhook_events
 for all
 using (auth.role() = 'service_role')
 with check (auth.role() = 'service_role');
@@ -223,7 +317,14 @@ insert into public.payment_products (
   colour,
   sort_order
 ) values
-  ('day_pass', 'day_pass', 'Day Pass', 'Paid access for a single day.', 'Day pass', 24, 'one_time', true, 'orange', 10),
-  ('round_pass', 'round_pass', 'Round Pass', 'Paid access for one round/day window.', 'Round pass', 24, 'one_time', true, 'green', 20),
-  ('monthly_membership', 'membership', 'Monthly Membership', 'Recurring membership access.', 'Monthly', 720, 'monthly', false, 'blue', 30)
-on conflict (product_key) do nothing;
+  ('month_pass', 'month_pass', 'One Month Pass', 'One payment for 30 days full access. No automatic renewal.', 'One month', 720, 'one_time', true, 'green', 10),
+  ('monthly_membership', 'membership', 'Monthly Membership', 'Full access with monthly renewal. Cancel anytime.', 'Monthly', 720, 'monthly', false, 'blue', 20)
+on conflict (product_key) do update set
+  product_kind = excluded.product_kind,
+  name = excluded.name,
+  description = excluded.description,
+  duration_hours = excluded.duration_hours,
+  billing_schedule = excluded.billing_schedule,
+  colour = excluded.colour,
+  sort_order = excluded.sort_order,
+  updated_at = now();

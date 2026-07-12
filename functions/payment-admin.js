@@ -1,11 +1,15 @@
 "use strict";
 
 const {
+  MONTHLY_MEMBERSHIP_KEY,
+  MONTH_PASS_KEY,
   email,
   encodeFilter,
   env,
   hasSupabase,
   json,
+  normaliseProductKey,
+  productPriceId,
   supabaseFetch,
   text
 } = require("./payment-utils");
@@ -13,8 +17,8 @@ const { sendSystemAlert } = require("./alert-utils");
 
 const PRODUCT_FIELDS = "id,product_key,product_kind,name,description,stripe_product_id,stripe_price_id,price_label,duration_hours,billing_schedule,active,colour,sort_order,metadata,created_at,updated_at";
 const DEFAULT_PRODUCTS = [
-  { product_key: "day_pass", product_kind: "day_pass", name: "Day Pass", description: "Paid access for a single day.", price_label: "Day pass", duration_hours: 24, billing_schedule: "one_time", active: true, colour: "orange", sort_order: 10 },
-  { product_key: "round_pass", product_kind: "round_pass", name: "Round Pass", description: "Paid access for one round/day window.", price_label: "Round pass", duration_hours: 24, billing_schedule: "one_time", active: true, colour: "green", sort_order: 20 }
+  { product_key: MONTH_PASS_KEY, product_kind: "month_pass", name: "One Month Pass", description: "One payment for 30 days full access. No automatic renewal.", price_label: "One month", duration_hours: 720, billing_schedule: "one_time", active: true, colour: "green", sort_order: 10 },
+  { product_key: MONTHLY_MEMBERSHIP_KEY, product_kind: "membership", name: "Monthly Membership", description: "Full access with monthly renewal. Cancel anytime.", price_label: "Monthly", duration_hours: 720, billing_schedule: "monthly", active: false, colour: "blue", sort_order: 20 }
 ];
 
 exports.handler = async function (event) {
@@ -82,6 +86,7 @@ async function adminContext(event) {
 async function readSettings(auth) {
   await ensureDefaults();
   const products = await supabaseFetch("payment_products?select=" + PRODUCT_FIELDS + "&order=sort_order.asc,created_at.asc", { method: "GET" });
+  const diagnostics = await paymentDiagnostics(products);
   return json(200, {
     ok: true,
     isAdmin: !!auth.isAdmin,
@@ -89,6 +94,16 @@ async function readSettings(auth) {
     stripeConnected: !!env("STRIPE_SECRET_KEY"),
     webhookConfigured: !!env("STRIPE_WEBHOOK_SECRET"),
     alertEmailConfigured: !!env("CLARITY_ALERT_EMAIL"),
+    monthPassPriceConfigured: diagnostics.monthPassPriceConfigured,
+    monthlyMembershipPriceConfigured: diagnostics.monthlyMembershipPriceConfigured,
+    subscriptionWebhookEventsConfigured: diagnostics.subscriptionWebhookEventsConfigured,
+    subscriptionWebhookEventsNote: diagnostics.subscriptionWebhookEventsNote,
+    billingPortalConfigured: diagnostics.billingPortalConfigured,
+    billingPortalConfiguredNote: diagnostics.billingPortalConfiguredNote,
+    recentWebhookFailures: diagnostics.recentWebhookFailures,
+    unprocessedWebhookCount: diagnostics.unprocessedWebhookCount,
+    pastDueMembershipCount: diagnostics.pastDueMembershipCount,
+    gracePeriodMembershipCount: diagnostics.gracePeriodMembershipCount,
     products: Array.isArray(products) ? products : [],
     serverManagedSecrets: ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "SUPABASE_SERVICE_ROLE_KEY", "RESEND_API_KEY"]
   });
@@ -114,7 +129,7 @@ function cleanProduct(input) {
   input = input || {};
   const key = text(input.product_key || input.productKey, 80).toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
   const kindRaw = text(input.product_kind || input.productKind || "day_pass", 40).toLowerCase().replace(/[^a-z0-9_]+/g, "_");
-  const allowedKinds = { day_pass: true, round_pass: true, membership: true, free_pass: true };
+  const allowedKinds = { month_pass: true, day_pass: true, round_pass: true, membership: true, free_pass: true };
   const duration = Number(input.duration_hours || input.durationHours || 24);
   if (!key) throw Object.assign(new Error("Product key is required"), { status: 400 });
   return {
@@ -316,4 +331,39 @@ async function logAdmin(auth, action, payload) {
       payload_json: payload || {}
     })
   });
+}
+
+async function paymentDiagnostics(products) {
+  const rows = Array.isArray(products) ? products : [];
+  const monthPass = rows.find(function (row) { return normaliseProductKey(row.product_key) === MONTH_PASS_KEY; });
+  const membership = rows.find(function (row) { return normaliseProductKey(row.product_key) === MONTHLY_MEMBERSHIP_KEY; });
+  const recentWebhookFailures = await safeRows("stripe_webhook_events?select=stripe_event_id,event_type,error_message,updated_at&processing_status=eq.failed&order=updated_at.desc&limit=5");
+  const unprocessed = await safeRows("stripe_webhook_events?select=stripe_event_id&processing_status=neq.processed&limit=500");
+  const pastDue = await safeRows("caddie_memberships?select=user_id,grace_until&status=eq.past_due&limit=500");
+  const now = Date.now();
+  const grace = pastDue.filter(function (row) {
+    const graceUntil = row && row.grace_until ? new Date(row.grace_until).getTime() : NaN;
+    return Number.isFinite(graceUntil) && graceUntil > now;
+  });
+  return {
+    monthPassPriceConfigured: !!productPriceId(monthPass, MONTH_PASS_KEY),
+    monthlyMembershipPriceConfigured: !!productPriceId(membership, MONTHLY_MEMBERSHIP_KEY),
+    subscriptionWebhookEventsConfigured: null,
+    subscriptionWebhookEventsNote: "Verify the production Stripe endpoint event list in the Stripe Dashboard; this app can confirm the webhook secret, not the endpoint's selected events.",
+    billingPortalConfigured: null,
+    billingPortalConfiguredNote: "A portal session is created through Stripe at runtime. Confirm Customer Portal capabilities in the Stripe Dashboard.",
+    recentWebhookFailures,
+    unprocessedWebhookCount: unprocessed.length,
+    pastDueMembershipCount: pastDue.length,
+    gracePeriodMembershipCount: grace.length
+  };
+}
+
+async function safeRows(path) {
+  try {
+    const rows = await supabaseFetch(path, { method: "GET" });
+    return Array.isArray(rows) ? rows : [];
+  } catch (_error) {
+    return [];
+  }
 }

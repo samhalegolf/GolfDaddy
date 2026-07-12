@@ -1,6 +1,6 @@
 "use strict";
 
-const { encodeFilter, hasSupabase, json, text, email, supabaseFetch } = require("./payment-utils");
+const { PAID_PERMISSION_KEYS, encodeFilter, hasSupabase, json, text, email, readPaidAccess, supabaseFetch } = require("./payment-utils");
 
 const PERMISSIONS = [
   "gps_round_start",
@@ -56,6 +56,38 @@ exports.handler = async function (event) {
       permissionKey,
       reasons: ["MISSING_ACCOUNT_ID_OR_EMAIL_OR_PROFILE"]
     });
+  }
+
+  if (PAID_PERMISSION_KEYS[permissionKey]) {
+    try {
+      const paidAccess = await readPaidAccess({ accountId, accountEmail, profileId });
+      if (paidAccess.active) {
+        return json(200, {
+          ok: true,
+          permissionKey,
+          allowed: true,
+          reasons: ["PAID_ACCESS_ACTIVE"],
+          accountId,
+          accountEmail,
+          profileId,
+          entitlement: paidAccess.entitlements && paidAccess.entitlements[0] || null,
+          membership: paidAccess.membership || null,
+          paymentState: paidAccess.paymentState,
+          requestContext: sanitizeContext(requestContext),
+          evaluatedAt: paidAccess.checkedAt
+        });
+      }
+    } catch (_error) {
+      return json(502, {
+        ok: false,
+        allowed: false,
+        permissionKey,
+        reasons: ["PAID_ACCESS_LOOKUP_FAILED"],
+        accountId,
+        profileId,
+        requestContext: sanitizeContext(requestContext)
+      });
+    }
   }
 
   const filters = [];

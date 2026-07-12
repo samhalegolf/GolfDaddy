@@ -4,6 +4,7 @@
   var CACHE_KEY = "clarity:payments:status:v1";
   var SETTINGS_KEY = "clarity:payments:settings:v1";
   var CHECKOUT_ENDPOINT = "/api/create-checkout-session";
+  var PORTAL_ENDPOINT = "/api/create-billing-portal-session";
   var STATUS_ENDPOINT = "/api/payment-entitlement";
   var ADMIN_ENDPOINT = "/api/payment-admin";
   var status = loadStatus();
@@ -64,37 +65,67 @@
 
   function products() {
     var rows = Array.isArray(settings && settings.products) ? settings.products : [];
-    if (rows.length) return rows.filter(function (product) { return product && product.active !== false; });
-    return [
-      { product_key: "day_pass", product_kind: "day_pass", name: "Day Pass", description: "Simple paid access for today.", price_label: "Buy pass", duration_hours: 24, active: true },
-      { product_key: "round_pass", product_kind: "round_pass", name: "Round Pass", description: "Ready for a round-specific entitlement later.", price_label: "Buy pass", duration_hours: 24, active: true }
-    ];
+    var defaults = {
+      month_pass: { product_key: "month_pass", product_kind: "month_pass", name: "One Month Pass", description: "One payment for 30 days full access. No automatic renewal.", price_label: "One month", duration_hours: 720, billing_schedule: "one_time", active: true },
+      monthly_membership: { product_key: "monthly_membership", product_kind: "membership", name: "Monthly Membership", description: "Full access with monthly renewal. Cancel anytime.", price_label: "Monthly", duration_hours: 720, billing_schedule: "monthly", active: false }
+    };
+    rows.forEach(function (product) {
+      var key = String(product && product.product_key || "");
+      if (defaults[key]) defaults[key] = Object.assign({}, defaults[key], product);
+    });
+    return [defaults.month_pass, defaults.monthly_membership];
   }
 
   function bestEntitlement() { var rows = Array.isArray(status && status.entitlements) ? status.entitlements : []; return rows[0] || null; }
+  function monthPassEntitlement() {
+    var rows = Array.isArray(status && status.entitlements) ? status.entitlements : [];
+    return rows.filter(function (row) {
+      return String(row && (row.product_key || row.entitlement_type || row.metadata && row.metadata.product_key) || "") === "month_pass";
+    })[0] || null;
+  }
+  function membership() { return status && status.membership || null; }
   function formatDate(value) { if (!value) return ""; var date = new Date(value); if (Number.isNaN(date.getTime())) return ""; return date.toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }); }
   function durationLabel(hours) { var value = Number(hours); if (!Number.isFinite(value) || value <= 0) return ""; if (value % 720 === 0) return (value / 720) + " month" + (value === 720 ? "" : "s"); if (value % 24 === 0) return (value / 24) + " day" + (value === 24 ? "" : "s"); return value + " hour" + (value === 1 ? "" : "s"); }
+  function daysUntil(value) { var date = value ? new Date(value).getTime() : NaN; if (!Number.isFinite(date)) return null; return Math.ceil((date - Date.now()) / (24 * 60 * 60 * 1000)); }
 
   function hasActiveAccess() {
     var activeAccount = account();
     if (isStaff(activeAccount)) return true;
-    var entitlement = bestEntitlement();
-    if (!status || !status.active || !entitlement) return false;
-    if (entitlement.expires_at && new Date(entitlement.expires_at).getTime() <= Date.now()) return false;
-    return true;
+    return !!(status && status.active);
   }
 
   function accessLabel() {
     var activeAccount = account();
     if (isStaff(activeAccount)) return "Staff access";
-    var entitlement = bestEntitlement();
-    if (hasActiveAccess() && entitlement) {
-      var type = String(entitlement.entitlement_type || entitlement.product_key || "pass").replace(/_/g, " ");
-      var expiry = formatDate(entitlement.expires_at);
-      return expiry ? type + " active until " + expiry : type + " active";
+    var member = membership();
+    var monthPass = monthPassEntitlement();
+    if (status && status.paymentState === "membership_active" && member) return "Membership active";
+    if (status && status.paymentState === "membership_ending" && member) return "Membership cancelled";
+    if (status && status.paymentState === "payment_problem_grace" && member) return "Payment problem";
+    if (status && status.paymentState === "month_pass_active" && monthPass) return "Month Pass active";
+    if (status && status.paymentState === "legacy_access_active") return "Legacy paid access active";
+    if (status && status.paymentState === "paid_access_expired") return "Paid access expired";
+    if (hasActiveAccess()) {
+      var entitlement = bestEntitlement();
+      if (entitlement) return "Paid access active";
     }
     if (status && status.configured === false) return "Payments not configured yet";
-    return "No active pass";
+    return "Free access";
+  }
+
+  function accessDetail() {
+    var member = membership();
+    var monthPass = monthPassEntitlement();
+    if (status && status.connectionIssue) return "Supabase could not confirm payment access. Paid features stay locked until the backend confirms the entitlement.";
+    if (status && status.error) return status.error;
+    if (pending) return "Checking payment status...";
+    if (status && status.paymentState === "membership_active" && member) return "Renews on " + (formatDate(member.current_period_end || member.access_until) || "the next billing date") + ".";
+    if (status && status.paymentState === "membership_ending" && member) return "Access continues until " + (formatDate(member.access_until || member.current_period_end) || "the paid-through date") + ".";
+    if (status && status.paymentState === "payment_problem_grace" && member) return "Grace period active until " + (formatDate(member.grace_until) || "the grace-period end") + ".";
+    if (status && status.paymentState === "month_pass_active" && monthPass) return "Access until " + (formatDate(monthPass.expires_at) || "the pass expiry date") + ".";
+    if (status && status.paymentState === "legacy_access_active") return "A still-valid older pass is providing access.";
+    if (status && status.paymentState === "paid_access_expired") return "Choose how you would like to continue.";
+    return account() ? "Choose a pass or membership to unlock full Clarity Caddie access." : "Sign in before buying access.";
   }
 
   function applyStatus() {
@@ -165,7 +196,7 @@
   async function buy(productKey) {
     var payload = accountPayload();
     if (!payload.accountId && !payload.email) {
-      safe(function () { return window.toast && window.toast("Sign in before buying a pass"); });
+      safe(function () { return window.toast && window.toast("Sign in before buying access"); });
       safe(function () { if (window.gdOpenProfileV67) window.gdOpenProfileV67(); });
       return false;
     }
@@ -173,11 +204,37 @@
     try {
       var response = await fetch(CHECKOUT_ENDPOINT, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.assign({}, payload, { productKey: productKey, passType: productKey })) });
       var body = await response.json().catch(function () { return {}; });
+      if (body && body.existingMembership) {
+        pending = false; render();
+        if (body.action === "manage_membership" || body.action === "complete_payment_setup") return manageMembership();
+        safe(function () { return window.toast && window.toast(body.message || "Membership already exists"); });
+        return false;
+      }
       if (!response.ok || !body.url) throw new Error(body.error || "Could not start checkout");
       window.location.assign(body.url);
     } catch (error) {
       pending = false; render();
       safe(function () { return window.toast && window.toast(error && error.message ? error.message : "Could not start checkout"); });
+    }
+    return false;
+  }
+
+  async function manageMembership() {
+    var payload = accountPayload();
+    if (!payload.accountId && !payload.email) {
+      safe(function () { return window.toast && window.toast("Sign in before managing membership"); });
+      safe(function () { if (window.gdOpenProfileV67) window.gdOpenProfileV67(); });
+      return false;
+    }
+    pending = true; render();
+    try {
+      var response = await fetch(PORTAL_ENDPOINT, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      var body = await response.json().catch(function () { return {}; });
+      if (!response.ok || !body.url) throw new Error(body.error || "Could not open membership management");
+      window.location.assign(body.url);
+    } catch (error) {
+      pending = false; render();
+      safe(function () { return window.toast && window.toast(error && error.message ? error.message : "Could not open membership management"); });
     }
     return false;
   }
@@ -194,7 +251,7 @@
     panel.innerHTML = [
       '<button class="gdPlayerSettingsSubBack" type="button" onclick="gdPlayerSettingsShowSection(&quot;menu&quot;)">‹ Settings</button>',
       "<strong>Payments & Access</strong>",
-      '<span id="clarityPaymentSectionLine">Passes, memberships and Stripe-linked access.</span>',
+      '<span id="clarityPaymentSectionLine">Month Pass, Membership and Stripe-linked access.</span>',
       '<div class="clarityPaymentSection" id="clarityPaymentSection"></div>'
     ].join("");
     sheet.appendChild(panel);
@@ -210,7 +267,7 @@
     row.id = "gdPlayerSettingsPaymentsRow";
     row.type = "button";
     row.onclick = function () { showSection("payments"); };
-    row.innerHTML = '<div><strong>Payments & Access</strong><span id="gdPlayerSettingsPaymentsLine">No active pass</span></div>';
+    row.innerHTML = '<div><strong>Payments & Access</strong><span id="gdPlayerSettingsPaymentsLine">Free access</span></div>';
     if (accountRow) list.insertBefore(row, accountRow); else list.appendChild(row);
   }
 
@@ -232,16 +289,12 @@
     var target = document.getElementById("clarityPaymentSection");
     if (!target || !panel) return;
 
-    var active = hasActiveAccess();
     var activeAccount = account();
-    var statusClass = active ? "active" : status && status.configured === false ? "warning" : "";
-    var detail = active ? "Paid access is active on this account." : activeAccount ? "Buy a pass to unlock paid Clarity Caddie access." : "Sign in before buying a pass.";
-    if (status && status.error) detail = status.error;
-    if (status && status.connectionIssue) detail = "Supabase could not confirm payment access. Paid features stay locked until the backend confirms the entitlement.";
-    if (pending) detail = "Checking payment status...";
+    var statusClass = hasActiveAccess() ? "active" : status && status.configured === false ? "warning" : "";
 
     target.innerHTML = [
-      '<div class="clarityPaymentStatus ' + statusClass + '"><strong>' + escapeHTML(accessLabel()) + '</strong><span>' + escapeHTML(detail) + '</span></div>',
+      '<div class="clarityPaymentStatus ' + statusClass + '"><strong>' + escapeHTML(accessLabel()) + '</strong><span>' + escapeHTML(accessDetail()) + '</span></div>',
+      renderExpiryBanner(),
       renderProductCards(),
       '<div class="clarityPaymentActions"><button class="secondary" type="button" onclick="ClarityPayments.refresh()">Refresh Status</button></div>',
       '<div class="clarityPaymentNote">Card details are handled by Stripe Checkout. Clarity unlocks access only after the Stripe webhook creates a Supabase entitlement.</div>',
@@ -249,10 +302,40 @@
     ].join("");
   }
 
+  function renderExpiryBanner() {
+    var monthPass = monthPassEntitlement();
+    if (status && status.paymentState === "paid_access_expired") {
+      return '<div class="clarityPaymentStatus warning"><strong>Your paid access has ended.</strong><span>Choose how you would like to continue.</span></div>';
+    }
+    if (!monthPass || !monthPass.expires_at || status && status.paymentState !== "month_pass_active") return "";
+    var days = daysUntil(monthPass.expires_at);
+    if (days == null || days > 5 || days < 0) return "";
+    var message = days <= 1 ? "Your Month Pass ends in 1 day." : "Your Month Pass ends in " + days + " days.";
+    return '<div class="clarityPaymentStatus warning"><strong>' + escapeHTML(message) + '</strong><span>Buy another Month Pass or become a Member when you are ready.</span></div>';
+  }
+
   function renderProductCards() {
-    var cards = products().filter(function (product) { return product.product_kind !== "free_pass"; }).map(function (product) {
-      var price = moneyText(product.price_label) || (product.stripe_price_id ? "Buy" : "Not linked yet");
-      return '<button class="clarityPaymentPass" type="button" onclick="ClarityPayments.buy(&quot;' + escapeHTML(product.product_key) + '&quot;)"><strong>' + escapeHTML(product.name) + '</strong><span>' + escapeHTML(product.description || durationLabel(product.duration_hours)) + '</span><small>' + escapeHTML(durationLabel(product.duration_hours)) + '</small><b>' + escapeHTML(price) + '</b></button>';
+    var member = membership();
+    var hasMembership = !!(member && ["active", "trialing", "past_due", "paused", "incomplete"].indexOf(String(member.status || "").toLowerCase()) !== -1);
+    var cards = products().map(function (product) {
+      var key = String(product.product_key || "");
+      var isMembershipProduct = key === "monthly_membership";
+      var priceConfigured = isMembershipProduct ? settings.monthlyMembershipPriceConfigured : settings.monthPassPriceConfigured;
+      var price = moneyText(product.price_label) || (priceConfigured || product.stripe_price_id ? "Configured in Stripe" : "Not linked yet");
+      var disabledReason = "";
+      if (product.active === false) disabledReason = "Not active yet";
+      if (!priceConfigured && !product.stripe_price_id) disabledReason = "Not linked yet";
+      var action = isMembershipProduct ? "Start Membership" : "Buy One Month";
+      var onclick = 'ClarityPayments.buy(&quot;' + escapeHTML(key) + '&quot;)';
+      if (isMembershipProduct && hasMembership) {
+        action = member && String(member.status || "").toLowerCase() === "incomplete" ? "Complete payment setup" : "Manage Membership";
+        onclick = "ClarityPayments.manageMembership()";
+        disabledReason = "";
+      }
+      var lines = isMembershipProduct
+        ? ["Full access", "Renews monthly", "Cancel anytime"]
+        : ["One payment", "30 days full access", "No automatic renewal"];
+      return '<button class="clarityPaymentPass" type="button" ' + (disabledReason ? 'disabled title="' + escapeHTML(disabledReason) + '"' : 'onclick="' + onclick + '"') + '><strong>' + escapeHTML(product.name) + '</strong><span>' + lines.map(escapeHTML).join(" · ") + '</span><small>' + escapeHTML(disabledReason || product.description || durationLabel(product.duration_hours)) + '</small><b>' + escapeHTML(price) + '</b><em>' + escapeHTML(disabledReason || action) + '</em></button>';
     }).join("");
     return '<div class="clarityPaymentPassGrid">' + cards + '</div>';
   }
@@ -266,7 +349,12 @@
       statusPill('Stripe secret', settings.stripeConnected),
       statusPill('Webhook secret', settings.webhookConfigured),
       statusPill('Alert email', settings.alertEmailConfigured),
+      statusPill('Month Pass price', settings.monthPassPriceConfigured),
+      statusPill('Membership price', settings.monthlyMembershipPriceConfigured),
+      statusPill('Subscription events', settings.subscriptionWebhookEventsConfigured),
+      statusPill('Billing Portal', settings.billingPortalConfigured),
       '</div>',
+      renderAdminDiagnostics(),
       settings.settingsError ? '<div class="clarityPaymentStatus warning"><strong>Settings warning</strong><span>' + escapeHTML(settings.settingsError) + '</span></div>' : '',
       '<div class="clarityPaymentAdminActions"><button type="button" onclick="ClarityPayments.reloadAdminSettings()">Reload</button><button type="button" onclick="ClarityPayments.seedDefaults()">Seed defaults</button></div>',
       '<div class="clarityPaymentProductList">' + all.map(renderAdminProduct).join("") + '</div>',
@@ -276,6 +364,26 @@
       renderManualGrantForm(),
       renderResolverTester(),
       '<div class="clarityPaymentNote">Use Stripe Product/Price IDs here, never secret keys. Create the product/price in Stripe, then paste the public-looking <code>price_...</code> ID into this settings page.</div>',
+      '</div>'
+    ].join("");
+  }
+
+  function renderAdminDiagnostics() {
+    var failures = Array.isArray(settings.recentWebhookFailures) ? settings.recentWebhookFailures : [];
+    var failureRows = failures.map(function (row) {
+      return '<div class="gdShotAdminListRow"><strong>' + escapeHTML(row.event_type || "webhook") + '</strong><span>' + escapeHTML(row.stripe_event_id || "") + '</span><em>' + escapeHTML(row.error_message || "") + '</em></div>';
+    }).join("") || '<div class="gdShotAdminEmpty">No recent webhook failures.</div>';
+    return [
+      '<div class="clarityPaymentAdminSection">',
+      '<strong>Payment diagnostics</strong>',
+      '<div class="clarityPaymentDiagGrid">',
+      '<span>Unprocessed webhooks <b>' + escapeHTML(settings.unprocessedWebhookCount || 0) + '</b></span>',
+      '<span>Past-due memberships <b>' + escapeHTML(settings.pastDueMembershipCount || 0) + '</b></span>',
+      '<span>Grace periods <b>' + escapeHTML(settings.gracePeriodMembershipCount || 0) + '</b></span>',
+      '</div>',
+      settings.subscriptionWebhookEventsNote ? '<div class="clarityPaymentNote">' + escapeHTML(settings.subscriptionWebhookEventsNote) + '</div>' : '',
+      settings.billingPortalConfiguredNote ? '<div class="clarityPaymentNote">' + escapeHTML(settings.billingPortalConfiguredNote) + '</div>' : '',
+      '<div class="gdShotAdminList">' + failureRows + '</div>',
       '</div>'
     ].join("");
   }
@@ -358,14 +466,18 @@
     return '<div class="clarityPaymentStatus ' + allowedClass + '"><strong>Resolver result</strong><span>' + escapeHTML(lines.join(" · ")) + '</span><pre style="margin-top:8px;white-space:pre-wrap;color:#d6f4ff;font-size:12px;">' + escapeHTML(JSON.stringify(result, null, 2)) + '</pre></div>';
   }
 
-  function statusPill(label, ok) { return '<div class="clarityPaymentPill ' + (ok ? 'ok' : 'bad') + '"><b>' + escapeHTML(ok ? '✓' : '!') + '</b><span>' + escapeHTML(label) + '</span></div>'; }
+  function statusPill(label, ok) {
+    var state = ok === null || typeof ok === "undefined" ? "unknown" : ok ? "ok" : "bad";
+    var mark = state === "unknown" ? "?" : ok ? "✓" : "!";
+    return '<div class="clarityPaymentPill ' + state + '"><b>' + escapeHTML(mark) + '</b><span>' + escapeHTML(label) + '</span></div>';
+  }
 
   function renderAdminProduct(product) {
     return '<div class="clarityPaymentProductRow"><div><strong>' + escapeHTML(product.name) + '</strong><span>' + escapeHTML(product.product_key + ' · ' + product.product_kind + ' · ' + durationLabel(product.duration_hours)) + '</span><em>' + escapeHTML(product.stripe_price_id || 'No Stripe Price ID') + '</em></div><button type="button" onclick="ClarityPayments.editProduct(&quot;' + escapeHTML(product.product_key) + '&quot;)">Edit</button><button type="button" onclick="ClarityPayments.toggleProduct(&quot;' + escapeHTML(product.product_key) + '&quot;,' + (product.active ? 'false' : 'true') + ')">' + (product.active ? 'Disable' : 'Enable') + '</button></div>';
   }
 
   function renderProductForm() {
-    return '<form class="clarityPaymentForm" onsubmit="return ClarityPayments.saveProductFromForm(this)"><strong>Create / edit pass or membership</strong><input name="product_key" placeholder="product_key e.g. monthly_membership" required><select name="product_kind"><option value="day_pass">Day pass</option><option value="round_pass">Round pass</option><option value="membership">Membership</option><option value="free_pass">Free pass template</option></select><input name="name" placeholder="Name shown in app" required><input name="price_label" placeholder="Price label e.g. $2 / $19 monthly"><input name="stripe_price_id" placeholder="Stripe Price ID e.g. price_..."><input name="stripe_product_id" placeholder="Stripe Product ID e.g. prod_..."><input name="duration_hours" type="number" min="1" step="1" value="24" placeholder="Duration hours"><input name="billing_schedule" placeholder="one_time / monthly / annual"><textarea name="description" placeholder="Description"></textarea><label><input type="checkbox" name="active" checked> Active</label><button type="submit">Save product</button></form>';
+    return '<form class="clarityPaymentForm" onsubmit="return ClarityPayments.saveProductFromForm(this)"><strong>Create / edit pass or membership</strong><input name="product_key" placeholder="month_pass or monthly_membership" required><select name="product_kind"><option value="month_pass">Month Pass</option><option value="membership">Membership</option><option value="free_pass">Free pass template</option><option value="day_pass">Legacy day pass</option><option value="round_pass">Legacy round pass</option></select><input name="name" placeholder="Name shown in app" required><input name="price_label" placeholder="Price label e.g. $29 / month"><input name="stripe_price_id" placeholder="Stripe Price ID e.g. price_..."><input name="stripe_product_id" placeholder="Stripe Product ID e.g. prod_..."><input name="duration_hours" type="number" min="1" step="1" value="720" placeholder="Duration hours"><input name="billing_schedule" placeholder="one_time / monthly"><textarea name="description" placeholder="Description"></textarea><label><input type="checkbox" name="active" checked> Active</label><button type="submit">Save product</button></form>';
   }
 
   function renderFreePassForm() {
@@ -396,11 +508,13 @@
     var payment = params.get("payment"); var sessionId = params.get("session_id");
     if (payment === "success" && sessionId) refresh({ sessionId: sessionId }).then(function () { safe(function () { return window.toast && window.toast(hasActiveAccess() ? "Pass active" : "Payment received. Access is updating."); }); });
     if (payment === "cancelled") safe(function () { return window.toast && window.toast("Checkout cancelled"); });
+    if (payment === "portal_return") refresh({ silent: true }).then(function () { safe(function () { return window.toast && window.toast("Membership settings updated"); }); });
     if (payment) safe(function () { var clean = window.location.pathname + window.location.hash; window.history.replaceState({}, document.title, clean || "/"); });
   }
 
   window.ClarityPayments = {
     buy: buy,
+    manageMembership: manageMembership,
     refresh: refresh,
     render: render,
     status: function () { return status; },
