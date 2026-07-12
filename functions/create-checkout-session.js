@@ -1,17 +1,21 @@
 "use strict";
 
 const {
-  PASS_CONFIG,
+  MONTHLY_MEMBERSHIP_KEY,
+  MONTH_PASS_KEY,
   appUrl,
   email,
+  ensureStripeCustomer,
   env,
   json,
+  membershipBlocksNewCheckout,
   normaliseProductKey,
-  passPriceId,
-  passType,
   paymentProduct,
-  productDurationHours,
   productPriceId,
+  readPaidAccess,
+  resolveAccount,
+  stripeFetch,
+  stripeSubscriptionBlocksNewCheckout,
   text
 } = require("./payment-utils");
 
@@ -19,94 +23,122 @@ exports.handler = async function (event) {
   if (event.httpMethod === "OPTIONS") return json(204, {});
   if (event.httpMethod !== "POST") return json(405, { error: "Method not allowed" });
 
-  if (!env("STRIPE_SECRET_KEY")) {
-    return json(503, { error: "Stripe is not configured yet" });
-  }
+  if (!env("STRIPE_SECRET_KEY")) return json(503, { error: "Stripe is not configured yet" });
 
   let payload;
   try {
     payload = JSON.parse(event.body || "{}");
-  } catch (error) {
+  } catch (_error) {
     return json(400, { error: "Invalid JSON" });
   }
 
-  const requestedKey = normaliseProductKey(payload.productKey || payload.passType || payload.entitlementType || payload.product);
-  if (!requestedKey) return json(400, { error: "Choose a valid pass or membership" });
-
-  let product = null;
-  try { product = await paymentProduct(requestedKey); } catch (_error) { product = null; }
-
-  const legacyType = passType(requestedKey);
-  if (!product && !legacyType) return json(400, { error: "Choose a valid active pass or membership" });
-
-  const price = productPriceId(product, legacyType);
-  if (!price) {
-    const label = product && product.name || PASS_CONFIG[legacyType] && PASS_CONFIG[legacyType].label || "This product";
-    return json(503, { error: label + " is not connected to a Stripe Price ID yet" });
+  const productKey = normaliseProductKey(payload.productKey || payload.passType || payload.entitlementType || payload.product);
+  if (productKey !== MONTH_PASS_KEY && productKey !== MONTHLY_MEMBERSHIP_KEY) {
+    return json(400, { error: "Choose One Month Pass or Monthly Membership" });
   }
-
-  const accountEmail = email(payload.email || payload.accountEmail);
-  const accountId = text(payload.accountId || payload.userId, 120);
-  const accountName = text(payload.name || payload.accountName, 120);
-  if (!accountEmail && !accountId) {
-    return json(400, { error: "Sign in before buying a pass" });
-  }
-
-  const productKey = product && product.product_key || legacyType;
-  const productKind = product && product.product_kind || legacyType;
-  const label = product && product.name || PASS_CONFIG[legacyType] && PASS_CONFIG[legacyType].label || productKey;
-  const durationHours = productDurationHours(product, legacyType);
-  const mode = productKind === "membership" || String(product && product.billing_schedule || "").toLowerCase().indexOf("subscription") !== -1 ? "subscription" : "payment";
-
-  const site = appUrl();
-  const params = new URLSearchParams();
-  params.append("mode", mode);
-  params.append("client_reference_id", accountId || accountEmail);
-  params.append("line_items[0][price]", price);
-  params.append("line_items[0][quantity]", "1");
-  params.append("success_url", site + "/?payment=success&session_id={CHECKOUT_SESSION_ID}");
-  params.append("cancel_url", site + "/?payment=cancelled");
-  params.append("allow_promotion_codes", "true");
-  if (accountEmail) params.append("customer_email", accountEmail);
-  params.append("metadata[app]", "clarity-caddie");
-  params.append("metadata[product_key]", productKey);
-  params.append("metadata[product_kind]", productKind);
-  params.append("metadata[product_name]", label);
-  params.append("metadata[entitlement_type]", productKey);
-  params.append("metadata[duration_hours]", String(durationHours));
-  params.append("metadata[account_id]", accountId);
-  params.append("metadata[account_email]", accountEmail);
-  params.append("metadata[account_name]", accountName);
-  params.append("payment_intent_data[metadata][app]", "clarity-caddie");
-  params.append("payment_intent_data[metadata][product_key]", productKey);
-  params.append("payment_intent_data[metadata][entitlement_type]", productKey);
-  params.append("payment_intent_data[metadata][duration_hours]", String(durationHours));
-  params.append("payment_intent_data[metadata][account_id]", accountId);
-  params.append("payment_intent_data[metadata][account_email]", accountEmail);
 
   try {
-    const response = await fetch("https://api.stripe.com/v1/checkout/sessions", {
-      method: "POST",
-      headers: {
-        Authorization: "Bearer " + env("STRIPE_SECRET_KEY"),
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Stripe-Version": "2026-02-25.clover"
-      },
-      body: params
-    });
-    const session = await response.json().catch(function () { return null; });
-    if (!response.ok || !session || !session.url) {
-      const message = session && session.error && session.error.message || "Could not start checkout";
-      throw new Error(message);
+    const account = await resolveAccount(payload);
+    const product = await paymentProduct(productKey, { activeOnly: false });
+    if (product && product.active === false) {
+      return json(503, { error: (product.name || "This product") + " is not active yet" });
     }
 
+    const price = productPriceId(product, productKey);
+    if (!price) {
+      const label = product && product.name || (productKey === MONTH_PASS_KEY ? "One Month Pass" : "Monthly Membership");
+      return json(503, { error: label + " is not connected to a Stripe Price ID yet" });
+    }
+
+    const customer = await ensureStripeCustomer(account);
+    if (!customer || !customer.id) return json(502, { error: "Could not prepare Stripe Customer" });
+
+    if (productKey === MONTHLY_MEMBERSHIP_KEY) {
+      const existing = await existingMembershipRelationship(account, customer.id, price);
+      if (existing) {
+        return json(200, {
+          ok: true,
+          existingMembership: true,
+          action: String(existing.status || "").toLowerCase() === "incomplete" ? "complete_payment_setup" : "manage_membership",
+          message: String(existing.status || "").toLowerCase() === "incomplete"
+            ? "A membership setup is already in progress."
+            : "This account already has a membership relationship.",
+          subscriptionId: existing.stripe_subscription_id || existing.id || null,
+          status: existing.status || null
+        });
+      }
+    }
+
+    const site = appUrl();
+    const metadata = {
+      app: "clarity-caddie",
+      user_id: text(account.account_id, 120),
+      account_id: text(account.account_id, 120),
+      account_email: email(account.email),
+      account_name: text(account.name, 120),
+      product_key: productKey
+    };
+
+    const params = {
+      mode: productKey === MONTHLY_MEMBERSHIP_KEY ? "subscription" : "payment",
+      customer: customer.id,
+      client_reference_id: account.account_id,
+      "line_items[0][price]": price,
+      "line_items[0][quantity]": "1",
+      success_url: site + "/?payment=success&session_id={CHECKOUT_SESSION_ID}",
+      cancel_url: site + "/?payment=cancelled",
+      allow_promotion_codes: "true"
+    };
+    Object.keys(metadata).forEach(function (key) {
+      params["metadata[" + key + "]"] = metadata[key];
+    });
+
+    if (productKey === MONTH_PASS_KEY) {
+      Object.keys(metadata).forEach(function (key) {
+        params["payment_intent_data[metadata][" + key + "]"] = metadata[key];
+      });
+    } else {
+      Object.keys(metadata).forEach(function (key) {
+        params["subscription_data[metadata][" + key + "]"] = metadata[key];
+      });
+    }
+
+    const session = await stripeFetch("POST", "/v1/checkout/sessions", params);
+    if (!session || !session.url) throw new Error("Could not start checkout");
+
     return json(200, {
+      ok: true,
       id: session.id,
       url: session.url,
-      productKey,
-      passType: productKey
+      productKey
     });
   } catch (error) {
-    return json(502, { error: error && error.message ? error.message : "Could not start checkout" });
+    return json(error.status || 502, { error: error && error.message ? error.message : "Could not start checkout", details: error.body || null });
   }
 };
+
+async function existingMembershipRelationship(account, customerId, priceId) {
+  const accountId = text(account && account.account_id, 120);
+  const accountEmail = email(account && account.email);
+  const access = await readPaidAccess({ accountId, accountEmail });
+  const localRelationship = (access.memberships || []).find(function (row) {
+    return membershipBlocksNewCheckout(row);
+  });
+  if (localRelationship) return localRelationship;
+
+  const subscriptions = await stripeFetch("GET", "/v1/subscriptions", {
+    customer: customerId,
+    status: "all",
+    limit: 100,
+    "expand[]": "data.items.data.price"
+  });
+  const rows = Array.isArray(subscriptions && subscriptions.data) ? subscriptions.data : [];
+  return rows.find(function (subscription) {
+    if (!stripeSubscriptionBlocksNewCheckout(subscription)) return false;
+    if (normaliseProductKey(subscription.metadata && subscription.metadata.product_key) === MONTHLY_MEMBERSHIP_KEY) return true;
+    const items = subscription.items && Array.isArray(subscription.items.data) ? subscription.items.data : [];
+    return items.some(function (item) {
+      return item && item.price && item.price.id === priceId;
+    });
+  }) || null;
+}
