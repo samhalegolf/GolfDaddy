@@ -156,8 +156,16 @@ function supabaseKey() {
   return env("SUPABASE_SERVICE_ROLE_KEY");
 }
 
+function supabaseAnonKey() {
+  return env("SUPABASE_ANON_KEY") || env("VITE_SUPABASE_ANON_KEY") || env("SUPABASE_PUBLIC_ANON_KEY") || "";
+}
+
 function hasSupabase() {
   return !!(supabaseBase() && supabaseKey());
+}
+
+function hasSupabaseAuth() {
+  return !!(supabaseBase() && supabaseAnonKey());
 }
 
 async function supabaseFetch(path, options) {
@@ -188,6 +196,10 @@ async function supabaseFetch(path, options) {
 
 function encodeFilter(value) {
   return encodeURIComponent(String(value || ""));
+}
+
+function isStripePriceId(value) {
+  return /^price_[A-Za-z0-9_]+$/.test(text(value, 200));
 }
 
 function formParams(data) {
@@ -241,6 +253,13 @@ async function stripeFetch(method, path, data) {
   return body;
 }
 
+function bearerToken(event) {
+  const headers = event && event.headers || {};
+  const header = text(headers.authorization || headers.Authorization, 500);
+  const match = /^Bearer\s+(.+)$/i.exec(header);
+  return match ? text(match[1], 500) : "";
+}
+
 function subjectFilters(accountId, accountEmail, profileId) {
   const filters = [];
   if (accountId) filters.push("user_id.eq." + encodeFilter(accountId));
@@ -254,7 +273,67 @@ function subjectOrFilter(accountId, accountEmail, profileId) {
   return filters.length ? "or=(" + filters.join(",") + ")" : "";
 }
 
-async function resolveAccount(payload) {
+async function authenticatedAccount(event) {
+  const token = bearerToken(event);
+  if (!token) return null;
+  if (!hasSupabaseAuth()) {
+    const error = new Error("Supabase Auth is not configured for payment identity verification");
+    error.status = 503;
+    throw error;
+  }
+
+  const response = await fetch(supabaseBase() + "/auth/v1/user", {
+    method: "GET",
+    headers: {
+      apikey: supabaseAnonKey(),
+      Authorization: "Bearer " + token
+    }
+  });
+  const bodyText = await response.text();
+  let body = null;
+  if (bodyText) {
+    try { body = JSON.parse(bodyText); } catch (_error) { body = bodyText; }
+  }
+  if (!response.ok || !body || !body.id) {
+    const error = new Error("Sign in again before buying access");
+    error.status = 401;
+    error.body = body;
+    throw error;
+  }
+
+  let account = null;
+  const rowsByAuth = await supabaseFetch("app_accounts?select=*&auth_user_id=eq." + encodeFilter(body.id) + "&limit=1", { method: "GET" }).catch(function () { return []; });
+  account = Array.isArray(rowsByAuth) ? rowsByAuth[0] : null;
+  const accountEmail = email(body.email);
+  if (!account && accountEmail) {
+    const rowsByEmail = await supabaseFetch("app_accounts?select=*&email=eq." + encodeFilter(accountEmail) + "&limit=1", { method: "GET" }).catch(function () { return []; });
+    account = Array.isArray(rowsByEmail) ? rowsByEmail[0] : null;
+  }
+  if (!account || !account.account_id) {
+    const error = new Error("Authenticated account is not linked to Clarity Caddie yet");
+    error.status = 401;
+    throw error;
+  }
+  return account;
+}
+
+function paymentAuthRequired(options) {
+  options = options || {};
+  if (options.requireAuth === true) return true;
+  if (env("CLARITY_ALLOW_LEGACY_PAYMENT_ACCOUNT_PAYLOAD") === "1") return false;
+  return hasSupabaseAuth();
+}
+
+async function resolveAccount(payload, options) {
+  options = options || {};
+  const authAccount = await authenticatedAccount(options.event);
+  if (authAccount) return authAccount;
+  if (paymentAuthRequired(options)) {
+    const error = new Error("Sign in with Supabase Auth before buying access");
+    error.status = 401;
+    throw error;
+  }
+
   const accountId = text(payload && (payload.accountId || payload.userId || payload.account_id || payload.user_id), 120);
   const accountEmail = email(payload && (payload.email || payload.accountEmail || payload.account_email));
   if (!accountId && !accountEmail) {
@@ -438,13 +517,17 @@ module.exports = {
   STRIPE_API_VERSION,
   accountCustomerId,
   appUrl,
+  authenticatedAccount,
+  bearerToken,
   email,
   encodeFilter,
   ensureStripeCustomer,
   entitlementWindow,
   env,
   hasSupabase,
+  hasSupabaseAuth,
   isPaidEntitlement,
+  isStripePriceId,
   json,
   membershipAccessState,
   membershipBlocksNewCheckout,
@@ -461,6 +544,7 @@ module.exports = {
   stripeFetch,
   stripeSubscriptionBlocksNewCheckout,
   subjectOrFilter,
+  supabaseAnonKey,
   supabaseFetch,
   text
 };

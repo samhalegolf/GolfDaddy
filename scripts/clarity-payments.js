@@ -3,6 +3,7 @@
 
   var CACHE_KEY = "clarity:payments:status:v1";
   var SETTINGS_KEY = "clarity:payments:settings:v1";
+  var AUTH_SESSION_KEY = "clarity:supabase-auth-session:v1";
   var CHECKOUT_ENDPOINT = "/api/create-checkout-session";
   var PORTAL_ENDPOINT = "/api/create-billing-portal-session";
   var STATUS_ENDPOINT = "/api/payment-entitlement";
@@ -20,6 +21,7 @@
   function safe(fn, fallback) { try { return fn(); } catch (_e) { return fallback; } }
   function escapeHTML(value) { return String(value == null ? "" : value).replace(/[&<>"']/g, function (ch) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]; }); }
   function moneyText(value) { return String(value || "").trim(); }
+  function isStripePriceId(value) { return /^price_[A-Za-z0-9_]+$/.test(String(value || "").trim()); }
 
   function account() {
     return safe(function () { return window.GolfDaddyAccounts && typeof window.GolfDaddyAccounts.current === "function" ? window.GolfDaddyAccounts.current() : null; }, null);
@@ -41,11 +43,27 @@
 
   function adminHeaders() {
     var payload = accountPayload();
-    return {
+    return Object.assign(requestHeaders(), {
       "Content-Type": "application/json",
       "X-Clarity-Account-Id": payload.accountId,
       "X-Clarity-Account-Email": payload.email
-    };
+    });
+  }
+
+  function authToken() {
+    return safe(function () {
+      var session = window.ClaritySupabaseAuth && typeof window.ClaritySupabaseAuth.session === "function"
+        ? window.ClaritySupabaseAuth.session()
+        : JSON.parse(localStorage.getItem(AUTH_SESSION_KEY) || "null");
+      return String(session && session.access_token || "").trim();
+    }, "");
+  }
+
+  function requestHeaders() {
+    var headers = { "Content-Type": "application/json" };
+    var token = authToken();
+    if (token) headers.Authorization = "Bearer " + token;
+    return headers;
   }
 
   function loadStatus() { return safe(function () { return JSON.parse(localStorage.getItem(CACHE_KEY) || "null"); }, null) || { active: false, entitlements: [], configured: null, checkedAt: "" }; }
@@ -145,7 +163,7 @@
     if (pending && refreshKey === lastRefreshKey) return status;
     pending = true; lastRefreshKey = refreshKey; render();
     try {
-      var response = await fetch(STATUS_ENDPOINT, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      var response = await fetch(STATUS_ENDPOINT, { method: "POST", headers: requestHeaders(), body: JSON.stringify(payload) });
       var body = await response.json().catch(function () { return {}; });
       if (!response.ok) throw new Error(body.error || "Could not check payment status");
       pending = false; return saveStatus(body);
@@ -202,7 +220,7 @@
     }
     pending = true; render();
     try {
-      var response = await fetch(CHECKOUT_ENDPOINT, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.assign({}, payload, { productKey: productKey, passType: productKey })) });
+      var response = await fetch(CHECKOUT_ENDPOINT, { method: "POST", headers: requestHeaders(), body: JSON.stringify(Object.assign({}, payload, { productKey: productKey, passType: productKey })) });
       var body = await response.json().catch(function () { return {}; });
       if (body && body.existingMembership) {
         pending = false; render();
@@ -228,7 +246,7 @@
     }
     pending = true; render();
     try {
-      var response = await fetch(PORTAL_ENDPOINT, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      var response = await fetch(PORTAL_ENDPOINT, { method: "POST", headers: requestHeaders(), body: JSON.stringify(payload) });
       var body = await response.json().catch(function () { return {}; });
       if (!response.ok || !body.url) throw new Error(body.error || "Could not open membership management");
       window.location.assign(body.url);
@@ -320,10 +338,13 @@
     var cards = products().map(function (product) {
       var key = String(product.product_key || "");
       var isMembershipProduct = key === "monthly_membership";
-      var priceConfigured = isMembershipProduct ? settings.monthlyMembershipPriceConfigured : settings.monthPassPriceConfigured;
-      var price = moneyText(product.price_label) || (priceConfigured || product.stripe_price_id ? "Configured in Stripe" : "Not linked yet");
+      var rowPriceId = String(product.stripe_price_id || "").trim();
+      var rowPriceMalformed = !!(rowPriceId && !isStripePriceId(rowPriceId));
+      var priceConfigured = (isMembershipProduct ? settings.monthlyMembershipPriceConfigured : settings.monthPassPriceConfigured) || isStripePriceId(rowPriceId);
+      var price = rowPriceMalformed ? "Invalid Price ID" : (moneyText(product.price_label) || (priceConfigured || product.stripe_price_id ? "Configured in Stripe" : "Not linked yet"));
       var disabledReason = "";
       if (product.active === false) disabledReason = "Not active yet";
+      if (rowPriceMalformed) disabledReason = "Invalid Price ID";
       if (!priceConfigured && !product.stripe_price_id) disabledReason = "Not linked yet";
       var action = isMembershipProduct ? "Start Membership" : "Buy One Month";
       var onclick = 'ClarityPayments.buy(&quot;' + escapeHTML(key) + '&quot;)';

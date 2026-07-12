@@ -7,6 +7,7 @@ const {
   encodeFilter,
   env,
   hasSupabase,
+  isStripePriceId,
   json,
   normaliseProductKey,
   productPriceId,
@@ -346,8 +347,8 @@ async function paymentDiagnostics(products) {
     return Number.isFinite(graceUntil) && graceUntil > now;
   });
   return {
-    monthPassPriceConfigured: !!productPriceId(monthPass, MONTH_PASS_KEY),
-    monthlyMembershipPriceConfigured: !!productPriceId(membership, MONTHLY_MEMBERSHIP_KEY),
+    monthPassPriceConfigured: isStripePriceId(productPriceId(monthPass, MONTH_PASS_KEY)),
+    monthlyMembershipPriceConfigured: isStripePriceId(productPriceId(membership, MONTHLY_MEMBERSHIP_KEY)),
     subscriptionWebhookEventsConfigured: null,
     subscriptionWebhookEventsNote: "Verify the production Stripe endpoint event list in the Stripe Dashboard; this app can confirm the webhook secret, not the endpoint's selected events.",
     billingPortalConfigured: null,

@@ -8,6 +8,7 @@ const {
   ensureStripeCustomer,
   env,
   json,
+  isStripePriceId,
   membershipBlocksNewCheckout,
   normaliseProductKey,
   paymentProduct,
@@ -38,7 +39,7 @@ exports.handler = async function (event) {
   }
 
   try {
-    const account = await resolveAccount(payload);
+    const account = await resolveAccount(payload, { event, requireAuth: true });
     const product = await paymentProduct(productKey, { activeOnly: false });
     if (product && product.active === false) {
       return json(503, { error: (product.name || "This product") + " is not active yet" });
@@ -48,6 +49,10 @@ exports.handler = async function (event) {
     if (!price) {
       const label = product && product.name || (productKey === MONTH_PASS_KEY ? "One Month Pass" : "Monthly Membership");
       return json(503, { error: label + " is not connected to a Stripe Price ID yet" });
+    }
+    if (!isStripePriceId(price)) {
+      const label = product && product.name || (productKey === MONTH_PASS_KEY ? "One Month Pass" : "Monthly Membership");
+      return json(503, { error: label + " needs a valid Stripe Price ID before Checkout can start" });
     }
 
     const customer = await ensureStripeCustomer(account);
