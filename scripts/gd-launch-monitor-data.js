@@ -47,8 +47,96 @@
     bagSyncEnabled: 1,
     bagSyncMinDeltaM: 0.5,
     bagSyncMinRatio: 0.55,
-    bagSyncMaxRatio: 1.7
+    bagSyncMaxRatio: 1.7,
+    // Admin-authored club/ball data exclusion rules (JSON array string).
+    // Each rule: {metric, op: gt|lt|eq|between, value, value2, abs, enabled}.
+    // Matching shots are excluded from cluster consideration (not the graph).
+    customGates: '',
+    // Don't-trust rules (JSON array string). Each: {source, metric|'all',
+    // enabled}. When a shot's import batch was identified as coming from
+    // that launch monitor, matching exclusion gates are NOT applied - the
+    // metric is treated as too unreliable to justify scrapping the shot.
+    // Preloaded with known weak spots (radar-estimated club data, modelled
+    // spin); all preloads are deletable/toggleable like user rules.
+    sourceTrust: '[{"id":"preload-r10-ftp","source":"garmin_r10","metric":"faceToPath","enabled":true,"preload":true},{"id":"preload-r10-aoa","source":"garmin_r10","metric":"attackAngle","enabled":true,"preload":true},{"id":"preload-skytrak-smash","source":"skytrak","metric":"smash","enabled":true,"preload":true},{"id":"preload-toptracer-spin","source":"toptracer","metric":"totalSpin","enabled":true,"preload":true}]'
   };
+
+  // === Launch monitor source identification ===
+  // Fingerprints an import batch from the verbiage the monitor's UI uses:
+  // metric tile names, column headers, distinctive terms and brand tokens.
+  var LM_PROVIDER_SIGNATURES = [
+    { key: 'trackman', label: 'Trackman', tokens: [[/\btrackman\b/i, 6], [/side\s*total/i, 4], [/spin\s*loft/i, 4], [/swing\s*direction/i, 3], [/low\s*point/i, 3], [/hang\s*time/i, 2], [/attack\s*angle/i, 1], [/launch\s*direction/i, 1], [/\bcurve\b/i, 1], [/dyn\.?\s*loft/i, 3]] },
+    { key: 'foresight', label: 'Foresight (GCQuad/GC3)', tokens: [[/\bforesight\b/i, 6], [/gc\s*quad|gcquad|gc3|gc2/i, 6], [/spin\s*tilt\s*axis/i, 5], [/face\s*to\s*target/i, 3], [/side\s*ang(le)?\b/i, 2], [/descent\s*ang(le)?\b/i, 2], [/peak\s*height/i, 2], [/angle\s*of\s*attack/i, 2], [/\blie\b/i, 1], [/club\s*speed/i, 1]] },
+    { key: 'flightscope', label: 'FlightScope / Mevo', tokens: [[/flight\s*scope|flightscope/i, 6], [/\bmevo\b/i, 6], [/vertical\s*launch/i, 4], [/horizontal\s*launch/i, 4], [/\blateral\b/i, 2], [/\baoa\b/i, 2], [/spin\s*rate/i, 1], [/\broll\b/i, 1]] },
+    { key: 'garmin_r10', label: 'Garmin R10', tokens: [[/\bgarmin\b/i, 6], [/\br10\b/i, 6], [/deviation\s*dist/i, 5], [/deviation\s*angle/i, 5], [/club\s*head\s*speed/i, 2], [/apex\s*height/i, 2], [/\bdeviation\b/i, 2]] },
+    { key: 'skytrak', label: 'SkyTrak', tokens: [[/sky\s*trak|skytrak/i, 6], [/back\s*spin/i, 2], [/side\s*spin/i, 2], [/side\s*angle/i, 2], [/roll\s*out/i, 3], [/descent\s*angle/i, 1], [/flight\s*path/i, 2]] },
+    { key: 'toptracer', label: 'Toptracer', tokens: [[/top\s*tracer|toptracer/i, 6], [/distance\s*to\s*pin/i, 3], [/from\s*cent(er|re)/i, 3], [/hang\s*time/i, 2], [/\bcurve\b/i, 1], [/\bheight\b/i, 1]] },
+    { key: 'uneekor', label: 'Uneekor', tokens: [[/\buneekor\b/i, 6], [/\beye\s*(xo|mini)\b/i, 5], [/side\s*distance/i, 3], [/loft\s*angle/i, 2], [/flight\s*time/i, 2], [/back\s*spin/i, 1], [/side\s*spin/i, 1]] },
+    { key: 'fullswing', label: 'Full Swing', tokens: [[/full\s*swing/i, 6], [/\bkit\b/i, 2], [/side\s*angle/i, 1], [/\bapex\b/i, 1], [/spin\s*axis/i, 1]] },
+    { key: 'rapsodo', label: 'Rapsodo MLM', tokens: [[/\brapsodo\b/i, 6], [/mlm\s*2\s*pro|mlm2pro|\bmlm\b/i, 6], [/shot\s*vision/i, 4], [/descent\s*angle/i, 1]] },
+    { key: 'awesome_golf', label: 'Awesome Golf', tokens: [[/awesome\s*golf/i, 6]] }
+  ];
+
+  function identifyProviderFromText(text) {
+    var haystack = String(text || '');
+    if (!haystack.trim()) return { providerGuess: 'unknown', label: 'Unknown', confidence: 0, evidence: [] };
+    var best = null;
+    LM_PROVIDER_SIGNATURES.forEach(function (sig) {
+      var score = 0;
+      var evidence = [];
+      sig.tokens.forEach(function (token) {
+        var match = haystack.match(token[0]);
+        if (match) { score += token[1]; evidence.push(match[0]); }
+      });
+      if (!best || score > best.score) best = { sig: sig, score: score, evidence: evidence };
+    });
+    if (!best || best.score < 4) return { providerGuess: 'unknown', label: 'Unknown', confidence: 0, evidence: [] };
+    return {
+      providerGuess: best.sig.key,
+      label: best.sig.label,
+      confidence: Math.min(1, best.score / 10),
+      evidence: best.evidence.slice(0, 6)
+    };
+  }
+
+  function importFingerprintText(payload) {
+    var parts = [];
+    (Array.isArray(payload && payload.rawTextBlocks) ? payload.rawTextBlocks : []).forEach(function (block) { parts.push(String(block || '')); });
+    if (payload && payload.label) parts.push(String(payload.label));
+    if (payload && payload.sourceLabel) parts.push(String(payload.sourceLabel));
+    (Array.isArray(payload && payload.clubGroups) ? payload.clubGroups : []).forEach(function (group) {
+      (Array.isArray(group && group.metrics) ? group.metrics : []).forEach(function (metric) {
+        if (metric && metric.rawLabel) parts.push(String(metric.rawLabel));
+        if (metric && metric.candidateMetric) parts.push(String(metric.candidateMetric));
+      });
+    });
+    return parts.join('\n');
+  }
+
+  function parseSourceTrust(raw) {
+    if (Array.isArray(raw)) return raw;
+    if (typeof raw !== 'string' || !raw.trim()) return [];
+    try { var parsed = JSON.parse(raw); return Array.isArray(parsed) ? parsed : []; } catch (error) { return []; }
+  }
+
+  function shotProviderGuess(shot) {
+    return String(shot && shot.providerGuess || shot && shot.rawGroup && shot.rawGroup.providerGuess || 'unknown').trim().toLowerCase();
+  }
+
+  // True when a don't-trust rule says: this shot's source is unreliable for
+  // this metric, so do not use the metric to exclude the shot.
+  function sourceTrustSkips(shot, metricKey, cfg) {
+    var rules = parseSourceTrust(cfg && cfg.sourceTrust);
+    if (!rules.length) return false;
+    var provider = shotProviderGuess(shot);
+    if (!provider || provider === 'unknown') return false;
+    return rules.some(function (rule) {
+      if (!rule || rule.enabled === false) return false;
+      if (String(rule.source || '').trim().toLowerCase() !== provider) return false;
+      var metric = String(rule.metric || 'all');
+      return metric === 'all' || metric === metricKey;
+    });
+  }
 
   function activePlayerScope() {
     var profile = null;
@@ -194,14 +282,20 @@
       var tuned = dev && typeof dev.get === 'function' ? dev.get('launchMonitorCluster') : null;
       if (tuned && typeof tuned === 'object') {
         Object.keys(DEFAULTS).forEach(function (key) {
+          if (key === 'customGates' || key === 'sourceTrust') return;
           if (Number.isFinite(Number(tuned[key]))) out[key] = Number(tuned[key]);
         });
+        if (typeof tuned.customGates === 'string' || Array.isArray(tuned.customGates)) out.customGates = tuned.customGates;
+        if (typeof tuned.sourceTrust === 'string' || Array.isArray(tuned.sourceTrust)) out.sourceTrust = tuned.sourceTrust;
       }
     } catch (error) {}
     overrides = overrides || {};
     Object.keys(DEFAULTS).forEach(function (key) {
+      if (key === 'customGates' || key === 'sourceTrust') return;
       if (Number.isFinite(Number(overrides[key]))) out[key] = Number(overrides[key]);
     });
+    if (typeof overrides.customGates === 'string' || Array.isArray(overrides.customGates)) out.customGates = overrides.customGates;
+    if (typeof overrides.sourceTrust === 'string' || Array.isArray(overrides.sourceTrust)) out.sourceTrust = overrides.sourceTrust;
     return out;
   }
 
@@ -476,12 +570,16 @@
     var store = readStore();
     var scope = resolvePlayerScope(payload);
     var importBatchId = String(payload.importBatchId || payload.importId || createId('practice-import')).trim();
+    // Fingerprint the batch: use the caller's identity if it already names a
+    // provider, otherwise identify from the import's own verbiage.
+    var providedIdentity = payload.sourceIdentity && payload.sourceIdentity.providerGuess && payload.sourceIdentity.providerGuess !== 'unknown' ? payload.sourceIdentity : null;
+    var identity = providedIdentity || identifyProviderFromText(importFingerprintText(payload));
     var session = applyPlayerScope({
       sessionId: payload.sessionId || createId('lm-session'),
       importBatchId: importBatchId,
       importId: importBatchId,
       label: payload.label || 'Launch monitor capture',
-      sourceIdentity: payload.sourceIdentity || { providerGuess: 'unknown', confidence: 0 },
+      sourceIdentity: identity,
       startedAt: payload.startedAt || payload.timestamp || new Date().toISOString(),
       importedAt: new Date().toISOString(),
       status: 'active',
@@ -765,24 +863,114 @@
     return null;
   }
 
+  // === Custom club/ball data gates ===
+  // Admin-authored rules stored as a JSON array in cfg.customGates. A shot
+  // matching any enabled rule is excluded from cluster consideration.
+  var CUSTOM_GATE_METRIC_NAMES = {
+    carry: ['carryDistance', 'carry', 'Carry'],
+    total: ['totalDistance', 'total', 'Total'],
+    offline: ['offline', 'side', 'sideCarry', 'lateral', 'Offline', 'Side'],
+    ballSpeed: ['ballSpeed', 'ball speed', 'BallSpeed', 'ball velocity', 'initial velocity', 'speed'],
+    clubSpeed: ['clubSpeed', 'club speed', 'clubhead speed', 'club head speed', 'swing speed'],
+    smash: ['smashFactor', 'smash'],
+    totalSpin: ['totalSpin', 'total spin', 'spinRate', 'backspin', 'spin'],
+    spinAxis: ['spinAxis', 'spin axis'],
+    launchAngle: ['launchAngle', 'launch', 'launch angle'],
+    launchDirection: ['launchDirection', 'launch direction', 'HLA', 'startDirection', 'start direction'],
+    faceAngle: ['faceAngle', 'face to target', 'face target', 'face', 'Face Angle'],
+    clubPath: ['clubPath', 'club path', 'path', 'Path'],
+    faceToPath: ['faceToPath', 'face to path', 'face path', 'face/path', 'FTP'],
+    attackAngle: ['attackAngle', 'attack angle', 'angle of attack', 'AoA'],
+    dynamicLoft: ['dynamicLoft', 'dynamic loft'],
+    apexHeight: ['apex', 'apexHeight', 'peak height', 'max height', 'height'],
+    descentAngle: ['descentAngle', 'descent angle', 'land angle', 'landing angle']
+  };
+
+  function parseCustomGates(raw) {
+    if (Array.isArray(raw)) return raw;
+    if (typeof raw !== 'string' || !raw.trim()) return [];
+    try { var parsed = JSON.parse(raw); return Array.isArray(parsed) ? parsed : []; } catch (error) { return []; }
+  }
+
+  function customGateValue(shot, metricKey) {
+    var names = CUSTOM_GATE_METRIC_NAMES[metricKey];
+    if (!names) return NaN;
+    var v = metricValue(shot, names);
+    if (!Number.isFinite(v) && metricKey === 'faceToPath') v = Number(shot && shot.delivery && shot.delivery.faceToPathDeg);
+    if (!Number.isFinite(v) && metricKey === 'spinAxis' && shot && shot.plot) v = Number(shot.plot.spinAxisDeg);
+    if (!Number.isFinite(v) && metricKey === 'carry') v = Number(shot && shot.carryM);
+    if (!Number.isFinite(v) && metricKey === 'total') v = Number(shot && shot.totalM);
+    if (!Number.isFinite(v) && metricKey === 'offline') v = Number(shot && shot.lateralM);
+    return Number.isFinite(v) ? v : NaN;
+  }
+
+  function customGateAppliesToClub(rule, shot) {
+    var clubs = Array.isArray(rule && rule.clubs) ? rule.clubs.filter(Boolean) : [];
+    if (!clubs.length) return true;
+    var club = normalizeClub(shot && shot.club || '');
+    return clubs.some(function (c) { return normalizeClub(c) === club; });
+  }
+
+  // unit 'pct' means the threshold is a percentage of the club's expected
+  // (bag) carry - useful for distance-style metrics like offline or carry.
+  function customGateThreshold(rule, shot, which) {
+    var v = Number(which === 'b' ? rule.value2 : rule.value);
+    if (!Number.isFinite(v)) return NaN;
+    if (rule && rule.unit === 'pct') {
+      var base = Number(shot && shot.expectedM);
+      if (!Number.isFinite(base) || base <= 0) base = Number(shot && shot.carryM);
+      if (!Number.isFinite(base) || base <= 0) return NaN;
+      return base * v / 100;
+    }
+    return v;
+  }
+
+  function customGateExclusionReason(shot, cfg) {
+    var rules = parseCustomGates(cfg && cfg.customGates);
+    for (var i = 0; i < rules.length; i++) {
+      var rule = rules[i] || {};
+      if (rule.enabled === false) continue;
+      if (!customGateAppliesToClub(rule, shot)) continue;
+      if (sourceTrustSkips(shot, String(rule.metric || ''), cfg)) continue;
+      var v = customGateValue(shot, rule.metric);
+      if (!Number.isFinite(v)) continue;
+      if (rule.abs) v = Math.abs(v);
+      var a = customGateThreshold(rule, shot, 'a');
+      var b = customGateThreshold(rule, shot, 'b');
+      var hit = false;
+      switch (rule.op) {
+        case 'gt': hit = Number.isFinite(a) && v > a; break;
+        case 'lt': hit = Number.isFinite(a) && v < a; break;
+        case 'eq': hit = Number.isFinite(a) && Math.abs(v - a) <= Math.max(0.01, Math.abs(a) * 0.001); break;
+        case 'between': hit = Number.isFinite(a) && Number.isFinite(b) && v >= Math.min(a, b) && v <= Math.max(a, b); break;
+        case 'outside': hit = Number.isFinite(a) && Number.isFinite(b) && (v < Math.min(a, b) || v > Math.max(a, b)); break;
+      }
+      if (hit) return 'custom_' + String(rule.metric || 'gate');
+    }
+    return '';
+  }
+
   function practiceQualityExclusionReason(shot, cfg) {
+    var customReason = customGateExclusionReason(shot, cfg);
+    if (customReason) return customReason;
+    var skip = function (metricKey) { return sourceTrustSkips(shot, metricKey, cfg); };
     var faceToPath = Number(shot && shot.delivery && shot.delivery.faceToPathDeg);
-    if (Number.isFinite(faceToPath) && Math.abs(faceToPath) > Math.max(0.5, Number(cfg.faceToPathMaxAbsDeg) || 6)) return 'face_to_path';
+    if (!skip('faceToPath') && Number.isFinite(faceToPath) && Math.abs(faceToPath) > Math.max(0.5, Number(cfg.faceToPathMaxAbsDeg) || 6)) return 'face_to_path';
     var spinAxis = metricValue(shot, ['spinAxis']);
     if (!Number.isFinite(spinAxis) && shot && shot.plot && Number.isFinite(Number(shot.plot.spinAxisDeg))) spinAxis = Number(shot.plot.spinAxisDeg);
-    if (Number.isFinite(spinAxis) && Math.abs(spinAxis) > Math.max(1, Number(cfg.spinAxisMaxAbsDeg) || 12)) return 'spin_axis';
+    if (!skip('spinAxis') && Number.isFinite(spinAxis) && Math.abs(spinAxis) > Math.max(1, Number(cfg.spinAxisMaxAbsDeg) || 12)) return 'spin_axis';
     var smash = metricValue(shot, ['smashFactor', 'smash']);
     var smashMin = Number.isFinite(Number(cfg.smashMin)) ? Number(cfg.smashMin) : 1.18;
     var smashMax = Number.isFinite(Number(cfg.smashMax)) ? Number(cfg.smashMax) : 1.52;
-    if (Number.isFinite(smash) && (smash < smashMin || smash > smashMax)) return 'smash';
+    if (!skip('smash') && Number.isFinite(smash) && (smash < smashMin || smash > smashMax)) return 'smash';
     var base = clubBaseline(shot && shot.club);
     var spin = metricValue(shot, ['totalSpin', 'total spin', 'backspin', 'spin', 'spinRate']);
     var spinTolerance = Math.max(0.05, Number(cfg.spinTolerancePct) || 0.35);
-    if (base && Number.isFinite(spin) && Math.abs(spin - base.spin) > base.spin * spinTolerance) return 'spin_amount';
+    if (!skip('totalSpin') && base && Number.isFinite(spin) && Math.abs(spin - base.spin) > base.spin * spinTolerance) return 'spin_amount';
     var launch = metricValue(shot, ['launchAngle', 'launch']);
-    if (base && Number.isFinite(launch) && Math.abs(launch - base.launch) > Math.max(1, Number(cfg.launchToleranceDeg) || 6)) return 'launch_angle';
+    if (!skip('launchAngle') && base && Number.isFinite(launch) && Math.abs(launch - base.launch) > Math.max(1, Number(cfg.launchToleranceDeg) || 6)) return 'launch_angle';
     var dynamicLoft = metricValue(shot, ['dynamicLoft']);
-    if (base && Number.isFinite(dynamicLoft) && Math.abs(dynamicLoft - base.dynamicLoft) > Math.max(1, Number(cfg.dynamicLoftToleranceDeg) || 8)) return 'dynamic_loft';
+    if (!skip('dynamicLoft') && base && Number.isFinite(dynamicLoft) && Math.abs(dynamicLoft - base.dynamicLoft) > Math.max(1, Number(cfg.dynamicLoftToleranceDeg) || 8)) return 'dynamic_loft';
     return '';
   }
 
@@ -1130,7 +1318,49 @@
     exclusionReason: exclusionReason,
     deliveryExclusionReason: deliveryExclusionReason,
     analyze: analyze,
-    analyzeDisplay: analyzeDisplay
+    analyzeDisplay: analyzeDisplay,
+    customGateExclusionReason: function (shot, cfg) { return customGateExclusionReason(shot, cfg || settings()); },
+    practiceQualityExclusionReason: function (shot, cfg) { return practiceQualityExclusionReason(shot, cfg || settings()); },
+    parseCustomGates: parseCustomGates,
+    parseSourceTrust: parseSourceTrust,
+    identifyProvider: identifyProviderFromText,
+    providerSignatures: function () { return LM_PROVIDER_SIGNATURES.map(function (sig) { return { key: sig.key, label: sig.label }; }); },
+    // Re-fingerprints every stored session/capture/shot from its own raw
+    // verbiage. Returns how many sessions changed.
+    retagProviders: function () {
+      var store = readStore();
+      var changed = 0;
+      var textBySession = {};
+      (store.captures || []).forEach(function (capture) {
+        var parts = textBySession[capture.sessionId] = textBySession[capture.sessionId] || [];
+        (Array.isArray(capture.rawTextBlocks) ? capture.rawTextBlocks : []).forEach(function (block) { parts.push(String(block || '')); });
+      });
+      (store.shots || []).forEach(function (shot) {
+        var parts = textBySession[shot.sessionId] = textBySession[shot.sessionId] || [];
+        (Array.isArray(shot.metrics) ? shot.metrics : []).forEach(function (metric) {
+          if (metric && metric.rawLabel) parts.push(String(metric.rawLabel));
+          if (metric && metric.candidateMetric) parts.push(String(metric.candidateMetric));
+        });
+      });
+      (store.sessions || []).forEach(function (session) {
+        var identity = identifyProviderFromText((textBySession[session.sessionId] || []).concat([session.label || '']).join('\n'));
+        var current = session.sourceIdentity && session.sourceIdentity.providerGuess || 'unknown';
+        if (identity.providerGuess !== 'unknown' && identity.providerGuess !== current) {
+          session.sourceIdentity = identity;
+          changed++;
+        }
+      });
+      if (changed) {
+        var byId = {};
+        (store.sessions || []).forEach(function (session) { byId[session.sessionId] = session; });
+        (store.shots || []).forEach(function (shot) {
+          var session = byId[shot.sessionId];
+          if (session && session.sourceIdentity && session.sourceIdentity.providerGuess) shot.providerGuess = session.sourceIdentity.providerGuess;
+        });
+        saveStore(store);
+      }
+      return changed;
+    }
   };
 
   root.modules.launchMonitorData = api;
