@@ -38896,20 +38896,13 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	  function gdRenderComparePracticeProjector(ctx){
     const root=byId("gdComparePracticeProjector");
     if(!root)return false;
-    const open=gdDataHubCompareOpen&&!!byId("dataHubPanel")?.classList.contains("open");
-    if(!open||!ctx){
-      root.hidden=true;
-      root.classList.remove("waiting");
-      root.innerHTML="";
-      return false;
-    }
-    // The adopt controls in the comparison are the PRACTICE ones (Generate /
-    // Adopt Bubble + bag suggestions) - same maths and handlers as the
-    // practice screen. The course-only view intentionally has no adopt dock.
-    const analysis=ctx.practiceAnalysis||safe(()=>typeof gdPracticeDisplayAnalysis==="function"?gdPracticeDisplayAnalysis():null,null);
-    root.hidden=false;
-    root.innerHTML=`<div class="gdCompareAdoptDock">${gdPracticeProjectionControlsHTML(analysis)}</div>`;
-    return true;
+    // The Generate / Adopt Bubble + bag controls now live on the Practice
+    // tab card while Comparison is expanded (see gdRenderDataHubCards).
+    // Nothing is duplicated inside the comparison expansion any more.
+    root.hidden=true;
+    root.classList.remove("waiting");
+    root.innerHTML="";
+    return false;
   }
   function gdPracticeBubbleMethod(analysis){
     const method=analysis?.methods?.resultScaledCluster||null;
@@ -40321,6 +40314,16 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       btn.classList.remove("widget","title");
       btn.setAttribute("aria-expanded",expanded&&key===active?"true":"false");
       btn.innerHTML=gdDataHubCardCopy[key];
+      // While Comparison is expanded the Practice tab carries the compact
+      // Generate / Adopt Bubble + bag controls (same maths and handlers as
+      // the practice screen) instead of duplicating them inside the
+      // comparison expansion.
+      const practiceTabDock=key==="practice"&&compareExpanded;
+      btn.classList.toggle("hasPracticeTabDock",practiceTabDock);
+      if(practiceTabDock){
+        const analysis=safe(()=>gdComparisonContext().practiceAnalysis,null)||safe(()=>typeof gdPracticeDisplayAnalysis==="function"?gdPracticeDisplayAnalysis():null,null);
+        btn.insertAdjacentHTML("beforeend",`<div class="gdPracticeTabCompactDock" data-gd-card-control onpointerdown="event.stopPropagation()" onclick="event.stopPropagation()">${gdPracticeProjectionControlsHTML(analysis)}</div>`);
+      }
     });
     document.querySelectorAll("#dataHubPanel .gdHubSection").forEach(section=>{
       section.classList.toggle("gdHubActive",expanded&&section.dataset.hubSection===active);
@@ -54555,6 +54558,85 @@ body:has(#courseScreen:not(.hidden)) .leaflet-marker-icon{display:none!important
   body.gdGpsActive .rightRail,
   body.gps-active .rightRail{top:calc(max(6px,env(safe-area-inset-top)) + 50px)!important;gap:4px!important;}
   #gdToolRailTab{top:calc(max(6px,env(safe-area-inset-top)) + 8px)!important;}
+}
+</style>
+<style id="gdHubAccordionWrapPolishV1">
+/* === Data Hub accordion polish ===
+   1) The expanded section's tab card fuses into the wrapping box: the
+      .gdHubSection.gdHubActive wrapper draws the ONE border around tab +
+      graph + buttons; the desktop skin's standalone card chrome is undone
+      here (this block is last in the cascade, so its !important wins). */
+#dataHubPanel .gdHubSection.gdHubActive{
+  border:1px solid rgba(98,210,255,.36)!important;
+  border-radius:22px!important;
+  background:linear-gradient(180deg,rgba(16,32,38,.96),rgba(7,11,12,.98))!important;
+  box-shadow:0 18px 44px rgba(0,0,0,.30),0 0 24px rgba(98,210,255,.10)!important;
+  overflow:visible!important;
+}
+#dataHubPanel .gdHubSection[data-hub-section="course"].gdHubActive{
+  border-color:rgba(55,242,141,.36)!important;
+  background:linear-gradient(180deg,rgba(18,38,28,.96),rgba(7,11,10,.98))!important;
+  box-shadow:0 18px 44px rgba(0,0,0,.30),0 0 24px rgba(55,242,141,.10)!important;
+}
+#dataHubPanel .gdHubSection.gdHubActive>.gdDataCard{
+  border:0!important;
+  border-radius:21px 21px 0 0!important;
+  background:transparent!important;
+  box-shadow:none!important;
+  min-height:0!important;
+  overflow:visible!important;
+}
+#dataHubPanel .gdHubSection.gdHubActive>.gdDataCard:hover{transform:none!important}
+#dataHubPanel .gdHubSection.gdHubActive>.gdHubSectionBody{padding:0 12px 12px!important}
+#dataHubPanel .gdHubSection.gdHubActive>.gdHubSectionBody.gdHubSectionOpen{overflow:visible!important}
+/* Keep the coloured signature strip as the fused header's top edge. */
+#dataHubPanel .gdHubSection.gdHubActive>.gdDataCard:before{border-radius:21px 21px 0 0}
+
+/* 2) Compact practice dock carried by the Practice tab while Comparison is
+      expanded (replaces the old duplicate dock inside the comparison tab). */
+#dataHubPanel.gdHubSectionExpanded #gdPracticeDataOpenBtn.hasPracticeTabDock{
+  flex-direction:column!important;
+  align-items:stretch!important;
+  overflow:visible!important;
+  min-height:0!important;
+}
+#gdPracticeDataOpenBtn .gdPracticeTabCompactDock{
+  cursor:default;
+  margin-top:10px;
+  padding-top:10px;
+  border-top:1px solid rgba(255,255,255,.08);
+}
+#gdPracticeDataOpenBtn .gdPracticeTabCompactDock .gdPracticeActionDock{
+  display:flex!important;
+  flex-wrap:wrap!important;
+  gap:8px!important;
+  align-items:center!important;
+}
+#gdPracticeDataOpenBtn .gdPracticeTabCompactDock .gdPracticePrimaryActions{
+  display:grid!important;
+  grid-template-columns:1fr 1fr!important;
+  gap:8px!important;
+  flex:1 1 220px!important;
+}
+#gdPracticeDataOpenBtn .gdPracticeTabCompactDock .gdPracticeBubbleAction{
+  min-height:34px!important;
+  padding:8px 9px!important;
+  font-size:11px!important;
+  border-radius:11px!important;
+}
+#gdPracticeDataOpenBtn .gdPracticeTabCompactDock .gdPracticeBagSuggestionIcon,
+#gdPracticeDataOpenBtn .gdPracticeTabCompactDock .gdPracticeBagSuggestionIconFrame{
+  width:38px!important;
+  height:38px!important;
+  min-width:38px!important;
+  min-height:38px!important;
+  grid-template-columns:38px!important;
+  grid-template-rows:38px auto!important;
+}
+/* Keep the tab dock lean: sandbox/admin lanes stay on the practice screen. */
+#gdPracticeDataOpenBtn .gdPracticeTabCompactDock .gdPracticeSandboxControls{display:none!important}
+@media(max-width:520px){
+  #gdPracticeDataOpenBtn .gdPracticeTabCompactDock .gdPracticePrimaryActions{grid-template-columns:1fr!important}
 }
 </style>
 <script id="gdGpsSpringCleanOwnerV1">
