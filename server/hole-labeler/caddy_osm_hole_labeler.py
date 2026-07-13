@@ -51,7 +51,8 @@ import golf_hole_mapper as mapper
 app = FastAPI(title="GolfDaddy OSM Hole Labeler")
 
 ALLOWED_ORIGINS = [o.strip() for o in os.environ.get(
-    "ALLOWED_ORIGINS", "https://clarity-caddie.netlify.app"
+    "ALLOWED_ORIGINS",
+    "https://caddy.claritygolf.app,https://clarity-caddie.netlify.app"
 ).split(",") if o.strip()]
 app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS,
                    allow_methods=["*"], allow_headers=["*"])
