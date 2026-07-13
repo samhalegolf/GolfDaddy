@@ -3396,6 +3396,22 @@
   function requestedHolePlayable(course,hole){
     return !!requestedMappedPlayData(course,hole);
   }
+  function coursePlayDebugDetail(course,hole,detail={}){
+    const h=validHoleNumber(hole)||1;
+    return Object.assign({
+      courseId:courseId(course),
+      courseName:courseName(course),
+      holeNumber:h
+    },detail||{});
+  }
+  function recordCoursePlayDebug(type,course,hole,detail={}){
+    try{
+      const pipeline=window.GDCoursePlayPipeline;
+      if(pipeline&&typeof pipeline.recordDebugEvent==='function'){
+        pipeline.recordDebugEvent(type,coursePlayDebugDetail(course,hole,detail));
+      }
+    }catch(e){}
+  }
   function ingestRequestedHoleToPipeline(course,hole,source){
     try{
       const resolved=requestedMappedPlayData(course,hole);
@@ -3555,6 +3571,7 @@
   function beginInteractiveGreenFallback(course,hole,reason){
     const h=rememberRequestedPlayHole(hole||1);
     const c=sessionCourse(course||courseObj());
+    recordCoursePlayDebug('gps-play-interactive-green-fallback',c,h,{reason:reason||'automatic-resolution-failed'});
     hideCourseLoading(0);
     try{if(typeof window.gdClearHoleImageRuntime==='function')window.gdClearHoleImageRuntime('interactive-green-fallback');}catch(e){}
     try{
@@ -3613,6 +3630,7 @@
     const promise=(async()=>{
       const showLoading=opts.showLoading!==false;
       window.__gdCoursePlayResolverActive={course:c,hole:h,reason:opts.reason||'course-play-resolver',at:Date.now()};
+      recordCoursePlayDebug('course-play-resolver-started',c,h,{reason:opts.reason||'course-play-resolver'});
       if(showLoading)showCourseLoading(c.name||c.courseName||'Loading course');
       updateCourseLoading(`Opening Hole ${h}`,28);
       try{
@@ -3629,21 +3647,47 @@
           document.body.dataset.gdCourseAutoMappedHoles=String(autoMapResult?.holes||0);
           document.body.dataset.gdCourseAutoMapSaved=String(autoMapResult?.saved||0);
         }catch(e){}
-        if(requestedHolePlayable(c,h))return showResolvedCoursePlayHole(c,h,'osm-automapper',opts);
+        const osmPlayable=requestedHolePlayable(c,h);
+        recordCoursePlayDebug('course-play-resolver-osm-completed',c,h,{
+          holes:autoMapResult?.holes||0,
+          saved:autoMapResult?.saved||0,
+          playable:osmPlayable,
+          source:'osm-automapper'
+        });
+        if(osmPlayable){
+          recordCoursePlayDebug('course-play-resolver-hole-playable',c,h,{source:'osm-automapper'});
+          return showResolvedCoursePlayHole(c,h,'osm-automapper',opts);
+        }
         if(claudeLabelerWaiting()){
+          recordCoursePlayDebug('course-play-resolver-claude-waiting',c,h,{
+            status:String(window.gdClaudeHoleLabels&&window.gdClaudeHoleLabels.status||''),
+            mode:String(window.gdClaudeHoleLabels&&window.gdClaudeHoleLabels.mode||'')
+          });
           updateCourseLoading('Finding hole numbers',62);
           const labelResult=await waitForClaudeHoleLabels(opts.labelWaitMs||COURSE_PLAY_LABEL_WAIT_MS);
+          recordCoursePlayDebug('course-play-resolver-claude-result',c,h,{status:labelResult&&labelResult.status||'unknown'});
           if(labelResult.status==='ready'){
             updateCourseLoading('Applying hole numbers',74);
             const retryOpts={quiet:true,frame:false,promptStart:true,fresh:true,course:c};
             if(opts.wholeCourse===false)retryOpts.hole=h;
             await autoMapOsmCourse(retryOpts);
-            if(requestedHolePlayable(c,h))return showResolvedCoursePlayHole(c,h,'claude-hole-labels',opts);
+            if(requestedHolePlayable(c,h)){
+              recordCoursePlayDebug('course-play-resolver-hole-playable',c,h,{source:'claude-hole-labels'});
+              return showResolvedCoursePlayHole(c,h,'claude-hole-labels',opts);
+            }
           }
+        }else{
+          recordCoursePlayDebug('course-play-resolver-claude-not-started',c,h,{
+            status:String(window.gdClaudeHoleLabels&&window.gdClaudeHoleLabels.status||''),
+            mode:String(window.gdClaudeHoleLabels&&window.gdClaudeHoleLabels.mode||''),
+            reason:'no-labeling-job-active'
+          });
         }
+        recordCoursePlayDebug('course-play-resolver-automatic-unresolved',c,h,{reason:'automatic-resolution-failed'});
         return beginInteractiveGreenFallback(c,h,'automatic-resolution-failed');
       }catch(error){
         try{console.warn('[Clarity Caddie] course play resolver failed',error);}catch(e){}
+        recordCoursePlayDebug('course-play-resolver-error',c,h,{reason:error&&error.message||'resolver-error'});
         return beginInteractiveGreenFallback(c,h,'resolver-error');
       }finally{
         delete window.__gdCoursePlayResolverActive;
