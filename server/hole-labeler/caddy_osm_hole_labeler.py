@@ -296,10 +296,17 @@ cannot establish orientation. Never guess — uncertain letters go in "unassigne
 
 
 def is_clean_assignment(result: dict, letters: list[str], total_holes: int) -> bool:
-    if not result.get("success") or result.get("unassigned"):
+    if not result.get("success"):
         return False
     asg = result.get("assignments") or {}
-    if sorted(asg.keys()) != sorted(letters):
+    unassigned = result.get("unassigned") or []
+    # OSM sometimes has MORE hole ways than the course has holes (practice
+    # holes, stale duplicates). Tolerate unassigned letters up to that
+    # surplus; with no surplus, every letter must be assigned.
+    surplus = max(0, len(letters) - EXPECTED_HOLES)
+    if len(unassigned) > surplus:
+        return False
+    if sorted(list(asg.keys()) + list(unassigned)) != sorted(letters):
         return False
     nums = list(asg.values())
     if len(set(nums)) != len(nums):
@@ -388,7 +395,8 @@ def run_pipeline(job_id: str, lat: float, lng: float,
                 if is_clean_assignment(result, letters, len(holes)):
                     asg = result["assignments"]
                     labels = {unlabeled[i]["key"]: asg[letters[i]]
-                              for i in range(len(unlabeled))}
+                              for i in range(len(unlabeled))
+                              if letters[i] in asg}
                     _finish(job_id, cache_key, {
                         "labels": labels,
                         "course_name": course_name,
