@@ -110,7 +110,12 @@ def cache_put(cache_key: str, result: dict):
     except Exception as exc:
         print(f"supabase cache write failed ({cache_key}): {exc}")
 
-OVERPASS = "https://overpass-api.de/api/interpreter"
+OVERPASS_ENDPOINTS = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter",
+]
+OVERPASS_UA = "clarity-hole-labeler/1.0 (samhalegolf@gmail.com)"
 TILE_URL = ("https://server.arcgisonline.com/ArcGIS/rest/services/"
             "World_Imagery/MapServer/tile/{z}/{y}/{x}")
 CANVAS_W = 1400
@@ -126,8 +131,20 @@ def fetch_osm_holes(lat: float, lng: float) -> list[dict]:
              f'way(around:1400,{lat},{lng})["golf"="hole"];'
              f'relation(around:1400,{lat},{lng})["golf"="hole"];'
              f');out geom tags;')
-    resp = httpx.get(OVERPASS, params={"data": query}, timeout=25)
-    resp.raise_for_status()
+    resp, last_exc = None, None
+    for endpoint in OVERPASS_ENDPOINTS:
+        try:
+            # POST + explicit User-Agent: overpass-api.de rejects anonymous
+            # GETs from cloud-provider IPs (406) even when browsers succeed.
+            resp = httpx.post(endpoint, data={"data": query},
+                              headers={"User-Agent": OVERPASS_UA}, timeout=25)
+            resp.raise_for_status()
+            break
+        except Exception as exc:
+            last_exc = exc
+            resp = None
+    if resp is None:
+        raise RuntimeError(f"all Overpass endpoints failed: {last_exc}")
     holes = []
     for el in resp.json().get("elements", []):
         pts = geometry_points(el)
