@@ -49,6 +49,8 @@
   var POLL_MS = 5000;
   var POLL_MAX = 60; // 5 minutes (generation jobs run longer than labeling)
   var pendingKeys = {};
+  var pendingResolutionKeys = {};
+  var EMPTY_RESULT_TTL_MS = 30 * 60 * 1000;
 
   function isGuideQuery(url) {
     if (!/overpass-api\.de/i.test(url)) return false;
@@ -67,11 +69,24 @@
     return STORE_PREFIX + center.lat.toFixed(4) + ',' + center.lng.toFixed(4);
   }
 
-  function readLabels(key) {
+  function readLabelRecord(key) {
     try {
       var raw = localStorage.getItem(key);
-      return raw ? (JSON.parse(raw).labels || null) : null;
+      return raw ? JSON.parse(raw) : null;
     } catch (e) { return null; }
+  }
+
+  function readLabels(key) {
+    var record = readLabelRecord(key);
+    return record ? (record.labels || null) : null;
+  }
+
+  function hasRecentEmptyLabelResult(key) {
+    var record = readLabelRecord(key);
+    var labels = record && record.labels;
+    var savedAt = Number(record && record.savedAt);
+    return !!(labels && !Object.keys(labels).length &&
+      Number.isFinite(savedAt) && Date.now() - savedAt < EMPTY_RESULT_TTL_MS);
   }
 
   function refNumber(el) {
@@ -93,11 +108,24 @@
     }).length;
   }
 
-  function readGenerated(key) {
+  function readGeneratedRecord(key) {
     try {
       var raw = localStorage.getItem(key);
-      return raw ? (JSON.parse(raw).elements || null) : null;
+      return raw ? JSON.parse(raw) : null;
     } catch (e) { return null; }
+  }
+
+  function readGenerated(key) {
+    var record = readGeneratedRecord(key);
+    return record ? (record.elements || null) : null;
+  }
+
+  function hasRecentEmptyGeneratedResult(key) {
+    var record = readGeneratedRecord(key);
+    var elements = record && record.elements;
+    var savedAt = Number(record && record.savedAt);
+    return !!(Array.isArray(elements) && !elements.length &&
+      Number.isFinite(savedAt) && Date.now() - savedAt < EMPTY_RESULT_TTL_MS);
   }
 
   function injectLabels(payload, labels) {
@@ -146,6 +174,47 @@
     } catch (e) { /* no-op */ }
   }
 
+  function resolutionKeyFor(storeKey) {
+    try {
+      var active = window.__gdCoursePlayResolverActive;
+      if (active && active.key) return String(active.key);
+    } catch (e) { /* no-op */ }
+    var status = String(NS.status || '');
+    if ((status === 'labeling' || status === 'generating') && NS.resolutionKey) {
+      return String(NS.resolutionKey);
+    }
+    return String(storeKey || 'course-hole');
+  }
+
+  function emitDebug(type, detail) {
+    var payload = detail || {};
+    payload[type] = true;
+    payload.resolutionKey = payload.resolutionKey || resolutionKeyFor(payload.storeKey);
+    try {
+      var pipeline = window.GDCoursePlayPipeline;
+      if (pipeline && typeof pipeline.recordDebugEvent === 'function') {
+        pipeline.recordDebugEvent(type, payload);
+      }
+    } catch (e) { /* no-op */ }
+    try {
+      window.dispatchEvent(new CustomEvent('gd:hole-labels-debug', {
+        detail: Object.assign({ type: type }, payload)
+      }));
+    } catch (e) { /* no-op */ }
+  }
+
+  function resolverOwnsCycle(resolutionKey) {
+    try {
+      var active = window.__gdCoursePlayResolverActive;
+      return !!(active && active.key && resolutionKey && String(active.key) === String(resolutionKey));
+    } catch (e) { return false; }
+  }
+
+  function deletePending(key, resolutionKey) {
+    delete pendingKeys[key];
+    if (resolutionKey) delete pendingResolutionKeys[resolutionKey];
+  }
+
   function applyLabels(count, attempt) {
     attempt = attempt || 0;
     if (typeof window.gdAutoMapOsmCourse !== 'function') {
@@ -187,14 +256,24 @@
     }
   }
 
-  function labelingFailed(key, why) {
+  function labelingFailed(key, why, resolutionKey, jobId) {
     NS.status = 'failed';
     NS.mode = null;
-    delete pendingKeys[key];
+    resolutionKey = resolutionKey || resolutionKeyFor(key);
+    deletePending(key, resolutionKey);
+    emitDebug('claude_result_failed', {
+      storeKey: key,
+      reason: why || null,
+      claude_job_id: jobId || NS.jobId || null,
+      jobId: jobId || NS.jobId || null,
+      status: 'failed',
+      mode: NS.mode || 'labeling',
+      resolutionKey: resolutionKey
+    });
     showToast('Couldn’t find hole numbers automatically for this course');
     try {
       window.dispatchEvent(new CustomEvent('gd:hole-labels-failed', {
-        detail: { storeKey: key, reason: why || null }
+        detail: { storeKey: key, reason: why || null, resolutionKey: resolutionKey, jobId: jobId || null }
       }));
     } catch (e) { /* no-op */ }
   }
@@ -202,9 +281,13 @@
   function requestLabels(key, center, elements) {
     if (!NS.backend) return; // dormant until a backend host is configured
     if (pendingKeys[key]) return;
+    var resolutionKey = resolutionKeyFor(key);
+    if (pendingResolutionKeys[resolutionKey]) return;
     pendingKeys[key] = true;
+    pendingResolutionKeys[resolutionKey] = true;
     NS.status = 'labeling';
     NS.mode = 'labeling';
+    NS.resolutionKey = resolutionKey;
 
     var body = { lat: center.lat, lng: center.lng };
     var courseName = resolveCourseName();
@@ -219,9 +302,16 @@
       ' — this can take a couple of minutes');
     try {
       window.dispatchEvent(new CustomEvent('gd:hole-labels-started', {
-        detail: { storeKey: key, courseName: courseName || null }
+        detail: { storeKey: key, courseName: courseName || null, resolutionKey: resolutionKey }
       }));
     } catch (e) { /* no-op */ }
+    emitDebug('claude_post_started', {
+      storeKey: key,
+      courseName: courseName || null,
+      holeNumber: Number(NS.requestedHole) || null,
+      resolutionKey: resolutionKey,
+      status: 'labeling'
+    });
 
     fetch(NS.backend + '/v1/osm-hole-labels', {
       method: 'POST',
@@ -230,35 +320,52 @@
     })
       .then(function (r) { return r.json(); })
       .then(function (data) {
-        if (data.status === 'done') return finish(key, data.result);
+        if (data.status === 'done') return finish(key, data.result, resolutionKey, data.job_id || null);
         if (!data.job_id) throw new Error('labeling request rejected');
-        return poll(key, data.job_id, 0);
+        NS.jobId = data.job_id;
+        emitDebug('claude_job_id', {
+          storeKey: key,
+          claude_job_id: data.job_id,
+          jobId: data.job_id,
+          resolutionKey: resolutionKey,
+          status: 'labeling'
+        });
+        return poll(key, data.job_id, 0, null, resolutionKey);
       })
       .catch(function (err) {
         console.warn('[Claude hole labels] request failed', err);
-        labelingFailed(key, 'request failed');
+        labelingFailed(key, 'request failed', resolutionKey);
       });
   }
 
-  function poll(key, jobId, attempt, onDone) {
+  function poll(key, jobId, attempt, onDone, resolutionKey) {
     onDone = onDone || finish;
+    resolutionKey = resolutionKey || resolutionKeyFor(key);
     if (attempt >= POLL_MAX) {
-      labelingFailed(key, 'timed out');
+      labelingFailed(key, 'timed out', resolutionKey, jobId);
       return;
     }
     setTimeout(function () {
+      emitDebug('claude_poll', {
+        storeKey: key,
+        claude_job_id: jobId,
+        jobId: jobId,
+        attempt: attempt + 1,
+        resolutionKey: resolutionKey,
+        status: NS.status || 'labeling'
+      });
       fetch(NS.backend + '/v1/osm-hole-labels/jobs/' + jobId)
         .then(function (r) { return r.json(); })
         .then(function (job) {
-          if (job.status === 'done') return onDone(key, job.result);
+          if (job.status === 'done') return onDone(key, job.result, resolutionKey, jobId);
           if (job.status === 'failed') {
             console.warn('[Claude hole labels] job failed:', job.error, job.diagnostics);
-            labelingFailed(key, job.error);
+            labelingFailed(key, job.error, resolutionKey, jobId);
             return;
           }
-          poll(key, jobId, attempt + 1, onDone);
+          poll(key, jobId, attempt + 1, onDone, resolutionKey);
         })
-        .catch(function () { poll(key, jobId, attempt + 1, onDone); });
+        .catch(function () { poll(key, jobId, attempt + 1, onDone, resolutionKey); });
     }, POLL_MS);
   }
 
@@ -268,17 +375,28 @@
   function requestGeneration(key, center) {
     if (!NS.backend || NS.generate === false) return;
     if (pendingKeys[key]) return;
+    var resolutionKey = resolutionKeyFor(key);
+    if (pendingResolutionKeys[resolutionKey]) return;
     var courseName = resolveCourseName();
     if (!courseName) return; // only generate when we know which course this is
     pendingKeys[key] = true;
+    pendingResolutionKeys[resolutionKey] = true;
     NS.status = 'generating';
     NS.mode = 'generate';
+    NS.resolutionKey = resolutionKey;
     showToast('Drawing ' + courseName + ' from satellite — this can take a few minutes');
     try {
       window.dispatchEvent(new CustomEvent('gd:hole-labels-started', {
-        detail: { storeKey: key, courseName: courseName, mode: 'generate' }
+        detail: { storeKey: key, courseName: courseName, mode: 'generate', resolutionKey: resolutionKey }
       }));
     } catch (e) { /* no-op */ }
+    emitDebug('claude_post_started', {
+      storeKey: key,
+      courseName: courseName,
+      mode: 'generate',
+      resolutionKey: resolutionKey,
+      status: 'generating'
+    });
 
     fetch(NS.backend + '/v1/osm-hole-generate', {
       method: 'POST',
@@ -287,17 +405,27 @@
     })
       .then(function (r) { return r.json(); })
       .then(function (data) {
-        if (data.status === 'done') return finishGenerated(key, data.result);
+        if (data.status === 'done') return finishGenerated(key, data.result, resolutionKey, data.job_id || null);
         if (!data.job_id) throw new Error('generation request rejected');
-        return poll(key, data.job_id, 0, finishGenerated);
+        NS.jobId = data.job_id;
+        emitDebug('claude_job_id', {
+          storeKey: key,
+          claude_job_id: data.job_id,
+          jobId: data.job_id,
+          mode: 'generate',
+          resolutionKey: resolutionKey,
+          status: 'generating'
+        });
+        return poll(key, data.job_id, 0, finishGenerated, resolutionKey);
       })
       .catch(function (err) {
         console.warn('[Claude hole gen] request failed', err);
-        labelingFailed(key, 'generation request failed');
+        labelingFailed(key, 'generation request failed', resolutionKey);
       });
   }
 
-  function finishGenerated(key, result) {
+  function finishGenerated(key, result, resolutionKey, jobId) {
+    resolutionKey = resolutionKey || resolutionKeyFor(key);
     var elements = (result && result.elements) || [];
     try {
       localStorage.setItem(key, JSON.stringify({
@@ -307,22 +435,32 @@
         method: result && result.method
       }));
     } catch (e) { /* storage full — still injected on next fetch this session */ }
-    delete pendingKeys[key];
+    deletePending(key, resolutionKey);
     NS.status = 'ready';
     NS.mode = null;
     clearGuideCache();
+    emitDebug(elements.length ? 'claude_result_ready' : 'claude_result_empty', {
+      storeKey: key,
+      count: elements.length,
+      mode: 'generate',
+      claude_job_id: jobId || NS.jobId || null,
+      jobId: jobId || NS.jobId || null,
+      resolutionKey: resolutionKey,
+      status: 'ready'
+    });
     try {
       window.dispatchEvent(new CustomEvent('gd:hole-labels-ready', {
-        detail: { storeKey: key, count: elements.length, mode: 'generate' }
+        detail: { storeKey: key, count: elements.length, mode: 'generate', resolutionKey: resolutionKey, jobId: jobId || null }
       }));
     } catch (e) { /* no-op */ }
     if (!elements.length) return;
     showToast('Course map drawn for ' +
       ((result && result.course_name) || 'this course') + ' — loading');
-    if (NS.autoApply) applyLabels(elements.length);
+    if (NS.autoApply && !resolverOwnsCycle(resolutionKey)) applyLabels(elements.length);
   }
 
-  function finish(key, result) {
+  function finish(key, result, resolutionKey, jobId) {
+    resolutionKey = resolutionKey || resolutionKeyFor(key);
     try {
       localStorage.setItem(key, JSON.stringify({
         savedAt: Date.now(),
@@ -331,20 +469,28 @@
         sourceMapUrl: result && result.source_map_url
       }));
     } catch (e) { /* storage full — labels still applied next fetch */ }
-    delete pendingKeys[key];
+    deletePending(key, resolutionKey);
     NS.status = 'ready';
     NS.mode = null;
     clearGuideCache(); // force the app to re-fetch guides with refs injected
     var count = Object.keys((result && result.labels) || {}).length;
+    emitDebug(count ? 'claude_result_ready' : 'claude_result_empty', {
+      storeKey: key,
+      count: count,
+      claude_job_id: jobId || NS.jobId || null,
+      jobId: jobId || NS.jobId || null,
+      resolutionKey: resolutionKey,
+      status: 'ready'
+    });
     try {
       window.dispatchEvent(new CustomEvent('gd:hole-labels-ready', {
-        detail: { storeKey: key, count: count }
+        detail: { storeKey: key, count: count, resolutionKey: resolutionKey, jobId: jobId || null }
       }));
     } catch (e) { /* no-op */ }
     if (!count) return;
     showToast('Hole numbers found for ' +
       ((result && result.course_name) || 'this course') + ' — updating map');
-    if (NS.autoApply) applyLabels(count);
+    if (NS.autoApply && !resolverOwnsCycle(resolutionKey)) applyLabels(count);
   }
 
   // -------------------------------------------------------------------------
@@ -374,6 +520,7 @@
               headers: { 'Content-Type': 'application/json' }
             });
           }
+          if (hasRecentEmptyGeneratedResult(genKey)) return res;
           requestGeneration(genKey, center); // background; response passes through
           return res;
         }
@@ -387,6 +534,7 @@
             headers: { 'Content-Type': 'application/json' }
           });
         }
+        if (hasRecentEmptyLabelResult(key)) return res;
 
         // If the course already has a usable numbered set (e.g. Queenstown:
         // 18 refs plus stale unnumbered duplicates), the standard mapper
