@@ -271,6 +271,14 @@
           });
         }
 
+        // If the course already has a usable numbered set (e.g. Queenstown:
+        // 18 refs plus stale unnumbered duplicates), the standard mapper
+        // works — don't burn a labeling job that validation would reject.
+        var labeledCount = ((payload && payload.elements) || []).filter(function (el) {
+          return String((el.tags || {}).golf || '').toLowerCase() === 'hole' && refNumber(el);
+        }).length;
+        if (labeledCount >= 9) return res;
+
         requestLabels(key, center); // background; this response passes through
         return res;
       }).catch(function () { return res; });
