@@ -64,10 +64,29 @@ Then point the client at it (browser console or index.html):
 
 ## Endpoints
 
-- `POST /v1/osm-hole-labels` body `{lat, lng, course_name?}` ->
-  `202 {job_id, status: "pending"}` or `{status: "done", result, cached: true}`
+- `POST /v1/osm-hole-labels` body `{lat, lng, course_name?, elements?}` ->
+  `202 {job_id, status: "pending"}` or `{status: "done", result, cached: true}`.
+  `elements` is the client's own Overpass payload (preferred — server-side
+  Overpass access from cloud IPs is unreliable).
+- `POST /v1/osm-hole-generate` body `{lat, lng, course_name?}` -> same job
+  shape. For courses with NO `golf=hole` geometry in OSM at all: traces hole
+  centerlines from Esri satellite imagery, validated against the course's
+  scorecard (lengths), hole-by-hole guide (dogleg directions), and hole-
+  sequence adjacency. Result is `{elements: [...]}` in Overpass shape —
+  `golf=hole` ways + `golf=green` octagons — which the client injects so the
+  app's mapper works unchanged. Requires a findable scorecard; refuses to
+  emit unvalidated geometry.
 - `GET /v1/osm-hole-labels/jobs/{job_id}` ->
-  `{status: "pending"|"done"|"failed", result, error}`
+  `{status: "pending"|"done"|"failed", result, error, diagnostics}` (both job types)
+
+## Labeling methods (in order)
+
+1. **Scorecard distances** — one text call: per-hole distances (+ dogleg
+   shapes from "hole by hole"/"course tour" pages) matched against measured
+   OSM way lengths; ambiguities resolved by hole-sequence adjacency.
+2. **Vision match** — lettered schematic vs an online layout map (searched
+   across the whole web incl. scorecard backs and signboard photos), with
+   measured lengths + scorecard distances provided for scale.
 
 `result` includes `labels`, `course_name`, `source_map_url`, and
 `schematic_png_b64` (the lettered snapshot Claude saw — useful for a

@@ -604,6 +604,212 @@ def _fail(job_id, error, diag=None):
 
 
 # ---------------------------------------------------------------------------
+# Geometry generation: trace holes from satellite imagery when OSM is empty.
+# Output is an Overpass-shaped `elements` array the app's mapper already
+# consumes: golf=hole ways with ref + geometry, golf=green polygons.
+# ---------------------------------------------------------------------------
+
+GEN_CANVAS_W = 1400
+GEN_RADIUS_M = 1200
+GEN_GREEN_RADIUS_M = 14.0  # generated green octagon; app accepts 5-145 m span
+
+
+def _inv_merc(nx: float, ny: float, bbox: tuple) -> tuple:
+    """Normalized image coords (origin top-left) -> (lat, lng)."""
+    x0, y0, x1, y1 = bbox
+    mx = x0 + nx * (x1 - x0)
+    my = y0 + ny * (y1 - y0)
+    lng = mx * 360.0 - 180.0
+    lat = math.degrees(math.atan(math.sinh(math.pi * (1.0 - 2.0 * my))))
+    return lat, lng
+
+
+def _gen_bbox(lat: float, lng: float, radius_m: float) -> tuple:
+    dlat = radius_m / 111320.0
+    dlng = radius_m / (111320.0 * math.cos(math.radians(lat)))
+    x0, y0 = _merc(lat + dlat, lng - dlng)  # NW corner (smaller merc y)
+    x1, y1 = _merc(lat - dlat, lng + dlng)  # SE corner
+    return (x0, y0, x1, y1)
+
+
+def _octagon(center: tuple, radius_m: float) -> list[tuple]:
+    lat, lng = center
+    dlat = radius_m / 111320.0
+    dlng = radius_m / (111320.0 * math.cos(math.radians(lat)))
+    pts = []
+    for i in range(8):
+        a = math.pi * i / 4.0
+        pts.append((lat + dlat * math.cos(a), lng + dlng * math.sin(a)))
+    return pts
+
+
+def generate_traces(img_b64: str, course_name: str, scorecard: dict,
+                    shapes: dict | None, width_m: float, height_m: float,
+                    feedback: str | None = None) -> dict:
+    card = "\n".join(
+        f"  hole {n}: {round(d)} m"
+        + (f", dogleg {shapes[n]}" if shapes and shapes.get(n) in ("left", "right")
+           else (", straight" if shapes and shapes.get(n) == "straight" else ""))
+        for n, d in sorted(scorecard.items()))
+    prompt = f"""This is a satellite image of the golf course "{course_name}".
+The image covers exactly {width_m:.0f} m wide x {height_m:.0f} m tall, so a line
+spanning 10% of the image width is about {width_m / 10:.0f} m long.
+
+Official scorecard (your traces MUST be consistent with these):
+{card}
+
+Task: trace the playing centerline of EVERY hole, tee to green, by following the
+mown fairway shapes. Anchor hole 1 near the clubhouse/parking area; consecutive
+holes connect (a hole's green sits near the next hole's tee).
+
+Respond with ONLY this JSON (no other text, no markdown):
+{{
+  "success": true/false,
+  "holes": [
+    {{
+      "number": 1,
+      "line": [{{"x": 0.42, "y": 0.18}}, ...],   // 3-8 points, tee FIRST, green LAST,
+                                                 // normalized 0-1, origin top-left
+      "green": {{"x": 0.55, "y": 0.12}}          // green center, or null if unsure
+    }}
+  ]
+}}
+
+Rules: the traced line length must match that hole's scorecard distance; bend
+direction must match any stated dogleg; never invent holes you cannot see.
+Set success=false if you cannot confidently identify the course's holes."""
+    if feedback:
+        prompt += f"\n\nYour previous attempt was rejected: {feedback}\nReturn a corrected response."
+    resp = mapper.client.messages.create(
+        model=mapper.MODEL,
+        max_tokens=6000,
+        messages=[{"role": "user", "content": [
+            mapper.image_block(img_b64, "image/jpeg"),
+            {"type": "text", "text": prompt}]}],
+    )
+    return mapper.extract_json(mapper.text_of(resp))
+
+
+def validate_generated(holes_ll: dict, scorecard: dict, shapes: dict | None):
+    """Same evidence gates as the labeler: scorecard lengths, dogleg
+    directions, hole-sequence adjacency. Returns (ok, messages)."""
+    msgs = []
+    expected = sorted(scorecard)
+    if sorted(holes_ll) != expected:
+        msgs.append(f"traced holes {sorted(holes_ll)} != scorecard holes {expected}")
+    for n in sorted(set(holes_ll) & set(scorecard)):
+        length = way_length_m(holes_ll[n])
+        d = scorecard[n]
+        if abs(length - d) > max(0.20 * d, 50.0):
+            msgs.append(f"hole {n}: traced {length:.0f}m vs scorecard {d:.0f}m")
+    by_num = {n: {"points": pts} for n, pts in holes_ll.items()}
+    conflicts = shape_conflicts(by_num, shapes)
+    if conflicts > 1:
+        msgs.append(f"{conflicts} holes bend opposite to their described dogleg")
+    adj = adjacency_score(by_num)
+    if 0 <= adj < 0.6:
+        msgs.append(f"hole sequence adjacency only {adj:.2f} (greens should abut next tees)")
+    return (not msgs), msgs
+
+
+def elements_from_traces(holes_ll: dict, greens_ll: dict) -> list[dict]:
+    """Overpass-shaped elements, exactly what parseOsmHoleGuides /
+    parseOsmGreenShapes in gd-course-library-pin-lock.js consume."""
+    els = []
+    for n in sorted(holes_ll):
+        els.append({
+            "type": "way", "id": 990000000 + n,
+            "tags": {"golf": "hole", "ref": str(n), "gd_generated": "1"},
+            "geometry": [{"lat": p[0], "lon": p[1]} for p in holes_ll[n]],
+        })
+    for n in sorted(greens_ll or {}):
+        els.append({
+            "type": "way", "id": 991000000 + n,
+            "tags": {"golf": "green", "ref": str(n), "gd_generated": "1"},
+            "geometry": [{"lat": p[0], "lon": p[1]}
+                         for p in _octagon(greens_ll[n], GEN_GREEN_RADIUS_M)],
+        })
+    return els
+
+
+def run_generate_pipeline(job_id: str, lat: float, lng: float,
+                          course_name: str | None, cache_key: str):
+    diag = {"attempts": 0}
+    try:
+        course_name = course_name or resolve_course_name(lat, lng)
+        if not course_name:
+            _fail(job_id, "could not resolve course name; pass course_name explicitly", diag)
+            return
+        diag["course_name"] = course_name
+
+        scorecard, shapes = None, None
+        try:
+            scorecard, shapes = mapper.find_scorecard_distances(course_name)
+        except Exception as exc:
+            print(f"scorecard lookup failed: {exc}")
+        diag["scorecard_holes"] = len(scorecard) if scorecard else 0
+        if not scorecard:
+            _fail(job_id, "no scorecard found online — cannot validate generated geometry", diag)
+            return
+
+        bbox = _gen_bbox(lat, lng, GEN_RADIUS_M)
+        x0, y0, x1, y1 = bbox
+        height = max(400, int(GEN_CANVAS_W * (y1 - y0) / (x1 - x0)))
+        img = fetch_tile_background(x0, y0, x1, y1, GEN_CANVAS_W, height)
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=90)
+        img_b64 = base64.standard_b64encode(buf.getvalue()).decode()
+        nw, se = _inv_merc(0, 0, bbox), _inv_merc(1, 1, bbox)
+        width_m = _hav_m((lat, nw[1]), (lat, se[1]))
+        height_m = _hav_m((nw[0], lng), (se[0], lng))
+
+        feedback = None
+        for attempt in (1, 2):
+            diag["attempts"] = attempt
+            try:
+                data = generate_traces(img_b64, course_name, scorecard, shapes,
+                                       width_m, height_m, feedback)
+            except Exception as exc:
+                feedback = f"response was not valid JSON ({exc})"
+                continue
+            if not data.get("success"):
+                feedback = "you reported success=false; look again for the fairway shapes"
+                continue
+            holes_ll, greens_ll, parse_ok = {}, {}, True
+            for hobj in data.get("holes") or []:
+                try:
+                    n = int(hobj["number"])
+                    pts = [_inv_merc(float(p["x"]), float(p["y"]), bbox)
+                           for p in hobj["line"]]
+                    if len(pts) < 2:
+                        raise ValueError("line too short")
+                    holes_ll[n] = pts
+                    g = hobj.get("green")
+                    if g:
+                        greens_ll[n] = _inv_merc(float(g["x"]), float(g["y"]), bbox)
+                except Exception:
+                    parse_ok = False
+            if not parse_ok or not holes_ll:
+                feedback = ("some holes were malformed; every hole needs a number "
+                            "and a line of {x,y} points")
+                continue
+            ok, msgs = validate_generated(holes_ll, scorecard, shapes)
+            diag["validation"] = msgs
+            if ok:
+                _finish(job_id, cache_key, {
+                    "elements": elements_from_traces(holes_ll, greens_ll),
+                    "course_name": course_name,
+                    "method": "generated-from-satellite",
+                })
+                return
+            feedback = "validation failures: " + "; ".join(msgs[:6])
+
+        _fail(job_id, "generated geometry failed validation", diag)
+    except Exception as exc:
+        _fail(job_id, str(exc), diag)
+
+
+# ---------------------------------------------------------------------------
 # HTTP surface
 # ---------------------------------------------------------------------------
 
@@ -627,6 +833,27 @@ def create_labels(req: LabelRequest):
     threading.Thread(target=run_pipeline,
                      args=(job_id, req.lat, req.lng, req.course_name, cache_key,
                            req.elements),
+                     daemon=True).start()
+    return {"job_id": job_id, "status": "pending"}
+
+
+class GenerateRequest(BaseModel):
+    lat: float
+    lng: float
+    course_name: str | None = None
+
+
+@app.post("/v1/osm-hole-generate")
+def create_generated(req: GenerateRequest):
+    cache_key = f"gen:{round(req.lat, 4)},{round(req.lng, 4)}"
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return {"status": "done", "result": cached, "cached": True}
+    job_id = uuid.uuid4().hex
+    with LOCK:
+        JOBS[job_id] = {"status": "pending", "result": None, "error": None}
+    threading.Thread(target=run_generate_pipeline,
+                     args=(job_id, req.lat, req.lng, req.course_name, cache_key),
                      daemon=True).start()
     return {"job_id": job_id, "status": "pending"}
 
