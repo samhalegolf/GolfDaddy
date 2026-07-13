@@ -29,17 +29,37 @@ drawing) runs completely unchanged.
 Returns `{"labels": {"way-123456": 4, ...}}` keyed the same way the app keys
 guide ids (`${element.type}-${element.id}`).
 
-## Run
+## Deploy (Render)
+
+The repo root has a `render.yaml` blueprint. In the Render dashboard:
+New -> Blueprint -> connect this GitHub repo -> set the two secrets when
+prompted (`ANTHROPIC_API_KEY`, `SUPABASE_SERVICE_ROLE_KEY` from Supabase
+dashboard -> Settings -> API). The service deploys to
+`https://clarity-hole-labeler.onrender.com`, which `index.html` already sets
+as `window.gdClaudeHoleLabels.backend`.
+
+Env vars:
+
+- `ANTHROPIC_API_KEY` (required) — Claude API key
+- `ALLOWED_ORIGINS` — comma-separated CORS origins
+  (default `https://clarity-caddie.netlify.app`)
+- `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` (optional) — persistent label
+  cache in `public.hole_label_cache` (migration:
+  `supabase/migrations/20260713_create_hole_label_cache.sql`, already applied
+  to the clarity-caddie project). Without them the cache is in-memory only.
+
+## Run locally
 
 ```bash
 pip install -r requirements.txt
-ANTHROPIC_API_KEY=sk-... uvicorn caddy_osm_hole_labeler:app --host 0.0.0.0 --port 8000
+ANTHROPIC_API_KEY=sk-... ALLOWED_ORIGINS=http://localhost:8888 \
+  uvicorn caddy_osm_hole_labeler:app --host 0.0.0.0 --port 8000
 ```
 
-Point the client at it (e.g. in index.html after the script tag):
+Then point the client at it (browser console or index.html):
 
 ```html
-<script>window.gdClaudeHoleLabels.backend = 'https://your-host';</script>
+<script>window.gdClaudeHoleLabels.backend = 'http://localhost:8000';</script>
 ```
 
 ## Endpoints
@@ -57,13 +77,16 @@ The client sends `course_name` automatically from `window.gdAssumedCourseName`;
 without it the service falls back to reverse-geocoding via Nominatim, which is
 less reliable for club names.
 
-## Before production
+## Production notes
 
-- Swap the in-memory `JOBS`/`CACHE` dicts for Redis or the app DB (results
-  currently vanish on restart and are per-worker).
-- Tighten the CORS `allow_origins` to the app origin.
-- A course's labels never change: cache aggressively; the pipeline should run
-  roughly once per course, ever.
+- Labels persist in Supabase (`hole_label_cache`); a course's labels never
+  change, so the Claude pipeline runs roughly once per course, ever. `JOBS`
+  remain in-memory — jobs are transient (the client polls for ~3 min), fine
+  for a single instance. Don't scale to multiple instances without moving
+  jobs to shared storage.
+- CORS is locked to the app origin via `ALLOWED_ORIGINS`.
+- Render's free tier spins down when idle: the first request for a new course
+  may take ~50s to wake the instance; polling keeps it alive during a job.
 - Some courses (flat, parallel, similar-length holes) will genuinely fail to
   match and return `failed` — the client treats that as "no labels" and the
   app behaves as it does today.

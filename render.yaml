@@ -1,0 +1,32 @@
+# Render blueprint for the OSM hole-labeler service (server/hole-labeler).
+# Deploy: Render dashboard -> New -> Blueprint -> connect this GitHub repo.
+# After first deploy the service lives at https://clarity-hole-labeler.onrender.com
+# (index.html already points window.gdClaudeHoleLabels.backend there).
+#
+# Set these two secrets in the Render dashboard when prompted:
+#   ANTHROPIC_API_KEY          - console.anthropic.com API key
+#   SUPABASE_SERVICE_ROLE_KEY  - Supabase dashboard -> Settings -> API (service_role)
+#
+# Note: the free plan spins down after inactivity, so the first request for a
+# new course may take ~50s to wake the instance. Polling keeps it awake for the
+# duration of a labeling job. Upgrade to starter to avoid cold starts.
+services:
+  - type: web
+    name: clarity-hole-labeler
+    runtime: python
+    rootDir: server/hole-labeler
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn caddy_osm_hole_labeler:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /healthz
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.4
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: SUPABASE_URL
+        value: https://zcevluithwoumvafhmct.supabase.co
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: ALLOWED_ORIGINS
+        value: https://clarity-caddie.netlify.app

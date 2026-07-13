@@ -17,12 +17,24 @@ guide ids (`${element.type}-${element.id}`), ready to inject as tags.ref.
 
 Deps: pip install fastapi uvicorn anthropic httpx pillow
 Run:  ANTHROPIC_API_KEY=... uvicorn caddy_osm_hole_labeler:app --port 8000
-Production: swap JOBS/CACHE dicts for Redis/DB; set CORS to your app origin.
+
+Env:
+  ANTHROPIC_API_KEY          required — Claude API key
+  ALLOWED_ORIGINS            comma-separated CORS origins
+                             (default: https://clarity-caddie.netlify.app)
+  SUPABASE_URL               optional — enables persistent label cache
+  SUPABASE_SERVICE_ROLE_KEY  optional — service-role key for hole_label_cache
+
+With Supabase configured, results persist in public.hole_label_cache and the
+Claude pipeline runs roughly once per course, ever. Without it, the cache is
+in-memory only (per-worker, lost on restart). JOBS stay in-memory: jobs are
+transient (client polls for ~3 min), fine for a single-instance deploy.
 """
 
 import io
 import json
 import math
+import os
 import re
 import threading
 import uuid
@@ -37,12 +49,65 @@ from pydantic import BaseModel
 import golf_hole_mapper as mapper
 
 app = FastAPI(title="GolfDaddy OSM Hole Labeler")
-app.add_middleware(CORSMiddleware, allow_origins=["*"],  # tighten in production
+
+ALLOWED_ORIGINS = [o.strip() for o in os.environ.get(
+    "ALLOWED_ORIGINS", "https://clarity-caddie.netlify.app"
+).split(",") if o.strip()]
+app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS,
                    allow_methods=["*"], allow_headers=["*"])
 
 JOBS: dict[str, dict] = {}
-CACHE: dict[str, dict] = {}
+CACHE: dict[str, dict] = {}  # in-memory fallback / hot layer over Supabase
 LOCK = threading.Lock()
+
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
+SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+CACHE_TABLE = "hole_label_cache"
+
+
+def _sb_headers() -> dict:
+    return {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+
+
+def cache_get(cache_key: str):
+    """In-memory first, then Supabase (if configured)."""
+    with LOCK:
+        hit = CACHE.get(cache_key)
+    if hit is not None:
+        return hit
+    if not (SUPABASE_URL and SUPABASE_KEY):
+        return None
+    try:
+        r = httpx.get(f"{SUPABASE_URL}/rest/v1/{CACHE_TABLE}",
+                      params={"cache_key": f"eq.{cache_key}", "select": "result"},
+                      headers=_sb_headers(), timeout=10)
+        r.raise_for_status()
+        rows = r.json()
+        if rows:
+            result = rows[0]["result"]
+            with LOCK:
+                CACHE[cache_key] = result
+            return result
+    except Exception as exc:
+        print(f"supabase cache read failed ({cache_key}): {exc}")
+    return None
+
+
+def cache_put(cache_key: str, result: dict):
+    with LOCK:
+        CACHE[cache_key] = result
+    if not (SUPABASE_URL and SUPABASE_KEY):
+        return
+    try:
+        httpx.post(
+            f"{SUPABASE_URL}/rest/v1/{CACHE_TABLE}",
+            headers={**_sb_headers(),
+                     "Prefer": "resolution=merge-duplicates"},
+            json={"cache_key": cache_key, "result": result},
+            timeout=10,
+        ).raise_for_status()
+    except Exception as exc:
+        print(f"supabase cache write failed ({cache_key}): {exc}")
 
 OVERPASS = "https://overpass-api.de/api/interpreter"
 TILE_URL = ("https://server.arcgisonline.com/ArcGIS/rest/services/"
@@ -300,7 +365,7 @@ def run_pipeline(job_id: str, lat: float, lng: float,
 def _finish(job_id, cache_key, result):
     with LOCK:
         JOBS[job_id] = {"status": "done", "result": result, "error": None}
-        CACHE[cache_key] = result
+    cache_put(cache_key, result)
 
 
 def _fail(job_id, error):
@@ -321,8 +386,7 @@ class LabelRequest(BaseModel):
 @app.post("/v1/osm-hole-labels")
 def create_labels(req: LabelRequest):
     cache_key = f"{round(req.lat, 4)},{round(req.lng, 4)}"
-    with LOCK:
-        cached = CACHE.get(cache_key)
+    cached = cache_get(cache_key)
     if cached is not None:
         return {"status": "done", "result": cached, "cached": True}
 
@@ -342,3 +406,8 @@ def get_job(job_id: str):
     if job is None:
         raise HTTPException(404, "unknown job_id")
     return job
+
+
+@app.get("/healthz")
+def healthz():
+    return {"ok": True, "supabase_cache": bool(SUPABASE_URL and SUPABASE_KEY)}
