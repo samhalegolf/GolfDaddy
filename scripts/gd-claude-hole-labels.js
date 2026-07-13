@@ -1,0 +1,279 @@
+/*
+ * gd-claude-hole-labels.js
+ * -------------------------
+ * Drop-in for GolfDaddy. For courses whose OSM data has golf=hole geometry but
+ * no ref tags, this script:
+ *
+ *   1. Intercepts the app's Overpass guide fetch (the one made by
+ *      loadOsmGuideBundle in gd-course-library-pin-lock.js).
+ *   2. If stored Claude labels exist for this course, injects them as tags.ref
+ *      into the payload BEFORE parseOsmHoleGuides sees it — so the existing
+ *      mapper works completely unchanged, numbers and all.
+ *   3. If not, kicks off a background labeling job on the backend
+ *      (caddy_osm_hole_labeler.py), polls it, stores the result, clears the
+ *      app's guide cache, and fires a 'gd:hole-labels-ready' event.
+ *   4. When labels arrive, shows a toast (via the app's window.toast, with a
+ *      built-in fallback) and auto-refreshes by calling
+ *      window.gdAutoMapOsmCourse({fresh:true}) — the same entry point
+ *      scheduleOsmAutoMapForPlay uses — so the numbered guides load, hole
+ *      objects save, and the map redraws without reopening the mapper.
+ *
+ * Install: load AFTER the app scripts in index.html:
+ *   <script src="scripts/gd-claude-hole-labels.js"></script>
+ * Configure: window.gdClaudeHoleLabels.backend = 'https://your-host';
+ * Course name resolves automatically from window.gdAssumedCourseName /
+ * sessionStorage 'gd_assumed_course_name' (the app already maintains these);
+ * set window.gdClaudeHoleLabels.courseName to override, or leave everything
+ * unset and the backend reverse-geocodes the course center as a last resort.
+ * Optional:  window.gdClaudeHoleLabels.autoApply = false; // toast only,
+ *            skip the automatic gdAutoMapOsmCourse refresh
+ */
+(function () {
+  'use strict';
+
+  var NS = (window.gdClaudeHoleLabels = window.gdClaudeHoleLabels || {});
+  // Set window.gdClaudeHoleLabels.backend to the hole-labeler service URL
+  // (server/hole-labeler) to enable label generation. Left unset, the feature
+  // stays dormant: any labels already stored for a course are still injected,
+  // but no network requests fire — so the app behaves exactly as it does today.
+  NS.backend = NS.backend || null;
+  NS.courseName = NS.courseName || null;
+  NS.autoApply = NS.autoApply !== false; // default on
+  NS.status = 'idle';
+
+  var STORE_PREFIX = 'gd_claude_hole_labels_v1:';
+  var GUIDE_CACHE_PREFIX = 'gd_osm_hole_guides_v1:'; // matches pin-lock.js
+  var POLL_MS = 5000;
+  var POLL_MAX = 36; // 3 minutes
+  var pendingKeys = {};
+
+  function isGuideQuery(url) {
+    if (!/overpass-api\.de/i.test(url)) return false;
+    try { return /golf/i.test(decodeURIComponent(url)); }
+    catch (e) { return /golf/i.test(url); }
+  }
+
+  function centerFromUrl(url) {
+    var decoded;
+    try { decoded = decodeURIComponent(url); } catch (e) { decoded = url; }
+    var m = decoded.match(/around:\d+\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/);
+    return m ? { lat: Number(m[1]), lng: Number(m[2]) } : null;
+  }
+
+  function storeKey(center) {
+    return STORE_PREFIX + center.lat.toFixed(4) + ',' + center.lng.toFixed(4);
+  }
+
+  function readLabels(key) {
+    try {
+      var raw = localStorage.getItem(key);
+      return raw ? (JSON.parse(raw).labels || null) : null;
+    } catch (e) { return null; }
+  }
+
+  function refNumber(el) {
+    var tags = (el && el.tags) || {};
+    var m = String(tags.ref || tags.name || '').match(/\d+/);
+    var n = m ? Number(m[0]) : NaN;
+    return n >= 1 && n <= 36 ? n : null;
+  }
+
+  function unlabeledHoles(payload) {
+    return ((payload && payload.elements) || []).filter(function (el) {
+      return String((el.tags || {}).golf || '').toLowerCase() === 'hole' && !refNumber(el);
+    });
+  }
+
+  function injectLabels(payload, labels) {
+    var hits = 0;
+    unlabeledHoles(payload).forEach(function (el) {
+      var n = labels[(el.type || 'osm') + '-' + el.id];
+      if (n != null) {
+        el.tags = el.tags || {};
+        el.tags.ref = String(n);
+        hits++;
+      }
+    });
+    return hits;
+  }
+
+  function clearGuideCache() {
+    try {
+      Object.keys(localStorage).forEach(function (k) {
+        if (k.indexOf(GUIDE_CACHE_PREFIX) === 0) localStorage.removeItem(k);
+      });
+    } catch (e) { /* no-op */ }
+  }
+
+  // ---------------------------------------------------------------------
+  // Toast + auto-apply
+  // ---------------------------------------------------------------------
+  function showToast(msg) {
+    try {
+      if (typeof window.toast === 'function') return window.toast(msg);
+    } catch (e) { /* fall through to built-in */ }
+    try {
+      var el = document.createElement('div');
+      el.textContent = msg;
+      el.style.cssText =
+        'position:fixed;left:50%;bottom:88px;transform:translateX(-50%);' +
+        'background:#101820;color:#fff;padding:10px 18px;border-radius:20px;' +
+        'font:600 14px/1.3 system-ui,sans-serif;z-index:99999;opacity:0;' +
+        'transition:opacity .25s;box-shadow:0 4px 14px rgba(0,0,0,.35);' +
+        'max-width:82vw;text-align:center;pointer-events:none;';
+      document.body.appendChild(el);
+      requestAnimationFrame(function () { el.style.opacity = '1'; });
+      setTimeout(function () {
+        el.style.opacity = '0';
+        setTimeout(function () { el.remove(); }, 300);
+      }, 3200);
+    } catch (e) { /* no-op */ }
+  }
+
+  function applyLabels(count, attempt) {
+    attempt = attempt || 0;
+    if (typeof window.gdAutoMapOsmCourse !== 'function') {
+      // Script order race or mapper not loaded yet — retry briefly, then
+      // leave it to the next natural guide load (labels are stored).
+      if (attempt < 3) {
+        setTimeout(function () { applyLabels(count, attempt + 1); }, 2000);
+      } else {
+        showToast('Hole numbers ready — reopen the course mapper to apply');
+      }
+      return;
+    }
+    // Same entry point scheduleOsmAutoMapForPlay uses. fresh:true forces the
+    // guide bundle past the in-memory cache and back through Overpass, where
+    // the interceptor injects the stored refs. quiet:true lets the app show
+    // its own "OSM base map ready" toast only when something was saved.
+    // Frame the camera only if the full mapper is open, to avoid yanking the
+    // view mid-round.
+    try {
+      Promise.resolve(window.gdAutoMapOsmCourse({
+        fresh: true,
+        quiet: true,
+        frame: !!window.gdFullMappingMode
+      })).catch(function (err) {
+        console.warn('[Claude hole labels] auto-map refresh failed', err);
+      });
+    } catch (err) {
+      console.warn('[Claude hole labels] auto-map refresh failed', err);
+    }
+  }
+
+  function resolveCourseName() {
+    if (NS.courseName) return NS.courseName;
+    try {
+      return window.gdAssumedCourseName ||
+        sessionStorage.getItem('gd_assumed_course_name') || null;
+    } catch (e) {
+      return window.gdAssumedCourseName || null;
+    }
+  }
+
+  function requestLabels(key, center) {
+    if (!NS.backend) return; // dormant until a backend host is configured
+    if (pendingKeys[key]) return;
+    pendingKeys[key] = true;
+    NS.status = 'labeling';
+
+    var body = { lat: center.lat, lng: center.lng };
+    var courseName = resolveCourseName();
+    if (courseName) body.course_name = courseName;
+
+    fetch(NS.backend + '/v1/osm-hole-labels', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.status === 'done') return finish(key, data.result);
+        if (!data.job_id) throw new Error('labeling request rejected');
+        return poll(key, data.job_id, 0);
+      })
+      .catch(function (err) {
+        console.warn('[Claude hole labels] request failed', err);
+        NS.status = 'failed';
+        delete pendingKeys[key];
+      });
+  }
+
+  function poll(key, jobId, attempt) {
+    if (attempt >= POLL_MAX) {
+      NS.status = 'failed';
+      delete pendingKeys[key];
+      return;
+    }
+    setTimeout(function () {
+      fetch(NS.backend + '/v1/osm-hole-labels/jobs/' + jobId)
+        .then(function (r) { return r.json(); })
+        .then(function (job) {
+          if (job.status === 'done') return finish(key, job.result);
+          if (job.status === 'failed') {
+            console.warn('[Claude hole labels] job failed:', job.error);
+            NS.status = 'failed';
+            delete pendingKeys[key];
+            return;
+          }
+          poll(key, jobId, attempt + 1);
+        })
+        .catch(function () { poll(key, jobId, attempt + 1); });
+    }, POLL_MS);
+  }
+
+  function finish(key, result) {
+    try {
+      localStorage.setItem(key, JSON.stringify({
+        savedAt: Date.now(),
+        labels: (result && result.labels) || {},
+        courseName: result && result.course_name,
+        sourceMapUrl: result && result.source_map_url
+      }));
+    } catch (e) { /* storage full — labels still applied next fetch */ }
+    delete pendingKeys[key];
+    NS.status = 'ready';
+    clearGuideCache(); // force the app to re-fetch guides with refs injected
+    var count = Object.keys((result && result.labels) || {}).length;
+    try {
+      window.dispatchEvent(new CustomEvent('gd:hole-labels-ready', {
+        detail: { storeKey: key, count: count }
+      }));
+    } catch (e) { /* no-op */ }
+    if (!count) return;
+    showToast('Hole numbers found for ' +
+      ((result && result.course_name) || 'this course') + ' — updating map');
+    if (NS.autoApply) applyLabels(count);
+  }
+
+  // -------------------------------------------------------------------------
+  // fetch interceptor
+  // -------------------------------------------------------------------------
+  var origFetch = window.fetch;
+  window.fetch = function (input, init) {
+    var url = typeof input === 'string' ? input : (input && input.url) || '';
+    if (!isGuideQuery(url)) return origFetch.apply(this, arguments);
+
+    var center = centerFromUrl(url);
+    return origFetch.apply(this, arguments).then(function (res) {
+      if (!res.ok || !center) return res;
+      return res.clone().json().then(function (payload) {
+        var missing = unlabeledHoles(payload);
+        if (!missing.length) return res; // OSM already has refs — nothing to do
+
+        var key = storeKey(center);
+        var labels = readLabels(key);
+        if (labels && injectLabels(payload, labels) > 0) {
+          return new Response(JSON.stringify(payload), {
+            status: res.status,
+            statusText: res.statusText,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
+
+        requestLabels(key, center); // background; this response passes through
+        return res;
+      }).catch(function () { return res; });
+    });
+  };
+})();
