@@ -78,27 +78,82 @@ def text_of(response) -> str:
 
 def find_candidate_pages(course_name: str) -> list[str]:
     prompt = (
-        f'Search the web to find a full-course layout map (hole diagram) for the golf '
-        f'course "{course_name}". Useful queries: "{course_name} course map", '
-        f'"{course_name} hole layout", "{course_name} scorecard course map", '
-        f'"{course_name} scorecard back". '
-        f"Tip: smaller clubs often print the course layout on the BACK of their "
-        f"scorecard, so pages with scorecard photos are good candidates too. "
-        f"Prefer the course's own website, then booking/review sites. "
-        f"Respond with ONLY a JSON array (no other text, no markdown) of up to 5 page "
-        f"URLs most likely to contain a course layout diagram image."
+        f'Search the whole web to find a full-course layout map (hole diagram) for the '
+        f'golf course "{course_name}" — do NOT limit yourself to the club\'s own '
+        f'website. Good sources: golf directories, booking sites, review sites '
+        f'(TripAdvisor visitor photos often show the course map signboard or the back '
+        f'of the scorecard), blogs, and news articles. Useful queries: '
+        f'"{course_name} course map", "{course_name} hole layout", '
+        f'"{course_name} scorecard back", "{course_name} tripadvisor photos". '
+        f"Smaller clubs often print the layout on the BACK of their scorecard or on a "
+        f"welcome signboard, so photos of those count. "
+        f"Respond with ONLY a JSON array (no other text, no markdown) of up to 6 page "
+        f"URLs most likely to contain a course layout image."
     )
     resp = client.messages.create(
         model=MODEL,
         max_tokens=1500,
         messages=[{"role": "user", "content": prompt}],
-        tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 4}],
+        tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 5}],
     )
     try:
         urls = extract_json(text_of(resp))
         return [u for u in urls if isinstance(u, str) and u.startswith("http")]
     except (json.JSONDecodeError, AttributeError):
         return []
+
+
+# ---------------------------------------------------------------------------
+# Scorecard distances via Claude + web search (for the distance-match method)
+# ---------------------------------------------------------------------------
+
+def find_scorecard_distances(course_name: str):
+    """Returns (distances_m, shapes) from the course's scorecard and
+    hole-by-hole descriptions, or (None, None).
+    distances_m: {hole: meters}; shapes: {hole: "left"|"right"|"straight"}."""
+    prompt = (
+        f'Search the web for the scorecard AND any hole-by-hole course description '
+        f'of the golf course "{course_name}" (club sites label these "hole by hole", '
+        f'"course tour", "course guide", or "pro\'s tips" — they usually give each '
+        f"hole's distance and shape). Extract per-hole distances for the "
+        f"LONGEST standard men's tees, and — when a hole-by-hole guide exists "
+        f'(phrases like "dogleg left", "sharp right", "straight away") — each '
+        f"hole's shape. Sources: the club website, golf directories, booking "
+        f"sites, review photos. Respond ONLY with JSON (no other text): "
+        f'{{"found": true/false, "units": "meters" or "yards", '
+        f'"holes": {{"1": {{"distance": 345, "shape": "left"}}, '
+        f'"2": {{"distance": 410, "shape": null}}, ...}}}} '
+        f'where "shape" is "left", "right", "straight", or null when the source '
+        f"doesn't say. Set found=false if you cannot locate reliable per-hole "
+        f"distances for this specific course. Never invent numbers."
+    )
+    resp = client.messages.create(
+        model=MODEL,
+        max_tokens=1600,
+        messages=[{"role": "user", "content": prompt}],
+        tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 5}],
+    )
+    try:
+        data = extract_json(text_of(resp))
+    except (json.JSONDecodeError, AttributeError):
+        return None, None
+    if not data.get("found"):
+        return None, None
+    dist, shapes = {}, {}
+    try:
+        for k, v in (data.get("holes") or {}).items():
+            n = int(k)
+            dist[n] = float(v["distance"])
+            s = str(v.get("shape") or "").lower()
+            if s in ("left", "right", "straight"):
+                shapes[n] = s
+    except (TypeError, ValueError, KeyError):
+        return None, None
+    if not dist:
+        return None, None
+    if str(data.get("units", "")).lower().startswith("yard"):
+        dist = {k: v * 0.9144 for k, v in dist.items()}
+    return dist, shapes
 
 
 # ---------------------------------------------------------------------------
