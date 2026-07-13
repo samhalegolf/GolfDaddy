@@ -126,27 +126,11 @@ EXPECTED_HOLES = 18
 # Overpass: fetch golf=hole geometry (mirrors the app's query)
 # ---------------------------------------------------------------------------
 
-def fetch_osm_holes(lat: float, lng: float) -> list[dict]:
-    query = (f'[out:json][timeout:18];('
-             f'way(around:1400,{lat},{lng})["golf"="hole"];'
-             f'relation(around:1400,{lat},{lng})["golf"="hole"];'
-             f');out geom tags;')
-    resp, last_exc = None, None
-    for endpoint in OVERPASS_ENDPOINTS:
-        try:
-            # POST + explicit User-Agent: overpass-api.de rejects anonymous
-            # GETs from cloud-provider IPs (406) even when browsers succeed.
-            resp = httpx.post(endpoint, data={"data": query},
-                              headers={"User-Agent": OVERPASS_UA}, timeout=25)
-            resp.raise_for_status()
-            break
-        except Exception as exc:
-            last_exc = exc
-            resp = None
-    if resp is None:
-        raise RuntimeError(f"all Overpass endpoints failed: {last_exc}")
+def parse_holes(elements: list[dict] | None) -> list[dict]:
     holes = []
-    for el in resp.json().get("elements", []):
+    for el in elements or []:
+        if str((el.get("tags") or {}).get("golf", "")).lower() != "hole":
+            continue
         pts = geometry_points(el)
         if len(pts) < 2:
             continue
@@ -156,6 +140,27 @@ def fetch_osm_holes(lat: float, lng: float) -> list[dict]:
             "points": pts,  # [(lat, lng), ...]
         })
     return holes
+
+
+def fetch_osm_holes(lat: float, lng: float) -> list[dict]:
+    """Fallback only — the client normally ships its own Overpass payload.
+    Cloud-host IPs are heavily deprioritized by Overpass servers."""
+    query = (f'[out:json][timeout:50];('
+             f'way(around:1400,{lat},{lng})["golf"="hole"];'
+             f'relation(around:1400,{lat},{lng})["golf"="hole"];'
+             f');out geom tags;')
+    last_exc = None
+    for endpoint in OVERPASS_ENDPOINTS:
+        try:
+            # POST + explicit User-Agent: overpass-api.de rejects anonymous
+            # GETs from cloud-provider IPs (406) even when browsers succeed.
+            resp = httpx.post(endpoint, data={"data": query},
+                              headers={"User-Agent": OVERPASS_UA}, timeout=60)
+            resp.raise_for_status()
+            return parse_holes(resp.json().get("elements", []))
+        except Exception as exc:
+            last_exc = exc
+    raise RuntimeError(f"all Overpass endpoints failed: {last_exc}")
 
 
 def geometry_points(el: dict) -> list[tuple[float, float]]:
@@ -324,7 +329,8 @@ def resolve_course_name(lat: float, lng: float) -> str | None:
 
 
 def run_pipeline(job_id: str, lat: float, lng: float,
-                 course_name: str | None, cache_key: str):
+                 course_name: str | None, cache_key: str,
+                 elements: list[dict] | None = None):
     # Diagnostics travel with the job so a failure says WHERE it died:
     # zero pages = Claude web search found nothing; zero screened = no image
     # passed the "real layout map with printed numbers" screen; attempts with
@@ -333,7 +339,9 @@ def run_pipeline(job_id: str, lat: float, lng: float,
             "images_scraped": 0, "candidates_screened_in": 0,
             "match_attempts": 0, "dirty_matches": 0}
     try:
-        holes = fetch_osm_holes(lat, lng)
+        # Prefer the client's own Overpass payload: it already fetched the
+        # data from a residential IP, so no server-side Overpass roundtrip.
+        holes = parse_holes(elements) if elements else fetch_osm_holes(lat, lng)
         unlabeled = [h for h in holes if h["ref"] is None]
         diag["osm_holes"], diag["unlabeled"] = len(holes), len(unlabeled)
         if not unlabeled:
@@ -413,6 +421,7 @@ class LabelRequest(BaseModel):
     lat: float
     lng: float
     course_name: str | None = None
+    elements: list[dict] | None = None  # client's own Overpass payload
 
 
 @app.post("/v1/osm-hole-labels")
@@ -426,7 +435,8 @@ def create_labels(req: LabelRequest):
     with LOCK:
         JOBS[job_id] = {"status": "pending", "result": None, "error": None}
     threading.Thread(target=run_pipeline,
-                     args=(job_id, req.lat, req.lng, req.course_name, cache_key),
+                     args=(job_id, req.lat, req.lng, req.course_name, cache_key,
+                           req.elements),
                      daemon=True).start()
     return {"job_id": job_id, "status": "pending"}
 
