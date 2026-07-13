@@ -182,7 +182,7 @@
     } catch (e) { /* no-op */ }
   }
 
-  function requestLabels(key, center) {
+  function requestLabels(key, center, elements) {
     if (!NS.backend) return; // dormant until a backend host is configured
     if (pendingKeys[key]) return;
     pendingKeys[key] = true;
@@ -191,6 +191,9 @@
     var body = { lat: center.lat, lng: center.lng };
     var courseName = resolveCourseName();
     if (courseName) body.course_name = courseName;
+    // Ship the Overpass payload we just received: the backend's own Overpass
+    // access is unreliable (cloud IPs are deprioritized), ours just worked.
+    if (elements && elements.length) body.elements = elements;
 
     // Make the background job visible — without this the mapper just sits
     // on its empty state for the 1-3 minutes the labeling pipeline runs.
@@ -297,7 +300,7 @@
         }).length;
         if (labeledCount >= 9) return res;
 
-        requestLabels(key, center); // background; this response passes through
+        requestLabels(key, center, payload.elements); // background; response passes through
         return res;
       }).catch(function () { return res; });
     });
