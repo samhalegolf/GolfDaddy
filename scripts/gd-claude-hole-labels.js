@@ -40,6 +40,8 @@
   NS.courseName = NS.courseName || null;
   NS.autoApply = NS.autoApply !== false; // default on
   NS.status = 'idle';
+  NS.mode = NS.mode || null;
+  NS.requestedHole = NS.requestedHole || null;
 
   var STORE_PREFIX = 'gd_claude_hole_labels_v1:';
   var GEN_STORE_PREFIX = 'gd_claude_gen_holes_v1:';
@@ -187,6 +189,7 @@
 
   function labelingFailed(key, why) {
     NS.status = 'failed';
+    NS.mode = null;
     delete pendingKeys[key];
     showToast('Couldn’t find hole numbers automatically for this course');
     try {
@@ -201,6 +204,7 @@
     if (pendingKeys[key]) return;
     pendingKeys[key] = true;
     NS.status = 'labeling';
+    NS.mode = 'labeling';
 
     var body = { lat: center.lat, lng: center.lng };
     var courseName = resolveCourseName();
@@ -268,6 +272,7 @@
     if (!courseName) return; // only generate when we know which course this is
     pendingKeys[key] = true;
     NS.status = 'generating';
+    NS.mode = 'generate';
     showToast('Drawing ' + courseName + ' from satellite — this can take a few minutes');
     try {
       window.dispatchEvent(new CustomEvent('gd:hole-labels-started', {
@@ -304,6 +309,7 @@
     } catch (e) { /* storage full — still injected on next fetch this session */ }
     delete pendingKeys[key];
     NS.status = 'ready';
+    NS.mode = null;
     clearGuideCache();
     try {
       window.dispatchEvent(new CustomEvent('gd:hole-labels-ready', {
@@ -327,6 +333,7 @@
     } catch (e) { /* storage full — labels still applied next fetch */ }
     delete pendingKeys[key];
     NS.status = 'ready';
+    NS.mode = null;
     clearGuideCache(); // force the app to re-fetch guides with refs injected
     var count = Object.keys((result && result.labels) || {}).length;
     try {
@@ -387,7 +394,13 @@
         var labeledCount = ((payload && payload.elements) || []).filter(function (el) {
           return String((el.tags || {}).golf || '').toLowerCase() === 'hole' && refNumber(el);
         }).length;
-        if (labeledCount >= 9) return res;
+        var requestedHole = Number(NS.requestedHole);
+        var requestedHoleLabeled = Number.isFinite(requestedHole) && requestedHole > 0 &&
+          ((payload && payload.elements) || []).some(function (el) {
+            return String((el.tags || {}).golf || '').toLowerCase() === 'hole' &&
+              refNumber(el) === Math.round(requestedHole);
+          });
+        if (labeledCount >= 9 && (!Number.isFinite(requestedHole) || requestedHole <= 0 || requestedHoleLabeled)) return res;
 
         requestLabels(key, center, payload.elements); // background; response passes through
         return res;

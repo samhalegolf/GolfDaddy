@@ -2796,6 +2796,23 @@
 	      const key=`${mappedModeCourseIdentity(c)}:${opts.hole||'course'}`;
 	      if(mapperOsmAutoMapRunKey===key)return true;
 	      mapperOsmAutoMapRunKey=key;
+	      const playResolutionRequested=opts.resolvePlay===true||opts.promptStart||opts.showLoading||validHoleNumber(opts.hole);
+	      if(opts.resolvePlay!==false&&playResolutionRequested&&typeof window.gdResolveCoursePlayHole==='function'){
+	        setTimeout(()=>{
+	          try{
+	            const active=sessionCourse(courseObj());
+	            if(mappedModeCourseIdentity(active)!==mappedModeCourseIdentity(c))return;
+	            window.gdResolveCoursePlayHole(c,{
+	              hole:validHoleNumber(opts.hole)||activePlayingHole()||holeNumber()||1,
+	              wholeCourse:!opts.hole,
+	              showLoading:!!opts.showLoading,
+	              fresh:!!opts.fresh,
+	              reason:opts.source||'scheduled-automap'
+	            });
+	          }catch(e){}
+	        },opts.delayMs||900);
+	        return true;
+	      }
 	      setTimeout(()=>{
 	        try{
 	          const active=sessionCourse(courseObj());
@@ -3349,6 +3366,295 @@
     if(!course||isManualGpsCourse(course)||courseOpenAlreadySettled(course,hole)||courseOpenInFlight(course,hole))return null;
     return showCourseLoading(course.name||course.courseName||'Loading course');
   }
+  const COURSE_PLAY_LABEL_WAIT_MS=150000;
+  const coursePlayResolverInFlight={};
+  let interactiveGreenFallbackState=null;
+  function sleep(ms){return new Promise(resolve=>setTimeout(resolve,ms));}
+  function coursePlayResolverKey(course,hole){
+    const c=sessionCourse(course||courseObj());
+    return `${courseOpenKey(c||course,hole)}:resolver`;
+  }
+  function rememberRequestedPlayHole(hole){
+    const h=validHoleNumber(hole)||1;
+    try{rememberPlayingHole(h);}catch(e){}
+    try{selectedHole=h;currentPlayingHole=h;}catch(e){}
+    try{sessionStorage.setItem('gd_active_playing_hole',String(h));sessionStorage.setItem('gd_mapper_active_hole',String(h));}catch(e){}
+    try{window.gdMapperActiveHole=h;}catch(e){}
+    try{
+      const par=knownParForHole(h);
+      if(typeof setHole==='function')setHole(par!==null?{hole:h,par}:{hole:h});
+    }catch(e){}
+    return h;
+  }
+  function requestedMappedPlayData(course,hole){
+    const h=validHoleNumber(hole)||1;
+    const c=loadUserCourseData(userId(),courseId(course))||course;
+    const data=mappedHolePlayData(c,h);
+    if(data&&data.complete&&data.green&&Array.isArray(data.route)&&data.route.length>=2)return {course:c,data};
+    return null;
+  }
+  function requestedHolePlayable(course,hole){
+    return !!requestedMappedPlayData(course,hole);
+  }
+  function ingestRequestedHoleToPipeline(course,hole,source){
+    try{
+      const resolved=requestedMappedPlayData(course,hole);
+      const pipeline=window.GDCoursePlayPipeline;
+      if(resolved&&pipeline&&typeof pipeline.ingestMappedHole==='function'){
+        pipeline.ingestMappedHole(resolved.course,hole,resolved.data,source||'course-play-resolver');
+      }
+    }catch(e){}
+  }
+  function setClaudeRequestedHole(course,hole){
+    try{
+      const ns=window.gdClaudeHoleLabels;
+      if(!ns)return false;
+      ns.requestedHole=validHoleNumber(hole)||1;
+      if(!ns.courseName)ns.courseName=courseName(course);
+      return true;
+    }catch(e){return false;}
+  }
+  function claudeLabelerWaiting(){
+    try{
+      const ns=window.gdClaudeHoleLabels||{};
+      return String(ns.status||'')==='labeling'&&String(ns.mode||'labeling')!=='generate';
+    }catch(e){return false;}
+  }
+  function waitForClaudeHoleLabels(timeoutMs=COURSE_PLAY_LABEL_WAIT_MS){
+    if(!claudeLabelerWaiting())return Promise.resolve({status:'not-started'});
+    return new Promise(resolve=>{
+      let settled=false;
+      const finish=(status,detail)=>{
+        if(settled)return;
+        settled=true;
+        window.removeEventListener('gd:hole-labels-ready',onReady,true);
+        window.removeEventListener('gd:hole-labels-failed',onFailed,true);
+        resolve({status,detail:detail||null});
+      };
+      const onReady=event=>finish('ready',event&&event.detail);
+      const onFailed=event=>finish('failed',event&&event.detail);
+      window.addEventListener('gd:hole-labels-ready',onReady,true);
+      window.addEventListener('gd:hole-labels-failed',onFailed,true);
+      setTimeout(()=>finish('timeout'),Math.max(1000,Number(timeoutMs)||COURSE_PLAY_LABEL_WAIT_MS));
+    });
+  }
+  function recentGpsFallbackPoint(){
+    try{
+      const state=window.gdGpsState||{};
+      const fix=state.lastFix||null;
+      const at=Number(state.lastFixAt||0);
+      if(!fix||!Number.isFinite(Number(fix.lat))||!Number.isFinite(Number(fix.lng)))return null;
+      if(Number.isFinite(at)&&at>0&&Date.now()-at>10*60*1000)return null;
+      return L.latLng(Number(fix.lat),Number(fix.lng));
+    }catch(e){return null;}
+  }
+  function pointDistance(a,b){
+    try{return a&&b&&map&&map.distance?map.distance(a,b):distance(a,b);}catch(e){return Infinity;}
+  }
+  function fallbackReferencePoint(course,green){
+    const candidates=[];
+    try{if(start)candidates.push(toLatLng(start));}catch(e){}
+    const gps=recentGpsFallbackPoint();
+    if(gps)candidates.push(gps);
+    try{if(map&&map.getCenter)candidates.push(map.getCenter());}catch(e){}
+    try{candidates.push(toLatLng(guideCoursePoint(course)));}catch(e){}
+    const found=candidates.filter(Boolean).find(point=>{
+      const d=pointDistance(point,green);
+      return Number.isFinite(d)&&d>35&&d<2200;
+    });
+    if(found)return found;
+    try{return projectFramePoint(green,Math.PI,120);}catch(e){}
+    return null;
+  }
+  function midpointPoint(a,b){
+    const p=toLatLng(a),q=toLatLng(b);
+    if(!p||!q)return null;
+    try{return L.latLng((Number(p.lat)+Number(q.lat))/2,(Number(p.lng)+Number(q.lng))/2);}catch(e){return null;}
+  }
+  function eventLatLng(event){
+    try{
+      if(event&&Number.isFinite(Number(event.clientX))&&Number.isFinite(Number(event.clientY))){
+        if(typeof window.gdLiveLatLngFromClient==='function'){
+          const live=window.gdLiveLatLngFromClient(event.clientX,event.clientY);
+          if(live)return live;
+        }
+        const el=map&&map.getContainer?map.getContainer():document.getElementById('map');
+        const rect=el&&el.getBoundingClientRect?el.getBoundingClientRect():null;
+        if(rect&&map&&map.containerPointToLatLng)return map.containerPointToLatLng(L.point(event.clientX-rect.left,event.clientY-rect.top));
+      }
+    }catch(e){}
+    return null;
+  }
+  function interactiveGreenBlockedTarget(event){
+    const target=event&&event.target;
+    return !!(target&&target.closest&&target.closest('button,a,input,select,textarea,.leaflet-control,.rightRail,.shellBar,.dock,#gdV62UndoDock,#gdV62ModeSwitch,#shotTile,#gdV62GpsBadge,#hint,#toast,#gdWandPanel,#gdMapperToolFlyout,#gdMapperToolsDrawer,#gdMapperHoleStrip,.panel,.modulePanel,#courseScreen:not(.hidden)'));
+  }
+  function saveInteractiveFallbackGreen(course,hole,greenPoint,reason){
+    const h=validHoleNumber(hole)||1;
+    const c=sessionCourse(course||courseObj());
+    const uid=userId();
+    const cid=courseId(c);
+    const name=courseName(c);
+    const green=toLatLng(greenPoint);
+    if(!green)return null;
+    const reference=fallbackReferencePoint(c,green);
+    const fairway=midpointPoint(reference,green)||reference;
+    let saved=0;
+    if(saveCourseObject({userId:uid,courseId:cid,courseName:name,course:c,type:'green',position:green,source:'interactive_green_fallback',holeNumber:h,confirmed:true,maxDedupeDistanceM:8}))saved++;
+    if(reference&&pointDistance(reference,green)>45){
+      if(saveCourseObject({userId:uid,courseId:cid,courseName:name,course:c,type:'tee',position:reference,source:'interactive_green_fallback_reference',holeNumber:h,confirmed:true,maxDedupeDistanceM:12}))saved++;
+    }
+    if(fairway){
+      if(saveCourseObject({userId:uid,courseId:cid,courseName:name,course:c,type:'fairway',position:fairway,source:'interactive_green_fallback_fairway',holeNumber:h,confirmed:true,maxDedupeDistanceM:12}))saved++;
+    }
+    const nextCourse=loadUserCourseData(uid,cid)||c;
+    try{drawHoleObjects(nextCourse,h);}catch(e){}
+    try{updateMapperHoleUi();updateMapperToolCompletion();renderCourseLibraryPanel();gdCLRefreshProfileCard();}catch(e){}
+    ingestRequestedHoleToPipeline(nextCourse,h,reason||'interactive-green-fallback');
+    return {course:nextCourse,saved,reference,fairway,green};
+  }
+  function clearInteractiveGreenFallback(reason){
+    const state=interactiveGreenFallbackState;
+    interactiveGreenFallbackState=null;
+    try{
+      const el=state&&state.mapEl;
+      const handler=state&&state.handler;
+      if(el&&handler){
+        el.removeEventListener('click',handler,true);
+      }
+    }catch(e){}
+    try{
+      document.body.classList.remove('gdGpsInteractiveGreenFallbackActive');
+      document.body.dataset.gdInteractiveGreenFallbackClearedBy=String(reason||'clear');
+      if(typeof window.gdApplyGpsMapVisibilityOwner==='function')window.gdApplyGpsMapVisibilityOwner(reason||'interactive-green-fallback-clear');
+    }catch(e){}
+  }
+  function finishInteractiveGreenFallback(point){
+    const state=interactiveGreenFallbackState;
+    if(!state||!point)return false;
+    const h=validHoleNumber(state.hole)||1;
+    const saved=saveInteractiveFallbackGreen(state.course,h,point,'interactive-green-fallback');
+    if(!saved)return false;
+    try{if(typeof gdSuppressMapPlacementClick==='function')gdSuppressMapPlacementClick(900);}catch(e){}
+    try{window.__gdManualStandingPlacementActiveUntil=0;}catch(e){}
+    clearInteractiveGreenFallback('green-selected');
+    try{toastSafe('Green selected');}catch(e){}
+    try{setMappedPlayMode('mapped',{skipFrame:true,silent:true,preserveAssist:true});}catch(e){}
+    try{mode='start';}catch(e){}
+    const playable=requestedHolePlayable(saved.course,h);
+    if(playable){
+      try{focusMappedHoleOrSavedGreen(h,{quiet:true,frame:true,promptStart:true,allowAnyStart:true,stablePreLock:true,course:saved.course});}catch(e){}
+      setTimeout(()=>{try{if(typeof window.gdFocusMappedPreLockHole==='function')window.gdFocusMappedPreLockHole(h,{source:'interactive-green-fallback',preserveGpsSession:true,reenterGps:false,refreshGps:false});}catch(e){}},80);
+      markCourseOpenReady(saved.course,h);
+    }else{
+      try{setState('Green selected');}catch(e){}
+      try{showHint('Tap where you are standing');}catch(e){}
+    }
+    return true;
+  }
+  function beginInteractiveGreenFallback(course,hole,reason){
+    const h=rememberRequestedPlayHole(hole||1);
+    const c=sessionCourse(course||courseObj());
+    hideCourseLoading(0);
+    try{if(typeof window.gdClearHoleImageRuntime==='function')window.gdClearHoleImageRuntime('interactive-green-fallback');}catch(e){}
+    try{
+      document.body.classList.add('shell-gps','gdGpsActive','gps-active','gdMappedCourseMode','gdGpsInteractiveGreenFallbackActive','gdGpsLiveMapAllowed','gdGpsExplicitMapMode');
+      document.body.classList.remove('gdCourseOpening','gdGpsFramePreparing','gdCoursePlayPipelinePreparing','gdHoleFrameLoading','gdCapturedFrameUnavailable','gdGpsLiveMapSuppressed','gdGpsHoleTransitioning','gdCapturedHoleFrameCameraOn','gdHoleImageCameraOn','gdMappedStartPromptActive','gdManualStartPlacementActive','gdHeadToTeeFrameActive','gdLockStateFrameActive','gd-frame-hard-locked');
+      document.body.dataset.gdInteractiveGreenFallbackReason=String(reason||'automatic-resolution-failed');
+      document.body.dataset.gdInteractiveGreenFallbackHole=String(h);
+    }catch(e){}
+    try{setMappedPlayMode('mapped',{skipFrame:true,silent:true,preserveAssist:true});}catch(e){}
+    try{mode='green';}catch(e){}
+    try{setState('Select green');}catch(e){}
+    try{showHint('Tap the green');}catch(e){}
+    try{if(map&&map.invalidateSize)setTimeout(()=>map.invalidateSize(false),40);}catch(e){}
+    try{if(typeof window.gdApplyGpsMapVisibilityOwner==='function')window.gdApplyGpsMapVisibilityOwner('interactive-green-fallback');}catch(e){}
+    const mapEl=(map&&map.getContainer&&map.getContainer())||document.getElementById('map');
+    if(!mapEl)return {playable:false,fallback:'interactive-green',armed:false};
+    if(interactiveGreenFallbackState)clearInteractiveGreenFallback('replace');
+    const handler=event=>{
+      if(!interactiveGreenFallbackState||interactiveGreenFallbackState.mapEl!==mapEl)return;
+      if(interactiveGreenBlockedTarget(event))return;
+      const ll=eventLatLng(event);
+      if(!ll)return;
+      event.preventDefault&&event.preventDefault();
+      event.stopPropagation&&event.stopPropagation();
+      if(event.stopImmediatePropagation)event.stopImmediatePropagation();
+      finishInteractiveGreenFallback(ll);
+    };
+    interactiveGreenFallbackState={course:c,hole:h,reason:reason||'automatic-resolution-failed',mapEl,handler,at:Date.now()};
+    mapEl.addEventListener('click',handler,true);
+    try{window.__gdInteractiveGreenFallback=interactiveGreenFallbackState;}catch(e){}
+    return {playable:false,fallback:'interactive-green',armed:true};
+  }
+  async function showResolvedCoursePlayHole(course,hole,reason,opts={}){
+    const h=rememberRequestedPlayHole(hole||1);
+    const mappedCourse=loadUserCourseData(userId(),courseId(course))||course;
+    ingestRequestedHoleToPipeline(mappedCourse,h,reason||'course-play-resolver');
+    updateCourseLoading(`Framing Hole ${h}`,86);
+    await sleep(80);
+    let framed=false;
+    try{framed=!!focusMappedHoleOrSavedGreen(h,{quiet:true,frame:true,promptStart:true,allowAnyStart:true,stablePreLock:true,course:mappedCourse});}catch(e){}
+    if(!framed&&typeof window.gdFocusMappedPreLockHole==='function'){
+      try{window.gdFocusMappedPreLockHole(h,{source:reason||'course-play-resolver',preserveGpsSession:true,reenterGps:false,refreshGps:false});framed=true;}catch(e){}
+    }
+    updateCourseLoading(`Hole ${h} ready`,100);
+    markCourseOpenReady(mappedCourse,h);
+    hideCourseLoading(220);
+    setTimeout(()=>checkClosestMappedHolePrompt(loadUserCourseData()),900);
+    return {playable:true,framed,course:mappedCourse,hole:h};
+  }
+  async function resolveCoursePlayHole(course,opts={}){
+    const c=sessionCourse(course||courseObj());
+    if(!c||isManualGpsCourse(c))return {playable:false,reason:'manual-course'};
+    const h=validHoleNumber(opts.hole)||1;
+    const key=coursePlayResolverKey(c,h);
+    if(coursePlayResolverInFlight[key])return coursePlayResolverInFlight[key];
+    const promise=(async()=>{
+      const showLoading=opts.showLoading!==false;
+      window.__gdCoursePlayResolverActive={course:c,hole:h,reason:opts.reason||'course-play-resolver',at:Date.now()};
+      if(showLoading)showCourseLoading(c.name||c.courseName||'Loading course');
+      updateCourseLoading(`Opening Hole ${h}`,28);
+      try{
+        rememberRequestedPlayHole(h);
+        try{if(typeof resetPlay==='function')resetPlay(true);}catch(e){}
+        try{await syncPublishedCourseMaps({quiet:true});}catch(e){}
+        try{setMappedPlayMode('mapped',{skipFrame:true,silent:true,preserveAssist:true});}catch(e){}
+        setClaudeRequestedHole(c,h);
+        updateCourseLoading('Mapping from OSM',42);
+        const mapOpts={quiet:true,frame:false,promptStart:true,fresh:opts.fresh!==false,course:c};
+        if(opts.wholeCourse===false)mapOpts.hole=h;
+        const autoMapResult=await autoMapOsmCourse(mapOpts);
+        try{
+          document.body.dataset.gdCourseAutoMappedHoles=String(autoMapResult?.holes||0);
+          document.body.dataset.gdCourseAutoMapSaved=String(autoMapResult?.saved||0);
+        }catch(e){}
+        if(requestedHolePlayable(c,h))return showResolvedCoursePlayHole(c,h,'osm-automapper',opts);
+        if(claudeLabelerWaiting()){
+          updateCourseLoading('Finding hole numbers',62);
+          const labelResult=await waitForClaudeHoleLabels(opts.labelWaitMs||COURSE_PLAY_LABEL_WAIT_MS);
+          if(labelResult.status==='ready'){
+            updateCourseLoading('Applying hole numbers',74);
+            const retryOpts={quiet:true,frame:false,promptStart:true,fresh:true,course:c};
+            if(opts.wholeCourse===false)retryOpts.hole=h;
+            await autoMapOsmCourse(retryOpts);
+            if(requestedHolePlayable(c,h))return showResolvedCoursePlayHole(c,h,'claude-hole-labels',opts);
+          }
+        }
+        return beginInteractiveGreenFallback(c,h,'automatic-resolution-failed');
+      }catch(error){
+        try{console.warn('[Clarity Caddie] course play resolver failed',error);}catch(e){}
+        return beginInteractiveGreenFallback(c,h,'resolver-error');
+      }finally{
+        delete window.__gdCoursePlayResolverActive;
+      }
+    })();
+    coursePlayResolverInFlight[key]=promise;
+    promise.finally(()=>{delete coursePlayResolverInFlight[key];});
+    return promise;
+  }
+  window.gdResolveCoursePlayHole=resolveCoursePlayHole;
+  window.gdBeginInteractiveGreenFallback=beginInteractiveGreenFallback;
   async function openCourseToFirstHole(course){
     const c=sessionCourse(course||courseObj());
     if(!c||isManualGpsCourse(c)){hideCourseLoading(0);return false;}
@@ -3357,57 +3663,10 @@
     if(courseOpenAlreadySettled(c,h)){hideCourseLoading(0);return true;}
     if(courseOpenInFlight(c,h))return true;
     window.__gdOpeningCourseToFirstHoleKey=openingKey;
-    showCourseLoading(c.name||c.courseName||'Loading course');
-    updateCourseLoading('Opening Hole 1',28);
     try{
-      rememberPlayingHole(h);
-      try{selectedHole=h;currentPlayingHole=h;}catch(e){}
-      try{sessionStorage.setItem('gd_active_playing_hole',String(h));sessionStorage.setItem('gd_mapper_active_hole',String(h));}catch(e){}
-      try{
-        const par=knownParForHole(h);
-        if(typeof setHole==='function')setHole(par!==null?{hole:h,par}:{hole:h});
-      }catch(e){}
-      try{if(typeof resetPlay==='function')resetPlay(true);}catch(e){}
-	      updateCourseLoading('Mapping full course',38);
-		      try{await syncPublishedCourseMaps({quiet:true});}catch(e){}
-		      try{setMappedPlayMode('mapped',{skipFrame:true,silent:true});}catch(e){}
-		      let autoMapResult=null;
-		      try{autoMapResult=await autoMapOsmCourse({quiet:true,frame:false,promptStart:true,fresh:true,course:c});}catch(e){}
-		      try{
-		        document.body.dataset.gdCourseAutoMappedHoles=String(autoMapResult?.holes||0);
-		        document.body.dataset.gdCourseAutoMapSaved=String(autoMapResult?.saved||0);
-		      }catch(e){}
-		      const openFrameRun=nextMappedFrameRun();
-		      updateCourseLoading('Building fairway line',48);
-		      await new Promise(resolve=>setTimeout(resolve,80));
-		      if(!mappedFrameRunActive(openFrameRun)){hideCourseLoading(0);return false;}
-		      let framed=false;
-		      const autoMapFrameRun=nextMappedFrameRun();
-		      if(!mappedFrameRunActive(autoMapFrameRun)){hideCourseLoading(0);return false;}
-		      updateCourseLoading('Framing Hole 1',86);
-		      const mappedCourse=loadUserCourseData(userId(),courseId(c))||c;
-		      try{framed=!!focusMappedHoleOrSavedGreen(h,{quiet:true,frame:true,promptStart:true,allowAnyStart:true,course:mappedCourse});}catch(e){}
-	      if(framed){
-	        updateCourseLoading('Hole 1 ready',100);
-	        markCourseOpenReady(c,h);
-	        hideCourseLoading(220);
-	        setTimeout(()=>scheduleOsmAutoMapForPlay(c,{frame:false,delayMs:20}),700);
-	        setTimeout(()=>checkClosestMappedHolePrompt(loadUserCourseData()),900);
-	      }else{
-	        updateCourseLoading('Hole 1 loaded · set position',100);
-	        markCourseOpenReady(c,h);
-	        hideCourseLoading(220);
-	        setTimeout(()=>{
-	          try{selectedHole=h;currentPlayingHole=h;}catch(e){}
-	          try{if(typeof setHole==='function')setHole({hole:h});}catch(e){}
-	          try{mode='start';}catch(e){}
-	          try{if(typeof setState==='function')setState('Mapped: set position');}catch(e){}
-	          try{if(typeof showHint==='function')showHint('Tap where you are standing');}catch(e){}
-	        },260);
-	        setTimeout(()=>scheduleOsmAutoMapForPlay(c,{frame:false,delayMs:20}),700);
-	        framed=true;
-	      }
-      return framed;
+      const result=await resolveCoursePlayHole(c,{hole:h,wholeCourse:true,showLoading:true,fresh:true,reason:'open-course-to-first-hole'});
+      if(result&&result.playable)setTimeout(()=>scheduleOsmAutoMapForPlay(c,{frame:false,delayMs:20,resolvePlay:false}),700);
+      return !!(result&&(result.playable||result.fallback));
     }catch(e){
       hideCourseLoading(250);
       reportMappedDropout(h,'course-open-error');
