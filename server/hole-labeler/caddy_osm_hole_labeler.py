@@ -336,8 +336,9 @@ def run_pipeline(job_id: str, lat: float, lng: float,
     # passed the "real layout map with printed numbers" screen; attempts with
     # no clean match = the matching/validation step rejected everything.
     diag = {"osm_holes": 0, "unlabeled": 0, "pages_found": 0,
-            "images_scraped": 0, "candidates_screened_in": 0,
+            "images_scraped": 0, "screens_run": 0, "candidates_screened_in": 0,
             "match_attempts": 0, "dirty_matches": 0}
+    MAX_SCREENS = 14  # bound Claude vision spend per job
     try:
         # Prefer the client's own Overpass payload: it already fetched the
         # data from a residential IP, so no server-side Overpass roundtrip.
@@ -368,12 +369,14 @@ def run_pipeline(job_id: str, lat: float, lng: float,
         with httpx.Client(follow_redirects=True, timeout=15,
                           headers={"User-Agent": "Mozilla/5.0"}) as http:
             for img_url in image_urls:
-                if diag["match_attempts"] >= mapper.MAX_CANDIDATE_MAPS:
+                if (diag["match_attempts"] >= mapper.MAX_CANDIDATE_MAPS
+                        or diag["screens_run"] >= MAX_SCREENS):
                     break
                 try:
                     map_b64, _ = mapper.load_image_b64(http.get(img_url).content)
                 except Exception:
                     continue
+                diag["screens_run"] += 1
                 if not mapper.screen_candidate(map_b64, "image/jpeg", course_name):
                     continue
                 diag["candidates_screened_in"] += 1

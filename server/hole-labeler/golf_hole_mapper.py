@@ -106,29 +106,61 @@ def find_candidate_pages(course_name: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 IMG_EXT = re.compile(r'https?://[^\s"\'<>]+\.(?:png|jpe?g|webp)', re.IGNORECASE)
+# src/href/data-src/og:image content attrs; tolerates relative URLs + query strings
+ATTR_IMG = re.compile(
+    r'(?:src|href|data-src|data-lazy-src|data-original|content)\s*=\s*'
+    r'["\']([^"\']+?\.(?:png|jpe?g|webp)(?:\?[^"\']*)?)["\']', re.IGNORECASE)
+SRCSET = re.compile(r'srcset\s*=\s*["\']([^"\']+)["\']', re.IGNORECASE)
 MAP_HINTS = ("map", "layout", "course", "hole", "aerial", "overview",
              "scorecard", "score-card", "card")
+MAX_IMAGES_PER_PAGE = 8   # unhinted fallback cap; screening does the real vetting
+MAX_IMAGES_TOTAL = 30
+
 
 def scrape_image_urls(page_urls: list[str]) -> list[str]:
+    """Extract candidate image URLs. Handles relative paths, srcset and
+    lazy-load attributes — club websites rarely use absolute image URLs.
+    Hinted images (map/layout/scorecard-ish filenames) are queued first."""
+    from urllib.parse import urljoin
+
     found, seen = [], set()
+
+    def add(u: str, base: str):
+        u = urljoin(base, u.strip())
+        if u.startswith("http") and u not in seen and len(found) < MAX_IMAGES_TOTAL:
+            seen.add(u)
+            found.append(u)
+
     with httpx.Client(follow_redirects=True, timeout=15,
                       headers={"User-Agent": "Mozilla/5.0"}) as http:
         for url in page_urls:
             # A search result may already be a direct image link
             if IMG_EXT.fullmatch(url):
-                found.append(url)
+                add(url, url)
                 continue
             try:
                 html = http.get(url).text
             except httpx.HTTPError:
                 continue
-            for img_url in IMG_EXT.findall(html):
-                if img_url in seen:
-                    continue
-                seen.add(img_url)
-                # Cheap relevance filter; screening call does the real vetting
-                if any(h in img_url.lower() for h in MAP_HINTS):
-                    found.append(img_url)
+
+            hinted, others = [], []
+            candidates = [m.group(1) for m in ATTR_IMG.finditer(html)]
+            for ss in SRCSET.finditer(html):
+                for part in ss.group(1).split(","):
+                    u = part.strip().split(" ")[0]
+                    if re.search(r"\.(?:png|jpe?g|webp)", u, re.IGNORECASE):
+                        candidates.append(u)
+            candidates.extend(IMG_EXT.findall(html))
+            for u in candidates:
+                (hinted if any(h in u.lower() for h in MAP_HINTS) else others).append(u)
+
+            for u in hinted:
+                add(u, url)
+            # No hinted names on this page: take a few unhinted images anyway —
+            # the vision screening call is the real filter.
+            if not hinted:
+                for u in others[:MAX_IMAGES_PER_PAGE]:
+                    add(u, url)
     return found
 
 
