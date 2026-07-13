@@ -42,9 +42,10 @@
   NS.status = 'idle';
 
   var STORE_PREFIX = 'gd_claude_hole_labels_v1:';
+  var GEN_STORE_PREFIX = 'gd_claude_gen_holes_v1:';
   var GUIDE_CACHE_PREFIX = 'gd_osm_hole_guides_v1:'; // matches pin-lock.js
   var POLL_MS = 5000;
-  var POLL_MAX = 36; // 3 minutes
+  var POLL_MAX = 60; // 5 minutes (generation jobs run longer than labeling)
   var pendingKeys = {};
 
   function isGuideQuery(url) {
@@ -82,6 +83,19 @@
     return ((payload && payload.elements) || []).filter(function (el) {
       return String((el.tags || {}).golf || '').toLowerCase() === 'hole' && !refNumber(el);
     });
+  }
+
+  function holeCount(payload) {
+    return ((payload && payload.elements) || []).filter(function (el) {
+      return String((el.tags || {}).golf || '').toLowerCase() === 'hole';
+    }).length;
+  }
+
+  function readGenerated(key) {
+    try {
+      var raw = localStorage.getItem(key);
+      return raw ? (JSON.parse(raw).elements || null) : null;
+    } catch (e) { return null; }
   }
 
   function injectLabels(payload, labels) {
@@ -222,7 +236,8 @@
       });
   }
 
-  function poll(key, jobId, attempt) {
+  function poll(key, jobId, attempt, onDone) {
+    onDone = onDone || finish;
     if (attempt >= POLL_MAX) {
       labelingFailed(key, 'timed out');
       return;
@@ -231,16 +246,74 @@
       fetch(NS.backend + '/v1/osm-hole-labels/jobs/' + jobId)
         .then(function (r) { return r.json(); })
         .then(function (job) {
-          if (job.status === 'done') return finish(key, job.result);
+          if (job.status === 'done') return onDone(key, job.result);
           if (job.status === 'failed') {
             console.warn('[Claude hole labels] job failed:', job.error, job.diagnostics);
             labelingFailed(key, job.error);
             return;
           }
-          poll(key, jobId, attempt + 1);
+          poll(key, jobId, attempt + 1, onDone);
         })
-        .catch(function () { poll(key, jobId, attempt + 1); });
+        .catch(function () { poll(key, jobId, attempt + 1, onDone); });
     }, POLL_MS);
+  }
+
+  // -------------------------------------------------------------------------
+  // Geometry generation: course has NO hole lines in OSM at all
+  // -------------------------------------------------------------------------
+  function requestGeneration(key, center) {
+    if (!NS.backend || NS.generate === false) return;
+    if (pendingKeys[key]) return;
+    var courseName = resolveCourseName();
+    if (!courseName) return; // only generate when we know which course this is
+    pendingKeys[key] = true;
+    NS.status = 'generating';
+    showToast('Drawing ' + courseName + ' from satellite — this can take a few minutes');
+    try {
+      window.dispatchEvent(new CustomEvent('gd:hole-labels-started', {
+        detail: { storeKey: key, courseName: courseName, mode: 'generate' }
+      }));
+    } catch (e) { /* no-op */ }
+
+    fetch(NS.backend + '/v1/osm-hole-generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lat: center.lat, lng: center.lng, course_name: courseName })
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.status === 'done') return finishGenerated(key, data.result);
+        if (!data.job_id) throw new Error('generation request rejected');
+        return poll(key, data.job_id, 0, finishGenerated);
+      })
+      .catch(function (err) {
+        console.warn('[Claude hole gen] request failed', err);
+        labelingFailed(key, 'generation request failed');
+      });
+  }
+
+  function finishGenerated(key, result) {
+    var elements = (result && result.elements) || [];
+    try {
+      localStorage.setItem(key, JSON.stringify({
+        savedAt: Date.now(),
+        elements: elements,
+        courseName: result && result.course_name,
+        method: result && result.method
+      }));
+    } catch (e) { /* storage full — still injected on next fetch this session */ }
+    delete pendingKeys[key];
+    NS.status = 'ready';
+    clearGuideCache();
+    try {
+      window.dispatchEvent(new CustomEvent('gd:hole-labels-ready', {
+        detail: { storeKey: key, count: elements.length, mode: 'generate' }
+      }));
+    } catch (e) { /* no-op */ }
+    if (!elements.length) return;
+    showToast('Course map drawn for ' +
+      ((result && result.course_name) || 'this course') + ' — loading');
+    if (NS.autoApply) applyLabels(elements.length);
   }
 
   function finish(key, result) {
@@ -280,7 +353,23 @@
       if (!res.ok || !center) return res;
       return res.clone().json().then(function (payload) {
         var missing = unlabeledHoles(payload);
-        if (!missing.length) return res; // OSM already has refs — nothing to do
+        if (!missing.length) {
+          if (holeCount(payload) > 0) return res; // labeled course — nothing to do
+          // OSM has NO hole lines here at all: use AI-generated geometry.
+          var genKey = GEN_STORE_PREFIX +
+            center.lat.toFixed(4) + ',' + center.lng.toFixed(4);
+          var gen = readGenerated(genKey);
+          if (gen && gen.length) {
+            payload.elements = (payload.elements || []).concat(gen);
+            return new Response(JSON.stringify(payload), {
+              status: res.status,
+              statusText: res.statusText,
+              headers: { 'Content-Type': 'application/json' }
+            });
+          }
+          requestGeneration(genKey, center); // background; response passes through
+          return res;
+        }
 
         var key = storeKey(center);
         var labels = readLabels(key);
