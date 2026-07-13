@@ -171,6 +171,17 @@
     }
   }
 
+  function labelingFailed(key, why) {
+    NS.status = 'failed';
+    delete pendingKeys[key];
+    showToast('Couldn’t find hole numbers automatically for this course');
+    try {
+      window.dispatchEvent(new CustomEvent('gd:hole-labels-failed', {
+        detail: { storeKey: key, reason: why || null }
+      }));
+    } catch (e) { /* no-op */ }
+  }
+
   function requestLabels(key, center) {
     if (!NS.backend) return; // dormant until a backend host is configured
     if (pendingKeys[key]) return;
@@ -180,6 +191,16 @@
     var body = { lat: center.lat, lng: center.lng };
     var courseName = resolveCourseName();
     if (courseName) body.course_name = courseName;
+
+    // Make the background job visible — without this the mapper just sits
+    // on its empty state for the 1-3 minutes the labeling pipeline runs.
+    showToast('Finding hole numbers' + (courseName ? ' for ' + courseName : '') +
+      ' — this can take a couple of minutes');
+    try {
+      window.dispatchEvent(new CustomEvent('gd:hole-labels-started', {
+        detail: { storeKey: key, courseName: courseName || null }
+      }));
+    } catch (e) { /* no-op */ }
 
     fetch(NS.backend + '/v1/osm-hole-labels', {
       method: 'POST',
@@ -194,15 +215,13 @@
       })
       .catch(function (err) {
         console.warn('[Claude hole labels] request failed', err);
-        NS.status = 'failed';
-        delete pendingKeys[key];
+        labelingFailed(key, 'request failed');
       });
   }
 
   function poll(key, jobId, attempt) {
     if (attempt >= POLL_MAX) {
-      NS.status = 'failed';
-      delete pendingKeys[key];
+      labelingFailed(key, 'timed out');
       return;
     }
     setTimeout(function () {
@@ -211,9 +230,8 @@
         .then(function (job) {
           if (job.status === 'done') return finish(key, job.result);
           if (job.status === 'failed') {
-            console.warn('[Claude hole labels] job failed:', job.error);
-            NS.status = 'failed';
-            delete pendingKeys[key];
+            console.warn('[Claude hole labels] job failed:', job.error, job.diagnostics);
+            labelingFailed(key, job.error);
             return;
           }
           poll(key, jobId, attempt + 1);

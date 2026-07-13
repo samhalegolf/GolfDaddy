@@ -325,17 +325,26 @@ def resolve_course_name(lat: float, lng: float) -> str | None:
 
 def run_pipeline(job_id: str, lat: float, lng: float,
                  course_name: str | None, cache_key: str):
+    # Diagnostics travel with the job so a failure says WHERE it died:
+    # zero pages = Claude web search found nothing; zero screened = no image
+    # passed the "real layout map with printed numbers" screen; attempts with
+    # no clean match = the matching/validation step rejected everything.
+    diag = {"osm_holes": 0, "unlabeled": 0, "pages_found": 0,
+            "images_scraped": 0, "candidates_screened_in": 0,
+            "match_attempts": 0, "dirty_matches": 0}
     try:
         holes = fetch_osm_holes(lat, lng)
         unlabeled = [h for h in holes if h["ref"] is None]
+        diag["osm_holes"], diag["unlabeled"] = len(holes), len(unlabeled)
         if not unlabeled:
             _finish(job_id, cache_key, {"labels": {}, "note": "no unlabeled holes"})
             return
 
         course_name = course_name or resolve_course_name(lat, lng)
         if not course_name:
-            _fail(job_id, "could not resolve course name; pass course_name explicitly")
+            _fail(job_id, "could not resolve course name; pass course_name explicitly", diag)
             return
+        diag["course_name"] = course_name
 
         letters = [letter_label(i) for i in range(len(unlabeled))]
         schematic = render_schematic(unlabeled)
@@ -344,13 +353,14 @@ def run_pipeline(job_id: str, lat: float, lng: float,
         schem_b64 = base64.standard_b64encode(buf.getvalue()).decode()
 
         pages = mapper.find_candidate_pages(course_name)
+        diag["pages_found"] = len(pages)
         image_urls = mapper.scrape_image_urls(pages) if pages else []
+        diag["images_scraped"] = len(image_urls)
 
-        attempted, labels = 0, None
         with httpx.Client(follow_redirects=True, timeout=15,
                           headers={"User-Agent": "Mozilla/5.0"}) as http:
             for img_url in image_urls:
-                if attempted >= mapper.MAX_CANDIDATE_MAPS:
+                if diag["match_attempts"] >= mapper.MAX_CANDIDATE_MAPS:
                     break
                 try:
                     map_b64, _ = mapper.load_image_b64(http.get(img_url).content)
@@ -358,7 +368,8 @@ def run_pipeline(job_id: str, lat: float, lng: float,
                     continue
                 if not mapper.screen_candidate(map_b64, "image/jpeg", course_name):
                     continue
-                attempted += 1
+                diag["candidates_screened_in"] += 1
+                diag["match_attempts"] += 1
                 try:
                     result = match_letters(schem_b64, map_b64, letters, course_name)
                 except Exception:
@@ -374,10 +385,11 @@ def run_pipeline(job_id: str, lat: float, lng: float,
                         "schematic_png_b64": schem_b64,  # for a verification UI
                     })
                     return
+                diag["dirty_matches"] += 1
 
-        _fail(job_id, "no candidate course map produced a clean assignment")
+        _fail(job_id, "no candidate course map produced a clean assignment", diag)
     except Exception as exc:
-        _fail(job_id, str(exc))
+        _fail(job_id, str(exc), diag)
 
 
 def _finish(job_id, cache_key, result):
@@ -386,9 +398,11 @@ def _finish(job_id, cache_key, result):
     cache_put(cache_key, result)
 
 
-def _fail(job_id, error):
+def _fail(job_id, error, diag=None):
+    print(f"job {job_id} failed: {error} diagnostics={diag}")
     with LOCK:
-        JOBS[job_id] = {"status": "failed", "result": None, "error": error}
+        JOBS[job_id] = {"status": "failed", "result": None,
+                        "error": error, "diagnostics": diag}
 
 
 # ---------------------------------------------------------------------------
