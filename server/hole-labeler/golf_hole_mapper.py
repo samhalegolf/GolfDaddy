@@ -80,7 +80,10 @@ def find_candidate_pages(course_name: str) -> list[str]:
     prompt = (
         f'Search the web to find a full-course layout map (hole diagram) for the golf '
         f'course "{course_name}". Useful queries: "{course_name} course map", '
-        f'"{course_name} hole layout", "{course_name} scorecard course map". '
+        f'"{course_name} hole layout", "{course_name} scorecard course map", '
+        f'"{course_name} scorecard back". '
+        f"Tip: smaller clubs often print the course layout on the BACK of their "
+        f"scorecard, so pages with scorecard photos are good candidates too. "
         f"Prefer the course's own website, then booking/review sites. "
         f"Respond with ONLY a JSON array (no other text, no markdown) of up to 5 page "
         f"URLs most likely to contain a course layout diagram image."
@@ -103,7 +106,8 @@ def find_candidate_pages(course_name: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 IMG_EXT = re.compile(r'https?://[^\s"\'<>]+\.(?:png|jpe?g|webp)', re.IGNORECASE)
-MAP_HINTS = ("map", "layout", "course", "hole", "aerial", "overview")
+MAP_HINTS = ("map", "layout", "course", "hole", "aerial", "overview",
+             "scorecard", "score-card", "card")
 
 def scrape_image_urls(page_urls: list[str]) -> list[str]:
     found, seen = [], set()
@@ -136,9 +140,11 @@ def screen_candidate(img_b64: str, media_type: str, course_name: str) -> bool:
     prompt = (
         f"Is this image an actual golf course layout map/diagram for a full course "
         f"(plausibly {course_name})? It should show multiple holes with fairways/greens "
-        f"in their spatial arrangement — not a single-hole graphic, logo, scorecard "
-        f"table, or unrelated photo. Respond ONLY with JSON: "
-        f'{{"is_course_map": true/false, "has_hole_numbers": true/false}}'
+        f"in their spatial arrangement — not a single-hole graphic, logo, a scorecard "
+        f"that is ONLY a numbers table, or an unrelated photo. NOTE: the back of a "
+        f"scorecard often carries the full course layout — that counts as a course "
+        f"map as long as the hole diagram with numbers is visible. Respond ONLY with "
+        f'JSON: {{"is_course_map": true/false, "has_hole_numbers": true/false}}'
     )
     resp = client.messages.create(
         model=MODEL,
