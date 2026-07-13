@@ -35666,9 +35666,9 @@ function gdWireManualGpsPlayButton(){
 <link rel="stylesheet" href="styles/gd-course-library.css?v=practice-course-ui-20260606">
 <link rel="stylesheet" href="styles/gd-arcade-mode.css?v=arcade-wiring-20260607">
 <script src="scripts/gd-windross-seed.js?v=windross-map-seed-20260525"></script>
-<script src="scripts/gd-course-library-pin-lock.js?v=tool-rail-tab-hole-label-20260620"></script>
+<script src="scripts/gd-course-library-pin-lock.js?v=gps-course-resolver-20260713"></script>
 <script src="scripts/gd-course-play-pipeline.js?v=course-play-pipeline-001"></script>
-<script src="scripts/gd-claude-hole-labels.js?v=claude-hole-labels-20260713e"></script>
+<script src="scripts/gd-claude-hole-labels.js?v=claude-hole-labels-20260713f"></script>
 <script>window.gdClaudeHoleLabels = window.gdClaudeHoleLabels || {}; window.gdClaudeHoleLabels.backend = "https://clarity-hole-labeler.onrender.com";</script>
 <script id="gdAutoMapHandoffQuarantineV1">
 (function(){
@@ -35764,14 +35764,23 @@ function gdWireManualGpsPlayButton(){
         return old.apply(this,arguments);
       };
     });
-    wrapNamedFunction("gdScheduleOsmAutoMapForPlay",function(old){
-      return function(course,opts){
-        if(!gdAutoMapMayOwnCamera({source:"scheduleOsmAutoMapForPlay",opts:opts})){
-          return old.call(this,course,dataOnlyOptions(opts,"scheduleOsmAutoMapForPlay"));
-        }
-        return old.apply(this,arguments);
-      };
-    });
+	    wrapNamedFunction("gdScheduleOsmAutoMapForPlay",function(old){
+	      return function(course,opts){
+	        if(!gdAutoMapMayOwnCamera({source:"scheduleOsmAutoMapForPlay",opts:opts})){
+	          if(window.gdResolveCoursePlayHole&&(opts&&((opts.hole&&Number(opts.hole)>0)||opts.promptStart||opts.resolvePlay))){
+	            return window.gdResolveCoursePlayHole(course,{
+	              hole:Number(opts.hole)||1,
+	              wholeCourse:!opts.hole,
+	              showLoading:!!opts.showLoading,
+	              fresh:!!opts.fresh,
+	              reason:"schedule-quarantine"
+	            });
+	          }
+	          return old.call(this,course,dataOnlyOptions(opts,"scheduleOsmAutoMapForPlay"));
+	        }
+	        return old.apply(this,arguments);
+	      };
+	    });
     wrapNamedFunction("gdAutoMapOsmCourse",function(old){
       return function(opts){
         if(!gdAutoMapMayOwnCamera({source:"autoMapOsmCourse",opts:opts})){
@@ -35780,12 +35789,15 @@ function gdWireManualGpsPlayButton(){
         return old.apply(this,arguments);
       };
     });
-    wrapNamedFunction("gdOpenCourseToFirstHole",function(old){
-      return function(course){
-        if(!gdAutoMapMayOwnCamera({source:"openCourseToFirstHole"}))return markBlocked("openCourseToFirstHole");
-        return old.apply(this,arguments);
-      };
-    });
+	    wrapNamedFunction("gdOpenCourseToFirstHole",function(old){
+	      return function(course){
+	        if(!gdAutoMapMayOwnCamera({source:"openCourseToFirstHole"})){
+	          if(window.gdResolveCoursePlayHole)return window.gdResolveCoursePlayHole(course,{hole:1,wholeCourse:true,showLoading:true,fresh:true,reason:"open-course-quarantine"});
+	          return markBlocked("openCourseToFirstHole");
+	        }
+	        return old.apply(this,arguments);
+	      };
+	    });
     wrapNamedFunction("gdOrientGpsCameraToBearing",function(old){
       return function(bearingRad,source,opts){
         var label=String(source||"");
@@ -54677,15 +54689,16 @@ body:has(#courseScreen:not(.hidden)) .leaflet-marker-icon{display:none!important
 	    return safe(function(){
 	      var tool=String(document.body.dataset&&document.body.dataset.gdToolScreen||"");
 	      var why=String(reason||"");
-	      return tool==="mapping"||
-	        document.body.classList.contains("gdFullMappingMode")||
-	        document.body.classList.contains("gdExplicitRemapMode")||
-	        document.body.classList.contains("gdMappingRepairActive")||
-	        !!window.gdFullMappingMode||
-	        !!window.__gdMapperObjectCaptureActive||
-	        /(^|[-_ ])(mapping|remap|mapper-tool|manual-map|capture)([-_ ]|$)/i.test(why);
-	    },false);
-	  }
+		      return tool==="mapping"||
+		        document.body.classList.contains("gdFullMappingMode")||
+		        document.body.classList.contains("gdExplicitRemapMode")||
+		        document.body.classList.contains("gdMappingRepairActive")||
+		        document.body.classList.contains("gdGpsInteractiveGreenFallbackActive")||
+		        !!window.gdFullMappingMode||
+		        !!window.__gdMapperObjectCaptureActive||
+		        /(^|[-_ ])(mapping|remap|mapper-tool|manual-map|capture|green-fallback|interactive-green|select-green)([-_ ]|$)/i.test(why);
+		    },false);
+		  }
 	  function gpsIdentity(value){return String(value||"").toLowerCase().replace(/[^a-z0-9]+/g,"")}
 	  function activeCourseIdentity(){
 	    return safe(function(){
