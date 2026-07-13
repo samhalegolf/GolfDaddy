@@ -32,6 +32,7 @@ transient (client polls for ~3 min), fine for a single-instance deploy.
 """
 
 import io
+import itertools
 import json
 import math
 import os
@@ -188,6 +189,38 @@ def ref_number(el: dict):
 # Schematic rendering (web mercator, optional satellite tile background)
 # ---------------------------------------------------------------------------
 
+def _hav_m(a: tuple, b: tuple) -> float:
+    """Meters between two (lat, lng) points."""
+    r = 6371000.0
+    p1, p2 = math.radians(a[0]), math.radians(b[0])
+    dp, dl = p2 - p1, math.radians(b[1] - a[1])
+    x = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * r * math.asin(math.sqrt(x))
+
+
+def way_length_m(points: list[tuple]) -> float:
+    return sum(_hav_m(a, b) for a, b in zip(points, points[1:]))
+
+
+def _bearing_deg(a: tuple, b: tuple) -> float:
+    p1, p2 = math.radians(a[0]), math.radians(b[0])
+    dl = math.radians(b[1] - a[1])
+    y = math.sin(dl) * math.cos(p2)
+    x = math.cos(p1) * math.sin(p2) - math.sin(p1) * math.cos(p2) * math.cos(dl)
+    return math.degrees(math.atan2(y, x))
+
+
+def way_turn_deg(points: list[tuple]) -> float:
+    """Signed heading change from the first to the last third of the line.
+    Positive = bends right (a dogleg right), negative = bends left."""
+    if len(points) < 3:
+        return 0.0
+    k = max(1, len(points) // 3)
+    b1 = _bearing_deg(points[0], points[k])
+    b2 = _bearing_deg(points[-k - 1], points[-1])
+    return (b2 - b1 + 540.0) % 360.0 - 180.0
+
+
 def _merc(lat, lng):
     x = (lng + 180.0) / 360.0
     s = math.sin(math.radians(lat))
@@ -264,7 +297,20 @@ def fetch_tile_background(x0, y0, x1, y1, w, h) -> Image.Image:
 # Claude matching: lettered schematic vs official course map
 # ---------------------------------------------------------------------------
 
-def match_letters(schem_b64, map_b64, letters: list[str], course_name: str) -> dict:
+def match_letters(schem_b64, map_b64, letters: list[str], course_name: str,
+                  letter_lengths: list[float] | None = None,
+                  scorecard: dict[int, float] | None = None) -> dict:
+    extra = ""
+    if letter_lengths:
+        pairs = ", ".join(f"{l}≈{round(m)}m" for l, m in zip(letters, letter_lengths))
+        extra += f"\nMeasured length of each lettered line (meters): {pairs}."
+    if scorecard:
+        card = ", ".join(f"hole {n}={round(d)}m" for n, d in sorted(scorecard.items()))
+        extra += (f"\nOfficial scorecard distances: {card}."
+                  f"\nUse these lengths to establish the scale between the two images "
+                  f"and to reject impossible matches — a lettered line may only "
+                  f"receive a hole number whose scorecard distance is consistent "
+                  f"with that line's measured length.")
     prompt = f"""You are given two images of the golf course "{course_name}":
 1. FIRST image: hole centerlines from map data, drawn over satellite imagery.
    Each line is tagged with a LETTER in a yellow circle: {", ".join(letters)}.
@@ -274,7 +320,7 @@ Task: assign the correct hole NUMBER to every LETTERED line by matching hole
 shapes, lengths, orientations, and relative positions. The images may differ in
 rotation and scale — establish orientation from distinctive features first
 (clubhouse, water, doglegs, boundary roads), then propagate numbers.
-
+{extra}
 Respond with ONLY this JSON (no other text, no markdown):
 {{
   "success": true/false,
@@ -317,6 +363,117 @@ def is_clean_assignment(result: dict, letters: list[str], total_holes: int) -> b
     if total_holes >= EXPECTED_HOLES and sorted(nums) != list(range(1, EXPECTED_HOLES + 1)):
         return False
     return True
+
+
+# ---------------------------------------------------------------------------
+# Distance matching: OSM way lengths vs scorecard hole distances
+# ---------------------------------------------------------------------------
+
+def adjacency_score(by_num: dict) -> float:
+    """Fraction of consecutive holes whose ways nearly touch (green of n abuts
+    tee of n+1). -1 when no consecutive pairs exist to check."""
+    ok = checked = 0
+    nums = sorted(by_num)
+    for a, b in zip(nums, nums[1:]):
+        if b != a + 1:
+            continue
+        pa, pb = by_num[a]["points"], by_num[b]["points"]
+        d = min(_hav_m(ea, eb) for ea in (pa[0], pa[-1]) for eb in (pb[0], pb[-1]))
+        checked += 1
+        if d < 250:
+            ok += 1
+    return ok / checked if checked else -1.0
+
+
+def shape_conflicts(by_num: dict, shapes: dict | None) -> int:
+    """Count strong disagreements between described hole shape (from the
+    course's hole-by-hole guide) and the way's actual bend direction."""
+    if not shapes:
+        return 0
+    bad = 0
+    for num, way in by_num.items():
+        desc = shapes.get(num)
+        if desc not in ("left", "right"):
+            continue
+        turn = way_turn_deg(way["points"])
+        if abs(turn) > 35.0 and (turn > 0) != (desc == "right"):
+            bad += 1
+    return bad
+
+
+def distance_assignment(unlabeled: list[dict], lengths: list[float],
+                        scorecard: dict[int, float], diag: dict,
+                        shapes: dict | None = None):
+    """Match unlabeled ways to scorecard holes by length. Sorted pairing is
+    optimal for 1D absolute error; near-equal lengths that could swap are
+    resolved (or rejected) via hole-sequence adjacency and described hole
+    shapes (dogleg left/right from the club's hole-by-hole guide)."""
+    n = len(scorecard)
+    if len(unlabeled) != n:
+        diag["distance_method"] = (f"count mismatch: {len(unlabeled)} ways vs "
+                                   f"{n} scorecard holes")
+        return None
+    ways = sorted(zip(unlabeled, lengths), key=lambda t: t[1])
+    card = sorted(scorecard.items(), key=lambda kv: kv[1])
+    for (_, wl), (num, d) in zip(ways, card):
+        if abs(wl - d) > max(0.18 * d, 45.0):
+            diag["distance_method"] = (f"tolerance fail: hole {num} card "
+                                       f"{d:.0f}m vs way {wl:.0f}m")
+            return None
+
+    # Ambiguity groups: runs where both card distances AND way lengths are
+    # within 15 m of their neighbour — sorted pairing could swap these.
+    groups, i = [], 0
+    while i < n - 1:
+        j = i
+        while (j < n - 1 and card[j + 1][1] - card[j][1] < 15.0
+               and ways[j + 1][1] - ways[j][1] < 15.0):
+            j += 1
+        if j > i:
+            groups.append(list(range(i, j + 1)))
+        i = j + 1
+
+    def build(perm):
+        return {card[k][0]: ways[perm[k]][0] for k in range(n)}
+
+    perms = [list(range(n))]
+    if groups and all(len(g) <= 4 for g in groups):
+        def expand(base, gs):
+            if not gs:
+                yield base[:]
+                return
+            g, rest = gs[0], gs[1:]
+            for p in itertools.permutations(g):
+                nb = base[:]
+                for pos, val in zip(g, p):
+                    nb[pos] = val
+                yield from expand(nb, rest)
+        perms = list(itertools.islice(expand(list(range(n)), groups), 200))
+    elif groups:
+        diag["distance_method"] = "too many near-equal hole lengths"
+        return None
+
+    best, best_score, best_adj, best_conf = None, -99.0, -1.0, 0
+    for perm in perms:
+        m = build(perm)
+        adj = adjacency_score(m)
+        conf = shape_conflicts(m, shapes)
+        s = adj - 0.5 * conf
+        if s > best_score:
+            best, best_score, best_adj, best_conf = m, s, adj, conf
+    diag["distance_adjacency"] = None if best_adj < 0 else round(best_adj, 2)
+    diag["shape_conflicts"] = best_conf
+    if best_conf > 1:
+        diag["distance_method"] = "hole shapes contradict the assignment"
+        return None
+    if groups and best_adj < 0.75:
+        diag["distance_method"] = "ambiguous lengths; adjacency could not disambiguate"
+        return None
+    if 0 <= best_adj < 0.6:
+        diag["distance_method"] = "adjacency check failed"
+        return None
+    diag["distance_method"] = "ok"
+    return {way["key"]: num for num, way in best.items()}
 
 
 # ---------------------------------------------------------------------------
@@ -363,6 +520,27 @@ def run_pipeline(job_id: str, lat: float, lng: float,
         diag["course_name"] = course_name
 
         letters = [letter_label(i) for i in range(len(unlabeled))]
+        lengths = [way_length_m(h["points"]) for h in unlabeled]
+
+        # ---- Method 1: scorecard distances (cheap — one text call, no images)
+        scorecard, shapes = None, None
+        try:
+            scorecard, shapes = mapper.find_scorecard_distances(course_name)
+        except Exception as exc:
+            print(f"scorecard lookup failed: {exc}")
+        diag["scorecard_holes"] = len(scorecard) if scorecard else 0
+        diag["described_shapes"] = len(shapes) if shapes else 0
+        if scorecard:
+            labels = distance_assignment(unlabeled, lengths, scorecard, diag, shapes)
+            if labels:
+                _finish(job_id, cache_key, {
+                    "labels": labels,
+                    "course_name": course_name,
+                    "method": "scorecard-distances",
+                })
+                return
+
+        # ---- Method 2: vision match against an online layout map ----
         schematic = render_schematic(unlabeled)
         buf = io.BytesIO()
         schematic.save(buf, format="JPEG", quality=90)
@@ -389,7 +567,8 @@ def run_pipeline(job_id: str, lat: float, lng: float,
                 diag["candidates_screened_in"] += 1
                 diag["match_attempts"] += 1
                 try:
-                    result = match_letters(schem_b64, map_b64, letters, course_name)
+                    result = match_letters(schem_b64, map_b64, letters, course_name,
+                                           lengths, scorecard)
                 except Exception:
                     continue
                 if is_clean_assignment(result, letters, len(holes)):
