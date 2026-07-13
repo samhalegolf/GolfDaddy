@@ -3460,10 +3460,30 @@
   function claudeLabelerWaiting(expectedKey){
     try{
       const ns=window.gdClaudeHoleLabels||{};
-      if(String(ns.status||'')!=='labeling'||String(ns.mode||'labeling')==='generate')return false;
+      const status=String(ns.status||'');
+      const active=status==='labeling'||status==='generating';
+      if(!active)return false;
       if(!expectedKey)return true;
       return !ns.resolutionKey||String(ns.resolutionKey)===String(expectedKey);
     }catch(e){return false;}
+  }
+  async function waitForClaudeLabelerStart(expectedKey,timeoutMs=2000,attemptToken=null){
+    const startedAt=Date.now();
+    while(Date.now()-startedAt<Math.max(250,Number(timeoutMs)||2000)){
+      if(attemptToken&&!resolverAttemptCurrent(attemptToken)){
+        return {started:false,stale:true,status:'stale'};
+      }
+      if(claudeLabelerWaiting(expectedKey)){
+        const ns=window.gdClaudeHoleLabels||{};
+        return {started:true,status:String(ns.status||''),mode:String(ns.mode||''),jobId:ns.jobId||null};
+      }
+      const ns=window.gdClaudeHoleLabels||{};
+      if(String(ns.status||'')==='failed'){
+        return {started:false,status:'failed',mode:String(ns.mode||''),jobId:ns.jobId||null};
+      }
+      await sleep(100);
+    }
+    return {started:claudeLabelerWaiting(expectedKey),status:String(window.gdClaudeHoleLabels&&window.gdClaudeHoleLabels.status||''),mode:String(window.gdClaudeHoleLabels&&window.gdClaudeHoleLabels.mode||''),jobId:window.gdClaudeHoleLabels&&window.gdClaudeHoleLabels.jobId||null};
   }
   function waitForClaudeHoleLabels(timeoutMs=COURSE_PLAY_LABEL_WAIT_MS,expectedKey=null,attemptToken=null){
     if(!claudeLabelerWaiting(expectedKey))return Promise.resolve({status:'not-started'});
@@ -3472,6 +3492,7 @@
       const finish=(status,detail)=>{
         if(settled)return;
         settled=true;
+        clearTimeout(timeoutId);
         window.removeEventListener('gd:hole-labels-ready',onReady,true);
         window.removeEventListener('gd:hole-labels-failed',onFailed,true);
         resolve({status,detail:detail||null});
@@ -3486,7 +3507,7 @@
       const onFailed=event=>{if(eventBelongs(event))finish('failed',event&&event.detail);};
       window.addEventListener('gd:hole-labels-ready',onReady,true);
       window.addEventListener('gd:hole-labels-failed',onFailed,true);
-      setTimeout(()=>finish('timeout'),Math.max(1000,Number(timeoutMs)||COURSE_PLAY_LABEL_WAIT_MS));
+      const timeoutId=setTimeout(()=>finish('timeout'),Math.max(1000,Number(timeoutMs)||COURSE_PLAY_LABEL_WAIT_MS));
     });
   }
   function recentGpsFallbackPoint(){
@@ -3711,13 +3732,15 @@
           recordCoursePlayDebug('course-play-resolver-hole-playable',c,h,{source:'osm-automapper',resolutionKey:key,attemptToken});
           return showResolvedCoursePlayHole(c,h,'osm-automapper',opts);
         }
-        if(claudeLabelerWaiting(key)){
+        const claudeStart=await waitForClaudeLabelerStart(key,opts.labelStartWaitMs||2000,attemptToken);
+        if(!resolverAttemptCurrent(attemptToken))return {playable:false,stale:true,reason:'resolver-replaced-before-claude'};
+        if(claudeStart.started){
           recordCoursePlayDebug('course-play-resolver-claude-waiting',c,h,{
-            status:String(window.gdClaudeHoleLabels&&window.gdClaudeHoleLabels.status||''),
-            mode:String(window.gdClaudeHoleLabels&&window.gdClaudeHoleLabels.mode||''),
+            status:claudeStart.status||String(window.gdClaudeHoleLabels&&window.gdClaudeHoleLabels.status||''),
+            mode:claudeStart.mode||String(window.gdClaudeHoleLabels&&window.gdClaudeHoleLabels.mode||''),
             resolutionKey:key,
             attemptToken,
-            claudeJobId:window.gdClaudeHoleLabels&&window.gdClaudeHoleLabels.jobId||null
+            claudeJobId:claudeStart.jobId||window.gdClaudeHoleLabels&&window.gdClaudeHoleLabels.jobId||null
           });
           updateCourseLoading('Finding hole numbers',62);
           const labelResult=await waitForClaudeHoleLabels(opts.labelWaitMs||COURSE_PLAY_LABEL_WAIT_MS,key,attemptToken);
@@ -3736,9 +3759,11 @@
           }
         }else{
           recordCoursePlayDebug('course-play-resolver-claude-not-started',c,h,{
-            status:String(window.gdClaudeHoleLabels&&window.gdClaudeHoleLabels.status||''),
-            mode:String(window.gdClaudeHoleLabels&&window.gdClaudeHoleLabels.mode||''),
-            reason:'no-labeling-job-active',
+            status:claudeStart.status||String(window.gdClaudeHoleLabels&&window.gdClaudeHoleLabels.status||''),
+            mode:claudeStart.mode||String(window.gdClaudeHoleLabels&&window.gdClaudeHoleLabels.mode||''),
+            reason:claudeStart.status==='failed'
+              ?'labeling-job-failed-before-wait'
+              :'no-labeling-job-started-after-grace-period',
             resolutionKey:key,
             attemptToken
           });
