@@ -37,7 +37,7 @@
   function now(){return new Date().toISOString();}
   function safe(fn,fb){try{return fn();}catch(e){return fb;}}
   function clone(value){return safe(function(){return JSON.parse(JSON.stringify(value));},value);}
-  function slug(value){return String(value||"course").replace(/[^a-z0-9:_-]+/gi,"_").slice(0,120)||"course";}
+  function slug(value){return String(value||"course").toLowerCase().trim().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,120)||"course";}
   function stableId(){
     return "cph_"+Date.now().toString(36)+"_"+Math.random().toString(36).slice(2,8);
   }
