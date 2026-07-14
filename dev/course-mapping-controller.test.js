@@ -101,7 +101,7 @@ function osmPayload(kind) {
 
 function loadController(options = {}) {
   const events = [];
-  const calls = { fetch: 0, native: 0, manual: 0, nativeInputs: [] };
+  const calls = { fetch: 0, native: 0, manual: 0, nativeInputs: [], fetchUrls: [] };
   const testConsole = Object.assign({}, console, { warn() {}, info() {} });
   const localStorage = storage({
     gd_user_course_library_v1: JSON.stringify(options.savedMap ? playableStore() : { courses: {} })
@@ -251,6 +251,7 @@ function loadController(options = {}) {
       const overpass = String(url || "").includes("overpass-api");
       if (!overpass) return { ok: true, json: async () => ({}) };
       calls.fetch += 1;
+      calls.fetchUrls.push(String(url || ""));
       const sequence = Array.isArray(options.fetchSequence) ? options.fetchSequence : null;
       const next = sequence && sequence.length ? sequence.shift() : null;
       if (options.fetchFails || next === "fail") return { ok: false, status: 504, json: async () => ({}) };
@@ -306,6 +307,14 @@ async function main() {
   assert.strictEqual(env.calls.native, 1, "native resolver still runs once after reload");
   assert.strictEqual(env.calls.nativeInputs[0].sourceLoadError, null, "source reload clears the acquisition error");
   assert.strictEqual(env.calls.nativeInputs[0].osmPayload.elements.length, 1, "native resolver receives reloaded OSM geometry");
+  assert(decodeURIComponent(env.calls.fetchUrls[0]).includes("around:1400"), "AutoMapper starts with the tighter course query");
+  assert(decodeURIComponent(env.calls.fetchUrls[1]).includes("around:3200"), "native resolver reloads a wider full-course source query");
+
+  env = await runScenario({ fetchSequence: ["native", "success"] });
+  assert.strictEqual(env.calls.fetch, 2, "native resolver reloads when AutoMapper only found a narrow source slice");
+  assert(decodeURIComponent(env.calls.fetchUrls[0]).includes("around:1400"), "narrow source slice came from AutoMapper radius");
+  assert(decodeURIComponent(env.calls.fetchUrls[1]).includes("around:3200"), "native resolver zoomed out for full-course framing");
+  assert.strictEqual(env.calls.nativeInputs[0].osmPayload.elements.length, 2, "native resolver receives the widened source payload");
 
   env = await runScenario({ fetchSequence: ["fail", "native"], nativePartial: true });
   assert.strictEqual(env.calls.native, 1, "partial native resolver runs once");

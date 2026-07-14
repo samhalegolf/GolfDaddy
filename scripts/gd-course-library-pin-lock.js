@@ -1789,8 +1789,32 @@
     }catch(e){}
     return 18;
   }
+  const OSM_AUTOMAPPER_RADIUS_M=1400;
+  const OSM_NATIVE_RESOLVER_RADIUS_M=3200;
+  function osmQueryRadius(opts={}){
+    const raw=Number(opts.osmRadiusM??opts.radiusM);
+    if(Number.isFinite(raw)&&raw>0)return Math.max(400,Math.min(5000,Math.round(raw)));
+    return OSM_AUTOMAPPER_RADIUS_M;
+  }
   function osmFeatureCount(payload,golfType){
     return (payload?.elements||[]).filter(element=>String(element?.tags?.golf||'').toLowerCase()===golfType).length;
+  }
+  function nativeResolverSourceCoverage(payload,bundle){
+    const elements=osmPayloadElements(payload);
+    if(!elements)return {reusable:false,elements:0,greens:0,holes:0,expected:automapperExpectedHoleCount(),reason:'missing payload'};
+    const expected=automapperExpectedHoleCount();
+    const greens=Math.max(osmFeatureCount(payload,'green'),Array.isArray(bundle?.greens)?bundle.greens.length:0);
+    const holes=osmFeatureCount(payload,'hole');
+    const threshold=Math.max(6,Math.min(12,Math.ceil((expected||18)*0.5)));
+    return {
+      reusable:greens>=threshold||holes>=threshold,
+      elements:elements.length,
+      greens,
+      holes,
+      expected,
+      threshold,
+      reason:greens>=threshold||holes>=threshold?'source covers enough whole-course geometry':'source appears too narrow for native resolver'
+    };
   }
   function automapperDebugDetails(payload,bundle){
     const elements=Array.isArray(payload?.elements)?payload.elements:[];
@@ -1870,40 +1894,46 @@
     let bundle=baseBundle&&typeof baseBundle==='object'?baseBundle:null;
     let payload=bundle?.osmPayload||null;
     let elements=osmPayloadElements(payload);
+    let coverage=nativeResolverSourceCoverage(payload,bundle);
     recordMappingDebug(request.debugRunId,{source:'native-resolver',phase:'progress',event:'native-resolver-source-load-started',summary:'Native resolver source load started',details:{
       invokedBy:opts.reason||opts.source||request.reason||'course-loader',
       resolutionKey:request.resolutionKey,
       attemptToken:request.attemptToken,
       courseCentre:request.courseCentre||null,
-      reason:elements?'Reusing AutoMapper OSM payload':bundle?.automapperError?'AutoMapper did not return reusable source geometry':'Native resolver requires source geometry before analysis'
+      reason:elements&&coverage.reusable?'Reusing AutoMapper OSM payload':elements?'AutoMapper OSM payload was too narrow for native geometry analysis':bundle?.automapperError?'AutoMapper did not return reusable source geometry':'Native resolver requires source geometry before analysis',
+      sourceCoverage:coverage
     }});
-    if(elements){
+    if(elements&&coverage.reusable){
       recordMappingDebug(request.debugRunId,{source:'native-resolver',phase:'progress',event:'native-resolver-source-load-succeeded',summary:'Native resolver source load succeeded',details:{
         source:'automapper-osm-payload',
         osmFeatures:elements.length,
         acceptedGreens:Array.isArray(bundle?.greens)?bundle.greens.length:0,
         guides:Array.isArray(bundle?.guides)?bundle.guides.length:0,
         resolutionKey:request.resolutionKey,
-        attemptToken:request.attemptToken
+        attemptToken:request.attemptToken,
+        sourceCoverage:coverage
       }});
       return {bundle,payload,sourceLoadError:null,source:'automapper-osm-payload'};
     }
     let loaded=null;
     let thrown=null;
     try{
-      loaded=await loadOsmGuideBundle(request.course,{needsGreens:true,fresh:true,skipGeometryResolver:true,suppressAutomapperTelemetry:true,debugRunId:request.debugRunId,source:'native-resolver',reason:'native-resolver-source-load',debugAttemptContext:attempt,callerFunction:'runNativeResolverStage'});
+      loaded=await loadOsmGuideBundle(request.course,{needsGreens:true,fresh:true,skipGeometryResolver:true,suppressAutomapperTelemetry:true,debugRunId:request.debugRunId,source:'native-resolver',reason:'native-resolver-source-load',debugAttemptContext:attempt,callerFunction:'runNativeResolverStage',osmRadiusM:OSM_NATIVE_RESOLVER_RADIUS_M});
     }catch(error){
       thrown=error;
     }
     if(loaded&&loaded.stale)return {bundle:loaded,payload:loaded.osmPayload||{elements:[]},sourceLoadError:null,source:'stale'};
     payload=loaded?.osmPayload||null;
     elements=osmPayloadElements(payload);
+    coverage=nativeResolverSourceCoverage(payload,loaded);
     if(elements){
       recordMappingDebug(request.debugRunId,{source:'native-resolver',phase:'progress',event:'native-resolver-source-load-succeeded',summary:'Native resolver source load succeeded',details:{
         source:'native-osm-fetch',
         osmFeatures:elements.length,
         acceptedGreens:Array.isArray(loaded?.greens)?loaded.greens.length:0,
         guides:Array.isArray(loaded?.guides)?loaded.guides.length:0,
+        queryRadiusM:OSM_NATIVE_RESOLVER_RADIUS_M,
+        sourceCoverage:coverage,
         resolutionKey:request.resolutionKey,
         attemptToken:request.attemptToken
       }});
@@ -2136,7 +2166,8 @@
       if(logAutomapperTelemetry)recordMappingDebug(debugRunId,{source:'automapper',phase:'skipped',event:'automapper-no-course-center',summary:'AutoMapper skipped: course center unavailable',details:{invokedBy:opts.reason||opts.source||'course-loader',skipReason:'missing course center'}});
       return {guides:[],greens:[]};
     }
-	    const query=`[out:json][timeout:18];(way(around:1400,${center.lat},${center.lng})["golf"="course"];relation(around:1400,${center.lat},${center.lng})["golf"="course"];way(around:1400,${center.lat},${center.lng})["golf"="hole"];relation(around:1400,${center.lat},${center.lng})["golf"="hole"];way(around:1400,${center.lat},${center.lng})["golf"="green"];relation(around:1400,${center.lat},${center.lng})["golf"="green"];way(around:1400,${center.lat},${center.lng})["golf"="fairway"];relation(around:1400,${center.lat},${center.lng})["golf"="fairway"];way(around:1400,${center.lat},${center.lng})["golf"="tee"];relation(around:1400,${center.lat},${center.lng})["golf"="tee"];way(around:1400,${center.lat},${center.lng})["golf"="bunker"];relation(around:1400,${center.lat},${center.lng})["golf"="bunker"];way(around:1400,${center.lat},${center.lng})["golf"="water_hazard"];relation(around:1400,${center.lat},${center.lng})["golf"="water_hazard"];way(around:1400,${center.lat},${center.lng})["golf"="lateral_water_hazard"];relation(around:1400,${center.lat},${center.lng})["golf"="lateral_water_hazard"];way(around:1400,${center.lat},${center.lng})["natural"="water"];relation(around:1400,${center.lat},${center.lng})["natural"="water"];);out geom tags;`;
+    const radiusM=osmQueryRadius(opts);
+	    const query=`[out:json][timeout:18];(way(around:${radiusM},${center.lat},${center.lng})["golf"="course"];relation(around:${radiusM},${center.lat},${center.lng})["golf"="course"];way(around:${radiusM},${center.lat},${center.lng})["golf"="hole"];relation(around:${radiusM},${center.lat},${center.lng})["golf"="hole"];way(around:${radiusM},${center.lat},${center.lng})["golf"="green"];relation(around:${radiusM},${center.lat},${center.lng})["golf"="green"];way(around:${radiusM},${center.lat},${center.lng})["golf"="fairway"];relation(around:${radiusM},${center.lat},${center.lng})["golf"="fairway"];way(around:${radiusM},${center.lat},${center.lng})["golf"="tee"];relation(around:${radiusM},${center.lat},${center.lng})["golf"="tee"];way(around:${radiusM},${center.lat},${center.lng})["golf"="bunker"];relation(around:${radiusM},${center.lat},${center.lng})["golf"="bunker"];way(around:${radiusM},${center.lat},${center.lng})["golf"="water_hazard"];relation(around:${radiusM},${center.lat},${center.lng})["golf"="water_hazard"];way(around:${radiusM},${center.lat},${center.lng})["golf"="lateral_water_hazard"];relation(around:${radiusM},${center.lat},${center.lng})["golf"="lateral_water_hazard"];way(around:${radiusM},${center.lat},${center.lng})["natural"="water"];relation(around:${radiusM},${center.lat},${center.lng})["natural"="water"];);out geom tags;`;
     const url='https://overpass-api.de/api/interpreter?data='+encodeURIComponent(query);
     const automapperStartedAt=Date.now();
     if(logAutomapperTelemetry)recordMappingDebug(debugRunId,{source:'automapper',phase:'started',event:'automapper-started',summary:'AutoMapper started',details:{
@@ -2144,6 +2175,7 @@
       needsGreens,
       fresh:!!opts.fresh,
       center:{lat:center.lat,lng:center.lng},
+      queryRadiusM:radiusM,
       resolutionKey:attempt.resolutionKey,
       attemptToken:attempt.attemptToken,
       expectedHoleCount:automapperExpectedHoleCount()
