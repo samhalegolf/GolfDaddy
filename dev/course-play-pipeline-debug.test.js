@@ -141,47 +141,20 @@ async function main() {
   assert(env.api, "pipeline API exports");
 
   env.api.syncGpsPipelineState("course-picker", 1);
-  assert.strictEqual(env.debugStarts.length, 1, "pipeline wait starts one debug run");
-  assert.strictEqual(env.debugStarts[0].courseId, "maungakiekie-golf-club", "run starts with selected course id");
-  assert(/^pipeline:maungakiekie-golf-club:h1:/.test(env.debugStarts[0].attemptToken), "run token uses selected course key");
-  assert.strictEqual(env.window.__gdCourseMappingDebugActiveAttempt.resolutionKey, "maungakiekie-golf-club:h1", "active attempt stores selected resolution key");
+  assert.strictEqual(env.debugStarts.length, 0, "pipeline does not start mapping debug runs");
+  assert.strictEqual(env.window.__gdCourseMappingDebugActiveAttempt, undefined, "pipeline does not publish active mapping attempts");
 
   env.advance(7501);
   env.api.syncGpsPipelineState("interval", 1);
-  assert(env.fallbackOpts(), "pipeline timeout opens fallback");
-  assert.strictEqual(env.fallbackOpts().resolutionKey, "maungakiekie-golf-club:h1", "fallback uses selected resolution key");
-  assert.strictEqual(env.fallbackOpts().attemptToken, env.debugStarts[0].attemptToken, "fallback reuses timestamped pipeline attempt token");
-  assert(env.debugEvents.some((row) => row.event && row.event.event === "pipeline-timeout"), "timeout is recorded on the debug run");
+  assert.strictEqual(env.fallbackOpts(), null, "pipeline timeout does not open fallback");
+  assert(env.api.getDebugTimeline().some((row) => row.type === "gps-play-pipeline-waiting-for-mapping-controller"), "pipeline records controller-owned fallback wait");
 
-  env.window.gdAutoMapOsmCourse = () => Promise.resolve({ saved: 2, holes: 18 });
+  const originalAutoMap = () => Promise.resolve({ saved: 2, holes: 18 });
+  env.window.gdAutoMapOsmCourse = originalAutoMap;
   env.api.installCourseLibraryAdapter();
-  const staleAttempt = {
-    runId: "map-run-cromwell",
-    debugRunId: "map-run-cromwell",
-    courseId: "cromwell",
-    courseName: "Cromwell Golf Course",
-    hole: 1,
-    resolutionKey: "cromwell:h1:center:-45.0381,169.2048:resolver",
-    attemptToken: "cromwell-token"
-  };
-  env.window.__gdCourseMappingDebugActiveAttempt = {
-    runId: "map-run-maungakiekie",
-    debugRunId: "map-run-maungakiekie",
-    courseId: "maungakiekie-golf-club",
-    courseName: "Maungakiekie Golf Club",
-    hole: 1,
-    resolutionKey: "maungakiekie-golf-club:h1",
-    attemptToken: "maungakiekie-token"
-  };
-  await env.window.gdAutoMapOsmCourse({
-    course: { courseId: "cromwell", courseName: "Cromwell Golf Course" },
-    debugRunId: staleAttempt.runId,
-    attemptToken: staleAttempt.attemptToken,
-    resolutionKey: staleAttempt.resolutionKey,
-    debugAttemptContext: staleAttempt
-  });
-  assert(env.staleRecords.some((row) => row.attemptedAction === "ingest-automapper-output"), "stale AutoMapper ingest is rejected");
-  assert(env.api.getDebugTimeline().some((row) => row.type === "automapper-stale-ingest-rejected"), "pipeline records stale automapper rejection");
+  assert.strictEqual(env.window.gdAutoMapOsmCourse, originalAutoMap, "pipeline adapter does not wrap AutoMapper");
+  assert(env.api.getDebugTimeline().some((row) => row.type === "course-library-adapter-passive"), "pipeline records passive adapter mode");
+  assert.strictEqual(env.staleRecords.length, 0, "pipeline adapter does not own stale AutoMapper ingestion");
 
   console.log("course-play-pipeline-debug tests passed");
 }
