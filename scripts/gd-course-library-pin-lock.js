@@ -3461,6 +3461,10 @@
 	    try{
 	      const c=sessionCourse(course||courseObj());
 	      if(!c||isManualGpsCourse(c))return false;
+	      if(window.__gdCoursePlayInteractiveFallbackActive||interactiveGreenFallbackState){
+	        recordCoursePlayDebug('course-mapping-schedule-skipped-manual-fallback-active',c,validHoleNumber(opts.hole)||activePlayingHole()||holeNumber()||1,{source:opts.source||'scheduled-automap',reason:'manual-fallback-terminal'});
+	        return false;
+	      }
 	      if(typeof fetch!=='function')return false;
 	      const key=`${mappedModeCourseIdentity(c)}:${opts.hole||'course'}`;
 	      if(mapperOsmAutoMapRunKey===key)return true;
@@ -4358,6 +4362,11 @@
     if(!c||isManualGpsCourse(c))return {playable:false,reason:'manual-course'};
     const h=validHoleNumber(opts.hole)||1;
     const key=opts.resolutionKey||coursePlayResolverKey(c,h);
+    const activeFallback=window.__gdCoursePlayInteractiveFallbackActive||interactiveGreenFallbackState;
+    if(activeFallback&&String(activeFallback.resolutionKey||activeFallback.key||'')===String(key)){
+      recordMappingDebug(activeFallback.debugRunId||opts.debugRunId||'',{source:'manual-fallback',phase:'skipped',event:'manual-fallback-terminal-reentry-blocked',summary:'Manual fallback blocked automatic re-entry',details:{hole:h,resolutionKey:key,attemptToken:activeFallback.attemptToken||opts.attemptToken||'',requestedReason:opts.reason||'course-selected'}});
+      return {playable:false,fallback:'interactive-green',armed:true,terminal:true,debugRunId:activeFallback.debugRunId||opts.debugRunId||'',reason:'manual-fallback-active'};
+    }
     if(coursePlayResolverInFlight[key])return coursePlayResolverInFlight[key];
     const attemptToken=opts.attemptToken||newCoursePlayAttemptToken(key);
     const debugRunId=opts.debugRunId||mappingDebugRun(c,{newRun:true,reason:opts.reason||'course-selected',selectedAt,attemptToken,hole:h});
@@ -4457,6 +4466,12 @@
     if(!c||isManualGpsCourse(c)){hideCourseLoading(0);return false;}
     const h=1;
     const openingKey=courseOpenKey(c,h);
+    const activeFallback=window.__gdCoursePlayInteractiveFallbackActive||interactiveGreenFallbackState;
+    if(activeFallback&&String(activeFallback.resolutionKey||activeFallback.key||'')===String(coursePlayResolverKey(c,h))){
+      recordCoursePlayDebug('course-open-skipped-manual-fallback-active',c,h,{reason:'manual-fallback-terminal',resolutionKey:activeFallback.resolutionKey||activeFallback.key||'',attemptToken:activeFallback.attemptToken||''});
+      hideCourseLoading(0);
+      return true;
+    }
     if(courseOpenAlreadySettled(c,h)){hideCourseLoading(0);return true;}
     if(courseOpenInFlight(c,h))return true;
     window.__gdOpeningCourseToFirstHoleKey=openingKey;
