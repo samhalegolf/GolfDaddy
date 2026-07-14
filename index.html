@@ -20571,7 +20571,8 @@ function gdRenderLaunchMonitorAdmin(){
 }
 
 /* ---------------- Core map ---------------- */
-const map=L.map("map",{zoomControl:false,attributionControl:false,tap:false,doubleClickZoom:false,touchZoom:true,scrollWheelZoom:true,boxZoom:false,keyboard:false}).setView([-36.9149,174.7255],18);
+const GD_NEUTRAL_MAP_CENTER=[0,0];
+const map=L.map("map",{zoomControl:false,attributionControl:false,tap:false,doubleClickZoom:false,scrollWheelZoom:true,boxZoom:false,keyboard:false}).setView(GD_NEUTRAL_MAP_CENTER,2);
 const gdFocusPane=map.createPane("gd-focus");
 gdFocusPane.classList.add("leaflet-gd-focus-pane");
 gdFocusPane.style.zIndex=345;
@@ -21656,15 +21657,51 @@ function gdIsLayupTarget(center,targetPoint){
 
 
 /* ---------------- Course flow ---------------- */
+function gdCoursePickerFinitePoint(point){
+  if(!point)return null;
+  const rawLat=point.lat;
+  const rawLng=point.lng??point.lon;
+  if(rawLat==null||rawLat===""||rawLng==null||rawLng==="")return null;
+  const lat=Number(rawLat);
+  const lng=Number(rawLng);
+  return Number.isFinite(lat)&&Number.isFinite(lng)?{lat,lng}:null;
+}
+function gdCoursePickerNeutralPoint(point){
+  const p=gdCoursePickerFinitePoint(point);
+  return !!(p&&Math.abs(p.lat)<0.000001&&Math.abs(p.lng)<0.000001);
+}
+function gdCoursePickerRecentGpsPoint(maxAgeMs=10*60*1000){
+  try{
+    const state=window.gdGpsState||{};
+    const fix=state.lastFix;
+    const at=Number(state.lastFixAt||0);
+    const point=gdCoursePickerFinitePoint(fix);
+    if(!point)return null;
+    if(Number.isFinite(at)&&at>0&&Date.now()-at>maxAgeMs)return null;
+    return point;
+  }catch(e){return null}
+}
+function gdCoursePickerPayloadHasPoint(payload){
+  return !!gdCoursePickerFinitePoint(payload);
+}
+function gdCoursePickerSetDatasetPoint(element,payload){
+  if(!element)return;
+  const point=gdCoursePickerFinitePoint(payload);
+  element.dataset.gdCourseLat=point?String(point.lat):"";
+  element.dataset.gdCourseLng=point?String(point.lng):"";
+}
 function gdCoursePickerDefaultPoint(){
-  try{if(window.start&&Number.isFinite(Number(start.lat))&&Number.isFinite(Number(start.lng)))return {lat:Number(start.lat),lng:Number(start.lng)};}catch(e){}
+  try{const point=gdCoursePickerFinitePoint(window.start);if(point)return point;}catch(e){}
+  const gps=gdCoursePickerRecentGpsPoint();
+  if(gps)return gps;
   try{
     if(window.map&&typeof map.getCenter==="function"){
       const center=map.getCenter();
-      if(center&&Number.isFinite(Number(center.lat))&&Number.isFinite(Number(center.lng)))return {lat:Number(center.lat),lng:Number(center.lng)};
+      const point=gdCoursePickerFinitePoint(center);
+      if(point&&!gdCoursePickerNeutralPoint(point))return point;
     }
   }catch(e){}
-  return {lat:-36.9149,lng:174.7255};
+  return null;
 }
 function gdAssumedCourseLabelForPicker(point=gdCoursePickerDefaultPoint()){
   const lat=Number(point?.lat),lng=Number(point?.lng);
@@ -21681,8 +21718,8 @@ function gdCurrentAssumedCoursePayload(){
   const point=gdCoursePickerDefaultPoint();
   return gdNormalizeCoursePickerPayload({
     name:"Manual GPS",
-    lat:point.lat,
-    lng:point.lng,
+    lat:point?.lat??null,
+    lng:point?.lng??null,
     assumedCandidate:false,
     source:"manual-gps"
   });
@@ -21697,8 +21734,7 @@ function gdRefreshCourseAssumedOption(course){
   if(option){
     option.__gdCoursePayload=payload;
     option.dataset.gdCourseName=payload.name;
-    option.dataset.gdCourseLat=String(payload.lat);
-    option.dataset.gdCourseLng=String(payload.lng);
+    gdCoursePickerSetDatasetPoint(option,payload);
   }
 }
 function gdRefreshAssumedCourseFromLocation(fallbackCourse){
@@ -21731,8 +21767,7 @@ function renderCourses(courses){
     row.className="course";
     row.__gdCoursePayload=c;
     row.dataset.gdCourseName=c.name;
-    row.dataset.gdCourseLat=String(c.lat);
-    row.dataset.gdCourseLng=String(c.lng);
+    gdCoursePickerSetDatasetPoint(row,c);
     row.innerHTML=`<div><div class="name"></div><div class="meta">Course result</div></div><button class="play">Play</button>`;
     row.querySelector(".name").textContent=c.name||"Course";
     row.onclick=()=>gdOpenCoursePickerCourse(c);
@@ -21745,8 +21780,10 @@ function renderCourses(courses){
 function gdNormalizeCoursePickerPayload(c){
   const src=c&&typeof c==="object"?c:{};
   const name=String(src.name||src.courseName||"Manual GPS").trim()||"Manual GPS";
-  const lat=Number(src.lat);
-  const lng=Number(src.lng);
+  const rawLat=src.lat??src.courseLat??src.latitude;
+  const rawLng=src.lng??src.courseLng??src.longitude??src.lon;
+  const lat=rawLat===""||rawLat==null?NaN:Number(rawLat);
+  const lng=rawLng===""||rawLng==null?NaN:Number(rawLng);
   return Object.assign({},src,{
     name,
     lat:Number.isFinite(lat)?lat:null,
@@ -22007,7 +22044,8 @@ function gdScheduleCoursePickerFirstHoleOpen(payload){
 window.gdPrepareCoursePickerFirstHoleState=gdPrepareCoursePickerFirstHoleState;
 window.gdScheduleCoursePickerFirstHoleOpen=gdScheduleCoursePickerFirstHoleOpen;
 function gdRefreshGpsMapAfterCourseOpen(payload,opts={}){
-  const setCourseView=opts.setCourseView!==undefined?!!opts.setCourseView:gdCoursePayloadIsManual(payload);
+  const hasCoursePoint=gdCoursePickerPayloadHasPoint(payload);
+  const setCourseView=opts.setCourseView!==undefined?!!opts.setCourseView:hasCoursePoint;
   [40,120,280,620].forEach(delay=>{
     setTimeout(()=>{
       try{
@@ -22018,7 +22056,7 @@ function gdRefreshGpsMapAfterCourseOpen(payload,opts={}){
         else window.map?.invalidateSize?.(false);
       }catch(e){}
       try{
-        if(setCourseView&&payload&&typeof map!=="undefined"&&map&&typeof map.setView==="function")map.setView([payload.lat,payload.lng],18,{animate:false});
+        if(setCourseView&&hasCoursePoint&&payload&&typeof map!=="undefined"&&map&&typeof map.setView==="function")map.setView([payload.lat,payload.lng],18,{animate:false});
       }catch(e){}
 	      try{if(typeof gdV62Refresh==="function")gdV62Refresh();}catch(e){}
 	      try{window.gdApplyGpsMapVisibilityOwner?.("course-open-refresh");}catch(e){}
@@ -22087,10 +22125,10 @@ function gdOpenCoursePickerCourse(course){
     gdStoreCoursePickerSelection(payload);
     gdEnsureGpsCourseSurface();
     try{const line=document.getElementById("courseLine");if(line){line.textContent=payload.name==="Manual GPS"?"":payload.name;line.style.display=line.textContent?"block":"none";}if(typeof gdMakeCourseLabelsClickable==="function")gdMakeCourseLabelsClickable();}catch(_){}
-    try{if(gdCoursePayloadIsManual(payload)&&window.map&&map.setView&&Number.isFinite(Number(payload.lat))&&Number.isFinite(Number(payload.lng)))map.setView([payload.lat,payload.lng],18);}catch(_){}
+    try{if(gdCoursePickerPayloadHasPoint(payload)&&window.map&&map.setView)map.setView([payload.lat,payload.lng],18);}catch(_){}
     try{if(typeof resetPlay==="function")resetPlay(true);}catch(_){}
     try{if(typeof toast==="function")toast(payload.name==="Manual GPS"?"Manual GPS selected":"Course selected");}catch(_){}
-    gdRefreshGpsMapAfterCourseOpen(payload,{setCourseView:gdCoursePayloadIsManual(payload)});
+    gdRefreshGpsMapAfterCourseOpen(payload,{setCourseView:gdCoursePickerPayloadHasPoint(payload)});
   }
   gdKickWholeCourseAutoMapOnLoad(payload);
   gdScheduleCoursePickerFirstHoleOpen(payload);
@@ -22170,8 +22208,8 @@ document.querySelectorAll(".panel").forEach(panel=>{
   panel.addEventListener("click",e=>{if(e.target===panel)panel.classList.remove("open")});
 });
 function openCourse(c){
-  c=gdNormalizeCoursePickerPayload(c||{name:"Manual GPS",lat:-36.9149,lng:174.7255});
-  const manualCourse=gdCoursePayloadIsManual(c);
+  c=gdNormalizeCoursePickerPayload(c||{name:"Manual GPS"});
+  const hasCoursePoint=gdCoursePickerPayloadHasPoint(c);
   try{clearSnapshotSource();}catch(e){}
   autoSwitchedForSecurity=false;
   gdStoreCoursePickerSelection(c);
@@ -22183,7 +22221,7 @@ function openCourse(c){
   gdEnsureGpsCourseSurface();
   try{ const line=document.getElementById("courseLine"); if(line){line.textContent=c.name==="Manual GPS"?"":c.name;line.style.display=line.textContent?"block":"none";} if(typeof gdMakeCourseLabelsClickable==="function")gdMakeCourseLabelsClickable(); }catch(e){}
 	  try{
-	    if(manualCourse&&typeof map!=="undefined"&&map&&typeof map.setView==="function"&&Number.isFinite(Number(c.lat))&&Number.isFinite(Number(c.lng))){
+	    if(hasCoursePoint&&typeof map!=="undefined"&&map&&typeof map.setView==="function"){
 	      map.setView([c.lat,c.lng],18,{animate:false});
 	    }
 	  }catch(e){console.warn("[GolfDaddy] course map setView failed",e);}
@@ -22193,7 +22231,7 @@ function openCourse(c){
   try{ if(typeof setGps==='function') setGps(false,'Manual'); }catch(e){}
   try{ var two=document.getElementById('gpsTwoTapBtn'), live=document.getElementById('gpsLiveModeBtn'); if(two)two.classList.add('active'); if(live)live.classList.remove('active'); }catch(e){}
   try{ if(typeof toast==="function")toast(c.name==='Manual GPS' ? "Manual GPS selected" : "Course selected"); }catch(e){}
-	  gdRefreshGpsMapAfterCourseOpen(c,{setCourseView:manualCourse});
+	  gdRefreshGpsMapAfterCourseOpen(c,{setCourseView:hasCoursePoint});
   return false;
 }
 function backToCourses(){
@@ -35028,7 +35066,7 @@ function gdWireManualGpsPlayButton(){
         ev.preventDefault();
         ev.stopPropagation();
         if(ev.stopImmediatePropagation) ev.stopImmediatePropagation();
-        openCourse({name:'Manual GPS',lat:-36.9149,lng:174.7255});
+        openCourse({name:'Manual GPS'});
         return false;
       }, true);
     });
@@ -44021,7 +44059,14 @@ body.gdWandLayerActive .gdWandHandle{
     return 2*R*Math.atan2(Math.sqrt(s),Math.sqrt(1-s));
   }
   function finitePoint(point){
-    return point&&Number.isFinite(Number(point.lat))&&Number.isFinite(Number(point.lng));
+    if(!point)return false;
+    const rawLat=point.lat;
+    const rawLng=point.lng??point.lon;
+    if(rawLat==null||rawLat===""||rawLng==null||rawLng==="")return false;
+    return Number.isFinite(Number(rawLat))&&Number.isFinite(Number(rawLng));
+  }
+  function neutralPoint(point){
+    return finitePoint(point)&&Math.abs(Number(point.lat))<0.000001&&Math.abs(Number(point.lng))<0.000001;
   }
   function recentGpsPoint(){
     return safe(()=>{
@@ -44033,25 +44078,57 @@ body.gdWandLayerActive .gdWandHandle{
       return recent&&finitePoint(point)?point:null;
     },null);
   }
+  function rememberPickerGps(pos){
+    const coords=pos&&pos.coords;
+    const point={lat:Number(coords&&coords.latitude),lng:Number(coords&&coords.longitude)};
+    if(!finitePoint(point))return null;
+    window.gdGpsState=window.gdGpsState||{};
+    window.gdGpsState.permissionKnown=true;
+    window.gdGpsState.permissionGranted=true;
+    window.gdGpsState.lastError=null;
+    window.gdGpsState.lastFix={lat:point.lat,lng:point.lng,accuracy:Number.isFinite(Number(coords.accuracy))?Number(coords.accuracy):null,source:"course-picker",simulated:false};
+    window.gdGpsState.lastFixAt=Date.now();
+    return point;
+  }
+  function requestPickerGps(){
+    if(window.__gdCoursePickerGpsRequestActive||!navigator.geolocation)return false;
+    window.__gdCoursePickerGpsRequestActive=true;
+    navigator.geolocation.getCurrentPosition(pos=>{
+      window.__gdCoursePickerGpsRequestActive=false;
+      if(rememberPickerGps(pos))renderNearby();
+    },err=>{
+      window.__gdCoursePickerGpsRequestActive=false;
+      window.gdGpsState=window.gdGpsState||{};
+      window.gdGpsState.lastError=err||null;
+    },{enableHighAccuracy:true,maximumAge:60000,timeout:9000});
+    return true;
+  }
   function currentPoint(){
     return safe(()=>{
-      if(typeof start!=="undefined"&&start)return{lat:Number(start.lat),lng:Number(start.lng)};
+      if(typeof start!=="undefined"&&start){
+        const point={lat:Number(start.lat),lng:Number(start.lng)};
+        if(finitePoint(point))return point;
+      }
       const gps=recentGpsPoint();
       if(gps)return gps;
       if(typeof map!=="undefined"&&map&&map.getCenter){
         const c=map.getCenter();
         const center={lat:Number(c.lat),lng:Number(c.lng)};
-        if(finitePoint(center))return center;
+        if(finitePoint(center)&&!neutralPoint(center))return center;
       }
-    },null)||{lat:-36.9149,lng:174.7255};
+    },null)||null;
   }
   function basePayload(raw){
     const src=raw&&typeof raw==="object"?raw:{};
     const name=String(src.name||src.courseName||"Course").trim()||"Course";
-    const lat=Number(src.lat??src.courseLat??src.latitude);
-    const lng=Number(src.lng??src.courseLng??src.longitude);
-    const finderLat=Number(src.finderLat??src.courseFinderLat);
-    const finderLng=Number(src.finderLng??src.courseFinderLng);
+    const rawLat=src.lat??src.courseLat??src.latitude;
+    const rawLng=src.lng??src.courseLng??src.longitude??src.lon;
+    const rawFinderLat=src.finderLat??src.courseFinderLat;
+    const rawFinderLng=src.finderLng??src.courseFinderLng;
+    const lat=rawLat===""||rawLat==null?NaN:Number(rawLat);
+    const lng=rawLng===""||rawLng==null?NaN:Number(rawLng);
+    const finderLat=rawFinderLat===""||rawFinderLat==null?NaN:Number(rawFinderLat);
+    const finderLng=rawFinderLng===""||rawFinderLng==null?NaN:Number(rawFinderLng);
     const canonicalKey=src.canonicalKey||keyForName(name);
     return Object.assign({},src,{
       name,
@@ -44123,8 +44200,10 @@ body.gdWandLayerActive .gdWandHandle{
   function localMatches(query,opts={}){
     const center=currentPoint();
     const q=cleanName(query);
+    if(opts.nearbyOnly&&!center)return [];
     return mergeDedupe(allLocalCourses(),center).filter(course=>{
       if(opts.nearbyOnly)return Number.isFinite(course.distanceM)&&course.distanceM<=NEARBY_M;
+      if(!q&&!center)return false;
       if(!q)return Number.isFinite(course.distanceM)&&course.distanceM<=NEARBY_M;
       const hay=[course.name,course.courseName,course.courseId,...(course.aliases||[])].map(cleanName).join(" ");
       return hay.includes(q)||q.includes(course.canonicalKey)||course.canonicalKey.includes(q);
@@ -44177,24 +44256,32 @@ body.gdWandLayerActive .gdWandHandle{
     else parts.push("course result");
     return parts.join(" · ");
   }
+  function setPayloadOn(element,course){
+    if(!element)return;
+    element.__gdCoursePayload=course;
+    element.dataset.gdCourseName=course.name;
+    if(typeof gdCoursePickerSetDatasetPoint==="function")gdCoursePickerSetDatasetPoint(element,course);
+    else{
+      element.dataset.gdCourseLat=Number.isFinite(Number(course.lat))?String(course.lat):"";
+      element.dataset.gdCourseLng=Number.isFinite(Number(course.lng))?String(course.lng):"";
+    }
+    element.dataset.gdCourseId=course.courseId||"";
+  }
   function renderNearby(){
     const option=byId("gdCourseAssumedOption");
     if(!option)return null;
+    const center=currentPoint();
     const nearby=rank(localMatches("",{nearbyOnly:true}),"").slice(0,3);
-    const courses=nearby.length?nearby:[basePayload({name:"Manual GPS",lat:currentPoint().lat,lng:currentPoint().lng,source:"manual-gps"})];
+    const courses=nearby.length?nearby:[basePayload({name:"Manual GPS",lat:center?.lat??null,lng:center?.lng??null,source:"manual-gps"})];
     const selected=courses[0];
-    option.__gdCoursePayload=selected;
-    option.dataset.gdCourseName=selected.name;
-    option.dataset.gdCourseLat=String(selected.lat);
-    option.dataset.gdCourseLng=String(selected.lng);
-    option.dataset.gdCourseId=selected.courseId||"";
+    setPayloadOn(option,selected);
     option.innerHTML=courses.map((course,idx)=>{
       const detail=metaText(course).replace(/\s*·\s*course result$/,"").replace(/^course result$/,"");
       return `<div class="courseAssumedBlock" role="button" tabindex="0" data-course-key="${esc(course.canonicalKey||course.name)}" data-course-index="${idx}">
         <div class="courseAssumedMain">
           <div class="courseAssumedLabel">${course.name==="Manual GPS"?"Manual mode":"Nearby course"}</div>
           <div class="courseAssumedName"${idx===0?' id="gdCourseAssumedName"':""}>${esc(course.name)}</div>
-          <div class="courseAssumedMeta">${esc(course.name==="Manual GPS"?"No saved nearby course. Search to choose one.":detail)}</div>
+          <div class="courseAssumedMeta">${esc(course.name==="Manual GPS"?(center?"No saved nearby course. Search to choose one.":"Search or use GPS to choose a course."):detail)}</div>
         </div>
         <button type="button"${idx===0?' id="gdCourseAssumedPlayBtn"':""}>${course.name==="Manual GPS"?"Manual":"Play"}</button>
       </div>`;
@@ -44202,11 +44289,7 @@ body.gdWandLayerActive .gdWandHandle{
     option.querySelectorAll(".courseAssumedBlock").forEach(block=>{
       const idx=Number(block.dataset.courseIndex);
       const course=courses[idx]||selected;
-      block.__gdCoursePayload=course;
-      block.dataset.gdCourseName=course.name;
-      block.dataset.gdCourseLat=String(course.lat);
-      block.dataset.gdCourseLng=String(course.lng);
-      block.dataset.gdCourseId=course.courseId||"";
+      setPayloadOn(block,course);
     });
     return selected;
   }
@@ -44230,11 +44313,7 @@ body.gdWandLayerActive .gdWandHandle{
       const c=basePayload(raw);
       const row=document.createElement("div");
       row.className="course";
-      row.__gdCoursePayload=c;
-      row.dataset.gdCourseName=c.name;
-      row.dataset.gdCourseLat=String(c.lat);
-      row.dataset.gdCourseLng=String(c.lng);
-      row.dataset.gdCourseId=c.courseId||"";
+      setPayloadOn(row,c);
       row.innerHTML=`<div><div class="name">${esc(c.name)}</div><div class="meta">${esc(metaText(c))}</div></div><button class="play" type="button">Play</button>`;
       list.appendChild(row);
     });
@@ -44286,6 +44365,7 @@ body.gdWandLayerActive .gdWandHandle{
     safe(()=>{if(typeof gdClearMappedStartPromptChrome==="function")gdClearMappedStartPromptChrome();});
     const input=byId("searchInput");
     if(input)input.value="";
+    requestPickerGps();
     window.renderCourses([]);
     const screen=byId("courseScreen");
     if(screen){

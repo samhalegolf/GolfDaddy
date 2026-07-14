@@ -386,17 +386,44 @@
     const clean=String(name||'').trim();
     return !!(clean&&!/^manual gps$/i.test(clean)&&!isAssumedCourseName(clean));
   }
+  function finitePlainPoint(point){
+    if(!point)return null;
+    const rawLat=point.lat;
+    const rawLng=point.lng??point.lon;
+    return finiteCoordinatePair(rawLat,rawLng);
+  }
+  function finiteCoordinatePair(rawLat,rawLng){
+    if(rawLat==null||rawLat===""||rawLng==null||rawLng==="")return null;
+    const lat=Number(rawLat),lng=Number(rawLng);
+    return Number.isFinite(lat)&&Number.isFinite(lng)?{lat,lng}:null;
+  }
+  function firstPresent(values){
+    return (values||[]).find(value=>value!=null&&value!=="");
+  }
+  function finitePointFromValues(latValues,lngValues){
+    return finiteCoordinatePair(firstPresent(latValues),firstPresent(lngValues));
+  }
+  function recentGpsPoint(){
+    try{
+      const state=window.gdGpsState||{};
+      const fix=state.lastFix||null;
+      const at=Number(state.lastFixAt||0);
+      if(!fix||!Number.isFinite(Number(fix.lat))||!Number.isFinite(Number(fix.lng)))return null;
+      if(Number.isFinite(at)&&at>0&&Date.now()-at>10*60*1000)return null;
+      return {lat:Number(fix.lat),lng:Number(fix.lng)};
+    }catch(e){return null;}
+  }
   function mapSessionCenter(course=courseObj()){
     const c=course||{};
     if(isManualGpsCourse(c)){
-      try{if(start)return toPlain(start);}catch(e){}
-      try{if(typeof map!=='undefined'&&map&&typeof map.getCenter==='function')return toPlain(map.getCenter());}catch(e){}
+      try{const point=finitePlainPoint(start);if(point)return point;}catch(e){}
+      const gps=recentGpsPoint();
+      if(gps)return gps;
     }
-    const lat=Number(c.lat??c.latitude), lng=Number(c.lng??c.longitude);
-    if(Number.isFinite(lat)&&Number.isFinite(lng))return {lat,lng};
-    try{if(start)return toPlain(start);}catch(e){}
-    try{if(typeof map!=='undefined'&&map&&typeof map.getCenter==='function')return toPlain(map.getCenter());}catch(e){}
-    return {lat:-36.9149,lng:174.7255};
+    const coursePoint=finitePointFromValues([c.lat,c.latitude],[c.lng,c.longitude,c.lon]);
+    if(coursePoint)return coursePoint;
+    try{const point=finitePlainPoint(start);if(point)return point;}catch(e){}
+    return recentGpsPoint();
   }
   function assumedCourseLabel(center=mapSessionCenter()){
     const lat=Number(center?.lat), lng=Number(center?.lng);
@@ -412,9 +439,10 @@
     return String(course?.courseName||course?.name||'').trim();
   }
   function courseCandidatePoint(course){
-    const lat=Number(course?.courseLat??course?.lat??course?.latitude??course?.finderLat??course?.courseFinderLat);
-    const lng=Number(course?.courseLng??course?.lng??course?.longitude??course?.finderLng??course?.courseFinderLng);
-    return Number.isFinite(lat)&&Number.isFinite(lng)?{lat,lng}:null;
+    return finitePointFromValues(
+      [course?.courseLat,course?.lat,course?.latitude,course?.finderLat,course?.courseFinderLat],
+      [course?.courseLng,course?.lng,course?.longitude,course?.lon,course?.finderLng,course?.courseFinderLng]
+    );
   }
   function savedCourseCandidates(){
     const store=loadStore();
@@ -477,7 +505,8 @@
       .sort((a,b)=>a.distanceM-b.distanceM);
   }
   function nearestKnownCourse(center=mapSessionCenter(),maxDistance=ASSUMED_COURSE_MATCH_RADIUS_M){
-    return nearbyKnownCourses(center,maxDistance)[0]||null;
+    const courses=nearbyKnownCourses(center,maxDistance);
+    return Array.isArray(courses)?courses[0]||null:null;
   }
   function sessionCourse(course=courseObj()){
     const c=course||{};
@@ -486,9 +515,9 @@
     let savedName='';
     try{savedName=window.gdAssumedCourseName||sessionStorage.getItem('gd_assumed_course_name')||'';}catch(e){savedName=window.gdAssumedCourseName||'';}
     if(isAssumedCourseName(savedName))savedName='';
-    const nearest=nearestKnownCourse(center);
+    const nearest=center?nearestKnownCourse(center):null;
     const name=nearest?.name||savedName||assumedCourseLabel(center);
-    return {...c,name,courseId:nearest?.courseId||assumedCourseId(center),lat:nearest?.lat??center.lat,lng:nearest?.lng??center.lng,assumed:true,source:nearest?.source||'assumed-live-gps',distanceM:nearest?.distanceM};
+    return {...c,name,courseId:nearest?.courseId||assumedCourseId(center),lat:nearest?.lat??center?.lat??null,lng:nearest?.lng??center?.lng??null,assumed:true,source:nearest?.source||'assumed-live-gps',distanceM:nearest?.distanceM};
   }
   function courseName(course=courseObj()){return String(sessionCourse(course)?.name||'Assumed golf course');}
   function activeCourseForMode(){
@@ -1666,12 +1695,11 @@
     }catch(e){}
   }
   function guideCoursePoint(course){
-    const lat=Number(course?.courseLat??course?.lat??course?.latitude);
-    const lng=Number(course?.courseLng??course?.lng??course?.longitude);
-    if(Number.isFinite(lat)&&Number.isFinite(lng))return {lat,lng};
+    const point=finitePointFromValues([course?.courseLat,course?.lat,course?.latitude],[course?.courseLng,course?.lng,course?.longitude,course?.lon]);
+    if(point)return point;
     const finder=courseFinderPoint(course);
     if(finder)return finder;
-    return mapSessionCenter(courseObj());
+    return null;
   }
   function guideCacheKey(course){
     const label=course?.courseId||course?.courseName||courseName(courseObj())||currentCourseStorageLabel();
@@ -2746,8 +2774,8 @@
     const selected=currentCourseStorageLabel();
     const sessionName=session&&!session.assumed?session.name:'';
     const name=selected||sessionName||assumedCourseLabel(center);
-    const lat=Number(session?.lat??session?.latitude??center.lat);
-    const lng=Number(session?.lng??session?.longitude??center.lng);
+    const lat=Number(session?.lat??session?.latitude??center?.lat);
+    const lng=Number(session?.lng??session?.longitude??center?.lng);
     return {name,courseId:session?.courseId||assumedCourseId(center),lat,lng,distanceM:session?.distanceM,assumedCandidate:true,source:session?.source||'assumed-course-candidate'};
   }
   function syncCoursePickerAssumption(){
@@ -2769,6 +2797,7 @@
     }catch(e){}
   }
   function nearbySavedCourses(center=mapSessionCenter(),maxDistance=1400){
+    if(!center)return [];
     return libraryCourses()
       .filter(course=>isUsefulCourseName(course.courseName))
       .map(course=>{
@@ -4130,12 +4159,8 @@
   }
   function recentGpsFallbackPoint(){
     try{
-      const state=window.gdGpsState||{};
-      const fix=state.lastFix||null;
-      const at=Number(state.lastFixAt||0);
-      if(!fix||!Number.isFinite(Number(fix.lat))||!Number.isFinite(Number(fix.lng)))return null;
-      if(Number.isFinite(at)&&at>0&&Date.now()-at>10*60*1000)return null;
-      return L.latLng(Number(fix.lat),Number(fix.lng));
+      const point=recentGpsPoint();
+      return point&&typeof L!=='undefined'&&L.latLng?L.latLng(point.lat,point.lng):point;
     }catch(e){return null;}
   }
   function pointDistance(a,b){
@@ -4146,7 +4171,6 @@
     try{if(start)candidates.push(toLatLng(start));}catch(e){}
     const gps=recentGpsFallbackPoint();
     if(gps)candidates.push(gps);
-    try{if(map&&map.getCenter)candidates.push(map.getCenter());}catch(e){}
     try{candidates.push(toLatLng(guideCoursePoint(course)));}catch(e){}
     const found=candidates.filter(Boolean).find(point=>{
       const d=pointDistance(point,green);
@@ -4308,8 +4332,9 @@
     try{
       if(map&&map.invalidateSize)setTimeout(()=>{
         try{map.invalidateSize(false);}catch(e){}
-        const gps=recentGpsFallbackPoint();
-        if(gps&&map&&map.panTo)try{map.panTo(gps,{animate:true});}catch(e){}
+        const focus=toLatLng(guideCoursePoint(c))||recentGpsFallbackPoint();
+        if(focus&&map&&map.setView)try{map.setView(focus,Math.max(map.getZoom?map.getZoom():17,17),{animate:true});}catch(e){}
+        else if(focus&&map&&map.panTo)try{map.panTo(focus,{animate:true});}catch(e){}
       },40);
     }catch(e){}
     try{if(typeof window.gdApplyGpsMapVisibilityOwner==='function')window.gdApplyGpsMapVisibilityOwner('interactive-green-fallback');}catch(e){}
@@ -5179,7 +5204,7 @@
 	    closeCourseLibraryPanel();
 	    try{document.getElementById('gdProfileV67')?.classList.add('hidden');}catch(e){}
     const finder=courseFinderPoint(saved);
-    const c={name:saved.courseName,courseId:saved.courseId,lat:finder?.lat||saved.courseLat||-36.9149,lng:finder?.lng||saved.courseLng||174.7255,courseLat:saved.courseLat||null,courseLng:saved.courseLng||null};
+    const c={name:saved.courseName,courseId:saved.courseId,lat:finder?.lat??saved.courseLat??null,lng:finder?.lng??saved.courseLng??null,courseLat:saved.courseLat??null,courseLng:saved.courseLng??null};
     if(finder){
       c.finderLat=finder.lat;
       c.finderLng=finder.lng;
