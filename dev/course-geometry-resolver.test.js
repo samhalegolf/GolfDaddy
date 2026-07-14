@@ -86,8 +86,33 @@ async function main() {
     expectedHoleCount: 3
   }), false, "does not run when AutoMapper already has numbered guides");
 
+  const emptySource = await resolver.resolveCourseGeometryForAutoMapper({
+    course: { courseId: "resolver-test", courseName: "Resolver Test Course", courseLat: baseLat, courseLng: baseLng },
+    osmPayload: { elements: [] },
+    expectedHoleCount: 3,
+    scorecardHoles: [
+      { holeNumber: 1, par: 5, distanceM: 500 },
+      { holeNumber: 2, par: 3, distanceM: 100 },
+      { holeNumber: 3, par: 4, distanceM: 300 }
+    ]
+  });
+  assert.strictEqual(emptySource.status, "source-load-failed", "empty native input fails as acquisition, not confidence");
+  assert.strictEqual(emptySource.sourceLoadError.code, "no-supported-golf-geometry-returned");
+  assert.strictEqual(emptySource.checkpoints.length, 0, "empty input does not create fake checkpoints");
+
+  const noScorecard = await resolver.resolveCourseGeometryForAutoMapper({
+    course: { courseId: "resolver-test", courseName: "Resolver Test Course", courseLat: baseLat, courseLng: baseLng },
+    osmPayload: { elements },
+    expectedHoleCount: 3
+  });
+  assert.strictEqual(noScorecard.status, "source-load-failed", "missing scorecard is an acquisition error");
+  assert.strictEqual(noScorecard.sourceLoadError.code, "scorecard-unavailable");
+  assert.strictEqual(noScorecard.checkpoints.length, 0, "scorecard acquisition failure does not create checkpoints");
+
   const result = await resolver.resolveCourseGeometryForAutoMapper({
     course: { courseId: "resolver-test", courseName: "Resolver Test Course", courseLat: baseLat, courseLng: baseLng },
+    courseCentre: { lat: baseLat, lng: baseLng },
+    mapViewport: { center: { lat: baseLat, lng: baseLng }, zoom: 16, bounds: { south: baseLat - 0.01, west: baseLng - 0.01, north: baseLat + 0.01, east: baseLng + 0.01 } },
     osmPayload: { elements },
     expectedHoleCount: 3,
     scorecardHoles: [
@@ -110,6 +135,11 @@ async function main() {
   );
   assert(result.analysisBoundary.length >= 3, "debug boundary is returned");
   assert(result.debugEvidence.greenCandidates.length === 3, "green evidence is returned");
+  assert.strictEqual(result.checkpoints.length, 3, "real evidence produces three visual checkpoints");
+  const fairwayLines = result.checkpoints.find((checkpoint) => checkpoint.stage === "fairway-lines");
+  assert(fairwayLines.imageDataUrl.startsWith("data:image/svg+xml"), "checkpoint includes a visual preview");
+  assert(fairwayLines.metadata.geometryIds.candidates.includes("way-101"), "checkpoint candidate IDs match debug evidence IDs");
+  assert.strictEqual(fairwayLines.metadata.viewport.zoom, 16, "checkpoint metadata includes map viewport");
 }
 
 main().catch((error) => {

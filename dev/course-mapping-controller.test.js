@@ -101,7 +101,7 @@ function osmPayload(kind) {
 
 function loadController(options = {}) {
   const events = [];
-  const calls = { fetch: 0, native: 0, manual: 0 };
+  const calls = { fetch: 0, native: 0, manual: 0, nativeInputs: [] };
   const testConsole = Object.assign({}, console, { warn() {}, info() {} });
   const localStorage = storage({
     gd_user_course_library_v1: JSON.stringify(options.savedMap ? playableStore() : { courses: {} })
@@ -143,8 +143,9 @@ function loadController(options = {}) {
       highConfidence: 0.76,
       mediumConfidence: 0.58,
       shouldRunForAutoMapper() { return true; },
-      async resolveCourseGeometryForAutoMapper() {
+      async resolveCourseGeometryForAutoMapper(input) {
         calls.native += 1;
+        calls.nativeInputs.push(input || {});
         if (options.nativeSuccess) {
           return {
             status: "resolved",
@@ -225,9 +226,14 @@ function loadController(options = {}) {
     setInterval: win.setInterval,
     clearInterval: win.clearInterval,
     fetch: async (url) => {
-      if (String(url || "").includes("overpass-api")) calls.fetch += 1;
-      if (options.fetchFails) return { ok: false, status: 504, json: async () => ({}) };
-      return { ok: true, json: async () => osmPayload(options.automapperSuccess ? "success" : options.nativeSuccess ? "native" : "zero") };
+      const overpass = String(url || "").includes("overpass-api");
+      if (!overpass) return { ok: true, json: async () => ({}) };
+      calls.fetch += 1;
+      const sequence = Array.isArray(options.fetchSequence) ? options.fetchSequence : null;
+      const next = sequence && sequence.length ? sequence.shift() : null;
+      if (options.fetchFails || next === "fail") return { ok: false, status: 504, json: async () => ({}) };
+      const kind = next || (options.automapperSuccess ? "success" : options.nativeSuccess ? "native" : "zero");
+      return { ok: true, json: async () => osmPayload(kind) };
     },
     AbortController: class { constructor() { this.signal = {}; } abort() {} }
   };
@@ -267,11 +273,21 @@ async function main() {
 
   env = await runScenario({ fetchFails: true });
   assert.strictEqual(env.calls.native, 1, "AutoMapper fetch failure invokes native resolver exactly once");
+  assert.strictEqual(env.calls.fetch, 2, "native resolver retries source geometry after AutoMapper fetch failure");
   assert(env.events.some((event) => event.event === "automapper-failed"), "AutoMapper failure is terminally logged");
+  assert.strictEqual(env.events.filter((event) => event.event === "automapper-failed").length, 1, "AutoMapper fetch failure is logged once");
   assert(env.events.some((event) => event.event === "native-resolver-started"), "native resolver start is logged after AutoMapper failure");
+  assert.strictEqual(env.calls.nativeInputs[0].sourceLoadError.code, "osm-request-failed", "native resolver receives a source-load error when geometry reload fails");
+
+  env = await runScenario({ fetchSequence: ["fail", "native"] });
+  assert.strictEqual(env.calls.fetch, 2, "native resolver can independently reload source geometry");
+  assert.strictEqual(env.calls.native, 1, "native resolver still runs once after reload");
+  assert.strictEqual(env.calls.nativeInputs[0].sourceLoadError, null, "source reload clears the acquisition error");
+  assert.strictEqual(env.calls.nativeInputs[0].osmPayload.elements.length, 1, "native resolver receives reloaded OSM geometry");
 
   env = await runScenario({});
   assert.strictEqual(env.calls.native, 1, "AutoMapper zero-guide result invokes native resolver exactly once");
+  assert.strictEqual(env.events.filter((event) => event.event === "automapper-failed").length, 1, "AutoMapper zero-guide failure is logged once");
   assert(env.events.some((event) => event.event === "native-resolver-failed"), "native resolver failure is terminally logged");
 
   env = await runScenario({ nativeSuccess: true });

@@ -190,6 +190,45 @@
     ];
   }
 
+  function inputCenter(input) {
+    input = input || {};
+    var course = input.course || {};
+    return toPoint(input.courseCentre) ||
+      toPoint(input.courseCenter) ||
+      toPoint(input.center) ||
+      toPoint(course.courseCentre) ||
+      toPoint(course.courseCenter) ||
+      toPoint(course.center) ||
+      toPoint(input.mapViewport && input.mapViewport.center) ||
+      toPoint({ lat: course.courseLat || course.lat || course.latitude, lng: course.courseLng || course.lng || course.longitude });
+  }
+
+  function viewportBoundary(viewport) {
+    var bounds = viewport && viewport.bounds || viewport;
+    if (!bounds) return null;
+    var north = number(bounds.north != null ? bounds.north : bounds.maxLat, NaN);
+    var south = number(bounds.south != null ? bounds.south : bounds.minLat, NaN);
+    var east = number(bounds.east != null ? bounds.east : bounds.maxLng, NaN);
+    var west = number(bounds.west != null ? bounds.west : bounds.minLng, NaN);
+    if (![north, south, east, west].every(Number.isFinite)) return null;
+    return [
+      { lat: south, lng: west },
+      { lat: south, lng: east },
+      { lat: north, lng: east },
+      { lat: north, lng: west }
+    ];
+  }
+
+  function explicitBoundary(input) {
+    input = input || {};
+    var candidates = [input.courseBoundary, input.boundary, input.analysisBoundary, viewportBoundary(input.mapViewport)];
+    for (var i = 0; i < candidates.length; i += 1) {
+      var polygon = cleanPolygon(candidates[i]);
+      if (polygon) return polygon;
+    }
+    return null;
+  }
+
   function projectPoint(point, bounds, width, height) {
     point = toPoint(point);
     if (!point || !bounds) return null;
@@ -276,6 +315,8 @@
 
   function deriveAnalysisBoundary(input, elements) {
     var course = input.course || {};
+    var boundary = explicitBoundary(input);
+    if (boundary) return boundary;
     var coursePolygons = (elements || []).filter(function (element) {
       return golfTag(element) === "course" && cleanPolygon(elementPoints(element));
     });
@@ -292,8 +333,7 @@
       if (golf || water) featurePoints = featurePoints.concat(elementPoints(element));
     });
     if (featurePoints.length >= 3) return boundsPolygon(boundsForPoints(featurePoints), 90);
-    var center = toPoint(input.center) ||
-      toPoint({ lat: course.courseLat || course.lat || course.latitude, lng: course.courseLng || course.lng || course.longitude });
+    var center = inputCenter(input);
     if (!center) return [];
     var dLat = 1400 / 111320;
     var dLng = 1400 / (111320 * Math.max(0.2, Math.cos(rad(center.lat))));
@@ -924,6 +964,123 @@
     return bundleGuides.length > 0 && bundleGuides.length < Math.min(expected, 18);
   }
 
+  function supportedGolfGeometry(elements) {
+    return (elements || []).filter(function (element) {
+      var golf = golfTag(element);
+      return golf === "hole" || golf === "green" || golf === "fairway" || golf === "tee";
+    });
+  }
+
+  function normalizeSourceLoadError(raw, fallbackCode, fallbackReason) {
+    raw = raw || {};
+    return {
+      code: String(raw.code || fallbackCode || "native-resolver-source-load-failed"),
+      reason: String(raw.reason || fallbackReason || raw.message || "Native resolver source load failed"),
+      message: String(raw.message || raw.reason || fallbackReason || "Native resolver source load failed"),
+      name: String(raw.name || "")
+    };
+  }
+
+  function sourceEvidenceError(input, elements, boundary, scorecard) {
+    if (input.sourceLoadError) return normalizeSourceLoadError(input.sourceLoadError, "osm-request-failed", "OSM request failed");
+    if (!Array.isArray(elements)) return normalizeSourceLoadError(null, "osm-payload-invalid", "OSM payload was unavailable");
+    if (!elements.length) return normalizeSourceLoadError(null, "no-supported-golf-geometry-returned", "No supported golf geometry returned");
+    if (!supportedGolfGeometry(elements).length) return normalizeSourceLoadError(null, "no-supported-golf-geometry-returned", "No supported golf geometry returned");
+    if (!Array.isArray(boundary) || boundary.length < 3) return normalizeSourceLoadError(null, "course-boundary-unavailable", "Course boundary unavailable");
+    if (!Array.isArray(scorecard) || !scorecard.length) return normalizeSourceLoadError(null, "scorecard-unavailable", "Scorecard unavailable");
+    return null;
+  }
+
+  function failedSourceFeedback(error, elements, scorecard) {
+    var supported = supportedGolfGeometry(elements);
+    return {
+      stage: "Source load failed",
+      geometry: {
+        osmFeatures: Array.isArray(elements) ? elements.length : 0,
+        supportedGolfFeatures: supported.length,
+        greenCandidates: 0,
+        acceptedGreens: 0,
+        rejectedGreens: 0,
+        fairwayCorridors: 0,
+        candidatePaths: 0,
+        missingCandidates: 0,
+        sourceLoadError: error
+      },
+      distance: {
+        measuredRange: null,
+        scorecardRange: distanceRange((scorecard || []).map(function (hole) { return hole.distanceM; })),
+        globalScale: 1,
+        averageNormalisedError: null,
+        rankAgreement: "0 / 0",
+        poorAgreementHoles: [],
+        distanceUsed: "none",
+        confidence: "None"
+      },
+      assignment: {
+        scorecardHoles: Array.isArray(scorecard) ? scorecard.length : 0,
+        geometryCandidates: 0,
+        resolvedHoles: 0,
+        unresolvedHoles: (scorecard || []).map(function (hole) { return hole.holeNumber; }),
+        duplicateAssignmentsBlocked: true,
+        unusedCandidates: 0,
+        overallAssignmentScore: 0,
+        overallConfidence: 0
+      },
+      tieBreakers: {},
+      explanations: []
+    };
+  }
+
+  function sourceLoadFailureResult(input, courseId, resolverRunId, mappingRunId, debugStartedAt, error, elements, boundary, scorecard) {
+    var result = {
+      courseId: courseId,
+      resolverRunId: resolverRunId,
+      status: "source-load-failed",
+      sourceLoadError: error,
+      holes: [],
+      unresolvedCandidates: [],
+      unresolvedScorecardHoles: scorecard || [],
+      analysisBoundary: boundary || [],
+      confidence: 0,
+      overallConfidence: 0,
+      warnings: [error.message],
+      checkpoints: [],
+      resolverVersion: RESOLVER_VERSION,
+      resolvedAt: nowIso(),
+      source: SOURCE,
+      debugEvidence: {
+        resolverRunId: resolverRunId,
+        analysisBoundary: boundary || [],
+        osmFeatureCount: Array.isArray(elements) ? elements.length : 0,
+        fairwayCount: (elements || []).filter(function (element) { return golfTag(element) === "fairway"; }).length,
+        expectedHoleCount: expectedHoleCount(input, scorecard || []),
+        greenCandidates: [],
+        rejectedGreenCandidates: [],
+        holeCandidates: [],
+        scorecardHoles: scorecard || [],
+        assignmentContext: {},
+        assignmentScore: 0,
+        assignmentAlternatives: [],
+        sourceLoadError: error
+      }
+    };
+    result.feedback = failedSourceFeedback(error, elements, scorecard || []);
+    if (!input.debugSuppressLifecycle) {
+      recordMappingDebug(mappingRunId, {
+        source: "native-resolver",
+        phase: "failed",
+        event: "native-resolver-source-load-failed",
+        summary: "Native resolver source load failed",
+        details: resolverDebugDetails(result),
+        error: { message: error.message, name: error.name || "", code: error.code },
+        durationMs: Date.now() - debugStartedAt,
+        confidence: 0
+      });
+    }
+    publishResult(result);
+    return result;
+  }
+
   function resolveStatus(assignments, confidence, expected) {
     var high = assignments.filter(function (hole) { return hole.confidence >= HIGH_CONFIDENCE; }).length;
     if (assignments.length >= expected && confidence >= HIGH_CONFIDENCE && high >= expected) return "resolved";
@@ -1001,7 +1158,8 @@
       var stroke = stage === "number-allocation" ? "#f8d24a" : "#74b9ff";
       body.push('<path d="' + shiftPath(path(candidate.path, false)) + '" fill="none" stroke="' + stroke + '" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>');
       var mid = candidate.path && candidate.path[Math.floor(candidate.path.length / 2)];
-      var text = stage === "number-allocation" && candidate.holeNumber ? "H" + candidate.holeNumber : (candidate.candidateId || ("Candidate " + String.fromCharCode(65 + index)));
+      var stableId = candidate.candidateId || candidate.displayId || ("candidate-" + (index + 1));
+      var text = stage === "number-allocation" && candidate.holeNumber ? "H" + candidate.holeNumber + " " + stableId : stableId;
       body.push(label(mid, text, stage === "number-allocation" ? "#ffe680" : "#cce4ff"));
     });
     if (data.center) body.push(label(data.center, "Course center", "#ffffff"));
@@ -1023,11 +1181,66 @@
     return "Candidate " + label;
   }
 
+  function roundCoord(value) {
+    var n = number(value, NaN);
+    return Number.isFinite(n) ? Number(n.toFixed(6)) : undefined;
+  }
+
+  function summarizeBounds(bounds) {
+    if (!bounds) return null;
+    return {
+      south: roundCoord(bounds.minLat),
+      west: roundCoord(bounds.minLng),
+      north: roundCoord(bounds.maxLat),
+      east: roundCoord(bounds.maxLng)
+    };
+  }
+
+  function summarizeViewport(viewport) {
+    if (!viewport) return null;
+    var out = {};
+    var center = toPoint(viewport.center);
+    if (center) out.center = { lat: roundCoord(center.lat), lng: roundCoord(center.lng) };
+    if (Number.isFinite(number(viewport.zoom, NaN))) out.zoom = number(viewport.zoom, NaN);
+    var boundary = viewportBoundary(viewport);
+    if (boundary) out.bounds = summarizeBounds(boundsForPoints(boundary));
+    return Object.keys(out).length ? out : null;
+  }
+
+  function geometryIds(elements, golf) {
+    return (elements || []).filter(function (element) { return golfTag(element) === golf; })
+      .map(function (element, index) { return elementId(element, golf + "-" + index); })
+      .slice(0, 40);
+  }
+
+  function checkpointMetadata(input, data, extra) {
+    var candidates = data.candidates || [];
+    return Object.assign({
+      viewport: summarizeViewport(input.mapViewport),
+      bounds: summarizeBounds(boundsForPoints(allCheckpointPoints(data)) || boundsForPoints(data.boundary || [])),
+      overlayCounts: {
+        sourceFeatures: (data.elements || []).length,
+        acceptedGreens: (data.greens || []).length,
+        rejectedGreens: (data.rejectedGreens || []).length,
+        fairways: geometryIds(data.elements || [], "fairway").length,
+        tees: geometryIds(data.elements || [], "tee").length,
+        candidates: candidates.length
+      },
+      geometryIds: {
+        acceptedGreens: (data.greens || []).map(function (green) { return green.id; }).filter(Boolean).slice(0, 40),
+        rejectedGreens: (data.rejectedGreens || []).map(function (green) { return green.id; }).filter(Boolean).slice(0, 40),
+        fairways: geometryIds(data.elements || [], "fairway"),
+        tees: geometryIds(data.elements || [], "tee"),
+        candidates: candidates.map(function (candidate) { return candidate.candidateId; }).filter(Boolean).slice(0, 40)
+      }
+    }, extra || {});
+  }
+
   function buildCheckpoints(input, runId, courseId, boundary, greenResult, candidates, match) {
     var course = input.course || {};
     var createdAt = nowIso();
     var elements = (input.osmPayload && input.osmPayload.elements) || input.elements || [];
-    var center = toPoint(input.center) || toPoint({ lat: course.courseLat || course.lat || course.latitude, lng: course.courseLng || course.lng || course.longitude });
+    var center = inputCenter(input);
     var assignmentsByCandidate = {};
     (match.assignments || []).forEach(function (assignment) { assignmentsByCandidate[assignment.candidate.candidateId] = assignment; });
     var base = {
@@ -1040,13 +1253,12 @@
       elements: elements
     };
     var lineCandidates = candidates.map(function (candidate, index) {
-      return Object.assign({}, candidate, { candidateId: candidateDisplayId(index), internalCandidateId: candidate.candidateId });
+      return Object.assign({}, candidate, { displayId: candidateDisplayId(index) });
     });
     var numberCandidates = candidates.map(function (candidate, index) {
       var assignment = assignmentsByCandidate[candidate.candidateId];
       return Object.assign({}, candidate, {
-        candidateId: candidateDisplayId(index),
-        internalCandidateId: candidate.candidateId,
+        displayId: candidateDisplayId(index),
         holeNumber: assignment && assignment.holeNumber,
         confidence: assignment && assignment.confidence || candidate.confidence
       });
@@ -1059,13 +1271,17 @@
           greens: greenResult.accepted,
           rejectedGreens: greenResult.rejected,
           candidates: [],
-          metadata: {
+          metadata: checkpointMetadata(input, Object.assign({}, base, {
+            greens: greenResult.accepted,
+            rejectedGreens: greenResult.rejected,
+            candidates: []
+          }), {
             osmFeatures: elements.length,
             acceptedGreens: greenResult.accepted.length,
             rejectedGreens: greenResult.rejected.length,
             fairways: elements.filter(function (element) { return golfTag(element) === "fairway"; }).length,
             tees: elements.filter(function (element) { return golfTag(element) === "tee"; }).length
-          }
+          })
         })
       },
       {
@@ -1075,12 +1291,16 @@
           greens: greenResult.accepted,
           rejectedGreens: greenResult.rejected,
           candidates: lineCandidates,
-          metadata: {
+          metadata: checkpointMetadata(input, Object.assign({}, base, {
+            greens: greenResult.accepted,
+            rejectedGreens: greenResult.rejected,
+            candidates: lineCandidates
+          }), {
             acceptedGreens: greenResult.accepted.length,
             candidatePaths: candidates.length,
             rejectedCandidates: 0,
             pathDistanceRangeM: distanceRange(candidates.map(function (candidate) { return candidate.pathDistanceM; }))
-          }
+          })
         })
       },
       {
@@ -1090,12 +1310,16 @@
           greens: greenResult.accepted,
           rejectedGreens: greenResult.rejected,
           candidates: numberCandidates,
-          metadata: {
+          metadata: checkpointMetadata(input, Object.assign({}, base, {
+            greens: greenResult.accepted,
+            rejectedGreens: greenResult.rejected,
+            candidates: numberCandidates
+          }), {
             resolvedHoles: (match.assignments || []).length,
             unresolvedScorecardHoles: (match.unresolvedScorecardHoles || []).map(function (hole) { return hole.holeNumber; }),
             confidence: match.confidence,
             alternatives: match.alternatives || []
-          }
+          })
         })
       }
     ];
@@ -1195,7 +1419,8 @@
       tieBreakersUsed: feedback.tieBreakers || {},
       confidence: result.confidence || 0,
       finalOutcome: result.status,
-      fallbackReason: result.status === "resolved" ? "" : "Resolver did not reach trusted assignment confidence.",
+      sourceLoadError: result.sourceLoadError || null,
+      fallbackReason: result.status === "resolved" ? "" : result.sourceLoadError ? result.sourceLoadError.message : "Resolver did not reach trusted assignment confidence.",
       checkpointAvailability: checkpoints.map(function (checkpoint) {
         return {
           stage: checkpoint.stage,
@@ -1236,9 +1461,13 @@
     activeRunId = resolverRunId;
     var warnings = [];
     var analysisBoundary = deriveAnalysisBoundary(input, elements);
+    var scorecard = normalizeScorecard(input);
+    var acquisitionError = sourceEvidenceError(input, elements, analysisBoundary, scorecard);
+    if (acquisitionError) {
+      return sourceLoadFailureResult(input, courseId, resolverRunId, mappingRunId, debugStartedAt, acquisitionError, elements, analysisBoundary, scorecard);
+    }
     var greenResult = detectGreenCandidates(elements, analysisBoundary);
     var candidates = detectHoleGeometryCandidates(elements, greenResult.accepted, analysisBoundary);
-    var scorecard = normalizeScorecard(input);
     var expected = expectedHoleCount(input, scorecard);
     var match = matchCandidatesToScorecard(candidates, scorecard, expected);
     warnings = warnings.concat(match.warnings || []);

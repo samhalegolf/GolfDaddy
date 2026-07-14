@@ -743,6 +743,38 @@
     return '<details><summary>Details</summary><pre>' + escapeHtml(text) + '</pre></details>';
   }
 
+  function compactList(value, limit) {
+    var rows = Array.isArray(value) ? value.filter(Boolean) : [];
+    if (!rows.length) return "";
+    limit = limit || 5;
+    return rows.slice(0, limit).join(", ") + (rows.length > limit ? " +" + (rows.length - limit) : "");
+  }
+
+  function checkpointFactsHtml(checkpoint) {
+    var metadata = checkpoint && checkpoint.metadata || {};
+    var counts = metadata.overlayCounts || {};
+    var ids = metadata.geometryIds || {};
+    var bounds = metadata.bounds || {};
+    var viewport = metadata.viewport || {};
+    var rows = [];
+    rows.push(["Overlays", [
+      "features " + (counts.sourceFeatures ?? metadata.osmFeatures ?? "0"),
+      "greens " + (counts.acceptedGreens ?? metadata.acceptedGreens ?? "0"),
+      "fairways " + (counts.fairways ?? metadata.fairways ?? "0"),
+      "tees " + (counts.tees ?? metadata.tees ?? "0"),
+      "lines " + (counts.candidates ?? metadata.candidatePaths ?? "0")
+    ].join(" / ")]);
+    if (bounds && bounds.north !== undefined) rows.push(["Bounds", "S " + bounds.south + " W " + bounds.west + " N " + bounds.north + " E " + bounds.east]);
+    if (viewport && viewport.center) rows.push(["Viewport", viewport.center.lat + ", " + viewport.center.lng + (viewport.zoom !== undefined ? " z" + viewport.zoom : "")]);
+    var candidateIds = compactList(ids.candidates, 6);
+    if (candidateIds) rows.push(["Candidate IDs", candidateIds]);
+    var greenIds = compactList(ids.acceptedGreens, 5);
+    if (greenIds) rows.push(["Green IDs", greenIds]);
+    return '<div class="gdCourseMappingCheckpointFacts">' + rows.map(function (row) {
+      return '<div><span>' + escapeHtml(row[0]) + '</span><strong>' + escapeHtml(row[1]) + '</strong></div>';
+    }).join("") + '</div>';
+  }
+
   function firingHtml(run) {
     if (!run) return '<div class="gdCoursePlayDebugEmpty">No firing list yet.</div>';
     var events = sortEvents(run.events || []);
@@ -778,8 +810,8 @@
     return '<div class="gdCourseMappingCheckpoints">' + CHECKPOINT_STAGES.map(function (stage) {
       var checkpoint = (run.checkpoints || []).find(function (item) { return item.stage === stage[0]; });
       if (!checkpoint) return '<div class="gdCourseMappingCheckpoint missing"><strong>' + escapeHtml(stage[1]) + '</strong><span>Not produced</span></div>';
-      var image = checkpoint.imageDataUrl ? '<details><summary>Open</summary><img alt="' + escapeHtml(stage[1]) + ' checkpoint" src="' + escapeHtml(checkpoint.imageDataUrl) + '"></details>' : '<div class="gdCoursePlayDebugEmpty">Image not retained after refresh.</div>';
-      return '<div class="gdCourseMappingCheckpoint"><div><strong>' + escapeHtml(stage[1]) + '</strong><span>' + escapeHtml(timeText(checkpoint.createdAt)) + ' - ' + escapeHtml(checkpoint.runId || run.runId) + '</span></div>' + image + '<button type="button" onclick="return gdCopyCourseMappingDebug(\'checkpoint:' + escapeHtml(stage[0]) + '\')">Copy Metadata</button></div>';
+      var image = checkpoint.imageDataUrl ? '<img alt="' + escapeHtml(stage[1]) + ' checkpoint preview" src="' + escapeHtml(checkpoint.imageDataUrl) + '">' : '<div class="gdCoursePlayDebugEmpty">No retained visual state for this checkpoint.</div>';
+      return '<div class="gdCourseMappingCheckpoint"><div><strong>' + escapeHtml(stage[1]) + '</strong><span>' + escapeHtml(timeText(checkpoint.createdAt)) + ' - ' + escapeHtml(checkpoint.runId || run.runId) + '</span></div>' + image + checkpointFactsHtml(checkpoint) + '<details><summary>Metadata</summary><pre>' + escapeHtml(copyCheckpointMetadata(run.runId, stage[0])) + '</pre></details><div class="gdCourseMappingCheckpointActions"><button type="button" onclick="return gdOpenCourseMappingCheckpoint(\'' + escapeHtml(run.runId) + '\',\'' + escapeHtml(stage[0]) + '\')">Open</button><button type="button" onclick="return gdCopyCourseMappingDebug(\'checkpoint:' + escapeHtml(stage[0]) + '\')">Copy Metadata</button></div></div>';
     }).join("") + '</div>';
   }
 

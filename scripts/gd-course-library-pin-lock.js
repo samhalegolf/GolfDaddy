@@ -1795,6 +1795,87 @@
       reason:acceptedHoles.length>=Math.min(expected,18)&&!duplicates.length?'AutoMapper exposed enough numbered guides':'AutoMapper numbering was missing, incomplete, or duplicated'
     };
   }
+  function nativeResolverScorecardHoles(){
+    const holes=(()=>{try{return Array.isArray(scorecard?.holes)?scorecard.holes:null;}catch(e){return null;}})()
+      ||(()=>{try{return Array.isArray(window.scorecard?.holes)?window.scorecard.holes:null;}catch(e){return null;}})()
+      ||(()=>{try{return Array.isArray(window.gdScorecard?.holes)?window.gdScorecard.holes:null;}catch(e){return null;}})()
+      ||(()=>{try{return Array.isArray(window.currentScorecard?.holes)?window.currentScorecard.holes:null;}catch(e){return null;}})();
+    if(!Array.isArray(holes))return [];
+    return holes.map(hole=>{
+      try{return typeof gdScorecardHoleView==='function'?gdScorecardHoleView(hole):hole;}catch(e){return hole;}
+    }).filter(Boolean);
+  }
+  function nativeResolverMapViewport(){
+    try{
+      if(typeof map==='undefined'||!map)return null;
+      const center=typeof map.getCenter==='function'?map.getCenter():null;
+      const zoom=typeof map.getZoom==='function'?map.getZoom():null;
+      const bounds=typeof map.getBounds==='function'?map.getBounds():null;
+      const out={};
+      const c=finiteMappingPoint(center);
+      if(c)out.center=c;
+      if(Number.isFinite(Number(zoom)))out.zoom=Number(zoom);
+      if(bounds){
+        const north=typeof bounds.getNorth==='function'?bounds.getNorth():bounds._northEast?.lat;
+        const south=typeof bounds.getSouth==='function'?bounds.getSouth():bounds._southWest?.lat;
+        const east=typeof bounds.getEast==='function'?bounds.getEast():bounds._northEast?.lng;
+        const west=typeof bounds.getWest==='function'?bounds.getWest():bounds._southWest?.lng;
+        if([north,south,east,west].every(value=>Number.isFinite(Number(value))))out.bounds={north:Number(north),south:Number(south),east:Number(east),west:Number(west)};
+      }
+      return Object.keys(out).length?out:null;
+    }catch(e){return null;}
+  }
+  function osmPayloadElements(payload){
+    return Array.isArray(payload?.elements)?payload.elements:null;
+  }
+  function nativeResolverSourceLoadErrorFromBundle(bundle,error=null){
+    const message=error&&error.message||bundle?.automapperError?.message||'Native resolver could not load OSM course geometry';
+    const name=error&&error.name||bundle?.automapperError?.name||'';
+    return {
+      code:'osm-request-failed',
+      reason:'OSM request failed',
+      message:String(message||'OSM request failed'),
+      name:String(name||'')
+    };
+  }
+  async function acquireNativeResolverSourceBundle(request,attempt,baseBundle,opts={}){
+    let bundle=baseBundle&&typeof baseBundle==='object'?baseBundle:null;
+    let payload=bundle?.osmPayload||null;
+    let elements=osmPayloadElements(payload);
+    if(elements)return {bundle,payload,sourceLoadError:null,source:'automapper-osm-payload'};
+    recordMappingDebug(request.debugRunId,{source:'native-resolver',phase:'progress',event:'native-resolver-loading-course-geometry',summary:'Native resolver loading course geometry',details:{
+      invokedBy:opts.reason||opts.source||request.reason||'course-loader',
+      resolutionKey:request.resolutionKey,
+      attemptToken:request.attemptToken,
+      courseCentre:request.courseCentre||null,
+      reason:bundle?.automapperError?'AutoMapper did not return reusable source geometry':'Native resolver requires source geometry before analysis'
+    }});
+    let loaded=null;
+    let thrown=null;
+    try{
+      loaded=await loadOsmGuideBundle(request.course,{needsGreens:true,fresh:true,skipGeometryResolver:true,suppressAutomapperTelemetry:true,debugRunId:request.debugRunId,source:'native-resolver',reason:'native-resolver-source-load',debugAttemptContext:attempt,callerFunction:'runNativeResolverStage'});
+    }catch(error){
+      thrown=error;
+    }
+    if(loaded&&loaded.stale)return {bundle:loaded,payload:loaded.osmPayload||{elements:[]},sourceLoadError:null,source:'stale'};
+    payload=loaded?.osmPayload||null;
+    elements=osmPayloadElements(payload);
+    if(elements){
+      recordMappingDebug(request.debugRunId,{source:'native-resolver',phase:'progress',event:'native-resolver-source-loaded',summary:'Native resolver loaded course geometry',details:{
+        osmFeatures:elements.length,
+        acceptedGreens:Array.isArray(loaded?.greens)?loaded.greens.length:0,
+        guides:Array.isArray(loaded?.guides)?loaded.guides.length:0,
+        resolutionKey:request.resolutionKey,
+        attemptToken:request.attemptToken
+      }});
+      return {bundle:loaded,payload,sourceLoadError:null,source:'native-osm-fetch'};
+    }
+    const sourceLoadError=nativeResolverSourceLoadErrorFromBundle(loaded||bundle,thrown);
+    const next=Object.assign({guides:[],greens:[]},bundle||{},loaded||{});
+    next.osmPayload=next.osmPayload||{elements:[]};
+    next.nativeResolverSourceLoadError=sourceLoadError;
+    return {bundle:next,payload:next.osmPayload,sourceLoadError,source:'native-osm-fetch-failed'};
+  }
   function shouldRunCourseGeometryResolver(course,payload,bundle,opts={}){
     const debugRunId=mappingDebugRun(course,opts);
     if(opts.skipGeometryResolver){
@@ -1885,9 +1966,17 @@
     try{
       const result=await resolver.resolveCourseGeometryForAutoMapper({
         course,
+        courseId:courseId(course),
+        courseName:courseName(course),
+        courseCentre:course?.courseCentre||guideCoursePoint(course),
+        courseBoundary:course?.courseBoundary||course?.boundary||course?.bounds||null,
+        mapViewport:nativeResolverMapViewport(),
+        scorecardHoles:nativeResolverScorecardHoles(),
         osmPayload:payload,
         guideBundle:bundle,
         expectedHoleCount:automapperExpectedHoleCount(),
+        sourceLoadError:opts.nativeResolverSourceLoadError||bundle?.nativeResolverSourceLoadError||null,
+        sourceLoadStatus:opts.nativeResolverSourceLoadStatus||'',
         debugRunId,
         debugAttemptContext:attempt,
         attemptToken:attempt.attemptToken,
@@ -1917,9 +2006,11 @@
           source:result?.source||resolver.source||'automapper-course-geometry-resolver'
         }}));
       }catch(e){}
-      recordMappingDebug(debugRunId,{source:'native-resolver',phase:result?.status==='resolved'?'completed':'failed',event:result?.status==='resolved'?'native-resolver-succeeded':'native-resolver-failed',summary:result?.status==='resolved'?'Native resolver succeeded':'Native resolver failed',durationMs:Date.now()-startedAt,confidence:Number(result?.confidence)||0,details:{
+      const sourceLoadFailed=result?.status==='source-load-failed'||result?.sourceLoadError;
+      recordMappingDebug(debugRunId,{source:'native-resolver',phase:result?.status==='resolved'?'completed':'failed',event:result?.status==='resolved'?'native-resolver-succeeded':sourceLoadFailed?'native-resolver-source-load-failed':'native-resolver-failed',summary:result?.status==='resolved'?'Native resolver succeeded':sourceLoadFailed?'Native resolver source load failed':'Native resolver failed',durationMs:Date.now()-startedAt,confidence:Number(result?.confidence)||0,details:{
         invokedBy:opts.reason||opts.source||'automapper',
         status:result?.status||'failed',
+        sourceLoadError:result?.sourceLoadError||opts.nativeResolverSourceLoadError||bundle?.nativeResolverSourceLoadError||null,
         resolverRunId:result?.resolverRunId||'',
         greenCandidates:(result?.feedback?.geometry?.greenCandidates)||0,
         acceptedGreens:(result?.feedback?.geometry?.acceptedGreens)||0,
@@ -1975,10 +2066,11 @@
   async function loadOsmGuideBundle(course=loadUserCourseData(),opts={}){
     const cacheKey=guideCacheKey(course);
     const needsGreens=!!opts.needsGreens;
+    const logAutomapperTelemetry=opts.suppressAutomapperTelemetry!==true;
     const debugRunId=mappingDebugRun(course,opts);
     const attempt=opts.debugAttemptContext||mappingAttemptContext(course,opts.hole||1,Object.assign({},opts,{debugRunId,callerFunction:opts.callerFunction||'loadOsmGuideBundle',source:'automapper'}));
     if(!opts.fresh&&mapperOsmGuideMemory?.cacheKey===cacheKey&&(!needsGreens||Array.isArray(mapperOsmGuideMemory.greens))){
-      recordMappingDebug(debugRunId,{source:'automapper',phase:'completed',event:'automapper-memory-hit',summary:'AutoMapper reused in-memory guide bundle',details:{
+      if(logAutomapperTelemetry)recordMappingDebug(debugRunId,{source:'automapper',phase:'completed',event:'automapper-memory-hit',summary:'AutoMapper reused in-memory guide bundle',details:{
         invokedBy:opts.reason||opts.source||'course-loader',
         acceptedHoles:Array.isArray(mapperOsmGuideMemory.guides)?mapperOsmGuideMemory.guides.length:0,
         greenShapes:Array.isArray(mapperOsmGuideMemory.greens)?mapperOsmGuideMemory.greens.length:0
@@ -1987,7 +2079,7 @@
     }
     const cached=cachedOsmGuideBundle(course);
     if(cached&&cached.guides.length&&(!needsGreens||cached.hasGreenCache)){
-      recordMappingDebug(debugRunId,{source:'automapper',phase:'completed',event:'automapper-cache-hit',summary:'AutoMapper reused cached guide bundle',details:{
+      if(logAutomapperTelemetry)recordMappingDebug(debugRunId,{source:'automapper',phase:'completed',event:'automapper-cache-hit',summary:'AutoMapper reused cached guide bundle',details:{
         invokedBy:opts.reason||opts.source||'course-loader',
         acceptedHoles:cached.guides.length,
         greenShapes:Array.isArray(cached.greens)?cached.greens.length:0
@@ -2002,13 +2094,13 @@
     }
     const center=guideCoursePoint(course);
     if(!Number.isFinite(center?.lat)||!Number.isFinite(center?.lng)){
-      recordMappingDebug(debugRunId,{source:'automapper',phase:'skipped',event:'automapper-no-course-center',summary:'AutoMapper skipped: course center unavailable',details:{invokedBy:opts.reason||opts.source||'course-loader',skipReason:'missing course center'}});
+      if(logAutomapperTelemetry)recordMappingDebug(debugRunId,{source:'automapper',phase:'skipped',event:'automapper-no-course-center',summary:'AutoMapper skipped: course center unavailable',details:{invokedBy:opts.reason||opts.source||'course-loader',skipReason:'missing course center'}});
       return {guides:[],greens:[]};
     }
 	    const query=`[out:json][timeout:18];(way(around:1400,${center.lat},${center.lng})["golf"="course"];relation(around:1400,${center.lat},${center.lng})["golf"="course"];way(around:1400,${center.lat},${center.lng})["golf"="hole"];relation(around:1400,${center.lat},${center.lng})["golf"="hole"];way(around:1400,${center.lat},${center.lng})["golf"="green"];relation(around:1400,${center.lat},${center.lng})["golf"="green"];way(around:1400,${center.lat},${center.lng})["golf"="fairway"];relation(around:1400,${center.lat},${center.lng})["golf"="fairway"];way(around:1400,${center.lat},${center.lng})["golf"="tee"];relation(around:1400,${center.lat},${center.lng})["golf"="tee"];way(around:1400,${center.lat},${center.lng})["golf"="bunker"];relation(around:1400,${center.lat},${center.lng})["golf"="bunker"];way(around:1400,${center.lat},${center.lng})["golf"="water_hazard"];relation(around:1400,${center.lat},${center.lng})["golf"="water_hazard"];way(around:1400,${center.lat},${center.lng})["golf"="lateral_water_hazard"];relation(around:1400,${center.lat},${center.lng})["golf"="lateral_water_hazard"];way(around:1400,${center.lat},${center.lng})["natural"="water"];relation(around:1400,${center.lat},${center.lng})["natural"="water"];);out geom tags;`;
     const url='https://overpass-api.de/api/interpreter?data='+encodeURIComponent(query);
     const automapperStartedAt=Date.now();
-    recordMappingDebug(debugRunId,{source:'automapper',phase:'started',event:'automapper-started',summary:'AutoMapper started',details:{
+    if(logAutomapperTelemetry)recordMappingDebug(debugRunId,{source:'automapper',phase:'started',event:'automapper-started',summary:'AutoMapper started',details:{
       invokedBy:opts.reason||opts.source||'course-loader',
       needsGreens,
       fresh:!!opts.fresh,
@@ -2026,7 +2118,7 @@
       .then(res=>res.ok?res.json():Promise.reject(new Error(`OSM guide ${res.status}`)))
       .then(async data=>{
         if(!isCurrentMappingAttempt(attempt)){
-          recordStaleMappingActivity(attempt,{eventSource:'automapper',event:'automapper-stale-result-rejected',summary:'AutoMapper stale result rejected',attemptedAction:'complete-automapper',callerFunction:'loadOsmGuideBundle'});
+          if(logAutomapperTelemetry)recordStaleMappingActivity(attempt,{eventSource:'automapper',event:'automapper-stale-result-rejected',summary:'AutoMapper stale result rejected',attemptedAction:'complete-automapper',callerFunction:'loadOsmGuideBundle'});
           return {guides:[],greens:[],stale:true};
         }
         let bundle=parseOsmGuideBundle(data);
@@ -2037,7 +2129,7 @@
         bundle.automapperStatus='success';
         bundle=nativeRequested?await resolveCourseGeometryGuideBundle(course,data,bundle,Object.assign({},opts,{debugRunId,skipGeometryResolver:false,source:opts.source||'automapper',debugAttemptContext:attempt,callerFunction:'resolveCourseGeometryGuideBundle'})):bundle;
         if(!isCurrentMappingAttempt(attempt)){
-          recordStaleMappingActivity(attempt,{eventSource:'native-resolver',event:'native-resolver-stale-result-rejected',summary:'Native resolver stale result rejected',attemptedAction:'return-resolver-output-to-automapper',callerFunction:'loadOsmGuideBundle'});
+          if(logAutomapperTelemetry)recordStaleMappingActivity(attempt,{eventSource:'native-resolver',event:'native-resolver-stale-result-rejected',summary:'Native resolver stale result rejected',attemptedAction:'return-resolver-output-to-automapper',callerFunction:'loadOsmGuideBundle'});
           return {guides:[],greens:[],stale:true};
         }
         mapperOsmGuideMemory={cacheKey,guides:bundle.guides,greens:bundle.greens,osmPayload:data};
@@ -2048,10 +2140,10 @@
       .catch(error=>{
         console.warn('[Clarity Caddie] OSM guide fetch failed',error);
         if(!isCurrentMappingAttempt(attempt)){
-          recordStaleMappingActivity(attempt,{eventSource:'automapper',event:'automapper-stale-result-rejected',summary:'AutoMapper stale result rejected',attemptedAction:'complete-automapper-fetch',callerFunction:'loadOsmGuideBundle'});
+          if(logAutomapperTelemetry)recordStaleMappingActivity(attempt,{eventSource:'automapper',event:'automapper-stale-result-rejected',summary:'AutoMapper stale result rejected',attemptedAction:'complete-automapper-fetch',callerFunction:'loadOsmGuideBundle'});
           return cached||{guides:[],greens:[],stale:true};
         }
-        recordMappingDebug(debugRunId,{source:'automapper',phase:'failed',event:'automapper-failed',summary:'AutoMapper failed',durationMs:Date.now()-automapperStartedAt,details:{
+        if(logAutomapperTelemetry)recordMappingDebug(debugRunId,{source:'automapper',phase:'failed',event:'automapper-failed',summary:'AutoMapper failed',durationMs:Date.now()-automapperStartedAt,details:{
           invokedBy:opts.reason||opts.source||'course-loader'
         },error:{message:error&&error.message||String(error),name:error&&error.name||''}});
         return cached||{guides:[],greens:[],automapperStatus:'failed',automapperError:{message:error&&error.message||String(error),name:error&&error.name||''}};
@@ -4247,14 +4339,12 @@
     return false;
   }
   async function runNativeResolverStage(request,attempt,autoMapResult,opts){
-    let baseBundle=autoMapResult&&autoMapResult.guideBundle||null;
-    if(!baseBundle||!baseBundle.osmPayload){
-      baseBundle=baseBundle||{guides:[],greens:[]};
-      baseBundle.osmPayload=baseBundle.osmPayload||{elements:[]};
-    }
-    const payload=baseBundle.osmPayload||{elements:[]};
     updateCourseLoading('Resolving native geometry',64);
-    const resolvedBundle=await resolveCourseGeometryGuideBundle(request.course,payload,baseBundle,Object.assign({},opts,{debugRunId:request.debugRunId,skipGeometryResolver:false,forceNativeResolver:true,suppressSkipTelemetry:true,source:'native-resolver',reason:request.reason,debugAttemptContext:attempt,callerFunction:'runCourseMappingAttempt'}));
+    const acquisition=await acquireNativeResolverSourceBundle(request,attempt,autoMapResult&&autoMapResult.guideBundle||null,opts);
+    if(acquisition&&acquisition.bundle&&acquisition.bundle.stale)return {ran:true,stale:true,bundle:acquisition.bundle};
+    const baseBundle=acquisition.bundle||{guides:[],greens:[],osmPayload:{elements:[]}};
+    const payload=acquisition.payload||baseBundle.osmPayload||{elements:[]};
+    const resolvedBundle=await resolveCourseGeometryGuideBundle(request.course,payload,baseBundle,Object.assign({},opts,{debugRunId:request.debugRunId,skipGeometryResolver:false,forceNativeResolver:true,suppressSkipTelemetry:true,source:'native-resolver',reason:request.reason,debugAttemptContext:attempt,callerFunction:'runCourseMappingAttempt',nativeResolverSourceLoadError:acquisition.sourceLoadError||null,nativeResolverSourceLoadStatus:acquisition.source||''}));
     if(resolvedBundle&&resolvedBundle.stale)return {ran:true,stale:true,bundle:resolvedBundle};
     const persisted=persistOsmGuideBundle(request.course,resolvedBundle,Object.assign({},opts,{quiet:true,frame:false,promptStart:true,hole:opts.wholeCourse===false?request.hole:null}),request.debugRunId,attempt);
     const playable=requestedHolePlayable(request.course,request.hole);
@@ -4327,7 +4417,9 @@
           finishMappingDebug(debugRunId,{status:'completed',outcome:'automapper map ready'});
           return showResolvedCoursePlayHole(c,h,'automapper',opts);
         }
-        recordMappingDebug(debugRunId,{source:'automapper',phase:'failed',event:'automapper-failed',summary:'AutoMapper failed',details:{hole:h,resolutionKey:key,attemptToken,guideCount:autoMapResult&&autoMapResult.holes||0,saved:autoMapResult&&autoMapResult.saved||0},error:autoMapResult&&autoMapResult.automapperError||null});
+        if(!(autoMapResult&&autoMapResult.automapperError)){
+          recordMappingDebug(debugRunId,{source:'automapper',phase:'failed',event:'automapper-failed',summary:'AutoMapper failed',details:{hole:h,resolutionKey:key,attemptToken,guideCount:autoMapResult&&autoMapResult.holes||0,saved:autoMapResult&&autoMapResult.saved||0},error:autoMapResult&&autoMapResult.automapperError||null});
+        }
         if(!mappingAttemptStillCurrent(request,attempt,'native-resolver'))return {playable:false,stale:true,reason:'superseded-before-native-resolver'};
         const nativeResult=await runNativeResolverStage(request,attempt,autoMapResult,opts);
         if(nativeResult&&nativeResult.stale)return {playable:false,stale:true,reason:'native-resolver-stale'};
