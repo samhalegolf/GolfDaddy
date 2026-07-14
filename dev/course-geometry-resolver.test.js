@@ -313,6 +313,27 @@ async function main() {
   assert.strictEqual(numberAllocation.metadata.scorecardDistanceCount, 3, "Number Allocation metadata reports usable distances");
   assert.strictEqual(JSON.stringify(numberAllocation.metadata.scorecardLengthOrder.map((row) => row.hole)), JSON.stringify([1, 3, 2]), "Number Allocation shows scorecard length ranking");
   assert.strictEqual(JSON.stringify(numberAllocation.metadata.candidateLengthOrder.map((row) => row.candidateId).slice(0, 3)), JSON.stringify(["way-303-way-203", "way-302-way-202", "way-301-way-201"]), "Number Allocation shows candidate length ranking");
+
+  const fullScorecard = [
+    { holeNumber: 1, par: 5, distanceM: 500 },
+    { holeNumber: 2, par: 3, distanceM: 100 },
+    { holeNumber: 3, par: 4, distanceM: 300 }
+  ];
+  const summary = resolver._test.scorecardEvidenceSummary(
+    { scorecardEvidence: { source: "website-scorecard", distanceCount: 3, lengthOrder: [{ hole: 3, distanceM: 300, par: 4 }] } },
+    [
+      { source: "official", sourceUrl: "https://example.test/official", holes: [{ holeNumber: 3, par: 4, distanceM: 300 }], distanceCount: 1 },
+      { source: "gps-app", sourceUrl: "https://example.test/gps", holes: fullScorecard, distanceCount: 3 }
+    ],
+    fullScorecard,
+    3
+  );
+  assert.strictEqual(JSON.stringify(summary.lengthOrder.map((row) => row.hole)), JSON.stringify([1, 3, 2]), "complete source length order outranks partial top-level evidence order");
+  assert.strictEqual(
+    resolver._test.resolveStatus(Array.from({ length: 18 }, () => ({ confidence: 0.7 })), 0.8379, 18, true),
+    "resolved",
+    "18/18 assigned holes with high overall confidence are resolved"
+  );
 }
 
 main().catch((error) => {

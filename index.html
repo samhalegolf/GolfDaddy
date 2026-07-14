@@ -30014,6 +30014,12 @@ function gdScorecardSeed(source,course,reason){
   const holes=source.seedHoles.map(h=>({hole:h.hole,par:h.par,index:h.index??null,metres:h.metres??null,score:null,putts:null,tees:{White:{par:h.par,index:h.index??null,metres:h.metres??null,gender:"M"}},sourceUrl:`${source.baseUrl}${source.holeListPath||""}`}));
   return {courseKey:gdScorecardCourseKey(course),courseName:gdScorecardNormalizeName(course?.name)||source.name,source:"seed",sourceUrl:source.baseUrl,holes,error:reason||""};
 }
+function gdScorecardDistanceCount(holes){
+  return (holes||[]).filter(h=>{
+    const tee=h?.tees?.[sessionTee]||h?.tees?.White||h?.tees?.Blue||null;
+    return Number.isFinite(Number(h?.metres??h?.distanceM??tee?.metres??tee?.distanceM));
+  }).length;
+}
 async function gdFetchScorecardText(url){
   try{
     const res=await fetch(url,{mode:"cors",credentials:"omit",cache:"no-store",headers:{"Accept":"text/html,application/xhtml+xml"}});
@@ -30078,6 +30084,33 @@ function gdParseSimpleParHoles(html,sourceUrl){
     const preferred=tees[sessionTee]||tees.White||tees.Blue||tees.Yellow||Object.values(tees)[0]||null;
     addHole({hole,par:values[6],index:values[5],metres:preferred?.metres??null,tees});
   }
+  function addTourHoleText(hole,par,body){
+    const tees={};
+    String(body||"").replace(/\b([A-Za-z][A-Za-z ]{0,20})\s+(\d{2,4})\s*(m|metres?|meters?|yds?|yards?)\b/gi,(_,tee,value,unit)=>{
+      const marker=gdScorecardMarkerKey(tee);
+      if(!marker)return "";
+      const raw=parseInt(value,10);
+      if(!Number.isFinite(raw))return "";
+      const metres=/^y/i.test(unit)?Math.round(raw*.9144):raw;
+      tees[marker]={par,index:null,metres,gender:"M"};
+      return "";
+    });
+    const stroke=String(body||"").match(/\bstroke\s*(\d{1,2})\b/i);
+    const preferred=tees[sessionTee]||tees.White||tees.Blue||tees.Yellow||Object.values(tees)[0]||null;
+    addHole({hole,par,index:stroke?parseInt(stroke[1],10):null,metres:preferred?.metres??null,tees});
+  }
+  doc.querySelectorAll("h1,h2,h3,h4").forEach(header=>{
+    const title=gdScorecardText(header);
+    const m=title.match(/\bhole\s*(\d{1,2})\b/i);
+    if(!m)return;
+    const hole=parseInt(m[1],10);
+    const container=header.parentElement||header;
+    let block=gdScorecardText(container);
+    if(!/\bpar\s*\d\b/i.test(block)&&container.nextElementSibling)block+=" "+gdScorecardText(container.nextElementSibling);
+    const parMatch=block.match(/\bpar\s*(\d)\b/i);
+    if(!parMatch)return;
+    addTourHoleText(hole,parseInt(parMatch[1],10),block);
+  });
   lines.forEach(line=>{
     const m=line.match(/^(\d{1,2})\s+((?:\d{2,4}\s+){5,}\d{1,2}\s+\d)(?:\s|$)/);
     if(!m)return;
@@ -30098,19 +30131,7 @@ function gdParseSimpleParHoles(html,sourceUrl){
   let tourMatch;
   while((tourMatch=tourPattern.exec(text))){
     const hole=parseInt(tourMatch[1],10), par=parseInt(tourMatch[2],10), body=tourMatch[3]||"";
-    const tees={};
-    body.replace(/\b([A-Za-z][A-Za-z ]{0,20})\s+(\d{2,4})\s*(m|metres?|meters?|yds?|yards?)\b/gi,(_,tee,value,unit)=>{
-      const marker=gdScorecardMarkerKey(tee);
-      if(!marker)return "";
-      const raw=parseInt(value,10);
-      if(!Number.isFinite(raw))return "";
-      const metres=/^y/i.test(unit)?Math.round(raw*.9144):raw;
-      tees[marker]={par,index:null,metres,gender:"M"};
-      return "";
-    });
-    const stroke=body.match(/\bstroke\s*(\d{1,2})\b/i);
-    const preferred=tees[sessionTee]||tees.White||tees.Blue||tees.Yellow||Object.values(tees)[0]||null;
-    addHole({hole,par,index:stroke?parseInt(stroke[1],10):null,metres:preferred?.metres??null,tees});
+    addTourHoleText(hole,par,body);
   }
   const patterns=[
     /hole\s*(\d{1,2})\D{0,80}?par\s*(\d)/gi,
@@ -30212,13 +30233,14 @@ async function gdEnsureScorecardForCourse(course){
       }catch(e){lastError=e;if(!seed)seed=gdScorecardSeed(source,course,e?.message)}
     }
     if(loadedSources.length){
+      const sortedSources=loadedSources.slice().sort((a,b)=>gdScorecardDistanceCount(b.holes)-gdScorecardDistanceCount(a.holes)||((b.holes||[]).length-(a.holes||[]).length));
       const sourceRows=loadedSources.map(source=>({
         source:source.source||"",
         provider:source.provider||"",
         sourceUrl:source.sourceUrl||"",
         holes:source.holes||[]
       }));
-      loaded=Object.assign({},loadedSources[0],{scorecardSources:sourceRows});
+      loaded=Object.assign({},sortedSources[0],{scorecardSources:sourceRows});
     }
     if(!loaded&&seed)loaded=seed;
     if(!loaded)throw lastError||new Error("No readable course scorecard found");
