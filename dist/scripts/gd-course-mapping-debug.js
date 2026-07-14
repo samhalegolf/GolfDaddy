@@ -107,6 +107,38 @@
     return String(course.courseName || course.name || input.courseName || input.courseId || course.id || "Course").trim() || "Course";
   }
 
+  function cleanIdentity(value) {
+    return String(value || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  }
+
+  function hasConcreteIdentity(input) {
+    var id = cleanIdentity(courseIdFrom(input));
+    var name = cleanIdentity(courseNameFrom(input));
+    return !!(id && id !== "course" || name && name !== "course");
+  }
+
+  function runMatchesInput(run, input) {
+    if (!run || !hasConcreteIdentity(input)) return true;
+    var runToken = String(run.attemptToken || "").trim();
+    var inputToken = String(input && (input.attemptToken || input.mappingAttemptToken) || "").trim();
+    if (runToken && inputToken && runToken !== inputToken) return false;
+    var runId = cleanIdentity(run.courseId);
+    var inputId = cleanIdentity(courseIdFrom(input));
+    if (runId && inputId && runId === inputId) return true;
+    var runName = cleanIdentity(run.courseName);
+    var inputName = cleanIdentity(courseNameFrom(input));
+    if (runName && inputName && runName === inputName) return true;
+    return false;
+  }
+
+  function pointFrom(input) {
+    var point = input && (input.courseCentre || input.courseCenter || input.center || input.centre);
+    if (!point && input && input.course) point = input.course.courseCentre || input.course.courseCenter || input.course.center || input.course.centre;
+    var lat = Number(point && (point.lat !== undefined ? point.lat : point.latitude));
+    var lng = Number(point && (point.lng !== undefined ? point.lng : point.lon !== undefined ? point.lon : point.longitude));
+    return Number.isFinite(lat) && Number.isFinite(lng) ? { lat: lat, lng: lng } : null;
+  }
+
   function makeRunId(input) {
     var stem = courseIdFrom(input).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 36) || "course";
     return "map-run-" + stem + "-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
@@ -147,7 +179,7 @@
     }
     var out = {};
     Object.keys(value).forEach(function (childKey) {
-      if (SECRET_KEY_RE.test(childKey)) {
+      if (SECRET_KEY_RE.test(childKey) && !/^(attemptToken|mappingAttemptToken)$/i.test(childKey)) {
         out[childKey] = "[redacted]";
         return;
       }
@@ -165,6 +197,9 @@
       runId: run.runId,
       courseId: run.courseId,
       courseName: run.courseName,
+      courseCentre: run.courseCentre || null,
+      selectedAt: run.selectedAt || null,
+      attemptToken: run.attemptToken || "",
       startedAt: run.startedAt,
       updatedAt: run.updatedAt,
       status: run.status,
@@ -232,6 +267,9 @@
       runId: runId || makeRunId(input),
       courseId: courseIdFrom(input),
       courseName: courseNameFrom(input),
+      courseCentre: pointFrom(input),
+      selectedAt: input.selectedAt || null,
+      attemptToken: String(input.attemptToken || input.mappingAttemptToken || ""),
       startedAt: input.startedAt || nowIso(),
       updatedAt: nowIso(),
       status: "active",
@@ -260,7 +298,7 @@
     if (input.runId && findRun(input.runId)) return input.runId;
     if (state.activeRunId) {
       var active = findRun(state.activeRunId);
-      if (active && active.status === "active") return active.runId;
+      if (active && active.status === "active" && runMatchesInput(active, input)) return active.runId;
     }
     return startRun(input);
   }
