@@ -516,7 +516,7 @@
       captureZoom:manifest&&manifest.captureZoom||null,
       tileCount:Array.isArray(manifest&&manifest.tiles)?manifest.tiles.length:0,
       anchorPins:clone(manifest&&manifest.anchorPins||{}),
-      tileMetadata:Array.isArray(manifest&&manifest.tiles)?manifest.tiles.map(function(tile){return {x:tile.x,y:tile.y,z:tile.z,tileX:tile.tileX,tileY:tile.tileY,url:tile.url};}):[],
+      tileMetadata:[],
       createdAt:index.frames[key]&&index.frames[key].createdAt||stamp,
       updatedAt:stamp,
       dbShareable:false,

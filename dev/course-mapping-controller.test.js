@@ -225,10 +225,11 @@ function loadController(options = {}) {
           const resolvedHoles = Array.from({ length: options.nativeSuccessHoles || 1 }, (_, index) => {
             const holeNumber = index + 1;
             const baseLat = -36.9005 + index * 0.001;
+            const confidence = Number(options.nativeLowConfidenceHole) === holeNumber ? 0.744 : 0.91;
             return {
               holeNumber,
-              confidence: 0.91,
-              matchScore: 0.91,
+              confidence,
+              matchScore: confidence,
               evidence: ["test"],
               candidate: {
                 candidateId: `native-${holeNumber}`,
@@ -448,6 +449,15 @@ async function main() {
   env = await runScenario({ fetchSequence: ["fail", "native"], nativeSuccess: true, nativeSuccessHoles: 3, wholeCourse: true });
   assert.deepStrictEqual(env.calls.frameWarmHoles, [1, 2, 3], "first-load native success warms every newly mapped play frame");
   assert.strictEqual(env.calls.ingestMappedCourse, 1, "first-load native success ingests the mapped course into the play pipeline");
+
+  env = await runScenario({ fetchSequence: ["fail", "native"], nativeSuccess: true, nativeSuccessHoles: 18, nativeLowConfidenceHole: 3, wholeCourse: true });
+  assert.strictEqual(env.result.playable, true, "resolved native run confirms every assigned hole even when one hole is below high-confidence threshold");
+  assert.strictEqual(env.calls.manual, 0, "full resolved native run does not fall through to manual fallback");
+  const resolvedStore = JSON.parse(env.localStorage.data.gd_user_course_library_v1);
+  const resolvedCourse = resolvedStore.courses["user-local-player::controller-test"];
+  const resolvedHole3 = Object.values(resolvedCourse.objects || {}).filter((object) => Number(object.holeNumber) === 3);
+  assert(resolvedHole3.length >= 3, "resolved native run persists hole 3 play objects");
+  assert(resolvedHole3.every((object) => object.confirmed), "resolved native run marks hole 3 objects confirmed");
 
   const noisyEvents = env.events.map((event) => event.event).filter(Boolean);
   assert(!noisyEvents.includes("automapper-invocation-requested"), "AutoMapper request noise is absent");

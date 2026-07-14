@@ -128,6 +128,7 @@ function loadPipeline() {
   return {
     api: context.window.GDCoursePlayPipeline,
     window: context.window,
+    localStorage,
     debugStarts,
     debugEvents,
     staleRecords,
@@ -155,6 +156,21 @@ async function main() {
   assert.strictEqual(env.window.gdAutoMapOsmCourse, originalAutoMap, "pipeline adapter does not wrap AutoMapper");
   assert(env.api.getDebugTimeline().some((row) => row.type === "course-library-adapter-passive"), "pipeline records passive adapter mode");
   assert.strictEqual(env.staleRecords.length, 0, "pipeline adapter does not own stale AutoMapper ingestion");
+
+  const tileHeavyManifest = {
+    key: "gd_captured_hole_frame_v19_maungakiekie:h1",
+    originPx: { x: 100, y: 200 },
+    imageWidth: 4096,
+    imageHeight: 4096,
+    captureZoom: 18,
+    anchorPins: { tee: { lat: -36.924, lng: 174.725 }, green: { lat: -36.923, lng: 174.726 }, route: [] },
+    tiles: Array.from({ length: 700 }, (_, index) => ({ x: index, y: index, z: 18, tileX: index, tileY: index, url: `https://tiles.example/${index}.jpg` }))
+  };
+  env.api.registerCoursePlayFrame(env.window.gdActiveCourse, 1, tileHeavyManifest, { manifestKey: tileHeavyManifest.key, status: "generated" });
+  const frameIndex = JSON.parse(env.localStorage.data.gd_course_play_frame_index_v1);
+  const frame = frameIndex.frames["maungakiekie-golf-club:h1"];
+  assert.strictEqual(frame.tileCount, 700, "frame index preserves tile count");
+  assert.strictEqual(frame.tileMetadata.length, 0, "frame index does not duplicate every tile URL");
 
   console.log("course-play-pipeline-debug tests passed");
 }
