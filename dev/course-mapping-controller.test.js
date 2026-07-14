@@ -60,6 +60,18 @@ function course() {
   };
 }
 
+function scorecardHoles() {
+  return [
+    504, 332, 148, 471, 167, 348, 290, 363, 357,
+    323, 413, 334, 311, 149, 483, 357, 122, 372
+  ].map((distanceM, index) => ({
+    hole: index + 1,
+    par: [5, 4, 3, 5, 3, 4, 4, 4, 4, 4, 5, 4, 4, 3, 5, 4, 3, 4][index],
+    metres: distanceM,
+    tees: { White: { metres: distanceM, par: [5, 4, 3, 5, 3, 4, 4, 4, 4, 4, 5, 4, 4, 3, 5, 4, 3, 4][index] } }
+  }));
+}
+
 function playableStore() {
   const c = course();
   return {
@@ -110,7 +122,7 @@ function osmPayload(kind) {
 
 function loadController(options = {}) {
   const events = [];
-  const calls = { fetch: 0, native: 0, manual: 0, nativeInputs: [], fetchUrls: [] };
+  const calls = { fetch: 0, native: 0, manual: 0, scorecard: 0, nativeInputs: [], fetchUrls: [], order: [] };
   const testConsole = Object.assign({}, console, { warn() {}, info() {} });
   const localStorage = storage({
     gd_user_course_library_v1: JSON.stringify(options.savedMap ? playableStore() : { courses: {} })
@@ -140,12 +152,14 @@ function loadController(options = {}) {
     getOrStartRun() { return "debug-run"; },
     finishRun() {}
   };
+  const testScorecard = { courseKey: "", courseName: "", source: "none", sourceUrl: "", holes: [] };
   const win = {
     document,
     localStorage,
     sessionStorage,
     currentCourse: course(),
     gdActiveCourse: course(),
+    scorecard: testScorecard,
     GDCourseMappingDebug: mappingDebug,
     GDCoursePlayPipeline: { recordDebugEvent() {} },
     GDCourseGeometryResolver: {
@@ -215,6 +229,21 @@ function loadController(options = {}) {
     clearInterval() {},
     MutationObserver: class { observe() {} disconnect() {} }
   };
+  if (options.scorecardDistances) {
+    win.gdEnsureScorecardForCourse = async () => {
+      calls.scorecard += 1;
+      calls.order.push("scorecard");
+      testScorecard.courseKey = "controller test golf club";
+      testScorecard.courseName = "Controller Test Golf Club";
+      testScorecard.source = "website";
+      testScorecard.sourceUrl = "https://example.test/controller-scorecard";
+      testScorecard.holes = scorecardHoles();
+      testScorecard.scorecardSources = [
+        { source: "website", sourceUrl: "https://example.test/controller-scorecard", holes: scorecardHoles() },
+        { source: "gps-app", sourceUrl: "https://example.test/controller-gps-scorecard", holes: scorecardHoles() }
+      ];
+    };
+  }
   win.window = win;
 
   const context = {
@@ -222,6 +251,8 @@ function loadController(options = {}) {
     document,
     localStorage,
     sessionStorage,
+    scorecard: testScorecard,
+    gdEnsureScorecardForCourse: win.gdEnsureScorecardForCourse,
     currentCourse: course(),
     map: {
       getContainer() { return elementStub(); },
@@ -260,6 +291,7 @@ function loadController(options = {}) {
       const overpass = String(url || "").includes("overpass-api");
       if (!overpass) return { ok: true, json: async () => ({}) };
       calls.fetch += 1;
+      calls.order.push("osm-fetch");
       calls.fetchUrls.push(String(url || ""));
       const sequence = Array.isArray(options.fetchSequence) ? options.fetchSequence : null;
       const next = sequence && sequence.length ? sequence.shift() : null;
@@ -340,6 +372,14 @@ async function main() {
   assert(!env.events.some((event) => event.event === "native-resolver-source-load-failed"), "scorecard-unavailable partial result is not logged as source-load-failed");
   assert(env.events.some((event) => event.event === "native-resolver-failed"), "partial native result still falls through as unresolved");
   assert.strictEqual(env.events.filter((event) => event.event === "manual-fallback-opened").length, 1, "partial native result opens manual fallback once");
+
+  env = await runScenario({ fetchSequence: ["fail", "native"], nativePartial: true, scorecardDistances: true });
+  assert.strictEqual(env.calls.scorecard, 1, "scorecard distances are fetched once for native resolver evidence");
+  assert(env.calls.order.indexOf("scorecard") >= 0 && env.calls.order.indexOf("scorecard") < env.calls.order.lastIndexOf("osm-fetch"), "scorecard fetch starts before native OSM acquisition");
+  assert.strictEqual(env.calls.nativeInputs[0].scorecardHoles.length, 18, "native resolver receives scorecard holes");
+  assert.strictEqual(env.calls.nativeInputs[0].scorecardEvidence.distanceCount, 18, "native resolver receives 18 scorecard distances");
+  assert.strictEqual(env.calls.nativeInputs[0].scorecardEvidence.sources.length, 2, "native resolver receives multiple scorecard evidence sources");
+  assert.deepStrictEqual(env.calls.nativeInputs[0].scorecardEvidence.lengthOrder.slice(0, 3).map((row) => row.hole), [1, 15, 4], "scorecard length order is exposed longest-to-shortest");
 
   env = await runScenario({});
   assert.strictEqual(env.calls.native, 1, "AutoMapper zero-guide result invokes native resolver exactly once");

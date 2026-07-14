@@ -174,11 +174,47 @@ async function main() {
   assert.strictEqual(noScorecardNumbers.metadata.warning, "Scorecard unavailable", "Number Allocation records the scorecard warning");
   assert.strictEqual(noScorecard.feedback.assignment.resolvedHoles, 0, "Number Allocation leaves resolved count at zero");
   assert.strictEqual(noScorecard.debugEvidence.holeCandidates.length, 3, "candidate centre-lines are constructed without scorecard evidence");
+  assert(noScorecard.debugEvidence.holeCandidates.every((candidate) => candidate.evidence.includes("fairway-centreline")), "candidate centre-lines are traced from green-led fairways");
   assert.deepStrictEqual(
     resolver._testCheckpoints.map((checkpoint) => checkpoint.stage),
     ["initial-snapshot", "fairway-lines", "number-allocation"],
     "debug UI receives the real geometry checkpoints"
   );
+
+  const scorecardShellOnly = await resolver.resolveCourseGeometryForAutoMapper({
+    course: { courseId: "resolver-test", courseName: "Resolver Test Course", courseLat: baseLat, courseLng: baseLng },
+    courseCentre: { lat: baseLat, lng: baseLng },
+    mapViewport: { center: { lat: baseLat, lng: baseLng }, zoom: 16, bounds: { south: baseLat - 0.01, west: baseLng - 0.01, north: baseLat + 0.01, east: baseLng + 0.01 } },
+    osmPayload: { elements },
+    expectedHoleCount: 3,
+    scorecardHoles: [
+      { holeNumber: 1, par: 5 },
+      { holeNumber: 2, par: 3 },
+      { holeNumber: 3, par: 4 }
+    ]
+  });
+  assert.strictEqual(scorecardShellOnly.status, "geometry-resolved-numbering-unavailable", "scorecard shell without distances cannot number geometry");
+  assert(scorecardShellOnly.warnings.includes("Scorecard distances unavailable"), "missing scorecard distances are explicit");
+  assert.strictEqual(scorecardShellOnly.holes.length, 0, "resolver does not fabricate numbers from par-only shells");
+  const shellNumbers = scorecardShellOnly.checkpoints.find((checkpoint) => checkpoint.stage === "number-allocation");
+  assert.strictEqual(shellNumbers.metadata.status, "unavailable", "par-only scorecard leaves Number Allocation unavailable");
+  assert.strictEqual(shellNumbers.metadata.warning, "Scorecard distances unavailable", "Number Allocation reports missing distances");
+
+  const noTaggedFairways = elements.filter((element) => element.tags.golf !== "fairway" && element.tags.golf !== "tee");
+  const inferredFairways = await resolver.resolveCourseGeometryForAutoMapper({
+    course: { courseId: "resolver-test", courseName: "Resolver Test Course", courseLat: baseLat, courseLng: baseLng },
+    courseCentre: { lat: baseLat, lng: baseLng },
+    osmPayload: { elements: noTaggedFairways },
+    expectedHoleCount: 3
+  });
+  assert.strictEqual(inferredFairways.status, "geometry-resolved-numbering-unavailable", "missing scorecard still returns geometry-only result without tagged fairways");
+  assert.strictEqual(inferredFairways.feedback.geometry.osmFairways, 0, "fixture has no OSM fairway polygons");
+  assert.strictEqual(inferredFairways.feedback.geometry.fairwayCorridors, 3, "green-led OSM hole lines register as fairway corridors");
+  assert.strictEqual(inferredFairways.debugEvidence.holeCandidates.length, 3, "green-led hole-line corridors produce one line per green");
+  assert(inferredFairways.debugEvidence.holeCandidates.every((candidate) => candidate.evidence.includes("osm-hole-line-as-fairway")), "hole-line corridors are labelled as fairway fallback evidence");
+  const inferredFairwayLines = inferredFairways.checkpoints.find((checkpoint) => checkpoint.stage === "fairway-lines");
+  assert.strictEqual(inferredFairwayLines.metadata.overlayCounts.osmFairways, 0, "Fairway Lines keeps raw OSM fairway count separate");
+  assert.strictEqual(inferredFairwayLines.metadata.overlayCounts.fairways, 3, "Fairway Lines registers inferred fairway corridors");
 
   const cromwellLat = -45.04;
   const cromwellLng = 169.2;
@@ -221,11 +257,29 @@ async function main() {
     mapViewport: { center: { lat: baseLat, lng: baseLng }, zoom: 16, bounds: { south: baseLat - 0.01, west: baseLng - 0.01, north: baseLat + 0.01, east: baseLng + 0.01 } },
     osmPayload: { elements },
     expectedHoleCount: 3,
-    scorecardHoles: [
-      { holeNumber: 1, par: 5, distanceM: 500 },
-      { holeNumber: 2, par: 3, distanceM: 100 },
-      { holeNumber: 3, par: 4, distanceM: 300 }
-    ]
+    scorecardEvidence: {
+      source: "multi-source-test",
+      sources: [
+        {
+          source: "official-tour",
+          sourceUrl: "https://example.test/official-tour",
+          holes: [
+            { holeNumber: 1, par: 5, distanceM: 500 },
+            { holeNumber: 2, par: 3, distanceM: 100 },
+            { holeNumber: 3, par: 4, distanceM: 300 }
+          ]
+        },
+        {
+          source: "gps-app",
+          sourceUrl: "https://example.test/gps-app",
+          holes: [
+            { hole: 1, par: 5, metres: 500 },
+            { hole: 2, par: 3, metres: 100 },
+            { hole: 3, par: 4, metres: 300 }
+          ]
+        }
+      ]
+    }
   });
 
   assert.strictEqual(result.status, "resolved");
@@ -233,19 +287,32 @@ async function main() {
   assert.strictEqual(
     JSON.stringify(result.holes.map((hole) => [hole.holeNumber, hole.candidate.candidateId])),
     JSON.stringify([
-      [1, "way-103"],
-      [2, "way-101"],
-      [3, "way-102"]
+      [1, "way-303-way-203"],
+      [2, "way-301-way-201"],
+      [3, "way-302-way-202"]
     ]),
-    "global assignment follows scorecard distances rather than raw OSM order"
+    "global assignment follows scorecard distances using green-led fairway centrelines"
   );
   assert(result.analysisBoundary.length >= 3, "debug boundary is returned");
   assert(result.debugEvidence.greenCandidates.length === 3, "green evidence is returned");
+  assert.strictEqual(result.debugEvidence.scorecardEvidence.sourceCount, 2, "resolver keeps multiple scorecard evidence sources");
+  assert.strictEqual(
+    JSON.stringify(result.debugEvidence.scorecardEvidence.lengthOrder.map((row) => row.hole)),
+    JSON.stringify([1, 3, 2]),
+    "scorecard evidence exposes longest-to-shortest hole order"
+  );
+  assert(result.holes.every((hole) => hole.assignmentEvidence.multiSourceCount === 2), "multi-source length order is used as first tie-breaker evidence");
+  assert.strictEqual(result.feedback.tieBreakers["multi-source-length-order"], 3, "multi-source agreement is counted in tie-breakers");
   assert.strictEqual(result.checkpoints.length, 3, "real evidence produces three visual checkpoints");
   const fairwayLines = result.checkpoints.find((checkpoint) => checkpoint.stage === "fairway-lines");
   assert(fairwayLines.imageDataUrl.startsWith("data:image/svg+xml"), "checkpoint includes a visual preview");
-  assert(fairwayLines.metadata.geometryIds.candidates.includes("way-101"), "checkpoint candidate IDs match debug evidence IDs");
+  assert(fairwayLines.metadata.geometryIds.candidates.includes("way-301-way-201"), "checkpoint candidate IDs match green-led fairway evidence IDs");
   assert.strictEqual(fairwayLines.metadata.viewport.zoom, 16, "checkpoint metadata includes map viewport");
+  const numberAllocation = result.checkpoints.find((checkpoint) => checkpoint.stage === "number-allocation");
+  assert.strictEqual(numberAllocation.metadata.scorecardEvidenceSourceCount, 2, "Number Allocation metadata keeps scorecard source count");
+  assert.strictEqual(numberAllocation.metadata.scorecardDistanceCount, 3, "Number Allocation metadata reports usable distances");
+  assert.strictEqual(JSON.stringify(numberAllocation.metadata.scorecardLengthOrder.map((row) => row.hole)), JSON.stringify([1, 3, 2]), "Number Allocation shows scorecard length ranking");
+  assert.strictEqual(JSON.stringify(numberAllocation.metadata.candidateLengthOrder.map((row) => row.candidateId).slice(0, 3)), JSON.stringify(["way-303-way-203", "way-302-way-202", "way-301-way-201"]), "Number Allocation shows candidate length ranking");
 }
 
 main().catch((error) => {

@@ -20707,7 +20707,7 @@ const targetIcon=L.divIcon({className:"",html:"<div class='targetDot'></div>",ic
 const pinIcon=L.divIcon({className:"",html:"<div class='pinDot'></div>",iconSize:[22,30],iconAnchor:[9,27]});
 const demoCourses=[];
 const scorecard={courseKey:"",courseName:"",source:"none",sourceUrl:"",loading:false,error:"",holes:[]};
-const GD_SCORECARD_CACHE_KEY="gd_course_website_scorecards_v2";
+const GD_SCORECARD_CACHE_KEY="gd_course_website_scorecards_v3";
 const GD_SCORECARD_SHELL_SOURCE="18-hole scoring shell";
 const GD_SCORECARD_DEFAULT_TEES=["Red","Yellow","White","Blue","Black"];
 const GD_SCORECARD_WEBSITE_SOURCES=[
@@ -29942,9 +29942,31 @@ function gdScorecardWebsiteCandidates(course){
   const name=gdScorecardNormalizeName(course?.name||"").toLowerCase();
   if(name){
     const slug=name.replace(/\bgolf club\b|\bgolf course\b|\bthe\b/g,"").replace(/[^a-z0-9]+/g,"").trim();
-    if(slug)list.push({name:gdScorecardNormalizeName(course?.name),baseUrl:`https://www.${slug}golf.co.nz`});
+    if(slug){
+      list.push({name:gdScorecardNormalizeName(course?.name),baseUrl:`https://www.${slug}golf.co.nz`});
+      list.push({name:gdScorecardNormalizeName(course?.name),baseUrl:`https://${slug}golf.co.nz`});
+    }
   }
+  gdScorecardGpsAppCandidates(course).forEach(source=>list.push(source));
   return list.filter((item,index,arr)=>item.baseUrl&&arr.findIndex(x=>x.baseUrl===item.baseUrl)===index);
+}
+function gdScorecardSlugVariants(course){
+  const name=gdScorecardNormalizeName(course?.name||course?.courseName||course?.clubName||"").toLowerCase();
+  if(!name)return [];
+  const base=name.replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
+  const variants=new Set([base]);
+  if(/\bgolf-club\b/.test(base))variants.add(base.replace(/\bgolf-club\b/,"golf-course"));
+  if(/\bgolf-course\b/.test(base))variants.add(base.replace(/\bgolf-course\b/,"golf-club"));
+  variants.add(base.replace(/-golf-(club|course)$/,""));
+  return [...variants].filter(Boolean);
+}
+function gdScorecardGpsAppCandidates(course){
+  return gdScorecardSlugVariants(course).map(slug=>({
+    name:gdScorecardNormalizeName(course?.name),
+    provider:"Golfify",
+    sourceKind:"gps-app",
+    baseUrl:`https://www.golfify.io/courses/${slug}`
+  }));
 }
 function gdScorecardCleanText(text){return String(text||"").replace(/&nbsp;/gi," ").replace(/\s+/g," ").trim()}
 function gdScorecardText(el){return gdScorecardCleanText(el?.textContent||"")}
@@ -29993,9 +30015,17 @@ function gdScorecardSeed(source,course,reason){
   return {courseKey:gdScorecardCourseKey(course),courseName:gdScorecardNormalizeName(course?.name)||source.name,source:"seed",sourceUrl:source.baseUrl,holes,error:reason||""};
 }
 async function gdFetchScorecardText(url){
-  const res=await fetch(url,{mode:"cors",credentials:"omit",cache:"no-store"});
-  if(!res.ok)throw new Error(`Website returned ${res.status}`);
-  return await res.text();
+  try{
+    const res=await fetch(url,{mode:"cors",credentials:"omit",cache:"no-store",headers:{"Accept":"text/html,application/xhtml+xml"}});
+    if(!res.ok)throw new Error(`Website returned ${res.status}`);
+    return await res.text();
+  }catch(directError){
+    const proxy=await fetch("/api/scorecard-fetch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({url})});
+    let payload=null;
+    try{payload=await proxy.json()}catch(e){}
+    if(!proxy.ok||!payload?.html)throw new Error(payload?.error||directError?.message||"Scorecard source unavailable");
+    return payload.html;
+  }
 }
 function gdParseAkaranaHole(html,hole,sourceUrl){
   const doc=new DOMParser().parseFromString(html,"text/html");
@@ -30018,8 +30048,70 @@ function gdParseAkaranaHole(html,hole,sourceUrl){
 }
 function gdParseSimpleParHoles(html,sourceUrl){
   const doc=new DOMParser().parseFromString(html,"text/html");
-  const text=gdScorecardCleanText(doc.body?.innerText||doc.body?.textContent||"");
+  const rawText=String(doc.body?.innerText||doc.body?.textContent||"");
+  const text=gdScorecardCleanText(rawText);
+  const lines=rawText.split(/\n+/).map(gdScorecardCleanText).filter(Boolean);
   const holes=new Map();
+  function addHole(row){
+    if(!row||!(row.hole>=1&&row.hole<=18)||!(row.par>=3&&row.par<=6))return;
+    const existing=holes.get(row.hole)||{};
+    const tees=Object.assign({},existing.tees||{},row.tees||{});
+    const preferred=tees[sessionTee]||tees.White||tees.Blue||tees.Yellow||Object.values(tees)[0]||null;
+    holes.set(row.hole,Object.assign({},existing,row,{
+      index:row.index??existing.index??null,
+      metres:row.metres??preferred?.metres??existing.metres??null,
+      tees,
+      score:null,
+      putts:null,
+      sourceUrl
+    }));
+  }
+  function addNumericScorecardRow(hole,values){
+    if(!(hole>=1&&hole<=18)||values.length<7)return;
+    const tees={
+      Black:{par:values[6],index:values[5],metres:values[0],gender:"M"},
+      Blue:{par:values[6],index:values[5],metres:values[1],gender:"M"},
+      White:{par:values[6],index:values[5],metres:values[2],gender:"M"},
+      Yellow:{par:values[6],index:values[5],metres:values[3],gender:"M"},
+      Red:{par:values[6],index:values[5],metres:values[4],gender:"M"}
+    };
+    const preferred=tees[sessionTee]||tees.White||tees.Blue||tees.Yellow||Object.values(tees)[0]||null;
+    addHole({hole,par:values[6],index:values[5],metres:preferred?.metres??null,tees});
+  }
+  lines.forEach(line=>{
+    const m=line.match(/^(\d{1,2})\s+((?:\d{2,4}\s+){5,}\d{1,2}\s+\d)(?:\s|$)/);
+    if(!m)return;
+    const hole=parseInt(m[1],10);
+    const values=(m[2].match(/\d+/g)||[]).map(value=>parseInt(value,10));
+    addNumericScorecardRow(hole,values);
+  });
+  const fullScorecardIndex=text.toLowerCase().indexOf("full scorecard");
+  if(fullScorecardIndex>=0){
+    const scorecardText=text.slice(fullScorecardIndex);
+    const rowPattern=/\b([1-9]|1[0-8])\s+((?:\d{2,4}\s+){5,}\d{1,2}\s+\d)(?=\s+(?:[1-9]|1[0-8]|out|in|total)\b)/gi;
+    let rowMatch;
+    while((rowMatch=rowPattern.exec(scorecardText))){
+      addNumericScorecardRow(parseInt(rowMatch[1],10),(rowMatch[2].match(/\d+/g)||[]).map(value=>parseInt(value,10)));
+    }
+  }
+  const tourPattern=/hole\s*(\d{1,2})\s*(?:[-–—][^-–—]*)?\s+par\s*(\d)\s*(?:[-–—]\s*)?([\s\S]*?)(?=hole\s*\d{1,2}\s*(?:[-–—]|\s+par)|$)/gi;
+  let tourMatch;
+  while((tourMatch=tourPattern.exec(text))){
+    const hole=parseInt(tourMatch[1],10), par=parseInt(tourMatch[2],10), body=tourMatch[3]||"";
+    const tees={};
+    body.replace(/\b([A-Za-z][A-Za-z ]{0,20})\s+(\d{2,4})\s*(m|metres?|meters?|yds?|yards?)\b/gi,(_,tee,value,unit)=>{
+      const marker=gdScorecardMarkerKey(tee);
+      if(!marker)return "";
+      const raw=parseInt(value,10);
+      if(!Number.isFinite(raw))return "";
+      const metres=/^y/i.test(unit)?Math.round(raw*.9144):raw;
+      tees[marker]={par,index:null,metres,gender:"M"};
+      return "";
+    });
+    const stroke=body.match(/\bstroke\s*(\d{1,2})\b/i);
+    const preferred=tees[sessionTee]||tees.White||tees.Blue||tees.Yellow||Object.values(tees)[0]||null;
+    addHole({hole,par,index:stroke?parseInt(stroke[1],10):null,metres:preferred?.metres??null,tees});
+  }
   const patterns=[
     /hole\s*(\d{1,2})\D{0,80}?par\s*(\d)/gi,
     /par\s*(\d)\D{0,80}?hole\s*(\d{1,2})/gi
@@ -30029,26 +30121,41 @@ function gdParseSimpleParHoles(html,sourceUrl){
     while((match=pattern.exec(text))){
       const hole=patternIndex===0?parseInt(match[1],10):parseInt(match[2],10);
       const par=patternIndex===0?parseInt(match[2],10):parseInt(match[1],10);
-      if(hole>=1&&hole<=18&&par>=3&&par<=6&&!holes.has(hole))holes.set(hole,{hole,par,index:null,metres:null,score:null,putts:null,tees:{},sourceUrl});
+      if(hole>=1&&hole<=18&&par>=3&&par<=6&&!holes.has(hole))addHole({hole,par,index:null,metres:null,tees:{}});
     }
   });
   doc.querySelectorAll("table tr,.hole,.course-hole,[class*='hole']").forEach(row=>{
+    const cells=[...row.querySelectorAll("th,td")].map(gdScorecardText).filter(Boolean);
+    if(cells.length>=8&&/^\d{1,2}$/.test(cells[0])){
+      const hole=parseInt(cells[0],10);
+      const values=cells.slice(1).map(value=>parseInt(value,10)).filter(value=>Number.isFinite(value));
+      addNumericScorecardRow(hole,values);
+    }
     const rowText=gdScorecardCleanText(row.innerText||row.textContent||"");
     const m=rowText.match(/hole\s*(\d{1,2}).{0,80}?par\s*(\d)/i)||rowText.match(/\b(\d{1,2})\b.{0,80}?par\s*(\d)/i);
     if(!m)return;
     const hole=parseInt(m[1],10), par=parseInt(m[2],10);
-    if(hole>=1&&hole<=18&&par>=3&&par<=6&&!holes.has(hole))holes.set(hole,{hole,par,index:null,metres:null,score:null,putts:null,tees:{},sourceUrl});
+    const tees={};
+    rowText.replace(/\b(white|blue|yellow|red|black)\s+(\d{2,4})\s*(m|metres?|meters?|yds?|yards?)\b/gi,(_,tee,value,unit)=>{
+      const marker=gdScorecardMarkerKey(tee);
+      const raw=parseInt(value,10);
+      if(marker&&Number.isFinite(raw))tees[marker]={par,index:null,metres:/^y/i.test(unit)?Math.round(raw*.9144):raw,gender:"M"};
+      return "";
+    });
+    const direct=rowText.match(/\b(?:distance|length)\D{0,20}(\d{2,4})\s*(m|metres?|meters?|yds?|yards?)\b/i);
+    const directMetres=direct?(/^y/i.test(direct[2])?Math.round(parseInt(direct[1],10)*.9144):parseInt(direct[1],10)):null;
+    if(hole>=1&&hole<=18&&par>=3&&par<=6)addHole({hole,par,index:null,metres:Number.isFinite(directMetres)?directMetres:null,tees});
   });
   return Array.from({length:18},(_,i)=>holes.get(i+1)).filter(Boolean);
 }
 async function gdTryGenericWebsiteScorecard(source,course){
-  const paths=[source.holeListPath||"", "/hole-by-hole", "/scorecard", "/course-scorecard", "/course", "/golf/course"];
+  const paths=[source.holeListPath||"", "/hole-by-hole", "/scorecard", "/course-scorecard", "/tour", "/course", "/golf/course"];
   for(const path of paths){
     const url=`${source.baseUrl}${path}`;
     try{
       const html=await gdFetchScorecardText(url);
       let holes=gdParseSimpleParHoles(html,url);
-      if(holes.length===18)return {courseKey:gdScorecardCourseKey(course),courseName:gdScorecardNormalizeName(course?.name)||source.name,source:"website",sourceUrl:url,holes,error:""};
+      if(holes.length===18)return {courseKey:gdScorecardCourseKey(course),courseName:gdScorecardNormalizeName(course?.name)||source.name,source:source.sourceKind||"website",provider:source.provider||source.name||"",sourceUrl:url,holes,error:""};
       const doc=new DOMParser().parseFromString(html,"text/html");
       const links=[...doc.querySelectorAll("a[href]")].map(a=>a.getAttribute("href")).filter(h=>/hole|score|course-hole-details/i.test(h||"")).slice(0,24);
       const linked=[];
@@ -30059,7 +30166,7 @@ async function gdTryGenericWebsiteScorecard(source,course){
       }
       const byHole=new Map(linked.map(h=>[h.hole,h]));
       holes=Array.from({length:18},(_,i)=>byHole.get(i+1)).filter(Boolean);
-      if(holes.length===18)return {courseKey:gdScorecardCourseKey(course),courseName:gdScorecardNormalizeName(course?.name)||source.name,source:"website",sourceUrl:url,holes,error:""};
+      if(holes.length===18)return {courseKey:gdScorecardCourseKey(course),courseName:gdScorecardNormalizeName(course?.name)||source.name,source:source.sourceKind||"website",provider:source.provider||source.name||"",sourceUrl:url,holes,error:""};
     }catch(e){}
   }
   throw new Error("No readable 18-hole par list found on course website");
@@ -30073,7 +30180,7 @@ async function gdLoadAkaranaScorecard(source,course){
     if(hole)holes.push(hole);
   }
   if(holes.length!==18||holes.some(h=>!Number.isFinite(Number(h.par))))throw new Error("Course website did not provide 18 holes with par");
-  return {courseKey:gdScorecardCourseKey(course),courseName:gdScorecardNormalizeName(course?.name)||source.name,source:"website",sourceUrl:source.baseUrl,holes,error:""};
+  return {courseKey:gdScorecardCourseKey(course),courseName:gdScorecardNormalizeName(course?.name)||source.name,source:source.sourceKind||"website",provider:source.provider||source.name||"",sourceUrl:source.baseUrl,holes,error:""};
 }
 async function gdLoadWebsiteScorecard(source,course){
   if(source.detailIdStart){
@@ -30096,9 +30203,22 @@ async function gdEnsureScorecardForCourse(course){
   renderScorecard();
   try{
     if(!sources.length)throw new Error("No course website scorecard source found");
-    let loaded=null,lastError=null,seed=null;
+    let loaded=null,lastError=null,seed=null,loadedSources=[];
     for(const source of sources){
-      try{loaded=await gdLoadWebsiteScorecard(source,course);break}catch(e){lastError=e;if(!seed)seed=gdScorecardSeed(source,course,e?.message)}
+      try{
+        const candidate=await gdLoadWebsiteScorecard(source,course);
+        loadedSources.push(candidate);
+        if(!loaded)loaded=candidate;
+      }catch(e){lastError=e;if(!seed)seed=gdScorecardSeed(source,course,e?.message)}
+    }
+    if(loadedSources.length){
+      const sourceRows=loadedSources.map(source=>({
+        source:source.source||"",
+        provider:source.provider||"",
+        sourceUrl:source.sourceUrl||"",
+        holes:source.holes||[]
+      }));
+      loaded=Object.assign({},loadedSources[0],{scorecardSources:sourceRows});
     }
     if(!loaded&&seed)loaded=seed;
     if(!loaded)throw lastError||new Error("No readable course scorecard found");
@@ -30169,9 +30289,9 @@ function renderScorecard(){
   panel?.classList.toggle("gdScoreHolePickerClosed",!gdScoreHolePickerOpen);
   document.getElementById("scoreCourse").textContent=hasCourse?courseName:"Course scorecard";
   document.getElementById("gdScoreCourseName").textContent=courseName;
-  document.getElementById("gdScoreCourseLabel").textContent=scorecard.source==="website"?"Course website scorecard":scorecard.source==="seed"?"Saved course website card":scorecard.source==="shell"?"Score entry":"Confirmed course";
+  document.getElementById("gdScoreCourseLabel").textContent=scorecard.source==="website"?"Course website scorecard":scorecard.source==="gps-app"?"GPS app scorecard":scorecard.source==="seed"?"Saved course website card":scorecard.source==="shell"?"Score entry":"Confirmed course";
   const teeSource=gdScorecardAvailableTees()===GD_SCORECARD_DEFAULT_TEES?"Default tees":"Course tees";
-  document.getElementById("gdScoreCourseMeta").textContent=scorecard.loading?"Loading scorecard from course website...":scorecard.source==="website"?`Pulled from ${scorecard.sourceUrl} · ${teeSource}`:scorecard.source==="seed"?`From saved course website data · ${teeSource}`:scorecard.source==="shell"?"Course website card unavailable. Using 18 empty score slots with default tees.":"Confirm a course to load a scorecard.";
+  document.getElementById("gdScoreCourseMeta").textContent=scorecard.loading?"Loading scorecard from course website...":scorecard.source==="website"||scorecard.source==="gps-app"?`Pulled from ${scorecard.sourceUrl} · ${teeSource}`:scorecard.source==="seed"?`From saved course website data · ${teeSource}`:scorecard.source==="shell"?"Course website card unavailable. Using 18 empty score slots with default tees.":"Confirm a course to load a scorecard.";
   const empty=document.getElementById("gdScoreEmpty");
   if(empty)empty.textContent=scorecard.loading?"Loading scorecard from course website...":hasCourse?"No scorecard data is available for this course yet.":"Confirm a course first, then the scorecard can load.";
   gdRenderScorecardTeeSelect();
@@ -30202,7 +30322,7 @@ function gdPersistCurrentScorecard(){const key=scorecard.courseKey;if(!key)retur
 function adjustHoleScore(d){const h=gdScorecardHoleAt(selectedHole);if(!h){toast("No hole selected");return}const hv=gdScorecardHoleView(h);const par=gdScorecardKnownNumber(hv.par);if(h.score==null)h.score=par??0;h.score=Math.max(0,h.score+d);gdPersistCurrentScorecard();renderScorecard()}
 function adjustHolePutts(d){const h=gdScorecardHoleAt(selectedHole);if(!h){toast("No hole selected");return}if(h.putts==null)h.putts=2;h.putts=Math.max(0,h.putts+d);gdPersistCurrentScorecard();renderScorecard()}
 function saveHoleScore(){const h=gdScorecardHoleAt(selectedHole);if(!h){toast("Select a course before saving a hole");return}const hv=gdScorecardHoleView(h);const par=gdScorecardKnownNumber(hv.par);if(h.score==null)h.score=par??0;gdManualScoreOverride=false;gdScorecardHasDrivenScore=true;playerScore=scorecard.holes.reduce((s,x)=>{const xv=gdScorecardHoleView(x);const p=gdScorecardKnownNumber(xv.par);return s+(x.score!=null&&p!==null?x.score-p:0)},0);gdPersistCurrentScorecard();updateScore();renderScorecard();gdPanelBack("scorePanel")}
-Object.assign(window,{gdScorecardConfirmedCourse,openScorecard,renderScorecard,saveHoleScore,playSelectedHole,setHole,adjustHoleScore,adjustHolePutts});
+Object.assign(window,{gdScorecardConfirmedCourse,gdEnsureScorecardForCourse,openScorecard,renderScorecard,saveHoleScore,playSelectedHole,setHole,adjustHoleScore,adjustHolePutts});
 function checkLeavingGreen(){if(!currentPlayingHole||!greenCentre||!start)return;const d=map.distance(start,greenCentre);if(d<25)hadNearGreen=true;if(hadNearGreen&&d>35){pendingScoreHole=currentPlayingHole;hadNearGreen=false}}
 
 /* ---------------- Undo/helpers ---------------- */
