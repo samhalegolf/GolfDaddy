@@ -22036,21 +22036,29 @@ function gdRefreshGpsMapAfterCourseOpen(payload,opts={}){
 }
 function gdKickWholeCourseAutoMapOnLoad(payload){
   if(!payload||gdCoursePayloadIsManual(payload))return false;
-  const key=String(payload.courseId||payload.savedCourseId||payload.canonicalKey||payload.name||payload.courseName||"course").toLowerCase();
   const now=Date.now();
+  const selectedAt=new Date(now).toISOString();
+  const library=window.GolfDaddyCourseLibrary||window.ClarityCaddieCourseLibrary||{};
+  let mappingCourse=typeof library.mappingCourseSnapshot==="function"
+    ? library.mappingCourseSnapshot(payload,{selectedAt,source:"course-picker-auto-map"})
+    : payload;
+  const key=String(mappingCourse.courseId||mappingCourse.savedCourseId||mappingCourse.canonicalKey||mappingCourse.name||mappingCourse.courseName||payload.courseId||payload.name||"course").toLowerCase();
   if(window.__gdWholeCourseAutoMapOnLoadKey===key&&now-(window.__gdWholeCourseAutoMapOnLoadAt||0)<45000)return true;
   window.__gdWholeCourseAutoMapOnLoadKey=key;
   window.__gdWholeCourseAutoMapOnLoadAt=now;
   const token=`${now}-${Math.random()}`;
-  const selectedAt=new Date(now).toISOString();
-  const attemptToken=`course-picker:${key}:${token}`;
-  const library=window.GolfDaddyCourseLibrary||window.ClarityCaddieCourseLibrary||{};
-  const mappingCourse=typeof library.mappingCourseSnapshot==="function"
-    ? library.mappingCourseSnapshot(payload,{selectedAt,attemptToken,source:"course-picker-auto-map"})
-    : payload;
-  const debugRunId=typeof library.startMappingDebugRun==="function"
-    ? library.startMappingDebugRun(mappingCourse,{selectedAt,attemptToken,reason:"course-picker-auto-map"})
-    : "";
+  const activeAttempt=typeof library.activeMappingDebugAttempt==="function"
+    ? library.activeMappingDebugAttempt(mappingCourse,{hole:1})
+    : null;
+  const attemptToken=activeAttempt&&activeAttempt.attemptToken||`course-picker:${key}:${token}`;
+  if(typeof library.mappingCourseSnapshot==="function"){
+    mappingCourse=library.mappingCourseSnapshot(payload,{selectedAt,attemptToken,source:"course-picker-auto-map"});
+  }
+  const debugRunId=activeAttempt&&activeAttempt.debugRunId
+    ? activeAttempt.debugRunId
+    : typeof library.startMappingDebugRun==="function"
+      ? library.startMappingDebugRun(mappingCourse,{selectedAt,attemptToken,reason:"course-picker-auto-map",hole:1})
+      : "";
   if(debugRunId&&window.GDCourseMappingDebug&&typeof window.GDCourseMappingDebug.recordEvent==="function"){
     try{
       window.GDCourseMappingDebug.recordEvent(debugRunId,{source:"course-loader",phase:"started",event:"course-picker-automap-started",summary:"Course picker auto-map started",details:{
