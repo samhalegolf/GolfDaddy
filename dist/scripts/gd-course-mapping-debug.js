@@ -11,8 +11,10 @@
 
   var VERSION = "course-mapping-debug-v1";
   var STORE_KEY = "gd_course_mapping_debug_runs_v1";
+  var STALE_STORE_KEY = "gd_course_mapping_debug_stale_v1";
   var RECENT_LIMIT = 10;
   var EVENT_LIMIT = 180;
+  var STALE_LIMIT = 30;
   var CHECKPOINT_STAGES = [
     ["initial-snapshot", "Initial Snapshot"],
     ["fairway-lines", "Fairway Lines"],
@@ -44,7 +46,8 @@
   var state = {
     activeRunId: "",
     selectedRunId: "",
-    runs: []
+    runs: [],
+    staleActivity: []
   };
 
   function safe(fn, fallback) {
@@ -80,6 +83,13 @@
     var n = Number(value);
     if (!Number.isFinite(n)) return "";
     return Math.round(n * 100) + "%";
+  }
+
+  function shortToken(value) {
+    var text = String(value || "");
+    if (!text) return "";
+    if (text.length <= 14) return text;
+    return "..." + text.slice(-10);
   }
 
   function cleanSource(source) {
@@ -179,7 +189,7 @@
     }
     var out = {};
     Object.keys(value).forEach(function (childKey) {
-      if (SECRET_KEY_RE.test(childKey) && !/^(attemptToken|mappingAttemptToken)$/i.test(childKey)) {
+      if (SECRET_KEY_RE.test(childKey) && !/^(attemptToken|mappingAttemptToken|staleAttemptToken|activeAttemptToken)$/i.test(childKey)) {
         out[childKey] = "[redacted]";
         return;
       }
@@ -217,6 +227,7 @@
     safe(function () {
       var rows = state.runs.slice(0, RECENT_LIMIT).map(lightweightRun);
       sessionStorage.setItem(STORE_KEY, JSON.stringify(rows));
+      sessionStorage.setItem(STALE_STORE_KEY, JSON.stringify(sanitize(state.staleActivity || [], { arrayLimit: STALE_LIMIT, maxDepth: 6 })));
     });
     mirror();
   }
@@ -230,6 +241,9 @@
       run.eventSequence = Number(run.eventSequence) || run.events.reduce(function (max, event) { return Math.max(max, Number(event.sequence) || 0); }, 0);
       return run;
     });
+    state.staleActivity = safe(function () { return JSON.parse(sessionStorage.getItem(STALE_STORE_KEY) || "[]"); }, []);
+    if (!Array.isArray(state.staleActivity)) state.staleActivity = [];
+    state.staleActivity = state.staleActivity.slice(0, STALE_LIMIT);
     var active = state.runs.find(function (run) { return run.status === "active"; });
     state.activeRunId = active && active.runId || "";
   }
@@ -308,7 +322,7 @@
     if (event && event.details && event.details.runFinal) return true;
     if (phase === "fallback") return true;
     if (source === "course-loader" && (phase === "completed" || phase === "failed" || phase === "cancelled" || phase === "superseded")) return true;
-    if (source === "manual-fallback" && (phase === "completed" || phase === "cancelled" || phase === "failed")) return true;
+    if (source === "manual-fallback" && (phase === "completed" || phase === "cancelled" || phase === "failed" || phase === "superseded")) return true;
     return false;
   }
 
@@ -352,6 +366,48 @@
     }
     touchRun(run);
     return row;
+  }
+
+  function recordStaleActivity(input) {
+    input = input || {};
+    var staleRunId = String(input.staleRunId || input.runId || "").trim();
+    var active = input.active || {};
+    var stale = input.stale || input;
+    var entry = sanitize({
+      id: input.id || uid("stale-activity"),
+      timestamp: input.timestamp || nowIso(),
+      staleRunId: staleRunId,
+      staleCourseId: stale.courseId || input.staleCourseId || "",
+      staleCourseName: stale.courseName || input.staleCourseName || "",
+      staleResolutionKey: stale.resolutionKey || input.staleResolutionKey || "",
+      staleAttemptToken: shortToken(stale.attemptToken || input.staleAttemptToken || ""),
+      activeRunId: active.runId || active.debugRunId || input.activeRunId || "",
+      activeCourseId: active.courseId || input.activeCourseId || "",
+      activeCourseName: active.courseName || input.activeCourseName || "",
+      activeResolutionKey: active.resolutionKey || input.activeResolutionKey || "",
+      activeAttemptToken: shortToken(active.attemptToken || input.activeAttemptToken || ""),
+      attemptedAction: input.attemptedAction || "unknown",
+      rejectionReason: input.rejectionReason || "active mapping attempt changed",
+      callerFunction: input.callerFunction || "",
+      source: input.source || "unknown",
+      lateByMs: Number.isFinite(Number(input.lateByMs)) ? Number(input.lateByMs) : undefined,
+      orphan: !staleRunId || !findRun(staleRunId)
+    }, { maxDepth: 6 });
+    state.staleActivity = [entry].concat((state.staleActivity || []).filter(function (item) { return item.id !== entry.id; })).slice(0, STALE_LIMIT);
+    if (staleRunId && findRun(staleRunId)) {
+      recordEvent(staleRunId, {
+        source: input.source || "native-resolver",
+        phase: "superseded",
+        event: input.event || "stale-result-rejected",
+        summary: input.summary || "Late automatic result rejected",
+        details: Object.assign({}, entry, { runFinal: true }),
+        outcome: input.outcome || "Late automatic result rejected"
+      });
+    } else {
+      persist();
+      notify();
+    }
+    return entry;
   }
 
   function attachCheckpoint(runId, checkpoint) {
@@ -555,6 +611,8 @@
       "",
       copyResolverFeedback(run.runId),
       "",
+      staleActivityText(run.runId),
+      "",
       checkpointSummary(run)
     ].filter(Boolean).join("\n");
   }
@@ -638,12 +696,15 @@
   }
 
   function adminSummaryHtml(run) {
+    var owner = safe(function () { return window.__gdCourseMappingDebugActiveAttempt || null; }, null);
     if (!run) return '<div class="gdCoursePlayDebugEmpty">No mapping attempts recorded yet.</div>';
     return [
       metricHtml("Latest run", run.courseName || run.courseId),
+      metricHtml("Current owner", owner ? (owner.courseName || owner.courseId || "active") + " H" + (owner.hole || 1) : "none"),
       metricHtml("AutoMapper", latestSourceStatus(run, "automapper")),
       metricHtml("Resolver", latestSourceStatus(run, "native-resolver")),
       metricHtml("Outcome", run.outcome || run.status || "active"),
+      metricHtml("Stale rejected", (state.staleActivity || []).length),
       metricHtml("Events", (run.events || []).length)
     ].join("");
   }
@@ -727,9 +788,59 @@
     return '<pre class="gdCourseMappingRaw">' + escapeHtml(copyRawJson(run.runId)) + '</pre>';
   }
 
+  function staleActivityForRun(runId) {
+    return (state.staleActivity || []).filter(function (item) { return !runId || item.staleRunId === runId || item.activeRunId === runId || item.orphan; });
+  }
+
+  function staleActivityText(runId) {
+    var rows = staleActivityForRun(runId);
+    if (!rows.length) return "STALE ACTIVITY\nNo stale automatic activity recorded.";
+    return "STALE ACTIVITY\n" + rows.map(function (item) {
+      return [
+        "Stale activity rejected",
+        "Course: " + (item.staleCourseName || item.staleCourseId || "unknown"),
+        "Run: " + (item.staleRunId || "orphan"),
+        "Action: " + (item.attemptedAction || "unknown"),
+        "Rejected because active run is " + (item.activeCourseName || item.activeCourseId || "unknown"),
+        item.lateByMs ? "Late by: " + seconds(item.lateByMs) : "",
+        "Caller: " + (item.callerFunction || "unknown"),
+        "Stale token: " + shortToken(item.staleAttemptToken),
+        "Active token: " + shortToken(item.activeAttemptToken)
+      ].filter(Boolean).join("\n");
+    }).join("\n\n");
+  }
+
+  function staleActivityHtml(run) {
+    var owner = safe(function () { return window.__gdCourseMappingDebugActiveAttempt || null; }, null);
+    var ownerHtml = owner ? [
+      '<div class="gdCourseMappingSection"><h4>Current owner</h4>',
+      '<div class="gdCourseMappingHandoffRow"><span>Active course</span><strong>' + escapeHtml(owner.courseName || owner.courseId || "unknown") + '</strong></div>',
+      '<div class="gdCourseMappingHandoffRow"><span>Active run</span><strong>' + escapeHtml(owner.runId || owner.debugRunId || "") + '</strong></div>',
+      '<div class="gdCourseMappingHandoffRow"><span>Hole</span><strong>' + escapeHtml(owner.hole || 1) + '</strong></div>',
+      '<div class="gdCourseMappingHandoffRow"><span>Attempt token</span><strong>' + escapeHtml(shortToken(owner.attemptToken)) + '</strong></div>',
+      '</div>'
+    ].join("") : '<div class="gdCourseMappingSection"><h4>Current owner</h4><div class="gdCoursePlayDebugEmpty">No active mapping owner.</div></div>';
+    var rows = staleActivityForRun(run && run.runId);
+    var staleHtml = rows.length ? rows.map(function (item) {
+      return '<div class="gdCourseMappingEvent"><strong>' + escapeHtml((item.staleCourseName || item.staleCourseId || "Unknown course") + " - " + (item.attemptedAction || "stale action")) + '</strong><span>Caller: ' + escapeHtml(item.callerFunction || "unknown") + '</span>' + detailsHtml({
+        staleRunId: item.staleRunId || "orphan",
+        staleResolutionKey: item.staleResolutionKey,
+        staleAttemptToken: shortToken(item.staleAttemptToken),
+        activeRunId: item.activeRunId,
+        activeCourseId: item.activeCourseId,
+        activeResolutionKey: item.activeResolutionKey,
+        activeAttemptToken: shortToken(item.activeAttemptToken),
+        rejectionReason: item.rejectionReason,
+        lateBy: item.lateByMs ? seconds(item.lateByMs) : ""
+      }) + '</div>';
+    }).join("") : '<div class="gdCoursePlayDebugEmpty">No stale automatic activity recorded.</div>';
+    return ownerHtml + '<div class="gdCourseMappingSection"><h4>Stale activity</h4><div class="gdCourseMappingEventList">' + staleHtml + '</div></div>';
+  }
+
   function panelBodyHtml(run) {
     if (activeTab === "automapper") return sourceEventsHtml(run, "automapper");
     if (activeTab === "resolver") return sourceEventsHtml(run, "native-resolver");
+    if (activeTab === "stale") return staleActivityHtml(run);
     if (activeTab === "checkpoints") return checkpointsHtml(run);
     if (activeTab === "raw") return rawEvidenceHtml(run);
     return firingHtml(run);
@@ -757,6 +868,7 @@
         tabButtonHtml("firing", "Firing List"),
         tabButtonHtml("automapper", "AutoMapper"),
         tabButtonHtml("resolver", "Native Resolver"),
+        tabButtonHtml("stale", "Stale Activity"),
         tabButtonHtml("checkpoints", "Checkpoints"),
         tabButtonHtml("raw", "Raw Evidence")
       ].join("") + '</div>',
@@ -811,7 +923,9 @@
     state.activeRunId = "";
     state.selectedRunId = "";
     state.runs = [];
+    state.staleActivity = [];
     safe(function () { sessionStorage.removeItem(STORE_KEY); });
+    safe(function () { sessionStorage.removeItem(STALE_STORE_KEY); });
     mirror();
   }
 
@@ -819,7 +933,8 @@
     __version: VERSION,
     startRun: startRun,
     getOrStartRun: getOrStartRun,
-    recordEvent: recordEvent,
+	    recordEvent: recordEvent,
+    recordStaleActivity: recordStaleActivity,
     attachCheckpoint: attachCheckpoint,
     finishRun: finishRun,
     getActiveRun: getActiveRun,

@@ -725,7 +725,11 @@
     if(!entry||!entry.debugRunId)return entry;
     pipelineMappingRunByKey[entry.resolutionKey]=entry;
     if(entry.key&&entry.key!==entry.resolutionKey)pipelineMappingRunByKey[entry.key]=entry;
-    try{window.__gdCourseMappingDebugActiveAttempt=entry;}catch(e){}
+    try{
+      var api=courseLibraryApi();
+      if(api&&typeof api.activateMappingAttempt==="function")api.activateMappingAttempt(entry);
+      else window.__gdCourseMappingDebugActiveAttempt=entry;
+    }catch(e){try{window.__gdCourseMappingDebugActiveAttempt=entry;}catch(ignore){}}
     return entry;
   }
   function pipelineMappingAttemptForKey(key){
@@ -1151,14 +1155,43 @@
     window.__gdCoursePlayPipelineCourseLibraryAdapter=true;
     var originalAutoMap=window.gdAutoMapOsmCourse;
     if(typeof originalAutoMap==="function"&&!originalAutoMap.__gdCoursePlayPipelineWrapped){
-      window.gdAutoMapOsmCourse=function(){
-        var args=arguments;
-        var opts=args&&args[0]||{};
-        var course=opts&&opts.course;
-        recordDebugEvent("automapper-started",{source:"automap"});
-        var result=originalAutoMap.apply(this,args);
-        var ingest=function(){safe(function(){
-          recordDebugEvent("automapper-ingest-started",{source:"automap"});
+	      window.gdAutoMapOsmCourse=function(){
+	        var args=arguments;
+	        var opts=args&&args[0]||{};
+	        var course=opts&&opts.course;
+        var library=courseLibraryApi();
+        var attempt=opts&&opts.debugAttemptContext||safe(function(){return typeof library.activeMappingDebugAttempt==="function"?library.activeMappingDebugAttempt(course,{hole:opts&&opts.hole||1}):null;},null)||{
+          runId:opts&&opts.debugRunId||"",
+          debugRunId:opts&&opts.debugRunId||"",
+          courseId:courseIdFrom(course||"course"),
+          courseName:courseNameFrom(course,"Course"),
+          hole:normalizeHoleNumber(opts&&opts.hole||1),
+          resolutionKey:opts&&opts.activeResolutionKey||opts&&opts.resolutionKey||"",
+          attemptToken:opts&&opts.attemptToken||"",
+          source:opts&&opts.reason||opts&&opts.source||"automapper",
+          callerFunction:"GDCoursePlayPipeline.gdAutoMapOsmCourse"
+        };
+	        recordDebugEvent("automapper-started",{source:"automap"});
+	        var result=originalAutoMap.apply(this,args);
+	        var ingest=function(){safe(function(){
+          if(attempt&&typeof library.isCurrentMappingAttempt==="function"&&!library.isCurrentMappingAttempt(attempt)){
+            if(window.GDCourseMappingDebug&&typeof window.GDCourseMappingDebug.recordStaleActivity==="function"){
+              window.GDCourseMappingDebug.recordStaleActivity({
+                staleRunId:attempt.runId||attempt.debugRunId||"",
+                stale:{courseId:attempt.courseId,courseName:attempt.courseName,resolutionKey:attempt.resolutionKey,attemptToken:attempt.attemptToken},
+                active:window.__gdCourseMappingDebugActiveAttempt||{},
+                attemptedAction:"ingest-automapper-output",
+                rejectionReason:"active mapping attempt changed",
+                callerFunction:"GDCoursePlayPipeline.gdAutoMapOsmCourse.finally",
+                source:"automapper",
+                event:"automapper-stale-result-rejected",
+                summary:"AutoMapper stale result rejected"
+              });
+            }
+            recordDebugEvent("automapper-stale-ingest-rejected",{courseId:attempt.courseId,courseName:attempt.courseName,holeNumber:attempt.hole,source:"automap"});
+            return;
+          }
+	          recordDebugEvent("automapper-ingest-started",{source:"automap"});
           var state=ingestCourseLibraryCourse(resolveFreshCourseForIngest(course),{source:"automap"});
           recordDebugEvent("automapper-completed",{courseId:state&&state.courseId,courseName:state&&state.courseName,status:state&&state.status,holesScanned:state&&state.adapter&&state.adapter.holesChecked,holesSaved:state&&state.adapter&&state.adapter.holesIngested,source:"automap"});
         });};
