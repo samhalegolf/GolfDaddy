@@ -60,6 +60,16 @@ function course() {
   };
 }
 
+function projectPoint(origin, bearingRad, metres) {
+  const earth = 111320;
+  const lat = Number(origin && origin.lat);
+  const lng = Number(origin && origin.lng);
+  return {
+    lat: lat + (Math.cos(bearingRad) * metres) / earth,
+    lng: lng + (Math.sin(bearingRad) * metres) / (earth * Math.cos(lat * Math.PI / 180))
+  };
+}
+
 function scorecardHoles() {
   return [
     504, 332, 148, 471, 167, 348, 290, 363, 357,
@@ -122,7 +132,7 @@ function osmPayload(kind) {
 
 function loadController(options = {}) {
   const events = [];
-  const calls = { fetch: 0, native: 0, manual: 0, scorecard: 0, nativeInputs: [], fetchUrls: [], order: [] };
+  const calls = { fetch: 0, native: 0, manual: 0, scorecard: 0, nativeInputs: [], fetchUrls: [], order: [], ingestMappedCourse: 0, ingestMappedHole: 0, ingestedHoles: [], frameWarm: 0, frameWarmHoles: [] };
   const testConsole = Object.assign({}, console, { warn() {}, info() {} });
   const localStorage = storage({
     gd_user_course_library_v1: JSON.stringify(options.savedMap ? playableStore() : { courses: {} })
@@ -161,7 +171,27 @@ function loadController(options = {}) {
     gdActiveCourse: course(),
     scorecard: testScorecard,
     GDCourseMappingDebug: mappingDebug,
-    GDCoursePlayPipeline: { recordDebugEvent() {} },
+    GDCoursePlayPipeline: {
+      recordDebugEvent() {},
+      ingestMappedCourse(courseInput, holes) {
+        calls.ingestMappedCourse += 1;
+        (holes || []).forEach((hole) => calls.ingestedHoles.push(Number(hole && (hole.holeNumber || hole.hole))));
+        return { courseId: courseInput && courseInput.courseId, holes: holes || [] };
+      },
+      ingestMappedHole(courseInput, holeNumber) {
+        calls.ingestMappedHole += 1;
+        calls.ingestedHoles.push(Number(holeNumber));
+        return { courseId: courseInput && courseInput.courseId, holeNumber };
+      }
+    },
+    gdRenderCoursePlayHoleFrame(courseInput, holeNumber, holeData, opts) {
+      if (opts && opts.cacheOnly) {
+        calls.frameWarm += 1;
+        calls.frameWarmHoles.push(Number(holeNumber));
+        return !!(holeData && Array.isArray(holeData.route) && holeData.route.length >= 2);
+      }
+      return false;
+    },
     GDCourseGeometryResolver: {
       highConfidence: 0.76,
       mediumConfidence: 0.58,
@@ -192,20 +222,25 @@ function loadController(options = {}) {
           };
         }
         if (options.nativeSuccess) {
-          return {
-            status: "resolved",
-            confidence: 0.91,
-            source: "test-native-resolver",
-            holes: [{
-              holeNumber: 1,
+          const resolvedHoles = Array.from({ length: options.nativeSuccessHoles || 1 }, (_, index) => {
+            const holeNumber = index + 1;
+            const baseLat = -36.9005 + index * 0.001;
+            return {
+              holeNumber,
               confidence: 0.91,
               matchScore: 0.91,
               evidence: ["test"],
               candidate: {
-                candidateId: "native-1",
-                path: [{ lat: -36.9005, lng: 174.75 }, { lat: -36.899, lng: 174.75 }]
+                candidateId: `native-${holeNumber}`,
+                path: [{ lat: baseLat, lng: 174.75 }, { lat: baseLat + 0.0015, lng: 174.75 }]
               }
-            }],
+            };
+          });
+          return {
+            status: "resolved",
+            confidence: 0.91,
+            source: "test-native-resolver",
+            holes: resolvedHoles,
             feedback: { geometry: {}, assignment: {}, distance: {}, tieBreakers: {} },
             warnings: []
           };
@@ -265,6 +300,7 @@ function loadController(options = {}) {
         return Math.hypot(dx, dy);
       }
     },
+    project: projectPoint,
     L: {
       latLng(lat, lng) { return { lat: Number(lat), lng: Number(lng) }; },
       circleMarker() { return { addTo() { return this; }, setLatLng() {}, remove() {} }; },
@@ -311,7 +347,7 @@ async function runScenario(options) {
   const result = await env.win.runCourseMappingAttempt({
     course: env.course,
     hole: 1,
-    wholeCourse: false,
+    wholeCourse: options.wholeCourse === undefined ? false : options.wholeCourse,
     showLoading: false,
     selectedAt: "2026-07-14T00:00:00.000Z",
     attemptToken: `attempt-${Math.random().toString(36).slice(2)}`,
@@ -323,12 +359,14 @@ async function runScenario(options) {
 
 async function main() {
   let env = await runScenario({ savedMap: true });
-  if (process.env.DEBUG_MAPPING_CONTROLLER_TEST) {
-    console.log(JSON.stringify({ result: env.result, events: env.events, store: env.localStorage.data.gd_user_course_library_v1 }, null, 2));
-  }
   assert.strictEqual(env.result.playable, true, "saved map resolves play");
   assert.strictEqual(env.calls.fetch, 0, "saved map success prevents AutoMapper");
   assert.strictEqual(env.calls.native, 0, "saved map success prevents native resolver");
+
+  env = await runScenario({ savedMap: true, wholeCourse: true, fetchSequence: ["fail", "native"], nativeSuccess: true });
+  assert.strictEqual(env.calls.native, 1, "partial saved map does not block whole-course native resolver");
+  assert(env.events.some((event) => event.event === "saved-map-incomplete"), "partial saved map is reported clearly");
+  assert(!env.events.some((event) => event.event === "saved-map-found"), "partial saved map is not treated as complete course evidence");
 
   env = await runScenario({ automapperSuccess: true });
   assert.strictEqual(env.result.playable, true, "AutoMapper success resolves play");
@@ -406,6 +444,10 @@ async function main() {
   assert.strictEqual(env.result.playable, true, "native resolver success resolves play");
   assert.strictEqual(env.calls.manual, 0, "native resolver success prevents manual fallback");
   assert(env.events.some((event) => event.event === "native-resolver-succeeded"), "native resolver success is terminally logged");
+
+  env = await runScenario({ fetchSequence: ["fail", "native"], nativeSuccess: true, nativeSuccessHoles: 3, wholeCourse: true });
+  assert.deepStrictEqual(env.calls.frameWarmHoles, [1, 2, 3], "first-load native success warms every newly mapped play frame");
+  assert.strictEqual(env.calls.ingestMappedCourse, 1, "first-load native success ingests the mapped course into the play pipeline");
 
   const noisyEvents = env.events.map((event) => event.event).filter(Boolean);
   assert(!noisyEvents.includes("automapper-invocation-requested"), "AutoMapper request noise is absent");
