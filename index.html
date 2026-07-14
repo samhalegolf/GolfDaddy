@@ -1615,6 +1615,12 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
     if(!manifest.createdAt)manifest.createdAt=manifest.updatedAt;
     return manifest;
   }
+  function compactStoredManifest(manifest){
+    var compact=clone(manifest||{});
+    compact.tileCount=Array.isArray(compact.tiles)?compact.tiles.length:Number(compact.tileCount)||0;
+    compact.tiles=[];
+    return compact;
+  }
   function normalizeScan(manifest,opts){
     manifest=normalizeManifest(manifest,opts);
     var courseKey=manifest.courseKey;
@@ -1636,24 +1642,27 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
       projection:{type:"leaflet-pixel-origin",captureZoom:manifest.captureZoom,originPx:manifest.originPx||null,imageWidth:manifest.imageWidth||0,imageHeight:manifest.imageHeight||0},
       pins:cleanPins(manifest.anchorPins),
       storage:{registryKey:STORE_KEY,activeKey:activeKey(courseKey,holeNumber),legacyManifestKey:manifest.key},
-      manifest:manifest
+      manifest:compactStoredManifest(manifest)
     };
   }
-	  function writeScan(manifest,opts){
-	    if(!manifest||!Array.isArray(manifest.tiles)||!manifest.originPx)return manifest;
-	    var scan=normalizeScan(manifest,opts||{});
-	    scan.manifest.scanId=scan.id;
-	    scan.manifest.activeScanId=scan.id;
-	    var registry=readRegistry();
+  function writeScan(manifest,opts){
+    if(!manifest||!Array.isArray(manifest.tiles)||!manifest.originPx)return manifest;
+    var scan=normalizeScan(manifest,opts||{});
+    scan.manifest.scanId=scan.id;
+    scan.manifest.activeScanId=scan.id;
+    var legacyManifest=normalizeManifest(manifest,opts||{});
+    legacyManifest.scanId=scan.id;
+    legacyManifest.activeScanId=scan.id;
+    var registry=readRegistry();
     registry.scans=registry.scans.filter(function(item){
       return item&&item.id!==scan.id&&!(item.courseKey===scan.courseKey&&Number(item.holeNumber)===Number(scan.holeNumber)&&item.status&&item.status.latest===true);
     });
     registry.scans.unshift(scan);
     writeRegistry(registry);
     safe(function(){localStorage.setItem(activeKey(scan.courseKey,scan.holeNumber),scan.id);});
-    safe(function(){localStorage.setItem(scan.storage.legacyManifestKey,JSON.stringify(scan.manifest));});
+    safe(function(){localStorage.setItem(scan.storage.legacyManifestKey,JSON.stringify(legacyManifest));});
     window.gdCapturedSurfaceActiveScan=scan;
-    window.gdCapturedSurfaceActiveManifest=scan.manifest;
+    window.gdCapturedSurfaceActiveManifest=legacyManifest;
     safe(function(){
       if(document.body){
         document.body.dataset.gdCapturedSurfaceOwner="captured-surface";
@@ -1663,7 +1672,7 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
         document.body.dataset.gdCapturedSurfaceRoutePins=String((scan.pins.route||[]).length);
       }
     });
-    return scan.manifest;
+    return legacyManifest;
   }
   function findScan(courseKey,holeNumber){
     courseKey=currentCourseKey(courseKey);
@@ -1676,9 +1685,16 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
   }
   function readManifest(courseKey,holeNumber){
     var scan=findScan(courseKey,holeNumber);
-    if(scan&&scan.manifest)return clone(scan.manifest);
     var key=manifestKey(currentCourseKey(courseKey),currentHoleNumber(holeNumber));
-    return safe(function(){return JSON.parse(localStorage.getItem(key)||"null");},null);
+    var legacy=safe(function(){return JSON.parse(localStorage.getItem(key)||"null");},null);
+    if(legacy&&Array.isArray(legacy.tiles)&&legacy.originPx)return legacy;
+    var scanKey=scan&&scan.storage&&scan.storage.legacyManifestKey;
+    if(scanKey&&scanKey!==key){
+      legacy=safe(function(){return JSON.parse(localStorage.getItem(scanKey)||"null");},null);
+      if(legacy&&Array.isArray(legacy.tiles)&&legacy.originPx)return legacy;
+    }
+    if(scan&&scan.manifest&&Array.isArray(scan.manifest.tiles)&&scan.manifest.tiles.length&&scan.manifest.originPx)return clone(scan.manifest);
+    return null;
   }
   function supabasePayload(scan){
     scan=scan||window.gdCapturedSurfaceActiveScan||findScan();

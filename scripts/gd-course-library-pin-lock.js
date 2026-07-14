@@ -2163,6 +2163,7 @@
     if(!h)return null;
     const resolver=window.GDCourseGeometryResolver||{};
     const high=Number(resolver.highConfidence)||.76;
+    const acceptedResolvedRun=String(result?.status||'')==='resolved'&&Array.isArray(result?.holes)&&result.holes.length>0&&!((result?.unresolvedScorecardHoles||[]).length);
     return {
       id:`cgr-${h}-${candidate.candidateId}`,
       hole:h,
@@ -2174,7 +2175,7 @@
       resolverConfidence:Number(resolved.confidence)||0,
       resolverMatchScore:Number(resolved.matchScore)||0,
       resolverEvidence:Array.isArray(resolved.evidence)?resolved.evidence.slice(0,18):[],
-      resolverProvisional:Number(resolved.confidence)<high,
+      resolverProvisional:!acceptedResolvedRun&&Number(resolved.confidence)<high,
       officialDistanceM:Number(resolved.officialDistanceM)||undefined,
       greenId:candidate.greenId||''
     };
