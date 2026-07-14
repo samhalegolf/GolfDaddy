@@ -94,8 +94,45 @@
     return body;
   }
 
+  function adoptCanonicalIds(result) {
+    if (!result || !result.merged || !result.accountId) return;
+    var oldId = result.localAccountId;
+    var newId = result.accountId;
+    var oldProfileId = result.localProfileId;
+    var newProfileId = result.profileId;
+    if (!oldId || (oldId === newId && oldProfileId === newProfileId)) return;
+    safe(function () {
+      var raw = JSON.parse(localStorage.getItem(ACCOUNT_KEY) || "{}");
+      var accounts = Array.isArray(raw.accounts) ? raw.accounts : [];
+      accounts.forEach(function (account) {
+        if (account && account.accountId === oldId) {
+          account.accountId = newId;
+          if (newProfileId) account.profileId = newProfileId;
+        }
+      });
+      if (raw.activeId === oldId) raw.activeId = newId;
+      if (oldProfileId && newProfileId && raw.viewingProfileId === oldProfileId) raw.viewingProfileId = newProfileId;
+      localStorage.setItem(ACCOUNT_KEY, JSON.stringify(raw));
+      if (window.GolfDaddyAccounts && typeof window.GolfDaddyAccounts.load === "function") window.GolfDaddyAccounts.load();
+      var profileRaw = JSON.parse(localStorage.getItem(PROFILE_KEY) || "{}");
+      var profiles = Array.isArray(profileRaw.profiles) ? profileRaw.profiles : [];
+      profiles.forEach(function (profile) {
+        if (!profile) return;
+        if (profile.accountId === oldId) profile.accountId = newId;
+        if (oldProfileId && newProfileId && profile.id === oldProfileId) profile.id = newProfileId;
+      });
+      if (oldProfileId && newProfileId && profileRaw.activeId === oldProfileId) profileRaw.activeId = newProfileId;
+      localStorage.setItem(PROFILE_KEY, JSON.stringify(profileRaw));
+    });
+  }
+
   function enqueue(payload, error) {
-    var rows = outbox();
+    var status = error && error.status;
+    if (status >= 400 && status < 500) return; // client errors won't succeed on retry
+    var rows = outbox().filter(function (row) {
+      var queued = row && row.payload;
+      return !(queued && queued.action === payload.action && queued.account && payload.account && queued.account.accountId === payload.account.accountId);
+    });
     rows.push({
       id: "sync_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8),
       payload: payload,
@@ -113,6 +150,7 @@
     saveStatus({ state: "checking", label: "Confirming account in Supabase…", error: "" });
     try {
       var result = await post(payload);
+      adoptCanonicalIds(result);
       saveStatus({ state: "synced", label: "Synced", lastSyncedAt: result.checkedAt || new Date().toISOString(), error: "" });
       return result;
     } catch (error) {
@@ -151,13 +189,16 @@
     for (var i = 0; i < rows.length; i += 1) {
       var row = rows[i];
       try {
-        await post(row.payload);
+        var flushedResult = await post(row.payload);
+        adoptCanonicalIds(flushedResult);
         flushed += 1;
       } catch (error) {
+        var errorStatus = error && error.status;
         row.attempts = Number(row.attempts || 0) + 1;
         row.lastError = error && error.message || String(error || "");
         row.updatedAt = new Date().toISOString();
-        remaining.push(row);
+        var permanent = errorStatus >= 400 && errorStatus < 500;
+        if (!permanent && row.attempts < 8) remaining.push(row);
       }
     }
     saveOutbox(remaining);

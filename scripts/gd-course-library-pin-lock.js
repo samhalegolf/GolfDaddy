@@ -1036,6 +1036,12 @@
       greenCenter:type==='green'?position:undefined,
       greenShape:type==='green'?shape:undefined,
       greenSource:type==='green'?source:undefined,
+      resolverVersion:input.resolverVersion||existing?.resolverVersion,
+      resolvedAt:input.resolvedAt||existing?.resolvedAt,
+      resolverSource:input.resolverSource||existing?.resolverSource,
+      resolverConfidence:Number.isFinite(Number(input.resolverConfidence))?Number(input.resolverConfidence):existing?.resolverConfidence,
+      resolverMatchScore:Number.isFinite(Number(input.resolverMatchScore))?Number(input.resolverMatchScore):existing?.resolverMatchScore,
+      resolverEvidence:Array.isArray(input.resolverEvidence)?input.resolverEvidence.slice(0,18):existing?.resolverEvidence,
       createdAt:existing?.createdAt||nowIso(),
       updatedAt:nowIso()
     };
@@ -1517,6 +1523,125 @@
   function parseOsmGuideBundle(payload){
     return {guides:parseOsmHoleGuides(payload),greens:parseOsmGreenShapes(payload)};
   }
+  function automapperExpectedHoleCount(){
+    try{
+      if(typeof scorecard!=='undefined'&&scorecard&&Array.isArray(scorecard.holes)&&scorecard.holes.length)return scorecard.holes.length;
+    }catch(e){}
+    try{
+      if(window.scorecard&&Array.isArray(window.scorecard.holes)&&window.scorecard.holes.length)return window.scorecard.holes.length;
+    }catch(e){}
+    return 18;
+  }
+  function osmFeatureCount(payload,golfType){
+    return (payload?.elements||[]).filter(element=>String(element?.tags?.golf||'').toLowerCase()===golfType).length;
+  }
+  function shouldRunCourseGeometryResolver(course,payload,bundle,opts={}){
+    if(opts.skipGeometryResolver)return false;
+    const resolver=window.GDCourseGeometryResolver;
+    if(!resolver||typeof resolver.shouldRunForAutoMapper!=='function')return false;
+    try{
+      return !!resolver.shouldRunForAutoMapper({
+        course,
+        osmPayload:payload,
+        guideBundle:bundle,
+        expectedHoleCount:automapperExpectedHoleCount()
+      });
+    }catch(e){
+      console.warn('[Clarity Caddie] Course Geometry Resolver gate failed',e);
+      return false;
+    }
+  }
+  function guideFromResolvedHole(resolved,result){
+    const candidate=resolved?.candidate;
+    const points=(candidate?.path||[]).map(toPlain).filter(point=>Number.isFinite(point?.lat)&&Number.isFinite(point?.lng));
+    if(!points.length)return null;
+    const h=validHoleNumber(resolved?.holeNumber);
+    if(!h)return null;
+    const resolver=window.GDCourseGeometryResolver||{};
+    const high=Number(resolver.highConfidence)||.76;
+    return {
+      id:`cgr-${h}-${candidate.candidateId}`,
+      hole:h,
+      par:knownScorecardNumber(resolved.par)||candidate.inferredPar,
+      points,
+      source:result.source||resolver.source||'automapper-course-geometry-resolver',
+      resolverVersion:result.resolverVersion||resolver.resolverVersion||'course-geometry-resolver-v1',
+      resolvedAt:result.resolvedAt||nowIso(),
+      resolverConfidence:Number(resolved.confidence)||0,
+      resolverMatchScore:Number(resolved.matchScore)||0,
+      resolverEvidence:Array.isArray(resolved.evidence)?resolved.evidence.slice(0,18):[],
+      resolverProvisional:Number(resolved.confidence)<high,
+      officialDistanceM:Number(resolved.officialDistanceM)||undefined,
+      greenId:candidate.greenId||''
+    };
+  }
+  function mergeResolvedGeometryGuides(existingGuides,resolvedGuides){
+    const byHole=new Set((existingGuides||[]).map(guide=>validHoleNumber(guide?.hole)).filter(Boolean));
+    const merged=[...(existingGuides||[])];
+    (resolvedGuides||[]).forEach(guide=>{
+      const h=validHoleNumber(guide?.hole);
+      if(!h||byHole.has(h))return;
+      byHole.add(h);
+      merged.push(guide);
+    });
+    return merged.sort((a,b)=>Number(a.hole||0)-Number(b.hole||0));
+  }
+  async function resolveCourseGeometryGuideBundle(course,payload,bundle,opts={}){
+    if(!shouldRunCourseGeometryResolver(course,payload,bundle,opts))return bundle;
+    const resolver=window.GDCourseGeometryResolver;
+    try{
+      const result=await resolver.resolveCourseGeometryForAutoMapper({
+        course,
+        osmPayload:payload,
+        guideBundle:bundle,
+        expectedHoleCount:automapperExpectedHoleCount()
+      });
+      const resolvedGuides=(result?.holes||[])
+        .map(resolved=>guideFromResolvedHole(resolved,result))
+        .filter(Boolean)
+        .filter(guide=>Number(guide.resolverConfidence)>=(Number(resolver.mediumConfidence)||.58));
+      const next={
+        ...bundle,
+        guides:mergeResolvedGeometryGuides(bundle.guides,resolvedGuides),
+        resolver:result
+      };
+      try{
+        window.__gdCourseGeometryResolverLastResult=result;
+        window.dispatchEvent(new CustomEvent('gd:course-geometry-resolved',{detail:{
+          status:result?.status||'failed',
+          confidence:result?.confidence||0,
+          holes:resolvedGuides.length,
+          source:result?.source||resolver.source||'automapper-course-geometry-resolver'
+        }}));
+      }catch(e){}
+      try{
+        if(resolver.debugEnabled&&resolver.debugEnabled()&&typeof resolver.drawDebug==='function')resolver.drawDebug(result);
+      }catch(e){}
+      if(resolvedGuides.length){
+        console.info('[Clarity Caddie] Course Geometry Resolver produced AutoMapper guides',{
+          status:result?.status,
+          confidence:result?.confidence,
+          holes:resolvedGuides.length,
+          greens:osmFeatureCount(payload,'green'),
+          fairways:osmFeatureCount(payload,'fairway')
+        });
+      }
+      return next;
+    }catch(error){
+      console.warn('[Clarity Caddie] Course Geometry Resolver failed',error);
+      return {...bundle,resolver:{
+        courseId:courseId(course),
+        status:'failed',
+        holes:[],
+        unresolvedCandidates:[],
+        unresolvedScorecardHoles:[],
+        analysisBoundary:[],
+        confidence:0,
+        warnings:[error&&error.message||'Course Geometry Resolver failed'],
+        source:'automapper-course-geometry-resolver'
+      }};
+    }
+  }
   function cachedOsmGuideBundle(course){
     return null;
   }
@@ -1536,13 +1661,15 @@
     if(mapperOsmGuideFetch?.cacheKey===cacheKey)return mapperOsmGuideFetch.promise;
     const center=guideCoursePoint(course);
     if(!Number.isFinite(center?.lat)||!Number.isFinite(center?.lng))return {guides:[],greens:[]};
-	    const query=`[out:json][timeout:18];(way(around:1400,${center.lat},${center.lng})["golf"="hole"];relation(around:1400,${center.lat},${center.lng})["golf"="hole"];way(around:1400,${center.lat},${center.lng})["golf"="green"];relation(around:1400,${center.lat},${center.lng})["golf"="green"];);out geom tags;`;
+	    const query=`[out:json][timeout:18];(way(around:1400,${center.lat},${center.lng})["golf"="course"];relation(around:1400,${center.lat},${center.lng})["golf"="course"];way(around:1400,${center.lat},${center.lng})["golf"="hole"];relation(around:1400,${center.lat},${center.lng})["golf"="hole"];way(around:1400,${center.lat},${center.lng})["golf"="green"];relation(around:1400,${center.lat},${center.lng})["golf"="green"];way(around:1400,${center.lat},${center.lng})["golf"="fairway"];relation(around:1400,${center.lat},${center.lng})["golf"="fairway"];way(around:1400,${center.lat},${center.lng})["golf"="tee"];relation(around:1400,${center.lat},${center.lng})["golf"="tee"];way(around:1400,${center.lat},${center.lng})["golf"="bunker"];relation(around:1400,${center.lat},${center.lng})["golf"="bunker"];way(around:1400,${center.lat},${center.lng})["golf"="water_hazard"];relation(around:1400,${center.lat},${center.lng})["golf"="water_hazard"];way(around:1400,${center.lat},${center.lng})["golf"="lateral_water_hazard"];relation(around:1400,${center.lat},${center.lng})["golf"="lateral_water_hazard"];way(around:1400,${center.lat},${center.lng})["natural"="water"];relation(around:1400,${center.lat},${center.lng})["natural"="water"];);out geom tags;`;
     const url='https://overpass-api.de/api/interpreter?data='+encodeURIComponent(query);
     const promise=fetch(url,{headers:{Accept:'application/json'}})
       .then(res=>res.ok?res.json():Promise.reject(new Error(`OSM guide ${res.status}`)))
-      .then(data=>{
-        const bundle=parseOsmGuideBundle(data);
+      .then(async data=>{
+        let bundle=parseOsmGuideBundle(data);
+        bundle=await resolveCourseGeometryGuideBundle(course,data,bundle,opts);
         mapperOsmGuideMemory={cacheKey,guides:bundle.guides,greens:bundle.greens};
+        if(bundle.resolver)mapperOsmGuideMemory.resolver=bundle.resolver;
         if(!opts.fresh)try{localStorage.setItem(cacheKey,JSON.stringify({savedAt:Date.now(),guides:bundle.guides,greens:bundle.greens}));}catch(e){}
         return mapperOsmGuideMemory;
       })
@@ -2701,6 +2828,18 @@
 	    });
 	    return Array.from(byHole.values()).sort((a,b)=>Number(a.hole)-Number(b.hole));
 	  }
+	  function resolverObjectPatchForGuide(guide,source){
+	    if(!guide?.resolverVersion)return {};
+	    return {
+	      source:guide.source||source||'automapper-course-geometry-resolver',
+	      resolverVersion:guide.resolverVersion,
+	      resolvedAt:guide.resolvedAt||nowIso(),
+	      resolverSource:guide.source||'automapper-course-geometry-resolver',
+	      resolverConfidence:Number(guide.resolverConfidence)||0,
+	      resolverMatchScore:Number(guide.resolverMatchScore)||0,
+	      resolverEvidence:Array.isArray(guide.resolverEvidence)?guide.resolverEvidence.slice(0,18):[]
+	    };
+	  }
 	  function saveOsmAutoHole(guide,greens,course=loadUserCourseData(),opts={}){
 	    const h=validHoleNumber(guide?.hole);
 	    const pts=(guide?.points||[]).map(toPlain).filter(Boolean);
@@ -2723,8 +2862,12 @@
 	    const greenCenter=match?.green?.center||greenEnd;
 	    const greenShape=match?.green?.shape||fallbackGreenShape(greenCenter,16,40).map(toPlain).filter(Boolean);
 	    let saved=0;
+	    const resolverPatch=resolverObjectPatchForGuide(guide,guide?.source);
+	    const resolverConfirmed=!guide?.resolverProvisional;
+	    const countCommittedSave=object=>{if(object&&(resolverConfirmed||!guide?.resolverVersion))saved++;};
 	    if(!state.green&&greenCenter&&greenShape.length>=3){
-		      if(saveCourseObject({
+		      countCommittedSave(saveCourseObject({
+		        ...resolverPatch,
 		        userId:uid,
 		        courseId:cid,
 		        courseName:name,
@@ -2733,18 +2876,18 @@
 	        position:greenCenter,
 	        shape:greenShape,
 	        greenShape,
-	        source:match?.green?'osm_auto_green_polygon':'osm_auto_green_estimate',
+	        source:resolverPatch.source||(match?.green?'osm_auto_green_polygon':'osm_auto_green_estimate'),
 	        holeNumber:h,
-	        confirmed:true,
+	        confirmed:resolverConfirmed,
 	        maxDedupeDistanceM:4
-	      }))saved++;
+	      }));
 		    }
 		    if(!state.tee&&tee){
-		      if(saveCourseObject({userId:uid,courseId:cid,courseName:name,course:selectedCourse,type:'tee',position:tee,source:'osm_auto_tee',holeNumber:h,confirmed:true,maxDedupeDistanceM:4}))saved++;
+		      countCommittedSave(saveCourseObject({...resolverPatch,userId:uid,courseId:cid,courseName:name,course:selectedCourse,type:'tee',position:tee,source:resolverPatch.source||'osm_auto_tee',holeNumber:h,confirmed:resolverConfirmed,maxDedupeDistanceM:4}));
 		    }
 		    if(!state.fairway){
 		      fairwaySamplesForGuide(ordered).forEach((point,index)=>{
-		        if(saveCourseObject({userId:uid,courseId:cid,courseName:name,course:selectedCourse,type:'fairway',position:point,source:index?'osm_auto_fairway_bend':'osm_auto_fairway',holeNumber:h,confirmed:true,maxDedupeDistanceM:4}))saved++;
+		        countCommittedSave(saveCourseObject({...resolverPatch,userId:uid,courseId:cid,courseName:name,course:selectedCourse,type:'fairway',position:point,source:resolverPatch.source||(index?'osm_auto_fairway_bend':'osm_auto_fairway'),holeNumber:h,confirmed:resolverConfirmed,maxDedupeDistanceM:4}));
 		      });
 		    }
 	    return {saved,greenPolygon:!!match?.green,fallback:!match?.green};
