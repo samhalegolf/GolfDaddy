@@ -1,0 +1,190 @@
+const assert = require("assert");
+const fs = require("fs");
+const path = require("path");
+const vm = require("vm");
+
+function storage(initial = {}) {
+  const data = Object.assign({}, initial);
+  return {
+    data,
+    getItem(key) { return Object.prototype.hasOwnProperty.call(data, key) ? data[key] : null; },
+    setItem(key, value) { data[key] = String(value); },
+    removeItem(key) { delete data[key]; }
+  };
+}
+
+function classList() {
+  const set = new Set();
+  return {
+    add(...items) { items.forEach((item) => set.add(item)); },
+    remove(...items) { items.forEach((item) => set.delete(item)); },
+    toggle(item, force) {
+      if (force === undefined ? !set.has(item) : force) set.add(item);
+      else set.delete(item);
+    },
+    contains(item) { return set.has(item); }
+  };
+}
+
+function loadDebug(options = {}) {
+  const code = fs.readFileSync(path.join(__dirname, "..", "scripts", "gd-course-mapping-debug.js"), "utf8");
+  const sessionStorage = options.sessionStorage || storage();
+  let fallbackCopied = false;
+  let alertCalled = false;
+  const body = {
+    dataset: { gdPermission: options.role || "admin" },
+    classList: classList(),
+    appendChild(node) { node.parentNode = body; },
+    removeChild(node) { node.parentNode = null; }
+  };
+  const document = {
+    readyState: "complete",
+    body,
+    addEventListener() {},
+    getElementById() { return null; },
+    createElement() {
+      return {
+        value: "",
+        style: {},
+        setAttribute() {},
+        focus() {},
+        select() {}
+      };
+    },
+    execCommand(command) {
+      fallbackCopied = command === "copy";
+      return fallbackCopied;
+    }
+  };
+  const window = {
+    document,
+    sessionStorage,
+    navigator: options.clipboard === "ok" ? { clipboard: { writeText: async () => true } } :
+      options.clipboard === "fail" ? { clipboard: { writeText: async () => { throw new Error("denied"); } } } : {},
+    console,
+    CustomEvent: function CustomEvent(type, init) { this.type = type; this.detail = init && init.detail; },
+    addEventListener() {},
+    dispatchEvent() {},
+    setTimeout(fn) { fn(); return 1; },
+    clearTimeout() {},
+    open() { return null; },
+    alert() { alertCalled = true; }
+  };
+  const context = {
+    window,
+    document,
+    navigator: window.navigator,
+    sessionStorage,
+    console,
+    setTimeout: window.setTimeout,
+    clearTimeout: window.clearTimeout,
+    alert: window.alert
+  };
+  vm.runInNewContext(code, context, { filename: "gd-course-mapping-debug.js" });
+  return {
+    api: context.window.GDCourseMappingDebug,
+    sessionStorage,
+    fallbackCopied: () => fallbackCopied,
+    alertCalled: () => alertCalled
+  };
+}
+
+function pointArray(count) {
+  return Array.from({ length: count }, (_, index) => ({ lat: -36.9 + index / 1000, lng: 174.7 + index / 1000 }));
+}
+
+async function main() {
+  const env = loadDebug({ role: "admin", clipboard: "fail" });
+  const api = env.api;
+  assert(api, "debug API exports");
+
+  const runA = api.startRun({ courseId: "cromwell", courseName: "Cromwell Golf Club" });
+  const runB = api.startRun({ courseId: "cromwell", courseName: "Cromwell Golf Club" });
+  assert.notStrictEqual(runA, runB, "retrying the same course creates a new run ID");
+
+  api.recordEvent(runB, { timestamp: "2026-07-14T11:26:04.000Z", source: "automapper", phase: "started", event: "automapper-started", summary: "AutoMapper started" });
+  api.recordEvent(runB, { timestamp: "2026-07-14T11:26:02.000Z", source: "course-loader", phase: "started", event: "course-loader-started", summary: "Course loader started" });
+  api.recordEvent(runB, { timestamp: "2026-07-14T11:26:03.000Z", source: "saved-map", phase: "skipped", event: "saved-map-not-found", summary: "Saved map not found", details: { requestedNextTool: "automapper" } });
+  const firing = api.copyFiringList(runB);
+  assert(firing.indexOf("Course loader started") < firing.indexOf("Saved map not found"), "events remain chronological");
+  assert(firing.indexOf("Saved map not found") < firing.indexOf("AutoMapper started"), "AutoMapper appears in combined firing list");
+
+  api.recordEvent(runB, { source: "automapper", phase: "progress", event: "automapper-incomplete-numbering", summary: "AutoMapper returned incomplete numbering", details: { requestedNextTool: "native-resolver", inputGeometryCount: 94, token: "secret-token" } });
+  api.recordEvent(runB, { source: "native-resolver", phase: "started", event: "native-resolver-started", summary: "Native resolver started" });
+  api.recordEvent(runB, { source: "native-resolver", phase: "fallback", event: "native-resolver-insufficient", summary: "Native resolver insufficient confidence", confidence: 0.68, details: { requestedNextTool: "manual-fallback", shape: pointArray(20), imageDataUrl: "data:image/png;base64,AAAA" } });
+  api.recordEvent(runB, { source: "manual-fallback", phase: "fallback", event: "manual-fallback-opened", summary: "Manual fallback opened" });
+  api.attachCheckpoint(runB, { stage: "fairway-lines", createdAt: "2026-07-14T11:26:06.000Z", imageDataUrl: "data:image/svg+xml;base64,AAAA", metadata: { candidateCount: 18 } });
+
+  assert(api.copyFiringList(runB).includes("Native resolver"), "native resolver events appear in combined firing list");
+  assert(api.copyFiringList(runB).includes("Manual fallback"), "manual fallback events appear in combined firing list");
+
+  const autoText = api.copyAutoMapperFeedback(runB);
+  assert(autoText.includes("AUTOMAPPER FEEDBACK"), "AutoMapper copy has AutoMapper header");
+  assert(!autoText.includes("NATIVE RESOLVER FEEDBACK"), "AutoMapper copy contains AutoMapper data only");
+  assert(!autoText.includes("secret-token"), "AutoMapper copy excludes tokens");
+
+  const resolverText = api.copyResolverFeedback(runB);
+  assert(resolverText.includes("NATIVE RESOLVER FEEDBACK"), "resolver copy has resolver header");
+  assert(!resolverText.includes("AUTOMAPPER FEEDBACK"), "resolver copy contains resolver data only");
+
+  const full = api.copyFullReport(runB);
+  assert(full.includes("FIRING LIST"), "full report combines firing list");
+  assert(full.includes("AUTOMAPPER FEEDBACK"), "full report combines AutoMapper feedback");
+  assert(full.includes("NATIVE RESOLVER FEEDBACK"), "full report combines resolver feedback");
+  assert(full.includes("CHECKPOINTS"), "full report combines checkpoint availability");
+  assert(!full.includes("data:image"), "normal report excludes image data URLs");
+  assert(!full.includes("\"lat\""), "normal report excludes giant raw geometry arrays");
+
+  const missingRun = api.startRun({ courseId: "missing", courseName: "Missing Handoff" });
+  api.recordEvent(missingRun, { source: "automapper", phase: "progress", summary: "AutoMapper requested native", details: { requestedNextTool: "native-resolver" } });
+  const missingFull = api.copyFullReport(missingRun);
+  assert(missingFull.includes("Handoff warning"), "missing handoff is reported");
+  assert(!missingFull.includes("repair"), "missing handoff is not automatically repaired");
+
+  const unusual = api.startRun({ courseId: "odd", courseName: "Odd Order" });
+  api.recordEvent(unusual, { source: "native-resolver", phase: "started", summary: "Native first" });
+  api.recordEvent(unusual, { source: "automapper", phase: "started", summary: "AutoMapper second" });
+  api.recordEvent(unusual, { source: "manual-fallback", phase: "fallback", summary: "Manual third" });
+  assert(api.copyFullReport(unusual).includes("Observed: Native resolver -> AutoMapper -> Manual fallback"), "unusual firing order is displayed accurately");
+
+  const stale = api.startRun({ courseId: "stale", courseName: "Stale Run" });
+  const active = api.startRun({ courseId: "active", courseName: "Active Run" });
+  api.recordEvent(stale, { source: "course-loader", phase: "superseded", summary: "Old run superseded" });
+  const activeRun = api.getRun(active);
+  assert(!activeRun.events.some((event) => event.summary === "Old run superseded"), "stale run events cannot attach to the active run accidentally");
+
+  for (let i = 0; i < 14; i += 1) api.startRun({ courseId: `bounded-${i}`, courseName: `Bounded ${i}` });
+  assert(api.getRecentRuns().length <= 10, "recent-run history is bounded");
+
+  const copyOk = await api.copyDebugText("copy me");
+  assert.strictEqual(copyOk, true, "clipboard fallback works when navigator.clipboard fails");
+  assert.strictEqual(env.fallbackCopied(), true, "temporary textarea fallback was used");
+  assert.strictEqual(env.alertCalled(), false, "copy success state does not use alert");
+
+  const adminEnv = loadDebug({ role: "admin" });
+  const devEnv = loadDebug({ role: "developer" });
+  const playerEnv = loadDebug({ role: "player" });
+  assert.strictEqual(adminEnv.api.canViewDebug(), true, "admin permission can view debug");
+  assert.strictEqual(devEnv.api.canViewDebug(), true, "developer permission can view debug");
+  assert.strictEqual(playerEnv.api.canViewDebug(), false, "normal players cannot view debug");
+
+  const restoredStorage = env.sessionStorage;
+  const restored = loadDebug({ role: "admin", sessionStorage: restoredStorage });
+  const restoredRaw = restored.api.copyRawJson(runB);
+  assert(!restoredRaw.includes("data:image/svg"), "page refresh restores only lightweight checkpoint metadata");
+
+  const beforeLocalKeys = Object.keys(env.sessionStorage.data).length;
+  api.recordEvent(runB, { source: "persistence", phase: "skipped", summary: "No production course data changed", details: { existingTrustedMap: true } });
+  assert(Object.keys(env.sessionStorage.data).length >= beforeLocalKeys, "diagnostics use debug session mirror only");
+  assert.strictEqual(typeof api.runNextTool, "undefined", "diagnostics do not control tool invocation");
+
+  api.recordEvent(runB, { source: "manual-fallback", phase: "cancelled", summary: "Manual fallback cancelled" });
+  assert(api.getRun(runB).status === "cancelled", "cancelled runs are labelled correctly");
+
+  console.log("course-mapping-debug tests passed");
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

@@ -2019,7 +2019,7 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
     .gdLmAdmin h3{margin:0 0 4px;font-size:16px;letter-spacing:-.02em}
     .gdLmAdmin p{margin:0 0 10px;color:rgba(255,255,255,.6);font-size:12px;font-weight:700;line-height:1.35}
     .gdCoursePlayDebug{display:none;margin:12px 0 14px;padding:12px;border-radius:20px;background:linear-gradient(180deg,rgba(31,211,109,.10),rgba(255,255,255,.04));border:1px solid rgba(31,211,109,.18)}
-    body[data-gd-permission="admin"] .gdCoursePlayDebug,body.gdCoursePlayDebugOn .gdCoursePlayDebug{display:block}
+    body[data-gd-permission="admin"] .gdCoursePlayDebug,body[data-gd-permission="developer"] .gdCoursePlayDebug,body.gdCoursePlayDebugOn .gdCoursePlayDebug,body.gdCourseMappingDebugOn .gdCourseMappingDebug{display:block}
     .gdCoursePlayDebugHead{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:10px}
     .gdCoursePlayDebugHead h3{margin:0;font-size:16px;letter-spacing:-.02em}
     .gdCoursePlayDebugHead p{margin:3px 0 0;color:rgba(255,255,255,.58);font-size:11px;font-weight:750;line-height:1.35}
@@ -2040,6 +2040,25 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
     .gdCoursePlayDebugEvent{padding:5px 0;border-bottom:1px solid rgba(255,255,255,.05)}
     .gdCoursePlayDebugEvent:last-child{border-bottom:0}
     .gdCoursePlayDebugEmpty{padding:9px;border-radius:12px;background:rgba(0,0,0,.16);color:rgba(255,255,255,.58);font-size:11px;font-weight:850}
+    .gdCourseMappingDebug{display:none;background:linear-gradient(180deg,rgba(96,165,250,.11),rgba(255,255,255,.04));border-color:rgba(96,165,250,.20)}
+    .gdCourseMappingToolbar{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px;align-items:center;margin:9px 0 10px}
+    .gdCourseMappingToolbar select{min-width:0;width:100%;box-sizing:border-box;border:1px solid rgba(255,255,255,.10);border-radius:14px;background:rgba(0,0,0,.22);color:#fff;padding:9px 10px;font-size:11px;font-weight:850}
+    .gdCourseMappingToolbar #gdCourseMappingCopyStatus{min-width:64px;color:rgba(255,255,255,.62);font-size:11px;font-weight:950;text-align:right}
+    .gdCourseMappingToolbar #gdCourseMappingCopyStatus.ok{color:#73ffae}.gdCourseMappingToolbar #gdCourseMappingCopyStatus.bad{color:#ff9d9d}
+    .gdCourseMappingTabs{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 10px}
+    .gdCourseMappingTabs button{border-radius:999px;padding:7px 10px;background:rgba(255,255,255,.08);color:rgba(255,255,255,.72);font-size:11px;font-weight:950}
+    .gdCourseMappingTabs button.active{background:rgba(96,165,250,.24);color:#fff}
+    .gdCourseMappingObserved{margin:0 0 8px;padding:8px;border-radius:12px;background:rgba(96,165,250,.10);border:1px solid rgba(96,165,250,.16);color:rgba(255,255,255,.76);font-size:11px;font-weight:850}
+    .gdCourseMappingTable{min-width:760px}
+    .gdCourseMappingTable details{margin-top:5px}.gdCourseMappingTable summary{cursor:pointer;color:#93c5fd;font-weight:950}.gdCourseMappingTable pre,.gdCourseMappingRaw{white-space:pre-wrap;overflow:auto;max-height:280px;margin:6px 0 0;padding:8px;border-radius:10px;background:rgba(0,0,0,.22);border:1px solid rgba(255,255,255,.07);color:rgba(255,255,255,.76);font:800 10px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace}
+    .gdCourseMappingSection{margin-top:10px}.gdCourseMappingSection h4{margin:0 0 6px;font-size:12px;color:rgba(255,255,255,.72);text-transform:uppercase;letter-spacing:.06em}
+    .gdCourseMappingHandoffRow{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;padding:7px 8px;border-radius:10px;background:rgba(0,0,0,.17);border:1px solid rgba(255,255,255,.06);font-size:11px;font-weight:850;color:rgba(255,255,255,.74)}
+    .gdCourseMappingHandoffRow+ .gdCourseMappingHandoffRow{margin-top:5px}.gdCourseMappingHandoffRow strong.ok{color:#73ffae}.gdCourseMappingHandoffRow strong.warn{color:#ffd287}
+    .gdCourseMappingWarnings p{margin:6px 0 0;padding:8px;border-radius:10px;background:rgba(255,210,135,.10);border:1px solid rgba(255,210,135,.16);color:#ffd287;font-size:11px;font-weight:850}
+    .gdCourseMappingEventList{display:grid;gap:7px}.gdCourseMappingEvent{padding:9px;border-radius:12px;background:rgba(0,0,0,.18);border:1px solid rgba(255,255,255,.07)}.gdCourseMappingEvent strong{display:block;font-size:12px;color:#fff}.gdCourseMappingEvent span{display:block;margin-top:3px;color:rgba(255,255,255,.56);font-size:10px;font-weight:900;text-transform:uppercase}
+    .gdCourseMappingCheckpoints{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px}.gdCourseMappingCheckpoint{display:grid;gap:7px;padding:9px;border-radius:12px;background:rgba(0,0,0,.18);border:1px solid rgba(255,255,255,.07)}.gdCourseMappingCheckpoint strong{display:block;color:#fff;font-size:12px}.gdCourseMappingCheckpoint span{display:block;color:rgba(255,255,255,.56);font-size:10px;font-weight:850}.gdCourseMappingCheckpoint img{display:block;width:100%;height:auto;border-radius:8px;border:1px solid rgba(255,255,255,.08);background:#07110c}.gdCourseMappingCheckpoint summary{cursor:pointer;color:#93c5fd;font-size:11px;font-weight:950}.gdCourseMappingCheckpoint button{justify-self:start;border-radius:999px;padding:7px 10px;background:rgba(255,255,255,.09);font-size:11px;font-weight:950}
+    .gdCourseMappingCheckpoint.missing{border-style:dashed;color:rgba(255,255,255,.56)}
+    @media(max-width:720px){.gdCourseMappingToolbar{grid-template-columns:1fr}.gdCourseMappingToolbar .gdCoursePlayDebugActions{justify-content:flex-start}.gdCourseMappingToolbar #gdCourseMappingCopyStatus{text-align:left}}
     .gdAdminDatabase{display:none;margin:12px 0 14px;padding:12px;border-radius:20px;background:linear-gradient(180deg,rgba(215,176,107,.12),rgba(255,255,255,.04));border:1px solid rgba(215,176,107,.20)}
     body[data-gd-permission="admin"] .gdAdminDatabase{display:block}
     .gdAdminDatabaseHead{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:10px}
@@ -6021,6 +6040,7 @@ body[data-gd-permission="admin"] #gdV62Home .gdHomeAdminSettings{display:inline-
 <div id="gdPermissionCard" class="gdPermissionCard"></div>
 <div class="gdAdminDatabase" id="gdAdminDatabasePanel"><div class="gdAdminDatabaseHead"><div><h3>Database</h3><p>Course Database is a read-only admin view of local Course Play Pipeline records and DB-ready payloads.</p></div><div class="gdAdminDatabaseActions"><button type="button" onclick="gdRenderAdminCourseDatabase()">Refresh</button></div></div><div class="gdAdminDatabaseFilters"><input id="gdAdminCourseDbSearch" type="search" placeholder="Search course name or key" oninput="gdRenderAdminCourseDatabase()"><select id="gdAdminCourseDbSyncFilter" onchange="gdRenderAdminCourseDatabase()"><option value="">All sync states</option></select><select id="gdAdminCourseDbStatusFilter" onchange="gdRenderAdminCourseDatabase()"><option value="">All statuses</option></select></div><div id="gdAdminCourseDbSummary" class="gdAdminDatabaseSummary"></div><div id="gdAdminCourseDbList" class="gdAdminCourseList"></div><div id="gdAdminCourseDbDetail" class="gdAdminCourseDetail"></div></div>
 <div class="gdCoursePlayDebug" id="gdCoursePlayDebugPanel"><div class="gdCoursePlayDebugHead"><div><h3>Course Play Pipeline</h3><p>Admin-only persistence/frame visibility. It reads local pipeline, frame-index, manifest, and sync-queue state.</p></div><div class="gdCoursePlayDebugActions"><button type="button" onclick="gdRenderCoursePlayPipelineDebug()">Refresh</button><button type="button" onclick="gdClearCoursePlayPipelineDebug()">Clear log</button></div></div><div id="gdCoursePlayDebugSummary" class="gdCoursePlayDebugSummary"></div><div id="gdCoursePlayDebugTable"></div><div id="gdCoursePlayDebugTimeline" class="gdCoursePlayDebugTimeline"></div></div>
+<div class="gdCoursePlayDebug gdCourseMappingDebug" id="gdCourseMappingDebugPanel"></div>
 <details class="gdDeveloperSettings" id="gdDeveloperSettings"><summary><span>Developer Settings</span><small>Safe values only · formulas locked</small></summary><div class="gdDeveloperBody">
 <div class="gdLmAdmin"><h3>Launch Monitor Intake Test</h3><p>Admin-only test lane for captured practice data. Upload plain text to check the hidden cluster and face/path corroboration logic.</p><div class="gdLmActions"><button class="gdUploadFileButton" id="gdLmUploadLabel" type="button" onclick="gdPickLaunchMonitorFile()">Upload text file</button><button type="button" id="gdLmClearDemoBtn" onclick="gdClearLaunchMonitorDemo()">Clear launch data</button></div><input type="file" id="gdLmUploadInput" accept=".txt,.csv,.json,text/plain,text/csv,application/json"><div class="gdLmResult" id="gdLaunchMonitorAdminResult"></div></div>
 <div id="devTuningControls"></div>
@@ -6764,6 +6784,7 @@ function renderDevPanel(){
   gdRenderAdminVisualSettings();
   gdRenderAdminCourseDatabase();
   gdRenderCoursePlayPipelineDebug();
+  try{window.GDCourseMappingDebug?.renderAdminPanel?.();}catch(e){}
   root.innerHTML="";
   const groups=Object.keys(DEV_DEFS).sort((a,b)=>DEV_DEFS[a].label.localeCompare(DEV_DEFS[b].label));
   if(!groups.includes(activeDevGroup))activeDevGroup=groups[0];
@@ -6788,7 +6809,7 @@ function renderDevPanel(){
     input.onchange=()=>{let v=Number(input.value);const f=DEV_FIELDS[input.dataset.devPath];if(!Number.isFinite(v))v=devDefault(input.dataset.devPath);v=Math.max(f.min,Math.min(f.max,v));setDev(input.dataset.devPath,v);};
   });
 }
-function openDeveloperPanel(){gdRenderPermissionsAdmin();renderDevPanel();gdRenderAdminCourseDatabase();gdRenderCoursePlayPipelineDebug();openPanel("developerPanel");}
+function openDeveloperPanel(){gdRenderPermissionsAdmin();renderDevPanel();gdRenderAdminCourseDatabase();gdRenderCoursePlayPipelineDebug();try{window.GDCourseMappingDebug?.renderAdminPanel?.();}catch(e){}openPanel("developerPanel");}
 window.GolfDaddyDev={defaults:DEV_DEFAULTS,settings:devSettings,get:dev,set:setDev,reset:resetDevSettings,render:renderDevPanel};
 window.gdPreLockBlackoutFrameEnabled=gdPreLockBlackoutFrameEnabled;
 window.gdTogglePreLockBlackoutFrame=gdTogglePreLockBlackoutFrame;
@@ -6802,8 +6823,9 @@ window.gdRenderCoursePlayMonitor=gdRenderCoursePlayMonitor;
 window.gdToggleCoursePlayMonitorCollapsed=gdToggleCoursePlayMonitorCollapsed;
 try{document.body.classList.toggle("gdCoursePlayDebugOn",gdCoursePlayDebugEnabled());}catch(e){}
 gdRenderCoursePlayMonitor();
-window.addEventListener("gd-course-play-debug-event",()=>{if(document.getElementById("developerPanel")?.classList.contains("open")){gdRenderAdminCourseDatabase();gdRenderCoursePlayPipelineDebug();}gdRenderCoursePlayMonitor();});
-setInterval(()=>{if(document.getElementById("developerPanel")?.classList.contains("open")){gdRenderAdminCourseDatabase();gdRenderCoursePlayPipelineDebug();}gdRenderCoursePlayMonitor();},2200);
+window.addEventListener("gd-course-play-debug-event",()=>{if(document.getElementById("developerPanel")?.classList.contains("open")){gdRenderAdminCourseDatabase();gdRenderCoursePlayPipelineDebug();try{window.GDCourseMappingDebug?.renderAdminPanel?.();}catch(e){}}gdRenderCoursePlayMonitor();});
+window.addEventListener("gd-course-mapping-debug-updated",()=>{if(document.getElementById("developerPanel")?.classList.contains("open"))try{window.GDCourseMappingDebug?.renderAdminPanel?.();}catch(e){}});
+setInterval(()=>{if(document.getElementById("developerPanel")?.classList.contains("open")){gdRenderAdminCourseDatabase();gdRenderCoursePlayPipelineDebug();try{window.GDCourseMappingDebug?.renderAdminPanel?.();}catch(e){}}gdRenderCoursePlayMonitor();},2200);
 
 function gdLmMetric(rawLabel,candidateMetric,value,unit="m",confidence=.84){
   return {rawLabel,candidateMetric,rawValue:String(value),value,unit,confidence};
@@ -35666,6 +35688,7 @@ function gdWireManualGpsPlayButton(){
 <link rel="stylesheet" href="styles/gd-course-library.css?v=practice-course-ui-20260606">
 <link rel="stylesheet" href="styles/gd-arcade-mode.css?v=arcade-wiring-20260607">
 <script src="scripts/gd-windross-seed.js?v=windross-map-seed-20260525"></script>
+<script src="scripts/gd-course-mapping-debug.js?v=course-mapping-debug-20260714"></script>
 <script src="scripts/gd-course-geometry-resolver.js?v=course-geometry-resolver-20260714"></script>
 <script src="scripts/gd-course-library-pin-lock.js?v=gps-course-resolver-20260713"></script>
 <script src="scripts/gd-course-play-pipeline.js?v=course-play-pipeline-001"></script>

@@ -34,6 +34,30 @@
     return "cgr-" + String(courseId || "course").replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase().slice(0, 36) + "-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
   }
 
+  function mappingDebug() {
+    return window.GDCourseMappingDebug && typeof window.GDCourseMappingDebug.recordEvent === "function" ? window.GDCourseMappingDebug : null;
+  }
+
+  function recordMappingDebug(runId, event) {
+    try {
+      var api = mappingDebug();
+      if (!api) return null;
+      return api.recordEvent(runId, event);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function attachMappingCheckpoint(runId, checkpoint) {
+    try {
+      var api = mappingDebug();
+      if (!api || typeof api.attachCheckpoint !== "function") return null;
+      return api.attachCheckpoint(runId, checkpoint);
+    } catch (e) {
+      return null;
+    }
+  }
+
   function escapeHtml(value) {
     return String(value == null ? "" : value).replace(/[&<>"']/g, function (ch) {
       return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch];
@@ -1144,6 +1168,46 @@
     };
   }
 
+  function resolverDebugDetails(result) {
+    var feedback = result.feedback || {};
+    var geometry = feedback.geometry || {};
+    var distance = feedback.distance || {};
+    var assignment = feedback.assignment || {};
+    var debug = result.debugEvidence || {};
+    var checkpoints = result.checkpoints || [];
+    return {
+      resolverRunId: result.resolverRunId,
+      status: result.status,
+      analysisBoundaryPoints: Array.isArray(result.analysisBoundary) ? result.analysisBoundary.length : 0,
+      osmFeaturesReceived: geometry.osmFeatures || debug.osmFeatureCount || 0,
+      greenCandidates: geometry.greenCandidates || 0,
+      acceptedGreens: geometry.acceptedGreens || 0,
+      rejectedGreens: geometry.rejectedGreens || 0,
+      fairwayGroups: geometry.fairwayCorridors || 0,
+      pathCandidates: geometry.candidatePaths || 0,
+      scorecardHoleCount: assignment.scorecardHoles || 0,
+      measuredDistanceRange: distance.measuredRange || null,
+      scorecardDistanceRange: distance.scorecardRange || null,
+      globalDistanceScale: distance.globalScale || 1,
+      rankAgreement: distance.rankAgreement || "",
+      resolvedHoles: assignment.resolvedHoles || 0,
+      unresolvedHoles: assignment.unresolvedHoles || [],
+      tieBreakersUsed: feedback.tieBreakers || {},
+      confidence: result.confidence || 0,
+      finalOutcome: result.status,
+      requestedNextTool: result.status === "resolved" ? "" : "manual-fallback",
+      fallbackReason: result.status === "resolved" ? "" : "Resolver did not reach trusted assignment confidence.",
+      checkpointAvailability: checkpoints.map(function (checkpoint) {
+        return {
+          stage: checkpoint.stage,
+          createdAt: checkpoint.createdAt,
+          metadata: checkpoint.metadata || {}
+        };
+      }),
+      warnings: result.warnings || []
+    };
+  }
+
   async function resolveCourseGeometryForAutoMapper(input) {
     input = input || {};
     var payload = input.osmPayload || {};
@@ -1151,6 +1215,25 @@
     var course = input.course || {};
     var courseId = String(course.courseId || course.id || input.courseId || course.name || course.courseName || "course");
     var resolverRunId = makeRunId(courseId);
+    var mappingRunId = String(input.debugRunId || input.mappingRunId || "");
+    var debugStartedAt = Date.now();
+    if (!mappingRunId && mappingDebug() && typeof mappingDebug().getOrStartRun === "function") {
+      mappingRunId = mappingDebug().getOrStartRun({ course: course, courseId: courseId, courseName: course.courseName || course.name || courseId });
+    }
+    if (!input.debugSuppressLifecycle) {
+      recordMappingDebug(mappingRunId, {
+        source: "native-resolver",
+        phase: "started",
+        event: "native-resolver-started",
+        summary: "Native resolver started",
+        details: {
+          invokedBy: input.debugInvokedBy || "direct",
+          osmFeatureCount: elements.length,
+          expectedHoleCount: input.expectedHoleCount || "",
+          eligibilityReason: input.debugEligibilityReason || "direct resolver call"
+        }
+      });
+    }
     activeRunId = resolverRunId;
     var warnings = [];
     var analysisBoundary = deriveAnalysisBoundary(input, elements);
@@ -1166,6 +1249,9 @@
     var assignedIds = {};
     match.assignments.forEach(function (assignment) { assignedIds[assignment.candidate.candidateId] = true; });
     var checkpoints = buildCheckpoints(input, resolverRunId, courseId, analysisBoundary, greenResult, candidates, match);
+    checkpoints.forEach(function (checkpoint) {
+      attachMappingCheckpoint(mappingRunId, checkpoint);
+    });
     var result = {
       courseId: courseId,
       resolverRunId: resolverRunId,
@@ -1201,6 +1287,25 @@
       result.status = "failed";
       result.cancelled = true;
       result.warnings = result.warnings.concat("Resolver run was superseded before completion.");
+      recordMappingDebug(mappingRunId, {
+        source: "native-resolver",
+        phase: "superseded",
+        event: "native-resolver-superseded",
+        summary: "Native resolver run was superseded",
+        details: resolverDebugDetails(result),
+        durationMs: Date.now() - debugStartedAt,
+        confidence: result.confidence || 0
+      });
+    } else if (!input.debugSuppressLifecycle) {
+      recordMappingDebug(mappingRunId, {
+        source: "native-resolver",
+        phase: result.status === "resolved" ? "completed" : "fallback",
+        event: "native-resolver-" + result.status,
+        summary: result.status === "resolved" ? "Native resolver completed" : "Native resolver requested manual fallback",
+        details: resolverDebugDetails(result),
+        durationMs: Date.now() - debugStartedAt,
+        confidence: result.confidence || 0
+      });
     }
     publishResult(result);
     return result;
@@ -1235,7 +1340,11 @@
       window.__gdCourseGeometryResolverLastResult = result;
       window.dispatchEvent(new CustomEvent("gd:native-course-resolver-updated", { detail: result }));
     } catch (e) { /* no-op */ }
-    if (debugEnabled()) renderFeedbackWindow(result);
+    try {
+      if (debugEnabled() && window.GDCourseMappingDebug && typeof window.GDCourseMappingDebug.renderAdminPanel === "function") {
+        window.GDCourseMappingDebug.renderAdminPanel();
+      }
+    } catch (e) { /* no-op */ }
   }
 
   function fmtPercent(value) {
