@@ -118,14 +118,14 @@ async function main() {
 
   api.recordEvent(runB, { timestamp: "2026-07-14T11:26:04.000Z", source: "automapper", phase: "started", event: "automapper-started", summary: "AutoMapper started" });
   api.recordEvent(runB, { timestamp: "2026-07-14T11:26:02.000Z", source: "course-loader", phase: "started", event: "course-loader-started", summary: "Course loader started" });
-  api.recordEvent(runB, { timestamp: "2026-07-14T11:26:03.000Z", source: "saved-map", phase: "skipped", event: "saved-map-not-found", summary: "Saved map not found", details: { requestedNextTool: "automapper" } });
+  api.recordEvent(runB, { timestamp: "2026-07-14T11:26:03.000Z", source: "saved-map", phase: "skipped", event: "saved-map-not-found", summary: "Saved map not found" });
   const firing = api.copyFiringList(runB);
   assert(firing.indexOf("Course loader started") < firing.indexOf("Saved map not found"), "events remain chronological");
   assert(firing.indexOf("Saved map not found") < firing.indexOf("AutoMapper started"), "AutoMapper appears in combined firing list");
 
-  api.recordEvent(runB, { source: "automapper", phase: "progress", event: "automapper-incomplete-numbering", summary: "AutoMapper returned incomplete numbering", details: { requestedNextTool: "native-resolver", inputGeometryCount: 94, token: "secret-token" } });
+  api.recordEvent(runB, { source: "automapper", phase: "failed", event: "automapper-failed", summary: "AutoMapper failed", details: { inputGeometryCount: 94, token: "secret-token" } });
   api.recordEvent(runB, { source: "native-resolver", phase: "started", event: "native-resolver-started", summary: "Native resolver started" });
-  api.recordEvent(runB, { source: "native-resolver", phase: "fallback", event: "native-resolver-insufficient", summary: "Native resolver insufficient confidence", confidence: 0.68, details: { requestedNextTool: "manual-fallback", shape: pointArray(20), imageDataUrl: "data:image/png;base64,AAAA" } });
+  api.recordEvent(runB, { source: "native-resolver", phase: "failed", event: "native-resolver-failed", summary: "Native resolver failed", confidence: 0.68, details: { shape: pointArray(20), imageDataUrl: "data:image/png;base64,AAAA" } });
   api.recordEvent(runB, { source: "manual-fallback", phase: "fallback", event: "manual-fallback-opened", summary: "Manual fallback opened" });
   api.attachCheckpoint(runB, { stage: "fairway-lines", createdAt: "2026-07-14T11:26:06.000Z", imageDataUrl: "data:image/svg+xml;base64,AAAA", metadata: { candidateCount: 18 } });
 
@@ -149,11 +149,11 @@ async function main() {
   assert(!full.includes("data:image"), "normal report excludes image data URLs");
   assert(!full.includes("\"lat\""), "normal report excludes giant raw geometry arrays");
 
-  const missingRun = api.startRun({ courseId: "missing", courseName: "Missing Handoff" });
-  api.recordEvent(missingRun, { source: "automapper", phase: "progress", summary: "AutoMapper requested native", details: { requestedNextTool: "native-resolver" } });
-  const missingFull = api.copyFullReport(missingRun);
-  assert(missingFull.includes("Handoff warning"), "missing handoff is reported");
-  assert(!missingFull.includes("repair"), "missing handoff is not automatically repaired");
+  const quietRun = api.startRun({ courseId: "quiet", courseName: "Quiet Lifecycle" });
+  api.recordEvent(quietRun, { source: "automapper", phase: "failed", event: "automapper-failed", summary: "AutoMapper failed" });
+  const quietFull = api.copyFullReport(quietRun);
+  assert(!quietFull.includes("Handoff warning"), "normal terminal stage events do not create handoff warnings");
+  assert(!quietFull.includes("repair"), "diagnostics do not invent lifecycle repairs");
 
   const staleRun = api.startRun({ courseId: "cromwell", courseName: "Cromwell Golf Course", attemptToken: "cromwell-token-1234567890" });
   const activeMaungakiekie = {

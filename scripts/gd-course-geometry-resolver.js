@@ -1195,7 +1195,6 @@
       tieBreakersUsed: feedback.tieBreakers || {},
       confidence: result.confidence || 0,
       finalOutcome: result.status,
-      requestedNextTool: result.status === "resolved" ? "" : "manual-fallback",
       fallbackReason: result.status === "resolved" ? "" : "Resolver did not reach trusted assignment confidence.",
       checkpointAvailability: checkpoints.map(function (checkpoint) {
         return {
