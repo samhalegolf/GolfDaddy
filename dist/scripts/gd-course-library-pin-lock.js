@@ -4353,6 +4353,28 @@
   function requestedHolePlayable(course,hole){
     return !!requestedMappedPlayData(course,hole);
   }
+  function mappedPlayableHoleCoverage(course){
+    let c=course;
+    try{c=loadUserCourseData(userId(),courseId(course))||course;}catch(e){}
+    const expected=Math.max(1,Math.min(18,Number(automapperExpectedHoleCount())||18));
+    const holes=[];
+    for(let hole=1;hole<=expected;hole++){
+      const data=mappedHolePlayData(c,hole);
+      if(data&&data.complete&&data.green&&Array.isArray(data.route)&&data.route.length>=2)holes.push(hole);
+    }
+    const missing=[];
+    for(let hole=1;hole<=expected;hole++)if(!holes.includes(hole))missing.push(hole);
+    return {expected,holes,count:holes.length,missing,complete:holes.length>=expected&&missing.length===0};
+  }
+  function savedMapCanSatisfyRequest(course,hole,wholeCourse){
+    const requestedPlayable=requestedHolePlayable(course,hole);
+    const coverage=mappedPlayableHoleCoverage(course);
+    return {
+      requestedPlayable,
+      coverage,
+      ready: wholeCourse?coverage.complete:requestedPlayable
+    };
+  }
   function coursePlayDebugDetail(course,hole,detail={}){
     const h=validHoleNumber(hole)||1;
     return Object.assign({
@@ -4368,6 +4390,46 @@
         pipeline.recordDebugEvent(type,coursePlayDebugDetail(course,hole,detail));
       }
     }catch(e){}
+  }
+  function mappedCoursePlayRows(course){
+    let c=course;
+    try{c=loadUserCourseData(userId(),courseId(course))||course;}catch(e){}
+    const expected=Math.max(1,Math.min(18,Number(automapperExpectedHoleCount())||18));
+    const rows=[];
+    for(let hole=1;hole<=expected;hole++){
+      const data=mappedHolePlayData(c,hole);
+      if(data&&data.complete&&data.green&&Array.isArray(data.route)&&data.route.length>=2)rows.push({hole,holeNumber:hole,data});
+    }
+    return {course:c,expected,rows};
+  }
+  function warmCoursePlayFrames(course,rows,source){
+    let warmed=0;
+    try{
+      if(!rows||!rows.length||typeof window.gdRenderCoursePlayHoleFrame!=='function')return 0;
+      rows.forEach(row=>{
+        const ok=window.gdRenderCoursePlayHoleFrame(course,row.hole,row.data,{reason:source||'course-first-load-frame-warmup',cacheOnly:true});
+        if(ok)warmed++;
+      });
+    }catch(e){}
+    return warmed;
+  }
+  function collectCoursePlayFrames(course,source,opts={}){
+    const collection=mappedCoursePlayRows(course);
+    const rows=collection.rows;
+    const c=collection.course||course;
+    let ingested=0;
+    try{
+      const pipeline=window.GDCoursePlayPipeline;
+      if(rows.length&&pipeline&&typeof pipeline.ingestMappedCourse==='function'){
+        pipeline.ingestMappedCourse(c,rows.map(row=>Object.assign({holeNumber:row.hole},row.data)),source||'course-play-resolver');
+        ingested=rows.length;
+      }else if(rows.length&&pipeline&&typeof pipeline.ingestMappedHole==='function'){
+        rows.forEach(row=>{pipeline.ingestMappedHole(c,row.hole,row.data,source||'course-play-resolver');ingested++;});
+      }
+    }catch(e){}
+    const warmed=opts.warmFrames===false?0:warmCoursePlayFrames(c,rows,source||'course-first-load-frame-warmup');
+    recordCoursePlayDebug('course-play-frames-collected',c,opts.activeHole||1,{source:source||'course-play-resolver',holes:rows.length,expectedHoleCount:collection.expected,ingested,warmed});
+    return {course:c,rows,expected:collection.expected,ingested,warmed};
   }
   function ingestRequestedHoleToPipeline(course,hole,source){
     try{
@@ -4581,6 +4643,7 @@
     const h=rememberRequestedPlayHole(hole||1);
     const mappedCourse=loadUserCourseData(userId(),courseId(course))||course;
     ingestRequestedHoleToPipeline(mappedCourse,h,reason||'course-play-resolver');
+    const frameCollection=collectCoursePlayFrames(mappedCourse,reason||'course-play-resolver',{activeHole:h,warmFrames:opts.collectCoursePlayFrames!==false});
     updateCourseLoading(`Framing Hole ${h}`,86);
     await sleep(80);
     let framed=false;
@@ -4592,7 +4655,7 @@
     markCourseOpenReady(mappedCourse,h);
     hideCourseLoading(220);
     setTimeout(()=>checkClosestMappedHolePrompt(loadUserCourseData()),900);
-    return {playable:true,framed,course:mappedCourse,hole:h};
+    return {playable:true,framed,course:mappedCourse,hole:h,framesCollected:frameCollection};
   }
   function mappingAttemptStillCurrent(request,attempt,stage){
     if(resolverAttemptCurrent(request.attemptToken,attempt))return true;
@@ -4609,9 +4672,10 @@
     const resolvedBundle=await resolveCourseGeometryGuideBundle(request.course,payload,baseBundle,Object.assign({},opts,{debugRunId:request.debugRunId,skipGeometryResolver:false,forceNativeResolver:true,suppressSkipTelemetry:true,source:'native-resolver',reason:request.reason,debugAttemptContext:attempt,callerFunction:'runCourseMappingAttempt',nativeResolverSourceLoadError:acquisition.sourceLoadError||null,nativeResolverSourceLoadStatus:acquisition.source||'',nativeResolverScorecardPromise:scorecardPromise}));
     if(resolvedBundle&&resolvedBundle.stale)return {ran:true,stale:true,bundle:resolvedBundle};
     const persisted=persistOsmGuideBundle(request.course,resolvedBundle,Object.assign({},opts,{quiet:true,frame:false,promptStart:true,hole:opts.wholeCourse===false?request.hole:null}),request.debugRunId,attempt);
-    const playable=requestedHolePlayable(request.course,request.hole);
-    recordCoursePlayDebug('course-mapping-native-completed',request.course,request.hole,{playable,holes:persisted.holes||0,saved:persisted.saved||0,nativeStatus:resolvedBundle&&resolvedBundle.resolver&&resolvedBundle.resolver.status||'unknown',nativeConfidence:resolvedBundle&&resolvedBundle.resolver&&resolvedBundle.resolver.confidence||0,resolutionKey:request.resolutionKey,attemptToken:request.attemptToken});
-    return {ran:true,playable,persisted,bundle:resolvedBundle};
+    const frameCollection=collectCoursePlayFrames(loadUserCourseData(userId(),courseId(request.course))||request.course,'native-resolver',{activeHole:request.hole,warmFrames:request.wholeCourse});
+    const playable=savedMapCanSatisfyRequest(request.course,request.hole,request.wholeCourse).ready;
+    recordCoursePlayDebug('course-mapping-native-completed',request.course,request.hole,{playable,holes:persisted.holes||0,saved:persisted.saved||0,framesCollected:frameCollection.rows.length,framesWarmed:frameCollection.warmed,nativeStatus:resolvedBundle&&resolvedBundle.resolver&&resolvedBundle.resolver.status||'unknown',nativeConfidence:resolvedBundle&&resolvedBundle.resolver&&resolvedBundle.resolver.confidence||0,resolutionKey:request.resolutionKey,attemptToken:request.attemptToken});
+    return {ran:true,playable,persisted,bundle:resolvedBundle,framesCollected:frameCollection};
   }
   async function runCourseMappingAttempt(input={}){
     const opts=Object.assign({},input||{});
@@ -4660,9 +4724,12 @@
         try{await syncPublishedCourseMaps({quiet:true});}catch(e){}
         try{setMappedPlayMode('mapped',{skipFrame:true,silent:true,preserveAssist:true});}catch(e){}
         recordMappingDebug(debugRunId,{source:'saved-map',phase:'started',event:'saved-map-lookup-started',summary:'Saved-map lookup started',details:{hole:h,existingTrustedMap:false,resolutionKey:key,attemptToken}});
-        const savedPlayable=requestedHolePlayable(c,h);
-        recordMappingDebug(debugRunId,{source:'saved-map',phase:savedPlayable?'completed':'skipped',event:savedPlayable?'saved-map-found':'saved-map-not-found',summary:savedPlayable?'Saved map found':'Saved map not found',details:{hole:h,existingTrustedMap:!!savedPlayable,resolutionKey:key,attemptToken}});
-        if(savedPlayable){
+        const savedState=savedMapCanSatisfyRequest(c,h,request.wholeCourse);
+        const savedPlayable=!!savedState.requestedPlayable;
+        const savedReady=!!savedState.ready;
+        const savedIncomplete=savedPlayable&&request.wholeCourse&&!savedReady;
+        recordMappingDebug(debugRunId,{source:'saved-map',phase:savedReady?'completed':'skipped',event:savedReady?'saved-map-found':savedIncomplete?'saved-map-incomplete':'saved-map-not-found',summary:savedReady?'Saved map found':savedIncomplete?'Saved map incomplete':'Saved map not found',details:{hole:h,existingTrustedMap:savedPlayable,resolutionKey:key,attemptToken,wholeCourse:request.wholeCourse,playableHoleCount:savedState.coverage.count,expectedHoleCount:savedState.coverage.expected,playableHoles:savedState.coverage.holes,missingHoles:savedState.coverage.missing}});
+        if(savedReady){
           finishMappingDebug(debugRunId,{status:'completed',outcome:'trusted saved map ready'});
           return showResolvedCoursePlayHole(c,h,'saved-map',opts);
         }
@@ -4676,9 +4743,11 @@
           document.body.dataset.gdCourseAutoMappedHoles=String(autoMapResult&&autoMapResult.holes||0);
           document.body.dataset.gdCourseAutoMapSaved=String(autoMapResult&&autoMapResult.saved||0);
         }catch(e){}
-        const autoPlayable=requestedHolePlayable(c,h);
-        recordCoursePlayDebug('course-mapping-automapper-completed',c,h,{holes:autoMapResult&&autoMapResult.holes||0,saved:autoMapResult&&autoMapResult.saved||0,playable:autoPlayable,source:'automapper',resolutionKey:key,attemptToken});
-        if(autoPlayable){
+        const autoState=savedMapCanSatisfyRequest(c,h,request.wholeCourse);
+        const autoPlayable=!!autoState.requestedPlayable;
+        const autoReady=!!autoState.ready;
+        recordCoursePlayDebug('course-mapping-automapper-completed',c,h,{holes:autoMapResult&&autoMapResult.holes||0,saved:autoMapResult&&autoMapResult.saved||0,playable:autoReady,requestedHolePlayable:autoPlayable,source:'automapper',resolutionKey:key,attemptToken});
+        if(autoReady){
           recordMappingDebug(debugRunId,{source:'automapper',phase:'completed',event:'automapper-succeeded',summary:'AutoMapper succeeded',details:{hole:h,resolutionKey:key,attemptToken,guideCount:autoMapResult&&autoMapResult.holes||0,saved:autoMapResult&&autoMapResult.saved||0}});
           recordMappingDebug(debugRunId,{source:'course-loader',phase:'completed',event:'mapping-attempt-completed',summary:'Course mapping completed',details:{hole:h,source:'automapper',resolutionKey:key,attemptToken}});
           finishMappingDebug(debugRunId,{status:'completed',outcome:'automapper map ready'});
@@ -4694,7 +4763,7 @@
         if(nativeResult&&nativeResult.playable){
           recordMappingDebug(debugRunId,{source:'course-loader',phase:'completed',event:'mapping-attempt-completed',summary:'Course mapping completed',details:{hole:h,source:'native-resolver',resolutionKey:key,attemptToken}});
           finishMappingDebug(debugRunId,{status:'completed',outcome:'native resolver map ready'});
-          return showResolvedCoursePlayHole(c,h,'native-resolver',opts);
+          return showResolvedCoursePlayHole(c,h,'native-resolver',Object.assign({},opts,{collectCoursePlayFrames:false}));
         }
         recordCoursePlayDebug('course-mapping-automatic-unresolved',c,h,{reason:'automatic-resolution-failed',resolutionKey:key,attemptToken});
         return beginInteractiveGreenFallback(c,h,'automatic-resolution-failed',{resolutionKey:key,activeResolutionKey:key,attemptToken,debugRunId,selectedAt,debugAttemptContext:attempt,callerFunction:'runCourseMappingAttempt',source:'mapping-controller'});
