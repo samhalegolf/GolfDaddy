@@ -289,6 +289,21 @@ async function main() {
   assert.strictEqual(env.calls.native, 1, "AutoMapper zero-guide result invokes native resolver exactly once");
   assert.strictEqual(env.events.filter((event) => event.event === "automapper-failed").length, 1, "AutoMapper zero-guide failure is logged once");
   assert(env.events.some((event) => event.event === "native-resolver-failed"), "native resolver failure is terminally logged");
+  assert.strictEqual(env.events.filter((event) => event.event === "manual-fallback-opened").length, 1, "automatic failure opens one manual fallback");
+  const reentry = await env.win.runCourseMappingAttempt({
+    course: env.course,
+    hole: 1,
+    wholeCourse: false,
+    showLoading: false,
+    selectedAt: "2026-07-14T00:00:01.000Z",
+    attemptToken: "attempt-reentry",
+    debugRunId: "debug-run-reentry",
+    reason: "open-course-quarantine"
+  });
+  assert.strictEqual(reentry.terminal, true, "manual fallback blocks course-loader re-entry");
+  assert.strictEqual(env.events.filter((event) => event.event === "mapping-attempt-started").length, 1, "manual fallback does not trigger course-loader re-entry");
+  assert.strictEqual(env.events.filter((event) => event.event === "manual-fallback-opened").length, 1, "one attempt produces exactly one manual fallback opened event");
+  assert(env.events.some((event) => event.event === "manual-fallback-terminal-reentry-blocked"), "blocked re-entry is explicitly logged");
 
   env = await runScenario({ nativeSuccess: true });
   assert.strictEqual(env.calls.native, 1, "native resolver success runs once");

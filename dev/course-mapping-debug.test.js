@@ -37,11 +37,25 @@ function loadDebug(options = {}) {
     appendChild(node) { node.parentNode = body; },
     removeChild(node) { node.parentNode = null; }
   };
+  const elements = {
+    gdCourseMappingDebugPanel: {
+      hidden: false,
+      innerHTML: "",
+      classList: classList()
+    },
+    developerPanel: {
+      classList: { contains(value) { return value === "open"; } }
+    },
+    gdCourseMappingCopyStatus: {
+      textContent: "",
+      classList: classList()
+    }
+  };
   const document = {
     readyState: "complete",
     body,
     addEventListener() {},
-    getElementById() { return null; },
+    getElementById(id) { return elements[id] || null; },
     createElement() {
       return {
         value: "",
@@ -83,6 +97,7 @@ function loadDebug(options = {}) {
   vm.runInNewContext(code, context, { filename: "gd-course-mapping-debug.js" });
   return {
     api: context.window.GDCourseMappingDebug,
+    elements,
     sessionStorage,
     fallbackCopied: () => fallbackCopied,
     alertCalled: () => alertCalled
@@ -91,6 +106,10 @@ function loadDebug(options = {}) {
 
 function pointArray(count) {
   return Array.from({ length: count }, (_, index) => ({ lat: -36.9 + index / 1000, lng: 174.7 + index / 1000 }));
+}
+
+function svgDataUrl(label) {
+  return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg"><text>${label}</text></svg>`);
 }
 
 async function main() {
@@ -127,7 +146,7 @@ async function main() {
   api.recordEvent(runB, { source: "native-resolver", phase: "started", event: "native-resolver-started", summary: "Native resolver started" });
   api.recordEvent(runB, { source: "native-resolver", phase: "failed", event: "native-resolver-failed", summary: "Native resolver failed", confidence: 0.68, details: { shape: pointArray(20), imageDataUrl: "data:image/png;base64,AAAA" } });
   api.recordEvent(runB, { source: "manual-fallback", phase: "fallback", event: "manual-fallback-opened", summary: "Manual fallback opened" });
-  api.attachCheckpoint(runB, { stage: "fairway-lines", createdAt: "2026-07-14T11:26:06.000Z", imageDataUrl: "data:image/svg+xml;base64,AAAA", metadata: { candidateCount: 18 } });
+  api.attachCheckpoint(runB, { stage: "fairway-lines", createdAt: "2026-07-14T11:26:06.000Z", imageDataUrl: svgDataUrl("fairway-lines"), metadata: { candidateCount: 18 } });
 
   assert(api.copyFiringList(runB).includes("Native resolver"), "native resolver events appear in combined firing list");
   assert(api.copyFiringList(runB).includes("Manual fallback"), "manual fallback events appear in combined firing list");
@@ -148,6 +167,60 @@ async function main() {
   assert(full.includes("CHECKPOINTS"), "full report combines checkpoint availability");
   assert(!full.includes("data:image"), "normal report excludes image data URLs");
   assert(!full.includes("\"lat\""), "normal report excludes giant raw geometry arrays");
+
+  const visualRun = api.startRun({ courseId: "visual", courseName: "Visual Course" });
+  api.attachCheckpoint(visualRun, {
+    stage: "initial-snapshot",
+    createdAt: "2026-07-14T11:27:01.000Z",
+    imageDataUrl: svgDataUrl("initial"),
+    metadata: {
+      viewport: { center: { lat: -45.1, lng: 169.2 }, zoom: 16 },
+      bounds: { south: -45.2, west: 169.1, north: -45.0, east: 169.3 },
+      overlayCounts: { sourceFeatures: 90, acceptedGreens: 18, rejectedGreens: 1, fairways: 14, tees: 18, candidates: 0 },
+      geometryIds: { acceptedGreens: ["way-201"], candidates: [] }
+    }
+  });
+  api.attachCheckpoint(visualRun, {
+    stage: "fairway-lines",
+    createdAt: "2026-07-14T11:27:02.000Z",
+    imageDataUrl: svgDataUrl("fairways"),
+    metadata: {
+      viewport: { center: { lat: -45.1, lng: 169.2 }, zoom: 16 },
+      bounds: { south: -45.2, west: 169.1, north: -45.0, east: 169.3 },
+      overlayCounts: { sourceFeatures: 90, acceptedGreens: 18, rejectedGreens: 1, fairways: 14, tees: 18, candidates: 18 },
+      geometryIds: { acceptedGreens: ["way-201"], candidates: ["way-101", "way-102"] }
+    }
+  });
+  api.attachCheckpoint(visualRun, {
+    stage: "number-allocation",
+    createdAt: "2026-07-14T11:27:03.000Z",
+    imageDataUrl: svgDataUrl("numbers"),
+    metadata: {
+      viewport: { center: { lat: -45.1, lng: 169.2 }, zoom: 16 },
+      bounds: { south: -45.2, west: 169.1, north: -45.0, east: 169.3 },
+      overlayCounts: { sourceFeatures: 90, acceptedGreens: 18, rejectedGreens: 1, fairways: 14, tees: 18, candidates: 18 },
+      geometryIds: { acceptedGreens: ["way-201"], candidates: ["way-101", "way-103"] }
+    }
+  });
+  const visualHtml = api._test.checkpointsHtml(api.getRun(visualRun));
+  assert.strictEqual((visualHtml.match(/<img alt=/g) || []).length, 3, "checkpoint SVG payload is rendered as image previews");
+  assert(visualHtml.includes("Initial Snapshot"), "initial snapshot card renders");
+  assert(visualHtml.includes("Fairway Lines"), "fairway lines card renders");
+  assert(visualHtml.includes("Number Allocation"), "number allocation card renders");
+  assert.notStrictEqual(api.getRun(visualRun).checkpoints[0].imageDataUrl, api.getRun(visualRun).checkpoints[1].imageDataUrl, "initial and fairway previews are distinct payloads");
+  assert.notStrictEqual(api.getRun(visualRun).checkpoints[1].imageDataUrl, api.getRun(visualRun).checkpoints[2].imageDataUrl, "fairway and number previews are distinct payloads");
+  assert(visualHtml.includes("features 90 / greens 18 / fairways 14 / tees 18 / lines 18"), "overlay counts render in checkpoint card");
+  assert(visualHtml.includes("way-101"), "candidate IDs render in checkpoint card");
+  assert(visualHtml.includes("S -45.2 W 169.1 N -45 E 169.3"), "bounds render in checkpoint card");
+  assert(!visualHtml.includes("&lt;svg"), "SVG source is not rendered as escaped text");
+  api.attachCheckpoint(visualRun, { stage: "number-allocation", createdAt: "2026-07-14T11:27:04.000Z", metadata: { overlayCounts: { sourceFeatures: 0, candidates: 0 } } });
+  const missingPreviewHtml = api._test.checkpointsHtml(api.getRun(visualRun));
+  assert(missingPreviewHtml.includes("No visual preview payload found"), "missing preview shows explicit error state");
+
+  const persistedVisualStorage = env.sessionStorage;
+  const restoredVisual = loadDebug({ role: "admin", sessionStorage: persistedVisualStorage });
+  const restoredVisualHtml = restoredVisual.api._test.checkpointsHtml(restoredVisual.api.getRun(visualRun));
+  assert(restoredVisualHtml.includes("<img"), "checkpoint SVG payload survives debug session restore");
 
   const quietRun = api.startRun({ courseId: "quiet", courseName: "Quiet Lifecycle" });
   api.recordEvent(quietRun, { source: "automapper", phase: "failed", event: "automapper-failed", summary: "AutoMapper failed" });

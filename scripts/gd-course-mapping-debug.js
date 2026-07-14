@@ -158,6 +158,21 @@
     return sanitize(value, { rawJson: true, maxDepth: 10 });
   }
 
+  function checkpointForUi(checkpoint) {
+    var copy = sanitize(Object.assign({}, checkpoint || {}, { imageDataUrl: undefined }), { rawJson: true, maxDepth: 8 });
+    if (checkpoint && /^data:image\/svg\+xml/i.test(String(checkpoint.imageDataUrl || ""))) {
+      copy.imageDataUrl = checkpoint.imageDataUrl;
+    }
+    return copy;
+  }
+
+  function runForUi(run) {
+    if (!run) return null;
+    var copy = clone(run);
+    copy.checkpoints = (run.checkpoints || []).map(checkpointForUi);
+    return copy;
+  }
+
   function looksLikePointArray(value) {
     if (!Array.isArray(value) || !value.length) return false;
     var sample = value.slice(0, Math.min(value.length, 8));
@@ -217,7 +232,11 @@
       eventSequence: run.eventSequence || 0,
       events: sanitize(run.events || [], { arrayLimit: EVENT_LIMIT, maxDepth: 7 }),
       checkpoints: (run.checkpoints || []).map(function (checkpoint) {
-        return sanitize(Object.assign({}, checkpoint, { imageDataUrl: undefined }), { maxDepth: 5 });
+        var safeCheckpoint = sanitize(Object.assign({}, checkpoint, { imageDataUrl: undefined }), { maxDepth: 5 });
+        if (checkpoint && /^data:image\/svg\+xml/i.test(String(checkpoint.imageDataUrl || ""))) {
+          safeCheckpoint.imageDataUrl = checkpoint.imageDataUrl;
+        }
+        return safeCheckpoint;
       })
     };
     return copy;
@@ -448,12 +467,12 @@
   }
 
   function getRecentRuns() {
-    return state.runs.slice(0, RECENT_LIMIT).map(function (run) { return clone(run); });
+    return state.runs.slice(0, RECENT_LIMIT).map(runForUi);
   }
 
   function getRun(runId) {
     var run = findRun(runId || state.selectedRunId || state.activeRunId || (state.runs[0] && state.runs[0].runId));
-    return run ? clone(run) : null;
+    return run ? runForUi(run) : null;
   }
 
   function getActiveRun() {
@@ -743,6 +762,11 @@
     return '<details><summary>Details</summary><pre>' + escapeHtml(text) + '</pre></details>';
   }
 
+  function checkpointVisualUrl(checkpoint) {
+    var value = checkpoint && (checkpoint.imageDataUrl || checkpoint.previewDataUrl || checkpoint.svgDataUrl || checkpoint.dataUrl || checkpoint.imageUrl);
+    return /^data:image\/svg\+xml/i.test(String(value || "")) || /^data:image\/(png|jpeg|webp|gif)/i.test(String(value || "")) ? String(value) : "";
+  }
+
   function compactList(value, limit) {
     var rows = Array.isArray(value) ? value.filter(Boolean) : [];
     if (!rows.length) return "";
@@ -810,7 +834,8 @@
     return '<div class="gdCourseMappingCheckpoints">' + CHECKPOINT_STAGES.map(function (stage) {
       var checkpoint = (run.checkpoints || []).find(function (item) { return item.stage === stage[0]; });
       if (!checkpoint) return '<div class="gdCourseMappingCheckpoint missing"><strong>' + escapeHtml(stage[1]) + '</strong><span>Not produced</span></div>';
-      var image = checkpoint.imageDataUrl ? '<img alt="' + escapeHtml(stage[1]) + ' checkpoint preview" src="' + escapeHtml(checkpoint.imageDataUrl) + '">' : '<div class="gdCoursePlayDebugEmpty">No retained visual state for this checkpoint.</div>';
+      var visualUrl = checkpointVisualUrl(checkpoint);
+      var image = visualUrl ? '<img alt="' + escapeHtml(stage[1]) + ' checkpoint preview" src="' + escapeHtml(visualUrl) + '">' : '<div class="gdCoursePlayDebugEmpty gdCourseMappingCheckpointError">No visual preview payload found for this checkpoint.</div>';
       return '<div class="gdCourseMappingCheckpoint"><div><strong>' + escapeHtml(stage[1]) + '</strong><span>' + escapeHtml(timeText(checkpoint.createdAt)) + ' - ' + escapeHtml(checkpoint.runId || run.runId) + '</span></div>' + image + checkpointFactsHtml(checkpoint) + '<details><summary>Metadata</summary><pre>' + escapeHtml(copyCheckpointMetadata(run.runId, stage[0])) + '</pre></details><div class="gdCourseMappingCheckpointActions"><button type="button" onclick="return gdOpenCourseMappingCheckpoint(\'' + escapeHtml(run.runId) + '\',\'' + escapeHtml(stage[0]) + '\')">Open</button><button type="button" onclick="return gdCopyCourseMappingDebug(\'checkpoint:' + escapeHtml(stage[0]) + '\')">Copy Metadata</button></div></div>';
     }).join("") + '</div>';
   }
@@ -942,10 +967,11 @@
   function openCheckpoint(runId, stage) {
     var run = findRun(runId || selectedRunId());
     var checkpoint = run && (run.checkpoints || []).find(function (item) { return item.stage === stage; });
-    if (!checkpoint || !checkpoint.imageDataUrl) return false;
+    var visualUrl = checkpointVisualUrl(checkpoint);
+    if (!checkpoint || !visualUrl) return false;
     var win = safe(function () { return window.open("", "_blank", "noopener,noreferrer"); }, null);
     if (win && win.document) {
-      win.document.write('<!doctype html><title>' + escapeHtml(stage) + '</title><img alt="' + escapeHtml(stage) + '" src="' + escapeHtml(checkpoint.imageDataUrl) + '" style="max-width:100%;height:auto;background:#07110c">');
+      win.document.write('<!doctype html><title>' + escapeHtml(stage) + '</title><img alt="' + escapeHtml(stage) + '" src="' + escapeHtml(visualUrl) + '" style="max-width:100%;height:auto;background:#07110c">');
       win.document.close();
     }
     return false;
@@ -986,7 +1012,8 @@
       sanitize: sanitize,
       handoffAnalysis: handoffAnalysis,
       fallbackCopy: fallbackCopy,
-      canViewDebug: canViewDebug
+      canViewDebug: canViewDebug,
+      checkpointsHtml: checkpointsHtml
     }
   };
 
