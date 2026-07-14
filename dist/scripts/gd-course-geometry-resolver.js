@@ -1002,13 +1002,16 @@
     var distanceCount = scorecardDistanceCount(scorecard);
     var explicitDistanceCount = number(evidence.distanceCount, NaN);
     if (Number.isFinite(explicitDistanceCount)) distanceCount = Math.max(distanceCount, explicitDistanceCount);
+    var normalizedLengthOrder = scorecardLengthOrder(scorecard);
+    var evidenceLengthOrder = Array.isArray(evidence.lengthOrder) ? evidence.lengthOrder : [];
+    var lengthOrder = evidenceLengthOrder.length >= normalizedLengthOrder.length ? evidenceLengthOrder : normalizedLengthOrder;
     return {
       source: evidence.source || (sourceRows[0] && sourceRows[0].source) || "",
       sourceUrl: evidence.sourceUrl || (sourceRows[0] && sourceRows[0].sourceUrl) || "",
       sourceCount: sourceRows.length,
       distanceCount: distanceCount,
       requiredDistanceCount: expected ? Math.min(expected, 18) : 18,
-      lengthOrder: Array.isArray(evidence.lengthOrder) && evidence.lengthOrder.length ? evidence.lengthOrder : scorecardLengthOrder(scorecard),
+      lengthOrder: lengthOrder,
       sources: sourceRows
     };
   }
@@ -1419,7 +1422,7 @@
   function resolveStatus(assignments, confidence, expected, scorecardAvailable) {
     if (!scorecardAvailable) return "geometry-resolved-numbering-unavailable";
     var high = assignments.filter(function (hole) { return hole.confidence >= HIGH_CONFIDENCE; }).length;
-    if (assignments.length >= expected && confidence >= HIGH_CONFIDENCE && high >= expected) return "resolved";
+    if (assignments.length >= expected && confidence >= HIGH_CONFIDENCE) return "resolved";
     if (high > 0 && confidence >= MEDIUM_CONFIDENCE) return "partially-resolved";
     if (assignments.length && confidence >= MEDIUM_CONFIDENCE) return "partially-resolved";
     return "insufficient-confidence";
@@ -2123,6 +2126,8 @@
       distanceM: distanceM,
       normalizeScorecard: normalizeScorecard,
       normalizeScorecardSources: normalizeScorecardSources,
+      scorecardEvidenceSummary: scorecardEvidenceSummary,
+      resolveStatus: resolveStatus,
       detectGreenCandidates: detectGreenCandidates,
       detectHoleGeometryCandidates: detectHoleGeometryCandidates,
       matchCandidatesToScorecard: matchCandidatesToScorecard
