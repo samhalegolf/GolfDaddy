@@ -22042,6 +22042,27 @@ function gdKickWholeCourseAutoMapOnLoad(payload){
   window.__gdWholeCourseAutoMapOnLoadKey=key;
   window.__gdWholeCourseAutoMapOnLoadAt=now;
   const token=`${now}-${Math.random()}`;
+  const selectedAt=new Date(now).toISOString();
+  const attemptToken=`course-picker:${key}:${token}`;
+  const library=window.GolfDaddyCourseLibrary||window.ClarityCaddieCourseLibrary||{};
+  const mappingCourse=typeof library.mappingCourseSnapshot==="function"
+    ? library.mappingCourseSnapshot(payload,{selectedAt,attemptToken,source:"course-picker-auto-map"})
+    : payload;
+  const debugRunId=typeof library.startMappingDebugRun==="function"
+    ? library.startMappingDebugRun(mappingCourse,{selectedAt,attemptToken,reason:"course-picker-auto-map"})
+    : "";
+  if(debugRunId&&window.GDCourseMappingDebug&&typeof window.GDCourseMappingDebug.recordEvent==="function"){
+    try{
+      window.GDCourseMappingDebug.recordEvent(debugRunId,{source:"course-loader",phase:"started",event:"course-picker-automap-started",summary:"Course picker auto-map started",details:{
+        courseId:mappingCourse.courseId||mappingCourse.id||key,
+        courseName:mappingCourse.courseName||mappingCourse.name||"Course",
+        courseCentre:mappingCourse.courseCentre||null,
+        selectedAt,
+        attemptToken,
+        requestedNextTool:"automapper"
+      }});
+    }catch(e){}
+  }
   window.__gdWholeCourseAutoMapOnLoadToken=token;
   const run=attempt=>{
     if(window.__gdWholeCourseAutoMapOnLoadToken!==token)return;
@@ -22051,7 +22072,7 @@ function gdKickWholeCourseAutoMapOnLoad(payload){
       return;
     }
     try{document.body.dataset.gdCourseAutoMapStatus="running";}catch(e){}
-    Promise.resolve(mapper({quiet:true,frame:false,fresh:true,course:payload}))
+    Promise.resolve(mapper({quiet:true,frame:false,fresh:true,course:mappingCourse,debugRunId,selectedAt,attemptToken,reason:"course-picker-auto-map",__gdMappingRunStarted:!!debugRunId}))
       .then(result=>{
         try{
           document.body.dataset.gdCourseAutoMapStatus=result?"done":"empty";

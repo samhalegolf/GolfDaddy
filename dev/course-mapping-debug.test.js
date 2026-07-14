@@ -102,6 +102,20 @@ async function main() {
   const runB = api.startRun({ courseId: "cromwell", courseName: "Cromwell Golf Club" });
   assert.notStrictEqual(runA, runB, "retrying the same course creates a new run ID");
 
+  const metaRun = api.startRun({
+    courseId: "maungakiekie-golf-club",
+    courseName: "Maungakiekie Golf Club",
+    courseCentre: { lat: -36.9229754, lng: 174.7254871 },
+    selectedAt: "2026-07-14T11:26:00.000Z",
+    attemptToken: "attempt-1"
+  });
+  const meta = api.getRun(metaRun);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(meta.courseCentre)), { lat: -36.9229754, lng: 174.7254871 }, "run stores selected course centre");
+  assert.strictEqual(meta.selectedAt, "2026-07-14T11:26:00.000Z", "run stores selectedAt");
+  assert.strictEqual(meta.attemptToken, "attempt-1", "run stores attempt token");
+  const otherRun = api.getOrStartRun({ courseId: "akarana-golf-club", courseName: "Akarana Golf Club" });
+  assert.notStrictEqual(otherRun, metaRun, "different course identity does not reuse the active run");
+
   api.recordEvent(runB, { timestamp: "2026-07-14T11:26:04.000Z", source: "automapper", phase: "started", event: "automapper-started", summary: "AutoMapper started" });
   api.recordEvent(runB, { timestamp: "2026-07-14T11:26:02.000Z", source: "course-loader", phase: "started", event: "course-loader-started", summary: "Course loader started" });
   api.recordEvent(runB, { timestamp: "2026-07-14T11:26:03.000Z", source: "saved-map", phase: "skipped", event: "saved-map-not-found", summary: "Saved map not found", details: { requestedNextTool: "automapper" } });
