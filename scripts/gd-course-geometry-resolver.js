@@ -199,8 +199,8 @@
       toPoint(course.courseCentre) ||
       toPoint(course.courseCenter) ||
       toPoint(course.center) ||
-      toPoint(input.mapViewport && input.mapViewport.center) ||
-      toPoint({ lat: course.courseLat || course.lat || course.latitude, lng: course.courseLng || course.lng || course.longitude });
+      toPoint({ lat: course.courseLat || course.lat || course.latitude, lng: course.courseLng || course.lng || course.longitude }) ||
+      toPoint(input.mapViewport && input.mapViewport.center);
   }
 
   function viewportBoundary(viewport) {
@@ -221,7 +221,7 @@
 
   function explicitBoundary(input) {
     input = input || {};
-    var candidates = [input.courseBoundary, input.boundary, input.analysisBoundary, viewportBoundary(input.mapViewport)];
+    var candidates = [input.courseBoundary, input.boundary, input.analysisBoundary];
     for (var i = 0; i < candidates.length; i += 1) {
       var polygon = cleanPolygon(candidates[i]);
       if (polygon) return polygon;

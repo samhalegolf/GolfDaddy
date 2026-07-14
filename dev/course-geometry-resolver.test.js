@@ -180,6 +180,41 @@ async function main() {
     "debug UI receives the real geometry checkpoints"
   );
 
+  const cromwellLat = -45.04;
+  const cromwellLng = 169.2;
+  const cromwellElements = [
+    lineElement(501, cromwellLat, cromwellLng, 100),
+    fairwayElement(701, cromwellLat, cromwellLng, 100),
+    teeElement(801, cromwellLat, cromwellLng),
+    greenElement(601, cromwellLat + 100 / 111320, cromwellLng),
+    lineElement(502, cromwellLat, cromwellLng + 0.004, 300),
+    fairwayElement(702, cromwellLat, cromwellLng + 0.004, 300),
+    teeElement(802, cromwellLat, cromwellLng + 0.004),
+    greenElement(602, cromwellLat + 300 / 111320, cromwellLng + 0.004),
+    lineElement(503, cromwellLat, cromwellLng + 0.008, 500),
+    fairwayElement(703, cromwellLat, cromwellLng + 0.008, 500),
+    teeElement(803, cromwellLat, cromwellLng + 0.008),
+    greenElement(603, cromwellLat + 500 / 111320, cromwellLng + 0.008)
+  ];
+  const staleViewport = await resolver.resolveCourseGeometryForAutoMapper({
+    course: { courseId: "cromwell-test", courseName: "Cromwell Test Course", courseLat: cromwellLat, courseLng: cromwellLng },
+    courseCentre: { lat: cromwellLat, lng: cromwellLng },
+    mapViewport: {
+      center: { lat: -36.914902, lng: 174.725498 },
+      zoom: 18,
+      bounds: { south: -36.91705, west: 174.723612, north: -36.912753, east: 174.727383 }
+    },
+    osmPayload: { elements: cromwellElements },
+    expectedHoleCount: 3
+  });
+  assert.strictEqual(staleViewport.status, "geometry-resolved-numbering-unavailable", "stale viewport does not block geometry-only resolution");
+  assert.strictEqual(staleViewport.debugEvidence.greenCandidates.length, 3, "stale viewport does not reject course greens");
+  assert.strictEqual(staleViewport.debugEvidence.holeCandidates.length, 3, "stale viewport does not reject candidate centre-lines");
+  assert(staleViewport.checkpoints.find((checkpoint) => checkpoint.stage === "initial-snapshot"), "Initial Snapshot is produced with stale viewport and no scorecard");
+  assert(staleViewport.checkpoints.find((checkpoint) => checkpoint.stage === "fairway-lines"), "Fairway Lines is produced with stale viewport and no scorecard");
+  const staleInitial = staleViewport.checkpoints.find((checkpoint) => checkpoint.stage === "initial-snapshot");
+  assert(staleInitial.metadata.bounds.north < -44, "checkpoint bounds follow source/course geometry, not stale Auckland viewport");
+
   const result = await resolver.resolveCourseGeometryForAutoMapper({
     course: { courseId: "resolver-test", courseName: "Resolver Test Course", courseLat: baseLat, courseLng: baseLng },
     courseCentre: { lat: baseLat, lng: baseLng },
