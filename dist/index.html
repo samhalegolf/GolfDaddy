@@ -43327,6 +43327,21 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 	    if(route==="shotdata"||route==="datahubpanel"||moduleRoutes.includes(route))return forceHomeFallback();
     return forceHomeFallback();
   }
+  function shellBackClick(event){
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    event?.stopImmediatePropagation?.();
+    return backStable();
+  }
+  function shellBackPointer(event){
+    if(document.body.classList.contains("gdMappedStartPromptActive")&&!document.body.classList.contains("gdManualStartPlacementActive")){
+      event?.preventDefault?.();
+      event?.stopPropagation?.();
+      event?.stopImmediatePropagation?.();
+      return backStable();
+    }
+    return true;
+  }
   function showModeDashboardStable(){
     return forceHomeFallback();
   }
@@ -43457,6 +43472,8 @@ body.gdAuthLocked #gdProfileV67 .topbar{
       gdClearPracticeData:clearPracticeData,
       gdCanonicalShellBack:backStable,
       gdCanonicalShellHome:cleanForHome,
+      gdShellBackClick:shellBackClick,
+      gdShellBackPointer:shellBackPointer,
       gdOpenAdminSettings:openDeveloper,
       openStats:openDataHub,
       openDeveloperPanel:openDeveloper,
@@ -54988,7 +55005,7 @@ body:has(#courseScreen:not(.hidden)) .leaflet-marker-icon{display:none!important
   if(window.__gdGpsPlayRuntimeOwnerV1)return;
   window.__gdGpsPlayRuntimeOwnerV1=true;
   window.__gdGpsSpringCleanOwnerV1="renamed-to-gdGpsPlayRuntimeOwnerV1";
-  window.gdGpsPlayRuntimeOwner={id:"gdGpsPlayRuntimeOwnerV1",owns:["gps-shell-runtime","manual-start-runtime","resume-round-runtime","tool-rail-runtime","captured-shot-overlay-runtime"],cameraOwner:"v19-captured-surface"};
+  window.gdGpsPlayRuntimeOwner={id:"gdGpsPlayRuntimeOwnerV1",owns:["gps-runtime-cleanup","manual-start-runtime","resume-round-runtime","tool-rail-runtime","captured-shot-overlay-runtime"],shellNavigationOwner:"gdCanonicalRouteAuditV1",cameraOwner:"v19-captured-surface"};
   var RESUME_KEY="gd_gps_resume_round_v1";
   var LEGACY_RESUME_KEY="gd_gps_auto_session_v1";
   var RESUME_TTL_MS=3*60*60*1000;
@@ -55012,6 +55029,7 @@ body:has(#courseScreen:not(.hidden)) .leaflet-marker-icon{display:none!important
   function byId(id){return document.getElementById(id)}
   function stop(event){if(!event)return;if(event.preventDefault)event.preventDefault();if(event.stopPropagation)event.stopPropagation();if(event.stopImmediatePropagation)event.stopImmediatePropagation()}
   function visible(el){if(!el||el.hidden||(el.classList&&el.classList.contains("hidden")))return false;var cs=getComputedStyle(el);var r=el.getBoundingClientRect();return cs.display!=="none"&&cs.visibility!=="hidden"&&r.width>0&&r.height>0}
+  function canonicalShellNavActive(){return typeof window.gdCanonicalShellHome==="function"&&typeof window.gdCanonicalShellBack==="function"}
 	  function pickerOpen(){return visible(byId("courseScreen"))}
 	  function homeOpen(){return document.body.classList.contains("shell-home")&&visible(byId("shellHome"))}
 	  function moduleOpen(){return document.body.classList.contains("shell-module")}
@@ -56044,29 +56062,33 @@ body:has(#courseScreen:not(.hidden)) .leaflet-marker-icon{display:none!important
 	    window.gdStartNewRoundFromPicker=endRound;
 	    window.gdSpringHomePlayTileOpen=playTileOpen;
 	    window.gdGpsBackToCoursePicker=function(reason){return showPicker(reason||"gps-back-to-course-picker")};
-	    window.gdShellBackClick=function(event){return back(event)};
-	    window.gdShellBackPointer=function(event){
-	      if(document.body&&document.body.classList.contains("gdMappedStartPromptActive")&&!document.body.classList.contains("gdManualStartPlacementActive")){scheduleBackPrelockPickerRestore("shell-back-pointer-prelock");return back(event);}
-	      return true;
-	    };
+	    window.gdGpsPlayRuntimeHome=home;
+	    window.gdGpsPlayRuntimeBack=back;
 	    window.gdArmManualStartCapturedSurface=armManualStart;
-	    window.gdCanonicalShellHome=home;
-    window.showShellHome=home;
-	    window.gdCanonicalShellBack=back;
-	    window.shellBack=back;
+	    if(!canonicalShellNavActive()){
+	      window.gdShellBackClick=function(event){return back(event)};
+	      window.gdShellBackPointer=function(event){
+	        if(document.body&&document.body.classList.contains("gdMappedStartPromptActive")&&!document.body.classList.contains("gdManualStartPlacementActive")){scheduleBackPrelockPickerRestore("shell-back-pointer-prelock");return back(event);}
+	        return true;
+	      };
+	      window.gdCanonicalShellHome=home;
+      window.showShellHome=home;
+	      window.gdCanonicalShellBack=back;
+	      window.shellBack=back;
+	    }
 	    window.enterGpsModule=enter;
 	    window.gdToggleSimpleGreenZoom=toggleCapturedGreenZoom;
 	    window.gdCoursePickerHome=pickerHome;
     window.gdCoursePickerBack=pickerBack;
     if(typeof oldOpenCourse==="function")window.gdOpenCoursePickerCourse=openCourseWrapper;
-	    safe(function(){showShellHome=home;shellBack=back;enterGpsModule=enter;gdToggleSimpleGreenZoom=toggleCapturedGreenZoom;gdCoursePickerHome=pickerHome;gdCoursePickerBack=pickerBack;if(typeof oldOpenCourse==="function")gdOpenCoursePickerCourse=openCourseWrapper});
+	    safe(function(){if(!canonicalShellNavActive()){showShellHome=home;shellBack=back;}enterGpsModule=enter;gdToggleSimpleGreenZoom=toggleCapturedGreenZoom;gdCoursePickerHome=pickerHome;gdCoursePickerBack=pickerBack;if(typeof oldOpenCourse==="function")gdOpenCoursePickerCourse=openCourseWrapper});
 	  }
 	  function wire(){
 	    expose();
 	    var homeBtn=byId("shellHomeBtn");
-	    if(homeBtn&&!homeBtn.__gdSpringHomeBound){homeBtn.__gdSpringHomeBound=true;homeBtn.addEventListener("click",home,true)}
+	    if(!canonicalShellNavActive()&&homeBtn&&!homeBtn.__gdSpringHomeBound){homeBtn.__gdSpringHomeBound=true;homeBtn.addEventListener("click",home,true)}
 	    var backBtn=byId("shellBackBtn");
-	    if(backBtn&&!backBtn.__gdSpringBackBound){backBtn.__gdSpringBackBound=true;backBtn.addEventListener("click",back,true)}
+	    if(!canonicalShellNavActive()&&backBtn&&!backBtn.__gdSpringBackBound){backBtn.__gdSpringBackBound=true;backBtn.addEventListener("click",back,true)}
     ensureResumePanel();
 	    bindHomePlayTile();
 	    bindGreenZoomButton();
@@ -56074,6 +56096,7 @@ body:has(#courseScreen:not(.hidden)) .leaflet-marker-icon{display:none!important
 	    guardSurface();
 	  }
 	  function earlyShellBack(event){
+	    if(canonicalShellNavActive())return;
 	    if(!event.target||!event.target.closest||!event.target.closest("#shellBackBtn"))return;
 	    if(Date.now()<Number(window.__gdSpringBackHandledUntil||0)){stop(event);return false}
 	    lastBackNavAt=Date.now();
@@ -56083,8 +56106,8 @@ body:has(#courseScreen:not(.hidden)) .leaflet-marker-icon{display:none!important
 	  document.addEventListener("mousedown",earlyShellBack,true);
 	  document.addEventListener("touchstart",earlyShellBack,true);
 	  document.addEventListener("pointerdown",function(event){
-	    if(event.target&&event.target.closest&&event.target.closest("#shellHomeBtn")){lastHomeNavAt=Date.now();home(event);return false}
-	    if(event.target&&event.target.closest&&event.target.closest("#shellBackBtn")){lastBackNavAt=Date.now();back(event);return false}
+	    if(!canonicalShellNavActive()&&event.target&&event.target.closest&&event.target.closest("#shellHomeBtn")){lastHomeNavAt=Date.now();home(event);return false}
+	    if(!canonicalShellNavActive()&&event.target&&event.target.closest&&event.target.closest("#shellBackBtn")){lastBackNavAt=Date.now();back(event);return false}
     if(!startButton(event))return;
     stop(event);
     armManualStart();
@@ -56099,8 +56122,8 @@ body:has(#courseScreen:not(.hidden)) .leaflet-marker-icon{display:none!important
 	  }
 	  window.addEventListener("pointerup",manualPlacementSurfaceEnd,true);
 	  document.addEventListener("click",function(event){
-	    if(event.target&&event.target.closest&&event.target.closest("#shellHomeBtn")){if(Date.now()-lastHomeNavAt<650){stop(event);return false}lastHomeNavAt=Date.now();home(event);return false}
-	    if(event.target&&event.target.closest&&event.target.closest("#shellBackBtn")){if(Date.now()-lastBackNavAt<650){stop(event);return false}lastBackNavAt=Date.now();back(event);return false}
+	    if(!canonicalShellNavActive()&&event.target&&event.target.closest&&event.target.closest("#shellHomeBtn")){if(Date.now()-lastHomeNavAt<650){stop(event);return false}lastHomeNavAt=Date.now();home(event);return false}
+	    if(!canonicalShellNavActive()&&event.target&&event.target.closest&&event.target.closest("#shellBackBtn")){if(Date.now()-lastBackNavAt<650){stop(event);return false}lastBackNavAt=Date.now();back(event);return false}
 	    if(event.target&&event.target.closest&&event.target.closest(".gdPlayTile")){return playTileOpen(event)}
 	    if(startButton(event)){stop(event);if(Date.now()-manualStartArmedAt>700)armManualStart();return false}
 	    if(event.target&&event.target.closest&&event.target.closest(".rightRail"))return;
