@@ -155,6 +155,43 @@ async function main() {
   assert(missingFull.includes("Handoff warning"), "missing handoff is reported");
   assert(!missingFull.includes("repair"), "missing handoff is not automatically repaired");
 
+  const staleRun = api.startRun({ courseId: "cromwell", courseName: "Cromwell Golf Course", attemptToken: "cromwell-token-1234567890" });
+  const activeMaungakiekie = {
+    runId: "map-run-maungakiekie",
+    courseId: "maungakiekie-golf-club",
+    courseName: "Maungakiekie Golf Club",
+    resolutionKey: "maungakiekie-golf-club:h1",
+    attemptToken: "maungakiekie-token-0987654321"
+  };
+  api.recordStaleActivity({
+    staleRunId: staleRun,
+    stale: { courseId: "cromwell", courseName: "Cromwell Golf Course", resolutionKey: "cromwell:h1:center:-45.0381,169.2048:resolver", attemptToken: "cromwell-token-1234567890" },
+    active: activeMaungakiekie,
+    attemptedAction: "open-manual-fallback",
+    rejectionReason: "active mapping attempt changed",
+    callerFunction: "resolveCoursePlayHole",
+    source: "native-resolver",
+    event: "native-resolver-stale-result-rejected",
+    summary: "Native resolver stale result rejected",
+    lateByMs: 16900
+  });
+  const staleReport = api.copyFullReport(staleRun);
+  assert(api.getRun(staleRun).status === "superseded", "stale run becomes superseded");
+  assert(staleReport.includes("STALE ACTIVITY"), "full report includes stale activity section");
+  assert(staleReport.includes("Cromwell Golf Course"), "stale report names stale course");
+  assert(staleReport.includes("Maungakiekie Golf Club"), "stale report names active course");
+  assert(staleReport.includes("resolveCoursePlayHole"), "stale report includes caller provenance");
+  assert(staleReport.includes("...1234567890"), "stale report keeps useful token suffix");
+  assert(!staleReport.includes("cromwell-token-1234567890"), "stale report redacts full stale token");
+  api.recordStaleActivity({
+    stale: { courseId: "orphan", courseName: "Orphan Course", resolutionKey: "orphan:h1", attemptToken: "orphan-token-abcdef" },
+    active: activeMaungakiekie,
+    attemptedAction: "open-manual-fallback",
+    callerFunction: "legacy-callback",
+    source: "manual-fallback"
+  });
+  assert(api.copyFullReport(staleRun).includes("orphan"), "orphan stale activity is retained for inspection");
+
   const unusual = api.startRun({ courseId: "odd", courseName: "Odd Order" });
   api.recordEvent(unusual, { source: "native-resolver", phase: "started", summary: "Native first" });
   api.recordEvent(unusual, { source: "automapper", phase: "started", summary: "AutoMapper second" });
