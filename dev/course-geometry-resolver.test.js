@@ -5,6 +5,8 @@ const vm = require("vm");
 
 function loadResolver() {
   const code = fs.readFileSync(path.join(__dirname, "..", "scripts", "gd-course-geometry-resolver.js"), "utf8");
+  const events = [];
+  const checkpoints = [];
   const context = {
     console,
     window: {},
@@ -16,7 +18,19 @@ function loadResolver() {
   };
   context.window.window = context.window;
   context.window.localStorage = context.localStorage;
+  context.window.GDCourseMappingDebug = {
+    recordEvent(runId, event) {
+      events.push(Object.assign({ runId }, event));
+      return event;
+    },
+    attachCheckpoint(runId, checkpoint) {
+      checkpoints.push(Object.assign({ runId }, checkpoint));
+      return checkpoint;
+    }
+  };
   vm.runInNewContext(code, context, { filename: "gd-course-geometry-resolver.js" });
+  context.window.GDCourseGeometryResolver._testEvents = events;
+  context.window.GDCourseGeometryResolver._testCheckpoints = checkpoints;
   return context.window.GDCourseGeometryResolver;
 }
 
@@ -55,6 +69,41 @@ function greenElement(id, centerLat, centerLng) {
   };
 }
 
+function fairwayElement(id, startLat, startLng, lengthM) {
+  const dLat = lengthM / 111320;
+  const dLng = 0.00018;
+  return {
+    type: "way",
+    id,
+    tags: { golf: "fairway" },
+    geometry: [
+      point(startLat, startLng - dLng),
+      point(startLat, startLng + dLng),
+      point(startLat + dLat, startLng + dLng),
+      point(startLat + dLat, startLng - dLng),
+      point(startLat, startLng - dLng)
+    ]
+  };
+}
+
+function teeElement(id, centerLat, centerLng) {
+  const radiusM = 7;
+  const dLat = radiusM / 111320;
+  const dLng = radiusM / (111320 * Math.cos(centerLat * Math.PI / 180));
+  return {
+    type: "way",
+    id,
+    tags: { golf: "tee" },
+    geometry: [
+      point(centerLat - dLat, centerLng - dLng),
+      point(centerLat - dLat, centerLng + dLng),
+      point(centerLat + dLat, centerLng + dLng),
+      point(centerLat + dLat, centerLng - dLng),
+      point(centerLat - dLat, centerLng - dLng)
+    ]
+  };
+}
+
 async function main() {
   const resolver = loadResolver();
   assert(resolver, "resolver exported");
@@ -63,10 +112,16 @@ async function main() {
   const baseLng = 174.75;
   const elements = [
     lineElement(101, baseLat, baseLng, 100),
+    fairwayElement(301, baseLat, baseLng, 100),
+    teeElement(401, baseLat, baseLng),
     greenElement(201, baseLat + 100 / 111320, baseLng),
     lineElement(102, baseLat, baseLng + 0.004, 300),
+    fairwayElement(302, baseLat, baseLng + 0.004, 300),
+    teeElement(402, baseLat, baseLng + 0.004),
     greenElement(202, baseLat + 300 / 111320, baseLng + 0.004),
     lineElement(103, baseLat, baseLng + 0.008, 500),
+    fairwayElement(303, baseLat, baseLng + 0.008, 500),
+    teeElement(403, baseLat, baseLng + 0.008),
     greenElement(203, baseLat + 500 / 111320, baseLng + 0.008)
   ];
 
@@ -102,12 +157,28 @@ async function main() {
 
   const noScorecard = await resolver.resolveCourseGeometryForAutoMapper({
     course: { courseId: "resolver-test", courseName: "Resolver Test Course", courseLat: baseLat, courseLng: baseLng },
+    courseCentre: { lat: baseLat, lng: baseLng },
+    mapViewport: { center: { lat: baseLat, lng: baseLng }, zoom: 16, bounds: { south: baseLat - 0.01, west: baseLng - 0.01, north: baseLat + 0.01, east: baseLng + 0.01 } },
     osmPayload: { elements },
     expectedHoleCount: 3
   });
-  assert.strictEqual(noScorecard.status, "source-load-failed", "missing scorecard is an acquisition error");
-  assert.strictEqual(noScorecard.sourceLoadError.code, "scorecard-unavailable");
-  assert.strictEqual(noScorecard.checkpoints.length, 0, "scorecard acquisition failure does not create checkpoints");
+  assert.strictEqual(noScorecard.status, "geometry-resolved-numbering-unavailable", "missing scorecard does not stop geometry loading");
+  assert.strictEqual(noScorecard.sourceLoadError, undefined, "missing scorecard is not a source-load error");
+  assert(noScorecard.warnings.includes("Scorecard unavailable"), "missing scorecard is reported as a warning");
+  assert.strictEqual(noScorecard.holes.length, 0, "resolver does not fabricate hole numbers without scorecard evidence");
+  assert.strictEqual(noScorecard.checkpoints.length, 3, "geometry checkpoints remain available without scorecard evidence");
+  assert(noScorecard.checkpoints.find((checkpoint) => checkpoint.stage === "initial-snapshot"), "Initial Snapshot is produced without a scorecard");
+  assert(noScorecard.checkpoints.find((checkpoint) => checkpoint.stage === "fairway-lines"), "Fairway Lines is produced without a scorecard");
+  const noScorecardNumbers = noScorecard.checkpoints.find((checkpoint) => checkpoint.stage === "number-allocation");
+  assert.strictEqual(noScorecardNumbers.metadata.status, "unavailable", "Number Allocation clearly reports unavailable");
+  assert.strictEqual(noScorecardNumbers.metadata.warning, "Scorecard unavailable", "Number Allocation records the scorecard warning");
+  assert.strictEqual(noScorecard.feedback.assignment.resolvedHoles, 0, "Number Allocation leaves resolved count at zero");
+  assert.strictEqual(noScorecard.debugEvidence.holeCandidates.length, 3, "candidate centre-lines are constructed without scorecard evidence");
+  assert.deepStrictEqual(
+    resolver._testCheckpoints.map((checkpoint) => checkpoint.stage),
+    ["initial-snapshot", "fairway-lines", "number-allocation"],
+    "debug UI receives the real geometry checkpoints"
+  );
 
   const result = await resolver.resolveCourseGeometryForAutoMapper({
     course: { courseId: "resolver-test", courseName: "Resolver Test Course", courseLat: baseLat, courseLng: baseLng },

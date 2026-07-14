@@ -1842,14 +1842,24 @@
     let bundle=baseBundle&&typeof baseBundle==='object'?baseBundle:null;
     let payload=bundle?.osmPayload||null;
     let elements=osmPayloadElements(payload);
-    if(elements)return {bundle,payload,sourceLoadError:null,source:'automapper-osm-payload'};
-    recordMappingDebug(request.debugRunId,{source:'native-resolver',phase:'progress',event:'native-resolver-loading-course-geometry',summary:'Native resolver loading course geometry',details:{
+    recordMappingDebug(request.debugRunId,{source:'native-resolver',phase:'progress',event:'native-resolver-source-load-started',summary:'Native resolver source load started',details:{
       invokedBy:opts.reason||opts.source||request.reason||'course-loader',
       resolutionKey:request.resolutionKey,
       attemptToken:request.attemptToken,
       courseCentre:request.courseCentre||null,
-      reason:bundle?.automapperError?'AutoMapper did not return reusable source geometry':'Native resolver requires source geometry before analysis'
+      reason:elements?'Reusing AutoMapper OSM payload':bundle?.automapperError?'AutoMapper did not return reusable source geometry':'Native resolver requires source geometry before analysis'
     }});
+    if(elements){
+      recordMappingDebug(request.debugRunId,{source:'native-resolver',phase:'progress',event:'native-resolver-source-load-succeeded',summary:'Native resolver source load succeeded',details:{
+        source:'automapper-osm-payload',
+        osmFeatures:elements.length,
+        acceptedGreens:Array.isArray(bundle?.greens)?bundle.greens.length:0,
+        guides:Array.isArray(bundle?.guides)?bundle.guides.length:0,
+        resolutionKey:request.resolutionKey,
+        attemptToken:request.attemptToken
+      }});
+      return {bundle,payload,sourceLoadError:null,source:'automapper-osm-payload'};
+    }
     let loaded=null;
     let thrown=null;
     try{
@@ -1861,7 +1871,8 @@
     payload=loaded?.osmPayload||null;
     elements=osmPayloadElements(payload);
     if(elements){
-      recordMappingDebug(request.debugRunId,{source:'native-resolver',phase:'progress',event:'native-resolver-source-loaded',summary:'Native resolver loaded course geometry',details:{
+      recordMappingDebug(request.debugRunId,{source:'native-resolver',phase:'progress',event:'native-resolver-source-load-succeeded',summary:'Native resolver source load succeeded',details:{
+        source:'native-osm-fetch',
         osmFeatures:elements.length,
         acceptedGreens:Array.isArray(loaded?.greens)?loaded.greens.length:0,
         guides:Array.isArray(loaded?.guides)?loaded.guides.length:0,

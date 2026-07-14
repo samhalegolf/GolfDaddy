@@ -981,13 +981,12 @@
     };
   }
 
-  function sourceEvidenceError(input, elements, boundary, scorecard) {
+  function sourceEvidenceError(input, elements, boundary) {
     if (input.sourceLoadError) return normalizeSourceLoadError(input.sourceLoadError, "osm-request-failed", "OSM request failed");
     if (!Array.isArray(elements)) return normalizeSourceLoadError(null, "osm-payload-invalid", "OSM payload was unavailable");
     if (!elements.length) return normalizeSourceLoadError(null, "no-supported-golf-geometry-returned", "No supported golf geometry returned");
     if (!supportedGolfGeometry(elements).length) return normalizeSourceLoadError(null, "no-supported-golf-geometry-returned", "No supported golf geometry returned");
     if (!Array.isArray(boundary) || boundary.length < 3) return normalizeSourceLoadError(null, "course-boundary-unavailable", "Course boundary unavailable");
-    if (!Array.isArray(scorecard) || !scorecard.length) return normalizeSourceLoadError(null, "scorecard-unavailable", "Scorecard unavailable");
     return null;
   }
 
@@ -1081,7 +1080,8 @@
     return result;
   }
 
-  function resolveStatus(assignments, confidence, expected) {
+  function resolveStatus(assignments, confidence, expected, scorecardAvailable) {
+    if (!scorecardAvailable) return "geometry-resolved-numbering-unavailable";
     var high = assignments.filter(function (hole) { return hole.confidence >= HIGH_CONFIDENCE; }).length;
     if (assignments.length >= expected && confidence >= HIGH_CONFIDENCE && high >= expected) return "resolved";
     if (high > 0 && confidence >= MEDIUM_CONFIDENCE) return "partially-resolved";
@@ -1315,6 +1315,9 @@
             rejectedGreens: greenResult.rejected,
             candidates: numberCandidates
           }), {
+            status: (match.numberingUnavailableReason ? "unavailable" : "produced"),
+            unavailableReason: match.numberingUnavailableReason || "",
+            warning: match.numberingUnavailableReason || "",
             resolvedHoles: (match.assignments || []).length,
             unresolvedScorecardHoles: (match.unresolvedScorecardHoles || []).map(function (hole) { return hole.holeNumber; }),
             confidence: match.confidence,
@@ -1327,6 +1330,7 @@
       var svg = checkpointSvg(entry.stage, entry.title, entry.data);
       return {
         stage: entry.stage,
+        title: entry.title,
         createdAt: createdAt,
         courseId: courseId,
         resolverRunId: runId,
@@ -1355,7 +1359,7 @@
       (hole.assignmentEvidence && hole.assignmentEvidence.tieBreakersUsed || []).forEach(function (key) { tieBreakers[key] = (tieBreakers[key] || 0) + 1; });
     });
     return {
-      stage: result.status === "resolved" ? "Completed" : result.status === "partially-resolved" ? "Partially resolved" : "Fallback required",
+      stage: result.status === "resolved" ? "Completed" : result.status === "partially-resolved" ? "Partially resolved" : result.status === "geometry-resolved-numbering-unavailable" ? "Numbering unavailable" : "Fallback required",
       geometry: {
         osmFeatures: debug.osmFeatureCount || 0,
         greenCandidates: (debug.greenCandidates || []).length + (debug.rejectedGreenCandidates || []).length,
@@ -1372,7 +1376,7 @@
         averageNormalisedError: assigned.length ? assigned.reduce(function (sum, hole) { return sum + number(hole.assignmentEvidence && hole.assignmentEvidence.normalizedDistanceDelta, 0); }, 0) / assigned.length : null,
         rankAgreement: assigned.filter(function (hole) { return hole.assignmentEvidence && hole.assignmentEvidence.rankScore >= 0.75; }).length + " / " + assigned.length,
         poorAgreementHoles: poor,
-        distanceUsed: "centre-path",
+        distanceUsed: scorecard.length ? "centre-path" : "not-used",
         confidence: result.confidence >= HIGH_CONFIDENCE ? "High" : result.confidence >= MEDIUM_CONFIDENCE ? "Medium" : "Low"
       },
       assignment: {
@@ -1420,7 +1424,7 @@
       confidence: result.confidence || 0,
       finalOutcome: result.status,
       sourceLoadError: result.sourceLoadError || null,
-      fallbackReason: result.status === "resolved" ? "" : result.sourceLoadError ? result.sourceLoadError.message : "Resolver did not reach trusted assignment confidence.",
+      fallbackReason: result.status === "resolved" ? "" : result.sourceLoadError ? result.sourceLoadError.message : result.status === "geometry-resolved-numbering-unavailable" ? "Scorecard unavailable" : "Resolver did not reach trusted assignment confidence.",
       checkpointAvailability: checkpoints.map(function (checkpoint) {
         return {
           stage: checkpoint.stage,
@@ -1462,7 +1466,7 @@
     var warnings = [];
     var analysisBoundary = deriveAnalysisBoundary(input, elements);
     var scorecard = normalizeScorecard(input);
-    var acquisitionError = sourceEvidenceError(input, elements, analysisBoundary, scorecard);
+    var acquisitionError = sourceEvidenceError(input, elements, analysisBoundary);
     if (acquisitionError) {
       return sourceLoadFailureResult(input, courseId, resolverRunId, mappingRunId, debugStartedAt, acquisitionError, elements, analysisBoundary, scorecard);
     }
@@ -1470,10 +1474,12 @@
     var candidates = detectHoleGeometryCandidates(elements, greenResult.accepted, analysisBoundary);
     var expected = expectedHoleCount(input, scorecard);
     var match = matchCandidatesToScorecard(candidates, scorecard, expected);
+    if (!scorecard.length) match.numberingUnavailableReason = "Scorecard unavailable";
     warnings = warnings.concat(match.warnings || []);
+    if (!scorecard.length) warnings.push("Scorecard unavailable");
     if (greenResult.accepted.length < Math.min(6, expected)) warnings.push("Few reliable green polygons were found inside the course boundary.");
     if (!candidates.length) warnings.push("No candidate centre-lines could be constructed.");
-    var status = resolveStatus(match.assignments, match.confidence, expected);
+    var status = resolveStatus(match.assignments, match.confidence, expected, !!scorecard.length);
     var assignedIds = {};
     match.assignments.forEach(function (assignment) { assignedIds[assignment.candidate.candidateId] = true; });
     var checkpoints = buildCheckpoints(input, resolverRunId, courseId, analysisBoundary, greenResult, candidates, match);
