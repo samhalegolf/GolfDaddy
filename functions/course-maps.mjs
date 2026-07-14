@@ -1,14 +1,51 @@
-import { createRequire } from "module";
-
-const require = createRequire(import.meta.url);
-const { hasSupabase, supabaseFetch } = require("./payment-utils.js");
-
 const STORE_NAME = "clarity-course-maps";
 const STORE_KEY = "published-course-maps-v1";
 const TABLE = "course_maps";
 const ADMIN_EMAILS = new Set(["samhalegolf@gmail.com", "admin@clarity.local"]);
 let getStoreImpl = null;
 let getStoreLoadAttempted = false;
+
+function env(name) {
+  return process.env[name] || "";
+}
+
+function supabaseBase() {
+  return env("SUPABASE_URL").replace(/\/+$/, "");
+}
+
+function supabaseKey() {
+  return env("SUPABASE_SERVICE_ROLE_KEY");
+}
+
+function hasSupabase() {
+  return !!(supabaseBase() && supabaseKey());
+}
+
+async function supabaseFetch(path, options = {}) {
+  if (!hasSupabase()) throw new Error("Supabase is not configured");
+  const headers = Object.assign({
+    apikey: supabaseKey(),
+    Authorization: "Bearer " + supabaseKey(),
+    "Content-Type": "application/json"
+  }, options.headers || {});
+  const response = await fetch(supabaseBase() + "/rest/v1/" + path, Object.assign({}, options, { headers }));
+  const bodyText = await response.text();
+  let body = null;
+  if (bodyText) {
+    try {
+      body = JSON.parse(bodyText);
+    } catch (_error) {
+      body = bodyText;
+    }
+  }
+  if (!response.ok) {
+    const error = new Error("Supabase request failed");
+    error.status = response.status;
+    error.body = body;
+    throw error;
+  }
+  return body;
+}
 
 export default async function courseMaps(req) {
   if (req.method === "OPTIONS") return json(200, { ok: true });
