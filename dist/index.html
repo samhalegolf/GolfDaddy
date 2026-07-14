@@ -22046,53 +22046,23 @@ function gdKickWholeCourseAutoMapOnLoad(payload){
   if(window.__gdWholeCourseAutoMapOnLoadKey===key&&now-(window.__gdWholeCourseAutoMapOnLoadAt||0)<45000)return true;
   window.__gdWholeCourseAutoMapOnLoadKey=key;
   window.__gdWholeCourseAutoMapOnLoadAt=now;
-  const token=`${now}-${Math.random()}`;
-  const activeAttempt=typeof library.activeMappingDebugAttempt==="function"
-    ? library.activeMappingDebugAttempt(mappingCourse,{hole:1})
-    : null;
-  const attemptToken=activeAttempt&&activeAttempt.attemptToken||`course-picker:${key}:${token}`;
-  if(typeof library.mappingCourseSnapshot==="function"){
-    mappingCourse=library.mappingCourseSnapshot(payload,{selectedAt,attemptToken,source:"course-picker-auto-map"});
+  const controller=window.runCourseMappingAttempt||window.gdRunCourseMappingAttempt||window.gdResolveCoursePlayHole;
+  if(typeof controller!=="function"){
+    try{document.body.dataset.gdCourseAutoMapStatus="controller_unavailable";}catch(e){}
+    return false;
   }
-  const debugRunId=activeAttempt&&activeAttempt.debugRunId
-    ? activeAttempt.debugRunId
-    : typeof library.startMappingDebugRun==="function"
-      ? library.startMappingDebugRun(mappingCourse,{selectedAt,attemptToken,reason:"course-picker-auto-map",hole:1})
-      : "";
-  if(debugRunId&&window.GDCourseMappingDebug&&typeof window.GDCourseMappingDebug.recordEvent==="function"){
-    try{
-      window.GDCourseMappingDebug.recordEvent(debugRunId,{source:"course-loader",phase:"started",event:"course-picker-automap-started",summary:"Course picker auto-map started",details:{
-        courseId:mappingCourse.courseId||mappingCourse.id||key,
-        courseName:mappingCourse.courseName||mappingCourse.name||"Course",
-        courseCentre:mappingCourse.courseCentre||null,
-        selectedAt,
-        attemptToken,
-        requestedNextTool:"automapper"
-      }});
-    }catch(e){}
-  }
-  window.__gdWholeCourseAutoMapOnLoadToken=token;
-  const run=attempt=>{
-    if(window.__gdWholeCourseAutoMapOnLoadToken!==token)return;
-    const mapper=window.gdAutoMapOsmCourse;
-    if(typeof mapper!=="function"){
-      if(attempt<12)setTimeout(()=>run(attempt+1),180);
-      return;
-    }
-    try{document.body.dataset.gdCourseAutoMapStatus="running";}catch(e){}
-    Promise.resolve(mapper({quiet:true,frame:false,fresh:true,course:mappingCourse,debugRunId,selectedAt,attemptToken,reason:"course-picker-auto-map",__gdMappingRunStarted:!!debugRunId}))
-      .then(result=>{
-        try{
-          document.body.dataset.gdCourseAutoMapStatus=result?"done":"empty";
-          document.body.dataset.gdCourseAutoMappedHoles=String(result?.holes||0);
-          document.body.dataset.gdCourseAutoMapSaved=String(result?.saved||0);
-        }catch(e){}
-      })
-      .catch(()=>{
-        try{document.body.dataset.gdCourseAutoMapStatus="error";}catch(e){}
-      });
-  };
-  setTimeout(()=>run(0),80);
+  try{document.body.dataset.gdCourseAutoMapStatus="running";}catch(e){}
+  Promise.resolve(controller({course:mappingCourse,hole:1,wholeCourse:true,showLoading:true,fresh:true,selectedAt,reason:"course-picker"}))
+    .then(result=>{
+      try{
+        document.body.dataset.gdCourseAutoMapStatus=result&&result.stale?"stale":result&&(result.playable||result.fallback)?"done":"empty";
+        document.body.dataset.gdCourseAutoMappedHoles=String(result?.holes||result?.persisted?.holes||0);
+        document.body.dataset.gdCourseAutoMapSaved=String(result?.saved||result?.persisted?.saved||0);
+      }catch(e){}
+    })
+    .catch(()=>{
+      try{document.body.dataset.gdCourseAutoMapStatus="error";}catch(e){}
+    });
   return true;
 }
 function gdOpenCoursePickerCourse(course){
