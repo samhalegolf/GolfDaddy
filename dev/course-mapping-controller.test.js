@@ -96,6 +96,15 @@ function osmPayload(kind) {
       ]
     };
   }
+  if (kind === "frame") {
+    return {
+      elements: [
+        { type: "way", id: 401, tags: { golf: "green" }, geometry: [{ lat: -36.8991, lon: 174.7499 }, { lat: -36.8991, lon: 174.7501 }, { lat: -36.8989, lon: 174.7501 }, { lat: -36.8989, lon: 174.7499 }, { lat: -36.8991, lon: 174.7499 }] },
+        { type: "way", id: 402, tags: { golf: "fairway" }, geometry: [{ lat: -36.9006, lon: 174.7498 }, { lat: -36.9006, lon: 174.7502 }, { lat: -36.8992, lon: 174.7502 }, { lat: -36.8992, lon: 174.7498 }, { lat: -36.9006, lon: 174.7498 }] },
+        { type: "way", id: 403, tags: { golf: "tee" }, geometry: [{ lat: -36.9007, lon: 174.74995 }, { lat: -36.9007, lon: 174.75005 }, { lat: -36.9006, lon: 174.75005 }, { lat: -36.9006, lon: 174.74995 }, { lat: -36.9007, lon: 174.74995 }] }
+      ]
+    };
+  }
   return { elements: [] };
 }
 
@@ -308,13 +317,21 @@ async function main() {
   assert.strictEqual(env.calls.nativeInputs[0].sourceLoadError, null, "source reload clears the acquisition error");
   assert.strictEqual(env.calls.nativeInputs[0].osmPayload.elements.length, 1, "native resolver receives reloaded OSM geometry");
   assert(decodeURIComponent(env.calls.fetchUrls[0]).includes("around:1400"), "AutoMapper starts with the tighter course query");
-  assert(decodeURIComponent(env.calls.fetchUrls[1]).includes("around:3200"), "native resolver reloads a wider full-course source query");
+  assert(decodeURIComponent(env.calls.fetchUrls[1]).includes("around:1400"), "native resolver repeats the pin-based source query when AutoMapper acquisition failed");
 
   env = await runScenario({ fetchSequence: ["native", "success"] });
   assert.strictEqual(env.calls.fetch, 2, "native resolver reloads when AutoMapper only found a narrow source slice");
   assert(decodeURIComponent(env.calls.fetchUrls[0]).includes("around:1400"), "narrow source slice came from AutoMapper radius");
   assert(decodeURIComponent(env.calls.fetchUrls[1]).includes("around:3200"), "native resolver zoomed out for full-course framing");
   assert.strictEqual(env.calls.nativeInputs[0].osmPayload.elements.length, 2, "native resolver receives the widened source payload");
+
+  env = await runScenario({ fetchSequence: ["frame", "success"] });
+  assert.strictEqual(env.calls.fetch, 2, "native resolver runs a framed second OSM query when first-pass source can frame the course");
+  assert(decodeURIComponent(env.calls.fetchUrls[0]).includes("around:1400"), "first pass is seeded from the selected course pin");
+  assert(!decodeURIComponent(env.calls.fetchUrls[1]).includes("around:"), "second pass is not another arbitrary radius query");
+  assert(decodeURIComponent(env.calls.fetchUrls[1]).includes("way("), "second pass uses a framed Overpass bbox query");
+  assert.strictEqual(env.calls.nativeInputs[0].osmPayload.elements.length, 2, "native resolver receives the framed source payload");
+  assert.strictEqual(env.calls.nativeInputs[0].courseBoundary, undefined, "native resolver does not receive a stale saved course boundary");
 
   env = await runScenario({ fetchSequence: ["fail", "native"], nativePartial: true });
   assert.strictEqual(env.calls.native, 1, "partial native resolver runs once");

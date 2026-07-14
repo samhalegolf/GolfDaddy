@@ -1791,10 +1791,52 @@
   }
   const OSM_AUTOMAPPER_RADIUS_M=1400;
   const OSM_NATIVE_RESOLVER_RADIUS_M=3200;
+  const OSM_NATIVE_FRAME_PAD_M=180;
+  const OSM_NATIVE_FRAME_MAX_SPAN_M=6200;
   function osmQueryRadius(opts={}){
     const raw=Number(opts.osmRadiusM??opts.radiusM);
     if(Number.isFinite(raw)&&raw>0)return Math.max(400,Math.min(5000,Math.round(raw)));
     return OSM_AUTOMAPPER_RADIUS_M;
+  }
+  function normalizedOsmFrame(frame){
+    if(!frame)return null;
+    const south=Number(frame.south??frame.minLat);
+    const west=Number(frame.west??frame.minLng);
+    const north=Number(frame.north??frame.maxLat);
+    const east=Number(frame.east??frame.maxLng);
+    if(![south,west,north,east].every(Number.isFinite))return null;
+    const out={south:Math.min(south,north),west:Math.min(west,east),north:Math.max(south,north),east:Math.max(west,east)};
+    if(out.north<=out.south||out.east<=out.west)return null;
+    return out;
+  }
+  function osmQuerySignature(opts={}){
+    const frame=normalizedOsmFrame(opts.osmFrame||opts.queryFrame);
+    if(frame)return `bbox:${frame.south.toFixed(6)},${frame.west.toFixed(6)},${frame.north.toFixed(6)},${frame.east.toFixed(6)}`;
+    return `around:${osmQueryRadius(opts)}`;
+  }
+  function osmQueryScope(opts={},center){
+    const frame=normalizedOsmFrame(opts.osmFrame||opts.queryFrame);
+    if(frame){
+      const box=[frame.south,frame.west,frame.north,frame.east].map(value=>Number(value).toFixed(6)).join(',');
+      return {mode:'bbox',selector:`(${box})`,frame};
+    }
+    const radiusM=osmQueryRadius(opts);
+    return {mode:'around',selector:`(around:${radiusM},${center.lat},${center.lng})`,radiusM};
+  }
+  function osmGuideQuery(scope){
+    const selector=scope?.selector||'';
+    const selectors=[
+      ['way','golf','course'],['relation','golf','course'],
+      ['way','golf','hole'],['relation','golf','hole'],
+      ['way','golf','green'],['relation','golf','green'],
+      ['way','golf','fairway'],['relation','golf','fairway'],
+      ['way','golf','tee'],['relation','golf','tee'],
+      ['way','golf','bunker'],['relation','golf','bunker'],
+      ['way','golf','water_hazard'],['relation','golf','water_hazard'],
+      ['way','golf','lateral_water_hazard'],['relation','golf','lateral_water_hazard'],
+      ['way','natural','water'],['relation','natural','water']
+    ];
+    return `[out:json][timeout:18];(${selectors.map(([type,key,value])=>`${type}${selector}["${key}"="${value}"];`).join('')});out geom tags;`;
   }
   function osmFeatureCount(payload,golfType){
     return (payload?.elements||[]).filter(element=>String(element?.tags?.golf||'').toLowerCase()===golfType).length;
@@ -1880,6 +1922,56 @@
   function osmPayloadElements(payload){
     return Array.isArray(payload?.elements)?payload.elements:null;
   }
+  function osmBoundsForPoints(points){
+    const clean=(points||[]).map(toPlain).filter(point=>Number.isFinite(point?.lat)&&Number.isFinite(point?.lng));
+    if(!clean.length)return null;
+    return clean.reduce((bounds,point)=>({
+      south:Math.min(bounds.south,point.lat),
+      west:Math.min(bounds.west,point.lng),
+      north:Math.max(bounds.north,point.lat),
+      east:Math.max(bounds.east,point.lng)
+    }),{south:Infinity,west:Infinity,north:-Infinity,east:-Infinity});
+  }
+  function osmPadBounds(bounds,padM=OSM_NATIVE_FRAME_PAD_M){
+    const frame=normalizedOsmFrame(bounds);
+    if(!frame)return null;
+    const centerLat=(frame.south+frame.north)/2;
+    const latPad=padM/111320;
+    const lngPad=padM/(111320*Math.max(.2,Math.cos(centerLat*Math.PI/180)));
+    return {south:frame.south-latPad,west:frame.west-lngPad,north:frame.north+latPad,east:frame.east+lngPad};
+  }
+  function osmBoundsSpanM(bounds){
+    const frame=normalizedOsmFrame(bounds);
+    if(!frame)return Infinity;
+    return distance({lat:frame.south,lng:frame.west},{lat:frame.north,lng:frame.east});
+  }
+  function nativeResolverFrameElement(element){
+    const golf=String(element?.tags?.golf||'').toLowerCase();
+    if(golf==='course'||golf==='hole'||golf==='green'||golf==='fairway'||golf==='tee'||golf==='bunker'||golf==='water_hazard'||golf==='lateral_water_hazard')return true;
+    return String(element?.tags?.natural||'').toLowerCase()==='water';
+  }
+  function nativeResolverFrameFromPayload(payload,course,opts={}){
+    const elements=osmPayloadElements(payload)||[];
+    const center=guideCoursePoint(course);
+    const points=[];
+    let featureCount=0;
+    let hasCoursePolygon=false;
+    elements.forEach(element=>{
+      if(!nativeResolverFrameElement(element))return;
+      const pts=osmGuidePointsFromElement(element);
+      if(!pts.length)return;
+      const featureCenter=shapeCentroid(pts)||pts[0];
+      if(center&&featureCenter&&distance(center,featureCenter)>OSM_NATIVE_FRAME_MAX_SPAN_M)return;
+      featureCount+=1;
+      if(String(element?.tags?.golf||'').toLowerCase()==='course'&&pts.length>=3)hasCoursePolygon=true;
+      points.push(...pts);
+    });
+    if(points.length<3)return null;
+    if(!hasCoursePolygon&&featureCount<Number(opts.minFeatures||3))return null;
+    const frame=osmPadBounds(osmBoundsForPoints(points),Number(opts.padM)||OSM_NATIVE_FRAME_PAD_M);
+    if(!frame||osmBoundsSpanM(frame)>OSM_NATIVE_FRAME_MAX_SPAN_M)return null;
+    return frame;
+  }
   function nativeResolverSourceLoadErrorFromBundle(bundle,error=null){
     const message=error&&error.message||bundle?.automapperError?.message||'Native resolver could not load OSM course geometry';
     const name=error&&error.name||bundle?.automapperError?.name||'';
@@ -1915,10 +2007,20 @@
       }});
       return {bundle,payload,sourceLoadError:null,source:'automapper-osm-payload'};
     }
+    const loadNativeSource=async(queryOpts={})=>loadOsmGuideBundle(request.course,Object.assign({},queryOpts,{needsGreens:true,fresh:true,skipGeometryResolver:true,suppressAutomapperTelemetry:true,debugRunId:request.debugRunId,source:'native-resolver',reason:'native-resolver-source-load',debugAttemptContext:attempt,callerFunction:'runNativeResolverStage'}));
     let loaded=null;
     let thrown=null;
     try{
-      loaded=await loadOsmGuideBundle(request.course,{needsGreens:true,fresh:true,skipGeometryResolver:true,suppressAutomapperTelemetry:true,debugRunId:request.debugRunId,source:'native-resolver',reason:'native-resolver-source-load',debugAttemptContext:attempt,callerFunction:'runNativeResolverStage',osmRadiusM:OSM_NATIVE_RESOLVER_RADIUS_M});
+      let frame=elements?nativeResolverFrameFromPayload(payload,request.course):null;
+      if(frame){
+        loaded=await loadNativeSource({osmFrame:frame,osmFrameReason:'automapper-source-frame'});
+      }else{
+        loaded=await loadNativeSource({osmRadiusM:elements?OSM_NATIVE_RESOLVER_RADIUS_M:OSM_AUTOMAPPER_RADIUS_M});
+        const seedPayload=loaded?.osmPayload||null;
+        const seedCoverage=nativeResolverSourceCoverage(seedPayload,loaded);
+        frame=!seedCoverage.reusable?nativeResolverFrameFromPayload(seedPayload,request.course):null;
+        if(frame)loaded=await loadNativeSource({osmFrame:frame,osmFrameReason:'native-source-seed-frame'});
+      }
     }catch(error){
       thrown=error;
     }
@@ -1932,7 +2034,9 @@
         osmFeatures:elements.length,
         acceptedGreens:Array.isArray(loaded?.greens)?loaded.greens.length:0,
         guides:Array.isArray(loaded?.guides)?loaded.guides.length:0,
-        queryRadiusM:OSM_NATIVE_RESOLVER_RADIUS_M,
+        queryMode:loaded?.queryMode||'',
+        queryRadiusM:loaded?.queryRadiusM||null,
+        queryFrame:loaded?.queryFrame||null,
         sourceCoverage:coverage,
         resolutionKey:request.resolutionKey,
         attemptToken:request.attemptToken
@@ -2038,7 +2142,6 @@
         courseId:courseId(course),
         courseName:courseName(course),
         courseCentre:course?.courseCentre||guideCoursePoint(course),
-        courseBoundary:course?.courseBoundary||course?.boundary||course?.bounds||null,
         mapViewport:nativeResolverMapViewport(),
         scorecardHoles:nativeResolverScorecardHoles(),
         osmPayload:payload,
@@ -2147,7 +2250,7 @@
       return mapperOsmGuideMemory;
     }
     const cached=cachedOsmGuideBundle(course);
-    if(cached&&cached.guides.length&&(!needsGreens||cached.hasGreenCache)){
+    if(!opts.fresh&&cached&&cached.guides.length&&(!needsGreens||cached.hasGreenCache)){
       if(logAutomapperTelemetry)recordMappingDebug(debugRunId,{source:'automapper',phase:'completed',event:'automapper-cache-hit',summary:'AutoMapper reused cached guide bundle',details:{
         invokedBy:opts.reason||opts.source||'course-loader',
         acceptedHoles:cached.guides.length,
@@ -2156,7 +2259,9 @@
       mapperOsmGuideMemory={cacheKey,guides:cached.guides,greens:cached.greens};
       return mapperOsmGuideMemory;
     }
-    if(mapperOsmGuideFetch?.cacheKey===cacheKey){
+    const querySignature=osmQuerySignature(opts);
+    const fetchKey=`${cacheKey}::${querySignature}`;
+    if(mapperOsmGuideFetch?.cacheKey===fetchKey){
       if(!mapperOsmGuideFetch.attempt||sameMappingAttempt(mapperOsmGuideFetch.attempt,attempt))return mapperOsmGuideFetch.promise;
       try{if(mapperOsmGuideFetch.controller&&typeof mapperOsmGuideFetch.controller.abort==='function')mapperOsmGuideFetch.controller.abort();}catch(e){}
       mapperOsmGuideFetch=null;
@@ -2166,8 +2271,8 @@
       if(logAutomapperTelemetry)recordMappingDebug(debugRunId,{source:'automapper',phase:'skipped',event:'automapper-no-course-center',summary:'AutoMapper skipped: course center unavailable',details:{invokedBy:opts.reason||opts.source||'course-loader',skipReason:'missing course center'}});
       return {guides:[],greens:[]};
     }
-    const radiusM=osmQueryRadius(opts);
-	    const query=`[out:json][timeout:18];(way(around:${radiusM},${center.lat},${center.lng})["golf"="course"];relation(around:${radiusM},${center.lat},${center.lng})["golf"="course"];way(around:${radiusM},${center.lat},${center.lng})["golf"="hole"];relation(around:${radiusM},${center.lat},${center.lng})["golf"="hole"];way(around:${radiusM},${center.lat},${center.lng})["golf"="green"];relation(around:${radiusM},${center.lat},${center.lng})["golf"="green"];way(around:${radiusM},${center.lat},${center.lng})["golf"="fairway"];relation(around:${radiusM},${center.lat},${center.lng})["golf"="fairway"];way(around:${radiusM},${center.lat},${center.lng})["golf"="tee"];relation(around:${radiusM},${center.lat},${center.lng})["golf"="tee"];way(around:${radiusM},${center.lat},${center.lng})["golf"="bunker"];relation(around:${radiusM},${center.lat},${center.lng})["golf"="bunker"];way(around:${radiusM},${center.lat},${center.lng})["golf"="water_hazard"];relation(around:${radiusM},${center.lat},${center.lng})["golf"="water_hazard"];way(around:${radiusM},${center.lat},${center.lng})["golf"="lateral_water_hazard"];relation(around:${radiusM},${center.lat},${center.lng})["golf"="lateral_water_hazard"];way(around:${radiusM},${center.lat},${center.lng})["natural"="water"];relation(around:${radiusM},${center.lat},${center.lng})["natural"="water"];);out geom tags;`;
+    const queryScope=osmQueryScope(opts,center);
+    const query=osmGuideQuery(queryScope);
     const url='https://overpass-api.de/api/interpreter?data='+encodeURIComponent(query);
     const automapperStartedAt=Date.now();
     if(logAutomapperTelemetry)recordMappingDebug(debugRunId,{source:'automapper',phase:'started',event:'automapper-started',summary:'AutoMapper started',details:{
@@ -2175,7 +2280,9 @@
       needsGreens,
       fresh:!!opts.fresh,
       center:{lat:center.lat,lng:center.lng},
-      queryRadiusM:radiusM,
+      queryMode:queryScope.mode,
+      queryRadiusM:queryScope.radiusM||null,
+      queryFrame:queryScope.frame||null,
       resolutionKey:attempt.resolutionKey,
       attemptToken:attempt.attemptToken,
       expectedHoleCount:automapperExpectedHoleCount()
@@ -2194,6 +2301,9 @@
         }
         let bundle=parseOsmGuideBundle(data);
         bundle.osmPayload=data;
+        bundle.queryMode=queryScope.mode;
+        bundle.queryRadiusM=queryScope.radiusM||null;
+        bundle.queryFrame=queryScope.frame||null;
         const autoDetails=automapperDebugDetails(data,bundle);
         const nativeRequested=!opts.skipGeometryResolver&&opts.allowInlineNativeResolver===true&&shouldRunCourseGeometryResolver(course,data,bundle,Object.assign({},opts,{debugRunId,source:opts.source||'automapper-inspection'}));
         bundle.automapperDetails=autoDetails;
@@ -2219,8 +2329,8 @@
         },error:{message:error&&error.message||String(error),name:error&&error.name||''}});
         return cached||{guides:[],greens:[],automapperStatus:'failed',automapperError:{message:error&&error.message||String(error),name:error&&error.name||''}};
       })
-      .finally(()=>{if(mapperOsmGuideFetch?.cacheKey===cacheKey)mapperOsmGuideFetch=null;});
-    mapperOsmGuideFetch={cacheKey,promise,controller,attempt};
+      .finally(()=>{if(mapperOsmGuideFetch?.cacheKey===fetchKey)mapperOsmGuideFetch=null;});
+    mapperOsmGuideFetch={cacheKey:fetchKey,promise,controller,attempt};
     return promise;
   }
   async function loadOsmHoleGuides(course=loadUserCourseData()){
