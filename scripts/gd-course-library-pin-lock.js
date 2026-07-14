@@ -4414,8 +4414,8 @@
     }catch(e){}
     return warmed;
   }
-  function collectCoursePlayFrames(course,source,opts={}){
-    const collection=mappedCoursePlayRows(course);
+	  function collectCoursePlayFrames(course,source,opts={}){
+	    const collection=mappedCoursePlayRows(course);
     const rows=collection.rows;
     const c=collection.course||course;
     let ingested=0;
@@ -4429,10 +4429,146 @@
       }
     }catch(e){}
     const warmed=opts.warmFrames===false?0:warmCoursePlayFrames(c,rows,source||'course-first-load-frame-warmup');
-    recordCoursePlayDebug('course-play-frames-collected',c,opts.activeHole||1,{source:source||'course-play-resolver',holes:rows.length,expectedHoleCount:collection.expected,ingested,warmed});
-    return {course:c,rows,expected:collection.expected,ingested,warmed};
-  }
-  function ingestRequestedHoleToPipeline(course,hole,source){
+	    recordCoursePlayDebug('course-play-frames-collected',c,opts.activeHole||1,{source:source||'course-play-resolver',holes:rows.length,expectedHoleCount:collection.expected,ingested,warmed});
+	    return {course:c,rows,expected:collection.expected,ingested,warmed};
+	  }
+	  function cloudCourseMapSyncApi(){
+	    try{
+	      const api=window.GolfDaddyCapturedSurfaceSync;
+	      return api&&typeof api.pullCourse==='function'?api:null;
+	    }catch(e){return null;}
+	  }
+	  function resumeRoundAvailableForCloudMap(){
+	    try{
+	      if(typeof window.gdReadResumeRound==='function'&&window.gdReadResumeRound())return true;
+	    }catch(e){}
+	    try{
+	      const panel=document.getElementById('gdCourseResumeRound');
+	      if(panel&&!panel.hidden&&!(panel.classList&&panel.classList.contains('hidden')))return true;
+	    }catch(e){}
+	    return false;
+	  }
+	  function shouldLookupCloudCourseMap(request,opts={}){
+	    if(opts.cloudCourseMapLookup===false)return false;
+	    if(opts.fromResume||opts.preserveState||opts.keepGps)return false;
+	    if(opts.__resumeRoundAvailableBeforeOpen)return false;
+	    if(resumeRoundAvailableForCloudMap())return false;
+	    return !!cloudCourseMapSyncApi();
+	  }
+	  function cloudCourseMapKeys(course){
+	    const keys=[];
+	    const add=value=>{
+	      const key=slug(value||'');
+	      if(key&&!keys.includes(key))keys.push(key);
+	    };
+	    add(courseId(course));
+	    add(course?.courseId||course?.id);
+	    add(courseName(course));
+	    add(course?.name||course?.courseName);
+	    return keys;
+	  }
+	  function cloudPoint(value){
+	    const lat=Number(value?.lat);
+	    const lng=Number(value?.lng);
+	    return Number.isFinite(lat)&&Number.isFinite(lng)?{lat,lng}:null;
+	  }
+	  function cloudPoints(values){
+	    return (Array.isArray(values)?values:[]).map(cloudPoint).filter(Boolean);
+	  }
+	  function cloudPins(scan){
+	    const manifest=scan?.manifest||{};
+	    const pins=scan?.pins||manifest.anchorPins||{};
+	    return {
+	      tee:cloudPoint(pins.tee),
+	      green:cloudPoint(pins.green),
+	      route:cloudPoints(pins.route),
+	      greenShape:cloudPoints(pins.greenShape)
+	    };
+	  }
+	  function pointAlongRoute(points,fraction=.5){
+	    const pts=cloudPoints(points);
+	    if(!pts.length)return null;
+	    if(pts.length===1)return pts[0];
+	    const total=routeLengthM(pts);
+	    if(!Number.isFinite(total)||total<=0)return pts[Math.floor(pts.length/2)];
+	    const target=total*Math.max(0,Math.min(1,fraction));
+	    let travelled=0;
+	    for(let i=1;i<pts.length;i++){
+	      const a=pts[i-1],b=pts[i];
+	      const segment=distance(a,b);
+	      if(travelled+segment>=target){
+	        const t=segment?((target-travelled)/segment):0;
+	        return {lat:a.lat+(b.lat-a.lat)*t,lng:a.lng+(b.lng-a.lng)*t};
+	      }
+	      travelled+=segment;
+	    }
+	    return pts[pts.length-1];
+	  }
+	  function persistCloudCourseMapScans(course,scans,opts={}){
+	    const rows=Array.isArray(scans)?scans:[];
+	    const uid=userId();
+	    const cid=courseId(course);
+	    const name=courseName(course);
+	    let saved=0;
+	    const holes={};
+	    rows.forEach(scan=>{
+	      const h=validHoleNumber(scan?.hole_number||scan?.holeNumber);
+	      if(!h)return;
+	      const pins=cloudPins(scan);
+	      const route=pins.route.length>=2?pins.route:[pins.tee,pins.green].filter(Boolean);
+	      const greenShape=pins.greenShape.length>=3?simplifyShape(pins.greenShape,64):null;
+	      const green=pins.green||shapeCentroid(greenShape)||route[route.length-1]||null;
+	      const tee=pins.tee||route[0]||null;
+	      const fairwayPoints=route.length>=3?route.slice(1,-1):route.length>=2?[pointAlongRoute(route,.5)].filter(Boolean):[];
+	      const resolvedAt=scan.updated_at||scan.updatedAt||nowIso();
+	      const base={userId:uid,courseId:cid,courseName:name,course,holeNumber:h,confirmed:true,resolverVersion:'captured-surface-sync-v1',resolvedAt,resolverSource:'supabase-captured-surface',resolverConfidence:.72,resolverMatchScore:.72,resolverEvidence:['supabase-captured-surface']};
+	      let holeSaved=0;
+	      if(green&&greenShape){
+	        if(saveCourseObject({...base,type:'green',position:green,shape:greenShape,greenShape,source:'supabase_captured_surface_green',maxDedupeDistanceM:8}))holeSaved++;
+	      }
+	      if(tee){
+	        if(saveCourseObject({...base,type:'tee',position:tee,source:'supabase_captured_surface_tee',maxDedupeDistanceM:8}))holeSaved++;
+	      }
+	      fairwayPoints.slice(0,3).forEach((point,index)=>{
+	        if(saveCourseObject({...base,type:'fairway',position:point,source:index?'supabase_captured_surface_fairway_bend':'supabase_captured_surface_fairway',maxDedupeDistanceM:10}))holeSaved++;
+	      });
+	      if(holeSaved){
+	        holes[h]=true;
+	        saved+=holeSaved;
+	      }
+	    });
+	    try{updateMapperToolCompletion();renderCourseLibraryPanel();gdCLRefreshProfileCard();}catch(e){}
+	    return {saved,holes:Object.keys(holes).map(Number).sort((a,b)=>a-b),scans:rows.length};
+	  }
+	  async function tryHydrateCourseMapFromCloud(request,attempt,opts={}){
+	    if(!shouldLookupCloudCourseMap(request,opts))return {attempted:false,reason:resumeRoundAvailableForCloudMap()?'resume-round-available':'cloud-pull-unavailable'};
+	    const api=cloudCourseMapSyncApi();
+	    const keys=cloudCourseMapKeys(request.course);
+	    if(!api||!keys.length)return {attempted:false,reason:'cloud-pull-unavailable'};
+	    recordMappingDebug(request.debugRunId,{source:'cloud-map',phase:'started',event:'course-map-cloud-lookup-started',summary:'Course map loading',details:{courseId:request.courseId,courseName:request.courseName,hole:request.hole,resolutionKey:request.resolutionKey,attemptToken:request.attemptToken,keys}});
+	    recordCoursePlayDebug('course-map-cloud-lookup-started',request.course,request.hole,{resolutionKey:request.resolutionKey,attemptToken:request.attemptToken,keys});
+	    updateCourseLoading('Course map loading',32);
+	    for(const key of keys){
+	      try{
+	        const result=await api.pullCourse(key,{reason:'course-play-cloud-map',forceActive:false});
+	        const scans=Array.isArray(result&&result.scans)?result.scans:[];
+	        if(!scans.length)continue;
+	        const persisted=persistCloudCourseMapScans(request.course,scans,{request,attempt,key});
+	        const readiness=savedMapCanSatisfyRequest(request.course,request.hole,request.wholeCourse);
+	        recordMappingDebug(request.debugRunId,{source:'cloud-map',phase:readiness.ready?'completed':'partial',event:readiness.ready?'course-map-cloud-loaded':'course-map-cloud-incomplete',summary:readiness.ready?'Course map loaded from cloud':'Course map cloud data incomplete',details:{courseKey:key,pulled:scans.length,persistedObjects:persisted.saved,holes:persisted.holes,playableHoleCount:readiness.coverage.count,expectedHoleCount:readiness.coverage.expected,missingHoles:readiness.coverage.missing,resolutionKey:request.resolutionKey,attemptToken:request.attemptToken}});
+	        recordCoursePlayDebug(readiness.ready?'course-map-cloud-loaded':'course-map-cloud-incomplete',request.course,request.hole,{courseKey:key,pulled:scans.length,persistedObjects:persisted.saved,holes:persisted.holes,playable:readiness.ready,resolutionKey:request.resolutionKey,attemptToken:request.attemptToken});
+	        return {attempted:true,found:true,key,result,persisted,readiness};
+	      }catch(error){
+	        recordMappingDebug(request.debugRunId,{source:'cloud-map',phase:'failed',event:'course-map-cloud-lookup-failed',summary:'Course map cloud lookup failed',details:{courseKey:key,resolutionKey:request.resolutionKey,attemptToken:request.attemptToken},error:{message:error&&error.message||String(error),status:error&&error.status||null}});
+	        recordCoursePlayDebug('course-map-cloud-lookup-failed',request.course,request.hole,{courseKey:key,reason:error&&error.message||String(error),resolutionKey:request.resolutionKey,attemptToken:request.attemptToken});
+	        return {attempted:true,failed:true,key,error};
+	      }
+	    }
+	    recordMappingDebug(request.debugRunId,{source:'cloud-map',phase:'skipped',event:'course-map-cloud-not-found',summary:'Course map not found in cloud',details:{keys,resolutionKey:request.resolutionKey,attemptToken:request.attemptToken}});
+	    recordCoursePlayDebug('course-map-cloud-not-found',request.course,request.hole,{keys,resolutionKey:request.resolutionKey,attemptToken:request.attemptToken});
+	    return {attempted:true,found:false,missing:true,keys};
+	  }
+	  function ingestRequestedHoleToPipeline(course,hole,source){
     try{
       const resolved=requestedMappedPlayData(course,hole);
       const pipeline=window.GDCoursePlayPipeline;
@@ -4719,12 +4855,15 @@
       recordCoursePlayDebug('course-mapping-attempt-started',c,h,{reason:request.reason,resolutionKey:key,attemptToken,revision});
       if(request.showLoading)showCourseLoading(c.name||c.courseName||'Loading course');
       updateCourseLoading(`Opening Hole ${h}`,24);
-      try{
-        rememberRequestedPlayHole(h);
-        try{if(typeof resetPlay==='function')resetPlay(true);}catch(e){}
-        try{await syncPublishedCourseMaps({quiet:true});}catch(e){}
-        try{setMappedPlayMode('mapped',{skipFrame:true,silent:true,preserveAssist:true});}catch(e){}
-        recordMappingDebug(debugRunId,{source:'saved-map',phase:'started',event:'saved-map-lookup-started',summary:'Saved-map lookup started',details:{hole:h,existingTrustedMap:false,resolutionKey:key,attemptToken}});
+	      try{
+	        rememberRequestedPlayHole(h);
+	        const resumeAvailableBeforeOpen=resumeRoundAvailableForCloudMap();
+	        try{if(typeof resetPlay==='function')resetPlay(true);}catch(e){}
+	        try{await syncPublishedCourseMaps({quiet:true});}catch(e){}
+	        try{setMappedPlayMode('mapped',{skipFrame:true,silent:true,preserveAssist:true});}catch(e){}
+	        const cloudMapResult=await tryHydrateCourseMapFromCloud(request,attempt,Object.assign({},opts,{__resumeRoundAvailableBeforeOpen:resumeAvailableBeforeOpen}));
+	        if(cloudMapResult&&cloudMapResult.attempted&&!mappingAttemptStillCurrent(request,attempt,'cloud-map'))return {playable:false,stale:true,reason:'superseded-after-cloud-map'};
+	        recordMappingDebug(debugRunId,{source:'saved-map',phase:'started',event:'saved-map-lookup-started',summary:'Saved-map lookup started',details:{hole:h,existingTrustedMap:false,resolutionKey:key,attemptToken}});
         const savedState=savedMapCanSatisfyRequest(c,h,request.wholeCourse);
         const savedPlayable=!!savedState.requestedPlayable;
         const savedReady=!!savedState.ready;

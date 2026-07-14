@@ -18,6 +18,7 @@ const {
   supabaseFetch,
   text
 } = require("./payment-utils");
+const { sendSystemAlert } = require("./alert-utils");
 
 const TABLE = "captured_surfaces";
 const MAX_SCANS_PER_PUSH = 20;
@@ -139,6 +140,29 @@ async function pull(payload) {
   };
 }
 
+async function warnPullFailed(payload, error, stage) {
+  try {
+    const courseKey = text(payload && payload.courseKey, 120);
+    const accountId = text(payload && payload.accountId, 120);
+    await sendSystemAlert({
+      eventType: "captured_surface_pull_failed",
+      title: "Captured surface pull failed",
+      detail: "A course map database pull failed before Play could hydrate a saved course map.",
+      key: [stage || "pull", courseKey || accountId || "unknown"].join(":"),
+      throttleMinutes: 20,
+      context: {
+        action: "pull",
+        stage: stage || "pull",
+        courseKey,
+        holeNumber: payload && payload.holeNumber || null,
+        accountId,
+        status: error && error.status || null,
+        details: error && (error.body || error.message) || String(error || "")
+      }
+    });
+  } catch (alertError) {}
+}
+
 exports.handler = async function (event) {
   if (event.httpMethod === "OPTIONS") return json(204, {});
   if (event.httpMethod !== "POST") return json(405, { error: "Method not allowed", synced: false });
@@ -150,16 +174,19 @@ exports.handler = async function (event) {
     return json(400, { error: "Invalid JSON", synced: false });
   }
 
+  const action = text(payload.action || "", 40);
+
   if (!hasSupabase()) {
+    if (action === "pull") await warnPullFailed(payload, { message: "Supabase is not configured" }, "not-configured");
     return json(503, { configured: false, synced: false, error: "Supabase is not configured. Captured surfaces were not synced." });
   }
 
-  const action = text(payload.action || "", 40);
   try {
     if (action === "push_scans") return json(200, await pushScans(payload));
     if (action === "pull") return json(200, await pull(payload));
     return json(400, { error: "Unsupported captured surface sync action", synced: false });
   } catch (error) {
+    if (action === "pull") await warnPullFailed(payload, error, "pull");
     return json(error.status || 502, {
       configured: true,
       synced: false,

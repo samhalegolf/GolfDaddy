@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  // Clarity Captured Surface -> Supabase sync (push-only v1).
+  // Clarity Captured Surface <-> Supabase sync.
   //
   // The captured-surface model (index.html, gdCapturedSurfaceModelV1) keeps a
   // localStorage registry of hole surface scans and has always queued Supabase
@@ -9,9 +9,9 @@
   // them: on scan writes (debounced), on startup, when the connection returns,
   // and when the session changes.
   //
-  // Registry stays the working copy. Cloud is a backup + diagnostics mirror;
-  // nothing is pulled back into the registry in v1, so the locked Green Wand /
-  // capture pipeline behaviour is untouched.
+  // Registry stays the working copy. Cloud is a backup + diagnostics mirror,
+  // and course-play can explicitly pull cloud scan rows before falling back to
+  // a fresh map scan.
 
   var ENDPOINT = '/api/captured-surface-sync';
   var REGISTRY_KEY = 'gd_captured_surface_scans_v1';
@@ -35,6 +35,58 @@
 
   function writeJson(key, value) {
     safe(function () { window.localStorage.setItem(key, JSON.stringify(value)); });
+  }
+
+  function slug(value) {
+    return String(value || 'course').toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'course';
+  }
+
+  function activeKey(courseKey, holeNumber) {
+    return 'gd_captured_surface_active_v1_' + slug(courseKey) + ':h' + (Number(holeNumber) || 1);
+  }
+
+  function legacyManifestKey(courseKey, holeNumber) {
+    return 'gd_captured_hole_frame_v19_' + slug(String(courseKey || 'course') + ':h' + (Number(holeNumber) || 1));
+  }
+
+  function point(value) {
+    if (!value) return null;
+    var lat = Number(value.lat);
+    var lng = Number(value.lng);
+    return Number.isFinite(lat) && Number.isFinite(lng) ? { lat: lat, lng: lng } : null;
+  }
+
+  function points(list) {
+    return (Array.isArray(list) ? list : []).map(point).filter(Boolean);
+  }
+
+  function cleanPins(pins) {
+    pins = pins && typeof pins === 'object' ? pins : {};
+    return {
+      tee: point(pins.tee),
+      green: point(pins.green),
+      route: points(pins.route),
+      greenShape: points(pins.greenShape)
+    };
+  }
+
+  function compactManifest(manifest) {
+    var copy = Object.assign({}, manifest && typeof manifest === 'object' ? manifest : {});
+    copy.tileCount = Array.isArray(copy.tiles) ? copy.tiles.length : Number(copy.tileCount) || 0;
+    if (!Array.isArray(copy.tiles)) copy.tiles = [];
+    return copy;
+  }
+
+  function renderableManifest(manifest) {
+    return !!(manifest && Array.isArray(manifest.tiles) && manifest.tiles.length && manifest.originPx);
+  }
+
+  function storedRenderableManifest(scan) {
+    var manifest = scan && scan.manifest;
+    if (renderableManifest(manifest)) return true;
+    var key = scan && scan.storage && scan.storage.legacyManifestKey;
+    var stored = key ? readJson(key, null) : null;
+    return renderableManifest(stored);
   }
 
   function readMeta() {
@@ -121,6 +173,112 @@
     return parsed;
   }
 
+  function cloudScanToLocal(row) {
+    if (!row || !row.client_scan_id) return null;
+    var courseKey = slug(row.course_key || row.courseKey || 'course');
+    var holeNumber = Math.max(1, Math.round(Number(row.hole_number || row.holeNumber) || 1));
+    var manifest = compactManifest(row.manifest || {});
+    if (!manifest.key) manifest.key = legacyManifestKey(courseKey, holeNumber);
+    if (!manifest.courseKey) manifest.courseKey = courseKey;
+    if (!manifest.courseName) manifest.courseName = row.course_name || row.courseName || courseKey;
+    if (!manifest.holeNumber) manifest.holeNumber = holeNumber;
+    var pins = cleanPins(row.pins || manifest.anchorPins || {});
+    return {
+      schema: 'gd.captured_surface.scan',
+      version: 1,
+      id: row.client_scan_id,
+      courseKey: courseKey,
+      courseName: row.course_name || row.courseName || manifest.courseName || courseKey,
+      holeNumber: holeNumber,
+      createdAt: row.created_at || row.createdAt || row.updated_at || row.updatedAt || new Date().toISOString(),
+      updatedAt: row.updated_at || row.updatedAt || row.created_at || row.createdAt || new Date().toISOString(),
+      reason: 'supabase-pull',
+      status: Object.assign({ latest: true, confidence: 'cloud-scan', trusted: false }, row.status || {}),
+      interaction: row.interaction || { owner: 'captured-surface', liveMapRole: 'capture-source-diagnostic-reference' },
+      source: {
+        type: row.source_type || row.sourceType || 'supabase-captured-surface',
+        captureZoom: manifest.captureZoom || row.projection && row.projection.captureZoom || null,
+        tileCount: Number(manifest.tileCount) || 0,
+        cloudHydrated: true
+      },
+      projection: row.projection || {
+        type: 'leaflet-pixel-origin',
+        captureZoom: manifest.captureZoom || null,
+        originPx: manifest.originPx || null,
+        imageWidth: manifest.imageWidth || 0,
+        imageHeight: manifest.imageHeight || 0
+      },
+      pins: pins,
+      storage: {
+        registryKey: REGISTRY_KEY,
+        activeKey: activeKey(courseKey, holeNumber),
+        legacyManifestKey: manifest.key || legacyManifestKey(courseKey, holeNumber)
+      },
+      manifest: manifest,
+      cloudHydrated: true,
+      cloudHydratedAt: new Date().toISOString(),
+      cloudSource: 'supabase'
+    };
+  }
+
+  function importPulledScans(rows, opts) {
+    opts = opts || {};
+    var incoming = (Array.isArray(rows) ? rows : []).map(cloudScanToLocal).filter(Boolean);
+    if (!incoming.length) return { count: 0, holes: [], renderableHoles: [], scans: [] };
+    var registry = readJson(REGISTRY_KEY, { version: 1, updatedAt: null, scans: [] });
+    registry.version = registry.version || 1;
+    registry.scans = Array.isArray(registry.scans) ? registry.scans : [];
+    var imported = [];
+    var holes = {};
+    var renderableHoles = {};
+    incoming.forEach(function (scan) {
+      var existing = registry.scans.find(function (item) { return item && item.id === scan.id; });
+      if (existing && !existing.cloudHydrated && String(existing.updatedAt || '') > String(scan.updatedAt || '')) return;
+      registry.scans = registry.scans.filter(function (item) { return !(item && item.id === scan.id); });
+      registry.scans.unshift(scan);
+      holes[String(scan.holeNumber)] = true;
+      if (storedRenderableManifest(scan)) renderableHoles[String(scan.holeNumber)] = true;
+      var currentActive = safe(function () { return window.localStorage.getItem(scan.storage.activeKey); }, '');
+      var currentScan = currentActive ? registry.scans.find(function (item) { return item && item.id === currentActive; }) : null;
+      var preserveRenderableLocal = currentScan && storedRenderableManifest(currentScan) && !renderableManifest(scan.manifest);
+      if (opts.forceActive || !currentActive || renderableManifest(scan.manifest) || !preserveRenderableLocal) {
+        safe(function () { window.localStorage.setItem(scan.storage.activeKey, scan.id); });
+      }
+      if (renderableManifest(scan.manifest)) {
+        safe(function () { window.localStorage.setItem(scan.storage.legacyManifestKey, JSON.stringify(scan.manifest)); });
+      }
+      imported.push(scan);
+    });
+    writeJson(REGISTRY_KEY, registry);
+    return {
+      count: imported.length,
+      holes: Object.keys(holes).map(Number).sort(function (a, b) { return a - b; }),
+      renderableHoles: Object.keys(renderableHoles).map(Number).sort(function (a, b) { return a - b; }),
+      scans: imported
+    };
+  }
+
+  async function pullCourse(courseKey, opts) {
+    opts = opts || {};
+    var key = slug(courseKey || opts.courseKey || '');
+    if (!key) throw new Error('Course key is required for captured surface pull');
+    setStatus({ state: 'loading', reason: opts.reason || 'course-map-pull', label: 'Course map loading', courseKey: key, error: '' });
+    try {
+      var body = { action: 'pull', courseKey: key, reason: opts.reason || 'course-map-pull' };
+      if (Number.isFinite(Number(opts.holeNumber)) && Number(opts.holeNumber) > 0) body.holeNumber = Math.round(Number(opts.holeNumber));
+      var result = await post(body);
+      var rows = Array.isArray(result.scans) ? result.scans : [];
+      var imported = importPulledScans(rows, opts);
+      setStatus(rows.length
+        ? { state: 'synced', reason: opts.reason || 'course-map-pull', label: 'Course map loaded', courseKey: key, pulled: rows.length, imported: imported.count, holes: imported.holes, error: '' }
+        : { state: 'missing', reason: opts.reason || 'course-map-pull', label: 'Course map unavailable', courseKey: key, pulled: 0, imported: 0, holes: [], error: '' });
+      return Object.assign({}, result, { pulled: rows.length, imported: imported, status: lastStatus });
+    } catch (error) {
+      setStatus({ state: 'error', reason: opts.reason || 'course-map-pull', label: 'Course map unavailable', courseKey: key, error: error && error.message || String(error || '') });
+      throw error;
+    }
+  }
+
   async function flush(reason) {
     if (flushing) return lastStatus;
     var payloads = pendingPayloads();
@@ -200,6 +358,8 @@
 
   window.GolfDaddyCapturedSurfaceSync = {
     flush: flush,
+    pullCourse: pullCourse,
+    importPulledScans: importPulledScans,
     status: function () { return lastStatus; },
     pending: pendingPayloads
   };
