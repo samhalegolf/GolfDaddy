@@ -82,6 +82,38 @@ function scorecardHoles() {
   }));
 }
 
+function cloudScan(holeNumber) {
+  const h = Number(holeNumber) || 1;
+  const baseLat = -36.9005 + h * 0.001;
+  const tee = { lat: baseLat, lng: 174.75 };
+  const fairway = { lat: baseLat + 0.00075, lng: 174.75 };
+  const green = { lat: baseLat + 0.0015, lng: 174.75 };
+  return {
+    client_scan_id: `controller-test-cloud-scan-${h}`,
+    course_key: "controller-test",
+    course_name: "Controller Test Golf Club",
+    hole_number: h,
+    source_type: "leaflet-tile-capture",
+    status: { latest: true, confidence: "cloud-scan" },
+    interaction: { owner: "captured-surface" },
+    projection: { type: "leaflet-pixel-origin", captureZoom: 19, originPx: { x: 1000 + h, y: 2000 + h }, imageWidth: 900, imageHeight: 1200 },
+    pins: {
+      tee,
+      green,
+      route: [tee, fairway, green],
+      greenShape: [
+        { lat: green.lat - 0.00006, lng: green.lng - 0.00006 },
+        { lat: green.lat - 0.00006, lng: green.lng + 0.00006 },
+        { lat: green.lat + 0.00006, lng: green.lng + 0.00006 },
+        { lat: green.lat + 0.00006, lng: green.lng - 0.00006 }
+      ]
+    },
+    manifest: { key: `gd_captured_hole_frame_v19_controller-test:h${h}`, courseKey: "controller-test", courseName: "Controller Test Golf Club", holeNumber: h, tileCount: 16, tiles: [], originPx: { x: 1000 + h, y: 2000 + h }, imageWidth: 900, imageHeight: 1200, captureZoom: 19 },
+    created_at: "2026-07-14T21:33:15.000Z",
+    updated_at: "2026-07-14T22:12:40.000Z"
+  };
+}
+
 function playableStore() {
   const c = course();
   return {
@@ -132,7 +164,7 @@ function osmPayload(kind) {
 
 function loadController(options = {}) {
   const events = [];
-  const calls = { fetch: 0, native: 0, manual: 0, scorecard: 0, nativeInputs: [], fetchUrls: [], order: [], ingestMappedCourse: 0, ingestMappedHole: 0, ingestedHoles: [], frameWarm: 0, frameWarmHoles: [] };
+  const calls = { fetch: 0, native: 0, manual: 0, scorecard: 0, cloudPull: 0, cloudPullKeys: [], nativeInputs: [], fetchUrls: [], order: [], ingestMappedCourse: 0, ingestMappedHole: 0, ingestedHoles: [], frameWarm: 0, frameWarmHoles: [] };
   const testConsole = Object.assign({}, console, { warn() {}, info() {} });
   const localStorage = storage({
     gd_user_course_library_v1: JSON.stringify(options.savedMap ? playableStore() : { courses: {} })
@@ -280,6 +312,25 @@ function loadController(options = {}) {
       ];
     };
   }
+  if (options.resumeRound) {
+    win.gdReadResumeRound = () => ({ updatedAt: Date.now(), course: course(), courseLabel: "Controller Test Golf Club", hole: 1, activated: true });
+  }
+  if (options.cloudPullScans || options.cloudPullEmpty || options.cloudPullFails) {
+    win.GolfDaddyCapturedSurfaceSync = {
+      async pullCourse(key) {
+        calls.cloudPull += 1;
+        calls.cloudPullKeys.push(String(key || ""));
+        calls.order.push("cloud-pull");
+        if (options.cloudPullFails) {
+          const error = new Error("database pull failed");
+          error.status = 502;
+          throw error;
+        }
+        const count = options.cloudPullScans === true ? 1 : Number(options.cloudPullScans) || 0;
+        return { synced: true, scans: options.cloudPullEmpty ? [] : Array.from({ length: count }, (_, index) => cloudScan(index + 1)) };
+      }
+    };
+  }
   win.window = win;
 
   const context = {
@@ -368,6 +419,36 @@ async function main() {
   assert.strictEqual(env.calls.native, 1, "partial saved map does not block whole-course native resolver");
   assert(env.events.some((event) => event.event === "saved-map-incomplete"), "partial saved map is reported clearly");
   assert(!env.events.some((event) => event.event === "saved-map-found"), "partial saved map is not treated as complete course evidence");
+
+  env = await runScenario({ cloudPullScans: true });
+  assert.strictEqual(env.result.playable, true, "cloud course map resolves play before a fresh scan");
+  assert.strictEqual(env.calls.cloudPull, 1, "cloud map is pulled once on a new-round open");
+  assert.strictEqual(env.calls.fetch, 0, "cloud map hit prevents OSM scan");
+  assert(env.events.some((event) => event.event === "course-map-cloud-lookup-started" && event.summary === "Course map loading"), "cloud map loading is reported truthfully");
+  assert(env.events.some((event) => event.event === "course-map-cloud-loaded"), "cloud map hit is logged");
+  assert(env.events.some((event) => event.event === "saved-map-found"), "cloud-hydrated map is available to the saved-map check");
+  assert(env.events.findIndex((event) => event.event === "course-map-cloud-lookup-started") < env.events.findIndex((event) => event.event === "saved-map-lookup-started"), "cloud lookup happens before saved-map readiness");
+
+  env = await runScenario({ cloudPullScans: 18, wholeCourse: true });
+  assert.strictEqual(env.result.playable, true, "whole-course cloud map resolves play");
+  assert.strictEqual(env.calls.fetch, 0, "whole-course cloud hit prevents OSM scan");
+  assert.deepStrictEqual(env.calls.frameWarmHoles, Array.from({ length: 18 }, (_, index) => index + 1), "whole-course cloud map collects every play frame on first load");
+  assert.strictEqual(env.calls.ingestMappedCourse, 1, "whole-course cloud map ingests the mapped course into the play pipeline");
+
+  env = await runScenario({ cloudPullEmpty: true, automapperSuccess: true });
+  assert(env.calls.cloudPull >= 1, "cloud miss is checked before fresh scan");
+  assert(env.events.some((event) => event.event === "course-map-cloud-not-found"), "cloud miss is logged");
+  assert.strictEqual(env.calls.fetch, 1, "cloud miss falls through to the existing fresh scan");
+
+  env = await runScenario({ cloudPullFails: true, automapperSuccess: true });
+  assert.strictEqual(env.calls.cloudPull, 1, "database pull failure is attempted once");
+  assert(env.events.some((event) => event.event === "course-map-cloud-lookup-failed"), "database pull failure is logged as a cloud warning");
+  assert.strictEqual(env.calls.fetch, 1, "database pull failure falls through to the existing fresh scan");
+
+  env = await runScenario({ cloudPullScans: true, resumeRound: true, automapperSuccess: true });
+  assert.strictEqual(env.calls.cloudPull, 0, "resume-round state skips the new-round cloud map pull");
+  assert(!env.events.some((event) => String(event.event || "").startsWith("course-map-cloud")), "resume-round path has no cloud-map lifecycle noise");
+  assert.strictEqual(env.calls.fetch, 1, "resume-round skip leaves the existing scan path available");
 
   env = await runScenario({ automapperSuccess: true });
   assert.strictEqual(env.result.playable, true, "AutoMapper success resolves play");
