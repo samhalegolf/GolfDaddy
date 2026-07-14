@@ -15,6 +15,7 @@
   var MEDIUM_CONFIDENCE = 0.58;
   var EARTH_RADIUS_M = 6371008.8;
   var MAX_BEAM_WIDTH = 360;
+  var GREEN_FAIRWAY_LINK_MAX_M = 230;
   var activeRunId = "";
 
   function number(value, fallback) {
@@ -483,16 +484,113 @@
     return { path: pts, green: match && match.green || null, greenDistanceM: match && match.distance || Infinity };
   }
 
-  function farthestPair(points) {
-    var pts = (points || []).map(toPoint).filter(Boolean);
-    var best = null;
-    for (var i = 0; i < pts.length; i += 1) {
-      for (var j = i + 1; j < pts.length; j += 1) {
-        var d = distanceM(pts[i], pts[j]);
-        if (!best || d > best.distance) best = { a: pts[i], b: pts[j], distance: d };
+  function localProjector(origin) {
+    origin = toPoint(origin) || { lat: 0, lng: 0 };
+    var latScale = 111320;
+    var lngScale = 111320 * Math.max(0.2, Math.cos(rad(origin.lat)));
+    return {
+      toXY: function (point) {
+        point = toPoint(point);
+        return point ? { x: (point.lng - origin.lng) * lngScale, y: (point.lat - origin.lat) * latScale } : null;
+      },
+      toPoint: function (xy) {
+        return { lat: origin.lat + xy.y / latScale, lng: origin.lng + xy.x / lngScale };
       }
+    };
+  }
+
+  function distancePointToSegmentM(point, a, b) {
+    point = toPoint(point);
+    a = toPoint(a);
+    b = toPoint(b);
+    if (!point || !a || !b) return Infinity;
+    var projector = localProjector(point);
+    var p = projector.toXY(point);
+    var aa = projector.toXY(a);
+    var bb = projector.toXY(b);
+    var vx = bb.x - aa.x;
+    var vy = bb.y - aa.y;
+    var len2 = vx * vx + vy * vy;
+    if (!len2) return Math.sqrt(Math.pow(p.x - aa.x, 2) + Math.pow(p.y - aa.y, 2));
+    var t = clamp(((p.x - aa.x) * vx + (p.y - aa.y) * vy) / len2, 0, 1);
+    var x = aa.x + vx * t;
+    var y = aa.y + vy * t;
+    return Math.sqrt(Math.pow(p.x - x, 2) + Math.pow(p.y - y, 2));
+  }
+
+  function distancePointToPolygonM(point, polygon) {
+    var poly = cleanPolygon(polygon);
+    point = toPoint(point);
+    if (!point || !poly) return Infinity;
+    if (pointInPolygon(point, poly)) return 0;
+    var best = Infinity;
+    for (var i = 0; i < poly.length; i += 1) {
+      best = Math.min(best, distancePointToSegmentM(point, poly[i], poly[(i + 1) % poly.length]));
     }
     return best;
+  }
+
+  function distancePointToPathM(point, path) {
+    var pts = (path || []).map(toPoint).filter(Boolean);
+    if (!toPoint(point) || pts.length < 2) return Infinity;
+    var best = Infinity;
+    for (var i = 1; i < pts.length; i += 1) {
+      best = Math.min(best, distancePointToSegmentM(point, pts[i - 1], pts[i]));
+    }
+    return best;
+  }
+
+  function fairwayMajorAxis(polygon) {
+    var pts = cleanPolygon(polygon);
+    if (!pts) return null;
+    var origin = centroid(pts);
+    var projector = localProjector(origin);
+    var xy = pts.map(projector.toXY).filter(Boolean);
+    if (xy.length < 3) return null;
+    var meanX = 0;
+    var meanY = 0;
+    xy.forEach(function (point) {
+      meanX += point.x;
+      meanY += point.y;
+    });
+    meanX /= xy.length;
+    meanY /= xy.length;
+    var xx = 0;
+    var xyCov = 0;
+    var yy = 0;
+    xy.forEach(function (point) {
+      var dx = point.x - meanX;
+      var dy = point.y - meanY;
+      xx += dx * dx;
+      xyCov += dx * dy;
+      yy += dy * dy;
+    });
+    var angle = 0.5 * Math.atan2(2 * xyCov, xx - yy);
+    var axis = { x: Math.cos(angle), y: Math.sin(angle) };
+    var min = Infinity;
+    var max = -Infinity;
+    xy.forEach(function (point) {
+      var projection = point.x * axis.x + point.y * axis.y;
+      min = Math.min(min, projection);
+      max = Math.max(max, projection);
+    });
+    if (!Number.isFinite(min) || !Number.isFinite(max) || max - min < 60) return null;
+    function pointAt(projection) {
+      return projector.toPoint({ x: axis.x * projection, y: axis.y * projection });
+    }
+    return {
+      min: min,
+      max: max,
+      spanM: max - min,
+      center: pointAt((min + max) / 2),
+      a: pointAt(min),
+      b: pointAt(max),
+      projectionForPoint: function (point) {
+        var p = projector.toXY(point);
+        return p ? p.x * axis.x + p.y * axis.y : NaN;
+      },
+      pointAt: pointAt
+    };
   }
 
   function nearbyFeatureCount(point, elements, radiusM, predicate) {
@@ -523,8 +621,20 @@
     return 3;
   }
 
-  function buildCandidate(id, rawPath, greens, elements, source, extraEvidence) {
-    var oriented = orientPathToGreen(rawPath, greens);
+  function orientPathToSpecificGreen(path, green) {
+    var pts = (path || []).map(toPoint).filter(Boolean);
+    green = green || null;
+    if (pts.length >= 2 && green && toPoint(green.centre)) {
+      var first = distanceM(pts[0], green.centre);
+      var last = distanceM(pts[pts.length - 1], green.centre);
+      if (first < last) pts.reverse();
+      return { path: pts, green: green, greenDistanceM: Math.min(first, last) };
+    }
+    return { path: pts, green: null, greenDistanceM: Infinity };
+  }
+
+  function buildCandidate(id, rawPath, greens, elements, source, extraEvidence, forcedGreen) {
+    var oriented = forcedGreen ? orientPathToSpecificGreen(rawPath, forcedGreen) : orientPathToGreen(rawPath, greens);
     var path = dedupeNearbyPoints(oriented.path, 2);
     if (path.length < 2) return null;
     var green = oriented.green;
@@ -537,11 +647,10 @@
     var evidence = [source, "path:" + Math.round(pathDistance) + "m"].concat(extraEvidence || []);
     if (green) evidence.push("green:" + green.id);
     if (oriented.greenDistanceM < Infinity) evidence.push("green-distance:" + Math.round(oriented.greenDistanceM) + "m");
-    var confidence = source === "osm-hole-line" ? 0.72 : 0.48;
+    var confidence = source === "osm-hole-line" ? 0.72 : source === "fairway-centreline" ? 0.64 : 0.48;
     if (green && oriented.greenDistanceM <= 95) confidence += 0.12;
     if (pathDistance >= 70 && pathDistance <= 620) confidence += 0.08;
     if (straightLine > 0 && pathDistance / straightLine < 1.55) confidence += 0.04;
-    if (source === "fairway-axis") confidence -= 0.08;
     return {
       candidateId: id,
       greenId: green && green.id || "",
@@ -560,8 +669,126 @@
     };
   }
 
-  function detectHoleGeometryCandidates(elements, greens, boundary) {
+  function fairwayCenterlineForGreen(green, fairway, index, boundary) {
+    var polygon = cleanPolygon(elementPoints(fairway));
+    if (!green || !polygon) return null;
+    var center = centroid(polygon);
+    if (center && !pointInPolygon(center, boundary)) return null;
+    var fairwayDistance = distancePointToPolygonM(green.centre, polygon);
+    if (fairwayDistance > GREEN_FAIRWAY_LINK_MAX_M) return null;
+    var axis = fairwayMajorAxis(polygon);
+    if (!axis) return null;
+    var endpointA = axis.a;
+    var endpointB = axis.b;
+    var aDistance = distanceM(endpointA, green.centre);
+    var bDistance = distanceM(endpointB, green.centre);
+    var near = aDistance <= bDistance ? endpointA : endpointB;
+    var far = aDistance <= bDistance ? endpointB : endpointA;
+    var greenProjection = axis.projectionForPoint(green.centre);
+    var projectedGreenSide = Number.isFinite(greenProjection) ? axis.pointAt(clamp(greenProjection, axis.min, axis.max)) : near;
+    if (distanceM(projectedGreenSide, green.centre) > distanceM(near, green.centre) + 35) projectedGreenSide = near;
+    var rawPath = [far, axis.center, projectedGreenSide, green.centre].filter(Boolean);
+    var evidence = [
+      "fairway:" + elementId(fairway, "fairway-" + index),
+      "green-led",
+      "fairway-distance:" + Math.round(fairwayDistance) + "m",
+      "fairway-axis-span:" + Math.round(axis.spanM) + "m"
+    ];
+    return buildCandidate(
+      elementId(fairway, "fairway-" + index) + "-" + green.id,
+      rawPath,
+      [green],
+      [fairway],
+      "fairway-centreline",
+      evidence,
+      green
+    );
+  }
+
+  function greenLedFairwayCandidates(elements, greens, boundary) {
+    var fairways = (elements || []).map(function (element, index) {
+      if (golfTag(element) !== "fairway") return null;
+      var polygon = cleanPolygon(elementPoints(element));
+      if (!polygon) return null;
+      return { element: element, index: index, polygon: polygon };
+    }).filter(Boolean);
+    if (!fairways.length || !(greens || []).length) return [];
     var candidates = [];
+    (greens || []).forEach(function (green) {
+      var ranked = fairways.map(function (fairway) {
+        return {
+          fairway: fairway,
+          distance: distancePointToPolygonM(green.centre, fairway.polygon)
+        };
+      }).filter(function (entry) {
+        return Number.isFinite(entry.distance) && entry.distance <= GREEN_FAIRWAY_LINK_MAX_M;
+      }).sort(function (a, b) {
+        return a.distance - b.distance;
+      });
+      for (var i = 0; i < ranked.length; i += 1) {
+        var candidate = fairwayCenterlineForGreen(green, ranked[i].fairway.element, ranked[i].fairway.index, boundary);
+        if (candidate) {
+          candidates.push(candidate);
+          break;
+        }
+      }
+    });
+    return candidates;
+  }
+
+  function greenLedHoleLineCorridorCandidates(elements, greens, boundary) {
+    var lines = (elements || []).map(function (element, index) {
+      if (golfTag(element) !== "hole") return null;
+      var pts = elementPoints(element);
+      if (pts.length < 2) return null;
+      var center = centroid(pts);
+      if (center && !pointInPolygon(center, boundary)) return null;
+      return { element: element, index: index, points: pts };
+    }).filter(Boolean);
+    if (!lines.length || !(greens || []).length) return [];
+    var candidates = [];
+    (greens || []).forEach(function (green) {
+      var ranked = lines.map(function (line) {
+        return {
+          line: line,
+          distance: Math.min(distancePointToPathM(green.centre, line.points), distanceM(green.centre, line.points[0]), distanceM(green.centre, line.points[line.points.length - 1]))
+        };
+      }).filter(function (entry) {
+        return Number.isFinite(entry.distance) && entry.distance <= GREEN_FAIRWAY_LINK_MAX_M;
+      }).sort(function (a, b) {
+        return a.distance - b.distance;
+      });
+      if (!ranked.length) return;
+      var line = ranked[0].line;
+      var ref = validHoleNumber(tagText(line.element, "ref") || tagText(line.element, "name"));
+      var candidate = buildCandidate(
+        elementId(line.element, "hole-" + line.index) + "-" + green.id,
+        line.points,
+        [green],
+        elements,
+        "fairway-centreline",
+        ["osm-hole-line-as-fairway", "green-led", "hole-line-distance:" + Math.round(ranked[0].distance) + "m"].concat(ref ? ["existing-ref:" + ref] : ["missing-ref"]),
+        green
+      );
+      if (candidate) {
+        candidate.existingHoleNumber = ref || undefined;
+        candidates.push(candidate);
+      }
+    });
+    return candidates;
+  }
+
+  function fairwayCorridorCount(elements, candidates) {
+    var taggedFairways = geometryIds(elements || [], "fairway").length;
+    var inferred = (candidates || []).filter(function (candidate) {
+      return (candidate.evidence || []).indexOf("fairway-centreline") >= 0 ||
+        (candidate.evidence || []).indexOf("osm-hole-line-as-fairway") >= 0;
+    }).length;
+    return Math.max(taggedFairways, inferred);
+  }
+
+  function detectHoleGeometryCandidates(elements, greens, boundary) {
+    var holeLineCandidates = [];
     (elements || []).forEach(function (element, index) {
       var golf = golfTag(element);
       var pts = elementPoints(element);
@@ -580,28 +807,18 @@
         );
         if (candidate) {
           candidate.existingHoleNumber = ref || undefined;
-          candidates.push(candidate);
+          holeLineCandidates.push(candidate);
         }
       }
     });
-    if (candidates.length >= 9) return dedupeCandidates(candidates);
-    (elements || []).forEach(function (element, index) {
-      if (golfTag(element) !== "fairway") return;
-      var polygon = cleanPolygon(elementPoints(element));
-      if (!polygon) return;
-      var pair = farthestPair(polygon);
-      if (!pair || pair.distance < 80) return;
-      var candidate = buildCandidate(
-        elementId(element, "fairway-" + index),
-        [pair.a, centroid(polygon), pair.b].filter(Boolean),
-        greens,
-        elements,
-        "fairway-axis",
-        ["fairway-span:" + Math.round(pair.distance) + "m"]
-      );
-      if (candidate) candidates.push(candidate);
-    });
-    return dedupeCandidates(candidates);
+    var fairwayCandidates = greenLedFairwayCandidates(elements, greens, boundary);
+    if (fairwayCandidates.length) {
+      var labelledHoleLines = holeLineCandidates.filter(function (candidate) { return candidate.existingHoleNumber; });
+      return dedupeCandidates(fairwayCandidates.concat(labelledHoleLines));
+    }
+    var holeLineCorridors = greenLedHoleLineCorridorCandidates(elements, greens, boundary);
+    if (holeLineCorridors.length) return dedupeCandidates(holeLineCorridors);
+    return dedupeCandidates(holeLineCandidates);
   }
 
   function dedupeCandidates(candidates) {
@@ -674,34 +891,126 @@
     return Number.isFinite(n) && n >= 3 && n <= 6 ? n : undefined;
   }
 
-  function scorecardSources(input) {
-    var sources = [];
-    if (Array.isArray(input.scorecardHoles)) sources.push(input.scorecardHoles);
-    if (input.scorecard) sources.push(input.scorecard);
-    try {
-      if (window.scorecard) sources.push(window.scorecard);
-      if (window.gdScorecard) sources.push(window.gdScorecard);
-      if (window.currentScorecard) sources.push(window.currentScorecard);
-    } catch (e) { /* no-op */ }
-    return sources;
+  function scorecardSourceHoles(source) {
+    if (Array.isArray(source)) return source;
+    if (Array.isArray(source && source.holes)) return source.holes;
+    if (Array.isArray(source && source.scorecard && source.scorecard.holes)) return source.scorecard.holes;
+    return [];
   }
 
-  function normalizeScorecard(input) {
-    var best = [];
-    scorecardSources(input || {}).forEach(function (source) {
-      var holes = [];
-      if (Array.isArray(source)) holes = source;
-      else if (Array.isArray(source && source.holes)) holes = source.holes;
-      else if (Array.isArray(source && source.scorecard && source.scorecard.holes)) holes = source.scorecard.holes;
-      if (!holes.length) return;
-      var normalized = holes.map(function (hole, index) {
-        return normalizeScorecardHole(hole, index + 1);
-      }).filter(Boolean);
+  function pushScorecardSource(entries, source, label, url) {
+    if (!source) return;
+    var holes = scorecardSourceHoles(source);
+    if (!holes.length) return;
+    entries.push({
+      source: source,
+      label: String(label || source.source || source.provider || source.name || "scorecard").trim(),
+      sourceUrl: String(url || source.sourceUrl || source.url || "").trim()
+    });
+  }
+
+  function scorecardSourceEntries(input) {
+    input = input || {};
+    var entries = [];
+    var evidence = input.scorecardEvidence || {};
+    var evidenceSources = Array.isArray(evidence.sources) ? evidence.sources : [];
+    if (evidenceSources.length) {
+      evidenceSources.forEach(function (source) {
+        pushScorecardSource(entries, source.holes || source.scorecard || source, source.source || source.provider || evidence.source, source.sourceUrl || source.url);
+      });
+    } else if (Array.isArray(evidence.holes)) {
+      pushScorecardSource(entries, evidence.holes, evidence.source || "scorecard-evidence", evidence.sourceUrl || "");
+    }
+    if (!evidenceSources.length && Array.isArray(input.scorecardHoles)) pushScorecardSource(entries, input.scorecardHoles, "scorecard-holes", "");
+    if (!evidenceSources.length && input.scorecard) pushScorecardSource(entries, input.scorecard, input.scorecard.source || "scorecard", input.scorecard.sourceUrl || "");
+    try {
+      if (!evidenceSources.length && window.scorecard) pushScorecardSource(entries, window.scorecard, window.scorecard.source || "window-scorecard", window.scorecard.sourceUrl || "");
+      if (!evidenceSources.length && window.gdScorecard) pushScorecardSource(entries, window.gdScorecard, window.gdScorecard.source || "window-gdScorecard", window.gdScorecard.sourceUrl || "");
+      if (!evidenceSources.length && window.currentScorecard) pushScorecardSource(entries, window.currentScorecard, window.currentScorecard.source || "window-currentScorecard", window.currentScorecard.sourceUrl || "");
+    } catch (e) { /* no-op */ }
+    return entries;
+  }
+
+  function normalizeScorecardSources(input) {
+    var seen = {};
+    return scorecardSourceEntries(input || {}).map(function (entry, index) {
+      var normalized = scorecardSourceHoles(entry.source).map(function (hole, holeIndex) {
+        return normalizeScorecardHole(hole, holeIndex + 1);
+      }).filter(Boolean).sort(function (a, b) { return a.holeNumber - b.holeNumber; });
       var completeDistances = normalized.filter(function (hole) { return Number.isFinite(hole.distanceM); }).length;
+      var signature = normalized.map(function (hole) {
+        return hole.holeNumber + ":" + (Number.isFinite(hole.distanceM) ? Math.round(hole.distanceM) : "");
+      }).join("|");
+      var key = (entry.sourceUrl || entry.label || ("inline-" + index)) + "|" + signature;
+      if (!normalized.length || seen[key]) return null;
+      seen[key] = true;
+      return {
+        source: entry.label || "scorecard",
+        sourceUrl: entry.sourceUrl || "",
+        holes: normalized,
+        distanceCount: completeDistances
+      };
+    }).filter(Boolean);
+  }
+
+  function normalizeScorecard(input, normalizedSources) {
+    normalizedSources = normalizedSources || normalizeScorecardSources(input || {});
+    var best = [];
+    normalizedSources.forEach(function (source) {
       var bestDistances = best.filter(function (hole) { return Number.isFinite(hole.distanceM); }).length;
-      if (normalized.length > best.length || completeDistances > bestDistances) best = normalized;
+      if (source.holes.length > best.length || source.distanceCount > bestDistances) best = source.holes;
     });
     return best.sort(function (a, b) { return a.holeNumber - b.holeNumber; });
+  }
+
+  function scorecardDistanceCount(scorecard) {
+    return (scorecard || []).filter(function (hole) { return Number.isFinite(hole.distanceM); }).length;
+  }
+
+  function scorecardLengthOrder(scorecard) {
+    return (scorecard || []).filter(function (hole) { return Number.isFinite(hole.distanceM); }).map(function (hole) {
+      return {
+        hole: hole.holeNumber,
+        distanceM: Math.round(hole.distanceM),
+        par: hole.par
+      };
+    }).sort(function (a, b) { return b.distanceM - a.distanceM; });
+  }
+
+  function candidateLengthOrder(candidates) {
+    return (candidates || []).filter(function (candidate) { return Number.isFinite(candidate.pathDistanceM); }).map(function (candidate) {
+      return {
+        candidateId: candidate.candidateId,
+        displayId: candidate.displayId || "",
+        pathDistanceM: Math.round(candidate.pathDistanceM)
+      };
+    }).sort(function (a, b) { return b.pathDistanceM - a.pathDistanceM; });
+  }
+
+  function scorecardEvidenceSummary(input, normalizedSources, scorecard, expected) {
+    input = input || {};
+    var evidence = input.scorecardEvidence || {};
+    var sourceRows = (normalizedSources || []).map(function (source) {
+      return {
+        source: source.source || "scorecard",
+        sourceUrl: source.sourceUrl || "",
+        holes: source.holes.length,
+        distanceCount: source.distanceCount,
+        lengthOrder: scorecardLengthOrder(source.holes).slice(0, Math.max(18, expected || 18))
+      };
+    });
+    var distanceCount = scorecardDistanceCount(scorecard);
+    var explicitDistanceCount = number(evidence.distanceCount, NaN);
+    if (Number.isFinite(explicitDistanceCount)) distanceCount = Math.max(distanceCount, explicitDistanceCount);
+    return {
+      source: evidence.source || (sourceRows[0] && sourceRows[0].source) || "",
+      sourceUrl: evidence.sourceUrl || (sourceRows[0] && sourceRows[0].sourceUrl) || "",
+      sourceCount: sourceRows.length,
+      distanceCount: distanceCount,
+      requiredDistanceCount: expected ? Math.min(expected, 18) : 18,
+      lengthOrder: Array.isArray(evidence.lengthOrder) && evidence.lengthOrder.length ? evidence.lengthOrder : scorecardLengthOrder(scorecard),
+      sources: sourceRows
+    };
   }
 
   function median(values) {
@@ -737,6 +1046,8 @@
     var evidence = candidate.evidence.slice();
     var distanceScore = 0;
     var rankScore = 0;
+    var multiSourceScore = 0;
+    var multiSourceCount = 0;
     var parScore = 0;
     var shapeScore = 0;
     var hazardScore = 0;
@@ -747,32 +1058,49 @@
     var tieBreakersUsed = [];
     var explanation = [];
     if (Number.isFinite(candidate.existingHoleNumber) && candidate.existingHoleNumber === hole.holeNumber) {
-      score += 0.28;
+      score += 0.24;
       evidence.push("existing-osm-ref-match");
       tieBreakersUsed.push("existing-osm-ref");
       explanation.push("Existing OSM hole number matched this scorecard hole.");
     }
     if (Number.isFinite(hole.distanceM)) {
+      var cr = context.candidateRanks[candidate.candidateId];
+      var hr = context.scorecardRanks[hole.holeNumber];
+      if (Number.isFinite(cr) && Number.isFinite(hr)) {
+        rankScore = clamp(1 - Math.abs(cr - hr) / 0.55, 0, 1);
+        score += 0.46 * rankScore;
+        evidence.push("relative-rank:" + rankScore.toFixed(2));
+        if (rankScore >= 0.75) explanation.push("Relative distance rank matched the scorecard structure.");
+      }
+      if (Array.isArray(context.sourceRankMaps) && context.sourceRankMaps.length > 1 && Number.isFinite(cr)) {
+        context.sourceRankMaps.forEach(function (sourceRank) {
+          var sr = sourceRank && sourceRank[hole.holeNumber];
+          if (!Number.isFinite(sr)) return;
+          multiSourceCount += 1;
+          multiSourceScore += clamp(1 - Math.abs(cr - sr) / 0.55, 0, 1);
+        });
+        if (multiSourceCount > 1) {
+          multiSourceScore /= multiSourceCount;
+          score += 0.12 * multiSourceScore;
+          evidence.push("multi-source-rank:" + multiSourceScore.toFixed(2));
+          if (multiSourceScore >= 0.78) {
+            tieBreakersUsed.push("multi-source-length-order");
+            explanation.push("Multiple scorecard sources agreed with this relative length order.");
+          }
+        }
+      }
       var expected = hole.distanceM * context.scale;
       var diff = Math.abs(candidate.pathDistanceM - expected) / Math.max(80, expected);
       scaledDistanceDeltaM = Math.abs(candidate.pathDistanceM - expected);
       normalizedDistanceDelta = diff;
       distanceScore = clamp(1 - diff / 0.28, 0, 1);
-      score += 0.34 * distanceScore;
-      evidence.push("distance-score:" + distanceScore.toFixed(2));
-      if (distanceScore >= 0.62) explanation.push("Centre-path distance fit the scorecard after course-wide scale adjustment.");
-      var cr = context.candidateRanks[candidate.candidateId];
-      var hr = context.scorecardRanks[hole.holeNumber];
-      if (Number.isFinite(cr) && Number.isFinite(hr)) {
-        rankScore = clamp(1 - Math.abs(cr - hr) / 0.55, 0, 1);
-        score += 0.18 * rankScore;
-        evidence.push("relative-rank:" + rankScore.toFixed(2));
-        if (rankScore >= 0.75) explanation.push("Relative distance rank matched the scorecard structure.");
-      }
+      score += 0.10 * distanceScore;
+      evidence.push("scale-sanity:" + distanceScore.toFixed(2));
+      if (distanceScore >= 0.62) explanation.push("Centre-path distance stayed within the course-wide scorecard scale check.");
     }
     if (hole.par && candidate.inferredPar) {
       parScore = hole.par === candidate.inferredPar ? 1 : Math.abs(hole.par - candidate.inferredPar) === 1 ? 0.42 : 0;
-      score += 0.11 * parScore;
+      score += 0.07 * parScore;
       evidence.push("par-score:" + parScore.toFixed(2));
       if (parScore >= 0.8) {
         tieBreakersUsed.push("par");
@@ -806,6 +1134,8 @@
         normalizedDistanceDelta: normalizedDistanceDelta,
         distanceScore: distanceScore,
         rankScore: rankScore,
+        multiSourceScore: multiSourceScore,
+        multiSourceCount: multiSourceCount,
         parScore: parScore,
         shapeScore: shapeScore,
         hazardScore: hazardScore,
@@ -830,7 +1160,7 @@
     return 0;
   }
 
-  function matchCandidatesToScorecard(candidates, scorecard, expectedHoleCount) {
+  function matchCandidatesToScorecard(candidates, scorecard, expectedHoleCount, normalizedScorecardSources) {
     var warnings = [];
     var holes = scorecard.slice().sort(function (a, b) { return a.holeNumber - b.holeNumber; });
     if (!holes.length) {
@@ -847,7 +1177,12 @@
     var context = {
       scale: distanceScale(usefulCandidates, holes),
       candidateRanks: rankMap(usefulCandidates, function (candidate) { return candidate.pathDistanceM; }, function (candidate) { return candidate.candidateId; }),
-      scorecardRanks: rankMap(holes, function (hole) { return hole.distanceM; }, function (hole) { return hole.holeNumber; })
+      scorecardRanks: rankMap(holes, function (hole) { return hole.distanceM; }, function (hole) { return hole.holeNumber; }),
+      sourceRankMaps: (normalizedScorecardSources || []).filter(function (source) { return source.distanceCount >= 2; }).map(function (source) {
+        return rankMap(source.holes, function (hole) { return hole.distanceM; }, function (hole) { return hole.holeNumber; });
+      }),
+      scorecardLengthOrder: scorecardLengthOrder(holes),
+      candidateLengthOrder: candidateLengthOrder(usefulCandidates)
     };
     var pair = {};
     holes.forEach(function (hole) {
@@ -1052,6 +1387,7 @@
         analysisBoundary: boundary || [],
         osmFeatureCount: Array.isArray(elements) ? elements.length : 0,
         fairwayCount: (elements || []).filter(function (element) { return golfTag(element) === "fairway"; }).length,
+        osmFairwayCount: (elements || []).filter(function (element) { return golfTag(element) === "fairway"; }).length,
         expectedHoleCount: expectedHoleCount(input, scorecard || []),
         greenCandidates: [],
         rejectedGreenCandidates: [],
@@ -1215,6 +1551,8 @@
 
   function checkpointMetadata(input, data, extra) {
     var candidates = data.candidates || [];
+    var taggedFairways = geometryIds(data.elements || [], "fairway");
+    var fairwayCorridors = fairwayCorridorCount(data.elements || [], candidates);
     return Object.assign({
       viewport: summarizeViewport(input.mapViewport),
       bounds: summarizeBounds(boundsForPoints(allCheckpointPoints(data)) || boundsForPoints(data.boundary || [])),
@@ -1222,14 +1560,15 @@
         sourceFeatures: (data.elements || []).length,
         acceptedGreens: (data.greens || []).length,
         rejectedGreens: (data.rejectedGreens || []).length,
-        fairways: geometryIds(data.elements || [], "fairway").length,
+        fairways: fairwayCorridors,
+        osmFairways: taggedFairways.length,
         tees: geometryIds(data.elements || [], "tee").length,
         candidates: candidates.length
       },
       geometryIds: {
         acceptedGreens: (data.greens || []).map(function (green) { return green.id; }).filter(Boolean).slice(0, 40),
         rejectedGreens: (data.rejectedGreens || []).map(function (green) { return green.id; }).filter(Boolean).slice(0, 40),
-        fairways: geometryIds(data.elements || [], "fairway"),
+        fairways: taggedFairways,
         tees: geometryIds(data.elements || [], "tee"),
         candidates: candidates.map(function (candidate) { return candidate.candidateId; }).filter(Boolean).slice(0, 40)
       }
@@ -1241,6 +1580,7 @@
     var createdAt = nowIso();
     var elements = (input.osmPayload && input.osmPayload.elements) || input.elements || [];
     var center = inputCenter(input);
+    var scorecardEvidence = match.scorecardEvidence || {};
     var assignmentsByCandidate = {};
     (match.assignments || []).forEach(function (assignment) { assignmentsByCandidate[assignment.candidate.candidateId] = assignment; });
     var base = {
@@ -1279,7 +1619,8 @@
             osmFeatures: elements.length,
             acceptedGreens: greenResult.accepted.length,
             rejectedGreens: greenResult.rejected.length,
-            fairways: elements.filter(function (element) { return golfTag(element) === "fairway"; }).length,
+            fairways: fairwayCorridorCount(elements, []),
+            osmFairways: elements.filter(function (element) { return golfTag(element) === "fairway"; }).length,
             tees: elements.filter(function (element) { return golfTag(element) === "tee"; }).length
           })
         })
@@ -1318,6 +1659,13 @@
             status: (match.numberingUnavailableReason ? "unavailable" : "produced"),
             unavailableReason: match.numberingUnavailableReason || "",
             warning: match.numberingUnavailableReason || "",
+            scorecardEvidenceSource: scorecardEvidence.source || "",
+            scorecardEvidenceSourceCount: scorecardEvidence.sourceCount || 0,
+            scorecardDistanceCount: scorecardEvidence.distanceCount || 0,
+            requiredScorecardDistanceCount: scorecardEvidence.requiredDistanceCount || 0,
+            scorecardLengthOrder: scorecardEvidence.lengthOrder || [],
+            scorecardSources: scorecardEvidence.sources || [],
+            candidateLengthOrder: match.context && match.context.candidateLengthOrder || candidateLengthOrder(candidates),
             resolvedHoles: (match.assignments || []).length,
             unresolvedScorecardHoles: (match.unresolvedScorecardHoles || []).map(function (hole) { return hole.holeNumber; }),
             confidence: match.confidence,
@@ -1350,6 +1698,7 @@
     var debug = result.debugEvidence || {};
     var candidates = debug.holeCandidates || [];
     var scorecard = debug.scorecardHoles || [];
+    var scorecardEvidence = debug.scorecardEvidence || {};
     var assigned = result.holes || [];
     var measuredRange = distanceRange(candidates.map(function (candidate) { return candidate.pathDistanceM; }));
     var scorecardRange = distanceRange(scorecard.map(function (hole) { return hole.distanceM; }));
@@ -1366,6 +1715,7 @@
         acceptedGreens: (debug.greenCandidates || []).length,
         rejectedGreens: (debug.rejectedGreenCandidates || []).length,
         fairwayCorridors: debug.fairwayCount || 0,
+        osmFairways: debug.osmFairwayCount || 0,
         candidatePaths: candidates.length,
         missingCandidates: Math.max(0, (debug.expectedHoleCount || 18) - candidates.length)
       },
@@ -1375,8 +1725,10 @@
         globalScale: debug.assignmentContext && debug.assignmentContext.scale || 1,
         averageNormalisedError: assigned.length ? assigned.reduce(function (sum, hole) { return sum + number(hole.assignmentEvidence && hole.assignmentEvidence.normalizedDistanceDelta, 0); }, 0) / assigned.length : null,
         rankAgreement: assigned.filter(function (hole) { return hole.assignmentEvidence && hole.assignmentEvidence.rankScore >= 0.75; }).length + " / " + assigned.length,
+        multiSourceAgreement: assigned.filter(function (hole) { return hole.assignmentEvidence && hole.assignmentEvidence.multiSourceScore >= 0.78; }).length + " / " + assigned.length,
         poorAgreementHoles: poor,
-        distanceUsed: scorecard.length ? "centre-path" : "not-used",
+        distanceUsed: scorecardEvidence.distanceCount >= (scorecardEvidence.requiredDistanceCount || 1) ? "relative-rank" : "not-used",
+        scorecardEvidence: scorecardEvidence,
         confidence: result.confidence >= HIGH_CONFIDENCE ? "High" : result.confidence >= MEDIUM_CONFIDENCE ? "Medium" : "Low"
       },
       assignment: {
@@ -1414,6 +1766,7 @@
       fairwayGroups: geometry.fairwayCorridors || 0,
       pathCandidates: geometry.candidatePaths || 0,
       scorecardHoleCount: assignment.scorecardHoles || 0,
+      scorecardEvidence: distance.scorecardEvidence || debug.scorecardEvidence || {},
       measuredDistanceRange: distance.measuredRange || null,
       scorecardDistanceRange: distance.scorecardRange || null,
       globalDistanceScale: distance.globalScale || 1,
@@ -1424,7 +1777,7 @@
       confidence: result.confidence || 0,
       finalOutcome: result.status,
       sourceLoadError: result.sourceLoadError || null,
-      fallbackReason: result.status === "resolved" ? "" : result.sourceLoadError ? result.sourceLoadError.message : result.status === "geometry-resolved-numbering-unavailable" ? "Scorecard unavailable" : "Resolver did not reach trusted assignment confidence.",
+      fallbackReason: result.status === "resolved" ? "" : result.sourceLoadError ? result.sourceLoadError.message : result.status === "geometry-resolved-numbering-unavailable" ? ((debug.scorecardEvidence && debug.scorecardEvidence.distanceCount) ? "Scorecard distances unavailable" : "Scorecard unavailable") : "Resolver did not reach trusted assignment confidence.",
       checkpointAvailability: checkpoints.map(function (checkpoint) {
         return {
           stage: checkpoint.stage,
@@ -1465,7 +1818,8 @@
     activeRunId = resolverRunId;
     var warnings = [];
     var analysisBoundary = deriveAnalysisBoundary(input, elements);
-    var scorecard = normalizeScorecard(input);
+    var scorecardSources = normalizeScorecardSources(input);
+    var scorecard = normalizeScorecard(input, scorecardSources);
     var acquisitionError = sourceEvidenceError(input, elements, analysisBoundary);
     if (acquisitionError) {
       return sourceLoadFailureResult(input, courseId, resolverRunId, mappingRunId, debugStartedAt, acquisitionError, elements, analysisBoundary, scorecard);
@@ -1473,13 +1827,39 @@
     var greenResult = detectGreenCandidates(elements, analysisBoundary);
     var candidates = detectHoleGeometryCandidates(elements, greenResult.accepted, analysisBoundary);
     var expected = expectedHoleCount(input, scorecard);
-    var match = matchCandidatesToScorecard(candidates, scorecard, expected);
-    if (!scorecard.length) match.numberingUnavailableReason = "Scorecard unavailable";
+    var requiredDistanceCount = scorecard.length ? Math.max(1, Math.min(expected || scorecard.length || 18, scorecard.length, 18)) : Math.max(1, Math.min(expected || 18, 18));
+    var distanceEvidenceCount = scorecardDistanceCount(scorecard);
+    var scorecardUsableForNumbering = !!scorecard.length && distanceEvidenceCount >= requiredDistanceCount;
+    var match = null;
+    if (scorecardUsableForNumbering) {
+      match = matchCandidatesToScorecard(candidates, scorecard, expected, scorecardSources);
+    } else {
+      var unavailableReason = scorecard.length ? "Scorecard distances unavailable" : "Scorecard unavailable";
+      match = {
+        assignments: [],
+        unresolvedScorecardHoles: scorecard,
+        confidence: 0,
+        warnings: [unavailableReason],
+        alternatives: [],
+        context: {
+          scale: 1,
+          candidateRanks: rankMap(candidates, function (candidate) { return candidate.pathDistanceM; }, function (candidate) { return candidate.candidateId; }),
+          scorecardRanks: rankMap(scorecard, function (hole) { return hole.distanceM; }, function (hole) { return hole.holeNumber; }),
+          sourceRankMaps: [],
+          scorecardLengthOrder: scorecardLengthOrder(scorecard),
+          candidateLengthOrder: candidateLengthOrder(candidates)
+        },
+        score: 0,
+        numberingUnavailableReason: unavailableReason
+      };
+    }
+    match.scorecardEvidence = scorecardEvidenceSummary(input, scorecardSources, scorecard, expected);
+    match.scorecardEvidence.requiredDistanceCount = requiredDistanceCount;
     warnings = warnings.concat(match.warnings || []);
-    if (!scorecard.length) warnings.push("Scorecard unavailable");
+    if (match.numberingUnavailableReason && warnings.indexOf(match.numberingUnavailableReason) < 0) warnings.push(match.numberingUnavailableReason);
     if (greenResult.accepted.length < Math.min(6, expected)) warnings.push("Few reliable green polygons were found inside the course boundary.");
     if (!candidates.length) warnings.push("No candidate centre-lines could be constructed.");
-    var status = resolveStatus(match.assignments, match.confidence, expected, !!scorecard.length);
+    var status = resolveStatus(match.assignments, match.confidence, expected, scorecardUsableForNumbering);
     var assignedIds = {};
     match.assignments.forEach(function (assignment) { assignedIds[assignment.candidate.candidateId] = true; });
     var checkpoints = buildCheckpoints(input, resolverRunId, courseId, analysisBoundary, greenResult, candidates, match);
@@ -1505,12 +1885,16 @@
         resolverRunId: resolverRunId,
         analysisBoundary: analysisBoundary,
         osmFeatureCount: elements.length,
-        fairwayCount: elements.filter(function (element) { return golfTag(element) === "fairway"; }).length,
+        fairwayCount: fairwayCorridorCount(elements, candidates),
+        osmFairwayCount: elements.filter(function (element) { return golfTag(element) === "fairway"; }).length,
         expectedHoleCount: expected,
         greenCandidates: greenResult.accepted,
         rejectedGreenCandidates: greenResult.rejected,
         holeCandidates: candidates,
         scorecardHoles: scorecard,
+        scorecardEvidence: match.scorecardEvidence,
+        scorecardSources: scorecardSources,
+        scorecardDistanceCount: distanceEvidenceCount,
         assignmentContext: match.context || {},
         assignmentScore: match.score || 0,
         assignmentAlternatives: match.alternatives || []
@@ -1605,6 +1989,8 @@
     var assignment = feedback.assignment || {};
     var tieBreakers = feedback.tieBreakers || {};
     var explanations = feedback.explanations || [];
+    var scorecardEvidence = distance.scorecardEvidence || {};
+    var lengthOrder = scorecardEvidence.lengthOrder || [];
     return [
       '<div class="gdNcrGrid">',
       feedbackMetric("OSM features", geometry.osmFeatures),
@@ -1615,6 +2001,8 @@
       feedbackMetric("Scorecard range", fmtRange(distance.scorecardRange)),
       feedbackMetric("Global scale", number(distance.globalScale, 1).toFixed(2)),
       feedbackMetric("Rank agreement", distance.rankAgreement),
+      feedbackMetric("Multi-source", scorecardEvidence.sourceCount ? scorecardEvidence.sourceCount + " sources" : "n/a"),
+      feedbackMetric("Scorecard lengths", (scorecardEvidence.distanceCount || 0) + " / " + (scorecardEvidence.requiredDistanceCount || 18)),
       feedbackMetric("Resolved", assignment.resolvedHoles + " / " + assignment.scorecardHoles),
       feedbackMetric("Unused candidates", assignment.unusedCandidates),
       feedbackMetric("Confidence", fmtPercent(assignment.overallConfidence)),
@@ -1624,6 +2012,10 @@
       '<div class="gdNcrChips">' + (Object.keys(tieBreakers).length ? Object.keys(tieBreakers).map(function (key) {
         return '<span>' + escapeHtml(key) + ': ' + escapeHtml(tieBreakers[key]) + '</span>';
       }).join("") : '<span>None</span>') + '</div>',
+      '<div class="gdNcrSubhead">Scorecard length order</div>',
+      '<div class="gdNcrChips">' + (lengthOrder.length ? lengthOrder.slice(0, 18).map(function (row, index) {
+        return '<span>' + escapeHtml(index + 1) + '. H' + escapeHtml(row.hole) + ' ' + escapeHtml(row.distanceM) + 'm</span>';
+      }).join("") : '<span>Unavailable</span>') + '</div>',
       '<div class="gdNcrSubhead">Resolved ties</div>',
       '<div class="gdNcrExplain">' + (explanations.length ? explanations.slice(0, 8).map(function (row) {
         return '<p><strong>Hole ' + escapeHtml(row.holeNumber) + ':</strong> ' + escapeHtml(row.explanation.join(" ")) + '</p>';
@@ -1730,6 +2122,7 @@
     _test: {
       distanceM: distanceM,
       normalizeScorecard: normalizeScorecard,
+      normalizeScorecardSources: normalizeScorecardSources,
       detectGreenCandidates: detectGreenCandidates,
       detectHoleGeometryCandidates: detectHoleGeometryCandidates,
       matchCandidatesToScorecard: matchCandidatesToScorecard

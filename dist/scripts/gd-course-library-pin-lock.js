@@ -1899,6 +1899,77 @@
       try{return typeof gdScorecardHoleView==='function'?gdScorecardHoleView(hole):hole;}catch(e){return hole;}
     }).filter(Boolean);
   }
+  function nativeResolverScorecardDistanceM(hole){
+    const metres=knownScorecardNumber(hole?.distanceM??hole?.meters??hole?.metres??hole?.distanceMeters??hole?.distanceMetres);
+    if(metres!==null)return metres;
+    const yards=knownScorecardNumber(hole?.distanceYd??hole?.yards??hole?.yds??hole?.yardage??hole?.distanceYards);
+    return yards!==null?yards*.9144:null;
+  }
+  function nativeResolverScorecardDistanceCount(holes){
+    return (holes||[]).filter(hole=>Number.isFinite(nativeResolverScorecardDistanceM(hole))).length;
+  }
+  function nativeResolverScorecardLengthOrder(holes){
+    return (holes||[]).map((hole,index)=>({
+      hole:validHoleNumber(hole?.holeNumber||hole?.hole||hole?.number||index+1),
+      distanceM:nativeResolverScorecardDistanceM(hole),
+      par:knownScorecardNumber(hole?.par)
+    })).filter(row=>row.hole&&Number.isFinite(row.distanceM)).sort((a,b)=>b.distanceM-a.distanceM);
+  }
+  function nativeResolverScorecardSourceRows(fallbackHoles=[]){
+    const rows=(()=>{try{return Array.isArray(scorecard?.scorecardSources)?scorecard.scorecardSources:null;}catch(e){return null;}})()
+      ||(()=>{try{return Array.isArray(window.scorecard?.scorecardSources)?window.scorecard.scorecardSources:null;}catch(e){return null;}})();
+    if(Array.isArray(rows)&&rows.length){
+      return rows.map(row=>{
+        const holes=Array.isArray(row?.holes)?row.holes:[];
+        return {
+          source:row?.provider||row?.source||'scorecard',
+          sourceUrl:row?.sourceUrl||'',
+          holes:holes.map(hole=>{
+            try{return typeof gdScorecardHoleView==='function'?gdScorecardHoleView(hole):hole;}catch(e){return hole;}
+          }).filter(Boolean),
+          distanceCount:nativeResolverScorecardDistanceCount(holes),
+          lengthOrder:nativeResolverScorecardLengthOrder(holes)
+        };
+      }).filter(row=>Array.isArray(row.holes)&&row.holes.length);
+    }
+    const source=(()=>{try{return scorecard?.provider||scorecard?.source||window.scorecard?.provider||window.scorecard?.source||'scorecard';}catch(e){return 'scorecard';}})();
+    const sourceUrl=(()=>{try{return scorecard?.sourceUrl||window.scorecard?.sourceUrl||'';}catch(e){return '';}})();
+    return fallbackHoles.length?[{source,sourceUrl,holes:fallbackHoles,distanceCount:nativeResolverScorecardDistanceCount(fallbackHoles),lengthOrder:nativeResolverScorecardLengthOrder(fallbackHoles)}]:[];
+  }
+  function nativeResolverScorecardEvidenceFromHoles(holes,source){
+    const sources=nativeResolverScorecardSourceRows(holes);
+    const best=sources.slice().sort((a,b)=>(b.distanceCount||0)-(a.distanceCount||0))[0]||null;
+    return {
+      holes:holes||[],
+      source:source||best?.source||'scorecard',
+      sourceUrl:best?.sourceUrl||'',
+      distanceCount:nativeResolverScorecardDistanceCount(holes),
+      lengthOrder:nativeResolverScorecardLengthOrder(holes),
+      sources
+    };
+  }
+  async function nativeResolverFetchScorecardEvidence(course,attempt,opts={}){
+    const before=nativeResolverScorecardHoles();
+    const expected=automapperExpectedHoleCount();
+    const needed=Math.min(expected||18,18);
+    if(nativeResolverScorecardDistanceCount(before)>=needed)return nativeResolverScorecardEvidenceFromHoles(before,'already-loaded');
+    const loader=(()=>{try{return typeof gdEnsureScorecardForCourse==='function'?gdEnsureScorecardForCourse:window.gdEnsureScorecardForCourse;}catch(e){return null;}})();
+    if(typeof loader!=='function')return nativeResolverScorecardEvidenceFromHoles(before,'scorecard-loader-unavailable');
+    try{
+      await loader(course);
+    }catch(e){}
+    const after=nativeResolverScorecardHoles();
+    return nativeResolverScorecardEvidenceFromHoles(after,'website-scorecard');
+  }
+  async function nativeResolverScorecardEvidence(course,opts={}){
+    if(opts.nativeResolverScorecardPromise){
+      try{
+        const evidence=await opts.nativeResolverScorecardPromise;
+        if(evidence&&Array.isArray(evidence.holes))return evidence;
+      }catch(e){}
+    }
+    return nativeResolverFetchScorecardEvidence(course,opts.debugAttemptContext||null,opts);
+  }
   function nativeResolverMapViewport(){
     try{
       if(typeof map==='undefined'||!map)return null;
@@ -2137,13 +2208,21 @@
       return {...bundle,stale:true};
     }
     try{
+      const scorecardEvidence=await nativeResolverScorecardEvidence(course,opts);
       const result=await resolver.resolveCourseGeometryForAutoMapper({
         course,
         courseId:courseId(course),
         courseName:courseName(course),
         courseCentre:course?.courseCentre||guideCoursePoint(course),
         mapViewport:nativeResolverMapViewport(),
-        scorecardHoles:nativeResolverScorecardHoles(),
+        scorecardHoles:scorecardEvidence.holes||[],
+        scorecardEvidence:{
+          source:scorecardEvidence.source||'',
+          sourceUrl:scorecardEvidence.sourceUrl||'',
+          distanceCount:scorecardEvidence.distanceCount||0,
+          lengthOrder:scorecardEvidence.lengthOrder||[],
+          sources:scorecardEvidence.sources||[]
+        },
         osmPayload:payload,
         guideBundle:bundle,
         expectedHoleCount:automapperExpectedHoleCount(),
@@ -4522,11 +4601,12 @@
   }
   async function runNativeResolverStage(request,attempt,autoMapResult,opts){
     updateCourseLoading('Resolving native geometry',64);
+    const scorecardPromise=nativeResolverFetchScorecardEvidence(request.course,attempt,opts);
     const acquisition=await acquireNativeResolverSourceBundle(request,attempt,autoMapResult&&autoMapResult.guideBundle||null,opts);
     if(acquisition&&acquisition.bundle&&acquisition.bundle.stale)return {ran:true,stale:true,bundle:acquisition.bundle};
     const baseBundle=acquisition.bundle||{guides:[],greens:[],osmPayload:{elements:[]}};
     const payload=acquisition.payload||baseBundle.osmPayload||{elements:[]};
-    const resolvedBundle=await resolveCourseGeometryGuideBundle(request.course,payload,baseBundle,Object.assign({},opts,{debugRunId:request.debugRunId,skipGeometryResolver:false,forceNativeResolver:true,suppressSkipTelemetry:true,source:'native-resolver',reason:request.reason,debugAttemptContext:attempt,callerFunction:'runCourseMappingAttempt',nativeResolverSourceLoadError:acquisition.sourceLoadError||null,nativeResolverSourceLoadStatus:acquisition.source||''}));
+    const resolvedBundle=await resolveCourseGeometryGuideBundle(request.course,payload,baseBundle,Object.assign({},opts,{debugRunId:request.debugRunId,skipGeometryResolver:false,forceNativeResolver:true,suppressSkipTelemetry:true,source:'native-resolver',reason:request.reason,debugAttemptContext:attempt,callerFunction:'runCourseMappingAttempt',nativeResolverSourceLoadError:acquisition.sourceLoadError||null,nativeResolverSourceLoadStatus:acquisition.source||'',nativeResolverScorecardPromise:scorecardPromise}));
     if(resolvedBundle&&resolvedBundle.stale)return {ran:true,stale:true,bundle:resolvedBundle};
     const persisted=persistOsmGuideBundle(request.course,resolvedBundle,Object.assign({},opts,{quiet:true,frame:false,promptStart:true,hole:opts.wholeCourse===false?request.hole:null}),request.debugRunId,attempt);
     const playable=requestedHolePlayable(request.course,request.hole);
