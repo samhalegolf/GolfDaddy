@@ -847,17 +847,8 @@
     var activeHole=normalizeHoleNumber(active.hole||hole);
     return activeHole===normalizeHoleNumber(hole);
   }
-  function claudeLabelJobActive(hole){
-    var ns=window.gdClaudeHoleLabels||{};
-    var status=String(ns.status||"");
-    var mode=String(ns.mode||"labeling");
-    if(status!=="labeling"&&status!=="generating")return false;
-    if(mode==="generate"&&status!=="generating")return false;
-    var requestedHole=normalizeHoleNumber(ns.requestedHole||hole);
-    return requestedHole===normalizeHoleNumber(hole);
-  }
   function courseResolutionOwnerActive(hole){
-    return coursePlayResolverActive(hole)||claudeLabelJobActive(hole)||interactiveGreenFallbackActive();
+    return coursePlayResolverActive(hole)||interactiveGreenFallbackActive();
   }
   function triggerInteractiveGreenFallback(course,hole,reason,state){
     var key=String(state&&state.courseId||courseIdFrom(course||"course"))+":h"+String(hole);

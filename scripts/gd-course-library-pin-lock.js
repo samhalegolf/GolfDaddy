@@ -3509,7 +3509,6 @@
     if(!course||isManualGpsCourse(course)||courseOpenAlreadySettled(course,hole)||courseOpenInFlight(course,hole))return null;
     return showCourseLoading(course.name||course.courseName||'Loading course');
   }
-  const COURSE_PLAY_LABEL_WAIT_MS=150000;
   const coursePlayResolverInFlight={};
   let interactiveGreenFallbackState=null;
   function sleep(ms){return new Promise(resolve=>setTimeout(resolve,ms));}
@@ -3586,72 +3585,6 @@
         pipeline.ingestMappedHole(resolved.course,hole,resolved.data,source||'course-play-resolver');
       }
     }catch(e){}
-  }
-  function setClaudeRequestedHole(course,hole,opts={}){
-    try{
-      const ns=window.gdClaudeHoleLabels;
-      if(!ns)return false;
-      ns.requestedHole=validHoleNumber(hole)||1;
-      if(!ns.courseName)ns.courseName=courseName(course);
-      if(opts.resolutionKey)ns.resolutionKey=opts.resolutionKey;
-      if(opts.attemptToken)ns.attemptToken=opts.attemptToken;
-      if(opts.courseId)ns.courseId=opts.courseId;
-      if(opts.resolverOwned)ns.resolverOwnedResolutionKey=opts.resolutionKey||ns.resolutionKey||null;
-      return true;
-    }catch(e){return false;}
-  }
-  function claudeLabelerWaiting(expectedKey){
-    try{
-      const ns=window.gdClaudeHoleLabels||{};
-      const status=String(ns.status||'');
-      const active=status==='labeling'||status==='generating';
-      if(!active)return false;
-      if(!expectedKey)return true;
-      return !ns.resolutionKey||String(ns.resolutionKey)===String(expectedKey);
-    }catch(e){return false;}
-  }
-  async function waitForClaudeLabelerStart(expectedKey,timeoutMs=2000,attemptToken=null){
-    const startedAt=Date.now();
-    while(Date.now()-startedAt<Math.max(250,Number(timeoutMs)||2000)){
-      if(attemptToken&&!resolverAttemptCurrent(attemptToken)){
-        return {started:false,stale:true,status:'stale'};
-      }
-      if(claudeLabelerWaiting(expectedKey)){
-        const ns=window.gdClaudeHoleLabels||{};
-        return {started:true,status:String(ns.status||''),mode:String(ns.mode||''),jobId:ns.jobId||null};
-      }
-      const ns=window.gdClaudeHoleLabels||{};
-      if(String(ns.status||'')==='failed'){
-        return {started:false,status:'failed',mode:String(ns.mode||''),jobId:ns.jobId||null};
-      }
-      await sleep(100);
-    }
-    return {started:claudeLabelerWaiting(expectedKey),status:String(window.gdClaudeHoleLabels&&window.gdClaudeHoleLabels.status||''),mode:String(window.gdClaudeHoleLabels&&window.gdClaudeHoleLabels.mode||''),jobId:window.gdClaudeHoleLabels&&window.gdClaudeHoleLabels.jobId||null};
-  }
-  function waitForClaudeHoleLabels(timeoutMs=COURSE_PLAY_LABEL_WAIT_MS,expectedKey=null,attemptToken=null){
-    if(!claudeLabelerWaiting(expectedKey))return Promise.resolve({status:'not-started'});
-    return new Promise(resolve=>{
-      let settled=false;
-      const finish=(status,detail)=>{
-        if(settled)return;
-        settled=true;
-        clearTimeout(timeoutId);
-        window.removeEventListener('gd:hole-labels-ready',onReady,true);
-        window.removeEventListener('gd:hole-labels-failed',onFailed,true);
-        resolve({status,detail:detail||null});
-      };
-      const eventBelongs=event=>{
-        const detail=event&&event.detail||{};
-        if(expectedKey&&detail.resolutionKey&&String(detail.resolutionKey)!==String(expectedKey))return false;
-        if(attemptToken&&!resolverAttemptCurrent(attemptToken))return false;
-        return true;
-      };
-      const onReady=event=>{if(eventBelongs(event))finish('ready',event&&event.detail);};
-      const onFailed=event=>{if(eventBelongs(event))finish('failed',event&&event.detail);};
-      window.addEventListener('gd:hole-labels-ready',onReady,true);
-      window.addEventListener('gd:hole-labels-failed',onFailed,true);
-      const timeoutId=setTimeout(()=>finish('timeout'),Math.max(1000,Number(timeoutMs)||COURSE_PLAY_LABEL_WAIT_MS));
-    });
   }
   function recentGpsFallbackPoint(){
     try{
@@ -3852,7 +3785,6 @@
         try{await syncPublishedCourseMaps({quiet:true});}catch(e){}
         try{setMappedPlayMode('mapped',{skipFrame:true,silent:true,preserveAssist:true});}catch(e){}
         if(!resolverAttemptCurrent(attemptToken))return {playable:false,stale:true,reason:'resolver-replaced-before-osm'};
-        setClaudeRequestedHole(c,h,{resolutionKey:key,attemptToken,courseId:courseId(c),resolverOwned:true});
         updateCourseLoading('Mapping from OSM',42);
         const mapOpts={quiet:true,frame:false,promptStart:true,fresh:opts.fresh!==false,course:c,__gdResolverOwned:true,resolutionKey:key,attemptToken};
         if(opts.wholeCourse===false)mapOpts.hole=h;
@@ -3875,43 +3807,14 @@
           recordCoursePlayDebug('course-play-resolver-hole-playable',c,h,{source:'osm-automapper',resolutionKey:key,attemptToken});
           return showResolvedCoursePlayHole(c,h,'osm-automapper',opts);
         }
-        const claudeStart=await waitForClaudeLabelerStart(key,opts.labelStartWaitMs||2000,attemptToken);
-        if(!resolverAttemptCurrent(attemptToken))return {playable:false,stale:true,reason:'resolver-replaced-before-claude'};
-        if(claudeStart.started){
-          recordCoursePlayDebug('course-play-resolver-claude-waiting',c,h,{
-            status:claudeStart.status||String(window.gdClaudeHoleLabels&&window.gdClaudeHoleLabels.status||''),
-            mode:claudeStart.mode||String(window.gdClaudeHoleLabels&&window.gdClaudeHoleLabels.mode||''),
-            resolutionKey:key,
-            attemptToken,
-            claudeJobId:claudeStart.jobId||window.gdClaudeHoleLabels&&window.gdClaudeHoleLabels.jobId||null
-          });
-          updateCourseLoading('Finding hole numbers',62);
-          const labelResult=await waitForClaudeHoleLabels(opts.labelWaitMs||COURSE_PLAY_LABEL_WAIT_MS,key,attemptToken);
-          if(!resolverAttemptCurrent(attemptToken))return {playable:false,stale:true,reason:'resolver-replaced-after-claude'};
-          recordCoursePlayDebug('course-play-resolver-claude-result',c,h,{status:labelResult&&labelResult.status||'unknown',resolutionKey:key,attemptToken,count:labelResult&&labelResult.detail&&labelResult.detail.count});
-          if(labelResult.status==='ready'){
-            updateCourseLoading('Applying hole numbers',74);
-            const retryOpts={quiet:true,frame:false,promptStart:true,fresh:true,course:c,__gdResolverOwned:true,resolutionKey:key,attemptToken};
-            if(opts.wholeCourse===false)retryOpts.hole=h;
-            await autoMapOsmCourse(retryOpts);
-            if(!resolverAttemptCurrent(attemptToken))return {playable:false,stale:true,reason:'resolver-replaced-after-claude-retry'};
-            if(requestedHolePlayable(c,h)){
-              recordCoursePlayDebug('course-play-resolver-hole-playable',c,h,{source:'claude-hole-labels',resolutionKey:key,attemptToken});
-              return showResolvedCoursePlayHole(c,h,'claude-hole-labels',opts);
-            }
-          }
-        }else{
-          recordCoursePlayDebug('course-play-resolver-claude-not-started',c,h,{
-            status:claudeStart.status||String(window.gdClaudeHoleLabels&&window.gdClaudeHoleLabels.status||''),
-            mode:claudeStart.mode||String(window.gdClaudeHoleLabels&&window.gdClaudeHoleLabels.mode||''),
-            reason:claudeStart.status==='failed'
-              ?'labeling-job-failed-before-wait'
-              :'no-labeling-job-started-after-grace-period',
-            resolutionKey:key,
-            attemptToken
-          });
-        }
         if(!resolverAttemptCurrent(attemptToken))return {playable:false,stale:true,reason:'resolver-replaced-before-fallback'};
+        recordCoursePlayDebug('course-play-resolver-native-unresolved',c,h,{
+          reason:'native-course-geometry-unresolved',
+          resolutionKey:key,
+          attemptToken,
+          nativeStatus:window.__gdCourseGeometryResolverLastResult&&window.__gdCourseGeometryResolverLastResult.status||'unknown',
+          nativeConfidence:window.__gdCourseGeometryResolverLastResult&&window.__gdCourseGeometryResolverLastResult.confidence||0
+        });
         recordCoursePlayDebug('course-play-resolver-automatic-unresolved',c,h,{reason:'automatic-resolution-failed',resolutionKey:key,attemptToken});
         return beginInteractiveGreenFallback(c,h,'automatic-resolution-failed',{resolutionKey:key,attemptToken});
       }catch(error){

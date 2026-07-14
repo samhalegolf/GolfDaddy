@@ -15,6 +15,7 @@
   var MEDIUM_CONFIDENCE = 0.58;
   var EARTH_RADIUS_M = 6371008.8;
   var MAX_BEAM_WIDTH = 360;
+  var activeRunId = "";
 
   function number(value, fallback) {
     var n = Number(value);
@@ -23,6 +24,20 @@
 
   function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
+  }
+
+  function nowIso() {
+    return new Date().toISOString();
+  }
+
+  function makeRunId(courseId) {
+    return "cgr-" + String(courseId || "course").replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase().slice(0, 36) + "-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
+  }
+
+  function escapeHtml(value) {
+    return String(value == null ? "" : value).replace(/[&<>"']/g, function (ch) {
+      return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch];
+    });
   }
 
   function toPoint(value) {
@@ -149,6 +164,25 @@
       { lat: bounds.maxLat + latPad, lng: bounds.maxLng + lngPad },
       { lat: bounds.maxLat + latPad, lng: bounds.minLng - lngPad }
     ];
+  }
+
+  function projectPoint(point, bounds, width, height) {
+    point = toPoint(point);
+    if (!point || !bounds) return null;
+    var x = (point.lng - bounds.minLng) / ((bounds.maxLng - bounds.minLng) || 1e-9);
+    var y = (bounds.maxLat - point.lat) / ((bounds.maxLat - bounds.minLat) || 1e-9);
+    return {
+      x: clamp(x, 0, 1) * width,
+      y: clamp(y, 0, 1) * height
+    };
+  }
+
+  function svgPath(points, bounds, width, height, close) {
+    var projected = (points || []).map(function (point) { return projectPoint(point, bounds, width, height); }).filter(Boolean);
+    if (!projected.length) return "";
+    return projected.map(function (point, index) {
+      return (index ? "L" : "M") + point.x.toFixed(1) + " " + point.y.toFixed(1);
+    }).join(" ") + (close ? " Z" : "");
   }
 
   function pointInPolygon(point, polygon) {
@@ -637,42 +671,86 @@
   function scorePair(candidate, hole, context) {
     var score = 0.22 * candidate.confidence;
     var evidence = candidate.evidence.slice();
+    var distanceScore = 0;
+    var rankScore = 0;
+    var parScore = 0;
+    var shapeScore = 0;
+    var hazardScore = 0;
+    var descriptionScore = 0;
+    var rawDistanceDeltaM = Number.isFinite(hole.distanceM) ? Math.abs(candidate.pathDistanceM - hole.distanceM) : null;
+    var scaledDistanceDeltaM = null;
+    var normalizedDistanceDelta = null;
+    var tieBreakersUsed = [];
+    var explanation = [];
     if (Number.isFinite(candidate.existingHoleNumber) && candidate.existingHoleNumber === hole.holeNumber) {
       score += 0.28;
       evidence.push("existing-osm-ref-match");
+      tieBreakersUsed.push("existing-osm-ref");
+      explanation.push("Existing OSM hole number matched this scorecard hole.");
     }
     if (Number.isFinite(hole.distanceM)) {
       var expected = hole.distanceM * context.scale;
       var diff = Math.abs(candidate.pathDistanceM - expected) / Math.max(80, expected);
-      var distanceScore = clamp(1 - diff / 0.28, 0, 1);
+      scaledDistanceDeltaM = Math.abs(candidate.pathDistanceM - expected);
+      normalizedDistanceDelta = diff;
+      distanceScore = clamp(1 - diff / 0.28, 0, 1);
       score += 0.34 * distanceScore;
       evidence.push("distance-score:" + distanceScore.toFixed(2));
+      if (distanceScore >= 0.62) explanation.push("Centre-path distance fit the scorecard after course-wide scale adjustment.");
       var cr = context.candidateRanks[candidate.candidateId];
       var hr = context.scorecardRanks[hole.holeNumber];
       if (Number.isFinite(cr) && Number.isFinite(hr)) {
-        var rankScore = clamp(1 - Math.abs(cr - hr) / 0.55, 0, 1);
+        rankScore = clamp(1 - Math.abs(cr - hr) / 0.55, 0, 1);
         score += 0.18 * rankScore;
         evidence.push("relative-rank:" + rankScore.toFixed(2));
+        if (rankScore >= 0.75) explanation.push("Relative distance rank matched the scorecard structure.");
       }
     }
     if (hole.par && candidate.inferredPar) {
-      var parScore = hole.par === candidate.inferredPar ? 1 : Math.abs(hole.par - candidate.inferredPar) === 1 ? 0.42 : 0;
+      parScore = hole.par === candidate.inferredPar ? 1 : Math.abs(hole.par - candidate.inferredPar) === 1 ? 0.42 : 0;
       score += 0.11 * parScore;
       evidence.push("par-score:" + parScore.toFixed(2));
+      if (parScore >= 0.8) {
+        tieBreakersUsed.push("par");
+        explanation.push("Inferred par matched the scorecard par.");
+      }
     }
     var text = hole.descriptionEvidence || {};
     if (text.dogleg && candidate.shape.indexOf("dogleg") >= 0) {
       var expectedShape = text.dogleg === "left" ? "dogleg-left" : "dogleg-right";
+      shapeScore = candidate.shape === expectedShape ? 1 : 0;
+      descriptionScore = shapeScore;
       score += candidate.shape === expectedShape ? 0.06 : -0.04;
       evidence.push("description-dogleg:" + text.dogleg);
+      tieBreakersUsed.push("dogleg-direction");
+      if (shapeScore) explanation.push("Dogleg direction matched the course description.");
     }
     if (text.water && (candidate.nearbyWater || candidate.crossingWater)) {
+      hazardScore = 1;
+      descriptionScore = Math.max(descriptionScore, 0.7);
       score += 0.04;
       evidence.push("description-water");
+      tieBreakersUsed.push("hazard-context");
+      explanation.push("Water or hazard context matched the scorecard/course description.");
     }
     return {
       score: clamp(score, 0, 1),
-      evidence: evidence
+      evidence: evidence,
+      assignmentEvidence: {
+        rawDistanceDeltaM: rawDistanceDeltaM,
+        scaledDistanceDeltaM: scaledDistanceDeltaM,
+        normalizedDistanceDelta: normalizedDistanceDelta,
+        distanceScore: distanceScore,
+        rankScore: rankScore,
+        parScore: parScore,
+        shapeScore: shapeScore,
+        hazardScore: hazardScore,
+        descriptionScore: descriptionScore,
+        routingScore: 0,
+        totalScore: clamp(score, 0, 1),
+        tieBreakersUsed: tieBreakersUsed,
+        explanation: explanation
+      }
     };
   }
 
@@ -748,6 +826,15 @@
     var best = states[0] || { assignments: [], score: 0 };
     var assignments = best.assignments.map(function (assignment) {
       var baseConfidence = clamp(assignment.pair.score * 0.88 + assignment.candidate.confidence * 0.12 + Math.max(0, assignment.continuity), 0, 1);
+      var structuredEvidence = Object.assign({}, assignment.pair.assignmentEvidence || {});
+      structuredEvidence.routingScore = assignment.continuity || 0;
+      structuredEvidence.totalScore = assignment.pair.score + (assignment.continuity || 0);
+      structuredEvidence.tieBreakersUsed = (structuredEvidence.tieBreakersUsed || []).slice();
+      structuredEvidence.explanation = (structuredEvidence.explanation || []).slice();
+      if (assignment.continuity > 0) {
+        structuredEvidence.tieBreakersUsed.push("previous-hole-routing");
+        structuredEvidence.explanation.push("Previous green to next tee routing supported this ordering.");
+      }
       return {
         holeNumber: assignment.hole.holeNumber,
         par: assignment.hole.par,
@@ -755,7 +842,8 @@
         candidate: assignment.candidate,
         matchScore: assignment.pair.score,
         confidence: baseConfidence,
-        evidence: assignment.pair.evidence.concat(assignment.continuity ? ["routing-continuity:" + assignment.continuity.toFixed(2)] : [])
+        evidence: assignment.pair.evidence.concat(assignment.continuity ? ["routing-continuity:" + assignment.continuity.toFixed(2)] : []),
+        assignmentEvidence: structuredEvidence
       };
     });
     var assignedHoleNumbers = {};
@@ -773,6 +861,8 @@
       unresolvedScorecardHoles: unresolvedScorecardHoles,
       confidence: clamp(confidence, 0, 1),
       warnings: warnings,
+      context: context,
+      score: best.score || 0,
       alternatives: states.slice(0, 5).map(function (state) {
         return {
           score: state.score,
@@ -818,12 +908,250 @@
     return "insufficient-confidence";
   }
 
+  function allCheckpointPoints(data) {
+    var points = [];
+    (data.boundary || []).forEach(function (point) { points.push(point); });
+    (data.greens || []).concat(data.rejectedGreens || []).forEach(function (green) {
+      points = points.concat(green.polygon || []);
+      if (green.centre) points.push(green.centre);
+    });
+    (data.candidates || []).forEach(function (candidate) { points = points.concat(candidate.path || []); });
+    (data.elements || []).forEach(function (element) { points = points.concat(elementPoints(element)); });
+    return points;
+  }
+
+  function checkpointBounds(data) {
+    return boundsForPoints(allCheckpointPoints(data)) || boundsForPoints(data.boundary || []);
+  }
+
+  function featureStyle(element) {
+    var golf = golfTag(element);
+    if (golf === "fairway") return { stroke: "#79d279", fill: "#79d279", opacity: 0.16 };
+    if (golf === "tee") return { stroke: "#fff0a8", fill: "#fff0a8", opacity: 0.28 };
+    if (golf === "bunker") return { stroke: "#f2c879", fill: "#f2c879", opacity: 0.34 };
+    if (golf === "water_hazard" || golf === "lateral_water_hazard" || tagText(element, "natural") === "water") return { stroke: "#5fb7ff", fill: "#5fb7ff", opacity: 0.28 };
+    if (golf === "course") return { stroke: "#ffffff", fill: "none", opacity: 0.18 };
+    return { stroke: "#bfc8c1", fill: "none", opacity: 0.12 };
+  }
+
+  function checkpointSvg(stage, title, data) {
+    var width = 760;
+    var height = 520;
+    var pad = 42;
+    var innerW = width - pad * 2;
+    var innerH = height - pad * 2;
+    var bounds = checkpointBounds(data);
+    var innerBounds = bounds;
+    if (bounds) {
+      var latPad = (bounds.maxLat - bounds.minLat) * 0.08 || 0.001;
+      var lngPad = (bounds.maxLng - bounds.minLng) * 0.08 || 0.001;
+      innerBounds = { minLat: bounds.minLat - latPad, maxLat: bounds.maxLat + latPad, minLng: bounds.minLng - lngPad, maxLng: bounds.maxLng + lngPad };
+    }
+    function path(points, close) { return svgPath(points, innerBounds, innerW, innerH, close); }
+    function shiftPath(d) { return d ? d.replace(/([ML])([0-9.-]+) ([0-9.-]+)/g, function (_, cmd, x, y) { return cmd + (Number(x) + pad).toFixed(1) + " " + (Number(y) + pad).toFixed(1); }) : ""; }
+    function label(point, text, fill) {
+      var p = projectPoint(point, innerBounds, innerW, innerH);
+      if (!p) return "";
+      return '<text x="' + (p.x + pad + 5).toFixed(1) + '" y="' + (p.y + pad - 5).toFixed(1) + '" fill="' + fill + '" font-size="12" font-weight="800">' + escapeHtml(text) + '</text>';
+    }
+    var body = [];
+    body.push('<rect width="100%" height="100%" rx="16" fill="#07110c"/>');
+    body.push('<text x="22" y="25" fill="#ffffff" font-size="16" font-weight="900">' + escapeHtml(title) + '</text>');
+    body.push('<text x="22" y="45" fill="#98a99f" font-size="11">' + escapeHtml(data.courseName || data.courseId || "Course") + " | " + escapeHtml(data.resolverRunId || "") + " | " + escapeHtml(data.createdAt || "") + '</text>');
+    (data.elements || []).forEach(function (element) {
+      var pts = elementPoints(element);
+      if (pts.length < 2) return;
+      var style = featureStyle(element);
+      var d = shiftPath(path(pts, pts.length >= 3));
+      if (!d) return;
+      body.push('<path d="' + d + '" fill="' + (style.fill || "none") + '" fill-opacity="' + style.opacity + '" stroke="' + style.stroke + '" stroke-opacity="' + Math.max(style.opacity, 0.28) + '" stroke-width="1.2"/>');
+    });
+    if ((data.boundary || []).length >= 3) body.push('<path d="' + shiftPath(path(data.boundary, true)) + '" fill="none" stroke="#ffdc5b" stroke-width="3" stroke-dasharray="8 5"/>');
+    (data.rejectedGreens || []).forEach(function (green) {
+      body.push('<path d="' + shiftPath(path(green.polygon, true)) + '" fill="#ff5a6f" fill-opacity=".16" stroke="#ff5a6f" stroke-width="2" stroke-dasharray="4 4"/>');
+    });
+    (data.greens || []).forEach(function (green) {
+      body.push('<path d="' + shiftPath(path(green.polygon, true)) + '" fill="#36d47d" fill-opacity=".28" stroke="#36d47d" stroke-width="2"/>');
+    });
+    (data.candidates || []).forEach(function (candidate, index) {
+      var stroke = stage === "number-allocation" ? "#f8d24a" : "#74b9ff";
+      body.push('<path d="' + shiftPath(path(candidate.path, false)) + '" fill="none" stroke="' + stroke + '" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>');
+      var mid = candidate.path && candidate.path[Math.floor(candidate.path.length / 2)];
+      var text = stage === "number-allocation" && candidate.holeNumber ? "H" + candidate.holeNumber : (candidate.candidateId || ("Candidate " + String.fromCharCode(65 + index)));
+      body.push(label(mid, text, stage === "number-allocation" ? "#ffe680" : "#cce4ff"));
+    });
+    if (data.center) body.push(label(data.center, "Course center", "#ffffff"));
+    body.push('<line x1="' + (width - 152) + '" y1="' + (height - 28) + '" x2="' + (width - 52) + '" y2="' + (height - 28) + '" stroke="#ffffff" stroke-width="3"/><text x="' + (width - 150) + '" y="' + (height - 34) + '" fill="#ffffff" font-size="10">approx scale</text>');
+    return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + width + " " + height + '">' + body.join("") + '</svg>';
+  }
+
+  function svgDataUrl(svg) {
+    return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+  }
+
+  function candidateDisplayId(index) {
+    var n = index;
+    var label = "";
+    do {
+      label = String.fromCharCode(65 + (n % 26)) + label;
+      n = Math.floor(n / 26) - 1;
+    } while (n >= 0);
+    return "Candidate " + label;
+  }
+
+  function buildCheckpoints(input, runId, courseId, boundary, greenResult, candidates, match) {
+    var course = input.course || {};
+    var createdAt = nowIso();
+    var elements = (input.osmPayload && input.osmPayload.elements) || input.elements || [];
+    var center = toPoint(input.center) || toPoint({ lat: course.courseLat || course.lat || course.latitude, lng: course.courseLng || course.lng || course.longitude });
+    var assignmentsByCandidate = {};
+    (match.assignments || []).forEach(function (assignment) { assignmentsByCandidate[assignment.candidate.candidateId] = assignment; });
+    var base = {
+      createdAt: createdAt,
+      courseId: courseId,
+      courseName: course.courseName || course.name || courseId,
+      resolverRunId: runId,
+      boundary: boundary,
+      center: center,
+      elements: elements
+    };
+    var lineCandidates = candidates.map(function (candidate, index) {
+      return Object.assign({}, candidate, { candidateId: candidateDisplayId(index), internalCandidateId: candidate.candidateId });
+    });
+    var numberCandidates = candidates.map(function (candidate, index) {
+      var assignment = assignmentsByCandidate[candidate.candidateId];
+      return Object.assign({}, candidate, {
+        candidateId: candidateDisplayId(index),
+        internalCandidateId: candidate.candidateId,
+        holeNumber: assignment && assignment.holeNumber,
+        confidence: assignment && assignment.confidence || candidate.confidence
+      });
+    });
+    var stages = [
+      {
+        stage: "initial-snapshot",
+        title: "Initial Snapshot",
+        data: Object.assign({}, base, {
+          greens: greenResult.accepted,
+          rejectedGreens: greenResult.rejected,
+          candidates: [],
+          metadata: {
+            osmFeatures: elements.length,
+            acceptedGreens: greenResult.accepted.length,
+            rejectedGreens: greenResult.rejected.length,
+            fairways: elements.filter(function (element) { return golfTag(element) === "fairway"; }).length,
+            tees: elements.filter(function (element) { return golfTag(element) === "tee"; }).length
+          }
+        })
+      },
+      {
+        stage: "fairway-lines",
+        title: "Fairway Lines",
+        data: Object.assign({}, base, {
+          greens: greenResult.accepted,
+          rejectedGreens: greenResult.rejected,
+          candidates: lineCandidates,
+          metadata: {
+            acceptedGreens: greenResult.accepted.length,
+            candidatePaths: candidates.length,
+            rejectedCandidates: 0,
+            pathDistanceRangeM: distanceRange(candidates.map(function (candidate) { return candidate.pathDistanceM; }))
+          }
+        })
+      },
+      {
+        stage: "number-allocation",
+        title: "Number Allocation",
+        data: Object.assign({}, base, {
+          greens: greenResult.accepted,
+          rejectedGreens: greenResult.rejected,
+          candidates: numberCandidates,
+          metadata: {
+            resolvedHoles: (match.assignments || []).length,
+            unresolvedScorecardHoles: (match.unresolvedScorecardHoles || []).map(function (hole) { return hole.holeNumber; }),
+            confidence: match.confidence,
+            alternatives: match.alternatives || []
+          }
+        })
+      }
+    ];
+    return stages.map(function (entry) {
+      var svg = checkpointSvg(entry.stage, entry.title, entry.data);
+      return {
+        stage: entry.stage,
+        createdAt: createdAt,
+        courseId: courseId,
+        resolverRunId: runId,
+        imageDataUrl: svgDataUrl(svg),
+        metadata: entry.data.metadata || {}
+      };
+    });
+  }
+
+  function distanceRange(values) {
+    var nums = (values || []).filter(Number.isFinite);
+    if (!nums.length) return null;
+    return { min: Math.round(Math.min.apply(null, nums)), max: Math.round(Math.max.apply(null, nums)) };
+  }
+
+  function buildFeedback(result) {
+    var debug = result.debugEvidence || {};
+    var candidates = debug.holeCandidates || [];
+    var scorecard = debug.scorecardHoles || [];
+    var assigned = result.holes || [];
+    var measuredRange = distanceRange(candidates.map(function (candidate) { return candidate.pathDistanceM; }));
+    var scorecardRange = distanceRange(scorecard.map(function (hole) { return hole.distanceM; }));
+    var poor = assigned.filter(function (hole) { return hole.assignmentEvidence && hole.assignmentEvidence.normalizedDistanceDelta > 0.22; }).map(function (hole) { return hole.holeNumber; });
+    var tieBreakers = {};
+    assigned.forEach(function (hole) {
+      (hole.assignmentEvidence && hole.assignmentEvidence.tieBreakersUsed || []).forEach(function (key) { tieBreakers[key] = (tieBreakers[key] || 0) + 1; });
+    });
+    return {
+      stage: result.status === "resolved" ? "Completed" : result.status === "partially-resolved" ? "Partially resolved" : "Fallback required",
+      geometry: {
+        osmFeatures: debug.osmFeatureCount || 0,
+        greenCandidates: (debug.greenCandidates || []).length + (debug.rejectedGreenCandidates || []).length,
+        acceptedGreens: (debug.greenCandidates || []).length,
+        rejectedGreens: (debug.rejectedGreenCandidates || []).length,
+        fairwayCorridors: debug.fairwayCount || 0,
+        candidatePaths: candidates.length,
+        missingCandidates: Math.max(0, (debug.expectedHoleCount || 18) - candidates.length)
+      },
+      distance: {
+        measuredRange: measuredRange,
+        scorecardRange: scorecardRange,
+        globalScale: debug.assignmentContext && debug.assignmentContext.scale || 1,
+        averageNormalisedError: assigned.length ? assigned.reduce(function (sum, hole) { return sum + number(hole.assignmentEvidence && hole.assignmentEvidence.normalizedDistanceDelta, 0); }, 0) / assigned.length : null,
+        rankAgreement: assigned.filter(function (hole) { return hole.assignmentEvidence && hole.assignmentEvidence.rankScore >= 0.75; }).length + " / " + assigned.length,
+        poorAgreementHoles: poor,
+        distanceUsed: "centre-path",
+        confidence: result.confidence >= HIGH_CONFIDENCE ? "High" : result.confidence >= MEDIUM_CONFIDENCE ? "Medium" : "Low"
+      },
+      assignment: {
+        scorecardHoles: scorecard.length,
+        geometryCandidates: candidates.length,
+        resolvedHoles: assigned.length,
+        unresolvedHoles: (result.unresolvedScorecardHoles || []).map(function (hole) { return hole.holeNumber; }),
+        duplicateAssignmentsBlocked: true,
+        unusedCandidates: (result.unresolvedCandidates || []).length,
+        overallAssignmentScore: number(debug.assignmentScore, 0),
+        overallConfidence: result.confidence
+      },
+      tieBreakers: tieBreakers,
+      explanations: assigned.map(function (hole) {
+        return { holeNumber: hole.holeNumber, explanation: hole.assignmentEvidence && hole.assignmentEvidence.explanation || [] };
+      }).filter(function (row) { return row.explanation.length; })
+    };
+  }
+
   async function resolveCourseGeometryForAutoMapper(input) {
     input = input || {};
     var payload = input.osmPayload || {};
     var elements = payload.elements || input.elements || [];
     var course = input.course || {};
     var courseId = String(course.courseId || course.id || input.courseId || course.name || course.courseName || "course");
+    var resolverRunId = makeRunId(courseId);
+    activeRunId = resolverRunId;
     var warnings = [];
     var analysisBoundary = deriveAnalysisBoundary(input, elements);
     var greenResult = detectGreenCandidates(elements, analysisBoundary);
@@ -837,36 +1165,177 @@
     var status = resolveStatus(match.assignments, match.confidence, expected);
     var assignedIds = {};
     match.assignments.forEach(function (assignment) { assignedIds[assignment.candidate.candidateId] = true; });
-    return {
+    var checkpoints = buildCheckpoints(input, resolverRunId, courseId, analysisBoundary, greenResult, candidates, match);
+    var result = {
       courseId: courseId,
+      resolverRunId: resolverRunId,
       status: status,
       holes: match.assignments,
       unresolvedCandidates: candidates.filter(function (candidate) { return !assignedIds[candidate.candidateId]; }),
       unresolvedScorecardHoles: match.unresolvedScorecardHoles,
       analysisBoundary: analysisBoundary,
       confidence: match.confidence,
+      overallConfidence: match.confidence,
       warnings: warnings,
+      checkpoints: checkpoints,
       resolverVersion: RESOLVER_VERSION,
-      resolvedAt: new Date().toISOString(),
+      resolvedAt: nowIso(),
       source: SOURCE,
       debugEvidence: {
+        resolverRunId: resolverRunId,
         analysisBoundary: analysisBoundary,
+        osmFeatureCount: elements.length,
+        fairwayCount: elements.filter(function (element) { return golfTag(element) === "fairway"; }).length,
+        expectedHoleCount: expected,
         greenCandidates: greenResult.accepted,
         rejectedGreenCandidates: greenResult.rejected,
         holeCandidates: candidates,
         scorecardHoles: scorecard,
+        assignmentContext: match.context || {},
+        assignmentScore: match.score || 0,
         assignmentAlternatives: match.alternatives || []
       }
     };
+    result.feedback = buildFeedback(result);
+    if (activeRunId !== resolverRunId) {
+      result.status = "failed";
+      result.cancelled = true;
+      result.warnings = result.warnings.concat("Resolver run was superseded before completion.");
+    }
+    publishResult(result);
+    return result;
   }
 
   function debugEnabled() {
     try {
+      if (!adminOrDeveloperAllowed()) return false;
       return !!window.gdCourseGeometryResolverDebug ||
-        localStorage.getItem("gd_course_geometry_resolver_debug") === "1";
+        localStorage.getItem("gd_course_geometry_resolver_debug") === "1" ||
+        localStorage.getItem("gd_course_play_debug_enabled") === "1" ||
+        /[?&](gd_course_play_debug|gd_course_geometry_debug|debug-course-play)(=1|=true|=[^&]+|&|$)/i.test(location.search);
     } catch (e) {
-      return !!window.gdCourseGeometryResolverDebug;
+      return !!window.gdCourseGeometryResolverDebug && adminOrDeveloperAllowed();
     }
+  }
+
+  function adminOrDeveloperAllowed() {
+    try {
+      var permission = String(document.body && document.body.dataset && document.body.dataset.gdPermission || "").toLowerCase();
+      if (permission === "admin" || permission === "developer") return true;
+      var account = window.GolfDaddyAccounts && typeof window.GolfDaddyAccounts.current === "function" ? window.GolfDaddyAccounts.current() : null;
+      var role = String(account && account.role || "").toLowerCase();
+      return role === "admin" || role === "developer";
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function publishResult(result) {
+    try {
+      window.__gdCourseGeometryResolverLastResult = result;
+      window.dispatchEvent(new CustomEvent("gd:native-course-resolver-updated", { detail: result }));
+    } catch (e) { /* no-op */ }
+    if (debugEnabled()) renderFeedbackWindow(result);
+  }
+
+  function fmtPercent(value) {
+    var n = number(value, NaN);
+    return Number.isFinite(n) ? Math.round(n * 100) + "%" : "";
+  }
+
+  function fmtRange(range) {
+    return range ? Math.round(range.min) + "-" + Math.round(range.max) + " m" : "n/a";
+  }
+
+  function checkpointFor(result, stage) {
+    return (result.checkpoints || []).filter(function (checkpoint) { return checkpoint.stage === stage; })[0] || null;
+  }
+
+  function feedbackMetric(label, value) {
+    return '<div class="gdNcrMetric"><span>' + escapeHtml(label) + '</span><strong>' + escapeHtml(value == null || value === "" ? "n/a" : value) + '</strong></div>';
+  }
+
+  function feedbackEvidenceHtml(result) {
+    var feedback = result.feedback || {};
+    var geometry = feedback.geometry || {};
+    var distance = feedback.distance || {};
+    var assignment = feedback.assignment || {};
+    var tieBreakers = feedback.tieBreakers || {};
+    var explanations = feedback.explanations || [];
+    return [
+      '<div class="gdNcrGrid">',
+      feedbackMetric("OSM features", geometry.osmFeatures),
+      feedbackMetric("Greens accepted", geometry.acceptedGreens + " / " + geometry.greenCandidates),
+      feedbackMetric("Fairway corridors", geometry.fairwayCorridors),
+      feedbackMetric("Candidate paths", geometry.candidatePaths),
+      feedbackMetric("Measured range", fmtRange(distance.measuredRange)),
+      feedbackMetric("Scorecard range", fmtRange(distance.scorecardRange)),
+      feedbackMetric("Global scale", number(distance.globalScale, 1).toFixed(2)),
+      feedbackMetric("Rank agreement", distance.rankAgreement),
+      feedbackMetric("Resolved", assignment.resolvedHoles + " / " + assignment.scorecardHoles),
+      feedbackMetric("Unused candidates", assignment.unusedCandidates),
+      feedbackMetric("Confidence", fmtPercent(assignment.overallConfidence)),
+      feedbackMetric("Fallback", assignment.unresolvedHoles && assignment.unresolvedHoles.length ? "H" + assignment.unresolvedHoles.join(", H") : "No"),
+      '</div>',
+      '<div class="gdNcrSubhead">Tie-breakers used</div>',
+      '<div class="gdNcrChips">' + (Object.keys(tieBreakers).length ? Object.keys(tieBreakers).map(function (key) {
+        return '<span>' + escapeHtml(key) + ': ' + escapeHtml(tieBreakers[key]) + '</span>';
+      }).join("") : '<span>None</span>') + '</div>',
+      '<div class="gdNcrSubhead">Resolved ties</div>',
+      '<div class="gdNcrExplain">' + (explanations.length ? explanations.slice(0, 8).map(function (row) {
+        return '<p><strong>Hole ' + escapeHtml(row.holeNumber) + ':</strong> ' + escapeHtml(row.explanation.join(" ")) + '</p>';
+      }).join("") : '<p>No tie-breaker changed the winning assignment.</p>') + '</div>'
+    ].join("");
+  }
+
+  function renderFeedbackWindow(result) {
+    try {
+      if (!document || !document.body || !adminOrDeveloperAllowed()) return;
+      var el = document.getElementById("gdNativeCourseResolverWindow");
+      if (!el) {
+        el = document.createElement("div");
+        el.id = "gdNativeCourseResolverWindow";
+        document.body.appendChild(el);
+        var style = document.createElement("style");
+        style.id = "gdNativeCourseResolverStyle";
+        style.textContent = [
+          "#gdNativeCourseResolverWindow{position:fixed;right:max(10px,env(safe-area-inset-right));bottom:calc(max(10px,env(safe-area-inset-bottom)) + 10px);z-index:2602;width:min(390px,calc(100vw - 20px));max-height:min(72vh,620px);overflow:hidden;border-radius:12px;background:rgba(6,12,10,.94);border:1px solid rgba(92,214,137,.28);box-shadow:0 18px 44px rgba(0,0,0,.42);color:#fff;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif}",
+          "#gdNativeCourseResolverWindow .gdNcrHead{display:flex;justify-content:space-between;gap:10px;padding:10px 11px 8px;border-bottom:1px solid rgba(255,255,255,.08)}",
+          "#gdNativeCourseResolverWindow .gdNcrHead strong{display:block;font-size:13px;font-weight:950}#gdNativeCourseResolverWindow .gdNcrHead span{display:block;margin-top:2px;color:rgba(255,255,255,.58);font-size:10px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:250px}",
+          "#gdNativeCourseResolverWindow .gdNcrBadge{align-self:flex-start;border-radius:999px;padding:4px 7px;background:rgba(92,214,137,.14);border:1px solid rgba(92,214,137,.25);font-size:9px;font-weight:950;text-transform:uppercase;color:#8dffbc}",
+          "#gdNativeCourseResolverWindow .gdNcrTabs{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;padding:8px 9px}#gdNativeCourseResolverWindow .gdNcrTabs button{height:28px;border:0;border-radius:8px;background:rgba(255,255,255,.08);color:rgba(255,255,255,.72);font-size:10px;font-weight:900}#gdNativeCourseResolverWindow .gdNcrTabs button.active{background:rgba(92,214,137,.22);color:#fff}",
+          "#gdNativeCourseResolverWindow .gdNcrBody{padding:0 9px 10px;overflow:auto;max-height:calc(min(72vh,620px) - 88px)}#gdNativeCourseResolverWindow img{display:block;width:100%;height:auto;border-radius:8px;border:1px solid rgba(255,255,255,.08);background:#07110c}",
+          "#gdNativeCourseResolverWindow .gdNcrGrid{display:grid;grid-template-columns:1fr 1fr;gap:6px}#gdNativeCourseResolverWindow .gdNcrMetric{min-width:0;padding:7px;border-radius:8px;background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.06)}#gdNativeCourseResolverWindow .gdNcrMetric span{display:block;color:rgba(255,255,255,.5);font-size:8px;font-weight:950;text-transform:uppercase;letter-spacing:.04em}#gdNativeCourseResolverWindow .gdNcrMetric strong{display:block;margin-top:2px;font-size:12px;font-weight:950;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}",
+          "#gdNativeCourseResolverWindow .gdNcrSubhead{margin:10px 0 5px;color:rgba(255,255,255,.68);font-size:10px;font-weight:950;text-transform:uppercase;letter-spacing:.05em}#gdNativeCourseResolverWindow .gdNcrChips{display:flex;gap:5px;flex-wrap:wrap}#gdNativeCourseResolverWindow .gdNcrChips span{border-radius:999px;padding:4px 7px;background:rgba(255,255,255,.08);font-size:10px;font-weight:850}#gdNativeCourseResolverWindow .gdNcrExplain p{margin:0 0 6px;color:rgba(255,255,255,.76);font-size:11px;line-height:1.35}",
+          "@media(max-width:520px){#gdNativeCourseResolverWindow{right:8px;left:8px;width:auto;bottom:8px}}"
+        ].join("");
+        document.head.appendChild(style);
+      }
+      var activeTab = el.getAttribute("data-tab") || "evidence";
+      var tabs = [
+        ["initial", "Initial", checkpointFor(result, "initial-snapshot")],
+        ["lines", "Lines", checkpointFor(result, "fairway-lines")],
+        ["numbers", "Numbers", checkpointFor(result, "number-allocation")],
+        ["evidence", "Evidence", null]
+      ];
+      var body = activeTab === "evidence"
+        ? feedbackEvidenceHtml(result)
+        : (tabs.filter(function (tab) { return tab[0] === activeTab; })[0] || tabs[0])[2];
+      var bodyHtml = typeof body === "string" ? body : body && body.imageDataUrl ? '<img alt="' + escapeHtml(activeTab) + ' resolver checkpoint" src="' + body.imageDataUrl + '">' : '<div class="gdNcrExplain"><p>No checkpoint available.</p></div>';
+      el.innerHTML = [
+        '<div class="gdNcrHead"><div><strong>Native Course Resolver</strong><span>' + escapeHtml(result.courseId) + " | " + escapeHtml(result.resolverRunId) + '</span></div><div class="gdNcrBadge">' + escapeHtml(result.feedback && result.feedback.stage || result.status) + '</div></div>',
+        '<div class="gdNcrTabs">' + tabs.map(function (tab) {
+          return '<button type="button" data-tab="' + tab[0] + '" class="' + (activeTab === tab[0] ? "active" : "") + '">' + escapeHtml(tab[1]) + '</button>';
+        }).join("") + '</div>',
+        '<div class="gdNcrBody">' + bodyHtml + '</div>'
+      ].join("");
+      Array.prototype.forEach.call(el.querySelectorAll("button[data-tab]"), function (button) {
+        button.onclick = function () {
+          el.setAttribute("data-tab", button.getAttribute("data-tab") || "evidence");
+          renderFeedbackWindow(result);
+        };
+      });
+    } catch (e) { /* no-op */ }
   }
 
   function drawDebug(result, leafletMap) {
