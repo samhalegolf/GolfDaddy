@@ -35,6 +35,7 @@
   var lastSyncStatusByKey={};
   var interactiveFallbackStartedByKey={};
   var pipelineMappingRunByKey={};
+  var lastPipelineIdentityCorrectionByKey={};
 
   function now(){return new Date().toISOString();}
   function safe(fn,fb){try{return fn();}catch(e){return fb;}}
@@ -714,6 +715,35 @@
     var name=state&&state.courseName||courseNameFrom(seed,id);
     return Object.assign({}, seed&&typeof seed==="object"?seed:{}, {courseId:id, courseName:name, name:name});
   }
+  function snapshotCourseId(snapshot,course,state){
+    return courseIdFrom(snapshot||course||state||"course");
+  }
+  function pipelineResolutionKey(snapshot,hole){
+    return snapshotCourseId(snapshot,null,null)+":h"+String(normalizeHoleNumber(hole));
+  }
+  function publishPipelineMappingAttempt(entry){
+    if(!entry||!entry.debugRunId)return entry;
+    pipelineMappingRunByKey[entry.resolutionKey]=entry;
+    if(entry.key&&entry.key!==entry.resolutionKey)pipelineMappingRunByKey[entry.key]=entry;
+    try{window.__gdCourseMappingDebugActiveAttempt=entry;}catch(e){}
+    return entry;
+  }
+  function pipelineMappingAttemptForKey(key){
+    var entry=pipelineMappingRunByKey[key];
+    if(!entry)return null;
+    if(typeof entry==="string")return {debugRunId:entry,runId:entry,resolutionKey:key,key:key};
+    return entry;
+  }
+  function clearPipelineMappingAttempt(key){
+    var entry=pipelineMappingAttemptForKey(key);
+    delete pipelineMappingRunByKey[key];
+    if(entry&&entry.resolutionKey)delete pipelineMappingRunByKey[entry.resolutionKey];
+    if(entry&&entry.key)delete pipelineMappingRunByKey[entry.key];
+    try{
+      var active=window.__gdCourseMappingDebugActiveAttempt;
+      if(active&&entry&&active.debugRunId===entry.debugRunId)delete window.__gdCourseMappingDebugActiveAttempt;
+    }catch(e){}
+  }
   function activeCourseFromGlobals(){
     return safe(function(){return window.gdActiveCourse||window.currentCourse||currentCourse||null;},null);
   }
@@ -728,15 +758,29 @@
     if(!api||!runId)return null;
     return safe(function(){return api.recordEvent(runId,event);},null);
   }
-  function pipelineMappingRun(key,course,state,hole,reason){
+  function pipelineMappingAttempt(key,course,state,hole,reason){
     var active=activeResolverForHole(hole);
     if(active&&active.debugRunId){
-      pipelineMappingRunByKey[key]=active.debugRunId;
-      return active.debugRunId;
+      return publishPipelineMappingAttempt({
+        debugRunId:active.debugRunId,
+        runId:active.debugRunId,
+        source:"course-play-resolver",
+        course:active.course||course||null,
+        courseId:active.courseId||courseIdFrom(active.course||course||state||"course"),
+        courseName:active.courseName||courseNameFrom(active.course||course||state,"Course"),
+        courseCentre:active.courseCentre||null,
+        hole:normalizeHoleNumber(hole),
+        selectedAt:active.selectedAt||null,
+        attemptToken:active.attemptToken||"",
+        resolutionKey:active.key||key,
+        key:key,
+        at:active.at||Date.now()
+      });
     }
-    if(pipelineMappingRunByKey[key])return pipelineMappingRunByKey[key];
+    var existing=pipelineMappingAttemptForKey(key);
+    if(existing)return publishPipelineMappingAttempt(existing);
     var api=mappingDebugApi();
-    if(!api||typeof api.startRun!=="function")return "";
+    if(!api||typeof api.startRun!=="function")return null;
     var snapshot=mappingCourseSnapshot(course,state);
     var selectedAt=now();
     var attemptToken="pipeline:"+key+":"+Date.now();
@@ -750,7 +794,22 @@
       invokedBy:reason||"course-play-pipeline"
     });},"");
     if(runId){
-      pipelineMappingRunByKey[key]=runId;
+      var entry={
+        debugRunId:runId,
+        runId:runId,
+        source:"course-play-pipeline",
+        course:snapshot,
+        courseId:snapshot.courseId||courseIdFrom(snapshot),
+        courseName:snapshot.courseName||snapshot.name||courseNameFrom(snapshot,"Course"),
+        courseCentre:snapshot.courseCentre||null,
+        hole:normalizeHoleNumber(hole),
+        selectedAt:selectedAt,
+        attemptToken:attemptToken,
+        resolutionKey:key,
+        key:key,
+        at:Date.now()
+      };
+      publishPipelineMappingAttempt(entry);
       recordMappingDebug(runId,{source:"course-loader",phase:"started",event:"pipeline-wait-started",summary:"Pipeline wait started",details:{
         courseId:snapshot.courseId||courseIdFrom(snapshot),
         courseName:snapshot.courseName||snapshot.name||courseNameFrom(snapshot,"Course"),
@@ -759,10 +818,15 @@
         selectedAt:selectedAt,
         attemptToken:attemptToken,
         invokedBy:reason||"course-play-pipeline",
-        requestedNextTool:"automapper"
+          requestedNextTool:"automapper"
       }});
+      return entry;
     }
-    return runId;
+    return null;
+  }
+  function pipelineMappingRun(key,course,state,hole,reason){
+    var entry=pipelineMappingAttempt(key,course,state,hole,reason);
+    return entry&&entry.debugRunId||"";
   }
   function resolveCourseFromLibrary(courseOrId){
     if(courseOrId&&typeof courseOrId==="object")return courseOrId;
@@ -916,15 +980,16 @@
     return coursePlayResolverActive(hole)||interactiveGreenFallbackActive();
   }
   function triggerInteractiveGreenFallback(course,hole,reason,state){
-    var key=String(state&&state.courseId||courseIdFrom(course||"course"))+":h"+String(hole);
+    var snapshot=mappingCourseSnapshot(course,state);
+    var key=pipelineResolutionKey(snapshot,hole);
     if(interactiveGreenFallbackActive())return true;
     if(interactiveFallbackStartedByKey[key]&&Date.now()-interactiveFallbackStartedByKey[key]<60000)return true;
     if(typeof window.gdBeginInteractiveGreenFallback!=="function")return false;
-    var snapshot=mappingCourseSnapshot(course,state);
     var active=activeResolverForHole(hole);
-    var debugRunId=active&&active.debugRunId||pipelineMappingRun(key,snapshot,state,hole,reason||"pipeline-timeout");
-    var attemptToken=active&&active.attemptToken||"pipeline:"+key;
-    var resolutionKey=active&&active.key||key;
+    var attempt=pipelineMappingAttempt(key,snapshot,state,hole,reason||"pipeline-timeout");
+    var debugRunId=active&&active.debugRunId||attempt&&attempt.debugRunId||"";
+    var attemptToken=active&&active.attemptToken||attempt&&attempt.attemptToken||"pipeline:"+key;
+    var resolutionKey=active&&active.key||attempt&&attempt.resolutionKey||key;
     recordMappingDebug(debugRunId,{source:"course-loader",phase:"progress",event:"pipeline-timeout",summary:"Pipeline timeout requested manual fallback",details:{
       courseId:snapshot.courseId||state&&state.courseId||courseIdFrom(snapshot||course||"course"),
       courseName:snapshot.courseName||snapshot.name||state&&state.courseName||courseNameFrom(snapshot||course,"Course"),
@@ -944,7 +1009,7 @@
       status:state&&state.status||HOLE_STATES.mapping,
       reason:reason||"pipeline-timeout"
     });
-    safe(function(){window.gdBeginInteractiveGreenFallback(snapshot||course||state||"course",hole,reason||"pipeline-timeout",{debugRunId:debugRunId,resolutionKey:resolutionKey,attemptToken:attemptToken,selectedAt:active&&active.selectedAt||null,reason:"course-play-pipeline-timeout"});});
+    safe(function(){window.gdBeginInteractiveGreenFallback(snapshot||course||state||"course",hole,reason||"pipeline-timeout",{debugRunId:debugRunId,resolutionKey:resolutionKey,attemptToken:attemptToken,selectedAt:active&&active.selectedAt||attempt&&attempt.selectedAt||null,reason:"course-play-pipeline-timeout"});});
     return interactiveGreenFallbackActive();
   }
   function pipelineStatusElement(){
@@ -968,26 +1033,46 @@
     if(!document.body)return null;
     var hole=normalizeHoleNumber(holeNumber||activeHoleFromApp());
     var course=activeCourseFromApp();
-    var state=getActiveHolePlayState(hole);
+    var initialState=getActiveHolePlayState(hole);
+    var snapshot=mappingCourseSnapshot(course,initialState);
+    var snapshotId=snapshotCourseId(snapshot,course,initialState);
+    var initialId=initialState&&initialState.courseId||"";
+    var identityCorrected=!!(initialId&&snapshotId&&initialId!==snapshotId);
+    var state=identityCorrected?getHolePlayState(snapshot,hole):initialState;
     var status=String(state&&state.status||HOLE_STATES.unknown);
     var fallbackActive=interactiveGreenFallbackActive();
     if(preparingStatus(status)){
-      var mapped=mappedHoleFromCourseLibrary(course,hole);
+      var mapped=mappedHoleFromCourseLibrary(snapshot||course,hole);
       if(mapped&&(Array.isArray(mapped.route)&&mapped.route.length>=2||mapped.green&&mapped.tee)){
-        state=ingestMappedHole(course||"course",hole,mapped,reason||"pipeline-sync");
+        state=ingestMappedHole(snapshot||course||"course",hole,mapped,reason||"pipeline-sync");
         status=String(state&&state.status||HOLE_STATES.unknown);
         fallbackActive=false;
       }
     }
-    var key=String(state&&state.courseId||courseIdFrom(course||"course"))+":h"+String(hole);
+    var key=pipelineResolutionKey(snapshot,hole);
+    if(identityCorrected&&lastPipelineIdentityCorrectionByKey[key]!==initialId+"->"+snapshotId){
+      lastPipelineIdentityCorrectionByKey[key]=initialId+"->"+snapshotId;
+      recordDebugEvent("gps-play-pipeline-course-identity-corrected",{staleCourseId:initialId,correctedCourseId:snapshotId,courseName:snapshot&&snapshot.courseName||courseNameFrom(snapshot||course,"Course"),holeNumber:hole,source:reason||"sync"});
+    }
     var syncSig=key+"|"+status+"|"+String(reason||"sync");
     if(gpsActive()&&reason!=="interval"&&lastSyncStatusByKey[key]!==syncSig){
-      recordDebugEvent("gps-play-requested-hole",{courseId:state&&state.courseId||courseIdFrom(course||"course"),courseName:state&&state.courseName||courseNameFrom(course,"Course"),holeNumber:hole,status:status,source:reason||"sync"});
+      recordDebugEvent("gps-play-requested-hole",{courseId:snapshotId,courseName:snapshot&&snapshot.courseName||state&&state.courseName||courseNameFrom(snapshot||course,"Course"),holeNumber:hole,status:status,source:reason||"sync"});
     }
     if(preparingStatus(status)){
       if(!preparingSince[key]){
         preparingSince[key]=Date.now();
-        pipelineMappingRun(key,course,state,hole,reason||"pipeline-sync");
+        var attempt=pipelineMappingAttempt(key,snapshot,state,hole,reason||"pipeline-sync");
+        if(identityCorrected&&attempt&&attempt.debugRunId){
+          recordMappingDebug(attempt.debugRunId,{source:"course-loader",phase:"progress",event:"pipeline-identity-corrected",summary:"Pipeline request identity corrected",details:{
+            staleCourseId:initialId,
+            correctedCourseId:snapshotId,
+            courseName:snapshot&&snapshot.courseName||"",
+            hole:hole,
+            resolutionKey:key,
+            attemptToken:attempt.attemptToken||"",
+            invokedBy:reason||"pipeline-sync"
+          }});
+        }
       }
       if(courseResolutionOwnerActive(hole)){
         preparingSince[key]=Date.now();
@@ -998,8 +1083,8 @@
         }else{
           preparingSince[key]=Date.now();
           recordDebugEvent("gps-play-pipeline-timeout-no-fallback",{
-            courseId:state&&state.courseId||courseIdFrom(course||"course"),
-            courseName:state&&state.courseName||courseNameFrom(course,"Course"),
+            courseId:snapshotId,
+            courseName:snapshot&&snapshot.courseName||state&&state.courseName||courseNameFrom(snapshot||course,"Course"),
             holeNumber:hole,
             status:status,
             reason:"interactive fallback unavailable"
@@ -1008,7 +1093,7 @@
       }
     }else{
       delete preparingSince[key];
-      delete pipelineMappingRunByKey[key];
+      clearPipelineMappingAttempt(key);
     }
     if(fallbackActive)delete preparingSince[key];
     var preparing=gpsActive()&&!fallbackActive&&preparingStatus(status);
@@ -1025,12 +1110,12 @@
     if(gpsActive()){
       var transitionKey=key+"|"+status+"|"+String(!!preparing)+"|"+String(!!unavailable);
       if(lastSyncStatusByKey[key]!==transitionKey){
-        if(preparing)recordDebugEvent("gps-play-showed-loading",{courseId:state&&state.courseId||courseIdFrom(course||"course"),courseName:state&&state.courseName||courseNameFrom(course,"Course"),holeNumber:hole,status:status,reason:reason||"sync"});
-        else if(unavailable)recordDebugEvent("gps-play-fell-to-unavailable",{courseId:state&&state.courseId||courseIdFrom(course||"course"),courseName:state&&state.courseName||courseNameFrom(course,"Course"),holeNumber:hole,status:status,reason:state&&state.unavailableReason||reason||"unavailable"});
+        if(preparing)recordDebugEvent("gps-play-showed-loading",{courseId:snapshotId,courseName:snapshot&&snapshot.courseName||state&&state.courseName||courseNameFrom(snapshot||course,"Course"),holeNumber:hole,status:status,reason:reason||"sync"});
+        else if(unavailable)recordDebugEvent("gps-play-fell-to-unavailable",{courseId:snapshotId,courseName:snapshot&&snapshot.courseName||state&&state.courseName||courseNameFrom(snapshot||course,"Course"),holeNumber:hole,status:status,reason:state&&state.unavailableReason||reason||"unavailable"});
         else if(status===HOLE_STATES.play_data_ready){
-          var frame=getCoursePlayFrameIndex(state&&state.courseId||course||"course",hole);
+          var frame=getCoursePlayFrameIndex(snapshot||state&&state.courseId||course||"course",hole);
           var manifestKey=frame&&frame.manifestKey||state&&state.presentation&&state.presentation.capturedManifestKey||null;
-          recordDebugEvent(frame&&capturedManifestPresent(manifestKey)?"gps-play-loaded-existing-frame":"gps-play-data-ready-no-manifest",{courseId:state&&state.courseId||courseIdFrom(course||"course"),courseName:state&&state.courseName||courseNameFrom(course,"Course"),holeNumber:hole,status:status,frameIndexKey:frame&&frame.frameIndexKey||null,manifestKey:manifestKey,manifestPresent:capturedManifestPresent(manifestKey),reason:reason||"sync"});
+          recordDebugEvent(frame&&capturedManifestPresent(manifestKey)?"gps-play-loaded-existing-frame":"gps-play-data-ready-no-manifest",{courseId:snapshotId,courseName:snapshot&&snapshot.courseName||state&&state.courseName||courseNameFrom(snapshot||course,"Course"),holeNumber:hole,status:status,frameIndexKey:frame&&frame.frameIndexKey||null,manifestKey:manifestKey,manifestPresent:capturedManifestPresent(manifestKey),reason:reason||"sync"});
         }
         lastSyncStatusByKey[key]=transitionKey;
       }
