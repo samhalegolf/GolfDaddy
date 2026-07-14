@@ -146,6 +146,28 @@ function loadController(options = {}) {
       async resolveCourseGeometryForAutoMapper(input) {
         calls.native += 1;
         calls.nativeInputs.push(input || {});
+        if (options.nativePartial) {
+          return {
+            status: "geometry-resolved-numbering-unavailable",
+            confidence: 0,
+            source: "test-native-resolver",
+            holes: [],
+            unresolvedCandidates: [{ candidateId: "native-geometry-1" }],
+            unresolvedScorecardHoles: [],
+            checkpoints: [
+              { stage: "initial-snapshot", imageDataUrl: "data:image/svg+xml,initial", metadata: {} },
+              { stage: "fairway-lines", imageDataUrl: "data:image/svg+xml,lines", metadata: {} },
+              { stage: "number-allocation", imageDataUrl: "data:image/svg+xml,numbers", metadata: { status: "unavailable", warning: "Scorecard unavailable" } }
+            ],
+            feedback: {
+              geometry: { greenCandidates: 1, acceptedGreens: 1, rejectedGreens: 0, fairwayCorridors: 1, candidatePaths: 1 },
+              assignment: { scorecardHoles: 0, resolvedHoles: 0, unresolvedHoles: [] },
+              distance: {},
+              tieBreakers: {}
+            },
+            warnings: ["Scorecard unavailable"]
+          };
+        }
         if (options.nativeSuccess) {
           return {
             status: "resolved",
@@ -284,6 +306,14 @@ async function main() {
   assert.strictEqual(env.calls.native, 1, "native resolver still runs once after reload");
   assert.strictEqual(env.calls.nativeInputs[0].sourceLoadError, null, "source reload clears the acquisition error");
   assert.strictEqual(env.calls.nativeInputs[0].osmPayload.elements.length, 1, "native resolver receives reloaded OSM geometry");
+
+  env = await runScenario({ fetchSequence: ["fail", "native"], nativePartial: true });
+  assert.strictEqual(env.calls.native, 1, "partial native resolver runs once");
+  assert(env.events.some((event) => event.event === "native-resolver-source-load-started"), "native source load start is logged");
+  assert(env.events.some((event) => event.event === "native-resolver-source-load-succeeded"), "native source load success is logged");
+  assert(!env.events.some((event) => event.event === "native-resolver-source-load-failed"), "scorecard-unavailable partial result is not logged as source-load-failed");
+  assert(env.events.some((event) => event.event === "native-resolver-failed"), "partial native result still falls through as unresolved");
+  assert.strictEqual(env.events.filter((event) => event.event === "manual-fallback-opened").length, 1, "partial native result opens manual fallback once");
 
   env = await runScenario({});
   assert.strictEqual(env.calls.native, 1, "AutoMapper zero-guide result invokes native resolver exactly once");

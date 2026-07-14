@@ -440,11 +440,16 @@
       metadata: sanitize(checkpoint && checkpoint.metadata || {}, { maxDepth: 5 })
     });
     run.checkpoints = [entry].concat((run.checkpoints || []).filter(function (item) { return item.stage !== stage; })).slice(0, CHECKPOINT_STAGES.length);
+    var checkpointEvent = stage === "number-allocation" && entry.metadata && entry.metadata.status === "unavailable"
+      ? "number-allocation-unavailable"
+      : stage + "-produced";
     recordEvent(run.runId, {
       source: "native-resolver",
       phase: "checkpoint",
-      event: stage,
-      summary: (checkpoint && checkpoint.title) || prettyLabel(stage) + " produced",
+      event: checkpointEvent,
+      summary: stage === "number-allocation" && entry.metadata && entry.metadata.status === "unavailable"
+        ? "Number Allocation unavailable"
+        : (checkpoint && checkpoint.title) || prettyLabel(stage) + " produced",
       details: Object.assign({ stage: stage }, entry.metadata || {})
     });
     touchRun(run);
