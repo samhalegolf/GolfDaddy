@@ -63,25 +63,30 @@ exports.handler = async function (event) {
 async function upsertAccount(payload, action) {
   const account = payload.account || {};
   const profile = payload.profile || {};
-  const accountId = text(account.accountId || account.id || account.account_id || payload.accountId, 120);
-  const profileId = text(account.profileId || account.profile_id || profile.id || profile.profileId || profile.profile_id || payload.profileId || (accountId ? "profile_" + accountId : ""), 120);
+  const localAccountId = text(account.accountId || account.id || account.account_id || payload.accountId, 120);
+  const localProfileId = text(account.profileId || account.profile_id || profile.id || profile.profileId || profile.profile_id || payload.profileId || (localAccountId ? "profile_" + localAccountId : ""), 120);
   const accountEmail = email(account.email || profile.email || payload.email);
   const name = text(account.name || profile.name || nameFromEmail(accountEmail) || "Clarity Player", 160);
   const role = normalRole(account.role || profile.accountPermission || profile.permission);
   const now = new Date().toISOString();
 
-  if (!accountId) throw badRequest("Account id is required");
+  if (!localAccountId) throw badRequest("Account id is required");
   if (!accountEmail) throw badRequest("Valid account email is required");
 
-  const duplicate = await supabaseFetch(
-    "app_accounts?select=account_id,email&email=eq." + encodeFilter(accountEmail) + "&account_id=neq." + encodeFilter(accountId) + "&limit=1",
+  // If this email already has a Supabase record under a different account id
+  // (new device/browser, cleared storage), adopt the existing record instead of
+  // rejecting with 409. Email is the identity; the server ids win.
+  let accountId = localAccountId;
+  let profileId = localProfileId;
+  let merged = false;
+  const existing = await supabaseFetch(
+    "app_accounts?select=account_id,profile_id,email&email=eq." + encodeFilter(accountEmail) + "&account_id=neq." + encodeFilter(localAccountId) + "&limit=1",
     { method: "GET" }
   );
-  if (Array.isArray(duplicate) && duplicate.length) {
-    const error = new Error("Email already exists in Supabase");
-    error.status = 409;
-    error.body = { error: "That email already has a Supabase account record." };
-    throw error;
+  if (Array.isArray(existing) && existing.length) {
+    accountId = text(existing[0].account_id, 120) || localAccountId;
+    profileId = text(existing[0].profile_id, 120) || localProfileId;
+    merged = true;
   }
 
   await supabaseFetch("app_accounts?on_conflict=account_id", {
@@ -107,7 +112,8 @@ async function upsertAccount(payload, action) {
         syncedFromBrowserAt: now,
         createdAt: account.createdAt || account.created_at || null,
         updatedAt: account.updatedAt || account.updated_at || null,
-        profileWasDerived: !(account.profileId || account.profile_id || profile.id || profile.profileId || profile.profile_id || payload.profileId)
+        profileWasDerived: !(account.profileId || account.profile_id || profile.id || profile.profileId || profile.profile_id || payload.profileId),
+        mergedFromLocalAccountId: merged ? localAccountId : null
       }),
       updated_at: now
     })
@@ -149,6 +155,9 @@ async function upsertAccount(payload, action) {
     accountId,
     profileId,
     accountEmail,
+    merged,
+    localAccountId: merged ? localAccountId : undefined,
+    localProfileId: merged ? localProfileId : undefined,
     checkedAt: now
   };
 }
