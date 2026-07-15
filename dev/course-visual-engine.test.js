@@ -92,6 +92,16 @@ function visualManifest(id, request, xOffset) {
     cameraTiltDeg: Number.isFinite(Number(request.cameraTiltDeg)) ? Number(request.cameraTiltDeg) : null,
     captureTiltDeg: Number.isFinite(Number(request.captureTiltDeg)) ? Number(request.captureTiltDeg) : null,
     playTiltDeg: Number.isFinite(Number(request.playTiltDeg)) ? Number(request.playTiltDeg) : null,
+    captureLens: request.captureLens || request.lensShape || "",
+    lensShape: request.lensShape || request.captureLens || "",
+    lensAspectRatio: Number.isFinite(Number(request.lensAspectRatio)) ? Number(request.lensAspectRatio) : null,
+    lensOrientation: request.lensOrientation || "",
+    lensFit: request.lensFit || "",
+    segmentIndex: Number.isFinite(Number(request.segmentIndex)) ? Number(request.segmentIndex) : null,
+    segmentCount: Number.isFinite(Number(request.segmentCount)) ? Number(request.segmentCount) : null,
+    segmentStartMeters: Number.isFinite(Number(request.segmentStartMeters)) ? Number(request.segmentStartMeters) : null,
+    segmentEndMeters: Number.isFinite(Number(request.segmentEndMeters)) ? Number(request.segmentEndMeters) : null,
+    routeLengthMeters: Number.isFinite(Number(request.routeLengthMeters)) ? Number(request.routeLengthMeters) : null,
     tileSourceLabel: request.tileSourceLabel || ""
   });
 }
@@ -153,6 +163,17 @@ function payload() {
   assert.ok(betaPlan.some((item) => item.role === "three-d-hole-beta"), "3D beta capture can be enabled");
   assert.ok(plan.find((item) => item.role === "green-surround").targetZoom > plan.find((item) => item.role === "play-corridor").targetZoom, "green capture asks for more pixels than corridor capture");
   assert.ok(plan.find((item) => item.role === "play-corridor").targetZoom > plan.find((item) => item.role === "course-backdrop").targetZoom, "corridor capture asks for more pixels than live underlay");
+  assert.equal(plan.find((item) => item.role === "green-surround").captureLens, "green-square", "green captures remain square super-HD tiles");
+  assert.equal(plan.find((item) => item.role === "green-surround").lensAspectRatio, 1, "green capture lens is square");
+  assert.equal(plan.find((item) => item.role === "play-corridor").captureLens, "mobile-hole", "corridor captures use long mobile-hole rectangles");
+  assert.equal(plan.find((item) => item.role === "play-corridor").lensAspectRatio, 9 / 16, "corridor lens is portrait shaped");
+  const corridorSegments = plan.filter((item) => item.role === "play-corridor");
+  assert.ok(corridorSegments.length > 1, "long corridors split into multiple fixed-zoom rectangles instead of zooming out");
+  assert.ok(corridorSegments.every((item) => item.targetZoom === 19 && item.minZoom === 19), "corridor segments keep a consistent HD zoom");
+  assert.ok(corridorSegments.every((item) => item.segmentCount === corridorSegments.length), "corridor segments carry segment metadata for stitching");
+  assert.equal(plan.find((item) => item.role === "course-backdrop").captureLens, undefined, "course underlay remains a broad map capture");
+  assert.equal(plan.find((item) => item.role === "terrain-reference").captureLens, undefined, "terrain reference remains course-wide");
+  assert.equal(betaPlan.find((item) => item.role === "three-d-hole-beta").captureLens, "mobile-hole", "3D beta captures use the same mobile lens");
 
   const record = engine.ingestCourseVisualInput(input);
   assert.equal(record.status, "input-ready");
@@ -167,6 +188,7 @@ function payload() {
   assert.ok(built.basicVisual.dataUrl.startsWith("data:image/svg+xml"));
   assert.equal(built.rawMaster.metadata.rendererVersion, "clarity-course-visual-renderer-v2");
   assert.equal(built.rawMaster.metadata.layout, "geographic-mercator");
+  assert.equal(built.rawMaster.metadata.stitchModel, "geo-rectangle-table-over-live-map", "stitch metadata describes overlapping rectangles over a live map base");
   assert.ok(built.rawMaster.height / built.rawMaster.width < 8, "full-course stitch does not collapse into a giant vertical strip");
   assert.ok(built.exampleHoleVisual.dataUrl.startsWith("data:image/svg+xml"), "example hole preview is built from the same captures");
   assert.equal(built.rawMaster.dataUrl, built.basicVisual.dataUrl, "raw master feeds basic delivery without recompression");
@@ -252,6 +274,8 @@ function payload() {
   assert.ok(requestedRoles.includes("green-surround"), "Build Basic asks browser capture for super-HD green");
   assert.ok(requestedRoles.includes("play-corridor"), "Build Basic asks browser capture for HD corridor");
   assert.ok(requestedRoles.includes("three-d-hole-beta"), "Build Basic asks browser capture for 3D beta when toggled");
+  assert.ok(visualRequests.filter((request) => request.role === "green-surround").every((request) => request.captureLens === "green-square" && request.lensAspectRatio === 1), "green capture requests carry the green-square lens into the browser capture step");
+  assert.ok(visualRequests.filter((request) => request.role === "play-corridor" || request.role === "three-d-hole-beta").every((request) => request.captureLens === "mobile-hole" && request.lensAspectRatio === 9 / 16), "corridor and 3D capture requests carry the mobile-hole lens into the browser capture step");
   assert.ok(plannedBuilt.terrainView && plannedBuilt.terrainView.dataUrl.startsWith("data:image/svg+xml"), "terrain view is built as a separate derived stage");
   assert.ok(plannedBuilt.beta3dView && plannedBuilt.beta3dView.dataUrl.startsWith("data:image/svg+xml"), "3D beta view is built as a separate opt-in stage");
   assert.equal(plannedBuilt.rawMaster.metadata.debugLayerModel, "live-underlay-plus-captured-overlays", "raw master records the debug layer model");

@@ -472,6 +472,29 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	    var maxY=Math.max.apply(null,projected.map(function(p){return p.y;}));
 	    return {minX:Math.floor(minX-bleed),minY:Math.floor(minY-bleed),maxX:Math.ceil(maxX+bleed),maxY:Math.ceil(maxY+bleed)};
 	  }
+	  function captureLensAspect(captureOpts){
+	    captureOpts=captureOpts||{};
+	    var shape=String(captureOpts.captureLens||captureOpts.lensShape||"").toLowerCase();
+	    var aspect=num(captureOpts.lensAspectRatio,num(captureOpts.lensAspect,NaN));
+	    if(!Number.isFinite(aspect)&&/mobile.*hole|hole.*mobile|mobile-hole/.test(shape))aspect=9/16;
+	    return Number.isFinite(aspect)&&aspect>0?Math.max(.28,Math.min(2.4,aspect)):0;
+	  }
+	  function applyCaptureLensRect(rect,captureOpts){
+	    var aspect=captureLensAspect(captureOpts);
+	    if(!rect||!aspect)return rect;
+	    var width=Math.max(1,rect.maxX-rect.minX);
+	    var height=Math.max(1,rect.maxY-rect.minY);
+	    var current=width/height;
+	    if(Math.abs(current-aspect)<.01)return rect;
+	    var cx=(rect.minX+rect.maxX)/2;
+	    var cy=(rect.minY+rect.maxY)/2;
+	    if(current>aspect){
+	      height=width/aspect;
+	    }else{
+	      width=height*aspect;
+	    }
+	    return {minX:Math.floor(cx-width/2),minY:Math.floor(cy-height/2),maxX:Math.ceil(cx+width/2),maxY:Math.ceil(cy+height/2)};
+	  }
 	  function tileCountFor(rect){
 	    if(!rect)return 0;
 	    var minTx=Math.floor(rect.minX/256),maxTx=Math.floor((rect.maxX-1)/256),minTy=Math.floor(rect.minY/256),maxTy=Math.floor((rect.maxY-1)/256);
@@ -490,11 +513,11 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	    var points=captureSurfacePoints(objectBounds,reason,captureOpts);
 		    var pins=captureAnchorPins();
 		    var bleed=Math.max(0,Math.round(num(captureOpts.bleedPx,/lock|zoom/i.test(String(reason))?2100:2800)));
-	    var rect=pixelRectFor(points,z,bleed);
+	    var rect=applyCaptureLensRect(pixelRectFor(points,z,bleed),captureOpts);
 	    if(!rect)return null;
 	    while(z>minZoom&&tileCountFor(rect)>maxTiles){
 	      z-=1;
-	      rect=pixelRectFor(points,z,bleed);
+	      rect=applyCaptureLensRect(pixelRectFor(points,z,bleed),captureOpts);
 	    }
 	    var origin={x:rect.minX,y:rect.minY};
 	    var width=Math.max(256,rect.maxX-rect.minX),height=Math.max(256,rect.maxY-rect.minY);
@@ -524,7 +547,17 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 			      manifest.playTiltDeg=Number.isFinite(Number(captureOpts.playTiltDeg))?Number(captureOpts.playTiltDeg):null;
 			      manifest.cameraFallback=captureOpts.beta3dStageOnly?"leaflet-flat-capture-faux-tilt-stage":"";
 			      manifest.tileSourceLabel=String(captureOpts.tileSourceLabel||"");
-			      manifest.visualCapturePolicy={role:manifest.visualRole,quality:manifest.visualQuality,targetZoom:z,requestedTargetZoom:captureOpts.targetZoom||null,minZoom:minZoom,maxZoom:maxZoom,maxTiles:maxTiles,bleedPx:bleed,lockBounds:captureOpts.lockBounds===true,tileSourceLabel:manifest.tileSourceLabel};
+			      manifest.captureLens=String(captureOpts.captureLens||captureOpts.lensShape||"");
+			      manifest.lensShape=String(captureOpts.lensShape||captureOpts.captureLens||"");
+			      manifest.lensAspectRatio=captureLensAspect(captureOpts)||null;
+			      manifest.lensOrientation=String(captureOpts.lensOrientation||"");
+			      manifest.lensFit=String(captureOpts.lensFit||"");
+			      manifest.segmentIndex=Number.isFinite(Number(captureOpts.segmentIndex))?Number(captureOpts.segmentIndex):null;
+			      manifest.segmentCount=Number.isFinite(Number(captureOpts.segmentCount))?Number(captureOpts.segmentCount):null;
+			      manifest.segmentStartMeters=Number.isFinite(Number(captureOpts.segmentStartMeters))?Number(captureOpts.segmentStartMeters):null;
+			      manifest.segmentEndMeters=Number.isFinite(Number(captureOpts.segmentEndMeters))?Number(captureOpts.segmentEndMeters):null;
+			      manifest.routeLengthMeters=Number.isFinite(Number(captureOpts.routeLengthMeters))?Number(captureOpts.routeLengthMeters):null;
+			      manifest.visualCapturePolicy={role:manifest.visualRole,quality:manifest.visualQuality,targetZoom:z,requestedTargetZoom:captureOpts.targetZoom||null,minZoom:minZoom,maxZoom:maxZoom,maxTiles:maxTiles,bleedPx:bleed,lockBounds:captureOpts.lockBounds===true,tileSourceLabel:manifest.tileSourceLabel,captureLens:manifest.captureLens,lensShape:manifest.lensShape,lensAspectRatio:manifest.lensAspectRatio,lensOrientation:manifest.lensOrientation,lensFit:manifest.lensFit,segmentIndex:manifest.segmentIndex,segmentCount:manifest.segmentCount,segmentStartMeters:manifest.segmentStartMeters,segmentEndMeters:manifest.segmentEndMeters,routeLengthMeters:manifest.routeLengthMeters};
 			    }
 			    manifest=safe(function(){return typeof window.gdCapturedSurfaceWriteScan==="function"?window.gdCapturedSurfaceWriteScan(manifest,{reason:reason,storageKey:storageKey()}):manifest;},manifest)||manifest;
     if(captureOpts.backgroundCapture){
@@ -909,6 +942,16 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	        maxZoom:request.maxZoom,
 	        maxTiles:request.maxTiles,
 	        bleedPx:request.bleedPx,
+	        captureLens:request.captureLens||request.lensShape,
+	        lensShape:request.lensShape||request.captureLens,
+	        lensAspectRatio:request.lensAspectRatio||request.lensAspect,
+	        lensOrientation:request.lensOrientation,
+	        lensFit:request.lensFit,
+	        segmentIndex:request.segmentIndex,
+	        segmentCount:request.segmentCount,
+	        segmentStartMeters:request.segmentStartMeters,
+	        segmentEndMeters:request.segmentEndMeters,
+	        routeLengthMeters:request.routeLengthMeters,
 	        tileTemplate:request.tileTemplate,
 	        tileSourceLabel:request.tileSourceLabel,
 	        lockBounds:true,
@@ -6705,6 +6748,31 @@ function gdAdminCourseVisualInlineSvg(src,label){
     .replace(/<script[\s\S]*?<\/script>/gi,"")
     .replace(/<foreignObject[\s\S]*?<\/foreignObject>/gi,"")
     .replace(/\son[a-z]+\s*=\s*(['"])[\s\S]*?\1/gi,"");
+  try{
+    const doc=new DOMParser().parseFromString(svg,"image/svg+xml");
+    const root=doc&&doc.documentElement;
+    if(root&&String(root.nodeName||"").toLowerCase()==="svg"){
+      const images=Array.from(root.querySelectorAll("image"));
+      const sourceImageCount=images.length;
+      if(sourceImageCount>700){
+        images.forEach(img=>{
+          const role=img.closest("[data-role]")?.getAttribute("data-role")||"";
+          if(role&&role!=="course-backdrop")img.remove();
+        });
+      }
+      let previewImages=Array.from(root.querySelectorAll("image"));
+      if(previewImages.length>260){
+        const stride=Math.max(1,Math.ceil(previewImages.length/260));
+        previewImages.forEach((img,index)=>{if(index%stride)img.remove();});
+        previewImages=Array.from(root.querySelectorAll("image"));
+      }
+      if(sourceImageCount!==previewImages.length){
+        root.setAttribute("data-admin-preview-source-images",String(sourceImageCount));
+        root.setAttribute("data-admin-preview-rendered-images",String(previewImages.length));
+      }
+      svg=new XMLSerializer().serializeToString(root);
+    }
+  }catch(e){}
   const aria=gdEscapeHTML(label||"Course visual");
   svg=svg.replace(/<svg\b/i,`<svg class="gdAdminCourseVisualSvg" role="img" aria-label="${aria}"`);
   return `<div class="gdAdminCourseVisualInline">${svg}</div>`;
@@ -6723,7 +6791,7 @@ function gdAdminCourseVisualImage(label,visual,fallback){
   ].filter(Boolean);
   const empty=visual&&visual.path||fallback&&fallback.path?"Saved path only":"Unavailable";
   const inline=gdAdminCourseVisualInlineSvg(src,label);
-  return `<div class="gdAdminCourseVisualSlot"><div class="gdAdminCourseVisualSlotHead"><strong>${gdEscapeHTML(label)}</strong>${dims?`<small>${gdEscapeHTML(dims)}</small>`:""}</div><div class="gdAdminCourseVisualFrame${scrollClass}">${inline||src?inline||`<img src="${gdEscapeHTML(src)}" alt="${gdEscapeHTML(label)}" loading="lazy" decoding="async">`:`<div class="gdAdminCourseVisualEmpty">${gdEscapeHTML(empty)}</div>`}</div>${meta.length?`<div class="gdAdminCourseVisualMeta">${meta.map(item=>`<span>${gdEscapeHTML(item)}</span>`).join("")}</div>`:""}</div>`;
+  return `<div class="gdAdminCourseVisualSlot"><div class="gdAdminCourseVisualSlotHead"><strong>${gdEscapeHTML(label)}</strong>${dims?`<small>${gdEscapeHTML(dims)}</small>`:""}</div><div class="gdAdminCourseVisualFrame${scrollClass}">${(inline||src)?(inline||`<img src="${gdEscapeHTML(src)}" alt="${gdEscapeHTML(label)}" loading="lazy" decoding="async">`):`<div class="gdAdminCourseVisualEmpty">${gdEscapeHTML(empty)}</div>`}</div>${meta.length?`<div class="gdAdminCourseVisualMeta">${meta.map(item=>`<span>${gdEscapeHTML(item)}</span>`).join("")}</div>`:""}</div>`;
 }
 function gdAdminCourseVisualControls(record){
   const modes=["Natural","Fresh","Rich","Strong"];

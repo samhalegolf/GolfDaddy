@@ -125,6 +125,89 @@
     var height=Math.abs(Number(bounds.north)-Number(bounds.south))*111320;
     return {width:width,height:height,diag:Math.sqrt(width*width+height*height)};
   }
+  function distanceMeters(a,b){
+    a=point(a);b=point(b);
+    if(!a||!b)return 0;
+    var lat=(a.lat+b.lat)/2*Math.PI/180;
+    var dx=(b.lng-a.lng)*111320*Math.max(.18,Math.cos(lat));
+    var dy=(b.lat-a.lat)*111320;
+    return Math.sqrt(dx*dx+dy*dy);
+  }
+  function routeLengthMeters(route){
+    route=points(route);
+    var total=0;
+    for(var i=1;i<route.length;i++)total+=distanceMeters(route[i-1],route[i]);
+    return total;
+  }
+  function dedupeRoutePoints(list){
+    var out=[];
+    points(list).forEach(function(p){
+      var last=out[out.length-1];
+      if(!last||distanceMeters(last,p)>.75)out.push(p);
+    });
+    return out;
+  }
+  function pointAtRouteDistance(route,meters){
+    route=points(route);
+    if(!route.length)return null;
+    var target=Math.max(0,Number(meters)||0);
+    var walked=0;
+    for(var i=1;i<route.length;i++){
+      var a=route[i-1],b=route[i],seg=distanceMeters(a,b);
+      if(seg<=0)continue;
+      if(walked+seg>=target){
+        var t=clamp((target-walked)/seg,0,1);
+        return {lat:a.lat+(b.lat-a.lat)*t,lng:a.lng+(b.lng-a.lng)*t};
+      }
+      walked+=seg;
+    }
+    return route[route.length-1];
+  }
+  function routeSegmentPoints(route,startM,endM){
+    route=points(route);
+    var out=[];
+    var total=0;
+    var start=Math.max(0,Number(startM)||0),end=Math.max(start,Number(endM)||start);
+    var startPoint=pointAtRouteDistance(route,start);
+    var endPoint=pointAtRouteDistance(route,end);
+    if(startPoint)out.push(startPoint);
+    for(var i=1;i<route.length-1;i++){
+      total+=distanceMeters(route[i-1],route[i]);
+      if(total>start&&total<end)out.push(route[i]);
+    }
+    if(endPoint)out.push(endPoint);
+    return dedupeRoutePoints(out);
+  }
+  function holeDataRoutePoints(holeData){
+    if(!holeData)return [];
+    var route=[];
+    var tee=point(holeData.tee&&holeData.tee.position||holeData.tee);
+    var green=point(holeData.green&&holeData.green.position||holeData.green&&holeData.green.center||holeData.green);
+    if(tee)route.push(tee);
+    route=route.concat(points(holeData.route));
+    if(green)route.push(green);
+    return dedupeRoutePoints(route);
+  }
+  function splitBoundsAlongRoute(bounds,holeData,policy){
+    if(!validBounds(bounds))return [];
+    var route=holeDataRoutePoints(holeData);
+    var length=routeLengthMeters(route);
+    var maxSegment=Number(policy&&policy.maxSegmentMeters)||0;
+    if(route.length<2||!maxSegment||length<=maxSegment)return [{bounds:bounds,segmentIndex:1,segmentCount:1,routeLengthMeters:length||boundsSpanM(bounds).diag}];
+    var maxSegments=Math.max(1,Math.round(Number(policy&&policy.maxSegments)||6));
+    var count=Math.max(1,Math.min(maxSegments,Math.ceil(length/maxSegment)));
+    var overlap=Math.max(0,Number(policy&&policy.segmentOverlapMeters)||0);
+    var out=[];
+    for(var i=0;i<count;i++){
+      var start=length*i/count;
+      var end=length*(i+1)/count;
+      var segmentStart=Math.max(0,start-overlap);
+      var segmentEnd=Math.min(length,end+overlap);
+      var segmentBounds=boundsFromPoints(routeSegmentPoints(route,segmentStart,segmentEnd));
+      if(segmentBounds)out.push({bounds:segmentBounds,segmentIndex:i+1,segmentCount:count,routeLengthMeters:length,segmentStartMeters:segmentStart,segmentEndMeters:segmentEnd});
+    }
+    return out.length?out:[{bounds:bounds,segmentIndex:1,segmentCount:1,routeLengthMeters:length}];
+  }
   function pointsFromGeometry(geometry){
     var out=[];
     function walk(value){
@@ -152,27 +235,36 @@
   }
   function capturePolicy(role){
     role=String(role||"");
-    if(role==="green-surround")return {role:role,label:"Super HD green surrounds",quality:"super-hd",targetZoom:20,minZoom:18,maxZoom:20,maxTiles:460,bleedMeters:72,bleedPx:720,stitchLayer:30};
-    if(role==="play-corridor")return {role:role,label:"HD play corridor",quality:"hd",targetZoom:19,minZoom:17,maxZoom:20,maxTiles:360,bleedMeters:48,bleedPx:560,stitchLayer:20};
+    var mobileHoleLens={captureLens:"mobile-hole",lensShape:"mobile-hole",lensAspectRatio:9/16,lensOrientation:"map-axis",lensFit:"expand-bounds"};
+    var greenSquareLens={captureLens:"green-square",lensShape:"green-square",lensAspectRatio:1,lensOrientation:"map-axis",lensFit:"expand-bounds"};
+    if(role==="green-surround")return Object.assign({role:role,label:"Super HD green surrounds",quality:"super-hd",targetZoom:20,minZoom:20,maxZoom:20,maxTiles:460,bleedMeters:72,bleedPx:720,stitchLayer:30,fixedZoom:true},greenSquareLens);
+    if(role==="play-corridor")return Object.assign({role:role,label:"HD play corridor",quality:"hd",targetZoom:19,minZoom:19,maxZoom:19,maxTiles:360,bleedMeters:48,bleedPx:560,stitchLayer:20,fixedZoom:true,maxSegmentMeters:320,segmentOverlapMeters:42,maxSegments:6},mobileHoleLens);
     if(role==="terrain-reference")return {role:role,label:"Terrain view reference",quality:"terrain-map",targetZoom:16,minZoom:14,maxZoom:17,maxTiles:260,bleedMeters:130,bleedPx:380,stitchLayer:5,terrainStageOnly:true,debugTerrain:true,tileSourceLabel:"Esri World Topographic Map",tileTemplate:"https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}"};
-    if(role==="three-d-hole-beta")return {role:role,label:"3D view beta hole camera",quality:"3d-beta",targetZoom:18,minZoom:17,maxZoom:20,maxTiles:320,bleedMeters:64,bleedPx:620,stitchLayer:40,beta3dStageOnly:true,cameraMode:"3d-beta-toggle",captureTiltDeg:8,playTiltDeg:14,cameraTiltDeg:8,cameraBearingMode:"play-axis",enabledByDefault:false};
+    if(role==="three-d-hole-beta")return Object.assign({role:role,label:"3D view beta hole camera",quality:"3d-beta",targetZoom:18,minZoom:18,maxZoom:18,maxTiles:320,bleedMeters:64,bleedPx:620,stitchLayer:40,beta3dStageOnly:true,cameraMode:"3d-beta-toggle",captureTiltDeg:8,playTiltDeg:14,cameraTiltDeg:8,cameraBearingMode:"play-axis",enabledByDefault:false,fixedZoom:true,maxSegmentMeters:320,segmentOverlapMeters:42,maxSegments:6},mobileHoleLens);
     return {role:"course-backdrop",label:"Live map underlay",quality:"live-map-base",targetZoom:17,minZoom:16,maxZoom:18,maxTiles:260,bleedMeters:120,bleedPx:420,stitchLayer:0,debugUnderlay:true};
   }
-  function planItem(courseId,courseName,role,bounds,holeNumber,holeData){
+  function planItem(courseId,courseName,role,bounds,holeNumber,holeData,extra){
+    extra=extra||{};
     var policy=capturePolicy(role);
     var padded=padBounds(bounds,policy.bleedMeters);
     if(!validBounds(padded))return null;
-    var id=["cv-plan",slug(courseId),policy.role,holeNumber?"h"+holeNumber:"course",hashString(padded)].join(":");
+    var segmentSuffix=extra.segmentCount>1?"s"+extra.segmentIndex+"of"+extra.segmentCount:"";
+    var id=["cv-plan",slug(courseId),policy.role,holeNumber?"h"+holeNumber:"course",segmentSuffix,hashString(padded)].filter(Boolean).join(":");
     return Object.assign({},policy,{
       id:id,
       planId:id,
       courseId:slug(courseId),
       courseName:text(courseName,180),
       holeNumber:holeNumber||null,
+      segmentIndex:extra.segmentIndex||null,
+      segmentCount:extra.segmentCount||null,
+      segmentStartMeters:Number.isFinite(Number(extra.segmentStartMeters))?Number(extra.segmentStartMeters):null,
+      segmentEndMeters:Number.isFinite(Number(extra.segmentEndMeters))?Number(extra.segmentEndMeters):null,
+      routeLengthMeters:Number.isFinite(Number(extra.routeLengthMeters))?Number(extra.routeLengthMeters):null,
       bounds:padded,
       sourceBounds:bounds,
       holeData:holeData||null,
-      captureKey:[slug(courseId),holeNumber?"h"+holeNumber:"course",policy.role].join(":"),
+      captureKey:[slug(courseId),holeNumber?"h"+holeNumber:"course",policy.role,segmentSuffix].filter(Boolean).join(":"),
       reason:"course-visual-"+policy.role+"-visual-lock"
     });
   }
@@ -185,16 +277,22 @@
     return {route:route,tee:tee?{position:tee}:null,green:green?{position:green,center:green,centre:green,greenShape:shape,shape:shape,holeNumber:hole.holeNumber}:null};
   }
   function planSummary(plan,captures){
-    var out={version:1,planned:Array.isArray(plan)?plan.length:0,captured:Array.isArray(captures)?captures.length:0,roles:{}};
+    var out={version:1,stitchModel:"geo-rectangle-table-over-live-map",planned:Array.isArray(plan)?plan.length:0,captured:Array.isArray(captures)?captures.length:0,roles:{}};
     (Array.isArray(plan)?plan:[]).forEach(function(item){
       var role=String(item&&item.role||"capture");
       out.roles[role]=out.roles[role]||{planned:0,captured:0,quality:item&&item.quality||"",layer:item&&item.stitchLayer||0};
       out.roles[role].planned+=1;
+      if(item&&item.captureLens)out.roles[role].captureLens=item.captureLens;
+      if(item&&item.lensAspectRatio)out.roles[role].lensAspectRatio=item.lensAspectRatio;
+      if(item&&item.segmentCount)out.roles[role].segmentCount=Math.max(Number(out.roles[role].segmentCount)||0,Number(item.segmentCount)||0);
     });
     (Array.isArray(captures)?captures:[]).forEach(function(capture){
       var role=String(capture&&capture.role||"capture");
       out.roles[role]=out.roles[role]||{planned:0,captured:0,quality:capture&&capture.quality||"",layer:capture&&capture.stitchLayer||0};
       out.roles[role].captured+=1;
+      if(capture&&capture.captureLens)out.roles[role].captureLens=capture.captureLens;
+      if(capture&&capture.lensAspectRatio)out.roles[role].lensAspectRatio=capture.lensAspectRatio;
+      if(capture&&capture.segmentCount)out.roles[role].segmentCount=Math.max(Number(out.roles[role].segmentCount)||0,Number(capture.segmentCount)||0);
     });
     return out;
   }
@@ -420,6 +518,16 @@
       playTiltDeg:finite(manifest.playTiltDeg!==undefined?manifest.playTiltDeg:opts&&opts.playTiltDeg),
       cameraFallback:text(manifest.cameraFallback||opts&&opts.cameraFallback,140),
       tileSourceLabel:text(manifest.tileSourceLabel||opts&&opts.tileSourceLabel,120),
+      captureLens:text(manifest.captureLens||manifest.lensShape||opts&&opts.captureLens||opts&&opts.lensShape,80),
+      lensShape:text(manifest.lensShape||manifest.captureLens||opts&&opts.lensShape||opts&&opts.captureLens,80),
+      lensAspectRatio:finite(manifest.lensAspectRatio!==undefined?manifest.lensAspectRatio:manifest.lensAspect!==undefined?manifest.lensAspect:opts&&opts.lensAspectRatio!==undefined?opts.lensAspectRatio:opts&&opts.lensAspect),
+      lensOrientation:text(manifest.lensOrientation||opts&&opts.lensOrientation,80),
+      lensFit:text(manifest.lensFit||opts&&opts.lensFit,80),
+      segmentIndex:finite(manifest.segmentIndex!==undefined?manifest.segmentIndex:opts&&opts.segmentIndex),
+      segmentCount:finite(manifest.segmentCount!==undefined?manifest.segmentCount:opts&&opts.segmentCount),
+      segmentStartMeters:finite(manifest.segmentStartMeters!==undefined?manifest.segmentStartMeters:opts&&opts.segmentStartMeters),
+      segmentEndMeters:finite(manifest.segmentEndMeters!==undefined?manifest.segmentEndMeters:opts&&opts.segmentEndMeters),
+      routeLengthMeters:finite(manifest.routeLengthMeters!==undefined?manifest.routeLengthMeters:opts&&opts.routeLengthMeters),
       sourceType:"leaflet-tile-manifest",
       originPx:manifest.originPx||null,
       tiles:manifest.tiles.map(function(tile){
@@ -478,11 +586,17 @@
       if(validBounds(corridorBounds)){
         var corridorSpan=boundsSpanM(corridorBounds);
         if(corridorSpan.diag<35)corridorBounds=padBounds(corridorBounds,32);
-        var corridorItem=planItem(normalized.courseId,normalized.courseName,"play-corridor",corridorBounds,holeNumber,holeDataByNumber[holeNumber]);
-        if(corridorItem)plan.push(corridorItem);
+        var corridorPolicy=capturePolicy("play-corridor");
+        splitBoundsAlongRoute(corridorBounds,holeDataByNumber[holeNumber],corridorPolicy).forEach(function(segment){
+          var corridorItem=planItem(normalized.courseId,normalized.courseName,"play-corridor",segment.bounds,holeNumber,holeDataByNumber[holeNumber],segment);
+          if(corridorItem)plan.push(corridorItem);
+        });
         if(opts.enable3dBeta===true){
-          var betaItem=planItem(normalized.courseId,normalized.courseName,"three-d-hole-beta",corridorBounds,holeNumber,holeDataByNumber[holeNumber]);
-          if(betaItem)plan.push(betaItem);
+          var betaPolicy=capturePolicy("three-d-hole-beta");
+          splitBoundsAlongRoute(corridorBounds,holeDataByNumber[holeNumber],betaPolicy).forEach(function(segment){
+            var betaItem=planItem(normalized.courseId,normalized.courseName,"three-d-hole-beta",segment.bounds,holeNumber,holeDataByNumber[holeNumber],segment);
+            if(betaItem)plan.push(betaItem);
+          });
         }
       }
     });
@@ -530,7 +644,7 @@
       courseName:text(input.courseName||input.name,180),
       courseBounds:validBounds(input.courseBounds)?input.courseBounds:mergeBounds((input.captures||[]).map(captureBounds).concat((input.objects||[]).map(function(o){return o&&o.bounds;}))),
       capturePlan:(Array.isArray(input.capturePlan)?input.capturePlan:[]).map(function(item){
-        return {id:text(item&&item.id||item&&item.planId,180),role:text(item&&item.role,60),quality:text(item&&item.quality,60),holeNumber:finite(item&&item.holeNumber),targetZoom:finite(item&&item.targetZoom),minZoom:finite(item&&item.minZoom),maxTiles:finite(item&&item.maxTiles),stitchLayer:finite(item&&item.stitchLayer),bounds:validBounds(item&&item.bounds)?item.bounds:null,label:text(item&&item.label,120),terrainStageOnly:!!(item&&item.terrainStageOnly),beta3dStageOnly:!!(item&&item.beta3dStageOnly),cameraMode:text(item&&item.cameraMode,80),cameraTiltDeg:finite(item&&item.cameraTiltDeg),captureTiltDeg:finite(item&&item.captureTiltDeg),playTiltDeg:finite(item&&item.playTiltDeg),tileSourceLabel:text(item&&item.tileSourceLabel,120)};
+        return {id:text(item&&item.id||item&&item.planId,180),role:text(item&&item.role,60),quality:text(item&&item.quality,60),holeNumber:finite(item&&item.holeNumber),targetZoom:finite(item&&item.targetZoom),minZoom:finite(item&&item.minZoom),maxTiles:finite(item&&item.maxTiles),stitchLayer:finite(item&&item.stitchLayer),bounds:validBounds(item&&item.bounds)?item.bounds:null,label:text(item&&item.label,120),terrainStageOnly:!!(item&&item.terrainStageOnly),beta3dStageOnly:!!(item&&item.beta3dStageOnly),cameraMode:text(item&&item.cameraMode,80),cameraTiltDeg:finite(item&&item.cameraTiltDeg),captureTiltDeg:finite(item&&item.captureTiltDeg),playTiltDeg:finite(item&&item.playTiltDeg),tileSourceLabel:text(item&&item.tileSourceLabel,120),captureLens:text(item&&item.captureLens||item&&item.lensShape,80),lensShape:text(item&&item.lensShape||item&&item.captureLens,80),lensAspectRatio:finite(item&&item.lensAspectRatio!==undefined?item.lensAspectRatio:item&&item.lensAspect),lensOrientation:text(item&&item.lensOrientation,80),lensFit:text(item&&item.lensFit,80),segmentIndex:finite(item&&item.segmentIndex),segmentCount:finite(item&&item.segmentCount),segmentStartMeters:finite(item&&item.segmentStartMeters),segmentEndMeters:finite(item&&item.segmentEndMeters),routeLengthMeters:finite(item&&item.routeLengthMeters)};
       }),
       sourceHoles:Array.isArray(input.sourceHoles)?input.sourceHoles.map(function(hole){return clone(hole);}):[],
       objects:(Array.isArray(input.objects)?input.objects:[]).map(function(object,index){
@@ -736,10 +850,10 @@
       var labelText=style.label+(capture.holeNumber?" H"+capture.holeNumber:"");
       var label='<g transform="translate(10 10)"><rect x="0" y="0" width="'+svgNum(Math.max(138,labelText.length*8.4))+'" height="24" rx="5" fill="rgba(0,0,0,.58)"/><text x="8" y="17" font-size="12" fill="#fff" stroke="#000" stroke-width="2.5" paint-order="stroke" font-family="system-ui, sans-serif" font-weight="900">'+escapeXml(labelText)+'</text></g>';
       var border='<rect x="2" y="2" width="'+svgNum(Math.max(1,(Number(capture.width)||1)-4))+'" height="'+svgNum(Math.max(1,(Number(capture.height)||1)-4))+'" fill="'+style.fill+'" stroke="'+style.stroke+'" stroke-width="5" vector-effect="non-scaling-stroke"/>';
-      return '<g data-capture-id="'+escapeXml(capture.id)+'" data-role="'+escapeXml(capture.role||"source-frame")+'" data-quality="'+escapeXml(capture.quality||"source")+'" data-stitch-layer="'+escapeXml(capture.stitchLayer||0)+'" opacity="'+svgNum(style.opacity)+'" transform="translate('+svgNum(x)+" "+svgNum(y)+') scale('+svgNum(w/(Number(capture.width)||1))+" "+svgNum(h/(Number(capture.height)||1))+')">'+captureContentSvg(capture)+border+label+'</g>';
+      return '<g data-capture-id="'+escapeXml(capture.id)+'" data-role="'+escapeXml(capture.role||"source-frame")+'" data-quality="'+escapeXml(capture.quality||"source")+'" data-capture-lens="'+escapeXml(capture.captureLens||"")+'" data-segment-index="'+escapeXml(capture.segmentIndex||"")+'" data-segment-count="'+escapeXml(capture.segmentCount||"")+'" data-stitch-layer="'+escapeXml(capture.stitchLayer||0)+'" opacity="'+svgNum(style.opacity)+'" transform="translate('+svgNum(x)+" "+svgNum(y)+') scale('+svgNum(w/(Number(capture.width)||1))+" "+svgNum(h/(Number(capture.height)||1))+')">'+captureContentSvg(capture)+border+label+'</g>';
     }).join("");
-    var svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+width+'" height="'+height+'" viewBox="0 0 '+width+" "+height+'" data-renderer="'+escapeXml(RENDERER_VERSION)+'" data-layout="geographic-mercator"><rect width="100%" height="100%" fill="#10130f"/>'+groups+'</svg>';
-    return {dataUrl:dataUrl("image/svg+xml",svg),width:width,height:height,missingAreas:missingAreas,bounds:mergeBounds(positioned.map(function(item){return item.bounds;})),sourceCaptureIds:positioned.map(function(item){return item.capture.id;}),metadata:Object.assign({rendererVersion:RENDERER_VERSION,format:"image/svg+xml",layout:"geographic-mercator",debugLayerModel:"live-underlay-plus-captured-overlays",outputDimensions:{width:width,height:height}},meta||{})};
+    var svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+width+'" height="'+height+'" viewBox="0 0 '+width+" "+height+'" data-renderer="'+escapeXml(RENDERER_VERSION)+'" data-layout="geographic-mercator" data-stitch-model="geo-rectangle-table-over-live-map"><rect width="100%" height="100%" fill="#10130f"/>'+groups+'</svg>';
+    return {dataUrl:dataUrl("image/svg+xml",svg),width:width,height:height,missingAreas:missingAreas,bounds:mergeBounds(positioned.map(function(item){return item.bounds;})),sourceCaptureIds:positioned.map(function(item){return item.capture.id;}),metadata:Object.assign({rendererVersion:RENDERER_VERSION,format:"image/svg+xml",layout:"geographic-mercator",stitchModel:"geo-rectangle-table-over-live-map",debugLayerModel:"live-underlay-plus-captured-overlays",outputDimensions:{width:width,height:height}},meta||{})};
   }
   function splitVisualCaptures(captures){
     var all=(Array.isArray(captures)?captures:[]).filter(renderableCapture);
