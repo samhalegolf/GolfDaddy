@@ -6,6 +6,7 @@
   root=root||typeof window!=="undefined"&&window||typeof globalThis!=="undefined"&&globalThis||{};
 
   var VERSION=1;
+  var PRESET_VERSION=2;
   var RENDERER_VERSION="clarity-course-visual-renderer-v3";
   var STORE_KEY="gd_course_visual_engine_v1";
   var PRESET_KEY="gd_course_visual_presets_v1";
@@ -437,13 +438,14 @@
     store.updatedAt=now();
     return writeJson(STORE_KEY,store);
   }
-  function defaultPreset(){
+  function baseCourseVisualPreset(){
     var stamp="2026-07-15T00:00:00.000Z";
     return {
       id:"clarity-course-natural-v1",
       name:"Natural",
-      version:1,
+      version:PRESET_VERSION,
       mode:"Natural",
+      description:"Balanced aerial map tone for general course overviews.",
       turf:{hueMin:86,hueMax:142,saturationMin:28,saturationMax:66,brightnessMin:30,brightnessMax:72,greenStrength:.35},
       lighting:{brightnessTarget:52,shadowFloor:14,highlightCeiling:92,contrastTarget:1.04},
       readability:{fairwaySeparation:.18,greenSeparation:.16,bunkerBrightness:.08,localContrast:.08,sharpness:.1},
@@ -452,23 +454,101 @@
       updatedAt:stamp
     };
   }
-  function presetForMode(mode){
-    var preset=clone(defaultPreset());
-    mode=String(mode||preset.mode||"Natural");
-    preset.mode=mode;
-    preset.name=mode;
-    if(mode==="Fresh"){preset.turf.greenStrength=.48;preset.turf.saturationMin=34;preset.lighting.brightnessTarget=56;preset.readability.localContrast=.12;}
-    if(mode==="Rich"){preset.turf.greenStrength=.62;preset.turf.saturationMin=40;preset.lighting.contrastTarget=1.08;preset.readability.greenSeparation=.22;}
-    if(mode==="Strong"){preset.turf.greenStrength=.78;preset.turf.saturationMin=46;preset.lighting.contrastTarget=1.12;preset.readability.fairwaySeparation=.28;preset.readability.sharpness=.18;}
-    preset.id="clarity-course-"+slug(mode)+"-v1";
+  function defaultPreset(){
+    return clone(baseCourseVisualPreset());
+  }
+  function presetSpec(id,name,mode,description,patch){
+    return {id:id,name:name,mode:mode||name,description:description||"",patch:patch||{}};
+  }
+  function builtInPresetSpecs(){
+    return [
+      presetSpec("clarity-course-natural-v1","Natural","Natural","Balanced aerial map tone for general course overviews.",{}),
+      presetSpec("clarity-course-fresh-v1","Fresh Fairway","Fresh","A brighter, cleaner course map that keeps grass lively without looking cartoonish.",{
+        turf:{greenStrength:.48,saturationMin:34},
+        lighting:{brightnessTarget:56,contrastTarget:1.05},
+        readability:{fairwaySeparation:.2,greenSeparation:.18,localContrast:.12,sharpness:.12},
+        mowingVisibility:"Low"
+      }),
+      presetSpec("clarity-course-rich-v1","Rich Aerial","Rich","Deeper greens and slightly stronger contrast for premium course thumbnails.",{
+        turf:{greenStrength:.62,saturationMin:40},
+        lighting:{brightnessTarget:53,contrastTarget:1.08},
+        readability:{fairwaySeparation:.23,greenSeparation:.22,localContrast:.13,sharpness:.14},
+        mowingVisibility:"Low"
+      }),
+      presetSpec("clarity-course-strong-v1","Strong Clarity","Strong","A more readable decision-map style for small screens and busy imagery.",{
+        turf:{greenStrength:.78,saturationMin:46},
+        lighting:{brightnessTarget:55,contrastTarget:1.12},
+        readability:{fairwaySeparation:.28,greenSeparation:.26,localContrast:.16,sharpness:.18},
+        mowingVisibility:"Clear"
+      }),
+      presetSpec("clarity-course-green-detail-v1","Green Detail","Green Detail","Emphasises greens and surrounds while keeping fairways natural.",{
+        turf:{greenStrength:.72,saturationMin:44,brightnessMin:34,brightnessMax:74},
+        lighting:{brightnessTarget:54,contrastTarget:1.09},
+        readability:{fairwaySeparation:.2,greenSeparation:.32,bunkerBrightness:.1,localContrast:.15,sharpness:.18},
+        mowingVisibility:"Clear"
+      }),
+      presetSpec("clarity-course-fairway-corridor-v1","Fairway Corridor","Fairway Corridor","Best for play-corridor inspection where fairways, hazards and landing areas need separation.",{
+        turf:{greenStrength:.56,saturationMin:36},
+        lighting:{brightnessTarget:57,shadowFloor:18,contrastTarget:1.1},
+        readability:{fairwaySeparation:.34,greenSeparation:.2,bunkerBrightness:.12,localContrast:.17,sharpness:.2},
+        mowingVisibility:"Low"
+      }),
+      presetSpec("clarity-course-terrain-relief-v1","Terrain Relief","Terrain Relief","Designed to carry terrain shading without losing the live imagery beneath it.",{
+        turf:{greenStrength:.44,saturationMin:32},
+        lighting:{brightnessTarget:50,shadowFloor:16,contrastTarget:1.13},
+        readability:{fairwaySeparation:.22,greenSeparation:.2,bunkerBrightness:.06,localContrast:.19,sharpness:.16},
+        mowingVisibility:"Clear"
+      }),
+      presetSpec("clarity-course-shade-rescue-v1","Shade Rescue","Shade Rescue","Lifts dark captures and tree-shadowed holes while avoiding a washed-out fairway.",{
+        turf:{greenStrength:.52,saturationMin:36,brightnessMin:34},
+        lighting:{brightnessTarget:62,shadowFloor:24,highlightCeiling:94,contrastTarget:1.02},
+        readability:{fairwaySeparation:.2,greenSeparation:.2,bunkerBrightness:.14,localContrast:.11,sharpness:.1},
+        mowingVisibility:"Low"
+      }),
+      presetSpec("clarity-course-broadcast-pop-v1","Broadcast Pop","Broadcast Pop","A bold preview look for demos and quick visual checks.",{
+        turf:{greenStrength:.86,saturationMin:48,saturationMax:72},
+        lighting:{brightnessTarget:58,shadowFloor:18,contrastTarget:1.16},
+        readability:{fairwaySeparation:.3,greenSeparation:.3,bunkerBrightness:.14,localContrast:.2,sharpness:.22},
+        mowingVisibility:"Prominent"
+      })
+    ];
+  }
+  function presetFromSpec(spec){
+    var preset=mergePreset(baseCourseVisualPreset(),spec&&spec.patch||{});
+    preset.id=spec&&spec.id||("clarity-course-"+slug(spec&&spec.name||"preset")+"-v1");
+    preset.name=spec&&spec.name||preset.name;
+    preset.mode=spec&&spec.mode||preset.name;
+    preset.description=spec&&spec.description||preset.description||"";
+    preset.version=PRESET_VERSION;
+    preset.updatedAt="2026-07-15T00:00:00.000Z";
     return preset;
+  }
+  function courseVisualPresetList(){
+    return builtInPresetSpecs().map(presetFromSpec);
+  }
+  function builtInPresetMap(){
+    var presets={};
+    courseVisualPresetList().forEach(function(preset){presets[preset.id]=preset;});
+    return presets;
+  }
+  function presetForMode(mode){
+    var key=slug(mode||"Natural");
+    var list=courseVisualPresetList();
+    var match=list.filter(function(preset){return slug(preset.id)===key||slug(preset.mode)===key||slug(preset.name)===key;})[0];
+    return clone(match||list[0]||defaultPreset());
   }
   function loadPresets(){
     var saved=readJson(PRESET_KEY,null);
-    if(saved&&saved.presets&&saved.presets[defaultPreset().id])return saved;
-    var presets={};
-    ["Natural","Fresh","Rich","Strong"].forEach(function(mode){var p=presetForMode(mode);presets[p.id]=p;});
-    return writeJson(PRESET_KEY,{schema:"gd.course_visual_engine.presets",version:1,defaultPresetId:defaultPreset().id,presets:presets,updatedAt:now()});
+    var builtIns=builtInPresetMap();
+    var presets=Object.assign({},saved&&saved.presets||{});
+    Object.keys(builtIns).forEach(function(id){presets[id]=builtIns[id];});
+    var store={schema:"gd.course_visual_engine.presets",version:PRESET_VERSION,defaultPresetId:defaultPreset().id,presets:presets,updatedAt:saved&&saved.updatedAt||now()};
+    var changed=!saved||saved.version!==PRESET_VERSION||!saved.presets;
+    Object.keys(builtIns).forEach(function(id){
+      if(!saved||!saved.presets||!saved.presets[id]||saved.presets[id].version!==PRESET_VERSION)changed=true;
+    });
+    if(changed){store.updatedAt=now();return writeJson(PRESET_KEY,store);}
+    return store;
   }
   function getPreset(presetId){
     var presets=loadPresets();
@@ -924,16 +1004,35 @@
     if(inner)return inner;
     return base?'<image href="'+escapeXml(base)+'" x="0" y="0" width="'+svgNum(width)+'" height="'+svgNum(height)+'" preserveAspectRatio="none"/>':"";
   }
+  function mowingOpacity(value){
+    value=String(value||"Unknown");
+    if(value==="Low")return .08;
+    if(value==="Clear")return .16;
+    if(value==="Prominent")return .28;
+    return 0;
+  }
+  function nativeReadabilityOverlay(settings){
+    var readability=settings&&settings.readability||{};
+    var local=clamp(Number(readability.localContrast)||.08,0,.25);
+    var top=clamp(.025+local*.22,.02,.09);
+    var bottom=clamp(.05+local*.28,.05,.13);
+    var opacity=clamp(.58+local*1.8,.58,.98);
+    return {top:+top.toFixed(3),bottom:+bottom.toFixed(3),opacity:+opacity.toFixed(3)};
+  }
   function nativeVisualAsset(asset,settings,meta){
     meta=meta||{};
     var dims=visualAssetDimensions(asset,meta.width,meta.height);
     var source=visualAssetSourceMarkup(asset,dims.width,dims.height);
     if(!source)throw Object.assign(new Error("Base visual is not available"),{code:"base-visual-missing"});
     var f=filterForSettings(settings);
+    var overlay=nativeReadabilityOverlay(settings);
+    var mow=mowingOpacity(settings&&settings.mowingVisibility);
     var role=text(meta.role,80)||"native-visuals";
     var stage=text(meta.stage,80)||"native-visuals";
     var version=meta.version!=null?String(meta.version):"";
-    var svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+dims.width+'" height="'+dims.height+'" viewBox="0 0 '+dims.width+" "+dims.height+'" data-renderer="'+escapeXml(RENDERER_VERSION)+'" data-role="'+escapeXml(role)+'" data-stage="'+escapeXml(stage)+'"'+(version?' data-version="'+escapeXml(version)+'"':"")+'><defs><filter id="cvNative"><feColorMatrix type="saturate" values="'+f.saturation+'"/><feComponentTransfer><feFuncR type="linear" slope="'+f.contrast+'" intercept="'+((f.brightness-1)/2)+'"/><feFuncG type="linear" slope="'+f.contrast+'" intercept="'+((f.brightness-1)/2)+'"/><feFuncB type="linear" slope="'+f.contrast+'" intercept="'+((f.brightness-1)/2)+'"/></feComponentTransfer></filter><linearGradient id="cvNativeReadability" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="rgba(255,255,255,.045)"/><stop offset=".55" stop-color="rgba(255,255,255,0)"/><stop offset="1" stop-color="rgba(0,0,0,.08)"/></linearGradient></defs><rect width="100%" height="100%" fill="#10130f"/><g filter="url(#cvNative)">'+source+'</g><rect width="100%" height="100%" fill="url(#cvNativeReadability)" opacity=".82"/></svg>';
+    var mowingPattern=mow?'<pattern id="cvMowingStripe" width="24" height="24" patternUnits="userSpaceOnUse" patternTransform="rotate(108)"><path d="M0 0 L0 24" stroke="rgba(255,255,255,.20)" stroke-width="1"/></pattern>':"";
+    var mowingLayer=mow?'<rect width="100%" height="100%" fill="url(#cvMowingStripe)" opacity="'+mow+'"/>':"";
+    var svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+dims.width+'" height="'+dims.height+'" viewBox="0 0 '+dims.width+" "+dims.height+'" data-renderer="'+escapeXml(RENDERER_VERSION)+'" data-role="'+escapeXml(role)+'" data-stage="'+escapeXml(stage)+'"'+(version?' data-version="'+escapeXml(version)+'"':"")+'><defs><filter id="cvNative"><feColorMatrix type="saturate" values="'+f.saturation+'"/><feComponentTransfer><feFuncR type="linear" slope="'+f.contrast+'" intercept="'+((f.brightness-1)/2)+'"/><feFuncG type="linear" slope="'+f.contrast+'" intercept="'+((f.brightness-1)/2)+'"/><feFuncB type="linear" slope="'+f.contrast+'" intercept="'+((f.brightness-1)/2)+'"/></feComponentTransfer></filter><linearGradient id="cvNativeReadability" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="rgba(255,255,255,'+overlay.top+')"/><stop offset=".55" stop-color="rgba(255,255,255,0)"/><stop offset="1" stop-color="rgba(0,0,0,'+overlay.bottom+')"/></linearGradient>'+mowingPattern+'</defs><rect width="100%" height="100%" fill="#10130f"/><g filter="url(#cvNative)">'+source+'</g><rect width="100%" height="100%" fill="url(#cvNativeReadability)" opacity="'+overlay.opacity+'"/>'+mowingLayer+'</svg>';
     return {dataUrl:dataUrl("image/svg+xml",svg),width:dims.width,height:dims.height,bounds:visualAssetBounds(asset,meta.bounds),sourceCaptureIds:asset&&asset.sourceCaptureIds||[],metadata:Object.assign({rendererVersion:RENDERER_VERSION,format:"image/svg+xml",role:role,stage:stage,inputRole:asset&&asset.metadata&&asset.metadata.role||"",inputStage:asset&&asset.metadata&&asset.metadata.stage||"",outputDimensions:dims},meta)};
   }
   function terrainShadeAsset(asset,terrainCaptures,meta){
@@ -1355,6 +1454,7 @@
     apiEndpoint:API_ENDPOINT,
     defaultPreset:defaultPreset,
     presetForMode:presetForMode,
+    courseVisualPresetList:courseVisualPresetList,
     loadPresets:loadPresets,
     getPreset:getPreset,
     mergePreset:mergePreset,
