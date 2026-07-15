@@ -193,11 +193,13 @@ function payload() {
   assert.ok(!decodeURIComponent(built.rawMaster.dataUrl).includes("SUPER HD GREEN"), "raw stitch does not bake debug labels into the visual product");
   assert.ok(built.rawMaster.height / built.rawMaster.width < 8, "full-course stitch does not collapse into a giant vertical strip");
   assert.ok(built.exampleHoleVisual.dataUrl.startsWith("data:image/svg+xml"), "example hole preview is built from the same captures");
+  assert.ok(built.terrainView && built.terrainView.dataUrl.startsWith("data:image/svg+xml"), "course overview enters a terrain shading stage after the base stitch");
   assert.equal(built.rawMaster.dataUrl, built.basicVisual.dataUrl, "raw master feeds basic delivery without recompression");
   const persistedAfterBuild = JSON.parse(localStorage.getItem(engine.storeKey));
   assert.equal(persistedAfterBuild.records.cromwell.rawMaster.dataUrl, undefined, "raw data URL is not persisted into localStorage");
   assert.equal(persistedAfterBuild.records.cromwell.basicVisual.dataUrl, undefined, "basic data URL is not persisted into localStorage");
   assert.equal(persistedAfterBuild.records.cromwell.exampleHoleVisual.dataUrl, undefined, "example-hole data URL is not persisted into localStorage");
+  assert.equal(persistedAfterBuild.records.cromwell.terrainView.dataUrl, undefined, "terrain data URL is not persisted into localStorage");
 
   const failed = engine.ingestCourseVisualInput({ courseId: "no-captures", objects: input.objects, captures: [] });
   assert.equal(failed.status, "unavailable");
@@ -217,16 +219,26 @@ function payload() {
   const preview = await engine.buildCourseVisualPreview("cromwell", engine.presetForMode("Fresh"));
   assert.equal(preview.status, "preview-ready");
   assert.ok(preview.previewVisual.path.includes("/preview/"));
+  assert.equal(preview.previewVisual.metadata.stage, "native-visuals", "course overview enters native visuals");
+  assert.equal(preview.terrainView.metadata.stage, "terrain-shading", "course overview enters terrain shading after native visuals");
+  assert.equal(preview.terrainView.metadata.inputStage, "native-visuals", "overview terrain shading consumes the native visual output");
+  assert.ok(preview.singleHolePreviewVisual.path.includes("/single-hole/preview/"), "single-hole visual enters native visuals");
+  assert.equal(preview.singleHolePreviewVisual.metadata.stage, "native-visuals", "single-hole native visual records the native stage");
+  assert.ok(preview.singleHoleTerrainView.path.includes("/single-hole/terrain/"), "single-hole visual enters terrain shading");
+  assert.equal(preview.singleHoleTerrainView.metadata.inputStage, "native-visuals", "single-hole terrain shading consumes the native hole output");
   assert.equal(preview.publishedVisual, null, "preview does not publish");
 
   const published = engine.publishCourseVisual("cromwell");
   assert.equal(published.status, "published", "publish changes active version");
   assert.equal(published.publishedVersion, preview.previewVisual.version);
+  assert.equal(published.publishedVisual.dataUrl, published.terrainView.dataUrl, "published overview uses the terrain-shaded product");
+  assert.ok(published.singleHolePublishedVisual && published.singleHolePublishedVisual.dataUrl === published.singleHoleTerrainView.dataUrl, "publish includes the terrain-shaded single-hole product");
   assert.ok(published.versions.filter((item) => item.type === "published").length >= 1, "published versions remain in history");
 
   const resolved = engine.resolveCourseVisual("cromwell");
   assert.equal(resolved.status, "published", "resolveCourseVisual prefers published over basic");
   assert.equal(resolved.publishedVisual.version, published.publishedVersion);
+  assert.equal(resolved.singleHolePublishedVisual.version, published.publishedVersion, "resolved metadata includes the published single-hole product");
 
   const basicOnlyInput = engine.adaptCoursePlayPayloadToVisualInput(Object.assign({}, payload(), { courseId: "basic-only", courseKey: "basic-only" }), {
     captures: [manifest("manifest-basic", 1, 0)]
