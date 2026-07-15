@@ -2230,8 +2230,12 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
     .gdAdminCourseVisualSlot small{color:rgba(255,255,255,.52);font-size:10px;font-weight:850;white-space:nowrap}
     .gdAdminCourseVisualFrame{display:grid;place-items:center;width:100%;height:clamp(180px,26vw,320px);overflow:auto;background:#10130f;overscroll-behavior:contain}
     .gdAdminCourseVisualFrame img{display:block;max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain}
+    .gdAdminCourseVisualInline{display:grid;place-items:center;width:100%;height:100%;min-height:180px}
+    .gdAdminCourseVisualInline svg{display:block;max-width:100%;max-height:100%;width:auto;height:auto}
     .gdAdminCourseVisualFrame.scroll{place-items:start center}
     .gdAdminCourseVisualFrame.scroll img{width:100%;height:auto;max-width:none;max-height:none}
+    .gdAdminCourseVisualFrame.scroll .gdAdminCourseVisualInline{place-items:start center}
+    .gdAdminCourseVisualFrame.scroll .gdAdminCourseVisualInline svg{width:100%;height:auto;max-width:none;max-height:none}
     .gdAdminCourseVisualEmpty{display:grid;place-items:center;width:100%;height:100%;min-height:180px;color:rgba(255,255,255,.48);font-size:11px;font-weight:850;background:#10130f}
     .gdAdminCourseVisualMeta{display:flex;gap:6px;flex-wrap:wrap;padding:7px 9px;border-top:1px solid rgba(255,255,255,.06);color:rgba(255,255,255,.55);font-size:10px;font-weight:850}
     .gdAdminCourseVisualControls{display:grid;grid-template-columns:140px repeat(4,minmax(92px,1fr));gap:8px;align-items:end;margin:8px 0}
@@ -6688,6 +6692,23 @@ function gdAdminCourseVisualSourceStatus(selected){
   const renderableCount=details.filter(row=>row.hasManifest&&row.tiles&&row.width&&row.height&&row.hasBounds).length;
   return {frameCount:rows.length,manifestCount,renderableCount,details};
 }
+function gdAdminCourseVisualInlineSvg(src,label){
+  src=String(src||"");
+  if(!/^data:image\/svg\+xml/i.test(src))return "";
+  let svg="";
+  try{
+    const body=src.slice(src.indexOf(",")+1);
+    svg=src.includes(";base64,")?atob(body):decodeURIComponent(body);
+  }catch(e){return "";}
+  if(!/<svg[\s>]/i.test(svg))return "";
+  svg=svg
+    .replace(/<script[\s\S]*?<\/script>/gi,"")
+    .replace(/<foreignObject[\s\S]*?<\/foreignObject>/gi,"")
+    .replace(/\son[a-z]+\s*=\s*(['"])[\s\S]*?\1/gi,"");
+  const aria=gdEscapeHTML(label||"Course visual");
+  svg=svg.replace(/<svg\b/i,`<svg class="gdAdminCourseVisualSvg" role="img" aria-label="${aria}"`);
+  return `<div class="gdAdminCourseVisualInline">${svg}</div>`;
+}
 function gdAdminCourseVisualImage(label,visual,fallback){
   const src=visual&&visual.dataUrl||fallback&&fallback.dataUrl||"";
   const width=Number(visual&&visual.width||fallback&&fallback.width||visual&&visual.metadata&&visual.metadata.outputDimensions&&visual.metadata.outputDimensions.width||fallback&&fallback.metadata&&fallback.metadata.outputDimensions&&fallback.metadata.outputDimensions.width||0)||0;
@@ -6701,7 +6722,8 @@ function gdAdminCourseVisualImage(label,visual,fallback){
     visual&&visual.path?String(visual.path).split("/").slice(-2).join("/"):""
   ].filter(Boolean);
   const empty=visual&&visual.path||fallback&&fallback.path?"Saved path only":"Unavailable";
-  return `<div class="gdAdminCourseVisualSlot"><div class="gdAdminCourseVisualSlotHead"><strong>${gdEscapeHTML(label)}</strong>${dims?`<small>${gdEscapeHTML(dims)}</small>`:""}</div><div class="gdAdminCourseVisualFrame${scrollClass}">${src?`<img src="${gdEscapeHTML(src)}" alt="${gdEscapeHTML(label)}" loading="lazy" decoding="async">`:`<div class="gdAdminCourseVisualEmpty">${gdEscapeHTML(empty)}</div>`}</div>${meta.length?`<div class="gdAdminCourseVisualMeta">${meta.map(item=>`<span>${gdEscapeHTML(item)}</span>`).join("")}</div>`:""}</div>`;
+  const inline=gdAdminCourseVisualInlineSvg(src,label);
+  return `<div class="gdAdminCourseVisualSlot"><div class="gdAdminCourseVisualSlotHead"><strong>${gdEscapeHTML(label)}</strong>${dims?`<small>${gdEscapeHTML(dims)}</small>`:""}</div><div class="gdAdminCourseVisualFrame${scrollClass}">${inline||src?inline||`<img src="${gdEscapeHTML(src)}" alt="${gdEscapeHTML(label)}" loading="lazy" decoding="async">`:`<div class="gdAdminCourseVisualEmpty">${gdEscapeHTML(empty)}</div>`}</div>${meta.length?`<div class="gdAdminCourseVisualMeta">${meta.map(item=>`<span>${gdEscapeHTML(item)}</span>`).join("")}</div>`:""}</div>`;
 }
 function gdAdminCourseVisualControls(record){
   const modes=["Natural","Fresh","Rich","Strong"];
