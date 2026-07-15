@@ -7306,6 +7306,17 @@ function gdAdminCourseVisualPresetButtonChanged(courseId,presetId){
   if(select)select.value=String(presetId||"");
   return gdAdminCourseVisualPresetChanged(courseId);
 }
+function gdAdminCourseVisualPresetButtonEvent(event){
+  const target=event&&event.target;
+  const button=target&&target.closest&&target.closest(".gdAdminCourseVisualPresetRail button[data-preset-id]");
+  if(!button)return;
+  event.preventDefault();
+  event.stopPropagation();
+  if(typeof event.stopImmediatePropagation==="function")event.stopImmediatePropagation();
+  const controls=button.closest(".gdAdminCourseVisualControls");
+  const courseId=controls&&controls.getAttribute("data-course-id")||gdAdminCourseDatabaseSelected||"";
+  gdAdminCourseVisualPresetButtonChanged(courseId,button.getAttribute("data-preset-id")||"");
+}
 function gdAdminCourseVisualControlEvent(event){
   const target=event&&event.target;
   if(!target||!target.id)return;
@@ -7322,6 +7333,7 @@ function gdAdminCourseVisualControlEvent(event){
 }
 if(!window.__gdAdminCourseVisualControlsBound){
   window.__gdAdminCourseVisualControlsBound=true;
+  document.addEventListener("click",gdAdminCourseVisualPresetButtonEvent,true);
   document.addEventListener("input",gdAdminCourseVisualControlEvent,true);
   document.addEventListener("change",gdAdminCourseVisualControlEvent,true);
 }
