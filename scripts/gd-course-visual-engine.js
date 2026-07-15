@@ -7,7 +7,7 @@
 
   var VERSION=1;
   var PRESET_VERSION=4;
-  var RENDERER_VERSION="clarity-course-visual-renderer-v13";
+  var RENDERER_VERSION="clarity-course-visual-renderer-v14";
   var STORE_KEY="gd_course_visual_engine_v1";
   var PRESET_KEY="gd_course_visual_presets_v1";
   var API_ENDPOINT="/api/course-visuals";
@@ -24,6 +24,12 @@
   function clone(value){return safe(function(){return JSON.parse(JSON.stringify(value));},value);}
   function slug(value){return String(value||"course").toLowerCase().trim().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,140)||"course";}
   function stableId(prefix){return String(prefix||"cv")+"_"+Date.now().toString(36)+"_"+Math.random().toString(36).slice(2,8);}
+  function stableIdStamp(id){
+    var match=String(id||"").match(/_([a-z0-9]+)_/i);
+    if(!match)return 0;
+    var stamp=parseInt(match[1],36);
+    return Number.isFinite(stamp)?stamp:0;
+  }
   function text(value,limit){var out=String(value||"").trim();return limit&&out.length>limit?out.slice(0,limit):out;}
   function finite(value){var n=Number(value);return Number.isFinite(n)?n:null;}
   function point(value){
@@ -1641,15 +1647,20 @@
     if(opts.forceRebuild===true)delete inFlightBuilds[courseId];
     if(inFlightBuilds[courseId])return inFlightBuilds[courseId];
     var buildRunId=text(opts.buildRunId||stableId("cv-run"),120);
+    function newerBuildIsActive(latestRun){
+      return !!(latestRun&&latestRun!==buildRunId&&stableIdStamp(latestRun)>stableIdStamp(buildRunId));
+    }
     function finishBuild(record){
       var latest=getRecord(courseId);
       var latestRun=latest&&latest.diagnostics&&latest.diagnostics.activeBuildRunId||"";
-      if(latestRun&&latestRun!==buildRunId)return latest;
+      if(newerBuildIsActive(latestRun))return latest;
       record.diagnostics=Object.assign({},record.diagnostics||{},{activeBuildRunId:null,completedBuildRunId:buildRunId});
       return putRecord(record);
     }
     var promise=Promise.resolve().then(function(){
       var record=getRecord(courseId);
+      var latestRun=record&&record.diagnostics&&record.diagnostics.activeBuildRunId||"";
+      if(newerBuildIsActive(latestRun))return record;
       var allCaptures=(Array.isArray(opts.captures)&&opts.captures.length?opts.captures:null)||transientCapturesByCourse[courseId]||capturesFromRecordRefs(record);
       var split=splitVisualCaptures(allCaptures);
       var captures=split.imagery;
