@@ -6961,7 +6961,7 @@ function gdAdminCourseVisualNeedsPipeline(record){
   if(!gdAdminCourseVisualStageReady(record.previewVisual,"native-visuals"))return true;
   if(!gdAdminCourseVisualStageReady(record.terrainView,"terrain-shading","native-visuals"))return true;
   if(!gdAdminCourseVisualStageReady(record.singleHolePreviewVisual,"native-visuals"))return true;
-  if(!gdAdminCourseVisualStageReady(record.singleHoleTerrainView,"terrain-shading","native-visuals"))return true;
+  if(!gdAdminCourseVisualStageReady(record.singleHoleTerrainView,"terrain-shading"))return true;
   const holeBaseCount=Array.isArray(record.holeFrameVisuals)?record.holeFrameVisuals.length:0;
   const holeNative=Array.isArray(record.holeFramePreviewVisuals)?record.holeFramePreviewVisuals:[];
   const holeTerrain=Array.isArray(record.holeFrameTerrainViews)?record.holeFrameTerrainViews:[];
@@ -37876,7 +37876,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 <script src="scripts/gd-launch-monitor-data.js?v=practice-data-20260712c"></script>
 <script src="scripts/gd-shot-library-sync.js?v=shot-library-supabase-001"></script>
 <script src="scripts/gd-captured-surface-sync.js?v=captured-surface-supabase-002"></script>
-<script src="scripts/gd-course-visual-engine.js?v=course-visual-engine-009"></script>
+<script src="scripts/gd-course-visual-engine.js?v=course-visual-engine-010"></script>
 <script src="scripts/gd-multi-nine-courses.js?v=multi-nine-courses-001"></script>
 <script src="scripts/gd-native-practice-data.js?v=native-practice-data-001"></script>
 <script id="gdCanonicalRouteAuditV1">
