@@ -6796,7 +6796,7 @@ function gdAdminCourseVisualMarkup(selected){
     sourceStatus:sourceStatus,
     preset:{id:record&&record.presetId,version:record&&record.presetVersion},
     rendererVersion:engine.rendererVersion,
-    resolvedPlayAsset:resolved&&resolved.publishedVisual?resolved.publishedVisual.path:resolved&&resolved.basicVisual?resolved.basicVisual.path:null,
+    resolvedPlayAsset:resolved&&resolved.publishedVisual?resolved.publishedVisual.path:null,
     lastError:record&&record.lastError||null,
     diagnostics:record&&record.diagnostics||{},
     versions:(record&&record.versions||[]).slice(-6)
@@ -6814,7 +6814,7 @@ function gdAdminCourseVisualMarkup(selected){
       gdAdminCourseDbMetric("Play asset",diagnostics.resolvedPlayAsset?"visual":"live map fallback")
     ].join("")}</div>`,
     `<div class="gdAdminCourseVisualGrid">${[
-      gdAdminCourseVisualImage("Raw / basic",record.basicVisual,record.rawMaster),
+      gdAdminCourseVisualImage("Raw / working",record.basicVisual,record.rawMaster),
       gdAdminCourseVisualImage("Example hole",record.exampleHoleVisual),
       gdAdminCourseVisualImage("Terrain view",record.terrainView),
       gdAdminCourseVisualImage("3D view beta",record.beta3dView),
@@ -6822,7 +6822,7 @@ function gdAdminCourseVisualMarkup(selected){
       gdAdminCourseVisualImage("Published",record.publishedVisual)
     ].join("")}</div>`,
     gdAdminCourseVisualControls(record),
-    `<div class="gdAdminCourseVisualActions"><button type="button" onclick="return gdAdminCourseVisualBuildBasic('${gdEscapeHTML(selected.id)}')">Build Basic</button><button class="primary" type="button" onclick="return gdAdminCourseVisualBuildPreview('${gdEscapeHTML(selected.id)}')">Build Preview</button><button type="button" onclick="return gdAdminCourseVisualPublish('${gdEscapeHTML(selected.id)}')">Publish</button><button type="button" onclick="return gdAdminCourseVisualResetPublished('${gdEscapeHTML(selected.id)}')">Reset to Published</button><button type="button" onclick="return gdAdminCourseVisualResetPreset('${gdEscapeHTML(selected.id)}')">Reset to Global Preset</button><button type="button" onclick="return gdAdminCourseVisualRevert('${gdEscapeHTML(selected.id)}')">Revert Published</button></div>`,
+    `<div class="gdAdminCourseVisualActions"><button type="button" onclick="return gdAdminCourseVisualBuildBasic('${gdEscapeHTML(selected.id)}')">Build Working Map</button><button class="primary" type="button" onclick="return gdAdminCourseVisualBuildPreview('${gdEscapeHTML(selected.id)}')">Build Preview</button><button type="button" onclick="return gdAdminCourseVisualPublish('${gdEscapeHTML(selected.id)}')">Publish Clarity Map</button><button type="button" onclick="return gdAdminCourseVisualResetPublished('${gdEscapeHTML(selected.id)}')">Reset to Published</button><button type="button" onclick="return gdAdminCourseVisualResetPreset('${gdEscapeHTML(selected.id)}')">Reset to Global Preset</button><button type="button" onclick="return gdAdminCourseVisualRevert('${gdEscapeHTML(selected.id)}')">Revert Published</button></div>`,
     `<div class="gdAdminCourseVisualDiag">${gdEscapeHTML(JSON.stringify(diagnostics,null,2))}</div>`
   ].join("");
 }
