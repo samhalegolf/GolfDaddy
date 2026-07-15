@@ -620,27 +620,37 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	          {x:center.x+ux*along+px*cross,y:center.y+uy*along+py*cross},
 	          {x:center.x-ux*along+px*cross,y:center.y-uy*along+py*cross}
 	        ];
-	        return {
-	          minX:Math.floor(Math.min.apply(null,lens.map(function(p){return p.x;}))),
-	          minY:Math.floor(Math.min.apply(null,lens.map(function(p){return p.y;}))),
-	          maxX:Math.ceil(Math.max.apply(null,lens.map(function(p){return p.x;}))),
-	          maxY:Math.ceil(Math.max.apply(null,lens.map(function(p){return p.y;})))
-	        };
-	      }
-	    }
+		        return {
+		          minX:Math.floor(Math.min.apply(null,lens.map(function(p){return p.x;}))),
+		          minY:Math.floor(Math.min.apply(null,lens.map(function(p){return p.y;}))),
+		          maxX:Math.ceil(Math.max.apply(null,lens.map(function(p){return p.x;}))),
+		          maxY:Math.ceil(Math.max.apply(null,lens.map(function(p){return p.y;}))),
+		          lensCornersPx:lens.map(function(p){return {x:Math.round(p.x),y:Math.round(p.y)};}),
+		          lensOrientation:"play-axis"
+		        };
+		      }
+		    }
 	    var width=Math.max(1,rect.maxX-rect.minX);
 	    var height=Math.max(1,rect.maxY-rect.minY);
 	    var current=width/height;
-	    if(Math.abs(current-aspect)<.01)return rect;
-	    var cx=(rect.minX+rect.maxX)/2;
-	    var cy=(rect.minY+rect.maxY)/2;
+		    if(Math.abs(current-aspect)<.01)return rect;
+		    var cx=(rect.minX+rect.maxX)/2;
+		    var cy=(rect.minY+rect.maxY)/2;
 	    if(current>aspect){
 	      height=width/aspect;
 	    }else{
 	      width=height*aspect;
 	    }
-	    return {minX:Math.floor(cx-width/2),minY:Math.floor(cy-height/2),maxX:Math.ceil(cx+width/2),maxY:Math.ceil(cy+height/2)};
-	  }
+		    var adjusted={minX:Math.floor(cx-width/2),minY:Math.floor(cy-height/2),maxX:Math.ceil(cx+width/2),maxY:Math.ceil(cy+height/2)};
+		    adjusted.lensCornersPx=[
+		      {x:adjusted.minX,y:adjusted.minY},
+		      {x:adjusted.maxX,y:adjusted.minY},
+		      {x:adjusted.maxX,y:adjusted.maxY},
+		      {x:adjusted.minX,y:adjusted.maxY}
+		    ];
+		    adjusted.lensOrientation="map-axis";
+		    return adjusted;
+		  }
 	  function tileCountFor(rect){
 	    if(!rect)return 0;
 	    var minTx=Math.floor(rect.minX/256),maxTx=Math.floor((rect.maxX-1)/256),minTy=Math.floor(rect.minY/256),maxTy=Math.floor((rect.maxY-1)/256);
@@ -693,9 +703,16 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
           if(url)tiles.push({x:tx*256-origin.x,y:ty*256-origin.y,z:z,tileX:tx,tileY:ty,url:url});
         }
       }
-    }
-				    var capturePins=captureWorkingPins(captureOpts);
-				    var manifest={version:VERSION,key:storageKey(),reason:reason,surfaceModel:"captured-surface-v1",interactionOwner:"captured-surface",liveMapRole:"capture-source-diagnostic-reference",courseKey:captureOpts.courseId||captureOpts.courseKey||surfaceCourseKey(),courseName:captureOpts.courseName||surfaceCourseName(),holeNumber:captureOpts.holeNumber||surfaceHoleNumber(),captureZoom:z,imageWidth:width,imageHeight:height,originPx:origin,tiles:tiles,includeTee:!!pins.tee,teeLatLng:pins.tee||null,anchorPins:pins,captureAnchorPins:capturePins,createdAt:new Date().toISOString()};
+		    }
+					    var capturePins=captureWorkingPins(captureOpts);
+					    var lensCornersPx=Array.isArray(rect.lensCornersPx)?rect.lensCornersPx.map(function(p){return {x:Math.round(num(p&&p.x,0)),y:Math.round(num(p&&p.y,0))};}).filter(function(p){return Number.isFinite(p.x)&&Number.isFinite(p.y);}):[];
+					    var lensLocalCorners=lensCornersPx.length>=4?lensCornersPx.map(function(p){return {x:p.x-origin.x,y:p.y-origin.y};}):[];
+					    var manifest={version:VERSION,key:storageKey(),reason:reason,surfaceModel:"captured-surface-v1",interactionOwner:"captured-surface",liveMapRole:"capture-source-diagnostic-reference",courseKey:captureOpts.courseId||captureOpts.courseKey||surfaceCourseKey(),courseName:captureOpts.courseName||surfaceCourseName(),holeNumber:captureOpts.holeNumber||surfaceHoleNumber(),captureZoom:z,imageWidth:width,imageHeight:height,originPx:origin,tiles:tiles,includeTee:!!pins.tee,teeLatLng:pins.tee||null,anchorPins:pins,captureAnchorPins:capturePins,createdAt:new Date().toISOString()};
+					    if(lensLocalCorners.length>=4){
+					      manifest.lensCornersPx=lensCornersPx;
+					      manifest.lensLocalCorners=lensLocalCorners;
+					      manifest.lensOrientation=rect.lensOrientation||captureOpts.lensOrientation||"";
+					    }
 			    if(captureOpts.role||captureOpts.quality||captureOpts.planId){
 			      manifest.visualRole=String(captureOpts.role||"");
 			      manifest.visualQuality=String(captureOpts.quality||"");
@@ -38000,7 +38017,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 <script src="scripts/gd-launch-monitor-data.js?v=practice-data-20260712c"></script>
 <script src="scripts/gd-shot-library-sync.js?v=shot-library-supabase-001"></script>
 <script src="scripts/gd-captured-surface-sync.js?v=captured-surface-supabase-002"></script>
-<script src="scripts/gd-course-visual-engine.js?v=course-visual-engine-020"></script>
+<script src="scripts/gd-course-visual-engine.js?v=course-visual-engine-021"></script>
 <script src="scripts/gd-multi-nine-courses.js?v=multi-nine-courses-001"></script>
 <script src="scripts/gd-native-practice-data.js?v=native-practice-data-001"></script>
 <script id="gdCanonicalRouteAuditV1">
