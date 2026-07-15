@@ -7636,6 +7636,9 @@ function gdAdminCourseVisualOverridesFromForm(){
 function gdAdminCourseVisualToast(text){
   try{toast(text);}catch(e){console.log(text);}
 }
+function gdAdminCourseVisualDelay(ms){
+  return new Promise(resolve=>setTimeout(resolve,Math.max(0,Number(ms)||0)));
+}
 async function gdAdminCourseVisualBuildBasic(courseId){
   const engine=window.GDCourseVisualEngine;
   if(!engine){gdAdminCourseVisualToast("Course Visual Engine not loaded");return false;}
@@ -7665,11 +7668,21 @@ async function gdAdminCourseVisualRecapture(courseId){
     engine.saveCourseVisualSettings(courseId,overrides);
     if(typeof engine.resetCourseVisualWorkingState==="function")engine.resetCourseVisualWorkingState(courseId,{keepPublished:true});
     gdAdminCourseVisualToast("Recapturing course visuals");
-    await engine.buildFromCourseDatabase(courseId,{enable3dBeta:overrides.visualEngine&&overrides.visualEngine.enable3dBeta===true,forceFresh:true,requireFreshCaptures:true});
-    let record=gdAdminCourseVisualRecord(courseId)||engine.getRecord(courseId);
+    const buildOpts={enable3dBeta:overrides.visualEngine&&overrides.visualEngine.enable3dBeta===true,forceFresh:true,requireFreshCaptures:true};
+    let record=null;
+    let lastMessage="";
+    for(let attempt=1;attempt<=2;attempt+=1){
+      await engine.buildFromCourseDatabase(courseId,buildOpts);
+      record=gdAdminCourseVisualRecord(courseId)||engine.getRecord(courseId);
+      if(record&&record.rawMaster&&record.basicVisual)break;
+      lastMessage=record&&record.lastError&&record.lastError.message||record&&record.diagnostics&&record.diagnostics.stitchFailure&&record.diagnostics.stitchFailure.message||"Fresh capture did not produce a stitch.";
+      if(attempt<2&&/renderable tile captures|fresh capture|stitch/i.test(String(lastMessage||""))){
+        gdAdminCourseVisualToast("Warming capture view, retrying");
+        await gdAdminCourseVisualDelay(900);
+      }
+    }
     if(!record||!record.rawMaster||!record.basicVisual){
-      const message=record&&record.lastError&&record.lastError.message||record&&record.diagnostics&&record.diagnostics.stitchFailure&&record.diagnostics.stitchFailure.message||"Fresh capture did not produce a stitch.";
-      throw new Error(message);
+      throw new Error(lastMessage||"Fresh capture did not produce a stitch.");
     }
     await engine.buildCourseVisualPreview(courseId,presetId,overrides);
     record=gdAdminCourseVisualRecord(courseId)||engine.getRecord(courseId);
