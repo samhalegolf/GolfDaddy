@@ -972,11 +972,10 @@
   }
   function resolveCourseVisual(courseId){
     var record=getRecord(courseId);
-    var visual=record.publishedVisual||record.basicVisual||null;
-    if(!visual)return null;
+    if(!record.publishedVisual)return null;
     return {
       courseId:record.courseId,
-      status:record.publishedVisual?"published":"basic-ready",
+      status:"published",
       rawMaster:record.rawMaster?{path:record.rawMaster.path,bounds:record.rawMaster.bounds,width:record.rawMaster.width,height:record.rawMaster.height}:undefined,
       basicVisual:record.basicVisual?{path:record.basicVisual.path,dataUrl:record.basicVisual.dataUrl,version:record.basicVisual.version}:undefined,
       terrainView:record.terrainView?{path:record.terrainView.path,dataUrl:record.terrainView.dataUrl,version:record.terrainView.version}:undefined,

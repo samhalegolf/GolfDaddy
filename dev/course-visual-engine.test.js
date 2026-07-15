@@ -210,7 +210,7 @@ function payload() {
   engine.ingestCourseVisualInput(basicOnlyInput);
   await engine.buildCourseVisualMaster("basic-only");
   const basicOnly = engine.resolveCourseVisual("basic-only");
-  assert.equal(basicOnly.status, "basic-ready", "resolveCourseVisual returns basic when no published version exists");
+  assert.equal(basicOnly, null, "resolveCourseVisual keeps Play on live map until a Clarity map is published");
   assert.equal(engine.resolveCourseVisual("missing-course"), null, "resolveCourseVisual returns null when neither asset exists");
 
   const beforeVersions = engine.getRecord("basic-only").versions.length;
