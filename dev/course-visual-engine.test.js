@@ -80,6 +80,16 @@ function manifest(id, holeNumber, xOffset) {
 
 function visualManifest(id, request, xOffset) {
   const base = manifest(id, Number(request.holeNumber) || 1, xOffset || 0);
+  const lensLocalCorners = request.captureLens === "mobile-hole" ? [
+    { x: 126, y: 18 },
+    { x: 494, y: 166 },
+    { x: 386, y: 502 },
+    { x: 18, y: 354 }
+  ] : [];
+  const lensCornersPx = lensLocalCorners.map((point) => ({
+    x: base.originPx.x + point.x,
+    y: base.originPx.y + point.y
+  }));
   return Object.assign({}, base, {
     key: id,
     courseKey: request.courseId || "cromwell",
@@ -113,7 +123,9 @@ function visualManifest(id, request, xOffset) {
     segmentStartMeters: Number.isFinite(Number(request.segmentStartMeters)) ? Number(request.segmentStartMeters) : null,
     segmentEndMeters: Number.isFinite(Number(request.segmentEndMeters)) ? Number(request.segmentEndMeters) : null,
     routeLengthMeters: Number.isFinite(Number(request.routeLengthMeters)) ? Number(request.routeLengthMeters) : null,
-    tileSourceLabel: request.tileSourceLabel || ""
+    tileSourceLabel: request.tileSourceLabel || "",
+    lensLocalCorners,
+    lensCornersPx
   });
 }
 
@@ -201,7 +213,7 @@ function payload() {
   assert.equal(built.status, "basic-ready", "valid captures produce a basic visual record");
   assert.ok(built.rawMaster.path.includes("/raw/"));
   assert.ok(built.basicVisual.dataUrl.startsWith("data:image/svg+xml"));
-  assert.equal(built.rawMaster.metadata.rendererVersion, "clarity-course-visual-renderer-v18");
+  assert.equal(built.rawMaster.metadata.rendererVersion, "clarity-course-visual-renderer-v19");
   assert.equal(built.rawMaster.metadata.layout, "geographic-mercator");
   assert.equal(built.rawMaster.metadata.stitchModel, "geo-rectangle-table-over-live-map", "stitch metadata describes overlapping rectangles over a live map base");
   assert.ok(decodeURIComponent(built.rawMaster.dataUrl).includes("data-stitch-width"), "raw stitch keeps coverage geometry as metadata attributes");
@@ -345,7 +357,7 @@ function payload() {
   });
   engine.ingestCourseVisualInput(multiInput);
   const multiBuilt = await engine.buildCourseVisualMaster("multi-capture");
-  assert.equal(multiBuilt.rawMaster.metadata.rendererVersion, "clarity-course-visual-renderer-v18");
+  assert.equal(multiBuilt.rawMaster.metadata.rendererVersion, "clarity-course-visual-renderer-v19");
   assert.ok(multiBuilt.rawMaster.height < 12000, "multi-capture stitch is geographically laid out instead of vertically appended");
   assert.ok(multiBuilt.rawMaster.height / multiBuilt.rawMaster.width < 8, "multi-capture output keeps a usable preview aspect");
 
@@ -377,6 +389,7 @@ function payload() {
     return capture;
   };
   const plannedBuilt = await engine.buildFromCourseDatabase("planned-course", { enable3dBeta: true });
+  const plannedRawSvg = svgText(plannedBuilt.rawMaster.dataUrl);
   const requestedRoles = visualRequests.map((request) => request.role);
   assert.ok(requestedRoles.includes("course-backdrop"), "Build Basic asks browser capture for the live underlay");
   assert.ok(requestedRoles.includes("terrain-reference"), "Build Basic asks browser capture for terrain reference");
@@ -388,6 +401,7 @@ function payload() {
   assert.ok(visualRequests.filter((request) => request.role === "play-corridor" || request.role === "three-d-hole-beta").every((request) => request.lensOrientation === "play-axis" && request.includeAnchorPins === true), "mobile-hole capture requests are aimed by the hole axis and include the donor route");
   assert.ok(visualRequests.filter((request) => request.holeNumber).every((request) => request.anchorPins && request.anchorPins.green && Array.isArray(request.anchorPins.route) && request.anchorPins.route.length >= 2), "planned hole captures carry the real green and route anchors into the browser snapshot step");
   assert.ok(visualRequests.filter((request) => request.role === "play-corridor").every((request) => request.captureAnchorPins && Array.isArray(request.captureAnchorPins.route) && request.captureAnchorPins.route.length >= 2), "planned corridor captures give the browser a segment route for the wider donor image");
+  assert.ok(plannedRawSvg.includes('data-lens-clip="oriented-mobile-hole"'), "mobile-hole captures are clipped to the oriented donor lens instead of showing the north-up tile AABB");
   assert.equal(plannedBuilt.exampleHoleVisual.metadata.windowShape, "mobile-hole-with-overflow", "single-hole product uses the mobile golf-hole window with visible overflow");
   assert.equal(plannedBuilt.exampleHoleVisual.metadata.framingModel, "gps-play-viewport-over-hole-surface", "single-hole product previews the GPS Play viewport over the play surface");
   assert.equal(plannedBuilt.exampleHoleVisual.metadata.orientationSource, "tee-green-anchor", "single-hole preview rotates from real tee-to-green anchors");

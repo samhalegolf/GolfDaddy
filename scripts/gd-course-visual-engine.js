@@ -7,7 +7,7 @@
 
   var VERSION=1;
   var PRESET_VERSION=4;
-  var RENDERER_VERSION="clarity-course-visual-renderer-v18";
+  var RENDERER_VERSION="clarity-course-visual-renderer-v19";
   var STORE_KEY="gd_course_visual_engine_v1";
   var PRESET_KEY="gd_course_visual_presets_v1";
   var API_ENDPOINT="/api/course-visuals";
@@ -40,6 +40,13 @@
     return lat==null||lng==null?null:{lat:lat,lng:lng};
   }
   function points(list){return (Array.isArray(list)?list:[]).map(point).filter(Boolean);}
+  function pixelPoints(list){
+    return (Array.isArray(list)?list:[]).map(function(value){
+      var x=finite(value&&value.x);
+      var y=finite(value&&value.y);
+      return x==null||y==null?null:{x:x,y:y};
+    }).filter(Boolean);
+  }
   function boundsFromPoints(list){
     var pts=points(list);
     if(!pts.length)return null;
@@ -736,6 +743,8 @@
       lensAspectRatio:finite(manifest.lensAspectRatio!==undefined?manifest.lensAspectRatio:manifest.lensAspect!==undefined?manifest.lensAspect:opts&&opts.lensAspectRatio!==undefined?opts.lensAspectRatio:opts&&opts.lensAspect),
       lensOrientation:text(manifest.lensOrientation||opts&&opts.lensOrientation,80),
       lensFit:text(manifest.lensFit||opts&&opts.lensFit,80),
+      lensCornersPx:pixelPoints(manifest.lensCornersPx||opts&&opts.lensCornersPx),
+      lensLocalCorners:pixelPoints(manifest.lensLocalCorners||opts&&opts.lensLocalCorners),
       segmentIndex:finite(manifest.segmentIndex!==undefined?manifest.segmentIndex:opts&&opts.segmentIndex),
       segmentCount:finite(manifest.segmentCount!==undefined?manifest.segmentCount:opts&&opts.segmentCount),
       segmentStartMeters:finite(manifest.segmentStartMeters!==undefined?manifest.segmentStartMeters:opts&&opts.segmentStartMeters),
@@ -1000,7 +1009,7 @@
     return putRecord(record,{skipCloudSync:true});
   }
   function captureSignature(captures){
-    return hashString((captures||[]).map(function(capture){return [capture.id,capture.role||"",capture.quality||"",capture.stitchLayer||0,capture.width,capture.height,capture.boundsSource||"",JSON.stringify(capture.bounds),JSON.stringify(capture.anchorPins||capture.pins||{}),Array.isArray(capture.tiles)?capture.tiles.length:0].join("|");}).join("\n"));
+    return hashString((captures||[]).map(function(capture){return [capture.id,capture.role||"",capture.quality||"",capture.stitchLayer||0,capture.width,capture.height,capture.boundsSource||"",JSON.stringify(capture.bounds),JSON.stringify(capture.anchorPins||capture.pins||{}),JSON.stringify(capture.lensLocalCorners||capture.lensCornersPx||[]),Array.isArray(capture.tiles)?capture.tiles.length:0].join("|");}).join("\n"));
   }
   function capturesFromRecordRefs(record){
     return (Array.isArray(record&&record.captureRefs)?record.captureRefs:[]).map(function(ref){
@@ -1313,6 +1322,17 @@
       if(role==="green-surround")return {opacity:.98,label:"SUPER HD GREEN"};
       return {opacity:1,label:"CAPTURE"};
     }
+    function lensClipPolygon(capture,x,y,w,h){
+      var local=pixelPoints(capture&&capture.lensLocalCorners);
+      var origin=capture&&capture.originPx||{};
+      if(local.length<4&&Array.isArray(capture&&capture.lensCornersPx)&&origin&&Number.isFinite(Number(origin.x))&&Number.isFinite(Number(origin.y))){
+        local=pixelPoints(capture.lensCornersPx).map(function(p){return {x:p.x-Number(origin.x),y:p.y-Number(origin.y)};});
+      }
+      if(local.length<4)return null;
+      var cw=Math.max(1,Number(capture&&capture.width)||1);
+      var ch=Math.max(1,Number(capture&&capture.height)||1);
+      return local.slice(0,4).map(function(p){return {x:x+p.x/cw*w,y:y+p.y/ch*h};});
+    }
     var defs=[];
     var groups=positioned.map(function(item,index){
       var capture=item.capture;
@@ -1330,8 +1350,13 @@
         var maskX=x-feather*2,maskY=y-feather*2,maskW=w+feather*4,maskH=h+feather*4;
         var innerX=x+feather*.8,innerY=y+feather*.8,innerW=Math.max(1,w-feather*1.6),innerH=Math.max(1,h-feather*1.6);
         var radius=Math.min(36,Math.max(8,feather*.55));
-        defs.push('<clipPath id="cvStitchClip'+index+'"><rect x="'+svgNum(x)+'" y="'+svgNum(y)+'" width="'+svgNum(w)+'" height="'+svgNum(h)+'" rx="'+svgNum(radius)+'"/></clipPath><mask id="cvStitchMask'+index+'" maskUnits="userSpaceOnUse" x="'+svgNum(maskX)+'" y="'+svgNum(maskY)+'" width="'+svgNum(maskW)+'" height="'+svgNum(maskH)+'"><rect x="'+svgNum(maskX)+'" y="'+svgNum(maskY)+'" width="'+svgNum(maskW)+'" height="'+svgNum(maskH)+'" fill="black"/><rect x="'+svgNum(x)+'" y="'+svgNum(y)+'" width="'+svgNum(w)+'" height="'+svgNum(h)+'" rx="'+svgNum(radius)+'" fill="white" filter="url(#cvStitchFeather)"/><rect x="'+svgNum(innerX)+'" y="'+svgNum(innerY)+'" width="'+svgNum(innerW)+'" height="'+svgNum(innerH)+'" rx="'+svgNum(radius*.65)+'" fill="white"/></mask>');
+        var lensPolygon=lensClipPolygon(capture,x,y,w,h);
+        var lensPoints=lensPolygon&&lensPolygon.map(function(point){return svgNum(point.x)+","+svgNum(point.y);}).join(" ");
+        var clipShape=lensPoints?'<polygon points="'+lensPoints+'"/>':'<rect x="'+svgNum(x)+'" y="'+svgNum(y)+'" width="'+svgNum(w)+'" height="'+svgNum(h)+'" rx="'+svgNum(radius)+'"/>';
+        var featherShape=lensPoints?'<polygon points="'+lensPoints+'" fill="white" filter="url(#cvStitchFeather)"/><polygon points="'+lensPoints+'" fill="white"/>':'<rect x="'+svgNum(x)+'" y="'+svgNum(y)+'" width="'+svgNum(w)+'" height="'+svgNum(h)+'" rx="'+svgNum(radius)+'" fill="white" filter="url(#cvStitchFeather)"/><rect x="'+svgNum(innerX)+'" y="'+svgNum(innerY)+'" width="'+svgNum(innerW)+'" height="'+svgNum(innerH)+'" rx="'+svgNum(radius*.65)+'" fill="white"/>';
+        defs.push('<clipPath id="cvStitchClip'+index+'">'+clipShape+'</clipPath><mask id="cvStitchMask'+index+'" maskUnits="userSpaceOnUse" x="'+svgNum(maskX)+'" y="'+svgNum(maskY)+'" width="'+svgNum(maskW)+'" height="'+svgNum(maskH)+'"><rect x="'+svgNum(maskX)+'" y="'+svgNum(maskY)+'" width="'+svgNum(maskW)+'" height="'+svgNum(maskH)+'" fill="black"/>'+featherShape+'</mask>');
         clipMask=' clip-path="url(#cvStitchClip'+index+')" mask="url(#cvStitchMask'+index+')"';
+        if(lensPoints)clipMask+=' data-lens-clip="oriented-mobile-hole"';
       }
       return '<g data-capture-id="'+escapeXml(capture.id)+'" data-role="'+escapeXml(role)+'" data-quality="'+escapeXml(capture.quality||"source")+'" data-capture-lens="'+escapeXml(capture.captureLens||"")+'" data-segment-index="'+escapeXml(capture.segmentIndex||"")+'" data-segment-count="'+escapeXml(capture.segmentCount||"")+'" data-stitch-layer="'+escapeXml(capture.stitchLayer||0)+'" data-stitch-x="'+svgNum(x)+'" data-stitch-y="'+svgNum(y)+'" data-stitch-width="'+svgNum(w)+'" data-stitch-height="'+svgNum(h)+'" opacity="'+svgNum(style.opacity)+'"'+clipMask+' transform="translate('+svgNum(x)+" "+svgNum(y)+') scale('+svgNum(w/(Number(capture.width)||1))+" "+svgNum(h/(Number(capture.height)||1))+')">'+captureContentSvg(capture)+'</g>';
     }).join("");
