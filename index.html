@@ -7306,7 +7306,7 @@ function gdAdminCourseVisualProducts(record){
   const overviewNative=gdAdminCourseVisualStageReady(record&&record.previewVisual,"native-visuals")?record.previewVisual:null;
   const overviewTerrain=gdAdminCourseVisualStageReady(record&&record.terrainView,"terrain-shading","native-visuals")?record.terrainView:null;
   const holeNative=gdAdminCourseVisualStageReady(record&&record.singleHolePreviewVisual,"native-visuals")?record.singleHolePreviewVisual:null;
-  const holeTerrain=gdAdminCourseVisualStageReady(record&&record.singleHoleTerrainView,"terrain-shading","native-visuals")?record.singleHoleTerrainView:null;
+  const holeTerrain=gdAdminCourseVisualStageReady(record&&record.singleHoleTerrainView,"terrain-shading")?record.singleHoleTerrainView:null;
   const beta3dOn=!!(record&&record.courseOverrides&&record.courseOverrides.visualEngine&&record.courseOverrides.visualEngine.enable3dBeta);
   const products=[
     {key:"course-overview",label:"Course overview",base:gdAdminCourseVisualProductBase(record),native:overviewNative,terrain:overviewTerrain,published:record&&record.publishedVisual||null},
