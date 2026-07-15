@@ -6920,6 +6920,23 @@ function gdAdminCourseVisualStitchLabel(item){
   }
   return item.style.label;
 }
+function gdAdminCourseVisualStitchFocusHole(items,record){
+  const nonUnderlay=(Array.isArray(items)?items:[]).filter(item=>item&&item.role!=="course-backdrop"&&Number(item.holeNumber)>0);
+  if(!nonUnderlay.length)return 0;
+  const preferred=Number(record&&record.exampleHoleVisual&&record.exampleHoleVisual.holeNumber)||Number(nonUnderlay[0].holeNumber)||0;
+  const holes={};
+  nonUnderlay.forEach(item=>{
+    const hole=Number(item.holeNumber)||0;
+    if(!hole)return;
+    holes[hole]=holes[hole]||{hole,green:0,corridor:0,count:0};
+    holes[hole].count+=1;
+    if(item.role==="green-surround")holes[hole].green+=1;
+    if(item.role==="play-corridor")holes[hole].corridor+=1;
+  });
+  if(holes[preferred])return preferred;
+  const complete=Object.values(holes).filter(entry=>entry.green&&entry.corridor).sort((a,b)=>a.hole-b.hole)[0];
+  return complete&&complete.hole||Object.values(holes).sort((a,b)=>b.count-a.count||a.hole-b.hole)[0].hole;
+}
 function gdAdminCourseVisualImageHref(node){
   if(!node)return "";
   try{return node.getAttribute("href")||node.getAttribute("xlink:href")||node.getAttributeNS("http://www.w3.org/1999/xlink","href")||"";}catch(e){return node.getAttribute("href")||node.getAttribute("xlink:href")||"";}
@@ -6977,13 +6994,15 @@ function gdAdminCourseVisualStitchView(record,planSummary){
   const greenCount=items.filter(item=>item.role==="green-surround").length;
   const segmentedCount=items.filter(item=>item.role==="play-corridor"&&item.segmentCount>1).length;
   const denseOverview=items.length>24;
-  const focusItems=items.filter(item=>item.role!=="course-backdrop");
+  const focusHole=denseOverview?gdAdminCourseVisualStitchFocusHole(items,record):0;
+  const focusItems=items.filter(item=>item.role!=="course-backdrop"&&(!focusHole||Number(item.holeNumber)===Number(focusHole)));
+  const cropItems=focusItems.length?focusItems:items.filter(item=>item.role!=="course-backdrop");
   let viewMinX=fullMinX,viewMinY=fullMinY,viewWidth=fullWidth,viewHeight=fullHeight;
-  if(denseOverview&&focusItems.length){
-    const focusMinX=Math.min(...focusItems.map(item=>item.x));
-    const focusMinY=Math.min(...focusItems.map(item=>item.y));
-    const focusMaxX=Math.max(...focusItems.map(item=>item.x+item.width));
-    const focusMaxY=Math.max(...focusItems.map(item=>item.y+item.height));
+  if(denseOverview&&cropItems.length){
+    const focusMinX=Math.min(...cropItems.map(item=>item.x));
+    const focusMinY=Math.min(...cropItems.map(item=>item.y));
+    const focusMaxX=Math.max(...cropItems.map(item=>item.x+item.width));
+    const focusMaxY=Math.max(...cropItems.map(item=>item.y+item.height));
     const focusWidth=Math.max(1,focusMaxX-focusMinX);
     const focusHeight=Math.max(1,focusMaxY-focusMinY);
     const pad=Math.max(280,Math.min(Math.max(fullWidth,fullHeight)*.10,Math.max(focusWidth,focusHeight)*.18));
@@ -7034,13 +7053,13 @@ function gdAdminCourseVisualStitchView(record,planSummary){
     `underlay ${underlayCount}`,
     `corridors ${corridorCount}`,
     `green squares ${greenCount}`,
-    denseOverview?"focused crop":"",
+    focusHole?`H${focusHole} focus`:denseOverview?"focused crop":"",
     imageEntries.length?`image tiles ${renderedImageCount}/${imageEntries.length}`:"no image tiles",
     segmentedCount?`split segments ${segmentedCount}`:"",
     planSummary&&planSummary.stitchModel?String(planSummary.stitchModel):"geo table"
   ].filter(Boolean);
-  const dims=denseOverview?`${Math.round(viewWidth)}×${Math.round(viewHeight)} crop / ${Math.round(fullWidth)}×${Math.round(fullHeight)} raw`:`${Math.round(fullWidth)}×${Math.round(fullHeight)}`;
-  return `<div class="gdAdminCourseVisualSlot wide"><div class="gdAdminCourseVisualSlotHead"><strong>Stitch table</strong><small>${gdEscapeHTML(dims)}</small></div><div class="gdAdminCourseVisualFrame stitch"><div class="gdAdminCourseVisualStitch">${svg}</div></div><div class="gdAdminCourseVisualMeta">${meta.map(item=>`<span>${gdEscapeHTML(item)}</span>`).join("")}</div></div>`;
+  const dims=denseOverview?`${Math.round(viewWidth)}×${Math.round(viewHeight)} ${focusHole?`H${focusHole} `:""}crop / ${Math.round(fullWidth)}×${Math.round(fullHeight)} raw`:`${Math.round(fullWidth)}×${Math.round(fullHeight)}`;
+  return `<div class="gdAdminCourseVisualSlot wide"><div class="gdAdminCourseVisualSlotHead"><strong>${focusHole?`Stitch table · H${focusHole}`:"Stitch table"}</strong><small>${gdEscapeHTML(dims)}</small></div><div class="gdAdminCourseVisualFrame stitch"><div class="gdAdminCourseVisualStitch">${svg}</div></div><div class="gdAdminCourseVisualMeta">${meta.map(item=>`<span>${gdEscapeHTML(item)}</span>`).join("")}</div></div>`;
 }
 function gdAdminCourseVisualImage(label,visual,fallback){
   const src=visual&&visual.dataUrl||fallback&&fallback.dataUrl||"";
