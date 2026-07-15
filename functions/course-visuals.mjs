@@ -119,7 +119,7 @@ async function uploadVisualAssets(assets) {
       },
       body: bytes
     });
-    uploaded.push({ path: clean.path, role: clean.role, contentType: clean.contentType, byteLength: bytes.byteLength });
+    uploaded.push({ path: clean.path, role: clean.role, contentType: clean.contentType, byteLength: bytes.byteLength, holeNumber: clean.holeNumber, hole_number: clean.holeNumber, metadata: clean.metadata });
   }
   return uploaded;
 }
@@ -197,7 +197,13 @@ function withPlayPayload(visual) {
 function visualToPlayPayload(visual) {
   visual = visual || {};
   const overview = playAssetForRole(visual, "published", visual.published_image_path);
-  const singleHole = playAssetForRole(visual, "single-hole-published", "");
+  const holeFrames = playAssetsForRole(visual, "hole-frame-published").sort((a, b) => integer(a.holeNumber) - integer(b.holeNumber));
+  const singleHole = playAssetForRole(visual, "single-hole-published", "") || holeFrames[0] || null;
+  const holeFrameMap = {};
+  for (const asset of holeFrames) {
+    const holeNumber = integer(asset && asset.holeNumber);
+    if (holeNumber) holeFrameMap[String(holeNumber)] = asset;
+  }
   const statusValue = visual.status === "published" && overview ? "published" : "unavailable";
   return {
     schema: "gd.course_visual.play_payload",
@@ -218,9 +224,16 @@ function visualToPlayPayload(visual) {
     publishedVisual: overview,
     single_hole_published_visual: singleHole,
     singleHolePublishedVisual: singleHole,
+    hole_frames: holeFrames,
+    holeFrames,
+    hole_frame_map: holeFrameMap,
+    holeFrameMap,
     assets: {
       overview,
-      singleHole
+      singleHole,
+      holeFrames,
+      holeFrameMap,
+      stitchUnderlay: overview
     },
     updated_at: text(visual.updated_at, 80),
     updatedAt: text(visual.updated_at, 80)
@@ -228,11 +241,22 @@ function visualToPlayPayload(visual) {
 }
 
 function playAssetForRole(visual, role, fallbackPath) {
-  const uploaded = jsonArray(visual && visual.uploaded_assets).find((asset) => String(asset && asset.role || "") === role);
+  return playAssetFromUpload(jsonArray(visual && visual.uploaded_assets).find((asset) => String(asset && asset.role || "") === role), role, fallbackPath);
+}
+
+function playAssetsForRole(visual, role) {
+  return jsonArray(visual && visual.uploaded_assets)
+    .filter((asset) => String(asset && asset.role || "") === role)
+    .map((asset) => playAssetFromUpload(asset, role, ""))
+    .filter(Boolean);
+}
+
+function playAssetFromUpload(uploaded, role, fallbackPath) {
   const sourcePath = text(uploaded && uploaded.path || fallbackPath, 420);
   const objectPath = storageObjectPath(sourcePath);
   if (!objectPath) return null;
   const publicUrl = publicStorageUrl(objectPath);
+  const holeNumber = integer(uploaded && (uploaded.holeNumber ?? uploaded.hole_number));
   return {
     role,
     path: displayAssetPath(sourcePath || objectPath),
@@ -244,7 +268,10 @@ function playAssetForRole(visual, role, fallbackPath) {
     content_type: text(uploaded && (uploaded.contentType || uploaded.content_type), 80) || "image/svg+xml",
     contentType: text(uploaded && (uploaded.contentType || uploaded.content_type), 80) || "image/svg+xml",
     byte_length: integer(uploaded && (uploaded.byteLength ?? uploaded.byte_length)),
-    byteLength: integer(uploaded && (uploaded.byteLength ?? uploaded.byte_length))
+    byteLength: integer(uploaded && (uploaded.byteLength ?? uploaded.byte_length)),
+    hole_number: holeNumber,
+    holeNumber,
+    metadata: jsonObject(uploaded && uploaded.metadata)
   };
 }
 
@@ -309,7 +336,7 @@ function sanitizeAsset(input) {
   if (!pathValue || !dataUrl.startsWith("data:")) return null;
   if (!/^course-visuals\//.test(pathValue)) return null;
   if (!/^image\/(svg\+xml|png|webp)$/.test(contentType)) return null;
-  return { path: pathValue.replace(/^course-visuals\//, ""), dataUrl, contentType, role: text(input.role, 80) };
+  return { path: pathValue.replace(/^course-visuals\//, ""), dataUrl, contentType, role: text(input.role, 80), holeNumber: integer(input.holeNumber ?? input.hole_number), metadata: jsonObject(input.metadata) };
 }
 
 function dataUrlToBytes(value) {

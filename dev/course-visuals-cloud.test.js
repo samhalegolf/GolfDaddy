@@ -30,7 +30,8 @@ const { pathToFileURL } = require("url");
     uploaded_assets: [
       { path: "course-visuals/cromwell/basic/1.svg", role: "basic" },
       { path: "cromwell/published/2.svg", role: "published", contentType: "image/svg+xml", byteLength: 128 },
-      { path: "cromwell/single-hole/published/2.svg", role: "single-hole-published", contentType: "image/svg+xml", byteLength: 96 }
+      { path: "cromwell/single-hole/published/2.svg", role: "single-hole-published", contentType: "image/svg+xml", byteLength: 96 },
+      { path: "cromwell/holes/h1/published/2.svg", role: "hole-frame-published", contentType: "image/svg+xml", byteLength: 88, holeNumber: 1, metadata: { playSurface: { useGpsPlayFraming: true, fallbackUnderlay: "published-stitch" } } }
     ]
   });
 
@@ -54,20 +55,27 @@ const { pathToFileURL } = require("url");
   assert.equal(restored.play_payload.status, "published");
   assert.equal(restored.play_payload.published_visual.storage_path, "course-visuals/cromwell/published/2.svg");
   assert.equal(restored.play_payload.single_hole_published_visual.storage_path, "course-visuals/cromwell/single-hole/published/2.svg");
+  assert.equal(restored.play_payload.hole_frames.length, 1);
+  assert.equal(restored.play_payload.hole_frame_map["1"].storage_path, "course-visuals/cromwell/holes/h1/published/2.svg");
+  assert.equal(restored.play_payload.assets.stitchUnderlay.storage_path, "course-visuals/cromwell/published/2.svg");
   assert.equal(restored.playPayload.publishedVisual.path, "course-visuals/cromwell/published/2.svg");
 
   const playPayload = visualToPlayPayload(visual);
   assert.equal(playPayload.schema, "gd.course_visual.play_payload");
   assert.equal(playPayload.assets.overview.role, "published");
   assert.equal(playPayload.assets.singleHole.role, "single-hole-published");
+  assert.equal(playPayload.assets.holeFrames[0].role, "hole-frame-published");
+  assert.equal(playPayload.holeFrameMap["1"].metadata.playSurface.useGpsPlayFraming, true);
 
   const asset = sanitizeAsset({
     path: "course-visuals/cromwell/basic/1.svg",
     role: "basic",
+    holeNumber: 3,
     contentType: "image/svg+xml",
     dataUrl: "data:image/svg+xml;charset=utf-8,%3Csvg%3E%3C/svg%3E"
   });
   assert.equal(asset.path, "cromwell/basic/1.svg");
+  assert.equal(asset.holeNumber, 3);
   assert.equal(dataUrlToBytes(asset.dataUrl).toString("utf8"), "<svg></svg>");
 
   const optionsResponse = await mod.default(new Request("https://clarity-caddie.test/api/course-visuals", { method: "OPTIONS" }));
