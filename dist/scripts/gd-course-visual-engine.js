@@ -7,7 +7,7 @@
 
   var VERSION=1;
   var PRESET_VERSION=4;
-  var RENDERER_VERSION="clarity-course-visual-renderer-v11";
+  var RENDERER_VERSION="clarity-course-visual-renderer-v12";
   var STORE_KEY="gd_course_visual_engine_v1";
   var PRESET_KEY="gd_course_visual_presets_v1";
   var API_ENDPOINT="/api/course-visuals";
@@ -930,7 +930,7 @@
     record.input={courseId:normalized.courseId,courseName:normalized.courseName,courseBounds:normalized.courseBounds,objectCount:normalized.objects.length,captureCount:normalized.captures.length,sourceCaptureIds:normalized.captures.map(function(capture){return capture.id;})};
     record.objects=normalized.objects;
     record.captureRefs=normalized.captures.map(function(capture){
-      return {id:capture.id,storagePath:capture.storagePath||"",holeNumber:capture.holeNumber||null,role:capture.role||"",quality:capture.quality||"",stitchLayer:capture.stitchLayer||0,planId:capture.planId||"",width:capture.width,height:capture.height,tileCount:Array.isArray(capture.tiles)?capture.tiles.length:0,bounds:capture.bounds||null};
+      return {id:capture.id,storagePath:capture.storagePath||"",holeNumber:capture.holeNumber||null,role:capture.role||"",quality:capture.quality||"",stitchLayer:capture.stitchLayer||0,planId:capture.planId||"",width:capture.width,height:capture.height,tileCount:Array.isArray(capture.tiles)?capture.tiles.length:0,bounds:capture.bounds||null,boundsSource:capture.boundsSource||"",captureLens:capture.captureLens||"",lensOrientation:capture.lensOrientation||"",captureAnchorPins:clone(capture.captureAnchorPins||{})};
     });
     record.status=normalized.captures.length?"input-ready":"unavailable";
     record.lastError=normalized.captures.length?null:{code:"missing-captures",message:"No captured frames are available for this course visual."};
@@ -944,7 +944,7 @@
   function capturesFromRecordRefs(record){
     return (Array.isArray(record&&record.captureRefs)?record.captureRefs:[]).map(function(ref){
       var manifest=ref&&ref.storagePath?readJson(ref.storagePath,null):null;
-      return manifest?manifestToCapture(manifest,{courseId:record.courseId,role:ref&&ref.role,quality:ref&&ref.quality,stitchLayer:ref&&ref.stitchLayer,planId:ref&&ref.planId}):null;
+      return manifest?manifestToCapture(manifest,{courseId:record.courseId,role:ref&&ref.role,quality:ref&&ref.quality,stitchLayer:ref&&ref.stitchLayer,planId:ref&&ref.planId,captureLens:ref&&ref.captureLens,lensOrientation:ref&&ref.lensOrientation,captureAnchorPins:ref&&ref.captureAnchorPins}):null;
     }).filter(function(capture){return capture&&capture.width&&capture.height&&captureBounds(capture)&&(Array.isArray(capture.tiles)&&capture.tiles.length||capture.imageUrl||capture.imageData);});
   }
   function renderableCapture(capture){
@@ -1883,6 +1883,36 @@
     recordEvent(record,"course-visual-settings-saved",{reset:"published"});
     return putRecord(record);
   }
+  function resetCourseVisualWorkingState(courseId,opts){
+    opts=opts||{};
+    var record=getRecord(courseId);
+    var keepPublished=opts.keepPublished!==false;
+    delete transientCapturesByCourse[record.courseId];
+    record.rawMaster=null;
+    record.basicVisual=null;
+    record.exampleHoleVisual=null;
+    record.holeFrameVisuals=[];
+    record.previewVisual=null;
+    record.terrainView=null;
+    record.singleHolePreviewVisual=null;
+    record.singleHoleTerrainView=null;
+    record.holeFramePreviewVisuals=[];
+    record.holeFrameTerrainViews=[];
+    record.beta3dView=null;
+    record.captureRefs=[];
+    record.input=null;
+    if(!keepPublished){
+      record.publishedVisual=null;
+      record.singleHolePublishedVisual=null;
+      record.holeFramePublishedVisuals=[];
+      record.publishedVersion=0;
+    }
+    record.status=record.publishedVisual?"published":"unavailable";
+    record.lastError=null;
+    record.diagnostics=Object.assign({},record.diagnostics||{},{capturePlanSummary:null,captureExecution:null,recaptureRequestedAt:now(),recaptureKeptPublished:keepPublished});
+    recordEvent(record,"course-visual-recapture-reset",{keepPublished:keepPublished});
+    return putRecord(record,{skipCloudSync:true});
+  }
   function resetToGlobalPreset(courseId,presetId){
     var record=getRecord(courseId);
     var preset=getPreset(presetId||defaultPreset().id);
@@ -2255,11 +2285,12 @@
     var previous=getRecord(input.courseId||courseId);
     var saved3d=!!(previous&&previous.courseOverrides&&previous.courseOverrides.visualEngine&&previous.courseOverrides.visualEngine.enable3dBeta);
     var enable3dBeta=opts.enable3dBeta===true||saved3d;
+    if(opts.forceFresh===true)previous=resetCourseVisualWorkingState(input.courseId||courseId,{keepPublished:true});
     var plan=planCourseVisualCaptures(input,{enable3dBeta:enable3dBeta});
     var planned=executeVisualCapturePlan(input,plan);
     var previousCaptures=capturesFromRecordRefs(previous).filter(renderableCapture);
     var previousVisualCaptures=previousCaptures.filter(visualCaptureRole);
-    if(previousVisualCaptures.length&&!hasVisualCaptureSet(planned.captures)){
+    if(opts.forceFresh!==true&&previousVisualCaptures.length&&!hasVisualCaptureSet(planned.captures)){
       planned=Object.assign({},planned,{
         captures:previousVisualCaptures,
         fallbackReason:(planned.fallbackReason?planned.fallbackReason+";":"")+"previous-visual-capture-refs"
@@ -2294,6 +2325,7 @@
     syncPublishedCourseVisual:syncPublishedCourseVisual,
     revertToPublishedVersion:revertToPublishedVersion,
     resetToPublished:resetToPublished,
+    resetCourseVisualWorkingState:resetCourseVisualWorkingState,
     resetToGlobalPreset:resetToGlobalPreset,
     resolveCourseVisual:resolveCourseVisual,
     outputForRecord:outputForRecord,
