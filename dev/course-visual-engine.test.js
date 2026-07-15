@@ -109,12 +109,18 @@ function payload() {
   const record = engine.ingestCourseVisualInput(input);
   assert.equal(record.status, "input-ready");
   assert.equal(record.input.captureCount, 1);
+  const persistedAfterIngest = JSON.parse(localStorage.getItem(engine.storeKey));
+  assert.equal(persistedAfterIngest.records.cromwell.captures, undefined, "full captures are kept transient, not persisted");
+  assert.equal(persistedAfterIngest.records.cromwell.captureRefs.length, 1, "persisted records keep lightweight capture refs");
 
   const built = await engine.buildCourseVisualMaster("cromwell");
   assert.equal(built.status, "basic-ready", "valid captures produce a basic visual record");
   assert.ok(built.rawMaster.path.includes("/raw/"));
   assert.ok(built.basicVisual.dataUrl.startsWith("data:image/svg+xml"));
   assert.equal(built.rawMaster.dataUrl, built.basicVisual.dataUrl, "raw master feeds basic delivery without recompression");
+  const persistedAfterBuild = JSON.parse(localStorage.getItem(engine.storeKey));
+  assert.equal(persistedAfterBuild.records.cromwell.rawMaster.dataUrl, undefined, "raw data URL is not persisted into localStorage");
+  assert.equal(persistedAfterBuild.records.cromwell.basicVisual.dataUrl, undefined, "basic data URL is not persisted into localStorage");
 
   const failed = engine.ingestCourseVisualInput({ courseId: "no-captures", objects: input.objects, captures: [] });
   assert.equal(failed.status, "unavailable");

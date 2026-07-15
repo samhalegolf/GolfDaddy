@@ -12,6 +12,8 @@
   var API_ENDPOINT="/api/course-visuals";
   var VALID_STATUSES={unavailable:1,"input-ready":1,stitching:1,"basic-ready":1,rendering:1,"preview-ready":1,published:1,failed:1};
   var inFlightBuilds={};
+  var transientCapturesByCourse={};
+  var transientAssetDataByPath={};
 
   function now(){return new Date().toISOString();}
   function safe(fn,fb){try{return fn();}catch(_error){return fb;}}
@@ -258,24 +260,47 @@
   }
   function getRecord(courseId){
     var store=loadStore();
-    return clone(store.records[slug(courseId)]||emptyRecord(courseId));
+    return attachTransientAssets(clone(store.records[slug(courseId)]||emptyRecord(courseId)));
   }
   function putRecord(record){
     var store=loadStore();
     record.updatedAt=now();
     record.status=VALID_STATUSES[record.status]?record.status:"failed";
-    store.records[record.courseId]=clone(record);
+    captureTransientAssets(record);
+    store.records[record.courseId]=persistableRecord(record);
     saveStore(store);
     queueCloudSync(record,"metadata");
-    return clone(record);
+    return attachTransientAssets(clone(record));
+  }
+  function captureTransientAssets(record){
+    [record&&record.rawMaster,record&&record.basicVisual,record&&record.previewVisual,record&&record.publishedVisual].forEach(function(asset){
+      if(asset&&asset.path&&asset.dataUrl)transientAssetDataByPath[asset.path]=asset.dataUrl;
+    });
+  }
+  function attachTransientAssets(record){
+    [record&&record.rawMaster,record&&record.basicVisual,record&&record.previewVisual,record&&record.publishedVisual].forEach(function(asset){
+      if(asset&&asset.path&&!asset.dataUrl&&transientAssetDataByPath[asset.path])asset.dataUrl=transientAssetDataByPath[asset.path];
+    });
+    return record;
+  }
+  function persistableRecord(record){
+    var out=clone(record);
+    delete out.captures;
+    [out&&out.rawMaster,out&&out.basicVisual,out&&out.previewVisual,out&&out.publishedVisual].forEach(function(asset){
+      if(asset)delete asset.dataUrl;
+    });
+    return out;
   }
   function ingestCourseVisualInput(input){
     var normalized=normalizeInput(input);
+    transientCapturesByCourse[normalized.courseId]=normalized.captures;
     var record=getRecord(normalized.courseId);
     record.courseName=normalized.courseName||record.courseName||normalized.courseId;
     record.input={courseId:normalized.courseId,courseName:normalized.courseName,courseBounds:normalized.courseBounds,objectCount:normalized.objects.length,captureCount:normalized.captures.length,sourceCaptureIds:normalized.captures.map(function(capture){return capture.id;})};
     record.objects=normalized.objects;
-    record.captures=normalized.captures;
+    record.captureRefs=normalized.captures.map(function(capture){
+      return {id:capture.id,storagePath:capture.storagePath||"",holeNumber:capture.holeNumber||null,width:capture.width,height:capture.height,tileCount:Array.isArray(capture.tiles)?capture.tiles.length:0,bounds:capture.bounds||null};
+    });
     record.status=normalized.captures.length?"input-ready":"unavailable";
     record.lastError=normalized.captures.length?null:{code:"missing-captures",message:"No captured frames are available for this course visual."};
     record.diagnostics=Object.assign({},record.diagnostics||{},{captureBounds:normalized.captures.map(captureBounds),sourceDimensions:normalized.captures.map(function(c){return {id:c.id,width:c.width,height:c.height,tiles:Array.isArray(c.tiles)?c.tiles.length:0};}),missingCaptures:normalized.captures.length?[]:["course-visual-captures"]});
@@ -284,6 +309,12 @@
   }
   function captureSignature(captures){
     return hashString((captures||[]).map(function(capture){return [capture.id,capture.width,capture.height,JSON.stringify(capture.bounds),Array.isArray(capture.tiles)?capture.tiles.length:0].join("|");}).join("\n"));
+  }
+  function capturesFromRecordRefs(record){
+    return (Array.isArray(record&&record.captureRefs)?record.captureRefs:[]).map(function(ref){
+      var manifest=ref&&ref.storagePath?readJson(ref.storagePath,null):null;
+      return manifest?manifestToCapture(manifest,{courseId:record.courseId}):null;
+    }).filter(function(capture){return capture&&capture.width&&capture.height&&captureBounds(capture)&&(Array.isArray(capture.tiles)&&capture.tiles.length||capture.imageUrl||capture.imageData);});
   }
   function stitchSvg(captures,meta){
     var valid=(Array.isArray(captures)?captures:[]).filter(function(capture){return capture&&capture.width&&capture.height&&Array.isArray(capture.tiles)&&capture.tiles.length;});
@@ -309,22 +340,24 @@
     var svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+width+'" height="'+height+'" viewBox="0 0 '+width+" "+height+'" data-renderer="'+escapeXml(RENDERER_VERSION)+'"><rect width="100%" height="100%" fill="#111"/>'+groups+'</svg>';
     return {dataUrl:dataUrl("image/svg+xml",svg),width:width,height:height,missingAreas:missingAreas,bounds:mergeBounds(valid.map(captureBounds)),sourceCaptureIds:valid.map(function(c){return c.id;}),metadata:Object.assign({rendererVersion:RENDERER_VERSION,format:"image/svg+xml"},meta||{})};
   }
-  function buildCourseVisualMaster(courseId){
+  function buildCourseVisualMaster(courseId,opts){
+    opts=opts||{};
     courseId=slug(courseId);
     if(inFlightBuilds[courseId])return inFlightBuilds[courseId];
     var promise=Promise.resolve().then(function(){
       var record=getRecord(courseId);
+      var captures=(Array.isArray(opts.captures)&&opts.captures.length?opts.captures:null)||transientCapturesByCourse[courseId]||capturesFromRecordRefs(record);
       record.status="stitching";
-      recordEvent(record,"course-visual-stitch-started",{captureCount:(record.captures||[]).length});
+      recordEvent(record,"course-visual-stitch-started",{captureCount:(captures||[]).length});
       putRecord(record);
-      var signature=captureSignature(record.captures||[]);
+      var signature=captureSignature(captures||[]);
       if(record.rawMaster&&record.rawMaster.captureSignature===signature&&record.basicVisual){
         record.status=record.publishedVisual?"published":"basic-ready";
         recordEvent(record,"course-visual-basic-ready",{idempotent:true,version:record.currentVersion});
         return putRecord(record);
       }
       try{
-        var stitched=stitchSvg(record.captures||[],{inputVisualId:record.id,courseId:courseId,captureSignature:signature});
+        var stitched=stitchSvg(captures||[],{inputVisualId:record.id,courseId:courseId,captureSignature:signature});
         var version=(Number(record.currentVersion)||0)+1;
         var visualId=stableId("visual");
         record.rawMaster={path:"course-visuals/"+courseId+"/raw/"+visualId+".svg",dataUrl:stitched.dataUrl,bounds:stitched.bounds,width:stitched.width,height:stitched.height,captureSignature:signature,metadata:stitched.metadata};
@@ -548,7 +581,7 @@
     var frameRows=api&&typeof api.getCoursePlayFrameIndex==="function"?api.getCoursePlayFrameIndex(courseId):[];
     var input=adaptCoursePlayPayloadToVisualInput(payload,{frameRows:frameRows,readManifest:function(key){return readJson(key,null);}});
     ingestCourseVisualInput(input);
-    return buildCourseVisualMaster(input.courseId);
+    return buildCourseVisualMaster(input.courseId,{captures:input.captures});
   }
   return {
     version:VERSION,
