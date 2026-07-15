@@ -226,6 +226,9 @@ function payload() {
   assert.ok(preview.previewVisual.path.includes("/preview/"));
   assert.equal(preview.previewVisual.metadata.stage, "native-visuals", "course overview enters native visuals");
   assert.ok(svgText(preview.previewVisual.dataUrl).includes("cvMowingStripe"), "preset mowing visibility is baked into native visuals");
+  assert.ok(svgText(preview.previewVisual.dataUrl).includes("fairway-airbrush"), "native visuals include the fairway burn-rescue airbrush layer");
+  assert.equal(preview.previewVisual.metadata.fairwayAirbrush.enabled, true, "fairway airbrush records its geometry-constrained pass");
+  assert.equal(preview.previewVisual.metadata.fairwayAirbrush.preserves, "relative-luminance-and-mow-lines", "fairway airbrush preserves mowing-line texture");
   assert.equal(preview.terrainView.metadata.stage, "terrain-shading", "course overview enters terrain shading after native visuals");
   assert.equal(preview.terrainView.metadata.inputStage, "native-visuals", "overview terrain shading consumes the native visual output");
   assert.ok(preview.singleHolePreviewVisual.path.includes("/single-hole/preview/"), "single-hole visual enters native visuals");
@@ -300,16 +303,52 @@ function payload() {
   assert.ok(plannedBuilt.beta3dView && plannedBuilt.beta3dView.dataUrl.startsWith("data:image/svg+xml"), "3D beta view is built as a separate opt-in stage");
   assert.equal(plannedBuilt.rawMaster.metadata.visualLayerModel, "live-underlay-plus-feathered-captures", "raw master records the visual layer model");
   assert.equal(plannedBuilt.diagnostics.stageSettings.enable3dBeta, true, "3D beta toggle is recorded in diagnostics");
+
+  const snapshotChoiceRequests = [];
+  global.GDCoursePlayPipeline = {
+    buildCoursePlayDbPayload() {
+      return Object.assign({}, payload(), { courseId: "snapshot-choice", courseKey: "snapshot-choice" });
+    },
+    getCoursePlayFrameIndex() {
+      return [];
+    }
+  };
+  global.gdBuildCourseVisualCaptureManifest = function buildSnapshotChoiceCapture(request) {
+    snapshotChoiceRequests.push(request);
+    if (request.role === "green-surround") {
+      const tooGreen = Object.assign(visualManifest("snapshot-too-green", request, 0), {
+        analysis: { greenLushness: 0.95, fairwayLines: 0.35 },
+        snapshotId: "snapshot-too-green"
+      });
+      const balanced = Object.assign(visualManifest("snapshot-balanced", request, 10), {
+        analysis: { greenLushness: 0.78, fairwayLines: 0.74 },
+        snapshotId: "snapshot-balanced"
+      });
+      const fairwayTieBreak = Object.assign(visualManifest("snapshot-fairway-lines", request, 20), {
+        analysis: { greenLushness: 0.74, fairwayLines: 0.78 },
+        snapshotId: "snapshot-fairway-lines"
+      });
+      return { olderSnapshots: [tooGreen, balanced, fairwayTieBreak] };
+    }
+    return visualManifest("snapshot-" + request.role + "-" + (request.holeNumber || "course"), request, snapshotChoiceRequests.length * 15);
+  };
+  const snapshotChoiceBuilt = await engine.buildFromCourseDatabase("snapshot-choice");
+  const snapshotSelection = snapshotChoiceBuilt.diagnostics.captureExecution.snapshotSelection.find((item) => item.role === "green-surround");
+  assert.ok(snapshotSelection, "capture execution records older-snapshot selection diagnostics");
+  assert.equal(snapshotSelection.selectedCaptureId, "snapshot-fairway-lines", "older snapshot selection breaks balanced ties toward fairway lines");
+  assert.equal(snapshotSelection.candidateCount, 3, "older snapshot selection scores all candidates");
+  assert.equal(snapshotSelection.tieBreak, "fairway-lines", "snapshot tie-break policy is explicit");
   global.GDCoursePlayPipeline = originalPipeline;
   global.gdBuildCourseVisualCaptureManifest = originalExecutor;
 
   const globalPreset = engine.getPreset("clarity-course-natural-v1");
   const presetStore = engine.loadPresets();
   const presetList = engine.courseVisualPresetList();
-  assert.equal(presetStore.version, 2, "preset store upgrades to the current built-in preset version");
+  assert.equal(presetStore.version, 3, "preset store upgrades to the current built-in preset version");
   assert.ok(presetList.length >= 8 && presetList.length <= 10, "admin gets a proper preset palette without becoming noisy");
   assert.ok(presetList.some((preset) => preset.id === "clarity-course-green-detail-v1"), "green detail preset is available");
   assert.ok(presetList.some((preset) => preset.id === "clarity-course-terrain-relief-v1"), "terrain relief preset is available");
+  assert.ok(presetList.some((preset) => preset.id === "clarity-course-acid-test-v1"), "overcooked debug preset is available");
   const merged = engine.mergePreset(globalPreset, { turf: { greenStrength: 0.9 } });
   assert.equal(globalPreset.turf.greenStrength, 0.35, "course overrides do not mutate the global preset");
   assert.equal(merged.turf.greenStrength, 0.9, "global preset inheritance accepts course overrides");

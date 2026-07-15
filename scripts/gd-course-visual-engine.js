@@ -6,7 +6,7 @@
   root=root||typeof window!=="undefined"&&window||typeof globalThis!=="undefined"&&globalThis||{};
 
   var VERSION=1;
-  var PRESET_VERSION=2;
+  var PRESET_VERSION=3;
   var RENDERER_VERSION="clarity-course-visual-renderer-v3";
   var STORE_KEY="gd_course_visual_engine_v1";
   var PRESET_KEY="gd_course_visual_presets_v1";
@@ -449,6 +449,7 @@
       turf:{hueMin:86,hueMax:142,saturationMin:28,saturationMax:66,brightnessMin:30,brightnessMax:72,greenStrength:.35},
       lighting:{brightnessTarget:52,shadowFloor:14,highlightCeiling:92,contrastTarget:1.04},
       readability:{fairwaySeparation:.18,greenSeparation:.16,bunkerBrightness:.08,localContrast:.08,sharpness:.1},
+      visualTools:{fairwayAirbrush:true,fairwayAirbrushStrength:.18,fairwayAirbrushWidthMeters:44},
       mowingVisibility:"Unknown",
       createdAt:stamp,
       updatedAt:stamp
@@ -463,52 +464,67 @@
   function builtInPresetSpecs(){
     return [
       presetSpec("clarity-course-natural-v1","Natural","Natural","Balanced aerial map tone for general course overviews.",{}),
-      presetSpec("clarity-course-fresh-v1","Fresh Fairway","Fresh","A brighter, cleaner course map that keeps grass lively without looking cartoonish.",{
-        turf:{greenStrength:.48,saturationMin:34},
-        lighting:{brightnessTarget:56,contrastTarget:1.05},
-        readability:{fairwaySeparation:.2,greenSeparation:.18,localContrast:.12,sharpness:.12},
-        mowingVisibility:"Low"
-      }),
-      presetSpec("clarity-course-rich-v1","Rich Aerial","Rich","Deeper greens and slightly stronger contrast for premium course thumbnails.",{
-        turf:{greenStrength:.62,saturationMin:40},
-        lighting:{brightnessTarget:53,contrastTarget:1.08},
-        readability:{fairwaySeparation:.23,greenSeparation:.22,localContrast:.13,sharpness:.14},
-        mowingVisibility:"Low"
-      }),
-      presetSpec("clarity-course-strong-v1","Strong Clarity","Strong","A more readable decision-map style for small screens and busy imagery.",{
-        turf:{greenStrength:.78,saturationMin:46},
-        lighting:{brightnessTarget:55,contrastTarget:1.12},
-        readability:{fairwaySeparation:.28,greenSeparation:.26,localContrast:.16,sharpness:.18},
+      presetSpec("clarity-course-fresh-v1","Fresh Fairway","Fresh","A bright fairway-first look with visibly greener turf and cleaner playing lines.",{
+        turf:{greenStrength:.9,saturationMin:42,saturationMax:76},
+        lighting:{brightnessTarget:62,contrastTarget:1.18},
+        readability:{fairwaySeparation:.32,greenSeparation:.22,localContrast:.2,sharpness:.2},
+        visualTools:{fairwayAirbrushStrength:.3,fairwayAirbrushWidthMeters:48},
         mowingVisibility:"Clear"
       }),
-      presetSpec("clarity-course-green-detail-v1","Green Detail","Green Detail","Emphasises greens and surrounds while keeping fairways natural.",{
-        turf:{greenStrength:.72,saturationMin:44,brightnessMin:34,brightnessMax:74},
-        lighting:{brightnessTarget:54,contrastTarget:1.09},
-        readability:{fairwaySeparation:.2,greenSeparation:.32,bunkerBrightness:.1,localContrast:.15,sharpness:.18},
+      presetSpec("clarity-course-rich-v1","Rich Aerial","Rich","Deeper greens and stronger contrast for premium course thumbnails.",{
+        turf:{greenStrength:1.25,saturationMin:50,saturationMax:84},
+        lighting:{brightnessTarget:55,contrastTarget:1.28},
+        readability:{fairwaySeparation:.34,greenSeparation:.3,localContrast:.24,sharpness:.24},
+        visualTools:{fairwayAirbrushStrength:.36,fairwayAirbrushWidthMeters:50},
         mowingVisibility:"Clear"
       }),
-      presetSpec("clarity-course-fairway-corridor-v1","Fairway Corridor","Fairway Corridor","Best for play-corridor inspection where fairways, hazards and landing areas need separation.",{
-        turf:{greenStrength:.56,saturationMin:36},
-        lighting:{brightnessTarget:57,shadowFloor:18,contrastTarget:1.1},
-        readability:{fairwaySeparation:.34,greenSeparation:.2,bunkerBrightness:.12,localContrast:.17,sharpness:.2},
-        mowingVisibility:"Low"
+      presetSpec("clarity-course-strong-v1","Strong Clarity","Strong","A punchy decision-map style for small screens and busy imagery.",{
+        turf:{greenStrength:1.55,saturationMin:56,saturationMax:90},
+        lighting:{brightnessTarget:60,contrastTarget:1.45},
+        readability:{fairwaySeparation:.44,greenSeparation:.38,localContrast:.34,sharpness:.34},
+        visualTools:{fairwayAirbrushStrength:.44,fairwayAirbrushWidthMeters:54},
+        mowingVisibility:"Prominent"
       }),
-      presetSpec("clarity-course-terrain-relief-v1","Terrain Relief","Terrain Relief","Designed to carry terrain shading without losing the live imagery beneath it.",{
-        turf:{greenStrength:.44,saturationMin:32},
-        lighting:{brightnessTarget:50,shadowFloor:16,contrastTarget:1.13},
-        readability:{fairwaySeparation:.22,greenSeparation:.2,bunkerBrightness:.06,localContrast:.19,sharpness:.16},
+      presetSpec("clarity-course-green-detail-v1","Green Detail","Green Detail","Pushes greens and surrounds hard enough to expose detail choices.",{
+        turf:{greenStrength:1.45,saturationMin:54,brightnessMin:34,brightnessMax:82},
+        lighting:{brightnessTarget:58,contrastTarget:1.32},
+        readability:{fairwaySeparation:.26,greenSeparation:.5,bunkerBrightness:.14,localContrast:.3,sharpness:.32},
+        visualTools:{fairwayAirbrushStrength:.34,fairwayAirbrushWidthMeters:46},
+        mowingVisibility:"Prominent"
+      }),
+      presetSpec("clarity-course-fairway-corridor-v1","Fairway Corridor","Fairway Corridor","A line-biased inspection look for fairways, hazards and landing areas.",{
+        turf:{greenStrength:.95,saturationMin:42},
+        lighting:{brightnessTarget:63,shadowFloor:20,contrastTarget:1.5},
+        readability:{fairwaySeparation:.58,greenSeparation:.26,bunkerBrightness:.18,localContrast:.42,sharpness:.42},
+        visualTools:{fairwayAirbrushStrength:.5,fairwayAirbrushWidthMeters:58},
+        mowingVisibility:"Prominent"
+      }),
+      presetSpec("clarity-course-terrain-relief-v1","Terrain Relief","Terrain Relief","Darker and higher contrast so terrain shading has something to bite into.",{
+        turf:{greenStrength:.65,saturationMin:34},
+        lighting:{brightnessTarget:45,shadowFloor:12,contrastTarget:1.55},
+        readability:{fairwaySeparation:.34,greenSeparation:.24,bunkerBrightness:.06,localContrast:.46,sharpness:.28},
+        visualTools:{fairwayAirbrushStrength:.26,fairwayAirbrushWidthMeters:48},
         mowingVisibility:"Clear"
       }),
-      presetSpec("clarity-course-shade-rescue-v1","Shade Rescue","Shade Rescue","Lifts dark captures and tree-shadowed holes while avoiding a washed-out fairway.",{
-        turf:{greenStrength:.52,saturationMin:36,brightnessMin:34},
-        lighting:{brightnessTarget:62,shadowFloor:24,highlightCeiling:94,contrastTarget:1.02},
-        readability:{fairwaySeparation:.2,greenSeparation:.2,bunkerBrightness:.14,localContrast:.11,sharpness:.1},
-        mowingVisibility:"Low"
+      presetSpec("clarity-course-shade-rescue-v1","Shade Rescue","Shade Rescue","Lifts dark captures and tree-shadowed holes without losing line visibility.",{
+        turf:{greenStrength:.85,saturationMin:40,brightnessMin:34},
+        lighting:{brightnessTarget:78,shadowFloor:30,highlightCeiling:98,contrastTarget:1.15},
+        readability:{fairwaySeparation:.3,greenSeparation:.26,bunkerBrightness:.2,localContrast:.2,sharpness:.18},
+        visualTools:{fairwayAirbrushStrength:.38,fairwayAirbrushWidthMeters:52},
+        mowingVisibility:"Clear"
       }),
-      presetSpec("clarity-course-broadcast-pop-v1","Broadcast Pop","Broadcast Pop","A bold preview look for demos and quick visual checks.",{
-        turf:{greenStrength:.86,saturationMin:48,saturationMax:72},
-        lighting:{brightnessTarget:58,shadowFloor:18,contrastTarget:1.16},
-        readability:{fairwaySeparation:.3,greenSeparation:.3,bunkerBrightness:.14,localContrast:.2,sharpness:.22},
+      presetSpec("clarity-course-broadcast-pop-v1","Broadcast Pop","Broadcast Pop","A bold demo look with saturated turf, heavy contrast and clear stripes.",{
+        turf:{greenStrength:2.2,saturationMin:62,saturationMax:96},
+        lighting:{brightnessTarget:68,shadowFloor:20,contrastTarget:1.7},
+        readability:{fairwaySeparation:.54,greenSeparation:.48,bunkerBrightness:.2,localContrast:.5,sharpness:.5},
+        visualTools:{fairwayAirbrushStrength:.56,fairwayAirbrushWidthMeters:60},
+        mowingVisibility:"Prominent"
+      }),
+      presetSpec("clarity-course-acid-test-v1","Acid Test","Acid Test","An intentionally overcooked debug look for finding the edge of the visual model.",{
+        turf:{greenStrength:3,saturationMin:72,saturationMax:100},
+        lighting:{brightnessTarget:82,shadowFloor:28,contrastTarget:1.95},
+        readability:{fairwaySeparation:.68,greenSeparation:.62,bunkerBrightness:.26,localContrast:.58,sharpness:.6},
+        visualTools:{fairwayAirbrushStrength:.68,fairwayAirbrushWidthMeters:64},
         mowingVisibility:"Prominent"
       })
     ];
@@ -619,6 +635,16 @@
       segmentStartMeters:finite(manifest.segmentStartMeters!==undefined?manifest.segmentStartMeters:opts&&opts.segmentStartMeters),
       segmentEndMeters:finite(manifest.segmentEndMeters!==undefined?manifest.segmentEndMeters:opts&&opts.segmentEndMeters),
       routeLengthMeters:finite(manifest.routeLengthMeters!==undefined?manifest.routeLengthMeters:opts&&opts.routeLengthMeters),
+      snapshotId:text(manifest.snapshotId||manifest.snapshotKey||manifest.captureSnapshotId||opts&&opts.snapshotId,180),
+      snapshotCapturedAt:text(manifest.snapshotCapturedAt||manifest.capturedAt||manifest.createdAt||manifest.updatedAt||opts&&opts.snapshotCapturedAt,80),
+      candidateId:text(manifest.candidateId||manifest.snapshotCandidateId||opts&&opts.candidateId,180),
+      candidateIndex:finite(opts&&opts.candidateIndex),
+      candidateCount:finite(opts&&opts.candidateCount),
+      snapshotSelectionScore:finite(opts&&opts.snapshotSelectionScore),
+      snapshotBalanceScore:finite(opts&&opts.snapshotBalanceScore),
+      greenLushnessScore:finite(opts&&opts.greenLushnessScore),
+      fairwayLineScore:finite(opts&&opts.fairwayLineScore),
+      snapshotSelectionReason:text(manifest.snapshotSelectionReason||opts&&opts.snapshotSelectionReason,220),
       sourceType:"leaflet-tile-manifest",
       originPx:manifest.originPx||null,
       tiles:manifest.tiles.map(function(tile){
@@ -1004,19 +1030,90 @@
     if(inner)return inner;
     return base?'<image href="'+escapeXml(base)+'" x="0" y="0" width="'+svgNum(width)+'" height="'+svgNum(height)+'" preserveAspectRatio="none"/>':"";
   }
+  function assetPointProjector(bounds,width,height){
+    var projected=projectedBounds(bounds);
+    if(!projected)return null;
+    var spanX=Math.max(1e-9,projected.right-projected.left);
+    var spanY=Math.max(1e-9,projected.bottom-projected.top);
+    return function(pt){
+      pt=point(pt);
+      if(!pt)return null;
+      var p=projectLatLng(pt.lat,pt.lng);
+      return {x:(p.x-projected.left)/spanX*width,y:(p.y-projected.top)/spanY*height};
+    };
+  }
+  function geometryIsPolygon(geometry,pts){
+    var type=String(geometry&&geometry.type||"").toLowerCase();
+    if(type.indexOf("polygon")>=0)return true;
+    if(geometry&&Array.isArray(geometry.polygon))return true;
+    if(!/line/.test(type)&&Array.isArray(pts)&&pts.length>=4&&distanceMeters(pts[0],pts[pts.length-1])<6)return true;
+    return false;
+  }
+  function fairwayAirbrushSettings(settings){
+    var tools=settings&&settings.visualTools||{};
+    if(tools.fairwayAirbrush===false)return null;
+    var readability=settings&&settings.readability||{};
+    var strength=finite(tools.fairwayAirbrushStrength);
+    if(strength==null)strength=.18+(Number(readability.fairwaySeparation)||.18)*.45;
+    var width=finite(tools.fairwayAirbrushWidthMeters);
+    if(width==null)width=44;
+    return {
+      strength:clamp(strength,0,.75),
+      widthMeters:clamp(width,18,86),
+      hueOpacity:clamp(strength*.86,0,.56),
+      saturationOpacity:clamp(strength*.42,0,.32)
+    };
+  }
+  function fairwayAirbrushMarkup(source,dims,bounds,settings,meta){
+    var airbrush=fairwayAirbrushSettings(settings);
+    if(!airbrush||airbrush.strength<=0||!validBounds(bounds))return {defs:"",layer:"",metadata:{enabled:false,reason:"disabled-or-missing-bounds"}};
+    var objects=(Array.isArray(meta&&meta.airbrushObjects)?meta.airbrushObjects:Array.isArray(meta&&meta.objects)?meta.objects:[]).filter(function(object){
+      var type=String(object&&object.type||"");
+      if(!/fairway/i.test(type))return false;
+      if(meta&&meta.holeNumber&&object&&object.holeNumber&&Number(object.holeNumber)!==Number(meta.holeNumber))return false;
+      var b=objectBounds(object);
+      return !b||boundsIntersects(padBounds(b,airbrush.widthMeters*1.3),bounds);
+    });
+    if(!objects.length)return {defs:"",layer:"",metadata:{enabled:false,reason:"missing-fairway-geometry"}};
+    var project=assetPointProjector(bounds,dims.width,dims.height);
+    if(!project)return {defs:"",layer:"",metadata:{enabled:false,reason:"missing-projector"}};
+    var span=boundsSpanM(bounds);
+    var pxPerM=(span.width>0&&span.height>0)?((dims.width/span.width)+(dims.height/span.height))/2:(dims.width/240);
+    var strokeWidth=clamp(airbrush.widthMeters*pxPerM,10,Math.max(18,Math.min(dims.width,dims.height)*.18));
+    var shapes=[];
+    objects.forEach(function(object,index){
+      var pts=pointsFromGeometry(object&&object.geometry);
+      if(!pts.length&&object&&object.position)pts=points([object.position]);
+      if(!pts.length)return;
+      var projectedPts=pts.map(project).filter(Boolean);
+      if(!projectedPts.length)return;
+      var isPolygon=geometryIsPolygon(object&&object.geometry,pts);
+      if(isPolygon&&projectedPts.length>=3){
+        shapes.push('<path data-fairway-index="'+index+'" d="M '+projectedPts.map(function(p){return svgNum(p.x)+" "+svgNum(p.y);}).join(" L ")+' Z" fill="white"/>');
+      }else if(projectedPts.length>=2){
+        shapes.push('<polyline data-fairway-index="'+index+'" points="'+projectedPts.map(function(p){return svgNum(p.x)+","+svgNum(p.y);}).join(" ")+'" fill="none" stroke="white" stroke-width="'+svgNum(strokeWidth)+'" stroke-linecap="round" stroke-linejoin="round"/>');
+      }else{
+        shapes.push('<circle data-fairway-index="'+index+'" cx="'+svgNum(projectedPts[0].x)+'" cy="'+svgNum(projectedPts[0].y)+'" r="'+svgNum(strokeWidth*.55)+'" fill="white"/>');
+      }
+    });
+    if(!shapes.length)return {defs:"",layer:"",metadata:{enabled:false,reason:"empty-fairway-mask"}};
+    var defs='<mask id="cvFairwayAirbrushMask" maskUnits="userSpaceOnUse" x="0" y="0" width="'+svgNum(dims.width)+'" height="'+svgNum(dims.height)+'"><rect width="100%" height="100%" fill="black"/><g filter="url(#cvFairwayAirbrushSoften)">'+shapes.join("")+'</g></mask><filter id="cvFairwayAirbrushSoften" x="-12%" y="-12%" width="124%" height="124%"><feGaussianBlur stdDeviation="'+svgNum(Math.max(2,Math.min(10,strokeWidth*.05)))+'"/></filter>';
+    var layer='<g data-role="fairway-airbrush" data-mode="burn-rescue-preserve-luminance" mask="url(#cvFairwayAirbrushMask)" opacity="1"><rect width="100%" height="100%" fill="#2f9d55" opacity="'+svgNum(airbrush.hueOpacity)+'" style="mix-blend-mode:hue"/><rect width="100%" height="100%" fill="#45aa5f" opacity="'+svgNum(airbrush.saturationOpacity)+'" style="mix-blend-mode:saturation"/><rect width="100%" height="100%" fill="rgba(64,142,72,.18)" opacity="'+svgNum(airbrush.strength*.28)+'" style="mix-blend-mode:soft-light"/></g>';
+    return {defs:defs,layer:layer,metadata:{enabled:true,mode:"burn-rescue-preserve-luminance",maskObjects:objects.length,strength:+airbrush.strength.toFixed(3),widthMeters:+airbrush.widthMeters.toFixed(1),preserves:"relative-luminance-and-mow-lines"}};
+  }
   function mowingOpacity(value){
     value=String(value||"Unknown");
-    if(value==="Low")return .08;
-    if(value==="Clear")return .16;
-    if(value==="Prominent")return .28;
+    if(value==="Low")return .12;
+    if(value==="Clear")return .28;
+    if(value==="Prominent")return .48;
     return 0;
   }
   function nativeReadabilityOverlay(settings){
     var readability=settings&&settings.readability||{};
-    var local=clamp(Number(readability.localContrast)||.08,0,.25);
-    var top=clamp(.025+local*.22,.02,.09);
-    var bottom=clamp(.05+local*.28,.05,.13);
-    var opacity=clamp(.58+local*1.8,.58,.98);
+    var local=clamp(Number(readability.localContrast)||.08,0,.65);
+    var top=clamp(.025+local*.22,.02,.16);
+    var bottom=clamp(.05+local*.3,.05,.24);
+    var opacity=clamp(.58+local*1.3,.58,1);
     return {top:+top.toFixed(3),bottom:+bottom.toFixed(3),opacity:+opacity.toFixed(3)};
   }
   function nativeVisualAsset(asset,settings,meta){
@@ -1030,10 +1127,15 @@
     var role=text(meta.role,80)||"native-visuals";
     var stage=text(meta.stage,80)||"native-visuals";
     var version=meta.version!=null?String(meta.version):"";
+    var assetBounds=visualAssetBounds(asset,meta.bounds);
+    var airbrush=fairwayAirbrushMarkup(source,dims,assetBounds,settings,meta);
     var mowingPattern=mow?'<pattern id="cvMowingStripe" width="24" height="24" patternUnits="userSpaceOnUse" patternTransform="rotate(108)"><path d="M0 0 L0 24" stroke="rgba(255,255,255,.20)" stroke-width="1"/></pattern>':"";
     var mowingLayer=mow?'<rect width="100%" height="100%" fill="url(#cvMowingStripe)" opacity="'+mow+'"/>':"";
-    var svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+dims.width+'" height="'+dims.height+'" viewBox="0 0 '+dims.width+" "+dims.height+'" data-renderer="'+escapeXml(RENDERER_VERSION)+'" data-role="'+escapeXml(role)+'" data-stage="'+escapeXml(stage)+'"'+(version?' data-version="'+escapeXml(version)+'"':"")+'><defs><filter id="cvNative"><feColorMatrix type="saturate" values="'+f.saturation+'"/><feComponentTransfer><feFuncR type="linear" slope="'+f.contrast+'" intercept="'+((f.brightness-1)/2)+'"/><feFuncG type="linear" slope="'+f.contrast+'" intercept="'+((f.brightness-1)/2)+'"/><feFuncB type="linear" slope="'+f.contrast+'" intercept="'+((f.brightness-1)/2)+'"/></feComponentTransfer></filter><linearGradient id="cvNativeReadability" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="rgba(255,255,255,'+overlay.top+')"/><stop offset=".55" stop-color="rgba(255,255,255,0)"/><stop offset="1" stop-color="rgba(0,0,0,'+overlay.bottom+')"/></linearGradient>'+mowingPattern+'</defs><rect width="100%" height="100%" fill="#10130f"/><g filter="url(#cvNative)">'+source+'</g><rect width="100%" height="100%" fill="url(#cvNativeReadability)" opacity="'+overlay.opacity+'"/>'+mowingLayer+'</svg>';
-    return {dataUrl:dataUrl("image/svg+xml",svg),width:dims.width,height:dims.height,bounds:visualAssetBounds(asset,meta.bounds),sourceCaptureIds:asset&&asset.sourceCaptureIds||[],metadata:Object.assign({rendererVersion:RENDERER_VERSION,format:"image/svg+xml",role:role,stage:stage,inputRole:asset&&asset.metadata&&asset.metadata.role||"",inputStage:asset&&asset.metadata&&asset.metadata.stage||"",outputDimensions:dims},meta)};
+    var svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+dims.width+'" height="'+dims.height+'" viewBox="0 0 '+dims.width+" "+dims.height+'" data-renderer="'+escapeXml(RENDERER_VERSION)+'" data-role="'+escapeXml(role)+'" data-stage="'+escapeXml(stage)+'"'+(version?' data-version="'+escapeXml(version)+'"':"")+'><defs><filter id="cvNative"><feColorMatrix type="saturate" values="'+f.saturation+'"/><feComponentTransfer><feFuncR type="linear" slope="'+f.contrast+'" intercept="'+((f.brightness-1)/2)+'"/><feFuncG type="linear" slope="'+f.contrast+'" intercept="'+((f.brightness-1)/2)+'"/><feFuncB type="linear" slope="'+f.contrast+'" intercept="'+((f.brightness-1)/2)+'"/></feComponentTransfer></filter><linearGradient id="cvNativeReadability" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="rgba(255,255,255,'+overlay.top+')"/><stop offset=".55" stop-color="rgba(255,255,255,0)"/><stop offset="1" stop-color="rgba(0,0,0,'+overlay.bottom+')"/></linearGradient>'+mowingPattern+(airbrush.defs||"")+'</defs><rect width="100%" height="100%" fill="#10130f"/><g filter="url(#cvNative)">'+source+'</g>'+(airbrush.layer||"")+'<rect width="100%" height="100%" fill="url(#cvNativeReadability)" opacity="'+overlay.opacity+'"/>'+mowingLayer+'</svg>';
+    var metaOut=Object.assign({},meta);
+    delete metaOut.objects;
+    delete metaOut.airbrushObjects;
+    return {dataUrl:dataUrl("image/svg+xml",svg),width:dims.width,height:dims.height,bounds:assetBounds,sourceCaptureIds:asset&&asset.sourceCaptureIds||[],metadata:Object.assign({rendererVersion:RENDERER_VERSION,format:"image/svg+xml",role:role,stage:stage,inputRole:asset&&asset.metadata&&asset.metadata.role||"",inputStage:asset&&asset.metadata&&asset.metadata.stage||"",outputDimensions:dims,fairwayAirbrush:airbrush.metadata},metaOut)};
   }
   function terrainShadeAsset(asset,terrainCaptures,meta){
     meta=meta||{};
@@ -1172,16 +1274,24 @@
     var turf=settings&&settings.turf||{};
     var lighting=settings&&settings.lighting||{};
     var readability=settings&&settings.readability||{};
-    var saturation=1+(Number(turf.greenStrength)||0)*.22;
-    var brightness=1+((Number(lighting.brightnessTarget)||52)-52)/140;
-    var contrast=Number(lighting.contrastTarget)||1;
-    var sharp=Number(readability.sharpness)||0;
+    var green=finite(turf.greenStrength);
+    if(green==null)green=.35;
+    green=clamp(green,0,3.5);
+    var brightnessTarget=finite(lighting.brightnessTarget);
+    if(brightnessTarget==null)brightnessTarget=52;
+    brightnessTarget=clamp(brightnessTarget,5,115);
+    var contrast=finite(lighting.contrastTarget);
+    if(contrast==null)contrast=1;
+    contrast=clamp(contrast,.55,2.2);
+    var saturation=1+green*.38;
+    var brightness=clamp(1+(brightnessTarget-52)/90,.45,1.75);
+    var sharp=clamp(Number(readability.sharpness)||0,0,.8);
     return {saturation:+saturation.toFixed(3),brightness:+brightness.toFixed(3),contrast:+contrast.toFixed(3),sharpness:+sharp.toFixed(3)};
   }
   function previewSvg(record,settings,version){
     var base=record.rawMaster&&record.rawMaster.dataUrl?record.rawMaster:record.basicVisual&&record.basicVisual.dataUrl?Object.assign({},record.basicVisual,{width:record.rawMaster&&record.rawMaster.width,height:record.rawMaster&&record.rawMaster.height,bounds:record.rawMaster&&record.rawMaster.bounds}):null;
     if(!base)throw Object.assign(new Error("Raw master is not available"),{code:"raw-master-missing"});
-    return nativeVisualAsset(base,settings,{role:"overview-native-visuals",stage:"native-visuals",version:version,product:"course-overview"}).dataUrl;
+    return nativeVisualAsset(base,settings,{role:"overview-native-visuals",stage:"native-visuals",version:version,product:"course-overview",airbrushObjects:Array.isArray(record.objects)?record.objects:[]}).dataUrl;
   }
   function saveCourseVisualSettings(courseId,overrides){
     var record=getRecord(courseId);
@@ -1206,14 +1316,15 @@
         var overrideHash=hashString(courseOverrides);
         var overviewBase=record.rawMaster&&record.rawMaster.dataUrl?record.rawMaster:record.basicVisual&&record.basicVisual.dataUrl?Object.assign({},record.basicVisual,{width:record.rawMaster&&record.rawMaster.width,height:record.rawMaster&&record.rawMaster.height,bounds:record.rawMaster&&record.rawMaster.bounds}):null;
         if(!overviewBase)throw Object.assign(new Error("Raw master is not available"),{code:"raw-master-missing"});
-        var overviewNative=nativeVisualAsset(overviewBase,settings,{role:"overview-native-visuals",stage:"native-visuals",version:version,product:"course-overview",presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash});
+        var airbrushObjects=Array.isArray(record.objects)?record.objects:[];
+        var overviewNative=nativeVisualAsset(overviewBase,settings,{role:"overview-native-visuals",stage:"native-visuals",version:version,product:"course-overview",presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash,airbrushObjects:airbrushObjects});
         record.previewVisual={path:"course-visuals/"+record.courseId+"/preview/"+version+".svg",dataUrl:overviewNative.dataUrl,version:version,width:overviewNative.width,height:overviewNative.height,bounds:overviewNative.bounds,presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash,metadata:overviewNative.metadata};
         var overviewTerrain=terrainShadeAsset(record.previewVisual,split.terrain,{role:"terrain-view",stage:"terrain-shading",version:version,product:"course-overview",bounds:record.previewVisual.bounds,presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash});
         if(overviewTerrain){
           record.terrainView={path:"course-visuals/"+record.courseId+"/terrain/"+version+".svg",dataUrl:overviewTerrain.dataUrl,version:version,width:overviewTerrain.width,height:overviewTerrain.height,bounds:overviewTerrain.bounds,sourceCaptureIds:overviewTerrain.sourceCaptureIds,presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash,metadata:overviewTerrain.metadata};
         }
         if(record.exampleHoleVisual&&record.exampleHoleVisual.dataUrl){
-          var holeNative=nativeVisualAsset(record.exampleHoleVisual,settings,{role:"single-hole-native-visuals",stage:"native-visuals",version:version,product:"single-hole",presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash});
+          var holeNative=nativeVisualAsset(record.exampleHoleVisual,settings,{role:"single-hole-native-visuals",stage:"native-visuals",version:version,product:"single-hole",holeNumber:record.exampleHoleVisual.holeNumber,presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash,airbrushObjects:airbrushObjects});
           record.singleHolePreviewVisual={path:"course-visuals/"+record.courseId+"/single-hole/preview/"+version+".svg",dataUrl:holeNative.dataUrl,version:version,width:holeNative.width,height:holeNative.height,bounds:holeNative.bounds,captureId:record.exampleHoleVisual.captureId,holeNumber:record.exampleHoleVisual.holeNumber,presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash,metadata:holeNative.metadata};
           var holeTerrain=terrainShadeAsset(record.singleHolePreviewVisual,split.terrain,{role:"single-hole-terrain",stage:"terrain-shading",version:version,product:"single-hole",bounds:record.singleHolePreviewVisual.bounds,presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash});
           if(holeTerrain){
@@ -1410,24 +1521,166 @@
       return row?restoreCloudMetadata(row):getRecord(courseId);
     }).catch(function(){return getRecord(courseId);});
   }
+  function captureCandidateList(output){
+    if(!output)return [];
+    if(Array.isArray(output))return output.map(function(item,index){return {manifest:item,raw:item,index:index};});
+    var keys=["candidates","snapshotCandidates","captureCandidates","snapshots","olderSnapshots","alternateSnapshots","alternates","manifests"];
+    for(var i=0;i<keys.length;i++){
+      var list=output&&output[keys[i]];
+      if(Array.isArray(list)&&list.length){
+        return list.map(function(item,index){
+          var manifest=item&&typeof item==="object"&&(item.manifest||item.captureManifest||item.tileManifest||item.snapshotManifest)||item;
+          return {manifest:manifest,raw:item,index:index,source:keys[i]};
+        });
+      }
+    }
+    return [{manifest:output,raw:output,index:0,source:"single"}];
+  }
+  function pathValue(source,path){
+    var parts=String(path||"").split(".");
+    var value=source;
+    for(var i=0;i<parts.length;i++){
+      if(!value||typeof value!=="object")return undefined;
+      value=value[parts[i]];
+    }
+    return value;
+  }
+  function normalizedMetric(value){
+    var n=finite(value);
+    if(n==null)return null;
+    if(n>10)n=n/100;
+    else if(n>1)n=n/10;
+    return clamp(n,0,1);
+  }
+  function snapshotMetric(sources,names){
+    var nested=["","analysis","visualAnalysis","snapshotAnalysis","quality","qualityMetrics","metrics","scores","metadata"];
+    for(var s=0;s<sources.length;s++){
+      var source=sources[s];
+      if(!source||typeof source!=="object")continue;
+      for(var n=0;n<nested.length;n++){
+        var base=nested[n]?pathValue(source,nested[n]):source;
+        if(!base||typeof base!=="object")continue;
+        for(var i=0;i<names.length;i++){
+          var value=pathValue(base,names[i]);
+          var metric=normalizedMetric(value);
+          if(metric!=null)return metric;
+        }
+      }
+    }
+    return null;
+  }
+  function scoreSnapshotCandidate(entry,total){
+    var manifest=entry&&entry.manifest||{};
+    var raw=entry&&entry.raw||{};
+    var sources=[raw,manifest];
+    var green=snapshotMetric(sources,["greenLushnessScore","greenLushness","lushnessScore","lushness","greenScore","greenCoverage","greenVisibility","turfLushness","grassHealthScore","vegetationScore"]);
+    var fairway=snapshotMetric(sources,["fairwayLineScore","fairwayLinesScore","fairwayLines","fairwayLineVisibility","lineVisibility","mowingLineScore","mowingLines","fairwayDefinition","fairwayContrast","corridorLineScore"]);
+    var hasGreen=green!=null;
+    var hasFairway=fairway!=null;
+    var score=0;
+    var balance=0;
+    if(hasGreen&&hasFairway){
+      var avg=(green+fairway)/2;
+      var floor=Math.min(green,fairway);
+      balance=1-Math.abs(green-fairway);
+      score=floor*.55+avg*.32+balance*.13;
+    }else if(hasFairway){
+      score=fairway*.78+.05;
+      balance=fairway*.5;
+    }else if(hasGreen){
+      score=green*.62;
+      balance=green*.45;
+    }
+    var candidateId=text(raw&&raw.candidateId||raw&&raw.snapshotCandidateId||manifest&&manifest.candidateId||manifest&&manifest.snapshotCandidateId||manifest&&manifest.snapshotId||manifest&&manifest.snapshotKey||manifest&&manifest.key,180);
+    return {
+      candidateId:candidateId,
+      candidateIndex:Number(entry&&entry.index||0)+1,
+      candidateCount:Math.max(1,Number(total)||1),
+      greenLushnessScore:green,
+      fairwayLineScore:fairway,
+      snapshotBalanceScore:hasGreen&&hasFairway?balance:null,
+      snapshotSelectionScore:score,
+      snapshotSelectionReason:hasGreen&&hasFairway?"balanced-lushness-and-fairway-lines":hasFairway?"fairway-line-only-score":hasGreen?"lushness-only-score":"no-snapshot-quality-metrics"
+    };
+  }
+  function compareSnapshotOptions(a,b){
+    var scoreDelta=Number(b.score.snapshotSelectionScore||0)-Number(a.score.snapshotSelectionScore||0);
+    if(Math.abs(scoreDelta)>.025)return scoreDelta;
+    var af=a.score.fairwayLineScore==null?-1:Number(a.score.fairwayLineScore);
+    var bf=b.score.fairwayLineScore==null?-1:Number(b.score.fairwayLineScore);
+    var fairwayDelta=bf-af;
+    if(Math.abs(fairwayDelta)>.001)return fairwayDelta;
+    var ag=a.score.greenLushnessScore==null?-1:Number(a.score.greenLushnessScore);
+    var bg=b.score.greenLushnessScore==null?-1:Number(b.score.greenLushnessScore);
+    var greenDelta=bg-ag;
+    if(Math.abs(greenDelta)>.001)return greenDelta;
+    return Number(a.score.candidateIndex||0)-Number(b.score.candidateIndex||0);
+  }
+  function selectCaptureCandidate(output,item){
+    var entries=captureCandidateList(output);
+    var options=[];
+    entries.forEach(function(entry){
+      var score=scoreSnapshotCandidate(entry,entries.length);
+      var capture=manifestToCapture(entry.manifest,Object.assign({},item||{},score));
+      if(capture&&capture.width&&capture.height&&captureBounds(capture)&&(Array.isArray(capture.tiles)&&capture.tiles.length||capture.imageUrl||capture.imageData)){
+        options.push({capture:capture,score:score});
+      }
+    });
+    if(!options.length)return null;
+    options.sort(compareSnapshotOptions);
+    var selected=options[0];
+    var diagnostic=null;
+    if(options.length>1||selected.score.greenLushnessScore!=null||selected.score.fairwayLineScore!=null){
+      diagnostic={
+        planId:item&&item.id||item&&item.planId||"",
+        role:item&&item.role||"",
+        holeNumber:item&&item.holeNumber||null,
+        selectedCaptureId:selected.capture&&selected.capture.id||"",
+        selectedCandidateId:selected.score.candidateId||"",
+        selectedCandidateIndex:selected.score.candidateIndex,
+        candidateCount:selected.score.candidateCount,
+        greenLushnessScore:selected.score.greenLushnessScore,
+        fairwayLineScore:selected.score.fairwayLineScore,
+        balanceScore:selected.score.snapshotBalanceScore,
+        selectionScore:selected.score.snapshotSelectionScore,
+        selectionReason:selected.score.snapshotSelectionReason,
+        tieBreak:"fairway-lines",
+        candidates:options.slice(0,5).map(function(option){
+          return {
+            captureId:option.capture&&option.capture.id||"",
+            candidateId:option.score.candidateId||"",
+            candidateIndex:option.score.candidateIndex,
+            greenLushnessScore:option.score.greenLushnessScore,
+            fairwayLineScore:option.score.fairwayLineScore,
+            balanceScore:option.score.snapshotBalanceScore,
+            selectionScore:option.score.snapshotSelectionScore
+          };
+        })
+      };
+    }
+    return {capture:selected.capture,diagnostic:diagnostic};
+  }
   function executeVisualCapturePlan(input,plan){
     var executor=root&&root.gdBuildCourseVisualCaptureManifest;
     var errors=[];
     if(typeof executor!=="function"||!Array.isArray(plan)||!plan.length){
-      return {executed:false,captures:input.captures||[],errors:errors,fallbackReason:typeof executor==="function"?"empty-plan":"capture-executor-missing"};
+      return {executed:false,captures:input.captures||[],errors:errors,snapshotSelection:[],fallbackReason:typeof executor==="function"?"empty-plan":"capture-executor-missing"};
     }
     var captures=[];
+    var snapshotSelection=[];
     plan.forEach(function(item){
       try{
         var manifest=executor(item);
-        var capture=manifestToCapture(manifest,item);
+        var selected=selectCaptureCandidate(manifest,item);
+        var capture=selected&&selected.capture;
         if(capture&&capture.width&&capture.height&&captureBounds(capture)&&(Array.isArray(capture.tiles)&&capture.tiles.length||capture.imageUrl||capture.imageData))captures.push(capture);
         else errors.push({planId:item&&item.id,role:item&&item.role,holeNumber:item&&item.holeNumber,code:"capture-empty"});
+        if(selected&&selected.diagnostic)snapshotSelection.push(selected.diagnostic);
       }catch(error){
         errors.push({planId:item&&item.id,role:item&&item.role,holeNumber:item&&item.holeNumber,code:"capture-failed",message:error&&error.message||String(error)});
       }
     });
-    return {executed:true,captures:captures.length?captures:(input.captures||[]),errors:errors,fallbackReason:captures.length?"":"planned-captures-empty"};
+    return {executed:true,captures:captures.length?captures:(input.captures||[]),errors:errors,snapshotSelection:snapshotSelection,fallbackReason:captures.length?"":"planned-captures-empty"};
   }
   function buildFromCourseDatabase(courseId,opts){
     opts=opts||{};
@@ -1442,7 +1695,7 @@
     var planned=executeVisualCapturePlan(input,plan);
     input=Object.assign({},input,{captures:planned.captures,capturePlan:plan});
     var record=ingestCourseVisualInput(input);
-    record.diagnostics=Object.assign({},record.diagnostics||{},{stageSettings:{enable3dBeta:enable3dBeta},capturePlan:input.capturePlan,capturePlanSummary:planSummary(plan,planned.captures),captureExecution:{attempted:planned.executed,captured:planned.captures.length,errors:planned.errors,fallbackReason:planned.fallbackReason||""}});
+    record.diagnostics=Object.assign({},record.diagnostics||{},{stageSettings:{enable3dBeta:enable3dBeta},capturePlan:input.capturePlan,capturePlanSummary:planSummary(plan,planned.captures),captureExecution:{attempted:planned.executed,captured:planned.captures.length,errors:planned.errors,snapshotSelection:planned.snapshotSelection||[],fallbackReason:planned.fallbackReason||""}});
     putRecord(record);
     return buildCourseVisualMaster(input.courseId,{captures:input.captures,capturePlan:plan});
   }
