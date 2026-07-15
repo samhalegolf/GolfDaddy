@@ -89,6 +89,7 @@ function visualManifest(id, request, xOffset) {
     visualQuality: request.quality,
     visualPlanId: request.planId || request.id,
     stitchLayer: request.stitchLayer,
+    anchorPins: request.anchorPins || base.anchorPins,
     debugUnderlay: !!request.debugUnderlay,
     debugTerrain: !!request.debugTerrain,
     terrainStageOnly: !!request.terrainStageOnly,
@@ -195,7 +196,7 @@ function payload() {
   assert.equal(built.status, "basic-ready", "valid captures produce a basic visual record");
   assert.ok(built.rawMaster.path.includes("/raw/"));
   assert.ok(built.basicVisual.dataUrl.startsWith("data:image/svg+xml"));
-  assert.equal(built.rawMaster.metadata.rendererVersion, "clarity-course-visual-renderer-v9");
+  assert.equal(built.rawMaster.metadata.rendererVersion, "clarity-course-visual-renderer-v10");
   assert.equal(built.rawMaster.metadata.layout, "geographic-mercator");
   assert.equal(built.rawMaster.metadata.stitchModel, "geo-rectangle-table-over-live-map", "stitch metadata describes overlapping rectangles over a live map base");
   assert.ok(decodeURIComponent(built.rawMaster.dataUrl).includes("data-stitch-width"), "raw stitch keeps coverage geometry as metadata attributes");
@@ -206,7 +207,8 @@ function payload() {
   assert.equal(built.holeFrameVisuals[0].metadata.framingModel, "gps-play-overcaptured-mercator-surface", "hole surfaces keep GPS Play surface metadata");
   assert.equal(built.holeFrameVisuals[0].metadata.playSurface.projection, "mercator-svg", "hole surfaces stay Mercator-aligned for Play projection");
   assert.equal(built.holeFrameVisuals[0].metadata.playSurface.useGpsPlayFraming, true, "hole surfaces tell Play to frame on the per-hole surface");
-  assert.equal(built.holeFrameVisuals[0].metadata.playSurface.fallbackUnderlay, "published-stitch", "hole surfaces name the stitched underlay fallback");
+  assert.equal(built.holeFrameVisuals[0].metadata.playSurface.fallbackUnderlay, "live-gps", "hole surfaces fall back only to live GPS");
+  assert.equal(built.holeFrameVisuals[0].metadata.playSurface.fallbackPolicy, "live-gps-only", "hole surfaces do not point Play at a stitched fallback");
   assert.ok(built.terrainView && built.terrainView.dataUrl.startsWith("data:image/svg+xml"), "course overview enters a terrain shading stage after the base stitch");
   assert.equal(built.rawMaster.dataUrl, built.basicVisual.dataUrl, "raw master feeds basic delivery without recompression");
   const persistedAfterBuild = JSON.parse(localStorage.getItem(engine.storeKey));
@@ -246,6 +248,8 @@ function payload() {
   assert.equal(preview.singleHolePreviewVisual.metadata.stage, "native-visuals", "single-hole native visual records the native stage");
   const singleHoleNativeSvg = svgText(preview.singleHolePreviewVisual.dataUrl);
   assert.ok(singleHoleNativeSvg.includes("cvPlayViewportDim"), "single-hole native visuals show the GPS Play viewport over the playable surface");
+  assert.ok(singleHoleNativeSvg.includes('data-role="play-route-axis"'), "single-hole preview proves the route/fairway axis from real anchors");
+  assert.ok(singleHoleNativeSvg.includes('data-role="play-green-bound"'), "single-hole preview proves the green bound from real anchors");
   assert.ok(!singleHoleNativeSvg.includes("green-surround-airbrush"), "single-hole native visuals do not touch up greens");
   assert.ok(!singleHoleNativeSvg.includes("cvGreenSurroundAirbrushClip"), "green touch-up masks are removed completely");
   assert.equal(preview.singleHolePreviewVisual.metadata.fairwayAirbrush.preserves, "relative-luminance-and-mow-lines", "fairway airbrush preserves mowing-line texture");
@@ -253,6 +257,7 @@ function payload() {
   assert.equal(preview.singleHolePreviewVisual.metadata.greenSurroundAirbrush.reason, "removed-green-touch-up", "green touch-up removal is explicit");
   assert.equal(preview.singleHolePreviewVisual.metadata.overflowVisible, true, "single-hole preview exposes the captured overflow outside the phone frame");
   assert.equal(preview.singleHolePreviewVisual.metadata.playSurface.useGpsPlayFraming, true, "single-hole preview is derived from the GPS Play surface");
+  assert.equal(preview.singleHolePreviewVisual.metadata.objectProofOverlay.enabled, true, "single-hole preview carries object proof metadata");
   assert.ok(preview.singleHoleTerrainView.path.includes("/single-hole/terrain/"), "single-hole visual enters terrain shading");
   assert.equal(preview.singleHoleTerrainView.metadata.inputRole, "hole-frame-terrain", "single-hole terrain view consumes the per-hole terrain play surface");
   assert.equal(preview.singleHoleTerrainView.metadata.inputStage, "terrain-shading", "single-hole terrain view wraps the terrain-shaded hole output");
@@ -270,7 +275,8 @@ function payload() {
   assert.ok(published.singleHolePublishedVisual && published.singleHolePublishedVisual.dataUrl === published.singleHoleTerrainView.dataUrl, "publish includes the terrain-shaded single-hole product");
   assert.ok(published.holeFramePublishedVisuals.length >= 1, "publish includes per-hole GPS Play surfaces");
   assert.equal(published.holeFramePublishedVisuals[0].metadata.role, "hole-frame-published", "published hole frames have the Play-facing role");
-  assert.equal(published.holeFramePublishedVisuals[0].metadata.playSurface.stitchUnderlayPath, published.publishedVisual.path, "published hole frames point at the stitched course underlay");
+  assert.equal(published.holeFramePublishedVisuals[0].metadata.playSurface.fallbackUnderlay, "live-gps", "published hole frames keep live GPS as the only fallback");
+  assert.equal(published.holeFramePublishedVisuals[0].metadata.playSurface.fallbackPolicy, "live-gps-only", "published hole frames do not use a stitched fallback underlay");
   assert.ok(published.versions.filter((item) => item.type === "published").length >= 1, "published versions remain in history");
 
   const originalFetch = global.fetch;
@@ -333,7 +339,7 @@ function payload() {
   });
   engine.ingestCourseVisualInput(multiInput);
   const multiBuilt = await engine.buildCourseVisualMaster("multi-capture");
-  assert.equal(multiBuilt.rawMaster.metadata.rendererVersion, "clarity-course-visual-renderer-v9");
+  assert.equal(multiBuilt.rawMaster.metadata.rendererVersion, "clarity-course-visual-renderer-v10");
   assert.ok(multiBuilt.rawMaster.height < 12000, "multi-capture stitch is geographically laid out instead of vertically appended");
   assert.ok(multiBuilt.rawMaster.height / multiBuilt.rawMaster.width < 8, "multi-capture output keeps a usable preview aspect");
 
@@ -373,8 +379,11 @@ function payload() {
   assert.ok(requestedRoles.includes("three-d-hole-beta"), "Build Basic asks browser capture for 3D beta when toggled");
   assert.ok(visualRequests.filter((request) => request.role === "green-surround").every((request) => request.captureLens === "green-square" && request.lensAspectRatio === 1), "green capture requests carry the green-square lens into the browser capture step");
   assert.ok(visualRequests.filter((request) => request.role === "play-corridor" || request.role === "three-d-hole-beta").every((request) => request.captureLens === "mobile-hole" && request.lensAspectRatio === 9 / 16), "corridor and 3D capture requests carry the mobile-hole lens into the browser capture step");
+  assert.ok(visualRequests.filter((request) => request.holeNumber).every((request) => request.anchorPins && request.anchorPins.green && Array.isArray(request.anchorPins.route) && request.anchorPins.route.length >= 2), "planned hole captures carry the real green and route anchors into the browser snapshot step");
   assert.equal(plannedBuilt.exampleHoleVisual.metadata.windowShape, "mobile-hole-with-overflow", "single-hole product uses the mobile golf-hole window with visible overflow");
   assert.equal(plannedBuilt.exampleHoleVisual.metadata.framingModel, "gps-play-viewport-over-hole-surface", "single-hole product previews the GPS Play viewport over the play surface");
+  assert.equal(plannedBuilt.exampleHoleVisual.metadata.orientationSource, "tee-green-anchor", "single-hole preview rotates from real tee-to-green anchors");
+  assert.equal(plannedBuilt.exampleHoleVisual.metadata.objectProofOverlay.enabled, true, "single-hole preview proves object overlay from the snapshot anchors");
   assert.ok(Math.abs(plannedBuilt.exampleHoleVisual.width / plannedBuilt.exampleHoleVisual.height - 9 / 16) < 0.02, "single-hole window is portrait instead of square");
   assert.ok(plannedBuilt.exampleHoleVisual.metadata.sourceCaptureCount > 1, "single-hole window stitches hole captures instead of picking one square");
   assert.ok(plannedBuilt.holeFrameVisuals.length >= 1, "planned build creates per-hole play surfaces");

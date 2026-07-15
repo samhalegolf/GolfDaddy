@@ -476,7 +476,9 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
       reason:"published-course-visual",
       surfaceModel:"clarity-course-visual-hole-surface-v1",
       interactionOwner:"course-visual",
-      liveMapRole:"published-stitch-underlay",
+      liveMapRole:"live-gps-fallback",
+      fallbackUnderlay:"live-gps",
+      fallbackPolicy:"live-gps-only",
       courseKey:surfaceCourseKey(),
       courseName:surfaceCourseName(),
       visualCourseId:record&&record.courseId||"",
@@ -504,13 +506,27 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
     safe(function(){if(capturedGpsPlayActive())gdCoursePlayDebugEvent("gps-play-loaded-course-visual-surface",{manifestKey:manifest.key,path:manifest.courseVisualPath,captureZoom:manifest.captureZoom,imageWidth:manifest.imageWidth,imageHeight:manifest.imageHeight});});
     return publishCaptureManifest(manifest);
   }
-	  function captureAnchorPins(){
+	  function captureAnchorPins(captureOpts){
+	    captureOpts=captureOpts||{};
+	    var planned=captureOpts.anchorPins||captureOpts.pins||{};
+	    function pack(p){p=asLL(p);return validLL(p)?{lat:+p.lat,lng:+p.lng}:null;}
+	    var plannedRoute=Array.isArray(planned.route)?planned.route.map(pack).filter(Boolean):[];
+	    var plannedShape=Array.isArray(planned.greenShape||planned.shape)?(planned.greenShape||planned.shape).map(pack).filter(Boolean):[];
+	    var plannedTee=pack(planned.tee||planned.start);
+	    var plannedGreen=pack(planned.green||planned.target||planned.pin);
+	    if(plannedTee||plannedGreen||plannedRoute.length||plannedShape.length){
+	      return {
+	        tee:plannedTee||plannedRoute[0]||null,
+	        green:plannedGreen||plannedRoute[plannedRoute.length-1]||null,
+	        route:plannedRoute,
+	        greenShape:plannedShape
+	      };
+	    }
 	    var data=safe(function(){return (mappedPayload()||{}).data||{};},{})||{};
 	    var route=mappedRoute(data).filter(validLL);
 	    var shape=mappedShape(data).filter(validLL);
 	    var tee=safe(function(){return typeof gdActiveMappedTeeStartPoint==="function"?gdActiveMappedTeeStartPoint():null;},null);
 	    var green=currentGreenPoint();
-	    function pack(p){p=asLL(p);return validLL(p)?{lat:+p.lat,lng:+p.lng}:null;}
 	    return {
 	      tee:pack(tee)||pack(route[0]),
 	      green:pack(green)||pack(route[route.length-1]),
@@ -520,10 +536,20 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	  }
 	  function captureSurfacePoints(objectBounds,reason,captureOpts){
 	    var points=validBounds(objectBounds)?boundsCorners(objectBounds):[];
+	    var plannedPins=captureAnchorPins(captureOpts);
+	    var hasPlannedPins=!!(captureOpts&&captureOpts.anchorPins&&(plannedPins.tee||plannedPins.green||plannedPins.route.length||plannedPins.greenShape.length));
+	    var includeWholeHole=!(captureOpts&&captureOpts.lockBounds===true)&&!/lock|zoom/i.test(String(reason||""));
+	    if(hasPlannedPins){
+	      if(includeWholeHole){
+	        points=points.concat(plannedPins.route||[],plannedPins.greenShape||[]);
+	        if(validLL(plannedPins.tee))points.push(plannedPins.tee);
+	        if(validLL(plannedPins.green))points.push(plannedPins.green);
+	      }
+	      return points.map(asLL).filter(validLL);
+	    }
 	    var data=safe(function(){return (mappedPayload()||{}).data||{};},{})||{};
 	    var route=mappedRoute(data);
 	    var shape=mappedShape(data);
-	    var includeWholeHole=!(captureOpts&&captureOpts.lockBounds===true)&&!/lock|zoom/i.test(String(reason||""));
 	    if(includeWholeHole&&route.length)points=points.concat(route);
 	    if(includeWholeHole&&shape.length)points=points.concat(shape);
 	    var tee=safe(function(){return typeof gdActiveMappedTeeStartPoint==="function"?gdActiveMappedTeeStartPoint():null;},null);
@@ -604,7 +630,7 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	    var z=Math.max(minZoom,Math.min(maxZoom,Math.floor(num(captureOpts.targetZoom,preferred))));
 	    var maxTiles=Math.max(16,Math.round(num(captureOpts.maxTiles,320)));
 	    var points=captureSurfacePoints(objectBounds,reason,captureOpts);
-		    var pins=captureAnchorPins();
+		    var pins=captureAnchorPins(captureOpts);
 		    var bleed=Math.max(0,Math.round(num(captureOpts.bleedPx,/lock|zoom/i.test(String(reason))?2100:2800)));
 	    var rect=applyCaptureLensRect(pixelRectFor(points,z,bleed),captureOpts);
 	    if(!rect)return null;
@@ -624,7 +650,7 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
         }
       }
     }
-			    var manifest={version:VERSION,key:storageKey(),reason:reason,surfaceModel:"captured-surface-v1",interactionOwner:"captured-surface",liveMapRole:"capture-source-diagnostic-reference",courseKey:surfaceCourseKey(),courseName:surfaceCourseName(),holeNumber:surfaceHoleNumber(),captureZoom:z,imageWidth:width,imageHeight:height,originPx:origin,tiles:tiles,includeTee:!!pins.tee,teeLatLng:pins.tee||null,anchorPins:pins,createdAt:new Date().toISOString()};
+			    var manifest={version:VERSION,key:storageKey(),reason:reason,surfaceModel:"captured-surface-v1",interactionOwner:"captured-surface",liveMapRole:"capture-source-diagnostic-reference",courseKey:captureOpts.courseId||captureOpts.courseKey||surfaceCourseKey(),courseName:captureOpts.courseName||surfaceCourseName(),holeNumber:captureOpts.holeNumber||surfaceHoleNumber(),captureZoom:z,imageWidth:width,imageHeight:height,originPx:origin,tiles:tiles,includeTee:!!pins.tee,teeLatLng:pins.tee||null,anchorPins:pins,createdAt:new Date().toISOString()};
 			    if(captureOpts.role||captureOpts.quality||captureOpts.planId){
 			      manifest.visualRole=String(captureOpts.role||"");
 			      manifest.visualQuality=String(captureOpts.quality||"");
@@ -37876,7 +37902,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 <script src="scripts/gd-launch-monitor-data.js?v=practice-data-20260712c"></script>
 <script src="scripts/gd-shot-library-sync.js?v=shot-library-supabase-001"></script>
 <script src="scripts/gd-captured-surface-sync.js?v=captured-surface-supabase-002"></script>
-<script src="scripts/gd-course-visual-engine.js?v=course-visual-engine-011"></script>
+<script src="scripts/gd-course-visual-engine.js?v=course-visual-engine-012"></script>
 <script src="scripts/gd-multi-nine-courses.js?v=multi-nine-courses-001"></script>
 <script src="scripts/gd-native-practice-data.js?v=native-practice-data-001"></script>
 <script id="gdCanonicalRouteAuditV1">
