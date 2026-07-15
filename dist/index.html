@@ -6938,7 +6938,7 @@ function gdAdminCourseVisualInlineSvg(src,label){
     if(root&&String(root.nodeName||"").toLowerCase()==="svg"){
       const images=Array.from(root.querySelectorAll("image"));
       const sourceImageCount=images.length;
-      const productPreview=/course overview|single hole/i.test(String(label||""));
+      const productPreview=/course overview|single hole|3d view beta/i.test(String(label||""));
       if(sourceImageCount>700&&!productPreview){
         images.forEach(img=>{
           const role=img.closest("[data-role]")?.getAttribute("data-role")||"";
