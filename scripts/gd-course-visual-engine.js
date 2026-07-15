@@ -2004,6 +2004,13 @@
     }
     return {capture:selected.capture,diagnostic:diagnostic};
   }
+  function visualCaptureRole(capture){
+    var role=String(capture&&capture.role||capture&&capture.visualRole||"");
+    return role==="course-backdrop"||role==="terrain-reference"||role==="green-surround"||role==="play-corridor"||role==="three-d-hole-beta";
+  }
+  function hasVisualCaptureSet(captures){
+    return (Array.isArray(captures)?captures:[]).some(visualCaptureRole);
+  }
   function executeVisualCapturePlan(input,plan){
     var executor=root&&root.gdBuildCourseVisualCaptureManifest;
     var errors=[];
@@ -2037,6 +2044,14 @@
     var enable3dBeta=opts.enable3dBeta===true||saved3d;
     var plan=planCourseVisualCaptures(input,{enable3dBeta:enable3dBeta});
     var planned=executeVisualCapturePlan(input,plan);
+    var previousCaptures=capturesFromRecordRefs(previous).filter(renderableCapture);
+    var previousVisualCaptures=previousCaptures.filter(visualCaptureRole);
+    if(previousVisualCaptures.length&&!hasVisualCaptureSet(planned.captures)){
+      planned=Object.assign({},planned,{
+        captures:previousVisualCaptures,
+        fallbackReason:(planned.fallbackReason?planned.fallbackReason+";":"")+"previous-visual-capture-refs"
+      });
+    }
     input=Object.assign({},input,{captures:planned.captures,capturePlan:plan});
     var record=ingestCourseVisualInput(input);
     record.diagnostics=Object.assign({},record.diagnostics||{},{stageSettings:{enable3dBeta:enable3dBeta},capturePlan:input.capturePlan,capturePlanSummary:planSummary(plan,planned.captures),captureExecution:{attempted:planned.executed,captured:planned.captures.length,errors:planned.errors,snapshotSelection:planned.snapshotSelection||[],fallbackReason:planned.fallbackReason||""}});

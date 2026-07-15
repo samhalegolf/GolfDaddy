@@ -420,6 +420,34 @@ function payload() {
   global.GDCoursePlayPipeline = originalPipeline;
   global.gdBuildCourseVisualCaptureManifest = originalExecutor;
 
+  const fallbackCoursePayload = Object.assign({}, payload(), { courseId: "fallback-existing-visuals", courseKey: "fallback-existing-visuals" });
+  const fallbackRequests = [
+    { courseId: "fallback-existing-visuals", courseName: "Fallback Existing Visuals", role: "course-backdrop", quality: "live-map-base", stitchLayer: 0, holeNumber: 1 },
+    { courseId: "fallback-existing-visuals", courseName: "Fallback Existing Visuals", role: "green-surround", quality: "super-hd", stitchLayer: 30, holeNumber: 1, captureLens: "green-square", lensAspectRatio: 1 },
+    { courseId: "fallback-existing-visuals", courseName: "Fallback Existing Visuals", role: "play-corridor", quality: "hd", stitchLayer: 20, holeNumber: 1, captureLens: "mobile-hole", lensAspectRatio: 9 / 16 }
+  ];
+  const fallbackManifests = fallbackRequests.map((request, index) => visualManifest("fallback-existing-visuals-" + request.role, request, index * 30));
+  fallbackManifests.forEach((item) => localStorage.setItem(item.key, JSON.stringify(item)));
+  engine.ingestCourseVisualInput(engine.adaptCoursePlayPayloadToVisualInput(fallbackCoursePayload, { captures: fallbackManifests }));
+  global.GDCoursePlayPipeline = {
+    buildCoursePlayDbPayload() {
+      return fallbackCoursePayload;
+    },
+    getCoursePlayFrameIndex() {
+      return [];
+    }
+  };
+  global.gdBuildCourseVisualCaptureManifest = function emptyVisualCaptureExecutor() {
+    return null;
+  };
+  const fallbackBuilt = await engine.buildFromCourseDatabase("fallback-existing-visuals");
+  assert.equal(fallbackBuilt.status, "basic-ready", "database rebuild reuses existing visual capture refs when fresh capture execution is empty");
+  assert.ok(fallbackBuilt.holeFrameVisuals.length >= 1, "fallback rebuild still creates per-hole play surfaces");
+  assert.ok(fallbackBuilt.diagnostics.captureExecution.fallbackReason.includes("previous-visual-capture-refs"), "fallback source is explicit in diagnostics");
+  assert.equal(fallbackBuilt.lastError, null, "fallback rebuild avoids the missing-renderable-captures failure");
+  global.GDCoursePlayPipeline = originalPipeline;
+  global.gdBuildCourseVisualCaptureManifest = originalExecutor;
+
   const globalPreset = engine.getPreset("clarity-course-natural-v1");
   const presetStore = engine.loadPresets();
   const presetList = engine.courseVisualPresetList();
