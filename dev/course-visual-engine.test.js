@@ -213,7 +213,7 @@ function payload() {
   assert.equal(built.status, "basic-ready", "valid captures produce a basic visual record");
   assert.ok(built.rawMaster.path.includes("/raw/"));
   assert.ok(built.basicVisual.dataUrl.startsWith("data:image/svg+xml"));
-  assert.equal(built.rawMaster.metadata.rendererVersion, "clarity-course-visual-renderer-v21");
+  assert.equal(built.rawMaster.metadata.rendererVersion, "clarity-course-visual-renderer-v22");
   assert.equal(built.rawMaster.metadata.layout, "geographic-mercator");
   assert.equal(built.rawMaster.metadata.stitchModel, "geo-rectangle-table-over-live-map", "stitch metadata describes overlapping rectangles over a live map base");
   assert.ok(decodeURIComponent(built.rawMaster.dataUrl).includes("data-stitch-width"), "raw stitch keeps coverage geometry as metadata attributes");
@@ -221,8 +221,8 @@ function payload() {
   assert.ok(built.rawMaster.height / built.rawMaster.width < 8, "full-course stitch does not collapse into a giant vertical strip");
   assert.ok(built.exampleHoleVisual.dataUrl.startsWith("data:image/svg+xml"), "example hole preview is built from the same captures");
   assert.ok(Array.isArray(built.holeFrameVisuals) && built.holeFrameVisuals.length >= 1, "base build creates ready per-hole play surfaces");
-  assert.equal(built.holeFrameVisuals[0].metadata.framingModel, "gps-play-overcaptured-mercator-surface", "hole surfaces keep GPS Play surface metadata");
-  assert.equal(built.holeFrameVisuals[0].metadata.playSurface.projection, "mercator-svg", "hole surfaces stay Mercator-aligned for Play projection");
+  assert.equal(built.holeFrameVisuals[0].metadata.framingModel, "gps-play-overcaptured-play-axis-surface", "hole surfaces keep GPS Play surface metadata");
+  assert.equal(built.holeFrameVisuals[0].metadata.playSurface.projection, "play-axis-svg", "hole surfaces are already aligned to the hole axis for Play projection");
   assert.equal(built.holeFrameVisuals[0].metadata.playSurface.useGpsPlayFraming, true, "hole surfaces tell Play to frame on the per-hole surface");
   assert.equal(built.holeFrameVisuals[0].metadata.playSurface.fallbackUnderlay, "live-gps", "hole surfaces fall back only to live GPS");
   assert.equal(built.holeFrameVisuals[0].metadata.playSurface.fallbackPolicy, "live-gps-only", "hole surfaces do not point Play at a stitched fallback");
@@ -357,7 +357,7 @@ function payload() {
   });
   engine.ingestCourseVisualInput(multiInput);
   const multiBuilt = await engine.buildCourseVisualMaster("multi-capture");
-  assert.equal(multiBuilt.rawMaster.metadata.rendererVersion, "clarity-course-visual-renderer-v21");
+  assert.equal(multiBuilt.rawMaster.metadata.rendererVersion, "clarity-course-visual-renderer-v22");
   assert.ok(multiBuilt.rawMaster.height < 12000, "multi-capture stitch is geographically laid out instead of vertically appended");
   assert.ok(multiBuilt.rawMaster.height / multiBuilt.rawMaster.width < 8, "multi-capture output keeps a usable preview aspect");
 
