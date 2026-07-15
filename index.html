@@ -238,6 +238,16 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
   }
   function validLL(p){return !!(p&&Number.isFinite(Number(p.lat))&&Number.isFinite(Number(p.lng)));}
   function validBounds(b){return !!(b&&typeof b.isValid==="function"&&b.isValid()&&b.getCenter&&b.getSouthWest&&b.getNorthEast);}
+  function coerceBounds(b){
+    if(validBounds(b))return b;
+    if(!b||!hasMap())return null;
+    var south=num(b.south!==undefined?b.south:b.minLat,NaN);
+    var west=num(b.west!==undefined?b.west:b.minLng,NaN);
+    var north=num(b.north!==undefined?b.north:b.maxLat,NaN);
+    var east=num(b.east!==undefined?b.east:b.maxLng,NaN);
+    if(!Number.isFinite(south)||!Number.isFinite(west)||!Number.isFinite(north)||!Number.isFinite(east))return null;
+    return safe(function(){return L.latLngBounds([[south,west],[north,east]]);},null);
+  }
   function boundsFromPoints(points){
     if(!hasMap())return null;
     var arr=(Array.isArray(points)?points:[]).map(asLL).filter(validLL);
@@ -378,6 +388,7 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	  }
 	  function storageKey(){
 	    if(renderSurfaceOverride){
+	      if(renderSurfaceOverride.captureKey)return "gd_captured_hole_frame_v19_"+String(renderSurfaceOverride.captureKey).replace(/[^a-z0-9:_-]+/gi,"_");
 	      var overrideCourse=renderSurfaceOverride.courseKey||renderSurfaceOverride.courseName||"course";
 	      var overrideHole=renderSurfaceOverride.holeNumber||1;
 	      return "gd_captured_hole_frame_v19_"+String(overrideCourse+":h"+overrideHole).replace(/[^a-z0-9:_-]+/gi,"_");
@@ -429,18 +440,18 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	      greenShape:shape.map(pack).filter(Boolean)
 	    };
 	  }
-	  function captureSurfacePoints(objectBounds,reason){
+	  function captureSurfacePoints(objectBounds,reason,captureOpts){
 	    var points=validBounds(objectBounds)?boundsCorners(objectBounds):[];
 	    var data=safe(function(){return (mappedPayload()||{}).data||{};},{})||{};
 	    var route=mappedRoute(data);
 	    var shape=mappedShape(data);
-	    var includeWholeHole=!/lock|zoom/i.test(String(reason||""));
+	    var includeWholeHole=!(captureOpts&&captureOpts.lockBounds===true)&&!/lock|zoom/i.test(String(reason||""));
 	    if(includeWholeHole&&route.length)points=points.concat(route);
 	    if(includeWholeHole&&shape.length)points=points.concat(shape);
 	    var tee=safe(function(){return typeof gdActiveMappedTeeStartPoint==="function"?gdActiveMappedTeeStartPoint():null;},null);
 	    if(includeWholeHole&&validLL(tee))points.push(tee);
 	    var holeB=greenBounds("hole");
-	    if(validBounds(holeB))points=points.concat(boundsCorners(holeB));
+	    if(includeWholeHole&&validBounds(holeB))points=points.concat(boundsCorners(holeB));
 	    return points.map(asLL).filter(validLL);
 	  }
 	  function preferredCaptureZoom(){
@@ -466,23 +477,29 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	    var minTx=Math.floor(rect.minX/256),maxTx=Math.floor((rect.maxX-1)/256),minTy=Math.floor(rect.minY/256),maxTy=Math.floor((rect.maxY-1)/256);
 	    return Math.max(0,maxTx-minTx+1)*Math.max(0,maxTy-minTy+1);
 	  }
-	  function buildCaptureManifest(objectBounds,reason){
+	  function buildCaptureManifest(objectBounds,reason,captureOpts){
+	    captureOpts=captureOpts||{};
+	    objectBounds=coerceBounds(objectBounds);
 	    if(!hasMap()||!validBounds(objectBounds))return null;
 	    reason=reason||"capture";
-	    var z=preferredCaptureZoom();
-	    var points=captureSurfacePoints(objectBounds,reason);
+	    var preferred=preferredCaptureZoom();
+	    var minZoom=Math.max(15,Math.min(20,Math.floor(num(captureOpts.minZoom,18))));
+	    var maxZoom=Math.max(minZoom,Math.min(20,Math.floor(num(captureOpts.maxZoom,preferred))));
+	    var z=Math.max(minZoom,Math.min(maxZoom,Math.floor(num(captureOpts.targetZoom,preferred))));
+	    var maxTiles=Math.max(16,Math.round(num(captureOpts.maxTiles,320)));
+	    var points=captureSurfacePoints(objectBounds,reason,captureOpts);
 		    var pins=captureAnchorPins();
-		    var bleed=/lock|zoom/i.test(String(reason))?2100:2800;
+		    var bleed=Math.max(0,Math.round(num(captureOpts.bleedPx,/lock|zoom/i.test(String(reason))?2100:2800)));
 	    var rect=pixelRectFor(points,z,bleed);
 	    if(!rect)return null;
-	    while(z>18&&tileCountFor(rect)>320){
+	    while(z>minZoom&&tileCountFor(rect)>maxTiles){
 	      z-=1;
 	      rect=pixelRectFor(points,z,bleed);
 	    }
 	    var origin={x:rect.minX,y:rect.minY};
 	    var width=Math.max(256,rect.maxX-rect.minX),height=Math.max(256,rect.maxY-rect.minY);
-    var layer=tileLayer(),tiles=[];
-    if(layer&&typeof layer.getTileUrl==="function"){
+    var layer=captureOpts.tileTemplate?{_url:String(captureOpts.tileTemplate),options:{urlTemplate:String(captureOpts.tileTemplate),subdomains:captureOpts.tileSubdomains||captureOpts.subdomains||[]}}:tileLayer(),tiles=[];
+    if(layer&&(typeof layer.getTileUrl==="function"||captureOpts.tileTemplate)){
       var minTx=Math.floor(rect.minX/256),maxTx=Math.floor((rect.maxX-1)/256),minTy=Math.floor(rect.minY/256),maxTy=Math.floor((rect.maxY-1)/256);
       for(var ty=minTy;ty<=maxTy;ty++){
         for(var tx=minTx;tx<=maxTx;tx++){
@@ -492,13 +509,34 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
       }
     }
 			    var manifest={version:VERSION,key:storageKey(),reason:reason,surfaceModel:"captured-surface-v1",interactionOwner:"captured-surface",liveMapRole:"capture-source-diagnostic-reference",courseKey:surfaceCourseKey(),courseName:surfaceCourseName(),holeNumber:surfaceHoleNumber(),captureZoom:z,imageWidth:width,imageHeight:height,originPx:origin,tiles:tiles,includeTee:!!pins.tee,teeLatLng:pins.tee||null,anchorPins:pins,createdAt:new Date().toISOString()};
+			    if(captureOpts.role||captureOpts.quality||captureOpts.planId){
+			      manifest.visualRole=String(captureOpts.role||"");
+			      manifest.visualQuality=String(captureOpts.quality||"");
+			      manifest.visualPlanId=String(captureOpts.planId||captureOpts.id||"");
+			      manifest.stitchLayer=Number.isFinite(Number(captureOpts.stitchLayer))?Number(captureOpts.stitchLayer):0;
+			      manifest.debugUnderlay=!!captureOpts.debugUnderlay;
+			      manifest.debugTerrain=!!captureOpts.debugTerrain;
+			      manifest.terrainStageOnly=!!captureOpts.terrainStageOnly;
+			      manifest.beta3dStageOnly=!!captureOpts.beta3dStageOnly;
+			      manifest.cameraMode=String(captureOpts.cameraMode||"");
+			      manifest.cameraTiltDeg=Number.isFinite(Number(captureOpts.cameraTiltDeg))?Number(captureOpts.cameraTiltDeg):null;
+			      manifest.captureTiltDeg=Number.isFinite(Number(captureOpts.captureTiltDeg))?Number(captureOpts.captureTiltDeg):null;
+			      manifest.playTiltDeg=Number.isFinite(Number(captureOpts.playTiltDeg))?Number(captureOpts.playTiltDeg):null;
+			      manifest.cameraFallback=captureOpts.beta3dStageOnly?"leaflet-flat-capture-faux-tilt-stage":"";
+			      manifest.tileSourceLabel=String(captureOpts.tileSourceLabel||"");
+			      manifest.visualCapturePolicy={role:manifest.visualRole,quality:manifest.visualQuality,targetZoom:z,requestedTargetZoom:captureOpts.targetZoom||null,minZoom:minZoom,maxZoom:maxZoom,maxTiles:maxTiles,bleedPx:bleed,lockBounds:captureOpts.lockBounds===true,tileSourceLabel:manifest.tileSourceLabel};
+			    }
 			    manifest=safe(function(){return typeof window.gdCapturedSurfaceWriteScan==="function"?window.gdCapturedSurfaceWriteScan(manifest,{reason:reason,storageKey:storageKey()}):manifest;},manifest)||manifest;
-    captureManifest=manifest;
-    window.gdHoleImageCaptureManifest=manifest;
+    if(captureOpts.backgroundCapture){
+      window.__gdLastCourseVisualCaptureManifest=manifest;
+    }else{
+      captureManifest=manifest;
+      window.gdHoleImageCaptureManifest=manifest;
 	    window.__gdLastHoleImageCaptureManifest=manifest;
 	    window.__gdV19CapturedHoleFrameManifest=manifest;
+    }
 	    safe(function(){localStorage.setItem(storageKey(),JSON.stringify(manifest));});
-	    gdRegisterCoursePlayFrameManifest(manifest,{generatedFrom:"v19-captured-surface",manifestKey:storageKey(),status:"generated"});
+	    if(!captureOpts.skipCoursePlayFrameRegister)gdRegisterCoursePlayFrameManifest(manifest,{generatedFrom:"v19-captured-surface",manifestKey:storageKey(),status:"generated"});
 	    safe(function(){if(capturedGpsPlayActive())gdCoursePlayDebugEvent("gps-play-generated-new-frame",{reason:reason,manifestKey:storageKey(),tileCount:tiles.length,captureZoom:z,imageWidth:width,imageHeight:height});});
 	    return manifest;
 	  }
@@ -841,8 +879,57 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	  function gdEnsureCoursePlayFrameRendered(courseId,holeNumber){
 	    return gdRenderCoursePlayHoleFrame(courseId,holeNumber,null,{reason:"course-play-pipeline"});
 	  }
+	  function gdBuildCourseVisualCaptureManifest(request){
+	    request=request||{};
+	    if(window.gdFullMappingMode||document.body&&document.body.classList.contains("gdFullMappingMode"))return null;
+	    var bounds=coerceBounds(request.bounds);
+	    if(!validBounds(bounds))return null;
+	    var previousOverride=renderSurfaceOverride;
+	    var role=String(request.role||"course-backdrop");
+	    var holeNumber=Number(request.holeNumber)||1;
+	    var courseKey=String(request.courseKey||request.courseId||surfaceCourseKey()||"course");
+	    renderSurfaceOverride={
+	      course:request.course||request.courseId||courseKey,
+	      courseKey:courseKey,
+	      courseName:String(request.courseName||request.courseLabel||surfaceCourseName()||courseKey),
+	      holeNumber:holeNumber,
+	      data:request.holeData||null,
+	      source:request.reason||"course-visual-capture",
+	      captureRole:role,
+	      captureKey:String(request.captureKey||request.planId||[courseKey,"h"+holeNumber,role].join(":"))
+	    };
+	    try{
+	      return buildCaptureManifest(bounds,request.reason||("course-visual-"+role+"-visual-lock"),{
+	        role:role,
+	        quality:request.quality||"",
+	        planId:request.planId||request.id||"",
+	        stitchLayer:request.stitchLayer,
+	        targetZoom:request.targetZoom,
+	        minZoom:request.minZoom,
+	        maxZoom:request.maxZoom,
+	        maxTiles:request.maxTiles,
+	        bleedPx:request.bleedPx,
+	        tileTemplate:request.tileTemplate,
+	        tileSourceLabel:request.tileSourceLabel,
+	        lockBounds:true,
+	        debugUnderlay:!!request.debugUnderlay,
+	        debugTerrain:!!request.debugTerrain,
+	        terrainStageOnly:!!request.terrainStageOnly,
+	        beta3dStageOnly:!!request.beta3dStageOnly,
+	        cameraMode:request.cameraMode,
+	        cameraTiltDeg:request.cameraTiltDeg,
+	        captureTiltDeg:request.captureTiltDeg,
+	        playTiltDeg:request.playTiltDeg,
+	        backgroundCapture:true,
+	        skipCoursePlayFrameRegister:true
+	      });
+	    }finally{
+	      renderSurfaceOverride=previousOverride;
+	    }
+	  }
 	  window.gdRenderCoursePlayHoleFrame=gdRenderCoursePlayHoleFrame;
 	  window.gdEnsureCoursePlayFrameRendered=gdEnsureCoursePlayFrameRendered;
+	  window.gdBuildCourseVisualCaptureManifest=gdBuildCourseVisualCaptureManifest;
 	  function activePipelineStatus(){
 	    var state=activePipelineHoleState();
 	    return String(state&&state.status||"");
@@ -2150,6 +2237,8 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
     .gdAdminCourseVisualControls{display:grid;grid-template-columns:140px repeat(4,minmax(92px,1fr));gap:8px;align-items:end;margin:8px 0}
     .gdAdminCourseVisualControls label{display:grid;gap:4px;color:rgba(255,255,255,.56);font-size:9px;font-weight:950;text-transform:uppercase;letter-spacing:.05em}
     .gdAdminCourseVisualControls select,.gdAdminCourseVisualControls input{width:100%;box-sizing:border-box;border:1px solid rgba(255,255,255,.10);border-radius:12px;background:rgba(0,0,0,.22);color:#fff;padding:8px;font-size:11px;font-weight:850}
+    .gdAdminCourseVisualControls label.gdAdminCourseVisualCheck{grid-template-columns:auto minmax(0,1fr);align-items:center;gap:8px;padding:8px;border:1px solid rgba(255,255,255,.08);border-radius:12px;background:rgba(0,0,0,.16)}
+    .gdAdminCourseVisualControls label.gdAdminCourseVisualCheck input{width:18px;height:18px;accent-color:#1fd36d}
     .gdAdminCourseVisualActions{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}
     .gdAdminCourseVisualActions button{border-radius:999px;padding:7px 10px;background:rgba(255,255,255,.09);color:#fff;font-size:11px;font-weight:950}
     .gdAdminCourseVisualActions button.primary{background:#1fd36d;color:#07100a}
@@ -6558,7 +6647,7 @@ function gdAdminCourseVisualRecord(courseId){
 const gdAdminCourseVisualHydrationPending={};
 const gdAdminCourseVisualHydrationAttempted={};
 function gdAdminCourseVisualAssets(record){
-  return [record&&record.rawMaster,record&&record.basicVisual,record&&record.exampleHoleVisual,record&&record.previewVisual,record&&record.publishedVisual].filter(Boolean);
+  return [record&&record.rawMaster,record&&record.basicVisual,record&&record.exampleHoleVisual,record&&record.terrainView,record&&record.beta3dView,record&&record.previewVisual,record&&record.publishedVisual].filter(Boolean);
 }
 function gdAdminCourseVisualNeedsHydration(record){
   return gdAdminCourseVisualAssets(record).some(asset=>asset&&asset.path&&!asset.dataUrl);
@@ -6622,12 +6711,14 @@ function gdAdminCourseVisualControls(record){
   const strength=Number(overrides.turf&&overrides.turf.greenStrength);
   const brightness=Number(overrides.lighting&&overrides.lighting.brightnessTarget);
   const contrast=Number(overrides.lighting&&overrides.lighting.contrastTarget);
+  const beta3d=!!(overrides.visualEngine&&overrides.visualEngine.enable3dBeta);
   return `<div class="gdAdminCourseVisualControls">
     <label>Preset<select id="gdCourseVisualPreset">${modes.map(mode=>{const p=window.GDCourseVisualEngine?.presetForMode?.(mode);return `<option value="${gdEscapeHTML(p?.id||mode)}" ${preset===(p?.id||mode)?"selected":""}>${gdEscapeHTML(mode)}</option>`;}).join("")}</select></label>
     <label>Green strength<input id="gdCourseVisualGreenStrength" type="range" min="0" max="1" step="0.05" value="${Number.isFinite(strength)?strength:.35}"></label>
     <label>Brightness target<input id="gdCourseVisualBrightness" type="number" min="20" max="85" step="1" value="${Number.isFinite(brightness)?brightness:52}"></label>
     <label>Contrast<input id="gdCourseVisualContrast" type="number" min="0.8" max="1.25" step="0.01" value="${Number.isFinite(contrast)?contrast:1.04}"></label>
     <label>Mowing visibility<select id="gdCourseVisualMowing">${["Unknown","Low","Clear","Prominent"].map(value=>`<option value="${value}" ${mowing===value?"selected":""}>${value}</option>`).join("")}</select></label>
+    <label class="gdAdminCourseVisualCheck"><input id="gdCourseVisual3dBeta" type="checkbox" ${beta3d?"checked":""}><span>3D view beta</span></label>
   </div>`;
 }
 function gdAdminCourseVisualOverridesFromForm(){
@@ -6637,7 +6728,8 @@ function gdAdminCourseVisualOverridesFromForm(){
   return {
     turf:{greenStrength:Number.isFinite(green)?green:.35},
     lighting:{brightnessTarget:Number.isFinite(brightness)?brightness:52,contrastTarget:Number.isFinite(contrast)?contrast:1.04},
-    mowingVisibility:String(document.getElementById("gdCourseVisualMowing")?.value||"Unknown")
+    mowingVisibility:String(document.getElementById("gdCourseVisualMowing")?.value||"Unknown"),
+    visualEngine:{enable3dBeta:document.getElementById("gdCourseVisual3dBeta")?.checked===true}
   };
 }
 function gdAdminCourseVisualToast(text){
@@ -6646,7 +6738,10 @@ function gdAdminCourseVisualToast(text){
 async function gdAdminCourseVisualBuildBasic(courseId){
   const engine=window.GDCourseVisualEngine;
   if(!engine){gdAdminCourseVisualToast("Course Visual Engine not loaded");return false;}
-  await engine.buildFromCourseDatabase(courseId);
+  const overrides=gdAdminCourseVisualOverridesFromForm();
+  engine.saveCourseVisualSettings(courseId,overrides);
+  gdAdminCourseVisualToast("Building visual captures");
+  await engine.buildFromCourseDatabase(courseId,{enable3dBeta:overrides.visualEngine&&overrides.visualEngine.enable3dBeta===true});
   gdRenderAdminCourseDatabase();
   return false;
 }
@@ -6691,6 +6786,10 @@ function gdAdminCourseVisualMarkup(selected){
   const dirty=record&&record.settingsDirty?" · unsaved settings":"";
   const sourceStatus=gdAdminCourseVisualSourceStatus(selected);
   const inputCaptureLabel=record&&record.input?record.input.captureCount:`${sourceStatus.renderableCount} available`;
+  const planSummary=record&&record.diagnostics&&record.diagnostics.capturePlanSummary||null;
+  const planLabel=planSummary?`${planSummary.captured}/${planSummary.planned} captured`:"not planned";
+  const beta3dOn=!!(record&&record.courseOverrides&&record.courseOverrides.visualEngine&&record.courseOverrides.visualEngine.enable3dBeta);
+  const beta3dLabel=beta3dOn?(record&&record.beta3dView?"ready":"on"):"off";
   const diagnostics={
     status:record&&record.status,
     inputStatus:record&&record.input||null,
@@ -6707,13 +6806,18 @@ function gdAdminCourseVisualMarkup(selected){
     `<div class="gdAdminDatabaseSummary">${[
       gdAdminCourseDbMetric("Input captures",inputCaptureLabel),
       gdAdminCourseDbMetric("Source manifests",`${sourceStatus.manifestCount}/${sourceStatus.frameCount}`),
+      gdAdminCourseDbMetric("Visual plan",planLabel),
       gdAdminCourseDbMetric("Current version",record.currentVersion||0),
       gdAdminCourseDbMetric("Published",record.publishedVersion||0),
+      gdAdminCourseDbMetric("Layer model",planSummary?"live underlay + HD overlays":"live map fallback"),
+      gdAdminCourseDbMetric("3D beta",beta3dLabel),
       gdAdminCourseDbMetric("Play asset",diagnostics.resolvedPlayAsset?"visual":"live map fallback")
     ].join("")}</div>`,
     `<div class="gdAdminCourseVisualGrid">${[
       gdAdminCourseVisualImage("Raw / basic",record.basicVisual,record.rawMaster),
       gdAdminCourseVisualImage("Example hole",record.exampleHoleVisual),
+      gdAdminCourseVisualImage("Terrain view",record.terrainView),
+      gdAdminCourseVisualImage("3D view beta",record.beta3dView),
       gdAdminCourseVisualImage("Styled preview",record.previewVisual),
       gdAdminCourseVisualImage("Published",record.publishedVisual)
     ].join("")}</div>`,

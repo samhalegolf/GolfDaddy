@@ -73,6 +73,29 @@ function manifest(id, holeNumber, xOffset) {
   };
 }
 
+function visualManifest(id, request, xOffset) {
+  const base = manifest(id, Number(request.holeNumber) || 1, xOffset || 0);
+  return Object.assign({}, base, {
+    key: id,
+    courseKey: request.courseId || "cromwell",
+    courseName: request.courseName || "Cromwell Golf Course",
+    holeNumber: Number(request.holeNumber) || 1,
+    visualRole: request.role,
+    visualQuality: request.quality,
+    visualPlanId: request.planId || request.id,
+    stitchLayer: request.stitchLayer,
+    debugUnderlay: !!request.debugUnderlay,
+    debugTerrain: !!request.debugTerrain,
+    terrainStageOnly: !!request.terrainStageOnly,
+    beta3dStageOnly: !!request.beta3dStageOnly,
+    cameraMode: request.cameraMode || "",
+    cameraTiltDeg: Number.isFinite(Number(request.cameraTiltDeg)) ? Number(request.cameraTiltDeg) : null,
+    captureTiltDeg: Number.isFinite(Number(request.captureTiltDeg)) ? Number(request.captureTiltDeg) : null,
+    playTiltDeg: Number.isFinite(Number(request.playTiltDeg)) ? Number(request.playTiltDeg) : null,
+    tileSourceLabel: request.tileSourceLabel || ""
+  });
+}
+
 function payload() {
   return {
     courseId: "cromwell",
@@ -119,6 +142,17 @@ function payload() {
   assert.equal(input.courseId, "cromwell");
   assert.equal(input.objects.length, 3, "mapper output converts into visual objects");
   assert.equal(input.captures.length, 1, "mapper frame rows convert into visual captures");
+  const plan = engine.planCourseVisualCaptures(input);
+  const planRoles = plan.map((item) => item.role);
+  assert.ok(planRoles.includes("course-backdrop"), "planned captures include a live map underlay");
+  assert.ok(planRoles.includes("terrain-reference"), "planned captures include a terrain-reference stage");
+  assert.ok(planRoles.includes("green-surround"), "planned captures include super-HD green surrounds");
+  assert.ok(planRoles.includes("play-corridor"), "planned captures include HD play corridor");
+  assert.equal(planRoles.includes("three-d-hole-beta"), false, "3D beta capture is opt-in");
+  const betaPlan = engine.planCourseVisualCaptures(input, { enable3dBeta: true });
+  assert.ok(betaPlan.some((item) => item.role === "three-d-hole-beta"), "3D beta capture can be enabled");
+  assert.ok(plan.find((item) => item.role === "green-surround").targetZoom > plan.find((item) => item.role === "play-corridor").targetZoom, "green capture asks for more pixels than corridor capture");
+  assert.ok(plan.find((item) => item.role === "play-corridor").targetZoom > plan.find((item) => item.role === "course-backdrop").targetZoom, "corridor capture asks for more pixels than live underlay");
 
   const record = engine.ingestCourseVisualInput(input);
   assert.equal(record.status, "input-ready");
@@ -195,6 +229,35 @@ function payload() {
   assert.equal(multiBuilt.rawMaster.metadata.rendererVersion, "clarity-course-visual-renderer-v2");
   assert.ok(multiBuilt.rawMaster.height < 12000, "multi-capture stitch is geographically laid out instead of vertically appended");
   assert.ok(multiBuilt.rawMaster.height / multiBuilt.rawMaster.width < 8, "multi-capture output keeps a usable preview aspect");
+
+  const originalPipeline = global.GDCoursePlayPipeline;
+  const originalExecutor = global.gdBuildCourseVisualCaptureManifest;
+  const visualRequests = [];
+  global.GDCoursePlayPipeline = {
+    buildCoursePlayDbPayload() {
+      return Object.assign({}, payload(), { courseId: "planned-course", courseKey: "planned-course" });
+    },
+    getCoursePlayFrameIndex() {
+      return [];
+    }
+  };
+  global.gdBuildCourseVisualCaptureManifest = function buildVisualCapture(request) {
+    visualRequests.push(request);
+    return visualManifest("visual-" + request.role + "-" + (request.holeNumber || "course"), request, visualRequests.length * 20);
+  };
+  const plannedBuilt = await engine.buildFromCourseDatabase("planned-course", { enable3dBeta: true });
+  const requestedRoles = visualRequests.map((request) => request.role);
+  assert.ok(requestedRoles.includes("course-backdrop"), "Build Basic asks browser capture for the live underlay");
+  assert.ok(requestedRoles.includes("terrain-reference"), "Build Basic asks browser capture for terrain reference");
+  assert.ok(requestedRoles.includes("green-surround"), "Build Basic asks browser capture for super-HD green");
+  assert.ok(requestedRoles.includes("play-corridor"), "Build Basic asks browser capture for HD corridor");
+  assert.ok(requestedRoles.includes("three-d-hole-beta"), "Build Basic asks browser capture for 3D beta when toggled");
+  assert.ok(plannedBuilt.terrainView && plannedBuilt.terrainView.dataUrl.startsWith("data:image/svg+xml"), "terrain view is built as a separate derived stage");
+  assert.ok(plannedBuilt.beta3dView && plannedBuilt.beta3dView.dataUrl.startsWith("data:image/svg+xml"), "3D beta view is built as a separate opt-in stage");
+  assert.equal(plannedBuilt.rawMaster.metadata.debugLayerModel, "live-underlay-plus-captured-overlays", "raw master records the debug layer model");
+  assert.equal(plannedBuilt.diagnostics.stageSettings.enable3dBeta, true, "3D beta toggle is recorded in diagnostics");
+  global.GDCoursePlayPipeline = originalPipeline;
+  global.gdBuildCourseVisualCaptureManifest = originalExecutor;
 
   const globalPreset = engine.getPreset("clarity-course-natural-v1");
   const merged = engine.mergePreset(globalPreset, { turf: { greenStrength: 0.9 } });

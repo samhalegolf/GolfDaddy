@@ -105,6 +105,99 @@
   function boundsCenter(bounds){
     return validBounds(bounds)?{lat:(Number(bounds.south)+Number(bounds.north))/2,lng:(Number(bounds.west)+Number(bounds.east))/2}:null;
   }
+  function padBounds(bounds,meters){
+    if(!validBounds(bounds))return null;
+    var pad=Math.max(0,Number(meters)||0);
+    var center=boundsCenter(bounds)||{lat:(Number(bounds.south)+Number(bounds.north))/2,lng:(Number(bounds.west)+Number(bounds.east))/2};
+    var latPad=pad/111320;
+    var lngPad=pad/(111320*Math.max(.18,Math.cos(Number(center.lat||0)*Math.PI/180)));
+    return {
+      south:Number(bounds.south)-latPad,
+      west:Number(bounds.west)-lngPad,
+      north:Number(bounds.north)+latPad,
+      east:Number(bounds.east)+lngPad
+    };
+  }
+  function boundsSpanM(bounds){
+    if(!validBounds(bounds))return {width:0,height:0,diag:0};
+    var centerLat=((Number(bounds.south)+Number(bounds.north))/2)*Math.PI/180;
+    var width=Math.abs(Number(bounds.east)-Number(bounds.west))*111320*Math.max(.18,Math.cos(centerLat));
+    var height=Math.abs(Number(bounds.north)-Number(bounds.south))*111320;
+    return {width:width,height:height,diag:Math.sqrt(width*width+height*height)};
+  }
+  function pointsFromGeometry(geometry){
+    var out=[];
+    function walk(value){
+      if(!value)return;
+      var p=point(value);
+      if(p){out.push(p);return;}
+      if(Array.isArray(value)){
+        if(value.length>=2&&Number.isFinite(Number(value[0]))&&Number.isFinite(Number(value[1]))){out.push({lat:Number(value[1]),lng:Number(value[0])});return;}
+        value.forEach(walk);
+      }else if(typeof value==="object"){
+        if(Array.isArray(value.points))value.points.forEach(walk);
+        if(Array.isArray(value.coordinates))value.coordinates.forEach(walk);
+        if(value.point)walk(value.point);
+        if(value.position)walk(value.position);
+        if(value.center)walk(value.center);
+        if(value.centre)walk(value.centre);
+      }
+    }
+    walk(geometry);
+    return out;
+  }
+  function objectBounds(object){
+    if(validBounds(object&&object.bounds))return object.bounds;
+    return boundsFromPoints(pointsFromGeometry(object&&object.geometry));
+  }
+  function capturePolicy(role){
+    role=String(role||"");
+    if(role==="green-surround")return {role:role,label:"Super HD green surrounds",quality:"super-hd",targetZoom:20,minZoom:18,maxZoom:20,maxTiles:460,bleedMeters:72,bleedPx:720,stitchLayer:30};
+    if(role==="play-corridor")return {role:role,label:"HD play corridor",quality:"hd",targetZoom:19,minZoom:17,maxZoom:20,maxTiles:360,bleedMeters:48,bleedPx:560,stitchLayer:20};
+    if(role==="terrain-reference")return {role:role,label:"Terrain view reference",quality:"terrain-map",targetZoom:16,minZoom:14,maxZoom:17,maxTiles:260,bleedMeters:130,bleedPx:380,stitchLayer:5,terrainStageOnly:true,debugTerrain:true,tileSourceLabel:"Esri World Topographic Map",tileTemplate:"https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}"};
+    if(role==="three-d-hole-beta")return {role:role,label:"3D view beta hole camera",quality:"3d-beta",targetZoom:18,minZoom:17,maxZoom:20,maxTiles:320,bleedMeters:64,bleedPx:620,stitchLayer:40,beta3dStageOnly:true,cameraMode:"3d-beta-toggle",captureTiltDeg:8,playTiltDeg:14,cameraTiltDeg:8,cameraBearingMode:"play-axis",enabledByDefault:false};
+    return {role:"course-backdrop",label:"Live map underlay",quality:"live-map-base",targetZoom:17,minZoom:16,maxZoom:18,maxTiles:260,bleedMeters:120,bleedPx:420,stitchLayer:0,debugUnderlay:true};
+  }
+  function planItem(courseId,courseName,role,bounds,holeNumber,holeData){
+    var policy=capturePolicy(role);
+    var padded=padBounds(bounds,policy.bleedMeters);
+    if(!validBounds(padded))return null;
+    var id=["cv-plan",slug(courseId),policy.role,holeNumber?"h"+holeNumber:"course",hashString(padded)].join(":");
+    return Object.assign({},policy,{
+      id:id,
+      planId:id,
+      courseId:slug(courseId),
+      courseName:text(courseName,180),
+      holeNumber:holeNumber||null,
+      bounds:padded,
+      sourceBounds:bounds,
+      holeData:holeData||null,
+      captureKey:[slug(courseId),holeNumber?"h"+holeNumber:"course",policy.role].join(":"),
+      reason:"course-visual-"+policy.role+"-visual-lock"
+    });
+  }
+  function holeRecordToPlayData(hole){
+    if(!hole)return null;
+    var route=points(hole.routePoints||hole.route||hole.frameAnchors&&hole.frameAnchors.route);
+    var green=point(hole.greenCentre||hole.greenCenter||hole.green||hole.frameAnchors&&hole.frameAnchors.green)||route[route.length-1]||null;
+    var tee=point(hole.teePoint||hole.tee||hole.frameAnchors&&hole.frameAnchors.tee)||route[0]||null;
+    var shape=points(hole.greenShape||hole.shape||hole.frameAnchors&&hole.frameAnchors.greenShape);
+    return {route:route,tee:tee?{position:tee}:null,green:green?{position:green,center:green,centre:green,greenShape:shape,shape:shape,holeNumber:hole.holeNumber}:null};
+  }
+  function planSummary(plan,captures){
+    var out={version:1,planned:Array.isArray(plan)?plan.length:0,captured:Array.isArray(captures)?captures.length:0,roles:{}};
+    (Array.isArray(plan)?plan:[]).forEach(function(item){
+      var role=String(item&&item.role||"capture");
+      out.roles[role]=out.roles[role]||{planned:0,captured:0,quality:item&&item.quality||"",layer:item&&item.stitchLayer||0};
+      out.roles[role].planned+=1;
+    });
+    (Array.isArray(captures)?captures:[]).forEach(function(capture){
+      var role=String(capture&&capture.role||"capture");
+      out.roles[role]=out.roles[role]||{planned:0,captured:0,quality:capture&&capture.quality||"",layer:capture&&capture.stitchLayer||0};
+      out.roles[role].captured+=1;
+    });
+    return out;
+  }
   function boundsCompatible(imageBounds,anchorBounds){
     if(!validBounds(imageBounds)||!validBounds(anchorBounds))return true;
     if(boundsIntersects(imageBounds,anchorBounds))return true;
@@ -146,7 +239,7 @@
     return value;
   }
   function visualAssets(record){
-    return [record&&record.rawMaster,record&&record.basicVisual,record&&record.exampleHoleVisual,record&&record.previewVisual,record&&record.publishedVisual].filter(Boolean);
+    return [record&&record.rawMaster,record&&record.basicVisual,record&&record.exampleHoleVisual,record&&record.terrainView,record&&record.beta3dView,record&&record.previewVisual,record&&record.publishedVisual].filter(Boolean);
   }
   function openAssetDb(){
     if(!root||!root.indexedDB)return Promise.resolve(null);
@@ -296,6 +389,10 @@
     var imageBounds=manifestImageBounds(manifest);
     var useImageBounds=imageBounds&&boundsCompatible(imageBounds,anchorBounds);
     var bounds=useImageBounds?imageBounds:(anchorBounds||imageBounds);
+    var role=text(manifest.visualRole||manifest.captureRole||opts&&opts.role,60)||"source-frame";
+    var quality=text(manifest.visualQuality||manifest.quality||opts&&opts.quality,60)||"source";
+    var layer=finite(manifest.stitchLayer!==undefined?manifest.stitchLayer:opts&&opts.stitchLayer);
+    if(layer==null)layer=role==="course-backdrop"?0:role==="play-corridor"?20:role==="green-surround"?30:10;
     return {
       id:text(manifest.scanId||manifest.activeScanId||manifest.key||("capture-"+courseId+"-h"+holeNumber),180),
       imageUrl:null,
@@ -309,6 +406,20 @@
       zoom:finite(manifest.captureZoom),
       capturedAt:text(manifest.createdAt||manifest.updatedAt,80),
       holeNumber:holeNumber,
+      role:role,
+      quality:quality,
+      stitchLayer:layer,
+      planId:text(manifest.visualPlanId||manifest.capturePlanId||opts&&opts.planId||opts&&opts.id,180),
+      debugUnderlay:!!(manifest.debugUnderlay||opts&&opts.debugUnderlay),
+      debugTerrain:!!(manifest.debugTerrain||opts&&opts.debugTerrain),
+      terrainStageOnly:!!(manifest.terrainStageOnly||opts&&opts.terrainStageOnly),
+      beta3dStageOnly:!!(manifest.beta3dStageOnly||opts&&opts.beta3dStageOnly),
+      cameraMode:text(manifest.cameraMode||opts&&opts.cameraMode,80),
+      cameraTiltDeg:finite(manifest.cameraTiltDeg!==undefined?manifest.cameraTiltDeg:opts&&opts.cameraTiltDeg),
+      captureTiltDeg:finite(manifest.captureTiltDeg!==undefined?manifest.captureTiltDeg:opts&&opts.captureTiltDeg),
+      playTiltDeg:finite(manifest.playTiltDeg!==undefined?manifest.playTiltDeg:opts&&opts.playTiltDeg),
+      cameraFallback:text(manifest.cameraFallback||opts&&opts.cameraFallback,140),
+      tileSourceLabel:text(manifest.tileSourceLabel||opts&&opts.tileSourceLabel,120),
       sourceType:"leaflet-tile-manifest",
       originPx:manifest.originPx||null,
       tiles:manifest.tiles.map(function(tile){
@@ -330,6 +441,53 @@
     var holeNumber=Math.max(1,Math.round(Number(hole&&hole.holeNumber)||1));
     var id=[type,hole&&hole.courseId||hole&&hole.courseKey||"course","h"+holeNumber,hashString(position||shape)].join(":");
     return {id:id,type:type,holeNumber:holeNumber,geometry:shape&&shape.length?{type:"LineString",points:shape}:{type:"Point",point:position},bounds:boundsFromPoints(shape&&shape.length?shape:[position])};
+  }
+  function planCourseVisualCaptures(input,opts){
+    opts=opts||{};
+    var normalized=normalizeInput(input||{});
+    var rawHoles=Array.isArray(input&&input.sourceHoles)?input.sourceHoles:[];
+    var holeDataByNumber={};
+    rawHoles.forEach(function(hole){
+      var holeNumber=Math.max(1,Math.round(Number(hole&&hole.holeNumber)||1));
+      holeDataByNumber[holeNumber]=holeRecordToPlayData(hole);
+    });
+    var byHole={};
+    normalized.objects.forEach(function(object){
+      var holeNumber=Math.max(1,Math.round(Number(object&&object.holeNumber)||1));
+      byHole[holeNumber]=byHole[holeNumber]||[];
+      byHole[holeNumber].push(object);
+    });
+    var plan=[];
+    var backdropBounds=validBounds(normalized.courseBounds)?normalized.courseBounds:mergeBounds(normalized.objects.map(objectBounds).concat(normalized.captures.map(captureBounds)));
+    var backdrop=planItem(normalized.courseId,normalized.courseName,"course-backdrop",backdropBounds,null,null);
+    if(backdrop)plan.push(backdrop);
+    var terrain=planItem(normalized.courseId,normalized.courseName,"terrain-reference",backdropBounds,null,null);
+    if(terrain)plan.push(terrain);
+    Object.keys(byHole).map(Number).filter(function(hole){return hole>0;}).sort(function(a,b){return a-b;}).forEach(function(holeNumber){
+      var objects=byHole[holeNumber]||[];
+      var greens=objects.filter(function(object){return /green|pin/i.test(String(object&&object.type||""));});
+      var corridors=objects.filter(function(object){return /fairway|tee|green|pin/i.test(String(object&&object.type||""));});
+      var greenBounds=mergeBounds(greens.map(objectBounds));
+      var corridorBounds=mergeBounds(corridors.map(objectBounds));
+      if(validBounds(greenBounds)){
+        var greenSpan=boundsSpanM(greenBounds);
+        if(greenSpan.diag<8)greenBounds=padBounds(greenBounds,16);
+        var greenItem=planItem(normalized.courseId,normalized.courseName,"green-surround",greenBounds,holeNumber,holeDataByNumber[holeNumber]);
+        if(greenItem)plan.push(greenItem);
+      }
+      if(validBounds(corridorBounds)){
+        var corridorSpan=boundsSpanM(corridorBounds);
+        if(corridorSpan.diag<35)corridorBounds=padBounds(corridorBounds,32);
+        var corridorItem=planItem(normalized.courseId,normalized.courseName,"play-corridor",corridorBounds,holeNumber,holeDataByNumber[holeNumber]);
+        if(corridorItem)plan.push(corridorItem);
+        if(opts.enable3dBeta===true){
+          var betaItem=planItem(normalized.courseId,normalized.courseName,"three-d-hole-beta",corridorBounds,holeNumber,holeDataByNumber[holeNumber]);
+          if(betaItem)plan.push(betaItem);
+        }
+      }
+    });
+    var limit=Math.max(0,Math.round(Number(opts.limit)||0));
+    return limit?plan.slice(0,limit):plan;
   }
   function adaptCoursePlayPayloadToVisualInput(payload,opts){
     opts=opts||{};
@@ -360,6 +518,7 @@
       courseBounds:mergeBounds(captures.map(captureBounds).concat(objects.map(function(object){return object.bounds;}))),
       objects:objects,
       captures:captures,
+      sourceHoles:holes.map(function(hole){return clone(hole);}),
       currentVisual:opts.currentVisual||null
     };
   }
@@ -370,6 +529,10 @@
       courseId:courseId,
       courseName:text(input.courseName||input.name,180),
       courseBounds:validBounds(input.courseBounds)?input.courseBounds:mergeBounds((input.captures||[]).map(captureBounds).concat((input.objects||[]).map(function(o){return o&&o.bounds;}))),
+      capturePlan:(Array.isArray(input.capturePlan)?input.capturePlan:[]).map(function(item){
+        return {id:text(item&&item.id||item&&item.planId,180),role:text(item&&item.role,60),quality:text(item&&item.quality,60),holeNumber:finite(item&&item.holeNumber),targetZoom:finite(item&&item.targetZoom),minZoom:finite(item&&item.minZoom),maxTiles:finite(item&&item.maxTiles),stitchLayer:finite(item&&item.stitchLayer),bounds:validBounds(item&&item.bounds)?item.bounds:null,label:text(item&&item.label,120),terrainStageOnly:!!(item&&item.terrainStageOnly),beta3dStageOnly:!!(item&&item.beta3dStageOnly),cameraMode:text(item&&item.cameraMode,80),cameraTiltDeg:finite(item&&item.cameraTiltDeg),captureTiltDeg:finite(item&&item.captureTiltDeg),playTiltDeg:finite(item&&item.playTiltDeg),tileSourceLabel:text(item&&item.tileSourceLabel,120)};
+      }),
+      sourceHoles:Array.isArray(input.sourceHoles)?input.sourceHoles.map(function(hole){return clone(hole);}):[],
       objects:(Array.isArray(input.objects)?input.objects:[]).map(function(object,index){
         return {id:text(object&&object.id,180)||"object-"+index,type:text(object&&object.type,40)||"other",holeNumber:finite(object&&object.holeNumber),geometry:object&&object.geometry,bounds:validBounds(object&&object.bounds)?object.bounds:null};
       }),
@@ -400,6 +563,8 @@
       status:"unavailable",
       rawMaster:null,
       basicVisual:null,
+      terrainView:null,
+      beta3dView:null,
       previewVisual:null,
       publishedVisual:null,
       versions:[],
@@ -443,7 +608,7 @@
   function persistableRecord(record){
     var out=clone(record);
     delete out.captures;
-    [out&&out.rawMaster,out&&out.basicVisual,out&&out.exampleHoleVisual,out&&out.previewVisual,out&&out.publishedVisual].forEach(function(asset){
+    [out&&out.rawMaster,out&&out.basicVisual,out&&out.exampleHoleVisual,out&&out.terrainView,out&&out.beta3dView,out&&out.previewVisual,out&&out.publishedVisual].forEach(function(asset){
       if(asset)delete asset.dataUrl;
     });
     return out;
@@ -456,21 +621,21 @@
     record.input={courseId:normalized.courseId,courseName:normalized.courseName,courseBounds:normalized.courseBounds,objectCount:normalized.objects.length,captureCount:normalized.captures.length,sourceCaptureIds:normalized.captures.map(function(capture){return capture.id;})};
     record.objects=normalized.objects;
     record.captureRefs=normalized.captures.map(function(capture){
-      return {id:capture.id,storagePath:capture.storagePath||"",holeNumber:capture.holeNumber||null,width:capture.width,height:capture.height,tileCount:Array.isArray(capture.tiles)?capture.tiles.length:0,bounds:capture.bounds||null};
+      return {id:capture.id,storagePath:capture.storagePath||"",holeNumber:capture.holeNumber||null,role:capture.role||"",quality:capture.quality||"",stitchLayer:capture.stitchLayer||0,planId:capture.planId||"",width:capture.width,height:capture.height,tileCount:Array.isArray(capture.tiles)?capture.tiles.length:0,bounds:capture.bounds||null};
     });
     record.status=normalized.captures.length?"input-ready":"unavailable";
     record.lastError=normalized.captures.length?null:{code:"missing-captures",message:"No captured frames are available for this course visual."};
-    record.diagnostics=Object.assign({},record.diagnostics||{},{captureBounds:normalized.captures.map(captureBounds),sourceDimensions:normalized.captures.map(function(c){return {id:c.id,width:c.width,height:c.height,tiles:Array.isArray(c.tiles)?c.tiles.length:0};}),missingCaptures:normalized.captures.length?[]:["course-visual-captures"]});
+    record.diagnostics=Object.assign({},record.diagnostics||{},{capturePlan:normalized.capturePlan,capturePlanSummary:planSummary(normalized.capturePlan,normalized.captures),captureBounds:normalized.captures.map(captureBounds),sourceDimensions:normalized.captures.map(function(c){return {id:c.id,role:c.role||"",quality:c.quality||"",stitchLayer:c.stitchLayer||0,width:c.width,height:c.height,tiles:Array.isArray(c.tiles)?c.tiles.length:0};}),missingCaptures:normalized.captures.length?[]:["course-visual-captures"]});
     recordEvent(record,"course-visual-input-received",{captureCount:normalized.captures.length,objectCount:normalized.objects.length});
     return putRecord(record);
   }
   function captureSignature(captures){
-    return hashString((captures||[]).map(function(capture){return [capture.id,capture.width,capture.height,capture.boundsSource||"",JSON.stringify(capture.bounds),Array.isArray(capture.tiles)?capture.tiles.length:0].join("|");}).join("\n"));
+    return hashString((captures||[]).map(function(capture){return [capture.id,capture.role||"",capture.quality||"",capture.stitchLayer||0,capture.width,capture.height,capture.boundsSource||"",JSON.stringify(capture.bounds),Array.isArray(capture.tiles)?capture.tiles.length:0].join("|");}).join("\n"));
   }
   function capturesFromRecordRefs(record){
     return (Array.isArray(record&&record.captureRefs)?record.captureRefs:[]).map(function(ref){
       var manifest=ref&&ref.storagePath?readJson(ref.storagePath,null):null;
-      return manifest?manifestToCapture(manifest,{courseId:record.courseId}):null;
+      return manifest?manifestToCapture(manifest,{courseId:record.courseId,role:ref&&ref.role,quality:ref&&ref.quality,stitchLayer:ref&&ref.stitchLayer,planId:ref&&ref.planId}):null;
     }).filter(function(capture){return capture&&capture.width&&capture.height&&captureBounds(capture)&&(Array.isArray(capture.tiles)&&capture.tiles.length||capture.imageUrl||capture.imageData);});
   }
   function renderableCapture(capture){
@@ -487,7 +652,17 @@
     return href?'<image href="'+escapeXml(href)+'" x="0" y="0" width="'+svgNum(capture.width)+'" height="'+svgNum(capture.height)+'" preserveAspectRatio="none"/>':"";
   }
   function chooseExampleCapture(captures){
+    function rank(capture){
+      var role=String(capture&&capture.role||"");
+      if(role==="green-surround")return 0;
+      if(role==="play-corridor")return 1;
+      if(role==="source-frame")return 2;
+      if(role==="course-backdrop")return 9;
+      return 4;
+    }
     var valid=(Array.isArray(captures)?captures:[]).filter(renderableCapture).sort(function(a,b){
+      var ar=rank(a),br=rank(b);
+      if(ar!==br)return ar-br;
       var ah=Number(a.holeNumber)||999,bh=Number(b.holeNumber)||999;
       if(ah!==bh)return ah-bh;
       return String(a.id||"").localeCompare(String(b.id||""));
@@ -501,8 +676,8 @@
     var height=Math.max(1,Math.round(Number(capture.height)||1));
     var content=captureContentSvg(capture);
     if(!content)return null;
-    var title="Example hole "+(capture.holeNumber||"?");
-    var label='<g transform="translate(12 12)"><rect x="0" y="0" width="180" height="30" rx="6" fill="rgba(0,0,0,.58)"/><text x="10" y="20" font-size="14" fill="#fff" font-family="system-ui, sans-serif" font-weight="800">'+escapeXml(title)+'</text></g>';
+    var title=(capture.role==="green-surround"?"Super HD green":capture.role==="play-corridor"?"HD corridor":"Example hole")+" "+(capture.holeNumber||"?");
+    var label='<g transform="translate(12 12)"><rect x="0" y="0" width="220" height="30" rx="6" fill="rgba(0,0,0,.58)"/><text x="10" y="20" font-size="14" fill="#fff" font-family="system-ui, sans-serif" font-weight="800">'+escapeXml(title)+'</text></g>';
     var svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+width+'" height="'+height+'" viewBox="0 0 '+width+" "+height+'" data-renderer="'+escapeXml(RENDERER_VERSION)+'" data-role="example-hole"><rect width="100%" height="100%" fill="#10130f"/>'+content+'<rect x="0" y="0" width="100%" height="100%" fill="none" stroke="rgba(255,255,255,.42)" stroke-width="2"/>'+label+'</svg>';
     return {dataUrl:dataUrl("image/svg+xml",svg),width:width,height:height,bounds:captureBounds(capture),captureId:capture.id,holeNumber:capture.holeNumber||null,sourceCaptureIds:[capture.id],metadata:Object.assign({rendererVersion:RENDERER_VERSION,format:"image/svg+xml",role:"example-hole"},meta||{})};
   }
@@ -515,6 +690,13 @@
       return projected?{capture:capture,bounds:bounds,projected:projected}:null;
     }).filter(Boolean);
     if(!positioned.length)throw Object.assign(new Error("No geographic capture bounds found"),{code:"missing-geographic-bounds"});
+    positioned.sort(function(a,b){
+      var al=Number(a.capture&&a.capture.stitchLayer)||0,bl=Number(b.capture&&b.capture.stitchLayer)||0;
+      if(al!==bl)return al-bl;
+      var ah=Number(a.capture&&a.capture.holeNumber)||0,bh=Number(b.capture&&b.capture.holeNumber)||0;
+      if(ah!==bh)return ah-bh;
+      return String(a.capture&&a.capture.id||"").localeCompare(String(b.capture&&b.capture.id||""));
+    });
     var overall=mergeProjectedBounds(positioned.map(function(item){return item.projected;}));
     var spanX=Math.max(1e-9,overall.right-overall.left);
     var spanY=Math.max(1e-9,overall.bottom-overall.top);
@@ -535,6 +717,13 @@
     width=Math.round(clamp(width,256,8192));
     height=Math.round(clamp(height,256,8192));
     var missingAreas=[];
+    function roleStyle(capture){
+      var role=String(capture&&capture.role||"source-frame");
+      if(role==="course-backdrop")return {stroke:"#4cc9f0",fill:"rgba(76,201,240,.12)",opacity:.58,label:"LIVE MAP UNDERLAY"};
+      if(role==="play-corridor")return {stroke:"#ffd166",fill:"rgba(255,209,102,.10)",opacity:.9,label:"HD PLAY CORRIDOR"};
+      if(role==="green-surround")return {stroke:"#64f28a",fill:"rgba(100,242,138,.12)",opacity:1,label:"SUPER HD GREEN"};
+      return {stroke:"#ffffff",fill:"rgba(255,255,255,.08)",opacity:1,label:"CAPTURE"};
+    }
     var groups=positioned.map(function(item){
       var capture=item.capture;
       var p=item.projected;
@@ -543,11 +732,79 @@
       var w=Math.max(1,(p.right-p.left)/spanX*width);
       var h=Math.max(1,(p.bottom-p.top)/spanY*height);
       if(capture.boundsSource&&capture.boundsSource!=="manifest-image")missingAreas.push({captureId:capture.id,reason:"low-confidence-bounds",boundsSource:capture.boundsSource});
-      var label='<text x="10" y="20" font-size="13" fill="#fff" stroke="#000" stroke-width="3" paint-order="stroke" font-family="system-ui, sans-serif" font-weight="800">'+escapeXml("H"+(capture.holeNumber||"?"))+'</text>';
-      return '<g data-capture-id="'+escapeXml(capture.id)+'" transform="translate('+svgNum(x)+" "+svgNum(y)+') scale('+svgNum(w/(Number(capture.width)||1))+" "+svgNum(h/(Number(capture.height)||1))+')">'+captureContentSvg(capture)+label+'</g>';
+      var style=roleStyle(capture);
+      var labelText=style.label+(capture.holeNumber?" H"+capture.holeNumber:"");
+      var label='<g transform="translate(10 10)"><rect x="0" y="0" width="'+svgNum(Math.max(138,labelText.length*8.4))+'" height="24" rx="5" fill="rgba(0,0,0,.58)"/><text x="8" y="17" font-size="12" fill="#fff" stroke="#000" stroke-width="2.5" paint-order="stroke" font-family="system-ui, sans-serif" font-weight="900">'+escapeXml(labelText)+'</text></g>';
+      var border='<rect x="2" y="2" width="'+svgNum(Math.max(1,(Number(capture.width)||1)-4))+'" height="'+svgNum(Math.max(1,(Number(capture.height)||1)-4))+'" fill="'+style.fill+'" stroke="'+style.stroke+'" stroke-width="5" vector-effect="non-scaling-stroke"/>';
+      return '<g data-capture-id="'+escapeXml(capture.id)+'" data-role="'+escapeXml(capture.role||"source-frame")+'" data-quality="'+escapeXml(capture.quality||"source")+'" data-stitch-layer="'+escapeXml(capture.stitchLayer||0)+'" opacity="'+svgNum(style.opacity)+'" transform="translate('+svgNum(x)+" "+svgNum(y)+') scale('+svgNum(w/(Number(capture.width)||1))+" "+svgNum(h/(Number(capture.height)||1))+')">'+captureContentSvg(capture)+border+label+'</g>';
     }).join("");
     var svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+width+'" height="'+height+'" viewBox="0 0 '+width+" "+height+'" data-renderer="'+escapeXml(RENDERER_VERSION)+'" data-layout="geographic-mercator"><rect width="100%" height="100%" fill="#10130f"/>'+groups+'</svg>';
-    return {dataUrl:dataUrl("image/svg+xml",svg),width:width,height:height,missingAreas:missingAreas,bounds:mergeBounds(positioned.map(function(item){return item.bounds;})),sourceCaptureIds:positioned.map(function(item){return item.capture.id;}),metadata:Object.assign({rendererVersion:RENDERER_VERSION,format:"image/svg+xml",layout:"geographic-mercator",outputDimensions:{width:width,height:height}},meta||{})};
+    return {dataUrl:dataUrl("image/svg+xml",svg),width:width,height:height,missingAreas:missingAreas,bounds:mergeBounds(positioned.map(function(item){return item.bounds;})),sourceCaptureIds:positioned.map(function(item){return item.capture.id;}),metadata:Object.assign({rendererVersion:RENDERER_VERSION,format:"image/svg+xml",layout:"geographic-mercator",debugLayerModel:"live-underlay-plus-captured-overlays",outputDimensions:{width:width,height:height}},meta||{})};
+  }
+  function splitVisualCaptures(captures){
+    var all=(Array.isArray(captures)?captures:[]).filter(renderableCapture);
+    var terrain=all.filter(function(capture){return String(capture&&capture.role||"")==="terrain-reference"||capture&&capture.terrainStageOnly;});
+    var beta3d=all.filter(function(capture){return String(capture&&capture.role||"")==="three-d-hole-beta"||capture&&capture.beta3dStageOnly;});
+    var imagery=all.filter(function(capture){return terrain.indexOf(capture)<0&&beta3d.indexOf(capture)<0;});
+    return {all:all,imagery:imagery,terrain:terrain,beta3d:beta3d};
+  }
+  function terrainViewSvg(record,terrainCaptures,meta){
+    record=record||{};
+    var base=record.rawMaster&&record.rawMaster.dataUrl||record.basicVisual&&record.basicVisual.dataUrl||"";
+    var bounds=record.rawMaster&&record.rawMaster.bounds||record.input&&record.input.courseBounds||null;
+    var width=Math.max(1,Math.round(Number(record.rawMaster&&record.rawMaster.width)||1200));
+    var height=Math.max(1,Math.round(Number(record.rawMaster&&record.rawMaster.height)||800));
+    var overall=projectedBounds(bounds);
+    var terrain=(Array.isArray(terrainCaptures)?terrainCaptures:[]).filter(renderableCapture).map(function(capture){
+      var captureBoundsValue=captureBounds(capture);
+      var projected=projectedBounds(captureBoundsValue);
+      return projected?{capture:capture,bounds:captureBoundsValue,projected:projected}:null;
+    }).filter(Boolean);
+    if(!base||!overall||!terrain.length)return null;
+    var spanX=Math.max(1e-9,overall.right-overall.left);
+    var spanY=Math.max(1e-9,overall.bottom-overall.top);
+    var terrainGroups=terrain.map(function(item){
+      var capture=item.capture;
+      var p=item.projected;
+      var x=(p.left-overall.left)/spanX*width;
+      var y=(p.top-overall.top)/spanY*height;
+      var w=Math.max(1,(p.right-p.left)/spanX*width);
+      var h=Math.max(1,(p.bottom-p.top)/spanY*height);
+      var label='<g transform="translate(12 42)"><rect x="0" y="0" width="210" height="25" rx="5" fill="rgba(0,0,0,.55)"/><text x="8" y="17" font-size="12" fill="#e8f8de" stroke="#000" stroke-width="2" paint-order="stroke" font-family="system-ui, sans-serif" font-weight="900">'+escapeXml("TERRAIN REFERENCE")+'</text></g>';
+      return '<g data-capture-id="'+escapeXml(capture.id)+'" data-role="terrain-reference" opacity=".44" style="mix-blend-mode:multiply" filter="url(#terrainTone)" transform="translate('+svgNum(x)+" "+svgNum(y)+') scale('+svgNum(w/(Number(capture.width)||1))+" "+svgNum(h/(Number(capture.height)||1))+')">'+captureContentSvg(capture)+label+'</g>';
+    }).join("");
+    var title='<g transform="translate(14 14)"><rect x="0" y="0" width="300" height="31" rx="6" fill="rgba(0,0,0,.62)"/><text x="10" y="21" font-size="14" fill="#fff" font-family="system-ui, sans-serif" font-weight="900">Terrain view · deterministic shading debug</text></g>';
+    var svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+width+'" height="'+height+'" viewBox="0 0 '+width+" "+height+'" data-renderer="'+escapeXml(RENDERER_VERSION)+'" data-role="terrain-view"><defs><filter id="terrainTone"><feColorMatrix type="matrix" values=".32 .32 .32 0 0 .30 .30 .30 0 0 .26 .26 .26 0 0 0 0 0 .85 0"/><feComponentTransfer><feFuncR type="linear" slope="1.08" intercept="-.03"/><feFuncG type="linear" slope="1.08" intercept="-.03"/><feFuncB type="linear" slope="1.08" intercept="-.03"/></feComponentTransfer></filter><pattern id="terrainHatch" width="18" height="18" patternUnits="userSpaceOnUse" patternTransform="rotate(-28)"><path d="M0 0 L0 18" stroke="rgba(255,255,255,.11)" stroke-width="1"/></pattern></defs><rect width="100%" height="100%" fill="#10130f"/><image href="'+escapeXml(base)+'" width="'+width+'" height="'+height+'" preserveAspectRatio="none"/><rect width="100%" height="100%" fill="rgba(44,67,42,.12)"/>'+terrainGroups+'<rect width="100%" height="100%" fill="url(#terrainHatch)" opacity=".30"/>'+title+'</svg>';
+    return {dataUrl:dataUrl("image/svg+xml",svg),width:width,height:height,bounds:bounds,sourceCaptureIds:terrain.map(function(item){return item.capture.id;}),metadata:Object.assign({rendererVersion:RENDERER_VERSION,format:"image/svg+xml",role:"terrain-view",stage:"terrain-view",terrainSource:"tile-reference-overlay",outputDimensions:{width:width,height:height}},meta||{})};
+  }
+  function beta3dViewSvg(captures,meta){
+    var valid=(Array.isArray(captures)?captures:[]).filter(renderableCapture).sort(function(a,b){
+      var ah=Number(a.holeNumber)||999,bh=Number(b.holeNumber)||999;
+      if(ah!==bh)return ah-bh;
+      return String(a.id||"").localeCompare(String(b.id||""));
+    });
+    if(!valid.length)return null;
+    var capture=valid[0];
+    var sourceWidth=Math.max(1,Math.round(Number(capture.width)||1));
+    var sourceHeight=Math.max(1,Math.round(Number(capture.height)||1));
+    var width=Math.max(720,Math.round(sourceWidth*.92));
+    var height=Math.max(520,Math.round(sourceHeight*.72));
+    var captureTilt=finite(capture.captureTiltDeg);
+    if(captureTilt==null)captureTilt=8;
+    var playTilt=finite(capture.playTiltDeg);
+    if(playTilt==null)playTilt=14;
+    var topY=Math.round(height*.11);
+    var bottomY=Math.round(height*.90);
+    var topInset=Math.round(width*(.18+Math.min(20,Math.max(0,captureTilt))*.0035));
+    var bottomInset=Math.round(width*.045);
+    var imgX=bottomInset;
+    var imgY=topY;
+    var imgW=width-bottomInset*2;
+    var imgH=bottomY-topY;
+    var content=captureContentSvg(capture);
+    var labelText="3D view beta H"+(capture.holeNumber||"?")+" · capture tilt "+captureTilt+" · play tilt "+playTilt;
+    var svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+width+'" height="'+height+'" viewBox="0 0 '+width+" "+height+'" data-renderer="'+escapeXml(RENDERER_VERSION)+'" data-role="3d-view-beta"><defs><clipPath id="tiltClip"><polygon points="'+topInset+','+topY+' '+(width-topInset)+','+topY+' '+(width-bottomInset)+','+bottomY+' '+bottomInset+','+bottomY+'"/></clipPath><linearGradient id="depthShade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="rgba(255,255,255,.16)"/><stop offset=".56" stop-color="rgba(255,255,255,0)"/><stop offset="1" stop-color="rgba(0,0,0,.24)"/></linearGradient></defs><rect width="100%" height="100%" fill="#10130f"/><polygon points="'+topInset+','+topY+' '+(width-topInset)+','+topY+' '+(width-bottomInset)+','+bottomY+' '+bottomInset+','+bottomY+'" fill="#182016" stroke="rgba(255,255,255,.28)" stroke-width="2"/><g clip-path="url(#tiltClip)"><g transform="translate('+imgX+" "+imgY+') scale('+svgNum(imgW/sourceWidth)+" "+svgNum(imgH/sourceHeight)+')">'+content+'</g><rect x="'+imgX+'" y="'+imgY+'" width="'+imgW+'" height="'+imgH+'" fill="url(#depthShade)"/></g><g transform="translate(14 14)"><rect x="0" y="0" width="'+svgNum(Math.max(350,labelText.length*7.2))+'" height="31" rx="6" fill="rgba(0,0,0,.64)"/><text x="10" y="21" font-size="14" fill="#fff" font-family="system-ui, sans-serif" font-weight="900">'+escapeXml(labelText)+'</text></g><text x="16" y="'+(height-18)+'" font-size="12" fill="rgba(255,255,255,.72)" font-family="system-ui, sans-serif" font-weight="850">Beta faux-tilt preview until native pitch/tilt capture is enabled</text></svg>';
+    return {dataUrl:dataUrl("image/svg+xml",svg),width:width,height:height,bounds:captureBounds(capture),sourceCaptureIds:[capture.id],metadata:Object.assign({rendererVersion:RENDERER_VERSION,format:"image/svg+xml",role:"3d-view-beta",stage:"3d-view-beta",captureTiltDeg:captureTilt,playTiltDeg:playTilt,nativePitchAvailable:false,outputDimensions:{width:width,height:height}},meta||{})};
   }
   function buildCourseVisualMaster(courseId,opts){
     opts=opts||{};
@@ -555,34 +812,50 @@
     if(inFlightBuilds[courseId])return inFlightBuilds[courseId];
     var promise=Promise.resolve().then(function(){
       var record=getRecord(courseId);
-      var captures=(Array.isArray(opts.captures)&&opts.captures.length?opts.captures:null)||transientCapturesByCourse[courseId]||capturesFromRecordRefs(record);
+      var allCaptures=(Array.isArray(opts.captures)&&opts.captures.length?opts.captures:null)||transientCapturesByCourse[courseId]||capturesFromRecordRefs(record);
+      var split=splitVisualCaptures(allCaptures);
+      var captures=split.imagery;
+      var capturePlan=Array.isArray(opts.capturePlan)?opts.capturePlan:(record.diagnostics&&record.diagnostics.capturePlan||[]);
+      var capturePlanMeta=planSummary(capturePlan,split.all||[]);
+      var beta3dExpected=!!split.beta3d.length;
       record.status="stitching";
-      recordEvent(record,"course-visual-stitch-started",{captureCount:(captures||[]).length});
+      recordEvent(record,"course-visual-stitch-started",{captureCount:(captures||[]).length,terrainReferenceCount:split.terrain.length,beta3dCaptureCount:split.beta3d.length});
       putRecord(record);
       var signature=captureSignature(captures||[]);
       var existingRenderer=record.rawMaster&&record.rawMaster.metadata&&record.rawMaster.metadata.rendererVersion;
       var existingAssetReady=!!(record.basicVisual&&(record.basicVisual.dataUrl||transientAssetDataByPath[record.basicVisual.path])||record.rawMaster&&(record.rawMaster.dataUrl||transientAssetDataByPath[record.rawMaster.path]));
-      if(record.rawMaster&&record.rawMaster.captureSignature===signature&&existingRenderer===RENDERER_VERSION&&record.basicVisual&&existingAssetReady){
+      var terrainExpected=!!split.terrain.length;
+      var existingTerrainReady=!terrainExpected||!!(record.terrainView&&(record.terrainView.dataUrl||transientAssetDataByPath[record.terrainView.path]));
+      var existingBeta3dReady=!beta3dExpected||!!(record.beta3dView&&(record.beta3dView.dataUrl||transientAssetDataByPath[record.beta3dView.path]));
+      if(record.rawMaster&&record.rawMaster.captureSignature===signature&&existingRenderer===RENDERER_VERSION&&record.basicVisual&&existingAssetReady&&existingTerrainReady&&existingBeta3dReady){
         record.status=record.publishedVisual?"published":"basic-ready";
         recordEvent(record,"course-visual-basic-ready",{idempotent:true,version:record.currentVersion});
         return putRecord(record);
       }
-      var example=exampleHoleSvg(captures||[],{inputVisualId:record.id,courseId:courseId,captureSignature:signature});
+      var example=exampleHoleSvg(captures||[],{inputVisualId:record.id,courseId:courseId,captureSignature:signature,capturePlanSummary:capturePlanMeta});
       if(example){
         record.exampleHoleVisual={path:"course-visuals/"+courseId+"/example/"+(example.captureId||"hole")+".svg",dataUrl:example.dataUrl,width:example.width,height:example.height,bounds:example.bounds,captureId:example.captureId,holeNumber:example.holeNumber,metadata:example.metadata};
       }
       try{
-        var stitched=stitchSvg(captures||[],{inputVisualId:record.id,courseId:courseId,captureSignature:signature});
+        var stitched=stitchSvg(captures||[],{inputVisualId:record.id,courseId:courseId,captureSignature:signature,capturePlanSummary:capturePlanMeta});
         var version=(Number(record.currentVersion)||0)+1;
         var visualId=stableId("visual");
         record.rawMaster={path:"course-visuals/"+courseId+"/raw/"+visualId+".svg",dataUrl:stitched.dataUrl,bounds:stitched.bounds,width:stitched.width,height:stitched.height,captureSignature:signature,metadata:stitched.metadata};
         record.basicVisual={path:"course-visuals/"+courseId+"/basic/"+version+".svg",dataUrl:stitched.dataUrl,version:version};
+        var terrain=terrainViewSvg(record,split.terrain,{inputVisualId:record.id,courseId:courseId,captureSignature:signature,capturePlanSummary:capturePlanMeta});
+        if(terrain){
+          record.terrainView={path:"course-visuals/"+courseId+"/terrain/"+version+".svg",dataUrl:terrain.dataUrl,version:version,width:terrain.width,height:terrain.height,bounds:terrain.bounds,sourceCaptureIds:terrain.sourceCaptureIds,metadata:terrain.metadata};
+        }
+        var beta3d=beta3dViewSvg(split.beta3d,{inputVisualId:record.id,courseId:courseId,captureSignature:signature,capturePlanSummary:capturePlanMeta});
+        if(beta3d){
+          record.beta3dView={path:"course-visuals/"+courseId+"/3d-beta/"+version+".svg",dataUrl:beta3d.dataUrl,version:version,width:beta3d.width,height:beta3d.height,bounds:beta3d.bounds,sourceCaptureIds:beta3d.sourceCaptureIds,metadata:beta3d.metadata};
+        }
         record.currentVersion=version;
         record.status="basic-ready";
         record.lastError=null;
-        record.diagnostics=Object.assign({},record.diagnostics||{},{stitchOutputDimensions:{width:stitched.width,height:stitched.height},missingCoverage:stitched.missingAreas,sourceCaptureIds:stitched.sourceCaptureIds,exampleHole:record.exampleHoleVisual?{captureId:record.exampleHoleVisual.captureId,holeNumber:record.exampleHoleVisual.holeNumber,width:record.exampleHoleVisual.width,height:record.exampleHoleVisual.height}:null});
-        record.versions=(record.versions||[]).concat([{version:version,type:"basic",rawMasterPath:record.rawMaster.path,basicImagePath:record.basicVisual.path,sourceCaptureIds:stitched.sourceCaptureIds,createdAt:now(),metadata:stitched.metadata}]);
-        recordEvent(record,"course-visual-basic-ready",{version:version,width:stitched.width,height:stitched.height,missingAreas:stitched.missingAreas.length});
+        record.diagnostics=Object.assign({},record.diagnostics||{},{capturePlanSummary:capturePlanMeta,stitchOutputDimensions:{width:stitched.width,height:stitched.height},terrainView:record.terrainView?{path:record.terrainView.path,sourceCaptureIds:record.terrainView.sourceCaptureIds,width:record.terrainView.width,height:record.terrainView.height}:{status:split.terrain.length?"failed":"missing-terrain-reference"},beta3dView:record.beta3dView?{path:record.beta3dView.path,sourceCaptureIds:record.beta3dView.sourceCaptureIds,width:record.beta3dView.width,height:record.beta3dView.height,metadata:record.beta3dView.metadata}:{status:beta3dExpected?"failed":"off"},missingCoverage:stitched.missingAreas,sourceCaptureIds:stitched.sourceCaptureIds,exampleHole:record.exampleHoleVisual?{captureId:record.exampleHoleVisual.captureId,holeNumber:record.exampleHoleVisual.holeNumber,width:record.exampleHoleVisual.width,height:record.exampleHoleVisual.height}:null});
+        record.versions=(record.versions||[]).concat([{version:version,type:"basic",rawMasterPath:record.rawMaster.path,basicImagePath:record.basicVisual.path,terrainViewPath:record.terrainView&&record.terrainView.path||null,beta3dViewPath:record.beta3dView&&record.beta3dView.path||null,sourceCaptureIds:stitched.sourceCaptureIds,createdAt:now(),metadata:stitched.metadata}]);
+        recordEvent(record,"course-visual-basic-ready",{version:version,width:stitched.width,height:stitched.height,missingAreas:stitched.missingAreas.length,terrainView:!!record.terrainView,beta3dView:!!record.beta3dView});
       }catch(error){
         record.status="failed";
         record.lastError={code:error&&error.code||"stitch-failed",message:error&&error.message||String(error)};
@@ -706,6 +979,7 @@
       status:record.publishedVisual?"published":"basic-ready",
       rawMaster:record.rawMaster?{path:record.rawMaster.path,bounds:record.rawMaster.bounds,width:record.rawMaster.width,height:record.rawMaster.height}:undefined,
       basicVisual:record.basicVisual?{path:record.basicVisual.path,dataUrl:record.basicVisual.dataUrl,version:record.basicVisual.version}:undefined,
+      terrainView:record.terrainView?{path:record.terrainView.path,dataUrl:record.terrainView.dataUrl,version:record.terrainView.version}:undefined,
       previewVisual:record.previewVisual?{path:record.previewVisual.path,dataUrl:record.previewVisual.dataUrl,version:record.previewVisual.version,presetId:record.previewVisual.presetId,presetVersion:record.previewVisual.presetVersion}:undefined,
       publishedVisual:record.publishedVisual?{path:record.publishedVisual.path,dataUrl:record.publishedVisual.dataUrl,version:record.publishedVisual.version,presetId:record.publishedVisual.presetId,presetVersion:record.publishedVisual.presetVersion}:undefined,
       error:record.lastError||undefined
@@ -718,6 +992,7 @@
       status:record.status==="published"?"published":record.previewVisual?"preview-ready":record.basicVisual?"basic-ready":record.status==="failed"?"failed":"unavailable",
       rawMaster:record.rawMaster?{path:record.rawMaster.path,bounds:record.rawMaster.bounds,width:record.rawMaster.width,height:record.rawMaster.height}:undefined,
       basicVisual:record.basicVisual?{path:record.basicVisual.path,version:record.basicVisual.version}:undefined,
+      terrainView:record.terrainView?{path:record.terrainView.path,version:record.terrainView.version}:undefined,
       previewVisual:record.previewVisual?{path:record.previewVisual.path,version:record.previewVisual.version,presetId:record.previewVisual.presetId,presetVersion:record.previewVisual.presetVersion}:undefined,
       publishedVisual:record.publishedVisual?{path:record.publishedVisual.path,version:record.publishedVisual.version,presetId:record.publishedVisual.presetId,presetVersion:record.publishedVisual.presetVersion}:undefined,
       error:record.lastError||undefined
@@ -741,6 +1016,7 @@
       record.rawMaster&&record.rawMaster.dataUrl?{path:record.rawMaster.path,dataUrl:record.rawMaster.dataUrl,contentType:"image/svg+xml",role:"raw-master"}:null,
       record.basicVisual&&record.basicVisual.dataUrl?{path:record.basicVisual.path,dataUrl:record.basicVisual.dataUrl,contentType:"image/svg+xml",role:"basic"}:null,
       record.exampleHoleVisual&&record.exampleHoleVisual.dataUrl?{path:record.exampleHoleVisual.path,dataUrl:record.exampleHoleVisual.dataUrl,contentType:"image/svg+xml",role:"example-hole"}:null,
+      record.terrainView&&record.terrainView.dataUrl?{path:record.terrainView.path,dataUrl:record.terrainView.dataUrl,contentType:"image/svg+xml",role:"terrain-view"}:null,
       record.previewVisual&&record.previewVisual.dataUrl?{path:record.previewVisual.path,dataUrl:record.previewVisual.dataUrl,contentType:"image/svg+xml",role:"preview"}:null,
       record.publishedVisual&&record.publishedVisual.dataUrl?{path:record.publishedVisual.path,dataUrl:record.publishedVisual.dataUrl,contentType:"image/svg+xml",role:"published"}:null
     ].filter(Boolean);
@@ -791,13 +1067,41 @@
       return row?restoreCloudMetadata(row):getRecord(courseId);
     }).catch(function(){return getRecord(courseId);});
   }
-  function buildFromCourseDatabase(courseId){
+  function executeVisualCapturePlan(input,plan){
+    var executor=root&&root.gdBuildCourseVisualCaptureManifest;
+    var errors=[];
+    if(typeof executor!=="function"||!Array.isArray(plan)||!plan.length){
+      return {executed:false,captures:input.captures||[],errors:errors,fallbackReason:typeof executor==="function"?"empty-plan":"capture-executor-missing"};
+    }
+    var captures=[];
+    plan.forEach(function(item){
+      try{
+        var manifest=executor(item);
+        var capture=manifestToCapture(manifest,item);
+        if(capture&&capture.width&&capture.height&&captureBounds(capture)&&(Array.isArray(capture.tiles)&&capture.tiles.length||capture.imageUrl||capture.imageData))captures.push(capture);
+        else errors.push({planId:item&&item.id,role:item&&item.role,holeNumber:item&&item.holeNumber,code:"capture-empty"});
+      }catch(error){
+        errors.push({planId:item&&item.id,role:item&&item.role,holeNumber:item&&item.holeNumber,code:"capture-failed",message:error&&error.message||String(error)});
+      }
+    });
+    return {executed:true,captures:captures.length?captures:(input.captures||[]),errors:errors,fallbackReason:captures.length?"":"planned-captures-empty"};
+  }
+  function buildFromCourseDatabase(courseId,opts){
+    opts=opts||{};
     var api=root&&root.GDCoursePlayPipeline;
     var payload=api&&typeof api.buildCoursePlayDbPayload==="function"?api.buildCoursePlayDbPayload(courseId):null;
     var frameRows=api&&typeof api.getCoursePlayFrameIndex==="function"?api.getCoursePlayFrameIndex(courseId):[];
-    var input=adaptCoursePlayPayloadToVisualInput(payload,{frameRows:frameRows,readManifest:function(key){return readJson(key,null);}});
-    ingestCourseVisualInput(input);
-    return buildCourseVisualMaster(input.courseId,{captures:input.captures});
+    var input=adaptCoursePlayPayloadToVisualInput(payload,{courseId:courseId,frameRows:frameRows,readManifest:function(key){return readJson(key,null);}});
+    var previous=getRecord(input.courseId||courseId);
+    var saved3d=!!(previous&&previous.courseOverrides&&previous.courseOverrides.visualEngine&&previous.courseOverrides.visualEngine.enable3dBeta);
+    var enable3dBeta=opts.enable3dBeta===true||saved3d;
+    var plan=planCourseVisualCaptures(input,{enable3dBeta:enable3dBeta});
+    var planned=executeVisualCapturePlan(input,plan);
+    input=Object.assign({},input,{captures:planned.captures,capturePlan:plan});
+    var record=ingestCourseVisualInput(input);
+    record.diagnostics=Object.assign({},record.diagnostics||{},{stageSettings:{enable3dBeta:enable3dBeta},capturePlan:input.capturePlan,capturePlanSummary:planSummary(plan,planned.captures),captureExecution:{attempted:planned.executed,captured:planned.captures.length,errors:planned.errors,fallbackReason:planned.fallbackReason||""}});
+    putRecord(record);
+    return buildCourseVisualMaster(input.courseId,{captures:input.captures,capturePlan:plan});
   }
   return {
     version:VERSION,
@@ -811,6 +1115,7 @@
     getPreset:getPreset,
     mergePreset:mergePreset,
     adaptCoursePlayPayloadToVisualInput:adaptCoursePlayPayloadToVisualInput,
+    planCourseVisualCaptures:planCourseVisualCaptures,
     manifestToCapture:manifestToCapture,
     ingestCourseVisualInput:ingestCourseVisualInput,
     buildCourseVisualMaster:buildCourseVisualMaster,
