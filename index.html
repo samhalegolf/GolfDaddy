@@ -6692,8 +6692,8 @@ function gdAdminCourseVisualMarkup(selected){
     `<div class="gdAdminCourseVisualGrid">${[
       gdAdminCourseVisualImage("Raw / basic",record.basicVisual,record.rawMaster),
       gdAdminCourseVisualImage("Example hole",record.exampleHoleVisual),
-      gdAdminCourseVisualImage("Styled preview",record.previewVisual,record.rawMaster),
-      gdAdminCourseVisualImage("Published",record.publishedVisual,record.rawMaster)
+      gdAdminCourseVisualImage("Styled preview",record.previewVisual),
+      gdAdminCourseVisualImage("Published",record.publishedVisual)
     ].join("")}</div>`,
     gdAdminCourseVisualControls(record),
     `<div class="gdAdminCourseVisualActions"><button type="button" onclick="return gdAdminCourseVisualBuildBasic('${gdEscapeHTML(selected.id)}')">Build Basic</button><button class="primary" type="button" onclick="return gdAdminCourseVisualBuildPreview('${gdEscapeHTML(selected.id)}')">Build Preview</button><button type="button" onclick="return gdAdminCourseVisualPublish('${gdEscapeHTML(selected.id)}')">Publish</button><button type="button" onclick="return gdAdminCourseVisualResetPublished('${gdEscapeHTML(selected.id)}')">Reset to Published</button><button type="button" onclick="return gdAdminCourseVisualResetPreset('${gdEscapeHTML(selected.id)}')">Reset to Global Preset</button><button type="button" onclick="return gdAdminCourseVisualRevert('${gdEscapeHTML(selected.id)}')">Revert Published</button></div>`,
