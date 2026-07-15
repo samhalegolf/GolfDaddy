@@ -7,7 +7,7 @@
 
   var VERSION=1;
   var PRESET_VERSION=4;
-  var RENDERER_VERSION="clarity-course-visual-renderer-v8";
+  var RENDERER_VERSION="clarity-course-visual-renderer-v9";
   var STORE_KEY="gd_course_visual_engine_v1";
   var PRESET_KEY="gd_course_visual_presets_v1";
   var API_ENDPOINT="/api/course-visuals";
@@ -1258,10 +1258,6 @@
     if(inner)return inner;
     return base?'<image href="'+escapeXml(base)+'" x="0" y="0" width="'+svgNum(width)+'" height="'+svgNum(height)+'" preserveAspectRatio="none"/>':"";
   }
-  function visualAssetImageMarkup(asset,width,height){
-    var base=asset&&asset.dataUrl||"";
-    return base?'<image href="'+escapeXml(base)+'" x="0" y="0" width="'+svgNum(width)+'" height="'+svgNum(height)+'" preserveAspectRatio="none"/>':"";
-  }
   function assetPointProjector(bounds,width,height){
     var projected=projectedBounds(bounds);
     if(!projected)return null;
@@ -1493,7 +1489,7 @@
       ty=(height-scaledH)/2;
     }
     var radius=Math.max(22,Math.min(58,frameW*.055));
-    var source='<g transform="translate('+svgNum(tx)+" "+svgNum(ty)+') scale('+svgNum(scale)+')">'+visualAssetImageMarkup(asset,sourceWidth,sourceHeight)+'</g>';
+    var source='<g transform="translate('+svgNum(tx)+" "+svgNum(ty)+') scale('+svgNum(scale)+')">'+visualAssetSourceMarkup(asset,sourceWidth,sourceHeight)+'</g>';
     var svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+width+'" height="'+height+'" viewBox="0 0 '+width+" "+height+'" data-renderer="'+escapeXml(RENDERER_VERSION)+'" data-role="'+escapeXml(meta.role||"single-hole-play-viewport")+'" data-stage="'+escapeXml(meta.stage||"play-viewport")+'" data-framing-model="gps-play-viewport-over-hole-surface"><defs><mask id="cvPlayViewportDim"><rect width="100%" height="100%" fill="white"/><rect x="'+svgNum(frameX)+'" y="'+svgNum(frameY)+'" width="'+svgNum(frameW)+'" height="'+svgNum(frameH)+'" rx="'+svgNum(radius)+'" fill="black"/></mask><linearGradient id="cvPlayViewportGlass" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="rgba(255,255,255,.14)"/><stop offset=".48" stop-color="rgba(255,255,255,0)"/><stop offset="1" stop-color="rgba(0,0,0,.18)"/></linearGradient></defs><rect width="100%" height="100%" fill="#10130f"/>'+source+'<rect width="100%" height="100%" fill="rgba(0,0,0,.42)" mask="url(#cvPlayViewportDim)"/><rect x="'+svgNum(frameX)+'" y="'+svgNum(frameY)+'" width="'+svgNum(frameW)+'" height="'+svgNum(frameH)+'" rx="'+svgNum(radius)+'" fill="none" stroke="rgba(255,255,255,.92)" stroke-width="'+svgNum(Math.max(4,width*.004))+'"/><rect x="'+svgNum(frameX+Math.max(10,frameW*.018))+'" y="'+svgNum(frameY+Math.max(10,frameW*.018))+'" width="'+svgNum(frameW-Math.max(20,frameW*.036))+'" height="'+svgNum(frameH-Math.max(20,frameW*.036))+'" rx="'+svgNum(Math.max(14,radius*.74))+'" fill="url(#cvPlayViewportGlass)" opacity=".78"/><rect x="'+svgNum(frameX-frameW*.018)+'" y="'+svgNum(frameY-frameW*.018)+'" width="'+svgNum(frameW+frameW*.036)+'" height="'+svgNum(frameH+frameW*.036)+'" rx="'+svgNum(radius+frameW*.018)+'" fill="none" stroke="rgba(102,255,159,.54)" stroke-width="2" stroke-dasharray="18 16"/></svg>';
     var sourceMeta=asset.metadata||{};
     return {dataUrl:dataUrl("image/svg+xml",svg),width:width,height:height,bounds:sourceBounds,captureId:asset.captureId,holeNumber:asset.holeNumber||sourceMeta.holeNumber||null,sourceCaptureIds:asset.sourceCaptureIds||[],metadata:Object.assign({},sourceMeta,{rendererVersion:RENDERER_VERSION,format:"image/svg+xml",role:meta.role||"single-hole-play-viewport",stage:meta.stage||"play-viewport",inputRole:sourceMeta.role||"",inputStage:sourceMeta.stage||"",product:meta.product||sourceMeta.product||"single-hole",captureLens:"mobile-hole",lensAspectRatio:targetAspect,windowShape:"mobile-hole-with-overflow",framingModel:"gps-play-viewport-over-hole-surface",playSurface:Object.assign({},playSurface,{useGpsPlayFraming:true,viewportFrame:{x:+frameX.toFixed(2),y:+frameY.toFixed(2),width:+frameW.toFixed(2),height:+frameH.toFixed(2),aspectRatio:targetAspect},displayTransform:{x:+tx.toFixed(2),y:+ty.toFixed(2),scale:+scale.toFixed(4)},overflowVisible:true}),sourceDimensions:{width:sourceWidth,height:sourceHeight},outputDimensions:{width:width,height:height},viewportFrame:{x:+frameX.toFixed(2),y:+frameY.toFixed(2),width:+frameW.toFixed(2),height:+frameH.toFixed(2),aspectRatio:targetAspect},overflowVisible:true},meta)};
@@ -1527,7 +1523,7 @@
     var imgY=topY;
     var imgW=width-bottomInset*2;
     var imgH=bottomY-topY;
-    var image=visualAssetImageMarkup(asset,sourceWidth,sourceHeight);
+    var image=visualAssetSourceMarkup(asset,sourceWidth,sourceHeight);
     var cameraModel="faux-3d-svg-perspective";
     var svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+width+'" height="'+height+'" viewBox="0 0 '+width+" "+height+'" data-renderer="'+escapeXml(RENDERER_VERSION)+'" data-role="3d-view-beta" data-camera-model="'+escapeXml(cameraModel)+'"><defs><clipPath id="tiltClip"><polygon points="'+topInset+','+topY+' '+(width-topInset)+','+topY+' '+(width-bottomInset)+','+bottomY+' '+bottomInset+','+bottomY+'"/></clipPath><linearGradient id="depthShade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="rgba(255,255,255,.18)"/><stop offset=".50" stop-color="rgba(255,255,255,0)"/><stop offset="1" stop-color="rgba(0,0,0,.34)"/></linearGradient><linearGradient id="sideWall" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="rgba(0,0,0,.45)"/><stop offset="1" stop-color="rgba(0,0,0,.10)"/></linearGradient></defs><rect width="100%" height="100%" fill="#10130f"/><polygon points="'+topInset+','+topY+' '+(width-topInset)+','+topY+' '+(width-bottomInset)+','+bottomY+' '+bottomInset+','+bottomY+'" fill="#182016" stroke="rgba(255,255,255,.30)" stroke-width="2"/><polygon points="'+topInset+','+topY+' '+bottomInset+','+bottomY+' 0,'+height+' 0,'+(bottomY+20)+'" fill="url(#sideWall)" opacity=".74"/><polygon points="'+(width-topInset)+','+topY+' '+(width-bottomInset)+','+bottomY+' '+width+','+height+' '+width+','+(bottomY+20)+'" fill="rgba(255,255,255,.06)" opacity=".78"/><g clip-path="url(#tiltClip)"><g transform="translate('+imgX+" "+imgY+') scale('+svgNum(imgW/sourceWidth)+" "+svgNum(imgH/sourceHeight)+')">'+image+'</g><rect x="'+imgX+'" y="'+imgY+'" width="'+imgW+'" height="'+imgH+'" fill="url(#depthShade)"/></g></svg>';
     var sourceMeta=asset.metadata||{};
