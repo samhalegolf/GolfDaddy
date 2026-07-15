@@ -500,6 +500,21 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	    var minTx=Math.floor(rect.minX/256),maxTx=Math.floor((rect.maxX-1)/256),minTy=Math.floor(rect.minY/256),maxTy=Math.floor((rect.maxY-1)/256);
 	    return Math.max(0,maxTx-minTx+1)*Math.max(0,maxTy-minTy+1);
 	  }
+	  function leafletCameraCapability(){
+	    var proto=safe(function(){return window.L&&window.L.Map&&window.L.Map.prototype;},null);
+	    var nativePitch=!!(proto&&(typeof proto.setPitch==="function"||typeof proto.getPitch==="function"));
+	    var nativeBearing=!!(proto&&(typeof proto.setBearing==="function"||typeof proto.getBearing==="function"||typeof proto.setRotation==="function"||typeof proto.getRotation==="function"));
+	    var runtimePitch=nativePitch||safe(function(){return !!(map&&(typeof map.setPitch==="function"||typeof map.getPitch==="function"));},false);
+	    var runtimeBearing=nativeBearing||safe(function(){return !!(map&&(typeof map.setBearing==="function"||typeof map.getBearing==="function"||typeof map.setRotation==="function"||typeof map.getRotation==="function"));},false);
+	    return {
+	      provider:"leaflet",
+	      library:"leaflet",
+	      nativePitchAvailable:!!runtimePitch,
+	      nativeBearingAvailable:!!runtimeBearing,
+	      pitchStrategy:runtimePitch?"native-pitch":"faux-tilt-svg",
+	      reason:runtimePitch?"leaflet-pitch-api-detected":"plain-leaflet-no-native-pitch"
+	    };
+	  }
 	  function buildCaptureManifest(objectBounds,reason,captureOpts){
 	    captureOpts=captureOpts||{};
 	    objectBounds=coerceBounds(objectBounds);
@@ -545,7 +560,11 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 			      manifest.cameraTiltDeg=Number.isFinite(Number(captureOpts.cameraTiltDeg))?Number(captureOpts.cameraTiltDeg):null;
 			      manifest.captureTiltDeg=Number.isFinite(Number(captureOpts.captureTiltDeg))?Number(captureOpts.captureTiltDeg):null;
 			      manifest.playTiltDeg=Number.isFinite(Number(captureOpts.playTiltDeg))?Number(captureOpts.playTiltDeg):null;
-			      manifest.cameraFallback=captureOpts.beta3dStageOnly?"leaflet-flat-capture-faux-tilt-stage":"";
+			      var cameraCapability=leafletCameraCapability();
+			      manifest.mapCameraCapability=cameraCapability;
+			      manifest.nativePitchAvailable=!!cameraCapability.nativePitchAvailable;
+			      manifest.nativeBearingAvailable=!!cameraCapability.nativeBearingAvailable;
+			      manifest.cameraFallback=captureOpts.beta3dStageOnly&&!cameraCapability.nativePitchAvailable?"leaflet-flat-capture-faux-tilt-stage":"";
 			      manifest.tileSourceLabel=String(captureOpts.tileSourceLabel||"");
 			      manifest.captureLens=String(captureOpts.captureLens||captureOpts.lensShape||"");
 			      manifest.lensShape=String(captureOpts.lensShape||captureOpts.captureLens||"");
@@ -557,7 +576,7 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 			      manifest.segmentStartMeters=Number.isFinite(Number(captureOpts.segmentStartMeters))?Number(captureOpts.segmentStartMeters):null;
 			      manifest.segmentEndMeters=Number.isFinite(Number(captureOpts.segmentEndMeters))?Number(captureOpts.segmentEndMeters):null;
 			      manifest.routeLengthMeters=Number.isFinite(Number(captureOpts.routeLengthMeters))?Number(captureOpts.routeLengthMeters):null;
-			      manifest.visualCapturePolicy={role:manifest.visualRole,quality:manifest.visualQuality,targetZoom:z,requestedTargetZoom:captureOpts.targetZoom||null,minZoom:minZoom,maxZoom:maxZoom,maxTiles:maxTiles,bleedPx:bleed,lockBounds:captureOpts.lockBounds===true,tileSourceLabel:manifest.tileSourceLabel,captureLens:manifest.captureLens,lensShape:manifest.lensShape,lensAspectRatio:manifest.lensAspectRatio,lensOrientation:manifest.lensOrientation,lensFit:manifest.lensFit,segmentIndex:manifest.segmentIndex,segmentCount:manifest.segmentCount,segmentStartMeters:manifest.segmentStartMeters,segmentEndMeters:manifest.segmentEndMeters,routeLengthMeters:manifest.routeLengthMeters};
+			      manifest.visualCapturePolicy={role:manifest.visualRole,quality:manifest.visualQuality,targetZoom:z,requestedTargetZoom:captureOpts.targetZoom||null,minZoom:minZoom,maxZoom:maxZoom,maxTiles:maxTiles,bleedPx:bleed,lockBounds:captureOpts.lockBounds===true,tileSourceLabel:manifest.tileSourceLabel,captureLens:manifest.captureLens,lensShape:manifest.lensShape,lensAspectRatio:manifest.lensAspectRatio,lensOrientation:manifest.lensOrientation,lensFit:manifest.lensFit,segmentIndex:manifest.segmentIndex,segmentCount:manifest.segmentCount,segmentStartMeters:manifest.segmentStartMeters,segmentEndMeters:manifest.segmentEndMeters,routeLengthMeters:manifest.routeLengthMeters,cameraCapability:cameraCapability};
 			    }
 			    manifest=safe(function(){return typeof window.gdCapturedSurfaceWriteScan==="function"?window.gdCapturedSurfaceWriteScan(manifest,{reason:reason,storageKey:storageKey()}):manifest;},manifest)||manifest;
     if(captureOpts.backgroundCapture){
@@ -7186,10 +7205,15 @@ function gdAdminCourseVisualProducts(record){
   const overviewTerrain=gdAdminCourseVisualStageReady(record&&record.terrainView,"terrain-shading","native-visuals")?record.terrainView:null;
   const holeNative=gdAdminCourseVisualStageReady(record&&record.singleHolePreviewVisual,"native-visuals")?record.singleHolePreviewVisual:null;
   const holeTerrain=gdAdminCourseVisualStageReady(record&&record.singleHoleTerrainView,"terrain-shading","native-visuals")?record.singleHoleTerrainView:null;
-  return [
+  const beta3dOn=!!(record&&record.courseOverrides&&record.courseOverrides.visualEngine&&record.courseOverrides.visualEngine.enable3dBeta);
+  const products=[
     {key:"course-overview",label:"Course overview",base:gdAdminCourseVisualProductBase(record),native:overviewNative,terrain:overviewTerrain,published:record&&record.publishedVisual||null},
     {key:"single-hole",label:"Single hole",base:record&&record.exampleHoleVisual||null,native:holeNative,terrain:holeTerrain,published:record&&record.singleHolePublishedVisual||null,holeNumber:record&&record.exampleHoleVisual&&record.exampleHoleVisual.holeNumber||record&&record.singleHoleTerrainView&&record.singleHoleTerrainView.holeNumber||null}
   ];
+  if(beta3dOn||record&&record.beta3dView){
+    products.push({key:"3d-beta",label:"3D view beta",beta:record&&record.beta3dView||null,stages:[{label:"Faux 3D",asset:record&&record.beta3dView||null}],holeNumber:record&&record.beta3dView&&record.beta3dView.metadata&&record.beta3dView.metadata.holeNumber||null});
+  }
+  return products;
 }
 function gdAdminCourseVisualMowingOpacity(value){
   value=String(value||"Unknown");
@@ -7357,17 +7381,17 @@ if(!window.__gdAdminCourseVisualControlsBound){
   document.addEventListener("change",gdAdminCourseVisualControlEvent,true);
 }
 function gdAdminCourseVisualProductCard(product){
-  const visual=product.terrain||product.native||product.published||product.base||null;
+  const visual=product.beta||product.terrain||product.native||product.published||product.base||null;
   const src=visual&&visual.dataUrl||"";
   const width=Number(visual&&visual.width||visual&&visual.metadata&&visual.metadata.outputDimensions&&visual.metadata.outputDimensions.width||0)||0;
   const height=Number(visual&&visual.height||visual&&visual.metadata&&visual.metadata.outputDimensions&&visual.metadata.outputDimensions.height||0)||0;
   const dims=width&&height?`${Math.round(width)}×${Math.round(height)}`:"";
-  const activeStage=product.terrain?"Terrain shading":product.native?"Native visuals":product.published?"Published":product.base?"Base capture":"Waiting";
+  const activeStage=product.beta?"Faux 3D":product.terrain?"Terrain shading":product.native?"Native visuals":product.published?"Published":product.base?"Base capture":"Waiting";
   const aspect=width&&height?width/height:0;
   const scrollClass=aspect&&(aspect<.35||aspect>3.25)?" scroll":"";
   const inline=gdAdminCourseVisualInlineSvg(src,product.label);
   const frame=(inline||src)?(inline||`<img src="${gdEscapeHTML(src)}" alt="${gdEscapeHTML(product.label)}" loading="lazy" decoding="async">`):`<div class="gdAdminCourseVisualEmpty">Awaiting ${gdEscapeHTML(product.label.toLowerCase())}</div>`;
-  const stages=[
+  const stages=product.stages||[
     {label:"Base capture",asset:product.base,ready:gdAdminCourseVisualStageAssetReady(product.base)},
     {label:"Native visuals",asset:product.native,ready:gdAdminCourseVisualStageAssetReady(product.native)},
     {label:"Terrain shading",asset:product.terrain,ready:gdAdminCourseVisualStageAssetReady(product.terrain)},
@@ -7378,7 +7402,7 @@ function gdAdminCourseVisualProductCard(product){
     product.holeNumber?`H${product.holeNumber}`:"",
     visual&&visual.path?String(visual.path).split("/").slice(-3).join("/"):""
   ].filter(Boolean);
-  return `<div class="gdAdminCourseVisualSlot product" data-product="${gdEscapeHTML(product.key||"")}"><div class="gdAdminCourseVisualSlotHead"><strong>${gdEscapeHTML(product.label)}</strong>${dims?`<small>${gdEscapeHTML(dims)}</small>`:""}</div><div class="gdAdminCourseVisualFrame${scrollClass}">${frame}</div><div class="gdAdminCourseVisualStages">${stages.map(stage=>`<span class="gdAdminCourseVisualStage ${stage.ready?"ready":"pending"}">${gdEscapeHTML(stage.label)}</span>`).join("")}</div>${meta.length?`<div class="gdAdminCourseVisualMeta">${meta.map(item=>`<span>${gdEscapeHTML(item)}</span>`).join("")}</div>`:""}</div>`;
+  return `<div class="gdAdminCourseVisualSlot product" data-product="${gdEscapeHTML(product.key||"")}"><div class="gdAdminCourseVisualSlotHead"><strong>${gdEscapeHTML(product.label)}</strong>${dims?`<small>${gdEscapeHTML(dims)}</small>`:""}</div><div class="gdAdminCourseVisualFrame${scrollClass}">${frame}</div><div class="gdAdminCourseVisualStages">${stages.map(stage=>{const ready=stage.ready!==undefined?stage.ready:gdAdminCourseVisualStageAssetReady(stage.asset);return `<span class="gdAdminCourseVisualStage ${ready?"ready":"pending"}">${gdEscapeHTML(stage.label)}</span>`;}).join("")}</div>${meta.length?`<div class="gdAdminCourseVisualMeta">${meta.map(item=>`<span>${gdEscapeHTML(item)}</span>`).join("")}</div>`:""}</div>`;
 }
 function gdAdminCourseVisualPresetList(){
   const engine=window.GDCourseVisualEngine;
@@ -37747,7 +37771,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 <script src="scripts/gd-launch-monitor-data.js?v=practice-data-20260712c"></script>
 <script src="scripts/gd-shot-library-sync.js?v=shot-library-supabase-001"></script>
 <script src="scripts/gd-captured-surface-sync.js?v=captured-surface-supabase-002"></script>
-<script src="scripts/gd-course-visual-engine.js?v=course-visual-engine-006"></script>
+<script src="scripts/gd-course-visual-engine.js?v=course-visual-engine-007"></script>
 <script src="scripts/gd-multi-nine-courses.js?v=multi-nine-courses-001"></script>
 <script src="scripts/gd-native-practice-data.js?v=native-practice-data-001"></script>
 <script id="gdCanonicalRouteAuditV1">
