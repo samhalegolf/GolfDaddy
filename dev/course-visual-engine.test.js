@@ -97,6 +97,10 @@ function visualManifest(id, request, xOffset) {
     cameraTiltDeg: Number.isFinite(Number(request.cameraTiltDeg)) ? Number(request.cameraTiltDeg) : null,
     captureTiltDeg: Number.isFinite(Number(request.captureTiltDeg)) ? Number(request.captureTiltDeg) : null,
     playTiltDeg: Number.isFinite(Number(request.playTiltDeg)) ? Number(request.playTiltDeg) : null,
+    mapCameraCapability: request.mapCameraCapability || null,
+    nativePitchAvailable: request.nativePitchAvailable === true,
+    nativeBearingAvailable: request.nativeBearingAvailable === true,
+    cameraFallback: request.cameraFallback || "",
     captureLens: request.captureLens || request.lensShape || "",
     lensShape: request.lensShape || request.captureLens || "",
     lensAspectRatio: Number.isFinite(Number(request.lensAspectRatio)) ? Number(request.lensAspectRatio) : null,
@@ -191,7 +195,7 @@ function payload() {
   assert.equal(built.status, "basic-ready", "valid captures produce a basic visual record");
   assert.ok(built.rawMaster.path.includes("/raw/"));
   assert.ok(built.basicVisual.dataUrl.startsWith("data:image/svg+xml"));
-  assert.equal(built.rawMaster.metadata.rendererVersion, "clarity-course-visual-renderer-v5");
+  assert.equal(built.rawMaster.metadata.rendererVersion, "clarity-course-visual-renderer-v6");
   assert.equal(built.rawMaster.metadata.layout, "geographic-mercator");
   assert.equal(built.rawMaster.metadata.stitchModel, "geo-rectangle-table-over-live-map", "stitch metadata describes overlapping rectangles over a live map base");
   assert.ok(decodeURIComponent(built.rawMaster.dataUrl).includes("data-stitch-width"), "raw stitch keeps coverage geometry as metadata attributes");
@@ -237,11 +241,11 @@ function payload() {
   assert.equal(preview.singleHolePreviewVisual.metadata.stage, "native-visuals", "single-hole native visual records the native stage");
   const singleHoleNativeSvg = svgText(preview.singleHolePreviewVisual.dataUrl);
   assert.ok(singleHoleNativeSvg.includes("fairway-airbrush"), "single-hole native visuals include the fairway burn-rescue airbrush layer");
-  assert.ok(singleHoleNativeSvg.includes("green-surround-airbrush"), "single-hole native visuals include green-surround burn rescue");
-  assert.ok(singleHoleNativeSvg.includes("cvGreenSurroundAirbrushClip"), "green-surround airbrush is hard-clipped to green geometry");
+  assert.ok(!singleHoleNativeSvg.includes("green-surround-airbrush"), "single-hole native visuals do not touch up greens");
+  assert.ok(!singleHoleNativeSvg.includes("cvGreenSurroundAirbrushClip"), "green touch-up masks are removed completely");
   assert.equal(preview.singleHolePreviewVisual.metadata.fairwayAirbrush.preserves, "relative-luminance-and-mow-lines", "fairway airbrush preserves mowing-line texture");
-  assert.equal(preview.singleHolePreviewVisual.metadata.greenSurroundAirbrush.preserves, "relative-luminance-and-mow-lines", "green-surround airbrush preserves mowing-line texture");
-  assert.equal(preview.singleHolePreviewVisual.metadata.greenSurroundAirbrush.bounds, "green-polygon-only", "green-surround airbrush metadata records the green-only bounds");
+  assert.equal(preview.singleHolePreviewVisual.metadata.greenSurroundAirbrush.enabled, false, "green touch-up metadata is disabled");
+  assert.equal(preview.singleHolePreviewVisual.metadata.greenSurroundAirbrush.reason, "removed-green-touch-up", "green touch-up removal is explicit");
   assert.ok(preview.singleHoleTerrainView.path.includes("/single-hole/terrain/"), "single-hole visual enters terrain shading");
   assert.equal(preview.singleHoleTerrainView.metadata.inputStage, "native-visuals", "single-hole terrain shading consumes the native hole output");
   assert.equal(preview.singleHoleTerrainView.metadata.terrainStrength, 0.85, "single-hole terrain uses the stronger preset terrain strength");
@@ -310,7 +314,7 @@ function payload() {
   });
   engine.ingestCourseVisualInput(multiInput);
   const multiBuilt = await engine.buildCourseVisualMaster("multi-capture");
-  assert.equal(multiBuilt.rawMaster.metadata.rendererVersion, "clarity-course-visual-renderer-v5");
+  assert.equal(multiBuilt.rawMaster.metadata.rendererVersion, "clarity-course-visual-renderer-v6");
   assert.ok(multiBuilt.rawMaster.height < 12000, "multi-capture stitch is geographically laid out instead of vertically appended");
   assert.ok(multiBuilt.rawMaster.height / multiBuilt.rawMaster.width < 8, "multi-capture output keeps a usable preview aspect");
 
@@ -327,7 +331,19 @@ function payload() {
   };
   global.gdBuildCourseVisualCaptureManifest = function buildVisualCapture(request) {
     visualRequests.push(request);
-    return visualManifest("visual-" + request.role + "-" + (request.holeNumber || "course"), request, visualRequests.length * 20);
+    const capture = visualManifest("visual-" + request.role + "-" + (request.holeNumber || "course"), request, visualRequests.length * 20);
+    if (request.role === "three-d-hole-beta") {
+      capture.mapCameraCapability = {
+        provider: "leaflet",
+        library: "leaflet",
+        nativePitchAvailable: false,
+        nativeBearingAvailable: false,
+        pitchStrategy: "faux-tilt-svg",
+        reason: "plain-leaflet-no-native-pitch"
+      };
+      capture.cameraFallback = "leaflet-flat-capture-faux-tilt-stage";
+    }
+    return capture;
   };
   const plannedBuilt = await engine.buildFromCourseDatabase("planned-course", { enable3dBeta: true });
   const requestedRoles = visualRequests.map((request) => request.role);
@@ -338,8 +354,14 @@ function payload() {
   assert.ok(requestedRoles.includes("three-d-hole-beta"), "Build Basic asks browser capture for 3D beta when toggled");
   assert.ok(visualRequests.filter((request) => request.role === "green-surround").every((request) => request.captureLens === "green-square" && request.lensAspectRatio === 1), "green capture requests carry the green-square lens into the browser capture step");
   assert.ok(visualRequests.filter((request) => request.role === "play-corridor" || request.role === "three-d-hole-beta").every((request) => request.captureLens === "mobile-hole" && request.lensAspectRatio === 9 / 16), "corridor and 3D capture requests carry the mobile-hole lens into the browser capture step");
+  assert.equal(plannedBuilt.exampleHoleVisual.metadata.windowShape, "mobile-hole", "single-hole product uses the mobile golf-hole window");
+  assert.ok(Math.abs(plannedBuilt.exampleHoleVisual.width / plannedBuilt.exampleHoleVisual.height - 9 / 16) < 0.02, "single-hole window is portrait instead of square");
+  assert.ok(plannedBuilt.exampleHoleVisual.metadata.sourceCaptureCount > 1, "single-hole window stitches hole captures instead of picking one square");
   assert.ok(plannedBuilt.terrainView && plannedBuilt.terrainView.dataUrl.startsWith("data:image/svg+xml"), "terrain view is built as a separate derived stage");
   assert.ok(plannedBuilt.beta3dView && plannedBuilt.beta3dView.dataUrl.startsWith("data:image/svg+xml"), "3D beta view is built as a separate opt-in stage");
+  assert.equal(plannedBuilt.beta3dView.metadata.cameraModel, "faux-3d-svg-perspective", "3D beta uses faux perspective when Leaflet has no pitch");
+  assert.equal(plannedBuilt.beta3dView.metadata.nativePitchAvailable, false, "3D beta records native pitch as unavailable");
+  assert.equal(plannedBuilt.beta3dView.metadata.mapCameraCapability.reason, "plain-leaflet-no-native-pitch", "3D beta records the Leaflet fallback reason");
   assert.equal(plannedBuilt.rawMaster.metadata.visualLayerModel, "live-underlay-plus-feathered-captures", "raw master records the visual layer model");
   assert.equal(plannedBuilt.diagnostics.stageSettings.enable3dBeta, true, "3D beta toggle is recorded in diagnostics");
 
