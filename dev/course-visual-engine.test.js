@@ -26,16 +26,29 @@ function installStorage() {
   };
 }
 
+function worldPixel(lat, lng, zoom) {
+  const scale = 256 * Math.pow(2, zoom);
+  const sin = Math.sin(lat * Math.PI / 180);
+  return {
+    x: (lng + 180) / 360 * scale,
+    y: (0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI)) * scale
+  };
+}
+
 function manifest(id, holeNumber, xOffset) {
+  const zoom = 17;
+  const imageWidth = 512;
+  const imageHeight = 512;
+  const center = worldPixel(-45.012 - holeNumber * 0.001, 169.102, zoom);
   return {
     key: id,
     courseKey: "cromwell",
     courseName: "Cromwell Golf Course",
     holeNumber,
-    imageWidth: 512,
-    imageHeight: 512,
-    captureZoom: 19,
-    originPx: { x: 1000 + xOffset, y: 2000 },
+    imageWidth,
+    imageHeight,
+    captureZoom: zoom,
+    originPx: { x: Math.round(center.x - imageWidth / 2 + (xOffset || 0)), y: Math.round(center.y - imageHeight / 2) },
     anchorPins: {
       tee: { lat: -45.01 - holeNumber * 0.001, lng: 169.1 },
       green: { lat: -45.012 - holeNumber * 0.001, lng: 169.104 },
@@ -51,10 +64,10 @@ function manifest(id, holeNumber, xOffset) {
       ]
     },
     tiles: [
-      { x: 0, y: 0, z: 19, tileX: 1, tileY: 2, url: "https://tiles.test/" + id + "/0.png" },
-      { x: 256, y: 0, z: 19, tileX: 2, tileY: 2, url: "https://tiles.test/" + id + "/1.png" },
-      { x: 0, y: 256, z: 19, tileX: 1, tileY: 3, url: "https://tiles.test/" + id + "/2.png" },
-      { x: 256, y: 256, z: 19, tileX: 2, tileY: 3, url: "https://tiles.test/" + id + "/3.png" }
+      { x: 0, y: 0, z: zoom, tileX: 1, tileY: 2, url: "https://tiles.test/" + id + "/0.png" },
+      { x: 256, y: 0, z: zoom, tileX: 2, tileY: 2, url: "https://tiles.test/" + id + "/1.png" },
+      { x: 0, y: 256, z: zoom, tileX: 1, tileY: 3, url: "https://tiles.test/" + id + "/2.png" },
+      { x: 256, y: 256, z: zoom, tileX: 2, tileY: 3, url: "https://tiles.test/" + id + "/3.png" }
     ],
     createdAt: "2026-07-15T00:00:00.000Z"
   };
@@ -117,10 +130,15 @@ function payload() {
   assert.equal(built.status, "basic-ready", "valid captures produce a basic visual record");
   assert.ok(built.rawMaster.path.includes("/raw/"));
   assert.ok(built.basicVisual.dataUrl.startsWith("data:image/svg+xml"));
+  assert.equal(built.rawMaster.metadata.rendererVersion, "clarity-course-visual-renderer-v2");
+  assert.equal(built.rawMaster.metadata.layout, "geographic-mercator");
+  assert.ok(built.rawMaster.height / built.rawMaster.width < 8, "full-course stitch does not collapse into a giant vertical strip");
+  assert.ok(built.exampleHoleVisual.dataUrl.startsWith("data:image/svg+xml"), "example hole preview is built from the same captures");
   assert.equal(built.rawMaster.dataUrl, built.basicVisual.dataUrl, "raw master feeds basic delivery without recompression");
   const persistedAfterBuild = JSON.parse(localStorage.getItem(engine.storeKey));
   assert.equal(persistedAfterBuild.records.cromwell.rawMaster.dataUrl, undefined, "raw data URL is not persisted into localStorage");
   assert.equal(persistedAfterBuild.records.cromwell.basicVisual.dataUrl, undefined, "basic data URL is not persisted into localStorage");
+  assert.equal(persistedAfterBuild.records.cromwell.exampleHoleVisual.dataUrl, undefined, "example-hole data URL is not persisted into localStorage");
 
   const failed = engine.ingestCourseVisualInput({ courseId: "no-captures", objects: input.objects, captures: [] });
   assert.equal(failed.status, "unavailable");
@@ -167,6 +185,15 @@ function payload() {
   ]);
   assert.equal(a.currentVersion, b.currentVersion);
   assert.equal(engine.getRecord("basic-only").versions.length, beforeVersions, "duplicate build requests do not create conflicting versions");
+
+  const multiInput = engine.adaptCoursePlayPayloadToVisualInput(Object.assign({}, payload(), { courseId: "multi-capture", courseKey: "multi-capture" }), {
+    captures: [manifest("manifest-multi-1", 1, 0), manifest("manifest-multi-2", 2, 0), manifest("manifest-multi-3", 3, 0)]
+  });
+  engine.ingestCourseVisualInput(multiInput);
+  const multiBuilt = await engine.buildCourseVisualMaster("multi-capture");
+  assert.equal(multiBuilt.rawMaster.metadata.rendererVersion, "clarity-course-visual-renderer-v2");
+  assert.ok(multiBuilt.rawMaster.height < 12000, "multi-capture stitch is geographically laid out instead of vertically appended");
+  assert.ok(multiBuilt.rawMaster.height / multiBuilt.rawMaster.width < 8, "multi-capture output keeps a usable preview aspect");
 
   const globalPreset = engine.getPreset("clarity-course-natural-v1");
   const merged = engine.mergePreset(globalPreset, { turf: { greenStrength: 0.9 } });
