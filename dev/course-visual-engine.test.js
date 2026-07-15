@@ -90,6 +90,7 @@ function visualManifest(id, request, xOffset) {
     visualPlanId: request.planId || request.id,
     stitchLayer: request.stitchLayer,
     anchorPins: request.anchorPins || base.anchorPins,
+    captureAnchorPins: request.captureAnchorPins || {},
     debugUnderlay: !!request.debugUnderlay,
     debugTerrain: !!request.debugTerrain,
     terrainStageOnly: !!request.terrainStageOnly,
@@ -177,13 +178,17 @@ function payload() {
   assert.equal(plan.find((item) => item.role === "green-surround").lensAspectRatio, 1, "green capture lens is square");
   assert.equal(plan.find((item) => item.role === "play-corridor").captureLens, "mobile-hole", "corridor captures use long mobile-hole rectangles");
   assert.equal(plan.find((item) => item.role === "play-corridor").lensAspectRatio, 9 / 16, "corridor lens is portrait shaped");
+  assert.equal(plan.find((item) => item.role === "play-corridor").lensOrientation, "play-axis", "corridor lens is aimed by the hole axis rather than north");
   const corridorSegments = plan.filter((item) => item.role === "play-corridor");
   assert.ok(corridorSegments.length > 1, "long corridors split into multiple fixed-zoom rectangles instead of zooming out");
   assert.ok(corridorSegments.every((item) => item.targetZoom === 19 && item.minZoom === 19), "corridor segments keep a consistent HD zoom");
   assert.ok(corridorSegments.every((item) => item.segmentCount === corridorSegments.length), "corridor segments carry segment metadata for stitching");
+  assert.ok(corridorSegments.every((item) => item.includeAnchorPins === true && item.captureAnchorPins && Array.isArray(item.captureAnchorPins.route) && item.captureAnchorPins.route.length >= 2), "corridor segments carry a wider donor-image route into capture");
+  assert.ok(corridorSegments.every((item) => item.anchorPins && item.anchorPins.green && Array.isArray(item.anchorPins.route) && item.anchorPins.route.length >= item.captureAnchorPins.route.length), "corridor segments keep the full-hole anchors for GPS Play");
   assert.equal(plan.find((item) => item.role === "course-backdrop").captureLens, undefined, "course underlay remains a broad map capture");
   assert.equal(plan.find((item) => item.role === "terrain-reference").captureLens, undefined, "terrain reference remains course-wide");
   assert.equal(betaPlan.find((item) => item.role === "three-d-hole-beta").captureLens, "mobile-hole", "3D beta captures use the same mobile lens");
+  assert.equal(betaPlan.find((item) => item.role === "three-d-hole-beta").lensOrientation, "play-axis", "3D beta captures use the hole axis too");
 
   const record = engine.ingestCourseVisualInput(input);
   assert.equal(record.status, "input-ready");
@@ -196,7 +201,7 @@ function payload() {
   assert.equal(built.status, "basic-ready", "valid captures produce a basic visual record");
   assert.ok(built.rawMaster.path.includes("/raw/"));
   assert.ok(built.basicVisual.dataUrl.startsWith("data:image/svg+xml"));
-  assert.equal(built.rawMaster.metadata.rendererVersion, "clarity-course-visual-renderer-v10");
+  assert.equal(built.rawMaster.metadata.rendererVersion, "clarity-course-visual-renderer-v11");
   assert.equal(built.rawMaster.metadata.layout, "geographic-mercator");
   assert.equal(built.rawMaster.metadata.stitchModel, "geo-rectangle-table-over-live-map", "stitch metadata describes overlapping rectangles over a live map base");
   assert.ok(decodeURIComponent(built.rawMaster.dataUrl).includes("data-stitch-width"), "raw stitch keeps coverage geometry as metadata attributes");
@@ -339,7 +344,7 @@ function payload() {
   });
   engine.ingestCourseVisualInput(multiInput);
   const multiBuilt = await engine.buildCourseVisualMaster("multi-capture");
-  assert.equal(multiBuilt.rawMaster.metadata.rendererVersion, "clarity-course-visual-renderer-v10");
+  assert.equal(multiBuilt.rawMaster.metadata.rendererVersion, "clarity-course-visual-renderer-v11");
   assert.ok(multiBuilt.rawMaster.height < 12000, "multi-capture stitch is geographically laid out instead of vertically appended");
   assert.ok(multiBuilt.rawMaster.height / multiBuilt.rawMaster.width < 8, "multi-capture output keeps a usable preview aspect");
 
@@ -379,7 +384,9 @@ function payload() {
   assert.ok(requestedRoles.includes("three-d-hole-beta"), "Build Basic asks browser capture for 3D beta when toggled");
   assert.ok(visualRequests.filter((request) => request.role === "green-surround").every((request) => request.captureLens === "green-square" && request.lensAspectRatio === 1), "green capture requests carry the green-square lens into the browser capture step");
   assert.ok(visualRequests.filter((request) => request.role === "play-corridor" || request.role === "three-d-hole-beta").every((request) => request.captureLens === "mobile-hole" && request.lensAspectRatio === 9 / 16), "corridor and 3D capture requests carry the mobile-hole lens into the browser capture step");
+  assert.ok(visualRequests.filter((request) => request.role === "play-corridor" || request.role === "three-d-hole-beta").every((request) => request.lensOrientation === "play-axis" && request.includeAnchorPins === true), "mobile-hole capture requests are aimed by the hole axis and include the donor route");
   assert.ok(visualRequests.filter((request) => request.holeNumber).every((request) => request.anchorPins && request.anchorPins.green && Array.isArray(request.anchorPins.route) && request.anchorPins.route.length >= 2), "planned hole captures carry the real green and route anchors into the browser snapshot step");
+  assert.ok(visualRequests.filter((request) => request.role === "play-corridor").every((request) => request.captureAnchorPins && Array.isArray(request.captureAnchorPins.route) && request.captureAnchorPins.route.length >= 2), "planned corridor captures give the browser a segment route for the wider donor image");
   assert.equal(plannedBuilt.exampleHoleVisual.metadata.windowShape, "mobile-hole-with-overflow", "single-hole product uses the mobile golf-hole window with visible overflow");
   assert.equal(plannedBuilt.exampleHoleVisual.metadata.framingModel, "gps-play-viewport-over-hole-surface", "single-hole product previews the GPS Play viewport over the play surface");
   assert.equal(plannedBuilt.exampleHoleVisual.metadata.orientationSource, "tee-green-anchor", "single-hole preview rotates from real tee-to-green anchors");
