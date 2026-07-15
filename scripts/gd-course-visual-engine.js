@@ -6,7 +6,7 @@
   root=root||typeof window!=="undefined"&&window||typeof globalThis!=="undefined"&&globalThis||{};
 
   var VERSION=1;
-  var RENDERER_VERSION="clarity-course-visual-renderer-v2";
+  var RENDERER_VERSION="clarity-course-visual-renderer-v3";
   var STORE_KEY="gd_course_visual_engine_v1";
   var PRESET_KEY="gd_course_visual_presets_v1";
   var API_ENDPOINT="/api/course-visuals";
@@ -237,8 +237,8 @@
     role=String(role||"");
     var mobileHoleLens={captureLens:"mobile-hole",lensShape:"mobile-hole",lensAspectRatio:9/16,lensOrientation:"map-axis",lensFit:"expand-bounds"};
     var greenSquareLens={captureLens:"green-square",lensShape:"green-square",lensAspectRatio:1,lensOrientation:"map-axis",lensFit:"expand-bounds"};
-    if(role==="green-surround")return Object.assign({role:role,label:"Super HD green surrounds",quality:"super-hd",targetZoom:20,minZoom:20,maxZoom:20,maxTiles:460,bleedMeters:72,bleedPx:720,stitchLayer:30,fixedZoom:true},greenSquareLens);
-    if(role==="play-corridor")return Object.assign({role:role,label:"HD play corridor",quality:"hd",targetZoom:19,minZoom:19,maxZoom:19,maxTiles:360,bleedMeters:48,bleedPx:560,stitchLayer:20,fixedZoom:true,maxSegmentMeters:320,segmentOverlapMeters:42,maxSegments:6},mobileHoleLens);
+    if(role==="green-surround")return Object.assign({role:role,label:"Super HD green surrounds",quality:"super-hd",targetZoom:20,minZoom:20,maxZoom:20,maxTiles:220,bleedMeters:26,bleedPx:220,stitchLayer:30,fixedZoom:true},greenSquareLens);
+    if(role==="play-corridor")return Object.assign({role:role,label:"HD play corridor",quality:"hd",targetZoom:19,minZoom:19,maxZoom:19,maxTiles:320,bleedMeters:32,bleedPx:220,stitchLayer:20,fixedZoom:true,maxSegmentMeters:320,segmentOverlapMeters:42,maxSegments:6},mobileHoleLens);
     if(role==="terrain-reference")return {role:role,label:"Terrain view reference",quality:"terrain-map",targetZoom:16,minZoom:14,maxZoom:17,maxTiles:260,bleedMeters:130,bleedPx:380,stitchLayer:5,terrainStageOnly:true,debugTerrain:true,tileSourceLabel:"Esri World Topographic Map",tileTemplate:"https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}"};
     if(role==="three-d-hole-beta")return Object.assign({role:role,label:"3D view beta hole camera",quality:"3d-beta",targetZoom:18,minZoom:18,maxZoom:18,maxTiles:320,bleedMeters:64,bleedPx:620,stitchLayer:40,beta3dStageOnly:true,cameraMode:"3d-beta-toggle",captureTiltDeg:8,playTiltDeg:14,cameraTiltDeg:8,cameraBearingMode:"play-axis",enabledByDefault:false,fixedZoom:true,maxSegmentMeters:320,segmentOverlapMeters:42,maxSegments:6},mobileHoleLens);
     return {role:"course-backdrop",label:"Live map underlay",quality:"live-map-base",targetZoom:17,minZoom:16,maxZoom:18,maxTiles:260,bleedMeters:120,bleedPx:420,stitchLayer:0,debugUnderlay:true};
@@ -833,12 +833,13 @@
     var missingAreas=[];
     function roleStyle(capture){
       var role=String(capture&&capture.role||"source-frame");
-      if(role==="course-backdrop")return {stroke:"#4cc9f0",fill:"rgba(76,201,240,.12)",opacity:.58,label:"LIVE MAP UNDERLAY"};
-      if(role==="play-corridor")return {stroke:"#ffd166",fill:"rgba(255,209,102,.10)",opacity:.9,label:"HD PLAY CORRIDOR"};
-      if(role==="green-surround")return {stroke:"#64f28a",fill:"rgba(100,242,138,.12)",opacity:1,label:"SUPER HD GREEN"};
-      return {stroke:"#ffffff",fill:"rgba(255,255,255,.08)",opacity:1,label:"CAPTURE"};
+      if(role==="course-backdrop")return {opacity:1,label:"LIVE MAP UNDERLAY"};
+      if(role==="play-corridor")return {opacity:.92,label:"HD PLAY CORRIDOR"};
+      if(role==="green-surround")return {opacity:.98,label:"SUPER HD GREEN"};
+      return {opacity:1,label:"CAPTURE"};
     }
-    var groups=positioned.map(function(item){
+    var defs=[];
+    var groups=positioned.map(function(item,index){
       var capture=item.capture;
       var p=item.projected;
       var x=(p.left-overall.left)/spanX*width;
@@ -847,13 +848,21 @@
       var h=Math.max(1,(p.bottom-p.top)/spanY*height);
       if(capture.boundsSource&&capture.boundsSource!=="manifest-image")missingAreas.push({captureId:capture.id,reason:"low-confidence-bounds",boundsSource:capture.boundsSource});
       var style=roleStyle(capture);
-      var labelText=style.label+(capture.holeNumber?" H"+capture.holeNumber:"");
-      var label='<g transform="translate(10 10)"><rect x="0" y="0" width="'+svgNum(Math.max(138,labelText.length*8.4))+'" height="24" rx="5" fill="rgba(0,0,0,.58)"/><text x="8" y="17" font-size="12" fill="#fff" stroke="#000" stroke-width="2.5" paint-order="stroke" font-family="system-ui, sans-serif" font-weight="900">'+escapeXml(labelText)+'</text></g>';
-      var border='<rect x="2" y="2" width="'+svgNum(Math.max(1,(Number(capture.width)||1)-4))+'" height="'+svgNum(Math.max(1,(Number(capture.height)||1)-4))+'" fill="'+style.fill+'" stroke="'+style.stroke+'" stroke-width="5" vector-effect="non-scaling-stroke"/>';
-      return '<g data-capture-id="'+escapeXml(capture.id)+'" data-role="'+escapeXml(capture.role||"source-frame")+'" data-quality="'+escapeXml(capture.quality||"source")+'" data-capture-lens="'+escapeXml(capture.captureLens||"")+'" data-segment-index="'+escapeXml(capture.segmentIndex||"")+'" data-segment-count="'+escapeXml(capture.segmentCount||"")+'" data-stitch-layer="'+escapeXml(capture.stitchLayer||0)+'" opacity="'+svgNum(style.opacity)+'" transform="translate('+svgNum(x)+" "+svgNum(y)+') scale('+svgNum(w/(Number(capture.width)||1))+" "+svgNum(h/(Number(capture.height)||1))+')">'+captureContentSvg(capture)+border+label+'</g>';
+      var role=String(capture&&capture.role||"source-frame");
+      var clipMask="";
+      if(role!=="course-backdrop"){
+        var feather=Math.max(16,Math.min(80,Math.min(w,h)*.08));
+        var maskX=x-feather*2,maskY=y-feather*2,maskW=w+feather*4,maskH=h+feather*4;
+        var innerX=x+feather*.8,innerY=y+feather*.8,innerW=Math.max(1,w-feather*1.6),innerH=Math.max(1,h-feather*1.6);
+        var radius=Math.min(36,Math.max(8,feather*.55));
+        defs.push('<clipPath id="cvStitchClip'+index+'"><rect x="'+svgNum(x)+'" y="'+svgNum(y)+'" width="'+svgNum(w)+'" height="'+svgNum(h)+'" rx="'+svgNum(radius)+'"/></clipPath><mask id="cvStitchMask'+index+'" maskUnits="userSpaceOnUse" x="'+svgNum(maskX)+'" y="'+svgNum(maskY)+'" width="'+svgNum(maskW)+'" height="'+svgNum(maskH)+'"><rect x="'+svgNum(maskX)+'" y="'+svgNum(maskY)+'" width="'+svgNum(maskW)+'" height="'+svgNum(maskH)+'" fill="black"/><rect x="'+svgNum(x)+'" y="'+svgNum(y)+'" width="'+svgNum(w)+'" height="'+svgNum(h)+'" rx="'+svgNum(radius)+'" fill="white" filter="url(#cvStitchFeather)"/><rect x="'+svgNum(innerX)+'" y="'+svgNum(innerY)+'" width="'+svgNum(innerW)+'" height="'+svgNum(innerH)+'" rx="'+svgNum(radius*.65)+'" fill="white"/></mask>');
+        clipMask=' clip-path="url(#cvStitchClip'+index+')" mask="url(#cvStitchMask'+index+')"';
+      }
+      return '<g data-capture-id="'+escapeXml(capture.id)+'" data-role="'+escapeXml(role)+'" data-quality="'+escapeXml(capture.quality||"source")+'" data-capture-lens="'+escapeXml(capture.captureLens||"")+'" data-segment-index="'+escapeXml(capture.segmentIndex||"")+'" data-segment-count="'+escapeXml(capture.segmentCount||"")+'" data-stitch-layer="'+escapeXml(capture.stitchLayer||0)+'" data-stitch-x="'+svgNum(x)+'" data-stitch-y="'+svgNum(y)+'" data-stitch-width="'+svgNum(w)+'" data-stitch-height="'+svgNum(h)+'" opacity="'+svgNum(style.opacity)+'"'+clipMask+' transform="translate('+svgNum(x)+" "+svgNum(y)+') scale('+svgNum(w/(Number(capture.width)||1))+" "+svgNum(h/(Number(capture.height)||1))+')">'+captureContentSvg(capture)+'</g>';
     }).join("");
-    var svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+width+'" height="'+height+'" viewBox="0 0 '+width+" "+height+'" data-renderer="'+escapeXml(RENDERER_VERSION)+'" data-layout="geographic-mercator" data-stitch-model="geo-rectangle-table-over-live-map"><rect width="100%" height="100%" fill="#10130f"/>'+groups+'</svg>';
-    return {dataUrl:dataUrl("image/svg+xml",svg),width:width,height:height,missingAreas:missingAreas,bounds:mergeBounds(positioned.map(function(item){return item.bounds;})),sourceCaptureIds:positioned.map(function(item){return item.capture.id;}),metadata:Object.assign({rendererVersion:RENDERER_VERSION,format:"image/svg+xml",layout:"geographic-mercator",stitchModel:"geo-rectangle-table-over-live-map",debugLayerModel:"live-underlay-plus-captured-overlays",outputDimensions:{width:width,height:height}},meta||{})};
+    var defsMarkup=defs.length?'<defs><filter id="cvStitchFeather" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="24"/></filter>'+defs.join("")+'</defs>':"";
+    var svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+width+'" height="'+height+'" viewBox="0 0 '+width+" "+height+'" data-renderer="'+escapeXml(RENDERER_VERSION)+'" data-layout="geographic-mercator" data-stitch-model="geo-rectangle-table-over-live-map"><rect width="100%" height="100%" fill="#10130f"/>'+defsMarkup+groups+'</svg>';
+    return {dataUrl:dataUrl("image/svg+xml",svg),width:width,height:height,missingAreas:missingAreas,bounds:mergeBounds(positioned.map(function(item){return item.bounds;})),sourceCaptureIds:positioned.map(function(item){return item.capture.id;}),metadata:Object.assign({rendererVersion:RENDERER_VERSION,format:"image/svg+xml",layout:"geographic-mercator",stitchModel:"geo-rectangle-table-over-live-map",visualLayerModel:"live-underlay-plus-feathered-captures",outputDimensions:{width:width,height:height}},meta||{})};
   }
   function splitVisualCaptures(captures){
     var all=(Array.isArray(captures)?captures:[]).filter(renderableCapture);

@@ -6752,6 +6752,7 @@ function gdAdminCourseVisualNeedsAutoBuild(record,sourceStatus){
   const plan=record&&record.diagnostics&&record.diagnostics.capturePlanSummary||null;
   const beta3d=!!(record&&record.courseOverrides&&record.courseOverrides.visualEngine&&record.courseOverrides.visualEngine.enable3dBeta);
   if(!record||!record.rawMaster||!record.basicVisual)return true;
+  if(window.GDCourseVisualEngine&&record.rawMaster&&record.rawMaster.metadata&&String(record.rawMaster.metadata.rendererVersion||"")!==String(window.GDCourseVisualEngine.rendererVersion||""))return true;
   if(!plan||String(plan.stitchModel||"")!=="geo-rectangle-table-over-live-map")return true;
   if(record.rawMaster&&record.rawMaster.metadata&&String(record.rawMaster.metadata.stitchModel||"")!=="geo-rectangle-table-over-live-map")return true;
   if(Number(plan.planned)>0&&Number(plan.captured)<Number(plan.planned))return true;
@@ -6880,13 +6881,20 @@ function gdAdminCourseVisualStitchRectFromGroup(group){
   const role=String(group&&group.getAttribute("data-role")||"");
   const style=gdAdminCourseVisualStitchRoleStyle(role);
   if(!style)return null;
-  const border=group.querySelector("rect[vector-effect],rect[stroke]");
-  if(!border)return null;
+  const attrX=Number(group.getAttribute("data-stitch-x"));
+  const attrY=Number(group.getAttribute("data-stitch-y"));
+  const attrW=Number(group.getAttribute("data-stitch-width"));
+  const attrH=Number(group.getAttribute("data-stitch-height"));
   const t=gdAdminCourseVisualParseTransform(group.getAttribute("transform")||"");
-  const x=(Number(border.getAttribute("x"))||0)*t.sx+t.x;
-  const y=(Number(border.getAttribute("y"))||0)*t.sy+t.y;
-  const width=Math.max(1,(Number(border.getAttribute("width"))||0)*Math.abs(t.sx));
-  const height=Math.max(1,(Number(border.getAttribute("height"))||0)*Math.abs(t.sy));
+  let x=attrX,y=attrY,width=attrW,height=attrH;
+  if(!Number.isFinite(x)||!Number.isFinite(y)||!(Number.isFinite(width)&&width>0)||!(Number.isFinite(height)&&height>0)){
+    const border=group.querySelector("rect[vector-effect],rect[stroke]");
+    if(!border)return null;
+    x=(Number(border.getAttribute("x"))||0)*t.sx+t.x;
+    y=(Number(border.getAttribute("y"))||0)*t.sy+t.y;
+    width=Math.max(1,(Number(border.getAttribute("width"))||0)*Math.abs(t.sx));
+    height=Math.max(1,(Number(border.getAttribute("height"))||0)*Math.abs(t.sy));
+  }
   const captureId=String(group.getAttribute("data-capture-id")||"");
   return {
     role,
@@ -6924,10 +6932,11 @@ function gdAdminCourseVisualLimitEvenly(list,maxCount){
   const stride=Math.max(1,Math.ceil(list.length/Math.max(1,maxCount)));
   return list.filter((item,index)=>index%stride===0).slice(0,maxCount);
 }
-function gdAdminCourseVisualStitchImageEntries(group,item,viewBounds){
+function gdAdminCourseVisualStitchImageEntries(group,item,viewBounds,groupIndex){
   const transform=String(group&&group.getAttribute("transform")||"");
   const t=gdAdminCourseVisualParseTransform(transform);
-  const opacity=item.role==="course-backdrop"?.72:item.role==="green-surround"?.92:.84;
+  const opacity=item.role==="course-backdrop"?.82:item.role==="green-surround"?.96:.88;
+  const clip=item.role==="course-backdrop"?"":` clip-path="url(#gdCourseVisualStitchClip${groupIndex})" mask="url(#gdCourseVisualStitchMask${groupIndex})"`;
   return Array.from(group.querySelectorAll("image")).map(image=>{
     const href=gdAdminCourseVisualImageHref(image);
     if(!href)return null;
@@ -6938,8 +6947,8 @@ function gdAdminCourseVisualStitchImageEntries(group,item,viewBounds){
     const projected={x:t.x+x*t.sx,y:t.y+y*t.sy,width:Math.abs(width*t.sx),height:Math.abs(height*t.sy)};
     if(!gdAdminCourseVisualRectIntersects(projected,viewBounds))return null;
     const preserve=String(image.getAttribute("preserveAspectRatio")||"none");
-    const svg=`<g data-role="${gdEscapeHTML(item.role)}" opacity="${gdAdminCourseVisualSvgNum(opacity)}" transform="${gdEscapeHTML(transform)}"><image href="${gdEscapeHTML(href)}" x="${gdAdminCourseVisualSvgNum(x)}" y="${gdAdminCourseVisualSvgNum(y)}" width="${gdAdminCourseVisualSvgNum(width)}" height="${gdAdminCourseVisualSvgNum(height)}" preserveAspectRatio="${gdEscapeHTML(preserve)}"/></g>`;
-    return {role:item.role,order:item.style.order,svg};
+    const svg=`<g data-role="${gdEscapeHTML(item.role)}" opacity="${gdAdminCourseVisualSvgNum(opacity)}"${clip} transform="${gdEscapeHTML(transform)}"><image href="${gdEscapeHTML(href)}" x="${gdAdminCourseVisualSvgNum(x)}" y="${gdAdminCourseVisualSvgNum(y)}" width="${gdAdminCourseVisualSvgNum(width)}" height="${gdAdminCourseVisualSvgNum(height)}" preserveAspectRatio="${gdEscapeHTML(preserve)}"/></g>`;
+    return {role:item.role,order:item.style.order,groupIndex,svg};
   }).filter(Boolean);
 }
 function gdAdminCourseVisualStitchView(record,planSummary){
@@ -6986,11 +6995,28 @@ function gdAdminCourseVisualStitchView(record,planSummary){
     viewHeight=Math.max(1,viewMaxY-viewMinY);
   }
   const viewBounds={x:viewMinX,y:viewMinY,width:viewWidth,height:viewHeight};
-  const imageEntries=groupItems.flatMap(entry=>gdAdminCourseVisualStitchImageEntries(entry.group,entry.item,viewBounds));
+  const imageEntries=groupItems.flatMap((entry,index)=>gdAdminCourseVisualStitchImageEntries(entry.group,entry.item,viewBounds,index));
   const backdropImages=gdAdminCourseVisualLimitEvenly(imageEntries.filter(entry=>entry.role==="course-backdrop"),denseOverview?520:900);
   const corridorImages=gdAdminCourseVisualLimitEvenly(imageEntries.filter(entry=>entry.role==="play-corridor"),denseOverview?820:1200);
   const greenImages=gdAdminCourseVisualLimitEvenly(imageEntries.filter(entry=>entry.role==="green-surround"),denseOverview?620:900);
-  const renderedImages=backdropImages.concat(corridorImages,greenImages).sort((a,b)=>a.order-b.order).map(entry=>entry.svg).join("");
+  const selectedImages=backdropImages.concat(corridorImages,greenImages).sort((a,b)=>a.order-b.order);
+  const selectedMaskIds=new Set(selectedImages.filter(entry=>entry.role!=="course-backdrop").map(entry=>entry.groupIndex));
+  const maskDefs=groupItems.map((entry,index)=>{
+    if(!selectedMaskIds.has(index))return "";
+    const item=entry.item;
+    const feather=Math.max(20,Math.min(90,Math.min(item.width,item.height)*.08));
+    const maskX=item.x-feather*2;
+    const maskY=item.y-feather*2;
+    const maskW=item.width+feather*4;
+    const maskH=item.height+feather*4;
+    const innerX=item.x+feather*.8;
+    const innerY=item.y+feather*.8;
+    const innerW=Math.max(1,item.width-feather*1.6);
+    const innerH=Math.max(1,item.height-feather*1.6);
+    const radius=Math.min(36,Math.max(10,feather*.55));
+    return `<clipPath id="gdCourseVisualStitchClip${index}"><rect x="${gdAdminCourseVisualSvgNum(item.x)}" y="${gdAdminCourseVisualSvgNum(item.y)}" width="${gdAdminCourseVisualSvgNum(item.width)}" height="${gdAdminCourseVisualSvgNum(item.height)}" rx="${gdAdminCourseVisualSvgNum(radius)}"/></clipPath><mask id="gdCourseVisualStitchMask${index}" maskUnits="userSpaceOnUse" x="${gdAdminCourseVisualSvgNum(maskX)}" y="${gdAdminCourseVisualSvgNum(maskY)}" width="${gdAdminCourseVisualSvgNum(maskW)}" height="${gdAdminCourseVisualSvgNum(maskH)}"><rect x="${gdAdminCourseVisualSvgNum(maskX)}" y="${gdAdminCourseVisualSvgNum(maskY)}" width="${gdAdminCourseVisualSvgNum(maskW)}" height="${gdAdminCourseVisualSvgNum(maskH)}" fill="black"/><rect x="${gdAdminCourseVisualSvgNum(item.x)}" y="${gdAdminCourseVisualSvgNum(item.y)}" width="${gdAdminCourseVisualSvgNum(item.width)}" height="${gdAdminCourseVisualSvgNum(item.height)}" rx="${gdAdminCourseVisualSvgNum(radius)}" fill="white" filter="url(#gdCourseVisualStitchFeather)"/><rect x="${gdAdminCourseVisualSvgNum(innerX)}" y="${gdAdminCourseVisualSvgNum(innerY)}" width="${gdAdminCourseVisualSvgNum(innerW)}" height="${gdAdminCourseVisualSvgNum(innerH)}" rx="${gdAdminCourseVisualSvgNum(radius*.65)}" fill="white"/></mask>`;
+  }).join("");
+  const renderedImages=selectedImages.map(entry=>entry.svg).join("");
   const renderedImageCount=backdropImages.length+corridorImages.length+greenImages.length;
   const stroke=Math.max(2,Math.min(10,viewWidth/360));
   const fontSize=Math.max(12,Math.min(34,viewWidth/86));
@@ -7002,7 +7028,8 @@ function gdAdminCourseVisualStitchView(record,planSummary){
     const visibleLabel=denseOverview&&item.role!=="course-backdrop"?"":`<text x="${gdAdminCourseVisualSvgNum(labelX)}" y="${gdAdminCourseVisualSvgNum(labelY)}" fill="#fff" stroke="#000" stroke-width="${gdAdminCourseVisualSvgNum(Math.max(3,stroke*.55))}" paint-order="stroke" font-family="system-ui, sans-serif" font-size="${gdAdminCourseVisualSvgNum(fontSize)}" font-weight="950">${gdEscapeHTML(label)}</text>`;
     return `<g opacity="${gdAdminCourseVisualSvgNum(item.style.opacity)}"><title>${gdEscapeHTML(label)}</title><rect x="${gdAdminCourseVisualSvgNum(item.x)}" y="${gdAdminCourseVisualSvgNum(item.y)}" width="${gdAdminCourseVisualSvgNum(item.width)}" height="${gdAdminCourseVisualSvgNum(item.height)}" rx="${gdAdminCourseVisualSvgNum(Math.min(12,stroke*1.6))}" fill="${item.style.fill}" stroke="${item.style.stroke}" stroke-width="${gdAdminCourseVisualSvgNum(stroke)}"${dash} vector-effect="non-scaling-stroke"/>${visibleLabel}</g>`;
   }).join("");
-  const svg=`<svg viewBox="${gdAdminCourseVisualSvgNum(viewMinX)} ${gdAdminCourseVisualSvgNum(viewMinY)} ${gdAdminCourseVisualSvgNum(viewWidth)} ${gdAdminCourseVisualSvgNum(viewHeight)}" role="img" aria-label="Course visual stitch table"><defs><pattern id="gdCourseVisualStitchGrid" width="42" height="42" patternUnits="userSpaceOnUse"><path d="M42 0H0V42" fill="none" stroke="rgba(255,255,255,.10)" stroke-width="1"/></pattern></defs><rect x="${gdAdminCourseVisualSvgNum(viewMinX)}" y="${gdAdminCourseVisualSvgNum(viewMinY)}" width="${gdAdminCourseVisualSvgNum(viewWidth)}" height="${gdAdminCourseVisualSvgNum(viewHeight)}" fill="#0b100e"/>${renderedImages}<rect x="${gdAdminCourseVisualSvgNum(viewMinX)}" y="${gdAdminCourseVisualSvgNum(viewMinY)}" width="${gdAdminCourseVisualSvgNum(viewWidth)}" height="${gdAdminCourseVisualSvgNum(viewHeight)}" fill="url(#gdCourseVisualStitchGrid)" opacity=".18"/>${rects}</svg>`;
+  const coverageFallback=renderedImageCount?"":rects;
+  const svg=`<svg viewBox="${gdAdminCourseVisualSvgNum(viewMinX)} ${gdAdminCourseVisualSvgNum(viewMinY)} ${gdAdminCourseVisualSvgNum(viewWidth)} ${gdAdminCourseVisualSvgNum(viewHeight)}" role="img" aria-label="Course visual stitch table"><defs><filter id="gdCourseVisualStitchFeather" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="28"/></filter><pattern id="gdCourseVisualStitchGrid" width="42" height="42" patternUnits="userSpaceOnUse"><path d="M42 0H0V42" fill="none" stroke="rgba(255,255,255,.10)" stroke-width="1"/></pattern>${maskDefs}</defs><rect x="${gdAdminCourseVisualSvgNum(viewMinX)}" y="${gdAdminCourseVisualSvgNum(viewMinY)}" width="${gdAdminCourseVisualSvgNum(viewWidth)}" height="${gdAdminCourseVisualSvgNum(viewHeight)}" fill="#0b100e"/>${renderedImages}<rect x="${gdAdminCourseVisualSvgNum(viewMinX)}" y="${gdAdminCourseVisualSvgNum(viewMinY)}" width="${gdAdminCourseVisualSvgNum(viewWidth)}" height="${gdAdminCourseVisualSvgNum(viewHeight)}" fill="url(#gdCourseVisualStitchGrid)" opacity=".08"/>${coverageFallback}</svg>`;
   const meta=[
     `underlay ${underlayCount}`,
     `corridors ${corridorCount}`,
