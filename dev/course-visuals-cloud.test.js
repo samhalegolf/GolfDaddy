@@ -25,7 +25,7 @@ const { pathToFileURL } = require("url");
     current_version: 2,
     published_version: 2,
     last_error: null,
-    diagnostics: { rendererVersion: "clarity-course-visual-renderer-v1" },
+    diagnostics: { rendererVersion: "clarity-course-visual-renderer-v2" },
     versions: [{ version: 1, type: "basic" }],
     uploaded_assets: [{ path: "course-visuals/cromwell/basic/1.svg", role: "basic" }]
   });

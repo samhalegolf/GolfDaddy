@@ -2136,11 +2136,17 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
     .gdAdminCourseTabs{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0}
     .gdAdminCourseTabs button{border-radius:999px;padding:7px 10px;background:rgba(255,255,255,.08);color:rgba(255,255,255,.72);font-size:10px;font-weight:950}
     .gdAdminCourseTabs button.active{background:rgba(31,211,109,.16);color:#82ffb6}
-    .gdAdminCourseVisualGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:8px 0}
-    .gdAdminCourseVisualSlot{min-width:0;border-radius:14px;border:1px solid rgba(255,255,255,.08);background:rgba(0,0,0,.18);overflow:hidden}
-    .gdAdminCourseVisualSlot strong{display:block;padding:8px 9px;color:#fff;font-size:10px;font-weight:950;text-transform:uppercase;letter-spacing:.05em}
-    .gdAdminCourseVisualSlot img{display:block;width:100%;aspect-ratio:4/3;object-fit:contain;background:#10130f}
-    .gdAdminCourseVisualEmpty{display:grid;place-items:center;width:100%;aspect-ratio:4/3;color:rgba(255,255,255,.48);font-size:11px;font-weight:850;background:#10130f}
+    .gdAdminCourseVisualGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:8px 0}
+    .gdAdminCourseVisualSlot{min-width:0;border-radius:8px;border:1px solid rgba(255,255,255,.08);background:rgba(0,0,0,.18);overflow:hidden}
+    .gdAdminCourseVisualSlotHead{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 9px}
+    .gdAdminCourseVisualSlot strong{color:#fff;font-size:10px;font-weight:950;text-transform:uppercase;letter-spacing:.05em}
+    .gdAdminCourseVisualSlot small{color:rgba(255,255,255,.52);font-size:10px;font-weight:850;white-space:nowrap}
+    .gdAdminCourseVisualFrame{display:grid;place-items:center;width:100%;height:clamp(180px,26vw,320px);overflow:auto;background:#10130f;overscroll-behavior:contain}
+    .gdAdminCourseVisualFrame img{display:block;max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain}
+    .gdAdminCourseVisualFrame.scroll{place-items:start center}
+    .gdAdminCourseVisualFrame.scroll img{width:100%;height:auto;max-width:none;max-height:none}
+    .gdAdminCourseVisualEmpty{display:grid;place-items:center;width:100%;height:100%;min-height:180px;color:rgba(255,255,255,.48);font-size:11px;font-weight:850;background:#10130f}
+    .gdAdminCourseVisualMeta{display:flex;gap:6px;flex-wrap:wrap;padding:7px 9px;border-top:1px solid rgba(255,255,255,.06);color:rgba(255,255,255,.55);font-size:10px;font-weight:850}
     .gdAdminCourseVisualControls{display:grid;grid-template-columns:140px repeat(4,minmax(92px,1fr));gap:8px;align-items:end;margin:8px 0}
     .gdAdminCourseVisualControls label{display:grid;gap:4px;color:rgba(255,255,255,.56);font-size:9px;font-weight:950;text-transform:uppercase;letter-spacing:.05em}
     .gdAdminCourseVisualControls select,.gdAdminCourseVisualControls input{width:100%;box-sizing:border-box;border:1px solid rgba(255,255,255,.10);border-radius:12px;background:rgba(0,0,0,.22);color:#fff;padding:8px;font-size:11px;font-weight:850}
@@ -6556,7 +6562,9 @@ function gdAdminCourseVisualSourceStatus(selected){
     let manifest=null;
     try{manifest=key?JSON.parse(localStorage.getItem(String(key))||"null"):null;}catch(e){manifest=null;}
     const pins=manifest&&manifest.anchorPins||manifest&&manifest.pins||{};
-    const hasBounds=!!(manifest&&manifest.bounds)||!!(pins&&((pins.tee&&pins.green)||(Array.isArray(pins.route)&&pins.route.length)||(Array.isArray(pins.greenShape)&&pins.greenShape.length)));
+    const origin=manifest&&manifest.originPx||{};
+    const hasOriginBounds=!!(manifest&&Number.isFinite(Number(origin.x))&&Number.isFinite(Number(origin.y))&&Number(manifest.imageWidth||manifest.width)>0&&Number(manifest.imageHeight||manifest.height)>0&&Number.isFinite(Number(manifest.captureZoom??manifest.zoom??manifest.tiles?.[0]?.z)));
+    const hasBounds=!!(manifest&&manifest.bounds)||hasOriginBounds||!!(pins&&((pins.tee&&pins.green)||(Array.isArray(pins.route)&&pins.route.length)||(Array.isArray(pins.greenShape)&&pins.greenShape.length)));
     return {
       holeNumber:row&&row.holeNumber||"",
       manifestKey:key,
@@ -6571,9 +6579,19 @@ function gdAdminCourseVisualSourceStatus(selected){
   const renderableCount=details.filter(row=>row.hasManifest&&row.tiles&&row.width&&row.height&&row.hasBounds).length;
   return {frameCount:rows.length,manifestCount,renderableCount,details};
 }
-function gdAdminCourseVisualImage(label,visual){
-  const src=visual&&visual.dataUrl||"";
-  return `<div class="gdAdminCourseVisualSlot"><strong>${gdEscapeHTML(label)}</strong>${src?`<img src="${gdEscapeHTML(src)}" alt="${gdEscapeHTML(label)}">`:`<div class="gdAdminCourseVisualEmpty">Unavailable</div>`}</div>`;
+function gdAdminCourseVisualImage(label,visual,fallback){
+  const src=visual&&visual.dataUrl||fallback&&fallback.dataUrl||"";
+  const width=Number(visual&&visual.width||fallback&&fallback.width||visual&&visual.metadata&&visual.metadata.outputDimensions&&visual.metadata.outputDimensions.width||fallback&&fallback.metadata&&fallback.metadata.outputDimensions&&fallback.metadata.outputDimensions.width||0)||0;
+  const height=Number(visual&&visual.height||fallback&&fallback.height||visual&&visual.metadata&&visual.metadata.outputDimensions&&visual.metadata.outputDimensions.height||fallback&&fallback.metadata&&fallback.metadata.outputDimensions&&fallback.metadata.outputDimensions.height||0)||0;
+  const aspect=width&&height?width/height:0;
+  const scrollClass=aspect&&(aspect<.35||aspect>3.25)?" scroll":"";
+  const dims=width&&height?`${Math.round(width)}×${Math.round(height)}`:"";
+  const meta=[
+    visual&&visual.holeNumber?`H${visual.holeNumber}`:"",
+    visual&&visual.captureId?String(visual.captureId):"",
+    visual&&visual.path?String(visual.path).split("/").slice(-2).join("/"):""
+  ].filter(Boolean);
+  return `<div class="gdAdminCourseVisualSlot"><div class="gdAdminCourseVisualSlotHead"><strong>${gdEscapeHTML(label)}</strong>${dims?`<small>${gdEscapeHTML(dims)}</small>`:""}</div><div class="gdAdminCourseVisualFrame${scrollClass}">${src?`<img src="${gdEscapeHTML(src)}" alt="${gdEscapeHTML(label)}" loading="lazy" decoding="async">`:`<div class="gdAdminCourseVisualEmpty">Unavailable</div>`}</div>${meta.length?`<div class="gdAdminCourseVisualMeta">${meta.map(item=>`<span>${gdEscapeHTML(item)}</span>`).join("")}</div>`:""}</div>`;
 }
 function gdAdminCourseVisualControls(record){
   const modes=["Natural","Fresh","Rich","Strong"];
@@ -6672,9 +6690,10 @@ function gdAdminCourseVisualMarkup(selected){
       gdAdminCourseDbMetric("Play asset",diagnostics.resolvedPlayAsset?"visual":"live map fallback")
     ].join("")}</div>`,
     `<div class="gdAdminCourseVisualGrid">${[
-      gdAdminCourseVisualImage("Raw / basic",record.basicVisual||record.rawMaster),
-      gdAdminCourseVisualImage("Styled preview",record.previewVisual),
-      gdAdminCourseVisualImage("Published",record.publishedVisual)
+      gdAdminCourseVisualImage("Raw / basic",record.basicVisual,record.rawMaster),
+      gdAdminCourseVisualImage("Example hole",record.exampleHoleVisual),
+      gdAdminCourseVisualImage("Styled preview",record.previewVisual,record.rawMaster),
+      gdAdminCourseVisualImage("Published",record.publishedVisual,record.rawMaster)
     ].join("")}</div>`,
     gdAdminCourseVisualControls(record),
     `<div class="gdAdminCourseVisualActions"><button type="button" onclick="return gdAdminCourseVisualBuildBasic('${gdEscapeHTML(selected.id)}')">Build Basic</button><button class="primary" type="button" onclick="return gdAdminCourseVisualBuildPreview('${gdEscapeHTML(selected.id)}')">Build Preview</button><button type="button" onclick="return gdAdminCourseVisualPublish('${gdEscapeHTML(selected.id)}')">Publish</button><button type="button" onclick="return gdAdminCourseVisualResetPublished('${gdEscapeHTML(selected.id)}')">Reset to Published</button><button type="button" onclick="return gdAdminCourseVisualResetPreset('${gdEscapeHTML(selected.id)}')">Reset to Global Preset</button><button type="button" onclick="return gdAdminCourseVisualRevert('${gdEscapeHTML(selected.id)}')">Revert Published</button></div>`,
@@ -36874,7 +36893,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 <script src="scripts/gd-launch-monitor-data.js?v=practice-data-20260712c"></script>
 <script src="scripts/gd-shot-library-sync.js?v=shot-library-supabase-001"></script>
 <script src="scripts/gd-captured-surface-sync.js?v=captured-surface-supabase-002"></script>
-<script src="scripts/gd-course-visual-engine.js?v=course-visual-engine-001"></script>
+<script src="scripts/gd-course-visual-engine.js?v=course-visual-engine-002"></script>
 <script src="scripts/gd-multi-nine-courses.js?v=multi-nine-courses-001"></script>
 <script src="scripts/gd-native-practice-data.js?v=native-practice-data-001"></script>
 <script id="gdCanonicalRouteAuditV1">

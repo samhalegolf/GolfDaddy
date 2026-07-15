@@ -6,7 +6,7 @@
   root=root||typeof window!=="undefined"&&window||typeof globalThis!=="undefined"&&globalThis||{};
 
   var VERSION=1;
-  var RENDERER_VERSION="clarity-course-visual-renderer-v1";
+  var RENDERER_VERSION="clarity-course-visual-renderer-v2";
   var STORE_KEY="gd_course_visual_engine_v1";
   var PRESET_KEY="gd_course_visual_presets_v1";
   var API_ENDPOINT="/api/course-visuals";
@@ -48,6 +48,81 @@
   }
   function validBounds(bounds){
     return !!(bounds&&Number.isFinite(Number(bounds.south))&&Number.isFinite(Number(bounds.west))&&Number.isFinite(Number(bounds.north))&&Number.isFinite(Number(bounds.east))&&Number(bounds.north)>=Number(bounds.south)&&Number(bounds.east)>=Number(bounds.west));
+  }
+  function clamp(value,min,max){value=Number(value);return Math.min(max,Math.max(min,Number.isFinite(value)?value:min));}
+  function svgNum(value){var n=Number(value);return Number.isFinite(n)?Number(n.toFixed(3)).toString():"0";}
+  function median(list){
+    var values=(Array.isArray(list)?list:[]).map(Number).filter(function(value){return Number.isFinite(value)&&value>0;}).sort(function(a,b){return a-b;});
+    if(!values.length)return null;
+    var mid=Math.floor(values.length/2);
+    return values.length%2?values[mid]:(values[mid-1]+values[mid])/2;
+  }
+  function projectLatLng(lat,lng){
+    lat=clamp(lat,-85.05112878,85.05112878);
+    lng=Number(lng);
+    var sin=Math.sin(lat*Math.PI/180);
+    return {x:(lng+180)/360,y:.5-Math.log((1+sin)/(1-sin))/(4*Math.PI)};
+  }
+  function unprojectWorldPixel(x,y,z){
+    var scale=256*Math.pow(2,Number(z)||0);
+    var lng=Number(x)/scale*360-180;
+    var n=Math.PI-2*Math.PI*Number(y)/scale;
+    var lat=180/Math.PI*Math.atan(.5*(Math.exp(n)-Math.exp(-n)));
+    return {lat:lat,lng:lng};
+  }
+  function projectedBounds(bounds){
+    if(!validBounds(bounds))return null;
+    var corners=[
+      projectLatLng(bounds.south,bounds.west),
+      projectLatLng(bounds.south,bounds.east),
+      projectLatLng(bounds.north,bounds.west),
+      projectLatLng(bounds.north,bounds.east)
+    ];
+    var xs=corners.map(function(p){return p.x;});
+    var ys=corners.map(function(p){return p.y;});
+    var out={left:Math.min.apply(null,xs),right:Math.max.apply(null,xs),top:Math.min.apply(null,ys),bottom:Math.max.apply(null,ys)};
+    var minSpan=1e-9;
+    if(out.right-out.left<minSpan){var cx=(out.left+out.right)/2;out.left=cx-minSpan/2;out.right=cx+minSpan/2;}
+    if(out.bottom-out.top<minSpan){var cy=(out.top+out.bottom)/2;out.top=cy-minSpan/2;out.bottom=cy+minSpan/2;}
+    return out;
+  }
+  function mergeProjectedBounds(list){
+    var values=(Array.isArray(list)?list:[]).filter(Boolean);
+    if(!values.length)return null;
+    return {
+      left:Math.min.apply(null,values.map(function(b){return b.left;})),
+      right:Math.max.apply(null,values.map(function(b){return b.right;})),
+      top:Math.min.apply(null,values.map(function(b){return b.top;})),
+      bottom:Math.max.apply(null,values.map(function(b){return b.bottom;}))
+    };
+  }
+  function boundsIntersects(a,b){
+    return validBounds(a)&&validBounds(b)&&!(Number(a.east)<Number(b.west)||Number(a.west)>Number(b.east)||Number(a.north)<Number(b.south)||Number(a.south)>Number(b.north));
+  }
+  function boundsCenter(bounds){
+    return validBounds(bounds)?{lat:(Number(bounds.south)+Number(bounds.north))/2,lng:(Number(bounds.west)+Number(bounds.east))/2}:null;
+  }
+  function boundsCompatible(imageBounds,anchorBounds){
+    if(!validBounds(imageBounds)||!validBounds(anchorBounds))return true;
+    if(boundsIntersects(imageBounds,anchorBounds))return true;
+    var imageCenter=boundsCenter(imageBounds);
+    var anchorCenter=boundsCenter(anchorBounds);
+    if(!imageCenter||!anchorCenter)return true;
+    var latTol=Math.max(.0005,(Number(imageBounds.north)-Number(imageBounds.south)+Number(anchorBounds.north)-Number(anchorBounds.south))*2);
+    var lngTol=Math.max(.0005,(Number(imageBounds.east)-Number(imageBounds.west)+Number(anchorBounds.east)-Number(anchorBounds.west))*2);
+    return Math.abs(imageCenter.lat-anchorCenter.lat)<=latTol&&Math.abs(imageCenter.lng-anchorCenter.lng)<=lngTol;
+  }
+  function manifestImageBounds(manifest){
+    if(!manifest)return null;
+    var width=Math.max(1,Math.round(Number(manifest.imageWidth||manifest.width)||0));
+    var height=Math.max(1,Math.round(Number(manifest.imageHeight||manifest.height)||0));
+    var origin=manifest.originPx||manifest.pixelOrigin||manifest.origin||{};
+    var x=finite(origin.x!==undefined?origin.x:origin.left);
+    var y=finite(origin.y!==undefined?origin.y:origin.top);
+    var zoom=finite(manifest.captureZoom!==undefined?manifest.captureZoom:manifest.zoom);
+    if(zoom==null&&Array.isArray(manifest.tiles)&&manifest.tiles[0])zoom=finite(manifest.tiles[0].z);
+    if(!width||!height||x==null||y==null||zoom==null)return null;
+    return boundsFromPoints([unprojectWorldPixel(x,y,zoom),unprojectWorldPixel(x+width,y+height,zoom)]);
   }
   function escapeXml(value){
     return String(value==null?"":value).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
@@ -140,13 +215,17 @@
     if(!manifest||!Array.isArray(manifest.tiles)||!manifest.tiles.length)return null;
     var courseId=slug(manifest.courseKey||manifest.courseName||opts&&opts.courseId);
     var holeNumber=Math.max(1,Math.round(Number(manifest.holeNumber)||Number(opts&&opts.holeNumber)||1));
-    var bounds=captureBounds(manifest);
+    var anchorBounds=captureBounds(manifest);
+    var imageBounds=manifestImageBounds(manifest);
+    var useImageBounds=imageBounds&&boundsCompatible(imageBounds,anchorBounds);
+    var bounds=useImageBounds?imageBounds:(anchorBounds||imageBounds);
     return {
       id:text(manifest.scanId||manifest.activeScanId||manifest.key||("capture-"+courseId+"-h"+holeNumber),180),
       imageUrl:null,
       imageData:null,
       storagePath:text(manifest.key||manifest.storageKey||"",220),
       bounds:bounds,
+      boundsSource:useImageBounds?"manifest-image":anchorBounds?"anchor-pins":imageBounds?"manifest-image-unverified":"unknown",
       width:Math.max(1,Math.round(Number(manifest.imageWidth)||0)),
       height:Math.max(1,Math.round(Number(manifest.imageHeight)||0)),
       devicePixelRatio:finite(manifest.devicePixelRatio)||1,
@@ -273,12 +352,12 @@
     return attachTransientAssets(clone(record));
   }
   function captureTransientAssets(record){
-    [record&&record.rawMaster,record&&record.basicVisual,record&&record.previewVisual,record&&record.publishedVisual].forEach(function(asset){
+    [record&&record.rawMaster,record&&record.basicVisual,record&&record.exampleHoleVisual,record&&record.previewVisual,record&&record.publishedVisual].forEach(function(asset){
       if(asset&&asset.path&&asset.dataUrl)transientAssetDataByPath[asset.path]=asset.dataUrl;
     });
   }
   function attachTransientAssets(record){
-    [record&&record.rawMaster,record&&record.basicVisual,record&&record.previewVisual,record&&record.publishedVisual].forEach(function(asset){
+    [record&&record.rawMaster,record&&record.basicVisual,record&&record.exampleHoleVisual,record&&record.previewVisual,record&&record.publishedVisual].forEach(function(asset){
       if(asset&&asset.path&&!asset.dataUrl&&transientAssetDataByPath[asset.path])asset.dataUrl=transientAssetDataByPath[asset.path];
     });
     return record;
@@ -286,7 +365,7 @@
   function persistableRecord(record){
     var out=clone(record);
     delete out.captures;
-    [out&&out.rawMaster,out&&out.basicVisual,out&&out.previewVisual,out&&out.publishedVisual].forEach(function(asset){
+    [out&&out.rawMaster,out&&out.basicVisual,out&&out.exampleHoleVisual,out&&out.previewVisual,out&&out.publishedVisual].forEach(function(asset){
       if(asset)delete asset.dataUrl;
     });
     return out;
@@ -308,7 +387,7 @@
     return putRecord(record);
   }
   function captureSignature(captures){
-    return hashString((captures||[]).map(function(capture){return [capture.id,capture.width,capture.height,JSON.stringify(capture.bounds),Array.isArray(capture.tiles)?capture.tiles.length:0].join("|");}).join("\n"));
+    return hashString((captures||[]).map(function(capture){return [capture.id,capture.width,capture.height,capture.boundsSource||"",JSON.stringify(capture.bounds),Array.isArray(capture.tiles)?capture.tiles.length:0].join("|");}).join("\n"));
   }
   function capturesFromRecordRefs(record){
     return (Array.isArray(record&&record.captureRefs)?record.captureRefs:[]).map(function(ref){
@@ -316,29 +395,81 @@
       return manifest?manifestToCapture(manifest,{courseId:record.courseId}):null;
     }).filter(function(capture){return capture&&capture.width&&capture.height&&captureBounds(capture)&&(Array.isArray(capture.tiles)&&capture.tiles.length||capture.imageUrl||capture.imageData);});
   }
-  function stitchSvg(captures,meta){
-    var valid=(Array.isArray(captures)?captures:[]).filter(function(capture){return capture&&capture.width&&capture.height&&Array.isArray(capture.tiles)&&capture.tiles.length;});
-    if(!valid.length)throw Object.assign(new Error("No renderable tile captures found"),{code:"missing-renderable-captures"});
-    var gutter=24;
-    var width=Math.max.apply(null,valid.map(function(capture){return Number(capture.width)||0;}));
-    var height=valid.reduce(function(sum,capture){return sum+(Number(capture.height)||0)+gutter;},0)-gutter;
-    width=Math.max(1,Math.round(width));
-    height=Math.max(1,Math.round(height));
-    var y=0;
-    var missingAreas=[];
-    var groups=valid.map(function(capture){
-      var tiles=capture.tiles.map(function(tile){
+  function renderableCapture(capture){
+    return !!(capture&&capture.width&&capture.height&&(Array.isArray(capture.tiles)&&capture.tiles.length||capture.imageUrl||capture.imageData));
+  }
+  function captureContentSvg(capture){
+    if(Array.isArray(capture&&capture.tiles)&&capture.tiles.length){
+      return capture.tiles.map(function(tile){
         var tw=Number(tile.width)||256,th=Number(tile.height)||256;
-        return '<image href="'+escapeXml(tile.url)+'" x="'+Math.round(Number(tile.x)||0)+'" y="'+Math.round((Number(tile.y)||0)+y)+'" width="'+tw+'" height="'+th+'" preserveAspectRatio="none"/>';
+        return '<image href="'+escapeXml(tile.url)+'" x="'+svgNum(Number(tile.x)||0)+'" y="'+svgNum(Number(tile.y)||0)+'" width="'+svgNum(tw)+'" height="'+svgNum(th)+'" preserveAspectRatio="none"/>';
       }).join("");
-      if(!capture.bounds)missingAreas.push({captureId:capture.id,reason:"missing-bounds"});
-      var label='<text x="12" y="'+Math.max(18,y+18)+'" font-size="14" fill="#fff" stroke="#000" stroke-width="3" paint-order="stroke">'+escapeXml("H"+(capture.holeNumber||"?")+" "+capture.id)+'</text>';
-      var out='<g data-capture-id="'+escapeXml(capture.id)+'">'+tiles+label+'</g>';
-      y+=Math.round(Number(capture.height)||0)+gutter;
-      return out;
+    }
+    var href=capture&&capture.imageData||capture&&capture.imageUrl||"";
+    return href?'<image href="'+escapeXml(href)+'" x="0" y="0" width="'+svgNum(capture.width)+'" height="'+svgNum(capture.height)+'" preserveAspectRatio="none"/>':"";
+  }
+  function chooseExampleCapture(captures){
+    var valid=(Array.isArray(captures)?captures:[]).filter(renderableCapture).sort(function(a,b){
+      var ah=Number(a.holeNumber)||999,bh=Number(b.holeNumber)||999;
+      if(ah!==bh)return ah-bh;
+      return String(a.id||"").localeCompare(String(b.id||""));
+    });
+    return valid[0]||null;
+  }
+  function exampleHoleSvg(captures,meta){
+    var capture=chooseExampleCapture(captures);
+    if(!capture)return null;
+    var width=Math.max(1,Math.round(Number(capture.width)||1));
+    var height=Math.max(1,Math.round(Number(capture.height)||1));
+    var content=captureContentSvg(capture);
+    if(!content)return null;
+    var title="Example hole "+(capture.holeNumber||"?");
+    var label='<g transform="translate(12 12)"><rect x="0" y="0" width="180" height="30" rx="6" fill="rgba(0,0,0,.58)"/><text x="10" y="20" font-size="14" fill="#fff" font-family="system-ui, sans-serif" font-weight="800">'+escapeXml(title)+'</text></g>';
+    var svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+width+'" height="'+height+'" viewBox="0 0 '+width+" "+height+'" data-renderer="'+escapeXml(RENDERER_VERSION)+'" data-role="example-hole"><rect width="100%" height="100%" fill="#10130f"/>'+content+'<rect x="0" y="0" width="100%" height="100%" fill="none" stroke="rgba(255,255,255,.42)" stroke-width="2"/>'+label+'</svg>';
+    return {dataUrl:dataUrl("image/svg+xml",svg),width:width,height:height,bounds:captureBounds(capture),captureId:capture.id,holeNumber:capture.holeNumber||null,sourceCaptureIds:[capture.id],metadata:Object.assign({rendererVersion:RENDERER_VERSION,format:"image/svg+xml",role:"example-hole"},meta||{})};
+  }
+  function stitchSvg(captures,meta){
+    var valid=(Array.isArray(captures)?captures:[]).filter(renderableCapture);
+    if(!valid.length)throw Object.assign(new Error("No renderable tile captures found"),{code:"missing-renderable-captures"});
+    var positioned=valid.map(function(capture){
+      var bounds=captureBounds(capture);
+      var projected=projectedBounds(bounds);
+      return projected?{capture:capture,bounds:bounds,projected:projected}:null;
+    }).filter(Boolean);
+    if(!positioned.length)throw Object.assign(new Error("No geographic capture bounds found"),{code:"missing-geographic-bounds"});
+    var overall=mergeProjectedBounds(positioned.map(function(item){return item.projected;}));
+    var spanX=Math.max(1e-9,overall.right-overall.left);
+    var spanY=Math.max(1e-9,overall.bottom-overall.top);
+    var scales=[];
+    positioned.forEach(function(item){
+      var pw=Math.max(1e-9,item.projected.right-item.projected.left);
+      var ph=Math.max(1e-9,item.projected.bottom-item.projected.top);
+      scales.push((Number(item.capture.width)||1)/pw);
+      scales.push((Number(item.capture.height)||1)/ph);
+    });
+    var usefulScale=median(scales)||4096/Math.max(spanX,spanY);
+    var usefulMax=Math.max(spanX*usefulScale,spanY*usefulScale);
+    var maxDim=clamp(Math.round(usefulMax),1024,8192);
+    var aspect=spanX/spanY||1;
+    var width,height;
+    if(aspect>=1){width=maxDim;height=Math.round(maxDim/aspect);}
+    else{height=maxDim;width=Math.round(maxDim*aspect);}
+    width=Math.round(clamp(width,256,8192));
+    height=Math.round(clamp(height,256,8192));
+    var missingAreas=[];
+    var groups=positioned.map(function(item){
+      var capture=item.capture;
+      var p=item.projected;
+      var x=(p.left-overall.left)/spanX*width;
+      var y=(p.top-overall.top)/spanY*height;
+      var w=Math.max(1,(p.right-p.left)/spanX*width);
+      var h=Math.max(1,(p.bottom-p.top)/spanY*height);
+      if(capture.boundsSource&&capture.boundsSource!=="manifest-image")missingAreas.push({captureId:capture.id,reason:"low-confidence-bounds",boundsSource:capture.boundsSource});
+      var label='<text x="10" y="20" font-size="13" fill="#fff" stroke="#000" stroke-width="3" paint-order="stroke" font-family="system-ui, sans-serif" font-weight="800">'+escapeXml("H"+(capture.holeNumber||"?"))+'</text>';
+      return '<g data-capture-id="'+escapeXml(capture.id)+'" transform="translate('+svgNum(x)+" "+svgNum(y)+') scale('+svgNum(w/(Number(capture.width)||1))+" "+svgNum(h/(Number(capture.height)||1))+')">'+captureContentSvg(capture)+label+'</g>';
     }).join("");
-    var svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+width+'" height="'+height+'" viewBox="0 0 '+width+" "+height+'" data-renderer="'+escapeXml(RENDERER_VERSION)+'"><rect width="100%" height="100%" fill="#111"/>'+groups+'</svg>';
-    return {dataUrl:dataUrl("image/svg+xml",svg),width:width,height:height,missingAreas:missingAreas,bounds:mergeBounds(valid.map(captureBounds)),sourceCaptureIds:valid.map(function(c){return c.id;}),metadata:Object.assign({rendererVersion:RENDERER_VERSION,format:"image/svg+xml"},meta||{})};
+    var svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+width+'" height="'+height+'" viewBox="0 0 '+width+" "+height+'" data-renderer="'+escapeXml(RENDERER_VERSION)+'" data-layout="geographic-mercator"><rect width="100%" height="100%" fill="#10130f"/>'+groups+'</svg>';
+    return {dataUrl:dataUrl("image/svg+xml",svg),width:width,height:height,missingAreas:missingAreas,bounds:mergeBounds(positioned.map(function(item){return item.bounds;})),sourceCaptureIds:positioned.map(function(item){return item.capture.id;}),metadata:Object.assign({rendererVersion:RENDERER_VERSION,format:"image/svg+xml",layout:"geographic-mercator",outputDimensions:{width:width,height:height}},meta||{})};
   }
   function buildCourseVisualMaster(courseId,opts){
     opts=opts||{};
@@ -351,10 +482,15 @@
       recordEvent(record,"course-visual-stitch-started",{captureCount:(captures||[]).length});
       putRecord(record);
       var signature=captureSignature(captures||[]);
-      if(record.rawMaster&&record.rawMaster.captureSignature===signature&&record.basicVisual){
+      var existingRenderer=record.rawMaster&&record.rawMaster.metadata&&record.rawMaster.metadata.rendererVersion;
+      if(record.rawMaster&&record.rawMaster.captureSignature===signature&&existingRenderer===RENDERER_VERSION&&record.basicVisual){
         record.status=record.publishedVisual?"published":"basic-ready";
         recordEvent(record,"course-visual-basic-ready",{idempotent:true,version:record.currentVersion});
         return putRecord(record);
+      }
+      var example=exampleHoleSvg(captures||[],{inputVisualId:record.id,courseId:courseId,captureSignature:signature});
+      if(example){
+        record.exampleHoleVisual={path:"course-visuals/"+courseId+"/example/"+(example.captureId||"hole")+".svg",dataUrl:example.dataUrl,width:example.width,height:example.height,bounds:example.bounds,captureId:example.captureId,holeNumber:example.holeNumber,metadata:example.metadata};
       }
       try{
         var stitched=stitchSvg(captures||[],{inputVisualId:record.id,courseId:courseId,captureSignature:signature});
@@ -365,7 +501,7 @@
         record.currentVersion=version;
         record.status="basic-ready";
         record.lastError=null;
-        record.diagnostics=Object.assign({},record.diagnostics||{},{stitchOutputDimensions:{width:stitched.width,height:stitched.height},missingCoverage:stitched.missingAreas,sourceCaptureIds:stitched.sourceCaptureIds});
+        record.diagnostics=Object.assign({},record.diagnostics||{},{stitchOutputDimensions:{width:stitched.width,height:stitched.height},missingCoverage:stitched.missingAreas,sourceCaptureIds:stitched.sourceCaptureIds,exampleHole:record.exampleHoleVisual?{captureId:record.exampleHoleVisual.captureId,holeNumber:record.exampleHoleVisual.holeNumber,width:record.exampleHoleVisual.width,height:record.exampleHoleVisual.height}:null});
         record.versions=(record.versions||[]).concat([{version:version,type:"basic",rawMasterPath:record.rawMaster.path,basicImagePath:record.basicVisual.path,sourceCaptureIds:stitched.sourceCaptureIds,createdAt:now(),metadata:stitched.metadata}]);
         recordEvent(record,"course-visual-basic-ready",{version:version,width:stitched.width,height:stitched.height,missingAreas:stitched.missingAreas.length});
       }catch(error){
@@ -525,6 +661,7 @@
     var assets=[
       record.rawMaster&&record.rawMaster.dataUrl?{path:record.rawMaster.path,dataUrl:record.rawMaster.dataUrl,contentType:"image/svg+xml",role:"raw-master"}:null,
       record.basicVisual&&record.basicVisual.dataUrl?{path:record.basicVisual.path,dataUrl:record.basicVisual.dataUrl,contentType:"image/svg+xml",role:"basic"}:null,
+      record.exampleHoleVisual&&record.exampleHoleVisual.dataUrl?{path:record.exampleHoleVisual.path,dataUrl:record.exampleHoleVisual.dataUrl,contentType:"image/svg+xml",role:"example-hole"}:null,
       record.previewVisual&&record.previewVisual.dataUrl?{path:record.previewVisual.path,dataUrl:record.previewVisual.dataUrl,contentType:"image/svg+xml",role:"preview"}:null,
       record.publishedVisual&&record.publishedVisual.dataUrl?{path:record.publishedVisual.path,dataUrl:record.publishedVisual.dataUrl,contentType:"image/svg+xml",role:"published"}:null
     ].filter(Boolean);
