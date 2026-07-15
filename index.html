@@ -7186,6 +7186,11 @@ function gdAdminCourseVisualMowingOpacity(value){
   if(value==="Prominent")return .28;
   return 0;
 }
+function gdAdminCourseVisualClampedNumber(value,min,max,fallback){
+  const n=Number(value);
+  if(!Number.isFinite(n))return fallback;
+  return Math.min(max,Math.max(min,n));
+}
 function gdAdminCourseVisualMergedSettings(presetId,overrides){
   const engine=window.GDCourseVisualEngine;
   let preset=null;
@@ -7198,13 +7203,13 @@ function gdAdminCourseVisualLiveFilterValues(presetId,overrides){
   const settings=gdAdminCourseVisualMergedSettings(presetId,overrides);
   const turf=settings&&settings.turf||{};
   const lighting=settings&&settings.lighting||{};
-  const green=Number(turf.greenStrength);
-  const brightnessTarget=Number(lighting.brightnessTarget);
-  const contrastTarget=Number(lighting.contrastTarget);
+  const green=gdAdminCourseVisualClampedNumber(turf.greenStrength,0,1,.35);
+  const brightnessTarget=gdAdminCourseVisualClampedNumber(lighting.brightnessTarget,20,85,52);
+  const contrastTarget=gdAdminCourseVisualClampedNumber(lighting.contrastTarget,.8,1.25,1.04);
   return {
-    saturation:Number((1+(Number.isFinite(green)?green:.35)*.22).toFixed(3)),
-    brightness:Number((1+((Number.isFinite(brightnessTarget)?brightnessTarget:52)-52)/140).toFixed(3)),
-    contrast:Number((Number.isFinite(contrastTarget)?contrastTarget:1.04).toFixed(3)),
+    saturation:Number((1+green*.22).toFixed(3)),
+    brightness:Number((1+(brightnessTarget-52)/140).toFixed(3)),
+    contrast:Number(contrastTarget.toFixed(3)),
     mowingOpacity:gdAdminCourseVisualMowingOpacity(settings&&settings.mowingVisibility||overrides&&overrides.mowingVisibility)
   };
 }
@@ -7336,9 +7341,9 @@ function gdAdminCourseVisualControls(record,courseId){
   const overrides=record&&record.courseOverrides||{};
   const settings=gdAdminCourseVisualMergedSettings(preset,overrides);
   const mowing=String(settings.mowingVisibility||"Unknown");
-  const strength=Number(settings.turf&&settings.turf.greenStrength);
-  const brightness=Number(settings.lighting&&settings.lighting.brightnessTarget);
-  const contrast=Number(settings.lighting&&settings.lighting.contrastTarget);
+  const strength=gdAdminCourseVisualClampedNumber(settings.turf&&settings.turf.greenStrength,0,1,.35);
+  const brightness=gdAdminCourseVisualClampedNumber(settings.lighting&&settings.lighting.brightnessTarget,20,85,52);
+  const contrast=gdAdminCourseVisualClampedNumber(settings.lighting&&settings.lighting.contrastTarget,.8,1.25,1.04);
   const beta3d=!!(settings.visualEngine&&settings.visualEngine.enable3dBeta);
   const key=gdEscapeHTML(courseId||record&&record.courseId||"");
   return `<div class="gdAdminCourseVisualControls" data-course-id="${key}">
@@ -7351,12 +7356,12 @@ function gdAdminCourseVisualControls(record,courseId){
   </div>`;
 }
 function gdAdminCourseVisualOverridesFromForm(){
-  const green=Number(document.getElementById("gdCourseVisualGreenStrength")?.value);
-  const brightness=Number(document.getElementById("gdCourseVisualBrightness")?.value);
-  const contrast=Number(document.getElementById("gdCourseVisualContrast")?.value);
+  const green=gdAdminCourseVisualClampedNumber(document.getElementById("gdCourseVisualGreenStrength")?.value,0,1,.35);
+  const brightness=gdAdminCourseVisualClampedNumber(document.getElementById("gdCourseVisualBrightness")?.value,20,85,52);
+  const contrast=gdAdminCourseVisualClampedNumber(document.getElementById("gdCourseVisualContrast")?.value,.8,1.25,1.04);
   return {
-    turf:{greenStrength:Number.isFinite(green)?green:.35},
-    lighting:{brightnessTarget:Number.isFinite(brightness)?brightness:52,contrastTarget:Number.isFinite(contrast)?contrast:1.04},
+    turf:{greenStrength:green},
+    lighting:{brightnessTarget:brightness,contrastTarget:contrast},
     mowingVisibility:String(document.getElementById("gdCourseVisualMowing")?.value||"Unknown"),
     visualEngine:{enable3dBeta:document.getElementById("gdCourseVisual3dBeta")?.checked===true}
   };
