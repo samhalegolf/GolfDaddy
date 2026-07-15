@@ -7,7 +7,7 @@
 
   var VERSION=1;
   var PRESET_VERSION=4;
-  var RENDERER_VERSION="clarity-course-visual-renderer-v10";
+  var RENDERER_VERSION="clarity-course-visual-renderer-v11";
   var STORE_KEY="gd_course_visual_engine_v1";
   var PRESET_KEY="gd_course_visual_presets_v1";
   var API_ENDPOINT="/api/course-visuals";
@@ -197,6 +197,27 @@
     var shape=points(holeData.green&&holeData.green.greenShape||holeData.green&&holeData.green.shape||holeData.greenShape||holeData.shape);
     return {tee:tee,green:green,route:route,greenShape:shape};
   }
+  function holeDataCaptureAnchorPins(holeData,role,extra){
+    role=String(role||"");
+    if(role!=="play-corridor"&&role!=="three-d-hole-beta")return null;
+    var anchors=holeDataAnchorPins(holeData);
+    var route=points(anchors.route);
+    if(!route.length&&anchors.tee&&anchors.green)route=[anchors.tee,anchors.green];
+    var segmentRoute=route;
+    var start=finite(extra&&extra.segmentStartMeters);
+    var end=finite(extra&&extra.segmentEndMeters);
+    if(route.length>=2&&start!=null&&end!=null&&end>start)segmentRoute=routeSegmentPoints(route,start,end);
+    if(!segmentRoute.length)segmentRoute=route;
+    var count=Number(extra&&extra.segmentCount)||0;
+    var index=Number(extra&&extra.segmentIndex)||0;
+    var isLast=!count||!index||index>=count;
+    return {
+      tee:segmentRoute[0]||anchors.tee||null,
+      green:segmentRoute[segmentRoute.length-1]||anchors.green||null,
+      route:segmentRoute,
+      greenShape:isLast?anchors.greenShape:[]
+    };
+  }
   function splitBoundsAlongRoute(bounds,holeData,policy){
     if(!validBounds(bounds))return [];
     var route=holeDataRoutePoints(holeData);
@@ -244,7 +265,7 @@
   }
   function capturePolicy(role){
     role=String(role||"");
-    var mobileHoleLens={captureLens:"mobile-hole",lensShape:"mobile-hole",lensAspectRatio:9/16,lensOrientation:"map-axis",lensFit:"expand-bounds"};
+    var mobileHoleLens={captureLens:"mobile-hole",lensShape:"mobile-hole",lensAspectRatio:9/16,lensOrientation:"play-axis",lensFit:"expand-bounds"};
     var greenSquareLens={captureLens:"green-square",lensShape:"green-square",lensAspectRatio:1,lensOrientation:"map-axis",lensFit:"expand-bounds"};
     if(role==="green-surround")return Object.assign({role:role,label:"Super HD green surrounds",quality:"super-hd",targetZoom:20,minZoom:20,maxZoom:20,maxTiles:220,bleedMeters:26,bleedPx:220,stitchLayer:30,fixedZoom:true},greenSquareLens);
     if(role==="play-corridor")return Object.assign({role:role,label:"HD play corridor",quality:"hd",targetZoom:19,minZoom:19,maxZoom:19,maxTiles:320,bleedMeters:32,bleedPx:220,stitchLayer:20,fixedZoom:true,maxSegmentMeters:320,segmentOverlapMeters:42,maxSegments:6},mobileHoleLens);
@@ -259,6 +280,8 @@
     if(!validBounds(padded))return null;
     var segmentSuffix=extra.segmentCount>1?"s"+extra.segmentIndex+"of"+extra.segmentCount:"";
     var id=["cv-plan",slug(courseId),policy.role,holeNumber?"h"+holeNumber:"course",segmentSuffix,hashString(padded)].filter(Boolean).join(":");
+    var anchors=holeDataAnchorPins(holeData);
+    var capturePins=holeDataCaptureAnchorPins(holeData,policy.role,extra);
     return Object.assign({},policy,{
       id:id,
       planId:id,
@@ -273,9 +296,11 @@
       bounds:padded,
       sourceBounds:bounds,
       holeData:holeData||null,
-      anchorPins:holeDataAnchorPins(holeData),
+      anchorPins:anchors,
+      captureAnchorPins:capturePins,
+      includeAnchorPins:!!(capturePins&&capturePins.route&&capturePins.route.length),
       captureKey:[slug(courseId),holeNumber?"h"+holeNumber:"course",policy.role,segmentSuffix].filter(Boolean).join(":"),
-      reason:"course-visual-"+policy.role+"-visual-lock"
+      reason:"course-visual-"+policy.role+(capturePins?"-hole-axis":"-visual-lock")
     });
   }
   function holeRecordToPlayData(hole){
@@ -648,6 +673,7 @@
       nativePitchAvailable:!!(manifest.nativePitchAvailable||cameraCapability&&cameraCapability.nativePitchAvailable),
       nativeBearingAvailable:!!(manifest.nativeBearingAvailable||cameraCapability&&cameraCapability.nativeBearingAvailable),
       anchorPins:clone(manifest.anchorPins||manifest.pins||opts&&opts.anchorPins||{}),
+      captureAnchorPins:clone(manifest.captureAnchorPins||manifest.capturePins||opts&&opts.captureAnchorPins||{}),
       tileSourceLabel:text(manifest.tileSourceLabel||opts&&opts.tileSourceLabel,120),
       captureLens:text(manifest.captureLens||manifest.lensShape||opts&&opts.captureLens||opts&&opts.lensShape,80),
       lensShape:text(manifest.lensShape||manifest.captureLens||opts&&opts.lensShape||opts&&opts.captureLens,80),
@@ -785,7 +811,7 @@
       courseName:text(input.courseName||input.name,180),
       courseBounds:validBounds(input.courseBounds)?input.courseBounds:mergeBounds((input.captures||[]).map(captureBounds).concat((input.objects||[]).map(function(o){return o&&o.bounds;}))),
       capturePlan:(Array.isArray(input.capturePlan)?input.capturePlan:[]).map(function(item){
-        return {id:text(item&&item.id||item&&item.planId,180),role:text(item&&item.role,60),quality:text(item&&item.quality,60),holeNumber:finite(item&&item.holeNumber),targetZoom:finite(item&&item.targetZoom),minZoom:finite(item&&item.minZoom),maxTiles:finite(item&&item.maxTiles),stitchLayer:finite(item&&item.stitchLayer),bounds:validBounds(item&&item.bounds)?item.bounds:null,label:text(item&&item.label,120),terrainStageOnly:!!(item&&item.terrainStageOnly),beta3dStageOnly:!!(item&&item.beta3dStageOnly),cameraMode:text(item&&item.cameraMode,80),cameraTiltDeg:finite(item&&item.cameraTiltDeg),captureTiltDeg:finite(item&&item.captureTiltDeg),playTiltDeg:finite(item&&item.playTiltDeg),tileSourceLabel:text(item&&item.tileSourceLabel,120),captureLens:text(item&&item.captureLens||item&&item.lensShape,80),lensShape:text(item&&item.lensShape||item&&item.captureLens,80),lensAspectRatio:finite(item&&item.lensAspectRatio!==undefined?item.lensAspectRatio:item&&item.lensAspect),lensOrientation:text(item&&item.lensOrientation,80),lensFit:text(item&&item.lensFit,80),segmentIndex:finite(item&&item.segmentIndex),segmentCount:finite(item&&item.segmentCount),segmentStartMeters:finite(item&&item.segmentStartMeters),segmentEndMeters:finite(item&&item.segmentEndMeters),routeLengthMeters:finite(item&&item.routeLengthMeters),anchorPins:clone(item&&item.anchorPins||{})};
+        return {id:text(item&&item.id||item&&item.planId,180),role:text(item&&item.role,60),quality:text(item&&item.quality,60),holeNumber:finite(item&&item.holeNumber),targetZoom:finite(item&&item.targetZoom),minZoom:finite(item&&item.minZoom),maxTiles:finite(item&&item.maxTiles),stitchLayer:finite(item&&item.stitchLayer),bounds:validBounds(item&&item.bounds)?item.bounds:null,label:text(item&&item.label,120),terrainStageOnly:!!(item&&item.terrainStageOnly),beta3dStageOnly:!!(item&&item.beta3dStageOnly),cameraMode:text(item&&item.cameraMode,80),cameraTiltDeg:finite(item&&item.cameraTiltDeg),captureTiltDeg:finite(item&&item.captureTiltDeg),playTiltDeg:finite(item&&item.playTiltDeg),tileSourceLabel:text(item&&item.tileSourceLabel,120),captureLens:text(item&&item.captureLens||item&&item.lensShape,80),lensShape:text(item&&item.lensShape||item&&item.captureLens,80),lensAspectRatio:finite(item&&item.lensAspectRatio!==undefined?item.lensAspectRatio:item&&item.lensAspect),lensOrientation:text(item&&item.lensOrientation,80),lensFit:text(item&&item.lensFit,80),segmentIndex:finite(item&&item.segmentIndex),segmentCount:finite(item&&item.segmentCount),segmentStartMeters:finite(item&&item.segmentStartMeters),segmentEndMeters:finite(item&&item.segmentEndMeters),routeLengthMeters:finite(item&&item.routeLengthMeters),anchorPins:clone(item&&item.anchorPins||{}),captureAnchorPins:clone(item&&item.captureAnchorPins||{}),includeAnchorPins:!!(item&&item.includeAnchorPins)};
       }),
       sourceHoles:Array.isArray(input.sourceHoles)?input.sourceHoles.map(function(hole){return clone(hole);}):[],
       objects:(Array.isArray(input.objects)?input.objects:[]).map(function(object,index){

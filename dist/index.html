@@ -506,39 +506,46 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
     safe(function(){if(capturedGpsPlayActive())gdCoursePlayDebugEvent("gps-play-loaded-course-visual-surface",{manifestKey:manifest.key,path:manifest.courseVisualPath,captureZoom:manifest.captureZoom,imageWidth:manifest.imageWidth,imageHeight:manifest.imageHeight});});
     return publishCaptureManifest(manifest);
   }
-	  function captureAnchorPins(captureOpts){
-	    captureOpts=captureOpts||{};
-	    var planned=captureOpts.anchorPins||captureOpts.pins||{};
+	  function cleanCapturePinSet(planned){
+	    planned=planned||{};
 	    function pack(p){p=asLL(p);return validLL(p)?{lat:+p.lat,lng:+p.lng}:null;}
 	    var plannedRoute=Array.isArray(planned.route)?planned.route.map(pack).filter(Boolean):[];
 	    var plannedShape=Array.isArray(planned.greenShape||planned.shape)?(planned.greenShape||planned.shape).map(pack).filter(Boolean):[];
 	    var plannedTee=pack(planned.tee||planned.start);
 	    var plannedGreen=pack(planned.green||planned.target||planned.pin);
-	    if(plannedTee||plannedGreen||plannedRoute.length||plannedShape.length){
-	      return {
-	        tee:plannedTee||plannedRoute[0]||null,
-	        green:plannedGreen||plannedRoute[plannedRoute.length-1]||null,
-	        route:plannedRoute,
-	        greenShape:plannedShape
-	      };
-	    }
+	    return {
+	      tee:plannedTee||plannedRoute[0]||null,
+	      green:plannedGreen||plannedRoute[plannedRoute.length-1]||null,
+	      route:plannedRoute,
+	      greenShape:plannedShape
+	    };
+	  }
+	  function hasCapturePinSet(pins){
+	    return !!(pins&&(validLL(pins.tee)||validLL(pins.green)||(Array.isArray(pins.route)&&pins.route.length)||(Array.isArray(pins.greenShape)&&pins.greenShape.length)));
+	  }
+	  function captureAnchorPins(captureOpts){
+	    captureOpts=captureOpts||{};
+	    var planned=captureOpts.anchorPins||captureOpts.pins||{};
+	    var plannedPins=cleanCapturePinSet(planned);
+	    if(hasCapturePinSet(plannedPins))return plannedPins;
 	    var data=safe(function(){return (mappedPayload()||{}).data||{};},{})||{};
 	    var route=mappedRoute(data).filter(validLL);
 	    var shape=mappedShape(data).filter(validLL);
 	    var tee=safe(function(){return typeof gdActiveMappedTeeStartPoint==="function"?gdActiveMappedTeeStartPoint():null;},null);
 	    var green=currentGreenPoint();
-	    return {
-	      tee:pack(tee)||pack(route[0]),
-	      green:pack(green)||pack(route[route.length-1]),
-	      route:route.map(pack).filter(Boolean),
-	      greenShape:shape.map(pack).filter(Boolean)
-	    };
+	    return cleanCapturePinSet({tee:tee,green:green,route:route,greenShape:shape});
+	  }
+	  function captureWorkingPins(captureOpts){
+	    captureOpts=captureOpts||{};
+	    var planned=captureOpts.captureAnchorPins||captureOpts.capturePins||null;
+	    var plannedPins=cleanCapturePinSet(planned);
+	    return hasCapturePinSet(plannedPins)?plannedPins:captureAnchorPins(captureOpts);
 	  }
 	  function captureSurfacePoints(objectBounds,reason,captureOpts){
 	    var points=validBounds(objectBounds)?boundsCorners(objectBounds):[];
-	    var plannedPins=captureAnchorPins(captureOpts);
-	    var hasPlannedPins=!!(captureOpts&&captureOpts.anchorPins&&(plannedPins.tee||plannedPins.green||plannedPins.route.length||plannedPins.greenShape.length));
-	    var includeWholeHole=!(captureOpts&&captureOpts.lockBounds===true)&&!/lock|zoom/i.test(String(reason||""));
+	    var plannedPins=captureWorkingPins(captureOpts);
+	    var hasPlannedPins=!!(captureOpts&&(captureOpts.captureAnchorPins||captureOpts.capturePins||captureOpts.anchorPins||captureOpts.pins)&&hasCapturePinSet(plannedPins));
+	    var includeWholeHole=captureOpts&&captureOpts.includeAnchorPins===true||(!(captureOpts&&captureOpts.lockBounds===true)&&!/lock|zoom/i.test(String(reason||"")));
 	    if(hasPlannedPins){
 	      if(includeWholeHole){
 	        points=points.concat(plannedPins.route||[],plannedPins.greenShape||[]);
@@ -586,6 +593,41 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	  function applyCaptureLensRect(rect,captureOpts){
 	    var aspect=captureLensAspect(captureOpts);
 	    if(!rect||!aspect)return rect;
+	    var orientation=String(captureOpts&&captureOpts.lensOrientation||"").toLowerCase();
+	    var pins=captureWorkingPins(captureOpts);
+	    var route=Array.isArray(pins&&pins.route)?pins.route:[];
+	    var routeStart=asLL(route[0]||pins&&pins.tee);
+	    var routeEnd=asLL(route[route.length-1]||pins&&pins.green);
+	    if(orientation==="play-axis"&&validLL(routeStart)&&validLL(routeEnd)&&hasMap()){
+	      var a=map.project(routeStart,captureOpts&&captureOpts.__captureZoom||preferredCaptureZoom());
+	      var b=map.project(routeEnd,captureOpts&&captureOpts.__captureZoom||preferredCaptureZoom());
+	      var dx=b.x-a.x,dy=b.y-a.y;
+	      var len=Math.sqrt(dx*dx+dy*dy);
+	      if(len>1){
+	        var ux=dx/len,uy=dy/len;
+	        var px=-uy,py=ux;
+	        var corners=[{x:rect.minX,y:rect.minY},{x:rect.maxX,y:rect.minY},{x:rect.maxX,y:rect.maxY},{x:rect.minX,y:rect.maxY}];
+	        var center={x:(a.x+b.x)/2,y:(a.y+b.y)/2};
+	        var extents=corners.map(function(p){return {along:(p.x-center.x)*ux+(p.y-center.y)*uy,cross:(p.x-center.x)*px+(p.y-center.y)*py};});
+	        var along=Math.max(len/2,Math.max.apply(null,extents.map(function(p){return Math.abs(p.along);})));
+	        var cross=Math.max(1,Math.max.apply(null,extents.map(function(p){return Math.abs(p.cross);})));
+	        var current=(cross*2)/(along*2);
+	        if(current>aspect)along=cross/aspect;
+	        else cross=along*aspect;
+	        var lens=[
+	          {x:center.x-ux*along-px*cross,y:center.y-uy*along-py*cross},
+	          {x:center.x+ux*along-px*cross,y:center.y+uy*along-py*cross},
+	          {x:center.x+ux*along+px*cross,y:center.y+uy*along+py*cross},
+	          {x:center.x-ux*along+px*cross,y:center.y-uy*along+py*cross}
+	        ];
+	        return {
+	          minX:Math.floor(Math.min.apply(null,lens.map(function(p){return p.x;}))),
+	          minY:Math.floor(Math.min.apply(null,lens.map(function(p){return p.y;}))),
+	          maxX:Math.ceil(Math.max.apply(null,lens.map(function(p){return p.x;}))),
+	          maxY:Math.ceil(Math.max.apply(null,lens.map(function(p){return p.y;})))
+	        };
+	      }
+	    }
 	    var width=Math.max(1,rect.maxX-rect.minX);
 	    var height=Math.max(1,rect.maxY-rect.minY);
 	    var current=width/height;
@@ -632,12 +674,14 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	    var points=captureSurfacePoints(objectBounds,reason,captureOpts);
 		    var pins=captureAnchorPins(captureOpts);
 		    var bleed=Math.max(0,Math.round(num(captureOpts.bleedPx,/lock|zoom/i.test(String(reason))?2100:2800)));
-	    var rect=applyCaptureLensRect(pixelRectFor(points,z,bleed),captureOpts);
-	    if(!rect)return null;
-	    while(z>minZoom&&tileCountFor(rect)>maxTiles){
-	      z-=1;
-	      rect=applyCaptureLensRect(pixelRectFor(points,z,bleed),captureOpts);
-	    }
+		    captureOpts.__captureZoom=z;
+		    var rect=applyCaptureLensRect(pixelRectFor(points,z,bleed),captureOpts);
+		    if(!rect)return null;
+		    while(z>minZoom&&tileCountFor(rect)>maxTiles){
+		      z-=1;
+		      captureOpts.__captureZoom=z;
+		      rect=applyCaptureLensRect(pixelRectFor(points,z,bleed),captureOpts);
+		    }
 	    var origin={x:rect.minX,y:rect.minY};
 	    var width=Math.max(256,rect.maxX-rect.minX),height=Math.max(256,rect.maxY-rect.minY);
     var layer=captureOpts.tileTemplate?{_url:String(captureOpts.tileTemplate),options:{urlTemplate:String(captureOpts.tileTemplate),subdomains:captureOpts.tileSubdomains||captureOpts.subdomains||[]}}:tileLayer(),tiles=[];
@@ -650,7 +694,8 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
         }
       }
     }
-			    var manifest={version:VERSION,key:storageKey(),reason:reason,surfaceModel:"captured-surface-v1",interactionOwner:"captured-surface",liveMapRole:"capture-source-diagnostic-reference",courseKey:captureOpts.courseId||captureOpts.courseKey||surfaceCourseKey(),courseName:captureOpts.courseName||surfaceCourseName(),holeNumber:captureOpts.holeNumber||surfaceHoleNumber(),captureZoom:z,imageWidth:width,imageHeight:height,originPx:origin,tiles:tiles,includeTee:!!pins.tee,teeLatLng:pins.tee||null,anchorPins:pins,createdAt:new Date().toISOString()};
+				    var capturePins=captureWorkingPins(captureOpts);
+				    var manifest={version:VERSION,key:storageKey(),reason:reason,surfaceModel:"captured-surface-v1",interactionOwner:"captured-surface",liveMapRole:"capture-source-diagnostic-reference",courseKey:captureOpts.courseId||captureOpts.courseKey||surfaceCourseKey(),courseName:captureOpts.courseName||surfaceCourseName(),holeNumber:captureOpts.holeNumber||surfaceHoleNumber(),captureZoom:z,imageWidth:width,imageHeight:height,originPx:origin,tiles:tiles,includeTee:!!pins.tee,teeLatLng:pins.tee||null,anchorPins:pins,captureAnchorPins:capturePins,createdAt:new Date().toISOString()};
 			    if(captureOpts.role||captureOpts.quality||captureOpts.planId){
 			      manifest.visualRole=String(captureOpts.role||"");
 			      manifest.visualQuality=String(captureOpts.quality||"");
@@ -680,7 +725,7 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 			      manifest.segmentStartMeters=Number.isFinite(Number(captureOpts.segmentStartMeters))?Number(captureOpts.segmentStartMeters):null;
 			      manifest.segmentEndMeters=Number.isFinite(Number(captureOpts.segmentEndMeters))?Number(captureOpts.segmentEndMeters):null;
 			      manifest.routeLengthMeters=Number.isFinite(Number(captureOpts.routeLengthMeters))?Number(captureOpts.routeLengthMeters):null;
-			      manifest.visualCapturePolicy={role:manifest.visualRole,quality:manifest.visualQuality,targetZoom:z,requestedTargetZoom:captureOpts.targetZoom||null,minZoom:minZoom,maxZoom:maxZoom,maxTiles:maxTiles,bleedPx:bleed,lockBounds:captureOpts.lockBounds===true,tileSourceLabel:manifest.tileSourceLabel,captureLens:manifest.captureLens,lensShape:manifest.lensShape,lensAspectRatio:manifest.lensAspectRatio,lensOrientation:manifest.lensOrientation,lensFit:manifest.lensFit,segmentIndex:manifest.segmentIndex,segmentCount:manifest.segmentCount,segmentStartMeters:manifest.segmentStartMeters,segmentEndMeters:manifest.segmentEndMeters,routeLengthMeters:manifest.routeLengthMeters,cameraCapability:cameraCapability};
+				      manifest.visualCapturePolicy={role:manifest.visualRole,quality:manifest.visualQuality,targetZoom:z,requestedTargetZoom:captureOpts.targetZoom||null,minZoom:minZoom,maxZoom:maxZoom,maxTiles:maxTiles,bleedPx:bleed,lockBounds:captureOpts.lockBounds===true,includeAnchorPins:captureOpts.includeAnchorPins===true,tileSourceLabel:manifest.tileSourceLabel,captureLens:manifest.captureLens,lensShape:manifest.lensShape,lensAspectRatio:manifest.lensAspectRatio,lensOrientation:manifest.lensOrientation,lensFit:manifest.lensFit,segmentIndex:manifest.segmentIndex,segmentCount:manifest.segmentCount,segmentStartMeters:manifest.segmentStartMeters,segmentEndMeters:manifest.segmentEndMeters,routeLengthMeters:manifest.routeLengthMeters,cameraCapability:cameraCapability};
 			    }
 			    manifest=safe(function(){return typeof window.gdCapturedSurfaceWriteScan==="function"?window.gdCapturedSurfaceWriteScan(manifest,{reason:reason,storageKey:storageKey()}):manifest;},manifest)||manifest;
     if(captureOpts.backgroundCapture){
@@ -1074,16 +1119,19 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	        captureLens:request.captureLens||request.lensShape,
 	        lensShape:request.lensShape||request.captureLens,
 	        lensAspectRatio:request.lensAspectRatio||request.lensAspect,
-	        lensOrientation:request.lensOrientation,
-	        lensFit:request.lensFit,
-	        segmentIndex:request.segmentIndex,
+		        lensOrientation:request.lensOrientation,
+		        lensFit:request.lensFit,
+		        anchorPins:request.anchorPins,
+		        captureAnchorPins:request.captureAnchorPins,
+		        includeAnchorPins:request.includeAnchorPins,
+		        segmentIndex:request.segmentIndex,
 	        segmentCount:request.segmentCount,
 	        segmentStartMeters:request.segmentStartMeters,
 	        segmentEndMeters:request.segmentEndMeters,
 	        routeLengthMeters:request.routeLengthMeters,
 	        tileTemplate:request.tileTemplate,
 	        tileSourceLabel:request.tileSourceLabel,
-	        lockBounds:true,
+		        lockBounds:request.lockBounds===true,
 	        debugUnderlay:!!request.debugUnderlay,
 	        debugTerrain:!!request.debugTerrain,
 	        terrainStageOnly:!!request.terrainStageOnly,
@@ -37902,7 +37950,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 <script src="scripts/gd-launch-monitor-data.js?v=practice-data-20260712c"></script>
 <script src="scripts/gd-shot-library-sync.js?v=shot-library-supabase-001"></script>
 <script src="scripts/gd-captured-surface-sync.js?v=captured-surface-supabase-002"></script>
-<script src="scripts/gd-course-visual-engine.js?v=course-visual-engine-012"></script>
+<script src="scripts/gd-course-visual-engine.js?v=course-visual-engine-013"></script>
 <script src="scripts/gd-multi-nine-courses.js?v=multi-nine-courses-001"></script>
 <script src="scripts/gd-native-practice-data.js?v=native-practice-data-001"></script>
 <script id="gdCanonicalRouteAuditV1">
