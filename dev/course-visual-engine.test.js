@@ -201,7 +201,7 @@ function payload() {
   assert.equal(built.status, "basic-ready", "valid captures produce a basic visual record");
   assert.ok(built.rawMaster.path.includes("/raw/"));
   assert.ok(built.basicVisual.dataUrl.startsWith("data:image/svg+xml"));
-  assert.equal(built.rawMaster.metadata.rendererVersion, "clarity-course-visual-renderer-v12");
+  assert.equal(built.rawMaster.metadata.rendererVersion, "clarity-course-visual-renderer-v13");
   assert.equal(built.rawMaster.metadata.layout, "geographic-mercator");
   assert.equal(built.rawMaster.metadata.stitchModel, "geo-rectangle-table-over-live-map", "stitch metadata describes overlapping rectangles over a live map base");
   assert.ok(decodeURIComponent(built.rawMaster.dataUrl).includes("data-stitch-width"), "raw stitch keeps coverage geometry as metadata attributes");
@@ -344,7 +344,7 @@ function payload() {
   });
   engine.ingestCourseVisualInput(multiInput);
   const multiBuilt = await engine.buildCourseVisualMaster("multi-capture");
-  assert.equal(multiBuilt.rawMaster.metadata.rendererVersion, "clarity-course-visual-renderer-v12");
+  assert.equal(multiBuilt.rawMaster.metadata.rendererVersion, "clarity-course-visual-renderer-v13");
   assert.ok(multiBuilt.rawMaster.height < 12000, "multi-capture stitch is geographically laid out instead of vertically appended");
   assert.ok(multiBuilt.rawMaster.height / multiBuilt.rawMaster.width < 8, "multi-capture output keeps a usable preview aspect");
 
@@ -499,14 +499,16 @@ function payload() {
   const forceInput = engine.adaptCoursePlayPayloadToVisualInput(Object.assign({}, payload(), { courseId: "force-fresh", courseKey: "force-fresh" }));
   const forcePlan = engine.planCourseVisualCaptures(forceInput);
   const oldForceManifest = visualManifest("old-force-visual", forcePlan.find((item) => item.role === "play-corridor"), 0);
+  const oldSourceFrameManifest = Object.assign(manifest("old-force-source-frame", 1, 40), { courseKey: "force-fresh" });
   localStorage.setItem(oldForceManifest.key, JSON.stringify(oldForceManifest));
+  localStorage.setItem(oldSourceFrameManifest.key, JSON.stringify(oldSourceFrameManifest));
   engine.ingestCourseVisualInput(Object.assign({}, forceInput, { captures: [oldForceManifest] }));
   global.GDCoursePlayPipeline = {
     buildCoursePlayDbPayload() {
       return Object.assign({}, payload(), { courseId: "force-fresh", courseKey: "force-fresh" });
     },
     getCoursePlayFrameIndex() {
-      return [];
+      return [{ holeNumber: 1, manifestKey: oldSourceFrameManifest.key, capturedManifestKey: oldSourceFrameManifest.key }];
     }
   };
   global.gdBuildCourseVisualCaptureManifest = function emptyFreshCapture() {
@@ -514,6 +516,9 @@ function payload() {
   };
   const forceFresh = await engine.buildFromCourseDatabase("force-fresh", { forceFresh: true });
   assert.equal(forceFresh.status, "failed", "force-fresh recapture does not silently reuse stale visual captures");
+  assert.equal(forceFresh.input.captureCount, 0, "force-fresh recapture does not fall back to old GPS/source frame manifests");
+  assert.equal(forceFresh.diagnostics.captureExecution.captured, 0, "force-fresh records that no fresh captures were produced");
+  assert.equal(forceFresh.diagnostics.captureExecution.freshRun, true, "force-fresh diagnostics identify a true fresh run");
   assert.equal(forceFresh.diagnostics.captureExecution.fallbackReason, "planned-captures-empty", "force-fresh reports the real fresh-capture failure");
   global.GDCoursePlayPipeline = originalPipeline;
   global.gdBuildCourseVisualCaptureManifest = originalExecutor;
