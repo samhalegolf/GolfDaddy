@@ -2301,6 +2301,9 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
     .gdAdminCourseVisualControls select,.gdAdminCourseVisualControls input{width:100%;box-sizing:border-box;border:1px solid rgba(255,255,255,.10);border-radius:12px;background:rgba(0,0,0,.22);color:#fff;padding:8px;font-size:11px;font-weight:850}
     .gdAdminCourseVisualControls label.gdAdminCourseVisualCheck{grid-template-columns:auto minmax(0,1fr);align-items:center;gap:8px;padding:8px;border:1px solid rgba(255,255,255,.08);border-radius:12px;background:rgba(0,0,0,.16)}
     .gdAdminCourseVisualControls label.gdAdminCourseVisualCheck input{width:18px;height:18px;accent-color:#1fd36d}
+    .gdAdminCourseVisualPresetRail{grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:6px}
+    .gdAdminCourseVisualPresetRail button{border-radius:12px;padding:8px 9px;background:rgba(255,255,255,.08);color:rgba(255,255,255,.72);font-size:10px;font-weight:950;text-align:left}
+    .gdAdminCourseVisualPresetRail button.active{background:rgba(31,211,109,.18);color:#7cffb3;box-shadow:inset 0 0 0 1px rgba(124,255,179,.24)}
     .gdAdminCourseVisualActions{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:8px 0}
     .gdAdminCourseVisualActions button{border-radius:999px;padding:7px 10px;background:rgba(255,255,255,.09);color:#fff;font-size:11px;font-weight:950}
     .gdAdminCourseVisualActions button.primary{background:#1fd36d;color:#07100a}
@@ -7275,6 +7278,7 @@ function gdAdminCourseVisualControlChanged(courseId){
 function gdAdminCourseVisualPresetChanged(courseId){
   const engine=window.GDCourseVisualEngine;
   const presetId=String(document.getElementById("gdCourseVisualPreset")?.value||"");
+  gdAdminCourseVisualSyncPresetButtons(presetId);
   let preset=null;
   try{preset=engine&&typeof engine.getPreset==="function"?engine.getPreset(presetId):null;}catch(e){preset=null;}
   if(preset){
@@ -7291,6 +7295,16 @@ function gdAdminCourseVisualPresetChanged(courseId){
     if(mowing)mowing.value=String(preset.mowingVisibility||"Unknown");
   }
   return gdAdminCourseVisualControlChanged(courseId);
+}
+function gdAdminCourseVisualSyncPresetButtons(presetId){
+  document.querySelectorAll(".gdAdminCourseVisualPresetRail button[data-preset-id]").forEach(button=>{
+    button.classList.toggle("active",String(button.getAttribute("data-preset-id")||"")===String(presetId||""));
+  });
+}
+function gdAdminCourseVisualPresetButtonChanged(courseId,presetId){
+  const select=document.getElementById("gdCourseVisualPreset");
+  if(select)select.value=String(presetId||"");
+  return gdAdminCourseVisualPresetChanged(courseId);
 }
 function gdAdminCourseVisualControlEvent(event){
   const target=event&&event.target;
@@ -7358,6 +7372,7 @@ function gdAdminCourseVisualControls(record,courseId){
   const key=gdEscapeHTML(courseId||record&&record.courseId||"");
   return `<div class="gdAdminCourseVisualControls" data-course-id="${key}">
     <label>Preset<select id="gdCourseVisualPreset" oninput="return gdAdminCourseVisualPresetChanged('${key}')" onchange="return gdAdminCourseVisualPresetChanged('${key}')">${presets.map(p=>`<option value="${gdEscapeHTML(p&&p.id||p&&p.mode||p&&p.name||"")}" ${preset===(p&&p.id)?"selected":""}>${gdEscapeHTML(p&&p.name||p&&p.mode||p&&p.id||"Preset")}</option>`).join("")}</select></label>
+    <div class="gdAdminCourseVisualPresetRail">${presets.map(p=>{const id=p&&p.id||p&&p.mode||p&&p.name||"";return `<button type="button" data-preset-id="${gdEscapeHTML(id)}" class="${preset===id?"active":""}" onclick="return gdAdminCourseVisualPresetButtonChanged('${key}','${gdEscapeHTML(id)}')">${gdEscapeHTML(p&&p.name||p&&p.mode||id||"Preset")}</button>`;}).join("")}</div>
     <label>Green strength<input id="gdCourseVisualGreenStrength" type="range" min="0" max="1" step="0.05" value="${Number.isFinite(strength)?strength:.35}" oninput="return gdAdminCourseVisualControlChanged('${key}')" onchange="return gdAdminCourseVisualControlChanged('${key}')"></label>
     <label>Brightness target<input id="gdCourseVisualBrightness" type="number" min="20" max="85" step="1" value="${Number.isFinite(brightness)?brightness:52}" oninput="return gdAdminCourseVisualControlChanged('${key}')" onchange="return gdAdminCourseVisualControlChanged('${key}')"></label>
     <label>Contrast<input id="gdCourseVisualContrast" type="number" min="0.8" max="1.25" step="0.01" value="${Number.isFinite(contrast)?contrast:1.04}" oninput="return gdAdminCourseVisualControlChanged('${key}')" onchange="return gdAdminCourseVisualControlChanged('${key}')"></label>
