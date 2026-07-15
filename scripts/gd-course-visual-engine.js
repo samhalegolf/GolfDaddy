@@ -7,7 +7,7 @@
 
   var VERSION=1;
   var PRESET_VERSION=4;
-  var RENDERER_VERSION="clarity-course-visual-renderer-v19";
+  var RENDERER_VERSION="clarity-course-visual-renderer-v20";
   var STORE_KEY="gd_course_visual_engine_v1";
   var PRESET_KEY="gd_course_visual_presets_v1";
   var API_ENDPOINT="/api/course-visuals";
@@ -1322,16 +1322,14 @@
       if(role==="green-surround")return {opacity:.98,label:"SUPER HD GREEN"};
       return {opacity:1,label:"CAPTURE"};
     }
-    function lensClipPolygon(capture,x,y,w,h){
+    function lensLocalPolygon(capture){
       var local=pixelPoints(capture&&capture.lensLocalCorners);
       var origin=capture&&capture.originPx||{};
       if(local.length<4&&Array.isArray(capture&&capture.lensCornersPx)&&origin&&Number.isFinite(Number(origin.x))&&Number.isFinite(Number(origin.y))){
         local=pixelPoints(capture.lensCornersPx).map(function(p){return {x:p.x-Number(origin.x),y:p.y-Number(origin.y)};});
       }
       if(local.length<4)return null;
-      var cw=Math.max(1,Number(capture&&capture.width)||1);
-      var ch=Math.max(1,Number(capture&&capture.height)||1);
-      return local.slice(0,4).map(function(p){return {x:x+p.x/cw*w,y:y+p.y/ch*h};});
+      return local.slice(0,4);
     }
     var defs=[];
     var groups=positioned.map(function(item,index){
@@ -1345,20 +1343,24 @@
       var style=roleStyle(capture);
       var role=String(capture&&capture.role||"source-frame");
       var clipMask="";
-      if(role!=="course-backdrop"){
+      var lensLocal=role!=="course-backdrop"?lensLocalPolygon(capture):null;
+      var lensLocalPoints=lensLocal&&lensLocal.map(function(point){return svgNum(point.x)+","+svgNum(point.y);}).join(" ");
+      if(lensLocalPoints){
+        defs.push('<clipPath id="cvLensClip'+index+'"><polygon points="'+lensLocalPoints+'"/></clipPath>');
+        clipMask=' data-lens-clip="oriented-mobile-hole"';
+      }else if(role!=="course-backdrop"){
         var feather=Math.max(16,Math.min(80,Math.min(w,h)*.08));
         var maskX=x-feather*2,maskY=y-feather*2,maskW=w+feather*4,maskH=h+feather*4;
         var innerX=x+feather*.8,innerY=y+feather*.8,innerW=Math.max(1,w-feather*1.6),innerH=Math.max(1,h-feather*1.6);
         var radius=Math.min(36,Math.max(8,feather*.55));
-        var lensPolygon=lensClipPolygon(capture,x,y,w,h);
-        var lensPoints=lensPolygon&&lensPolygon.map(function(point){return svgNum(point.x)+","+svgNum(point.y);}).join(" ");
-        var clipShape=lensPoints?'<polygon points="'+lensPoints+'"/>':'<rect x="'+svgNum(x)+'" y="'+svgNum(y)+'" width="'+svgNum(w)+'" height="'+svgNum(h)+'" rx="'+svgNum(radius)+'"/>';
-        var featherShape=lensPoints?'<polygon points="'+lensPoints+'" fill="white" filter="url(#cvStitchFeather)"/><polygon points="'+lensPoints+'" fill="white"/>':'<rect x="'+svgNum(x)+'" y="'+svgNum(y)+'" width="'+svgNum(w)+'" height="'+svgNum(h)+'" rx="'+svgNum(radius)+'" fill="white" filter="url(#cvStitchFeather)"/><rect x="'+svgNum(innerX)+'" y="'+svgNum(innerY)+'" width="'+svgNum(innerW)+'" height="'+svgNum(innerH)+'" rx="'+svgNum(radius*.65)+'" fill="white"/>';
+        var clipShape='<rect x="'+svgNum(x)+'" y="'+svgNum(y)+'" width="'+svgNum(w)+'" height="'+svgNum(h)+'" rx="'+svgNum(radius)+'"/>';
+        var featherShape='<rect x="'+svgNum(x)+'" y="'+svgNum(y)+'" width="'+svgNum(w)+'" height="'+svgNum(h)+'" rx="'+svgNum(radius)+'" fill="white" filter="url(#cvStitchFeather)"/><rect x="'+svgNum(innerX)+'" y="'+svgNum(innerY)+'" width="'+svgNum(innerW)+'" height="'+svgNum(innerH)+'" rx="'+svgNum(radius*.65)+'" fill="white"/>';
         defs.push('<clipPath id="cvStitchClip'+index+'">'+clipShape+'</clipPath><mask id="cvStitchMask'+index+'" maskUnits="userSpaceOnUse" x="'+svgNum(maskX)+'" y="'+svgNum(maskY)+'" width="'+svgNum(maskW)+'" height="'+svgNum(maskH)+'"><rect x="'+svgNum(maskX)+'" y="'+svgNum(maskY)+'" width="'+svgNum(maskW)+'" height="'+svgNum(maskH)+'" fill="black"/>'+featherShape+'</mask>');
         clipMask=' clip-path="url(#cvStitchClip'+index+')" mask="url(#cvStitchMask'+index+')"';
-        if(lensPoints)clipMask+=' data-lens-clip="oriented-mobile-hole"';
       }
-      return '<g data-capture-id="'+escapeXml(capture.id)+'" data-role="'+escapeXml(role)+'" data-quality="'+escapeXml(capture.quality||"source")+'" data-capture-lens="'+escapeXml(capture.captureLens||"")+'" data-segment-index="'+escapeXml(capture.segmentIndex||"")+'" data-segment-count="'+escapeXml(capture.segmentCount||"")+'" data-stitch-layer="'+escapeXml(capture.stitchLayer||0)+'" data-stitch-x="'+svgNum(x)+'" data-stitch-y="'+svgNum(y)+'" data-stitch-width="'+svgNum(w)+'" data-stitch-height="'+svgNum(h)+'" opacity="'+svgNum(style.opacity)+'"'+clipMask+' transform="translate('+svgNum(x)+" "+svgNum(y)+') scale('+svgNum(w/(Number(capture.width)||1))+" "+svgNum(h/(Number(capture.height)||1))+')">'+captureContentSvg(capture)+'</g>';
+      var content=captureContentSvg(capture);
+      if(lensLocalPoints)content='<g clip-path="url(#cvLensClip'+index+')">'+content+'</g>';
+      return '<g data-capture-id="'+escapeXml(capture.id)+'" data-role="'+escapeXml(role)+'" data-quality="'+escapeXml(capture.quality||"source")+'" data-capture-lens="'+escapeXml(capture.captureLens||"")+'" data-segment-index="'+escapeXml(capture.segmentIndex||"")+'" data-segment-count="'+escapeXml(capture.segmentCount||"")+'" data-stitch-layer="'+escapeXml(capture.stitchLayer||0)+'" data-stitch-x="'+svgNum(x)+'" data-stitch-y="'+svgNum(y)+'" data-stitch-width="'+svgNum(w)+'" data-stitch-height="'+svgNum(h)+'" opacity="'+svgNum(style.opacity)+'"'+clipMask+' transform="translate('+svgNum(x)+" "+svgNum(y)+') scale('+svgNum(w/(Number(capture.width)||1))+" "+svgNum(h/(Number(capture.height)||1))+')">'+content+'</g>';
     }).join("");
     var defsMarkup=defs.length?'<defs><filter id="cvStitchFeather" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="24"/></filter>'+defs.join("")+'</defs>':"";
     var svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+width+'" height="'+height+'" viewBox="0 0 '+width+" "+height+'" data-renderer="'+escapeXml(RENDERER_VERSION)+'" data-layout="geographic-mercator" data-stitch-model="geo-rectangle-table-over-live-map"><rect width="100%" height="100%" fill="#10130f"/>'+defsMarkup+groups+'</svg>';
