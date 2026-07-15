@@ -213,7 +213,7 @@ function payload() {
   assert.equal(built.status, "basic-ready", "valid captures produce a basic visual record");
   assert.ok(built.rawMaster.path.includes("/raw/"));
   assert.ok(built.basicVisual.dataUrl.startsWith("data:image/svg+xml"));
-  assert.equal(built.rawMaster.metadata.rendererVersion, "clarity-course-visual-renderer-v23");
+  assert.equal(built.rawMaster.metadata.rendererVersion, "clarity-course-visual-renderer-v24");
   assert.equal(built.rawMaster.metadata.layout, "geographic-mercator");
   assert.equal(built.rawMaster.metadata.stitchModel, "geo-rectangle-table-over-live-map", "stitch metadata describes overlapping rectangles over a live map base");
   assert.ok(decodeURIComponent(built.rawMaster.dataUrl).includes("data-stitch-width"), "raw stitch keeps coverage geometry as metadata attributes");
@@ -245,8 +245,9 @@ function payload() {
     turf: { greenStrength: 0.7 },
     lighting: { brightnessTarget: 57, contrastTarget: 1.08 },
     mowingVisibility: "Clear"
-  });
+  }, { presetId: "clarity-course-fresh-v1" });
   assert.equal(settingsRecord.settingsDirty, true, "preview settings are saved without publishing");
+  assert.equal(settingsRecord.presetId, "clarity-course-fresh-v1", "preset selection is saved immediately before async preview rendering");
   assert.equal(settingsRecord.publishedVisual, null);
 
   const preview = await engine.buildCourseVisualPreview("cromwell", engine.presetForMode("Fresh"));
@@ -273,6 +274,7 @@ function payload() {
   assert.ok(!singleHoleNativeSvg.includes("green-surround-airbrush"), "single-hole native visuals do not touch up greens");
   assert.ok(!singleHoleNativeSvg.includes("cvGreenSurroundAirbrushClip"), "green touch-up masks are removed completely");
   assert.equal(preview.singleHolePreviewVisual.metadata.fairwayAirbrush.preserves, "relative-luminance-and-mow-lines", "fairway airbrush preserves mowing-line texture");
+  assert.equal(preview.singleHolePreviewVisual.metadata.fairwayAirbrush.projector, "play-surface-display-transform", "single-hole airbrush follows the transformed play surface instead of raw map north");
   assert.equal(preview.singleHolePreviewVisual.metadata.greenSurroundAirbrush.enabled, false, "green touch-up metadata is disabled");
   assert.equal(preview.singleHolePreviewVisual.metadata.greenSurroundAirbrush.reason, "removed-green-touch-up", "green touch-up removal is explicit");
   assert.equal(preview.singleHolePreviewVisual.metadata.overflowVisible, true, "single-hole preview exposes the captured overflow outside the phone frame");
@@ -359,7 +361,7 @@ function payload() {
   });
   engine.ingestCourseVisualInput(multiInput);
   const multiBuilt = await engine.buildCourseVisualMaster("multi-capture");
-  assert.equal(multiBuilt.rawMaster.metadata.rendererVersion, "clarity-course-visual-renderer-v23");
+  assert.equal(multiBuilt.rawMaster.metadata.rendererVersion, "clarity-course-visual-renderer-v24");
   assert.ok(multiBuilt.rawMaster.height < 12000, "multi-capture stitch is geographically laid out instead of vertically appended");
   assert.ok(multiBuilt.rawMaster.height / multiBuilt.rawMaster.width < 8, "multi-capture output keeps a usable preview aspect");
 

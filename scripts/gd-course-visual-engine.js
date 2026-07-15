@@ -7,7 +7,7 @@
 
   var VERSION=1;
   var PRESET_VERSION=4;
-  var RENDERER_VERSION="clarity-course-visual-renderer-v23";
+  var RENDERER_VERSION="clarity-course-visual-renderer-v24";
   var STORE_KEY="gd_course_visual_engine_v1";
   var PRESET_KEY="gd_course_visual_presets_v1";
   var API_ENDPOINT="/api/course-visuals";
@@ -1344,6 +1344,7 @@
     var radius=Math.max(18,Math.min(52,width*.045));
     var frameRadius=Math.max(14,Math.min(46,frameW*.06));
     var angleDeg=angle*180/Math.PI;
+    var displayTransform={x:+tx.toFixed(2),y:+ty.toFixed(2),scale:+scale.toFixed(4),rotationDeg:+angleDeg.toFixed(3)};
     var title=text(opts.title||"Hole window "+(capture.holeNumber||"?"),80);
     var label='<g transform="translate(14 14)"><rect x="0" y="0" width="'+svgNum(Math.max(230,title.length*8.4))+'" height="31" rx="6" fill="rgba(0,0,0,.58)"/><text x="10" y="21" font-size="14" fill="#fff" font-family="system-ui, sans-serif" font-weight="850">'+escapeXml(title)+'</text></g>';
     function sourcePointList(list){
@@ -1378,10 +1379,11 @@
       orientationSource:orientationSource,
       rotationDeg:+angleDeg.toFixed(3),
       scale:+scale.toFixed(4),
+      displayTransform:displayTransform,
       objectProofOverlay:{enabled:!!proofParts.length,routePoints:routePx.length,greenShapePoints:greenShapePx.length,tee:!!teePx,green:!!greenPx},
       overflowVisible:true
     };
-    return {dataUrl:dataUrl("image/svg+xml",svg),width:width,height:height,bounds:sourceBounds,captureId:capture.id,holeNumber:capture.holeNumber||null,sourceCaptureIds:sourceIds,metadata:Object.assign({rendererVersion:RENDERER_VERSION,format:"image/svg+xml",role:opts.role||"example-hole",stage:opts.stage||"hole-window",captureLens:"mobile-hole",lensAspectRatio:targetAspect,sourceDimensions:{width:sourceWidth,height:sourceHeight},outputDimensions:{width:width,height:height},viewportFrame:{x:+frameX.toFixed(2),y:+frameY.toFixed(2),width:+frameW.toFixed(2),height:+frameH.toFixed(2),aspectRatio:targetAspect},windowShape:"mobile-hole-with-overflow",framingModel:"gps-play-viewport-over-hole-surface",playSurface:playSurface,orientationSource:orientationSource,rotationDeg:+angleDeg.toFixed(3),scale:+scale.toFixed(4),objectProofOverlay:{enabled:!!proofParts.length,routePoints:routePx.length,greenShapePoints:greenShapePx.length,tee:!!teePx,green:!!greenPx},overflowVisible:true,sourceCaptureCount:sourceIds.length},meta||{})};
+    return {dataUrl:dataUrl("image/svg+xml",svg),width:width,height:height,bounds:sourceBounds,captureId:capture.id,holeNumber:capture.holeNumber||null,sourceCaptureIds:sourceIds,metadata:Object.assign({rendererVersion:RENDERER_VERSION,format:"image/svg+xml",role:opts.role||"example-hole",stage:opts.stage||"hole-window",captureLens:"mobile-hole",lensAspectRatio:targetAspect,sourceDimensions:{width:sourceWidth,height:sourceHeight},sourceBounds:sourceBounds,outputDimensions:{width:width,height:height},viewportFrame:{x:+frameX.toFixed(2),y:+frameY.toFixed(2),width:+frameW.toFixed(2),height:+frameH.toFixed(2),aspectRatio:targetAspect},windowShape:"mobile-hole-with-overflow",framingModel:"gps-play-viewport-over-hole-surface",playSurface:playSurface,orientationSource:orientationSource,rotationDeg:+angleDeg.toFixed(3),scale:+scale.toFixed(4),displayTransform:displayTransform,objectProofOverlay:{enabled:!!proofParts.length,routePoints:routePx.length,greenShapePoints:greenShapePx.length,tee:!!teePx,green:!!greenPx},overflowVisible:true,sourceCaptureCount:sourceIds.length},meta||{})};
   }
   function exampleHoleSvg(captures,meta){
     var selected=chooseExampleHoleCaptures(captures);
@@ -1573,7 +1575,7 @@
   function inheritedSurfaceMetadata(asset){
     var sourceMeta=asset&&asset.metadata||{};
     var out={};
-    ["framingModel","captureLens","lensAspectRatio","windowShape","orientationSource","rotationDeg","scale","overflowVisible"].forEach(function(key){
+    ["framingModel","captureLens","lensAspectRatio","windowShape","orientationSource","rotationDeg","scale","overflowVisible","displayTransform","playAxis"].forEach(function(key){
       if(sourceMeta[key]!=null)out[key]=sourceMeta[key];
     });
     ["playSurface","viewportFrame","objectProofOverlay","sourceDimensions"].forEach(function(key){
@@ -1592,6 +1594,46 @@
       var p=projectLatLng(pt.lat,pt.lng);
       return {x:(p.x-projected.left)/spanX*width,y:(p.y-projected.top)/spanY*height};
     };
+  }
+  function displayTransformProjector(bounds,dims,meta){
+    var playSurface=meta&&meta.playSurface||{};
+    var transform=meta&&meta.displayTransform||playSurface.displayTransform||null;
+    var sourceBounds=playSurface.sourceBounds||meta&&meta.sourceBounds||bounds;
+    var sourceDims=playSurface.sourceDimensions||meta&&meta.sourceDimensions||{};
+    var sourceWidth=Math.max(1,Number(sourceDims.width)||0);
+    var sourceHeight=Math.max(1,Number(sourceDims.height)||0);
+    if(!transform||!sourceWidth||!sourceHeight||!validBounds(sourceBounds))return null;
+    var sourceProject=assetPointProjector(sourceBounds,sourceWidth,sourceHeight);
+    if(!sourceProject)return null;
+    var matrix=String(transform.matrix||"").match(/matrix\(([^)]+)\)/i);
+    if(matrix){
+      var values=matrix[1].trim().split(/[,\s]+/).map(Number);
+      if(values.length>=6&&values.every(function(value){return Number.isFinite(value);})){
+        return function(pt){
+          var p=sourceProject(pt);
+          return p?{x:values[0]*p.x+values[2]*p.y+values[4],y:values[1]*p.x+values[3]*p.y+values[5]}:null;
+        };
+      }
+    }
+    var tx=finite(transform.x);
+    var ty=finite(transform.y);
+    var scale=finite(transform.scale);
+    var angle=(finite(transform.rotationDeg)||0)*Math.PI/180;
+    if(tx==null||ty==null||scale==null)return null;
+    var cos=Math.cos(angle),sin=Math.sin(angle);
+    return function(pt){
+      var p=sourceProject(pt);
+      return p?{x:tx+scale*(p.x*cos-p.y*sin),y:ty+scale*(p.x*sin+p.y*cos)}:null;
+    };
+  }
+  function fairwayAirbrushProjector(bounds,dims,meta){
+    var playSurface=meta&&meta.playSurface||{};
+    var transformed=displayTransformProjector(bounds,dims,meta);
+    if(transformed)return {project:transformed,mode:"play-surface-display-transform"};
+    var axis=meta&&meta.playAxis||playSurface.playAxis||null;
+    var axisProject=playAxisProjector(axis);
+    if(axisProject)return {project:axisProject,mode:"play-axis"};
+    return {project:assetPointProjector(bounds,dims.width,dims.height),mode:"asset-bounds"};
   }
   function geometryIsPolygon(geometry,pts){
     var type=String(geometry&&geometry.type||"").toLowerCase();
@@ -1630,7 +1672,8 @@
       return !b||boundsIntersects(padBounds(b,airbrush.widthMeters*1.3),bounds);
     });
     if(!objects.length)return {defs:"",layer:"",metadata:{enabled:false,reason:"missing-fairway-geometry"}};
-    var project=assetPointProjector(bounds,dims.width,dims.height);
+    var projectedModel=fairwayAirbrushProjector(bounds,dims,meta);
+    var project=projectedModel&&projectedModel.project;
     if(!project)return {defs:"",layer:"",metadata:{enabled:false,reason:"missing-projector"}};
     var span=boundsSpanM(bounds);
     var pxPerM=(span.width>0&&span.height>0)?((dims.width/span.width)+(dims.height/span.height))/2:(dims.width/240);
@@ -1654,7 +1697,7 @@
     if(!shapes.length)return {defs:"",layer:"",metadata:{enabled:false,reason:"empty-fairway-mask"}};
     var defs='<mask id="cvFairwayAirbrushMask" maskUnits="userSpaceOnUse" x="0" y="0" width="'+svgNum(dims.width)+'" height="'+svgNum(dims.height)+'"><rect width="100%" height="100%" fill="black"/><g filter="url(#cvFairwayAirbrushSoften)">'+shapes.join("")+'</g></mask><filter id="cvFairwayAirbrushSoften" x="-12%" y="-12%" width="124%" height="124%"><feGaussianBlur stdDeviation="'+svgNum(Math.max(2,Math.min(10,strokeWidth*.05)))+'"/></filter>';
     var layer='<g data-role="fairway-airbrush" data-mode="burn-rescue-preserve-luminance" mask="url(#cvFairwayAirbrushMask)" opacity="1"><rect width="100%" height="100%" fill="#2f9d55" opacity="'+svgNum(airbrush.hueOpacity)+'" style="mix-blend-mode:hue"/><rect width="100%" height="100%" fill="#45aa5f" opacity="'+svgNum(airbrush.saturationOpacity)+'" style="mix-blend-mode:saturation"/><rect width="100%" height="100%" fill="rgba(64,142,72,.18)" opacity="'+svgNum(airbrush.strength*.28)+'" style="mix-blend-mode:soft-light"/></g>';
-    return {defs:defs,layer:layer,metadata:{enabled:true,mode:"burn-rescue-preserve-luminance",maskObjects:objects.length,strength:+airbrush.strength.toFixed(3),widthMeters:+airbrush.widthMeters.toFixed(1),preserves:"relative-luminance-and-mow-lines"}};
+    return {defs:defs,layer:layer,metadata:{enabled:true,mode:"burn-rescue-preserve-luminance",projector:projectedModel.mode,maskObjects:objects.length,strength:+airbrush.strength.toFixed(3),widthMeters:+airbrush.widthMeters.toFixed(1),preserves:"relative-luminance-and-mow-lines"}};
   }
   function greenSurroundAirbrushMarkup(source,dims,bounds,settings,meta){
     return {defs:"",layer:"",metadata:{enabled:false,reason:"removed-green-touch-up"}};
@@ -1686,8 +1729,10 @@
     var stage=text(meta.stage,80)||"native-visuals";
     var version=meta.version!=null?String(meta.version):"";
     var assetBounds=visualAssetBounds(asset,meta.bounds);
-    var airbrush=fairwayAirbrushMarkup(source,dims,assetBounds,settings,meta);
-    var greenAirbrush=greenSurroundAirbrushMarkup(source,dims,assetBounds,settings,meta);
+    var inherited=inheritedSurfaceMetadata(asset);
+    var effectMeta=Object.assign({},inherited,meta);
+    var airbrush=fairwayAirbrushMarkup(source,dims,assetBounds,settings,effectMeta);
+    var greenAirbrush=greenSurroundAirbrushMarkup(source,dims,assetBounds,settings,effectMeta);
     var greenLayer=f.greenBias?'<g data-role="green-strength" data-strength="'+svgNum(f.greenBias)+'"><rect width="100%" height="100%" fill="#3cae5f" opacity="'+svgNum(f.greenBias)+'" style="mix-blend-mode:hue"/><rect width="100%" height="100%" fill="#5fbe70" opacity="'+svgNum(f.greenBias*.42)+'" style="mix-blend-mode:saturation"/><rect width="100%" height="100%" fill="rgba(52,126,54,.18)" opacity="'+svgNum(f.greenBias*.32)+'" style="mix-blend-mode:soft-light"/></g>':"";
     var mowingPattern=mow?'<pattern id="cvMowingStripe" width="24" height="24" patternUnits="userSpaceOnUse" patternTransform="rotate(108)"><path d="M0 0 L0 24" stroke="rgba(255,255,255,.20)" stroke-width="1"/></pattern>':"";
     var mowingLayer=mow?'<rect width="100%" height="100%" fill="url(#cvMowingStripe)" opacity="'+mow+'"/>':"";
@@ -1695,7 +1740,7 @@
     var metaOut=Object.assign({},meta);
     delete metaOut.objects;
     delete metaOut.airbrushObjects;
-    return {dataUrl:dataUrl("image/svg+xml",svg),width:dims.width,height:dims.height,bounds:assetBounds,sourceCaptureIds:asset&&asset.sourceCaptureIds||[],metadata:Object.assign({},inheritedSurfaceMetadata(asset),{rendererVersion:RENDERER_VERSION,format:"image/svg+xml",role:role,stage:stage,inputRole:asset&&asset.metadata&&asset.metadata.role||"",inputStage:asset&&asset.metadata&&asset.metadata.stage||"",outputDimensions:dims,filter:f,fairwayAirbrush:airbrush.metadata,greenSurroundAirbrush:greenAirbrush.metadata},metaOut)};
+    return {dataUrl:dataUrl("image/svg+xml",svg),width:dims.width,height:dims.height,bounds:assetBounds,sourceCaptureIds:asset&&asset.sourceCaptureIds||[],metadata:Object.assign({},inherited,{rendererVersion:RENDERER_VERSION,format:"image/svg+xml",role:role,stage:stage,inputRole:asset&&asset.metadata&&asset.metadata.role||"",inputStage:asset&&asset.metadata&&asset.metadata.stage||"",outputDimensions:dims,filter:f,fairwayAirbrush:airbrush.metadata,greenSurroundAirbrush:greenAirbrush.metadata},metaOut)};
   }
   function terrainShadeAsset(asset,terrainCaptures,meta){
     meta=meta||{};
@@ -2045,11 +2090,18 @@
     if(!base)throw Object.assign(new Error("Raw master is not available"),{code:"raw-master-missing"});
     return nativeVisualAsset(base,settings,{role:"overview-native-visuals",stage:"native-visuals",version:version,product:"course-overview",airbrushObjects:Array.isArray(record.objects)?record.objects:[]}).dataUrl;
   }
-  function saveCourseVisualSettings(courseId,overrides){
+  function saveCourseVisualSettings(courseId,overrides,opts){
+    opts=opts||{};
     var record=getRecord(courseId);
+    var presetId=text(opts.presetId||opts.preset||"",160);
+    if(presetId){
+      var preset=getPreset(presetId);
+      record.presetId=preset.id;
+      record.presetVersion=preset.version;
+    }
     record.courseOverrides=clone(overrides||{});
     record.settingsDirty=true;
-    recordEvent(record,"course-visual-settings-saved",{published:false,overrideHash:hashString(record.courseOverrides)});
+    recordEvent(record,"course-visual-settings-saved",{published:false,presetId:record.presetId,presetVersion:record.presetVersion,overrideHash:hashString(record.courseOverrides)});
     return putRecord(record,{skipCloudSync:true});
   }
   function buildCourseVisualPreview(courseId,presetOrId,overrides){
@@ -2060,6 +2112,10 @@
       var settings=mergePreset(preset,courseOverrides);
       var allCaptures=transientCapturesByCourse[record.courseId]||capturesFromRecordRefs(record);
       var split=splitVisualCaptures(allCaptures);
+      record.presetId=preset.id;
+      record.presetVersion=preset.version;
+      record.courseOverrides=clone(courseOverrides||{});
+      record.settingsDirty=true;
       record.status="rendering";
       recordEvent(record,"course-visual-preview-started",{presetId:preset.id,presetVersion:preset.version});
       putRecord(record);
