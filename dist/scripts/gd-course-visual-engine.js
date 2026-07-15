@@ -7,7 +7,7 @@
 
   var VERSION=1;
   var PRESET_VERSION=4;
-  var RENDERER_VERSION="clarity-course-visual-renderer-v14";
+  var RENDERER_VERSION="clarity-course-visual-renderer-v15";
   var STORE_KEY="gd_course_visual_engine_v1";
   var PRESET_KEY="gd_course_visual_presets_v1";
   var API_ENDPOINT="/api/course-visuals";
@@ -1653,7 +1653,9 @@
     function finishBuild(record){
       var latest=getRecord(courseId);
       var latestRun=latest&&latest.diagnostics&&latest.diagnostics.activeBuildRunId||"";
-      if(newerBuildIsActive(latestRun))return latest;
+      var latestHasWorking=!!(latest&&(latest.rawMaster||latest.basicVisual||latest.previewVisual||latest.singleHoleTerrainView));
+      var recordHasWorking=!!(record&&(record.rawMaster||record.basicVisual||record.previewVisual||record.singleHoleTerrainView));
+      if(newerBuildIsActive(latestRun)&&(!recordHasWorking||latestHasWorking))return latest;
       record.diagnostics=Object.assign({},record.diagnostics||{},{activeBuildRunId:null,completedBuildRunId:buildRunId});
       return putRecord(record);
     }
