@@ -228,12 +228,15 @@ function visualToPlayPayload(visual) {
     holeFrames,
     hole_frame_map: holeFrameMap,
     holeFrameMap,
+    fallback_underlay: "live-gps",
+    fallbackUnderlay: "live-gps",
+    fallback_policy: "live-gps-only",
+    fallbackPolicy: "live-gps-only",
     assets: {
       overview,
       singleHole,
       holeFrames,
-      holeFrameMap,
-      stitchUnderlay: overview
+      holeFrameMap
     },
     updated_at: text(visual.updated_at, 80),
     updatedAt: text(visual.updated_at, 80)
