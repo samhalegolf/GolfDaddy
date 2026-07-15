@@ -2268,13 +2268,17 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
     .gdAdminCourseTabs button.active{background:rgba(31,211,109,.16);color:#82ffb6}
     .gdAdminCourseVisualGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:8px 0}
     .gdAdminCourseVisualSlot{min-width:0;border-radius:8px;border:1px solid rgba(255,255,255,.08);background:rgba(0,0,0,.18);overflow:hidden}
+    .gdAdminCourseVisualSlot.wide{grid-column:1/-1}
     .gdAdminCourseVisualSlotHead{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 9px}
     .gdAdminCourseVisualSlot strong{color:#fff;font-size:10px;font-weight:950;text-transform:uppercase;letter-spacing:.05em}
     .gdAdminCourseVisualSlot small{color:rgba(255,255,255,.52);font-size:10px;font-weight:850;white-space:nowrap}
     .gdAdminCourseVisualFrame{display:grid;place-items:center;width:100%;height:clamp(180px,26vw,320px);overflow:auto;background:#10130f;overscroll-behavior:contain}
+    .gdAdminCourseVisualFrame.stitch{height:clamp(280px,48vw,560px);background:#0b100e}
     .gdAdminCourseVisualFrame img{display:block;max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain}
     .gdAdminCourseVisualInline{display:grid;place-items:center;width:100%;height:100%;min-height:180px}
     .gdAdminCourseVisualInline svg{display:block;max-width:100%;max-height:100%;width:auto;height:auto}
+    .gdAdminCourseVisualStitch{display:grid;place-items:center;width:100%;height:100%;min-height:260px;padding:10px;box-sizing:border-box}
+    .gdAdminCourseVisualStitch svg{display:block;width:100%;height:100%;min-height:240px}
     .gdAdminCourseVisualFrame.scroll{place-items:start center}
     .gdAdminCourseVisualFrame.scroll img{width:100%;height:auto;max-width:none;max-height:none}
     .gdAdminCourseVisualFrame.scroll .gdAdminCourseVisualInline{place-items:start center}
@@ -2286,9 +2290,10 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
     .gdAdminCourseVisualControls select,.gdAdminCourseVisualControls input{width:100%;box-sizing:border-box;border:1px solid rgba(255,255,255,.10);border-radius:12px;background:rgba(0,0,0,.22);color:#fff;padding:8px;font-size:11px;font-weight:850}
     .gdAdminCourseVisualControls label.gdAdminCourseVisualCheck{grid-template-columns:auto minmax(0,1fr);align-items:center;gap:8px;padding:8px;border:1px solid rgba(255,255,255,.08);border-radius:12px;background:rgba(0,0,0,.16)}
     .gdAdminCourseVisualControls label.gdAdminCourseVisualCheck input{width:18px;height:18px;accent-color:#1fd36d}
-    .gdAdminCourseVisualActions{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}
+    .gdAdminCourseVisualActions{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:8px 0}
     .gdAdminCourseVisualActions button{border-radius:999px;padding:7px 10px;background:rgba(255,255,255,.09);color:#fff;font-size:11px;font-weight:950}
     .gdAdminCourseVisualActions button.primary{background:#1fd36d;color:#07100a}
+    .gdAdminCourseVisualActions span{color:rgba(255,255,255,.52);font-size:10px;font-weight:850}
     .gdAdminCourseVisualDiag{max-height:220px;overflow:auto;border-radius:12px;background:rgba(0,0,0,.22);border:1px solid rgba(255,255,255,.07);padding:8px;font:800 10px/1.35 ui-monospace,SFMono-Regular,Menlo,monospace;color:rgba(255,255,255,.72);white-space:pre-wrap}
     .gdAdminCourseHoleScroll{overflow:auto;border-radius:13px;border:1px solid rgba(255,255,255,.08);background:rgba(0,0,0,.16)}
     .gdAdminCourseHoleTable{min-width:900px;width:100%;border-collapse:collapse;font:800 10px/1.3 ui-monospace,SFMono-Regular,Menlo,monospace;color:rgba(255,255,255,.76)}
@@ -6735,15 +6740,81 @@ function gdAdminCourseVisualSourceStatus(selected){
   const renderableCount=details.filter(row=>row.hasManifest&&row.tiles&&row.width&&row.height&&row.hasBounds).length;
   return {frameCount:rows.length,manifestCount,renderableCount,details};
 }
-function gdAdminCourseVisualInlineSvg(src,label){
+const gdAdminCourseVisualAutoBuildPending={};
+const gdAdminCourseVisualAutoBuildAttempted={};
+function gdAdminCourseVisualAutoBuildSignal(record,sourceStatus){
+  const count=Number(sourceStatus&&sourceStatus.frameCount)||Number(sourceStatus&&sourceStatus.renderableCount)||Number(record&&record.input&&record.input.objectCount)||0;
+  return count>0;
+}
+function gdAdminCourseVisualNeedsAutoBuild(record,sourceStatus){
+  if(record&&String(record.status||"")==="rendering")return false;
+  if(!gdAdminCourseVisualAutoBuildSignal(record,sourceStatus)&&!(record&&record.rawMaster))return false;
+  const plan=record&&record.diagnostics&&record.diagnostics.capturePlanSummary||null;
+  const beta3d=!!(record&&record.courseOverrides&&record.courseOverrides.visualEngine&&record.courseOverrides.visualEngine.enable3dBeta);
+  if(!record||!record.rawMaster||!record.basicVisual)return true;
+  if(!plan||String(plan.stitchModel||"")!=="geo-rectangle-table-over-live-map")return true;
+  if(record.rawMaster&&record.rawMaster.metadata&&String(record.rawMaster.metadata.stitchModel||"")!=="geo-rectangle-table-over-live-map")return true;
+  if(Number(plan.planned)>0&&Number(plan.captured)<Number(plan.planned))return true;
+  if(beta3d&&!record.beta3dView)return true;
+  return false;
+}
+function gdAdminCourseVisualAutoBuildKey(courseId,record,sourceStatus){
+  const plan=record&&record.diagnostics&&record.diagnostics.capturePlanSummary||{};
+  const beta3d=!!(record&&record.courseOverrides&&record.courseOverrides.visualEngine&&record.courseOverrides.visualEngine.enable3dBeta);
+  return [
+    courseId,
+    record&&record.currentVersion||0,
+    record&&record.updatedAt||"",
+    sourceStatus&&sourceStatus.frameCount||0,
+    sourceStatus&&sourceStatus.renderableCount||0,
+    plan&&plan.planned||0,
+    plan&&plan.captured||0,
+    plan&&plan.stitchModel||"",
+    beta3d?1:0
+  ].join("::");
+}
+function gdAdminCourseVisualScheduleAutoBuild(courseId,record,sourceStatus){
+  const engine=window.GDCourseVisualEngine;
+  if(!engine||typeof engine.buildFromCourseDatabase!=="function"||!gdAdminCourseVisualNeedsAutoBuild(record,sourceStatus))return "";
+  const key=gdAdminCourseVisualAutoBuildKey(courseId,record,sourceStatus);
+  if(gdAdminCourseVisualAutoBuildPending[key]||gdAdminCourseVisualAutoBuildAttempted[key])return key;
+  gdAdminCourseVisualAutoBuildPending[key]=true;
+  gdAdminCourseVisualAutoBuildAttempted[key]=true;
+  setTimeout(async()=>{
+    try{
+      const fresh=gdAdminCourseVisualRecord(courseId)||engine.getRecord(courseId);
+      const overrides=fresh&&fresh.courseOverrides||{};
+      const beta3d=!!(overrides.visualEngine&&overrides.visualEngine.enable3dBeta);
+      gdAdminCourseVisualToast("Building course visual stitch");
+      await engine.buildFromCourseDatabase(courseId,{enable3dBeta:beta3d});
+    }catch(error){
+      console.warn("[GolfDaddy] course visual auto-build failed",error);
+    }finally{
+      delete gdAdminCourseVisualAutoBuildPending[key];
+      if(gdAdminCourseDatabaseSelected===courseId&&gdAdminCourseDatabaseTab==="visuals")gdRenderAdminCourseDatabase();
+    }
+  },0);
+  return key;
+}
+function gdAdminCourseVisualSvgText(src){
   src=String(src||"");
   if(!/^data:image\/svg\+xml/i.test(src))return "";
   let svg="";
   try{
-    const body=src.slice(src.indexOf(",")+1);
+    const comma=src.indexOf(",");
+    if(comma<0)return "";
+    const body=src.slice(comma+1);
     svg=src.includes(";base64,")?atob(body):decodeURIComponent(body);
   }catch(e){return "";}
   if(!/<svg[\s>]/i.test(svg))return "";
+  return svg
+    .replace(/<script[\s\S]*?<\/script>/gi,"")
+    .replace(/<foreignObject[\s\S]*?<\/foreignObject>/gi,"")
+    .replace(/\son[a-z]+\s*=\s*(['"])[\s\S]*?\1/gi,"");
+}
+function gdAdminCourseVisualInlineSvg(src,label){
+  let svg=gdAdminCourseVisualSvgText(src);
+  if(!svg)return "";
   svg=svg
     .replace(/<script[\s\S]*?<\/script>/gi,"")
     .replace(/<foreignObject[\s\S]*?<\/foreignObject>/gi,"")
@@ -6776,6 +6847,113 @@ function gdAdminCourseVisualInlineSvg(src,label){
   const aria=gdEscapeHTML(label||"Course visual");
   svg=svg.replace(/<svg\b/i,`<svg class="gdAdminCourseVisualSvg" role="img" aria-label="${aria}"`);
   return `<div class="gdAdminCourseVisualInline">${svg}</div>`;
+}
+function gdAdminCourseVisualSvgNum(value){
+  const n=Number(value);
+  return Number.isFinite(n)?Number(n.toFixed(2)).toString():"0";
+}
+function gdAdminCourseVisualParseTransform(value){
+  value=String(value||"");
+  const matrix=value.match(/matrix\(\s*([-+0-9.eE]+)[\s,]+([-+0-9.eE]+)[\s,]+([-+0-9.eE]+)[\s,]+([-+0-9.eE]+)[\s,]+([-+0-9.eE]+)[\s,]+([-+0-9.eE]+)\s*\)/i);
+  if(matrix)return {x:Number(matrix[5])||0,y:Number(matrix[6])||0,sx:Number(matrix[1])||1,sy:Number(matrix[4])||1};
+  const translate=value.match(/translate\(\s*([-+0-9.eE]+)(?:[\s,]+([-+0-9.eE]+))?\s*\)/i);
+  const scale=value.match(/scale\(\s*([-+0-9.eE]+)(?:[\s,]+([-+0-9.eE]+))?\s*\)/i);
+  return {
+    x:translate?Number(translate[1])||0:0,
+    y:translate?Number(translate[2])||0:0,
+    sx:scale?Number(scale[1])||1:1,
+    sy:scale?Number(scale[2]||scale[1])||1:1
+  };
+}
+function gdAdminCourseVisualHoleFromCaptureId(value){
+  const match=String(value||"").match(/(?:^|:)h(\d+)(?::|$)/i);
+  return match?Number(match[1])||0:0;
+}
+function gdAdminCourseVisualStitchRoleStyle(role){
+  role=String(role||"");
+  if(role==="course-backdrop")return {fill:"rgba(76,201,240,.08)",stroke:"#4cc9f0",label:"LIVE",order:0,opacity:.58};
+  if(role==="play-corridor")return {fill:"rgba(255,209,102,.20)",stroke:"#ffd166",label:"HD",order:1,opacity:.92};
+  if(role==="green-surround")return {fill:"rgba(100,242,138,.22)",stroke:"#64f28a",label:"S-HD",order:2,opacity:1};
+  return null;
+}
+function gdAdminCourseVisualStitchRectFromGroup(group){
+  const role=String(group&&group.getAttribute("data-role")||"");
+  const style=gdAdminCourseVisualStitchRoleStyle(role);
+  if(!style)return null;
+  const border=group.querySelector("rect[vector-effect],rect[stroke]");
+  if(!border)return null;
+  const t=gdAdminCourseVisualParseTransform(group.getAttribute("transform")||"");
+  const x=(Number(border.getAttribute("x"))||0)*t.sx+t.x;
+  const y=(Number(border.getAttribute("y"))||0)*t.sy+t.y;
+  const width=Math.max(1,(Number(border.getAttribute("width"))||0)*Math.abs(t.sx));
+  const height=Math.max(1,(Number(border.getAttribute("height"))||0)*Math.abs(t.sy));
+  const captureId=String(group.getAttribute("data-capture-id")||"");
+  return {
+    role,
+    style,
+    captureId,
+    lens:String(group.getAttribute("data-capture-lens")||""),
+    holeNumber:gdAdminCourseVisualHoleFromCaptureId(captureId),
+    segmentIndex:Number(group.getAttribute("data-segment-index"))||0,
+    segmentCount:Number(group.getAttribute("data-segment-count"))||0,
+    x,
+    y,
+    width,
+    height
+  };
+}
+function gdAdminCourseVisualStitchLabel(item){
+  const hole=item.holeNumber?`H${item.holeNumber}`:"";
+  if(item.role==="course-backdrop")return "live map";
+  if(item.role==="green-surround")return `${hole} green`.trim();
+  if(item.role==="play-corridor"){
+    const segment=item.segmentCount>1?`${item.segmentIndex}/${item.segmentCount}`:"";
+    return `${hole} fairway ${segment}`.trim();
+  }
+  return item.style.label;
+}
+function gdAdminCourseVisualStitchView(record,planSummary){
+  const src=record&&record.rawMaster&&record.rawMaster.dataUrl||record&&record.basicVisual&&record.basicVisual.dataUrl||"";
+  const svgText=gdAdminCourseVisualSvgText(src);
+  const empty=`<div class="gdAdminCourseVisualSlot wide"><div class="gdAdminCourseVisualSlotHead"><strong>Stitch table</strong><small>${gdEscapeHTML(planSummary&&planSummary.stitchModel||"working map")}</small></div><div class="gdAdminCourseVisualFrame stitch"><div class="gdAdminCourseVisualEmpty">Awaiting stitch</div></div></div>`;
+  if(!svgText)return empty;
+  let root=null;
+  try{
+    const doc=new DOMParser().parseFromString(svgText,"image/svg+xml");
+    root=doc&&doc.documentElement;
+  }catch(e){root=null;}
+  if(!root||String(root.nodeName||"").toLowerCase()!=="svg")return empty;
+  const viewParts=String(root.getAttribute("viewBox")||"").trim().split(/[\s,]+/).map(Number).filter(Number.isFinite);
+  const attrWidth=parseFloat(root.getAttribute("width")||"");
+  const attrHeight=parseFloat(root.getAttribute("height")||"");
+  const minX=viewParts.length===4?viewParts[0]:0;
+  const minY=viewParts.length===4?viewParts[1]:0;
+  const width=Math.max(1,viewParts.length===4?viewParts[2]:(Number.isFinite(attrWidth)?attrWidth:1200));
+  const height=Math.max(1,viewParts.length===4?viewParts[3]:(Number.isFinite(attrHeight)?attrHeight:800));
+  const items=Array.from(root.querySelectorAll("g[data-role]")).map(gdAdminCourseVisualStitchRectFromGroup).filter(Boolean).sort((a,b)=>a.style.order-b.style.order||a.y-b.y||a.x-b.x);
+  if(!items.length)return empty;
+  const underlayCount=items.filter(item=>item.role==="course-backdrop").length;
+  const corridorCount=items.filter(item=>item.role==="play-corridor").length;
+  const greenCount=items.filter(item=>item.role==="green-surround").length;
+  const segmentedCount=items.filter(item=>item.role==="play-corridor"&&item.segmentCount>1).length;
+  const stroke=Math.max(2,Math.min(10,width/360));
+  const fontSize=Math.max(12,Math.min(34,width/86));
+  const rects=items.map(item=>{
+    const label=gdAdminCourseVisualStitchLabel(item);
+    const labelX=item.x+Math.max(8,stroke*2);
+    const labelY=item.y+fontSize+Math.max(8,stroke*2);
+    const dash=item.role==="course-backdrop"?' stroke-dasharray="18 12"':"";
+    return `<g opacity="${gdAdminCourseVisualSvgNum(item.style.opacity)}"><rect x="${gdAdminCourseVisualSvgNum(item.x)}" y="${gdAdminCourseVisualSvgNum(item.y)}" width="${gdAdminCourseVisualSvgNum(item.width)}" height="${gdAdminCourseVisualSvgNum(item.height)}" rx="${gdAdminCourseVisualSvgNum(Math.min(12,stroke*1.6))}" fill="${item.style.fill}" stroke="${item.style.stroke}" stroke-width="${gdAdminCourseVisualSvgNum(stroke)}"${dash} vector-effect="non-scaling-stroke"/><text x="${gdAdminCourseVisualSvgNum(labelX)}" y="${gdAdminCourseVisualSvgNum(labelY)}" fill="#fff" stroke="#000" stroke-width="${gdAdminCourseVisualSvgNum(Math.max(3,stroke*.55))}" paint-order="stroke" font-family="system-ui, sans-serif" font-size="${gdAdminCourseVisualSvgNum(fontSize)}" font-weight="950">${gdEscapeHTML(label)}</text></g>`;
+  }).join("");
+  const svg=`<svg viewBox="${gdAdminCourseVisualSvgNum(minX)} ${gdAdminCourseVisualSvgNum(minY)} ${gdAdminCourseVisualSvgNum(width)} ${gdAdminCourseVisualSvgNum(height)}" role="img" aria-label="Course visual stitch table"><defs><pattern id="gdCourseVisualStitchGrid" width="42" height="42" patternUnits="userSpaceOnUse"><path d="M42 0H0V42" fill="none" stroke="rgba(255,255,255,.10)" stroke-width="1"/></pattern></defs><rect x="${gdAdminCourseVisualSvgNum(minX)}" y="${gdAdminCourseVisualSvgNum(minY)}" width="${gdAdminCourseVisualSvgNum(width)}" height="${gdAdminCourseVisualSvgNum(height)}" fill="#0b100e"/><rect x="${gdAdminCourseVisualSvgNum(minX)}" y="${gdAdminCourseVisualSvgNum(minY)}" width="${gdAdminCourseVisualSvgNum(width)}" height="${gdAdminCourseVisualSvgNum(height)}" fill="url(#gdCourseVisualStitchGrid)" opacity=".64"/>${rects}</svg>`;
+  const meta=[
+    `underlay ${underlayCount}`,
+    `corridors ${corridorCount}`,
+    `green squares ${greenCount}`,
+    segmentedCount?`split segments ${segmentedCount}`:"",
+    planSummary&&planSummary.stitchModel?String(planSummary.stitchModel):"geo table"
+  ].filter(Boolean);
+  return `<div class="gdAdminCourseVisualSlot wide"><div class="gdAdminCourseVisualSlotHead"><strong>Stitch table</strong><small>${Math.round(width)}×${Math.round(height)}</small></div><div class="gdAdminCourseVisualFrame stitch"><div class="gdAdminCourseVisualStitch">${svg}</div></div><div class="gdAdminCourseVisualMeta">${meta.map(item=>`<span>${gdEscapeHTML(item)}</span>`).join("")}</div></div>`;
 }
 function gdAdminCourseVisualImage(label,visual,fallback){
   const src=visual&&visual.dataUrl||fallback&&fallback.dataUrl||"";
@@ -6848,8 +7026,34 @@ async function gdAdminCourseVisualBuildPreview(courseId){
 function gdAdminCourseVisualPublish(courseId){
   const engine=window.GDCourseVisualEngine;
   if(!engine){gdAdminCourseVisualToast("Course Visual Engine not loaded");return false;}
-  engine.publishCourseVisual(courseId);
-  gdRenderAdminCourseDatabase();
+  (async()=>{
+    try{
+      const presetId=String(document.getElementById("gdCourseVisualPreset")?.value||"");
+      const overrides=gdAdminCourseVisualOverridesFromForm();
+      engine.saveCourseVisualSettings(courseId,overrides);
+      let record=gdAdminCourseVisualRecord(courseId)||engine.getRecord(courseId);
+      const sourceStatus=gdAdminCourseVisualSourceStatus({id:courseId,key:courseId});
+      const beta3d=!!(overrides.visualEngine&&overrides.visualEngine.enable3dBeta);
+      if(!record||!record.rawMaster||!record.basicVisual||gdAdminCourseVisualNeedsAutoBuild(record,sourceStatus)||(beta3d&&!record.beta3dView)){
+        gdAdminCourseVisualToast("Building course visual stitch");
+        await engine.buildFromCourseDatabase(courseId,{enable3dBeta:beta3d});
+      }
+      record=gdAdminCourseVisualRecord(courseId)||engine.getRecord(courseId);
+      if(!record.previewVisual||record.settingsDirty||String(record.previewVisual.presetId||"")!==presetId){
+        gdAdminCourseVisualToast("Building styled preview");
+        await engine.buildCourseVisualPreview(courseId,presetId,overrides);
+      }
+      record=gdAdminCourseVisualRecord(courseId)||engine.getRecord(courseId);
+      if(!record.previewVisual)throw new Error(record.lastError&&record.lastError.message||"Styled preview did not build.");
+      engine.publishCourseVisual(courseId);
+      gdAdminCourseVisualToast("Published Clarity course map");
+    }catch(error){
+      console.warn("[GolfDaddy] course visual publish failed",error);
+      gdAdminCourseVisualToast(error&&error.message?error.message:"Course visual publish failed");
+    }finally{
+      gdRenderAdminCourseDatabase();
+    }
+  })();
   return false;
 }
 function gdAdminCourseVisualResetPublished(courseId){
@@ -6875,6 +7079,9 @@ function gdAdminCourseVisualMarkup(selected){
   const resolved=engine.resolveCourseVisual(selected.id);
   const dirty=record&&record.settingsDirty?" · unsaved settings":"";
   const sourceStatus=gdAdminCourseVisualSourceStatus(selected);
+  const autoBuildNeeded=gdAdminCourseVisualNeedsAutoBuild(record,sourceStatus);
+  const autoBuildKey=gdAdminCourseVisualScheduleAutoBuild(selected.id,record,sourceStatus);
+  const autoBuildStatus=autoBuildKey&&gdAdminCourseVisualAutoBuildPending[autoBuildKey]?"building":autoBuildNeeded?(autoBuildKey&&gdAdminCourseVisualAutoBuildAttempted[autoBuildKey]?"check diagnostics":"queued"):"ready";
   const inputCaptureLabel=record&&record.input?record.input.captureCount:`${sourceStatus.renderableCount} available`;
   const planSummary=record&&record.diagnostics&&record.diagnostics.capturePlanSummary||null;
   const planLabel=planSummary?`${planSummary.captured}/${planSummary.planned} captured`:"not planned";
@@ -6900,10 +7107,12 @@ function gdAdminCourseVisualMarkup(selected){
       gdAdminCourseDbMetric("Current version",record.currentVersion||0),
       gdAdminCourseDbMetric("Published",record.publishedVersion||0),
       gdAdminCourseDbMetric("Layer model",planSummary?"live underlay + HD overlays":"live map fallback"),
+      gdAdminCourseDbMetric("Pipeline",autoBuildStatus),
       gdAdminCourseDbMetric("3D beta",beta3dLabel),
       gdAdminCourseDbMetric("Play asset",diagnostics.resolvedPlayAsset?"visual":"live map fallback")
     ].join("")}</div>`,
     `<div class="gdAdminCourseVisualGrid">${[
+      gdAdminCourseVisualStitchView(record,planSummary),
       gdAdminCourseVisualImage("Raw / working",record.basicVisual,record.rawMaster),
       gdAdminCourseVisualImage("Example hole",record.exampleHoleVisual),
       gdAdminCourseVisualImage("Terrain view",record.terrainView),
@@ -6912,7 +7121,7 @@ function gdAdminCourseVisualMarkup(selected){
       gdAdminCourseVisualImage("Published",record.publishedVisual)
     ].join("")}</div>`,
     gdAdminCourseVisualControls(record),
-    `<div class="gdAdminCourseVisualActions"><button type="button" onclick="return gdAdminCourseVisualBuildBasic('${gdEscapeHTML(selected.id)}')">Build Working Map</button><button class="primary" type="button" onclick="return gdAdminCourseVisualBuildPreview('${gdEscapeHTML(selected.id)}')">Build Preview</button><button type="button" onclick="return gdAdminCourseVisualPublish('${gdEscapeHTML(selected.id)}')">Publish Clarity Map</button><button type="button" onclick="return gdAdminCourseVisualResetPublished('${gdEscapeHTML(selected.id)}')">Reset to Published</button><button type="button" onclick="return gdAdminCourseVisualResetPreset('${gdEscapeHTML(selected.id)}')">Reset to Global Preset</button><button type="button" onclick="return gdAdminCourseVisualRevert('${gdEscapeHTML(selected.id)}')">Revert Published</button></div>`,
+    `<div class="gdAdminCourseVisualActions"><button class="primary" type="button" onclick="return gdAdminCourseVisualPublish('${gdEscapeHTML(selected.id)}')">Publish Clarity Map</button></div>`,
     `<div class="gdAdminCourseVisualDiag">${gdEscapeHTML(JSON.stringify(diagnostics,null,2))}</div>`
   ].join("");
 }
