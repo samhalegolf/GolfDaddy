@@ -6871,9 +6871,9 @@ function gdAdminCourseVisualHoleFromCaptureId(value){
 }
 function gdAdminCourseVisualStitchRoleStyle(role){
   role=String(role||"");
-  if(role==="course-backdrop")return {fill:"rgba(76,201,240,.08)",stroke:"#4cc9f0",label:"LIVE",order:0,opacity:.58};
-  if(role==="play-corridor")return {fill:"rgba(255,209,102,.20)",stroke:"#ffd166",label:"HD",order:1,opacity:.92};
-  if(role==="green-surround")return {fill:"rgba(100,242,138,.22)",stroke:"#64f28a",label:"S-HD",order:2,opacity:1};
+  if(role==="course-backdrop")return {fill:"rgba(76,201,240,.04)",stroke:"#4cc9f0",label:"LIVE",order:0,opacity:.62};
+  if(role==="play-corridor")return {fill:"rgba(255,209,102,.045)",stroke:"#ffd166",label:"HD",order:1,opacity:.88};
+  if(role==="green-surround")return {fill:"rgba(100,242,138,.10)",stroke:"#64f28a",label:"S-HD",order:2,opacity:.95};
   return null;
 }
 function gdAdminCourseVisualStitchRectFromGroup(group){
@@ -6926,34 +6926,55 @@ function gdAdminCourseVisualStitchView(record,planSummary){
   const viewParts=String(root.getAttribute("viewBox")||"").trim().split(/[\s,]+/).map(Number).filter(Number.isFinite);
   const attrWidth=parseFloat(root.getAttribute("width")||"");
   const attrHeight=parseFloat(root.getAttribute("height")||"");
-  const minX=viewParts.length===4?viewParts[0]:0;
-  const minY=viewParts.length===4?viewParts[1]:0;
-  const width=Math.max(1,viewParts.length===4?viewParts[2]:(Number.isFinite(attrWidth)?attrWidth:1200));
-  const height=Math.max(1,viewParts.length===4?viewParts[3]:(Number.isFinite(attrHeight)?attrHeight:800));
+  const fullMinX=viewParts.length===4?viewParts[0]:0;
+  const fullMinY=viewParts.length===4?viewParts[1]:0;
+  const fullWidth=Math.max(1,viewParts.length===4?viewParts[2]:(Number.isFinite(attrWidth)?attrWidth:1200));
+  const fullHeight=Math.max(1,viewParts.length===4?viewParts[3]:(Number.isFinite(attrHeight)?attrHeight:800));
   const items=Array.from(root.querySelectorAll("g[data-role]")).map(gdAdminCourseVisualStitchRectFromGroup).filter(Boolean).sort((a,b)=>a.style.order-b.style.order||a.y-b.y||a.x-b.x);
   if(!items.length)return empty;
   const underlayCount=items.filter(item=>item.role==="course-backdrop").length;
   const corridorCount=items.filter(item=>item.role==="play-corridor").length;
   const greenCount=items.filter(item=>item.role==="green-surround").length;
   const segmentedCount=items.filter(item=>item.role==="play-corridor"&&item.segmentCount>1).length;
-  const stroke=Math.max(2,Math.min(10,width/360));
-  const fontSize=Math.max(12,Math.min(34,width/86));
+  const denseOverview=items.length>24;
+  const focusItems=items.filter(item=>item.role!=="course-backdrop");
+  let viewMinX=fullMinX,viewMinY=fullMinY,viewWidth=fullWidth,viewHeight=fullHeight;
+  if(denseOverview&&focusItems.length){
+    const focusMinX=Math.min(...focusItems.map(item=>item.x));
+    const focusMinY=Math.min(...focusItems.map(item=>item.y));
+    const focusMaxX=Math.max(...focusItems.map(item=>item.x+item.width));
+    const focusMaxY=Math.max(...focusItems.map(item=>item.y+item.height));
+    const focusWidth=Math.max(1,focusMaxX-focusMinX);
+    const focusHeight=Math.max(1,focusMaxY-focusMinY);
+    const pad=Math.max(280,Math.min(Math.max(fullWidth,fullHeight)*.10,Math.max(focusWidth,focusHeight)*.18));
+    viewMinX=Math.max(fullMinX,focusMinX-pad);
+    viewMinY=Math.max(fullMinY,focusMinY-pad);
+    const viewMaxX=Math.min(fullMinX+fullWidth,focusMaxX+pad);
+    const viewMaxY=Math.min(fullMinY+fullHeight,focusMaxY+pad);
+    viewWidth=Math.max(1,viewMaxX-viewMinX);
+    viewHeight=Math.max(1,viewMaxY-viewMinY);
+  }
+  const stroke=Math.max(2,Math.min(10,viewWidth/360));
+  const fontSize=Math.max(12,Math.min(34,viewWidth/86));
   const rects=items.map(item=>{
     const label=gdAdminCourseVisualStitchLabel(item);
     const labelX=item.x+Math.max(8,stroke*2);
     const labelY=item.y+fontSize+Math.max(8,stroke*2);
     const dash=item.role==="course-backdrop"?' stroke-dasharray="18 12"':"";
-    return `<g opacity="${gdAdminCourseVisualSvgNum(item.style.opacity)}"><rect x="${gdAdminCourseVisualSvgNum(item.x)}" y="${gdAdminCourseVisualSvgNum(item.y)}" width="${gdAdminCourseVisualSvgNum(item.width)}" height="${gdAdminCourseVisualSvgNum(item.height)}" rx="${gdAdminCourseVisualSvgNum(Math.min(12,stroke*1.6))}" fill="${item.style.fill}" stroke="${item.style.stroke}" stroke-width="${gdAdminCourseVisualSvgNum(stroke)}"${dash} vector-effect="non-scaling-stroke"/><text x="${gdAdminCourseVisualSvgNum(labelX)}" y="${gdAdminCourseVisualSvgNum(labelY)}" fill="#fff" stroke="#000" stroke-width="${gdAdminCourseVisualSvgNum(Math.max(3,stroke*.55))}" paint-order="stroke" font-family="system-ui, sans-serif" font-size="${gdAdminCourseVisualSvgNum(fontSize)}" font-weight="950">${gdEscapeHTML(label)}</text></g>`;
+    const visibleLabel=denseOverview&&item.role!=="course-backdrop"?"":`<text x="${gdAdminCourseVisualSvgNum(labelX)}" y="${gdAdminCourseVisualSvgNum(labelY)}" fill="#fff" stroke="#000" stroke-width="${gdAdminCourseVisualSvgNum(Math.max(3,stroke*.55))}" paint-order="stroke" font-family="system-ui, sans-serif" font-size="${gdAdminCourseVisualSvgNum(fontSize)}" font-weight="950">${gdEscapeHTML(label)}</text>`;
+    return `<g opacity="${gdAdminCourseVisualSvgNum(item.style.opacity)}"><title>${gdEscapeHTML(label)}</title><rect x="${gdAdminCourseVisualSvgNum(item.x)}" y="${gdAdminCourseVisualSvgNum(item.y)}" width="${gdAdminCourseVisualSvgNum(item.width)}" height="${gdAdminCourseVisualSvgNum(item.height)}" rx="${gdAdminCourseVisualSvgNum(Math.min(12,stroke*1.6))}" fill="${item.style.fill}" stroke="${item.style.stroke}" stroke-width="${gdAdminCourseVisualSvgNum(stroke)}"${dash} vector-effect="non-scaling-stroke"/>${visibleLabel}</g>`;
   }).join("");
-  const svg=`<svg viewBox="${gdAdminCourseVisualSvgNum(minX)} ${gdAdminCourseVisualSvgNum(minY)} ${gdAdminCourseVisualSvgNum(width)} ${gdAdminCourseVisualSvgNum(height)}" role="img" aria-label="Course visual stitch table"><defs><pattern id="gdCourseVisualStitchGrid" width="42" height="42" patternUnits="userSpaceOnUse"><path d="M42 0H0V42" fill="none" stroke="rgba(255,255,255,.10)" stroke-width="1"/></pattern></defs><rect x="${gdAdminCourseVisualSvgNum(minX)}" y="${gdAdminCourseVisualSvgNum(minY)}" width="${gdAdminCourseVisualSvgNum(width)}" height="${gdAdminCourseVisualSvgNum(height)}" fill="#0b100e"/><rect x="${gdAdminCourseVisualSvgNum(minX)}" y="${gdAdminCourseVisualSvgNum(minY)}" width="${gdAdminCourseVisualSvgNum(width)}" height="${gdAdminCourseVisualSvgNum(height)}" fill="url(#gdCourseVisualStitchGrid)" opacity=".64"/>${rects}</svg>`;
+  const svg=`<svg viewBox="${gdAdminCourseVisualSvgNum(viewMinX)} ${gdAdminCourseVisualSvgNum(viewMinY)} ${gdAdminCourseVisualSvgNum(viewWidth)} ${gdAdminCourseVisualSvgNum(viewHeight)}" role="img" aria-label="Course visual stitch table"><defs><pattern id="gdCourseVisualStitchGrid" width="42" height="42" patternUnits="userSpaceOnUse"><path d="M42 0H0V42" fill="none" stroke="rgba(255,255,255,.10)" stroke-width="1"/></pattern></defs><rect x="${gdAdminCourseVisualSvgNum(viewMinX)}" y="${gdAdminCourseVisualSvgNum(viewMinY)}" width="${gdAdminCourseVisualSvgNum(viewWidth)}" height="${gdAdminCourseVisualSvgNum(viewHeight)}" fill="#0b100e"/><rect x="${gdAdminCourseVisualSvgNum(viewMinX)}" y="${gdAdminCourseVisualSvgNum(viewMinY)}" width="${gdAdminCourseVisualSvgNum(viewWidth)}" height="${gdAdminCourseVisualSvgNum(viewHeight)}" fill="url(#gdCourseVisualStitchGrid)" opacity=".64"/>${rects}</svg>`;
   const meta=[
     `underlay ${underlayCount}`,
     `corridors ${corridorCount}`,
     `green squares ${greenCount}`,
+    denseOverview?"focused crop":"",
     segmentedCount?`split segments ${segmentedCount}`:"",
     planSummary&&planSummary.stitchModel?String(planSummary.stitchModel):"geo table"
   ].filter(Boolean);
-  return `<div class="gdAdminCourseVisualSlot wide"><div class="gdAdminCourseVisualSlotHead"><strong>Stitch table</strong><small>${Math.round(width)}×${Math.round(height)}</small></div><div class="gdAdminCourseVisualFrame stitch"><div class="gdAdminCourseVisualStitch">${svg}</div></div><div class="gdAdminCourseVisualMeta">${meta.map(item=>`<span>${gdEscapeHTML(item)}</span>`).join("")}</div></div>`;
+  const dims=denseOverview?`${Math.round(viewWidth)}×${Math.round(viewHeight)} crop / ${Math.round(fullWidth)}×${Math.round(fullHeight)} raw`:`${Math.round(fullWidth)}×${Math.round(fullHeight)}`;
+  return `<div class="gdAdminCourseVisualSlot wide"><div class="gdAdminCourseVisualSlotHead"><strong>Stitch table</strong><small>${gdEscapeHTML(dims)}</small></div><div class="gdAdminCourseVisualFrame stitch"><div class="gdAdminCourseVisualStitch">${svg}</div></div><div class="gdAdminCourseVisualMeta">${meta.map(item=>`<span>${gdEscapeHTML(item)}</span>`).join("")}</div></div>`;
 }
 function gdAdminCourseVisualImage(label,visual,fallback){
   const src=visual&&visual.dataUrl||fallback&&fallback.dataUrl||"";
