@@ -7,7 +7,7 @@
 
   var VERSION=1;
   var PRESET_VERSION=4;
-  var RENDERER_VERSION="clarity-course-visual-renderer-v15";
+  var RENDERER_VERSION="clarity-course-visual-renderer-v16";
   var STORE_KEY="gd_course_visual_engine_v1";
   var PRESET_KEY="gd_course_visual_presets_v1";
   var API_ENDPOINT="/api/course-visuals";
@@ -17,6 +17,7 @@
   var inFlightBuilds={};
   var transientCapturesByCourse={};
   var transientAssetDataByPath={};
+  var volatileStore=null;
   var assetDbPromise=null;
 
   function now(){return new Date().toISOString();}
@@ -373,9 +374,44 @@
     if(!root||!root.localStorage)return clone(fb);
     return safe(function(){var raw=root.localStorage.getItem(key);return raw?JSON.parse(raw):clone(fb);},clone(fb));
   }
+  function tryWriteJson(key,value){
+    if(!root||!root.localStorage)return true;
+    try{
+      root.localStorage.setItem(key,JSON.stringify(value));
+      return true;
+    }catch(_error){
+      return false;
+    }
+  }
   function writeJson(key,value){
-    if(root&&root.localStorage)safe(function(){root.localStorage.setItem(key,JSON.stringify(value));});
+    tryWriteJson(key,value);
     return value;
+  }
+  function compactAssetMetadata(meta){
+    if(!meta||typeof meta!=="object")return meta||null;
+    var out={};
+    Object.keys(meta).forEach(function(key){
+      var value=meta[key];
+      if(value==null||typeof value!=="object")out[key]=value;
+    });
+    ["outputDimensions","sourceDimensions","viewportFrame","displayTransform","objectProofOverlay","mapCameraCapability","anchorPins"].forEach(function(key){
+      if(meta[key]&&typeof meta[key]==="object")out[key]=clone(meta[key]);
+    });
+    if(meta.playSurface&&typeof meta.playSurface==="object"){
+      var play=meta.playSurface;
+      out.playSurface={
+        useGpsPlayFraming:play.useGpsPlayFraming===true,
+        fallbackUnderlay:play.fallbackUnderlay||"",
+        fallbackPolicy:play.fallbackPolicy||"",
+        publishedOverviewPath:play.publishedOverviewPath||"",
+        overflowVisible:play.overflowVisible===true,
+        viewportFrame:play.viewportFrame?clone(play.viewportFrame):undefined,
+        displayTransform:play.displayTransform?clone(play.displayTransform):undefined,
+        objectProofOverlay:play.objectProofOverlay?clone(play.objectProofOverlay):undefined,
+        anchorPins:play.anchorPins?clone(play.anchorPins):undefined
+      };
+    }
+    return out;
   }
   function visualAssets(record){
     function list(value){return Array.isArray(value)?value:[];}
@@ -477,6 +513,9 @@
   }
   function loadStore(){
     var store=readJson(STORE_KEY,emptyStore());
+    if(volatileStore&&volatileStore.records&&String(volatileStore.updatedAt||"")>=String(store&&store.updatedAt||"")){
+      store=clone(volatileStore);
+    }
     store.schema="gd.course_visual_engine.store";
     store.version=VERSION;
     store.rendererVersion=RENDERER_VERSION;
@@ -486,7 +525,18 @@
   function saveStore(store){
     store=store&&typeof store==="object"?store:emptyStore();
     store.updatedAt=now();
-    return writeJson(STORE_KEY,store);
+    volatileStore=clone(store);
+    if(tryWriteJson(STORE_KEY,store))return store;
+    var compact=clone(store)||emptyStore();
+    Object.keys(compact.records||{}).forEach(function(courseId){
+      var record=compact.records[courseId];
+      if(!record||typeof record!=="object")return;
+      record.versions=(Array.isArray(record.versions)?record.versions:[]).slice(-12);
+      record.events=(Array.isArray(record.events)?record.events:[]).slice(-16);
+      if(Array.isArray(record.captureRefs)&&record.captureRefs.length>84)record.captureRefs=record.captureRefs.slice(-84);
+    });
+    tryWriteJson(STORE_KEY,compact);
+    return store;
   }
   function baseCourseVisualPreset(){
     var stamp="2026-07-15T00:00:00.000Z";
@@ -905,10 +955,14 @@
     var out=clone(record);
     delete out.captures;
     visualAssets(out).forEach(function(asset){
-      if(asset)delete asset.dataUrl;
+      if(asset){
+        delete asset.dataUrl;
+        if(asset.metadata)asset.metadata=compactAssetMetadata(asset.metadata);
+        if(Array.isArray(asset.sourceCaptureIds)&&asset.sourceCaptureIds.length>24)asset.sourceCaptureIds=asset.sourceCaptureIds.slice(0,24);
+      }
     });
-    out.versions=(Array.isArray(out.versions)?out.versions:[]).slice(-60);
-    out.events=(Array.isArray(out.events)?out.events:[]).slice(-40);
+    out.versions=(Array.isArray(out.versions)?out.versions:[]).slice(-24);
+    out.events=(Array.isArray(out.events)?out.events:[]).slice(-24);
     if(out.diagnostics&&typeof out.diagnostics==="object"){
       out.diagnostics=clone(out.diagnostics)||{};
       delete out.diagnostics.capturePlan;
