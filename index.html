@@ -2275,6 +2275,7 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
     .gdAdminCourseVisualSlot strong{color:#fff;font-size:10px;font-weight:950;text-transform:uppercase;letter-spacing:.05em}
     .gdAdminCourseVisualSlot small{color:rgba(255,255,255,.52);font-size:10px;font-weight:850;white-space:nowrap}
     .gdAdminCourseVisualFrame{display:grid;place-items:center;width:100%;height:clamp(180px,26vw,320px);overflow:auto;background:#10130f;overscroll-behavior:contain}
+    .gdAdminCourseVisualSlot.product .gdAdminCourseVisualFrame{position:relative}
     .gdAdminCourseVisualSlot.product .gdAdminCourseVisualFrame{height:clamp(280px,42vw,620px)}
     .gdAdminCourseVisualFrame.stitch{height:clamp(280px,48vw,560px);background:#0b100e}
     .gdAdminCourseVisualFrame img{display:block;max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain}
@@ -2286,6 +2287,8 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
     .gdAdminCourseVisualFrame.scroll img{width:100%;height:auto;max-width:none;max-height:none}
     .gdAdminCourseVisualFrame.scroll .gdAdminCourseVisualInline{place-items:start center}
     .gdAdminCourseVisualFrame.scroll .gdAdminCourseVisualInline svg{width:100%;height:auto;max-width:none;max-height:none}
+    .gdAdminCourseVisualProducts.liveFiltering .gdAdminCourseVisualSlot.product .gdAdminCourseVisualInline,.gdAdminCourseVisualProducts.liveFiltering .gdAdminCourseVisualSlot.product .gdAdminCourseVisualFrame>img{filter:saturate(var(--gd-course-visual-saturation,1)) brightness(var(--gd-course-visual-brightness,1)) contrast(var(--gd-course-visual-contrast,1))}
+    .gdAdminCourseVisualProducts.liveFiltering .gdAdminCourseVisualSlot.product .gdAdminCourseVisualFrame:after{content:"";position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(108deg,rgba(255,255,255,.18) 0 1px,rgba(255,255,255,0) 1px 18px);mix-blend-mode:soft-light;opacity:var(--gd-course-visual-mowing-opacity,0)}
     .gdAdminCourseVisualEmpty{display:grid;place-items:center;width:100%;height:100%;min-height:180px;color:rgba(255,255,255,.48);font-size:11px;font-weight:850;background:#10130f}
     .gdAdminCourseVisualMeta{display:flex;gap:6px;flex-wrap:wrap;padding:7px 9px;border-top:1px solid rgba(255,255,255,.06);color:rgba(255,255,255,.55);font-size:10px;font-weight:850}
     .gdAdminCourseVisualStages{display:flex;gap:5px;flex-wrap:wrap;padding:8px 9px;border-top:1px solid rgba(255,255,255,.06)}
@@ -7176,6 +7179,89 @@ function gdAdminCourseVisualProducts(record){
     {label:"Single hole",base:record&&record.exampleHoleVisual||null,native:holeNative,terrain:holeTerrain,published:record&&record.singleHolePublishedVisual||null,holeNumber:record&&record.exampleHoleVisual&&record.exampleHoleVisual.holeNumber||record&&record.singleHoleTerrainView&&record.singleHoleTerrainView.holeNumber||null}
   ];
 }
+function gdAdminCourseVisualMowingOpacity(value){
+  value=String(value||"Unknown");
+  if(value==="Low")return .08;
+  if(value==="Clear")return .16;
+  if(value==="Prominent")return .28;
+  return 0;
+}
+function gdAdminCourseVisualLiveFilterValues(presetId,overrides){
+  const engine=window.GDCourseVisualEngine;
+  let preset=null;
+  try{preset=engine&&typeof engine.getPreset==="function"?engine.getPreset(presetId):null;}catch(e){preset=null;}
+  let settings=preset||{};
+  try{settings=engine&&typeof engine.mergePreset==="function"?engine.mergePreset(settings,overrides||{}):Object.assign({},settings,overrides||{});}catch(e){settings=Object.assign({},settings,overrides||{});}
+  const turf=settings&&settings.turf||{};
+  const lighting=settings&&settings.lighting||{};
+  const green=Number(turf.greenStrength);
+  const brightnessTarget=Number(lighting.brightnessTarget);
+  const contrastTarget=Number(lighting.contrastTarget);
+  return {
+    saturation:Number((1+(Number.isFinite(green)?green:.35)*.22).toFixed(3)),
+    brightness:Number((1+((Number.isFinite(brightnessTarget)?brightnessTarget:52)-52)/140).toFixed(3)),
+    contrast:Number((Number.isFinite(contrastTarget)?contrastTarget:1.04).toFixed(3)),
+    mowingOpacity:gdAdminCourseVisualMowingOpacity(settings&&settings.mowingVisibility||overrides&&overrides.mowingVisibility)
+  };
+}
+function gdAdminCourseVisualApplyLiveFilter(courseId){
+  const products=document.querySelector(".gdAdminCourseVisualProducts");
+  if(!products)return;
+  const presetId=String(document.getElementById("gdCourseVisualPreset")?.value||"");
+  const values=gdAdminCourseVisualLiveFilterValues(presetId,gdAdminCourseVisualOverridesFromForm());
+  products.style.setProperty("--gd-course-visual-saturation",String(values.saturation));
+  products.style.setProperty("--gd-course-visual-brightness",String(values.brightness));
+  products.style.setProperty("--gd-course-visual-contrast",String(values.contrast));
+  products.style.setProperty("--gd-course-visual-mowing-opacity",String(values.mowingOpacity));
+  products.classList.add("liveFiltering");
+}
+const gdAdminCourseVisualLiveBuildTimers={};
+function gdAdminCourseVisualScheduleLiveBuild(courseId){
+  const engine=window.GDCourseVisualEngine;
+  if(!engine||typeof engine.buildCourseVisualPreview!=="function")return;
+  clearTimeout(gdAdminCourseVisualLiveBuildTimers[courseId]);
+  gdAdminCourseVisualLiveBuildTimers[courseId]=setTimeout(async()=>{
+    try{
+      const presetId=String(document.getElementById("gdCourseVisualPreset")?.value||"");
+      const overrides=gdAdminCourseVisualOverridesFromForm();
+      engine.saveCourseVisualSettings(courseId,overrides);
+      const fresh=gdAdminCourseVisualRecord(courseId)||engine.getRecord(courseId);
+      const sourceStatus=gdAdminCourseVisualSourceStatus({id:courseId,key:courseId});
+      const beta3d=!!(overrides.visualEngine&&overrides.visualEngine.enable3dBeta);
+      if(!fresh||!fresh.rawMaster||!fresh.basicVisual||gdAdminCourseVisualNeedsAutoBuild(fresh,sourceStatus)||(beta3d&&!fresh.beta3dView)){
+        await engine.buildFromCourseDatabase(courseId,{enable3dBeta:beta3d});
+      }
+      await engine.buildCourseVisualPreview(courseId,presetId,overrides);
+      if(gdAdminCourseDatabaseSelected===courseId&&gdAdminCourseDatabaseTab==="visuals")gdRenderAdminCourseDatabase();
+    }catch(error){
+      console.warn("[GolfDaddy] course visual live filter build failed",error);
+      gdAdminCourseVisualToast(error&&error.message?error.message:"Course visual filter build failed");
+      gdAdminCourseVisualApplyLiveFilter(courseId);
+    }finally{
+      delete gdAdminCourseVisualLiveBuildTimers[courseId];
+    }
+  },900);
+}
+function gdAdminCourseVisualControlChanged(courseId){
+  gdAdminCourseVisualApplyLiveFilter(courseId);
+  gdAdminCourseVisualScheduleLiveBuild(courseId);
+  return false;
+}
+function gdAdminCourseVisualPresetChanged(courseId){
+  const engine=window.GDCourseVisualEngine;
+  const presetId=String(document.getElementById("gdCourseVisualPreset")?.value||"");
+  let preset=null;
+  try{preset=engine&&typeof engine.getPreset==="function"?engine.getPreset(presetId):null;}catch(e){preset=null;}
+  if(preset){
+    const green=document.getElementById("gdCourseVisualGreenStrength");
+    const brightness=document.getElementById("gdCourseVisualBrightness");
+    const contrast=document.getElementById("gdCourseVisualContrast");
+    if(green)green.value=Number(preset.turf&&preset.turf.greenStrength)||.35;
+    if(brightness)brightness.value=Number(preset.lighting&&preset.lighting.brightnessTarget)||52;
+    if(contrast)contrast.value=Number(preset.lighting&&preset.lighting.contrastTarget)||1.04;
+  }
+  return gdAdminCourseVisualControlChanged(courseId);
+}
 function gdAdminCourseVisualProductCard(product){
   const visual=product.terrain||product.native||product.published||product.base||null;
   const src=visual&&visual.dataUrl||"";
@@ -7200,7 +7286,7 @@ function gdAdminCourseVisualProductCard(product){
   ].filter(Boolean);
   return `<div class="gdAdminCourseVisualSlot product"><div class="gdAdminCourseVisualSlotHead"><strong>${gdEscapeHTML(product.label)}</strong>${dims?`<small>${gdEscapeHTML(dims)}</small>`:""}</div><div class="gdAdminCourseVisualFrame${scrollClass}">${frame}</div><div class="gdAdminCourseVisualStages">${stages.map(stage=>`<span class="gdAdminCourseVisualStage ${stage.ready?"ready":"pending"}">${gdEscapeHTML(stage.label)}</span>`).join("")}</div>${meta.length?`<div class="gdAdminCourseVisualMeta">${meta.map(item=>`<span>${gdEscapeHTML(item)}</span>`).join("")}</div>`:""}</div>`;
 }
-function gdAdminCourseVisualControls(record){
+function gdAdminCourseVisualControls(record,courseId){
   const modes=["Natural","Fresh","Rich","Strong"];
   const preset=(record&&record.presetId)||"clarity-course-natural-v1";
   const overrides=record&&record.courseOverrides||{};
@@ -7209,13 +7295,14 @@ function gdAdminCourseVisualControls(record){
   const brightness=Number(overrides.lighting&&overrides.lighting.brightnessTarget);
   const contrast=Number(overrides.lighting&&overrides.lighting.contrastTarget);
   const beta3d=!!(overrides.visualEngine&&overrides.visualEngine.enable3dBeta);
+  const key=gdEscapeHTML(courseId||record&&record.courseId||"");
   return `<div class="gdAdminCourseVisualControls">
-    <label>Preset<select id="gdCourseVisualPreset">${modes.map(mode=>{const p=window.GDCourseVisualEngine?.presetForMode?.(mode);return `<option value="${gdEscapeHTML(p?.id||mode)}" ${preset===(p?.id||mode)?"selected":""}>${gdEscapeHTML(mode)}</option>`;}).join("")}</select></label>
-    <label>Green strength<input id="gdCourseVisualGreenStrength" type="range" min="0" max="1" step="0.05" value="${Number.isFinite(strength)?strength:.35}"></label>
-    <label>Brightness target<input id="gdCourseVisualBrightness" type="number" min="20" max="85" step="1" value="${Number.isFinite(brightness)?brightness:52}"></label>
-    <label>Contrast<input id="gdCourseVisualContrast" type="number" min="0.8" max="1.25" step="0.01" value="${Number.isFinite(contrast)?contrast:1.04}"></label>
-    <label>Mowing visibility<select id="gdCourseVisualMowing">${["Unknown","Low","Clear","Prominent"].map(value=>`<option value="${value}" ${mowing===value?"selected":""}>${value}</option>`).join("")}</select></label>
-    <label class="gdAdminCourseVisualCheck"><input id="gdCourseVisual3dBeta" type="checkbox" ${beta3d?"checked":""}><span>3D view beta</span></label>
+    <label>Preset<select id="gdCourseVisualPreset" onchange="return gdAdminCourseVisualPresetChanged('${key}')">${modes.map(mode=>{const p=window.GDCourseVisualEngine?.presetForMode?.(mode);return `<option value="${gdEscapeHTML(p?.id||mode)}" ${preset===(p?.id||mode)?"selected":""}>${gdEscapeHTML(mode)}</option>`;}).join("")}</select></label>
+    <label>Green strength<input id="gdCourseVisualGreenStrength" type="range" min="0" max="1" step="0.05" value="${Number.isFinite(strength)?strength:.35}" oninput="return gdAdminCourseVisualControlChanged('${key}')"></label>
+    <label>Brightness target<input id="gdCourseVisualBrightness" type="number" min="20" max="85" step="1" value="${Number.isFinite(brightness)?brightness:52}" oninput="return gdAdminCourseVisualControlChanged('${key}')"></label>
+    <label>Contrast<input id="gdCourseVisualContrast" type="number" min="0.8" max="1.25" step="0.01" value="${Number.isFinite(contrast)?contrast:1.04}" oninput="return gdAdminCourseVisualControlChanged('${key}')"></label>
+    <label>Mowing visibility<select id="gdCourseVisualMowing" onchange="return gdAdminCourseVisualControlChanged('${key}')">${["Unknown","Low","Clear","Prominent"].map(value=>`<option value="${value}" ${mowing===value?"selected":""}>${value}</option>`).join("")}</select></label>
+    <label class="gdAdminCourseVisualCheck"><input id="gdCourseVisual3dBeta" type="checkbox" ${beta3d?"checked":""} onchange="return gdAdminCourseVisualControlChanged('${key}')"><span>3D view beta</span></label>
   </div>`;
 }
 function gdAdminCourseVisualOverridesFromForm(){
@@ -7346,7 +7433,7 @@ function gdAdminCourseVisualMarkup(selected){
     ].join("")}</div>`,
     `<div class="gdAdminCourseVisualProducts">${gdAdminCourseVisualProducts(record).map(gdAdminCourseVisualProductCard).join("")}</div>`,
     record.lastError?`<div class="gdAdminCourseVisualNotice">${gdEscapeHTML(record.lastError.message||record.lastError.code||"Course visual pipeline needs attention.")}</div>`:"",
-    gdAdminCourseVisualControls(record),
+    gdAdminCourseVisualControls(record,selected.id),
     `<div class="gdAdminCourseVisualActions"><button class="primary" type="button" onclick="return gdAdminCourseVisualPublish('${gdEscapeHTML(selected.id)}')">Publish Clarity Map</button></div>`
   ].join("");
 }
