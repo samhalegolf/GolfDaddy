@@ -24,6 +24,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/course-visuals"
+  to = "/.netlify/functions/course-visuals"
+  status = 200
+
+[[redirects]]
   from = "/api/scorecard-fetch"
   to = "/.netlify/functions/scorecard-fetch"
   status = 200
