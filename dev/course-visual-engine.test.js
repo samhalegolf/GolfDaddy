@@ -4,6 +4,11 @@
 const assert = require("assert");
 const path = require("path");
 
+function svgText(dataUrl) {
+  const body = String(dataUrl || "").split(",")[1] || "";
+  return decodeURIComponent(body);
+}
+
 function installStorage() {
   const data = {};
   global.localStorage = {
@@ -220,6 +225,7 @@ function payload() {
   assert.equal(preview.status, "preview-ready");
   assert.ok(preview.previewVisual.path.includes("/preview/"));
   assert.equal(preview.previewVisual.metadata.stage, "native-visuals", "course overview enters native visuals");
+  assert.ok(svgText(preview.previewVisual.dataUrl).includes("cvMowingStripe"), "preset mowing visibility is baked into native visuals");
   assert.equal(preview.terrainView.metadata.stage, "terrain-shading", "course overview enters terrain shading after native visuals");
   assert.equal(preview.terrainView.metadata.inputStage, "native-visuals", "overview terrain shading consumes the native visual output");
   assert.ok(preview.singleHolePreviewVisual.path.includes("/single-hole/preview/"), "single-hole visual enters native visuals");
@@ -298,6 +304,12 @@ function payload() {
   global.gdBuildCourseVisualCaptureManifest = originalExecutor;
 
   const globalPreset = engine.getPreset("clarity-course-natural-v1");
+  const presetStore = engine.loadPresets();
+  const presetList = engine.courseVisualPresetList();
+  assert.equal(presetStore.version, 2, "preset store upgrades to the current built-in preset version");
+  assert.ok(presetList.length >= 8 && presetList.length <= 10, "admin gets a proper preset palette without becoming noisy");
+  assert.ok(presetList.some((preset) => preset.id === "clarity-course-green-detail-v1"), "green detail preset is available");
+  assert.ok(presetList.some((preset) => preset.id === "clarity-course-terrain-relief-v1"), "terrain relief preset is available");
   const merged = engine.mergePreset(globalPreset, { turf: { greenStrength: 0.9 } });
   assert.equal(globalPreset.turf.greenStrength, 0.35, "course overrides do not mutate the global preset");
   assert.equal(merged.turf.greenStrength, 0.9, "global preset inheritance accepts course overrides");

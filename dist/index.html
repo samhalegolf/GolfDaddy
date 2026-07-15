@@ -7335,9 +7335,19 @@ function gdAdminCourseVisualProductCard(product){
   ].filter(Boolean);
   return `<div class="gdAdminCourseVisualSlot product"><div class="gdAdminCourseVisualSlotHead"><strong>${gdEscapeHTML(product.label)}</strong>${dims?`<small>${gdEscapeHTML(dims)}</small>`:""}</div><div class="gdAdminCourseVisualFrame${scrollClass}">${frame}</div><div class="gdAdminCourseVisualStages">${stages.map(stage=>`<span class="gdAdminCourseVisualStage ${stage.ready?"ready":"pending"}">${gdEscapeHTML(stage.label)}</span>`).join("")}</div>${meta.length?`<div class="gdAdminCourseVisualMeta">${meta.map(item=>`<span>${gdEscapeHTML(item)}</span>`).join("")}</div>`:""}</div>`;
 }
+function gdAdminCourseVisualPresetList(){
+  const engine=window.GDCourseVisualEngine;
+  try{
+    if(engine&&typeof engine.courseVisualPresetList==="function"){
+      const list=engine.courseVisualPresetList();
+      if(Array.isArray(list)&&list.length)return list;
+    }
+  }catch(e){}
+  return ["Natural","Fresh","Rich","Strong"].map(mode=>engine&&typeof engine.presetForMode==="function"?engine.presetForMode(mode):{id:mode,name:mode,mode:mode});
+}
 function gdAdminCourseVisualControls(record,courseId){
-  const modes=["Natural","Fresh","Rich","Strong"];
   const preset=(record&&record.presetId)||"clarity-course-natural-v1";
+  const presets=gdAdminCourseVisualPresetList();
   const overrides=record&&record.courseOverrides||{};
   const settings=gdAdminCourseVisualMergedSettings(preset,overrides);
   const mowing=String(settings.mowingVisibility||"Unknown");
@@ -7347,7 +7357,7 @@ function gdAdminCourseVisualControls(record,courseId){
   const beta3d=!!(settings.visualEngine&&settings.visualEngine.enable3dBeta);
   const key=gdEscapeHTML(courseId||record&&record.courseId||"");
   return `<div class="gdAdminCourseVisualControls" data-course-id="${key}">
-    <label>Preset<select id="gdCourseVisualPreset" oninput="return gdAdminCourseVisualPresetChanged('${key}')" onchange="return gdAdminCourseVisualPresetChanged('${key}')">${modes.map(mode=>{const p=window.GDCourseVisualEngine?.presetForMode?.(mode);return `<option value="${gdEscapeHTML(p?.id||mode)}" ${preset===(p?.id||mode)?"selected":""}>${gdEscapeHTML(mode)}</option>`;}).join("")}</select></label>
+    <label>Preset<select id="gdCourseVisualPreset" oninput="return gdAdminCourseVisualPresetChanged('${key}')" onchange="return gdAdminCourseVisualPresetChanged('${key}')">${presets.map(p=>`<option value="${gdEscapeHTML(p&&p.id||p&&p.mode||p&&p.name||"")}" ${preset===(p&&p.id)?"selected":""}>${gdEscapeHTML(p&&p.name||p&&p.mode||p&&p.id||"Preset")}</option>`).join("")}</select></label>
     <label>Green strength<input id="gdCourseVisualGreenStrength" type="range" min="0" max="1" step="0.05" value="${Number.isFinite(strength)?strength:.35}" oninput="return gdAdminCourseVisualControlChanged('${key}')" onchange="return gdAdminCourseVisualControlChanged('${key}')"></label>
     <label>Brightness target<input id="gdCourseVisualBrightness" type="number" min="20" max="85" step="1" value="${Number.isFinite(brightness)?brightness:52}" oninput="return gdAdminCourseVisualControlChanged('${key}')" onchange="return gdAdminCourseVisualControlChanged('${key}')"></label>
     <label>Contrast<input id="gdCourseVisualContrast" type="number" min="0.8" max="1.25" step="0.01" value="${Number.isFinite(contrast)?contrast:1.04}" oninput="return gdAdminCourseVisualControlChanged('${key}')" onchange="return gdAdminCourseVisualControlChanged('${key}')"></label>
