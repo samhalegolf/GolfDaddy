@@ -866,6 +866,25 @@
     visualAssets(out).forEach(function(asset){
       if(asset)delete asset.dataUrl;
     });
+    out.versions=(Array.isArray(out.versions)?out.versions:[]).slice(-60);
+    out.events=(Array.isArray(out.events)?out.events:[]).slice(-40);
+    if(out.diagnostics&&typeof out.diagnostics==="object"){
+      out.diagnostics=clone(out.diagnostics)||{};
+      delete out.diagnostics.capturePlan;
+      delete out.diagnostics.captureBounds;
+      delete out.diagnostics.sourceDimensions;
+      if(out.diagnostics.captureExecution){
+        out.diagnostics.captureExecution={
+          attempted:!!out.diagnostics.captureExecution.attempted,
+          captured:Number(out.diagnostics.captureExecution.captured)||0,
+          fallbackReason:out.diagnostics.captureExecution.fallbackReason||"",
+          errors:(Array.isArray(out.diagnostics.captureExecution.errors)?out.diagnostics.captureExecution.errors:[]).slice(-12),
+          snapshotSelection:(Array.isArray(out.diagnostics.captureExecution.snapshotSelection)?out.diagnostics.captureExecution.snapshotSelection:[]).slice(-12).map(function(item){
+            return {planId:item&&item.planId||"",role:item&&item.role||"",holeNumber:item&&item.holeNumber||null,selectedCaptureId:item&&item.selectedCaptureId||"",selectedCandidateId:item&&item.selectedCandidateId||"",candidateCount:item&&item.candidateCount||0,greenLushnessScore:item&&item.greenLushnessScore,fairwayLineScore:item&&item.fairwayLineScore,balanceScore:item&&item.balanceScore,selectionScore:item&&item.selectionScore,selectionReason:item&&item.selectionReason||"",tieBreak:item&&item.tieBreak||""};
+          })
+        };
+      }
+    }
     return out;
   }
   function ingestCourseVisualInput(input){

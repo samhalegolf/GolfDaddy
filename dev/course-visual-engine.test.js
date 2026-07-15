@@ -469,6 +469,9 @@ function payload() {
   assert.equal(restored.status, "published", "reloading admin state restores current visual status from local store");
   assert.ok(restored.diagnostics.stitchOutputDimensions.width > 0, "diagnostics include stitch output dimensions");
   assert.ok((restored.events || []).some((event) => event.type === "course-visual-published"), "structured diagnostic event names are recorded");
+  const persistedCromwell = JSON.parse(localStorage.getItem(engine.storeKey)).records.cromwell;
+  assert.ok(persistedCromwell.versions.length <= 60, "persisted visual history is compacted to avoid localStorage quota failures");
+  assert.equal(persistedCromwell.diagnostics.capturePlan, undefined, "bulky capture plans stay out of the persisted visual record");
 
   const reloadInput = engine.adaptCoursePlayPayloadToVisualInput(Object.assign({}, payload(), { courseId: "reload-missing-asset", courseKey: "reload-missing-asset" }), {
     captures: [manifest("manifest-reload-missing-asset", 1, 0)]
