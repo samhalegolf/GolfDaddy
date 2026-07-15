@@ -7298,9 +7298,9 @@ function gdAdminCourseVisualControls(record,courseId){
   const key=gdEscapeHTML(courseId||record&&record.courseId||"");
   return `<div class="gdAdminCourseVisualControls">
     <label>Preset<select id="gdCourseVisualPreset" onchange="return gdAdminCourseVisualPresetChanged('${key}')">${modes.map(mode=>{const p=window.GDCourseVisualEngine?.presetForMode?.(mode);return `<option value="${gdEscapeHTML(p?.id||mode)}" ${preset===(p?.id||mode)?"selected":""}>${gdEscapeHTML(mode)}</option>`;}).join("")}</select></label>
-    <label>Green strength<input id="gdCourseVisualGreenStrength" type="range" min="0" max="1" step="0.05" value="${Number.isFinite(strength)?strength:.35}" oninput="return gdAdminCourseVisualControlChanged('${key}')"></label>
-    <label>Brightness target<input id="gdCourseVisualBrightness" type="number" min="20" max="85" step="1" value="${Number.isFinite(brightness)?brightness:52}" oninput="return gdAdminCourseVisualControlChanged('${key}')"></label>
-    <label>Contrast<input id="gdCourseVisualContrast" type="number" min="0.8" max="1.25" step="0.01" value="${Number.isFinite(contrast)?contrast:1.04}" oninput="return gdAdminCourseVisualControlChanged('${key}')"></label>
+    <label>Green strength<input id="gdCourseVisualGreenStrength" type="range" min="0" max="1" step="0.05" value="${Number.isFinite(strength)?strength:.35}" oninput="return gdAdminCourseVisualControlChanged('${key}')" onchange="return gdAdminCourseVisualControlChanged('${key}')"></label>
+    <label>Brightness target<input id="gdCourseVisualBrightness" type="number" min="20" max="85" step="1" value="${Number.isFinite(brightness)?brightness:52}" oninput="return gdAdminCourseVisualControlChanged('${key}')" onchange="return gdAdminCourseVisualControlChanged('${key}')"></label>
+    <label>Contrast<input id="gdCourseVisualContrast" type="number" min="0.8" max="1.25" step="0.01" value="${Number.isFinite(contrast)?contrast:1.04}" oninput="return gdAdminCourseVisualControlChanged('${key}')" onchange="return gdAdminCourseVisualControlChanged('${key}')"></label>
     <label>Mowing visibility<select id="gdCourseVisualMowing" onchange="return gdAdminCourseVisualControlChanged('${key}')">${["Unknown","Low","Clear","Prominent"].map(value=>`<option value="${value}" ${mowing===value?"selected":""}>${value}</option>`).join("")}</select></label>
     <label class="gdAdminCourseVisualCheck"><input id="gdCourseVisual3dBeta" type="checkbox" ${beta3d?"checked":""} onchange="return gdAdminCourseVisualControlChanged('${key}')"><span>3D view beta</span></label>
   </div>`;
