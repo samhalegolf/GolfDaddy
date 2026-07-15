@@ -7649,6 +7649,26 @@ async function gdAdminCourseVisualBuildPreview(courseId){
   gdRenderAdminCourseDatabase();
   return false;
 }
+async function gdAdminCourseVisualRecapture(courseId){
+  const engine=window.GDCourseVisualEngine;
+  if(!engine){gdAdminCourseVisualToast("Course Visual Engine not loaded");return false;}
+  try{
+    const presetId=String(document.getElementById("gdCourseVisualPreset")?.value||"");
+    const overrides=gdAdminCourseVisualOverridesFromForm();
+    engine.saveCourseVisualSettings(courseId,overrides);
+    if(typeof engine.resetCourseVisualWorkingState==="function")engine.resetCourseVisualWorkingState(courseId,{keepPublished:true});
+    gdAdminCourseVisualToast("Recapturing course visuals");
+    await engine.buildFromCourseDatabase(courseId,{enable3dBeta:overrides.visualEngine&&overrides.visualEngine.enable3dBeta===true,forceFresh:true});
+    await engine.buildCourseVisualPreview(courseId,presetId,overrides);
+    gdAdminCourseVisualToast("Fresh course visual preview ready");
+  }catch(error){
+    console.warn("[GolfDaddy] course visual recapture failed",error);
+    gdAdminCourseVisualToast(error&&error.message?error.message:"Course visual recapture failed");
+  }finally{
+    gdRenderAdminCourseDatabase();
+  }
+  return false;
+}
 function gdAdminCourseVisualPublish(courseId){
   const engine=window.GDCourseVisualEngine;
   if(!engine){gdAdminCourseVisualToast("Course Visual Engine not loaded");return false;}
@@ -7754,7 +7774,7 @@ function gdAdminCourseVisualMarkup(selected){
     `<div ${gdAdminCourseVisualProductFilterAttrs(record)}>${gdAdminCourseVisualProducts(record).map(gdAdminCourseVisualProductCard).join("")}</div>`,
     record.lastError?`<div class="gdAdminCourseVisualNotice">${gdEscapeHTML(record.lastError.message||record.lastError.code||"Course visual pipeline needs attention.")}</div>`:"",
     gdAdminCourseVisualControls(record,selected.id),
-    `<div class="gdAdminCourseVisualActions"><button class="primary" type="button" onclick="return gdAdminCourseVisualPublish('${gdEscapeHTML(selected.id)}')">Publish Clarity Map</button></div>`
+    `<div class="gdAdminCourseVisualActions"><button type="button" onclick="return gdAdminCourseVisualRecapture('${gdEscapeHTML(selected.id)}')">Recapture Visuals</button><button class="primary" type="button" onclick="return gdAdminCourseVisualPublish('${gdEscapeHTML(selected.id)}')">Publish Clarity Map</button></div>`
   ].join("");
 }
 function gdRenderAdminCourseDatabase(){
@@ -37950,7 +37970,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 <script src="scripts/gd-launch-monitor-data.js?v=practice-data-20260712c"></script>
 <script src="scripts/gd-shot-library-sync.js?v=shot-library-supabase-001"></script>
 <script src="scripts/gd-captured-surface-sync.js?v=captured-surface-supabase-002"></script>
-<script src="scripts/gd-course-visual-engine.js?v=course-visual-engine-013"></script>
+<script src="scripts/gd-course-visual-engine.js?v=course-visual-engine-014"></script>
 <script src="scripts/gd-multi-nine-courses.js?v=multi-nine-courses-001"></script>
 <script src="scripts/gd-native-practice-data.js?v=native-practice-data-001"></script>
 <script id="gdCanonicalRouteAuditV1">
