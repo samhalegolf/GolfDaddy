@@ -426,6 +426,84 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	    window.__gdV19CapturedHoleFrameManifest=manifest;
 	    return manifest;
 	  }
+  function courseVisualRecord(){
+    var engine=safe(function(){return window.GDCourseVisualEngine;},null);
+    if(!engine)return null;
+    var ids=[surfaceCourseKey(),surfaceCourseName()].filter(Boolean);
+    for(var i=0;i<ids.length;i++){
+      var id=ids[i];
+      var record=safe(function(){return typeof engine.resolveCourseVisual==="function"?engine.resolveCourseVisual(id):null;},null)||
+        safe(function(){return typeof engine.getRecord==="function"?engine.getRecord(id):null;},null);
+      if(record&&record.publishedVisual)return record;
+    }
+    return null;
+  }
+  function courseVisualHoleAsset(record){
+    var hole=surfaceHoleNumber();
+    var frames=(Array.isArray(record&&record.holeFramePublishedVisuals)&&record.holeFramePublishedVisuals.length?record.holeFramePublishedVisuals:Array.isArray(record&&record.holeFrameTerrainViews)&&record.holeFrameTerrainViews.length?record.holeFrameTerrainViews:[]);
+    return frames.filter(function(asset){return asset&&Math.round(Number(asset.holeNumber)||0)===Math.round(Number(hole)||0);})[0]||null;
+  }
+  function courseVisualManifestZoom(bounds,width,height){
+    if(!validBounds(bounds)||!hasMap())return 19;
+    var sw=bounds.getSouthWest(),ne=bounds.getNorthEast(),nw=L.latLng(ne.lat,sw.lng);
+    var best={zoom:19,score:Infinity};
+    for(var z=14;z<=22;z++){
+      var a=map.project(nw,z),b=map.project(ne,z),c=map.project(sw,z);
+      var spanW=Math.max(1,Math.abs(b.x-a.x));
+      var spanH=Math.max(1,Math.abs(c.y-a.y));
+      var score=Math.abs(Math.log(spanW/Math.max(1,width)))+Math.abs(Math.log(spanH/Math.max(1,height)));
+      if(score<best.score)best={zoom:z,score:score};
+    }
+    return best.zoom;
+  }
+  function courseVisualManifestFromAsset(asset,record){
+    var src=String(asset&&asset.dataUrl||asset&&asset.url||asset&&asset.publicUrl||"");
+    if(!src)return null;
+    var meta=asset&&asset.metadata||{};
+    var playSurface=meta.playSurface||{};
+    if(playSurface.useGpsPlayFraming===false)return null;
+    var bounds=coerceBounds(asset&&asset.bounds||playSurface.sourceBounds);
+    if(!validBounds(bounds)||!hasMap())return null;
+    var width=Math.max(1,Math.round(Number(asset&&asset.width||playSurface.outputDimensions&&playSurface.outputDimensions.width||meta.outputDimensions&&meta.outputDimensions.width)||1200));
+    var height=Math.max(1,Math.round(Number(asset&&asset.height||playSurface.outputDimensions&&playSurface.outputDimensions.height||meta.outputDimensions&&meta.outputDimensions.height)||1800));
+    var zoom=courseVisualManifestZoom(bounds,width,height);
+    var sw=bounds.getSouthWest(),ne=bounds.getNorthEast(),nw=L.latLng(ne.lat,sw.lng);
+    var origin=map.project(nw,zoom);
+    var pins=playSurface.anchorPins||meta.anchorPins||captureAnchorPins();
+    return {
+      version:VERSION,
+      key:"gd_course_visual_hole_surface_v1_"+String((record&&record.courseId||surfaceCourseKey())+":h"+surfaceHoleNumber()).replace(/[^a-z0-9:_-]+/gi,"_"),
+      reason:"published-course-visual",
+      surfaceModel:"clarity-course-visual-hole-surface-v1",
+      interactionOwner:"course-visual",
+      liveMapRole:"published-stitch-underlay",
+      courseKey:surfaceCourseKey(),
+      courseName:surfaceCourseName(),
+      visualCourseId:record&&record.courseId||"",
+      holeNumber:surfaceHoleNumber(),
+      captureZoom:zoom,
+      imageWidth:width,
+      imageHeight:height,
+      originPx:{x:origin.x,y:origin.y},
+      tiles:[{x:0,y:0,z:zoom,tileX:0,tileY:0,url:src,width:width,height:height}],
+      includeTee:!!(pins&&pins.tee),
+      teeLatLng:pins&&pins.tee||null,
+      anchorPins:pins||{},
+      bounds:{south:sw.lat,west:sw.lng,north:ne.lat,east:ne.lng},
+      courseVisualPath:asset.path||"",
+      createdAt:new Date().toISOString()
+    };
+  }
+  function loadPublishedCourseVisualManifest(){
+    var record=courseVisualRecord();
+    var asset=courseVisualHoleAsset(record);
+    var manifest=courseVisualManifestFromAsset(asset,record);
+    if(!manifest||!manifestMatchesActive(manifest))return null;
+    captureManifest=manifest;
+    gdRegisterCoursePlayFrameManifest(manifest,{generatedFrom:"course-visual-published-hole-surface",manifestKey:manifest.key,status:"loaded"});
+    safe(function(){if(capturedGpsPlayActive())gdCoursePlayDebugEvent("gps-play-loaded-course-visual-surface",{manifestKey:manifest.key,path:manifest.courseVisualPath,captureZoom:manifest.captureZoom,imageWidth:manifest.imageWidth,imageHeight:manifest.imageHeight});});
+    return publishCaptureManifest(manifest);
+  }
 	  function captureAnchorPins(){
 	    var data=safe(function(){return (mappedPayload()||{}).data||{};},{})||{};
 	    var route=mappedRoute(data).filter(validLL);
@@ -595,6 +673,8 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	  function loadCaptureManifest(){
 	    if(captureManifest&&manifestMatchesActive(captureManifest))return publishCaptureManifest(captureManifest);
 	    if(captureManifest&&!manifestMatchesActive(captureManifest))captureManifest=null;
+	    var visualManifest=loadPublishedCourseVisualManifest();
+	    if(visualManifest)return visualManifest;
 	    var m=safe(function(){return JSON.parse(localStorage.getItem(storageKey())||"null");},null);
 	    if(!m&&typeof window.gdCapturedSurfaceReadManifest==="function")m=safe(function(){return window.gdCapturedSurfaceReadManifest(surfaceCourseKey(),surfaceHoleNumber());},null);
 	    if(m&&Array.isArray(m.tiles)&&m.originPx&&m.surfaceModel!=="captured-surface-v1")m=null;
@@ -624,7 +704,11 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
 	    if(!manifest||!manifestMatchesActive(manifest))return false;
 	    var el=document.getElementById("gdHoleImageCameraLayer");
 	    if(!el){el=document.createElement("div");el.id="gdHoleImageCameraLayer";el.setAttribute("aria-hidden","true");document.body.appendChild(el);}
-		    var tiles=(manifest.tiles||[]).map(function(t){return '<img class="gdHoleImageTile" src="'+String(t.url).replace(/"/g,"&quot;")+'" style="left:'+Math.round(t.x)+'px;top:'+Math.round(t.y)+'px"/>';}).join("");
+		    var tiles=(manifest.tiles||[]).map(function(t){
+		      var w=Math.max(1,Math.round(Number(t.width)||258));
+		      var h=Math.max(1,Math.round(Number(t.height)||258));
+		      return '<img class="gdHoleImageTile" src="'+String(t.url).replace(/"/g,"&quot;")+'" style="left:'+Math.round(t.x)+'px;top:'+Math.round(t.y)+'px;width:'+w+'px!important;height:'+h+'px!important"/>';
+		    }).join("");
 		    el.innerHTML='<div class="gdHoleImageTiles" style="position:absolute;left:0;top:0;width:'+manifest.imageWidth+'px;height:'+manifest.imageHeight+'px;transform-origin:0 0">'+tiles+'<div class="gdHoleImageOverlay"></div></div>';
 		    el.dataset.gdCapturedSurfaceHole=String(manifest.holeNumber||"");
 			    el.dataset.gdCapturedSurfaceCourse=String(manifest.courseKey||manifest.courseName||"");
@@ -6733,18 +6817,28 @@ function gdAdminCourseVisualRecord(courseId){
 const gdAdminCourseVisualHydrationPending={};
 const gdAdminCourseVisualHydrationAttempted={};
 function gdAdminCourseVisualAssets(record){
-  return [
+  const list=value=>Array.isArray(value)?value:[];
+  const assets=[
     record&&record.rawMaster,
     record&&record.basicVisual,
     record&&record.exampleHoleVisual,
+    list(record&&record.holeFrameVisuals),
     record&&record.previewVisual,
     record&&record.terrainView,
     record&&record.singleHolePreviewVisual,
     record&&record.singleHoleTerrainView,
+    list(record&&record.holeFramePreviewVisuals),
+    list(record&&record.holeFrameTerrainViews),
     record&&record.beta3dView,
     record&&record.publishedVisual,
-    record&&record.singleHolePublishedVisual
-  ].filter(Boolean);
+    record&&record.singleHolePublishedVisual,
+    list(record&&record.holeFramePublishedVisuals)
+  ];
+  return assets.reduce((out,item)=>{
+    if(Array.isArray(item))item.forEach(asset=>{if(asset)out.push(asset);});
+    else if(item)out.push(item);
+    return out;
+  },[]);
 }
 function gdAdminCourseVisualNeedsHydration(record){
   return gdAdminCourseVisualAssets(record).some(asset=>asset&&asset.path&&!asset.dataUrl);
@@ -6868,9 +6962,15 @@ function gdAdminCourseVisualNeedsPipeline(record){
   if(!gdAdminCourseVisualStageReady(record.terrainView,"terrain-shading","native-visuals"))return true;
   if(!gdAdminCourseVisualStageReady(record.singleHolePreviewVisual,"native-visuals"))return true;
   if(!gdAdminCourseVisualStageReady(record.singleHoleTerrainView,"terrain-shading","native-visuals"))return true;
+  const holeBaseCount=Array.isArray(record.holeFrameVisuals)?record.holeFrameVisuals.length:0;
+  const holeNative=Array.isArray(record.holeFramePreviewVisuals)?record.holeFramePreviewVisuals:[];
+  const holeTerrain=Array.isArray(record.holeFrameTerrainViews)?record.holeFrameTerrainViews:[];
+  if(holeBaseCount&&(holeNative.length<holeBaseCount||holeNative.some(asset=>!gdAdminCourseVisualStageReady(asset,"native-visuals"))))return true;
+  if(holeBaseCount&&(holeTerrain.length<holeBaseCount||holeTerrain.some(asset=>!gdAdminCourseVisualStageReady(asset,"terrain-shading","native-visuals"))))return true;
   const nativeRenderer=String(record.previewVisual&&record.previewVisual.metadata&&record.previewVisual.metadata.rendererVersion||"");
   const holeRenderer=String(record.singleHolePreviewVisual&&record.singleHolePreviewVisual.metadata&&record.singleHolePreviewVisual.metadata.rendererVersion||"");
-  return !!(renderer&&(nativeRenderer&&nativeRenderer!==renderer||holeRenderer&&holeRenderer!==renderer));
+  const frameRenderer=String(holeNative[0]&&holeNative[0].metadata&&holeNative[0].metadata.rendererVersion||"");
+  return !!(renderer&&(nativeRenderer&&nativeRenderer!==renderer||holeRenderer&&holeRenderer!==renderer||frameRenderer&&frameRenderer!==renderer));
 }
 function gdAdminCourseVisualPipelineKey(courseId,record){
   return [
@@ -6882,7 +6982,9 @@ function gdAdminCourseVisualPipelineKey(courseId,record){
     record&&record.previewVisual&&record.previewVisual.path||"",
     record&&record.terrainView&&record.terrainView.path||"",
     record&&record.singleHolePreviewVisual&&record.singleHolePreviewVisual.path||"",
-    record&&record.singleHoleTerrainView&&record.singleHoleTerrainView.path||""
+    record&&record.singleHoleTerrainView&&record.singleHoleTerrainView.path||"",
+    Array.isArray(record&&record.holeFramePreviewVisuals)?record.holeFramePreviewVisuals.map(asset=>asset&&asset.path||"").join("|"):"",
+    Array.isArray(record&&record.holeFrameTerrainViews)?record.holeFrameTerrainViews.map(asset=>asset&&asset.path||"").join("|"):""
   ].join("::");
 }
 function gdAdminCourseVisualSchedulePipeline(courseId,record,sourceStatus){
@@ -7496,6 +7598,9 @@ function gdAdminCourseVisualPublish(courseId){
       record=gdAdminCourseVisualRecord(courseId)||engine.getRecord(courseId);
       if(!record.previewVisual||!record.terrainView)throw new Error(record.lastError&&record.lastError.message||"Course overview pipeline did not build.");
       if(!record.singleHolePreviewVisual||!record.singleHoleTerrainView)throw new Error(record.lastError&&record.lastError.message||"Single-hole pipeline did not build.");
+      const holeBaseCount=Array.isArray(record.holeFrameVisuals)?record.holeFrameVisuals.length:0;
+      const holeTerrainCount=Array.isArray(record.holeFrameTerrainViews)?record.holeFrameTerrainViews.length:0;
+      if(holeBaseCount&&holeTerrainCount<holeBaseCount)throw new Error(record.lastError&&record.lastError.message||"Per-hole GPS Play surfaces did not finish terrain shading.");
       engine.publishCourseVisual(courseId);
       if(typeof engine.syncPublishedCourseVisual==="function"){
         gdAdminCourseVisualToast("Saving published map to Clarity Cloud");
@@ -37771,7 +37876,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 <script src="scripts/gd-launch-monitor-data.js?v=practice-data-20260712c"></script>
 <script src="scripts/gd-shot-library-sync.js?v=shot-library-supabase-001"></script>
 <script src="scripts/gd-captured-surface-sync.js?v=captured-surface-supabase-002"></script>
-<script src="scripts/gd-course-visual-engine.js?v=course-visual-engine-007"></script>
+<script src="scripts/gd-course-visual-engine.js?v=course-visual-engine-008"></script>
 <script src="scripts/gd-multi-nine-courses.js?v=multi-nine-courses-001"></script>
 <script src="scripts/gd-native-practice-data.js?v=native-practice-data-001"></script>
 <script id="gdCanonicalRouteAuditV1">

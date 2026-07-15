@@ -7,7 +7,7 @@
 
   var VERSION=1;
   var PRESET_VERSION=4;
-  var RENDERER_VERSION="clarity-course-visual-renderer-v6";
+  var RENDERER_VERSION="clarity-course-visual-renderer-v7";
   var STORE_KEY="gd_course_visual_engine_v1";
   var PRESET_KEY="gd_course_visual_presets_v1";
   var API_ENDPOINT="/api/course-visuals";
@@ -338,18 +338,28 @@
     return value;
   }
   function visualAssets(record){
-    return [
+    function list(value){return Array.isArray(value)?value:[];}
+    var assets=[
       record&&record.rawMaster,
       record&&record.basicVisual,
       record&&record.exampleHoleVisual,
+      list(record&&record.holeFrameVisuals),
       record&&record.previewVisual,
       record&&record.terrainView,
       record&&record.singleHolePreviewVisual,
       record&&record.singleHoleTerrainView,
+      list(record&&record.holeFramePreviewVisuals),
+      list(record&&record.holeFrameTerrainViews),
       record&&record.beta3dView,
       record&&record.publishedVisual,
-      record&&record.singleHolePublishedVisual
-    ].filter(Boolean);
+      record&&record.singleHolePublishedVisual,
+      list(record&&record.holeFramePublishedVisuals)
+    ];
+    return assets.reduce(function(out,item){
+      if(Array.isArray(item))item.forEach(function(asset){if(asset)out.push(asset);});
+      else if(item)out.push(item);
+      return out;
+    },[]);
   }
   function openAssetDb(){
     if(!root||!root.indexedDB)return Promise.resolve(null);
@@ -628,6 +638,7 @@
       mapCameraCapability:cameraCapability,
       nativePitchAvailable:!!(manifest.nativePitchAvailable||cameraCapability&&cameraCapability.nativePitchAvailable),
       nativeBearingAvailable:!!(manifest.nativeBearingAvailable||cameraCapability&&cameraCapability.nativeBearingAvailable),
+      anchorPins:clone(manifest.anchorPins||manifest.pins||{}),
       tileSourceLabel:text(manifest.tileSourceLabel||opts&&opts.tileSourceLabel,120),
       captureLens:text(manifest.captureLens||manifest.lensShape||opts&&opts.captureLens||opts&&opts.lensShape,80),
       lensShape:text(manifest.lensShape||manifest.captureLens||opts&&opts.lensShape||opts&&opts.captureLens,80),
@@ -799,13 +810,17 @@
       rawMaster:null,
       basicVisual:null,
       exampleHoleVisual:null,
+      holeFrameVisuals:[],
       previewVisual:null,
       terrainView:null,
       singleHolePreviewVisual:null,
       singleHoleTerrainView:null,
+      holeFramePreviewVisuals:[],
+      holeFrameTerrainViews:[],
       beta3dView:null,
       publishedVisual:null,
       singleHolePublishedVisual:null,
+      holeFramePublishedVisuals:[],
       versions:[],
       presetId:defaultPreset().id,
       presetVersion:1,
@@ -932,41 +947,183 @@
     });
     return holeCaptures.length?holeCaptures:[preferred].filter(Boolean);
   }
-  function exampleHoleSvg(captures,meta){
-    var selected=chooseExampleHoleCaptures(captures);
-    var capture=selected[0]||chooseExampleCapture(captures);
-    if(!capture)return null;
+  function captureAnchors(capture){
+    var pins=capture&&capture.anchorPins||capture&&capture.pins||{};
+    var tee=point(pins.tee||pins.start||capture&&capture.teeLatLng);
+    var green=point(pins.green||pins.target||pins.pin);
+    var route=points(pins.route);
+    var shape=points(pins.greenShape||pins.shape);
+    if(!route.length&&tee&&green)route=[tee,green];
+    return {tee:tee||route[0]||null,green:green||route[route.length-1]||null,route:route,greenShape:shape};
+  }
+  function holeFrameAnchors(captures){
+    var best=null;
+    (Array.isArray(captures)?captures:[]).forEach(function(capture){
+      var anchors=captureAnchors(capture);
+      var score=(anchors.route&&anchors.route.length||0)+(anchors.tee?2:0)+(anchors.green?2:0)+(anchors.greenShape&&anchors.greenShape.length?1:0);
+      if(!best||score>best.score)best={score:score,anchors:anchors};
+    });
+    return best&&best.score?best.anchors:{tee:null,green:null,route:[],greenShape:[]};
+  }
+  function rotateSvgPoint(p,angle){
+    var c=Math.cos(angle),s=Math.sin(angle);
+    return {x:p.x*c-p.y*s,y:p.x*s+p.y*c};
+  }
+  function transformedBounds(points,angle,scale,tx,ty){
+    var out=(Array.isArray(points)?points:[]).map(function(p){
+      var r=rotateSvgPoint(p,angle);
+      return {x:tx+r.x*scale,y:ty+r.y*scale};
+    });
+    if(!out.length)return null;
+    return {
+      minX:Math.min.apply(null,out.map(function(p){return p.x;})),
+      maxX:Math.max.apply(null,out.map(function(p){return p.x;})),
+      minY:Math.min.apply(null,out.map(function(p){return p.y;})),
+      maxY:Math.max.apply(null,out.map(function(p){return p.y;}))
+    };
+  }
+  function holeWindowAsset(captures,meta,opts){
+    opts=opts||{};
+    var selected=(Array.isArray(captures)?captures:[]).filter(renderableCapture);
+    if(!selected.length)return null;
+    var capture=selected[0];
     var sourceAsset=null;
     if(selected.length>1){
-      sourceAsset=safe(function(){return stitchSvg(selected,{inputVisualId:meta&&meta.inputVisualId,courseId:meta&&meta.courseId,role:"example-hole-source",stage:"hole-window-source"});},null);
+      sourceAsset=safe(function(){return stitchSvg(selected,{inputVisualId:meta&&meta.inputVisualId,courseId:meta&&meta.courseId,role:"hole-window-source",stage:"play-axis-source"});},null);
     }
     var sourceWidth=Math.max(1,Math.round(Number(sourceAsset&&sourceAsset.width||capture.width)||1));
     var sourceHeight=Math.max(1,Math.round(Number(sourceAsset&&sourceAsset.height||capture.height)||1));
-    var isMobileHole=selected.some(function(item){return /mobile-hole|hole/i.test(String(item&&item.captureLens||item&&item.lensShape||""))||String(item&&item.role||"")==="play-corridor";});
-    var targetAspect=isMobileHole?9/16:0;
-    var width=sourceWidth;
-    var height=sourceHeight;
-    if(targetAspect){
-      var sourceAspect=sourceWidth/sourceHeight;
-      if(Math.abs(sourceAspect-targetAspect)>.035){
-        if(sourceAspect>targetAspect)height=Math.max(sourceHeight,Math.round(sourceWidth/targetAspect));
-        else width=Math.max(sourceWidth,Math.round(sourceHeight*targetAspect));
-      }
+    var sourceBounds=sourceAsset&&sourceAsset.bounds||captureBounds(capture);
+    var sourceContent=sourceAsset&&sourceAsset.dataUrl?svgInnerFromDataUrl(sourceAsset.dataUrl):captureContentSvg(capture);
+    if(!sourceContent)return null;
+    var targetAspect=9/16;
+    var width=Math.max(720,Math.min(4096,Math.round(sourceWidth)));
+    var height=Math.round(width/targetAspect);
+    var anchors=holeFrameAnchors(selected);
+    var project=assetPointProjector(sourceBounds,sourceWidth,sourceHeight);
+    var anchorPoints=(anchors.route&&anchors.route.length?anchors.route:[]).concat(anchors.greenShape||[]);
+    if(anchors.tee)anchorPoints.push(anchors.tee);
+    if(anchors.green)anchorPoints.push(anchors.green);
+    var projected=project?anchorPoints.map(project).filter(Boolean):[];
+    var teePx=project&&anchors.tee?project(anchors.tee):null;
+    var greenPx=project&&anchors.green?project(anchors.green):null;
+    var angle=0;
+    var orientationSource="none";
+    if(teePx&&greenPx&&Math.abs(greenPx.x-teePx.x)+Math.abs(greenPx.y-teePx.y)>1){
+      angle=-Math.PI/2-Math.atan2(greenPx.y-teePx.y,greenPx.x-teePx.x);
+      orientationSource="tee-green-anchor";
+    }else if(projected.length>=2){
+      var a=projected[0],b=projected[projected.length-1];
+      angle=-Math.PI/2-Math.atan2(b.y-a.y,b.x-a.x);
+      orientationSource="route-anchor";
+      teePx=a;greenPx=b;
     }
-    var content=sourceAsset?visualAssetSourceMarkup(sourceAsset,sourceWidth,sourceHeight):captureContentSvg(capture);
-    if(!content)return null;
-    var title=(isMobileHole?"Hole window":capture.role==="green-surround"?"Super HD green":"Example hole")+" "+(capture.holeNumber||"?");
-    var scale=Math.max(width/sourceWidth,height/sourceHeight);
-    var tx=(width-sourceWidth*scale)/2;
-    var ty=(height-sourceHeight*scale)/2;
-    var radius=isMobileHole?Math.max(16,Math.min(42,width*.06)):0;
-    var clipId="cvExampleHoleClip";
-    var defs=isMobileHole?'<defs><clipPath id="'+clipId+'"><rect x="0" y="0" width="'+svgNum(width)+'" height="'+svgNum(height)+'" rx="'+svgNum(radius)+'"/></clipPath><linearGradient id="cvHoleWindowDepth" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="rgba(255,255,255,.08)"/><stop offset=".52" stop-color="rgba(255,255,255,0)"/><stop offset="1" stop-color="rgba(0,0,0,.22)"/></linearGradient></defs>':"";
-    var body='<g'+(isMobileHole?' clip-path="url(#'+clipId+')"':"")+'><g transform="translate('+svgNum(tx)+" "+svgNum(ty)+') scale('+svgNum(scale)+')">'+content+'</g>'+((isMobileHole)?'<rect width="100%" height="100%" fill="url(#cvHoleWindowDepth)"/>':"")+'</g>';
-    var label='<g transform="translate(12 12)"><rect x="0" y="0" width="220" height="30" rx="6" fill="rgba(0,0,0,.58)"/><text x="10" y="20" font-size="14" fill="#fff" font-family="system-ui, sans-serif" font-weight="800">'+escapeXml(title)+'</text></g>';
-    var svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+width+'" height="'+height+'" viewBox="0 0 '+width+" "+height+'" data-renderer="'+escapeXml(RENDERER_VERSION)+'" data-role="example-hole" data-capture-lens="'+escapeXml(capture.captureLens||"")+'"><rect width="100%" height="100%" fill="#10130f"/>'+defs+body+'<rect x="0" y="0" width="100%" height="100%" rx="'+svgNum(radius)+'" fill="none" stroke="rgba(255,255,255,.42)" stroke-width="2"/>'+label+'</svg>';
+    if(!projected.length){
+      projected=[{x:0,y:0},{x:sourceWidth,y:sourceHeight}];
+      teePx={x:sourceWidth/2,y:sourceHeight*.86};
+      greenPx={x:sourceWidth/2,y:sourceHeight*.18};
+    }
+    var rotated=projected.map(function(p){return rotateSvgPoint(p,angle);});
+    var minX=Math.min.apply(null,rotated.map(function(p){return p.x;}));
+    var maxX=Math.max.apply(null,rotated.map(function(p){return p.x;}));
+    var minY=Math.min.apply(null,rotated.map(function(p){return p.y;}));
+    var maxY=Math.max.apply(null,rotated.map(function(p){return p.y;}));
+    var routeLen=teePx&&greenPx?Math.sqrt(Math.pow(greenPx.x-teePx.x,2)+Math.pow(greenPx.y-teePx.y,2)):Math.max(maxY-minY,maxX-minX);
+    var xPad=clamp(routeLen*.22,Math.max(110,sourceWidth*.06),Math.max(180,sourceWidth*.36));
+    var yPad=clamp(routeLen*.10,Math.max(90,sourceHeight*.035),Math.max(220,sourceHeight*.22));
+    minX-=xPad;maxX+=xPad;minY-=yPad;maxY+=yPad;
+    var fitW=Math.max(1,maxX-minX),fitH=Math.max(1,maxY-minY);
+    var scale=Math.min(width*.78/fitW,height*.78/fitH);
+    scale=clamp(scale,.05,1.75);
+    var teeR=teePx?rotateSvgPoint(teePx,angle):null;
+    var greenR=greenPx?rotateSvgPoint(greenPx,angle):null;
+    var tx=width/2-((minX+maxX)/2)*scale;
+    var ty=height/2-((minY+maxY)/2)*scale;
+    if(teeR&&greenR){
+      tx=width/2-((teeR.x+greenR.x)/2)*scale;
+      ty=height*.53-((teeR.y+greenR.y)/2)*scale;
+    }
+    var boundsAfter=transformedBounds([{x:minX,y:minY},{x:maxX,y:maxY}],0,scale,tx,ty);
+    var marginX=width*.08,marginY=height*.07;
+    if(boundsAfter){
+      if(boundsAfter.minX>marginX)tx-=boundsAfter.minX-marginX;
+      if(boundsAfter.maxX<width-marginX)tx+=(width-marginX)-boundsAfter.maxX;
+      if(boundsAfter.minY>marginY)ty-=boundsAfter.minY-marginY;
+      if(boundsAfter.maxY<height-marginY)ty+=(height-marginY)-boundsAfter.maxY;
+    }
+    var radius=Math.max(18,Math.min(52,width*.045));
+    var angleDeg=angle*180/Math.PI;
+    var title=text(opts.title||"Hole window "+(capture.holeNumber||"?"),80);
+    var label='<g transform="translate(14 14)"><rect x="0" y="0" width="'+svgNum(Math.max(230,title.length*8.4))+'" height="31" rx="6" fill="rgba(0,0,0,.58)"/><text x="10" y="21" font-size="14" fill="#fff" font-family="system-ui, sans-serif" font-weight="850">'+escapeXml(title)+'</text></g>';
+    var svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+width+'" height="'+height+'" viewBox="0 0 '+width+" "+height+'" data-renderer="'+escapeXml(RENDERER_VERSION)+'" data-role="'+escapeXml(opts.role||"example-hole")+'" data-framing-model="play-axis-anchor-frame"><defs><clipPath id="cvHoleWindowClip"><rect x="0" y="0" width="'+svgNum(width)+'" height="'+svgNum(height)+'" rx="'+svgNum(radius)+'"/></clipPath><linearGradient id="cvHoleWindowDepth" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="rgba(255,255,255,.08)"/><stop offset=".52" stop-color="rgba(255,255,255,0)"/><stop offset="1" stop-color="rgba(0,0,0,.22)"/></linearGradient></defs><rect width="100%" height="100%" fill="#10130f"/><g clip-path="url(#cvHoleWindowClip)"><g transform="translate('+svgNum(tx)+" "+svgNum(ty)+') scale('+svgNum(scale)+') rotate('+svgNum(angleDeg)+')">'+sourceContent+'</g><rect width="100%" height="100%" fill="url(#cvHoleWindowDepth)"/></g><rect x="0" y="0" width="100%" height="100%" rx="'+svgNum(radius)+'" fill="none" stroke="rgba(255,255,255,.42)" stroke-width="2"/>'+label+'</svg>';
     var sourceIds=sourceAsset&&sourceAsset.sourceCaptureIds||selected.map(function(item){return item.id;}).filter(Boolean);
-    return {dataUrl:dataUrl("image/svg+xml",svg),width:width,height:height,bounds:sourceAsset&&sourceAsset.bounds||captureBounds(capture),captureId:capture.id,holeNumber:capture.holeNumber||null,sourceCaptureIds:sourceIds,metadata:Object.assign({rendererVersion:RENDERER_VERSION,format:"image/svg+xml",role:"example-hole",captureLens:isMobileHole?"mobile-hole":capture.captureLens||capture.lensShape||"",lensAspectRatio:targetAspect||finite(capture.lensAspectRatio),sourceDimensions:{width:sourceWidth,height:sourceHeight},outputDimensions:{width:width,height:height},windowShape:isMobileHole?"mobile-hole":"source-aspect",sourceCaptureCount:sourceIds.length},meta||{})};
+    var playSurface={
+      model:"overcaptured-hole-surface",
+      useGpsPlayFraming:true,
+      fallbackUnderlay:"published-stitch",
+      bleedPct:.22,
+      anchorPins:clone(anchors),
+      sourceBounds:clone(sourceBounds),
+      sourceDimensions:{width:sourceWidth,height:sourceHeight},
+      outputDimensions:{width:width,height:height},
+      orientationSource:orientationSource,
+      rotationDeg:+angleDeg.toFixed(3),
+      scale:+scale.toFixed(4)
+    };
+    return {dataUrl:dataUrl("image/svg+xml",svg),width:width,height:height,bounds:sourceBounds,captureId:capture.id,holeNumber:capture.holeNumber||null,sourceCaptureIds:sourceIds,metadata:Object.assign({rendererVersion:RENDERER_VERSION,format:"image/svg+xml",role:opts.role||"example-hole",stage:opts.stage||"hole-window",captureLens:"mobile-hole",lensAspectRatio:targetAspect,sourceDimensions:{width:sourceWidth,height:sourceHeight},outputDimensions:{width:width,height:height},windowShape:"mobile-hole",framingModel:"play-axis-anchor-frame",playSurface:playSurface,orientationSource:orientationSource,rotationDeg:+angleDeg.toFixed(3),scale:+scale.toFixed(4),sourceCaptureCount:sourceIds.length},meta||{})};
+  }
+  function exampleHoleSvg(captures,meta){
+    var selected=chooseExampleHoleCaptures(captures);
+    return holeWindowAsset(selected.length?selected:[chooseExampleCapture(captures)].filter(Boolean),meta,{role:"example-hole",stage:"hole-window",title:"Hole window "+(selected[0]&&selected[0].holeNumber||"?")});
+  }
+  function holePlaySurfaceAsset(captures,meta){
+    var selected=(Array.isArray(captures)?captures:[]).filter(renderableCapture);
+    if(!selected.length)return null;
+    var capture=selected[0];
+    var anchors=holeFrameAnchors(selected);
+    var surface=safe(function(){
+      return stitchSvg(selected,Object.assign({role:"hole-frame",stage:"hole-surface",product:"hole-frame"},meta||{}));
+    },null);
+    if(!surface||!surface.dataUrl)return null;
+    var sourceIds=surface.sourceCaptureIds||selected.map(function(item){return item.id;}).filter(Boolean);
+    var playSurface={
+      model:"overcaptured-hole-surface",
+      projection:"mercator-svg",
+      useGpsPlayFraming:true,
+      fallbackUnderlay:"published-stitch",
+      bleedPct:.22,
+      anchorPins:clone(anchors),
+      sourceBounds:clone(surface.bounds),
+      outputDimensions:{width:surface.width,height:surface.height},
+      stitchModel:surface.metadata&&surface.metadata.stitchModel||"geo-rectangle-table-over-live-map"
+    };
+    return {dataUrl:surface.dataUrl,width:surface.width,height:surface.height,bounds:surface.bounds,captureId:capture.id,holeNumber:capture.holeNumber||null,sourceCaptureIds:sourceIds,metadata:Object.assign({},surface.metadata||{},{rendererVersion:RENDERER_VERSION,format:"image/svg+xml",role:"hole-frame",stage:"hole-surface",product:"hole-frame",captureLens:"mobile-hole",framingModel:"gps-play-overcaptured-mercator-surface",playSurface:playSurface,sourceCaptureCount:sourceIds.length},meta||{})};
+  }
+  function buildHoleFrameVisuals(captures,meta){
+    var byHole={};
+    (Array.isArray(captures)?captures:[]).filter(renderableCapture).forEach(function(capture){
+      var role=String(capture&&capture.role||"");
+      if(role==="course-backdrop"||role==="terrain-reference"||role==="three-d-hole-beta"||capture.terrainStageOnly||capture.beta3dStageOnly)return;
+      var hole=Math.max(0,Math.round(Number(capture&&capture.holeNumber)||0));
+      if(!hole)return;
+      byHole[hole]=byHole[hole]||[];
+      byHole[hole].push(capture);
+    });
+    return Object.keys(byHole).map(Number).sort(function(a,b){return a-b;}).map(function(holeNumber){
+      var frame=holePlaySurfaceAsset(byHole[holeNumber],Object.assign({holeNumber:holeNumber},meta||{}));
+      if(frame)frame.holeNumber=holeNumber;
+      return frame;
+    }).filter(Boolean);
+  }
+  function captureHoleFrameCount(captures){
+    var seen={};
+    (Array.isArray(captures)?captures:[]).filter(renderableCapture).forEach(function(capture){
+      var role=String(capture&&capture.role||"");
+      if(role==="course-backdrop"||role==="terrain-reference"||role==="three-d-hole-beta"||capture.terrainStageOnly||capture.beta3dStageOnly)return;
+      var hole=Math.max(0,Math.round(Number(capture&&capture.holeNumber)||0));
+      if(hole)seen[hole]=true;
+    });
+    return Object.keys(seen).length;
   }
   function stitchSvg(captures,meta){
     var valid=(Array.isArray(captures)?captures:[]).filter(renderableCapture);
@@ -1307,10 +1464,12 @@
       var existingRenderer=record.rawMaster&&record.rawMaster.metadata&&record.rawMaster.metadata.rendererVersion;
       var existingAssetReady=!!(record.basicVisual&&(record.basicVisual.dataUrl||transientAssetDataByPath[record.basicVisual.path])||record.rawMaster&&(record.rawMaster.dataUrl||transientAssetDataByPath[record.rawMaster.path]));
       var existingExampleReady=!!(record.exampleHoleVisual&&(record.exampleHoleVisual.dataUrl||transientAssetDataByPath[record.exampleHoleVisual.path]));
+      var expectedHoleFrameCount=captureHoleFrameCount(captures||[]);
+      var existingHoleFramesReady=!expectedHoleFrameCount||Array.isArray(record.holeFrameVisuals)&&record.holeFrameVisuals.length>=expectedHoleFrameCount&&record.holeFrameVisuals.every(function(asset){return asset&&(asset.dataUrl||transientAssetDataByPath[asset.path]);});
       var terrainExpected=!!split.terrain.length;
       var existingTerrainReady=!terrainExpected||!!(record.terrainView&&(record.terrainView.dataUrl||transientAssetDataByPath[record.terrainView.path]));
       var existingBeta3dReady=!beta3dExpected||!!(record.beta3dView&&(record.beta3dView.dataUrl||transientAssetDataByPath[record.beta3dView.path]));
-      if(record.rawMaster&&record.rawMaster.captureSignature===signature&&existingRenderer===RENDERER_VERSION&&record.basicVisual&&existingAssetReady&&existingExampleReady&&existingTerrainReady&&existingBeta3dReady){
+      if(record.rawMaster&&record.rawMaster.captureSignature===signature&&existingRenderer===RENDERER_VERSION&&record.basicVisual&&existingAssetReady&&existingExampleReady&&existingHoleFramesReady&&existingTerrainReady&&existingBeta3dReady){
         record.status=record.publishedVisual?"published":"basic-ready";
         recordEvent(record,"course-visual-basic-ready",{idempotent:true,version:record.currentVersion});
         return putRecord(record);
@@ -1323,11 +1482,18 @@
         var stitched=stitchSvg(captures||[],{inputVisualId:record.id,courseId:courseId,captureSignature:signature,capturePlanSummary:capturePlanMeta});
         var version=(Number(record.currentVersion)||0)+1;
         var visualId=stableId("visual");
+        var holeFrames=buildHoleFrameVisuals(captures||[],{inputVisualId:record.id,courseId:courseId,captureSignature:signature,capturePlanSummary:capturePlanMeta,stitchUnderlayPath:"course-visuals/"+courseId+"/basic/"+version+".svg"});
         record.rawMaster={path:"course-visuals/"+courseId+"/raw/"+visualId+".svg",dataUrl:stitched.dataUrl,bounds:stitched.bounds,width:stitched.width,height:stitched.height,captureSignature:signature,metadata:stitched.metadata};
         record.basicVisual={path:"course-visuals/"+courseId+"/basic/"+version+".svg",dataUrl:stitched.dataUrl,version:version};
+        record.holeFrameVisuals=holeFrames.map(function(frame){
+          return {path:"course-visuals/"+courseId+"/holes/h"+(frame.holeNumber||"unknown")+"/base/"+version+".svg",dataUrl:frame.dataUrl,version:version,width:frame.width,height:frame.height,bounds:frame.bounds,captureId:frame.captureId,holeNumber:frame.holeNumber,sourceCaptureIds:frame.sourceCaptureIds,metadata:Object.assign({},frame.metadata||{},{stitchUnderlayPath:"course-visuals/"+courseId+"/basic/"+version+".svg"})};
+        });
         record.previewVisual=null;
         record.singleHolePreviewVisual=null;
         record.singleHoleTerrainView=null;
+        record.holeFramePreviewVisuals=[];
+        record.holeFrameTerrainViews=[];
+        record.holeFramePublishedVisuals=[];
         var terrain=terrainViewSvg(record,split.terrain,{inputVisualId:record.id,courseId:courseId,captureSignature:signature,capturePlanSummary:capturePlanMeta});
         if(terrain){
           record.terrainView={path:"course-visuals/"+courseId+"/terrain/"+version+".svg",dataUrl:terrain.dataUrl,version:version,width:terrain.width,height:terrain.height,bounds:terrain.bounds,sourceCaptureIds:terrain.sourceCaptureIds,metadata:terrain.metadata};
@@ -1339,9 +1505,9 @@
         record.currentVersion=version;
         record.status="basic-ready";
         record.lastError=null;
-        record.diagnostics=Object.assign({},record.diagnostics||{},{capturePlanSummary:capturePlanMeta,stitchOutputDimensions:{width:stitched.width,height:stitched.height},terrainView:record.terrainView?{path:record.terrainView.path,sourceCaptureIds:record.terrainView.sourceCaptureIds,width:record.terrainView.width,height:record.terrainView.height}:{status:split.terrain.length?"failed":"missing-terrain-reference"},beta3dView:record.beta3dView?{path:record.beta3dView.path,sourceCaptureIds:record.beta3dView.sourceCaptureIds,width:record.beta3dView.width,height:record.beta3dView.height,metadata:record.beta3dView.metadata}:{status:beta3dExpected?"failed":"off"},missingCoverage:stitched.missingAreas,sourceCaptureIds:stitched.sourceCaptureIds,exampleHole:record.exampleHoleVisual?{captureId:record.exampleHoleVisual.captureId,holeNumber:record.exampleHoleVisual.holeNumber,width:record.exampleHoleVisual.width,height:record.exampleHoleVisual.height}:null});
-        record.versions=(record.versions||[]).concat([{version:version,type:"basic",rawMasterPath:record.rawMaster.path,basicImagePath:record.basicVisual.path,terrainViewPath:record.terrainView&&record.terrainView.path||null,beta3dViewPath:record.beta3dView&&record.beta3dView.path||null,sourceCaptureIds:stitched.sourceCaptureIds,createdAt:now(),metadata:stitched.metadata}]);
-        recordEvent(record,"course-visual-basic-ready",{version:version,width:stitched.width,height:stitched.height,missingAreas:stitched.missingAreas.length,terrainView:!!record.terrainView,beta3dView:!!record.beta3dView});
+        record.diagnostics=Object.assign({},record.diagnostics||{},{capturePlanSummary:capturePlanMeta,stitchOutputDimensions:{width:stitched.width,height:stitched.height},terrainView:record.terrainView?{path:record.terrainView.path,sourceCaptureIds:record.terrainView.sourceCaptureIds,width:record.terrainView.width,height:record.terrainView.height}:{status:split.terrain.length?"failed":"missing-terrain-reference"},beta3dView:record.beta3dView?{path:record.beta3dView.path,sourceCaptureIds:record.beta3dView.sourceCaptureIds,width:record.beta3dView.width,height:record.beta3dView.height,metadata:record.beta3dView.metadata}:{status:beta3dExpected?"failed":"off"},missingCoverage:stitched.missingAreas,sourceCaptureIds:stitched.sourceCaptureIds,holeFrameCount:record.holeFrameVisuals.length,holeFrames:record.holeFrameVisuals.map(function(asset){return {holeNumber:asset.holeNumber,path:asset.path,width:asset.width,height:asset.height,sourceCaptureIds:asset.sourceCaptureIds};}),exampleHole:record.exampleHoleVisual?{captureId:record.exampleHoleVisual.captureId,holeNumber:record.exampleHoleVisual.holeNumber,width:record.exampleHoleVisual.width,height:record.exampleHoleVisual.height}:null});
+        record.versions=(record.versions||[]).concat([{version:version,type:"basic",rawMasterPath:record.rawMaster.path,basicImagePath:record.basicVisual.path,terrainViewPath:record.terrainView&&record.terrainView.path||null,beta3dViewPath:record.beta3dView&&record.beta3dView.path||null,holeFramePaths:record.holeFrameVisuals.map(function(asset){return asset.path;}),sourceCaptureIds:stitched.sourceCaptureIds,createdAt:now(),metadata:Object.assign({},stitched.metadata||{},{holeFrameCount:record.holeFrameVisuals.length})}]);
+        recordEvent(record,"course-visual-basic-ready",{version:version,width:stitched.width,height:stitched.height,missingAreas:stitched.missingAreas.length,terrainView:!!record.terrainView,beta3dView:!!record.beta3dView,holeFrameCount:record.holeFrameVisuals.length});
       }catch(error){
         record.status="failed";
         record.lastError={code:error&&error.code||"stitch-failed",message:error&&error.message||String(error)};
@@ -1421,6 +1587,20 @@
             record.singleHoleTerrainView={path:"course-visuals/"+record.courseId+"/single-hole/terrain/"+version+".svg",dataUrl:holeTerrain.dataUrl,version:version,width:holeTerrain.width,height:holeTerrain.height,bounds:holeTerrain.bounds,sourceCaptureIds:holeTerrain.sourceCaptureIds,captureId:record.exampleHoleVisual.captureId,holeNumber:record.exampleHoleVisual.holeNumber,presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash,metadata:holeTerrain.metadata};
           }
         }
+        record.holeFramePreviewVisuals=[];
+        record.holeFrameTerrainViews=[];
+        (Array.isArray(record.holeFrameVisuals)?record.holeFrameVisuals:[]).forEach(function(frame){
+          if(!frame||!frame.dataUrl)return;
+          var holeNumber=Math.max(0,Math.round(Number(frame.holeNumber)||0));
+          if(!holeNumber)return;
+          var frameNative=nativeVisualAsset(frame,settings,{role:"hole-frame-native-visuals",stage:"native-visuals",version:version,product:"hole-frame",holeNumber:holeNumber,presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash,airbrushObjects:airbrushObjects,stitchUnderlayPath:record.basicVisual&&record.basicVisual.path||""});
+          var framePreview={path:"course-visuals/"+record.courseId+"/holes/h"+holeNumber+"/preview/"+version+".svg",dataUrl:frameNative.dataUrl,version:version,width:frameNative.width,height:frameNative.height,bounds:frameNative.bounds,captureId:frame.captureId,holeNumber:holeNumber,sourceCaptureIds:frameNative.sourceCaptureIds&&frameNative.sourceCaptureIds.length?frameNative.sourceCaptureIds:frame.sourceCaptureIds,presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash,metadata:Object.assign({},frameNative.metadata||{},{playSurface:Object.assign({},frame.metadata&&frame.metadata.playSurface||{},{stitchUnderlayPath:record.basicVisual&&record.basicVisual.path||""})})};
+          record.holeFramePreviewVisuals.push(framePreview);
+          var frameTerrain=terrainShadeAsset(framePreview,split.terrain,{role:"hole-frame-terrain",stage:"terrain-shading",version:version,product:"hole-frame",holeNumber:holeNumber,terrainStrength:terrainStrengthForProduct(settings,"single-hole"),bounds:framePreview.bounds,presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash,stitchUnderlayPath:record.basicVisual&&record.basicVisual.path||""});
+          if(frameTerrain){
+            record.holeFrameTerrainViews.push({path:"course-visuals/"+record.courseId+"/holes/h"+holeNumber+"/terrain/"+version+".svg",dataUrl:frameTerrain.dataUrl,version:version,width:frameTerrain.width,height:frameTerrain.height,bounds:frameTerrain.bounds,sourceCaptureIds:frameTerrain.sourceCaptureIds,captureId:frame.captureId,holeNumber:holeNumber,presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash,metadata:Object.assign({},frameTerrain.metadata||{},{playSurface:Object.assign({},frame.metadata&&frame.metadata.playSurface||{},{stitchUnderlayPath:record.basicVisual&&record.basicVisual.path||""})})});
+          }
+        });
         record.presetId=preset.id;
         record.presetVersion=preset.version;
         record.courseOverrides=courseOverrides;
@@ -1428,9 +1608,9 @@
         record.status="preview-ready";
         record.settingsDirty=false;
         record.lastError=null;
-        record.diagnostics=Object.assign({},record.diagnostics||{},{preview:{rendererVersion:RENDERER_VERSION,outputFormat:"image/svg+xml",outputDimensions:{width:record.previewVisual&&record.previewVisual.width,height:record.previewVisual&&record.previewVisual.height},presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash,products:{overview:{native:!!record.previewVisual,terrain:!!record.terrainView},singleHole:{base:!!record.exampleHoleVisual,native:!!record.singleHolePreviewVisual,terrain:!!record.singleHoleTerrainView}}}});
-        record.versions=(record.versions||[]).concat([{version:version,type:"preview",previewImagePath:record.previewVisual.path,terrainViewPath:record.terrainView&&record.terrainView.path||null,singleHolePreviewPath:record.singleHolePreviewVisual&&record.singleHolePreviewVisual.path||null,singleHoleTerrainPath:record.singleHoleTerrainView&&record.singleHoleTerrainView.path||null,presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash,createdAt:now(),metadata:{rendererVersion:RENDERER_VERSION,outputFormat:"image/svg+xml",products:["course-overview","single-hole"],stages:["native-visuals","terrain-shading"]}}]);
-        recordEvent(record,"course-visual-preview-ready",{version:version,presetId:preset.id,presetVersion:preset.version,overviewTerrain:!!record.terrainView,singleHoleTerrain:!!record.singleHoleTerrainView});
+        record.diagnostics=Object.assign({},record.diagnostics||{},{preview:{rendererVersion:RENDERER_VERSION,outputFormat:"image/svg+xml",outputDimensions:{width:record.previewVisual&&record.previewVisual.width,height:record.previewVisual&&record.previewVisual.height},presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash,products:{overview:{native:!!record.previewVisual,terrain:!!record.terrainView},singleHole:{base:!!record.exampleHoleVisual,native:!!record.singleHolePreviewVisual,terrain:!!record.singleHoleTerrainView},holeFrames:{base:(record.holeFrameVisuals||[]).length,native:record.holeFramePreviewVisuals.length,terrain:record.holeFrameTerrainViews.length}}}});
+        record.versions=(record.versions||[]).concat([{version:version,type:"preview",previewImagePath:record.previewVisual.path,terrainViewPath:record.terrainView&&record.terrainView.path||null,singleHolePreviewPath:record.singleHolePreviewVisual&&record.singleHolePreviewVisual.path||null,singleHoleTerrainPath:record.singleHoleTerrainView&&record.singleHoleTerrainView.path||null,holeFramePreviewPaths:record.holeFramePreviewVisuals.map(function(asset){return asset.path;}),holeFrameTerrainPaths:record.holeFrameTerrainViews.map(function(asset){return asset.path;}),presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash,createdAt:now(),metadata:{rendererVersion:RENDERER_VERSION,outputFormat:"image/svg+xml",products:["course-overview","single-hole","hole-frames"],stages:["native-visuals","terrain-shading"]}}]);
+        recordEvent(record,"course-visual-preview-ready",{version:version,presetId:preset.id,presetVersion:preset.version,overviewTerrain:!!record.terrainView,singleHoleTerrain:!!record.singleHoleTerrainView,holeFrameTerrainCount:record.holeFrameTerrainViews.length});
       }catch(error){
         record.status="failed";
         record.lastError={code:error&&error.code||"preview-failed",message:error&&error.message||String(error)};
@@ -1454,11 +1634,17 @@
     if(singleHoleFinal&&singleHoleFinal.dataUrl){
       record.singleHolePublishedVisual={path:"course-visuals/"+record.courseId+"/single-hole/published/"+version+".svg",dataUrl:singleHoleFinal.dataUrl,version:version,width:singleHoleFinal.width,height:singleHoleFinal.height,bounds:singleHoleFinal.bounds,captureId:singleHoleFinal.captureId||record.exampleHoleVisual&&record.exampleHoleVisual.captureId,holeNumber:singleHoleFinal.holeNumber||record.exampleHoleVisual&&record.exampleHoleVisual.holeNumber,presetId:preview.presetId,presetVersion:preview.presetVersion,overrideHash:preview.overrideHash,publishedAt:record.publishedVisual.publishedAt,metadata:Object.assign({},singleHoleFinal.metadata||{},{role:"single-hole-published",publishedFrom:singleHoleFinal.metadata&&singleHoleFinal.metadata.role||"single-hole-preview"})};
     }
+    var frameSources=(Array.isArray(record.holeFrameTerrainViews)&&record.holeFrameTerrainViews.length?record.holeFrameTerrainViews:Array.isArray(record.holeFramePreviewVisuals)&&record.holeFramePreviewVisuals.length?record.holeFramePreviewVisuals:record.holeFrameVisuals||[]).filter(function(asset){return asset&&asset.dataUrl;});
+    record.holeFramePublishedVisuals=frameSources.map(function(asset){
+      var holeNumber=Math.max(0,Math.round(Number(asset.holeNumber)||0));
+      if(!holeNumber)return null;
+      return {path:"course-visuals/"+record.courseId+"/holes/h"+holeNumber+"/published/"+version+".svg",dataUrl:asset.dataUrl,version:version,width:asset.width,height:asset.height,bounds:asset.bounds,captureId:asset.captureId,holeNumber:holeNumber,sourceCaptureIds:asset.sourceCaptureIds,presetId:preview.presetId,presetVersion:preview.presetVersion,overrideHash:preview.overrideHash,publishedAt:record.publishedVisual.publishedAt,metadata:Object.assign({},asset.metadata||{},{role:"hole-frame-published",publishedFrom:asset.metadata&&asset.metadata.role||"hole-frame",stitchUnderlayPath:record.publishedVisual.path,playSurface:Object.assign({},asset.metadata&&asset.metadata.playSurface||{},{fallbackUnderlay:"published-stitch",stitchUnderlayPath:record.publishedVisual.path})})};
+    }).filter(Boolean).sort(function(a,b){return Number(a.holeNumber)-Number(b.holeNumber);});
     record.publishedVersion=version;
     record.status="published";
     record.lastError=null;
-    record.versions=(record.versions||[]).concat([{version:version,type:"published",publishedImagePath:record.publishedVisual.path,singleHolePublishedPath:record.singleHolePublishedVisual&&record.singleHolePublishedVisual.path||null,presetId:preview.presetId,presetVersion:preview.presetVersion,overrideHash:preview.overrideHash,createdAt:record.publishedVisual.publishedAt,metadata:{rendererVersion:RENDERER_VERSION,outputFormat:"image/svg+xml",publishedProducts:["course-overview","single-hole"],publishedStages:["terrain-shading","native-visuals"]}}]);
-    recordEvent(record,"course-visual-published",{version:version,presetId:preview.presetId,presetVersion:preview.presetVersion,overviewStage:overviewFinal&&overviewFinal.metadata&&overviewFinal.metadata.stage||"",singleHoleStage:singleHoleFinal&&singleHoleFinal.metadata&&singleHoleFinal.metadata.stage||""});
+    record.versions=(record.versions||[]).concat([{version:version,type:"published",publishedImagePath:record.publishedVisual.path,singleHolePublishedPath:record.singleHolePublishedVisual&&record.singleHolePublishedVisual.path||null,holeFramePublishedPaths:record.holeFramePublishedVisuals.map(function(asset){return asset.path;}),presetId:preview.presetId,presetVersion:preview.presetVersion,overrideHash:preview.overrideHash,createdAt:record.publishedVisual.publishedAt,metadata:{rendererVersion:RENDERER_VERSION,outputFormat:"image/svg+xml",publishedProducts:["course-overview","single-hole","hole-frames"],publishedStages:["terrain-shading","native-visuals"],holeFramePublishedCount:record.holeFramePublishedVisuals.length}}]);
+    recordEvent(record,"course-visual-published",{version:version,presetId:preview.presetId,presetVersion:preview.presetVersion,overviewStage:overviewFinal&&overviewFinal.metadata&&overviewFinal.metadata.stage||"",singleHoleStage:singleHoleFinal&&singleHoleFinal.metadata&&singleHoleFinal.metadata.stage||"",holeFramePublishedCount:record.holeFramePublishedVisuals.length});
     return putRecord(record,{skipCloudSync:true});
   }
   function revertToPublishedVersion(courseId,version){
@@ -1476,6 +1662,8 @@
     record.terrainView=null;
     record.singleHolePreviewVisual=null;
     record.singleHoleTerrainView=null;
+    record.holeFramePreviewVisuals=[];
+    record.holeFrameTerrainViews=[];
     record.settingsDirty=false;
     record.courseOverrides={};
     record.status=record.publishedVisual?"published":record.basicVisual?"basic-ready":"unavailable";
@@ -1492,6 +1680,13 @@
     recordEvent(record,"course-visual-settings-saved",{reset:"global-preset",presetId:preset.id,presetVersion:preset.version});
     return putRecord(record);
   }
+  function assetListForOutput(list,includeData){
+    return (Array.isArray(list)?list:[]).filter(Boolean).map(function(asset){
+      var out={path:asset.path,version:asset.version,presetId:asset.presetId,presetVersion:asset.presetVersion,holeNumber:asset.holeNumber,width:asset.width,height:asset.height,bounds:asset.bounds,sourceCaptureIds:asset.sourceCaptureIds,metadata:asset.metadata};
+      if(includeData)out.dataUrl=asset.dataUrl;
+      return out;
+    });
+  }
   function resolveCourseVisual(courseId){
     var record=getRecord(courseId);
     if(!record.publishedVisual)return null;
@@ -1504,9 +1699,13 @@
       exampleHoleVisual:record.exampleHoleVisual?{path:record.exampleHoleVisual.path,dataUrl:record.exampleHoleVisual.dataUrl,holeNumber:record.exampleHoleVisual.holeNumber}:undefined,
       singleHolePreviewVisual:record.singleHolePreviewVisual?{path:record.singleHolePreviewVisual.path,dataUrl:record.singleHolePreviewVisual.dataUrl,version:record.singleHolePreviewVisual.version,presetId:record.singleHolePreviewVisual.presetId,presetVersion:record.singleHolePreviewVisual.presetVersion,holeNumber:record.singleHolePreviewVisual.holeNumber}:undefined,
       singleHoleTerrainView:record.singleHoleTerrainView?{path:record.singleHoleTerrainView.path,dataUrl:record.singleHoleTerrainView.dataUrl,version:record.singleHoleTerrainView.version,presetId:record.singleHoleTerrainView.presetId,presetVersion:record.singleHoleTerrainView.presetVersion,holeNumber:record.singleHoleTerrainView.holeNumber}:undefined,
+      holeFrameVisuals:assetListForOutput(record.holeFrameVisuals,true),
+      holeFramePreviewVisuals:assetListForOutput(record.holeFramePreviewVisuals,true),
+      holeFrameTerrainViews:assetListForOutput(record.holeFrameTerrainViews,true),
       previewVisual:record.previewVisual?{path:record.previewVisual.path,dataUrl:record.previewVisual.dataUrl,version:record.previewVisual.version,presetId:record.previewVisual.presetId,presetVersion:record.previewVisual.presetVersion}:undefined,
       publishedVisual:record.publishedVisual?{path:record.publishedVisual.path,dataUrl:record.publishedVisual.dataUrl,version:record.publishedVisual.version,presetId:record.publishedVisual.presetId,presetVersion:record.publishedVisual.presetVersion}:undefined,
       singleHolePublishedVisual:record.singleHolePublishedVisual?{path:record.singleHolePublishedVisual.path,dataUrl:record.singleHolePublishedVisual.dataUrl,version:record.singleHolePublishedVisual.version,presetId:record.singleHolePublishedVisual.presetId,presetVersion:record.singleHolePublishedVisual.presetVersion,holeNumber:record.singleHolePublishedVisual.holeNumber}:undefined,
+      holeFramePublishedVisuals:assetListForOutput(record.holeFramePublishedVisuals,true),
       error:record.lastError||undefined
     };
   }
@@ -1521,9 +1720,13 @@
       exampleHoleVisual:record.exampleHoleVisual?{path:record.exampleHoleVisual.path,holeNumber:record.exampleHoleVisual.holeNumber}:undefined,
       singleHolePreviewVisual:record.singleHolePreviewVisual?{path:record.singleHolePreviewVisual.path,version:record.singleHolePreviewVisual.version,presetId:record.singleHolePreviewVisual.presetId,presetVersion:record.singleHolePreviewVisual.presetVersion,holeNumber:record.singleHolePreviewVisual.holeNumber}:undefined,
       singleHoleTerrainView:record.singleHoleTerrainView?{path:record.singleHoleTerrainView.path,version:record.singleHoleTerrainView.version,presetId:record.singleHoleTerrainView.presetId,presetVersion:record.singleHoleTerrainView.presetVersion,holeNumber:record.singleHoleTerrainView.holeNumber}:undefined,
+      holeFrameVisuals:assetListForOutput(record.holeFrameVisuals,false),
+      holeFramePreviewVisuals:assetListForOutput(record.holeFramePreviewVisuals,false),
+      holeFrameTerrainViews:assetListForOutput(record.holeFrameTerrainViews,false),
       previewVisual:record.previewVisual?{path:record.previewVisual.path,version:record.previewVisual.version,presetId:record.previewVisual.presetId,presetVersion:record.previewVisual.presetVersion}:undefined,
       publishedVisual:record.publishedVisual?{path:record.publishedVisual.path,version:record.publishedVisual.version,presetId:record.publishedVisual.presetId,presetVersion:record.publishedVisual.presetVersion}:undefined,
       singleHolePublishedVisual:record.singleHolePublishedVisual?{path:record.singleHolePublishedVisual.path,version:record.singleHolePublishedVisual.version,presetId:record.singleHolePublishedVisual.presetId,presetVersion:record.singleHolePublishedVisual.presetVersion,holeNumber:record.singleHolePublishedVisual.holeNumber}:undefined,
+      holeFramePublishedVisuals:assetListForOutput(record.holeFramePublishedVisuals,false),
       error:record.lastError||undefined
     };
   }
@@ -1576,17 +1779,25 @@
     }).finally(function(){record.__syncing=false;});
   }
   function metadataForCloud(record){
+    function assetPayload(asset,role){
+      if(!asset||!asset.dataUrl)return null;
+      return {path:asset.path,dataUrl:asset.dataUrl,contentType:"image/svg+xml",role:role,holeNumber:asset.holeNumber||asset.metadata&&asset.metadata.holeNumber||null,metadata:asset.metadata||null};
+    }
     var assets=[
-      record.rawMaster&&record.rawMaster.dataUrl?{path:record.rawMaster.path,dataUrl:record.rawMaster.dataUrl,contentType:"image/svg+xml",role:"raw-master"}:null,
-      record.basicVisual&&record.basicVisual.dataUrl?{path:record.basicVisual.path,dataUrl:record.basicVisual.dataUrl,contentType:"image/svg+xml",role:"basic"}:null,
-      record.exampleHoleVisual&&record.exampleHoleVisual.dataUrl?{path:record.exampleHoleVisual.path,dataUrl:record.exampleHoleVisual.dataUrl,contentType:"image/svg+xml",role:"example-hole"}:null,
-      record.previewVisual&&record.previewVisual.dataUrl?{path:record.previewVisual.path,dataUrl:record.previewVisual.dataUrl,contentType:"image/svg+xml",role:"preview"}:null,
-      record.terrainView&&record.terrainView.dataUrl?{path:record.terrainView.path,dataUrl:record.terrainView.dataUrl,contentType:"image/svg+xml",role:"terrain-view"}:null,
-      record.singleHolePreviewVisual&&record.singleHolePreviewVisual.dataUrl?{path:record.singleHolePreviewVisual.path,dataUrl:record.singleHolePreviewVisual.dataUrl,contentType:"image/svg+xml",role:"single-hole-preview"}:null,
-      record.singleHoleTerrainView&&record.singleHoleTerrainView.dataUrl?{path:record.singleHoleTerrainView.path,dataUrl:record.singleHoleTerrainView.dataUrl,contentType:"image/svg+xml",role:"single-hole-terrain"}:null,
-      record.publishedVisual&&record.publishedVisual.dataUrl?{path:record.publishedVisual.path,dataUrl:record.publishedVisual.dataUrl,contentType:"image/svg+xml",role:"published"}:null,
-      record.singleHolePublishedVisual&&record.singleHolePublishedVisual.dataUrl?{path:record.singleHolePublishedVisual.path,dataUrl:record.singleHolePublishedVisual.dataUrl,contentType:"image/svg+xml",role:"single-hole-published"}:null
+      assetPayload(record.rawMaster,"raw-master"),
+      assetPayload(record.basicVisual,"basic"),
+      assetPayload(record.exampleHoleVisual,"example-hole"),
+      assetPayload(record.previewVisual,"preview"),
+      assetPayload(record.terrainView,"terrain-view"),
+      assetPayload(record.singleHolePreviewVisual,"single-hole-preview"),
+      assetPayload(record.singleHoleTerrainView,"single-hole-terrain"),
+      assetPayload(record.publishedVisual,"published"),
+      assetPayload(record.singleHolePublishedVisual,"single-hole-published")
     ].filter(Boolean);
+    (Array.isArray(record.holeFrameVisuals)?record.holeFrameVisuals:[]).forEach(function(asset){var payload=assetPayload(asset,"hole-frame");if(payload)assets.push(payload);});
+    (Array.isArray(record.holeFramePreviewVisuals)?record.holeFramePreviewVisuals:[]).forEach(function(asset){var payload=assetPayload(asset,"hole-frame-preview");if(payload)assets.push(payload);});
+    (Array.isArray(record.holeFrameTerrainViews)?record.holeFrameTerrainViews:[]).forEach(function(asset){var payload=assetPayload(asset,"hole-frame-terrain");if(payload)assets.push(payload);});
+    (Array.isArray(record.holeFramePublishedVisuals)?record.holeFramePublishedVisuals:[]).forEach(function(asset){var payload=assetPayload(asset,"hole-frame-published");if(payload)assets.push(payload);});
     return {
       id:record.id,
       course_id:record.courseId,
@@ -1621,8 +1832,12 @@
     record.lastError=row.last_error||record.lastError||null;
     record.diagnostics=row.diagnostics||record.diagnostics||{};
     record.versions=Array.isArray(row.versions)?row.versions:record.versions||[];
-    var assets=Array.isArray(row.assets)?row.assets:[];
+    var assets=Array.isArray(row.assets)?row.assets:Array.isArray(row.uploaded_assets)?row.uploaded_assets:Array.isArray(row.uploadedAssets)?row.uploadedAssets:[];
     function assetForRole(role){return assets.filter(function(asset){return asset&&asset.role===role&&asset.path;})[0]||null;}
+    function assetsForRole(role){return assets.filter(function(asset){return asset&&asset.role===role&&asset.path;}).sort(function(a,b){return Number(a.holeNumber||a.hole_number||0)-Number(b.holeNumber||b.hole_number||0);});}
+    function restoredFrameAsset(asset,version){
+      return {path:asset.path,dataUrl:asset.dataUrl,version:version,presetId:record.presetId,presetVersion:record.presetVersion,holeNumber:asset.holeNumber||asset.hole_number||null,metadata:asset.metadata||{}};
+    }
     if(row.raw_master_path&&!record.rawMaster)record.rawMaster={path:row.raw_master_path,bounds:row.course_bounds||null,width:0,height:0};
     if(row.basic_image_path&&!record.basicVisual)record.basicVisual={path:row.basic_image_path,version:record.currentVersion||1};
     if(row.preview_image_path&&!record.previewVisual)record.previewVisual={path:row.preview_image_path,version:record.currentVersion||1,presetId:record.presetId,presetVersion:record.presetVersion};
@@ -1637,6 +1852,10 @@
     if(singlePreviewAsset&&!record.singleHolePreviewVisual)record.singleHolePreviewVisual={path:singlePreviewAsset.path,dataUrl:singlePreviewAsset.dataUrl,version:record.currentVersion||1,presetId:record.presetId,presetVersion:record.presetVersion};
     if(singleTerrainAsset&&!record.singleHoleTerrainView)record.singleHoleTerrainView={path:singleTerrainAsset.path,dataUrl:singleTerrainAsset.dataUrl,version:record.currentVersion||1,presetId:record.presetId,presetVersion:record.presetVersion};
     if(singlePublishedAsset&&!record.singleHolePublishedVisual)record.singleHolePublishedVisual={path:singlePublishedAsset.path,dataUrl:singlePublishedAsset.dataUrl,version:record.publishedVersion||record.currentVersion||1,presetId:record.presetId,presetVersion:record.presetVersion};
+    if(!record.holeFrameVisuals||!record.holeFrameVisuals.length)record.holeFrameVisuals=assetsForRole("hole-frame").map(function(asset){return restoredFrameAsset(asset,record.currentVersion||1);});
+    if(!record.holeFramePreviewVisuals||!record.holeFramePreviewVisuals.length)record.holeFramePreviewVisuals=assetsForRole("hole-frame-preview").map(function(asset){return restoredFrameAsset(asset,record.currentVersion||1);});
+    if(!record.holeFrameTerrainViews||!record.holeFrameTerrainViews.length)record.holeFrameTerrainViews=assetsForRole("hole-frame-terrain").map(function(asset){return restoredFrameAsset(asset,record.currentVersion||1);});
+    if(!record.holeFramePublishedVisuals||!record.holeFramePublishedVisuals.length)record.holeFramePublishedVisuals=assetsForRole("hole-frame-published").map(function(asset){return restoredFrameAsset(asset,record.publishedVersion||record.currentVersion||1);});
     return putRecord(record,{skipCloudSync:true});
   }
   function pullCourseVisual(courseId){

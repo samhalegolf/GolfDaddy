@@ -195,13 +195,18 @@ function payload() {
   assert.equal(built.status, "basic-ready", "valid captures produce a basic visual record");
   assert.ok(built.rawMaster.path.includes("/raw/"));
   assert.ok(built.basicVisual.dataUrl.startsWith("data:image/svg+xml"));
-  assert.equal(built.rawMaster.metadata.rendererVersion, "clarity-course-visual-renderer-v6");
+  assert.equal(built.rawMaster.metadata.rendererVersion, "clarity-course-visual-renderer-v7");
   assert.equal(built.rawMaster.metadata.layout, "geographic-mercator");
   assert.equal(built.rawMaster.metadata.stitchModel, "geo-rectangle-table-over-live-map", "stitch metadata describes overlapping rectangles over a live map base");
   assert.ok(decodeURIComponent(built.rawMaster.dataUrl).includes("data-stitch-width"), "raw stitch keeps coverage geometry as metadata attributes");
   assert.ok(!decodeURIComponent(built.rawMaster.dataUrl).includes("SUPER HD GREEN"), "raw stitch does not bake debug labels into the visual product");
   assert.ok(built.rawMaster.height / built.rawMaster.width < 8, "full-course stitch does not collapse into a giant vertical strip");
   assert.ok(built.exampleHoleVisual.dataUrl.startsWith("data:image/svg+xml"), "example hole preview is built from the same captures");
+  assert.ok(Array.isArray(built.holeFrameVisuals) && built.holeFrameVisuals.length >= 1, "base build creates ready per-hole play surfaces");
+  assert.equal(built.holeFrameVisuals[0].metadata.framingModel, "gps-play-overcaptured-mercator-surface", "hole surfaces keep GPS Play surface metadata");
+  assert.equal(built.holeFrameVisuals[0].metadata.playSurface.projection, "mercator-svg", "hole surfaces stay Mercator-aligned for Play projection");
+  assert.equal(built.holeFrameVisuals[0].metadata.playSurface.useGpsPlayFraming, true, "hole surfaces tell Play to frame on the per-hole surface");
+  assert.equal(built.holeFrameVisuals[0].metadata.playSurface.fallbackUnderlay, "published-stitch", "hole surfaces name the stitched underlay fallback");
   assert.ok(built.terrainView && built.terrainView.dataUrl.startsWith("data:image/svg+xml"), "course overview enters a terrain shading stage after the base stitch");
   assert.equal(built.rawMaster.dataUrl, built.basicVisual.dataUrl, "raw master feeds basic delivery without recompression");
   const persistedAfterBuild = JSON.parse(localStorage.getItem(engine.storeKey));
@@ -249,6 +254,10 @@ function payload() {
   assert.ok(preview.singleHoleTerrainView.path.includes("/single-hole/terrain/"), "single-hole visual enters terrain shading");
   assert.equal(preview.singleHoleTerrainView.metadata.inputStage, "native-visuals", "single-hole terrain shading consumes the native hole output");
   assert.equal(preview.singleHoleTerrainView.metadata.terrainStrength, 0.85, "single-hole terrain uses the stronger preset terrain strength");
+  assert.ok(preview.holeFramePreviewVisuals.length >= 1, "every hole frame enters native visuals");
+  assert.ok(preview.holeFrameTerrainViews.length >= 1, "every hole frame enters terrain shading");
+  assert.equal(preview.holeFrameTerrainViews[0].metadata.role, "hole-frame-terrain", "hole frame terrain output carries its own role");
+  assert.equal(preview.holeFrameTerrainViews[0].metadata.playSurface.useGpsPlayFraming, true, "terrain hole frame keeps play-surface metadata");
   assert.equal(preview.publishedVisual, null, "preview does not publish");
 
   const published = engine.publishCourseVisual("cromwell");
@@ -256,6 +265,9 @@ function payload() {
   assert.equal(published.publishedVersion, preview.previewVisual.version);
   assert.equal(published.publishedVisual.dataUrl, published.terrainView.dataUrl, "published overview uses the terrain-shaded product");
   assert.ok(published.singleHolePublishedVisual && published.singleHolePublishedVisual.dataUrl === published.singleHoleTerrainView.dataUrl, "publish includes the terrain-shaded single-hole product");
+  assert.ok(published.holeFramePublishedVisuals.length >= 1, "publish includes per-hole GPS Play surfaces");
+  assert.equal(published.holeFramePublishedVisuals[0].metadata.role, "hole-frame-published", "published hole frames have the Play-facing role");
+  assert.equal(published.holeFramePublishedVisuals[0].metadata.playSurface.stitchUnderlayPath, published.publishedVisual.path, "published hole frames point at the stitched course underlay");
   assert.ok(published.versions.filter((item) => item.type === "published").length >= 1, "published versions remain in history");
 
   const originalFetch = global.fetch;
@@ -283,6 +295,9 @@ function payload() {
   assert.equal(cloudRequest.body.visual.status, "published", "cloud sync sends a published visual record");
   assert.ok(cloudRequest.body.visual.assets.some((asset) => asset.role === "published"), "cloud sync uploads the published overview asset");
   assert.ok(cloudRequest.body.visual.assets.some((asset) => asset.role === "single-hole-published"), "cloud sync uploads the single-hole published asset");
+  const cloudHoleFrames = cloudRequest.body.visual.assets.filter((asset) => asset.role === "hole-frame-published");
+  assert.ok(cloudHoleFrames.length >= 1, "cloud sync uploads per-hole published assets");
+  assert.ok(cloudHoleFrames.every((asset) => Number(asset.holeNumber) > 0), "cloud hole frame assets carry hole numbers");
   assert.equal(engine.getRecord("cromwell").diagnostics.cloudPublish.playPayloadReady, true, "local diagnostics record Play payload readiness");
   global.fetch = originalFetch;
   global.GolfDaddyAccounts = originalAccounts;
@@ -291,6 +306,7 @@ function payload() {
   assert.equal(resolved.status, "published", "resolveCourseVisual prefers published over basic");
   assert.equal(resolved.publishedVisual.version, published.publishedVersion);
   assert.equal(resolved.singleHolePublishedVisual.version, published.publishedVersion, "resolved metadata includes the published single-hole product");
+  assert.ok(resolved.holeFramePublishedVisuals.length >= 1, "resolved metadata includes published per-hole surfaces");
 
   const basicOnlyInput = engine.adaptCoursePlayPayloadToVisualInput(Object.assign({}, payload(), { courseId: "basic-only", courseKey: "basic-only" }), {
     captures: [manifest("manifest-basic", 1, 0)]
@@ -314,7 +330,7 @@ function payload() {
   });
   engine.ingestCourseVisualInput(multiInput);
   const multiBuilt = await engine.buildCourseVisualMaster("multi-capture");
-  assert.equal(multiBuilt.rawMaster.metadata.rendererVersion, "clarity-course-visual-renderer-v6");
+  assert.equal(multiBuilt.rawMaster.metadata.rendererVersion, "clarity-course-visual-renderer-v7");
   assert.ok(multiBuilt.rawMaster.height < 12000, "multi-capture stitch is geographically laid out instead of vertically appended");
   assert.ok(multiBuilt.rawMaster.height / multiBuilt.rawMaster.width < 8, "multi-capture output keeps a usable preview aspect");
 
@@ -357,6 +373,8 @@ function payload() {
   assert.equal(plannedBuilt.exampleHoleVisual.metadata.windowShape, "mobile-hole", "single-hole product uses the mobile golf-hole window");
   assert.ok(Math.abs(plannedBuilt.exampleHoleVisual.width / plannedBuilt.exampleHoleVisual.height - 9 / 16) < 0.02, "single-hole window is portrait instead of square");
   assert.ok(plannedBuilt.exampleHoleVisual.metadata.sourceCaptureCount > 1, "single-hole window stitches hole captures instead of picking one square");
+  assert.ok(plannedBuilt.holeFrameVisuals.length >= 1, "planned build creates per-hole play surfaces");
+  assert.equal(plannedBuilt.holeFrameVisuals[0].metadata.playSurface.useGpsPlayFraming, true, "planned hole surface is ready for GPS Play framing");
   assert.ok(plannedBuilt.terrainView && plannedBuilt.terrainView.dataUrl.startsWith("data:image/svg+xml"), "terrain view is built as a separate derived stage");
   assert.ok(plannedBuilt.beta3dView && plannedBuilt.beta3dView.dataUrl.startsWith("data:image/svg+xml"), "3D beta view is built as a separate opt-in stage");
   assert.equal(plannedBuilt.beta3dView.metadata.cameraModel, "faux-3d-svg-perspective", "3D beta uses faux perspective when Leaflet has no pitch");
