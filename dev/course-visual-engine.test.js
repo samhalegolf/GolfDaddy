@@ -191,7 +191,7 @@ function payload() {
   assert.equal(built.status, "basic-ready", "valid captures produce a basic visual record");
   assert.ok(built.rawMaster.path.includes("/raw/"));
   assert.ok(built.basicVisual.dataUrl.startsWith("data:image/svg+xml"));
-  assert.equal(built.rawMaster.metadata.rendererVersion, "clarity-course-visual-renderer-v3");
+  assert.equal(built.rawMaster.metadata.rendererVersion, "clarity-course-visual-renderer-v4");
   assert.equal(built.rawMaster.metadata.layout, "geographic-mercator");
   assert.equal(built.rawMaster.metadata.stitchModel, "geo-rectangle-table-over-live-map", "stitch metadata describes overlapping rectangles over a live map base");
   assert.ok(decodeURIComponent(built.rawMaster.dataUrl).includes("data-stitch-width"), "raw stitch keeps coverage geometry as metadata attributes");
@@ -225,16 +225,23 @@ function payload() {
   assert.equal(preview.status, "preview-ready");
   assert.ok(preview.previewVisual.path.includes("/preview/"));
   assert.equal(preview.previewVisual.metadata.stage, "native-visuals", "course overview enters native visuals");
-  assert.ok(svgText(preview.previewVisual.dataUrl).includes("cvMowingStripe"), "preset mowing visibility is baked into native visuals");
-  assert.ok(svgText(preview.previewVisual.dataUrl).includes("fairway-airbrush"), "native visuals include the fairway burn-rescue airbrush layer");
-  assert.equal(preview.previewVisual.metadata.fairwayAirbrush.enabled, true, "fairway airbrush records its geometry-constrained pass");
-  assert.equal(preview.previewVisual.metadata.fairwayAirbrush.preserves, "relative-luminance-and-mow-lines", "fairway airbrush preserves mowing-line texture");
+  const overviewSvg = svgText(preview.previewVisual.dataUrl);
+  assert.ok(overviewSvg.includes("cvMowingStripe"), "preset mowing visibility is baked into native visuals");
+  assert.ok(overviewSvg.includes("green-strength"), "green strength is baked into native visuals as a visible layer");
+  assert.ok(!overviewSvg.includes("fairway-airbrush"), "course overview native visuals do not apply the airbrush pass");
+  assert.equal(preview.previewVisual.metadata.fairwayAirbrush.enabled, false, "course overview explicitly records airbrush as disabled");
   assert.equal(preview.terrainView.metadata.stage, "terrain-shading", "course overview enters terrain shading after native visuals");
   assert.equal(preview.terrainView.metadata.inputStage, "native-visuals", "overview terrain shading consumes the native visual output");
+  assert.equal(preview.terrainView.metadata.terrainStrength, 0.42, "course overview keeps the softer terrain strength");
   assert.ok(preview.singleHolePreviewVisual.path.includes("/single-hole/preview/"), "single-hole visual enters native visuals");
   assert.equal(preview.singleHolePreviewVisual.metadata.stage, "native-visuals", "single-hole native visual records the native stage");
+  assert.ok(svgText(preview.singleHolePreviewVisual.dataUrl).includes("fairway-airbrush"), "single-hole native visuals include the fairway burn-rescue airbrush layer");
+  assert.ok(svgText(preview.singleHolePreviewVisual.dataUrl).includes("green-surround-airbrush"), "single-hole native visuals include green-surround burn rescue");
+  assert.equal(preview.singleHolePreviewVisual.metadata.fairwayAirbrush.preserves, "relative-luminance-and-mow-lines", "fairway airbrush preserves mowing-line texture");
+  assert.equal(preview.singleHolePreviewVisual.metadata.greenSurroundAirbrush.preserves, "relative-luminance-and-mow-lines", "green-surround airbrush preserves mowing-line texture");
   assert.ok(preview.singleHoleTerrainView.path.includes("/single-hole/terrain/"), "single-hole visual enters terrain shading");
   assert.equal(preview.singleHoleTerrainView.metadata.inputStage, "native-visuals", "single-hole terrain shading consumes the native hole output");
+  assert.equal(preview.singleHoleTerrainView.metadata.terrainStrength, 0.85, "single-hole terrain uses the stronger preset terrain strength");
   assert.equal(preview.publishedVisual, null, "preview does not publish");
 
   const published = engine.publishCourseVisual("cromwell");
@@ -271,7 +278,7 @@ function payload() {
   });
   engine.ingestCourseVisualInput(multiInput);
   const multiBuilt = await engine.buildCourseVisualMaster("multi-capture");
-  assert.equal(multiBuilt.rawMaster.metadata.rendererVersion, "clarity-course-visual-renderer-v3");
+  assert.equal(multiBuilt.rawMaster.metadata.rendererVersion, "clarity-course-visual-renderer-v4");
   assert.ok(multiBuilt.rawMaster.height < 12000, "multi-capture stitch is geographically laid out instead of vertically appended");
   assert.ok(multiBuilt.rawMaster.height / multiBuilt.rawMaster.width < 8, "multi-capture output keeps a usable preview aspect");
 
@@ -344,7 +351,7 @@ function payload() {
   const globalPreset = engine.getPreset("clarity-course-natural-v1");
   const presetStore = engine.loadPresets();
   const presetList = engine.courseVisualPresetList();
-  assert.equal(presetStore.version, 3, "preset store upgrades to the current built-in preset version");
+  assert.equal(presetStore.version, 4, "preset store upgrades to the current built-in preset version");
   assert.ok(presetList.length >= 8 && presetList.length <= 10, "admin gets a proper preset palette without becoming noisy");
   assert.ok(presetList.some((preset) => preset.id === "clarity-course-green-detail-v1"), "green detail preset is available");
   assert.ok(presetList.some((preset) => preset.id === "clarity-course-terrain-relief-v1"), "terrain relief preset is available");
