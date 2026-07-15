@@ -819,14 +819,15 @@
     var store=loadStore();
     return attachTransientAssets(clone(store.records[slug(courseId)]||emptyRecord(courseId)));
   }
-  function putRecord(record){
+  function putRecord(record,opts){
+    opts=opts||{};
     var store=loadStore();
     record.updatedAt=now();
     record.status=VALID_STATUSES[record.status]?record.status:"failed";
     captureTransientAssets(record);
     store.records[record.courseId]=persistableRecord(record);
     saveStore(store);
-    queueCloudSync(record,"metadata");
+    if(!opts.skipCloudSync&&record.status==="published"&&record.publishedVisual&&!record.settingsDirty)queueCloudSync(record,"metadata");
     return attachTransientAssets(clone(record));
   }
   function captureTransientAssets(record){
@@ -862,7 +863,7 @@
     record.lastError=normalized.captures.length?null:{code:"missing-captures",message:"No captured frames are available for this course visual."};
     record.diagnostics=Object.assign({},record.diagnostics||{},{capturePlan:normalized.capturePlan,capturePlanSummary:planSummary(normalized.capturePlan,normalized.captures),captureBounds:normalized.captures.map(captureBounds),sourceDimensions:normalized.captures.map(function(c){return {id:c.id,role:c.role||"",quality:c.quality||"",stitchLayer:c.stitchLayer||0,width:c.width,height:c.height,tiles:Array.isArray(c.tiles)?c.tiles.length:0};}),missingCaptures:normalized.captures.length?[]:["course-visual-captures"]});
     recordEvent(record,"course-visual-input-received",{captureCount:normalized.captures.length,objectCount:normalized.objects.length});
-    return putRecord(record);
+    return putRecord(record,{skipCloudSync:true});
   }
   function captureSignature(captures){
     return hashString((captures||[]).map(function(capture){return [capture.id,capture.role||"",capture.quality||"",capture.stitchLayer||0,capture.width,capture.height,capture.boundsSource||"",JSON.stringify(capture.bounds),Array.isArray(capture.tiles)?capture.tiles.length:0].join("|");}).join("\n"));
@@ -1137,7 +1138,8 @@
     var span=boundsSpanM(bounds);
     var pxPerM=(span.width>0&&span.height>0)?((dims.width/span.width)+(dims.height/span.height))/2:(dims.width/180);
     var strokeWidth=clamp(airbrush.widthMeters*pxPerM,12,Math.max(20,Math.min(dims.width,dims.height)*.24));
-    var shapes=[];
+    var softShapes=[];
+    var hardShapes=[];
     objects.forEach(function(object,index){
       var pts=pointsFromGeometry(object&&object.geometry);
       if(!pts.length&&object&&object.position)pts=points([object.position]);
@@ -1146,17 +1148,23 @@
       if(!projectedPts.length)return;
       var polygon=projectedPts.length>=3;
       if(polygon){
-        shapes.push('<path data-green-index="'+index+'" d="M '+projectedPts.map(function(p){return svgNum(p.x)+" "+svgNum(p.y);}).join(" L ")+' Z" fill="white" stroke="white" stroke-width="'+svgNum(strokeWidth*.55)+'" stroke-linecap="round" stroke-linejoin="round"/>');
+        var path='<path data-green-index="'+index+'" d="M '+projectedPts.map(function(p){return svgNum(p.x)+" "+svgNum(p.y);}).join(" L ")+' Z" fill="white"/>';
+        softShapes.push(path);
+        hardShapes.push(path);
       }else if(projectedPts.length>=2){
-        shapes.push('<polyline data-green-index="'+index+'" points="'+projectedPts.map(function(p){return svgNum(p.x)+","+svgNum(p.y);}).join(" ")+'" fill="none" stroke="white" stroke-width="'+svgNum(strokeWidth)+'" stroke-linecap="round" stroke-linejoin="round"/>');
+        var line='<polyline data-green-index="'+index+'" points="'+projectedPts.map(function(p){return svgNum(p.x)+","+svgNum(p.y);}).join(" ")+'" fill="none" stroke="white" stroke-width="'+svgNum(strokeWidth)+'" stroke-linecap="round" stroke-linejoin="round"/>';
+        softShapes.push(line);
+        hardShapes.push(line);
       }else{
-        shapes.push('<circle data-green-index="'+index+'" cx="'+svgNum(projectedPts[0].x)+'" cy="'+svgNum(projectedPts[0].y)+'" r="'+svgNum(strokeWidth*.62)+'" fill="white"/>');
+        var circle='<circle data-green-index="'+index+'" cx="'+svgNum(projectedPts[0].x)+'" cy="'+svgNum(projectedPts[0].y)+'" r="'+svgNum(strokeWidth*.62)+'" fill="white"/>';
+        softShapes.push(circle);
+        hardShapes.push(circle);
       }
     });
-    if(!shapes.length)return {defs:"",layer:"",metadata:{enabled:false,reason:"empty-green-mask"}};
-    var defs='<mask id="cvGreenSurroundAirbrushMask" maskUnits="userSpaceOnUse" x="0" y="0" width="'+svgNum(dims.width)+'" height="'+svgNum(dims.height)+'"><rect width="100%" height="100%" fill="black"/><g filter="url(#cvGreenSurroundAirbrushSoften)">'+shapes.join("")+'</g></mask><filter id="cvGreenSurroundAirbrushSoften" x="-16%" y="-16%" width="132%" height="132%"><feGaussianBlur stdDeviation="'+svgNum(Math.max(2.5,Math.min(13,strokeWidth*.06)))+'"/></filter>';
-    var layer='<g data-role="green-surround-airbrush" data-mode="green-surround-burn-rescue-preserve-luminance" mask="url(#cvGreenSurroundAirbrushMask)" opacity="1"><rect width="100%" height="100%" fill="#37b863" opacity="'+svgNum(airbrush.hueOpacity)+'" style="mix-blend-mode:hue"/><rect width="100%" height="100%" fill="#65c778" opacity="'+svgNum(airbrush.saturationOpacity)+'" style="mix-blend-mode:saturation"/><rect width="100%" height="100%" fill="rgba(73,165,83,.20)" opacity="'+svgNum(airbrush.strength*.3)+'" style="mix-blend-mode:soft-light"/></g>';
-    return {defs:defs,layer:layer,metadata:{enabled:true,mode:"green-surround-burn-rescue-preserve-luminance",maskObjects:objects.length,strength:+airbrush.strength.toFixed(3),widthMeters:+airbrush.widthMeters.toFixed(1),preserves:"relative-luminance-and-mow-lines"}};
+    if(!softShapes.length)return {defs:"",layer:"",metadata:{enabled:false,reason:"empty-green-mask"}};
+    var defs='<clipPath id="cvGreenSurroundAirbrushClip">'+hardShapes.join("")+'</clipPath><mask id="cvGreenSurroundAirbrushMask" maskUnits="userSpaceOnUse" x="0" y="0" width="'+svgNum(dims.width)+'" height="'+svgNum(dims.height)+'"><rect width="100%" height="100%" fill="black"/><g clip-path="url(#cvGreenSurroundAirbrushClip)" filter="url(#cvGreenSurroundAirbrushSoften)">'+softShapes.join("")+'</g></mask><filter id="cvGreenSurroundAirbrushSoften" x="-16%" y="-16%" width="132%" height="132%"><feGaussianBlur stdDeviation="'+svgNum(Math.max(1.2,Math.min(5,strokeWidth*.028)))+'"/></filter>';
+    var layer='<g data-role="green-surround-airbrush" data-mode="green-bounds-burn-rescue-preserve-luminance" clip-path="url(#cvGreenSurroundAirbrushClip)" mask="url(#cvGreenSurroundAirbrushMask)" opacity="1"><rect width="100%" height="100%" fill="#37b863" opacity="'+svgNum(airbrush.hueOpacity)+'" style="mix-blend-mode:hue"/><rect width="100%" height="100%" fill="#65c778" opacity="'+svgNum(airbrush.saturationOpacity)+'" style="mix-blend-mode:saturation"/><rect width="100%" height="100%" fill="rgba(73,165,83,.20)" opacity="'+svgNum(airbrush.strength*.3)+'" style="mix-blend-mode:soft-light"/></g>';
+    return {defs:defs,layer:layer,metadata:{enabled:true,mode:"green-bounds-burn-rescue-preserve-luminance",maskObjects:objects.length,strength:+airbrush.strength.toFixed(3),widthMeters:+airbrush.widthMeters.toFixed(1),bounds:"green-polygon-only",preserves:"relative-luminance-and-mow-lines"}};
   }
   function mowingOpacity(value){
     value=String(value||"Unknown");
@@ -1376,7 +1384,7 @@
     record.courseOverrides=clone(overrides||{});
     record.settingsDirty=true;
     recordEvent(record,"course-visual-settings-saved",{published:false,overrideHash:hashString(record.courseOverrides)});
-    return putRecord(record);
+    return putRecord(record,{skipCloudSync:true});
   }
   function buildCourseVisualPreview(courseId,presetOrId,overrides){
     return Promise.resolve().then(function(){
@@ -1447,7 +1455,7 @@
     record.lastError=null;
     record.versions=(record.versions||[]).concat([{version:version,type:"published",publishedImagePath:record.publishedVisual.path,singleHolePublishedPath:record.singleHolePublishedVisual&&record.singleHolePublishedVisual.path||null,presetId:preview.presetId,presetVersion:preview.presetVersion,overrideHash:preview.overrideHash,createdAt:record.publishedVisual.publishedAt,metadata:{rendererVersion:RENDERER_VERSION,outputFormat:"image/svg+xml",publishedProducts:["course-overview","single-hole"],publishedStages:["terrain-shading","native-visuals"]}}]);
     recordEvent(record,"course-visual-published",{version:version,presetId:preview.presetId,presetVersion:preview.presetVersion,overviewStage:overviewFinal&&overviewFinal.metadata&&overviewFinal.metadata.stage||"",singleHoleStage:singleHoleFinal&&singleHoleFinal.metadata&&singleHoleFinal.metadata.stage||""});
-    return putRecord(record);
+    return putRecord(record,{skipCloudSync:true});
   }
   function revertToPublishedVersion(courseId,version){
     var record=getRecord(courseId);
@@ -1515,18 +1523,53 @@
       error:record.lastError||undefined
     };
   }
-  function queueCloudSync(record,reason){
-    if(!root||typeof root.fetch!=="function"||!record||record.__syncing)return;
-    var actor=safe(function(){
+  function cloudActor(){
+    return safe(function(){
       var api=root.GolfDaddyAccounts||root.ClarityCaddieAccounts;
       var current=api&&typeof api.current==="function"?api.current():null;
-      return {role:current&&current.role||"",email:current&&current.email||"",accountId:current&&current.accountId||""};
-    },{});
+      var body=root.document&&root.document.body;
+      return {
+        role:current&&current.role||current&&current.permission||body&&body.dataset&&body.dataset.gdPermission||"",
+        email:current&&current.email||current&&current.accountEmail||"",
+        accountId:current&&current.accountId||current&&current.account_id||""
+      };
+    },{role:"",email:"",accountId:""});
+  }
+  function queueCloudSync(record,reason){
+    if(!root||typeof root.fetch!=="function"||!record||record.__syncing)return;
+    var actor=cloudActor();
     if(String(actor.role||"").toLowerCase()!=="admin")return;
-    var body={action:"upsert",reason:reason||"local",actor:actor,visual:metadataForCloud(record)};
     setTimeout(function(){
-      safe(function(){root.fetch(API_ENDPOINT,{method:"POST",headers:{"Content-Type":"application/json","Accept":"application/json"},body:JSON.stringify(body)}).catch(function(){});});
+      syncPublishedCourseVisual(record,reason||"metadata",{silent:true}).catch(function(){});
     },20);
+  }
+  function syncPublishedCourseVisual(recordOrCourseId,reason,opts){
+    opts=opts||{};
+    var record=typeof recordOrCourseId==="string"?getRecord(recordOrCourseId):attachTransientAssets(clone(recordOrCourseId||{}));
+    if(!record||!record.courseId)return Promise.reject(Object.assign(new Error("Course visual record is required"),{code:"course-visual-missing"}));
+    if(!root||typeof root.fetch!=="function")return Promise.reject(Object.assign(new Error("Cloud publish endpoint is not available"),{code:"course-visual-cloud-unavailable"}));
+    var actor=safe(function(){
+      return cloudActor();
+    },{role:"",email:"",accountId:""});
+    if(String(actor.role||"").toLowerCase()!=="admin")return Promise.reject(Object.assign(new Error("Admin account is required to publish course visuals to Clarity Cloud"),{code:"course-visual-admin-required"}));
+    if(!record.publishedVisual)return Promise.reject(Object.assign(new Error("Publish a course visual before syncing it to Clarity Cloud"),{code:"course-visual-published-missing"}));
+    var body={action:"upsert",reason:reason||"local",actor:actor,visual:metadataForCloud(record)};
+    record.__syncing=true;
+    return root.fetch(API_ENDPOINT,{method:"POST",headers:{"Content-Type":"application/json","Accept":"application/json"},body:JSON.stringify(body)}).then(function(response){
+      return response.text().then(function(textBody){
+        var data=null;
+        if(textBody){try{data=JSON.parse(textBody);}catch(_error){data={error:textBody};}}
+        if(!response.ok){
+          var message=data&&data.error||("Course visual cloud publish failed with HTTP "+response.status);
+          throw Object.assign(new Error(message),{code:"course-visual-cloud-failed",status:response.status,body:data});
+        }
+        var fresh=getRecord(record.courseId);
+        fresh.diagnostics=Object.assign({},fresh.diagnostics||{},{cloudPublish:{storage:data&&data.storage||"unknown",syncedAt:now(),reason:reason||"publish",playPayloadReady:!!(data&&(data.play_payload||data.playPayload)),publishedImagePath:body.visual&&body.visual.published_image_path||""}});
+        recordEvent(fresh,"course-visual-cloud-published",{storage:data&&data.storage||"unknown",playPayloadReady:!!(data&&(data.play_payload||data.playPayload)),reason:reason||"publish"});
+        putRecord(fresh,{skipCloudSync:true});
+        return data||{};
+      });
+    }).finally(function(){record.__syncing=false;});
   }
   function metadataForCloud(record){
     var assets=[
@@ -1590,7 +1633,7 @@
     if(singlePreviewAsset&&!record.singleHolePreviewVisual)record.singleHolePreviewVisual={path:singlePreviewAsset.path,dataUrl:singlePreviewAsset.dataUrl,version:record.currentVersion||1,presetId:record.presetId,presetVersion:record.presetVersion};
     if(singleTerrainAsset&&!record.singleHoleTerrainView)record.singleHoleTerrainView={path:singleTerrainAsset.path,dataUrl:singleTerrainAsset.dataUrl,version:record.currentVersion||1,presetId:record.presetId,presetVersion:record.presetVersion};
     if(singlePublishedAsset&&!record.singleHolePublishedVisual)record.singleHolePublishedVisual={path:singlePublishedAsset.path,dataUrl:singlePublishedAsset.dataUrl,version:record.publishedVersion||record.currentVersion||1,presetId:record.presetId,presetVersion:record.presetVersion};
-    return putRecord(record);
+    return putRecord(record,{skipCloudSync:true});
   }
   function pullCourseVisual(courseId){
     if(!root||typeof root.fetch!=="function")return Promise.resolve(getRecord(courseId));
@@ -1797,6 +1840,7 @@
     buildCourseVisualPreview:buildCourseVisualPreview,
     saveCourseVisualSettings:saveCourseVisualSettings,
     publishCourseVisual:publishCourseVisual,
+    syncPublishedCourseVisual:syncPublishedCourseVisual,
     revertToPublishedVersion:revertToPublishedVersion,
     resetToPublished:resetToPublished,
     resetToGlobalPreset:resetToGlobalPreset,
