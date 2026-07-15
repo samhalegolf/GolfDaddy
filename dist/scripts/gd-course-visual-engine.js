@@ -7,7 +7,7 @@
 
   var VERSION=1;
   var PRESET_VERSION=4;
-  var RENDERER_VERSION="clarity-course-visual-renderer-v17";
+  var RENDERER_VERSION="clarity-course-visual-renderer-v18";
   var STORE_KEY="gd_course_visual_engine_v1";
   var PRESET_KEY="gd_course_visual_presets_v1";
   var API_ENDPOINT="/api/course-visuals";
@@ -394,7 +394,7 @@
       var value=meta[key];
       if(value==null||typeof value!=="object")out[key]=value;
     });
-    ["outputDimensions","sourceDimensions","viewportFrame","displayTransform","objectProofOverlay","mapCameraCapability","anchorPins","underlay"].forEach(function(key){
+    ["outputDimensions","sourceDimensions","viewportFrame","displayTransform","objectProofOverlay","mapCameraCapability","anchorPins"].forEach(function(key){
       if(meta[key]&&typeof meta[key]==="object")out[key]=clone(meta[key]);
     });
     if(meta.playSurface&&typeof meta.playSurface==="object"){
@@ -1109,7 +1109,7 @@
     var sourceWidth=Math.max(1,Math.round(Number(sourceAsset&&sourceAsset.width||capture.width)||1));
     var sourceHeight=Math.max(1,Math.round(Number(sourceAsset&&sourceAsset.height||capture.height)||1));
     var sourceBounds=sourceAsset&&sourceAsset.bounds||captureBounds(capture);
-    var sourceContent=sourceAsset&&sourceAsset.dataUrl?svgInnerFromDataUrl(sourceAsset.dataUrl):captureContentSvg(capture);
+    var sourceContent=sourceAsset&&sourceAsset.dataUrl?svgInnerFromDataUrl(sourceAsset.dataUrl).replace(/<rect\s+width="100%"\s+height="100%"\s+fill="#10130f"\s*\/>/i,""):captureContentSvg(capture);
     if(!sourceContent)return null;
     var targetAspect=9/16;
     var width=Math.max(720,Math.min(4096,Math.round(sourceWidth)));
@@ -1148,15 +1148,23 @@
     var yPad=clamp(routeLen*.10,Math.max(90,sourceHeight*.035),Math.max(220,sourceHeight*.22));
     minX-=xPad;maxX+=xPad;minY-=yPad;maxY+=yPad;
     var fitW=Math.max(1,maxX-minX),fitH=Math.max(1,maxY-minY);
-    var scale=Math.min(width*.78/fitW,height*.78/fitH);
+    var frameW=width*.82;
+    var frameH=frameW/targetAspect;
+    if(frameH>height*.84){
+      frameH=height*.84;
+      frameW=frameH*targetAspect;
+    }
+    var frameX=(width-frameW)/2;
+    var frameY=(height-frameH)/2;
+    var scale=Math.min(frameW*.84/fitW,frameH*.84/fitH);
     scale=clamp(scale,.05,1.75);
     var teeR=teePx?rotateSvgPoint(teePx,angle):null;
     var greenR=greenPx?rotateSvgPoint(greenPx,angle):null;
-    var tx=width/2-((minX+maxX)/2)*scale;
-    var ty=height/2-((minY+maxY)/2)*scale;
+    var tx=frameX+frameW/2-((minX+maxX)/2)*scale;
+    var ty=frameY+frameH/2-((minY+maxY)/2)*scale;
     if(teeR&&greenR){
-      tx=width/2-((teeR.x+greenR.x)/2)*scale;
-      ty=height*.53-((teeR.y+greenR.y)/2)*scale;
+      tx=frameX+frameW/2-((teeR.x+greenR.x)/2)*scale;
+      ty=frameY+frameH*.53-((teeR.y+greenR.y)/2)*scale;
     }
     var boundsAfter=transformedBounds([{x:minX,y:minY},{x:maxX,y:maxY}],0,scale,tx,ty);
     var marginX=width*.08,marginY=height*.07;
@@ -1167,10 +1175,27 @@
       if(boundsAfter.maxY<height-marginY)ty+=(height-marginY)-boundsAfter.maxY;
     }
     var radius=Math.max(18,Math.min(52,width*.045));
+    var frameRadius=Math.max(14,Math.min(46,frameW*.06));
     var angleDeg=angle*180/Math.PI;
     var title=text(opts.title||"Hole window "+(capture.holeNumber||"?"),80);
     var label='<g transform="translate(14 14)"><rect x="0" y="0" width="'+svgNum(Math.max(230,title.length*8.4))+'" height="31" rx="6" fill="rgba(0,0,0,.58)"/><text x="10" y="21" font-size="14" fill="#fff" font-family="system-ui, sans-serif" font-weight="850">'+escapeXml(title)+'</text></g>';
-    var svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+width+'" height="'+height+'" viewBox="0 0 '+width+" "+height+'" data-renderer="'+escapeXml(RENDERER_VERSION)+'" data-role="'+escapeXml(opts.role||"example-hole")+'" data-framing-model="play-axis-anchor-frame"><defs><clipPath id="cvHoleWindowClip"><rect x="0" y="0" width="'+svgNum(width)+'" height="'+svgNum(height)+'" rx="'+svgNum(radius)+'"/></clipPath><linearGradient id="cvHoleWindowDepth" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="rgba(255,255,255,.08)"/><stop offset=".52" stop-color="rgba(255,255,255,0)"/><stop offset="1" stop-color="rgba(0,0,0,.22)"/></linearGradient></defs><rect width="100%" height="100%" fill="#10130f"/><g clip-path="url(#cvHoleWindowClip)"><g transform="translate('+svgNum(tx)+" "+svgNum(ty)+') scale('+svgNum(scale)+') rotate('+svgNum(angleDeg)+')">'+sourceContent+'</g><rect width="100%" height="100%" fill="url(#cvHoleWindowDepth)"/></g><rect x="0" y="0" width="100%" height="100%" rx="'+svgNum(radius)+'" fill="none" stroke="rgba(255,255,255,.42)" stroke-width="2"/>'+label+'</svg>';
+    function sourcePointList(list){
+      return (Array.isArray(list)?list:[]).map(function(item){return project?project(item):null;}).filter(Boolean);
+    }
+    var routePx=sourcePointList(anchors.route);
+    var greenShapePx=sourcePointList(anchors.greenShape);
+    var proofParts=[];
+    if(greenShapePx.length>=3){
+      proofParts.push('<polygon data-role="play-green-bound" points="'+greenShapePx.map(function(p){return svgNum(p.x)+","+svgNum(p.y);}).join(" ")+'" fill="rgba(72,255,141,.14)" stroke="rgba(98,255,157,.88)" stroke-width="5" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>');
+    }
+    if(routePx.length>=2){
+      proofParts.push('<polyline data-role="play-route-axis" points="'+routePx.map(function(p){return svgNum(p.x)+","+svgNum(p.y);}).join(" ")+'" fill="none" stroke="rgba(255,247,128,.92)" stroke-width="7" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/>');
+    }
+    if(teePx)proofParts.push('<circle data-role="play-tee-anchor" cx="'+svgNum(teePx.x)+'" cy="'+svgNum(teePx.y)+'" r="12" fill="rgba(255,255,255,.9)" stroke="rgba(0,0,0,.72)" stroke-width="3" vector-effect="non-scaling-stroke"/>');
+    if(greenPx)proofParts.push('<circle data-role="play-green-anchor" cx="'+svgNum(greenPx.x)+'" cy="'+svgNum(greenPx.y)+'" r="14" fill="rgba(84,255,144,.9)" stroke="rgba(0,0,0,.76)" stroke-width="3" vector-effect="non-scaling-stroke"/>');
+    var objectOverlay=proofParts.length?'<g data-role="play-object-proof-overlay" data-orientation-source="'+escapeXml(orientationSource)+'">'+proofParts.join("")+'</g>':"";
+    var viewportFrame='<rect data-role="gps-play-frame" x="'+svgNum(frameX)+'" y="'+svgNum(frameY)+'" width="'+svgNum(frameW)+'" height="'+svgNum(frameH)+'" rx="'+svgNum(frameRadius)+'" fill="none" stroke="rgba(255,255,255,.88)" stroke-width="'+svgNum(Math.max(3,width*.004))+'"/><rect data-role="capture-overflow-frame" x="'+svgNum(frameX-frameW*.025)+'" y="'+svgNum(frameY-frameW*.025)+'" width="'+svgNum(frameW+frameW*.05)+'" height="'+svgNum(frameH+frameW*.05)+'" rx="'+svgNum(frameRadius+frameW*.025)+'" fill="none" stroke="rgba(102,255,159,.56)" stroke-width="2" stroke-dasharray="18 15"/>';
+    var svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+width+'" height="'+height+'" viewBox="0 0 '+width+" "+height+'" data-renderer="'+escapeXml(RENDERER_VERSION)+'" data-role="'+escapeXml(opts.role||"example-hole")+'" data-framing-model="gps-play-viewport-over-hole-surface"><defs><clipPath id="cvHoleWindowClip"><rect x="0" y="0" width="'+svgNum(width)+'" height="'+svgNum(height)+'" rx="'+svgNum(radius)+'"/></clipPath><linearGradient id="cvHoleWindowDepth" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="rgba(255,255,255,.08)"/><stop offset=".52" stop-color="rgba(255,255,255,0)"/><stop offset="1" stop-color="rgba(0,0,0,.22)"/></linearGradient></defs><rect width="100%" height="100%" fill="#10130f"/><g clip-path="url(#cvHoleWindowClip)"><g transform="translate('+svgNum(tx)+" "+svgNum(ty)+') scale('+svgNum(scale)+') rotate('+svgNum(angleDeg)+')">'+sourceContent+objectOverlay+'</g><rect width="100%" height="100%" fill="url(#cvHoleWindowDepth)"/>'+viewportFrame+'</g><rect x="0" y="0" width="100%" height="100%" rx="'+svgNum(radius)+'" fill="none" stroke="rgba(255,255,255,.42)" stroke-width="2"/>'+label+'</svg>';
     var sourceIds=sourceAsset&&sourceAsset.sourceCaptureIds||selected.map(function(item){return item.id;}).filter(Boolean);
     var playSurface={
       model:"overcaptured-hole-surface",
@@ -1182,11 +1207,14 @@
       sourceBounds:clone(sourceBounds),
       sourceDimensions:{width:sourceWidth,height:sourceHeight},
       outputDimensions:{width:width,height:height},
+      viewportFrame:{x:+frameX.toFixed(2),y:+frameY.toFixed(2),width:+frameW.toFixed(2),height:+frameH.toFixed(2),aspectRatio:targetAspect},
       orientationSource:orientationSource,
       rotationDeg:+angleDeg.toFixed(3),
-      scale:+scale.toFixed(4)
+      scale:+scale.toFixed(4),
+      objectProofOverlay:{enabled:!!proofParts.length,routePoints:routePx.length,greenShapePoints:greenShapePx.length,tee:!!teePx,green:!!greenPx},
+      overflowVisible:true
     };
-    return {dataUrl:dataUrl("image/svg+xml",svg),width:width,height:height,bounds:sourceBounds,captureId:capture.id,holeNumber:capture.holeNumber||null,sourceCaptureIds:sourceIds,metadata:Object.assign({rendererVersion:RENDERER_VERSION,format:"image/svg+xml",role:opts.role||"example-hole",stage:opts.stage||"hole-window",captureLens:"mobile-hole",lensAspectRatio:targetAspect,sourceDimensions:{width:sourceWidth,height:sourceHeight},outputDimensions:{width:width,height:height},windowShape:"mobile-hole",framingModel:"play-axis-anchor-frame",playSurface:playSurface,orientationSource:orientationSource,rotationDeg:+angleDeg.toFixed(3),scale:+scale.toFixed(4),sourceCaptureCount:sourceIds.length},meta||{})};
+    return {dataUrl:dataUrl("image/svg+xml",svg),width:width,height:height,bounds:sourceBounds,captureId:capture.id,holeNumber:capture.holeNumber||null,sourceCaptureIds:sourceIds,metadata:Object.assign({rendererVersion:RENDERER_VERSION,format:"image/svg+xml",role:opts.role||"example-hole",stage:opts.stage||"hole-window",captureLens:"mobile-hole",lensAspectRatio:targetAspect,sourceDimensions:{width:sourceWidth,height:sourceHeight},outputDimensions:{width:width,height:height},viewportFrame:{x:+frameX.toFixed(2),y:+frameY.toFixed(2),width:+frameW.toFixed(2),height:+frameH.toFixed(2),aspectRatio:targetAspect},windowShape:"mobile-hole-with-overflow",framingModel:"gps-play-viewport-over-hole-surface",playSurface:playSurface,orientationSource:orientationSource,rotationDeg:+angleDeg.toFixed(3),scale:+scale.toFixed(4),objectProofOverlay:{enabled:!!proofParts.length,routePoints:routePx.length,greenShapePoints:greenShapePx.length,tee:!!teePx,green:!!greenPx},overflowVisible:true,sourceCaptureCount:sourceIds.length},meta||{})};
   }
   function exampleHoleSvg(captures,meta){
     var selected=chooseExampleHoleCaptures(captures);
@@ -1360,21 +1388,16 @@
     if(inner)return inner;
     return base?'<image href="'+escapeXml(base)+'" x="0" y="0" width="'+svgNum(width)+'" height="'+svgNum(height)+'" preserveAspectRatio="none"/>':"";
   }
-  function projectedVisualAssetSourceMarkup(asset,targetBounds,targetWidth,targetHeight){
-    if(!asset||!asset.dataUrl||!validBounds(targetBounds))return "";
-    var assetBounds=visualAssetBounds(asset);
-    var assetProjected=projectedBounds(assetBounds);
-    var targetProjected=projectedBounds(targetBounds);
-    if(!assetProjected||!targetProjected)return "";
-    if(!boundsIntersects(assetBounds,targetBounds))return "";
-    var targetSpanX=Math.max(1e-9,targetProjected.right-targetProjected.left);
-    var targetSpanY=Math.max(1e-9,targetProjected.bottom-targetProjected.top);
-    var dims=visualAssetDimensions(asset);
-    var x=(assetProjected.left-targetProjected.left)/targetSpanX*targetWidth;
-    var y=(assetProjected.top-targetProjected.top)/targetSpanY*targetHeight;
-    var w=(assetProjected.right-assetProjected.left)/targetSpanX*targetWidth;
-    var h=(assetProjected.bottom-assetProjected.top)/targetSpanY*targetHeight;
-    return '<g data-role="play-underlay" data-source-role="'+escapeXml(asset.metadata&&asset.metadata.role||"course-overview")+'" transform="translate('+svgNum(x)+" "+svgNum(y)+') scale('+svgNum(w/dims.width)+" "+svgNum(h/dims.height)+')"><image href="'+escapeXml(asset.dataUrl)+'" x="0" y="0" width="'+svgNum(dims.width)+'" height="'+svgNum(dims.height)+'" preserveAspectRatio="none"/></g>';
+  function inheritedSurfaceMetadata(asset){
+    var sourceMeta=asset&&asset.metadata||{};
+    var out={};
+    ["framingModel","captureLens","lensAspectRatio","windowShape","orientationSource","rotationDeg","scale","overflowVisible"].forEach(function(key){
+      if(sourceMeta[key]!=null)out[key]=sourceMeta[key];
+    });
+    ["playSurface","viewportFrame","objectProofOverlay","sourceDimensions"].forEach(function(key){
+      if(sourceMeta[key]&&typeof sourceMeta[key]==="object")out[key]=clone(sourceMeta[key]);
+    });
+    return out;
   }
   function assetPointProjector(bounds,width,height){
     var projected=projectedBounds(bounds);
@@ -1490,7 +1513,7 @@
     var metaOut=Object.assign({},meta);
     delete metaOut.objects;
     delete metaOut.airbrushObjects;
-    return {dataUrl:dataUrl("image/svg+xml",svg),width:dims.width,height:dims.height,bounds:assetBounds,sourceCaptureIds:asset&&asset.sourceCaptureIds||[],metadata:Object.assign({rendererVersion:RENDERER_VERSION,format:"image/svg+xml",role:role,stage:stage,inputRole:asset&&asset.metadata&&asset.metadata.role||"",inputStage:asset&&asset.metadata&&asset.metadata.stage||"",outputDimensions:dims,filter:f,fairwayAirbrush:airbrush.metadata,greenSurroundAirbrush:greenAirbrush.metadata},metaOut)};
+    return {dataUrl:dataUrl("image/svg+xml",svg),width:dims.width,height:dims.height,bounds:assetBounds,sourceCaptureIds:asset&&asset.sourceCaptureIds||[],metadata:Object.assign({},inheritedSurfaceMetadata(asset),{rendererVersion:RENDERER_VERSION,format:"image/svg+xml",role:role,stage:stage,inputRole:asset&&asset.metadata&&asset.metadata.role||"",inputStage:asset&&asset.metadata&&asset.metadata.stage||"",outputDimensions:dims,filter:f,fairwayAirbrush:airbrush.metadata,greenSurroundAirbrush:greenAirbrush.metadata},metaOut)};
   }
   function terrainShadeAsset(asset,terrainCaptures,meta){
     meta=meta||{};
@@ -1535,7 +1558,7 @@
     var stage=text(meta.stage,80)||"terrain-shading";
     var terrainSource=terrain.length?"tile-reference-overlay":"deterministic-shading";
     var svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+dims.width+'" height="'+dims.height+'" viewBox="0 0 '+dims.width+" "+dims.height+'" data-renderer="'+escapeXml(RENDERER_VERSION)+'" data-role="'+escapeXml(role)+'" data-stage="'+escapeXml(stage)+'" data-terrain-strength="'+svgNum(strength)+'"><defs><filter id="terrainTone"><feColorMatrix type="matrix" values=".32 .32 .32 0 0 .30 .30 .30 0 0 .26 .26 .26 0 0 0 0 0 '+svgNum(terrainToneAlpha)+' 0"/><feComponentTransfer><feFuncR type="linear" slope="'+svgNum(terrainToneSlope)+'" intercept="-.03"/><feFuncG type="linear" slope="'+svgNum(terrainToneSlope)+'" intercept="-.03"/><feFuncB type="linear" slope="'+svgNum(terrainToneSlope)+'" intercept="-.03"/></feComponentTransfer></filter><linearGradient id="terrainRelief" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="rgba(255,255,255,'+svgNum(reliefTop)+')"/><stop offset=".42" stop-color="rgba(255,255,255,0)"/><stop offset=".68" stop-color="rgba(20,42,26,'+svgNum(reliefMid)+')"/><stop offset="1" stop-color="rgba(0,0,0,'+svgNum(reliefBottom)+')"/></linearGradient><pattern id="terrainHatch" width="18" height="18" patternUnits="userSpaceOnUse" patternTransform="rotate(-28)"><path d="M0 0 L0 18" stroke="rgba(255,255,255,.10)" stroke-width="1"/></pattern></defs><rect width="100%" height="100%" fill="#10130f"/><g>'+source+'</g><rect width="100%" height="100%" fill="url(#terrainRelief)" opacity="'+svgNum(reliefOpacity)+'"/>'+terrainGroups+'<rect width="100%" height="100%" fill="rgba(44,67,42,'+svgNum(tintOpacity)+')"/><rect width="100%" height="100%" fill="url(#terrainHatch)" opacity="'+svgNum(hatchOpacity)+'"/></svg>';
-    return {dataUrl:dataUrl("image/svg+xml",svg),width:dims.width,height:dims.height,bounds:bounds,sourceCaptureIds:sourceCaptureIds,metadata:Object.assign({rendererVersion:RENDERER_VERSION,format:"image/svg+xml",role:role,stage:stage,terrainSource:terrainSource,terrainStrength:+strength.toFixed(3),inputRole:asset&&asset.metadata&&asset.metadata.role||"",inputStage:asset&&asset.metadata&&asset.metadata.stage||"",outputDimensions:dims},meta)};
+    return {dataUrl:dataUrl("image/svg+xml",svg),width:dims.width,height:dims.height,bounds:bounds,sourceCaptureIds:sourceCaptureIds,metadata:Object.assign({},inheritedSurfaceMetadata(asset),{rendererVersion:RENDERER_VERSION,format:"image/svg+xml",role:role,stage:stage,terrainSource:terrainSource,terrainStrength:+strength.toFixed(3),inputRole:asset&&asset.metadata&&asset.metadata.role||"",inputStage:asset&&asset.metadata&&asset.metadata.stage||"",outputDimensions:dims},meta)};
   }
   function terrainViewSvg(record,terrainCaptures,meta){
     record=record||{};
@@ -1636,13 +1659,12 @@
     if(teePx)proofParts.push('<circle data-role="play-tee-anchor" cx="'+svgNum(teePx.x)+'" cy="'+svgNum(teePx.y)+'" r="12" fill="rgba(255,255,255,.92)" stroke="rgba(0,0,0,.72)" stroke-width="3" vector-effect="non-scaling-stroke"/>');
     if(greenPx)proofParts.push('<circle data-role="play-green-anchor" cx="'+svgNum(greenPx.x)+'" cy="'+svgNum(greenPx.y)+'" r="14" fill="rgba(84,255,144,.9)" stroke="rgba(0,0,0,.76)" stroke-width="3" vector-effect="non-scaling-stroke"/>');
     var objectOverlay=proofParts.length?'<g data-role="play-object-proof-overlay" data-orientation-source="'+escapeXml(orientationSource)+'">'+proofParts.join("")+'</g>':"";
-    var underlayMarkup=projectedVisualAssetSourceMarkup(meta.underlayAsset,sourceBounds,sourceWidth,sourceHeight);
-    var source='<g transform="'+matrix+'">'+underlayMarkup+visualAssetSourceMarkup(asset,sourceWidth,sourceHeight,{transparentBackground:!!underlayMarkup})+objectOverlay+'</g>';
+    var source='<g transform="'+matrix+'">'+visualAssetSourceMarkup(asset,sourceWidth,sourceHeight)+objectOverlay+'</g>';
     var svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+width+'" height="'+height+'" viewBox="0 0 '+width+" "+height+'" data-renderer="'+escapeXml(RENDERER_VERSION)+'" data-role="'+escapeXml(meta.role||"single-hole-play-viewport")+'" data-stage="'+escapeXml(meta.stage||"play-viewport")+'" data-framing-model="gps-play-viewport-over-hole-surface"><defs><mask id="cvPlayViewportDim"><rect width="100%" height="100%" fill="white"/><rect x="'+svgNum(frameX)+'" y="'+svgNum(frameY)+'" width="'+svgNum(frameW)+'" height="'+svgNum(frameH)+'" rx="'+svgNum(radius)+'" fill="black"/></mask><linearGradient id="cvPlayViewportGlass" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="rgba(255,255,255,.14)"/><stop offset=".48" stop-color="rgba(255,255,255,0)"/><stop offset="1" stop-color="rgba(0,0,0,.18)"/></linearGradient></defs><rect width="100%" height="100%" fill="#10130f"/>'+source+'<rect width="100%" height="100%" fill="rgba(0,0,0,.42)" mask="url(#cvPlayViewportDim)"/><rect x="'+svgNum(frameX)+'" y="'+svgNum(frameY)+'" width="'+svgNum(frameW)+'" height="'+svgNum(frameH)+'" rx="'+svgNum(radius)+'" fill="none" stroke="rgba(255,255,255,.92)" stroke-width="'+svgNum(Math.max(4,width*.004))+'"/><rect x="'+svgNum(frameX+Math.max(10,frameW*.018))+'" y="'+svgNum(frameY+Math.max(10,frameW*.018))+'" width="'+svgNum(frameW-Math.max(20,frameW*.036))+'" height="'+svgNum(frameH-Math.max(20,frameW*.036))+'" rx="'+svgNum(Math.max(14,radius*.74))+'" fill="url(#cvPlayViewportGlass)" opacity=".78"/><rect x="'+svgNum(frameX-frameW*.018)+'" y="'+svgNum(frameY-frameW*.018)+'" width="'+svgNum(frameW+frameW*.036)+'" height="'+svgNum(frameH+frameW*.036)+'" rx="'+svgNum(radius+frameW*.018)+'" fill="none" stroke="rgba(102,255,159,.54)" stroke-width="2" stroke-dasharray="18 16"/></svg>';
     var sourceMeta=asset.metadata||{};
     var metaOut=Object.assign({},meta);
     delete metaOut.underlayAsset;
-    return {dataUrl:dataUrl("image/svg+xml",svg),width:width,height:height,bounds:sourceBounds,captureId:asset.captureId,holeNumber:asset.holeNumber||sourceMeta.holeNumber||null,sourceCaptureIds:asset.sourceCaptureIds||[],metadata:Object.assign({},sourceMeta,{rendererVersion:RENDERER_VERSION,format:"image/svg+xml",role:meta.role||"single-hole-play-viewport",stage:meta.stage||"play-viewport",inputRole:sourceMeta.role||"",inputStage:sourceMeta.stage||"",product:meta.product||sourceMeta.product||"single-hole",captureLens:"mobile-hole",lensAspectRatio:targetAspect,windowShape:"mobile-hole-with-overflow",framingModel:"gps-play-viewport-over-hole-surface",orientationSource:orientationSource,rotationDeg:+angleDeg.toFixed(3),objectProofOverlay:{enabled:!!proofParts.length,routePoints:routePx.length,greenShapePoints:greenShapePx.length,tee:!!teePx,green:!!greenPx},underlay:{enabled:!!underlayMarkup,sourceRole:meta.underlayAsset&&meta.underlayAsset.metadata&&meta.underlayAsset.metadata.role||"",sourcePath:meta.underlayAsset&&meta.underlayAsset.path||""},playSurface:Object.assign({},playSurface,{useGpsPlayFraming:true,fallbackUnderlay:"live-gps",fallbackPolicy:"live-gps-only",viewportFrame:{x:+frameX.toFixed(2),y:+frameY.toFixed(2),width:+frameW.toFixed(2),height:+frameH.toFixed(2),aspectRatio:targetAspect},displayTransform:{x:+tx.toFixed(2),y:+ty.toFixed(2),scale:+scale.toFixed(4),rotationDeg:+angleDeg.toFixed(3),matrix:matrix,orientationSource:orientationSource},objectProofOverlay:{enabled:!!proofParts.length,routePoints:routePx.length,greenShapePoints:greenShapePx.length,tee:!!teePx,green:!!greenPx},overflowVisible:true}),sourceDimensions:{width:sourceWidth,height:sourceHeight},outputDimensions:{width:width,height:height},viewportFrame:{x:+frameX.toFixed(2),y:+frameY.toFixed(2),width:+frameW.toFixed(2),height:+frameH.toFixed(2),aspectRatio:targetAspect},overflowVisible:true},metaOut)};
+    return {dataUrl:dataUrl("image/svg+xml",svg),width:width,height:height,bounds:sourceBounds,captureId:asset.captureId,holeNumber:asset.holeNumber||sourceMeta.holeNumber||null,sourceCaptureIds:asset.sourceCaptureIds||[],metadata:Object.assign({},sourceMeta,{rendererVersion:RENDERER_VERSION,format:"image/svg+xml",role:meta.role||"single-hole-play-viewport",stage:meta.stage||"play-viewport",inputRole:sourceMeta.role||"",inputStage:sourceMeta.stage||"",product:meta.product||sourceMeta.product||"single-hole",captureLens:"mobile-hole",lensAspectRatio:targetAspect,windowShape:"mobile-hole-with-overflow",framingModel:"gps-play-viewport-over-hole-surface",orientationSource:orientationSource,rotationDeg:+angleDeg.toFixed(3),objectProofOverlay:{enabled:!!proofParts.length,routePoints:routePx.length,greenShapePoints:greenShapePx.length,tee:!!teePx,green:!!greenPx},playSurface:Object.assign({},playSurface,{useGpsPlayFraming:true,fallbackUnderlay:"live-gps",fallbackPolicy:"live-gps-only",viewportFrame:{x:+frameX.toFixed(2),y:+frameY.toFixed(2),width:+frameW.toFixed(2),height:+frameH.toFixed(2),aspectRatio:targetAspect},displayTransform:{x:+tx.toFixed(2),y:+ty.toFixed(2),scale:+scale.toFixed(4),rotationDeg:+angleDeg.toFixed(3),matrix:matrix,orientationSource:orientationSource},objectProofOverlay:{enabled:!!proofParts.length,routePoints:routePx.length,greenShapePoints:greenShapePx.length,tee:!!teePx,green:!!greenPx},overflowVisible:true}),sourceDimensions:{width:sourceWidth,height:sourceHeight},outputDimensions:{width:width,height:height},viewportFrame:{x:+frameX.toFixed(2),y:+frameY.toFixed(2),width:+frameW.toFixed(2),height:+frameH.toFixed(2),aspectRatio:targetAspect},overflowVisible:true},metaOut)};
   }
   function primaryHoleAsset(list,holeNumber){
     var assets=(Array.isArray(list)?list:[]).filter(function(asset){return asset&&asset.dataUrl;});
@@ -1774,8 +1796,8 @@
         record.holeFrameVisuals=holeFrames.map(function(frame){
           return {path:"course-visuals/"+courseId+"/holes/h"+(frame.holeNumber||"unknown")+"/base/"+version+".svg",dataUrl:frame.dataUrl,version:version,width:frame.width,height:frame.height,bounds:frame.bounds,captureId:frame.captureId,holeNumber:frame.holeNumber,sourceCaptureIds:frame.sourceCaptureIds,metadata:Object.assign({},frame.metadata||{},{visualAssemblyUnderlayPath:"course-visuals/"+courseId+"/basic/"+version+".svg"})};
         });
-        var example=playViewportAsset(primaryHoleAsset(record.holeFrameVisuals),{inputVisualId:record.id,courseId:courseId,captureSignature:signature,capturePlanSummary:capturePlanMeta,role:"example-hole",stage:"play-viewport",product:"single-hole",underlayAsset:record.basicVisual});
-        if(!example)example=exampleHoleSvg(captures||[],{inputVisualId:record.id,courseId:courseId,captureSignature:signature,capturePlanSummary:capturePlanMeta});
+        var example=exampleHoleSvg(captures||[],{inputVisualId:record.id,courseId:courseId,captureSignature:signature,capturePlanSummary:capturePlanMeta});
+        if(!example)example=playViewportAsset(primaryHoleAsset(record.holeFrameVisuals),{inputVisualId:record.id,courseId:courseId,captureSignature:signature,capturePlanSummary:capturePlanMeta,role:"example-hole",stage:"play-viewport",product:"single-hole"});
         if(example){
           record.exampleHoleVisual={path:"course-visuals/"+courseId+"/example/h"+(example.holeNumber||"hole")+"/"+version+".svg",dataUrl:example.dataUrl,width:example.width,height:example.height,bounds:example.bounds,captureId:example.captureId,holeNumber:example.holeNumber,metadata:example.metadata};
         }
@@ -1896,14 +1918,14 @@
         var visibleHoleNumber=record.exampleHoleVisual&&record.exampleHoleVisual.holeNumber;
         var holeViewportSource=primaryHoleAsset(record.holeFramePreviewVisuals,visibleHoleNumber);
         var holeTerrainViewportSource=primaryHoleAsset(record.holeFrameTerrainViews,visibleHoleNumber)||holeViewportSource;
-        if(holeViewportSource){
-          var holeViewport=playViewportAsset(holeViewportSource,{role:"single-hole-native-visuals",stage:"native-visuals",version:version,product:"single-hole",holeNumber:holeViewportSource.holeNumber,presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash,underlayAsset:record.previewVisual});
+        if(!record.singleHolePreviewVisual&&holeViewportSource){
+          var holeViewport=playViewportAsset(holeViewportSource,{role:"single-hole-native-visuals",stage:"native-visuals",version:version,product:"single-hole",holeNumber:holeViewportSource.holeNumber,presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash});
           if(holeViewport){
             record.singleHolePreviewVisual={path:"course-visuals/"+record.courseId+"/single-hole/preview/"+version+".svg",dataUrl:holeViewport.dataUrl,version:version,width:holeViewport.width,height:holeViewport.height,bounds:holeViewport.bounds,captureId:holeViewport.captureId||holeViewportSource.captureId,holeNumber:holeViewport.holeNumber||holeViewportSource.holeNumber,presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash,metadata:holeViewport.metadata};
           }
         }
-        if(holeTerrainViewportSource){
-          var holeTerrainViewport=playViewportAsset(holeTerrainViewportSource,{role:"single-hole-terrain",stage:"terrain-shading",version:version,product:"single-hole",holeNumber:holeTerrainViewportSource.holeNumber,presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash,underlayAsset:record.terrainView||record.previewVisual});
+        if(!record.singleHoleTerrainView&&holeTerrainViewportSource){
+          var holeTerrainViewport=playViewportAsset(holeTerrainViewportSource,{role:"single-hole-terrain",stage:"terrain-shading",version:version,product:"single-hole",holeNumber:holeTerrainViewportSource.holeNumber,presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash});
           if(holeTerrainViewport){
             record.singleHoleTerrainView={path:"course-visuals/"+record.courseId+"/single-hole/terrain/"+version+".svg",dataUrl:holeTerrainViewport.dataUrl,version:version,width:holeTerrainViewport.width,height:holeTerrainViewport.height,bounds:holeTerrainViewport.bounds,sourceCaptureIds:holeTerrainViewport.sourceCaptureIds,captureId:holeTerrainViewport.captureId||holeTerrainViewportSource.captureId,holeNumber:holeTerrainViewport.holeNumber||holeTerrainViewportSource.holeNumber,presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash,metadata:holeTerrainViewport.metadata};
           }
