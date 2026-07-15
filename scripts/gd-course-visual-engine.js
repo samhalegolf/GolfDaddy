@@ -7,7 +7,7 @@
 
   var VERSION=1;
   var PRESET_VERSION=4;
-  var RENDERER_VERSION="clarity-course-visual-renderer-v16";
+  var RENDERER_VERSION="clarity-course-visual-renderer-v17";
   var STORE_KEY="gd_course_visual_engine_v1";
   var PRESET_KEY="gd_course_visual_presets_v1";
   var API_ENDPOINT="/api/course-visuals";
@@ -394,7 +394,7 @@
       var value=meta[key];
       if(value==null||typeof value!=="object")out[key]=value;
     });
-    ["outputDimensions","sourceDimensions","viewportFrame","displayTransform","objectProofOverlay","mapCameraCapability","anchorPins"].forEach(function(key){
+    ["outputDimensions","sourceDimensions","viewportFrame","displayTransform","objectProofOverlay","mapCameraCapability","anchorPins","underlay"].forEach(function(key){
       if(meta[key]&&typeof meta[key]==="object")out[key]=clone(meta[key]);
     });
     if(meta.playSurface&&typeof meta.playSurface==="object"){
@@ -1350,11 +1350,31 @@
   function visualAssetBounds(asset,fallback){
     return asset&&asset.bounds||asset&&asset.metadata&&asset.metadata.bounds||fallback||null;
   }
-  function visualAssetSourceMarkup(asset,width,height){
+  function visualAssetSourceMarkup(asset,width,height,opts){
+    opts=opts||{};
     var base=asset&&asset.dataUrl||"";
     var inner=svgInnerFromDataUrl(base);
+    if(inner&&opts.transparentBackground){
+      inner=inner.replace(/<rect\s+width="100%"\s+height="100%"\s+fill="#10130f"\s*\/>/i,"");
+    }
     if(inner)return inner;
     return base?'<image href="'+escapeXml(base)+'" x="0" y="0" width="'+svgNum(width)+'" height="'+svgNum(height)+'" preserveAspectRatio="none"/>':"";
+  }
+  function projectedVisualAssetSourceMarkup(asset,targetBounds,targetWidth,targetHeight){
+    if(!asset||!asset.dataUrl||!validBounds(targetBounds))return "";
+    var assetBounds=visualAssetBounds(asset);
+    var assetProjected=projectedBounds(assetBounds);
+    var targetProjected=projectedBounds(targetBounds);
+    if(!assetProjected||!targetProjected)return "";
+    if(!boundsIntersects(assetBounds,targetBounds))return "";
+    var targetSpanX=Math.max(1e-9,targetProjected.right-targetProjected.left);
+    var targetSpanY=Math.max(1e-9,targetProjected.bottom-targetProjected.top);
+    var dims=visualAssetDimensions(asset);
+    var x=(assetProjected.left-targetProjected.left)/targetSpanX*targetWidth;
+    var y=(assetProjected.top-targetProjected.top)/targetSpanY*targetHeight;
+    var w=(assetProjected.right-assetProjected.left)/targetSpanX*targetWidth;
+    var h=(assetProjected.bottom-assetProjected.top)/targetSpanY*targetHeight;
+    return '<g data-role="play-underlay" data-source-role="'+escapeXml(asset.metadata&&asset.metadata.role||"course-overview")+'" transform="translate('+svgNum(x)+" "+svgNum(y)+') scale('+svgNum(w/dims.width)+" "+svgNum(h/dims.height)+')"><image href="'+escapeXml(asset.dataUrl)+'" x="0" y="0" width="'+svgNum(dims.width)+'" height="'+svgNum(dims.height)+'" preserveAspectRatio="none"/></g>';
   }
   function assetPointProjector(bounds,width,height){
     var projected=projectedBounds(bounds);
@@ -1616,10 +1636,13 @@
     if(teePx)proofParts.push('<circle data-role="play-tee-anchor" cx="'+svgNum(teePx.x)+'" cy="'+svgNum(teePx.y)+'" r="12" fill="rgba(255,255,255,.92)" stroke="rgba(0,0,0,.72)" stroke-width="3" vector-effect="non-scaling-stroke"/>');
     if(greenPx)proofParts.push('<circle data-role="play-green-anchor" cx="'+svgNum(greenPx.x)+'" cy="'+svgNum(greenPx.y)+'" r="14" fill="rgba(84,255,144,.9)" stroke="rgba(0,0,0,.76)" stroke-width="3" vector-effect="non-scaling-stroke"/>');
     var objectOverlay=proofParts.length?'<g data-role="play-object-proof-overlay" data-orientation-source="'+escapeXml(orientationSource)+'">'+proofParts.join("")+'</g>':"";
-    var source='<g transform="'+matrix+'">'+visualAssetSourceMarkup(asset,sourceWidth,sourceHeight)+objectOverlay+'</g>';
+    var underlayMarkup=projectedVisualAssetSourceMarkup(meta.underlayAsset,sourceBounds,sourceWidth,sourceHeight);
+    var source='<g transform="'+matrix+'">'+underlayMarkup+visualAssetSourceMarkup(asset,sourceWidth,sourceHeight,{transparentBackground:!!underlayMarkup})+objectOverlay+'</g>';
     var svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+width+'" height="'+height+'" viewBox="0 0 '+width+" "+height+'" data-renderer="'+escapeXml(RENDERER_VERSION)+'" data-role="'+escapeXml(meta.role||"single-hole-play-viewport")+'" data-stage="'+escapeXml(meta.stage||"play-viewport")+'" data-framing-model="gps-play-viewport-over-hole-surface"><defs><mask id="cvPlayViewportDim"><rect width="100%" height="100%" fill="white"/><rect x="'+svgNum(frameX)+'" y="'+svgNum(frameY)+'" width="'+svgNum(frameW)+'" height="'+svgNum(frameH)+'" rx="'+svgNum(radius)+'" fill="black"/></mask><linearGradient id="cvPlayViewportGlass" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="rgba(255,255,255,.14)"/><stop offset=".48" stop-color="rgba(255,255,255,0)"/><stop offset="1" stop-color="rgba(0,0,0,.18)"/></linearGradient></defs><rect width="100%" height="100%" fill="#10130f"/>'+source+'<rect width="100%" height="100%" fill="rgba(0,0,0,.42)" mask="url(#cvPlayViewportDim)"/><rect x="'+svgNum(frameX)+'" y="'+svgNum(frameY)+'" width="'+svgNum(frameW)+'" height="'+svgNum(frameH)+'" rx="'+svgNum(radius)+'" fill="none" stroke="rgba(255,255,255,.92)" stroke-width="'+svgNum(Math.max(4,width*.004))+'"/><rect x="'+svgNum(frameX+Math.max(10,frameW*.018))+'" y="'+svgNum(frameY+Math.max(10,frameW*.018))+'" width="'+svgNum(frameW-Math.max(20,frameW*.036))+'" height="'+svgNum(frameH-Math.max(20,frameW*.036))+'" rx="'+svgNum(Math.max(14,radius*.74))+'" fill="url(#cvPlayViewportGlass)" opacity=".78"/><rect x="'+svgNum(frameX-frameW*.018)+'" y="'+svgNum(frameY-frameW*.018)+'" width="'+svgNum(frameW+frameW*.036)+'" height="'+svgNum(frameH+frameW*.036)+'" rx="'+svgNum(radius+frameW*.018)+'" fill="none" stroke="rgba(102,255,159,.54)" stroke-width="2" stroke-dasharray="18 16"/></svg>';
     var sourceMeta=asset.metadata||{};
-    return {dataUrl:dataUrl("image/svg+xml",svg),width:width,height:height,bounds:sourceBounds,captureId:asset.captureId,holeNumber:asset.holeNumber||sourceMeta.holeNumber||null,sourceCaptureIds:asset.sourceCaptureIds||[],metadata:Object.assign({},sourceMeta,{rendererVersion:RENDERER_VERSION,format:"image/svg+xml",role:meta.role||"single-hole-play-viewport",stage:meta.stage||"play-viewport",inputRole:sourceMeta.role||"",inputStage:sourceMeta.stage||"",product:meta.product||sourceMeta.product||"single-hole",captureLens:"mobile-hole",lensAspectRatio:targetAspect,windowShape:"mobile-hole-with-overflow",framingModel:"gps-play-viewport-over-hole-surface",orientationSource:orientationSource,rotationDeg:+angleDeg.toFixed(3),objectProofOverlay:{enabled:!!proofParts.length,routePoints:routePx.length,greenShapePoints:greenShapePx.length,tee:!!teePx,green:!!greenPx},playSurface:Object.assign({},playSurface,{useGpsPlayFraming:true,fallbackUnderlay:"live-gps",fallbackPolicy:"live-gps-only",viewportFrame:{x:+frameX.toFixed(2),y:+frameY.toFixed(2),width:+frameW.toFixed(2),height:+frameH.toFixed(2),aspectRatio:targetAspect},displayTransform:{x:+tx.toFixed(2),y:+ty.toFixed(2),scale:+scale.toFixed(4),rotationDeg:+angleDeg.toFixed(3),matrix:matrix,orientationSource:orientationSource},objectProofOverlay:{enabled:!!proofParts.length,routePoints:routePx.length,greenShapePoints:greenShapePx.length,tee:!!teePx,green:!!greenPx},overflowVisible:true}),sourceDimensions:{width:sourceWidth,height:sourceHeight},outputDimensions:{width:width,height:height},viewportFrame:{x:+frameX.toFixed(2),y:+frameY.toFixed(2),width:+frameW.toFixed(2),height:+frameH.toFixed(2),aspectRatio:targetAspect},overflowVisible:true},meta)};
+    var metaOut=Object.assign({},meta);
+    delete metaOut.underlayAsset;
+    return {dataUrl:dataUrl("image/svg+xml",svg),width:width,height:height,bounds:sourceBounds,captureId:asset.captureId,holeNumber:asset.holeNumber||sourceMeta.holeNumber||null,sourceCaptureIds:asset.sourceCaptureIds||[],metadata:Object.assign({},sourceMeta,{rendererVersion:RENDERER_VERSION,format:"image/svg+xml",role:meta.role||"single-hole-play-viewport",stage:meta.stage||"play-viewport",inputRole:sourceMeta.role||"",inputStage:sourceMeta.stage||"",product:meta.product||sourceMeta.product||"single-hole",captureLens:"mobile-hole",lensAspectRatio:targetAspect,windowShape:"mobile-hole-with-overflow",framingModel:"gps-play-viewport-over-hole-surface",orientationSource:orientationSource,rotationDeg:+angleDeg.toFixed(3),objectProofOverlay:{enabled:!!proofParts.length,routePoints:routePx.length,greenShapePoints:greenShapePx.length,tee:!!teePx,green:!!greenPx},underlay:{enabled:!!underlayMarkup,sourceRole:meta.underlayAsset&&meta.underlayAsset.metadata&&meta.underlayAsset.metadata.role||"",sourcePath:meta.underlayAsset&&meta.underlayAsset.path||""},playSurface:Object.assign({},playSurface,{useGpsPlayFraming:true,fallbackUnderlay:"live-gps",fallbackPolicy:"live-gps-only",viewportFrame:{x:+frameX.toFixed(2),y:+frameY.toFixed(2),width:+frameW.toFixed(2),height:+frameH.toFixed(2),aspectRatio:targetAspect},displayTransform:{x:+tx.toFixed(2),y:+ty.toFixed(2),scale:+scale.toFixed(4),rotationDeg:+angleDeg.toFixed(3),matrix:matrix,orientationSource:orientationSource},objectProofOverlay:{enabled:!!proofParts.length,routePoints:routePx.length,greenShapePoints:greenShapePx.length,tee:!!teePx,green:!!greenPx},overflowVisible:true}),sourceDimensions:{width:sourceWidth,height:sourceHeight},outputDimensions:{width:width,height:height},viewportFrame:{x:+frameX.toFixed(2),y:+frameY.toFixed(2),width:+frameW.toFixed(2),height:+frameH.toFixed(2),aspectRatio:targetAspect},overflowVisible:true},metaOut)};
   }
   function primaryHoleAsset(list,holeNumber){
     var assets=(Array.isArray(list)?list:[]).filter(function(asset){return asset&&asset.dataUrl;});
@@ -1751,7 +1774,7 @@
         record.holeFrameVisuals=holeFrames.map(function(frame){
           return {path:"course-visuals/"+courseId+"/holes/h"+(frame.holeNumber||"unknown")+"/base/"+version+".svg",dataUrl:frame.dataUrl,version:version,width:frame.width,height:frame.height,bounds:frame.bounds,captureId:frame.captureId,holeNumber:frame.holeNumber,sourceCaptureIds:frame.sourceCaptureIds,metadata:Object.assign({},frame.metadata||{},{visualAssemblyUnderlayPath:"course-visuals/"+courseId+"/basic/"+version+".svg"})};
         });
-        var example=playViewportAsset(primaryHoleAsset(record.holeFrameVisuals),{inputVisualId:record.id,courseId:courseId,captureSignature:signature,capturePlanSummary:capturePlanMeta,role:"example-hole",stage:"play-viewport",product:"single-hole"});
+        var example=playViewportAsset(primaryHoleAsset(record.holeFrameVisuals),{inputVisualId:record.id,courseId:courseId,captureSignature:signature,capturePlanSummary:capturePlanMeta,role:"example-hole",stage:"play-viewport",product:"single-hole",underlayAsset:record.basicVisual});
         if(!example)example=exampleHoleSvg(captures||[],{inputVisualId:record.id,courseId:courseId,captureSignature:signature,capturePlanSummary:capturePlanMeta});
         if(example){
           record.exampleHoleVisual={path:"course-visuals/"+courseId+"/example/h"+(example.holeNumber||"hole")+"/"+version+".svg",dataUrl:example.dataUrl,width:example.width,height:example.height,bounds:example.bounds,captureId:example.captureId,holeNumber:example.holeNumber,metadata:example.metadata};
@@ -1874,13 +1897,13 @@
         var holeViewportSource=primaryHoleAsset(record.holeFramePreviewVisuals,visibleHoleNumber);
         var holeTerrainViewportSource=primaryHoleAsset(record.holeFrameTerrainViews,visibleHoleNumber)||holeViewportSource;
         if(holeViewportSource){
-          var holeViewport=playViewportAsset(holeViewportSource,{role:"single-hole-native-visuals",stage:"native-visuals",version:version,product:"single-hole",holeNumber:holeViewportSource.holeNumber,presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash});
+          var holeViewport=playViewportAsset(holeViewportSource,{role:"single-hole-native-visuals",stage:"native-visuals",version:version,product:"single-hole",holeNumber:holeViewportSource.holeNumber,presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash,underlayAsset:record.previewVisual});
           if(holeViewport){
             record.singleHolePreviewVisual={path:"course-visuals/"+record.courseId+"/single-hole/preview/"+version+".svg",dataUrl:holeViewport.dataUrl,version:version,width:holeViewport.width,height:holeViewport.height,bounds:holeViewport.bounds,captureId:holeViewport.captureId||holeViewportSource.captureId,holeNumber:holeViewport.holeNumber||holeViewportSource.holeNumber,presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash,metadata:holeViewport.metadata};
           }
         }
         if(holeTerrainViewportSource){
-          var holeTerrainViewport=playViewportAsset(holeTerrainViewportSource,{role:"single-hole-terrain",stage:"terrain-shading",version:version,product:"single-hole",holeNumber:holeTerrainViewportSource.holeNumber,presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash});
+          var holeTerrainViewport=playViewportAsset(holeTerrainViewportSource,{role:"single-hole-terrain",stage:"terrain-shading",version:version,product:"single-hole",holeNumber:holeTerrainViewportSource.holeNumber,presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash,underlayAsset:record.terrainView||record.previewVisual});
           if(holeTerrainViewport){
             record.singleHoleTerrainView={path:"course-visuals/"+record.courseId+"/single-hole/terrain/"+version+".svg",dataUrl:holeTerrainViewport.dataUrl,version:version,width:holeTerrainViewport.width,height:holeTerrainViewport.height,bounds:holeTerrainViewport.bounds,sourceCaptureIds:holeTerrainViewport.sourceCaptureIds,captureId:holeTerrainViewport.captureId||holeTerrainViewportSource.captureId,holeNumber:holeTerrainViewport.holeNumber||holeTerrainViewportSource.holeNumber,presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash,metadata:holeTerrainViewport.metadata};
           }
