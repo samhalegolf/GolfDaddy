@@ -7,7 +7,7 @@
 
   var VERSION=1;
   var PRESET_VERSION=4;
-  var RENDERER_VERSION="clarity-course-visual-renderer-v25";
+  var RENDERER_VERSION="clarity-course-visual-renderer-v26";
   var STORE_KEY="gd_course_visual_engine_v1";
   var PRESET_KEY="gd_course_visual_presets_v1";
   var API_ENDPOINT="/api/course-visuals";
@@ -1910,25 +1910,55 @@
     if(!asset||!asset.dataUrl)return null;
     var sourceWidth=Math.max(1,Math.round(Number(asset.width)||1));
     var sourceHeight=Math.max(1,Math.round(Number(asset.height)||1));
-    var width=Math.max(720,Math.min(4096,Math.round(sourceWidth*.92)));
-    var height=Math.max(520,Math.round(sourceHeight*.72));
     var captureTilt=finite(meta.captureTiltDeg);
     if(captureTilt==null)captureTilt=10;
     var playTilt=finite(meta.playTiltDeg);
     if(playTilt==null)playTilt=16;
-    var topY=Math.round(height*.10);
-    var bottomY=Math.round(height*.90);
-    var topInset=Math.round(width*(.18+Math.min(24,Math.max(0,captureTilt))*.004));
-    var bottomInset=Math.round(width*.045);
-    var imgX=bottomInset;
-    var imgY=topY;
-    var imgW=width-bottomInset*2;
-    var imgH=bottomY-topY;
     var image=visualAssetSourceMarkup(asset,sourceWidth,sourceHeight);
     var cameraModel="faux-3d-svg-perspective";
-    var svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+width+'" height="'+height+'" viewBox="0 0 '+width+" "+height+'" data-renderer="'+escapeXml(RENDERER_VERSION)+'" data-role="3d-view-beta" data-camera-model="'+escapeXml(cameraModel)+'"><defs><clipPath id="tiltClip"><polygon points="'+topInset+','+topY+' '+(width-topInset)+','+topY+' '+(width-bottomInset)+','+bottomY+' '+bottomInset+','+bottomY+'"/></clipPath><linearGradient id="depthShade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="rgba(255,255,255,.18)"/><stop offset=".50" stop-color="rgba(255,255,255,0)"/><stop offset="1" stop-color="rgba(0,0,0,.34)"/></linearGradient><linearGradient id="sideWall" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="rgba(0,0,0,.45)"/><stop offset="1" stop-color="rgba(0,0,0,.10)"/></linearGradient></defs><rect width="100%" height="100%" fill="#10130f"/><polygon points="'+topInset+','+topY+' '+(width-topInset)+','+topY+' '+(width-bottomInset)+','+bottomY+' '+bottomInset+','+bottomY+'" fill="#182016" stroke="rgba(255,255,255,.30)" stroke-width="2"/><polygon points="'+topInset+','+topY+' '+bottomInset+','+bottomY+' 0,'+height+' 0,'+(bottomY+20)+'" fill="url(#sideWall)" opacity=".74"/><polygon points="'+(width-topInset)+','+topY+' '+(width-bottomInset)+','+bottomY+' '+width+','+height+' '+width+','+(bottomY+20)+'" fill="rgba(255,255,255,.06)" opacity=".78"/><g clip-path="url(#tiltClip)"><g transform="translate('+imgX+" "+imgY+') scale('+svgNum(imgW/sourceWidth)+" "+svgNum(imgH/sourceHeight)+')">'+image+'</g><rect x="'+imgX+'" y="'+imgY+'" width="'+imgW+'" height="'+imgH+'" fill="url(#depthShade)"/></g></svg>';
+    var rendered=faux3dSurfaceSvg(image,sourceWidth,sourceHeight,{cameraModel:cameraModel,captureTiltDeg:captureTilt,playTiltDeg:playTilt,labelText:"3D view beta H"+(asset.holeNumber||asset.metadata&&asset.metadata.holeNumber||"?")+" · faux tilt",footerText:"Full play surface preserved; fake perspective is applied after the hole frame"});
     var sourceMeta=asset.metadata||{};
-    return {dataUrl:dataUrl("image/svg+xml",svg),width:width,height:height,bounds:asset.bounds,sourceCaptureIds:asset.sourceCaptureIds||[],metadata:Object.assign({rendererVersion:RENDERER_VERSION,format:"image/svg+xml",role:"3d-view-beta",stage:"3d-view-beta",holeNumber:asset.holeNumber||sourceMeta.holeNumber||null,cameraModel:cameraModel,captureTiltDeg:captureTilt,playTiltDeg:playTilt,nativePitchAvailable:false,mapCameraCapability:{provider:"leaflet",library:"leaflet",nativePitchAvailable:false,nativeBearingAvailable:false,pitchStrategy:"faux-tilt-svg",reason:"plain-leaflet-no-native-pitch"},cameraFallback:"leaflet-flat-capture-faux-tilt-stage",inputRole:sourceMeta.role||"",inputStage:sourceMeta.stage||"",sourceVisualPath:asset.path||"",outputDimensions:{width:width,height:height}},meta)};
+    return {dataUrl:dataUrl("image/svg+xml",rendered.svg),width:rendered.width,height:rendered.height,bounds:asset.bounds,sourceCaptureIds:asset.sourceCaptureIds||[],metadata:Object.assign({},inheritedSurfaceMetadata(asset),{rendererVersion:RENDERER_VERSION,format:"image/svg+xml",role:"3d-view-beta",stage:"3d-view-beta",holeNumber:asset.holeNumber||sourceMeta.holeNumber||null,cameraModel:cameraModel,captureTiltDeg:captureTilt,playTiltDeg:playTilt,nativePitchAvailable:false,mapCameraCapability:{provider:"leaflet",library:"leaflet",nativePitchAvailable:false,nativeBearingAvailable:false,pitchStrategy:"faux-tilt-svg",reason:"plain-leaflet-no-native-pitch"},cameraFallback:"leaflet-flat-capture-faux-tilt-stage",inputRole:sourceMeta.role||"",inputStage:sourceMeta.stage||"",sourceVisualPath:asset.path||"",sourceFraming:"preserve-full-play-surface",surfaceModel:"framed-play-surface-faux-3d",faux3dSurface:rendered.surface,outputDimensions:{width:rendered.width,height:rendered.height}},meta)};
+  }
+  function faux3dSurfaceSvg(content,sourceWidth,sourceHeight,opts){
+    opts=opts||{};
+    sourceWidth=Math.max(1,Math.round(Number(sourceWidth)||1));
+    sourceHeight=Math.max(1,Math.round(Number(sourceHeight)||1));
+    var width=Math.max(720,Math.min(4096,Math.round(sourceWidth*.92)));
+    var height=Math.max(680,Math.min(6144,Math.round(sourceHeight*.78)));
+    var sourceAspect=sourceWidth/sourceHeight;
+    var maxPlaneW=width*.72;
+    var maxPlaneH=height*.80;
+    var planeW=maxPlaneW;
+    var planeH=planeW/sourceAspect;
+    if(planeH>maxPlaneH){
+      planeH=maxPlaneH;
+      planeW=planeH*sourceAspect;
+    }
+    planeW=Math.max(320,Math.round(planeW));
+    planeH=Math.max(420,Math.round(planeH));
+    var planeX=Math.round((width-planeW)/2);
+    var planeY=Math.round((height-planeH)/2);
+    var captureTilt=Math.min(28,Math.max(0,finite(opts.captureTiltDeg)||0));
+    var playTilt=Math.min(32,Math.max(0,finite(opts.playTiltDeg)||0));
+    var skew=-Math.max(2,Math.min(8,captureTilt*.26+playTilt*.08));
+    var compress=1-Math.min(.18,playTilt*.006);
+    var cx=planeX+planeW/2;
+    var cy=planeY+planeH/2;
+    var drop=Math.max(54,Math.round(height*(.055+playTilt*.0018)));
+    var side=Math.max(36,Math.round(width*(.035+captureTilt*.0009)));
+    var deckTopY=Math.max(0,planeY-drop*.38);
+    var deckBottomY=Math.min(height,planeY+planeH+drop);
+    var labelText=text(opts.labelText||"",90);
+    var footerText=text(opts.footerText||"",140);
+    var cameraModel=opts.cameraModel||"faux-3d-svg-perspective";
+    var label=labelText?'<g transform="translate(14 14)"><rect x="0" y="0" width="'+svgNum(Math.max(370,labelText.length*7.6))+'" height="31" rx="7" fill="rgba(0,0,0,.64)"/><text x="10" y="21" font-size="14" fill="#fff" font-family="system-ui, sans-serif" font-weight="900">'+escapeXml(labelText)+'</text></g>':"";
+    var footer=footerText?'<text x="16" y="'+svgNum(height-18)+'" font-size="12" fill="rgba(255,255,255,.72)" font-family="system-ui, sans-serif" font-weight="850">'+escapeXml(footerText)+'</text>':"";
+    var deck='<polygon data-role="faux-3d-deck" points="'+svgNum(planeX+side)+','+svgNum(deckTopY)+' '+svgNum(planeX+planeW-side)+','+svgNum(deckTopY)+' '+svgNum(planeX+planeW+side)+','+svgNum(deckBottomY)+' '+svgNum(planeX-side)+','+svgNum(deckBottomY)+'" fill="#162016" stroke="rgba(255,255,255,.26)" stroke-width="2"/>';
+    var shadow='<ellipse data-role="faux-3d-shadow" cx="'+svgNum(cx)+'" cy="'+svgNum(deckBottomY-drop*.18)+'" rx="'+svgNum(planeW*.54)+'" ry="'+svgNum(Math.max(26,drop*.55))+'" fill="rgba(0,0,0,.45)"/>';
+    var transform='translate('+svgNum(cx)+" "+svgNum(cy)+') skewX('+svgNum(skew)+') scale(1 '+svgNum(compress)+') translate('+svgNum(-cx)+" "+svgNum(-cy)+')';
+    var svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+width+'" height="'+height+'" viewBox="0 0 '+width+" "+height+'" data-renderer="'+escapeXml(RENDERER_VERSION)+'" data-role="3d-view-beta" data-camera-model="'+escapeXml(cameraModel)+'" data-source-framing="preserve-full-play-surface"><defs><linearGradient id="depthShade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="rgba(255,255,255,.18)"/><stop offset=".54" stop-color="rgba(255,255,255,0)"/><stop offset="1" stop-color="rgba(0,0,0,.28)"/></linearGradient><linearGradient id="stageFade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#182018"/><stop offset="1" stop-color="#0c0f0c"/></linearGradient></defs><rect width="100%" height="100%" fill="#10130f"/>'+shadow+deck+'<g data-role="faux-3d-source-plane" data-source-framing="preserve-full-play-surface" transform="'+transform+'"><rect x="'+svgNum(planeX-8)+'" y="'+svgNum(planeY-8)+'" width="'+svgNum(planeW+16)+'" height="'+svgNum(planeH+16)+'" rx="14" fill="rgba(0,0,0,.48)" stroke="rgba(255,255,255,.32)" stroke-width="2"/><svg x="'+svgNum(planeX)+'" y="'+svgNum(planeY)+'" width="'+svgNum(planeW)+'" height="'+svgNum(planeH)+'" viewBox="0 0 '+sourceWidth+" "+sourceHeight+'" preserveAspectRatio="xMidYMid meet" overflow="hidden">'+content+'</svg><rect x="'+svgNum(planeX)+'" y="'+svgNum(planeY)+'" width="'+svgNum(planeW)+'" height="'+svgNum(planeH)+'" fill="url(#depthShade)" opacity=".72"/><rect x="'+svgNum(planeX)+'" y="'+svgNum(planeY)+'" width="'+svgNum(planeW)+'" height="'+svgNum(planeH)+'" fill="none" stroke="rgba(111,255,166,.42)" stroke-width="3"/></g><rect width="100%" height="100%" fill="url(#stageFade)" opacity=".13"/>'+label+footer+'</svg>';
+    return {svg:svg,width:width,height:height,surface:{x:+planeX.toFixed(2),y:+planeY.toFixed(2),width:+planeW.toFixed(2),height:+planeH.toFixed(2),sourceWidth:sourceWidth,sourceHeight:sourceHeight,sourceFraming:"preserve-full-play-surface",skewDeg:+skew.toFixed(3),compressY:+compress.toFixed(3),captureTiltDeg:captureTilt,playTiltDeg:playTilt}};
   }
   function beta3dViewSvg(captures,meta){
     var valid=(Array.isArray(captures)?captures:[]).filter(renderableCapture).sort(function(a,b){
@@ -1946,28 +1976,18 @@
     }
     var sourceWidth=Math.max(1,Math.round(Number(sourceAsset&&sourceAsset.width||capture.width)||1));
     var sourceHeight=Math.max(1,Math.round(Number(sourceAsset&&sourceAsset.height||capture.height)||1));
-    var width=Math.max(720,Math.round(sourceWidth*.92));
-    var height=Math.max(520,Math.round(sourceHeight*.72));
     var captureTilt=finite(capture.captureTiltDeg);
     if(captureTilt==null)captureTilt=8;
     var playTilt=finite(capture.playTiltDeg);
     if(playTilt==null)playTilt=14;
-    var topY=Math.round(height*.11);
-    var bottomY=Math.round(height*.90);
-    var topInset=Math.round(width*(.18+Math.min(20,Math.max(0,captureTilt))*.0035));
-    var bottomInset=Math.round(width*.045);
-    var imgX=bottomInset;
-    var imgY=topY;
-    var imgW=width-bottomInset*2;
-    var imgH=bottomY-topY;
     var content=sourceAsset?visualAssetSourceMarkup(sourceAsset,sourceWidth,sourceHeight):captureContentSvg(capture);
     var capability=clone(capture.mapCameraCapability||null)||{};
     var nativePitch=valid.some(function(item){return item&&item.nativePitchAvailable===true||item&&item.mapCameraCapability&&item.mapCameraCapability.nativePitchAvailable===true;});
     var cameraModel=nativePitch?"native-pitch-capture":"faux-3d-svg-perspective";
     var labelText="3D view beta H"+(capture.holeNumber||"?")+" · "+(nativePitch?"native pitch":"faux tilt")+" "+captureTilt+" · play "+playTilt;
-    var svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+width+'" height="'+height+'" viewBox="0 0 '+width+" "+height+'" data-renderer="'+escapeXml(RENDERER_VERSION)+'" data-role="3d-view-beta" data-camera-model="'+escapeXml(cameraModel)+'"><defs><clipPath id="tiltClip"><polygon points="'+topInset+','+topY+' '+(width-topInset)+','+topY+' '+(width-bottomInset)+','+bottomY+' '+bottomInset+','+bottomY+'"/></clipPath><linearGradient id="depthShade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="rgba(255,255,255,.18)"/><stop offset=".50" stop-color="rgba(255,255,255,0)"/><stop offset="1" stop-color="rgba(0,0,0,.32)"/></linearGradient><linearGradient id="sideWall" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="rgba(0,0,0,.42)"/><stop offset="1" stop-color="rgba(0,0,0,.08)"/></linearGradient></defs><rect width="100%" height="100%" fill="#10130f"/><polygon points="'+topInset+','+topY+' '+(width-topInset)+','+topY+' '+(width-bottomInset)+','+bottomY+' '+bottomInset+','+bottomY+'" fill="#182016" stroke="rgba(255,255,255,.30)" stroke-width="2"/><polygon points="'+topInset+','+topY+' '+bottomInset+','+bottomY+' 0,'+height+' 0,'+(bottomY+20)+'" fill="url(#sideWall)" opacity=".72"/><polygon points="'+(width-topInset)+','+topY+' '+(width-bottomInset)+','+bottomY+' '+width+','+height+' '+width+','+(bottomY+20)+'" fill="rgba(255,255,255,.055)" opacity=".78"/><g clip-path="url(#tiltClip)"><g transform="translate('+imgX+" "+imgY+') scale('+svgNum(imgW/sourceWidth)+" "+svgNum(imgH/sourceHeight)+')">'+content+'</g><rect x="'+imgX+'" y="'+imgY+'" width="'+imgW+'" height="'+imgH+'" fill="url(#depthShade)"/></g><g transform="translate(14 14)"><rect x="0" y="0" width="'+svgNum(Math.max(390,labelText.length*7.5))+'" height="31" rx="6" fill="rgba(0,0,0,.64)"/><text x="10" y="21" font-size="14" fill="#fff" font-family="system-ui, sans-serif" font-weight="900">'+escapeXml(labelText)+'</text></g><text x="16" y="'+(height-18)+'" font-size="12" fill="rgba(255,255,255,.72)" font-family="system-ui, sans-serif" font-weight="850">'+escapeXml(nativePitch?"Native pitch capture path detected":"Plain Leaflet source: fake perspective from flat captures")+'</text></svg>';
+    var rendered=faux3dSurfaceSvg(content,sourceWidth,sourceHeight,{cameraModel:cameraModel,captureTiltDeg:captureTilt,playTiltDeg:playTilt,labelText:labelText,footerText:nativePitch?"Native pitch capture path detected":"Plain Leaflet source: fake perspective from flat captures"});
     var sourceIds=sourceAsset&&sourceAsset.sourceCaptureIds||valid.map(function(item){return item.id;}).filter(Boolean);
-    return {dataUrl:dataUrl("image/svg+xml",svg),width:width,height:height,bounds:sourceAsset&&sourceAsset.bounds||captureBounds(capture),sourceCaptureIds:sourceIds,metadata:Object.assign({rendererVersion:RENDERER_VERSION,format:"image/svg+xml",role:"3d-view-beta",stage:"3d-view-beta",holeNumber:capture.holeNumber||null,cameraModel:cameraModel,captureTiltDeg:captureTilt,playTiltDeg:playTilt,nativePitchAvailable:nativePitch,mapCameraCapability:capability.provider?capability:{provider:"leaflet",nativePitchAvailable:false,pitchStrategy:"faux-tilt-svg",reason:"plain-leaflet-no-native-pitch"},cameraFallback:nativePitch?"":"leaflet-flat-capture-faux-tilt-stage",outputDimensions:{width:width,height:height}},meta||{})};
+    return {dataUrl:dataUrl("image/svg+xml",rendered.svg),width:rendered.width,height:rendered.height,bounds:sourceAsset&&sourceAsset.bounds||captureBounds(capture),sourceCaptureIds:sourceIds,metadata:Object.assign({rendererVersion:RENDERER_VERSION,format:"image/svg+xml",role:"3d-view-beta",stage:"3d-view-beta",holeNumber:capture.holeNumber||null,cameraModel:cameraModel,captureTiltDeg:captureTilt,playTiltDeg:playTilt,nativePitchAvailable:nativePitch,mapCameraCapability:capability.provider?capability:{provider:"leaflet",nativePitchAvailable:false,pitchStrategy:"faux-tilt-svg",reason:"plain-leaflet-no-native-pitch"},cameraFallback:nativePitch?"":"leaflet-flat-capture-faux-tilt-stage",sourceFraming:"preserve-full-play-surface",surfaceModel:"framed-play-surface-faux-3d",faux3dSurface:rendered.surface,outputDimensions:{width:rendered.width,height:rendered.height}},meta||{})};
   }
   function buildCourseVisualMaster(courseId,opts){
     opts=opts||{};
