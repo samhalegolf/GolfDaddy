@@ -104,7 +104,8 @@ function payload() {
 
 (async function run() {
   installStorage();
-  const engine = require(path.join(__dirname, "..", "scripts", "gd-course-visual-engine.js"));
+  const enginePath = path.join(__dirname, "..", "scripts", "gd-course-visual-engine.js");
+  const engine = require(enginePath);
   localStorage.clear();
 
   const frameRows = [{ holeNumber: 1, manifestKey: "manifest-1" }];
@@ -209,6 +210,20 @@ function payload() {
   assert.equal(restored.status, "published", "reloading admin state restores current visual status from local store");
   assert.ok(restored.diagnostics.stitchOutputDimensions.width > 0, "diagnostics include stitch output dimensions");
   assert.ok((restored.events || []).some((event) => event.type === "course-visual-published"), "structured diagnostic event names are recorded");
+
+  const reloadInput = engine.adaptCoursePlayPayloadToVisualInput(Object.assign({}, payload(), { courseId: "reload-missing-asset", courseKey: "reload-missing-asset" }), {
+    captures: [manifest("manifest-reload-missing-asset", 1, 0)]
+  });
+  localStorage.setItem("manifest-reload-missing-asset", JSON.stringify(manifest("manifest-reload-missing-asset", 1, 0)));
+  engine.ingestCourseVisualInput(reloadInput);
+  const firstReloadBuild = await engine.buildCourseVisualMaster("reload-missing-asset");
+  assert.equal(firstReloadBuild.currentVersion, 1);
+  delete require.cache[require.resolve(enginePath)];
+  const reloadedEngine = require(enginePath);
+  assert.equal(reloadedEngine.getRecord("reload-missing-asset").basicVisual.dataUrl, undefined, "reload starts with metadata but no transient image data");
+  const rebuiltAfterReload = await reloadedEngine.buildCourseVisualMaster("reload-missing-asset");
+  assert.equal(rebuiltAfterReload.currentVersion, 2, "Build Basic regenerates when the saved v2 asset data is missing after reload");
+  assert.ok(rebuiltAfterReload.basicVisual.dataUrl.startsWith("data:image/svg+xml"), "regenerated asset is immediately renderable");
 
   console.log("course visual engine tests passed");
 })().catch((error) => {

@@ -6555,6 +6555,26 @@ function gdAdminCourseDbSetTab(tab){
 function gdAdminCourseVisualRecord(courseId){
   try{return window.GDCourseVisualEngine&&window.GDCourseVisualEngine.getRecord(courseId)||null;}catch(e){return null;}
 }
+const gdAdminCourseVisualHydrationPending={};
+const gdAdminCourseVisualHydrationAttempted={};
+function gdAdminCourseVisualAssets(record){
+  return [record&&record.rawMaster,record&&record.basicVisual,record&&record.exampleHoleVisual,record&&record.previewVisual,record&&record.publishedVisual].filter(Boolean);
+}
+function gdAdminCourseVisualNeedsHydration(record){
+  return gdAdminCourseVisualAssets(record).some(asset=>asset&&asset.path&&!asset.dataUrl);
+}
+function gdAdminCourseVisualScheduleHydration(courseId,record){
+  const engine=window.GDCourseVisualEngine;
+  if(!engine||typeof engine.hydrateCourseVisualAssets!=="function"||!gdAdminCourseVisualNeedsHydration(record))return;
+  const key=[courseId,record&&record.updatedAt||"",gdAdminCourseVisualAssets(record).map(asset=>`${asset.path}:${asset.dataUrl?1:0}`).join("|")].join("::");
+  if(gdAdminCourseVisualHydrationPending[key]||gdAdminCourseVisualHydrationAttempted[key])return;
+  gdAdminCourseVisualHydrationPending[key]=true;
+  gdAdminCourseVisualHydrationAttempted[key]=true;
+  engine.hydrateCourseVisualAssets(courseId).then(result=>{
+    delete gdAdminCourseVisualHydrationPending[key];
+    if(result&&result.hydratedCount&&gdAdminCourseDatabaseSelected===courseId&&gdAdminCourseDatabaseTab==="visuals")gdRenderAdminCourseDatabase();
+  }).catch(()=>{delete gdAdminCourseVisualHydrationPending[key];});
+}
 function gdAdminCourseVisualSourceStatus(selected){
   const rows=gdAdminCourseDbFrameRows(selected&&selected.id||selected&&selected.key||"");
   const details=rows.map(row=>{
@@ -6591,7 +6611,8 @@ function gdAdminCourseVisualImage(label,visual,fallback){
     visual&&visual.captureId?String(visual.captureId):"",
     visual&&visual.path?String(visual.path).split("/").slice(-2).join("/"):""
   ].filter(Boolean);
-  return `<div class="gdAdminCourseVisualSlot"><div class="gdAdminCourseVisualSlotHead"><strong>${gdEscapeHTML(label)}</strong>${dims?`<small>${gdEscapeHTML(dims)}</small>`:""}</div><div class="gdAdminCourseVisualFrame${scrollClass}">${src?`<img src="${gdEscapeHTML(src)}" alt="${gdEscapeHTML(label)}" loading="lazy" decoding="async">`:`<div class="gdAdminCourseVisualEmpty">Unavailable</div>`}</div>${meta.length?`<div class="gdAdminCourseVisualMeta">${meta.map(item=>`<span>${gdEscapeHTML(item)}</span>`).join("")}</div>`:""}</div>`;
+  const empty=visual&&visual.path||fallback&&fallback.path?"Saved path only":"Unavailable";
+  return `<div class="gdAdminCourseVisualSlot"><div class="gdAdminCourseVisualSlotHead"><strong>${gdEscapeHTML(label)}</strong>${dims?`<small>${gdEscapeHTML(dims)}</small>`:""}</div><div class="gdAdminCourseVisualFrame${scrollClass}">${src?`<img src="${gdEscapeHTML(src)}" alt="${gdEscapeHTML(label)}" loading="lazy" decoding="async">`:`<div class="gdAdminCourseVisualEmpty">${gdEscapeHTML(empty)}</div>`}</div>${meta.length?`<div class="gdAdminCourseVisualMeta">${meta.map(item=>`<span>${gdEscapeHTML(item)}</span>`).join("")}</div>`:""}</div>`;
 }
 function gdAdminCourseVisualControls(record){
   const modes=["Natural","Fresh","Rich","Strong"];
@@ -6665,6 +6686,7 @@ function gdAdminCourseVisualMarkup(selected){
   const engine=window.GDCourseVisualEngine;
   if(!engine)return '<div class="gdCoursePlayDebugEmpty">Course Visual Engine is not loaded.</div>';
   const record=gdAdminCourseVisualRecord(selected.id)||engine.getRecord(selected.id);
+  gdAdminCourseVisualScheduleHydration(selected.id,record);
   const resolved=engine.resolveCourseVisual(selected.id);
   const dirty=record&&record.settingsDirty?" · unsaved settings":"";
   const sourceStatus=gdAdminCourseVisualSourceStatus(selected);
@@ -36893,7 +36915,7 @@ body.gdAuthLocked #gdProfileV67 .topbar{
 <script src="scripts/gd-launch-monitor-data.js?v=practice-data-20260712c"></script>
 <script src="scripts/gd-shot-library-sync.js?v=shot-library-supabase-001"></script>
 <script src="scripts/gd-captured-surface-sync.js?v=captured-surface-supabase-002"></script>
-<script src="scripts/gd-course-visual-engine.js?v=course-visual-engine-002"></script>
+<script src="scripts/gd-course-visual-engine.js?v=course-visual-engine-003"></script>
 <script src="scripts/gd-multi-nine-courses.js?v=multi-nine-courses-001"></script>
 <script src="scripts/gd-native-practice-data.js?v=native-practice-data-001"></script>
 <script id="gdCanonicalRouteAuditV1">

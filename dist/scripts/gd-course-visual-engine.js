@@ -10,10 +10,13 @@
   var STORE_KEY="gd_course_visual_engine_v1";
   var PRESET_KEY="gd_course_visual_presets_v1";
   var API_ENDPOINT="/api/course-visuals";
+  var ASSET_DB_NAME="gd_course_visual_assets_v1";
+  var ASSET_STORE_NAME="assets";
   var VALID_STATUSES={unavailable:1,"input-ready":1,stitching:1,"basic-ready":1,rendering:1,"preview-ready":1,published:1,failed:1};
   var inFlightBuilds={};
   var transientCapturesByCourse={};
   var transientAssetDataByPath={};
+  var assetDbPromise=null;
 
   function now(){return new Date().toISOString();}
   function safe(fn,fb){try{return fn();}catch(_error){return fb;}}
@@ -141,6 +144,80 @@
   function writeJson(key,value){
     if(root&&root.localStorage)safe(function(){root.localStorage.setItem(key,JSON.stringify(value));});
     return value;
+  }
+  function visualAssets(record){
+    return [record&&record.rawMaster,record&&record.basicVisual,record&&record.exampleHoleVisual,record&&record.previewVisual,record&&record.publishedVisual].filter(Boolean);
+  }
+  function openAssetDb(){
+    if(!root||!root.indexedDB)return Promise.resolve(null);
+    if(assetDbPromise)return assetDbPromise;
+    assetDbPromise=new Promise(function(resolve){
+      var req=safe(function(){return root.indexedDB.open(ASSET_DB_NAME,1);},null);
+      if(!req){resolve(null);return;}
+      req.onupgradeneeded=function(){
+        var db=req.result;
+        if(db&&!db.objectStoreNames.contains(ASSET_STORE_NAME))db.createObjectStore(ASSET_STORE_NAME,{keyPath:"path"});
+      };
+      req.onsuccess=function(){resolve(req.result||null);};
+      req.onerror=function(){resolve(null);};
+      req.onblocked=function(){resolve(null);};
+    });
+    return assetDbPromise;
+  }
+  function saveAssetData(path,dataUrl){
+    if(!path||!dataUrl)return Promise.resolve(false);
+    transientAssetDataByPath[path]=dataUrl;
+    return openAssetDb().then(function(db){
+      if(!db)return false;
+      return new Promise(function(resolve){
+        var tx=safe(function(){return db.transaction(ASSET_STORE_NAME,"readwrite");},null);
+        if(!tx){resolve(false);return;}
+        safe(function(){tx.objectStore(ASSET_STORE_NAME).put({path:path,dataUrl:dataUrl,updatedAt:now()});});
+        tx.oncomplete=function(){resolve(true);};
+        tx.onerror=function(){resolve(false);};
+        tx.onabort=function(){resolve(false);};
+      });
+    }).catch(function(){return false;});
+  }
+  function loadAssetData(path){
+    if(!path)return Promise.resolve(null);
+    if(transientAssetDataByPath[path])return Promise.resolve(transientAssetDataByPath[path]);
+    return openAssetDb().then(function(db){
+      if(!db)return null;
+      return new Promise(function(resolve){
+        var tx=safe(function(){return db.transaction(ASSET_STORE_NAME,"readonly");},null);
+        if(!tx){resolve(null);return;}
+        var req=safe(function(){return tx.objectStore(ASSET_STORE_NAME).get(path);},null);
+        if(!req){resolve(null);return;}
+        req.onsuccess=function(){
+          var data=req.result&&req.result.dataUrl||null;
+          if(data)transientAssetDataByPath[path]=data;
+          resolve(data);
+        };
+        req.onerror=function(){resolve(null);};
+      });
+    }).catch(function(){return null;});
+  }
+  function hydrateRecordAssets(record){
+    record=record&&typeof record==="object"?record:null;
+    if(!record)return Promise.resolve({record:record,hydratedCount:0});
+    var count=0;
+    return Promise.all(visualAssets(record).map(function(asset){
+      if(!asset||!asset.path||asset.dataUrl)return Promise.resolve(false);
+      return loadAssetData(asset.path).then(function(data){
+        if(!data)return false;
+        asset.dataUrl=data;
+        count+=1;
+        return true;
+      });
+    })).then(function(){return {record:attachTransientAssets(record),hydratedCount:count};});
+  }
+  function hydrateCourseVisualAssets(courseId){
+    var record=getRecord(courseId);
+    return hydrateRecordAssets(record).then(function(result){
+      captureTransientAssets(result.record);
+      return result;
+    });
   }
   function emptyStore(){
     return {schema:"gd.course_visual_engine.store",version:VERSION,rendererVersion:RENDERER_VERSION,updatedAt:null,records:{}};
@@ -297,7 +374,8 @@
         return {id:text(object&&object.id,180)||"object-"+index,type:text(object&&object.type,40)||"other",holeNumber:finite(object&&object.holeNumber),geometry:object&&object.geometry,bounds:validBounds(object&&object.bounds)?object.bounds:null};
       }),
       captures:(Array.isArray(input.captures)?input.captures:[]).map(function(capture,index){
-        var looksLikeManifest=capture&&capture.tiles&&(capture.imageWidth||capture.imageHeight||capture.originPx);
+        var isNormalizedCapture=!!(capture&&capture.width&&capture.height&&(capture.storagePath||capture.bounds));
+        var looksLikeManifest=capture&&capture.tiles&&!isNormalizedCapture&&(capture.imageWidth||capture.imageHeight||capture.originPx||capture.key||capture.storageKey);
         var c=looksLikeManifest?manifestToCapture(capture,{courseId:courseId}):(capture&&capture.tiles?capture:manifestToCapture(capture,{courseId:courseId}));
         c=c&&typeof c==="object"?c:{};
         return Object.assign({},c,{id:text(c.id,180)||"capture-"+index,bounds:captureBounds(c),width:Math.max(0,Math.round(Number(c.width)||0)),height:Math.max(0,Math.round(Number(c.height)||0))});
@@ -352,12 +430,12 @@
     return attachTransientAssets(clone(record));
   }
   function captureTransientAssets(record){
-    [record&&record.rawMaster,record&&record.basicVisual,record&&record.exampleHoleVisual,record&&record.previewVisual,record&&record.publishedVisual].forEach(function(asset){
-      if(asset&&asset.path&&asset.dataUrl)transientAssetDataByPath[asset.path]=asset.dataUrl;
+    visualAssets(record).forEach(function(asset){
+      if(asset&&asset.path&&asset.dataUrl)saveAssetData(asset.path,asset.dataUrl);
     });
   }
   function attachTransientAssets(record){
-    [record&&record.rawMaster,record&&record.basicVisual,record&&record.exampleHoleVisual,record&&record.previewVisual,record&&record.publishedVisual].forEach(function(asset){
+    visualAssets(record).forEach(function(asset){
       if(asset&&asset.path&&!asset.dataUrl&&transientAssetDataByPath[asset.path])asset.dataUrl=transientAssetDataByPath[asset.path];
     });
     return record;
@@ -483,7 +561,8 @@
       putRecord(record);
       var signature=captureSignature(captures||[]);
       var existingRenderer=record.rawMaster&&record.rawMaster.metadata&&record.rawMaster.metadata.rendererVersion;
-      if(record.rawMaster&&record.rawMaster.captureSignature===signature&&existingRenderer===RENDERER_VERSION&&record.basicVisual){
+      var existingAssetReady=!!(record.basicVisual&&(record.basicVisual.dataUrl||transientAssetDataByPath[record.basicVisual.path])||record.rawMaster&&(record.rawMaster.dataUrl||transientAssetDataByPath[record.rawMaster.path]));
+      if(record.rawMaster&&record.rawMaster.captureSignature===signature&&existingRenderer===RENDERER_VERSION&&record.basicVisual&&existingAssetReady){
         record.status=record.publishedVisual?"published":"basic-ready";
         recordEvent(record,"course-visual-basic-ready",{idempotent:true,version:record.currentVersion});
         return putRecord(record);
@@ -748,6 +827,7 @@
     saveStore:saveStore,
     pullCourseVisual:pullCourseVisual,
     buildFromCourseDatabase:buildFromCourseDatabase,
-    __test:{emptyStore:emptyStore,stitchSvg:stitchSvg,hashString:hashString,captureSignature:captureSignature,metadataForCloud:metadataForCloud}
+    hydrateCourseVisualAssets:hydrateCourseVisualAssets,
+    __test:{emptyStore:emptyStore,stitchSvg:stitchSvg,hashString:hashString,captureSignature:captureSignature,metadataForCloud:metadataForCloud,loadAssetData:loadAssetData,saveAssetData:saveAssetData}
   };
 });
