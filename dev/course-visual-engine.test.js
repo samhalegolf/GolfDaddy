@@ -213,7 +213,7 @@ function payload() {
   assert.equal(built.status, "basic-ready", "valid captures produce a basic visual record");
   assert.ok(built.rawMaster.path.includes("/raw/"));
   assert.ok(built.basicVisual.dataUrl.startsWith("data:image/svg+xml"));
-  assert.equal(built.rawMaster.metadata.rendererVersion, "clarity-course-visual-renderer-v24");
+  assert.equal(built.rawMaster.metadata.rendererVersion, "clarity-course-visual-renderer-v25");
   assert.equal(built.rawMaster.metadata.layout, "geographic-mercator");
   assert.equal(built.rawMaster.metadata.stitchModel, "geo-rectangle-table-over-live-map", "stitch metadata describes overlapping rectangles over a live map base");
   assert.ok(decodeURIComponent(built.rawMaster.dataUrl).includes("data-stitch-width"), "raw stitch keeps coverage geometry as metadata attributes");
@@ -273,8 +273,9 @@ function payload() {
   assert.ok(singleHoleNativeSvg.indexOf('data-role="play-route-axis"') < singleHoleNativeSvg.indexOf("<image "), "route proof paints behind the captured image tiles");
   assert.ok(!singleHoleNativeSvg.includes("green-surround-airbrush"), "single-hole native visuals do not touch up greens");
   assert.ok(!singleHoleNativeSvg.includes("cvGreenSurroundAirbrushClip"), "green touch-up masks are removed completely");
-  assert.equal(preview.singleHolePreviewVisual.metadata.fairwayAirbrush.preserves, "relative-luminance-and-mow-lines", "fairway airbrush preserves mowing-line texture");
-  assert.equal(preview.singleHolePreviewVisual.metadata.fairwayAirbrush.projector, "play-surface-display-transform", "single-hole airbrush follows the transformed play surface instead of raw map north");
+  assert.ok(!singleHoleNativeSvg.includes('data-role="fairway-airbrush"'), "single-hole visuals do not airbrush generated route-only fairway lines");
+  assert.equal(preview.singleHolePreviewVisual.metadata.fairwayAirbrush.enabled, false, "route-only fairway objects are not eligible for the airbrush");
+  assert.equal(preview.singleHolePreviewVisual.metadata.fairwayAirbrush.reason, "missing-fairway-polygon-geometry", "airbrush waits for real OSM fairway polygon bounds");
   assert.equal(preview.singleHolePreviewVisual.metadata.greenSurroundAirbrush.enabled, false, "green touch-up metadata is disabled");
   assert.equal(preview.singleHolePreviewVisual.metadata.greenSurroundAirbrush.reason, "removed-green-touch-up", "green touch-up removal is explicit");
   assert.equal(preview.singleHolePreviewVisual.metadata.overflowVisible, true, "single-hole preview exposes the captured overflow outside the phone frame");
@@ -361,7 +362,7 @@ function payload() {
   });
   engine.ingestCourseVisualInput(multiInput);
   const multiBuilt = await engine.buildCourseVisualMaster("multi-capture");
-  assert.equal(multiBuilt.rawMaster.metadata.rendererVersion, "clarity-course-visual-renderer-v24");
+  assert.equal(multiBuilt.rawMaster.metadata.rendererVersion, "clarity-course-visual-renderer-v25");
   assert.ok(multiBuilt.rawMaster.height < 12000, "multi-capture stitch is geographically laid out instead of vertically appended");
   assert.ok(multiBuilt.rawMaster.height / multiBuilt.rawMaster.width < 8, "multi-capture output keeps a usable preview aspect");
 
