@@ -7,7 +7,7 @@
 
   var VERSION=1;
   var PRESET_VERSION=4;
-  var RENDERER_VERSION="clarity-course-visual-renderer-v20";
+  var RENDERER_VERSION="clarity-course-visual-renderer-v21";
   var STORE_KEY="gd_course_visual_engine_v1";
   var PRESET_KEY="gd_course_visual_presets_v1";
   var API_ENDPOINT="/api/course-visuals";
@@ -1118,7 +1118,13 @@
     var sourceWidth=Math.max(1,Math.round(Number(sourceAsset&&sourceAsset.width||capture.width)||1));
     var sourceHeight=Math.max(1,Math.round(Number(sourceAsset&&sourceAsset.height||capture.height)||1));
     var sourceBounds=sourceAsset&&sourceAsset.bounds||captureBounds(capture);
-    var sourceContent=sourceAsset&&sourceAsset.dataUrl?svgInnerFromDataUrl(sourceAsset.dataUrl).replace(/<rect\s+width="100%"\s+height="100%"\s+fill="#10130f"\s*\/>/i,""):captureContentSvg(capture);
+    var sourceContent="";
+    if(sourceAsset&&sourceAsset.dataUrl){
+      var sourceInner=svgInnerFromDataUrl(sourceAsset.dataUrl).replace(/<rect\s+width="100%"\s+height="100%"\s+fill="#10130f"\s*\/>/i,"");
+      sourceContent=sourceInner?'<svg x="0" y="0" width="'+svgNum(sourceWidth)+'" height="'+svgNum(sourceHeight)+'" viewBox="0 0 '+svgNum(sourceWidth)+" "+svgNum(sourceHeight)+'" overflow="visible">'+sourceInner+'</svg>':"";
+    }else{
+      sourceContent=captureContentSvg(capture);
+    }
     if(!sourceContent)return null;
     var targetAspect=9/16;
     var width=Math.max(720,Math.min(4096,Math.round(sourceWidth)));
