@@ -7256,11 +7256,33 @@ function gdAdminCourseVisualPresetChanged(courseId){
     const green=document.getElementById("gdCourseVisualGreenStrength");
     const brightness=document.getElementById("gdCourseVisualBrightness");
     const contrast=document.getElementById("gdCourseVisualContrast");
-    if(green)green.value=Number(preset.turf&&preset.turf.greenStrength)||.35;
-    if(brightness)brightness.value=Number(preset.lighting&&preset.lighting.brightnessTarget)||52;
-    if(contrast)contrast.value=Number(preset.lighting&&preset.lighting.contrastTarget)||1.04;
+    const presetGreen=Number(preset.turf&&preset.turf.greenStrength);
+    const presetBrightness=Number(preset.lighting&&preset.lighting.brightnessTarget);
+    const presetContrast=Number(preset.lighting&&preset.lighting.contrastTarget);
+    if(green)green.value=Number.isFinite(presetGreen)?presetGreen:.35;
+    if(brightness)brightness.value=Number.isFinite(presetBrightness)?presetBrightness:52;
+    if(contrast)contrast.value=Number.isFinite(presetContrast)?presetContrast:1.04;
   }
   return gdAdminCourseVisualControlChanged(courseId);
+}
+function gdAdminCourseVisualControlEvent(event){
+  const target=event&&event.target;
+  if(!target||!target.id)return;
+  const controls=target.closest&&target.closest(".gdAdminCourseVisualControls");
+  if(!controls)return;
+  const courseId=controls.getAttribute("data-course-id")||gdAdminCourseDatabaseSelected||"";
+  if(target.id==="gdCourseVisualPreset"){
+    if(event.type==="change")gdAdminCourseVisualPresetChanged(courseId);
+    return;
+  }
+  if(["gdCourseVisualGreenStrength","gdCourseVisualBrightness","gdCourseVisualContrast","gdCourseVisualMowing","gdCourseVisual3dBeta"].includes(target.id)){
+    gdAdminCourseVisualControlChanged(courseId);
+  }
+}
+if(!window.__gdAdminCourseVisualControlsBound){
+  window.__gdAdminCourseVisualControlsBound=true;
+  document.addEventListener("input",gdAdminCourseVisualControlEvent,true);
+  document.addEventListener("change",gdAdminCourseVisualControlEvent,true);
 }
 function gdAdminCourseVisualProductCard(product){
   const visual=product.terrain||product.native||product.published||product.base||null;
@@ -7296,7 +7318,7 @@ function gdAdminCourseVisualControls(record,courseId){
   const contrast=Number(overrides.lighting&&overrides.lighting.contrastTarget);
   const beta3d=!!(overrides.visualEngine&&overrides.visualEngine.enable3dBeta);
   const key=gdEscapeHTML(courseId||record&&record.courseId||"");
-  return `<div class="gdAdminCourseVisualControls">
+  return `<div class="gdAdminCourseVisualControls" data-course-id="${key}">
     <label>Preset<select id="gdCourseVisualPreset" onchange="return gdAdminCourseVisualPresetChanged('${key}')">${modes.map(mode=>{const p=window.GDCourseVisualEngine?.presetForMode?.(mode);return `<option value="${gdEscapeHTML(p?.id||mode)}" ${preset===(p?.id||mode)?"selected":""}>${gdEscapeHTML(mode)}</option>`;}).join("")}</select></label>
     <label>Green strength<input id="gdCourseVisualGreenStrength" type="range" min="0" max="1" step="0.05" value="${Number.isFinite(strength)?strength:.35}" oninput="return gdAdminCourseVisualControlChanged('${key}')" onchange="return gdAdminCourseVisualControlChanged('${key}')"></label>
     <label>Brightness target<input id="gdCourseVisualBrightness" type="number" min="20" max="85" step="1" value="${Number.isFinite(brightness)?brightness:52}" oninput="return gdAdminCourseVisualControlChanged('${key}')" onchange="return gdAdminCourseVisualControlChanged('${key}')"></label>
