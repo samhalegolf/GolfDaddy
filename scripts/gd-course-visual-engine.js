@@ -7,7 +7,7 @@
 
   var VERSION=1;
   var PRESET_VERSION=4;
-  var RENDERER_VERSION="clarity-course-visual-renderer-v12";
+  var RENDERER_VERSION="clarity-course-visual-renderer-v13";
   var STORE_KEY="gd_course_visual_engine_v1";
   var PRESET_KEY="gd_course_visual_presets_v1";
   var API_ENDPOINT="/api/course-visuals";
@@ -912,6 +912,7 @@
         out.diagnostics.captureExecution={
           attempted:!!out.diagnostics.captureExecution.attempted,
           captured:Number(out.diagnostics.captureExecution.captured)||0,
+          freshRun:out.diagnostics.captureExecution.freshRun===true,
           fallbackReason:out.diagnostics.captureExecution.fallbackReason||"",
           errors:(Array.isArray(out.diagnostics.captureExecution.errors)?out.diagnostics.captureExecution.errors:[]).slice(-12),
           snapshotSelection:(Array.isArray(out.diagnostics.captureExecution.snapshotSelection)?out.diagnostics.captureExecution.snapshotSelection:[]).slice(-12).map(function(item){
@@ -1637,7 +1638,16 @@
   function buildCourseVisualMaster(courseId,opts){
     opts=opts||{};
     courseId=slug(courseId);
+    if(opts.forceRebuild===true)delete inFlightBuilds[courseId];
     if(inFlightBuilds[courseId])return inFlightBuilds[courseId];
+    var buildRunId=text(opts.buildRunId||stableId("cv-run"),120);
+    function finishBuild(record){
+      var latest=getRecord(courseId);
+      var latestRun=latest&&latest.diagnostics&&latest.diagnostics.activeBuildRunId||"";
+      if(latestRun&&latestRun!==buildRunId)return latest;
+      record.diagnostics=Object.assign({},record.diagnostics||{},{activeBuildRunId:null,completedBuildRunId:buildRunId});
+      return putRecord(record);
+    }
     var promise=Promise.resolve().then(function(){
       var record=getRecord(courseId);
       var allCaptures=(Array.isArray(opts.captures)&&opts.captures.length?opts.captures:null)||transientCapturesByCourse[courseId]||capturesFromRecordRefs(record);
@@ -1647,6 +1657,7 @@
       var capturePlanMeta=planSummary(capturePlan,split.all||[]);
       var beta3dExpected=!!split.beta3d.length;
       record.status="stitching";
+      record.diagnostics=Object.assign({},record.diagnostics||{},{activeBuildRunId:buildRunId});
       recordEvent(record,"course-visual-stitch-started",{captureCount:(captures||[]).length,terrainReferenceCount:split.terrain.length,beta3dCaptureCount:split.beta3d.length});
       putRecord(record);
       var signature=captureSignature(captures||[]);
@@ -1661,7 +1672,7 @@
       if(record.rawMaster&&record.rawMaster.captureSignature===signature&&existingRenderer===RENDERER_VERSION&&record.basicVisual&&existingAssetReady&&existingExampleReady&&existingHoleFramesReady&&existingTerrainReady&&existingBeta3dReady){
         record.status=record.publishedVisual?"published":"basic-ready";
         recordEvent(record,"course-visual-basic-ready",{idempotent:true,version:record.currentVersion});
-        return putRecord(record);
+        return finishBuild(record);
       }
       try{
         var stitched=stitchSvg(captures||[],{inputVisualId:record.id,courseId:courseId,captureSignature:signature,capturePlanSummary:capturePlanMeta});
@@ -1705,7 +1716,7 @@
         record.diagnostics=Object.assign({},record.diagnostics||{},{stitchFailure:record.lastError});
         recordEvent(record,"course-visual-build-failed",record.lastError);
       }
-      return putRecord(record);
+      return finishBuild(record);
     });
     inFlightBuilds[courseId]=promise.finally(function(){delete inFlightBuilds[courseId];});
     return inFlightBuilds[courseId];
@@ -2254,11 +2265,13 @@
   function hasVisualCaptureSet(captures){
     return (Array.isArray(captures)?captures:[]).some(visualCaptureRole);
   }
-  function executeVisualCapturePlan(input,plan){
+  function executeVisualCapturePlan(input,plan,opts){
+    opts=opts||{};
     var executor=root&&root.gdBuildCourseVisualCaptureManifest;
+    var fallbackCaptures=opts.requireFresh===true?[]:(input.captures||[]);
     var errors=[];
     if(typeof executor!=="function"||!Array.isArray(plan)||!plan.length){
-      return {executed:false,captures:input.captures||[],errors:errors,snapshotSelection:[],fallbackReason:typeof executor==="function"?"empty-plan":"capture-executor-missing"};
+      return {executed:false,captures:fallbackCaptures,errors:errors,snapshotSelection:[],fallbackReason:typeof executor==="function"?"empty-plan":"capture-executor-missing"};
     }
     var captures=[];
     var snapshotSelection=[];
@@ -2274,7 +2287,7 @@
         errors.push({planId:item&&item.id,role:item&&item.role,holeNumber:item&&item.holeNumber,code:"capture-failed",message:error&&error.message||String(error)});
       }
     });
-    return {executed:true,captures:captures.length?captures:(input.captures||[]),errors:errors,snapshotSelection:snapshotSelection,fallbackReason:captures.length?"":"planned-captures-empty"};
+    return {executed:true,captures:captures.length?captures:fallbackCaptures,errors:errors,snapshotSelection:snapshotSelection,fallbackReason:captures.length?"":"planned-captures-empty"};
   }
   function buildFromCourseDatabase(courseId,opts){
     opts=opts||{};
@@ -2287,7 +2300,8 @@
     var enable3dBeta=opts.enable3dBeta===true||saved3d;
     if(opts.forceFresh===true)previous=resetCourseVisualWorkingState(input.courseId||courseId,{keepPublished:true});
     var plan=planCourseVisualCaptures(input,{enable3dBeta:enable3dBeta});
-    var planned=executeVisualCapturePlan(input,plan);
+    var buildRunId=stableId(opts.forceFresh===true?"fresh-capture":"capture");
+    var planned=executeVisualCapturePlan(input,plan,{requireFresh:opts.forceFresh===true||opts.requireFreshCaptures===true});
     var previousCaptures=capturesFromRecordRefs(previous).filter(renderableCapture);
     var previousVisualCaptures=previousCaptures.filter(visualCaptureRole);
     if(opts.forceFresh!==true&&previousVisualCaptures.length&&!hasVisualCaptureSet(planned.captures)){
@@ -2298,9 +2312,9 @@
     }
     input=Object.assign({},input,{captures:planned.captures,capturePlan:plan});
     var record=ingestCourseVisualInput(input);
-    record.diagnostics=Object.assign({},record.diagnostics||{},{stageSettings:{enable3dBeta:enable3dBeta},capturePlan:input.capturePlan,capturePlanSummary:planSummary(plan,planned.captures),captureExecution:{attempted:planned.executed,captured:planned.captures.length,errors:planned.errors,snapshotSelection:planned.snapshotSelection||[],fallbackReason:planned.fallbackReason||""}});
+    record.diagnostics=Object.assign({},record.diagnostics||{},{stageSettings:{enable3dBeta:enable3dBeta},capturePlan:input.capturePlan,capturePlanSummary:planSummary(plan,planned.captures),captureExecution:{attempted:planned.executed,captured:planned.captures.length,errors:planned.errors,snapshotSelection:planned.snapshotSelection||[],fallbackReason:planned.fallbackReason||"",freshRun:opts.forceFresh===true||opts.requireFreshCaptures===true},activeBuildRunId:buildRunId});
     putRecord(record);
-    return buildCourseVisualMaster(input.courseId,{captures:input.captures,capturePlan:plan});
+    return buildCourseVisualMaster(input.courseId,{captures:input.captures,capturePlan:plan,forceRebuild:opts.forceFresh===true,buildRunId:buildRunId});
   }
   return {
     version:VERSION,
