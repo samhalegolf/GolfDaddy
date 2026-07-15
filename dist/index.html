@@ -2267,12 +2267,15 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
     .gdAdminCourseTabs button{border-radius:999px;padding:7px 10px;background:rgba(255,255,255,.08);color:rgba(255,255,255,.72);font-size:10px;font-weight:950}
     .gdAdminCourseTabs button.active{background:rgba(31,211,109,.16);color:#82ffb6}
     .gdAdminCourseVisualGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:8px 0}
+    .gdAdminCourseVisualProducts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:10px 0}
     .gdAdminCourseVisualSlot{min-width:0;border-radius:8px;border:1px solid rgba(255,255,255,.08);background:rgba(0,0,0,.18);overflow:hidden}
+    .gdAdminCourseVisualSlot.product{background:rgba(0,0,0,.22);border-color:rgba(255,255,255,.10)}
     .gdAdminCourseVisualSlot.wide{grid-column:1/-1}
     .gdAdminCourseVisualSlotHead{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 9px}
     .gdAdminCourseVisualSlot strong{color:#fff;font-size:10px;font-weight:950;text-transform:uppercase;letter-spacing:.05em}
     .gdAdminCourseVisualSlot small{color:rgba(255,255,255,.52);font-size:10px;font-weight:850;white-space:nowrap}
     .gdAdminCourseVisualFrame{display:grid;place-items:center;width:100%;height:clamp(180px,26vw,320px);overflow:auto;background:#10130f;overscroll-behavior:contain}
+    .gdAdminCourseVisualSlot.product .gdAdminCourseVisualFrame{height:clamp(280px,42vw,620px)}
     .gdAdminCourseVisualFrame.stitch{height:clamp(280px,48vw,560px);background:#0b100e}
     .gdAdminCourseVisualFrame img{display:block;max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain}
     .gdAdminCourseVisualInline{display:grid;place-items:center;width:100%;height:100%;min-height:180px}
@@ -2285,6 +2288,11 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
     .gdAdminCourseVisualFrame.scroll .gdAdminCourseVisualInline svg{width:100%;height:auto;max-width:none;max-height:none}
     .gdAdminCourseVisualEmpty{display:grid;place-items:center;width:100%;height:100%;min-height:180px;color:rgba(255,255,255,.48);font-size:11px;font-weight:850;background:#10130f}
     .gdAdminCourseVisualMeta{display:flex;gap:6px;flex-wrap:wrap;padding:7px 9px;border-top:1px solid rgba(255,255,255,.06);color:rgba(255,255,255,.55);font-size:10px;font-weight:850}
+    .gdAdminCourseVisualStages{display:flex;gap:5px;flex-wrap:wrap;padding:8px 9px;border-top:1px solid rgba(255,255,255,.06)}
+    .gdAdminCourseVisualStage{display:inline-flex;align-items:center;min-height:20px;border-radius:999px;padding:2px 7px;background:rgba(255,255,255,.07);color:rgba(255,255,255,.48);font-size:9px;font-weight:950;text-transform:uppercase;letter-spacing:.04em}
+    .gdAdminCourseVisualStage.ready{background:rgba(31,211,109,.15);color:#76ffae}
+    .gdAdminCourseVisualStage.pending{background:rgba(255,210,135,.12);color:#ffd287}
+    .gdAdminCourseVisualNotice{padding:8px 9px;border-radius:10px;border:1px solid rgba(255,210,135,.18);background:rgba(255,210,135,.08);color:#ffd287;font-size:10px;font-weight:850;line-height:1.35}
     .gdAdminCourseVisualControls{display:grid;grid-template-columns:140px repeat(4,minmax(92px,1fr));gap:8px;align-items:end;margin:8px 0}
     .gdAdminCourseVisualControls label{display:grid;gap:4px;color:rgba(255,255,255,.56);font-size:9px;font-weight:950;text-transform:uppercase;letter-spacing:.05em}
     .gdAdminCourseVisualControls select,.gdAdminCourseVisualControls input{width:100%;box-sizing:border-box;border:1px solid rgba(255,255,255,.10);border-radius:12px;background:rgba(0,0,0,.22);color:#fff;padding:8px;font-size:11px;font-weight:850}
@@ -2301,7 +2309,7 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
     .gdAdminCourseHoleTable th{position:sticky;top:0;background:#15120d;color:rgba(255,255,255,.56);font-size:9px;text-transform:uppercase;letter-spacing:.05em;z-index:1}
     .gdAdminPayloadPreview{display:none;margin-top:8px;padding:9px;border-radius:13px;background:rgba(0,0,0,.28);border:1px solid rgba(255,255,255,.08);max-height:280px;overflow:auto;color:rgba(255,255,255,.80);font:800 10px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;overflow-wrap:anywhere}
     .gdAdminPayloadPreview.open{display:block}
-    @media(max-width:620px){.gdAdminDatabaseFilters,.gdAdminCourseVisualGrid,.gdAdminCourseVisualControls{grid-template-columns:1fr}.gdAdminDatabaseHead,.gdAdminCourseDetailHead{display:grid}.gdAdminDatabaseActions{justify-content:flex-start}.gdAdminCourseRow{grid-template-columns:1fr}}
+    @media(max-width:620px){.gdAdminDatabaseFilters,.gdAdminCourseVisualGrid,.gdAdminCourseVisualProducts,.gdAdminCourseVisualControls{grid-template-columns:1fr}.gdAdminDatabaseHead,.gdAdminCourseDetailHead{display:grid}.gdAdminDatabaseActions{justify-content:flex-start}.gdAdminCourseRow{grid-template-columns:1fr}}
     #gdCoursePlayMonitor{display:none;position:fixed;left:max(10px,env(safe-area-inset-left));bottom:calc(max(10px,env(safe-area-inset-bottom)) + 10px);z-index:2600;width:min(318px,calc(100vw - 20px));max-height:min(46vh,360px);overflow:hidden;padding:10px 11px;border-radius:16px;background:rgba(5,13,9,.90);border:1px solid rgba(31,211,109,.24);box-shadow:0 18px 42px rgba(0,0,0,.38);backdrop-filter:blur(12px);color:#fff;pointer-events:auto;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif}
     body[data-gd-permission="admin"].gdCoursePlayDebugOn #gdCoursePlayMonitor{display:block}
     #gdCoursePlayMonitor.gdCpmCollapsed{width:min(268px,calc(100vw - 20px));padding:8px 10px}
@@ -6699,7 +6707,18 @@ function gdAdminCourseVisualRecord(courseId){
 const gdAdminCourseVisualHydrationPending={};
 const gdAdminCourseVisualHydrationAttempted={};
 function gdAdminCourseVisualAssets(record){
-  return [record&&record.rawMaster,record&&record.basicVisual,record&&record.exampleHoleVisual,record&&record.terrainView,record&&record.beta3dView,record&&record.previewVisual,record&&record.publishedVisual].filter(Boolean);
+  return [
+    record&&record.rawMaster,
+    record&&record.basicVisual,
+    record&&record.exampleHoleVisual,
+    record&&record.previewVisual,
+    record&&record.terrainView,
+    record&&record.singleHolePreviewVisual,
+    record&&record.singleHoleTerrainView,
+    record&&record.beta3dView,
+    record&&record.publishedVisual,
+    record&&record.singleHolePublishedVisual
+  ].filter(Boolean);
 }
 function gdAdminCourseVisualNeedsHydration(record){
   return gdAdminCourseVisualAssets(record).some(asset=>asset&&asset.path&&!asset.dataUrl);
@@ -6797,6 +6816,65 @@ function gdAdminCourseVisualScheduleAutoBuild(courseId,record,sourceStatus){
   },0);
   return key;
 }
+const gdAdminCourseVisualPipelinePending={};
+const gdAdminCourseVisualPipelineAttempted={};
+function gdAdminCourseVisualStageReady(asset,stage,inputStage){
+  if(!asset||!(asset.dataUrl||asset.path))return false;
+  const meta=asset.metadata||{};
+  if(stage&&String(meta.stage||"")!==stage)return false;
+  if(inputStage&&String(meta.inputStage||"")!==inputStage)return false;
+  return true;
+}
+function gdAdminCourseVisualNeedsPipeline(record){
+  if(!record||String(record.status||"")==="rendering"||String(record.status||"")==="stitching")return false;
+  if(!record.rawMaster||!record.basicVisual)return false;
+  const renderer=String(window.GDCourseVisualEngine&&window.GDCourseVisualEngine.rendererVersion||"");
+  if(record.settingsDirty)return true;
+  if(!gdAdminCourseVisualStageReady(record.previewVisual,"native-visuals"))return true;
+  if(!gdAdminCourseVisualStageReady(record.terrainView,"terrain-shading","native-visuals"))return true;
+  if(!gdAdminCourseVisualStageReady(record.singleHolePreviewVisual,"native-visuals"))return true;
+  if(!gdAdminCourseVisualStageReady(record.singleHoleTerrainView,"terrain-shading","native-visuals"))return true;
+  const nativeRenderer=String(record.previewVisual&&record.previewVisual.metadata&&record.previewVisual.metadata.rendererVersion||"");
+  const holeRenderer=String(record.singleHolePreviewVisual&&record.singleHolePreviewVisual.metadata&&record.singleHolePreviewVisual.metadata.rendererVersion||"");
+  return !!(renderer&&(nativeRenderer&&nativeRenderer!==renderer||holeRenderer&&holeRenderer!==renderer));
+}
+function gdAdminCourseVisualPipelineKey(courseId,record){
+  return [
+    courseId,
+    record&&record.currentVersion||0,
+    record&&record.updatedAt||"",
+    record&&record.presetId||"",
+    record&&record.settingsDirty?1:0,
+    record&&record.previewVisual&&record.previewVisual.path||"",
+    record&&record.terrainView&&record.terrainView.path||"",
+    record&&record.singleHolePreviewVisual&&record.singleHolePreviewVisual.path||"",
+    record&&record.singleHoleTerrainView&&record.singleHoleTerrainView.path||""
+  ].join("::");
+}
+function gdAdminCourseVisualSchedulePipeline(courseId,record,sourceStatus){
+  const engine=window.GDCourseVisualEngine;
+  if(!engine||typeof engine.buildCourseVisualPreview!=="function")return "";
+  if(gdAdminCourseVisualNeedsAutoBuild(record,sourceStatus)||!gdAdminCourseVisualNeedsPipeline(record))return "";
+  const key=gdAdminCourseVisualPipelineKey(courseId,record);
+  if(gdAdminCourseVisualPipelinePending[key]||gdAdminCourseVisualPipelineAttempted[key])return key;
+  gdAdminCourseVisualPipelinePending[key]=true;
+  gdAdminCourseVisualPipelineAttempted[key]=true;
+  setTimeout(async()=>{
+    try{
+      const fresh=gdAdminCourseVisualRecord(courseId)||engine.getRecord(courseId);
+      const presetId=String(fresh&&fresh.presetId||engine.defaultPreset?.().id||"");
+      const overrides=fresh&&fresh.courseOverrides||{};
+      gdAdminCourseVisualToast("Applying native visuals and terrain shading");
+      await engine.buildCourseVisualPreview(courseId,presetId,overrides);
+    }catch(error){
+      console.warn("[GolfDaddy] course visual pipeline failed",error);
+    }finally{
+      delete gdAdminCourseVisualPipelinePending[key];
+      if(gdAdminCourseDatabaseSelected===courseId&&gdAdminCourseDatabaseTab==="visuals")gdRenderAdminCourseDatabase();
+    }
+  },0);
+  return key;
+}
 function gdAdminCourseVisualSvgText(src){
   src=String(src||"");
   if(!/^data:image\/svg\+xml/i.test(src))return "";
@@ -6826,15 +6904,17 @@ function gdAdminCourseVisualInlineSvg(src,label){
     if(root&&String(root.nodeName||"").toLowerCase()==="svg"){
       const images=Array.from(root.querySelectorAll("image"));
       const sourceImageCount=images.length;
-      if(sourceImageCount>700){
+      const productPreview=/course overview|single hole/i.test(String(label||""));
+      if(sourceImageCount>700&&!productPreview){
         images.forEach(img=>{
           const role=img.closest("[data-role]")?.getAttribute("data-role")||"";
           if(role&&role!=="course-backdrop")img.remove();
         });
       }
       let previewImages=Array.from(root.querySelectorAll("image"));
-      if(previewImages.length>260){
-        const stride=Math.max(1,Math.ceil(previewImages.length/260));
+      const maxPreviewImages=productPreview?900:260;
+      if(previewImages.length>maxPreviewImages){
+        const stride=Math.max(1,Math.ceil(previewImages.length/maxPreviewImages));
         previewImages.forEach((img,index)=>{if(index%stride)img.remove();});
         previewImages=Array.from(root.querySelectorAll("image"));
       }
@@ -7077,6 +7157,49 @@ function gdAdminCourseVisualImage(label,visual,fallback){
   const inline=gdAdminCourseVisualInlineSvg(src,label);
   return `<div class="gdAdminCourseVisualSlot"><div class="gdAdminCourseVisualSlotHead"><strong>${gdEscapeHTML(label)}</strong>${dims?`<small>${gdEscapeHTML(dims)}</small>`:""}</div><div class="gdAdminCourseVisualFrame${scrollClass}">${(inline||src)?(inline||`<img src="${gdEscapeHTML(src)}" alt="${gdEscapeHTML(label)}" loading="lazy" decoding="async">`):`<div class="gdAdminCourseVisualEmpty">${gdEscapeHTML(empty)}</div>`}</div>${meta.length?`<div class="gdAdminCourseVisualMeta">${meta.map(item=>`<span>${gdEscapeHTML(item)}</span>`).join("")}</div>`:""}</div>`;
 }
+function gdAdminCourseVisualStageAssetReady(asset){
+  return !!(asset&&(asset.dataUrl||asset.path));
+}
+function gdAdminCourseVisualProductBase(record){
+  if(record&&record.basicVisual){
+    return Object.assign({},record.basicVisual,{width:record.rawMaster&&record.rawMaster.width,height:record.rawMaster&&record.rawMaster.height,bounds:record.rawMaster&&record.rawMaster.bounds,metadata:Object.assign({},record.basicVisual.metadata||{},{stage:"base-capture",role:"basic"})});
+  }
+  return record&&record.rawMaster||null;
+}
+function gdAdminCourseVisualProducts(record){
+  const overviewNative=gdAdminCourseVisualStageReady(record&&record.previewVisual,"native-visuals")?record.previewVisual:null;
+  const overviewTerrain=gdAdminCourseVisualStageReady(record&&record.terrainView,"terrain-shading","native-visuals")?record.terrainView:null;
+  const holeNative=gdAdminCourseVisualStageReady(record&&record.singleHolePreviewVisual,"native-visuals")?record.singleHolePreviewVisual:null;
+  const holeTerrain=gdAdminCourseVisualStageReady(record&&record.singleHoleTerrainView,"terrain-shading","native-visuals")?record.singleHoleTerrainView:null;
+  return [
+    {label:"Course overview",base:gdAdminCourseVisualProductBase(record),native:overviewNative,terrain:overviewTerrain,published:record&&record.publishedVisual||null},
+    {label:"Single hole",base:record&&record.exampleHoleVisual||null,native:holeNative,terrain:holeTerrain,published:record&&record.singleHolePublishedVisual||null,holeNumber:record&&record.exampleHoleVisual&&record.exampleHoleVisual.holeNumber||record&&record.singleHoleTerrainView&&record.singleHoleTerrainView.holeNumber||null}
+  ];
+}
+function gdAdminCourseVisualProductCard(product){
+  const visual=product.terrain||product.native||product.published||product.base||null;
+  const src=visual&&visual.dataUrl||"";
+  const width=Number(visual&&visual.width||visual&&visual.metadata&&visual.metadata.outputDimensions&&visual.metadata.outputDimensions.width||0)||0;
+  const height=Number(visual&&visual.height||visual&&visual.metadata&&visual.metadata.outputDimensions&&visual.metadata.outputDimensions.height||0)||0;
+  const dims=width&&height?`${Math.round(width)}×${Math.round(height)}`:"";
+  const activeStage=product.terrain?"Terrain shading":product.native?"Native visuals":product.published?"Published":product.base?"Base capture":"Waiting";
+  const aspect=width&&height?width/height:0;
+  const scrollClass=aspect&&(aspect<.35||aspect>3.25)?" scroll":"";
+  const inline=gdAdminCourseVisualInlineSvg(src,product.label);
+  const frame=(inline||src)?(inline||`<img src="${gdEscapeHTML(src)}" alt="${gdEscapeHTML(product.label)}" loading="lazy" decoding="async">`):`<div class="gdAdminCourseVisualEmpty">Awaiting ${gdEscapeHTML(product.label.toLowerCase())}</div>`;
+  const stages=[
+    {label:"Base capture",asset:product.base,ready:gdAdminCourseVisualStageAssetReady(product.base)},
+    {label:"Native visuals",asset:product.native,ready:gdAdminCourseVisualStageAssetReady(product.native)},
+    {label:"Terrain shading",asset:product.terrain,ready:gdAdminCourseVisualStageAssetReady(product.terrain)},
+    {label:"Published",asset:product.published,ready:gdAdminCourseVisualStageAssetReady(product.published)}
+  ];
+  const meta=[
+    activeStage,
+    product.holeNumber?`H${product.holeNumber}`:"",
+    visual&&visual.path?String(visual.path).split("/").slice(-3).join("/"):""
+  ].filter(Boolean);
+  return `<div class="gdAdminCourseVisualSlot product"><div class="gdAdminCourseVisualSlotHead"><strong>${gdEscapeHTML(product.label)}</strong>${dims?`<small>${gdEscapeHTML(dims)}</small>`:""}</div><div class="gdAdminCourseVisualFrame${scrollClass}">${frame}</div><div class="gdAdminCourseVisualStages">${stages.map(stage=>`<span class="gdAdminCourseVisualStage ${stage.ready?"ready":"pending"}">${gdEscapeHTML(stage.label)}</span>`).join("")}</div>${meta.length?`<div class="gdAdminCourseVisualMeta">${meta.map(item=>`<span>${gdEscapeHTML(item)}</span>`).join("")}</div>`:""}</div>`;
+}
 function gdAdminCourseVisualControls(record){
   const modes=["Natural","Fresh","Rich","Strong"];
   const preset=(record&&record.presetId)||"clarity-course-natural-v1";
@@ -7145,12 +7268,13 @@ function gdAdminCourseVisualPublish(courseId){
         await engine.buildFromCourseDatabase(courseId,{enable3dBeta:beta3d});
       }
       record=gdAdminCourseVisualRecord(courseId)||engine.getRecord(courseId);
-      if(!record.previewVisual||record.settingsDirty||String(record.previewVisual.presetId||"")!==presetId){
-        gdAdminCourseVisualToast("Building styled preview");
+      if(gdAdminCourseVisualNeedsPipeline(record)||!record.previewVisual||record.settingsDirty||String(record.previewVisual.presetId||"")!==presetId){
+        gdAdminCourseVisualToast("Applying native visuals and terrain shading");
         await engine.buildCourseVisualPreview(courseId,presetId,overrides);
       }
       record=gdAdminCourseVisualRecord(courseId)||engine.getRecord(courseId);
-      if(!record.previewVisual)throw new Error(record.lastError&&record.lastError.message||"Styled preview did not build.");
+      if(!record.previewVisual||!record.terrainView)throw new Error(record.lastError&&record.lastError.message||"Course overview pipeline did not build.");
+      if(!record.singleHolePreviewVisual||!record.singleHoleTerrainView)throw new Error(record.lastError&&record.lastError.message||"Single-hole pipeline did not build.");
       engine.publishCourseVisual(courseId);
       gdAdminCourseVisualToast("Published Clarity course map");
     }catch(error){
@@ -7187,7 +7311,10 @@ function gdAdminCourseVisualMarkup(selected){
   const sourceStatus=gdAdminCourseVisualSourceStatus(selected);
   const autoBuildNeeded=gdAdminCourseVisualNeedsAutoBuild(record,sourceStatus);
   const autoBuildKey=gdAdminCourseVisualScheduleAutoBuild(selected.id,record,sourceStatus);
+  const pipelineKey=autoBuildNeeded?"":gdAdminCourseVisualSchedulePipeline(selected.id,record,sourceStatus);
   const autoBuildStatus=autoBuildKey&&gdAdminCourseVisualAutoBuildPending[autoBuildKey]?"building":autoBuildNeeded?(autoBuildKey&&gdAdminCourseVisualAutoBuildAttempted[autoBuildKey]?"check diagnostics":"queued"):"ready";
+  const pipelineNeeded=!autoBuildNeeded&&gdAdminCourseVisualNeedsPipeline(record);
+  const pipelineStatus=pipelineKey&&gdAdminCourseVisualPipelinePending[pipelineKey]?"native + terrain":pipelineNeeded?(pipelineKey&&gdAdminCourseVisualPipelineAttempted[pipelineKey]?"check diagnostics":"queued"):"ready";
   const inputCaptureLabel=record&&record.input?record.input.captureCount:`${sourceStatus.renderableCount} available`;
   const planSummary=record&&record.diagnostics&&record.diagnostics.capturePlanSummary||null;
   const planLabel=planSummary?`${planSummary.captured}/${planSummary.planned} captured`:"not planned";
@@ -7213,22 +7340,14 @@ function gdAdminCourseVisualMarkup(selected){
       gdAdminCourseDbMetric("Current version",record.currentVersion||0),
       gdAdminCourseDbMetric("Published",record.publishedVersion||0),
       gdAdminCourseDbMetric("Layer model",planSummary?"live underlay + HD overlays":"live map fallback"),
-      gdAdminCourseDbMetric("Pipeline",autoBuildStatus),
+      gdAdminCourseDbMetric("Pipeline",autoBuildStatus==="ready"?pipelineStatus:autoBuildStatus),
       gdAdminCourseDbMetric("3D beta",beta3dLabel),
       gdAdminCourseDbMetric("Play asset",diagnostics.resolvedPlayAsset?"visual":"live map fallback")
     ].join("")}</div>`,
-    `<div class="gdAdminCourseVisualGrid">${[
-      gdAdminCourseVisualStitchView(record,planSummary),
-      gdAdminCourseVisualImage("Raw / working",record.basicVisual,record.rawMaster),
-      gdAdminCourseVisualImage("Example hole",record.exampleHoleVisual),
-      gdAdminCourseVisualImage("Terrain view",record.terrainView),
-      gdAdminCourseVisualImage("3D view beta",record.beta3dView),
-      gdAdminCourseVisualImage("Styled preview",record.previewVisual),
-      gdAdminCourseVisualImage("Published",record.publishedVisual)
-    ].join("")}</div>`,
+    `<div class="gdAdminCourseVisualProducts">${gdAdminCourseVisualProducts(record).map(gdAdminCourseVisualProductCard).join("")}</div>`,
+    record.lastError?`<div class="gdAdminCourseVisualNotice">${gdEscapeHTML(record.lastError.message||record.lastError.code||"Course visual pipeline needs attention.")}</div>`:"",
     gdAdminCourseVisualControls(record),
-    `<div class="gdAdminCourseVisualActions"><button class="primary" type="button" onclick="return gdAdminCourseVisualPublish('${gdEscapeHTML(selected.id)}')">Publish Clarity Map</button></div>`,
-    `<div class="gdAdminCourseVisualDiag">${gdEscapeHTML(JSON.stringify(diagnostics,null,2))}</div>`
+    `<div class="gdAdminCourseVisualActions"><button class="primary" type="button" onclick="return gdAdminCourseVisualPublish('${gdEscapeHTML(selected.id)}')">Publish Clarity Map</button></div>`
   ].join("");
 }
 function gdRenderAdminCourseDatabase(){
