@@ -6549,6 +6549,28 @@ function gdAdminCourseDbSetTab(tab){
 function gdAdminCourseVisualRecord(courseId){
   try{return window.GDCourseVisualEngine&&window.GDCourseVisualEngine.getRecord(courseId)||null;}catch(e){return null;}
 }
+function gdAdminCourseVisualSourceStatus(selected){
+  const rows=gdAdminCourseDbFrameRows(selected&&selected.id||selected&&selected.key||"");
+  const details=rows.map(row=>{
+    const key=row&&row.manifestKey||row&&row.capturedManifestKey||null;
+    let manifest=null;
+    try{manifest=key?JSON.parse(localStorage.getItem(String(key))||"null"):null;}catch(e){manifest=null;}
+    const pins=manifest&&manifest.anchorPins||manifest&&manifest.pins||{};
+    const hasBounds=!!(manifest&&manifest.bounds)||!!(pins&&((pins.tee&&pins.green)||(Array.isArray(pins.route)&&pins.route.length)||(Array.isArray(pins.greenShape)&&pins.greenShape.length)));
+    return {
+      holeNumber:row&&row.holeNumber||"",
+      manifestKey:key,
+      hasManifest:!!manifest,
+      tiles:manifest&&Array.isArray(manifest.tiles)?manifest.tiles.length:0,
+      width:Number(manifest&&manifest.imageWidth||manifest&&manifest.width||0)||0,
+      height:Number(manifest&&manifest.imageHeight||manifest&&manifest.height||0)||0,
+      hasBounds:hasBounds
+    };
+  });
+  const manifestCount=details.filter(row=>row.hasManifest).length;
+  const renderableCount=details.filter(row=>row.hasManifest&&row.tiles&&row.width&&row.height&&row.hasBounds).length;
+  return {frameCount:rows.length,manifestCount,renderableCount,details};
+}
 function gdAdminCourseVisualImage(label,visual){
   const src=visual&&visual.dataUrl||"";
   return `<div class="gdAdminCourseVisualSlot"><strong>${gdEscapeHTML(label)}</strong>${src?`<img src="${gdEscapeHTML(src)}" alt="${gdEscapeHTML(label)}">`:`<div class="gdAdminCourseVisualEmpty">Unavailable</div>`}</div>`;
@@ -6627,9 +6649,12 @@ function gdAdminCourseVisualMarkup(selected){
   const record=gdAdminCourseVisualRecord(selected.id)||engine.getRecord(selected.id);
   const resolved=engine.resolveCourseVisual(selected.id);
   const dirty=record&&record.settingsDirty?" · unsaved settings":"";
+  const sourceStatus=gdAdminCourseVisualSourceStatus(selected);
+  const inputCaptureLabel=record&&record.input?record.input.captureCount:`${sourceStatus.renderableCount} available`;
   const diagnostics={
     status:record&&record.status,
     inputStatus:record&&record.input||null,
+    sourceStatus:sourceStatus,
     preset:{id:record&&record.presetId,version:record&&record.presetVersion},
     rendererVersion:engine.rendererVersion,
     resolvedPlayAsset:resolved&&resolved.publishedVisual?resolved.publishedVisual.path:resolved&&resolved.basicVisual?resolved.basicVisual.path:null,
@@ -6640,7 +6665,8 @@ function gdAdminCourseVisualMarkup(selected){
   return [
     `<div class="gdAdminCourseDetailHead"><div><h4>Course Visuals · ${gdEscapeHTML(selected.name)}</h4><span>${gdEscapeHTML(record.status||"unavailable")} · ${gdEscapeHTML(record.presetId||"global preset")}${dirty}</span></div></div>`,
     `<div class="gdAdminDatabaseSummary">${[
-      gdAdminCourseDbMetric("Input captures",record.input&&record.input.captureCount||0),
+      gdAdminCourseDbMetric("Input captures",inputCaptureLabel),
+      gdAdminCourseDbMetric("Source manifests",`${sourceStatus.manifestCount}/${sourceStatus.frameCount}`),
       gdAdminCourseDbMetric("Current version",record.currentVersion||0),
       gdAdminCourseDbMetric("Published",record.publishedVersion||0),
       gdAdminCourseDbMetric("Play asset",diagnostics.resolvedPlayAsset?"visual":"live map fallback")
