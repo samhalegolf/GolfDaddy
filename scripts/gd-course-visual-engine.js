@@ -7,7 +7,7 @@
 
   var VERSION=1;
   var PRESET_VERSION=4;
-  var RENDERER_VERSION="clarity-course-visual-renderer-v24";
+  var RENDERER_VERSION="clarity-course-visual-renderer-v25";
   var STORE_KEY="gd_course_visual_engine_v1";
   var PRESET_KEY="gd_course_visual_presets_v1";
   var API_ENDPOINT="/api/course-visuals";
@@ -1668,10 +1668,12 @@
       var type=String(object&&object.type||"");
       if(!/fairway/i.test(type))return false;
       if(meta&&meta.holeNumber&&object&&object.holeNumber&&Number(object.holeNumber)!==Number(meta.holeNumber))return false;
+      var pts=pointsFromGeometry(object&&object.geometry);
+      if(!geometryIsPolygon(object&&object.geometry,pts))return false;
       var b=objectBounds(object);
       return !b||boundsIntersects(padBounds(b,airbrush.widthMeters*1.3),bounds);
     });
-    if(!objects.length)return {defs:"",layer:"",metadata:{enabled:false,reason:"missing-fairway-geometry"}};
+    if(!objects.length)return {defs:"",layer:"",metadata:{enabled:false,reason:"missing-fairway-polygon-geometry"}};
     var projectedModel=fairwayAirbrushProjector(bounds,dims,meta);
     var project=projectedModel&&projectedModel.project;
     if(!project)return {defs:"",layer:"",metadata:{enabled:false,reason:"missing-projector"}};
