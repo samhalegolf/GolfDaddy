@@ -98,7 +98,8 @@ export default async function courseVisuals(req) {
       headers: { Prefer: "resolution=merge-duplicates,return=representation" },
       body: JSON.stringify(visualToRow(visual))
     });
-    return json(200, { visual, storage: "supabase" });
+    const responseVisual = withPlayPayload(visual);
+    return json(200, { visual: responseVisual, play_payload: responseVisual.play_payload, playPayload: responseVisual.play_payload, storage: "supabase" });
   } catch (error) {
     return json(error.status || 503, { error: storageMessage(error), visual });
   }
@@ -162,7 +163,7 @@ function visualToRow(visual) {
 }
 
 function rowToVisual(row) {
-  return {
+  return withPlayPayload({
     id: text(row && row.id, 180),
     course_id: text(row && row.course_id, 160),
     status: status(row && row.status),
@@ -183,7 +184,84 @@ function rowToVisual(row) {
     uploaded_assets: jsonArray(row && row.uploaded_assets),
     created_at: text(row && row.created_at, 80),
     updated_at: text(row && row.updated_at, 80)
+  });
+}
+
+function withPlayPayload(visual) {
+  const out = Object.assign({}, visual || {});
+  out.play_payload = visualToPlayPayload(out);
+  out.playPayload = out.play_payload;
+  return out;
+}
+
+function visualToPlayPayload(visual) {
+  visual = visual || {};
+  const overview = playAssetForRole(visual, "published", visual.published_image_path);
+  const singleHole = playAssetForRole(visual, "single-hole-published", "");
+  const statusValue = visual.status === "published" && overview ? "published" : "unavailable";
+  return {
+    schema: "gd.course_visual.play_payload",
+    version: 1,
+    source: "supabase-course-visuals",
+    course_id: text(visual.course_id, 160),
+    courseId: text(visual.course_id, 160),
+    status: statusValue,
+    published_version: integer(visual.published_version),
+    publishedVersion: integer(visual.published_version),
+    preset_id: text(visual.preset_id, 160),
+    presetId: text(visual.preset_id, 160),
+    preset_version: integer(visual.preset_version),
+    presetVersion: integer(visual.preset_version),
+    course_bounds: jsonObject(visual.course_bounds),
+    courseBounds: jsonObject(visual.course_bounds),
+    published_visual: overview,
+    publishedVisual: overview,
+    single_hole_published_visual: singleHole,
+    singleHolePublishedVisual: singleHole,
+    assets: {
+      overview,
+      singleHole
+    },
+    updated_at: text(visual.updated_at, 80),
+    updatedAt: text(visual.updated_at, 80)
   };
+}
+
+function playAssetForRole(visual, role, fallbackPath) {
+  const uploaded = jsonArray(visual && visual.uploaded_assets).find((asset) => String(asset && asset.role || "") === role);
+  const sourcePath = text(uploaded && uploaded.path || fallbackPath, 420);
+  const objectPath = storageObjectPath(sourcePath);
+  if (!objectPath) return null;
+  const publicUrl = publicStorageUrl(objectPath);
+  return {
+    role,
+    path: displayAssetPath(sourcePath || objectPath),
+    storage_path: BUCKET + "/" + objectPath,
+    storagePath: BUCKET + "/" + objectPath,
+    public_url: publicUrl,
+    publicUrl,
+    url: publicUrl,
+    content_type: text(uploaded && (uploaded.contentType || uploaded.content_type), 80) || "image/svg+xml",
+    contentType: text(uploaded && (uploaded.contentType || uploaded.content_type), 80) || "image/svg+xml",
+    byte_length: integer(uploaded && (uploaded.byteLength ?? uploaded.byte_length)),
+    byteLength: integer(uploaded && (uploaded.byteLength ?? uploaded.byte_length))
+  };
+}
+
+function storageObjectPath(value) {
+  return text(value, 420).replace(/^\/+/, "").replace(/^course-visuals\//, "");
+}
+
+function displayAssetPath(value) {
+  const pathValue = text(value, 420).replace(/^\/+/, "");
+  return /^course-visuals\//.test(pathValue) ? pathValue : "course-visuals/" + storageObjectPath(pathValue);
+}
+
+function publicStorageUrl(objectPath) {
+  const base = supabaseBase();
+  const clean = storageObjectPath(objectPath);
+  if (!base || !clean) return "";
+  return base + "/storage/v1/object/public/" + BUCKET + "/" + clean.split("/").map(encodeURIComponent).join("/");
 }
 
 function isAdminActor(actor) {
@@ -262,6 +340,8 @@ export const __courseVisualsTest = {
   sanitizeVisual,
   visualToRow,
   rowToVisual,
+  visualToPlayPayload,
+  withPlayPayload,
   sanitizeAsset,
   dataUrlToBytes,
 };

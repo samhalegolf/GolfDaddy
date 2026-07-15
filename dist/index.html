@@ -7283,6 +7283,10 @@ function gdAdminCourseVisualScheduleLiveBuild(courseId){
   },900);
 }
 function gdAdminCourseVisualControlChanged(courseId){
+  const engine=window.GDCourseVisualEngine;
+  if(engine&&typeof engine.saveCourseVisualSettings==="function"){
+    try{engine.saveCourseVisualSettings(courseId,gdAdminCourseVisualOverridesFromForm());}catch(e){}
+  }
   gdAdminCourseVisualApplyLiveFilter(courseId);
   gdAdminCourseVisualScheduleLiveBuild(courseId);
   return false;
@@ -7469,7 +7473,14 @@ function gdAdminCourseVisualPublish(courseId){
       if(!record.previewVisual||!record.terrainView)throw new Error(record.lastError&&record.lastError.message||"Course overview pipeline did not build.");
       if(!record.singleHolePreviewVisual||!record.singleHoleTerrainView)throw new Error(record.lastError&&record.lastError.message||"Single-hole pipeline did not build.");
       engine.publishCourseVisual(courseId);
-      gdAdminCourseVisualToast("Published Clarity course map");
+      if(typeof engine.syncPublishedCourseVisual==="function"){
+        gdAdminCourseVisualToast("Saving published map to Clarity Cloud");
+        const cloud=await engine.syncPublishedCourseVisual(courseId,"publish");
+        const payloadReady=!!(cloud&&cloud.play_payload||cloud&&cloud.playPayload);
+        gdAdminCourseVisualToast(payloadReady?"Published Clarity course map to Supabase":"Published Clarity course map");
+      }else{
+        gdAdminCourseVisualToast("Published Clarity course map");
+      }
     }catch(error){
       console.warn("[GolfDaddy] course visual publish failed",error);
       gdAdminCourseVisualToast(error&&error.message?error.message:"Course visual publish failed");

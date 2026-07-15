@@ -235,10 +235,13 @@ function payload() {
   assert.equal(preview.terrainView.metadata.terrainStrength, 0.42, "course overview keeps the softer terrain strength");
   assert.ok(preview.singleHolePreviewVisual.path.includes("/single-hole/preview/"), "single-hole visual enters native visuals");
   assert.equal(preview.singleHolePreviewVisual.metadata.stage, "native-visuals", "single-hole native visual records the native stage");
-  assert.ok(svgText(preview.singleHolePreviewVisual.dataUrl).includes("fairway-airbrush"), "single-hole native visuals include the fairway burn-rescue airbrush layer");
-  assert.ok(svgText(preview.singleHolePreviewVisual.dataUrl).includes("green-surround-airbrush"), "single-hole native visuals include green-surround burn rescue");
+  const singleHoleNativeSvg = svgText(preview.singleHolePreviewVisual.dataUrl);
+  assert.ok(singleHoleNativeSvg.includes("fairway-airbrush"), "single-hole native visuals include the fairway burn-rescue airbrush layer");
+  assert.ok(singleHoleNativeSvg.includes("green-surround-airbrush"), "single-hole native visuals include green-surround burn rescue");
+  assert.ok(singleHoleNativeSvg.includes("cvGreenSurroundAirbrushClip"), "green-surround airbrush is hard-clipped to green geometry");
   assert.equal(preview.singleHolePreviewVisual.metadata.fairwayAirbrush.preserves, "relative-luminance-and-mow-lines", "fairway airbrush preserves mowing-line texture");
   assert.equal(preview.singleHolePreviewVisual.metadata.greenSurroundAirbrush.preserves, "relative-luminance-and-mow-lines", "green-surround airbrush preserves mowing-line texture");
+  assert.equal(preview.singleHolePreviewVisual.metadata.greenSurroundAirbrush.bounds, "green-polygon-only", "green-surround airbrush metadata records the green-only bounds");
   assert.ok(preview.singleHoleTerrainView.path.includes("/single-hole/terrain/"), "single-hole visual enters terrain shading");
   assert.equal(preview.singleHoleTerrainView.metadata.inputStage, "native-visuals", "single-hole terrain shading consumes the native hole output");
   assert.equal(preview.singleHoleTerrainView.metadata.terrainStrength, 0.85, "single-hole terrain uses the stronger preset terrain strength");
@@ -250,6 +253,35 @@ function payload() {
   assert.equal(published.publishedVisual.dataUrl, published.terrainView.dataUrl, "published overview uses the terrain-shaded product");
   assert.ok(published.singleHolePublishedVisual && published.singleHolePublishedVisual.dataUrl === published.singleHoleTerrainView.dataUrl, "publish includes the terrain-shaded single-hole product");
   assert.ok(published.versions.filter((item) => item.type === "published").length >= 1, "published versions remain in history");
+
+  const originalFetch = global.fetch;
+  const originalAccounts = global.GolfDaddyAccounts;
+  let cloudRequest = null;
+  global.GolfDaddyAccounts = { current() { return { role: "admin", email: "samhalegolf@gmail.com", accountId: "acct-test" }; } };
+  global.fetch = async function mockCourseVisualCloud(url, options) {
+    cloudRequest = { url, options, body: JSON.parse(options.body) };
+    return {
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({
+        storage: "supabase",
+        play_payload: {
+          status: "published",
+          published_visual: { url: "https://example.test/course-visuals/cromwell/published/2.svg" }
+        }
+      })
+    };
+  };
+  const cloud = await engine.syncPublishedCourseVisual("cromwell", "publish");
+  assert.equal(cloud.storage, "supabase", "explicit publish sync waits for Supabase");
+  assert.equal(cloud.play_payload.status, "published", "cloud response contains the Play payload");
+  assert.equal(cloudRequest.url, "/api/course-visuals", "published visuals sync to the course visuals endpoint");
+  assert.equal(cloudRequest.body.visual.status, "published", "cloud sync sends a published visual record");
+  assert.ok(cloudRequest.body.visual.assets.some((asset) => asset.role === "published"), "cloud sync uploads the published overview asset");
+  assert.ok(cloudRequest.body.visual.assets.some((asset) => asset.role === "single-hole-published"), "cloud sync uploads the single-hole published asset");
+  assert.equal(engine.getRecord("cromwell").diagnostics.cloudPublish.playPayloadReady, true, "local diagnostics record Play payload readiness");
+  global.fetch = originalFetch;
+  global.GolfDaddyAccounts = originalAccounts;
 
   const resolved = engine.resolveCourseVisual("cromwell");
   assert.equal(resolved.status, "published", "resolveCourseVisual prefers published over basic");

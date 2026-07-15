@@ -7,7 +7,7 @@ const { pathToFileURL } = require("url");
 
 (async function run() {
   const mod = await import(pathToFileURL(path.join(__dirname, "..", "functions", "course-visuals.mjs")).href);
-  const { sanitizeVisual, visualToRow, rowToVisual, sanitizeAsset, dataUrlToBytes } = mod.__courseVisualsTest;
+  const { sanitizeVisual, visualToRow, rowToVisual, visualToPlayPayload, sanitizeAsset, dataUrlToBytes } = mod.__courseVisualsTest;
 
   const visual = sanitizeVisual({
     id: "visual::cromwell",
@@ -27,7 +27,11 @@ const { pathToFileURL } = require("url");
     last_error: null,
     diagnostics: { rendererVersion: "clarity-course-visual-renderer-v2" },
     versions: [{ version: 1, type: "basic" }],
-    uploaded_assets: [{ path: "course-visuals/cromwell/basic/1.svg", role: "basic" }]
+    uploaded_assets: [
+      { path: "course-visuals/cromwell/basic/1.svg", role: "basic" },
+      { path: "cromwell/published/2.svg", role: "published", contentType: "image/svg+xml", byteLength: 128 },
+      { path: "cromwell/single-hole/published/2.svg", role: "single-hole-published", contentType: "image/svg+xml", byteLength: 96 }
+    ]
   });
 
   assert.equal(visual.course_id, "cromwell-golf-course");
@@ -47,6 +51,15 @@ const { pathToFileURL } = require("url");
   assert.equal(restored.published_image_path, "course-visuals/cromwell/published/2.svg");
   assert.equal(restored.versions[0].type, "basic");
   assert.equal(restored.uploaded_assets[0].role, "basic");
+  assert.equal(restored.play_payload.status, "published");
+  assert.equal(restored.play_payload.published_visual.storage_path, "course-visuals/cromwell/published/2.svg");
+  assert.equal(restored.play_payload.single_hole_published_visual.storage_path, "course-visuals/cromwell/single-hole/published/2.svg");
+  assert.equal(restored.playPayload.publishedVisual.path, "course-visuals/cromwell/published/2.svg");
+
+  const playPayload = visualToPlayPayload(visual);
+  assert.equal(playPayload.schema, "gd.course_visual.play_payload");
+  assert.equal(playPayload.assets.overview.role, "published");
+  assert.equal(playPayload.assets.singleHole.role, "single-hole-published");
 
   const asset = sanitizeAsset({
     path: "course-visuals/cromwell/basic/1.svg",
