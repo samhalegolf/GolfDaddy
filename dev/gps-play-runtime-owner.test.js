@@ -92,6 +92,8 @@ assertNotContains(shellCss, 'content: "Back" !important', "GPS shell no longer p
 assertContains(shellCss, "body.shell-gps #shellTop", "external shell CSS reinforces the real shell controls");
 assertContains(html, 'styles/gd-shell.css?v=real-shell-controls-20260716', "GPS shell stylesheet URL cache-busts removed fake labels");
 assertContains(runtimeCss, "body.shell-gps #courseScreen:not(.hidden) .courseNav", "course picker does not paint duplicate Back/Home above the shell");
+assertContains(runtimeCss, "body.shell-gps #courseScreen:not(.hidden),", "course picker wrapper does not block shell controls");
+assertContains(runtimeCss, "body.shell-gps #courseScreen:not(.hidden) .courseCard", "course picker keeps cards/search interactive after wrapper pass-through");
 assertContains(html, "body.gdMappedStartPromptActive #gdV62UndoDock{\n  opacity:1!important;\n  filter:none!important;\n  pointer-events:none!important;\n}", "mapped start prompt keeps the lock/shot dock visible");
 assertContains(html, "body.gdMappedStartPromptActive #hint.gdMappedStartPill{\n  z-index:2540!important;\n  bottom:calc(148px + env(safe-area-inset-bottom))!important;", "mapped start pill sits above the lock/shot dock");
 
