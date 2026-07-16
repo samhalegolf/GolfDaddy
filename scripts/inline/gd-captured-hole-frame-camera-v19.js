@@ -93,10 +93,10 @@
       mappedPoint(g.center||g.centre||g.position||g.pin||data.greenCenter||data.greenCentre);
   }
   function capturedDisplayTargetPoint(){
-    return asLL(safe(function(){return typeof gdShotDisplayTarget==="function"&&(gdShotDisplayTarget()||null);},null))||
+    return asLL(lastShotOverlayCenter)||
+      asLL(safe(function(){return typeof gdShotDisplayTarget==="function"&&(gdShotDisplayTarget()||null);},null))||
       asLL(safe(function(){return target;},null))||
-      asLL(safe(function(){return window.target;},null))||
-      asLL(lastShotOverlayCenter);
+      asLL(safe(function(){return window.target;},null));
   }
   function capturedBubbleOnGreen(display,green){
     display=asLL(display); green=asLL(green);
@@ -701,8 +701,7 @@
 	    var desiredLen=Math.sqrt(desiredDx*desiredDx+desiredDy*desiredDy);
 	    if(desiredLen<10)return null;
 	    var singleScale=baseScale*fitRatio;
-	    var axisScale=desiredLen/sourceLen;
-	    var scale=Math.max(.08,Math.min(num(opts.maxScale,4),singleScale,axisScale));
+	    var scale=Math.max(.08,Math.min(num(opts.maxScale,4),singleScale));
 	    var tx=desiredGreen.x-rGreen.x*scale;
 	    var ty=desiredGreen.y-rGreen.y*scale;
 	    var teeScreen={x:tx+rTee.x*scale,y:ty+rTee.y*scale};
@@ -1577,7 +1576,7 @@
 		      document.body.classList.remove("gdMappedStartPromptActive","gdGreenArrivalMode","gd-green-zoom-active","gdWaitingForConfirmedGreen","gdFrameCameraWaiting");
 		    }
 		    if(!opts.force&&tiltedCapturedSurfaceReady()){
-		      var lineBounds=capturedPlayLineBounds();
+		      var lineBounds=activeBounds("lock")||capturedPlayLineBounds();
 		      if(validBounds(lineBounds)&&fitCaptured(lineBounds,"hole",num(opts.padding,.025),{objectName:opts.objectName||"capturedTiltedShotLineLock",reason:opts.reason||"tilted-shot-line-lock",maxScale:3.4,fitRatio:.56})){
 		        freezeLockCamera();
 		        if(lastShotOverlayPayload&&lastShotOverlayCenter)renderShotOverlay(lastShotOverlayPayload,lastShotOverlayCenter,{remember:false});
