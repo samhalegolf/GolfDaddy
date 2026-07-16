@@ -122,64 +122,41 @@ body.gdDebugGreenMarkers .leaflet-overlay-pane path[fill="#1fd36d"][stroke="#1fd
   stroke-opacity:.18!important;
 }
 
-/* GPS emergency visual shell labels.
-   The real Back/Home buttons remain the click targets; these pseudo labels only make them visible above all map layers. */
+/* GPS shell chrome is real DOM only. Earlier body pseudo-labels painted
+   fake Back/Home pills above the actual controls and covered Settings. */
 body.gdGpsShellFrame::before,
 body[data-clarity-route="gps"]::before,
 body.shell-gps::before,
 body.gdGpsActive::before,
-body.gps-active::before {
-  content: "Back" !important;
-  position: fixed !important;
-  left: max(12px, env(safe-area-inset-left)) !important;
-  top: max(10px, env(safe-area-inset-top)) !important;
-  min-width: 66px !important;
-  height: 46px !important;
-  padding: 0 14px !important;
-  display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  border-radius: 999px !important;
-  background: rgba(0,0,0,.78) !important;
-  border: 1px solid rgba(255,255,255,.34) !important;
-  box-shadow: 0 18px 36px rgba(0,0,0,.52), inset 0 1px 0 rgba(255,255,255,.18) !important;
-  color: #fff !important;
-  font-size: 14px !important;
-  font-weight: 950 !important;
-  line-height: 1 !important;
-  z-index: 2147483646 !important;
-  pointer-events: none !important;
-  opacity: 1 !important;
-  visibility: visible !important;
-  transform: translateZ(0) !important;
-}
-
+body.gps-active::before,
 body.gdGpsShellFrame::after,
 body[data-clarity-route="gps"]::after,
 body.shell-gps::after,
 body.gdGpsActive::after,
 body.gps-active::after {
-  content: "Home" !important;
-  position: fixed !important;
-  right: max(12px, env(safe-area-inset-right)) !important;
-  top: max(10px, env(safe-area-inset-top)) !important;
-  min-width: 66px !important;
-  height: 46px !important;
-  padding: 0 14px !important;
-  display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  border-radius: 999px !important;
-  background: rgba(0,0,0,.78) !important;
-  border: 1px solid rgba(255,255,255,.34) !important;
-  box-shadow: 0 18px 36px rgba(0,0,0,.52), inset 0 1px 0 rgba(255,255,255,.18) !important;
-  color: #fff !important;
-  font-size: 14px !important;
-  font-weight: 950 !important;
-  line-height: 1 !important;
-  z-index: 2147483646 !important;
-  pointer-events: none !important;
-  opacity: 1 !important;
-  visibility: visible !important;
+  content: none !important;
+  display: none !important;
+}
+
+body.shell-gps #shellTop,
+body.gdGpsActive #shellTop,
+body.gps-active #shellTop {
+  z-index: 2147483000 !important;
+  isolation: isolate !important;
   transform: translateZ(0) !important;
+}
+
+body.shell-gps #shellTop #shellBackBtn,
+body.shell-gps #shellTop #shellHomeBtn,
+body.shell-gps #shellTop #shellSettingsBtn,
+body.gdGpsActive #shellTop #shellBackBtn,
+body.gdGpsActive #shellTop #shellHomeBtn,
+body.gdGpsActive #shellTop #shellSettingsBtn,
+body.gps-active #shellTop #shellBackBtn,
+body.gps-active #shellTop #shellHomeBtn,
+body.gps-active #shellTop #shellSettingsBtn {
+  background: rgba(0,0,0,.82) !important;
+  border-color: rgba(255,255,255,.24) !important;
+  box-shadow: 0 18px 36px rgba(0,0,0,.46), inset 0 1px 0 rgba(255,255,255,.14) !important;
+  z-index: 2147483001 !important;
 }

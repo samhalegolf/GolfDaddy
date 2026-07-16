@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 
 const html = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
+const shellCss = fs.readFileSync(path.join(__dirname, "..", "styles", "gd-shell.css"), "utf8");
 
 function scriptById(id) {
   const match = html.match(new RegExp(`<script id="${id}">([\\s\\S]*?)<\\/script>`));
@@ -84,7 +85,11 @@ assertContains(runtimeCss, "body.shell-gps #shellHomeBtn", "GPS runtime keeps sh
 assertContains(runtimeCss, "body.shell-gps #shellTop #shellSettingsBtn", "GPS runtime keeps shell Settings visible");
 assertNotContains(runtimeCss, "#shellHomeBtn{display:none!important", "GPS runtime does not hide the real Home button");
 assertContains(runtimeCss, "#gdToolRailTab{position:fixed!important", "GPS runtime owns the tool tab position");
-assertContains(runtimeCss, "z-index:8270!important", "Settings sits above the tool tab");
+assertContains(runtimeCss, "z-index:2147483000!important", "GPS runtime lifts the real shell row above map layers");
+assertContains(runtimeCss, "z-index:2147483002!important", "Settings sits above the tool tab");
+assertNotContains(shellCss, 'content: "Home" !important', "GPS shell no longer paints a fake Home label over Settings");
+assertNotContains(shellCss, 'content: "Back" !important', "GPS shell no longer paints a fake Back label over Back");
+assertContains(shellCss, "body.shell-gps #shellTop", "external shell CSS reinforces the real shell controls");
 assertContains(html, "body.gdMappedStartPromptActive #gdV62UndoDock{\n  opacity:1!important;\n  filter:none!important;\n  pointer-events:none!important;\n}", "mapped start prompt keeps the lock/shot dock visible");
 assertContains(html, "body.gdMappedStartPromptActive #hint.gdMappedStartPill{\n  z-index:2540!important;\n  bottom:calc(148px + env(safe-area-inset-bottom))!important;", "mapped start pill sits above the lock/shot dock");
 
