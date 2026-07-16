@@ -18132,14 +18132,15 @@ function gdFinalizeHeadToTeeShot(hole){
   if(!start||!target)return false;
   try{mode="aim"}catch(e){}
   try{document.getElementById("shotTile")?.classList.add("visible")}catch(e){}
-  try{if(!lockedFrame&&typeof lockFrame==="function")lockFrame(false);else if(!lockedFrame&&typeof setBubbleOnlyLock==="function")setBubbleOnlyLock(true);}catch(e){}
   try{gdApplyHeadToTeeBagTarget(hole)}catch(e){}
+  try{if(!lockedFrame&&typeof lockFrame==="function")lockFrame(false);else if(!lockedFrame&&typeof setBubbleOnlyLock==="function")setBubbleOnlyLock(true);}catch(e){}
   try{if(typeof renderShot==="function")renderShot();}catch(e){}
   try{if(typeof updatePinLine==="function")updatePinLine();}catch(e){}
+  try{if(typeof gdHeadToTeeShotFrame==="function")gdHeadToTeeShotFrame();}catch(e){}
   try{if(!gdIsLayupTarget(greenCentre,target))setState(`Hole ${hole||""}`.trim()||"Hole")}catch(e){}
   try{hideHint()}catch(e){}
   try{const hint=document.getElementById("hint");if(hint){hint.classList.remove("visible","gdMappedStartPill");hint.textContent="";}}catch(e){}
-  [0,180,520,980].forEach(delay=>setTimeout(gdHeadToTeeShotFrame,delay));
+  [180,520,980].forEach(delay=>setTimeout(gdHeadToTeeShotFrame,delay));
   toast("Tee start set");
   return true;
 }

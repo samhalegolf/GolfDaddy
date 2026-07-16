@@ -583,6 +583,19 @@
 	    if(!manifest||!manifestMatchesActive(manifest))return false;
 	    var el=document.getElementById("gdHoleImageCameraLayer");
 	    if(!el){el=document.createElement("div");el.id="gdHoleImageCameraLayer";el.setAttribute("aria-hidden","true");document.body.appendChild(el);}
+	    var manifestKey=String(manifest.key||manifest.storageKey||manifest.scanId||manifest.activeScanId||storageKey()||"");
+	    var existingGroup=el.querySelector(".gdHoleImageTiles");
+	    var sameRenderedSurface=!!(existingGroup&&
+	      String(el.dataset.gdCapturedSurfaceManifestKey||"")===manifestKey&&
+	      String(el.dataset.gdCapturedSurfaceHole||"")===String(manifest.holeNumber||"")&&
+	      String(el.dataset.gdCapturedSurfaceCourse||"")===String(manifest.courseKey||manifest.courseName||"")&&
+	      existingGroup.querySelectorAll(".gdHoleImageTile").length===(manifest.tiles||[]).length);
+	    if(sameRenderedSurface){
+	      clearTerminalCapturedUnavailable("render-capture-manifest");
+	      clearHoleFrameLoading();
+	      clearCapturedFrameUnavailable();
+	      return true;
+	    }
 		    var tiles=(manifest.tiles||[]).map(function(t){
 		      var w=Math.max(1,Math.round(Number(t.width)||258));
 		      var h=Math.max(1,Math.round(Number(t.height)||258));
@@ -592,7 +605,7 @@
 		    el.dataset.gdCapturedSurfaceHole=String(manifest.holeNumber||"");
 			    el.dataset.gdCapturedSurfaceCourse=String(manifest.courseKey||manifest.courseName||"");
 			    el.dataset.gdCapturedSurfaceScanId=String(manifest.scanId||manifest.activeScanId||"");
-			    el.dataset.gdCapturedSurfaceManifestKey=String(manifest.key||manifest.storageKey||manifest.scanId||manifest.activeScanId||storageKey()||"");
+			    el.dataset.gdCapturedSurfaceManifestKey=manifestKey;
 			    el.dataset.gdIncludeTee=manifest.includeTee?"1":"0";
 		    if(manifest.teeLatLng){el.dataset.gdTeeLat=String(manifest.teeLatLng.lat);el.dataset.gdTeeLng=String(manifest.teeLatLng.lng);}
 		    else{delete el.dataset.gdTeeLat;delete el.dataset.gdTeeLng;}
@@ -1666,7 +1679,7 @@
     window.gdQueueMappedPreLockHoleFrame=function(opts){setTimeout(function(){setup(opts||{});},30);return true;};
     window.gdFocusMappedPreLockHole=function(hole,opts){return setup(opts||{});};
     window.gdSimpleFrameLock=lock;
-	    window.gdHeadToTeeShotFrame=function(){return lockState({animate:false,fromHeadToTee:true,objectName:"capturedHeadToTeeLockFrame",reason:"head-to-tee-lock"});};
+	    window.gdHeadToTeeShotFrame=function(){safe(function(){lockedFrame=true;});return lockState({animate:false,fromHeadToTee:true,objectName:"capturedHeadToTeeLockFrame",reason:"head-to-tee-lock"});};
     window.frameShotView=function(){return lock({animate:true});};
     window.lockFrame=function(refit){safe(function(){lockedFrame=true;});if(refit!==false&&tiltedCapturedSurfaceReady()){safe(function(){setBubbleOnlyLock(true);});safe(function(){renderShot();});lock({animate:true});}else if(refit!==false)lock({animate:true});safe(function(){setBubbleOnlyLock(true);});safe(function(){renderShot();});return true;};
     window.gdToggleTargetZoom=zoom;
