@@ -141,7 +141,7 @@
       if(r&&Number.isFinite(r.left)&&Number.isFinite(r.width))return r;
     }
     var w=innerWidth||390,h=innerHeight||760;
-    var spec={hole:{x:.305,y:.300,w:.390,h:.255},lock:{x:.175,y:.235,w:.650,h:.430},zoom:{x:.090,y:.195,w:.820,h:.535},tee:{x:.230,y:.805,w:.540,h:.175}}[kind]||{x:.175,y:.235,w:.650,h:.430};
+	    var spec={hole:{x:.308,y:.203,w:.375,h:.160},lock:{x:.247,y:.203,w:.497,h:.222},zoom:{x:.152,y:.203,w:.687,h:.316},tee:{x:.308,y:.881,w:.375,h:.037}}[kind]||{x:.247,y:.203,w:.497,h:.222};
     return {left:w*spec.x,top:h*spec.y,right:w*(spec.x+spec.w),bottom:h*(spec.y+spec.h),width:w*spec.w,height:h*spec.h};
   }
 	  function tileLayer(){
@@ -659,8 +659,9 @@
 	    var desiredDy=desiredGreen.y-desiredTee.y;
 	    var desiredLen=Math.sqrt(desiredDx*desiredDx+desiredDy*desiredDy);
 	    if(desiredLen<10)return null;
-	    var singleScale=baseScale*fitRatio;
-	    var scale=Math.max(.08,Math.min(num(opts.maxScale,4),singleScale));
+		    var singleScale=baseScale*fitRatio;
+		    var axisScale=desiredLen/sourceLen;
+		    var scale=Math.max(.08,Math.min(num(opts.maxScale,4),singleScale,axisScale));
 	    var tx=desiredGreen.x-rGreen.x*scale;
 	    var ty=desiredGreen.y-rGreen.y*scale;
 	    var teeScreen={x:tx+rTee.x*scale,y:ty+rTee.y*scale};
@@ -874,7 +875,7 @@
 	      if(!manifest||!manifestMatchesActive(manifest))return false;
 	      if(opts.cacheOnly)return true;
 	      if(!renderCaptureManifest(manifest))return false;
-	      var ok=fitCaptured(bounds,"hole",.025,{objectName:"coursePlayPipelineHoleFrame",reason:opts.reason||"course-play-pipeline",maxScale:3.4,fitRatio:.56});
+	      var ok=fitCaptured(bounds,"hole",.025,{objectName:"coursePlayPipelineHoleFrame",reason:opts.reason||"course-play-pipeline",maxScale:7.2,fitRatio:.94});
 	      if(ok){
 	        clearTerminalCapturedUnavailable("course-play-pipeline-rendered");
 	        clearStalePreparingOwners("course-play-pipeline-rendered");
@@ -1050,7 +1051,7 @@
 	          if(holeFrameKey()!==key||!document.body||!document.body.classList.contains("gdHoleFrameLoading"))return;
 	          var b=greenBounds("hole");
 	          var manifest=loadCaptureManifest();
-	          if(manifest&&validBounds(b)&&fitCaptured(b,"hole",.025,{objectName:"capturedGreenHoleFrame",reason:"loading-ready",maxScale:3.4,fitRatio:.56}))return;
+	          if(manifest&&validBounds(b)&&fitCaptured(b,"hole",.025,{objectName:"capturedGreenHoleFrame",reason:"loading-ready",maxScale:7.2,fitRatio:.94}))return;
 	          if(pipelineReadyForActiveHole()&&gdEnsureCoursePlayFrameRendered(surfaceCourseKey(),surfaceHoleNumber()))return;
 	          if(pipelineReadyForActiveHole())return markTerminalCapturedUnavailable("pipeline-ready-captured-presentation-timeout",Object.assign({stage:"loading-timeout"},context||{}));
 	          gdCapturedFrameUnavailable("frame-loading-timeout",Object.assign({stage:"loading-timeout"},context||{}));
@@ -1158,7 +1159,7 @@
     var usableW=Math.max(30,fr.width*(1-padding*2)),usableH=Math.max(30,fr.height*(1-padding*2));
     var objW=Math.max(2,rpx.maxX-rpx.minX),objH=Math.max(2,rpx.maxY-rpx.minY);
 	    var baseScale=Math.min(usableW/objW,usableH/objH);
-	    var fitRatio={hole:.56,lock:.50,zoom:.36,tee:.56}[frame||"hole"]||.50;
+	    var fitRatio={hole:.94,lock:.94,zoom:.96,tee:.94}[frame||"hole"]||.94;
 	    fitRatio=Math.max(.18,Math.min(1,num(opts.fitRatio,fitRatio)));
 	    var scale=baseScale*fitRatio;
 	    scale=Math.max(.08,Math.min(num(opts.maxScale,4),scale));
@@ -1308,7 +1309,7 @@
 	    var b=activeBounds("zoom");
 	    lockCameraFrozen=false;
 	    if(document.body)document.body.classList.remove("gdWaitingForConfirmedGreen","gdFrameCameraWaiting");
-	    var ok=fitCaptured(b,"zoom",.018,{objectName:"capturedBubbleLongPressZoom",reason:"bubble-long-press-zoom",maxScale:3.2,fitRatio:.36})||fallbackNative(b,"zoom",.018,{animate:true});
+	    var ok=fitCaptured(b,"zoom",.018,{objectName:"capturedBubbleLongPressZoom",reason:"bubble-long-press-zoom",maxScale:7.2,fitRatio:.96})||fallbackNative(b,"zoom",.018,{animate:true});
 	    if(lastShotOverlayPayload&&lastShotOverlayCenter)renderShotOverlay(lastShotOverlayPayload,lastShotOverlayCenter,{remember:false});
 	    return ok;
 	  }
@@ -1497,7 +1498,7 @@
 	    safe(function(){var tile=document.getElementById("shotTile");if(tile)tile.classList.remove("visible");});
 	    var b=greenBounds("hole");
 	    if(document.body){document.body.classList.add("gdMappedStartPromptActive");document.body.classList.remove("gdHeadToTeeFrameActive","gdLockStateFrameActive","gdGreenArrivalMode","gd-green-zoom-active","gdWaitingForConfirmedGreen","gdFrameCameraWaiting","gd-frame-hard-locked");}
-		    return fitCaptured(b,"hole",num(opts.padding,.025),{objectName:"capturedGreenHoleFrame",reason:"setup",maxScale:3.4,fitRatio:.56})||fallbackNative(b,"hole",num(opts.padding,.025),opts);
+			    return fitCaptured(b,"hole",num(opts.padding,.025),{objectName:"capturedGreenHoleFrame",reason:"setup",maxScale:7.2,fitRatio:.94})||fallbackNative(b,"hole",num(opts.padding,.025),opts);
 	  }
 		  function headToTee(opts){
 		    opts=opts||{};
@@ -1507,7 +1508,7 @@
 	      document.body.classList.add("gdHeadToTeeFrameActive");
 	      document.body.classList.remove("gdMappedStartPromptActive","gdGreenArrivalMode","gd-green-zoom-active","gdWaitingForConfirmedGreen","gdFrameCameraWaiting");
 	    }
-	    return fitCaptured(b,"hole",num(opts.padding,.025),{objectName:"capturedHeadToTeeHoleFrame",reason:"head-to-tee",maxScale:3.4,fitRatio:.56})||fallbackNative(b,"hole",num(opts.padding,.025),opts);
+	    return fitCaptured(b,"hole",num(opts.padding,.025),{objectName:"capturedHeadToTeeHoleFrame",reason:"head-to-tee",maxScale:7.2,fitRatio:.94})||fallbackNative(b,"hole",num(opts.padding,.025),opts);
 	  }
 		  function lockState(opts){
 		    opts=opts||{};
@@ -1518,7 +1519,7 @@
 		    }
 		    if(!opts.force&&tiltedCapturedSurfaceReady()){
 		      var tightBounds=activeBounds("lock");
-		      if(validBounds(tightBounds)&&fitCaptured(tightBounds,"lock",num(opts.padding,.022),{objectName:opts.objectName||"capturedTiltedTightLock",reason:opts.reason||"tilted-tight-lock",maxScale:4.4,fitRatio:.72})){
+		      if(validBounds(tightBounds)&&fitCaptured(tightBounds,"lock",num(opts.padding,.018),{objectName:opts.objectName||"capturedTiltedTightLock",reason:opts.reason||"tilted-tight-lock",maxScale:7.2,fitRatio:.94})){
 		        freezeLockCamera();
 		        if(lastShotOverlayPayload&&lastShotOverlayCenter)renderShotOverlay(lastShotOverlayPayload,lastShotOverlayCenter,{remember:false});
 		        readout("tilted lock | tight frame then tilt");
@@ -1535,7 +1536,7 @@
 		      return true;
 		    }
 		    var b=activeBounds("lock");
-		    var ok=fitCaptured(b,"lock",num(opts.padding,.024),{objectName:opts.objectName||"capturedLockState",reason:opts.reason||"lock-state",maxScale:4.2,fitRatio:.64})||fallbackNative(b,"lock",num(opts.padding,.024),opts);
+		    var ok=fitCaptured(b,"lock",num(opts.padding,.018),{objectName:opts.objectName||"capturedLockState",reason:opts.reason||"lock-state",maxScale:7.2,fitRatio:.94})||fallbackNative(b,"lock",num(opts.padding,.018),opts);
 		    if(ok)freezeLockCamera();
 		    return ok;
 		  }
@@ -1549,7 +1550,7 @@
 	    lockCameraFrozen=false;
 	    if(document.body){document.body.classList.add("gd-green-zoom-active");document.body.classList.remove("gdWaitingForConfirmedGreen","gdFrameCameraWaiting");}
 	    safe(function(){var btn=document.getElementById("gdGreenZoomBtn");if(btn)btn.classList.add("softActive");});
-	    return fitCaptured(b,"zoom",.018,{objectName:"capturedTargetZoom",reason:"zoom",maxScale:3.2,fitRatio:.36})||fallbackNative(b,"zoom",.018,{animate:true});
+	    return fitCaptured(b,"zoom",.018,{objectName:"capturedTargetZoom",reason:"zoom",maxScale:7.2,fitRatio:.96})||fallbackNative(b,"zoom",.018,{animate:true});
 	  }
 	  function clearRuntime(reason){
 	    captureManifest=null;

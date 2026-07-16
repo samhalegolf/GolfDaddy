@@ -124,10 +124,13 @@ body.gdGpsActive #courseScreen:not(.hidden) .courseHeader,
 body.gps-active #courseScreen:not(.hidden) .courseHeader{grid-template-columns:1fr!important;margin-top:calc(54px + env(safe-area-inset-top))!important;pointer-events:none!important;}
 body.shell-gps #courseScreen:not(.hidden) .courseAssumed,
 body.shell-gps #courseScreen:not(.hidden) .courseCard,
+body.shell-gps #courseScreen:not(.hidden) #gdCourseResumeRound,
 body.gdGpsActive #courseScreen:not(.hidden) .courseAssumed,
 body.gdGpsActive #courseScreen:not(.hidden) .courseCard,
+body.gdGpsActive #courseScreen:not(.hidden) #gdCourseResumeRound,
 body.gps-active #courseScreen:not(.hidden) .courseAssumed,
-body.gps-active #courseScreen:not(.hidden) .courseCard{pointer-events:auto!important;}
+body.gps-active #courseScreen:not(.hidden) .courseCard,
+body.gps-active #courseScreen:not(.hidden) #gdCourseResumeRound{pointer-events:auto!important;}
 body.shell-gps .rightRail,
 body.gdGpsActive .rightRail,
 body.gps-active .rightRail{position:fixed!important;right:calc(10px + env(safe-area-inset-right))!important;left:auto!important;top:calc(max(10px,env(safe-area-inset-top)) + 108px)!important;bottom:auto!important;z-index:8210!important;max-height:0!important;overflow:hidden!important;opacity:0!important;visibility:hidden!important;pointer-events:none!important;transform:translateY(-8px) scale(.98)!important;transform-origin:top right!important;transition:opacity .16s ease, transform .16s ease, max-height .16s ease, visibility .16s ease!important;}

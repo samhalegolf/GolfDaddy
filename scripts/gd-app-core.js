@@ -16518,14 +16518,14 @@ function gdScreenTargetFrameRatios(kind="lock"){
   // object bounds should fill the chosen box, not merely sit near its centre.
   const frame={
     // Medium locked-in frame: green/bubble should own this area in normal lock-in.
-    lock:{left:.25,top:.205,width:.49,height:.22},
+    lock:{left:.247,top:.203,width:.497,height:.222},
     // Tightest green/hole frame: reserved for saved green / hole-object framing.
-    hole:{left:.31,top:.205,width:.37,height:.157},
+    hole:{left:.308,top:.203,width:.375,height:.160},
     // Largest green/landing zoom frame: optional button fills this bigger area.
-    zoom:{left:.155,top:.205,width:.68,height:.315},
+    zoom:{left:.152,top:.203,width:.687,height:.316},
     // Tee frame sits just above the bottom controls for future tee/origin framing.
-    tee:{left:.31,top:.715,width:.37,height:.05}
-  }[kind]||{left:.25,top:.205,width:.49,height:.22};
+    tee:{left:.308,top:.881,width:.375,height:.037}
+  }[kind]||{left:.247,top:.203,width:.497,height:.222};
   return Object.assign({},frame,{right:Math.max(0,1-frame.left-frame.width),bottom:Math.max(0,1-frame.top-frame.height)});
 }
 function gdScreenTargetFrameConfig(kind="lock"){

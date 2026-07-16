@@ -9,11 +9,11 @@
     var w=innerWidth||document.documentElement.clientWidth||390;
     var h=innerHeight||document.documentElement.clientHeight||760;
     var spec={
-      zoom:{x:.154,y:.205,w:.692,h:.315},
-      lock:{x:.250,y:.208,w:.500,h:.218},
-      hole:{x:.310,y:.209,w:.375,h:.157},
-      tee:{x:.230,y:.805,w:.540,h:.175}
-    }[kind]||{x:.250,y:.208,w:.500,h:.218};
+      zoom:{x:.152,y:.203,w:.687,h:.316},
+      lock:{x:.247,y:.203,w:.497,h:.222},
+      hole:{x:.308,y:.203,w:.375,h:.160},
+      tee:{x:.308,y:.881,w:.375,h:.037}
+    }[kind]||{x:.247,y:.203,w:.497,h:.222};
     return {left:w*spec.x,top:h*spec.y,right:w*(spec.x+spec.w),bottom:h*(spec.y+spec.h),width:w*spec.w,height:h*spec.h};
   }
   function ensureOverlay(){
@@ -25,8 +25,8 @@
       overlay.setAttribute("aria-hidden","true");
       document.body.appendChild(overlay);
     }
-    var labels={hole:"Green (Hole Frame)",lock:"Green (Lock in State )",zoom:"Green Zoom"};
-    overlay.innerHTML=["zoom","lock","hole"].map(function(k){
+    var labels={hole:"Green (Hole Frame)",lock:"Green (Lock in State )",zoom:"Green Zoom",tee:"Tee (Hole Frame)"};
+    overlay.innerHTML=["zoom","lock","hole","tee"].map(function(k){
       var r=frameRect(k);
       return '<div class="gdTargetFrameBox" data-frame="'+k+'" style="left:'+Math.round(r.left)+'px;top:'+Math.round(r.top)+'px;width:'+Math.round(r.width)+'px;height:'+Math.round(r.height)+'px"><span>'+labels[k]+'</span></div>';
     }).join("");
