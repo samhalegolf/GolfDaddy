@@ -84,48 +84,9 @@
     if(!validLL(a)||!validLL(b))return NaN;
     return safe(function(){return typeof bearing==="function"?bearing(a,b):Math.atan2(b.lng-a.lng,b.lat-a.lat);},NaN);
   }
-  function capturedGreenCentrePoint(){
-    var data=safe(function(){return (mappedPayload()||{}).data||{};},{})||{};
-    var g=data.green||{};
-    return asLL(safe(function(){return greenCentre;},null))||
-      asLL(safe(function(){return window.greenCentre;},null))||
-      asLL(safe(function(){var m=greenMarker;return m&&m.getLatLng&&m.getLatLng();},null))||
-      mappedPoint(g.center||g.centre||g.position||g.pin||data.greenCenter||data.greenCentre);
-  }
-  function capturedDisplayTargetPoint(){
-    return asLL(lastShotOverlayCenter)||
-      asLL(safe(function(){return typeof gdShotDisplayTarget==="function"&&(gdShotDisplayTarget()||null);},null))||
-      asLL(safe(function(){return target;},null))||
-      asLL(safe(function(){return window.target;},null));
-  }
-  function capturedBubbleOnGreen(display,green){
-    display=asLL(display); green=asLL(green);
-    if(!validLL(display)||!validLL(green)||!hasMap())return false;
-    var shape=safe(function(){return Array.isArray(greenPolygon)&&greenPolygon.length>=3?greenPolygon:null;},null)||
-      mappedShape(safe(function(){return (mappedPayload()||{}).data||{};},{})||{});
-    var shapeBounds=boundsFromPoints(shape);
-    if(validBounds(shapeBounds)&&shapeBounds.contains&&shapeBounds.contains(display))return true;
-    var d=safe(function(){return map.distance(display,green);},Infinity);
-    return Number.isFinite(d)&&d<=42;
-  }
-  function capturedPlayLine(){
-    var s=asLL(safe(function(){return start;},null))||asLL(safe(function(){return window.start;},null));
-    var display=capturedDisplayTargetPoint();
-    var green=capturedGreenCentrePoint();
-    if(!validLL(s)||!validLL(display))return null;
-    if(validLL(green)&&capturedBubbleOnGreen(display,green))return {source:"start-green-centre-line",start:s,target:green,displayTarget:display};
-    return {source:"start-bubble-line",start:s,target:display,displayTarget:display};
-  }
-  function capturedPlayLineBounds(line){
-    line=line||capturedPlayLine();
-    return line&&validLL(line.start)&&validLL(line.target)?boundsFromPoints([line.start,line.target]):null;
-  }
   function capturedOrientationAxis(bounds,frame){
-    var playLine=capturedPlayLine();
-    if(playLine){
-      var playBearing=bearingRad(playLine.start,playLine.target);
-      if(Number.isFinite(playBearing))return {source:playLine.source,bearingRad:playBearing};
-    }
+    var shotAxis=safe(function(){return typeof window.gdShotUpAxis==="function"?window.gdShotUpAxis():null;},null);
+    if(shotAxis&&Number.isFinite(Number(shotAxis.bearingRad)))return {source:shotAxis.source||"shot-axis",bearingRad:Number(shotAxis.bearingRad)};
     var payload=mappedPayload()||{};
     var data=payload.data||{};
     var route=mappedRoute(data);
@@ -139,8 +100,6 @@
       var teeBearing=bearingRad(tee,center);
       if(Number.isFinite(teeBearing))return {source:"mapped-tee-green",bearingRad:teeBearing};
     }
-    var shotAxis=safe(function(){return typeof window.gdShotUpAxis==="function"?window.gdShotUpAxis():null;},null);
-    if(shotAxis&&Number.isFinite(Number(shotAxis.bearingRad)))return {source:shotAxis.source||"shot-axis",bearingRad:Number(shotAxis.bearingRad)};
     var s=asLL(safe(function(){return start;},null)), t=asLL(safe(function(){return target;},null))||center;
     var direct=bearingRad(s,t);
     if(Number.isFinite(direct))return {source:"direct-shot",bearingRad:direct};
@@ -717,42 +676,6 @@
 	      teeAnchor:"tee"
 	    };
 	  }
-	  function playLineDualAnchorFit(manifest,angle,fr,baseScale,fitRatio,opts){
-	    var line=capturedPlayLine();
-	    if(!line)return null;
-	    var startPx=pointPx(manifest,line.start);
-	    var targetPx=pointPx(manifest,line.target);
-	    if(!startPx||!targetPx)return null;
-	    var rStart=rotatePx(startPx,angle);
-	    var rTarget=rotatePx(targetPx,angle);
-	    var sourceDx=rTarget.x-rStart.x;
-	    var sourceDy=rTarget.y-rStart.y;
-	    var sourceLen=Math.sqrt(sourceDx*sourceDx+sourceDy*sourceDy);
-	    var desiredTarget=centerOfRect(fr);
-	    var desiredStart=centerOfRect(frameRect("tee"));
-	    if(!desiredTarget||!desiredStart||sourceLen<10)return null;
-	    var desiredDx=desiredTarget.x-desiredStart.x;
-	    var desiredDy=desiredTarget.y-desiredStart.y;
-	    var desiredLen=Math.sqrt(desiredDx*desiredDx+desiredDy*desiredDy);
-	    if(desiredLen<10)return null;
-	    var singleScale=baseScale*fitRatio;
-	    var axisScale=desiredLen/sourceLen;
-	    var scale=Math.max(.08,Math.min(num(opts.maxScale,4),singleScale,axisScale));
-	    var tx=desiredTarget.x-rTarget.x*scale;
-	    var ty=desiredTarget.y-rTarget.y*scale;
-	    var startScreen={x:tx+rStart.x*scale,y:ty+rStart.y*scale};
-	    var errX=startScreen.x-desiredStart.x;
-	    var errY=startScreen.y-desiredStart.y;
-	    return {
-	      scale:scale,
-	      tx:tx,
-	      ty:ty,
-	      source:line.source,
-	      teeErrorPx:Math.sqrt(errX*errX+errY*errY),
-	      greenAnchor:line.source==="start-green-centre-line"?"green-centre":"bubble",
-	      teeAnchor:"start"
-	    };
-	  }
 	  function hideWaiting(){
 	    safe(function(){document.body.classList.remove("gdWaitingForConfirmedGreen","gdFrameCameraWaiting");});
 	  }
@@ -1248,7 +1171,7 @@
 	    var ty=desiredGreen.y-rotatedCenter.y*scale;
 	    var dualAnchor=null;
 	    if(frameName==="hole"){
-	      dualAnchor=playLineDualAnchorFit(manifest,angle,fr,baseScale,fitRatio,opts)||holeDualAnchorFit(manifest,px,angle,fr,baseScale,fitRatio,opts);
+	      dualAnchor=holeDualAnchorFit(manifest,px,angle,fr,baseScale,fitRatio,opts);
 	      if(dualAnchor){
 	        scale=dualAnchor.scale;
 	        tx=dualAnchor.tx;
@@ -1289,26 +1212,44 @@
 	  function localPointsFromLatLngs(points){
 	    return (Array.isArray(points)?points:[]).map(function(p){return pointPx(captureManifest,p);}).filter(function(p){return p&&Number.isFinite(p.x)&&Number.isFinite(p.y);});
 	  }
+	  function elementTransformMatrix(el){
+	    if(!el)return null;
+	    var style=safe(function(){return getComputedStyle(el);},null);
+	    if(!style)return null;
+	    var transform=String(style.transform||"none");
+	    var matrix=safe(function(){return transform&&transform!=="none"?new DOMMatrix(transform):new DOMMatrix();},null);
+	    if(!matrix)return null;
+	    var origin=String(style.transformOrigin||"0 0 0").split(/\s+/);
+	    var ox=num(origin[0],0),oy=num(origin[1],0),oz=num(origin[2],0);
+	    return new DOMMatrix().translate(ox,oy,oz).multiply(matrix).translate(-ox,-oy,-oz);
+	  }
 	  function capturedGroupMatrix(){
+	    var layer=document.getElementById("gdHoleImageCameraLayer");
 	    var group=document.querySelector("#gdHoleImageCameraLayer .gdHoleImageTiles");
 	    if(!group)return null;
-	    var transform=safe(function(){return getComputedStyle(group).transform;},"none")||"none";
-	    try{return transform&&transform!=="none"?new DOMMatrix(transform):new DOMMatrix();}catch(e){return null;}
+	    var groupMatrix=elementTransformMatrix(group);
+	    if(!groupMatrix)return null;
+	    var layerMatrix=elementTransformMatrix(layer)||new DOMMatrix();
+	    return layerMatrix.multiply(groupMatrix);
+	  }
+	  function matrixPointToXY(p){
+	    if(!p)return null;
+	    var w=Number(p.w);
+	    if(Number.isFinite(w)&&Math.abs(w)>0.0001&&Math.abs(w-1)>0.0001)return {x:p.x/w,y:p.y/w};
+	    return {x:p.x,y:p.y};
 	  }
 	  function capturedLocalToScreenPoint(point){
 	    var matrix=capturedGroupMatrix();
 	    if(!matrix||!point)return null;
 	    try{
-	      var p=new DOMPoint(point.x,point.y).matrixTransform(matrix);
-	      return {x:p.x,y:p.y};
+	      return matrixPointToXY(new DOMPoint(point.x,point.y,0,1).matrixTransform(matrix));
 	    }catch(e){return null;}
 	  }
 	  function capturedScreenToLocalPoint(clientX,clientY){
 	    var matrix=capturedGroupMatrix();
 	    if(!matrix)return null;
 	    try{
-	      var p=new DOMPoint(clientX,clientY).matrixTransform(matrix.inverse());
-	      return {x:p.x,y:p.y};
+	      return matrixPointToXY(new DOMPoint(clientX,clientY,0,1).matrixTransform(matrix.inverse()));
 	    }catch(e){return null;}
 	  }
 	  function capturedLocalPointToLatLng(point){
@@ -1576,11 +1517,11 @@
 		      document.body.classList.remove("gdMappedStartPromptActive","gdGreenArrivalMode","gd-green-zoom-active","gdWaitingForConfirmedGreen","gdFrameCameraWaiting");
 		    }
 		    if(!opts.force&&tiltedCapturedSurfaceReady()){
-		      var lineBounds=activeBounds("lock")||capturedPlayLineBounds();
-		      if(validBounds(lineBounds)&&fitCaptured(lineBounds,"hole",num(opts.padding,.025),{objectName:opts.objectName||"capturedTiltedShotLineLock",reason:opts.reason||"tilted-shot-line-lock",maxScale:3.4,fitRatio:.56})){
+		      var tightBounds=activeBounds("lock");
+		      if(validBounds(tightBounds)&&fitCaptured(tightBounds,"lock",num(opts.padding,.022),{objectName:opts.objectName||"capturedTiltedTightLock",reason:opts.reason||"tilted-tight-lock",maxScale:4.4,fitRatio:.72})){
 		        freezeLockCamera();
 		        if(lastShotOverlayPayload&&lastShotOverlayCenter)renderShotOverlay(lastShotOverlayPayload,lastShotOverlayCenter,{remember:false});
-		        readout("tilted lock | centred play line");
+		        readout("tilted lock | tight frame then tilt");
 		        return true;
 		      }
 		      freezeLockCamera();
@@ -1724,7 +1665,7 @@
     window.gdSimpleFrameLock=lock;
 	    window.gdHeadToTeeShotFrame=function(){return lockState({animate:false,fromHeadToTee:true,objectName:"capturedHeadToTeeLockFrame",reason:"head-to-tee-lock"});};
     window.frameShotView=function(){return lock({animate:true});};
-    window.lockFrame=function(refit){safe(function(){lockedFrame=true;});if(refit!==false)lock({animate:true});safe(function(){setBubbleOnlyLock(true);});safe(function(){renderShot();});return true;};
+    window.lockFrame=function(refit){safe(function(){lockedFrame=true;});if(refit!==false&&tiltedCapturedSurfaceReady()){safe(function(){setBubbleOnlyLock(true);});safe(function(){renderShot();});lock({animate:true});}else if(refit!==false)lock({animate:true});safe(function(){setBubbleOnlyLock(true);});safe(function(){renderShot();});return true;};
     window.gdToggleTargetZoom=zoom;
     window.gdToggleSimpleGreenZoom=zoom;
     safe(function(){lockFrame=window.lockFrame;frameShotView=window.frameShotView;gdHeadToTeeShotFrame=window.gdHeadToTeeShotFrame;});
