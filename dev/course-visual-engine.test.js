@@ -302,7 +302,7 @@ function payload() {
   assert.equal(published.holeFramePublishedVisuals[0].metadata.playSurface.fallbackPolicy, "live-gps-only", "published hole frames do not use a stitched fallback underlay");
   assert.ok(published.versions.filter((item) => item.type === "published").length >= 1, "published versions remain in history");
 
-  const originalFetch = global.fetch;
+  const cloudVisualOriginalFetch = global.fetch;
   const originalAccounts = global.GolfDaddyAccounts;
   let cloudRequest = null;
   global.GolfDaddyAccounts = { current() { return { role: "admin", email: "samhalegolf@gmail.com", accountId: "acct-test" }; } };
@@ -331,7 +331,7 @@ function payload() {
   assert.ok(cloudHoleFrames.length >= 1, "cloud sync uploads per-hole published assets");
   assert.ok(cloudHoleFrames.every((asset) => Number(asset.holeNumber) > 0), "cloud hole frame assets carry hole numbers");
   assert.equal(engine.getRecord("cromwell").diagnostics.cloudPublish.playPayloadReady, true, "local diagnostics record Play payload readiness");
-  global.fetch = originalFetch;
+  global.fetch = cloudVisualOriginalFetch;
   global.GolfDaddyAccounts = originalAccounts;
 
   const resolved = engine.resolveCourseVisual("cromwell");
@@ -560,6 +560,60 @@ function payload() {
   const rebuiltAfterReload = await reloadedEngine.buildCourseVisualMaster("reload-missing-asset");
   assert.equal(rebuiltAfterReload.currentVersion, 2, "Build Basic regenerates when the saved v2 asset data is missing after reload");
   assert.ok(rebuiltAfterReload.basicVisual.dataUrl.startsWith("data:image/svg+xml"), "regenerated asset is immediately renderable");
+
+  const originalFetch = global.fetch;
+  global.fetch = async function mockCourseVisualPull(url) {
+    assert.ok(String(url).includes("/api/course-visuals?courseId=cloud-course"), "cloud visual pull uses the course visual endpoint");
+    return {
+      ok: true,
+      async json() {
+        return {
+          visual: {
+            course_id: "cloud-course",
+            status: "published",
+            published_image_path: "course-visuals/cloud-course/published/9.svg",
+            current_version: 9,
+            published_version: 9,
+            preset_id: "clarity-course-natural-v1",
+            preset_version: 4,
+            play_payload: {
+              publishedVisual: {
+                role: "published",
+                path: "course-visuals/cloud-course/published/9.svg",
+                url: "https://storage.test/course-visuals/cloud-course/published/9.svg",
+                metadata: { outputDimensions: { width: 1800, height: 2400 }, sourceBounds: { south: -45.02, west: 169.1, north: -45.01, east: 169.11 } }
+              },
+              singleHolePublishedVisual: {
+                role: "single-hole-published",
+                path: "course-visuals/cloud-course/single-hole/published/9.svg",
+                url: "https://storage.test/course-visuals/cloud-course/single-hole/published/9.svg",
+                holeNumber: 1,
+                metadata: { outputDimensions: { width: 900, height: 1600 }, sourceBounds: { south: -45.02, west: 169.1, north: -45.01, east: 169.11 } }
+              },
+              holeFrames: [
+                {
+                  role: "hole-frame-published",
+                  path: "course-visuals/cloud-course/holes/h1/published/9.svg",
+                  url: "https://storage.test/course-visuals/cloud-course/holes/h1/published/9.svg",
+                  holeNumber: 1,
+                  metadata: { outputDimensions: { width: 900, height: 1600 }, sourceBounds: { south: -45.02, west: 169.1, north: -45.01, east: 169.11 } }
+                }
+              ]
+            }
+          },
+          storage: "supabase"
+        };
+      }
+    };
+  };
+  const cloudRecord = await reloadedEngine.pullCourseVisual("cloud-course");
+  const cloudResolved = reloadedEngine.resolveCourseVisual("cloud-course");
+  assert.equal(cloudRecord.status, "published", "cloud visual restore keeps published status");
+  assert.equal(cloudResolved.publishedVisual.url, "https://storage.test/course-visuals/cloud-course/published/9.svg", "cloud overview keeps the Supabase Storage URL");
+  assert.equal(cloudResolved.singleHolePublishedVisual.url, "https://storage.test/course-visuals/cloud-course/single-hole/published/9.svg", "single-hole play asset keeps the Supabase Storage URL");
+  assert.equal(cloudResolved.holeFramePublishedVisuals.length, 1, "cloud play payload restores hole-frame assets for GPS Play");
+  assert.equal(cloudResolved.holeFramePublishedVisuals[0].url, "https://storage.test/course-visuals/cloud-course/holes/h1/published/9.svg", "hole-frame play asset keeps the Supabase Storage URL");
+  global.fetch = originalFetch;
 
   console.log("course visual engine tests passed");
 })().catch((error) => {
