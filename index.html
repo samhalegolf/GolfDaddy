@@ -2442,6 +2442,7 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
     .gdAdminDatabaseFilters{display:grid;grid-template-columns:minmax(0,1.8fr) minmax(120px,1fr) minmax(120px,1fr);gap:8px;margin-bottom:10px}
     .gdAdminDatabaseFilters input,.gdAdminDatabaseFilters select{width:100%;box-sizing:border-box;border:1px solid rgba(255,255,255,.10);border-radius:14px;background:rgba(0,0,0,.22);color:#fff;padding:10px 11px;font-size:12px;font-weight:850}
     .gdAdminDatabaseSummary{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:7px;margin:8px 0 10px}
+    .gdAdminDatabaseSummary:empty{display:none}
     .gdAdminDatabaseMetric{min-width:0;padding:8px;border-radius:12px;background:rgba(0,0,0,.18);border:1px solid rgba(255,255,255,.07)}
     .gdAdminDatabaseMetric span{display:block;color:rgba(255,255,255,.52);font-size:9px;font-weight:950;text-transform:uppercase;letter-spacing:.06em}
     .gdAdminDatabaseMetric strong{display:block;margin-top:3px;color:#fff;font-size:13px;font-weight:950;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -2534,6 +2535,8 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
     .gdAdminCourseActionRail button.danger{background:rgba(255,103,103,.11);color:#ffb0b0}
     .gdAdminCourseActionRail button.primary{background:#1fd36d;color:#06110b}
     .gdAdminCourseWorkspace{display:grid;gap:10px}
+    .gdAdminCourseDebugWindow{display:grid;gap:10px}
+    .gdAdminCourseDebugWindow .gdCoursePlayDebug{display:block;margin:0}
     .gdAdminCourseStageLine{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
     .gdAdminCourseStageLine span{display:inline-flex;align-items:center;min-height:22px;border-radius:999px;padding:3px 8px;background:rgba(255,255,255,.07);color:rgba(255,255,255,.62);font-size:9px;font-weight:950;text-transform:uppercase;letter-spacing:.04em}
     .gdAdminCourseStageLine span.ready{background:rgba(31,211,109,.14);color:#83ffb7}
@@ -6495,7 +6498,6 @@ body[data-gd-permission="admin"] #gdV62Home .gdHomeAdminSettings{display:inline-
 <div class="row"><div><strong>Show aim line</strong><span>Start to target guide</span></div><button class="toggle active" id="aimToggle" onclick="toggleAimLine()">On</button></div>
 <div class="row"><div><strong>Shot-up frame</strong><span>Rotate view so the shot runs up screen</span></div><button class="toggle active" id="shotUpToggle" onclick="toggleShotUpFrame()">On</button></div>
 <div class="row"><div><strong>Lock frame tightness</strong><span id="frameTightSub">Tight shot focus</span></div><button class="toggle active" id="frameTightToggle" onclick="cycleFrameTightness()">Tight</button></div>
-<div class="row gdAdminOnlySetting" id="gdPreLockBlackoutRow"><div><strong>Hole frame blackout</strong><span id="gdPreLockBlackoutSub">Soft pre-lock frame</span></div><button class="toggle" id="gdPreLockBlackoutToggle" type="button" onclick="gdTogglePreLockBlackoutFrame()">Soft</button></div>
 <button class="settingsStatsButton gdSettingsAdmin" onclick="openDeveloperPanel()">Admin Settings</button>
 <div class="row gdSettingsRetired" hidden><div><strong>Shot tracking</strong><span>Log GPS shot sequence to stats</span></div><button class="toggle" id="trackToggle" onclick="toggleTracking()">Off</button></div>
 <button class="settingsStatsButton gdSettingsRetired" hidden onclick="openStats()">Open Shot Data</button>
@@ -6508,12 +6510,8 @@ body[data-gd-permission="admin"] #gdV62Home .gdHomeAdminSettings{display:inline-
 <button class="primary" onclick="gdPanelBack('settingsPanel')" style="width:100%">Back</button>
 </div></div>
 <div class="panel devPanel" id="developerPanel"><div class="sheet"><div class="sheetHeader"><button class="backBtn" onclick="gdPanelBack('developerPanel')">‹</button><div><div class="sheetTitle">Admin Settings</div><div class="sheetSub">Permissions first · developer tuning tucked away</div></div></div>
-<div class="devIntro"><strong>Admin uses the Coach-facing app by default.</strong><br/>The only extra surface is this Admin Settings page, where permissions and tucked-away developer controls live.</div>
-<div class="gdAdminVisualCard" id="gdAdminPreLockFrameCard"><div><strong>Hole frame blackout</strong><span id="gdAdminPreLockFrameSub">Soft faded frame around the pre-lock hole view.</span></div><button id="gdAdminPreLockFrameToggle" type="button" onclick="gdTogglePreLockBlackoutFrame()">Soft</button></div>
 <div id="gdPermissionCard" class="gdPermissionCard"></div>
 <div class="gdAdminDatabase" id="gdAdminDatabasePanel"><div class="gdAdminDatabaseHead"><div><h3>Database</h3><p>Course Database is a read-only admin view of local Course Play Pipeline records and DB-ready payloads.</p></div><div class="gdAdminDatabaseActions"><button type="button" onclick="gdRenderAdminCourseDatabase()">Refresh</button></div></div><div class="gdAdminDatabaseFilters"><input id="gdAdminCourseDbSearch" type="search" placeholder="Search course name or key" oninput="gdRenderAdminCourseDatabase()"><select id="gdAdminCourseDbSyncFilter" onchange="gdRenderAdminCourseDatabase()"><option value="">All sync states</option></select><select id="gdAdminCourseDbStatusFilter" onchange="gdRenderAdminCourseDatabase()"><option value="">All statuses</option></select></div><div id="gdAdminCourseDbSummary" class="gdAdminDatabaseSummary"></div><div id="gdAdminCourseDbList" class="gdAdminCourseList"></div><div id="gdAdminCourseDbDetail" class="gdAdminCourseDetail"></div></div>
-<div class="gdCoursePlayDebug" id="gdCoursePlayDebugPanel"><div class="gdCoursePlayDebugHead"><div><h3>Course Play Pipeline</h3><p>Admin-only persistence/frame visibility. It reads local pipeline, frame-index, manifest, and sync-queue state.</p></div><div class="gdCoursePlayDebugActions"><button type="button" onclick="gdRenderCoursePlayPipelineDebug()">Refresh</button><button type="button" onclick="gdClearCoursePlayPipelineDebug()">Clear log</button></div></div><div id="gdCoursePlayDebugSummary" class="gdCoursePlayDebugSummary"></div><div id="gdCoursePlayDebugTable"></div><div id="gdCoursePlayDebugTimeline" class="gdCoursePlayDebugTimeline"></div></div>
-<div class="gdCoursePlayDebug gdCourseMappingDebug" id="gdCourseMappingDebugPanel"></div>
 <details class="gdDeveloperSettings" id="gdDeveloperSettings"><summary><span>Developer Settings</span><small>Safe values only · formulas locked</small></summary><div class="gdDeveloperBody">
 <div class="gdLmAdmin"><h3>Launch Monitor Intake Test</h3><p>Admin-only test lane for captured practice data. Upload plain text to check the hidden cluster and face/path corroboration logic.</p><div class="gdLmActions"><button class="gdUploadFileButton" id="gdLmUploadLabel" type="button" onclick="gdPickLaunchMonitorFile()">Upload text file</button><button type="button" id="gdLmClearDemoBtn" onclick="gdClearLaunchMonitorDemo()">Clear launch data</button></div><input type="file" id="gdLmUploadInput" accept=".txt,.csv,.json,text/plain,text/csv,application/json"><div class="gdLmResult" id="gdLaunchMonitorAdminResult"></div></div>
 <div id="devTuningControls"></div>
@@ -6994,6 +6992,7 @@ function gdAdminCourseDbActionRail(selected){
     <button type="button" class="${active("visuals")}" onclick="return gdAdminCourseDbLoadVisual(${id})">Visuals</button>
     <button type="button" class="${active("scorecard")}" onclick="return gdAdminCourseDbShowScorecard(${id})">Score Card</button>
     <button type="button" class="${active("preview")}" onclick="return gdAdminCourseDbShowPreview(${id})">Hole Preview</button>
+    <button type="button" class="${active("debug")}" onclick="return gdAdminCourseDbShowDebug(${id})">Debug</button>
     <button type="button" class="danger" onclick="return gdAdminCourseDbDelete(${id})">Delete</button>
     <button type="button" class="primary" onclick="return gdAdminCourseDbUpdate(${id})">Update</button>
   </div>`;
@@ -7006,6 +7005,9 @@ function gdAdminCourseDbShowScorecard(courseId){
 }
 function gdAdminCourseDbShowPreview(courseId){
   return gdAdminCourseDbOpen(courseId,"preview");
+}
+function gdAdminCourseDbShowDebug(courseId){
+  return gdAdminCourseDbOpen(courseId,"debug");
 }
 function gdAdminCourseDbDelete(courseId){
   courseId=String(courseId||"");
@@ -7153,6 +7155,14 @@ function gdAdminCoursePreviewMarkup(selected){
   const id=gdAdminJsArg(selected.id);
   const frame=(inline||src)?(inline||`<img src="${gdEscapeHTML(src)}" alt="Hole ${gdEscapeHTML(current)} play preview" loading="lazy" decoding="async">`):`<div class="gdAdminPhoneEmpty">No visual surface yet. Use Visuals or Update to build the Clarity play surface.</div>`;
   return `<div class="gdAdminPhonePreviewShell"><div class="gdAdminPhoneInfo"><strong>${gdEscapeHTML(selected.name)} · Hole ${gdEscapeHTML(current)}</strong><span>Phone mock-up uses the same per-hole Clarity visual products that GPS Play will consume, with the captured surface visible inside the play viewport.</span><div class="gdAdminPhoneControls"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev hole</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next hole</button><button type="button" onclick="return gdAdminCourseDbLoadVisual(${id})">Open visuals</button></div><div class="gdAdminCourseStageLine"><span class="${asset&&asset.dataUrl?"ready":"warn"}">${asset&&asset.dataUrl?"surface ready":"needs visual"}</span><span>H${gdEscapeHTML(current)} / ${gdEscapeHTML(count)}</span><span>${gdEscapeHTML(asset&&asset.path?String(asset.path).split("/").slice(-3).join("/"):"live fallback")}</span></div></div><div class="gdAdminPhone"><div class="gdAdminPhoneScreen"><div class="gdAdminPhoneHud"><span>Clarity Play</span><b>H${gdEscapeHTML(current)}</b></div>${frame}<div class="gdAdminPhoneNav"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next</button></div></div></div></div>`;
+}
+function gdAdminCourseDebugMarkup(selected){
+  return `<div class="gdAdminCourseDebugWindow"><div class="gdAdminCourseStageLine"><span class="ready">${gdEscapeHTML(selected.playReadyCount||0)} play ready</span><span>${gdEscapeHTML(selected.framesIndexedCount||0)} frames</span><span>${gdEscapeHTML(selected.manifestCount||0)} manifests</span><span>${gdEscapeHTML(gdCoursePlayDebugTime(selected.updatedAt)||"unknown")} updated</span></div><div class="gdCoursePlayDebug" id="gdCoursePlayDebugPanel"><div class="gdCoursePlayDebugHead"><div><h3>Live scan feedback</h3><p>Course Play, frame, manifest, sync, and runtime events for this course.</p></div><div class="gdCoursePlayDebugActions"><button type="button" onclick="return gdAdminCourseDebugRefresh()">Refresh</button><button type="button" onclick="gdClearCoursePlayPipelineDebug();return gdAdminCourseDebugRefresh()">Clear log</button></div></div><div id="gdCoursePlayDebugSummary" class="gdCoursePlayDebugSummary"></div><div id="gdCoursePlayDebugTable"></div><div id="gdCoursePlayDebugTimeline" class="gdCoursePlayDebugTimeline"></div></div><div class="gdCoursePlayDebug gdCourseMappingDebug" id="gdCourseMappingDebugPanel"></div></div>`;
+}
+function gdAdminCourseDebugRefresh(){
+  try{gdRenderCoursePlayPipelineDebug();}catch(e){}
+  try{window.GDCourseMappingDebug?.renderAdminPanel?.();}catch(e){}
+  return false;
 }
 function gdAdminCourseVisualRecord(courseId){
   try{return window.GDCourseVisualEngine&&window.GDCourseVisualEngine.getRecord(courseId)||null;}catch(e){return null;}
@@ -8103,14 +8113,7 @@ function gdRenderAdminCourseDatabase(){
     gdAdminCourseDatabaseSelected="";
     gdAdminCourseDatabaseTab="overview";
   }
-  summary.innerHTML=[
-    gdAdminCourseDbMetric("Records",all.length),
-    gdAdminCourseDbMetric("Shown",filtered.length),
-    gdAdminCourseDbMetric("Holes",all.reduce((sum,item)=>sum+item.holeCount,0)),
-    gdAdminCourseDbMetric("Play ready",all.reduce((sum,item)=>sum+item.playReadyCount,0)),
-    gdAdminCourseDbMetric("Frames indexed",all.reduce((sum,item)=>sum+item.framesIndexedCount,0)),
-    gdAdminCourseDbMetric("Manifests",all.reduce((sum,item)=>sum+item.manifestCount,0))
-  ].join("");
+  summary.innerHTML="";
   if(!all.length){
     list.innerHTML='<div class="gdCoursePlayDebugEmpty">No course database records yet. Map a course to create a local course-play record.</div>';
     detail.innerHTML="";
@@ -8138,6 +8141,11 @@ function gdRenderAdminCourseDatabase(){
   }
   if(gdAdminCourseDatabaseTab==="preview"){
     detail.innerHTML=`<div class="gdAdminCourseActionPanel">${header}${gdAdminCoursePreviewMarkup(selected)}</div>`;
+    return;
+  }
+  if(gdAdminCourseDatabaseTab==="debug"){
+    detail.innerHTML=`<div class="gdAdminCourseActionPanel">${header}${gdAdminCourseDebugMarkup(selected)}</div>`;
+    gdAdminCourseDebugRefresh();
     return;
   }
   const geometryRows=rows.length?`<div class="gdAdminCourseHoleScroll"><table class="gdAdminCourseHoleTable"><thead><tr><th>Hole</th><th>State</th><th>Tee</th><th>Green</th><th>Route</th><th>Frame anchor</th><th>Frame index</th><th>Manifest</th><th>Source / confidence</th><th>Sync</th><th>Updated</th></tr></thead><tbody>${rows.map(row=>`<tr><td>H${gdEscapeHTML(row.holeNumber)}</td><td>${gdEscapeHTML(row.status)}</td><td>${gdAdminCourseDbFlag(row.hasTee)}</td><td>${gdAdminCourseDbFlag(row.hasGreen)}</td><td>${gdAdminCourseDbFlag(row.hasRoute)}</td><td>${gdAdminCourseDbFlag(row.hasFrameAnchor)}</td><td>${gdAdminCourseDbFlag(row.hasFrameIndex)}</td><td>${gdAdminCourseDbFlag(row.hasManifest)}<br>${gdEscapeHTML(row.manifestKey||"")}</td><td>${gdEscapeHTML(row.source)}<br>${gdEscapeHTML(row.confidence)}</td><td>${gdEscapeHTML(row.syncStatus)}</td><td>${gdEscapeHTML(gdCoursePlayDebugTime(row.updatedAt))}</td></tr>`).join("")}</tbody></table></div>`:'<div class="gdCoursePlayDebugEmpty">No holes found for this course yet.</div>';
@@ -8449,6 +8457,8 @@ window.gdRenderCoursePlayPipelineDebug=gdRenderCoursePlayPipelineDebug;
 window.gdRenderAdminCourseDatabase=gdRenderAdminCourseDatabase;
 window.gdAdminCourseDbOpen=gdAdminCourseDbOpen;
 window.gdAdminCourseDbSetStatusOpen=gdAdminCourseDbSetStatusOpen;
+window.gdAdminCourseDbShowDebug=gdAdminCourseDbShowDebug;
+window.gdAdminCourseDebugRefresh=gdAdminCourseDebugRefresh;
 window.gdToggleAdminCourseDbPayload=gdToggleAdminCourseDbPayload;
 window.gdSetCoursePlayDebug=gdSetCoursePlayDebug;
 window.gdClearCoursePlayPipelineDebug=gdClearCoursePlayPipelineDebug;
