@@ -7136,7 +7136,7 @@ function gdAdminCoursePreviewMarkup(selected){
   gdAdminCoursePreviewHoleByCourse[selected.id]=current;
   const asset=gdAdminCoursePreviewAsset(record,current);
   const src=asset&&asset.dataUrl||"";
-  const inline=gdAdminCourseVisualInlineSvg(src,`Hole ${current} play preview`);
+  const inline=gdAdminCourseVisualInlineSvg(src,`Hole ${current} play preview`,{preserveImages:true});
   const id=gdAdminJsArg(selected.id);
   const frame=(inline||src)?(inline||`<img src="${gdEscapeHTML(src)}" alt="Hole ${gdEscapeHTML(current)} play preview" loading="lazy" decoding="async">`):`<div class="gdAdminPhoneEmpty">No visual surface yet. Use Visuals or Update to build the Clarity play surface.</div>`;
   return `<div class="gdAdminPhonePreviewShell"><div class="gdAdminPhoneInfo"><strong>${gdEscapeHTML(selected.name)} · Hole ${gdEscapeHTML(current)}</strong><span>Phone mock-up uses the same per-hole Clarity visual products that GPS Play will consume, with the captured surface visible inside the play viewport.</span><div class="gdAdminPhoneControls"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev hole</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next hole</button><button type="button" onclick="return gdAdminCourseDbLoadVisual(${id})">Open visuals</button></div><div class="gdAdminCourseStageLine"><span class="${asset&&asset.dataUrl?"ready":"warn"}">${asset&&asset.dataUrl?"surface ready":"needs visual"}</span><span>H${gdEscapeHTML(current)} / ${gdEscapeHTML(count)}</span><span>${gdEscapeHTML(asset&&asset.path?String(asset.path).split("/").slice(-3).join("/"):"live fallback")}</span></div></div><div class="gdAdminPhone"><div class="gdAdminPhoneScreen"><div class="gdAdminPhoneHud"><span>Clarity Play</span><b>H${gdEscapeHTML(current)}</b></div>${frame}<div class="gdAdminPhoneNav"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next</button></div></div></div></div>`;
@@ -7357,7 +7357,8 @@ function gdAdminCourseVisualSvgText(src){
     .replace(/<foreignObject[\s\S]*?<\/foreignObject>/gi,"")
     .replace(/\son[a-z]+\s*=\s*(['"])[\s\S]*?\1/gi,"");
 }
-function gdAdminCourseVisualInlineSvg(src,label){
+function gdAdminCourseVisualInlineSvg(src,label,opts){
+  opts=opts||{};
   let svg=gdAdminCourseVisualSvgText(src);
   if(!svg)return "";
   svg=svg
@@ -7370,7 +7371,8 @@ function gdAdminCourseVisualInlineSvg(src,label){
     if(root&&String(root.nodeName||"").toLowerCase()==="svg"){
       const images=Array.from(root.querySelectorAll("image"));
       const sourceImageCount=images.length;
-      const productPreview=/course overview|single hole|3d view beta/i.test(String(label||""));
+      const preserveImages=!!opts.preserveImages;
+      const productPreview=preserveImages||/course overview|single hole|3d view beta/i.test(String(label||""));
       if(sourceImageCount>700&&!productPreview){
         images.forEach(img=>{
           const role=img.closest("[data-role]")?.getAttribute("data-role")||"";
