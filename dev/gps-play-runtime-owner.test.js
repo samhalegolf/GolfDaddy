@@ -94,6 +94,10 @@ assertContains(html, 'styles/gd-shell.css?v=real-shell-controls-20260716', "GPS 
 assertContains(runtimeCss, "body.shell-gps #courseScreen:not(.hidden) .courseNav", "course picker does not paint duplicate Back/Home above the shell");
 assertContains(runtimeCss, "body.shell-gps #courseScreen:not(.hidden),", "course picker wrapper does not block shell controls");
 assertContains(runtimeCss, "body.shell-gps #courseScreen:not(.hidden) .courseCard", "course picker keeps cards/search interactive after wrapper pass-through");
+assertContains(runtimeScript, "function liftShellTop", "GPS runtime owns lifting shell chrome out of app stacking context");
+assertContains(runtimeScript, "document.body.appendChild(top)", "GPS runtime moves shell chrome to the body layer");
+assertContains(runtimeScript, 'top.dataset.gdShellLayer="body"', "GPS runtime marks shell chrome as body-layered for diagnostics");
+assertContains(runtimeScript, "liftShellTop();\n    if(homeOpen())clearCaptured", "surface guard lifts shell before course/map surfaces can cover it");
 assertContains(html, "body.gdMappedStartPromptActive #gdV62UndoDock{\n  opacity:1!important;\n  filter:none!important;\n  pointer-events:none!important;\n}", "mapped start prompt keeps the lock/shot dock visible");
 assertContains(html, "body.gdMappedStartPromptActive #hint.gdMappedStartPill{\n  z-index:2540!important;\n  bottom:calc(148px + env(safe-area-inset-bottom))!important;", "mapped start pill sits above the lock/shot dock");
 
