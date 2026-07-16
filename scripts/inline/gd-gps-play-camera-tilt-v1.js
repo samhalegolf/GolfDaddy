@@ -4,7 +4,7 @@
   window.__gdGpsPlayCameraTiltV1=true;
 
   var AUTO_LOCK_TILT_DEG=32;
-  var LOCK_TILT_DELAY_MS=520;
+  var LOCK_TILT_DELAY_MS=0;
   var FLAT_TILT_DEG=0;
   var STORAGE_KEY="gd_gps_play_camera_tilt_deg_v1";
   var currentDeg=null;
@@ -105,6 +105,10 @@
     }
     if(currentDeg===AUTO_LOCK_TILT_DEG)return currentDeg;
     if(lockTiltTimer)return currentDeg==null?FLAT_TILT_DEG:currentDeg;
+    if(LOCK_TILT_DELAY_MS<=0){
+      clearLockTiltTimer();
+      return applyTilt(AUTO_LOCK_TILT_DEG,reason||"lock-same-time");
+    }
     lockTiltTimer=setTimeout(function(){
       lockTiltTimer=0;
       if(lockedViewReady())applyTilt(AUTO_LOCK_TILT_DEG,"lock-settled");
