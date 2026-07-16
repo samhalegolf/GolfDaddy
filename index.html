@@ -2560,6 +2560,10 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
     .gdAdminPhone{width:min(100%,360px);aspect-ratio:9/16;border-radius:32px;padding:12px;background:#050807;border:1px solid rgba(255,255,255,.16);box-shadow:0 18px 44px rgba(0,0,0,.42);box-sizing:border-box}
     .gdAdminPhoneScreen{position:relative;width:100%;height:100%;border-radius:24px;overflow:hidden;background:#10130f;border:1px solid rgba(255,255,255,.10)}
     .gdAdminPhoneScreen .gdAdminCourseVisualInline,.gdAdminPhoneScreen .gdAdminCourseVisualInline svg,.gdAdminPhoneScreen img{width:100%;height:100%;max-width:none;max-height:none;object-fit:cover}
+    .gdAdminPhoneFrameCrop{position:absolute;inset:0;overflow:hidden;background:#10130f}
+    .gdAdminPhoneFrameCrop>.gdAdminCourseVisualInline,.gdAdminPhoneFrameCrop>img{position:absolute;left:var(--gd-phone-frame-left,0);top:var(--gd-phone-frame-top,0);width:var(--gd-phone-frame-width,100%)!important;height:var(--gd-phone-frame-height,100%)!important;max-width:none;max-height:none}
+    .gdAdminPhoneFrameCrop>.gdAdminCourseVisualInline svg{width:100%!important;height:100%!important;max-width:none;max-height:none}
+    .gdAdminPhoneFrameCrop svg [data-role="gps-play-frame"],.gdAdminPhoneFrameCrop svg [data-role="capture-overflow-frame"]{display:none}
     .gdAdminPhoneHud{position:absolute;left:0;right:0;top:0;display:flex;justify-content:space-between;gap:8px;padding:10px;background:linear-gradient(180deg,rgba(0,0,0,.72),rgba(0,0,0,0));color:#fff;font-size:10px;font-weight:950;z-index:2}
     .gdAdminPhoneHud b{font-size:15px}
     .gdAdminPhoneNav{position:absolute;left:10px;right:10px;bottom:10px;display:flex;justify-content:space-between;gap:8px;z-index:2}
@@ -7142,6 +7146,202 @@ function gdAdminCoursePreviewStep(courseId,delta){
   const current=Number(gdAdminCoursePreviewHoleByCourse[courseId])||1;
   return gdAdminCoursePreviewSetHole(courseId,current+(Number(delta)||0));
 }
+function gdAdminCoursePreviewSvgInfo(src){
+  const svg=gdAdminCourseVisualSvgText(src);
+  if(!svg)return null;
+  try{
+    const doc=new DOMParser().parseFromString(svg,"image/svg+xml");
+    const root=doc&&doc.documentElement;
+    if(!root||String(root.nodeName||"").toLowerCase()!=="svg")return null;
+    const viewBox=String(root.getAttribute("viewBox")||"").trim().split(/[\s,]+/).map(Number).filter(Number.isFinite);
+    const width=viewBox.length===4?viewBox[2]:Number(String(root.getAttribute("width")||"").replace(/[^\d.+-]/g,""));
+    const height=viewBox.length===4?viewBox[3]:Number(String(root.getAttribute("height")||"").replace(/[^\d.+-]/g,""));
+    return {doc,root,width:Math.max(1,width||1),height:Math.max(1,height||1),minX:viewBox.length===4?viewBox[0]:0,minY:viewBox.length===4?viewBox[1]:0};
+  }catch(e){return null;}
+}
+function gdAdminCoursePreviewMatrixIdentity(){
+  return {a:1,b:0,c:0,d:1,e:0,f:0};
+}
+function gdAdminCoursePreviewMatrixMultiply(m,n){
+  return {
+    a:m.a*n.a+m.c*n.b,
+    b:m.b*n.a+m.d*n.b,
+    c:m.a*n.c+m.c*n.d,
+    d:m.b*n.c+m.d*n.d,
+    e:m.a*n.e+m.c*n.f+m.e,
+    f:m.b*n.e+m.d*n.f+m.f
+  };
+}
+function gdAdminCoursePreviewParseTransform(value){
+  let matrix=gdAdminCoursePreviewMatrixIdentity();
+  const text=String(value||"");
+  text.replace(/([a-z]+)\(([^)]*)\)/ig,(_all,kind,args)=>{
+    const nums=String(args||"").trim().split(/[\s,]+/).map(Number).filter(Number.isFinite);
+    let next=null;
+    kind=String(kind||"").toLowerCase();
+    if(kind==="matrix"&&nums.length>=6)next={a:nums[0],b:nums[1],c:nums[2],d:nums[3],e:nums[4],f:nums[5]};
+    if(kind==="translate")next={a:1,b:0,c:0,d:1,e:nums[0]||0,f:nums.length>1?nums[1]||0:0};
+    if(kind==="scale"){
+      const sx=nums[0]==null?1:nums[0];
+      const sy=nums.length>1?nums[1]:sx;
+      next={a:sx,b:0,c:0,d:sy,e:0,f:0};
+    }
+    if(kind==="rotate"&&nums.length){
+      const rad=nums[0]*Math.PI/180;
+      const cos=Math.cos(rad),sin=Math.sin(rad);
+      next={a:cos,b:sin,c:-sin,d:cos,e:0,f:0};
+      if(nums.length>=3){
+        const cx=nums[1]||0,cy=nums[2]||0;
+        next=gdAdminCoursePreviewMatrixMultiply(
+          gdAdminCoursePreviewMatrixMultiply({a:1,b:0,c:0,d:1,e:cx,f:cy},next),
+          {a:1,b:0,c:0,d:1,e:-cx,f:-cy}
+        );
+      }
+    }
+    if(next)matrix=gdAdminCoursePreviewMatrixMultiply(matrix,next);
+    return "";
+  });
+  return matrix;
+}
+function gdAdminCoursePreviewElementMatrix(node,root){
+  const chain=[];
+  for(let item=node;item&&item.nodeType===1;item=item.parentElement){
+    chain.unshift(item);
+    if(item===root)break;
+  }
+  return chain.reduce((matrix,item)=>{
+    const transform=item.getAttribute&&item.getAttribute("transform");
+    return transform?gdAdminCoursePreviewMatrixMultiply(matrix,gdAdminCoursePreviewParseTransform(transform)):matrix;
+  },gdAdminCoursePreviewMatrixIdentity());
+}
+function gdAdminCoursePreviewTransformPoint(matrix,x,y){
+  return {x:matrix.a*x+matrix.c*y+matrix.e,y:matrix.b*x+matrix.d*y+matrix.f};
+}
+function gdAdminCoursePreviewObjectBounds(info){
+  if(!info||!info.root)return null;
+  const nodes=Array.from(info.root.querySelectorAll('[data-role="play-route-axis"],[data-role="play-green-bound"],[data-role="play-tee-anchor"],[data-role="play-green-anchor"]'));
+  if(!nodes.length)return null;
+  const bounds={minX:Infinity,minY:Infinity,maxX:-Infinity,maxY:-Infinity,count:0};
+  const add=(node,x,y,pad=0)=>{
+    const matrix=gdAdminCoursePreviewElementMatrix(node,info.root);
+    const p=gdAdminCoursePreviewTransformPoint(matrix,Number(x)||0,Number(y)||0);
+    bounds.minX=Math.min(bounds.minX,p.x-pad);
+    bounds.minY=Math.min(bounds.minY,p.y-pad);
+    bounds.maxX=Math.max(bounds.maxX,p.x+pad);
+    bounds.maxY=Math.max(bounds.maxY,p.y+pad);
+    bounds.count+=1;
+  };
+  nodes.forEach(node=>{
+    const points=String(node.getAttribute("points")||"").trim().split(/[\s,]+/).map(Number).filter(Number.isFinite);
+    for(let i=0;i+1<points.length;i+=2)add(node,points[i],points[i+1]);
+    if(node.tagName&&String(node.tagName).toLowerCase()==="circle"){
+      add(node,Number(node.getAttribute("cx"))||0,Number(node.getAttribute("cy"))||0,Number(node.getAttribute("r"))||0);
+    }
+  });
+  if(!bounds.count||!Number.isFinite(bounds.minX)||!Number.isFinite(bounds.minY)||!Number.isFinite(bounds.maxX)||!Number.isFinite(bounds.maxY))return null;
+  return bounds;
+}
+function gdAdminCoursePreviewClampFrame(frame,sourceWidth,sourceHeight,source){
+  if(!frame)return null;
+  let width=Math.max(1,Number(frame.width)||0);
+  let height=Math.max(1,Number(frame.height)||0);
+  let x=Number(frame.x)||0;
+  let y=Number(frame.y)||0;
+  if(width>sourceWidth)width=sourceWidth;
+  if(height>sourceHeight)height=sourceHeight;
+  x=Math.max(0,Math.min(sourceWidth-width,x));
+  y=Math.max(0,Math.min(sourceHeight-height,y));
+  return {x,y,width,height,sourceWidth,sourceHeight,source:source||frame.source||"gps-play-frame"};
+}
+function gdAdminCoursePreviewPlayViewportRatios(info){
+  const width=Math.max(1,Number(info&&info.width)||1);
+  const height=Math.max(1,Number(info&&info.height)||1);
+  const targetAspect=9/16;
+  let frameH=Math.min(height*.82,Math.max(height*.62,width*.92/targetAspect));
+  let frameW=frameH*targetAspect;
+  if(frameW>width*.84){
+    frameW=width*.84;
+    frameH=frameW/targetAspect;
+  }
+  const frameX=(width-frameW)/2;
+  const frameY=(height-frameH)/2;
+  return {
+    left:frameX/width,
+    top:frameY/height,
+    width:frameW/width*.78,
+    height:frameH/height*.80,
+    centerX:(frameX+frameW/2)/width,
+    centerY:(frameY+frameH*.52)/height
+  };
+}
+function gdAdminCoursePreviewFrameFromObjects(info,bounds){
+  if(!info||!bounds)return null;
+  const ratios=gdAdminCoursePreviewPlayViewportRatios(info);
+  const sourceWidth=info.width,sourceHeight=info.height;
+  const phoneAspect=9/16;
+  const objectWidth=Math.max(1,bounds.maxX-bounds.minX);
+  const objectHeight=Math.max(1,bounds.maxY-bounds.minY);
+  const routeDiag=Math.sqrt(objectWidth*objectWidth+objectHeight*objectHeight);
+  const padX=Math.max(sourceWidth*.025,objectWidth*.16,routeDiag*.075);
+  const padY=Math.max(sourceHeight*.015,objectHeight*.08,routeDiag*.045);
+  const minX=Math.max(0,bounds.minX-padX);
+  const maxX=Math.min(sourceWidth,bounds.maxX+padX);
+  const minY=Math.max(0,bounds.minY-padY);
+  const maxY=Math.min(sourceHeight,bounds.maxY+padY);
+  const fitWidth=Math.max(1,maxX-minX);
+  const fitHeight=Math.max(1,maxY-minY);
+  const targetWidth=Math.max(.08,Number(ratios.width)||1-Number(ratios.left||0)-Number(ratios.right||0));
+  const targetHeight=Math.max(.08,Number(ratios.height)||1-Number(ratios.top||0)-Number(ratios.bottom||0));
+  let cropWidth=Math.max(fitWidth/targetWidth,fitHeight*phoneAspect/targetHeight)*1.04;
+  let cropHeight=cropWidth/phoneAspect;
+  if(cropHeight>sourceHeight){
+    cropHeight=sourceHeight;
+    cropWidth=cropHeight*phoneAspect;
+  }
+  if(cropWidth>sourceWidth){
+    cropWidth=sourceWidth;
+    cropHeight=cropWidth/phoneAspect;
+  }
+  const targetCenterX=Number(ratios.centerX)||((Number(ratios.left)||0)+targetWidth/2);
+  const targetCenterY=Number(ratios.centerY)||((Number(ratios.top)||0)+targetHeight/2);
+  const focusX=(minX+maxX)/2;
+  const focusY=(minY+maxY)/2;
+  return gdAdminCoursePreviewClampFrame({
+    x:focusX-targetCenterX*cropWidth,
+    y:focusY-targetCenterY*cropHeight,
+    width:cropWidth,
+    height:cropHeight
+  },sourceWidth,sourceHeight,"gps-play-viewport-frame");
+}
+function gdAdminCoursePreviewFrameBox(src){
+  const info=gdAdminCoursePreviewSvgInfo(src);
+  if(!info)return null;
+  const viewport=info.root.querySelector('rect[data-role="gps-play-frame"]');
+  if(viewport){
+    const box=gdAdminCoursePreviewClampFrame({
+      x:Number(viewport.getAttribute("x"))||0,
+      y:Number(viewport.getAttribute("y"))||0,
+      width:Number(viewport.getAttribute("width"))||0,
+      height:Number(viewport.getAttribute("height"))||0
+    },info.width,info.height,"stored-gps-play-frame");
+    if(box)return box;
+  }
+  return gdAdminCoursePreviewFrameFromObjects(info,gdAdminCoursePreviewObjectBounds(info));
+}
+function gdAdminCoursePreviewPhoneFrameMarkup(markup,frameBox){
+  if(!markup||!frameBox)return markup||"";
+  const left=-(frameBox.x/frameBox.width)*100;
+  const top=-(frameBox.y/frameBox.height)*100;
+  const width=(frameBox.sourceWidth/frameBox.width)*100;
+  const height=(frameBox.sourceHeight/frameBox.height)*100;
+  const style=[
+    `--gd-phone-frame-left:${gdAdminCourseVisualSvgNum(left)}%`,
+    `--gd-phone-frame-top:${gdAdminCourseVisualSvgNum(top)}%`,
+    `--gd-phone-frame-width:${gdAdminCourseVisualSvgNum(width)}%`,
+    `--gd-phone-frame-height:${gdAdminCourseVisualSvgNum(height)}%`
+  ].join(";");
+  return `<div class="gdAdminPhoneFrameCrop" data-frame-source="${gdEscapeHTML(frameBox.source||"gps-play-frame")}" style="${style}">${markup}</div>`;
+}
 function gdAdminCoursePreviewMarkup(selected){
   const engine=window.GDCourseVisualEngine;
   const record=gdAdminCourseVisualRecord(selected.id)||engine?.getRecord?.(selected.id)||null;
@@ -7153,7 +7353,8 @@ function gdAdminCoursePreviewMarkup(selected){
   const src=asset&&asset.dataUrl||"";
   const inline=gdAdminCourseVisualInlineSvg(src,`Hole ${current} play preview`,{preserveImages:true});
   const id=gdAdminJsArg(selected.id);
-  const frame=(inline||src)?(inline||`<img src="${gdEscapeHTML(src)}" alt="Hole ${gdEscapeHTML(current)} play preview" loading="lazy" decoding="async">`):`<div class="gdAdminPhoneEmpty">No visual surface yet. Use Visuals or Update to build the Clarity play surface.</div>`;
+  const imageMarkup=inline||src?inline||`<img src="${gdEscapeHTML(src)}" alt="Hole ${gdEscapeHTML(current)} play preview" loading="lazy" decoding="async">`:"";
+  const frame=imageMarkup?gdAdminCoursePreviewPhoneFrameMarkup(imageMarkup,gdAdminCoursePreviewFrameBox(src)):`<div class="gdAdminPhoneEmpty">No visual surface yet. Use Visuals or Update to build the Clarity play surface.</div>`;
   return `<div class="gdAdminPhonePreviewShell"><div class="gdAdminPhoneInfo"><strong>${gdEscapeHTML(selected.name)} · Hole ${gdEscapeHTML(current)}</strong><span>Phone mock-up uses the same per-hole Clarity visual products that GPS Play will consume, with the captured surface visible inside the play viewport.</span><div class="gdAdminPhoneControls"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev hole</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next hole</button><button type="button" onclick="return gdAdminCourseDbLoadVisual(${id})">Open visuals</button></div><div class="gdAdminCourseStageLine"><span class="${asset&&asset.dataUrl?"ready":"warn"}">${asset&&asset.dataUrl?"surface ready":"needs visual"}</span><span>H${gdEscapeHTML(current)} / ${gdEscapeHTML(count)}</span><span>${gdEscapeHTML(asset&&asset.path?String(asset.path).split("/").slice(-3).join("/"):"live fallback")}</span></div></div><div class="gdAdminPhone"><div class="gdAdminPhoneScreen"><div class="gdAdminPhoneHud"><span>Clarity Play</span><b>H${gdEscapeHTML(current)}</b></div>${frame}<div class="gdAdminPhoneNav"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next</button></div></div></div></div>`;
 }
 function gdAdminCourseDebugMarkup(selected){
@@ -22858,21 +23059,25 @@ function setBubbleOnlyLock(on){
   }
 }
 
-function gdScreenTargetFrameConfig(kind="lock"){
-  const w=window.innerWidth||document.documentElement.clientWidth||390;
-  const h=window.innerHeight||document.documentElement.clientHeight||760;
+function gdScreenTargetFrameRatios(kind="lock"){
   // Ratios based on Sam's marked frame guide. These are real invisible camera frames:
   // object bounds should fill the chosen box, not merely sit near its centre.
   const frame={
     // Medium locked-in frame: green/bubble should own this area in normal lock-in.
-    lock:{left:.25,right:.26,top:.205,bottom:.575},
+    lock:{left:.25,top:.205,width:.49,height:.22},
     // Tightest green/hole frame: reserved for saved green / hole-object framing.
-    hole:{left:.31,right:.32,top:.205,bottom:.638},
+    hole:{left:.31,top:.205,width:.37,height:.157},
     // Largest green/landing zoom frame: optional button fills this bigger area.
-    zoom:{left:.155,right:.165,top:.205,bottom:.48},
+    zoom:{left:.155,top:.205,width:.68,height:.315},
     // Tee frame sits just above the bottom controls for future tee/origin framing.
-    tee:{left:.31,right:.32,top:.715,bottom:.235}
-  }[kind]||{left:.25,right:.26,top:.205,bottom:.575};
+    tee:{left:.31,top:.715,width:.37,height:.05}
+  }[kind]||{left:.25,top:.205,width:.49,height:.22};
+  return Object.assign({},frame,{right:Math.max(0,1-frame.left-frame.width),bottom:Math.max(0,1-frame.top-frame.height)});
+}
+function gdScreenTargetFrameConfig(kind="lock"){
+  const w=window.innerWidth||document.documentElement.clientWidth||390;
+  const h=window.innerHeight||document.documentElement.clientHeight||760;
+  const frame=gdScreenTargetFrameRatios(kind);
   return {
     left:Math.round(w*frame.left),
     right:Math.round(w*frame.right),
