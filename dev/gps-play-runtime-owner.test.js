@@ -10,6 +10,12 @@ function scriptById(id) {
   return match[1];
 }
 
+function styleById(id) {
+  const match = html.match(new RegExp(`<style id="${id}">([\\s\\S]*?)<\\/style>`));
+  assert(match, `style ${id} exists`);
+  return match[1];
+}
+
 function sliceBetween(start, end) {
   const startIndex = html.indexOf(start);
   assert(startIndex >= 0, `${start} exists`);
@@ -35,6 +41,7 @@ function assertBefore(source, first, second, message) {
 }
 
 const runtimeScript = scriptById("gdGpsPlayRuntimeOwnerV1");
+const runtimeCss = styleById("gdGpsPlayRuntimeOwnerV1Css");
 new Function(runtimeScript);
 
 assertNotContains(html, '<script id="gdGpsSpringCleanOwnerV1">', "old Spring Clean script id is not the live owner");
@@ -72,6 +79,14 @@ assertContains(runtimeScript, "delete window.__gdLastStandingPoint", "manual-sta
 assertContains(runtimeScript, '"gdStandingPointLat"', "manual-start cleanup clears standing-point datasets");
 assertContains(runtimeScript, '"gdGreenFocusBallLat"', "manual-start cleanup clears green-focus ball datasets");
 assertContains(runtimeScript, '"gdManualSurfaceEnd"', "manual-start cleanup clears surface-end diagnostics");
+
+assertContains(runtimeCss, "body.shell-gps #shellHomeBtn", "GPS runtime keeps shell Home visible");
+assertContains(runtimeCss, "body.shell-gps #shellTop #shellSettingsBtn", "GPS runtime keeps shell Settings visible");
+assertNotContains(runtimeCss, "#shellHomeBtn{display:none!important", "GPS runtime does not hide the real Home button");
+assertContains(runtimeCss, "#gdToolRailTab{position:fixed!important", "GPS runtime owns the tool tab position");
+assertContains(runtimeCss, "z-index:8270!important", "Settings sits above the tool tab");
+assertContains(html, "body.gdMappedStartPromptActive #gdV62UndoDock{\n  opacity:1!important;\n  filter:none!important;\n  pointer-events:none!important;\n}", "mapped start prompt keeps the lock/shot dock visible");
+assertContains(html, "body.gdMappedStartPromptActive #hint.gdMappedStartPill{\n  z-index:2540!important;\n  bottom:calc(148px + env(safe-area-inset-bottom))!important;", "mapped start pill sits above the lock/shot dock");
 
 const lockAfterManualStart = sliceBetween("function lockAfterManualStart", "function manualStartPresentationSurfaceEvent");
 assertContains(lockAfterManualStart, "var lockHole=currentHole()", "manual-start delayed lock captures the originating hole");
