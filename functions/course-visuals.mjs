@@ -86,6 +86,21 @@ export default async function courseVisuals(req) {
 
   const actor = payload && payload.actor || {};
   if (!isAdminActor(actor)) return json(403, { error: "Admin visual publish only" });
+  const action = text(payload && payload.action, 40) || "upsert";
+  if (action === "delete" || action === "reset") {
+    const courseId = slug(payload && (payload.courseId || payload.course_id) || payload && payload.visual && (payload.visual.courseId || payload.visual.course_id));
+    if (!courseId) return json(400, { error: "courseId is required" });
+    if (!hasSupabase()) return json(503, { error: "Supabase is not configured", courseId });
+    try {
+      const deleted = await supabaseFetch(TABLE + "?course_id=eq." + encodeURIComponent(courseId), {
+        method: "DELETE",
+        headers: { Prefer: "return=representation" }
+      });
+      return json(200, { ok: true, action: "delete", courseId, deleted: Array.isArray(deleted) ? deleted.length : 0, storage: "supabase" });
+    } catch (error) {
+      return json(error.status || 503, { error: storageMessage(error), courseId });
+    }
+  }
   const visual = sanitizeVisual(payload && payload.visual);
   if (!visual) return json(400, { error: "Course visual record is required" });
   if (!hasSupabase()) return json(503, { error: "Supabase is not configured", visual });

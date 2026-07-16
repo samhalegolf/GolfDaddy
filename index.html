@@ -441,7 +441,12 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
   function courseVisualHoleAsset(record){
     var hole=surfaceHoleNumber();
     var frames=(Array.isArray(record&&record.holeFramePublishedVisuals)&&record.holeFramePublishedVisuals.length?record.holeFramePublishedVisuals:Array.isArray(record&&record.holeFrameTerrainViews)&&record.holeFrameTerrainViews.length?record.holeFrameTerrainViews:[]);
-    return frames.filter(function(asset){return asset&&Math.round(Number(asset.holeNumber)||0)===Math.round(Number(hole)||0);})[0]||null;
+    var match=frames.filter(function(asset){return asset&&Math.round(Number(asset.holeNumber)||0)===Math.round(Number(hole)||0);})[0]||null;
+    if(match)return match;
+    var single=record&&record.singleHolePublishedVisual||record&&record.singleHoleTerrainView||null;
+    var singleHole=Math.round(Number(single&&single.holeNumber)||0);
+    if(single&&(!frames.length||singleHole===Math.round(Number(hole)||0)||singleHole<1&&Math.round(Number(hole)||0)===1))return single;
+    return null;
   }
   function courseVisualManifestZoom(bounds,width,height){
     if(!validBounds(bounds)||!hasMap())return 19;
@@ -8151,8 +8156,9 @@ async function gdAdminCourseVisualRecapture(courseId){
   try{
     const presetId=String(document.getElementById("gdCourseVisualPreset")?.value||"");
     const overrides=gdAdminCourseVisualOverridesFromForm();
+    if(typeof engine.deleteCloudCourseVisual==="function")await engine.deleteCloudCourseVisual(courseId,{silent:true});
+    if(typeof engine.resetCourseVisualWorkingState==="function")engine.resetCourseVisualWorkingState(courseId,{keepPublished:false});
     engine.saveCourseVisualSettings(courseId,overrides,{presetId});
-    if(typeof engine.resetCourseVisualWorkingState==="function")engine.resetCourseVisualWorkingState(courseId,{keepPublished:true});
     gdAdminCourseVisualToast("Recapturing course visuals");
     const buildOpts={enable3dBeta:overrides.visualEngine&&overrides.visualEngine.enable3dBeta===true,forceFresh:true,requireFreshCaptures:true};
     let record=null;
@@ -22575,7 +22581,6 @@ function setState(s){document.getElementById("stateLine").textContent=gdHonestGp
 function fmt(m){return units==="yd"?{value:Math.round(m*1.09361),unit:"yd"}:{value:Math.round(m),unit:"m"}}
 function setGps(on,label="GPS"){const el=document.getElementById("gpsLive");el.classList.toggle("off",!on);el.innerHTML=`<i></i>${label}`}
 function gdHintWantsMappedStartPill(text){
-  if(window.gdHasFreshLiveGpsFeed&&window.gdHasFreshLiveGpsFeed())return false;
   return String(text||"").trim()==="Tap where you are standing"&&typeof gdMappedCourseAssistActive==="function"&&gdMappedCourseAssistActive();
 }
 function gdInstallMappedStartHintActions(h){
@@ -22595,13 +22600,6 @@ function gdInstallMappedStartHintActions(h){
 	}
 function gdRenderMappedStartHint(h){
   gdInstallMappedStartHintActions(h);
-  if(window.gdHasFreshLiveGpsFeed&&window.gdHasFreshLiveGpsFeed()){
-    h.classList.remove("gdMappedStartPill","visible");
-    h.textContent="";
-    try{document.body.classList.remove("gdMappedStartPromptActive")}catch(e){}
-    try{document.getElementById("app")?.classList.remove("gdPreLockFrame");}catch(e){}
-    return;
-  }
   h.classList.add("gdMappedStartPill");
   h.innerHTML='<button class="gdMappedStartAction" type="button" data-gd-mapped-start-action="manual">Set Start Point</button><button class="gdMappedStartAction gdHeadToTee" type="button" data-gd-mapped-start-action="tee">Head To the Tee</button>';
   try{document.body.classList.add("gdMappedStartPromptActive")}catch(e){}
@@ -23920,6 +23918,65 @@ function gdRefreshGpsMapAfterCourseOpen(payload,opts={}){
     },delay);
   });
 }
+function gdCourseVisualPlayKeys(payload){
+  const keys=[];
+  const add=value=>{
+    const raw=String(value||"").trim();
+    const key=raw.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
+    if(key&&!keys.includes(key))keys.push(key);
+  };
+  add(payload?.courseId);
+  add(payload?.courseKey);
+  add(payload?.savedCourseId);
+  add(payload?.canonicalKey);
+  add(payload?.id);
+  add(payload?.name);
+  add(payload?.courseName);
+  [payload?.name,payload?.courseName].forEach(name=>{
+    const stripped=String(name||"").replace(/\b(golf\s+course|golf\s+club|golf|course|club)\b/ig," ").trim();
+    if(stripped)add(stripped);
+  });
+  return keys;
+}
+function gdScheduleCourseVisualPullForPlay(payload){
+  if(gdCoursePayloadIsManual(payload))return false;
+  const engine=window.GDCourseVisualEngine;
+  if(!engine||typeof engine.pullCourseVisual!=="function")return false;
+  const keys=gdCourseVisualPlayKeys(payload);
+  if(!keys.length)return false;
+  const token=keys.join("|");
+  const now=Date.now();
+  if(window.__gdCourseVisualPlayPullKey===token&&now-(window.__gdCourseVisualPlayPullAt||0)<45000)return true;
+  window.__gdCourseVisualPlayPullKey=token;
+  window.__gdCourseVisualPlayPullAt=now;
+  try{document.body.dataset.gdCourseVisualPlayPull="loading";}catch(e){}
+  setTimeout(async()=>{
+    let loaded=null;
+    let loadedKey="";
+    for(const key of keys){
+      try{
+        const record=await engine.pullCourseVisual(key);
+        if(record&&record.publishedVisual){
+          loaded=record;
+          loadedKey=key;
+          break;
+        }
+      }catch(e){}
+    }
+    try{
+      document.body.dataset.gdCourseVisualPlayPull=loaded?"loaded":"missing";
+      document.body.dataset.gdCourseVisualPlayPullKey=loadedKey||keys[0]||"";
+    }catch(e){}
+    if(!loaded)return;
+    try{if(typeof gdCoursePlayDebugEvent==="function")gdCoursePlayDebugEvent("course-visual-cloud-loaded",{courseId:loaded.courseId,key:loadedKey,holeFrames:Array.isArray(loaded.holeFramePublishedVisuals)?loaded.holeFramePublishedVisuals.length:0,singleHole:!!loaded.singleHolePublishedVisual});}catch(e){}
+    try{window.gdResetHoleImageFresh?.();}catch(e){}
+    try{window.gdEnsureCurrentCapturedSurfaceManifest?.("course-visual-cloud-loaded");}catch(e){}
+    try{window.gdQueueMappedPreLockHoleFrame?.({source:"course-visual-cloud-loaded"});}catch(e){}
+    try{window.gdApplyGpsMapVisibilityOwner?.("course-visual-cloud-loaded");}catch(e){}
+    try{window.gdHydrateGpsBadge?.(true);}catch(e){}
+  },80);
+  return true;
+}
 function gdKickWholeCourseAutoMapOnLoad(payload){
   if(!payload||gdCoursePayloadIsManual(payload))return false;
   const now=Date.now();
@@ -23979,6 +24036,7 @@ function gdOpenCoursePickerCourse(course){
     gdRefreshGpsMapAfterCourseOpen(payload,{setCourseView:gdCoursePickerPayloadHasPoint(payload)});
   }
   gdKickWholeCourseAutoMapOnLoad(payload);
+  gdScheduleCourseVisualPullForPlay(payload);
   gdScheduleCoursePickerFirstHoleOpen(payload);
   return false;
 }
@@ -24079,6 +24137,7 @@ function openCourse(c){
   try{ if(typeof setGps==='function') setGps(false,'Manual'); }catch(e){}
   try{ var two=document.getElementById('gpsTwoTapBtn'), live=document.getElementById('gpsLiveModeBtn'); if(two)two.classList.add('active'); if(live)live.classList.remove('active'); }catch(e){}
   try{ if(typeof toast==="function")toast(c.name==='Manual GPS' ? "Manual GPS selected" : "Course selected"); }catch(e){}
+  gdScheduleCourseVisualPullForPlay(c);
 	  gdRefreshGpsMapAfterCourseOpen(c,{setCourseView:hasCoursePoint});
   return false;
 }

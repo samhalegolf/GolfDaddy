@@ -2308,10 +2308,13 @@
   }
   function assetListForOutput(list,includeData){
     return (Array.isArray(list)?list:[]).filter(Boolean).map(function(asset){
-      var out={path:asset.path,version:asset.version,presetId:asset.presetId,presetVersion:asset.presetVersion,holeNumber:asset.holeNumber,width:asset.width,height:asset.height,bounds:asset.bounds,sourceCaptureIds:asset.sourceCaptureIds,metadata:asset.metadata};
+      var out={path:asset.path,url:asset.url||asset.publicUrl||asset.public_url||"",publicUrl:asset.publicUrl||asset.public_url||asset.url||"",storagePath:asset.storagePath||asset.storage_path||"",contentType:asset.contentType||asset.content_type||"",version:asset.version,presetId:asset.presetId,presetVersion:asset.presetVersion,holeNumber:asset.holeNumber,width:asset.width,height:asset.height,bounds:asset.bounds,sourceCaptureIds:asset.sourceCaptureIds,metadata:asset.metadata};
       if(includeData)out.dataUrl=asset.dataUrl;
       return out;
     });
+  }
+  function assetForOutput(asset,includeData){
+    return assetListForOutput(asset?[asset]:[],includeData)[0];
   }
   function resolveCourseVisual(courseId){
     var record=getRecord(courseId);
@@ -2323,14 +2326,14 @@
       basicVisual:record.basicVisual?{path:record.basicVisual.path,dataUrl:record.basicVisual.dataUrl,version:record.basicVisual.version}:undefined,
       terrainView:record.terrainView?{path:record.terrainView.path,dataUrl:record.terrainView.dataUrl,version:record.terrainView.version}:undefined,
       exampleHoleVisual:record.exampleHoleVisual?{path:record.exampleHoleVisual.path,dataUrl:record.exampleHoleVisual.dataUrl,holeNumber:record.exampleHoleVisual.holeNumber}:undefined,
-      singleHolePreviewVisual:record.singleHolePreviewVisual?{path:record.singleHolePreviewVisual.path,dataUrl:record.singleHolePreviewVisual.dataUrl,version:record.singleHolePreviewVisual.version,presetId:record.singleHolePreviewVisual.presetId,presetVersion:record.singleHolePreviewVisual.presetVersion,holeNumber:record.singleHolePreviewVisual.holeNumber}:undefined,
-      singleHoleTerrainView:record.singleHoleTerrainView?{path:record.singleHoleTerrainView.path,dataUrl:record.singleHoleTerrainView.dataUrl,version:record.singleHoleTerrainView.version,presetId:record.singleHoleTerrainView.presetId,presetVersion:record.singleHoleTerrainView.presetVersion,holeNumber:record.singleHoleTerrainView.holeNumber}:undefined,
+      singleHolePreviewVisual:assetForOutput(record.singleHolePreviewVisual,true),
+      singleHoleTerrainView:assetForOutput(record.singleHoleTerrainView,true),
       holeFrameVisuals:assetListForOutput(record.holeFrameVisuals,true),
       holeFramePreviewVisuals:assetListForOutput(record.holeFramePreviewVisuals,true),
       holeFrameTerrainViews:assetListForOutput(record.holeFrameTerrainViews,true),
       previewVisual:record.previewVisual?{path:record.previewVisual.path,dataUrl:record.previewVisual.dataUrl,version:record.previewVisual.version,presetId:record.previewVisual.presetId,presetVersion:record.previewVisual.presetVersion}:undefined,
-      publishedVisual:record.publishedVisual?{path:record.publishedVisual.path,dataUrl:record.publishedVisual.dataUrl,version:record.publishedVisual.version,presetId:record.publishedVisual.presetId,presetVersion:record.publishedVisual.presetVersion}:undefined,
-      singleHolePublishedVisual:record.singleHolePublishedVisual?{path:record.singleHolePublishedVisual.path,dataUrl:record.singleHolePublishedVisual.dataUrl,version:record.singleHolePublishedVisual.version,presetId:record.singleHolePublishedVisual.presetId,presetVersion:record.singleHolePublishedVisual.presetVersion,holeNumber:record.singleHolePublishedVisual.holeNumber}:undefined,
+      publishedVisual:assetForOutput(record.publishedVisual,true),
+      singleHolePublishedVisual:assetForOutput(record.singleHolePublishedVisual,true),
       holeFramePublishedVisuals:assetListForOutput(record.holeFramePublishedVisuals,true),
       error:record.lastError||undefined
     };
@@ -2344,14 +2347,14 @@
       basicVisual:record.basicVisual?{path:record.basicVisual.path,version:record.basicVisual.version}:undefined,
       terrainView:record.terrainView?{path:record.terrainView.path,version:record.terrainView.version}:undefined,
       exampleHoleVisual:record.exampleHoleVisual?{path:record.exampleHoleVisual.path,holeNumber:record.exampleHoleVisual.holeNumber}:undefined,
-      singleHolePreviewVisual:record.singleHolePreviewVisual?{path:record.singleHolePreviewVisual.path,version:record.singleHolePreviewVisual.version,presetId:record.singleHolePreviewVisual.presetId,presetVersion:record.singleHolePreviewVisual.presetVersion,holeNumber:record.singleHolePreviewVisual.holeNumber}:undefined,
-      singleHoleTerrainView:record.singleHoleTerrainView?{path:record.singleHoleTerrainView.path,version:record.singleHoleTerrainView.version,presetId:record.singleHoleTerrainView.presetId,presetVersion:record.singleHoleTerrainView.presetVersion,holeNumber:record.singleHoleTerrainView.holeNumber}:undefined,
+      singleHolePreviewVisual:assetForOutput(record.singleHolePreviewVisual,false),
+      singleHoleTerrainView:assetForOutput(record.singleHoleTerrainView,false),
       holeFrameVisuals:assetListForOutput(record.holeFrameVisuals,false),
       holeFramePreviewVisuals:assetListForOutput(record.holeFramePreviewVisuals,false),
       holeFrameTerrainViews:assetListForOutput(record.holeFrameTerrainViews,false),
       previewVisual:record.previewVisual?{path:record.previewVisual.path,version:record.previewVisual.version,presetId:record.previewVisual.presetId,presetVersion:record.previewVisual.presetVersion}:undefined,
-      publishedVisual:record.publishedVisual?{path:record.publishedVisual.path,version:record.publishedVisual.version,presetId:record.publishedVisual.presetId,presetVersion:record.publishedVisual.presetVersion}:undefined,
-      singleHolePublishedVisual:record.singleHolePublishedVisual?{path:record.singleHolePublishedVisual.path,version:record.singleHolePublishedVisual.version,presetId:record.singleHolePublishedVisual.presetId,presetVersion:record.singleHolePublishedVisual.presetVersion,holeNumber:record.singleHolePublishedVisual.holeNumber}:undefined,
+      publishedVisual:assetForOutput(record.publishedVisual,false),
+      singleHolePublishedVisual:assetForOutput(record.singleHolePublishedVisual,false),
       holeFramePublishedVisuals:assetListForOutput(record.holeFramePublishedVisuals,false),
       error:record.lastError||undefined
     };
@@ -2403,6 +2406,32 @@
         return data||{};
       });
     }).finally(function(){record.__syncing=false;});
+  }
+  function deleteCloudCourseVisual(courseId,opts){
+    opts=opts||{};
+    var id=slug(courseId);
+    if(!id)return Promise.reject(Object.assign(new Error("Course visual courseId is required"),{code:"course-visual-course-id-required"}));
+    if(!root||typeof root.fetch!=="function")return Promise.reject(Object.assign(new Error("Cloud visual endpoint is not available"),{code:"course-visual-cloud-unavailable"}));
+    var actor=safe(function(){return cloudActor();},{role:"",email:"",accountId:""});
+    if(String(actor.role||"").toLowerCase()!=="admin")return Promise.reject(Object.assign(new Error("Admin account is required to delete course visuals from Clarity Cloud"),{code:"course-visual-admin-required"}));
+    return root.fetch(API_ENDPOINT,{method:"POST",headers:{"Content-Type":"application/json","Accept":"application/json"},body:JSON.stringify({action:"delete",courseId:id,actor:actor})}).then(function(response){
+      return response.text().then(function(textBody){
+        var data=null;
+        if(textBody){try{data=JSON.parse(textBody);}catch(_error){data={error:textBody};}}
+        if(!response.ok){
+          var message=data&&data.error||("Course visual cloud delete failed with HTTP "+response.status);
+          throw Object.assign(new Error(message),{code:"course-visual-cloud-delete-failed",status:response.status,body:data});
+        }
+        var record=resetCourseVisualWorkingState(id,{keepPublished:false});
+        record.diagnostics=Object.assign({},record.diagnostics||{},{cloudDelete:{deletedAt:now(),storage:data&&data.storage||"unknown",deleted:data&&data.deleted||0}});
+        recordEvent(record,"course-visual-cloud-deleted",{storage:data&&data.storage||"unknown",deleted:data&&data.deleted||0});
+        putRecord(record,{skipCloudSync:true});
+        return data||{};
+      });
+    }).catch(function(error){
+      if(opts.silent)return null;
+      throw error;
+    });
   }
   function metadataForCloud(record){
     function assetPayload(asset,role){
@@ -2458,30 +2487,79 @@
     record.lastError=row.last_error||record.lastError||null;
     record.diagnostics=row.diagnostics||record.diagnostics||{};
     record.versions=Array.isArray(row.versions)?row.versions:record.versions||[];
-    var assets=Array.isArray(row.assets)?row.assets:Array.isArray(row.uploaded_assets)?row.uploaded_assets:Array.isArray(row.uploadedAssets)?row.uploadedAssets:[];
-    function assetForRole(role){return assets.filter(function(asset){return asset&&asset.role===role&&asset.path;})[0]||null;}
-    function assetsForRole(role){return assets.filter(function(asset){return asset&&asset.role===role&&asset.path;}).sort(function(a,b){return Number(a.holeNumber||a.hole_number||0)-Number(b.holeNumber||b.hole_number||0);});}
-    function restoredFrameAsset(asset,version){
-      return {path:asset.path,dataUrl:asset.dataUrl,version:version,presetId:record.presetId,presetVersion:record.presetVersion,holeNumber:asset.holeNumber||asset.hole_number||null,metadata:asset.metadata||{}};
+    var play=row.play_payload||row.playPayload||{};
+    var playAssets=play&&play.assets||{};
+    var rawAssets=(Array.isArray(row.assets)?row.assets:Array.isArray(row.uploaded_assets)?row.uploaded_assets:Array.isArray(row.uploadedAssets)?row.uploadedAssets:[]).slice();
+    function pushCloudAsset(asset,role){
+      if(!asset||typeof asset!=="object")return;
+      rawAssets.push(Object.assign({},asset,{role:asset.role||role}));
     }
+    pushCloudAsset(play.publishedVisual||play.published_visual||playAssets.overview,"published");
+    pushCloudAsset(play.singleHolePublishedVisual||play.single_hole_published_visual||playAssets.singleHole,"single-hole-published");
+    (Array.isArray(play.holeFrames)?play.holeFrames:Array.isArray(play.hole_frames)?play.hole_frames:Array.isArray(playAssets.holeFrames)?playAssets.holeFrames:[]).forEach(function(asset){pushCloudAsset(asset,"hole-frame-published");});
+    Object.keys(play.holeFrameMap||play.hole_frame_map||playAssets.holeFrameMap||{}).forEach(function(key){pushCloudAsset((play.holeFrameMap||play.hole_frame_map||playAssets.holeFrameMap||{})[key],"hole-frame-published");});
+    function cloudObject(value){return value&&typeof value==="object"&&!Array.isArray(value)?value:{};}
+    function normalizeCloudAsset(asset){
+      if(!asset||typeof asset!=="object")return null;
+      var metadata=cloudObject(asset.metadata);
+      var dims=metadata.outputDimensions||metadata.playSurface&&metadata.playSurface.outputDimensions||{};
+      var bounds=asset.bounds||metadata.bounds||metadata.sourceBounds||metadata.playSurface&&metadata.playSurface.sourceBounds||null;
+      return {
+        path:asset.path||asset.storage_path||asset.storagePath||"",
+        role:asset.role||"",
+        dataUrl:asset.dataUrl||asset.data_url||"",
+        url:asset.url||asset.publicUrl||asset.public_url||"",
+        publicUrl:asset.publicUrl||asset.public_url||asset.url||"",
+        storagePath:asset.storagePath||asset.storage_path||"",
+        contentType:asset.contentType||asset.content_type||"",
+        byteLength:asset.byteLength||asset.byte_length||0,
+        holeNumber:asset.holeNumber||asset.hole_number||null,
+        width:asset.width||dims.width||null,
+        height:asset.height||dims.height||null,
+        bounds:bounds,
+        sourceCaptureIds:asset.sourceCaptureIds||asset.source_capture_ids||metadata.sourceCaptureIds||[],
+        metadata:metadata
+      };
+    }
+    var byKey={};
+    rawAssets.forEach(function(asset){
+      var normalized=normalizeCloudAsset(asset);
+      if(!normalized||!normalized.role||!normalized.path&&!normalized.url)return;
+      var key=[normalized.role,normalized.holeNumber||0,normalized.path||normalized.url].join("::");
+      byKey[key]=Object.assign({},byKey[key]||{},normalized,{metadata:Object.assign({},byKey[key]&&byKey[key].metadata||{},normalized.metadata||{})});
+    });
+    var assets=Object.keys(byKey).map(function(key){return byKey[key];});
+    function assetForRole(role){return assets.filter(function(asset){return asset&&asset.role===role&&(asset.path||asset.url);}).sort(function(a,b){return (b.url?1:0)-(a.url?1:0);})[0]||null;}
+    function assetsForRole(role){return assets.filter(function(asset){return asset&&asset.role===role&&(asset.path||asset.url);}).sort(function(a,b){return Number(a.holeNumber||a.hole_number||0)-Number(b.holeNumber||b.hole_number||0);});}
+    function restoredFrameAsset(asset,version){
+      var out={path:asset.path,url:asset.url||"",publicUrl:asset.publicUrl||"",storagePath:asset.storagePath||"",contentType:asset.contentType||"",byteLength:asset.byteLength||0,version:version,presetId:record.presetId,presetVersion:record.presetVersion,holeNumber:asset.holeNumber||asset.hole_number||null,width:asset.width||null,height:asset.height||null,bounds:asset.bounds||null,sourceCaptureIds:asset.sourceCaptureIds||[],metadata:asset.metadata||{}};
+      if(asset.dataUrl)out.dataUrl=asset.dataUrl;
+      return out;
+    }
+    var publishedAsset=assetForRole("published");
     if(row.raw_master_path&&!record.rawMaster)record.rawMaster={path:row.raw_master_path,bounds:row.course_bounds||null,width:0,height:0};
     if(row.basic_image_path&&!record.basicVisual)record.basicVisual={path:row.basic_image_path,version:record.currentVersion||1};
     if(row.preview_image_path&&!record.previewVisual)record.previewVisual={path:row.preview_image_path,version:record.currentVersion||1,presetId:record.presetId,presetVersion:record.presetVersion};
-    if(row.published_image_path&&!record.publishedVisual)record.publishedVisual={path:row.published_image_path,version:record.publishedVersion||record.currentVersion||1,presetId:record.presetId,presetVersion:record.presetVersion};
+    if(publishedAsset)record.publishedVisual=Object.assign({},record.publishedVisual||{},restoredFrameAsset(publishedAsset,record.publishedVersion||record.currentVersion||1));
+    else if(row.published_image_path&&!record.publishedVisual)record.publishedVisual={path:row.published_image_path,version:record.publishedVersion||record.currentVersion||1,presetId:record.presetId,presetVersion:record.presetVersion};
     var exampleAsset=assetForRole("example-hole");
     var terrainAsset=assetForRole("terrain-view");
     var singlePreviewAsset=assetForRole("single-hole-preview");
     var singleTerrainAsset=assetForRole("single-hole-terrain");
     var singlePublishedAsset=assetForRole("single-hole-published");
-    if(exampleAsset&&!record.exampleHoleVisual)record.exampleHoleVisual={path:exampleAsset.path,dataUrl:exampleAsset.dataUrl,width:0,height:0};
-    if(terrainAsset&&!record.terrainView)record.terrainView={path:terrainAsset.path,dataUrl:terrainAsset.dataUrl,version:record.currentVersion||1,presetId:record.presetId,presetVersion:record.presetVersion};
-    if(singlePreviewAsset&&!record.singleHolePreviewVisual)record.singleHolePreviewVisual={path:singlePreviewAsset.path,dataUrl:singlePreviewAsset.dataUrl,version:record.currentVersion||1,presetId:record.presetId,presetVersion:record.presetVersion};
-    if(singleTerrainAsset&&!record.singleHoleTerrainView)record.singleHoleTerrainView={path:singleTerrainAsset.path,dataUrl:singleTerrainAsset.dataUrl,version:record.currentVersion||1,presetId:record.presetId,presetVersion:record.presetVersion};
-    if(singlePublishedAsset&&!record.singleHolePublishedVisual)record.singleHolePublishedVisual={path:singlePublishedAsset.path,dataUrl:singlePublishedAsset.dataUrl,version:record.publishedVersion||record.currentVersion||1,presetId:record.presetId,presetVersion:record.presetVersion};
-    if(!record.holeFrameVisuals||!record.holeFrameVisuals.length)record.holeFrameVisuals=assetsForRole("hole-frame").map(function(asset){return restoredFrameAsset(asset,record.currentVersion||1);});
-    if(!record.holeFramePreviewVisuals||!record.holeFramePreviewVisuals.length)record.holeFramePreviewVisuals=assetsForRole("hole-frame-preview").map(function(asset){return restoredFrameAsset(asset,record.currentVersion||1);});
-    if(!record.holeFrameTerrainViews||!record.holeFrameTerrainViews.length)record.holeFrameTerrainViews=assetsForRole("hole-frame-terrain").map(function(asset){return restoredFrameAsset(asset,record.currentVersion||1);});
-    if(!record.holeFramePublishedVisuals||!record.holeFramePublishedVisuals.length)record.holeFramePublishedVisuals=assetsForRole("hole-frame-published").map(function(asset){return restoredFrameAsset(asset,record.publishedVersion||record.currentVersion||1);});
+    if(exampleAsset)record.exampleHoleVisual=Object.assign({},record.exampleHoleVisual||{},restoredFrameAsset(exampleAsset,record.currentVersion||1));
+    if(terrainAsset)record.terrainView=Object.assign({},record.terrainView||{},restoredFrameAsset(terrainAsset,record.currentVersion||1));
+    if(singlePreviewAsset)record.singleHolePreviewVisual=Object.assign({},record.singleHolePreviewVisual||{},restoredFrameAsset(singlePreviewAsset,record.currentVersion||1));
+    if(singleTerrainAsset)record.singleHoleTerrainView=Object.assign({},record.singleHoleTerrainView||{},restoredFrameAsset(singleTerrainAsset,record.currentVersion||1));
+    if(singlePublishedAsset)record.singleHolePublishedVisual=Object.assign({},record.singleHolePublishedVisual||{},restoredFrameAsset(singlePublishedAsset,record.publishedVersion||record.currentVersion||1));
+    var cloudHoleFrames=assetsForRole("hole-frame");
+    var cloudFramePreviews=assetsForRole("hole-frame-preview");
+    var cloudFrameTerrains=assetsForRole("hole-frame-terrain");
+    var cloudFramePublished=assetsForRole("hole-frame-published");
+    if(cloudHoleFrames.length)record.holeFrameVisuals=cloudHoleFrames.map(function(asset){return restoredFrameAsset(asset,record.currentVersion||1);});
+    if(cloudFramePreviews.length)record.holeFramePreviewVisuals=cloudFramePreviews.map(function(asset){return restoredFrameAsset(asset,record.currentVersion||1);});
+    if(cloudFrameTerrains.length)record.holeFrameTerrainViews=cloudFrameTerrains.map(function(asset){return restoredFrameAsset(asset,record.currentVersion||1);});
+    if(cloudFramePublished.length)record.holeFramePublishedVisuals=cloudFramePublished.map(function(asset){return restoredFrameAsset(asset,record.publishedVersion||record.currentVersion||1);});
     return putRecord(record,{skipCloudSync:true});
   }
   function pullCourseVisual(courseId){
@@ -2709,6 +2787,7 @@
     saveCourseVisualSettings:saveCourseVisualSettings,
     publishCourseVisual:publishCourseVisual,
     syncPublishedCourseVisual:syncPublishedCourseVisual,
+    deleteCloudCourseVisual:deleteCloudCourseVisual,
     revertToPublishedVersion:revertToPublishedVersion,
     resetToPublished:resetToPublished,
     resetCourseVisualWorkingState:resetCourseVisualWorkingState,
