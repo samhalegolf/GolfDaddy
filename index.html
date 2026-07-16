@@ -2454,6 +2454,7 @@ body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}
     .gdAdminCourseBadge.ok{background:rgba(31,211,109,.15);color:#73ffae}
     .gdAdminCourseBadge.warn{background:rgba(255,210,135,.14);color:#ffd287}
     .gdAdminCourseDetail{margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.08)}
+    .gdAdminCourseDetail:empty{display:none}
     .gdAdminCourseDetailHead{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
     .gdAdminCourseDetailHead h4{margin:0;color:#fff;font-size:15px;font-weight:950}
     .gdAdminCourseDetailHead span{display:block;margin-top:3px;color:rgba(255,255,255,.58);font-size:10px;font-weight:800;line-height:1.3}
@@ -6838,6 +6839,7 @@ function gdCoursePlayDebugMetric(label,value){
 let gdAdminCourseDatabaseSelected="";
 let gdAdminCourseDatabaseTab="overview";
 const gdAdminCoursePreviewHoleByCourse={};
+const gdAdminCourseDbStatusOpenByCourse={};
 function gdAdminCourseDbMetric(label,value){
   return `<div class="gdAdminDatabaseMetric"><span>${gdEscapeHTML(label)}</span><strong>${gdEscapeHTML(value ?? "")}</strong></div>`;
 }
@@ -6941,8 +6943,15 @@ function gdAdminCourseDbFillFilter(id,values,current,label){
   select.value=current||"";
 }
 function gdAdminCourseDbOpen(courseId){
-  gdAdminCourseDatabaseSelected=String(courseId||"");
-  if(arguments.length>1)gdAdminCourseDatabaseTab=String(arguments[1]||"overview");
+  const next=String(courseId||"");
+  const nextTab=arguments.length>1?String(arguments[1]||"overview"):gdAdminCourseDatabaseTab;
+  if(next&&next===gdAdminCourseDatabaseSelected&&nextTab==="overview"&&gdAdminCourseDatabaseTab==="overview"){
+    gdAdminCourseDatabaseSelected="";
+    gdAdminCourseDatabaseTab="overview";
+  }else{
+    gdAdminCourseDatabaseSelected=next;
+    gdAdminCourseDatabaseTab=nextTab;
+  }
   gdRenderAdminCourseDatabase();
   return false;
 }
@@ -6955,6 +6964,10 @@ function gdAdminCourseDbSetTab(tab){
   gdAdminCourseDatabaseTab=String(tab||"overview");
   gdRenderAdminCourseDatabase();
   return false;
+}
+function gdAdminCourseDbSetStatusOpen(courseId,open){
+  courseId=String(courseId||"");
+  if(courseId)gdAdminCourseDbStatusOpenByCourse[courseId]=!!open;
 }
 function gdAdminJsArg(value){
   return gdEscapeHTML(JSON.stringify(String(value||"")));
@@ -8086,8 +8099,10 @@ function gdRenderAdminCourseDatabase(){
     const hay=[item.name,item.key,item.status,item.syncStatus,item.source].join(" ").toLowerCase();
     return (!search||hay.indexOf(search)>=0)&&(!syncFilter||item.syncStatus===syncFilter)&&(!statusFilter||item.status===statusFilter);
   });
-  if(!gdAdminCourseDatabaseSelected&&filtered[0])gdAdminCourseDatabaseSelected=filtered[0].id;
-  if(gdAdminCourseDatabaseSelected&&!all.some(item=>item.id===gdAdminCourseDatabaseSelected))gdAdminCourseDatabaseSelected=filtered[0]?.id||"";
+  if(gdAdminCourseDatabaseSelected&&!filtered.some(item=>item.id===gdAdminCourseDatabaseSelected)){
+    gdAdminCourseDatabaseSelected="";
+    gdAdminCourseDatabaseTab="overview";
+  }
   summary.innerHTML=[
     gdAdminCourseDbMetric("Records",all.length),
     gdAdminCourseDbMetric("Shown",filtered.length),
@@ -8108,7 +8123,7 @@ function gdRenderAdminCourseDatabase(){
     const active=item.id===gdAdminCourseDatabaseSelected?" active":"";
     return `<tr class="${active}" onclick="return gdAdminCourseDbOpen(${gdAdminJsArg(item.id)} ,'overview')"><td class="gdAdminCourseNameCell" title="${gdEscapeHTML(item.key)}">${gdEscapeHTML(item.name)}</td><td><span class="gdAdminCourseStatusDot ${statusTone}">${gdEscapeHTML(item.status)}</span></td><td><span class="gdAdminCourseStatusDot ${syncTone}">${gdEscapeHTML(item.syncStatus)}</span></td><td>${gdEscapeHTML(item.holeCount)}</td><td>${gdEscapeHTML(item.playReadyCount)}/${gdEscapeHTML(item.holeCount||0)}</td><td>${gdEscapeHTML(item.framesIndexedCount)}</td><td>${gdEscapeHTML(item.manifestCount)}</td><td><span class="gdAdminCourseStatusDot ${visual.tone}">${gdEscapeHTML(visual.label)}</span></td><td>${gdEscapeHTML(gdCoursePlayDebugTime(item.updatedAt)||"unknown")}</td></tr>`;
   }).join("")}</tbody></table></div>`:'<div class="gdCoursePlayDebugEmpty">No course records match the current filters.</div>';
-  const selected=all.find(item=>item.id===gdAdminCourseDatabaseSelected)||filtered[0]||all[0];
+  const selected=filtered.find(item=>item.id===gdAdminCourseDatabaseSelected);
   if(!selected){detail.innerHTML="";return;}
   const rows=selected.rows||[];
   const payload=gdAdminCourseDbPayload(selected.id);
@@ -8126,13 +8141,14 @@ function gdRenderAdminCourseDatabase(){
     return;
   }
   const geometryRows=rows.length?`<div class="gdAdminCourseHoleScroll"><table class="gdAdminCourseHoleTable"><thead><tr><th>Hole</th><th>State</th><th>Tee</th><th>Green</th><th>Route</th><th>Frame anchor</th><th>Frame index</th><th>Manifest</th><th>Source / confidence</th><th>Sync</th><th>Updated</th></tr></thead><tbody>${rows.map(row=>`<tr><td>H${gdEscapeHTML(row.holeNumber)}</td><td>${gdEscapeHTML(row.status)}</td><td>${gdAdminCourseDbFlag(row.hasTee)}</td><td>${gdAdminCourseDbFlag(row.hasGreen)}</td><td>${gdAdminCourseDbFlag(row.hasRoute)}</td><td>${gdAdminCourseDbFlag(row.hasFrameAnchor)}</td><td>${gdAdminCourseDbFlag(row.hasFrameIndex)}</td><td>${gdAdminCourseDbFlag(row.hasManifest)}<br>${gdEscapeHTML(row.manifestKey||"")}</td><td>${gdEscapeHTML(row.source)}<br>${gdEscapeHTML(row.confidence)}</td><td>${gdEscapeHTML(row.syncStatus)}</td><td>${gdEscapeHTML(gdCoursePlayDebugTime(row.updatedAt))}</td></tr>`).join("")}</tbody></table></div>`:'<div class="gdCoursePlayDebugEmpty">No holes found for this course yet.</div>';
+  const statusOpen=!!gdAdminCourseDbStatusOpenByCourse[selected.id];
   detail.innerHTML=`<div class="gdAdminCourseActionPanel">${header}<div class="gdAdminCourseWorkspace"><div class="gdAdminCourseStageLine">${[
     `<span class="${selected.geometryReadyCount===selected.holeCount&&selected.holeCount?"ready":"warn"}">${gdEscapeHTML(selected.geometryReadyCount)}/${gdEscapeHTML(selected.holeCount)} geometry</span>`,
     `<span class="${selected.playReadyCount?"ready":"warn"}">${gdEscapeHTML(selected.playReadyCount)} play ready</span>`,
     `<span class="${selected.framesIndexedCount?"ready":"warn"}">${gdEscapeHTML(selected.framesIndexedCount)} frames</span>`,
     `<span class="${selected.manifestCount?"ready":"warn"}">${gdEscapeHTML(selected.manifestCount)} manifests</span>`,
     `<span>${gdEscapeHTML(gdCoursePlayDebugTime(selected.updatedAt)||"unknown")} updated</span>`
-  ].join("")}</div><details class="gdAdminCourseSettings" open><summary>Course status</summary><div class="gdAdminCourseSettingsBody"><div class="gdAdminDatabaseSummary">${[
+  ].join("")}</div><details class="gdAdminCourseSettings" ${statusOpen?"open":""} ontoggle="gdAdminCourseDbSetStatusOpen(${gdAdminJsArg(selected.id)},this.open)"><summary>Course status</summary><div class="gdAdminCourseSettingsBody"><div class="gdAdminDatabaseSummary">${[
       gdAdminCourseDbMetric("Hole count",selected.holeCount),
       gdAdminCourseDbMetric("Tee/green/route",selected.geometryReadyCount),
       gdAdminCourseDbMetric("Play data ready",selected.playReadyCount),
@@ -8432,6 +8448,7 @@ window.gdTogglePreLockBlackoutFrame=gdTogglePreLockBlackoutFrame;
 window.gdRenderCoursePlayPipelineDebug=gdRenderCoursePlayPipelineDebug;
 window.gdRenderAdminCourseDatabase=gdRenderAdminCourseDatabase;
 window.gdAdminCourseDbOpen=gdAdminCourseDbOpen;
+window.gdAdminCourseDbSetStatusOpen=gdAdminCourseDbSetStatusOpen;
 window.gdToggleAdminCourseDbPayload=gdToggleAdminCourseDbPayload;
 window.gdSetCoursePlayDebug=gdSetCoursePlayDebug;
 window.gdClearCoursePlayPipelineDebug=gdClearCoursePlayPipelineDebug;
