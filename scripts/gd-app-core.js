@@ -18138,10 +18138,10 @@ function gdFinalizeHeadToTeeShot(hole){
   try{mode="aim"}catch(e){}
   try{document.getElementById("shotTile")?.classList.add("visible")}catch(e){}
   try{gdApplyHeadToTeeBagTarget(hole)}catch(e){}
+  runHeadToTeeFrame();
   try{if(!lockedFrame&&typeof lockFrame==="function")lockFrame(false);else if(!lockedFrame&&typeof setBubbleOnlyLock==="function")setBubbleOnlyLock(true);}catch(e){}
   try{if(typeof renderShot==="function")renderShot();}catch(e){}
   try{if(typeof updatePinLine==="function")updatePinLine();}catch(e){}
-  runHeadToTeeFrame();
   try{if(!gdIsLayupTarget(greenCentre,target))setState(`Hole ${hole||""}`.trim()||"Hole")}catch(e){}
   try{hideHint()}catch(e){}
   try{const hint=document.getElementById("hint");if(hint){hint.classList.remove("visible","gdMappedStartPill");hint.textContent="";}}catch(e){}
