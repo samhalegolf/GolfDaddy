@@ -1,0 +1,16 @@
+body.shell-module #gdV62GpsBadge,
+body.shell-module #gdV62ModeSwitch,
+body.shell-module #gdV62UndoDock,
+body.shell-module #gdV62Distance,
+body.shell-module .rightRail,
+body.shell-module #gdAssumedCourseBadge,
+body.shell-module .gpsToast,
+body.shell-module .leaflet-control-container{
+  display:none!important;
+  visibility:hidden!important;
+  pointer-events:none!important;
+}
+body.shell-module #courseScreen{
+  opacity:0!important;
+  pointer-events:none!important;
+}

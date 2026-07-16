@@ -1,0 +1,226 @@
+/* GPS Play runtime owner: shell cleanup, manual start, tool rail, resume, and captured shot overlays. */
+body.shell-gps #gdClosestHolePrompt,
+body.gdGpsActive #gdClosestHolePrompt,
+body.gps-active #gdClosestHolePrompt{display:none!important;pointer-events:none!important;}
+body.shell-gps:not(.gdGpsLiveMapAllowed) #map,
+body.gdGpsActive:not(.gdGpsLiveMapAllowed) #map,
+body.gps-active:not(.gdGpsLiveMapAllowed) #map{display:block!important;visibility:hidden!important;opacity:0!important;pointer-events:none!important;}
+body.shell-gps.gdGpsLiveMapAllowed #map,
+body.gdGpsActive.gdGpsLiveMapAllowed #map,
+body.gps-active.gdGpsLiveMapAllowed #map{display:block!important;visibility:visible!important;opacity:1!important;pointer-events:auto!important;}
+body.gdGpsLiveMapSuppressed #map,
+body.shell-gps:is(.gdCapturedHoleFrameCameraOn,.gdHoleImageCameraOn):not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #map,
+body.gdGpsActive:is(.gdCapturedHoleFrameCameraOn,.gdHoleImageCameraOn):not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #map,
+body.gps-active:is(.gdCapturedHoleFrameCameraOn,.gdHoleImageCameraOn):not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #map,
+body.gdGpsFramePreparing.shell-gps:not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #map,
+body.gdGpsFramePreparing.gdGpsActive:not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #map,
+body.gdGpsFramePreparing.gps-active:not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #map,
+body.gdMappedStartPromptActive.shell-gps:not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #map,
+body.gdMappedStartPromptActive.gdGpsActive:not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #map,
+body.gdMappedStartPromptActive.gps-active:not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #map{visibility:hidden!important;opacity:0!important;pointer-events:none!important;}
+body.gdGpsLiveMapSuppressed #app,
+body.shell-gps:is(.gdCapturedHoleFrameCameraOn,.gdHoleImageCameraOn):not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #app,
+body.gdGpsActive:is(.gdCapturedHoleFrameCameraOn,.gdHoleImageCameraOn):not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #app,
+body.gps-active:is(.gdCapturedHoleFrameCameraOn,.gdHoleImageCameraOn):not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #app,
+body.gdGpsFramePreparing.shell-gps:not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #app,
+body.gdGpsFramePreparing.gdGpsActive:not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #app,
+body.gdGpsFramePreparing.gps-active:not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #app{background:#020604!important;}
+body.shell-home #gdHoleImageCameraLayer,
+body.shell-home #gdCapturedHoleFrameReadout,
+body.gdCapturedHoleFrameCameraOn:not(.gdTargetFrameDebugOn) #gdCapturedHoleFrameReadout{display:none!important;pointer-events:none!important;}
+body.gdCapturedHoleFrameCameraOn #gdHoleImageCameraLayer{background:transparent!important;}
+body.gdCapturedHoleFrameCameraOn #map{background:#020604!important;}
+body.gdCapturedHoleFrameCameraOn #app.gdPreLockFrame::after{display:none!important;background:none!important;box-shadow:none!important;}
+body.gdCapturedHoleFrameCameraOn #app.gdPreLockFrame #map,
+body.gdCapturedHoleFrameCameraOn #app.framed #map,
+body.gdCapturedHoleFrameCameraOn #map{filter:none!important;}
+body.gdCapturedHoleFrameCameraOn .gdGpsFocusMask{display:none!important;}
+body.gdCapturedHoleFrameCameraOn #map .leaflet-tile-pane,
+body.gdCapturedHoleFrameCameraOn #map .leaflet-overlay-pane,
+body.gdCapturedHoleFrameCameraOn #map .leaflet-shadow-pane,
+body.gdCapturedHoleFrameCameraOn #map .leaflet-marker-pane{opacity:1!important;}
+body.gdCapturedHoleFrameCameraOn #gdHoleImageCameraLayer .gdHoleImageTile{filter:saturate(.92) contrast(1.08) brightness(.82)!important;}
+body.shell-home:not(.shell-gps):not(.gdGpsActive):not(.gps-active) #map{visibility:visible!important;}
+body.gdMappedStartPromptActive #shotTile,
+body.gdMappedStartPromptActive .shotTile.visible{display:none!important;opacity:0!important;pointer-events:none!important;}
+	body.gdMappedStartPromptActive .targetDot,
+	body.gdMappedStartPromptActive .gdBubbleDragHit,
+	body.gdMappedStartPromptActive .gdAimRecognitionFleck,
+	body.gdMappedStartPromptActive .gdMiddleGuideLabel,
+	body.gdMappedStartPromptActive .remainingGreenLabel{display:none!important;opacity:0!important;pointer-events:none!important;}
+	body.gdManualStartPlacementActive #gdCapturedBubbleDragHit{display:none!important;pointer-events:none!important;}
+	body.gdManualStartPlacementActive #hint{z-index:2540!important;pointer-events:none!important;}
+	body.gdCapturedBubbleDragging #gdHoleImageCameraLayer .gdCapturedAimLine{opacity:.88!important;}
+	body.gdCapturedHoleFrameCameraOn:not(.gdGreenArrivalMode) .leaflet-marker-icon:has(.startDot),
+	body.gdCapturedHoleFrameCameraOn:not(.gdGreenArrivalMode) .leaflet-marker-icon:has(.targetDot),
+	body.gdCapturedHoleFrameCameraOn:not(.gdGreenArrivalMode) .leaflet-marker-icon:has(.gdMiddleGuideLabel),
+	body.gdCapturedHoleFrameCameraOn:not(.gdGreenArrivalMode) .leaflet-marker-icon:has(.remainingGreenLabel),
+	body.gdCapturedHoleFrameCameraOn:not(.gdGreenArrivalMode) .leaflet-marker-icon:has(.gdBubbleDragHit){display:none!important;visibility:hidden!important;opacity:0!important;pointer-events:none!important;}
+	body.gdCapturedHoleFrameCameraOn:not(.gdGreenArrivalMode) .leaflet-marker-icon.gdBubbleDragHitIcon{display:none!important;visibility:hidden!important;opacity:0!important;pointer-events:none!important;}
+	body.gdTargetFrameDebugOn #gdTargetFrameDebugOverlay{display:block!important;}
+	body.shell-home #gdTargetFrameDebugOverlay{display:none!important;pointer-events:none!important;}
+	body:not(.gdMappedStartPromptActive):not(.gd-frame-hard-locked):not(.gd-green-zoom-active):not(.gdGreenArrivalMode) #gdTargetFrameDebugOverlay{display:none!important;pointer-events:none!important;}
+	#gdTargetFrameDebugOverlay{position:fixed!important;inset:0!important;pointer-events:none!important;z-index:900!important;display:none!important;}
+	.gdTargetFrameBox{position:fixed!important;box-sizing:border-box!important;border:1px solid rgba(74,124,255,.26)!important;border-radius:0!important;background:rgba(255,255,255,.035)!important;box-shadow:none!important;color:rgba(76,126,226,.42)!important;font:600 clamp(10px,2.25vw,18px)/1.12 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif!important;letter-spacing:0!important;text-transform:none!important;text-shadow:none!important;pointer-events:none!important;}
+	.gdTargetFrameBox span{position:absolute!important;left:50%!important;top:50%!important;transform:translate(-50%,-50%)!important;display:block!important;width:100%!important;padding:0 3px!important;border-radius:0!important;background:transparent!important;color:rgba(36,88,190,.42)!important;text-align:center!important;white-space:normal!important;}
+	.gdTargetFrameBox[data-frame="lock"] span{top:72%!important;}
+	.gdTargetFrameBox[data-frame="zoom"] span{top:80%!important;}
+	body.shell-gps #shellTop,
+	body.gdGpsActive #shellTop,
+	body.gps-active #shellTop{display:flex!important;visibility:visible!important;opacity:1!important;z-index:2147483000!important;pointer-events:none!important;isolation:isolate!important;transform:translateZ(0)!important;}
+	body.shell-gps #shellBackBtn,
+	body.shell-gps #shellHomeBtn,
+	body.gdGpsActive #shellBackBtn,
+	body.gdGpsActive #shellHomeBtn,
+	body.gps-active #shellBackBtn,
+	body.gps-active #shellHomeBtn{position:relative!important;z-index:2147483001!important;display:inline-flex!important;visibility:visible!important;opacity:1!important;align-items:center!important;justify-content:center!important;width:auto!important;min-width:66px!important;height:46px!important;padding:9px 14px!important;border-radius:999px!important;font-size:14px!important;line-height:1!important;font-weight:950!important;letter-spacing:0!important;color:#fff!important;text-transform:none!important;white-space:nowrap!important;background:rgba(0,0,0,.82)!important;border:1px solid rgba(255,255,255,.24)!important;box-shadow:0 18px 36px rgba(0,0,0,.46),inset 0 1px 0 rgba(255,255,255,.14)!important;pointer-events:auto!important;}
+	body.shell-gps #shellTop #shellSettingsBtn,
+	body.gdGpsActive #shellTop #shellSettingsBtn,
+	body.gps-active #shellTop #shellSettingsBtn{position:fixed!important;right:calc(10px + env(safe-area-inset-right))!important;top:calc(10px + env(safe-area-inset-top))!important;z-index:2147483002!important;display:inline-flex!important;visibility:visible!important;opacity:1!important;align-items:center!important;justify-content:center!important;width:auto!important;min-width:92px!important;height:46px!important;padding:9px 14px!important;border-radius:999px!important;font-size:14px!important;line-height:1!important;font-weight:950!important;letter-spacing:0!important;color:#fff!important;text-transform:none!important;white-space:nowrap!important;background:rgba(0,0,0,.82)!important;border:1px solid rgba(255,255,255,.24)!important;box-shadow:0 18px 36px rgba(0,0,0,.46),inset 0 1px 0 rgba(255,255,255,.14)!important;pointer-events:auto!important;}
+	body.shell-gps #shellTop #shellSettingsBtn::before,
+	body.gdGpsActive #shellTop #shellSettingsBtn::before,
+	body.gps-active #shellTop #shellSettingsBtn::before{content:none!important;display:none!important;}
+	body.shell-gps #shellBackBtn::before,
+	body.shell-gps #shellBackBtn::after,
+	body.shell-gps #shellHomeBtn::before,
+	body.shell-gps #shellHomeBtn::after,
+	body.gdGpsActive #shellBackBtn::before,
+	body.gdGpsActive #shellBackBtn::after,
+	body.gdGpsActive #shellHomeBtn::before,
+	body.gdGpsActive #shellHomeBtn::after,
+	body.gps-active #shellBackBtn::before,
+	body.gps-active #shellBackBtn::after,
+	body.gps-active #shellHomeBtn::before,
+	body.gps-active #shellHomeBtn::after{content:none!important;display:none!important;}
+	#gdToolRailTab{position:fixed!important;right:calc(10px + env(safe-area-inset-right))!important;top:calc(max(10px,env(safe-area-inset-top)) + 64px)!important;z-index:8260!important;width:46px!important;height:36px!important;border:0!important;border-radius:14px!important;display:none!important;place-items:center!important;padding:0!important;color:#fff!important;background:rgba(3,8,6,.70)!important;box-shadow:0 12px 26px rgba(0,0,0,.30)!important;backdrop-filter:blur(14px)!important;-webkit-backdrop-filter:blur(14px)!important;pointer-events:auto!important;touch-action:manipulation!important;}
+#gdToolRailTab svg{width:22px!important;height:22px!important;display:block!important;transition:transform .18s ease!important;}
+#gdToolRailTab *{pointer-events:none!important;}
+#gdToolRailTab[hidden]{display:none!important;}
+#gdToolRailTab:focus-visible{outline:2px solid rgba(31,211,109,.72)!important;outline-offset:3px!important;}
+body.gdToolRailOpen #gdToolRailTab{background:linear-gradient(180deg,rgba(31,211,109,.34),rgba(4,12,8,.78))!important;box-shadow:0 0 0 1px rgba(31,211,109,.18),0 16px 34px rgba(0,0,0,.34)!important;}
+body.gdToolRailOpen #gdToolRailTab svg{transform:rotate(-12deg)!important;}
+body.shell-gps:not(.gdToolRailEmpty) #gdToolRailTab,
+body.gdGpsActive:not(.gdToolRailEmpty) #gdToolRailTab,
+body.gps-active:not(.gdToolRailEmpty) #gdToolRailTab{display:grid!important;}
+body.gdCourseOpening.shell-gps:not(.gdToolRailEmpty) #gdToolRailTab,
+body.gdCourseOpening.gdGpsActive:not(.gdToolRailEmpty) #gdToolRailTab,
+body.gdCourseOpening.gps-active:not(.gdToolRailEmpty) #gdToolRailTab{display:none!important;visibility:hidden!important;pointer-events:none!important;}
+body[data-gd-tool-screen="home"] #gdToolRailTab,
+body[data-gd-tool-screen="module"] #gdToolRailTab,
+body[data-gd-tool-screen="mapping"] #gdToolRailTab,
+body:has(#courseScreen:not(.hidden)) #gdToolRailTab,
+body.gdCoursePickerOpen #gdToolRailTab,
+body.gdCourseOpening #gdToolRailTab,
+body.shell-home #gdToolRailTab,
+body.shell-module #gdToolRailTab{display:none!important;}
+body.shell-gps #courseScreen:not(.hidden) .courseNav,
+body.gdGpsActive #courseScreen:not(.hidden) .courseNav,
+body.gps-active #courseScreen:not(.hidden) .courseNav{display:none!important;visibility:hidden!important;opacity:0!important;pointer-events:none!important;}
+body.shell-gps #courseScreen:not(.hidden),
+body.gdGpsActive #courseScreen:not(.hidden),
+body.gps-active #courseScreen:not(.hidden){pointer-events:none!important;}
+body.shell-gps #courseScreen:not(.hidden) .courseHeader,
+body.gdGpsActive #courseScreen:not(.hidden) .courseHeader,
+body.gps-active #courseScreen:not(.hidden) .courseHeader{grid-template-columns:1fr!important;margin-top:calc(54px + env(safe-area-inset-top))!important;pointer-events:none!important;}
+body.shell-gps #courseScreen:not(.hidden) .courseAssumed,
+body.shell-gps #courseScreen:not(.hidden) .courseCard,
+body.gdGpsActive #courseScreen:not(.hidden) .courseAssumed,
+body.gdGpsActive #courseScreen:not(.hidden) .courseCard,
+body.gps-active #courseScreen:not(.hidden) .courseAssumed,
+body.gps-active #courseScreen:not(.hidden) .courseCard{pointer-events:auto!important;}
+body.shell-gps .rightRail,
+body.gdGpsActive .rightRail,
+body.gps-active .rightRail{position:fixed!important;right:calc(10px + env(safe-area-inset-right))!important;left:auto!important;top:calc(max(10px,env(safe-area-inset-top)) + 108px)!important;bottom:auto!important;z-index:8210!important;max-height:0!important;overflow:hidden!important;opacity:0!important;visibility:hidden!important;pointer-events:none!important;transform:translateY(-8px) scale(.98)!important;transform-origin:top right!important;transition:opacity .16s ease, transform .16s ease, max-height .16s ease, visibility .16s ease!important;}
+body.gdToolRailOpen.shell-gps .rightRail,
+body.gdToolRailOpen.gdGpsActive .rightRail,
+body.gdToolRailOpen.gps-active .rightRail{max-height:calc(100vh - 112px - env(safe-area-inset-bottom))!important;overflow:visible!important;opacity:1!important;visibility:visible!important;pointer-events:auto!important;transform:none!important;display:grid!important;grid-template-columns:1fr!important;gap:5px!important;align-items:center!important;justify-items:center!important;width:44px!important;min-width:44px!important;padding:4px!important;border-radius:14px!important;background:rgba(3,8,6,.82)!important;border:0!important;box-shadow:0 18px 38px rgba(0,0,0,.46)!important;backdrop-filter:blur(14px)!important;-webkit-backdrop-filter:blur(14px)!important;}
+body.gdToolRailOpen.gdMappedStartPromptActive .rightRail{opacity:1!important;filter:none!important;pointer-events:auto!important;}
+body.shell-gps:not(.gdToolRailOpen) .rightRail > .railBtn,
+body.gdGpsActive:not(.gdToolRailOpen) .rightRail > .railBtn,
+body.gps-active:not(.gdToolRailOpen) .rightRail > .railBtn,
+body.shell-gps:not(.gdToolRailOpen) .rightRail > #gdV62ModeSwitch,
+body.gdGpsActive:not(.gdToolRailOpen) .rightRail > #gdV62ModeSwitch,
+body.gps-active:not(.gdToolRailOpen) .rightRail > #gdV62ModeSwitch{display:none!important;visibility:hidden!important;opacity:0!important;pointer-events:none!important;}
+body.shell-gps:not(.gdToolRailOpen) .rightRail > :is(#flagTool,#windToolBtn,#greenToolBtn,#gpsRailBtn,#gdGpsSnapZoomBtn,#gdGreenZoomBtn,#scorecardRailBtn,#bagRailBtn,#gdMapperToolsBtn),
+body.gdGpsActive:not(.gdToolRailOpen) .rightRail > :is(#flagTool,#windToolBtn,#greenToolBtn,#gpsRailBtn,#gdGpsSnapZoomBtn,#gdGreenZoomBtn,#scorecardRailBtn,#bagRailBtn,#gdMapperToolsBtn),
+body.gps-active:not(.gdToolRailOpen) .rightRail > :is(#flagTool,#windToolBtn,#greenToolBtn,#gpsRailBtn,#gdGpsSnapZoomBtn,#gdGreenZoomBtn,#scorecardRailBtn,#bagRailBtn,#gdMapperToolsBtn){display:none!important;visibility:hidden!important;opacity:0!important;pointer-events:none!important;}
+body.gdToolRailOpen.shell-gps .rightRail > .railBtn,
+body.gdToolRailOpen.gdGpsActive .rightRail > .railBtn,
+body.gdToolRailOpen.gps-active .rightRail > .railBtn,
+body.gdToolRailOpen.shell-gps .rightRail > #gdV62ModeSwitch,
+body.gdToolRailOpen.gdGpsActive .rightRail > #gdV62ModeSwitch,
+body.gdToolRailOpen.gps-active .rightRail > #gdV62ModeSwitch{display:none!important;visibility:hidden!important;pointer-events:none!important;}
+body.gdToolRailOpen.shell-gps .rightRail > [data-gd-tool-tab-allowed="1"],
+body.gdToolRailOpen.gdGpsActive .rightRail > [data-gd-tool-tab-allowed="1"],
+body.gdToolRailOpen.gps-active .rightRail > [data-gd-tool-tab-allowed="1"]{display:grid!important;visibility:visible!important;opacity:1!important;filter:none!important;pointer-events:auto!important;width:34px!important;height:34px!important;min-width:34px!important;min-height:34px!important;border-radius:10px!important;background:rgba(4,11,8,.72)!important;border:0!important;box-shadow:none!important;color:rgba(255,255,255,.92)!important;padding:0!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important;}
+body.gdToolRailOpen.shell-gps .rightRail > [data-gd-tool-tab-allowed="1"] img,
+body.gdToolRailOpen.gdGpsActive .rightRail > [data-gd-tool-tab-allowed="1"] img,
+body.gdToolRailOpen.gps-active .rightRail > [data-gd-tool-tab-allowed="1"] img,
+body.gdToolRailOpen.shell-gps .rightRail > [data-gd-tool-tab-allowed="1"] svg,
+body.gdToolRailOpen.gdGpsActive .rightRail > [data-gd-tool-tab-allowed="1"] svg,
+body.gdToolRailOpen.gps-active .rightRail > [data-gd-tool-tab-allowed="1"] svg{width:20px!important;height:20px!important;transform:none!important;filter:drop-shadow(0 4px 7px rgba(0,0,0,.28))!important;}
+body.gdToolRailOpen.shell-gps .rightRail > :is(#flagTool,#windToolBtn,#greenToolBtn,#gpsRailBtn,#gdGpsSnapZoomBtn,#gdGreenZoomBtn,#scorecardRailBtn,#bagRailBtn,#gdMapperToolsBtn)[data-gd-tool-tab-allowed="1"],
+body.gdToolRailOpen.gdGpsActive .rightRail > :is(#flagTool,#windToolBtn,#greenToolBtn,#gpsRailBtn,#gdGpsSnapZoomBtn,#gdGreenZoomBtn,#scorecardRailBtn,#bagRailBtn,#gdMapperToolsBtn)[data-gd-tool-tab-allowed="1"],
+body.gdToolRailOpen.gps-active .rightRail > :is(#flagTool,#windToolBtn,#greenToolBtn,#gpsRailBtn,#gdGpsSnapZoomBtn,#gdGreenZoomBtn,#scorecardRailBtn,#bagRailBtn,#gdMapperToolsBtn)[data-gd-tool-tab-allowed="1"]{display:grid!important;visibility:visible!important;opacity:1!important;width:30px!important;height:30px!important;min-width:30px!important;min-height:30px!important;max-width:30px!important;max-height:30px!important;aspect-ratio:1!important;border:0!important;outline:0!important;border-radius:9px!important;background:rgba(4,11,8,.56)!important;box-shadow:none!important;padding:0!important;margin:0!important;color:rgba(255,255,255,.92)!important;line-height:1!important;overflow:hidden!important;place-items:center!important;}
+body.gdToolRailOpen.shell-gps .rightRail > :is(#flagTool,#windToolBtn,#greenToolBtn,#gpsRailBtn,#gdGpsSnapZoomBtn,#gdGreenZoomBtn,#scorecardRailBtn,#bagRailBtn,#gdMapperToolsBtn)[data-gd-tool-tab-allowed="1"] :is(svg,img),
+body.gdToolRailOpen.gdGpsActive .rightRail > :is(#flagTool,#windToolBtn,#greenToolBtn,#gpsRailBtn,#gdGpsSnapZoomBtn,#gdGreenZoomBtn,#scorecardRailBtn,#bagRailBtn,#gdMapperToolsBtn)[data-gd-tool-tab-allowed="1"] :is(svg,img),
+body.gdToolRailOpen.gps-active .rightRail > :is(#flagTool,#windToolBtn,#greenToolBtn,#gpsRailBtn,#gdGpsSnapZoomBtn,#gdGreenZoomBtn,#scorecardRailBtn,#bagRailBtn,#gdMapperToolsBtn)[data-gd-tool-tab-allowed="1"] :is(svg,img){width:18px!important;height:18px!important;max-width:18px!important;max-height:18px!important;object-fit:contain!important;border:0!important;outline:0!important;box-shadow:none!important;filter:none!important;transform:none!important;}
+body.gdToolRailOpen.shell-gps .rightRail,
+body.gdToolRailOpen.gdGpsActive .rightRail,
+body.gdToolRailOpen.gps-active .rightRail{width:38px!important;min-width:38px!important;gap:4px!important;padding:4px!important;border:0!important;}
+body.gdToolRailEmpty .rightRail,
+body.gdCoursePickerOpen .rightRail,
+body.gdCourseOpening .rightRail,
+body:has(#courseScreen:not(.hidden)) .rightRail{display:none!important;visibility:hidden!important;pointer-events:none!important;}
+body.gdCoursePickerOpen #gdV62GpsBadge,
+body.gdCoursePickerOpen #gdV62UndoDock,
+body.gdCoursePickerOpen #gdV62Distance,
+body.gdCoursePickerOpen #shotTile,
+body.gdCoursePickerOpen #gdGpsClearBtn,
+body.gdCoursePickerOpen #gdV62NewShotBtn,
+body.gdCoursePickerOpen #gdV62LogShotBtn,
+body:has(#courseScreen:not(.hidden)) #gdV62GpsBadge,
+body:has(#courseScreen:not(.hidden)) #gdV62UndoDock,
+body:has(#courseScreen:not(.hidden)) #gdV62Distance,
+body:has(#courseScreen:not(.hidden)) #shotTile,
+body.gdCoursePickerOpen .dock,
+body.gdCoursePickerOpen .scoreBlock,
+body.gdCoursePickerOpen .scoreBtn,
+	body:has(#courseScreen:not(.hidden)) .dock,
+	body:has(#courseScreen:not(.hidden)) .scoreBlock,
+	body:has(#courseScreen:not(.hidden)) .scoreBtn{display:none!important;visibility:hidden!important;opacity:0!important;pointer-events:none!important;}
+	body.shell-home #hint,
+	body.shell-module #hint,
+	body.gdCoursePickerOpen #hint,
+	body:has(#courseScreen:not(.hidden)) #hint{display:none!important;visibility:hidden!important;opacity:0!important;pointer-events:none!important;}
+body:has(#scorePanel.open) #shellTop,
+body:has(#bagPanel.open) #shellTop,
+body:has(#scorePanel.open) #gdV62GpsBadge,
+body:has(#bagPanel.open) #gdV62GpsBadge,
+body:has(#scorePanel.open) #gdV62UndoDock,
+body:has(#bagPanel.open) #gdV62UndoDock,
+body:has(#scorePanel.open) #gdV62Distance,
+body:has(#bagPanel.open) #gdV62Distance,
+body:has(#scorePanel.open) #shotTile,
+body:has(#bagPanel.open) #shotTile,
+body:has(#scorePanel.open) #gdHoleStepper,
+body:has(#bagPanel.open) #gdHoleStepper,
+body:has(#scorePanel.open) #gdNextHolePopout,
+body:has(#bagPanel.open) #gdNextHolePopout,
+body:has(#scorePanel.open) #gdToolRailTab,
+body:has(#bagPanel.open) #gdToolRailTab,
+body:has(#scorePanel.open) .rightRail,
+body:has(#bagPanel.open) .rightRail,
+body:has(#scorePanel.open) #gdCapturedBubbleDragHit,
+body:has(#bagPanel.open) #gdCapturedBubbleDragHit,
+body:has(#scorePanel.open) .gdBubbleDragHitIcon,
+body:has(#bagPanel.open) .gdBubbleDragHitIcon{display:none!important;visibility:hidden!important;opacity:0!important;pointer-events:none!important;}
+body.shell-home .leaflet-marker-icon,
+body.gdCoursePickerOpen .leaflet-marker-icon,
+body:has(#courseScreen:not(.hidden)) .leaflet-marker-icon{display:none!important;visibility:hidden!important;opacity:0!important;pointer-events:none!important;}
+	@media(max-height:680px){
+	  body.shell-gps .rightRail,
+	  body.gdGpsActive .rightRail,
+	  body.gps-active .rightRail{top:calc(max(6px,env(safe-area-inset-top)) + 100px)!important;gap:4px!important;}
+	  #gdToolRailTab{top:calc(max(6px,env(safe-area-inset-top)) + 58px)!important;}
+	}

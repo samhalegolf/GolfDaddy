@@ -1,0 +1,54 @@
+#gdWandSampleTruthPanel{
+  position:absolute;
+  left:18px;
+  top:calc(max(12px,env(safe-area-inset-top)) + 214px);
+  z-index:100002;
+  width:min(360px,calc(100vw - 36px));
+  background:rgba(3,8,6,.92);
+  border:1px solid rgba(31,211,109,.35);
+  border-radius:18px;
+  padding:12px;
+  color:white;
+  box-shadow:0 18px 50px rgba(0,0,0,.45);
+  font-family:Inter,Arial,sans-serif;
+}
+#gdWandSampleTruthPanel.hidden{display:none!important}
+#gdWandSampleTruthPanel .truthTop{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:8px;
+  margin-bottom:8px;
+  font-size:13px;
+  font-weight:950;
+}
+#gdWandSampleTruthPanel button{
+  border:0;
+  border-radius:10px;
+  padding:7px 9px;
+  background:rgba(255,255,255,.12);
+  color:white;
+  font-weight:900;
+}
+#gdWandSampleTruthCanvas{
+  width:100%;
+  height:auto;
+  border-radius:12px;
+  border:1px solid rgba(255,255,255,.16);
+  image-rendering:auto;
+  background:#000;
+}
+#gdWandSampleTruthText{
+  margin-top:8px;
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  font-size:10.5px;
+  line-height:1.35;
+  white-space:pre-wrap;
+  color:rgba(255,255,255,.82);
+}
+#gdWandTruthBtn{
+  margin-top:8px;
+  width:100%;
+  background:rgba(255,255,255,.10);
+  color:white;
+}

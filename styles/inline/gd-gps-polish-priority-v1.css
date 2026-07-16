@@ -1,0 +1,21 @@
+body.gdWandLayerActive #map{
+  z-index:2147480000!important;
+}
+body.gdWandLayerActive #map .leaflet-overlay-pane,
+body.gdWandLayerActive #map .leaflet-marker-pane{
+  z-index:2147482000!important;
+}
+body.gdWandLayerActive #map .leaflet-tooltip-pane,
+body.gdWandLayerActive #map .leaflet-popup-pane{
+  z-index:2147482100!important;
+}
+body.gdWandLayerActive #gdWandPanel:not(.hidden){
+  z-index:2147483000!important;
+  pointer-events:auto!important;
+}
+body.gdWandLayerActive .gdWandHandle{
+  width:24px!important;
+  height:24px!important;
+  margin:-3px 0 0 -3px;
+  pointer-events:auto!important;
+}

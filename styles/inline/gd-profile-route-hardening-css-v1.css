@@ -1,0 +1,34 @@
+	body.gdProfileOpen:not(.gdAuthLocked) #shellHome,
+	body.gdProfileOpen:not(.gdAuthLocked) #courseScreen,
+	body.gdProfileOpen:not(.gdAuthLocked) #shellTop,
+	body.gdProfileOpen:not(.gdAuthLocked) #shellDock{
+  display:none!important;
+  visibility:hidden!important;
+  pointer-events:none!important;
+}
+body.gdProfileOpen #gdProfileV67{
+  display:block!important;
+  visibility:visible!important;
+  opacity:1!important;
+  z-index:7900!important;
+}
+		body.gdAuthLocked #shellHome,
+		body.gdAuthLocked #courseScreen,
+		body.gdAuthLocked #shellTop,
+		body.gdAuthLocked #shellDock,
+		body.gdAuthLocked .modulePanel,
+	body.gdAuthLocked .panel,
+	body.gdAuthLocked .claritySupportButton{
+	  display:none!important;
+		  visibility:hidden!important;
+		  pointer-events:none!important;
+		}
+		body.gdAuthLocked #gdProfileV67{
+		  display:block!important;
+		  visibility:visible!important;
+		  opacity:1!important;
+		  z-index:7900!important;
+		}
+body.gdAuthLocked #gdProfileV67 .topbar{
+  display:none!important;
+}

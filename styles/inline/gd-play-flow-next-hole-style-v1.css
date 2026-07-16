@@ -1,0 +1,234 @@
+.gdNextHolePopout{
+  position:fixed;
+  left:12px;
+  bottom:calc(240px + env(safe-area-inset-bottom));
+  z-index:1845;
+  width:172px;
+  height:58px;
+  border:1px solid rgba(255,255,255,.12);
+  border-radius:20px;
+  display:grid;
+  grid-template-columns:44px 1fr 44px;
+  align-items:stretch;
+  gap:6px;
+  padding:6px;
+  overflow:hidden;
+  box-sizing:border-box;
+  background:rgba(5,10,8,.82);
+  color:#fff;
+  box-shadow:0 12px 26px rgba(0,0,0,.32);
+  backdrop-filter:blur(12px);
+  -webkit-backdrop-filter:blur(12px);
+  touch-action:none;
+}
+.gdNextHolePopout button{
+  width:100%;
+  height:100%;
+  min-width:0;
+  box-sizing:border-box;
+  border:1px solid rgba(255,255,255,.11);
+  border-radius:15px;
+  display:grid;
+  place-items:center;
+  padding:0;
+  background:rgba(255,255,255,.08);
+  color:#fff;
+  font-weight:950;
+  box-shadow:none;
+  touch-action:none;
+}
+.gdNextHolePopout button:disabled{
+  opacity:.36;
+}
+.gdNextHolePopout .gdHoleNavStep{
+  font-size:27px;
+  line-height:1;
+  width:100%;
+  min-width:0;
+}
+.gdNextHolePopout .gdHoleNavNumber{
+  grid-template-rows:13px 1fr;
+  background:linear-gradient(180deg,rgba(37,224,116,.93),rgba(10,126,64,.93));
+  color:#071008;
+  min-width:0;
+  overflow:hidden;
+}
+.gdNextHolePopout.hidden{display:none!important}
+body.shell-home .gdNextHolePopout,
+body.shell-module .gdNextHolePopout,
+body:not(.shell-gps):not(.gdGpsActive):not(.gps-active) .gdNextHolePopout,
+body.shell-home .gdHoleSelectTray,
+body.shell-module .gdHoleSelectTray,
+body:not(.shell-gps):not(.gdGpsActive):not(.gps-active) .gdHoleSelectTray{
+  display:none!important;
+  visibility:hidden!important;
+  pointer-events:none!important;
+}
+.gdNextHolePopout:after{
+  content:none!important;
+  display:none!important;
+}
+.gdNextHolePopout span{
+  position:relative;
+  z-index:1;
+  font-size:9px;
+  line-height:1;
+  font-weight:950;
+  letter-spacing:0;
+  text-transform:uppercase;
+}
+.gdNextHolePopout strong{
+  position:relative;
+  z-index:1;
+  font-size:22px;
+  line-height:1;
+  font-weight:950;
+  letter-spacing:0;
+}
+.gdNextHolePopout.chooser .gdHoleNavNumber{
+  background:linear-gradient(180deg,rgba(199,255,71,.95),rgba(31,211,109,.95));
+}
+.gdHoleSelectTray{
+  position:fixed;
+  left:12px;
+  bottom:calc(306px + env(safe-area-inset-bottom));
+  z-index:1846;
+  width:min(312px,calc(100vw - 24px));
+  padding:10px;
+  border-radius:22px;
+  border:1px solid rgba(255,255,255,.13);
+  background:rgba(5,10,8,.92);
+  color:#fff;
+  box-shadow:0 18px 42px rgba(0,0,0,.42);
+  backdrop-filter:blur(18px);
+  -webkit-backdrop-filter:blur(18px);
+  box-sizing:border-box;
+  touch-action:none;
+}
+.gdHoleSelectTray.hidden{display:none!important}
+.gdHoleSelectHead{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  margin:0 0 8px;
+}
+.gdHoleSelectHead span{
+  color:rgba(183,255,59,.80);
+  font-size:9px;
+  line-height:1;
+  font-weight:950;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+}
+.gdHoleSelectHead strong{
+  color:#fff;
+  font-size:14px;
+  line-height:1;
+  font-weight:950;
+}
+.gdHoleSelectStrip{
+  display:flex;
+  gap:7px;
+  overflow:auto;
+  padding:1px 1px 2px;
+  -webkit-overflow-scrolling:touch;
+}
+.gdHoleSelectStrip button{
+  flex:0 0 auto;
+  min-width:40px;
+  height:40px;
+  padding:0;
+  border-radius:14px;
+  display:grid;
+  place-items:center;
+  background:rgba(255,255,255,.09);
+  color:#fff;
+  font-size:15px;
+  font-weight:950;
+}
+.gdHoleSelectStrip button.active{
+  background:#1fd36d;
+  color:#071008;
+}
+.gdHoleSelectStrip button.playing{
+  box-shadow:0 0 0 2px rgba(31,211,109,.42),0 10px 24px rgba(0,0,0,.24);
+}
+.gdScoreSave.gdScoreSaveQueued{
+  background:linear-gradient(180deg,#28dc72,#16a85b)!important;
+}
+.gdHoleStepper{
+  position:absolute;
+  left:calc(10px + env(safe-area-inset-left));
+  top:50%;
+  transform:translateY(-50%);
+  z-index:1844;
+  display:none!important;
+  grid-template-columns:42px;
+  grid-auto-rows:42px;
+  align-items:center;
+  justify-items:center;
+  gap:7px;
+  padding:6px;
+  border-radius:20px;
+  border:1px solid rgba(255,255,255,.12);
+  background:rgba(4,9,7,.72);
+  box-shadow:0 14px 30px rgba(0,0,0,.28);
+  backdrop-filter:blur(14px);
+  -webkit-backdrop-filter:blur(14px);
+  color:#fff;
+  pointer-events:auto;
+}
+body.shell-gps .gdHoleStepper:not(.hidden),
+body.gdGpsActive .gdHoleStepper:not(.hidden),
+body.gps-active .gdHoleStepper:not(.hidden){
+  display:grid!important;
+}
+.gdHoleStepper.hidden{display:none!important}
+.gdHoleStepper button{
+  width:42px;
+  height:38px;
+  border-radius:14px;
+  border:1px solid rgba(255,255,255,.12);
+  background:rgba(255,255,255,.08);
+  color:#fff;
+  font-size:22px;
+  line-height:1;
+  font-weight:950;
+  padding:0;
+}
+.gdHoleStepper button:disabled{
+  opacity:.35;
+}
+.gdHoleStepper strong{
+  min-width:42px;
+  text-align:center;
+  color:#fff;
+  font-size:14px;
+  line-height:1;
+  font-weight:950;
+  letter-spacing:.02em;
+}
+@media (max-width:520px){
+  .gdNextHolePopout{
+    bottom:calc(270px + env(safe-area-inset-bottom));
+  }
+  .gdHoleSelectTray{
+    bottom:calc(336px + env(safe-area-inset-bottom));
+  }
+  .gdHoleStepper{
+    left:calc(8px + env(safe-area-inset-left));
+    top:50%;
+    grid-template-columns:38px;
+    grid-auto-rows:38px;
+    gap:6px;
+  }
+  .gdHoleStepper button{
+    width:38px;
+    height:36px;
+  }
+  .gdHoleStepper strong{
+    min-width:38px;
+    font-size:13px;
+  }
+}

@@ -1,0 +1,22 @@
+#gdWandPanel .gdWandActions{grid-template-columns:1.1fr .78fr .78fr .62fr!important}
+#gdWandAcceptBtn{background:linear-gradient(180deg,#28d66f,#118d45)!important;color:#021006!important}
+#gdWandExitBtn{background:rgba(255,255,255,.08)!important;color:#fff!important}
+#greenToolBtn{position:relative}
+#greenToolBtn.gdWandLive:after{
+  content:"Live";
+  position:absolute;
+  left:50%;
+  bottom:7px;
+  transform:translateX(-50%);
+  font-size:8px;
+  line-height:1;
+  font-weight:950;
+  letter-spacing:.05em;
+  text-transform:uppercase;
+  color:#031009;
+  background:rgba(183,255,59,.92);
+  border-radius:999px;
+  padding:2px 5px;
+  box-shadow:0 4px 10px rgba(0,0,0,.24);
+}
+@media(max-width:430px){#gdWandPanel .gdWandActions{grid-template-columns:1fr 1fr!important}#gdWandScanBtn{grid-column:1/-1}}

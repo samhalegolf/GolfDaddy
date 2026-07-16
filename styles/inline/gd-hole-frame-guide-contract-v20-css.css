@@ -1,0 +1,35 @@
+/* V20: guide overlay matches the original hole-framing sketch: nested blue boxes, less aggressive green fill. */
+body.gdTargetFrameDebugOn #gdTargetFrameDebugOverlay{display:block!important;}
+body.shell-home #gdTargetFrameDebugOverlay{display:none!important;pointer-events:none!important;}
+body:not(.gdMappedStartPromptActive):not(.gd-frame-hard-locked):not(.gd-green-zoom-active) #gdTargetFrameDebugOverlay{display:none!important;pointer-events:none!important;}
+#gdTargetFrameDebugOverlay{position:fixed!important;inset:0!important;pointer-events:none!important;z-index:900!important;display:none!important;}
+.gdTargetFrameBox{
+  position:fixed!important;
+  box-sizing:border-box!important;
+  border:1px solid rgba(74,124,255,.36)!important;
+  border-radius:0!important;
+  background:rgba(255,255,255,.055)!important;
+  box-shadow:none!important;
+  color:rgba(76,126,226,.58)!important;
+  font:600 clamp(10px,2.25vw,18px)/1.12 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif!important;
+  letter-spacing:0!important;
+  text-transform:none!important;
+  text-shadow:none!important;
+  pointer-events:none!important;
+}
+.gdTargetFrameBox span{
+  position:absolute!important;
+  left:50%!important;
+  top:50%!important;
+  transform:translate(-50%,-50%)!important;
+  display:block!important;
+  width:100%!important;
+  padding:0 3px!important;
+  border-radius:0!important;
+  background:transparent!important;
+  color:rgba(36,88,190,.58)!important;
+  text-align:center!important;
+  white-space:normal!important;
+}
+.gdTargetFrameBox[data-frame="lock"] span{top:72%!important;}
+.gdTargetFrameBox[data-frame="zoom"] span{top:80%!important;}

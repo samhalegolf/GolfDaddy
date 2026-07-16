@@ -1,0 +1,4270 @@
+.gdShotDataPanel.open .moduleSheet,
+.gdShotDataPanel.open .sheet{
+  width:min(100%,860px)!important;
+  max-width:860px!important;
+}
+.gdShotDataHubCard{
+  border-radius:16px!important;
+  padding:12px!important;
+  background:linear-gradient(180deg,rgba(21,35,36,.86),rgba(8,13,12,.96))!important;
+  border-color:rgba(115,193,205,.22)!important;
+  box-shadow:0 18px 42px rgba(0,0,0,.28),inset 0 1px 0 rgba(255,255,255,.05)!important;
+}
+.gdShotDataHubCard.gdOffsetHubDetails{
+  background:
+    radial-gradient(ellipse 52% 82% at 72% 54%,rgba(244,248,243,.17),rgba(244,248,243,.055) 46%,transparent 74%),
+    linear-gradient(180deg,rgba(20,35,34,.92),rgba(7,12,11,.98))!important;
+  border-color:rgba(244,248,243,.16)!important;
+  box-shadow:0 18px 42px rgba(0,0,0,.28),0 0 22px rgba(244,248,243,.08),inset 0 1px 0 rgba(255,255,255,.05)!important;
+}
+.gdShotDataHubCard.gdOffsetHubDetails[open],
+.gdShotDataHubCard.gdOffsetHubDetails.open{
+  background:
+    radial-gradient(ellipse 58% 92% at 72% 57%,rgba(244,248,243,.20),rgba(244,248,243,.065) 46%,transparent 74%),
+    linear-gradient(180deg,rgba(22,39,38,.94),rgba(7,12,11,.98))!important;
+  border-color:rgba(244,248,243,.24)!important;
+  box-shadow:0 18px 42px rgba(0,0,0,.30),0 0 30px rgba(244,248,243,.12),inset 0 1px 0 rgba(255,255,255,.06)!important;
+}
+.gdShotDataHubCard.gdOffsetHubDetails.gdMyBubbleActive{
+  background:
+    radial-gradient(ellipse 58% 92% at 72% 57%,rgba(55,242,141,.28),rgba(55,242,141,.08) 46%,transparent 74%),
+    linear-gradient(180deg,rgba(17,50,38,.94),rgba(6,16,11,.98))!important;
+  border-color:rgba(55,242,141,.46)!important;
+  box-shadow:0 18px 42px rgba(0,0,0,.30),0 0 30px rgba(55,242,141,.16),inset 0 1px 0 rgba(255,255,255,.06)!important;
+}
+.gdShotDataHubCard.gdOffsetHubDetails[data-gd-bubble-kind="adopted-current"] .gdOffsetHubSummary:after,
+.gdShotDataHubCard.gdOffsetHubDetails.gdMyBubbleActive .gdOffsetHubSummary:after{
+  background:linear-gradient(180deg,#37f28d,#20bd69)!important;
+  border-color:rgba(55,242,141,.58)!important;
+  color:#06100b!important;
+}
+.gdShotDataHubCard.gdOffsetHubDetails[open] .gdOffsetHubSummary,
+.gdShotDataHubCard.gdOffsetHubDetails.open .gdOffsetHubSummary{
+  padding-bottom:4px!important;
+}
+.gdBubbleGenHead strong{font-size:16px!important;letter-spacing:0!important}
+.gdBubbleGenHead span{max-width:540px;color:rgba(238,245,242,.64)!important}
+.gdBubbleGenHead button{min-height:38px;border-radius:12px!important;padding:0 13px!important}
+.gdBubbleGenGrid{grid-template-columns:124px minmax(0,1fr)!important;gap:8px!important;margin-top:9px!important}
+#dataHubPanel .gdOffsetHubBody .gdBubbleOffsetActions,
+#statsPanel .gdOffsetHubBody .gdBubbleOffsetActions,
+#dataHubPanel .gdOffsetHubBody .gdBubbleGenGrid label,
+#statsPanel .gdOffsetHubBody .gdBubbleGenGrid label,
+#practiceDataPanel .gdOffsetHubBody .gdBubbleGenGrid label{
+  display:none!important;
+}
+#dataHubPanel .gdOffsetHubBody .gdBubbleGenGrid,
+#statsPanel .gdOffsetHubBody .gdBubbleGenGrid,
+#practiceDataPanel .gdOffsetHubBody .gdBubbleGenGrid{
+  grid-template-columns:1fr!important;
+  margin-top:8px!important;
+}
+#dataHubPanel .gdOffsetHubBody .gdBubbleOffsetSource,
+#statsPanel .gdOffsetHubBody .gdBubbleOffsetSource,
+#practiceDataPanel .gdOffsetHubBody .gdBubbleOffsetSource{
+  min-height:132px!important;
+  height:132px!important;
+  background:
+    radial-gradient(ellipse 34% 58% at 68% 52%,rgba(244,248,243,.13),rgba(244,248,243,.045) 44%,transparent 72%),
+    linear-gradient(180deg,rgba(244,248,243,.025),rgba(244,248,243,.01))!important;
+  border:0!important;
+  box-shadow:none!important;
+}
+.gdBubbleGenGrid input,
+.gdBubbleOffsetSource{
+  min-height:42px!important;
+  border-radius:12px!important;
+}
+.gdBubbleOffsetSource{
+  position:relative!important;
+  padding:0!important;
+  overflow:hidden!important;
+}
+.gdBubbleOffsetSource[data-gd-bubble-state]:after{
+  content:attr(data-gd-bubble-state);
+  position:absolute;
+  left:12px;
+  top:10px;
+  z-index:2;
+  max-width:calc(100% - 24px);
+  color:rgba(238,245,242,.82);
+  font-size:10px;
+  font-weight:950;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+  pointer-events:none;
+}
+.gdBubbleOffsetSource[data-gd-bubble-kind="default"]:after{color:rgba(215,176,107,.88)}
+.gdBubbleOffsetSource[data-gd-bubble-kind="pending"]:after,
+.gdBubbleOffsetSource[data-gd-bubble-kind="adopted-current"]:after{color:rgba(45,214,129,.9)}
+.gdBubbleOffsetSource[data-gd-bubble-kind="saved"]:after{color:rgba(45,214,129,.82)}
+.gdBubbleOffsetSource.gdMyBubbleLaneSource:after{
+  display:none!important;
+}
+.gdShotBubbleHubPreview{
+  --gd-shot-zero-x:68%;
+  --gd-shot-bubble-x:68%;
+  --gd-shot-bubble-y:56%;
+  --gd-shot-alignment-y:56%;
+  --gd-shot-bubble-tilt:-3deg;
+  --gd-shot-line-angle:0deg;
+  --gd-shot-line-width:56%;
+  margin:0!important;
+  min-height:72px!important;
+  height:72px!important;
+  width:100%!important;
+  border-radius:15px!important;
+  overflow:hidden!important;
+  background:transparent!important;
+  border:0!important;
+  box-shadow:none!important;
+}
+#dataHubPanel .gdOffsetHubBody .gdShotBubbleHubPreview,
+#statsPanel .gdOffsetHubBody .gdShotBubbleHubPreview,
+#practiceDataPanel .gdOffsetHubBody .gdShotBubbleHubPreview{
+  min-height:132px!important;
+  height:132px!important;
+}
+#dataHubPanel .gdOffsetHubDetails[open] .gdOffsetHubSummary span,
+#dataHubPanel .gdOffsetHubDetails.open .gdOffsetHubSummary span,
+#statsPanel .gdOffsetHubDetails[open] .gdOffsetHubSummary span,
+#statsPanel .gdOffsetHubDetails.open .gdOffsetHubSummary span{
+  display:none!important;
+}
+.gdShotBubbleHubPreview svg{
+  display:block!important;
+  width:100%!important;
+  height:100%!important;
+}
+.gdShotBubbleHubPreview svg[data-gd-my-bubble-lane="1"]{
+  cursor:default!important;
+  touch-action:none!important;
+  user-select:none!important;
+}
+.gdShotBubbleHubPreview svg[data-gd-my-bubble-lane="1"] .gdMyBubbleLandingHandle,
+.gdShotBubbleHubPreview svg[data-gd-my-bubble-lane="1"] .gdMyBubbleLandingHit{
+  cursor:ew-resize!important;
+}
+.gdShotBubbleHubPreview svg[data-gd-my-bubble-lane="1"].dragging{
+  cursor:grabbing!important;
+}
+.gdShotBubbleLane{
+  position:relative!important;
+  height:72px!important;
+  min-height:72px!important;
+}
+.gdShotBubbleLane:before{
+  display:none!important;
+}
+.gdShotBubbleLane:after{
+  content:"";
+  position:absolute;
+  left:12%;
+  top:var(--gd-shot-alignment-y);
+  width:calc(var(--gd-shot-zero-x) - 12%);
+  transform:translateY(-50%);
+  border-top:1px dashed rgba(255,255,255,.30);
+}
+.gdShotBubbleBall{
+  position:absolute!important;
+  left:12%!important;
+  top:var(--gd-shot-alignment-y)!important;
+  width:16px!important;
+  height:16px!important;
+  transform:translate(-50%,-50%)!important;
+  border-radius:50%!important;
+  background:radial-gradient(circle at 35% 28%,#fff,#dfe5e2 56%,#8b9691)!important;
+  box-shadow:0 0 18px rgba(255,255,255,.34),0 10px 18px rgba(0,0,0,.42)!important;
+}
+.gdShotBubbleAim{
+  position:absolute!important;
+  left:12%!important;
+  right:auto!important;
+  top:var(--gd-shot-alignment-y)!important;
+  width:var(--gd-shot-line-width)!important;
+  height:2px!important;
+  transform:translateY(-50%) rotate(var(--gd-shot-line-angle))!important;
+  transform-origin:0 50%!important;
+  border-radius:999px!important;
+  background:linear-gradient(90deg,rgba(255,159,47,.92),rgba(255,159,47,.58))!important;
+  box-shadow:0 0 12px rgba(255,159,47,.20)!important;
+}
+.gdShotBubbleTarget{
+  position:absolute!important;
+  left:var(--gd-shot-bubble-x)!important;
+  top:var(--gd-shot-bubble-y)!important;
+  width:118px!important;
+  height:48px!important;
+  transform:translate(-50%,-50%) rotate(var(--gd-shot-line-angle))!important;
+  border-radius:50%!important;
+  border:2px solid rgba(255,159,47,.82)!important;
+  background:
+    radial-gradient(ellipse at 52% 25%,rgba(239,68,68,.48),rgba(239,68,68,.13) 30%,rgba(255,255,255,.10) 56%,rgba(96,165,250,.24) 100%)!important;
+  box-shadow:0 0 24px rgba(255,159,47,.18)!important;
+}
+.gdShotBubbleCenter{
+  position:absolute!important;
+  left:var(--gd-shot-zero-x)!important;
+  top:var(--gd-shot-alignment-y)!important;
+  width:18px!important;
+  height:18px!important;
+  transform:translate(-50%,-50%)!important;
+  opacity:.86!important;
+}
+.gdShotBubbleCenter:before,
+.gdShotBubbleCenter:after{
+  content:"";
+  position:absolute;
+  left:50%;
+  top:50%;
+  transform:translate(-50%,-50%);
+  border-radius:999px;
+  background:rgba(255,255,255,.74);
+}
+.gdShotBubbleCenter:before{width:16px;height:2px}
+.gdShotBubbleCenter:after{width:2px;height:16px}
+.gdDataSplit{
+  display:grid!important;
+  grid-template-columns:repeat(3,minmax(0,1fr))!important;
+  gap:10px!important;
+  margin-top:14px!important;
+  align-items:stretch!important;
+}
+.gdDataCard{
+  position:relative!important;
+  min-height:148px!important;
+  border-radius:16px!important;
+  padding:14px!important;
+  background:linear-gradient(180deg,rgba(19,31,29,.94),rgba(7,11,10,.98))!important;
+  border:1px solid rgba(255,255,255,.105)!important;
+  box-shadow:0 16px 36px rgba(0,0,0,.28),inset 0 1px 0 rgba(255,255,255,.055)!important;
+  overflow:hidden!important;
+  transition:
+    min-height .24s ease,
+    max-height .24s ease,
+    transform .22s ease,
+    border-color .2s ease,
+    background .2s ease,
+    box-shadow .2s ease,
+    opacity .2s ease!important;
+}
+.gdDataCard:before{
+  content:"";
+  position:absolute;
+  inset:0 0 auto;
+  height:3px;
+  background:rgba(255,255,255,.18);
+  pointer-events:none;
+}
+#gdCourseDataOpenBtn:before{background:#37f28d}
+#gdCompareDataOpenBtn:before{background:#62d2ff}
+#gdPracticeDataOpenBtn:before{background:#62d2ff}
+#gdCourseDataOpenBtn{
+  background:
+    radial-gradient(ellipse 54% 84% at 72% 52%,rgba(55,242,141,.18),rgba(55,242,141,.055) 46%,transparent 74%),
+    linear-gradient(180deg,rgba(18,38,28,.96),rgba(7,11,10,.98))!important;
+  border-color:rgba(55,242,141,.32)!important;
+  box-shadow:0 16px 36px rgba(0,0,0,.28),0 0 24px rgba(55,242,141,.10),inset 0 1px 0 rgba(255,255,255,.055)!important;
+}
+#gdPracticeDataOpenBtn{
+  background:
+    radial-gradient(ellipse 54% 84% at 72% 52%,rgba(98,210,255,.20),rgba(98,210,255,.06) 46%,transparent 74%),
+    linear-gradient(180deg,rgba(16,32,38,.96),rgba(7,11,12,.98))!important;
+  border-color:rgba(98,210,255,.34)!important;
+  box-shadow:0 16px 36px rgba(0,0,0,.28),0 0 24px rgba(98,210,255,.11),inset 0 1px 0 rgba(255,255,255,.055)!important;
+}
+.gdDataCard.primary,
+.gdDataCard.compare{
+  grid-column:auto!important;
+}
+.gdDataCard .ico{
+  width:34px!important;
+  height:34px!important;
+  display:grid!important;
+  place-items:center!important;
+  border-radius:12px!important;
+  background:rgba(255,255,255,.07)!important;
+  border:1px solid rgba(255,255,255,.09)!important;
+  font-size:19px!important;
+  line-height:1!important;
+}
+.gdDataCard strong{
+  font-size:19px!important;
+  line-height:1.06!important;
+  letter-spacing:0!important;
+}
+.gdDataCard:hover{transform:translateY(-1px)}
+.gdDataCard.compare.title:hover{transform:none}
+.gdDataCard span{
+  margin-top:7px!important;
+  color:rgba(238,245,242,.66)!important;
+  font-size:12px!important;
+  line-height:1.34!important;
+}
+#dataHubPanel.gdCompareExpanded .gdDataSplit{
+  grid-template-columns:minmax(154px,.62fr) minmax(340px,1.36fr) minmax(154px,.62fr)!important;
+  grid-template-areas:"course compareTitle practice" "course compareVisual practice"!important;
+  align-items:stretch!important;
+}
+#dataHubPanel.gdCompareExpanded .gdDataCard.compare.title{
+  grid-column:auto!important;
+  grid-row:auto!important;
+  min-height:0!important;
+  padding:14px 16px 10px!important;
+  border-radius:16px 16px 0 0!important;
+  background:linear-gradient(180deg,rgba(19,31,29,.94),rgba(7,11,10,.98))!important;
+  border:1px solid rgba(255,255,255,.10)!important;
+  border-bottom:0!important;
+  box-shadow:none!important;
+  display:grid!important;
+  grid-template-columns:34px minmax(0,1fr)!important;
+  gap:10px!important;
+  align-items:center!important;
+}
+#dataHubPanel.gdCompareExpanded .gdDataCard.compare.title:before{display:none}
+#dataHubPanel.gdCompareExpanded .gdDataCard.compare.title .ico{font-size:16px!important}
+#dataHubPanel.gdCompareExpanded .gdDataCard.compare.title strong{font-size:18px!important}
+#dataHubPanel.gdCompareExpanded .gdDataCard.compare.title span{margin-top:3px!important;font-size:11px!important}
+#dataHubPanel.gdCompareExpanded #gdHubCompareExpansion{
+  margin:0!important;
+  min-width:0!important;
+  padding:0!important;
+  border-radius:0 0 16px 16px!important;
+  background:linear-gradient(180deg,rgba(7,11,10,.98),rgba(7,10,9,.98))!important;
+  border:1px solid rgba(255,255,255,.10)!important;
+  border-top:0!important;
+  box-shadow:0 16px 36px rgba(0,0,0,.24),inset 0 1px 0 rgba(255,255,255,.045)!important;
+  overflow:hidden!important;
+  animation:gdCompareVisualMorph .22s ease both;
+}
+.gdPracticeVisual,
+.gdCompareVisual,
+.gdStatsVisual{
+  position:relative!important;
+  border-radius:16px!important;
+  background:linear-gradient(180deg,rgba(20,27,26,.94),rgba(7,10,9,.98))!important;
+  border:1px solid rgba(255,255,255,.10)!important;
+  box-shadow:0 16px 36px rgba(0,0,0,.24),inset 0 1px 0 rgba(255,255,255,.045)!important;
+  overflow:hidden!important;
+}
+.gdPracticeGraphRotateControl{
+  position:absolute!important;
+  right:10px!important;
+  top:10px!important;
+  z-index:5!important;
+  width:34px!important;
+  height:34px!important;
+  border-radius:50%!important;
+  border:1px solid rgba(255,255,255,.18)!important;
+  background:rgba(6,12,10,.78)!important;
+  color:rgba(238,245,242,.84)!important;
+  display:grid!important;
+  place-items:center!important;
+  padding:0!important;
+  font-size:17px!important;
+  font-weight:950!important;
+  line-height:1!important;
+  box-shadow:0 10px 24px rgba(0,0,0,.28),inset 0 1px 0 rgba(255,255,255,.08)!important;
+}
+.gdPracticeGraphRotateControl.active{
+  border-color:rgba(55,242,141,.62)!important;
+  background:linear-gradient(180deg,rgba(55,242,141,.94),rgba(24,176,96,.92))!important;
+  color:#06100b!important;
+}
+#bagPanel #gdBagPanelSub:empty{display:none!important}
+#bagPanel .row:has(#gdBagStatusTitle){display:none!important}
+.gdShotBubbleDomOverlay{
+  position:absolute!important;
+  inset:0!important;
+  z-index:2!important;
+  display:block!important;
+  width:100%!important;
+  height:100%!important;
+  pointer-events:none!important;
+}
+#gdPracticeDataVisual .gdShotBubbleOverlayLens{
+  mix-blend-mode:screen!important;
+}
+#gdPracticeDataVisual .gdShotBubbleOverlayLens .gdOffsetHubBubble{
+  vector-effect:non-scaling-stroke!important;
+}
+#gdPracticeDataVisual .gdPracticeMyBubbleLayer .gdOffsetHubBubble{
+  fill:#d7b06b!important;
+  fill-opacity:.16!important;
+  stroke:#d7b06b!important;
+  stroke-opacity:.72!important;
+  stroke-width:1.45!important;
+  filter:drop-shadow(0 0 12px rgba(215,176,107,.16))!important;
+}
+#gdPracticeDataVisual .gdPracticeMyBubbleLayer-pending,
+#gdPracticeDataVisual .gdPracticeMyBubbleLayer-adopted-current,
+#gdPracticeDataVisual .gdPracticeMyBubbleAdopting{
+  mix-blend-mode:normal!important;
+}
+#gdPracticeDataVisual .gdPracticeMyBubbleLayer-pending .gdOffsetHubBubble,
+#gdPracticeDataVisual .gdPracticeMyBubbleLayer-adopted-current .gdOffsetHubBubble,
+#gdPracticeDataVisual .gdPracticeMyBubbleAdopting .gdOffsetHubBubble{
+  fill:#37f28d!important;
+  fill-opacity:.86!important;
+  stroke:#37f28d!important;
+  stroke-opacity:1!important;
+  stroke-width:2.35!important;
+  filter:drop-shadow(0 0 20px rgba(55,242,141,.42))!important;
+}
+#gdPracticeDataVisual .gdPracticeBubbleProjectionLayer .gdOffsetHubBubble{
+  fill:#62d2ff!important;
+  fill-opacity:.13!important;
+  stroke:#62d2ff!important;
+  stroke-opacity:.82!important;
+  stroke-width:1.55!important;
+  filter:drop-shadow(0 0 12px rgba(98,210,255,.16))!important;
+}
+#gdPracticeDataVisual .gdPracticeBubbleProjectionLayer-combined{
+  mix-blend-mode:normal!important;
+}
+#gdPracticeDataVisual .gdPracticeBubbleProjectionLayer-combined .gdOffsetHubBubble{
+  fill:#37f28d!important;
+  fill-opacity:.34!important;
+  stroke:#37f28d!important;
+  stroke-opacity:1!important;
+  stroke-width:2.1!important;
+  filter:drop-shadow(0 0 18px rgba(55,242,141,.28))!important;
+}
+#gdPracticeDataVisual .gdPracticeMyBubbleAdopting{
+  transform-box:view-box!important;
+  transform-origin:center!important;
+  animation:gdPracticeMyBubbleAdoptTravel 1.35s cubic-bezier(.2,.72,.18,1) both!important;
+}
+#gdPracticeDataVisual .gdPracticeBubbleAdoptionGhost{
+  animation:gdPracticeBubbleAdoptionGhost 1.35s ease both!important;
+}
+@keyframes gdPracticeMyBubbleAdoptTravel{
+  0%{transform:translate(var(--gd-practice-adopt-x,0px),var(--gd-practice-adopt-y,0px));opacity:.88}
+  55%{opacity:.96}
+  100%{transform:translate(0,0);opacity:1}
+}
+@keyframes gdPracticeBubbleAdoptionGhost{
+  0%{opacity:.88}
+  58%{opacity:.44}
+  100%{opacity:0}
+}
+.gdShotBubbleOverlayToggle{
+  position:absolute!important;
+  z-index:3!important;
+  top:10px!important;
+  right:10px!important;
+  min-width:76px!important;
+  height:34px!important;
+  padding:0 12px!important;
+  border-radius:999px!important;
+  border:1px solid rgba(255,255,255,.14)!important;
+  background:rgba(7,10,9,.74)!important;
+  color:rgba(255,255,255,.76)!important;
+  font-size:10px!important;
+  line-height:1!important;
+  font-weight:950!important;
+  letter-spacing:.08em!important;
+  text-transform:uppercase!important;
+  backdrop-filter:blur(12px)!important;
+  box-shadow:0 10px 24px rgba(0,0,0,.26)!important;
+}
+.gdShotBubbleOverlayToggle.active{
+  border-color:rgba(215,176,107,.70)!important;
+  background:linear-gradient(180deg,rgba(215,176,107,.92),rgba(197,141,53,.92))!important;
+  color:#071008!important;
+}
+.gdShotBubbleOverlayControls{
+  display:flex!important;
+  justify-content:flex-end!important;
+  margin:8px 0 12px!important;
+}
+.gdShotBubbleOverlayControl{
+  min-height:38px!important;
+  padding:0 16px!important;
+  border-radius:999px!important;
+  border:1px solid rgba(255,255,255,.14)!important;
+  background:rgba(255,255,255,.075)!important;
+  color:rgba(255,255,255,.82)!important;
+  font-size:11px!important;
+  font-weight:950!important;
+  letter-spacing:.06em!important;
+  text-transform:uppercase!important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.06)!important;
+}
+.gdShotBubbleOverlayControl.active{
+  border-color:rgba(215,176,107,.70)!important;
+  background:linear-gradient(180deg,rgba(215,176,107,.94),rgba(197,141,53,.94))!important;
+  color:#071008!important;
+}
+#dataHubPanel.gdCompareExpanded .gdCompareVisual{
+  height:286px!important;
+  min-height:286px!important;
+  margin:8px!important;
+  border:1px solid rgba(98,210,255,.14)!important;
+  border-radius:14px!important;
+  box-shadow:none!important;
+  background:linear-gradient(180deg,rgba(18,45,66,.32),rgba(7,10,9,.98))!important;
+}
+#dataHubPanel.gdCompareExpanded .gdCompareClubPick{
+  position:absolute!important;
+  z-index:4!important;
+  top:16px!important;
+  right:16px!important;
+  display:flex!important;
+  align-items:center!important;
+  gap:8px!important;
+  padding:7px 9px!important;
+  border-radius:999px!important;
+  border:1px solid rgba(255,255,255,.12)!important;
+  background:rgba(5,10,9,.62)!important;
+  backdrop-filter:blur(10px)!important;
+  color:rgba(255,255,255,.62)!important;
+  font-size:8px!important;
+  font-weight:950!important;
+  letter-spacing:.08em!important;
+  text-transform:uppercase!important;
+}
+#dataHubPanel.gdCompareExpanded .gdCompareClubPick select{
+  min-width:74px!important;
+  border:0!important;
+  background:transparent!important;
+  color:#fff!important;
+  font-size:11px!important;
+  font-weight:950!important;
+  letter-spacing:0!important;
+  text-transform:none!important;
+  outline:none!important;
+}
+#dataHubPanel.gdCompareExpanded .gdCompareVisual svg{
+  width:100%!important;
+  height:286px!important;
+  min-height:286px!important;
+}
+#gdHubCompareDataVisual .gdCompareBubbleLayer{
+  mix-blend-mode:screen!important;
+}
+#gdHubCompareDataVisual .gdCompareBubbleLayer-playing{
+  mix-blend-mode:normal!important;
+}
+#gdHubCompareDataVisual .gdCompareBubbleLayer .gdOffsetHubOverlayLine{
+  stroke-opacity:.18!important;
+}
+#gdHubCompareDataVisual .gdCompareBubbleLayer .gdOffsetHubBubble{
+  vector-effect:non-scaling-stroke!important;
+}
+#gdHubCompareDataVisual .gdCompareBubbleLayer-playing .gdOffsetHubBubble{
+  fill:#f4f8f3!important;
+  fill-opacity:.26!important;
+  stroke:#f4f8f3!important;
+  stroke-width:0!important;
+  stroke-opacity:0!important;
+  filter:drop-shadow(0 0 14px rgba(244,248,243,.24))!important;
+}
+#gdHubCompareDataVisual .gdCompareBubbleLayer-course .gdOffsetHubBubble{
+  fill:#37f28d!important;
+  fill-opacity:.045!important;
+  stroke:#37f28d!important;
+  stroke-width:1.7!important;
+  stroke-opacity:.98!important;
+  stroke-dasharray:none!important;
+}
+#gdHubCompareDataVisual .gdCompareBubbleLayer-practice .gdOffsetHubBubble{
+  fill:#62d2ff!important;
+  fill-opacity:.05!important;
+  stroke:#62d2ff!important;
+  stroke-width:1.7!important;
+  stroke-opacity:.96!important;
+}
+#dataHubPanel.gdCompareExpanded .gdDataCard.widget{
+  box-sizing:border-box!important;
+  min-height:375px!important;
+  max-height:375px!important;
+  border-radius:16px!important;
+  padding:13px!important;
+  gap:8px!important;
+  align-content:start!important;
+  display:block!important;
+  background:linear-gradient(180deg,rgba(19,31,29,.94),rgba(7,11,10,.98))!important;
+}
+#dataHubPanel.gdCompareExpanded .gdDataCard.widget.active{
+  border-color:rgba(98,210,255,.30)!important;
+  background:linear-gradient(180deg,rgba(24,45,51,.94),rgba(7,12,12,.98))!important;
+}
+#dataHubPanel.gdCompareExpanded #gdCourseDataOpenBtn.widget{
+  border-color:rgba(55,242,141,.66)!important;
+  background:linear-gradient(180deg,rgba(55,242,141,.34),rgba(55,242,141,.16) 48%,rgba(7,12,12,.98))!important;
+}
+#dataHubPanel.gdCompareExpanded #gdPracticeDataOpenBtn.widget{
+  border-color:rgba(98,210,255,.64)!important;
+  background:linear-gradient(180deg,rgba(98,210,255,.34),rgba(98,210,255,.18) 48%,rgba(7,12,12,.98))!important;
+}
+#dataHubPanel.gdCompareExpanded #gdCourseDataOpenBtn.widget.active{
+  border-color:rgba(55,242,141,.94)!important;
+  box-shadow:0 18px 44px rgba(0,0,0,.30),inset 0 0 0 1px rgba(55,242,141,.34),0 0 0 1px rgba(55,242,141,.16)!important;
+}
+#dataHubPanel.gdCompareExpanded #gdPracticeDataOpenBtn.widget.active{
+  border-color:rgba(98,210,255,.92)!important;
+  box-shadow:0 18px 44px rgba(0,0,0,.30),inset 0 0 0 1px rgba(98,210,255,.32),0 0 0 1px rgba(98,210,255,.16)!important;
+}
+#dataHubPanel.gdCompareExpanded #gdPracticeDataOpenBtn.widget .gdShotDataLibraryDropdown.open>.gdShotDataLibraryTabs>.gdPracticeLibraryTab{
+  border-color:rgba(98,210,255,.58)!important;
+  background:linear-gradient(180deg,#62d2ff,#248dc0)!important;
+  color:#071008!important;
+}
+#dataHubPanel.gdCompareExpanded #gdPracticeDataOpenBtn.widget .gdShotDataLibraryDropdown.open>.gdShotDataLibraryTabs>.gdPracticeLibraryTab .gdShotDataLibraryChevron{
+  border-color:rgba(0,0,0,.12)!important;
+  background:rgba(0,0,0,.14)!important;
+  color:rgba(0,0,0,.72)!important;
+}
+#dataHubPanel.gdCompareExpanded .gdCompareSourceTitle strong{
+  color:#fff!important;
+  font-size:18px!important;
+  line-height:1.05!important;
+}
+#dataHubPanel.gdCompareExpanded .gdCompareSourceShell{
+  display:grid!important;
+  grid-template-columns:minmax(0,1fr) minmax(154px,190px)!important;
+  gap:14px!important;
+  align-items:center!important;
+  width:100%!important;
+  min-height:100%!important;
+  min-width:0!important;
+  box-sizing:border-box!important;
+  justify-self:stretch!important;
+  align-self:stretch!important;
+  grid-column:1 / -1!important;
+}
+#dataHubPanel.gdCompareExpanded .gdCompareSourceShell.active{
+  grid-template-columns:1fr!important;
+  gap:7px!important;
+  align-content:start!important;
+  align-items:start!important;
+}
+#dataHubPanel.gdCompareExpanded .gdDataCard.widget:has(.gdCompareSourceShell.simple){
+  min-height:86px!important;
+  max-height:none!important;
+  padding:14px!important;
+}
+#dataHubPanel.gdCompareExpanded .gdCompareSourceShell.simple{
+  min-height:0!important;
+  align-content:center!important;
+  align-items:center!important;
+}
+#dataHubPanel.gdCompareExpanded .gdDataCard.widget:not(.active) .gdCompareSourceShell{
+  grid-template-columns:1fr!important;
+}
+#dataHubPanel.gdCompareExpanded .gdCompareSourceTitle{
+  display:grid!important;
+  gap:10px!important;
+  align-content:center!important;
+  justify-items:start!important;
+  min-width:0!important;
+}
+#dataHubPanel.gdCompareExpanded .gdCompareSourceTitle.active{
+  display:flex!important;
+  align-items:center!important;
+  justify-content:space-between!important;
+  gap:10px!important;
+  width:100%!important;
+}
+#dataHubPanel.gdCompareExpanded .gdCompareSourceControl{
+  display:grid!important;
+  gap:7px!important;
+  width:100%!important;
+  min-width:0!important;
+}
+#dataHubPanel.gdCompareExpanded .gdCompareSourceControl .gdShotDataLibraryTabs{
+  display:none!important;
+}
+#dataHubPanel.gdCompareExpanded .gdCompareSourceControl .gdShotDataLibraryDropdown:not(.open)>.gdShotDataLibraryBody,
+#dataHubPanel.gdCompareExpanded .gdCompareSourceControl .gdShotDataLibraryDropdown>.gdShotDataLibraryBody{
+  display:grid!important;
+  max-height:270px!important;
+  overflow:auto!important;
+  padding:10px!important;
+  border-radius:14px!important;
+  background:rgba(255,255,255,.04)!important;
+  border:1px solid rgba(255,255,255,.08)!important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.035)!important;
+}
+#dataHubPanel.gdCompareExpanded .gdCompareSourceOpen{
+  min-height:30px!important;
+  padding:0 12px!important;
+  border-radius:999px!important;
+  border:1px solid rgba(255,255,255,.16)!important;
+  background:rgba(255,255,255,.10)!important;
+  color:#fff!important;
+  font-size:10px!important;
+  line-height:1!important;
+  font-weight:950!important;
+  letter-spacing:.05em!important;
+  text-transform:uppercase!important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.08)!important;
+}
+#dataHubPanel.gdCompareExpanded #gdCourseDataOpenBtn.widget .gdCompareSourceOpen{
+  border-color:rgba(55,242,141,.58)!important;
+  background:rgba(55,242,141,.20)!important;
+  color:#eafff3!important;
+}
+#dataHubPanel.gdCompareExpanded #gdPracticeDataOpenBtn.widget .gdCompareSourceOpen{
+  border-color:rgba(98,210,255,.54)!important;
+  background:rgba(98,210,255,.20)!important;
+  color:#e9faff!important;
+}
+#dataHubPanel.gdCompareExpanded .gdCompareSourceOpen:active{
+  transform:translateY(1px)!important;
+}
+#dataHubPanel.gdCompareExpanded .gdCompareSourceActions{
+  display:flex!important;
+  justify-content:flex-start!important;
+  min-width:0!important;
+}
+#dataHubPanel.gdCompareExpanded .gdCompareSourceShell.active>.gdCompareSourceActions .gdCompareSourceOpen{
+  min-height:24px!important;
+  padding:5px 9px!important;
+  font-size:9px!important;
+}
+#dataHubPanel.gdCompareExpanded .gdDataCard.widget.active .gdCompareCompact{
+  max-height:270px!important;
+  padding-right:3px!important;
+}
+#dataHubPanel.gdCompareExpanded .gdDataCard.widget:not(.active){
+  opacity:.92!important;
+}
+@keyframes gdCompareVisualMorph{
+  from{opacity:.35;transform:translateY(-6px) scale(.985)}
+  to{opacity:1;transform:translateY(0) scale(1)}
+}
+.gdDataCard.widget span{font-size:11px!important;text-transform:none!important;letter-spacing:0!important}
+.gdDataCard.widget strong{font-size:21px!important;line-height:1.04!important}
+.gdDataCard.widget small{font-size:11px!important;line-height:1.25!important}
+.gdCompareCompact{
+  gap:6px!important;
+  margin-top:3px!important;
+  padding-top:9px!important;
+  border-top:1px solid rgba(255,255,255,.09)!important;
+  overflow:auto!important;
+}
+.gdCompareCompactGrid{gap:5px!important}
+.gdCompareCompact label,
+.gdCompareCompactRow{
+  min-height:24px!important;
+  grid-template-columns:74px minmax(0,1fr)!important;
+  gap:8px!important;
+  padding:0!important;
+  font-size:9px!important;
+  letter-spacing:.04em!important;
+  color:rgba(238,245,242,.58)!important;
+}
+.gdCompareCompact .gdCompactConsistency,
+.gdDataCard.widget .gdCompareCompactRow,
+#dataHubPanel.gdCompareExpanded .gdDataCard.widget .gdCompareCompactRow{
+  grid-template-columns:minmax(74px,.9fr) 42px minmax(72px,1fr)!important;
+  gap:7px!important;
+  min-height:22px!important;
+  font-size:9px!important;
+}
+.gdCompareCompact select,
+.gdCompareCompact input:not([type=range]){
+  height:24px!important;
+  padding:0 7px!important;
+  border-radius:8px!important;
+  background:rgba(0,0,0,.20)!important;
+  border:1px solid rgba(255,255,255,.08)!important;
+}
+	.gdCompareCompactValue{font-size:11px!important}
+	.gdCompareCourseSummary{
+	  display:grid!important;
+	  gap:7px!important;
+	  margin-top:0!important;
+	  padding-top:0!important;
+	  border-top:0!important;
+	  min-width:0!important;
+	  justify-self:end!important;
+	  width:min(190px,100%)!important;
+	}
+	.gdCompareCourseConsistency > div{
+	  display:flex!important;
+	  justify-content:space-between!important;
+	  align-items:flex-start!important;
+	  gap:8px!important;
+	  min-width:0!important;
+	}
+	.gdCompareCourseSummary span{
+	  color:rgba(255,255,255,.58)!important;
+	  font-size:9px!important;
+	  line-height:1!important;
+	  font-weight:950!important;
+	  text-transform:uppercase!important;
+	  letter-spacing:.04em!important;
+	}
+	.gdCompareCourseSummary strong{
+	  color:#fff!important;
+	  font-size:12px!important;
+	  line-height:1!important;
+	  font-weight:950!important;
+	  text-align:right!important;
+	}
+	.gdCompareCourseConsistency{
+	  display:grid!important;
+	  gap:4px!important;
+	  padding-top:2px!important;
+	  min-width:0!important;
+	}
+	.gdCompareCourseConsistency input[type=range]{
+	  width:100%!important;
+	  min-width:0!important;
+	  height:14px!important;
+	  margin:0!important;
+	  padding:0!important;
+	  accent-color:#21d07b!important;
+	}
+	.gdComparePracticeControls{
+	  display:grid!important;
+	  gap:6px!important;
+	  margin-top:0!important;
+	  padding-top:0!important;
+	  border-top:0!important;
+	  min-width:0!important;
+	  justify-self:end!important;
+	  width:min(190px,100%)!important;
+	}
+	.gdComparePracticeMaster{
+	  display:grid!important;
+	  gap:4px!important;
+	  min-width:0!important;
+	}
+	.gdComparePracticeHead,
+	.gdComparePracticeToleranceRow > div{
+	  display:flex!important;
+	  align-items:center!important;
+	  justify-content:space-between!important;
+	  gap:6px!important;
+	  min-width:0!important;
+	}
+	.gdComparePracticeHead span,
+	.gdComparePracticeToleranceRow span{
+	  color:rgba(255,255,255,.58)!important;
+	  font-size:9px!important;
+	  line-height:1!important;
+	  font-weight:950!important;
+	  text-transform:uppercase!important;
+	  letter-spacing:.04em!important;
+	  overflow:hidden!important;
+	  text-overflow:ellipsis!important;
+	  white-space:nowrap!important;
+	}
+	.gdComparePracticeControls input[type=range]{
+	  width:100%!important;
+	  min-width:0!important;
+	  height:14px!important;
+	  margin:0!important;
+	  padding:0!important;
+	  accent-color:#d7b06b!important;
+	}
+	.gdComparePracticeAdminBtn{
+	  min-height:26px!important;
+	  width:auto!important;
+	  border-radius:10px!important;
+	  border:1px solid rgba(255,255,255,.10)!important;
+	  background:rgba(255,255,255,.055)!important;
+	  color:rgba(255,255,255,.74)!important;
+	  font-size:10px!important;
+	  font-weight:950!important;
+	  line-height:1!important;
+	  padding:6px 9px!important;
+	}
+	.gdComparePracticeAdminBtn.active{
+	  color:#ffd287!important;
+	  border-color:rgba(215,176,107,.32)!important;
+	  background:rgba(215,176,107,.16)!important;
+	}
+	.gdComparePracticeAdminGrid{
+	  display:grid!important;
+	  gap:5px!important;
+	  max-height:202px!important;
+	  overflow:auto!important;
+	  padding-right:2px!important;
+	  min-width:0!important;
+	}
+	.gdComparePracticeToleranceRow{
+	  display:grid!important;
+	  gap:3px!important;
+	  min-width:0!important;
+	}
+	.gdComparePracticeToleranceRow .gdCompareCompactValue{
+	  flex:0 0 auto!important;
+	  font-size:10px!important;
+	  line-height:1!important;
+	}
+	.gdCourseDataLanding,
+	.gdStatsLegend,
+.gdStatsControl,
+	.gdStatsFilters,
+	.gdPracticeActions,
+	.gdPracticeResult,
+	.gdPracticeExtractCheckpoint,
+	.gdPracticeEvidenceList,
+	.gdPracticeTolerancePanel{
+	  border-radius:16px!important;
+  background:rgba(255,255,255,.045)!important;
+  border:1px solid rgba(255,255,255,.085)!important;
+  padding:12px!important;
+}
+.gdPracticeExtractCheckpoint[hidden]{display:none!important}
+.gdPracticeExtractCheckpoint{
+  display:grid!important;
+  gap:9px!important;
+  background:linear-gradient(180deg,rgba(18,78,112,.42),rgba(255,255,255,.035))!important;
+  border-color:rgba(74,198,255,.35)!important;
+}
+.gdPracticeExtractHead{
+  display:flex!important;
+  align-items:flex-start!important;
+  justify-content:space-between!important;
+  gap:10px!important;
+}
+.gdPracticeExtractHead strong{
+  display:block!important;
+  color:#fff!important;
+  font-size:15px!important;
+  line-height:1.05!important;
+  font-weight:950!important;
+}
+.gdPracticeExtractHead span{
+  display:block!important;
+  margin-top:3px!important;
+  color:rgba(255,255,255,.62)!important;
+  font-size:10px!important;
+  line-height:1.25!important;
+  font-weight:850!important;
+}
+.gdPracticeExtractStats{
+  display:flex!important;
+  gap:5px!important;
+  flex-wrap:wrap!important;
+  justify-content:flex-end!important;
+}
+.gdPracticeExtractStats b{
+  border-radius:999px!important;
+  border:1px solid rgba(255,255,255,.10)!important;
+  background:rgba(255,255,255,.06)!important;
+  color:rgba(255,255,255,.74)!important;
+  padding:5px 7px!important;
+  font-size:9px!important;
+  line-height:1!important;
+  font-weight:950!important;
+}
+.gdPracticeExtractActions{
+  display:grid!important;
+  grid-template-columns:1fr 1fr!important;
+  gap:7px!important;
+}
+.gdPracticeExtractActions button{
+  min-height:34px!important;
+  border-radius:11px!important;
+  border:1px solid rgba(255,255,255,.12)!important;
+  background:rgba(255,255,255,.06)!important;
+  color:#fff!important;
+  font-size:10px!important;
+  font-weight:950!important;
+}
+.gdPracticeExtractActions button.primary{
+  background:linear-gradient(180deg,rgba(31,211,109,.24),rgba(31,211,109,.10))!important;
+  border-color:rgba(31,211,109,.36)!important;
+}
+.gdPracticeExtractList{
+  display:grid!important;
+  gap:5px!important;
+  max-height:260px!important;
+  overflow:auto!important;
+  padding-right:2px!important;
+}
+.gdPracticeExtractRow{
+  display:grid!important;
+  grid-template-columns:24px 44px repeat(11,minmax(58px,1fr)) minmax(76px,auto)!important;
+  gap:5px!important;
+  align-items:center!important;
+  min-width:980px!important;
+  border-radius:10px!important;
+  background:rgba(0,0,0,.18)!important;
+  border:1px solid rgba(255,255,255,.075)!important;
+  padding:6px!important;
+}
+.gdPracticeExtractRow span,
+.gdPracticeExtractRow strong,
+.gdPracticeExtractRow b,
+.gdPracticeExtractRow em{
+  min-width:0!important;
+  white-space:nowrap!important;
+  overflow:hidden!important;
+  text-overflow:ellipsis!important;
+  line-height:1!important;
+}
+.gdPracticeExtractRow span{
+  color:rgba(255,255,255,.46)!important;
+  font-size:9px!important;
+  font-weight:950!important;
+  text-align:center!important;
+}
+.gdPracticeExtractRow strong{
+  color:#fff!important;
+  font-size:11px!important;
+  font-weight:950!important;
+}
+.gdPracticeExtractRow b{
+  color:rgba(255,255,255,.68)!important;
+  font-size:9px!important;
+  font-weight:850!important;
+}
+.gdPracticeExtractRow em{
+  justify-self:end!important;
+  border-radius:999px!important;
+  padding:4px 6px!important;
+  background:rgba(255,255,255,.055)!important;
+  color:rgba(255,255,255,.64)!important;
+  font-size:8px!important;
+  font-style:normal!important;
+  font-weight:950!important;
+}
+.gdPracticeExtractRow.good em{color:#37f28d!important;background:rgba(31,211,109,.10)!important}
+.gdPracticeExtractRow.warn{border-color:rgba(255,199,101,.22)!important}
+.gdPracticeExtractRow.warn em{color:#ffd287!important;background:rgba(215,176,107,.13)!important}
+.gdPracticeExtractRow.gdPracticeExtractHeader{
+  background:rgba(255,255,255,.065)!important;
+  border-color:rgba(255,255,255,.11)!important;
+  position:sticky!important;
+  top:0!important;
+  z-index:1!important;
+}
+.gdPracticeExtractRow.gdPracticeExtractHeader b,
+.gdPracticeExtractRow.gdPracticeExtractHeader em{
+  color:rgba(255,255,255,.82)!important;
+  background:transparent!important;
+  padding:0!important;
+  justify-self:stretch!important;
+  font-size:8px!important;
+  text-transform:uppercase!important;
+  letter-spacing:.04em!important;
+}
+.gdShotDataTabs{
+  grid-column:1/-1!important;
+  display:flex!important;
+  gap:8px!important;
+  padding:7px!important;
+  border-radius:16px!important;
+  background:rgba(255,255,255,.045)!important;
+  border:1px solid rgba(255,255,255,.085)!important;
+}
+.gdShotDataTabs button{
+  flex:1 1 0!important;
+  min-height:38px!important;
+  border-radius:12px!important;
+  background:rgba(255,255,255,.055)!important;
+  border:1px solid transparent!important;
+  color:rgba(255,255,255,.70)!important;
+  font-size:13px!important;
+  font-weight:950!important;
+}
+.gdShotDataTabs button.active{
+  background:linear-gradient(180deg,rgba(31,211,109,.24),rgba(31,211,109,.10))!important;
+  border-color:rgba(31,211,109,.38)!important;
+  color:#fff!important;
+}
+.gdShotDataAdminPanel{
+  display:none;
+  grid-column:2!important;
+  border-radius:16px!important;
+  background:rgba(255,255,255,.045)!important;
+  border:1px solid rgba(255,255,255,.085)!important;
+  padding:12px!important;
+}
+.gdCourseDataLanding{
+  display:grid!important;
+  gap:8px!important;
+  align-self:start!important;
+}
+.gdCourseDataLandingHead{
+  display:flex!important;
+  justify-content:space-between!important;
+  align-items:flex-start!important;
+  gap:10px!important;
+}
+.gdCourseDataLandingHead span{
+  display:block!important;
+  color:rgba(255,255,255,.58)!important;
+  font-size:10px!important;
+  font-weight:950!important;
+  text-transform:uppercase!important;
+  letter-spacing:.1em!important;
+}
+.gdCourseDataLandingHead strong{
+  display:block!important;
+  color:#fff!important;
+  font-size:17px!important;
+  line-height:1.05!important;
+  font-weight:950!important;
+  text-align:right!important;
+}
+.gdCourseDataLandingStats{
+  display:grid!important;
+  grid-template-columns:repeat(3,1fr)!important;
+  gap:5px!important;
+}
+.gdCourseDataLandingStats b{
+  min-width:0!important;
+  border-radius:10px!important;
+  background:rgba(0,0,0,.18)!important;
+  border:1px solid rgba(255,255,255,.07)!important;
+  padding:7px 6px!important;
+  color:rgba(255,255,255,.72)!important;
+  font-size:10px!important;
+  line-height:1!important;
+  font-weight:950!important;
+  text-align:center!important;
+  white-space:nowrap!important;
+}
+.gdShotAdminHead{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:10px}
+.gdShotAdminHead strong{display:block;color:#fff;font-size:18px;font-weight:950;line-height:1.1}
+.gdShotAdminHead span{display:block;margin-top:4px;color:rgba(255,255,255,.58);font-size:12px;font-weight:780;line-height:1.25}
+.gdShotAdminBadge{white-space:nowrap;border-radius:999px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.055);padding:7px 10px;color:rgba(255,255,255,.72);font-size:11px;font-weight:950}
+.gdShotAdminList{display:grid;gap:8px}
+.gdShotAdminRow{display:grid;grid-template-columns:1fr auto;gap:9px;align-items:center;border-radius:14px;background:rgba(0,0,0,.16);border:1px solid rgba(255,255,255,.075);padding:10px}
+.gdShotAdminRow span{display:block;color:rgba(255,255,255,.58);font-size:11px;font-weight:800;margin-top:2px}
+.gdShotAdminRow strong{display:block;color:#fff;font-size:14px;font-weight:950}
+.gdShotAdminRow button{border-radius:12px!important;padding:8px 10px!important;background:rgba(255,90,95,.16)!important;border:1px solid rgba(255,90,95,.25)!important;color:#fff!important;font-size:11px!important}
+.gdShotAdminEmpty{border-radius:14px;border:1px dashed rgba(255,255,255,.13);background:rgba(255,255,255,.035);padding:12px;color:rgba(255,255,255,.58);font-size:12px;font-weight:850;line-height:1.3}
+.gdDataImportPanel{
+  display:grid!important;
+  gap:8px!important;
+  margin:0 0 8px!important;
+  padding:0!important;
+  border-radius:0!important;
+  background:transparent!important;
+  border:0!important;
+}
+.gdDataImportPanel.locked{opacity:.62!important}
+.gdDataImportToggle{
+  appearance:none!important;
+  display:flex!important;
+  align-items:center!important;
+  justify-content:space-between!important;
+  gap:12px!important;
+  width:100%!important;
+  min-height:44px!important;
+  border-radius:999px!important;
+  padding:12px 14px!important;
+  border:1px solid rgba(255,255,255,.12)!important;
+  background:linear-gradient(180deg,rgba(255,255,255,.075),rgba(255,255,255,.032))!important;
+  color:#f4f7f5!important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 10px 24px rgba(0,0,0,.16)!important;
+  font-size:13px!important;
+  line-height:1!important;
+  font-weight:950!important;
+  cursor:pointer!important;
+}
+.gdDataImportToggle i{
+  display:grid!important;
+  place-items:center!important;
+  width:22px!important;
+  height:22px!important;
+  border-radius:999px!important;
+  border:1px solid rgba(255,255,255,.10)!important;
+  background:rgba(255,255,255,.055)!important;
+  color:rgba(255,255,255,.72)!important;
+  font-size:10px!important;
+  line-height:1!important;
+  font-style:normal!important;
+  transition:transform .16s ease!important;
+}
+.gdDataImportPanel.open .gdDataImportToggle{
+  border-color:rgba(98,210,255,.50)!important;
+  background:linear-gradient(180deg,#62d2ff,#248dc0)!important;
+  color:#041015!important;
+}
+.gdDataImportPanel.open .gdDataImportToggle i{
+  transform:rotate(180deg)!important;
+  border-color:rgba(0,0,0,.12)!important;
+  background:rgba(0,0,0,.14)!important;
+  color:rgba(0,0,0,.72)!important;
+}
+.gdDataImportBody{
+  display:none!important;
+  grid-template-columns:minmax(0,1fr) auto auto!important;
+  gap:8px!important;
+  align-items:center!important;
+  padding:8px!important;
+  border-radius:14px!important;
+  background:rgba(0,0,0,.15)!important;
+  border:1px solid rgba(255,255,255,.075)!important;
+}
+.gdDataImportPanel.open .gdDataImportBody{display:grid!important}
+.gdDataImportBody strong{
+  display:block!important;
+  color:#fff!important;
+  font-size:13px!important;
+  line-height:1!important;
+  font-weight:950!important;
+}
+.gdDataImportBody span{
+  display:block!important;
+  margin-top:3px!important;
+  color:rgba(255,255,255,.54)!important;
+  font-size:9px!important;
+  line-height:1.15!important;
+  font-weight:800!important;
+}
+.gdDataImportBody button{
+  min-height:28px!important;
+  border-radius:10px!important;
+  padding:6px 9px!important;
+  font-size:10px!important;
+  line-height:1!important;
+}
+.gdDataTuningPanel{
+  display:grid!important;
+  gap:6px!important;
+  margin:0 0 8px!important;
+  padding:8px!important;
+  border-radius:14px!important;
+  background:rgba(0,0,0,.15)!important;
+  border:1px solid rgba(255,255,255,.075)!important;
+}
+.gdDataTuningPanel.locked{opacity:.62!important}
+.gdDataTuningHead{
+  display:flex!important;
+  align-items:center!important;
+  justify-content:space-between!important;
+  gap:8px!important;
+}
+.gdDataTuningHead strong{
+  color:#fff!important;
+  font-size:14px!important;
+  line-height:1!important;
+  font-weight:950!important;
+}
+.gdDataTuningHead span{
+  padding:4px 7px!important;
+  border-radius:999px!important;
+  background:rgba(255,255,255,.055)!important;
+  border:1px solid rgba(255,255,255,.10)!important;
+  color:rgba(255,255,255,.70)!important;
+  font-size:9px!important;
+  line-height:1!important;
+  font-weight:950!important;
+}
+.gdDataTuningGrid{
+  display:grid!important;
+  grid-template-columns:1fr!important;
+  gap:5px!important;
+}
+.gdDataTuningRow{
+  display:grid!important;
+  grid-template-columns:minmax(78px,.75fr) minmax(84px,1fr) 42px!important;
+  align-items:center!important;
+  gap:6px!important;
+  min-height:24px!important;
+}
+.gdDataTuningRow label{
+  color:rgba(255,255,255,.70)!important;
+  font-size:10px!important;
+  line-height:1.05!important;
+  font-weight:900!important;
+}
+.gdDataTuningRow input[type="range"]{
+  width:100%!important;
+  min-width:0!important;
+  margin:0!important;
+  accent-color:#62d2ff!important;
+}
+.gdDataTuningRow output{
+  color:#fff!important;
+  font-size:10px!important;
+  line-height:1!important;
+  font-weight:950!important;
+  text-align:right!important;
+  white-space:nowrap!important;
+}
+	.gdPracticeMasterTolerance{
+  margin-top:0!important;
+  width:100%!important;
+  max-width:100%!important;
+  border-radius:15px!important;
+  background:rgba(0,0,0,.16)!important;
+  border:1px solid rgba(255,255,255,.085)!important;
+  padding:9px 11px!important;
+}
+	#gdPracticeMasterTolerance[hidden]{display:none!important}
+.gdPracticeMasterTolerance label{
+  display:grid!important;
+  grid-template-columns:1fr auto!important;
+  gap:8px!important;
+  align-items:center!important;
+  color:rgba(255,255,255,.62)!important;
+  font-size:10px!important;
+  font-weight:950!important;
+  text-transform:uppercase!important;
+  letter-spacing:.1em!important;
+}
+.gdPracticeMasterTolerance strong{
+  color:#fff!important;
+  font-size:13px!important;
+  letter-spacing:0!important;
+}
+.gdPracticeMasterTolerance input{width:100%!important;margin-top:6px!important;accent-color:#d7b06b!important}
+.gdPracticeToleranceScale{
+  display:flex!important;
+  justify-content:space-between!important;
+  gap:10px!important;
+  margin-top:4px!important;
+  color:rgba(255,255,255,.46)!important;
+  font-size:9px!important;
+  font-weight:900!important;
+  text-transform:uppercase!important;
+  letter-spacing:.06em!important;
+}
+	.gdPracticeMasterTolerance.locked{opacity:.62}
+	.gdPracticeEvidenceList{
+	  display:grid!important;
+	  gap:8px!important;
+	  align-self:start!important;
+	  max-height:none!important;
+	  overflow:visible!important;
+	  padding:0!important;
+	  border:0!important;
+	  border-radius:0!important;
+	  background:transparent!important;
+	  box-shadow:none!important;
+	}
+	.gdShotDataLibraryShell{
+	  display:grid!important;
+	  gap:8px!important;
+	  min-width:0!important;
+	}
+	.gdShotDataLibraryTabs,
+	.gdPracticeLibraryTabs,
+	.gdCourseLibraryTabs{
+	  display:grid!important;
+	  grid-template-columns:minmax(0,1fr) auto auto!important;
+	  gap:7px!important;
+	  align-items:center!important;
+	  padding:7px!important;
+	  border-radius:13px!important;
+	  background:rgba(0,0,0,.16)!important;
+	  border:1px solid rgba(255,255,255,.075)!important;
+	}
+	.gdShotDataLibraryDropdownToggle{
+	  appearance:none!important;
+	  width:100%!important;
+	  color:inherit!important;
+	  font:inherit!important;
+	  text-align:inherit!important;
+	  cursor:pointer!important;
+	  user-select:none!important;
+	}
+	.gdShotDataLibraryDropdown>.gdShotDataLibraryTabs{
+	  grid-template-columns:1fr!important;
+	  padding:0!important;
+	  background:transparent!important;
+	  border:0!important;
+	}
+	.gdShotDataLibraryDropdown>.gdShotDataLibraryTabs>.gdShotDataLibraryTab{
+	  display:flex!important;
+	  align-items:center!important;
+	  justify-content:space-between!important;
+	  gap:12px!important;
+	  width:100%!important;
+	  min-height:46px!important;
+	  padding:12px 14px!important;
+	  text-align:left!important;
+	}
+	.gdShotDataLibraryTabMain{
+	  display:grid!important;
+	  grid-template-columns:minmax(0,1fr)!important;
+	  align-items:center!important;
+	  gap:4px!important;
+	  min-width:0!important;
+	  width:100%!important;
+	}
+	.gdShotDataLibraryTabMain>.gdNativeProcessingStack{margin-top:0!important;gap:2px!important}
+	.gdShotDataLibraryTabMain .gdNativeProcessingBadge{
+	  grid-template-columns:minmax(74px,1fr) minmax(0,auto)!important;
+	  gap:5px!important;
+	  min-width:0!important;
+	  width:100%!important;
+	  font-size:8px!important;
+	  line-height:1!important;
+	}
+	.gdShotDataLibraryTabMain .gdNativeProcessingTrack,
+	.gdShotDataLibraryTabMain .gdNativeProcessingNodes{height:12px!important}
+	.gdShotDataLibraryTabMain .gdNativeProcessingRail,
+	.gdShotDataLibraryTabMain .gdNativeProcessingFill{left:5px!important;right:5px!important;height:2px!important}
+	.gdShotDataLibraryTabMain .gdNativeProcessingNode{width:10px!important;height:10px!important;font-size:6px!important;box-shadow:0 0 0 2px rgba(0,0,0,.18)!important}
+	.gdShotDataLibraryTabMain .gdNativeProcessingNode.active{box-shadow:0 0 0 3px rgba(55,242,141,.10)!important}
+	.gdShotDataLibraryTabMain .gdNativeProcessingLabel{max-width:104px!important;overflow:hidden!important;text-overflow:ellipsis!important}
+	.gdPracticeLibraryProcessing{
+	  display:block!important;
+	  margin:0 0 8px!important;
+	  padding:7px 9px!important;
+	  border-radius:11px!important;
+	  border:1px solid rgba(55,242,141,.18)!important;
+	  background:rgba(8,24,17,.72)!important;
+	}
+	.gdPracticeLibraryProcessing .gdNativeProcessingBadge{
+	  grid-template-columns:minmax(96px,1fr) minmax(0,auto)!important;
+	  gap:6px!important;
+	  font-size:8px!important;
+	  line-height:1!important;
+	}
+	.gdPracticeLibraryProcessing .gdNativeProcessingTrack,
+	.gdPracticeLibraryProcessing .gdNativeProcessingNodes{height:12px!important}
+	.gdPracticeLibraryProcessing .gdNativeProcessingRail,
+	.gdPracticeLibraryProcessing .gdNativeProcessingFill{height:2px!important}
+	.gdPracticeLibraryProcessing .gdNativeProcessingNode{width:10px!important;height:10px!important;font-size:6px!important}
+	.gdPracticeLibraryProcessing .gdNativeProcessingLabel{max-width:120px!important;overflow:hidden!important;text-overflow:ellipsis!important}
+	.gdShotDataLibraryTabMain .gdNativeProcessingStop,
+	.gdPracticeLibraryProcessing .gdNativeProcessingStop{padding:4px 7px!important;font-size:7px!important}
+	.gdShotDataLibraryChevron{
+	  display:grid!important;
+	  place-items:center!important;
+	  width:24px!important;
+	  height:24px!important;
+	  border-radius:999px!important;
+	  border:1px solid rgba(255,255,255,.10)!important;
+	  background:rgba(255,255,255,.055)!important;
+	  color:rgba(255,255,255,.72)!important;
+	  font-size:11px!important;
+	  line-height:1!important;
+	  transition:transform .16s ease!important;
+	}
+	.gdShotDataLibraryDropdown.open>.gdShotDataLibraryTabs .gdShotDataLibraryChevron{
+	  transform:rotate(180deg)!important;
+	}
+	.gdShotDataLibraryTab,
+	.gdPracticeLibraryTab,
+	.gdCourseLibraryTab{
+	  appearance:none!important;
+	  width:100%!important;
+	  min-width:0!important;
+	  min-height:30px!important;
+	  border-radius:999px!important;
+	  padding:7px 10px!important;
+	  border:1px solid rgba(55,242,141,.38)!important;
+	  background:linear-gradient(180deg,#37f28d,#20bd69)!important;
+	  color:#06100b!important;
+	  font-size:11px!important;
+	  line-height:1!important;
+	  font-weight:950!important;
+	  text-align:left!important;
+	}
+	.gdShotDataLibraryShell-course .gdShotDataLibraryTab,
+	.gdCourseLibraryTab{
+	  border-color:rgba(98,210,255,.40)!important;
+	  background:linear-gradient(180deg,#62d2ff,#248dc0)!important;
+	  color:#041015!important;
+	}
+	.gdShotDataLibraryDropdown:not(.open)>.gdShotDataLibraryBody{
+	  display:none!important;
+	}
+	.gdShotDataLibraryDropdown>.gdShotDataLibraryTabs>.gdShotDataLibraryTab{
+	  min-height:54px!important;
+	  padding:14px 16px!important;
+	  border-color:rgba(255,255,255,.12)!important;
+	  background:linear-gradient(180deg,rgba(255,255,255,.075),rgba(255,255,255,.032))!important;
+	  color:#f4f7f5!important;
+	  box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 10px 24px rgba(0,0,0,.18)!important;
+	  cursor:pointer!important;
+	}
+	.gdShotDataLibraryDropdown.open>.gdShotDataLibraryTabs>.gdPracticeLibraryTab{
+	  border-color:rgba(55,242,141,.58)!important;
+	  background:linear-gradient(180deg,#37f28d,#20bd69)!important;
+	  color:#06100b!important;
+	}
+	.gdShotDataLibraryDropdown.open>.gdShotDataLibraryTabs>.gdCourseLibraryTab{
+	  border-color:rgba(98,210,255,.50)!important;
+	  background:linear-gradient(180deg,#62d2ff,#248dc0)!important;
+	  color:#041015!important;
+	}
+		.gdShotDataLibraryDropdown.open>.gdShotDataLibraryBody{
+		  max-height:280px!important;
+		  overflow:auto!important;
+	  padding:12px!important;
+	  border-radius:16px!important;
+	  background:rgba(255,255,255,.045)!important;
+		  border:1px solid rgba(255,255,255,.085)!important;
+		  box-shadow:inset 0 1px 0 rgba(255,255,255,.035)!important;
+		}
+		#practiceDataPanel.open .gdPracticeLibraryShell.gdShotDataLibraryDropdown.open>.gdShotDataLibraryBody{
+		  max-height:none!important;
+		  overflow:visible!important;
+		}
+	.gdShotDataLibraryDropdown.open>.gdShotDataLibraryTabs>.gdPracticeLibraryTab .gdShotDataLibraryChevron,
+	.gdShotDataLibraryDropdown.open>.gdShotDataLibraryTabs>.gdCourseLibraryTab .gdShotDataLibraryChevron{
+	  border-color:rgba(0,0,0,.12)!important;
+	  background:rgba(0,0,0,.14)!important;
+	  color:rgba(0,0,0,.72)!important;
+	}
+	.gdShotDataLibraryBubble,
+	.gdPracticeLibraryBubble,
+	.gdCourseLibraryBubble{
+	  display:grid!important;
+	  gap:1px!important;
+	  min-width:88px!important;
+	  padding:5px 8px!important;
+	  border-radius:11px!important;
+	  background:rgba(55,242,141,.09)!important;
+	  border:1px solid rgba(55,242,141,.18)!important;
+	}
+	.gdShotDataLibraryShell-course .gdShotDataLibraryBubble,
+	.gdCourseLibraryBubble{
+	  background:rgba(98,210,255,.09)!important;
+	  border-color:rgba(98,210,255,.20)!important;
+	}
+	.gdShotDataLibraryBubble span,
+	.gdPracticeLibraryBubble span,
+	.gdCourseLibraryBubble span{
+	  color:rgba(255,255,255,.52)!important;
+	  font-size:8px!important;
+	  line-height:1!important;
+	  font-weight:950!important;
+	  text-transform:uppercase!important;
+	  letter-spacing:.06em!important;
+	  text-align:right!important;
+	}
+	.gdShotDataLibraryBubble strong,
+	.gdPracticeLibraryBubble strong,
+	.gdCourseLibraryBubble strong{
+	  color:#37f28d!important;
+	  font-size:13px!important;
+	  line-height:1!important;
+	  font-weight:950!important;
+	  text-align:right!important;
+	  white-space:nowrap!important;
+	}
+	.gdShotDataLibraryShell-course .gdShotDataLibraryBubble strong,
+	.gdCourseLibraryBubble strong{
+	  color:#62d2ff!important;
+	}
+	.gdShotDataLibraryTabs>b,
+	.gdPracticeLibraryTabs>b,
+	.gdCourseLibraryTabs>b{
+	  min-width:34px!important;
+	  border-radius:999px!important;
+	  padding:6px 8px!important;
+	  background:rgba(255,255,255,.055)!important;
+	  border:1px solid rgba(255,255,255,.10)!important;
+	  color:rgba(255,255,255,.78)!important;
+	  font-size:11px!important;
+	  line-height:1!important;
+	  text-align:center!important;
+	}
+	.gdShotDataLibraryBody,
+	.gdPracticeLibraryBody,
+	.gdCourseLibraryBody{
+	  display:grid!important;
+	  gap:8px!important;
+	}
+	.gdCourseLibraryClubTabs{
+	  display:flex!important;
+	  flex-wrap:nowrap!important;
+	  gap:6px!important;
+	  overflow:auto!important;
+	  padding:1px 0 2px!important;
+	  scrollbar-width:thin!important;
+	}
+	.gdCourseLibraryClubTabs.empty{
+	  display:block!important;
+	  color:rgba(255,255,255,.52)!important;
+	  font-size:10px!important;
+	  font-weight:850!important;
+	}
+	.gdCourseLibraryClubTab{
+	  flex:0 0 auto!important;
+	  display:inline-flex!important;
+	  align-items:center!important;
+	  gap:7px!important;
+	  min-height:28px!important;
+	  border-radius:999px!important;
+	  padding:6px 9px!important;
+	  border:1px solid rgba(255,255,255,.10)!important;
+	  background:rgba(255,255,255,.055)!important;
+	  color:rgba(255,255,255,.72)!important;
+	  font-size:10px!important;
+	  line-height:1!important;
+	  font-weight:950!important;
+	}
+	.gdCourseLibraryClubTab.active{
+	  border-color:rgba(98,210,255,.42)!important;
+	  background:linear-gradient(180deg,rgba(98,210,255,.24),rgba(98,210,255,.09))!important;
+	  color:#fff!important;
+	}
+	.gdCourseLibraryClubTab strong{
+	  font-size:10px!important;
+	  color:inherit!important;
+	}
+	#statsPanel.open .gdCourseLibraryRows{
+	  display:grid!important;
+	  gap:8px!important;
+	  align-self:start!important;
+	  max-height:280px!important;
+	  overflow:auto!important;
+	  border-radius:16px!important;
+	  background:rgba(255,255,255,.045)!important;
+	  border:1px solid rgba(255,255,255,.085)!important;
+	  padding:12px!important;
+	}
+	.gdCompareLibraryStats{
+	  display:flex!important;
+	  justify-content:space-between!important;
+	  align-items:center!important;
+	  gap:8px!important;
+	  min-width:0!important;
+	  color:rgba(255,255,255,.58)!important;
+	  font-size:9px!important;
+	  line-height:1.1!important;
+	  font-weight:950!important;
+	}
+	#dataHubPanel.gdCompareExpanded .gdDataCard.widget .gdShotDataLibraryShell{
+	  gap:6px!important;
+	}
+	#dataHubPanel.gdCompareExpanded .gdDataCard.widget .gdShotDataLibraryTabs{
+	  grid-template-columns:minmax(0,1fr) auto!important;
+	  padding:5px!important;
+	}
+	#dataHubPanel.gdCompareExpanded .gdDataCard.widget .gdShotDataLibraryTabs>b{
+	  grid-column:2!important;
+	  grid-row:1!important;
+	}
+	#dataHubPanel.gdCompareExpanded .gdDataCard.widget .gdShotDataLibraryBubble{
+	  grid-column:1/-1!important;
+	  grid-row:2!important;
+	}
+	#dataHubPanel.gdCompareExpanded .gdDataCard.widget .gdShotDataLibraryBubble span,
+	#dataHubPanel.gdCompareExpanded .gdDataCard.widget .gdShotDataLibraryBubble strong{
+	  text-align:left!important;
+	}
+	.gdPracticeEvidenceHead{
+	  display:flex!important;
+	  justify-content:space-between!important;
+	  align-items:flex-start!important;
+	  gap:10px!important;
+	}
+	.gdPracticeEvidenceHead strong{
+	  display:block!important;
+	  color:#fff!important;
+	  font-size:14px!important;
+	  line-height:1.05!important;
+	  font-weight:950!important;
+	}
+	.gdPracticeEvidenceHead span{
+	  display:block!important;
+	  margin-top:3px!important;
+	  color:rgba(255,255,255,.56)!important;
+	  font-size:10px!important;
+	  line-height:1.2!important;
+	  font-weight:820!important;
+	}
+	.gdPracticeEvidenceHead b{
+	  min-width:34px!important;
+	  border-radius:999px!important;
+	  padding:5px 8px!important;
+	  background:rgba(255,255,255,.055)!important;
+	  border:1px solid rgba(255,255,255,.10)!important;
+	  color:rgba(255,255,255,.78)!important;
+	  font-size:11px!important;
+	  line-height:1!important;
+	  text-align:center!important;
+	}
+	.gdPracticeImportJob{
+	  display:grid!important;
+	  gap:10px!important;
+	  margin:0 0 12px!important;
+	  padding:12px!important;
+	  border:1px solid rgba(255,255,255,.10)!important;
+	  border-radius:8px!important;
+	  background:rgba(9,14,12,.82)!important;
+	  color:#fff!important;
+	}
+	.gdPracticeImportJob.active{border-color:rgba(55,242,141,.28)!important;box-shadow:inset 0 0 0 1px rgba(55,242,141,.08)!important}
+	.gdPracticeImportJob.failed{border-color:rgba(255,132,92,.38)!important;background:rgba(24,10,8,.86)!important}
+	.gdPracticeImportJob.done{border-color:rgba(215,176,107,.28)!important}
+	.gdPracticeImportJobMain{display:grid!important;gap:4px!important;min-width:0!important}
+	.gdPracticeImportJobMain strong{font-size:13px!important;font-weight:950!important;line-height:1.2!important}
+	.gdPracticeImportJobMain span{font-size:12px!important;line-height:1.35!important;color:rgba(255,255,255,.78)!important}
+	.gdPracticeImportJobMain small{font-size:10px!important;line-height:1.3!important;color:rgba(255,255,255,.55)!important}
+	.gdPracticeImportJobActions{display:flex!important;flex-wrap:wrap!important;gap:8px!important}
+	.gdPracticeImportJobActions button{
+	  border:1px solid rgba(255,255,255,.14)!important;
+	  border-radius:8px!important;
+	  background:rgba(255,255,255,.08)!important;
+	  color:#fff!important;
+	  padding:7px 10px!important;
+	  font-size:11px!important;
+	  font-weight:900!important;
+	}
+	.gdPracticeImportJobDiagnostic{font-size:11px!important;color:rgba(255,255,255,.68)!important}
+	.gdPracticeImportJobDiagnostic pre{max-height:120px!important;overflow:auto!important;white-space:pre-wrap!important;margin:8px 0 0!important;padding:8px!important;border-radius:6px!important;background:rgba(0,0,0,.28)!important}
+		.gdPracticeEvidenceTabs{
+	  display:flex!important;
+	  gap:6px!important;
+	  overflow:auto!important;
+	  padding-bottom:1px!important;
+	}
+	.gdPracticeEvidenceTab{
+	  appearance:none!important;
+	  flex:0 0 auto!important;
+	  display:flex!important;
+	  align-items:center!important;
+	  gap:7px!important;
+	  min-height:30px!important;
+	  border-radius:999px!important;
+	  padding:6px 9px!important;
+	  border:1px solid rgba(255,255,255,.10)!important;
+	  background:rgba(255,255,255,.045)!important;
+	  color:rgba(255,255,255,.68)!important;
+	  cursor:pointer!important;
+	}
+	.gdPracticeEvidenceTab.active{
+	  color:#06100b!important;
+	  background:linear-gradient(180deg,#37f28d,#20bd69)!important;
+	  border-color:rgba(55,242,141,.58)!important;
+	}
+	.gdPracticeEvidenceTab span,
+	.gdPracticeEvidenceTab strong{
+	  font-size:10px!important;
+	  line-height:1!important;
+	  font-weight:950!important;
+	}
+	.gdPracticePlotMode{
+	  display:grid!important;
+	  grid-template-columns:auto auto minmax(0,1fr)!important;
+	  gap:6px!important;
+	  align-items:center!important;
+	  padding:7px!important;
+	  border-radius:12px!important;
+	  background:rgba(31,211,109,.045)!important;
+	  border:1px solid rgba(31,211,109,.12)!important;
+	}
+	.gdPracticePlotMode button{
+	  border:0!important;
+	  min-height:28px!important;
+	  border-radius:999px!important;
+	  padding:6px 9px!important;
+	  background:rgba(255,255,255,.065)!important;
+	  border:1px solid rgba(255,255,255,.10)!important;
+	  color:rgba(255,255,255,.72)!important;
+	  font-size:10px!important;
+	  line-height:1!important;
+	  font-weight:950!important;
+	}
+	.gdPracticePlotMode button.active,
+	.gdPracticePlotMode button[aria-pressed="true"]{
+	  background:linear-gradient(180deg,#37f28d,#20bd69)!important;
+	  border-color:rgba(55,242,141,.58)!important;
+	  color:#06100b!important;
+	}
+.gdPracticePlotMode span{
+	  min-width:0!important;
+	  color:rgba(255,255,255,.58)!important;
+	  font-size:10px!important;
+	  line-height:1.2!important;
+	  font-weight:850!important;
+	  text-align:right!important;
+	}
+	.gdPracticeProjectionControls{
+	  display:grid!important;
+	  grid-template-columns:1fr!important;
+	  gap:8px!important;
+	  align-items:stretch!important;
+	  padding:0!important;
+	  border-radius:0!important;
+	  background:transparent!important;
+	  border:0!important;
+	  box-shadow:none!important;
+	}
+	.gdPracticeProjector{
+	  display:grid!important;
+	  gap:8px!important;
+	  min-width:0!important;
+	}
+	.gdPracticeProjectorToggle{
+	  appearance:none!important;
+	  display:grid!important;
+	  grid-template-columns:minmax(0,1fr) auto auto!important;
+	  gap:10px!important;
+	  align-items:center!important;
+	  min-height:54px!important;
+	  width:100%!important;
+	  border-radius:999px!important;
+	  padding:14px 16px!important;
+	  border:1px solid rgba(255,255,255,.12)!important;
+	  background:linear-gradient(180deg,rgba(255,255,255,.075),rgba(255,255,255,.032))!important;
+	  color:#f4f7f5!important;
+	  box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 10px 24px rgba(0,0,0,.18)!important;
+	  cursor:pointer!important;
+	}
+	.gdPracticeProjectorToggle span{
+	  min-width:0!important;
+	  font-size:13px!important;
+	  line-height:1!important;
+	  font-weight:950!important;
+	  text-align:left!important;
+	}
+	.gdPracticeProjectorToggle small{
+	  color:rgba(255,255,255,.60)!important;
+	  font-size:10px!important;
+	  line-height:1!important;
+	  font-weight:900!important;
+	  white-space:nowrap!important;
+	}
+	.gdPracticeProjectorToggle i{
+	  display:grid!important;
+	  place-items:center!important;
+	  width:24px!important;
+	  height:24px!important;
+	  border-radius:999px!important;
+	  border:1px solid rgba(255,255,255,.10)!important;
+	  background:rgba(255,255,255,.055)!important;
+	  color:rgba(255,255,255,.72)!important;
+	  font-size:11px!important;
+	  line-height:1!important;
+	  font-style:normal!important;
+	  transition:transform .16s ease!important;
+	}
+	.gdPracticeProjector.open .gdPracticeProjectorToggle,
+	.gdPracticeProjector.active .gdPracticeProjectorToggle{
+	  border-color:rgba(55,242,141,.58)!important;
+	  background:linear-gradient(180deg,#37f28d,#20bd69)!important;
+	  color:#06100b!important;
+	}
+	.gdPracticeProjector.open .gdPracticeProjectorToggle small,
+	.gdPracticeProjector.active .gdPracticeProjectorToggle small{
+	  color:rgba(0,0,0,.62)!important;
+	}
+	.gdPracticeProjector.open .gdPracticeProjectorToggle i,
+	.gdPracticeProjector.active .gdPracticeProjectorToggle i{
+	  border-color:rgba(0,0,0,.12)!important;
+	  background:rgba(0,0,0,.14)!important;
+	  color:rgba(0,0,0,.72)!important;
+	}
+	.gdPracticeProjector.open .gdPracticeProjectorToggle i{
+	  transform:rotate(180deg)!important;
+	}
+	.gdPracticeProjectorMenu{
+	  display:none!important;
+	  grid-template-columns:minmax(0,1fr) minmax(0,1fr) 32px!important;
+	  gap:7px!important;
+	  align-items:center!important;
+	  padding:10px!important;
+	  border-radius:16px!important;
+	  background:rgba(255,255,255,.045)!important;
+	  border:1px solid rgba(255,255,255,.085)!important;
+	  box-shadow:inset 0 1px 0 rgba(255,255,255,.035)!important;
+	}
+	.gdPracticeProjector.open .gdPracticeProjectorMenu{
+	  display:grid!important;
+	}
+	.gdPracticeProjectionHead{
+	  display:flex!important;
+	  align-items:center!important;
+	  justify-content:space-between!important;
+	  gap:10px!important;
+	  min-width:0!important;
+	}
+	.gdPracticeProjectionHead strong{
+	  min-width:0!important;
+	  color:rgba(255,255,255,.88)!important;
+	  font-size:12px!important;
+	  line-height:1!important;
+	  font-weight:950!important;
+	  text-transform:uppercase!important;
+	  letter-spacing:.08em!important;
+	}
+	.gdPracticeProjectionActions{
+	  display:grid!important;
+	  grid-template-columns:minmax(0,1fr) minmax(0,1fr) 32px!important;
+	  gap:7px!important;
+	  align-items:center!important;
+	}
+	.gdPracticeProjectionControls button{
+	  border:0!important;
+	  min-height:32px!important;
+	  border-radius:999px!important;
+	  padding:7px 10px!important;
+	  background:rgba(255,255,255,.065)!important;
+	  border:1px solid rgba(255,255,255,.10)!important;
+	  color:rgba(255,255,255,.72)!important;
+	  font-size:10px!important;
+	  line-height:1!important;
+	  font-weight:950!important;
+	}
+	.gdPracticeProjectionControls button.active,
+	.gdPracticeProjectionControls button[aria-pressed="true"]{
+	  background:linear-gradient(180deg,#37f28d,#20bd69)!important;
+	  border-color:rgba(55,242,141,.58)!important;
+	  color:#06100b!important;
+	}
+	.gdPracticeProjectionControls .gdPracticeBagToggle{
+	  width:32px!important;
+	  min-width:32px!important;
+	  height:32px!important;
+	  min-height:32px!important;
+	  padding:0!important;
+	  display:grid!important;
+	  place-items:center!important;
+	}
+	.gdPracticeProjectionControls .gdPracticeBagToggle img{
+	  width:18px!important;
+	  height:18px!important;
+	  object-fit:contain!important;
+	  filter:drop-shadow(0 1px 1px rgba(0,0,0,.45))!important;
+	}
+	.gdPracticeProjectorMenu .gdPracticeProjectionStatus{
+	  grid-column:1/-1!important;
+	  text-align:left!important;
+	}
+	.gdPracticeProjectionStatus{
+	  min-width:0!important;
+	  color:rgba(255,255,255,.58)!important;
+	  font-size:10px!important;
+	  line-height:1.2!important;
+	  font-weight:850!important;
+	  text-align:right!important;
+	  white-space:nowrap!important;
+	}
+		.gdPracticeProjectionControls.waiting .gdPracticeProjectionStatus{
+		  color:rgba(255,210,135,.78)!important;
+		}
+		.gdPracticeAutoFlow{
+		  display:grid!important;
+		  grid-template-columns:auto minmax(0,1fr) auto!important;
+		  gap:9px!important;
+		  align-items:center!important;
+		  padding:10px!important;
+		  border-radius:16px!important;
+		  background:linear-gradient(180deg,rgba(255,255,255,.065),rgba(255,255,255,.032))!important;
+		  border:1px solid rgba(255,255,255,.09)!important;
+		  box-shadow:inset 0 1px 0 rgba(255,255,255,.04)!important;
+		}
+		.gdPracticeAutoFlow.ready{
+		  border-color:rgba(55,242,141,.28)!important;
+		  background:linear-gradient(180deg,rgba(31,211,109,.13),rgba(255,255,255,.035))!important;
+		}
+		.gdPracticeAutoFlow.waiting{
+		  grid-template-columns:minmax(0,1fr) auto!important;
+		}
+		.gdPracticeAutoBubblePreview{
+		  width:78px!important;
+		  height:44px!important;
+		  border-radius:12px!important;
+		  overflow:hidden!important;
+		  background:rgba(0,0,0,.20)!important;
+		  border:1px solid rgba(255,255,255,.08)!important;
+		}
+		.gdPracticeAutoBubblePreview svg{
+		  width:100%!important;
+		  height:100%!important;
+		  display:block!important;
+		}
+		.gdPracticeAutoCopy{
+		  min-width:0!important;
+		  display:grid!important;
+		  gap:3px!important;
+		}
+		.gdPracticeAutoCopy span{
+		  color:rgba(255,255,255,.60)!important;
+		  font-size:10px!important;
+		  line-height:1!important;
+		  font-weight:950!important;
+		  text-transform:uppercase!important;
+		  letter-spacing:0!important;
+		}
+		.gdPracticeAutoCopy strong{
+		  min-width:0!important;
+		  color:#fff!important;
+		  font-size:13px!important;
+		  line-height:1.15!important;
+		  font-weight:950!important;
+		  overflow:hidden!important;
+		  text-overflow:ellipsis!important;
+		  white-space:nowrap!important;
+		}
+		.gdPracticeAutoAdopt{
+		  white-space:nowrap!important;
+		  border:0!important;
+		  min-height:32px!important;
+		  border-radius:999px!important;
+		  padding:7px 10px!important;
+		  background:linear-gradient(180deg,#37f28d,#20bd69)!important;
+		  border:1px solid rgba(55,242,141,.58)!important;
+		  color:#06100b!important;
+		  font-size:10px!important;
+		  line-height:1!important;
+		  font-weight:950!important;
+		}
+		.gdPracticeAutoAdopt:disabled{
+		  color:rgba(255,255,255,.52)!important;
+		  background:rgba(255,255,255,.065)!important;
+		  border-color:rgba(255,255,255,.10)!important;
+		}
+		@media(max-width:520px){
+		  .gdPracticeAutoFlow,
+		  .gdPracticeAutoFlow.waiting{
+		    grid-template-columns:1fr!important;
+		  }
+		  .gdPracticeAutoBubblePreview{
+		    width:100%!important;
+		    height:54px!important;
+		  }
+		  .gdPracticeAutoCopy strong{
+		    white-space:normal!important;
+		  }
+		  .gdPracticeAutoAdopt{
+		    width:100%!important;
+		  }
+		}
+		.gdPracticeBagWidget{
+	  grid-column:1/-1!important;
+	  display:grid!important;
+	  gap:8px!important;
+	  padding:8px!important;
+	  border-radius:12px!important;
+	  background:rgba(0,0,0,.22)!important;
+	  border:1px solid rgba(255,255,255,.09)!important;
+	  box-shadow:inset 0 1px 0 rgba(255,255,255,.05)!important;
+	}
+	.gdPracticeBagWidget.dirty{
+	  border-color:rgba(215,176,107,.32)!important;
+	  background:rgba(215,176,107,.075)!important;
+	}
+	.gdPracticeBagWidget.confirm{
+	  border-color:rgba(55,242,141,.28)!important;
+	}
+	.gdPracticeBagWidgetHead{
+	  display:flex!important;
+	  align-items:center!important;
+	  justify-content:space-between!important;
+	  gap:8px!important;
+	}
+	.gdPracticeBagWidgetTitle{
+	  min-width:0!important;
+	  display:grid!important;
+	  gap:2px!important;
+	}
+	.gdPracticeBagWidgetTitle strong{
+	  color:#fff!important;
+	  font-size:12px!important;
+	  line-height:1!important;
+	  font-weight:950!important;
+	}
+	.gdPracticeBagWidgetTitle span{
+	  color:rgba(255,255,255,.52)!important;
+	  font-size:10px!important;
+	  line-height:1.15!important;
+	  font-weight:850!important;
+	}
+	.gdPracticeBagScaleButton{
+	  white-space:nowrap!important;
+	}
+	.gdPracticeBagRows{
+	  display:grid!important;
+	  grid-template-columns:repeat(2,minmax(0,1fr))!important;
+	  gap:6px!important;
+	  max-height:210px!important;
+	  overflow:auto!important;
+	  padding-right:2px!important;
+	}
+	.gdPracticeBagRow{
+	  display:grid!important;
+	  grid-template-columns:42px minmax(0,1fr) 18px!important;
+	  gap:5px!important;
+	  align-items:center!important;
+	  min-width:0!important;
+	  padding:5px!important;
+	  border-radius:10px!important;
+	  background:rgba(255,255,255,.045)!important;
+	  border:1px solid rgba(255,255,255,.075)!important;
+	}
+	.gdPracticeBagRow.active{
+	  border-color:rgba(215,176,107,.42)!important;
+	  background:rgba(215,176,107,.12)!important;
+	}
+	.gdPracticeBagRow button{
+	  min-height:28px!important;
+	  height:28px!important;
+	  width:100%!important;
+	  padding:0 5px!important;
+	  border-radius:9px!important;
+	  font-size:10px!important;
+	}
+	.gdPracticeBagRow input{
+	  box-sizing:border-box!important;
+	  width:100%!important;
+	  min-width:0!important;
+	  height:28px!important;
+	  border-radius:9px!important;
+	  border:1px solid rgba(255,255,255,.11)!important;
+	  background:rgba(0,0,0,.25)!important;
+	  color:#fff!important;
+	  padding:0 7px!important;
+	  font-size:12px!important;
+	  font-weight:950!important;
+	  text-align:right!important;
+	}
+	.gdPracticeBagRow span{
+	  color:rgba(255,255,255,.48)!important;
+	  font-size:9px!important;
+	  font-weight:950!important;
+	  text-align:left!important;
+	}
+	.gdPracticeBagWidgetActions{
+	  display:flex!important;
+	  justify-content:flex-end!important;
+	  gap:6px!important;
+	  flex-wrap:wrap!important;
+	}
+	.gdPracticeBagWidgetActions button:disabled{
+	  opacity:.42!important;
+	  cursor:not-allowed!important;
+	}
+	.gdPracticeBagDiffList{
+	  display:grid!important;
+	  gap:5px!important;
+	  max-height:190px!important;
+	  overflow:auto!important;
+	}
+	.gdPracticeBagDiff{
+	  display:grid!important;
+	  grid-template-columns:68px minmax(0,1fr) auto!important;
+	  gap:7px!important;
+	  align-items:center!important;
+	  padding:7px 8px!important;
+	  border-radius:10px!important;
+	  background:rgba(255,255,255,.045)!important;
+	  border:1px solid rgba(255,255,255,.075)!important;
+	}
+	.gdPracticeBagDiff span{
+	  color:rgba(255,255,255,.52)!important;
+	  font-size:9px!important;
+	  font-weight:950!important;
+	  text-transform:uppercase!important;
+	  letter-spacing:.08em!important;
+	  text-align:left!important;
+	}
+	.gdPracticeBagDiff strong{
+	  min-width:0!important;
+	  color:#fff!important;
+	  font-size:12px!important;
+	  font-weight:950!important;
+	  overflow:hidden!important;
+	  text-overflow:ellipsis!important;
+	  white-space:nowrap!important;
+	}
+	.gdPracticeBagDiff small{
+	  color:rgba(215,176,107,.92)!important;
+	  font-size:10px!important;
+	  font-weight:950!important;
+	  text-align:right!important;
+	  white-space:nowrap!important;
+	}
+	.gdPracticeBagEmpty{
+	  padding:10px!important;
+	  color:rgba(255,255,255,.55)!important;
+	  font-size:11px!important;
+	  font-weight:850!important;
+	  text-align:center!important;
+	}
+	.gdPracticeEvidenceTools{
+	  display:flex!important;
+	  align-items:center!important;
+	  gap:7px!important;
+	  flex-wrap:wrap!important;
+	  padding:7px!important;
+	  border-radius:12px!important;
+	  background:rgba(255,255,255,.035)!important;
+	  border:1px solid rgba(255,255,255,.075)!important;
+	}
+	.gdPracticeEvidenceTools label{
+	  display:flex!important;
+	  align-items:center!important;
+	  gap:6px!important;
+	  color:rgba(255,255,255,.72)!important;
+	  font-size:10px!important;
+	  line-height:1!important;
+	  font-weight:900!important;
+	}
+	.gdPracticeEvidenceTools button{
+	  border:0!important;
+	  border-radius:999px!important;
+	  padding:6px 9px!important;
+	  background:rgba(255,255,255,.075)!important;
+	  border:1px solid rgba(255,255,255,.10)!important;
+	  color:#fff!important;
+	  font-size:10px!important;
+	  line-height:1!important;
+	  font-weight:950!important;
+	}
+	.gdPracticeEvidenceTools button.danger{
+	  background:rgba(255,107,122,.14)!important;
+	  border-color:rgba(255,107,122,.25)!important;
+	  color:#ffb5bd!important;
+	}
+		.gdPracticeEvidenceTools button:disabled{
+		  opacity:.42!important;
+		  cursor:not-allowed!important;
+		}
+		.gdPracticeShotLibrary{
+		  display:grid!important;
+		  gap:8px!important;
+		  min-width:0!important;
+		}
+		.gdPracticeShotClub{
+		  display:grid!important;
+		  overflow:hidden!important;
+		  border-radius:12px!important;
+		  background:rgba(0,0,0,.14)!important;
+		  border:1px solid rgba(255,255,255,.075)!important;
+		}
+		.gdPracticeShotClubHead{
+		  appearance:none!important;
+		  border:0!important;
+		  width:100%!important;
+		  display:grid!important;
+		  grid-template-columns:minmax(0,1fr) auto 20px!important;
+		  gap:6px!important;
+		  align-items:center!important;
+		  padding:6px 8px!important;
+		  background:rgba(255,255,255,.025)!important;
+		  color:#fff!important;
+		  text-align:left!important;
+		  cursor:pointer!important;
+		}
+		.gdPracticeShotClub.open .gdPracticeShotClubHead{
+		  background:rgba(255,255,255,.045)!important;
+		}
+		.gdPracticeShotClubHead span{
+		  display:block!important;
+		  color:#fff!important;
+		  font-size:13px!important;
+		  font-weight:950!important;
+		  text-transform:uppercase!important;
+		  letter-spacing:.06em!important;
+		}
+		.gdPracticeShotClubHead strong{
+		  display:block!important;
+		  margin-top:2px!important;
+		  min-width:0!important;
+		  color:#fff!important;
+		  font-size:12px!important;
+		  line-height:1.12!important;
+		  font-weight:950!important;
+		  overflow:hidden!important;
+		  text-overflow:ellipsis!important;
+		  white-space:nowrap!important;
+		}
+		.gdPracticeShotClubHead small{
+		  color:rgba(255,255,255,.58)!important;
+		  font-size:10px!important;
+		  line-height:1.2!important;
+		  font-weight:850!important;
+		  text-align:right!important;
+		  white-space:nowrap!important;
+		}
+		.gdPracticeShotClubBody{
+		  display:none!important;
+		  gap:5px!important;
+		  padding:5px!important;
+		}
+		.gdPracticeShotClub.open .gdPracticeShotClubBody{
+		  display:grid!important;
+		}
+		.gdPracticeUploadRow{
+		  display:block!important;
+		  min-width:0!important;
+		  border-radius:9px!important;
+		  background:rgba(255,255,255,.035)!important;
+		  border:1px solid rgba(255,255,255,.065)!important;
+		  padding:0!important;
+		  overflow:hidden!important;
+		}
+		.gdPracticeUploadRow>summary{
+		  display:grid!important;
+		  grid-template-columns:auto minmax(0,1fr) auto!important;
+		  gap:6px!important;
+		  align-items:center!important;
+		  padding:5px 7px!important;
+		  cursor:pointer!important;
+		  list-style:none!important;
+		}
+		.gdPracticeUploadRow>summary::-webkit-details-marker{display:none!important}
+		.gdPracticeUploadRow[open]>summary{background:rgba(255,255,255,.03)!important}
+		.gdPracticeUploadRaw{
+		  padding:6px 7px!important;
+		  border-top:1px solid rgba(255,255,255,.06)!important;
+		  min-width:0!important;
+		  overflow-x:auto!important;
+		}
+		.gdPracticeUploadMeta{
+		  display:grid!important;
+		  gap:3px!important;
+		  min-width:0!important;
+		}
+		.gdPracticeUploadMeta strong{
+		  color:#fff!important;
+		  font-size:11px!important;
+		  line-height:1.1!important;
+		  font-weight:950!important;
+		  overflow:hidden!important;
+		  text-overflow:ellipsis!important;
+		  white-space:nowrap!important;
+		}
+		.gdPracticeUploadMeta span{
+		  color:rgba(255,255,255,.58)!important;
+		  font-size:10px!important;
+		  line-height:1.2!important;
+		  font-weight:850!important;
+		  overflow:hidden!important;
+		  text-overflow:ellipsis!important;
+		  white-space:nowrap!important;
+		}
+		.gdPracticeUploadRow>b{
+		  color:rgba(215,176,107,.92)!important;
+		  font-size:9px!important;
+		  font-weight:950!important;
+		  white-space:nowrap!important;
+		  text-transform:uppercase!important;
+		}
+		.gdPracticeUploadActions{
+		  display:flex!important;
+		  gap:5px!important;
+		  justify-content:flex-end!important;
+		  flex-wrap:wrap!important;
+		}
+		.gdPracticeUploadActions button,
+		.gdPracticeRawHead button{
+		  border-radius:999px!important;
+		  padding:5px 8px!important;
+		  background:rgba(255,255,255,.075)!important;
+		  border:1px solid rgba(255,255,255,.10)!important;
+		  color:#fff!important;
+		  font-size:9px!important;
+		  line-height:1!important;
+		  font-weight:950!important;
+		  white-space:nowrap!important;
+		}
+		.gdPracticeUploadActions button.danger{
+		  background:rgba(255,107,122,.14)!important;
+		  border-color:rgba(255,107,122,.25)!important;
+		  color:#ffb5bd!important;
+		}
+		/* Tiny red cross for deleting an import — replaces the loud pill. */
+		.gdPracticeUploadActions button.gdPracticeDeleteX{
+		  width:18px!important;
+		  height:18px!important;
+		  padding:0!important;
+		  border-radius:50%!important;
+		  display:inline-flex!important;
+		  align-items:center!important;
+		  justify-content:center!important;
+		  font-size:12px!important;
+		  line-height:1!important;
+		  font-weight:900!important;
+		  background:rgba(255,107,122,.16)!important;
+		  border:1px solid rgba(255,107,122,.32)!important;
+		  color:#ff8a96!important;
+		}
+		.gdPracticeUploadActions button.gdPracticeDeleteX:hover{
+		  background:rgba(255,107,122,.30)!important;
+		  color:#fff!important;
+		}
+		.gdPracticeUploadActions:empty{display:none!important}
+		.gdPracticeRawDisclosure{
+		  grid-column:1/-1!important;
+		  min-width:0!important;
+		}
+		.gdPracticeRawDisclosure>summary{
+		  list-style:none!important;
+		  cursor:pointer!important;
+		  display:inline-flex!important;
+		  align-items:center!important;
+		  min-height:24px!important;
+		  border-radius:999px!important;
+		  padding:5px 8px!important;
+		  background:rgba(255,255,255,.075)!important;
+		  border:1px solid rgba(255,255,255,.10)!important;
+		  color:#fff!important;
+		  font-size:9px!important;
+		  line-height:1!important;
+		  font-weight:950!important;
+		  white-space:nowrap!important;
+		}
+		.gdPracticeRawDisclosure>summary::-webkit-details-marker{display:none!important}
+		.gdPracticeRawDisclosure[open]>summary{
+		  background:rgba(215,176,107,.16)!important;
+		  border-color:rgba(215,176,107,.28)!important;
+		  color:#ffd287!important;
+		  margin-bottom:7px!important;
+		}
+		.gdPracticeRawDrawer{
+		  grid-column:1/-1!important;
+		  display:grid!important;
+		  gap:7px!important;
+		  min-width:0!important;
+		  max-height:285px!important;
+		  border-radius:10px!important;
+		  background:rgba(0,0,0,.20)!important;
+		  border:1px solid rgba(255,255,255,.075)!important;
+		  overflow:hidden!important;
+		}
+		.gdPracticeRawHead{
+		  position:sticky!important;
+		  top:0!important;
+		  z-index:1!important;
+		  display:grid!important;
+		  grid-template-columns:minmax(0,1fr) auto!important;
+		  gap:8px!important;
+		  align-items:center!important;
+		  padding:8px!important;
+		  background:rgba(10,16,13,.96)!important;
+		  border-bottom:1px solid rgba(255,255,255,.07)!important;
+		}
+		.gdPracticeRawHead strong{
+		  display:block!important;
+		  color:#fff!important;
+		  font-size:12px!important;
+		  line-height:1!important;
+		  font-weight:950!important;
+		}
+		.gdPracticeRawHead span,
+		.gdPracticeRawMeta span{
+		  display:block!important;
+		  min-width:0!important;
+		  color:rgba(255,255,255,.58)!important;
+		  font-size:10px!important;
+		  line-height:1.2!important;
+		  font-weight:850!important;
+		  overflow:hidden!important;
+		  text-overflow:ellipsis!important;
+		  white-space:nowrap!important;
+		}
+		.gdPracticeRawMeta{
+		  display:flex!important;
+		  gap:8px!important;
+		  flex-wrap:wrap!important;
+		  padding:0 8px!important;
+		}
+		.gdPracticeRawMeta b{
+		  color:rgba(255,255,255,.82)!important;
+		  font-weight:950!important;
+		}
+		.gdPracticeRawScroll{
+		  min-height:0!important;
+		  max-height:210px!important;
+		  overflow:auto!important;
+		  padding:0 8px 8px!important;
+		}
+		.gdPracticeRawShotTable{
+		  min-width:520px!important;
+		  display:grid!important;
+		  gap:0!important;
+		}
+		.gdPracticeRawShotHead,
+		.gdPracticeRawShotRow{
+		  display:grid!important;
+		  /* column layout comes from the inline style (dynamic metric columns) */
+		  gap:6px!important;
+		  align-items:center!important;
+		}
+		.gdPracticeRawShotHead{
+		  position:sticky!important;
+		  top:0!important;
+		  z-index:1!important;
+		  padding:4px 0!important;
+		  background:rgba(10,16,13,.98)!important;
+		  color:rgba(255,255,255,.42)!important;
+		  font-size:8px!important;
+		  font-weight:950!important;
+		  text-transform:uppercase!important;
+		}
+		.gdPracticeRawShotRow{
+		  min-height:25px!important;
+		  border-top:1px solid rgba(255,255,255,.05)!important;
+		  color:rgba(255,255,255,.72)!important;
+		  font-size:10px!important;
+		  font-weight:850!important;
+		}
+		.gdPracticeRawShotRow span,
+		.gdPracticeRawShotRow strong{
+		  min-width:0!important;
+		  overflow:hidden!important;
+		  text-overflow:ellipsis!important;
+		  white-space:nowrap!important;
+		}
+		.gdPracticeRawShotRow strong{
+		  color:#fff!important;
+		  font-weight:950!important;
+		}
+		.gdPracticeImportCard summary{
+		  grid-template-columns:auto minmax(0,1fr) auto auto!important;
+		  align-items:center!important;
+		}
+		.gdPracticeImportCard summary>span{
+		  display:grid!important;
+		  gap:2px!important;
+		  min-width:0!important;
+		}
+		.gdPracticeImportCard summary>span small{
+		  display:block!important;
+		  color:rgba(255,255,255,.48)!important;
+		  font-size:9px!important;
+		  font-weight:850!important;
+		  overflow:hidden!important;
+		  text-overflow:ellipsis!important;
+		  white-space:nowrap!important;
+		}
+		.gdPracticeImportDelete{
+		  border-radius:999px!important;
+		  padding:5px 8px!important;
+		  background:rgba(255,107,122,.14)!important;
+		  border:1px solid rgba(255,107,122,.25)!important;
+		  color:#ffb5bd!important;
+		  font-size:9px!important;
+		  font-weight:950!important;
+		}
+		.gdPracticeImportCard .gdPracticeEvidenceUploadSelect{
+		  margin:0!important;
+		}
+		.gdPracticeEvidenceClub{
+		  display:grid!important;
+	  gap:0!important;
+	  border-radius:13px!important;
+	  background:rgba(0,0,0,.16)!important;
+	  border:1px solid rgba(255,255,255,.075)!important;
+	  padding:0!important;
+	  overflow:hidden!important;
+	}
+	.gdPracticeEvidenceClubHead{
+	  appearance:none!important;
+	  border:0!important;
+	  background:transparent!important;
+	  width:100%!important;
+	  display:grid!important;
+	  grid-template-columns:1fr auto 22px!important;
+	  gap:8px!important;
+	  align-items:start!important;
+	  text-align:left!important;
+	  padding:9px 8px!important;
+	  cursor:pointer!important;
+	}
+	.gdPracticeEvidenceClubHead.static{
+	  cursor:default!important;
+	  pointer-events:none!important;
+	}
+	.gdPracticeEvidenceClubHead span{
+	  display:block!important;
+	  color:rgba(255,255,255,.62)!important;
+	  font-size:10px!important;
+	  font-weight:950!important;
+	  text-transform:uppercase!important;
+	  letter-spacing:.08em!important;
+	}
+	.gdPracticeEvidenceClubHead strong{
+	  display:block!important;
+	  margin-top:2px!important;
+	  color:#fff!important;
+	  font-size:13px!important;
+	  font-weight:950!important;
+	}
+	.gdPracticeEvidenceClubHead small{
+	  color:rgba(255,255,255,.58)!important;
+	  font-size:10px!important;
+	  line-height:1.2!important;
+	  font-weight:850!important;
+	  text-align:right!important;
+	  text-transform:capitalize!important;
+	}
+	.gdPracticeEvidenceChevron{
+	  display:grid!important;
+	  place-items:center!important;
+	  width:22px!important;
+	  height:22px!important;
+	  border-radius:999px!important;
+	  background:rgba(255,255,255,.055)!important;
+	  border:1px solid rgba(255,255,255,.09)!important;
+	  color:rgba(255,255,255,.72)!important;
+	  font-size:13px!important;
+	  line-height:1!important;
+	  font-style:normal!important;
+	  font-weight:950!important;
+	}
+	.gdPracticeEvidenceClubBody{
+	  display:none!important;
+	  gap:6px!important;
+	  padding:0 8px 8px!important;
+	}
+	.gdPracticeEvidenceClub.open .gdPracticeEvidenceClubBody{
+	  display:grid!important;
+	}
+	.gdPracticeEvidenceUpload{
+	  display:block!important;
+	  border-radius:10px!important;
+	  border:1px solid rgba(255,255,255,.07)!important;
+	  background:rgba(255,255,255,.025)!important;
+	  overflow:hidden!important;
+	}
+	.gdPracticeEvidenceUpload summary{
+	  display:grid!important;
+	  grid-template-columns:22px minmax(0,1fr) auto!important;
+	  gap:8px!important;
+	  align-items:center!important;
+	  min-height:30px!important;
+	  padding:7px 8px!important;
+	  cursor:pointer!important;
+	  list-style:none!important;
+	}
+	.gdPracticeEvidenceUpload summary::-webkit-details-marker{display:none!important}
+	.gdPracticeEvidenceUpload summary span{
+	  min-width:0!important;
+	  overflow:hidden!important;
+	  text-overflow:ellipsis!important;
+	  white-space:nowrap!important;
+	  color:rgba(255,255,255,.62)!important;
+	  font-size:10px!important;
+	  line-height:1.15!important;
+	  font-weight:850!important;
+	}
+	.gdPracticeEvidenceUpload summary strong{
+	  color:#fff!important;
+	  font-size:11px!important;
+	  line-height:1!important;
+	  font-weight:950!important;
+	}
+	.gdPracticeEvidenceUploadSelect,
+	.gdPracticeEvidenceShotSelect{
+	  display:grid!important;
+	  place-items:center!important;
+	  width:20px!important;
+	  height:20px!important;
+	  margin:0!important;
+	}
+	.gdPracticeEvidenceUploadSelect input,
+	.gdPracticeEvidenceShotSelect input,
+	.gdPracticeEvidenceTools input{
+	  accent-color:#37f28d!important;
+	}
+	.gdPracticeEvidenceUploadSelect span,
+	.gdPracticeEvidenceShotSelect span{
+	  display:none!important;
+	}
+		.gdPracticeEvidenceShots{
+		  display:grid!important;
+		  gap:4px!important;
+		  padding:0 6px 7px!important;
+		  overflow-x:auto!important;
+		}
+		.gdPracticeEvidenceTable{
+		  min-width:520px!important;
+		}
+		.gdPracticeEvidenceTableHead{
+		  display:grid!important;
+		  grid-template-columns:22px 34px 54px 58px 64px minmax(88px,1fr)!important;
+		  gap:6px!important;
+		  align-items:center!important;
+		  padding:0 6px 2px!important;
+		  color:rgba(255,255,255,.40)!important;
+		  font-size:8px!important;
+		  line-height:1!important;
+		  font-weight:950!important;
+		  text-transform:uppercase!important;
+		  letter-spacing:0!important;
+		}
+		.gdPracticeEvidenceShot{
+		  display:grid!important;
+		  grid-template-columns:22px 34px 54px 58px 64px minmax(88px,1fr)!important;
+		  gap:6px!important;
+		  align-items:center!important;
+		  min-height:22px!important;
+		  border-radius:9px!important;
+		  background:rgba(255,255,255,.035)!important;
+		  padding:5px 6px!important;
+		}
+		.gdPracticeEvidenceIndex{
+		  color:rgba(255,255,255,.50)!important;
+		  font-size:9px!important;
+		  font-weight:950!important;
+		  text-align:left!important;
+		}
+		.gdPracticeEvidenceShot span,
+		.gdPracticeEvidenceShot em{
+		  color:rgba(255,255,255,.54)!important;
+		  font-size:9px!important;
+		  line-height:1.1!important;
+		  font-weight:800!important;
+		  font-style:normal!important;
+		  overflow:hidden!important;
+		  text-overflow:ellipsis!important;
+		  white-space:nowrap!important;
+		}
+		.gdPracticeEvidenceShot strong{
+		  color:#fff!important;
+		  font-size:11px!important;
+		  line-height:1!important;
+	  font-weight:950!important;
+	  text-align:right!important;
+	}
+	.gdPracticeEvidenceShot.counted{background:rgba(255,255,255,.035)!important}
+	.gdPracticeEvidenceShot.counted em{color:rgba(255,255,255,.58)!important}
+	.gdPracticeEvidenceDot{
+	  display:inline-block!important;
+	  width:6px!important;
+	  height:6px!important;
+	  margin:0 5px 1px 0!important;
+	  border-radius:999px!important;
+	  background:rgba(255,255,255,.26)!important;
+	  vertical-align:middle!important;
+	}
+	.gdPracticeEvidenceDot.focus{background:#d7b06b!important}
+	.gdPracticeEvidenceDot.muted{background:rgba(143,154,150,.72)!important}
+	.gdPracticeEvidenceDot.stored{background:rgba(55,242,141,.76)!important}
+	.gdPracticeEvidenceShot.filtered,
+	.gdPracticeEvidenceShot.excluded{opacity:.66!important}
+.gdPracticeAdminExpander,
+.gdCourseAdminExpander{
+  margin-top:0!important;
+  width:100%!important;
+  max-width:100%!important;
+  min-height:34px!important;
+  border-radius:14px!important;
+  background:rgba(255,255,255,.055)!important;
+  border:1px solid rgba(255,255,255,.10)!important;
+  color:rgba(255,255,255,.72)!important;
+  font-size:12px!important;
+  font-weight:950!important;
+}
+#practiceDataPanel:not(.gdPracticeAdminExpanded) .gdPracticeLiveDebugPanel,
+#practiceDataPanel:not(.gdPracticeAdminExpanded) .gdPracticePhotoDebugPanel,
+#practiceDataPanel:not(.gdPracticeAdminExpanded) .gdPracticePhotoQaPanel,
+#practiceDataPanel:not(.gdPracticeAdminExpanded) #gdPracticeLoadExtracted7iBtn,
+#practiceDataPanel:not(.gdPracticeAdminExpanded) .gdPracticeSandboxControls{
+  display:none!important;
+  visibility:hidden!important;
+  pointer-events:none!important;
+}
+.gdPracticeAdminExpander.active,
+.gdCourseAdminExpander.active{
+  color:#fff!important;
+  background:linear-gradient(180deg,rgba(31,211,109,.20),rgba(31,211,109,.08))!important;
+  border-color:rgba(31,211,109,.34)!important;
+}
+#gdPracticeTolerancePanel[hidden]{display:none!important}
+#gdPracticeTolerancePanel{
+  margin-top:0!important;
+  width:100%!important;
+  box-sizing:border-box!important;
+  padding:8px!important;
+  border-radius:14px!important;
+  overflow:hidden!important;
+}
+#gdPracticeTolerancePanel .gdPracticeToleranceHead{
+  display:flex!important;
+  justify-content:space-between!important;
+  align-items:center!important;
+  gap:8px!important;
+  margin:0 0 6px!important;
+}
+#gdPracticeTolerancePanel .gdPracticeToleranceHead strong{
+  color:#fff!important;
+  font-size:14px!important;
+  line-height:1!important;
+  font-weight:950!important;
+}
+#gdPracticeTolerancePanel .gdPracticeToleranceHead span{display:none!important}
+#gdPracticeTolerancePanel .gdPracticeToleranceBadge{
+  padding:4px 7px!important;
+  border-radius:999px!important;
+  font-size:9px!important;
+  line-height:1!important;
+  font-weight:950!important;
+}
+#gdPracticeTolerancePanel .gdPracticeToleranceGrid{
+  display:grid!important;
+  grid-template-columns:1fr!important;
+  gap:5px!important;
+}
+#gdPracticeTolerancePanel .gdPracticeTolerance{
+  display:grid!important;
+  grid-template-columns:minmax(0,1fr) 42px!important;
+  align-items:center!important;
+  gap:6px!important;
+  min-height:24px!important;
+}
+#gdPracticeTolerancePanel .gdPracticeTolerance label{
+  grid-column:1/-1!important;
+  color:rgba(255,255,255,.70)!important;
+  font-size:10px!important;
+  line-height:1.05!important;
+  font-weight:900!important;
+  padding:0!important;
+  border-radius:0!important;
+}
+#gdPracticeTolerancePanel .gdPracticeTolerance label small{
+  display:block!important;
+  margin-top:2px!important;
+  color:rgba(255,255,255,.42)!important;
+  font-size:8.8px!important;
+  line-height:1.15!important;
+  font-weight:800!important;
+}
+#gdPracticeTolerancePanel .gdPracticeTolerance input[type="range"]{
+  grid-column:1!important;
+  width:100%!important;
+  min-width:0!important;
+  margin:0!important;
+  accent-color:#d7b06b!important;
+}
+#gdPracticeTolerancePanel .gdPracticeTolerance output{
+  color:#fff!important;
+  font-size:10px!important;
+  line-height:1!important;
+  font-weight:950!important;
+  text-align:right!important;
+  white-space:nowrap!important;
+}
+#statsPanel:not(.gdCourseAdminTab) .gdShotDataAdminPanel{display:none!important}
+#statsPanel.gdCourseAdminTab .gdShotDataAdminPanel{display:block!important;grid-column:2!important}
+#statsPanel.open .gdCourseDataLanding{
+  order:1!important;
+  padding:0!important;
+  border:0!important;
+  border-radius:0!important;
+  background:transparent!important;
+  box-shadow:none!important;
+}
+#statsPanel.open .gdCourseAdminExpander{order:2!important}
+#statsPanel.open .gdShotDataAdminPanel{order:3!important}
+#statsPanel.open .gdStatsControl{order:4!important;margin:0!important}
+#statsPanel.open .gdShotDataAdminPanel{
+  padding:8px!important;
+  border-radius:14px!important;
+  max-height:230px!important;
+  overflow:auto!important;
+}
+#statsPanel.open .gdShotAdminHead{align-items:center!important;margin-bottom:6px!important}
+#statsPanel.open .gdShotAdminHead strong{font-size:14px!important}
+#statsPanel.open .gdShotAdminHead span{display:none!important}
+#statsPanel.open .gdShotAdminBadge{padding:4px 7px!important;font-size:9px!important}
+#statsPanel.open .gdShotAdminList{gap:5px!important}
+#statsPanel.open .gdShotAdminRow{border-radius:11px!important;padding:7px!important;gap:6px!important}
+#statsPanel.open .gdShotAdminRow strong{font-size:12px!important}
+#statsPanel.open .gdShotAdminRow span{font-size:9px!important;line-height:1.15!important}
+#statsPanel.open .gdShotAdminRow button{padding:6px 8px!important;font-size:10px!important}
+#statsPanel.open .gdShotAdminEmpty{padding:9px!important;font-size:10px!important;border-radius:11px!important}
+.gdStatsFilters label,
+.gdPracticeTolerancePanel label{
+  border-radius:12px!important;
+}
+			#practiceDataPanel.open .gdPracticeVisualStack{order:1}
+		#practiceDataPanel.open .gdPracticeProjectionControls{order:2}
+		.gdPracticeResult[hidden],#gdPracticeDataResult[hidden]{display:none!important}
+		#practiceDataPanel.open .gdPracticeResult{order:3}
+		#practiceDataPanel.open .gdPracticeEvidenceList{order:4}
+		#practiceDataPanel.open .gdPracticeAdminExpander{order:5}
+    #practiceDataPanel.open .gdPracticeLiveDebugPanel{order:6}
+		#practiceDataPanel.open .gdPracticeExtractCheckpoint{order:7}
+		#practiceDataPanel.open .gdPracticeMasterTolerance{order:8}
+		#practiceDataPanel.open .gdPracticeRecommendationsPanel{order:9}
+		#practiceDataPanel.open .gdPracticeTolerancePanel{order:10}
+	#practiceDataPanel.open .gdPracticeScanner,
+	#practiceDataPanel.open .gdPracticeReview{order:10}
+#practiceDataPanel.open .gdPracticeScanner.active,
+#practiceDataPanel.open .gdManualQuadTool.active{
+  grid-column:1/-1!important;
+  order:21!important;
+  margin-top:0!important;
+}
+#practiceDataPanel.open .gdPracticeIntakeActions{
+  grid-column:1/-1!important;
+  order:20;
+  display:grid!important;
+  grid-template-columns:1fr!important;
+  gap:8px!important;
+  margin-top:0!important;
+  padding:0!important;
+  background:transparent!important;
+  border:0!important;
+  border-radius:0!important;
+  box-shadow:none!important;
+  align-items:stretch!important;
+}
+#practiceDataPanel.open .gdPracticeImportToggle{
+  appearance:none!important;
+  display:flex!important;
+  align-items:center!important;
+  justify-content:space-between!important;
+  gap:12px!important;
+  width:100%!important;
+  min-height:54px!important;
+  border-radius:999px!important;
+  padding:14px 18px!important;
+  border:1px solid rgba(255,255,255,.12)!important;
+  background:linear-gradient(180deg,rgba(255,255,255,.075),rgba(255,255,255,.032))!important;
+  color:#f4f7f5!important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 10px 24px rgba(0,0,0,.18)!important;
+  font-size:15px!important;
+  line-height:1!important;
+  font-weight:950!important;
+  cursor:pointer!important;
+}
+#practiceDataPanel.open .gdPracticeIntakeActions.open .gdPracticeImportToggle{
+  border-color:rgba(215,176,107,.58)!important;
+  background:linear-gradient(180deg,#d7b06b,#b88d42)!important;
+  color:#06100b!important;
+}
+#practiceDataPanel.open .gdPracticeImportChevron{
+  display:grid!important;
+  place-items:center!important;
+  width:24px!important;
+  height:24px!important;
+  border-radius:999px!important;
+  border:1px solid rgba(255,255,255,.10)!important;
+  background:rgba(255,255,255,.055)!important;
+  color:rgba(255,255,255,.72)!important;
+  font-size:11px!important;
+  line-height:1!important;
+  transition:transform .16s ease!important;
+}
+#practiceDataPanel.open .gdPracticeIntakeActions.open .gdPracticeImportChevron{
+  transform:rotate(180deg)!important;
+  border-color:rgba(0,0,0,.12)!important;
+  background:rgba(0,0,0,.14)!important;
+  color:rgba(0,0,0,.72)!important;
+}
+#practiceDataPanel.open .gdPracticeImportBody{
+  display:none!important;
+  grid-template-columns:1fr 1fr!important;
+  gap:10px!important;
+  padding:10px!important;
+  border-radius:16px!important;
+  background:rgba(255,255,255,.045)!important;
+  border:1px solid rgba(255,255,255,.085)!important;
+}
+#practiceDataPanel.open .gdPracticeIntakeActions.open .gdPracticeImportBody{
+  display:grid!important;
+}
+	#practiceDataPanel.open .gdPracticeIntakeActions .gdUploadFileButton{
+	  min-height:48px!important;
+	  border-radius:14px!important;
+	  font-size:14px!important;
+	}
+	#practiceDataPanel.open .gdPracticeVisualTitle{
+	  margin:0!important;
+	  color:#f4f7f5!important;
+	  font-size:17px!important;
+	  line-height:1.05!important;
+	  font-weight:950!important;
+	  letter-spacing:0!important;
+	}
+	#practiceDataPanel.open .gdPracticeImportIconPanel{
+	  display:grid!important;
+	  grid-template-columns:auto auto!important;
+	  align-items:center!important;
+	  gap:10px!important;
+	  width:max-content!important;
+	  max-width:100%!important;
+	  padding:8px!important;
+	  border-radius:14px!important;
+	  border:1px solid rgba(255,255,255,.085)!important;
+	  background:rgba(255,255,255,.035)!important;
+	  box-shadow:inset 0 1px 0 rgba(255,255,255,.045)!important;
+	}
+	#practiceDataPanel.open .gdPracticeImportTitle{
+	  color:rgba(255,255,255,.52)!important;
+	  font-size:10px!important;
+	  line-height:1!important;
+	  font-weight:900!important;
+	}
+	#practiceDataPanel.open .gdPracticeImportIcons{
+	  display:flex!important;
+	  align-items:center!important;
+	  gap:6px!important;
+	}
+	#practiceDataPanel.open .gdPracticeImportIconButton,
+	#practiceDataPanel.open .gdPracticeImportIconButton.gdPracticeImportToggle{
+	  appearance:none!important;
+	  display:grid!important;
+	  place-items:center!important;
+	  width:42px!important;
+	  height:42px!important;
+	  min-width:42px!important;
+	  min-height:42px!important;
+	  border-radius:12px!important;
+	  padding:0!important;
+	  border:1px solid rgba(255,255,255,.12)!important;
+	  background:linear-gradient(180deg,rgba(255,255,255,.075),rgba(255,255,255,.028))!important;
+	  color:#f4f7f5!important;
+	  box-shadow:inset 0 1px 0 rgba(255,255,255,.055),0 8px 18px rgba(0,0,0,.16)!important;
+	  cursor:pointer!important;
+	  font-size:0!important;
+	}
+	#practiceDataPanel.open .gdPracticeImportIconButton.email{
+	  color:rgba(244,247,245,.58)!important;
+	  border-color:rgba(255,255,255,.075)!important;
+	  background:rgba(255,255,255,.025)!important;
+	  box-shadow:none!important;
+	}
+	#practiceDataPanel.open .gdPracticeIntakeActions.open .gdPracticeImportIconButton.gdPracticeImportToggle{
+	  border-color:rgba(215,176,107,.54)!important;
+	  background:linear-gradient(180deg,#d7b06b,#b88d42)!important;
+	  color:#06100b!important;
+	}
+	#practiceDataPanel.open .gdPracticeImportIconGlyph,
+	#practiceDataPanel.open .gdPracticeImportIconGlyph svg{
+	  display:block!important;
+	}
+	#practiceDataPanel.open .gdPracticeImportIconGlyph svg{
+	  width:22px!important;
+	  height:22px!important;
+	  fill:none!important;
+	  stroke:currentColor!important;
+	  stroke-width:1.9!important;
+	  stroke-linecap:round!important;
+	  stroke-linejoin:round!important;
+	}
+	#practiceDataPanel.open .gdPracticeEmailBox{
+	  grid-column:1/-1!important;
+	  display:grid!important;
+	  gap:6px!important;
+	  min-width:0!important;
+	  border-top:1px solid rgba(255,255,255,.08)!important;
+	  padding-top:7px!important;
+	}
+	#practiceDataPanel.open .gdPracticeEmailBox[hidden]{
+	  display:none!important;
+	}
+	#practiceDataPanel.open .gdPracticeEmailHead{
+	  display:grid!important;
+	  grid-template-columns:minmax(0,1fr) auto!important;
+	  gap:8px!important;
+	  align-items:center!important;
+	}
+	#practiceDataPanel.open .gdPracticeEmailHead strong{
+	  display:block!important;
+	  color:#fff!important;
+	  font-size:12px!important;
+	  font-weight:950!important;
+	}
+	#practiceDataPanel.open .gdPracticeEmailHead span{
+	  display:block!important;
+	  margin-top:2px!important;
+	  color:rgba(255,255,255,.55)!important;
+	  font-size:10px!important;
+	  font-weight:820!important;
+	}
+	#practiceDataPanel.open .gdPracticeEmailActions{
+	  display:flex!important;
+	  gap:6px!important;
+	  align-items:center!important;
+	}
+	#practiceDataPanel.open .gdPracticeEmailHead button{
+	  min-height:30px!important;
+	  border-radius:9px!important;
+	  border:1px solid rgba(255,255,255,.10)!important;
+	  background:rgba(255,255,255,.08)!important;
+	  color:#fff!important;
+	  font-size:10px!important;
+	  font-weight:950!important;
+	  padding:6px 9px!important;
+	}
+	#practiceDataPanel.open .gdPracticeEmailAddress{
+	  min-width:0!important;
+	  overflow:auto!important;
+	  border-radius:10px!important;
+	  border:1px solid rgba(215,176,107,.18)!important;
+	  background:rgba(215,176,107,.08)!important;
+	  color:#ffe3a9!important;
+	  padding:8px 9px!important;
+	  font:850 11px/1.25 ui-monospace,SFMono-Regular,Menlo,monospace!important;
+	  white-space:nowrap!important;
+	}
+	#practiceDataPanel.open .gdPracticeEmailRecent{
+	  display:grid!important;
+	  gap:6px!important;
+	  min-width:0!important;
+	}
+	#practiceDataPanel.open .gdPracticeEmailRecent>span{
+	  display:block!important;
+	  padding:8px 9px!important;
+	  border-radius:10px!important;
+	  background:rgba(0,0,0,.18)!important;
+	  border:1px solid rgba(255,255,255,.07)!important;
+	  color:rgba(255,255,255,.58)!important;
+	  font-size:10px!important;
+	  font-weight:850!important;
+	}
+	#practiceDataPanel.open .gdPracticeEmailRecent.warn>span{
+	  color:#ffd287!important;
+	  border-color:rgba(215,176,107,.18)!important;
+	  background:rgba(215,176,107,.08)!important;
+	}
+	#practiceDataPanel.open .gdPracticeEmailRecent button{
+	  display:grid!important;
+	  grid-template-columns:minmax(0,1fr) auto!important;
+	  gap:8px!important;
+	  align-items:center!important;
+	  width:100%!important;
+	  min-height:36px!important;
+	  border-radius:10px!important;
+	  border:1px solid rgba(255,255,255,.09)!important;
+	  background:rgba(255,255,255,.055)!important;
+	  color:#fff!important;
+	  padding:8px 9px!important;
+	  text-align:left!important;
+	}
+	#practiceDataPanel.open .gdPracticeEmailRecent button span{
+	  min-width:0!important;
+	  overflow:hidden!important;
+	  text-overflow:ellipsis!important;
+	  white-space:nowrap!important;
+	  font-size:10px!important;
+	  font-weight:900!important;
+	}
+	#practiceDataPanel.open .gdPracticeEmailRecent button b{
+	  color:#8cffbf!important;
+	  font-size:9px!important;
+	  font-weight:950!important;
+	  white-space:nowrap!important;
+	}
+	#practiceDataPanel.open .gdNativePracticeDrawer{
+	  grid-column:1/-1!important;
+	  display:block!important;
+	  min-width:0!important;
+	  border-radius:13px!important;
+	  border:1px solid rgba(255,255,255,.075)!important;
+	  background:rgba(0,0,0,.13)!important;
+	  overflow:hidden!important;
+	}
+	#practiceDataPanel.open .gdNativePracticeDrawer summary{
+	  display:grid!important;
+	  grid-template-columns:minmax(0,1fr) auto!important;
+	  gap:8px!important;
+	  align-items:center!important;
+	  min-height:36px!important;
+	  padding:9px 10px!important;
+	  list-style:none!important;
+	  cursor:pointer!important;
+	  color:rgba(255,255,255,.76)!important;
+	}
+	#practiceDataPanel.open .gdNativePracticeDrawer summary::-webkit-details-marker{
+	  display:none!important;
+	}
+	#practiceDataPanel.open .gdNativePracticeDrawer summary span{
+	  color:#f4f7f5!important;
+	  font-size:11px!important;
+	  line-height:1!important;
+	  font-weight:950!important;
+	}
+	#practiceDataPanel.open .gdNativePracticeDrawer summary small{
+	  color:rgba(255,255,255,.45)!important;
+	  font-size:9px!important;
+	  line-height:1!important;
+	  font-weight:850!important;
+	  white-space:nowrap!important;
+	}
+	#practiceDataPanel.open .gdNativePracticeDrawer[open]{
+	  border-color:rgba(215,176,107,.18)!important;
+	  background:rgba(215,176,107,.055)!important;
+	}
+	#practiceDataPanel.open #gdNativePracticeImportLane{
+	  grid-column:1/-1!important;
+	  margin:0 8px 8px!important;
+	}
+	#practiceDataPanel.open .gdNativePracticeUploadButton{
+	  min-height:36px!important;
+	  width:max-content!important;
+	  max-width:100%!important;
+	  padding:8px 11px!important;
+	  border-radius:11px!important;
+	  font-size:11px!important;
+	  justify-self:start!important;
+	}
+	#practiceDataPanel.open:not(.gdPracticeAdminExpanded) .gdNativePracticeDrawer,
+	#practiceDataPanel.open:not(.gdPracticeAdminExpanded) .gdPracticeEmailBox:not(.active){
+	  display:none!important;
+	  visibility:hidden!important;
+	  pointer-events:none!important;
+	}
+	.gdPracticeClubKeyDrop{
+	  margin-top:7px!important;
+	  width:max-content!important;
+	  max-width:100%!important;
+	  border-radius:10px!important;
+	  border:1px solid rgba(255,255,255,.08)!important;
+	  background:rgba(255,255,255,.035)!important;
+	  color:rgba(255,255,255,.72)!important;
+	  overflow:hidden!important;
+	}
+	.gdPracticeClubKeyDrop summary{
+	  cursor:pointer!important;
+	  padding:7px 9px!important;
+	  font-size:10px!important;
+	  font-weight:950!important;
+	  list-style:none!important;
+	}
+	.gdPracticeClubKeyDrop summary::-webkit-details-marker{display:none!important}
+	.gdPracticeClubKeyList{
+	  display:flex!important;
+	  flex-wrap:wrap!important;
+	  gap:6px!important;
+	  padding:0 9px 8px!important;
+	}
+	.gdPracticeClubKeyItem{
+	  display:inline-flex!important;
+	  align-items:center!important;
+	  gap:5px!important;
+	  color:rgba(255,255,255,.66)!important;
+	  font-size:10px!important;
+	  font-weight:850!important;
+	}
+	.gdPracticeClubKeySwatch{
+	  width:8px!important;
+	  height:8px!important;
+	  border-radius:999px!important;
+	  display:inline-block!important;
+	}
+	.gdPracticeEvidenceClubRows{
+	  display:grid!important;
+	  gap:8px!important;
+	}
+	.gdPracticeEvidenceClubRowsScrollable{
+	  max-height:440px!important;
+	  overflow:auto!important;
+	  padding-right:2px!important;
+	}
+	#practiceDataPanel.open .gdPracticeEvidenceUpload summary{
+	  grid-template-columns:minmax(0,1fr) auto!important;
+	}
+	#practiceDataPanel.open .gdPracticeEvidenceTableHead,
+	#practiceDataPanel.open .gdPracticeEvidenceShot{
+	  grid-template-columns:34px 54px 58px 64px minmax(88px,1fr)!important;
+	}
+	#practiceDataPanel.open .gdPracticeEvidenceTable{
+	  min-width:470px!important;
+	}
+	@media(max-width:760px){
+  .gdShotDataAdminPanel{grid-column:1!important}
+  .gdPracticeProjectorToggle{grid-template-columns:minmax(0,1fr) auto!important}
+  .gdPracticeProjectorToggle small{grid-column:1/-1!important;grid-row:2!important;text-align:left!important;white-space:normal!important}
+  .gdPracticeProjectorToggle i{grid-column:2!important;grid-row:1/3!important}
+  .gdPracticeProjectorMenu{grid-template-columns:minmax(0,1fr) minmax(0,1fr) 32px!important}
+  .gdPracticeProjectionStatus{text-align:left!important;white-space:normal!important}
+  .gdShotDataLibraryTabs,.gdPracticeLibraryTabs,.gdCourseLibraryTabs{grid-template-columns:minmax(0,1fr) auto!important}
+  .gdShotDataLibraryDropdown>.gdShotDataLibraryTabs{grid-template-columns:1fr!important}
+  .gdShotDataLibraryTabs>b,.gdPracticeLibraryTabs>b,.gdCourseLibraryTabs>b{grid-column:2!important;grid-row:1!important}
+  .gdShotDataLibraryDropdown .gdShotDataLibraryChevron{grid-column:auto!important;grid-row:auto!important}
+  .gdShotDataLibraryBubble,.gdPracticeLibraryBubble,.gdCourseLibraryBubble{grid-column:1/-1!important;grid-row:2!important}
+	  .gdShotDataLibraryBubble span,.gdShotDataLibraryBubble strong,.gdPracticeLibraryBubble span,.gdPracticeLibraryBubble strong,.gdCourseLibraryBubble span,.gdCourseLibraryBubble strong{text-align:left!important}
+		  .gdPracticeImportCard summary{grid-template-columns:auto minmax(0,1fr) auto!important}
+		  .gdPracticeImportCard summary>strong{grid-column:2!important;grid-row:2!important;text-align:left!important}
+		  .gdPracticeImportDelete{grid-column:3!important;grid-row:1/3!important}
+		  .gdPracticeShotClubHead{grid-template-columns:minmax(0,1fr) 22px!important}
+		  .gdPracticeShotClubHead small{grid-column:1/-1!important;grid-row:2!important;text-align:left!important}
+		  .gdPracticeShotClubHead .gdPracticeEvidenceChevron{grid-column:2!important;grid-row:1/3!important}
+		  .gdPracticeUploadRow>summary{grid-template-columns:auto minmax(0,1fr) auto!important}
+		  .gdPracticeRawDrawer{max-height:300px!important}
+		  .gdPracticeRawHead{grid-template-columns:1fr!important}
+		  .gdPracticeRawScroll{max-height:214px!important}
+		  #practiceDataPanel.open .gdPracticeImportBody{grid-template-columns:1fr!important}
+  .gdPracticeBagRows{grid-template-columns:1fr!important}
+  .gdPracticeBagDiff{grid-template-columns:58px minmax(0,1fr)!important}
+  .gdPracticeBagDiff small{grid-column:1/-1!important;text-align:left!important}
+  #statsPanel.gdCourseAdminTab .gdShotDataAdminPanel{grid-column:1!important}
+  .gdDataSplit,
+  #dataHubPanel:not(.gdCompareExpanded) .gdDataSplit{
+    grid-template-columns:1fr!important;
+  }
+  #dataHubPanel.gdCompareExpanded .gdDataSplit{
+    grid-template-columns:1fr!important;
+    grid-template-areas:"course" "compareTitle" "compareVisual" "practice"!important;
+  }
+  #dataHubPanel.gdCompareExpanded .gdDataCard.widget{
+    min-height:0!important;
+    max-height:none!important;
+  }
+  #dataHubPanel.gdCompareExpanded .gdCompareVisual,
+  #dataHubPanel.gdCompareExpanded .gdCompareVisual svg{
+    height:auto!important;
+    min-height:260px!important;
+  }
+  #practiceDataPanel.open .gdPracticeIntakeActions{
+    grid-template-columns:1fr!important;
+  }
+}
+@media(max-width:520px){
+  .gdShotDataPanel.open{padding-left:12px!important;padding-right:12px!important}
+  .gdBubbleGenHead{grid-template-columns:1fr!important}
+  .gdBubbleOffsetActions{width:100%;display:grid!important;grid-template-columns:1fr 1fr!important}
+  .gdBubbleGenGrid{grid-template-columns:1fr!important}
+  .gdShotBubbleHubPreview,
+  .gdShotBubbleLane{min-height:68px!important;height:68px!important}
+  .gdShotBubbleTarget{width:110px!important;height:46px!important}
+  .gdDataCard{min-height:122px!important}
+}
+
+/* Practice Data UI overrides */
+
+	.gdPracticeEvidenceList{
+	  display:grid!important;
+	  gap:8px!important;
+	  align-self:start!important;
+	  max-height:none!important;
+	  overflow:visible!important;
+	  padding:0!important;
+	  border:0!important;
+	  border-radius:0!important;
+	  background:transparent!important;
+	  box-shadow:none!important;
+	}
+	.gdShotDataLibraryShell{
+	  display:grid!important;
+	  gap:8px!important;
+	  min-width:0!important;
+	}
+	.gdShotDataLibraryTabs,
+	.gdPracticeLibraryTabs,
+	.gdCourseLibraryTabs{
+	  display:grid!important;
+	  grid-template-columns:minmax(0,1fr) auto auto!important;
+	  gap:7px!important;
+	  align-items:center!important;
+	  padding:7px!important;
+	  border-radius:13px!important;
+	  background:rgba(0,0,0,.16)!important;
+	  border:1px solid rgba(255,255,255,.075)!important;
+	}
+	.gdShotDataLibraryDropdownToggle{
+	  appearance:none!important;
+	  width:100%!important;
+	  color:inherit!important;
+	  font:inherit!important;
+	  text-align:inherit!important;
+	  cursor:pointer!important;
+	  user-select:none!important;
+	}
+	.gdShotDataLibraryDropdown>.gdShotDataLibraryTabs{
+	  grid-template-columns:1fr!important;
+	  padding:0!important;
+	  background:transparent!important;
+	  border:0!important;
+	}
+	.gdShotDataLibraryDropdown>.gdShotDataLibraryTabs>.gdShotDataLibraryTab{
+	  display:flex!important;
+	  align-items:center!important;
+	  justify-content:space-between!important;
+	  gap:12px!important;
+	  width:100%!important;
+	  min-height:46px!important;
+	  padding:12px 14px!important;
+	  text-align:left!important;
+	}
+	.gdShotDataLibraryTabMain{
+	  display:grid!important;
+	  grid-template-columns:minmax(0,1fr)!important;
+	  align-items:center!important;
+	  gap:4px!important;
+	  min-width:0!important;
+	  width:100%!important;
+	}
+	.gdShotDataLibraryTabMain>.gdNativeProcessingStack{display:grid!important;margin-top:0!important;gap:2px!important}
+	.gdShotDataLibraryTabMain .gdNativeProcessingBadge{
+	  grid-template-columns:minmax(74px,1fr) minmax(0,auto)!important;
+	  gap:5px!important;
+	  min-width:0!important;
+	  width:100%!important;
+	  font-size:8px!important;
+	  line-height:1!important;
+	}
+	.gdShotDataLibraryTabMain .gdNativeProcessingTrack,
+	.gdShotDataLibraryTabMain .gdNativeProcessingNodes{height:12px!important}
+	.gdShotDataLibraryTabMain .gdNativeProcessingRail,
+	.gdShotDataLibraryTabMain .gdNativeProcessingFill{left:5px!important;right:5px!important;height:2px!important}
+	.gdShotDataLibraryTabMain .gdNativeProcessingNode{width:10px!important;height:10px!important;font-size:6px!important;box-shadow:0 0 0 2px rgba(0,0,0,.18)!important}
+	.gdShotDataLibraryTabMain .gdNativeProcessingNode.active{box-shadow:0 0 0 3px rgba(55,242,141,.10)!important}
+	.gdShotDataLibraryTabMain .gdNativeProcessingLabel{max-width:104px!important;overflow:hidden!important;text-overflow:ellipsis!important}
+	.gdPracticeLibraryProcessing{
+	  display:block!important;
+	  margin:0 0 8px!important;
+	  padding:7px 9px!important;
+	  border-radius:11px!important;
+	  border:1px solid rgba(55,242,141,.18)!important;
+	  background:rgba(8,24,17,.72)!important;
+	}
+	.gdPracticeLibraryProcessing .gdNativeProcessingBadge{
+	  grid-template-columns:minmax(96px,1fr) minmax(0,auto)!important;
+	  gap:6px!important;
+	  font-size:8px!important;
+	  line-height:1!important;
+	}
+	.gdPracticeLibraryProcessing .gdNativeProcessingTrack,
+	.gdPracticeLibraryProcessing .gdNativeProcessingNodes{height:12px!important}
+	.gdPracticeLibraryProcessing .gdNativeProcessingRail,
+	.gdPracticeLibraryProcessing .gdNativeProcessingFill{height:2px!important}
+	.gdPracticeLibraryProcessing .gdNativeProcessingNode{width:10px!important;height:10px!important;font-size:6px!important}
+	.gdPracticeLibraryProcessing .gdNativeProcessingLabel{max-width:120px!important;overflow:hidden!important;text-overflow:ellipsis!important}
+	.gdShotDataLibraryChevron{
+	  display:grid!important;
+	  place-items:center!important;
+	  width:24px!important;
+	  height:24px!important;
+	  border-radius:999px!important;
+	  border:1px solid rgba(255,255,255,.10)!important;
+	  background:rgba(255,255,255,.055)!important;
+	  color:rgba(255,255,255,.72)!important;
+	  font-size:11px!important;
+	  line-height:1!important;
+	  transition:transform .16s ease!important;
+	}
+	.gdShotDataLibraryDropdown.open>.gdShotDataLibraryTabs .gdShotDataLibraryChevron{
+	  transform:rotate(180deg)!important;
+	}
+	.gdShotDataLibraryTab,
+	.gdPracticeLibraryTab,
+	.gdCourseLibraryTab{
+	  appearance:none!important;
+	  width:100%!important;
+	  min-width:0!important;
+	  min-height:30px!important;
+	  border-radius:999px!important;
+	  padding:7px 10px!important;
+	  border:1px solid rgba(55,242,141,.38)!important;
+	  background:linear-gradient(180deg,#37f28d,#20bd69)!important;
+	  color:#06100b!important;
+	  font-size:11px!important;
+	  line-height:1!important;
+	  font-weight:950!important;
+	  text-align:left!important;
+	}
+	.gdShotDataLibraryShell-course .gdShotDataLibraryTab,
+	.gdCourseLibraryTab{
+	  border-color:rgba(98,210,255,.40)!important;
+	  background:linear-gradient(180deg,#62d2ff,#248dc0)!important;
+	  color:#041015!important;
+	}
+	.gdShotDataLibraryDropdown:not(.open)>.gdShotDataLibraryBody{
+	  display:none!important;
+	}
+	.gdShotDataLibraryDropdown>.gdShotDataLibraryTabs>.gdShotDataLibraryTab{
+	  min-height:54px!important;
+	  padding:14px 16px!important;
+	  border-color:rgba(255,255,255,.12)!important;
+	  background:linear-gradient(180deg,rgba(255,255,255,.075),rgba(255,255,255,.032))!important;
+	  color:#f4f7f5!important;
+	  box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 10px 24px rgba(0,0,0,.18)!important;
+	  cursor:pointer!important;
+	}
+	.gdShotDataLibraryDropdown.open>.gdShotDataLibraryTabs>.gdPracticeLibraryTab{
+	  border-color:rgba(255,255,255,.13)!important;
+	  background:linear-gradient(180deg,rgba(255,255,255,.075),rgba(255,255,255,.032))!important;
+	  color:#f4f7f5!important;
+	}
+	.gdShotDataLibraryDropdown.open>.gdShotDataLibraryTabs>.gdCourseLibraryTab{
+	  border-color:rgba(98,210,255,.50)!important;
+	  background:linear-gradient(180deg,#62d2ff,#248dc0)!important;
+	  color:#041015!important;
+	}
+		.gdShotDataLibraryDropdown.open>.gdShotDataLibraryBody{
+		  max-height:280px!important;
+		  overflow:auto!important;
+	  padding:12px!important;
+	  border-radius:16px!important;
+	  background:rgba(255,255,255,.045)!important;
+		  border:1px solid rgba(255,255,255,.085)!important;
+		  box-shadow:inset 0 1px 0 rgba(255,255,255,.035)!important;
+		}
+		#practiceDataPanel.open .gdPracticeLibraryShell.gdShotDataLibraryDropdown.open>.gdShotDataLibraryBody{
+		  max-height:none!important;
+		  overflow:visible!important;
+		}
+	.gdShotDataLibraryDropdown.open>.gdShotDataLibraryTabs>.gdPracticeLibraryTab .gdShotDataLibraryChevron,
+	.gdShotDataLibraryDropdown.open>.gdShotDataLibraryTabs>.gdCourseLibraryTab .gdShotDataLibraryChevron{
+	  border-color:rgba(0,0,0,.12)!important;
+	  background:rgba(0,0,0,.14)!important;
+	  color:rgba(0,0,0,.72)!important;
+	}
+	.gdShotDataLibraryBubble,
+	.gdPracticeLibraryBubble,
+	.gdCourseLibraryBubble{
+	  display:grid!important;
+	  gap:1px!important;
+	  min-width:88px!important;
+	  padding:5px 8px!important;
+	  border-radius:11px!important;
+	  background:rgba(55,242,141,.09)!important;
+	  border:1px solid rgba(55,242,141,.18)!important;
+	}
+	.gdShotDataLibraryShell-course .gdShotDataLibraryBubble,
+	.gdCourseLibraryBubble{
+	  background:rgba(98,210,255,.09)!important;
+	  border-color:rgba(98,210,255,.20)!important;
+	}
+	.gdShotDataLibraryBubble span,
+	.gdPracticeLibraryBubble span,
+	.gdCourseLibraryBubble span{
+	  color:rgba(255,255,255,.52)!important;
+	  font-size:8px!important;
+	  line-height:1!important;
+	  font-weight:950!important;
+	  text-transform:uppercase!important;
+	  letter-spacing:.06em!important;
+	  text-align:right!important;
+	}
+	.gdShotDataLibraryBubble strong,
+	.gdPracticeLibraryBubble strong,
+	.gdCourseLibraryBubble strong{
+	  color:#37f28d!important;
+	  font-size:13px!important;
+	  line-height:1!important;
+	  font-weight:950!important;
+	  text-align:right!important;
+	  white-space:nowrap!important;
+	}
+	.gdShotDataLibraryShell-course .gdShotDataLibraryBubble strong,
+	.gdCourseLibraryBubble strong{
+	  color:#62d2ff!important;
+	}
+	.gdShotDataLibraryTabs>b,
+	.gdPracticeLibraryTabs>b,
+	.gdCourseLibraryTabs>b{
+	  min-width:34px!important;
+	  border-radius:999px!important;
+	  padding:6px 8px!important;
+	  background:rgba(255,255,255,.055)!important;
+	  border:1px solid rgba(255,255,255,.10)!important;
+	  color:rgba(255,255,255,.78)!important;
+	  font-size:11px!important;
+	  line-height:1!important;
+	  text-align:center!important;
+	}
+	.gdShotDataLibraryBody,
+	.gdPracticeLibraryBody,
+	.gdCourseLibraryBody{
+	  display:grid!important;
+	  gap:8px!important;
+	}
+
+	.gdPracticeEvidenceHead{
+	  display:flex!important;
+	  justify-content:space-between!important;
+	  align-items:flex-start!important;
+	  gap:10px!important;
+	}
+	.gdPracticeEvidenceHead strong{
+	  display:block!important;
+	  color:#fff!important;
+	  font-size:14px!important;
+	  line-height:1.05!important;
+	  font-weight:950!important;
+	}
+	.gdPracticeEvidenceHead span{
+	  display:block!important;
+	  margin-top:3px!important;
+	  color:rgba(255,255,255,.56)!important;
+	  font-size:10px!important;
+	  line-height:1.2!important;
+	  font-weight:820!important;
+	}
+	.gdPracticeEvidenceHead b{
+	  min-width:34px!important;
+	  border-radius:999px!important;
+	  padding:5px 8px!important;
+	  background:rgba(255,255,255,.055)!important;
+	  border:1px solid rgba(255,255,255,.10)!important;
+	  color:rgba(255,255,255,.78)!important;
+	  font-size:11px!important;
+	  line-height:1!important;
+	  text-align:center!important;
+	}
+	.gdPracticeImportJob{
+	  display:grid!important;
+	  gap:10px!important;
+	  margin:0 0 12px!important;
+	  padding:12px!important;
+	  border:1px solid rgba(255,255,255,.10)!important;
+	  border-radius:8px!important;
+	  background:rgba(9,14,12,.82)!important;
+	  color:#fff!important;
+	}
+	.gdPracticeImportJob.active{border-color:rgba(55,242,141,.28)!important;box-shadow:inset 0 0 0 1px rgba(55,242,141,.08)!important}
+	.gdPracticeImportJob.failed{border-color:rgba(255,132,92,.38)!important;background:rgba(24,10,8,.86)!important}
+	.gdPracticeImportJob.done{border-color:rgba(215,176,107,.28)!important}
+	.gdPracticeImportJobMain{display:grid!important;gap:4px!important;min-width:0!important}
+	.gdPracticeImportJobMain strong{font-size:13px!important;font-weight:950!important;line-height:1.2!important}
+	.gdPracticeImportJobMain span{font-size:12px!important;line-height:1.35!important;color:rgba(255,255,255,.78)!important}
+	.gdPracticeImportJobMain small{font-size:10px!important;line-height:1.3!important;color:rgba(255,255,255,.55)!important}
+	.gdPracticeImportJobActions{display:flex!important;flex-wrap:wrap!important;gap:8px!important}
+	.gdPracticeImportJobActions button{
+	  border:1px solid rgba(255,255,255,.14)!important;
+	  border-radius:8px!important;
+	  background:rgba(255,255,255,.08)!important;
+	  color:#fff!important;
+	  padding:7px 10px!important;
+	  font-size:11px!important;
+	  font-weight:900!important;
+	}
+	.gdPracticeImportJobDiagnostic{font-size:11px!important;color:rgba(255,255,255,.68)!important}
+	.gdPracticeImportJobDiagnostic pre{max-height:120px!important;overflow:auto!important;white-space:pre-wrap!important;margin:8px 0 0!important;padding:8px!important;border-radius:6px!important;background:rgba(0,0,0,.28)!important}
+		.gdPracticeEvidenceTabs{
+		  display:flex!important;
+		  gap:6px!important;
+		  overflow:auto!important;
+		  padding-bottom:1px!important;
+		}
+		.gdPracticeEvidenceClubRows{
+		  display:grid!important;
+		  gap:0!important;
+		  margin-top:0!important;
+		  overflow:hidden!important;
+		  border-radius:13px!important;
+		  background:rgba(0,0,0,.14)!important;
+		  border:1px solid rgba(255,255,255,.075)!important;
+		}
+		.gdPracticeEvidenceClubRowsScrollable{
+		  max-height:440px!important;
+		  overflow:auto!important;
+		  overflow-x:hidden!important;
+		  padding-right:2px!important;
+		}
+		.gdPracticeEvidenceNoRows{
+		  padding:7px 8px!important;
+		  border-radius:10px!important;
+		  background:rgba(255,255,255,.04)!important;
+		  border:1px solid rgba(255,255,255,.07)!important;
+		  color:rgba(255,255,255,.48)!important;
+		  font-size:10px!important;
+		  line-height:1.25!important;
+		  font-weight:850!important;
+		}
+		.gdPracticeEvidenceTab{
+		  appearance:none!important;
+		  flex:0 0 auto!important;
+	  display:flex!important;
+	  align-items:center!important;
+	  gap:7px!important;
+	  min-height:30px!important;
+	  border-radius:999px!important;
+	  padding:6px 9px!important;
+	  border:1px solid rgba(255,255,255,.10)!important;
+	  background:rgba(255,255,255,.045)!important;
+	  color:rgba(255,255,255,.68)!important;
+	  cursor:pointer!important;
+	}
+	.gdPracticeEvidenceTab.active{
+	  color:#06100b!important;
+	  background:linear-gradient(180deg,#37f28d,#20bd69)!important;
+	  border-color:rgba(55,242,141,.58)!important;
+	}
+	.gdPracticeEvidenceTab span,
+	.gdPracticeEvidenceTab strong{
+	  font-size:10px!important;
+	  line-height:1!important;
+	  font-weight:950!important;
+	}
+	.gdPracticePlotMode{
+	  display:grid!important;
+	  grid-template-columns:auto auto minmax(0,1fr)!important;
+	  gap:6px!important;
+	  align-items:center!important;
+	  padding:7px!important;
+	  border-radius:12px!important;
+	  background:rgba(31,211,109,.045)!important;
+	  border:1px solid rgba(31,211,109,.12)!important;
+	}
+	.gdPracticePlotMode button{
+	  border:0!important;
+	  min-height:28px!important;
+	  border-radius:999px!important;
+	  padding:6px 9px!important;
+	  background:rgba(255,255,255,.065)!important;
+	  border:1px solid rgba(255,255,255,.10)!important;
+	  color:rgba(255,255,255,.72)!important;
+	  font-size:10px!important;
+	  line-height:1!important;
+	  font-weight:950!important;
+	}
+	.gdPracticePlotMode button.active,
+	.gdPracticePlotMode button[aria-pressed="true"]{
+	  background:linear-gradient(180deg,#37f28d,#20bd69)!important;
+	  border-color:rgba(55,242,141,.58)!important;
+	  color:#06100b!important;
+	}
+.gdPracticePlotMode span{
+	  min-width:0!important;
+	  color:rgba(255,255,255,.58)!important;
+	  font-size:10px!important;
+	  line-height:1.2!important;
+	  font-weight:850!important;
+	  text-align:right!important;
+	}
+
+	.gdPracticeProjectionControls{
+	  display:grid!important;
+	  grid-template-columns:1fr!important;
+	  gap:8px!important;
+	  align-items:stretch!important;
+	  padding:0!important;
+	  border-radius:0!important;
+	  background:transparent!important;
+	  border:0!important;
+	  box-shadow:none!important;
+	}
+
+	.gdPracticeActionDock{
+	  display:grid!important;
+	  grid-template-columns:minmax(150px,1fr) max-content!important;
+	  gap:8px!important;
+	  align-items:start!important;
+	}
+	.gdPracticePrimaryActions{
+	  display:grid!important;
+	  grid-template-columns:1fr!important;
+	  gap:7px!important;
+	  align-items:stretch!important;
+	  min-width:0!important;
+	}
+	.gdPracticeBagSuggestionSlot{
+	  justify-self:start!important;
+	  align-self:start!important;
+	  min-width:0!important;
+	}
+	.gdPracticeBubbleAction{
+	  min-height:40px!important;
+	  border-radius:12px!important;
+	  font-size:12px!important;
+	  line-height:1!important;
+	  font-weight:950!important;
+	  border:1px solid rgba(255,255,255,.11)!important;
+	  background:rgba(255,255,255,.065)!important;
+	  color:rgba(255,255,255,.74)!important;
+	}
+	.gdPracticeBubbleAction.generate.ready{
+	  color:#06100b!important;
+	  background:linear-gradient(180deg,#37f28d,#20bd69)!important;
+	  border-color:rgba(55,242,141,.58)!important;
+	}
+	.gdPracticeBubbleAction.generate.active,
+	.gdPracticeBubbleAction.adopt.adopted{
+	  color:#06100b!important;
+	  background:linear-gradient(180deg,#d7b06b,#a97932)!important;
+	  border-color:rgba(215,176,107,.58)!important;
+	}
+	.gdPracticeBubbleAction.adopt:not(:disabled){
+	  color:#06100b!important;
+	  background:linear-gradient(180deg,#37f28d,#20bd69)!important;
+	  border-color:rgba(55,242,141,.58)!important;
+	}
+	.gdPracticeBubbleAction:disabled{
+	  opacity:.45!important;
+	  cursor:not-allowed!important;
+	  filter:grayscale(.18)!important;
+	}
+		.gdPracticeBagSuggestionIcon{
+		  appearance:none!important;
+		  position:relative!important;
+	  justify-self:start!important;
+	  display:inline-grid!important;
+	  grid-template-columns:52px!important;
+	  grid-template-rows:52px auto!important;
+	  gap:7px!important;
+	  align-items:start!important;
+	  justify-items:start!important;
+	  width:max-content!important;
+	  min-height:52px!important;
+	  margin-top:0!important;
+	  border-radius:0!important;
+	  padding:0!important;
+	  background:transparent!important;
+	  border:0!important;
+		  color:#ffd287!important;
+		  box-shadow:none!important;
+		}
+		.gdPracticeProjectionControls button.gdPracticeBagSuggestionIcon{
+		  width:52px!important;
+		  min-width:52px!important;
+		  height:52px!important;
+		  min-height:52px!important;
+		  border-radius:0!important;
+		  padding:0!important;
+		  background:transparent!important;
+		  border:0!important;
+		  box-shadow:none!important;
+		  color:#ffd287!important;
+		}
+		.gdPracticeBagSuggestionIcon.active{
+		  background:transparent!important;
+		  border-color:transparent!important;
+	}
+	.gdPracticeBagSuggestionIcon.unseen{
+	  box-shadow:none!important;
+	}
+	.gdPracticeBagSuggestionIconFrame{
+	  display:grid!important;
+	  place-items:center!important;
+	  width:52px!important;
+	  height:52px!important;
+	  border-radius:8px!important;
+	  overflow:hidden!important;
+	  background:linear-gradient(180deg,rgba(22,34,26,.96),rgba(4,9,6,.98))!important;
+	  border:1px solid rgba(255,255,255,.12)!important;
+	  box-shadow:0 12px 24px rgba(0,0,0,.34),inset 0 1px 0 rgba(255,255,255,.08)!important;
+	}
+	.gdPracticeBagSuggestionIcon.unseen .gdPracticeBagSuggestionIconFrame{
+	  box-shadow:0 12px 24px rgba(0,0,0,.34),inset 0 1px 0 rgba(255,255,255,.08)!important;
+	}
+	.gdPracticeBagSuggestionIconFrame img{
+	  width:50px!important;
+	  height:50px!important;
+	  object-fit:contain!important;
+	  transform:translateY(3px)!important;
+	  filter:drop-shadow(0 10px 12px rgba(0,0,0,.38))!important;
+	}
+		.gdPracticeBagSuggestionNoticeRow{
+		  display:flex!important;
+		  justify-content:flex-end!important;
+		  align-items:center!important;
+		  min-height:24px!important;
+		  margin:5px 0 0!important;
+		  padding:0!important;
+		}
+		.gdPracticeBagSuggestionNotice{
+		  appearance:none!important;
+		  max-width:220px!important;
+		  overflow:hidden!important;
+		  text-overflow:ellipsis!important;
+		  white-space:nowrap!important;
+		  padding:6px 10px!important;
+		  border-radius:999px!important;
+		  background:rgba(0,0,0,.20)!important;
+		  border:1px solid rgba(215,176,107,.24)!important;
+		  color:#ffd287!important;
+		  font-size:10px!important;
+		  line-height:1!important;
+		  font-weight:950!important;
+		  text-align:right!important;
+		  box-shadow:none!important;
+		  cursor:pointer!important;
+		}
+		.gdPracticeBagSuggestionNotice::before{
+		  content:""!important;
+		  display:inline-block!important;
+		  width:18px!important;
+		  height:1px!important;
+		  margin:0 7px 3px 0!important;
+		  background:linear-gradient(90deg,transparent,rgba(215,176,107,.58))!important;
+		  vertical-align:middle!important;
+		}
+	.gdPracticeBagSuggestionPanel{
+	  display:grid!important;
+	  gap:8px!important;
+	  min-width:260px!important;
+	  max-width:min(420px,calc(100vw - 36px))!important;
+	  padding:10px!important;
+	  border-radius:13px!important;
+	  background:rgba(0,0,0,.20)!important;
+	  border:1px solid rgba(215,176,107,.22)!important;
+	  box-shadow:inset 0 1px 0 rgba(255,255,255,.04)!important;
+	}
+	.gdPracticeBagSuggestionHead{
+	  display:grid!important;
+	  grid-template-columns:max-content 28px!important;
+	  gap:8px!important;
+	  align-items:center!important;
+	  justify-content:space-between!important;
+	}
+	.gdPracticeBagSuggestionTitle{
+	  display:inline-flex!important;
+	  align-items:center!important;
+	  gap:7px!important;
+	  min-width:0!important;
+	}
+	.gdPracticeBagSuggestionTitle img{
+	  width:24px!important;
+	  height:24px!important;
+	  object-fit:contain!important;
+	  filter:drop-shadow(0 1px 1px rgba(0,0,0,.45))!important;
+	}
+	.gdPracticeBagSuggestionTitle span{
+	  min-width:0!important;
+	  color:#fff!important;
+	  font-size:12px!important;
+	  line-height:1!important;
+	  font-weight:950!important;
+	}
+	.gdPracticeBagSuggestionHead button{
+	  width:28px!important;
+	  height:28px!important;
+	  min-height:28px!important;
+	  padding:0!important;
+	  border-radius:9px!important;
+	}
+	.gdPracticeDistanceLink{
+	  display:grid!important;
+	  grid-template-columns:auto minmax(0,1fr)!important;
+	  gap:8px!important;
+	  align-items:center!important;
+	  padding:7px 8px!important;
+	  border-radius:10px!important;
+	  background:rgba(215,176,107,.10)!important;
+	  border:1px solid rgba(215,176,107,.18)!important;
+	}
+	.gdPracticeDistanceLink span{
+	  color:rgba(255,255,255,.56)!important;
+	  font-size:10px!important;
+	  font-weight:900!important;
+	}
+	.gdPracticeDistanceLink strong{
+	  color:#ffd287!important;
+	  font-size:12px!important;
+	  font-weight:950!important;
+	  text-align:right!important;
+	}
+	.gdPracticeDistanceLinkChoices{
+	  display:flex!important;
+	  flex-wrap:wrap!important;
+	  gap:6px!important;
+	}
+	.gdPracticeDistanceLinkChoices button{
+	  min-height:28px!important;
+	  border-radius:999px!important;
+	  padding:6px 9px!important;
+	  font-size:10px!important;
+	}
+	.gdPracticeDistanceLinkChoices button.active{
+	  color:#06100b!important;
+	  background:linear-gradient(180deg,#d7b06b,#a97932)!important;
+	  border-color:rgba(215,176,107,.58)!important;
+	}
+	.gdPracticeBagSuggestionGrid{
+	  display:grid!important;
+	  grid-template-columns:max-content max-content max-content max-content!important;
+	  justify-content:start!important;
+	  gap:3px 7px!important;
+	  align-items:center!important;
+	}
+	.gdPracticeBagSuggestionGrid>span{
+	  color:rgba(255,255,255,.48)!important;
+	  font-size:9px!important;
+	  font-weight:950!important;
+	  line-height:1!important;
+	  justify-self:end!important;
+	}
+	.gdPracticeBagSuggestionGrid>span:first-child{
+	  justify-self:start!important;
+	}
+	.gdPracticeBagSuggestionRow{
+	  display:contents!important;
+	}
+	.gdPracticeBagSuggestionRow strong,
+	.gdPracticeCurrentCell{
+	  min-width:0!important;
+	  width:max-content!important;
+	  padding:4px 6px!important;
+	  border-radius:6px!important;
+	  background:rgba(255,255,255,.045)!important;
+	  border:1px solid rgba(255,255,255,.055)!important;
+	  color:rgba(255,255,255,.82)!important;
+	  font-size:10px!important;
+	  line-height:1!important;
+	  font-weight:900!important;
+	}
+	.gdPracticeBagSuggestionRow strong{
+	  justify-self:start!important;
+	}
+	.gdPracticeBagSuggestionRow.link strong,
+	.gdPracticeBagSuggestionRow.link .gdPracticeCurrentCell{
+	  background:rgba(215,176,107,.10)!important;
+	  border-color:rgba(215,176,107,.16)!important;
+	}
+	.gdPracticeCurrentCell{
+	  text-align:right!important;
+	  justify-self:end!important;
+	}
+	.gdPracticeCurrentCell.readonly{
+	  background:rgba(255,255,255,.032)!important;
+	  border-color:rgba(255,255,255,.07)!important;
+	  color:rgba(255,255,255,.62)!important;
+	}
+	.gdPracticeCurrentCell.empty{
+	  background:rgba(0,0,0,.12)!important;
+	  border-color:rgba(255,255,255,.04)!important;
+	  color:rgba(255,255,255,.38)!important;
+	  font-style:italic!important;
+	}
+	.gdPracticeSuggestedSide,
+	.gdPracticeBagSuggestionRow b{
+	  min-width:0!important;
+	  width:max-content!important;
+	  padding:0 2px!important;
+	  background:transparent!important;
+	  border:0!important;
+	  border-radius:0!important;
+	  font-size:10px!important;
+	  line-height:1!important;
+	  font-weight:900!important;
+	  text-align:right!important;
+	  justify-self:end!important;
+	}
+	.gdPracticeSuggestedSide{
+	  color:#ffd287!important;
+	}
+	.gdPracticeBagSuggestionRow b{
+	  color:rgba(255,255,255,.46)!important;
+	}
+	.gdPracticeBagSuggestionRow input{
+	  box-sizing:border-box!important;
+	  width:54px!important;
+	  min-width:54px!important;
+	  height:25px!important;
+	  border-radius:7px!important;
+	  border:1px solid rgba(55,242,141,.42)!important;
+	  background:rgba(55,242,141,.075)!important;
+	  color:#fff!important;
+	  padding:0 6px!important;
+	  text-align:right!important;
+	  font-size:11px!important;
+	  font-weight:950!important;
+	  outline:none!important;
+	  box-shadow:inset 0 1px 0 rgba(255,255,255,.06)!important;
+	  justify-self:end!important;
+	}
+	.gdPracticeBagSuggestionRow input:focus{
+	  border-color:rgba(55,242,141,.74)!important;
+	  box-shadow:0 0 0 2px rgba(55,242,141,.14),inset 0 1px 0 rgba(255,255,255,.08)!important;
+	}
+	.gdPracticeBagSuggestionActions{
+	  display:flex!important;
+	  justify-content:flex-end!important;
+	  gap:7px!important;
+	  flex-wrap:wrap!important;
+	}
+	.gdPracticeBagSuggestionActions button{
+	  min-height:32px!important;
+	  border-radius:999px!important;
+	  padding:7px 10px!important;
+	  font-size:10px!important;
+	}
+	.gdPracticeBagSuggestionActions button:first-child{
+	  color:#06100b!important;
+	  background:linear-gradient(180deg,#37f28d,#20bd69)!important;
+	  border-color:rgba(55,242,141,.58)!important;
+	}
+	.gdPracticeSandboxControls{
+	  display:grid!important;
+	  gap:8px!important;
+	  margin-bottom:9px!important;
+	  padding:9px!important;
+	  border-radius:12px!important;
+	  background:rgba(255,255,255,.035)!important;
+	  border:1px dashed rgba(255,255,255,.14)!important;
+	}
+	.gdPracticeSandboxControls.compact{
+	  margin:8px 0 0!important;
+	  padding:8px!important;
+	  border-radius:10px!important;
+	  background:rgba(255,255,255,.028)!important;
+	}
+	.gdPracticeSandboxControls.compact>div:first-child{
+	  grid-template-columns:auto minmax(0,1fr)!important;
+	  align-items:center!important;
+	  gap:7px!important;
+	}
+	.gdPracticeSandboxControls>div:first-child{
+	  display:grid!important;
+	  gap:2px!important;
+	}
+	.gdPracticeSandboxControls strong{
+	  color:#fff!important;
+	  font-size:11px!important;
+	  line-height:1!important;
+	  font-weight:950!important;
+	}
+	.gdPracticeSandboxControls span{
+	  color:rgba(255,255,255,.52)!important;
+	  font-size:10px!important;
+	  line-height:1.2!important;
+	  font-weight:850!important;
+	}
+	.gdPracticeSandboxButtons{
+	  display:flex!important;
+	  flex-wrap:wrap!important;
+	  gap:6px!important;
+	}
+	.gdPracticeSandboxButtons button{
+	  min-height:28px!important;
+	  border-radius:999px!important;
+	  padding:6px 8px!important;
+	  background:rgba(255,255,255,.06)!important;
+	  border:1px solid rgba(255,255,255,.10)!important;
+	  color:rgba(255,255,255,.74)!important;
+	  font-size:10px!important;
+	  font-weight:900!important;
+	}
+	.gdPracticeSandboxControls.compact .gdPracticeSandboxButtons{
+	  gap:5px!important;
+	}
+	.gdPracticeSandboxControls.compact .gdPracticeSandboxButtons button{
+	  min-height:25px!important;
+	  padding:5px 7px!important;
+	  font-size:9px!important;
+	}
+	.gdPracticeNativeLibrary{
+	  display:grid!important;
+	  gap:10px!important;
+	}
+	.gdPracticeNativeClub{
+	  display:grid!important;
+	  gap:0!important;
+	  overflow:visible!important;
+	  border-radius:0!important;
+	  background:transparent!important;
+	  border:0!important;
+	  border-bottom:1px solid rgba(255,255,255,.07)!important;
+	}
+	.gdPracticeNativeClub:last-child{border-bottom:0!important}
+	.gdPracticeNativeClubHead{
+	  appearance:none!important;
+	  width:100%!important;
+	  border:0!important;
+	  display:grid!important;
+	  grid-template-columns:minmax(0,1fr) auto!important;
+	  gap:8px!important;
+	  align-items:center!important;
+	  padding:10px 11px!important;
+	  background:transparent!important;
+	  text-align:left!important;
+	  cursor:pointer!important;
+	}
+	.gdPracticeNativeClub.open .gdPracticeNativeClubHead{background:rgba(255,255,255,.032)!important}
+	.gdPracticeNativeClubHead span{
+	  display:block!important;
+	  color:rgba(255,255,255,.58)!important;
+	  font-size:10px!important;
+	  line-height:1!important;
+	  font-weight:950!important;
+	}
+	.gdPracticeNativeClubHead strong{
+	  display:block!important;
+	  margin-top:2px!important;
+	  color:#fff!important;
+	  font-size:13px!important;
+	  line-height:1!important;
+	  font-weight:950!important;
+	}
+	.gdPracticeNativeClubHead small{
+	  color:rgba(255,255,255,.54)!important;
+	  font-size:10px!important;
+	  font-weight:850!important;
+	}
+	.gdPracticeNativeClubBody{
+	  display:none!important;
+	  gap:0!important;
+	  padding:0 11px 10px!important;
+	}
+	.gdPracticeNativeClub.open .gdPracticeNativeClubBody{display:grid!important}
+	.gdPracticeNativeUpload{
+	  border-radius:0!important;
+	  background:transparent!important;
+	  border:0!important;
+	  border-top:1px solid rgba(255,255,255,.055)!important;
+	  overflow:visible!important;
+	}
+	.gdPracticeNativeUpload summary{
+	  display:grid!important;
+	  grid-template-columns:minmax(0,1fr) auto!important;
+	  gap:8px!important;
+	  align-items:center!important;
+	  padding:8px 0!important;
+	  cursor:pointer!important;
+	  list-style:none!important;
+	}
+	.gdPracticeNativeUpload summary::-webkit-details-marker{display:none!important}
+	.gdPracticeNativeUpload summary span{
+	  min-width:0!important;
+	  overflow:hidden!important;
+	  text-overflow:ellipsis!important;
+	  white-space:nowrap!important;
+	  color:rgba(255,255,255,.78)!important;
+	  font-size:11px!important;
+	  font-weight:900!important;
+	}
+	.gdPracticeNativeUpload summary strong{
+	  color:rgba(255,255,255,.54)!important;
+	  font-size:10px!important;
+	  font-weight:900!important;
+	}
+	.gdPracticeNativeShots{
+	  display:grid!important;
+	  gap:0!important;
+	  padding:0 0 8px!important;
+	}
+	.gdPracticeNativeUpload:not([open]) .gdPracticeNativeShots{display:none!important}
+	.gdPracticeNativeTableHead,
+	.gdPracticeNativeShot{
+	  display:grid!important;
+	  grid-template-columns:34px minmax(58px,.8fr) minmax(64px,1fr) minmax(64px,1fr)!important;
+	  gap:5px!important;
+	  align-items:center!important;
+	}
+	.gdPracticeNativeTableHead span{
+	  color:rgba(255,255,255,.42)!important;
+	  font-size:9px!important;
+	  line-height:1!important;
+	  font-weight:950!important;
+	}
+	.gdPracticeNativeShot{
+	  min-height:24px!important;
+	  border-radius:0!important;
+	  background:transparent!important;
+	  border-top:1px solid rgba(255,255,255,.04)!important;
+	  padding:4px 0!important;
+	}
+	.gdPracticeNativeShot.excluded{
+	  opacity:.52!important;
+	}
+	.gdPracticeNativeShot.counted{
+	  background:rgba(55,242,141,.035)!important;
+	}
+	.gdPracticeNativeShot span,
+	.gdPracticeNativeShot strong{
+	  min-width:0!important;
+	  color:rgba(255,255,255,.78)!important;
+	  font-size:11px!important;
+	  line-height:1!important;
+	  font-weight:900!important;
+	  overflow:hidden!important;
+	  text-overflow:ellipsis!important;
+	  white-space:nowrap!important;
+	}
+	.gdPracticeNativeShot strong{
+	  color:#fff!important;
+	}
+	@media(max-width:520px){
+	  .gdPracticeActionDock{
+	    grid-template-columns:1fr!important;
+	  }
+	  .gdPracticePrimaryActions{
+	    grid-template-columns:1fr!important;
+	  }
+	  .gdPracticeBagSuggestionSlot{
+	    justify-self:start!important;
+	  }
+	  .gdPracticeBagSuggestionGrid{
+	    grid-template-columns:max-content max-content max-content max-content!important;
+	    gap:3px 5px!important;
+	  }
+	  .gdPracticeBagSuggestionNotice{
+	    max-width:190px!important;
+	  }
+	  .gdPracticeNativeTableHead,
+	  .gdPracticeNativeShot{
+	    grid-template-columns:28px minmax(50px,.8fr) minmax(56px,1fr) minmax(56px,1fr)!important;
+	  }
+	}

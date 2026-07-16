@@ -1,0 +1,24 @@
+#gdWandDiagBtn{position:absolute;right:18px;bottom:188px;z-index:99999;border:1px solid rgba(255,255,255,.22);background:rgba(8,12,10,.86);color:white;border-radius:14px;padding:10px 12px;font-weight:900;font-size:12px;box-shadow:0 10px 30px rgba(0,0,0,.35)}
+#gdWandDiagPanel{
+position:absolute;
+left:18px;
+top:82px;
+right:auto;
+bottom:auto;
+width:min(760px,calc(100vw - 36px));
+max-height:44vh;
+overflow:auto;
+z-index:100000;
+background:rgba(2,8,5,.88);
+border:1px solid rgba(31,211,109,.35);
+border-radius:18px;
+padding:12px 14px;
+color:white;
+font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+font-size:11px;
+line-height:1.35;
+white-space:pre-wrap;
+box-shadow:0 18px 60px rgba(0,0,0,.45)
+}
+#gdWandDiagPanel .diagTop{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:8px;font-family:Inter,Arial,sans-serif;font-size:14px;font-weight:900;white-space:normal}
+#gdWandDiagPanel button{border:0;border-radius:10px;padding:8px 10px;background:#1f2a24;color:white;font-weight:900}

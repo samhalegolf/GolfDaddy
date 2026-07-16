@@ -1,0 +1,52 @@
+#gdWandPanel{
+  left:18px!important;
+  right:18px!important;
+  bottom:calc(18px + env(safe-area-inset-bottom))!important;
+  max-width:460px!important;
+  padding:10px!important;
+  border-radius:18px!important;
+}
+#gdWandPanel .gdWandTop{margin-bottom:8px!important}
+#gdWandPanel .gdWandTitle{font-size:13px!important}
+#gdWandPanel .gdWandStatus{
+  max-width:360px;
+  font-size:10px!important;
+  line-height:1.24!important;
+}
+#gdWandPanel .gdWandRobustPill{
+  padding:7px 10px!important;
+  margin-bottom:7px!important;
+  font-size:11px!important;
+}
+#gdWandPanel .gdCalibrationDetails{
+  margin:7px 0 9px!important;
+  border-radius:14px!important;
+  background:rgba(255,255,255,.04)!important;
+}
+#gdWandPanel .gdCalibrationDetails summary{
+  padding:8px 10px!important;
+  font-size:11px!important;
+}
+#gdWandPanel .gdWandCalibrationControls{padding:0 10px 10px!important}
+#gdWandPanel .gdWandSlider{
+  grid-template-columns:74px 1fr 50px!important;
+  gap:8px!important;
+  margin:8px 0!important;
+  font-size:10px!important;
+}
+#gdWandPanel .gdWandActions{
+  grid-template-columns:1fr 1fr!important;
+  gap:8px!important;
+}
+#gdWandPanel .gdWandActions button{
+  min-height:42px!important;
+  padding:9px 8px!important;
+  border-radius:14px!important;
+}
+#gdWandScanBtn,
+#gdWandRejectBtn,
+#gdCalibrationSaveBtn{display:none!important}
+#gdWandExitBtn{background:rgba(255,255,255,.08)!important;color:#fff!important}
+@media(max-width:430px){
+  #gdWandPanel{left:12px!important;right:12px!important}
+}

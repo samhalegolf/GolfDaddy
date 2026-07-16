@@ -1,0 +1,45 @@
+#statsPanel.open > .sheet > .gdShotBubbleOverlayControls{
+  display:none!important;
+  visibility:hidden!important;
+  pointer-events:none!important;
+}
+#statsPanel.open .gdStatsFilterDetails{
+  display:block!important;
+  width:100%!important;
+}
+#statsPanel.open .gdStatsFilterDetails summary{
+  display:flex!important;
+  align-items:center!important;
+  justify-content:space-between!important;
+  gap:10px!important;
+  min-height:44px!important;
+  border-radius:16px!important;
+  border:1px solid rgba(255,255,255,.10)!important;
+  background:rgba(255,255,255,.055)!important;
+  color:#fff!important;
+  padding:0 14px!important;
+  cursor:pointer!important;
+  list-style:none!important;
+  font-size:12px!important;
+  font-weight:950!important;
+  letter-spacing:.08em!important;
+  text-transform:uppercase!important;
+}
+#statsPanel.open .gdStatsFilterDetails summary::-webkit-details-marker{display:none}
+#statsPanel.open .gdStatsFilterDetails summary:after{
+  content:"+";
+  font-size:18px;
+  line-height:1;
+  color:rgba(255,255,255,.70);
+}
+#statsPanel.open .gdStatsFilterDetails[open] summary{
+  border-color:rgba(31,211,109,.36)!important;
+  background:linear-gradient(180deg,rgba(31,211,109,.18),rgba(31,211,109,.07))!important;
+}
+#statsPanel.open .gdStatsFilterDetails[open] summary:after{content:"-"}
+#statsPanel.open .gdStatsFilterDetails .gdStatsFilters{
+  margin-top:8px!important;
+}
+#statsPanel.open .gdStatsFilterDetails:not([open]) .gdStatsFilters{
+  display:none!important;
+}

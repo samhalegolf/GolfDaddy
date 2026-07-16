@@ -1,0 +1,60 @@
+.gdGreenFocusBall{
+  width:34px;
+  height:34px;
+  border-radius:999px;
+  background:
+    radial-gradient(circle at 39% 34%, rgba(255,255,255,.98) 0 3px, transparent 3.4px),
+    radial-gradient(circle at 58% 31%, rgba(216,226,216,.86) 0 2.4px, transparent 2.8px),
+    radial-gradient(circle at 49% 49%, rgba(194,211,193,.72) 0 2.2px, transparent 2.7px),
+    radial-gradient(circle at 33% 63%, rgba(176,195,176,.66) 0 2.1px, transparent 2.7px),
+    radial-gradient(circle at 64% 66%, rgba(170,190,170,.58) 0 2.2px, transparent 2.8px),
+    radial-gradient(circle at 39% 30%, #fff 0%, #f6f8f1 35%, #dce5d7 65%, #9caf96 100%);
+  border:2px solid rgba(255,255,255,.96);
+  box-shadow:
+    inset -7px -9px 12px rgba(63,86,58,.32),
+    inset 6px 6px 10px rgba(255,255,255,.58),
+    0 0 0 6px rgba(88,220,126,.22),
+    0 0 30px rgba(88,220,126,.88),
+    0 16px 32px rgba(0,0,0,.45);
+}
+
+body.shell-gps .rightRail #gdGpsSnapZoomBtn,
+body.gdGpsActive .rightRail #gdGpsSnapZoomBtn,
+body[data-gd-tool-screen="mapped"] #gdGpsSnapZoomBtn,
+body[data-gd-tool-screen="unmapped"] #gdGpsSnapZoomBtn{
+  display:grid!important;
+  visibility:visible!important;
+  pointer-events:auto!important;
+  order:4!important;
+}
+
+body.shell-gps .rightRail #gdGpsSnapZoomBtn svg{
+  width:30px;
+  height:30px;
+  display:block;
+  stroke:currentColor;
+}
+
+body.gdMappedStartPromptActive #gdGpsSnapZoomBtn,
+body.gdGreenArrivalMode #gdGpsSnapZoomBtn{
+  opacity:1!important;
+  filter:none!important;
+  pointer-events:auto!important;
+}
+
+body.gdMappedStartPromptActive .leaflet-container,
+body.gdGreenArrivalMode .leaflet-container{
+  cursor:zoom-in!important;
+}
+
+body.gdGreenArrivalMode .greenLabel,
+body.gdGreenArrivalMode .yardLabel.edgeLabel,
+body.gdGreenArrivalMode .remainingGreenLabel,
+body.gdGreenArrivalMode .gdMiddleGuideLabel{
+  display:none!important;
+}
+
+body.gdMappedSnapCameraActive .leaflet-marker-pane,
+body.gdMappedSnapCameraActive .leaflet-overlay-pane{
+  transition:opacity .16s ease;
+}

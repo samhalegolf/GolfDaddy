@@ -1,0 +1,423 @@
+body.gdMappedStartPromptActive .gdNextHolePopout,
+body.gdMappedStartPromptActive .gdHoleSelectTray{
+  opacity:1!important;
+  filter:none!important;
+  pointer-events:auto!important;
+}
+body.gdMappedStartPromptActive #gdV62GpsBadge{
+  opacity:1!important;
+  filter:none!important;
+  pointer-events:auto!important;
+  z-index:2550!important;
+}
+body.gdGreenArrivalMode .targetDot,
+body.gdGreenArrivalMode .gdBubbleDragHit,
+body.gdGreenArrivalMode #gdCapturedBubbleDragHit,
+body.gdGreenArrivalMode .gdAimRecognitionFleck,
+body.gdGreenArrivalMode .greenLabel,
+body.gdGreenArrivalMode .yardLabel.edgeLabel,
+body.gdGreenArrivalMode .remainingGreenLabel,
+body.gdGreenArrivalMode .gdMiddleGuideLabel{
+  display:none!important;
+}
+body.gdGreenArrivalMode .leaflet-marker-icon:has(.gdGreenFocusBall),
+body.gdGreenArrivalMode .startDot{
+  opacity:0!important;
+}
+body.shell-gps #gdV62UndoDock #gdGpsClearBtn,
+body.gdGpsActive #gdV62UndoDock #gdGpsClearBtn,
+body.gps-active #gdV62UndoDock #gdGpsClearBtn{
+  font-size:13px!important;
+  color:#121819!important;
+}
+body.shell-gps #gdV62UndoDock #gdGpsClearBtn::after,
+body.gdGpsActive #gdV62UndoDock #gdGpsClearBtn::after,
+body.gps-active #gdV62UndoDock #gdGpsClearBtn::after{
+  content:"";
+  position:absolute;
+  inset:10px;
+  border-radius:inherit;
+  pointer-events:none;
+  opacity:.18;
+  background:
+    radial-gradient(circle at 22% 24%, rgba(108,120,145,.55) 0 1.3px, transparent 1.6px),
+    radial-gradient(circle at 68% 34%, rgba(108,120,145,.45) 0 1px, transparent 1.4px),
+    radial-gradient(circle at 40% 70%, rgba(108,120,145,.38) 0 1.1px, transparent 1.5px),
+    radial-gradient(circle at 78% 72%, rgba(108,120,145,.34) 0 1px, transparent 1.4px);
+}
+body.shell-gps #gdV62UndoDock #gdV62NewShotBtn,
+body.gdGpsActive #gdV62UndoDock #gdV62NewShotBtn,
+body.gps-active #gdV62UndoDock #gdV62NewShotBtn{
+  overflow:hidden!important;
+}
+body.shell-gps #gdV62UndoDock #gdV62NewShotBtn::after,
+body.gdGpsActive #gdV62UndoDock #gdV62NewShotBtn::after,
+body.gps-active #gdV62UndoDock #gdV62NewShotBtn::after{
+  content:"";
+  position:absolute;
+  inset:8px;
+  border-radius:inherit;
+  pointer-events:none;
+  opacity:.18;
+  background:
+    radial-gradient(circle at 24% 28%, rgba(118,132,158,.62) 0 1.4px, transparent 1.8px),
+    radial-gradient(circle at 53% 19%, rgba(118,132,158,.44) 0 1.1px, transparent 1.5px),
+    radial-gradient(circle at 70% 48%, rgba(118,132,158,.50) 0 1.2px, transparent 1.7px),
+    radial-gradient(circle at 34% 70%, rgba(118,132,158,.42) 0 1.1px, transparent 1.6px),
+    radial-gradient(circle at 76% 76%, rgba(118,132,158,.36) 0 1px, transparent 1.5px);
+}
+.gdGreenFocusScreenBall{
+  position:fixed;
+  width:36px;
+  height:36px;
+  margin:-18px 0 0 -18px;
+  border-radius:999px;
+  z-index:2525;
+  display:none;
+  touch-action:none;
+  cursor:grab;
+  background:
+    radial-gradient(circle at 38% 33%, rgba(255,255,255,.98) 0 3px, transparent 3.4px),
+    radial-gradient(circle at 58% 31%, rgba(215,226,215,.86) 0 2.2px, transparent 2.8px),
+    radial-gradient(circle at 49% 49%, rgba(194,211,193,.7) 0 2px, transparent 2.6px),
+    radial-gradient(circle at 33% 63%, rgba(176,195,176,.62) 0 2px, transparent 2.6px),
+    radial-gradient(circle at 64% 66%, rgba(170,190,170,.56) 0 2px, transparent 2.6px),
+    radial-gradient(circle at 39% 30%, #fff 0%, #f6f8f1 35%, #dce5d7 65%, #9caf96 100%);
+  border:2px solid rgba(255,255,255,.96);
+  box-shadow:
+    inset -7px -9px 12px rgba(63,86,58,.32),
+    inset 6px 6px 10px rgba(255,255,255,.58),
+    0 0 0 7px rgba(88,220,126,.22),
+    0 0 30px rgba(88,220,126,.88),
+    0 16px 32px rgba(0,0,0,.45);
+}
+body.gdGreenArrivalMode .gdGreenFocusScreenBall{
+  display:block;
+}
+.gdGreenFocusScreenBall.dragging{
+  cursor:grabbing;
+  box-shadow:
+    inset -7px -9px 12px rgba(63,86,58,.32),
+    inset 6px 6px 10px rgba(255,255,255,.58),
+    0 0 0 9px rgba(88,220,126,.28),
+    0 0 38px rgba(88,220,126,.96),
+    0 20px 38px rgba(0,0,0,.5);
+}
+body.shell-gps .shotTile .tileMetricValue,
+body.gdGpsActive .shotTile .tileMetricValue,
+body.gps-active .shotTile .tileMetricValue,
+body.shell-gps .shotTile .tileSmallValue,
+body.gdGpsActive .shotTile .tileSmallValue,
+body.gps-active .shotTile .tileSmallValue{
+  font-variant-numeric:tabular-nums!important;
+  white-space:nowrap!important;
+}
+body.shell-gps .shotTile .tileClub,
+body.gdGpsActive .shotTile .tileClub,
+body.gps-active .shotTile .tileClub,
+body.shell-gps .shotTile .tileDist,
+body.gdGpsActive .shotTile .tileDist,
+body.gps-active .shotTile .tileDist{
+  min-width:0!important;
+  overflow:hidden!important;
+  text-overflow:ellipsis!important;
+}
+body.shell-gps #shotTile.visible,
+body.gdGpsActive #shotTile.visible,
+body.gps-active #shotTile.visible{
+  width:188px!important;
+  min-width:188px!important;
+  max-width:188px!important;
+  height:112px!important;
+  min-height:112px!important;
+  padding:0!important;
+  overflow:hidden!important;
+}
+body.shell-gps #shotTile .gdShotHoleChip,
+body.gdGpsActive #shotTile .gdShotHoleChip,
+body.gps-active #shotTile .gdShotHoleChip{
+  display:none!important;
+}
+body.shell-gps #shotTile .tileTop,
+body.gdGpsActive #shotTile .tileTop,
+body.gps-active #shotTile .tileTop{
+  display:none!important;
+}
+body.shell-gps #shotTile .tileBack,
+body.gdGpsActive #shotTile .tileBack,
+body.gps-active #shotTile .tileBack{
+  position:absolute!important;
+  top:7px!important;
+  left:9px!important;
+  right:auto!important;
+  width:78px!important;
+  transform:none!important;
+  text-align:left!important;
+  max-width:none!important;
+  display:flex!important;
+  align-items:baseline!important;
+  justify-content:flex-start!important;
+  gap:2px!important;
+}
+body.shell-gps #shotTile .tilePlays,
+body.gdGpsActive #shotTile .tilePlays,
+body.gps-active #shotTile .tilePlays{
+  display:flex!important;
+  position:absolute!important;
+  right:9px!important;
+  left:auto!important;
+  top:7px!important;
+  bottom:auto!important;
+  width:70px!important;
+  height:22px!important;
+  transform:none!important;
+  flex-direction:row!important;
+  align-items:baseline!important;
+  justify-content:flex-end!important;
+  gap:3px!important;
+  text-align:right!important;
+  opacity:.9!important;
+}
+body.shell-gps #shotTile .tileClub,
+body.gdGpsActive #shotTile .tileClub,
+body.gps-active #shotTile .tileClub{
+  position:absolute!important;
+  left:12px!important;
+  top:50%!important;
+  right:auto!important;
+  bottom:auto!important;
+  width:66px!important;
+  height:68px!important;
+  transform:translateY(-50%)!important;
+  display:flex!important;
+  align-items:center!important;
+  justify-content:center!important;
+  text-align:center!important;
+}
+body.shell-gps #shotTile .tileDist,
+body.gdGpsActive #shotTile .tileDist,
+body.gps-active #shotTile .tileDist{
+  position:absolute!important;
+  left:94px!important;
+  right:8px!important;
+  top:36px!important;
+  bottom:auto!important;
+  width:auto!important;
+  height:66px!important;
+  transform:none!important;
+  display:flex!important;
+  flex-direction:column!important;
+  align-items:center!important;
+  justify-content:center!important;
+  gap:0!important;
+  text-align:center!important;
+}
+body.shell-gps #shotTile .tilePrimary,
+body.gdGpsActive #shotTile .tilePrimary,
+body.gps-active #shotTile .tilePrimary{
+  position:absolute!important;
+  left:76px!important;
+  right:auto!important;
+  top:58px!important;
+  bottom:auto!important;
+  width:34px!important;
+  min-width:34px!important;
+  height:28px!important;
+  transform:none!important;
+  display:flex!important;
+  flex-direction:column-reverse!important;
+  align-items:center!important;
+  justify-content:center!important;
+  gap:1px!important;
+  text-align:center!important;
+}
+body.shell-gps #shotTile .tileFront,
+body.gdGpsActive #shotTile .tileFront,
+body.gps-active #shotTile .tileFront{
+  position:absolute!important;
+  left:9px!important;
+  right:auto!important;
+  width:80px!important;
+  top:auto!important;
+  bottom:7px!important;
+  transform:none!important;
+  text-align:left!important;
+  max-width:none!important;
+  display:flex!important;
+  align-items:baseline!important;
+  justify-content:flex-start!important;
+  gap:2px!important;
+}
+body.shell-gps #shotTile .tileMeta,
+body.gdGpsActive #shotTile .tileMeta,
+body.gps-active #shotTile .tileMeta,
+body.shell-gps #shotTile .tilePinMetric,
+body.gdGpsActive #shotTile .tilePinMetric,
+body.gps-active #shotTile .tilePinMetric{
+  display:none!important;
+}
+body.shell-gps #shotTile .tileClub .tileMetricLabel,
+body.gdGpsActive #shotTile .tileClub .tileMetricLabel,
+body.gps-active #shotTile .tileClub .tileMetricLabel,
+body.shell-gps #shotTile .tileDist .tileMetricLabel,
+body.gdGpsActive #shotTile .tileDist .tileMetricLabel,
+body.gps-active #shotTile .tileDist .tileMetricLabel{
+  display:none!important;
+}
+body.shell-gps #shotTile .tileBack .tileMetricLabel,
+body.gdGpsActive #shotTile .tileBack .tileMetricLabel,
+body.gps-active #shotTile .tileBack .tileMetricLabel,
+body.shell-gps #shotTile .tileFront .tileMetricLabel,
+body.gdGpsActive #shotTile .tileFront .tileMetricLabel,
+body.gps-active #shotTile .tileFront .tileMetricLabel,
+body.shell-gps #shotTile .tileDist .tileMetricLabel,
+body.gdGpsActive #shotTile .tileDist .tileMetricLabel,
+body.gps-active #shotTile .tileDist .tileMetricLabel{
+  display:inline!important;
+}
+body.shell-gps #shotTile .tileClub .tileMetricValue,
+body.gdGpsActive #shotTile .tileClub .tileMetricValue,
+body.gps-active #shotTile .tileClub .tileMetricValue{
+  max-width:58px!important;
+  font-size:34px!important;
+  line-height:.9!important;
+  letter-spacing:-.055em!important;
+  text-align:center!important;
+  overflow:hidden!important;
+  text-overflow:clip!important;
+}
+body.shell-gps #shotTile .tileDist .tileMetricValue,
+body.gdGpsActive #shotTile .tileDist .tileMetricValue,
+body.gps-active #shotTile .tileDist .tileMetricValue{
+  max-width:80px!important;
+  font-size:31px!important;
+  line-height:.88!important;
+  letter-spacing:-.06em!important;
+  text-align:center!important;
+}
+body.shell-gps #shotTile .tileDist.slopeOver .tileMetricValue,
+body.gdGpsActive #shotTile .tileDist.slopeOver .tileMetricValue,
+body.gps-active #shotTile .tileDist.slopeOver .tileMetricValue{
+  color:#fff!important;
+}
+body.shell-gps #shotTile .tileDist.slopeUnder .tileMetricValue,
+body.shell-gps #shotTile .tileDist.slopeLevel .tileMetricValue,
+body.gdGpsActive #shotTile .tileDist.slopeUnder .tileMetricValue,
+body.gdGpsActive #shotTile .tileDist.slopeLevel .tileMetricValue,
+body.gps-active #shotTile .tileDist.slopeUnder .tileMetricValue,
+body.gps-active #shotTile .tileDist.slopeLevel .tileMetricValue{
+  color:#fff!important;
+}
+body.shell-gps #shotTile .tileDist .tileMetricValue span,
+body.gdGpsActive #shotTile .tileDist .tileMetricValue span,
+body.gps-active #shotTile .tileDist .tileMetricValue span{
+  font-size:.42em!important;
+  margin-left:1px!important;
+}
+body.shell-gps #shotTile .tileBack .tileMetricLabel,
+body.gdGpsActive #shotTile .tileBack .tileMetricLabel,
+body.gps-active #shotTile .tileBack .tileMetricLabel,
+body.shell-gps #shotTile .tileFront .tileMetricLabel,
+body.gdGpsActive #shotTile .tileFront .tileMetricLabel,
+body.gps-active #shotTile .tileFront .tileMetricLabel,
+body.shell-gps #shotTile .tilePlays .tileMetricLabel,
+body.gdGpsActive #shotTile .tilePlays .tileMetricLabel,
+body.gps-active #shotTile .tilePlays .tileMetricLabel{
+  font-size:8px!important;
+  line-height:1!important;
+  display:inline!important;
+  opacity:.78!important;
+}
+body.shell-gps #shotTile .tileDist .tileMetricLabel,
+body.gdGpsActive #shotTile .tileDist .tileMetricLabel,
+body.gps-active #shotTile .tileDist .tileMetricLabel{
+  font-size:9px!important;
+  line-height:1!important;
+  display:block!important;
+  opacity:.78!important;
+  text-transform:uppercase!important;
+}
+body.shell-gps #shotTile .tileBack .tileMetricValue,
+body.gdGpsActive #shotTile .tileBack .tileMetricValue,
+body.gps-active #shotTile .tileBack .tileMetricValue,
+body.shell-gps #shotTile .tileFront .tileMetricValue,
+body.gdGpsActive #shotTile .tileFront .tileMetricValue,
+body.gps-active #shotTile .tileFront .tileMetricValue,
+body.shell-gps #shotTile .tilePlays .tileMetricValue,
+body.gdGpsActive #shotTile .tilePlays .tileMetricValue,
+body.gps-active #shotTile .tilePlays .tileMetricValue{
+  font-size:12px!important;
+  line-height:1!important;
+}
+body.shell-gps #shotTile .tilePlays .tileMetricLabel,
+body.gdGpsActive #shotTile .tilePlays .tileMetricLabel,
+body.gps-active #shotTile .tilePlays .tileMetricLabel{
+  font-size:8px!important;
+}
+body.shell-gps #shotTile .tilePlays .tileMetricValue,
+body.gdGpsActive #shotTile .tilePlays .tileMetricValue,
+body.gps-active #shotTile .tilePlays .tileMetricValue{
+  font-size:12px!important;
+}
+body.shell-gps #shotTile .tileBack .tileMetricValue span,
+body.gdGpsActive #shotTile .tileBack .tileMetricValue span,
+body.gps-active #shotTile .tileBack .tileMetricValue span,
+body.shell-gps #shotTile .tileFront .tileMetricValue span,
+body.gdGpsActive #shotTile .tileFront .tileMetricValue span,
+body.gps-active #shotTile .tileFront .tileMetricValue span,
+body.shell-gps #shotTile .tilePlays .tileMetricValue span,
+body.gdGpsActive #shotTile .tilePlays .tileMetricValue span,
+body.gps-active #shotTile .tilePlays .tileMetricValue span{
+  font-size:.42em!important;
+  margin-left:1px!important;
+}
+body.shell-gps #shotTile .tileStockMetric .tileMetricLabel,
+body.gdGpsActive #shotTile .tileStockMetric .tileMetricLabel,
+body.gps-active #shotTile .tileStockMetric .tileMetricLabel{
+  font-size:7px!important;
+  line-height:1!important;
+  display:block!important;
+  opacity:.72!important;
+}
+body.shell-gps #shotTile .tileStockMetric .tileSmallValue,
+body.gdGpsActive #shotTile .tileStockMetric .tileSmallValue,
+body.gps-active #shotTile .tileStockMetric .tileSmallValue{
+  font-size:10px!important;
+  line-height:1!important;
+  display:block!important;
+  font-weight:950!important;
+}
+body.shell-gps #shotTile .tileStockMetric .tileSmallValue span,
+body.gdGpsActive #shotTile .tileStockMetric .tileSmallValue span,
+body.gps-active #shotTile .tileStockMetric .tileSmallValue span{
+  font-size:.5em!important;
+  margin-left:1px!important;
+}
+body.shell-gps #shotTile .tileCarryLabel,
+body.gdGpsActive #shotTile .tileCarryLabel,
+body.gps-active #shotTile .tileCarryLabel{
+  display:block!important;
+  margin-top:2px!important;
+  font-size:8px!important;
+  line-height:1!important;
+  font-weight:900!important;
+  color:rgba(246,248,251,.62)!important;
+  text-transform:none!important;
+}
+body.shell-gps #shotTile .tileCarryValue,
+body.gdGpsActive #shotTile .tileCarryValue,
+body.gps-active #shotTile .tileCarryValue{
+  display:block!important;
+  font-size:15px!important;
+  line-height:1!important;
+  font-weight:950!important;
+  color:rgba(246,248,251,.78)!important;
+  letter-spacing:-.035em!important;
+}
+body.shell-gps #shotTile .tileCarryValue span,
+body.gdGpsActive #shotTile .tileCarryValue span,
+body.gps-active #shotTile .tileCarryValue span{
+  font-size:.55em!important;
+  margin-left:1px!important;
+  color:rgba(246,248,251,.62)!important;
+}

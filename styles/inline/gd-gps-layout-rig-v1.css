@@ -1,0 +1,172 @@
+body.gdGpsActive #gdV62UndoBtn,
+body.shell-gps #gdV62UndoBtn{
+  display:none!important;
+  visibility:hidden!important;
+  pointer-events:none!important;
+}
+body.gdGpsActive #gdV62UndoDock,
+body.shell-gps #gdV62UndoDock{
+  inset:0!important;
+  transform:none!important;
+}
+body.gdMappedStartPromptActive #gdV62UndoDock{
+  inset:0!important;
+  transform:none!important;
+}
+body.gdMappedStartPromptActive #gdV62NewShotBtn{
+  left:50%!important;
+  bottom:calc(16px + env(safe-area-inset-bottom))!important;
+  min-width:92px!important;
+  width:92px!important;
+  height:42px!important;
+  border-radius:16px!important;
+  padding:0 10px!important;
+  font-size:13px!important;
+}
+body.gdGpsLayoutRigOn:not(.gdMappedStartPromptActive) #gdV62UndoDock{
+  inset:0!important;
+  transform:none!important;
+}
+body.gdGpsActive .gdNextHolePopout,
+body.shell-gps .gdNextHolePopout,
+body.gps-active .gdNextHolePopout{
+  left:12px!important;
+  right:auto!important;
+  bottom:calc(16px + env(safe-area-inset-bottom))!important;
+  width:158px!important;
+  z-index:1848!important;
+}
+body.gdGpsActive .gdHoleSelectTray,
+body.shell-gps .gdHoleSelectTray,
+body.gps-active .gdHoleSelectTray{
+  left:12px!important;
+  right:auto!important;
+  bottom:calc(84px + env(safe-area-inset-bottom))!important;
+  width:min(312px,calc(100vw - 24px))!important;
+  z-index:1849!important;
+}
+@media(max-width:390px){
+  body.gdGpsActive .gdNextHolePopout,
+  body.shell-gps .gdNextHolePopout,
+  body.gps-active .gdNextHolePopout{
+    width:148px!important;
+    grid-template-columns:40px 1fr 40px!important;
+  }
+  body.gdGpsActive #gdV62NewShotBtn,
+  body.shell-gps #gdV62NewShotBtn{
+    left:50%!important;
+    min-width:76px!important;
+    width:76px!important;
+    padding-left:8px!important;
+    padding-right:8px!important;
+    font-size:12px!important;
+  }
+}
+.gdGpsLayoutRig{
+  position:fixed;
+  inset:0;
+  z-index:3600;
+  pointer-events:none;
+  display:none;
+  color:#d9f99d;
+  font-family:inherit;
+}
+body.gdGpsLayoutRigOn .gdGpsLayoutRig{
+  display:block;
+}
+.gdGpsLayoutRig:before{
+  content:"GPS layout rig";
+  position:absolute;
+  left:50%;
+  top:calc(max(8px,env(safe-area-inset-top)) + 8px);
+  transform:translateX(-50%);
+  padding:6px 10px;
+  border-radius:999px;
+  border:1px solid rgba(217,249,157,.38);
+  background:rgba(2,6,4,.72);
+  color:#d9f99d;
+  font-size:11px;
+  font-weight:950;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+}
+.gdGpsLayoutRig .gdRigToggle{
+  position:absolute;
+  left:50%;
+  top:calc(max(8px,env(safe-area-inset-top)) + 42px);
+  transform:translateX(-50%);
+  pointer-events:auto;
+  height:32px;
+  padding:0 12px;
+  border-radius:999px;
+  border:1px solid rgba(217,249,157,.34);
+  background:rgba(2,6,4,.78);
+  color:#d9f99d;
+  font-size:10px;
+  font-weight:950;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+}
+.gdGpsLayoutRig .gdRigZone{
+  position:absolute;
+  border:1px dashed rgba(217,249,157,.58);
+  background:rgba(217,249,157,.055);
+  border-radius:16px;
+  box-shadow:inset 0 0 0 1px rgba(0,0,0,.28);
+}
+.gdGpsLayoutRig .gdRigZone span{
+  position:absolute;
+  left:8px;
+  top:7px;
+  padding:3px 6px;
+  border-radius:999px;
+  background:rgba(2,6,4,.74);
+  color:#d9f99d;
+  font-size:10px;
+  line-height:1;
+  font-weight:950;
+  white-space:nowrap;
+}
+.gdGpsLayoutRig .gdRigTop{left:10px;right:10px;top:calc(max(8px,env(safe-area-inset-top)) + 52px);height:58px}
+.gdGpsLayoutRig .gdRigRail{right:8px;top:calc(max(10px,env(safe-area-inset-top)) + 58px);width:70px;height:min(560px,calc(100vh - 168px))}
+.gdGpsLayoutRig .gdRigShot{left:10px;bottom:calc(92px + env(safe-area-inset-bottom));width:168px;height:122px}
+.gdGpsLayoutRig .gdRigHole{left:10px;bottom:calc(12px + env(safe-area-inset-bottom));width:164px;height:66px}
+.gdGpsLayoutRig .gdRigUnlock{
+  left:calc(50% - 46px);
+  bottom:calc(12px + env(safe-area-inset-bottom));
+  width:92px;
+  height:50px;
+  border-color:rgba(217,249,157,.72);
+}
+.gdGpsLayoutRig .gdRigAction{
+  right:10px;
+  left:auto;
+  bottom:calc(12px + env(safe-area-inset-bottom));
+  width:128px;
+  height:128px;
+  transform:none;
+  border-color:rgba(98,210,255,.88);
+  background:rgba(98,210,255,.08);
+}
+.gdGpsLayoutRig .gdRigAction span{
+  left:8px;
+  top:7px;
+  transform:none;
+}
+.gdGpsLayoutRig .gdRigMap{
+  left:50%;
+  top:50%;
+  width:min(28vw,210px);
+  height:min(62vh,520px);
+  transform:translate(-50%,-50%);
+  border-color:rgba(98,210,255,.58);
+  background:rgba(98,210,255,.045);
+  color:#7dd3fc;
+}
+body.gdGpsLayoutRigOn .shotTile,
+body.gdGpsLayoutRigOn .rightRail,
+body.gdGpsLayoutRigOn #gdV62UndoDock,
+body.gdGpsLayoutRigOn .gdNextHolePopout{
+  outline:2px solid rgba(217,249,157,.72)!important;
+  outline-offset:3px!important;
+}

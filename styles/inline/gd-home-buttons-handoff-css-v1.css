@@ -1,0 +1,245 @@
+#shellHome:not(.hidden){
+  z-index:7300!important;
+  display:block!important;
+  min-height:100dvh!important;
+  padding:calc(24px + env(safe-area-inset-top)) 18px calc(22px + env(safe-area-inset-bottom))!important;
+  overflow:auto!important;
+  background:
+    radial-gradient(circle at 50% 8%,rgba(32,190,93,.18),transparent 30%),
+    radial-gradient(circle at 50% 42%,rgba(36,121,64,.20),transparent 46%),
+    linear-gradient(180deg,#050706 0%,#020302 62%,#000 100%)!important;
+}
+#shellHome > #gdV62Home ~ *{display:none!important}
+#shellHome > :not(#gdV62Home){display:none!important}
+#shellHome:not(.hidden) ~ #shellTop,
+#shellHome:not(.hidden) ~ #shellDock{
+  display:none!important;
+  visibility:hidden!important;
+  pointer-events:none!important;
+}
+.shellTop .shellLogoBtn{
+  display:none!important;
+  visibility:hidden!important;
+  pointer-events:none!important;
+}
+.shellTop .shellLogoBtn:before,
+.shellHome .shellLogo:before{
+  content:none!important;
+  display:none!important;
+}
+#gdV62Home{
+  width:min(100%,720px)!important;
+  min-height:calc(100dvh - 46px - env(safe-area-inset-top) - env(safe-area-inset-bottom))!important;
+  margin:0 auto!important;
+  padding:0!important;
+  display:flex!important;
+  flex-direction:column!important;
+  justify-content:center!important;
+  gap:20px!important;
+  color:#f7faf7!important;
+}
+#gdV62Home .gdHomeHeader{
+  position:relative!important;
+  width:min(100%,620px)!important;
+  margin:0 auto!important;
+  text-align:left!important;
+  padding:0!important;
+}
+#gdV62Home .gdHomeBrand{
+  appearance:none!important;
+  border:0!important;
+  background:transparent!important;
+  color:#fff!important;
+  padding:0!important;
+  font-family:"SF Pro Rounded","Avenir Next",ui-rounded,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif!important;
+  font-size:clamp(22px,5.6vw,34px)!important;
+  line-height:1!important;
+  font-weight:620!important;
+  letter-spacing:0!important;
+  text-align:left!important;
+  cursor:pointer!important;
+}
+#gdV62Home .gdHomeBrandInner{
+  display:inline-flex!important;
+  align-items:center!important;
+  justify-content:flex-start!important;
+  gap:12px!important;
+}
+.gdClarityMark{
+  display:inline-flex!important;
+  align-items:center!important;
+  justify-content:center!important;
+  width:62px!important;
+  height:62px!important;
+  flex:0 0 62px!important;
+  filter:drop-shadow(0 8px 14px rgba(0,0,0,.28))!important;
+}
+.gdClarityMark svg{display:block!important;width:100%!important;height:100%!important}
+.gdClarityMark img{display:block!important;width:100%!important;height:100%!important;object-fit:contain!important}
+#gdV62Home .gdHomeBrandText{
+  display:inline-block!important;
+}
+#gdV62Home .gdHomeTagline{
+  max-width:680px!important;
+  margin-left:auto!important;
+  margin-right:auto!important;
+}
+#gdV62Home .gdHomeTagline{
+  margin-top:7px!important;
+  color:#07482c!important;
+  font-family:"SF Pro Rounded","Avenir Next",ui-rounded,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif!important;
+  font-size:clamp(14px,3.2vw,22px)!important;
+  line-height:1.1!important;
+  font-weight:520!important;
+  letter-spacing:0!important;
+}
+#gdV62Home .gdHomeTagline span{color:inherit!important}
+#gdV62Home .gdHomeTagline .gdTaglineGreen{color:#07482c!important}
+#gdV62Home .gdHomeTagline .gdTaglineOrange{color:#ff9d06!important}
+#gdV62Home .gdHomeTagline .gdTaglineBlack{color:#010101!important}
+.gdHomeTileLabel .gdHomeTileKicker{
+  display:block!important;
+  margin-bottom:5px!important;
+  color:#42b66a!important;
+  font-size:clamp(10px,2vw,14px)!important;
+  line-height:1!important;
+  font-weight:780!important;
+  letter-spacing:.06em!important;
+}
+.gdHomeTileLabel .gdHomeTileAction{
+  display:block!important;
+  color:#fff!important;
+}
+.gdHomeTileLabel .gdHomeTileSub{
+  display:block!important;
+  margin-top:7px!important;
+  max-width:12em!important;
+  color:rgba(255,255,255,.72)!important;
+  font-size:clamp(10px,2.1vw,13px)!important;
+  line-height:1.15!important;
+  font-weight:680!important;
+  letter-spacing:0!important;
+  text-transform:none!important;
+}
+.courseHeader .brand .logo{
+  display:grid!important;
+  place-items:center!important;
+  background:transparent!important;
+  box-shadow:0 10px 24px rgba(0,0,0,.28)!important;
+  border:0!important;
+}
+.courseHeader .brand .logo svg,
+.courseHeader .brand .logo img{display:block!important;width:100%!important;height:100%!important;object-fit:contain!important}
+#gdV62Home .gdHomeAdminSettings{
+  display:none!important;
+  position:absolute!important;
+  top:2px!important;
+  left:4px!important;
+  min-height:38px!important;
+  padding:0 14px!important;
+  border-radius:999px!important;
+  border:1px solid rgba(255,255,255,.14)!important;
+  background:rgba(255,255,255,.075)!important;
+  color:#f4f7f5!important;
+  font-size:13px!important;
+  line-height:1!important;
+  font-weight:950!important;
+  letter-spacing:0!important;
+  cursor:pointer!important;
+  box-shadow:0 12px 28px rgba(0,0,0,.28)!important;
+}
+body[data-gd-permission="admin"] #gdV62Home .gdHomeAdminSettings{display:inline-flex!important;align-items:center!important;justify-content:center!important}
+#gdV62Home .gdHomePlayerSettings{
+  display:none!important;
+  position:absolute!important;
+  top:2px!important;
+  right:4px!important;
+  min-height:38px!important;
+  padding:0 14px!important;
+  border-radius:999px!important;
+  border:1px solid rgba(255,255,255,.14)!important;
+  background:rgba(255,255,255,.075)!important;
+  color:#f4f7f5!important;
+  font-size:13px!important;
+  line-height:1!important;
+  font-weight:950!important;
+  letter-spacing:0!important;
+  cursor:pointer!important;
+  box-shadow:0 12px 28px rgba(0,0,0,.28)!important;
+}
+#gdV62Home .gdHomePlayerSettings.visible{display:inline-flex!important;align-items:center!important;justify-content:center!important}
+@media (max-width:620px){
+  #gdV62Home .gdHomeAdminSettings,
+  #gdV62Home .gdHomePlayerSettings{position:static!important;margin:12px auto 0!important;width:max-content!important}
+}
+#gdV62Home .gdHomeTiles{
+  width:min(100%,620px)!important;
+  margin:0 auto!important;
+  display:grid!important;
+  grid-template-columns:repeat(2,minmax(0,1fr))!important;
+  gap:14px!important;
+}
+#gdV62Home .gdHomeTile{
+  position:relative!important;
+  aspect-ratio:1/1!important;
+  min-height:0!important;
+  border:1px solid rgba(255,255,255,.12)!important;
+  border-radius:8px!important;
+  background:
+    radial-gradient(circle at 58% 62%,rgba(38,201,93,.20),transparent 44%),
+    linear-gradient(180deg,rgba(22,34,26,.96),rgba(4,9,6,.98))!important;
+  box-shadow:0 20px 42px rgba(0,0,0,.42),inset 0 1px 0 rgba(255,255,255,.08)!important;
+  overflow:hidden!important;
+  padding:16px!important;
+  color:#fff!important;
+  cursor:pointer!important;
+  display:block!important;
+  text-align:left!important;
+}
+#gdV62Home .gdHomeTile:before{
+  content:""!important;
+  position:absolute!important;
+  inset:0!important;
+  background:linear-gradient(135deg,rgba(255,255,255,.08),transparent 34%,rgba(0,0,0,.22) 100%)!important;
+  pointer-events:none!important;
+}
+#gdV62Home .gdHomeTile:active{transform:translateY(1px)!important}
+#gdV62Home .gdHomeTileLabel{
+  position:absolute!important;
+  top:16px!important;
+  left:16px!important;
+  z-index:2!important;
+  display:block!important;
+  max-width:82%!important;
+  color:#f4f7f4!important;
+  font-family:"SF Pro Rounded","Avenir Next",ui-rounded,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif!important;
+  font-size:clamp(17px,4.7vw,32px)!important;
+  line-height:1!important;
+  font-weight:820!important;
+  letter-spacing:0!important;
+  text-shadow:0 2px 12px rgba(0,0,0,.48)!important;
+}
+#gdV62Home .gdHomeTileArt{
+  position:absolute!important;
+  z-index:1!important;
+  left:50%!important;
+  top:58%!important;
+  width:104%!important;
+  height:104%!important;
+  max-width:none!important;
+  max-height:none!important;
+  object-fit:contain!important;
+  transform:translate(-50%,-50%)!important;
+  filter:drop-shadow(0 18px 20px rgba(0,0,0,.38))!important;
+  pointer-events:none!important;
+}
+#gdV62Home .gdBubbleTile .gdHomeTileArt{top:60%;width:118%;height:118%;transform:translate(-50%,-50%) rotate(4deg)!important}
+#gdV62Home .gdBagTile .gdHomeTileArt{top:61%;width:96%;height:96%}
+#gdV62Home .gdProfileTile .gdHomeTileArt{top:61%;width:95%;height:95%}
+@media (max-width:430px){
+  #shellHome:not(.hidden){padding-left:14px!important;padding-right:14px!important}
+  #gdV62Home{gap:16px!important;justify-content:flex-start!important}
+  #gdV62Home .gdHomeTiles{gap:11px!important}
+  #gdV62Home .gdHomeTile{padding:13px!important}
+  #gdV62Home .gdHomeTileLabel{top:13px!important;left:13px!important}
+}

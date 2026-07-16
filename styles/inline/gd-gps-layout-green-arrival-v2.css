@@ -1,0 +1,281 @@
+body.gdGpsActive #gpsLive,
+body.gdGpsActive .gpsLive,
+body.gdGpsActive .gpsText,
+body.gdGpsActive .gpsLabel {
+  display: none !important;
+}
+
+body.gdGpsActive #gdV62ModeSwitch {
+  display: none !important;
+}
+
+body.gdGpsActive #gpsRailBtn {
+  border-color: rgba(88, 204, 126, .74) !important;
+  box-shadow: 0 0 0 1px rgba(88, 204, 126, .22), 0 10px 28px rgba(0, 0, 0, .45) !important;
+}
+
+body.gdGpsActive .gdNextHolePopout {
+  left: auto !important;
+  right: 92px !important;
+  bottom: auto !important;
+  top: calc(max(10px, env(safe-area-inset-top)) + 8px) !important;
+  width: 148px !important;
+  min-height: 54px !important;
+  z-index: 2345 !important;
+}
+
+body.gdGpsActive .gdNextHolePopout .gdNextHoleCurrent {
+  min-width: 54px !important;
+  padding: 7px 9px !important;
+}
+
+body.gdGpsActive .gdNextHolePopout .gdNextHoleButton {
+  width: 44px !important;
+  min-width: 44px !important;
+}
+
+body.gdGpsActive .gdHoleSelectTray {
+  left: auto !important;
+  right: 12px !important;
+  bottom: auto !important;
+  top: calc(max(10px, env(safe-area-inset-top)) + 72px) !important;
+  width: min(340px, calc(100vw - 24px)) !important;
+  z-index: 2360 !important;
+}
+
+body.gdGpsActive #gdV62UndoDock {
+  left: 0 !important;
+  right: 0 !important;
+  bottom: max(12px, env(safe-area-inset-bottom)) !important;
+  width: 100vw !important;
+  height: 114px !important;
+  padding: 0 14px !important;
+  display: grid !important;
+  grid-template-columns: minmax(72px, 92px) minmax(84px, 1fr) minmax(126px, 152px) !important;
+  align-items: end !important;
+  gap: 14px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  pointer-events: none !important;
+  z-index: 2210 !important;
+}
+
+body.gdGpsActive #gdV62NewShotBtn,
+body.gdGpsActive #gdV62LogShotBtn,
+body.gdGpsActive #gdGpsClearBtn {
+  pointer-events: auto !important;
+}
+
+body.gdGpsActive #gdV62NewShotBtn {
+  width: 78px !important;
+  height: 78px !important;
+  justify-self: center !important;
+  align-self: end !important;
+  border-radius: 999px !important;
+  border: 2px solid rgba(70, 91, 255, .9) !important;
+  color: #1137ff !important;
+  background:
+    radial-gradient(circle at 35% 31%, rgba(172, 183, 197, .34) 0 2px, transparent 2.4px),
+    radial-gradient(circle at 63% 31%, rgba(172, 183, 197, .28) 0 2px, transparent 2.4px),
+    radial-gradient(circle at 48% 50%, rgba(172, 183, 197, .20) 0 2px, transparent 2.5px),
+    radial-gradient(circle at 34% 68%, rgba(172, 183, 197, .26) 0 2px, transparent 2.4px),
+    radial-gradient(circle at 67% 68%, rgba(172, 183, 197, .22) 0 2px, transparent 2.4px),
+    radial-gradient(circle at 50% 48%, rgba(255, 255, 255, .98), rgba(235, 240, 246, .96) 63%, rgba(247, 250, 255, .72) 100%) !important;
+  box-shadow:
+    inset 0 -5px 14px rgba(80, 102, 142, .16),
+    inset 0 5px 10px rgba(255, 255, 255, .9),
+    0 12px 26px rgba(0, 0, 0, .42) !important;
+  font-size: 11px !important;
+  line-height: 1.02 !important;
+  letter-spacing: .01em !important;
+  text-align: center !important;
+}
+
+body.gdGpsActive #gdV62NewShotBtn::before {
+  content: "";
+  position: absolute;
+  inset: 7px;
+  border-radius: inherit;
+  border: 1px solid rgba(125, 138, 160, .16);
+  pointer-events: none;
+}
+
+body.gdGpsActive #gdV62LogShotBtn {
+  width: 144px !important;
+  height: 96px !important;
+  justify-self: end !important;
+  align-self: end !important;
+  border-radius: 16px !important;
+  background: rgba(0, 0, 0, .48) !important;
+  border: 1px solid rgba(255, 255, 255, .12) !important;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .04), 0 14px 32px rgba(0, 0, 0, .48) !important;
+}
+
+body.gdGpsActive #gdV62LogShotBtn .gdShotEndIcon {
+  width: 92px !important;
+  height: 66px !important;
+  margin-top: 0 !important;
+}
+
+body.gdGpsActive #gdV62LogShotBtn .gdShotEndText {
+  margin-top: 0 !important;
+  font-size: 11px !important;
+}
+
+body.gdGpsActive #gdGpsClearBtn {
+  width: 76px;
+  height: 58px;
+  justify-self: start;
+  align-self: end;
+  border-radius: 999px;
+  border: 2px solid rgba(70, 91, 255, .82);
+  background: rgba(245, 248, 255, .96);
+  color: #173bff;
+  font: 900 12px/1 var(--font, system-ui, sans-serif);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, .42), inset 0 1px 0 rgba(255, 255, 255, .9);
+  text-transform: none;
+}
+
+body.gdGpsActive .shotTile {
+  width: 142px !important;
+  height: 104px !important;
+  min-height: 104px !important;
+  padding: 7px 9px !important;
+  bottom: 126px !important;
+  left: 12px !important;
+  background: rgba(0, 0, 0, .42) !important;
+  border: 1px solid rgba(255, 255, 255, .14) !important;
+  border-radius: 14px !important;
+  backdrop-filter: blur(9px) saturate(1.05) !important;
+  -webkit-backdrop-filter: blur(9px) saturate(1.05) !important;
+}
+
+body.gdGpsActive .shotTile .tileClub {
+  font-size: 20px !important;
+}
+
+body.gdGpsActive .shotTile .tileDist {
+  font-size: 24px !important;
+}
+
+body.gdGpsActive .shotTile .tilePlays,
+body.gdGpsActive .shotTile .tileFront,
+body.gdGpsActive .shotTile .tileBack {
+  font-size: 10px !important;
+}
+
+body.gdGpsActive .shotTile .gdSetBagLink {
+  width: 42px !important;
+  height: 42px !important;
+  border-radius: 12px !important;
+  background: rgba(0, 0, 0, .28) !important;
+}
+
+body.gdGpsActive .shotTile .gdSetBagLink img,
+body.gdGpsActive .shotTile .gdSetBagLink svg {
+  width: 34px !important;
+  height: 34px !important;
+}
+
+body.gdMappedStartPromptActive #hint.gdMappedStartPill {
+  z-index: 2460 !important;
+  opacity: 1 !important;
+  transform: translateX(-50%) translateY(0) scale(1.01) !important;
+  box-shadow: 0 0 0 2px rgba(82, 218, 118, .28), 0 18px 48px rgba(0, 0, 0, .56) !important;
+  pointer-events: auto !important;
+}
+
+body.gdMappedStartPromptActive:not(.gdManualStartPlacementActive) #hint.gdMappedStartPill .gdMappedStartAction {
+  pointer-events: auto !important;
+}
+
+body.gdMappedStartPromptActive .rightRail,
+body.gdMappedStartPromptActive .shotTile,
+body.gdMappedStartPromptActive .gdNextHolePopout,
+body.gdMappedStartPromptActive #gdV62GpsBadge,
+body.gdMappedStartPromptActive #gdGpsClearBtn {
+  opacity: .28 !important;
+  filter: grayscale(.25) brightness(.68) !important;
+  pointer-events: none !important;
+}
+
+body.gdMappedStartPromptActive #shotTile,
+body.gdMappedStartPromptActive .shotTile.visible {
+  display: none !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+body.gdMappedStartPromptActive .targetDot,
+body.gdMappedStartPromptActive .gdBubbleDragHit,
+body.gdMappedStartPromptActive .gdAimRecognitionFleck,
+body.gdMappedStartPromptActive .gdMiddleGuideLabel,
+body.gdMappedStartPromptActive .remainingGreenLabel {
+  display: none !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+body.gdGreenArrivalMode::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 2380;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 50% 42%, rgba(0, 0, 0, .10), rgba(0, 0, 0, .58) 44%, rgba(0, 0, 0, .82) 100%);
+}
+
+body.gdGreenArrivalMode .rightRail,
+body.gdGreenArrivalMode .shotTile,
+body.gdGreenArrivalMode #gdV62GpsBadge,
+body.gdGreenArrivalMode #gdV62NewShotBtn {
+  opacity: .16 !important;
+  filter: grayscale(.3) brightness(.48) !important;
+  pointer-events: none !important;
+}
+
+body.gdGreenArrivalMode #gdV62UndoDock {
+  z-index: 2480 !important;
+  grid-template-columns: minmax(70px, 92px) minmax(1px, 1fr) minmax(178px, 218px) !important;
+  height: clamp(190px, 30vh, 240px) !important;
+  opacity: 1 !important;
+  filter: none !important;
+}
+
+body.gdGreenArrivalMode #gdV62NewShotBtn {
+  display: none !important;
+}
+
+body.gdGreenArrivalMode #gdV62LogShotBtn {
+  width: clamp(178px, 42vw, 218px) !important;
+  height: clamp(178px, 42vw, 218px) !important;
+  border-radius: 24px !important;
+  z-index: 2500 !important;
+  opacity: 1 !important;
+  filter: none !important;
+  background: rgba(0, 0, 0, .56) !important;
+}
+
+body.gdGreenArrivalMode #gdV62LogShotBtn .gdShotEndIcon {
+  width: 150px !important;
+  height: 112px !important;
+}
+
+body.gdGreenArrivalMode #gdV62LogShotBtn .gdShotEndText {
+  font-size: 14px !important;
+}
+
+body.gdGreenArrivalMode #gdGpsClearBtn,
+body.gdGreenArrivalMode .gdNextHolePopout,
+body.gdGreenArrivalMode .gdHoleSelectTray {
+  z-index: 2500 !important;
+  opacity: 1 !important;
+  filter: none !important;
+  pointer-events: auto !important;
+}
+
+body.gdGreenArrivalMode .startDot,
+body.gdGreenArrivalMode .ballDot {
+  box-shadow: 0 0 0 5px rgba(88, 220, 126, .22), 0 0 26px rgba(88, 220, 126, .9) !important;
+}

@@ -1,0 +1,23 @@
+#gdV62ModeSwitch{
+  width:58px!important;
+  height:98px!important;
+  position:relative!important;
+  right:auto!important;
+  top:auto!important;
+  left:auto!important;
+  bottom:auto!important;
+  transform:none!important;
+  transition:none!important;
+  contain:layout paint style!important;
+}
+#gdV62ModeSwitch button.gdModeToggle,
+#gdV62ModeSwitch .gdModeTrack{
+  transition:none!important;
+}
+#gdV62ModeSwitch .gdModeKnob{
+  will-change:transform;
+  transition:transform .24s cubic-bezier(.2,.8,.2,1),background .18s ease,color .18s ease!important;
+}
+#gdV62ModeSwitch[data-switching="1"]{
+  pointer-events:none;
+}

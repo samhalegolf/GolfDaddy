@@ -1,0 +1,39 @@
+/* V19: return camera ownership to the captured Hole Frame image when native map zoom is not enough. */
+body.gdWaitingForConfirmedGreen:not(.gdFrameCameraWaiting) #gdConfirmedGreenLoadingGate,
+body.gdWaitingForConfirmedGreen:not(.gdFrameCameraWaiting) #gdConfirmedGreenGateReadout{display:none!important;pointer-events:none!important;}
+body:not(.gdFrameCameraWaiting) #gdConfirmedGreenGateReadout{display:none!important;pointer-events:none!important;}
+#gdHoleImageCameraLayer{position:fixed!important;inset:0!important;z-index:320!important;pointer-events:none!important;overflow:hidden!important;display:none;background:transparent!important;transform-origin:0 0!important;}
+body.gdCapturedHoleFrameCameraOn #gdHoleImageCameraLayer{display:block!important;z-index:330!important;}
+body.gdCapturedHoleFrameCameraOn #map{background:#020604!important;}
+body.gdCapturedHoleFrameCameraOn #app.gdPreLockFrame::after{display:none!important;background:none!important;box-shadow:none!important;}
+body.gdCapturedHoleFrameCameraOn #app.gdPreLockFrame #map,
+body.gdCapturedHoleFrameCameraOn #app.framed #map,
+body.gdCapturedHoleFrameCameraOn #map{filter:none!important;}
+body.gdCapturedHoleFrameCameraOn .gdGpsFocusMask{display:none!important;}
+body.gdCapturedHoleFrameCameraOn #map .leaflet-tile-pane,
+body.gdCapturedHoleFrameCameraOn #map .leaflet-overlay-pane,
+body.gdCapturedHoleFrameCameraOn #map .leaflet-shadow-pane,
+body.gdCapturedHoleFrameCameraOn #map .leaflet-marker-pane{opacity:1!important;}
+#gdHoleImageCameraLayer .gdHoleImageTiles{position:absolute!important;left:0;top:0;transform-origin:0 0;will-change:transform;font-size:0!important;line-height:0!important;}
+#gdHoleImageCameraLayer .gdHoleImageTile{position:absolute!important;width:258px!important;height:258px!important;display:block!important;max-width:none!important;max-height:none!important;image-rendering:auto!important;user-select:none!important;-webkit-user-drag:none!important;transform:translateZ(0);backface-visibility:hidden;filter:saturate(.92) contrast(1.08) brightness(.82)!important;}
+#gdHoleImageCameraLayer .gdHoleImageOverlay{position:absolute!important;inset:0!important;pointer-events:none!important;}
+#gdHoleImageCameraLayer .gdCapturedShotSvg{position:absolute!important;left:0!important;top:0!important;overflow:visible!important;pointer-events:none!important;}
+#gdHoleImageCameraLayer .gdCapturedAimLine{fill:none;stroke:rgba(255,255,255,.78);stroke-linecap:round;stroke-linejoin:round;}
+#gdHoleImageCameraLayer .gdCapturedShotBubble{fill:rgba(255,255,255,.13);stroke:rgba(255,255,255,.92);stroke-linejoin:round;}
+#gdHoleImageCameraLayer .gdCapturedShotCore{fill:rgba(255,122,22,.92);stroke:#fff;}
+#gdCapturedBubbleDragHit{position:fixed!important;left:-9999px;top:-9999px;width:1px;height:1px;z-index:1480!important;border-radius:999px!important;background:transparent!important;pointer-events:auto!important;touch-action:none!important;cursor:grab!important;display:none;}
+body.gdCapturedHoleFrameCameraOn:not(.gdMappedStartPromptActive) #gdCapturedBubbleDragHit{display:block;}
+body.gdTargetFrameDebugOn #gdCapturedBubbleDragHit{background:rgba(31,211,109,.08)!important;outline:1px solid rgba(31,211,109,.24)!important;}
+#gdCapturedFrameUnavailable,
+#gdHoleFrameLoading{position:fixed;left:50%;bottom:calc(max(14px,env(safe-area-inset-bottom)) + 92px);transform:translateX(-50%);z-index:2403;max-width:min(330px,calc(100vw - 32px));padding:10px 14px;border-radius:999px;background:rgba(5,13,9,.92);border:1px solid rgba(255,255,255,.22);color:#fff;font:900 13px/1.2 Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;text-align:center;box-shadow:0 14px 34px rgba(0,0,0,.38);pointer-events:none;display:none;}
+body.gdCapturedFrameUnavailable #gdCapturedFrameUnavailable{display:block;}
+body.gdHoleFrameLoading #gdHoleFrameLoading{display:block;}
+#gdCoursePlayHoleTransitionMask{position:fixed;inset:0;z-index:2402;display:none;align-items:center;justify-content:center;padding:24px;background:rgba(2,6,4,.74);color:#fff;font:900 13px/1.2 Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;text-align:center;pointer-events:none;}
+#gdCoursePlayHoleTransitionMask span{display:inline-flex;max-width:min(330px,calc(100vw - 32px));padding:10px 14px;border-radius:999px;background:rgba(5,13,9,.92);border:1px solid rgba(255,255,255,.22);box-shadow:0 14px 34px rgba(0,0,0,.38);}
+body.gdGpsHoleTransitioning #gdCoursePlayHoleTransitionMask{display:flex;}
+body.gdGpsHoleTransitioning #map{visibility:hidden!important;opacity:0!important;pointer-events:none!important;}
+body.gdGpsHoleTransitioning #app{background:#020604!important;}
+#gdCoursePlayPipelineStatus{position:fixed;left:50%;bottom:calc(max(14px,env(safe-area-inset-bottom)) + 136px);transform:translateX(-50%);z-index:2403;max-width:min(330px,calc(100vw - 32px));padding:10px 14px;border-radius:999px;background:rgba(5,13,9,.92);border:1px solid rgba(255,255,255,.22);color:#fff;font:900 13px/1.2 Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;text-align:center;box-shadow:0 14px 34px rgba(0,0,0,.38);pointer-events:none;display:none;}
+body.gdCoursePlayPipelinePreparing #gdCoursePlayPipelineStatus{display:block;}
+#gdCapturedHoleFrameReadout{position:fixed;left:8px;bottom:84px;z-index:2402;max-width:330px;padding:6px 8px;border-radius:10px;background:rgba(0,0,0,.74);border:1px solid rgba(31,211,109,.34);color:rgba(255,255,255,.86);font:800 9px/1.25 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.06em;text-transform:uppercase;pointer-events:none;display:none;}
+body.gdTargetFrameDebugOn #gdCapturedHoleFrameReadout{display:block;}

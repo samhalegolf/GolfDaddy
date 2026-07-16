@@ -1,0 +1,29 @@
+body.gdFullMappingMode #flagTool,
+body.gdFullMappingMode #greenToolBtn,
+body.gdFullMappingMode #gpsRailBtn,
+body.gdFullMappingMode #gdMapperToolsBtn,
+body.gdFullMappingMode #scorecardRailBtn,
+body.gdFullMappingMode #bagRailBtn,
+body.gdFullMappingMode #windToolBtn,
+body.gdFullMappingMode #gpsModeSwitch,
+body.gdFullMappingMode .scoreBlock,
+body.gdFullMappingMode .dockGrid,
+body.gdFullMappingMode .dock,
+body.gdFullMappingMode .shotTile,
+body.gdFullMappingMode #gdV62NewShotBtn{
+  display:none!important;
+  visibility:hidden!important;
+  pointer-events:none!important;
+}
+body.gdFullMappingMode #gdMapperToolFlyout{
+  display:flex!important;
+  visibility:visible!important;
+  pointer-events:auto!important;
+  z-index:2200!important;
+}
+body.gdFullMappingMode #gdV62UndoDock,
+body.gdFullMappingMode [onclick="undoLast()"]{
+  display:flex!important;
+  visibility:visible!important;
+  pointer-events:auto!important;
+}

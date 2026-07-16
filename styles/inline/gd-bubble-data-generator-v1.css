@@ -1,0 +1,25 @@
+.gdBubbleGenCard{margin-top:12px;padding:12px;border-radius:18px;background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.08)}
+.gdShotDataHubCard{margin:0 0 12px;background:linear-gradient(180deg,rgba(33,59,73,.36),rgba(255,255,255,.045));border-color:rgba(98,210,255,.20)}
+.gdBubbleGenHead{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center}
+.gdBubbleGenHead strong{display:block;font-size:17px;color:#fff}
+.gdBubbleGenHead span{display:block;margin-top:3px;color:rgba(255,255,255,.64);font-size:12px;line-height:1.3}
+.gdBubbleGenHead button{border:0;border-radius:13px;padding:10px 12px;background:linear-gradient(180deg,#d7b06b,#b88d42);color:#06100b;font-weight:950}
+.gdShotDataHubCard.gdOffsetHubDetails{padding:0!important;overflow:hidden}
+.gdBubbleGenHead.gdOffsetHubSummary{list-style:none;cursor:pointer;padding:12px;grid-template-columns:minmax(0,1fr) auto!important}
+.gdOffsetHubButton{width:100%;border:0;background:transparent;color:inherit;text-align:left}
+.gdOffsetHubSummary::-webkit-details-marker{display:none}
+.gdOffsetHubSummary:after{content:"+";display:grid;place-items:center;width:34px;height:34px;border-radius:12px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.10);color:rgba(255,255,255,.82);font-size:22px;font-weight:950;line-height:1}
+.gdOffsetHubDetails[open] .gdOffsetHubSummary:after{content:"-"}
+.gdOffsetHubDetails.open .gdOffsetHubSummary:after{content:"-"}
+.gdOffsetHubBody{display:grid;gap:9px;padding:0 12px 12px}
+.gdOffsetHubBody[hidden]{display:none!important}
+.gdOffsetHubBody .gdBubbleOffsetActions{justify-content:end}
+.gdBubbleOffsetActions{display:flex;gap:8px;align-items:center}
+.gdBubbleOffsetActions button{border:0;border-radius:13px;padding:10px 12px;background:linear-gradient(180deg,#d7b06b,#b88d42);color:#06100b;font-weight:950}
+.gdBubbleOffsetActions button:first-child{background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.10);color:#fff}
+.gdBubbleGenGrid{display:grid;grid-template-columns:120px 1fr;gap:8px;margin-top:10px;align-items:end}
+.gdBubbleGenGrid label{display:grid;gap:5px;color:rgba(255,255,255,.66);font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.08em}
+.gdBubbleGenGrid input{box-sizing:border-box;width:100%;border:1px solid rgba(255,255,255,.12);border-radius:12px;background:rgba(0,0,0,.24);color:#fff;padding:10px 11px;font-weight:850}
+.gdBubbleGenGrid input[readonly]{color:rgba(255,255,255,.72);background:rgba(0,0,0,.13)}
+.gdBubbleOffsetSource{min-height:40px;display:flex;align-items:center;padding:9px 10px;border-radius:12px;background:rgba(0,0,0,.16);border:1px solid rgba(255,255,255,.07);color:rgba(255,255,255,.66);font-size:12px;font-weight:800;line-height:1.3}
+@media(max-width:520px){.gdBubbleGenHead,.gdBubbleGenGrid{grid-template-columns:1fr}}
