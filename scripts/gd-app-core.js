@@ -18046,6 +18046,7 @@ function gdUseMappedTeeAsStart(){
   const ll=gdMappedPointToLatLng(payload?.data?.tee?.position)||gdMappedPointToLatLng(payload?.data?.route?.[0])||gdActiveMappedTeeStartPoint();
   if(!ll){toast("Tee box not mapped yet");return false}
   if(lockedFrame){toast("Unlock to change start");return false}
+  try{document.body.classList.add("gdHeadToTeeFrameActive")}catch(e){}
   try{sessionStorage.setItem("gd_gps_session_activated","1")}catch(e){}
   try{if(Number.isFinite(Number(payload?.hole)))currentPlayingHole=selectedHole=Number(payload.hole);}catch(e){}
   try{if(typeof window.gdRememberPlayingHole==="function")window.gdRememberPlayingHole(payload?.hole);}catch(e){}
@@ -18068,6 +18069,7 @@ function gdUseMappedTeeAsStart(){
     toast("Tee start set");
     return true;
   }
+  try{document.body.classList.remove("gdHeadToTeeFrameActive")}catch(e){}
   toast("Open the course first");
   return false;
 }
