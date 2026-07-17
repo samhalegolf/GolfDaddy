@@ -19,6 +19,7 @@ const {
   stripeSubscriptionBlocksNewCheckout,
   text
 } = require("./payment-utils");
+const { prepareReferredMembershipCheckout } = require("./referral-service");
 
 exports.handler = async function (event) {
   if (event.httpMethod === "OPTIONS") return json(204, {});
@@ -83,6 +84,15 @@ exports.handler = async function (event) {
       account_name: text(account.name, 120),
       product_key: productKey
     };
+    let referralCheckout = null;
+    if (productKey === MONTHLY_MEMBERSHIP_KEY) {
+      referralCheckout = await prepareReferredMembershipCheckout(account);
+      if (referralCheckout && referralCheckout.referralId) {
+        metadata.referral_id = text(referralCheckout.referralId, 120);
+        metadata.referred_by_account_id = text(referralCheckout.inviterAccountId, 120);
+        metadata.referral_free_access_ends_at = text(referralCheckout.freeAccessEndsAt, 80);
+      }
+    }
 
     const params = {
       mode: productKey === MONTHLY_MEMBERSHIP_KEY ? "subscription" : "payment",
@@ -106,6 +116,9 @@ exports.handler = async function (event) {
       Object.keys(metadata).forEach(function (key) {
         params["subscription_data[metadata][" + key + "]"] = metadata[key];
       });
+      if (referralCheckout && referralCheckout.trialEnd) {
+        params["subscription_data[trial_end]"] = String(referralCheckout.trialEnd);
+      }
     }
 
     const session = await stripeFetch("POST", "/v1/checkout/sessions", params);
@@ -115,7 +128,12 @@ exports.handler = async function (event) {
       ok: true,
       id: session.id,
       url: session.url,
-      productKey
+      productKey,
+      referral: referralCheckout ? {
+        referralId: referralCheckout.referralId,
+        freeAccessEndsAt: referralCheckout.freeAccessEndsAt,
+        billingStartsAt: referralCheckout.freeAccessEndsAt
+      } : null
     });
   } catch (error) {
     return json(error.status || 502, { error: error && error.message ? error.message : "Could not start checkout", details: error.body || null });

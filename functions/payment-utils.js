@@ -3,10 +3,15 @@
 const STRIPE_API_VERSION = "2026-02-25.clover";
 const MONTH_PASS_KEY = "month_pass";
 const MONTHLY_MEMBERSHIP_KEY = "monthly_membership";
+const REFERRAL_ACCESS_KEY = "referral_membership";
+const ADMIN_COMPED_MEMBERSHIP_KEY = "admin_comped_membership";
 const MONTH_PASS_HOURS = 24 * 30;
 const PAID_ACCESS_KEYS = {
   month_pass: true,
   monthly_membership: true,
+  referral_membership: true,
+  referral: true,
+  admin_comped_membership: true,
   subscription: true,
   day_pass: true,
   round_pass: true,
@@ -216,7 +221,7 @@ function formParams(data) {
   return params;
 }
 
-async function stripeFetch(method, path, data) {
+async function stripeFetch(method, path, data, fetchOptions) {
   const secret = env("STRIPE_SECRET_KEY");
   if (!secret) {
     const error = new Error("Stripe is not configured yet");
@@ -225,20 +230,22 @@ async function stripeFetch(method, path, data) {
   }
   const upper = String(method || "GET").toUpperCase();
   const url = new URL("https://api.stripe.com" + path);
-  const options = {
+  const requestOptions = {
     method: upper,
     headers: {
       Authorization: "Bearer " + secret,
       "Stripe-Version": STRIPE_API_VERSION
     }
   };
+  const extra = fetchOptions || {};
+  Object.assign(requestOptions.headers, extra.headers || {});
   if (upper === "GET") {
     formParams(data).forEach(function (value, key) { url.searchParams.append(key, value); });
   } else {
-    options.headers["Content-Type"] = "application/x-www-form-urlencoded";
-    options.body = formParams(data);
+    requestOptions.headers["Content-Type"] = "application/x-www-form-urlencoded";
+    requestOptions.body = formParams(data);
   }
-  const response = await fetch(url.toString(), options);
+  const response = await fetch(url.toString(), requestOptions);
   const bodyText = await response.text();
   let body = null;
   if (bodyText) {
@@ -489,6 +496,10 @@ async function readPaidAccess(identity) {
   let paymentState = "free_access";
   if (membershipState.active) {
     paymentState = membershipState.state;
+  } else if (entitlements.some(function (row) { return rowProductKey(row) === ADMIN_COMPED_MEMBERSHIP_KEY || row && row.entitlement_reason === ADMIN_COMPED_MEMBERSHIP_KEY; })) {
+    paymentState = "admin_comped_membership_active";
+  } else if (entitlements.some(function (row) { return rowProductKey(row) === REFERRAL_ACCESS_KEY || rowProductKey(row) === "referral" || row && row.entitlement_reason === "referral_free_month"; })) {
+    paymentState = "referral_access_active";
   } else if (entitlements.some(function (row) { return rowProductKey(row) === MONTH_PASS_KEY; })) {
     paymentState = "month_pass_active";
   } else if (entitlements.length) {
@@ -512,8 +523,10 @@ module.exports = {
   MONTHLY_MEMBERSHIP_KEY,
   MONTH_PASS_HOURS,
   MONTH_PASS_KEY,
+  ADMIN_COMPED_MEMBERSHIP_KEY,
   PAID_PERMISSION_KEYS,
   PASS_CONFIG,
+  REFERRAL_ACCESS_KEY,
   STRIPE_API_VERSION,
   accountCustomerId,
   appUrl,

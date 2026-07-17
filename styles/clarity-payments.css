@@ -290,10 +290,171 @@
   color: #ffcc8a;
 }
 
+.clarityReferralPanel {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 14px;
+  background: rgba(255,255,255,.045);
+}
+
+.clarityReferralPanel.invitee {
+  border-color: rgba(66,182,106,.35);
+  background: rgba(66,182,106,.10);
+}
+
+.clarityReferralHead {
+  display: grid;
+  gap: 4px;
+}
+
+.clarityReferralHead strong,
+.clarityReferralForm strong,
+.clarityReferralRow strong {
+  color: #fff;
+}
+
+.clarityReferralHead span,
+.clarityReferralForm span,
+.clarityReferralRow span,
+.clarityReferralRow em {
+  color: rgba(255,255,255,.66);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.clarityReferralSummary {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.clarityReferralSummary div {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 10px;
+  background: rgba(0,0,0,.16);
+}
+
+.clarityReferralSummary span {
+  color: rgba(255,255,255,.58);
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.clarityReferralSummary strong {
+  color: #fff;
+  font-size: 18px;
+}
+
+.clarityReferralForm {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 12px;
+  background: rgba(0,0,0,.16);
+}
+
+.clarityReferralForm input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 10px;
+  padding: 10px;
+  color: #fff;
+  background: rgba(0,0,0,.25);
+}
+
+.clarityReferralList {
+  display: grid;
+  gap: 8px;
+}
+
+.clarityReferralRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 10px;
+  background: rgba(0,0,0,.14);
+}
+
+.clarityReferralRow div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.clarityReferralRow em {
+  font-style: normal;
+}
+
+.clarityReferralLanding {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(0,0,0,.72);
+  backdrop-filter: blur(12px);
+}
+
+.clarityReferralLandingBox {
+  display: grid;
+  gap: 12px;
+  width: min(420px, 100%);
+  padding: 20px;
+  border: 1px solid rgba(255,255,255,.16);
+  border-radius: 14px;
+  background: #101614;
+  box-shadow: 0 24px 80px rgba(0,0,0,.42);
+}
+
+.clarityReferralLandingBox strong {
+  color: #fff;
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.clarityReferralLandingBox span,
+.clarityReferralLandingBox li {
+  color: rgba(255,255,255,.72);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.clarityReferralLandingBox ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.clarityReferralLandingBox button {
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 999px;
+  padding: 10px 12px;
+  color: #06110b;
+  font-weight: 800;
+  background: #ff9f2f;
+}
+
+.clarityReferralLandingBox button.secondary {
+  color: #fff;
+  background: rgba(255,255,255,.08);
+}
+
 @media (max-width: 430px) {
   .clarityPaymentConnectGrid,
   .clarityPaymentDiagGrid,
-  .clarityPaymentProductRow {
+  .clarityPaymentProductRow,
+  .clarityReferralSummary,
+  .clarityReferralRow {
     grid-template-columns: 1fr;
   }
 }

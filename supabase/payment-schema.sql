@@ -14,6 +14,12 @@ create table if not exists public.user_entitlements (
   stripe_checkout_session_id text unique,
   stripe_payment_intent_id text,
   stripe_subscription_id text,
+  source_type text,
+  source_referral_id uuid,
+  entitlement_reason text,
+  referral_eligible boolean not null default false,
+  non_renewing boolean not null default false,
+  scheduled_paid_start_at timestamptz,
   usage_count integer not null default 0,
   metadata jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
@@ -177,6 +183,24 @@ alter table if exists public.user_entitlements
 
 alter table if exists public.user_entitlements
   add column if not exists usage_count integer not null default 0;
+
+alter table if exists public.user_entitlements
+  add column if not exists source_type text;
+
+alter table if exists public.user_entitlements
+  add column if not exists source_referral_id uuid;
+
+alter table if exists public.user_entitlements
+  add column if not exists entitlement_reason text;
+
+alter table if exists public.user_entitlements
+  add column if not exists referral_eligible boolean not null default false;
+
+alter table if exists public.user_entitlements
+  add column if not exists non_renewing boolean not null default false;
+
+alter table if exists public.user_entitlements
+  add column if not exists scheduled_paid_start_at timestamptz;
 
 alter table if exists public.app_accounts
   add column if not exists stripe_customer_id text;
