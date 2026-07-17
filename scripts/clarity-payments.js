@@ -785,17 +785,36 @@
 
   function formData(form) { var data = {}; Array.prototype.forEach.call(new FormData(form).entries(), function (entry) { data[entry[0]] = entry[1]; }); data.active = !!form.elements.active && form.elements.active.checked; return data; }
 
+  function formElement(form, name) {
+    return form && form.elements ? form.elements[name] : null;
+  }
+
+  function formValue(form, name, fallback) {
+    var element = formElement(form, name);
+    if (!element) return fallback == null ? "" : fallback;
+    return element.value == null ? "" : String(element.value);
+  }
+
   function productFormData(form) {
     form = form && form.form ? form.form : form;
-    var data = formData(form);
     var fallback = adminProductByKey(editingProductKey) || {};
-    data.product_key = data.product_key || fallback.product_key || editingProductKey || "";
-    data.product_kind = data.product_kind || fallback.product_kind || (data.product_key === "monthly_membership" ? "membership" : "month_pass");
-    data.name = data.name || fallback.name || data.product_key.replace(/_/g, " ");
-    data.duration_hours = data.duration_hours || fallback.duration_hours || 720;
-    data.billing_schedule = data.billing_schedule || fallback.billing_schedule || (data.product_kind === "membership" ? "monthly" : "one_time");
-    data.active = !!(form && form.elements && form.elements.active) ? !!form.elements.active.checked : fallback.active !== false;
-    return data;
+    var productKey = String(formValue(form, "product_key", fallback.product_key || editingProductKey || "")).trim();
+    var productKind = String(formValue(form, "product_kind", fallback.product_kind || (productKey === "monthly_membership" ? "membership" : "month_pass"))).trim();
+    return {
+      product_key: productKey,
+      product_kind: productKind,
+      name: String(formValue(form, "name", fallback.name || productKey.replace(/_/g, " "))).trim(),
+      description: formValue(form, "description", fallback.description || ""),
+      stripe_product_id: String(formValue(form, "stripe_product_id", fallback.stripe_product_id || "")).trim(),
+      stripe_price_id: String(formValue(form, "stripe_price_id", fallback.stripe_price_id || "")).trim(),
+      price_label: String(formValue(form, "price_label", fallback.price_label || "")).trim(),
+      duration_hours: String(formValue(form, "duration_hours", fallback.duration_hours || 720)).trim(),
+      billing_schedule: String(formValue(form, "billing_schedule", fallback.billing_schedule || (productKind === "membership" ? "monthly" : "one_time"))).trim(),
+      active: formElement(form, "active") ? !!form.elements.active.checked : fallback.active !== false,
+      colour: fallback.colour || "",
+      sort_order: fallback.sort_order || 100,
+      metadata: fallback.metadata || {}
+    };
   }
 
   function updateAdminQueryState(next) {
