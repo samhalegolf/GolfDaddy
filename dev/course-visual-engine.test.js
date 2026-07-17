@@ -368,6 +368,84 @@ function payload() {
 
   const originalPipeline = global.GDCoursePlayPipeline;
   const originalExecutor = global.gdBuildCourseVisualCaptureManifest;
+  const originalFetchForManifestResolution = global.fetch;
+  let automaticCourseVisualPosts = 0;
+  const cromwellHoles = Array.from({ length: 18 }, (_, index) => {
+    const holeNumber = index + 1;
+    const lat = -45.011 - index * 0.001;
+    const lng = 169.1 + index * 0.001;
+    return {
+      courseId: "cromwell",
+      courseKey: "cromwell",
+      courseName: "Cromwell Golf Course",
+      holeNumber,
+      status: "play_data_ready",
+      teePoint: { lat, lng },
+      greenCentre: { lat: lat - 0.002, lng: lng + 0.004 },
+      greenShape: [
+        { lat: lat - 0.0021, lng: lng + 0.0039 },
+        { lat: lat - 0.0022, lng: lng + 0.0041 },
+        { lat: lat - 0.0019, lng: lng + 0.0042 }
+      ],
+      routePoints: [
+        { lat, lng },
+        { lat: lat - 0.001, lng: lng + 0.002 },
+        { lat: lat - 0.002, lng: lng + 0.004 }
+      ]
+    };
+  });
+  const cromwellFrameRows = cromwellHoles.map((hole) => {
+    const indexedKey = `gd_captured_hole_frame_v19_Cromwell_Golf_Course:h${hole.holeNumber}`;
+    const actualKey = `gd_captured_hole_frame_v19_cromwell:h${hole.holeNumber}`;
+    localStorage.setItem(actualKey, JSON.stringify(Object.assign(manifest(actualKey, hole.holeNumber, hole.holeNumber * 30), { courseKey: "cromwell", courseName: "Cromwell Golf Course" })));
+    return {
+      schema: "gd.course_play_pipeline.frame",
+      frameIndexKey: `cromwell:h${hole.holeNumber}`,
+      courseId: "cromwell",
+      courseKey: "cromwell",
+      courseName: "Cromwell Golf Course",
+      holeNumber: hole.holeNumber,
+      manifestKey: indexedKey,
+      capturedManifestKey: indexedKey
+    };
+  });
+  localStorage.setItem("gd_course_play_frame_index_v1", JSON.stringify({
+    schema: "gd.course_play_pipeline.frame_index",
+    version: 1,
+    updatedAt: null,
+    frames: Object.fromEntries(cromwellFrameRows.map((row) => [row.frameIndexKey, Object.assign({}, row)]))
+  }));
+  global.GDCoursePlayPipeline = {
+    frameIndexStorageKey: "gd_course_play_frame_index_v1",
+    buildCoursePlayDbPayload() {
+      return { courseId: "cromwell", courseKey: "cromwell", courseName: "Cromwell Golf Course", holes: cromwellHoles };
+    },
+    getCoursePlayFrameIndex() {
+      return cromwellFrameRows.map((row) => Object.assign({}, row));
+    }
+  };
+  global.fetch = async function rejectAutomaticCourseVisualPost(url, options) {
+    if (String(url).includes("/api/course-visuals") && options && options.method === "POST") automaticCourseVisualPosts += 1;
+    throw new Error("unexpected fetch during native visual build");
+  };
+  const cromwellNative = await engine.buildFromCourseDatabase("cromwell");
+  assert.equal(cromwellNative.diagnostics.manifestResolution.required, 18, "Cromwell native build requires every indexed frame manifest");
+  assert.equal(cromwellNative.diagnostics.manifestResolution.resolved, 18, "Cromwell resolves all captured-frame manifest aliases");
+  assert.equal(cromwellNative.diagnostics.manifestResolution.missing, 0, "Cromwell has no missing captured-frame manifests");
+  assert.equal(cromwellNative.diagnostics.manifestResolution.repairedFrameIndex, true, "stale Cromwell frame-index keys are repaired to the working manifest keys");
+  assert.equal(cromwellNative.diagnostics.publishEnabled, true, "native visual becomes eligible for manual publishing after complete manifest resolution");
+  assert.equal(cromwellNative.holeFrameVisuals.length, 18, "Cromwell has one base hole-frame visual per resolved manifest");
+  const repairedCromwellFrameIndex = JSON.parse(localStorage.getItem("gd_course_play_frame_index_v1"));
+  assert.equal(repairedCromwellFrameIndex.frames["cromwell:h2"].manifestKey, "gd_captured_hole_frame_v19_cromwell:h2", "hole 2 frame-index entry is repaired to the actual stored manifest key");
+  assert.deepEqual(cromwellNative.diagnostics.manifestResolution.resolvedManifests.find((item) => item.holeNumber === 2).attemptedKeys, [
+    "gd_captured_hole_frame_v19_Cromwell_Golf_Course:h2",
+    "gd_captured_hole_frame_v19_cromwell:h2",
+    "gd_captured_hole_frame_v19_cromwell-golf-course:h2"
+  ], "lookup order prefers the indexed key, then courseId, then course name / recovered key aliases");
+  assert.equal(automaticCourseVisualPosts, 0, "native visual build does not automatically publish to /api/course-visuals");
+  global.fetch = originalFetchForManifestResolution;
+  global.GDCoursePlayPipeline = originalPipeline;
+
   const visualRequests = [];
   global.GDCoursePlayPipeline = {
     buildCoursePlayDbPayload() {
