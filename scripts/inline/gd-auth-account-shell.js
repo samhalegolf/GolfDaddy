@@ -1050,9 +1050,9 @@
             <div class="gdCourseGreenIcon" aria-hidden="true"></div>
             <div><strong>Courses</strong><span>Recent courses.</span></div>
           </button>` : ''}
-          ${canShowProfileCard('play') ? `<button class="card" onclick="gd67OpenProfileTool('play')">
-            ${icon('gps') || icon('play')}
-            <div><strong>Play</strong><span>Open GPS and start a round.</span></div>
+          ${!coachViewingPlayer ? `<button class="card" onclick="gd67OpenMembershipSettings()">
+            ${icon('profile') || icon('scorecard')}
+            <div><strong>Membership</strong><span>Manage access, Month Pass and Membership.</span></div>
           </button>` : ''}
         </section>
         ${isCoach ? `<button class="coachChangePlayer" type="button" onclick="gd67ChangePlayer()">${coachViewingPlayer ? 'Change Player' : 'Coach Dashboard'}</button>` : ''}
@@ -1614,6 +1614,27 @@
     return false;
   }
 
+  function openMembershipSettings() {
+    try {
+      const p = profile();
+      window.__gdSettingsReturnTarget = 'profile';
+      window.__gdBackTarget = 'profile';
+      window.__gdProfileReturnProfileId = p && p.id || '';
+      window.__gdProfileReturnName = p && p.name || 'Profile';
+    } catch(e) {}
+    if (typeof window.gdOpenPlayerSettingsPanel === 'function') {
+      window.gdOpenPlayerSettingsPanel({fromProfile:true});
+      setTimeout(() => {
+        try {
+          if (window.ClarityPayments && typeof window.ClarityPayments.showSettings === 'function') return window.ClarityPayments.showSettings();
+          if (typeof window.gdPlayerSettingsShowSection === 'function') return window.gdPlayerSettingsShowSection('payments');
+        } catch(e) {}
+      }, 0);
+      return false;
+    }
+    return openProfileSettings();
+  }
+
   window.gdOpenProfileV67 = open;
   window.gdCloseProfileV67 = close;
   window.gdToggleProfileEditV67 = toggleEdit;
@@ -1630,6 +1651,7 @@
   window.gd67UploadProfilePhoto = uploadProfilePhoto;
   window.gd67OpenProfilePhotoPicker = openProfilePhotoPicker;
   window.gd67OpenProfileSettings = openProfileSettings;
+  window.gd67OpenMembershipSettings = openMembershipSettings;
   window.gd67AddCoachPlayer = addCoachPlayer;
   window.gd67AddCoachAccount = addCoachAccount;
   window.gd67RemoveProfile = removeProfile;
