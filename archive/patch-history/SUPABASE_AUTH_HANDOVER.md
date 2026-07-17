@@ -1,4 +1,4 @@
-# Clarity Caddie — Supabase Auth Source of Truth Build
+# Clarity Caddy — Supabase Auth Source of Truth Build
 
 This build moves the account login/signup path onto Supabase Auth.
 

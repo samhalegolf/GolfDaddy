@@ -30,7 +30,7 @@ exports.handler = async function(event){
         message.ctaLabel = "Set up your password";
         message.ctaUrl = invite.link;
         message.title = "Set up your Clarity account";
-        message.detail = "Your Clarity Caddie account has been created by " + (message.actorName || "your coach") + ". Use the secure button below to set your password. This link is unique to your account.";
+        message.detail = "Your Clarity Caddy account has been created by " + (message.actorName || "your coach") + ". Use the secure button below to set your password. This link is unique to your account.";
       }
       if(invite && invite.user && invite.user.id){
         await syncInvitedAccount(invite.user, payload, message);

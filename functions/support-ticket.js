@@ -203,7 +203,7 @@ function sanitizeErrorRow(row){
 function renderDebugEmail(ticket, ticketId){
   var context = ticket.context || {};
   var build = context.build || {};
-  var subject = "Clarity Caddie beta report" + (context.route ? " · " + context.route : "") + (ticketId ? " · " + ticketId : "");
+  var subject = "Clarity Caddy beta report" + (context.route ? " · " + context.route : "") + (ticketId ? " · " + ticketId : "");
   var details = [
     ["Ticket", ticketId || "email-only"],
     ["Created", ticket.created_at],
@@ -221,7 +221,7 @@ function renderDebugEmail(ticket, ticketId){
   var session = sectionRows("Session storage summary", context.sessionStorageSummary, storageLine);
   var errors = sectionRows("Recent errors", context.recentErrors, errorLine);
   var textBody = [
-    "Clarity Caddie beta report",
+    "Clarity Caddy beta report",
     "",
     "What happened:",
     ticket.happened,
@@ -243,7 +243,7 @@ function renderDebugEmail(ticket, ticketId){
   var html = [
     "<!doctype html><html><body style=\"margin:0;background:#07100b;color:#f7faf7;font-family:Arial,Helvetica,sans-serif\">",
     "<div style=\"max-width:680px;margin:0 auto;padding:28px 16px\">",
-    "<p style=\"margin:0 0 8px;color:#42b66a;font-weight:800;letter-spacing:.08em;text-transform:uppercase\">Clarity Caddie beta</p>",
+    "<p style=\"margin:0 0 8px;color:#42b66a;font-weight:800;letter-spacing:.08em;text-transform:uppercase\">Clarity Caddy beta</p>",
     "<h1 style=\"margin:0 0 18px;font-size:28px;line-height:1.08\">Debug report</h1>",
     "<h2 style=\"margin:22px 0 8px;font-size:16px\">What happened</h2>",
     "<p style=\"white-space:pre-wrap;color:#dbe5df\">" + escapeHTML(ticket.happened) + "</p>",

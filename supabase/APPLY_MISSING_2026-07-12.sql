@@ -1,5 +1,5 @@
 -- ============================================================================
--- Clarity Caddie — apply MISSING Supabase schema (verified 2026-07-12)
+-- Clarity Caddy — apply MISSING Supabase schema (verified 2026-07-12)
 -- ============================================================================
 -- Run this ONCE in the Supabase SQL editor (project zcevluithwoumvafhmct).
 -- It is safe to re-run: everything is if-not-exists / drop-if-exists.

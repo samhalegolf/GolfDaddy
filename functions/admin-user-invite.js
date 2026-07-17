@@ -24,7 +24,7 @@ async function sendEmail(to, name, actorName, setupLink) {
   const from = env("CLARITY_EMAIL_FROM") || "Clarity Golf Systems <notifications@claritygolf.app>";
   const app = siteUrl();
   const logoUrl = app + "/assets/brand/cg-logo-white-g.png";
-  const detail = "Your Clarity Caddie account has been created by " + (actorName || "your coach") + ". Use the secure button below to set your password. This link is unique to your account.";
+  const detail = "Your Clarity Caddy account has been created by " + (actorName || "your coach") + ". Use the secure button below to set your password. This link is unique to your account.";
   const html = [
     "<!doctype html><html><body style=\"margin:0;background:#07100b;color:#f7faf7;font-family:Arial,Helvetica,sans-serif\">",
     "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#07100b;padding:28px 14px\"><tr><td align=\"center\">",

@@ -1,5 +1,5 @@
 /* Extracted verbatim from an inline <script> block in index.html (split-03). */
-/* --- Clarity Caddie patch: switching to 2-Tap unlocks the soft-locked frame v1 --- */
+/* --- Clarity Caddy patch: switching to 2-Tap unlocks the soft-locked frame v1 --- */
 (function(){
   'use strict';
   function gdToast(msg){ try{ if(typeof toast === 'function') toast(msg); }catch(e){} }

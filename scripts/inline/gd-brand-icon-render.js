@@ -12,7 +12,7 @@
   function ensureRightRail() {
     let rail = document.querySelector('.rightRail');
     if (!rail) {
-      console.warn('[Clarity Caddie] right rail shell is missing');
+      console.warn('[Clarity Caddy] right rail shell is missing');
       return;
     }
 
@@ -39,7 +39,7 @@
     spec.forEach(([id, key, label, handler]) => {
       let btn = document.getElementById(id);
       if (!btn) {
-        console.warn('[Clarity Caddie] final rail button missing:', id);
+        console.warn('[Clarity Caddy] final rail button missing:', id);
         return;
       }
       btn.classList.add('railBtn');

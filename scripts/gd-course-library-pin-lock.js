@@ -1,4 +1,4 @@
-/* Clarity Caddie Personal Course Library + Pin-Lock MVP v1 */
+/* Clarity Caddy Personal Course Library + Pin-Lock MVP v1 */
 (function(){
   'use strict';
 
@@ -2150,7 +2150,7 @@
       }
       return shouldRun;
     }catch(e){
-      console.warn('[Clarity Caddie] Course Geometry Resolver gate failed',e);
+      console.warn('[Clarity Caddy] Course Geometry Resolver gate failed',e);
       recordMappingDebug(debugRunId,{source:'native-resolver',phase:'failed',event:'native-resolver-gate-failed',summary:'Native resolver gate failed',details:{invokedBy:opts.reason||opts.source||'automapper'},error:{message:e&&e.message||String(e)}});
       return false;
     }
@@ -2281,7 +2281,7 @@
       }});
       try{window.GDCourseMappingDebug?.renderAdminPanel?.();}catch(e){}
       if(resolvedGuides.length){
-        console.info('[Clarity Caddie] Course Geometry Resolver produced AutoMapper guides',{
+        console.info('[Clarity Caddy] Course Geometry Resolver produced AutoMapper guides',{
           status:result?.status,
           confidence:result?.confidence,
           holes:resolvedGuides.length,
@@ -2291,7 +2291,7 @@
       }
       return next;
     }catch(error){
-      console.warn('[Clarity Caddie] Course Geometry Resolver failed',error);
+      console.warn('[Clarity Caddy] Course Geometry Resolver failed',error);
       recordMappingDebug(debugRunId,{source:'native-resolver',phase:'failed',event:'native-resolver-failed',summary:'Native resolver failed',durationMs:Date.now()-startedAt,details:{
         invokedBy:opts.reason||opts.source||'automapper'
       },error:{message:error&&error.message||String(error),name:error&&error.name||''}});
@@ -2399,7 +2399,7 @@
         return mapperOsmGuideMemory;
       })
       .catch(error=>{
-        console.warn('[Clarity Caddie] OSM guide fetch failed',error);
+        console.warn('[Clarity Caddy] OSM guide fetch failed',error);
         if(!isCurrentMappingAttempt(attempt)){
           if(logAutomapperTelemetry)recordStaleMappingActivity(attempt,{eventSource:'automapper',event:'automapper-stale-result-rejected',summary:'AutoMapper stale result rejected',attemptedAction:'complete-automapper-fetch',callerFunction:'loadOsmGuideBundle'});
           return cached||{guides:[],greens:[],stale:true};
@@ -2834,7 +2834,7 @@
     const now=Date.now();
     const duplicate=mappedDropoutNotice.key===key&&now-mappedDropoutNotice.at<1800;
     mappedDropoutNotice={key,at:now};
-    try{console.warn('[Clarity Caddie] mapped data dropout',{course:mappedModeCourseIdentity(),hole:h,reason});}catch(e){}
+    try{console.warn('[Clarity Caddy] mapped data dropout',{course:mappedModeCourseIdentity(),hole:h,reason});}catch(e){}
     if(opts.quiet)return false;
     if(!duplicate){
       try{setState('Mapped data needed');}catch(e){}
@@ -4097,7 +4097,7 @@
     const rail=document.querySelector('.rightRail');
     if(!rail)return;
     const btn=document.getElementById('gdMapperToolsBtn');
-    if(!btn){console.warn('[Clarity Caddie] final rail button missing: gdMapperToolsBtn');return;}
+    if(!btn){console.warn('[Clarity Caddy] final rail button missing: gdMapperToolsBtn');return;}
     btn.setAttribute('onclick','return window.gdOpenMapperTools&&window.gdOpenMapperTools(event)');
     btn.onclick=openMapperToolsDrawer;
     updateMapperToolsButtonState();
@@ -4141,7 +4141,7 @@
     el=document.createElement('div');
     el.id='gdCourseLoadingOverlay';
     el.className='gdCourseLoadingOverlay hidden';
-    el.innerHTML=`<div class="gdCourseLoadingSheet"><div class="gdCourseLoadingEyebrow">Clarity Caddie</div><strong id="gdCourseLoadingTitle">Loading course</strong><span id="gdCourseLoadingSub">Preparing Hole 1</span><div class="gdCourseLoadingTrack"><i id="gdCourseLoadingBar"></i></div></div>`;
+    el.innerHTML=`<div class="gdCourseLoadingSheet"><div class="gdCourseLoadingEyebrow">Clarity Caddy</div><strong id="gdCourseLoadingTitle">Loading course</strong><span id="gdCourseLoadingSub">Preparing Hole 1</span><div class="gdCourseLoadingTrack"><i id="gdCourseLoadingBar"></i></div></div>`;
     const style=document.createElement('style');
     style.id='gdCourseLoadingOverlayStyles';
     style.textContent=`
@@ -4954,7 +4954,7 @@
         recordCoursePlayDebug('course-mapping-automatic-unresolved',c,h,{reason:'automatic-resolution-failed',resolutionKey:key,attemptToken});
         return beginInteractiveGreenFallback(c,h,'automatic-resolution-failed',{resolutionKey:key,activeResolutionKey:key,attemptToken,debugRunId,selectedAt,debugAttemptContext:attempt,callerFunction:'runCourseMappingAttempt',source:'mapping-controller'});
       }catch(error){
-        try{console.warn('[Clarity Caddie] course mapping attempt failed',error);}catch(e){}
+        try{console.warn('[Clarity Caddy] course mapping attempt failed',error);}catch(e){}
         recordCoursePlayDebug('course-mapping-attempt-error',c,h,{reason:error&&error.message||'mapping-controller-error',resolutionKey:key,attemptToken});
         recordMappingDebug(debugRunId,{source:'course-loader',phase:'failed',event:'mapping-attempt-failed',summary:'Course mapping attempt failed',details:{resolutionKey:key,attemptToken},error:{message:error&&error.message||String(error),name:error&&error.name||''}});
         if(!mappingAttemptStillCurrent(request,attempt,'course-loader'))return {playable:false,stale:true,reason:'superseded-after-error'};

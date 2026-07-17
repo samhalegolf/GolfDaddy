@@ -17516,7 +17516,7 @@ function gdOpenCoursePickerCourse(course){
   try{
     openCourse(payload);
   }catch(e){
-    console.warn("Clarity Caddie course picker fallback",e);
+    console.warn("Clarity Caddy course picker fallback",e);
     gdStoreCoursePickerSelection(payload);
     gdEnsureGpsCourseSurface();
     try{const line=document.getElementById("courseLine");if(line){line.textContent=payload.name==="Manual GPS"?"":payload.name;line.style.display=line.textContent?"block":"none";}if(typeof gdMakeCourseLabelsClickable==="function")gdMakeCourseLabelsClickable();}catch(_){}
@@ -21785,7 +21785,7 @@ function getMapMetersPerPixelAt(latlng){
 
 function clearWandScaleLock(reason){
   wandScaleLock=null;
-  if(reason) console.debug && console.debug('[Clarity Caddie Wand] scale lock cleared:', reason);
+  if(reason) console.debug && console.debug('[Clarity Caddy Wand] scale lock cleared:', reason);
 }
 
 function captureWandScaleLock(reason,frameScale){

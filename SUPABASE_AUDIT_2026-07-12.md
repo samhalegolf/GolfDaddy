@@ -1,4 +1,4 @@
-# Supabase Audit — Clarity Caddie (live app)
+# Supabase Audit — Clarity Caddy (live app)
 
 Date: 2026-07-12
 Scope: live app (`index.html` + `scripts/` + `functions/`), verified against the production Supabase project (`zcevluithwoumvafhmct`) using the public anon key. Existing tables return a permission error (RLS deny-all, correct); missing tables return "table not found".

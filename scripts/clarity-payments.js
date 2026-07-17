@@ -143,7 +143,7 @@
     if (status && status.paymentState === "month_pass_active" && monthPass) return "Access until " + (formatDate(monthPass.expires_at) || "the pass expiry date") + ".";
     if (status && status.paymentState === "legacy_access_active") return "A still-valid older pass is providing access.";
     if (status && status.paymentState === "paid_access_expired") return "Choose how you would like to continue.";
-    return account() ? "Choose a pass or membership to unlock full Clarity Caddie access." : "Sign in before buying access.";
+    return account() ? "Choose a pass or membership to unlock full Clarity Caddy access." : "Sign in before buying access.";
   }
 
   function applyStatus() {

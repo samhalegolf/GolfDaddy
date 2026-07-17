@@ -1,4 +1,4 @@
-/* Clarity Caddie Arcade Mode wiring.
+/* Clarity Caddy Arcade Mode wiring.
    Structure first: mapped-course provider -> route adapter -> controller -> swing view -> shot renderer. */
 (function(){
   "use strict";

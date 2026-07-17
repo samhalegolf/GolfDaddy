@@ -1,5 +1,5 @@
 /* Extracted verbatim from an inline <script> block in index.html (split-03). */
-/* --- Clarity Caddie patch: location permission/fix state is based on last successful GPS fix --- */
+/* --- Clarity Caddy patch: location permission/fix state is based on last successful GPS fix --- */
 (function(){
   const CACHE_MAX_MS = 90000;
   const REQUEST_TIMEOUT_MS = 18000;

@@ -247,7 +247,7 @@
     overlay.style.cssText = "position:fixed;inset:0;z-index:999999;background:rgba(3,8,5,.92);display:flex;align-items:center;justify-content:center;padding:20px;font-family:Arial,Helvetica,sans-serif;color:#fff";
     overlay.innerHTML = [
       "<div style='width:min(420px,100%);background:#101b15;border:1px solid rgba(255,255,255,.16);border-radius:22px;padding:22px;box-shadow:0 24px 80px rgba(0,0,0,.45)'>",
-      "<div style='color:#42b66a;font-weight:900;letter-spacing:.12em;text-transform:uppercase;font-size:12px;margin-bottom:10px'>Clarity Caddie</div>",
+      "<div style='color:#42b66a;font-weight:900;letter-spacing:.12em;text-transform:uppercase;font-size:12px;margin-bottom:10px'>Clarity Caddy</div>",
       "<h1 style='font-size:28px;line-height:1.05;margin:0 0 10px'>Set your password</h1>",
       "<p style='margin:0 0 16px;color:#c8d1cc;line-height:1.4'>Create a password for this Clarity account. This setup link can only be used with the email it was sent to.</p>",
       "<input id='claritySetupPassword1' type='password' autocomplete='new-password' placeholder='New password' style='box-sizing:border-box;width:100%;margin:0 0 10px;padding:14px;border-radius:14px;border:1px solid rgba(255,255,255,.18);background:#07100b;color:#fff;font-size:16px'>",

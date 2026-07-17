@@ -1,5 +1,5 @@
 /* Extracted verbatim from an inline <script> block in index.html (split-03). */
-/* --- Clarity Caddie GPS bag prompt return path v1 --- */
+/* --- Clarity Caddy GPS bag prompt return path v1 --- */
 (function(){
   'use strict';
   function safe(fn){ try{return fn();}catch(e){} }

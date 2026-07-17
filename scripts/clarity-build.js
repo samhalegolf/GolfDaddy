@@ -1,6 +1,6 @@
 (function(){
   var build = {
-    appName: "Clarity Caddie",
+    appName: "Clarity Caddy",
     packageName: "clarity-caddie-core",
     version: "0.1.0-beta.1",
     buildId: "2026-06-20-tool-rail-tab-hole-label-001",

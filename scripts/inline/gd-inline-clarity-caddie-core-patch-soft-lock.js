@@ -1,5 +1,5 @@
 /* Extracted verbatim from an inline <script> block in index.html (split-03). */
-/* Clarity Caddie Core Patch: Soft Lock Replace Green Centre Workflow v1 */
+/* Clarity Caddy Core Patch: Soft Lock Replace Green Centre Workflow v1 */
 (function(){
   'use strict';
   let replacingGreenCentre = false;
@@ -152,7 +152,7 @@
   function ensureControls(){
     try{
       let rail = document.querySelector('.rightRail');
-      if(!rail){ console.warn('[Clarity Caddie] right rail shell is missing'); return; }
+      if(!rail){ console.warn('[Clarity Caddy] right rail shell is missing'); return; }
       ['replaceGreenCentreBtn','newShotUnlockBtn'].forEach(id=>{
         const btn=document.getElementById(id);
         if(btn&&btn.parentElement===rail)btn.remove();

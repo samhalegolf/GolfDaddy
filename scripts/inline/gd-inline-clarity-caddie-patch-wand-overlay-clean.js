@@ -1,5 +1,5 @@
 /* Extracted verbatim from an inline <script> block in index.html (split-03). */
-/* --- Clarity Caddie patch: Wand overlay clean v1
+/* --- Clarity Caddy patch: Wand overlay clean v1
    Fix: Wand button must never reveal the course search picker over a locked GPS map.
    It opens only the in-GPS overlay and preserves current map/shot/lock state. */
 (function(){

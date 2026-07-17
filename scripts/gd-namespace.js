@@ -4,7 +4,7 @@
   window.ClarityCaddie = window.ClarityCaddie || window.GolfDaddy || {};
   window.GolfDaddy = window.GolfDaddy || window.ClarityCaddie;
   window.ClarityCaddie.brand = window.ClarityCaddie.brand || {
-    appName: 'Clarity Caddie',
+    appName: 'Clarity Caddy',
     platformName: 'Clarity Golf Systems'
   };
   window.GolfDaddy.version = window.GolfDaddy.version || 'clarity-caddie-ui-pass';

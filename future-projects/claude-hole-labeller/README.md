@@ -1,6 +1,6 @@
 # Claude Hole Labeller Archive
 
-This folder preserves the retired Claude-based course hole labelling system for possible future research. It is no longer part of the active Clarity Caddie / GolfDaddy course-loading pipeline.
+This folder preserves the retired Claude-based course hole labelling system for possible future research. It is no longer part of the active Clarity Caddy / GolfDaddy course-loading pipeline.
 
 ## What It Did
 

@@ -1,4 +1,4 @@
-# Clarity Caddie Supabase Auth Deploy Checklist
+# Clarity Caddy Supabase Auth Deploy Checklist
 
 ## What is already built in this package
 

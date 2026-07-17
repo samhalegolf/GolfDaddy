@@ -21,10 +21,10 @@
   }
   function ensureGpsRailButton(){
     const rail=document.querySelector(".rightRail");
-    if(!rail){console.warn("[Clarity Caddie] right rail shell is missing");return;}
+    if(!rail){console.warn("[Clarity Caddy] right rail shell is missing");return;}
     let btn=document.getElementById("gpsRailBtn");
     if(!btn){
-      console.warn("[Clarity Caddie] final rail button missing: gpsRailBtn");
+      console.warn("[Clarity Caddy] final rail button missing: gpsRailBtn");
       return;
     }
     btn.type="button";

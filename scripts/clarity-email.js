@@ -210,8 +210,8 @@
     var targetName = target && target.name || "this account";
     if(direction === "coach_to_player")return actorName + " updated " + targetName + ". Open the app to review the latest profile data.";
     if(direction === "player_to_coach")return targetName + " has new activity ready for coach review.";
-    if(kind === "account")return "Account settings were saved in Clarity Caddie.";
-    return "Profile activity was saved in Clarity Caddie.";
+    if(kind === "account")return "Account settings were saved in Clarity Caddy.";
+    return "Profile activity was saved in Clarity Caddy.";
   }
   function recipientsFor(actor, targetOwner){
     if(!actor)return [];
@@ -269,7 +269,7 @@
       targetName:recipient && recipient.name || "",
       direction:"service",
       title:options && options.title || "Your Clarity account is ready",
-      detail:options && options.detail || "Your account has been updated in Clarity Caddie.",
+      detail:options && options.detail || "Your account has been updated in Clarity Caddy.",
       ctaLabel:options && options.ctaLabel || "Open Clarity",
       ctaUrl:options && options.ctaUrl || appUrl(),
       createdAt:nowISO()
@@ -396,7 +396,7 @@
 	                  actor:actor,
 	                  targetOwner:resolved,
 	                  title:"A player account was created",
-	                  detail:"A new player account was created in Clarity Caddie."
+	                  detail:"A new player account was created in Clarity Caddy."
 	                }).catch(function(){});
 	                return;
 	              }
@@ -411,7 +411,7 @@
 	                actor:actor,
 	                targetOwner:resolved,
 	                title:name === "addPlayer" ? "A player account was created" : "A coach account was created",
-	                detail:"A new account was created in Clarity Caddie."
+	                detail:"A new account was created in Clarity Caddy."
 	              }).catch(function(){});
 	              return;
 	            }

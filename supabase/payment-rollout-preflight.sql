@@ -1,5 +1,5 @@
 -- ============================================================================
--- Clarity Caddie payment rollout preflight (read-only)
+-- Clarity Caddy payment rollout preflight (read-only)
 -- ============================================================================
 -- Run this before supabase/migrations/20260713_add_month_pass_memberships.sql.
 -- This file is intentionally read-only: it only SELECTs metadata/data and emits

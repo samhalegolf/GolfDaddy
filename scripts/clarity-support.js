@@ -210,7 +210,7 @@
 })();
 
 
-/* --- Clarity Caddie bag hotfix: legacy-safe bag editor + ghost-bag setup support --- */
+/* --- Clarity Caddy bag hotfix: legacy-safe bag editor + ghost-bag setup support --- */
 (function(){
   var win = window;
   function safe(fn, fallback){ try { return fn(); } catch(e) { return fallback; } }

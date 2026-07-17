@@ -1,4 +1,4 @@
-# Clarity Caddie Payment Settings Build
+# Clarity Caddy Payment Settings Build
 
 Built: 2026-06-17
 

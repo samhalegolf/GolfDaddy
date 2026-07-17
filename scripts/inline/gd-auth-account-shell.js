@@ -384,7 +384,7 @@
 	          ${authFeedbackMarkup()}
 	          <div class="authHelp" id="gd67ForgotPasswordHelp" role="status"></div>
 	          <button class="saveBtn" type="button" onclick="gd67Login()">Login</button>
-	          <div class="authSwitch"><span>New to Clarity Caddie?</span><button class="textLink" type="button" onclick="gd67SetAuthMode('signup')">Create account</button></div>
+	          <div class="authSwitch"><span>New to Clarity Caddy?</span><button class="textLink" type="button" onclick="gd67SetAuthMode('signup')">Create account</button></div>
         </section>`;
     }
     const role = String(account.role || 'player') === 'admin' ? 'admin' : (String(account.role || 'player') === 'coach' ? 'coach' : 'player');
@@ -979,7 +979,7 @@
         <div class="heading authHeading">
           <div class="authBrand">
             <span class="authMark" aria-hidden="true"><img src="assets/brand/cg-logo-white-g.png?v=clarity-20260531" alt=""></span>
-            <div class="authTitle">Clarity Caddie</div>
+            <div class="authTitle">Clarity Caddy</div>
           </div>
 	          <div class="authMode">${authMode === 'signup' ? 'Create account' : (authMode === 'reset' ? (isAccountSetupRoute() ? 'Set up account' : 'Set password') : 'Sign in')}</div>
         </div>
@@ -1245,7 +1245,7 @@
 		    }
 		    resetEmail = passwordResetEmailFromRoute();
 		    authMode = 'reset';
-	    try { document.title = isAccountSetupRoute() ? 'Set up account - Clarity Caddie' : 'Set password - Clarity Caddie'; } catch(e) {}
+	    try { document.title = isAccountSetupRoute() ? 'Set up account - Clarity Caddy' : 'Set password - Clarity Caddy'; } catch(e) {}
 	    authFeedback = '';
 	    authFeedbackKind = 'info';
 	    render();

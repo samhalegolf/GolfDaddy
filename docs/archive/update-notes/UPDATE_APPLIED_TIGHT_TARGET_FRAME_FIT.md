@@ -1,4 +1,4 @@
-# Clarity Caddie — Tight Target Frame Fit Update
+# Clarity Caddy — Tight Target Frame Fit Update
 
 ## Why this update exists
 The debug frame overlay proved the camera frames were sitting too low and the map was not zooming aggressively enough. The previous implementation was still too close to a point-based camera placement system.

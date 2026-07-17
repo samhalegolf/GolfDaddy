@@ -4,7 +4,7 @@ Updated: 2026-06-09 NZST
 
 ## Mission
 
-Make Clarity Caddie feel truthful, stable, and app-like for soft launch.
+Make Clarity Caddy feel truthful, stable, and app-like for soft launch.
 
 Phase 1 is not a redesign. It is a tight stabilisation pass for the current play/GPS-centred app.
 

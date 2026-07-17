@@ -1,5 +1,5 @@
 /* Extracted verbatim from an inline <script> block in index.html (split-03). */
-/* --- Clarity Caddie vNext patch: GPS locate button recenters when unlocked, stays live-only when locked --- */
+/* --- Clarity Caddy vNext patch: GPS locate button recenters when unlocked, stays live-only when locked --- */
 (function(){
   function safeToast(msg){ try{ if(typeof toast==='function') toast(msg); }catch(e){} }
   function setGpsLabelSafe(ok,label){ try{ if(typeof setGps==='function') setGps(ok,label); }catch(e){}; try{ if(typeof setGpsLabel==='function') setGpsLabel(ok,label); }catch(e){} }

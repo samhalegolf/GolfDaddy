@@ -1,4 +1,4 @@
-# Clarity Caddie — Column Corridor Merge Bug
+# Clarity Caddy — Column Corridor Merge Bug
 
 Investigation summary for external review. Codebase: `GolfDaddy` repo, file `index.html` (single-file app, all functions below live in inline `<script>` blocks). Line numbers are current as of this write-up.
 

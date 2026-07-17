@@ -1,6 +1,6 @@
-# Clarity Caddie Core - Codex Package
+# Clarity Caddy Core - Codex Package
 
-This is the Clarity Caddie app build. The app is part of the Clarity Golf Systems brand architecture.
+This is the Clarity Caddy app build. The app is part of the Clarity Golf Systems brand architecture.
 
 Main entry:
 

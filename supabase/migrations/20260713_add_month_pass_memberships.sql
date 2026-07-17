@@ -1,5 +1,5 @@
 -- ============================================================================
--- Clarity Caddie payment rollout: Month Pass + Monthly Membership
+-- Clarity Caddy payment rollout: Month Pass + Monthly Membership
 -- ============================================================================
 -- Production rollout file for the Stripe Month Pass / Membership branch.
 --

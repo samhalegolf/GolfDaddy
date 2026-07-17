@@ -223,7 +223,7 @@ async function grantMonthPass(session) {
   const metadata = session.metadata || {};
   const userId = text(metadata.user_id || metadata.account_id || session.client_reference_id, 120);
   const accountEmail = email(metadata.account_email || session.customer_details && session.customer_details.email || session.customer_email);
-  if (!userId && !accountEmail) throw new Error("Could not resolve Caddie account for Month Pass");
+  if (!userId && !accountEmail) throw new Error("Could not resolve Caddy account for Month Pass");
 
   const existing = await supabaseFetch("user_entitlements?select=id&stripe_checkout_session_id=eq." + encodeURIComponent(session.id) + "&limit=1", { method: "GET" });
   if (Array.isArray(existing) && existing.length) return;
@@ -273,7 +273,7 @@ async function handleInvoicePaid(invoice, stripeEvent) {
   const subscription = await retrieveSubscription(subscriptionIdFromInvoice(invoice));
   if (!subscription || !await subscriptionIsMonthlyMembership(subscription)) return;
   const identity = await subscriptionIdentity(subscription, invoice);
-  if (!identity.userId) throw new Error("Could not resolve Caddie account for paid invoice");
+  if (!identity.userId) throw new Error("Could not resolve Caddy account for paid invoice");
 
   const existing = await membershipByUserOrSubscription(identity.userId, subscription.id);
   if (existing && existing.last_paid_invoice_id === invoice.id) return;
@@ -292,7 +292,7 @@ async function handleInvoiceProblem(invoice, stripeEvent) {
   const subscription = await retrieveSubscription(subscriptionIdFromInvoice(invoice));
   if (!subscription || !await subscriptionIsMonthlyMembership(subscription)) return;
   const identity = await subscriptionIdentity(subscription, invoice);
-  if (!identity.userId) throw new Error("Could not resolve Caddie account for failed invoice");
+  if (!identity.userId) throw new Error("Could not resolve Caddy account for failed invoice");
 
   const existing = await membershipByUserOrSubscription(identity.userId, subscription.id);
   const firstFailedAt = existing && existing.first_payment_failed_at || toIso(stripeEvent.created) || new Date().toISOString();
@@ -329,7 +329,7 @@ async function upsertMembershipFromSubscription(subscription, stripeEvent, optio
   options = options || {};
   const identity = await subscriptionIdentity(subscription, options.invoice || options.session || null);
   const userId = identity.userId;
-  if (!userId) throw new Error("Could not resolve Caddie account for membership");
+  if (!userId) throw new Error("Could not resolve Caddy account for membership");
   const now = new Date().toISOString();
   const eventCreatedAt = toIso(stripeEvent && stripeEvent.created) || now;
   const existing = await membershipByUserOrSubscription(userId, subscription.id);

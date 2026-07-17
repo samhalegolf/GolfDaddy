@@ -1,5 +1,5 @@
 /* Extracted verbatim from an inline <script> block in index.html (split-03). */
-/* --- Clarity Caddie Play Button Rescue v1 ---
+/* --- Clarity Caddy Play Button Rescue v1 ---
    Keeps Wand untouched. Fixes home/play route after a prior Wand edit left a script fragment broken.
    Any Play/Open GPS/GPS Module tile now reliably enters the GPS/course picker. */
 (function(){
@@ -105,7 +105,7 @@
     if(el.closest&&el.closest('#courseScreen')) return false;
     var t=labelOf(el);
     if(!t) return false;
-	    return t==='play' || t.indexOf('clarity caddie')>=0 || t.indexOf('open gps')>=0 || t.indexOf('gps module')>=0 || t.indexOf('player mode')>=0 || t.indexOf('start manual')>=0 || t.indexOf('continue a round')>=0;
+	    return t==='play' || t.indexOf('clarity caddy')>=0 || t.indexOf('open gps')>=0 || t.indexOf('gps module')>=0 || t.indexOf('player mode')>=0 || t.indexOf('start manual')>=0 || t.indexOf('continue a round')>=0;
   }
   function bindPlayButtons(){
     try{

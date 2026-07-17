@@ -6,11 +6,11 @@ Use this checklist in Stripe test mode before any production rollout. Do not pas
 
 1. In Stripe Dashboard, switch to **Test mode**.
 2. Create or identify a one-time Price for **One Month Pass**.
-   - Product name: `Clarity Caddie One Month Pass`
+   - Product name: `Clarity Caddy One Month Pass`
    - Pricing model: one-time
    - Copy the test `price_...` ID.
 3. Create or identify a recurring Price for **Monthly Membership**.
-   - Product name: `Clarity Caddie Monthly Membership`
+   - Product name: `Clarity Caddy Monthly Membership`
    - Pricing model: recurring
    - Billing period: monthly
    - Copy the test `price_...` ID.
@@ -66,7 +66,7 @@ payment_intent.payment_failed
 
 ## 4. Month Pass Checkout
 
-1. Sign into Clarity Caddie with a Supabase Auth test user.
+1. Sign into Clarity Caddy with a Supabase Auth test user.
 2. Open **Player Settings > Payments & Access**.
 3. Confirm the Month Pass card is enabled only when its `price_...` ID is configured.
 4. Click **Buy One Month**.

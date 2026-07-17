@@ -2,7 +2,7 @@
   "name": "clarity-caddie-core",
   "version": "0.1.0",
   "private": true,
-  "description": "Clarity Caddie app baseline with locked Green Wand green-centred tile crop.",
+  "description": "Clarity Caddy app baseline with locked Green Wand green-centred tile crop.",
   "scripts": {
     "start": "python3 -m http.server 5173",
     "serve": "python3 -m http.server 5173",

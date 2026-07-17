@@ -1,7 +1,7 @@
 /*
  * gd-course-geometry-resolver.js
  * --------------------------------
- * Self-contained Course Geometry Resolver for the existing Clarity Caddie
+ * Self-contained Course Geometry Resolver for the existing Clarity Caddy
  * AutoMapper. It does not save course maps or own GPS play; it returns
  * evidence-backed hole candidates that gd-course-library-pin-lock.js can feed
  * through the normal AutoMapper save path.

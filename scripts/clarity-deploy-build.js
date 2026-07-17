@@ -33,5 +33,5 @@ fs.mkdirSync(dist, { recursive: true });
 publicPaths.forEach(copyEntry);
 
 console.log("Prepared Netlify deploy output: " + path.relative(root, dist));
-console.log("Clarity Caddie app restored at site root: /");
+console.log("Clarity Caddy app restored at site root: /");
 console.log("Public entries: " + publicPaths.filter(function (entry) { return fs.existsSync(path.join(root, entry)); }).join(", "));

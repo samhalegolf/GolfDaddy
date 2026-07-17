@@ -1,4 +1,4 @@
-# Clarity Caddie — V11 Hole Image + Green Truth Cluster Foundation
+# Clarity Caddy — V11 Hole Image + Green Truth Cluster Foundation
 
 ## Intent
 

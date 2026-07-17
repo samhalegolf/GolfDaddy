@@ -1,4 +1,4 @@
-# Clarity Caddie — Supabase Source-of-Truth Upgrade
+# Clarity Caddy — Supabase Source-of-Truth Upgrade
 
 Date: 2026-06-16
 

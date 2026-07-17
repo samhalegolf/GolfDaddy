@@ -1,4 +1,4 @@
--- Clarity Caddie course-map cloud backing store.
+-- Clarity Caddy course-map cloud backing store.
 -- Supabase owns structured map truth; bulky visual artifacts should be linked
 -- through assets_json rather than stored as tile arrays here.
 

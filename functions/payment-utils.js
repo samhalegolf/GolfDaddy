@@ -310,7 +310,7 @@ async function authenticatedAccount(event) {
     account = Array.isArray(rowsByEmail) ? rowsByEmail[0] : null;
   }
   if (!account || !account.account_id) {
-    const error = new Error("Authenticated account is not linked to Clarity Caddie yet");
+    const error = new Error("Authenticated account is not linked to Clarity Caddy yet");
     error.status = 401;
     throw error;
   }

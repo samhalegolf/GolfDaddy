@@ -1,4 +1,4 @@
-# Clarity Caddie GitHub import notes
+# Clarity Caddy GitHub import notes
 
 This package is source-only for GitHub/Netlify continuous deployment.
 

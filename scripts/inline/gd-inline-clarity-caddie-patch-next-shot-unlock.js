@@ -1,5 +1,5 @@
 /* Extracted verbatim from an inline <script> block in index.html (split-03). */
-/* --- Clarity Caddie patch: Next Shot unlock + Undo unlock fallback v1 --- */
+/* --- Clarity Caddy patch: Next Shot unlock + Undo unlock fallback v1 --- */
 (function(){
   'use strict';
   function gdToast(msg){ try{ if(typeof toast === 'function') toast(msg); }catch(e){} }
