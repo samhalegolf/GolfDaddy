@@ -785,6 +785,19 @@
 
   function formData(form) { var data = {}; Array.prototype.forEach.call(new FormData(form).entries(), function (entry) { data[entry[0]] = entry[1]; }); data.active = !!form.elements.active && form.elements.active.checked; return data; }
 
+  function productFormData(form) {
+    form = form && form.form ? form.form : form;
+    var data = formData(form);
+    var fallback = adminProductByKey(editingProductKey) || {};
+    data.product_key = data.product_key || fallback.product_key || editingProductKey || "";
+    data.product_kind = data.product_kind || fallback.product_kind || (data.product_key === "monthly_membership" ? "membership" : "month_pass");
+    data.name = data.name || fallback.name || data.product_key.replace(/_/g, " ");
+    data.duration_hours = data.duration_hours || fallback.duration_hours || 720;
+    data.billing_schedule = data.billing_schedule || fallback.billing_schedule || (data.product_kind === "membership" ? "monthly" : "one_time");
+    data.active = !!(form && form.elements && form.elements.active) ? !!form.elements.active.checked : fallback.active !== false;
+    return data;
+  }
+
   function updateAdminQueryState(next) {
     entitlementQueryState = Object.assign({}, entitlementQueryState, next || {});
     render();
@@ -837,7 +850,7 @@
       return false;
     },
     closeProductEditor: function () { editingProductKey = ""; render(); return false; },
-    saveProductFromForm: function (form) { var data = formData(form); editingProductKey = data.product_key || editingProductKey; adminAction("upsertProduct", { product: data }); return false; },
+    saveProductFromForm: function (form) { var data = productFormData(form); editingProductKey = data.product_key || editingProductKey; adminAction("upsertProduct", { product: data }); return false; },
     issueFreePassFromForm: function (form) { var data = formData(form); adminAction("issueFreePass", data).then(function () { form.reset(); if (form.elements.productKey) form.elements.productKey.value = "admin_comped_membership"; if (form.elements.durationHours) form.elements.durationHours.value = "720"; if (form.elements.allowMemberReferrals) form.elements.allowMemberReferrals.checked = true; refresh({ silent: true }); }); return false; }
     ,
     createReferralFromForm: function (form, mode) {
