@@ -26259,6 +26259,15 @@ const GD_PLACEHOLDER_SEED_KEY='gd_placeholder_profile_seed_v1';
 const GD_ONBOARDING_DRAFT={step:0,name:'',mode:'player',handedness:'right',consistency:'mid',bagChoice:'quick',sevenIron:155,faceOffsetDeg:1.4};
 let GD_PROFILE_STATE={profiles:[],activeId:null,onboardingDraft:{...GD_ONBOARDING_DRAFT}};
 function gdNewId(prefix='p'){return prefix+'_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,7)}
+// Hand-typeable profile id: "player" + 2 digits (e.g. "player47").
+// Lowercase + slug-safe so it round-trips through the practice-email address unchanged.
+// NOTE: 2 digits = only 90 ids (10-99). Widen the range here if you need more profiles.
+function gdNewProfileId(){
+  const gen=()=>'player'+String(Math.floor(Math.random()*90)+10); // two digits, 10-99 (no leading zero)
+  let id=gen(),guard=0;
+  while(typeof gdProfileById==='function'&&gdProfileById(id)&&guard++<200)id=gen();
+  return id;
+}
 function gdConsistencyLabel(v){return({elite:'Very consistent',good:'Pretty consistent',mid:'Mixed',high:'Wild sometimes',beginner:'Very variable'})[v]||'Mixed'}
 const GD_PERMISSION_STORE_KEY='gd_account_permission_v1';
 const GD_COACH_PROFILE_VISIBILITY_KEY='gd_coach_profile_visibility_v1';
@@ -26412,7 +26421,7 @@ function gdPlaceholderProfile(id=GD_PLACEHOLDER_PROFILE_ID){
   const driver=gdPlaceholderBubble('Driver',248,'right','good',1.6);
   return{id,name:'Demo Player',handicap:'8.4',hcp:'8.4',permission:'player',accountPermission:'player',mode:'player',handedness:'right',consistency:'good',skillLevel:'good',faceOffsetDeg:1.6,bag,bubbleProfiles:{'7i':seven,'Driver':driver},previewBubbleSet:seven,onboardingComplete:true,placeholderProfile:true,createdAt:now,updatedAt:now}
 }
-function gdDefaultProfile(){return gdPlaceholderProfile(gdNewId())}
+function gdDefaultProfile(){return gdPlaceholderProfile(gdNewProfileId())}
 function gdInstallPlaceholderProfile(force=false){
   const existing=GD_PROFILE_STATE.profiles.find(p=>p.id===GD_PLACEHOLDER_PROFILE_ID||p.placeholderProfile);
   if(existing&&!force&&localStorage.getItem(GD_PLACEHOLDER_SEED_KEY))return existing;
@@ -26821,7 +26830,7 @@ function gdAccountCreate(data,opts={}){
   const coachId=data?.coachId||null;
   const account={
     accountId,
-    profileId:gdNewId('profile'),
+    profileId:gdNewProfileId(),
     name,
     email,
     role,
