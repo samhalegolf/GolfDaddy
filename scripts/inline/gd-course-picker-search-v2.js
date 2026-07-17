@@ -1,7 +1,7 @@
 /* Extracted verbatim from an inline <script> block in index.html (split-03). */
 (function(){
   "use strict";
-  const STORE_KEY="gd_user_course_library_v1";
+  const RECENTS_KEY="gd_recent_course_picks_v1";
   const NEARBY_M=5200;
   const REMOTE_LIMIT=12;
   const KNOWN=[
@@ -115,22 +115,34 @@
       lng:Number.isFinite(lng)?lng:(Number.isFinite(finderLng)?finderLng:null)
     });
   }
-  function savedCourses(){
-    const store=safe(()=>JSON.parse(localStorage.getItem(STORE_KEY)||"{}"),{})||{};
-    return Object.values(store.courses||{}).map(course=>{
-      const p=basePayload({
-        name:course.courseName,
-        courseId:course.courseId,
-        lat:course.courseLat,
-        lng:course.courseLng,
-        finderLat:course.finderLat??course.courseFinderLat,
-        finderLng:course.finderLng??course.courseFinderLng,
-        source:"saved-course"
-      });
-      p.hasSavedData=true;
-      p.hasFinderCoordinate=Number.isFinite(Number(p.finderLat))&&Number.isFinite(Number(p.finderLng));
-      return p.name&&p.name!=="Manual GPS"?p:null;
+  function readRecentCourses(){
+    const rows=safe(()=>JSON.parse(localStorage.getItem(RECENTS_KEY)||"[]"),[])||[];
+    return (Array.isArray(rows)?rows:[]).map(item=>{
+      const course=basePayload(Object.assign({},item,{source:"recent-course"}));
+      course.hasSavedData=false;
+      course.hasFinderCoordinate=false;
+      return course.name&&!/^manual gps$/i.test(course.name)?course:null;
     }).filter(Boolean);
+  }
+  function rememberRecentCourse(raw){
+    const course=basePayload(raw);
+    if(!course.name||/^manual gps$/i.test(course.name))return;
+    const row={
+      name:course.name,
+      courseName:course.name,
+      courseId:course.courseId||course.canonicalKey,
+      canonicalKey:course.canonicalKey||keyForName(course.name),
+      lat:Number.isFinite(Number(course.lat))?Number(course.lat):null,
+      lng:Number.isFinite(Number(course.lng))?Number(course.lng):null,
+      pickedAt:new Date().toISOString(),
+      source:"recent-course"
+    };
+    const key=String(row.canonicalKey||keyForName(row.name)).toLowerCase();
+    const next=[row].concat(readRecentCourses().filter(item=>String(item.canonicalKey||keyForName(item.name)).toLowerCase()!==key)).slice(0,8);
+    safe(()=>localStorage.setItem(RECENTS_KEY,JSON.stringify(next)));
+  }
+  function savedCourses(){
+    return readRecentCourses();
   }
   function allLocalCourses(){
     const api=window.GolfDaddyCourseLibrary;
@@ -213,7 +225,7 @@
       else if(q&&nameClean.startsWith(q))score-=38;
       else if(q&&nameClean.includes(q))score-=24;
       if(Number.isFinite(course.distanceM))score-=Math.max(0,34-(course.distanceM/130));
-      if(course.hasSavedData)score-=14;
+      if(course.source==="recent-course")score-=14;
       if(course.source==="known-course"||course.source==="built-in-course")score-=7;
       course.__rank=score;
       return course;
@@ -222,9 +234,8 @@
   function metaText(course){
     const parts=[];
     if(Number.isFinite(course.distanceM))parts.push(course.distanceM<1000?`${Math.round(course.distanceM)}m away`:`${(course.distanceM/1000).toFixed(1)}km away`);
-    if(course.hasSavedData)parts.push("saved data");
-    if(course.hasFinderCoordinate)parts.push("finder point");
-    if(course.source==="remote-search")parts.push("search result");
+    if(course.source==="recent-course")parts.push("Recent");
+    else if(course.source==="remote-search")parts.push("search result");
     else parts.push("course result");
     return parts.join(" · ");
   }
@@ -268,6 +279,7 @@
   function selectCourse(raw){
     const course=basePayload(raw);
     course.courseId=course.savedCourseId||course.courseId||course.canonicalKey;
+    rememberRecentCourse(course);
     if(typeof window.gdOpenCoursePickerCourse==="function")return window.gdOpenCoursePickerCourse(course);
     if(typeof window.openCourse==="function"&&window.openCourse!==selectCourse)return window.openCourse(course);
     safe(()=>{localStorage.setItem("gd_active_course_v1",JSON.stringify(course));sessionStorage.setItem("gd_assumed_course_name",course.name);});
@@ -290,7 +302,10 @@
       list.appendChild(row);
     });
     const count=byId("countLine");
-    if(count)count.textContent=courses.length?`${courses.length} found`:"Search";
+    if(count){
+      const recentOnly=courses.length&&courses.every(course=>course&&course.source==="recent-course");
+      count.textContent=courses.length?(recentOnly?`${courses.length} recent`:`${courses.length} found`):"Search";
+    }
   };
   window.manualSearch=function(){
     const q=byId("searchInput")?.value.trim()||"";
@@ -300,7 +315,7 @@
     if(list)list.innerHTML="";
     renderNearby();
     if(!q){
-      window.renderCourses([]);
+      window.renderCourses(readRecentCourses());
       return false;
     }
     if(count)count.textContent="Searching";
@@ -332,13 +347,14 @@
   window.gdOpenChangeCourse=function(event){
     if(event){event.preventDefault?.();event.stopPropagation?.();event.stopImmediatePropagation?.();}
     window.gdCourseChangeMode="change-course";
+    window.__gdCoursePickerReturnTarget="gps";
     safe(()=>{window.__gdCoursePickerChangingAt=Date.now();window.__gdCoursePickerFirstHoleOpenToken=null;window.__gdStableMappedHoleOneLast=null;});
     safe(()=>{if(window.__gdPreLockHoleFrameTimer)clearTimeout(window.__gdPreLockHoleFrameTimer);});
     safe(()=>{if(typeof gdClearMappedStartPromptChrome==="function")gdClearMappedStartPromptChrome();});
     const input=byId("searchInput");
     if(input)input.value="";
     requestPickerGps();
-    window.renderCourses([]);
+    window.renderCourses(readRecentCourses());
     const screen=byId("courseScreen");
     if(screen){
       screen.classList.remove("hidden");
@@ -348,6 +364,15 @@
     setTimeout(()=>input?.focus(),80);
     return false;
   };
+  const oldOpenCoursePickerCourse=window.gdOpenCoursePickerCourse;
+  if(typeof oldOpenCoursePickerCourse==="function"&&!oldOpenCoursePickerCourse.__gdRecentCourseWrapped){
+    const wrapped=function(course){
+      rememberRecentCourse(course);
+      return oldOpenCoursePickerCourse.apply(this,arguments);
+    };
+    wrapped.__gdRecentCourseWrapped=true;
+    window.gdOpenCoursePickerCourse=wrapped;
+  }
   let activeCourseHoleOneTimer=null;
   function shouldOpenActiveCourseToHoleOne(active,opts){
     const name=String(active?.name||active?.courseName||"").trim();
@@ -406,6 +431,6 @@
     return res;
   };
   window.gdRefreshCourseAssumedNearby=renderNearby;
-  if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",()=>{renderNearby();window.renderCourses([]);});
-  else{renderNearby();window.renderCourses([]);}
+  if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",()=>{renderNearby();window.renderCourses(readRecentCourses());});
+  else{renderNearby();window.renderCourses(readRecentCourses());}
 })();

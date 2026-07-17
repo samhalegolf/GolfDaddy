@@ -3474,32 +3474,13 @@ function gdPickPracticePhotoFile(event,mode="photo"){
 }
 let gdPracticeSampleImportChecked=false;
 async function gdSyncPracticeSampleImportButton(){
-  const btn=document.getElementById("gdPracticeLoadExtracted7iBtn");
-  if(!btn||gdPracticeSampleImportChecked)return;
+  if(gdPracticeSampleImportChecked)return;
   gdPracticeSampleImportChecked=true;
-  try{
-    const response=await fetch("data/practice-7i-extracted.json",{method:"HEAD",cache:"no-store"});
-    if(response.ok)btn.hidden=false;
-    else btn.remove();
-  }catch(e){
-    btn.remove();
-  }
+  return false;
 }
 async function gdLoadExtractedPractice7iData(){
-  try{
-    gdLmSetStatus("Status","Loading extracted 7i scan","Current photo OCR payload","needs_more_data");
-    const response=await fetch("data/practice-7i-extracted.json",{cache:"no-store"});
-    if(!response.ok)throw new Error(`HTTP ${response.status}`);
-    const payload=await response.json();
-    payload.replaceExisting=false;
-    await gdImportLaunchMonitorPayload(payload,"Extracted 7i scan");
-    gdLmSetStatus("Status","Extracted 7i scan loaded",`${(payload.clubGroups||[]).length} shots added to Practice Data`,"corroborated");
-    if(typeof gdSetPracticeEvidenceClubTab==="function")gdSetPracticeEvidenceClubTab("7i");
-  }catch(e){
-    console.warn("[GolfDaddy] extracted 7i import failed",e);
-    gdLmSetStatus("Status","Extracted 7i import failed",e&&e.message?e.message:"Could not load extracted payload","conflict_check");
-    gdLmToast("Extracted 7i import failed");
-  }
+  gdLmSetStatus("Status","Sample import removed","Use camera, photo upload, email receiver, or CSV/text import for Practice Data.","needs_more_data");
+  gdLmToast("Sample import removed");
   return false;
 }
 let gdPracticeExtractionPreviewState=null;
@@ -3967,11 +3948,32 @@ function gdPracticeRecordLiveDebugEvent(type,message,extra={}){
   window.__gdPracticeLiveDebugEvents=gdPracticeLiveDebugEvents;
   try{gdRenderPracticeLiveDebugPanel();}catch(e){console.warn("[GolfDaddy] practice live debug render skipped",e);}
 }
+function gdPracticeFriendlyScanFailureMessage(message){
+  const text=String(message||"").trim();
+  if(!text)return "";
+  if(/^Couldn.?t find headers|^Could not find headers/i.test(text))return text;
+  if(/^Couldn.?t read values|^Could not read values/i.test(text))return text;
+  if(/^Couldn.?t find the table|^Could not find the table/i.test(text))return text;
+  if(/header allocation|header strip|mapped value fields|known metric|metric headers|column names|identify the columns|assigned headers|no allocated column strips/i.test(text)){
+    return "Couldn't find headers. Keep the header row visible and re-frame the value grid.";
+  }
+  if(/no usable rows|no valid native practice rows|cell ocr|reading values|read values|raw values|no rows lined up|no aligned rows|column strip read|usable shots|0 valid rows/i.test(text)){
+    return "Couldn't read values. Use a clearer crop, brighter photo, or pasted CSV/text.";
+  }
+  if(/column split|value grid|flattened value grid|usable grid|number-like|value corridors|frame|crop|re-frame|cluster/i.test(text)){
+    return "Couldn't find the table. Keep the practice table inside the frame and scan again.";
+  }
+  return text;
+}
 function gdSetPracticeScanStatus(message,opts={}){
-  const text=String(message||"");
-  const state=/failed|could not|no column|too small|no usable|timed out|timeout|stopped|nothing was saved/i.test(text)
+  let text=String(message||"");
+  const failureLike=/failed|could not|couldn't|no |needs attention|stopped|blocked|missing|unable|did not|without saving|before values|0 valid|incomplete/i.test(text)||String(opts.debugState||"")==="error";
+  const friendly=failureLike?gdPracticeFriendlyScanFailureMessage(text):text;
+  if(friendly&&friendly!==text)text=friendly;
+  const diagnostic=String(opts.rawMessage||text);
+  const state=/failed|could not|couldn't|no column|too small|no usable|timed out|timeout|stopped|nothing was saved/i.test(diagnostic+" "+text)
     ?"error"
-    :(/reading|finding|fitting|flattening|cropping|generating|checking|masking|scan started|scanning/i.test(text)?"scanning":(/ready|imported|checkpoint ready|complete|cluster found|column crops ready|columns cropped/i.test(text)?"ready":"idle"));
+    :(/reading|finding|fitting|flattening|cropping|generating|checking|masking|scan started|scanning/i.test(diagnostic+" "+text)?"scanning":(/ready|imported|checkpoint ready|complete|cluster found|column crops ready|columns cropped/i.test(diagnostic+" "+text)?"ready":"idle"));
   const progressActive=gdPracticeScanProgressIsActive();
   const scanRunning=state==="scanning"&&progressActive;
   const debugState=gdPracticeResolveLiveDebugState(text,state,progressActive,opts.debugState);
@@ -3985,7 +3987,7 @@ function gdSetPracticeScanStatus(message,opts={}){
   });
   document.body.classList.toggle("gdPracticeScanRunning",scanRunning);
   document.getElementById("practiceDataPanel")?.classList.toggle("gdPracticeScanRunning",scanRunning);
-  gdPracticeRecordLiveDebugEvent("status",text,{state:debugState,active:scanRunning,progressActive});
+  gdPracticeRecordLiveDebugEvent("status",text,{state:debugState,active:scanRunning,progressActive,diagnostic});
   if(scanRunning){
     if(!gdPracticePhotoProcessingStartedAt)gdPracticeProcessingStart();
     try{gdSetShotDataLibraryOpen("practice",true);}catch(e){}
@@ -4019,10 +4021,10 @@ function gdPracticeQuietScanSurface(opts={}){
   }
 }
 function gdPracticeFeedback(message,tone=""){
-  const text=String(message||"");
-  if(!text)return;
   const kind=String(tone||"").toLowerCase();
-  gdSetPracticeScanStatus(text,{debugState:(kind==="error"||kind==="ready"||kind==="warning")?kind:""});
+  const text=kind==="error"?gdPracticeFriendlyScanFailureMessage(message):String(message||"");
+  if(!text)return;
+  gdSetPracticeScanStatus(text,{rawMessage:message,debugState:(kind==="error"||kind==="ready"||kind==="warning")?kind:""});
   if(kind==="error")gdLmSetStatus("Status","Practice scan needs attention",text,"conflict_check");
   else if(kind==="ready")gdLmSetStatus("Status","Practice scan ready",text,"corroborated");
 }
@@ -17140,6 +17142,7 @@ function gdOpenChangeCourse(event){
     event.stopImmediatePropagation?.();
   }
   try{window.gdCourseChangeMode="change-course";}catch(e){}
+  try{window.__gdCoursePickerReturnTarget="gps";}catch(e){}
   try{
     window.__gdCoursePickerChangingAt=Date.now();
     window.__gdCoursePickerFirstHoleOpenToken=null;
@@ -17545,6 +17548,7 @@ function gdCoursePickerHome(event){
     event.stopImmediatePropagation?.();
   }
   try{window.gdCourseChangeMode="";}catch(e){}
+  try{window.__gdCoursePickerReturnTarget="";}catch(e){}
   try{document.getElementById("courseScreen")?.classList.add("hidden");}catch(e){}
   if(typeof window.gdCanonicalShellHome==="function")return window.gdCanonicalShellHome();
   if(typeof showShellHome==="function")return showShellHome();
@@ -17557,6 +17561,11 @@ function gdCoursePickerBack(event){
     event.stopImmediatePropagation?.();
   }
   try{document.getElementById("courseScreen")?.classList.add("hidden");}catch(e){}
+  if(window.__gdCoursePickerReturnTarget==="home"){
+    window.__gdCoursePickerReturnTarget="";
+    window.gdCourseChangeMode="";
+    return gdCoursePickerHome(event);
+  }
   if(window.gdCourseChangeMode==="assumed-label"||window.gdCourseChangeMode==="change-course"){
     window.gdCourseChangeMode="";
     if(typeof enterGpsModule==="function")return enterGpsModule({preserveState:true,fromBack:true});
@@ -22994,7 +23003,7 @@ function gdRefreshScoreDisplays(){
     if(mid)mid.textContent=value;
   }
 }
-function adjustScore(d){if(gdScorecardHasDrivenScore)gdManualScoreOverride=true;playerScore+=d;updateScore()}
+function adjustScore(d){if(gdScorecardHasDrivenScore)gdManualScoreOverride=true;playerScore+=Number(d)||0;updateScore();return false}
 function updateScore(){gdRefreshScoreDisplays()}
 function logShot(reason){if(!shotTracking||!start||!target)return;const d=map.distance(start,target);trackedShots.push({id:++shotId,reason,distanceM:Math.round(d),start:{lat:start.lat,lng:start.lng},target:{lat:target.lat,lng:target.lng},time:new Date().toISOString()})}
 let gdStatsConsistencyPct=68;
@@ -23200,8 +23209,11 @@ function gdPracticeScanReentryBlocked(){
 }
 function gdPracticeScanStoppedMessage(reason=""){
   const text=String(reason||"").trim();
+  if(/header|column name|metric/i.test(text)){
+    return "Couldn't find headers. Nothing was saved. Keep the header row visible and re-frame the value grid.";
+  }
   if(/reading values|cell ocr|ocr|timeout|timed out|exceeded/i.test(text)){
-    return "Scan stopped while reading values. Nothing was saved. Try a tighter crop or clearer table photo.";
+    return "Couldn't read values. Nothing was saved. Try a tighter crop or clearer table photo.";
   }
   return "Scan stopped before values were saved. Try a tighter crop or clearer table photo.";
 }
@@ -26190,6 +26202,13 @@ openBag=function(opts={}){
   showShellChrome(true);
   setShellLayer('module');
   setDockActive('bag');
+  if(opts.fromGps){
+    window.__gdBackTarget='gps';
+    try{document.getElementById('bagPanel').dataset.gdReturnTarget='gps';}catch(e){}
+  }else if(opts.fromHome){
+    window.__gdBackTarget='home';
+    try{document.getElementById('bagPanel').dataset.gdReturnTarget='home';}catch(e){}
+  }
   opts.replace ? replaceShellRoute('bag') : pushShellRoute('bag');
   __gdOpenBag();
 };
@@ -26208,6 +26227,13 @@ openDeveloperPanel=function(opts={}){
 const __gdOpenSettings=openSettings;
 openSettings=function(opts={}){
   showShellChrome(true);
+  if(opts.fromGps){
+    window.__gdBackTarget='gps';
+    try{document.getElementById('settingsPanel').dataset.gdReturnTarget='gps';}catch(e){}
+  }else if(opts.fromHome){
+    window.__gdBackTarget='home';
+    try{document.getElementById('settingsPanel').dataset.gdReturnTarget='home';}catch(e){}
+  }
   if((shellRouteStack[shellRouteStack.length-1]||'')!=='settings'){
     opts.replace ? replaceShellRoute('settings') : pushShellRoute('settings');
   }

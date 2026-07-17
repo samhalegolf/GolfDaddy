@@ -108,7 +108,8 @@
     }
 
     var route = safe(function () { return window.ClarityRouter && window.ClarityRouter.get && window.ClarityRouter.get(); }, null);
-    var returnToGps = !!opts.fromGps || document.body.classList.contains("shell-gps") || document.body.classList.contains("gdGpsActive") || document.body.classList.contains("gps-active") || route && route.name === "gps";
+    var explicitHome = !!opts.fromHome;
+    var returnToGps = !explicitHome && (!!opts.fromGps || document.body.classList.contains("shell-gps") || document.body.classList.contains("gdGpsActive") || document.body.classList.contains("gps-active") || route && route.name === "gps");
     var profilePanel = document.getElementById("gdProfileV67");
     var explicitProfile = !!opts.fromProfile || window.__gdSettingsReturnTarget === "profile" || route && route.name === "profile";
     var returnToProfile = explicitProfile || !!(profilePanel && !profilePanel.classList.contains("hidden") && document.body.classList.contains("gdProfileOpen"));

@@ -606,6 +606,10 @@
     try{
       const btn=document.getElementById('gdMappedPlayModeToggle');
       const sub=document.getElementById('gdMappedPlayModeSub');
+      const row=document.getElementById('gdMappedPlayModeRow');
+      const role=String((typeof gdGetAccountPermission==='function'&&gdGetAccountPermission())||document.body?.dataset?.gdPermission||document.body?.dataset?.clarityAccountRole||document.body?.dataset?.accountRole||window.GolfDaddyAccounts?.current?.()?.role||'player').toLowerCase();
+      const canShow=role==='admin'||role==='coach';
+      if(row)row.hidden=!canShow;
       const courseScreen=document.getElementById('courseScreen');
       const pickerOpen=!!(courseScreen&&!courseScreen.classList.contains('hidden')&&getComputedStyle(courseScreen).display!=='none'&&getComputedStyle(courseScreen).visibility!=='hidden');
       const mapped=mappedCourseAssistEnabled();
@@ -615,19 +619,24 @@
         try{if(typeof clearWandHandles==='function')clearWandHandles();}catch(e){}
         try{if(typeof window.gdClearWandLive==='function')window.gdClearWandLive();}catch(e){}
       }
-      if(btn){
+      if(btn&&canShow){
         btn.textContent=mapped?'Mapped':'Unmapped';
         btn.classList.toggle('active',mapped);
         btn.setAttribute('aria-label',mapped?'Mapped course mode':'Unmapped course mode');
         btn.title=mapped?'Mapped course mode':'Unmapped course mode';
       }
-      if(sub)sub.textContent=mapped?`Use saved mapping for ${courseName(activeCourseForMode())}`:`Plain two-tap for ${courseName(activeCourseForMode())}`;
+      if(sub&&canShow)sub.textContent=mapped?`Use saved mapping for ${courseName(activeCourseForMode())}`:`Plain two-tap for ${courseName(activeCourseForMode())}`;
     }catch(e){}
   }
   function installMappedPlayModeSetting(){
     try{
+      const role=String((typeof gdGetAccountPermission==='function'&&gdGetAccountPermission())||document.body?.dataset?.gdPermission||document.body?.dataset?.clarityAccountRole||document.body?.dataset?.accountRole||window.GolfDaddyAccounts?.current?.()?.role||'player').toLowerCase();
+      const canShow=role==='admin'||role==='coach';
       const existing=document.getElementById('gdMappedPlayModeToggle');
       if(existing){
+        const existingRow=document.getElementById('gdMappedPlayModeRow');
+        if(existingRow)existingRow.hidden=!canShow;
+        if(!canShow){updateMappedPlayModeUi();return;}
         if(!existing.__gdMappedPlayModeBound){
           existing.__gdMappedPlayModeBound=true;
           existing.addEventListener('click',toggleMappedPlayMode);
@@ -635,6 +644,7 @@
         updateMappedPlayModeUi();
         return;
       }
+      if(!canShow){updateMappedPlayModeUi();return;}
       const anchor=document.getElementById('mapSourceBtn')?.closest?.('.row')||document.getElementById('settingsPanel')?.querySelector?.('.gdSettingsGroup');
       if(!anchor)return;
       const row=document.createElement('div');
@@ -5481,9 +5491,83 @@
     }
     list.appendChild(card);
   }
+  function courseLibraryMappingAdmin(){
+    const actor=currentAdminActor();
+    const role=String((typeof gdGetAccountPermission==='function'&&gdGetAccountPermission())||actor.role||document.body?.dataset?.gdPermission||document.body?.dataset?.clarityAccountRole||document.body?.dataset?.accountRole||'player').toLowerCase();
+    return role==='admin'||role==='coach';
+  }
+  function courseRecentRows(){
+    const rows=(()=>{try{return JSON.parse(localStorage.getItem('gd_recent_course_picks_v1')||'[]');}catch(e){return [];}})();
+    return (Array.isArray(rows)?rows:[]).map(item=>{
+      const name=String(item?.name||item?.courseName||'').trim();
+      if(!name||/^manual gps$/i.test(name))return null;
+      return {
+        name,
+        courseName:name,
+        courseId:item?.courseId||item?.canonicalKey||slug(name),
+        canonicalKey:item?.canonicalKey||slug(name),
+        lat:Number.isFinite(Number(item?.lat))?Number(item.lat):null,
+        lng:Number.isFinite(Number(item?.lng))?Number(item.lng):null,
+        pickedAt:item?.pickedAt||item?.updatedAt||item?.createdAt||''
+      };
+    }).filter(Boolean);
+  }
+  function syncCourseLibraryHeading(mappingView){
+    const overlay=document.getElementById('gdCourseLibraryOverlay');
+    const title=overlay?.querySelector('.gdCourseLibraryHead h2');
+    const sub=overlay?.querySelector('.gdCourseLibraryHead p');
+    const input=overlay?.querySelector('#gdCourseLibrarySearchInput');
+    if(title)title.textContent=mappingView?'Saved Courses':'Recent Courses';
+    if(sub)sub.textContent=mappingView?'Objects are grouped by saved GPS course, with duplicates merged by course label.':'Recently played or selected courses.';
+    if(input)input.placeholder=mappingView?'Search saved courses':'Search recent courses';
+  }
+  function openRecentCourse(row){
+    const course={
+      name:row.name,
+      courseName:row.name,
+      courseId:row.courseId||row.canonicalKey,
+      canonicalKey:row.canonicalKey||slug(row.name),
+      lat:Number.isFinite(Number(row.lat))?Number(row.lat):null,
+      lng:Number.isFinite(Number(row.lng))?Number(row.lng):null,
+      source:'recent-course'
+    };
+    if(typeof window.closeCourseLibraryPanel==='function')window.closeCourseLibraryPanel();
+    if(typeof window.gdOpenCoursePickerCourse==='function')return window.gdOpenCoursePickerCourse(course);
+    try{localStorage.setItem('gd_active_course_v1',JSON.stringify(course));sessionStorage.setItem('gd_assumed_course_name',course.name);}catch(e){}
+    if(typeof enterGpsModule==='function')return enterGpsModule({fromCoursePicker:true,selectedCourse:course});
+    return false;
+  }
+  function renderCourseLibraryRecents(){
+    const list=document.getElementById('gdCourseLibraryList');
+    if(!list)return;
+    syncCourseLibraryHeading(false);
+    const search=document.getElementById('gdCourseLibrarySearchInput');
+    if(search&&search.value!==courseLibraryFilter)search.value=courseLibraryFilter;
+    const filter=normalizeCourseName(courseLibraryFilter);
+    const rows=courseRecentRows().filter(row=>!filter||normalizeCourseName(row.name).includes(filter));
+    list.innerHTML='';
+    if(!rows.length){
+      list.innerHTML=`<div class="gdCourseCard"><strong>${filter?'No matching recents':'No recent courses yet'}</strong><span>${filter?'Try another search.':'Play or select a course and it will appear here.'}</span></div>`;
+      return;
+    }
+    rows.forEach(row=>{
+      const card=document.createElement('button');
+      card.className='gdCourseCard gdRecentCourseCard';
+      card.type='button';
+      const meta=row.pickedAt?`Recent · ${dateLabel(row.pickedAt)}`:'Recent';
+      card.innerHTML=`<strong>${esc(row.name)}</strong><span>${esc(meta)}</span>`;
+      card.onclick=()=>openRecentCourse(row);
+      list.appendChild(card);
+    });
+  }
   function renderCourseLibraryPanel(detailKey=null){
     const list=document.getElementById('gdCourseLibraryList');
     if(!list)return;
+    if(!courseLibraryMappingAdmin()){
+      renderCourseLibraryRecents();
+      return;
+    }
+    syncCourseLibraryHeading(true);
     const search=document.getElementById('gdCourseLibrarySearchInput');
     if(search&&search.value!==courseLibraryFilter)search.value=courseLibraryFilter;
     const uid=userId();

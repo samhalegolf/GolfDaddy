@@ -1107,10 +1107,12 @@
     if(!root)return;
     if(!gdPracticeEmailLaneOpen){
       root.hidden=true;
+      root.classList.remove("active");
       root.innerHTML="";
       return;
     }
     root.hidden=false;
+    root.classList.add("active");
     const identity=gdPracticeEmailIdentity();
     const address=gdPracticeEmailLaneState.address||gdPracticeEmailAddressLocal(identity);
     const status=gdPracticeEmailLaneState.status||"Address generated locally";
@@ -1209,7 +1211,7 @@
     event?.preventDefault?.();
     event?.stopPropagation?.();
     event?.stopImmediatePropagation?.();
-    gdPracticeImportOpen=true;
+    gdPracticeImportOpen=false;
     gdPracticeEmailLaneOpen=true;
     try{localStorage.removeItem(GD_PRACTICE_IMPORT_OPEN_KEY);}catch(e){}
     gdRenderPracticeImportPanel();
@@ -1518,7 +1520,7 @@
     event?.stopPropagation?.();
     event?.stopImmediatePropagation?.();
     gdPracticeImportOpen=!gdPracticeImportOpen;
-    if(!gdPracticeImportOpen)gdPracticeEmailLaneOpen=false;
+    gdPracticeEmailLaneOpen=false;
     try{localStorage.removeItem(GD_PRACTICE_IMPORT_OPEN_KEY);}catch(e){}
     if(gdPracticeImportOpen){
       const savedRows=gdNativePracticeApi()?.loadNativePracticeShots?.({})||[];
@@ -3595,6 +3597,11 @@
 		    (Array.isArray(p?.bag)?p.bag:[]).forEach(row=>add(row?.club||row?.name));
 		    add(ctx?.courseBubble?.club);
 		    add(ctx?.practiceBubble?.club);
+		    if(!clubs.length){
+		      const defaults=gdShotBubbleSafe(()=>typeof gdDefaultBagRows==="function"?gdDefaultBagRows():[],[])||[];
+		      defaults.forEach(row=>add(row?.club||row?.name));
+		    }
+		    if(!clubs.length)["Driver","3w","5w","4i","5i","6i","7i","8i","9i","PW","GW","SW"].forEach(add);
 		    return clubs;
 		  }
 		  function gdCompareNormaliseClub(club,ctx){
@@ -3628,7 +3635,7 @@
 		      .join("");
 		  }
 		  function gdCompareManualProfileBubbleSource(p,club,offset){
-		    if(!p||p.placeholderProfile||!Number.isFinite(Number(offset)))return null;
+		    if(!p||!Number.isFinite(Number(offset)))return null;
 		    const bagRows=Array.isArray(p.bag)?p.bag:[];
 		    const selected=gdCompareClubKey(club)||gdCompareClubKey(p?.baseCalibration?.club)||gdCompareClubKey(p?.previewBubbleSet?.club)||"7i";
 		    const row=bagRows.find(item=>gdCompareClubKey(item?.club||item?.name).toLowerCase()===selected.toLowerCase())
@@ -4181,6 +4188,11 @@
     if(profileSource&&typeof profileSource==="object"){
       const strict=gdGpsReadyMyBubbleSource(profileSource,{offsetDeg:currentOffset,club:selected,handedness:p?.handedness});
       return strict?Object.assign({},strict,{shapeSource:strict.shapeSource||"my-bubble-current"}):null;
+    }
+    const manual=gdCompareManualProfileBubbleSource(p,selected,currentOffset);
+    if(manual){
+      const fallback=gdGpsReadyMyBubbleSource(manual,{offsetDeg:currentOffset,club:selected,handedness:p?.handedness});
+      return fallback?Object.assign({},fallback,{shapeSource:fallback.shapeSource||"manual-profile"}):Object.assign({},manual,{offsetDeg:currentOffset});
     }
     return null;
   }
@@ -6005,9 +6017,18 @@
 	  }
     if(!window.__gdPracticeNativeClubToggleBound){
       window.__gdPracticeNativeClubToggleBound=true;
-      document.addEventListener("click",event=>{
-        const target=event.target&&event.target.closest&&event.target.closest("[data-gd-practice-club-toggle]");
-        if(!target)return;
+    document.addEventListener("click",event=>{
+      const scoreButton=event.target&&event.target.closest&&event.target.closest(".scoreBlock .scoreBtn");
+      if(scoreButton){
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        const label=String(scoreButton.getAttribute("aria-label")||scoreButton.textContent||"");
+        const delta=/decrease|-/i.test(label)?-1:1;
+        if(typeof window.adjustScore==="function")return window.adjustScore(delta);
+        return false;
+      }
+      const target=event.target&&event.target.closest&&event.target.closest("[data-gd-practice-club-toggle]");
+      if(!target)return;
         event.preventDefault();
         event.stopImmediatePropagation();
         return gdPracticeToggleEvidenceClub(target);
@@ -6665,6 +6686,7 @@
 	      gdSetShotBubbleOverlay:gdSetShotBubbleOverlay,
 	      gdSyncShotBubbleOverlayControls:gdSyncShotBubbleOverlayControls,
 		      gdCompareSetSource:gdCompareSetSource,
+	      gdCompareSetClub:gdCompareSetClub,
 	      gdCompareCourseControl:gdCompareCourseControl,
 	      gdCompareSetConsistency:gdCompareSetConsistency,
 	      gdCompareTogglePracticeAdmin:gdCompareTogglePracticeAdmin,

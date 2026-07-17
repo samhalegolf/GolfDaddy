@@ -1048,7 +1048,7 @@
           </button>` : ''}
           ${canShowProfileCard('courses') ? `<button class="card" id="gdProfileCoursesCard" type="button" onclick="try{openCourseLibraryPanel()}catch(e){}">
             <div class="gdCourseGreenIcon" aria-hidden="true"></div>
-            <div><strong>Courses</strong><span>Saved course mapping data.</span></div>
+            <div><strong>Courses</strong><span>Recent courses.</span></div>
           </button>` : ''}
           ${canShowProfileCard('play') ? `<button class="card" onclick="gd67OpenProfileTool('play')">
             ${icon('gps') || icon('play')}

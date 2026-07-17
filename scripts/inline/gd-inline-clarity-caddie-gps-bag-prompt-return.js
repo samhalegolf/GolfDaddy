@@ -15,6 +15,7 @@
     safe(()=>{ if(typeof map!=='undefined'&&map&&map.invalidateSize){ setTimeout(()=>map.invalidateSize(),60); setTimeout(()=>map.invalidateSize(),240); } });
     safe(()=>{ if(typeof renderShot==='function') renderShot(); });
     safe(()=>{ if(typeof gdV62Refresh==='function') gdV62Refresh(); });
+    safe(()=>{ if(typeof window.gdApplyGpsMapVisibilityOwner==='function') window.gdApplyGpsMapVisibilityOwner('bag-return'); });
   }
   window.gdReturnToGpsMapFromBag=function(){
     safe(()=>sessionStorage.removeItem('gd_return_from_bag_to_gps'));
@@ -24,7 +25,7 @@
   window.gdOpenBagFromGps=function(ev){
     if(ev){ ev.preventDefault(); ev.stopPropagation(); }
     safe(()=>sessionStorage.setItem('gd_return_from_bag_to_gps','1'));
-    if(typeof openBag==='function') openBag();
+    if(typeof openBag==='function') openBag({fromGps:true});
     return false;
   };
   const previousClosePanel=window.closePanel;

@@ -2744,7 +2744,6 @@
 #practiceDataPanel:not(.gdPracticeAdminExpanded) .gdPracticeLiveDebugPanel,
 #practiceDataPanel:not(.gdPracticeAdminExpanded) .gdPracticePhotoDebugPanel,
 #practiceDataPanel:not(.gdPracticeAdminExpanded) .gdPracticePhotoQaPanel,
-#practiceDataPanel:not(.gdPracticeAdminExpanded) #gdPracticeLoadExtracted7iBtn,
 #practiceDataPanel:not(.gdPracticeAdminExpanded) .gdPracticeSandboxControls{
   display:none!important;
   visibility:hidden!important;
@@ -3040,6 +3039,19 @@
 	}
 	#practiceDataPanel.open .gdPracticeEmailBox[hidden]{
 	  display:none!important;
+	}
+	#practiceDataPanel.open .gdPracticeIntakeActions.email-open .gdPracticeImportBody{
+	  display:grid!important;
+	  grid-template-columns:1fr!important;
+	}
+	#practiceDataPanel.open .gdPracticeIntakeActions.email-open .gdPracticeImportBody > :not(.gdPracticeEmailBox){
+	  display:none!important;
+	}
+	#practiceDataPanel.open .gdPracticeIntakeActions.email-open .gdPracticeImportIconButton.email{
+	  border-color:rgba(215,176,107,.54)!important;
+	  background:linear-gradient(180deg,#d7b06b,#b88d42)!important;
+	  color:#06100b!important;
+	  box-shadow:inset 0 1px 0 rgba(255,255,255,.18),0 8px 18px rgba(0,0,0,.16)!important;
 	}
 	#practiceDataPanel.open .gdPracticeEmailHead{
 	  display:grid!important;

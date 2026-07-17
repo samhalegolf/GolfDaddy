@@ -46,6 +46,7 @@
       safe(()=>{if(typeof map!=='undefined'&&map&&map.invalidateSize)setTimeout(()=>map.invalidateSize(),40);});
       safe(()=>{if(typeof window.gdSyncPlayFlowRail==='function')window.gdSyncPlayFlowRail();});
       safe(()=>{if(typeof window.gdHydrateGpsBadge==='function')window.gdHydrateGpsBadge(true);});
+      safe(()=>{if(typeof window.gdApplyGpsMapVisibilityOwner==='function')window.gdApplyGpsMapVisibilityOwner('return-from-tool-panel');});
       return false;
     }
     safe(()=>{if(typeof enterGpsModule==='function') enterGpsModule({fromBack:true,preserve:true});});
@@ -57,7 +58,7 @@
     if(ev){ev.preventDefault();ev.stopPropagation();}
     if(isPanelOpen('bagPanel')){returnGpsMap();return false;}
     safe(()=>sessionStorage.setItem('gd_return_from_bag_to_gps','1'));
-    safe(()=>{if(typeof openBag==='function') openBag();});
+    safe(()=>{if(typeof openBag==='function') openBag({fromGps:true});});
     return false;
   };
   window.gdToggleScorecardTool=function(ev){
@@ -71,6 +72,13 @@
     if(ev){ev.preventDefault();ev.stopPropagation();}
     safe(()=>{if(typeof toggleGreenWand==='function') toggleGreenWand(ev); else if(typeof openGpsWand==='function') openGpsWand(ev);});
     setTimeout(syncWandLiveChrome,40);
+    return false;
+  };
+  window.gdOpenGpsToolSettings=function(ev){
+    if(ev){ev.preventDefault();ev.stopPropagation();if(ev.stopImmediatePropagation)ev.stopImmediatePropagation();}
+    safe(()=>sessionStorage.setItem('gd_return_from_settings_to_gps','1'));
+    safe(()=>{window.__gdBackTarget='gps';});
+    safe(()=>{if(typeof openSettings==='function')openSettings({fromGps:true});});
     return false;
   };
   function wrapAccept(){
@@ -118,6 +126,8 @@
     if(bag) bag.onclick=window.gdToggleBagTool;
     const score=document.getElementById('scorecardRailBtn');
     if(score) score.onclick=window.gdToggleScorecardTool;
+    const settings=document.getElementById('gdGpsSettingsRailBtn');
+    if(settings) settings.onclick=window.gdOpenGpsToolSettings;
     const flag=document.getElementById('flagTool');
     if(flag) flag.onclick=function(ev){if(ev){ev.preventDefault();ev.stopPropagation();}return false;};
     syncWandLiveChrome();

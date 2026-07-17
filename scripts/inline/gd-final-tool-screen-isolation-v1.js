@@ -44,8 +44,8 @@
     safe(function(){if(typeof toast==="function")toast(next==="mapped"?"Mapped course assist on":"Plain two-tap mode")});
     return next;
   }
-	  function mappedMode(){
-	    return safe(function(){
+  function mappedMode(){
+    return safe(function(){
       if(tournamentActive())return false;
       var course=activeCourse();
       var value=localStorage.getItem(COURSE_MODE_PREFIX+courseIdentity(course));
@@ -56,9 +56,21 @@
       return defaultMappedMode(course)==="mapped";
     },false);
   }
+  function canShowCourseMappingSetting(){
+    var role=safe(function(){return typeof gdGetAccountPermission==="function"?gdGetAccountPermission():""},"")||
+      safe(function(){return document.body&&document.body.dataset&&(document.body.dataset.gdPermission||document.body.dataset.clarityAccountRole||document.body.dataset.accountRole)},"")||
+      safe(function(){return window.GolfDaddyAccounts&&typeof window.GolfDaddyAccounts.current==="function"&&(window.GolfDaddyAccounts.current()||{}).role},"")||
+      "player";
+    role=String(role||"player").toLowerCase();
+    return role==="admin"||role==="coach";
+  }
   function updateCourseMappingSetting(){
     var course=activeCourse();
     var mapped=mappedMode();
+    var row=document.getElementById("gdMappedPlayModeRow");
+    var canShow=canShowCourseMappingSetting();
+    if(row)row.hidden=!canShow;
+    if(!canShow)return;
     var btn=document.getElementById("gdMappedPlayModeToggle");
     var sub=document.getElementById("gdMappedPlayModeSub");
     if(btn){

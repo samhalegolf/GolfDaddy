@@ -552,6 +552,11 @@
   function pickerHome(event){stop(event);writeResume("course-picker-home");return typeof oldPickerHome==="function"?oldPickerHome.call(this,event):home(event)}
   function pickerBack(event){
     stop(event);
+    if(window.__gdCoursePickerReturnTarget==="home"){
+      window.__gdCoursePickerReturnTarget="";
+      window.gdCourseChangeMode="";
+      return home(event);
+    }
     if(window.gdCourseChangeMode==="assumed-label"||window.gdCourseChangeMode==="change-course"){
       window.gdCourseChangeMode="";
       safe(function(){var courseScreenEl=byId("courseScreen");if(courseScreenEl)courseScreenEl.classList.add("hidden")});
@@ -913,27 +918,30 @@
 	  function toggleCapturedGreenZoom(event){
 	    if(event)stop(event);
 	    var btn=byId("gdGreenZoomBtn");
-	    var active=!!(capturedGreenZoomActive||(document.body&&document.body.classList.contains("gd-green-zoom-active"))||(btn&&btn.classList.contains("softActive")));
-	    if(active){
-	      capturedGreenZoomActive=false;
-	      clearGreenZoomChrome();
-	      if(safe(function(){return !!lockedFrame},false)){
-	        safe(function(){if(typeof window.gdFitLockStateFrameV19==="function")window.gdFitLockStateFrameV19({force:true,objectName:"greenZoomReturnLock",reason:"green-zoom-button-return"});else if(typeof lockFrame==="function")lockFrame(true)});
-	        safe(function(){if(typeof setBubbleOnlyLock==="function")setBubbleOnlyLock(true)});
-	      }else if(document.body.classList.contains("gdMappedStartPromptActive")){
-	        restoreMappedStartPrompt("green-zoom-button-return-prelock");
-	      }
-	      [0,80,220].forEach(function(delay){setTimeout(clearGreenZoomChrome,delay)});
-	      return false;
+	    capturedGreenZoomActive=false;
+	    clearGreenZoomChrome();
+	    safe(function(){
+	      if(typeof lockFrameTightness!=="undefined"){
+	        lockFrameTightness=lockFrameTightness===0.48?0.62:0.48;
+	        var toggle=document.getElementById("frameTightToggle");
+	        var sub=document.getElementById("frameTightSub");
+	        if(toggle)toggle.textContent=lockFrameTightness===0.48?"Very tight":"Tight";
+	        if(sub)sub.textContent=lockFrameTightness===0.48?"Maximum shot focus":"Tight shot focus";
+	        if(typeof lockFrame==="function"&&start&&target&&lockedFrame)lockFrame(false);
+	        if(typeof applyShotUpAfterPlacement==="function")applyShotUpAfterPlacement();
+	      }else if(typeof cycleFrameTightness==="function")cycleFrameTightness();
+	    });
+	    safe(function(){
+	      if(typeof window.gdFitLockStateFrameV19==="function")window.gdFitLockStateFrameV19({force:true,objectName:"frameTightnessButton",reason:"frame-tightness-button"});
+	      else if(typeof lockFrame==="function"&&lockedFrame)lockFrame(true);
+	    });
+	    safe(function(){if(typeof renderShot==="function")renderShot();});
+	    var label=safe(function(){return document.getElementById("frameTightToggle")?.textContent||"Frame tightness";},"Frame tightness");
+	    if(btn){
+	      btn.title=label;
+	      btn.setAttribute("aria-label",label);
 	    }
-	    var ok=false;
-	    safe(function(){if(typeof window.gdToggleTargetZoom==="function")ok=window.gdToggleTargetZoom({preventDefault:function(){},stopPropagation:function(){},stopImmediatePropagation:function(){}})!==false;});
-	    if(!ok&&typeof oldSimpleGreenZoom==="function")ok=oldSimpleGreenZoom.call(window,event)!==false;
-	    if(ok!==false){
-	      capturedGreenZoomActive=true;
-	      document.body.classList.add("gd-green-zoom-active");
-	      if(btn)btn.classList.add("softActive");
-	    }
+	    safe(function(){if(typeof toast==="function")toast(label);});
 	    return false;
 	  }
 	  function bindGreenZoomButton(){
@@ -953,6 +961,8 @@
 	  }
   function playTileOpen(event){
     stop(event);
+    window.__gdCoursePickerReturnTarget="home";
+    window.gdCourseChangeMode="";
     return showPicker("home-play-tile");
   }
   function bindHomePlayTile(){
@@ -1026,10 +1036,10 @@
     if(!roleAllowsTool(id))return false;
     var screen=currentToolScreen();
     if(id==="gdArcadeRailBtn")return document.body.classList.contains("gdArcadeEntryAllowed")&&document.body.classList.contains("gdArcadeEntryAvailable");
-    if(id==="gdGpsSnapZoomBtn"||id==="gdGreenZoomBtn")return gpsOpen();
+    if(id==="gdGpsSnapZoomBtn"||id==="gdGreenZoomBtn"||id==="gdGpsSettingsRailBtn")return gpsOpen();
     if(id==="gdV62ModeSwitch")return false;
-    var mapped={flagTool:1,windToolBtn:1,gpsRailBtn:1,gdGreenZoomBtn:1,scorecardRailBtn:1,bagRailBtn:1};
-    var unmapped={flagTool:1,greenToolBtn:1,windToolBtn:1,gpsRailBtn:1,gdMapperToolsBtn:1,gdGreenZoomBtn:1,scorecardRailBtn:1,bagRailBtn:1};
+    var mapped={flagTool:1,windToolBtn:1,gpsRailBtn:1,gdGreenZoomBtn:1,gdGpsSettingsRailBtn:1,scorecardRailBtn:1,bagRailBtn:1};
+    var unmapped={flagTool:1,greenToolBtn:1,windToolBtn:1,gpsRailBtn:1,gdMapperToolsBtn:1,gdGreenZoomBtn:1,gdGpsSettingsRailBtn:1,scorecardRailBtn:1,bagRailBtn:1};
     if(screen==="mapped")return !!mapped[id];
     if(screen==="unmapped"||!screen)return !!unmapped[id];
     return false;
