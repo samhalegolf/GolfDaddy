@@ -19,6 +19,7 @@
   var referralPending = false;
   var entitlementQueryState = { accountId: "", accountEmail: "", entitlements: [], loading: false, error: "", lastChecked: "" };
   var resolverTestState = { permissionKey: "gps_live_bubble", accountId: "", accountEmail: "", profileId: "", loading: false, result: null, error: "" };
+  var editingProductKey = "";
   var originalShowSection = null;
   var lastRefreshKey = "";
   var PERMISSION_KEYS = ["gps_round_start", "gps_round_pass", "gps_live_bubble", "practice_bubble_view", "my_bubble_view", "course_data_view", "course_bubble_view", "coach_admin_grant", "trial_access"];
@@ -611,30 +612,30 @@
 
   function renderAdminSettings() {
     var all = Array.isArray(settings.products) ? settings.products : [];
+    var editingProduct = adminProductByKey(editingProductKey);
     return [
       '<div class="clarityPaymentAdmin">',
-      '<div class="clarityPaymentAdminHead"><strong>Admin Payment Settings</strong><span>Safe settings only. Stripe secret keys stay in Netlify.</span></div>',
+      '<div class="clarityPaymentAdminHead"><strong>Payment setup</strong><span>Products and safe live checks only. Secret keys stay in Netlify.</span></div>',
       '<div class="clarityPaymentConnectGrid">',
       statusPill('Stripe secret', settings.stripeConnected),
       statusPill('Webhook secret', settings.webhookConfigured),
-      statusPill('Alert email', settings.alertEmailConfigured),
       statusPill('Month Pass price', settings.monthPassPriceConfigured),
       statusPill('Membership price', settings.monthlyMembershipPriceConfigured),
-      statusPill('Subscription events', settings.subscriptionWebhookEventsConfigured),
-      statusPill('Billing Portal', settings.billingPortalConfigured),
       '</div>',
-      renderAdminDiagnostics(),
       settings.settingsError ? '<div class="clarityPaymentStatus warning"><strong>Settings warning</strong><span>' + escapeHTML(settings.settingsError) + '</span></div>' : '',
       '<div class="clarityPaymentAdminActions"><button type="button" onclick="ClarityPayments.reloadAdminSettings()">Reload</button><button type="button" onclick="ClarityPayments.seedDefaults()">Seed defaults</button></div>',
       '<div class="clarityPaymentProductList">' + all.map(renderAdminProduct).join("") + '</div>',
-      renderProductForm(),
-      renderFreePassForm(),
-      renderEntitlementViewer(),
-      renderManualGrantForm(),
-      renderResolverTester(),
-      '<div class="clarityPaymentNote">Use Stripe Product/Price IDs here, never secret keys. Create the product/price in Stripe, then paste the public-looking <code>price_...</code> ID into this settings page.</div>',
+      editingProduct ? renderProductForm(editingProduct) : '<div class="clarityPaymentAdminHint">Tap Edit on a product to change its Stripe Price ID, price label, or live state.</div>',
+      '<details class="clarityPaymentAdminDetails"><summary><strong>Diagnostics</strong><span>Webhook, portal and membership health</span></summary>' + renderAdminDiagnostics() + '</details>',
+      '<details class="clarityPaymentAdminDetails"><summary><strong>Advanced tools</strong><span>Comp access, entitlement lookup and resolver checks</span></summary>' + renderFreePassForm() + renderEntitlementViewer() + renderManualGrantForm() + renderResolverTester() + '<div class="clarityPaymentNote">Use Stripe Product/Price IDs here, never secret keys. Create the product/price in Stripe, then paste the public-looking <code>price_...</code> ID into this settings page.</div></details>',
       '</div>'
     ].join("");
+  }
+
+  function adminProductByKey(key) {
+    key = String(key || "").trim();
+    if (!key) return null;
+    return (settings.products || []).filter(function (item) { return item.product_key === key; })[0] || null;
   }
 
   function renderAdminDiagnostics() {
@@ -742,11 +743,40 @@
   }
 
   function renderAdminProduct(product) {
-    return '<div class="clarityPaymentProductRow"><div><strong>' + escapeHTML(product.name) + '</strong><span>' + escapeHTML(product.product_key + ' · ' + product.product_kind + ' · ' + durationLabel(product.duration_hours)) + '</span><em>' + escapeHTML(product.stripe_price_id || 'No Stripe Price ID') + '</em></div><button type="button" onclick="ClarityPayments.editProduct(&quot;' + escapeHTML(product.product_key) + '&quot;)">Edit</button><button type="button" onclick="ClarityPayments.toggleProduct(&quot;' + escapeHTML(product.product_key) + '&quot;,' + (product.active ? 'false' : 'true') + ')">' + (product.active ? 'Disable' : 'Enable') + '</button></div>';
+    var selected = product.product_key === editingProductKey;
+    var state = product.active ? "Live" : "Off";
+    return '<div class="clarityPaymentProductRow' + (selected ? ' selected' : '') + '"><div><strong>' + escapeHTML(product.name) + '</strong><span>' + escapeHTML(state + ' · ' + product.product_key + ' · ' + durationLabel(product.duration_hours)) + '</span><em>' + escapeHTML(product.stripe_price_id || 'No Stripe Price ID') + '</em></div><button type="button" onclick="ClarityPayments.editProduct(&quot;' + escapeHTML(product.product_key) + '&quot;)">' + (selected ? 'Editing' : 'Edit') + '</button><button type="button" onclick="ClarityPayments.toggleProduct(&quot;' + escapeHTML(product.product_key) + '&quot;,' + (product.active ? 'false' : 'true') + ')">' + (product.active ? 'Disable' : 'Enable') + '</button></div>';
   }
 
-  function renderProductForm() {
-    return '<form class="clarityPaymentForm" onsubmit="return ClarityPayments.saveProductFromForm(this)"><strong>Create / edit pass or membership</strong><input name="product_key" placeholder="month_pass or monthly_membership" required><select name="product_kind"><option value="month_pass">Month Pass</option><option value="membership">Membership</option><option value="free_pass">Free pass template</option><option value="day_pass">Legacy day pass</option><option value="round_pass">Legacy round pass</option></select><input name="name" placeholder="Name shown in app" required><input name="price_label" placeholder="Price label e.g. $29 / month"><input name="stripe_price_id" placeholder="Stripe Price ID e.g. price_..."><input name="stripe_product_id" placeholder="Stripe Product ID e.g. prod_..."><input name="duration_hours" type="number" min="1" step="1" value="720" placeholder="Duration hours"><input name="billing_schedule" placeholder="one_time / monthly"><textarea name="description" placeholder="Description"></textarea><label><input type="checkbox" name="active" checked> Active</label><button type="submit">Save product</button></form>';
+  function optionHTML(value, label, current) {
+    return '<option value="' + escapeHTML(value) + '"' + (value === current ? ' selected' : '') + '>' + escapeHTML(label) + '</option>';
+  }
+
+  function renderProductForm(product) {
+    product = product || {};
+    var kind = String(product.product_kind || "month_pass");
+    return [
+      '<form class="clarityPaymentForm clarityPaymentProductForm" data-clarity-product-form onsubmit="return ClarityPayments.saveProductFromForm(this)">',
+      '<div class="clarityPaymentFormHead"><strong>Edit ' + escapeHTML(product.name || "product") + '</strong><button class="secondary" type="button" onclick="ClarityPayments.closeProductEditor()">Close</button></div>',
+      '<input name="product_key" value="' + escapeHTML(product.product_key || "") + '" placeholder="month_pass or monthly_membership" required>',
+      '<select name="product_kind">',
+      optionHTML("month_pass", "Month Pass", kind),
+      optionHTML("membership", "Membership", kind),
+      optionHTML("free_pass", "Free pass template", kind),
+      optionHTML("day_pass", "Legacy day pass", kind),
+      optionHTML("round_pass", "Legacy round pass", kind),
+      '</select>',
+      '<input name="name" value="' + escapeHTML(product.name || "") + '" placeholder="Name shown in app" required>',
+      '<input name="price_label" value="' + escapeHTML(product.price_label || "") + '" placeholder="Price label e.g. NZ$7.99 / month">',
+      '<input name="stripe_price_id" value="' + escapeHTML(product.stripe_price_id || "") + '" placeholder="Stripe Price ID e.g. price_...">',
+      '<input name="stripe_product_id" value="' + escapeHTML(product.stripe_product_id || "") + '" placeholder="Stripe Product ID e.g. prod_...">',
+      '<input name="duration_hours" type="number" min="1" step="1" value="' + escapeHTML(product.duration_hours || 720) + '" placeholder="Duration hours">',
+      '<input name="billing_schedule" value="' + escapeHTML(product.billing_schedule || "one_time") + '" placeholder="one_time / monthly">',
+      '<textarea name="description" placeholder="Description">' + escapeHTML(product.description || "") + '</textarea>',
+      '<label><input type="checkbox" name="active"' + (product.active !== false ? ' checked' : '') + '> Active</label>',
+      '<button type="submit">' + (adminPending ? "Saving..." : "Save product") + '</button>',
+      '</form>'
+    ].join("");
   }
 
   function renderFreePassForm() {
@@ -796,13 +826,18 @@
     seedDefaults: function () { return adminAction("seedDefaults", {}); },
     toggleProduct: function (key, active) { return adminAction("setProductActive", { productKey: key, active: !!active }); },
     editProduct: function (key) {
-      var product = (settings.products || []).filter(function (item) { return item.product_key === key; })[0];
-      var form = document.querySelector(".clarityPaymentForm"); if (!product || !form) return false;
-      Object.keys(product).forEach(function (field) { if (form.elements[field]) form.elements[field].value = product[field] == null ? "" : product[field]; });
-      if (form.elements.active) form.elements.active.checked = product.active !== false;
+      if (!adminProductByKey(key)) return false;
+      editingProductKey = key;
+      render();
+      safe(function () {
+        var form = document.querySelector("[data-clarity-product-form]");
+        if (form && typeof form.scrollIntoView === "function") form.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        if (form && form.elements.stripe_price_id) form.elements.stripe_price_id.focus();
+      });
       return false;
     },
-    saveProductFromForm: function (form) { var data = formData(form); adminAction("upsertProduct", { product: data }).then(function () { form.reset(); if (form.elements.active) form.elements.active.checked = true; }); return false; },
+    closeProductEditor: function () { editingProductKey = ""; render(); return false; },
+    saveProductFromForm: function (form) { var data = formData(form); editingProductKey = data.product_key || editingProductKey; adminAction("upsertProduct", { product: data }); return false; },
     issueFreePassFromForm: function (form) { var data = formData(form); adminAction("issueFreePass", data).then(function () { form.reset(); if (form.elements.productKey) form.elements.productKey.value = "admin_comped_membership"; if (form.elements.durationHours) form.elements.durationHours.value = "720"; if (form.elements.allowMemberReferrals) form.elements.allowMemberReferrals.checked = true; refresh({ silent: true }); }); return false; }
     ,
     createReferralFromForm: function (form, mode) {

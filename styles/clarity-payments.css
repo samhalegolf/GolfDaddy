@@ -215,6 +215,11 @@
   background: rgba(255,255,255,.045);
 }
 
+.clarityPaymentProductRow.selected {
+  border-color: rgba(255,159,47,.42);
+  background: rgba(255,159,47,.10);
+}
+
 .clarityPaymentProductRow div {
   display: grid;
   gap: 3px;
@@ -243,6 +248,58 @@
   background: rgba(255,255,255,.08);
 }
 
+.clarityPaymentAdminHint {
+  padding: 10px 12px;
+  border: 1px dashed rgba(255,255,255,.14);
+  border-radius: 12px;
+  color: rgba(255,255,255,.62);
+  font-size: 12px;
+  line-height: 1.35;
+  background: rgba(255,255,255,.035);
+}
+
+.clarityPaymentAdminDetails {
+  border: 1px solid rgba(255,255,255,.10);
+  border-radius: 12px;
+  background: rgba(255,255,255,.04);
+  overflow: hidden;
+}
+
+.clarityPaymentAdminDetails summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  padding: 11px 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.clarityPaymentAdminDetails summary::-webkit-details-marker {
+  display: none;
+}
+
+.clarityPaymentAdminDetails summary strong {
+  color: #fff;
+  font-size: 13px;
+}
+
+.clarityPaymentAdminDetails summary span {
+  color: rgba(255,255,255,.56);
+  font-size: 11px;
+  text-align: right;
+}
+
+.clarityPaymentAdminDetails[open] summary {
+  border-bottom: 1px solid rgba(255,255,255,.10);
+}
+
+.clarityPaymentAdminDetails > .clarityPaymentAdminSection,
+.clarityPaymentAdminDetails > .clarityPaymentForm,
+.clarityPaymentAdminDetails > .clarityPaymentNote {
+  margin: 10px;
+}
+
 .clarityPaymentForm {
   display: grid;
   gap: 8px;
@@ -250,6 +307,22 @@
   border: 1px solid rgba(255,255,255,.10);
   border-radius: 14px;
   background: rgba(0,0,0,.18);
+}
+
+.clarityPaymentProductForm {
+  border-color: rgba(255,159,47,.25);
+  background: rgba(255,159,47,.075);
+}
+
+.clarityPaymentFormHead {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+}
+
+.clarityPaymentFormHead button {
+  flex: 0 0 auto;
 }
 
 .clarityPaymentForm strong {
