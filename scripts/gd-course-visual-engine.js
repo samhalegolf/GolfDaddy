@@ -381,6 +381,66 @@
     if(!root||!root.localStorage)return clone(fb);
     return safe(function(){var raw=root.localStorage.getItem(key);return raw?JSON.parse(raw):clone(fb);},clone(fb));
   }
+  function capturedFrameHoleKey(holeNumber){
+    var n=Math.max(1,Math.round(Number(holeNumber)||1));
+    return "h"+String(n);
+  }
+  function extractCapturedFrameCourseKey(manifestKey){
+    var match=String(manifestKey||"").match(/^gd_captured_hole_frame_v\d+_([^:]+):h\d+$/i);
+    return match?match[1]:"";
+  }
+  function slugifyCapturedFrameCourseKey(value){
+    value=String(value||"").trim();
+    return value?slug(value):"";
+  }
+  function buildCapturedFrameManifestAliases(args){
+    args=args||{};
+    var manifestKey=text(args.manifestKey,220);
+    var holeKey=capturedFrameHoleKey(args.holeNumber);
+    var seen={};
+    var aliases=[];
+    function add(value){
+      value=text(value,220);
+      if(value&&!seen[value]){seen[value]=true;aliases.push(value);}
+    }
+    add(manifestKey);
+    [args.courseId,args.courseName,extractCapturedFrameCourseKey(manifestKey)].forEach(function(value){
+      var courseSlug=slugifyCapturedFrameCourseKey(value);
+      if(courseSlug)add("gd_captured_hole_frame_v19_"+courseSlug+":"+holeKey);
+    });
+    return aliases;
+  }
+  function repairCapturedFrameIndexManifestKey(args){
+    args=args||{};
+    var api=root&&root.GDCoursePlayPipeline;
+    var storageKey=api&&api.frameIndexStorageKey||"gd_course_play_frame_index_v1";
+    var frameIndexKey=text(args.frameIndexKey,220)||slug(args.courseId)+":"+capturedFrameHoleKey(args.holeNumber);
+    var index=readJson(storageKey,null);
+    if(!index||!index.frames||!index.frames[frameIndexKey])return false;
+    var frame=index.frames[frameIndexKey];
+    frame.manifestKey=args.manifestKey;
+    frame.capturedManifestKey=args.manifestKey;
+    frame.updatedAt=now();
+    index.updatedAt=now();
+    return tryWriteJson(storageKey,index);
+  }
+  function resolveCapturedFrameManifest(args){
+    args=args||{};
+    var indexedManifestKey=text(args.manifestKey,220);
+    var keys=buildCapturedFrameManifestAliases(args);
+    for(var i=0;i<keys.length;i++){
+      var candidateKey=keys[i];
+      var manifest=readJson(candidateKey,null);
+      if(!manifest)continue;
+      if(candidateKey!==indexedManifestKey){
+        repairCapturedFrameIndexManifestKey({courseId:args.courseId,holeNumber:args.holeNumber,frameIndexKey:args.frameIndexKey,manifestKey:candidateKey});
+        if(root&&root.console&&typeof root.console.info==="function")root.console.info("[course-visuals] resolved captured-frame manifest alias",{courseId:args.courseId,holeNumber:args.holeNumber,originalManifestKey:indexedManifestKey,resolvedManifestKey:candidateKey});
+      }
+      return {manifest:manifest,resolvedKey:candidateKey,attemptedKeys:keys,repaired:candidateKey!==indexedManifestKey};
+    }
+    if(root&&root.console&&typeof root.console.warn==="function")root.console.warn("[course-visuals] captured-frame manifest resolution failed",{courseId:args.courseId,holeNumber:args.holeNumber,attemptedKeys:keys});
+    return {manifest:null,resolvedKey:null,attemptedKeys:keys,repaired:false};
+  }
   function tryWriteJson(key,value){
     if(!root||!root.localStorage)return true;
     try{
@@ -853,7 +913,7 @@
     else if(Array.isArray(opts.frameRows)&&typeof opts.readManifest==="function"){
       opts.frameRows.forEach(function(frame){
         var key=frame&&(frame.manifestKey||frame.capturedManifestKey);
-        var manifest=key?opts.readManifest(key):null;
+        var manifest=key?opts.readManifest(key,frame,{courseId:courseId,courseName:source.courseName||source.name||opts.courseName,holeNumber:frame&&frame.holeNumber}):null;
         if(manifest)manifests.push(manifest);
       });
     }
@@ -2223,6 +2283,13 @@
       if(!found){record.status="failed";record.lastError={code:"preview-version-missing",message:"The requested preview version is not available."};recordEvent(record,"course-visual-publish-failed",record.lastError);return putRecord(record);}
     }
     if(!preview){record.status="failed";record.lastError={code:"preview-missing",message:"Build a preview before publishing a styled course visual."};recordEvent(record,"course-visual-publish-failed",record.lastError);return putRecord(record);}
+    var manifestResolution=record.diagnostics&&record.diagnostics.manifestResolution||null;
+    if(manifestResolution&&Number(manifestResolution.required)>0&&Number(manifestResolution.missing)>0){
+      record.status="failed";
+      record.lastError={code:"captured-frame-manifest-resolution-required",message:"Resolve every captured-frame manifest before publishing.",courseId:record.courseId,required:Number(manifestResolution.required)||0,resolved:Number(manifestResolution.resolved)||0,missing:Number(manifestResolution.missing)||0,missingManifests:manifestResolution.missingManifests||[]};
+      recordEvent(record,"course-visual-publish-failed",record.lastError);
+      return putRecord(record,{skipCloudSync:true});
+    }
     var version=Number(preview.version)||((Number(record.currentVersion)||0)+1);
     var overviewFinal=record.terrainView&&Number(record.terrainView.version)===version?record.terrainView:record.terrainView||preview;
     var singleHoleFinal=record.singleHoleTerrainView&&Number(record.singleHoleTerrainView.version)===version?record.singleHoleTerrainView:record.singleHoleTerrainView||record.singleHolePreviewVisual||record.exampleHoleVisual;
@@ -2744,13 +2811,40 @@
     var api=root&&root.GDCoursePlayPipeline;
     var payload=api&&typeof api.buildCoursePlayDbPayload==="function"?api.buildCoursePlayDbPayload(courseId):null;
     var frameRows=api&&typeof api.getCoursePlayFrameIndex==="function"?api.getCoursePlayFrameIndex(courseId):[];
-    var input=adaptCoursePlayPayloadToVisualInput(payload,{courseId:courseId,frameRows:frameRows,readManifest:function(key){return readJson(key,null);}});
+    var source=payload&&payload.payload||payload||{};
+    var resolvedManifests=[];
+    var missingManifests=[];
+    var repairedFrameIndex=false;
+    var input=adaptCoursePlayPayloadToVisualInput(payload,{courseId:courseId,courseName:source.courseName||source.name,frameRows:frameRows,readManifest:function(key,frame,context){
+      var resolution=resolveCapturedFrameManifest({
+        manifestKey:key,
+        courseId:source.courseId||source.courseKey||context&&context.courseId||courseId,
+        courseName:source.courseName||source.name||context&&context.courseName,
+        holeNumber:frame&&frame.holeNumber||context&&context.holeNumber,
+        frameIndexKey:frame&&frame.frameIndexKey
+      });
+      if(resolution.manifest){
+        resolvedManifests.push({holeNumber:frame&&frame.holeNumber||context&&context.holeNumber,originalManifestKey:key,resolvedManifestKey:resolution.resolvedKey,attemptedKeys:resolution.attemptedKeys,repaired:resolution.repaired});
+        repairedFrameIndex=repairedFrameIndex||!!resolution.repaired;
+      }else{
+        missingManifests.push({holeNumber:frame&&frame.holeNumber||context&&context.holeNumber,originalManifestKey:key,attemptedKeys:resolution.attemptedKeys});
+      }
+      return resolution.manifest;
+    }});
     var previous=getRecord(input.courseId||courseId);
     var saved3d=!!(previous&&previous.courseOverrides&&previous.courseOverrides.visualEngine&&previous.courseOverrides.visualEngine.enable3dBeta);
     var enable3dBeta=opts.enable3dBeta===true||saved3d;
     if(opts.forceFresh===true)previous=resetCourseVisualWorkingState(input.courseId||courseId,{keepPublished:true});
     var plan=planCourseVisualCaptures(input,{enable3dBeta:enable3dBeta});
     var buildRunId=stableId(opts.forceFresh===true?"fresh-capture":"capture");
+    if(Array.isArray(frameRows)&&frameRows.length&&missingManifests.length){
+      var failedRecord=ingestCourseVisualInput(Object.assign({},input,{capturePlan:plan}));
+      failedRecord.status="failed";
+      failedRecord.lastError={code:"captured-frame-manifest-resolution-failed",message:"Captured-frame manifests did not resolve for "+missingManifests.length+" of "+frameRows.length+" indexed frame rows.",courseId:input.courseId,holeCount:frameRows.length,missingCount:missingManifests.length,attemptedKeys:missingManifests.map(function(item){return {holeNumber:item.holeNumber,originalManifestKey:item.originalManifestKey,attemptedKeys:item.attemptedKeys};})};
+      failedRecord.diagnostics=Object.assign({},failedRecord.diagnostics||{},{stageSettings:{enable3dBeta:enable3dBeta},capturePlan:plan,capturePlanSummary:planSummary(plan,input.captures),manifestResolution:{required:frameRows.length,resolved:resolvedManifests.length,missing:missingManifests.length,repairedFrameIndex:repairedFrameIndex,resolvedManifests:resolvedManifests,missingManifests:missingManifests},activeBuildRunId:buildRunId,publishEnabled:false});
+      recordEvent(failedRecord,"course-visual-manifest-resolution-failed",{courseId:input.courseId,required:frameRows.length,resolved:resolvedManifests.length,missing:missingManifests.length,missingManifests:missingManifests});
+      return putRecord(failedRecord);
+    }
     var planned=executeVisualCapturePlan(input,plan,{requireFresh:opts.forceFresh===true||opts.requireFreshCaptures===true});
     var previousCaptures=capturesFromRecordRefs(previous).filter(renderableCapture);
     var previousVisualCaptures=previousCaptures.filter(visualCaptureRole);
@@ -2762,7 +2856,7 @@
     }
     input=Object.assign({},input,{captures:planned.captures,capturePlan:plan});
     var record=ingestCourseVisualInput(input);
-    record.diagnostics=Object.assign({},record.diagnostics||{},{stageSettings:{enable3dBeta:enable3dBeta},capturePlan:input.capturePlan,capturePlanSummary:planSummary(plan,planned.captures),captureExecution:{attempted:planned.executed,captured:planned.captures.length,errors:planned.errors,snapshotSelection:planned.snapshotSelection||[],fallbackReason:planned.fallbackReason||"",freshRun:opts.forceFresh===true||opts.requireFreshCaptures===true},activeBuildRunId:buildRunId});
+    record.diagnostics=Object.assign({},record.diagnostics||{},{stageSettings:{enable3dBeta:enable3dBeta},capturePlan:input.capturePlan,capturePlanSummary:planSummary(plan,planned.captures),manifestResolution:{required:Array.isArray(frameRows)?frameRows.length:0,resolved:resolvedManifests.length,missing:missingManifests.length,repairedFrameIndex:repairedFrameIndex,resolvedManifests:resolvedManifests,missingManifests:missingManifests},captureExecution:{attempted:planned.executed,captured:planned.captures.length,errors:planned.errors,snapshotSelection:planned.snapshotSelection||[],fallbackReason:planned.fallbackReason||"",freshRun:opts.forceFresh===true||opts.requireFreshCaptures===true},activeBuildRunId:buildRunId,publishEnabled:!missingManifests.length});
     putRecord(record);
     return buildCourseVisualMaster(input.courseId,{captures:input.captures,capturePlan:plan,forceRebuild:opts.forceFresh===true,buildRunId:buildRunId});
   }

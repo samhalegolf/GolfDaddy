@@ -4453,7 +4453,7 @@
 	    if(opts.fromResume||opts.preserveState||opts.keepGps)return false;
 	    if(opts.__resumeRoundAvailableBeforeOpen)return false;
 	    if(resumeRoundAvailableForCloudMap())return false;
-	    return !!cloudCourseMapSyncApi();
+	    return typeof fetch==='function';
 	  }
 	  function cloudCourseMapKeys(course){
 	    const keys=[];
@@ -4542,31 +4542,76 @@
 	  }
 	  async function tryHydrateCourseMapFromCloud(request,attempt,opts={}){
 	    if(!shouldLookupCloudCourseMap(request,opts))return {attempted:false,reason:resumeRoundAvailableForCloudMap()?'resume-round-available':'cloud-pull-unavailable'};
-	    const api=cloudCourseMapSyncApi();
 	    const keys=cloudCourseMapKeys(request.course);
-	    if(!api||!keys.length)return {attempted:false,reason:'cloud-pull-unavailable'};
-	    recordMappingDebug(request.debugRunId,{source:'cloud-map',phase:'started',event:'course-map-cloud-lookup-started',summary:'Course map loading',details:{courseId:request.courseId,courseName:request.courseName,hole:request.hole,resolutionKey:request.resolutionKey,attemptToken:request.attemptToken,keys}});
+	    if(!keys.length)return {attempted:false,reason:'cloud-pull-unavailable'};
+	    recordMappingDebug(request.debugRunId,{source:'cloud-map',phase:'started',event:'course-map-cloud-lookup-started',summary:'Course map loading',details:{courseId:request.courseId,courseName:request.courseName,hole:request.hole,resolutionKey:request.resolutionKey,attemptToken:request.attemptToken,keys,lookup:'published-course-maps'}});
 	    recordCoursePlayDebug('course-map-cloud-lookup-started',request.course,request.hole,{resolutionKey:request.resolutionKey,attemptToken:request.attemptToken,keys});
 	    updateCourseLoading('Course map loading',32);
-	    for(const key of keys){
-	      try{
-	        const result=await api.pullCourse(key,{reason:'course-play-cloud-map',forceActive:false});
-	        const scans=Array.isArray(result&&result.scans)?result.scans:[];
-	        if(!scans.length)continue;
-	        const persisted=persistCloudCourseMapScans(request.course,scans,{request,attempt,key});
-	        const readiness=savedMapCanSatisfyRequest(request.course,request.hole,request.wholeCourse);
-	        recordMappingDebug(request.debugRunId,{source:'cloud-map',phase:readiness.ready?'completed':'partial',event:readiness.ready?'course-map-cloud-loaded':'course-map-cloud-incomplete',summary:readiness.ready?'Course map loaded from cloud':'Course map cloud data incomplete',details:{courseKey:key,pulled:scans.length,persistedObjects:persisted.saved,holes:persisted.holes,playableHoleCount:readiness.coverage.count,expectedHoleCount:readiness.coverage.expected,missingHoles:readiness.coverage.missing,resolutionKey:request.resolutionKey,attemptToken:request.attemptToken}});
-	        recordCoursePlayDebug(readiness.ready?'course-map-cloud-loaded':'course-map-cloud-incomplete',request.course,request.hole,{courseKey:key,pulled:scans.length,persistedObjects:persisted.saved,holes:persisted.holes,playable:readiness.ready,resolutionKey:request.resolutionKey,attemptToken:request.attemptToken});
-	        return {attempted:true,found:true,key,result,persisted,readiness};
-	      }catch(error){
-	        recordMappingDebug(request.debugRunId,{source:'cloud-map',phase:'failed',event:'course-map-cloud-lookup-failed',summary:'Course map cloud lookup failed',details:{courseKey:key,resolutionKey:request.resolutionKey,attemptToken:request.attemptToken},error:{message:error&&error.message||String(error),status:error&&error.status||null}});
-	        recordCoursePlayDebug('course-map-cloud-lookup-failed',request.course,request.hole,{courseKey:key,reason:error&&error.message||String(error),resolutionKey:request.resolutionKey,attemptToken:request.attemptToken});
-	        return {attempted:true,failed:true,key,error};
+	    try{
+	      const maps=await syncPublishedCourseMaps({quiet:true,throwOnError:true});
+	      const published=publishedCourses().find(course=>keys.some(key=>courseMatchesIdentity(course,key,request.courseName,request.course)))||null;
+	      const readiness=savedMapCanSatisfyRequest(request.course,request.hole,request.wholeCourse);
+	      if(published){
+	        recordMappingDebug(request.debugRunId,{source:'cloud-map',phase:readiness.ready?'completed':'partial',event:readiness.ready?'course-map-cloud-loaded':'course-map-cloud-incomplete',summary:readiness.ready?'Course map loaded from cloud':'Course map cloud data incomplete',details:{courseKey:published.courseId,lookup:'published-course-maps',publishedCourseId:published.id,pulled:Object.keys(maps&&maps.courses||{}).length,persistedObjects:Object.keys(published.objects||{}).length,holes:readiness.coverage.holes,playableHoleCount:readiness.coverage.count,expectedHoleCount:readiness.coverage.expected,missingHoles:readiness.coverage.missing,resolutionKey:request.resolutionKey,attemptToken:request.attemptToken}});
+	        recordCoursePlayDebug(readiness.ready?'course-map-cloud-loaded':'course-map-cloud-incomplete',request.course,request.hole,{courseKey:published.courseId,lookup:'published-course-maps',publishedCourseId:published.id,pulled:Object.keys(maps&&maps.courses||{}).length,persistedObjects:Object.keys(published.objects||{}).length,holes:readiness.coverage.holes,playable:readiness.ready,resolutionKey:request.resolutionKey,attemptToken:request.attemptToken});
+	        return {attempted:true,found:true,key:published.courseId,result:maps,persisted:{saved:0,holes:readiness.coverage.holes},readiness,published};
 	      }
+	    }catch(error){
+	      recordMappingDebug(request.debugRunId,{source:'cloud-map',phase:'failed',event:'course-map-cloud-lookup-failed',summary:'Course map cloud lookup failed',details:{keys,lookup:'published-course-maps',resolutionKey:request.resolutionKey,attemptToken:request.attemptToken},error:{message:error&&error.message||String(error),status:error&&error.status||null}});
+	      recordCoursePlayDebug('course-map-cloud-lookup-failed',request.course,request.hole,{keys,lookup:'published-course-maps',reason:error&&error.message||String(error),resolutionKey:request.resolutionKey,attemptToken:request.attemptToken});
+	      return {attempted:true,failed:true,keys,error};
 	    }
-	    recordMappingDebug(request.debugRunId,{source:'cloud-map',phase:'skipped',event:'course-map-cloud-not-found',summary:'Course map not found in cloud',details:{keys,resolutionKey:request.resolutionKey,attemptToken:request.attemptToken}});
+	    recordMappingDebug(request.debugRunId,{source:'cloud-map',phase:'skipped',event:'course-map-cloud-not-found',summary:'Course map not found in cloud',details:{keys,lookup:'published-course-maps',resolutionKey:request.resolutionKey,attemptToken:request.attemptToken}});
 	    recordCoursePlayDebug('course-map-cloud-not-found',request.course,request.hole,{keys,resolutionKey:request.resolutionKey,attemptToken:request.attemptToken});
 	    return {attempted:true,found:false,missing:true,keys};
+	  }
+	  function shouldSyncGeneratedCourseMapToCloud(request,opts={}){
+	    if(opts.generatedCourseMapSync===false||opts.cloudCourseMapSync===false)return false;
+	    if(opts.fromResume||opts.preserveState||opts.keepGps)return false;
+	    if(request&&request.wholeCourse===false)return false;
+	    return typeof fetch==='function';
+	  }
+	  async function syncGeneratedCourseMapToCloud(request,source,opts={}){
+	    if(!shouldSyncGeneratedCourseMapToCloud(request,opts))return {attempted:false,reason:'cloud-sync-disabled'};
+	    const actor=currentAdminActor();
+	    const actorAllowed=String(actor.role||'').toLowerCase()==='admin'&&isPublishedAdminEmail(actor.email);
+	    const course=loadUserCourseData(userId(),request.courseId)||request.course;
+	    const readiness=savedMapCanSatisfyRequest(course,request.hole,true);
+	    if(!readiness.ready){
+	      recordMappingDebug(request.debugRunId,{source:'cloud-map',phase:'skipped',event:'course-map-cloud-sync-skipped',summary:'Course map cloud sync skipped',details:{reason:'incomplete-map',source:source||'generated-map',courseId:request.courseId,courseName:request.courseName,hole:request.hole,playableHoleCount:readiness.coverage.count,expectedHoleCount:readiness.coverage.expected,missingHoles:readiness.coverage.missing,resolutionKey:request.resolutionKey,attemptToken:request.attemptToken}});
+	      return {attempted:false,reason:'incomplete-map',readiness};
+	    }
+	    if(!actorAllowed){
+	      recordMappingDebug(request.debugRunId,{source:'cloud-map',phase:'skipped',event:'course-map-cloud-sync-skipped',summary:'Course map cloud sync skipped',details:{reason:'admin-required',source:source||'generated-map',courseId:request.courseId,courseName:request.courseName,hole:request.hole,resolutionKey:request.resolutionKey,attemptToken:request.attemptToken}});
+	      recordCoursePlayDebug('course-map-cloud-sync-skipped',request.course,request.hole,{reason:'admin-required',source:source||'generated-map',resolutionKey:request.resolutionKey,attemptToken:request.attemptToken});
+	      return {attempted:false,reason:'admin-required',readiness};
+	    }
+	    const clean=normalizePublishedCourse(course,actor);
+	    if(!clean)return {attempted:false,reason:'empty-map',readiness};
+	    recordMappingDebug(request.debugRunId,{source:'cloud-map',phase:'started',event:'course-map-cloud-sync-started',summary:'Course map cloud sync started',details:{source:source||'generated-map',courseId:clean.courseId,courseName:clean.courseName,publishedCourseId:clean.id,playableHoleCount:readiness.coverage.count,expectedHoleCount:readiness.coverage.expected,resolutionKey:request.resolutionKey,attemptToken:request.attemptToken}});
+	    recordCoursePlayDebug('course-map-cloud-sync-started',request.course,request.hole,{source:source||'generated-map',courseId:clean.courseId,publishedCourseId:clean.id,holes:readiness.coverage.count,resolutionKey:request.resolutionKey,attemptToken:request.attemptToken});
+	    try{
+	      const res=await fetch(PUBLISHED_COURSE_API,{
+	        method:'POST',
+	        headers:{'Content-Type':'application/json','Accept':'application/json'},
+	        body:JSON.stringify({course:clean,actor})
+	      });
+	      const data=await res.json().catch(()=>null);
+	      if(!res.ok){
+	        const error=new Error(data&&data.error||`Course map sync failed (${res.status})`);
+	        error.status=res.status;
+	        error.body=data;
+	        throw error;
+	      }
+	      if(data)mergePublishedStore(data);
+	      recordMappingDebug(request.debugRunId,{source:'cloud-map',phase:'completed',event:'course-map-cloud-synced',summary:'Course map synced to cloud',details:{source:source||'generated-map',courseId:clean.courseId,courseName:clean.courseName,publishedCourseId:clean.id,playableHoleCount:readiness.coverage.count,expectedHoleCount:readiness.coverage.expected,storage:data&&data.storage||'course-maps',resolutionKey:request.resolutionKey,attemptToken:request.attemptToken}});
+	      recordCoursePlayDebug('course-map-cloud-synced',request.course,request.hole,{source:source||'generated-map',courseId:clean.courseId,publishedCourseId:clean.id,holes:readiness.coverage.count,storage:data&&data.storage||'course-maps',resolutionKey:request.resolutionKey,attemptToken:request.attemptToken});
+	      return {attempted:true,synced:true,course:clean,result:data,readiness};
+	    }catch(error){
+	      recordMappingDebug(request.debugRunId,{source:'cloud-map',phase:'failed',event:'course-map-cloud-sync-failed',summary:'Course map cloud sync failed',details:{source:source||'generated-map',courseId:clean.courseId,courseName:clean.courseName,publishedCourseId:clean.id,resolutionKey:request.resolutionKey,attemptToken:request.attemptToken},error:{message:error&&error.message||String(error),status:error&&error.status||null}});
+	      recordCoursePlayDebug('course-map-cloud-sync-failed',request.course,request.hole,{source:source||'generated-map',courseId:clean.courseId,publishedCourseId:clean.id,reason:error&&error.message||String(error),status:error&&error.status||null,resolutionKey:request.resolutionKey,attemptToken:request.attemptToken});
+	      return {attempted:true,synced:false,failed:true,error,course:clean,readiness};
+	    }
 	  }
 	  function ingestRequestedHoleToPipeline(course,hole,source){
     try{
@@ -4859,7 +4904,6 @@
 	        rememberRequestedPlayHole(h);
 	        const resumeAvailableBeforeOpen=resumeRoundAvailableForCloudMap();
 	        try{if(typeof resetPlay==='function')resetPlay(true);}catch(e){}
-	        try{await syncPublishedCourseMaps({quiet:true});}catch(e){}
 	        try{setMappedPlayMode('mapped',{skipFrame:true,silent:true,preserveAssist:true});}catch(e){}
 	        const cloudMapResult=await tryHydrateCourseMapFromCloud(request,attempt,Object.assign({},opts,{__resumeRoundAvailableBeforeOpen:resumeAvailableBeforeOpen}));
 	        if(cloudMapResult&&cloudMapResult.attempted&&!mappingAttemptStillCurrent(request,attempt,'cloud-map'))return {playable:false,stale:true,reason:'superseded-after-cloud-map'};
@@ -4890,6 +4934,7 @@
         if(autoReady){
           recordMappingDebug(debugRunId,{source:'automapper',phase:'completed',event:'automapper-succeeded',summary:'AutoMapper succeeded',details:{hole:h,resolutionKey:key,attemptToken,guideCount:autoMapResult&&autoMapResult.holes||0,saved:autoMapResult&&autoMapResult.saved||0}});
           recordMappingDebug(debugRunId,{source:'course-loader',phase:'completed',event:'mapping-attempt-completed',summary:'Course mapping completed',details:{hole:h,source:'automapper',resolutionKey:key,attemptToken}});
+          await syncGeneratedCourseMapToCloud(request,'automapper',opts);
           finishMappingDebug(debugRunId,{status:'completed',outcome:'automapper map ready'});
           return showResolvedCoursePlayHole(c,h,'automapper',opts);
         }
@@ -4902,6 +4947,7 @@
         if(!mappingAttemptStillCurrent(request,attempt,'native-resolver'))return {playable:false,stale:true,reason:'superseded-after-native-resolver'};
         if(nativeResult&&nativeResult.playable){
           recordMappingDebug(debugRunId,{source:'course-loader',phase:'completed',event:'mapping-attempt-completed',summary:'Course mapping completed',details:{hole:h,source:'native-resolver',resolutionKey:key,attemptToken}});
+          await syncGeneratedCourseMapToCloud(request,'native-resolver',opts);
           finishMappingDebug(debugRunId,{status:'completed',outcome:'native resolver map ready'});
           return showResolvedCoursePlayHole(c,h,'native-resolver',Object.assign({},opts,{collectCoursePlayFrames:false}));
         }
@@ -5494,12 +5540,18 @@
     try{
       if(typeof fetch!=='function')return loadPublishedStore();
       const res=await fetch(PUBLISHED_COURSE_API,{headers:{Accept:'application/json'},cache:'no-store'});
-      if(!res.ok)return loadPublishedStore();
+      if(!res.ok){
+        const error=new Error(`Course map lookup failed (${res.status})`);
+        error.status=res.status;
+        if(opts.throwOnError)throw error;
+        return loadPublishedStore();
+      }
       const data=await res.json();
       const merged=mergePublishedStore(data);
       try{renderCourseLibraryPanel();}catch(e){}
       return merged;
     }catch(e){
+      if(opts.throwOnError)throw e;
       return loadPublishedStore();
     }
   }

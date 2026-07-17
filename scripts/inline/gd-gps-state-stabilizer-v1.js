@@ -793,6 +793,7 @@
 	    safe(function(){ lockedFrame = false; });
 	    safe(function(){ if(typeof setBubbleOnlyLock === "function") setBubbleOnlyLock(false); });
 	    safe(function(){ document.body.classList.remove("gdLockStateFrameActive", "gd-frame-hard-locked", "gdMappedStartPromptActive", "gdHeadToTeeFrameActive"); });
+	    safe(function(){ if(typeof window.gdSyncGpsPlayCameraTilt === "function") window.gdSyncGpsPlayCameraTilt("unlock-start"); });
 	    safe(function(){ document.getElementById("app") && document.getElementById("app").classList.remove("framed", "gdPreLockFrame"); });
 	    safe(function(){ if(typeof hideHint === "function") hideHint(); });
 	    safe(function(){ mode = mappedAssist() ? "ready" : "green"; });
@@ -823,6 +824,19 @@
 	    var gps = recentGpsPoint();
 	    return (gps && gps.ll) || safe(function(){ return start || null; }, null);
 	  }
+	  function optimisticLockPoint(){
+	    var gps = hasFreshRealGps(120000) ? recentGpsPoint() : null;
+	    if(gps && gps.ll) return gps;
+	    var s = safe(function(){ return start || null; }, null);
+	    return s ? { ll:s, accuracy:null, source:"existing-start" } : null;
+	  }
+	  function refreshGpsAfterOptimisticLock(reason){
+	    if(!navigator.geolocation) return false;
+	    navigator.geolocation.getCurrentPosition(function(pos){
+	      safe(function(){ if(typeof window.gdGpsRememberFix === "function") window.gdGpsRememberFix(pos, reason || "lock-button-background"); });
+	    }, function(){}, { enableHighAccuracy:true, maximumAge:3000, timeout:3500 });
+	    return true;
+	  }
 
 	  function lockShotFromPoint(point, reason, accuracy){
 	    if(!gpsActive()) return false;
@@ -852,6 +866,7 @@
 	    safe(function(){ if(typeof setBubbleOnlyLock === "function") setBubbleOnlyLock(true); });
 	    safe(function(){ document.body.classList.remove("gdMappedStartPromptActive", "gdManualStartPlacementActive"); });
 	    safe(function(){ document.body.classList.add("gdLockStateFrameActive"); });
+	    safe(function(){ if(typeof window.gdSyncGpsPlayCameraTilt === "function") window.gdSyncGpsPlayCameraTilt(reason || "lock-start"); });
 	    safe(function(){ document.getElementById("app") && document.getElementById("app").classList.add("framed"); });
 	    safe(function(){ document.getElementById("shotTile") && document.getElementById("shotTile").classList.add("visible"); });
 	    safe(function(){ if(typeof hideHint === "function") hideHint(); });
@@ -870,6 +885,13 @@
 
 	  function requestFreshLocationThenLock(){
 	    hapticSafe(12);
+	    var immediate = optimisticLockPoint();
+	    if(immediate && immediate.ll){
+	      safe(function(){ document.body.dataset.gdGpsLockStartMode = immediate.source || "optimistic"; });
+	      var result = lockShotFromPoint(immediate.ll, immediate.source === "existing-start" ? "lock-button-start" : "lock-button-optimistic", immediate.accuracy);
+	      refreshGpsAfterOptimisticLock("lock-button-background");
+	      return result;
+	    }
 	    if(!navigator.geolocation) return lockShotFromPoint(pointFromRecentGpsOrStart(), "lock-button");
 	    setStateSafe("Checking GPS");
 	    navigator.geolocation.getCurrentPosition(function(pos){

@@ -1,0 +1,35 @@
+/* Fresh GPS Play camera tilt: auto flat whole-hole view, then delayed lock tilt. */
+:root{
+  --gd-gps-play-camera-tilt-deg:0deg;
+  --gd-gps-play-camera-tilt-scale:1;
+  --gd-gps-play-camera-tilt-duration:1000ms;
+}
+body.gdGpsPlayCameraTiltAutoReady.gdCapturedHoleFrameCameraOn #gdHoleImageCameraLayer{
+  transform:perspective(900px) rotateX(var(--gd-gps-play-camera-tilt-deg)) scale(var(--gd-gps-play-camera-tilt-scale))!important;
+  transform-origin:50% 70%!important;
+  transition:transform var(--gd-gps-play-camera-tilt-duration) cubic-bezier(.18,.82,.24,1),filter var(--gd-gps-play-camera-tilt-duration) ease!important;
+  will-change:transform!important;
+}
+body.gdGpsPlayCameraTiltAutoReady.gdCapturedHoleFrameCameraOn #gdHoleImageCameraLayer .gdHoleImageTiles{
+  transition:transform var(--gd-gps-play-camera-tilt-duration) cubic-bezier(.18,.82,.24,1)!important;
+  will-change:transform!important;
+}
+body.gdCapturedBubbleDragging #gdHoleImageCameraLayer .gdHoleImageTiles,
+body.gdGpsHoleTransitioning #gdHoleImageCameraLayer .gdHoleImageTiles,
+body.gdCourseOpening #gdHoleImageCameraLayer .gdHoleImageTiles{
+  transition:none!important;
+}
+body.gdGpsPlayCameraTiltOn.gdCapturedHoleFrameCameraOn #gdHoleImageCameraLayer .gdHoleImageTile{
+  filter:saturate(.96) contrast(1.1) brightness(.84)!important;
+}
+body.gdGpsPlayCameraTiltFlat.gdCapturedHoleFrameCameraOn #gdHoleImageCameraLayer .gdHoleImageTile{
+  filter:saturate(.92) contrast(1.08) brightness(.82)!important;
+}
+@media (prefers-reduced-motion: reduce){
+  body.gdGpsPlayCameraTiltAutoReady.gdCapturedHoleFrameCameraOn #gdHoleImageCameraLayer{
+    transition-duration:1ms!important;
+  }
+  body.gdGpsPlayCameraTiltAutoReady.gdCapturedHoleFrameCameraOn #gdHoleImageCameraLayer .gdHoleImageTiles{
+    transition-duration:1ms!important;
+  }
+}
