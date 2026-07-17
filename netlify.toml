@@ -49,6 +49,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/referrals"
+  to = "/.netlify/functions/referrals"
+  status = 200
+
+[[redirects]]
   from = "/api/payment-admin"
   to = "/.netlify/functions/payment-admin"
   status = 200

@@ -1,6 +1,7 @@
 "use strict";
 
 const {
+  ADMIN_COMPED_MEMBERSHIP_KEY,
   MONTHLY_MEMBERSHIP_KEY,
   MONTH_PASS_KEY,
   email,
@@ -205,6 +206,7 @@ async function manualGrantPermission(payload, auth) {
   const accountEmail = email(payload.accountEmail || payload.email || payload.targetEmail);
   const profileId = text(payload.profileId, 120);
   const permissionKey = text(payload.permissionKey || payload.entitlementType, 120);
+  const allowMemberReferrals = permissionKey === ADMIN_COMPED_MEMBERSHIP_KEY && boolFlag(payload.allowMemberReferrals, true);
   const notes = text(payload.notes || payload.note, 300);
   const starts = payload.startsAt ? new Date(payload.startsAt) : new Date();
   const hours = Number(payload.durationHours || payload.duration_hours || 0);
@@ -223,15 +225,20 @@ async function manualGrantPermission(payload, auth) {
       account_email: accountEmail || null,
       profile_id: profileId || null,
       entitlement_type: permissionKey,
+      product_key: permissionKey,
       status: "active",
       starts_at: starts.toISOString(),
       expires_at: expires ? expires.toISOString() : null,
+      entitlement_reason: permissionKey === ADMIN_COMPED_MEMBERSHIP_KEY ? ADMIN_COMPED_MEMBERSHIP_KEY : "admin_manual_grant",
+      referral_eligible: allowMemberReferrals,
       usage_count: 0,
       metadata: {
-        source: "admin_manual_grant",
+        source: permissionKey === ADMIN_COMPED_MEMBERSHIP_KEY ? ADMIN_COMPED_MEMBERSHIP_KEY : "admin_manual_grant",
         note: notes,
         granted_by: auth.account && auth.account.email || "admin",
-        permission_key: permissionKey
+        permission_key: permissionKey,
+        entitlement_reason: permissionKey === ADMIN_COMPED_MEMBERSHIP_KEY ? ADMIN_COMPED_MEMBERSHIP_KEY : "admin_manual_grant",
+        allow_member_referrals: allowMemberReferrals
       }
     })
   });
@@ -293,6 +300,8 @@ async function issueFreePass(payload, auth) {
   const productKey = text(payload.productKey || "free_pass", 80).toLowerCase().replace(/[^a-z0-9_]+/g, "_");
   const hours = Number(payload.durationHours || payload.duration_hours || 24);
   const cleanHours = Number.isFinite(hours) && hours > 0 ? hours : 24;
+  const isCompedMembership = productKey === ADMIN_COMPED_MEMBERSHIP_KEY;
+  const allowMemberReferrals = isCompedMembership && boolFlag(payload.allowMemberReferrals, true);
   if (!accountEmail && !accountId) return json(400, { error: "Account email or account id is required" });
 
   const starts = payload.startsAt ? new Date(payload.startsAt) : new Date();
@@ -306,19 +315,34 @@ async function issueFreePass(payload, auth) {
       user_id: accountId || null,
       account_email: accountEmail || null,
       entitlement_type: productKey,
+      product_key: productKey,
       status: "active",
       starts_at: starts.toISOString(),
       expires_at: expires.toISOString(),
+      source_type: isCompedMembership ? ADMIN_COMPED_MEMBERSHIP_KEY : "admin_free_pass",
+      entitlement_reason: isCompedMembership ? ADMIN_COMPED_MEMBERSHIP_KEY : productKey,
+      referral_eligible: allowMemberReferrals,
+      non_renewing: true,
       metadata: {
-        source: "admin_free_pass",
+        source: isCompedMembership ? ADMIN_COMPED_MEMBERSHIP_KEY : "admin_free_pass",
+        entitlement_reason: isCompedMembership ? ADMIN_COMPED_MEMBERSHIP_KEY : productKey,
         note: text(payload.note, 500),
         issued_by: auth.account && auth.account.email || "admin",
-        duration_hours: cleanHours
+        duration_hours: cleanHours,
+        membership_level: isCompedMembership,
+        allow_member_referrals: allowMemberReferrals
       }
     })
   });
   await logAdmin(auth, "issue_free_pass", { accountEmail, accountId, productKey, hours: cleanHours });
   return json(200, { ok: true, message: "Free pass issued" });
+}
+
+function boolFlag(value, defaultValue) {
+  if (value === undefined || value === null || value === "") return !!defaultValue;
+  if (value === true || value === "true" || value === "on" || value === "1") return true;
+  if (value === false || value === "false" || value === "off" || value === "0") return false;
+  return !!defaultValue;
 }
 
 async function logAdmin(auth, action, payload) {

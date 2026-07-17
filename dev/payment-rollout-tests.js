@@ -36,6 +36,11 @@ function resetEnv() {
   process.env.STRIPE_WEBHOOK_SECRET = WEBHOOK_SECRET;
   process.env.STRIPE_MONTH_PASS_PRICE_ID = "price_month_env";
   process.env.STRIPE_MONTHLY_MEMBERSHIP_PRICE_ID = "price_membership_env";
+  process.env.CLARITY_REFERRALS_ENABLED = "1";
+  process.env.CLARITY_REFERRAL_FREE_ACCESS_DAYS = "30";
+  process.env.CLARITY_REFERRAL_INVITE_EXPIRY_DAYS = "30";
+  process.env.CLARITY_REFERRAL_MAX_OUTSTANDING_INVITES = "10";
+  process.env.CLARITY_REFERRAL_MAX_UNAPPLIED_REWARDS = "12";
   delete process.env.CLARITY_ALLOW_LEGACY_PAYMENT_ACCOUNT_PAYLOAD;
 }
 
@@ -44,6 +49,9 @@ function clearPaymentModules() {
     if (key.indexOf(path.join("functions", "payment-utils.js")) !== -1 ||
         key.indexOf(path.join("functions", "create-checkout-session.js")) !== -1 ||
         key.indexOf(path.join("functions", "create-billing-portal-session.js")) !== -1 ||
+        key.indexOf(path.join("functions", "referral-service.js")) !== -1 ||
+        key.indexOf(path.join("functions", "referrals.js")) !== -1 ||
+        key.indexOf(path.join("functions", "payment-admin.js")) !== -1 ||
         key.indexOf(path.join("functions", "stripe-webhook.js")) !== -1) {
       delete require.cache[key];
     }
@@ -71,11 +79,13 @@ function baseState() {
   return {
     authUsers: {
       token_auth: { id: "auth_1", email: "auth@example.com" },
-      token_victim: { id: "auth_2", email: "victim@example.com" }
+      token_victim: { id: "auth_2", email: "victim@example.com" },
+      token_friend: { id: "auth_3", email: "friend@example.com" }
     },
     app_accounts: [
-      { account_id: "acct_auth", auth_user_id: "auth_1", email: "auth@example.com", name: "Auth User", stripe_customer_id: "cus_auth", role: "player", metadata: {} },
-      { account_id: "acct_victim", auth_user_id: "auth_2", email: "victim@example.com", name: "Victim User", stripe_customer_id: "cus_victim", role: "player", metadata: {} }
+      { account_id: "acct_auth", auth_user_id: "auth_1", email: "auth@example.com", name: "Auth User", stripe_customer_id: "cus_auth", role: "player", metadata: {}, created_at: iso(-24 * 60 * 60 * 1000) },
+      { account_id: "acct_victim", auth_user_id: "auth_2", email: "victim@example.com", name: "Victim User", stripe_customer_id: "cus_victim", role: "player", metadata: {}, created_at: iso(0) },
+      { account_id: "acct_friend", auth_user_id: "auth_3", email: "friend@example.com", name: "Friend User", stripe_customer_id: "cus_friend", role: "player", metadata: {}, created_at: iso(0) }
     ],
     payment_products: [
       { product_key: "month_pass", product_kind: "month_pass", name: "One Month Pass", active: true, stripe_price_id: "price_month_test", duration_hours: 720, billing_schedule: "one_time" },
@@ -85,9 +95,13 @@ function baseState() {
     caddie_memberships: [],
     stripe_webhook_events: [],
     payment_events: [],
+    referral_invitations: [],
+    referral_reward_ledger: [],
+    referral_analytics_events: [],
     stripeCustomers: {
       cus_auth: { id: "cus_auth", email: "auth@example.com" },
-      cus_victim: { id: "cus_victim", email: "victim@example.com" }
+      cus_victim: { id: "cus_victim", email: "victim@example.com" },
+      cus_friend: { id: "cus_friend", email: "friend@example.com" }
     },
     stripeSubscriptions: {},
     stripeSubscriptionsByCustomer: {},
@@ -95,7 +109,8 @@ function baseState() {
       checkoutSessions: [],
       portalSessions: [],
       stripeGets: [],
-      supabasePatches: []
+      supabasePatches: [],
+      balanceTransactions: []
     }
   };
 }
@@ -162,7 +177,7 @@ function patchRows(rows, params, patch) {
     matches = matches.filter(function (row) { return compare(row[key], op, expected); });
   });
   matches.forEach(function (row) { Object.assign(row, patch); });
-  return matches.length;
+  return matches;
 }
 
 function upsertBy(rows, conflictKey, row) {
@@ -200,8 +215,9 @@ function createFetch(state) {
 
       if (method === "PATCH") {
         state.captures.supabasePatches.push({ table, query: url.search, body: clone(body) });
-        patchRows(rows, params, body);
-        return response(204, null);
+        const matches = patchRows(rows, params, body);
+        const prefer = String(options && options.headers && (options.headers.Prefer || options.headers.prefer) || "");
+        return prefer.indexOf("return=representation") !== -1 ? response(200, matches.map(clone)) : response(204, null);
       }
 
       if (method === "POST") {
@@ -258,6 +274,13 @@ function createFetch(state) {
       if (method === "GET" && url.pathname.indexOf("/v1/invoices/") === 0) {
         return response(404, { error: { message: "No such invoice" } });
       }
+      if (method === "POST" && /\/v1\/customers\/[^/]+\/balance_transactions$/.test(url.pathname)) {
+        const body = parseBody(options && options.body);
+        const id = "cbtxn_" + (state.captures.balanceTransactions.length + 1);
+        const transaction = Object.assign({ id }, body);
+        state.captures.balanceTransactions.push(transaction);
+        return response(200, transaction);
+      }
     }
 
     return response(500, { error: "Unhandled fetch in payment rollout tests", url: url.toString(), method });
@@ -290,7 +313,7 @@ function subscription(overrides) {
     current_period_start: Math.floor((FIXED_NOW - 1000) / 1000),
     current_period_end: Math.floor((FIXED_NOW + 30 * 24 * 60 * 60 * 1000) / 1000),
     cancel_at_period_end: false,
-    items: { data: [{ price: { id: "price_membership_test" } }] }
+    items: { data: [{ price: { id: "price_membership_test", unit_amount: 2900, currency: "aud" } }] }
   }, overrides || {});
 }
 
@@ -301,6 +324,8 @@ async function loadHandlers(state) {
   return {
     checkout: require(path.join(ROOT, "functions/create-checkout-session.js")).handler,
     portal: require(path.join(ROOT, "functions/create-billing-portal-session.js")).handler,
+    referrals: require(path.join(ROOT, "functions/referrals.js")).handler,
+    admin: require(path.join(ROOT, "functions/payment-admin.js")).handler,
     webhook: require(path.join(ROOT, "functions/stripe-webhook.js")).handler,
     utils: require(path.join(ROOT, "functions/payment-utils.js"))
   };
@@ -322,6 +347,29 @@ async function runWebhook(state, stripeEvent) {
   return { result, body: await jsonBody(result), state };
 }
 
+async function runReferral(state, action, payload, token) {
+  const handlers = await loadHandlers(state);
+  const result = await handlers.referrals(event("POST", Object.assign({ action }, payload || {}), token || "token_auth"));
+  return { result, body: await jsonBody(result), state };
+}
+
+function referralTokenFrom(url) {
+  return new URL(url).searchParams.get("ref");
+}
+
+function activePaidMembership(accountId, email, customerId, subscriptionId) {
+  return {
+    user_id: accountId,
+    account_email: email,
+    status: "active",
+    access_until: iso(30 * 24 * 60 * 60 * 1000),
+    current_period_end: iso(30 * 24 * 60 * 60 * 1000),
+    stripe_customer_id: customerId,
+    stripe_subscription_id: subscriptionId || "sub_" + accountId,
+    last_paid_invoice_id: "inv_paid_" + accountId
+  };
+}
+
 function checkoutSessionCompleted(id, session) {
   return {
     id,
@@ -340,12 +388,12 @@ function checkoutSessionCompleted(id, session) {
   };
 }
 
-function invoiceEvent(id, type, subId) {
+function invoiceEvent(id, type, subId, overrides) {
   return {
     id,
     type,
     created: Math.floor(FIXED_NOW / 1000),
-    data: { object: { id: "inv_" + id, subscription: subId || "sub_test", customer: "cus_auth" } }
+    data: { object: Object.assign({ id: "inv_" + id, subscription: subId || "sub_test", customer: "cus_auth" }, overrides || {}) }
   };
 }
 
@@ -398,6 +446,112 @@ test("Unauthenticated Checkout is rejected when Supabase Auth is configured", as
   const result = await handlers.checkout(event("POST", { productKey: "month_pass", accountId: "acct_auth", email: "auth@example.com" }, ""));
   assert.strictEqual(result.statusCode, 401);
   assert.strictEqual(state.captures.checkoutSessions.length, 0);
+});
+
+test("Active Monthly Member creates a private referral invite", async function () {
+  const state = baseState();
+  state.caddie_memberships.push(activePaidMembership("acct_auth", "auth@example.com", "cus_auth", "sub_inviter"));
+  const out = await runReferral(state, "createInvite", { friendName: "Sam Friend", friendEmail: "friend@example.com" }, "token_auth");
+  assert.strictEqual(out.result.statusCode, 200, JSON.stringify(out.body));
+  assert.ok(out.body.shareUrl.indexOf("?ref=") !== -1);
+  assert.strictEqual(state.referral_invitations.length, 1);
+  assert.strictEqual(state.referral_invitations[0].status, "open");
+  assert.strictEqual(state.referral_invitations[0].friend_name, "Sam Friend");
+});
+
+test("Month Pass-only user cannot create a referral invite", async function () {
+  const state = baseState();
+  state.user_entitlements.push({ user_id: "acct_auth", account_email: "auth@example.com", entitlement_type: "month_pass", product_key: "month_pass", status: "active", starts_at: iso(-1000), expires_at: iso(30 * 24 * 60 * 60 * 1000) });
+  const out = await runReferral(state, "createInvite", {}, "token_auth");
+  assert.strictEqual(out.result.statusCode, 403);
+  assert.strictEqual(state.referral_invitations.length, 0);
+});
+
+test("Admin-comped Membership with referral flag can create a referral invite", async function () {
+  const state = baseState();
+  state.user_entitlements.push({ user_id: "acct_auth", account_email: "auth@example.com", entitlement_type: "admin_comped_membership", product_key: "admin_comped_membership", entitlement_reason: "admin_comped_membership", referral_eligible: true, status: "active", starts_at: iso(-1000), expires_at: iso(30 * 24 * 60 * 60 * 1000), metadata: { allow_member_referrals: true } });
+  const out = await runReferral(state, "createInvite", {}, "token_auth");
+  assert.strictEqual(out.result.statusCode, 200, JSON.stringify(out.body));
+  assert.strictEqual(state.referral_invitations.length, 1);
+});
+
+test("Referral free-month recipient cannot create referral invites", async function () {
+  const state = baseState();
+  state.user_entitlements.push({ user_id: "acct_auth", account_email: "auth@example.com", entitlement_type: "referral_membership", product_key: "referral_membership", entitlement_reason: "referral_free_month", referral_eligible: false, status: "active", starts_at: iso(-1000), expires_at: iso(30 * 24 * 60 * 60 * 1000), metadata: { source: "referral" } });
+  const out = await runReferral(state, "createInvite", {}, "token_auth");
+  assert.strictEqual(out.result.statusCode, 403);
+});
+
+test("New account accepts referral and receives exactly 30 days with no Stripe payment", async function () {
+  const state = baseState();
+  state.caddie_memberships.push(activePaidMembership("acct_auth", "auth@example.com", "cus_auth", "sub_inviter"));
+  const invite = await runReferral(state, "createInvite", {}, "token_auth");
+  const token = referralTokenFrom(invite.body.shareUrl);
+  const accepted = await runReferral(state, "accept", { referralToken: token }, "token_victim");
+  assert.strictEqual(accepted.result.statusCode, 200, JSON.stringify(accepted.body));
+  assert.strictEqual(state.user_entitlements.length, 1);
+  assert.strictEqual(state.user_entitlements[0].product_key, "referral_membership");
+  assert.strictEqual(state.user_entitlements[0].referral_eligible, false);
+  assert.strictEqual(new Date(state.user_entitlements[0].expires_at).getTime() - new Date(state.user_entitlements[0].starts_at).getTime(), 30 * 24 * 60 * 60 * 1000);
+  assert.strictEqual(state.captures.checkoutSessions.length, 0);
+});
+
+test("Referral token cannot be reused by a second account", async function () {
+  const state = baseState();
+  state.caddie_memberships.push(activePaidMembership("acct_auth", "auth@example.com", "cus_auth", "sub_inviter"));
+  const invite = await runReferral(state, "createInvite", {}, "token_auth");
+  const token = referralTokenFrom(invite.body.shareUrl);
+  await runReferral(state, "accept", { referralToken: token }, "token_victim");
+  const second = await runReferral(state, "accept", { referralToken: token }, "token_friend");
+  assert.strictEqual(second.result.statusCode, 409);
+  assert.strictEqual(state.user_entitlements.length, 1);
+});
+
+test("Invitee checkout during referral month delays billing until free access ends", async function () {
+  const state = baseState();
+  state.caddie_memberships.push(activePaidMembership("acct_auth", "auth@example.com", "cus_auth", "sub_inviter"));
+  const invite = await runReferral(state, "createInvite", {}, "token_auth");
+  const token = referralTokenFrom(invite.body.shareUrl);
+  await runReferral(state, "accept", { referralToken: token }, "token_victim");
+  const out = await runCheckout(state, "monthly_membership", "token_victim");
+  assert.strictEqual(out.result.statusCode, 200, JSON.stringify(out.body));
+  const session = state.captures.checkoutSessions[0];
+  assert.strictEqual(session.mode, "subscription");
+  assert.ok(Number(session["subscription_data[trial_end]"]) > Math.floor(FIXED_NOW / 1000));
+  assert.strictEqual(session["metadata[referral_id]"], state.referral_invitations[0].id);
+});
+
+test("Positive first paid referred invoice earns one inviter reward and Stripe credit", async function () {
+  const state = baseState();
+  state.caddie_memberships.push(activePaidMembership("acct_auth", "auth@example.com", "cus_auth", "sub_inviter"));
+  state.stripeSubscriptions.sub_inviter = subscription({ id: "sub_inviter", customer: "cus_auth", metadata: { product_key: "monthly_membership", user_id: "acct_auth", account_email: "auth@example.com" } });
+  const invite = await runReferral(state, "createInvite", {}, "token_auth");
+  const token = referralTokenFrom(invite.body.shareUrl);
+  await runReferral(state, "accept", { referralToken: token }, "token_victim");
+  state.stripeSubscriptions.sub_referred = subscription({ id: "sub_referred", customer: "cus_victim", metadata: { product_key: "monthly_membership", user_id: "acct_victim", account_email: "victim@example.com" } });
+  const out = await runWebhook(state, invoiceEvent("evt_referred_paid", "invoice.paid", "sub_referred", { customer: "cus_victim", amount_paid: 2900, amount_due: 2900, currency: "aud" }));
+  assert.strictEqual(out.result.statusCode, 200, JSON.stringify(out.body));
+  assert.strictEqual(state.referral_reward_ledger.length, 1);
+  assert.strictEqual(state.referral_reward_ledger[0].status, "scheduled");
+  assert.strictEqual(state.referral_invitations[0].status, "reward_earned");
+  assert.strictEqual(state.captures.balanceTransactions.length, 1);
+  assert.strictEqual(Number(state.captures.balanceTransactions[0].amount), -2900);
+});
+
+test("Zero-value referred invoice and webhook replay do not double earn rewards", async function () {
+  const state = baseState();
+  state.caddie_memberships.push(activePaidMembership("acct_auth", "auth@example.com", "cus_auth", "sub_inviter"));
+  state.stripeSubscriptions.sub_inviter = subscription({ id: "sub_inviter", customer: "cus_auth", metadata: { product_key: "monthly_membership", user_id: "acct_auth", account_email: "auth@example.com" } });
+  const invite = await runReferral(state, "createInvite", {}, "token_auth");
+  const token = referralTokenFrom(invite.body.shareUrl);
+  await runReferral(state, "accept", { referralToken: token }, "token_victim");
+  state.stripeSubscriptions.sub_referred = subscription({ id: "sub_referred", customer: "cus_victim", metadata: { product_key: "monthly_membership", user_id: "acct_victim", account_email: "victim@example.com" } });
+  await runWebhook(state, invoiceEvent("evt_referred_zero", "invoice.paid", "sub_referred", { customer: "cus_victim", amount_paid: 0, amount_due: 0, currency: "aud" }));
+  assert.strictEqual(state.referral_reward_ledger.length, 0);
+  await runWebhook(state, invoiceEvent("evt_referred_positive", "invoice.paid", "sub_referred", { customer: "cus_victim", amount_paid: 2900, amount_due: 2900, currency: "aud" }));
+  await runWebhook(state, invoiceEvent("evt_referred_positive", "invoice.paid", "sub_referred", { customer: "cus_victim", amount_paid: 2900, amount_due: 2900, currency: "aud" }));
+  assert.strictEqual(state.referral_reward_ledger.length, 1);
+  assert.strictEqual(state.captures.balanceTransactions.length, 1);
 });
 
 test("Checkout rejects malformed Price IDs before Stripe", async function () {

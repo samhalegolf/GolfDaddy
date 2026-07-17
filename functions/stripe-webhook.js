@@ -19,6 +19,7 @@ const {
   text
 } = require("./payment-utils");
 const { sendSystemAlert } = require("./alert-utils");
+const referrals = require("./referral-service");
 
 const GRACE_DAYS = 7;
 const WEBHOOK_PROCESSING_RETRY_AFTER_MS = 15 * 60 * 1000;
@@ -184,6 +185,8 @@ async function processStripeEvent(stripeEvent) {
       return handleSubscriptionDeleted(object, stripeEvent);
     case "charge.refunded":
       return handleChargeRefunded(object, stripeEvent);
+    case "charge.dispute.created":
+      return handleChargeDisputeCreated(object);
     case "payment_intent.payment_failed":
       return handlePaymentIntentFailed(object);
     default:
@@ -285,6 +288,20 @@ async function handleInvoicePaid(invoice, stripeEvent) {
     graceUntil: null,
     firstPaymentFailedAt: null,
     lastPaidInvoiceId: invoice.id
+  });
+  await referrals.markScheduledRewardAppliedForInvoice({
+    invoice,
+    subscription,
+    stripeEvent,
+    userId: identity.userId,
+    accountEmail: identity.accountEmail
+  });
+  await referrals.evaluateReferralConversion({
+    invoice,
+    subscription,
+    stripeEvent,
+    userId: identity.userId,
+    accountEmail: identity.accountEmail
   });
 }
 
@@ -397,8 +414,18 @@ async function handleChargeRefunded(charge) {
     const subscription = invoice ? await retrieveSubscription(subscriptionIdFromInvoice(invoice)) : null;
     if (subscription && await subscriptionIsMonthlyMembership(subscription)) {
       await recordMembershipRefundWarning(subscription.id, invoiceId, charge);
+      await referrals.reversePendingReferralRewardForInvoice(invoiceId, "qualifying_payment_refunded");
     }
   }
+}
+
+async function handleChargeDisputeCreated(dispute) {
+  const chargeId = idValue(dispute && dispute.charge);
+  if (!chargeId) return;
+  const charge = await stripeFetch("GET", "/v1/charges/" + encodeURIComponent(chargeId), {}).catch(function () { return null; });
+  const invoiceId = idValue(charge && charge.invoice);
+  if (!invoiceId) return;
+  await referrals.reversePendingReferralRewardForInvoice(invoiceId, "qualifying_payment_disputed");
 }
 
 async function recordMembershipRefundWarning(subscriptionId, invoiceId, charge) {
