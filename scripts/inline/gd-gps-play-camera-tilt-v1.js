@@ -48,24 +48,14 @@
     deg=Number(deg)||0;
     return (1+Math.max(0,deg)/150).toFixed(3);
   }
-  function setButtonState(button,deg){
-    if(!button)return;
-    var locked=deg>0;
-    var title=locked?"Auto camera tilt: locked at 32 deg":"Auto camera tilt: flat until lock";
-    button.dataset.gdTiltLabel=locked?"32 deg":"Auto";
-    button.classList.toggle("active",locked);
-    button.setAttribute("aria-label",title);
-    button.title=title;
-    var text=button.querySelector("[data-gd-tilt-value]");
-    if(text)text.textContent=button.id==="gdGpsCameraTiltToggle"?"Auto 32":(locked?"32":"Auto");
+  function removeTiltControls(){
+    ["gdGpsPlayCameraTiltBtn","gdGpsCameraTiltRow"].forEach(function(id){
+      var el=document.getElementById(id);
+      if(el&&el.parentNode)el.parentNode.removeChild(el);
+    });
   }
-  function syncControls(deg){
-    var fab=document.getElementById("gdGpsPlayCameraTiltBtn");
-    var settings=document.getElementById("gdGpsCameraTiltToggle");
-    setButtonState(fab,deg);
-    setButtonState(settings,deg);
-    var sub=document.getElementById("gdGpsCameraTiltSub");
-    if(sub)sub.textContent=deg>0?"Locked - easing to 32 deg":"Flat until lock";
+  function syncControls(){
+    removeTiltControls();
   }
   function clearLockTiltTimer(){
     if(lockTiltTimer){clearTimeout(lockTiltTimer);lockTiltTimer=0;}
@@ -99,7 +89,7 @@
           document.body.classList.remove("gdGpsPlayCameraTiltOn");
           document.body.dataset.gdGpsPlayCameraTiltDeg=String(FLAT_TILT_DEG);
         }
-        syncControls(FLAT_TILT_DEG);
+        syncControls();
       }
       return FLAT_TILT_DEG;
     }
@@ -115,7 +105,7 @@
       else applyTilt(FLAT_TILT_DEG,"lock-cancelled");
     },LOCK_TILT_DELAY_MS);
     if(currentDeg!==FLAT_TILT_DEG)applyTilt(FLAT_TILT_DEG,reason||"lock-prep-flat");
-    syncControls(FLAT_TILT_DEG);
+    syncControls();
     return FLAT_TILT_DEG;
   }
   function scheduleSync(reason){
@@ -132,37 +122,7 @@
       if(event.stopImmediatePropagation)event.stopImmediatePropagation();
     }
     scheduleSync("control-sync");
-    safe(function(){if(typeof toast==="function")toast("Auto tilt: flat, then 32 deg on lock");});
     return false;
-  }
-  function iconMarkup(){
-    return '<svg aria-hidden="true" viewBox="0 0 48 48" fill="none"><path d="M7 31h34" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M11 25l26-9" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M16 35h16" stroke="currentColor" stroke-width="3" stroke-linecap="round" opacity=".72"/></svg><span data-gd-tilt-value>Auto</span>';
-  }
-  function ensureFab(){
-    if(!document.body)return null;
-    var button=document.getElementById("gdGpsPlayCameraTiltBtn");
-    if(button)return button;
-    button=document.createElement("button");
-    button.id="gdGpsPlayCameraTiltBtn";
-    button.className="gdGpsPlayCameraTiltBtn";
-    button.type="button";
-    button.innerHTML=iconMarkup();
-    button.addEventListener("click",handleControl,true);
-    document.body.appendChild(button);
-    return button;
-  }
-  function ensureSettingsRow(){
-    var panel=document.getElementById("settingsPanel");
-    if(!panel||document.getElementById("gdGpsCameraTiltRow"))return;
-    var anchor=safe(function(){return document.getElementById("shotUpToggle").closest(".row");},null)||
-      document.getElementById("gdMappedPlayModeRow");
-    if(!anchor||!anchor.parentNode)return;
-    var row=document.createElement("div");
-    row.className="row";
-    row.id="gdGpsCameraTiltRow";
-    row.innerHTML='<div><strong>Camera tilt</strong><span id="gdGpsCameraTiltSub">Flat until lock</span></div><button class="toggle" id="gdGpsCameraTiltToggle" type="button"><span data-gd-tilt-value>Auto 32</span></button>';
-    row.querySelector("button").addEventListener("click",handleControl,true);
-    anchor.parentNode.insertBefore(row,anchor.nextSibling);
   }
   function ensureObserver(){
     if(observer||!document.body||typeof MutationObserver!=="function")return;
@@ -171,8 +131,7 @@
   }
   function init(){
     safe(function(){localStorage.removeItem(STORAGE_KEY);});
-    ensureFab();
-    ensureSettingsRow();
+    removeTiltControls();
     ensureObserver();
     applyTilt(FLAT_TILT_DEG,"init-flat");
     scheduleSync("init");
@@ -184,6 +143,6 @@
   window.gdGetGpsPlayCameraTilt=function(){return currentDeg==null?FLAT_TILT_DEG:currentDeg;};
   if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init,{once:true});
   else init();
-  [160,420,900,1600,2600].forEach(function(delay){setTimeout(function(){ensureObserver();scheduleSync("settle-"+delay);},delay);});
+  [160,420,900,1600,2600].forEach(function(delay){setTimeout(function(){removeTiltControls();ensureObserver();scheduleSync("settle-"+delay);},delay);});
   ["click","pointerup","transitionend"].forEach(function(type){window.addEventListener(type,function(){scheduleSync(type);},true);});
 })();

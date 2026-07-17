@@ -134,6 +134,47 @@ function playableStore() {
   };
 }
 
+function publishedCourseMap(holeCount = 1) {
+  const c = course();
+  const objects = {};
+  const holes = {};
+  const total = holeCount === true ? 1 : Number(holeCount) || 0;
+  if (total <= 0) {
+    return { version: 1, storage: "supabase", updatedAt: "2026-07-14T22:12:40.000Z", courses: {} };
+  }
+  for (let h = 1; h <= total; h += 1) {
+    const baseLat = -36.9005 + h * 0.001;
+    const green = { lat: baseLat + 0.0015, lng: 174.75 };
+    const shape = [
+      { lat: green.lat - 0.00006, lng: green.lng - 0.00006 },
+      { lat: green.lat - 0.00006, lng: green.lng + 0.00006 },
+      { lat: green.lat + 0.00006, lng: green.lng + 0.00006 }
+    ];
+    objects[`published-green-${h}`] = { id: `published-green-${h}`, userId: "published", courseId: c.courseId, type: "green", holeNumber: h, confirmed: true, position: green, greenCenter: green, shape, greenShape: shape, source: "supabase-course-map", published: true };
+    objects[`published-tee-${h}`] = { id: `published-tee-${h}`, userId: "published", courseId: c.courseId, type: "tee", holeNumber: h, confirmed: true, position: { lat: baseLat, lng: 174.75 }, source: "supabase-course-map", published: true };
+    objects[`published-fairway-${h}`] = { id: `published-fairway-${h}`, userId: "published", courseId: c.courseId, type: "fairway", holeNumber: h, confirmed: true, position: { lat: baseLat + 0.00075, lng: 174.75 }, source: "supabase-course-map", published: true };
+    holes[h] = { id: `published-green-${h}`, userId: "published", courseId: c.courseId, holeNumber: h, greenCenter: green, greenShape: shape, greenSource: "supabase-course-map", confirmed: true, published: true };
+  }
+  return {
+    version: 1,
+    storage: "supabase",
+    updatedAt: "2026-07-14T22:12:40.000Z",
+    courses: {
+      "published::controller-test": {
+        id: "published::controller-test",
+        userId: "published",
+        courseId: c.courseId,
+        courseName: c.courseName,
+        published: true,
+        publishedAt: "2026-07-14T22:12:40.000Z",
+        publishedBy: { name: "Sam", email: "samhalegolf@gmail.com", accountId: "acct-1" },
+        objects,
+        holes
+      }
+    }
+  };
+}
+
 function osmPayload(kind) {
   if (kind === "success") {
     return {
@@ -164,7 +205,7 @@ function osmPayload(kind) {
 
 function loadController(options = {}) {
   const events = [];
-  const calls = { fetch: 0, native: 0, manual: 0, scorecard: 0, cloudPull: 0, cloudPullKeys: [], nativeInputs: [], fetchUrls: [], order: [], ingestMappedCourse: 0, ingestMappedHole: 0, ingestedHoles: [], frameWarm: 0, frameWarmHoles: [] };
+  const calls = { fetch: 0, native: 0, manual: 0, scorecard: 0, courseMapsGet: 0, courseMapsPost: 0, courseMapsBodies: [], courseVisualsGet: 0, courseVisualsPost: 0, nativeInputs: [], fetchUrls: [], order: [], ingestMappedCourse: 0, ingestMappedHole: 0, ingestedHoles: [], frameWarm: 0, frameWarmHoles: [] };
   const testConsole = Object.assign({}, console, { warn() {}, info() {} });
   const localStorage = storage({
     gd_user_course_library_v1: JSON.stringify(options.savedMap ? playableStore() : { courses: {} })
@@ -288,6 +329,12 @@ function loadController(options = {}) {
       }
     },
     CustomEvent: function CustomEvent(type, init) { this.type = type; this.detail = init && init.detail; },
+    GolfDaddyAccounts: {
+      current() {
+        return { name: "Sam", email: "samhalegolf@gmail.com", role: "admin", accountId: "acct-1" };
+      }
+    },
+    gdGetAccountPermission() { return "admin"; },
     addEventListener() {},
     removeEventListener() {},
     dispatchEvent() {},
@@ -314,22 +361,6 @@ function loadController(options = {}) {
   }
   if (options.resumeRound) {
     win.gdReadResumeRound = () => ({ updatedAt: Date.now(), course: course(), courseLabel: "Controller Test Golf Club", hole: 1, activated: true });
-  }
-  if (options.cloudPullScans || options.cloudPullEmpty || options.cloudPullFails) {
-    win.GolfDaddyCapturedSurfaceSync = {
-      async pullCourse(key) {
-        calls.cloudPull += 1;
-        calls.cloudPullKeys.push(String(key || ""));
-        calls.order.push("cloud-pull");
-        if (options.cloudPullFails) {
-          const error = new Error("database pull failed");
-          error.status = 502;
-          throw error;
-        }
-        const count = options.cloudPullScans === true ? 1 : Number(options.cloudPullScans) || 0;
-        return { synced: true, scans: options.cloudPullEmpty ? [] : Array.from({ length: count }, (_, index) => cloudScan(index + 1)) };
-      }
-    };
   }
   win.window = win;
 
@@ -371,16 +402,42 @@ function loadController(options = {}) {
     console: testConsole,
     CustomEvent: win.CustomEvent,
     MutationObserver: win.MutationObserver,
+    gdGetAccountPermission: win.gdGetAccountPermission,
     setTimeout: win.setTimeout,
     clearTimeout: win.clearTimeout,
     setInterval: win.setInterval,
     clearInterval: win.clearInterval,
-    fetch: async (url) => {
-      const overpass = String(url || "").includes("overpass-api");
+    fetch: async (url, init = {}) => {
+      const href = String(url || "");
+      const method = String(init && init.method || "GET").toUpperCase();
+      if (href.includes("/api/course-maps")) {
+        if (method === "POST") {
+          calls.courseMapsPost += 1;
+          calls.order.push("course-maps-post");
+          let body = {};
+          try { body = JSON.parse(init.body || "{}"); } catch (_error) {}
+          calls.courseMapsBodies.push(body);
+          if (options.courseMapsPostFails) return { ok: false, status: 503, json: async () => ({ error: "course map write failed" }) };
+          const id = body && body.course && body.course.id || "published::controller-test";
+          return { ok: true, status: 200, json: async () => ({ version: 1, storage: "supabase", updatedAt: "2026-07-14T23:00:00.000Z", courses: { [id]: body.course } }) };
+        }
+        calls.courseMapsGet += 1;
+        calls.order.push("course-maps-get");
+        if (options.courseMapsFails) throw Object.assign(new Error("database pull failed"), { status: 502 });
+        const holes = options.courseMapsHoles === undefined ? 0 : options.courseMapsHoles;
+        return { ok: true, status: 200, json: async () => publishedCourseMap(holes) };
+      }
+      if (href.includes("/api/course-visuals")) {
+        if (method === "POST") calls.courseVisualsPost += 1;
+        else calls.courseVisualsGet += 1;
+        calls.order.push(method === "POST" ? "course-visuals-post" : "course-visuals-get");
+        return { ok: true, status: 200, json: async () => ({ visual: null, storage: "supabase" }) };
+      }
+      const overpass = href.includes("overpass-api");
       if (!overpass) return { ok: true, json: async () => ({}) };
       calls.fetch += 1;
       calls.order.push("osm-fetch");
-      calls.fetchUrls.push(String(url || ""));
+      calls.fetchUrls.push(href);
       const sequence = Array.isArray(options.fetchSequence) ? options.fetchSequence : null;
       const next = sequence && sequence.length ? sequence.shift() : null;
       if (options.fetchFails || next === "fail") return { ok: false, status: 504, json: async () => ({}) };
@@ -396,6 +453,25 @@ function loadController(options = {}) {
 
 async function runScenario(options) {
   const env = loadController(options);
+  Object.assign(env.calls, {
+    fetch: 0,
+    native: 0,
+    manual: 0,
+    scorecard: 0,
+    courseMapsGet: 0,
+    courseMapsPost: 0,
+    courseVisualsGet: 0,
+    courseVisualsPost: 0,
+    ingestMappedCourse: 0,
+    ingestMappedHole: 0,
+    frameWarm: 0
+  });
+  env.calls.courseMapsBodies.length = 0;
+  env.calls.nativeInputs.length = 0;
+  env.calls.fetchUrls.length = 0;
+  env.calls.order.length = 0;
+  env.calls.ingestedHoles.length = 0;
+  env.calls.frameWarmHoles.length = 0;
   const result = await env.win.runCourseMappingAttempt({
     course: env.course,
     hole: 1,
@@ -420,33 +496,34 @@ async function main() {
   assert(env.events.some((event) => event.event === "saved-map-incomplete"), "partial saved map is reported clearly");
   assert(!env.events.some((event) => event.event === "saved-map-found"), "partial saved map is not treated as complete course evidence");
 
-  env = await runScenario({ cloudPullScans: true });
-  assert.strictEqual(env.result.playable, true, "cloud course map resolves play before a fresh scan");
-  assert.strictEqual(env.calls.cloudPull, 1, "cloud map is pulled once on a new-round open");
-  assert.strictEqual(env.calls.fetch, 0, "cloud map hit prevents OSM scan");
+  env = await runScenario({ courseMapsHoles: 1 });
+  assert.strictEqual(env.result.playable, true, "published object course map resolves play before a fresh scan");
+  assert.strictEqual(env.calls.courseMapsGet, 1, "published object library is checked once on a new-round open");
+  assert.strictEqual(env.calls.fetch, 0, "published object map hit prevents OSM scan");
   assert(env.events.some((event) => event.event === "course-map-cloud-lookup-started" && event.summary === "Course map loading"), "cloud map loading is reported truthfully");
-  assert(env.events.some((event) => event.event === "course-map-cloud-loaded"), "cloud map hit is logged");
-  assert(env.events.some((event) => event.event === "saved-map-found"), "cloud-hydrated map is available to the saved-map check");
+  assert(env.events.some((event) => event.event === "course-map-cloud-loaded"), "published object map hit is logged");
+  assert(env.events.some((event) => event.event === "saved-map-found"), "published object map is available to the saved-map check");
   assert(env.events.findIndex((event) => event.event === "course-map-cloud-lookup-started") < env.events.findIndex((event) => event.event === "saved-map-lookup-started"), "cloud lookup happens before saved-map readiness");
 
-  env = await runScenario({ cloudPullScans: 18, wholeCourse: true });
-  assert.strictEqual(env.result.playable, true, "whole-course cloud map resolves play");
-  assert.strictEqual(env.calls.fetch, 0, "whole-course cloud hit prevents OSM scan");
-  assert.deepStrictEqual(env.calls.frameWarmHoles, Array.from({ length: 18 }, (_, index) => index + 1), "whole-course cloud map collects every play frame on first load");
-  assert.strictEqual(env.calls.ingestMappedCourse, 1, "whole-course cloud map ingests the mapped course into the play pipeline");
+  env = await runScenario({ courseMapsHoles: 18, wholeCourse: true });
+  assert.strictEqual(env.result.playable, true, "whole-course published object map resolves play");
+  assert.strictEqual(env.calls.courseMapsGet, 1, "whole-course object library is checked once");
+  assert.strictEqual(env.calls.fetch, 0, "whole-course published object hit prevents OSM scan");
+  assert.deepStrictEqual(env.calls.frameWarmHoles, Array.from({ length: 18 }, (_, index) => index + 1), "whole-course published object map collects every play frame on first load");
+  assert.strictEqual(env.calls.ingestMappedCourse, 1, "whole-course published object map ingests the mapped course into the play pipeline");
 
-  env = await runScenario({ cloudPullEmpty: true, automapperSuccess: true });
-  assert(env.calls.cloudPull >= 1, "cloud miss is checked before fresh scan");
+  env = await runScenario({ automapperSuccess: true });
+  assert.strictEqual(env.calls.courseMapsGet, 1, "published object map miss is checked before fresh scan");
   assert(env.events.some((event) => event.event === "course-map-cloud-not-found"), "cloud miss is logged");
   assert.strictEqual(env.calls.fetch, 1, "cloud miss falls through to the existing fresh scan");
 
-  env = await runScenario({ cloudPullFails: true, automapperSuccess: true });
-  assert.strictEqual(env.calls.cloudPull, 1, "database pull failure is attempted once");
+  env = await runScenario({ courseMapsFails: true, automapperSuccess: true });
+  assert.strictEqual(env.calls.courseMapsGet, 1, "database pull failure is attempted once");
   assert(env.events.some((event) => event.event === "course-map-cloud-lookup-failed"), "database pull failure is logged as a cloud warning");
   assert.strictEqual(env.calls.fetch, 1, "database pull failure falls through to the existing fresh scan");
 
-  env = await runScenario({ cloudPullScans: true, resumeRound: true, automapperSuccess: true });
-  assert.strictEqual(env.calls.cloudPull, 0, "resume-round state skips the new-round cloud map pull");
+  env = await runScenario({ courseMapsHoles: 1, resumeRound: true, automapperSuccess: true });
+  assert.strictEqual(env.calls.courseMapsGet, 0, "resume-round state skips the new-round cloud map pull");
   assert(!env.events.some((event) => String(event.event || "").startsWith("course-map-cloud")), "resume-round path has no cloud-map lifecycle noise");
   assert.strictEqual(env.calls.fetch, 1, "resume-round skip leaves the existing scan path available");
 
@@ -534,6 +611,10 @@ async function main() {
   env = await runScenario({ fetchSequence: ["fail", "native"], nativeSuccess: true, nativeSuccessHoles: 18, nativeLowConfidenceHole: 3, wholeCourse: true });
   assert.strictEqual(env.result.playable, true, "resolved native run confirms every assigned hole even when one hole is below high-confidence threshold");
   assert.strictEqual(env.calls.manual, 0, "full resolved native run does not fall through to manual fallback");
+  assert.strictEqual(env.calls.courseMapsPost, 1, "complete generated object map syncs to the shared course-map library");
+  assert.strictEqual(env.calls.courseVisualsPost, 0, "object map sync does not call the native visual publishing endpoint");
+  assert.strictEqual(env.calls.courseMapsBodies[0].course.courseId, "controller-test", "generated object map sync uses the canonical course id");
+  assert(Object.keys(env.calls.courseMapsBodies[0].course.objects || {}).length >= 54, "generated object map sync sends tee, green, and route objects");
   const resolvedStore = JSON.parse(env.localStorage.data.gd_user_course_library_v1);
   const resolvedCourse = resolvedStore.courses["user-local-player::controller-test"];
   const resolvedHole3 = Object.values(resolvedCourse.objects || {}).filter((object) => Number(object.holeNumber) === 3);
