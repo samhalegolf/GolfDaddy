@@ -3895,3 +3895,21 @@ body.gd-green-zoom-active .rightRail .gdGreenZoomBtn{background:linear-gradient(
 /* Keep green geometry as a very subtle guide, not hidden and not visually dominant. */
 .gdSubtleGreenOutline{opacity:.22!important;stroke-width:.75!important;}
 .gdSubtleGreenSoft{opacity:.12!important;}
+
+/* --- Course Picker Pin Prompt v1 --- */
+.courseScreen.gdCoursePinMode .courseAssumed,
+.courseScreen.gdCoursePinMode .courseCard{display:none!important}
+.gdCoursePinScreen{position:absolute;inset:0;z-index:5;display:flex;align-items:flex-end;justify-content:center;padding:0 0 calc(18px + env(safe-area-inset-bottom));box-sizing:border-box;pointer-events:none}
+.gdCoursePinScreen.hidden{display:none!important}
+.gdCoursePinCrosshair{position:absolute;left:50%;top:50%;width:34px;height:34px;transform:translate(-50%,-50%);border-radius:999px;border:2px solid #1fd36d;box-shadow:0 0 0 5px rgba(31,211,109,.22),0 16px 36px rgba(0,0,0,.44);background:rgba(3,9,6,.38);pointer-events:none}
+.gdCoursePinCrosshair:before,.gdCoursePinCrosshair:after{content:"";position:absolute;background:#1fd36d;border-radius:99px}
+.gdCoursePinCrosshair:before{left:50%;top:-12px;bottom:-12px;width:2px;transform:translateX(-50%)}
+.gdCoursePinCrosshair:after{left:-12px;right:-12px;top:50%;height:2px;transform:translateY(-50%)}
+.gdCoursePinPanel{width:min(350px,calc(100vw - 32px));padding:14px;border-radius:22px;background:rgba(5,9,7,.9);border:1px solid rgba(255,255,255,.14);box-shadow:0 24px 70px rgba(0,0,0,.52);backdrop-filter:blur(18px);pointer-events:auto;color:#fff}
+.gdCoursePinKicker{color:#a8ff53;font-size:10px;font-weight:950;text-transform:uppercase;letter-spacing:.14em}
+.gdCoursePinTitle{margin-top:5px;font-size:22px;font-weight:950;line-height:1;letter-spacing:-.02em}
+.gdCoursePinText{margin-top:7px;color:rgba(255,255,255,.68);font-size:13px;font-weight:760;line-height:1.28}
+.gdCoursePinActions{display:grid;grid-template-columns:.82fr 1fr;gap:8px;margin-top:12px}
+.gdCoursePinActions button{min-height:44px;border-radius:15px;font-size:13px;font-weight:950;border:1px solid rgba(255,255,255,.11)}
+.gdCoursePinSecondary{background:rgba(255,255,255,.08);color:#fff}
+.gdCoursePinPrimary{background:#1fd36d;color:#071008}

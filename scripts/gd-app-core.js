@@ -17227,6 +17227,198 @@ function gdEnsureGpsCourseSurface(){
 function gdCoursePayloadIsManual(payload){
   return /^manual gps$/i.test(String(payload?.name||payload?.courseName||"").trim());
 }
+const GD_COURSE_PICKER_PIN_STORE_KEY="gd_course_picker_course_pins_v1";
+function gdCoursePickerReadPinStore(){
+  try{
+    const store=JSON.parse(localStorage.getItem(GD_COURSE_PICKER_PIN_STORE_KEY)||"{}");
+    return store&&typeof store==="object"?store:{};
+  }catch(e){return {}}
+}
+function gdCoursePickerWritePinStore(store){
+  try{localStorage.setItem(GD_COURSE_PICKER_PIN_STORE_KEY,JSON.stringify(store||{}));}catch(e){}
+}
+function gdCoursePickerPinKey(payload){
+  const key=gdStoredCourseSessionKey(payload);
+  return key&&key!=="manual-gps"?key:"";
+}
+function gdCoursePickerStoredPin(payload){
+  const key=gdCoursePickerPinKey(payload);
+  if(!key)return null;
+  const saved=gdCoursePickerReadPinStore()[key];
+  const point=gdCoursePickerFinitePoint(saved);
+  return point?Object.assign({},saved,point):null;
+}
+function gdCoursePickerRememberPin(payload,point){
+  const key=gdCoursePickerPinKey(payload);
+  const pin=gdCoursePickerFinitePoint(point);
+  if(!key||!pin)return false;
+  const store=gdCoursePickerReadPinStore();
+  store[key]={
+    lat:pin.lat,
+    lng:pin.lng,
+    courseName:payload?.name||payload?.courseName||"",
+    pinnedAt:new Date().toISOString(),
+    source:"course-picker-pin"
+  };
+  gdCoursePickerWritePinStore(store);
+  return true;
+}
+function gdCoursePickerApplyStoredPin(payload){
+  if(gdCoursePayloadIsManual(payload)||payload?.coursePinned||payload?.pinnedByUser)return payload;
+  const pin=gdCoursePickerStoredPin(payload);
+  if(!pin)return payload;
+  return gdNormalizeCoursePickerPayload(Object.assign({},payload,{
+    lat:pin.lat,
+    lng:pin.lng,
+    courseLat:pin.lat,
+    courseLng:pin.lng,
+    finderLat:pin.lat,
+    finderLng:pin.lng,
+    coursePinned:true,
+    pinnedByUser:true,
+    pinSource:pin.source||"stored-course-pin"
+  }));
+}
+function gdCoursePickerMapCenterPoint(){
+  try{
+    if(typeof map==="undefined"||!map||typeof map.getCenter!=="function")return null;
+    const center=gdCoursePickerFinitePoint(map.getCenter());
+    return center&&!gdCoursePickerNeutralPoint(center)?center:null;
+  }catch(e){return null}
+}
+function gdCoursePickerPinPointForPayload(payload){
+  return gdCoursePickerMapCenterPoint()||gdCoursePickerFinitePoint(payload)||gdCoursePickerDefaultPoint();
+}
+function gdCoursePickerNeedsCoursePin(payload){
+  if(gdCoursePayloadIsManual(payload))return false;
+  if(window.__gdCoursePickerBypassPinOnce){
+    window.__gdCoursePickerBypassPinOnce=false;
+    return false;
+  }
+  if(payload?.coursePinned||payload?.pinnedByUser||payload?.pinSource)return false;
+  if(gdCoursePickerStoredPin(payload))return false;
+  if(gdCoursePickerRecentGpsPoint())return false;
+  if(gdCoursePickerHasMappedPlayData(payload,1))return false;
+  return true;
+}
+function gdSetCoursePickerPinMode(on){
+  const active=!!on;
+  try{
+    const screen=document.getElementById("courseScreen");
+    if(screen)screen.classList.toggle("gdCoursePinMode",active);
+    document.body.classList.toggle("gdCoursePinPromptActive",active);
+    window.__gdCoursePickerPinPromptActive=active;
+  }catch(e){}
+}
+function gdEnsureCoursePinScreen(){
+  let panel=document.getElementById("gdCoursePinScreen");
+  if(panel)return panel;
+  panel=document.createElement("div");
+  panel.id="gdCoursePinScreen";
+  panel.className="gdCoursePinScreen hidden";
+  panel.innerHTML='<div class="gdCoursePinCrosshair" aria-hidden="true"></div><div class="gdCoursePinPanel" role="dialog" aria-live="polite" aria-labelledby="gdCoursePinTitle"><div class="gdCoursePinKicker">GPS not available</div><div class="gdCoursePinTitle" id="gdCoursePinTitle">Pin course</div><div class="gdCoursePinText" id="gdCoursePinText">Move the map over the course, then pin it.</div><div class="gdCoursePinActions"><button type="button" class="gdCoursePinSecondary" onclick="gdCancelCoursePin(event)">Back</button><button type="button" class="gdCoursePinPrimary" onclick="gdConfirmCoursePin(event)">Pin Course</button></div></div>';
+  (document.getElementById("courseScreen")||document.body).appendChild(panel);
+  return panel;
+}
+function gdCenterCoursePinMap(payload){
+  const point=gdCoursePickerFinitePoint(payload)||gdCoursePickerMapCenterPoint()||gdCoursePickerDefaultPoint();
+  if(!point)return false;
+  try{
+    if(typeof map==="undefined"||!map||typeof map.setView!=="function")return false;
+    const currentZoom=typeof map.getZoom==="function"?Number(map.getZoom()):NaN;
+    const zoom=Number.isFinite(currentZoom)&&currentZoom>=16?currentZoom:16;
+    map.setView([point.lat,point.lng],zoom,{animate:false});
+    if(typeof map.invalidateSize==="function"){
+      setTimeout(()=>map.invalidateSize(false),40);
+      setTimeout(()=>map.invalidateSize(false),240);
+    }
+    return true;
+  }catch(e){return false}
+}
+function gdHideCoursePinScreen(){
+  try{document.getElementById("gdCoursePinScreen")?.classList.add("hidden");}catch(e){}
+  gdSetCoursePickerPinMode(false);
+}
+function gdShowCoursePinScreen(payload){
+  payload=gdNormalizeCoursePickerPayload(payload);
+  try{
+    window.__gdPendingCoursePinPayload=payload;
+    window.__gdLiveCoursePickerSelection=payload;
+    window.__gdLiveCoursePickerSelectionAt=Date.now();
+    window.__gdCoursePickerFirstHoleOpenToken=null;
+    window.__gdCoursePickerChangingAt=Date.now();
+  }catch(e){}
+  try{
+    document.body.dataset.gdCourseNeedsPin="choose-course-pin";
+    document.body.dataset.gdCourseNeedsPinCourse=payload?.courseId||payload?.canonicalKey||payload?.name||"";
+    document.body.classList.remove("gdMappedStartPromptActive","gdCapturedHoleFrameCameraOn","gdHoleImageCameraOn","gdGpsPresentationReady","gdHeadToTeeFrameActive","gdLockStateFrameActive","gd-frame-hard-locked");
+  }catch(e){}
+  try{window.gdClearHoleImageRuntime?.("course-picker-pin-prompt");}catch(e){}
+  const screen=document.getElementById("courseScreen");
+  if(screen){
+    screen.classList.remove("hidden");
+    screen.style.display="flex";
+    screen.style.visibility="";
+    screen.style.opacity="";
+    screen.style.pointerEvents="auto";
+  }
+  const panel=gdEnsureCoursePinScreen();
+  const title=panel.querySelector("#gdCoursePinTitle");
+  const text=panel.querySelector("#gdCoursePinText");
+  if(title)title.textContent=`Pin ${payload.name||"course"}`;
+  if(text)text.textContent="Move the map over the course, then pin it.";
+  gdSetCoursePickerPinMode(true);
+  panel.classList.remove("hidden");
+  gdCenterCoursePinMap(payload);
+  try{window.gdApplyGpsMapVisibilityOwner?.("course-picker-pin-prompt");}catch(e){}
+  try{if(typeof toast==="function")toast("Pin the course location");}catch(e){}
+  return false;
+}
+function gdCancelCoursePin(event){
+  if(event){
+    event.preventDefault?.();
+    event.stopPropagation?.();
+    event.stopImmediatePropagation?.();
+  }
+  try{window.__gdPendingCoursePinPayload=null;}catch(e){}
+  try{document.body.dataset.gdCourseNeedsPin="pending";}catch(e){}
+  gdHideCoursePinScreen();
+  try{setTimeout(()=>document.getElementById("searchInput")?.focus(),60);}catch(e){}
+  return false;
+}
+function gdConfirmCoursePin(event){
+  if(event){
+    event.preventDefault?.();
+    event.stopPropagation?.();
+    event.stopImmediatePropagation?.();
+  }
+  const payload=gdNormalizeCoursePickerPayload(window.__gdPendingCoursePinPayload||window.__gdLiveCoursePickerSelection||gdCurrentAssumedCoursePayload());
+  const point=gdCoursePickerPinPointForPayload(payload);
+  if(!point){
+    try{if(typeof toast==="function")toast("Move the map over the course first");}catch(e){}
+    return false;
+  }
+  gdCoursePickerRememberPin(payload,point);
+  const pinned=gdNormalizeCoursePickerPayload(Object.assign({},payload,{
+    lat:point.lat,
+    lng:point.lng,
+    courseLat:point.lat,
+    courseLng:point.lng,
+    finderLat:point.lat,
+    finderLng:point.lng,
+    coursePinned:true,
+    pinnedByUser:true,
+    pinSource:"course-picker-pin"
+  }));
+  gdHideCoursePinScreen();
+  try{window.__gdPendingCoursePinPayload=null;window.__gdCoursePickerBypassPinOnce=true;}catch(e){}
+  return gdOpenCoursePickerCourse(pinned);
+}
+window.gdCoursePickerNeedsCoursePin=gdCoursePickerNeedsCoursePin;
+window.gdShowCoursePinScreen=gdShowCoursePinScreen;
+window.gdHideCoursePinScreen=gdHideCoursePinScreen;
+window.gdConfirmCoursePin=gdConfirmCoursePin;
+window.gdCancelCoursePin=gdCancelCoursePin;
 function gdCoursePickerHasMappedPlayData(payload,hole=1){
   if(gdCoursePayloadIsManual(payload))return false;
   const h=Number(hole)||1;
@@ -17543,7 +17735,8 @@ function gdKickWholeCourseAutoMapOnLoad(payload){
   return true;
 }
 function gdOpenCoursePickerCourse(course){
-  const payload=gdNormalizeCoursePickerPayload(course);
+  let payload=gdNormalizeCoursePickerPayload(course);
+  payload=gdCoursePickerApplyStoredPin(payload);
   try{
     window.__gdCoursePickerChangingAt=0;
     window.__gdCoursePickerFirstHoleOpenToken=null;
@@ -17552,6 +17745,8 @@ function gdOpenCoursePickerCourse(course){
     window.__gdLiveCoursePickerSelectionAt=Date.now();
     localStorage.removeItem("gd_active_course_v1");
   }catch(e){}
+  if(gdCoursePickerNeedsCoursePin(payload))return gdShowCoursePinScreen(payload);
+  gdHideCoursePinScreen();
   gdResetCoursePickerPresentationReadiness(payload);
   if(!gdCoursePayloadIsManual(payload)){
     try{selectedHole=1;currentPlayingHole=1;}catch(e){}
@@ -17591,6 +17786,7 @@ function gdCoursePickerHome(event){
   }
   try{window.gdCourseChangeMode="";}catch(e){}
   try{window.__gdCoursePickerReturnTarget="";}catch(e){}
+  gdHideCoursePinScreen();
   try{document.getElementById("courseScreen")?.classList.add("hidden");}catch(e){}
   if(typeof window.gdCanonicalShellHome==="function")return window.gdCanonicalShellHome();
   if(typeof showShellHome==="function")return showShellHome();
@@ -17602,6 +17798,7 @@ function gdCoursePickerBack(event){
     event.stopPropagation?.();
     event.stopImmediatePropagation?.();
   }
+  if(window.__gdCoursePickerPinPromptActive)return gdCancelCoursePin(event);
   try{document.getElementById("courseScreen")?.classList.add("hidden");}catch(e){}
   if(window.__gdCoursePickerReturnTarget==="home"){
     window.__gdCoursePickerReturnTarget="";

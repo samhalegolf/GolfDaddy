@@ -553,9 +553,15 @@
     }
     return typeof oldBack==="function"?oldBack.apply(this,arguments):home(event);
   }
-  function pickerHome(event){stop(event);writeResume("course-picker-home");return typeof oldPickerHome==="function"?oldPickerHome.call(this,event):home(event)}
+  function pickerHome(event){
+    stop(event);
+    safe(function(){if(typeof window.gdHideCoursePinScreen==="function")window.gdHideCoursePinScreen()});
+    writeResume("course-picker-home");
+    return typeof oldPickerHome==="function"?oldPickerHome.call(this,event):home(event);
+  }
   function pickerBack(event){
     stop(event);
+    if(window.__gdCoursePickerPinPromptActive&&typeof window.gdCancelCoursePin==="function")return window.gdCancelCoursePin(event);
     if(window.__gdCoursePickerReturnTarget==="home"){
       window.__gdCoursePickerReturnTarget="";
       window.gdCourseChangeMode="";
@@ -598,8 +604,9 @@
     return false;
   }
   function openCourseWrapper(){
-    setResumeActivated(true);
     var result=typeof oldOpenCourse==="function"?oldOpenCourse.apply(this,arguments):false;
+    if(window.__gdCoursePickerPinPromptActive||document.body&&document.body.dataset&&document.body.dataset.gdCourseNeedsPin==="choose-course-pin")return result;
+    setResumeActivated(true);
     setTimeout(function(){writeResume("course-open")},900);
     queuePostOpeningToolSync("course-open");
     return result;
