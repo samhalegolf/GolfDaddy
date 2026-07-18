@@ -40,4 +40,10 @@ Status unknown, confirm with Sam before touching: `gd-arcade-mode` (+ `gd-arcade
 - **Phase B — carve core by feature.** Extract feature blocks (flag/pin first as the template, then permissions, GPS watch, scorecard) into owner modules loaded immediately after core, with guarded init. Core shrinks; every step boot-tested.
 - **Phase C — one shell owner.** Merge the route/shell logic split across core and `gd-route-audit`.
 
-Done: boot smoke test added and proven against the broken commit; dead files (`gd-gps-badge.js`, `clarity-landing-build2.js`) deleted.
+Done so far:
+- Boot smoke test added and proven against the broken commit.
+- Dead files deleted (`gd-gps-badge.js`, `clarity-landing-build2.js`).
+- Legacy features fully deleted per Sam: arcade mode, tournament mode, windross seed.
+- Phase A in-place merges (order preserved, sections labelled, boot-tested): 7 GPS play layers → `gd-gps-play-runtime-owner-v1.js`; 6 caddie patches → `gd-caddie-gps-patches-v1.js`; 3 late wand layers → `gd-wand-flow-layers-v1.js`. Load order: 83 → 66 scripts.
+
+Phase A remaining: the early wand/caddie belt (slots ~20–27, interleaved so needs cross-reference checks before regrouping), the mid GPS run (`request-button-fix`, `new-shot-final-wire`, `final-tool-screen-isolation`, `play-flow-next-hole`, `mapped-entry-guard` — two dev tests read these paths), and folding merged-section code into real owners as Phase B carves.
