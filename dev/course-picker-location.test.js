@@ -77,9 +77,9 @@ assert(pickerSearch.includes("function loadDatabaseCourses(opts={})"), "course p
 assert(pickerSearch.includes('source:"database-course"'), "database courses are tagged when merged into picker results");
 assert(pickerSearch.includes("hasDatabaseMap=true"), "database course results keep a database-map flag for picker ranking");
 assert(index.includes("gd-app-base.css?v=course-picker-live-gps-pin-20260718"), "base CSS cache-bust ships the pin prompt styling");
-assert(index.includes("gd-app-core.js?v=course-picker-pin-source-20260719"), "app core cache-bust ships the DB-map pin rule");
+assert(index.includes("gd-app-core.js?v=boot-crash-fix-20260719"), "app core cache-bust ships the flagTool boot-crash fix");
 assert(index.includes("gd-gps-beta-mode-shell.js?v=course-picker-rail-owner-20260719"), "beta GPS shell cache-bust ships rail owner handoff");
-assert(index.includes("gd-brand-icon-render.js?v=course-picker-rail-owner-20260719b"), "brand rail cache-bust ships dynamic rail ownership");
+assert(index.includes("gd-brand-icon-render.js?v=boot-crash-fix-20260719"), "brand rail cache-bust ships dynamic rail ownership + flag handler rebind");
 assert(index.includes("gd-course-picker-search-v2.js?v=course-picker-owner-cleanup-20260719"), "course picker search cache-bust ships database course hydration");
 assert(index.includes("gd-course-library-pin-lock.js?v=course-picker-db-search-sync-20260718"), "course library cache-bust ships generated scan upload");
 assert(index.includes("gd-gps-request-button-fix-v1.js?v=course-picker-rail-owner-20260719"), "GPS request button cache-bust ships optional rail handling");

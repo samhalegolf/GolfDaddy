@@ -112,6 +112,9 @@
 
     spec.forEach(item => ensureRailButton(rail, item));
 
+    // Rebind gd-app-core's flag drag/pin pointer handlers onto the freshly created #flagTool.
+    try { if (typeof window.gdBindFlagPointerHandlers === 'function') window.gdBindFlagPointerHandlers(); } catch (e) {}
+
     ['gdV62ModeSwitch','gdGpsSnapZoomBtn','gdGreenZoomBtn'].forEach(id => {
       const extra = document.getElementById(id);
       if (extra) extra.dataset.gdRailButton = 'final';
