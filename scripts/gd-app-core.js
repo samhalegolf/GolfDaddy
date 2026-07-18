@@ -16981,7 +16981,11 @@ function gdCoursePickerRecentGpsPoint(maxAgeMs=10*60*1000){
     const at=Number(state.lastFixAt||0);
     const point=gdCoursePickerFinitePoint(fix);
     if(!point)return null;
-    if(Number.isFinite(at)&&at>0&&Date.now()-at>maxAgeMs)return null;
+    if(!Number.isFinite(at)||at<=0||Date.now()-at>maxAgeMs)return null;
+    if(state.permissionKnown===true&&state.permissionGranted!==true)return null;
+    if(fix&&fix.simulated===true)return null;
+    const source=String(fix?.source||"").toLowerCase();
+    if(/manual|tap|click|map|green-focus|pin/.test(source))return null;
     return point;
   }catch(e){return null}
 }
@@ -17290,15 +17294,17 @@ function gdCoursePickerPinPointForPayload(payload){
   return gdCoursePickerMapCenterPoint()||gdCoursePickerFinitePoint(payload)||gdCoursePickerDefaultPoint();
 }
 function gdCoursePickerNeedsCoursePin(payload){
-  if(gdCoursePayloadIsManual(payload))return false;
+  const mark=reason=>{try{document.body.dataset.gdCoursePinDecision=reason;}catch(e){}};
+  if(gdCoursePayloadIsManual(payload)){mark("manual-course");return false;}
   if(window.__gdCoursePickerBypassPinOnce){
     window.__gdCoursePickerBypassPinOnce=false;
+    mark("bypass-once");
     return false;
   }
-  if(payload?.coursePinned||payload?.pinnedByUser||payload?.pinSource)return false;
-  if(gdCoursePickerStoredPin(payload))return false;
-  if(gdCoursePickerRecentGpsPoint())return false;
-  if(gdCoursePickerHasMappedPlayData(payload,1))return false;
+  if(payload?.coursePinned||payload?.pinnedByUser||payload?.pinSource){mark("already-pinned");return false;}
+  if(gdCoursePickerStoredPin(payload)){mark("stored-pin");return false;}
+  if(gdCoursePickerRecentGpsPoint()){mark("recent-live-gps");return false;}
+  mark("needs-pin");
   return true;
 }
 function gdSetCoursePickerPinMode(on){

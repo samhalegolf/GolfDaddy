@@ -45,7 +45,13 @@
       const state=window.gdGpsState||{};
       const fix=state.lastFix;
       if(!fix)return null;
-      const recent=!state.lastFixAt||Date.now()-Number(state.lastFixAt)<10*60*1000;
+      const at=Number(state.lastFixAt||0);
+      const recent=Number.isFinite(at)&&at>0&&Date.now()-at<10*60*1000;
+      if(!recent)return null;
+      if(state.permissionKnown===true&&state.permissionGranted!==true)return null;
+      if(fix.simulated===true)return null;
+      const source=String(fix.source||"").toLowerCase();
+      if(/manual|tap|click|map|green-focus|pin/.test(source))return null;
       const point={lat:Number(fix.lat),lng:Number(fix.lng)};
       return recent&&finitePoint(point)?point:null;
     },null);
