@@ -45,12 +45,19 @@ exports.handler = async function (event) {
 
     return json(400, { error: "Unknown payment admin action" });
   } catch (error) {
-    await sendSystemAlert({
-      eventType: "payment_admin_failed",
-      title: "Payment admin action failed",
-      detail: error && error.message ? error.message : "Payment admin failed",
-      context: { status: error.status || null, details: error.body || String(error) }
-    });
+    // Alert only on genuine server faults (5xx or an unexpected throw with no
+    // status). Client/auth failures (401/403 stale token, 400 bad input) are
+    // expected and must not email an alert per request - a reloading admin
+    // screen otherwise floods the inbox.
+    const status = error && error.status;
+    if (!status || status >= 500) {
+      await sendSystemAlert({
+        eventType: "payment_admin_failed",
+        title: "Payment admin action failed",
+        detail: error && error.message ? error.message : "Payment admin failed",
+        context: { status: status || null, details: error.body || String(error) }
+      }).catch(function () {});
+    }
     return json(error.status || 500, { error: error && error.message ? error.message : "Payment admin failed", details: error.body || null });
   }
 };
