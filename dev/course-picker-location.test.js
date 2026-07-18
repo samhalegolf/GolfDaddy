@@ -83,6 +83,6 @@ assert(index.includes("gd-brand-icon-render.js?v=boot-crash-fix-20260719"), "bra
 assert(index.includes("gd-course-picker-search-v2.js?v=course-picker-owner-cleanup-20260719"), "course picker search cache-bust ships database course hydration");
 assert(index.includes("gd-course-library-pin-lock.js?v=course-picker-db-search-sync-20260718"), "course library cache-bust ships generated scan upload");
 assert(index.includes("gd-gps-request-button-fix-v1.js?v=course-picker-rail-owner-20260719"), "GPS request button cache-bust ships optional rail handling");
-assert(index.includes("gd-gps-play-runtime-owner-v1.js?v=course-picker-rail-owner-20260719"), "GPS runtime cache-bust ships the pin prompt wrapper guard");
+assert(index.includes("gd-gps-play-runtime-owner-v1.js?v=gps-owner-merge-20260719"), "GPS runtime cache-bust ships the pin prompt wrapper guard");
 
 console.log("course-picker-location tests passed");

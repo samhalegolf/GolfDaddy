@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(echo \"=== list other repos ===\" && ls /Users/samhalegolf/Documents/GitHub)",
+      "mcp__ae6cf1a3-8738-403a-9901-581af33bde26__list_projects",
+      "mcp__ae6cf1a3-8738-403a-9901-581af33bde26__list_tables",
+      "Bash(python3 -c ' *)",
+      "mcp__ae6cf1a3-8738-403a-9901-581af33bde26__execute_sql",
+      "mcp__ae6cf1a3-8738-403a-9901-581af33bde26__apply_migration",
+      "Bash(mkdir -p /Users/samhalegolf/Documents/GitHub/Claritygolf-Booking-/source/netlify/database/migrations/20260715000100_add_calendar_item_person_id)",
+      "Bash(npm run *)",
+      "Bash(git checkout *)",
+      "Bash(python3 -)"
+    ]
+  }
+}

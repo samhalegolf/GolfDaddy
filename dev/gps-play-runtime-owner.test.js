@@ -9,7 +9,7 @@ const appCore = fs.readFileSync(path.join(root, "scripts", "gd-app-core.js"), "u
 const betaModeShell = fs.readFileSync(path.join(root, "scripts", "inline", "gd-gps-beta-mode-shell.js"), "utf8");
 const playFlow = fs.readFileSync(path.join(root, "scripts", "inline", "gd-play-flow-next-hole-v1.js"), "utf8");
 const capturedCamera = fs.readFileSync(path.join(root, "scripts", "inline", "gd-captured-hole-frame-camera-v19.js"), "utf8");
-const stateStabilizer = fs.readFileSync(path.join(root, "scripts", "inline", "gd-gps-state-stabilizer-v1.js"), "utf8");
+const stateStabilizer = fs.readFileSync(path.join(root, "scripts", "inline", "gd-gps-play-runtime-owner-v1.js"), "utf8");
 const stableControlsCss = fs.readFileSync(path.join(root, "styles", "inline", "gd-gps-stable-controls-v1.css"), "utf8");
 
 function readAsset(assetPath) {
