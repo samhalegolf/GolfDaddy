@@ -3,7 +3,7 @@
 const {
   hasSupabase,
   json,
-  resolveAccount,
+  resolveAccountByIdentity,
   text
 } = require("./payment-utils");
 const referrals = require("./referral-service");
@@ -35,7 +35,11 @@ exports.handler = async function (event) {
       return json(200, result);
     }
 
-    const account = await resolveAccount(payload, { event, requireAuth: true });
+    // Identity from account-id/email (headers or payload), matching the rest of
+    // Caddie. Deliberately NOT JWT-gated: the referral dashboard is a read of the
+    // signed-in user's own referral state, and requiring a live Supabase JWT here
+    // 401'd every call once the access token expired.
+    const account = await resolveAccountByIdentity(payload, event);
 
     if (action === "dashboard") {
       const result = await referrals.getReferralDashboard(account);

@@ -365,6 +365,41 @@ async function resolveAccount(payload, options) {
   return account;
 }
 
+// Resolve an account from client-supplied identity (payload accountId/email or
+// the X-Clarity-Account-* headers) WITHOUT Supabase-Auth JWT verification. This
+// is the same trust model the rest of Caddie already uses (payment status/admin
+// key off account-id/email) and matches resolveAccount's own no-token fallback.
+// Used by endpoints that must NOT hard-require a live JWT - e.g. the referral
+// dashboard, where a stale/unverifiable token would otherwise 401 even though
+// the user is a known account.
+async function resolveAccountByIdentity(payload, event) {
+  const headers = (event && event.headers) || {};
+  const headerId = text(headers["x-clarity-account-id"] || headers["X-Clarity-Account-Id"], 120);
+  const headerEmail = email(headers["x-clarity-account-email"] || headers["X-Clarity-Account-Email"]);
+  const accountId = text(payload && (payload.accountId || payload.userId || payload.account_id || payload.user_id), 120) || headerId;
+  const accountEmail = email(payload && (payload.email || payload.accountEmail || payload.account_email)) || headerEmail;
+  if (!accountId && !accountEmail) {
+    const error = new Error("Sign in before continuing");
+    error.status = 401;
+    throw error;
+  }
+  let account = null;
+  if (accountId) {
+    const rows = await supabaseFetch("app_accounts?select=*&account_id=eq." + encodeFilter(accountId) + "&limit=1", { method: "GET" });
+    account = Array.isArray(rows) ? rows[0] : null;
+  }
+  if (!account && accountEmail) {
+    const rows = await supabaseFetch("app_accounts?select=*&email=eq." + encodeFilter(accountEmail) + "&limit=1", { method: "GET" });
+    account = Array.isArray(rows) ? rows[0] : null;
+  }
+  if (!account || !account.account_id) {
+    const error = new Error("Sign in before continuing");
+    error.status = 401;
+    throw error;
+  }
+  return account;
+}
+
 function accountCustomerId(account) {
   return text(account && (account.stripe_customer_id || account.metadata && account.metadata.stripe_customer_id), 200);
 }
@@ -553,6 +588,7 @@ module.exports = {
   productPriceId,
   readPaidAccess,
   resolveAccount,
+  resolveAccountByIdentity,
   rowProductKey,
   stripeFetch,
   stripeSubscriptionBlocksNewCheckout,
