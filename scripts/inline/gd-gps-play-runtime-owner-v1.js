@@ -44,16 +44,16 @@
 	    return safe(function(){
 	      var tool=String(document.body.dataset&&document.body.dataset.gdToolScreen||"");
 	      var why=String(reason||"");
-		      return tool==="mapping"||
-		        document.body.classList.contains("gdFullMappingMode")||
-		        document.body.classList.contains("gdExplicitRemapMode")||
-		        document.body.classList.contains("gdMappingRepairActive")||
-		        document.body.classList.contains("gdGpsInteractiveGreenFallbackActive")||
-		        !!window.gdFullMappingMode||
-		        !!window.__gdMapperObjectCaptureActive||
-		        /(^|[-_ ])(mapping|remap|mapper-tool|manual-map|capture|green-fallback|interactive-green|select-green)([-_ ]|$)/i.test(why);
-		    },false);
-		  }
+	      return tool==="mapping"||
+	        document.body.classList.contains("gdFullMappingMode")||
+	        document.body.classList.contains("gdExplicitRemapMode")||
+	        document.body.classList.contains("gdMappingRepairActive")||
+	        document.body.classList.contains("gdGpsInteractiveGreenFallbackActive")||
+	        !!window.gdFullMappingMode||
+	        !!window.__gdMapperObjectCaptureActive||
+	        /(^|[-_ ])(mapping|remap|mapper-tool|manual-map|capture|green-fallback|interactive-green|select-green)([-_ ]|$)/i.test(why);
+	    },false);
+	  }
 	  function gpsIdentity(value){return String(value||"").toLowerCase().replace(/[^a-z0-9]+/g,"")}
 	  function activeCourseIdentity(){
 	    return safe(function(){
@@ -65,7 +65,7 @@
 	    return String(manifest&&(manifest.key||manifest.storageKey||manifest.scanId||manifest.activeScanId)||"");
 	  }
 	  function gdGpsLiveMapExplicitlyAllowed(reason){
-	    return gdGpsExplicitMapMode(reason);
+	    return pickerOpen()||document.body.classList.contains("gdCoursePickerOpen")||gdGpsExplicitMapMode(reason);
 	  }
 	  function gdGpsPresentationReady(){
 	    return safe(function(){
@@ -120,8 +120,10 @@
 	      document.body.classList.toggle("gdGpsPresentationReady",!!ready);
 	      document.body.classList.toggle("gdGpsLiveMapAllowed",!!(gpsOpen()&&explicit));
 	      if(!gpsOpen()||pickerOpen()||homeOpen()||moduleOpen()){
-	        document.body.classList.remove("gdGpsLiveMapSuppressed","gdGpsLiveMapAllowed");
+	        document.body.classList.toggle("gdGpsLiveMapAllowed",!!(gpsOpen()&&pickerOpen()));
+	        document.body.classList.remove("gdGpsLiveMapSuppressed");
 	        document.body.dataset.gdGpsMapVisibilityOwner=String(reason||"not-gps");
+	        document.body.dataset.gdGpsMapVisibilityState=pickerOpen()?"picker-live-map":"not-gps";
 	        return true;
 	      }
 	      var mayExpose=gdGpsPlayMayExposeLiveMap(reason);
@@ -333,11 +335,13 @@
 	    safe(function(){document.body.dataset.clarityRoute="gps";document.body.dataset.gdToolScreen="picker"});
 	    setRouteLabel("GPS");
     safe(function(){if(typeof gdRefreshAssumedCourseFromLocation==="function")gdRefreshAssumedCourseFromLocation()});
-    ensureResumePanel();
-    setTimeout(ensureResumePanel,160);
-	    guardSurface();
-	    return false;
-	  }
+	    ensureResumePanel();
+	    setTimeout(ensureResumePanel,160);
+	    safe(function(){if(typeof window.gdCoursePickerCenterMapOnGps==="function")window.gdCoursePickerCenterMapOnGps()});
+	    safe(function(){if(typeof window.gdCoursePickerRequestGps==="function")window.gdCoursePickerRequestGps()});
+		    guardSurface();
+		    return false;
+		  }
 	  function scheduleBackPrelockPickerRestore(reason){
 	    window.__gdBackPrelockPickerUntil=Date.now()+2400;
 	    [60,180,420,900,1500,2200].forEach(function(delay){

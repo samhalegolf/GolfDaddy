@@ -2,27 +2,46 @@ const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
 
-const html = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
-const shellCss = fs.readFileSync(path.join(__dirname, "..", "styles", "gd-shell.css"), "utf8");
+const root = path.join(__dirname, "..");
+const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
+const shellCss = fs.readFileSync(path.join(root, "styles", "gd-shell.css"), "utf8");
+const appCore = fs.readFileSync(path.join(root, "scripts", "gd-app-core.js"), "utf8");
+const playFlow = fs.readFileSync(path.join(root, "scripts", "inline", "gd-play-flow-next-hole-v1.js"), "utf8");
+const capturedCamera = fs.readFileSync(path.join(root, "scripts", "inline", "gd-captured-hole-frame-camera-v19.js"), "utf8");
+const stateStabilizer = fs.readFileSync(path.join(root, "scripts", "inline", "gd-gps-state-stabilizer-v1.js"), "utf8");
+const stableControlsCss = fs.readFileSync(path.join(root, "styles", "inline", "gd-gps-stable-controls-v1.css"), "utf8");
+
+function readAsset(assetPath) {
+  const clean = String(assetPath || "").split("?")[0];
+  assert(clean, "asset path exists");
+  return fs.readFileSync(path.join(root, clean), "utf8");
+}
 
 function scriptById(id) {
-  const match = html.match(new RegExp(`<script id="${id}">([\\s\\S]*?)<\\/script>`));
+  const match = html.match(new RegExp(`<script\\b(?=[^>]*\\bid="${id}")[^>]*>([\\s\\S]*?)<\\/script>`));
   assert(match, `script ${id} exists`);
-  return match[1];
+  if (match[1].trim()) return match[1];
+  const src = (match[0].match(/\bsrc="([^"]+)"/) || [])[1];
+  assert(src, `script ${id} has a src`);
+  return readAsset(src);
 }
 
 function styleById(id) {
-  const match = html.match(new RegExp(`<style id="${id}">([\\s\\S]*?)<\\/style>`));
-  assert(match, `style ${id} exists`);
-  return match[1];
+  const style = html.match(new RegExp(`<style\\b(?=[^>]*\\bid="${id}")[^>]*>([\\s\\S]*?)<\\/style>`));
+  if (style) return style[1];
+  const link = html.match(new RegExp(`<link\\b(?=[^>]*\\bid="${id}")[^>]*>`));
+  assert(link, `style ${id} exists`);
+  const href = (link[0].match(/\bhref="([^"]+)"/) || [])[1];
+  assert(href, `style ${id} has an href`);
+  return readAsset(href);
 }
 
 function sliceBetween(start, end) {
-  const startIndex = html.indexOf(start);
+  const startIndex = sourceBundle.indexOf(start);
   assert(startIndex >= 0, `${start} exists`);
-  const endIndex = end ? html.indexOf(end, startIndex) : html.length;
+  const endIndex = end ? sourceBundle.indexOf(end, startIndex) : sourceBundle.length;
   assert(endIndex > startIndex, `${end || "EOF"} follows ${start}`);
-  return html.slice(startIndex, endIndex);
+  return sourceBundle.slice(startIndex, endIndex);
 }
 
 function assertContains(source, needle, message) {
@@ -43,6 +62,7 @@ function assertBefore(source, first, second, message) {
 
 const runtimeScript = scriptById("gdGpsPlayRuntimeOwnerV1");
 const runtimeCss = styleById("gdGpsPlayRuntimeOwnerV1Css");
+const sourceBundle = [html, appCore, playFlow, capturedCamera, stateStabilizer, stableControlsCss, runtimeScript, runtimeCss].join("\n");
 new Function(runtimeScript);
 
 assertNotContains(html, '<script id="gdGpsSpringCleanOwnerV1">', "old Spring Clean script id is not the live owner");
@@ -50,9 +70,9 @@ assertNotContains(html, '<style id="gdGpsSpringCleanOwnerV1Css">', "old Spring C
 assertContains(runtimeScript, 'window.__gdGpsSpringCleanOwnerV1="renamed-to-gdGpsPlayRuntimeOwnerV1"', "old guard remains as a compatibility alias");
 assertContains(runtimeScript, 'window.gdGpsPlayRuntimeOwner={id:"gdGpsPlayRuntimeOwnerV1"', "runtime owner publishes debug metadata");
 assertContains(runtimeScript, 'cameraOwner:"v19-captured-surface"', "runtime owner does not claim camera ownership");
-assertContains(html, 'data-owner="gps-play-runtime"', "captured shot overlay labels the runtime owner");
-assertNotContains(html, 'data-owner="spring-clean"', "captured shot overlay no longer reports Spring Clean");
-assertNotContains(html, 'source:"spring-clean"', "captured overlay debug source no longer reports Spring Clean");
+assertContains(sourceBundle, 'data-owner="gps-play-runtime"', "captured shot overlay labels the runtime owner");
+assertNotContains(sourceBundle, 'data-owner="spring-clean"', "captured shot overlay no longer reports Spring Clean");
+assertNotContains(sourceBundle, 'source:"spring-clean"', "captured overlay debug source no longer reports Spring Clean");
 
 const transition = sliceBetween("function gdBeginGpsHoleSwitchTransition", "function gdEndGpsHoleSwitchTransition");
 assertContains(transition, 'window.gdClearManualStartRuntime((reason||"hole-switch")+"-transition"', "hole transition clears manual-start runtime");
@@ -94,12 +114,14 @@ assertContains(html, 'styles/gd-shell.css?v=real-shell-controls-20260716', "GPS 
 assertContains(runtimeCss, "body.shell-gps #courseScreen:not(.hidden) .courseNav", "course picker does not paint duplicate Back/Home above the shell");
 assertContains(runtimeCss, "body.shell-gps #courseScreen:not(.hidden),", "course picker wrapper does not block shell controls");
 assertContains(runtimeCss, "body.shell-gps #courseScreen:not(.hidden) .courseCard", "course picker keeps cards/search interactive after wrapper pass-through");
+assertContains(runtimeCss, "body.shell-gps.gdCoursePickerOpen #map", "course picker keeps the live GPS map visible behind its buttons");
+assertContains(runtimeScript, 'document.body.dataset.gdGpsMapVisibilityState=pickerOpen()?"picker-live-map":"not-gps"', "runtime owner records the picker live-map state");
 assertContains(runtimeScript, "function liftShellTop", "GPS runtime owns lifting shell chrome out of app stacking context");
 assertContains(runtimeScript, "document.body.appendChild(top)", "GPS runtime moves shell chrome to the body layer");
 assertContains(runtimeScript, 'top.dataset.gdShellLayer="body"', "GPS runtime marks shell chrome as body-layered for diagnostics");
 assertContains(runtimeScript, "liftShellTop();\n    if(homeOpen())clearCaptured", "surface guard lifts shell before course/map surfaces can cover it");
-assertContains(html, "body.gdMappedStartPromptActive #gdV62UndoDock{\n  opacity:1!important;\n  filter:none!important;\n  pointer-events:none!important;\n}", "mapped start prompt keeps the lock/shot dock visible");
-assertContains(html, "body.gdMappedStartPromptActive #hint.gdMappedStartPill{\n  z-index:2540!important;\n  bottom:calc(148px + env(safe-area-inset-bottom))!important;", "mapped start pill sits above the lock/shot dock");
+assertContains(sourceBundle, "body.gdMappedStartPromptActive #gdV62UndoDock{\n  opacity:1!important;\n  filter:none!important;\n  pointer-events:none!important;\n}", "mapped start prompt keeps the lock/shot dock visible");
+assertContains(sourceBundle, "body.gdMappedStartPromptActive #hint.gdMappedStartPill{\n  z-index:2540!important;\n  bottom:calc(148px + env(safe-area-inset-bottom))!important;", "mapped start pill sits above the lock/shot dock");
 
 const lockAfterManualStart = sliceBetween("function lockAfterManualStart", "function manualStartPresentationSurfaceEvent");
 assertContains(lockAfterManualStart, "var lockHole=currentHole()", "manual-start delayed lock captures the originating hole");

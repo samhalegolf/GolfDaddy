@@ -18,6 +18,12 @@ body.gdGpsFramePreparing.gps-active:not(.gdGpsPresentationReady):not(.gdCaptured
 body.gdMappedStartPromptActive.shell-gps:not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #map,
 body.gdMappedStartPromptActive.gdGpsActive:not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #map,
 body.gdMappedStartPromptActive.gps-active:not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #map{visibility:hidden!important;opacity:0!important;pointer-events:none!important;}
+body.shell-gps.gdCoursePickerOpen #map,
+body.gdGpsActive.gdCoursePickerOpen #map,
+body.gps-active.gdCoursePickerOpen #map,
+body.shell-gps:has(#courseScreen:not(.hidden)) #map,
+body.gdGpsActive:has(#courseScreen:not(.hidden)) #map,
+body.gps-active:has(#courseScreen:not(.hidden)) #map{display:block!important;visibility:visible!important;opacity:1!important;pointer-events:auto!important;}
 body.gdGpsLiveMapSuppressed #app,
 body.shell-gps:is(.gdCapturedHoleFrameCameraOn,.gdHoleImageCameraOn):not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #app,
 body.gdGpsActive:is(.gdCapturedHoleFrameCameraOn,.gdHoleImageCameraOn):not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #app,
@@ -224,6 +230,8 @@ body:has(#bagPanel.open) .gdBubbleDragHitIcon{display:none!important;visibility:
 body.shell-home .leaflet-marker-icon,
 body.gdCoursePickerOpen .leaflet-marker-icon,
 body:has(#courseScreen:not(.hidden)) .leaflet-marker-icon{display:none!important;visibility:hidden!important;opacity:0!important;pointer-events:none!important;}
+body.gdCoursePickerOpen #map .leaflet-marker-icon,
+body:has(#courseScreen:not(.hidden)) #map .leaflet-marker-icon{display:block!important;visibility:visible!important;opacity:1!important;}
 	@media(max-height:680px){
 	  body.shell-gps .rightRail,
 	  body.gdGpsActive .rightRail,

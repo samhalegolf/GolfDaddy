@@ -50,6 +50,27 @@
       return recent&&finitePoint(point)?point:null;
     },null);
   }
+  function pickerVisible(){
+    const screen=byId("courseScreen");
+    if(!screen||screen.classList.contains("hidden"))return false;
+    const cs=getComputedStyle(screen);
+    return cs.display!=="none"&&cs.visibility!=="hidden";
+  }
+  function centerPickerMapOnGps(point=recentGpsPoint()){
+    if(!finitePoint(point))return false;
+    if(!pickerVisible()&&!document.body.classList.contains("gdCoursePickerOpen"))return false;
+    return safe(()=>{
+      if(typeof map==="undefined"||!map||typeof map.setView!=="function")return false;
+      const currentZoom=typeof map.getZoom==="function"?Number(map.getZoom()):NaN;
+      const zoom=Number.isFinite(currentZoom)&&currentZoom>=15?currentZoom:16;
+      map.setView([Number(point.lat),Number(point.lng)],zoom,{animate:false});
+      if(typeof map.invalidateSize==="function"){
+        setTimeout(()=>map.invalidateSize(),40);
+        setTimeout(()=>map.invalidateSize(),220);
+      }
+      return true;
+    },false);
+  }
   function rememberPickerGps(pos){
     const coords=pos&&pos.coords;
     const point={lat:Number(coords&&coords.latitude),lng:Number(coords&&coords.longitude)};
@@ -60,6 +81,7 @@
     window.gdGpsState.lastError=null;
     window.gdGpsState.lastFix={lat:point.lat,lng:point.lng,accuracy:Number.isFinite(Number(coords.accuracy))?Number(coords.accuracy):null,source:"course-picker",simulated:false};
     window.gdGpsState.lastFixAt=Date.now();
+    centerPickerMapOnGps(point);
     return point;
   }
   function requestPickerGps(){
@@ -75,6 +97,9 @@
     },{enableHighAccuracy:true,maximumAge:60000,timeout:9000});
     return true;
   }
+  window.gdCoursePickerRequestGps=requestPickerGps;
+  window.gdCoursePickerRememberGps=rememberPickerGps;
+  window.gdCoursePickerCenterMapOnGps=centerPickerMapOnGps;
   function currentPoint(){
     return safe(()=>{
       if(typeof start!=="undefined"&&start){
@@ -216,7 +241,8 @@
     finally{clearTimeout(timer)}
   }
   function rank(courses,query){
-    const center=currentPoint();
+    const gps=recentGpsPoint();
+    const center=gps||currentPoint();
     const q=cleanName(query);
     return mergeDedupe(courses,center).map(course=>{
       const nameClean=cleanName(course.name);
@@ -229,7 +255,13 @@
       if(course.source==="known-course"||course.source==="built-in-course")score-=7;
       course.__rank=score;
       return course;
-    }).sort((a,b)=>a.__rank-b.__rank||String(a.name).localeCompare(String(b.name)));
+    }).sort((a,b)=>{
+      if(gps&&Number.isFinite(a.distanceM)&&Number.isFinite(b.distanceM)){
+        const distanceDelta=a.distanceM-b.distanceM;
+        if(Math.abs(distanceDelta)>25)return distanceDelta;
+      }
+      return a.__rank-b.__rank||String(a.name).localeCompare(String(b.name));
+    });
   }
   function metaText(course){
     const parts=[];
@@ -353,6 +385,7 @@
     safe(()=>{if(typeof gdClearMappedStartPromptChrome==="function")gdClearMappedStartPromptChrome();});
     const input=byId("searchInput");
     if(input)input.value="";
+    centerPickerMapOnGps();
     requestPickerGps();
     window.renderCourses(readRecentCourses());
     const screen=byId("courseScreen");

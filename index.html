@@ -28,7 +28,7 @@
 <script src="scripts/gd-launch-monitor-alias-registry.js?v=practice-alias-registry-20260612"></script>
 <script src="scripts/clarity-table-ocr.js?v=table-ocr-deepscan-20260712a"></script>
 <script src="scripts/clarity-table-ocr-pixels.js?v=table-ocr-deepscan-20260712a"></script>
-<link rel="stylesheet" href="styles/inline/gd-app-base.css?v=split04">
+<link rel="stylesheet" href="styles/inline/gd-app-base.css?v=picker-live-map-20260718">
 
 <link rel="stylesheet" id="gdHomeButtonsHandoffCssV1" href="styles/inline/gd-home-buttons-handoff-css-v1.css?v=split04">
 </head>
@@ -40,7 +40,7 @@
 <div id="gdV62Home">
 <div class="gdHomeHeader"><button class="gdHomeBrand" onclick="try{showShellHome()}catch(e){}" aria-label="Clarity Golf home"><span class="gdHomeBrandInner"><span class="gdClarityMark" aria-hidden="true"><img src="assets/brand/cg-logo-white-g.png?v=clarity-20260531" alt=""></span><span class="gdHomeBrandText">CLARITY GOLF</span></span></button><div class="gdHomeTagline"><span class="gdTaglineGreen">Turn</span> <span class="gdTaglineOrange">Practice</span> <span class="gdTaglineGreen">Patterns In</span><span class="gdTaglineOrange">to</span> <span class="gdTaglineGreen">on Course</span> <span class="gdTaglineOrange">Results</span></div><button class="gdHomeAdminSettings" onclick="try{if(window.gdOpenAdminSettings)return window.gdOpenAdminSettings({fromHome:true});openDeveloperPanel({fromHome:true});}catch(e){}" aria-label="Admin Settings">Admin</button><button class="gdHomePlayerSettings" onclick="gdOpenPlayerSettingsPanel({fromHome:true})" aria-label="Settings">Settings</button></div>
 <section class="gdHomeTiles" aria-label="Clarity Golf home navigation">
-<button class="gdHomeTile gdPlayTile" onclick="try{document.body.classList.remove('shell-home');document.body.classList.add('shell-gps','gps-active','gdCoursePickerOpen');var h=document.getElementById('shellHome');if(h)h.classList.add('hidden');var c=document.getElementById('courseScreen');if(c){c.classList.remove('hidden');c.style.display='flex';c.style.visibility='';c.style.opacity='';c.style.pointerEvents='auto'};if(window.gdEnsureResumeRoundPicker)gdEnsureResumeRoundPicker();return false}catch(e){return false}" aria-label="Clarity Caddy Play"><span class="gdHomeTileLabel"><span class="gdHomeTileKicker">CLARITY CADDY</span><span class="gdHomeTileAction">PLAY</span></span><img class="gdHomeTileArt" src="assets/home/play.png?v=clarity-20260531" alt=""></button>
+<button class="gdHomeTile gdPlayTile" onclick="try{document.body.classList.remove('shell-home');document.body.classList.add('shell-gps','gps-active','gdCoursePickerOpen');var h=document.getElementById('shellHome');if(h)h.classList.add('hidden');var c=document.getElementById('courseScreen');if(c){c.classList.remove('hidden');c.style.display='flex';c.style.visibility='';c.style.opacity='';c.style.pointerEvents='auto'};if(window.gdCoursePickerCenterMapOnGps)window.gdCoursePickerCenterMapOnGps();if(window.gdCoursePickerRequestGps)window.gdCoursePickerRequestGps();if(window.gdEnsureResumeRoundPicker)gdEnsureResumeRoundPicker();return false}catch(e){return false}" aria-label="Clarity Caddy Play"><span class="gdHomeTileLabel"><span class="gdHomeTileKicker">CLARITY CADDY</span><span class="gdHomeTileAction">PLAY</span></span><img class="gdHomeTileArt" src="assets/home/play.png?v=clarity-20260531" alt=""></button>
 <button class="gdHomeTile gdBubbleTile" onclick="try{gdOpenDataHub()}catch(e){}" aria-label="Clarity Shot System Enter"><span class="gdHomeTileLabel"><span class="gdHomeTileKicker">CLARITY SHOT SYSTEM</span><span class="gdHomeTileAction">ENTER</span></span><img class="gdHomeTileArt" src="assets/home/shot-system.svg?v=clarity-shot-system-line-20260601" alt=""></button>
 <button class="gdHomeTile gdBagTile" onclick="try{openBag()}catch(e){}" aria-label="Bag"><span class="gdHomeTileLabel">BAG</span><img class="gdHomeTileArt" src="assets/home/bag.png" alt=""></button>
 <button class="gdHomeTile gdProfileTile" onclick="try{openProfilePanel()}catch(e){}" aria-label="Player Profile"><span class="gdHomeTileLabel">PLAYER<br>PROFILE</span><img class="gdHomeTileArt" src="assets/home/profile.png" alt=""></button>
@@ -436,7 +436,7 @@
 
 <!-- Removed gdFinalStructureGuardCssV3: final CSS hiders masked retired-panel bleed-through. -->
 <!-- Removed gdFinalStructureGuardV3: blank-route recovery masked route ownership problems. -->
-<script id="gdCoursePickerSearchV2" src="scripts/inline/gd-course-picker-search-v2.js?v=split03"></script>
+<script id="gdCoursePickerSearchV2" src="scripts/inline/gd-course-picker-search-v2.js?v=picker-live-map-20260718"></script>
 <link rel="stylesheet" id="gdGpsRequestButtonFixV1" href="styles/inline/gd-gps-request-button-fix-v1.css?v=split04">
 <script id="gdGpsRequestButtonFixV1" src="scripts/inline/gd-gps-request-button-fix-v1.js?v=split03"></script>
 <link rel="stylesheet" id="gdStableGpsModeSwitchV1" href="styles/inline/gd-stable-gps-mode-switch-v1.css?v=split04">
@@ -470,9 +470,9 @@
 <link rel="stylesheet" id="gdGpsStateStabilizerV1" href="styles/inline/gd-gps-state-stabilizer-v1.css?v=split04">
 <script id="gdGpsStateStabilizerV1" src="scripts/inline/gd-gps-state-stabilizer-v1.js?v=split03"></script>
 
-<link rel="stylesheet" id="gdGpsPlayRuntimeOwnerV1Css" href="styles/inline/gd-gps-play-runtime-owner-v1-css.css?v=split04">
+<link rel="stylesheet" id="gdGpsPlayRuntimeOwnerV1Css" href="styles/inline/gd-gps-play-runtime-owner-v1-css.css?v=picker-live-map-20260718">
 <link rel="stylesheet" id="gdHubAccordionWrapPolishV1" href="styles/inline/gd-hub-accordion-wrap-polish-v1.css?v=split04">
-<script id="gdGpsPlayRuntimeOwnerV1" src="scripts/inline/gd-gps-play-runtime-owner-v1.js?v=split03"></script>
+<script id="gdGpsPlayRuntimeOwnerV1" src="scripts/inline/gd-gps-play-runtime-owner-v1.js?v=picker-live-map-20260718"></script>
 <link rel="stylesheet" id="gdGpsPlayCameraTiltV1Css" href="styles/inline/gd-gps-play-camera-tilt-v1.css?v=tilt02">
 <script id="gdGpsPlayCameraTiltV1" src="scripts/inline/gd-gps-play-camera-tilt-v1.js?v=tilt02"></script>
 
