@@ -46,4 +46,6 @@ Done so far:
 - Legacy features fully deleted per Sam: arcade mode, tournament mode, windross seed.
 - Phase A in-place merges (order preserved, sections labelled, boot-tested): 7 GPS play layers → `gd-gps-play-runtime-owner-v1.js`; 6 caddie patches → `gd-caddie-gps-patches-v1.js`; 3 late wand layers → `gd-wand-flow-layers-v1.js`. Load order: 83 → 66 scripts.
 
-Phase A remaining: the early wand/caddie belt (slots ~20–27, interleaved so needs cross-reference checks before regrouping), the mid GPS run (`request-button-fix`, `new-shot-final-wire`, `final-tool-screen-isolation`, `play-flow-next-hole`, `mapped-entry-guard` — two dev tests read these paths), and folding merged-section code into real owners as Phase B carves.
+- Phase A continued: 5 mid GPS flow layers → `gd-gps-play-flow-layers-v1.js`; wand/caddie belt regrouped (5 wand layers → `gd-wand-belt-layers-v1.js`, 2 caddie strays folded into `gd-caddie-gps-patches-v1.js`, cross-references verified before the move). Load order now 56 scripts.
+
+Phase A is essentially done. Next is Phase B: carve gd-app-core by feature (flag/pin block first as the template), fold merged-section code into real owners as blocks move, and remove the inert tournament references as their blocks are carved. Remaining small merge candidates if desired: `gd-gps-location-set-lock-v1` + `gd-inline-gps-viewport-lock-v1` (contiguous pair), auth cluster (`gd-auth-gate-v1`, `gd-inline-profile-route-hardening-v1` → auth shell owner, non-contiguous so needs checks), `gd-inline-gps-tool-toggle-polish-v1-samebutton` → GPS owner.
