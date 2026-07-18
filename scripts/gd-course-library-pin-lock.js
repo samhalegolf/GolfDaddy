@@ -37,8 +37,7 @@
   const OSM_AUTO_GREEN_MAX_SPAN_M=145;
   const BUILT_IN_COURSE_CANDIDATES=[
     {courseName:'Akarana Golf Club',courseId:'akarana-golf-club',courseLat:-36.9174953,courseLng:174.7400425,source:'built-in-course'},
-    {courseName:'Maungakiekie Golf Club',courseId:'maungakiekie-golf-club',courseLat:-36.9229754,courseLng:174.7254871,source:'built-in-course',aliases:['maungakeikei','maunga']},
-    {courseName:'Windross Farm Golf Course',courseId:'windross-farm-golf-course',source:'built-in-course',aliases:['windross','windross farm']}
+    {courseName:'Maungakiekie Golf Club',courseId:'maungakiekie-golf-club',courseLat:-36.9229754,courseLng:174.7254871,source:'built-in-course',aliases:['maungakeikei','maunga']}
   ];
   function stopMappedMapMotion(){
     try{if(typeof map!=='undefined'&&map&&typeof map.stop==='function')map.stop();}catch(e){}
@@ -543,10 +542,6 @@
   function mappedModeCourseKey(course=activeCourseForMode()){
     return `${MAPPED_PLAY_MODE_PREFIX}${mappedModeCourseIdentity(course)}`;
   }
-  function isWindrossCourse(course=activeCourseForMode()){
-    const raw=[course?.name,course?.courseName,course?.courseId,course?.id].filter(Boolean).join(' ');
-    return /windross/i.test(raw);
-  }
   function courseHasMappedGreenFairway(course=null,hole=null){
     try{
       const h=validHoleNumber(hole);
@@ -575,9 +570,6 @@
       const courseValue=localStorage.getItem(mappedModeCourseKey(course));
       if(courseValue==='mapped')return 'mapped';
       if(courseValue==='unmapped')return 'unmapped';
-      const legacy=localStorage.getItem(MAPPED_PLAY_MODE_KEY);
-      if(isWindrossCourse(course)&&legacy==='mapped')return 'mapped';
-      if(isWindrossCourse(course)&&legacy==='unmapped')return 'unmapped';
     }catch(e){}
     return defaultMappedPlayMode(course);
   }

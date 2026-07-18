@@ -26,10 +26,6 @@
     course=course||activeCourse();
     return slug(course.courseId||course.id||course.name||course.courseName||"manual-gps");
   }
-  function isWindross(course){
-    course=course||activeCourse();
-    return /windross/i.test([course.name,course.courseName,course.courseId,course.id].filter(Boolean).join(" "));
-  }
   function defaultMappedMode(course){
     course=course||activeCourse();
     var name=String(course.name||course.courseName||"");
@@ -50,8 +46,6 @@
       var value=localStorage.getItem(COURSE_MODE_PREFIX+courseIdentity(course));
       if(value==="mapped")return true;
       if(value==="unmapped")return false;
-      var legacy=localStorage.getItem(MODE_KEY);
-      if(isWindross(course)&&(legacy==="mapped"||legacy==="unmapped"))return legacy==="mapped";
       return defaultMappedMode(course)==="mapped";
     },false);
   }
