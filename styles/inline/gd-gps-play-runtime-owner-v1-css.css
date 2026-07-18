@@ -2,6 +2,15 @@
 body.shell-gps #gdClosestHolePrompt,
 body.gdGpsActive #gdClosestHolePrompt,
 body.gps-active #gdClosestHolePrompt{display:none!important;pointer-events:none!important;}
+body.shell-gps .playerBadge,
+body.shell-gps #playerBadge,
+body.shell-gps .gpsPlayerBadge,
+body.gdGpsActive .playerBadge,
+body.gdGpsActive #playerBadge,
+body.gdGpsActive .gpsPlayerBadge,
+body.gps-active .playerBadge,
+body.gps-active #playerBadge,
+body.gps-active .gpsPlayerBadge{display:none!important;visibility:hidden!important;opacity:0!important;pointer-events:none!important;}
 body.shell-gps:not(.gdGpsLiveMapAllowed) #map,
 body.gdGpsActive:not(.gdGpsLiveMapAllowed) #map,
 body.gps-active:not(.gdGpsLiveMapAllowed) #map{display:block!important;visibility:hidden!important;opacity:0!important;pointer-events:none!important;}

@@ -1404,9 +1404,15 @@ body.gdGpsActive .gdGpsModuleDock{
 }
 
 /* Hide old GPS player badge during GPS. v62 owns the stable badge. */
+body.shell-gps .playerBadge,
+body.shell-gps #playerBadge,
+body.shell-gps .gpsPlayerBadge,
 body.gdGpsActive .playerBadge,
 body.gdGpsActive #playerBadge,
-body.gdGpsActive .gpsPlayerBadge{
+body.gdGpsActive .gpsPlayerBadge,
+body.gps-active .playerBadge,
+body.gps-active #playerBadge,
+body.gps-active .gpsPlayerBadge{
   display:none!important;
   visibility:hidden!important;
   opacity:0!important;

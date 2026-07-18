@@ -28,7 +28,7 @@
 <script src="scripts/gd-launch-monitor-alias-registry.js?v=practice-alias-registry-20260612"></script>
 <script src="scripts/clarity-table-ocr.js?v=table-ocr-deepscan-20260712a"></script>
 <script src="scripts/clarity-table-ocr-pixels.js?v=table-ocr-deepscan-20260712a"></script>
-<link rel="stylesheet" href="styles/inline/gd-app-base.css?v=picker-live-map-20260718">
+<link rel="stylesheet" href="styles/inline/gd-app-base.css?v=gps-legacy-player-badge-20260718">
 
 <link rel="stylesheet" id="gdHomeButtonsHandoffCssV1" href="styles/inline/gd-home-buttons-handoff-css-v1.css?v=split04">
 </head>
@@ -196,7 +196,7 @@
 <div class="gpsModeSwitch" id="gpsModeSwitch"><button class="live" id="gpsLiveModeBtn" onclick="setGpsPlayMode(\'live\')">Live</button><button class="twoTap active" id="gpsTwoTapBtn" onclick="setGpsPlayMode(\'twoTap\')">Manual</button></div>
 <div class="playerBadge">
 <div class="badgeMain">
-<div><div class="badgeName" id="playerName">SAM</div><button class="badgeCourse" id="courseLine" type="button" onclick="gdOpenChangeCourse(event)"></button></div>
+<div><div class="badgeName" id="playerName"></div><button class="badgeCourse" id="courseLine" type="button" onclick="gdOpenChangeCourse(event)"></button></div>
 <div class="scoreBlock"><button class="scoreBtn" type="button" aria-label="Decrease score" onclick="event.stopPropagation();return adjustScore(-1)">-</button><div class="scoreValue" id="scoreValue">E</div><button class="scoreBtn" type="button" aria-label="Increase score" onclick="event.stopPropagation();return adjustScore(1)">+</button></div>
 </div>
 <div class="badgeMeta"><span id="stateLine">GPS not started</span><span class="gpsLive" id="gpsLive"><i></i>GPS</span><span class="holeMeta" id="holeLine" style="display:none">Hole 1 · Par 4</span></div>
@@ -470,7 +470,7 @@
 <link rel="stylesheet" id="gdGpsStateStabilizerV1" href="styles/inline/gd-gps-state-stabilizer-v1.css?v=split04">
 <script id="gdGpsStateStabilizerV1" src="scripts/inline/gd-gps-state-stabilizer-v1.js?v=split03"></script>
 
-<link rel="stylesheet" id="gdGpsPlayRuntimeOwnerV1Css" href="styles/inline/gd-gps-play-runtime-owner-v1-css.css?v=picker-live-map-20260718">
+<link rel="stylesheet" id="gdGpsPlayRuntimeOwnerV1Css" href="styles/inline/gd-gps-play-runtime-owner-v1-css.css?v=gps-legacy-player-badge-20260718">
 <link rel="stylesheet" id="gdHubAccordionWrapPolishV1" href="styles/inline/gd-hub-accordion-wrap-polish-v1.css?v=split04">
 <script id="gdGpsPlayRuntimeOwnerV1" src="scripts/inline/gd-gps-play-runtime-owner-v1.js?v=picker-live-map-20260718"></script>
 <link rel="stylesheet" id="gdGpsPlayCameraTiltV1Css" href="styles/inline/gd-gps-play-camera-tilt-v1.css?v=tilt02">
