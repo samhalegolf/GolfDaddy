@@ -1,14 +1,18 @@
 /* Extracted verbatim from an inline <script> block in index.html (split-03). */
 (function(){
   "use strict";
-  const RECENTS_KEY="gd_recent_course_picks_v1";
-  const NEARBY_M=5200;
-  const REMOTE_LIMIT=12;
+	  const RECENTS_KEY="gd_recent_course_picks_v1";
+	  const COURSE_MAPS_API="/api/course-maps";
+	  const NEARBY_M=5200;
+	  const REMOTE_LIMIT=12;
   const KNOWN=[
     {name:"Akarana Golf Club",courseId:"akarana-golf-club",lat:-36.9174953,lng:174.7400425,source:"known-course",aliases:["akarana golf course","akarana gc"]},
     {name:"Maungakiekie Golf Club",courseId:"maungakiekie-golf-club",lat:-36.9229754,lng:174.7254871,source:"known-course",aliases:["maungakeikei golf club","maungakiekie golf course","maunga gc"]}
-  ];
-  let searchRun=0;
+	  ];
+	  let searchRun=0;
+	  let databaseCourseCache=[];
+	  let databaseCourseLoadAt=0;
+	  let databaseCoursePromise=null;
 
   function byId(id){return document.getElementById(id)}
   function safe(fn,fallback){try{return fn()}catch(e){return fallback}}
@@ -121,7 +125,7 @@
       }
     },null)||null;
   }
-  function basePayload(raw){
+	  function basePayload(raw){
     const src=raw&&typeof raw==="object"?raw:{};
     const name=String(src.name||src.courseName||"Course").trim()||"Course";
     const rawLat=src.lat??src.courseLat??src.latitude;
@@ -185,14 +189,52 @@
     const next=[row].concat(readRecentCourses().filter(item=>String(item.canonicalKey||keyForName(item.name)).toLowerCase()!==key)).slice(0,8);
     safe(()=>localStorage.setItem(RECENTS_KEY,JSON.stringify(next)));
   }
-  function savedCourses(){
-    return readRecentCourses();
-  }
-  function allLocalCourses(){
-    const api=window.GolfDaddyCourseLibrary;
-    const libraryKnown=typeof api?.knownCourseCandidates==="function"?safe(()=>api.knownCourseCandidates(),[]): [];
-    return KNOWN.concat(libraryKnown||[]).map(basePayload);
-  }
+	  function savedCourses(){
+	    return readRecentCourses();
+	  }
+	  function databaseCoursePayload(raw){
+	    const course=basePayload({
+	      name:raw?.courseName||raw?.name,
+	      courseName:raw?.courseName||raw?.name,
+	      courseId:raw?.courseId||raw?.id,
+	      canonicalKey:raw?.courseId||raw?.canonicalKey,
+	      lat:raw?.courseLat??raw?.lat??raw?.finderLat,
+	      lng:raw?.courseLng??raw?.lng??raw?.finderLng,
+	      courseLat:raw?.courseLat??raw?.lat,
+	      courseLng:raw?.courseLng??raw?.lng,
+	      finderLat:raw?.finderLat??raw?.courseFinderLat,
+	      finderLng:raw?.finderLng??raw?.courseFinderLng,
+	      source:"database-course"
+	    });
+	    course.hasDatabaseMap=true;
+	    course.databaseCourseId=raw?.id||course.courseId;
+	    return course.name&&!/^manual gps$/i.test(course.name)?course:null;
+	  }
+	  function databaseCoursesFromMaps(maps){
+	    return Object.values(maps?.courses||{}).map(databaseCoursePayload).filter(Boolean);
+	  }
+	  function loadDatabaseCourses(opts={}){
+	    if(typeof fetch!=="function")return Promise.resolve(databaseCourseCache.slice());
+	    const now=Date.now();
+	    if(!opts.force&&databaseCourseCache.length&&now-databaseCourseLoadAt<120000)return Promise.resolve(databaseCourseCache.slice());
+	    if(databaseCoursePromise)return databaseCoursePromise;
+	    databaseCoursePromise=fetch(COURSE_MAPS_API,{headers:{Accept:"application/json"},cache:"no-store"})
+	      .then(res=>res.ok?res.json():null)
+	      .then(data=>{
+	        databaseCourseCache=databaseCoursesFromMaps(data);
+	        databaseCourseLoadAt=Date.now();
+	        window.__gdCoursePickerDatabaseCourses=databaseCourseCache.slice();
+	        return databaseCourseCache.slice();
+	      })
+	      .catch(()=>databaseCourseCache.slice())
+	      .finally(()=>{databaseCoursePromise=null;});
+	    return databaseCoursePromise;
+	  }
+	  function allLocalCourses(){
+	    const api=window.GolfDaddyCourseLibrary;
+	    const libraryKnown=typeof api?.knownCourseCandidates==="function"?safe(()=>api.knownCourseCandidates(),[]): [];
+	    return KNOWN.concat(libraryKnown||[],databaseCourseCache||[]).map(basePayload);
+	  }
   function mergeDedupe(courses,center=currentPoint()){
     const mapByKey=new Map();
     courses.map(basePayload).forEach(course=>{
@@ -202,12 +244,18 @@
       course.distanceM=Number.isFinite(Number(course.distanceM))?Number(course.distanceM):distance(center,course);
       if(existing){
         existing.aliases=[...(existing.aliases||[]),...(course.aliases||[]),course.name].filter(Boolean);
-        existing.hasSavedData=!!(existing.hasSavedData||course.hasSavedData);
-        existing.hasFinderCoordinate=!!(existing.hasFinderCoordinate||course.hasFinderCoordinate);
-        if(course.hasSavedData){
-          existing.courseId=course.courseId||existing.courseId;
-          existing.savedCourseId=course.courseId||existing.savedCourseId;
-        }
+	        existing.hasSavedData=!!(existing.hasSavedData||course.hasSavedData);
+	        existing.hasFinderCoordinate=!!(existing.hasFinderCoordinate||course.hasFinderCoordinate);
+	        existing.hasDatabaseMap=!!(existing.hasDatabaseMap||course.hasDatabaseMap);
+	        if(course.databaseCourseId)existing.databaseCourseId=course.databaseCourseId;
+	        if(course.hasSavedData){
+	          existing.courseId=course.courseId||existing.courseId;
+	          existing.savedCourseId=course.courseId||existing.savedCourseId;
+	        }
+	        if(course.hasDatabaseMap){
+	          existing.courseId=course.courseId||existing.courseId;
+	          existing.source="database-course";
+	        }
         if(Number.isFinite(Number(course.finderLat))&&Number.isFinite(Number(course.finderLng))){
           existing.finderLat=course.finderLat;
           existing.finderLng=course.finderLng;
@@ -270,8 +318,9 @@
       else if(q&&nameClean.startsWith(q))score-=38;
       else if(q&&nameClean.includes(q))score-=24;
       if(Number.isFinite(course.distanceM))score-=Math.max(0,34-(course.distanceM/130));
-      if(course.source==="recent-course")score-=14;
-      if(course.source==="known-course"||course.source==="built-in-course")score-=7;
+	    if(course.source==="recent-course")score-=14;
+	      if(course.source==="database-course"||course.hasDatabaseMap)score-=12;
+	      if(course.source==="known-course"||course.source==="built-in-course")score-=7;
       course.__rank=score;
       return course;
     }).sort((a,b)=>{
@@ -284,9 +333,10 @@
   }
   function metaText(course){
     const parts=[];
-    if(Number.isFinite(course.distanceM))parts.push(course.distanceM<1000?`${Math.round(course.distanceM)}m away`:`${(course.distanceM/1000).toFixed(1)}km away`);
-    if(course.source==="recent-course")parts.push("Recent");
-    else if(course.source==="remote-search")parts.push("search result");
+	    if(Number.isFinite(course.distanceM))parts.push(course.distanceM<1000?`${Math.round(course.distanceM)}m away`:`${(course.distanceM/1000).toFixed(1)}km away`);
+	    if(course.source==="recent-course")parts.push("Recent");
+	    else if(course.source==="database-course"||course.hasDatabaseMap)parts.push("database map");
+	    else if(course.source==="remote-search")parts.push("search result");
     else parts.push("course result");
     return parts.join(" · ");
   }
@@ -365,19 +415,20 @@
     const run=++searchRun;
     if(list)list.innerHTML="";
     renderNearby();
-    if(!q){
-      window.renderCourses(readRecentCourses());
-      return false;
-    }
-    if(count)count.textContent="Searching";
-    const immediate=rank(localMatches(q),q);
-    if(immediate.length)window.renderCourses(immediate);
-    remoteMatches(q).then(remote=>{
-      if(run!==searchRun)return;
-      const results=rank(immediate.concat(remote),q).slice(0,12);
-      window.renderCourses(results);
-      if(count)count.textContent=results.length?`${results.length} found`:"No course found";
-    });
+	    if(!q){
+	      window.renderCourses(readRecentCourses());
+	      loadDatabaseCourses().then(()=>{renderNearby();if(run===searchRun)window.renderCourses(readRecentCourses());});
+	      return false;
+	    }
+	    if(count)count.textContent="Searching";
+	    const immediate=rank(localMatches(q),q);
+	    if(immediate.length)window.renderCourses(immediate);
+	    Promise.all([loadDatabaseCourses(),remoteMatches(q)]).then(([,remote])=>{
+	      if(run!==searchRun)return;
+	      const results=rank(localMatches(q).concat(remote),q).slice(0,12);
+	      window.renderCourses(results);
+	      if(count)count.textContent=results.length?`${results.length} found`:"No course found";
+	    });
     return false;
   };
   const oldRefresh=window.gdRefreshCourseAssumedOption;
@@ -404,10 +455,11 @@
     safe(()=>{if(typeof gdClearMappedStartPromptChrome==="function")gdClearMappedStartPromptChrome();});
     const input=byId("searchInput");
     if(input)input.value="";
-    centerPickerMapOnGps();
-    requestPickerGps();
-    window.renderCourses(readRecentCourses());
-    const screen=byId("courseScreen");
+	    centerPickerMapOnGps();
+	    requestPickerGps();
+	    window.renderCourses(readRecentCourses());
+	    loadDatabaseCourses().then(()=>{renderNearby();if(!(input&&input.value.trim()))window.renderCourses(readRecentCourses());});
+	    const screen=byId("courseScreen");
     if(screen){
       screen.classList.remove("hidden");
       screen.style.display="flex";
@@ -483,6 +535,6 @@
     return res;
   };
   window.gdRefreshCourseAssumedNearby=renderNearby;
-  if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",()=>{renderNearby();window.renderCourses(readRecentCourses());});
-  else{renderNearby();window.renderCourses(readRecentCourses());}
+	  if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",()=>{renderNearby();window.renderCourses(readRecentCourses());loadDatabaseCourses().then(()=>{renderNearby();window.renderCourses(readRecentCourses());});});
+	  else{renderNearby();window.renderCourses(readRecentCourses());loadDatabaseCourses().then(()=>{renderNearby();window.renderCourses(readRecentCourses());});}
 })();

@@ -10,6 +10,9 @@ const { pathToFileURL } = require("url");
   const {
     courseFromSupabaseRow,
     courseToSupabaseRow,
+    findCourseMapKey,
+    isGeneratedCourseUpload,
+    mergeGeneratedCourse,
     mapsFromSupabaseRows,
     mergeMapSets,
     sanitizeCourse
@@ -98,6 +101,54 @@ const { pathToFileURL } = require("url");
   assert.equal(merged.storage, "supabase");
   assert.equal(merged.courses["published::cromwell"].courseName, "Cromwell Golf Course");
   assert.equal(merged.updatedAt, "2026-07-15T01:00:00.000Z");
+
+  assert.equal(isGeneratedCourseUpload({ generated: true, mode: "generated-create-or-append" }), true);
+  assert.equal(isGeneratedCourseUpload({ generated: true, source: "native-resolver" }), true);
+  assert.equal(isGeneratedCourseUpload({ generated: false, mode: "generated-create-or-append" }), false);
+
+  const playerActor = { name: "Player", email: "player@example.com", role: "player", accountId: "acct-player" };
+  const playerScan = sanitizeCourse({
+    courseId: "cromwell",
+    courseName: "Cromwell Golf Course",
+    objects: {
+      g2: {
+        id: "g2",
+        type: "green",
+        greenCenter: { lat: -45.04, lng: 169.21 },
+        greenShape: [
+          { lat: -45.0401, lng: 169.2101 },
+          { lat: -45.0402, lng: 169.2102 },
+          { lat: -45.0403, lng: 169.2103 }
+        ],
+        holeNumber: 2,
+        confirmed: true,
+        source: "native-resolver"
+      }
+    },
+    holes: {
+      2: {
+        id: "h2",
+        holeNumber: 2,
+        greenCenter: { lat: -45.04, lng: 169.21 },
+        greenShape: [
+          { lat: -45.0401, lng: 169.2101 },
+          { lat: -45.0402, lng: 169.2102 },
+          { lat: -45.0403, lng: 169.2103 }
+        ],
+        greenSource: "native-resolver"
+      }
+    }
+  }, { name: "Community scan", email: "", accountId: playerActor.accountId });
+  const existingKey = findCourseMapKey(cloudMaps, playerScan);
+  assert.equal(existingKey, "published::cromwell");
+  const generatedMerge = mergeGeneratedCourse(cloudMaps.courses[existingKey], playerScan);
+  assert.equal(generatedMerge.accepted.objects, 1);
+  assert.equal(generatedMerge.accepted.holes, 1);
+  assert.equal(Object.keys(generatedMerge.course.objects).length, 3);
+  assert.equal(generatedMerge.course.publishedBy.email, "samhalegolf@gmail.com");
+  const duplicateMerge = mergeGeneratedCourse(generatedMerge.course, playerScan);
+  assert.equal(duplicateMerge.accepted.objects, 0);
+  assert.equal(duplicateMerge.accepted.holes, 0);
 
   const optionsResponse = await mod.default(new Request("https://clarity-caddie.test/api/course-maps", { method: "OPTIONS" }));
   assert.equal(optionsResponse.status, 200);

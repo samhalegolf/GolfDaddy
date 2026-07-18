@@ -60,13 +60,23 @@ export default async function courseMaps(req) {
   }
 
   const actor = payload && payload.actor || {};
-  if (!isAdminActor(actor)) return json(403, { error: "Admin publish only" });
+  const adminActor = isAdminActor(actor);
+  const generatedUpload = isGeneratedCourseUpload(payload);
+  if (!adminActor && !generatedUpload) return json(403, { error: "Admin publish only" });
 
-  const course = sanitizeCourse(payload && payload.course, actor);
+  const course = sanitizeCourse(payload && payload.course, adminActor ? actor : communityScanActor(actor));
   if (!course) return json(400, { error: "Course map is required" });
 
   const current = await readMaps();
-  current.courses[course.id] = course;
+  const existingKey = findCourseMapKey(current, course);
+  const existingCourse = existingKey ? current.courses[existingKey] : null;
+  const mode = adminActor ? "admin-publish" : "generated-create-or-append";
+  const merge = adminActor
+    ? { course, accepted: { objects: Object.keys(course.objects || {}).length, holes: Object.keys(course.holes || {}).length, course: 1 } }
+    : mergeGeneratedCourse(existingCourse, course);
+  if (!merge.course) return json(400, { error: "No new generated objects" });
+  if (existingKey && existingKey !== merge.course.id) delete current.courses[existingKey];
+  current.courses[merge.course.id] = merge.course;
   current.updatedAt = new Date().toISOString();
 
   const warnings = [];
@@ -88,7 +98,7 @@ export default async function courseMaps(req) {
     if (storage !== "supabase") return json(503, { error: "Course map storage unavailable", warnings });
   }
 
-  return json(200, Object.assign(current, { storage, warnings }));
+  return json(200, Object.assign(current, { storage, warnings, mode, accepted: merge.accepted }));
 }
 
 export const config = {
@@ -245,6 +255,112 @@ function isAdminActor(actor) {
   return role === "admin" && ADMIN_EMAILS.has(email);
 }
 
+function isGeneratedCourseUpload(payload) {
+  if (!payload || payload.generated !== true) return false;
+  const mode = text(payload.mode, 80).toLowerCase();
+  const source = text(payload.source, 120).toLowerCase();
+  if (mode === "generated-create-or-append") return true;
+  return /automapper|native-resolver|course-picker-pin|generated-map/.test(source);
+}
+
+function communityScanActor(actor) {
+  return {
+    name: "Community scan",
+    email: "",
+    accountId: text(actor && actor.accountId, 120),
+    role: "player"
+  };
+}
+
+function findCourseMapKey(maps, course) {
+  const courses = maps && maps.courses || {};
+  if (course && course.id && courses[course.id]) return course.id;
+  const cid = slug(course && course.courseId);
+  const name = cleanName(course && (course.courseName || course.name));
+  return Object.keys(courses).find((key) => {
+    const existing = courses[key] || {};
+    return !!(
+      cid && slug(existing.courseId || existing.id) === cid ||
+      name && cleanName(existing.courseName || existing.name) === name
+    );
+  }) || "";
+}
+
+function mergeGeneratedCourse(existing, incoming) {
+  const now = new Date().toISOString();
+  const accepted = { objects: 0, holes: 0, course: existing ? 0 : 1 };
+  if (!existing) {
+    if (!generatedCourseHasGeometry(incoming)) return { course: null, accepted };
+    const created = Object.assign({}, incoming, {
+      communityGenerated: true,
+      updatedAt: now,
+      createdAt: incoming.createdAt || now
+    });
+    accepted.objects = Object.keys(created.objects || {}).length;
+    accepted.holes = Object.keys(created.holes || {}).length;
+    return { course: created, accepted };
+  }
+
+  const course = Object.assign({}, existing, {
+    objects: Object.assign({}, existing.objects || {}),
+    holes: Object.assign({}, existing.holes || {}),
+    assets: Object.assign({}, existing.assets || {}),
+    communityGenerated: existing.communityGenerated === true || incoming.communityGenerated === true,
+  });
+
+  Object.values(incoming.objects || {}).forEach((object) => {
+    if (!object || generatedObjectExists(course, object)) return;
+    course.objects[object.id] = object;
+    accepted.objects += 1;
+  });
+  Object.values(incoming.holes || {}).forEach((hole) => {
+    if (!hole || generatedHoleExists(course, hole)) return;
+    course.holes[hole.holeNumber] = hole;
+    accepted.holes += 1;
+  });
+
+  ["courseLat", "courseLng", "finderLat", "finderLng", "courseFinderLat", "courseFinderLng"].forEach((key) => {
+    if ((course[key] === null || course[key] === undefined || course[key] === "") && incoming[key] !== null && incoming[key] !== undefined && incoming[key] !== "") course[key] = incoming[key];
+  });
+  if (accepted.objects || accepted.holes) course.updatedAt = now;
+  return { course, accepted };
+}
+
+function generatedCourseHasGeometry(course) {
+  return Object.keys(course && course.objects || {}).length > 0 || Object.keys(course && course.holes || {}).length > 0;
+}
+
+function generatedObjectExists(course, object) {
+  if (!object || !object.id) return true;
+  const objects = Object.values(course && course.objects || {});
+  if ((course.objects || {})[object.id]) return true;
+  const position = point(object.position || object.greenCenter);
+  if (!position) return true;
+  const holeNumber = validHole(object.holeNumber);
+  const type = text(object.type, 40).toLowerCase();
+  const threshold = type === "green" ? 10 : 8;
+  return objects.some((existing) => {
+    if (!existing) return false;
+    if (text(existing.type, 40).toLowerCase() !== type) return false;
+    if (validHole(existing.holeNumber) !== holeNumber) return false;
+    const existingPoint = point(existing.position || existing.greenCenter);
+    return !!(existingPoint && distanceM(existingPoint, position) <= threshold);
+  });
+}
+
+function generatedHoleExists(course, hole) {
+  const holeNumber = validHole(hole && hole.holeNumber);
+  if (!holeNumber) return true;
+  if ((course.holes || {})[holeNumber]) return true;
+  const center = point(hole.greenCenter || hole.position);
+  if (!center) return true;
+  return Object.values(course.holes || {}).some((existing) => {
+    if (validHole(existing && existing.holeNumber) !== holeNumber) return false;
+    const existingCenter = point(existing.greenCenter || existing.position);
+    return !!(existingCenter && distanceM(existingCenter, center) <= 10);
+  });
+}
+
 function sanitizeCourse(input, actor) {
   if (!input || typeof input !== "object") return null;
   const courseName = text(input.courseName || input.name, 160);
@@ -391,9 +507,33 @@ function slug(value) {
   return String(value || "course").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "course";
 }
 
+function cleanName(value) {
+  return String(value || "").toLowerCase()
+    .replace(/\b(golf club|golf course|country club|links|club|course|gc|cub)\b/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function distanceM(a, b) {
+  const lat1 = finite(a && a.lat);
+  const lng1 = finite(a && a.lng);
+  const lat2 = finite(b && b.lat);
+  const lng2 = finite(b && b.lng);
+  if (lat1 == null || lng1 == null || lat2 == null || lng2 == null) return Infinity;
+  const rad = (value) => value * Math.PI / 180;
+  const dLat = rad(lat2 - lat1);
+  const dLng = rad(lng2 - lng1);
+  const s = Math.sin(dLat / 2) ** 2 + Math.cos(rad(lat1)) * Math.cos(rad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * 6371000 * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
+}
+
 export const __courseMapsTest = {
   courseFromSupabaseRow,
   courseToSupabaseRow,
+  findCourseMapKey,
+  isGeneratedCourseUpload,
+  mergeGeneratedCourse,
   mapsFromSupabaseRows,
   mergeMapSets,
   sanitizeCourse,

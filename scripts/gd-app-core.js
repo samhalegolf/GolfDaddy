@@ -17768,7 +17768,8 @@ function gdKickWholeCourseAutoMapOnLoad(payload,opts={}){
   let mappingCourse=typeof library.mappingCourseSnapshot==="function"
     ? library.mappingCourseSnapshot(payload,snapshotOpts)
     : payload;
-  const key=String(mappingCourse.courseId||mappingCourse.savedCourseId||mappingCourse.canonicalKey||mappingCourse.name||mappingCourse.courseName||payload.courseId||payload.name||"course").toLowerCase();
+  const seedKey=pinSeed&&pinnedCentre?`:pin:${Number(pinnedCentre.lat).toFixed(5)},${Number(pinnedCentre.lng).toFixed(5)}`:"";
+  const key=String(mappingCourse.courseId||mappingCourse.savedCourseId||mappingCourse.canonicalKey||mappingCourse.name||mappingCourse.courseName||payload.courseId||payload.name||"course").toLowerCase()+seedKey;
   if(window.__gdWholeCourseAutoMapOnLoadKey===key&&now-(window.__gdWholeCourseAutoMapOnLoadAt||0)<45000)return true;
   window.__gdWholeCourseAutoMapOnLoadKey=key;
   window.__gdWholeCourseAutoMapOnLoadAt=now;
@@ -17794,7 +17795,7 @@ function gdKickWholeCourseAutoMapOnLoad(payload,opts={}){
         return {playable:false,reason:"controller-unavailable"};
       }
       try{document.body.dataset.gdCourseAutoMapStatus="running";}catch(e){}
-      return controller({course:mappingCourse,courseCentre:pinnedCentre||undefined,hole:1,wholeCourse:true,showLoading:true,fresh:true,allowLocalSavedMap:payload?.gdDatabaseMapAvailable===true,selectedAt,reason:pinSeed?"course-picker-pin":"course-picker"});
+      return controller({course:mappingCourse,courseCentre:pinnedCentre||undefined,hole:1,wholeCourse:true,showLoading:true,fresh:true,allowLocalSavedMap:payload?.gdDatabaseMapAvailable===true,acceptPartialGeneratedMap:pinSeed,selectedAt,reason:pinSeed?"course-picker-pin":"course-picker"});
     })
     .then(result=>{
       if(result&&result.loaded)return;
@@ -17804,7 +17805,7 @@ function gdKickWholeCourseAutoMapOnLoad(payload,opts={}){
         document.body.dataset.gdCourseAutoMapSaved=String(result?.saved||result?.persisted?.saved||0);
         document.body.dataset.gdCourseNeedsPin=result&&result.fallback?"active":result&&result.playable?"no":"pending";
       }catch(e){}
-      if(result&&result.playable)gdScheduleCoursePickerFirstHoleOpen(payload);
+      if(result&&result.playable&&!result.partial)gdScheduleCoursePickerFirstHoleOpen(payload);
     })
     .catch(()=>{
       try{document.body.dataset.gdCourseAutoMapStatus="error";document.body.dataset.gdCourseNeedsPin="pending";}catch(e){}
@@ -17822,6 +17823,7 @@ function gdOpenCoursePickerCourse(course){
     window.gdCourseChangeMode="";
     window.__gdLiveCoursePickerSelection=payload;
     window.__gdLiveCoursePickerSelectionAt=Date.now();
+    if(!gdCoursePayloadIsManual(payload))window.__gdCoursePickerOwnsOpenResolverUntil=Date.now()+8000;
     localStorage.removeItem("gd_active_course_v1");
   }catch(e){}
   if(gdCoursePickerNeedsCoursePin(payload))return gdShowCoursePinScreen(payload);
