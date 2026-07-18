@@ -453,6 +453,25 @@
     safe(()=>{window.__gdCoursePickerChangingAt=Date.now();window.__gdCoursePickerFirstHoleOpenToken=null;window.__gdStableMappedHoleOneLast=null;});
     safe(()=>{if(window.__gdPreLockHoleFrameTimer)clearTimeout(window.__gdPreLockHoleFrameTimer);});
     safe(()=>{if(typeof gdClearMappedStartPromptChrome==="function")gdClearMappedStartPromptChrome();});
+    safe(()=>{
+      document.body.classList.remove("shell-home","shell-module","gdToolRailOpen","gdCourseOpening","gdCoursePinPromptActive");
+      document.body.classList.add("shell-gps","gdGpsActive","gps-active","gdCoursePickerOpen");
+      document.body.dataset.clarityRoute="gps";
+      document.body.dataset.gdToolScreen="picker";
+      [
+        "gdCourseNeedsPin",
+        "gdCourseNeedsPinCourse",
+        "gdCoursePinDecision",
+        "gdCourseDatabaseMapAvailable",
+        "gdCourseDatabaseMapSource",
+        "gdCourseAutoMapStatus",
+        "gdCourseAutoMappedHoles",
+        "gdCourseAutoMapSaved",
+        "gdCourseScannerSeed"
+      ].forEach(key=>delete document.body.dataset[key]);
+      window.__gdCoursePickerPinPromptActive=false;
+    });
+    safe(()=>{const home=byId("shellHome");if(home){home.classList.add("hidden");home.style.display="none";home.style.visibility="hidden";home.style.opacity="0";}});
     const input=byId("searchInput");
     if(input)input.value="";
 	    centerPickerMapOnGps();
@@ -463,6 +482,8 @@
     if(screen){
       screen.classList.remove("hidden");
       screen.style.display="flex";
+      screen.style.visibility="";
+      screen.style.opacity="";
       screen.style.pointerEvents="auto";
     }
     setTimeout(()=>input?.focus(),80);

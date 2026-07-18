@@ -132,7 +132,7 @@
       var cs=getComputedStyle(courseScreen);
       return cs.display!=="none"&&cs.visibility!=="hidden";
     },false);
-    if(pickerOpen)screen="unmapped";
+    if(pickerOpen)screen="picker";
     document.body.dataset.gdToolScreen=screen;
     document.body.dataset.gdToolCourse=courseIdentity(activeCourse());
     document.body.classList.toggle("gdMappedCourseMode",screen==="mapped");

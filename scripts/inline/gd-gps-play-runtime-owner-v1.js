@@ -183,7 +183,7 @@
   function setRouteLabel(label){var el=byId("shellRouteLabel");if(el)el.textContent=label||""}
 	  function cleanRouteClasses(route){
 	    if(!document.body)return;
-	    document.body.classList.remove("shell-home","shell-gps","shell-module","gdGpsActive","gps-active","gps-open","manual-gps-active","gdCoursePickerOpen","gdToolRailOpen");
+	    document.body.classList.remove("shell-home","shell-gps","shell-module","gdGpsActive","gps-active","gps-open","manual-gps-active","gdCoursePickerOpen","gdCoursePinPromptActive","gdToolRailOpen");
 	    if(route!=="gps")releaseGpsFirstPaintGate(route||"leave-gps");
 	    if(route==="home")document.body.classList.add("shell-home");
 	    if(route==="gps")document.body.classList.add("shell-gps","gdGpsActive","gps-active");
@@ -193,6 +193,10 @@
 	      if(route==="home")document.body.dataset.gdToolScreen="home";
 	      else if(route==="module")document.body.dataset.gdToolScreen="module";
 	      else if(document.body.dataset.gdToolScreen==="home"||document.body.dataset.gdToolScreen==="module"||document.body.dataset.gdToolScreen==="picker")document.body.dataset.gdToolScreen="unmapped";
+	      if(route!=="gps"){
+	        ["gdCourseNeedsPin","gdCourseNeedsPinCourse","gdCoursePinDecision","gdCourseDatabaseMapAvailable","gdCourseDatabaseMapSource","gdCourseAutoMapStatus","gdCourseAutoMappedHoles","gdCourseAutoMapSaved","gdCourseScannerSeed"].forEach(function(key){delete document.body.dataset[key]});
+	        safe(function(){window.__gdCoursePickerPinPromptActive=false;window.__gdPendingCoursePinPayload=null;});
+	      }
 	    }
 	  }
   function clearCaptured(reason){
@@ -326,7 +330,9 @@
 	    safe(function(){document.querySelectorAll(".panel.open,.modulePanel.open").forEach(function(el){el.classList.remove("open")})});
     cleanRouteClasses("gps");
     safe(function(){
-      document.body.classList.remove("gdMappedStartPromptActive","gdManualStartPlacementActive","gdHeadToTeeFrameActive","gdLockStateFrameActive","gd-frame-hard-locked","gdGreenArrivalMode","gd-green-zoom-active","gdBubbleLongPressZoomActive","gdCapturedBubbleDragging");
+      document.body.classList.remove("gdMappedStartPromptActive","gdManualStartPlacementActive","gdHeadToTeeFrameActive","gdLockStateFrameActive","gd-frame-hard-locked","gdGreenArrivalMode","gd-green-zoom-active","gdBubbleLongPressZoomActive","gdCapturedBubbleDragging","gdToolRailOpen","gdCourseOpening","gdCoursePinPromptActive");
+      ["gdCourseNeedsPin","gdCourseNeedsPinCourse","gdCoursePinDecision","gdCourseDatabaseMapAvailable","gdCourseDatabaseMapSource","gdCourseAutoMapStatus","gdCourseAutoMappedHoles","gdCourseAutoMapSaved","gdCourseScannerSeed"].forEach(function(key){delete document.body.dataset[key]});
+      window.__gdCoursePickerPinPromptActive=false;
       if(typeof window.gdClearCapturedHoleFrameShotOverlay==="function")window.gdClearCapturedHoleFrameShotOverlay();
     });
     clearCaptured("course-picker");
