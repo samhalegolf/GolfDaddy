@@ -11,7 +11,7 @@ const gpsRuntimeCss = fs.readFileSync(path.join(root, "styles", "inline", "gd-gp
 const gpsRuntime = fs.readFileSync(path.join(root, "scripts", "inline", "gd-gps-play-runtime-owner-v1.js"), "utf8");
 const brandRail = fs.readFileSync(path.join(root, "scripts", "inline", "gd-brand-icon-render.js"), "utf8");
 const betaShell = fs.readFileSync(path.join(root, "scripts", "inline", "gd-gps-beta-mode-shell.js"), "utf8");
-const gpsRequestButton = fs.readFileSync(path.join(root, "scripts", "inline", "gd-gps-request-button-fix-v1.js"), "utf8");
+const gpsRequestButton = fs.readFileSync(path.join(root, "scripts", "inline", "gd-gps-play-flow-layers-v1.js"), "utf8");
 const library = fs.readFileSync(path.join(root, "scripts", "gd-course-library-pin-lock.js"), "utf8");
 
 for (const [label, source] of [["index.html", index], ["gd-course-library-pin-lock.js", library]]) {
@@ -82,7 +82,7 @@ assert(index.includes("gd-gps-beta-mode-shell.js?v=course-picker-rail-owner-2026
 assert(index.includes("gd-brand-icon-render.js?v=boot-crash-fix-20260719"), "brand rail cache-bust ships dynamic rail ownership + flag handler rebind");
 assert(index.includes("gd-course-picker-search-v2.js?v=course-picker-owner-cleanup-20260719"), "course picker search cache-bust ships database course hydration");
 assert(index.includes("gd-course-library-pin-lock.js?v=course-picker-db-search-sync-20260718"), "course library cache-bust ships generated scan upload");
-assert(index.includes("gd-gps-request-button-fix-v1.js?v=course-picker-rail-owner-20260719"), "GPS request button cache-bust ships optional rail handling");
+assert(index.includes("gd-gps-play-flow-layers-v1.js?v=gps-flow-merge-20260719"), "GPS request button cache-bust ships optional rail handling");
 assert(index.includes("gd-gps-play-runtime-owner-v1.js?v=gps-owner-merge-20260719"), "GPS runtime cache-bust ships the pin prompt wrapper guard");
 
 console.log("course-picker-location tests passed");
