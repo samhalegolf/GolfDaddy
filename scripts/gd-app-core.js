@@ -17227,6 +17227,38 @@ function gdEnsureGpsCourseSurface(){
 function gdCoursePayloadIsManual(payload){
   return /^manual gps$/i.test(String(payload?.name||payload?.courseName||"").trim());
 }
+function gdCoursePickerHasMappedPlayData(payload,hole=1){
+  if(gdCoursePayloadIsManual(payload))return false;
+  const h=Number(hole)||1;
+  try{
+    if(typeof window.gdCourseHasMappedGreenFairway==="function"&&window.gdCourseHasMappedGreenFairway(payload,h))return true;
+  }catch(e){}
+  try{
+    const api=window.GolfDaddyCourseLibrary||window.ClarityCaddieCourseLibrary||{};
+    const data=typeof api.mappedHolePlayData==="function"?api.mappedHolePlayData(payload,h):null;
+    if(data&&data.complete&&data.green&&Array.isArray(data.route)&&data.route.length>=2)return true;
+  }catch(e){}
+  return false;
+}
+function gdResetCoursePickerPresentationReadiness(payload){
+  if(gdCoursePayloadIsManual(payload))return;
+  try{
+    window.__gdCourseFirstHoleReadyKey="";
+    window.__gdCourseFirstHoleReadyAt=0;
+    window.__gdOpeningCourseToFirstHoleKey="";
+    window.__gdCoursePickerFirstHoleOpenToken=null;
+  }catch(e){}
+  if(gdCoursePickerHasMappedPlayData(payload,1)){
+    try{document.body.dataset.gdCourseNeedsPin="no";}catch(e){}
+    return;
+  }
+  try{
+    document.body.dataset.gdCourseNeedsPin="pending";
+    document.body.dataset.gdCourseNeedsPinCourse=payload?.courseId||payload?.canonicalKey||payload?.name||"";
+    document.body.classList.remove("gdMappedStartPromptActive","gdCapturedHoleFrameCameraOn","gdHoleImageCameraOn","gdGpsPresentationReady","gdHeadToTeeFrameActive","gdLockStateFrameActive","gd-frame-hard-locked");
+  }catch(e){}
+  try{window.gdClearHoleImageRuntime?.("course-picker-needs-pin");}catch(e){}
+}
 function gdCoursePickerFirstHoleBusy(){
   try{
     const el=document.getElementById("gdCourseLoadingOverlay");
@@ -17286,6 +17318,7 @@ function gdShouldSkipMappedHoleOneReset(opts={}){
 }
 function gdCoursePickerFirstHoleReady(payload){
   if(gdCoursePayloadIsManual(payload))return false;
+  if(!gdCoursePickerHasMappedPlayData(payload,1))return false;
   try{
     const keyParts=[
       payload?.courseId,
@@ -17312,6 +17345,7 @@ function gdCoursePickerFirstHoleReady(payload){
 }
 function gdPrepareCoursePickerFirstHoleState(payload){
   if(gdCoursePayloadIsManual(payload))return false;
+  if(!gdCoursePickerHasMappedPlayData(payload,1))return false;
   try{window.__gdCoursePickerChangingAt=0;}catch(e){}
   try{selectedHole=1;currentPlayingHole=1;}catch(e){}
   try{sessionStorage.setItem("gd_active_playing_hole","1");sessionStorage.setItem("gd_mapper_active_hole","1");}catch(e){}
@@ -17326,6 +17360,10 @@ function gdPrepareCoursePickerFirstHoleState(payload){
 }
 function gdScheduleCoursePickerFirstHoleOpen(payload){
   if(gdCoursePayloadIsManual(payload))return;
+  if(!gdCoursePickerHasMappedPlayData(payload,1)){
+    try{document.body.dataset.gdCourseNeedsPin="pending";}catch(e){}
+    return false;
+  }
   if(gdCoursePickerFirstHoleReady(payload))return true;
   if(gdCoursePickerFirstHoleBusy()){
     return true;
@@ -17348,6 +17386,7 @@ function gdScheduleCoursePickerFirstHoleOpen(payload){
 }
 window.gdPrepareCoursePickerFirstHoleState=gdPrepareCoursePickerFirstHoleState;
 window.gdScheduleCoursePickerFirstHoleOpen=gdScheduleCoursePickerFirstHoleOpen;
+window.gdCoursePickerHasMappedPlayData=gdCoursePickerHasMappedPlayData;
 function gdRefreshGpsMapAfterCourseOpen(payload,opts={}){
   const hasCoursePoint=gdCoursePickerPayloadHasPoint(payload);
   const setCourseView=opts.setCourseView!==undefined?!!opts.setCourseView:hasCoursePoint;
@@ -17477,6 +17516,7 @@ function gdKickWholeCourseAutoMapOnLoad(payload){
           document.body.dataset.gdCourseAutoMapStatus="native_visual_loaded";
           document.body.dataset.gdCourseAutoMappedHoles=String(Array.isArray(visualResult.loaded.holeFramePublishedVisuals)?visualResult.loaded.holeFramePublishedVisuals.length:0);
           document.body.dataset.gdCourseAutoMapSaved="0";
+          document.body.dataset.gdCourseNeedsPin="no";
         }catch(e){}
         return visualResult;
       }
@@ -17494,10 +17534,11 @@ function gdKickWholeCourseAutoMapOnLoad(payload){
         document.body.dataset.gdCourseAutoMapStatus=result&&result.stale?"stale":result&&(result.playable||result.fallback)?"done":"empty";
         document.body.dataset.gdCourseAutoMappedHoles=String(result?.holes||result?.persisted?.holes||0);
         document.body.dataset.gdCourseAutoMapSaved=String(result?.saved||result?.persisted?.saved||0);
+        document.body.dataset.gdCourseNeedsPin=result&&result.fallback?"active":result&&result.playable?"no":"pending";
       }catch(e){}
     })
     .catch(()=>{
-      try{document.body.dataset.gdCourseAutoMapStatus="error";}catch(e){}
+      try{document.body.dataset.gdCourseAutoMapStatus="error";document.body.dataset.gdCourseNeedsPin="pending";}catch(e){}
     });
   return true;
 }
@@ -17511,6 +17552,7 @@ function gdOpenCoursePickerCourse(course){
     window.__gdLiveCoursePickerSelectionAt=Date.now();
     localStorage.removeItem("gd_active_course_v1");
   }catch(e){}
+  gdResetCoursePickerPresentationReadiness(payload);
   if(!gdCoursePayloadIsManual(payload)){
     try{selectedHole=1;currentPlayingHole=1;}catch(e){}
     try{sessionStorage.setItem("gd_gps_session_activated","1");sessionStorage.setItem("gd_active_playing_hole","1");sessionStorage.setItem("gd_mapper_active_hole","1");}catch(e){}

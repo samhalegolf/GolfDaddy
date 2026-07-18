@@ -550,7 +550,7 @@
   function courseHasMappedGreenFairway(course=null,hole=null){
     try{
       const h=validHoleNumber(hole);
-      const c=(course&&objectValues(course).length)?course:loadUserCourseData();
+      const c=(course&&objectValues(course).length)?course:(course?loadUserCourseData(userId(),courseId(course)):loadUserCourseData());
       if(!c)return false;
       const holes=new Map();
       objectValues(c).forEach(object=>{
@@ -4279,6 +4279,8 @@
   function courseOpenUiReady(course,hole=1){
     try{
       const expected=validHoleNumber(hole)||1;
+      const hasTrustedPlayData=requestedHolePlayable(course,expected);
+      if(!hasTrustedPlayData)return false;
       const activeName=String(document.getElementById('courseLine')?.textContent||'').trim().toLowerCase();
       const payloadName=String(course?.name||course?.courseName||'').trim().toLowerCase();
       let activeHole=validHoleNumber(activePlayingHole?.())||validHoleNumber(currentPlayingHole)||validHoleNumber(selectedHole)||0;
