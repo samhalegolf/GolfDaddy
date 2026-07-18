@@ -228,13 +228,17 @@
     wireGpsBadgeTuck(el);
   }
 
-  function ensureModeSwitch(){
-    let sw=document.getElementById('gdV62ModeSwitch');
-    const rail=document.querySelector('.rightRail');
-    if(!sw){sw=document.createElement('div');sw.id='gdV62ModeSwitch';}
-    if(rail&&sw.parentElement!==rail)rail.appendChild(sw);
-    else if(!rail&&!sw.parentElement)document.body.appendChild(sw);
-    ['top','right','bottom','left','transform'].forEach(prop=>{sw.style[prop]='';});
+	  function ensureModeSwitch(){
+	    let sw=document.getElementById('gdV62ModeSwitch');
+	    if(!gpsActive()){
+	      if(sw&&!document.querySelector('.rightRail')&&sw.parentElement===document.body)sw.remove();
+	      return;
+	    }
+	    const rail=document.querySelector('.rightRail') || (typeof window.gdEnsureAppRightRail==='function' ? window.gdEnsureAppRightRail() : null);
+	    if(!rail)return;
+	    if(!sw){sw=document.createElement('div');sw.id='gdV62ModeSwitch';}
+	    if(rail&&sw.parentElement!==rail)rail.appendChild(sw);
+	    ['top','right','bottom','left','transform'].forEach(prop=>{sw.style[prop]='';});
     delete sw.dataset.gdStableTop;
     const liveMode=mode()==='live';
     const nextMode=liveMode?'twoTap':'live';

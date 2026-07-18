@@ -19,14 +19,11 @@
     }
     return false;
   }
-  function ensureGpsRailButton(){
-    const rail=document.querySelector(".rightRail");
-    if(!rail){console.warn("[Clarity Caddy] right rail shell is missing");return;}
-    let btn=document.getElementById("gpsRailBtn");
-    if(!btn){
-      console.warn("[Clarity Caddy] final rail button missing: gpsRailBtn");
-      return;
-    }
+	  function ensureGpsRailButton(){
+	    const rail=document.querySelector(".rightRail");
+	    if(!rail)return;
+	    let btn=document.getElementById("gpsRailBtn");
+	    if(!btn)return;
     btn.type="button";
     btn.classList.add("railBtn","gdGpsRecenterBtn");
     btn.setAttribute("aria-label","GPS locate");

@@ -1030,7 +1030,7 @@
     lastTabToggleAt=Date.now();
     var open=!document.body.classList.contains("gdToolRailOpen");
     var token=++toolRailOpenToken;
-    safe(function(){var rail=byId("gdAppRightRail")||document.querySelector(".rightRail");if(rail)syncAllowedButtons(rail)});
+    safe(function(){var rail=byId("gdAppRightRail")||document.querySelector(".rightRail");if(!rail&&typeof window.gdEnsureAppRightRail==="function")rail=window.gdEnsureAppRightRail();if(rail)syncAllowedButtons(rail)});
     setToolOpen(open);
     if(open)[120,360,680,1000].forEach(function(delay){setTimeout(function(){if(token===toolRailOpenToken&&document.body.classList.contains("gdToolRailOpen")&&gpsOpen()&&!hiddenToolScreen()&&!pickerOpen())setToolOpen(true)},delay)});
     else setTimeout(syncToolRail,80);
@@ -1077,7 +1077,8 @@
     guardSurface();
     restoreGpsSurfaceFromResume("tool-sync");
 	    var rail=byId("gdAppRightRail")||document.querySelector(".rightRail");
-	    var tab=ensureToolTab();
+	    if(!rail&&typeof window.gdEnsureAppRightRail==="function")rail=window.gdEnsureAppRightRail();
+		    var tab=ensureToolTab();
 	    bindGreenZoomButton();
 	    if(rail&&rail.parentElement!==document.body)document.body.appendChild(rail);
     var active=gpsOpen()&&!hiddenToolScreen()&&!pickerOpen()&&!!rail;

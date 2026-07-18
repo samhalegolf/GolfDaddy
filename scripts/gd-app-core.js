@@ -17311,17 +17311,15 @@ function gdCoursePickerPinPointForPayload(payload){
 function gdCoursePickerNeedsCoursePin(payload){
   const mark=reason=>{try{document.body.dataset.gdCoursePinDecision=reason;}catch(e){}};
   if(gdCoursePayloadIsManual(payload)){mark("manual-course");return false;}
-  if(payload?.gdDatabaseMapAvailable===true){mark("database-map");return false;}
-  if(window.__gdCoursePickerBypassPinOnce){
-    window.__gdCoursePickerBypassPinOnce=false;
-    mark("bypass-once");
-    return false;
-  }
-  if(gdCoursePickerStoredPin(payload)){mark("stored-pin");return false;}
-  if(gdCoursePickerRecentGpsPoint()){mark("recent-live-gps");return false;}
-  mark("needs-pin");
-  return true;
-}
+	  if(payload?.gdDatabaseMapAvailable===true){mark("database-map");return false;}
+	  if(window.__gdCoursePickerBypassPinOnce){
+	    window.__gdCoursePickerBypassPinOnce=false;
+	    mark("bypass-once");
+	    return false;
+	  }
+	  mark("needs-pin");
+	  return true;
+	}
 function gdCoursePickerUsesPinSeed(payload){
   return !!(payload&&!gdCoursePayloadIsManual(payload)&&payload.gdTrustedCoursePin===true&&gdCoursePickerFinitePoint(payload));
 }
@@ -17331,13 +17329,9 @@ async function gdCoursePickerDatabaseMapAvailable(payload){
     document.body.dataset.gdCoursePinDecision="checking-database-map";
     document.body.dataset.gdCourseNeedsPin="checking_database_map";
   }catch(e){}
-  try{
-    const visual=await gdLoadCourseVisualForPlay(payload,{force:true,source:"course-picker-db-map-check"});
-    if(visual&&visual.loaded)return {available:true,attempted:true,source:"published-course-visual",visual};
-  }catch(e){}
-  try{
-    const library=window.GolfDaddyCourseLibrary||window.ClarityCaddieCourseLibrary||{};
-    if(typeof library.publishedCourseMapAvailability==="function"){
+	  try{
+	    const library=window.GolfDaddyCourseLibrary||window.ClarityCaddieCourseLibrary||{};
+	    if(typeof library.publishedCourseMapAvailability==="function"){
       const result=await library.publishedCourseMapAvailability(payload,{hole:1,wholeCourse:true,source:"course-picker-db-map-check"});
       if(result&&result.available)return Object.assign({source:"published-course-map"},result);
       return Object.assign({available:false,source:"published-course-map"},result||{});
@@ -17791,11 +17785,11 @@ function gdKickWholeCourseAutoMapOnLoad(payload,opts={}){
     document.body.dataset.gdCourseAutoMapStatus=pinSeed?"checking_pin_seed":"checking_native_visual";
     document.body.dataset.gdCourseScannerSeed=pinSeed?"pin":"course";
   }catch(e){}
-  Promise.resolve(gdLoadCourseVisualForPlay(payload,{force:true,source:"course-visual-preload"}))
-    .then(visualResult=>{
-      if(visualResult&&visualResult.loaded){
-        try{
-          document.body.dataset.gdCourseAutoMapStatus="native_visual_loaded";
+	  Promise.resolve(pinSeed?null:gdLoadCourseVisualForPlay(payload,{force:true,source:"course-visual-preload"}))
+	    .then(visualResult=>{
+	      if(!pinSeed&&visualResult&&visualResult.loaded){
+	        try{
+	          document.body.dataset.gdCourseAutoMapStatus="native_visual_loaded";
           document.body.dataset.gdCourseAutoMappedHoles=String(Array.isArray(visualResult.loaded.holeFramePublishedVisuals)?visualResult.loaded.holeFramePublishedVisuals.length:0);
           document.body.dataset.gdCourseAutoMapSaved="0";
           document.body.dataset.gdCourseNeedsPin="no";
@@ -17860,11 +17854,11 @@ function gdOpenCoursePickerCourse(course){
     try{if(typeof toast==="function")toast(payload.name==="Manual GPS"?"Manual GPS selected":"Course selected");}catch(_){}
     gdRefreshGpsMapAfterCourseOpen(payload,{setCourseView:gdCoursePickerPayloadHasPoint(payload)});
   }
-  gdKickWholeCourseAutoMapOnLoad(payload,{fromPinnedSeed:usePinSeed});
-  gdScheduleCourseVisualPullForPlay(payload);
-  if(!usePinSeed)gdScheduleCoursePickerFirstHoleOpen(payload);
-  return false;
-}
+	  gdKickWholeCourseAutoMapOnLoad(payload,{fromPinnedSeed:usePinSeed});
+	  if(payload?.gdDatabaseMapAvailable===true)gdScheduleCourseVisualPullForPlay(payload);
+	  if(!usePinSeed)gdScheduleCoursePickerFirstHoleOpen(payload);
+	  return false;
+	}
 function gdConfirmAssumedCourse(event){
   if(event){
     event.preventDefault?.();

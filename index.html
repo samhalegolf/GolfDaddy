@@ -201,18 +201,6 @@
 </div>
 <div class="badgeMeta"><span id="stateLine">GPS not started</span><span class="gpsLive" id="gpsLive"><i></i>GPS</span><span class="holeMeta" id="holeLine" style="display:none">Hole 1 · Par 4</span></div>
 </div>
-<div class="rightRail" id="gdAppRightRail">
-<button aria-label="Place flag" class="railBtn" data-gd-rail-button="final" data-gd-rail-icon="flag" id="flagTool" title="Place flag" type="button"></button>
-<button aria-label="Green Wand" class="railBtn greenBtn" data-gd-rail-button="final" data-gd-rail-icon="wand" id="greenToolBtn" title="Green Wand" type="button"></button>
-<button aria-label="Wind" class="railBtn gdWindToolBtn" data-gd-rail-button="final" id="windToolBtn" title="Wind" type="button" onclick="gdWindToolPressed(event)"><svg aria-hidden="true" viewBox="0 0 48 48"><path d="M9 17h20c4.4 0 6.6-5.4 3.5-8.5-2.4-2.4-6.5-1.5-7.6 1.7" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M8 25h28c5.2 0 7.8 6.3 4.1 10-2.9 2.9-7.8 1.7-9.1-2.1" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M13 33h11" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/></svg></button>
-<button aria-label="GPS locate" class="railBtn gdGpsRecenterBtn" data-gd-rail-button="final" data-gd-rail-icon="gps" id="gpsRailBtn" title="GPS locate" type="button"></button>
-<button aria-label="Frame tightness" class="railBtn gdGreenZoomBtn" data-gd-rail-button="final" id="gdGreenZoomBtn" title="Frame tightness" type="button" onclick="return gdToggleSimpleGreenZoom(event)"><svg aria-hidden="true" viewBox="0 0 48 48" fill="none"><circle cx="21" cy="21" r="10" stroke="currentColor" stroke-width="4"/><path d="M29 29l9 9" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M21 15v12M15 21h12" stroke="currentColor" stroke-width="3.4" stroke-linecap="round"/></svg></button>
-<button aria-label="Arcade Mode" aria-hidden="true" class="railBtn gdArcadeRailBtn" data-gd-rail-button="final" id="gdArcadeRailBtn" title="Arcade Mode" type="button" onclick="return gdOpenArcadeEntry(event)"><svg aria-hidden="true" viewBox="0 0 48 48" fill="none"><path d="M14 19h20c4.4 0 8 3.6 8 8v3.5c0 3-2.4 5.5-5.5 5.5-1.8 0-3.5-.9-4.5-2.4L29.8 30H18.2L16 33.6c-1 1.5-2.7 2.4-4.5 2.4C8.4 36 6 33.5 6 30.5V27c0-4.4 3.6-8 8-8Z" stroke="currentColor" stroke-width="3.4" stroke-linejoin="round"/><path d="M15 25v6M12 28h6" stroke="currentColor" stroke-width="3.4" stroke-linecap="round"/><path d="M32 27h.1M37 31h.1" stroke="currentColor" stroke-width="4.2" stroke-linecap="round"/></svg></button>
-<button aria-label="Map tools" class="railBtn gdMapperToolsBtn" data-gd-rail-button="final" id="gdMapperToolsBtn" title="Map tools" type="button">MAP</button>
-<button aria-label="GPS settings" class="railBtn gdGpsSettingsRailBtn" data-gd-rail-button="final" id="gdGpsSettingsRailBtn" title="GPS settings" type="button" onclick="return gdOpenGpsToolSettings(event)"><svg aria-hidden="true" viewBox="0 0 48 48" fill="none"><circle cx="24" cy="24" r="5.5" stroke="currentColor" stroke-width="3.6"/><path d="M24 8v6M24 34v6M10.1 16l5.2 3M32.7 29l5.2 3M10.1 32l5.2-3M32.7 19l5.2-3" stroke="currentColor" stroke-width="3.6" stroke-linecap="round"/></svg></button>
-<button aria-label="Scorecard" class="railBtn" data-gd-rail-button="final" data-gd-rail-icon="scorecard" id="scorecardRailBtn" title="Scorecard" type="button"></button>
-<button aria-label="Bag" class="railBtn" data-gd-rail-button="final" data-gd-rail-icon="bag" id="bagRailBtn" title="Bag" type="button"></button>
-</div>
 <div class="gdWindPicker hidden" id="gdWindPicker" aria-hidden="true" onclick="gdWindPickDirection(event)">
   <div class="gdWindPickerCompass">
     <div class="gdWindPickerLabel">Tap wind origin</div>
@@ -326,16 +314,16 @@
 <div class="courseList" id="courseList"></div>
 </div></div>
 </div>
-<script src="scripts/gd-app-core.js?v=course-picker-owner-cleanup-20260719"></script>
+<script src="scripts/gd-app-core.js?v=course-picker-pin-source-20260719"></script>
 <script src="scripts/gd-icon-assets.js?v=icon-assets-001"></script>
-<script src="scripts/inline/gd-gps-beta-mode-shell.js?v=gps-legacy-player-badge-20260718"></script>
+<script src="scripts/inline/gd-gps-beta-mode-shell.js?v=course-picker-rail-owner-20260719"></script>
 
 <!-- Removed superseded cleanup layer from original script index 4. -->
 
 
 <!-- Removed superseded cleanup layer from original script index 5. -->
 
-<script src="scripts/inline/gd-brand-icon-render.js?v=split03"></script>
+<script src="scripts/inline/gd-brand-icon-render.js?v=course-picker-rail-owner-20260719"></script>
 <script src="scripts/inline/gd-auth-account-shell.js?v=profile-membership-20260718"></script>
 
 <script src="scripts/inline/gd-inline-clarity-caddie-core-patch-soft-lock.js?v=split03"></script>
@@ -438,7 +426,7 @@
 <!-- Removed gdFinalStructureGuardV3: blank-route recovery masked route ownership problems. -->
 <script id="gdCoursePickerSearchV2" src="scripts/inline/gd-course-picker-search-v2.js?v=course-picker-owner-cleanup-20260719"></script>
 <link rel="stylesheet" id="gdGpsRequestButtonFixV1" href="styles/inline/gd-gps-request-button-fix-v1.css?v=split04">
-<script id="gdGpsRequestButtonFixV1" src="scripts/inline/gd-gps-request-button-fix-v1.js?v=split03"></script>
+<script id="gdGpsRequestButtonFixV1" src="scripts/inline/gd-gps-request-button-fix-v1.js?v=course-picker-rail-owner-20260719"></script>
 <link rel="stylesheet" id="gdStableGpsModeSwitchV1" href="styles/inline/gd-stable-gps-mode-switch-v1.css?v=split04">
 <link rel="stylesheet" id="gdBubbleDataGeneratorV1" href="styles/inline/gd-bubble-data-generator-v1.css?v=split04">
 <link rel="stylesheet" id="gdShotDataVisualPolishV1" href="styles/inline/gd-shot-data-visual-polish-v1.css?v=split04">
@@ -471,7 +459,7 @@
 
 <link rel="stylesheet" id="gdGpsPlayRuntimeOwnerV1Css" href="styles/inline/gd-gps-play-runtime-owner-v1-css.css?v=course-picker-owner-cleanup-20260719">
 <link rel="stylesheet" id="gdHubAccordionWrapPolishV1" href="styles/inline/gd-hub-accordion-wrap-polish-v1.css?v=split04">
-<script id="gdGpsPlayRuntimeOwnerV1" src="scripts/inline/gd-gps-play-runtime-owner-v1.js?v=course-picker-owner-cleanup-20260719"></script>
+<script id="gdGpsPlayRuntimeOwnerV1" src="scripts/inline/gd-gps-play-runtime-owner-v1.js?v=course-picker-rail-owner-20260719"></script>
 <link rel="stylesheet" id="gdGpsPlayCameraTiltV1Css" href="styles/inline/gd-gps-play-camera-tilt-v1.css?v=tilt02">
 <script id="gdGpsPlayCameraTiltV1" src="scripts/inline/gd-gps-play-camera-tilt-v1.js?v=tilt02"></script>
 
