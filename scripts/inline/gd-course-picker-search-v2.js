@@ -149,7 +149,20 @@
   function readRecentCourses(){
     const rows=safe(()=>JSON.parse(localStorage.getItem(RECENTS_KEY)||"[]"),[])||[];
     return (Array.isArray(rows)?rows:[]).map(item=>{
-      const course=basePayload(Object.assign({},item,{source:"recent-course"}));
+      const raw=item&&typeof item==="object"?item:{};
+      const course=basePayload({
+        name:raw.name,
+        courseName:raw.courseName,
+        courseId:raw.courseId,
+        canonicalKey:raw.canonicalKey,
+        lat:raw.lat,
+        lng:raw.lng,
+        courseLat:raw.courseLat,
+        courseLng:raw.courseLng,
+        finderLat:raw.finderLat,
+        finderLng:raw.finderLng,
+        source:"recent-course"
+      });
       course.hasSavedData=false;
       course.hasFinderCoordinate=false;
       return course.name&&!/^manual gps$/i.test(course.name)?course:null;

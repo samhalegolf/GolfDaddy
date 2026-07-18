@@ -17268,7 +17268,7 @@ function gdCoursePickerRememberPin(payload,point){
   return true;
 }
 function gdCoursePickerApplyStoredPin(payload){
-  if(gdCoursePayloadIsManual(payload)||payload?.coursePinned||payload?.pinnedByUser)return payload;
+  if(gdCoursePayloadIsManual(payload))return payload;
   const pin=gdCoursePickerStoredPin(payload);
   if(!pin)return payload;
   return gdNormalizeCoursePickerPayload(Object.assign({},payload,{
@@ -17280,7 +17280,8 @@ function gdCoursePickerApplyStoredPin(payload){
     finderLng:pin.lng,
     coursePinned:true,
     pinnedByUser:true,
-    pinSource:pin.source||"stored-course-pin"
+    pinSource:pin.source||"stored-course-pin",
+    gdTrustedCoursePin:true
   }));
 }
 function gdCoursePickerMapCenterPoint(){
@@ -17296,16 +17297,75 @@ function gdCoursePickerPinPointForPayload(payload){
 function gdCoursePickerNeedsCoursePin(payload){
   const mark=reason=>{try{document.body.dataset.gdCoursePinDecision=reason;}catch(e){}};
   if(gdCoursePayloadIsManual(payload)){mark("manual-course");return false;}
+  if(payload?.gdDatabaseMapAvailable===true){mark("database-map");return false;}
   if(window.__gdCoursePickerBypassPinOnce){
     window.__gdCoursePickerBypassPinOnce=false;
     mark("bypass-once");
     return false;
   }
-  if(payload?.coursePinned||payload?.pinnedByUser||payload?.pinSource){mark("already-pinned");return false;}
   if(gdCoursePickerStoredPin(payload)){mark("stored-pin");return false;}
   if(gdCoursePickerRecentGpsPoint()){mark("recent-live-gps");return false;}
   mark("needs-pin");
   return true;
+}
+function gdCoursePickerUsesPinSeed(payload){
+  return !!(payload&&!gdCoursePayloadIsManual(payload)&&payload.gdTrustedCoursePin===true&&gdCoursePickerFinitePoint(payload));
+}
+async function gdCoursePickerDatabaseMapAvailable(payload){
+  if(!payload||gdCoursePayloadIsManual(payload))return {available:false,attempted:false,reason:"manual-course"};
+  try{
+    document.body.dataset.gdCoursePinDecision="checking-database-map";
+    document.body.dataset.gdCourseNeedsPin="checking_database_map";
+  }catch(e){}
+  try{
+    const visual=await gdLoadCourseVisualForPlay(payload,{force:true,source:"course-picker-db-map-check"});
+    if(visual&&visual.loaded)return {available:true,attempted:true,source:"published-course-visual",visual};
+  }catch(e){}
+  try{
+    const library=window.GolfDaddyCourseLibrary||window.ClarityCaddieCourseLibrary||{};
+    if(typeof library.publishedCourseMapAvailability==="function"){
+      const result=await library.publishedCourseMapAvailability(payload,{hole:1,wholeCourse:true,source:"course-picker-db-map-check"});
+      if(result&&result.available)return Object.assign({source:"published-course-map"},result);
+      return Object.assign({available:false,source:"published-course-map"},result||{});
+    }
+  }catch(error){
+    return {available:false,attempted:true,failed:true,source:"published-course-map",reason:error&&error.message||String(error)};
+  }
+  return {available:false,attempted:false,reason:"database-map-check-unavailable"};
+}
+function gdCoursePickerCheckDatabaseThenOpen(payload){
+  payload=gdNormalizeCoursePickerPayload(payload);
+  const token=`${Date.now()}-${Math.random()}`;
+  window.__gdCoursePickerDbCheckToken=token;
+  try{
+    window.__gdLiveCoursePickerSelection=payload;
+    window.__gdLiveCoursePickerSelectionAt=Date.now();
+    document.body.dataset.gdCourseNeedsPin="checking_database_map";
+    document.body.dataset.gdCourseNeedsPinCourse=payload?.courseId||payload?.canonicalKey||payload?.name||"";
+    document.body.dataset.gdCoursePinDecision="checking-database-map";
+  }catch(e){}
+  gdCoursePickerDatabaseMapAvailable(payload).then(result=>{
+    if(window.__gdCoursePickerDbCheckToken!==token)return false;
+    const hasDatabaseMap=!!(result&&result.available);
+    try{
+      document.body.dataset.gdCourseDatabaseMapAvailable=hasDatabaseMap?"yes":"no";
+      document.body.dataset.gdCourseDatabaseMapSource=result&&result.source||result&&result.reason||"";
+    }catch(e){}
+    const next=gdNormalizeCoursePickerPayload(Object.assign({},payload,{
+      gdDatabaseMapChecked:true,
+      gdDatabaseMapAvailable:hasDatabaseMap,
+      gdDatabaseMapSource:result&&result.source||""
+    }));
+    return gdOpenCoursePickerCourse(next);
+  }).catch(error=>{
+    if(window.__gdCoursePickerDbCheckToken!==token)return false;
+    try{
+      document.body.dataset.gdCourseDatabaseMapAvailable="error";
+      document.body.dataset.gdCourseDatabaseMapSource=error&&error.message||"database-map-check-error";
+    }catch(e){}
+    return gdOpenCoursePickerCourse(Object.assign({},payload,{gdDatabaseMapChecked:true,gdDatabaseMapAvailable:false}));
+  });
+  return false;
 }
 function gdSetCoursePickerPinMode(on){
   const active=!!on;
@@ -17414,7 +17474,8 @@ function gdConfirmCoursePin(event){
     finderLng:point.lng,
     coursePinned:true,
     pinnedByUser:true,
-    pinSource:"course-picker-pin"
+    pinSource:"course-picker-pin",
+    gdTrustedCoursePin:true
   }));
   gdHideCoursePinScreen();
   try{window.__gdPendingCoursePinPayload=null;window.__gdCoursePickerBypassPinOnce=true;}catch(e){}
@@ -17438,7 +17499,7 @@ function gdCoursePickerHasMappedPlayData(payload,hole=1){
   }catch(e){}
   return false;
 }
-function gdResetCoursePickerPresentationReadiness(payload){
+function gdResetCoursePickerPresentationReadiness(payload,opts={}){
   if(gdCoursePayloadIsManual(payload))return;
   try{
     window.__gdCourseFirstHoleReadyKey="";
@@ -17446,13 +17507,14 @@ function gdResetCoursePickerPresentationReadiness(payload){
     window.__gdOpeningCourseToFirstHoleKey="";
     window.__gdCoursePickerFirstHoleOpenToken=null;
   }catch(e){}
-  if(gdCoursePickerHasMappedPlayData(payload,1)){
+  if(!opts.forceScanner&&gdCoursePickerHasMappedPlayData(payload,1)){
     try{document.body.dataset.gdCourseNeedsPin="no";}catch(e){}
     return;
   }
   try{
     document.body.dataset.gdCourseNeedsPin="pending";
     document.body.dataset.gdCourseNeedsPinCourse=payload?.courseId||payload?.canonicalKey||payload?.name||"";
+    if(opts.forceScanner)document.body.dataset.gdCoursePlayPipelineStatus="scan_from_pin";
     document.body.classList.remove("gdMappedStartPromptActive","gdCapturedHoleFrameCameraOn","gdHoleImageCameraOn","gdGpsPresentationReady","gdHeadToTeeFrameActive","gdLockStateFrameActive","gd-frame-hard-locked");
   }catch(e){}
   try{window.gdClearHoleImageRuntime?.("course-picker-needs-pin");}catch(e){}
@@ -17694,19 +17756,26 @@ function gdScheduleCourseVisualPullForPlay(payload){
   setTimeout(()=>{gdLoadCourseVisualForPlay(payload,{keys,force:true,setLoading:false,source:"course-visual-cloud-loaded"});},80);
   return true;
 }
-function gdKickWholeCourseAutoMapOnLoad(payload){
+function gdKickWholeCourseAutoMapOnLoad(payload,opts={}){
   if(!payload||gdCoursePayloadIsManual(payload))return false;
   const now=Date.now();
   const selectedAt=new Date(now).toISOString();
   const library=window.GolfDaddyCourseLibrary||window.ClarityCaddieCourseLibrary||{};
+  const pinSeed=!!opts.fromPinnedSeed;
+  const pinnedCentre=pinSeed?gdCoursePickerFinitePoint(payload):null;
+  const snapshotOpts={selectedAt,source:pinSeed?"course-picker-pin-auto-map":"course-picker-auto-map"};
+  if(pinnedCentre)snapshotOpts.courseCentre=pinnedCentre;
   let mappingCourse=typeof library.mappingCourseSnapshot==="function"
-    ? library.mappingCourseSnapshot(payload,{selectedAt,source:"course-picker-auto-map"})
+    ? library.mappingCourseSnapshot(payload,snapshotOpts)
     : payload;
   const key=String(mappingCourse.courseId||mappingCourse.savedCourseId||mappingCourse.canonicalKey||mappingCourse.name||mappingCourse.courseName||payload.courseId||payload.name||"course").toLowerCase();
   if(window.__gdWholeCourseAutoMapOnLoadKey===key&&now-(window.__gdWholeCourseAutoMapOnLoadAt||0)<45000)return true;
   window.__gdWholeCourseAutoMapOnLoadKey=key;
   window.__gdWholeCourseAutoMapOnLoadAt=now;
-  try{document.body.dataset.gdCourseAutoMapStatus="checking_native_visual";}catch(e){}
+  try{
+    document.body.dataset.gdCourseAutoMapStatus=pinSeed?"checking_pin_seed":"checking_native_visual";
+    document.body.dataset.gdCourseScannerSeed=pinSeed?"pin":"course";
+  }catch(e){}
   Promise.resolve(gdLoadCourseVisualForPlay(payload,{force:true,source:"course-visual-preload"}))
     .then(visualResult=>{
       if(visualResult&&visualResult.loaded){
@@ -17716,6 +17785,7 @@ function gdKickWholeCourseAutoMapOnLoad(payload){
           document.body.dataset.gdCourseAutoMapSaved="0";
           document.body.dataset.gdCourseNeedsPin="no";
         }catch(e){}
+        gdScheduleCoursePickerFirstHoleOpen(payload);
         return visualResult;
       }
       const controller=window.runCourseMappingAttempt||window.gdRunCourseMappingAttempt||window.gdResolveCoursePlayHole;
@@ -17724,7 +17794,7 @@ function gdKickWholeCourseAutoMapOnLoad(payload){
         return {playable:false,reason:"controller-unavailable"};
       }
       try{document.body.dataset.gdCourseAutoMapStatus="running";}catch(e){}
-      return controller({course:mappingCourse,hole:1,wholeCourse:true,showLoading:true,fresh:true,selectedAt,reason:"course-picker"});
+      return controller({course:mappingCourse,courseCentre:pinnedCentre||undefined,hole:1,wholeCourse:true,showLoading:true,fresh:true,selectedAt,reason:pinSeed?"course-picker-pin":"course-picker"});
     })
     .then(result=>{
       if(result&&result.loaded)return;
@@ -17734,6 +17804,7 @@ function gdKickWholeCourseAutoMapOnLoad(payload){
         document.body.dataset.gdCourseAutoMapSaved=String(result?.saved||result?.persisted?.saved||0);
         document.body.dataset.gdCourseNeedsPin=result&&result.fallback?"active":result&&result.playable?"no":"pending";
       }catch(e){}
+      if(result&&result.playable)gdScheduleCoursePickerFirstHoleOpen(payload);
     })
     .catch(()=>{
       try{document.body.dataset.gdCourseAutoMapStatus="error";document.body.dataset.gdCourseNeedsPin="pending";}catch(e){}
@@ -17743,6 +17814,8 @@ function gdKickWholeCourseAutoMapOnLoad(payload){
 function gdOpenCoursePickerCourse(course){
   let payload=gdNormalizeCoursePickerPayload(course);
   payload=gdCoursePickerApplyStoredPin(payload);
+  if(!payload.gdDatabaseMapChecked&&!gdCoursePayloadIsManual(payload))return gdCoursePickerCheckDatabaseThenOpen(payload);
+  const usePinSeed=!payload.gdDatabaseMapAvailable&&gdCoursePickerUsesPinSeed(payload);
   try{
     window.__gdCoursePickerChangingAt=0;
     window.__gdCoursePickerFirstHoleOpenToken=null;
@@ -17753,7 +17826,7 @@ function gdOpenCoursePickerCourse(course){
   }catch(e){}
   if(gdCoursePickerNeedsCoursePin(payload))return gdShowCoursePinScreen(payload);
   gdHideCoursePinScreen();
-  gdResetCoursePickerPresentationReadiness(payload);
+  gdResetCoursePickerPresentationReadiness(payload,{forceScanner:usePinSeed});
   if(!gdCoursePayloadIsManual(payload)){
     try{selectedHole=1;currentPlayingHole=1;}catch(e){}
     try{sessionStorage.setItem("gd_gps_session_activated","1");sessionStorage.setItem("gd_active_playing_hole","1");sessionStorage.setItem("gd_mapper_active_hole","1");}catch(e){}
@@ -17771,9 +17844,9 @@ function gdOpenCoursePickerCourse(course){
     try{if(typeof toast==="function")toast(payload.name==="Manual GPS"?"Manual GPS selected":"Course selected");}catch(_){}
     gdRefreshGpsMapAfterCourseOpen(payload,{setCourseView:gdCoursePickerPayloadHasPoint(payload)});
   }
-  gdKickWholeCourseAutoMapOnLoad(payload);
+  gdKickWholeCourseAutoMapOnLoad(payload,{fromPinnedSeed:usePinSeed});
   gdScheduleCourseVisualPullForPlay(payload);
-  gdScheduleCoursePickerFirstHoleOpen(payload);
+  if(!usePinSeed)gdScheduleCoursePickerFirstHoleOpen(payload);
   return false;
 }
 function gdConfirmAssumedCourse(event){

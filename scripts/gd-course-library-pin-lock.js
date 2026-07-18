@@ -3330,6 +3330,7 @@
 	    autoMapOsmCourse,
 	    publishCourseMap,
 	    syncPublishedCourseMaps,
+	    publishedCourseMapAvailability,
 	    loadPublishedStore,
 		    assumedCourseCandidate,
 		    mappingCourseSnapshot,
@@ -4576,6 +4577,33 @@
 	    recordMappingDebug(request.debugRunId,{source:'cloud-map',phase:'skipped',event:'course-map-cloud-not-found',summary:'Course map not found in cloud',details:{keys,lookup:'published-course-maps',resolutionKey:request.resolutionKey,attemptToken:request.attemptToken}});
 	    recordCoursePlayDebug('course-map-cloud-not-found',request.course,request.hole,{keys,resolutionKey:request.resolutionKey,attemptToken:request.attemptToken});
 	    return {attempted:true,found:false,missing:true,keys};
+	  }
+	  async function publishedCourseMapAvailability(course,opts={}){
+	    const selectedAt=opts.selectedAt||nowIso();
+	    const c=mappingCourseSnapshot(course||courseObj(),Object.assign({},opts,{selectedAt,source:opts.source||'course-picker-db-map-check'}));
+	    if(!c||isManualGpsCourse(c))return {attempted:false,available:false,reason:'manual-course'};
+	    if(typeof fetch!=='function')return {attempted:false,available:false,reason:'fetch-unavailable'};
+	    const h=validHoleNumber(opts.hole)||1;
+	    const wholeCourse=opts.wholeCourse!==false;
+	    const keys=cloudCourseMapKeys(c);
+	    if(!keys.length)return {attempted:false,available:false,reason:'no-course-keys',course:c,keys};
+	    try{
+	      const maps=await syncPublishedCourseMaps({quiet:true,throwOnError:true});
+	      const published=publishedCourses().find(row=>keys.some(key=>courseMatchesIdentity(row,key,courseName(c),c)))||null;
+	      const readiness=published?savedMapCanSatisfyRequest(c,h,wholeCourse):null;
+	      return {
+	        attempted:true,
+	        available:!!(published&&readiness&&readiness.ready),
+	        found:!!published,
+	        course:c,
+	        published,
+	        keys,
+	        readiness,
+	        pulled:Object.keys(maps&&maps.courses||{}).length
+	      };
+	    }catch(error){
+	      return {attempted:true,available:false,failed:true,error,course:c,keys,reason:error&&error.message||String(error)};
+	    }
 	  }
 	  function shouldSyncGeneratedCourseMapToCloud(request,opts={}){
 	    if(opts.generatedCourseMapSync===false||opts.cloudCourseMapSync===false)return false;
