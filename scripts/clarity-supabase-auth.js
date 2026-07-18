@@ -231,6 +231,85 @@
     return body;
   }
 
+  // --- Access-token refresh -------------------------------------------------
+  // Supabase access tokens expire ~hourly. Nothing used to refresh them, so the
+  // stored session went stale and every JWT-gated call (the referral dashboard)
+  // failed auth - which, before the backend stopped alerting on 401s, flooded
+  // the admin inbox. These helpers refresh the token from the stored
+  // refresh_token before it's used, and drop a dead session so the app stops
+  // retrying it.
+
+  // Decode a JWT payload without verifying (the browser has no signing secret).
+  // Returns null when the token isn't a well-formed 3-segment JWT.
+  function decodeJwtPayload(token) {
+    var parts = String(token || "").split(".");
+    if (parts.length !== 3) return null;
+    return safe(function () {
+      return JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
+    }, null);
+  }
+
+  // Missing, malformed, or within 60s of expiry -> refresh before using it.
+  function tokenNeedsRefresh(token) {
+    var payload = decodeJwtPayload(token);
+    if (!payload || !payload.exp) return true;
+    return payload.exp * 1000 <= Date.now() + 60000;
+  }
+
+  var refreshInFlight = null;
+
+  async function doRefreshSession() {
+    var session = loadJson(SESSION_KEY, null);
+    var refreshToken = session && session.refresh_token;
+    if (!refreshToken) return "";
+    var config;
+    try { config = await publicAuthConfig(); } catch (_e) { return ""; }
+    var response = await fetch(config.supabaseUrl.replace(/\/+$/, "") + "/auth/v1/token?grant_type=refresh_token", {
+      method: "POST",
+      headers: { apikey: config.supabaseAnonKey, "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refreshToken })
+    });
+    var body = await response.json().catch(function () { return {}; });
+    if (!response.ok || !body.access_token) {
+      // Refresh token revoked/expired: clear only the Supabase session (the rest
+      // of the app's account state lives elsewhere) so it stops sending a dead
+      // token and a fresh sign-in can repopulate it.
+      safe(function () { localStorage.removeItem(SESSION_KEY); });
+      return "";
+    }
+    saveJson(SESSION_KEY, {
+      access_token: body.access_token,
+      refresh_token: body.refresh_token || refreshToken,
+      expires_at: body.expires_at || (body.expires_in ? Math.floor(Date.now() / 1000) + Number(body.expires_in) : null),
+      token_type: body.token_type || "bearer",
+      savedAt: nowISO()
+    });
+    return body.access_token;
+  }
+
+  // De-duped so concurrent callers (e.g. several referral polls) share one
+  // network round-trip instead of racing to spend the single-use refresh token.
+  function refreshSession() {
+    if (refreshInFlight) return refreshInFlight;
+    refreshInFlight = doRefreshSession().then(function (token) {
+      refreshInFlight = null;
+      return token;
+    }, function () {
+      refreshInFlight = null;
+      return "";
+    });
+    return refreshInFlight;
+  }
+
+  // A valid access token, refreshing first when the stored one is missing or
+  // about to expire. Returns "" when there is no session or the refresh failed.
+  async function freshAccessToken() {
+    var session = loadJson(SESSION_KEY, null);
+    var token = session && session.access_token;
+    if (token && !tokenNeedsRefresh(token)) return token;
+    return await refreshSession();
+  }
+
   function clearRecoveryUrl() {
     safe(function () {
       var clean = location.origin + location.pathname;
@@ -307,7 +386,7 @@
     return true;
   }
 
-  window.ClaritySupabaseAuth = { signup: signup, login: login, updateAccount: updateAccount, invitePlayer: invitePlayer, commit: commit, wrap: wrap, showPasswordSetup: showPasswordSetup, session: function () { return loadJson(SESSION_KEY, null); } };
+  window.ClaritySupabaseAuth = { signup: signup, login: login, updateAccount: updateAccount, invitePlayer: invitePlayer, commit: commit, wrap: wrap, showPasswordSetup: showPasswordSetup, session: function () { return loadJson(SESSION_KEY, null); }, freshAccessToken: freshAccessToken, refreshSession: refreshSession };
   document.addEventListener("DOMContentLoaded", function () { setTimeout(wrap, 0); setTimeout(wrap, 600); setTimeout(showPasswordSetup, 50); });
   setTimeout(wrap, 0);
   setTimeout(wrap, 800);

@@ -72,6 +72,30 @@
     return headers;
   }
 
+  // Like requestHeaders, but first refreshes the Supabase access token if it has
+  // expired (the referral endpoint is JWT-gated, and tokens die ~hourly). Falls
+  // back to whatever is stored if the auth module isn't loaded. When forceRefresh
+  // is true it always exchanges the refresh token first - used to retry once
+  // after a 401 in case the server rejected a token we thought was still valid.
+  async function authedHeaders(forceRefresh) {
+    var headers = { "Content-Type": "application/json" };
+    var token = "";
+    try {
+      var auth = window.ClaritySupabaseAuth;
+      if (forceRefresh && auth && typeof auth.refreshSession === "function") {
+        token = await auth.refreshSession();
+      } else if (auth && typeof auth.freshAccessToken === "function") {
+        token = await auth.freshAccessToken();
+      } else {
+        token = authToken();
+      }
+    } catch (_error) {
+      token = authToken();
+    }
+    if (token) headers.Authorization = "Bearer " + token;
+    return headers;
+  }
+
   function loadStatus() { return safe(function () { return JSON.parse(localStorage.getItem(CACHE_KEY) || "null"); }, null) || { active: false, entitlements: [], configured: null, checkedAt: "" }; }
   function loadSettings() { return safe(function () { return JSON.parse(localStorage.getItem(SETTINGS_KEY) || "null"); }, null) || { products: [], stripeConnected: false, webhookConfigured: false, isAdmin: false }; }
   function loadReferralState() { return safe(function () { return JSON.parse(localStorage.getItem(REFERRAL_STATE_KEY) || "null"); }, null) || { dashboard: null, shareUrl: "", error: "", lastChecked: "" }; }
@@ -238,7 +262,14 @@
     opts = opts || {};
     referralPending = true; render();
     try {
-      var response = await fetch(REFERRAL_ENDPOINT, { method: "POST", headers: requestHeaders(), body: JSON.stringify(Object.assign({ action: action }, payload || {})) });
+      var requestBody = JSON.stringify(Object.assign({ action: action }, payload || {}));
+      var response = await fetch(REFERRAL_ENDPOINT, { method: "POST", headers: await authedHeaders(false), body: requestBody });
+      // A 401 means the token was stale/rejected: force one refresh and retry
+      // before giving up, so a just-expired session recovers silently instead
+      // of surfacing an error.
+      if (response.status === 401) {
+        response = await fetch(REFERRAL_ENDPOINT, { method: "POST", headers: await authedHeaders(true), body: requestBody });
+      }
       var body = await response.json().catch(function () { return {}; });
       if (!response.ok) throw new Error(body.error || "Referral action failed");
       referralPending = false;
