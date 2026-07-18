@@ -46,7 +46,6 @@
   }
   function mappedMode(){
     return safe(function(){
-      if(tournamentActive())return false;
       var course=activeCourse();
       var value=localStorage.getItem(COURSE_MODE_PREFIX+courseIdentity(course));
       if(value==="mapped")return true;
@@ -100,12 +99,8 @@
 	  function mappingActive(){
 	    return !!window.gdFullMappingMode||document.body.classList.contains("gdFullMappingMode");
 	  }
-	  function tournamentActive(){
-	    return safe(function(){return typeof window.gdTournamentModeEnabled==="function"&&window.gdTournamentModeEnabled()},false);
-	  }
 	  function toolScreen(){
 	    if(!gpsActive())return document.body.classList.contains("shell-module")?"module":"home";
-	    if(tournamentActive())return "unmapped";
 	    if(mappingActive())return "mapping";
 	    return mappedMode()?"mapped":"unmapped";
 	  }
