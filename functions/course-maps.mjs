@@ -61,7 +61,14 @@ export default async function courseMaps(req) {
 
   const actor = payload && payload.actor || {};
   const adminActor = isAdminActor(actor);
+  const action = text(payload && payload.action, 40).toLowerCase() || "upsert";
   const generatedUpload = isGeneratedCourseUpload(payload);
+
+  if (action === "delete" || action === "reset") {
+    if (!adminActor) return json(403, { error: "Admin delete only" });
+    return deleteCourseMap(payload);
+  }
+
   if (!adminActor && !generatedUpload) return json(403, { error: "Admin publish only" });
 
   const course = sanitizeCourse(payload && payload.course, adminActor ? actor : communityScanActor(actor));
@@ -132,15 +139,94 @@ function emptyMaps() {
 }
 
 async function readMaps() {
-  const blobMaps = await readBlobMaps();
-  if (!hasSupabase()) return blobMaps;
+  if (!hasSupabase()) return readBlobMaps();
+  const blobMapsPromise = readBlobMaps().catch((error) => {
+    console.warn("course map mirror read failed", error && error.message || error);
+    return null;
+  });
   try {
     const cloudMaps = await readSupabaseMaps();
-    return mergeMapSets(blobMaps, cloudMaps, { storage: "supabase" });
+    const blobMaps = await blobMapsPromise;
+    return withMirrorSummary(cloudMaps, blobMaps);
   } catch (error) {
     console.warn("course map supabase read failed", error && (error.body || error.message) || error);
-    return Object.assign(blobMaps, { storage: "netlify-blobs", warnings: [{ storage: "supabase", message: storageMessage(error) }] });
+    const warnings = [{ storage: "supabase", message: storageMessage(error) }];
+    const blobMaps = await blobMapsPromise;
+    if (env("COURSE_MAPS_ALLOW_BLOB_FALLBACK") === "true") {
+      return Object.assign(blobMaps || emptyMaps(), {
+        storage: "netlify-blobs",
+        authoritativeStorage: "supabase",
+        warnings
+      });
+    }
+    return Object.assign(emptyMaps(), {
+      storage: "supabase",
+      unavailable: true,
+      mirrorStorage: blobMaps ? "netlify-blobs" : null,
+      mirrorCourseCount: blobMaps ? Object.keys(blobMaps.courses || {}).length : 0,
+      warnings
+    });
   }
+}
+
+async function deleteCourseMap(payload) {
+  const courseId = deleteCourseId(payload);
+  if (!courseId) return json(400, { error: "courseId is required" });
+
+  let current;
+  try {
+    current = hasSupabase() ? await readSupabaseMaps() : await readBlobMaps();
+  } catch (error) {
+    return json(error.status || 503, { error: storageMessage(error), courseId, storage: "supabase" });
+  }
+
+  const existingKey = findCourseMapKey(current, {
+    id: "published::" + courseId,
+    courseId,
+    courseName: payload && (payload.courseName || payload.name) || payload && payload.course && (payload.course.courseName || payload.course.name)
+  });
+  let deletedMirror = 0;
+  if (existingKey) {
+    delete current.courses[existingKey];
+    current.updatedAt = new Date().toISOString();
+    deletedMirror = 1;
+  }
+
+  const warnings = [];
+  let deletedSupabase = 0;
+  let storage = "netlify-blobs";
+  if (hasSupabase()) {
+    try {
+      deletedSupabase = await deleteSupabaseCourse(courseId);
+      storage = "supabase";
+    } catch (error) {
+      return json(error.status || 503, { error: storageMessage(error), courseId, storage: "supabase" });
+    }
+  } else {
+    warnings.push({ storage: "supabase", message: "Supabase is not configured" });
+  }
+
+  const mirrored = await writeBlobMaps(current);
+  if (!mirrored.ok) {
+    warnings.push({ storage: "netlify-blobs", message: mirrored.message });
+    if (storage !== "supabase") return json(503, { error: "Course map storage unavailable", courseId, warnings });
+  }
+
+  return json(200, Object.assign(current, {
+    ok: true,
+    action: "delete",
+    courseId,
+    deleted: { supabase: deletedSupabase, mirror: deletedMirror },
+    storage,
+    warnings
+  }));
+}
+
+function withMirrorSummary(cloudMaps, blobMaps) {
+  const out = Object.assign(emptyMaps(), cloudMaps || {}, { storage: "supabase" });
+  out.mirrorStorage = blobMaps ? "netlify-blobs" : null;
+  out.mirrorCourseCount = blobMaps ? Object.keys(blobMaps.courses || {}).length : 0;
+  return out;
 }
 
 async function readBlobMaps() {
@@ -176,6 +262,18 @@ async function writeSupabaseCourse(course) {
     headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
     body: JSON.stringify(courseToSupabaseRow(course))
   });
+}
+
+async function deleteSupabaseCourse(courseId) {
+  const byCourseId = await supabaseFetch(TABLE + "?course_id=eq." + encodeURIComponent(courseId), {
+    method: "DELETE",
+    headers: { Prefer: "return=representation" }
+  });
+  const byId = await supabaseFetch(TABLE + "?id=eq." + encodeURIComponent("published::" + courseId), {
+    method: "DELETE",
+    headers: { Prefer: "return=representation" }
+  });
+  return (Array.isArray(byCourseId) ? byCourseId.length : 0) + (Array.isArray(byId) ? byId.length : 0);
 }
 
 function mapsFromSupabaseRows(rows) {
@@ -270,6 +368,16 @@ function communityScanActor(actor) {
     accountId: text(actor && actor.accountId, 120),
     role: "player"
   };
+}
+
+function deleteCourseId(payload) {
+  const course = payload && payload.course || {};
+  const raw = text(
+    payload && (payload.courseId || payload.course_id || payload.id || payload.courseName || payload.name) ||
+    course && (course.courseId || course.course_id || course.id || course.courseName || course.name),
+    220
+  );
+  return slug(raw.replace(/^published::/i, ""));
 }
 
 function findCourseMapKey(maps, course) {
@@ -531,10 +639,12 @@ function distanceM(a, b) {
 export const __courseMapsTest = {
   courseFromSupabaseRow,
   courseToSupabaseRow,
+  deleteCourseId,
   findCourseMapKey,
   isGeneratedCourseUpload,
   mergeGeneratedCourse,
   mapsFromSupabaseRows,
   mergeMapSets,
   sanitizeCourse,
+  withMirrorSummary,
 };

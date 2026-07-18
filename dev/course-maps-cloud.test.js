@@ -10,12 +10,14 @@ const { pathToFileURL } = require("url");
   const {
     courseFromSupabaseRow,
     courseToSupabaseRow,
+    deleteCourseId,
     findCourseMapKey,
     isGeneratedCourseUpload,
     mergeGeneratedCourse,
     mapsFromSupabaseRows,
     mergeMapSets,
-    sanitizeCourse
+    sanitizeCourse,
+    withMirrorSummary
   } = mod.__courseMapsTest;
 
   const actor = { name: "Sam", email: "samhalegolf@gmail.com", role: "admin", accountId: "acct-1" };
@@ -101,6 +103,20 @@ const { pathToFileURL } = require("url");
   assert.equal(merged.storage, "supabase");
   assert.equal(merged.courses["published::cromwell"].courseName, "Cromwell Golf Course");
   assert.equal(merged.updatedAt, "2026-07-15T01:00:00.000Z");
+
+  const authoritative = withMirrorSummary(cloudMaps, {
+    updatedAt: "2026-07-16T01:00:00.000Z",
+    courses: {
+      "published::akarana-golf-club": { id: "published::akarana-golf-club", courseId: "akarana-golf-club", courseName: "Akarana Golf Club" }
+    }
+  });
+  assert.equal(authoritative.storage, "supabase");
+  assert.equal(authoritative.courses["published::akarana-golf-club"], undefined);
+  assert.equal(authoritative.courses["published::cromwell"].courseName, "Cromwell Golf Course");
+  assert.equal(authoritative.mirrorCourseCount, 1);
+
+  assert.equal(deleteCourseId({ id: "published::akarana-golf-club" }), "akarana-golf-club");
+  assert.equal(deleteCourseId({ course: { courseName: "Akarana Golf Club" } }), "akarana-golf-club");
 
   assert.equal(isGeneratedCourseUpload({ generated: true, mode: "generated-create-or-append" }), true);
   assert.equal(isGeneratedCourseUpload({ generated: true, source: "native-resolver" }), true);

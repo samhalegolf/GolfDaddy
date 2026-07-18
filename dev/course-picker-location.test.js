@@ -61,9 +61,9 @@ assert(pickerSearch.includes("function loadDatabaseCourses(opts={})"), "course p
 assert(pickerSearch.includes('source:"database-course"'), "database courses are tagged when merged into picker results");
 assert(pickerSearch.includes("hasDatabaseMap=true"), "database course results keep a database-map flag for picker ranking");
 assert(index.includes("gd-app-base.css?v=course-picker-live-gps-pin-20260718"), "base CSS cache-bust ships the pin prompt styling");
-assert(index.includes("gd-app-core.js?v=course-picker-db-search-sync-20260718"), "app core cache-bust ships the DB-map pin rule");
-assert(index.includes("gd-course-picker-search-v2.js?v=course-picker-db-search-sync-20260718"), "course picker search cache-bust ships database course hydration");
+assert(index.includes("gd-app-core.js?v=course-picker-owner-cleanup-20260719"), "app core cache-bust ships the DB-map pin rule");
+assert(index.includes("gd-course-picker-search-v2.js?v=course-picker-owner-cleanup-20260719"), "course picker search cache-bust ships database course hydration");
 assert(index.includes("gd-course-library-pin-lock.js?v=course-picker-db-search-sync-20260718"), "course library cache-bust ships generated scan upload");
-assert(index.includes("gd-gps-play-runtime-owner-v1.js?v=course-picker-pin-screen-20260718"), "GPS runtime cache-bust ships the pin prompt wrapper guard");
+assert(index.includes("gd-gps-play-runtime-owner-v1.js?v=course-picker-owner-cleanup-20260719"), "GPS runtime cache-bust ships the pin prompt wrapper guard");
 
 console.log("course-picker-location tests passed");
