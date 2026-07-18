@@ -35,8 +35,10 @@
     if (!document.body) return false;
     if (!gpsOpen()) return false;
     if (pickerOpen()) return false;
+    if (document.body.classList.contains('gdAuthLocked') || document.body.classList.contains('gdProfileOpen')) return false;
     if (document.body.classList.contains('shell-home') || document.body.classList.contains('shell-module')) return false;
     if (document.body.classList.contains('gdCourseOpening')) return false;
+    if (document.querySelector('#bagPanel.open,#developerPanel.open,#settingsPanel.open,#profilePanel.open,#statsPanel.open,#dataHubPanel.open,#practiceDataPanel.open,#gdProfileV67:not(.hidden)')) return false;
     return true;
   }
 

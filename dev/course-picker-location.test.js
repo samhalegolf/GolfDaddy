@@ -59,6 +59,7 @@ assert(gpsRuntime.includes('document.body.dataset.gdCourseNeedsPin==="choose-cou
 assert(!index.includes('class="rightRail" id="gdAppRightRail"'), "right rail is no longer static boot markup that can flash over the picker");
 assert(brandRail.includes("function railAllowed()"), "brand rail script owns rail creation instead of static HTML");
 assert(brandRail.includes("removeRightRail();"), "brand rail script deletes the rail while picker/home surfaces own the screen");
+assert(brandRail.includes("gdAuthLocked") && brandRail.includes("gdProfileOpen"), "brand rail script does not keep a hidden rail on auth/profile screens");
 assert(brandRail.includes("window.gdEnsureAppRightRail = ensureRightRail;"), "runtime owner can request a rail only when GPS play needs it");
 assert(gpsRuntime.includes('if(!rail&&typeof window.gdEnsureAppRightRail==="function")rail=window.gdEnsureAppRightRail();'), "GPS runtime creates the rail through the rail owner");
 assert(betaShell.includes("if(!gpsActive()){"), "legacy beta shell does not attach mode switch while picker is active");
