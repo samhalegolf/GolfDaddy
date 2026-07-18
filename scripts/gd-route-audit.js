@@ -122,7 +122,7 @@
 	      "manual-gps-active","shell-home","shell-gps","shell-module","gdShotDataOpen","gdMappedCourseMode","gdMappedStartPromptActive",
 	      "gdManualStartPlacementActive","gdToolRailOpen","gdCoursePickerOpen","gdCoursePinPromptActive","gdCourseOpening","gdCapturedHoleFrameCameraOn","gdHoleImageCameraOn",
 	      "gdAuthLocked","gdPasswordResetRoute","gdGreenArrivalMode","gdMappedSnapCameraActive","gdPreLockBlackoutFrame",
-	      "gdWandLayerActive","gdArcadeMode","gdArcadeRouteLocked","gdArcadePlaying","gdArcadeDragging",
+	      "gdWandLayerActive",
 	      "gdFullMappingMode","gdFullMappingUiActive"
 	    ].forEach(cls=>document.body.classList.remove(cls));
 	  }

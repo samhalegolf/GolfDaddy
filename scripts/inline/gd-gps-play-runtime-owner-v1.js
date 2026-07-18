@@ -1052,7 +1052,6 @@
     var id=el.id||"";
     if(!roleAllowsTool(id))return false;
     var screen=currentToolScreen();
-    if(id==="gdArcadeRailBtn")return document.body.classList.contains("gdArcadeEntryAllowed")&&document.body.classList.contains("gdArcadeEntryAvailable");
     if(id==="gdGpsSnapZoomBtn"||id==="gdGreenZoomBtn"||id==="gdGpsSettingsRailBtn")return gpsOpen();
     if(id==="gdV62ModeSwitch")return false;
     var mapped={flagTool:1,windToolBtn:1,gpsRailBtn:1,gdGreenZoomBtn:1,gdGpsSettingsRailBtn:1,scorecardRailBtn:1,bagRailBtn:1};
