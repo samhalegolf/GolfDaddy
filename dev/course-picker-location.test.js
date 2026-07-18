@@ -39,6 +39,7 @@ assert(appCore.includes('mark("needs-pin")'), "pin decision writes a DOM breadcr
 assert(appCore.includes("const usePinSeed=!payload.gdDatabaseMapAvailable&&gdCoursePickerUsesPinSeed(payload);"), "database maps win over stored pin scanner seeds");
 assert(appCore.includes('reason:pinSeed?"course-picker-pin":"course-picker"'), "confirmed pins feed the course scanner as the mapping reason");
 assert(appCore.includes("courseCentre:pinnedCentre||undefined"), "confirmed pins feed the course scanner as the mapping centre");
+assert(appCore.includes("allowLocalSavedMap:payload?.gdDatabaseMapAvailable===true"), "local saved maps cannot beat the picker pin flow without a confirmed database map");
 assert(appCore.includes("window.gdConfirmCoursePin=gdConfirmCoursePin"), "pin confirmation is exposed for the picker panel");
 assert(pickerBaseCss.includes(".courseScreen{position:absolute;inset:0;z-index:7600;background:transparent"), "course picker overlay leaves the live map visible behind the controls");
 assert(pickerBaseCss.includes(".gdCoursePinScreen"), "course picker includes the no-GPS pin prompt styling");
@@ -51,10 +52,12 @@ assert(library.includes("lat:finder?.lat??saved.courseLat??null"), "course libra
 assert(library.includes("course?loadUserCourseData(userId(),courseId(course)):loadUserCourseData()"), "mapped checks load the explicit selected course instead of stale active course data");
 assert(library.includes("const hasTrustedPlayData=requestedHolePlayable(course,expected);"), "settled course-open UI requires trusted mapped data for the requested hole");
 assert(library.includes("async function publishedCourseMapAvailability(course,opts={})"), "course library exposes a DB-map-only availability check for the picker");
+assert(library.includes("function courseDataMapReadiness(course,hole,wholeCourse)"), "database map availability checks the published course data directly");
+assert(library.includes("saved-map-ignored-without-database-map"), "course scanner ignores local saved maps when the picker did not confirm a database map");
 assert(index.includes("gd-app-base.css?v=course-picker-live-gps-pin-20260718"), "base CSS cache-bust ships the pin prompt styling");
-assert(index.includes("gd-app-core.js?v=course-picker-db-map-pin-20260718"), "app core cache-bust ships the DB-map pin rule");
-assert(index.includes("gd-course-picker-search-v2.js?v=course-picker-db-map-pin-20260718"), "course picker search cache-bust ships sanitized recents");
-assert(index.includes("gd-course-library-pin-lock.js?v=course-picker-db-map-pin-20260718"), "course library cache-bust ships the DB-map availability check");
+assert(index.includes("gd-app-core.js?v=course-picker-db-map-pin2-20260718"), "app core cache-bust ships the DB-map pin rule");
+assert(index.includes("gd-course-picker-search-v2.js?v=course-picker-db-map-pin2-20260718"), "course picker search cache-bust ships sanitized recents");
+assert(index.includes("gd-course-library-pin-lock.js?v=course-picker-db-map-pin2-20260718"), "course library cache-bust ships the DB-map availability check");
 assert(index.includes("gd-gps-play-runtime-owner-v1.js?v=course-picker-pin-screen-20260718"), "GPS runtime cache-bust ships the pin prompt wrapper guard");
 
 console.log("course-picker-location tests passed");

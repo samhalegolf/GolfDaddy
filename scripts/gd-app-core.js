@@ -17794,7 +17794,7 @@ function gdKickWholeCourseAutoMapOnLoad(payload,opts={}){
         return {playable:false,reason:"controller-unavailable"};
       }
       try{document.body.dataset.gdCourseAutoMapStatus="running";}catch(e){}
-      return controller({course:mappingCourse,courseCentre:pinnedCentre||undefined,hole:1,wholeCourse:true,showLoading:true,fresh:true,selectedAt,reason:pinSeed?"course-picker-pin":"course-picker"});
+      return controller({course:mappingCourse,courseCentre:pinnedCentre||undefined,hole:1,wholeCourse:true,showLoading:true,fresh:true,allowLocalSavedMap:payload?.gdDatabaseMapAvailable===true,selectedAt,reason:pinSeed?"course-picker-pin":"course-picker"});
     })
     .then(result=>{
       if(result&&result.loaded)return;

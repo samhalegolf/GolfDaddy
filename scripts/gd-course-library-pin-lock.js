@@ -4389,6 +4389,20 @@
       ready: wholeCourse?coverage.complete:requestedPlayable
     };
   }
+  function courseDataMapReadiness(course,hole,wholeCourse){
+    const h=validHoleNumber(hole)||1;
+    const expected=Math.max(1,Math.min(18,Number(automapperExpectedHoleCount())||18));
+    const holes=[];
+    for(let n=1;n<=expected;n++){
+      const data=mappedHolePlayData(course,n);
+      if(data&&data.complete&&data.green&&Array.isArray(data.route)&&data.route.length>=2)holes.push(n);
+    }
+    const missing=[];
+    for(let n=1;n<=expected;n++)if(!holes.includes(n))missing.push(n);
+    const requestedPlayable=holes.includes(h);
+    const coverage={expected,holes,count:holes.length,missing,complete:holes.length>=expected&&missing.length===0};
+    return {requestedPlayable,coverage,ready:wholeCourse?coverage.complete:requestedPlayable};
+  }
   function coursePlayDebugDetail(course,hole,detail={}){
     const h=validHoleNumber(hole)||1;
     return Object.assign({
@@ -4563,11 +4577,11 @@
 	    try{
 	      const maps=await syncPublishedCourseMaps({quiet:true,throwOnError:true});
 	      const published=publishedCourses().find(course=>keys.some(key=>courseMatchesIdentity(course,key,request.courseName,request.course)))||null;
-	      const readiness=savedMapCanSatisfyRequest(request.course,request.hole,request.wholeCourse);
+	      const readiness=published?courseDataMapReadiness(published,request.hole,request.wholeCourse):null;
 	      if(published){
-	        recordMappingDebug(request.debugRunId,{source:'cloud-map',phase:readiness.ready?'completed':'partial',event:readiness.ready?'course-map-cloud-loaded':'course-map-cloud-incomplete',summary:readiness.ready?'Course map loaded from cloud':'Course map cloud data incomplete',details:{courseKey:published.courseId,lookup:'published-course-maps',publishedCourseId:published.id,pulled:Object.keys(maps&&maps.courses||{}).length,persistedObjects:Object.keys(published.objects||{}).length,holes:readiness.coverage.holes,playableHoleCount:readiness.coverage.count,expectedHoleCount:readiness.coverage.expected,missingHoles:readiness.coverage.missing,resolutionKey:request.resolutionKey,attemptToken:request.attemptToken}});
-	        recordCoursePlayDebug(readiness.ready?'course-map-cloud-loaded':'course-map-cloud-incomplete',request.course,request.hole,{courseKey:published.courseId,lookup:'published-course-maps',publishedCourseId:published.id,pulled:Object.keys(maps&&maps.courses||{}).length,persistedObjects:Object.keys(published.objects||{}).length,holes:readiness.coverage.holes,playable:readiness.ready,resolutionKey:request.resolutionKey,attemptToken:request.attemptToken});
-	        return {attempted:true,found:true,key:published.courseId,result:maps,persisted:{saved:0,holes:readiness.coverage.holes},readiness,published};
+	        recordMappingDebug(request.debugRunId,{source:'cloud-map',phase:readiness&&readiness.ready?'completed':'partial',event:readiness&&readiness.ready?'course-map-cloud-loaded':'course-map-cloud-incomplete',summary:readiness&&readiness.ready?'Course map loaded from cloud':'Course map cloud data incomplete',details:{courseKey:published.courseId,lookup:'published-course-maps',publishedCourseId:published.id,pulled:Object.keys(maps&&maps.courses||{}).length,persistedObjects:Object.keys(published.objects||{}).length,holes:readiness&&readiness.coverage&&readiness.coverage.holes||[],playableHoleCount:readiness&&readiness.coverage&&readiness.coverage.count||0,expectedHoleCount:readiness&&readiness.coverage&&readiness.coverage.expected||0,missingHoles:readiness&&readiness.coverage&&readiness.coverage.missing||[],resolutionKey:request.resolutionKey,attemptToken:request.attemptToken}});
+	        recordCoursePlayDebug(readiness&&readiness.ready?'course-map-cloud-loaded':'course-map-cloud-incomplete',request.course,request.hole,{courseKey:published.courseId,lookup:'published-course-maps',publishedCourseId:published.id,pulled:Object.keys(maps&&maps.courses||{}).length,persistedObjects:Object.keys(published.objects||{}).length,holes:readiness&&readiness.coverage&&readiness.coverage.holes||[],playable:!!(readiness&&readiness.ready),resolutionKey:request.resolutionKey,attemptToken:request.attemptToken});
+	        return {attempted:true,found:true,key:published.courseId,result:maps,persisted:{saved:0,holes:readiness&&readiness.coverage&&readiness.coverage.holes||[]},readiness,published};
 	      }
 	    }catch(error){
 	      recordMappingDebug(request.debugRunId,{source:'cloud-map',phase:'failed',event:'course-map-cloud-lookup-failed',summary:'Course map cloud lookup failed',details:{keys,lookup:'published-course-maps',resolutionKey:request.resolutionKey,attemptToken:request.attemptToken},error:{message:error&&error.message||String(error),status:error&&error.status||null}});
@@ -4590,7 +4604,7 @@
 	    try{
 	      const maps=await syncPublishedCourseMaps({quiet:true,throwOnError:true});
 	      const published=publishedCourses().find(row=>keys.some(key=>courseMatchesIdentity(row,key,courseName(c),c)))||null;
-	      const readiness=published?savedMapCanSatisfyRequest(c,h,wholeCourse):null;
+	      const readiness=published?courseDataMapReadiness(published,h,wholeCourse):null;
 	      return {
 	        attempted:true,
 	        available:!!(published&&readiness&&readiness.ready),
@@ -4948,12 +4962,13 @@
 	        const cloudMapResult=await tryHydrateCourseMapFromCloud(request,attempt,Object.assign({},opts,{__resumeRoundAvailableBeforeOpen:resumeAvailableBeforeOpen}));
 	        if(cloudMapResult&&cloudMapResult.attempted&&!mappingAttemptStillCurrent(request,attempt,'cloud-map'))return {playable:false,stale:true,reason:'superseded-after-cloud-map'};
 	        recordMappingDebug(debugRunId,{source:'saved-map',phase:'started',event:'saved-map-lookup-started',summary:'Saved-map lookup started',details:{hole:h,existingTrustedMap:false,resolutionKey:key,attemptToken}});
+        const localSavedMapAllowed=opts.allowLocalSavedMap!==false;
         const savedState=savedMapCanSatisfyRequest(c,h,request.wholeCourse);
         const savedPlayable=!!savedState.requestedPlayable;
         const savedReady=!!savedState.ready;
         const savedIncomplete=savedPlayable&&request.wholeCourse&&!savedReady;
-        recordMappingDebug(debugRunId,{source:'saved-map',phase:savedReady?'completed':'skipped',event:savedReady?'saved-map-found':savedIncomplete?'saved-map-incomplete':'saved-map-not-found',summary:savedReady?'Saved map found':savedIncomplete?'Saved map incomplete':'Saved map not found',details:{hole:h,existingTrustedMap:savedPlayable,resolutionKey:key,attemptToken,wholeCourse:request.wholeCourse,playableHoleCount:savedState.coverage.count,expectedHoleCount:savedState.coverage.expected,playableHoles:savedState.coverage.holes,missingHoles:savedState.coverage.missing}});
-        if(savedReady){
+        recordMappingDebug(debugRunId,{source:'saved-map',phase:savedReady&&localSavedMapAllowed?'completed':'skipped',event:savedReady&&!localSavedMapAllowed?'saved-map-ignored-without-database-map':savedReady?'saved-map-found':savedIncomplete?'saved-map-incomplete':'saved-map-not-found',summary:savedReady&&!localSavedMapAllowed?'Saved map ignored without database map':savedReady?'Saved map found':savedIncomplete?'Saved map incomplete':'Saved map not found',details:{hole:h,existingTrustedMap:savedPlayable,localSavedMapAllowed,resolutionKey:key,attemptToken,wholeCourse:request.wholeCourse,playableHoleCount:savedState.coverage.count,expectedHoleCount:savedState.coverage.expected,playableHoles:savedState.coverage.holes,missingHoles:savedState.coverage.missing}});
+        if(savedReady&&localSavedMapAllowed){
           finishMappingDebug(debugRunId,{status:'completed',outcome:'trusted saved map ready'});
           return showResolvedCoursePlayHole(c,h,'saved-map',opts);
         }
