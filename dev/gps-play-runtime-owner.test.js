@@ -6,6 +6,7 @@ const root = path.join(__dirname, "..");
 const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
 const shellCss = fs.readFileSync(path.join(root, "styles", "gd-shell.css"), "utf8");
 const appCore = fs.readFileSync(path.join(root, "scripts", "gd-app-core.js"), "utf8");
+const betaModeShell = fs.readFileSync(path.join(root, "scripts", "inline", "gd-gps-beta-mode-shell.js"), "utf8");
 const playFlow = fs.readFileSync(path.join(root, "scripts", "inline", "gd-play-flow-next-hole-v1.js"), "utf8");
 const capturedCamera = fs.readFileSync(path.join(root, "scripts", "inline", "gd-captured-hole-frame-camera-v19.js"), "utf8");
 const stateStabilizer = fs.readFileSync(path.join(root, "scripts", "inline", "gd-gps-state-stabilizer-v1.js"), "utf8");
@@ -62,7 +63,7 @@ function assertBefore(source, first, second, message) {
 
 const runtimeScript = scriptById("gdGpsPlayRuntimeOwnerV1");
 const runtimeCss = styleById("gdGpsPlayRuntimeOwnerV1Css");
-const sourceBundle = [html, appCore, playFlow, capturedCamera, stateStabilizer, stableControlsCss, runtimeScript, runtimeCss].join("\n");
+const sourceBundle = [html, appCore, betaModeShell, playFlow, capturedCamera, stateStabilizer, stableControlsCss, runtimeScript, runtimeCss].join("\n");
 new Function(runtimeScript);
 
 assertNotContains(html, '<script id="gdGpsSpringCleanOwnerV1">', "old Spring Clean script id is not the live owner");
@@ -118,6 +119,9 @@ assertContains(runtimeCss, "body.shell-gps.gdCoursePickerOpen #map", "course pic
 assertContains(runtimeCss, "body.shell-gps .playerBadge", "GPS runtime hides the old hard-coded player badge");
 assertNotContains(html, '<div class="badgeName" id="playerName">SAM</div>', "old player badge no longer hard-codes Sam");
 assertNotContains(html, 'id="playerName"', "old GPS player badge no longer owns the active profile-name hook");
+assertContains(html, "scripts/inline/gd-gps-beta-mode-shell.js?v=gps-legacy-player-badge-20260718", "GPS badge script cache-busts the neutral label");
+assertContains(sourceBundle, "name.textContent='GPS'", "modern GPS badge uses a neutral label instead of the player name");
+assertNotContains(sourceBundle, "name.textContent=profileName()", "modern GPS badge does not render the player name");
 assertContains(runtimeScript, 'document.body.dataset.gdGpsMapVisibilityState=pickerOpen()?"picker-live-map":"not-gps"', "runtime owner records the picker live-map state");
 assertContains(runtimeScript, "function liftShellTop", "GPS runtime owns lifting shell chrome out of app stacking context");
 assertContains(runtimeScript, "document.body.appendChild(top)", "GPS runtime moves shell chrome to the body layer");

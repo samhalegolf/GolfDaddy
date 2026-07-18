@@ -168,7 +168,7 @@
     }catch(e){courseTop.textContent=''}
     const name=document.createElement('div');
     name.className='name';
-    name.textContent=profileName();
+    name.textContent='GPS';
     const subEl=document.createElement('div');
     subEl.className='sub';
     subEl.textContent=sub;
