@@ -196,7 +196,7 @@
 <div class="gpsModeSwitch" id="gpsModeSwitch"><button class="live" id="gpsLiveModeBtn" onclick="setGpsPlayMode(\'live\')">Live</button><button class="twoTap active" id="gpsTwoTapBtn" onclick="setGpsPlayMode(\'twoTap\')">Manual</button></div>
 <div class="playerBadge">
 <div class="badgeMain">
-<div><div class="badgeName" id="playerName"></div><button class="badgeCourse" id="courseLine" type="button" onclick="gdOpenChangeCourse(event)"></button></div>
+<div><div class="badgeName"></div><button class="badgeCourse" id="courseLine" type="button" onclick="gdOpenChangeCourse(event)"></button></div>
 <div class="scoreBlock"><button class="scoreBtn" type="button" aria-label="Decrease score" onclick="event.stopPropagation();return adjustScore(-1)">-</button><div class="scoreValue" id="scoreValue">E</div><button class="scoreBtn" type="button" aria-label="Increase score" onclick="event.stopPropagation();return adjustScore(1)">+</button></div>
 </div>
 <div class="badgeMeta"><span id="stateLine">GPS not started</span><span class="gpsLive" id="gpsLive"><i></i>GPS</span><span class="holeMeta" id="holeLine" style="display:none">Hole 1 · Par 4</span></div>

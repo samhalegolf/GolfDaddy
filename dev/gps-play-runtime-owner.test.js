@@ -117,6 +117,7 @@ assertContains(runtimeCss, "body.shell-gps #courseScreen:not(.hidden) .courseCar
 assertContains(runtimeCss, "body.shell-gps.gdCoursePickerOpen #map", "course picker keeps the live GPS map visible behind its buttons");
 assertContains(runtimeCss, "body.shell-gps .playerBadge", "GPS runtime hides the old hard-coded player badge");
 assertNotContains(html, '<div class="badgeName" id="playerName">SAM</div>', "old player badge no longer hard-codes Sam");
+assertNotContains(html, 'id="playerName"', "old GPS player badge no longer owns the active profile-name hook");
 assertContains(runtimeScript, 'document.body.dataset.gdGpsMapVisibilityState=pickerOpen()?"picker-live-map":"not-gps"', "runtime owner records the picker live-map state");
 assertContains(runtimeScript, "function liftShellTop", "GPS runtime owns lifting shell chrome out of app stacking context");
 assertContains(runtimeScript, "document.body.appendChild(top)", "GPS runtime moves shell chrome to the body layer");
