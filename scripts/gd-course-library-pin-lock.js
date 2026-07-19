@@ -88,6 +88,10 @@
   function mappingCourseSnapshot(course,opts={}){
     const base=sessionCourse(course||courseObj())||course||{};
     let snap={...base};
+    try{
+      const owner=window.GDCourseLocation;
+      if(owner&&typeof owner.attachToCourse==='function')snap=owner.attachToCourse({...snap,courseCentre:opts.courseCentre||opts.courseCenter||snap.courseCentre||snap.courseCenter},{requireConfirmed:false});
+    }catch(e){}
     let cid=slug(snap.courseId||snap.id||snap.savedCourseId||snap.canonicalKey||'');
     const knownById=builtInCourseById(cid);
     if(knownById){
@@ -414,6 +418,11 @@
   }
   function mapSessionCenter(course=courseObj()){
     const c=course||{};
+    try{
+      const owner=window.GDCourseLocation;
+      const resolved=owner&&typeof owner.resolve==='function'&&!isManualGpsCourse(c)?owner.resolve(c,{requireConfirmed:false}):null;
+      if(resolved&&resolved.centre)return resolved.centre;
+    }catch(e){}
     if(isManualGpsCourse(c)){
       try{const point=finitePlainPoint(start);if(point)return point;}catch(e){}
       const gps=recentGpsPoint();
@@ -1068,6 +1077,11 @@
     return Math.hypot(dx,dy);
   }
   function courseFinderPoint(course){
+    try{
+      const owner=window.GDCourseLocation;
+      const resolved=owner&&typeof owner.get==='function'?owner.get(course):null;
+      if(resolved&&resolved.centre)return resolved.centre;
+    }catch(e){}
     const lat=Number(course?.finderLat??course?.courseFinderLat);
     const lng=Number(course?.finderLng??course?.courseFinderLng);
     return Number.isFinite(lat)&&Number.isFinite(lng)?{lat,lng}:null;
@@ -1206,6 +1220,13 @@
     if(!Number.isFinite(lat)||!Number.isFinite(lng))return null;
     const c=sessionCourse(courseObj());
     if(!c||isManualGpsCourse(c)||isAssumedCourseName(c.name))return null;
+    try{
+      const owner=window.GDCourseLocation;
+      if(owner&&typeof owner.confirm==='function'){
+        const saved=owner.confirm(c,{lat,lng},{source:source||'course-library-finder'});
+        return saved&&saved.storedCourse||saved;
+      }
+    }catch(e){}
     const uid=userId();
     const cid=courseId(c);
     const store=loadStore();
@@ -1849,6 +1870,11 @@
     }catch(e){}
   }
   function guideCoursePoint(course){
+    try{
+      const owner=window.GDCourseLocation;
+      const resolved=owner&&typeof owner.resolve==='function'?owner.resolve(course,{requireConfirmed:false}):null;
+      if(resolved&&resolved.centre)return resolved.centre;
+    }catch(e){}
     const point=finitePointFromValues([course?.courseLat,course?.lat,course?.latitude],[course?.courseLng,course?.lng,course?.longitude,course?.lon]);
     if(point)return point;
     const finder=courseFinderPoint(course);
@@ -5552,6 +5578,7 @@
   }
   function renderCourseFinderCard(list,course){
     const point=courseFinderPoint(course);
+    const location=(()=>{try{return window.GDCourseLocation&&typeof window.GDCourseLocation.resolve==='function'?window.GDCourseLocation.resolve(course,{requireConfirmed:false}):null;}catch(e){return null;}})();
     const card=document.createElement('div');
     card.className=`gdCourseFinderCard${point?'':' empty'}`;
     if(point){
@@ -5559,10 +5586,12 @@
       const moved=Number.isFinite(home.lat)&&Number.isFinite(home.lng)?distance(home,point):null;
       const details=[
         `Lat/Lng ${coordLabel(point)}`,
+        location&&location.source?`source ${location.source}`:null,
+        location?location.confirmed?'confirmed':'proposal':null,
         Number.isFinite(moved)&&moved>2?`${Math.round(moved)}m from course centre`:null,
-        course.finderUpdatedAt?`updated ${dateLabel(course.finderUpdatedAt)}`:null
+        (location&&location.updatedAt||course.finderUpdatedAt)?`updated ${dateLabel(location&&location.updatedAt||course.finderUpdatedAt)}`:null
       ].filter(Boolean).join(' · ');
-	      card.innerHTML=`<details class="gdCourseFinderDetails"><summary><div><small>Course locator pin</small><strong>Saved finder point</strong></div><span>Open</span></summary><div class="gdCourseFinderTop"><span>${esc(details)}</span></div><div class="gdCourseFinderActions"><button type="button" data-action="open">Show on map</button><button class="danger" type="button" data-action="clear">Clear pin</button></div></details>`;
+		      card.innerHTML=`<details class="gdCourseFinderDetails"><summary><div><small>Course location</small><strong>${location&&location.confirmed?'Confirmed course centre':'Course centre proposal'}</strong></div><span>Open</span></summary><div class="gdCourseFinderTop"><span>${esc(details)}</span></div><div class="gdCourseFinderActions"><button type="button" data-action="open">Show on map</button><button class="danger" type="button" data-action="clear">Remove</button></div></details>`;
       card.querySelector('[data-action="open"]').onclick=()=>window.gdCLOpenCourseLocatorFromLibrary(course.id);
       card.querySelector('[data-action="clear"]').onclick=()=>window.gdCLClearCourseFinder(course.id);
     }else{
@@ -5912,6 +5941,17 @@
     const store=loadStore();
     const saved=store.courses[courseStoreId];
     if(!saved)return;
+    try{
+      const owner=window.GDCourseLocation;
+      if(owner&&typeof owner.remove==='function'){
+        owner.remove(saved,{source:'course-library-remove-location'});
+        clearCourseFinderLayer();
+        gdCLRefreshProfileCard();
+        toastSafe('Course location removed');
+        renderCourseLibraryPanel(courseStoreId);
+        return;
+      }
+    }catch(e){}
     delete saved.finderLat;
     delete saved.finderLng;
     delete saved.courseFinderLat;

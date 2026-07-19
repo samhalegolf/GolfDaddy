@@ -107,6 +107,7 @@
     window.gdGpsState.lastError=null;
     window.gdGpsState.lastFix={lat:point.lat,lng:point.lng,accuracy:Number.isFinite(Number(coords.accuracy))?Number(coords.accuracy):null,source:"course-picker",simulated:false};
     window.gdGpsState.lastFixAt=Date.now();
+    safe(()=>{if(window.GDCourseLocation&&typeof window.GDCourseLocation.propose==="function")window.GDCourseLocation.propose(state.activeSelection||{},Object.assign({source:"course-picker"},point),{source:"course-picker-gps-proposal",realGpsOnly:true,confidence:.45});});
     centerPickerMapOnGps(point);
     return point;
   }
@@ -409,7 +410,9 @@
   }
   function applyStoredPin(course){
     const apply=bridge().applyStoredPin;
-    return typeof apply==="function"?normalizeCourse(apply(course)):course;
+    const applied=typeof apply==="function"?normalizeCourse(apply(course)):course;
+    const owner=window.GDCourseLocation;
+    return owner&&typeof owner.attachToCourse==="function"?normalizeCourse(owner.attachToCourse(applied,{requireConfirmed:false})):applied;
   }
   function selectionKey(course,opts={}){
     const point=opts.fromPinnedSeed?finitePoint(course)&&course:null;
@@ -424,11 +427,14 @@
     const now=Date.now();
     const selectedAt=new Date(now).toISOString();
     const pinSeed=!!opts.fromPinnedSeed;
-    const pinnedCentre=pinSeed&&finitePoint(course)?{lat:Number(course.lat),lng:Number(course.lng)}:null;
+    const owner=window.GDCourseLocation;
+    const location=owner&&typeof owner.resolve==="function"?owner.resolve(course,{requireConfirmed:pinSeed||course?.courseLocationConfirmed===true}):null;
+    const resolvedCourse=owner&&typeof owner.attachToCourse==="function"?owner.attachToCourse(course,{requireConfirmed:pinSeed||course?.courseLocationConfirmed===true}):course;
+    const pinnedCentre=location&&location.centre?{lat:Number(location.centre.lat),lng:Number(location.centre.lng)}:(pinSeed&&finitePoint(resolvedCourse)?{lat:Number(resolvedCourse.lat),lng:Number(resolvedCourse.lng)}:null);
     const library=window.GolfDaddyCourseLibrary||window.ClarityCaddieCourseLibrary||{};
     const snapshotOpts={selectedAt,source:pinSeed?"course-picker-pin-auto-map":"course-picker-auto-map"};
     if(pinnedCentre)snapshotOpts.courseCentre=pinnedCentre;
-    const mappingCourse=typeof library.mappingCourseSnapshot==="function"?library.mappingCourseSnapshot(course,snapshotOpts):course;
+    const mappingCourse=typeof library.mappingCourseSnapshot==="function"?library.mappingCourseSnapshot(resolvedCourse,snapshotOpts):resolvedCourse;
     return {
       course:mappingCourse,
       courseCentre:pinnedCentre||undefined,
@@ -521,6 +527,7 @@
     let course=normalizeCourse(raw);
     course.courseId=course.savedCourseId||course.courseId||course.canonicalKey;
     course=applyStoredPin(course);
+    if(window.GDCourseLocation&&typeof window.GDCourseLocation.attachToCourse==="function")course=normalizeCourse(window.GDCourseLocation.attachToCourse(course,{requireConfirmed:false}));
     rememberRecentCourse(course);
     state.activeSelection=course;
     safe(()=>{window.__gdLiveCoursePickerSelection=course;window.__gdLiveCoursePickerSelectionAt=Date.now();});
@@ -547,7 +554,7 @@
         });
       return false;
     }
-    const usePinSeed=!course.gdDatabaseMapAvailable&&course.gdTrustedCoursePin===true&&courseHasPoint(course);
+    const usePinSeed=!course.gdDatabaseMapAvailable&&course.courseLocationConfirmed===true&&courseHasPoint(course);
     safe(()=>{
       window.__gdCoursePickerChangingAt=0;
       window.__gdCoursePickerFirstHoleOpenToken=null;

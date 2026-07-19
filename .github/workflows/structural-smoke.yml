@@ -34,6 +34,8 @@ jobs:
       - name: Run structural regression tests
         run: |
           node dev/app-permissions-smoke.test.js
+          node dev/course-location-owner.test.js
+          node dev/course-location-behavior.test.js
           node dev/course-picker-location.test.js
           node dev/course-picker-owner.test.js
           node dev/course-picker-behavior.test.js

@@ -306,6 +306,35 @@ const gdAdminCourseDbStatusOpenByCourse={};
 function gdAdminCourseDbMetric(label,value){
   return `<div class="gdAdminDatabaseMetric"><span>${gdEscapeHTML(label)}</span><strong>${gdEscapeHTML(value ?? "")}</strong></div>`;
 }
+function gdAdminCourseLocationPayload(selected,payload={}){
+  const course=selected&&selected.course||{};
+  return Object.assign({},payload&&payload.course||payload||{},course,{
+    courseId:course.courseId||selected&&selected.id||payload&&payload.courseId,
+    courseName:course.courseName||course.name||selected&&selected.name||payload&&payload.courseName,
+    name:course.courseName||course.name||selected&&selected.name||payload&&payload.name
+  });
+}
+function gdAdminCourseLocationSummary(selected,payload={}){
+  const course=gdAdminCourseLocationPayload(selected,payload);
+  const owner=window.GDCourseLocation;
+  const resolved=owner&&typeof owner.resolve==="function"?owner.resolve(course,{requireConfirmed:false}):null;
+  const centre=resolved&&resolved.centre;
+  const point=centre?`${Number(centre.lat).toFixed(5)}, ${Number(centre.lng).toFixed(5)}`:"Not set";
+  const source=resolved&&resolved.source||"unresolved";
+  const confirmed=resolved&&resolved.confirmed?"confirmed":"proposal";
+  const updated=resolved&&resolved.updatedAt?gdCoursePlayDebugTime(resolved.updatedAt):"";
+  return {course,resolved,point,source,confirmed,updated};
+}
+function gdAdminCourseLocationMarkup(selected,payload={}){
+  const info=gdAdminCourseLocationSummary(selected,payload);
+  const id=gdAdminJsArg(selected&&selected.id||info.course.courseId||"");
+  return `<details class="gdAdminCourseSettings" open><summary>Course location</summary><div class="gdAdminCourseSettingsBody"><div class="gdAdminDatabaseSummary">${[
+    gdAdminCourseDbMetric("Centre",info.point),
+    gdAdminCourseDbMetric("Source",info.source),
+    gdAdminCourseDbMetric("Status",info.resolved?info.confirmed:"missing"),
+    gdAdminCourseDbMetric("Updated",info.updated||"")
+  ].join("")}</div><div class="gdAdminCourseVisualActions"><button type="button" onclick="return gdAdminCourseLocationEdit(${id})">Edit location</button><button class="danger" type="button" onclick="return gdAdminCourseLocationRemove(${id})">Remove</button></div></div></details>`;
+}
 function gdAdminCourseDbBadge(label,tone=""){
   return `<span class="gdAdminCourseBadge ${gdEscapeHTML(tone)}">${gdEscapeHTML(label)}</span>`;
 }
@@ -416,6 +445,29 @@ function gdAdminCourseDbOpen(courseId){
     gdAdminCourseDatabaseTab=nextTab;
   }
   gdRenderAdminCourseDatabase();
+  return false;
+}
+function gdAdminCourseLocationSelected(courseId){
+  const id=String(courseId||gdAdminCourseDatabaseSelected||"");
+  const selected=gdAdminCourseDbSummaries().find(item=>item.id===id);
+  if(!selected)return null;
+  const payload=gdAdminCourseDbPayload(selected.id)||{};
+  return gdAdminCourseLocationPayload(selected,payload);
+}
+function gdAdminCourseLocationEdit(courseId){
+  const course=gdAdminCourseLocationSelected(courseId);
+  if(!course)return false;
+  if(typeof window.gdShowCoursePinScreen==="function")return window.gdShowCoursePinScreen(course);
+  if(window.GDCoursePicker&&typeof window.GDCoursePicker.open==="function")return window.GDCoursePicker.open({source:"admin-course-location",returnTarget:"gps"});
+  return false;
+}
+function gdAdminCourseLocationRemove(courseId){
+  const course=gdAdminCourseLocationSelected(courseId);
+  if(!course||!window.GDCourseLocation||typeof window.GDCourseLocation.remove!=="function")return false;
+  window.GDCourseLocation.remove(course,{source:"admin-course-location-remove"});
+  gdRenderAdminCourseDatabase();
+  try{if(typeof renderCourseLibraryPanel==="function")renderCourseLibraryPanel();}catch(e){}
+  try{if(typeof toast==="function")toast("Course location removed");}catch(e){}
   return false;
 }
 function gdToggleAdminCourseDbPayload(){
@@ -1819,7 +1871,7 @@ function gdRenderAdminCourseDatabase(){
     `<span class="${selected.framesIndexedCount?"ready":"warn"}">${gdEscapeHTML(selected.framesIndexedCount)} frames</span>`,
     `<span class="${selected.manifestCount?"ready":"warn"}">${gdEscapeHTML(selected.manifestCount)} manifests</span>`,
     `<span>${gdEscapeHTML(gdCoursePlayDebugTime(selected.updatedAt)||"unknown")} updated</span>`
-  ].join("")}</div><details class="gdAdminCourseSettings" ${statusOpen?"open":""} ontoggle="gdAdminCourseDbSetStatusOpen(${gdAdminJsArg(selected.id)},this.open)"><summary>Course status</summary><div class="gdAdminCourseSettingsBody"><div class="gdAdminDatabaseSummary">${[
+  ].join("")}</div>${gdAdminCourseLocationMarkup(selected,payload)}<details class="gdAdminCourseSettings" ${statusOpen?"open":""} ontoggle="gdAdminCourseDbSetStatusOpen(${gdAdminJsArg(selected.id)},this.open)"><summary>Course status</summary><div class="gdAdminCourseSettingsBody"><div class="gdAdminDatabaseSummary">${[
       gdAdminCourseDbMetric("Hole count",selected.holeCount),
       gdAdminCourseDbMetric("Tee/green/route",selected.geometryReadyCount),
       gdAdminCourseDbMetric("Play data ready",selected.playReadyCount),
@@ -2121,6 +2173,8 @@ window.gdRenderAdminCourseDatabase=gdRenderAdminCourseDatabase;
 window.gdAdminCourseDbOpen=gdAdminCourseDbOpen;
 window.gdAdminCourseDbSetStatusOpen=gdAdminCourseDbSetStatusOpen;
 window.gdAdminCourseDbShowDebug=gdAdminCourseDbShowDebug;
+window.gdAdminCourseLocationEdit=gdAdminCourseLocationEdit;
+window.gdAdminCourseLocationRemove=gdAdminCourseLocationRemove;
 window.gdAdminCourseDebugRefresh=gdAdminCourseDebugRefresh;
 window.gdToggleAdminCourseDbPayload=gdToggleAdminCourseDbPayload;
 window.gdSetCoursePlayDebug=gdSetCoursePlayDebug;
@@ -17224,6 +17278,11 @@ function gdCoursePickerPinKey(payload){
   return key&&key!=="manual-gps"?key:"";
 }
 function gdCoursePickerStoredPin(payload){
+  const owner=window.GDCourseLocation;
+  if(owner&&typeof owner.get==="function"){
+    const resolved=owner.get(payload);
+    if(resolved&&resolved.centre)return Object.assign({},resolved,resolved.centre,{source:resolved.source||"course-location-owner"});
+  }
   const key=gdCoursePickerPinKey(payload);
   if(!key)return null;
   const saved=gdCoursePickerReadPinStore()[key];
@@ -17231,6 +17290,8 @@ function gdCoursePickerStoredPin(payload){
   return point?Object.assign({},saved,point):null;
 }
 function gdCoursePickerRememberPin(payload,point){
+  const owner=window.GDCourseLocation;
+  if(owner&&typeof owner.confirm==="function")return !!owner.confirm(payload,point,{source:"course-picker-pin"});
   const key=gdCoursePickerPinKey(payload);
   const pin=gdCoursePickerFinitePoint(point);
   if(!key||!pin)return false;
@@ -17246,6 +17307,8 @@ function gdCoursePickerRememberPin(payload,point){
   return true;
 }
 function gdCoursePickerApplyStoredPin(payload){
+  const owner=window.GDCourseLocation;
+  if(owner&&typeof owner.attachToCourse==="function")return owner.attachToCourse(payload,{requireConfirmed:true});
   if(gdCoursePayloadIsManual(payload))return payload;
   const pin=gdCoursePickerStoredPin(payload);
   if(!pin)return payload;
@@ -17275,17 +17338,20 @@ function gdCoursePickerPinPointForPayload(payload){
 function gdCoursePickerNeedsCoursePin(payload){
   const mark=reason=>{try{document.body.dataset.gdCoursePinDecision=reason;}catch(e){}};
   if(gdCoursePayloadIsManual(payload)){mark("manual-course");return false;}
-	  if(payload?.gdDatabaseMapAvailable===true){mark("database-map");return false;}
-	  if(window.__gdCoursePickerBypassPinOnce){
-	    window.__gdCoursePickerBypassPinOnce=false;
-	    mark("bypass-once");
+		  if(payload?.gdDatabaseMapAvailable===true){mark("database-map");return false;}
+  const owner=window.GDCourseLocation;
+  const resolved=owner&&typeof owner.get==="function"?owner.get(payload):null;
+  if(resolved&&resolved.centre&&resolved.confirmed){mark("confirmed-course-location");return false;}
+		  if(window.__gdCoursePickerBypassPinOnce){
+		    window.__gdCoursePickerBypassPinOnce=false;
+		    mark("bypass-once");
 	    return false;
 	  }
 	  mark("needs-pin");
 	  return true;
 	}
 function gdCoursePickerUsesPinSeed(payload){
-  return !!(payload&&!gdCoursePayloadIsManual(payload)&&payload.gdTrustedCoursePin===true&&gdCoursePickerFinitePoint(payload));
+  return !!(payload&&!gdCoursePayloadIsManual(payload)&&payload.courseLocationConfirmed===true&&gdCoursePickerFinitePoint(payload));
 }
 async function gdCoursePickerDatabaseMapAvailable(payload){
   if(!payload||gdCoursePayloadIsManual(payload))return {available:false,attempted:false,reason:"manual-course"};
@@ -17408,6 +17474,11 @@ function gdShowCoursePinScreen(payload){
   gdSetCoursePickerPinMode(true);
   panel.classList.remove("hidden");
   gdCenterCoursePinMap(payload);
+  try{
+    const owner=window.GDCourseLocation;
+    const proposal=gdCoursePickerMapCenterPoint()||gdCoursePickerFinitePoint(payload)||gdCoursePickerDefaultPoint();
+    if(owner&&typeof owner.propose==="function"&&proposal)owner.propose(payload,proposal,{source:"course-picker-pin-proposal",confidence:.35});
+  }catch(e){}
   try{window.gdApplyGpsMapVisibilityOwner?.("course-picker-pin-prompt");}catch(e){}
   try{if(typeof toast==="function")toast("Pin the course location");}catch(e){}
   return false;
@@ -17436,14 +17507,19 @@ function gdConfirmCoursePin(event){
     try{if(typeof toast==="function")toast("Move the map over the course first");}catch(e){}
     return false;
   }
-  gdCoursePickerRememberPin(payload,point);
-  const pinned=gdNormalizeCoursePickerPayload(Object.assign({},payload,{
-    lat:point.lat,
-    lng:point.lng,
-    courseLat:point.lat,
-    courseLng:point.lng,
-    finderLat:point.lat,
-    finderLng:point.lng,
+  const owner=window.GDCourseLocation;
+  const resolved=owner&&typeof owner.confirm==="function"?owner.confirm(payload,point,{source:"course-picker-pin"}):null;
+  if(!resolved)gdCoursePickerRememberPin(payload,point);
+  const savedPoint=resolved&&resolved.centre||point;
+  const pinned=owner&&typeof owner.attachToCourse==="function"
+    ?owner.attachToCourse(payload,{requireConfirmed:true})
+    :gdNormalizeCoursePickerPayload(Object.assign({},payload,{
+    lat:savedPoint.lat,
+    lng:savedPoint.lng,
+    courseLat:savedPoint.lat,
+    courseLng:savedPoint.lng,
+    finderLat:savedPoint.lat,
+    finderLng:savedPoint.lng,
     coursePinned:true,
     pinnedByUser:true,
     pinSource:"course-picker-pin",
