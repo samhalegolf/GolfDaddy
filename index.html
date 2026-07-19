@@ -207,54 +207,12 @@
   </div>
 </div>
 
-<div class="gdWandPanel hidden" id="gdWandPanel">
-  <div class="gdWandTop">
-    <div>
-      <div class="gdWandTitle" id="gdWandTitleText">Green Wand Calibration</div>
-      <div class="gdWandStatus" id="gdWandStatus">First green at this location: tune Robust, then save calibration.</div>
-    </div>
-    <button class="gdWandClose" onclick="closeWandPanel()">×</button>
-  </div>
-
-  <div class="gdWandRobustPill">Robust Wand</div>
-
-  <details class="gdCalibrationDetails" id="gdCalibrationDetails" open>
-    <summary>Calibration</summary>
-    <div class="gdWandCalibrationControls" id="gdWandCalibrationControls">
-      <div class="gdWandSlider">
-        <span>Sensitivity</span>
-        <input id="gdWandSensitivity" min="58" max="79" value="71" type="range" oninput="setWandSensitivity(this.value)">
-        <span class="gdWandReadout" id="gdWandSensitivityOut">71</span>
-      </div>
-      <div class="gdWandSlider">
-        <span>Size</span>
-        <input id="gdWandBaseBubble" min="6" max="30" value="24.5" step="0.5" type="range" oninput="setWandBaseBubble(this.value)">
-        <span class="gdWandReadout" id="gdWandBaseBubbleOut">24.5m</span>
-      </div>
-      <div class="gdWandSlider">
-        <span>Curve</span>
-        <input id="gdWandClusterPull" min="0" max="120" value="60" type="range" oninput="setWandClusterPull(this.value)">
-        <span class="gdWandReadout" id="gdWandClusterPullOut">60%</span>
-      </div>
-      <button class="gdCalibrationSave" id="gdCalibrationSaveBtn" onclick="saveGreenWandCalibration()">Save Calibration</button>
-    </div>
-  </details>
-
-  <div class="gdWandActions">
-    <button class="primary" id="gdWandScanBtn" onclick="runGreenWandScan()">Calibrate / Scan</button>
-    <button class="accept" id="gdWandAcceptBtn" onclick="acceptGreenWand()">Accept</button>
-    <button id="gdWandRejectBtn" onclick="rejectGreenWand()">Reject</button>
-    <button id="gdWandExitBtn" onclick="closeWandPanel()">Exit</button>
-  </div>
-
-</div></div>
+</div>
 
 <div class="ghost" id="ghost">⚑</div><div class="pulseDrop" id="dropPulse"></div>
 <div class="shotTile" id="shotTile"><button class="gdShotHoleChip" id="gdShotHoleChip" type="button" data-gd-hole-picker-trigger title="Long press to pick hole" aria-label="Current hole">H1</button><div class="tileTop"></div><div class="tileBack" id="tileBack"></div><div class="tilePlays" id="tilePlays"></div><div class="tileMain"><div class="tileClub"><button class="gdSetBagLink" onclick="gdOpenBagFromGps(event)" aria-label="Open bag"><img src="assets/home/bag.png" alt=""></button></div><div class="tileDist" id="tileDist">—<span>m</span></div><div class="tileSub tilePrimary" id="tileSub"></div><div class="tileSub tileMeta" id="tileMeta"></div></div><div class="tileFront" id="tileFront"></div><div class="tileSub tilePinMetric" id="pinDiff" style="display:none">Pin —</div></div>
 <div class="hint" id="hint"></div>
 	<div class="toast" id="toast"></div>
-<input accept="image/*" id="snapshotInput" onchange="loadSnapshotSource(event)" style="display:none" type="file"/>
-<canvas id="snapshotCanvas" style="display:none"></canvas>
 <div class="dock"><div class="dockGrid"><button class="dockAction" onclick="refreshGPS()">
 <svg class="dockIcon" fill="none" style="width:22px;height:22px" viewbox="0 0 44 44">
 <path d="M22 7v7M22 30v7M7 22h7M30 22h7" stroke="currentColor" stroke-linecap="round" stroke-width="3"></path>
@@ -283,8 +241,6 @@
 <div class="row gdSettingsRetired" hidden><div><strong>Shot render</strong><span>Classic circles or custom shape</span></div><button class="toggle active" id="bubbleModeToggle" onclick="toggleBubbleRenderMode()">Custom</button></div>
 <div class="row gdSettingsRetired" hidden><div><strong>Shot bias</strong><span>Simple data feed for shape testing</span></div><button class="toggle" id="bubbleBiasToggle" onclick="cycleBubbleBias()">Neutral</button></div>
 <div class="row gdSettingsRetired" hidden><div><strong>Subtle texture</strong><span>Add faint internal contour lines</span></div><button class="toggle active" id="bubbleOrganicToggle" onclick="toggleBubbleOrganic()">On</button></div>
-<div class="row gdSettingsRetired" hidden><div><strong>Green Finder</strong><span id="greenFinderSub">Beta · saves confirmed 3m green samples</span></div><button class="toggle" id="greenFinderToggle" onclick="toggleGreenFinderBeta()">Beta Off</button></div>
-<div class="row gdSettingsRetired" hidden><div><strong>Snapshot pixels</strong><span id="snapshotSub">Beta · upload readable map snapshot</span></div><button class="toggle" id="snapshotBtn" onclick="chooseSnapshotSource()">Upload</button></div>
 <button class="primary" onclick="gdPanelBack('settingsPanel')" style="width:100%">Back</button>
 </div></div>
 <div class="panel devPanel" id="developerPanel"><div class="sheet"><div class="sheetHeader"><button class="backBtn" onclick="gdPanelBack('developerPanel')">‹</button><div><div class="sheetTitle">Admin Settings</div><div class="sheetSub">Permissions first · developer tuning tucked away</div></div></div>
@@ -343,18 +299,8 @@
 
 
 
-<script id="gdWandBeltLayersV1" src="scripts/inline/gd-wand-belt-layers-v1.js?v=wand-belt-merge-20260719"></script>
-
-
-
-
-
-
-
-
 <!-- Earlier retired-screen guards removed; canonical route audit remains the route authority. -->
 
-<link rel="stylesheet" id="gdGpsToolTogglePolishStyle" href="styles/inline/gd-gps-tool-toggle-polish-style.css?v=split04">
 <script src="scripts/inline/gd-inline-gps-tool-toggle-polish-v1-samebutton.js?v=split03"></script>
 <link rel="stylesheet" href="styles/gd-course-library.css?v=practice-course-ui-20260606">
 <script src="scripts/gd-course-mapping-debug.js?v=course-mapping-debug-20260714"></script>
@@ -390,22 +336,11 @@
 <script src="scripts/gd-native-practice-data.js?v=native-practice-data-001"></script>
 <script id="gdCanonicalRouteAuditV1" src="scripts/gd-route-audit.js?v=course-picker-owner-cleanup-20260719"></script>
 <!-- Removed gdProfileRouteStabilizerV2: profile fallback rendering masked real route failures. -->
-<link rel="stylesheet" id="gdCleanDiagOnlyFixV1" href="styles/inline/gd-clean-diag-only-fix-v1.css?v=split04">
-
 <link rel="stylesheet" id="gdEditableBagPanelV1" href="styles/inline/gd-editable-bag-panel-v1.css?v=split04">
 
 <link rel="stylesheet" id="gdCoursePickerHiddenHardFixV1" href="styles/inline/gd-course-picker-hidden-hard-fix-v1.css?v=split04">
 
 <link rel="stylesheet" id="gdCanonicalModuleScreenFixV1" href="styles/inline/gd-canonical-module-screen-fix-v1.css?v=split04">
-
-<link rel="stylesheet" id="gdWandRootCauseCleanCssV1" href="styles/inline/gd-wand-root-cause-clean-css-v1.css?v=split04">
-
-<link rel="stylesheet" id="gdWandRobustKnownGoodCssV1" href="styles/inline/gd-wand-robust-known-good-css-v1.css?v=split04">
-<link rel="stylesheet" id="gdWandCompactFlowCssV1" href="styles/inline/gd-wand-compact-flow-css-v1.css?v=split04">
-<script id="gdWandFlowLayersV1" src="scripts/inline/gd-wand-flow-layers-v1.js?v=wand-flow-merge-20260719"></script>
-<link rel="stylesheet" id="gdWandFloatingMapperCssV1" href="styles/inline/gd-wand-floating-mapper-css-v1.css?v=split04">
-
-<link rel="stylesheet" id="gdGpsPolishPriorityV1" href="styles/inline/gd-gps-polish-priority-v1.css?v=split04">
 
 <!-- Removed gdFinalStructureGuardCssV3: final CSS hiders masked retired-panel bleed-through. -->
 <!-- Removed gdFinalStructureGuardV3: blank-route recovery masked route ownership problems. -->

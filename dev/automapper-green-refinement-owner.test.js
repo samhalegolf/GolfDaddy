@@ -7,6 +7,7 @@ const index = fs.readFileSync(path.join(root, "index.html"), "utf8");
 const engine = fs.readFileSync(path.join(root, "scripts", "gd-green-shape-engine.js"), "utf8");
 const mapper = fs.readFileSync(path.join(root, "scripts", "gd-course-library-pin-lock.js"), "utf8");
 const core = fs.readFileSync(path.join(root, "scripts", "gd-app-core.js"), "utf8");
+const brandIcons = fs.readFileSync(path.join(root, "scripts", "inline", "gd-brand-icon-render.js"), "utf8");
 
 function assertContains(source, needle, message) {
   assert(source.includes(needle), message || `contains ${needle}`);
@@ -66,19 +67,27 @@ assertContains(mapper, "automapper-green-shape-refinement-skipped", "diagnostics
 assertContains(mapper, "details:Object.assign({},detail,{skipReason:reason})", "skips keep specific reasons");
 assertContains(mapper, "details:Object.assign({},detail,extra,{rejectionReason:reason})", "rejections keep specific reasons");
 
-assertContains(mapper, "function startMapperGreenWand", "standalone Wand fallback remains present");
-assertContains(mapper, "saveCurrentGreen('wand_accepted')", "standalone Wand acceptance path remains present");
+assertNotContains(mapper, "function startMapperGreenWand", "standalone Wand fallback is retired");
+assertNotContains(mapper, "saveCurrentGreen('wand_accepted')", "standalone Wand acceptance path is retired");
 assertNotContains(mapper, "openGpsWand({source:'automapper-green-shape-engine'", "refinement path does not invoke standalone Wand UI");
 assertNotContains(mapper, "startMapperGreenWand({source:'automapper-green-shape-engine'", "refinement path does not invoke mapper Wand UI");
 assertNotContains(mapper, "gdCompactWandOpen({source:'automapper-green-shape-engine'", "refinement path does not invoke compact Wand UI");
+assertNotContains(mapper, "gdCompactWandOpen", "mapper no longer knows about compact Wand UI");
+assertNotContains(mapper, "gdToggleWandTool", "mapper no longer knows about the Wand rail toggle");
+assertNotContains(mapper, "openGpsWand", "mapper no longer knows about the Wand route entry");
+assertNotContains(mapper, "gdWandPanel", "mapper no longer manipulates a standalone Wand panel");
 assertNotContains(mapper, "gdWandActive", "integration does not assign Wand-active body or shell state");
 assertNotContains(mapper, "gdShellLayer=\"wand\"", "integration does not move shell ownership to Wand");
 assertNotContains(mapper, "document.body.classList.add('wand", "integration does not add Wand body classes");
 assertNotContains(mapper, "document.body.classList.add(\"wand", "integration does not add Wand body classes");
 
-assertContains(core, "function scanGreen", "standalone Wand UI remains outside the AutoMapper adapter");
-assertContains(core, "engine.analyzeGreenWand", "standalone Wand UI delegates to the engine separately");
+assertNotContains(core, "function scanGreen", "standalone Wand scanner is retired from core");
+assertNotContains(core, "function openGpsWand", "standalone Wand route entry is retired from core");
+assertNotContains(core, "function toggleGreenWand", "standalone Wand toggle is retired from core");
+assertNotContains(core, "engine.analyzeGreenWand", "core no longer hosts standalone engine UI calls");
+assertContains(core, "function drawGreenPolygon", "shared green rendering remains available to GPS/course-library flows");
 assertNotContains(core, "automapperRunGreenShapeRefinement", "core does not own the AutoMapper refinement adapter");
+assertNotContains(brandIcons, "greenToolBtn", "right rail no longer creates the standalone Wand button");
 
 assert(
   lineIndex(index, 'id="gdGreenShapeEngine"') < lineIndex(index, "scripts/gd-course-library-pin-lock.js"),

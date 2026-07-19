@@ -15929,9 +15929,6 @@ function setMapSource(index, reason="manual"){
   baseLayer.once("load",()=>{
     if(reason==="security"){
       toast(`Switched to ${current.name}`);
-      if(greenActive && target){
-        setTimeout(()=>scanGreen(),180);
-      }
     }
   });
 }
@@ -15942,7 +15939,6 @@ function cycleMapSource(){
 }
 
 function autoSwitchMapSource(){
-  if(snapshotPixelActive) return false;
   if(mapSources.length<2) return false;
   if(autoSwitchedForSecurity) return false;
 
@@ -15955,13 +15951,6 @@ function autoSwitchMapSource(){
 }
 
 setMapSource(0,"initial");
-
-map.on("movestart",()=>{
-  if(snapshotPixelActive){
-    const sub=document.getElementById("snapshotSub");
-    if(sub)sub.textContent="Beta · snapshot may be stale after map move";
-  }
-});
 
 const app=document.getElementById("app");
 let mode="start", start=null, target=null, greenCentre=null, pin=null;
@@ -15998,14 +15987,6 @@ let greenScanWasRotated=false;
 let phoneHeading=null;
 let orientationListening=false;
 let pinDirectionLine=null;
-let greenActive=false, greenTolerance=.03, sessionGreenTolerance=.03, greenContrast=0, lastArea=0, stall=0;
-let greenSamplePixel=null, greenSamplePixels=[], greenScanUsedPixels=false;
-let greenPixelAccessOk=false;
-let snapshotPixelSource=null;
-let snapshotPixelActive=false;
-const GREEN_SEED_RADIUS_M=3;
-let greenFinderBeta=false;
-let greenFinderSamples=[];
 const GD_ROUND_SCORE_KEY="gd_round_score_v1";
 let currentPlayingHole=null, hadNearGreen=false, pendingScoreHole=null, playerScore=Number(sessionStorage.getItem(GD_ROUND_SCORE_KEY)||0)||0;
 let gdScorecardHasDrivenScore=false, gdManualScoreOverride=false;
@@ -16069,8 +16050,6 @@ function hideHint(){const h=document.getElementById("hint");if(h)h.classList.rem
 function haptic(ms=12){try{if(navigator.vibrate)navigator.vibrate(ms)}catch(e){}}
 let toastTimer=null;
 
-function openGreenSandboxNotice(){ toggleGreenWand(); }
-
 function toast(text){
   const el=document.getElementById("toast");
   el.textContent=text;
@@ -16080,7 +16059,6 @@ function toast(text){
 }
 function closeAllPanels(){
   document.querySelectorAll(".panel.open").forEach(p=>p.classList.remove("open"));
-  if(greenActive) toggleGreenWand();
 }
 function setSoftActive(id,on=true){
   const el=document.getElementById(id);
@@ -16625,7 +16603,6 @@ function lockFrame(refit=true){
 function unlockFrameForReset(){
   setBubbleOnlyLock(false);
   clearMapRotation();
-  if(typeof clearWandScaleLock==="function") clearWandScaleLock("frame-unlock");
 }
 function moveBubbleTo(ll,saveUndo=true){
   if(!ll||!start) return;
@@ -16636,7 +16613,6 @@ function moveBubbleTo(ll,saveUndo=true){
   if(targetMarker) targetMarker.setLatLng(gdShotDisplayTarget()||target);
   renderShot();
   updatePinLine();
-  if(greenActive){ establishGreenFromBubble(); scanGreen(); }
 }
 function gdActiveShotBagRows(){
   try{return gdAccountShotBagRows();}catch(e){return []}
@@ -17931,7 +17907,6 @@ document.querySelectorAll(".panel").forEach(panel=>{
 function openCourse(c){
   c=gdNormalizeCoursePickerPayload(c||{name:"Manual GPS"});
   const hasCoursePoint=gdCoursePickerPayloadHasPoint(c);
-  try{clearSnapshotSource();}catch(e){}
   autoSwitchedForSecurity=false;
   gdStoreCoursePickerSelection(c);
   try{
@@ -18559,9 +18534,6 @@ function gdClearTargetArtifactsForFreshStart(){
   document.getElementById("shotTile")?.classList.remove("visible");
 }
 function clearPendingGreenTarget(){
-  try{if(window.gdClearWandLive)window.gdClearWandLive();}catch(e){}
-  try{if(typeof clearWandHandles==="function")clearWandHandles();}catch(e){}
-  try{if(typeof clearWandDebugLayers==="function")clearWandDebugLayers();}catch(e){}
   try{clearShot();}catch(e){}
   [targetMarker,greenMarker,pinMarker,pinDirectionLine,greenOutline,greenSoft,greenLabel,frontLabel,backLabel].forEach(l=>{try{if(l)map.removeLayer(l)}catch(e){}});
   targetMarker=greenMarker=pinMarker=pinDirectionLine=greenOutline=greenSoft=greenLabel=frontLabel=backLabel=null;
@@ -18694,7 +18666,7 @@ function gdIsMapPlacementSurfaceEvent(ev){
   const mapEl=map&&map.getContainer?map.getContainer():document.getElementById("map");
   if(!mapEl||!ev||!ev.target||!mapEl.contains(ev.target))return false;
   if(!document.body.classList.contains("gdGpsActive")&&!document.body.classList.contains("gps-active"))return false;
-  const blocked=ev.target.closest("button,a,input,select,textarea,.leaflet-control,.rightRail,.shellBar,.dock,#gdV62UndoDock,#gdV62ModeSwitch,#shotTile,#gdV62GpsBadge,#hint,#toast,#gdWandPanel,#gdMapperToolFlyout,#gdMapperToolsDrawer,#gdMapperHoleStrip,.panel,.modulePanel,#courseScreen:not(.hidden)");
+  const blocked=ev.target.closest("button,a,input,select,textarea,.leaflet-control,.rightRail,.shellBar,.dock,#gdV62UndoDock,#gdV62ModeSwitch,#shotTile,#gdV62GpsBadge,#hint,#toast,#gdMapperToolFlyout,#gdMapperToolsDrawer,#gdMapperHoleStrip,.panel,.modulePanel,#courseScreen:not(.hidden)");
   return !blocked;
 }
 function gdCompleteMapPlacementFromClientEvent(ev){
@@ -19049,7 +19021,6 @@ function gdInstallSmoothBubbleDrag(marker){
         el.style.cursor="grab";
         renderShot();
         if(lockedFrame)setBubbleOnlyLock(true);
-        if(greenActive){establishGreenFromBubble();scanGreen();}
         gdFinishBubbleLongPressZoom(finishedFromLongPressZoom);
         try{el.releasePointerCapture(endEv.pointerId);}catch(e){}
       };
@@ -21252,1118 +21223,7 @@ function placePin(ll){undoStack.push({type:"pin",value:pin});pin=ll;if(!pinMarke
 function updatePinLine(){[pinLine,pinLabel].forEach(l=>l&&map.removeLayer(l));pinLine=pinLabel=null;const el=document.getElementById("pinDiff");if(el)el.style.display="none";if(typeof gdTournamentModeEnabled==="function"&&gdTournamentModeEnabled()){return;}const bubbleTarget=gdShotDisplayTarget();const diff=gdShotPinDiffData();if(!pin||!bubbleTarget||!diff)return;if(el){el.classList.add("tilePinMetric");el.textContent=`Pin diff ${diff.value}${diff.unit}`;el.style.display="block";}pinLine=L.polyline([bubbleTarget,pin],{color:"#fff",weight:2,opacity:.52,dashArray:"3,7"}).addTo(map)}
 
 
-function toggleGreenFinderBeta(){
-  greenFinderBeta=!greenFinderBeta;
-  const b=document.getElementById("greenFinderToggle");
-  b.textContent=greenFinderBeta?"Beta On":"Beta Off";
-  b.classList.toggle("active",greenFinderBeta);
-  document.getElementById("greenFinderSub").textContent=greenFinderBeta
-    ? `Beta · ${greenFinderSamples.length} samples saved`
-    : "Beta · saves confirmed 3m green samples";
-  toast(greenFinderBeta?"Green Finder beta on":"Green Finder beta off");
-}
-
-function confirmGreenAndClose(){
-  if(greenFinderBeta && greenCentre){
-    saveGreenFinderSample();
-  }
-  toggleGreenWand();
-}
-
-function saveGreenFinderSample(){
-  if(!greenCentre)return;
-
-  const circlePoints=[];
-  const pixelSamples=[];
-
-  // Centre + ring around a real 3m circle.
-  const centrePt=map.latLngToContainerPoint(greenCentre);
-  const centrePx=trySampleMapPixel(centrePt.x,centrePt.y);
-  if(centrePx) pixelSamples.push({offsetM:[0,0],pixel:centrePx});
-
-  const ringCount=16;
-  for(let i=0;i<ringCount;i++){
-    const a=(Math.PI*2*i)/ringCount;
-    const ll=project(greenCentre,a,GREEN_SEED_RADIUS_M);
-    circlePoints.push({lat:ll.lat,lng:ll.lng});
-    const p=map.latLngToContainerPoint(ll);
-    const px=trySampleMapPixel(p.x,p.y);
-    if(px) pixelSamples.push({
-      offsetM:[
-        Math.round(Math.sin(a)*GREEN_SEED_RADIUS_M*100)/100,
-        Math.round(Math.cos(a)*GREEN_SEED_RADIUS_M*100)/100
-      ],
-      pixel:px
-    });
-  }
-
-  const sample={
-    id:Date.now(),
-    type:"greenFinderBetaSample",
-    course:currentCourse?.name||"Manual GPS",
-    centre:{lat:greenCentre.lat,lng:greenCentre.lng},
-    radiusM:GREEN_SEED_RADIUS_M,
-    tolerance:greenTolerance,
-    contrastMode:greenContrast,
-    pixelSamples,
-    ring:circlePoints,
-    confirmedAt:new Date().toISOString()
-  };
-
-  greenFinderSamples.push(sample);
-  console.log("GREEN_FINDER_BETA_SAMPLE",sample);
-
-  const sub=document.getElementById("greenFinderSub");
-  if(sub)sub.textContent=`Beta · ${greenFinderSamples.length} samples saved`;
-  toast(`Green sample saved · ${pixelSamples.length} pixels`);
-}
-
-
-/* Green Shape Engine ownership moved to scripts/gd-green-shape-engine.js. */
-
-/* ---------------- Green wand hybrid: sandbox brain + core shell ---------------- */
-let wandMode="robustTonal";
-let lastWandResult=null;
-let wandHandleMarkers=[];
-let wandScaleLock=null; // frozen metres-per-pixel snapshot for the current locked frame / Wand session
-
-// Real-world Wand expansion tuning. Keep scan distance in metres, then convert to screen pixels per current map zoom.
-const WAND_SANDBOX_BASE_MPP = 0.238; // live GPS scale where the sandbox 61px bubble looked correct (~14.5m radius)
-let wandBaseBubbleSizeOverride=null;
-let wandBaseBubbleMetersOverride=null; // sandbox px, then meter-normalised into current locked frame
-let wandClusterPullOverride=null;
-let wandDebugLayers=[];
-
-const WAND_EXPANSION_TUNING = {
-  // Keep the sandbox architecture: healthy bubble first, probes/dots/ridges pull it into shape.
-  // GPS only converts sandbox pixels into live metres. No flood expansion and no size-slider sensitivity.
-  robustTonal: { clusterPullScale: 1.00 },
-  stableHold: { clusterPullScale: 1.00 },
-  aggressiveRidge: { clusterPullScale: 1.00 }
-};
-
-function getMapMetersPerPixelAt(latlng){
-  try{
-    const p=map.latLngToContainerPoint(latlng);
-    const a=map.containerPointToLatLng([p.x-1,p.y]);
-    const b=map.containerPointToLatLng([p.x+1,p.y]);
-    const m=map.distance(a,b)/2;
-    return Math.max(0.05, Math.min(5, m||0.35));
-  }catch(e){
-    return 0.35;
-  }
-}
-
-function clearWandScaleLock(reason){
-  wandScaleLock=null;
-  if(reason) console.debug && console.debug('[Clarity Caddy Wand] scale lock cleared:', reason);
-}
-
-function captureWandScaleLock(reason,frameScale){
-  const centre=greenCentre || target || map.getCenter();
-  const zoom=Number.isFinite(Number(frameScale?.zoom)) ? Number(frameScale.zoom) : (typeof map.getZoom==='function' ? map.getZoom() : null);
-  const mpp=Number.isFinite(Number(frameScale?.metersPerPixel)) ? Number(frameScale.metersPerPixel) : getMapMetersPerPixelAt(centre);
-  const size=map.getSize ? map.getSize() : {x:0,y:0};
-  const source=String(frameScale?.source||'map-container');
-  const sourceCentre=frameScale?.centre||centre;
-  wandScaleLock={
-    metersPerPixel:mpp,
-    centre:{lat:sourceCentre.lat,lng:sourceCentre.lng},
-    zoom,
-    viewport:{x:size.x,y:size.y},
-    source,
-    lockedFrame:!!lockedFrame,
-    createdAt:Date.now(),
-    reason:reason||'wand-open'
-  };
-  return wandScaleLock;
-}
-
-function getWandScaleLock(frameScale){
-  const zoom=typeof map.getZoom==='function' ? map.getZoom() : null;
-  const size=map.getSize ? map.getSize() : {x:0,y:0};
-  const frameMpp=Number(frameScale?.metersPerPixel);
-  const frameZoom=Number(frameScale?.zoom);
-  const frameSource=String(frameScale?.source||'');
-
-  if(Number.isFinite(frameMpp)&&frameMpp>0&&Number.isFinite(frameZoom)){
-    if(wandScaleLock){
-      const viewportChanged=Math.abs((wandScaleLock.viewport?.x||0)-size.x)>2 || Math.abs((wandScaleLock.viewport?.y||0)-size.y)>2;
-      const sameFrame=wandScaleLock.source===frameSource && Math.abs(Number(wandScaleLock.zoom)-frameZoom)<0.001 && Math.abs(Number(wandScaleLock.metersPerPixel)-frameMpp)<0.001;
-      if(sameFrame && !viewportChanged) return wandScaleLock;
-    }
-    return captureWandScaleLock(wandScaleLock?'tile-scale-refresh':'tile-scale-init',{
-      metersPerPixel:frameMpp,
-      zoom:frameZoom,
-      source:frameSource||'tile-crop',
-      centre:frameScale?.centre
-    });
-  }
-
-  // The Wand should not recalculate scale during scan/probe growth. Once a locked
-  // frame exists, freeze metres-per-pixel for the whole Wand session. This stops
-  // detected meterage from jumping around as the live GPS dot/bubble/green centre moves.
-  if(wandScaleLock){
-    const zoomChanged=wandScaleLock.zoom!==zoom;
-    const viewportChanged=Math.abs((wandScaleLock.viewport?.x||0)-size.x)>2 || Math.abs((wandScaleLock.viewport?.y||0)-size.y)>2;
-    if(!zoomChanged && !viewportChanged) return wandScaleLock;
-  }
-  return captureWandScaleLock(wandScaleLock?'scale-refresh':'scale-init');
-}
-
-function getExpandedWandOptions(preset,built){
-  const t=WAND_EXPANSION_TUNING[wandMode] || WAND_EXPANSION_TUNING.robustTonal;
-  const scale=getWandScaleLock(built&&Number.isFinite(Number(built.metersPerPixel))?{
-    metersPerPixel:Number(built.metersPerPixel),
-    zoom:Number(built.tileZoom),
-    source:built.coordinateFrame,
-    centre:built.centreLatLng
-  }:null);
-  const mpp=scale.metersPerPixel;
-
-  const defaultMeters=sandboxPxToHealthyBubbleMeters(preset.baseBubbleSize || 61);
-  const baseBubbleMeters=Number(wandBaseBubbleMetersOverride ?? defaultMeters);
-  const baseBubbleSizePx=Math.max(24, Math.min(320, baseBubbleMeters / Math.max(0.05, mpp)));
-  const pull=Number(wandClusterPullOverride ?? preset.clusterPull ?? 100);
-
-  return {
-    metersPerPixel:mpp,
-    scaleLocked:true,
-    scaleLock:scale,
-    sandboxPresetPx:Number(preset.baseBubbleSize || 61),
-    sandboxBasePx:baseBubbleSizePx,
-    baseBubbleMeters,
-    baseBubbleSizePx,
-    clusterPull:Math.max(0, Math.min(140, pull * (t.clusterPullScale || 1)))
-  };
-}
-
-function normalizeSandboxWandShell(outline, seed, expanded){
-  // Sandbox contract:
-  // - probes may travel and find white candidate dots;
-  // - accepted dots/ridge lines may magnet-pull the healthy bubble;
-  // - final shell remains clamped inside buildHealthyBubble around the base bubble.
-  //
-  // Do not resize the output here and do not convert long probe travel into green size.
-  // GPS only meter-normalises the healthy base bubble before the sandbox engine runs.
-  return outline;
-}
-
-
-
-function healthyBubbleMetersToSandboxPx(meters){
-  const mpp = (wandScaleLock && Number(wandScaleLock.metersPerPixel)) || getWandScaleLock().metersPerPixel || WAND_SANDBOX_BASE_MPP;
-  return Math.max(24, Math.min(320, (Number(meters)||13) / Math.max(0.05, mpp)));
-}
-function sandboxPxToHealthyBubbleMeters(px){
-  // Convert sandbox preset pixels to a real-world healthy bubble size using the sandbox reference scale.
-  // This keeps mode defaults stable, then GPS converts metres back into current-frame pixels.
-  return Math.max(6, Math.min(30, (Number(px)||61) * WAND_SANDBOX_BASE_MPP));
-}
-
-function currentWandPreset(){
-  const engine=window.GolfDaddyGreenWandEngine;
-  const base = engine?.GREEN_WAND_MODE_PRESETS?.robustTonal || {
-    key:"robustTonal",label:"Robust Tonal",sensitivityRange:{min:58,max:79,preset:68},baseBubbleSize:61,clusterPull:100,
-    filters:{grayscale:100,contrast:170,brightness:100,saturate:40,blur:1,invert:0}
-  };
-  return {
-    ...base,
-    key:"robustTonal",
-    label:"Robust Tonal",
-    sensitivityRange:{min:58,max:79,preset:71},
-    // Do not rely on this for GPS size. setWandMode uses the metres override below.
-    baseBubbleSize:base.baseBubbleSize || 61,
-    clusterPull:60
-  };
-}
-
-function toggleGreenWand(){
-  if(!target && !greenCentre){toast("Set green target first");return;}
-  greenActive=!greenActive;
-  const panel=document.getElementById("gdWandPanel");
-  if(panel)panel.classList.toggle("hidden",!greenActive);
-  if(greenActive){
-    establishGreenFromBubble();
-    captureWandScaleLock("wand-open");
-    setWandMode(wandMode || "robustTonal", false);
-    const lockedTxt=wandScaleLock ? ` · scale locked ${wandScaleLock.metersPerPixel.toFixed(2)}m/px` : "";
-    updateWandStatus("Ready · sandbox scan if pixels allow"+lockedTxt);
-  }else{
-    clearWandHandles();
-    clearWandScaleLock("wand-close");
-  }
-}
-
-function closeWandPanel(){
-  greenActive=false;
-  const panel=document.getElementById("gdWandPanel");
-  if(panel)panel.classList.add("hidden");
-  clearWandHandles();
-  clearWandScaleLock("wand-close");
-}
-
-
-try{
-  if(map && typeof map.on==="function"){
-    map.on("zoomstart resize",()=>clearWandScaleLock("map-scale-change"));
-  }
-}catch(e){}
-
-
-
-let gdWandControlRescanTimer=null;
-function gdRequestWandControlRescan(){
-  try{
-    clearTimeout(gdWandControlRescanTimer);
-    gdWandControlRescanTimer=setTimeout(()=>{
-      try{
-        if(typeof establishGreenFromBubble==="function") establishGreenFromBubble();
-        const hasGreenTarget=!!(greenCentre || target);
-        const hasOutline=!!(lastWandResult || (greenPolygon && greenPolygon.length));
-        if(typeof scanGreen==="function" && hasGreenTarget && (greenActive || hasOutline)){
-          scanGreen();
-          return;
-        }
-        if(typeof renderShot==="function") renderShot();
-      }catch(e){}
-    },120);
-  }catch(e){}
-}
-
-function gdMarkWandCalibrationLive(statusText){
-  try{ if(typeof gdMarkGreenWandCalibrationDirty==="function") gdMarkGreenWandCalibrationDirty(); }catch(e){}
-  const save=document.getElementById("gdCalibrationSaveBtn");
-  const scan=document.getElementById("gdWandScanBtn");
-  const hint=document.getElementById("gdWandUserHint");
-  if(save) save.textContent="Save Live Calibration";
-  if(scan) scan.textContent="Live Scan";
-  if(hint) hint.textContent="Live previewing. Save to keep these settings.";
-  if(statusText) updateWandStatus(statusText);
-  gdRequestWandControlRescan();
-}
-
-function setWandBaseBubble(value){
-  wandBaseBubbleMetersOverride=Math.max(6,Math.min(30,Number(value)||13));
-  const out=document.getElementById("gdWandBaseBubbleOut");
-  if(out) out.textContent=wandBaseBubbleMetersOverride.toFixed(wandBaseBubbleMetersOverride%1?1:0)+"m";
-  gdMarkWandCalibrationLive(`Live preview · size ${wandBaseBubbleMetersOverride.toFixed(1)}m`);
-}
-
-function setWandClusterPull(value){
-  wandClusterPullOverride=Math.round(Number(value)||0);
-  const el=document.getElementById("gdWandClusterPull");
-  const out=document.getElementById("gdWandClusterPullOut");
-  if(el)el.value=wandClusterPullOverride;
-  if(out)out.textContent=wandClusterPullOverride+"%";
-  gdMarkWandCalibrationLive(`Live preview · curve ${wandClusterPullOverride}%`);
-}
-
-function clearWandDebugLayers(){
-  try{wandDebugLayers.forEach(l=>{try{map.removeLayer(l)}catch(e){}});}catch(e){}
-  wandDebugLayers=[];
-}
-
-function addWandDebugLayer(layer){
-  try{layer.addTo(map); wandDebugLayers.push(layer);}catch(e){}
-}
-
-function pointToLatLngSafe(p,built){
-  try{
-    if(built && typeof built.toLatLng==="function") return built.toLatLng(p);
-    return map.containerPointToLatLng([p.x,p.y]);
-  }catch(e){return null;}
-}
-
-function gdWandDebugOverlayEnabled(){
-  try{
-    if(typeof dev==="function") return Number(dev("wand.debugOverlay")) >= 1;
-  }catch(e){}
-  try{return localStorage.getItem("gd_wand_debug_overlay")==="1";}catch(e){}
-  return false;
-}
-
-function drawWandDebugAnalysis(analysis,built){
-  clearWandDebugLayers();
-  if(!analysis || !greenActive || !gdWandDebugOverlayEnabled())return;
-  try{
-    const raw=(analysis.candidates||[]);
-    raw.forEach((p,i)=>{
-      const ll=pointToLatLngSafe(p,built); if(!ll)return;
-      addWandDebugLayer(L.circleMarker(ll,{radius:(i%4===0?3.2:2.1),color:'rgba(255,255,255,.75)',weight:1,fillColor:'rgba(255,255,255,.9)',fillOpacity:.85,interactive:false,pane:'overlayPane'}));
-    });
-    (analysis.accepted||[]).forEach((p,i)=>{
-      const ll=pointToLatLngSafe(p,built); if(!ll)return;
-      addWandDebugLayer(L.circleMarker(ll,{radius:(i%3===0?5:4),color:'rgba(0,0,0,.35)',weight:1,fillColor:'rgba(251,191,36,.96)',fillOpacity:.96,interactive:false,pane:'overlayPane'}));
-    });
-    (analysis.probes||[]).forEach((pr,i)=>{
-      if(i%3!==0)return;
-      const a=pointToLatLngSafe({x:pr.x1,y:pr.y1},built); const b=pointToLatLngSafe({x:pr.x2,y:pr.y2},built);
-      if(!a||!b)return;
-      addWandDebugLayer(L.polyline([a,b],{color:pr.hit?'rgba(255,255,255,.16)':'rgba(255,255,255,.06)',weight:1,interactive:false,pane:'overlayPane'}));
-    });
-    (analysis.miniLines||[]).forEach(line=>{
-      const pts=line.map(p=>pointToLatLngSafe(p,built)).filter(Boolean);
-      if(pts.length>=2)addWandDebugLayer(L.polyline(pts,{color:'rgba(251,146,60,.96)',weight:4,opacity:.95,interactive:false,pane:'overlayPane'}));
-    });
-  }catch(e){console.warn('Wand real debug draw failed',e);}
-}
-
-function setWandMode(modeName, keepSensitivity){
-  wandMode="robustTonal";
-  const preset=currentWandPreset();
-  const input=document.getElementById("gdWandSensitivity");
-  if(input){ input.min=preset.sensitivityRange.min; input.max=preset.sensitivityRange.max; }
-
-  const current=Math.round((greenTolerance||0)*100);
-  const inRange=current>=preset.sensitivityRange.min && current<=preset.sensitivityRange.max;
-  setWandSensitivity((keepSensitivity && inRange)?current:preset.sensitivityRange.preset,false);
-
-  if(!keepSensitivity){
-    // Working robust GPS default from successful tile-source test.
-    wandBaseBubbleMetersOverride=24.5;
-    wandClusterPullOverride=60;
-  }else{
-    if(wandBaseBubbleMetersOverride==null) wandBaseBubbleMetersOverride=24.5;
-    if(wandClusterPullOverride==null) wandClusterPullOverride=60;
-  }
-
-  const baseEl=document.getElementById("gdWandBaseBubble");
-  const baseOut=document.getElementById("gdWandBaseBubbleOut");
-  if(baseEl) baseEl.value=wandBaseBubbleMetersOverride;
-  if(baseOut) baseOut.textContent=Number(wandBaseBubbleMetersOverride).toFixed(Number(wandBaseBubbleMetersOverride)%1?1:0)+"m";
-
-  const pullEl=document.getElementById("gdWandClusterPull");
-  const pullOut=document.getElementById("gdWandClusterPullOut");
-  if(pullEl) pullEl.value=wandClusterPullOverride;
-  if(pullOut) pullOut.textContent=wandClusterPullOverride+"%";
-
-  updateWandStatus(`Robust · sensitivity ${Math.round((greenTolerance||0)*100)} · size ${Number(wandBaseBubbleMetersOverride||0).toFixed(1)}m · curve ${wandClusterPullOverride}%`);
-  if(typeof gdUpdateWandCalibrationUi==="function") gdUpdateWandCalibrationUi();
-}
-
-function setWandSensitivity(value, liveUpdate=true){
-  const preset=currentWandPreset();
-  const v=Math.max(preset.sensitivityRange.min,Math.min(preset.sensitivityRange.max,Number(value)||preset.sensitivityRange.preset));
-  greenTolerance=v/100;
-  sessionGreenTolerance=greenTolerance;
-  const input=document.getElementById("gdWandSensitivity");
-  const out=document.getElementById("gdWandSensitivityOut");
-  if(input)input.value=v;
-  if(out)out.textContent=String(v);
-  if(liveUpdate) gdMarkWandCalibrationLive(`Live preview · sensitivity ${v}`);
-}
-
-function updateWandStatus(text){
-  const el=document.getElementById("gdWandStatus");
-  if(el)el.textContent=text;
-}
-
-function establishGreenFromBubble(){
-  if(greenCentre)return greenCentre;
-  // Legacy fallback only. The Wand owns the green centre once one has been set;
-  // moving the aim/bubble target must not resize or recenter the green scan.
-  if(target)greenCentre=L.latLng(target.lat,target.lng);
-  return greenCentre;
-}
-
-function adjustGreenTol(delta){
-  const current=Math.round((greenTolerance||.68)*100);
-  setWandSensitivity(current+(delta*3));
-  if(greenActive)runGreenWandScan();
-}
-
-function retryGreen(){
-  clearWandHandles();
-  lastWandResult=null;
-  runGreenWandScan();
-}
-
-async function runGreenWandScan(){
-  establishGreenFromBubble();
-  if(!greenCentre){toast("Set green target first");return;}
-  await scanGreen();
-}
-
-function chooseSnapshotSource(){
-  document.getElementById("snapshotInput").click();
-}
-
-function loadSnapshotSource(event){
-  const file=event.target.files && event.target.files[0];
-  if(!file)return;
-
-  const reader=new FileReader();
-  reader.onload=()=>{
-    const img=new Image();
-    img.onload=()=>{
-      const mapEl=document.getElementById("map");
-      const rect=mapEl.getBoundingClientRect();
-      const canvas=document.getElementById("snapshotCanvas");
-      canvas.width=Math.round(rect.width);
-      canvas.height=Math.round(rect.height);
-      const ctx=canvas.getContext("2d",{willReadFrequently:true});
-
-      // Fit uploaded snapshot to the current map viewport.
-      // This is a beta alignment assumption: upload a snapshot of the current map view.
-      ctx.clearRect(0,0,canvas.width,canvas.height);
-      ctx.drawImage(img,0,0,canvas.width,canvas.height);
-
-      snapshotPixelSource={canvas,ctx,loadedAt:new Date().toISOString()};
-      snapshotPixelActive=true;
-      greenPixelAccessOk=true;
-      autoSwitchedForSecurity=false;
-
-      const btn=document.getElementById("snapshotBtn");
-      btn.textContent="Active";
-      btn.classList.add("active");
-      document.getElementById("snapshotSub").textContent="Beta · wand reading uploaded snapshot";
-      toast("Snapshot pixel source active");
-
-      if(greenActive && target) scanGreen();
-    };
-    img.src=reader.result;
-  };
-  reader.readAsDataURL(file);
-}
-
-function clearSnapshotSource(){
-  snapshotPixelSource=null;
-  snapshotPixelActive=false;
-  autoSwitchedForSecurity=false;
-  const btn=document.getElementById("snapshotBtn");
-  if(btn){
-    btn.textContent="Upload";
-    btn.classList.remove("active");
-  }
-  const sub=document.getElementById("snapshotSub");
-  if(sub)sub.textContent="Beta · upload readable map snapshot";
-}
-
-
-
-function gdCanvasUsefulV2(canvas){
-  try{
-    const ctx=canvas.getContext("2d",{willReadFrequently:true});
-    if(!ctx) return false;
-    const data=ctx.getImageData(0,0,canvas.width,canvas.height).data;
-    let useful=0, varied=0, last=-1;
-    const pixels=data.length/4;
-    const step=Math.max(1,Math.floor(pixels/2600));
-    for(let p=0;p<pixels;p+=step){
-      const i=p*4;
-      const r=data[i],g=data[i+1],b=data[i+2],a=data[i+3];
-      if(a>8 && (r>10 || g>10 || b>10)) useful++;
-      const lum=(r+g+b)/3;
-      if(last>=0 && Math.abs(lum-last)>7) varied++;
-      last=lum;
-    }
-    return useful>35 && varied>10;
-  }catch(e){return false;}
-}
-
-function gdGetGreenCentreForTileCrop(){
-  try{ if(typeof establishGreenFromBubble==="function") establishGreenFromBubble(); }catch(e){}
-  try{ if(typeof greenCentre!=="undefined" && greenCentre) return greenCentre; }catch(e){}
-  try{ if(window.greenCentre) return window.greenCentre; }catch(e){}
-  return null;
-}
-
-function gdLoadedTileItemsFromBaseLayer(){
-  const items=[];
-  try{
-    if(baseLayer && baseLayer._tiles){
-      Object.values(baseLayer._tiles).forEach(t=>{
-        const el=t && (t.el || t.img || t.tile);
-        const c=t && t.coords;
-        if(!el || !c) return;
-        if(!el.complete || !el.naturalWidth || !el.naturalHeight) return;
-        items.push({img:el, coords:{x:Number(c.x),y:Number(c.y),z:Number(c.z)}});
-      });
-    }
-  }catch(e){}
-
-  // Fallback only for getting coords if Leaflet internals fail. Esri is z/y/x; OSM is z/x/y.
-  if(!items.length){
-    try{
-      const source=(mapSources && mapSources[activeMapSourceIndex]) ? mapSources[activeMapSourceIndex].key : "";
-      [...document.querySelectorAll("#map img.leaflet-tile")].forEach(img=>{
-        if(!img.complete || !img.naturalWidth || !img.naturalHeight) return;
-        const url=img.currentSrc || img.src || "";
-        let m=url.match(/\/tile\/(\d+)\/(-?\d+)\/(-?\d+)(?:\?|$)/i);
-        if(m){
-          // ArcGIS/Esri: /tile/z/y/x
-          items.push({img,coords:{z:+m[1],y:+m[2],x:+m[3]}});
-          return;
-        }
-        m=url.match(/\/(\d+)\/(-?\d+)\/(-?\d+)(?:\.[a-z]+|\?|$)/i);
-        if(m){
-          if(source==="esri") items.push({img,coords:{z:+m[1],y:+m[2],x:+m[3]}});
-          else items.push({img,coords:{z:+m[1],x:+m[2],y:+m[3]}});
-        }
-      });
-    }catch(e){}
-  }
-
-  return items.filter(it=>Number.isFinite(it.coords.x)&&Number.isFinite(it.coords.y)&&Number.isFinite(it.coords.z));
-}
-
-function gdBuildGreenCentredTileCropV2(){
-  if(typeof L==="undefined" || typeof map==="undefined" || !map) return null;
-  const centre=gdGetGreenCentreForTileCrop();
-  if(!centre) return null;
-
-  const items=gdLoadedTileItemsFromBaseLayer();
-  if(!items.length) return null;
-
-  const zoomCounts={};
-  items.forEach(it=>zoomCounts[it.coords.z]=(zoomCounts[it.coords.z]||0)+1);
-  const desired=Number.isFinite(map.getZoom?.()) ? Math.round(map.getZoom()) : null;
-  const zooms=Object.keys(zoomCounts).map(Number);
-  const z=zooms.includes(desired) ? desired : zooms.sort((a,b)=>zoomCounts[b]-zoomCounts[a])[0];
-
-  const tiles=items.filter(it=>it.coords.z===z);
-  if(!tiles.length) return null;
-
-  const tileSize=(baseLayer && baseLayer.getTileSize) ? baseLayer.getTileSize().x : 256;
-  const cropSize=640;
-  const half=cropSize/2;
-
-  const canvas=document.createElement("canvas");
-  canvas.width=cropSize;
-  canvas.height=cropSize;
-  const ctx=canvas.getContext("2d",{willReadFrequently:true});
-  if(!ctx) return null;
-  ctx.clearRect(0,0,cropSize,cropSize);
-
-  const centreLL=L.latLng(centre.lat,centre.lng);
-  const worldPoint=map.project(centreLL,z);
-  const onePxLeft=map.unproject(L.point(worldPoint.x-1,worldPoint.y),z);
-  const onePxRight=map.unproject(L.point(worldPoint.x+1,worldPoint.y),z);
-  const tileMetersPerPixel=Math.max(0.03,Math.min(8,map.distance(onePxLeft,onePxRight)/2 || getMapMetersPerPixelAt(centreLL)));
-
-  let drawn=0, attempted=tiles.length;
-  tiles.forEach(it=>{
-    try{
-      const globalX=it.coords.x*tileSize;
-      const globalY=it.coords.y*tileSize;
-      const drawX=half + (globalX-worldPoint.x);
-      const drawY=half + (globalY-worldPoint.y);
-
-      if(drawX+tileSize<0 || drawY+tileSize<0 || drawX>cropSize || drawY>cropSize) return;
-      ctx.drawImage(it.img,drawX,drawY,tileSize,tileSize);
-      drawn++;
-    }catch(e){}
-  });
-
-  const useful=gdCanvasUsefulV2(canvas);
-  return {
-    canvas,
-    ctx,
-    coordinateFrame:"green-centred-leaflet-tile-crop-v2",
-    useful,
-    drawnTiles:drawn,
-    attemptedTiles:attempted,
-    cropSize,
-    seed:{x:half,y:half},
-    tileZoom:z,
-    tileSize,
-    metersPerPixel:tileMetersPerPixel,
-    centreLatLng:{lat:centre.lat,lng:centre.lng},
-    worldCentre:{x:worldPoint.x,y:worldPoint.y},
-    toLatLng(point){
-      const p = Array.isArray(point) ? {x:point[0],y:point[1]} : point;
-      const wx=worldPoint.x + (Number(p.x)-half);
-      const wy=worldPoint.y + (Number(p.y)-half);
-      return map.unproject(L.point(wx,wy),z);
-    },
-    fromLatLng(ll){
-      const wp=map.project(L.latLng(ll.lat,ll.lng),z);
-      return {x:half+(wp.x-worldPoint.x),y:half+(wp.y-worldPoint.y)};
-    }
-  };
-}
-
-function gdWandSeedForBuiltCanvas(built,canvas){
-  if(built && built.seed){
-    return {
-      x:Math.max(2,Math.min(canvas.width-3,Number(built.seed.x))),
-      y:Math.max(2,Math.min(canvas.height-3,Number(built.seed.y)))
-    };
-  }
-  const centrePoint=map.latLngToContainerPoint(greenCentre);
-  return {
-    x:Math.max(2,Math.min(canvas.width-3,centrePoint.x)),
-    y:Math.max(2,Math.min(canvas.height-3,centrePoint.y))
-  };
-}
-
-function gdWandCanvasPointToLatLng(point,built){
-  if(built && typeof built.toLatLng==="function") return built.toLatLng(point);
-  return map.containerPointToLatLng([point.x,point.y]);
-}
-
-function gdTilePos(el){
-  try{
-    if(window.L && L.DomUtil && typeof L.DomUtil.getPosition==="function"){
-      const p=L.DomUtil.getPosition(el);
-      if(p && Number.isFinite(p.x) && Number.isFinite(p.y) && (p.x || p.y)) return {x:p.x,y:p.y};
-    }
-  }catch(e){}
-  try{
-    if(el && el._leaflet_pos && Number.isFinite(el._leaflet_pos.x) && Number.isFinite(el._leaflet_pos.y)){
-      return {x:el._leaflet_pos.x,y:el._leaflet_pos.y};
-    }
-  }catch(e){}
-  const s=((el&&el.style&&el.style.transform)||"") + " " + ((el&&el.style&&el.style.webkitTransform)||"");
-  let m=s.match(/translate3d\(([-0-9.]+)px,\s*([-0-9.]+)px/i) ||
-        s.match(/translate\(([-0-9.]+)px,\s*([-0-9.]+)px/i) ||
-        s.match(/matrix\([^,]+,[^,]+,[^,]+,[^,]+,\s*([-0-9.]+),\s*([-0-9.]+)\)/i);
-  if(m) return {x:parseFloat(m[1])||0,y:parseFloat(m[2])||0};
-  const left=parseFloat((el&&el.style&&el.style.left)||"0")||0;
-  const top=parseFloat((el&&el.style&&el.style.top)||"0")||0;
-  return {x:left,y:top};
-}
-
-function gdCanvasHasUsefulPixels(canvas){
-  try{
-    const ctx=canvas.getContext("2d",{willReadFrequently:true});
-    const data=ctx.getImageData(0,0,canvas.width,canvas.height).data;
-    let nonBlack=0, varied=0, last=-1;
-    const px=data.length/4;
-    const step=Math.max(1,Math.floor(px/2500));
-    for(let p=0;p<px;p+=step){
-      const i=p*4;
-      const r=data[i],g=data[i+1],b=data[i+2],a=data[i+3];
-      if(a>5 && (r>8 || g>8 || b>8)) nonBlack++;
-      const lum=(r+g+b)/3;
-      if(last>=0 && Math.abs(lum-last)>6) varied++;
-      last=lum;
-    }
-    return nonBlack>30 && varied>8;
-  }catch(e){
-    return false;
-  }
-}
-
-function tryBuildMapCanvas(){
-  const greenCrop=gdBuildGreenCentredTileCropV2();
-  if(greenCrop && greenCrop.useful){
-    greenPixelAccessOk=true;
-    return greenCrop;
-  }
-
-  if(snapshotPixelActive && snapshotPixelSource){
-    greenPixelAccessOk=true;
-    snapshotPixelSource.coordinateFrame="snapshot-viewport";
-    return snapshotPixelSource;
-  }
-
-  const mapEl=document.getElementById("map");
-  const size=map.getSize ? map.getSize() : {x:mapEl.clientWidth,y:mapEl.clientHeight};
-  const canvas=document.createElement("canvas");
-  canvas.width=Math.round(size.x || mapEl.clientWidth);
-  canvas.height=Math.round(size.y || mapEl.clientHeight);
-  const ctx=canvas.getContext("2d",{willReadFrequently:true});
-  if(!ctx)return null;
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-
-  const mapPane=map.getPane ? map.getPane("mapPane") : mapEl.querySelector(".leaflet-map-pane");
-  const tilePane=map.getPane ? map.getPane("tilePane") : mapEl.querySelector(".leaflet-tile-pane");
-  const mapPanePos=gdTilePos(mapPane);
-  const tilePanePos=gdTilePos(tilePane);
-
-  const tiles=[...mapEl.querySelectorAll("img.leaflet-tile")]
-    .filter(img=>img.complete && img.naturalWidth && img.naturalHeight);
-
-  let drawn=0;
-  let attempted=0;
-  tiles.forEach(img=>{
-    try{
-      attempted++;
-      const tilePos=gdTilePos(img);
-      const w=parseFloat(img.style.width)||img.width||img.naturalWidth||256;
-      const h=parseFloat(img.style.height)||img.height||img.naturalHeight||256;
-      const x=Math.round(mapPanePos.x + tilePanePos.x + tilePos.x);
-      const y=Math.round(mapPanePos.y + tilePanePos.y + tilePos.y);
-
-      // These coordinates are Leaflet containerPoint-space. No CSS visual rects.
-      if(x+w < -512 || y+h < -512 || x > canvas.width+512 || y > canvas.height+512) return;
-      ctx.drawImage(img,x,y,w,h);
-      drawn++;
-    }catch(e){}
-  });
-
-  // If Leaflet internal positions did not land in the container, do NOT use rotated client rects.
-  // Return a blank/failed sample so we know the source is not valid rather than analysing fake mixed tiles.
-  try{
-    ctx.getImageData(0,0,1,1);
-    greenPixelAccessOk=true;
-    const useful=gdCanvasHasUsefulPixels(canvas);
-    return {
-      canvas,
-      ctx,
-      coordinateFrame: useful ? "leaflet-internal-container" : "leaflet-internal-container-empty",
-      drawnTiles:drawn,
-      attemptedTiles:attempted,
-      canvasSize:{x:canvas.width,y:canvas.height},
-      mapPanePos,
-      tilePanePos,
-      useful
-    };
-  }catch(e){
-    greenPixelAccessOk=false;
-    if(!window.__greenPixelBlockedWarned){
-      console.warn("Green Wand pixel sampling blocked by map tile/browser security.");
-      window.__greenPixelBlockedWarned=true;
-    }
-    const switched=autoSwitchMapSource();
-    if(switched) toast("Pixel read blocked · switching map source");
-    return null;
-  }
-}
-
-
-function trySampleMapPixel(x,y){
-  const built=tryBuildMapCanvas();
-  if(!built)return null;
-  try{
-    const p=built.ctx.getImageData(Math.round(x),Math.round(y),1,1).data;
-    return {r:p[0],g:p[1],b:p[2],a:p[3]};
-  }catch(e){
-    return null;
-  }
-}
-
-function sampleGreenSurfacePixels(centre){
-  // Denser real-world 3m seed sampling.
-  // Centre + inner ring + outer ring.
-  const points=[centre];
-
-  const rings=[
-    {r:GREEN_SEED_RADIUS_M*0.5,n:8},
-    {r:GREEN_SEED_RADIUS_M,n:16}
-  ];
-
-  rings.forEach(ring=>{
-    for(let i=0;i<ring.n;i++){
-      const a=(Math.PI*2*i)/ring.n;
-      points.push(project(centre,a,ring.r));
-    }
-  });
-
-  const samples=[];
-  points.forEach(ll=>{
-    const p=map.latLngToContainerPoint(ll);
-    const px=trySampleMapPixel(p.x,p.y);
-    if(px&&px.a>0)samples.push(px);
-  });
-  return samples;
-}
-
-function sampleAverage(samples){
-  if(!samples.length)return null;
-  return {
-    r:Math.round(samples.reduce((s,p)=>s+p.r,0)/samples.length),
-    g:Math.round(samples.reduce((s,p)=>s+p.g,0)/samples.length),
-    b:Math.round(samples.reduce((s,p)=>s+p.b,0)/samples.length)
-  };
-}
-
-function rawColourDistance(a,b){
-  const dr=a.r-b.r,dg=a.g-b.g,db=a.b-b.b;
-  const colour=Math.sqrt(dr*dr*.8+dg*dg*1.0+db*db*.8);
-  const brightA=(a.r+a.g+a.b)/3;
-  const brightB=(b.r+b.g+b.b)/3;
-  const brightness=Math.abs(brightA-brightB)*.55;
-  return colour+brightness;
-}
-
-function distanceToSampleSet(samples,pixel){
-  if(!samples.length)return 9999;
-  let best=9999;
-  samples.forEach(s=>best=Math.min(best,rawColourDistance(s,pixel)));
-  return best;
-}
-
-function pixelAllowed(samples,pixel,previous,tolerance,edgeThreshold,normalisedRadius){
-  // Earlier version: sample match + previous-pixel edge resistance.
-  const sampleDiff=distanceToSampleSet(samples,pixel);
-  const edgeDiff=rawColourDistance(previous,pixel);
-
-  const outwardResistance=1+(normalisedRadius*.55);
-  const edgeLimit=edgeThreshold/outwardResistance;
-
-  const brightness=(pixel.r+pixel.g+pixel.b)/3;
-  const saturation=Math.max(pixel.r,pixel.g,pixel.b)-Math.min(pixel.r,pixel.g,pixel.b);
-  const sandLike=brightness>165 && saturation<34;
-
-  return sampleDiff<tolerance && edgeDiff<edgeLimit && !sandLike;
-}
-
-function gdValidateWandOutline(pts,analysis){
-  try{
-    if(!greenCentre || !Array.isArray(pts) || pts.length<12) return {ok:false,reason:"missing outline"};
-    const distances=pts.map(p=>map.distance(greenCentre,p)).filter(Number.isFinite);
-    if(distances.length<12) return {ok:false,reason:"invalid distances"};
-    const avg=distances.reduce((s,d)=>s+d,0)/distances.length;
-    const max=Math.max(...distances);
-    const min=Math.min(...distances);
-    const centre=pts.reduce((acc,p)=>({lat:acc.lat+p.lat,lng:acc.lng+p.lng}),{lat:0,lng:0});
-    centre.lat/=pts.length;
-    centre.lng/=pts.length;
-    const centreDrift=map.distance(greenCentre,L.latLng(centre.lat,centre.lng));
-    const accepted=Number(analysis?.metrics?.acceptedDots||0);
-    const bestChain=Number(analysis?.metrics?.bestChain||0);
-    if(avg<2.5 || avg>42) return {ok:false,reason:`radius ${Math.round(avg)}m`};
-    if(max>75 || max/Math.max(min,1)>7) return {ok:false,reason:"spread"};
-    if(centreDrift>Math.max(24,avg*1.65)) return {ok:false,reason:`drift ${Math.round(centreDrift)}m`};
-    if(accepted<6 && bestChain<8) return {ok:false,reason:"weak edge family"};
-    return {ok:true,avg,max,centreDrift};
-  }catch(e){
-    return {ok:false,reason:"validation error"};
-  }
-}
-
-function fallbackGreenRadius(){
-  // Start tiny. User grows it out with +.
-  // If pixels are blocked, this remains a centred reference, not detection.
-  const t=Math.pow(greenTolerance,1.45);
-  if(!greenPixelAccessOk){
-    return Math.max(2.5,Math.min(13,2.5+(t*12)));
-  }
-  return Math.max(3.5,Math.min(32,3.5+(t*24)));
-}
-
-async function scanGreen(){
-  establishGreenFromBubble();
-  if(!greenCentre)return;
-
-  const engine=window.GolfDaddyGreenWandEngine;
-  const built=tryBuildMapCanvas();
-  if(!built || !engine?.analyzeGreenWand){
-    greenPixelAccessOk=false;
-    updateWandStatus("Auto scan unavailable · quick green shape");
-    drawQuickShapeGreen();
-    return;
-  }
-
-  try{
-    const canvas=built.canvas;
-    window.__lastWandCanvasBuild={coordinateFrame:built.coordinateFrame,drawnTiles:built.drawnTiles,attemptedTiles:built.attemptedTiles,useful:built.useful,tileZoom:built.tileZoom,mapPanePos:built.mapPanePos,tilePanePos:built.tilePanePos,width:canvas.width,height:canvas.height};
-    const seed=gdWandSeedForBuiltCanvas(built,canvas);
-    const preset=currentWandPreset();
-    const expanded=getExpandedWandOptions(preset,built);
-    updateWandStatus(`Scanning · ${preset.label} · scale locked ${expanded.metersPerPixel.toFixed(2)}m/px`);
-    const analysis=await engine.analyzeGreenWand(canvas,canvas.width,canvas.height,{
-      seed,
-      sensitivity:Math.round((greenTolerance||preset.sensitivityRange.preset/100)*100),
-      // Sandbox brain still works in pixels; GPS only converts the sandbox exploration size to real-world metres.
-      baseBubbleSize:expanded.baseBubbleSizePx,
-      clusterPull:expanded.clusterPull,
-      filters:preset.filters
-    });
-
-    const outline=(analysis.outerShell&&analysis.outerShell.length>=12)?analysis.outerShell:analysis.insetGreen;
-    if(!outline || outline.length<12){
-      updateWandStatus("Weak sandbox fit · quick green shape");
-      drawQuickShapeGreen();
-      return;
-    }
-
-    let pts=outline.map(p=>gdWandCanvasPointToLatLng(p,built));
-    let avgM=Math.round(pts.reduce((sum,p)=>sum+map.distance(greenCentre,p),0)/pts.length);
-
-    // High-resolution satellite tiles can make the sandbox's old pixel-sized shell look tiny.
-    // If the scan has found a real edge family but returned an unrealistically small shell,
-    // gently expand/settle it in screen space while preserving the detected shape.
-    const adjustedOutline=normalizeSandboxWandShell(outline,seed,expanded);
-    if(adjustedOutline!==outline){
-      pts=adjustedOutline.map(p=>gdWandCanvasPointToLatLng(p,built));
-      avgM=Math.round(pts.reduce((sum,p)=>sum+map.distance(greenCentre,p),0)/pts.length);
-    }
-    const quality=gdValidateWandOutline(pts,analysis);
-    if(!quality.ok){
-      console.warn("Green Wand scan rejected by geometry guard",quality.reason,window.__lastWandCanvasBuild);
-      updateWandStatus(`Scan rejected · ${quality.reason} · quick green shape`);
-      clearWandDebugLayers();
-      drawQuickShapeGreen();
-      return;
-    }
-    const confidence=Math.max(.38,Math.min(.94,
-      (analysis.metrics.acceptedDots/144)*.42 +
-      Math.min(analysis.metrics.bestChain/44,1)*.26 +
-      Math.min(analysis.metrics.ridgeCoverage/80,1)*.18 +
-      Math.min(analysis.metrics.difference/32,1)*.14
-    ));
-
-    lastWandResult=makeWandResult(pts,"pixel",confidence,`${avgM}m ${preset.label}`);
-    lastWandResult.modeKey=wandMode;
-    lastWandResult.modeLabel=preset.label;
-    lastWandResult.baseBubbleSize=expanded.baseBubbleSizePx;
-    lastWandResult.sandboxBasePx=expanded.sandboxBasePx;
-    lastWandResult.baseRadiusMeters=Number((expanded.baseBubbleMeters || (expanded.baseBubbleSizePx*expanded.metersPerPixel)).toFixed(1));
-    lastWandResult.metersPerPixel=Number(expanded.metersPerPixel.toFixed(3));
-    lastWandResult.scaleLocked=true;
-    lastWandResult.scaleLock=expanded.scaleLock;
-    lastWandResult.clusterPull=expanded.clusterPull;
-    lastWandResult.filters=preset.filters;
-    lastWandResult.metrics=analysis.metrics;
-    lastWandResult.debugRaw={candidates:analysis.candidates,accepted:analysis.accepted,miniLines:analysis.miniLines,probes:analysis.probes,outerShell:analysis.outerShell,insetGreen:analysis.insetGreen,outputSource:"sandboxOuterShell"};
-    lastWandResult.debugCounts={
-      candidates:analysis.candidates?.length||0,
-      accepted:analysis.accepted?.length||0,
-      ridgeLines:analysis.ridgeLines?.length||0
-    };
-
-    drawGreenPolygon(pts,`${avgM}m scan`);
-    drawWandDebugAnalysis(analysis,built);
-    updateWandStatus(`${preset.label} · ${analysis.metrics.verdict} · ${avgM}m · ${Math.round(confidence*100)}% · bubble ${(wandBaseBubbleMetersOverride || sandboxPxToHealthyBubbleMeters(expanded.sandboxBasePx)).toFixed(1)}m/${Math.round(expanded.sandboxBasePx)}px · pull ${Math.round(expanded.clusterPull)}% · outer shell · scale locked`);
-    toast("Sandbox green scan ready");
-  }catch(e){
-    console.warn("Green Wand sandbox scan failed",e);
-    updateWandStatus("Sandbox scan failed · quick green shape");
-    drawQuickShapeGreen();
-  }
-}
-
-function drawQuickShapeGreen(){
-  drawFallbackGreen();
-  makeEditableGreen();
-  updateWandStatus("Quick shape · drag handles then accept");
-  toast("Quick green shape");
-}
-
-function drawFallbackGreen(){
-  const r=fallbackGreenRadius();
-  const dirs=72;
-  const pts=[];
-  for(let i=0;i<dirs;i++){
-    const a=(Math.PI*2*i)/dirs;
-    const wob=1 + Math.sin(a*3)*.055 + Math.cos(a*5)*.035;
-    pts.push(projectOffset(greenCentre,0,Math.cos(a)*r*.88*wob,Math.sin(a)*r*1.18*wob));
-  }
-  const source=greenPixelAccessOk?"pixel-estimate":"manual-estimate";
-  lastWandResult=makeWandResult(pts,source,.35,greenPixelAccessOk?`${Math.round(r)}m green`:`${Math.round(r)}m fallback`);
-  drawGreenPolygon(pts,greenPixelAccessOk?`${Math.round(r)}m green`:`${Math.round(r)}m fallback`);
-}
-
-function makeWandResult(pts,source,confidence,label){
-  return {
-    holeId: currentPlayingHole?.hole || selectedHole || null,
-    boundaryPoints: pts.map(p=>({lat:p.lat,lng:p.lng})),
-    modeUsed: source==="pixel"?wandMode:"quick-shape",
-    modeLabel: source==="pixel"?currentWandPreset().label:"Quick Shape",
-    sensitivity: Math.round((greenTolerance||0)*100),
-    confidence: Number(confidence.toFixed(2)),
-    sampledCenter: greenCentre?{lat:greenCentre.lat,lng:greenCentre.lng}:null,
-    source,
-    label,
-    createdAt:new Date().toISOString()
-  };
-}
-
-function clearWandHandles(){
-  clearWandDebugLayers();
-  wandHandleMarkers.forEach(m=>{try{map.removeLayer(m)}catch(e){}});
-  wandHandleMarkers=[];
-}
-
-function makeEditableGreen(){
-  clearWandHandles();
-  if(!greenPolygon||!greenPolygon.length)return;
-  const idxs=[0,Math.floor(greenPolygon.length/4),Math.floor(greenPolygon.length/2),Math.floor(greenPolygon.length*3/4)];
-  idxs.forEach((idx)=>{
-    const marker=L.marker(greenPolygon[idx],{
-      draggable:true,
-      zIndexOffset:100000,
-      icon:L.divIcon({className:"",html:"<div class='gdWandHandle'></div>",iconSize:[18,18],iconAnchor:[9,9]})
-    }).addTo(map);
-    marker.on("drag",()=>{
-      const moved=marker.getLatLng();
-      const old=greenPolygon[idx];
-      const dLat=moved.lat-old.lat;
-      const dLng=moved.lng-old.lng;
-      greenPolygon=greenPolygon.map((p,i)=>{
-        const influence=Math.max(0,1-(Math.min(Math.abs(i-idx),greenPolygon.length-Math.abs(i-idx))/(greenPolygon.length/3)));
-        return L.latLng(p.lat+dLat*influence,p.lng+dLng*influence);
-      });
-      drawGreenPolygon(greenPolygon,"quick shape");
-      makeEditableGreen();
-      lastWandResult=makeWandResult(greenPolygon,"manual-estimate",.42,"quick shape");
-    });
-    wandHandleMarkers.push(marker);
-  });
-}
-
-function acceptGreenWand(){
-  if(!greenPolygon||!greenPolygon.length){toast("No green to accept");return;}
-  lastWandResult=lastWandResult||makeWandResult(greenPolygon,"manual-estimate",.4,"accepted");
-  window.golfDaddyAcceptedGreen=lastWandResult;
-  window.clarityCaddieAcceptedGreen=lastWandResult;
-  clearWandHandles();
-  drawGreenPolygon(greenPolygon,"saved green",{settled:true});
-  updateWandStatus(`Accepted · ${lastWandResult.modeUsed} · ${lastWandResult.sensitivity}%`);
-  toast("Green accepted");
-}
-
-function importGreenWandResult(result){
-  if(!result||!Array.isArray(result.boundaryPoints))return false;
-  const pts=result.boundaryPoints.map(p=>L.latLng(p.lat,p.lng));
-  greenCentre=result.sampledCenter?L.latLng(result.sampledCenter.lat,result.sampledCenter.lng):(target||greenCentre);
-  lastWandResult=result;
-  drawGreenPolygon(pts,result.label||"wand import");
-  return true;
-}
-window.importGreenWandResult=importGreenWandResult;
-
-function drawMaskOutline(mask,sx,sy){
-  const dirs=72;
-  const radial=new Array(dirs).fill(0);
-
-  for(const [x,y] of mask){
-    const dx=x-sx,dy=y-sy;
-    const dist=Math.sqrt(dx*dx+dy*dy);
-    let a=Math.atan2(dy,dx);
-    if(a<0)a+=Math.PI*2;
-    const bin=Math.min(dirs-1,Math.floor((a/(Math.PI*2))*dirs));
-    if(dist>radial[bin])radial[bin]=dist;
-  }
-
-  let smooth=radial.map((v,i)=>{
-    let sum=0,count=0;
-    for(let k=-2;k<=2;k++){
-      const j=(i+k+dirs)%dirs;
-      if(radial[j]>0){sum+=radial[j];count++}
-    }
-    return count?sum/count:v;
-  });
-
-  // Earlier spike damping.
-  smooth=smooth.map((v,i)=>{
-    const prev=smooth[(i-1+dirs)%dirs]||v;
-    const next=smooth[(i+1)%dirs]||v;
-    const avg=(prev+next)/2;
-    if(avg>0 && v>avg*1.32)return avg*1.16;
-    return v;
-  });
-
-  const pts=[];
-  for(let i=0;i<dirs;i++){
-    const r=smooth[i];
-    if(r<=0)continue;
-    const a=(Math.PI*2*i)/dirs;
-    pts.push(map.containerPointToLatLng([sx+Math.cos(a)*r,sy+Math.sin(a)*r]));
-  }
-
-  if(pts.length<8){
-    drawFallbackGreen();
-    return;
-  }
-
-  const approx=Math.round(pts.reduce((s,p)=>s+map.distance(greenCentre,p),0)/pts.length);
-  drawGreenPolygon(pts,`${approx}m scan`);
-}
+/* Standalone Wand UI retired. Green Shape Engine ownership lives in scripts/gd-green-shape-engine.js. */
 
 function drawGreenPolygon(pts,label,opts={}){
   [greenOutline,greenSoft,greenLabel,frontLabel,backLabel].forEach(l=>l&&map.removeLayer(l));
@@ -22391,7 +21251,8 @@ function drawGreenPolygon(pts,label,opts={}){
   }).addTo(map);
 
   if(!settled&&label){
-    const north=project(greenCentre,0,Math.max(12,fallbackGreenRadius()+6));
+    const northBase=greenCentre||target||pts[0];
+    const north=project(northBase,0,18);
     greenLabel=L.marker(north,{
       interactive:false,
       icon:L.divIcon({
@@ -22406,9 +21267,6 @@ function drawGreenPolygon(pts,label,opts={}){
   }
 
   drawGreenDistances(pts);
-  if(typeof attachGreenOutlineLongPress==="function") attachGreenOutlineLongPress();
-  const tolEl=document.getElementById("tolValue");
-  if(tolEl)tolEl.textContent=`Tol ${Math.round(greenTolerance*100)}%`;
   renderShot();
 }
 
@@ -25170,7 +24028,7 @@ function replaceShellRoute(route){
   lastShellModule=route;
   updateShellRouteLabel();
 }
-function setDockActive(name){['Gps','Bubble','Bag','Green','Admin'].forEach(k=>{const el=document.getElementById('dock'+k);if(el)el.classList.toggle('active',k.toLowerCase()===name);});}
+function setDockActive(name){['Gps','Bubble','Bag','Admin'].forEach(k=>{const el=document.getElementById('dock'+k);if(el)el.classList.toggle('active',k.toLowerCase()===name);});}
 function closeModulePanels(){document.querySelectorAll('.modulePanel.open').forEach(p=>p.classList.remove('open'));}
 function setShellLayer(layer){
   document.body.classList.toggle('shell-home',layer==='home');
@@ -25260,7 +24118,7 @@ function enterGpsModule(opts={}){
 }
 function openShellModule(id,opts={}){
   if(id==='modeDashboardPanel')return showShellHome();
-  if(id==='greenToolsPanel')return openGpsWand();
+  if(id==='greenToolsPanel')return enterGpsModule(Object.assign({},opts,{preserveState:true}));
   closeAllPanels();
   closeModulePanels();
   hideGpsSurface();
@@ -25278,7 +24136,7 @@ function openRoute(route,opts={replace:true}){
   if(route==='home')return showShellHome();
   if(route==='gps')return enterGpsModule(opts);
   if(route==='modeDashboardPanel')return showShellHome();
-  if(route==='greenToolsPanel')return openGpsWand();
+  if(route==='greenToolsPanel')return enterGpsModule(Object.assign({},opts,{preserveState:true}));
   if(route==='profilePanel')return openProfilePanel(opts);
   if(route==='onboardingPanel')return openOnboarding(false);
   if(route==='bag')return openBag(opts);
@@ -26269,53 +25127,6 @@ window.GolfDaddyAccounts={load:gdAccountsLoad,save:gdAccountsSave,state:()=>GD_A
 window.ClarityCaddieProfiles=window.GolfDaddyProfiles;
 window.ClarityCaddieAccounts=window.GolfDaddyAccounts;
 try{window.ClaritySession&&window.ClaritySession.sync("account-api-ready");}catch(e){}
-/* --- Wand in GPS test patch v2: overlay only, never reset current GPS state --- */
-function openGpsWand(evt){
-  try{ if(evt && evt.preventDefault) evt.preventDefault(); if(evt && evt.stopPropagation) evt.stopPropagation(); }catch(e){}
-  try{
-    var gpsPage=document.getElementById("gpsPage");
-    var gpsAlreadyActive=document.body.classList.contains("gps-active") || (gpsPage && gpsPage.classList.contains("active"));
-    // Only enter GPS from Home/Dock. If already inside GPS, do NOT call enterGpsModule because that can reset shot state.
-    if(!gpsAlreadyActive && typeof enterGpsModule === "function") enterGpsModule({preserveState:true, fromWand:true});
-  }catch(e){}
-  setTimeout(function(){
-    try{
-      greenActive=true;
-      var panel=document.getElementById("gdWandPanel");
-      if(panel) panel.classList.remove("hidden");
-      if(typeof setWandMode === "function") setWandMode((typeof wandMode!=="undefined" && wandMode) ? wandMode : "robustTonal", true);
-      if(typeof updateWandStatus === "function"){
-        if(typeof greenCentre!=="undefined" && greenCentre) updateWandStatus("Ready · GPS overlay mode");
-        else updateWandStatus("Set/lock a green first, then scan. No GPS reset triggered.");
-      }
-    }catch(e){}
-  }, 60);
-  return false;
-}
-
-
-/* --- Wand safe toggle hotfix: opening the wand must not reset/re-enter GPS --- */
-(function(){
-  var _oldClose = (typeof closeWandPanel === "function") ? closeWandPanel : null;
-  window.toggleGreenWand = function(evt){
-    try{ if(evt && evt.preventDefault) evt.preventDefault(); if(evt && evt.stopPropagation) evt.stopPropagation(); }catch(e){}
-    try{
-      var panel=document.getElementById("gdWandPanel");
-      var willOpen = !panel || panel.classList.contains("hidden") || !greenActive;
-      greenActive = willOpen;
-      if(panel) panel.classList.toggle("hidden", !willOpen);
-      if(willOpen){
-        if(typeof setWandMode === "function") setWandMode((typeof wandMode!=="undefined" && wandMode) ? wandMode : "robustTonal", true);
-        if(typeof updateWandStatus === "function"){
-          if((typeof target!=="undefined" && target) || (typeof greenCentre!=="undefined" && greenCentre)) updateWandStatus("Ready · scan or quick shape");
-          else updateWandStatus("Set/lock a green first, then scan. No reset triggered.");
-        }
-      }else if(typeof clearWandHandles === "function") clearWandHandles();
-    }catch(e){ console.warn("Wand toggle safe hotfix", e); }
-    return false;
-  };
-})();
-
 window.GolfDaddyShell={home:showShellHome,mode:setShellMode,dashboard:showShellHome,gps:enterGpsModule,module:openShellModule,back:shellBack,profile:openProfilePanel,onboarding:openOnboarding};
 window.ClarityCaddieShell=window.GolfDaddyShell;
 bootProfileShell();

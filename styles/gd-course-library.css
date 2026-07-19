@@ -488,7 +488,6 @@
   background:linear-gradient(180deg,#29df79,#11a452)!important;
   color:#03150a!important;
 }
-body.gdMappedCourseMode:not(.gdFullMappingMode) #greenToolBtn,
 body.gdMappedCourseMode:not(.gdFullMappingMode) #gdMapperToolsBtn{
   display:none!important;
   visibility:hidden!important;
@@ -904,7 +903,6 @@ body.gdFullMappingMode .shotTile,
 body.gdFullMappingMode #gpsModeSwitch,
 body.gdFullMappingMode .scoreBlock,
 body.gdFullMappingMode #flagTool,
-body.gdFullMappingMode #greenToolBtn,
 body.gdFullMappingMode #gpsRailBtn,
 body.gdFullMappingMode #scorecardRailBtn,
 body.gdFullMappingMode #bagRailBtn,

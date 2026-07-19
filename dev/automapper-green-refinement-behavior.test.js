@@ -107,10 +107,7 @@ function makeHarness() {
   const routeCalls = [];
   const gpsCalls = [];
   const holeChanges = [];
-  const elements = new Map([
-    ["gdWandPanel", makeElement("gdWandPanel")]
-  ]);
-  elements.get("gdWandPanel").classList.add("hidden");
+  const elements = new Map();
 
   const document = {
     readyState: "loading",
@@ -175,13 +172,6 @@ function makeHarness() {
     frameMappedHoleForPlay() {},
     gdOpenShellRoute(route) { routeCalls.push(route); },
     setHole(hole) { holeChanges.push(hole); },
-    openGpsWand(...args) { wandCalls.push(["openGpsWand", args]); },
-    gdCompactWandOpen(...args) { wandCalls.push(["gdCompactWandOpen", args]); },
-    startMapperGreenWand(...args) { wandCalls.push(["startMapperGreenWand", args]); },
-    closeWandPanel(...args) { wandCalls.push(["closeWandPanel", args]); },
-    acceptGreenWand(...args) { wandCalls.push(["acceptGreenWand", args]); },
-    importGreenWandResult(...args) { wandCalls.push(["importGreenWandResult", args]); },
-    rejectGreenWand(...args) { wandCalls.push(["rejectGreenWand", args]); },
     gdStartGpsCamera(...args) { gpsCalls.push(["gdStartGpsCamera", args]); },
     map: {
       project(point) {
@@ -233,7 +223,7 @@ function makeHarness() {
   vm.runInNewContext(instrumentedSource, context, { filename: mapperPath });
   const api = context.window.__gdAutomapperGreenRefinementTestApi;
   assert(api, "instrumented mapper API is available");
-  return { context, api, localStorage, sessionStorage, events, wandCalls, routeCalls, gpsCalls, holeChanges };
+  return { context, api, localStorage, sessionStorage, events, wandCalls, routeCalls, gpsCalls, holeChanges, elements };
 }
 
 function ring(center, radiusM, points = 24) {
@@ -370,7 +360,10 @@ async function saveFixtureHole(harness, opts = {}) {
     assert.strictEqual(second.refinement.accepted, true, "same stale course snapshot can re-run refinement");
     assert.strictEqual(greenObjects(harness).length, 1, "repeated accepted refinement does not duplicate persistence");
     assert.strictEqual(harness.wandCalls.length, 0, "no standalone Wand function is called");
-    assert.strictEqual(harness.context.document.getElementById("gdWandPanel").classList.contains("hidden"), true, "Wand panel stays closed");
+    assert.strictEqual(harness.elements.has("gdWandPanel"), false, "standalone Wand panel is not requested");
+    ["openGpsWand", "gdCompactWandOpen", "startMapperGreenWand", "closeWandPanel", "acceptGreenWand", "importGreenWandResult", "rejectGreenWand"].forEach((name) => {
+      assert.strictEqual(typeof harness.context[name], "undefined", `${name} stays undefined in the mapper harness`);
+    });
     assert.strictEqual(harness.context.document.body.classList.contains("wand-active"), false, "no Wand-active body class is added");
     assert.deepStrictEqual(harness.gpsCalls, [], "no GPS camera command is issued");
     assert.deepStrictEqual(harness.routeCalls, [], "no shell route changes");

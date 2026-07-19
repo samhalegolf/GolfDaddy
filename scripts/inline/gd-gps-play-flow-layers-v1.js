@@ -196,13 +196,6 @@
     safe(function(){flag.classList.remove("softActive","grabbing")});
     safe(function(){document.getElementById("gdPinToolFlyout")?.classList.add("hidden")});
   }
-  function closeMappedWand(screen){
-    if(screen!=="mapped")return;
-    safe(function(){greenActive=false});
-    safe(function(){document.getElementById("gdWandPanel")?.classList.add("hidden")});
-    safe(function(){if(typeof clearWandHandles==="function")clearWandHandles()});
-    safe(function(){if(typeof window.gdClearWandLive==="function")window.gdClearWandLive()});
-  }
   function syncToolScreen(){
     var screen=toolScreen();
     var pickerOpen=safe(function(){
@@ -216,7 +209,6 @@
     document.body.dataset.gdToolCourse=courseIdentity(activeCourse());
     document.body.classList.toggle("gdMappedCourseMode",screen==="mapped");
     updateCourseMappingSetting();
-    closeMappedWand(screen);
     var flag=document.getElementById("flagTool");
     if(flag){
       flag.onclick=openFlagPlacement;

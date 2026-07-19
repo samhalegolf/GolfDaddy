@@ -120,9 +120,9 @@ async function launchBrowser(playwright) {
         candidateCentrePx: { x: 120, y: 120 },
         constraints: { width: 240, height: 240, minPoints: 16, minConfidence: 0.99, minAcceptedDots: 60, minBestChain: 60 }
       });
-      const panelOpen = !document.getElementById("gdWandPanel").classList.contains("hidden");
+      const panel = document.getElementById("gdWandPanel");
       return {
-        first, second, blank, tiny, oversized, panelOpen,
+        first, second, blank, tiny, oversized, panelPresent: !!panel,
         detected: {
           ok: detected.ok,
           polygonPoints: detected.polygonPixels.length,
@@ -140,7 +140,7 @@ async function launchBrowser(playwright) {
       };
     });
 
-    assert.strictEqual(result.panelOpen, false, "engine behavior test does not open standalone Wand UI");
+    assert.strictEqual(result.panelPresent, false, "engine behavior test does not require standalone Wand UI");
     assert.strictEqual(result.first.count >= 3, true, "green-like region returns a polygon");
     assert.strictEqual(result.first.boundsOk, true, "green-like polygon remains inside crop bounds");
     assert.strictEqual(result.first.acceptedDots > 0 || result.first.bestChain > 0, true, "green-like region finds an edge family");

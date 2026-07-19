@@ -1150,7 +1150,6 @@
     greenBallDrag = null;
     removeGreenFocusBall();
     safe(function(){ if(typeof gdClearShotForNextStart === "function") gdClearShotForNextStart(null); });
-    safe(function(){ if(typeof clearWandScaleLock === "function") clearWandScaleLock(reason || "fresh-hole"); });
     safe(function(){ if(map && map.dragging && !document.body.classList.contains("gdMappedStartPromptActive")) map.dragging.enable(); });
     safe(function(){
       var tile = document.getElementById("shotTile");
@@ -1578,7 +1577,6 @@
     changed = safe(function(){
       if(typeof clearReplaceGreenMode === "function") clearReplaceGreenMode();
       document.body.classList.remove("gd-replacing-green-centre");
-      if(typeof window.gdClearWandLive === "function") window.gdClearWandLive();
       return false;
     }, false) || changed;
     removeGreenFocusBall();
@@ -3519,7 +3517,7 @@
 	      var mapEl=map&&map.getContainer?map.getContainer():byId("map");
 	      var frameEl=byId("gdHoleImageCameraLayer");
 	      var appEl=byId("app");
-	      if(target&&target.closest&&target.closest("button,a,input,select,textarea,.leaflet-control,.rightRail,.shellBar,.dock,#gdV62UndoDock,#gdV62ModeSwitch,#shotTile,#gdV62GpsBadge,#hint,#toast,#gdWandPanel,#gdMapperToolFlyout,#gdMapperToolsDrawer,#gdMapperHoleStrip,.panel,.modulePanel,#courseScreen:not(.hidden)"))return false;
+	      if(target&&target.closest&&target.closest("button,a,input,select,textarea,.leaflet-control,.rightRail,.shellBar,.dock,#gdV62UndoDock,#gdV62ModeSwitch,#shotTile,#gdV62GpsBadge,#hint,#toast,#gdMapperToolFlyout,#gdMapperToolsDrawer,#gdMapperHoleStrip,.panel,.modulePanel,#courseScreen:not(.hidden)"))return false;
 	      if(target&&((mapEl&&mapEl.contains(target))||(frameEl&&frameEl.contains(target))))return true;
 	      var rectSource=mapEl||frameEl||appEl;
 	      if(!rectSource)return false;
@@ -3727,7 +3725,7 @@
     if(id==="gdGpsSnapZoomBtn"||id==="gdGreenZoomBtn"||id==="gdGpsSettingsRailBtn")return gpsOpen();
     if(id==="gdV62ModeSwitch")return false;
     var mapped={flagTool:1,windToolBtn:1,gpsRailBtn:1,gdGreenZoomBtn:1,gdGpsSettingsRailBtn:1,scorecardRailBtn:1,bagRailBtn:1};
-    var unmapped={flagTool:1,greenToolBtn:1,windToolBtn:1,gpsRailBtn:1,gdMapperToolsBtn:1,gdGreenZoomBtn:1,gdGpsSettingsRailBtn:1,scorecardRailBtn:1,bagRailBtn:1};
+    var unmapped={flagTool:1,windToolBtn:1,gpsRailBtn:1,gdMapperToolsBtn:1,gdGreenZoomBtn:1,gdGpsSettingsRailBtn:1,scorecardRailBtn:1,bagRailBtn:1};
     if(screen==="mapped")return !!mapped[id];
     if(screen==="unmapped"||!screen)return !!unmapped[id];
     return false;

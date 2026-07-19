@@ -606,11 +606,6 @@
       const pickerOpen=!!(courseScreen&&!courseScreen.classList.contains('hidden')&&getComputedStyle(courseScreen).display!=='none'&&getComputedStyle(courseScreen).visibility!=='hidden');
       const mapped=mappedCourseAssistEnabled();
       document.body.classList.toggle('gdMappedCourseMode',mapped&&!pickerOpen);
-      if(mapped){
-        try{document.getElementById('gdWandPanel')?.classList.add('hidden');}catch(e){}
-        try{if(typeof clearWandHandles==='function')clearWandHandles();}catch(e){}
-        try{if(typeof window.gdClearWandLive==='function')window.gdClearWandLive();}catch(e){}
-      }
       if(btn&&canShow){
         btn.textContent=mapped?'Mapped':'Unmapped';
         btn.classList.toggle('active',mapped);
@@ -3332,36 +3327,6 @@
     drawSavedGreen(rec,opts);
     return rec;
   }
-  function mapperGreenRecordForWand(){
-    const h=mapperHole();
-    const confirmed=activeGreenRecord(userId(),courseId(),h,{includeLegacy:true});
-    if(confirmed?.greenCenter)return confirmed;
-    const course=loadUserCourseData();
-    if(!course||!h)return null;
-    const object=objectValues(course,'green')
-      .filter(o=>Number(o.holeNumber)===Number(h)&&(o.greenCenter||o.position))
-      .sort((a,b)=>{
-        const aShape=Array.isArray(a.greenShape||a.shape)&&(a.greenShape||a.shape).length>=3?1:0;
-        const bShape=Array.isArray(b.greenShape||b.shape)&&(b.greenShape||b.shape).length>=3?1:0;
-        const aConfirmed=a.confirmed?1:0;
-        const bConfirmed=b.confirmed?1:0;
-        return (bShape-aShape)||(bConfirmed-aConfirmed)||String(b.updatedAt||'').localeCompare(String(a.updatedAt||''));
-      })[0];
-    return object?asGreenRecord(object):null;
-  }
-  function hydrateMapperGreenForWand(){
-    const rec=mapperGreenRecordForWand();
-    if(!rec?.greenCenter)return false;
-    if(rec.confirmed&&drawSavedGreen(rec,{quiet:true}))return true;
-    const center=toLatLng(rec.greenCenter);
-    if(!center)return false;
-    try{greenCentre=center;}catch(e){}
-    const pts=Array.isArray(rec.greenShape)&&rec.greenShape.length>=3?rec.greenShape.map(toLatLng).filter(Boolean):[];
-    if(pts.length>=3&&typeof drawGreenPolygon==='function'){
-      try{drawGreenPolygon(pts,'saved green',{settled:true});}catch(e){}
-    }
-    return true;
-  }
 	  function saveCurrentGreen(source='manual'){
 	    if(applyingSavedGreen)return null;
 	    try{if(!greenCentre)return null;}catch(e){return null;}
@@ -3472,7 +3437,6 @@
 	    saveCurrentGreen,
 	    activeGreenRecord,
 	    activeGreenShape,
-	    hydrateMapperGreenForWand,
 	    lockMappedGreenFromStart:forceLockMappedGreenFromStart,
 	    mappedHolePlayData,
 	    mappedFairwayAxisForShot,
@@ -3505,7 +3469,6 @@
   window.gdMappedFairwayLayupTarget=mappedFairwayLayupTarget;
   window.gdAutoMapOsmCourse=autoMapOsmCourse;
   window.gdScheduleOsmAutoMapForPlay=scheduleOsmAutoMapForPlay;
-  window.gdMapperHydrateGreenForWand=hydrateMapperGreenForWand;
 
 		  function ensureMapperToolsDrawer(){
     let el=document.getElementById('gdMapperToolsDrawer');
@@ -3513,7 +3476,7 @@
     el=document.createElement('div');
     el.id='gdMapperToolsDrawer';
     el.className='gdMapperToolsDrawer hidden';
-    el.innerHTML=`<div class="gdMapperToolsSheet"><div class="gdMapperToolsHead"><div><h2>Map Tools</h2><p>Save course objects inside the current course group. Greens and bunkers stay usable from their own library tabs.</p></div><button class="gdSheetClose" type="button" onclick="gdCloseMapperTools()">×</button></div><div class="gdMapperCourseLine" id="gdMapperCourseLine"></div><div class="gdMapperToolGrid"><button class="gdMapperToolChoice primary" type="button" id="gdMapperGreenTool"><strong>Green</strong><span>Use Green Wand, then save the shape as a reusable green target.</span></button><button class="gdMapperToolChoice" type="button" id="gdMapperBunkerTool"><strong>Bunker Pin</strong><span>Tap one bunker anchor and save it to the bunker map.</span></button><button class="gdMapperToolChoice" type="button" id="gdMapperTeeTool"><strong>Tee Pin</strong><span>Tap a tee reference point for the active hole.</span></button><button class="gdMapperToolChoice" type="button" id="gdMapperFairwayTool"><strong>Fairway Point</strong><span>Tap a fairway reference or landing zone for the active hole.</span></button></div></div>`;
+    el.innerHTML=`<div class="gdMapperToolsSheet"><div class="gdMapperToolsHead"><div><h2>Map Tools</h2><p>Save course objects inside the current course group. Greens and bunkers stay usable from their own library tabs.</p></div><button class="gdSheetClose" type="button" onclick="gdCloseMapperTools()">×</button></div><div class="gdMapperCourseLine" id="gdMapperCourseLine"></div><div class="gdMapperToolGrid"><button class="gdMapperToolChoice primary" type="button" id="gdMapperGreenTool"><strong>Green</strong><span>Tap a green centre and save it as a reusable green target.</span></button><button class="gdMapperToolChoice" type="button" id="gdMapperBunkerTool"><strong>Bunker Pin</strong><span>Tap one bunker anchor and save it to the bunker map.</span></button><button class="gdMapperToolChoice" type="button" id="gdMapperTeeTool"><strong>Tee Pin</strong><span>Tap a tee reference point for the active hole.</span></button><button class="gdMapperToolChoice" type="button" id="gdMapperFairwayTool"><strong>Fairway Point</strong><span>Tap a fairway reference or landing zone for the active hole.</span></button></div></div>`;
     document.body.appendChild(el);
     el.addEventListener('click',ev=>{if(ev.target===el)gdCloseMapperTools();});
     el.querySelector('#gdMapperGreenTool').onclick=startMapperGreenCapture;
@@ -3528,8 +3491,7 @@
 	    el=document.createElement('div');
 	    el.id='gdMapperToolFlyout';
 	    el.className='gdMapperToolFlyout hidden';
-	    el.innerHTML=`<div class="gdMapperHoleStepper" aria-label="Mapping hole"><button type="button" data-hole-step="-1">‹</button><strong id="gdMapperHoleValue">H1</strong><button type="button" data-hole-step="1">›</button></div><button class="gdMapperFlyoutAction primary" data-map-tool="green" type="button" aria-label="Green pin"><span class="ico">▰</span><span class="txt">Green</span></button><button class="gdMapperFlyoutAction gdFullMappingOnly" data-map-tool="greenwand" type="button" aria-label="Green wand"><span class="ico">▦</span><span class="txt">Wand</span></button><button class="gdMapperFlyoutAction" data-map-tool="bunker" type="button" aria-label="Bunker pin"><span class="ico">◒</span><span class="txt">Bunker</span></button><button class="gdMapperFlyoutAction gdFullMappingOnly" data-map-tool="mapstyle" type="button" aria-label="OSM line guide"><span class="ico">▧</span><span class="txt">Guide</span></button><button class="gdMapperFlyoutAction gdFullMappingOnly" data-map-tool="automap" type="button" aria-label="Auto map from OSM"><span class="ico">A</span><span class="txt">Auto</span></button><button class="gdMapperFlyoutAction" data-map-tool="tee" type="button" aria-label="Tee pin"><span class="ico">T</span><span class="txt">Tee</span></button><button class="gdMapperFlyoutAction" data-map-tool="fairway" type="button" aria-label="Fairway point"><span class="ico">•</span><span class="txt">Fairway</span></button><button class="gdMapperFlyoutAction gdFullMappingOnly gdMapperClearHoleTool" data-map-tool="clearhole" type="button" aria-label="Clear this hole"><span class="ico">×</span><span class="txt">Clear H1</span></button>`;
-	    el.querySelector('[data-map-tool="greenwand"]')?.insertAdjacentHTML('afterend','<button class="gdMapperFlyoutAction gdFullMappingOnly" data-map-tool="assignhole" type="button" aria-label="Assign hole"><span class="ico" id="gdMapperAssignHoleValue">H1</span><span class="txt">Hole</span></button>');
+	    el.innerHTML=`<div class="gdMapperHoleStepper" aria-label="Mapping hole"><button type="button" data-hole-step="-1">‹</button><strong id="gdMapperHoleValue">H1</strong><button type="button" data-hole-step="1">›</button></div><button class="gdMapperFlyoutAction primary" data-map-tool="green" type="button" aria-label="Green pin"><span class="ico">▰</span><span class="txt">Green</span></button><button class="gdMapperFlyoutAction gdFullMappingOnly" data-map-tool="assignhole" type="button" aria-label="Assign hole"><span class="ico" id="gdMapperAssignHoleValue">H1</span><span class="txt">Hole</span></button><button class="gdMapperFlyoutAction" data-map-tool="bunker" type="button" aria-label="Bunker pin"><span class="ico">◒</span><span class="txt">Bunker</span></button><button class="gdMapperFlyoutAction gdFullMappingOnly" data-map-tool="mapstyle" type="button" aria-label="OSM line guide"><span class="ico">▧</span><span class="txt">Guide</span></button><button class="gdMapperFlyoutAction gdFullMappingOnly" data-map-tool="automap" type="button" aria-label="Auto map from OSM"><span class="ico">A</span><span class="txt">Auto</span></button><button class="gdMapperFlyoutAction" data-map-tool="tee" type="button" aria-label="Tee pin"><span class="ico">T</span><span class="txt">Tee</span></button><button class="gdMapperFlyoutAction" data-map-tool="fairway" type="button" aria-label="Fairway point"><span class="ico">•</span><span class="txt">Fairway</span></button><button class="gdMapperFlyoutAction gdFullMappingOnly gdMapperClearHoleTool" data-map-tool="clearhole" type="button" aria-label="Clear this hole"><span class="ico">×</span><span class="txt">Clear H1</span></button>`;
 	    el.insertAdjacentHTML('beforeend','<button class="gdMapperFlyoutAction gdFullMappingOnly gdMapperSaveTool" data-map-tool="save" type="button" aria-label="Save mapping"><span class="ico">✓</span><span class="txt">Save</span></button><button class="gdMapperFlyoutAction gdFullMappingOnly gdMapperNextTool" data-map-tool="next" type="button" aria-label="Next hole"><span class="ico">›</span><span class="txt">Next</span></button>');
 	    document.body.appendChild(el);
 	    el.addEventListener('pointerdown',ev=>ev.stopPropagation());
@@ -3556,7 +3518,6 @@
 	      }
 	      const replace=!!(window.gdFullMappingMode&&mapperToolDone(tool));
 	      if(tool==='green')startMapperGreenCapture(ev,{replaceExisting:replace});
-	      if(tool==='greenwand')startMapperGreenWand(ev);
 	      if(tool==='assignhole')assignActiveGreenFromToolbar();
 	      if(tool==='automap')autoMapOsmCourse();
 	      if(tool==='save')saveFullMappingMode();
@@ -3941,7 +3902,7 @@
 	    }).join('');
 	  }
 	  function mapperToolDone(type){
-	    if(type==='mapstyle'||type==='greenwand'||type==='assignhole'||type==='automap'||type==='save'||type==='next'||type==='clearhole')return false;
+	    if(type==='mapstyle'||type==='assignhole'||type==='automap'||type==='save'||type==='next'||type==='clearhole')return false;
 	    const h=mapperHole();
 	    const objects=courseObjectsForMapper();
 	    if(type==='sand')type='bunker';
@@ -3949,7 +3910,7 @@
 	    return objects.some(o=>o.type===type&&Number(o.holeNumber)===Number(h)&&(type!=='green'||o.confirmed));
 	  }
 	  function mapperToolCaptureType(type){
-	    if(type==='mapstyle'||type==='greenwand'||type==='assignhole'||type==='automap'||type==='save'||type==='next'||type==='clearhole')return '';
+	    if(type==='mapstyle'||type==='assignhole'||type==='automap'||type==='save'||type==='next'||type==='clearhole')return '';
 	    if(type==='sand')return 'bunker';
 	    return type||'';
 	  }
@@ -4112,28 +4073,7 @@
 	    closeMapperToolFlyout();
 	  };
 	  function startMapperGreenCapture(ev,opts={}){
-	    if(window.gdFullMappingMode){
-	      startMapperGreenPinCapture(opts);
-	      return;
-	    }
-	    startMapperGreenWand(ev);
-		  }
-	  function startMapperGreenWand(ev){
-	    cancelMapperCapture();
-	    try{mode='ready';}catch(e){}
-	    try{if(typeof gdSuppressMapPlacementClick==='function')gdSuppressMapPlacementClick(700);}catch(e){}
-	    try{hydrateMapperGreenForWand();}catch(e){}
-	    updateMapperHoleUi();
-	    setMapperContext('green');
-	    hintSafe('Green tool ready');
-	    toastSafe('Green tool ready');
-    try{
-      const wand=document.getElementById('greenToolBtn');
-      if(typeof window.gdCompactWandOpen==='function')window.gdCompactWandOpen(ev||{preventDefault(){},stopPropagation(){}});
-      else if(typeof window.gdToggleWandTool==='function')window.gdToggleWandTool(ev||{preventDefault(){},stopPropagation(){}});
-      else if(typeof openGpsWand==='function')openGpsWand(ev||null);
-      else if(wand)wand.click();
-    }catch(e){}
+	    startMapperGreenPinCapture(opts);
 		  }
 	  function assignActiveGreenFromToolbar(){
 	    cancelMapperCapture();
@@ -4155,7 +4095,6 @@
 	    const advance=!!opts.advance;
 	    const nextHole=Math.min(18,savedHole+1);
 	    const targetHole=advance&&savedHole<18?nextHole:savedHole;
-	    try{if(typeof closeWandPanel==='function')closeWandPanel();}catch(e){}
 	    try{renderCourseLibraryPanel();}catch(e){}
 	    try{gdCLRefreshProfileCard();}catch(e){}
 	    setMapperHole(targetHole);
@@ -4181,7 +4120,6 @@
 	      const green=resetUserGreen(uid,cid,h)?1:0;
 	      const tees=deleteCourseObjectsForHole('tee',h,uid,cid);
 	      const fairways=deleteCourseObjectsForHole('fairway',h,uid,cid);
-	      try{if(typeof closeWandPanel==='function')closeWandPanel();}catch(e){}
 	      try{greenPolygon=null;greenCentre=null;}catch(e){}
 	      try{[greenMarker,greenOutline,greenSoft,greenLabel,frontLabel,backLabel].forEach(l=>l&&map.removeLayer(l));greenMarker=greenOutline=greenSoft=greenLabel=frontLabel=backLabel=null;}catch(e){}
 	      const course=loadUserCourseData();
@@ -4196,7 +4134,6 @@
 	    }
 	  }
 	  function startMapperGreenPinCapture(opts={}){
-	    try{if(typeof closeWandPanel==='function')closeWandPanel();}catch(e){}
 	    try{mode='ready';}catch(e){}
 	    setMapperContext('');
 	    startMapperObjectPinCapture('green',opts.replaceExisting?'replacement green pin':'green pin','mapping_green_pin',opts);
@@ -4882,7 +4819,7 @@
   }
   function interactiveGreenBlockedTarget(event){
     const target=event&&event.target;
-    return !!(target&&target.closest&&target.closest('button,a,input,select,textarea,.leaflet-control,.rightRail,.shellBar,.dock,#gdV62UndoDock,#gdV62ModeSwitch,#shotTile,#gdV62GpsBadge,#hint,#toast,#gdWandPanel,#gdMapperToolFlyout,#gdMapperToolsDrawer,#gdMapperHoleStrip,.panel,.modulePanel,#courseScreen:not(.hidden)'));
+    return !!(target&&target.closest&&target.closest('button,a,input,select,textarea,.leaflet-control,.rightRail,.shellBar,.dock,#gdV62UndoDock,#gdV62ModeSwitch,#shotTile,#gdV62GpsBadge,#hint,#toast,#gdMapperToolFlyout,#gdMapperToolsDrawer,#gdMapperHoleStrip,.panel,.modulePanel,#courseScreen:not(.hidden)'));
   }
   function saveInteractiveFallbackGreen(course,hole,greenPoint,reason){
     const h=validHoleNumber(hole)||1;
@@ -5341,75 +5278,6 @@
           return res;
         };
       }
-      const oldAccept=typeof acceptGreenWand==='function'?acceptGreenWand:window.acceptGreenWand;
-      if(typeof oldAccept==='function'){
-        const wrapped=function(){
-          const res=oldAccept.apply(this,arguments);
-          const ctx=mapperContext();
-          saveCurrentGreen('wand_accepted');
-          if(ctx==='green')setMapperContext('');
-          setTimeout(addForgetGreenButton,60);
-          return res;
-        };
-        window.acceptGreenWand=wrapped; try{acceptGreenWand=wrapped;}catch(e){}
-      }
-      const oldImport=typeof importGreenWandResult==='function'?importGreenWandResult:window.importGreenWandResult;
-      if(typeof oldImport==='function'){
-        const wrapped=function(result){
-          const res=oldImport.apply(this,arguments);
-          const ctx=mapperContext();
-          if(res)saveCurrentGreen(result?.source==='pixel'?'wand_accepted':'imported');
-          if(ctx==='green')setMapperContext('');
-          return res;
-        };
-        window.importGreenWandResult=wrapped; try{importGreenWandResult=wrapped;}catch(e){}
-      }
-      const oldReject=typeof rejectGreenWand==='function'?rejectGreenWand:window.rejectGreenWand;
-      if(typeof oldReject==='function'){
-        const wrapped=function(){
-          if(mapperContext()==='green')setMapperContext('');
-          return oldReject.apply(this,arguments);
-        };
-        window.rejectGreenWand=wrapped; try{rejectGreenWand=wrapped;}catch(e){}
-      }
-      const oldClose=typeof closeWandPanel==='function'?closeWandPanel:window.closeWandPanel;
-      if(typeof oldClose==='function'){
-        const wrapped=function(){
-          if(mapperContext()==='green')setMapperContext('');
-          return oldClose.apply(this,arguments);
-        };
-        window.closeWandPanel=wrapped; try{closeWandPanel=wrapped;}catch(e){}
-      }
-    }
-  }
-
-  function addForgetGreenButton(){
-    return;
-    const actions=document.querySelector('#gdWandPanel .gdWandActions');
-    if(!actions)return;
-    if(!document.getElementById('gdMoveGreenHoleBtn')){
-      const move=document.createElement('button');
-      move.id='gdMoveGreenHoleBtn';
-      move.type='button';
-      move.textContent='Change Hole';
-      move.onclick=function(ev){ev.preventDefault();ev.stopPropagation();moveActiveGreenToHole();return false;};
-      actions.appendChild(move);
-    }
-    if(!document.getElementById('gdUnassignGreenHoleBtn')){
-      const unassign=document.createElement('button');
-      unassign.id='gdUnassignGreenHoleBtn';
-      unassign.type='button';
-      unassign.textContent='Unassign Hole';
-      unassign.onclick=function(ev){ev.preventDefault();ev.stopPropagation();unassignActiveGreen();return false;};
-      actions.appendChild(unassign);
-    }
-    if(!document.getElementById('gdForgetGreenBtn')){
-      const btn=document.createElement('button');
-      btn.id='gdForgetGreenBtn';
-      btn.type='button';
-      btn.textContent='Forget Green';
-      btn.onclick=function(ev){ev.preventDefault();ev.stopPropagation();resetActiveGreen();return false;};
-      actions.appendChild(btn);
     }
   }
 
@@ -6370,7 +6238,6 @@
     observeProfile();
     observeMapperRail();
     installMapperToolsButton();
-    addForgetGreenButton();
     ensureAssumedCourseBadge();
     setTimeout(gdCLInjectProfileCourseCard,300);
     setTimeout(installMappedPlayModeSetting,320);
@@ -6387,7 +6254,6 @@
 
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install);
   else install();
-  document.addEventListener('click',()=>setTimeout(addForgetGreenButton,80),true);
   document.addEventListener('click',()=>setTimeout(installMapperToolsButton,120),true);
   document.addEventListener('click',()=>setTimeout(installMappedPlayModeSetting,120),true);
   document.addEventListener('click',()=>setTimeout(ensureAssumedCourseBadge,120),true);

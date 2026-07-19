@@ -81,7 +81,7 @@
   }
   function install(){
     wrapAccounts();
-    ['showShellHome','showModePicker','enterGpsModule','openShellModule','openGpsWand','openBag','openStats','openCourseData','openPracticeData','openDeveloperPanel','gdOpenPlayerSettingsPanel'].forEach(guard);
+    ['showShellHome','showModePicker','enterGpsModule','openShellModule','openBag','openStats','openCourseData','openPracticeData','openDeveloperPanel','gdOpenPlayerSettingsPanel'].forEach(guard);
     const oldClose=window.gdCloseProfileV67;
     if(typeof oldClose==='function'&&!oldClose.__gdAuthGate){
       const wrappedClose=function(){

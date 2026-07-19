@@ -8,7 +8,6 @@
   document.documentElement.setAttribute(routeAuditGuard,"1");
   const oldEnterGps=window.enterGpsModule;
   const oldOpenShellModule=window.openShellModule;
-  const oldOpenGpsWand=window.openGpsWand;
   const oldOpenProfilePanel=window.openProfilePanel;
   function safe(fn,fallback){try{return fn();}catch(e){console.warn("[GolfDaddy] route audit",e);return fallback;}}
   function byId(id){return document.getElementById(id);}
@@ -23,7 +22,6 @@
 	    try{window.gdFullMappingMode=false;sessionStorage.removeItem("gd_full_mapping_mode");}catch(e){}
 	    try{if(typeof window.gdClearMapperGuideUi==="function")window.gdClearMapperGuideUi();}catch(e){}
 	    byId("gdProfileV67")?.classList.add("hidden");
-    byId("gdWandPanel")?.classList.add("hidden");
   }
   function showCoursePicker(){
     const screen=byId("courseScreen");
@@ -122,7 +120,6 @@
 	      "manual-gps-active","shell-home","shell-gps","shell-module","gdShotDataOpen","gdMappedCourseMode","gdMappedStartPromptActive",
 	      "gdManualStartPlacementActive","gdToolRailOpen","gdCoursePickerOpen","gdCoursePinPromptActive","gdCourseOpening","gdCapturedHoleFrameCameraOn","gdHoleImageCameraOn",
 	      "gdAuthLocked","gdPasswordResetRoute","gdGreenArrivalMode","gdMappedSnapCameraActive","gdPreLockBlackoutFrame",
-	      "gdWandLayerActive",
 	      "gdFullMappingMode","gdFullMappingUiActive"
 	    ].forEach(cls=>document.body.classList.remove(cls));
 	  }
@@ -134,8 +131,7 @@
 	      "gdManualStartPlacementActive",
 	      "gdToolRailOpen",
 	      "gdCapturedHoleFrameCameraOn",
-	      "gdHoleImageCameraOn",
-	      "gdWandActive"
+	      "gdHoleImageCameraOn"
 	    );
 	    document.documentElement.classList.remove("gdGpsViewportLocked");
 	  }
@@ -158,7 +154,6 @@
 	    }
 	    document.querySelectorAll(".modulePanel.open,.panel.open").forEach(panel=>panel.classList.remove("open"));
 	    byId("gdProfileV67")?.classList.add("hidden");
-	    byId("gdWandPanel")?.classList.add("hidden");
 	    document.body.dataset.gdToolScreen="home";
 	  }
   function showShellChrome(on){
@@ -180,7 +175,7 @@
     setProfileReturnButton();
   }
   function setDock(name){
-    ["Gps","Bubble","Bag","Green","Admin"].forEach(key=>{
+    ["Gps","Bubble","Bag","Admin"].forEach(key=>{
       byId("dock"+key)?.classList.toggle("active",key.toLowerCase()===name);
     });
   }
@@ -6534,19 +6529,6 @@
     remember("dataHubPanel",!!(opts&&opts.replace));
     return false;
   }
-  function openWandStable(evt){
-    if(evt){evt.preventDefault?.();evt.stopPropagation?.();}
-    const latestWand=window.gdCompactWandOpen||window.openGpsWand||oldOpenGpsWand;
-    if(document.body.classList.contains("shell-gps")){
-      return typeof latestWand==="function"&&latestWand!==openWandStable?latestWand.call(window,evt):false;
-    }
-    openGpsStable({replace:true});
-    setTimeout(()=>safe(()=>{
-      const nextWand=window.gdCompactWandOpen||window.openGpsWand||oldOpenGpsWand;
-      if(typeof nextWand==="function"&&nextWand!==openWandStable)nextWand.call(window,evt);
-    }),120);
-    return false;
-  }
   function openProfileStable(opts){
     let opened=false;
     const profileOpts=Object.assign({replace:true},opts||{});
@@ -7007,7 +6989,7 @@
 	    document.addEventListener("click",event=>{
 	      if(event.target?.closest?.("[data-gd-card-control]"))return;
 	      const target=event.target&&event.target.closest&&event.target.closest(
-	        "#shellHomeBtn,#shellProfileReturnBtn,#shellSettingsBtn,#dockAdmin,#dockBag,#dockGps,#dockBubble,#dockGreen,#gdCourseDataOpenBtn,#gdPracticeDataOpenBtn,#gdCompareDataOpenBtn,.gdPlayTile,.gdBubbleTile,.gdBagTile,.gdProfileTile,[onclick*='enterGpsModule'],[onclick*='openDeveloperPanel'],[onclick*='openBag'],[onclick*='openStats'],[onclick*='gdBubbleOffsetEdit'],[onclick*='gdBubbleOffsetSave']"
+	        "#shellHomeBtn,#shellProfileReturnBtn,#shellSettingsBtn,#dockAdmin,#dockBag,#dockGps,#dockBubble,#gdCourseDataOpenBtn,#gdPracticeDataOpenBtn,#gdCompareDataOpenBtn,.gdPlayTile,.gdBubbleTile,.gdBagTile,.gdProfileTile,[onclick*='enterGpsModule'],[onclick*='openDeveloperPanel'],[onclick*='openBag'],[onclick*='openStats'],[onclick*='gdBubbleOffsetEdit'],[onclick*='gdBubbleOffsetSave']"
 	      );
       if(!target)return;
       const on=(target.getAttribute("onclick")||"");
@@ -7026,7 +7008,6 @@
 	        return openGpsStable({replace:false,fromHome:homeContext});
 	      }
       if(target.id==="dockBubble"||target.classList.contains("gdBubbleTile")){event.preventDefault();event.stopImmediatePropagation();openBubbleStable();return;}
-      if(target.id==="dockGreen"){event.preventDefault();event.stopImmediatePropagation();openWandStable(event);return;}
       if(target.id==="gdCourseDataOpenBtn"){event.preventDefault();event.stopImmediatePropagation();gdHubSetSection("course");return;}
       if(target.id==="gdPracticeDataOpenBtn"){event.preventDefault();event.stopImmediatePropagation();gdHubSetSection("practice");return;}
       if(target.id==="gdCompareDataOpenBtn"){event.preventDefault();event.stopImmediatePropagation();gdHubSetSection("compare");return;}

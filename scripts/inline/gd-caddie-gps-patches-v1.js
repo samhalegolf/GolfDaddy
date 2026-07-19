@@ -54,11 +54,10 @@
     }catch(e){}
     try{ if(document.getElementById('shotTile')) document.getElementById('shotTile').classList.add('visible'); }catch(e){}
 
-    // Hidden recalculation only: redraw geometry, green/wand references and labels, but never refit or pan the map.
+    // Hidden recalculation only: redraw geometry and labels, but never refit or pan the map.
     try{ if(typeof renderShot === 'function') renderShot(); }catch(e){}
     try{ if(typeof updatePinLine === 'function') updatePinLine(); }catch(e){}
     try{ if(typeof applyShotUpAfterPlacement === 'function') applyShotUpAfterPlacement(); }catch(e){}
-    try{ if(typeof greenActive !== 'undefined' && greenActive){ if(typeof establishGreenFromBubble === 'function') establishGreenFromBubble(); if(typeof scanGreen === 'function') scanGreen(); } }catch(e){}
     try{ if(typeof setBubbleOnlyLock === 'function') setBubbleOnlyLock(true); else lockedFrame = true; }catch(e){}
     gdState('Locked · green centre replaced');
     gdHideHint();
@@ -398,10 +397,10 @@
   window.gdEnterTwoTapNoLocation = enterTwoTapNoLocation;
 })();
 
-/* ==== section: gd-inline-clarity-caddie-play-button-rescue-v1.js (moved from post-wand-diagnostics slot; no wand coupling — verified 2026-07-19) ==== */
+/* ==== section: gd-inline-clarity-caddie-play-button-rescue-v1.js ==== */
 /* Extracted verbatim from an inline <script> block in index.html (split-03). */
 /* --- Clarity Caddy Play Button Rescue v1 ---
-   Keeps Wand untouched. Fixes home/play route after a prior Wand edit left a script fragment broken.
+   Fixes home/play route after a prior script fragment broke.
    Any Play/Open GPS/GPS Module tile now reliably enters the GPS/course picker. */
 (function(){
   function qs(id){ return document.getElementById(id); }
@@ -409,7 +408,6 @@
   function closePanels(){
     try{ document.querySelectorAll('.modulePanel.open,.panel.open').forEach(function(p){ p.classList.remove('open'); }); }catch(e){}
     try{ qs('gdProfileV67')?.classList.add('hidden'); document.body.classList.remove('gdProfileOpen'); }catch(e){}
-    try{ qs('gdWandPanel')?.classList.add('hidden'); }catch(e){}
   }
   function setGpsClasses(){
     try{ document.body.classList.add('gdGpsActive','gps-active'); }catch(e){}
@@ -682,7 +680,7 @@ function gdWireManualGpsPlayButton(){
   setTimeout(gdManualGpsButtonHardWire,1600);
 })();
 
-/* ==== section: gd-inline-clarity-caddie-gps-bag-prompt-return.js (moved from post-wand-robust slot; no wand coupling — verified 2026-07-19) ==== */
+/* ==== section: gd-inline-clarity-caddie-gps-bag-prompt-return.js ==== */
 /* Extracted verbatim from an inline <script> block in index.html (split-03). */
 /* --- Clarity Caddy GPS bag prompt return path v1 --- */
 (function(){

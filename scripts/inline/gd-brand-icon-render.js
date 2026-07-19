@@ -98,7 +98,6 @@
 
     const spec = [
       { id: 'flagTool', key: 'flag', icon: 'flag', label: 'Place flag', className: 'railBtn', html: icon('flag'), handler: function() { try { if (typeof startPinPlacement === 'function') startPinPlacement(); } catch(e) {} } },
-      { id: 'greenToolBtn', key: 'wand', icon: 'wand', label: 'Green Wand', className: 'railBtn greenBtn', html: icon('wand'), handler: function() { try { if (typeof openGpsWand === 'function') openGpsWand(); } catch(e) {} } },
       { id: 'windToolBtn', key: 'wind', label: 'Wind', className: 'railBtn gdWindToolBtn', html: WIND_SVG, handler: function(ev) { try { if (typeof gdWindToolPressed === 'function') return gdWindToolPressed(ev); } catch(e) {} return false; } },
       { id: 'gpsRailBtn', key: 'cgGps', icon: 'gps', label: 'GPS locate', className: 'railBtn gdGpsRecenterBtn', html: icon('cgGps'), handler: function() { try { if (typeof refreshGPS === 'function') refreshGPS(); } catch(e) {} } },
       { id: 'gdGreenZoomBtn', key: 'green-zoom', label: 'Frame tightness', className: 'railBtn gdGreenZoomBtn', html: ZOOM_SVG, handler: function(ev) { try { if (typeof gdToggleSimpleGreenZoom === 'function') return gdToggleSimpleGreenZoom(ev); } catch(e) {} return false; } },
