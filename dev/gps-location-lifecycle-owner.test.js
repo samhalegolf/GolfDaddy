@@ -8,6 +8,7 @@ const runtime = fs.readFileSync(path.join(root, "scripts", "inline", "gd-gps-pla
 const caddie = fs.readFileSync(path.join(root, "scripts", "inline", "gd-caddie-gps-patches-v1.js"), "utf8");
 const beta = fs.readFileSync(path.join(root, "scripts", "inline", "gd-gps-beta-mode-shell.js"), "utf8");
 const picker = fs.readFileSync(path.join(root, "scripts", "inline", "gd-course-picker-search-v2.js"), "utf8");
+const index = fs.readFileSync(path.join(root, "index.html"), "utf8");
 
 function assertContains(source, needle, message) {
   assert(source.includes(needle), message || `contains ${needle}`);
@@ -15,6 +16,21 @@ function assertContains(source, needle, message) {
 
 function assertNotContains(source, needle, message) {
   assert(!source.includes(needle), message || `does not contain ${needle}`);
+}
+
+function loadedScriptSources() {
+  const scripts = [];
+  const scriptRe = /<script\b[^>]*\bsrc="([^"]+\.js)(?:\?[^"]*)?"[^>]*>/g;
+  let match;
+  while ((match = scriptRe.exec(index))) {
+    scripts.push(match[1]);
+  }
+  return scripts;
+}
+
+function assignmentCount(source, globalName) {
+  const re = new RegExp(`window\\.${globalName}\\s*=(?!=)`, "g");
+  return (source.match(re) || []).length;
 }
 
 assertContains(runtime, 'owns:["gps-location-lifecycle"', "GPS runtime metadata owns location lifecycle");
@@ -44,7 +60,17 @@ assertNotContains(caddie, "navigator.geolocation.__gdFixCachePatched", "caddie p
 assertNotContains(caddie, "window.refreshGPS=function(){ requestGpsRobust", "caddie patches no longer own refreshGPS");
 assertNotContains(caddie, "window.gdGpsLocateNow = function(){ requestGpsRobust", "caddie patches no longer own gdGpsLocateNow");
 
-assertContains(beta, "window.refreshGPS=function(){enterLiveGps()}", "beta shell still has its pre-owner legacy refresh assignment before runtime takes ownership");
+const refreshAssignments = loadedScriptSources()
+  .map((src) => ({ src, count: assignmentCount(fs.readFileSync(path.join(root, src), "utf8"), "refreshGPS") }))
+  .filter((entry) => entry.count > 0);
+assert.deepStrictEqual(refreshAssignments, [
+  { src: "scripts/inline/gd-gps-play-runtime-owner-v1.js", count: 1 }
+], "runtime owner is the only loaded script assigning window.refreshGPS");
+assert.strictEqual(assignmentCount(beta, "refreshGPS"), 0, "beta shell does not assign window.refreshGPS");
+assertContains(beta, "window.GDGpsLocationLifecycle?.locate?.()", "beta-shell live locate action calls lifecycle API explicitly");
+assertNotContains(beta, "navigator.geolocation.getCurrentPosition", "beta shell no longer owns a geolocation request path");
+assertNotContains(beta, "window.gdGpsRememberFix", "beta shell no longer writes GPS fix memory");
+assertNotContains(beta, "window.gdRememberLiveGpsOnly", "beta shell no longer writes live GPS memory");
 assertContains(picker, "function requestPickerGps()", "course picker keeps its picker-scoped one-shot GPS request");
 assertContains(picker, "source:\"course-picker\",simulated:false", "course picker writes real picker observations, not course-location pins");
 assertContains(picker, "if(/manual|tap|click|map|green-focus|pin/.test(source))return null", "course picker still rejects manual/simulated fixes");

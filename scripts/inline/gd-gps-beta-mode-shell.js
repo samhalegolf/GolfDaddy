@@ -338,27 +338,8 @@
   }
   function enterLiveGps(){
     localStorage.setItem(MODE_KEY,'live');
-    if(!navigator.geolocation){setGpsLabel(false,'GPS unavailable');safeToast('GPS unavailable');refresh();return}
     setGpsLabel(true,'GPS…');setStateLabel('Requesting GPS');hint('Allow location permission');
-	    navigator.geolocation.getCurrentPosition(pos=>{
-	      const here=L.latLng(pos.coords.latitude,pos.coords.longitude);
-	      try{
-	        gpsOk=true;
-	        setGpsLabel(true,'GPS');
-	        if(typeof window.gdGpsRememberFix==='function')window.gdGpsRememberFix(pos,'enter-live');
-	        if(typeof window.gdRememberLiveGpsOnly==='function')window.gdRememberLiveGpsOnly(here,pos.coords.accuracy,'gps-live');
-	        if(typeof lockedFrame!=='undefined'&&lockedFrame){
-	          if(typeof updateGpsInsideLockedFrame==='function'&&curStart())updateGpsInsideLockedFrame(here,'GPS live');
-	          setStateLabel('Live locked');
-	          hideHintSafe();
-	        }else{
-	          setStateLabel('GPS live');
-	          hideHintSafe();
-	        }
-	        if(typeof startWatch==='function')startWatch();
-      }catch(e){console.warn(e)}
-      refresh();
-    },err=>{const denied=err&&err.code===1;setGpsLabel(false,denied?'GPS denied':'GPS weak');setStateLabel(denied?'GPS permission needed':'GPS is searching');if(denied)hideHintSafe();else hint('GPS is searching. Try again near the tee.');safeToast(err&&err.message?err.message:(denied?'Location permission needed':'GPS is searching'));refresh();},{enableHighAccuracy:true,maximumAge:0,timeout:15000});
+    window.GDGpsLocationLifecycle?.locate?.();
     refresh();
   }
   function clearOrUndo(){
@@ -422,7 +403,6 @@
   }
 
   window.setGpsPlayMode=function(next){next==='live'?enterLiveGps():enterTwoTap()};
-  window.refreshGPS=function(){enterLiveGps()};
   window.gdV62Refresh=refresh;
 
   ['enterGpsModule','setStart','setGreenTarget','renderShot','lockFrame','openShellModule','showShellHome','openProfilePanel'].forEach(name=>{
