@@ -330,6 +330,16 @@
 <script src="scripts/gd-shot-outcomes.js"></script>
 <script src="scripts/gd-shot-events.js?v=deliberate-outcome-20260612"></script>
 <script src="scripts/gd-shot-cluster-analysis.js?v=deliberate-outcome-20260612"></script>
+<!-- Course Data: immutable Shot Snapshot + Conditions Engine. Load order matters:
+     tolerance profile and geometry must exist before the engine, and the engine
+     before the intake path that invokes it. -->
+<script src="scripts/gd-shot-snapshot.js?v=conditions-engine-v1"></script>
+<script src="scripts/course-data/conditions-engine/gd-conditions-tolerance-profile.js?v=conditions-engine-v1"></script>
+<script src="scripts/course-data/conditions-engine/gd-conditions-geometry.js?v=conditions-engine-v1"></script>
+<script src="scripts/course-data/conditions-engine/gd-conditions-engine.js?v=conditions-engine-v1"></script>
+<script src="scripts/course-data/gd-course-data-intake.js?v=conditions-engine-v1"></script>
+<script src="scripts/course-data/gd-course-data-comparison.js?v=conditions-engine-v1"></script>
+<script src="scripts/course-data/gd-conditions-debug.js?v=conditions-engine-v1"></script>
 <script src="scripts/gd-launch-monitor-data.js?v=practice-data-20260712c"></script>
 <script src="scripts/gd-shot-library-sync.js?v=shot-library-supabase-001"></script>
 <script src="scripts/gd-captured-surface-sync.js?v=captured-surface-supabase-002"></script>

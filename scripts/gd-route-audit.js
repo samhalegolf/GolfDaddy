@@ -3522,9 +3522,13 @@
 	      baseDistanceM:baseDistance
 	    };
 	  }
+  function gdCourseDataComparison(){
+    return window.GolfDaddyCourseDataComparison||window.GolfDaddy?.modules?.courseDataComparison||null;
+  }
   function gdCompareCoursePoints(ctx){
     const records=(ctx.courseRecords||[]).slice(0,70);
     if(!records.length)return [];
+    const comparison=gdCourseDataComparison();
     const actualDistanceForRecord=record=>{
       const actual=Number(record.actualDistanceM);
       if(Number.isFinite(actual))return actual;
@@ -3534,8 +3538,17 @@
       return Number.isFinite(expected)?expected:NaN;
     };
     return records.map((record,index)=>{
-      const actual=actualDistanceForRecord(record);
-      const lateral=gdShotChartLateralInfo(record,actual);
+      /* The Course Bubble / Comparison Layer decides whether this shot compares
+         against My Bubble on its raw or its wind/slope-normalised position. It
+         only substitutes when the Conditions Engine applied normalisation, so a
+         record with no analysis falls through to exactly the previous maths. */
+      const values=comparison?comparison.comparisonValues(record):null;
+      const actual=values&&Number.isFinite(Number(values.actualDistanceM))
+        ?Number(values.actualDistanceM)
+        :actualDistanceForRecord(record);
+      const lateral=values&&values.normalisationApplied&&Number.isFinite(Number(values.lateralM))
+        ?{value:Number(values.lateralM),hasLateral:true}
+        :gdShotChartLateralInfo(record,actual);
       return {
         index,
         source:"course",
@@ -3544,7 +3557,11 @@
         lateralM:lateral.value,
         hasLateral:lateral.hasLateral,
         counted:record.counted!==false,
-        excluded:record.counted===false
+        excluded:record.counted===false,
+        normalisationApplied:!!(values&&values.normalisationApplied),
+        normalisationType:values?values.normalisationType:null,
+        rawActualDistanceM:values?values.rawActualDistanceM:actualDistanceForRecord(record),
+        rawLateralM:values?values.rawLateralM:null
       };
     }).filter(point=>Number.isFinite(Number(point.actualDistanceM))&&Number(point.actualDistanceM)>0);
   }
@@ -4653,6 +4670,16 @@
       "statsCluster.distanceWindowPct",
       "statsCluster.distanceWindowMinM",
       "statsCluster.distanceWindowMaxM"
+    ]},
+    /* Analysis-only. These never touch the in-round wind aim tool; they set how
+       the Conditions Engine splits wind between distance and direction when
+       deciding whether wind explains a shot. Editing them mints a new tolerance
+       profile version so earlier analyses stay explainable. */
+    {label:"Wind normalisation",meta:"Conditions Engine",fields:[
+      "conditionsEngine.headwindFactor",
+      "conditionsEngine.tailwindFactor",
+      "conditionsEngine.crosswindFactor",
+      "conditionsEngine.crosswindGateDeg"
     ]}
   ];
   const gdCourseToleranceCompactLabels={
@@ -4665,6 +4692,10 @@
     "statsCluster.consistencyMinPct":"Slider min",
     "statsCluster.consistencyMaxPct":"Slider max",
     "statsCluster.consistencyDefaultPct":"Default fit",
+    "conditionsEngine.headwindFactor":"Headwind",
+    "conditionsEngine.tailwindFactor":"Tailwind",
+    "conditionsEngine.crosswindFactor":"Crosswind",
+    "conditionsEngine.crosswindGateDeg":"Cross gate",
     "statsCluster.distanceWindowPct":"Miss vs bag %",
     "statsCluster.distanceWindowMinM":"Miss floor",
     "statsCluster.distanceWindowMaxM":"Miss cap"

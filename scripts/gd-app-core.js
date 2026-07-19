@@ -49,6 +49,16 @@ const DEV_DEFAULTS={
     level3Kmh:24,
     cacheMinutes:25
   },
+  /* Conditions Engine directional wind model. These are analysis-only: they
+     never affect the in-round wind aim tool, only how Course Data decides
+     whether wind explains a shot. Changing any of them mints a new tolerance
+     profile version, so past analyses stay explainable. */
+  conditionsEngine:{
+    headwindFactor:1,
+    tailwindFactor:.55,
+    crosswindFactor:.65,
+    crosswindGateDeg:45
+  },
   wand:{
     defaultSensitivity:.03,
     overlayOpacity:.28,
@@ -213,6 +223,10 @@ const DEV_FIELDS={
   "statsCluster.distanceWindowMinM":{label:"Distance window min",step:.5,min:2,max:30,unit:"m",help:"Minimum distance gate for short clubs."},
   "statsCluster.distanceWindowMaxM":{label:"Distance window max",step:.5,min:10,max:70,unit:"m",help:"Maximum distance gate for long clubs."},
   "statsCluster.viableDegreeAbs":{label:"Shot offset degree limit",step:.25,min:2,max:15,unit:"°",help:"Degrees outside this are not profile shot-data suggestions."},
+  "conditionsEngine.headwindFactor":{label:"Headwind bias",step:.05,min:0,max:2,help:"How much a headwind is assumed to hurt distance. 1 = the full modelled wind effect."},
+  "conditionsEngine.tailwindFactor":{label:"Tailwind bias",step:.05,min:0,max:2,help:"How much a tailwind is assumed to help. Normally lower than the headwind bias."},
+  "conditionsEngine.crosswindFactor":{label:"Crosswind bias",step:.05,min:0,max:2,help:"Lateral push once the wind is clearly across the shot line."},
+  "conditionsEngine.crosswindGateDeg":{label:"Crosswind gate",step:1,min:0,max:89,unit:"°",help:"Degrees off the shot line before any lateral effect applies. Higher = only near-dead crosswinds count."},
   "statsCluster.alignmentDegreeAbs":{label:"Alignment check degree",step:.25,min:4,max:25,unit:"°",help:"Strong clusters beyond this suggest aim/alignment feedback."},
   "statsCluster.minClusterShots":{label:"Minimum cluster shots",step:1,min:3,max:30,help:"Fewest viable shots before a club cluster can speak."},
   "statsCluster.minSuggestionClubs":{label:"Minimum suggestion clubs",step:1,min:1,max:8,help:"Fewest club clusters before a profile-level offset option appears."},
@@ -16022,6 +16036,10 @@ let gdCurrentShotTargetMode="greenTarget", gdLastShotTargetMode="greenTarget", g
 let units="m", showAim=true, showFilter=true, gpsWatch=null, gpsOk=false, shotTracking=false, trackedShots=[], shotId=0, currentShotLogged=false;
 let gdLastAutoNextShotAt=0;
 let gdWindActive=false, gdWindLevel=1, gdWindOriginAngle=null, gdWindLandingTarget=null;
+/* Records whether the active wind came from live evidence or the player's own
+   selection. Course Data needs this distinction on the Shot Snapshot; the
+   Conditions Engine compares selected intent against live evidence. */
+let gdWindSelectionSource=null;
 let gdLiveWindState={data:null,loading:false,lastFetchAt:0,error:""};
 let gdWindLongPressSuppressUntil=0;
 let bubbleRenderMode="custom";
@@ -16779,6 +16797,7 @@ function gdApplyLiveWind(data,render=true){
   gdWindOriginAngle=gdNormAngle(Number(data.directionDeg)*Math.PI/180);
   gdWindLevel=Math.max(1,Math.min(3,Number(data.level)||gdWindLevelForSpeed(data.speedKmh)));
   gdWindActive=true;
+  gdWindSelectionSource="live";
   gdCloseWindPicker();
   gdApplyWindToCurrentShot(render);
   gdSyncWindButton();
@@ -16896,6 +16915,7 @@ async function gdWindToolPressed(event){
     gdWindActive=false;
     gdWindOriginAngle=null;
     gdWindLandingTarget=null;
+    gdWindSelectionSource=null;
     gdClearWindVisuals();
     if(targetMarker&&target)targetMarker.setLatLng(target);
     renderShot();
@@ -16905,6 +16925,7 @@ async function gdWindToolPressed(event){
     return false;
   }
   gdWindLevel=gdWindLevel+1;
+  gdWindSelectionSource="user";
   gdApplyWindToCurrentShot(true);
   try{toast(`Wind ${gdWindLevel}`)}catch(e){}
   return false;
@@ -16924,6 +16945,7 @@ function gdWindPickDirection(event){
   gdWindOriginAngle=gdNormAngle(screenAngle-mapRotation);
   gdWindActive=true;
   gdWindLevel=1;
+  gdWindSelectionSource="user";
   gdCloseWindPicker();
   gdApplyWindToCurrentShot(true);
   gdSyncWindButton();
@@ -19884,33 +19906,11 @@ function gdSlopeAdjustedDistanceData(origin,target,flatDistanceM){
   gdQueueShotElevation(origin,target,key);
   return null;
 }
-function gdSlopeAdjustedDistanceHtml(origin,target,flatDistanceM){
-  const data=gdSlopeAdjustedDistanceData(origin,target,flatDistanceM);
-  if(!data)return "";
-  return `<span class="gdSlopeAdjustedValue" title="Slope adjusted: ${gdEscapeHTML(data.label)}">plays ${data.adjusted.value}${data.adjusted.unit}</span>`;
-}
-function gdRenderSlopeAdjustedLine(tileMain,data){
-  if(!tileMain)return;
-  tileMain.querySelectorAll(".gdSlopeAdjustedLine").forEach(el=>el.remove());
-  tileMain.classList.remove("hasSlope","slopeUnder","slopeOver","slopeLevel");
-  if(!data)return;
-  tileMain.classList.add("hasSlope",data.relation==="over"?"slopeOver":(data.relation==="under"?"slopeUnder":"slopeLevel"));
-  const line=document.createElement("div");
-  line.className="gdSlopeAdjustedLine";
-  line.title=`Slope adjusted: ${data.label}`;
-  const label=document.createElement("span");
-  label.className="gdSlopeAdjustedLabel";
-  label.textContent="plays";
-  const value=document.createElement("span");
-  value.className="gdSlopeAdjustedValue";
-  value.textContent=data.adjusted.value;
-  const unit=document.createElement("span");
-  unit.className="unit";
-  unit.textContent=data.adjusted.unit;
-  value.appendChild(unit);
-  line.append(label,value);
-  tileMain.appendChild(line);
-}
+/* The legacy .gdSlopeAdjustedLine renderer and gdSlopeAdjustedDistanceHtml were
+   removed with the Conditions Engine work: slope has rendered into #tilePlays
+   via gdRenderShotCardSlope since that tile landed, the legacy class carried no
+   CSS, and leaving a second slope-render path in place invited exactly the kind
+   of duplicate environmental handling the Conditions Engine consolidates. */
 function gdRenderShotCardSlope(tilePlays,slopeData){
   if(!tilePlays)return;
   tilePlays.classList.remove("slopeOver","slopeUnder","slopeLevel");
@@ -20019,7 +20019,6 @@ function gdResetShotDistanceDisplay(){
   const front=document.getElementById("tileFront");
   const plays=document.getElementById("tilePlays");
   const pinDiff=document.getElementById("pinDiff");
-  const tileMain=tile?tile.querySelector(".tileMain"):null;
   if(dist)dist.innerHTML=`—<span>${units==="yd"?"yd":"m"}</span>`;
   if(sub)sub.textContent="";
   if(meta)meta.textContent="";
@@ -20027,7 +20026,6 @@ function gdResetShotDistanceDisplay(){
   if(front)front.innerHTML="";
   if(plays){plays.classList.remove("slopeOver","slopeUnder","slopeLevel");plays.innerHTML="";}
   if(pinDiff){pinDiff.style.display="none";pinDiff.textContent="";}
-  gdRenderSlopeAdjustedLine(tileMain,null);
   if(tile)tile.classList.remove("visible");
 }
 function gdShotBagIconHtml(){
@@ -20321,6 +20319,142 @@ function gdShotEventsApi(){
   window.ClarityCaddieShotEvents=api;
   return api;
 }
+/* ---------------- Course Data handoff: immutable Shot Snapshot ----------------
+   GPS Play's only analytical output. At shot completion we record the best raw
+   evidence available and hand it to Course Data, which owns validation,
+   persistence and the Conditions Engine. GPS Play performs no wind correction,
+   no slope correction, no My Bubble comparison and no variant selection, and it
+   never waits for analysis: submitShotSnapshot persists the raw snapshot and
+   returns, with analysis deferred to a later tick.
+------------------------------------------------------------------------------ */
+function gdCourseDataIntake(){
+  return window.GolfDaddyCourseDataIntake||window.GolfDaddy?.modules?.courseDataIntake||null;
+}
+function gdSnapshotPlayerId(){
+  try{
+    const events=window.GolfDaddyShotEvents||window.GolfDaddy?.modules?.shotEvents;
+    const scope=events&&typeof events.activePlayerScope==="function"?events.activePlayerScope():null;
+    return scope&&scope.playerId?scope.playerId:null;
+  }catch(e){return null;}
+}
+function gdSnapshotCourseId(){
+  try{
+    const course=JSON.parse(localStorage.getItem("gd_active_course_v1")||"null");
+    return course&&(course.id||course.courseId)||null;
+  }catch(e){return null;}
+}
+function gdLiveWindEvidenceForSnapshot(){
+  const data=gdLiveWindState&&gdLiveWindState.data;
+  if(!data||!Number.isFinite(Number(data.directionDeg)))return {liveWindAvailable:false};
+  return {
+    liveWindAvailable:true,
+    liveWindSpeed:Number(data.speedKmh),
+    liveWindDirection:Number(data.directionDeg),
+    liveWindScaleLevel:Number(data.level)||gdWindLevelForSpeed(data.speedKmh),
+    liveWindSource:data.source||"Open-Meteo",
+    liveWindCapturedAt:data.fetchedAt?new Date(Number(data.fetchedAt)).toISOString():null,
+    // Freshness is the only confidence signal the wind source gives us.
+    liveWindConfidence:gdLiveWindFresh()?"high":"low"
+  };
+}
+function gdLiveSlopeEvidenceForSnapshot(){
+  const result=gdShotElevationState&&gdShotElevationState.result;
+  if(!result||!result.ok||!Number.isFinite(Number(result.deltaM)))return {liveSlopeAvailable:false};
+  return {
+    liveSlopeAvailable:true,
+    liveSlopeValue:Number(result.deltaM),
+    liveSlopeDirection:result.plays||null,
+    liveSlopeSource:result.origin?.source||"open-meteo",
+    liveSlopeCapturedAt:result.sampledAt||null,
+    // A mixed-source pair cannot be trusted as a like-for-like elevation delta.
+    liveSlopeConfidence:result.sourceMatch?(result.origin?.confidence||"medium"):"none"
+  };
+}
+function gdSubmitCourseDataShotSnapshot(landing,gpsAccuracyM,reason,ballEvent){
+  if(typeof gdTournamentModeEnabled==="function"&&gdTournamentModeEnabled())return null;
+  try{
+    const intake=gdCourseDataIntake();
+    const builder=window.GolfDaddyShotSnapshot||window.GolfDaddy?.modules?.shotSnapshot;
+    if(!intake||!builder||!start||!landing)return null;
+
+    const aimTarget=target||landing;
+    const flatDistance=map.distance(start,landing);
+    const payload=target?getGpsBubblePayload(map.distance(start,target)):null;
+    const clubLabel=payload?.club||(target?calculateShot(map.distance(start,target)).club:null)||"GPS";
+
+    // Freeze the bubble geometry that was live at capture time so this shot is
+    // never re-analysed against a newer My Bubble.
+    let bubbleVersionId=null,bubbleGeometry=null;
+    if(payload&&target){
+      const centre=gdBubbleRenderCenter(payload)||target;
+      const depthM=Math.max(1,gdFiniteNumber(payload.depthRadiusM,1)*2);
+      const widthM=Math.max(1,gdFiniteNumber(payload.lateralRadiusM,1)*2);
+      const geometry={
+        club:clubLabel,
+        centerLat:centre.lat,
+        centerLng:centre.lng,
+        orientationDeg:((bearing(start,target)*180/Math.PI)+360)%360,
+        widthM,
+        depthM,
+        carryM:gdFiniteNumber(payload.baseCarry,null),
+        totalM:gdFiniteNumber(payload.totalM,null),
+        offsetDeg:gdFiniteNumber(payload.faceAlignmentOffsetDeg,0),
+        source:"gps-bubble"
+      };
+      const version=intake.registerMyBubbleVersion(geometry,{source:"gps-bubble"});
+      bubbleVersionId=version?.versionId||null;
+      bubbleGeometry=version?.geometry||geometry;
+    }
+
+    const windEvidence=gdLiveWindEvidenceForSnapshot();
+    const slopeEvidence=gdLiveSlopeEvidenceForSnapshot();
+    const userSelectedWind=!!gdWindActive&&gdWindSelectionSource==="user";
+
+    const snapshot=builder.buildShotSnapshot(Object.assign({
+      shotId:gdCurrentPlannedShotId||(ballEvent&&ballEvent.eventId?`snap-${ballEvent.eventId}`:null)||`snap-${Date.now()}`,
+      roundId:gdStatsRoundId(),
+      playerId:gdSnapshotPlayerId(),
+      courseId:gdSnapshotCourseId(),
+      holeNumber:Number(currentPlayingHole||selectedHole||0)||null,
+      capturedAt:new Date().toISOString(),
+
+      clubId:clubLabel,
+      shotStartPosition:{lat:start.lat,lng:start.lng},
+      shotLandingPosition:{lat:landing.lat,lng:landing.lng},
+      targetPosition:{lat:aimTarget.lat,lng:aimTarget.lng},
+      intendedDirection:target?((bearing(start,target)*180/Math.PI)+360)%360:null,
+      shotDistance:flatDistance,
+
+      myBubbleVersionId:bubbleVersionId,
+      myBubbleGeometry:bubbleGeometry,
+      bagVersionId:null,
+
+      userSelectedWind,
+      userWindSelection:userSelectedWind?{
+        scaleLevel:gdWindLevel,
+        directionDeg:Number.isFinite(Number(gdWindOriginAngle))?((Number(gdWindOriginAngle)*180/Math.PI)+360)%360:null
+      }:null,
+      userWindIntent:userSelectedWind?"manual-wind-tool":null,
+
+      // No slope selection surface exists in GPS Play today; recorded honestly
+      // rather than inferred.
+      userSelectedSlope:false,
+      userSlopeSelection:null,
+      userSlopeIntent:null,
+
+      gpsAccuracy:Number.isFinite(Number(gpsAccuracyM))?Number(gpsAccuracyM):null,
+      landingConfidence:ballEvent&&ballEvent.confidence?ballEvent.confidence:"medium",
+      targetConfidence:targetWasMoved?"high":"medium",
+      shotCaptureMethod:reason||"next_shot_button"
+    },windEvidence,slopeEvidence));
+
+    return intake.submitShotSnapshot(snapshot);
+  }catch(e){
+    // Course Data handoff must never interrupt the round.
+    console.warn("[GolfDaddy] shot snapshot submission skipped",e);
+    return null;
+  }
+}
 function gdLogBallPositionForTracking(ll,reason="next_shot_button",gpsAccuracyM=null){
   if(typeof gdTournamentModeEnabled==="function"&&gdTournamentModeEnabled())return null;
   try{
@@ -20339,6 +20473,7 @@ function gdLogBallPositionForTracking(ll,reason="next_shot_button",gpsAccuracyM=
         courseContext:"gps_course",
         confidence:source==="phone_shake"?"medium":"high"
       });
+      gdSubmitCourseDataShotSnapshot(ll,gpsAccuracyM,reason,logged);
       gdRefreshCourseDataSurfaces();
       return logged;
     }
@@ -20354,6 +20489,7 @@ function gdLogBallPositionForTracking(ll,reason="next_shot_button",gpsAccuracyM=
       confidence:source==="phone_shake"?"medium":"high"
     });
     try{stats.pairPendingShots&&stats.pairPendingShots();}catch(e){}
+    gdSubmitCourseDataShotSnapshot(ll,gpsAccuracyM,reason,result);
     gdRefreshCourseDataSurfaces();
     return result;
   }catch(e){
@@ -21019,7 +21155,6 @@ function renderShot(){
     :"Aim at centre";
   const tile=document.getElementById("shotTile");
   const labelEl=tile?tile.querySelector(".tileLabel"):null;
-  const tileMain=tile?tile.querySelector(".tileMain"):null;
   const clubEl=tile?tile.querySelector(".tileClub"):null;
   const tileSub=document.getElementById("tileSub");
   const tileMeta=document.getElementById("tileMeta");
@@ -21049,8 +21184,6 @@ function renderShot(){
     tileDist.classList.remove("slopeOver","slopeUnder","slopeLevel");
     tileDist.innerHTML=gdShotDistanceStackHtml(fd,carryDistance);
   }
-  // Slope now renders into #tilePlays; keep the legacy line clear only outside normal render.
-  if(tileMain)tileMain.querySelectorAll(".gdSlopeAdjustedLine").forEach(el=>el.remove());
   const clubComparisonDistance=gdShotClubComparisonDistance(bubbleCenterDistance);
   const totalDelta=readyBag?gdShotTotalDeltaData(gdb,clubComparisonDistance):null;
   if(tileSub){

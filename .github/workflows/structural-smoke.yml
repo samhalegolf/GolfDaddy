@@ -51,3 +51,8 @@ jobs:
           node dev/automapper-green-refinement-behavior.test.js
           node dev/gps-play-camera-tilt.test.js
           node dev/gps-play-runtime-owner.test.js
+          node dev/conditions-engine.test.js
+          node dev/course-data-intake.test.js
+          node dev/course-data-comparison.test.js
+          node dev/conditions-engine-ownership.test.js
+          node dev/conditions-engine-behavior.test.js
