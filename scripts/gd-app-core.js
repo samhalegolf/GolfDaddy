@@ -306,6 +306,35 @@ const gdAdminCourseDbStatusOpenByCourse={};
 function gdAdminCourseDbMetric(label,value){
   return `<div class="gdAdminDatabaseMetric"><span>${gdEscapeHTML(label)}</span><strong>${gdEscapeHTML(value ?? "")}</strong></div>`;
 }
+function gdAdminCourseLocationPayload(selected,payload={}){
+  const course=selected&&selected.course||{};
+  return Object.assign({},payload&&payload.course||payload||{},course,{
+    courseId:course.courseId||selected&&selected.id||payload&&payload.courseId,
+    courseName:course.courseName||course.name||selected&&selected.name||payload&&payload.courseName,
+    name:course.courseName||course.name||selected&&selected.name||payload&&payload.name
+  });
+}
+function gdAdminCourseLocationSummary(selected,payload={}){
+  const course=gdAdminCourseLocationPayload(selected,payload);
+  const owner=window.GDCourseLocation;
+  const resolved=owner&&typeof owner.resolve==="function"?owner.resolve(course,{requireConfirmed:false}):null;
+  const centre=resolved&&resolved.centre;
+  const point=centre?`${Number(centre.lat).toFixed(5)}, ${Number(centre.lng).toFixed(5)}`:"Not set";
+  const source=resolved&&resolved.source||"unresolved";
+  const confirmed=resolved&&resolved.confirmed?"confirmed":"proposal";
+  const updated=resolved&&resolved.updatedAt?gdCoursePlayDebugTime(resolved.updatedAt):"";
+  return {course,resolved,point,source,confirmed,updated};
+}
+function gdAdminCourseLocationMarkup(selected,payload={}){
+  const info=gdAdminCourseLocationSummary(selected,payload);
+  const id=gdAdminJsArg(selected&&selected.id||info.course.courseId||"");
+  return `<details class="gdAdminCourseSettings" open><summary>Course location</summary><div class="gdAdminCourseSettingsBody"><div class="gdAdminDatabaseSummary">${[
+    gdAdminCourseDbMetric("Centre",info.point),
+    gdAdminCourseDbMetric("Source",info.source),
+    gdAdminCourseDbMetric("Status",info.resolved?info.confirmed:"missing"),
+    gdAdminCourseDbMetric("Updated",info.updated||"")
+  ].join("")}</div><div class="gdAdminCourseVisualActions"><button type="button" onclick="return gdAdminCourseLocationEdit(${id})">Edit location</button><button class="danger" type="button" onclick="return gdAdminCourseLocationRemove(${id})">Remove</button></div></div></details>`;
+}
 function gdAdminCourseDbBadge(label,tone=""){
   return `<span class="gdAdminCourseBadge ${gdEscapeHTML(tone)}">${gdEscapeHTML(label)}</span>`;
 }
@@ -416,6 +445,29 @@ function gdAdminCourseDbOpen(courseId){
     gdAdminCourseDatabaseTab=nextTab;
   }
   gdRenderAdminCourseDatabase();
+  return false;
+}
+function gdAdminCourseLocationSelected(courseId){
+  const id=String(courseId||gdAdminCourseDatabaseSelected||"");
+  const selected=gdAdminCourseDbSummaries().find(item=>item.id===id);
+  if(!selected)return null;
+  const payload=gdAdminCourseDbPayload(selected.id)||{};
+  return gdAdminCourseLocationPayload(selected,payload);
+}
+function gdAdminCourseLocationEdit(courseId){
+  const course=gdAdminCourseLocationSelected(courseId);
+  if(!course)return false;
+  if(typeof window.gdShowCoursePinScreen==="function")return window.gdShowCoursePinScreen(course);
+  if(window.GDCoursePicker&&typeof window.GDCoursePicker.open==="function")return window.GDCoursePicker.open({source:"admin-course-location",returnTarget:"gps"});
+  return false;
+}
+function gdAdminCourseLocationRemove(courseId){
+  const course=gdAdminCourseLocationSelected(courseId);
+  if(!course||!window.GDCourseLocation||typeof window.GDCourseLocation.remove!=="function")return false;
+  window.GDCourseLocation.remove(course,{source:"admin-course-location-remove"});
+  gdRenderAdminCourseDatabase();
+  try{if(typeof renderCourseLibraryPanel==="function")renderCourseLibraryPanel();}catch(e){}
+  try{if(typeof toast==="function")toast("Course location removed");}catch(e){}
   return false;
 }
 function gdToggleAdminCourseDbPayload(){
@@ -1819,7 +1871,7 @@ function gdRenderAdminCourseDatabase(){
     `<span class="${selected.framesIndexedCount?"ready":"warn"}">${gdEscapeHTML(selected.framesIndexedCount)} frames</span>`,
     `<span class="${selected.manifestCount?"ready":"warn"}">${gdEscapeHTML(selected.manifestCount)} manifests</span>`,
     `<span>${gdEscapeHTML(gdCoursePlayDebugTime(selected.updatedAt)||"unknown")} updated</span>`
-  ].join("")}</div><details class="gdAdminCourseSettings" ${statusOpen?"open":""} ontoggle="gdAdminCourseDbSetStatusOpen(${gdAdminJsArg(selected.id)},this.open)"><summary>Course status</summary><div class="gdAdminCourseSettingsBody"><div class="gdAdminDatabaseSummary">${[
+  ].join("")}</div>${gdAdminCourseLocationMarkup(selected,payload)}<details class="gdAdminCourseSettings" ${statusOpen?"open":""} ontoggle="gdAdminCourseDbSetStatusOpen(${gdAdminJsArg(selected.id)},this.open)"><summary>Course status</summary><div class="gdAdminCourseSettingsBody"><div class="gdAdminDatabaseSummary">${[
       gdAdminCourseDbMetric("Hole count",selected.holeCount),
       gdAdminCourseDbMetric("Tee/green/route",selected.geometryReadyCount),
       gdAdminCourseDbMetric("Play data ready",selected.playReadyCount),
@@ -2121,6 +2173,8 @@ window.gdRenderAdminCourseDatabase=gdRenderAdminCourseDatabase;
 window.gdAdminCourseDbOpen=gdAdminCourseDbOpen;
 window.gdAdminCourseDbSetStatusOpen=gdAdminCourseDbSetStatusOpen;
 window.gdAdminCourseDbShowDebug=gdAdminCourseDbShowDebug;
+window.gdAdminCourseLocationEdit=gdAdminCourseLocationEdit;
+window.gdAdminCourseLocationRemove=gdAdminCourseLocationRemove;
 window.gdAdminCourseDebugRefresh=gdAdminCourseDebugRefresh;
 window.gdToggleAdminCourseDbPayload=gdToggleAdminCourseDbPayload;
 window.gdSetCoursePlayDebug=gdSetCoursePlayDebug;
@@ -15929,9 +15983,6 @@ function setMapSource(index, reason="manual"){
   baseLayer.once("load",()=>{
     if(reason==="security"){
       toast(`Switched to ${current.name}`);
-      if(greenActive && target){
-        setTimeout(()=>scanGreen(),180);
-      }
     }
   });
 }
@@ -15942,7 +15993,6 @@ function cycleMapSource(){
 }
 
 function autoSwitchMapSource(){
-  if(snapshotPixelActive) return false;
   if(mapSources.length<2) return false;
   if(autoSwitchedForSecurity) return false;
 
@@ -15955,13 +16005,6 @@ function autoSwitchMapSource(){
 }
 
 setMapSource(0,"initial");
-
-map.on("movestart",()=>{
-  if(snapshotPixelActive){
-    const sub=document.getElementById("snapshotSub");
-    if(sub)sub.textContent="Beta · snapshot may be stale after map move";
-  }
-});
 
 const app=document.getElementById("app");
 let mode="start", start=null, target=null, greenCentre=null, pin=null;
@@ -15998,34 +16041,14 @@ let greenScanWasRotated=false;
 let phoneHeading=null;
 let orientationListening=false;
 let pinDirectionLine=null;
-let greenActive=false, greenTolerance=.03, sessionGreenTolerance=.03, greenContrast=0, lastArea=0, stall=0;
-let greenSamplePixel=null, greenSamplePixels=[], greenScanUsedPixels=false;
-let greenPixelAccessOk=false;
-let snapshotPixelSource=null;
-let snapshotPixelActive=false;
-const GREEN_SEED_RADIUS_M=3;
-let greenFinderBeta=false;
-let greenFinderSamples=[];
 const GD_ROUND_SCORE_KEY="gd_round_score_v1";
-let sessionTee="White", selectedHole=1, currentPlayingHole=null, hadNearGreen=false, pendingScoreHole=null, playerScore=Number(sessionStorage.getItem(GD_ROUND_SCORE_KEY)||0)||0;
-let gdScorecardHasDrivenScore=false, gdManualScoreOverride=false, gdScoreHolePickerOpen=true;
+let currentPlayingHole=null, hadNearGreen=false, pendingScoreHole=null, playerScore=Number(sessionStorage.getItem(GD_ROUND_SCORE_KEY)||0)||0;
+let gdScorecardHasDrivenScore=false, gdManualScoreOverride=false;
 
 const startIcon=L.divIcon({className:"",html:"<div class='startDot'></div>",iconSize:[24,24],iconAnchor:[12,12]});
 const targetIcon=L.divIcon({className:"",html:"<div class='targetDot'></div>",iconSize:[13,13],iconAnchor:[6.5,6.5]});
 const pinIcon=L.divIcon({className:"",html:"<div class='pinDot'></div>",iconSize:[22,30],iconAnchor:[9,27]});
 const demoCourses=[];
-const scorecard={courseKey:"",courseName:"",source:"none",sourceUrl:"",loading:false,error:"",holes:[]};
-const GD_SCORECARD_CACHE_KEY="gd_course_website_scorecards_v3";
-const GD_SCORECARD_SHELL_SOURCE="18-hole scoring shell";
-const GD_SCORECARD_DEFAULT_TEES=["Red","Yellow","White","Blue","Black"];
-const GD_SCORECARD_WEBSITE_SOURCES=[
-  {match:/akarana/i,name:"Akarana Golf Club",baseUrl:"https://www.akaranagolf.co.nz",holeListPath:"/hole-by-hole",detailIdStart:2296381,seedHoles:[
-    {hole:1,par:5,index:16,metres:401},{hole:2,par:4,index:18,metres:254},{hole:3,par:3,index:14,metres:156},{hole:4,par:4,index:12,metres:299},{hole:5,par:3,index:10,metres:144},{hole:6,par:4,index:2,metres:343},
-    {hole:7,par:4,index:4,metres:376},{hole:8,par:3,index:8,metres:155},{hole:9,par:4,index:6,metres:371},{hole:10,par:5,index:11,metres:459},{hole:11,par:3,index:13,metres:136},{hole:12,par:5,index:3,metres:462},
-    {hole:13,par:4,index:1,metres:355},{hole:14,par:4,index:5,metres:354},{hole:15,par:4,index:9,metres:327},{hole:16,par:3,index:17,metres:156},{hole:17,par:4,index:7,metres:353},{hole:18,par:4,index:15,metres:310}
-  ]}
-];
-
 function gdHonestGpsStateLabel(s){
   const label=String(s||"");
   if(label!=="GPS ready")return label;
@@ -16081,8 +16104,6 @@ function hideHint(){const h=document.getElementById("hint");if(h)h.classList.rem
 function haptic(ms=12){try{if(navigator.vibrate)navigator.vibrate(ms)}catch(e){}}
 let toastTimer=null;
 
-function openGreenSandboxNotice(){ toggleGreenWand(); }
-
 function toast(text){
   const el=document.getElementById("toast");
   el.textContent=text;
@@ -16092,7 +16113,6 @@ function toast(text){
 }
 function closeAllPanels(){
   document.querySelectorAll(".panel.open").forEach(p=>p.classList.remove("open"));
-  if(greenActive) toggleGreenWand();
 }
 function setSoftActive(id,on=true){
   const el=document.getElementById(id);
@@ -16637,7 +16657,6 @@ function lockFrame(refit=true){
 function unlockFrameForReset(){
   setBubbleOnlyLock(false);
   clearMapRotation();
-  if(typeof clearWandScaleLock==="function") clearWandScaleLock("frame-unlock");
 }
 function moveBubbleTo(ll,saveUndo=true){
   if(!ll||!start) return;
@@ -16648,7 +16667,6 @@ function moveBubbleTo(ll,saveUndo=true){
   if(targetMarker) targetMarker.setLatLng(gdShotDisplayTarget()||target);
   renderShot();
   updatePinLine();
-  if(greenActive){ establishGreenFromBubble(); scanGreen(); }
 }
 function gdActiveShotBagRows(){
   try{return gdAccountShotBagRows();}catch(e){return []}
@@ -17154,16 +17172,9 @@ function gdOpenChangeCourse(event){
     if(window.__gdPreLockHoleFrameTimer)clearTimeout(window.__gdPreLockHoleFrameTimer);
     if(typeof gdClearMappedStartPromptChrome==="function")gdClearMappedStartPromptChrome();
   }catch(e){}
-  try{document.querySelectorAll(".panel.open,.modulePanel.open").forEach(el=>el.classList.remove("open"));}catch(e){}
-  try{document.getElementById("shellHome")?.classList.add("hidden");}catch(e){}
-  try{if(typeof showShellChrome==="function")showShellChrome(true);}catch(e){}
-  try{if(typeof setShellLayer==="function")setShellLayer("gps");}catch(e){}
-  try{if(typeof setDockActive==="function")setDockActive("gps");}catch(e){}
+  try{window.GDShell?.openCoursePicker?.({source:"legacy-change-course",returnTarget:"gps"});}catch(e){}
   try{
-    document.body.classList.remove("shell-home","shell-module","gdProfileOpen","gdStatsOpen","gdBubbleStudioOpen","gdToolRailOpen","gdCourseOpening","gdCoursePinPromptActive");
-    document.body.classList.add("shell-gps","gdGpsActive","gps-active","gdCoursePickerOpen");
-    document.body.dataset.clarityRoute="gps";
-    document.body.dataset.gdToolScreen="picker";
+    document.body.classList.remove("gdProfileOpen","gdStatsOpen","gdBubbleStudioOpen","gdToolRailOpen","gdCourseOpening","gdCoursePinPromptActive");
     [
       "gdCourseNeedsPin",
       "gdCourseNeedsPinCourse",
@@ -17184,14 +17195,6 @@ function gdOpenChangeCourse(event){
     gdRefreshAssumedCourseFromLocation();
     const count=document.getElementById("countLine");
     if(count)count.textContent="Search";
-  }catch(e){}
-  try{
-    const screen=document.getElementById("courseScreen");
-    if(screen){
-      screen.classList.remove("hidden");
-      screen.style.display="flex";
-      screen.style.pointerEvents="auto";
-    }
   }catch(e){}
   try{setTimeout(()=>document.getElementById("searchInput")?.focus(),80);}catch(e){}
   return false;
@@ -17220,16 +17223,8 @@ function gdStoreCoursePickerSelection(payload){
 	  }catch(e){}
 	}
 function gdEnsureGpsCourseSurface(){
-  try{document.querySelectorAll(".panel.open,.modulePanel.open").forEach(el=>el.classList.remove("open"));}catch(e){}
-  try{document.getElementById("courseScreen")?.classList.add("hidden");}catch(e){}
-  try{document.getElementById("shellHome")?.classList.add("hidden");}catch(e){}
-  try{if(typeof showShellChrome==="function")showShellChrome(true);}catch(e){}
-  try{if(typeof setShellLayer==="function")setShellLayer("gps");}catch(e){}
-  try{if(typeof setDockActive==="function")setDockActive("gps");}catch(e){}
-  try{
-	    document.body.classList.remove("shell-home","shell-module","gdProfileOpen","gdStatsOpen","gdBubbleStudioOpen");
-	    document.body.classList.add("shell-gps","gdGpsActive","gps-active","gps-open","manual-gps-active","gdModeTwoTap");
-	  }catch(e){}
+  try{window.GDShell?.enterGps?.({source:"core-ensure-gps-course-surface",replace:true,fromCoursePicker:true});}catch(e){}
+  try{document.body.classList.remove("gdProfileOpen","gdStatsOpen","gdBubbleStudioOpen");document.body.classList.add("gps-open","manual-gps-active","gdModeTwoTap");}catch(e){}
 	  try{window.gdApplyGpsMapVisibilityOwner?.("ensure-gps-course-surface-before-map");}catch(e){}
 	  const mapEl=document.getElementById("map");
 		  if(mapEl){
@@ -17260,6 +17255,11 @@ function gdCoursePickerPinKey(payload){
   return key&&key!=="manual-gps"?key:"";
 }
 function gdCoursePickerStoredPin(payload){
+  const owner=window.GDCourseLocation;
+  if(owner&&typeof owner.get==="function"){
+    const resolved=owner.get(payload);
+    if(resolved&&resolved.centre)return Object.assign({},resolved,resolved.centre,{source:resolved.source||"course-location-owner"});
+  }
   const key=gdCoursePickerPinKey(payload);
   if(!key)return null;
   const saved=gdCoursePickerReadPinStore()[key];
@@ -17267,6 +17267,8 @@ function gdCoursePickerStoredPin(payload){
   return point?Object.assign({},saved,point):null;
 }
 function gdCoursePickerRememberPin(payload,point){
+  const owner=window.GDCourseLocation;
+  if(owner&&typeof owner.confirm==="function")return !!owner.confirm(payload,point,{source:"course-picker-pin"});
   const key=gdCoursePickerPinKey(payload);
   const pin=gdCoursePickerFinitePoint(point);
   if(!key||!pin)return false;
@@ -17282,6 +17284,8 @@ function gdCoursePickerRememberPin(payload,point){
   return true;
 }
 function gdCoursePickerApplyStoredPin(payload){
+  const owner=window.GDCourseLocation;
+  if(owner&&typeof owner.attachToCourse==="function")return owner.attachToCourse(payload,{requireConfirmed:true});
   if(gdCoursePayloadIsManual(payload))return payload;
   const pin=gdCoursePickerStoredPin(payload);
   if(!pin)return payload;
@@ -17311,17 +17315,20 @@ function gdCoursePickerPinPointForPayload(payload){
 function gdCoursePickerNeedsCoursePin(payload){
   const mark=reason=>{try{document.body.dataset.gdCoursePinDecision=reason;}catch(e){}};
   if(gdCoursePayloadIsManual(payload)){mark("manual-course");return false;}
-	  if(payload?.gdDatabaseMapAvailable===true){mark("database-map");return false;}
-	  if(window.__gdCoursePickerBypassPinOnce){
-	    window.__gdCoursePickerBypassPinOnce=false;
-	    mark("bypass-once");
+		  if(payload?.gdDatabaseMapAvailable===true){mark("database-map");return false;}
+  const owner=window.GDCourseLocation;
+  const resolved=owner&&typeof owner.get==="function"?owner.get(payload):null;
+  if(resolved&&resolved.centre&&resolved.confirmed){mark("confirmed-course-location");return false;}
+		  if(window.__gdCoursePickerBypassPinOnce){
+		    window.__gdCoursePickerBypassPinOnce=false;
+		    mark("bypass-once");
 	    return false;
 	  }
 	  mark("needs-pin");
 	  return true;
 	}
 function gdCoursePickerUsesPinSeed(payload){
-  return !!(payload&&!gdCoursePayloadIsManual(payload)&&payload.gdTrustedCoursePin===true&&gdCoursePickerFinitePoint(payload));
+  return !!(payload&&!gdCoursePayloadIsManual(payload)&&payload.courseLocationConfirmed===true&&gdCoursePickerFinitePoint(payload));
 }
 async function gdCoursePickerDatabaseMapAvailable(payload){
   if(!payload||gdCoursePayloadIsManual(payload))return {available:false,attempted:false,reason:"manual-course"};
@@ -17444,6 +17451,11 @@ function gdShowCoursePinScreen(payload){
   gdSetCoursePickerPinMode(true);
   panel.classList.remove("hidden");
   gdCenterCoursePinMap(payload);
+  try{
+    const owner=window.GDCourseLocation;
+    const proposal=gdCoursePickerMapCenterPoint()||gdCoursePickerFinitePoint(payload)||gdCoursePickerDefaultPoint();
+    if(owner&&typeof owner.propose==="function"&&proposal)owner.propose(payload,proposal,{source:"course-picker-pin-proposal",confidence:.35});
+  }catch(e){}
   try{window.gdApplyGpsMapVisibilityOwner?.("course-picker-pin-prompt");}catch(e){}
   try{if(typeof toast==="function")toast("Pin the course location");}catch(e){}
   return false;
@@ -17472,14 +17484,19 @@ function gdConfirmCoursePin(event){
     try{if(typeof toast==="function")toast("Move the map over the course first");}catch(e){}
     return false;
   }
-  gdCoursePickerRememberPin(payload,point);
-  const pinned=gdNormalizeCoursePickerPayload(Object.assign({},payload,{
-    lat:point.lat,
-    lng:point.lng,
-    courseLat:point.lat,
-    courseLng:point.lng,
-    finderLat:point.lat,
-    finderLng:point.lng,
+  const owner=window.GDCourseLocation;
+  const resolved=owner&&typeof owner.confirm==="function"?owner.confirm(payload,point,{source:"course-picker-pin"}):null;
+  if(!resolved)gdCoursePickerRememberPin(payload,point);
+  const savedPoint=resolved&&resolved.centre||point;
+  const pinned=owner&&typeof owner.attachToCourse==="function"
+    ?owner.attachToCourse(payload,{requireConfirmed:true})
+    :gdNormalizeCoursePickerPayload(Object.assign({},payload,{
+    lat:savedPoint.lat,
+    lng:savedPoint.lng,
+    courseLat:savedPoint.lat,
+    courseLng:savedPoint.lng,
+    finderLat:savedPoint.lat,
+    finderLng:savedPoint.lng,
     coursePinned:true,
     pinnedByUser:true,
     pinSource:"course-picker-pin",
@@ -17764,101 +17781,93 @@ function gdScheduleCourseVisualPullForPlay(payload){
   setTimeout(()=>{gdLoadCourseVisualForPlay(payload,{keys,force:true,setLoading:false,source:"course-visual-cloud-loaded"});},80);
   return true;
 }
+window.GDCoursePickerCoreBridge={
+  normalizeCourse:gdNormalizeCoursePickerPayload,
+  applyStoredPin:gdCoursePickerApplyStoredPin,
+  isManual:gdCoursePayloadIsManual,
+  finitePoint:gdCoursePickerFinitePoint,
+  hasPoint:gdCoursePickerPayloadHasPoint,
+  defaultPoint:gdCoursePickerDefaultPoint,
+  payloadFromSelectionElement:gdCoursePickerPayloadFromSelectionElement,
+  databaseMapAvailable:gdCoursePickerDatabaseMapAvailable,
+  needsCoursePin:gdCoursePickerNeedsCoursePin,
+  showPin:gdShowCoursePinScreen,
+  hidePin:gdHideCoursePinScreen,
+  cancelPin:gdCancelCoursePin,
+  hasMappedPlayData:gdCoursePickerHasMappedPlayData,
+  resetPresentationReadiness:gdResetCoursePickerPresentationReadiness,
+  storeSelection:gdStoreCoursePickerSelection,
+  ensureGpsCourseSurface:gdEnsureGpsCourseSurface,
+  refreshGpsMapAfterCourseOpen:gdRefreshGpsMapAfterCourseOpen,
+  prepareFirstHoleState:gdPrepareCoursePickerFirstHoleState,
+  scheduleVisualPullForPlay:gdScheduleCourseVisualPullForPlay,
+  openManualCourse:function(payload){
+    try{return openCourse(payload)}catch(e){
+      console.warn("Clarity Caddy course picker fallback",e);
+      gdStoreCoursePickerSelection(payload);
+      gdEnsureGpsCourseSurface();
+      try{const line=document.getElementById("courseLine");if(line){line.textContent="";line.style.display="none";}if(typeof gdMakeCourseLabelsClickable==="function")gdMakeCourseLabelsClickable();}catch(_){}
+      try{if(typeof resetPlay==="function")resetPlay(true);}catch(_){}
+      try{if(typeof toast==="function")toast("Manual GPS selected");}catch(_){}
+      gdRefreshGpsMapAfterCourseOpen(payload,{setCourseView:gdCoursePickerPayloadHasPoint(payload)});
+      return false;
+    }
+  },
+  prepareMappingSurface:function(payload,opts={}){
+    gdHideCoursePinScreen();
+    gdResetCoursePickerPresentationReadiness(payload,{forceScanner:!!opts.fromPinnedSeed});
+    gdStoreCoursePickerSelection(payload);
+    try{selectedHole=1;currentPlayingHole=1;}catch(e){}
+    try{
+      sessionStorage.setItem("gd_gps_session_activated","1");
+      sessionStorage.setItem("gd_active_playing_hole","1");
+      sessionStorage.setItem("gd_mapper_active_hole","1");
+    }catch(e){}
+    try{window.gdMapperActiveHole=1;}catch(e){}
+    gdRefreshGpsMapAfterCourseOpen(payload,{setCourseView:gdCoursePickerPayloadHasPoint(payload)});
+  },
+  enterGpsPlayAfterMapping:function(payload,result){
+    if(!(result&&result.playable))return false;
+    const playCourse=result.course||payload;
+    gdStoreCoursePickerSelection(playCourse);
+    gdEnsureGpsCourseSurface();
+    gdRefreshGpsMapAfterCourseOpen(playCourse,{setCourseView:gdCoursePickerPayloadHasPoint(payload)});
+    gdPrepareCoursePickerFirstHoleState(playCourse);
+    if(payload?.gdDatabaseMapAvailable===true)gdScheduleCourseVisualPullForPlay(payload);
+    try{if(typeof toast==="function")toast("Course ready");}catch(e){}
+    return true;
+  }
+};
 function gdKickWholeCourseAutoMapOnLoad(payload,opts={}){
-  if(!payload||gdCoursePayloadIsManual(payload))return false;
-  const now=Date.now();
-  const selectedAt=new Date(now).toISOString();
-  const library=window.GolfDaddyCourseLibrary||window.ClarityCaddieCourseLibrary||{};
-  const pinSeed=!!opts.fromPinnedSeed;
-  const pinnedCentre=pinSeed?gdCoursePickerFinitePoint(payload):null;
-  const snapshotOpts={selectedAt,source:pinSeed?"course-picker-pin-auto-map":"course-picker-auto-map"};
-  if(pinnedCentre)snapshotOpts.courseCentre=pinnedCentre;
-  let mappingCourse=typeof library.mappingCourseSnapshot==="function"
-    ? library.mappingCourseSnapshot(payload,snapshotOpts)
-    : payload;
-  const seedKey=pinSeed&&pinnedCentre?`:pin:${Number(pinnedCentre.lat).toFixed(5)},${Number(pinnedCentre.lng).toFixed(5)}`:"";
-  const key=String(mappingCourse.courseId||mappingCourse.savedCourseId||mappingCourse.canonicalKey||mappingCourse.name||mappingCourse.courseName||payload.courseId||payload.name||"course").toLowerCase()+seedKey;
-  if(window.__gdWholeCourseAutoMapOnLoadKey===key&&now-(window.__gdWholeCourseAutoMapOnLoadAt||0)<45000)return true;
-  window.__gdWholeCourseAutoMapOnLoadKey=key;
-  window.__gdWholeCourseAutoMapOnLoadAt=now;
-  try{
-    document.body.dataset.gdCourseAutoMapStatus=pinSeed?"checking_pin_seed":"checking_native_visual";
-    document.body.dataset.gdCourseScannerSeed=pinSeed?"pin":"course";
-  }catch(e){}
-	  Promise.resolve(pinSeed?null:gdLoadCourseVisualForPlay(payload,{force:true,source:"course-visual-preload"}))
-	    .then(visualResult=>{
-	      if(!pinSeed&&visualResult&&visualResult.loaded){
-	        try{
-	          document.body.dataset.gdCourseAutoMapStatus="native_visual_loaded";
-          document.body.dataset.gdCourseAutoMappedHoles=String(Array.isArray(visualResult.loaded.holeFramePublishedVisuals)?visualResult.loaded.holeFramePublishedVisuals.length:0);
-          document.body.dataset.gdCourseAutoMapSaved="0";
-          document.body.dataset.gdCourseNeedsPin="no";
-        }catch(e){}
-        gdScheduleCoursePickerFirstHoleOpen(payload);
-        return visualResult;
-      }
-      const controller=window.runCourseMappingAttempt||window.gdRunCourseMappingAttempt||window.gdResolveCoursePlayHole;
-      if(typeof controller!=="function"){
-        try{document.body.dataset.gdCourseAutoMapStatus="controller_unavailable";}catch(e){}
-        return {playable:false,reason:"controller-unavailable"};
-      }
-      try{document.body.dataset.gdCourseAutoMapStatus="running";}catch(e){}
-      return controller({course:mappingCourse,courseCentre:pinnedCentre||undefined,hole:1,wholeCourse:true,showLoading:true,fresh:true,allowLocalSavedMap:payload?.gdDatabaseMapAvailable===true,acceptPartialGeneratedMap:pinSeed,selectedAt,reason:pinSeed?"course-picker-pin":"course-picker"});
-    })
-    .then(result=>{
-      if(result&&result.loaded)return;
-      try{
-        document.body.dataset.gdCourseAutoMapStatus=result&&result.stale?"stale":result&&(result.playable||result.fallback)?"done":"empty";
-        document.body.dataset.gdCourseAutoMappedHoles=String(result?.holes||result?.persisted?.holes||0);
-        document.body.dataset.gdCourseAutoMapSaved=String(result?.saved||result?.persisted?.saved||0);
-        document.body.dataset.gdCourseNeedsPin=result&&result.fallback?"active":result&&result.playable?"no":"pending";
-      }catch(e){}
-      if(result&&result.playable&&!result.partial)gdScheduleCoursePickerFirstHoleOpen(payload);
-    })
-    .catch(()=>{
-      try{document.body.dataset.gdCourseAutoMapStatus="error";document.body.dataset.gdCourseNeedsPin="pending";}catch(e){}
-    });
-  return true;
+  if(window.GDCoursePicker&&typeof window.GDCoursePicker.selectCourse==="function"){
+    return window.GDCoursePicker.selectCourse(payload,Object.assign({source:"core-compat-kick"},opts||{}));
+  }
+  return false;
 }
-function gdOpenCoursePickerCourse(course){
+function gdOpenCoursePickerLegacyCourse(course){
   let payload=gdNormalizeCoursePickerPayload(course);
   payload=gdCoursePickerApplyStoredPin(payload);
   if(!payload.gdDatabaseMapChecked&&!gdCoursePayloadIsManual(payload))return gdCoursePickerCheckDatabaseThenOpen(payload);
   const usePinSeed=!payload.gdDatabaseMapAvailable&&gdCoursePickerUsesPinSeed(payload);
-  try{
-    window.__gdCoursePickerChangingAt=0;
-    window.__gdCoursePickerFirstHoleOpenToken=null;
-    window.gdCourseChangeMode="";
-    window.__gdLiveCoursePickerSelection=payload;
-    window.__gdLiveCoursePickerSelectionAt=Date.now();
-    if(!gdCoursePayloadIsManual(payload))window.__gdCoursePickerOwnsOpenResolverUntil=Date.now()+8000;
-    localStorage.removeItem("gd_active_course_v1");
-  }catch(e){}
   if(gdCoursePickerNeedsCoursePin(payload))return gdShowCoursePinScreen(payload);
+  if(gdCoursePayloadIsManual(payload))return window.GDCoursePickerCoreBridge.openManualCourse(payload);
   gdHideCoursePinScreen();
   gdResetCoursePickerPresentationReadiness(payload,{forceScanner:usePinSeed});
-  if(!gdCoursePayloadIsManual(payload)){
-    try{selectedHole=1;currentPlayingHole=1;}catch(e){}
-    try{sessionStorage.setItem("gd_gps_session_activated","1");sessionStorage.setItem("gd_active_playing_hole","1");sessionStorage.setItem("gd_mapper_active_hole","1");}catch(e){}
-    try{window.gdMapperActiveHole=1;}catch(e){}
+  try{selectedHole=1;currentPlayingHole=1;}catch(e){}
+  try{sessionStorage.setItem("gd_gps_session_activated","1");sessionStorage.setItem("gd_active_playing_hole","1");sessionStorage.setItem("gd_mapper_active_hole","1");}catch(e){}
+  try{window.gdMapperActiveHole=1;}catch(e){}
+  openCourse(payload);
+  gdKickWholeCourseAutoMapOnLoad(payload,{fromPinnedSeed:usePinSeed});
+  if(payload?.gdDatabaseMapAvailable===true)gdScheduleCourseVisualPullForPlay(payload);
+  if(!usePinSeed)gdScheduleCoursePickerFirstHoleOpen(payload);
+  return false;
+}
+function gdOpenCoursePickerCourse(course){
+  if(window.GDCoursePicker&&typeof window.GDCoursePicker.selectCourse==="function"){
+    return window.GDCoursePicker.selectCourse(course,{source:"core-compat-select"});
   }
-  try{
-    openCourse(payload);
-  }catch(e){
-    console.warn("Clarity Caddy course picker fallback",e);
-    gdStoreCoursePickerSelection(payload);
-    gdEnsureGpsCourseSurface();
-    try{const line=document.getElementById("courseLine");if(line){line.textContent=payload.name==="Manual GPS"?"":payload.name;line.style.display=line.textContent?"block":"none";}if(typeof gdMakeCourseLabelsClickable==="function")gdMakeCourseLabelsClickable();}catch(_){}
-    try{if(gdCoursePickerPayloadHasPoint(payload)&&window.map&&map.setView)map.setView([payload.lat,payload.lng],18);}catch(_){}
-    try{if(typeof resetPlay==="function")resetPlay(true);}catch(_){}
-    try{if(typeof toast==="function")toast(payload.name==="Manual GPS"?"Manual GPS selected":"Course selected");}catch(_){}
-    gdRefreshGpsMapAfterCourseOpen(payload,{setCourseView:gdCoursePickerPayloadHasPoint(payload)});
-  }
-	  gdKickWholeCourseAutoMapOnLoad(payload,{fromPinnedSeed:usePinSeed});
-	  if(payload?.gdDatabaseMapAvailable===true)gdScheduleCourseVisualPullForPlay(payload);
-	  if(!usePinSeed)gdScheduleCoursePickerFirstHoleOpen(payload);
-	  return false;
-	}
+  return gdOpenCoursePickerLegacyCourse(course);
+}
 function gdConfirmAssumedCourse(event){
   if(event){
     event.preventDefault?.();
@@ -17943,7 +17952,6 @@ document.querySelectorAll(".panel").forEach(panel=>{
 function openCourse(c){
   c=gdNormalizeCoursePickerPayload(c||{name:"Manual GPS"});
   const hasCoursePoint=gdCoursePickerPayloadHasPoint(c);
-  try{clearSnapshotSource();}catch(e){}
   autoSwitchedForSecurity=false;
   gdStoreCoursePickerSelection(c);
   try{
@@ -18571,9 +18579,6 @@ function gdClearTargetArtifactsForFreshStart(){
   document.getElementById("shotTile")?.classList.remove("visible");
 }
 function clearPendingGreenTarget(){
-  try{if(window.gdClearWandLive)window.gdClearWandLive();}catch(e){}
-  try{if(typeof clearWandHandles==="function")clearWandHandles();}catch(e){}
-  try{if(typeof clearWandDebugLayers==="function")clearWandDebugLayers();}catch(e){}
   try{clearShot();}catch(e){}
   [targetMarker,greenMarker,pinMarker,pinDirectionLine,greenOutline,greenSoft,greenLabel,frontLabel,backLabel].forEach(l=>{try{if(l)map.removeLayer(l)}catch(e){}});
   targetMarker=greenMarker=pinMarker=pinDirectionLine=greenOutline=greenSoft=greenLabel=frontLabel=backLabel=null;
@@ -18706,7 +18711,7 @@ function gdIsMapPlacementSurfaceEvent(ev){
   const mapEl=map&&map.getContainer?map.getContainer():document.getElementById("map");
   if(!mapEl||!ev||!ev.target||!mapEl.contains(ev.target))return false;
   if(!document.body.classList.contains("gdGpsActive")&&!document.body.classList.contains("gps-active"))return false;
-  const blocked=ev.target.closest("button,a,input,select,textarea,.leaflet-control,.rightRail,.shellBar,.dock,#gdV62UndoDock,#gdV62ModeSwitch,#shotTile,#gdV62GpsBadge,#hint,#toast,#gdWandPanel,#gdMapperToolFlyout,#gdMapperToolsDrawer,#gdMapperHoleStrip,.panel,.modulePanel,#courseScreen:not(.hidden)");
+  const blocked=ev.target.closest("button,a,input,select,textarea,.leaflet-control,.rightRail,.shellBar,.dock,#gdV62UndoDock,#gdV62ModeSwitch,#shotTile,#gdV62GpsBadge,#hint,#toast,#gdMapperToolFlyout,#gdMapperToolsDrawer,#gdMapperHoleStrip,.panel,.modulePanel,#courseScreen:not(.hidden)");
   return !blocked;
 }
 function gdCompleteMapPlacementFromClientEvent(ev){
@@ -19061,7 +19066,6 @@ function gdInstallSmoothBubbleDrag(marker){
         el.style.cursor="grab";
         renderShot();
         if(lockedFrame)setBubbleOnlyLock(true);
-        if(greenActive){establishGreenFromBubble();scanGreen();}
         gdFinishBubbleLongPressZoom(finishedFromLongPressZoom);
         try{el.releasePointerCapture(endEv.pointerId);}catch(e){}
       };
@@ -21088,122 +21092,12 @@ function clearShot(options={}){
   try{if(typeof window.gdClearCapturedHoleFrameShotOverlay==="function")window.gdClearCapturedHoleFrameShotOverlay();}catch(e){}
 }
 
-/* ---------------- GPS ---------------- */
-function initGPS(){
-  if(!navigator.geolocation){gpsOk=false;setGps(false,"Manual");showHint(gdMappedStartHint());return}
-  setGps(true,"GPS…");
-  navigator.geolocation.getCurrentPosition(p=>{
-    gpsOk=true;setGps(true,"GPS");hideHint();
-    const here=L.latLng(p.coords.latitude,p.coords.longitude);
-	    gdRememberLiveGpsOnly(here,p.coords.accuracy,"gps-init");
-	    startWatch();
-	  },()=>{gpsOk=false;setGps(false,"Manual");showHint(gdMappedStartHint())},{enableHighAccuracy:true,maximumAge:3000,timeout:8000})
-	}
-	function pulseStartDot(){const el=document.querySelector(".startDot");if(el){el.classList.remove("pulse");void el.offsetWidth;el.classList.add("pulse")}}
-	function gdRememberLiveGpsOnly(here,accuracy=null,source="gps-live"){
-	  window.__gdGpsLocateQuarantineV1=true;
-	  if(!here||!Number.isFinite(Number(here.lat))||!Number.isFinite(Number(here.lng)))return false;
-	  window.gdGpsState=window.gdGpsState||{};
-	  window.gdGpsState.permissionKnown=true;
-	  window.gdGpsState.permissionGranted=true;
-	  window.gdGpsState.lastError=null;
-	  window.gdGpsState.lastFix={lat:Number(here.lat),lng:Number(here.lng),accuracy:Number.isFinite(Number(accuracy))?Number(accuracy):null,source:source||"gps-live",simulated:false};
-	  window.gdGpsState.lastFixAt=Date.now();
-	  window.__gdLastLiveGpsPoint={lat:Number(here.lat),lng:Number(here.lng),accuracy:Number.isFinite(Number(accuracy))?Number(accuracy):null,source:source||"gps-live",at:Date.now()};
-	  try{if(document.body&&document.body.dataset){document.body.dataset.gdLiveGpsLat=String(Number(here.lat));document.body.dataset.gdLiveGpsLng=String(Number(here.lng));document.body.dataset.gdLiveGpsSource=source||"gps-live";document.body.dataset.gdLiveGpsAt=String(Date.now());}}catch(e){}
-	  try{
-	    if(typeof L!=="undefined"&&typeof map!=="undefined"&&map){
-	      const ll=L.latLng(Number(here.lat),Number(here.lng));
-	      if(!window.__gdLiveGpsMarker){
-	        window.__gdLiveGpsMarker=L.circleMarker(ll,{radius:6,color:"#1fd36d",weight:2,opacity:.95,fillColor:"#1fd36d",fillOpacity:.32,interactive:false}).addTo(map);
-	      }else if(window.__gdLiveGpsMarker.setLatLng){
-	        window.__gdLiveGpsMarker.setLatLng(ll);
-	      }
-	    }
-	  }catch(e){}
-	  try{gpsOk=true;}catch(e){}
-	  try{setGps(true,source==="gps-refresh"?"GPS refreshed":"GPS live");}catch(e){}
-	  return true;
-	}
-	window.gdRememberLiveGpsOnly=gdRememberLiveGpsOnly;
-	function updateGpsInsideLockedFrame(here,label="GPS live"){
-	  if(!here||!start) return false;
-	  gdRememberLiveGpsOnly(here,null,label);
-	  const moved=map.distance(start,here);
-  if(moved>lockedGpsUpdateMaxM){
-    setGps(true,"GPS moved");
-    toast("GPS moved outside locked frame · reset for new shot");
-    return false;
-  }
-  setGps(true,label);
-  pulseStartDot();
-  return true;
-}
-function startWatch(){
-	  if(gpsWatch||!navigator.geolocation)return;
-	  gpsWatch=navigator.geolocation.watchPosition(p=>{
-	    const here=L.latLng(p.coords.latitude,p.coords.longitude);
-	    gdRememberLiveGpsOnly(here,p.coords.accuracy,"gps-watch");
-	    if(!start)return;
-	    if(lockedFrame){
-	      updateGpsInsideLockedFrame(here,"GPS live");
-	      return;
-	    }
-	  },()=>setGps(false,"GPS weak"),{enableHighAccuracy:true,maximumAge:3000,timeout:10000});
-	}
-	function refreshGPS(){if(!navigator.geolocation)return;navigator.geolocation.getCurrentPosition(p=>{const here=L.latLng(p.coords.latitude,p.coords.longitude);gdRememberLiveGpsOnly(here,p.coords.accuracy,"gps-refresh");startWatch();toast("GPS refreshed")},null,{enableHighAccuracy:true,maximumAge:0,timeout:8000})}
-function centerOnPlayer(){if(lockedFrame){toast("Frame locked · GPS dot still live");pulseStartDot();return;}clearMapRotation();if(!start){refreshGPS();return}map.panTo(start,{animate:true,duration:.35});pulseStartDot()}
+/* GPS watch/location lifecycle is owned by scripts/inline/gd-gps-play-runtime-owner-v1.js. */
 
 /* ---------------- Flag ---------------- */
-/* #flagTool is no longer static HTML; the GPS rail owner (gd-brand-icon-render.js)
-   creates it during GPS play. All lookups must be live + null-safe, and the pointer
-   handlers rebind whenever a fresh #flagTool node appears. */
-function gdFlagEl(){return document.getElementById("flagTool")}
-const ghost=document.getElementById("ghost"),dropPulse=document.getElementById("dropPulse");let draggingFlag=false,placingPin=false,flagPointerStart=null,suppressFlagClickUntil=0;
-function cancelPinPlacement(message="Pin cancelled"){
-  placingPin=false;
-  draggingFlag=false;
-  flagPointerStart=null;
-  gdFlagEl()?.classList.remove("softActive","grabbing");
-  if(ghost)ghost.style.display="none";
-  hideHint();
-  setState(mode==="aim"?"Aim":(gpsOk?"GPS ready":"Manual GPS"));
-  toast(message);
-}
-function startPinPlacement(ev){
-  if(ev){ev.preventDefault();ev.stopPropagation();}
-  if(Date.now()<suppressFlagClickUntil)return;
-  if(placingPin){cancelPinPlacement();return;}
-  placingPin=true;
-  draggingFlag=false;
-  gdFlagEl()?.classList.add("softActive");
-  gdFlagEl()?.classList.remove("grabbing");
-  if(ghost)ghost.style.display="none";
-  setState("Place pin");
-  showHint("Tap map to place the pin");
-  toast("Tap map to place pin");
-}
-function finishPinPlacement(ll){
-  placingPin=false;
-  gdFlagEl()?.classList.remove("softActive","grabbing");
-  if(ghost)ghost.style.display="none";
-  hideHint();
-  placePin(ll);
-  toast("Pin placed");
-}
-window.startPinPlacement=startPinPlacement;
-function gdBindFlagPointerHandlers(){
-  const flagEl=gdFlagEl();
-  if(!flagEl||flagEl.__gdFlagPointerBound)return;
-  flagEl.__gdFlagPointerBound=true;
-  flagEl.addEventListener("pointerdown",e=>{if(e.button&&e.button!==0)return;e.preventDefault();e.stopPropagation();flagPointerStart={x:e.clientX,y:e.clientY,id:e.pointerId};draggingFlag=false;try{flagEl.setPointerCapture(e.pointerId)}catch(_e){}});
-  flagEl.addEventListener("pointermove",e=>{if(!flagPointerStart)return;const moved=Math.hypot(e.clientX-flagPointerStart.x,e.clientY-flagPointerStart.y);if(!draggingFlag&&moved>8){draggingFlag=true;placingPin=false;flagEl.classList.add("grabbing");flagEl.classList.remove("softActive");if(ghost)ghost.style.display="block";}if(draggingFlag)moveGhost(e.clientX,e.clientY)});
-  flagEl.addEventListener("pointerup",e=>{if(!flagPointerStart)return;e.preventDefault();e.stopPropagation();const wasDragging=draggingFlag;flagPointerStart=null;draggingFlag=false;flagEl.classList.remove("grabbing");if(ghost)ghost.style.display="none";if(wasDragging){suppressFlagClickUntil=Date.now()+450;showDrop(e.clientX,e.clientY);const p=typeof gdClientToMapContainerPoint==="function"?gdClientToMapContainerPoint(e.clientX,e.clientY):null;const ll=p?map.containerPointToLatLng(p):map.containerPointToLatLng([e.clientX-document.getElementById("map").getBoundingClientRect().left,e.clientY-document.getElementById("map").getBoundingClientRect().top]);finishPinPlacement(ll);return;}startPinPlacement(e)});
-  flagEl.addEventListener("pointercancel",()=>{flagPointerStart=null;draggingFlag=false;flagEl.classList.remove("grabbing");if(ghost)ghost.style.display="none"});
-}
-window.gdBindFlagPointerHandlers=gdBindFlagPointerHandlers;
-gdBindFlagPointerHandlers();
-function moveGhost(x,y){ghost.style.left=x+"px";ghost.style.top=y+"px"}function showDrop(x,y){dropPulse.classList.remove("show");dropPulse.style.left=x+"px";dropPulse.style.top=y+"px";void dropPulse.offsetWidth;dropPulse.classList.add("show")}
+/* Flag/pin placement carved out to scripts/gd-flag-pin.js (Phase B, 2026-07-19).
+   That module loads immediately after this file and declares placingPin,
+   cancelPinPlacement, finishPinPlacement etc. in the shared global scope. */
 let gdPinDragState=null;
 const GD_PIN_LONG_PRESS_MS=650;
 const GD_PIN_LONG_PRESS_CANCEL_PX=9;
@@ -21374,1773 +21268,7 @@ function placePin(ll){undoStack.push({type:"pin",value:pin});pin=ll;if(!pinMarke
 function updatePinLine(){[pinLine,pinLabel].forEach(l=>l&&map.removeLayer(l));pinLine=pinLabel=null;const el=document.getElementById("pinDiff");if(el)el.style.display="none";if(typeof gdTournamentModeEnabled==="function"&&gdTournamentModeEnabled()){return;}const bubbleTarget=gdShotDisplayTarget();const diff=gdShotPinDiffData();if(!pin||!bubbleTarget||!diff)return;if(el){el.classList.add("tilePinMetric");el.textContent=`Pin diff ${diff.value}${diff.unit}`;el.style.display="block";}pinLine=L.polyline([bubbleTarget,pin],{color:"#fff",weight:2,opacity:.52,dashArray:"3,7"}).addTo(map)}
 
 
-function toggleGreenFinderBeta(){
-  greenFinderBeta=!greenFinderBeta;
-  const b=document.getElementById("greenFinderToggle");
-  b.textContent=greenFinderBeta?"Beta On":"Beta Off";
-  b.classList.toggle("active",greenFinderBeta);
-  document.getElementById("greenFinderSub").textContent=greenFinderBeta
-    ? `Beta · ${greenFinderSamples.length} samples saved`
-    : "Beta · saves confirmed 3m green samples";
-  toast(greenFinderBeta?"Green Finder beta on":"Green Finder beta off");
-}
-
-function confirmGreenAndClose(){
-  if(greenFinderBeta && greenCentre){
-    saveGreenFinderSample();
-  }
-  toggleGreenWand();
-}
-
-function saveGreenFinderSample(){
-  if(!greenCentre)return;
-
-  const circlePoints=[];
-  const pixelSamples=[];
-
-  // Centre + ring around a real 3m circle.
-  const centrePt=map.latLngToContainerPoint(greenCentre);
-  const centrePx=trySampleMapPixel(centrePt.x,centrePt.y);
-  if(centrePx) pixelSamples.push({offsetM:[0,0],pixel:centrePx});
-
-  const ringCount=16;
-  for(let i=0;i<ringCount;i++){
-    const a=(Math.PI*2*i)/ringCount;
-    const ll=project(greenCentre,a,GREEN_SEED_RADIUS_M);
-    circlePoints.push({lat:ll.lat,lng:ll.lng});
-    const p=map.latLngToContainerPoint(ll);
-    const px=trySampleMapPixel(p.x,p.y);
-    if(px) pixelSamples.push({
-      offsetM:[
-        Math.round(Math.sin(a)*GREEN_SEED_RADIUS_M*100)/100,
-        Math.round(Math.cos(a)*GREEN_SEED_RADIUS_M*100)/100
-      ],
-      pixel:px
-    });
-  }
-
-  const sample={
-    id:Date.now(),
-    type:"greenFinderBetaSample",
-    course:currentCourse?.name||"Manual GPS",
-    centre:{lat:greenCentre.lat,lng:greenCentre.lng},
-    radiusM:GREEN_SEED_RADIUS_M,
-    tolerance:greenTolerance,
-    contrastMode:greenContrast,
-    pixelSamples,
-    ring:circlePoints,
-    confirmedAt:new Date().toISOString()
-  };
-
-  greenFinderSamples.push(sample);
-  console.log("GREEN_FINDER_BETA_SAMPLE",sample);
-
-  const sub=document.getElementById("greenFinderSub");
-  if(sub)sub.textContent=`Beta · ${greenFinderSamples.length} samples saved`;
-  toast(`Green sample saved · ${pixelSamples.length} pixels`);
-}
-
-
-/* ---------------- Sandbox Green Wand Engine v2 (compiled from green-wand-app-ready) ---------------- */
-(function(){
-const GREEN_WAND_MODE_PRESETS = {
-    robustTonal: {
-        key: 'robustTonal',
-        label: 'Robust Tonal',
-        description: 'Balanced tonal default for most courses. Good first mode when the edge ridge is visible but not extreme.',
-        sensitivityRange: { min: 58, max: 79, preset: 68 },
-        baseBubbleSize: 61,
-        clusterPull: 100,
-        filters: { grayscale: 100, contrast: 170, brightness: 100, saturate: 40, blur: 1, invert: 0 },
-    },
-    stableHold: {
-        key: 'stableHold',
-        label: 'Stable Hold',
-        description: 'Calmer hold for when the fit is close but looks jumpy or choppy. Keeps the same tonal family with softer pull.',
-        sensitivityRange: { min: 65, max: 85, preset: 76 },
-        baseBubbleSize: 61,
-        clusterPull: 62,
-        filters: { grayscale: 100, contrast: 170, brightness: 100, saturate: 40, blur: 1, invert: 0 },
-    },
-    aggressiveRidge: {
-        key: 'aggressiveRidge',
-        label: 'Aggressive Ridge Snap',
-        description: 'For strong visible white-dot ridges. Pulls hard and reacts more aggressively to the edge line.',
-        sensitivityRange: { min: 80, max: 100, preset: 90 },
-        baseBubbleSize: 60,
-        clusterPull: 100,
-        filters: { grayscale: 100, contrast: 170, brightness: 100, saturate: 40, blur: 1, invert: 0 },
-    },
-};
-const GREEN_WAND_MODE_ORDER = [
-    'robustTonal',
-    'stableHold',
-    'aggressiveRidge',
-];
-
-function clamp(v, min, max) {
-    return Math.max(min, Math.min(max, v));
-}
-function dist(a, b) {
-    return Math.hypot(a.x - b.x, a.y - b.y);
-}
-function rgbDistance(a, b) {
-    return Math.sqrt((a.r - b.r) ** 2 + (a.g - b.g) ** 2 + (a.b - b.b) ** 2);
-}
-function luminance(p) {
-    return 0.2126 * p.r + 0.7152 * p.g + 0.0722 * p.b;
-}
-function greenishScore(p) {
-    return p.g - (p.r + p.b) * 0.5;
-}
-function percentile(values, p) {
-    if (!values.length)
-        return 0;
-    const sorted = [...values].sort((a, b) => a - b);
-    const idx = Math.min(sorted.length - 1, Math.max(0, Math.floor((sorted.length - 1) * p)));
-    return sorted[idx];
-}
-function buildFilterString(filters) {
-    return [
-        `grayscale(${filters.grayscale}%)`,
-        `contrast(${filters.contrast}%)`,
-        `brightness(${filters.brightness}%)`,
-        `saturate(${filters.saturate}%)`,
-        `blur(${filters.blur}px)`,
-        `invert(${filters.invert}%)`,
-    ].join(' ');
-}
-function sensitivityToThreshold(sensitivity) {
-    return clamp(120 - sensitivity * 1.05, 6, 120);
-}
-function samplePixel(data, width, x, y) {
-    const ix = clamp(Math.round(x), 0, width - 1);
-    const height = Math.floor(data.length / 4 / width);
-    const iy = clamp(Math.round(y), 0, height - 1);
-    const i = (iy * width + ix) * 4;
-    return { r: data[i], g: data[i + 1], b: data[i + 2], a: data[i + 3] };
-}
-function averageAround(data, width, height, x, y, radius = 4) {
-    let r = 0, g = 0, b = 0, n = 0;
-    for (let yy = -radius; yy <= radius; yy++) {
-        for (let xx = -radius; xx <= radius; xx++) {
-            const px = clamp(Math.round(x + xx), 0, width - 1);
-            const py = clamp(Math.round(y + yy), 0, height - 1);
-            const i = (py * width + px) * 4;
-            r += data[i];
-            g += data[i + 1];
-            b += data[i + 2];
-            n++;
-        }
-    }
-    return { r: r / n, g: g / n, b: b / n };
-}
-function localToneContrast(data, width, x, y) {
-    const pts = [
-        samplePixel(data, width, x, y),
-        samplePixel(data, width, x + 2, y),
-        samplePixel(data, width, x - 2, y),
-        samplePixel(data, width, x, y + 2),
-        samplePixel(data, width, x, y - 2),
-        samplePixel(data, width, x + 2, y + 2),
-        samplePixel(data, width, x - 2, y - 2),
-    ].map(luminance);
-    return Math.max(...pts) - Math.min(...pts);
-}
-function centroid(points) {
-    if (!points.length)
-        return { x: 0, y: 0 };
-    return points.reduce((acc, p) => ({ x: acc.x + p.x / points.length, y: acc.y + p.y / points.length }), { x: 0, y: 0 });
-}
-function averageRadius(points, c) {
-    if (!points.length)
-        return 0;
-    return points.reduce((sum, p) => sum + dist(p, c), 0) / points.length;
-}
-function polygonPath(points) {
-    if (!points.length)
-        return '';
-    return points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ') + ' Z';
-}
-function smoothPoints(points, passes = 3) {
-    if (!points.length)
-        return [];
-    let out = points.map((p) => ({ ...p }));
-    for (let pass = 0; pass < passes; pass++) {
-        out = out.map((p, i) => {
-            const prev = out[(i - 1 + out.length) % out.length];
-            const next = out[(i + 1) % out.length];
-            return {
-                ...p,
-                x: p.x * 0.45 + prev.x * 0.275 + next.x * 0.275,
-                y: p.y * 0.45 + prev.y * 0.275 + next.y * 0.275,
-            };
-        });
-    }
-    return out;
-}
-function finalSmoothPoints(points, passes = 8) {
-    if (!points.length)
-        return [];
-    let out = points.map((p) => ({ ...p }));
-    for (let pass = 0; pass < passes; pass++) {
-        out = out.map((p, i) => {
-            const prev2 = out[(i - 2 + out.length) % out.length];
-            const prev1 = out[(i - 1 + out.length) % out.length];
-            const next1 = out[(i + 1) % out.length];
-            const next2 = out[(i + 2) % out.length];
-            return {
-                ...p,
-                x: p.x * 0.34 + prev1.x * 0.22 + next1.x * 0.22 + prev2.x * 0.11 + next2.x * 0.11,
-                y: p.y * 0.34 + prev1.y * 0.22 + next1.y * 0.22 + prev2.y * 0.11 + next2.y * 0.11,
-            };
-        });
-    }
-    return out;
-}
-function addNeighbourSupport(candidates, baseBubbleSize = 61) {
-    const scale = clamp((Number(baseBubbleSize) || 61) / 61, 0.75, 3.2);
-    const radiusTolerance = 18 * scale;
-    return candidates.map((c, i, arr) => {
-        let support = 0;
-        for (let offset = 1; offset <= 2; offset++) {
-            const left = arr[(i - offset + arr.length) % arr.length];
-            const right = arr[(i + offset) % arr.length];
-            const leftClose = Math.max(0, 1 - Math.abs(left.radius - c.radius) / radiusTolerance);
-            const rightClose = Math.max(0, 1 - Math.abs(right.radius - c.radius) / radiusTolerance);
-            support += (leftClose + rightClose) * (offset === 1 ? 1.45 : 0.95);
-        }
-        return { ...c, support, totalScore: c.rawScore + support * 20 };
-    });
-}
-function findRuns(mask, value) {
-    const n = mask.length;
-    if (!n)
-        return [];
-    const allSame = mask.every((v) => v === value);
-    if (allSame)
-        return value ? [{ start: 0, end: n - 1, length: n }] : [];
-    const anchor = mask.findIndex((v) => v !== value);
-    const runs = [];
-    let current = null;
-    for (let step = 1; step <= n; step++) {
-        const idx = (anchor + step) % n;
-        if (mask[idx] === value) {
-            if (!current)
-                current = { start: idx, end: idx, length: 1 };
-            else {
-                current.end = idx;
-                current.length += 1;
-            }
-        }
-        else if (current) {
-            runs.push(current);
-            current = null;
-        }
-    }
-    if (current)
-        runs.push(current);
-    return runs;
-}
-function chainRadiusSmoothEnough(candidates, indices, maxStep) {
-    for (let i = 1; i < indices.length; i++) {
-        if (Math.abs(candidates[indices[i]].radius - candidates[indices[i - 1]].radius) > maxStep)
-            return false;
-    }
-    return true;
-}
-function nearestAccepted(mask, index, direction, maxLook) {
-    const n = mask.length;
-    for (let step = 1; step <= maxLook; step++) {
-        const idx = (index + direction * step + n) % n;
-        if (mask[idx])
-            return idx;
-    }
-    return -1;
-}
-function findTonalEdgeCandidates({ imageData, width, height, seed, sensitivity, baseBubbleSize = 61, }) {
-    const data = imageData.data;
-    const safeSeed = { x: clamp(seed.x, 1, width - 2), y: clamp(seed.y, 1, height - 2) };
-    const threshold = sensitivityToThreshold(sensitivity);
-    const probeCount = 144;
-    const probes = [];
-    const candidates = [];
-    const scale = clamp((Number(baseBubbleSize) || 61) / 61, 0.75, 3.2);
-    const startR = Math.max(10, 10 * scale);
-    const stepR = Math.max(3, 3 * Math.min(scale, 2.2));
-    const innerAcceptR = Math.max(16, 16 * scale);
-    const aheadStep = Math.max(3, 3 * Math.min(scale, 2.2));
-    const outwardBiasR = Math.max(75, 75 * scale);
-    const maxR = Math.min(Math.min(width, height) * 0.43, Math.max((Number(baseBubbleSize)||61) * 2.35, innerAcceptR * 2.1));
-    const seedTone = luminance(averageAround(data, width, height, safeSeed.x, safeSeed.y, Math.max(4, 6 * Math.min(scale, 1.8))));
-    for (let i = 0; i < probeCount; i++) {
-        const angle = (Math.PI * 2 * i) / probeCount;
-        let prevLuma = seedTone;
-        let best = null;
-        let lastPoint = { x: safeSeed.x, y: safeSeed.y };
-        for (let r = startR; r <= maxR; r += stepR) {
-            const x = safeSeed.x + Math.cos(angle) * r;
-            const y = safeSeed.y + Math.sin(angle) * r;
-            if (x < 2 || y < 2 || x > width - 3 || y > height - 3)
-                break;
-            const px = samplePixel(data, width, x, y);
-            const nowLuma = luminance(px);
-            const toneJump = Math.abs(nowLuma - prevLuma);
-            const localContrast = localToneContrast(data, width, x, y);
-            const ahead1 = luminance(samplePixel(data, width, safeSeed.x + Math.cos(angle) * (r + aheadStep), safeSeed.y + Math.sin(angle) * (r + aheadStep)));
-            const ahead2 = luminance(samplePixel(data, width, safeSeed.x + Math.cos(angle) * (r + aheadStep * 2), safeSeed.y + Math.sin(angle) * (r + aheadStep * 2)));
-            const persistence = (Math.abs(ahead1 - nowLuma) + Math.abs(ahead2 - ahead1)) * 0.5;
-            const centreDrift = Math.abs(nowLuma - seedTone);
-            const outwardBias = 0.65 + Math.min(1, r / outwardBiasR) * 0.35;
-            const rawScore = (toneJump * 1.9 + localContrast * 0.85 + persistence * 1.15 + centreDrift * 0.35) * outwardBias;
-            const candidate = {
-                x,
-                y,
-                angle,
-                radius: r,
-                rawScore,
-                toneJump,
-                localContrast,
-                persistence,
-                centreDrift,
-                soft: rawScore < threshold,
-            };
-            if (!best || rawScore > best.rawScore)
-                best = candidate;
-            if (rawScore > threshold && r > innerAcceptR) {
-                const earlyHit = { ...candidate, soft: false };
-                if (!best || earlyHit.rawScore > best.rawScore * 0.9)
-                    best = earlyHit;
-                break;
-            }
-            prevLuma = nowLuma;
-            lastPoint = { x, y };
-        }
-        const chosen = best ||
-            {
-                x: lastPoint.x,
-                y: lastPoint.y,
-                angle,
-                radius: dist(lastPoint, safeSeed),
-                rawScore: 0,
-                toneJump: 0,
-                localContrast: 0,
-                persistence: 0,
-                centreDrift: 0,
-                soft: true,
-            };
-        candidates.push(chosen);
-        probes.push({ x1: safeSeed.x, y1: safeSeed.y, x2: chosen.x, y2: chosen.y, hit: !chosen.soft });
-    }
-    return { candidates, probes };
-}
-function buildContinuitySelection(candidates) {
-    const scores = candidates.map((c) => c.totalScore || 0);
-    const strongCut = percentile(scores, 0.48);
-    const softCut = percentile(scores, 0.3);
-    const n = candidates.length;
-    let mask = candidates.map((c) => (c.totalScore || 0) >= strongCut && (c.support || 0) >= 0.85);
-    const expanded = [...mask];
-    for (let i = 0; i < n; i++) {
-        if (expanded[i])
-            continue;
-        const c = candidates[i];
-        if ((c.totalScore || 0) < softCut || (c.support || 0) < 0.45)
-            continue;
-        const left = nearestAccepted(expanded, i, -1, 3);
-        const right = nearestAccepted(expanded, i, 1, 3);
-        if (left !== -1 && right !== -1) {
-            const local = [left, i, right];
-            if (chainRadiusSmoothEnough(candidates, local, 22) && Math.abs(candidates[left].radius - candidates[right].radius) <= 26) {
-                expanded[i] = true;
-            }
-        }
-    }
-    const bridged = [...expanded];
-    const falseRuns = findRuns(bridged, false);
-    for (const run of falseRuns) {
-        if (run.length > 3)
-            continue;
-        const prev = (run.start - 1 + n) % n;
-        const next = (run.end + 1) % n;
-        if (!bridged[prev] || !bridged[next])
-            continue;
-        const gapIndices = [];
-        for (let step = 0; step < run.length; step++)
-            gapIndices.push((run.start + step) % n);
-        const avgGapScore = gapIndices.reduce((sum, idx) => sum + (candidates[idx].totalScore || 0), 0) / gapIndices.length;
-        const test = [prev, ...gapIndices, next];
-        const smoothEnough = chainRadiusSmoothEnough(candidates, test, 24);
-        const endpointClose = Math.abs(candidates[prev].radius - candidates[next].radius) <= 28;
-        if (avgGapScore >= softCut * 0.82 && smoothEnough && endpointClose) {
-            gapIndices.forEach((idx) => {
-                bridged[idx] = true;
-            });
-        }
-    }
-    const chains = findRuns(bridged, true)
-        .map((run) => {
-        const indices = [];
-        for (let step = 0; step < run.length; step++)
-            indices.push((run.start + step) % n);
-        const avgScore = indices.reduce((sum, idx) => sum + (candidates[idx].totalScore || 0), 0) / indices.length;
-        const radiusSteps = indices.slice(1).map((idx, k) => Math.abs(candidates[idx].radius - candidates[indices[k]].radius));
-        const avgStep = radiusSteps.length ? radiusSteps.reduce((a, b) => a + b, 0) / radiusSteps.length : 0;
-        const continuityBonus = Math.max(0, 18 - avgStep);
-        return { indices, score: indices.length * 8 + avgScore + continuityBonus * 4 };
-    })
-        .sort((a, b) => b.score - a.score);
-    const best = chains[0] || { indices: [] };
-    return { acceptedIndices: new Set(best.indices), chains, bestLength: best.indices.length || 0 };
-}
-function buildRidgeLines(candidates, acceptedIndices) {
-    const n = candidates.length;
-    const acceptedMask = candidates.map((_, i) => acceptedIndices.has(i));
-    const scores = candidates.map((c) => c.totalScore || 0);
-    const strongCut = percentile(scores, 0.34);
-    const softCut = percentile(scores, 0.22);
-    const mask = candidates.map((c, i) => acceptedMask[i] || ((c.totalScore || 0) >= strongCut && (c.support || 0) >= 0.75));
-    for (let i = 0; i < n; i++) {
-        if (mask[i])
-            continue;
-        const c = candidates[i];
-        if ((c.totalScore || 0) < softCut || (c.support || 0) < 0.4)
-            continue;
-        const left = mask[(i - 1 + n) % n] || mask[(i - 2 + n) % n];
-        const right = mask[(i + 1) % n] || mask[(i + 2) % n];
-        if (left && right)
-            mask[i] = true;
-    }
-    const falseRuns = findRuns(mask, false);
-    for (const run of falseRuns) {
-        if (run.length > 2)
-            continue;
-        const prev = (run.start - 1 + n) % n;
-        const next = (run.end + 1) % n;
-        if (!mask[prev] || !mask[next])
-            continue;
-        for (let step = 0; step < run.length; step++) {
-            const idx = (run.start + step) % n;
-            if ((candidates[idx].totalScore || 0) >= softCut * 0.85)
-                mask[idx] = true;
-        }
-    }
-    return findRuns(mask, true)
-        .map((run) => {
-        const indices = [];
-        for (let step = 0; step < run.length; step++)
-            indices.push((run.start + step) % n);
-        const points = indices.map((idx) => ({
-            ...candidates[idx],
-            score: candidates[idx].totalScore || 0,
-            support: candidates[idx].support || 0,
-        }));
-        const avgScore = points.reduce((sum, p) => sum + p.score, 0) / Math.max(1, points.length);
-        const peakScore = points.reduce((m, p) => Math.max(m, p.score), 0);
-        return { indices, points, length: indices.length, avgScore, peakScore };
-    })
-        .filter((line) => line.length >= 4);
-}
-function buildRidgeSnapProfile(candidates, ridgeLines, baseBubbleSize) {
-    const n = candidates.length;
-    const snapRadius = new Array(n).fill(baseBubbleSize);
-    const snapStrength = new Array(n).fill(0);
-    const accumRadius = new Array(n).fill(0);
-    const accumWeight = new Array(n).fill(0);
-    function circularDistance(a, b) {
-        const d = Math.abs(a - b);
-        return Math.min(d, n - d);
-    }
-    for (const line of ridgeLines) {
-        const lineStrength = clamp(line.length / 7, 0.7, 2.6) * clamp(line.avgScore / 120, 0.75, 2.4) * clamp(line.peakScore / 150, 0.8, 2.0);
-        for (let target = 0; target < n; target++) {
-            let bestLocalWeight = 0;
-            let bestLocalRadius = baseBubbleSize;
-            for (const idx of line.indices) {
-                const steps = circularDistance(target, idx);
-                if (steps > 12)
-                    continue;
-                const angularWeight = Math.exp(-(steps * steps) / (2 * 3.8 * 3.8));
-                const candidateWeight = angularWeight * lineStrength;
-                accumRadius[target] += candidates[idx].radius * candidateWeight;
-                accumWeight[target] += candidateWeight;
-                if (candidateWeight > bestLocalWeight) {
-                    bestLocalWeight = candidateWeight;
-                    bestLocalRadius = candidates[idx].radius;
-                }
-            }
-            if (bestLocalWeight > snapStrength[target]) {
-                snapStrength[target] = bestLocalWeight;
-                snapRadius[target] = bestLocalRadius;
-            }
-        }
-    }
-    for (let i = 0; i < n; i++) {
-        if (accumWeight[i] > 0) {
-            const averaged = accumRadius[i] / accumWeight[i];
-            snapRadius[i] = snapRadius[i] * 0.58 + averaged * 0.42;
-        }
-    }
-    return { snapRadius, snapStrength };
-}
-function buildHealthyBubble({ candidates, acceptedIndices, ridgeLines, seed, baseBubbleSize, clusterPull, }) {
-    const n = candidates.length;
-    if (!n)
-        return { bubble: [] };
-    const acceptedMask = candidates.map((_, i) => acceptedIndices.has(i));
-    const accepted = candidates.filter((_, i) => acceptedMask[i]);
-    const acceptedScores = accepted.map((c) => c.totalScore || 0);
-    const strongCut = acceptedScores.length ? percentile(acceptedScores, 0.45) : 0;
-    const pullRatio = clusterPull / 100;
-    const minRadius = baseBubbleSize * 0.38;
-    const maxRadius = baseBubbleSize * 2.05;
-    const maxOffset = Math.max(38, baseBubbleSize * 1.05);
-    const ridgeProfile = buildRidgeSnapProfile(candidates, ridgeLines, baseBubbleSize);
-    function circularDistance(a, b) {
-        const d = Math.abs(a - b);
-        return Math.min(d, n - d);
-    }
-    const bubble = [];
-    for (let i = 0; i < n; i++) {
-        let targetRadius = baseBubbleSize;
-        const ridgeStrength = clamp(ridgeProfile.snapStrength[i], 0, 4.5);
-        if (ridgeStrength > 0) {
-            const ridgeBlend = clamp(0.36 + pullRatio * 0.44 + ridgeStrength * 0.08, 0.36, 1.0);
-            targetRadius = targetRadius * (1 - ridgeBlend) + ridgeProfile.snapRadius[i] * ridgeBlend;
-        }
-        let weightedPull = 0;
-        let totalWeight = 0;
-        for (let j = 0; j < n; j++) {
-            if (!acceptedMask[j])
-                continue;
-            const c = candidates[j];
-            const steps = circularDistance(i, j);
-            if (steps > 10)
-                continue;
-            const angularWeight = Math.exp(-(steps * steps) / (2 * 4.0 * 4.0));
-            const scoreNorm = strongCut > 0 ? clamp((c.totalScore || 0) / strongCut, 0.8, 2.5) : 1;
-            const weight = angularWeight * scoreNorm;
-            weightedPull += (c.radius - targetRadius) * weight;
-            totalWeight += weight;
-        }
-        if (totalWeight > 0) {
-            const avgPull = weightedPull / totalWeight;
-            const localConfidence = clamp(totalWeight / 1.6, 0, 1.8);
-            targetRadius += avgPull * (0.2 + pullRatio * 0.4) * localConfidence;
-        }
-        if (acceptedMask[i]) {
-            const c = candidates[i];
-            const directStrength = strongCut > 0 ? clamp((c.totalScore || 0) / strongCut, 0.75, 2.1) : 1;
-            const directBlend = clamp(0.52 + pullRatio * 0.3 + (directStrength - 0.75) * 0.16, 0.52, 0.98);
-            targetRadius = targetRadius * (1 - directBlend) + c.radius * directBlend;
-        }
-        const delta = clamp(targetRadius - baseBubbleSize, -maxOffset, maxOffset);
-        targetRadius = clamp(baseBubbleSize + delta, minRadius, maxRadius);
-        const angle = candidates[i].angle;
-        bubble.push({ x: seed.x + Math.cos(angle) * targetRadius, y: seed.y + Math.sin(angle) * targetRadius, radius: targetRadius });
-    }
-    let fitted = smoothPoints(bubble, 1);
-    fitted = finalSmoothPoints(fitted, 1);
-    return { bubble: fitted };
-}
-function offsetContour(points, amount) {
-    if (!points.length)
-        return [];
-    const c = centroid(points);
-    return points.map((p) => {
-        const vx = p.x - c.x;
-        const vy = p.y - c.y;
-        const len = Math.max(1, Math.hypot(vx, vy));
-        return { x: p.x + (vx / len) * amount, y: p.y + (vy / len) * amount };
-    });
-}
-function buildOuterShell(contour) {
-    const c = centroid(contour);
-    const avgR = averageRadius(contour, c);
-    const shellExpand = clamp(avgR * 0.008, 0.5, 2.25);
-    let shell = smoothPoints(contour, 3);
-    shell = offsetContour(shell, shellExpand);
-    shell = finalSmoothPoints(shell, 3);
-    return { shell };
-}
-function buildInsetGreen(shell, originalImageData, width, height) {
-    if (!shell.length)
-        return { inset: [], avgInset: 0, avgGreenDelta: 0 };
-    const data = originalImageData.data;
-    const c = centroid(shell);
-    const avgR = averageRadius(shell, c);
-    const baseInset = clamp(avgR * 0.04, 4, 10);
-    let greenDeltaTotal = 0;
-    const inset = shell.map((p) => {
-        const vx = p.x - c.x;
-        const vy = p.y - c.y;
-        const len = Math.max(1, Math.hypot(vx, vy));
-        const nx = vx / len;
-        const ny = vy / len;
-        const inside = averageAround(data, width, height, p.x - nx * 8, p.y - ny * 8, 3);
-        const outside = averageAround(data, width, height, p.x + nx * 8, p.y + ny * 8, 3);
-        const greenDelta = greenishScore(inside) - greenishScore(outside);
-        greenDeltaTotal += greenDelta;
-        const extraInset = clamp((2 - greenDelta) * 0.25, 0, 4);
-        const move = baseInset + extraInset;
-        return { x: p.x - nx * move, y: p.y - ny * move, move };
-    });
-    const avgInset = inset.reduce((sum, p) => sum + p.move, 0) / inset.length;
-    const finalInset = finalSmoothPoints(inset.map((p) => ({ x: p.x, y: p.y })), 4);
-    return { inset: finalInset, avgInset, avgGreenDelta: greenDeltaTotal / inset.length };
-}
-function compareInsideOutside({ imageData, width, points }) {
-    if (!points.length)
-        return null;
-    const data = imageData.data;
-    const c = centroid(points);
-    const inside = [];
-    const outside = [];
-    for (let i = 0; i < points.length; i += 4) {
-        const p = points[i];
-        const vx = p.x - c.x;
-        const vy = p.y - c.y;
-        const len = Math.max(1, Math.hypot(vx, vy));
-        const nx = vx / len;
-        const ny = vy / len;
-        inside.push(samplePixel(data, width, p.x - nx * 13, p.y - ny * 13));
-        outside.push(samplePixel(data, width, p.x + nx * 13, p.y + ny * 13));
-    }
-    const avg = (arr) => arr.reduce((a, p) => ({ r: a.r + p.r / arr.length, g: a.g + p.g / arr.length, b: a.b + p.b / arr.length }), { r: 0, g: 0, b: 0 });
-    const ai = avg(inside);
-    const ao = avg(outside);
-    const difference = rgbDistance(ai, ao);
-    return { difference, verdict: difference > 26 ? 'Strong edge' : difference > 15 ? 'Possible edge' : 'Weak edge' };
-}
-function toCanvasImageSource(image) {
-    return image;
-}
-async function analyzeGreenWand(image, width, height, options) {
-    const baseCanvas = document.createElement('canvas');
-    baseCanvas.width = width;
-    baseCanvas.height = height;
-    const baseCtx = baseCanvas.getContext('2d', { willReadFrequently: true });
-    if (!baseCtx)
-        throw new Error('Could not create analysis canvas context.');
-    baseCtx.clearRect(0, 0, width, height);
-    baseCtx.filter = 'none';
-    baseCtx.drawImage(toCanvasImageSource(image), 0, 0, width, height);
-    const originalImageData = baseCtx.getImageData(0, 0, width, height);
-    const filteredCanvas = document.createElement('canvas');
-    filteredCanvas.width = width;
-    filteredCanvas.height = height;
-    const filteredCtx = filteredCanvas.getContext('2d', { willReadFrequently: true });
-    if (!filteredCtx)
-        throw new Error('Could not create filtered canvas context.');
-    filteredCtx.clearRect(0, 0, width, height);
-    filteredCtx.filter = buildFilterString(options.filters);
-    filteredCtx.drawImage(toCanvasImageSource(image), 0, 0, width, height);
-    filteredCtx.filter = 'none';
-    const filteredImageData = filteredCtx.getImageData(0, 0, width, height);
-    const raw = findTonalEdgeCandidates({
-        imageData: filteredImageData,
-        width,
-        height,
-        seed: options.seed,
-        sensitivity: options.sensitivity,
-        baseBubbleSize: options.baseBubbleSize || 61,
-    });
-    const supported = addNeighbourSupport(raw.candidates, options.baseBubbleSize || 61);
-    const selection = buildContinuitySelection(supported);
-    const accepted = supported.filter((_, i) => selection.acceptedIndices.has(i));
-    const ridgeLines = buildRidgeLines(supported, selection.acceptedIndices);
-    const bubbleFit = buildHealthyBubble({
-        candidates: supported,
-        acceptedIndices: selection.acceptedIndices,
-        ridgeLines,
-        seed: options.seed,
-        baseBubbleSize: options.baseBubbleSize,
-        clusterPull: options.clusterPull,
-    });
-    const { shell } = buildOuterShell(bubbleFit.bubble);
-    const insetResult = buildInsetGreen(shell, originalImageData, width, height);
-    const insetGreen = insetResult.inset;
-    const miniLines = ridgeLines.map((line) => line.points.map((p) => ({ x: p.x, y: p.y })));
-    const comparison = compareInsideOutside({ imageData: originalImageData, width, points: insetGreen });
-    return {
-        probes: raw.probes,
-        candidates: supported,
-        accepted,
-        ridgeLines,
-        miniLines,
-        bubble: bubbleFit.bubble,
-        outerShell: shell,
-        insetGreen,
-        metrics: {
-            edgeDots: supported.length,
-            acceptedDots: accepted.length,
-            bestChain: selection.bestLength,
-            ridgeLineCount: ridgeLines.length,
-            ridgeCoverage: ridgeLines.reduce((sum, line) => sum + line.length, 0),
-            difference: (comparison === null || comparison === void 0 ? void 0 : comparison.difference) || 0,
-            greenDelta: insetResult.avgGreenDelta,
-            verdict: (comparison === null || comparison === void 0 ? void 0 : comparison.verdict) || '—',
-        },
-    };
-}
-function getModeDefaults(mode) {
-    return GREEN_WAND_MODE_PRESETS[mode];
-}
-
-window.GolfDaddyGreenWandEngine={
-  GREEN_WAND_MODE_PRESETS,
-  GREEN_WAND_MODE_ORDER,
-  buildFilterString,
-  polygonPath,
-  analyzeGreenWand,
-  getModeDefaults
-};
-window.ClarityCaddieGreenWandEngine=window.GolfDaddyGreenWandEngine;
-})();
-
-/* ---------------- Green wand hybrid: sandbox brain + core shell ---------------- */
-let wandMode="robustTonal";
-let lastWandResult=null;
-let wandHandleMarkers=[];
-let wandScaleLock=null; // frozen metres-per-pixel snapshot for the current locked frame / Wand session
-
-// Real-world Wand expansion tuning. Keep scan distance in metres, then convert to screen pixels per current map zoom.
-const WAND_SANDBOX_BASE_MPP = 0.238; // live GPS scale where the sandbox 61px bubble looked correct (~14.5m radius)
-let wandBaseBubbleSizeOverride=null;
-let wandBaseBubbleMetersOverride=null; // sandbox px, then meter-normalised into current locked frame
-let wandClusterPullOverride=null;
-let wandDebugLayers=[];
-
-const WAND_EXPANSION_TUNING = {
-  // Keep the sandbox architecture: healthy bubble first, probes/dots/ridges pull it into shape.
-  // GPS only converts sandbox pixels into live metres. No flood expansion and no size-slider sensitivity.
-  robustTonal: { clusterPullScale: 1.00 },
-  stableHold: { clusterPullScale: 1.00 },
-  aggressiveRidge: { clusterPullScale: 1.00 }
-};
-
-function getMapMetersPerPixelAt(latlng){
-  try{
-    const p=map.latLngToContainerPoint(latlng);
-    const a=map.containerPointToLatLng([p.x-1,p.y]);
-    const b=map.containerPointToLatLng([p.x+1,p.y]);
-    const m=map.distance(a,b)/2;
-    return Math.max(0.05, Math.min(5, m||0.35));
-  }catch(e){
-    return 0.35;
-  }
-}
-
-function clearWandScaleLock(reason){
-  wandScaleLock=null;
-  if(reason) console.debug && console.debug('[Clarity Caddy Wand] scale lock cleared:', reason);
-}
-
-function captureWandScaleLock(reason,frameScale){
-  const centre=greenCentre || target || map.getCenter();
-  const zoom=Number.isFinite(Number(frameScale?.zoom)) ? Number(frameScale.zoom) : (typeof map.getZoom==='function' ? map.getZoom() : null);
-  const mpp=Number.isFinite(Number(frameScale?.metersPerPixel)) ? Number(frameScale.metersPerPixel) : getMapMetersPerPixelAt(centre);
-  const size=map.getSize ? map.getSize() : {x:0,y:0};
-  const source=String(frameScale?.source||'map-container');
-  const sourceCentre=frameScale?.centre||centre;
-  wandScaleLock={
-    metersPerPixel:mpp,
-    centre:{lat:sourceCentre.lat,lng:sourceCentre.lng},
-    zoom,
-    viewport:{x:size.x,y:size.y},
-    source,
-    lockedFrame:!!lockedFrame,
-    createdAt:Date.now(),
-    reason:reason||'wand-open'
-  };
-  return wandScaleLock;
-}
-
-function getWandScaleLock(frameScale){
-  const zoom=typeof map.getZoom==='function' ? map.getZoom() : null;
-  const size=map.getSize ? map.getSize() : {x:0,y:0};
-  const frameMpp=Number(frameScale?.metersPerPixel);
-  const frameZoom=Number(frameScale?.zoom);
-  const frameSource=String(frameScale?.source||'');
-
-  if(Number.isFinite(frameMpp)&&frameMpp>0&&Number.isFinite(frameZoom)){
-    if(wandScaleLock){
-      const viewportChanged=Math.abs((wandScaleLock.viewport?.x||0)-size.x)>2 || Math.abs((wandScaleLock.viewport?.y||0)-size.y)>2;
-      const sameFrame=wandScaleLock.source===frameSource && Math.abs(Number(wandScaleLock.zoom)-frameZoom)<0.001 && Math.abs(Number(wandScaleLock.metersPerPixel)-frameMpp)<0.001;
-      if(sameFrame && !viewportChanged) return wandScaleLock;
-    }
-    return captureWandScaleLock(wandScaleLock?'tile-scale-refresh':'tile-scale-init',{
-      metersPerPixel:frameMpp,
-      zoom:frameZoom,
-      source:frameSource||'tile-crop',
-      centre:frameScale?.centre
-    });
-  }
-
-  // The Wand should not recalculate scale during scan/probe growth. Once a locked
-  // frame exists, freeze metres-per-pixel for the whole Wand session. This stops
-  // detected meterage from jumping around as the live GPS dot/bubble/green centre moves.
-  if(wandScaleLock){
-    const zoomChanged=wandScaleLock.zoom!==zoom;
-    const viewportChanged=Math.abs((wandScaleLock.viewport?.x||0)-size.x)>2 || Math.abs((wandScaleLock.viewport?.y||0)-size.y)>2;
-    if(!zoomChanged && !viewportChanged) return wandScaleLock;
-  }
-  return captureWandScaleLock(wandScaleLock?'scale-refresh':'scale-init');
-}
-
-function getExpandedWandOptions(preset,built){
-  const t=WAND_EXPANSION_TUNING[wandMode] || WAND_EXPANSION_TUNING.robustTonal;
-  const scale=getWandScaleLock(built&&Number.isFinite(Number(built.metersPerPixel))?{
-    metersPerPixel:Number(built.metersPerPixel),
-    zoom:Number(built.tileZoom),
-    source:built.coordinateFrame,
-    centre:built.centreLatLng
-  }:null);
-  const mpp=scale.metersPerPixel;
-
-  const defaultMeters=sandboxPxToHealthyBubbleMeters(preset.baseBubbleSize || 61);
-  const baseBubbleMeters=Number(wandBaseBubbleMetersOverride ?? defaultMeters);
-  const baseBubbleSizePx=Math.max(24, Math.min(320, baseBubbleMeters / Math.max(0.05, mpp)));
-  const pull=Number(wandClusterPullOverride ?? preset.clusterPull ?? 100);
-
-  return {
-    metersPerPixel:mpp,
-    scaleLocked:true,
-    scaleLock:scale,
-    sandboxPresetPx:Number(preset.baseBubbleSize || 61),
-    sandboxBasePx:baseBubbleSizePx,
-    baseBubbleMeters,
-    baseBubbleSizePx,
-    clusterPull:Math.max(0, Math.min(140, pull * (t.clusterPullScale || 1)))
-  };
-}
-
-function normalizeSandboxWandShell(outline, seed, expanded){
-  // Sandbox contract:
-  // - probes may travel and find white candidate dots;
-  // - accepted dots/ridge lines may magnet-pull the healthy bubble;
-  // - final shell remains clamped inside buildHealthyBubble around the base bubble.
-  //
-  // Do not resize the output here and do not convert long probe travel into green size.
-  // GPS only meter-normalises the healthy base bubble before the sandbox engine runs.
-  return outline;
-}
-
-
-
-function healthyBubbleMetersToSandboxPx(meters){
-  const mpp = (wandScaleLock && Number(wandScaleLock.metersPerPixel)) || getWandScaleLock().metersPerPixel || WAND_SANDBOX_BASE_MPP;
-  return Math.max(24, Math.min(320, (Number(meters)||13) / Math.max(0.05, mpp)));
-}
-function sandboxPxToHealthyBubbleMeters(px){
-  // Convert sandbox preset pixels to a real-world healthy bubble size using the sandbox reference scale.
-  // This keeps mode defaults stable, then GPS converts metres back into current-frame pixels.
-  return Math.max(6, Math.min(30, (Number(px)||61) * WAND_SANDBOX_BASE_MPP));
-}
-
-function currentWandPreset(){
-  const engine=window.GolfDaddyGreenWandEngine;
-  const base = engine?.GREEN_WAND_MODE_PRESETS?.robustTonal || {
-    key:"robustTonal",label:"Robust Tonal",sensitivityRange:{min:58,max:79,preset:68},baseBubbleSize:61,clusterPull:100,
-    filters:{grayscale:100,contrast:170,brightness:100,saturate:40,blur:1,invert:0}
-  };
-  return {
-    ...base,
-    key:"robustTonal",
-    label:"Robust Tonal",
-    sensitivityRange:{min:58,max:79,preset:71},
-    // Do not rely on this for GPS size. setWandMode uses the metres override below.
-    baseBubbleSize:base.baseBubbleSize || 61,
-    clusterPull:60
-  };
-}
-
-function toggleGreenWand(){
-  if(!target && !greenCentre){toast("Set green target first");return;}
-  greenActive=!greenActive;
-  const panel=document.getElementById("gdWandPanel");
-  if(panel)panel.classList.toggle("hidden",!greenActive);
-  if(greenActive){
-    establishGreenFromBubble();
-    captureWandScaleLock("wand-open");
-    setWandMode(wandMode || "robustTonal", false);
-    const lockedTxt=wandScaleLock ? ` · scale locked ${wandScaleLock.metersPerPixel.toFixed(2)}m/px` : "";
-    updateWandStatus("Ready · sandbox scan if pixels allow"+lockedTxt);
-  }else{
-    clearWandHandles();
-    clearWandScaleLock("wand-close");
-  }
-}
-
-function closeWandPanel(){
-  greenActive=false;
-  const panel=document.getElementById("gdWandPanel");
-  if(panel)panel.classList.add("hidden");
-  clearWandHandles();
-  clearWandScaleLock("wand-close");
-}
-
-
-try{
-  if(map && typeof map.on==="function"){
-    map.on("zoomstart resize",()=>clearWandScaleLock("map-scale-change"));
-  }
-}catch(e){}
-
-
-
-let gdWandControlRescanTimer=null;
-function gdRequestWandControlRescan(){
-  try{
-    clearTimeout(gdWandControlRescanTimer);
-    gdWandControlRescanTimer=setTimeout(()=>{
-      try{
-        if(typeof establishGreenFromBubble==="function") establishGreenFromBubble();
-        const hasGreenTarget=!!(greenCentre || target);
-        const hasOutline=!!(lastWandResult || (greenPolygon && greenPolygon.length));
-        if(typeof scanGreen==="function" && hasGreenTarget && (greenActive || hasOutline)){
-          scanGreen();
-          return;
-        }
-        if(typeof renderShot==="function") renderShot();
-      }catch(e){}
-    },120);
-  }catch(e){}
-}
-
-function gdMarkWandCalibrationLive(statusText){
-  try{ if(typeof gdMarkGreenWandCalibrationDirty==="function") gdMarkGreenWandCalibrationDirty(); }catch(e){}
-  const save=document.getElementById("gdCalibrationSaveBtn");
-  const scan=document.getElementById("gdWandScanBtn");
-  const hint=document.getElementById("gdWandUserHint");
-  if(save) save.textContent="Save Live Calibration";
-  if(scan) scan.textContent="Live Scan";
-  if(hint) hint.textContent="Live previewing. Save to keep these settings.";
-  if(statusText) updateWandStatus(statusText);
-  gdRequestWandControlRescan();
-}
-
-function setWandBaseBubble(value){
-  wandBaseBubbleMetersOverride=Math.max(6,Math.min(30,Number(value)||13));
-  const out=document.getElementById("gdWandBaseBubbleOut");
-  if(out) out.textContent=wandBaseBubbleMetersOverride.toFixed(wandBaseBubbleMetersOverride%1?1:0)+"m";
-  gdMarkWandCalibrationLive(`Live preview · size ${wandBaseBubbleMetersOverride.toFixed(1)}m`);
-}
-
-function setWandClusterPull(value){
-  wandClusterPullOverride=Math.round(Number(value)||0);
-  const el=document.getElementById("gdWandClusterPull");
-  const out=document.getElementById("gdWandClusterPullOut");
-  if(el)el.value=wandClusterPullOverride;
-  if(out)out.textContent=wandClusterPullOverride+"%";
-  gdMarkWandCalibrationLive(`Live preview · curve ${wandClusterPullOverride}%`);
-}
-
-function clearWandDebugLayers(){
-  try{wandDebugLayers.forEach(l=>{try{map.removeLayer(l)}catch(e){}});}catch(e){}
-  wandDebugLayers=[];
-}
-
-function addWandDebugLayer(layer){
-  try{layer.addTo(map); wandDebugLayers.push(layer);}catch(e){}
-}
-
-function pointToLatLngSafe(p,built){
-  try{
-    if(built && typeof built.toLatLng==="function") return built.toLatLng(p);
-    return map.containerPointToLatLng([p.x,p.y]);
-  }catch(e){return null;}
-}
-
-function gdWandDebugOverlayEnabled(){
-  try{
-    if(typeof dev==="function") return Number(dev("wand.debugOverlay")) >= 1;
-  }catch(e){}
-  try{return localStorage.getItem("gd_wand_debug_overlay")==="1";}catch(e){}
-  return false;
-}
-
-function drawWandDebugAnalysis(analysis,built){
-  clearWandDebugLayers();
-  if(!analysis || !greenActive || !gdWandDebugOverlayEnabled())return;
-  try{
-    const raw=(analysis.candidates||[]);
-    raw.forEach((p,i)=>{
-      const ll=pointToLatLngSafe(p,built); if(!ll)return;
-      addWandDebugLayer(L.circleMarker(ll,{radius:(i%4===0?3.2:2.1),color:'rgba(255,255,255,.75)',weight:1,fillColor:'rgba(255,255,255,.9)',fillOpacity:.85,interactive:false,pane:'overlayPane'}));
-    });
-    (analysis.accepted||[]).forEach((p,i)=>{
-      const ll=pointToLatLngSafe(p,built); if(!ll)return;
-      addWandDebugLayer(L.circleMarker(ll,{radius:(i%3===0?5:4),color:'rgba(0,0,0,.35)',weight:1,fillColor:'rgba(251,191,36,.96)',fillOpacity:.96,interactive:false,pane:'overlayPane'}));
-    });
-    (analysis.probes||[]).forEach((pr,i)=>{
-      if(i%3!==0)return;
-      const a=pointToLatLngSafe({x:pr.x1,y:pr.y1},built); const b=pointToLatLngSafe({x:pr.x2,y:pr.y2},built);
-      if(!a||!b)return;
-      addWandDebugLayer(L.polyline([a,b],{color:pr.hit?'rgba(255,255,255,.16)':'rgba(255,255,255,.06)',weight:1,interactive:false,pane:'overlayPane'}));
-    });
-    (analysis.miniLines||[]).forEach(line=>{
-      const pts=line.map(p=>pointToLatLngSafe(p,built)).filter(Boolean);
-      if(pts.length>=2)addWandDebugLayer(L.polyline(pts,{color:'rgba(251,146,60,.96)',weight:4,opacity:.95,interactive:false,pane:'overlayPane'}));
-    });
-  }catch(e){console.warn('Wand real debug draw failed',e);}
-}
-
-function setWandMode(modeName, keepSensitivity){
-  wandMode="robustTonal";
-  const preset=currentWandPreset();
-  const input=document.getElementById("gdWandSensitivity");
-  if(input){ input.min=preset.sensitivityRange.min; input.max=preset.sensitivityRange.max; }
-
-  const current=Math.round((greenTolerance||0)*100);
-  const inRange=current>=preset.sensitivityRange.min && current<=preset.sensitivityRange.max;
-  setWandSensitivity((keepSensitivity && inRange)?current:preset.sensitivityRange.preset,false);
-
-  if(!keepSensitivity){
-    // Working robust GPS default from successful tile-source test.
-    wandBaseBubbleMetersOverride=24.5;
-    wandClusterPullOverride=60;
-  }else{
-    if(wandBaseBubbleMetersOverride==null) wandBaseBubbleMetersOverride=24.5;
-    if(wandClusterPullOverride==null) wandClusterPullOverride=60;
-  }
-
-  const baseEl=document.getElementById("gdWandBaseBubble");
-  const baseOut=document.getElementById("gdWandBaseBubbleOut");
-  if(baseEl) baseEl.value=wandBaseBubbleMetersOverride;
-  if(baseOut) baseOut.textContent=Number(wandBaseBubbleMetersOverride).toFixed(Number(wandBaseBubbleMetersOverride)%1?1:0)+"m";
-
-  const pullEl=document.getElementById("gdWandClusterPull");
-  const pullOut=document.getElementById("gdWandClusterPullOut");
-  if(pullEl) pullEl.value=wandClusterPullOverride;
-  if(pullOut) pullOut.textContent=wandClusterPullOverride+"%";
-
-  updateWandStatus(`Robust · sensitivity ${Math.round((greenTolerance||0)*100)} · size ${Number(wandBaseBubbleMetersOverride||0).toFixed(1)}m · curve ${wandClusterPullOverride}%`);
-  if(typeof gdUpdateWandCalibrationUi==="function") gdUpdateWandCalibrationUi();
-}
-
-function setWandSensitivity(value, liveUpdate=true){
-  const preset=currentWandPreset();
-  const v=Math.max(preset.sensitivityRange.min,Math.min(preset.sensitivityRange.max,Number(value)||preset.sensitivityRange.preset));
-  greenTolerance=v/100;
-  sessionGreenTolerance=greenTolerance;
-  const input=document.getElementById("gdWandSensitivity");
-  const out=document.getElementById("gdWandSensitivityOut");
-  if(input)input.value=v;
-  if(out)out.textContent=String(v);
-  if(liveUpdate) gdMarkWandCalibrationLive(`Live preview · sensitivity ${v}`);
-}
-
-function updateWandStatus(text){
-  const el=document.getElementById("gdWandStatus");
-  if(el)el.textContent=text;
-}
-
-function establishGreenFromBubble(){
-  if(greenCentre)return greenCentre;
-  // Legacy fallback only. The Wand owns the green centre once one has been set;
-  // moving the aim/bubble target must not resize or recenter the green scan.
-  if(target)greenCentre=L.latLng(target.lat,target.lng);
-  return greenCentre;
-}
-
-function adjustGreenTol(delta){
-  const current=Math.round((greenTolerance||.68)*100);
-  setWandSensitivity(current+(delta*3));
-  if(greenActive)runGreenWandScan();
-}
-
-function retryGreen(){
-  clearWandHandles();
-  lastWandResult=null;
-  runGreenWandScan();
-}
-
-async function runGreenWandScan(){
-  establishGreenFromBubble();
-  if(!greenCentre){toast("Set green target first");return;}
-  await scanGreen();
-}
-
-function chooseSnapshotSource(){
-  document.getElementById("snapshotInput").click();
-}
-
-function loadSnapshotSource(event){
-  const file=event.target.files && event.target.files[0];
-  if(!file)return;
-
-  const reader=new FileReader();
-  reader.onload=()=>{
-    const img=new Image();
-    img.onload=()=>{
-      const mapEl=document.getElementById("map");
-      const rect=mapEl.getBoundingClientRect();
-      const canvas=document.getElementById("snapshotCanvas");
-      canvas.width=Math.round(rect.width);
-      canvas.height=Math.round(rect.height);
-      const ctx=canvas.getContext("2d",{willReadFrequently:true});
-
-      // Fit uploaded snapshot to the current map viewport.
-      // This is a beta alignment assumption: upload a snapshot of the current map view.
-      ctx.clearRect(0,0,canvas.width,canvas.height);
-      ctx.drawImage(img,0,0,canvas.width,canvas.height);
-
-      snapshotPixelSource={canvas,ctx,loadedAt:new Date().toISOString()};
-      snapshotPixelActive=true;
-      greenPixelAccessOk=true;
-      autoSwitchedForSecurity=false;
-
-      const btn=document.getElementById("snapshotBtn");
-      btn.textContent="Active";
-      btn.classList.add("active");
-      document.getElementById("snapshotSub").textContent="Beta · wand reading uploaded snapshot";
-      toast("Snapshot pixel source active");
-
-      if(greenActive && target) scanGreen();
-    };
-    img.src=reader.result;
-  };
-  reader.readAsDataURL(file);
-}
-
-function clearSnapshotSource(){
-  snapshotPixelSource=null;
-  snapshotPixelActive=false;
-  autoSwitchedForSecurity=false;
-  const btn=document.getElementById("snapshotBtn");
-  if(btn){
-    btn.textContent="Upload";
-    btn.classList.remove("active");
-  }
-  const sub=document.getElementById("snapshotSub");
-  if(sub)sub.textContent="Beta · upload readable map snapshot";
-}
-
-
-
-function gdCanvasUsefulV2(canvas){
-  try{
-    const ctx=canvas.getContext("2d",{willReadFrequently:true});
-    if(!ctx) return false;
-    const data=ctx.getImageData(0,0,canvas.width,canvas.height).data;
-    let useful=0, varied=0, last=-1;
-    const pixels=data.length/4;
-    const step=Math.max(1,Math.floor(pixels/2600));
-    for(let p=0;p<pixels;p+=step){
-      const i=p*4;
-      const r=data[i],g=data[i+1],b=data[i+2],a=data[i+3];
-      if(a>8 && (r>10 || g>10 || b>10)) useful++;
-      const lum=(r+g+b)/3;
-      if(last>=0 && Math.abs(lum-last)>7) varied++;
-      last=lum;
-    }
-    return useful>35 && varied>10;
-  }catch(e){return false;}
-}
-
-function gdGetGreenCentreForTileCrop(){
-  try{ if(typeof establishGreenFromBubble==="function") establishGreenFromBubble(); }catch(e){}
-  try{ if(typeof greenCentre!=="undefined" && greenCentre) return greenCentre; }catch(e){}
-  try{ if(window.greenCentre) return window.greenCentre; }catch(e){}
-  return null;
-}
-
-function gdLoadedTileItemsFromBaseLayer(){
-  const items=[];
-  try{
-    if(baseLayer && baseLayer._tiles){
-      Object.values(baseLayer._tiles).forEach(t=>{
-        const el=t && (t.el || t.img || t.tile);
-        const c=t && t.coords;
-        if(!el || !c) return;
-        if(!el.complete || !el.naturalWidth || !el.naturalHeight) return;
-        items.push({img:el, coords:{x:Number(c.x),y:Number(c.y),z:Number(c.z)}});
-      });
-    }
-  }catch(e){}
-
-  // Fallback only for getting coords if Leaflet internals fail. Esri is z/y/x; OSM is z/x/y.
-  if(!items.length){
-    try{
-      const source=(mapSources && mapSources[activeMapSourceIndex]) ? mapSources[activeMapSourceIndex].key : "";
-      [...document.querySelectorAll("#map img.leaflet-tile")].forEach(img=>{
-        if(!img.complete || !img.naturalWidth || !img.naturalHeight) return;
-        const url=img.currentSrc || img.src || "";
-        let m=url.match(/\/tile\/(\d+)\/(-?\d+)\/(-?\d+)(?:\?|$)/i);
-        if(m){
-          // ArcGIS/Esri: /tile/z/y/x
-          items.push({img,coords:{z:+m[1],y:+m[2],x:+m[3]}});
-          return;
-        }
-        m=url.match(/\/(\d+)\/(-?\d+)\/(-?\d+)(?:\.[a-z]+|\?|$)/i);
-        if(m){
-          if(source==="esri") items.push({img,coords:{z:+m[1],y:+m[2],x:+m[3]}});
-          else items.push({img,coords:{z:+m[1],x:+m[2],y:+m[3]}});
-        }
-      });
-    }catch(e){}
-  }
-
-  return items.filter(it=>Number.isFinite(it.coords.x)&&Number.isFinite(it.coords.y)&&Number.isFinite(it.coords.z));
-}
-
-function gdBuildGreenCentredTileCropV2(){
-  if(typeof L==="undefined" || typeof map==="undefined" || !map) return null;
-  const centre=gdGetGreenCentreForTileCrop();
-  if(!centre) return null;
-
-  const items=gdLoadedTileItemsFromBaseLayer();
-  if(!items.length) return null;
-
-  const zoomCounts={};
-  items.forEach(it=>zoomCounts[it.coords.z]=(zoomCounts[it.coords.z]||0)+1);
-  const desired=Number.isFinite(map.getZoom?.()) ? Math.round(map.getZoom()) : null;
-  const zooms=Object.keys(zoomCounts).map(Number);
-  const z=zooms.includes(desired) ? desired : zooms.sort((a,b)=>zoomCounts[b]-zoomCounts[a])[0];
-
-  const tiles=items.filter(it=>it.coords.z===z);
-  if(!tiles.length) return null;
-
-  const tileSize=(baseLayer && baseLayer.getTileSize) ? baseLayer.getTileSize().x : 256;
-  const cropSize=640;
-  const half=cropSize/2;
-
-  const canvas=document.createElement("canvas");
-  canvas.width=cropSize;
-  canvas.height=cropSize;
-  const ctx=canvas.getContext("2d",{willReadFrequently:true});
-  if(!ctx) return null;
-  ctx.clearRect(0,0,cropSize,cropSize);
-
-  const centreLL=L.latLng(centre.lat,centre.lng);
-  const worldPoint=map.project(centreLL,z);
-  const onePxLeft=map.unproject(L.point(worldPoint.x-1,worldPoint.y),z);
-  const onePxRight=map.unproject(L.point(worldPoint.x+1,worldPoint.y),z);
-  const tileMetersPerPixel=Math.max(0.03,Math.min(8,map.distance(onePxLeft,onePxRight)/2 || getMapMetersPerPixelAt(centreLL)));
-
-  let drawn=0, attempted=tiles.length;
-  tiles.forEach(it=>{
-    try{
-      const globalX=it.coords.x*tileSize;
-      const globalY=it.coords.y*tileSize;
-      const drawX=half + (globalX-worldPoint.x);
-      const drawY=half + (globalY-worldPoint.y);
-
-      if(drawX+tileSize<0 || drawY+tileSize<0 || drawX>cropSize || drawY>cropSize) return;
-      ctx.drawImage(it.img,drawX,drawY,tileSize,tileSize);
-      drawn++;
-    }catch(e){}
-  });
-
-  const useful=gdCanvasUsefulV2(canvas);
-  return {
-    canvas,
-    ctx,
-    coordinateFrame:"green-centred-leaflet-tile-crop-v2",
-    useful,
-    drawnTiles:drawn,
-    attemptedTiles:attempted,
-    cropSize,
-    seed:{x:half,y:half},
-    tileZoom:z,
-    tileSize,
-    metersPerPixel:tileMetersPerPixel,
-    centreLatLng:{lat:centre.lat,lng:centre.lng},
-    worldCentre:{x:worldPoint.x,y:worldPoint.y},
-    toLatLng(point){
-      const p = Array.isArray(point) ? {x:point[0],y:point[1]} : point;
-      const wx=worldPoint.x + (Number(p.x)-half);
-      const wy=worldPoint.y + (Number(p.y)-half);
-      return map.unproject(L.point(wx,wy),z);
-    },
-    fromLatLng(ll){
-      const wp=map.project(L.latLng(ll.lat,ll.lng),z);
-      return {x:half+(wp.x-worldPoint.x),y:half+(wp.y-worldPoint.y)};
-    }
-  };
-}
-
-function gdWandSeedForBuiltCanvas(built,canvas){
-  if(built && built.seed){
-    return {
-      x:Math.max(2,Math.min(canvas.width-3,Number(built.seed.x))),
-      y:Math.max(2,Math.min(canvas.height-3,Number(built.seed.y)))
-    };
-  }
-  const centrePoint=map.latLngToContainerPoint(greenCentre);
-  return {
-    x:Math.max(2,Math.min(canvas.width-3,centrePoint.x)),
-    y:Math.max(2,Math.min(canvas.height-3,centrePoint.y))
-  };
-}
-
-function gdWandCanvasPointToLatLng(point,built){
-  if(built && typeof built.toLatLng==="function") return built.toLatLng(point);
-  return map.containerPointToLatLng([point.x,point.y]);
-}
-
-function gdTilePos(el){
-  try{
-    if(window.L && L.DomUtil && typeof L.DomUtil.getPosition==="function"){
-      const p=L.DomUtil.getPosition(el);
-      if(p && Number.isFinite(p.x) && Number.isFinite(p.y) && (p.x || p.y)) return {x:p.x,y:p.y};
-    }
-  }catch(e){}
-  try{
-    if(el && el._leaflet_pos && Number.isFinite(el._leaflet_pos.x) && Number.isFinite(el._leaflet_pos.y)){
-      return {x:el._leaflet_pos.x,y:el._leaflet_pos.y};
-    }
-  }catch(e){}
-  const s=((el&&el.style&&el.style.transform)||"") + " " + ((el&&el.style&&el.style.webkitTransform)||"");
-  let m=s.match(/translate3d\(([-0-9.]+)px,\s*([-0-9.]+)px/i) ||
-        s.match(/translate\(([-0-9.]+)px,\s*([-0-9.]+)px/i) ||
-        s.match(/matrix\([^,]+,[^,]+,[^,]+,[^,]+,\s*([-0-9.]+),\s*([-0-9.]+)\)/i);
-  if(m) return {x:parseFloat(m[1])||0,y:parseFloat(m[2])||0};
-  const left=parseFloat((el&&el.style&&el.style.left)||"0")||0;
-  const top=parseFloat((el&&el.style&&el.style.top)||"0")||0;
-  return {x:left,y:top};
-}
-
-function gdCanvasHasUsefulPixels(canvas){
-  try{
-    const ctx=canvas.getContext("2d",{willReadFrequently:true});
-    const data=ctx.getImageData(0,0,canvas.width,canvas.height).data;
-    let nonBlack=0, varied=0, last=-1;
-    const px=data.length/4;
-    const step=Math.max(1,Math.floor(px/2500));
-    for(let p=0;p<px;p+=step){
-      const i=p*4;
-      const r=data[i],g=data[i+1],b=data[i+2],a=data[i+3];
-      if(a>5 && (r>8 || g>8 || b>8)) nonBlack++;
-      const lum=(r+g+b)/3;
-      if(last>=0 && Math.abs(lum-last)>6) varied++;
-      last=lum;
-    }
-    return nonBlack>30 && varied>8;
-  }catch(e){
-    return false;
-  }
-}
-
-function tryBuildMapCanvas(){
-  const greenCrop=gdBuildGreenCentredTileCropV2();
-  if(greenCrop && greenCrop.useful){
-    greenPixelAccessOk=true;
-    return greenCrop;
-  }
-
-  if(snapshotPixelActive && snapshotPixelSource){
-    greenPixelAccessOk=true;
-    snapshotPixelSource.coordinateFrame="snapshot-viewport";
-    return snapshotPixelSource;
-  }
-
-  const mapEl=document.getElementById("map");
-  const size=map.getSize ? map.getSize() : {x:mapEl.clientWidth,y:mapEl.clientHeight};
-  const canvas=document.createElement("canvas");
-  canvas.width=Math.round(size.x || mapEl.clientWidth);
-  canvas.height=Math.round(size.y || mapEl.clientHeight);
-  const ctx=canvas.getContext("2d",{willReadFrequently:true});
-  if(!ctx)return null;
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-
-  const mapPane=map.getPane ? map.getPane("mapPane") : mapEl.querySelector(".leaflet-map-pane");
-  const tilePane=map.getPane ? map.getPane("tilePane") : mapEl.querySelector(".leaflet-tile-pane");
-  const mapPanePos=gdTilePos(mapPane);
-  const tilePanePos=gdTilePos(tilePane);
-
-  const tiles=[...mapEl.querySelectorAll("img.leaflet-tile")]
-    .filter(img=>img.complete && img.naturalWidth && img.naturalHeight);
-
-  let drawn=0;
-  let attempted=0;
-  tiles.forEach(img=>{
-    try{
-      attempted++;
-      const tilePos=gdTilePos(img);
-      const w=parseFloat(img.style.width)||img.width||img.naturalWidth||256;
-      const h=parseFloat(img.style.height)||img.height||img.naturalHeight||256;
-      const x=Math.round(mapPanePos.x + tilePanePos.x + tilePos.x);
-      const y=Math.round(mapPanePos.y + tilePanePos.y + tilePos.y);
-
-      // These coordinates are Leaflet containerPoint-space. No CSS visual rects.
-      if(x+w < -512 || y+h < -512 || x > canvas.width+512 || y > canvas.height+512) return;
-      ctx.drawImage(img,x,y,w,h);
-      drawn++;
-    }catch(e){}
-  });
-
-  // If Leaflet internal positions did not land in the container, do NOT use rotated client rects.
-  // Return a blank/failed sample so we know the source is not valid rather than analysing fake mixed tiles.
-  try{
-    ctx.getImageData(0,0,1,1);
-    greenPixelAccessOk=true;
-    const useful=gdCanvasHasUsefulPixels(canvas);
-    return {
-      canvas,
-      ctx,
-      coordinateFrame: useful ? "leaflet-internal-container" : "leaflet-internal-container-empty",
-      drawnTiles:drawn,
-      attemptedTiles:attempted,
-      canvasSize:{x:canvas.width,y:canvas.height},
-      mapPanePos,
-      tilePanePos,
-      useful
-    };
-  }catch(e){
-    greenPixelAccessOk=false;
-    if(!window.__greenPixelBlockedWarned){
-      console.warn("Green Wand pixel sampling blocked by map tile/browser security.");
-      window.__greenPixelBlockedWarned=true;
-    }
-    const switched=autoSwitchMapSource();
-    if(switched) toast("Pixel read blocked · switching map source");
-    return null;
-  }
-}
-
-
-function trySampleMapPixel(x,y){
-  const built=tryBuildMapCanvas();
-  if(!built)return null;
-  try{
-    const p=built.ctx.getImageData(Math.round(x),Math.round(y),1,1).data;
-    return {r:p[0],g:p[1],b:p[2],a:p[3]};
-  }catch(e){
-    return null;
-  }
-}
-
-function sampleGreenSurfacePixels(centre){
-  // Denser real-world 3m seed sampling.
-  // Centre + inner ring + outer ring.
-  const points=[centre];
-
-  const rings=[
-    {r:GREEN_SEED_RADIUS_M*0.5,n:8},
-    {r:GREEN_SEED_RADIUS_M,n:16}
-  ];
-
-  rings.forEach(ring=>{
-    for(let i=0;i<ring.n;i++){
-      const a=(Math.PI*2*i)/ring.n;
-      points.push(project(centre,a,ring.r));
-    }
-  });
-
-  const samples=[];
-  points.forEach(ll=>{
-    const p=map.latLngToContainerPoint(ll);
-    const px=trySampleMapPixel(p.x,p.y);
-    if(px&&px.a>0)samples.push(px);
-  });
-  return samples;
-}
-
-function sampleAverage(samples){
-  if(!samples.length)return null;
-  return {
-    r:Math.round(samples.reduce((s,p)=>s+p.r,0)/samples.length),
-    g:Math.round(samples.reduce((s,p)=>s+p.g,0)/samples.length),
-    b:Math.round(samples.reduce((s,p)=>s+p.b,0)/samples.length)
-  };
-}
-
-function rawColourDistance(a,b){
-  const dr=a.r-b.r,dg=a.g-b.g,db=a.b-b.b;
-  const colour=Math.sqrt(dr*dr*.8+dg*dg*1.0+db*db*.8);
-  const brightA=(a.r+a.g+a.b)/3;
-  const brightB=(b.r+b.g+b.b)/3;
-  const brightness=Math.abs(brightA-brightB)*.55;
-  return colour+brightness;
-}
-
-function distanceToSampleSet(samples,pixel){
-  if(!samples.length)return 9999;
-  let best=9999;
-  samples.forEach(s=>best=Math.min(best,rawColourDistance(s,pixel)));
-  return best;
-}
-
-function pixelAllowed(samples,pixel,previous,tolerance,edgeThreshold,normalisedRadius){
-  // Earlier version: sample match + previous-pixel edge resistance.
-  const sampleDiff=distanceToSampleSet(samples,pixel);
-  const edgeDiff=rawColourDistance(previous,pixel);
-
-  const outwardResistance=1+(normalisedRadius*.55);
-  const edgeLimit=edgeThreshold/outwardResistance;
-
-  const brightness=(pixel.r+pixel.g+pixel.b)/3;
-  const saturation=Math.max(pixel.r,pixel.g,pixel.b)-Math.min(pixel.r,pixel.g,pixel.b);
-  const sandLike=brightness>165 && saturation<34;
-
-  return sampleDiff<tolerance && edgeDiff<edgeLimit && !sandLike;
-}
-
-function gdValidateWandOutline(pts,analysis){
-  try{
-    if(!greenCentre || !Array.isArray(pts) || pts.length<12) return {ok:false,reason:"missing outline"};
-    const distances=pts.map(p=>map.distance(greenCentre,p)).filter(Number.isFinite);
-    if(distances.length<12) return {ok:false,reason:"invalid distances"};
-    const avg=distances.reduce((s,d)=>s+d,0)/distances.length;
-    const max=Math.max(...distances);
-    const min=Math.min(...distances);
-    const centre=pts.reduce((acc,p)=>({lat:acc.lat+p.lat,lng:acc.lng+p.lng}),{lat:0,lng:0});
-    centre.lat/=pts.length;
-    centre.lng/=pts.length;
-    const centreDrift=map.distance(greenCentre,L.latLng(centre.lat,centre.lng));
-    const accepted=Number(analysis?.metrics?.acceptedDots||0);
-    const bestChain=Number(analysis?.metrics?.bestChain||0);
-    if(avg<2.5 || avg>42) return {ok:false,reason:`radius ${Math.round(avg)}m`};
-    if(max>75 || max/Math.max(min,1)>7) return {ok:false,reason:"spread"};
-    if(centreDrift>Math.max(24,avg*1.65)) return {ok:false,reason:`drift ${Math.round(centreDrift)}m`};
-    if(accepted<6 && bestChain<8) return {ok:false,reason:"weak edge family"};
-    return {ok:true,avg,max,centreDrift};
-  }catch(e){
-    return {ok:false,reason:"validation error"};
-  }
-}
-
-function fallbackGreenRadius(){
-  // Start tiny. User grows it out with +.
-  // If pixels are blocked, this remains a centred reference, not detection.
-  const t=Math.pow(greenTolerance,1.45);
-  if(!greenPixelAccessOk){
-    return Math.max(2.5,Math.min(13,2.5+(t*12)));
-  }
-  return Math.max(3.5,Math.min(32,3.5+(t*24)));
-}
-
-async function scanGreen(){
-  establishGreenFromBubble();
-  if(!greenCentre)return;
-
-  const engine=window.GolfDaddyGreenWandEngine;
-  const built=tryBuildMapCanvas();
-  if(!built || !engine?.analyzeGreenWand){
-    greenPixelAccessOk=false;
-    updateWandStatus("Auto scan unavailable · quick green shape");
-    drawQuickShapeGreen();
-    return;
-  }
-
-  try{
-    const canvas=built.canvas;
-    window.__lastWandCanvasBuild={coordinateFrame:built.coordinateFrame,drawnTiles:built.drawnTiles,attemptedTiles:built.attemptedTiles,useful:built.useful,tileZoom:built.tileZoom,mapPanePos:built.mapPanePos,tilePanePos:built.tilePanePos,width:canvas.width,height:canvas.height};
-    const seed=gdWandSeedForBuiltCanvas(built,canvas);
-    const preset=currentWandPreset();
-    const expanded=getExpandedWandOptions(preset,built);
-    updateWandStatus(`Scanning · ${preset.label} · scale locked ${expanded.metersPerPixel.toFixed(2)}m/px`);
-    const analysis=await engine.analyzeGreenWand(canvas,canvas.width,canvas.height,{
-      seed,
-      sensitivity:Math.round((greenTolerance||preset.sensitivityRange.preset/100)*100),
-      // Sandbox brain still works in pixels; GPS only converts the sandbox exploration size to real-world metres.
-      baseBubbleSize:expanded.baseBubbleSizePx,
-      clusterPull:expanded.clusterPull,
-      filters:preset.filters
-    });
-
-    const outline=(analysis.outerShell&&analysis.outerShell.length>=12)?analysis.outerShell:analysis.insetGreen;
-    if(!outline || outline.length<12){
-      updateWandStatus("Weak sandbox fit · quick green shape");
-      drawQuickShapeGreen();
-      return;
-    }
-
-    let pts=outline.map(p=>gdWandCanvasPointToLatLng(p,built));
-    let avgM=Math.round(pts.reduce((sum,p)=>sum+map.distance(greenCentre,p),0)/pts.length);
-
-    // High-resolution satellite tiles can make the sandbox's old pixel-sized shell look tiny.
-    // If the scan has found a real edge family but returned an unrealistically small shell,
-    // gently expand/settle it in screen space while preserving the detected shape.
-    const adjustedOutline=normalizeSandboxWandShell(outline,seed,expanded);
-    if(adjustedOutline!==outline){
-      pts=adjustedOutline.map(p=>gdWandCanvasPointToLatLng(p,built));
-      avgM=Math.round(pts.reduce((sum,p)=>sum+map.distance(greenCentre,p),0)/pts.length);
-    }
-    const quality=gdValidateWandOutline(pts,analysis);
-    if(!quality.ok){
-      console.warn("Green Wand scan rejected by geometry guard",quality.reason,window.__lastWandCanvasBuild);
-      updateWandStatus(`Scan rejected · ${quality.reason} · quick green shape`);
-      clearWandDebugLayers();
-      drawQuickShapeGreen();
-      return;
-    }
-    const confidence=Math.max(.38,Math.min(.94,
-      (analysis.metrics.acceptedDots/144)*.42 +
-      Math.min(analysis.metrics.bestChain/44,1)*.26 +
-      Math.min(analysis.metrics.ridgeCoverage/80,1)*.18 +
-      Math.min(analysis.metrics.difference/32,1)*.14
-    ));
-
-    lastWandResult=makeWandResult(pts,"pixel",confidence,`${avgM}m ${preset.label}`);
-    lastWandResult.modeKey=wandMode;
-    lastWandResult.modeLabel=preset.label;
-    lastWandResult.baseBubbleSize=expanded.baseBubbleSizePx;
-    lastWandResult.sandboxBasePx=expanded.sandboxBasePx;
-    lastWandResult.baseRadiusMeters=Number((expanded.baseBubbleMeters || (expanded.baseBubbleSizePx*expanded.metersPerPixel)).toFixed(1));
-    lastWandResult.metersPerPixel=Number(expanded.metersPerPixel.toFixed(3));
-    lastWandResult.scaleLocked=true;
-    lastWandResult.scaleLock=expanded.scaleLock;
-    lastWandResult.clusterPull=expanded.clusterPull;
-    lastWandResult.filters=preset.filters;
-    lastWandResult.metrics=analysis.metrics;
-    lastWandResult.debugRaw={candidates:analysis.candidates,accepted:analysis.accepted,miniLines:analysis.miniLines,probes:analysis.probes,outerShell:analysis.outerShell,insetGreen:analysis.insetGreen,outputSource:"sandboxOuterShell"};
-    lastWandResult.debugCounts={
-      candidates:analysis.candidates?.length||0,
-      accepted:analysis.accepted?.length||0,
-      ridgeLines:analysis.ridgeLines?.length||0
-    };
-
-    drawGreenPolygon(pts,`${avgM}m scan`);
-    drawWandDebugAnalysis(analysis,built);
-    updateWandStatus(`${preset.label} · ${analysis.metrics.verdict} · ${avgM}m · ${Math.round(confidence*100)}% · bubble ${(wandBaseBubbleMetersOverride || sandboxPxToHealthyBubbleMeters(expanded.sandboxBasePx)).toFixed(1)}m/${Math.round(expanded.sandboxBasePx)}px · pull ${Math.round(expanded.clusterPull)}% · outer shell · scale locked`);
-    toast("Sandbox green scan ready");
-  }catch(e){
-    console.warn("Green Wand sandbox scan failed",e);
-    updateWandStatus("Sandbox scan failed · quick green shape");
-    drawQuickShapeGreen();
-  }
-}
-
-function drawQuickShapeGreen(){
-  drawFallbackGreen();
-  makeEditableGreen();
-  updateWandStatus("Quick shape · drag handles then accept");
-  toast("Quick green shape");
-}
-
-function drawFallbackGreen(){
-  const r=fallbackGreenRadius();
-  const dirs=72;
-  const pts=[];
-  for(let i=0;i<dirs;i++){
-    const a=(Math.PI*2*i)/dirs;
-    const wob=1 + Math.sin(a*3)*.055 + Math.cos(a*5)*.035;
-    pts.push(projectOffset(greenCentre,0,Math.cos(a)*r*.88*wob,Math.sin(a)*r*1.18*wob));
-  }
-  const source=greenPixelAccessOk?"pixel-estimate":"manual-estimate";
-  lastWandResult=makeWandResult(pts,source,.35,greenPixelAccessOk?`${Math.round(r)}m green`:`${Math.round(r)}m fallback`);
-  drawGreenPolygon(pts,greenPixelAccessOk?`${Math.round(r)}m green`:`${Math.round(r)}m fallback`);
-}
-
-function makeWandResult(pts,source,confidence,label){
-  return {
-    holeId: currentPlayingHole?.hole || selectedHole || null,
-    boundaryPoints: pts.map(p=>({lat:p.lat,lng:p.lng})),
-    modeUsed: source==="pixel"?wandMode:"quick-shape",
-    modeLabel: source==="pixel"?currentWandPreset().label:"Quick Shape",
-    sensitivity: Math.round((greenTolerance||0)*100),
-    confidence: Number(confidence.toFixed(2)),
-    sampledCenter: greenCentre?{lat:greenCentre.lat,lng:greenCentre.lng}:null,
-    source,
-    label,
-    createdAt:new Date().toISOString()
-  };
-}
-
-function clearWandHandles(){
-  clearWandDebugLayers();
-  wandHandleMarkers.forEach(m=>{try{map.removeLayer(m)}catch(e){}});
-  wandHandleMarkers=[];
-}
-
-function makeEditableGreen(){
-  clearWandHandles();
-  if(!greenPolygon||!greenPolygon.length)return;
-  const idxs=[0,Math.floor(greenPolygon.length/4),Math.floor(greenPolygon.length/2),Math.floor(greenPolygon.length*3/4)];
-  idxs.forEach((idx)=>{
-    const marker=L.marker(greenPolygon[idx],{
-      draggable:true,
-      zIndexOffset:100000,
-      icon:L.divIcon({className:"",html:"<div class='gdWandHandle'></div>",iconSize:[18,18],iconAnchor:[9,9]})
-    }).addTo(map);
-    marker.on("drag",()=>{
-      const moved=marker.getLatLng();
-      const old=greenPolygon[idx];
-      const dLat=moved.lat-old.lat;
-      const dLng=moved.lng-old.lng;
-      greenPolygon=greenPolygon.map((p,i)=>{
-        const influence=Math.max(0,1-(Math.min(Math.abs(i-idx),greenPolygon.length-Math.abs(i-idx))/(greenPolygon.length/3)));
-        return L.latLng(p.lat+dLat*influence,p.lng+dLng*influence);
-      });
-      drawGreenPolygon(greenPolygon,"quick shape");
-      makeEditableGreen();
-      lastWandResult=makeWandResult(greenPolygon,"manual-estimate",.42,"quick shape");
-    });
-    wandHandleMarkers.push(marker);
-  });
-}
-
-function acceptGreenWand(){
-  if(!greenPolygon||!greenPolygon.length){toast("No green to accept");return;}
-  lastWandResult=lastWandResult||makeWandResult(greenPolygon,"manual-estimate",.4,"accepted");
-  window.golfDaddyAcceptedGreen=lastWandResult;
-  window.clarityCaddieAcceptedGreen=lastWandResult;
-  clearWandHandles();
-  drawGreenPolygon(greenPolygon,"saved green",{settled:true});
-  updateWandStatus(`Accepted · ${lastWandResult.modeUsed} · ${lastWandResult.sensitivity}%`);
-  toast("Green accepted");
-}
-
-function importGreenWandResult(result){
-  if(!result||!Array.isArray(result.boundaryPoints))return false;
-  const pts=result.boundaryPoints.map(p=>L.latLng(p.lat,p.lng));
-  greenCentre=result.sampledCenter?L.latLng(result.sampledCenter.lat,result.sampledCenter.lng):(target||greenCentre);
-  lastWandResult=result;
-  drawGreenPolygon(pts,result.label||"wand import");
-  return true;
-}
-window.importGreenWandResult=importGreenWandResult;
-
-function drawMaskOutline(mask,sx,sy){
-  const dirs=72;
-  const radial=new Array(dirs).fill(0);
-
-  for(const [x,y] of mask){
-    const dx=x-sx,dy=y-sy;
-    const dist=Math.sqrt(dx*dx+dy*dy);
-    let a=Math.atan2(dy,dx);
-    if(a<0)a+=Math.PI*2;
-    const bin=Math.min(dirs-1,Math.floor((a/(Math.PI*2))*dirs));
-    if(dist>radial[bin])radial[bin]=dist;
-  }
-
-  let smooth=radial.map((v,i)=>{
-    let sum=0,count=0;
-    for(let k=-2;k<=2;k++){
-      const j=(i+k+dirs)%dirs;
-      if(radial[j]>0){sum+=radial[j];count++}
-    }
-    return count?sum/count:v;
-  });
-
-  // Earlier spike damping.
-  smooth=smooth.map((v,i)=>{
-    const prev=smooth[(i-1+dirs)%dirs]||v;
-    const next=smooth[(i+1)%dirs]||v;
-    const avg=(prev+next)/2;
-    if(avg>0 && v>avg*1.32)return avg*1.16;
-    return v;
-  });
-
-  const pts=[];
-  for(let i=0;i<dirs;i++){
-    const r=smooth[i];
-    if(r<=0)continue;
-    const a=(Math.PI*2*i)/dirs;
-    pts.push(map.containerPointToLatLng([sx+Math.cos(a)*r,sy+Math.sin(a)*r]));
-  }
-
-  if(pts.length<8){
-    drawFallbackGreen();
-    return;
-  }
-
-  const approx=Math.round(pts.reduce((s,p)=>s+map.distance(greenCentre,p),0)/pts.length);
-  drawGreenPolygon(pts,`${approx}m scan`);
-}
+/* Standalone Wand UI retired. Green Shape Engine ownership lives in scripts/gd-green-shape-engine.js. */
 
 function drawGreenPolygon(pts,label,opts={}){
   [greenOutline,greenSoft,greenLabel,frontLabel,backLabel].forEach(l=>l&&map.removeLayer(l));
@@ -23168,7 +21296,8 @@ function drawGreenPolygon(pts,label,opts={}){
   }).addTo(map);
 
   if(!settled&&label){
-    const north=project(greenCentre,0,Math.max(12,fallbackGreenRadius()+6));
+    const northBase=greenCentre||target||pts[0];
+    const north=project(northBase,0,18);
     greenLabel=L.marker(north,{
       interactive:false,
       icon:L.divIcon({
@@ -23183,9 +21312,6 @@ function drawGreenPolygon(pts,label,opts={}){
   }
 
   drawGreenDistances(pts);
-  if(typeof attachGreenOutlineLongPress==="function") attachGreenOutlineLongPress();
-  const tolEl=document.getElementById("tolValue");
-  if(tolEl)tolEl.textContent=`Tol ${Math.round(greenTolerance*100)}%`;
   renderShot();
 }
 
@@ -25664,443 +23790,7 @@ function renderStats(){
   trackedShots.slice().reverse().forEach(s=>{const v=fmt(s.distanceM);const row=document.createElement("div");row.className="bagRow";row.innerHTML=`<span>Shot ${s.id} · ${s.reason}</span><strong>${v.value}${v.unit}</strong>`;list.appendChild(row)})
   gdRenderCourseDataAdminPanel();
 }
-function gdScorecardNormalizeName(name){return String(name||"").trim().replace(/\s+/g," ")}
-function gdScorecardCourseKey(course){const name=gdScorecardNormalizeName(course?.name||course?.clubName||"");return name?name.toLowerCase():""}
-function gdScorecardCourseCandidate(value,source=""){
-  const name=gdScorecardNormalizeName(value?.name||value?.courseName||value?.clubName||value);
-  if(!name||name==="Manual GPS"||/assumed course/i.test(name))return null;
-  if(value&&typeof value==="object")return Object.assign({},value,{name,courseName:name,scorecardSource:source||value.scorecardSource||value.source||""});
-  return {name,courseName:name,scorecardSource:source};
-}
-function gdScorecardConfirmedCourse(){
-  const candidates=[typeof currentCourse!=="undefined"?currentCourse:null,window.currentCourse,window.gdActiveCourse];
-  try{if(typeof window.gdActiveCourseForMode==="function")candidates.push(window.gdActiveCourseForMode())}catch(e){}
-  candidates.push(document.body?.dataset?.gdActiveCourseName,window.gdActiveCourseDisplayName,document.getElementById("courseLine")?.textContent,sessionStorage.getItem("gd_assumed_course_name"));
-  try{candidates.push(JSON.parse(localStorage.getItem("gd_active_course_v1")||"null"))}catch(e){}
-  for(const candidate of candidates){
-    const course=gdScorecardCourseCandidate(candidate,"gps-active-course");
-    if(course)return course;
-  }
-  return null;
-}
-function gdScorecardReadCache(){try{return JSON.parse(localStorage.getItem(GD_SCORECARD_CACHE_KEY)||"{}")||{}}catch(e){return {}}}
-function gdScorecardWriteCache(cache){try{localStorage.setItem(GD_SCORECARD_CACHE_KEY,JSON.stringify(cache||{}))}catch(e){}}
-function gdScorecardSourceForCourse(course){
-  const name=gdScorecardNormalizeName(course?.name||course?.clubName||"");
-  return GD_SCORECARD_WEBSITE_SOURCES.find(s=>s.match.test(name))||null;
-}
-function gdScorecardWebsiteCandidates(course){
-  const list=[];
-  const known=gdScorecardSourceForCourse(course);
-  if(known)list.push(known);
-  const raw=[course?.website,course?.url,course?.site,course?.homepage].filter(Boolean);
-  raw.forEach(url=>list.push({name:gdScorecardNormalizeName(course?.name),baseUrl:String(url).replace(/\/+$/,"")}));
-  const name=gdScorecardNormalizeName(course?.name||"").toLowerCase();
-  if(name){
-    const slug=name.replace(/\bgolf club\b|\bgolf course\b|\bthe\b/g,"").replace(/[^a-z0-9]+/g,"").trim();
-    if(slug){
-      list.push({name:gdScorecardNormalizeName(course?.name),baseUrl:`https://www.${slug}golf.co.nz`});
-      list.push({name:gdScorecardNormalizeName(course?.name),baseUrl:`https://${slug}golf.co.nz`});
-    }
-  }
-  gdScorecardGpsAppCandidates(course).forEach(source=>list.push(source));
-  return list.filter((item,index,arr)=>item.baseUrl&&arr.findIndex(x=>x.baseUrl===item.baseUrl)===index);
-}
-function gdScorecardSlugVariants(course){
-  const name=gdScorecardNormalizeName(course?.name||course?.courseName||course?.clubName||"").toLowerCase();
-  if(!name)return [];
-  const base=name.replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
-  const variants=new Set([base]);
-  if(/\bgolf-club\b/.test(base))variants.add(base.replace(/\bgolf-club\b/,"golf-course"));
-  if(/\bgolf-course\b/.test(base))variants.add(base.replace(/\bgolf-course\b/,"golf-club"));
-  variants.add(base.replace(/-golf-(club|course)$/,""));
-  return [...variants].filter(Boolean);
-}
-function gdScorecardGpsAppCandidates(course){
-  return gdScorecardSlugVariants(course).map(slug=>({
-    name:gdScorecardNormalizeName(course?.name),
-    provider:"Golfify",
-    sourceKind:"gps-app",
-    baseUrl:`https://www.golfify.io/courses/${slug}`
-  }));
-}
-function gdScorecardCleanText(text){return String(text||"").replace(/&nbsp;/gi," ").replace(/\s+/g," ").trim()}
-function gdScorecardText(el){return gdScorecardCleanText(el?.textContent||"")}
-function gdScorecardMarkerKey(name){
-  const key=gdScorecardCleanText(name).replace(/\s+C$/i,"");
-  return key?key.charAt(0).toUpperCase()+key.slice(1).toLowerCase():"";
-}
-function gdScorecardShell(course,reason){
-  const courseName=gdScorecardNormalizeName(course?.name||course?.clubName||"Confirmed course");
-  return {
-    courseKey:gdScorecardCourseKey(course),
-    courseName,
-    source:"shell",
-    sourceUrl:"",
-    error:reason||"",
-    holes:Array.from({length:18},(_,i)=>({hole:i+1,par:null,index:null,metres:null,score:null,putts:null,tees:{}}))
-  };
-}
-function gdScorecardEnsureHoleSlots(course){
-  if(!Array.isArray(scorecard.holes))scorecard.holes=[];
-  if(scorecard.holes.length>=18)return scorecard.holes;
-  const shell=gdScorecardShell(course||gdScorecardConfirmedCourse()||{name:scorecard.courseName||"Confirmed course"},"Scorecard slots ready");
-  const byHole=new Map((scorecard.holes||[]).map(h=>[Number(h.hole),h]));
-  scorecard.holes=shell.holes.map(row=>Object.assign({},row,byHole.get(Number(row.hole))||{}));
-  return scorecard.holes;
-}
-function gdScorecardHoleAt(hole,course){
-  const h=Number(hole)||1;
-  gdScorecardEnsureHoleSlots(course);
-  return scorecard.holes[h-1]||null;
-}
-function gdScorecardMergeScores(nextHoles,previousHoles){
-  const previous=new Map((previousHoles||[]).map(h=>[Number(h.hole),h]));
-  return (nextHoles||[]).map(h=>{
-    const old=previous.get(Number(h.hole));
-    if(!old)return h;
-    return Object.assign({},h,{
-      score:old.score!=null?old.score:h.score,
-      putts:old.putts!=null?old.putts:h.putts
-    });
-  });
-}
-function gdScorecardSeed(source,course,reason){
-  if(!Array.isArray(source?.seedHoles)||source.seedHoles.length!==18)return null;
-  const holes=source.seedHoles.map(h=>({hole:h.hole,par:h.par,index:h.index??null,metres:h.metres??null,score:null,putts:null,tees:{White:{par:h.par,index:h.index??null,metres:h.metres??null,gender:"M"}},sourceUrl:`${source.baseUrl}${source.holeListPath||""}`}));
-  return {courseKey:gdScorecardCourseKey(course),courseName:gdScorecardNormalizeName(course?.name)||source.name,source:"seed",sourceUrl:source.baseUrl,holes,error:reason||""};
-}
-function gdScorecardDistanceCount(holes){
-  return (holes||[]).filter(h=>{
-    const tee=h?.tees?.[sessionTee]||h?.tees?.White||h?.tees?.Blue||null;
-    return Number.isFinite(Number(h?.metres??h?.distanceM??tee?.metres??tee?.distanceM));
-  }).length;
-}
-async function gdFetchScorecardText(url){
-  try{
-    const res=await fetch(url,{mode:"cors",credentials:"omit",cache:"no-store",headers:{"Accept":"text/html,application/xhtml+xml"}});
-    if(!res.ok)throw new Error(`Website returned ${res.status}`);
-    return await res.text();
-  }catch(directError){
-    const proxy=await fetch("/api/scorecard-fetch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({url})});
-    let payload=null;
-    try{payload=await proxy.json()}catch(e){}
-    if(!proxy.ok||!payload?.html)throw new Error(payload?.error||directError?.message||"Scorecard source unavailable");
-    return payload.html;
-  }
-}
-function gdParseAkaranaHole(html,hole,sourceUrl){
-  const doc=new DOMParser().parseFromString(html,"text/html");
-  const rows=[...doc.querySelectorAll("tr[class*='course-marker']")];
-  const tees={};
-  rows.forEach(row=>{
-    const cells=[...row.querySelectorAll("td")].map(gdScorecardText);
-    if(cells.length<5)return;
-    const marker=gdScorecardMarkerKey(cells[0]);
-    if(!marker||/ C$/i.test(cells[0]))return;
-    const gender=/women/i.test(row.className)?"W":"M";
-    if(gender!=="M"&&tees[marker])return;
-    const par=parseInt(cells[2],10), index=parseInt(cells[3],10), metres=parseInt(cells[4],10);
-    if(!Number.isFinite(par))return;
-    tees[marker]={par,index:Number.isFinite(index)?index:null,metres:Number.isFinite(metres)?metres:null,gender};
-  });
-  const preferred=tees[sessionTee]||tees.White||tees.Blue||Object.values(tees)[0]||null;
-  if(!preferred)return null;
-  return {hole,par:preferred.par,index:preferred.index,metres:preferred.metres,score:null,putts:null,tees,sourceUrl};
-}
-function gdParseSimpleParHoles(html,sourceUrl){
-  const doc=new DOMParser().parseFromString(html,"text/html");
-  const rawText=String(doc.body?.innerText||doc.body?.textContent||"");
-  const text=gdScorecardCleanText(rawText);
-  const lines=rawText.split(/\n+/).map(gdScorecardCleanText).filter(Boolean);
-  const holes=new Map();
-  function addHole(row){
-    if(!row||!(row.hole>=1&&row.hole<=18)||!(row.par>=3&&row.par<=6))return;
-    const existing=holes.get(row.hole)||{};
-    const tees=Object.assign({},existing.tees||{},row.tees||{});
-    const preferred=tees[sessionTee]||tees.White||tees.Blue||tees.Yellow||Object.values(tees)[0]||null;
-    holes.set(row.hole,Object.assign({},existing,row,{
-      index:row.index??existing.index??null,
-      metres:row.metres??preferred?.metres??existing.metres??null,
-      tees,
-      score:null,
-      putts:null,
-      sourceUrl
-    }));
-  }
-  function addNumericScorecardRow(hole,values){
-    if(!(hole>=1&&hole<=18)||values.length<7)return;
-    const tees={
-      Black:{par:values[6],index:values[5],metres:values[0],gender:"M"},
-      Blue:{par:values[6],index:values[5],metres:values[1],gender:"M"},
-      White:{par:values[6],index:values[5],metres:values[2],gender:"M"},
-      Yellow:{par:values[6],index:values[5],metres:values[3],gender:"M"},
-      Red:{par:values[6],index:values[5],metres:values[4],gender:"M"}
-    };
-    const preferred=tees[sessionTee]||tees.White||tees.Blue||tees.Yellow||Object.values(tees)[0]||null;
-    addHole({hole,par:values[6],index:values[5],metres:preferred?.metres??null,tees});
-  }
-  function addTourHoleText(hole,par,body){
-    const tees={};
-    String(body||"").replace(/\b([A-Za-z][A-Za-z ]{0,20})\s+(\d{2,4})\s*(m|metres?|meters?|yds?|yards?)\b/gi,(_,tee,value,unit)=>{
-      const marker=gdScorecardMarkerKey(tee);
-      if(!marker)return "";
-      const raw=parseInt(value,10);
-      if(!Number.isFinite(raw))return "";
-      const metres=/^y/i.test(unit)?Math.round(raw*.9144):raw;
-      tees[marker]={par,index:null,metres,gender:"M"};
-      return "";
-    });
-    const stroke=String(body||"").match(/\bstroke\s*(\d{1,2})\b/i);
-    const preferred=tees[sessionTee]||tees.White||tees.Blue||tees.Yellow||Object.values(tees)[0]||null;
-    addHole({hole,par,index:stroke?parseInt(stroke[1],10):null,metres:preferred?.metres??null,tees});
-  }
-  doc.querySelectorAll("h1,h2,h3,h4").forEach(header=>{
-    const title=gdScorecardText(header);
-    const m=title.match(/\bhole\s*(\d{1,2})\b/i);
-    if(!m)return;
-    const hole=parseInt(m[1],10);
-    const container=header.parentElement||header;
-    let block=gdScorecardText(container);
-    if(!/\bpar\s*\d\b/i.test(block)&&container.nextElementSibling)block+=" "+gdScorecardText(container.nextElementSibling);
-    const parMatch=block.match(/\bpar\s*(\d)\b/i);
-    if(!parMatch)return;
-    addTourHoleText(hole,parseInt(parMatch[1],10),block);
-  });
-  lines.forEach(line=>{
-    const m=line.match(/^(\d{1,2})\s+((?:\d{2,4}\s+){5,}\d{1,2}\s+\d)(?:\s|$)/);
-    if(!m)return;
-    const hole=parseInt(m[1],10);
-    const values=(m[2].match(/\d+/g)||[]).map(value=>parseInt(value,10));
-    addNumericScorecardRow(hole,values);
-  });
-  const fullScorecardIndex=text.toLowerCase().indexOf("full scorecard");
-  if(fullScorecardIndex>=0){
-    const scorecardText=text.slice(fullScorecardIndex);
-    const rowPattern=/\b([1-9]|1[0-8])\s+((?:\d{2,4}\s+){5,}\d{1,2}\s+\d)(?=\s+(?:[1-9]|1[0-8]|out|in|total)\b)/gi;
-    let rowMatch;
-    while((rowMatch=rowPattern.exec(scorecardText))){
-      addNumericScorecardRow(parseInt(rowMatch[1],10),(rowMatch[2].match(/\d+/g)||[]).map(value=>parseInt(value,10)));
-    }
-  }
-  const tourPattern=/hole\s*(\d{1,2})\s*(?:[-–—][^-–—]*)?\s+par\s*(\d)\s*(?:[-–—]\s*)?([\s\S]*?)(?=hole\s*\d{1,2}\s*(?:[-–—]|\s+par)|$)/gi;
-  let tourMatch;
-  while((tourMatch=tourPattern.exec(text))){
-    const hole=parseInt(tourMatch[1],10), par=parseInt(tourMatch[2],10), body=tourMatch[3]||"";
-    addTourHoleText(hole,par,body);
-  }
-  const patterns=[
-    /hole\s*(\d{1,2})\D{0,80}?par\s*(\d)/gi,
-    /par\s*(\d)\D{0,80}?hole\s*(\d{1,2})/gi
-  ];
-  patterns.forEach((pattern,patternIndex)=>{
-    let match;
-    while((match=pattern.exec(text))){
-      const hole=patternIndex===0?parseInt(match[1],10):parseInt(match[2],10);
-      const par=patternIndex===0?parseInt(match[2],10):parseInt(match[1],10);
-      if(hole>=1&&hole<=18&&par>=3&&par<=6&&!holes.has(hole))addHole({hole,par,index:null,metres:null,tees:{}});
-    }
-  });
-  doc.querySelectorAll("table tr,.hole,.course-hole,[class*='hole']").forEach(row=>{
-    const cells=[...row.querySelectorAll("th,td")].map(gdScorecardText).filter(Boolean);
-    if(cells.length>=8&&/^\d{1,2}$/.test(cells[0])){
-      const hole=parseInt(cells[0],10);
-      const values=cells.slice(1).map(value=>parseInt(value,10)).filter(value=>Number.isFinite(value));
-      addNumericScorecardRow(hole,values);
-    }
-    const rowText=gdScorecardCleanText(row.innerText||row.textContent||"");
-    const m=rowText.match(/hole\s*(\d{1,2}).{0,80}?par\s*(\d)/i)||rowText.match(/\b(\d{1,2})\b.{0,80}?par\s*(\d)/i);
-    if(!m)return;
-    const hole=parseInt(m[1],10), par=parseInt(m[2],10);
-    const tees={};
-    rowText.replace(/\b(white|blue|yellow|red|black)\s+(\d{2,4})\s*(m|metres?|meters?|yds?|yards?)\b/gi,(_,tee,value,unit)=>{
-      const marker=gdScorecardMarkerKey(tee);
-      const raw=parseInt(value,10);
-      if(marker&&Number.isFinite(raw))tees[marker]={par,index:null,metres:/^y/i.test(unit)?Math.round(raw*.9144):raw,gender:"M"};
-      return "";
-    });
-    const direct=rowText.match(/\b(?:distance|length)\D{0,20}(\d{2,4})\s*(m|metres?|meters?|yds?|yards?)\b/i);
-    const directMetres=direct?(/^y/i.test(direct[2])?Math.round(parseInt(direct[1],10)*.9144):parseInt(direct[1],10)):null;
-    if(hole>=1&&hole<=18&&par>=3&&par<=6)addHole({hole,par,index:null,metres:Number.isFinite(directMetres)?directMetres:null,tees});
-  });
-  return Array.from({length:18},(_,i)=>holes.get(i+1)).filter(Boolean);
-}
-async function gdTryGenericWebsiteScorecard(source,course){
-  const paths=[source.holeListPath||"", "/hole-by-hole", "/scorecard", "/course-scorecard", "/tour", "/course", "/golf/course"];
-  for(const path of paths){
-    const url=`${source.baseUrl}${path}`;
-    try{
-      const html=await gdFetchScorecardText(url);
-      let holes=gdParseSimpleParHoles(html,url);
-      if(holes.length===18)return {courseKey:gdScorecardCourseKey(course),courseName:gdScorecardNormalizeName(course?.name)||source.name,source:source.sourceKind||"website",provider:source.provider||source.name||"",sourceUrl:url,holes,error:""};
-      const doc=new DOMParser().parseFromString(html,"text/html");
-      const links=[...doc.querySelectorAll("a[href]")].map(a=>a.getAttribute("href")).filter(h=>/hole|score|course-hole-details/i.test(h||"")).slice(0,24);
-      const linked=[];
-      for(const href of links){
-        const detailUrl=new URL(href,source.baseUrl).href;
-        const detailHtml=await gdFetchScorecardText(detailUrl);
-        linked.push(...gdParseSimpleParHoles(detailHtml,detailUrl));
-      }
-      const byHole=new Map(linked.map(h=>[h.hole,h]));
-      holes=Array.from({length:18},(_,i)=>byHole.get(i+1)).filter(Boolean);
-      if(holes.length===18)return {courseKey:gdScorecardCourseKey(course),courseName:gdScorecardNormalizeName(course?.name)||source.name,source:source.sourceKind||"website",provider:source.provider||source.name||"",sourceUrl:url,holes,error:""};
-    }catch(e){}
-  }
-  throw new Error("No readable 18-hole par list found on course website");
-}
-async function gdLoadAkaranaScorecard(source,course){
-  const holes=[];
-  for(let i=0;i<18;i++){
-    const url=`${source.baseUrl}/course-hole-details?HoleID=${source.detailIdStart+i}`;
-    const html=await gdFetchScorecardText(url);
-    const hole=gdParseAkaranaHole(html,i+1,url);
-    if(hole)holes.push(hole);
-  }
-  if(holes.length!==18||holes.some(h=>!Number.isFinite(Number(h.par))))throw new Error("Course website did not provide 18 holes with par");
-  return {courseKey:gdScorecardCourseKey(course),courseName:gdScorecardNormalizeName(course?.name)||source.name,source:source.sourceKind||"website",provider:source.provider||source.name||"",sourceUrl:source.baseUrl,holes,error:""};
-}
-async function gdLoadWebsiteScorecard(source,course){
-  if(source.detailIdStart){
-    try{return await gdLoadAkaranaScorecard(source,course)}catch(e){}
-  }
-  return await gdTryGenericWebsiteScorecard(source,course);
-}
-async function gdEnsureScorecardForCourse(course){
-  const key=gdScorecardCourseKey(course);
-  if(!key)return;
-  if(scorecard.courseKey===key&&scorecard.holes.length)return;
-  const cache=gdScorecardReadCache();
-  if(cache[key]?.holes?.length){
-    Object.assign(scorecard,cache[key],{loading:false});
-    return;
-  }
-  const sources=gdScorecardWebsiteCandidates(course);
-  const loadingShell=gdScorecardShell(course,"Loading course website scorecard");
-  Object.assign(scorecard,{courseKey:key,courseName:gdScorecardNormalizeName(course?.name),source:"loading",sourceUrl:"",loading:true,error:"",holes:loadingShell.holes});
-  renderScorecard();
-  try{
-    if(!sources.length)throw new Error("No course website scorecard source found");
-    let loaded=null,lastError=null,seed=null,loadedSources=[];
-    for(const source of sources){
-      try{
-        const candidate=await gdLoadWebsiteScorecard(source,course);
-        loadedSources.push(candidate);
-        if(!loaded)loaded=candidate;
-      }catch(e){lastError=e;if(!seed)seed=gdScorecardSeed(source,course,e?.message)}
-    }
-    if(loadedSources.length){
-      const sortedSources=loadedSources.slice().sort((a,b)=>gdScorecardDistanceCount(b.holes)-gdScorecardDistanceCount(a.holes)||((b.holes||[]).length-(a.holes||[]).length));
-      const sourceRows=loadedSources.map(source=>({
-        source:source.source||"",
-        provider:source.provider||"",
-        sourceUrl:source.sourceUrl||"",
-        holes:source.holes||[]
-      }));
-      loaded=Object.assign({},sortedSources[0],{scorecardSources:sourceRows});
-    }
-    if(!loaded&&seed)loaded=seed;
-    if(!loaded)throw lastError||new Error("No readable course scorecard found");
-    loaded.holes=gdScorecardMergeScores(loaded.holes,scorecard.holes);
-    Object.assign(scorecard,loaded,{loading:false});
-    cache[key]=loaded;
-    gdScorecardWriteCache(cache);
-  }catch(e){
-    const shell=gdScorecardShell(course,e?.message||"Course website scorecard was not available");
-    shell.holes=gdScorecardMergeScores(shell.holes,scorecard.holes);
-    Object.assign(scorecard,shell,{loading:false});
-    cache[key]=shell;
-    gdScorecardWriteCache(cache);
-  }
-  selectedHole=Math.max(1,Math.min(scorecard.holes.length||18,Number(selectedHole)||1));
-  renderScorecard();
-}
-function gdScorecardHoleView(h){
-  const tee=h?.tees?.[sessionTee]||h?.tees?.White||h?.tees?.Blue||null;
-  return Object.assign({},h,tee||{});
-}
-function gdScorecardKnownNumber(value){
-  if(value===null||value===undefined||String(value).trim()==="")return null;
-  const n=Number(value);
-  return Number.isFinite(n)?n:null;
-}
-function gdScorecardAvailableTees(){
-  const tees=new Set();
-  (scorecard.holes||[]).forEach(h=>Object.keys(h.tees||{}).forEach(t=>tees.add(t)));
-  const found=[...tees].filter(Boolean);
-  return found.length?found:GD_SCORECARD_DEFAULT_TEES;
-}
-function gdRenderScorecardTeeSelect(){
-  const select=document.getElementById("teeSelect");
-  if(!select)return;
-  const tees=gdScorecardAvailableTees();
-  if(!tees.includes(sessionTee))sessionTee=tees.includes("White")?"White":tees[0];
-  select.innerHTML=tees.map(t=>`<option value="${t}">${t}</option>`).join("");
-  select.value=sessionTee;
-}
-function gdToggleScoreHolePicker(event){
-  if(event){event.preventDefault();event.stopPropagation();}
-  gdScoreHolePickerOpen=!gdScoreHolePickerOpen;
-  renderScorecard();
-  return false;
-}
-function openScorecard(){
-  const course=gdScorecardConfirmedCourse();
-  gdScoreHolePickerOpen=true;
-  if(!course){
-    Object.assign(scorecard,{courseKey:"",courseName:"",source:"none",sourceUrl:"",loading:false,error:"",holes:[]});
-    renderScorecard();
-    openPanel("scorePanel");
-    toast("Confirm a course before using the scorecard");
-    return;
-  }
-  openPanel("scorePanel");
-  gdEnsureScorecardForCourse(course);
-}
-function renderScorecard(){
-  const panel=document.getElementById("scorePanel");
-  const course=gdScorecardConfirmedCourse();
-  const courseName=scorecard.courseName||gdScorecardNormalizeName(course?.name)||"No course selected";
-  const hasCourse=!!courseName&&courseName!=="No course selected";
-  const hasHoles=Array.isArray(scorecard.holes)&&scorecard.holes.length>0;
-  panel?.classList.toggle("gdScoreEmptyMode",!hasCourse||(!scorecard.loading&&!hasHoles));
-  panel?.classList.toggle("gdScoreShell",scorecard.source==="shell");
-  panel?.classList.toggle("gdScoreHolePickerClosed",!gdScoreHolePickerOpen);
-  document.getElementById("scoreCourse").textContent=hasCourse?courseName:"Course scorecard";
-  document.getElementById("gdScoreCourseName").textContent=courseName;
-  document.getElementById("gdScoreCourseLabel").textContent=scorecard.source==="website"?"Course website scorecard":scorecard.source==="gps-app"?"GPS app scorecard":scorecard.source==="seed"?"Saved course website card":scorecard.source==="shell"?"Score entry":"Confirmed course";
-  const teeSource=gdScorecardAvailableTees()===GD_SCORECARD_DEFAULT_TEES?"Default tees":"Course tees";
-  document.getElementById("gdScoreCourseMeta").textContent=scorecard.loading?"Loading scorecard from course website...":scorecard.source==="website"||scorecard.source==="gps-app"?`Pulled from ${scorecard.sourceUrl} · ${teeSource}`:scorecard.source==="seed"?`From saved course website data · ${teeSource}`:scorecard.source==="shell"?"Course website card unavailable. Using 18 empty score slots with default tees.":"Confirm a course to load a scorecard.";
-  const empty=document.getElementById("gdScoreEmpty");
-  if(empty)empty.textContent=scorecard.loading?"Loading scorecard from course website...":hasCourse?"No scorecard data is available for this course yet.":"Confirm a course first, then the scorecard can load.";
-  gdRenderScorecardTeeSelect();
-  const pickerToggle=document.getElementById("gdScoreHolePickerToggle");
-  const pickerCurrent=document.getElementById("gdScoreHolePickerCurrent");
-  if(pickerToggle)pickerToggle.setAttribute("aria-expanded",gdScoreHolePickerOpen?"true":"false");
-  if(pickerCurrent)pickerCurrent.textContent=`H${selectedHole||1}`;
-  const strip=document.getElementById("holeStrip");
-  strip.innerHTML="";
-  scorecard.holes.forEach(h=>{const b=document.createElement("button");b.className="holePill"+(h.hole===selectedHole?" active":"")+(h.score!=null?" scored":"")+(h.hole===currentPlayingHole?" playing":"");b.textContent=h.hole;b.setAttribute("aria-label",`Play hole ${h.hole}`);b.onclick=()=>{selectedHole=h.hole;gdScoreHolePickerOpen=false;playSelectedHole()};strip.appendChild(b)});
-  const h=hasCourse?gdScorecardHoleAt(selectedHole,course):scorecard.holes[selectedHole-1];
-  if(!h){
-    document.getElementById("scoreTitle").textContent="Hole 1";
-    document.getElementById("scoreMeta").textContent="No scorecard loaded";
-    document.getElementById("holeScore").textContent="—";
-    return;
-  }
-  const hv=gdScorecardHoleView(h), parts=[];
-  const par=gdScorecardKnownNumber(hv.par);
-  if(par!==null)parts.push(`Par ${par}`);
-  document.getElementById("scoreTitle").textContent=`Hole ${h.hole}`;
-  document.getElementById("scoreMeta").textContent=parts.length?`${sessionTee} tee · ${parts.join(" · ")}`:`${sessionTee} tee · Hole number only`;
-  document.getElementById("holeScore").textContent=h.score??"—";
-}
-function playSelectedHole(){const h=gdScorecardHoleAt(selectedHole);if(!h){toast("Select a course before choosing a hole");return false}const hv=gdScorecardHoleView(h);const par=gdScorecardKnownNumber(hv.par);currentPlayingHole=h.hole;try{sessionStorage.setItem("gd_active_playing_hole",String(h.hole));sessionStorage.setItem("gd_mapper_active_hole",String(h.hole));}catch(e){}try{window.gdRememberPlayingHole?.(h.hole)}catch(e){}setHole(par!==null?{hole:h.hole,par}:{hole:h.hole});setState(`Hole ${h.hole}`);renderScorecard();try{window.gdSyncPlayFlowRail?.()}catch(e){}return true}
-function setHole(h){const el=document.getElementById("holeLine");const skipRefresh=!!window.__gdHoleFrameSwitching;if(!h){el.style.display="none";try{if(!skipRefresh&&typeof gdV62Refresh==="function")setTimeout(gdV62Refresh,20)}catch(e){};return}const par=gdScorecardKnownNumber(typeof h==="object"?h.par:null);el.style.display="inline";el.textContent=par!==null?`Hole ${h.hole} · Par ${par}`:`Hole ${h.hole}`;try{if(!skipRefresh&&typeof gdV62Refresh==="function")setTimeout(gdV62Refresh,20)}catch(e){}}
-function gdPersistCurrentScorecard(){const key=scorecard.courseKey;if(!key)return;const cache=gdScorecardReadCache();cache[key]=Object.assign({},scorecard,{loading:false});gdScorecardWriteCache(cache)}
-function adjustHoleScore(d){const h=gdScorecardHoleAt(selectedHole);if(!h){toast("No hole selected");return}const hv=gdScorecardHoleView(h);const par=gdScorecardKnownNumber(hv.par);if(h.score==null)h.score=par??0;h.score=Math.max(0,h.score+d);gdPersistCurrentScorecard();renderScorecard()}
-function adjustHolePutts(d){const h=gdScorecardHoleAt(selectedHole);if(!h){toast("No hole selected");return}if(h.putts==null)h.putts=2;h.putts=Math.max(0,h.putts+d);gdPersistCurrentScorecard();renderScorecard()}
-function saveHoleScore(){const h=gdScorecardHoleAt(selectedHole);if(!h){toast("Select a course before saving a hole");return}const hv=gdScorecardHoleView(h);const par=gdScorecardKnownNumber(hv.par);if(h.score==null)h.score=par??0;gdManualScoreOverride=false;gdScorecardHasDrivenScore=true;playerScore=scorecard.holes.reduce((s,x)=>{const xv=gdScorecardHoleView(x);const p=gdScorecardKnownNumber(xv.par);return s+(x.score!=null&&p!==null?x.score-p:0)},0);gdPersistCurrentScorecard();updateScore();renderScorecard();gdPanelBack("scorePanel")}
-Object.assign(window,{gdScorecardConfirmedCourse,gdEnsureScorecardForCourse,openScorecard,renderScorecard,saveHoleScore,playSelectedHole,setHole,adjustHoleScore,adjustHolePutts});
+/* GPS scorecard ownership moved to scripts/inline/gd-gps-scorecard-owner-v1.js. */
 function checkLeavingGreen(){if(!currentPlayingHole||!greenCentre||!start)return;const d=map.distance(start,greenCentre);if(d<25)hadNearGreen=true;if(hadNearGreen&&d>35){pendingScoreHole=currentPlayingHole;hadNearGreen=false}}
 
 /* ---------------- Undo/helpers ---------------- */
@@ -26368,10 +24058,7 @@ function shellRouteName(route){
   return String(route).replace('Panel','').replace(/([A-Z])/g,' $1').trim();
 }
 function updateShellRouteLabel(){
-  const el=document.getElementById('shellRouteLabel');
-  if(el)el.textContent=shellRouteName(lastShellModule);
-  const back=document.getElementById('shellBackBtn');
-  if(back)back.style.visibility=(lastShellModule==='home'?'hidden':'visible');
+  try{window.GDShell?.init?.();}catch(e){}
 }
 function pushShellRoute(route){
   if(shellRouteStack[shellRouteStack.length-1]!==route) shellRouteStack.push(route);
@@ -26383,21 +24070,20 @@ function replaceShellRoute(route){
   lastShellModule=route;
   updateShellRouteLabel();
 }
-function setDockActive(name){['Gps','Bubble','Bag','Green','Admin'].forEach(k=>{const el=document.getElementById('dock'+k);if(el)el.classList.toggle('active',k.toLowerCase()===name);});}
+function setDockActive(name){['Gps','Bubble','Bag','Admin'].forEach(k=>{const el=document.getElementById('dock'+k);if(el)el.classList.toggle('active',k.toLowerCase()===name);});}
 function closeModulePanels(){document.querySelectorAll('.modulePanel.open').forEach(p=>p.classList.remove('open'));}
 function setShellLayer(layer){
-  document.body.classList.toggle('shell-home',layer==='home');
-  document.body.classList.toggle('shell-gps',layer==='gps');
-  document.body.classList.toggle('shell-module',layer==='module');
-  if(layer!=='gps'){
-    document.body.classList.remove('gdGpsActive','gps-active','gps-open','manual-gps-active');
+  if(window.GDShell){
+    if(layer==='home')return window.GDShell.showHome({source:'legacy-set-shell-layer',replace:true});
+    if(layer==='gps')return window.GDShell.enterGps({source:'legacy-set-shell-layer',replace:true});
+    if(layer==='module')return window.GDShell.openModule(lastShellModule||'module',{source:'legacy-set-shell-layer',replace:true});
   }
 }
 function hideGpsSurface(){
   try{document.getElementById('courseScreen')?.classList.add('hidden');}catch(e){}
   try{document.getElementById('gdCoursePinScreen')?.classList.add('hidden');}catch(e){}
   try{
-    document.body.classList.remove('gdCoursePickerOpen','gdCoursePinPromptActive','gdCourseOpening','gdToolRailOpen');
+    document.body.classList.remove('gdCoursePinPromptActive','gdCourseOpening','gdToolRailOpen');
     [
       'gdCourseNeedsPin',
       'gdCourseNeedsPinCourse',
@@ -26429,7 +24115,6 @@ function showModePicker(){
   closeAllPanels();
   closeModulePanels();
   hideGpsSurface();
-  document.body.classList.remove('gdGpsActive','gps-active','gps-open','manual-gps-active');
   document.getElementById('shellHome')?.classList.remove('hidden');
   showShellChrome(false);
   setShellLayer('home');
@@ -26473,7 +24158,7 @@ function enterGpsModule(opts={}){
 }
 function openShellModule(id,opts={}){
   if(id==='modeDashboardPanel')return showShellHome();
-  if(id==='greenToolsPanel')return openGpsWand();
+  if(id==='greenToolsPanel')return enterGpsModule(Object.assign({},opts,{preserveState:true}));
   closeAllPanels();
   closeModulePanels();
   hideGpsSurface();
@@ -26491,7 +24176,7 @@ function openRoute(route,opts={replace:true}){
   if(route==='home')return showShellHome();
   if(route==='gps')return enterGpsModule(opts);
   if(route==='modeDashboardPanel')return showShellHome();
-  if(route==='greenToolsPanel')return openGpsWand();
+  if(route==='greenToolsPanel')return enterGpsModule(Object.assign({},opts,{preserveState:true}));
   if(route==='profilePanel')return openProfilePanel(opts);
   if(route==='onboardingPanel')return openOnboarding(false);
   if(route==='bag')return openBag(opts);
@@ -26500,15 +24185,13 @@ function openRoute(route,opts={replace:true}){
   return openShellModule(route,opts);
 }
 function shellBack(){
-  if(document.body.classList.contains("gdMappedStartPromptActive")&&!document.body.classList.contains("gdManualStartPlacementActive")){
-    try{
-      document.body.classList.remove("shell-home","shell-module","gdToolRailOpen","gdCourseOpening","gdCoursePinPromptActive");
-      document.body.classList.add("shell-gps","gdGpsActive","gps-active","gdCoursePickerOpen");
-      document.body.dataset.clarityRoute="gps";
-      document.body.dataset.gdToolScreen="picker";
-      ["gdCourseNeedsPin","gdCourseNeedsPinCourse","gdCoursePinDecision","gdCourseDatabaseMapAvailable","gdCourseDatabaseMapSource","gdCourseAutoMapStatus","gdCourseAutoMappedHoles","gdCourseAutoMapSaved","gdCourseScannerSeed"].forEach(key=>delete document.body.dataset[key]);
-      window.__gdCoursePickerPinPromptActive=false;
-    }catch(e){}
+	  if(document.body.classList.contains("gdMappedStartPromptActive")&&!document.body.classList.contains("gdManualStartPlacementActive")){
+	    try{
+	      window.GDShell?.openCoursePicker?.({source:"legacy-shell-back-prelock",returnTarget:"gps"});
+	      document.body.classList.remove("gdToolRailOpen","gdCourseOpening","gdCoursePinPromptActive");
+	      ["gdCourseNeedsPin","gdCourseNeedsPinCourse","gdCoursePinDecision","gdCourseDatabaseMapAvailable","gdCourseDatabaseMapSource","gdCourseAutoMapStatus","gdCourseAutoMappedHoles","gdCourseAutoMapSaved","gdCourseScannerSeed"].forEach(key=>delete document.body.dataset[key]);
+	      window.__gdCoursePickerPinPromptActive=false;
+	    }catch(e){}
     try{const h=document.getElementById("shellHome");if(h){h.classList.add("hidden");h.style.display="none";h.style.visibility="hidden";h.style.opacity="0";}}catch(e){}
     try{const c=document.getElementById("courseScreen");if(c){c.classList.remove("hidden");c.style.display="flex";c.style.visibility="";c.style.opacity="";c.style.pointerEvents="auto";}}catch(e){}
     try{const hint=document.getElementById("hint");if(hint){hint.classList.remove("visible","gdMappedStartPill");hint.textContent="";}}catch(e){}
@@ -26558,13 +24241,7 @@ if(window.GolfDaddyCore){window.GolfDaddyCore.calculateCleanBubbleProfile=calcul
 
 const __gdOpenBag=openBag;
 openBag=function(opts={}){
-  closeModulePanels();
-  hideGpsSurface();
-  document.body.classList.remove('gdGpsActive','gps-active','gps-open','manual-gps-active');
-  document.getElementById('shellHome')?.classList.add('hidden');
-  showShellChrome(true);
-  setShellLayer('module');
-  setDockActive('bag');
+  window.GDShell?.openModule?.('bag',{source:'legacy-open-bag',fromGps:!!opts.fromGps,fromHome:!!opts.fromHome,replace:!!opts.replace});
   if(opts.fromGps){
     window.__gdBackTarget='gps';
     try{document.getElementById('bagPanel').dataset.gdReturnTarget='gps';}catch(e){}
@@ -26577,13 +24254,7 @@ openBag=function(opts={}){
 };
 const __gdOpenDeveloper=openDeveloperPanel;
 openDeveloperPanel=function(opts={}){
-  closeModulePanels();
-  hideGpsSurface();
-  document.body.classList.remove('gdGpsActive','gps-active','gps-open','manual-gps-active');
-  document.getElementById('shellHome')?.classList.add('hidden');
-  showShellChrome(true);
-  setShellLayer('module');
-  setDockActive('admin');
+  window.GDShell?.openModule?.('admin',{source:'legacy-open-admin',fromGps:!!opts.fromGps,fromHome:!!opts.fromHome,replace:!!opts.replace});
   opts.replace ? replaceShellRoute('admin') : pushShellRoute('admin');
   __gdOpenDeveloper();
 };
@@ -26632,139 +24303,6 @@ function gdNewProfileId(){
   return id;
 }
 function gdConsistencyLabel(v){return({elite:'Very consistent',good:'Pretty consistent',mid:'Mixed',high:'Wild sometimes',beginner:'Very variable'})[v]||'Mixed'}
-const GD_PERMISSION_STORE_KEY='gd_account_permission_v1';
-const GD_COACH_PROFILE_VISIBILITY_KEY='gd_coach_profile_visibility_v1';
-const GD_PERMISSIONS={
-  admin:{label:'Admin',publicLabel:'Coach',desc:'Coach-facing app plus Admin Settings and Developer Settings.'},
-  coach:{label:'Coach',publicLabel:'Coach',desc:'Coach tools without developer tuning.'},
-  player:{label:'Player',publicLabel:'Player',desc:'Core GPS, bag, profile and Shot Data.'},
-  subscribedPlayer:{label:'Subscribed Player',publicLabel:'Subscribed Player',desc:'Player flow plus subscribed features and saved data.'}
-};
-const GD_COACH_PROFILE_VISIBILITY_FIELDS=[
-  {key:'bag',label:'Bag',desc:'Club list and carry distances.'},
-  {key:'shot',label:'Shot Data',desc:'Course and shot pattern data.'},
-  {key:'courses',label:'Course Mapping',desc:'Saved mapped courses, greens, tees, bunkers and fairways.'},
-  {key:'play',label:'Play / GPS',desc:'Open GPS as that player.'}
-];
-const GD_COACH_PROFILE_VISIBILITY_DEFAULTS={bag:true,shot:true,courses:false,play:false};
-function gdNormalizePermission(v){
-  const raw=String(v||'player').trim();
-  const key=raw.toLowerCase().replace(/[\s_-]+/g,'');
-  if(key==='subscribed'||key==='subscriber'||key==='subscribedplayer'||key==='advanced')return 'subscribedPlayer';
-  if(key==='admin')return 'admin';
-  if(key==='coach')return 'coach';
-  if(key==='player')return 'player';
-  return 'player';
-}
-function gdPermissionLabel(v){return GD_PERMISSIONS[gdNormalizePermission(v)].label}
-function gdPermissionPublicLabel(v){return GD_PERMISSIONS[gdNormalizePermission(v)].publicLabel}
-function gdPermissionToMode(v){const p=gdNormalizePermission(v);return p==='admin'||p==='coach'?'coach':'player'}
-function gdModeLabel(v){return gdPermissionPublicLabel(gdNormalizePermission(v))}
-function gdGetCoachProfileVisibility(){
-  let saved={};
-  try{saved=JSON.parse(localStorage.getItem(GD_COACH_PROFILE_VISIBILITY_KEY)||'{}')||{};}catch(e){saved={};}
-  return {...GD_COACH_PROFILE_VISIBILITY_DEFAULTS,...saved};
-}
-function gdCoachCanSeeProfileFeature(key){
-  return !!gdGetCoachProfileVisibility()[key];
-}
-function gdSetCoachProfileVisibility(key,value){
-  const next=gdGetCoachProfileVisibility();
-  next[key]=!!value;
-  localStorage.setItem(GD_COACH_PROFILE_VISIBILITY_KEY,JSON.stringify(next));
-  gdRenderPermissionsAdmin();
-  try{if(typeof renderProfilePanel==="function")renderProfilePanel();}catch(e){}
-  try{if(typeof toast==="function")toast("Coach profile visibility updated");}catch(e){}
-  return next;
-}
-window.gdGetCoachProfileVisibility=gdGetCoachProfileVisibility;
-window.gdCoachCanSeeProfileFeature=gdCoachCanSeeProfileFeature;
-window.gdSetCoachProfileVisibility=gdSetCoachProfileVisibility;
-function gdGetAccountPermission(){
-  let hasAccountApi=false;
-  const paidActive=()=>{
-    try{return !!(window.ClarityPayments&&typeof window.ClarityPayments.hasActiveAccess==="function"&&window.ClarityPayments.hasActiveAccess());}catch(e){return false;}
-  };
-  try{
-    hasAccountApi=!!(window.GolfDaddyAccounts&&typeof window.GolfDaddyAccounts.current==="function");
-    const account=hasAccountApi?window.GolfDaddyAccounts.current():null;
-    if(account){
-      const permission=gdNormalizePermission(account.role||account.permission||"player");
-      return permission==="player"&&paidActive()?"subscribedPlayer":permission;
-    }
-  }catch(e){}
-  if(hasAccountApi)return paidActive()?"subscribedPlayer":"player";
-  let p=null;
-  try{p=typeof activePlayerProfile==='function'?activePlayerProfile():null;}catch(e){}
-  const permission=gdNormalizePermission(localStorage.getItem(GD_PERMISSION_STORE_KEY)||p?.permission||p?.accountPermission||p?.mode||'player');
-  return permission==="player"&&paidActive()?"subscribedPlayer":permission;
-}
-function gdApplyAccountPermission(value,opts={}){
-  const permission=gdNormalizePermission(value);
-  localStorage.setItem(GD_PERMISSION_STORE_KEY,permission);
-  let p=null;
-  try{p=typeof activePlayerProfile==='function'?activePlayerProfile():null;}catch(e){}
-  if(p){
-    p.permission=permission;
-    p.accountPermission=permission;
-    p.mode=gdPermissionToMode(permission);
-    p.updatedAt=new Date().toISOString();
-    try{savePlayerProfiles&&savePlayerProfiles();}catch(e){}
-    try{syncCoreProfileFromActive&&syncCoreProfileFromActive();}catch(e){}
-  }
-  gdRenderPermissionsAdmin();
-  gdRefreshPermissionChrome();
-  try{if(document.getElementById("practiceDataPanel")?.classList.contains("open")&&typeof renderPracticeData==="function")renderPracticeData();}catch(e){}
-  try{if(document.getElementById("statsPanel")?.classList.contains("open")&&typeof renderStats==="function")renderStats();}catch(e){}
-  if(!opts.silent)try{toast(`Permission set to ${gdPermissionLabel(permission)}`);}catch(e){}
-  return permission;
-}
-function gdRefreshPermissionChrome(){
-  const permission=gdGetAccountPermission();
-  document.body.dataset.gdPermission=permission;
-  const adminBtn=document.getElementById('dockAdmin');
-  if(adminBtn)adminBtn.textContent='Admin';
-  try{gdRefreshAccountQuickSignOut();}catch(e){}
-}
-function gdEnsureAccountQuickSignOut(){
-  if(!document.body)return null;
-  let btn=document.getElementById('gdQuickSignOut');
-  if(btn)btn.remove();
-  return null;
-}
-function gdRefreshAccountQuickSignOut(){
-  const btn=gdEnsureAccountQuickSignOut();
-  if(!btn)return;
-  let account=null;
-  try{account=window.GolfDaddyAccounts&&typeof window.GolfDaddyAccounts.current==="function"?window.GolfDaddyAccounts.current():gdCurrentAccount();}catch(e){account=null;}
-  btn.classList.toggle('visible',!!account);
-  btn.title=account?`Signed in as ${account.name||account.email||'account'}`:'';
-}
-function gdQuickSignOut(){
-  try{
-    if(window.GolfDaddyAccounts&&typeof window.GolfDaddyAccounts.logout==="function")window.GolfDaddyAccounts.logout();
-    else gdAccountLogout();
-  }catch(e){try{toast(e.message||'Could not sign out')}catch(_e){}}
-  try{showShellHome();}catch(e){}
-  try{gdRefreshAccountQuickSignOut();}catch(e){}
-  setTimeout(()=>{try{if(window.gdOpenProfileV67)window.gdOpenProfileV67();else if(window.openProfilePanel)window.openProfilePanel();}catch(e){}},30);
-}
-function gdRenderPermissionsAdmin(){
-  const root=document.getElementById('gdPermissionCard');
-  if(!root)return;
-  const current=gdGetAccountPermission();
-  const order=['admin','coach','player','subscribedPlayer'];
-  const visibility=gdGetCoachProfileVisibility();
-  const visibilityRows=GD_COACH_PROFILE_VISIBILITY_FIELDS.map(item=>{
-    return `<label class="gdCoachVisibilityOption"><input type="checkbox" data-gd-coach-visible="${gdEscapeHTML(item.key)}" ${visibility[item.key]?'checked':''}><div>${gdEscapeHTML(item.label)}<span>${gdEscapeHTML(item.desc)}</span></div></label>`;
-  }).join('');
-  root.innerHTML=`<h3>Account Permissions</h3><p>Admin and Coach share the same app feel. Admin only gets this settings surface and the tucked-away Developer Settings.</p><div class="gdPermissionGrid">${order.map(key=>{
-    const item=GD_PERMISSIONS[key];
-    return `<button type="button" class="gdPermissionOption ${key===current?'active':''}" data-gd-permission="${key}"><strong>${gdEscapeHTML(item.label)}</strong><span>${gdEscapeHTML(item.desc)}</span></button>`;
-  }).join('')}</div><div class="gdCoachVisibility"><h4>Coach can see on another profile</h4><p>Admin controls which player-profile cards appear when a coach opens someone else.</p><div class="gdCoachVisibilityGrid">${visibilityRows}</div></div><div class="gdPermissionSummary">Current app face: ${gdEscapeHTML(gdPermissionPublicLabel(current))}. Stored permission: ${gdEscapeHTML(gdPermissionLabel(current))}.</div>`;
-  root.querySelectorAll('[data-gd-permission]').forEach(btn=>{btn.onclick=()=>gdApplyAccountPermission(btn.dataset.gdPermission);});
-  root.querySelectorAll('[data-gd-coach-visible]').forEach(input=>{input.onchange=()=>gdSetCoachProfileVisibility(input.dataset.gdCoachVisible,input.checked);});
-}
 	const GD_DEFAULT_BAG_CELL_COUNT=12;
 	const GD_DEFAULT_BAG_7I_CARRY=155;
 	function gdDefaultBagRows(){return gdGenerateQuickBag(GD_DEFAULT_BAG_7I_CARRY).slice(0,GD_DEFAULT_BAG_CELL_COUNT)}
@@ -27610,61 +25148,11 @@ function gdPasswordResetRouteActive(){
 }
 function gdAuthRouteBootActive(){return gdPasswordResetRouteActive()||document.documentElement.classList.contains('gdAuthRouteBoot')}
 function bootProfileShell(){loadPlayerProfiles();gdInstallPlaceholderProfile();ensureProfile();gdAccountsBootstrap();savePlayerProfiles();syncCoreProfileFromActive();if(!gdAuthRouteBootActive())showShellHome();}
-document.addEventListener('DOMContentLoaded',()=>setTimeout(()=>{try{gdRefreshAccountQuickSignOut();}catch(e){}},80));
 window.GolfDaddyProfiles={load:loadPlayerProfiles,save:savePlayerProfiles,active:activePlayerProfile,open:openProfilePanel,onboarding:openOnboarding,generateQuickBag:gdGenerateQuickBag,installPlaceholder:gdInstallPlaceholderProfile};
 window.GolfDaddyAccounts={load:gdAccountsLoad,save:gdAccountsSave,state:()=>GD_ACCOUNT_STATE,current:gdCurrentAccount,accountForProfile:gdAccountForProfile,linkedPlayers:gdAccountLinkedPlayers,allAccounts:gdAdminAllAccounts,coachAccounts:gdAccountCoachAccounts,coachInviteFor:gdCoachInviteFor,generateCoachInvite:gdCoachGenerateInvite,connectCoachByCode:gdAccountConnectCoachByCode,linkExistingPlayerByEmail:gdAccountLinkExistingPlayerByEmail,signup:(data)=>gdAccountCreate(data,{activate:true}),login:gdAccountLogin,logout:gdAccountLogout,update:gdAccountUpdate,addPlayer:gdCoachAddPlayerAccount,addCoach:gdCoachAddCoachAccount,removeAccount:gdAdminRemoveAccount,viewProfile:gdAccountViewProfile,adminViewProfile:gdAdminViewProfile,viewOwnProfile:gdAccountViewOwnProfile,returnToOwnProfile:gdAccountReturnToOwnProfile,apply:gdAccountApplySession,roleLabel:gdAccountPublicRole};
-window.GolfDaddyPermissions={all:GD_PERMISSIONS,get:gdGetAccountPermission,set:gdApplyAccountPermission,label:gdPermissionLabel,publicLabel:gdPermissionPublicLabel,render:gdRenderPermissionsAdmin};
 window.ClarityCaddieProfiles=window.GolfDaddyProfiles;
 window.ClarityCaddieAccounts=window.GolfDaddyAccounts;
-window.ClarityCaddiePermissions=window.GolfDaddyPermissions;
 try{window.ClaritySession&&window.ClaritySession.sync("account-api-ready");}catch(e){}
-/* --- Wand in GPS test patch v2: overlay only, never reset current GPS state --- */
-function openGpsWand(evt){
-  try{ if(evt && evt.preventDefault) evt.preventDefault(); if(evt && evt.stopPropagation) evt.stopPropagation(); }catch(e){}
-  try{
-    var gpsPage=document.getElementById("gpsPage");
-    var gpsAlreadyActive=document.body.classList.contains("gps-active") || (gpsPage && gpsPage.classList.contains("active"));
-    // Only enter GPS from Home/Dock. If already inside GPS, do NOT call enterGpsModule because that can reset shot state.
-    if(!gpsAlreadyActive && typeof enterGpsModule === "function") enterGpsModule({preserveState:true, fromWand:true});
-  }catch(e){}
-  setTimeout(function(){
-    try{
-      greenActive=true;
-      var panel=document.getElementById("gdWandPanel");
-      if(panel) panel.classList.remove("hidden");
-      if(typeof setWandMode === "function") setWandMode((typeof wandMode!=="undefined" && wandMode) ? wandMode : "robustTonal", true);
-      if(typeof updateWandStatus === "function"){
-        if(typeof greenCentre!=="undefined" && greenCentre) updateWandStatus("Ready · GPS overlay mode");
-        else updateWandStatus("Set/lock a green first, then scan. No GPS reset triggered.");
-      }
-    }catch(e){}
-  }, 60);
-  return false;
-}
-
-
-/* --- Wand safe toggle hotfix: opening the wand must not reset/re-enter GPS --- */
-(function(){
-  var _oldClose = (typeof closeWandPanel === "function") ? closeWandPanel : null;
-  window.toggleGreenWand = function(evt){
-    try{ if(evt && evt.preventDefault) evt.preventDefault(); if(evt && evt.stopPropagation) evt.stopPropagation(); }catch(e){}
-    try{
-      var panel=document.getElementById("gdWandPanel");
-      var willOpen = !panel || panel.classList.contains("hidden") || !greenActive;
-      greenActive = willOpen;
-      if(panel) panel.classList.toggle("hidden", !willOpen);
-      if(willOpen){
-        if(typeof setWandMode === "function") setWandMode((typeof wandMode!=="undefined" && wandMode) ? wandMode : "robustTonal", true);
-        if(typeof updateWandStatus === "function"){
-          if((typeof target!=="undefined" && target) || (typeof greenCentre!=="undefined" && greenCentre)) updateWandStatus("Ready · scan or quick shape");
-          else updateWandStatus("Set/lock a green first, then scan. No reset triggered.");
-        }
-      }else if(typeof clearWandHandles === "function") clearWandHandles();
-    }catch(e){ console.warn("Wand toggle safe hotfix", e); }
-    return false;
-  };
-})();
-
 window.GolfDaddyShell={home:showShellHome,mode:setShellMode,dashboard:showShellHome,gps:enterGpsModule,module:openShellModule,back:shellBack,profile:openProfilePanel,onboarding:openOnboarding};
 window.ClarityCaddieShell=window.GolfDaddyShell;
 bootProfileShell();

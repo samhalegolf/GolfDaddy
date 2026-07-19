@@ -37,8 +37,7 @@
   const OSM_AUTO_GREEN_MAX_SPAN_M=145;
   const BUILT_IN_COURSE_CANDIDATES=[
     {courseName:'Akarana Golf Club',courseId:'akarana-golf-club',courseLat:-36.9174953,courseLng:174.7400425,source:'built-in-course'},
-    {courseName:'Maungakiekie Golf Club',courseId:'maungakiekie-golf-club',courseLat:-36.9229754,courseLng:174.7254871,source:'built-in-course',aliases:['maungakeikei','maunga']},
-    {courseName:'Windross Farm Golf Course',courseId:'windross-farm-golf-course',source:'built-in-course',aliases:['windross','windross farm']}
+    {courseName:'Maungakiekie Golf Club',courseId:'maungakiekie-golf-club',courseLat:-36.9229754,courseLng:174.7254871,source:'built-in-course',aliases:['maungakeikei','maunga']}
   ];
   function stopMappedMapMotion(){
     try{if(typeof map!=='undefined'&&map&&typeof map.stop==='function')map.stop();}catch(e){}
@@ -89,6 +88,10 @@
   function mappingCourseSnapshot(course,opts={}){
     const base=sessionCourse(course||courseObj())||course||{};
     let snap={...base};
+    try{
+      const owner=window.GDCourseLocation;
+      if(owner&&typeof owner.attachToCourse==='function')snap=owner.attachToCourse({...snap,courseCentre:opts.courseCentre||opts.courseCenter||snap.courseCentre||snap.courseCenter},{requireConfirmed:false});
+    }catch(e){}
     let cid=slug(snap.courseId||snap.id||snap.savedCourseId||snap.canonicalKey||'');
     const knownById=builtInCourseById(cid);
     if(knownById){
@@ -415,6 +418,11 @@
   }
   function mapSessionCenter(course=courseObj()){
     const c=course||{};
+    try{
+      const owner=window.GDCourseLocation;
+      const resolved=owner&&typeof owner.resolve==='function'&&!isManualGpsCourse(c)?owner.resolve(c,{requireConfirmed:false}):null;
+      if(resolved&&resolved.centre)return resolved.centre;
+    }catch(e){}
     if(isManualGpsCourse(c)){
       try{const point=finitePlainPoint(start);if(point)return point;}catch(e){}
       const gps=recentGpsPoint();
@@ -543,10 +551,6 @@
   function mappedModeCourseKey(course=activeCourseForMode()){
     return `${MAPPED_PLAY_MODE_PREFIX}${mappedModeCourseIdentity(course)}`;
   }
-  function isWindrossCourse(course=activeCourseForMode()){
-    const raw=[course?.name,course?.courseName,course?.courseId,course?.id].filter(Boolean).join(' ');
-    return /windross/i.test(raw);
-  }
   function courseHasMappedGreenFairway(course=null,hole=null){
     try{
       const h=validHoleNumber(hole);
@@ -575,9 +579,6 @@
       const courseValue=localStorage.getItem(mappedModeCourseKey(course));
       if(courseValue==='mapped')return 'mapped';
       if(courseValue==='unmapped')return 'unmapped';
-      const legacy=localStorage.getItem(MAPPED_PLAY_MODE_KEY);
-      if(isWindrossCourse(course)&&legacy==='mapped')return 'mapped';
-      if(isWindrossCourse(course)&&legacy==='unmapped')return 'unmapped';
     }catch(e){}
     return defaultMappedPlayMode(course);
   }
@@ -614,11 +615,6 @@
       const pickerOpen=!!(courseScreen&&!courseScreen.classList.contains('hidden')&&getComputedStyle(courseScreen).display!=='none'&&getComputedStyle(courseScreen).visibility!=='hidden');
       const mapped=mappedCourseAssistEnabled();
       document.body.classList.toggle('gdMappedCourseMode',mapped&&!pickerOpen);
-      if(mapped){
-        try{document.getElementById('gdWandPanel')?.classList.add('hidden');}catch(e){}
-        try{if(typeof clearWandHandles==='function')clearWandHandles();}catch(e){}
-        try{if(typeof window.gdClearWandLive==='function')window.gdClearWandLive();}catch(e){}
-      }
       if(btn&&canShow){
         btn.textContent=mapped?'Mapped':'Unmapped';
         btn.classList.toggle('active',mapped);
@@ -1081,6 +1077,11 @@
     return Math.hypot(dx,dy);
   }
   function courseFinderPoint(course){
+    try{
+      const owner=window.GDCourseLocation;
+      const resolved=owner&&typeof owner.get==='function'?owner.get(course):null;
+      if(resolved&&resolved.centre)return resolved.centre;
+    }catch(e){}
     const lat=Number(course?.finderLat??course?.courseFinderLat);
     const lng=Number(course?.finderLng??course?.courseFinderLng);
     return Number.isFinite(lat)&&Number.isFinite(lng)?{lat,lng}:null;
@@ -1219,6 +1220,13 @@
     if(!Number.isFinite(lat)||!Number.isFinite(lng))return null;
     const c=sessionCourse(courseObj());
     if(!c||isManualGpsCourse(c)||isAssumedCourseName(c.name))return null;
+    try{
+      const owner=window.GDCourseLocation;
+      if(owner&&typeof owner.confirm==='function'){
+        const saved=owner.confirm(c,{lat,lng},{source:source||'course-library-finder'});
+        return saved&&saved.storedCourse||saved;
+      }
+    }catch(e){}
     const uid=userId();
     const cid=courseId(c);
     const store=loadStore();
@@ -1310,6 +1318,7 @@
       resolverConfidence:Number.isFinite(Number(input.resolverConfidence))?Number(input.resolverConfidence):existing?.resolverConfidence,
       resolverMatchScore:Number.isFinite(Number(input.resolverMatchScore))?Number(input.resolverMatchScore):existing?.resolverMatchScore,
       resolverEvidence:Array.isArray(input.resolverEvidence)?input.resolverEvidence.slice(0,18):existing?.resolverEvidence,
+      greenShapeRefinement:input.greenShapeRefinement||existing?.greenShapeRefinement,
       createdAt:existing?.createdAt||nowIso(),
       updatedAt:nowIso()
     };
@@ -1509,6 +1518,162 @@
     for(let i=0;i<count;i++)pts.push(project(ll,(Math.PI*2*i)/count,radiusM));
     return pts;
   }
+  const AUTOMAPPER_GREEN_SHAPE_CROP_PX=240;
+  const AUTOMAPPER_GREEN_SHAPE_MAX_DRIFT_M=22;
+  const AUTOMAPPER_GREEN_SHAPE_MIN_RADIUS_M=4;
+  const AUTOMAPPER_GREEN_SHAPE_MAX_RADIUS_M=42;
+  function automapperGreenShapeEngine(){
+    try{return window.GDGreenShapeEngine||window.GolfDaddyGreenWandEngine||window.ClarityCaddieGreenWandEngine||null;}catch(e){return null;}
+  }
+  function automapperCaptureKey(course,hole){
+    const identity=course?.courseId||course?.id||course?.courseName||course?.name||courseId(course);
+    return 'gd_captured_hole_frame_v19_'+slug(String(identity||'course')+':h'+(Number(hole)||1));
+  }
+  function automapperRenderableManifest(manifest,hole){
+    if(!manifest||!manifest.originPx||!Array.isArray(manifest.tiles)||!manifest.tiles.length)return null;
+    const width=Number(manifest.imageWidth||manifest.width)||0;
+    const height=Number(manifest.imageHeight||manifest.height)||0;
+    const zoom=Number(manifest.captureZoom??manifest.zoom??manifest.tiles?.[0]?.z);
+    if(!width||!height||!Number.isFinite(zoom))return null;
+    const manifestHole=validHoleNumber(manifest.holeNumber||manifest.hole);
+    if(manifestHole&&hole&&manifestHole!==hole)return null;
+    return Object.assign({},manifest,{imageWidth:width,imageHeight:height,captureZoom:zoom});
+  }
+  function automapperReadCapturedManifest(course,hole){
+    const candidates=[];
+    const push=m=>{const clean=automapperRenderableManifest(m,hole);if(clean)candidates.push(clean);};
+    try{if(typeof window.gdCapturedSurfaceReadManifest==='function')push(window.gdCapturedSurfaceReadManifest(courseId(course),hole));}catch(e){}
+    try{if(typeof window.gdCapturedSurfaceReadManifest==='function')push(window.gdCapturedSurfaceReadManifest(course?.courseName||course?.name||courseId(course),hole));}catch(e){}
+    try{push(window.gdHoleImageCaptureManifest);}catch(e){}
+    try{push(window.__gdLastHoleImageCaptureManifest);}catch(e){}
+    try{push(window.__gdV19CapturedHoleFrameManifest);}catch(e){}
+    try{
+      const raw=localStorage.getItem(automapperCaptureKey(course,hole));
+      if(raw)push(JSON.parse(raw));
+    }catch(e){}
+    return candidates[0]||null;
+  }
+  function automapperLatLngToManifestPx(manifest,point){
+    try{
+      if(typeof map==='undefined'||!map||!manifest?.originPx)return null;
+      const ll=toLatLng(point);
+      if(!ll)return null;
+      const projected=map.project(ll,Number(manifest.captureZoom));
+      return {x:Number(projected.x)-Number(manifest.originPx.x||0),y:Number(projected.y)-Number(manifest.originPx.y||0)};
+    }catch(e){return null;}
+  }
+  function automapperManifestPxToLatLng(manifest,point){
+    try{
+      if(typeof map==='undefined'||!map||typeof L==='undefined'||!manifest?.originPx)return null;
+      const px=Number(point?.x)+Number(manifest.originPx.x||0);
+      const py=Number(point?.y)+Number(manifest.originPx.y||0);
+      const ll=map.unproject(L.point(px,py),Number(manifest.captureZoom));
+      return toPlain(ll);
+    }catch(e){return null;}
+  }
+  function automapperConstrainedCropBounds(manifest,centerPx){
+    const size=AUTOMAPPER_GREEN_SHAPE_CROP_PX;
+    const width=Number(manifest.imageWidth||manifest.width)||0;
+    const height=Number(manifest.imageHeight||manifest.height)||0;
+    if(!width||!height||!centerPx)return null;
+    const x=clamp(Number(centerPx.x)-size/2,0,Math.max(0,width-size));
+    const y=clamp(Number(centerPx.y)-size/2,0,Math.max(0,height-size));
+    return {x,y,width:Math.min(size,width),height:Math.min(size,height)};
+  }
+  function automapperLoadCropImage(src){
+    return new Promise((resolve,reject)=>{
+      if(!src)return reject(new Error('missing tile url'));
+      const img=new Image();
+      img.crossOrigin='anonymous';
+      img.onload=()=>resolve(img);
+      img.onerror=()=>reject(new Error('tile image load failed'));
+      img.src=src;
+    });
+  }
+  function automapperTileUrl(tile){
+    return tile?.url||tile?.src||tile?.imageUrl||tile?.dataUrl||tile?.href||'';
+  }
+  function automapperTileIntersectsCrop(tile,crop){
+    const x=Number(tile?.x)||0,y=Number(tile?.y)||0,w=Number(tile?.width)||256,h=Number(tile?.height)||256;
+    return x+w>crop.x&&y+h>crop.y&&x<crop.x+crop.width&&y<crop.y+crop.height;
+  }
+  async function automapperBuildGreenShapeCrop(manifest,centerPx){
+    const crop=automapperConstrainedCropBounds(manifest,centerPx);
+    if(!crop||crop.width<80||crop.height<80)return null;
+    const canvas=document.createElement('canvas');
+    canvas.width=Math.round(crop.width);
+    canvas.height=Math.round(crop.height);
+    const ctx=canvas.getContext('2d',{willReadFrequently:true});
+    if(!ctx)return null;
+    let drawn=0;
+    const tiles=(manifest.tiles||[]).filter(tile=>automapperTileIntersectsCrop(tile,crop));
+    for(const tile of tiles){
+      try{
+        const img=await automapperLoadCropImage(automapperTileUrl(tile));
+        ctx.drawImage(img,(Number(tile.x)||0)-crop.x,(Number(tile.y)||0)-crop.y,Number(tile.width)||256,Number(tile.height)||256);
+        drawn++;
+      }catch(e){}
+    }
+    if(!drawn)return null;
+    try{ctx.getImageData(Math.floor(canvas.width/2),Math.floor(canvas.height/2),1,1);}catch(e){return null;}
+    return {canvas,crop,seed:{x:Number(centerPx.x)-crop.x,y:Number(centerPx.y)-crop.y},tileCount:drawn};
+  }
+  function automapperGreenShapeVerdict(polygon,center,detected={}){
+    const pts=(polygon||[]).map(toPlain).filter(p=>Number.isFinite(p?.lat)&&Number.isFinite(p?.lng));
+    if(pts.length<8)return {ok:false,reason:'too-few-map-points'};
+    const centroid=shapeCentroid(pts);
+    if(!centroid)return {ok:false,reason:'missing-centroid'};
+    const drift=distance(center,centroid);
+    if(!Number.isFinite(drift)||drift>AUTOMAPPER_GREEN_SHAPE_MAX_DRIFT_M)return {ok:false,reason:'centroid-drift',driftM:drift};
+    const radii=pts.map(p=>distance(centroid,p)).filter(Number.isFinite);
+    const avg=radii.reduce((sum,v)=>sum+v,0)/Math.max(1,radii.length);
+    const max=Math.max(...radii,0);
+    const min=Math.min(...radii,Infinity);
+    if(avg<AUTOMAPPER_GREEN_SHAPE_MIN_RADIUS_M)return {ok:false,reason:'too-small',avgRadiusM:avg};
+    if(avg>AUTOMAPPER_GREEN_SHAPE_MAX_RADIUS_M||max>AUTOMAPPER_GREEN_SHAPE_MAX_RADIUS_M*1.55)return {ok:false,reason:'too-large',avgRadiusM:avg,maxRadiusM:max};
+    if(min>0&&max/min>7)return {ok:false,reason:'distorted-outline',avgRadiusM:avg,maxRadiusM:max,minRadiusM:min};
+    if((Number(detected.confidence)||0)<0.52)return {ok:false,reason:'low-confidence',confidence:Number(detected.confidence)||0};
+    return {ok:true,reason:'accepted',centroid,driftM:drift,avgRadiusM:avg,maxRadiusM:max,minRadiusM:min,confidence:Number(detected.confidence)||0};
+  }
+  async function automapperRunGreenShapeRefinement({course,hole,greenCenter,greenShape,debugRunId,attempt,source}={}){
+    const detail={hole,source:source||'automapper',attemptToken:attempt&&attempt.attemptToken||'',resolutionKey:attempt&&attempt.resolutionKey||''};
+    const skip=reason=>{
+      recordMappingDebug(debugRunId,{source:'automapper-green-shape-engine',phase:'skipped',event:'automapper-green-shape-refinement-skipped',summary:'Green Shape Engine refinement skipped',details:Object.assign({},detail,{skipReason:reason})});
+      return {accepted:false,phase:'skipped',reason};
+    };
+    const reject=(reason,extra={})=>{
+      recordMappingDebug(debugRunId,{source:'automapper-green-shape-engine',phase:'rejected',event:'automapper-green-shape-refinement-rejected',summary:'Green Shape Engine refinement rejected',details:Object.assign({},detail,extra,{rejectionReason:reason})});
+      return {accepted:false,phase:'rejected',reason,diagnostics:extra};
+    };
+    try{
+      if(!greenCenter||!Array.isArray(greenShape)||greenShape.length<3)return skip('missing-candidate-green');
+      if(attempt&&!isCurrentMappingAttempt(attempt))return skip('stale-mapping-attempt');
+      const engine=automapperGreenShapeEngine();
+      if(!engine||typeof engine.detect!=='function')return skip('engine-unavailable');
+      const manifest=automapperReadCapturedManifest(course,hole);
+      if(!manifest)return skip('no-renderable-crop');
+      const centerPx=automapperLatLngToManifestPx(manifest,greenCenter);
+      if(!centerPx)return skip('projection-unavailable');
+      const crop=await automapperBuildGreenShapeCrop(manifest,centerPx);
+      if(!crop)return skip('no-renderable-crop');
+      const detected=await engine.detect({
+        image:crop.canvas,
+        width:crop.canvas.width,
+        height:crop.canvas.height,
+        candidateCentrePx:crop.seed,
+        constraints:{width:crop.canvas.width,height:crop.canvas.height,minPoints:16,minConfidence:.52,minAcceptedDots:8,minBestChain:8}
+      });
+      if(!detected||!detected.ok)return reject(detected?.rejectionReason||'engine-rejected',{confidence:Number(detected&&detected.confidence)||0,metrics:detected&&detected.metrics||null,tileCount:crop.tileCount});
+      const polygon=(detected.polygonPixels||[]).map(p=>automapperManifestPxToLatLng(manifest,{x:Number(p.x)+crop.crop.x,y:Number(p.y)+crop.crop.y})).filter(Boolean);
+      const simplified=simplifyShape(polygon,56);
+      const verdict=automapperGreenShapeVerdict(simplified,greenCenter,detected);
+      if(!verdict.ok)return reject(verdict.reason,Object.assign({},verdict,{confidence:Number(detected.confidence)||0,metrics:detected.metrics||null,tileCount:crop.tileCount}));
+      recordMappingDebug(debugRunId,{source:'automapper-green-shape-engine',phase:'completed',event:'automapper-green-shape-refinement-accepted',summary:'Green Shape Engine refinement accepted',confidence:Number(detected.confidence)||0,details:Object.assign({},detail,{polygonPoints:simplified.length,tileCount:crop.tileCount,driftM:verdict.driftM,avgRadiusM:verdict.avgRadiusM,confidence:Number(detected.confidence)||0,metrics:detected.metrics||null})});
+      return {accepted:true,greenShape:simplified,confidence:Number(detected.confidence)||0,diagnostics:Object.assign({},verdict,{metrics:detected.metrics||null,tileCount:crop.tileCount})};
+    }catch(e){
+      return reject('refinement-error',{error:{message:e&&e.message||String(e)}});
+    }
+  }
   function hasConfirmedGreenShape(object){
     const shape=object?.greenShape||object?.shape;
     return object?.type==='green'&&!!object.confirmed&&Array.isArray(shape)&&shape.length>=3;
@@ -1705,6 +1870,11 @@
     }catch(e){}
   }
   function guideCoursePoint(course){
+    try{
+      const owner=window.GDCourseLocation;
+      const resolved=owner&&typeof owner.resolve==='function'?owner.resolve(course,{requireConfirmed:false}):null;
+      if(resolved&&resolved.centre)return resolved.centre;
+    }catch(e){}
     const point=finitePointFromValues([course?.courseLat,course?.lat,course?.latitude],[course?.courseLng,course?.lng,course?.longitude,course?.lon]);
     if(point)return point;
     const finder=courseFinderPoint(course);
@@ -3183,36 +3353,6 @@
     drawSavedGreen(rec,opts);
     return rec;
   }
-  function mapperGreenRecordForWand(){
-    const h=mapperHole();
-    const confirmed=activeGreenRecord(userId(),courseId(),h,{includeLegacy:true});
-    if(confirmed?.greenCenter)return confirmed;
-    const course=loadUserCourseData();
-    if(!course||!h)return null;
-    const object=objectValues(course,'green')
-      .filter(o=>Number(o.holeNumber)===Number(h)&&(o.greenCenter||o.position))
-      .sort((a,b)=>{
-        const aShape=Array.isArray(a.greenShape||a.shape)&&(a.greenShape||a.shape).length>=3?1:0;
-        const bShape=Array.isArray(b.greenShape||b.shape)&&(b.greenShape||b.shape).length>=3?1:0;
-        const aConfirmed=a.confirmed?1:0;
-        const bConfirmed=b.confirmed?1:0;
-        return (bShape-aShape)||(bConfirmed-aConfirmed)||String(b.updatedAt||'').localeCompare(String(a.updatedAt||''));
-      })[0];
-    return object?asGreenRecord(object):null;
-  }
-  function hydrateMapperGreenForWand(){
-    const rec=mapperGreenRecordForWand();
-    if(!rec?.greenCenter)return false;
-    if(rec.confirmed&&drawSavedGreen(rec,{quiet:true}))return true;
-    const center=toLatLng(rec.greenCenter);
-    if(!center)return false;
-    try{greenCentre=center;}catch(e){}
-    const pts=Array.isArray(rec.greenShape)&&rec.greenShape.length>=3?rec.greenShape.map(toLatLng).filter(Boolean):[];
-    if(pts.length>=3&&typeof drawGreenPolygon==='function'){
-      try{drawGreenPolygon(pts,'saved green',{settled:true});}catch(e){}
-    }
-    return true;
-  }
 	  function saveCurrentGreen(source='manual'){
 	    if(applyingSavedGreen)return null;
 	    try{if(!greenCentre)return null;}catch(e){return null;}
@@ -3323,7 +3463,6 @@
 	    saveCurrentGreen,
 	    activeGreenRecord,
 	    activeGreenShape,
-	    hydrateMapperGreenForWand,
 	    lockMappedGreenFromStart:forceLockMappedGreenFromStart,
 	    mappedHolePlayData,
 	    mappedFairwayAxisForShot,
@@ -3356,7 +3495,6 @@
   window.gdMappedFairwayLayupTarget=mappedFairwayLayupTarget;
   window.gdAutoMapOsmCourse=autoMapOsmCourse;
   window.gdScheduleOsmAutoMapForPlay=scheduleOsmAutoMapForPlay;
-  window.gdMapperHydrateGreenForWand=hydrateMapperGreenForWand;
 
 		  function ensureMapperToolsDrawer(){
     let el=document.getElementById('gdMapperToolsDrawer');
@@ -3364,7 +3502,7 @@
     el=document.createElement('div');
     el.id='gdMapperToolsDrawer';
     el.className='gdMapperToolsDrawer hidden';
-    el.innerHTML=`<div class="gdMapperToolsSheet"><div class="gdMapperToolsHead"><div><h2>Map Tools</h2><p>Save course objects inside the current course group. Greens and bunkers stay usable from their own library tabs.</p></div><button class="gdSheetClose" type="button" onclick="gdCloseMapperTools()">×</button></div><div class="gdMapperCourseLine" id="gdMapperCourseLine"></div><div class="gdMapperToolGrid"><button class="gdMapperToolChoice primary" type="button" id="gdMapperGreenTool"><strong>Green</strong><span>Use Green Wand, then save the shape as a reusable green target.</span></button><button class="gdMapperToolChoice" type="button" id="gdMapperBunkerTool"><strong>Bunker Pin</strong><span>Tap one bunker anchor and save it to the bunker map.</span></button><button class="gdMapperToolChoice" type="button" id="gdMapperTeeTool"><strong>Tee Pin</strong><span>Tap a tee reference point for the active hole.</span></button><button class="gdMapperToolChoice" type="button" id="gdMapperFairwayTool"><strong>Fairway Point</strong><span>Tap a fairway reference or landing zone for the active hole.</span></button></div></div>`;
+    el.innerHTML=`<div class="gdMapperToolsSheet"><div class="gdMapperToolsHead"><div><h2>Map Tools</h2><p>Save course objects inside the current course group. Greens and bunkers stay usable from their own library tabs.</p></div><button class="gdSheetClose" type="button" onclick="gdCloseMapperTools()">×</button></div><div class="gdMapperCourseLine" id="gdMapperCourseLine"></div><div class="gdMapperToolGrid"><button class="gdMapperToolChoice primary" type="button" id="gdMapperGreenTool"><strong>Green</strong><span>Tap a green centre and save it as a reusable green target.</span></button><button class="gdMapperToolChoice" type="button" id="gdMapperBunkerTool"><strong>Bunker Pin</strong><span>Tap one bunker anchor and save it to the bunker map.</span></button><button class="gdMapperToolChoice" type="button" id="gdMapperTeeTool"><strong>Tee Pin</strong><span>Tap a tee reference point for the active hole.</span></button><button class="gdMapperToolChoice" type="button" id="gdMapperFairwayTool"><strong>Fairway Point</strong><span>Tap a fairway reference or landing zone for the active hole.</span></button></div></div>`;
     document.body.appendChild(el);
     el.addEventListener('click',ev=>{if(ev.target===el)gdCloseMapperTools();});
     el.querySelector('#gdMapperGreenTool').onclick=startMapperGreenCapture;
@@ -3379,8 +3517,7 @@
 	    el=document.createElement('div');
 	    el.id='gdMapperToolFlyout';
 	    el.className='gdMapperToolFlyout hidden';
-	    el.innerHTML=`<div class="gdMapperHoleStepper" aria-label="Mapping hole"><button type="button" data-hole-step="-1">‹</button><strong id="gdMapperHoleValue">H1</strong><button type="button" data-hole-step="1">›</button></div><button class="gdMapperFlyoutAction primary" data-map-tool="green" type="button" aria-label="Green pin"><span class="ico">▰</span><span class="txt">Green</span></button><button class="gdMapperFlyoutAction gdFullMappingOnly" data-map-tool="greenwand" type="button" aria-label="Green wand"><span class="ico">▦</span><span class="txt">Wand</span></button><button class="gdMapperFlyoutAction" data-map-tool="bunker" type="button" aria-label="Bunker pin"><span class="ico">◒</span><span class="txt">Bunker</span></button><button class="gdMapperFlyoutAction gdFullMappingOnly" data-map-tool="mapstyle" type="button" aria-label="OSM line guide"><span class="ico">▧</span><span class="txt">Guide</span></button><button class="gdMapperFlyoutAction gdFullMappingOnly" data-map-tool="automap" type="button" aria-label="Auto map from OSM"><span class="ico">A</span><span class="txt">Auto</span></button><button class="gdMapperFlyoutAction" data-map-tool="tee" type="button" aria-label="Tee pin"><span class="ico">T</span><span class="txt">Tee</span></button><button class="gdMapperFlyoutAction" data-map-tool="fairway" type="button" aria-label="Fairway point"><span class="ico">•</span><span class="txt">Fairway</span></button><button class="gdMapperFlyoutAction gdFullMappingOnly gdMapperClearHoleTool" data-map-tool="clearhole" type="button" aria-label="Clear this hole"><span class="ico">×</span><span class="txt">Clear H1</span></button>`;
-	    el.querySelector('[data-map-tool="greenwand"]')?.insertAdjacentHTML('afterend','<button class="gdMapperFlyoutAction gdFullMappingOnly" data-map-tool="assignhole" type="button" aria-label="Assign hole"><span class="ico" id="gdMapperAssignHoleValue">H1</span><span class="txt">Hole</span></button>');
+	    el.innerHTML=`<div class="gdMapperHoleStepper" aria-label="Mapping hole"><button type="button" data-hole-step="-1">‹</button><strong id="gdMapperHoleValue">H1</strong><button type="button" data-hole-step="1">›</button></div><button class="gdMapperFlyoutAction primary" data-map-tool="green" type="button" aria-label="Green pin"><span class="ico">▰</span><span class="txt">Green</span></button><button class="gdMapperFlyoutAction gdFullMappingOnly" data-map-tool="assignhole" type="button" aria-label="Assign hole"><span class="ico" id="gdMapperAssignHoleValue">H1</span><span class="txt">Hole</span></button><button class="gdMapperFlyoutAction" data-map-tool="bunker" type="button" aria-label="Bunker pin"><span class="ico">◒</span><span class="txt">Bunker</span></button><button class="gdMapperFlyoutAction gdFullMappingOnly" data-map-tool="mapstyle" type="button" aria-label="OSM line guide"><span class="ico">▧</span><span class="txt">Guide</span></button><button class="gdMapperFlyoutAction gdFullMappingOnly" data-map-tool="automap" type="button" aria-label="Auto map from OSM"><span class="ico">A</span><span class="txt">Auto</span></button><button class="gdMapperFlyoutAction" data-map-tool="tee" type="button" aria-label="Tee pin"><span class="ico">T</span><span class="txt">Tee</span></button><button class="gdMapperFlyoutAction" data-map-tool="fairway" type="button" aria-label="Fairway point"><span class="ico">•</span><span class="txt">Fairway</span></button><button class="gdMapperFlyoutAction gdFullMappingOnly gdMapperClearHoleTool" data-map-tool="clearhole" type="button" aria-label="Clear this hole"><span class="ico">×</span><span class="txt">Clear H1</span></button>`;
 	    el.insertAdjacentHTML('beforeend','<button class="gdMapperFlyoutAction gdFullMappingOnly gdMapperSaveTool" data-map-tool="save" type="button" aria-label="Save mapping"><span class="ico">✓</span><span class="txt">Save</span></button><button class="gdMapperFlyoutAction gdFullMappingOnly gdMapperNextTool" data-map-tool="next" type="button" aria-label="Next hole"><span class="ico">›</span><span class="txt">Next</span></button>');
 	    document.body.appendChild(el);
 	    el.addEventListener('pointerdown',ev=>ev.stopPropagation());
@@ -3407,7 +3544,6 @@
 	      }
 	      const replace=!!(window.gdFullMappingMode&&mapperToolDone(tool));
 	      if(tool==='green')startMapperGreenCapture(ev,{replaceExisting:replace});
-	      if(tool==='greenwand')startMapperGreenWand(ev);
 	      if(tool==='assignhole')assignActiveGreenFromToolbar();
 	      if(tool==='automap')autoMapOsmCourse();
 	      if(tool==='save')saveFullMappingMode();
@@ -3592,7 +3728,7 @@
 	      resolverEvidence:Array.isArray(guide.resolverEvidence)?guide.resolverEvidence.slice(0,18):[]
 	    };
 	  }
-	  function saveOsmAutoHole(guide,greens,course=loadUserCourseData(),opts={}){
+	  async function saveOsmAutoHole(guide,greens,course=loadUserCourseData(),opts={}){
 	    const h=validHoleNumber(guide?.hole);
 	    const pts=(guide?.points||[]).map(toPlain).filter(Boolean);
 	    if(!h||pts.length<2)return {saved:0,greenPolygon:false,fallback:false};
@@ -3617,18 +3753,27 @@
 	    const resolverPatch=resolverObjectPatchForGuide(guide,guide?.source);
 	    const resolverConfirmed=!guide?.resolverProvisional;
 	    const countCommittedSave=object=>{if(object&&(resolverConfirmed||!guide?.resolverVersion))saved++;};
-	    if(!state.green&&greenCenter&&greenShape.length>=3){
+	    const refinement=!state.green?await automapperRunGreenShapeRefinement({course:selectedCourse,hole:h,greenCenter,greenShape,debugRunId:opts.debugRunId||'',attempt:opts.debugAttemptContext||null,source:match?.green?'osm_auto_green_polygon':'osm_auto_green_estimate'}):{accepted:false,phase:'skipped',reason:'green-already-mapped'};
+	    const acceptedRefinement=refinement&&refinement.accepted;
+	    const saveGreenShape=acceptedRefinement?refinement.greenShape:greenShape;
+	    const greenSource=acceptedRefinement?'osm_auto_green_refined':(resolverPatch.source||(match?.green?'osm_auto_green_polygon':'osm_auto_green_estimate'));
+	    const greenResolverPatch=acceptedRefinement?Object.assign({},resolverPatch,{
+	      resolverConfidence:Math.max(Number(resolverPatch.resolverConfidence)||0,Number(refinement.confidence)||0),
+	      resolverEvidence:[...(Array.isArray(resolverPatch.resolverEvidence)?resolverPatch.resolverEvidence:[]),'green-shape-engine-refinement'].slice(0,18),
+	      greenShapeRefinement:{engine:'GDGreenShapeEngine',status:'accepted',confidence:Number(refinement.confidence)||0,diagnostics:refinement.diagnostics||null}
+	    }):resolverPatch;
+	    if(!state.green&&greenCenter&&saveGreenShape.length>=3){
 		      countCommittedSave(saveCourseObject({
-		        ...resolverPatch,
+		        ...greenResolverPatch,
 		        userId:uid,
 		        courseId:cid,
 		        courseName:name,
 		        course:selectedCourse,
 		        type:'green',
 	        position:greenCenter,
-	        shape:greenShape,
-	        greenShape,
-	        source:resolverPatch.source||(match?.green?'osm_auto_green_polygon':'osm_auto_green_estimate'),
+	        shape:saveGreenShape,
+	        greenShape:saveGreenShape,
+	        source:greenSource,
 	        holeNumber:h,
 	        confirmed:resolverConfirmed,
 	        maxDedupeDistanceM:4
@@ -3642,19 +3787,22 @@
 		        countCommittedSave(saveCourseObject({...resolverPatch,userId:uid,courseId:cid,courseName:name,course:selectedCourse,type:'fairway',position:point,source:resolverPatch.source||(index?'osm_auto_fairway_bend':'osm_auto_fairway'),holeNumber:h,confirmed:resolverConfirmed,maxDedupeDistanceM:4}));
 		      });
 		    }
-	    return {saved,greenPolygon:!!match?.green,fallback:!match?.green};
+	    return {saved,greenPolygon:!!match?.green,fallback:!match?.green,refinement};
 	  }
-	  function persistOsmGuideBundle(course,bundle,opts={},debugRunId='',attempt=null){
+	  async function persistOsmGuideBundle(course,bundle,opts={},debugRunId='',attempt=null){
 	    const coursePoint=guideCoursePoint(course);
 	    const guides=opts.hole?[bestGuideForHole(bundle&&bundle.guides,opts.hole,coursePoint)].filter(Boolean):chooseAutoMapGuides(bundle&&bundle.guides,coursePoint);
-	    if(!guides.length)return {saved:0,holes:0,polygons:0,fallbacks:0,guides:[],guideBundle:bundle||null};
-	    let saved=0,polygons=0,fallbacks=0;
-	    guides.forEach(guide=>{
-		      const result=saveOsmAutoHole(guide,bundle&&bundle.greens,loadUserCourseData(userId(),courseId(course))||course,{replaceExisting:!!opts.replaceExisting,sessionCourse:course});
+	    if(!guides.length)return {saved:0,holes:0,polygons:0,fallbacks:0,refinedGreenShapes:0,refinementRejected:0,refinementSkipped:0,guides:[],guideBundle:bundle||null};
+	    let saved=0,polygons=0,fallbacks=0,refinedGreenShapes=0,refinementRejected=0,refinementSkipped=0;
+	    for(const guide of guides){
+		      const result=await saveOsmAutoHole(guide,bundle&&bundle.greens,loadUserCourseData(userId(),courseId(course))||course,{replaceExisting:!!opts.replaceExisting,sessionCourse:course,debugRunId,debugAttemptContext:attempt});
 	      saved+=result.saved;
 	      if(result.greenPolygon)polygons++;
 	      if(result.fallback)fallbacks++;
-	    });
+	      if(result.refinement&&result.refinement.accepted)refinedGreenShapes++;
+	      else if(result.refinement&&result.refinement.phase==='rejected')refinementRejected++;
+	      else if(result.refinement&&result.refinement.phase==='skipped')refinementSkipped++;
+	    }
 	    const active=opts.hole?validHoleNumber(opts.hole):mapperHole();
 	    const nextCourse=loadUserCourseData(userId(),courseId(course));
 	    if(nextCourse)drawHoleObjects(nextCourse,active);
@@ -3666,7 +3814,7 @@
 	      if(window.gdFullMappingMode)focusMapperHoleReference(active,{drawObjects:false,frame:true});
 	      else if(nextCourse)frameMappedHoleForPlay(nextCourse,active,{quiet:true,promptStart:!!opts.promptStart,allowAnyStart:true});
 	    }
-	    return {saved,holes:guides.length,polygons,fallbacks,guides,guideBundle:bundle||null};
+	    return {saved,holes:guides.length,polygons,fallbacks,refinedGreenShapes,refinementRejected,refinementSkipped,guides,guideBundle:bundle||null};
 	  }
 	  async function autoMapOsmCourse(opts={}){
 	    cancelMapperCapture();
@@ -3705,7 +3853,7 @@
 	      recordStaleMappingActivity(attempt,{eventSource:'automapper',event:'automapper-stale-result-rejected',summary:'AutoMapper stale result rejected',attemptedAction:'persist-geometry',callerFunction:'autoMapOsmCourse'});
 	      return false;
 	    }
-	    const persisted=persistOsmGuideBundle(course,bundle,opts,debugRunId,attempt);
+	    const persisted=await persistOsmGuideBundle(course,bundle,opts,debugRunId,attempt);
 	    if(!persisted.guides.length){
 	      if(!quiet)toastSafe('No OSM hole lines found');
 	      return Object.assign({saved:0,holes:0,polygons:0,fallbacks:0,automapperStatus:'failed',automapperError:bundle.automapperError||null},persisted);
@@ -3725,6 +3873,9 @@
 	      savedObjects:saved,
 	      shapedGreens:polygons,
 	      fallbackGreenShapes:fallbacks,
+	      refinedGreenShapes:persisted.refinedGreenShapes||0,
+	      refinementRejected:persisted.refinementRejected||0,
+	      refinementSkipped:persisted.refinementSkipped||0,
 	      hole:opts.hole?active:'',
 	      existingTrustedMap:!saved
 	    }});
@@ -3777,7 +3928,7 @@
 	    }).join('');
 	  }
 	  function mapperToolDone(type){
-	    if(type==='mapstyle'||type==='greenwand'||type==='assignhole'||type==='automap'||type==='save'||type==='next'||type==='clearhole')return false;
+	    if(type==='mapstyle'||type==='assignhole'||type==='automap'||type==='save'||type==='next'||type==='clearhole')return false;
 	    const h=mapperHole();
 	    const objects=courseObjectsForMapper();
 	    if(type==='sand')type='bunker';
@@ -3785,7 +3936,7 @@
 	    return objects.some(o=>o.type===type&&Number(o.holeNumber)===Number(h)&&(type!=='green'||o.confirmed));
 	  }
 	  function mapperToolCaptureType(type){
-	    if(type==='mapstyle'||type==='greenwand'||type==='assignhole'||type==='automap'||type==='save'||type==='next'||type==='clearhole')return '';
+	    if(type==='mapstyle'||type==='assignhole'||type==='automap'||type==='save'||type==='next'||type==='clearhole')return '';
 	    if(type==='sand')return 'bunker';
 	    return type||'';
 	  }
@@ -3948,28 +4099,7 @@
 	    closeMapperToolFlyout();
 	  };
 	  function startMapperGreenCapture(ev,opts={}){
-	    if(window.gdFullMappingMode){
-	      startMapperGreenPinCapture(opts);
-	      return;
-	    }
-	    startMapperGreenWand(ev);
-		  }
-	  function startMapperGreenWand(ev){
-	    cancelMapperCapture();
-	    try{mode='ready';}catch(e){}
-	    try{if(typeof gdSuppressMapPlacementClick==='function')gdSuppressMapPlacementClick(700);}catch(e){}
-	    try{hydrateMapperGreenForWand();}catch(e){}
-	    updateMapperHoleUi();
-	    setMapperContext('green');
-	    hintSafe('Green tool ready');
-	    toastSafe('Green tool ready');
-    try{
-      const wand=document.getElementById('greenToolBtn');
-      if(typeof window.gdCompactWandOpen==='function')window.gdCompactWandOpen(ev||{preventDefault(){},stopPropagation(){}});
-      else if(typeof window.gdToggleWandTool==='function')window.gdToggleWandTool(ev||{preventDefault(){},stopPropagation(){}});
-      else if(typeof openGpsWand==='function')openGpsWand(ev||null);
-      else if(wand)wand.click();
-    }catch(e){}
+	    startMapperGreenPinCapture(opts);
 		  }
 	  function assignActiveGreenFromToolbar(){
 	    cancelMapperCapture();
@@ -3991,7 +4121,6 @@
 	    const advance=!!opts.advance;
 	    const nextHole=Math.min(18,savedHole+1);
 	    const targetHole=advance&&savedHole<18?nextHole:savedHole;
-	    try{if(typeof closeWandPanel==='function')closeWandPanel();}catch(e){}
 	    try{renderCourseLibraryPanel();}catch(e){}
 	    try{gdCLRefreshProfileCard();}catch(e){}
 	    setMapperHole(targetHole);
@@ -4017,7 +4146,6 @@
 	      const green=resetUserGreen(uid,cid,h)?1:0;
 	      const tees=deleteCourseObjectsForHole('tee',h,uid,cid);
 	      const fairways=deleteCourseObjectsForHole('fairway',h,uid,cid);
-	      try{if(typeof closeWandPanel==='function')closeWandPanel();}catch(e){}
 	      try{greenPolygon=null;greenCentre=null;}catch(e){}
 	      try{[greenMarker,greenOutline,greenSoft,greenLabel,frontLabel,backLabel].forEach(l=>l&&map.removeLayer(l));greenMarker=greenOutline=greenSoft=greenLabel=frontLabel=backLabel=null;}catch(e){}
 	      const course=loadUserCourseData();
@@ -4032,7 +4160,6 @@
 	    }
 	  }
 	  function startMapperGreenPinCapture(opts={}){
-	    try{if(typeof closeWandPanel==='function')closeWandPanel();}catch(e){}
 	    try{mode='ready';}catch(e){}
 	    setMapperContext('');
 	    startMapperObjectPinCapture('green',opts.replaceExisting?'replacement green pin':'green pin','mapping_green_pin',opts);
@@ -4718,7 +4845,7 @@
   }
   function interactiveGreenBlockedTarget(event){
     const target=event&&event.target;
-    return !!(target&&target.closest&&target.closest('button,a,input,select,textarea,.leaflet-control,.rightRail,.shellBar,.dock,#gdV62UndoDock,#gdV62ModeSwitch,#shotTile,#gdV62GpsBadge,#hint,#toast,#gdWandPanel,#gdMapperToolFlyout,#gdMapperToolsDrawer,#gdMapperHoleStrip,.panel,.modulePanel,#courseScreen:not(.hidden)'));
+    return !!(target&&target.closest&&target.closest('button,a,input,select,textarea,.leaflet-control,.rightRail,.shellBar,.dock,#gdV62UndoDock,#gdV62ModeSwitch,#shotTile,#gdV62GpsBadge,#hint,#toast,#gdMapperToolFlyout,#gdMapperToolsDrawer,#gdMapperHoleStrip,.panel,.modulePanel,#courseScreen:not(.hidden)'));
   }
   function saveInteractiveFallbackGreen(course,hole,greenPoint,reason){
     const h=validHoleNumber(hole)||1;
@@ -4837,7 +4964,8 @@
     hideCourseLoading(0);
     try{if(typeof window.gdClearHoleImageRuntime==='function')window.gdClearHoleImageRuntime('interactive-green-fallback');}catch(e){}
     try{
-      document.body.classList.add('shell-gps','gdGpsActive','gps-active','gdMappedCourseMode','gdGpsInteractiveGreenFallbackActive','gdGpsLiveMapAllowed','gdGpsExplicitMapMode');
+	      window.GDShell?.enterGps?.({source:'interactive-green-fallback',replace:true,preserveState:true});
+	      document.body.classList.add('gdMappedCourseMode','gdGpsInteractiveGreenFallbackActive','gdGpsLiveMapAllowed','gdGpsExplicitMapMode');
       document.body.classList.remove('gdCourseOpening','gdGpsFramePreparing','gdCoursePlayPipelinePreparing','gdHoleFrameLoading','gdCapturedFrameUnavailable','gdGpsLiveMapSuppressed','gdGpsHoleTransitioning','gdCapturedHoleFrameCameraOn','gdHoleImageCameraOn','gdMappedStartPromptActive','gdManualStartPlacementActive','gdHeadToTeeFrameActive','gdLockStateFrameActive','gd-frame-hard-locked');
       document.body.dataset.gdInteractiveGreenFallbackReason=String(reason||'automatic-resolution-failed');
       document.body.dataset.gdInteractiveGreenFallbackHole=String(h);
@@ -4906,7 +5034,7 @@
     const payload=acquisition.payload||baseBundle.osmPayload||{elements:[]};
     const resolvedBundle=await resolveCourseGeometryGuideBundle(request.course,payload,baseBundle,Object.assign({},opts,{debugRunId:request.debugRunId,skipGeometryResolver:false,forceNativeResolver:true,suppressSkipTelemetry:true,source:'native-resolver',reason:request.reason,debugAttemptContext:attempt,callerFunction:'runCourseMappingAttempt',nativeResolverSourceLoadError:acquisition.sourceLoadError||null,nativeResolverSourceLoadStatus:acquisition.source||'',nativeResolverScorecardPromise:scorecardPromise}));
     if(resolvedBundle&&resolvedBundle.stale)return {ran:true,stale:true,bundle:resolvedBundle};
-	    const persisted=persistOsmGuideBundle(request.course,resolvedBundle,Object.assign({},opts,{quiet:true,frame:false,promptStart:true,hole:opts.wholeCourse===false?request.hole:null}),request.debugRunId,attempt);
+	    const persisted=await persistOsmGuideBundle(request.course,resolvedBundle,Object.assign({},opts,{quiet:true,frame:false,promptStart:true,hole:opts.wholeCourse===false?request.hole:null}),request.debugRunId,attempt);
 	    const frameCollection=collectCoursePlayFrames(loadUserCourseData(userId(),courseId(request.course))||request.course,'native-resolver',{activeHole:request.hole,warmFrames:request.wholeCourse});
 	    const generatedState=savedMapCanSatisfyRequest(request.course,request.hole,request.wholeCourse);
 	    const partialPlayable=!!(opts.acceptPartialGeneratedMap&&generatedState.requestedPlayable);
@@ -5066,6 +5194,37 @@
   window.gdLockMappedGreenFromStart=forceLockMappedGreenFromStart;
   window.gdOpenCourseToFirstHole=openCourseToFirstHole;
 
+  function installScorecardOwnerHooks(){
+    if(document.__gdCourseLibraryScorecardOwnerHooks)return true;
+    if(!document.addEventListener)return false;
+    document.__gdCourseLibraryScorecardOwnerHooks=true;
+    document.addEventListener('gd:scorecard-play-selected',event=>{
+      const detail=event&&event.detail||{};
+      const requestedHole=validHoleNumber(detail.hole)||validHoleNumber(currentPlayingHole)||validHoleNumber(selectedHole)||1;
+      let par=detail.par??null;
+      try{
+        const h=rememberPlayingHole(currentPlayingHole||selectedHole||requestedHole);
+        if(h&&typeof setHole==='function'){
+          par=knownParForHole(h);
+          setHole(par!==null?{hole:h,par}:{hole:h});
+        }
+      }catch(e){}
+      try{saveCourseFinderCoordinate(currentMapFinderPoint(),'play-hole');}catch(e){}
+      const selectedCourse=sessionCourse(courseObj());
+      try{scheduleOsmAutoMapForPlay(selectedCourse,{hole:currentPlayingHole||selectedHole||requestedHole,delayMs:80,frame:true,promptStart:true});}catch(e){}
+      returnToGpsFromScorecard();
+      setTimeout(ensureAssumedCourseBadge,60);
+      setTimeout(returnToGpsFromScorecard,60);
+      setTimeout(()=>{try{if(typeof window.gdFocusMappedPreLockHole==="function")window.gdFocusMappedPreLockHole(currentPlayingHole||selectedHole||requestedHole,{source:"scorecard-play-selected",par});}catch(e){}},160);
+    });
+    document.addEventListener('gd:scorecard-save',()=>{
+      try{rememberPlayingHole(currentPlayingHole||selectedHole||1);}catch(e){}
+      const shouldReturn=(()=>{try{return sessionStorage.getItem('gd_return_from_scorecard')==='gps'||document.body.classList.contains('gdGpsActive')||document.body.classList.contains('shell-gps');}catch(e){return true;}})();
+      if(shouldReturn)setTimeout(returnToGpsFromScorecard,80);
+    });
+    return true;
+  }
+
   function wrapGpsFunctions(){
     if(!window.__gdCourseLibraryGpsWrapped){
       window.__gdCourseLibraryGpsWrapped=true;
@@ -5114,41 +5273,7 @@
         };
         window.openCourse=wrapped; try{openCourse=wrapped;}catch(e){}
       }
-      const oldPlay=typeof playSelectedHole==='function'?playSelectedHole:window.playSelectedHole;
-      if(typeof oldPlay==='function'){
-        const wrapped=function(){
-          const requestedHole=validHoleNumber(selectedHole)||validHoleNumber(currentPlayingHole)||1;
-          const res=oldPlay.apply(this,arguments);
-          let par=null;
-          try{
-            const h=rememberPlayingHole(currentPlayingHole||selectedHole||1);
-            if(h&&typeof setHole==='function'){
-              par=knownParForHole(h);
-              setHole(par!==null?{hole:h,par}:{hole:h});
-            }
-          }catch(e){}
-          try{saveCourseFinderCoordinate(currentMapFinderPoint(),'play-hole');}catch(e){}
-	          const selectedCourse=sessionCourse(courseObj());
-	          try{scheduleOsmAutoMapForPlay(selectedCourse,{hole:currentPlayingHole||selectedHole||requestedHole,delayMs:80,frame:true,promptStart:true});}catch(e){}
-	          returnToGpsFromScorecard();
-	          setTimeout(ensureAssumedCourseBadge,60);
-	          setTimeout(returnToGpsFromScorecard,60);
-	          setTimeout(()=>{try{if(typeof window.gdFocusMappedPreLockHole==="function")window.gdFocusMappedPreLockHole(currentPlayingHole||selectedHole||requestedHole,{source:"scorecard-play-selected",par});}catch(e){}},160);
-	          return res;
-	        };
-        window.playSelectedHole=wrapped; try{playSelectedHole=wrapped;}catch(e){}
-      }
-      const oldSaveScore=typeof saveHoleScore==='function'?saveHoleScore:window.saveHoleScore;
-      if(typeof oldSaveScore==='function'){
-        const wrapped=function(){
-          try{rememberPlayingHole(currentPlayingHole||selectedHole||1);}catch(e){}
-          const shouldReturn=(()=>{try{return sessionStorage.getItem('gd_return_from_scorecard')==='gps'||document.body.classList.contains('gdGpsActive')||document.body.classList.contains('shell-gps');}catch(e){return true;}})();
-          const res=oldSaveScore.apply(this,arguments);
-          if(shouldReturn)setTimeout(returnToGpsFromScorecard,80);
-          return res;
-        };
-        window.saveHoleScore=wrapped; try{saveHoleScore=wrapped;}catch(e){}
-      }
+      installScorecardOwnerHooks();
 	      const oldSetStart=typeof setStart==='function'?setStart:window.setStart;
 	      if(typeof oldSetStart==='function'){
 	        const wrapped=function(ll,saveUndo){
@@ -5180,75 +5305,6 @@
           return res;
         };
       }
-      const oldAccept=typeof acceptGreenWand==='function'?acceptGreenWand:window.acceptGreenWand;
-      if(typeof oldAccept==='function'){
-        const wrapped=function(){
-          const res=oldAccept.apply(this,arguments);
-          const ctx=mapperContext();
-          saveCurrentGreen('wand_accepted');
-          if(ctx==='green')setMapperContext('');
-          setTimeout(addForgetGreenButton,60);
-          return res;
-        };
-        window.acceptGreenWand=wrapped; try{acceptGreenWand=wrapped;}catch(e){}
-      }
-      const oldImport=typeof importGreenWandResult==='function'?importGreenWandResult:window.importGreenWandResult;
-      if(typeof oldImport==='function'){
-        const wrapped=function(result){
-          const res=oldImport.apply(this,arguments);
-          const ctx=mapperContext();
-          if(res)saveCurrentGreen(result?.source==='pixel'?'wand_accepted':'imported');
-          if(ctx==='green')setMapperContext('');
-          return res;
-        };
-        window.importGreenWandResult=wrapped; try{importGreenWandResult=wrapped;}catch(e){}
-      }
-      const oldReject=typeof rejectGreenWand==='function'?rejectGreenWand:window.rejectGreenWand;
-      if(typeof oldReject==='function'){
-        const wrapped=function(){
-          if(mapperContext()==='green')setMapperContext('');
-          return oldReject.apply(this,arguments);
-        };
-        window.rejectGreenWand=wrapped; try{rejectGreenWand=wrapped;}catch(e){}
-      }
-      const oldClose=typeof closeWandPanel==='function'?closeWandPanel:window.closeWandPanel;
-      if(typeof oldClose==='function'){
-        const wrapped=function(){
-          if(mapperContext()==='green')setMapperContext('');
-          return oldClose.apply(this,arguments);
-        };
-        window.closeWandPanel=wrapped; try{closeWandPanel=wrapped;}catch(e){}
-      }
-    }
-  }
-
-  function addForgetGreenButton(){
-    return;
-    const actions=document.querySelector('#gdWandPanel .gdWandActions');
-    if(!actions)return;
-    if(!document.getElementById('gdMoveGreenHoleBtn')){
-      const move=document.createElement('button');
-      move.id='gdMoveGreenHoleBtn';
-      move.type='button';
-      move.textContent='Change Hole';
-      move.onclick=function(ev){ev.preventDefault();ev.stopPropagation();moveActiveGreenToHole();return false;};
-      actions.appendChild(move);
-    }
-    if(!document.getElementById('gdUnassignGreenHoleBtn')){
-      const unassign=document.createElement('button');
-      unassign.id='gdUnassignGreenHoleBtn';
-      unassign.type='button';
-      unassign.textContent='Unassign Hole';
-      unassign.onclick=function(ev){ev.preventDefault();ev.stopPropagation();unassignActiveGreen();return false;};
-      actions.appendChild(unassign);
-    }
-    if(!document.getElementById('gdForgetGreenBtn')){
-      const btn=document.createElement('button');
-      btn.id='gdForgetGreenBtn';
-      btn.type='button';
-      btn.textContent='Forget Green';
-      btn.onclick=function(ev){ev.preventDefault();ev.stopPropagation();resetActiveGreen();return false;};
-      actions.appendChild(btn);
     }
   }
 
@@ -5523,6 +5579,7 @@
   }
   function renderCourseFinderCard(list,course){
     const point=courseFinderPoint(course);
+    const location=(()=>{try{return window.GDCourseLocation&&typeof window.GDCourseLocation.resolve==='function'?window.GDCourseLocation.resolve(course,{requireConfirmed:false}):null;}catch(e){return null;}})();
     const card=document.createElement('div');
     card.className=`gdCourseFinderCard${point?'':' empty'}`;
     if(point){
@@ -5530,10 +5587,12 @@
       const moved=Number.isFinite(home.lat)&&Number.isFinite(home.lng)?distance(home,point):null;
       const details=[
         `Lat/Lng ${coordLabel(point)}`,
+        location&&location.source?`source ${location.source}`:null,
+        location?location.confirmed?'confirmed':'proposal':null,
         Number.isFinite(moved)&&moved>2?`${Math.round(moved)}m from course centre`:null,
-        course.finderUpdatedAt?`updated ${dateLabel(course.finderUpdatedAt)}`:null
+        (location&&location.updatedAt||course.finderUpdatedAt)?`updated ${dateLabel(location&&location.updatedAt||course.finderUpdatedAt)}`:null
       ].filter(Boolean).join(' · ');
-	      card.innerHTML=`<details class="gdCourseFinderDetails"><summary><div><small>Course locator pin</small><strong>Saved finder point</strong></div><span>Open</span></summary><div class="gdCourseFinderTop"><span>${esc(details)}</span></div><div class="gdCourseFinderActions"><button type="button" data-action="open">Show on map</button><button class="danger" type="button" data-action="clear">Clear pin</button></div></details>`;
+		      card.innerHTML=`<details class="gdCourseFinderDetails"><summary><div><small>Course location</small><strong>${location&&location.confirmed?'Confirmed course centre':'Course centre proposal'}</strong></div><span>Open</span></summary><div class="gdCourseFinderTop"><span>${esc(details)}</span></div><div class="gdCourseFinderActions"><button type="button" data-action="open">Show on map</button><button class="danger" type="button" data-action="clear">Remove</button></div></details>`;
       card.querySelector('[data-action="open"]').onclick=()=>window.gdCLOpenCourseLocatorFromLibrary(course.id);
       card.querySelector('[data-action="clear"]').onclick=()=>window.gdCLClearCourseFinder(course.id);
     }else{
@@ -5883,6 +5942,17 @@
     const store=loadStore();
     const saved=store.courses[courseStoreId];
     if(!saved)return;
+    try{
+      const owner=window.GDCourseLocation;
+      if(owner&&typeof owner.remove==='function'){
+        owner.remove(saved,{source:'course-library-remove-location'});
+        clearCourseFinderLayer();
+        gdCLRefreshProfileCard();
+        toastSafe('Course location removed');
+        renderCourseLibraryPanel(courseStoreId);
+        return;
+      }
+    }catch(e){}
     delete saved.finderLat;
     delete saved.finderLng;
     delete saved.courseFinderLat;
@@ -6209,7 +6279,6 @@
     observeProfile();
     observeMapperRail();
     installMapperToolsButton();
-    addForgetGreenButton();
     ensureAssumedCourseBadge();
     setTimeout(gdCLInjectProfileCourseCard,300);
     setTimeout(installMappedPlayModeSetting,320);
@@ -6226,7 +6295,6 @@
 
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install);
   else install();
-  document.addEventListener('click',()=>setTimeout(addForgetGreenButton,80),true);
   document.addEventListener('click',()=>setTimeout(installMapperToolsButton,120),true);
   document.addEventListener('click',()=>setTimeout(installMappedPlayModeSetting,120),true);
   document.addEventListener('click',()=>setTimeout(ensureAssumedCourseBadge,120),true);

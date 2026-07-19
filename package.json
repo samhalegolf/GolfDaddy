@@ -7,7 +7,8 @@
     "start": "python3 -m http.server 5173",
     "serve": "python3 -m http.server 5173",
     "build:netlify": "node scripts/clarity-deploy-build.js",
-    "test:payments": "node dev/payment-rollout-tests.js"
+    "test:payments": "node dev/payment-rollout-tests.js",
+    "test:boot": "node dev/boot-smoke.test.js"
   },
   "codex": {
     "entry": "index.html",
@@ -22,5 +23,8 @@
   },
   "dependencies": {
     "@netlify/blobs": "^10.7.9"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.56.0"
   }
 }

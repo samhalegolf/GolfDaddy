@@ -476,17 +476,28 @@ function sanitizeCourse(input, actor) {
   const courseId = slug(input.courseId || input.id || courseName);
   const id = "published::" + courseId;
   const now = new Date().toISOString();
+  const locationPoint = point(input.courseLocation && (input.courseLocation.centre || input.courseLocation.center || input.courseLocation) || input.courseCentre || input.courseCenter);
   const course = {
     id,
     userId: "published",
     courseId,
     courseName,
-    courseLat: finite(input.courseLat),
-    courseLng: finite(input.courseLng),
-    finderLat: finite(input.finderLat || input.courseFinderLat),
-    finderLng: finite(input.finderLng || input.courseFinderLng),
-    courseFinderLat: finite(input.finderLat || input.courseFinderLat),
-    courseFinderLng: finite(input.finderLng || input.courseFinderLng),
+    courseLat: finite(input.courseLat ?? (locationPoint && locationPoint.lat)),
+    courseLng: finite(input.courseLng ?? (locationPoint && locationPoint.lng)),
+    finderLat: finite(input.finderLat || input.courseFinderLat || (locationPoint && locationPoint.lat)),
+    finderLng: finite(input.finderLng || input.courseFinderLng || (locationPoint && locationPoint.lng)),
+    courseFinderLat: finite(input.finderLat || input.courseFinderLat || (locationPoint && locationPoint.lat)),
+    courseFinderLng: finite(input.finderLng || input.courseFinderLng || (locationPoint && locationPoint.lng)),
+    courseLocation: locationPoint ? {
+      centre: locationPoint,
+      source: text(input.courseLocation && input.courseLocation.source || input.courseLocationSource, 120),
+      confidence: finite(input.courseLocation && input.courseLocation.confidence || input.courseLocationConfidence),
+      confirmed: input.courseLocationConfirmed !== false && (!input.courseLocation || input.courseLocation.confirmed !== false),
+      updatedAt: text(input.courseLocation && input.courseLocation.updatedAt || input.courseLocationUpdatedAt, 80) || now
+    } : undefined,
+    courseLocationSource: text(input.courseLocationSource || input.courseLocation && input.courseLocation.source, 120),
+    courseLocationConfirmed: input.courseLocationConfirmed === true || !!(input.courseLocation && input.courseLocation.confirmed),
+    courseLocationUpdatedAt: text(input.courseLocationUpdatedAt || input.courseLocation && input.courseLocation.updatedAt, 80),
     createdAt: text(input.createdAt, 80) || now,
     updatedAt: now,
     published: true,

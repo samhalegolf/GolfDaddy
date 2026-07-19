@@ -116,10 +116,8 @@
     var returnProfile = returnToProfile ? profile(activeAccount) : null;
 
     safe(function () { if (window.gdCloseProfileV67) window.gdCloseProfileV67(); });
-    safe(function () { document.querySelectorAll(".modulePanel.open,.panel.open").forEach(function (panel) { panel.classList.remove("open"); }); });
-    safe(function () { document.getElementById("shellHome") && document.getElementById("shellHome").classList.add("hidden"); });
-    safe(function () { document.body.classList.remove("shell-home", "shell-gps", "gdGpsActive", "gps-active", "gps-open", "manual-gps-active", "gdProfileOpen"); });
-    safe(function () { document.body.classList.add("shell-module"); });
+    safe(function () { window.GDShell?.openModule?.("playerSettings", { source: "player-settings", fromGps: returnToGps, fromProfile: returnToProfile }); });
+    safe(function () { document.body.classList.remove("gps-open", "manual-gps-active", "gdProfileOpen"); });
     safe(function () { if (typeof window.hideGpsSurface === "function") window.hideGpsSurface(); });
     safe(function () { if (typeof window.showShellChrome === "function") window.showShellChrome(true); });
     safe(function () { if (typeof window.setShellLayer === "function") window.setShellLayer("module"); });

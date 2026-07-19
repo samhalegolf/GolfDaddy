@@ -1342,21 +1342,6 @@ body.shell-home #developerPanel:not(.open){
 }
 #profileConsistencyInput{display:none!important}
 #profileConsistencyInput + *{display:none!important}
-.wandBridgeCard{
-  border-color:rgba(31,211,109,.22)!important;
-  background:linear-gradient(180deg,rgba(31,211,109,.10),rgba(255,255,255,.045))!important;
-}
-.wandModePills{
-  display:grid;
-  grid-template-columns:repeat(3,1fr);
-  gap:7px;
-  margin-top:10px;
-}
-.wandModePills button{
-  padding:10px 6px;
-  border-radius:14px;
-  font-size:11px;
-}
 @media(max-width:720px){
   .gpsModeSwitch{top:calc(76px + env(safe-area-inset-top))}
   .shotTile{bottom:calc(128px + env(safe-area-inset-bottom))!important;width:160px!important}
@@ -2372,7 +2357,6 @@ body.gdGpsActive .shellBar button:not(.gdKeepShellButton){
 #flagTool,
 #gpsRailBtn,
 #bagRailBtn,
-#greenToolBtn,
 #scorecardRailBtn{
   width:58px!important;
   height:58px!important;
@@ -2390,7 +2374,6 @@ body.gdGpsActive .shellBar button:not(.gdKeepShellButton){
 #flagTool img,
 #gpsRailBtn img,
 #bagRailBtn img,
-#greenToolBtn img,
 #scorecardRailBtn img{
   object-fit:contain!important;
   background:transparent!important;
@@ -2400,7 +2383,6 @@ body.gdGpsActive .shellBar button:not(.gdKeepShellButton){
 }
 #flagTool img,
 #gpsRailBtn img,
-#greenToolBtn img,
 #scorecardRailBtn img{
   width:40px!important;
   height:40px!important;
@@ -2517,17 +2499,6 @@ body.gdGpsActive #shellRouteLabel{
   display:none!important;
   visibility:hidden!important;
   pointer-events:none!important;
-}
-body.gdGpsActive #greenToolBtn.gdWandActive,
-body.gdGpsActive.gdWandActive #greenToolBtn{
-  background:linear-gradient(180deg,#2be477,#0fa952)!important;
-  border-color:rgba(157,255,190,.52)!important;
-  box-shadow:0 12px 28px rgba(25,199,92,.26),inset 0 1px 0 rgba(255,255,255,.28)!important;
-}
-body.gdGpsActive #greenToolBtn.gdWandActive img,
-body.gdGpsActive.gdWandActive #greenToolBtn img{
-  filter:brightness(0) invert(1) drop-shadow(0 8px 14px rgba(0,0,0,.28))!important;
-  opacity:1!important;
 }
 #gdV62ModeSwitch{
   box-sizing:border-box!important;
@@ -3871,14 +3842,6 @@ body.gdProfileOpen .profilePanel{
   #gdProfileV67 .card img{width:36px;height:36px}
   #gdProfileV67 .card strong{font-size:16px}
 }
-
-
-
-/* --- Green Wand Assist Layer v1 --- */
-.gdWandPanel{position:fixed;left:12px;right:12px;bottom:calc(16px + env(safe-area-inset-bottom));z-index:2140;max-width:520px;margin:0 auto;padding:12px;border-radius:22px;background:rgba(5,10,8,.92);border:1px solid rgba(255,255,255,.12);box-shadow:0 22px 60px rgba(0,0,0,.48);backdrop-filter:blur(18px);color:#fff;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif}
-.gdWandPanel.hidden{display:none!important}.gdWandTop{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}.gdWandTitle{font-size:14px;font-weight:950;letter-spacing:-.02em}.gdWandStatus{font-size:11px;color:rgba(230,238,233,.66);font-weight:800;margin-top:2px}.gdWandClose{width:34px;height:34px;border-radius:12px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.07);color:#fff;font-weight:950}.gdWandModes{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px}.gdWandModes button,.gdWandActions button{border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.065);color:#fff;border-radius:14px;padding:10px 8px;font-weight:950;font-size:12px}.gdWandModes button.active{background:linear-gradient(180deg,#28d66f,#118d45);color:#021006}.gdWandSlider{display:grid;grid-template-columns:74px 1fr 54px;gap:9px;align-items:center;margin:10px 0;color:rgba(230,238,233,.78);font-size:11px;font-weight:950;text-transform:uppercase;letter-spacing:.08em}.gdWandSlider input{width:100%;accent-color:#28d66f}.gdWandReadout{text-align:right;color:#fff;font-size:13px;letter-spacing:0}.gdWandActions{display:grid;grid-template-columns:1.2fr .9fr .9fr;gap:8px}.gdWandActions button.primary{background:linear-gradient(180deg,#ff9f2f,#c97917);color:#07100b}.gdWandActions button.accept{background:linear-gradient(180deg,#28d66f,#118d45);color:#021006}.gdWandHandle{width:18px;height:18px;border-radius:50%;background:#fff;border:3px solid #28d66f;box-shadow:0 0 0 3px rgba(40,214,111,.25),0 6px 16px rgba(0,0,0,.45)}
-@media(max-width:430px){.gdWandPanel{left:8px;right:8px}.gdWandActions{grid-template-columns:1fr 1fr}.gdWandActions .primary{grid-column:1/-1}}
-
 
 /* --- Bubble Lock Behaviour v1 --- */
 body.gd-frame-hard-locked #map{cursor:default!important;}

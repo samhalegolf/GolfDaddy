@@ -11,8 +11,12 @@ const gpsRuntimeCss = fs.readFileSync(path.join(root, "styles", "inline", "gd-gp
 const gpsRuntime = fs.readFileSync(path.join(root, "scripts", "inline", "gd-gps-play-runtime-owner-v1.js"), "utf8");
 const brandRail = fs.readFileSync(path.join(root, "scripts", "inline", "gd-brand-icon-render.js"), "utf8");
 const betaShell = fs.readFileSync(path.join(root, "scripts", "inline", "gd-gps-beta-mode-shell.js"), "utf8");
-const gpsRequestButton = fs.readFileSync(path.join(root, "scripts", "inline", "gd-gps-request-button-fix-v1.js"), "utf8");
+const gpsRequestButton = fs.readFileSync(path.join(root, "scripts", "inline", "gd-gps-play-flow-layers-v1.js"), "utf8");
 const library = fs.readFileSync(path.join(root, "scripts", "gd-course-library-pin-lock.js"), "utf8");
+const coursePickerMappingPrep = pickerSearch.slice(
+  pickerSearch.indexOf("function prepareMappingSurface"),
+  pickerSearch.indexOf("function enterGpsPlay")
+);
 
 for (const [label, source] of [["index.html", index], ["gd-course-library-pin-lock.js", library]]) {
   assert(!/-36\.9149|174\.7255/.test(source), `${label} must not contain the old Maungakiekie fallback coordinate`);
@@ -21,8 +25,8 @@ for (const [label, source] of [["index.html", index], ["gd-course-library-pin-lo
 assert(appCore.includes("const GD_NEUTRAL_MAP_CENTER=[0,0];"), "map boots to a neutral technical center");
 assert(appCore.includes("return null;\n}\nfunction gdAssumedCourseLabelForPicker"), "course picker returns no default point when location is unknown");
 assert(pickerSearch.includes("requestPickerGps();"), "course picker requests GPS for nearby suggestions");
-assert(pickerSearch.includes("window.gdCoursePickerRequestGps=requestPickerGps"), "home/play route can request picker GPS from a user click");
-assert(pickerSearch.includes("window.gdCoursePickerCenterMapOnGps=centerPickerMapOnGps"), "course picker can center the live map on the latest GPS fix");
+assert(pickerSearch.includes("window.gdCoursePickerRequestGps=function(){return api.requestLocation();};"), "home/play route can request picker GPS through the picker owner");
+assert(pickerSearch.includes("window.gdCoursePickerCenterMapOnGps=function(point){return api.centerMapOnLocation(point);};"), "course picker can center the live map through the picker owner");
 assert(pickerSearch.includes("map.setView([Number(point.lat),Number(point.lng)],zoom,{animate:false})"), "GPS fix recenters the map behind the course picker");
 assert(pickerSearch.includes("const gps=recentGpsPoint();"), "course picker ranking uses actual recent GPS when available");
 assert(pickerSearch.includes('if(/manual|tap|click|map|green-focus|pin/.test(source))return null;'), "course picker search ignores simulated/map-derived points as GPS");
@@ -32,7 +36,7 @@ assert(appCore.includes("const setCourseView=opts.setCourseView!==undefined?!!op
 assert(appCore.includes("if(!Number.isFinite(at)||at<=0||Date.now()-at>maxAgeMs)return null;"), "course picker requires a timestamped recent GPS fix");
 assert(appCore.includes("function gdResetCoursePickerPresentationReadiness(payload,opts={})"), "new course selections clear stale captured presentation readiness");
 assert(appCore.includes("if(!gdCoursePickerHasMappedPlayData(payload,1))return false;"), "course picker only opens mapped start when the selected course has mapped play data");
-assert(appCore.includes('document.body.dataset.gdCourseNeedsPin=result&&result.fallback?"active":result&&result.playable?"no":"pending";'), "course picker records when the pin fallback owns unresolved courses");
+assert(pickerSearch.includes('document.body.dataset.gdCourseNeedsPin=result&&result.fallback?"active":result&&result.playable?"no":"pending";'), "course picker records when the pin fallback owns unresolved courses");
 assert(appCore.includes("function gdCoursePickerNeedsCoursePin(payload)"), "course picker can detect when a no-GPS course pick needs a pin screen");
 assert(appCore.includes("payload?.gdDatabaseMapAvailable===true"), "published database maps beat the pin prompt");
 assert(!appCore.includes('mark("stored-pin");return false;'), "stored pins prefill the pin screen but do not bypass it");
@@ -43,11 +47,20 @@ assert(appCore.includes("if(!payload.gdDatabaseMapChecked&&!gdCoursePayloadIsMan
 assert(appCore.includes("if(gdCoursePickerNeedsCoursePin(payload))return gdShowCoursePinScreen(payload);"), "no-GPS course picks show the pin screen before course play opens");
 assert(appCore.includes('mark("needs-pin")'), "pin decision writes a DOM breadcrumb for live QA");
 assert(appCore.includes("const usePinSeed=!payload.gdDatabaseMapAvailable&&gdCoursePickerUsesPinSeed(payload);"), "database maps win over stored pin scanner seeds");
-assert(appCore.includes('reason:pinSeed?"course-picker-pin":"course-picker"'), "confirmed pins feed the course scanner as the mapping reason");
-assert(appCore.includes("courseCentre:pinnedCentre||undefined"), "confirmed pins feed the course scanner as the mapping centre");
-assert(appCore.includes("allowLocalSavedMap:payload?.gdDatabaseMapAvailable===true"), "local saved maps cannot beat the picker pin flow without a confirmed database map");
-assert(appCore.includes("acceptPartialGeneratedMap:pinSeed"), "pin-seeded scans can open the generated first hole without waiting for a full database publish");
-assert(appCore.includes("Promise.resolve(pinSeed?null:gdLoadCourseVisualForPlay"), "pin-seeded scans do not get pre-empted by course visuals");
+assert(pickerSearch.includes('reason:pinSeed?"course-picker-pin":"course-picker"'), "confirmed pins feed the course scanner as the mapping reason");
+assert(pickerSearch.includes("courseCentre:pinnedCentre||undefined"), "confirmed pins feed the course scanner as the mapping centre");
+assert(pickerSearch.includes("allowLocalSavedMap:course?.gdDatabaseMapAvailable===true"), "local saved maps cannot beat the picker pin flow without a confirmed database map");
+assert(pickerSearch.includes("acceptPartialGeneratedMap:pinSeed"), "pin-seeded scans can open the generated first hole without waiting for a full database publish");
+assert(pickerSearch.includes("window.GDCoursePicker=api"), "course picker has one explicit public owner");
+assert(!appCore.includes("GDCoursePickerOwner"), "partial core picker owner is retired");
+assert(pickerSearch.includes("function selectCourseForPlay(raw,opts={})"), "course picker owns selection-to-play orchestration");
+assert(pickerSearch.includes("const controller=window.runCourseMappingAttempt||window.gdRunCourseMappingAttempt;"), "course picker invokes the mapping controller directly instead of the legacy resolver alias");
+assert(!pickerSearch.includes("window.runCourseMappingAttempt||window.gdRunCourseMappingAttempt||window.gdResolveCoursePlayHole"), "course picker does not restore the legacy resolver alias as an owner");
+assert(pickerSearch.includes("prepareMappingSurface(course,opts);"), "course picker closes picker/pin UI before handing one request to the mapping controller");
+assert(!coursePickerMappingPrep.includes("gdEnsureGpsCourseSurface();"), "course picker does not enter GPS Play before mapping returns a playable result");
+assert(pickerSearch.includes("setMappingStatus(result);"), "course picker receives mapping success/failure from the controller");
+assert(pickerSearch.includes("if(result&&result.playable)enterGpsPlay(course,result,opts);"), "course picker enters GPS Play only after a playable mapping result");
+assert(appCore.includes('return window.GDCoursePicker.selectCourse(payload,Object.assign({source:"core-compat-kick"},opts||{}));'), "legacy automap kickoff delegates back to the course picker owner");
 assert(appCore.includes("if(payload?.gdDatabaseMapAvailable===true)gdScheduleCourseVisualPullForPlay(payload);"), "course visual pulls only follow confirmed database maps");
 assert(appCore.includes("window.gdConfirmCoursePin=gdConfirmCoursePin"), "pin confirmation is exposed for the picker panel");
 assert(pickerBaseCss.includes(".courseScreen{position:absolute;inset:0;z-index:7600;background:transparent"), "course picker overlay leaves the live map visible behind the controls");
@@ -77,12 +90,14 @@ assert(pickerSearch.includes("function loadDatabaseCourses(opts={})"), "course p
 assert(pickerSearch.includes('source:"database-course"'), "database courses are tagged when merged into picker results");
 assert(pickerSearch.includes("hasDatabaseMap=true"), "database course results keep a database-map flag for picker ranking");
 assert(index.includes("gd-app-base.css?v=course-picker-live-gps-pin-20260718"), "base CSS cache-bust ships the pin prompt styling");
-assert(index.includes("gd-app-core.js?v=boot-crash-fix-20260719"), "app core cache-bust ships the flagTool boot-crash fix");
-assert(index.includes("gd-gps-beta-mode-shell.js?v=course-picker-rail-owner-20260719"), "beta GPS shell cache-bust ships rail owner handoff");
+assert(index.includes("gd-app-permissions.js?v=permissions-carve-20260719"), "local app permissions owner ships before app core");
+assert(index.includes("gd-app-core.js?v=course-picker-owner-20260719"), "app core cache-bust ships the picker bridge");
+assert(index.includes("gd-flag-pin.js?v=flag-pin-carve-20260719"), "flag/pin owner still ships the flagTool boot-crash fix");
+assert(index.includes("gd-gps-beta-mode-shell.js?v=course-picker-owner-20260719"), "beta GPS shell cache-bust ships picker owner handoff");
 assert(index.includes("gd-brand-icon-render.js?v=boot-crash-fix-20260719"), "brand rail cache-bust ships dynamic rail ownership + flag handler rebind");
-assert(index.includes("gd-course-picker-search-v2.js?v=course-picker-owner-cleanup-20260719"), "course picker search cache-bust ships database course hydration");
+assert(index.includes("gd-course-picker-search-v2.js?v=course-picker-owner-20260719"), "course picker owner cache-bust ships database course hydration and selection ownership");
 assert(index.includes("gd-course-library-pin-lock.js?v=course-picker-db-search-sync-20260718"), "course library cache-bust ships generated scan upload");
-assert(index.includes("gd-gps-request-button-fix-v1.js?v=course-picker-rail-owner-20260719"), "GPS request button cache-bust ships optional rail handling");
-assert(index.includes("gd-gps-play-runtime-owner-v1.js?v=course-picker-rail-owner-20260719"), "GPS runtime cache-bust ships the pin prompt wrapper guard");
+assert(index.includes("gd-gps-play-flow-layers-v1.js?v=gps-flow-merge-20260719"), "GPS request button cache-bust ships optional rail handling");
+assert(index.includes("gd-gps-play-runtime-owner-v1.js?v=course-picker-owner-20260719"), "GPS runtime cache-bust ships picker owner handoff and location lifecycle owner");
 
 console.log("course-picker-location tests passed");

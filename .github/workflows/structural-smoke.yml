@@ -1,0 +1,53 @@
+name: Structural smoke
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [structural-rebuild]
+
+permissions:
+  contents: read
+
+jobs:
+  boot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Boot real page
+        run: npm run test:boot
+
+      - name: Run structural regression tests
+        run: |
+          node dev/app-permissions-smoke.test.js
+          node dev/shell-owner.test.js
+          node dev/shell-behavior.test.js
+          node dev/course-location-owner.test.js
+          node dev/course-location-behavior.test.js
+          node dev/course-picker-location.test.js
+          node dev/course-picker-owner.test.js
+          node dev/course-picker-behavior.test.js
+          node dev/gps-location-lifecycle-behavior.test.js
+          node dev/gps-location-lifecycle-owner.test.js
+          node dev/gps-scorecard-owner.test.js
+          node dev/gps-scorecard-behavior.test.js
+          node dev/green-shape-engine-owner.test.js
+          node dev/green-shape-engine-behavior.test.js
+          node dev/automapper-green-refinement-owner.test.js
+          node dev/automapper-green-refinement-behavior.test.js
+          node dev/gps-play-camera-tilt.test.js
+          node dev/gps-play-runtime-owner.test.js

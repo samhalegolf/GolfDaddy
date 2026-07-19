@@ -67,10 +67,6 @@
     if (!document.body) return;
     document.body.dataset.clarityRoute = route.name;
     document.body.dataset.clarityRouteLabel = route.label;
-    var label = document.getElementById("shellRouteLabel");
-    if (label) label.textContent = route.label || "Home";
-    var back = document.getElementById("shellBackBtn");
-    if (back) back.style.visibility = route.name && route.name !== "home" ? "visible" : "hidden";
   }
 
   function navigate(name, opts) {

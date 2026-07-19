@@ -168,6 +168,53 @@ Notes:
 
 ---
 
+## Course Picker
+
+Owner:
+- `scripts/inline/gd-course-picker-search-v2.js`
+- Public API: `window.GDCoursePicker`
+
+Owns:
+- Picker initialization
+- Picker open/close lifecycle
+- Search input and result rendering
+- Nearby and assumed-course presentation
+- Resume-round picker presentation and selection entry
+- Picker-scoped one-shot GPS request
+- Selected-course identity
+- Saved playable-course lookup
+- One mapping-controller invocation
+- Mapping result handling
+- One GPS Play handoff after a playable course result
+
+Must NOT own:
+- AutoMapper internals
+- Native Course Geometry Resolver or hole labelling internals
+- Green Shape Engine detection
+- Live GPS watches
+- One-tap fallback internals
+- GPS Play runtime
+- Shell ownership
+- Course-location pin persistence beyond delegating the existing prompt in this transitional carve
+
+Inputs:
+- User course search/nearby/resume selection
+- Picker one-shot GPS observation
+- Published course-map availability
+- Saved playable-course readiness
+
+Outputs:
+- One selected-course identity
+- One mapping-controller request when mapping is required
+- One GPS Play handoff when mapping/readiness returns playable
+
+Notes:
+- The picker calls only `runCourseMappingAttempt` / `gdRunCourseMappingAttempt` for mapping.
+- The mapping order remains saved playable course -> OSM AutoMapper -> native Course Geometry Resolver / hole labeller -> one-tap live-map fallback.
+- Legacy globals remain compatibility aliases into `window.GDCoursePicker`.
+
+---
+
 ## GPS Play
 
 Owns:

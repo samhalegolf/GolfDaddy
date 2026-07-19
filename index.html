@@ -40,7 +40,7 @@
 <div id="gdV62Home">
 <div class="gdHomeHeader"><button class="gdHomeBrand" onclick="try{showShellHome()}catch(e){}" aria-label="Clarity Golf home"><span class="gdHomeBrandInner"><span class="gdClarityMark" aria-hidden="true"><img src="assets/brand/cg-logo-white-g.png?v=clarity-20260531" alt=""></span><span class="gdHomeBrandText">CLARITY GOLF</span></span></button><div class="gdHomeTagline"><span class="gdTaglineGreen">Turn</span> <span class="gdTaglineOrange">Practice</span> <span class="gdTaglineGreen">Patterns In</span><span class="gdTaglineOrange">to</span> <span class="gdTaglineGreen">on Course</span> <span class="gdTaglineOrange">Results</span></div><button class="gdHomeAdminSettings" onclick="try{if(window.gdOpenAdminSettings)return window.gdOpenAdminSettings({fromHome:true});openDeveloperPanel({fromHome:true});}catch(e){}" aria-label="Admin Settings">Admin</button><button class="gdHomePlayerSettings" onclick="gdOpenPlayerSettingsPanel({fromHome:true})" aria-label="Settings">Settings</button></div>
 <section class="gdHomeTiles" aria-label="Clarity Golf home navigation">
-<button class="gdHomeTile gdPlayTile" onclick="try{document.body.classList.remove('shell-home');document.body.classList.add('shell-gps','gps-active','gdCoursePickerOpen');var h=document.getElementById('shellHome');if(h)h.classList.add('hidden');var c=document.getElementById('courseScreen');if(c){c.classList.remove('hidden');c.style.display='flex';c.style.visibility='';c.style.opacity='';c.style.pointerEvents='auto'};if(window.gdCoursePickerCenterMapOnGps)window.gdCoursePickerCenterMapOnGps();if(window.gdCoursePickerRequestGps)window.gdCoursePickerRequestGps();if(window.gdEnsureResumeRoundPicker)gdEnsureResumeRoundPicker();return false}catch(e){return false}" aria-label="Clarity Caddy Play"><span class="gdHomeTileLabel"><span class="gdHomeTileKicker">CLARITY CADDY</span><span class="gdHomeTileAction">PLAY</span></span><img class="gdHomeTileArt" src="assets/home/play.png?v=clarity-20260531" alt=""></button>
+<button class="gdHomeTile gdPlayTile" onclick="try{return window.GDCoursePicker&&typeof window.GDCoursePicker.open==='function'?window.GDCoursePicker.open({source:'home-play',returnTarget:'home'}):(typeof gdOpenChangeCourse==='function'?gdOpenChangeCourse(event):false)}catch(e){return false}" aria-label="Clarity Caddy Play"><span class="gdHomeTileLabel"><span class="gdHomeTileKicker">CLARITY CADDY</span><span class="gdHomeTileAction">PLAY</span></span><img class="gdHomeTileArt" src="assets/home/play.png?v=clarity-20260531" alt=""></button>
 <button class="gdHomeTile gdBubbleTile" onclick="try{gdOpenDataHub()}catch(e){}" aria-label="Clarity Shot System Enter"><span class="gdHomeTileLabel"><span class="gdHomeTileKicker">CLARITY SHOT SYSTEM</span><span class="gdHomeTileAction">ENTER</span></span><img class="gdHomeTileArt" src="assets/home/shot-system.svg?v=clarity-shot-system-line-20260601" alt=""></button>
 <button class="gdHomeTile gdBagTile" onclick="try{openBag()}catch(e){}" aria-label="Bag"><span class="gdHomeTileLabel">BAG</span><img class="gdHomeTileArt" src="assets/home/bag.png" alt=""></button>
 <button class="gdHomeTile gdProfileTile" onclick="try{openProfilePanel()}catch(e){}" aria-label="Player Profile"><span class="gdHomeTileLabel">PLAYER<br>PROFILE</span><img class="gdHomeTileArt" src="assets/home/profile.png" alt=""></button>
@@ -207,54 +207,12 @@
   </div>
 </div>
 
-<div class="gdWandPanel hidden" id="gdWandPanel">
-  <div class="gdWandTop">
-    <div>
-      <div class="gdWandTitle" id="gdWandTitleText">Green Wand Calibration</div>
-      <div class="gdWandStatus" id="gdWandStatus">First green at this location: tune Robust, then save calibration.</div>
-    </div>
-    <button class="gdWandClose" onclick="closeWandPanel()">×</button>
-  </div>
-
-  <div class="gdWandRobustPill">Robust Wand</div>
-
-  <details class="gdCalibrationDetails" id="gdCalibrationDetails" open>
-    <summary>Calibration</summary>
-    <div class="gdWandCalibrationControls" id="gdWandCalibrationControls">
-      <div class="gdWandSlider">
-        <span>Sensitivity</span>
-        <input id="gdWandSensitivity" min="58" max="79" value="71" type="range" oninput="setWandSensitivity(this.value)">
-        <span class="gdWandReadout" id="gdWandSensitivityOut">71</span>
-      </div>
-      <div class="gdWandSlider">
-        <span>Size</span>
-        <input id="gdWandBaseBubble" min="6" max="30" value="24.5" step="0.5" type="range" oninput="setWandBaseBubble(this.value)">
-        <span class="gdWandReadout" id="gdWandBaseBubbleOut">24.5m</span>
-      </div>
-      <div class="gdWandSlider">
-        <span>Curve</span>
-        <input id="gdWandClusterPull" min="0" max="120" value="60" type="range" oninput="setWandClusterPull(this.value)">
-        <span class="gdWandReadout" id="gdWandClusterPullOut">60%</span>
-      </div>
-      <button class="gdCalibrationSave" id="gdCalibrationSaveBtn" onclick="saveGreenWandCalibration()">Save Calibration</button>
-    </div>
-  </details>
-
-  <div class="gdWandActions">
-    <button class="primary" id="gdWandScanBtn" onclick="runGreenWandScan()">Calibrate / Scan</button>
-    <button class="accept" id="gdWandAcceptBtn" onclick="acceptGreenWand()">Accept</button>
-    <button id="gdWandRejectBtn" onclick="rejectGreenWand()">Reject</button>
-    <button id="gdWandExitBtn" onclick="closeWandPanel()">Exit</button>
-  </div>
-
-</div></div>
+</div>
 
 <div class="ghost" id="ghost">⚑</div><div class="pulseDrop" id="dropPulse"></div>
 <div class="shotTile" id="shotTile"><button class="gdShotHoleChip" id="gdShotHoleChip" type="button" data-gd-hole-picker-trigger title="Long press to pick hole" aria-label="Current hole">H1</button><div class="tileTop"></div><div class="tileBack" id="tileBack"></div><div class="tilePlays" id="tilePlays"></div><div class="tileMain"><div class="tileClub"><button class="gdSetBagLink" onclick="gdOpenBagFromGps(event)" aria-label="Open bag"><img src="assets/home/bag.png" alt=""></button></div><div class="tileDist" id="tileDist">—<span>m</span></div><div class="tileSub tilePrimary" id="tileSub"></div><div class="tileSub tileMeta" id="tileMeta"></div></div><div class="tileFront" id="tileFront"></div><div class="tileSub tilePinMetric" id="pinDiff" style="display:none">Pin —</div></div>
 <div class="hint" id="hint"></div>
 	<div class="toast" id="toast"></div>
-<input accept="image/*" id="snapshotInput" onchange="loadSnapshotSource(event)" style="display:none" type="file"/>
-<canvas id="snapshotCanvas" style="display:none"></canvas>
 <div class="dock"><div class="dockGrid"><button class="dockAction" onclick="refreshGPS()">
 <svg class="dockIcon" fill="none" style="width:22px;height:22px" viewbox="0 0 44 44">
 <path d="M22 7v7M22 30v7M7 22h7M30 22h7" stroke="currentColor" stroke-linecap="round" stroke-width="3"></path>
@@ -268,7 +226,6 @@
 <div class="modulePanel gdShotDataPanel" id="statsPanel"><div class="sheet"><div class="sheetHeader"><button class="backBtn" onclick="gdPanelBack('statsPanel')">‹</button><div><div class="sheetTitle">Shot Data</div><div class="sheetSub" id="statsSub">Shot tracking off</div></div></div><div class="gdBubbleGenCard gdShotDataHubCard" data-gd-offset-hub><div class="gdBubbleGenHead"><div><strong>GPS Ready My Bubble</strong><span>Your current My Bubble. Course Data and Practice Data can update it.</span></div><div class="gdBubbleOffsetActions"><button type="button" onclick="gdBubbleOffsetEdit()">Edit</button><button type="button" onclick="gdBubbleOffsetSave()">Apply</button></div></div><div class="gdBubbleGenGrid"><label>Bubble centre<input class="gdBubbleFaceOffsetInput" type="text" inputmode="decimal" readonly oninput="gdRenderBubbleOffsetHub(true)"></label><div class="gdBubbleOffsetSource">Current My Bubble value</div></div></div><div class="gdStatsVisual" id="gdStatsVisual"></div><div class="gdShotBubbleOverlayControls"><div class="gdShotBubbleOverlayControl" role="button" tabindex="0" data-gd-overlay-control="course" onpointerdown="this.dataset.gdPressed='1';this.dataset.gdOverlayRequest=this.getAttribute('aria-pressed')==='true'?'off':'on';return false" onclick="if(this.dataset.gdPressed){delete this.dataset.gdPressed;return false}this.dataset.gdOverlayRequest=this.getAttribute('aria-pressed')==='true'?'off':'on';return false" onkeydown="if(event.key==='Enter'||event.key===' '){this.dataset.gdOverlayRequest=this.getAttribute('aria-pressed')==='true'?'off':'on';return false}">Overlay Shot Data</div></div><div class="gdCourseDataLanding" id="gdCourseDataLanding"><div class="gdCourseDataLandingHead"><span>Course landing</span><strong>No data yet</strong></div><div class="gdCourseDataLandingStats"><b>0 plans</b><b>0 pairs</b><b>0 shown</b></div></div><div class="gdStatsLegend"><span class="presumed"><i></i>Presumed shot data</span><span class="result"><i></i>Result shot data</span><span class="shot"><i></i>Counted shots</span><span class="excluded"><i></i>Filtered out</span></div><div class="gdStatsControl"><div><label for="gdStatsConsistency">Consistency setting</label><strong id="gdStatsConsistencyLabel">68%</strong></div><span id="gdStatsFitHint">Shot data fit</span><input id="gdStatsConsistency" min="51" max="80" step="1" type="range" value="68" oninput="gdSetStatsConsistency(this.value)"></div><div class="gdStatsFilters"><label>Club<select id="gdStatsClubFilter" onchange="gdStatsFilterChanged()"><option value="all">All clubs</option></select></label><label>Min m<input id="gdStatsMinDistance" inputmode="numeric" placeholder="Any" oninput="gdStatsFilterChanged()"></label><label>Max m<input id="gdStatsMaxDistance" inputmode="numeric" placeholder="Any" oninput="gdStatsFilterChanged()"></label><label>Date<select id="gdStatsDateRange" onchange="gdStatsFilterChanged()"><option value="all">All time</option><option value="3m">Last 3 months</option><option value="6m">Last 6 months</option><option value="12m">Last 12 months</option></select></label><label>Colour<select id="gdStatsColourMode" onchange="gdStatsFilterChanged()"><option value="club">By club</option><option value="time">By time</option></select></label><label>Sort<select id="gdStatsSort" onchange="gdStatsFilterChanged()"><option value="club">Club</option><option value="dateDesc">Newest</option><option value="dateAsc">Oldest</option><option value="distanceAsc">Distance ↑</option><option value="distanceDesc">Distance ↓</option><option value="offset">Bubble signal</option><option value="fit">Shot data fit</option></select></label></div><div class="bagList" id="shotLogList"></div><button class="gdCourseAdminExpander" id="gdCourseAdminExpanderBtn" type="button" aria-expanded="false" onclick="return gdSetCourseDataTab('admin')">Admin</button><div class="gdShotDataAdminPanel" id="gdCourseDataAdminPanel"></div></div></div>
 <div class="panel" id="settingsPanel"><div class="sheet gdSettingsSheet"><div class="sheetHeader"><button class="backBtn" onclick="gdPanelBack('settingsPanel')">‹</button><div><div class="sheetTitle">GPS Settings</div><div class="sheetSub">Round and map controls</div></div></div>
 <div class="gdSettingsGroup">Round</div>
-<div class="row" id="gdTournamentModeRow"><div><strong>Tournament mode</strong><span id="gdTournamentModeSub">Distance only · no advice</span></div><button class="toggle" id="gdTournamentModeToggle" onclick="gdToggleTournamentMode()">Off</button></div>
 <div class="row"><div><strong>Units</strong><span id="unitsSub">Meters</span></div><button class="toggle active" id="unitsToggle" onclick="toggleUnits()">Meters</button></div>
 <div class="row"><div><strong>Map source</strong><span id="mapSourceSub">Primary imagery</span></div><button class="toggle active" id="mapSourceBtn" onclick="cycleMapSource()">Esri</button></div>
 <div class="row" id="gdMappedPlayModeRow" hidden><div><strong>Course mapping</strong><span id="gdMappedPlayModeSub">Use saved hole mapping</span></div><button class="toggle active" id="gdMappedPlayModeToggle" type="button">Mapped</button></div>
@@ -284,8 +241,6 @@
 <div class="row gdSettingsRetired" hidden><div><strong>Shot render</strong><span>Classic circles or custom shape</span></div><button class="toggle active" id="bubbleModeToggle" onclick="toggleBubbleRenderMode()">Custom</button></div>
 <div class="row gdSettingsRetired" hidden><div><strong>Shot bias</strong><span>Simple data feed for shape testing</span></div><button class="toggle" id="bubbleBiasToggle" onclick="cycleBubbleBias()">Neutral</button></div>
 <div class="row gdSettingsRetired" hidden><div><strong>Subtle texture</strong><span>Add faint internal contour lines</span></div><button class="toggle active" id="bubbleOrganicToggle" onclick="toggleBubbleOrganic()">On</button></div>
-<div class="row gdSettingsRetired" hidden><div><strong>Green Finder</strong><span id="greenFinderSub">Beta · saves confirmed 3m green samples</span></div><button class="toggle" id="greenFinderToggle" onclick="toggleGreenFinderBeta()">Beta Off</button></div>
-<div class="row gdSettingsRetired" hidden><div><strong>Snapshot pixels</strong><span id="snapshotSub">Beta · upload readable map snapshot</span></div><button class="toggle" id="snapshotBtn" onclick="chooseSnapshotSource()">Upload</button></div>
 <button class="primary" onclick="gdPanelBack('settingsPanel')" style="width:100%">Back</button>
 </div></div>
 <div class="panel devPanel" id="developerPanel"><div class="sheet"><div class="sheetHeader"><button class="backBtn" onclick="gdPanelBack('developerPanel')">‹</button><div><div class="sheetTitle">Admin Settings</div><div class="sheetSub">Permissions first · developer tuning tucked away</div></div></div>
@@ -314,9 +269,14 @@
 <div class="courseList" id="courseList"></div>
 </div></div>
 </div>
-<script src="scripts/gd-app-core.js?v=boot-crash-fix-20260719"></script>
+<script src="scripts/gd-app-permissions.js?v=permissions-carve-20260719"></script>
+<script id="gdGreenShapeEngine" src="scripts/gd-green-shape-engine.js?v=green-shape-engine-20260719"></script>
+<script src="scripts/gd-app-core.js?v=course-picker-owner-20260719"></script>
+<script src="scripts/gd-shell.js?v=shell-owner-20260719"></script>
+<script src="scripts/gd-course-location.js?v=course-location-owner-20260719"></script>
+<script src="scripts/gd-flag-pin.js?v=flag-pin-carve-20260719"></script>
 <script src="scripts/gd-icon-assets.js?v=icon-assets-001"></script>
-<script src="scripts/inline/gd-gps-beta-mode-shell.js?v=course-picker-rail-owner-20260719"></script>
+<script src="scripts/inline/gd-gps-beta-mode-shell.js?v=course-picker-owner-20260719"></script>
 
 <!-- Removed superseded cleanup layer from original script index 4. -->
 
@@ -326,50 +286,25 @@
 <script src="scripts/inline/gd-brand-icon-render.js?v=boot-crash-fix-20260719"></script>
 <script src="scripts/inline/gd-auth-account-shell.js?v=profile-membership-20260718"></script>
 
-<script src="scripts/inline/gd-inline-clarity-caddie-core-patch-soft-lock.js?v=split03"></script>
-
-
-<script src="scripts/inline/gd-inline-clarity-caddie-v-next-patch-gps-locate.js?v=split03"></script>
-
-<script src="scripts/inline/gd-inline-clarity-caddie-patch-location-permission-fix.js?v=split03"></script>
+<script src="scripts/inline/gd-caddie-gps-patches-v1.js?v=caddie-gps-wrapper-delete-20260719"></script>
 
 
 
-<script src="scripts/inline/gd-inline-clarity-caddie-patch-next-shot-unlock.js?v=split03"></script>
 
 
 
-<script src="scripts/inline/gd-inline-clarity-caddie-patch-switching-to-2-tap.js?v=split03"></script>
-
-
-<script src="scripts/inline/gd-inline-clarity-caddie-patch-2-tap-must-work.js?v=split03"></script>
 
 
 
-<script src="scripts/inline/gd-inline-clarity-caddie-patch-wand-overlay-clean.js?v=split03"></script>
 
 
-<link rel="stylesheet" id="gdWandDiagStyle" href="styles/inline/gd-wand-diag-style.css?v=split04">
-<script id="gdWandDiagnosticsV1" src="scripts/inline/gd-wand-diagnostics-v1.js?v=split03"></script>
 
 
-<script src="scripts/inline/gd-inline-clarity-caddie-play-button-rescue-v1.js?v=split03"></script>
-
-
-<link rel="stylesheet" id="gdWandSampleTruthStyleV1" href="styles/inline/gd-wand-sample-truth-style-v1.css?v=split04">
-
-<script id="gdWandSampleTruthV1" src="scripts/inline/gd-wand-sample-truth-v1.js?v=split03"></script>
 
 <!-- Earlier retired-screen guards removed; canonical route audit remains the route authority. -->
 
-<script id="gdWandRobustKnownGoodFlowV1" src="scripts/inline/gd-wand-robust-known-good-flow-v1.js?v=split03"></script>
-<script src="scripts/inline/gd-inline-clarity-caddie-gps-bag-prompt-return.js?v=split03"></script>
-<script src="scripts/inline/gd-inline-gps-wand-active-chrome-sync-v1.js?v=split03"></script>
-<link rel="stylesheet" id="gdGpsToolTogglePolishStyle" href="styles/inline/gd-gps-tool-toggle-polish-style.css?v=split04">
 <script src="scripts/inline/gd-inline-gps-tool-toggle-polish-v1-samebutton.js?v=split03"></script>
 <link rel="stylesheet" href="styles/gd-course-library.css?v=practice-course-ui-20260606">
-<link rel="stylesheet" href="styles/gd-arcade-mode.css?v=arcade-wiring-20260607">
-<script src="scripts/gd-windross-seed.js?v=windross-map-seed-20260525"></script>
 <script src="scripts/gd-course-mapping-debug.js?v=course-mapping-debug-20260714"></script>
 <script src="scripts/gd-course-geometry-resolver.js?v=course-geometry-resolver-20260714"></script>
 <script src="scripts/gd-course-library-pin-lock.js?v=course-picker-db-search-sync-20260718"></script>
@@ -401,69 +336,42 @@
 <script src="scripts/gd-course-visual-engine.js?v=course-visual-engine-028"></script>
 <script src="scripts/gd-multi-nine-courses.js?v=multi-nine-courses-001"></script>
 <script src="scripts/gd-native-practice-data.js?v=native-practice-data-001"></script>
-<script id="gdCanonicalRouteAuditV1" src="scripts/gd-route-audit.js?v=course-picker-owner-cleanup-20260719"></script>
+<script id="gdCanonicalRouteAuditV1" src="scripts/gd-route-audit.js?v=course-picker-owner-20260719"></script>
 <!-- Removed gdProfileRouteStabilizerV2: profile fallback rendering masked real route failures. -->
-<link rel="stylesheet" id="gdCleanDiagOnlyFixV1" href="styles/inline/gd-clean-diag-only-fix-v1.css?v=split04">
-
 <link rel="stylesheet" id="gdEditableBagPanelV1" href="styles/inline/gd-editable-bag-panel-v1.css?v=split04">
 
 <link rel="stylesheet" id="gdCoursePickerHiddenHardFixV1" href="styles/inline/gd-course-picker-hidden-hard-fix-v1.css?v=split04">
 
 <link rel="stylesheet" id="gdCanonicalModuleScreenFixV1" href="styles/inline/gd-canonical-module-screen-fix-v1.css?v=split04">
 
-<link rel="stylesheet" id="gdWandRootCauseCleanCssV1" href="styles/inline/gd-wand-root-cause-clean-css-v1.css?v=split04">
-
-<link rel="stylesheet" id="gdWandRobustKnownGoodCssV1" href="styles/inline/gd-wand-robust-known-good-css-v1.css?v=split04">
-<link rel="stylesheet" id="gdWandCompactFlowCssV1" href="styles/inline/gd-wand-compact-flow-css-v1.css?v=split04">
-<script id="gdWandCompactFlowV1" src="scripts/inline/gd-wand-compact-flow-v1.js?v=split03"></script>
-<link rel="stylesheet" id="gdWandFloatingMapperCssV1" href="styles/inline/gd-wand-floating-mapper-css-v1.css?v=split04">
-<script id="gdWandFloatingMapperV1" src="scripts/inline/gd-wand-floating-mapper-v1.js?v=split03"></script>
-
-<link rel="stylesheet" id="gdGpsPolishPriorityV1" href="styles/inline/gd-gps-polish-priority-v1.css?v=split04">
-<script id="gdGpsPolishWandLayerV1" src="scripts/inline/gd-gps-polish-wand-layer-v1.js?v=split03"></script>
-
 <!-- Removed gdFinalStructureGuardCssV3: final CSS hiders masked retired-panel bleed-through. -->
 <!-- Removed gdFinalStructureGuardV3: blank-route recovery masked route ownership problems. -->
-<script id="gdCoursePickerSearchV2" src="scripts/inline/gd-course-picker-search-v2.js?v=course-picker-owner-cleanup-20260719"></script>
+<script id="gdCoursePickerSearchV2" src="scripts/inline/gd-course-picker-search-v2.js?v=course-picker-owner-20260719"></script>
 <link rel="stylesheet" id="gdGpsRequestButtonFixV1" href="styles/inline/gd-gps-request-button-fix-v1.css?v=split04">
-<script id="gdGpsRequestButtonFixV1" src="scripts/inline/gd-gps-request-button-fix-v1.js?v=course-picker-rail-owner-20260719"></script>
+<script id="gdGpsPlayFlowLayersV1" src="scripts/inline/gd-gps-play-flow-layers-v1.js?v=gps-flow-merge-20260719"></script>
 <link rel="stylesheet" id="gdStableGpsModeSwitchV1" href="styles/inline/gd-stable-gps-mode-switch-v1.css?v=split04">
 <link rel="stylesheet" id="gdBubbleDataGeneratorV1" href="styles/inline/gd-bubble-data-generator-v1.css?v=split04">
 <link rel="stylesheet" id="gdShotDataVisualPolishV1" href="styles/inline/gd-shot-data-visual-polish-v1.css?v=split04">
 <link rel="stylesheet" id="gdMappingModeFinalRailCssV1" href="styles/inline/gd-mapping-mode-final-rail-css-v1.css?v=split04">
-<script id="gdGpsNewShotFinalWireV1" src="scripts/inline/gd-gps-new-shot-final-wire-v1.js?v=split03"></script>
-<script id="gdFinalToolScreenIsolationV1" src="scripts/inline/gd-final-tool-screen-isolation-v1.js?v=course-picker-owner-cleanup-20260719"></script>
-<link rel="stylesheet" id="gdArcadeCourseEntryStyleV1" href="styles/inline/gd-arcade-course-entry-style-v1.css?v=split04">
-<script id="gdArcadeCourseEntryV1" src="scripts/inline/gd-arcade-course-entry-v1.js?v=split03"></script>
 <link rel="stylesheet" id="gdPlayFlowNextHoleStyleV1" href="styles/inline/gd-play-flow-next-hole-style-v1.css?v=split04">
-<script id="gdPlayFlowNextHoleV1" src="scripts/inline/gd-play-flow-next-hole-v1.js?v=split03"></script>
-<script id="gdGpsMappedEntryGuardV1" src="scripts/inline/gd-gps-mapped-entry-guard-v1.js?v=split03"></script>
-<link rel="stylesheet" id="gdTournamentModeCssV1" href="styles/inline/gd-tournament-mode-css-v1.css?v=split04">
-<script id="gdTournamentModeV1" src="scripts/inline/gd-tournament-mode-v1.js?v=split03"></script>
 <link rel="stylesheet" id="gdCourseDataFilterTabCssV1" href="styles/inline/gd-course-data-filter-tab-css-v1.css?v=split04">
 <script src="scripts/clarity-email.js?v=email-reset-20260606"></script>
-<script src="scripts/gd-arcade-mode.js?v=arcade-wiring-20260607"></script>
 <script src="scripts/clarity-support.js?v=no-floating-report-001"></script>
 <script src="scripts/clarity-backup.js"></script>
 <script id="gdActionFeedbackV1" src="scripts/inline/gd-action-feedback-v1.js?v=split03"></script>
 <link rel="stylesheet" id="gdGpsLayoutRigV1" href="styles/inline/gd-gps-layout-rig-v1.css?v=split04">
-<script id="gdGpsLayoutRigV1" src="scripts/inline/gd-gps-layout-rig-v1.js?v=split03"></script>
 <link rel="stylesheet" id="gdGpsAutoSessionV1" href="styles/inline/gd-gps-auto-session-v1.css?v=split04">
-<script id="gdGpsAutoSessionV1" src="scripts/inline/gd-gps-auto-session-v1.js?v=split03"></script>
 <link rel="stylesheet" id="gdGpsLayoutGreenArrivalV2" href="styles/inline/gd-gps-layout-green-arrival-v2.css?v=split04">
 <link rel="stylesheet" id="gdGpsMappedCameraAndGreenFocusV1" href="styles/inline/gd-gps-mapped-camera-and-green-focus-v1.css?v=split04">
-<script id="gdGpsMappedCameraAndGreenFocusV1" src="scripts/inline/gd-gps-mapped-camera-and-green-focus-v1.js?v=split03"></script>
 <link rel="stylesheet" id="gdGpsStableControlsV1" href="styles/inline/gd-gps-stable-controls-v1.css?v=split04">
 <link rel="stylesheet" id="gdGpsStateStabilizerV1" href="styles/inline/gd-gps-state-stabilizer-v1.css?v=split04">
-<script id="gdGpsStateStabilizerV1" src="scripts/inline/gd-gps-state-stabilizer-v1.js?v=split03"></script>
 
 <link rel="stylesheet" id="gdGpsPlayRuntimeOwnerV1Css" href="styles/inline/gd-gps-play-runtime-owner-v1-css.css?v=course-picker-owner-cleanup-20260719">
 <link rel="stylesheet" id="gdHubAccordionWrapPolishV1" href="styles/inline/gd-hub-accordion-wrap-polish-v1.css?v=split04">
-<script id="gdGpsPlayRuntimeOwnerV1" src="scripts/inline/gd-gps-play-runtime-owner-v1.js?v=course-picker-rail-owner-20260719"></script>
+<script id="gdGpsPlayRuntimeOwnerV1" src="scripts/inline/gd-gps-play-runtime-owner-v1.js?v=course-picker-owner-20260719"></script>
+<script id="gdGpsScorecardOwnerV1" src="scripts/inline/gd-gps-scorecard-owner-v1.js?v=scorecard-owner-20260719"></script>
 <link rel="stylesheet" id="gdGpsPlayCameraTiltV1Css" href="styles/inline/gd-gps-play-camera-tilt-v1.css?v=tilt02">
-<script id="gdGpsPlayCameraTiltV1" src="scripts/inline/gd-gps-play-camera-tilt-v1.js?v=tilt02"></script>
 
-<script id="gdGpsScorecardOwnerV1" src="scripts/inline/gd-gps-scorecard-owner-v1.js?v=split03"></script>
 <script src="scripts/inline/gd-practice-import-action-bridge.js?v=split03"></script>
 
 </body>

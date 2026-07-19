@@ -8,19 +8,17 @@ body.gdGpsActive #gpsRailBtn{
   background:linear-gradient(180deg,rgba(19,103,201,.68),rgba(6,32,58,.72))!important;
 }
 body.gdGpsActive #flagTool{order:1!important}
-body.gdGpsActive #greenToolBtn{order:2!important}
-body.gdGpsActive #windToolBtn{order:3!important}
-body.gdGpsActive #gpsRailBtn{order:4!important}
-body.gdGpsActive #gdMapperToolsBtn{order:5!important}
-body.gdGpsActive #scorecardRailBtn{order:6!important}
-body.gdGpsActive #bagRailBtn{order:7!important}
+body.gdGpsActive #windToolBtn{order:2!important}
+body.gdGpsActive #gpsRailBtn{order:3!important}
+body.gdGpsActive #gdMapperToolsBtn{order:4!important}
+body.gdGpsActive #scorecardRailBtn{order:5!important}
+body.gdGpsActive #bagRailBtn{order:6!important}
 .rightRail #flagTool{order:1!important}
-.rightRail #greenToolBtn{order:2!important}
-.rightRail #windToolBtn{order:3!important}
-.rightRail #gpsRailBtn{order:4!important}
-.rightRail #gdMapperToolsBtn{order:5!important}
-.rightRail #scorecardRailBtn{order:6!important}
-.rightRail #bagRailBtn{order:7!important}
+.rightRail #windToolBtn{order:2!important}
+.rightRail #gpsRailBtn{order:3!important}
+.rightRail #gdMapperToolsBtn{order:4!important}
+.rightRail #scorecardRailBtn{order:5!important}
+.rightRail #bagRailBtn{order:6!important}
 #gpsRailBtn .gdGpsRailText{
   display:grid;
   place-items:center;

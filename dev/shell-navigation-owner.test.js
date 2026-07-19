@@ -2,20 +2,14 @@ const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
 
-const html = fs.readFileSync(path.join(__dirname, "..", "index.html"), "utf8");
-
-function scriptById(id) {
-  const match = html.match(new RegExp(`<script id="${id}">([\\s\\S]*?)<\\/script>`));
-  assert(match, `script ${id} exists`);
-  return match[1];
-}
+const root = path.join(__dirname, "..");
+const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
+const shell = fs.readFileSync(path.join(root, "scripts", "gd-shell.js"), "utf8");
+const routeAudit = fs.readFileSync(path.join(root, "scripts", "gd-route-audit.js"), "utf8");
+const runtime = fs.readFileSync(path.join(root, "scripts", "inline", "gd-gps-play-runtime-owner-v1.js"), "utf8");
 
 function assertContains(source, needle, message) {
   assert(source.includes(needle), message || `contains ${needle}`);
-}
-
-function assertNotContains(source, needle, message) {
-  assert(!source.includes(needle), message || `does not contain ${needle}`);
 }
 
 function assertBefore(source, first, second, message) {
@@ -26,56 +20,25 @@ function assertBefore(source, first, second, message) {
   assert(firstIndex < secondIndex, message || `${first} appears before ${second}`);
 }
 
-function allInlineScriptsParse() {
-  const failures = [];
-  const re = /<script([^>]*)>([\s\S]*?)<\/script>/gi;
-  let count = 0;
-  let match;
-  while ((match = re.exec(html))) {
-    const attrs = match[1] || "";
-    if (/\bsrc\s*=/.test(attrs)) continue;
-    const type = (attrs.match(/\btype\s*=\s*["']?([^"'\s>]+)/i) || [])[1] || "text/javascript";
-    if (!/^(text\/javascript|application\/javascript|module)$/i.test(type)) continue;
-    const id = (attrs.match(/\bid\s*=\s*["']([^"']+)/i) || [])[1] || `inline-${count + 1}`;
-    try {
-      new Function(match[2]);
-      count += 1;
-    } catch (error) {
-      failures.push(`${id}: ${error.message}`);
-    }
-  }
-  assert.deepStrictEqual(failures, [], "all inline scripts parse");
-  return count;
-}
-
-const inlineCount = allInlineScriptsParse();
-assert(inlineCount >= 40, "expected the app shell inline scripts to be checked");
-
-const canonical = scriptById("gdCanonicalRouteAuditV1");
-const runtime = scriptById("gdGpsPlayRuntimeOwnerV1");
-new Function(canonical);
+new Function(shell);
+new Function(routeAudit);
 new Function(runtime);
 
-const oldEnterMatches = canonical.match(/const oldEnterGps=window\.enterGpsModule/g) || [];
-assert.strictEqual(oldEnterMatches.length, 1, "canonical shell owner declares oldEnterGps only once");
+assertContains(html, 'scripts/gd-shell.js?v=shell-owner-20260719', "page loads explicit Shell owner");
+assertBefore(html, "scripts/gd-shell.js", "scripts/gd-route-audit.js", "Shell owner loads before route audit compatibility code");
 
-assertContains(canonical, "function shellBackClick(event)", "canonical owner defines the shell Back click command");
-assertContains(canonical, "function shellBackPointer(event)", "canonical owner defines the shell Back pointer command");
-assertContains(canonical, "gdShellBackClick:shellBackClick", "canonical owner exports gdShellBackClick for inline shell markup");
-assertContains(canonical, "gdShellBackPointer:shellBackPointer", "canonical owner exports gdShellBackPointer for inline shell markup");
-assertContains(canonical, "gdCanonicalShellBack:backStable", "canonical owner exports canonical Back");
-assertContains(canonical, "gdCanonicalShellHome:cleanForHome", "canonical owner exports canonical Home");
+assertContains(shell, "window.GDShell=api", "Shell owner exposes GDShell");
+assertContains(shell, "window.gdShellBackClick=function(event)", "Shell owner exports Back click compatibility");
+assertContains(shell, "window.gdShellBackPointer=function(event)", "Shell owner exports Back pointer compatibility");
+assertContains(shell, "window.gdCanonicalShellHome=function()", "Shell owner exports canonical Home compatibility");
+assertContains(shell, "window.gdCanonicalShellBack=function()", "Shell owner exports canonical Back compatibility");
 
-assertContains(html, 'onclick="return gdShellBackClick(event)"', "shell Back button uses the global Back command");
-assertContains(html, 'onpointerdown="return gdShellBackPointer(event)"', "shell Back button uses the global pointer command");
-assertContains(html, 'onclick="showShellHome()"', "shell Home button uses the global Home command");
+assertContains(routeAudit, "gdCanonicalShellBack:function(){return window.GDShell?.back", "route audit Back alias delegates to Shell");
+assertContains(routeAudit, "gdCanonicalShellHome:function(){return window.GDShell?.home", "route audit Home alias delegates to Shell");
+assertContains(routeAudit, "safe(()=>window.GDShell?.init?.());", "route audit asks Shell to own top-bar button wiring");
 
-assertContains(runtime, 'shellNavigationOwner:"gdCanonicalRouteAuditV1"', "GPS runtime declares canonical shell navigation owner");
-assertContains(runtime, "function canonicalShellNavActive()", "GPS runtime can detect canonical shell owner");
-assertContains(runtime, "if(!canonicalShellNavActive()){", "GPS runtime only falls back to shell nav ownership when canonical owner is missing");
-assertBefore(runtime, "if(!canonicalShellNavActive()){", "window.gdCanonicalShellHome=home", "GPS runtime does not overwrite canonical Home outside the fallback guard");
-assertBefore(runtime, "if(!canonicalShellNavActive()){", "window.gdCanonicalShellBack=back", "GPS runtime does not overwrite canonical Back outside the fallback guard");
-assertContains(runtime, "if(canonicalShellNavActive())return;", "GPS runtime does not capture Back/Home pointer events when canonical owner is active");
-assertNotContains(runtime, "window.gdShellBackClick=function(event){return back(event)};\n\t    window.gdShellBackPointer", "GPS runtime does not unconditionally own shell Back globals");
+assertContains(runtime, "function canonicalShellNavActive()", "GPS runtime still detects canonical shell navigation");
+assertContains(runtime, "if(!canonicalShellNavActive()){", "GPS runtime shell wiring remains fallback-only");
+assertContains(runtime, "window.GDShell?.openCoursePicker", "GPS runtime delegates picker route presentation to Shell");
 
 console.log("shell-navigation-owner tests passed");

@@ -1,0 +1,61 @@
+# Structural Rebuild Plan
+
+Branch: `structural-rebuild`. Written 2026-07-19 after the flagTool boot-crash incident.
+
+## Where the codebase is
+
+82 scripts are loaded by `index.html` (~73,000 lines total). `gd-app-core.js` is 27,671 lines — 38% of everything — and runs DOM wiring at its top level, so a single missing element aborts thousands of lines of unrelated initialization. All 82 scripts share one global lexical scope in a required load order; state declared in one file is read by files loaded later (e.g. `wandMode`, `placingPin`). Roughly 30 of the loaded files are patch layers (`-fix-v1`, `-rescue-v1`, `-patch-*`, `-stabilizer-v1`) that wrap or monkey-patch behavior owned elsewhere.
+
+The split into external files worked for the HTML (index.html is 470 lines) but preserved the patch archaeology instead of removing it.
+
+## Rules (apply to every commit on this branch and after merge)
+
+1. `npm run test:boot` must pass before every commit. It boots the real page headless and fails on any uncaught exception plus two end-of-load canaries. This test caught the flagTool crash retroactively with exact stack traces.
+2. Deleting something means deleting it completely: the file, its `<script>`/`<link>` tag, its CSS, and every reference — then boot test + grep to prove it. No hiding, no suppressing.
+3. One owner per surface. A bug in a feature is fixed inside its owner file, never by adding a new layer on top.
+4. Small commits, each independently boot-tested. No mixed feature+cleanup commits.
+5. Respect the locked baseline in `package.json` (`codex.doNotModify`): the Green Wand sandbox engine, tile-crop sampling, and probe/ridge/magnetic shell logic move but do not change.
+
+## Target module map (owners)
+
+Already clean, keep as-is:
+- Platform: `gd-namespace`, `clarity-store`, `clarity-session`, `clarity-cloud-sync`, `clarity-supabase-auth`, `clarity-router`, `clarity-permissions`, `clarity-email`, `clarity-backup`, `clarity-support`
+- Payments: `clarity-payments`
+- Rail/branding: `gd-icon-assets`, `gd-brand-icon-render` (rebuilt this weekend; owns rail lifecycle)
+
+Consolidate into single owners:
+- **Auth/account shell** ← `gd-auth-account-shell` + `gd-auth-gate-v1` + `gd-auth-reset-route-bootstrap` + `gd-inline-profile-route-hardening-v1`
+- **GPS play runtime** ← `gd-gps-play-runtime-owner-v1` + `gd-gps-state-stabilizer-v1` + `gd-gps-auto-session-v1` + `gd-gps-layout-rig-v1` + `gd-gps-play-camera-tilt-v1` + `gd-inline-gps-viewport-lock-v1` + `gd-gps-location-set-lock-v1` + `gd-gps-mapped-camera-and-green-focus-v1` + `gd-gps-scorecard-owner-v1` + `gd-gps-new-shot-final-wire-v1` + `gd-gps-request-button-fix-v1` + `gd-gps-mapped-entry-guard-v1` + the nine `gd-inline-clarity-caddie-*` patches + `gd-final-tool-screen-isolation-v1` + `gd-play-flow-next-hole-v1`
+- **Wand** ← `gd-wand-robust-known-good-flow-v1` + `gd-wand-sample-truth-v1` + `gd-wand-diagnostics-v1` + `gd-wand-compact-flow-v1` + `gd-wand-floating-mapper-v1` + `gd-gps-polish-wand-layer-v1` + `gd-inline-clarity-caddie-patch-wand-overlay-clean` + `gd-inline-gps-wand-active-chrome-sync-v1` (+ wand code inside core; locked engine logic moves verbatim)
+- **Course picker** ← `gd-course-picker-search-v2` via `window.GDCoursePicker`. It owns picker initialization, open/close, search/results, nearby/assumed presentation, one-shot picker GPS, resume-round picker entry, selected-course identity, saved playable lookup, one mapping-controller invocation, mapping-result handling, and one GPS Play handoff. Core keeps only `GDCoursePickerCoreBridge` compatibility for existing pin/manual/GPS helper seams. Course-location pin persistence remains the next separate carve.
+- **Course data/mapping** ← `gd-course-geometry-resolver`, `gd-course-library-pin-lock` (split library vs UI), `gd-course-play-pipeline`, `gd-course-mapping-debug`, `gd-course-visual-engine`, `gd-multi-nine-courses`, `gd-captured-surface-model/sync`, `gd-captured-hole-frame-camera-v19`, `gd-hole-frame-guide-contract-v20`, `gd-auto-map-handoff-quarantine-v1`
+- **Practice/shot data** ← `clarity-table-ocr(+pixels)`, `gd-launch-monitor-*`, `gd-shot-*`, `gd-native-practice-data`, `gd-practice-import-action-bridge`
+- **Shell/routing** ← reconcile `gd-route-audit` (7,058 lines) with the routing half of core; one shell owner.
+
+Status unknown, confirm with Sam before touching: `gd-arcade-mode` (+ `gd-arcade-course-entry-v1`), `gd-tournament-mode-v1`, `gd-windross-seed`.
+
+## Sequence
+
+- **Phase A — collapse the patch layers.** Fold each patch file into its owner (wand first, then the caddie patches into GPS runtime), deleting the file+tag each time. This shrinks the load order from ~82 to ~35 scripts without touching core.
+- **Phase B — carve core by feature.** Extract feature blocks (flag/pin first as the template, then permissions, GPS watch, scorecard) into owner modules loaded immediately after core, with guarded init. Core shrinks; every step boot-tested.
+- **Phase C — one shell owner.** Merge the route/shell logic split across core and `gd-route-audit`.
+
+Done so far:
+- Boot smoke test added and proven against the broken commit.
+- Dead files deleted (`gd-gps-badge.js`, `clarity-landing-build2.js`).
+- Legacy features fully deleted per Sam: arcade mode, tournament mode, windross seed.
+- Phase A in-place merges (order preserved, sections labelled, boot-tested): 7 GPS play layers → `gd-gps-play-runtime-owner-v1.js`; 6 caddie patches → `gd-caddie-gps-patches-v1.js`; 3 late wand layers → `gd-wand-flow-layers-v1.js`. Load order: 83 → 66 scripts.
+
+- Phase A continued: 5 mid GPS flow layers → `gd-gps-play-flow-layers-v1.js`; wand/caddie belt regrouped (5 wand layers → `gd-wand-belt-layers-v1.js`, 2 caddie strays folded into `gd-caddie-gps-patches-v1.js`, cross-references verified before the move). Load order now 56 scripts.
+
+Phase B started: flag/pin block carved into scripts/gd-flag-pin.js (loads right after core; shared global lexical scope keeps cross-references working). Local app permissions are carved into scripts/gd-app-permissions.js, loaded before core because profile/account boot needs its global bindings; the platform `clarity-permissions.js` resolver remains separate. GPS watch/location lifecycle is now fully single-owned by `gd-gps-play-runtime-owner-v1.js`; the old caddie GPS locate, geolocation monkey-patch wrappers, and beta-shell `window.refreshGPS` claim were deleted instead of kept as rescue layers.
+
+Phase B scorecard checkpoint: `scripts/inline/gd-gps-scorecard-owner-v1.js` is now the single scorecard owner. It owns scorecard state, score entry, par/stroke display helpers, render/open lifecycle, current-hole sync, reset, total calculation, and queued score-save next-hole transitions through `window.GDGpsScorecard`. The old core scorecard implementation was removed and the embedded runtime scorecard section was retired. Core line count for this carve: 27,425 before scorecard carve → 26,977 after. Source script tags: 58 before → 59 after because the scorecard owner is now a standalone owner file. Files retained: `gd-gps-play-flow-layers-v1.js` still owns GPS round-flow/shot-state/hole-frame transitions, but now delegates score-save queueing to the scorecard owner; `gd-course-library-pin-lock.js` and `gd-multi-nine-courses.js` keep their side effects through scorecard owner events rather than wrappers. Files deleted: none in this carve. Compatibility aliases retained: `openScorecard`, `renderScorecard`, `saveHoleScore`, `playSelectedHole`, `setHole`, `adjustHoleScore`, `adjustHolePutts`, `gdScorecardConfirmedCourse`, `gdEnsureScorecardForCourse`, `gdScorecardHoleView`, `gdScorecardKnownNumber`, and `gdToggleScoreHolePicker`, all delegating to the owner implementation.
+
+Phase B course picker checkpoint: `scripts/inline/gd-course-picker-search-v2.js` now exposes the single public picker owner as `window.GDCoursePicker`. The inline Play tile, beta-shell Play tile, route-audit picker open path, and GPS runtime Play tile hook delegate to `GDCoursePicker.open(...)`. Legacy globals such as `manualSearch`, `renderCourses`, `gdOpenChangeCourse`, `gdOpenCoursePickerCourse`, `gdOpenCoursePickerSelectionFromElement`, and picker GPS helpers remain compatibility aliases into the owner. The picker calls only `runCourseMappingAttempt` / `gdRunCourseMappingAttempt`; AutoMapper, native resolver, Green Shape Engine, fallback internals, GPS Play internals, and shell ownership were not moved into the picker. See `docs/reports/COURSE_PICKER_OWNERSHIP_MAP.md`.
+
+Next separate task after picker ownership: course-location pin ownership. Do not fold that into shell consolidation, AutoMapper internals, native resolver internals, GPS Play runtime, or map camera ownership.
+
+Green Wand product decision checkpoint (2026-07-19): Green Wand is no longer required as a standalone player-facing GPS tool. The protected boundary is narrowed to the working green-shape detector: crop/image sampling, colour/tone segmentation, radial probes, ridge/edge detection, magnetic healthy-bubble growth, shell/polygon generation and cleanup, confidence/size/rejection gates, and pixel-to-map conversion. Standalone Wand screen entry, GPS rail controls, floating/compact UI, overlay cleanup layers, rescue wrappers, duplicate observers, standalone save choreography, and mapper hooks duplicated outside AutoMapper are now deletion candidates after the engine is isolated and test-covered.
+
+Wand map checkpoint: see `docs/reports/GREEN_WAND_ENGINE_EXTRACTION_MAP.md`. Current classification: detection engine now lives in `scripts/gd-green-shape-engine.js` as `window.GolfDaddyGreenWandEngine.analyzeGreenWand` plus `detect()` / `validateDetection()` with `window.GDGreenShapeEngine` as the future-facing alias. The live AutoMapper handoff from `2146605` is now covered by `dev/automapper-green-refinement-owner.test.js` and `dev/automapper-green-refinement-behavior.test.js`: accepted candidate/crop/projection/strong-engine output, source metadata, existing save-path delegation, dedupe, repeatability, stale attempt isolation, UI isolation, no imagery, invalid projection, engine no-match, engine exception, low confidence, invalid/non-finite polygons, drift, course mismatch, hole mismatch, and stronger existing geometry. Standalone Wand UI still lives in core plus `gd-wand-flow-layers-v1.js`; diagnostics remain mostly inert in `gd-wand-belt-layers-v1.js`. Standalone Wand retirement remains blocked until these AutoMapper refinement tests are passing in structural CI; do not claim the Wand surface is retired.

@@ -324,7 +324,8 @@
 		    try { document.getElementById('courseScreen')?.classList.add('hidden'); } catch(e) {}
 		    try { document.getElementById('shellTop')?.classList.remove('visible'); } catch(e) {}
 		    try { document.getElementById('shellDock')?.classList.remove('visible'); } catch(e) {}
-		    document.body.classList.remove('shell-home','shell-gps','shell-module','gdGpsActive','gps-active','gps-open','manual-gps-active','gdStatsOpen','gdBubbleStudioOpen','gdShotDataOpen');
+		    document.body.classList.remove('gps-open','manual-gps-active','gdStatsOpen','gdBubbleStudioOpen','gdShotDataOpen');
+		    safe(function(){window.GDShell?.showAuth?.({source:'auth-account-route'});});
 		    document.body.classList.add('gdAuthLocked','gdProfileOpen');
 	    document.body.classList.toggle('gdPasswordResetRoute', !!isReset);
 	    overlay().classList.remove('hidden');

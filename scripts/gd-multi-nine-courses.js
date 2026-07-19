@@ -197,20 +197,16 @@
     if (row && row.parentNode) row.parentNode.removeChild(row);
   }
 
-  function wrapRenderScorecard() {
+  function installScorecardRenderHook() {
     if (renderInstalled) return true;
-    var original = window.renderScorecard;
-    if (typeof original !== 'function') return false;
-    function wrapped() {
-      var result = original.apply(this, arguments);
+    if (typeof document === 'undefined' || !document.addEventListener) return false;
+    document.addEventListener('gd:scorecard-render', function () {
       safe(function () {
         var course = typeof gdScorecardConfirmedCourse === 'function' ? gdScorecardConfirmedCourse() : null;
         var entry = multiNineCourseFor(course);
         if (entry) renderPicker(entry, course); else removePicker();
       });
-      return result;
-    }
-    window.renderScorecard = wrapped;
+    });
     renderInstalled = true;
     return true;
   }
@@ -218,7 +214,7 @@
   var installAttempts = 0;
   function install() {
     var okShell = wrapScorecardShell();
-    var okRender = wrapRenderScorecard();
+    var okRender = installScorecardRenderHook();
     if ((!okShell || !okRender) && installAttempts++ < 10) setTimeout(install, 400);
   }
 
