@@ -65,12 +65,26 @@ the iOS project has been compiled or run.
 **Nothing has run on a real device or emulator.** The APK builds; it has not been
 installed. Real-course GPS testing is still the gate before any public submission.
 
-**Payments will not work in the app as-is.** `scripts/clarity-payments.js:416` does
-`window.location.assign()` to a Stripe Checkout URL — a top-level off-origin
-navigation. In a webview this either leaves the app or is blocked, and shipping it
-would be an in-app purchase policy violation on both stores. Store billing is
-unresolved; see `docs/architecture/MEMBER_REFERRALS.md` for the referral side, whose
-inviter reward is a Stripe customer balance credit with no Apple/Google equivalent.
+**Store billing: server done, client not.** The RevenueCat webhook
+(`functions/store-webhook.js`), schema, entitlement read path and referral rewards
+are built and tested. What does not exist yet is the client purchase module:
+`clarity-payments.js` blocks Stripe checkout when native and delegates to
+`window.ClarityStoreBilling`, **which has not been written**. Tapping buy in the app
+currently shows "Purchases are unavailable right now".
+
+Building it needs external setup that cannot be done from the repo:
+
+1. RevenueCat account with the Play app connected
+2. Products in Play Console — the tests assume `clarity_membership_monthly` and
+   `clarity_month_pass`
+3. RevenueCat public SDK key in the client; shared secret in Netlify as
+   `REVENUECAT_WEBHOOK_AUTH` (the webhook fails closed without it)
+4. RevenueCat webhook pointed at `https://caddy.claritygolf.app/api/store-webhook`
+5. The client must set RevenueCat's `appUserID` to our `account_id` at login — that
+   is how the webhook joins a purchase back to an account
+
+Nothing has been run against a real store. The webhook is tested against stubbed
+Supabase and synthetic RevenueCat payloads only.
 
 **Auth deep links break.** Password-reset and account-setup emails link to
 `caddy.claritygolf.app` with `?claritySetPassword=1` / `?clarityResetPassword`,
