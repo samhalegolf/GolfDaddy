@@ -24,16 +24,17 @@ Restrictions that still apply until tests protect behavior:
 
 ## Current Script And Core Counts
 
-- Source script tags in `index.html`: 59.
-- `scripts/gd-app-core.js`: 26,977 lines.
-- Wand source scripts currently loaded directly: `scripts/inline/gd-wand-belt-layers-v1.js` and `scripts/inline/gd-wand-flow-layers-v1.js`.
+- Source script tags in `index.html`: 60 after extraction; 59 before extraction.
+- `scripts/gd-app-core.js`: 26,322 lines after extraction; 26,977 before extraction.
+- `scripts/gd-green-shape-engine.js`: 658 lines.
+- Wand/engine source scripts currently loaded directly: `scripts/gd-green-shape-engine.js`, `scripts/inline/gd-wand-belt-layers-v1.js`, and `scripts/inline/gd-wand-flow-layers-v1.js`.
 - Wand CSS currently loaded directly: `styles/inline/gd-wand-diag-style.css`, `styles/inline/gd-wand-sample-truth-style-v1.css`, `styles/inline/gd-wand-root-cause-clean-css-v1.css`, `styles/inline/gd-wand-robust-known-good-css-v1.css`, `styles/inline/gd-wand-compact-flow-css-v1.css`, `styles/inline/gd-wand-floating-mapper-css-v1.css`.
 
 ## A. Detection Engine
 
 Preserve/move after behavior fixtures pass:
 
-- `scripts/gd-app-core.js`: `window.GolfDaddyGreenWandEngine` / `window.ClarityCaddieGreenWandEngine`.
+- `scripts/gd-green-shape-engine.js`: `window.GolfDaddyGreenWandEngine` / `window.ClarityCaddieGreenWandEngine` / `window.GDGreenShapeEngine`.
 - `GREEN_WAND_MODE_PRESETS`, `GREEN_WAND_MODE_ORDER`, `buildFilterString`, `polygonPath`, `analyzeGreenWand`, `getModeDefaults`.
 - Internal detector helpers around the same block: pixel sampling, tone/luma scoring, local contrast, radial probe generation, neighbour support, continuity selection, ridge line construction, ridge snap profile, healthy bubble fitting, outer shell/inset shell generation, inside/outside edge comparison, smoothing, centroid/radius helpers.
 - Readers: `scanGreen()` in `scripts/gd-app-core.js`; `currentWandPreset()` in `scripts/gd-app-core.js`; new behavior fixture.
@@ -41,7 +42,7 @@ Preserve/move after behavior fixtures pass:
 - DOM/map globals used by core detector: `document.createElement("canvas")` only. It does not use Leaflet, body classes, `map`, `greenCentre`, course records, or Wand panel DOM.
 - Classification: algorithm.
 - AutoMapper impact: none today.
-- Recommendation: move into `scripts/gd-green-shape-engine.js` with a narrow compatibility alias only after tests are green.
+- Recommendation: preserve in `scripts/gd-green-shape-engine.js`; add a narrower `detect()` wrapper in a later commit after deciding whether `gdValidateWandOutline` belongs inside the engine contract or adapter validation.
 
 ## B. Engine Adapters
 
@@ -96,7 +97,7 @@ Delete after extraction when no standalone Wand UI depends on them:
 
 ## Current AutoMapper/Wand Relationship
 
-AutoMapper does not currently invoke the Wand detection engine directly.
+AutoMapper does not currently invoke the Green Shape Engine directly.
 
 Current data flow:
 
@@ -155,4 +156,4 @@ The first extracted version may keep `analyzeGreenWand(canvas, width, height, op
 
 Boundary status: clear enough for behavior fixtures.
 
-Extraction status: not completed in this report commit. The next safe step is to add behavior fixtures against the current engine, then move the detector block with compatibility aliases if those fixtures pass.
+Extraction status: completed after the fixture commit. The detector block moved from `scripts/gd-app-core.js` to `scripts/gd-green-shape-engine.js` with compatibility aliases preserved. Standalone Wand UI deletion is intentionally left for a later commit.
