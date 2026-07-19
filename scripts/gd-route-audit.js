@@ -23,9 +23,12 @@
 	    try{if(typeof window.gdClearMapperGuideUi==="function")window.gdClearMapperGuideUi();}catch(e){}
 	    byId("gdProfileV67")?.classList.add("hidden");
   }
-  function showCoursePicker(){
-    const screen=byId("courseScreen");
-    if(!screen)return;
+	  function showCoursePicker(){
+	    if(window.GDCoursePicker&&typeof window.GDCoursePicker.open==="function"){
+	      return window.GDCoursePicker.open({source:"route-audit",returnTarget:"gps"});
+	    }
+	    const screen=byId("courseScreen");
+	    if(!screen)return;
     clearCoursePickerDatabaseState();
     document.body.classList.remove("shell-home","shell-module","gdMappedCourseMode","gdMappedStartPromptActive","gdToolRailOpen","gdCourseOpening","gdCoursePinPromptActive");
     document.body.classList.add("shell-gps","gdGpsActive","gps-active","gdCoursePickerOpen");
@@ -6583,8 +6586,11 @@
     if(!opened)return forceHomeFallback();
     return false;
   }
-	  function showCoursePickerStableBack(reason){
-	    clearCoursePickerDatabaseState();
+		  function showCoursePickerStableBack(reason){
+		    if(window.GDCoursePicker&&typeof window.GDCoursePicker.open==="function"){
+		      return window.GDCoursePicker.open({source:reason||"stable-back",returnTarget:"gps"});
+		    }
+		    clearCoursePickerDatabaseState();
 	    safe(()=>{document.body.classList.remove("shell-home","shell-module","gdToolRailOpen","gdCourseOpening","gdCoursePinPromptActive")});
 	    safe(()=>{document.body.classList.add("shell-gps","gdGpsActive","gps-active","gdCoursePickerOpen")});
 	    safe(()=>{document.body.dataset.clarityRoute="gps";document.body.dataset.gdToolScreen="picker"});

@@ -35,6 +35,8 @@ jobs:
         run: |
           node dev/app-permissions-smoke.test.js
           node dev/course-picker-location.test.js
+          node dev/course-picker-owner.test.js
+          node dev/course-picker-behavior.test.js
           node dev/gps-location-lifecycle-behavior.test.js
           node dev/gps-location-lifecycle-owner.test.js
           node dev/gps-scorecard-owner.test.js

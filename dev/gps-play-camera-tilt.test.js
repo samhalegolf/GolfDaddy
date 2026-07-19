@@ -24,7 +24,7 @@ function assertNotContains(source, needle, message) {
 new Function(script);
 
 assertContains(html, "gd-gps-play-camera-tilt-v1.css?v=tilt02", "tilt CSS cache-bust is updated");
-assertContains(html, "gd-gps-play-runtime-owner-v1.js?v=gps-location-lifecycle-20260719", "tilt logic ships inside the merged GPS play owner");
+assertContains(html, "gd-gps-play-runtime-owner-v1.js?v=course-picker-owner-20260719", "tilt logic ships inside the merged GPS play owner");
 assertContains(script, "AUTO_LOCK_TILT_DEG=32", "GPS Play camera tilt locks to the chosen 32 degree presentation");
 assertContains(script, "window.gdSyncGpsPlayCameraTilt", "automatic tilt sync hook remains available to lock/unlock owners");
 assertContains(script, "removeTiltControls", "tilt module cleans up older injected controls");

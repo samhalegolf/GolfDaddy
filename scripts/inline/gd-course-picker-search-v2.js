@@ -13,9 +13,25 @@
 	  let databaseCourseCache=[];
 	  let databaseCourseLoadAt=0;
 	  let databaseCoursePromise=null;
+  const state={
+    initialized:false,
+    listenersBound:false,
+    destroyed:false,
+    open:false,
+    source:"",
+    activeKey:"",
+    activeToken:"",
+    activePromise:null,
+    activeSelection:null,
+    lastResult:null,
+    lastSearchQuery:"",
+    lastNearby:null,
+    lastResumePanel:null
+  };
 
   function byId(id){return document.getElementById(id)}
   function safe(fn,fallback){try{return fn()}catch(e){return fallback}}
+  function bridge(){return window.GDCoursePickerCoreBridge||{}}
   function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]))}
   function slug(s){return String(s||"course").toLowerCase().trim().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"")||"course"}
   function cleanName(s){
@@ -107,9 +123,6 @@
     },{enableHighAccuracy:true,maximumAge:60000,timeout:9000});
     return true;
   }
-  window.gdCoursePickerRequestGps=requestPickerGps;
-  window.gdCoursePickerRememberGps=rememberPickerGps;
-  window.gdCoursePickerCenterMapOnGps=centerPickerMapOnGps;
   function currentPoint(){
     return safe(()=>{
       if(typeof start!=="undefined"&&start){
@@ -375,19 +388,193 @@
       const course=courses[idx]||selected;
       setPayloadOn(block,course);
     });
+    state.lastNearby=selected;
     return selected;
   }
   function selectCourse(raw){
-    const course=basePayload(raw);
-    course.courseId=course.savedCourseId||course.courseId||course.canonicalKey;
-    rememberRecentCourse(course);
-    if(typeof window.gdOpenCoursePickerCourse==="function")return window.gdOpenCoursePickerCourse(course);
-    if(typeof window.openCourse==="function"&&window.openCourse!==selectCourse)return window.openCourse(course);
-    safe(()=>{localStorage.setItem("gd_active_course_v1",JSON.stringify(course));sessionStorage.setItem("gd_assumed_course_name",course.name);});
-    byId("courseScreen")?.classList.add("hidden");
-    return false;
+    return selectCourseForPlay(raw,{source:"picker-select"});
   }
-  window.renderCourses=function(courses){
+  function normalizeCourse(raw){
+    const normalizer=bridge().normalizeCourse;
+    const course=typeof normalizer==="function"?normalizer(raw):basePayload(raw);
+    return basePayload(course);
+  }
+  function isManualCourse(course){
+    const owned=bridge().isManual;
+    return typeof owned==="function"?!!owned(course):/^manual gps$/i.test(String(course?.name||course?.courseName||"").trim());
+  }
+  function courseHasPoint(course){
+    const owned=bridge().hasPoint;
+    return typeof owned==="function"?!!owned(course):finitePoint(course);
+  }
+  function applyStoredPin(course){
+    const apply=bridge().applyStoredPin;
+    return typeof apply==="function"?normalizeCourse(apply(course)):course;
+  }
+  function selectionKey(course,opts={}){
+    const point=opts.fromPinnedSeed?finitePoint(course)&&course:null;
+    const seed=point?`:pin:${Number(point.lat).toFixed(5)},${Number(point.lng).toFixed(5)}`:"";
+    return `${String(course?.courseId||course?.id||course?.canonicalKey||course?.name||course?.courseName||"course").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"")||"course"}:h1${seed}`;
+  }
+  function mappingController(){
+    const controller=window.runCourseMappingAttempt||window.gdRunCourseMappingAttempt;
+    return typeof controller==="function"?controller:null;
+  }
+  function mappingRequest(course,opts={}){
+    const now=Date.now();
+    const selectedAt=new Date(now).toISOString();
+    const pinSeed=!!opts.fromPinnedSeed;
+    const pinnedCentre=pinSeed&&finitePoint(course)?{lat:Number(course.lat),lng:Number(course.lng)}:null;
+    const library=window.GolfDaddyCourseLibrary||window.ClarityCaddieCourseLibrary||{};
+    const snapshotOpts={selectedAt,source:pinSeed?"course-picker-pin-auto-map":"course-picker-auto-map"};
+    if(pinnedCentre)snapshotOpts.courseCentre=pinnedCentre;
+    const mappingCourse=typeof library.mappingCourseSnapshot==="function"?library.mappingCourseSnapshot(course,snapshotOpts):course;
+    return {
+      course:mappingCourse,
+      courseCentre:pinnedCentre||undefined,
+      hole:1,
+      wholeCourse:true,
+      showLoading:true,
+      fresh:true,
+      allowLocalSavedMap:course?.gdDatabaseMapAvailable===true,
+      acceptPartialGeneratedMap:pinSeed,
+      selectedAt,
+      reason:pinSeed?"course-picker-pin":"course-picker"
+    };
+  }
+  function setMappingStatus(result){
+    try{
+      document.body.dataset.gdCourseAutoMapStatus=result&&result.stale?"stale":result&&(result.playable||result.fallback)?"done":"empty";
+      document.body.dataset.gdCourseAutoMappedHoles=String(result?.holes||result?.persisted?.holes||0);
+      document.body.dataset.gdCourseAutoMapSaved=String(result?.saved||result?.persisted?.saved||0);
+      document.body.dataset.gdCourseNeedsPin=result&&result.fallback?"active":result&&result.playable?"no":"pending";
+    }catch(e){}
+  }
+  function closePickerSurface(reason){
+    const screen=byId("courseScreen");
+    if(screen)screen.classList.add("hidden");
+    safe(()=>{document.body.classList.remove("gdCoursePickerOpen","gdCoursePinPromptActive");document.body.dataset.gdCoursePickerClosedBy=String(reason||"course-picker-owner");});
+    safe(()=>{window.__gdCoursePickerPinPromptActive=false;});
+    state.open=false;
+  }
+  function prepareMappingSurface(course,opts={}){
+    const b=bridge();
+    if(typeof b.hidePin==="function")b.hidePin();
+    closePickerSurface("course-picker-mapping");
+    if(typeof b.prepareMappingSurface==="function")b.prepareMappingSurface(course,opts);
+    else{
+      if(typeof b.resetPresentationReadiness==="function")b.resetPresentationReadiness(course,{forceScanner:!!opts.fromPinnedSeed});
+      if(typeof b.storeSelection==="function")b.storeSelection(course);
+    }
+  }
+  function enterGpsPlay(course,result,opts={}){
+    if(!(result&&result.playable))return false;
+    const entered=typeof bridge().enterGpsPlayAfterMapping==="function"
+      ? bridge().enterGpsPlayAfterMapping(course,result,opts)
+      : false;
+    if(entered)state.lastResult=result;
+    return entered;
+  }
+  function localSavedPlayable(course){
+    const has=bridge().hasMappedPlayData;
+    return typeof has==="function"&&!!has(course,1);
+  }
+  function invokeMappingOnce(course,opts={}){
+    const key=selectionKey(course,opts);
+    if(state.activePromise&&state.activeKey===key)return state.activePromise;
+    const controller=mappingController();
+    const token=`${Date.now()}-${Math.random()}`;
+    state.activeKey=key;
+    state.activeToken=token;
+    state.activeSelection=course;
+    try{
+      window.__gdCoursePickerOwnsOpenResolverUntil=Date.now()+45000;
+      document.body.dataset.gdCourseAutoMapStatus=opts.fromPinnedSeed?"checking_pin_seed":"running";
+      document.body.dataset.gdCourseScannerSeed=opts.fromPinnedSeed?"pin":"course";
+      document.body.dataset.gdCoursePickerOwner="GDCoursePicker";
+    }catch(e){}
+    prepareMappingSurface(course,opts);
+    if(typeof controller!=="function"){
+      try{document.body.dataset.gdCourseAutoMapStatus="controller_unavailable";document.body.dataset.gdCourseNeedsPin="pending";}catch(e){}
+      return false;
+    }
+    const request=mappingRequest(course,opts);
+    const promise=Promise.resolve(controller(request))
+      .then(result=>{
+        if(state.activeToken!==token)return Object.assign({},result,{stale:true});
+        state.lastResult=result||null;
+        setMappingStatus(result);
+        if(result&&result.playable)enterGpsPlay(course,result,opts);
+        return result;
+      })
+      .catch(error=>{
+        if(state.activeToken===token){
+          try{document.body.dataset.gdCourseAutoMapStatus="error";document.body.dataset.gdCourseNeedsPin="pending";}catch(e){}
+        }
+        throw error;
+      })
+      .finally(()=>{if(state.activeToken===token)state.activePromise=null;});
+    state.activePromise=promise;
+    return promise;
+  }
+  function selectCourseForPlay(raw,opts={}){
+    let course=normalizeCourse(raw);
+    course.courseId=course.savedCourseId||course.courseId||course.canonicalKey;
+    course=applyStoredPin(course);
+    rememberRecentCourse(course);
+    state.activeSelection=course;
+    safe(()=>{window.__gdLiveCoursePickerSelection=course;window.__gdLiveCoursePickerSelectionAt=Date.now();});
+    if(!course.gdDatabaseMapChecked&&!isManualCourse(course)){
+      const token=`${Date.now()}-${Math.random()}`;
+      state.activeToken=token;
+      safe(()=>{
+        document.body.dataset.gdCourseNeedsPin="checking_database_map";
+        document.body.dataset.gdCourseNeedsPinCourse=course.courseId||course.canonicalKey||course.name||"";
+        document.body.dataset.gdCoursePinDecision="checking-database-map";
+      });
+      const checker=bridge().databaseMapAvailable;
+      Promise.resolve(typeof checker==="function"?checker(course):{available:false,attempted:false,reason:"database-map-check-unavailable"})
+        .then(result=>{
+          if(state.activeToken!==token)return false;
+          const hasDatabaseMap=!!(result&&result.available);
+          safe(()=>{document.body.dataset.gdCourseDatabaseMapAvailable=hasDatabaseMap?"yes":"no";document.body.dataset.gdCourseDatabaseMapSource=result&&result.source||result&&result.reason||"";});
+          return selectCourseForPlay(Object.assign({},course,{gdDatabaseMapChecked:true,gdDatabaseMapAvailable:hasDatabaseMap,gdDatabaseMapSource:result&&result.source||""}),Object.assign({},opts,{source:"database-map-checked"}));
+        })
+        .catch(error=>{
+          if(state.activeToken!==token)return false;
+          safe(()=>{document.body.dataset.gdCourseDatabaseMapAvailable="error";document.body.dataset.gdCourseDatabaseMapSource=error&&error.message||"database-map-check-error";});
+          return selectCourseForPlay(Object.assign({},course,{gdDatabaseMapChecked:true,gdDatabaseMapAvailable:false}),Object.assign({},opts,{source:"database-map-error"}));
+        });
+      return false;
+    }
+    const usePinSeed=!course.gdDatabaseMapAvailable&&course.gdTrustedCoursePin===true&&courseHasPoint(course);
+    safe(()=>{
+      window.__gdCoursePickerChangingAt=0;
+      window.__gdCoursePickerFirstHoleOpenToken=null;
+      window.gdCourseChangeMode="";
+      if(!isManualCourse(course))window.__gdCoursePickerOwnsOpenResolverUntil=Date.now()+45000;
+      localStorage.removeItem("gd_active_course_v1");
+    });
+    const needsPin=bridge().needsCoursePin;
+    if(typeof needsPin==="function"&&needsPin(course)){
+      const showPin=bridge().showPin;
+      return typeof showPin==="function"?showPin(course):false;
+    }
+    if(isManualCourse(course)){
+      if(typeof bridge().hidePin==="function")bridge().hidePin();
+      closePickerSurface("manual-gps-selected");
+      const manualOpen=bridge().openManualCourse;
+      return typeof manualOpen==="function"?manualOpen(course):false;
+    }
+    if(course.gdDatabaseMapAvailable===true&&localSavedPlayable(course)){
+      if(typeof bridge().hidePin==="function")bridge().hidePin();
+      closePickerSurface("saved-playable-course");
+      setMappingStatus({playable:true,holes:0,saved:0});
+      return enterGpsPlay(course,{playable:true,course,source:"saved-playable-course"},opts);
+    }
+    return invokeMappingOnce(course,Object.assign({},opts,{fromPinnedSeed:usePinSeed}));
+  }
+  function renderCoursesOwner(courses){
     const list=byId("courseList");
     if(!list)return;
     renderNearby();
@@ -407,49 +594,55 @@
       const recentOnly=courses.length&&courses.every(course=>course&&course.source==="recent-course");
       count.textContent=courses.length?(recentOnly?`${courses.length} recent`:`${courses.length} found`):"Search";
     }
-  };
-  window.manualSearch=function(){
+  }
+  function searchOwner(query){
     const q=byId("searchInput")?.value.trim()||"";
+    const requested=query==null?q:String(query||"").trim();
+    if(query!=null){
+      const input=byId("searchInput");
+      if(input)input.value=requested;
+    }
     const count=byId("countLine");
     const list=byId("courseList");
     const run=++searchRun;
     if(list)list.innerHTML="";
     renderNearby();
-	    if(!q){
-	      window.renderCourses(readRecentCourses());
-	      loadDatabaseCourses().then(()=>{renderNearby();if(run===searchRun)window.renderCourses(readRecentCourses());});
+    state.lastSearchQuery=requested;
+	    if(!requested){
+	      renderCoursesOwner(readRecentCourses());
+	      loadDatabaseCourses().then(()=>{renderNearby();if(run===searchRun)renderCoursesOwner(readRecentCourses());});
 	      return false;
 	    }
 	    if(count)count.textContent="Searching";
-	    const immediate=rank(localMatches(q),q);
-	    if(immediate.length)window.renderCourses(immediate);
-	    Promise.all([loadDatabaseCourses(),remoteMatches(q)]).then(([,remote])=>{
+	    const immediate=rank(localMatches(requested),requested);
+	    if(immediate.length)renderCoursesOwner(immediate);
+	    Promise.all([loadDatabaseCourses(),remoteMatches(requested)]).then(([,remote])=>{
 	      if(run!==searchRun)return;
-	      const results=rank(localMatches(q).concat(remote),q).slice(0,12);
-	      window.renderCourses(results);
+	      const results=rank(localMatches(requested).concat(remote),requested).slice(0,12);
+	      renderCoursesOwner(results);
 	      if(count)count.textContent=results.length?`${results.length} found`:"No course found";
 	    });
     return false;
-  };
-  const oldRefresh=window.gdRefreshCourseAssumedOption;
-  window.gdRefreshCourseAssumedOption=function(course){
+  }
+  const oldRefreshAssumedOption=window.gdRefreshCourseAssumedOption;
+  function refreshAssumedOptionOwner(course){
     if(course&&course.assumedCandidate&&course.name&&!/^assumed/i.test(course.name))return renderNearby();
-    if(typeof oldRefresh==="function")oldRefresh(course);
+    if(typeof oldRefreshAssumedOption==="function")oldRefreshAssumedOption(course);
     return renderNearby();
-  };
-  window.gdConfirmAssumedCourse=function(event){
+  }
+  function confirmAssumedCourseOwner(event){
     if(event){event.preventDefault?.();event.stopPropagation?.();event.stopImmediatePropagation?.();}
-    if(typeof window.gdOpenCoursePickerSelectionFromElement==="function"){
-      return window.gdOpenCoursePickerSelectionFromElement(event?.target);
-    }
     const option=byId("gdCourseAssumedOption");
     const block=event?.target?.closest?.(".courseAssumedBlock");
-    return selectCourse(block?.__gdCoursePayload||option?.__gdCoursePayload||renderNearby());
-  };
-  window.gdOpenChangeCourse=function(event){
+    return selectCourseForPlay(block?.__gdCoursePayload||option?.__gdCoursePayload||renderNearby(),{source:"assumed-course"});
+  }
+  function openOwner(opts={}){
+    const event=opts&&opts.preventDefault?opts:opts.event;
     if(event){event.preventDefault?.();event.stopPropagation?.();event.stopImmediatePropagation?.();}
-    window.gdCourseChangeMode="change-course";
-    window.__gdCoursePickerReturnTarget="gps";
+    state.open=true;
+    state.source=opts.source||"change-course";
+    window.gdCourseChangeMode=opts.mode||"change-course";
+    window.__gdCoursePickerReturnTarget=opts.returnTarget||"gps";
     safe(()=>{window.__gdCoursePickerChangingAt=Date.now();window.__gdCoursePickerFirstHoleOpenToken=null;window.__gdStableMappedHoleOneLast=null;});
     safe(()=>{if(window.__gdPreLockHoleFrameTimer)clearTimeout(window.__gdPreLockHoleFrameTimer);});
     safe(()=>{if(typeof gdClearMappedStartPromptChrome==="function")gdClearMappedStartPromptChrome();});
@@ -476,8 +669,8 @@
     if(input)input.value="";
 	    centerPickerMapOnGps();
 	    requestPickerGps();
-	    window.renderCourses(readRecentCourses());
-	    loadDatabaseCourses().then(()=>{renderNearby();if(!(input&&input.value.trim()))window.renderCourses(readRecentCourses());});
+	    renderCoursesOwner(readRecentCourses());
+	    loadDatabaseCourses().then(()=>{renderNearby();if(!(input&&input.value.trim()))renderCoursesOwner(readRecentCourses());});
 	    const screen=byId("courseScreen");
     if(screen){
       screen.classList.remove("hidden");
@@ -487,16 +680,8 @@
       screen.style.pointerEvents="auto";
     }
     setTimeout(()=>input?.focus(),80);
+    resumeRound({renderOnly:true,source:state.source});
     return false;
-  };
-  const oldOpenCoursePickerCourse=window.gdOpenCoursePickerCourse;
-  if(typeof oldOpenCoursePickerCourse==="function"&&!oldOpenCoursePickerCourse.__gdRecentCourseWrapped){
-    const wrapped=function(course){
-      rememberRecentCourse(course);
-      return oldOpenCoursePickerCourse.apply(this,arguments);
-    };
-    wrapped.__gdRecentCourseWrapped=true;
-    window.gdOpenCoursePickerCourse=wrapped;
   }
   let activeCourseHoleOneTimer=null;
   function shouldOpenActiveCourseToHoleOne(active,opts){
@@ -547,7 +732,7 @@
     const active=(opts&&opts.selectedCourse)||window.__gdLiveCoursePickerSelection||safe(()=>JSON.parse(localStorage.getItem("gd_active_course_v1")||"null"),null);
     if(active&&active.name&&!forcePicker){
       byId("courseScreen")?.classList.add("hidden");
-      if(!gdCoursePayloadIsManual(active)){
+      if(!isManualCourse(active)){
         if(typeof gdScheduleCoursePickerFirstHoleOpen==="function")gdScheduleCoursePickerFirstHoleOpen(active);
         else scheduleActiveCourseToHoleOne(active,opts||{});
       }
@@ -555,7 +740,110 @@
     else renderNearby();
     return res;
   };
-  window.gdRefreshCourseAssumedNearby=renderNearby;
-	  if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",()=>{renderNearby();window.renderCourses(readRecentCourses());loadDatabaseCourses().then(()=>{renderNearby();window.renderCourses(readRecentCourses());});});
-	  else{renderNearby();window.renderCourses(readRecentCourses());loadDatabaseCourses().then(()=>{renderNearby();window.renderCourses(readRecentCourses());});}
+  function resumeRound(opts={}){
+    if(opts&&opts.event){opts.event.preventDefault?.();opts.event.stopPropagation?.();opts.event.stopImmediatePropagation?.();}
+    const panel=typeof window.gdEnsureResumeRoundPicker==="function"?window.gdEnsureResumeRoundPicker():null;
+    state.lastResumePanel=panel||null;
+    if(opts.renderOnly)return panel;
+    if(typeof window.gdResumeRoundFromPicker==="function")return window.gdResumeRoundFromPicker(opts.event||opts);
+    return false;
+  }
+  function closeOwner(opts={}){
+    const event=opts&&opts.preventDefault?opts:opts.event;
+    if(event){event.preventDefault?.();event.stopPropagation?.();event.stopImmediatePropagation?.();}
+    if(opts.cancelPending!==false){
+      state.activeToken=`cancelled-${Date.now()}-${Math.random()}`;
+      state.activePromise=null;
+    }
+    if(typeof bridge().hidePin==="function")bridge().hidePin();
+    closePickerSurface(opts.reason||"course-picker-close");
+    return false;
+  }
+  function bindListeners(){
+    if(state.listenersBound)return true;
+    state.listenersBound=true;
+    const screen=byId("courseScreen");
+    if(screen&&!screen.__gdCoursePickerOwnerBound){
+      screen.__gdCoursePickerOwnerBound=true;
+      screen.addEventListener("click",event=>{
+        const target=event.target&&event.target.closest&&event.target.closest("#gdCourseAssumedOption .courseAssumedBlock,#courseScreen .course");
+        if(!target)return;
+        event.preventDefault();
+        event.stopPropagation();
+        if(event.stopImmediatePropagation)event.stopImmediatePropagation();
+        return selectCourseForPlay(target.__gdCoursePayload||target,{source:"picker-list-click"});
+      },false);
+      screen.addEventListener("keydown",event=>{
+        if((event.key!=="Enter"&&event.key!==" ")||!event.target?.closest?.("#gdCourseAssumedOption .courseAssumedBlock,#courseScreen .course"))return;
+        event.preventDefault();
+        return selectCourseForPlay(event.target.closest("#gdCourseAssumedOption .courseAssumedBlock,#courseScreen .course").__gdCoursePayload,{source:"picker-list-key"});
+      },false);
+    }
+    const input=byId("searchInput");
+    if(input&&!input.__gdCoursePickerSearchBound){
+      input.__gdCoursePickerSearchBound=true;
+      input.addEventListener("keydown",event=>{if(event.key==="Enter")searchOwner();});
+    }
+    return true;
+  }
+  function init(){
+    if(state.destroyed)return false;
+    bindListeners();
+    state.initialized=true;
+    renderNearby();
+    renderCoursesOwner(readRecentCourses());
+    loadDatabaseCourses().then(()=>{renderNearby();renderCoursesOwner(readRecentCourses());});
+    return true;
+  }
+  function destroy(){
+    closeOwner({reason:"destroy"});
+    state.destroyed=true;
+    return true;
+  }
+  function getState(){
+    return Object.assign({},state,{
+      activeSelection:state.activeSelection?Object.assign({},state.activeSelection):null,
+      activePromise:!!state.activePromise
+    });
+  }
+  function selectionFromElement(element){
+    const payloadFromCore=bridge().payloadFromSelectionElement;
+    if(typeof payloadFromCore==="function")return payloadFromCore(element);
+    const target=element?.closest?.("#gdCourseAssumedOption .courseAssumedBlock,#courseScreen .course");
+    return target?.__gdCoursePayload||renderNearby();
+  }
+  const api={
+    init,
+    open:openOwner,
+    close:closeOwner,
+    search:searchOwner,
+    renderCourses:renderCoursesOwner,
+    refreshNearby:renderNearby,
+    refreshAssumed:refreshAssumedOptionOwner,
+    requestLocation:requestPickerGps,
+    rememberLocation:rememberPickerGps,
+    centerMapOnLocation:centerPickerMapOnGps,
+    selectCourse:selectCourseForPlay,
+    selectFromElement:function(element,opts={}){return selectCourseForPlay(selectionFromElement(element),Object.assign({source:"selection-element"},opts||{}));},
+    resumeRound,
+    getState,
+    destroy
+  };
+  window.GDCoursePicker=api;
+  window.renderCourses=function(courses){return api.renderCourses(courses);};
+  window.manualSearch=function(query){return api.search(query);};
+  window.gdRefreshCourseAssumedOption=function(course){return api.refreshAssumed(course);};
+  window.gdRefreshCourseAssumedNearby=function(){return api.refreshNearby();};
+  window.gdConfirmAssumedCourse=function(event){
+    if(event){event.preventDefault?.();event.stopPropagation?.();event.stopImmediatePropagation?.();}
+    return api.selectFromElement(event?.target,{source:"assumed-course"});
+  };
+  window.gdOpenChangeCourse=function(event){return api.open({event,source:"change-course",returnTarget:"gps"});};
+  window.gdOpenCoursePickerCourse=function(course){return api.selectCourse(course,{source:"legacy-global"});};
+  window.gdOpenCoursePickerSelectionFromElement=function(element){return api.selectFromElement(element);};
+  window.gdCoursePickerRequestGps=function(){return api.requestLocation();};
+  window.gdCoursePickerRememberGps=function(pos){return api.rememberLocation(pos);};
+  window.gdCoursePickerCenterMapOnGps=function(point){return api.centerMapOnLocation(point);};
+  if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init,{once:true});
+  else init();
 })();

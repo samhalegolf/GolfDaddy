@@ -17728,101 +17728,93 @@ function gdScheduleCourseVisualPullForPlay(payload){
   setTimeout(()=>{gdLoadCourseVisualForPlay(payload,{keys,force:true,setLoading:false,source:"course-visual-cloud-loaded"});},80);
   return true;
 }
+window.GDCoursePickerCoreBridge={
+  normalizeCourse:gdNormalizeCoursePickerPayload,
+  applyStoredPin:gdCoursePickerApplyStoredPin,
+  isManual:gdCoursePayloadIsManual,
+  finitePoint:gdCoursePickerFinitePoint,
+  hasPoint:gdCoursePickerPayloadHasPoint,
+  defaultPoint:gdCoursePickerDefaultPoint,
+  payloadFromSelectionElement:gdCoursePickerPayloadFromSelectionElement,
+  databaseMapAvailable:gdCoursePickerDatabaseMapAvailable,
+  needsCoursePin:gdCoursePickerNeedsCoursePin,
+  showPin:gdShowCoursePinScreen,
+  hidePin:gdHideCoursePinScreen,
+  cancelPin:gdCancelCoursePin,
+  hasMappedPlayData:gdCoursePickerHasMappedPlayData,
+  resetPresentationReadiness:gdResetCoursePickerPresentationReadiness,
+  storeSelection:gdStoreCoursePickerSelection,
+  ensureGpsCourseSurface:gdEnsureGpsCourseSurface,
+  refreshGpsMapAfterCourseOpen:gdRefreshGpsMapAfterCourseOpen,
+  prepareFirstHoleState:gdPrepareCoursePickerFirstHoleState,
+  scheduleVisualPullForPlay:gdScheduleCourseVisualPullForPlay,
+  openManualCourse:function(payload){
+    try{return openCourse(payload)}catch(e){
+      console.warn("Clarity Caddy course picker fallback",e);
+      gdStoreCoursePickerSelection(payload);
+      gdEnsureGpsCourseSurface();
+      try{const line=document.getElementById("courseLine");if(line){line.textContent="";line.style.display="none";}if(typeof gdMakeCourseLabelsClickable==="function")gdMakeCourseLabelsClickable();}catch(_){}
+      try{if(typeof resetPlay==="function")resetPlay(true);}catch(_){}
+      try{if(typeof toast==="function")toast("Manual GPS selected");}catch(_){}
+      gdRefreshGpsMapAfterCourseOpen(payload,{setCourseView:gdCoursePickerPayloadHasPoint(payload)});
+      return false;
+    }
+  },
+  prepareMappingSurface:function(payload,opts={}){
+    gdHideCoursePinScreen();
+    gdResetCoursePickerPresentationReadiness(payload,{forceScanner:!!opts.fromPinnedSeed});
+    gdStoreCoursePickerSelection(payload);
+    try{selectedHole=1;currentPlayingHole=1;}catch(e){}
+    try{
+      sessionStorage.setItem("gd_gps_session_activated","1");
+      sessionStorage.setItem("gd_active_playing_hole","1");
+      sessionStorage.setItem("gd_mapper_active_hole","1");
+    }catch(e){}
+    try{window.gdMapperActiveHole=1;}catch(e){}
+    gdRefreshGpsMapAfterCourseOpen(payload,{setCourseView:gdCoursePickerPayloadHasPoint(payload)});
+  },
+  enterGpsPlayAfterMapping:function(payload,result){
+    if(!(result&&result.playable))return false;
+    const playCourse=result.course||payload;
+    gdStoreCoursePickerSelection(playCourse);
+    gdEnsureGpsCourseSurface();
+    gdRefreshGpsMapAfterCourseOpen(playCourse,{setCourseView:gdCoursePickerPayloadHasPoint(payload)});
+    gdPrepareCoursePickerFirstHoleState(playCourse);
+    if(payload?.gdDatabaseMapAvailable===true)gdScheduleCourseVisualPullForPlay(payload);
+    try{if(typeof toast==="function")toast("Course ready");}catch(e){}
+    return true;
+  }
+};
 function gdKickWholeCourseAutoMapOnLoad(payload,opts={}){
-  if(!payload||gdCoursePayloadIsManual(payload))return false;
-  const now=Date.now();
-  const selectedAt=new Date(now).toISOString();
-  const library=window.GolfDaddyCourseLibrary||window.ClarityCaddieCourseLibrary||{};
-  const pinSeed=!!opts.fromPinnedSeed;
-  const pinnedCentre=pinSeed?gdCoursePickerFinitePoint(payload):null;
-  const snapshotOpts={selectedAt,source:pinSeed?"course-picker-pin-auto-map":"course-picker-auto-map"};
-  if(pinnedCentre)snapshotOpts.courseCentre=pinnedCentre;
-  let mappingCourse=typeof library.mappingCourseSnapshot==="function"
-    ? library.mappingCourseSnapshot(payload,snapshotOpts)
-    : payload;
-  const seedKey=pinSeed&&pinnedCentre?`:pin:${Number(pinnedCentre.lat).toFixed(5)},${Number(pinnedCentre.lng).toFixed(5)}`:"";
-  const key=String(mappingCourse.courseId||mappingCourse.savedCourseId||mappingCourse.canonicalKey||mappingCourse.name||mappingCourse.courseName||payload.courseId||payload.name||"course").toLowerCase()+seedKey;
-  if(window.__gdWholeCourseAutoMapOnLoadKey===key&&now-(window.__gdWholeCourseAutoMapOnLoadAt||0)<45000)return true;
-  window.__gdWholeCourseAutoMapOnLoadKey=key;
-  window.__gdWholeCourseAutoMapOnLoadAt=now;
-  try{
-    document.body.dataset.gdCourseAutoMapStatus=pinSeed?"checking_pin_seed":"checking_native_visual";
-    document.body.dataset.gdCourseScannerSeed=pinSeed?"pin":"course";
-  }catch(e){}
-	  Promise.resolve(pinSeed?null:gdLoadCourseVisualForPlay(payload,{force:true,source:"course-visual-preload"}))
-	    .then(visualResult=>{
-	      if(!pinSeed&&visualResult&&visualResult.loaded){
-	        try{
-	          document.body.dataset.gdCourseAutoMapStatus="native_visual_loaded";
-          document.body.dataset.gdCourseAutoMappedHoles=String(Array.isArray(visualResult.loaded.holeFramePublishedVisuals)?visualResult.loaded.holeFramePublishedVisuals.length:0);
-          document.body.dataset.gdCourseAutoMapSaved="0";
-          document.body.dataset.gdCourseNeedsPin="no";
-        }catch(e){}
-        gdScheduleCoursePickerFirstHoleOpen(payload);
-        return visualResult;
-      }
-      const controller=window.runCourseMappingAttempt||window.gdRunCourseMappingAttempt||window.gdResolveCoursePlayHole;
-      if(typeof controller!=="function"){
-        try{document.body.dataset.gdCourseAutoMapStatus="controller_unavailable";}catch(e){}
-        return {playable:false,reason:"controller-unavailable"};
-      }
-      try{document.body.dataset.gdCourseAutoMapStatus="running";}catch(e){}
-      return controller({course:mappingCourse,courseCentre:pinnedCentre||undefined,hole:1,wholeCourse:true,showLoading:true,fresh:true,allowLocalSavedMap:payload?.gdDatabaseMapAvailable===true,acceptPartialGeneratedMap:pinSeed,selectedAt,reason:pinSeed?"course-picker-pin":"course-picker"});
-    })
-    .then(result=>{
-      if(result&&result.loaded)return;
-      try{
-        document.body.dataset.gdCourseAutoMapStatus=result&&result.stale?"stale":result&&(result.playable||result.fallback)?"done":"empty";
-        document.body.dataset.gdCourseAutoMappedHoles=String(result?.holes||result?.persisted?.holes||0);
-        document.body.dataset.gdCourseAutoMapSaved=String(result?.saved||result?.persisted?.saved||0);
-        document.body.dataset.gdCourseNeedsPin=result&&result.fallback?"active":result&&result.playable?"no":"pending";
-      }catch(e){}
-      if(result&&result.playable&&!result.partial)gdScheduleCoursePickerFirstHoleOpen(payload);
-    })
-    .catch(()=>{
-      try{document.body.dataset.gdCourseAutoMapStatus="error";document.body.dataset.gdCourseNeedsPin="pending";}catch(e){}
-    });
-  return true;
+  if(window.GDCoursePicker&&typeof window.GDCoursePicker.selectCourse==="function"){
+    return window.GDCoursePicker.selectCourse(payload,Object.assign({source:"core-compat-kick"},opts||{}));
+  }
+  return false;
 }
-function gdOpenCoursePickerCourse(course){
+function gdOpenCoursePickerLegacyCourse(course){
   let payload=gdNormalizeCoursePickerPayload(course);
   payload=gdCoursePickerApplyStoredPin(payload);
   if(!payload.gdDatabaseMapChecked&&!gdCoursePayloadIsManual(payload))return gdCoursePickerCheckDatabaseThenOpen(payload);
   const usePinSeed=!payload.gdDatabaseMapAvailable&&gdCoursePickerUsesPinSeed(payload);
-  try{
-    window.__gdCoursePickerChangingAt=0;
-    window.__gdCoursePickerFirstHoleOpenToken=null;
-    window.gdCourseChangeMode="";
-    window.__gdLiveCoursePickerSelection=payload;
-    window.__gdLiveCoursePickerSelectionAt=Date.now();
-    if(!gdCoursePayloadIsManual(payload))window.__gdCoursePickerOwnsOpenResolverUntil=Date.now()+8000;
-    localStorage.removeItem("gd_active_course_v1");
-  }catch(e){}
   if(gdCoursePickerNeedsCoursePin(payload))return gdShowCoursePinScreen(payload);
+  if(gdCoursePayloadIsManual(payload))return window.GDCoursePickerCoreBridge.openManualCourse(payload);
   gdHideCoursePinScreen();
   gdResetCoursePickerPresentationReadiness(payload,{forceScanner:usePinSeed});
-  if(!gdCoursePayloadIsManual(payload)){
-    try{selectedHole=1;currentPlayingHole=1;}catch(e){}
-    try{sessionStorage.setItem("gd_gps_session_activated","1");sessionStorage.setItem("gd_active_playing_hole","1");sessionStorage.setItem("gd_mapper_active_hole","1");}catch(e){}
-    try{window.gdMapperActiveHole=1;}catch(e){}
+  try{selectedHole=1;currentPlayingHole=1;}catch(e){}
+  try{sessionStorage.setItem("gd_gps_session_activated","1");sessionStorage.setItem("gd_active_playing_hole","1");sessionStorage.setItem("gd_mapper_active_hole","1");}catch(e){}
+  try{window.gdMapperActiveHole=1;}catch(e){}
+  openCourse(payload);
+  gdKickWholeCourseAutoMapOnLoad(payload,{fromPinnedSeed:usePinSeed});
+  if(payload?.gdDatabaseMapAvailable===true)gdScheduleCourseVisualPullForPlay(payload);
+  if(!usePinSeed)gdScheduleCoursePickerFirstHoleOpen(payload);
+  return false;
+}
+function gdOpenCoursePickerCourse(course){
+  if(window.GDCoursePicker&&typeof window.GDCoursePicker.selectCourse==="function"){
+    return window.GDCoursePicker.selectCourse(course,{source:"core-compat-select"});
   }
-  try{
-    openCourse(payload);
-  }catch(e){
-    console.warn("Clarity Caddy course picker fallback",e);
-    gdStoreCoursePickerSelection(payload);
-    gdEnsureGpsCourseSurface();
-    try{const line=document.getElementById("courseLine");if(line){line.textContent=payload.name==="Manual GPS"?"":payload.name;line.style.display=line.textContent?"block":"none";}if(typeof gdMakeCourseLabelsClickable==="function")gdMakeCourseLabelsClickable();}catch(_){}
-    try{if(gdCoursePickerPayloadHasPoint(payload)&&window.map&&map.setView)map.setView([payload.lat,payload.lng],18);}catch(_){}
-    try{if(typeof resetPlay==="function")resetPlay(true);}catch(_){}
-    try{if(typeof toast==="function")toast(payload.name==="Manual GPS"?"Manual GPS selected":"Course selected");}catch(_){}
-    gdRefreshGpsMapAfterCourseOpen(payload,{setCourseView:gdCoursePickerPayloadHasPoint(payload)});
-  }
-	  gdKickWholeCourseAutoMapOnLoad(payload,{fromPinnedSeed:usePinSeed});
-	  if(payload?.gdDatabaseMapAvailable===true)gdScheduleCourseVisualPullForPlay(payload);
-	  if(!usePinSeed)gdScheduleCoursePickerFirstHoleOpen(payload);
-	  return false;
-	}
+  return gdOpenCoursePickerLegacyCourse(course);
+}
 function gdConfirmAssumedCourse(event){
   if(event){
     event.preventDefault?.();

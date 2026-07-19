@@ -119,7 +119,7 @@ assertContains(runtimeCss, "body.shell-gps.gdCoursePickerOpen #map", "course pic
 assertContains(runtimeCss, "body.shell-gps .playerBadge", "GPS runtime hides the old hard-coded player badge");
 assertNotContains(html, '<div class="badgeName" id="playerName">SAM</div>', "old player badge no longer hard-codes Sam");
 assertNotContains(html, 'id="playerName"', "old GPS player badge no longer owns the active profile-name hook");
-assertContains(html, "scripts/inline/gd-gps-beta-mode-shell.js?v=course-picker-rail-owner-20260719", "GPS badge script cache-busts the neutral label");
+assertContains(html, "scripts/inline/gd-gps-beta-mode-shell.js?v=course-picker-owner-20260719", "GPS badge script cache-busts the picker owner handoff");
 assertContains(sourceBundle, "name.textContent='GPS'", "modern GPS badge uses a neutral label instead of the player name");
 assertNotContains(sourceBundle, "name.textContent=profileName()", "modern GPS badge does not render the player name");
 assertContains(runtimeScript, 'document.body.dataset.gdGpsMapVisibilityState=pickerOpen()?"picker-live-map":"not-gps"', "runtime owner records the picker live-map state");

@@ -3646,12 +3646,13 @@
 	      setTimeout(function(){syncToolRail()},delay);
 	    });
 	  }
-  function playTileOpen(event){
-    stop(event);
-    window.__gdCoursePickerReturnTarget="home";
-    window.gdCourseChangeMode="";
-    return showPicker("home-play-tile");
-  }
+	  function playTileOpen(event){
+	    stop(event);
+	    window.__gdCoursePickerReturnTarget="home";
+	    window.gdCourseChangeMode="";
+	    if(window.GDCoursePicker&&typeof window.GDCoursePicker.open==="function")return window.GDCoursePicker.open({source:"home-play",returnTarget:"home"});
+	    return showPicker("home-play-tile");
+	  }
   function bindHomePlayTile(){
     safe(function(){
       document.querySelectorAll("button.gdPlayTile,.gdPlayTile").forEach(function(tile){
