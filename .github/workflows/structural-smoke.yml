@@ -1,0 +1,39 @@
+name: Structural smoke
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [structural-rebuild]
+
+permissions:
+  contents: read
+
+jobs:
+  boot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Boot real page
+        run: npm run test:boot
+
+      - name: Run structural regression tests
+        run: |
+          node dev/course-picker-location.test.js
+          node dev/gps-play-camera-tilt.test.js
+          node dev/gps-play-runtime-owner.test.js
