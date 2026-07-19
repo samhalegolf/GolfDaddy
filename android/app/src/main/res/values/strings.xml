@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Clarity Caddy</string>
+    <string name="title_activity_main">Clarity Caddy</string>
+    <string name="package_name">com.claritygolf.caddy</string>
+    <string name="custom_url_scheme">com.claritygolf.caddy</string>
+</resources>

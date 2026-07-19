@@ -1,5 +1,8 @@
 /* Extracted verbatim from an inline <script> block in index.html (split-03). */
 (function(){
+  /* Native shells serve bundled assets from a local webview origin, so the
+     localhost dev-server prompt below must never fire there. */
+  if(window.GDNative&&window.GDNative.isNative)return;
   if(location.protocol!=="file:")return;
   var target="http://localhost:5173/";
   fetch(target,{mode:"no-cors",cache:"no-store"})

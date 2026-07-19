@@ -1,0 +1,33 @@
+{
+  "appId": "com.claritygolf.caddy",
+  "appName": "Clarity Caddy",
+  "webDir": "dist",
+  "android": {
+    "path": "android",
+    "androidScheme": "https"
+  },
+  "ios": {
+    "path": "ios",
+    "scheme": "Clarity Caddy",
+    "contentInset": "always",
+    "limitsNavigationsToAppBoundDomains": false
+  },
+  "server": {
+    "androidScheme": "https"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 1200,
+      "backgroundColor": "#050806",
+      "showSpinner": false,
+      "androidSpinnerStyle": "small",
+      "splashFullScreen": true,
+      "splashImmersive": false
+    },
+    "StatusBar": {
+      "style": "DARK",
+      "backgroundColor": "#050806"
+    },
+    "Geolocation": {}
+  }
+}
