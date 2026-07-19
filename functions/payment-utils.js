@@ -5,6 +5,11 @@ const MONTH_PASS_KEY = "month_pass";
 const MONTHLY_MEMBERSHIP_KEY = "monthly_membership";
 const REFERRAL_ACCESS_KEY = "referral_membership";
 const ADMIN_COMPED_MEMBERSHIP_KEY = "admin_comped_membership";
+/* Store-billed access (Google Play / App Store via RevenueCat). Distinct keys from
+   the Stripe products so paymentState can report where access came from without
+   joining another table. */
+const STORE_MEMBERSHIP_KEY = "store_membership";
+const STORE_MONTH_PASS_KEY = "store_month_pass";
 const MONTH_PASS_HOURS = 24 * 30;
 const PAID_ACCESS_KEYS = {
   month_pass: true,
@@ -15,7 +20,13 @@ const PAID_ACCESS_KEYS = {
   subscription: true,
   day_pass: true,
   round_pass: true,
-  free_pass: true
+  free_pass: true,
+  store_membership: true,
+  store_month_pass: true
+};
+const STORE_ACCESS_KEYS = {
+  store_membership: true,
+  store_month_pass: true
 };
 const MEMBERSHIP_ACCESS_STATUSES = { active: true, trialing: true };
 const MEMBERSHIP_GRACE_STATUS = "past_due";
@@ -453,6 +464,13 @@ function isPaidEntitlement(row) {
   return !!PAID_ACCESS_KEYS[rowProductKey(row)];
 }
 
+/* True when access was granted by Apple or Google rather than Stripe or an admin.
+   Used to keep store-billed members off web billing management, since their
+   subscription can only be cancelled in the store account that owns it. */
+function isStoreEntitlement(row) {
+  return !!STORE_ACCESS_KEYS[rowProductKey(row)];
+}
+
 function entitlementIsLive(row, nowMs) {
   if (!row || String(row.status || "").toLowerCase() !== "active") return false;
   const starts = row.starts_at ? new Date(row.starts_at).getTime() : 0;
@@ -533,6 +551,13 @@ async function readPaidAccess(identity) {
     paymentState = membershipState.state;
   } else if (entitlements.some(function (row) { return rowProductKey(row) === ADMIN_COMPED_MEMBERSHIP_KEY || row && row.entitlement_reason === ADMIN_COMPED_MEMBERSHIP_KEY; })) {
     paymentState = "admin_comped_membership_active";
+  } else if (entitlements.some(function (row) { return rowProductKey(row) === STORE_MEMBERSHIP_KEY; })) {
+    /* A paid store subscription outranks a free referral month: if a user holds
+       both, they are a paying member. These keys are new, so no pre-existing row
+       can match here and the branches below keep their current behaviour. */
+    paymentState = "store_membership_active";
+  } else if (entitlements.some(function (row) { return rowProductKey(row) === STORE_MONTH_PASS_KEY; })) {
+    paymentState = "store_month_pass_active";
   } else if (entitlements.some(function (row) { return rowProductKey(row) === REFERRAL_ACCESS_KEY || rowProductKey(row) === "referral" || row && row.entitlement_reason === "referral_free_month"; })) {
     paymentState = "referral_access_active";
   } else if (entitlements.some(function (row) { return rowProductKey(row) === MONTH_PASS_KEY; })) {
@@ -562,6 +587,9 @@ module.exports = {
   PAID_PERMISSION_KEYS,
   PASS_CONFIG,
   REFERRAL_ACCESS_KEY,
+  STORE_ACCESS_KEYS,
+  STORE_MEMBERSHIP_KEY,
+  STORE_MONTH_PASS_KEY,
   STRIPE_API_VERSION,
   accountCustomerId,
   appUrl,
@@ -575,6 +603,7 @@ module.exports = {
   hasSupabase,
   hasSupabaseAuth,
   isPaidEntitlement,
+  isStoreEntitlement,
   isStripePriceId,
   json,
   membershipAccessState,

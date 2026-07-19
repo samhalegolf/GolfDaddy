@@ -4,6 +4,11 @@
   functions = "functions"
 
 [[redirects]]
+  from = "/api/store-webhook"
+  to = "/.netlify/functions/store-webhook"
+  status = 200
+
+[[redirects]]
   from = "/api/email-notification"
   to = "/.netlify/functions/email-notification"
   status = 200

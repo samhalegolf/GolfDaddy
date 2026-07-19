@@ -395,7 +395,23 @@
     if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
   }
 
+  /* Store policy: a digital membership bought inside the iOS or Android app must
+     go through Apple/Google billing. Sending the user to Stripe Checkout from the
+     app is an in-app purchase violation on both stores, so the web checkout path
+     is hard-blocked when native rather than merely hidden - render() can be
+     bypassed, this cannot. Store purchases go through ClarityStoreBilling. */
+  function storeBillingBlocksWebCheckout() {
+    return !!(window.GDNative && window.GDNative.isNative);
+  }
+
   async function buy(productKey) {
+    if (storeBillingBlocksWebCheckout()) {
+      if (window.ClarityStoreBilling && typeof window.ClarityStoreBilling.buy === "function") {
+        return window.ClarityStoreBilling.buy(productKey);
+      }
+      safe(function () { return window.toast && window.toast("Purchases are unavailable right now"); });
+      return false;
+    }
     var payload = accountPayload();
     if (!payload.accountId && !payload.email) {
       safe(function () { return window.toast && window.toast("Sign in before buying access"); });
@@ -422,6 +438,14 @@
   }
 
   async function manageMembership() {
+    /* The Stripe billing portal is a web checkout surface, so it stays out of the
+       apps for the same reason buy() does. Store-billed members manage their
+       subscription in the store account that owns it; web-billed members are
+       reminded by email and manage it on the website. Neither needs a link here. */
+    if (storeBillingBlocksWebCheckout()) {
+      safe(function () { return window.toast && window.toast("Your membership renews outside this app"); });
+      return false;
+    }
     var payload = accountPayload();
     if (!payload.accountId && !payload.email) {
       safe(function () { return window.toast && window.toast("Sign in before managing membership"); });
