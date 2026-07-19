@@ -28,7 +28,7 @@ Restrictions that still apply until tests protect behavior:
 - `scripts/gd-app-core.js`: 26,322 lines after extraction; 26,977 before extraction.
 - `scripts/gd-green-shape-engine.js`: 658 lines.
 - Wand/engine source scripts currently loaded directly: `scripts/gd-green-shape-engine.js`, `scripts/inline/gd-wand-belt-layers-v1.js`, and `scripts/inline/gd-wand-flow-layers-v1.js`.
-- Wand CSS currently loaded directly: `styles/inline/gd-wand-diag-style.css`, `styles/inline/gd-wand-sample-truth-style-v1.css`, `styles/inline/gd-wand-root-cause-clean-css-v1.css`, `styles/inline/gd-wand-robust-known-good-css-v1.css`, `styles/inline/gd-wand-compact-flow-css-v1.css`, `styles/inline/gd-wand-floating-mapper-css-v1.css`.
+- Wand CSS currently loaded directly: `styles/inline/gd-wand-root-cause-clean-css-v1.css`, `styles/inline/gd-wand-robust-known-good-css-v1.css`, `styles/inline/gd-wand-compact-flow-css-v1.css`, `styles/inline/gd-wand-floating-mapper-css-v1.css`.
 
 ## A. Detection Engine
 
@@ -75,10 +75,10 @@ Delete after extraction, not now:
 
 Preserve only the useful AutoMapper debugging parts:
 
-- `scripts/inline/gd-wand-belt-layers-v1.js`: disabled `collectWandDiagnostics` / `showWandDiagnostics` block. Useful concepts: coordinate-frame checks, tile count, seed point, boundary centroid drift. Current implementation is inert because it removes the UI and returns immediately.
-- `scripts/inline/gd-wand-belt-layers-v1.js`: disabled sample-truth panel. Useful concepts: preview the exact sampled canvas, centre crosshair, metre rings, pixel probes. Current implementation is inert.
+- `scripts/inline/gd-wand-belt-layers-v1.js`: inert `collectWandDiagnostics` / `showWandDiagnostics` compatibility stubs remain. The unreachable UI body and dead CSS were deleted after the startup/dependency audit.
+- `scripts/inline/gd-wand-belt-layers-v1.js`: inert `gdShowWandSampleTruth` compatibility stub remains. The unreachable sample-truth panel body and dead CSS were deleted after the startup/dependency audit.
 - `scripts/gd-app-core.js`: `drawWandDebugAnalysis` and `gdWandDebugOverlayEnabled`. Useful for future AutoMapper debugging if converted to diagnostics data rather than Leaflet overlays.
-- `styles/inline/gd-wand-diag-style.css`, `gd-wand-sample-truth-style-v1.css`.
+- Deleted in the startup/dependency audit: `styles/inline/gd-wand-diag-style.css`, `gd-wand-sample-truth-style-v1.css`.
 - Classification: diagnostics.
 - Recommendation: rewrite after extraction as optional engine diagnostics returned from `detect`/`refine`; delete inert buttons/panels when standalone UI is removed.
 

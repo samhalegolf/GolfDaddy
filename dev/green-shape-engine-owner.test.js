@@ -27,6 +27,8 @@ assertContains(index, 'id="gdWandFlowLayersV1"', "merged Wand flow layer is load
 assertContains(index, 'id="gdGreenShapeEngine"', "Green Shape Engine owner is loaded before core");
 assert(index.indexOf('id="gdGreenShapeEngine"') < index.indexOf("scripts/gd-app-core.js"), "Green Shape Engine loads before core");
 assertContains(index, 'id="gdWandPanel"', "standalone Wand panel still exists before extraction");
+assertNotContains(index, "gdWandDiagStyle", "dead Wand diagnostics CSS is no longer loaded");
+assertNotContains(index, "gdWandSampleTruthStyleV1", "dead Wand sample-truth CSS is no longer loaded");
 
 assertContains(core, "Green Shape Engine ownership moved to scripts/gd-green-shape-engine.js", "core leaves a narrow ownership note");
 assertNotContains(core, "function findTonalEdgeCandidates", "core no longer owns probe candidate detection");
@@ -53,6 +55,10 @@ assertContains(flow, "window.gdCompactWandOpen", "compact Wand flow is UI-only o
 assertContains(flow, "window.openGpsWand=openAndScan", "flow layer replaces the open handler");
 assertContains(belt, "window.collectWandDiagnostics=function(){return ''}", "diagnostics are currently inert");
 assertContains(belt, "window.gdShowWandSampleTruth=function(){}", "sample-truth UI is currently inert");
+assertNotContains(belt, "function ensureDiagUi", "unreachable diagnostics UI body was deleted");
+assertNotContains(belt, "function ensureTruthButton", "unreachable sample-truth UI body was deleted");
+assert(!fs.existsSync(path.join(root, "styles", "inline", "gd-wand-diag-style.css")), "dead Wand diagnostics CSS file was deleted");
+assert(!fs.existsSync(path.join(root, "styles", "inline", "gd-wand-sample-truth-style-v1.css")), "dead Wand sample-truth CSS file was deleted");
 
 assertContains(pinLock, "function startMapperGreenWand", "mapper fallback still opens standalone Wand UI");
 assertContains(pinLock, "hydrateMapperGreenForWand", "mapper hydrates Wand-compatible globals");
