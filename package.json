@@ -34,7 +34,8 @@
     "@capacitor/preferences": "8.0.1",
     "@capacitor/splash-screen": "8.0.2",
     "@capacitor/status-bar": "8.0.3",
-    "@netlify/blobs": "^10.7.9"
+    "@netlify/blobs": "^10.7.9",
+    "@revenuecat/purchases-capacitor": "^13.2.3"
   },
   "devDependencies": {
     "@capacitor/cli": "8.4.2",

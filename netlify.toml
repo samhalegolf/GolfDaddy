@@ -9,6 +9,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/store-config"
+  to = "/.netlify/functions/store-config"
+  status = 200
+
+[[redirects]]
   from = "/api/email-notification"
   to = "/.netlify/functions/email-notification"
   status = 200

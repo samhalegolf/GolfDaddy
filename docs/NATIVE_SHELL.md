@@ -65,26 +65,48 @@ the iOS project has been compiled or run.
 **Nothing has run on a real device or emulator.** The APK builds; it has not been
 installed. Real-course GPS testing is still the gate before any public submission.
 
-**Store billing: server done, client not.** The RevenueCat webhook
-(`functions/store-webhook.js`), schema, entitlement read path and referral rewards
-are built and tested. What does not exist yet is the client purchase module:
-`clarity-payments.js` blocks Stripe checkout when native and delegates to
-`window.ClarityStoreBilling`, **which has not been written**. Tapping buy in the app
-currently shows "Purchases are unavailable right now".
+**Store billing: code complete, unconfigured.** The webhook
+(`functions/store-webhook.js`), schema, entitlement read path, referral rewards and
+the client module (`scripts/clarity-store-billing.js`) are all built and tested.
+`PurchasesPlugin` and the Play Billing Client are confirmed present in the built APK.
 
-Building it needs external setup that cannot be done from the repo:
+The client talks to the RevenueCat plugin through the Capacitor bridge
+(`window.Capacitor.Plugins.Purchases`) rather than importing the SDK, because this
+repo has no bundler. Signatures match `@revenuecat/purchases-capacitor` 13.2.3; if
+that dependency is upgraded, re-check `configure`, `logIn`, `getOfferings`,
+`purchasePackage` and `restorePurchases` against `definitions.d.ts`.
+
+The module never grants access. A completed purchase only triggers a re-read of
+`/api/payment-entitlement`, polled for a few seconds because the webhook is
+asynchronous — the entitlement is written server-side after RevenueCat validates the
+receipt. A client that could grant its own access would be trivially spoofable.
+
+What remains is external setup that cannot be done from the repo:
 
 1. RevenueCat account with the Play app connected
-2. Products in Play Console — the tests assume `clarity_membership_monthly` and
-   `clarity_month_pass`
-3. RevenueCat public SDK key in the client; shared secret in Netlify as
-   `REVENUECAT_WEBHOOK_AUTH` (the webhook fails closed without it)
-4. RevenueCat webhook pointed at `https://caddy.claritygolf.app/api/store-webhook`
-5. The client must set RevenueCat's `appUserID` to our `account_id` at login — that
-   is how the webhook joins a purchase back to an account
+2. Products in Play Console, and a RevenueCat offering containing them
+3. Netlify environment variables:
+   - `REVENUECAT_ANDROID_PUBLIC_KEY` / `REVENUECAT_IOS_PUBLIC_KEY` — public SDK
+     keys, served to the app by `/api/store-config`
+   - `REVENUECAT_WEBHOOK_AUTH` — shared secret; **the webhook fails closed without
+     it**, since an unauthenticated endpoint that writes entitlements would let
+     anyone grant themselves paid access
+   - `STORE_MEMBERSHIP_PRODUCT_ID` / `STORE_MONTH_PASS_PRODUCT_ID` — default to
+     `clarity_membership_monthly` and `clarity_month_pass`
+4. RevenueCat webhook pointed at `https://caddy.claritygolf.app/api/store-webhook`,
+   with the Authorization header set to the same shared secret
+
+Product ids and SDK keys are served from `/api/store-config` rather than hardcoded,
+so they can change without a store release — a wrong product id would otherwise be a
+multi-day review cycle to fix.
+
+`appUserID` is set to our `account_id`, which is the only join the webhook has back
+to an account. `buy()` and `restore()` both identify before purchasing, so no login
+hook is needed.
 
 Nothing has been run against a real store. The webhook is tested against stubbed
-Supabase and synthetic RevenueCat payloads only.
+Supabase and synthetic RevenueCat payloads; the client is tested against a stubbed
+Capacitor bridge. No real money has moved through any of it.
 
 **Auth deep links break.** Password-reset and account-setup emails link to
 `caddy.claritygolf.app` with `?claritySetPassword=1` / `?clarityResetPassword`,
