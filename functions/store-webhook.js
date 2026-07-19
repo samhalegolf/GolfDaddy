@@ -306,7 +306,43 @@ async function grantAccess(rcEvent) {
     headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
     body: JSON.stringify(payload)
   });
+
+  /* An invitee continuing on a store never produces a Stripe invoice, so this is
+     the only place their inviter's reward can be triggered. Deliberately not
+     fatal: the purchase itself is recorded above, and failing the whole webhook
+     over a referral bookkeeping error would make RevenueCat retry a grant that
+     already succeeded. */
+  await maybeConvertReferral(subject, rcEvent, transactionId);
+
   return { handled: true, action: "granted", productKey: productKey };
+}
+
+async function maybeConvertReferral(subject, rcEvent, transactionId) {
+  /* Only a genuine first purchase converts a referral. Renewals and restores of
+     an existing subscription must not earn the inviter a second month. */
+  if (rcEvent.type !== "INITIAL_PURCHASE" && rcEvent.type !== "NON_RENEWING_PURCHASE") return;
+  if (!subject.userId && !subject.accountEmail) return;
+  try {
+    const referrals = require("./referral-service");
+    await referrals.evaluateStoreReferralConversion({
+      userId: subject.userId,
+      accountEmail: subject.accountEmail,
+      storeTransactionId: transactionId,
+      store: STORE_MAP[rcEvent.store] || null
+    });
+  } catch (error) {
+    await sendSystemAlert({
+      eventType: "store_referral_conversion_failed",
+      title: "Store purchase recorded but referral reward was not evaluated",
+      detail: "The buyer has access. Their inviter may be owed a reward month that was not granted. Check referral_invitations and referral_reward_ledger.",
+      context: {
+        eventId: rcEvent.id,
+        appUserId: rcEvent.app_user_id || null,
+        storeTransactionId: transactionId,
+        error: error && (error.message || String(error))
+      }
+    });
+  }
 }
 
 async function revokeAccess(rcEvent) {

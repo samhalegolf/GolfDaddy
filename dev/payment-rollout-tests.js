@@ -521,7 +521,7 @@ test("Invitee checkout during referral month delays billing until free access en
   assert.strictEqual(session["metadata[referral_id]"], state.referral_invitations[0].id);
 });
 
-test("Positive first paid referred invoice earns one inviter reward and Stripe credit", async function () {
+test("Positive first paid referred invoice earns one inviter reward as entitlement days", async function () {
   const state = baseState();
   state.caddie_memberships.push(activePaidMembership("acct_auth", "auth@example.com", "cus_auth", "sub_inviter"));
   state.stripeSubscriptions.sub_inviter = subscription({ id: "sub_inviter", customer: "cus_auth", metadata: { product_key: "monthly_membership", user_id: "acct_auth", account_email: "auth@example.com" } });
@@ -532,10 +532,22 @@ test("Positive first paid referred invoice earns one inviter reward and Stripe c
   const out = await runWebhook(state, invoiceEvent("evt_referred_paid", "invoice.paid", "sub_referred", { customer: "cus_victim", amount_paid: 2900, amount_due: 2900, currency: "aud" }));
   assert.strictEqual(out.result.statusCode, 200, JSON.stringify(out.body));
   assert.strictEqual(state.referral_reward_ledger.length, 1);
-  assert.strictEqual(state.referral_reward_ledger[0].status, "scheduled");
+  /* Inviter rewards are entitlement days, not Stripe customer balance credits, so
+     the reward is applied on earn and no Stripe credit is raised. The credit
+     mechanism could never pay out an inviter who subscribes through Play or the
+     App Store, since they have no Stripe customer at all. */
+  assert.strictEqual(state.referral_reward_ledger[0].status, "applied");
+  assert.strictEqual(state.referral_reward_ledger[0].audit_metadata.reward_mechanism, "entitlement_days");
   assert.strictEqual(state.referral_invitations[0].status, "reward_earned");
-  assert.strictEqual(state.captures.balanceTransactions.length, 1);
-  assert.strictEqual(Number(state.captures.balanceTransactions[0].amount), -2900);
+  assert.strictEqual(state.captures.balanceTransactions.length, 0, "no Stripe credit is raised");
+
+  const rewardRows = state.user_entitlements.filter(function (row) {
+    return row.product_key === "referral_reward_membership";
+  });
+  assert.strictEqual(rewardRows.length, 1, "inviter receives exactly one reward month");
+  assert.strictEqual(rewardRows[0].user_id, "acct_auth");
+  const span = new Date(rewardRows[0].expires_at).getTime() - new Date(rewardRows[0].starts_at).getTime();
+  assert.ok(Math.abs(span - 30 * 24 * 60 * 60 * 1000) < 1000, "reward grants 30 days");
 });
 
 test("Zero-value referred invoice and webhook replay do not double earn rewards", async function () {
@@ -551,7 +563,10 @@ test("Zero-value referred invoice and webhook replay do not double earn rewards"
   await runWebhook(state, invoiceEvent("evt_referred_positive", "invoice.paid", "sub_referred", { customer: "cus_victim", amount_paid: 2900, amount_due: 2900, currency: "aud" }));
   await runWebhook(state, invoiceEvent("evt_referred_positive", "invoice.paid", "sub_referred", { customer: "cus_victim", amount_paid: 2900, amount_due: 2900, currency: "aud" }));
   assert.strictEqual(state.referral_reward_ledger.length, 1);
-  assert.strictEqual(state.captures.balanceTransactions.length, 1);
+  const rewardRows = state.user_entitlements.filter(function (row) {
+    return row.product_key === "referral_reward_membership";
+  });
+  assert.strictEqual(rewardRows.length, 1, "a replayed webhook must not grant a second reward month");
 });
 
 test("Checkout rejects malformed Price IDs before Stripe", async function () {

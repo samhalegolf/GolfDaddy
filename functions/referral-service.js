@@ -4,13 +4,16 @@ const crypto = require("crypto");
 const {
   ADMIN_COMPED_MEMBERSHIP_KEY,
   REFERRAL_ACCESS_KEY,
+  REFERRAL_REWARD_KEY,
   appUrl,
   email,
   encodeFilter,
   env,
+  isPaidEntitlement,
   membershipAccessState,
   readPaidAccess,
   stripeFetch,
+  subjectOrFilter,
   supabaseFetch,
   text
 } = require("./payment-utils");
@@ -590,6 +593,63 @@ async function expireReferral(referral) {
   return row;
 }
 
+/* Store equivalent of evaluateReferralConversion.
+ *
+ * An invitee who continues on Google Play or the App Store never produces a
+ * Stripe invoice, so the Stripe path below would never fire and their inviter
+ * would never be rewarded. This is the same conversion, qualified by a verified
+ * store purchase instead.
+ *
+ * Called from the RevenueCat webhook, which has already had the receipt validated
+ * by RevenueCat against Apple/Google - we never take the client's word for it. */
+async function evaluateStoreReferralConversion(input) {
+  input = input || {};
+  const userId = text(input.userId, 120);
+  const userEmail = email(input.accountEmail);
+  const transactionId = text(input.storeTransactionId, 200);
+  const store = text(input.store, 40);
+  if (!transactionId || (!userId && !userEmail)) return null;
+
+  const referral = await referralForConvertedInvitee(userId, userEmail);
+  if (!referral || referral.reward_earned_at) return null;
+  /* A renewal of the same subscription must not earn a second reward. */
+  if (referral.first_paid_store_transaction_id
+    && referral.first_paid_store_transaction_id !== transactionId) return null;
+  const existingReward = await rewardForReferral(referral.id);
+  if (existingReward) return existingReward;
+
+  await patchReferral(referral.id, {
+    status: "converted",
+    conversion_source: store || "store",
+    paid_membership_started_at: referral.paid_membership_started_at || nowIso(),
+    first_paid_store_transaction_id: transactionId,
+    updated_at: nowIso()
+  });
+  await recordReferralEvent("referral_first_store_purchase_succeeded", {
+    referralId: referral.id,
+    accountId: userId,
+    actorAccountId: userId,
+    metadata: { store: store || "", store_transaction_id: transactionId }
+  });
+
+  const reward = await earnReferralReward(referral, {}, {}, {
+    qualifyingSource: store || "store",
+    qualifyingStoreTransactionId: transactionId
+  });
+  await patchReferral(referral.id, {
+    status: "reward_earned",
+    reward_earned_at: reward.earned_at || nowIso(),
+    updated_at: nowIso()
+  });
+  await recordReferralEvent("referral_reward_earned", {
+    referralId: referral.id,
+    accountId: referral.inviter_account_id,
+    actorAccountId: userId,
+    metadata: { reward_id: reward.id, store_transaction_id: transactionId }
+  });
+  return reward;
+}
+
 async function evaluateReferralConversion(input) {
   input = input || {};
   const invoice = input.invoice || {};
@@ -652,8 +712,10 @@ async function rewardForReferral(referralId) {
   return Array.isArray(rows) ? rows[0] || null : null;
 }
 
-async function earnReferralReward(referral, invoice, subscription) {
+async function earnReferralReward(referral, invoice, subscription, storeContext) {
   const cfg = config();
+  const store = storeContext || {};
+  const fromStore = !!store.qualifyingStoreTransactionId;
   const activeRewards = await rewardBalance(referral.inviter_account_id);
   const baseStatus = activeRewards >= cfg.maxStackedRewards ? "pending" : "available";
   const idempotencyKey = "referral_reward_" + referral.id;
@@ -669,14 +731,16 @@ async function earnReferralReward(referral, invoice, subscription) {
       reward_duration_days: 30,
       status: baseStatus,
       earned_at: nowIso(),
-      qualifying_stripe_invoice_id: invoice.id,
-      qualifying_stripe_subscription_id: subscription.id,
-      stripe_invoice_id: invoice.id,
-      credit_amount: Number(invoice.amount_paid) || null,
-      credit_currency: text(invoice.currency, 20) || null,
+      qualifying_source: fromStore ? text(store.qualifyingSource, 40) : "stripe",
+      qualifying_store_transaction_id: fromStore ? text(store.qualifyingStoreTransactionId, 200) : null,
+      qualifying_stripe_invoice_id: invoice && invoice.id || null,
+      qualifying_stripe_subscription_id: subscription && subscription.id || null,
+      stripe_invoice_id: invoice && invoice.id || null,
+      credit_amount: Number(invoice && invoice.amount_paid) || null,
+      credit_currency: text(invoice && invoice.currency, 20) || null,
       idempotency_key: idempotencyKey,
       audit_metadata: {
-        source: "stripe_webhook",
+        source: fromStore ? "store_webhook" : "stripe_webhook",
         max_stacked_rewards: cfg.maxStackedRewards,
         held_by_max_balance: baseStatus === "pending"
       }
@@ -694,69 +758,130 @@ async function rewardBalance(inviterId) {
   }).length;
 }
 
+/* Grants the inviter's earned month as entitlement days rather than a Stripe
+   customer balance credit.
+
+   The credit mechanism required the inviter to hold an active Stripe subscription
+   with a stripe_customer_id, so an inviter paying through Google Play or the App
+   Store could never be paid out - their reward sat blocked indefinitely. Days in
+   user_entitlements work identically regardless of how either party pays, stay
+   entirely inside our own ledger, and are never visible to Apple or Google as a
+   discount applied to a store-billed subscription.
+
+   The month stacks on the END of existing access rather than starting now, so a
+   member with three weeks left gets a full extra month, not four days of overlap.
+   This mirrors how Stripe month passes already stack via monthPassBaseMs. */
 async function applyReferralReward(reward, referral, invoice) {
   if (!reward || reward.status !== "available") return reward;
-  const account = await accountById(referral.inviter_account_id);
-  const customerId = text(account && account.stripe_customer_id, 200);
-  const memberships = await membershipRows(referral.inviter_account_id, referral.inviter_account_email);
-  const membership = memberships.find(isActivePaidMembership);
-  if (!customerId || !membership || !membership.stripe_subscription_id) {
+
+  const inviterId = text(referral.inviter_account_id, 120);
+  const inviterEmail = email(referral.inviter_account_email);
+  if (!inviterId && !inviterEmail) {
     return patchReward(reward.id, {
       status: "available",
       audit_metadata: Object.assign({}, reward.audit_metadata || {}, {
-        application_blocked: "inviter_membership_not_active",
+        application_blocked: "inviter_not_identifiable",
         blocked_at: nowIso()
       })
     });
   }
 
-  const subscription = await stripeFetch("GET", "/v1/subscriptions/" + encodeURIComponent(membership.stripe_subscription_id), {
-    "expand[]": ["items.data.price", "latest_invoice"]
-  }).catch(function () { return null; });
-  const price = subscription && subscription.items && Array.isArray(subscription.items.data) && subscription.items.data[0] && subscription.items.data[0].price || null;
-  const amount = positiveInteger(price && price.unit_amount) || positiveInteger(invoice.amount_paid);
-  const currency = text(price && price.currency || invoice.currency, 20).toLowerCase();
-  if (!amount || !currency) {
-    return patchReward(reward.id, {
-      status: "available",
-      audit_metadata: Object.assign({}, reward.audit_metadata || {}, {
-        application_blocked: "missing_credit_amount",
-        blocked_at: nowIso()
-      })
-    });
-  }
+  const days = positiveInteger(reward.reward_duration_days) || 30;
+  const startMs = await rewardStackBaseMs(inviterId, inviterEmail);
+  const startsAt = new Date(startMs).toISOString();
+  const expiresAt = new Date(startMs + days * 24 * 60 * 60 * 1000).toISOString();
 
-  const idempotencyKey = "referral_credit_" + reward.id;
-  const transaction = await stripeFetch("POST", "/v1/customers/" + encodeURIComponent(customerId) + "/balance_transactions", {
-    amount: -amount,
-    currency,
-    description: "Clarity Caddy referral reward - one Monthly Membership period",
-    "metadata[app]": "clarity-caddie",
-    "metadata[referral_id]": referral.id,
-    "metadata[referral_reward_id]": reward.id,
-    "metadata[reward_type]": "free_membership_month"
-  }, { headers: { "Idempotency-Key": idempotencyKey } });
-
-  const scheduled = await patchReward(reward.id, {
-    status: "scheduled",
-    scheduled_for: membership.current_period_end || membership.access_until || null,
-    stripe_customer_id: customerId,
-    stripe_subscription_id: membership.stripe_subscription_id,
-    stripe_customer_balance_transaction_id: transaction && transaction.id || null,
-    credit_amount: amount,
-    credit_currency: currency,
-    idempotency_key: idempotencyKey,
-    audit_metadata: Object.assign({}, reward.audit_metadata || {}, {
-      stripe_mechanism: "customer_balance_credit",
-      credit_transaction_created_at: nowIso()
+  /* Idempotent on source_referral_id: the partial unique index means a concurrent
+     or replayed delivery merges into the same row instead of granting twice. */
+  await supabaseFetch("user_entitlements?on_conflict=source_referral_id", {
+    method: "POST",
+    headers: { Prefer: "resolution=ignore-duplicates,return=minimal" },
+    body: JSON.stringify({
+      user_id: inviterId || null,
+      account_email: inviterEmail || null,
+      entitlement_type: REFERRAL_REWARD_KEY,
+      product_key: REFERRAL_REWARD_KEY,
+      status: "active",
+      starts_at: startsAt,
+      expires_at: expiresAt,
+      source_type: "referral_reward",
+      source_referral_id: referral.id,
+      entitlement_reason: "referral_reward_month",
+      non_renewing: true,
+      metadata: {
+        product_key: REFERRAL_REWARD_KEY,
+        referral_id: referral.id,
+        reward_id: reward.id,
+        reward_duration_days: days,
+        stacked_after_existing_access: startMs > Date.now() + 1000
+      },
+      updated_at: nowIso()
     })
   });
-  await recordReferralEvent("referral_reward_scheduled", {
+
+  const granted = await rewardEntitlementForReferral(referral.id);
+
+  const applied = await patchReward(reward.id, {
+    status: "applied",
+    applied_at: nowIso(),
+    scheduled_for: startsAt,
+    reward_entitlement_id: granted && granted.id || null,
+    audit_metadata: Object.assign({}, reward.audit_metadata || {}, {
+      reward_mechanism: "entitlement_days",
+      granted_days: days,
+      access_starts_at: startsAt,
+      access_expires_at: expiresAt,
+      qualifying_invoice_id: invoice && invoice.id || null
+    })
+  });
+  await recordReferralEvent("referral_reward_applied", {
     referralId: referral.id,
     accountId: referral.inviter_account_id,
-    metadata: { reward_id: reward.id, stripe_customer_balance_transaction_id: transaction && transaction.id || null }
+    metadata: {
+      reward_id: reward.id,
+      mechanism: "entitlement_days",
+      access_starts_at: startsAt,
+      access_expires_at: expiresAt
+    }
   });
-  return scheduled;
+  return applied;
+}
+
+/* The later of now and the inviter's furthest existing paid expiry, so a reward
+   month extends access instead of running concurrently with it. */
+async function rewardStackBaseMs(inviterId, inviterEmail) {
+  const now = Date.now();
+  const filter = subjectOrFilter(inviterId, inviterEmail, "");
+  if (!filter) return now;
+  const rows = await supabaseFetch(
+    "user_entitlements?select=product_key,entitlement_type,status,expires_at&status=eq.active&" + filter + "&order=expires_at.desc.nullslast&limit=100",
+    { method: "GET" }
+  ).catch(function () { return []; });
+  const expiries = (Array.isArray(rows) ? rows : []).filter(function (row) {
+    return isPaidEntitlement(row) && row.expires_at;
+  }).map(function (row) {
+    return new Date(row.expires_at).getTime();
+  }).filter(function (ms) {
+    return Number.isFinite(ms) && ms > now;
+  });
+
+  /* A renewing membership has no entitlement row, so also stack behind any active
+     subscription period the inviter is currently in. */
+  const memberships = await membershipRows(inviterId, inviterEmail).catch(function () { return []; });
+  memberships.filter(isActivePaidMembership).forEach(function (row) {
+    const end = new Date(row.current_period_end || row.access_until || 0).getTime();
+    if (Number.isFinite(end) && end > now) expiries.push(end);
+  });
+
+  return expiries.length ? Math.max(now, Math.max.apply(Math, expiries)) : now;
+}
+
+async function rewardEntitlementForReferral(referralId) {
+  const rows = await supabaseFetch(
+    "user_entitlements?select=*&source_type=eq.referral_reward&source_referral_id=eq." + encodeFilter(referralId) + "&limit=1",
+    { method: "GET" }
+  ).catch(function () { return []; });
+  return Array.isArray(rows) ? rows[0] || null : null;
 }
 
 function positiveInteger(value) {
@@ -807,13 +932,46 @@ async function reversePendingReferralRewardForInvoice(invoiceId, reason) {
   const reward = await rewardForReferral(referral.id);
   if (!reward) return null;
   if (reward.status === "applied") {
-    return patchReward(reward.id, {
+    /* Under the entitlement-days model a reward is 'applied' the moment it is
+       earned, so this is now the common reversal path rather than a rare one.
+       Previously most reversals caught the reward at 'scheduled' and clawed back
+       the Stripe credit; the equivalent here is expiring the granted month, or a
+       refunded qualifying payment would silently leave the inviter paid. */
+    const granted = await rewardEntitlementForReferral(referral.id);
+    if (granted && granted.id) {
+      await supabaseFetch("user_entitlements?id=eq." + encodeFilter(granted.id), {
+        method: "PATCH",
+        headers: { Prefer: "return=minimal" },
+        body: JSON.stringify({
+          status: "reversed",
+          expires_at: nowIso(),
+          updated_at: nowIso()
+        })
+      }).catch(function () {});
+    }
+    const reversedApplied = await patchReward(reward.id, {
+      status: "reversed",
+      reversed_at: nowIso(),
+      reversal_reason: text(reason, 200) || "qualifying_payment_reversed",
       audit_metadata: Object.assign({}, reward.audit_metadata || {}, {
         refund_or_dispute_after_application: true,
+        reward_mechanism: "entitlement_days",
+        reversed_entitlement_id: granted && granted.id || null,
         review_reason: reason || "qualifying_payment_reversed",
         review_recorded_at: nowIso()
       })
     });
+    await recordReferralEvent("referral_reward_reversed", {
+      referralId: referral.id,
+      accountId: referral.inviter_account_id,
+      metadata: {
+        reward_id: reward.id,
+        mechanism: "entitlement_days",
+        entitlement_id: granted && granted.id || null,
+        reason: reason || "qualifying_payment_reversed"
+      }
+    });
+    return reversedApplied;
   }
   if (reward.status === "scheduled" && reward.stripe_customer_id && reward.credit_amount && reward.credit_currency) {
     const reversal = await stripeFetch("POST", "/v1/customers/" + encodeURIComponent(reward.stripe_customer_id) + "/balance_transactions", {
@@ -915,10 +1073,18 @@ module.exports = {
   acceptReferralInvite,
   createReferralInvite,
   evaluateReferralConversion,
+  evaluateStoreReferralConversion,
   getReferralDashboard,
   markScheduledRewardAppliedForInvoice,
   openReferralToken,
   prepareReferredMembershipCheckout,
   reversePendingReferralRewardForInvoice,
   revokeReferralInvite
+};
+
+/* Exported for tests. The reward-stacking arithmetic is the subtle part: it must
+   extend existing access rather than run concurrently with it. */
+module.exports.__test = {
+  applyReferralReward,
+  rewardStackBaseMs
 };

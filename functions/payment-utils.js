@@ -10,6 +10,9 @@ const ADMIN_COMPED_MEMBERSHIP_KEY = "admin_comped_membership";
    joining another table. */
 const STORE_MEMBERSHIP_KEY = "store_membership";
 const STORE_MONTH_PASS_KEY = "store_month_pass";
+/* The INVITER's earned reward month. Distinct from REFERRAL_ACCESS_KEY, which is
+   the INVITEE's gifted free month. */
+const REFERRAL_REWARD_KEY = "referral_reward_membership";
 const MONTH_PASS_HOURS = 24 * 30;
 const PAID_ACCESS_KEYS = {
   month_pass: true,
@@ -22,7 +25,8 @@ const PAID_ACCESS_KEYS = {
   round_pass: true,
   free_pass: true,
   store_membership: true,
-  store_month_pass: true
+  store_month_pass: true,
+  referral_reward_membership: true
 };
 const STORE_ACCESS_KEYS = {
   store_membership: true,
@@ -594,6 +598,7 @@ module.exports = {
   PAID_PERMISSION_KEYS,
   PASS_CONFIG,
   REFERRAL_ACCESS_KEY,
+  REFERRAL_REWARD_KEY,
   STORE_ACCESS_KEYS,
   STORE_MEMBERSHIP_KEY,
   STORE_MONTH_PASS_KEY,
