@@ -33,6 +33,7 @@ jobs:
 
       - name: Run structural regression tests
         run: |
+          node dev/app-permissions-smoke.test.js
           node dev/course-picker-location.test.js
           node dev/gps-play-camera-tilt.test.js
           node dev/gps-play-runtime-owner.test.js
