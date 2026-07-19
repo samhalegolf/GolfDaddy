@@ -38,6 +38,7 @@ jobs:
           node dev/store-billing.test.js
           node dev/referral-reward-entitlements.test.js
           node dev/store-billing-client.test.js
+          node dev/native-back-button.test.js
           node dev/shell-owner.test.js
           node dev/shell-behavior.test.js
           node dev/course-location-owner.test.js
