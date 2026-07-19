@@ -1302,6 +1302,7 @@
       resolverConfidence:Number.isFinite(Number(input.resolverConfidence))?Number(input.resolverConfidence):existing?.resolverConfidence,
       resolverMatchScore:Number.isFinite(Number(input.resolverMatchScore))?Number(input.resolverMatchScore):existing?.resolverMatchScore,
       resolverEvidence:Array.isArray(input.resolverEvidence)?input.resolverEvidence.slice(0,18):existing?.resolverEvidence,
+      greenShapeRefinement:input.greenShapeRefinement||existing?.greenShapeRefinement,
       createdAt:existing?.createdAt||nowIso(),
       updatedAt:nowIso()
     };

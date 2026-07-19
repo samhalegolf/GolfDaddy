@@ -108,7 +108,7 @@ Current data flow:
 5. `acceptGreenWand()` updates `greenPolygon` / `lastWandResult`; `gd-course-library-pin-lock.js` wraps accept/import and then calls `saveCurrentGreen("wand_accepted")`.
 6. Saved green geometry is persisted as course object data and can later be consumed by GPS/course play.
 
-Shared globals such as `greenCentre`, `greenPolygon`, and `greenShape` are compatibility state. They do not mean AutoMapper is using the detector. Today AutoMapper receives no polygon back from the detector unless a user goes through the standalone Wand acceptance flow.
+Shared globals such as `greenCentre`, `greenPolygon`, and `greenShape` are compatibility state for the standalone Wand surface. AutoMapper's live path now uses the narrower adapter in `scripts/gd-course-library-pin-lock.js`: it builds a captured-surface crop around the candidate green, calls `GDGreenShapeEngine.detect()`, validates map geometry, and then delegates accepted polygons to the existing `saveCourseObject()` path through `saveOsmAutoHole()`.
 
 ## Future Engine Contract
 
@@ -156,4 +156,8 @@ The first extracted version may keep `analyzeGreenWand(canvas, width, height, op
 
 Boundary status: clear enough for behavior fixtures.
 
-Extraction status: completed after the fixture commit. The detector block moved from `scripts/gd-app-core.js` to `scripts/gd-green-shape-engine.js` with compatibility aliases preserved. Standalone Wand UI deletion is intentionally left for a later commit.
+Extraction status: completed after the fixture commit. The detector block moved from `scripts/gd-app-core.js` to `scripts/gd-green-shape-engine.js` with compatibility aliases preserved.
+
+AutoMapper handoff status: the live `2146605` handoff is test-covered by `dev/automapper-green-refinement-owner.test.js` and `dev/automapper-green-refinement-behavior.test.js`. Coverage includes the single mapping-owned adapter, engine load order, captured-surface crop source, accepted result delegation through the existing save path, source metadata, dedupe, repeatability, stale attempt isolation, no Wand UI/global state calls, no GPS camera/shell/hole changes, and controlled rejection for no imagery, invalid projection, engine no-match, engine exception, low confidence, invalid polygon, non-finite polygon points, polygon drift from the candidate, stale attempt, course mismatch, hole mismatch, and stronger existing geometry.
+
+Standalone Wand retirement status: still intentionally left for a later commit. Do not remove the standalone Wand surface until these AutoMapper refinement tests and structural CI pass.
