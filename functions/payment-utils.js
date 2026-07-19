@@ -376,14 +376,21 @@ async function resolveAccount(payload, options) {
   return account;
 }
 
-// Resolve an account from client-supplied identity (payload accountId/email or
-// the X-Clarity-Account-* headers) WITHOUT Supabase-Auth JWT verification. This
-// is the same trust model the rest of Caddie already uses (payment status/admin
-// key off account-id/email) and matches resolveAccount's own no-token fallback.
-// Used by endpoints that must NOT hard-require a live JWT - e.g. the referral
-// dashboard, where a stale/unverifiable token would otherwise 401 even though
-// the user is a known account.
+// Resolve an account for endpoints that must NOT hard-require a live JWT - e.g.
+// the referral dashboard, where a stale/unverifiable token would otherwise 401
+// even though the user is a known account.
+//
+// A verified Supabase-Auth token still wins when one is present: it is the
+// strongest identity we have, and it means an authenticated caller carrying no
+// X-Clarity-Account-* header (the common case) resolves instead of 401'ing, and
+// cannot be talked into acting as someone else by a spoofed payload accountId.
+// Only when there is no usable token do we fall back to client-supplied identity
+// (payload accountId/email or the X-Clarity-Account-* headers) - the same trust
+// model the rest of Caddie already uses, and resolveAccount's own fallback.
 async function resolveAccountByIdentity(payload, event) {
+  const authAccount = await authenticatedAccount(event).catch(function () { return null; });
+  if (authAccount) return authAccount;
+
   const headers = (event && event.headers) || {};
   const headerId = text(headers["x-clarity-account-id"] || headers["X-Clarity-Account-Id"], 120);
   const headerEmail = email(headers["x-clarity-account-email"] || headers["X-Clarity-Account-Email"]);
