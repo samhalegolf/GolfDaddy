@@ -1501,6 +1501,162 @@
     for(let i=0;i<count;i++)pts.push(project(ll,(Math.PI*2*i)/count,radiusM));
     return pts;
   }
+  const AUTOMAPPER_GREEN_SHAPE_CROP_PX=240;
+  const AUTOMAPPER_GREEN_SHAPE_MAX_DRIFT_M=22;
+  const AUTOMAPPER_GREEN_SHAPE_MIN_RADIUS_M=4;
+  const AUTOMAPPER_GREEN_SHAPE_MAX_RADIUS_M=42;
+  function automapperGreenShapeEngine(){
+    try{return window.GDGreenShapeEngine||window.GolfDaddyGreenWandEngine||window.ClarityCaddieGreenWandEngine||null;}catch(e){return null;}
+  }
+  function automapperCaptureKey(course,hole){
+    const identity=course?.courseId||course?.id||course?.courseName||course?.name||courseId(course);
+    return 'gd_captured_hole_frame_v19_'+slug(String(identity||'course')+':h'+(Number(hole)||1));
+  }
+  function automapperRenderableManifest(manifest,hole){
+    if(!manifest||!manifest.originPx||!Array.isArray(manifest.tiles)||!manifest.tiles.length)return null;
+    const width=Number(manifest.imageWidth||manifest.width)||0;
+    const height=Number(manifest.imageHeight||manifest.height)||0;
+    const zoom=Number(manifest.captureZoom??manifest.zoom??manifest.tiles?.[0]?.z);
+    if(!width||!height||!Number.isFinite(zoom))return null;
+    const manifestHole=validHoleNumber(manifest.holeNumber||manifest.hole);
+    if(manifestHole&&hole&&manifestHole!==hole)return null;
+    return Object.assign({},manifest,{imageWidth:width,imageHeight:height,captureZoom:zoom});
+  }
+  function automapperReadCapturedManifest(course,hole){
+    const candidates=[];
+    const push=m=>{const clean=automapperRenderableManifest(m,hole);if(clean)candidates.push(clean);};
+    try{if(typeof window.gdCapturedSurfaceReadManifest==='function')push(window.gdCapturedSurfaceReadManifest(courseId(course),hole));}catch(e){}
+    try{if(typeof window.gdCapturedSurfaceReadManifest==='function')push(window.gdCapturedSurfaceReadManifest(course?.courseName||course?.name||courseId(course),hole));}catch(e){}
+    try{push(window.gdHoleImageCaptureManifest);}catch(e){}
+    try{push(window.__gdLastHoleImageCaptureManifest);}catch(e){}
+    try{push(window.__gdV19CapturedHoleFrameManifest);}catch(e){}
+    try{
+      const raw=localStorage.getItem(automapperCaptureKey(course,hole));
+      if(raw)push(JSON.parse(raw));
+    }catch(e){}
+    return candidates[0]||null;
+  }
+  function automapperLatLngToManifestPx(manifest,point){
+    try{
+      if(typeof map==='undefined'||!map||!manifest?.originPx)return null;
+      const ll=toLatLng(point);
+      if(!ll)return null;
+      const projected=map.project(ll,Number(manifest.captureZoom));
+      return {x:Number(projected.x)-Number(manifest.originPx.x||0),y:Number(projected.y)-Number(manifest.originPx.y||0)};
+    }catch(e){return null;}
+  }
+  function automapperManifestPxToLatLng(manifest,point){
+    try{
+      if(typeof map==='undefined'||!map||typeof L==='undefined'||!manifest?.originPx)return null;
+      const px=Number(point?.x)+Number(manifest.originPx.x||0);
+      const py=Number(point?.y)+Number(manifest.originPx.y||0);
+      const ll=map.unproject(L.point(px,py),Number(manifest.captureZoom));
+      return toPlain(ll);
+    }catch(e){return null;}
+  }
+  function automapperConstrainedCropBounds(manifest,centerPx){
+    const size=AUTOMAPPER_GREEN_SHAPE_CROP_PX;
+    const width=Number(manifest.imageWidth||manifest.width)||0;
+    const height=Number(manifest.imageHeight||manifest.height)||0;
+    if(!width||!height||!centerPx)return null;
+    const x=clamp(Number(centerPx.x)-size/2,0,Math.max(0,width-size));
+    const y=clamp(Number(centerPx.y)-size/2,0,Math.max(0,height-size));
+    return {x,y,width:Math.min(size,width),height:Math.min(size,height)};
+  }
+  function automapperLoadCropImage(src){
+    return new Promise((resolve,reject)=>{
+      if(!src)return reject(new Error('missing tile url'));
+      const img=new Image();
+      img.crossOrigin='anonymous';
+      img.onload=()=>resolve(img);
+      img.onerror=()=>reject(new Error('tile image load failed'));
+      img.src=src;
+    });
+  }
+  function automapperTileUrl(tile){
+    return tile?.url||tile?.src||tile?.imageUrl||tile?.dataUrl||tile?.href||'';
+  }
+  function automapperTileIntersectsCrop(tile,crop){
+    const x=Number(tile?.x)||0,y=Number(tile?.y)||0,w=Number(tile?.width)||256,h=Number(tile?.height)||256;
+    return x+w>crop.x&&y+h>crop.y&&x<crop.x+crop.width&&y<crop.y+crop.height;
+  }
+  async function automapperBuildGreenShapeCrop(manifest,centerPx){
+    const crop=automapperConstrainedCropBounds(manifest,centerPx);
+    if(!crop||crop.width<80||crop.height<80)return null;
+    const canvas=document.createElement('canvas');
+    canvas.width=Math.round(crop.width);
+    canvas.height=Math.round(crop.height);
+    const ctx=canvas.getContext('2d',{willReadFrequently:true});
+    if(!ctx)return null;
+    let drawn=0;
+    const tiles=(manifest.tiles||[]).filter(tile=>automapperTileIntersectsCrop(tile,crop));
+    for(const tile of tiles){
+      try{
+        const img=await automapperLoadCropImage(automapperTileUrl(tile));
+        ctx.drawImage(img,(Number(tile.x)||0)-crop.x,(Number(tile.y)||0)-crop.y,Number(tile.width)||256,Number(tile.height)||256);
+        drawn++;
+      }catch(e){}
+    }
+    if(!drawn)return null;
+    try{ctx.getImageData(Math.floor(canvas.width/2),Math.floor(canvas.height/2),1,1);}catch(e){return null;}
+    return {canvas,crop,seed:{x:Number(centerPx.x)-crop.x,y:Number(centerPx.y)-crop.y},tileCount:drawn};
+  }
+  function automapperGreenShapeVerdict(polygon,center,detected={}){
+    const pts=(polygon||[]).map(toPlain).filter(p=>Number.isFinite(p?.lat)&&Number.isFinite(p?.lng));
+    if(pts.length<8)return {ok:false,reason:'too-few-map-points'};
+    const centroid=shapeCentroid(pts);
+    if(!centroid)return {ok:false,reason:'missing-centroid'};
+    const drift=distance(center,centroid);
+    if(!Number.isFinite(drift)||drift>AUTOMAPPER_GREEN_SHAPE_MAX_DRIFT_M)return {ok:false,reason:'centroid-drift',driftM:drift};
+    const radii=pts.map(p=>distance(centroid,p)).filter(Number.isFinite);
+    const avg=radii.reduce((sum,v)=>sum+v,0)/Math.max(1,radii.length);
+    const max=Math.max(...radii,0);
+    const min=Math.min(...radii,Infinity);
+    if(avg<AUTOMAPPER_GREEN_SHAPE_MIN_RADIUS_M)return {ok:false,reason:'too-small',avgRadiusM:avg};
+    if(avg>AUTOMAPPER_GREEN_SHAPE_MAX_RADIUS_M||max>AUTOMAPPER_GREEN_SHAPE_MAX_RADIUS_M*1.55)return {ok:false,reason:'too-large',avgRadiusM:avg,maxRadiusM:max};
+    if(min>0&&max/min>7)return {ok:false,reason:'distorted-outline',avgRadiusM:avg,maxRadiusM:max,minRadiusM:min};
+    if((Number(detected.confidence)||0)<0.52)return {ok:false,reason:'low-confidence',confidence:Number(detected.confidence)||0};
+    return {ok:true,reason:'accepted',centroid,driftM:drift,avgRadiusM:avg,maxRadiusM:max,minRadiusM:min,confidence:Number(detected.confidence)||0};
+  }
+  async function automapperRunGreenShapeRefinement({course,hole,greenCenter,greenShape,debugRunId,attempt,source}={}){
+    const detail={hole,source:source||'automapper',attemptToken:attempt&&attempt.attemptToken||'',resolutionKey:attempt&&attempt.resolutionKey||''};
+    const skip=reason=>{
+      recordMappingDebug(debugRunId,{source:'automapper-green-shape-engine',phase:'skipped',event:'automapper-green-shape-refinement-skipped',summary:'Green Shape Engine refinement skipped',details:Object.assign({},detail,{skipReason:reason})});
+      return {accepted:false,phase:'skipped',reason};
+    };
+    const reject=(reason,extra={})=>{
+      recordMappingDebug(debugRunId,{source:'automapper-green-shape-engine',phase:'rejected',event:'automapper-green-shape-refinement-rejected',summary:'Green Shape Engine refinement rejected',details:Object.assign({},detail,extra,{rejectionReason:reason})});
+      return {accepted:false,phase:'rejected',reason,diagnostics:extra};
+    };
+    try{
+      if(!greenCenter||!Array.isArray(greenShape)||greenShape.length<3)return skip('missing-candidate-green');
+      if(attempt&&!isCurrentMappingAttempt(attempt))return skip('stale-mapping-attempt');
+      const engine=automapperGreenShapeEngine();
+      if(!engine||typeof engine.detect!=='function')return skip('engine-unavailable');
+      const manifest=automapperReadCapturedManifest(course,hole);
+      if(!manifest)return skip('no-renderable-crop');
+      const centerPx=automapperLatLngToManifestPx(manifest,greenCenter);
+      if(!centerPx)return skip('projection-unavailable');
+      const crop=await automapperBuildGreenShapeCrop(manifest,centerPx);
+      if(!crop)return skip('no-renderable-crop');
+      const detected=await engine.detect({
+        image:crop.canvas,
+        width:crop.canvas.width,
+        height:crop.canvas.height,
+        candidateCentrePx:crop.seed,
+        constraints:{width:crop.canvas.width,height:crop.canvas.height,minPoints:16,minConfidence:.52,minAcceptedDots:8,minBestChain:8}
+      });
+      if(!detected||!detected.ok)return reject(detected?.rejectionReason||'engine-rejected',{confidence:Number(detected&&detected.confidence)||0,metrics:detected&&detected.metrics||null,tileCount:crop.tileCount});
+      const polygon=(detected.polygonPixels||[]).map(p=>automapperManifestPxToLatLng(manifest,{x:Number(p.x)+crop.crop.x,y:Number(p.y)+crop.crop.y})).filter(Boolean);
+      const simplified=simplifyShape(polygon,56);
+      const verdict=automapperGreenShapeVerdict(simplified,greenCenter,detected);
+      if(!verdict.ok)return reject(verdict.reason,Object.assign({},verdict,{confidence:Number(detected.confidence)||0,metrics:detected.metrics||null,tileCount:crop.tileCount}));
+      recordMappingDebug(debugRunId,{source:'automapper-green-shape-engine',phase:'completed',event:'automapper-green-shape-refinement-accepted',summary:'Green Shape Engine refinement accepted',confidence:Number(detected.confidence)||0,details:Object.assign({},detail,{polygonPoints:simplified.length,tileCount:crop.tileCount,driftM:verdict.driftM,avgRadiusM:verdict.avgRadiusM,confidence:Number(detected.confidence)||0,metrics:detected.metrics||null})});
+      return {accepted:true,greenShape:simplified,confidence:Number(detected.confidence)||0,diagnostics:Object.assign({},verdict,{metrics:detected.metrics||null,tileCount:crop.tileCount})};
+    }catch(e){
+      return reject('refinement-error',{error:{message:e&&e.message||String(e)}});
+    }
+  }
   function hasConfirmedGreenShape(object){
     const shape=object?.greenShape||object?.shape;
     return object?.type==='green'&&!!object.confirmed&&Array.isArray(shape)&&shape.length>=3;
@@ -3584,7 +3740,7 @@
 	      resolverEvidence:Array.isArray(guide.resolverEvidence)?guide.resolverEvidence.slice(0,18):[]
 	    };
 	  }
-	  function saveOsmAutoHole(guide,greens,course=loadUserCourseData(),opts={}){
+	  async function saveOsmAutoHole(guide,greens,course=loadUserCourseData(),opts={}){
 	    const h=validHoleNumber(guide?.hole);
 	    const pts=(guide?.points||[]).map(toPlain).filter(Boolean);
 	    if(!h||pts.length<2)return {saved:0,greenPolygon:false,fallback:false};
@@ -3609,18 +3765,27 @@
 	    const resolverPatch=resolverObjectPatchForGuide(guide,guide?.source);
 	    const resolverConfirmed=!guide?.resolverProvisional;
 	    const countCommittedSave=object=>{if(object&&(resolverConfirmed||!guide?.resolverVersion))saved++;};
-	    if(!state.green&&greenCenter&&greenShape.length>=3){
+	    const refinement=!state.green?await automapperRunGreenShapeRefinement({course:selectedCourse,hole:h,greenCenter,greenShape,debugRunId:opts.debugRunId||'',attempt:opts.debugAttemptContext||null,source:match?.green?'osm_auto_green_polygon':'osm_auto_green_estimate'}):{accepted:false,phase:'skipped',reason:'green-already-mapped'};
+	    const acceptedRefinement=refinement&&refinement.accepted;
+	    const saveGreenShape=acceptedRefinement?refinement.greenShape:greenShape;
+	    const greenSource=acceptedRefinement?'osm_auto_green_refined':(resolverPatch.source||(match?.green?'osm_auto_green_polygon':'osm_auto_green_estimate'));
+	    const greenResolverPatch=acceptedRefinement?Object.assign({},resolverPatch,{
+	      resolverConfidence:Math.max(Number(resolverPatch.resolverConfidence)||0,Number(refinement.confidence)||0),
+	      resolverEvidence:[...(Array.isArray(resolverPatch.resolverEvidence)?resolverPatch.resolverEvidence:[]),'green-shape-engine-refinement'].slice(0,18),
+	      greenShapeRefinement:{engine:'GDGreenShapeEngine',status:'accepted',confidence:Number(refinement.confidence)||0,diagnostics:refinement.diagnostics||null}
+	    }):resolverPatch;
+	    if(!state.green&&greenCenter&&saveGreenShape.length>=3){
 		      countCommittedSave(saveCourseObject({
-		        ...resolverPatch,
+		        ...greenResolverPatch,
 		        userId:uid,
 		        courseId:cid,
 		        courseName:name,
 		        course:selectedCourse,
 		        type:'green',
 	        position:greenCenter,
-	        shape:greenShape,
-	        greenShape,
-	        source:resolverPatch.source||(match?.green?'osm_auto_green_polygon':'osm_auto_green_estimate'),
+	        shape:saveGreenShape,
+	        greenShape:saveGreenShape,
+	        source:greenSource,
 	        holeNumber:h,
 	        confirmed:resolverConfirmed,
 	        maxDedupeDistanceM:4
@@ -3634,19 +3799,22 @@
 		        countCommittedSave(saveCourseObject({...resolverPatch,userId:uid,courseId:cid,courseName:name,course:selectedCourse,type:'fairway',position:point,source:resolverPatch.source||(index?'osm_auto_fairway_bend':'osm_auto_fairway'),holeNumber:h,confirmed:resolverConfirmed,maxDedupeDistanceM:4}));
 		      });
 		    }
-	    return {saved,greenPolygon:!!match?.green,fallback:!match?.green};
+	    return {saved,greenPolygon:!!match?.green,fallback:!match?.green,refinement};
 	  }
-	  function persistOsmGuideBundle(course,bundle,opts={},debugRunId='',attempt=null){
+	  async function persistOsmGuideBundle(course,bundle,opts={},debugRunId='',attempt=null){
 	    const coursePoint=guideCoursePoint(course);
 	    const guides=opts.hole?[bestGuideForHole(bundle&&bundle.guides,opts.hole,coursePoint)].filter(Boolean):chooseAutoMapGuides(bundle&&bundle.guides,coursePoint);
-	    if(!guides.length)return {saved:0,holes:0,polygons:0,fallbacks:0,guides:[],guideBundle:bundle||null};
-	    let saved=0,polygons=0,fallbacks=0;
-	    guides.forEach(guide=>{
-		      const result=saveOsmAutoHole(guide,bundle&&bundle.greens,loadUserCourseData(userId(),courseId(course))||course,{replaceExisting:!!opts.replaceExisting,sessionCourse:course});
+	    if(!guides.length)return {saved:0,holes:0,polygons:0,fallbacks:0,refinedGreenShapes:0,refinementRejected:0,refinementSkipped:0,guides:[],guideBundle:bundle||null};
+	    let saved=0,polygons=0,fallbacks=0,refinedGreenShapes=0,refinementRejected=0,refinementSkipped=0;
+	    for(const guide of guides){
+		      const result=await saveOsmAutoHole(guide,bundle&&bundle.greens,loadUserCourseData(userId(),courseId(course))||course,{replaceExisting:!!opts.replaceExisting,sessionCourse:course,debugRunId,debugAttemptContext:attempt});
 	      saved+=result.saved;
 	      if(result.greenPolygon)polygons++;
 	      if(result.fallback)fallbacks++;
-	    });
+	      if(result.refinement&&result.refinement.accepted)refinedGreenShapes++;
+	      else if(result.refinement&&result.refinement.phase==='rejected')refinementRejected++;
+	      else if(result.refinement&&result.refinement.phase==='skipped')refinementSkipped++;
+	    }
 	    const active=opts.hole?validHoleNumber(opts.hole):mapperHole();
 	    const nextCourse=loadUserCourseData(userId(),courseId(course));
 	    if(nextCourse)drawHoleObjects(nextCourse,active);
@@ -3658,7 +3826,7 @@
 	      if(window.gdFullMappingMode)focusMapperHoleReference(active,{drawObjects:false,frame:true});
 	      else if(nextCourse)frameMappedHoleForPlay(nextCourse,active,{quiet:true,promptStart:!!opts.promptStart,allowAnyStart:true});
 	    }
-	    return {saved,holes:guides.length,polygons,fallbacks,guides,guideBundle:bundle||null};
+	    return {saved,holes:guides.length,polygons,fallbacks,refinedGreenShapes,refinementRejected,refinementSkipped,guides,guideBundle:bundle||null};
 	  }
 	  async function autoMapOsmCourse(opts={}){
 	    cancelMapperCapture();
@@ -3697,7 +3865,7 @@
 	      recordStaleMappingActivity(attempt,{eventSource:'automapper',event:'automapper-stale-result-rejected',summary:'AutoMapper stale result rejected',attemptedAction:'persist-geometry',callerFunction:'autoMapOsmCourse'});
 	      return false;
 	    }
-	    const persisted=persistOsmGuideBundle(course,bundle,opts,debugRunId,attempt);
+	    const persisted=await persistOsmGuideBundle(course,bundle,opts,debugRunId,attempt);
 	    if(!persisted.guides.length){
 	      if(!quiet)toastSafe('No OSM hole lines found');
 	      return Object.assign({saved:0,holes:0,polygons:0,fallbacks:0,automapperStatus:'failed',automapperError:bundle.automapperError||null},persisted);
@@ -3717,6 +3885,9 @@
 	      savedObjects:saved,
 	      shapedGreens:polygons,
 	      fallbackGreenShapes:fallbacks,
+	      refinedGreenShapes:persisted.refinedGreenShapes||0,
+	      refinementRejected:persisted.refinementRejected||0,
+	      refinementSkipped:persisted.refinementSkipped||0,
 	      hole:opts.hole?active:'',
 	      existingTrustedMap:!saved
 	    }});
@@ -4898,7 +5069,7 @@
     const payload=acquisition.payload||baseBundle.osmPayload||{elements:[]};
     const resolvedBundle=await resolveCourseGeometryGuideBundle(request.course,payload,baseBundle,Object.assign({},opts,{debugRunId:request.debugRunId,skipGeometryResolver:false,forceNativeResolver:true,suppressSkipTelemetry:true,source:'native-resolver',reason:request.reason,debugAttemptContext:attempt,callerFunction:'runCourseMappingAttempt',nativeResolverSourceLoadError:acquisition.sourceLoadError||null,nativeResolverSourceLoadStatus:acquisition.source||'',nativeResolverScorecardPromise:scorecardPromise}));
     if(resolvedBundle&&resolvedBundle.stale)return {ran:true,stale:true,bundle:resolvedBundle};
-	    const persisted=persistOsmGuideBundle(request.course,resolvedBundle,Object.assign({},opts,{quiet:true,frame:false,promptStart:true,hole:opts.wholeCourse===false?request.hole:null}),request.debugRunId,attempt);
+	    const persisted=await persistOsmGuideBundle(request.course,resolvedBundle,Object.assign({},opts,{quiet:true,frame:false,promptStart:true,hole:opts.wholeCourse===false?request.hole:null}),request.debugRunId,attempt);
 	    const frameCollection=collectCoursePlayFrames(loadUserCourseData(userId(),courseId(request.course))||request.course,'native-resolver',{activeHole:request.hole,warmFrames:request.wholeCourse});
 	    const generatedState=savedMapCanSatisfyRequest(request.course,request.hole,request.wholeCourse);
 	    const partialPlayable=!!(opts.acceptPartialGeneratedMap&&generatedState.requestedPlayable);

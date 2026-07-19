@@ -36,6 +36,8 @@ assertContains(engine, "Sandbox Green Wand Engine v2", "new owner contains the c
 assertContains(engine, "window.GolfDaddyGreenWandEngine={", "compatibility detector API is assigned in owner");
 assertContains(engine, "window.GDGreenShapeEngine=window.GolfDaddyGreenWandEngine", "future engine alias is assigned");
 assertContains(engine, "analyzeGreenWand", "current detector exposes analyzeGreenWand");
+assertContains(engine, "async function detect", "engine exposes a data-oriented AutoMapper detection contract");
+assertContains(engine, "validateDetection", "engine exposes deterministic crop-level validation");
 assertContains(engine, "findTonalEdgeCandidates", "probe candidate detection lives in the engine owner");
 assertContains(engine, "buildRidgeLines", "ridge detection lives in the engine owner");
 assertContains(engine, "buildHealthyBubble", "magnetic healthy-bubble fitting lives in the engine owner");
@@ -55,6 +57,14 @@ assertContains(belt, "window.gdShowWandSampleTruth=function(){}", "sample-truth 
 assertContains(pinLock, "function startMapperGreenWand", "mapper fallback still opens standalone Wand UI");
 assertContains(pinLock, "hydrateMapperGreenForWand", "mapper hydrates Wand-compatible globals");
 assertContains(pinLock, "saveCurrentGreen('wand_accepted')", "mapper receives accepted Wand output through save wrapper");
-assertNotContains(pinLock, "GolfDaddyGreenWandEngine.analyzeGreenWand", "AutoMapper/course library does not call detector directly");
+assertContains(pinLock, "async function automapperRunGreenShapeRefinement", "AutoMapper owns a narrow Green Shape Engine refinement handoff");
+assertContains(pinLock, "automapperBuildGreenShapeCrop", "AutoMapper supplies a constrained imagery crop to the engine");
+assertContains(pinLock, "engine.detect", "AutoMapper calls the engine data API, not the standalone Wand UI");
+assertContains(pinLock, "automapper-green-shape-refinement-accepted", "AutoMapper records accepted refinement diagnostics");
+assertContains(pinLock, "automapper-green-shape-refinement-rejected", "AutoMapper records controlled rejection diagnostics");
+assertContains(pinLock, "automapper-green-shape-refinement-skipped", "AutoMapper records deterministic skip diagnostics");
+assertContains(pinLock, "osm_auto_green_refined", "accepted refinement is labelled as an AutoMapper refinement source");
+assertContains(pinLock, "await saveOsmAutoHole", "AutoMapper persistence awaits the internal refinement stage");
+assertNotContains(pinLock, "openGpsWand({source:'automapper-green-shape-engine'", "refinement path does not activate Wand UI");
 
 console.log("green-shape-engine-owner tests passed");

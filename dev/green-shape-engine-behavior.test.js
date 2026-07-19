@@ -106,8 +106,38 @@ async function launchBrowser(playwright) {
       const blank = summarize(await engine.analyzeGreenWand(buildCanvas("blank"), 240, 240, options));
       const tiny = summarize(await engine.analyzeGreenWand(buildCanvas("tiny"), 240, 240, options));
       const oversized = summarize(await engine.analyzeGreenWand(buildCanvas("oversized"), 240, 240, options));
+      const detected = await engine.detect({
+        image: buildCanvas("green"),
+        width: 240,
+        height: 240,
+        candidateCentrePx: { x: 120, y: 120 },
+        constraints: { width: 240, height: 240, minPoints: 16, minConfidence: 0.45, minAcceptedDots: 1, minBestChain: 1 }
+      });
+      const rejected = await engine.detect({
+        image: buildCanvas("blank"),
+        width: 240,
+        height: 240,
+        candidateCentrePx: { x: 120, y: 120 },
+        constraints: { width: 240, height: 240, minPoints: 16, minConfidence: 0.99, minAcceptedDots: 60, minBestChain: 60 }
+      });
       const panelOpen = !document.getElementById("gdWandPanel").classList.contains("hidden");
-      return { first, second, blank, tiny, oversized, panelOpen };
+      return {
+        first, second, blank, tiny, oversized, panelOpen,
+        detected: {
+          ok: detected.ok,
+          polygonPoints: detected.polygonPixels.length,
+          confidence: Number(detected.confidence.toFixed(4)),
+          reason: detected.rejectionReason,
+          validationReason: detected.diagnostics.validation.reason
+        },
+        rejected: {
+          ok: rejected.ok,
+          polygonPoints: rejected.polygonPixels.length,
+          confidence: Number(rejected.confidence.toFixed(4)),
+          reason: rejected.rejectionReason,
+          validationReason: rejected.diagnostics.validation.reason
+        }
+      };
     });
 
     assert.strictEqual(result.panelOpen, false, "engine behavior test does not open standalone Wand UI");
@@ -120,6 +150,11 @@ async function launchBrowser(playwright) {
     assert.strictEqual(result.tiny.count >= 3, true, "tiny noise returns the current controlled shell instead of throwing");
     assert.strictEqual(result.tiny.boundsOk, true, "tiny-noise shell remains inside crop bounds");
     assert.strictEqual(result.oversized.boundsOk, true, "oversized fixture remains bounded by crop");
+    assert.strictEqual(result.detected.ok, true, "detect accepts a green-like crop with permissive gates");
+    assert.strictEqual(result.detected.polygonPoints >= 16, true, "detect returns polygon pixels for AutoMapper");
+    assert.strictEqual(result.detected.validationReason, "accepted", "detect returns an acceptance diagnostic");
+    assert.strictEqual(result.rejected.ok, false, "detect rejects when deterministic gates are not met");
+    assert.strictEqual(result.rejected.validationReason, "low-confidence", "detect returns a controlled rejection reason");
     assert.deepStrictEqual(pageErrors, [], "green-shape behavior produced no page errors");
     console.log("green-shape-engine-behavior tests passed");
   } finally {

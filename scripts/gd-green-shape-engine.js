@@ -644,6 +644,80 @@ async function analyzeGreenWand(image, width, height, options) {
 function getModeDefaults(mode) {
     return GREEN_WAND_MODE_PRESETS[mode];
 }
+function detectionConfidence(metrics) {
+    const dots = clamp((Number(metrics === null || metrics === void 0 ? void 0 : metrics.acceptedDots) || 0) / 42, 0, 1);
+    const chain = clamp((Number(metrics === null || metrics === void 0 ? void 0 : metrics.bestChain) || 0) / 24, 0, 1);
+    const ridge = clamp((Number(metrics === null || metrics === void 0 ? void 0 : metrics.ridgeCoverage) || 0) / 120, 0, 1);
+    const contrast = clamp((Number(metrics === null || metrics === void 0 ? void 0 : metrics.difference) || 0) / 42, 0, 1);
+    return clamp(dots * 0.28 + chain * 0.28 + ridge * 0.18 + contrast * 0.26, 0, 1);
+}
+function validateDetection(result, constraints) {
+    const c = constraints || {};
+    const polygon = Array.isArray(result === null || result === void 0 ? void 0 : result.polygonPixels) ? result.polygonPixels : [];
+    const metrics = result && result.metrics || {};
+    const minPoints = Number(c.minPoints) || 16;
+    const minConfidence = Number(c.minConfidence) || 0.52;
+    const minAcceptedDots = Number(c.minAcceptedDots) || 8;
+    const minBestChain = Number(c.minBestChain) || 8;
+    if (polygon.length < minPoints)
+        return { ok: false, reason: 'too-few-polygon-points' };
+    if ((Number(result && result.confidence) || 0) < minConfidence)
+        return { ok: false, reason: 'low-confidence' };
+    if ((Number(metrics.acceptedDots) || 0) < minAcceptedDots && (Number(metrics.bestChain) || 0) < minBestChain)
+        return { ok: false, reason: 'weak-edge-support' };
+    const width = Number(c.width) || Number(result && result.width) || 0;
+    const height = Number(c.height) || Number(result && result.height) || 0;
+    if (width > 0 && height > 0) {
+        const pad = Number(c.edgePaddingPx) || 2;
+        if (!polygon.every((p) => p && Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y)) && Number(p.x) >= -pad && Number(p.y) >= -pad && Number(p.x) <= width + pad && Number(p.y) <= height + pad))
+            return { ok: false, reason: 'polygon-outside-crop' };
+    }
+    return { ok: true, reason: 'accepted' };
+}
+async function detect(input) {
+    const request = input || {};
+    const image = request.image || request.canvas || null;
+    const width = Number(request.imageWidth || request.width || image && image.width) || 0;
+    const height = Number(request.imageHeight || request.height || image && image.height) || 0;
+    const seed = request.candidateCentrePx || request.candidateCenterPx || request.seed || { x: width / 2, y: height / 2 };
+    if (!image || !width || !height || !Number.isFinite(Number(seed.x)) || !Number.isFinite(Number(seed.y))) {
+        return { ok: false, rejectionReason: 'invalid-input', polygonPixels: [], confidence: 0, diagnostics: { width, height } };
+    }
+    const preset = getModeDefaults(request.mode || 'robustTonal') || GREEN_WAND_MODE_PRESETS.robustTonal;
+    const options = Object.assign({
+        seed: { x: clamp(Number(seed.x), 0, width), y: clamp(Number(seed.y), 0, height) },
+        sensitivity: Number(request.sensitivity) || preset.sensitivityRange.preset,
+        baseBubbleSize: Number(request.baseBubbleSize) || preset.baseBubbleSize,
+        clusterPull: Number(request.clusterPull) || preset.clusterPull,
+        filters: preset.filters
+    }, request.options || {});
+    const analysis = await analyzeGreenWand(image, width, height, options);
+    const polygonPixels = (Array.isArray(analysis.insetGreen) && analysis.insetGreen.length >= 3 ? analysis.insetGreen : analysis.outerShell || [])
+        .map((p) => ({ x: Number(p.x), y: Number(p.y) }))
+        .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
+    const confidence = detectionConfidence(analysis.metrics || {});
+    const result = {
+        ok: false,
+        polygonPixels,
+        confidence,
+        metrics: analysis.metrics || {},
+        diagnostics: {
+            mode: preset.key,
+            width,
+            height,
+            candidateCentrePx: options.seed,
+            polygonPoints: polygonPixels.length,
+            confidence
+        }
+    };
+    const verdict = validateDetection(Object.assign({}, result, { width, height }), Object.assign({ width, height }, request.constraints || {}));
+    result.ok = !!verdict.ok;
+    result.rejectionReason = verdict.reason;
+    result.diagnostics.validation = verdict;
+    if (request.includeRawAnalysis)
+        result.rawAnalysis = analysis;
+    return result;
+}
 
 window.GolfDaddyGreenWandEngine={
   GREEN_WAND_MODE_PRESETS,
@@ -651,6 +725,8 @@ window.GolfDaddyGreenWandEngine={
   buildFilterString,
   polygonPath,
   analyzeGreenWand,
+  detect,
+  validateDetection,
   getModeDefaults
 };
 window.ClarityCaddieGreenWandEngine=window.GolfDaddyGreenWandEngine;
