@@ -77,7 +77,9 @@ assert(pickerSearch.includes("function loadDatabaseCourses(opts={})"), "course p
 assert(pickerSearch.includes('source:"database-course"'), "database courses are tagged when merged into picker results");
 assert(pickerSearch.includes("hasDatabaseMap=true"), "database course results keep a database-map flag for picker ranking");
 assert(index.includes("gd-app-base.css?v=course-picker-live-gps-pin-20260718"), "base CSS cache-bust ships the pin prompt styling");
-assert(index.includes("gd-app-core.js?v=flag-pin-carve-20260719"), "app core cache-bust ships the flagTool boot-crash fix");
+assert(index.includes("gd-app-permissions.js?v=permissions-carve-20260719"), "local app permissions owner ships before app core");
+assert(index.includes("gd-app-core.js?v=permissions-carve-20260719"), "app core cache-bust ships the permissions carve");
+assert(index.includes("gd-flag-pin.js?v=flag-pin-carve-20260719"), "flag/pin owner still ships the flagTool boot-crash fix");
 assert(index.includes("gd-gps-beta-mode-shell.js?v=course-picker-rail-owner-20260719"), "beta GPS shell cache-bust ships rail owner handoff");
 assert(index.includes("gd-brand-icon-render.js?v=boot-crash-fix-20260719"), "brand rail cache-bust ships dynamic rail ownership + flag handler rebind");
 assert(index.includes("gd-course-picker-search-v2.js?v=course-picker-owner-cleanup-20260719"), "course picker search cache-bust ships database course hydration");
