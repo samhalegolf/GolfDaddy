@@ -381,9 +381,7 @@
     return Array.from(document.querySelectorAll('[id*="score" i],[class*="score" i]')).some(el=>{const r=el.getBoundingClientRect?el.getBoundingClientRect():null;return r&&r.width>40&&r.height>40&&el.offsetParent!==null&&!el.classList.contains('hidden')});
   }
   function returnToGps(){returnScorecardToGps=false;sessionStorage.removeItem('gd_return_from_scorecard');try{if(typeof enterGpsModule==='function')enterGpsModule({fromBack:true,preserve:true})}catch(e){}setTimeout(refresh,100)}
-  function patchScorecard(){
-    const old=window.openScorecard;
-    if(typeof old==='function'&&!old.__v62Wrapped){const w=function(...args){returnScorecardToGps=setGpsActive()||document.body.classList.contains('gdGpsActive')||lastGpsActive;if(returnScorecardToGps)sessionStorage.setItem('gd_return_from_scorecard','gps');const res=old.apply(this,args);setTimeout(refresh,80);return res};w.__v62Wrapped=true;window.openScorecard=w}
+  function wireScorecardBack(){
     document.querySelectorAll('button,[role="button"],a').forEach(btn=>{
       if(btn.dataset.v62Back) return;
       const label=((btn.textContent||'')+' '+(btn.getAttribute('aria-label')||'')+' '+(btn.title||'')).toLowerCase();
@@ -399,7 +397,7 @@
     ensureDistance();
     ensureHome();
     lockProfile();
-    patchScorecard();
+    wireScorecardBack();
   }
 
   window.setGpsPlayMode=function(next){next==='live'?enterLiveGps():enterTwoTap()};

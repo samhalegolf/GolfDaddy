@@ -5058,6 +5058,37 @@
   window.gdLockMappedGreenFromStart=forceLockMappedGreenFromStart;
   window.gdOpenCourseToFirstHole=openCourseToFirstHole;
 
+  function installScorecardOwnerHooks(){
+    if(document.__gdCourseLibraryScorecardOwnerHooks)return true;
+    if(!document.addEventListener)return false;
+    document.__gdCourseLibraryScorecardOwnerHooks=true;
+    document.addEventListener('gd:scorecard-play-selected',event=>{
+      const detail=event&&event.detail||{};
+      const requestedHole=validHoleNumber(detail.hole)||validHoleNumber(currentPlayingHole)||validHoleNumber(selectedHole)||1;
+      let par=detail.par??null;
+      try{
+        const h=rememberPlayingHole(currentPlayingHole||selectedHole||requestedHole);
+        if(h&&typeof setHole==='function'){
+          par=knownParForHole(h);
+          setHole(par!==null?{hole:h,par}:{hole:h});
+        }
+      }catch(e){}
+      try{saveCourseFinderCoordinate(currentMapFinderPoint(),'play-hole');}catch(e){}
+      const selectedCourse=sessionCourse(courseObj());
+      try{scheduleOsmAutoMapForPlay(selectedCourse,{hole:currentPlayingHole||selectedHole||requestedHole,delayMs:80,frame:true,promptStart:true});}catch(e){}
+      returnToGpsFromScorecard();
+      setTimeout(ensureAssumedCourseBadge,60);
+      setTimeout(returnToGpsFromScorecard,60);
+      setTimeout(()=>{try{if(typeof window.gdFocusMappedPreLockHole==="function")window.gdFocusMappedPreLockHole(currentPlayingHole||selectedHole||requestedHole,{source:"scorecard-play-selected",par});}catch(e){}},160);
+    });
+    document.addEventListener('gd:scorecard-save',()=>{
+      try{rememberPlayingHole(currentPlayingHole||selectedHole||1);}catch(e){}
+      const shouldReturn=(()=>{try{return sessionStorage.getItem('gd_return_from_scorecard')==='gps'||document.body.classList.contains('gdGpsActive')||document.body.classList.contains('shell-gps');}catch(e){return true;}})();
+      if(shouldReturn)setTimeout(returnToGpsFromScorecard,80);
+    });
+    return true;
+  }
+
   function wrapGpsFunctions(){
     if(!window.__gdCourseLibraryGpsWrapped){
       window.__gdCourseLibraryGpsWrapped=true;
@@ -5106,41 +5137,7 @@
         };
         window.openCourse=wrapped; try{openCourse=wrapped;}catch(e){}
       }
-      const oldPlay=typeof playSelectedHole==='function'?playSelectedHole:window.playSelectedHole;
-      if(typeof oldPlay==='function'){
-        const wrapped=function(){
-          const requestedHole=validHoleNumber(selectedHole)||validHoleNumber(currentPlayingHole)||1;
-          const res=oldPlay.apply(this,arguments);
-          let par=null;
-          try{
-            const h=rememberPlayingHole(currentPlayingHole||selectedHole||1);
-            if(h&&typeof setHole==='function'){
-              par=knownParForHole(h);
-              setHole(par!==null?{hole:h,par}:{hole:h});
-            }
-          }catch(e){}
-          try{saveCourseFinderCoordinate(currentMapFinderPoint(),'play-hole');}catch(e){}
-	          const selectedCourse=sessionCourse(courseObj());
-	          try{scheduleOsmAutoMapForPlay(selectedCourse,{hole:currentPlayingHole||selectedHole||requestedHole,delayMs:80,frame:true,promptStart:true});}catch(e){}
-	          returnToGpsFromScorecard();
-	          setTimeout(ensureAssumedCourseBadge,60);
-	          setTimeout(returnToGpsFromScorecard,60);
-	          setTimeout(()=>{try{if(typeof window.gdFocusMappedPreLockHole==="function")window.gdFocusMappedPreLockHole(currentPlayingHole||selectedHole||requestedHole,{source:"scorecard-play-selected",par});}catch(e){}},160);
-	          return res;
-	        };
-        window.playSelectedHole=wrapped; try{playSelectedHole=wrapped;}catch(e){}
-      }
-      const oldSaveScore=typeof saveHoleScore==='function'?saveHoleScore:window.saveHoleScore;
-      if(typeof oldSaveScore==='function'){
-        const wrapped=function(){
-          try{rememberPlayingHole(currentPlayingHole||selectedHole||1);}catch(e){}
-          const shouldReturn=(()=>{try{return sessionStorage.getItem('gd_return_from_scorecard')==='gps'||document.body.classList.contains('gdGpsActive')||document.body.classList.contains('shell-gps');}catch(e){return true;}})();
-          const res=oldSaveScore.apply(this,arguments);
-          if(shouldReturn)setTimeout(returnToGpsFromScorecard,80);
-          return res;
-        };
-        window.saveHoleScore=wrapped; try{saveHoleScore=wrapped;}catch(e){}
-      }
+      installScorecardOwnerHooks();
 	      const oldSetStart=typeof setStart==='function'?setStart:window.setStart;
 	      if(typeof oldSetStart==='function'){
 	        const wrapped=function(ll,saveUndo){

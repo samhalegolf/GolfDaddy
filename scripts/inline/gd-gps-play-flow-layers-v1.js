@@ -421,11 +421,21 @@
   function openScorecardOnHole(h){
     h=rememberHole(h);
     safe(function(){sessionStorage.setItem("gd_return_from_scorecard","gps");});
-    safe(function(){if(typeof openScorecard==="function")openScorecard();});
+    safe(function(){
+      if(window.GDGpsScorecard&&typeof window.GDGpsScorecard.syncCurrentHole==="function")window.GDGpsScorecard.syncCurrentHole(h);
+      if(window.GDGpsScorecard&&typeof window.GDGpsScorecard.open==="function")window.GDGpsScorecard.open({hole:h});
+      else if(typeof openScorecard==="function")openScorecard();
+    });
     [80,300,760].forEach(function(delay){
       setTimeout(function(){
-        safe(function(){selectedHole=h;});
-        safe(function(){if(typeof renderScorecard==="function")renderScorecard();});
+        safe(function(){
+          if(window.GDGpsScorecard&&typeof window.GDGpsScorecard.syncCurrentHole==="function")window.GDGpsScorecard.syncCurrentHole(h);
+          else selectedHole=h;
+        });
+        safe(function(){
+          if(window.GDGpsScorecard&&typeof window.GDGpsScorecard.render==="function")window.GDGpsScorecard.render();
+          else if(typeof renderScorecard==="function")renderScorecard();
+        });
         syncScoreSaveLabel();
       },delay);
     });
@@ -717,6 +727,7 @@
     var next=nextHole(current);
     if(next>current)nextPromptLatch={hole:current,next:next,at:Date.now()};
     queuedNextHole=next>current?next:null;
+    safe(function(){if(window.GDGpsScorecard&&typeof window.GDGpsScorecard.queueNextHole==="function")window.GDGpsScorecard.queueNextHole(queuedNextHole);});
     openScorecardOnHole(current);
     syncScoreSaveLabel();
     safe(function(){if(typeof toast==="function")toast(queuedNextHole?"Save score to play H"+queuedNextHole:"Scorecard ready");});
@@ -1064,33 +1075,6 @@
       syncRailButton();
     },true);
   }
-  function wrapSaveScore(){
-    var old=window.saveHoleScore||safe(function(){return saveHoleScore},null);
-    if(typeof old!=="function"||old.__gdPlayFlowWrapped)return;
-    var wrapped=function(){
-      var next=validHole(queuedNextHole);
-      var res=old.apply(this,arguments);
-      queuedNextHole=null;
-      syncScoreSaveLabel();
-      if(next)setTimeout(function(){playHole(next,{source:"score-save-next"});},180);
-      return res;
-    };
-    wrapped.__gdPlayFlowWrapped=true;
-    window.saveHoleScore=wrapped;
-    safe(function(){saveHoleScore=wrapped;});
-  }
-  function wrapRenderScorecard(){
-    var old=window.renderScorecard||safe(function(){return renderScorecard},null);
-    if(typeof old!=="function"||old.__gdPlayFlowWrapped)return;
-    var wrapped=function(){
-      var res=old.apply(this,arguments);
-      syncScoreSaveLabel();
-      return res;
-    };
-    wrapped.__gdPlayFlowWrapped=true;
-    window.renderScorecard=wrapped;
-    safe(function(){renderScorecard=wrapped;});
-  }
   function wrapPromptClearer(name){
     var old=window[name]||safe(function(){return eval(name)},null);
     if(typeof old!=="function"||old.__gdPlayFlowClearWrapped)return;
@@ -1109,8 +1093,6 @@
   function install(){
     installRailGestures();
     installDocumentGuards();
-    wrapSaveScore();
-    wrapRenderScorecard();
     wrapPromptClearer("gdClearShotForNextStart");
     wrapPromptClearer("resetPlay");
     wrapPromptClearer("clearAllLayers");
