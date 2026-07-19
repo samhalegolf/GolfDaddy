@@ -477,6 +477,7 @@ function sanitizeCourse(input, actor) {
   const id = "published::" + courseId;
   const now = new Date().toISOString();
   const locationPoint = point(input.courseLocation && (input.courseLocation.centre || input.courseLocation.center || input.courseLocation) || input.courseCentre || input.courseCenter);
+  const locationConfirmed = input.courseLocationConfirmed === true || !!(input.courseLocation && input.courseLocation.confirmed === true);
   const course = {
     id,
     userId: "published",
@@ -492,11 +493,11 @@ function sanitizeCourse(input, actor) {
       centre: locationPoint,
       source: text(input.courseLocation && input.courseLocation.source || input.courseLocationSource, 120),
       confidence: finite(input.courseLocation && input.courseLocation.confidence || input.courseLocationConfidence),
-      confirmed: input.courseLocationConfirmed !== false && (!input.courseLocation || input.courseLocation.confirmed !== false),
+      confirmed: locationConfirmed,
       updatedAt: text(input.courseLocation && input.courseLocation.updatedAt || input.courseLocationUpdatedAt, 80) || now
     } : undefined,
     courseLocationSource: text(input.courseLocationSource || input.courseLocation && input.courseLocation.source, 120),
-    courseLocationConfirmed: input.courseLocationConfirmed === true || !!(input.courseLocation && input.courseLocation.confirmed),
+    courseLocationConfirmed: locationConfirmed,
     courseLocationUpdatedAt: text(input.courseLocationUpdatedAt || input.courseLocation && input.courseLocation.updatedAt, 80),
     createdAt: text(input.createdAt, 80) || now,
     updatedAt: now,
