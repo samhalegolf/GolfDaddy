@@ -39,5 +39,7 @@ jobs:
           node dev/gps-location-lifecycle-owner.test.js
           node dev/gps-scorecard-owner.test.js
           node dev/gps-scorecard-behavior.test.js
+          node dev/green-shape-engine-owner.test.js
+          node dev/green-shape-engine-behavior.test.js
           node dev/gps-play-camera-tilt.test.js
           node dev/gps-play-runtime-owner.test.js
