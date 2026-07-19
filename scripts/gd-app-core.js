@@ -21088,71 +21088,7 @@ function clearShot(options={}){
   try{if(typeof window.gdClearCapturedHoleFrameShotOverlay==="function")window.gdClearCapturedHoleFrameShotOverlay();}catch(e){}
 }
 
-/* ---------------- GPS ---------------- */
-function initGPS(){
-  if(!navigator.geolocation){gpsOk=false;setGps(false,"Manual");showHint(gdMappedStartHint());return}
-  setGps(true,"GPS…");
-  navigator.geolocation.getCurrentPosition(p=>{
-    gpsOk=true;setGps(true,"GPS");hideHint();
-    const here=L.latLng(p.coords.latitude,p.coords.longitude);
-	    gdRememberLiveGpsOnly(here,p.coords.accuracy,"gps-init");
-	    startWatch();
-	  },()=>{gpsOk=false;setGps(false,"Manual");showHint(gdMappedStartHint())},{enableHighAccuracy:true,maximumAge:3000,timeout:8000})
-	}
-	function pulseStartDot(){const el=document.querySelector(".startDot");if(el){el.classList.remove("pulse");void el.offsetWidth;el.classList.add("pulse")}}
-	function gdRememberLiveGpsOnly(here,accuracy=null,source="gps-live"){
-	  window.__gdGpsLocateQuarantineV1=true;
-	  if(!here||!Number.isFinite(Number(here.lat))||!Number.isFinite(Number(here.lng)))return false;
-	  window.gdGpsState=window.gdGpsState||{};
-	  window.gdGpsState.permissionKnown=true;
-	  window.gdGpsState.permissionGranted=true;
-	  window.gdGpsState.lastError=null;
-	  window.gdGpsState.lastFix={lat:Number(here.lat),lng:Number(here.lng),accuracy:Number.isFinite(Number(accuracy))?Number(accuracy):null,source:source||"gps-live",simulated:false};
-	  window.gdGpsState.lastFixAt=Date.now();
-	  window.__gdLastLiveGpsPoint={lat:Number(here.lat),lng:Number(here.lng),accuracy:Number.isFinite(Number(accuracy))?Number(accuracy):null,source:source||"gps-live",at:Date.now()};
-	  try{if(document.body&&document.body.dataset){document.body.dataset.gdLiveGpsLat=String(Number(here.lat));document.body.dataset.gdLiveGpsLng=String(Number(here.lng));document.body.dataset.gdLiveGpsSource=source||"gps-live";document.body.dataset.gdLiveGpsAt=String(Date.now());}}catch(e){}
-	  try{
-	    if(typeof L!=="undefined"&&typeof map!=="undefined"&&map){
-	      const ll=L.latLng(Number(here.lat),Number(here.lng));
-	      if(!window.__gdLiveGpsMarker){
-	        window.__gdLiveGpsMarker=L.circleMarker(ll,{radius:6,color:"#1fd36d",weight:2,opacity:.95,fillColor:"#1fd36d",fillOpacity:.32,interactive:false}).addTo(map);
-	      }else if(window.__gdLiveGpsMarker.setLatLng){
-	        window.__gdLiveGpsMarker.setLatLng(ll);
-	      }
-	    }
-	  }catch(e){}
-	  try{gpsOk=true;}catch(e){}
-	  try{setGps(true,source==="gps-refresh"?"GPS refreshed":"GPS live");}catch(e){}
-	  return true;
-	}
-	window.gdRememberLiveGpsOnly=gdRememberLiveGpsOnly;
-	function updateGpsInsideLockedFrame(here,label="GPS live"){
-	  if(!here||!start) return false;
-	  gdRememberLiveGpsOnly(here,null,label);
-	  const moved=map.distance(start,here);
-  if(moved>lockedGpsUpdateMaxM){
-    setGps(true,"GPS moved");
-    toast("GPS moved outside locked frame · reset for new shot");
-    return false;
-  }
-  setGps(true,label);
-  pulseStartDot();
-  return true;
-}
-function startWatch(){
-	  if(gpsWatch||!navigator.geolocation)return;
-	  gpsWatch=navigator.geolocation.watchPosition(p=>{
-	    const here=L.latLng(p.coords.latitude,p.coords.longitude);
-	    gdRememberLiveGpsOnly(here,p.coords.accuracy,"gps-watch");
-	    if(!start)return;
-	    if(lockedFrame){
-	      updateGpsInsideLockedFrame(here,"GPS live");
-	      return;
-	    }
-	  },()=>setGps(false,"GPS weak"),{enableHighAccuracy:true,maximumAge:3000,timeout:10000});
-	}
-	function refreshGPS(){if(!navigator.geolocation)return;navigator.geolocation.getCurrentPosition(p=>{const here=L.latLng(p.coords.latitude,p.coords.longitude);gdRememberLiveGpsOnly(here,p.coords.accuracy,"gps-refresh");startWatch();toast("GPS refreshed")},null,{enableHighAccuracy:true,maximumAge:0,timeout:8000})}
-function centerOnPlayer(){if(lockedFrame){toast("Frame locked · GPS dot still live");pulseStartDot();return;}clearMapRotation();if(!start){refreshGPS();return}map.panTo(start,{animate:true,duration:.35});pulseStartDot()}
+/* GPS watch/location lifecycle is owned by scripts/inline/gd-gps-play-runtime-owner-v1.js. */
 
 /* ---------------- Flag ---------------- */
 /* Flag/pin placement carved out to scripts/gd-flag-pin.js (Phase B, 2026-07-19).

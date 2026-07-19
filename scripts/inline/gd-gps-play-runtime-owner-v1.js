@@ -2477,7 +2477,7 @@
   if(window.__gdGpsPlayRuntimeOwnerV1)return;
   window.__gdGpsPlayRuntimeOwnerV1=true;
   window.__gdGpsSpringCleanOwnerV1="renamed-to-gdGpsPlayRuntimeOwnerV1";
-  window.gdGpsPlayRuntimeOwner={id:"gdGpsPlayRuntimeOwnerV1",owns:["gps-runtime-cleanup","manual-start-runtime","resume-round-runtime","tool-rail-runtime","captured-shot-overlay-runtime"],shellNavigationOwner:"gdCanonicalRouteAuditV1",cameraOwner:"v19-captured-surface"};
+  window.gdGpsPlayRuntimeOwner={id:"gdGpsPlayRuntimeOwnerV1",owns:["gps-location-lifecycle","gps-runtime-cleanup","manual-start-runtime","resume-round-runtime","tool-rail-runtime","captured-shot-overlay-runtime"],shellNavigationOwner:"gdCanonicalRouteAuditV1",cameraOwner:"v19-captured-surface"};
   var RESUME_KEY="gd_gps_resume_round_v1";
   var LEGACY_RESUME_KEY="gd_gps_auto_session_v1";
   var RESUME_TTL_MS=3*60*60*1000;
@@ -2496,9 +2496,208 @@
 	  var oldBack=window.gdCanonicalShellBack||window.shellBack;
 	  var oldPickerHome=window.gdCoursePickerHome;
 	  var oldOpenCourse=window.gdOpenCoursePickerCourse;
-	  var oldSimpleGreenZoom=window.gdToggleSimpleGreenZoom;
+  var oldSimpleGreenZoom=window.gdToggleSimpleGreenZoom;
   function safe(fn,fallback){try{return fn()}catch(e){return fallback}}
   function byId(id){return document.getElementById(id)}
+  function latLngFromPosition(pos){
+    if(!pos)return null;
+    if(pos.coords)return L.latLng(pos.coords.latitude,pos.coords.longitude);
+    if(Number.isFinite(Number(pos.lat))&&Number.isFinite(Number(pos.lng)))return L.latLng(Number(pos.lat),Number(pos.lng));
+    return null;
+  }
+  function setGpsSafe(ok,label){
+    safe(function(){if(typeof setGps==="function")setGps(ok,label)});
+    safe(function(){if(typeof setGpsLabel==="function")setGpsLabel(ok,label)});
+  }
+  function setStateSafe(label){
+    safe(function(){if(typeof setState==="function")setState(label)});
+    safe(function(){if(typeof setStateLabel==="function")setStateLabel(label)});
+  }
+  function showGpsHintSafe(label){
+    safe(function(){if(typeof showHint==="function")showHint(label)});
+    safe(function(){if(typeof hint==="function")hint(label)});
+  }
+  function hideGpsHintSafe(){
+    safe(function(){if(typeof hideHint==="function")hideHint()});
+    safe(function(){if(typeof hideHintSafe==="function")hideHintSafe()});
+  }
+  function gpsErrorLabel(err){
+    var code=err&&err.code;
+    if(code===1)return {gps:"GPS denied",state:"GPS permission needed",toast:"Location permission needed",hint:null};
+    if(code===3)return {gps:"GPS weak",state:"GPS is searching",toast:"GPS timeout · try again outside",hint:"GPS is searching. Try again near the tee."};
+    return {gps:"GPS weak",state:"GPS is searching",toast:"GPS is searching",hint:"GPS is searching. Try again near the tee."};
+  }
+  function pulseStartDot(){var el=document.querySelector(".startDot");if(el){el.classList.remove("pulse");void el.offsetWidth;el.classList.add("pulse")}}
+  function rememberLiveGpsOnly(here,accuracy,source){
+    window.__gdGpsLocateQuarantineV1=true;
+    if(!here||!Number.isFinite(Number(here.lat))||!Number.isFinite(Number(here.lng)))return false;
+    var point={lat:Number(here.lat),lng:Number(here.lng)};
+    var accuracyValue=Number.isFinite(Number(accuracy))?Number(accuracy):null;
+    window.gdGpsState=window.gdGpsState||{};
+    window.gdGpsState.permissionKnown=true;
+    window.gdGpsState.permissionGranted=true;
+    window.gdGpsState.lastError=null;
+    window.gdGpsState.lastFix={lat:point.lat,lng:point.lng,accuracy:accuracyValue,source:source||"gps-live",simulated:false};
+    window.gdGpsState.lastFixAt=Date.now();
+    window.__gdLastLiveGpsPoint={lat:point.lat,lng:point.lng,accuracy:accuracyValue,source:source||"gps-live",at:Date.now()};
+    safe(function(){
+      if(document.body&&document.body.dataset){
+        document.body.dataset.gdLiveGpsLat=String(point.lat);
+        document.body.dataset.gdLiveGpsLng=String(point.lng);
+        document.body.dataset.gdLiveGpsSource=source||"gps-live";
+        document.body.dataset.gdLiveGpsAt=String(Date.now());
+      }
+    });
+    safe(function(){
+      if(typeof L!=="undefined"&&typeof map!=="undefined"&&map){
+        var ll=L.latLng(point.lat,point.lng);
+        if(!window.__gdLiveGpsMarker){
+          window.__gdLiveGpsMarker=L.circleMarker(ll,{radius:6,color:"#1fd36d",weight:2,opacity:.95,fillColor:"#1fd36d",fillOpacity:.32,interactive:false}).addTo(map);
+        }else if(window.__gdLiveGpsMarker.setLatLng){
+          window.__gdLiveGpsMarker.setLatLng(ll);
+        }
+      }
+    });
+    safe(function(){gpsOk=true});
+    setGpsSafe(true,source==="gps-refresh"?"GPS refreshed":"GPS live");
+    return true;
+  }
+  function rememberGpsPosition(pos,source){
+    var ll=latLngFromPosition(pos);
+    if(!ll)return null;
+    rememberLiveGpsOnly(ll,pos&&pos.coords?pos.coords.accuracy:null,source||"gps");
+    return ll;
+  }
+  function updateGpsInsideLockedFrameOwner(here,label){
+    if(!here)return false;
+    var currentStart=safe(function(){return typeof start!=="undefined"?start:null},null);
+    if(!currentStart)return false;
+    rememberLiveGpsOnly(here,null,label||"GPS live");
+    var moved=safe(function(){return map.distance(currentStart,here)},0);
+    var max=safe(function(){return Number(lockedGpsUpdateMaxM)||0},0);
+    if(max&&moved>max){
+      setGpsSafe(true,"GPS moved");
+      safe(function(){if(typeof toast==="function")toast("GPS moved outside locked frame · reset for new shot")});
+      return false;
+    }
+    setGpsSafe(true,label||"GPS live");
+    pulseStartDot();
+    return true;
+  }
+  function startLocationWatch(){
+    if(safe(function(){return !!gpsWatch},false)||!navigator.geolocation)return null;
+    var watch=navigator.geolocation.watchPosition(function(pos){
+      var here=rememberGpsPosition(pos,"gps-watch");
+      if(!here)return;
+      var hasStart=safe(function(){return !!start},false);
+      if(!hasStart)return;
+      if(safe(function(){return !!lockedFrame},false)){
+        updateGpsInsideLockedFrameOwner(here,"GPS live");
+      }
+    },function(err){
+      window.gdGpsState=window.gdGpsState||{};
+      window.gdGpsState.lastError=err||null;
+      setGpsSafe(false,"GPS weak");
+    },{enableHighAccuracy:true,maximumAge:3000,timeout:10000});
+    safe(function(){gpsWatch=watch});
+    return watch;
+  }
+  function stopLocationWatch(reason){
+    var watch=safe(function(){return gpsWatch},null);
+    if(watch&&navigator.geolocation){
+      safe(function(){navigator.geolocation.clearWatch(watch)});
+    }
+    safe(function(){gpsWatch=null});
+    window.gdGpsState=window.gdGpsState||{};
+    window.gdGpsState.watchStoppedAt=Date.now();
+    window.gdGpsState.watchStopReason=reason||"gps-location-lifecycle";
+    return true;
+  }
+  function requestGpsFix(opts){
+    opts=opts||{};
+    if(window.__gdGpsLocationRequestActive)return false;
+    if(!navigator.geolocation){
+      setGpsSafe(false,"GPS unavailable");
+      safe(function(){if(typeof toast==="function")toast("GPS unavailable")});
+      return false;
+    }
+    window.__gdGpsLocationRequestActive=true;
+    setGpsSafe(true,"GPS...");
+    navigator.geolocation.getCurrentPosition(function(pos){
+      window.__gdGpsLocationRequestActive=false;
+      var here=rememberGpsPosition(pos,opts.source||"gps-refresh");
+      if(!here)return;
+      if(safe(function(){return !!lockedFrame},false)){
+        updateGpsInsideLockedFrameOwner(here,opts.label||"GPS live");
+        setStateSafe("Live locked");
+      }else{
+        setStateSafe(opts.state||"GPS live");
+      }
+      hideGpsHintSafe();
+      startLocationWatch();
+      if(opts.toast!==false)safe(function(){if(typeof toast==="function")toast(opts.toastLabel||"GPS refreshed")});
+      safe(function(){if(typeof gdV62Refresh==="function")gdV62Refresh()});
+    },function(err){
+      window.__gdGpsLocationRequestActive=false;
+      window.gdGpsState=window.gdGpsState||{};
+      window.gdGpsState.permissionKnown=true;
+      window.gdGpsState.permissionGranted=!(err&&err.code===1);
+      window.gdGpsState.lastError=err||null;
+      var labels=gpsErrorLabel(err);
+      setGpsSafe(false,labels.gps);
+      setStateSafe(labels.state);
+      if(labels.hint)showGpsHintSafe(labels.hint);
+      else hideGpsHintSafe();
+      safe(function(){if(typeof toast==="function")toast(err&&err.message?err.message:labels.toast)});
+      safe(function(){if(typeof gdV62Refresh==="function")gdV62Refresh()});
+    },{enableHighAccuracy:true,maximumAge:opts.maximumAge==null?0:opts.maximumAge,timeout:opts.timeout||15000});
+    return true;
+  }
+  function initGpsLocation(){
+    if(!navigator.geolocation){
+      safe(function(){gpsOk=false});
+      setGpsSafe(false,"Manual");
+      showGpsHintSafe(safe(function(){return gdMappedStartHint()},"Tap twice: ball then green"));
+      return false;
+    }
+    return requestGpsFix({source:"gps-init",toast:false,state:"GPS live",maximumAge:3000,timeout:8000});
+  }
+  function refreshGpsLocation(){return requestGpsFix({source:"gps-refresh",toast:true,toastLabel:"GPS refreshed",state:"GPS live",maximumAge:0,timeout:8000})}
+  function centerOnPlayerOwner(){
+    if(safe(function(){return !!lockedFrame},false)){
+      safe(function(){if(typeof toast==="function")toast("Frame locked · GPS dot still live")});
+      pulseStartDot();
+      return false;
+    }
+    safe(function(){if(typeof clearMapRotation==="function")clearMapRotation()});
+    var currentStart=safe(function(){return typeof start!=="undefined"?start:null},null);
+    if(!currentStart)return refreshGpsLocation();
+    safe(function(){map.panTo(currentStart,{animate:true,duration:.35})});
+    pulseStartDot();
+    return true;
+  }
+  window.GDGpsLocationLifecycle={
+    id:"gdGpsPlayRuntimeOwnerV1",
+    init:initGpsLocation,
+    refresh:refreshGpsLocation,
+    locate:function(){return requestGpsFix({source:"gps-locate",toast:true,toastLabel:"GPS located",state:"GPS live",maximumAge:0,timeout:15000})},
+    startWatch:startLocationWatch,
+    stopWatch:stopLocationWatch,
+    rememberFix:rememberGpsPosition,
+    rememberLive:rememberLiveGpsOnly,
+    updateLocked:updateGpsInsideLockedFrameOwner,
+    centerOnPlayer:centerOnPlayerOwner
+  };
+  window.initGPS=initGpsLocation;
+  window.refreshGPS=refreshGpsLocation;
+  window.gdGpsLocateNow=window.GDGpsLocationLifecycle.locate;
+  window.gdGpsRememberFix=rememberGpsPosition;
+  window.gdGpsApplyFix=function(point,opts){opts=opts||{};return rememberLiveGpsOnly(latLngFromPosition(point),opts.accuracy,opts.source||"gps-live")};
+  window.gdRememberLiveGpsOnly=rememberLiveGpsOnly;
+  window.updateGpsInsideLockedFrame=updateGpsInsideLockedFrameOwner;
+  window.startWatch=startLocationWatch;
+  window.stopGpsWatch=stopLocationWatch;
+  window.centerOnPlayer=centerOnPlayerOwner;
   function liftShellTop(){
     var top=byId("shellTop");
     if(!top||!document.body)return false;
