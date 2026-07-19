@@ -25,7 +25,8 @@
 	    safe(()=>document.getElementById('courseScreen')?.classList.add('hidden'));
 	    safe(()=>document.getElementById('shellTop')?.classList.remove('visible'));
 	    safe(()=>document.getElementById('shellDock')?.classList.remove('visible'));
-	    safe(()=>document.body.classList.remove('gdBubbleStudioOpen','shell-home','shell-gps','gps-active','gdGpsActive','gps-open','manual-gps-active','shell-module'));
+	    safe(()=>document.body.classList.remove('gdBubbleStudioOpen','gps-open','manual-gps-active'));
+	    safe(()=>window.GDShell?.showAuth?.({source:'profile-route-auth'}));
 	    safe(()=>document.body.classList.add('gdAuthLocked','gdProfileOpen'));
 	    const profile=document.getElementById('gdProfileV67');
 	    if(profile) profile.classList.remove('hidden');
@@ -38,9 +39,9 @@
     safe(()=>document.getElementById('courseScreen')?.classList.add('hidden'));
     safe(()=>document.getElementById('shellTop')?.classList.remove('visible'));
     safe(()=>document.getElementById('shellDock')?.classList.remove('visible'));
-    safe(()=>document.body.classList.remove('gdBubbleStudioOpen','shell-gps','gps-active','gdGpsActive','gps-open','manual-gps-active'));
-    safe(()=>document.body.classList.add('gdProfileOpen','shell-module'));
-    safe(()=>document.body.classList.remove('shell-home'));
+    safe(()=>document.body.classList.remove('gdBubbleStudioOpen','gps-open','manual-gps-active'));
+    safe(()=>window.GDShell?.openModule?.('profile',{source:'profile-route-hardening',moduleId:'gdProfileV67',replace:true}));
+    safe(()=>document.body.classList.add('gdProfileOpen'));
     const profile=document.getElementById('gdProfileV67');
     if(profile) profile.classList.remove('hidden');
     safe(()=>{
@@ -50,8 +51,8 @@
   }
   function forceProfileHome(){
     safe(()=>document.getElementById('gdProfileV67')?.classList.add('hidden'));
-    safe(()=>document.body.classList.remove('gdProfileOpen','shell-module','shell-gps','gps-active','gdGpsActive'));
-    safe(()=>document.body.classList.add('shell-home'));
+    safe(()=>document.body.classList.remove('gdProfileOpen'));
+    safe(()=>window.GDShell?.showHome?.({source:'profile-route-home',replace:true}));
     const home=document.getElementById('shellHome');
     if(home){
       home.classList.remove('hidden');

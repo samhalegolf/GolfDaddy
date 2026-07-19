@@ -19,12 +19,11 @@
     const course=document.getElementById('courseScreen');
     return !course || course.classList.contains('hidden');
   }
-  function setGpsActive(){
-    const active=gpsActive();
-    document.body.classList.toggle('gdGpsActive',active);
-    if(active) lastGpsActive=true;
-    return active;
-  }
+	  function setGpsActive(){
+	    const active=gpsActive();
+	    if(active) lastGpsActive=true;
+	    return active;
+	  }
   function usablePersonName(value){
     const name=String(value||'').trim();
     if(!name)return '';
@@ -338,27 +337,8 @@
   }
   function enterLiveGps(){
     localStorage.setItem(MODE_KEY,'live');
-    if(!navigator.geolocation){setGpsLabel(false,'GPS unavailable');safeToast('GPS unavailable');refresh();return}
     setGpsLabel(true,'GPS…');setStateLabel('Requesting GPS');hint('Allow location permission');
-	    navigator.geolocation.getCurrentPosition(pos=>{
-	      const here=L.latLng(pos.coords.latitude,pos.coords.longitude);
-	      try{
-	        gpsOk=true;
-	        setGpsLabel(true,'GPS');
-	        if(typeof window.gdGpsRememberFix==='function')window.gdGpsRememberFix(pos,'enter-live');
-	        if(typeof window.gdRememberLiveGpsOnly==='function')window.gdRememberLiveGpsOnly(here,pos.coords.accuracy,'gps-live');
-	        if(typeof lockedFrame!=='undefined'&&lockedFrame){
-	          if(typeof updateGpsInsideLockedFrame==='function'&&curStart())updateGpsInsideLockedFrame(here,'GPS live');
-	          setStateLabel('Live locked');
-	          hideHintSafe();
-	        }else{
-	          setStateLabel('GPS live');
-	          hideHintSafe();
-	        }
-	        if(typeof startWatch==='function')startWatch();
-      }catch(e){console.warn(e)}
-      refresh();
-    },err=>{const denied=err&&err.code===1;setGpsLabel(false,denied?'GPS denied':'GPS weak');setStateLabel(denied?'GPS permission needed':'GPS is searching');if(denied)hideHintSafe();else hint('GPS is searching. Try again near the tee.');safeToast(err&&err.message?err.message:(denied?'Location permission needed':'GPS is searching'));refresh();},{enableHighAccuracy:true,maximumAge:0,timeout:15000});
+    window.GDGpsLocationLifecycle?.locate?.();
     refresh();
   }
   function clearOrUndo(){
@@ -377,7 +357,7 @@
     wrap.dataset.gdHomeBuilt='1';
     wrap.innerHTML=`<div class="gdHomeHeader"><button class="gdHomeBrand" onclick="try{showShellHome()}catch(e){}" aria-label="Clarity Golf home"><span class="gdHomeBrandInner"><span class="gdClarityMark" aria-hidden="true"><img src="assets/brand/cg-logo-white-g.png?v=clarity-20260531" alt=""></span><span class="gdHomeBrandText">CLARITY GOLF</span></span></button><div class="gdHomeTagline"><span class="gdTaglineGreen">Turn</span> <span class="gdTaglineOrange">Practice</span> <span class="gdTaglineGreen">Patterns In</span><span class="gdTaglineOrange">to</span> <span class="gdTaglineGreen">on Course</span> <span class="gdTaglineOrange">Results</span></div><button class="gdHomeAdminSettings" onclick="try{if(window.gdOpenAdminSettings)return window.gdOpenAdminSettings({fromHome:true});openDeveloperPanel({fromHome:true});}catch(e){}" aria-label="Admin Settings">Admin</button><button class="gdHomePlayerSettings" onclick="gdOpenPlayerSettingsPanel({fromHome:true})" aria-label="Settings">Settings</button></div>
       <section class="gdHomeTiles" aria-label="Clarity Golf home navigation">
-        <button class="gdHomeTile gdPlayTile" onclick="try{document.body.classList.remove('shell-home');document.body.classList.add('shell-gps','gps-active','gdCoursePickerOpen');var h=document.getElementById('shellHome');if(h)h.classList.add('hidden');var c=document.getElementById('courseScreen');if(c){c.classList.remove('hidden');c.style.display='flex';c.style.visibility='';c.style.opacity='';c.style.pointerEvents='auto'};if(window.gdCoursePickerCenterMapOnGps)window.gdCoursePickerCenterMapOnGps();if(window.gdCoursePickerRequestGps)window.gdCoursePickerRequestGps();if(window.gdEnsureResumeRoundPicker)gdEnsureResumeRoundPicker();return false}catch(e){return false}" aria-label="Clarity Caddy Play"><span class="gdHomeTileLabel"><span class="gdHomeTileKicker">CLARITY CADDY</span><span class="gdHomeTileAction">PLAY</span></span><img class="gdHomeTileArt" src="assets/home/play.png?v=clarity-20260531" alt=""></button>
+        <button class="gdHomeTile gdPlayTile" onclick="try{return window.GDCoursePicker&&typeof window.GDCoursePicker.open==='function'?window.GDCoursePicker.open({source:'home-play',returnTarget:'home'}):(typeof gdOpenChangeCourse==='function'?gdOpenChangeCourse(event):false)}catch(e){return false}" aria-label="Clarity Caddy Play"><span class="gdHomeTileLabel"><span class="gdHomeTileKicker">CLARITY CADDY</span><span class="gdHomeTileAction">PLAY</span></span><img class="gdHomeTileArt" src="assets/home/play.png?v=clarity-20260531" alt=""></button>
         <button class="gdHomeTile gdBubbleTile" onclick="try{gdOpenDataHub()}catch(e){}" aria-label="Clarity Shot System Enter"><span class="gdHomeTileLabel"><span class="gdHomeTileKicker">CLARITY SHOT SYSTEM</span><span class="gdHomeTileAction">ENTER</span></span><img class="gdHomeTileArt" src="assets/home/shot-system.svg?v=clarity-shot-system-line-20260601" alt=""></button>
         <button class="gdHomeTile gdBagTile" onclick="try{openBag()}catch(e){}" aria-label="Bag"><span class="gdHomeTileLabel">BAG</span><img class="gdHomeTileArt" src="assets/home/bag.png" alt=""></button>
         <button class="gdHomeTile gdProfileTile" onclick="try{openProfilePanel()}catch(e){}" aria-label="Player Profile"><span class="gdHomeTileLabel">PLAYER<br>PROFILE</span><img class="gdHomeTileArt" src="assets/home/profile.png" alt=""></button>
@@ -400,9 +380,7 @@
     return Array.from(document.querySelectorAll('[id*="score" i],[class*="score" i]')).some(el=>{const r=el.getBoundingClientRect?el.getBoundingClientRect():null;return r&&r.width>40&&r.height>40&&el.offsetParent!==null&&!el.classList.contains('hidden')});
   }
   function returnToGps(){returnScorecardToGps=false;sessionStorage.removeItem('gd_return_from_scorecard');try{if(typeof enterGpsModule==='function')enterGpsModule({fromBack:true,preserve:true})}catch(e){}setTimeout(refresh,100)}
-  function patchScorecard(){
-    const old=window.openScorecard;
-    if(typeof old==='function'&&!old.__v62Wrapped){const w=function(...args){returnScorecardToGps=setGpsActive()||document.body.classList.contains('gdGpsActive')||lastGpsActive;if(returnScorecardToGps)sessionStorage.setItem('gd_return_from_scorecard','gps');const res=old.apply(this,args);setTimeout(refresh,80);return res};w.__v62Wrapped=true;window.openScorecard=w}
+  function wireScorecardBack(){
     document.querySelectorAll('button,[role="button"],a').forEach(btn=>{
       if(btn.dataset.v62Back) return;
       const label=((btn.textContent||'')+' '+(btn.getAttribute('aria-label')||'')+' '+(btn.title||'')).toLowerCase();
@@ -418,11 +396,10 @@
     ensureDistance();
     ensureHome();
     lockProfile();
-    patchScorecard();
+    wireScorecardBack();
   }
 
   window.setGpsPlayMode=function(next){next==='live'?enterLiveGps():enterTwoTap()};
-  window.refreshGPS=function(){enterLiveGps()};
   window.gdV62Refresh=refresh;
 
   ['enterGpsModule','setStart','setGreenTarget','renderShot','lockFrame','openShellModule','showShellHome','openProfilePanel'].forEach(name=>{
