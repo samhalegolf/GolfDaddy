@@ -457,9 +457,11 @@
     }catch(e){}
   }
   function closePickerSurface(reason){
-    const screen=byId("courseScreen");
-    if(screen)screen.classList.add("hidden");
-    safe(()=>{document.body.classList.remove("gdCoursePickerOpen","gdCoursePinPromptActive");document.body.dataset.gdCoursePickerClosedBy=String(reason||"course-picker-owner");});
+    if(window.GDShell&&typeof window.GDShell.closeCoursePicker==="function"){
+      if(reason==="course-picker-mapping")window.GDShell.openCoursePicker({source:reason,replace:true});
+      else window.GDShell.closeCoursePicker({reason:reason||"course-picker-owner",to:"gps"});
+    }
+    safe(()=>{document.body.dataset.gdCoursePickerClosedBy=String(reason||"course-picker-owner");});
     safe(()=>{window.__gdCoursePickerPinPromptActive=false;});
     state.open=false;
   }
@@ -654,10 +656,10 @@
     safe(()=>{if(window.__gdPreLockHoleFrameTimer)clearTimeout(window.__gdPreLockHoleFrameTimer);});
     safe(()=>{if(typeof gdClearMappedStartPromptChrome==="function")gdClearMappedStartPromptChrome();});
     safe(()=>{
-      document.body.classList.remove("shell-home","shell-module","gdToolRailOpen","gdCourseOpening","gdCoursePinPromptActive");
-      document.body.classList.add("shell-gps","gdGpsActive","gps-active","gdCoursePickerOpen");
-      document.body.dataset.clarityRoute="gps";
-      document.body.dataset.gdToolScreen="picker";
+      if(window.GDShell&&typeof window.GDShell.openCoursePicker==="function"){
+        window.GDShell.openCoursePicker({source:state.source,returnTarget:window.__gdCoursePickerReturnTarget,replace:!!opts.replace});
+      }
+      document.body.classList.remove("gdToolRailOpen","gdCourseOpening","gdCoursePinPromptActive");
       [
         "gdCourseNeedsPin",
         "gdCourseNeedsPinCourse",
@@ -671,21 +673,12 @@
       ].forEach(key=>delete document.body.dataset[key]);
       window.__gdCoursePickerPinPromptActive=false;
     });
-    safe(()=>{const home=byId("shellHome");if(home){home.classList.add("hidden");home.style.display="none";home.style.visibility="hidden";home.style.opacity="0";}});
     const input=byId("searchInput");
     if(input)input.value="";
 	    centerPickerMapOnGps();
 	    requestPickerGps();
 	    renderCoursesOwner(readRecentCourses());
 	    loadDatabaseCourses().then(()=>{renderNearby();if(!(input&&input.value.trim()))renderCoursesOwner(readRecentCourses());});
-	    const screen=byId("courseScreen");
-    if(screen){
-      screen.classList.remove("hidden");
-      screen.style.display="flex";
-      screen.style.visibility="";
-      screen.style.opacity="";
-      screen.style.pointerEvents="auto";
-    }
     setTimeout(()=>input?.focus(),80);
     resumeRound({renderOnly:true,source:state.source});
     return false;

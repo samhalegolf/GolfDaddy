@@ -27,21 +27,24 @@
 	    safe(()=>document.getElementById('shellDock')?.classList.remove('visible'));
 		    safe(()=>document.getElementById('clarityBackupOverlay')?.classList.remove('open'));
 		    safe(()=>document.getElementById('claritySupportOverlay')?.classList.remove('open'));
-		    safe(()=>document.body.classList.remove('shell-home','shell-gps','shell-module','gdGpsActive','gps-active','gps-open','manual-gps-active','gdStatsOpen','gdBubbleStudioOpen','gdShotDataOpen'));
+		    safe(()=>document.body.classList.remove('gps-open','manual-gps-active','gdStatsOpen','gdBubbleStudioOpen','gdShotDataOpen'));
 		  }
 	  function showLoginGate(){
 	    if(window.gd67OpenPasswordResetRoute&&safe(()=>window.gd67OpenPasswordResetRoute(),false)){
-	      closeNonAuthSurfaces();
-	      document.body.classList.add('gdAuthLocked','gdProfileOpen','gdPasswordResetRoute');
+		    closeNonAuthSurfaces();
+		    safe(()=>window.GDShell?.showAuth?.({source:'auth-gate-reset'}));
+		    document.body.classList.add('gdAuthLocked','gdProfileOpen','gdPasswordResetRoute');
 	      return false;
 	    }
-	    closeNonAuthSurfaces();
-	    document.body.classList.add('gdAuthLocked','gdProfileOpen');
+		    closeNonAuthSurfaces();
+		    safe(()=>window.GDShell?.showAuth?.({source:'auth-gate'}));
+		    document.body.classList.add('gdAuthLocked','gdProfileOpen');
     const profile=document.getElementById('gdProfileV67');
     if(window.gdOpenProfileV67&&(!profile||profile.classList.contains('hidden')||!/Sign in/i.test(profile.textContent||''))){
-      safe(()=>window.gdOpenProfileV67({authGate:true}));
-      closeNonAuthSurfaces();
-      document.body.classList.add('gdAuthLocked','gdProfileOpen');
+	      safe(()=>window.gdOpenProfileV67({authGate:true}));
+	      closeNonAuthSurfaces();
+	      safe(()=>window.GDShell?.showAuth?.({source:'auth-gate-profile'}));
+	      document.body.classList.add('gdAuthLocked','gdProfileOpen');
     }else if(profile){
       profile.classList.remove('hidden');
     }

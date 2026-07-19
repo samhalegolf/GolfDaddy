@@ -332,10 +332,9 @@
   function state(msg){ safe(function(){ if(typeof setState==='function') setState(msg); }); safe(function(){ if(typeof setStateLabel==='function') setStateLabel(msg); }); }
   function hintMsg(msg){ safe(function(){ if(typeof showHint==='function') showHint(msg); else if(typeof hint==='function') hint(msg); }); }
   function hideCoursePicker(){ safe(function(){ var cs=document.getElementById('courseScreen'); if(cs) cs.classList.add('hidden'); }); }
-  function showGpsSurface(){
-    hideCoursePicker();
-    safe(function(){ document.body.classList.add('shell-gps','gps-active','gdModeTwoTap'); document.body.classList.remove('gdModeLive'); });
-    safe(function(){ if(typeof setShellLayer==='function') setShellLayer('gps'); });
+	  function showGpsSurface(){
+	    hideCoursePicker();
+	    safe(function(){ window.GDShell?.enterGps?.({source:'two-tap-no-location',replace:true});document.body.classList.add('gdModeTwoTap'); document.body.classList.remove('gdModeLive'); });
     safe(function(){ if(typeof setDockActive==='function') setDockActive('gps'); });
     safe(function(){ var h=document.getElementById('shellHome'); if(h) h.classList.add('hidden'); });
     safe(function(){ if(typeof showShellChrome==='function') showShellChrome(true); });
@@ -409,10 +408,9 @@
     try{ document.querySelectorAll('.modulePanel.open,.panel.open').forEach(function(p){ p.classList.remove('open'); }); }catch(e){}
     try{ qs('gdProfileV67')?.classList.add('hidden'); document.body.classList.remove('gdProfileOpen'); }catch(e){}
   }
-  function setGpsClasses(){
-    try{ document.body.classList.add('gdGpsActive','gps-active'); }catch(e){}
-    try{ document.body.classList.remove('shell-home','shell-module'); document.body.classList.add('shell-gps'); }catch(e){}
-  }
+	  function setGpsClasses(){
+	    try{ window.GDShell?.enterGps?.({source:'play-button-rescue',replace:true}); }catch(e){}
+	  }
   function showShellGpsChrome(){
     try{ qs('shellHome')?.classList.add('hidden'); }catch(e){}
     try{ qs('shellTop')?.classList.add('visible'); }catch(e){}
@@ -686,9 +684,8 @@ function gdWireManualGpsPlayButton(){
 (function(){
   'use strict';
   function safe(fn){ try{return fn();}catch(e){} }
-  function setGpsMapVisible(){
-    safe(()=>document.body.classList.add('gdGpsActive','gps-active','shell-gps'));
-    safe(()=>document.body.classList.remove('shell-home','shell-module'));
+	  function setGpsMapVisible(){
+	    safe(()=>window.GDShell?.enterGps?.({source:'bag-return',replace:true,preserveState:true}));
     safe(()=>document.getElementById('shellHome')?.classList.add('hidden'));
     safe(()=>document.getElementById('shellTop')?.classList.add('visible'));
     safe(()=>document.getElementById('shellDock')?.classList.add('visible'));

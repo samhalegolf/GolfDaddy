@@ -13,8 +13,7 @@
     safe(()=>document.querySelectorAll('.panel.open,.modulePanel.open').forEach(p=>p.classList.remove('open')));
     if(gdGpsSurfaceAlreadyOpen()){
       safe(()=>document.getElementById('courseScreen')?.classList.add('hidden'));
-      safe(()=>document.body.classList.remove('shell-home','shell-module'));
-      safe(()=>document.body.classList.add('shell-gps','gdGpsActive','gps-active'));
+      safe(()=>window.GDShell?.enterGps?.({source:'gps-tool-toggle',replace:true,preserveState:true}));
       safe(()=>{if(typeof showShellChrome==='function')showShellChrome(true);});
       safe(()=>{if(typeof setDockActive==='function')setDockActive('gps');});
       safe(()=>{if(typeof map!=='undefined'&&map&&map.invalidateSize)setTimeout(()=>map.invalidateSize(),40);});

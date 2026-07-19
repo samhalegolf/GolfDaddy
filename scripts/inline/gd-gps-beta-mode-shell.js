@@ -19,12 +19,11 @@
     const course=document.getElementById('courseScreen');
     return !course || course.classList.contains('hidden');
   }
-  function setGpsActive(){
-    const active=gpsActive();
-    document.body.classList.toggle('gdGpsActive',active);
-    if(active) lastGpsActive=true;
-    return active;
-  }
+	  function setGpsActive(){
+	    const active=gpsActive();
+	    if(active) lastGpsActive=true;
+	    return active;
+	  }
   function usablePersonName(value){
     const name=String(value||'').trim();
     if(!name)return '';

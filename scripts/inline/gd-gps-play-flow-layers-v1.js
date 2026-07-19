@@ -368,8 +368,7 @@
     var gpsOpen=safe(function(){return isGpsOpen&&isGpsOpen();},false)||document.body.classList.contains("shell-gps")||document.body.classList.contains("gdGpsActive")||document.body.classList.contains("gps-active");
     if(gpsOpen){
       safe(function(){document.getElementById("courseScreen")?.classList.add("hidden");});
-      safe(function(){document.body.classList.remove("shell-home","shell-module");});
-      safe(function(){document.body.classList.add("shell-gps","gdGpsActive","gps-active");});
+      safe(function(){window.GDShell?.enterGps?.({source:"gps-play-flow-return",replace:true,preserveState:true});});
       safe(function(){if(typeof showShellChrome==="function")showShellChrome(true);});
       safe(function(){if(typeof setDockActive==="function")setDockActive("gps");});
       safe(function(){if(typeof map!=="undefined"&&map&&map.invalidateSize)setTimeout(function(){map.invalidateSize();},40);});

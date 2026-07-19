@@ -4964,7 +4964,8 @@
     hideCourseLoading(0);
     try{if(typeof window.gdClearHoleImageRuntime==='function')window.gdClearHoleImageRuntime('interactive-green-fallback');}catch(e){}
     try{
-      document.body.classList.add('shell-gps','gdGpsActive','gps-active','gdMappedCourseMode','gdGpsInteractiveGreenFallbackActive','gdGpsLiveMapAllowed','gdGpsExplicitMapMode');
+	      window.GDShell?.enterGps?.({source:'interactive-green-fallback',replace:true,preserveState:true});
+	      document.body.classList.add('gdMappedCourseMode','gdGpsInteractiveGreenFallbackActive','gdGpsLiveMapAllowed','gdGpsExplicitMapMode');
       document.body.classList.remove('gdCourseOpening','gdGpsFramePreparing','gdCoursePlayPipelinePreparing','gdHoleFrameLoading','gdCapturedFrameUnavailable','gdGpsLiveMapSuppressed','gdGpsHoleTransitioning','gdCapturedHoleFrameCameraOn','gdHoleImageCameraOn','gdMappedStartPromptActive','gdManualStartPlacementActive','gdHeadToTeeFrameActive','gdLockStateFrameActive','gd-frame-hard-locked');
       document.body.dataset.gdInteractiveGreenFallbackReason=String(reason||'automatic-resolution-failed');
       document.body.dataset.gdInteractiveGreenFallbackHole=String(h);
