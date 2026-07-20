@@ -5,6 +5,14 @@ const MONTH_PASS_KEY = "month_pass";
 const MONTHLY_MEMBERSHIP_KEY = "monthly_membership";
 const REFERRAL_ACCESS_KEY = "referral_membership";
 const ADMIN_COMPED_MEMBERSHIP_KEY = "admin_comped_membership";
+/* Store-billed access (Google Play / App Store via RevenueCat). Distinct keys from
+   the Stripe products so paymentState can report where access came from without
+   joining another table. */
+const STORE_MEMBERSHIP_KEY = "store_membership";
+const STORE_MONTH_PASS_KEY = "store_month_pass";
+/* The INVITER's earned reward month. Distinct from REFERRAL_ACCESS_KEY, which is
+   the INVITEE's gifted free month. */
+const REFERRAL_REWARD_KEY = "referral_reward_membership";
 const MONTH_PASS_HOURS = 24 * 30;
 const PAID_ACCESS_KEYS = {
   month_pass: true,
@@ -15,7 +23,14 @@ const PAID_ACCESS_KEYS = {
   subscription: true,
   day_pass: true,
   round_pass: true,
-  free_pass: true
+  free_pass: true,
+  store_membership: true,
+  store_month_pass: true,
+  referral_reward_membership: true
+};
+const STORE_ACCESS_KEYS = {
+  store_membership: true,
+  store_month_pass: true
 };
 const MEMBERSHIP_ACCESS_STATUSES = { active: true, trialing: true };
 const MEMBERSHIP_GRACE_STATUS = "past_due";
@@ -365,14 +380,21 @@ async function resolveAccount(payload, options) {
   return account;
 }
 
-// Resolve an account from client-supplied identity (payload accountId/email or
-// the X-Clarity-Account-* headers) WITHOUT Supabase-Auth JWT verification. This
-// is the same trust model the rest of Caddie already uses (payment status/admin
-// key off account-id/email) and matches resolveAccount's own no-token fallback.
-// Used by endpoints that must NOT hard-require a live JWT - e.g. the referral
-// dashboard, where a stale/unverifiable token would otherwise 401 even though
-// the user is a known account.
+// Resolve an account for endpoints that must NOT hard-require a live JWT - e.g.
+// the referral dashboard, where a stale/unverifiable token would otherwise 401
+// even though the user is a known account.
+//
+// A verified Supabase-Auth token still wins when one is present: it is the
+// strongest identity we have, and it means an authenticated caller carrying no
+// X-Clarity-Account-* header (the common case) resolves instead of 401'ing, and
+// cannot be talked into acting as someone else by a spoofed payload accountId.
+// Only when there is no usable token do we fall back to client-supplied identity
+// (payload accountId/email or the X-Clarity-Account-* headers) - the same trust
+// model the rest of Caddie already uses, and resolveAccount's own fallback.
 async function resolveAccountByIdentity(payload, event) {
+  const authAccount = await authenticatedAccount(event).catch(function () { return null; });
+  if (authAccount) return authAccount;
+
   const headers = (event && event.headers) || {};
   const headerId = text(headers["x-clarity-account-id"] || headers["X-Clarity-Account-Id"], 120);
   const headerEmail = email(headers["x-clarity-account-email"] || headers["X-Clarity-Account-Email"]);
@@ -451,6 +473,13 @@ function rowProductKey(row) {
 
 function isPaidEntitlement(row) {
   return !!PAID_ACCESS_KEYS[rowProductKey(row)];
+}
+
+/* True when access was granted by Apple or Google rather than Stripe or an admin.
+   Used to keep store-billed members off web billing management, since their
+   subscription can only be cancelled in the store account that owns it. */
+function isStoreEntitlement(row) {
+  return !!STORE_ACCESS_KEYS[rowProductKey(row)];
 }
 
 function entitlementIsLive(row, nowMs) {
@@ -533,6 +562,13 @@ async function readPaidAccess(identity) {
     paymentState = membershipState.state;
   } else if (entitlements.some(function (row) { return rowProductKey(row) === ADMIN_COMPED_MEMBERSHIP_KEY || row && row.entitlement_reason === ADMIN_COMPED_MEMBERSHIP_KEY; })) {
     paymentState = "admin_comped_membership_active";
+  } else if (entitlements.some(function (row) { return rowProductKey(row) === STORE_MEMBERSHIP_KEY; })) {
+    /* A paid store subscription outranks a free referral month: if a user holds
+       both, they are a paying member. These keys are new, so no pre-existing row
+       can match here and the branches below keep their current behaviour. */
+    paymentState = "store_membership_active";
+  } else if (entitlements.some(function (row) { return rowProductKey(row) === STORE_MONTH_PASS_KEY; })) {
+    paymentState = "store_month_pass_active";
   } else if (entitlements.some(function (row) { return rowProductKey(row) === REFERRAL_ACCESS_KEY || rowProductKey(row) === "referral" || row && row.entitlement_reason === "referral_free_month"; })) {
     paymentState = "referral_access_active";
   } else if (entitlements.some(function (row) { return rowProductKey(row) === MONTH_PASS_KEY; })) {
@@ -562,6 +598,10 @@ module.exports = {
   PAID_PERMISSION_KEYS,
   PASS_CONFIG,
   REFERRAL_ACCESS_KEY,
+  REFERRAL_REWARD_KEY,
+  STORE_ACCESS_KEYS,
+  STORE_MEMBERSHIP_KEY,
+  STORE_MONTH_PASS_KEY,
   STRIPE_API_VERSION,
   accountCustomerId,
   appUrl,
@@ -575,6 +615,7 @@ module.exports = {
   hasSupabase,
   hasSupabaseAuth,
   isPaidEntitlement,
+  isStoreEntitlement,
   isStripePriceId,
   json,
   membershipAccessState,

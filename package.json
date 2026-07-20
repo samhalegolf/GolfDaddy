@@ -8,7 +8,10 @@
     "serve": "python3 -m http.server 5173",
     "build:netlify": "node scripts/clarity-deploy-build.js",
     "test:payments": "node dev/payment-rollout-tests.js",
-    "test:boot": "node dev/boot-smoke.test.js"
+    "test:boot": "node dev/boot-smoke.test.js",
+    "native:sync": "npm run build:netlify && npx cap sync",
+    "native:android": "npm run native:sync && npx cap open android",
+    "native:ios": "npm run native:sync && npx cap open ios"
   },
   "codex": {
     "entry": "index.html",
@@ -22,9 +25,20 @@
     ]
   },
   "dependencies": {
-    "@netlify/blobs": "^10.7.9"
+    "@capacitor/android": "8.4.2",
+    "@capacitor/app": "8.1.1",
+    "@capacitor/browser": "8.0.4",
+    "@capacitor/core": "8.4.2",
+    "@capacitor/geolocation": "8.2.0",
+    "@capacitor/ios": "8.4.2",
+    "@capacitor/preferences": "8.0.1",
+    "@capacitor/splash-screen": "8.0.2",
+    "@capacitor/status-bar": "8.0.3",
+    "@netlify/blobs": "^10.7.9",
+    "@revenuecat/purchases-capacitor": "^13.2.3"
   },
   "devDependencies": {
+    "@capacitor/cli": "8.4.2",
     "playwright-core": "^1.56.0"
   }
 }

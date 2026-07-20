@@ -34,6 +34,14 @@ jobs:
       - name: Run structural regression tests
         run: |
           node dev/app-permissions-smoke.test.js
+          node dev/native-shell-owner.test.js
+          node dev/store-billing.test.js
+          node dev/referral-reward-entitlements.test.js
+          node dev/store-billing-client.test.js
+          node dev/native-back-button.test.js
+          node dev/course-key-normalisation.test.js
+          node dev/course-identity-resolution.test.js
+          node dev/captured-scan-hydrate.test.js
           node dev/shell-owner.test.js
           node dev/shell-behavior.test.js
           node dev/course-location-owner.test.js
@@ -56,3 +64,7 @@ jobs:
           node dev/course-data-comparison.test.js
           node dev/conditions-engine-ownership.test.js
           node dev/conditions-engine-behavior.test.js
+          node dev/course-mapping-controller.test.js
+          node dev/course-visual-engine.test.js
+          node dev/shell-navigation-owner.test.js
+          node dev/payment-rollout-tests.js

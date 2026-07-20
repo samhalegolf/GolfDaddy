@@ -185,7 +185,12 @@
 	  }
 	  function surfaceCourseKey(){
 	    if(renderSurfaceOverride&&renderSurfaceOverride.courseKey)return renderSurfaceOverride.courseKey;
-	    return safe(function(){return (currentCourse&&(currentCourse.key||currentCourse.id||currentCourse.name))||document.body.dataset.gdActiveCourseName||"course";},"course");
+	    /* courseId first: on a stored library record .id is the composite storage
+	       key `${userId}::${courseId}`, which is a location in the store, not a
+	       course identity. Preferring .id leaked keys like
+	       "user-<playerid>::akarana-golf-club" into captured_surfaces, splitting a
+	       course's scans across a per-user key nobody else can read back. */
+	    return safe(function(){return (currentCourse&&(currentCourse.courseId||currentCourse.key||currentCourse.id||currentCourse.name))||document.body.dataset.gdActiveCourseName||"course";},"course");
 	  }
 	  function surfaceCourseName(){
 	    if(renderSurfaceOverride&&renderSurfaceOverride.courseName)return renderSurfaceOverride.courseName;
