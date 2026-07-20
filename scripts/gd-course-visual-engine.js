@@ -2886,6 +2886,19 @@
     putRecord(record);
     return buildCourseVisualMaster(input.courseId,{captures:input.captures,capturePlan:plan,forceRebuild:opts.forceFresh===true,buildRunId:buildRunId});
   }
+  function beta3dTiltPolicy(){
+    var policy=capturePolicy("three-d-hole-beta")||{};
+    return {
+      captureTiltDeg:finite(policy.captureTiltDeg)||0,
+      playTiltDeg:finite(policy.playTiltDeg)||0,
+      cameraTiltDeg:finite(policy.cameraTiltDeg)||0,
+      cameraMode:text(policy.cameraMode,80),
+      cameraBearingMode:text(policy.cameraBearingMode,80),
+      pitchStrategy:"faux-tilt-svg",
+      nativePitchAvailable:false,
+      owner:"gps-play-runtime"
+    };
+  }
   return {
     version:VERSION,
     rendererVersion:RENDERER_VERSION,
@@ -2894,6 +2907,7 @@
     apiEndpoint:API_ENDPOINT,
     defaultPreset:defaultPreset,
     greenToneHex:greenToneHex,
+    beta3dTiltPolicy:beta3dTiltPolicy,
     presetForMode:presetForMode,
     courseVisualPresetList:courseVisualPresetList,
     loadPresets:loadPresets,

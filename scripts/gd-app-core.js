@@ -883,8 +883,11 @@ function gdAdminCoursePreviewMarkup(selected){
   const imageMarkup=inline||src?inline||`<img src="${gdEscapeHTML(src)}" alt="Hole ${gdEscapeHTML(current)} play preview" loading="lazy" decoding="async">`:"";
   const frame=imageMarkup?gdAdminCoursePreviewPhoneFrameMarkup(imageMarkup,gdAdminCoursePreviewFrameBox(src)):`<div class="gdAdminPhoneEmpty">No visual surface yet. Use Update to build the Clarity play surface.</div>`;
   const filterStyle=gdAdminCourseVisualFilterStyleVars(record);
+  const tilt=gdAdminCourseVisualTiltInfo(record);
+  const screenStyle=filterStyle+";--gd-phone-tilt:"+gdAdminCourseVisualSvgNum(tilt.playTiltDeg)+"deg";
+  const tiltClass=gdAdminCoursePreviewTilt?" gdAdminPhoneTilted":"";
   const dock=window.GDCourseVisualEngine?gdAdminCourseVisualControls(record,selected.id):"";
-  return `<div class="gdAdminPhonePreviewShell gdAdminPhonePreviewTuned"><div class="gdAdminPhoneInfo"><strong>${gdEscapeHTML(selected.name)} · Hole ${gdEscapeHTML(current)}</strong><span>Tune the per-hole Clarity play surface with the tool tabs beside the phone — every change previews live before you publish.</span><div class="gdAdminPhoneControls"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev hole</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next hole</button></div><div class="gdAdminCourseStageLine"><span class="${asset&&asset.dataUrl?"ready":"warn"}">${asset&&asset.dataUrl?"surface ready":"needs visual"}</span><span>H${gdEscapeHTML(current)} / ${gdEscapeHTML(count)}</span><span>${gdEscapeHTML(asset&&asset.path?String(asset.path).split("/").slice(-3).join("/"):"live fallback")}</span></div></div><div class="gdAdminPhoneStage"><div class="gdAdminPhone"><div class="gdAdminPhoneScreen gdAdminPhoneTuned filtered" style="${filterStyle}"><div class="gdAdminPhoneHud"><span>Clarity Play</span><b>H${gdEscapeHTML(current)}</b></div>${frame}<div class="gdAdminPhoneNav"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next</button></div></div></div>${dock}</div></div>`;
+  return `<div class="gdAdminPhonePreviewShell gdAdminPhonePreviewTuned"><div class="gdAdminPhoneInfo"><strong>${gdEscapeHTML(selected.name)} · Hole ${gdEscapeHTML(current)}</strong><span>Tune the per-hole Clarity play surface with the tool tabs beside the phone — every change previews live before you publish.</span><div class="gdAdminPhoneControls"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev hole</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next hole</button></div><div class="gdAdminCourseStageLine"><span class="${asset&&asset.dataUrl?"ready":"warn"}">${asset&&asset.dataUrl?"surface ready":"needs visual"}</span><span>H${gdEscapeHTML(current)} / ${gdEscapeHTML(count)}</span><span>${gdEscapeHTML(asset&&asset.path?String(asset.path).split("/").slice(-3).join("/"):"live fallback")}</span></div></div><div class="gdAdminPhoneStage"><div class="gdAdminPhone"><div class="gdAdminPhoneScreen gdAdminPhoneTuned filtered${tiltClass}" style="${screenStyle}"><div class="gdAdminPhoneHud"><span>Clarity Play</span><b>H${gdEscapeHTML(current)}</b></div>${frame}<div class="gdAdminPhoneNav"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next</button></div></div></div>${dock}</div></div>`;
 }
 function gdAdminCourseDebugMarkup(selected){
   return `<div class="gdAdminCourseDebugWindow"><div class="gdAdminCourseStageLine"><span class="ready">${gdEscapeHTML(selected.playReadyCount||0)} play ready</span><span>${gdEscapeHTML(selected.framesIndexedCount||0)} frames</span><span>${gdEscapeHTML(selected.manifestCount||0)} manifests</span><span>${gdEscapeHTML(gdCoursePlayDebugTime(selected.updatedAt)||"unknown")} updated</span></div><div class="gdCoursePlayDebug" id="gdCoursePlayDebugPanel"><div class="gdCoursePlayDebugHead"><div><h3>Live scan feedback</h3><p>Course Play, frame, manifest, sync, and runtime events for this course.</p></div><div class="gdCoursePlayDebugActions"><button type="button" onclick="return gdAdminCourseDebugRefresh()">Refresh</button><button type="button" onclick="gdClearCoursePlayPipelineDebug();return gdAdminCourseDebugRefresh()">Clear log</button></div></div><div id="gdCoursePlayDebugSummary" class="gdCoursePlayDebugSummary"></div><div id="gdCoursePlayDebugTable"></div><div id="gdCoursePlayDebugTimeline" class="gdCoursePlayDebugTimeline"></div></div><div class="gdCoursePlayDebug gdCourseMappingDebug" id="gdCourseMappingDebugPanel"></div></div>`;
@@ -1645,6 +1648,42 @@ function gdAdminCourseVisualSelectTool(group){
   });
   return false;
 }
+let gdAdminCoursePreviewTilt=false;
+function gdAdminCourseVisualTiltInfo(record){
+  const engine=window.GDCourseVisualEngine;
+  let policy={captureTiltDeg:8,playTiltDeg:14,cameraTiltDeg:8,pitchStrategy:"faux-tilt-svg",nativePitchAvailable:false};
+  try{if(engine&&typeof engine.beta3dTiltPolicy==="function")policy=Object.assign(policy,engine.beta3dTiltPolicy());}catch(e){}
+  const meta=record&&record.beta3dView&&record.beta3dView.metadata||null;
+  const num=(value,fallback)=>Number.isFinite(Number(value))?Number(value):fallback;
+  return {
+    captureTiltDeg:num(meta&&meta.captureTiltDeg,policy.captureTiltDeg),
+    playTiltDeg:num(meta&&meta.playTiltDeg,policy.playTiltDeg),
+    nativePitchAvailable:meta?!!meta.nativePitchAvailable:!!policy.nativePitchAvailable,
+    pitchStrategy:(meta&&(meta.pitchStrategy||meta.mapCameraCapability&&meta.mapCameraCapability.pitchStrategy))||policy.pitchStrategy
+  };
+}
+function gdAdminCoursePreviewToggleTilt(){
+  gdAdminCoursePreviewTilt=!gdAdminCoursePreviewTilt;
+  document.querySelectorAll(".gdAdminPhoneScreen").forEach(screen=>screen.classList.toggle("gdAdminPhoneTilted",gdAdminCoursePreviewTilt));
+  document.querySelectorAll(".gdAdminPhoneTiltBtn").forEach(btn=>{
+    btn.classList.toggle("active",gdAdminCoursePreviewTilt);
+    btn.setAttribute("aria-pressed",gdAdminCoursePreviewTilt?"true":"false");
+  });
+  return false;
+}
+function gdAdminCourseVisualDepthBody(record,beta3dField){
+  const tilt=gdAdminCourseVisualTiltInfo(record);
+  const built=!!(record&&record.beta3dView);
+  return beta3dField+
+    `<div class="gdAdminPhoneTiltPanel" role="group" aria-label="Play tilt (read only)">`+
+      `<div class="gdAdminPhoneTiltReadout"><span>Capture tilt</span><b>${tilt.captureTiltDeg}°</b></div>`+
+      `<div class="gdAdminPhoneTiltReadout"><span>Play tilt</span><b>${tilt.playTiltDeg}°</b></div>`+
+      `<div class="gdAdminPhoneTiltReadout"><span>Pitch</span><b>${tilt.nativePitchAvailable?"native":"faux tilt"}</b></div>`+
+      `<div class="gdAdminPhoneTiltReadout"><span>3D asset</span><b class="${built?"ready":"warn"}">${built?"built":"not built"}</b></div>`+
+      `<button type="button" class="gdAdminPhoneTiltBtn${gdAdminCoursePreviewTilt?" active":""}" aria-pressed="${gdAdminCoursePreviewTilt?"true":"false"}" onclick="return gdAdminCoursePreviewToggleTilt()">Preview tilt</button>`+
+      `<span class="gdAdminPhoneTiltNote">Read-only — GPS Play sets the live tilt at runtime. This only previews it.</span>`+
+    `</div>`;
+}
 function gdAdminCourseVisualControls(record,courseId){
   const preset=(record&&record.presetId)||"clarity-course-natural-v1";
   const presets=gdAdminCourseVisualPresetList();
@@ -1674,7 +1713,7 @@ function gdAdminCourseVisualControls(record,courseId){
     {id:"light",icon:"💡",label:"Lighting",body:brightnessField+contrastField},
     {id:"terrain",icon:"⛰️",label:"Terrain",body:terrainField},
     {id:"lines",icon:"🌾",label:"Mow lines",body:mowingField},
-    {id:"depth",icon:"🧊",label:"3D depth",body:beta3dField},
+    {id:"depth",icon:"🧊",label:"3D depth",body:gdAdminCourseVisualDepthBody(record,beta3dField)},
     {id:"actions",icon:"⚙️",label:"Actions",body:actionsField}
   ];
   const active=gdAdminCourseVisualActiveTool;

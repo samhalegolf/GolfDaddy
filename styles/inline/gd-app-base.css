@@ -468,6 +468,16 @@
     .gdAdminPhoneTuned .gdAdminPhoneFrameCrop>.gdAdminCourseVisualInline,.gdAdminPhoneTuned .gdAdminPhoneFrameCrop>.gdAdminCourseVisualInline svg,.gdAdminPhoneTuned .gdAdminPhoneFrameCrop>img{filter:saturate(var(--gd-course-visual-saturation,1)) brightness(var(--gd-course-visual-brightness,1)) contrast(var(--gd-course-visual-contrast,1))}
     .gdAdminPhoneTuned:before{content:"";position:absolute;inset:0;pointer-events:none;z-index:1;background:var(--gd-course-visual-green-hex,#3cae5f);mix-blend-mode:hue;opacity:var(--gd-course-visual-green-bias,0)}
     .gdAdminPhoneTuned:after{content:"";position:absolute;inset:0;pointer-events:none;z-index:1;background:repeating-linear-gradient(108deg,rgba(255,255,255,.18) 0 1px,rgba(255,255,255,0) 1px 18px);mix-blend-mode:soft-light;opacity:var(--gd-course-visual-mowing-opacity,0)}
+    .gdAdminPhoneScreen .gdAdminPhoneFrameCrop{transition:transform .42s cubic-bezier(.2,.7,.2,1)}
+    .gdAdminPhoneScreen.gdAdminPhoneTilted .gdAdminPhoneFrameCrop{transform:perspective(720px) rotateX(var(--gd-phone-tilt,14deg));transform-origin:50% 92%}
+    .gdAdminPhoneTiltPanel{display:grid;gap:6px;padding:10px;border-radius:12px;background:rgba(0,0,0,.2);border:1px solid rgba(255,255,255,.08)}
+    .gdAdminPhoneTiltReadout{display:flex;justify-content:space-between;align-items:center;font-size:9px;font-weight:950;color:rgba(255,255,255,.56);text-transform:uppercase;letter-spacing:.05em}
+    .gdAdminPhoneTiltReadout b{color:#fff;font-size:12px}
+    .gdAdminPhoneTiltReadout b.ready{color:#7cffb3}
+    .gdAdminPhoneTiltReadout b.warn{color:#ffcf7c}
+    .gdAdminPhoneTiltBtn{margin-top:2px;border-radius:999px;padding:8px 12px;background:rgba(255,255,255,.09);border:1px solid rgba(255,255,255,.16);color:#fff;font-size:11px;font-weight:950;cursor:pointer}
+    .gdAdminPhoneTiltBtn.active{background:rgba(31,211,109,.2);border-color:rgba(124,255,179,.4);color:#7cffb3}
+    .gdAdminPhoneTiltNote{color:rgba(255,255,255,.44);font-size:9px;font-weight:800;line-height:1.35;text-transform:none;letter-spacing:0}
     .gdAdminCourseVisualTuningHint{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
     .gdAdminInlineLink{background:none;border:none;padding:0;font:inherit;color:#6fffa6;text-decoration:underline;cursor:pointer}
     .gdAdminCourseVisualControls.gdAdminPhoneToolDock{display:flex;flex-direction:row;align-items:flex-start;gap:8px;margin:0}
