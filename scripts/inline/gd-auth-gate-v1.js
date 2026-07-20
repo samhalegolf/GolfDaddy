@@ -52,6 +52,19 @@
   }
   function releaseGate(){
     document.body.classList.remove('gdAuthLocked');
+    /* gdAuthRouteBoot is a pre-paint guess made from localStorage before any
+       script can verify it, and gd-app-base.css uses it to hide #shellHome,
+       #courseScreen, #shellTop, #shellDock and every panel with !important.
+       Four separate places are meant to clear it after sign-in; when none of
+       them do, the shell renders as a blank screen no matter what the router
+       says - route "home", no hidden class, and nothing visible.
+
+       This gate is the authoritative check, so the guess must not outlive it:
+       if an account exists, the boot class is stale by definition. Clearing it
+       here means a missed removal self-heals on the next gate pass rather than
+       stranding the user. gdResetRouteBoot is deliberately left alone - it has
+       no CSS and belongs to the password-reset flow. */
+    safe(function(){document.documentElement.classList.remove('gdAuthRouteBoot')});
     return true;
   }
   function applyGate(){

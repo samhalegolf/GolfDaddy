@@ -120,9 +120,23 @@
     return !!key && key !== 'course';
   }
 
+  /* A scan that came from the database has nothing to tell the database.
+     pendingPayloads walks the whole registry, so without this every hydrated
+     scan is pushed straight back on the next flush: 17 pulled, 17 re-uploaded,
+     updated_at churned on every course entry. That is what made a course jump to
+     the top of the admin list just for being opened, and why freshly pulled
+     scans still showed as local.
+
+     A local re-capture replaces the registry entry with a fresh scan that has no
+     cloudHydrated flag, so genuine edits still upload. */
+  function scanIsCloudHydrated(scan) {
+    return !!(scan && scan.source && scan.source.cloudHydrated);
+  }
+
   function scanToPayload(scan) {
     if (!scan || !scan.id) return null;
     if (!scanIsIdentified(scan)) return null;
+    if (scanIsCloudHydrated(scan)) return null;
     return {
       client_scan_id: scan.id,
       /* Slug on write so it matches the read path. The server normalises too -

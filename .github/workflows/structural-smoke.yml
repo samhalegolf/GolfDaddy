@@ -42,6 +42,8 @@ jobs:
           node dev/course-key-normalisation.test.js
           node dev/course-identity-resolution.test.js
           node dev/captured-scan-hydrate.test.js
+          node dev/auth-route-boot-release.test.js
+          node dev/scan-push-filter.test.js
           node dev/shell-owner.test.js
           node dev/shell-behavior.test.js
           node dev/course-location-owner.test.js
