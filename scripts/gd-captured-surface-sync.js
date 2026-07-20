@@ -114,7 +114,11 @@
     if (!scan || !scan.id) return null;
     return {
       client_scan_id: scan.id,
-      course_key: scan.courseKey,
+      /* Slug on write so it matches the read path. The server normalises too -
+         it has to, because older installed builds keep sending raw keys - but
+         normalising here keeps local and remote keys identical, so a scan is not
+         stored locally under one key and remotely under another. */
+      course_key: slug(scan.courseKey),
       course_name: scan.courseName,
       hole_number: scan.holeNumber,
       source_type: scan.source && scan.source.type || '',

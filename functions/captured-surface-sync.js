@@ -32,6 +32,29 @@ function jsonObject(value) {
   return value && typeof value === "object" ? value : {};
 }
 
+/* Canonical course key: a plain slug of the course identity.
+ *
+ * Producers upstream disagree - some pass a raw display name, some an id, and
+ * the course picker strips "golf club"/"golf course" before slugging. That drift
+ * put the same course under several keys ("maungakiekie-golf-club" alongside
+ * "Maungakiekie_Golf_Club"), and because the read path slugs while the write path
+ * did not, scans written under a raw key could never be read back at all.
+ *
+ * Normalising here rather than at each producer is deliberate: this is the only
+ * choke point every client passes through, and older installed app builds will
+ * keep sending unnormalised keys for as long as they exist.
+ *
+ * Plain slug, not the picker's stripped form, so this agrees with course_maps
+ * (which already stores "maungakiekie-golf-club") and keeps courses that differ
+ * only by suffix distinct. */
+function courseKeySlug(value) {
+  return String(value || "course")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "course";
+}
+
 function normaliseScan(row, payload) {
   const clientScanId = text(row.client_scan_id || row.clientScanId || row.id, 200);
   if (!clientScanId) return null;
@@ -39,7 +62,7 @@ function normaliseScan(row, payload) {
     client_scan_id: clientScanId,
     account_id: text(row.account_id || row.accountId || payload.accountId, 120) || null,
     player_id: text(row.player_id || row.playerId || payload.playerId, 120) || null,
-    course_key: text(row.course_key || row.courseKey, 120) || "course",
+    course_key: courseKeySlug(text(row.course_key || row.courseKey, 120)),
     course_name: text(row.course_name || row.courseName, 160) || null,
     hole_number: Math.max(1, Math.round(Number(row.hole_number || row.holeNumber) || 1)),
     source_type: text(row.source_type || (row.source && row.source.type), 80) || null,
@@ -95,7 +118,10 @@ async function pushScans(payload) {
 }
 
 function scopeFilter(payload) {
-  const courseKey = text(payload.courseKey, 120);
+  /* Must slug identically to the write path, or a pull silently returns nothing
+     for a course whose scans exist under the normalised key. */
+  const raw = text(payload.courseKey, 120);
+  const courseKey = raw ? courseKeySlug(raw) : "";
   const accountId = text(payload.accountId, 120);
   if (courseKey) {
     let base = TABLE + "?course_key=eq." + encodeFilter(courseKey);
