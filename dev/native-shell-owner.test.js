@@ -62,6 +62,20 @@ async function launchBrowser(playwright) {
     "owner must define window.GDNative"
   );
 
+  /* The bundled app is served from https://localhost, so every /api call is
+     cross-origin and the Netlify functions send no CORS headers. Without native
+     HTTP the auth config fetch fails, the Supabase client never configures, and
+     login silently falls back to local accounts - which looks like "Supabase is
+     not connected" rather than like a network error. Verified on device:
+     enabling this turned that fetch from "Failed to fetch" into 200.
+     Mocked-route tests cannot catch this, so the setting is locked here. */
+  const capConfig = JSON.parse(fs.readFileSync(path.join(ROOT, "capacitor.config.json"), "utf8"));
+  assert.strictEqual(
+    capConfig.plugins && capConfig.plugins.CapacitorHttp && capConfig.plugins.CapacitorHttp.enabled,
+    true,
+    "CapacitorHttp must stay enabled or cross-origin /api calls are CORS-blocked in the app"
+  );
+
   const otherDefiners = [];
   const scanDirs = ["scripts", "scripts/inline"];
   scanDirs.forEach((dir) => {
