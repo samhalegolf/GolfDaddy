@@ -59,7 +59,7 @@ jobs:
           node dev/auth-refresh-resilience.test.js
           node dev/cloud-sync-honesty.test.js
           node dev/deploy-cache-busting.test.js
-          node dev/admin-publish-merge.test.js
+          node dev/course-publish-merge.test.js
           node dev/shell-owner.test.js
           node dev/shell-behavior.test.js
           node dev/course-location-owner.test.js
