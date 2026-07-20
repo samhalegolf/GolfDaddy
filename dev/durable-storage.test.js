@@ -1,0 +1,243 @@
+/* Durable storage for keys that cannot be re-fetched.
+ *
+ * A WebView can evict localStorage under storage pressure. Everything here lives
+ * there - session, accounts, profiles, and the round currently being played - so
+ * eviction signs the user out and loses the round mid-play.
+ *
+ * Preferences is durable native storage but async, and 278 call sites read
+ * localStorage synchronously, so it cannot be swapped in. This mirrors instead.
+ *
+ * These check the parts that would be dangerous to get wrong: that a write is
+ * never delayed or broken by mirroring, that a restore actually recovers the
+ * session, that the reload cannot loop, and that the web build is untouched. */
+const http = require("http");
+const fs = require("fs");
+const path = require("path");
+const assert = require("assert");
+
+const ROOT = path.join(__dirname, "..");
+const MODULE = path.join(ROOT, "scripts", "inline", "gd-durable-storage.js");
+const MIME = {
+  ".html": "text/html", ".js": "text/javascript", ".css": "text/css",
+  ".json": "application/json", ".png": "image/png", ".jpg": "image/jpeg",
+  ".svg": "image/svg+xml", ".webp": "image/webp", ".ico": "image/x-icon",
+  ".woff": "font/woff", ".woff2": "font/woff2"
+};
+
+function startServer() {
+  return new Promise((resolve) => {
+    const server = http.createServer((req, res) => {
+      const urlPath = decodeURIComponent(req.url.split("?")[0]);
+      const filePath = path.join(ROOT, urlPath === "/" ? "index.html" : urlPath);
+      if (!filePath.startsWith(ROOT)) { res.writeHead(403); res.end(); return; }
+      fs.readFile(filePath, (err, data) => {
+        if (err) { res.writeHead(404); res.end("not found"); return; }
+        res.writeHead(200, { "Content-Type": MIME[path.extname(filePath)] || "application/octet-stream" });
+        res.end(data);
+      });
+    });
+    server.listen(0, "127.0.0.1", () => resolve(server));
+  });
+}
+
+async function launchBrowser(playwright) {
+  const explicit = process.env.GD_BOOT_CHROMIUM;
+  if (explicit) return playwright.chromium.launch({ executablePath: explicit, headless: true });
+  try { return await playwright.chromium.launch({ headless: true }); }
+  catch (_e) { return playwright.chromium.launch({ channel: "chrome", headless: true }); }
+}
+
+let failed = 0;
+function check(name, fn) {
+  try { fn(); console.log("  ok  " + name); }
+  catch (err) { failed += 1; console.error("  FAIL " + name); console.error("       " + (err && err.message || err)); }
+}
+
+/* A fake Preferences plugin whose store survives a page reload, the way native
+   storage does. Kept on a global the init script re-reads. */
+function nativeStub(seeded) {
+  window.__prefs = Object.assign({}, seeded || {});
+  window.__prefCalls = { set: 0, get: 0, remove: 0 };
+  window.Capacitor = {
+    getPlatform: function () { return "android"; },
+    isNativePlatform: function () { return true; },
+    Plugins: {
+      Preferences: {
+        set: async function (o) { window.__prefCalls.set += 1; window.__prefs[o.key] = String(o.value); return {}; },
+        get: async function (o) { window.__prefCalls.get += 1; return { value: Object.prototype.hasOwnProperty.call(window.__prefs, o.key) ? window.__prefs[o.key] : null }; },
+        remove: async function (o) { window.__prefCalls.remove += 1; delete window.__prefs[o.key]; return {}; }
+      }
+    }
+  };
+}
+
+(async () => {
+  let playwright;
+  try { playwright = require("playwright-core"); }
+  catch (_e) { console.error("durable-storage: playwright-core is not installed."); process.exit(2); }
+
+  const server = await startServer();
+  const browser = await launchBrowser(playwright);
+  const base = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    /* --- native: mirroring --- */
+    const context = await browser.newContext();
+    await context.route("**/api/**", (r) => r.fulfill({ status: 200, contentType: "application/json", body: "{}" }));
+    const page = await context.newPage();
+    await page.addInitScript(nativeStub, {});
+    await page.goto(`${base}/index.html`, { waitUntil: "load", timeout: 30000 });
+    await page.waitForTimeout(1500);
+
+    const mirrored = await page.evaluate(async () => {
+      localStorage.setItem("clarity:supabase-auth-session:v1", "session-token-abc");
+      localStorage.setItem("gd_gps_resume_round_v1", '{"hole":14}');
+      localStorage.setItem("some_other_key", "should not be mirrored");
+      await new Promise((r) => setTimeout(r, 200));
+      return {
+        session: window.__prefs["durable:clarity:supabase-auth-session:v1"],
+        round: window.__prefs["durable:gd_gps_resume_round_v1"],
+        other: window.__prefs["durable:some_other_key"],
+        active: window.GDDurableStorage.state().active
+      };
+    });
+
+    check("the mirror is active on native", () => {
+      assert.strictEqual(mirrored.active, true);
+    });
+
+    check("critical keys are mirrored to durable storage", () => {
+      assert.strictEqual(mirrored.session, "session-token-abc", "the session must be mirrored");
+      assert.strictEqual(mirrored.round, '{"hole":14}', "the in-progress round must be mirrored");
+    });
+
+    check("uninteresting keys are not mirrored", () => {
+      assert.strictEqual(
+        mirrored.other, undefined,
+        "mirroring everything would waste native storage protecting data that re-fetches"
+      );
+    });
+
+    const writeStillWorks = await page.evaluate(() => {
+      localStorage.setItem("gd_accounts_v1", "account-data");
+      return localStorage.getItem("gd_accounts_v1");
+    });
+
+    check("mirroring does not disturb the write itself", () => {
+      assert.strictEqual(
+        writeStillWorks, "account-data",
+        "localStorage stays the source of truth; a mirror failure must not lose a write"
+      );
+    });
+
+    const removed = await page.evaluate(async () => {
+      localStorage.removeItem("gd_accounts_v1");
+      await new Promise((r) => setTimeout(r, 150));
+      return window.__prefs["durable:gd_accounts_v1"];
+    });
+
+    check("a deliberate removal clears the mirror too", () => {
+      assert.strictEqual(removed, undefined, "a signed-out session must not be resurrected on next boot");
+    });
+
+    await page.close();
+    await context.close();
+
+    /* --- native: recovery from eviction --- */
+    const evictedCtx = await browser.newContext();
+    await evictedCtx.route("**/api/**", (r) => r.fulfill({ status: 200, contentType: "application/json", body: "{}" }));
+    const evicted = await evictedCtx.newPage();
+    /* Durable storage holds a session; localStorage is empty, exactly as it is
+       after the WebView evicts web storage. */
+    await evicted.addInitScript(nativeStub, {
+      "durable:clarity:supabase-auth-session:v1": "recovered-session",
+      "durable:gd_player_profiles_v27": '{"profiles":[{"id":"player47"}]}'
+    });
+    await evicted.goto(`${base}/index.html`, { waitUntil: "load", timeout: 30000 });
+    await evicted.waitForTimeout(2500);
+
+    const recovered = await evicted.evaluate(() => ({
+      session: localStorage.getItem("clarity:supabase-auth-session:v1"),
+      profiles: localStorage.getItem("gd_player_profiles_v27"),
+      reloadGuard: sessionStorage.getItem("gd_durable_restore_reloaded_v1")
+    }));
+
+    check("an evicted session is restored from durable storage", () => {
+      assert.strictEqual(
+        recovered.session, "recovered-session",
+        "without this the user is silently signed out and their round is gone"
+      );
+      assert.ok(recovered.profiles, "user-entered profile data must come back too");
+    });
+
+    check("the recovery reload is guarded against looping", () => {
+      assert.strictEqual(
+        recovered.reloadGuard, "1",
+        "a persistent restore failure must not reload forever"
+      );
+    });
+
+    await evicted.close();
+    await evictedCtx.close();
+
+    /* --- web: untouched --- */
+    const webCtx = await browser.newContext();
+    await webCtx.route("**/api/**", (r) => r.fulfill({ status: 200, contentType: "application/json", body: "{}" }));
+    const web = await webCtx.newPage();
+    const webErrors = [];
+    web.on("pageerror", (e) => webErrors.push(String(e)));
+    await web.goto(`${base}/index.html`, { waitUntil: "load", timeout: 30000 });
+    await web.waitForTimeout(1500);
+
+    const webState = await web.evaluate(() => {
+      localStorage.setItem("clarity:supabase-auth-session:v1", "web-session");
+      return {
+        exists: !!window.GDDurableStorage,
+        active: window.GDDurableStorage ? window.GDDurableStorage.state().active : null,
+        stillReadable: localStorage.getItem("clarity:supabase-auth-session:v1")
+      };
+    });
+
+    check("the web build is unaffected", () => {
+      assert.deepStrictEqual(webErrors, [], "must not throw on the website");
+      assert.strictEqual(webState.exists, true, "the module still defines itself");
+      assert.strictEqual(webState.active, false, "but does not patch localStorage where there is no native storage");
+      assert.strictEqual(webState.stillReadable, "web-session", "web writes keep working normally");
+    });
+
+    await web.close();
+    await webCtx.close();
+  } finally {
+    await browser.close();
+    server.close();
+  }
+
+  const src = fs.readFileSync(MODULE, "utf8");
+
+  check("mirroring is fire-and-forget", () => {
+    assert.ok(
+      /Fire and forget/.test(src) && !/await api\.set/.test(src),
+      "awaiting the mirror would make every critical write wait on native storage"
+    );
+  });
+
+  check("the course library is deliberately not mirrored", () => {
+    assert.ok(
+      !/gd_published_course_library_v1/.test(src),
+      "it is large and re-pulls from the server, so mirroring it protects nothing"
+    );
+  });
+
+  check("restore writes through the original setter", () => {
+    assert.ok(
+      /originalSetItem/.test(src),
+      "using the patched setter would mirror back the value just read out of Preferences"
+    );
+  });
+
+  if (failed) { console.error("durable-storage failed: " + failed + " check(s)"); process.exit(1); }
+  console.log("durable-storage passed");
+})().catch((err) => {
+  console.error("durable-storage failed:", err && err.stack || err);
+  process.exit(1);
+});

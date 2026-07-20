@@ -51,6 +51,7 @@ jobs:
           node dev/course-library-client.test.js
           node dev/course-picker-meta-label.test.js
           node dev/error-reporting.test.js
+          node dev/durable-storage.test.js
           node dev/shell-owner.test.js
           node dev/shell-behavior.test.js
           node dev/course-location-owner.test.js
