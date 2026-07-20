@@ -14,6 +14,66 @@ apply plugin: 'com.android.application'
  * back to the debug key - a debug-signed artifact is rejected by Play, and
  * discovering that at upload time wastes a build.
  */
+/* Version numbering.
+ *
+ * Play requires versionCode to strictly increase on every upload and silently
+ * rejects a repeat, so leaving it hardcoded means remembering to bump it by hand
+ * before each release - exactly the kind of step that gets forgotten once and
+ * then wastes a build.
+ *
+ * Derived from the git commit count: monotonic under normal workflow, identical
+ * for anyone building the same commit, and needs no state file to keep in sync.
+ * A floor guards the case where git is unavailable (building from an archive,
+ * or a shallow clone) so a build can never emit a LOWER code than one already
+ * uploaded - which would be rejected and is hard to diagnose.
+ *
+ * ANDROID_VERSION_CODE overrides everything, for CI that numbers its own builds.
+ */
+def VERSION_CODE_FLOOR = 1
+
+def resolveVersionCode = { ->
+    def override = System.getenv("ANDROID_VERSION_CODE")
+    if (override != null && override.trim() ==~ /\d+/) {
+        return Math.max(VERSION_CODE_FLOOR, override.trim().toInteger())
+    }
+    try {
+        def out = new ByteArrayOutputStream()
+        def err = new ByteArrayOutputStream()
+        def result = exec {
+            commandLine "git", "rev-list", "--count", "HEAD"
+            workingDir rootProject.projectDir
+            standardOutput = out
+            errorOutput = err
+            ignoreExitValue = true
+        }
+        def counted = out.toString().trim()
+        if (result.exitValue == 0 && counted ==~ /\d+/ && counted.toInteger() > 0) {
+            return Math.max(VERSION_CODE_FLOOR, counted.toInteger())
+        }
+    } catch (Exception ignored) {
+        // git unavailable - fall through to the floor
+    }
+    return VERSION_CODE_FLOOR
+}
+
+/* Human-readable version, taken from package.json so the app, the web build and
+   the repo cannot drift apart. */
+def resolveVersionName = { ->
+    try {
+        def pkg = new File(rootProject.projectDir.parentFile, "package.json")
+        if (pkg.exists()) {
+            def parsed = new groovy.json.JsonSlurper().parseText(pkg.text)
+            if (parsed?.version) return parsed.version.toString()
+        }
+    } catch (Exception ignored) {
+        // fall through
+    }
+    return "1.0"
+}
+
+def appVersionCode = resolveVersionCode()
+def appVersionName = resolveVersionName()
+
 def keystorePropertiesFile = rootProject.file("keystore.properties")
 def keystoreProperties = new Properties()
 if (keystorePropertiesFile.exists()) {
@@ -42,8 +102,8 @@ android {
         applicationId "com.claritygolf.caddy"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode appVersionCode
+        versionName appVersionName
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -82,6 +142,11 @@ android {
 gradle.taskGraph.whenReady { graph ->
     def buildingRelease = graph.allTasks.any { task ->
         task.project == project && task.name ==~ /(?i).*(assemble|bundle)Release.*/
+    }
+    if (buildingRelease) {
+        /* Printed so the number that goes to Play is visible in the build log
+           rather than something to go digging for after an upload is rejected. */
+        logger.lifecycle("Clarity Caddy release: versionCode ${appVersionCode}, versionName ${appVersionName}")
     }
     if (buildingRelease && !hasReleaseSigning) {
         throw new GradleException(
