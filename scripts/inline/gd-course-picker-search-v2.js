@@ -349,7 +349,12 @@
     const parts=[];
 	    if(Number.isFinite(course.distanceM))parts.push(course.distanceM<1000?`${Math.round(course.distanceM)}m away`:`${(course.distanceM/1000).toFixed(1)}km away`);
 	    if(course.source==="recent-course")parts.push("Recent");
-	    else if(course.source==="database-course"||course.hasDatabaseMap)parts.push("database map");
+	    /* No label for a course we already hold a map for. Where the map came
+	       from is our concern, not the player's - they only need to recognise
+	       the course. The branch stays so these courses do not fall through and
+	       get relabelled "search result" or "course result"; ranking still
+	       favours them above, which is behaviour rather than a badge. */
+	    else if(course.source==="database-course"||course.hasDatabaseMap){/* no badge */}
 	    else if(course.source==="remote-search")parts.push("search result");
     else parts.push("course result");
     return parts.join(" · ");
