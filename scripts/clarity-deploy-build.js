@@ -8,7 +8,12 @@ const publicPaths = [
   "index.html",
   "assets",
   "scripts",
-  "styles"
+  "styles",
+  // Deep-link verification files. Android reads assetlinks.json and iOS reads
+  // apple-app-site-association from this path over https; if they are not
+  // deployed, links open the browser instead of the app and the failure is
+  // silent - the OS simply does not verify and falls back.
+  ".well-known"
 ];
 
 function copyEntry(relativePath) {

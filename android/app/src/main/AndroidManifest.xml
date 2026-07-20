@@ -22,6 +22,28 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+            <!--
+                Android App Links. Password reset and account setup emails link to
+                https://caddy.claritygolf.app/?claritySetPassword=1, which opened
+                the browser rather than the app, so a user following a reset link
+                from their phone ended up resetting in a different session.
+
+                autoVerify makes Android check
+                https://caddy.claritygolf.app/.well-known/assetlinks.json against
+                the installed app's signing certificate. If that file is missing
+                or the fingerprint does not match, verification fails silently and
+                links simply keep opening the browser - there is no error.
+
+                launchMode is already singleTask, so a link delivers to the running
+                instance via onNewIntent rather than starting a second one.
+            -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="caddy.claritygolf.app" />
+            </intent-filter>
+
         </activity>
 
         <provider

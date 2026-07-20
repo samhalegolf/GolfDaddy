@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.claritygolf.caddy",
+      "sha256_cert_fingerprints": [
+        "07:19:A2:48:A7:C7:D1:41:29:01:53:26:50:07:35:4E:85:6B:50:E1:FA:BF:C5:1E:C8:7F:6B:1C:67:A9:4A:B6"
+      ]
+    }
+  }
+]
