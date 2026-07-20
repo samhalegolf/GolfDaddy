@@ -60,7 +60,11 @@ async function createOrFindUser(accountEmail, name, accountRole) {
 }
 
 async function setupLink(accountEmail) {
-  const generated = await supabaseAuth("admin/generate_link", { method: "POST", body: JSON.stringify({ type: "recovery", email: accountEmail, options: { redirect_to: siteUrl() + "/?claritySetPassword=1" } }) }, true);
+  // claritySetPassword drives the password-set flow (well-tested trigger);
+  // clarityAccountSetup marks this as a NEW-account setup so the UI shows setup
+  // wording ("Set up account") and telemetry uses the account-setup reason,
+  // instead of the generic reset wording an invited user was getting.
+  const generated = await supabaseAuth("admin/generate_link", { method: "POST", body: JSON.stringify({ type: "recovery", email: accountEmail, options: { redirect_to: siteUrl() + "/?claritySetPassword=1&clarityAccountSetup=1" } }) }, true);
   const link = generated && (generated.action_link || generated.actionLink || generated.properties && generated.properties.action_link);
   if (!link || !/^https?:\/\//.test(String(link))) throw new Error("Supabase did not return a setup link");
   return String(link);

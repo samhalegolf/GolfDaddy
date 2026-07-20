@@ -258,23 +258,58 @@
 
   var refreshInFlight = null;
 
+  function reportAuth(message, detail) {
+    safe(function () {
+      if (window.ClarityErrorReporter && typeof window.ClarityErrorReporter.report === "function") {
+        window.ClarityErrorReporter.report("Auth refresh: " + message, String(detail || ""));
+      }
+    });
+  }
+
   async function doRefreshSession() {
     var session = loadJson(SESSION_KEY, null);
     var refreshToken = session && session.refresh_token;
     if (!refreshToken) return "";
     var config;
-    try { config = await publicAuthConfig(); } catch (_e) { return ""; }
-    var response = await fetch(config.supabaseUrl.replace(/\/+$/, "") + "/auth/v1/token?grant_type=refresh_token", {
-      method: "POST",
-      headers: { apikey: config.supabaseAnonKey, "Content-Type": "application/json" },
-      body: JSON.stringify({ refresh_token: refreshToken })
-    });
-    var body = await response.json().catch(function () { return {}; });
+    try {
+      config = await publicAuthConfig();
+    } catch (configError) {
+      // The config endpoint being unreachable is a transient failure, NOT a
+      // reason to sign the user out - their token may be perfectly valid. Report
+      // it (this is the CORS-block silent-failure class) and leave the session
+      // intact so the next attempt can retry.
+      reportAuth("config fetch failed", configError && (configError.message || configError));
+      return "";
+    }
+    var response;
+    var body;
+    try {
+      response = await fetch(config.supabaseUrl.replace(/\/+$/, "") + "/auth/v1/token?grant_type=refresh_token", {
+        method: "POST",
+        headers: { apikey: config.supabaseAnonKey, "Content-Type": "application/json" },
+        body: JSON.stringify({ refresh_token: refreshToken })
+      });
+      body = await response.json().catch(function () { return {}; });
+    } catch (networkError) {
+      // Network error reaching Supabase - transient. Keep the session.
+      reportAuth("network error", networkError && (networkError.message || networkError));
+      return "";
+    }
     if (!response.ok || !body.access_token) {
-      // Refresh token revoked/expired: clear only the Supabase session (the rest
-      // of the app's account state lives elsewhere) so it stops sending a dead
-      // token and a fresh sign-in can repopulate it.
-      safe(function () { localStorage.removeItem(SESSION_KEY); });
+      // Only a definitive client-side auth rejection (400/401) means the refresh
+      // token is genuinely revoked or expired. A 5xx/429/408 is a transient
+      // Supabase problem - deleting the session there silently logs out a valid
+      // user over a blip and keeps them out after Supabase recovers.
+      var tokenIsRevoked = response.status === 400 || response.status === 401;
+      if (tokenIsRevoked) {
+        // Clear only the Supabase session (the rest of the app's account state
+        // lives elsewhere) so it stops sending a dead token and a fresh sign-in
+        // can repopulate it. This is expected, so it is not reported as an error.
+        safe(function () { localStorage.removeItem(SESSION_KEY); });
+        return "";
+      }
+      // Transient server error: keep the session, report, retry next time.
+      reportAuth("transient " + response.status, body && (body.error_description || body.error || body.msg));
       return "";
     }
     saveJson(SESSION_KEY, {

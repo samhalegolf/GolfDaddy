@@ -245,6 +245,7 @@
     if (!rows.length) return { flushed: 0 };
     saveStatus({ state: "checking", label: "Syncing pending changes…" });
     var remaining = [];
+    var dropped = [];
     var flushed = 0;
     for (var i = 0; i < rows.length; i += 1) {
       var row = rows[i];
@@ -259,20 +260,33 @@
         row.updatedAt = new Date().toISOString();
         var permanent = errorStatus >= 400 && errorStatus < 500;
         if (!permanent && row.attempts < 8) remaining.push(row);
+        else dropped.push(row);
       }
     }
     saveOutbox(remaining);
-    saveStatus(remaining.length ? {
-      state: "pending",
-      label: "Pending sync",
-      error: remaining[0] && remaining[0].lastError || ""
-    } : {
-      state: "synced",
-      label: "Synced",
-      lastSyncedAt: new Date().toISOString(),
-      error: ""
-    });
-    return { flushed: flushed, pending: remaining.length };
+    if (dropped.length) {
+      // A row the server rejected with 4xx (or exhausted retries) is discarded so
+      // it stops blocking the queue - but that is a real, unrecoverable loss of a
+      // change the user made. Previously this still reported "Synced", so the loss
+      // was invisible. Report it and refuse to claim everything is synced.
+      safe(function () {
+        if (window.ClarityErrorReporter && typeof window.ClarityErrorReporter.report === "function") {
+          window.ClarityErrorReporter.report(
+            "Cloud sync dropped a rejected change",
+            "count=" + dropped.length + " status/last=" + (dropped[0] && dropped[0].lastError || "")
+          );
+        }
+      });
+    }
+    if (remaining.length) {
+      saveStatus({ state: "pending", label: "Pending sync", error: remaining[0] && remaining[0].lastError || "" });
+    } else if (dropped.length) {
+      // Honest state: some changes could not be saved. Not "Synced".
+      saveStatus({ state: "error", label: "Some changes could not be saved", error: dropped[0] && dropped[0].lastError || "" });
+    } else {
+      saveStatus({ state: "synced", label: "Synced", lastSyncedAt: new Date().toISOString(), error: "" });
+    }
+    return { flushed: flushed, pending: remaining.length, dropped: dropped.length };
   }
 
   function discardLocalAccount(accountId) {
