@@ -119,6 +119,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/auth-restore-account"
+  to = "/.netlify/functions/auth-restore-account"
+  status = 200
+
+[[redirects]]
   from = "/api/auth-reset-password"
   to = "/.netlify/functions/auth-reset-password"
   status = 200

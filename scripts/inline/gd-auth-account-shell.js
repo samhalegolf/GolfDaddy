@@ -1403,26 +1403,11 @@
       await window.ClarityCloudSync.requireAccountSynced(loggedIn, 'login');
 	      finishLogin(loggedIn);
 	    } catch(e) {
-	      if (/account not found/i.test(String(e&&e.message||''))&&window.ClarityCloudSync&&typeof window.ClarityCloudSync.restoreAccounts==='function') {
-	        setAuthFeedback('Checking saved accounts...', 'info');
-	        try {
-	          const restored = await window.ClarityCloudSync.restoreAccounts('login');
-	          if (restored && ((restored.accountsMerged||0)>0 || (Array.isArray(restored.accounts)&&restored.accounts.length))) {
-	            const loggedIn = await api.login(
-	              document.getElementById('gd67AuthEmail')?.value,
-	              document.getElementById('gd67AuthPassword')?.value,
-	              {keepLoggedIn: document.getElementById('gd67KeepLoggedIn')?.checked !== false}
-	            );
-            setAuthFeedback('Confirming account in Supabase...', 'info');
-            if (!window.ClarityCloudSync || typeof window.ClarityCloudSync.requireAccountSynced !== 'function') throw new Error('Supabase account sync is not ready');
-            await window.ClarityCloudSync.requireAccountSynced(loggedIn, 'login');
-	            finishLogin(loggedIn);
-	            return;
-	          }
-	        } catch(retryError) {
-	          e = retryError;
-	        }
-	      }
+	      /* No account-restore fallback here: a successful login already merges the
+	         account from Supabase, and an "account not found" means it does not
+	         exist there - restoring cannot help, and there is no recovery token
+	         during a normal login to authorise one. The setup/reset flow is where
+	         restoreAccounts belongs, and it is wired there. */
 	      if (/supabase|confirm account|sync/i.test(String(e && e.message || ''))) {
 	        try { if (api && typeof api.logout === 'function') api.logout(); } catch(logoutError) {}
 	      }

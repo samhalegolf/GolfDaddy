@@ -78,6 +78,66 @@
     };
   }
 
+  /* Restore an account onto this device from Supabase, using the recovery token
+     the setup/reset email link carries as proof of email ownership. Previously
+     this was called in three places but never defined, so it silently no-opped
+     and a coach-invited user on a new device was told their account could not be
+     found. See functions/auth-restore-account.js for the security model - the
+     token is the proof, never a client-supplied email. */
+  function recoveryAccessToken() {
+    return safe(function () {
+      var hash = new URLSearchParams(String(location.hash || "").replace(/^#/, ""));
+      var query = new URLSearchParams(String(location.search || ""));
+      return hash.get("access_token") || query.get("access_token") || "";
+    }, "");
+  }
+
+  async function restoreAccounts(reason) {
+    var token = recoveryAccessToken();
+    if (!token) {
+      /* No token means no proof of identity. Without it we cannot safely fetch
+         an account, so the caller falls back to its own "not found" message -
+         the same outcome as before, but now explicit rather than a missing
+         function. */
+      return { accountsMerged: 0, accounts: [], reason: reason || "", restored: false, code: "no_token" };
+    }
+    try {
+      var response = await fetch("/api/auth-restore-account", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accessToken: token })
+      });
+      var body = await response.json().catch(function () { return {}; });
+      if (!response.ok || !body.ok || !body.account) {
+        var error = new Error(body.error || "Could not restore account");
+        error.status = response.status;
+        error.code = body.code || "";
+        throw error;
+      }
+      /* Merge into local state without activating - the setup/reset flow finishes
+         the sign-in itself once the password is set. */
+      safe(function () {
+        if (window.ClaritySupabaseAuth && typeof window.ClaritySupabaseAuth.commit === "function") {
+          window.ClaritySupabaseAuth.commit(body, { activate: false });
+        }
+      });
+      return { accountsMerged: 1, accounts: [body.account], account: body.account, restored: true, reason: reason || "" };
+    } catch (error) {
+      /* Report rather than swallow: a failed restore is invisible to the user
+         beyond a generic message, and this is exactly the silent-failure class
+         the audit is closing. */
+      safe(function () {
+        if (window.ClarityErrorReporter && typeof window.ClarityErrorReporter.report === "function") {
+          window.ClarityErrorReporter.report(
+            "Account restore failed: " + (error && (error.code || error.message) || "unknown"),
+            "reason=" + (reason || "") + " status=" + (error && error.status || "")
+          );
+        }
+      });
+      return { accountsMerged: 0, accounts: [], restored: false, reason: reason || "", error: error && (error.code || error.message) || "restore_failed" };
+    }
+  }
+
   async function post(payload) {
     var response = await fetch(ENDPOINT, {
       method: "POST",
@@ -298,6 +358,7 @@
     status: function () { return status; },
     syncNow: syncNow,
     flushOutbox: flushOutbox,
+    restoreAccounts: restoreAccounts,
     requireAccountSynced: requireAccountSynced,
     discardLocalAccount: discardLocalAccount,
     diagnostics: diagnostics,
