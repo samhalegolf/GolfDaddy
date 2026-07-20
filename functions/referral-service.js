@@ -923,12 +923,34 @@ async function markScheduledRewardAppliedForInvoice(input) {
   return applied;
 }
 
+/* Reverse a referral reward once its qualifying purchase is refunded or disputed.
+   Split from the lookup so the same reversal runs whether the refund arrived as a
+   Stripe invoice or a store transaction - the store path had no reversal at all,
+   so a store-side refund left the inviter holding a free month. refKey is the
+   invoice id or store transaction id, used only for the idempotency key and audit
+   trail. */
 async function reversePendingReferralRewardForInvoice(invoiceId, reason) {
   const cleanInvoiceId = text(invoiceId, 200);
   if (!cleanInvoiceId) return null;
   const referralRows = await supabaseFetch("referral_invitations?select=*&first_paid_invoice_id=eq." + encodeFilter(cleanInvoiceId) + "&limit=1", { method: "GET" }).catch(function () { return []; });
   const referral = Array.isArray(referralRows) ? referralRows[0] || null : null;
   if (!referral) return null;
+  return reverseResolvedReferralReward(referral, reason, cleanInvoiceId);
+}
+
+/* Store equivalent, keyed on the store transaction id. Called from the RevenueCat
+   webhook on REFUND. Without this, an invitee refunding a store purchase revoked
+   only their own access while the inviter kept the earned month. */
+async function reversePendingReferralRewardForStoreTransaction(transactionId, reason) {
+  const cleanTransactionId = text(transactionId, 200);
+  if (!cleanTransactionId) return null;
+  const referralRows = await supabaseFetch("referral_invitations?select=*&first_paid_store_transaction_id=eq." + encodeFilter(cleanTransactionId) + "&limit=1", { method: "GET" }).catch(function () { return []; });
+  const referral = Array.isArray(referralRows) ? referralRows[0] || null : null;
+  if (!referral) return null;
+  return reverseResolvedReferralReward(referral, reason, cleanTransactionId);
+}
+
+async function reverseResolvedReferralReward(referral, reason, refKey) {
   const reward = await rewardForReferral(referral.id);
   if (!reward) return null;
   if (reward.status === "applied") {
@@ -981,7 +1003,7 @@ async function reversePendingReferralRewardForInvoice(invoiceId, reason) {
       "metadata[app]": "clarity-caddie",
       "metadata[referral_reward_id]": reward.id,
       "metadata[reversal_reason]": text(reason, 200) || "qualifying_payment_reversed"
-    }, { headers: { "Idempotency-Key": "referral_reward_reversal_" + reward.id + "_" + cleanInvoiceId } }).catch(function () { return null; });
+    }, { headers: { "Idempotency-Key": "referral_reward_reversal_" + reward.id + "_" + refKey } }).catch(function () { return null; });
     return patchReward(reward.id, {
       status: "reversed",
       reversed_at: nowIso(),
@@ -998,7 +1020,7 @@ async function reversePendingReferralRewardForInvoice(invoiceId, reason) {
     await recordReferralEvent("referral_reward_reversed", {
       referralId: referral.id,
       accountId: reward.inviter_account_id,
-      metadata: { reward_id: reward.id, invoice_id: cleanInvoiceId, reason: reason || "qualifying_payment_reversed" }
+      metadata: { reward_id: reward.id, ref_key: refKey, reason: reason || "qualifying_payment_reversed" }
     });
     return reversed;
   }
@@ -1079,6 +1101,7 @@ module.exports = {
   openReferralToken,
   prepareReferredMembershipCheckout,
   reversePendingReferralRewardForInvoice,
+  reversePendingReferralRewardForStoreTransaction,
   revokeReferralInvite
 };
 

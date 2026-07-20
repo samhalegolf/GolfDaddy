@@ -363,7 +363,37 @@ async function revokeAccess(rcEvent) {
       updated_at: new Date().toISOString()
     })
   });
+
+  /* A refund of a purchase that qualified someone's referral must also claw back
+     the inviter's earned month. Only REFUND, not EXPIRATION: a subscription
+     lapsing at period end is a completed, honoured referral, not a reversal.
+     Non-fatal for the same reason as maybeConvertReferral - the buyer's access is
+     already revoked above, and failing the webhook over referral bookkeeping just
+     makes RevenueCat retry a revocation that already happened. */
+  if (rcEvent.type === "REFUND") {
+    await maybeReverseReferralReward(rcEvent, transactionId);
+  }
+
   return { handled: true, action: status };
+}
+
+async function maybeReverseReferralReward(rcEvent, transactionId) {
+  try {
+    const referrals = require("./referral-service");
+    if (typeof referrals.reversePendingReferralRewardForStoreTransaction !== "function") return;
+    await referrals.reversePendingReferralRewardForStoreTransaction(transactionId, "store_purchase_refunded");
+  } catch (error) {
+    await sendSystemAlert({
+      eventType: "store_referral_reversal_failed",
+      title: "Store refund processed but referral reward may not have been reversed",
+      detail: "A refunded store purchase that had qualified a referral could not have its inviter reward reversed. The inviter may be holding a month they are no longer owed. Check referral_reward_ledger.",
+      context: {
+        eventId: rcEvent.id,
+        storeTransactionId: transactionId,
+        error: error && (error.message || String(error))
+      }
+    });
+  }
 }
 
 function storeTransactionId(rcEvent) {
