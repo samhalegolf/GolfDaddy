@@ -1795,7 +1795,7 @@
     var effectMeta=Object.assign({},inherited,meta);
     var airbrush=fairwayAirbrushMarkup(source,dims,assetBounds,settings,effectMeta);
     var greenAirbrush=greenSurroundAirbrushMarkup(source,dims,assetBounds,settings,effectMeta);
-    var greenLayer=f.greenBias?'<g data-role="green-strength" data-strength="'+svgNum(f.greenBias)+'"><rect width="100%" height="100%" fill="#3cae5f" opacity="'+svgNum(f.greenBias)+'" style="mix-blend-mode:hue"/><rect width="100%" height="100%" fill="#5fbe70" opacity="'+svgNum(f.greenBias*.42)+'" style="mix-blend-mode:saturation"/><rect width="100%" height="100%" fill="rgba(52,126,54,.18)" opacity="'+svgNum(f.greenBias*.32)+'" style="mix-blend-mode:soft-light"/></g>':"";
+    var greenLayer=f.greenBias?'<g data-role="green-strength" data-strength="'+svgNum(f.greenBias)+'" data-tone="'+svgNum(f.greenTone)+'"><rect width="100%" height="100%" fill="'+f.greenHex+'" opacity="'+svgNum(f.greenBias)+'" style="mix-blend-mode:hue"/><rect width="100%" height="100%" fill="#5fbe70" opacity="'+svgNum(f.greenBias*.42)+'" style="mix-blend-mode:saturation"/><rect width="100%" height="100%" fill="rgba(52,126,54,.18)" opacity="'+svgNum(f.greenBias*.32)+'" style="mix-blend-mode:soft-light"/></g>':"";
     var mowingPattern=mow?'<pattern id="cvMowingStripe" width="24" height="24" patternUnits="userSpaceOnUse" patternTransform="rotate(108)"><path d="M0 0 L0 24" stroke="rgba(255,255,255,.20)" stroke-width="1"/></pattern>':"";
     var mowingLayer=mow?'<rect width="100%" height="100%" fill="url(#cvMowingStripe)" opacity="'+mow+'"/>':"";
     var svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+dims.width+'" height="'+dims.height+'" viewBox="0 0 '+dims.width+" "+dims.height+'" data-renderer="'+escapeXml(RENDERER_VERSION)+'" data-role="'+escapeXml(role)+'" data-stage="'+escapeXml(stage)+'"'+(version?' data-version="'+escapeXml(version)+'"':"")+'><defs><filter id="cvNative"><feColorMatrix type="saturate" values="'+f.saturation+'"/><feComponentTransfer><feFuncR type="linear" slope="'+f.contrast+'" intercept="'+((f.brightness-1)/2)+'"/><feFuncG type="linear" slope="'+f.contrast+'" intercept="'+((f.brightness-1)/2)+'"/><feFuncB type="linear" slope="'+f.contrast+'" intercept="'+((f.brightness-1)/2)+'"/></feComponentTransfer></filter><linearGradient id="cvNativeReadability" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="rgba(255,255,255,'+overlay.top+')"/><stop offset=".55" stop-color="rgba(255,255,255,0)"/><stop offset="1" stop-color="rgba(0,0,0,'+overlay.bottom+')"/></linearGradient>'+mowingPattern+(airbrush.defs||"")+(greenAirbrush.defs||"")+'</defs><rect width="100%" height="100%" fill="#10130f"/><g filter="url(#cvNative)">'+source+'</g>'+greenLayer+(airbrush.layer||"")+(greenAirbrush.layer||"")+'<rect width="100%" height="100%" fill="url(#cvNativeReadability)" opacity="'+overlay.opacity+'"/>'+mowingLayer+'</svg>';
@@ -2142,6 +2142,29 @@
     inFlightBuilds[courseId]=promise.finally(function(){delete inFlightBuilds[courseId];});
     return inFlightBuilds[courseId];
   }
+  function hslToHex(h,s,l){
+    h=((Number(h)%360)+360)%360;
+    s=clamp(s,0,1);
+    l=clamp(l,0,1);
+    var c=(1-Math.abs(2*l-1))*s;
+    var x=c*(1-Math.abs((h/60)%2-1));
+    var m=l-c/2;
+    var r=0,g=0,b=0;
+    if(h<60){r=c;g=x;}
+    else if(h<120){r=x;g=c;}
+    else if(h<180){g=c;b=x;}
+    else if(h<240){g=x;b=c;}
+    else if(h<300){r=x;b=c;}
+    else{r=c;b=x;}
+    function chan(v){return ("0"+Math.round(clamp((v+m)*255,0,255)).toString(16)).slice(-2);}
+    return "#"+chan(r)+chan(g)+chan(b);
+  }
+  function greenToneHex(tone){
+    // tone -1 (cool teal-green) .. 0 (neutral, ~#3cae5f) .. +1 (warm yellow-green)
+    tone=clamp(finite(tone)==null?0:tone,-1,1);
+    var hue=138-tone*34;
+    return hslToHex(hue,.49,.46);
+  }
   function filterForSettings(settings){
     var turf=settings&&settings.turf||{};
     var lighting=settings&&settings.lighting||{};
@@ -2149,6 +2172,9 @@
     var green=finite(turf.greenStrength);
     if(green==null)green=.35;
     green=clamp(green,0,3.5);
+    var greenTone=finite(turf.greenTone);
+    if(greenTone==null)greenTone=0;
+    greenTone=clamp(greenTone,-1,1);
     var brightnessTarget=finite(lighting.brightnessTarget);
     if(brightnessTarget==null)brightnessTarget=52;
     brightnessTarget=clamp(brightnessTarget,5,115);
@@ -2159,7 +2185,7 @@
     var greenBias=clamp(green*.2,0,.62);
     var brightness=clamp(1+(brightnessTarget-52)/90,.45,1.75);
     var sharp=clamp(Number(readability.sharpness)||0,0,.8);
-    return {saturation:+saturation.toFixed(3),brightness:+brightness.toFixed(3),contrast:+contrast.toFixed(3),sharpness:+sharp.toFixed(3),greenBias:+greenBias.toFixed(3)};
+    return {saturation:+saturation.toFixed(3),brightness:+brightness.toFixed(3),contrast:+contrast.toFixed(3),sharpness:+sharp.toFixed(3),greenBias:+greenBias.toFixed(3),greenTone:+greenTone.toFixed(3),greenHex:greenToneHex(greenTone)};
   }
   function terrainStrengthForProduct(settings,product){
     var tools=settings&&settings.visualTools||{};
@@ -2867,6 +2893,7 @@
     presetKey:PRESET_KEY,
     apiEndpoint:API_ENDPOINT,
     defaultPreset:defaultPreset,
+    greenToneHex:greenToneHex,
     presetForMode:presetForMode,
     courseVisualPresetList:courseVisualPresetList,
     loadPresets:loadPresets,
@@ -2894,6 +2921,6 @@
     pullCourseVisual:pullCourseVisual,
     buildFromCourseDatabase:buildFromCourseDatabase,
     hydrateCourseVisualAssets:hydrateCourseVisualAssets,
-    __test:{emptyStore:emptyStore,stitchSvg:stitchSvg,hashString:hashString,captureSignature:captureSignature,metadataForCloud:metadataForCloud,loadAssetData:loadAssetData,saveAssetData:saveAssetData}
+    __test:{emptyStore:emptyStore,stitchSvg:stitchSvg,hashString:hashString,captureSignature:captureSignature,metadataForCloud:metadataForCloud,loadAssetData:loadAssetData,saveAssetData:saveAssetData,filterForSettings:filterForSettings,greenToneHex:greenToneHex,hslToHex:hslToHex}
   };
 });

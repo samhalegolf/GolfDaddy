@@ -693,6 +693,29 @@ function payload() {
   assert.equal(cloudResolved.holeFramePublishedVisuals[0].url, "https://storage.test/course-visuals/cloud-course/holes/h1/published/9.svg", "hole-frame play asset keeps the Supabase Storage URL");
   global.fetch = originalFetch;
 
+  // Green tone (cool <-> warm) turf control
+  const toneRgb = (hex) => {
+    const m = String(hex || "").match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+    assert.ok(m, "green tone produces a #rrggbb hex, got " + hex);
+    return { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) };
+  };
+  const neutralFilter = engine.__test.filterForSettings({ turf: { greenStrength: 1.5 } });
+  assert.equal(neutralFilter.greenTone, 0, "greenTone defaults to neutral (0)");
+  const neutralRgb = toneRgb(neutralFilter.greenHex);
+  assert.ok(neutralRgb.g > neutralRgb.r && neutralRgb.g > neutralRgb.b, "neutral green tone stays green-dominant");
+  assert.ok(Math.abs(neutralRgb.r - 0x3c) <= 3 && Math.abs(neutralRgb.g - 0xae) <= 3 && Math.abs(neutralRgb.b - 0x5f) <= 3, "neutral tone reproduces the legacy #3cae5f overlay");
+
+  const coolRgb = toneRgb(engine.__test.filterForSettings({ turf: { greenStrength: 1.5, greenTone: -1 } }).greenHex);
+  const warmRgb = toneRgb(engine.__test.filterForSettings({ turf: { greenStrength: 1.5, greenTone: 1 } }).greenHex);
+  assert.ok(warmRgb.r > neutralRgb.r && warmRgb.r > coolRgb.r, "warmer tone raises red toward yellow-green");
+  assert.ok(coolRgb.b > neutralRgb.b && neutralRgb.b > warmRgb.b, "cooler tone raises blue toward teal-green, warmer tone lowers it");
+  assert.ok(coolRgb.g > coolRgb.r && warmRgb.g > warmRgb.b, "both tone extremes remain recognisably green");
+
+  assert.equal(engine.__test.filterForSettings({ turf: { greenTone: 5 } }).greenTone, 1, "greenTone clamps to +1");
+  assert.equal(engine.__test.filterForSettings({ turf: { greenTone: -9 } }).greenTone, -1, "greenTone clamps to -1");
+  assert.equal(typeof engine.greenToneHex, "function", "greenToneHex is exposed for the admin live preview");
+  assert.equal(engine.greenToneHex(0), neutralFilter.greenHex, "public greenToneHex matches the render pipeline");
+
   console.log("course visual engine tests passed");
 })().catch((error) => {
   console.error(error);

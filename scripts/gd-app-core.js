@@ -881,8 +881,10 @@ function gdAdminCoursePreviewMarkup(selected){
   const inline=gdAdminCourseVisualInlineSvg(src,`Hole ${current} play preview`,{preserveImages:true});
   const id=gdAdminJsArg(selected.id);
   const imageMarkup=inline||src?inline||`<img src="${gdEscapeHTML(src)}" alt="Hole ${gdEscapeHTML(current)} play preview" loading="lazy" decoding="async">`:"";
-  const frame=imageMarkup?gdAdminCoursePreviewPhoneFrameMarkup(imageMarkup,gdAdminCoursePreviewFrameBox(src)):`<div class="gdAdminPhoneEmpty">No visual surface yet. Use Visuals or Update to build the Clarity play surface.</div>`;
-  return `<div class="gdAdminPhonePreviewShell"><div class="gdAdminPhoneInfo"><strong>${gdEscapeHTML(selected.name)} · Hole ${gdEscapeHTML(current)}</strong><span>Phone mock-up uses the same per-hole Clarity visual products that GPS Play will consume, with the captured surface visible inside the play viewport.</span><div class="gdAdminPhoneControls"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev hole</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next hole</button><button type="button" onclick="return gdAdminCourseDbLoadVisual(${id})">Open visuals</button></div><div class="gdAdminCourseStageLine"><span class="${asset&&asset.dataUrl?"ready":"warn"}">${asset&&asset.dataUrl?"surface ready":"needs visual"}</span><span>H${gdEscapeHTML(current)} / ${gdEscapeHTML(count)}</span><span>${gdEscapeHTML(asset&&asset.path?String(asset.path).split("/").slice(-3).join("/"):"live fallback")}</span></div></div><div class="gdAdminPhone"><div class="gdAdminPhoneScreen"><div class="gdAdminPhoneHud"><span>Clarity Play</span><b>H${gdEscapeHTML(current)}</b></div>${frame}<div class="gdAdminPhoneNav"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next</button></div></div></div></div>`;
+  const frame=imageMarkup?gdAdminCoursePreviewPhoneFrameMarkup(imageMarkup,gdAdminCoursePreviewFrameBox(src)):`<div class="gdAdminPhoneEmpty">No visual surface yet. Use Update to build the Clarity play surface.</div>`;
+  const filterStyle=gdAdminCourseVisualFilterStyleVars(record);
+  const tuning=window.GDCourseVisualEngine?`<div class="gdAdminPhoneTuningColumn">${gdAdminCourseVisualTuningPanel(record,selected.id)}</div>`:"";
+  return `<div class="gdAdminPhonePreviewShell gdAdminPhonePreviewTuned"><div class="gdAdminPhoneInfo"><strong>${gdEscapeHTML(selected.name)} · Hole ${gdEscapeHTML(current)}</strong><span>Tune the per-hole Clarity play surface below — every change previews live on this phone mock-up before you publish.</span><div class="gdAdminPhoneControls"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev hole</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next hole</button></div><div class="gdAdminCourseStageLine"><span class="${asset&&asset.dataUrl?"ready":"warn"}">${asset&&asset.dataUrl?"surface ready":"needs visual"}</span><span>H${gdEscapeHTML(current)} / ${gdEscapeHTML(count)}</span><span>${gdEscapeHTML(asset&&asset.path?String(asset.path).split("/").slice(-3).join("/"):"live fallback")}</span></div>${tuning}</div><div class="gdAdminPhone"><div class="gdAdminPhoneScreen gdAdminPhoneTuned filtered" style="${filterStyle}"><div class="gdAdminPhoneHud"><span>Clarity Play</span><b>H${gdEscapeHTML(current)}</b></div>${frame}<div class="gdAdminPhoneNav"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next</button></div></div></div></div>`;
 }
 function gdAdminCourseDebugMarkup(selected){
   return `<div class="gdAdminCourseDebugWindow"><div class="gdAdminCourseStageLine"><span class="ready">${gdEscapeHTML(selected.playReadyCount||0)} play ready</span><span>${gdEscapeHTML(selected.framesIndexedCount||0)} frames</span><span>${gdEscapeHTML(selected.manifestCount||0)} manifests</span><span>${gdEscapeHTML(gdCoursePlayDebugTime(selected.updatedAt)||"unknown")} updated</span></div><div class="gdCoursePlayDebug" id="gdCoursePlayDebugPanel"><div class="gdCoursePlayDebugHead"><div><h3>Live scan feedback</h3><p>Course Play, frame, manifest, sync, and runtime events for this course.</p></div><div class="gdCoursePlayDebugActions"><button type="button" onclick="return gdAdminCourseDebugRefresh()">Refresh</button><button type="button" onclick="gdClearCoursePlayPipelineDebug();return gdAdminCourseDebugRefresh()">Clear log</button></div></div><div id="gdCoursePlayDebugSummary" class="gdCoursePlayDebugSummary"></div><div id="gdCoursePlayDebugTable"></div><div id="gdCoursePlayDebugTimeline" class="gdCoursePlayDebugTimeline"></div></div><div class="gdCoursePlayDebug gdCourseMappingDebug" id="gdCourseMappingDebugPanel"></div></div>`;
@@ -1427,11 +1429,19 @@ function gdAdminCourseVisualMergedSettings(presetId,overrides){
   try{settings=engine&&typeof engine.mergePreset==="function"?engine.mergePreset(settings,overrides||{}):Object.assign({},settings,overrides||{});}catch(e){settings=Object.assign({},settings,overrides||{});}
   return settings||{};
 }
+function gdAdminCourseVisualGreenToneHex(tone){
+  const engine=window.GDCourseVisualEngine;
+  try{
+    if(engine&&typeof engine.greenToneHex==="function")return engine.greenToneHex(tone);
+  }catch(e){}
+  return "#3cae5f";
+}
 function gdAdminCourseVisualLiveFilterValues(presetId,overrides){
   const settings=gdAdminCourseVisualMergedSettings(presetId,overrides);
   const turf=settings&&settings.turf||{};
   const lighting=settings&&settings.lighting||{};
   const green=gdAdminCourseVisualClampedNumber(turf.greenStrength,0,3.5,.35);
+  const greenTone=gdAdminCourseVisualClampedNumber(turf.greenTone,-1,1,0);
   const brightnessTarget=gdAdminCourseVisualClampedNumber(lighting.brightnessTarget,5,115,52);
   const contrastTarget=gdAdminCourseVisualClampedNumber(lighting.contrastTarget,.55,2.2,1.04);
   return {
@@ -1439,10 +1449,11 @@ function gdAdminCourseVisualLiveFilterValues(presetId,overrides){
     brightness:Number(gdAdminCourseVisualClampedNumber(1+(brightnessTarget-52)/90,.45,1.75,1).toFixed(3)),
     contrast:Number(contrastTarget.toFixed(3)),
     greenBias:Number(gdAdminCourseVisualClampedNumber(green*.2,0,.62,0).toFixed(3)),
+    greenHex:gdAdminCourseVisualGreenToneHex(greenTone),
     mowingOpacity:gdAdminCourseVisualMowingOpacity(settings&&settings.mowingVisibility||overrides&&overrides.mowingVisibility)
   };
 }
-function gdAdminCourseVisualProductFilterAttrs(record){
+function gdAdminCourseVisualFilterStyleVars(record){
   const engine=window.GDCourseVisualEngine;
   let presetId=String(record&&record.presetId||"");
   if(!presetId){
@@ -1450,26 +1461,32 @@ function gdAdminCourseVisualProductFilterAttrs(record){
   }
   if(!presetId)presetId="clarity-course-natural-v1";
   const values=gdAdminCourseVisualLiveFilterValues(presetId,record&&record.courseOverrides||{});
-  const style=[
+  return [
     `--gd-course-visual-saturation:${values.saturation}`,
     `--gd-course-visual-brightness:${values.brightness}`,
     `--gd-course-visual-contrast:${values.contrast}`,
     `--gd-course-visual-green-bias:${values.greenBias}`,
+    `--gd-course-visual-green-hex:${values.greenHex}`,
     `--gd-course-visual-mowing-opacity:${values.mowingOpacity}`
   ].join(";");
-  return `class="gdAdminCourseVisualProducts filtered" style="${style}"`;
+}
+function gdAdminCourseVisualProductFilterAttrs(record){
+  return `class="gdAdminCourseVisualProducts filtered" style="${gdAdminCourseVisualFilterStyleVars(record)}"`;
 }
 function gdAdminCourseVisualApplyLiveFilter(courseId){
-  const products=document.querySelector(".gdAdminCourseVisualProducts");
-  if(!products)return;
+  const targets=document.querySelectorAll(".gdAdminCourseVisualProducts,.gdAdminPhoneTuned");
+  if(!targets.length)return;
   const presetId=String(document.getElementById("gdCourseVisualPreset")?.value||"");
   const values=gdAdminCourseVisualLiveFilterValues(presetId,gdAdminCourseVisualOverridesFromForm());
-  products.style.setProperty("--gd-course-visual-saturation",String(values.saturation));
-  products.style.setProperty("--gd-course-visual-brightness",String(values.brightness));
-  products.style.setProperty("--gd-course-visual-contrast",String(values.contrast));
-  products.style.setProperty("--gd-course-visual-green-bias",String(values.greenBias));
-  products.style.setProperty("--gd-course-visual-mowing-opacity",String(values.mowingOpacity));
-  products.classList.add("filtered","liveFiltering");
+  targets.forEach(target=>{
+    target.style.setProperty("--gd-course-visual-saturation",String(values.saturation));
+    target.style.setProperty("--gd-course-visual-brightness",String(values.brightness));
+    target.style.setProperty("--gd-course-visual-contrast",String(values.contrast));
+    target.style.setProperty("--gd-course-visual-green-bias",String(values.greenBias));
+    target.style.setProperty("--gd-course-visual-green-hex",String(values.greenHex));
+    target.style.setProperty("--gd-course-visual-mowing-opacity",String(values.mowingOpacity));
+    target.classList.add("filtered","liveFiltering");
+  });
 }
 const gdAdminCourseVisualLiveBuildTimers={};
 function gdAdminCourseVisualScheduleLiveBuild(courseId){
@@ -1488,7 +1505,7 @@ function gdAdminCourseVisualScheduleLiveBuild(courseId){
         await engine.buildFromCourseDatabase(courseId,{enable3dBeta:beta3d});
       }
       await engine.buildCourseVisualPreview(courseId,presetId,overrides);
-      if(gdAdminCourseDatabaseSelected===courseId&&gdAdminCourseDatabaseTab==="visuals")gdRenderAdminCourseDatabase();
+      if(gdAdminCourseDatabaseSelected===courseId&&(gdAdminCourseDatabaseTab==="visuals"||gdAdminCourseDatabaseTab==="preview"))gdRenderAdminCourseDatabase();
     }catch(error){
       console.warn("[GolfDaddy] course visual live filter build failed",error);
       gdAdminCourseVisualToast(error&&error.message?error.message:"Course visual filter build failed");
@@ -1565,7 +1582,7 @@ function gdAdminCourseVisualControlEvent(event){
     gdAdminCourseVisualPresetChanged(courseId);
     return;
   }
-  if(["gdCourseVisualGreenStrength","gdCourseVisualTerrainStrength","gdCourseVisualBrightness","gdCourseVisualContrast","gdCourseVisualMowing","gdCourseVisual3dBeta"].includes(target.id)){
+  if(["gdCourseVisualGreenStrength","gdCourseVisualGreenTone","gdCourseVisualTerrainStrength","gdCourseVisualBrightness","gdCourseVisualContrast","gdCourseVisualMowing","gdCourseVisual3dBeta"].includes(target.id)){
     gdAdminCourseVisualControlChanged(courseId);
   }
 }
@@ -1616,6 +1633,7 @@ function gdAdminCourseVisualControls(record,courseId){
   const settings=gdAdminCourseVisualMergedSettings(preset,overrides);
   const mowing=String(settings.mowingVisibility||"Unknown");
   const strength=gdAdminCourseVisualClampedNumber(settings.turf&&settings.turf.greenStrength,0,3.5,.35);
+  const greenTone=gdAdminCourseVisualClampedNumber(settings.turf&&settings.turf.greenTone,-1,1,0);
   const terrain=gdAdminCourseVisualClampedNumber(settings.visualTools&&settings.visualTools.holeTerrainStrength,0,1.6,.9);
   const brightness=gdAdminCourseVisualClampedNumber(settings.lighting&&settings.lighting.brightnessTarget,5,115,52);
   const contrast=gdAdminCourseVisualClampedNumber(settings.lighting&&settings.lighting.contrastTarget,.55,2.2,1.04);
@@ -1625,6 +1643,7 @@ function gdAdminCourseVisualControls(record,courseId){
     <label>Preset<select id="gdCourseVisualPreset" oninput="return gdAdminCourseVisualPresetChanged('${key}')" onchange="return gdAdminCourseVisualPresetChanged('${key}')">${presets.map(p=>`<option value="${gdEscapeHTML(p&&p.id||p&&p.mode||p&&p.name||"")}" ${preset===(p&&p.id)?"selected":""}>${gdEscapeHTML(p&&p.name||p&&p.mode||p&&p.id||"Preset")}</option>`).join("")}</select></label>
     <div class="gdAdminCourseVisualPresetRail">${presets.map(p=>{const id=p&&p.id||p&&p.mode||p&&p.name||"";return `<button type="button" data-preset-id="${gdEscapeHTML(id)}" class="${preset===id?"active":""}" onclick="return gdAdminCourseVisualPresetButtonChanged('${key}','${gdEscapeHTML(id)}')">${gdEscapeHTML(p&&p.name||p&&p.mode||id||"Preset")}</button>`;}).join("")}</div>
     <label>Green strength<input id="gdCourseVisualGreenStrength" type="range" min="0" max="3.5" step="0.05" value="${Number.isFinite(strength)?strength:.35}" oninput="return gdAdminCourseVisualControlChanged('${key}')" onchange="return gdAdminCourseVisualControlChanged('${key}')"></label>
+    <label>Green tone <small>cool ↔ warm</small><input id="gdCourseVisualGreenTone" type="range" min="-1" max="1" step="0.05" value="${Number.isFinite(greenTone)?greenTone:0}" oninput="return gdAdminCourseVisualControlChanged('${key}')" onchange="return gdAdminCourseVisualControlChanged('${key}')"></label>
     <label>Hole terrain<input id="gdCourseVisualTerrainStrength" type="range" min="0" max="1.6" step="0.05" value="${Number.isFinite(terrain)?terrain:.9}" oninput="return gdAdminCourseVisualControlChanged('${key}')" onchange="return gdAdminCourseVisualControlChanged('${key}')"></label>
     <label>Brightness target<input id="gdCourseVisualBrightness" type="number" min="5" max="115" step="1" value="${Number.isFinite(brightness)?brightness:52}" oninput="return gdAdminCourseVisualControlChanged('${key}')" onchange="return gdAdminCourseVisualControlChanged('${key}')"></label>
     <label>Contrast<input id="gdCourseVisualContrast" type="number" min="0.55" max="2.2" step="0.01" value="${Number.isFinite(contrast)?contrast:1.04}" oninput="return gdAdminCourseVisualControlChanged('${key}')" onchange="return gdAdminCourseVisualControlChanged('${key}')"></label>
@@ -1632,13 +1651,18 @@ function gdAdminCourseVisualControls(record,courseId){
     <label class="gdAdminCourseVisualCheck"><input id="gdCourseVisual3dBeta" type="checkbox" ${beta3d?"checked":""} onchange="return gdAdminCourseVisualControlChanged('${key}')"><span>3D view beta</span></label>
   </div>`;
 }
+function gdAdminCourseVisualTuningPanel(record,courseId){
+  const id=gdEscapeHTML(courseId||record&&record.courseId||"");
+  return `<details class="gdAdminCourseSettings gdAdminCourseTuningPanel" open><summary>Visual settings</summary><div class="gdAdminCourseSettingsBody">${gdAdminCourseVisualControls(record,courseId)}<div class="gdAdminCourseVisualActions"><button type="button" onclick="return gdAdminCourseVisualBuildBasic('${id}')">Build base</button><button type="button" onclick="return gdAdminCourseVisualBuildPreview('${id}')">Apply preset</button><button type="button" onclick="return gdAdminCourseVisualRecapture('${id}')">Re-run captures</button><button class="primary" type="button" onclick="return gdAdminCourseVisualPublish('${id}')">Publish Clarity map</button></div></div></details>`;
+}
 function gdAdminCourseVisualOverridesFromForm(){
   const green=gdAdminCourseVisualClampedNumber(document.getElementById("gdCourseVisualGreenStrength")?.value,0,3.5,.35);
+  const greenTone=gdAdminCourseVisualClampedNumber(document.getElementById("gdCourseVisualGreenTone")?.value,-1,1,0);
   const terrain=gdAdminCourseVisualClampedNumber(document.getElementById("gdCourseVisualTerrainStrength")?.value,0,1.6,.9);
   const brightness=gdAdminCourseVisualClampedNumber(document.getElementById("gdCourseVisualBrightness")?.value,5,115,52);
   const contrast=gdAdminCourseVisualClampedNumber(document.getElementById("gdCourseVisualContrast")?.value,.55,2.2,1.04);
   return {
-    turf:{greenStrength:green},
+    turf:{greenStrength:green,greenTone:greenTone},
     lighting:{brightnessTarget:brightness,contrastTarget:contrast},
     visualTools:{holeTerrainStrength:terrain},
     mowingVisibility:String(document.getElementById("gdCourseVisualMowing")?.value||"Unknown"),
@@ -1815,12 +1839,13 @@ function gdAdminCourseVisualMarkup(selected){
     ].join("")}</div>`,
     `<div ${gdAdminCourseVisualProductFilterAttrs(record)}>${products.map(gdAdminCourseVisualProductCard).join("")}</div>`,
     record.lastError?`<div class="gdAdminCourseVisualNotice">${gdEscapeHTML(record.lastError.message||record.lastError.code||"Course visual pipeline needs attention.")}</div>`:"",
-    `<details class="gdAdminCourseSettings"><summary>Visual settings</summary><div class="gdAdminCourseSettingsBody">${gdAdminCourseVisualControls(record,selected.id)}<div class="gdAdminCourseVisualActions"><button type="button" onclick="return gdAdminCourseVisualBuildBasic('${gdEscapeHTML(selected.id)}')">Build base</button><button type="button" onclick="return gdAdminCourseVisualBuildPreview('${gdEscapeHTML(selected.id)}')">Apply preset</button><button type="button" onclick="return gdAdminCourseVisualRecapture('${gdEscapeHTML(selected.id)}')">Re-run captures</button><button class="primary" type="button" onclick="return gdAdminCourseVisualPublish('${gdEscapeHTML(selected.id)}')">Publish Clarity map</button></div><details class="gdAdminCourseSettings"><summary>Diagnostics</summary><div class="gdAdminCourseSettingsBody"><div class="gdAdminDatabaseSummary">${[
+    `<div class="gdAdminCourseVisualNotice gdAdminCourseVisualTuningHint">Visual tuning now lives in the <button type="button" class="gdAdminInlineLink" onclick="return gdAdminCoursePreviewSetHole('${gdEscapeHTML(selected.id)}',${Number(gdAdminCoursePreviewHoleByCourse[selected.id])||1})">Hole preview</button> tab, where every change previews live on the phone surface.</div>`,
+    `<details class="gdAdminCourseSettings"><summary>Diagnostics</summary><div class="gdAdminCourseSettingsBody"><div class="gdAdminDatabaseSummary">${[
       gdAdminCourseDbMetric("Source manifests",`${sourceStatus.manifestCount}/${sourceStatus.frameCount}`),
       gdAdminCourseDbMetric("Current version",record.currentVersion||0),
       gdAdminCourseDbMetric("Published",record.publishedVersion||0),
       gdAdminCourseDbMetric("Layer model",planSummary?"live underlay + HD overlays":"live map fallback")
-    ].join("")}</div><pre class="gdAdminCourseVisualDiag">${gdEscapeHTML(JSON.stringify(diagnostics,null,2))}</pre></div></details></div></details></div>`
+    ].join("")}</div><pre class="gdAdminCourseVisualDiag">${gdEscapeHTML(JSON.stringify(diagnostics,null,2))}</pre></div></details></div>`
   ].join("");
 }
 function gdRenderAdminCourseDatabase(){
