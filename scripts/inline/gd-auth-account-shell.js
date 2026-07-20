@@ -325,7 +325,13 @@
 		    try { document.getElementById('shellTop')?.classList.remove('visible'); } catch(e) {}
 		    try { document.getElementById('shellDock')?.classList.remove('visible'); } catch(e) {}
 		    document.body.classList.remove('gps-open','manual-gps-active','gdStatsOpen','gdBubbleStudioOpen','gdShotDataOpen');
-		    safe(function(){window.GDShell?.showAuth?.({source:'auth-account-route'});});
+		    /* try/catch, not safe(): safe() is not defined in this file, so this line
+		       threw a ReferenceError every time. Everything above had already hidden
+		       the shell, and the three lines below - which add the auth classes and
+		       un-hide the reset overlay - never ran. The password reset route
+		       therefore rendered as a blank screen. Failing to show the auth shell
+		       must not stop the reset overlay from appearing. */
+		    try { window.GDShell?.showAuth?.({source:'auth-account-route'}); } catch(e) {}
 		    document.body.classList.add('gdAuthLocked','gdProfileOpen');
 	    document.body.classList.toggle('gdPasswordResetRoute', !!isReset);
 	    overlay().classList.remove('hidden');
