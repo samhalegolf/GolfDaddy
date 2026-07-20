@@ -9,6 +9,7 @@
  * These lock the two properties that matter: writes are normalised, and reads
  * normalise identically so a pull finds what a push stored. */
 const assert = require("assert");
+const fs = require("fs");
 const path = require("path");
 const Module = require("module");
 
@@ -115,9 +116,49 @@ test("the server write path slugs before storing", () => {
   const norm = src.match(/function normaliseScan\(row, payload\) \{[\s\S]*?\n\}/);
   assert.ok(norm, "normaliseScan must exist");
   assert.ok(
-    /course_key:\s*courseKeySlug\(/.test(norm[0]),
+    /courseKeySlug\(/.test(norm[0]) && /course_key:\s*courseKey\b/.test(norm[0]),
     "normaliseScan must slug course_key - older installed builds still send raw keys"
   );
+});
+
+test("scans with no course identity are rejected server-side", () => {
+  const src = fs.readFileSync(FN, "utf8");
+  const norm = src.match(/function normaliseScan\(row, payload\) \{[\s\S]*?\n\}/);
+  assert.ok(norm, "normaliseScan must exist");
+  assert.ok(
+    /courseKey === "course"/.test(norm[0]) && /return null/.test(norm[0]),
+    "an unidentified scan must be rejected - every one slugs to \"course\" and would "
+    + "merge with unrelated captures under a single key"
+  );
+});
+
+test("the client does not push unidentified scans", () => {
+  const src = fs.readFileSync(path.join(ROOT, "scripts", "gd-captured-surface-sync.js"), "utf8");
+  assert.ok(/function scanIsIdentified\(/.test(src), "scanIsIdentified must exist");
+  assert.ok(
+    /if \(!scanIsIdentified\(scan\)\) return null;/.test(src),
+    "scanToPayload must drop unidentified scans before they are queued"
+  );
+});
+
+test("composite storage keys never leak into course names", () => {
+  [
+    ["scripts/inline/gd-captured-hole-frame-camera-v19.js", "function surfaceCourseName("],
+    ["scripts/inline/gd-captured-surface-model-v1.js", "manifest.courseName=manifest.courseName||"],
+    ["scripts/inline/gd-captured-surface-model-v1.js", "function currentCourseKey("]
+  ].forEach(function (entry) {
+    const src = fs.readFileSync(path.join(ROOT, entry[0]), "utf8");
+    const idx = src.indexOf(entry[1]);
+    assert.notStrictEqual(idx, -1, "could not find " + entry[1] + " in " + entry[0]);
+    const body = src.slice(idx, idx + 700);
+    /* Only inspect the resolution expression, not the explanatory comment. */
+    const expr = body.replace(/\/\*[\s\S]*?\*\//g, "");
+    assert.ok(
+      !/currentCourse\.(key|id)\b/.test(expr),
+      entry[0] + " / " + entry[1] + " must not fall through to .key or .id - on a stored "
+      + "record those are the composite `${userId}::${courseId}` storage key"
+    );
+  });
 });
 
 test("the sync function still loads", () => {

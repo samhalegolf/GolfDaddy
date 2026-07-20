@@ -26,7 +26,9 @@
     };
   }
   function currentCourseKey(fallback){
-    return slug(safe(function(){return (currentCourse&&(currentCourse.key||currentCourse.id||currentCourse.name))||document.body.dataset.gdActiveCourseName;},null)||fallback||"course");
+    /* courseId first, and never .key/.id - those are the composite
+       `${userId}::${courseId}` storage key on a stored library record. */
+    return slug(safe(function(){return (currentCourse&&(currentCourse.courseId||currentCourse.name||currentCourse.courseName))||document.body.dataset.gdActiveCourseName;},null)||fallback||"course");
   }
   function currentHoleNumber(fallback){
     return Number(safe(function(){return currentPlayingHole||selectedHole||gdMappedStartHoleNumber&&gdMappedStartHoleNumber();},null)||fallback||1)||1;
@@ -68,7 +70,10 @@
     manifest.interactionOwner="captured-surface";
     manifest.liveMapRole="capture-source-diagnostic-reference";
     manifest.courseKey=courseKey;
-    manifest.courseName=manifest.courseName||safe(function(){return currentCourse&&(currentCourse.name||currentCourse.title||currentCourse.key||currentCourse.id);},"Course")||"Course";
+    /* Never fall through to .key or .id: on a stored library record those are the
+       composite `${userId}::${courseId}` storage key, which is how course names
+       like "user-<playerid>::pupuke" reached the database. */
+    manifest.courseName=manifest.courseName||safe(function(){return currentCourse&&(currentCourse.name||currentCourse.courseName||currentCourse.title);},"Course")||"Course";
     manifest.holeNumber=holeNumber;
     manifest.key=legacyKey;
     manifest.anchorPins=pins;

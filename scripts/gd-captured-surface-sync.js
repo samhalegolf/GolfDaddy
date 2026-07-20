@@ -110,8 +110,19 @@
     };
   }
 
+  /* A scan captured before any course was resolved has no identity. It still gets
+     stored locally so the current render works, but it must never reach the
+     database: every such scan slugs to the same "course" key, so they merge with
+     each other and with unrelated captures. One reached the table as
+     course_key "course" / name "Course". */
+  function scanIsIdentified(scan) {
+    var key = slug(scan && scan.courseKey);
+    return !!key && key !== 'course';
+  }
+
   function scanToPayload(scan) {
     if (!scan || !scan.id) return null;
+    if (!scanIsIdentified(scan)) return null;
     return {
       client_scan_id: scan.id,
       /* Slug on write so it matches the read path. The server normalises too -

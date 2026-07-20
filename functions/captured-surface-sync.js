@@ -58,11 +58,17 @@ function courseKeySlug(value) {
 function normaliseScan(row, payload) {
   const clientScanId = text(row.client_scan_id || row.clientScanId || row.id, 200);
   if (!clientScanId) return null;
+  /* Reject scans with no course identity. courseKeySlug turns an empty key into
+     "course", so every unidentified capture would collapse onto one key and merge
+     with unrelated ones. The client filters these too, but older installed builds
+     keep sending them, so the server has to be the authority. */
+  const courseKey = courseKeySlug(text(row.course_key || row.courseKey, 120));
+  if (courseKey === "course") return null;
   return {
     client_scan_id: clientScanId,
     account_id: text(row.account_id || row.accountId || payload.accountId, 120) || null,
     player_id: text(row.player_id || row.playerId || payload.playerId, 120) || null,
-    course_key: courseKeySlug(text(row.course_key || row.courseKey, 120)),
+    course_key: courseKey,
     course_name: text(row.course_name || row.courseName, 160) || null,
     hole_number: Math.max(1, Math.round(Number(row.hole_number || row.holeNumber) || 1)),
     source_type: text(row.source_type || (row.source && row.source.type), 80) || null,

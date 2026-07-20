@@ -194,7 +194,12 @@
 	  }
 	  function surfaceCourseName(){
 	    if(renderSurfaceOverride&&renderSurfaceOverride.courseName)return renderSurfaceOverride.courseName;
-	    return safe(function(){return (currentCourse&&(currentCourse.name||currentCourse.title||currentCourse.key||currentCourse.id))||document.body.dataset.gdActiveCourseName||"Course";},"Course");
+	    /* Same reasoning as surfaceCourseKey: .key and .id on a stored library
+	       record are the composite `${userId}::${courseId}` storage key, not a
+	       display name. Falling through to them wrote course names like
+	       "user-<playerid>::pupuke" into captured_surfaces. courseName is the
+	       record's real name; the composite fields are dropped entirely. */
+	    return safe(function(){return (currentCourse&&(currentCourse.name||currentCourse.courseName||currentCourse.title))||document.body.dataset.gdActiveCourseName||"Course";},"Course");
 	  }
 	  function surfaceHoleNumber(){
 	    if(renderSurfaceOverride&&Number(renderSurfaceOverride.holeNumber))return Number(renderSurfaceOverride.holeNumber)||1;
