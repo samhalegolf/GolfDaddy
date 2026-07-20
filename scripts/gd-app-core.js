@@ -883,8 +883,8 @@ function gdAdminCoursePreviewMarkup(selected){
   const imageMarkup=inline||src?inline||`<img src="${gdEscapeHTML(src)}" alt="Hole ${gdEscapeHTML(current)} play preview" loading="lazy" decoding="async">`:"";
   const frame=imageMarkup?gdAdminCoursePreviewPhoneFrameMarkup(imageMarkup,gdAdminCoursePreviewFrameBox(src)):`<div class="gdAdminPhoneEmpty">No visual surface yet. Use Update to build the Clarity play surface.</div>`;
   const filterStyle=gdAdminCourseVisualFilterStyleVars(record);
-  const tuning=window.GDCourseVisualEngine?`<div class="gdAdminPhoneTuningColumn">${gdAdminCourseVisualTuningPanel(record,selected.id)}</div>`:"";
-  return `<div class="gdAdminPhonePreviewShell gdAdminPhonePreviewTuned"><div class="gdAdminPhoneInfo"><strong>${gdEscapeHTML(selected.name)} · Hole ${gdEscapeHTML(current)}</strong><span>Tune the per-hole Clarity play surface below — every change previews live on this phone mock-up before you publish.</span><div class="gdAdminPhoneControls"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev hole</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next hole</button></div><div class="gdAdminCourseStageLine"><span class="${asset&&asset.dataUrl?"ready":"warn"}">${asset&&asset.dataUrl?"surface ready":"needs visual"}</span><span>H${gdEscapeHTML(current)} / ${gdEscapeHTML(count)}</span><span>${gdEscapeHTML(asset&&asset.path?String(asset.path).split("/").slice(-3).join("/"):"live fallback")}</span></div>${tuning}</div><div class="gdAdminPhone"><div class="gdAdminPhoneScreen gdAdminPhoneTuned filtered" style="${filterStyle}"><div class="gdAdminPhoneHud"><span>Clarity Play</span><b>H${gdEscapeHTML(current)}</b></div>${frame}<div class="gdAdminPhoneNav"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next</button></div></div></div></div>`;
+  const dock=window.GDCourseVisualEngine?gdAdminCourseVisualControls(record,selected.id):"";
+  return `<div class="gdAdminPhonePreviewShell gdAdminPhonePreviewTuned"><div class="gdAdminPhoneInfo"><strong>${gdEscapeHTML(selected.name)} · Hole ${gdEscapeHTML(current)}</strong><span>Tune the per-hole Clarity play surface with the tool tabs beside the phone — every change previews live before you publish.</span><div class="gdAdminPhoneControls"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev hole</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next hole</button></div><div class="gdAdminCourseStageLine"><span class="${asset&&asset.dataUrl?"ready":"warn"}">${asset&&asset.dataUrl?"surface ready":"needs visual"}</span><span>H${gdEscapeHTML(current)} / ${gdEscapeHTML(count)}</span><span>${gdEscapeHTML(asset&&asset.path?String(asset.path).split("/").slice(-3).join("/"):"live fallback")}</span></div></div><div class="gdAdminPhoneStage"><div class="gdAdminPhone"><div class="gdAdminPhoneScreen gdAdminPhoneTuned filtered" style="${filterStyle}"><div class="gdAdminPhoneHud"><span>Clarity Play</span><b>H${gdEscapeHTML(current)}</b></div>${frame}<div class="gdAdminPhoneNav"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next</button></div></div></div>${dock}</div></div>`;
 }
 function gdAdminCourseDebugMarkup(selected){
   return `<div class="gdAdminCourseDebugWindow"><div class="gdAdminCourseStageLine"><span class="ready">${gdEscapeHTML(selected.playReadyCount||0)} play ready</span><span>${gdEscapeHTML(selected.framesIndexedCount||0)} frames</span><span>${gdEscapeHTML(selected.manifestCount||0)} manifests</span><span>${gdEscapeHTML(gdCoursePlayDebugTime(selected.updatedAt)||"unknown")} updated</span></div><div class="gdCoursePlayDebug" id="gdCoursePlayDebugPanel"><div class="gdCoursePlayDebugHead"><div><h3>Live scan feedback</h3><p>Course Play, frame, manifest, sync, and runtime events for this course.</p></div><div class="gdCoursePlayDebugActions"><button type="button" onclick="return gdAdminCourseDebugRefresh()">Refresh</button><button type="button" onclick="gdClearCoursePlayPipelineDebug();return gdAdminCourseDebugRefresh()">Clear log</button></div></div><div id="gdCoursePlayDebugSummary" class="gdCoursePlayDebugSummary"></div><div id="gdCoursePlayDebugTable"></div><div id="gdCoursePlayDebugTimeline" class="gdCoursePlayDebugTimeline"></div></div><div class="gdCoursePlayDebug gdCourseMappingDebug" id="gdCourseMappingDebugPanel"></div></div>`;
@@ -1626,6 +1626,25 @@ function gdAdminCourseVisualPresetList(){
   }catch(e){}
   return ["Natural","Fresh","Rich","Strong"].map(mode=>engine&&typeof engine.presetForMode==="function"?engine.presetForMode(mode):{id:mode,name:mode,mode:mode});
 }
+let gdAdminCourseVisualActiveTool="turf";
+function gdAdminCourseVisualSelectTool(group){
+  group=String(group||"");
+  gdAdminCourseVisualActiveTool=(gdAdminCourseVisualActiveTool===group)?"":group;
+  document.querySelectorAll(".gdAdminPhoneToolDock").forEach(dock=>{
+    dock.querySelectorAll(".gdAdminPhoneTool").forEach(btn=>{
+      const on=btn.getAttribute("data-tool-group")===gdAdminCourseVisualActiveTool;
+      btn.classList.toggle("active",on);
+      btn.setAttribute("aria-selected",on?"true":"false");
+    });
+    dock.querySelectorAll(".gdAdminPhoneToolPanel").forEach(panel=>{
+      const on=panel.getAttribute("data-tool-group")===gdAdminCourseVisualActiveTool;
+      panel.classList.toggle("active",on);
+      panel.hidden=!on;
+    });
+    dock.classList.toggle("gdAdminPhoneToolDockOpen",!!gdAdminCourseVisualActiveTool);
+  });
+  return false;
+}
 function gdAdminCourseVisualControls(record,courseId){
   const preset=(record&&record.presetId)||"clarity-course-natural-v1";
   const presets=gdAdminCourseVisualPresetList();
@@ -1639,21 +1658,29 @@ function gdAdminCourseVisualControls(record,courseId){
   const contrast=gdAdminCourseVisualClampedNumber(settings.lighting&&settings.lighting.contrastTarget,.55,2.2,1.04);
   const beta3d=!!(settings.visualEngine&&settings.visualEngine.enable3dBeta);
   const key=gdEscapeHTML(courseId||record&&record.courseId||"");
-  return `<div class="gdAdminCourseVisualControls" data-course-id="${key}">
-    <label>Preset<select id="gdCourseVisualPreset" oninput="return gdAdminCourseVisualPresetChanged('${key}')" onchange="return gdAdminCourseVisualPresetChanged('${key}')">${presets.map(p=>`<option value="${gdEscapeHTML(p&&p.id||p&&p.mode||p&&p.name||"")}" ${preset===(p&&p.id)?"selected":""}>${gdEscapeHTML(p&&p.name||p&&p.mode||p&&p.id||"Preset")}</option>`).join("")}</select></label>
-    <div class="gdAdminCourseVisualPresetRail">${presets.map(p=>{const id=p&&p.id||p&&p.mode||p&&p.name||"";return `<button type="button" data-preset-id="${gdEscapeHTML(id)}" class="${preset===id?"active":""}" onclick="return gdAdminCourseVisualPresetButtonChanged('${key}','${gdEscapeHTML(id)}')">${gdEscapeHTML(p&&p.name||p&&p.mode||id||"Preset")}</button>`;}).join("")}</div>
-    <label>Green strength<input id="gdCourseVisualGreenStrength" type="range" min="0" max="3.5" step="0.05" value="${Number.isFinite(strength)?strength:.35}" oninput="return gdAdminCourseVisualControlChanged('${key}')" onchange="return gdAdminCourseVisualControlChanged('${key}')"></label>
-    <label>Green tone <small>cool ↔ warm</small><input id="gdCourseVisualGreenTone" type="range" min="-1" max="1" step="0.05" value="${Number.isFinite(greenTone)?greenTone:0}" oninput="return gdAdminCourseVisualControlChanged('${key}')" onchange="return gdAdminCourseVisualControlChanged('${key}')"></label>
-    <label>Hole terrain<input id="gdCourseVisualTerrainStrength" type="range" min="0" max="1.6" step="0.05" value="${Number.isFinite(terrain)?terrain:.9}" oninput="return gdAdminCourseVisualControlChanged('${key}')" onchange="return gdAdminCourseVisualControlChanged('${key}')"></label>
-    <label>Brightness target<input id="gdCourseVisualBrightness" type="number" min="5" max="115" step="1" value="${Number.isFinite(brightness)?brightness:52}" oninput="return gdAdminCourseVisualControlChanged('${key}')" onchange="return gdAdminCourseVisualControlChanged('${key}')"></label>
-    <label>Contrast<input id="gdCourseVisualContrast" type="number" min="0.55" max="2.2" step="0.01" value="${Number.isFinite(contrast)?contrast:1.04}" oninput="return gdAdminCourseVisualControlChanged('${key}')" onchange="return gdAdminCourseVisualControlChanged('${key}')"></label>
-    <label>Mowing visibility<select id="gdCourseVisualMowing" onchange="return gdAdminCourseVisualControlChanged('${key}')">${["Unknown","Low","Clear","Prominent"].map(value=>`<option value="${value}" ${mowing===value?"selected":""}>${value}</option>`).join("")}</select></label>
-    <label class="gdAdminCourseVisualCheck"><input id="gdCourseVisual3dBeta" type="checkbox" ${beta3d?"checked":""} onchange="return gdAdminCourseVisualControlChanged('${key}')"><span>3D view beta</span></label>
-  </div>`;
-}
-function gdAdminCourseVisualTuningPanel(record,courseId){
-  const id=gdEscapeHTML(courseId||record&&record.courseId||"");
-  return `<details class="gdAdminCourseSettings gdAdminCourseTuningPanel" open><summary>Visual settings</summary><div class="gdAdminCourseSettingsBody">${gdAdminCourseVisualControls(record,courseId)}<div class="gdAdminCourseVisualActions"><button type="button" onclick="return gdAdminCourseVisualBuildBasic('${id}')">Build base</button><button type="button" onclick="return gdAdminCourseVisualBuildPreview('${id}')">Apply preset</button><button type="button" onclick="return gdAdminCourseVisualRecapture('${id}')">Re-run captures</button><button class="primary" type="button" onclick="return gdAdminCourseVisualPublish('${id}')">Publish Clarity map</button></div></div></details>`;
+  const presetField=`<label>Preset<select id="gdCourseVisualPreset" oninput="return gdAdminCourseVisualPresetChanged('${key}')" onchange="return gdAdminCourseVisualPresetChanged('${key}')">${presets.map(p=>`<option value="${gdEscapeHTML(p&&p.id||p&&p.mode||p&&p.name||"")}" ${preset===(p&&p.id)?"selected":""}>${gdEscapeHTML(p&&p.name||p&&p.mode||p&&p.id||"Preset")}</option>`).join("")}</select></label>`;
+  const presetRail=`<div class="gdAdminCourseVisualPresetRail">${presets.map(p=>{const id=p&&p.id||p&&p.mode||p&&p.name||"";return `<button type="button" data-preset-id="${gdEscapeHTML(id)}" class="${preset===id?"active":""}" onclick="return gdAdminCourseVisualPresetButtonChanged('${key}','${gdEscapeHTML(id)}')">${gdEscapeHTML(p&&p.name||p&&p.mode||id||"Preset")}</button>`;}).join("")}</div>`;
+  const greenStrengthField=`<label>Green strength<input id="gdCourseVisualGreenStrength" type="range" min="0" max="3.5" step="0.05" value="${Number.isFinite(strength)?strength:.35}" oninput="return gdAdminCourseVisualControlChanged('${key}')" onchange="return gdAdminCourseVisualControlChanged('${key}')"></label>`;
+  const greenToneField=`<label>Green tone <small>cool ↔ warm</small><input id="gdCourseVisualGreenTone" type="range" min="-1" max="1" step="0.05" value="${Number.isFinite(greenTone)?greenTone:0}" oninput="return gdAdminCourseVisualControlChanged('${key}')" onchange="return gdAdminCourseVisualControlChanged('${key}')"></label>`;
+  const terrainField=`<label>Hole terrain<input id="gdCourseVisualTerrainStrength" type="range" min="0" max="1.6" step="0.05" value="${Number.isFinite(terrain)?terrain:.9}" oninput="return gdAdminCourseVisualControlChanged('${key}')" onchange="return gdAdminCourseVisualControlChanged('${key}')"></label>`;
+  const brightnessField=`<label>Brightness target<input id="gdCourseVisualBrightness" type="number" min="5" max="115" step="1" value="${Number.isFinite(brightness)?brightness:52}" oninput="return gdAdminCourseVisualControlChanged('${key}')" onchange="return gdAdminCourseVisualControlChanged('${key}')"></label>`;
+  const contrastField=`<label>Contrast<input id="gdCourseVisualContrast" type="number" min="0.55" max="2.2" step="0.01" value="${Number.isFinite(contrast)?contrast:1.04}" oninput="return gdAdminCourseVisualControlChanged('${key}')" onchange="return gdAdminCourseVisualControlChanged('${key}')"></label>`;
+  const mowingField=`<label>Mowing visibility<select id="gdCourseVisualMowing" onchange="return gdAdminCourseVisualControlChanged('${key}')">${["Unknown","Low","Clear","Prominent"].map(value=>`<option value="${value}" ${mowing===value?"selected":""}>${value}</option>`).join("")}</select></label>`;
+  const beta3dField=`<label class="gdAdminCourseVisualCheck"><input id="gdCourseVisual3dBeta" type="checkbox" ${beta3d?"checked":""} onchange="return gdAdminCourseVisualControlChanged('${key}')"><span>3D view beta</span></label>`;
+  const actionsField=`<div class="gdAdminCourseVisualActions"><button type="button" onclick="return gdAdminCourseVisualBuildBasic('${key}')">Build base</button><button type="button" onclick="return gdAdminCourseVisualBuildPreview('${key}')">Apply preset</button><button type="button" onclick="return gdAdminCourseVisualRecapture('${key}')">Re-run captures</button><button class="primary" type="button" onclick="return gdAdminCourseVisualPublish('${key}')">Publish Clarity map</button></div>`;
+  const groups=[
+    {id:"preset",icon:"🎨",label:"Preset",body:presetField+presetRail},
+    {id:"turf",icon:"🌱",label:"Turf & green",body:greenStrengthField+greenToneField},
+    {id:"light",icon:"💡",label:"Lighting",body:brightnessField+contrastField},
+    {id:"terrain",icon:"⛰️",label:"Terrain",body:terrainField},
+    {id:"lines",icon:"🌾",label:"Mow lines",body:mowingField},
+    {id:"depth",icon:"🧊",label:"3D depth",body:beta3dField},
+    {id:"actions",icon:"⚙️",label:"Actions",body:actionsField}
+  ];
+  const active=gdAdminCourseVisualActiveTool;
+  const rail=`<div class="gdAdminPhoneToolRail" role="tablist" aria-label="Visual tuning tools">${groups.map(g=>`<button type="button" role="tab" aria-selected="${g.id===active?"true":"false"}" class="gdAdminPhoneTool${g.id===active?" active":""}" data-tool-group="${g.id}" title="${gdEscapeHTML(g.label)}" aria-label="${gdEscapeHTML(g.label)}" onclick="return gdAdminCourseVisualSelectTool('${g.id}')"><span aria-hidden="true">${g.icon}</span></button>`).join("")}</div>`;
+  const flyout=`<div class="gdAdminPhoneToolFlyout">${groups.map(g=>`<div class="gdAdminPhoneToolPanel${g.id===active?" active":""}" data-tool-group="${g.id}"${g.id===active?"":" hidden"}><h4>${gdEscapeHTML(g.label)}</h4>${g.body}</div>`).join("")}</div>`;
+  return `<div class="gdAdminCourseVisualControls gdAdminPhoneToolDock${active?" gdAdminPhoneToolDockOpen":""}" data-course-id="${key}">${rail}${flyout}</div>`;
 }
 function gdAdminCourseVisualOverridesFromForm(){
   const green=gdAdminCourseVisualClampedNumber(document.getElementById("gdCourseVisualGreenStrength")?.value,0,3.5,.35);

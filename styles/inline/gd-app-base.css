@@ -445,7 +445,8 @@
     .gdAdminScorecardTable{min-width:620px;width:100%;border-collapse:collapse;font:850 10px/1.3 ui-monospace,SFMono-Regular,Menlo,monospace;color:rgba(255,255,255,.76)}
     .gdAdminScorecardTable th,.gdAdminScorecardTable td{padding:7px 8px;border-bottom:1px solid rgba(255,255,255,.055);text-align:left}
     .gdAdminScorecardTable th{position:sticky;top:0;background:#10130f;color:rgba(255,255,255,.55);font-size:8.5px;text-transform:uppercase;letter-spacing:.06em}
-    .gdAdminPhonePreviewShell{display:grid;grid-template-columns:minmax(0,1fr) minmax(260px,360px);gap:14px;align-items:start}
+    .gdAdminPhonePreviewShell{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px;align-items:start}
+    .gdAdminPhoneStage{display:flex;align-items:flex-start;gap:10px}
     .gdAdminPhoneInfo{display:grid;gap:8px}
     .gdAdminPhoneInfo strong{color:#fff;font-size:15px;font-weight:950}
     .gdAdminPhoneInfo span{color:rgba(255,255,255,.58);font-size:11px;font-weight:850;line-height:1.35}
@@ -466,11 +467,25 @@
     .gdAdminPhoneTuned .gdAdminPhoneFrameCrop>.gdAdminCourseVisualInline,.gdAdminPhoneTuned .gdAdminPhoneFrameCrop>.gdAdminCourseVisualInline svg,.gdAdminPhoneTuned .gdAdminPhoneFrameCrop>img{filter:saturate(var(--gd-course-visual-saturation,1)) brightness(var(--gd-course-visual-brightness,1)) contrast(var(--gd-course-visual-contrast,1))}
     .gdAdminPhoneTuned:before{content:"";position:absolute;inset:0;pointer-events:none;z-index:1;background:var(--gd-course-visual-green-hex,#3cae5f);mix-blend-mode:hue;opacity:var(--gd-course-visual-green-bias,0)}
     .gdAdminPhoneTuned:after{content:"";position:absolute;inset:0;pointer-events:none;z-index:1;background:repeating-linear-gradient(108deg,rgba(255,255,255,.18) 0 1px,rgba(255,255,255,0) 1px 18px);mix-blend-mode:soft-light;opacity:var(--gd-course-visual-mowing-opacity,0)}
-    .gdAdminPhoneTuningColumn{margin-top:14px}
-    .gdAdminPhoneTuningColumn .gdAdminCourseVisualActions{margin-top:10px}
     .gdAdminCourseVisualTuningHint{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
     .gdAdminInlineLink{background:none;border:none;padding:0;font:inherit;color:#6fffa6;text-decoration:underline;cursor:pointer}
-    @media(max-width:720px){.gdAdminPhonePreviewShell{grid-template-columns:1fr}.gdAdminPhone{justify-self:center}.gdAdminCourseActionHead{display:grid}.gdAdminCourseVisualProducts{grid-template-columns:1fr}}
+    .gdAdminCourseVisualControls.gdAdminPhoneToolDock{display:flex;flex-direction:row;align-items:flex-start;gap:8px;margin:0}
+    .gdAdminPhoneToolRail{display:flex;flex-direction:column;gap:6px;flex:0 0 auto}
+    .gdAdminPhoneTool{width:42px;height:42px;padding:0;display:grid;place-items:center;border-radius:13px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);color:#fff;font-size:19px;line-height:1;cursor:pointer}
+    .gdAdminPhoneTool span{filter:grayscale(.15)}
+    .gdAdminPhoneTool.active{background:rgba(111,255,166,.16);border-color:rgba(111,255,166,.5);box-shadow:0 0 0 1px rgba(111,255,166,.28)}
+    .gdAdminPhoneToolFlyout{position:relative;flex:0 0 auto}
+    .gdAdminPhoneToolDock:not(.gdAdminPhoneToolDockOpen) .gdAdminPhoneToolFlyout{display:none}
+    .gdAdminPhoneToolPanel{width:236px;box-sizing:border-box;display:grid;gap:10px;padding:12px;border-radius:14px;background:rgba(11,15,11,.95);border:1px solid rgba(255,255,255,.14);box-shadow:0 16px 40px rgba(0,0,0,.4)}
+    .gdAdminPhoneToolPanel[hidden]{display:none}
+    .gdAdminPhoneToolPanel h4{margin:0;color:#fff;font-size:11px;font-weight:950;text-transform:uppercase;letter-spacing:.06em}
+    .gdAdminPhoneToolPanel label{display:grid;gap:4px;color:rgba(255,255,255,.56);font-size:9px;font-weight:950;text-transform:uppercase;letter-spacing:.05em}
+    .gdAdminPhoneToolPanel select,.gdAdminPhoneToolPanel input{width:100%;box-sizing:border-box;border:1px solid rgba(255,255,255,.10);border-radius:12px;background:rgba(0,0,0,.22);color:#fff;padding:8px;font-size:11px;font-weight:850}
+    .gdAdminPhoneToolPanel label.gdAdminCourseVisualCheck{grid-template-columns:auto minmax(0,1fr);align-items:center;gap:8px;padding:8px;border:1px solid rgba(255,255,255,.08);border-radius:12px;background:rgba(0,0,0,.16)}
+    .gdAdminPhoneToolPanel label.gdAdminCourseVisualCheck input{width:18px;height:18px;accent-color:#1fd36d}
+    .gdAdminPhoneToolPanel .gdAdminCourseVisualPresetRail{grid-template-columns:1fr 1fr}
+    .gdAdminPhoneToolPanel .gdAdminCourseVisualActions{margin:0}
+    @media(max-width:720px){.gdAdminPhonePreviewShell{grid-template-columns:1fr}.gdAdminPhone{justify-self:center}.gdAdminPhoneStage{flex-wrap:wrap;justify-content:center}.gdAdminPhoneToolFlyout{flex:1 1 100%}.gdAdminPhoneToolPanel{width:100%}.gdAdminCourseActionHead{display:grid}.gdAdminCourseVisualProducts{grid-template-columns:1fr}}
     @media(max-width:620px){.gdAdminDatabaseFilters,.gdAdminCourseVisualGrid,.gdAdminCourseVisualControls{grid-template-columns:1fr}.gdAdminDatabaseHead,.gdAdminCourseDetailHead{display:grid}.gdAdminDatabaseActions{justify-content:flex-start}.gdAdminCourseRow{grid-template-columns:1fr}}
     #gdCoursePlayMonitor{display:none;position:fixed;left:max(10px,env(safe-area-inset-left));bottom:calc(max(10px,env(safe-area-inset-bottom)) + 10px);z-index:2600;width:min(318px,calc(100vw - 20px));max-height:min(46vh,360px);overflow:hidden;padding:10px 11px;border-radius:16px;background:rgba(5,13,9,.90);border:1px solid rgba(31,211,109,.24);box-shadow:0 18px 42px rgba(0,0,0,.38);backdrop-filter:blur(12px);color:#fff;pointer-events:auto;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif}
     body[data-gd-permission="admin"].gdCoursePlayDebugOn #gdCoursePlayMonitor{display:block}
