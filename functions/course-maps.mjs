@@ -79,7 +79,7 @@ export default async function courseMaps(req) {
   const existingCourse = existingKey ? current.courses[existingKey] : null;
   const mode = adminActor ? "admin-publish" : "generated-create-or-append";
   const merge = adminActor
-    ? { course, accepted: { objects: Object.keys(course.objects || {}).length, holes: Object.keys(course.holes || {}).length, course: 1 } }
+    ? mergeAdminPublish(existingCourse, course)
     : mergeGeneratedCourse(existingCourse, course);
   if (!merge.course) return json(400, { error: "No new generated objects" });
   if (existingKey && existingKey !== merge.course.id) delete current.courses[existingKey];
@@ -395,6 +395,40 @@ function findCourseMapKey(maps, course) {
       name && cleanName(existing.courseName || existing.name) === name
     );
   }) || "";
+}
+
+/* Admin publish is authoritative but MUST NOT be destructive. It previously
+   replaced the whole course wholesale ({ course }), so publishing a session that
+   had only 4 holes mapped wiped the other 13 that were already published - a
+   17-hole course silently collapsed to 4, and play could only load those 4.
+ *
+ * Non-destructive union: keep every existing hole/object, then apply the
+ * incoming ones on top (incoming wins on a genuine conflict, since admin is
+ * authoritative for the holes they DID map). A hole the payload does not mention
+ * is left untouched. Removing a hole is a deliberate act and goes through the
+ * explicit delete action, not an accident of a partial re-scan. */
+function mergeAdminPublish(existing, incoming) {
+  const now = new Date().toISOString();
+  if (!existing) {
+    return {
+      course: incoming,
+      accepted: { objects: Object.keys(incoming.objects || {}).length, holes: Object.keys(incoming.holes || {}).length, course: 1 }
+    };
+  }
+  const course = Object.assign({}, existing, incoming, {
+    objects: Object.assign({}, existing.objects || {}, incoming.objects || {}),
+    holes: Object.assign({}, existing.holes || {}, incoming.holes || {}),
+    assets: Object.assign({}, existing.assets || {}, incoming.assets || {}),
+    updatedAt: now
+  });
+  return {
+    course,
+    accepted: {
+      objects: Object.keys(incoming.objects || {}).length,
+      holes: Object.keys(incoming.holes || {}).length,
+      course: 1
+    }
+  };
 }
 
 function mergeGeneratedCourse(existing, incoming) {

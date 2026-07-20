@@ -447,6 +447,7 @@
     .gdAdminScorecardTable th{position:sticky;top:0;background:#10130f;color:rgba(255,255,255,.55);font-size:8.5px;text-transform:uppercase;letter-spacing:.06em}
     .gdAdminPhonePreviewShell{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px;align-items:start}
     .gdAdminPhoneStage{display:flex;align-items:flex-start;gap:10px}
+    .gdAdminPhoneStage .gdAdminPhone{flex:0 0 auto;width:min(300px,80vw)}
     .gdAdminPhoneInfo{display:grid;gap:8px}
     .gdAdminPhoneInfo strong{color:#fff;font-size:15px;font-weight:950}
     .gdAdminPhoneInfo span{color:rgba(255,255,255,.58);font-size:11px;font-weight:850;line-height:1.35}
