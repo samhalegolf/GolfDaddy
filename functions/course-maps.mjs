@@ -302,6 +302,9 @@ function courseToSupabaseRow(course) {
     published_by_json: jsonObject(course && course.publishedBy),
     objects_json: jsonObject(course && course.objects),
     holes_json: jsonObject(course && course.holes),
+    /* Denormalised so /api/course-library can report hole counts without
+       reading holes_json, which runs to tens of kilobytes per course. */
+    hole_count: Object.keys(jsonObject(course && course.holes)).length || null,
     assets_json: jsonObject(course && course.assets),
     course_json: jsonObject(course),
     updated_at: text(course && course.updatedAt, 80) || now
