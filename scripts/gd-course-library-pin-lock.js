@@ -5,6 +5,10 @@
   const STORE_KEY='gd_user_course_library_v1';
   const PUBLISHED_STORE_KEY='gd_published_course_library_v1';
   const PUBLISHED_COURSE_API='/api/course-maps';
+  const COURSE_LIBRARY_API='/api/course-library';
+  /* Last freshness result, so UI can say "new map update available" without
+     re-asking, and so the check is observable for diagnostics. */
+  let lastCourseLibraryFreshness={checked:false,stale:[],missing:[],current:[],serverTime:''};
   const PUBLISHED_ADMIN_EMAILS=['samhalegolf@gmail.com','admin@clarity.local'];
   let applyingSavedGreen=false;
   let pinLockRegion={x:0,y:0};
@@ -5846,23 +5850,112 @@
   window.closeCourseLibraryPanel=function(){
     document.getElementById('gdCourseLibraryOverlay')?.classList.add('hidden');
   };
-  async function syncPublishedCourseMaps(opts={}){
+  /* The local library is a cached mirror of the published courses. Checking
+     whether it is stale must not cost what re-downloading costs, or the cache
+     is pointless - /api/course-maps returns every course's full objects and
+     holes, hundreds of kilobytes, and it was being fetched on every course
+     entry purely to discover that nothing had changed.
+
+     /api/course-library answers the same question in well under a kilobyte. */
+  async function fetchCourseLibraryManifest(){
+    if(typeof fetch!=='function')return null;
     try{
+      const res=await fetch(COURSE_LIBRARY_API,{headers:{Accept:'application/json'},cache:'no-store'});
+      if(!res.ok)return null;
+      const data=await res.json();
+      if(!data||data.configured===false||!Array.isArray(data.courses))return null;
+      return data;
+    }catch(e){return null;}
+  }
+  /* Must mirror objectsVersion() in functions/course-library.mjs: the newest of
+     publishedAt and updatedAt. Comparing a different field than the server
+     reports would make every course look permanently stale. */
+  function localObjectsVersion(course){
+    const published=String(course&&course.publishedAt||'');
+    const updated=String(course&&course.updatedAt||'');
+    if(published&&updated)return published>updated?published:updated;
+    return published||updated||'';
+  }
+  function courseLibraryFreshness(manifest){
+    const result={checked:false,stale:[],missing:[],current:[],serverTime:''};
+    if(!manifest||!Array.isArray(manifest.courses))return result;
+    result.checked=true;
+    result.serverTime=manifest.serverTime||'';
+    const local={};
+    publishedCourses().forEach(function(course){
+      const key=slug(course&&(course.courseId||course.id)||'');
+      if(key)local[key]=course;
+    });
+    manifest.courses.forEach(function(entry){
+      const key=slug(entry&&entry.course_id||'');
+      if(!key)return;
+      const held=local[key];
+      if(!held){result.missing.push(key);return;}
+      const remote=String(entry.objects_version||'');
+      const mine=localObjectsVersion(held);
+      /* Only a strictly newer server version counts. Equal is current, and an
+         older server version means a local publish has not synced yet - not a
+         reason to overwrite it. */
+      if(remote&&(!mine||remote>mine))result.stale.push(key);
+      else result.current.push(key);
+    });
+    return result;
+  }
+  /* Concurrent callers share one round trip. The resolver and the startup timer
+     can both ask within the same window, and without this both see an empty
+     local store, both decide it is stale, and both pull the full payload -
+     hundreds of kilobytes fetched twice for one result. The shared promise
+     resolves to {store,error} so each caller still applies its own
+     throwOnError rather than inheriting another caller's error handling. */
+  let publishedSyncInFlight=null;
+  async function syncPublishedCourseMaps(opts={}){
+    if(opts.force!==true&&publishedSyncInFlight){
+      const shared=await publishedSyncInFlight;
+      if(shared.error&&opts.throwOnError)throw shared.error;
+      return shared.store;
+    }
+    const run=(async function(){
+      try{return {store:await runPublishedCourseMapSync(opts),error:null};}
+      catch(error){return {store:loadPublishedStore(),error:error};}
+    })();
+    publishedSyncInFlight=run;
+    try{
+      const result=await run;
+      if(result.error&&opts.throwOnError)throw result.error;
+      return result.store;
+    }finally{
+      if(publishedSyncInFlight===run)publishedSyncInFlight=null;
+    }
+  }
+  /* Always throws on failure. Error policy belongs to the caller, not to
+     whoever happened to start the shared run first - if this swallowed errors
+     according to the owner's throwOnError, a sharer that asked for errors would
+     silently receive a stale store instead. */
+  async function runPublishedCourseMapSync(opts={}){
+    {
       if(typeof fetch!=='function')return loadPublishedStore();
+      /* Ask the cheap question first. Only pull full course payloads when the
+         manifest says something actually changed, or when a caller explicitly
+         forces it (a publish has to re-read what the server now holds). */
+      if(opts.force!==true){
+        const manifest=await fetchCourseLibraryManifest();
+        const freshness=courseLibraryFreshness(manifest);
+        lastCourseLibraryFreshness=freshness;
+        if(freshness.checked&&!freshness.stale.length&&!freshness.missing.length){
+          try{renderCourseLibraryPanel();}catch(e){}
+          return loadPublishedStore();
+        }
+      }
       const res=await fetch(PUBLISHED_COURSE_API,{headers:{Accept:'application/json'},cache:'no-store'});
       if(!res.ok){
         const error=new Error(`Course map lookup failed (${res.status})`);
         error.status=res.status;
-        if(opts.throwOnError)throw error;
-        return loadPublishedStore();
+        throw error;
       }
       const data=await res.json();
       const merged=mergePublishedStore(data);
       try{renderCourseLibraryPanel();}catch(e){}
       return merged;
-    }catch(e){
-      if(opts.throwOnError)throw e;
-      return loadPublishedStore();
     }
   }
   async function publishCourseMap(courseStoreId){
@@ -6425,6 +6518,21 @@
 (function(){
   "use strict";
   if(window.__gdHoleFrameVisualZoomHotfixV1) return;
+  /* Course library freshness, exposed so UI can offer "new map update
+     available" without repeating the network check, and so the behaviour is
+     observable on a device without a debug build. */
+  window.GDCourseLibrary={
+    freshness:function(){return JSON.parse(JSON.stringify(lastCourseLibraryFreshness));},
+    check:async function(){
+      const manifest=await fetchCourseLibraryManifest();
+      lastCourseLibraryFreshness=courseLibraryFreshness(manifest);
+      return window.GDCourseLibrary.freshness();
+    },
+    updateAvailable:function(){
+      return !!(lastCourseLibraryFreshness.checked&&(lastCourseLibraryFreshness.stale.length||lastCourseLibraryFreshness.missing.length));
+    },
+    refresh:function(opts){return syncPublishedCourseMaps(Object.assign({quiet:true},opts||{}));}
+  };
   window.__gdHoleFrameVisualZoomHotfixV1=true;
 
   function safe(fn,fallback){try{return fn();}catch(_){return fallback;}}

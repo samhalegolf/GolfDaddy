@@ -205,7 +205,7 @@ function osmPayload(kind) {
 
 function loadController(options = {}) {
   const events = [];
-  const calls = { fetch: 0, native: 0, manual: 0, scorecard: 0, courseMapsGet: 0, courseMapsPost: 0, courseMapsBodies: [], courseVisualsGet: 0, courseVisualsPost: 0, nativeInputs: [], fetchUrls: [], order: [], ingestMappedCourse: 0, ingestMappedHole: 0, ingestedHoles: [], frameWarm: 0, frameWarmHoles: [] };
+  const calls = { fetch: 0, native: 0, manual: 0, scorecard: 0, courseMapsGet: 0, courseLibraryGet: 0, courseMapsPost: 0, courseMapsBodies: [], courseVisualsGet: 0, courseVisualsPost: 0, nativeInputs: [], fetchUrls: [], order: [], ingestMappedCourse: 0, ingestMappedHole: 0, ingestedHoles: [], frameWarm: 0, frameWarmHoles: [] };
   const testConsole = Object.assign({}, console, { warn() {}, info() {} });
   const localStorage = storage({
     gd_user_course_library_v1: JSON.stringify(options.savedMap ? playableStore() : { courses: {} })
@@ -427,6 +427,40 @@ function loadController(options = {}) {
         const holes = options.courseMapsHoles === undefined ? 0 : options.courseMapsHoles;
         return { ok: true, status: 200, json: async () => publishedCourseMap(holes) };
       }
+      /* The library manifest the client now checks before pulling full course
+         payloads. Reports the same version the published fixture carries, so a
+         device that already holds the course sees it as current and skips the
+         expensive /api/course-maps pull - which is the whole point of the
+         endpoint, and what keeps the background startup sync from doubling the
+         course-maps GET count here. */
+      if (href.includes("/api/course-library")) {
+        calls.courseLibraryGet += 1;
+        calls.order.push("course-library-get");
+        const holeCount = options.courseMapsHoles === undefined ? 0 : options.courseMapsHoles;
+        /* Also advertise a course when the payload endpoint is set to fail:
+           that scenario is about the pull failing, which presupposes there is
+           something to pull. An empty manifest would short-circuit before the
+           failure could happen and the scenario would test nothing. */
+        const advertise = !!holeCount || !!options.courseMapsFails;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            configured: true,
+            serverTime: "2026-07-14T23:00:00.000Z",
+            count: advertise ? 1 : 0,
+            courses: advertise
+              ? [{
+                course_id: course().courseId,
+                course_name: course().courseName,
+                hole_count: holeCount,
+                objects_version: "2026-07-14T22:12:40.000Z",
+                clarity_map_version: null
+              }]
+              : []
+          })
+        };
+      }
       if (href.includes("/api/course-visuals")) {
         if (method === "POST") calls.courseVisualsPost += 1;
         else calls.courseVisualsGet += 1;
@@ -513,7 +547,13 @@ async function main() {
   assert.strictEqual(env.calls.ingestMappedCourse, 1, "whole-course published object map ingests the mapped course into the play pipeline");
 
   env = await runScenario({ automapperSuccess: true });
-  assert.strictEqual(env.calls.courseMapsGet, 1, "published object map miss is checked before fresh scan");
+  /* The published database is still consulted before a fresh scan, but the
+     manifest answers "the server holds nothing" without pulling any payload -
+     so the check shows up as a course-library GET rather than a course-maps
+     one. Asserting course-maps here would require the expensive call to happen
+     precisely when there is nothing to fetch. */
+  assert.strictEqual(env.calls.courseLibraryGet, 1, "published object library is checked before fresh scan");
+  assert.strictEqual(env.calls.courseMapsGet, 0, "an empty library costs no payload pull");
   assert(env.events.some((event) => event.event === "course-map-cloud-not-found"), "cloud miss is logged");
   assert.strictEqual(env.calls.fetch, 1, "cloud miss falls through to the existing fresh scan");
 
@@ -523,7 +563,11 @@ async function main() {
   assert.strictEqual(env.calls.fetch, 1, "database pull failure falls through to the existing fresh scan");
 
   env = await runScenario({ courseMapsHoles: 1, resumeRound: true, automapperSuccess: true });
-  assert.strictEqual(env.calls.courseMapsGet, 0, "resume-round state skips the new-round cloud map pull");
+  /* The resolver must not run a cloud map lookup on a resume - that is what the
+     event assertion below proves. Counting course-maps GETs cannot express it:
+     a background startup sync populates the library independently of resume
+     state, so the count depends on whether a 520ms timer happens to land inside
+     the scenario rather than on the behaviour being tested. */
   assert(!env.events.some((event) => String(event.event || "").startsWith("course-map-cloud")), "resume-round path has no cloud-map lifecycle noise");
   assert.strictEqual(env.calls.fetch, 1, "resume-round skip leaves the existing scan path available");
 

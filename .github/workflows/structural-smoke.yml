@@ -48,6 +48,7 @@ jobs:
           node dev/course-hole-count.test.js
           node dev/placeholder-profile-identity.test.js
           node dev/course-library-manifest.test.js
+          node dev/course-library-client.test.js
           node dev/shell-owner.test.js
           node dev/shell-behavior.test.js
           node dev/course-location-owner.test.js
