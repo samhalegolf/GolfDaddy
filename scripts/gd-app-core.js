@@ -25327,7 +25327,7 @@ function gdAccountsBootstrap(){
 function gdPasswordResetRouteActive(){
   try{
     const params=new URLSearchParams(location.search||'');
-    return params.has('clarityResetPassword')||params.has('resetPassword');
+    return params.has('claritySetPassword')||params.has('setPassword')||params.has('clarityResetPassword')||params.has('resetPassword');
   }catch(e){return false}
 }
 function gdAuthRouteBootActive(){return gdPasswordResetRouteActive()||document.documentElement.classList.contains('gdAuthRouteBoot')}

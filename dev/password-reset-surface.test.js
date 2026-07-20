@@ -89,6 +89,45 @@ check("the reveal still happens after the auth-shell call", () => {
   );
 });
 
+
+check("every place that gates the reset route knows the parameter the emails send", () => {
+  /* The recovery emails send ?claritySetPassword=1. clarity-supabase-auth.js
+     handled it, but the three places that gate and route the reset UI checked
+     only clarityResetPassword - so a real reset link processed the recovery
+     token while the UI did not believe it was on a reset route. */
+  const gates = [
+    ["scripts/inline/gd-auth-reset-route-bootstrap.js", "pre-paint route classes"],
+    ["scripts/inline/gd-auth-account-shell.js", "resetParams()"],
+    ["scripts/gd-app-core.js", "gdPasswordResetRouteActive()"]
+  ];
+  gates.forEach(function (entry) {
+    const body = fs.readFileSync(path.join(ROOT, entry[0]), "utf8");
+    assert.ok(
+      /claritySetPassword/.test(body),
+      entry[0] + " (" + entry[1] + ") must recognise claritySetPassword - it is what the emails actually send"
+    );
+  });
+});
+
+check("the emails and the client agree on the parameter", () => {
+  const email = fs.readFileSync(path.join(ROOT, "scripts", "clarity-email.js"), "utf8");
+  const sent = /searchParams\.set\("([a-zA-Z]+)", "1"\)/.exec(email);
+  assert.ok(sent, "clarity-email.js must set a reset parameter");
+  const bootstrap = fs.readFileSync(path.join(ROOT, "scripts", "inline", "gd-auth-reset-route-bootstrap.js"), "utf8");
+  assert.ok(
+    bootstrap.indexOf(sent[1]) !== -1,
+    "the bootstrap must check the same parameter the email sends, got: " + sent[1]
+  );
+});
+
+check("finishing a reset clears the parameter from the URL", () => {
+  const shell = fs.readFileSync(path.join(ROOT, "scripts", "inline", "gd-auth-account-shell.js"), "utf8");
+  assert.ok(
+    /delete\('claritySetPassword'\)/.test(shell),
+    "leaving it in the URL means a refresh re-enters the reset route"
+  );
+});
+
 (async () => {
   let playwright;
   try { playwright = require("playwright-core"); }

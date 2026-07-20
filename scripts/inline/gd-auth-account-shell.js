@@ -273,7 +273,9 @@
 	  function passwordResetParams() {
 	    try {
 	      const params = new URLSearchParams(location.search || '');
-	      return (params.has('clarityResetPassword') || params.has('resetPassword') || params.has('clarityAccountSetup') || params.has('accountSetup')) ? params : null;
+	      /* claritySetPassword is the parameter the recovery emails send; omitting it
+	         meant resetParams() returned null on a genuine reset link. */
+	      return (params.has('claritySetPassword') || params.has('setPassword') || params.has('clarityResetPassword') || params.has('resetPassword') || params.has('clarityAccountSetup') || params.has('accountSetup')) ? params : null;
 	    } catch(e) { return null; }
 	  }
 
@@ -296,6 +298,10 @@
 		  function clearPasswordResetRoute() {
 		    try {
 	      const url = new URL(location.href);
+	      /* claritySetPassword must be cleared too, or the URL keeps advertising a
+	         reset route after the reset is finished and a refresh re-enters it. */
+	      url.searchParams.delete('claritySetPassword');
+	      url.searchParams.delete('setPassword');
 	      url.searchParams.delete('clarityResetPassword');
 	      url.searchParams.delete('resetPassword');
 	      url.searchParams.delete('clarityAccountSetup');
