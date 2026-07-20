@@ -128,6 +128,33 @@ permission prompts and better background behaviour.
 Hardware back currently does nothing useful; it should close the topmost modal before
 navigating.
 
+## Network reachability, verified on device
+
+The bundled app is served from `https://localhost`, so every `/api` call is
+cross-origin. Netlify functions send no CORS headers, so the webview blocked them
+all until `CapacitorHttp` was enabled — requests now originate from native code and
+CORS does not apply.
+
+Probed from inside the running app. Every status matches what the live site returns
+to a direct request, so nothing is being blocked or mis-rewritten:
+
+| Endpoint | Status | Meaning |
+|---|---|---|
+| `/api/auth-public-config` | 200 | Supabase config loads — was `Failed to fetch` before the fix |
+| `/api/course-maps` | 200 | course picker search works |
+| `/api/course-visuals` | 400 | reachable; 400 is "missing params" |
+| `/api/captured-surface-sync` | 405 | reachable; needs POST |
+| `/api/account-sync` | 405 | reachable; needs POST |
+| `overpass-api.de/api/interpreter` | 200 | AutoMapper course scan works |
+| `api.open-meteo.com` | 200 | elevation and wind |
+| `cdn.jsdelivr.net` | 200 | tesseract OCR |
+
+Caveat: the POST-only endpoints were confirmed reachable by a GET returning 405.
+That proves the transport works; it does not prove those flows succeed end to end
+with auth headers and a real payload.
+
+Satellite tiles are `<img>` elements, not fetches, and were never affected.
+
 ## Third-party origins the webview must reach
 
 `server.arcgisonline.com` (satellite tiles), `{s}.tile.openstreetmap.org`,
