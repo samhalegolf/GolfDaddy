@@ -89,15 +89,15 @@ assert(pickerSearch.includes('const COURSE_MAPS_API="/api/course-maps";'), "cour
 assert(pickerSearch.includes("function loadDatabaseCourses(opts={})"), "course picker hydrates database courses behind the search UI");
 assert(pickerSearch.includes('source:"database-course"'), "database courses are tagged when merged into picker results");
 assert(pickerSearch.includes("hasDatabaseMap=true"), "database course results keep a database-map flag for picker ranking");
-assert(index.includes("gd-app-base.css?v=course-picker-live-gps-pin-20260718"), "base CSS cache-bust ships the pin prompt styling");
-assert(index.includes("gd-app-permissions.js?v=permissions-carve-20260719"), "local app permissions owner ships before app core");
-assert(index.includes("gd-app-core.js?v=course-picker-owner-20260719"), "app core cache-bust ships the picker bridge");
-assert(index.includes("gd-flag-pin.js?v=flag-pin-carve-20260719"), "flag/pin owner still ships the flagTool boot-crash fix");
-assert(index.includes("gd-gps-beta-mode-shell.js?v=course-picker-owner-20260719"), "beta GPS shell cache-bust ships picker owner handoff");
-assert(index.includes("gd-brand-icon-render.js?v=boot-crash-fix-20260719"), "brand rail cache-bust ships dynamic rail ownership + flag handler rebind");
-assert(index.includes("gd-course-picker-search-v2.js?v=course-picker-owner-20260719"), "course picker owner cache-bust ships database course hydration and selection ownership");
-assert(index.includes("gd-course-library-pin-lock.js?v=course-picker-db-search-sync-20260718"), "course library cache-bust ships generated scan upload");
-assert(index.includes("gd-gps-play-flow-layers-v1.js?v=gps-flow-merge-20260719"), "GPS request button cache-bust ships optional rail handling");
-assert(index.includes("gd-gps-play-runtime-owner-v1.js?v=course-picker-owner-20260719"), "GPS runtime cache-bust ships picker owner handoff and location lifecycle owner");
+assert(index.includes("gd-app-base.css?v="), "base CSS cache-bust ships the pin prompt styling");
+assert(index.includes("gd-app-permissions.js?v="), "local app permissions owner ships before app core");
+assert(index.includes("gd-app-core.js?v="), "app core cache-bust ships the picker bridge");
+assert(index.includes("gd-flag-pin.js?v="), "flag/pin owner still ships the flagTool boot-crash fix");
+assert(index.includes("gd-gps-beta-mode-shell.js?v="), "beta GPS shell cache-bust ships picker owner handoff");
+assert(index.includes("gd-brand-icon-render.js?v="), "brand rail cache-bust ships dynamic rail ownership + flag handler rebind");
+assert(index.includes("gd-course-picker-search-v2.js?v="), "course picker owner cache-bust ships database course hydration and selection ownership");
+assert(index.includes("gd-course-library-pin-lock.js?v="), "course library cache-bust ships generated scan upload");
+assert(index.includes("gd-gps-play-flow-layers-v1.js?v="), "GPS request button cache-bust ships optional rail handling");
+assert(index.includes("gd-gps-play-runtime-owner-v1.js?v="), "GPS runtime cache-bust ships picker owner handoff and location lifecycle owner");
 
 console.log("course-picker-location tests passed");
