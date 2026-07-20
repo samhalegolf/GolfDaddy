@@ -4597,6 +4597,48 @@
 	      return api&&typeof api.pullCourse==='function'?api:null;
 	    }catch(e){return null;}
 	  }
+	  /* Literal course identity: whatever the picker's search returned, slugged.
+	     Deliberately never reads .id - on a stored library record that is the
+	     composite `${userId}::${courseId}` storage key, not a course identity.
+	     No fuzzy candidate list and no nearest-course fallback: two spellings of
+	     the same course become two records, and merging them is a backend job. */
+	  function literalCourseKey(course){
+	    const c=course||{};
+	    const key=slug(c.courseId||c.courseName||c.name||'');
+	    return key&&key!=='item'?key:'';
+	  }
+	  /* Download previously captured scans for this course before anything decides
+	     to capture.
+
+	     pullCourse writes each row into the same local manifest keys the saved-map
+	     check reads, so a hydrated course satisfies that check and never reaches
+	     the automapper. That is why this runs before it rather than after.
+
+	     Until now nothing called pullCourse at all - the only cloud lookup was for
+	     published course_maps, so any course scanned but not published missed on
+	     every device, every time, and was rescanned from scratch. That is how one
+	     course accumulated 231 rows across 18 holes. */
+	  async function tryHydrateCapturedScansFromCloud(request,opts={}){
+	    if(opts.capturedScanHydrate===false)return {attempted:false,reason:'disabled'};
+	    if(typeof fetch!=='function')return {attempted:false,reason:'fetch-unavailable'};
+	    const api=cloudCourseMapSyncApi();
+	    if(!api)return {attempted:false,reason:'sync-unavailable'};
+	    const key=literalCourseKey(request&&request.course);
+	    if(!key)return {attempted:false,reason:'no-course-key'};
+	    try{
+	      const result=await api.pullCourse(key,{reason:'course-play-scan-hydrate'});
+	      const pulled=Number(result&&result.pulled)||0;
+	      const holes=result&&result.imported&&result.imported.holes||[];
+	      recordMappingDebug(request.debugRunId,{source:'cloud-scans',phase:pulled?'completed':'skipped',event:pulled?'captured-scans-hydrated':'captured-scans-not-found',summary:pulled?'Captured scans loaded':'No captured scans in database',details:{courseKey:key,pulled,holes,hole:request.hole,resolutionKey:request.resolutionKey,attemptToken:request.attemptToken}});
+	      recordCoursePlayDebug(pulled?'captured-scans-hydrated':'captured-scans-not-found',request.course,request.hole,{courseKey:key,pulled,holes,resolutionKey:request.resolutionKey,attemptToken:request.attemptToken});
+	      return {attempted:true,key,pulled,holes};
+	    }catch(error){
+	      /* Never fatal: a failed hydrate just means we fall through to scanning,
+	         which is the behaviour that existed before this ran at all. */
+	      recordMappingDebug(request.debugRunId,{source:'cloud-scans',phase:'failed',event:'captured-scans-hydrate-failed',summary:'Captured scan lookup failed',details:{courseKey:key,resolutionKey:request.resolutionKey,attemptToken:request.attemptToken},error:{message:error&&error.message||String(error),status:error&&error.status||null}});
+	      return {attempted:true,failed:true,key,error};
+	    }
+	  }
 	  function resumeRoundAvailableForCloudMap(){
 	    try{
 	      if(typeof window.gdReadResumeRound==='function'&&window.gdReadResumeRound())return true;
@@ -5096,6 +5138,12 @@
 	        try{setMappedPlayMode('mapped',{skipFrame:true,silent:true,preserveAssist:true});}catch(e){}
 	        const cloudMapResult=await tryHydrateCourseMapFromCloud(request,attempt,Object.assign({},opts,{__resumeRoundAvailableBeforeOpen:resumeAvailableBeforeOpen}));
 	        if(cloudMapResult&&cloudMapResult.attempted&&!mappingAttemptStillCurrent(request,attempt,'cloud-map'))return {playable:false,stale:true,reason:'superseded-after-cloud-map'};
+	        /* Awaited, and before the saved-map check below: hydrating writes into
+	           the local store that check reads, so an already-scanned course is
+	           satisfied there and never reaches the automapper. Doing this after
+	           would mean scanning first and only then discovering the data existed. */
+	        const cloudScanResult=await tryHydrateCapturedScansFromCloud(request,opts);
+	        if(cloudScanResult&&cloudScanResult.attempted&&!mappingAttemptStillCurrent(request,attempt,'cloud-scans'))return {playable:false,stale:true,reason:'superseded-after-cloud-scans'};
 	        recordMappingDebug(debugRunId,{source:'saved-map',phase:'started',event:'saved-map-lookup-started',summary:'Saved-map lookup started',details:{hole:h,existingTrustedMap:false,resolutionKey:key,attemptToken}});
         const localSavedMapAllowed=opts.allowLocalSavedMap!==false;
         const savedState=savedMapCanSatisfyRequest(c,h,request.wholeCourse);

@@ -41,6 +41,7 @@ jobs:
           node dev/native-back-button.test.js
           node dev/course-key-normalisation.test.js
           node dev/course-identity-resolution.test.js
+          node dev/captured-scan-hydrate.test.js
           node dev/shell-owner.test.js
           node dev/shell-behavior.test.js
           node dev/course-location-owner.test.js
