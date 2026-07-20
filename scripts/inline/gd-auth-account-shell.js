@@ -890,7 +890,12 @@
     try { invite = api && typeof api.coachInviteFor === 'function' ? api.coachInviteFor(account) : null; }
     catch(e) { invite = null; }
     const code = invite && invite.code ? String(invite.code) : '';
-    const inviteUrl = new URL(location.origin + location.pathname);
+    /* This QR is scanned by ANOTHER phone, so it must encode the public site, not
+       the page origin. In the app location.origin is https://localhost, which was
+       useless to the scanner. GDNative.apiOrigin holds the real domain in-app. */
+    let inviteBase = 'https://caddy.claritygolf.app';
+    try { inviteBase = ((window.GDNative && window.GDNative.apiOrigin) || location.origin).replace(/\/+$/, ''); } catch(e) {}
+    const inviteUrl = new URL(inviteBase + '/');
     if (code) inviteUrl.searchParams.set('clarityCoachInvite', code);
     const qrData = encodeURIComponent(code ? inviteUrl.toString() : '');
     const qrSrc = code ? `https://api.qrserver.com/v1/create-qr-code/?size=176x176&margin=12&data=${qrData}` : '';

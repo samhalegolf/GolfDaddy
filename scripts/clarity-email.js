@@ -158,14 +158,26 @@
     setStatus("Notification preference saved.");
     return false;
   }
+  /* Every URL that goes INTO an email body must be the public site, not the page
+     origin. In the native app the page loads from https://localhost, so building
+     links from location.origin sent recipients dead https://localhost/ links and
+     a broken logo. GDNative.apiOrigin holds the real domain in-app; on web,
+     location.origin is already correct. Always the site root, never the bundled
+     local pathname. */
+  function publicBase(){
+    var origin;
+    try { origin = (window.GDNative && window.GDNative.apiOrigin) || location.origin; }
+    catch(e){ origin = location.origin; }
+    return String(origin || "").replace(/\/+$/, "");
+  }
   function logoUrl(){
-    return new URL("assets/brand/cg-logo-white-g.png?v=clarity-20260531", location.origin + location.pathname).toString();
+    return publicBase() + "/assets/brand/cg-logo-white-g.png?v=clarity-20260531";
   }
   function appUrl(){
-    return new URL(location.pathname || "/", location.origin).toString();
+    return publicBase() + "/";
   }
   function passwordResetUrl(emailValue){
-    var url = new URL(location.pathname || "/", location.origin);
+    var url = new URL("/", publicBase() + "/");
     url.searchParams.set("claritySetPassword", "1");
     url.searchParams.set("email", String(emailValue || "").trim());
     return url.toString();
@@ -175,7 +187,7 @@
     var actorName = payload.actorName || "Clarity";
     var title = payload.title || "Your Clarity account was updated";
     var detail = payload.detail || "";
-    var ctaUrl = payload.ctaUrl || location.origin + "/";
+    var ctaUrl = payload.ctaUrl || appUrl();
     var ctaLabel = payload.ctaLabel || "Open Clarity";
     var footer = isServiceEmail(payload)
       ? "You are receiving this because it relates to your Clarity account access."
@@ -320,7 +332,7 @@
       title:options && options.title || eventTitle(kind, actor, target),
       detail:options && options.detail || "",
       ctaLabel:"Open Clarity",
-      ctaUrl:location.origin + location.pathname,
+      ctaUrl:appUrl(),
       createdAt:nowISO(),
       test:!!(options && options.test)
     };

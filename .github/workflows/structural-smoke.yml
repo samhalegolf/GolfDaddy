@@ -55,6 +55,7 @@ jobs:
           node dev/deep-links.test.js
           node dev/account-restore.test.js
           node dev/store-referral-reversal.test.js
+          node dev/email-public-url.test.js
           node dev/shell-owner.test.js
           node dev/shell-behavior.test.js
           node dev/course-location-owner.test.js
