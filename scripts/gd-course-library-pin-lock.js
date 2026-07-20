@@ -380,7 +380,12 @@
   function profile(){try{return typeof activePlayerProfile==='function'?activePlayerProfile():null;}catch(e){return null;}}
   function userId(){const p=profile();return 'user-'+slug(p?.id||p?.name||'local-player');}
   function courseObj(){try{return currentCourse||null;}catch(e){return null;}}
-  function rawCourseName(course=courseObj()){return String(course?.name||'Manual GPS');}
+  /* Stored library records carry courseName, not name - ensureCourse builds them
+     as {id,userId,courseId,courseName,...}. Reading only .name meant every stored
+     record was classified as Manual GPS, so sessionCourse substituted the nearest
+     built-in course. In Auckland that is Akarana, which is why picking any course
+     with a stored record navigated to Akarana instead. */
+  function rawCourseName(course=courseObj()){return String(course?.name||course?.courseName||'Manual GPS');}
   function isManualGpsCourse(course=courseObj()){return /^manual gps$/i.test(rawCourseName(course).trim());}
   function isAssumedCourseName(name){
     return /^assumed (golf )?course\b/i.test(String(name||'').trim());
