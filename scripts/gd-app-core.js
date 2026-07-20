@@ -24775,7 +24775,58 @@ function gdAccountNewProfile(account,coachIds=[]){
     updatedAt:now
   };
 }
+/* A real account must never adopt the seeded demo profile.
+   ensureProfile() returns whatever is active, and on a fresh install
+   gdInstallPlaceholderProfile has just made that the placeholder - so the admin
+   bootstrap created its account pointing at gd_placeholder_demo_player and kept
+   that id permanently. Everything derived from the profile id inherited it:
+   userId() became "user-gd-placeholder-demo-player", course library keys were
+   namespaced under it, and every captured scan was stamped
+   player_id=gd_placeholder_demo_player.
+   The normal signup path already mints its own id via gdNewProfileId(); this
+   makes bootstrap behave the same way. */
+function gdProfileForNewAccount(){
+  const active=ensureProfile();
+  const isPlaceholder=!!active&&(active.id===GD_PLACEHOLDER_PROFILE_ID||active.placeholderProfile===true);
+  if(!isPlaceholder)return active;
+  const fresh=gdDefaultProfile();
+  fresh.placeholderProfile=false;
+  GD_PROFILE_STATE.profiles.push(fresh);
+  GD_PROFILE_STATE.activeId=fresh.id;
+  savePlayerProfiles();
+  return fresh;
+}
+/* Repair for installs created before the above. Re-points an account that is
+   still on the placeholder id onto a real one, carrying the profile's data
+   across so nothing the user entered is lost. Local course-library keys are
+   namespaced by profile id and will not follow, but course data now lives
+   server side and is re-pulled per course, so that is recoverable; leaving a
+   real account permanently identified as a demo player is not. */
+function gdRepairPlaceholderAccountProfile(account){
+  if(!account||account.profileId!==GD_PLACEHOLDER_PROFILE_ID)return false;
+  const existing=gdProfileById(GD_PLACEHOLDER_PROFILE_ID);
+  const replacementId=gdNewProfileId();
+  const replacement=Object.assign({},existing||gdDefaultProfile(),{
+    id:replacementId,
+    accountId:account.accountId,
+    email:account.email||(existing&&existing.email)||'',
+    name:account.name||(existing&&existing.name)||'Player',
+    placeholderProfile:false,
+    updatedAt:new Date().toISOString()
+  });
+  GD_PROFILE_STATE.profiles=GD_PROFILE_STATE.profiles
+    .filter(p=>p&&p.id!==GD_PLACEHOLDER_PROFILE_ID)
+    .concat([replacement]);
+  account.profileId=replacementId;
+  account.updatedAt=new Date().toISOString();
+  if(GD_ACCOUNT_STATE.viewingProfileId===GD_PLACEHOLDER_PROFILE_ID)GD_ACCOUNT_STATE.viewingProfileId=replacementId;
+  if(GD_PROFILE_STATE.activeId===GD_PLACEHOLDER_PROFILE_ID)GD_PROFILE_STATE.activeId=replacementId;
+  gdAccountsSave();
+  savePlayerProfiles();
+  return true;
+}
 function gdAccountEnsureProfile(account){
+  gdRepairPlaceholderAccountProfile(account);
   let profile=gdProfileById(account.profileId);
   if(!profile){
     profile=gdAccountNewProfile(account,account.linkedCoachIds||[]);
@@ -25240,7 +25291,7 @@ function gdAccountsBootstrap(){
     gdAccountApplySession({silent:true});
     return gdCurrentAccount();
   }
-  const profile=ensureProfile();
+  const profile=gdProfileForNewAccount();
   const role='admin';
   const accountId=gdNewId('acct');
   const salt=gdNewId('salt');
