@@ -1,5 +1,40 @@
 apply plugin: 'com.android.application'
 
+/* Release signing.
+ *
+ * Credentials are read from keystore.properties or the environment, never from
+ * this file: the keystore and its passwords must not enter the repository. Both
+ * are gitignored.
+ *
+ * Losing the upload keystore means losing the ability to update the app on Play
+ * unless Play App Signing key upgrade is used, so back it up somewhere durable
+ * and separate from this machine.
+ *
+ * A release build without credentials fails loudly rather than silently falling
+ * back to the debug key - a debug-signed artifact is rejected by Play, and
+ * discovering that at upload time wastes a build.
+ */
+def keystorePropertiesFile = rootProject.file("keystore.properties")
+def keystoreProperties = new Properties()
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
+def signingValue = { String propertyKey, String envKey ->
+    def fromFile = keystoreProperties.getProperty(propertyKey)
+    if (fromFile != null && !fromFile.trim().isEmpty()) return fromFile.trim()
+    def fromEnv = System.getenv(envKey)
+    if (fromEnv != null && !fromEnv.trim().isEmpty()) return fromEnv.trim()
+    return null
+}
+
+def releaseStorePath = signingValue("storeFile", "ANDROID_KEYSTORE_FILE")
+def releaseStorePassword = signingValue("storePassword", "ANDROID_KEYSTORE_PASSWORD")
+def releaseKeyAlias = signingValue("keyAlias", "ANDROID_KEY_ALIAS")
+def releaseKeyPassword = signingValue("keyPassword", "ANDROID_KEY_PASSWORD")
+def hasReleaseSigning = releaseStorePath != null && releaseStorePassword != null &&
+        releaseKeyAlias != null && releaseKeyPassword != null
+
 android {
     namespace = "com.claritygolf.caddy"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -16,11 +51,46 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        if (hasReleaseSigning) {
+            release {
+                storeFile file(releaseStorePath)
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+                /* Both schemes: v1 for older devices, v2 for the modern
+                   whole-APK signature Play expects. */
+                v1SigningEnabled true
+                v2SigningEnabled true
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (hasReleaseSigning) {
+                signingConfig signingConfigs.release
+            }
         }
+    }
+}
+
+/* Fail the build rather than emit an unsigned or debug-signed release. Play
+   rejects those, and finding out at upload time means the build was wasted.
+   Checked at task-graph time so it fails before any work is done. */
+gradle.taskGraph.whenReady { graph ->
+    def buildingRelease = graph.allTasks.any { task ->
+        task.project == project && task.name ==~ /(?i).*(assemble|bundle)Release.*/
+    }
+    if (buildingRelease && !hasReleaseSigning) {
+        throw new GradleException(
+            "Release signing is not configured.\n" +
+            "Create android/keystore.properties (see keystore.properties.example) " +
+            "or set ANDROID_KEYSTORE_FILE, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS " +
+            "and ANDROID_KEY_PASSWORD.\n" +
+            "Neither the keystore nor its passwords belong in the repository."
+        )
     }
 }
 

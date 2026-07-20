@@ -21,3 +21,9 @@ Thumbs.db
 
 # Temporary on-device diagnostics - never commit
 scripts/inline/gd-native-diag-temp.js
+
+# Android release signing - credentials must never enter the repository.
+# Losing the upload keystore means losing the ability to update the app on Play.
+android/keystore.properties
+*.jks
+*.keystore

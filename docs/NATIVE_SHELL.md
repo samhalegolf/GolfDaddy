@@ -128,6 +128,44 @@ permission prompts and better background behaviour.
 Hardware back currently does nothing useful; it should close the topmost modal before
 navigating.
 
+## Android release signing
+
+Debug builds need nothing. A **release** build (for Play internal testing or
+production) requires an upload keystore, which is deliberately not in this repo.
+
+Create it once — this prompts for the passwords, so they are never typed into a
+shell history:
+
+```
+keytool -genkeypair -v \
+  -keystore android/clarity-caddy-upload.jks \
+  -alias clarity-caddy-upload \
+  -keyalg RSA -keysize 4096 -validity 10000
+```
+
+Then copy `android/keystore.properties.example` to `android/keystore.properties`
+and fill in the two passwords. Both the `.jks` and `keystore.properties` are
+gitignored; CI can set `ANDROID_KEYSTORE_FILE`, `ANDROID_KEYSTORE_PASSWORD`,
+`ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD` instead.
+
+**Back the keystore up somewhere durable and off this machine.** Losing it means
+losing the ability to update the app on Play, unless Play App Signing key
+upgrade is available.
+
+Build:
+
+```
+npm run native:release:aab    # android/app/build/outputs/bundle/release  - for Play
+npm run native:release:apk    # android/app/build/outputs/apk/release     - direct install
+```
+
+A release build without credentials fails at task-graph time with an explicit
+message rather than silently falling back to the debug key — Play rejects
+debug-signed artifacts, and discovering that at upload wastes a build.
+
+`versionCode` is still `1` in `android/app/build.gradle`. Play requires it to
+increase with every upload.
+
 ## Network reachability, verified on device
 
 The bundled app is served from `https://localhost`, so every `/api` call is
