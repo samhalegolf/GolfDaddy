@@ -45,6 +45,7 @@ jobs:
           node dev/auth-route-boot-release.test.js
           node dev/scan-push-filter.test.js
           node dev/password-reset-surface.test.js
+          node dev/course-hole-count.test.js
           node dev/shell-owner.test.js
           node dev/shell-behavior.test.js
           node dev/course-location-owner.test.js

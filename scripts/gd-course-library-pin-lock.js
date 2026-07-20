@@ -1974,6 +1974,65 @@
     }catch(e){}
     return 18;
   }
+  /* Hole counts are not always 18. Nine-hole courses, 27-hole courses played as
+     three nines, and genuine oddities like Takapuna's 17 are all normal - a
+     course with fewer than 18 mapped holes is not a failed scan.
+
+     Assuming 18 had real consequences beyond a wrong label: courseDataMapReadiness
+     marked those courses incomplete, which reported "saved-map-incomplete" on
+     every entry and suppressed the cloud sync outright ("reason:incomplete-map"),
+     so a 9 or 17 hole course could never publish.
+
+     Resolution order, most authoritative first:
+       1. the live scorecard, when a round is in progress
+       2. a hole count declared on the course record
+       3. the highest hole number the course actually has data for
+       4. 18, only when nothing at all is known */
+  const COURSE_HOLE_COUNT_MAX=36;
+  function scorecardHoleCount(){
+    try{
+      if(typeof scorecard!=='undefined'&&scorecard&&Array.isArray(scorecard.holes)&&scorecard.holes.length)return scorecard.holes.length;
+    }catch(e){}
+    try{
+      if(window.scorecard&&Array.isArray(window.scorecard.holes)&&window.scorecard.holes.length)return window.scorecard.holes.length;
+    }catch(e){}
+    return 0;
+  }
+  function declaredHoleCount(course){
+    const c=course||{};
+    const raw=Number(c.holeCount??c.holes_count??c.expectedHoleCount??(c.payload&&c.payload.holeCount));
+    return Number.isFinite(raw)&&raw>0?raw:0;
+  }
+  /* Deliberately NOT inferred from how many holes happen to be mapped. That
+     reading makes any partial scan look complete: a course with four holes
+     mapped would "expect" four and be judged done, so the resolver would never
+     finish it. The count has to be declared by something that knows - the
+     scorecard, or a completed whole-course sweep recording what it found. */
+  function courseExpectedHoleCount(course){
+    const resolved=scorecardHoleCount()||declaredHoleCount(course)||18;
+    return Math.max(1,Math.min(COURSE_HOLE_COUNT_MAX,resolved));
+  }
+  /* Persist what a completed whole-course sweep found, so the count becomes
+     declared rather than guessed. Guarded to sane sizes: a sweep that returned
+     one or two holes has clearly not mapped a course and must not convince
+     later checks that the course is that small. */
+  function recordDiscoveredHoleCount(course,count){
+    const found=Number(count);
+    if(!Number.isFinite(found)||found<9||found>COURSE_HOLE_COUNT_MAX)return false;
+    try{
+      const uid=userId();
+      const cid=courseId(course);
+      const store=loadStore();
+      const key=findCourseKey(store,uid,cid);
+      const row=key&&store.courses[key];
+      if(!row)return false;
+      if(Number(row.holeCount)===found)return false;
+      row.holeCount=found;
+      row.updatedAt=nowIso();
+      saveStore(store);
+      return true;
+    }catch(e){return false;}
+  }
   const OSM_AUTOMAPPER_RADIUS_M=1400;
   const OSM_NATIVE_RESOLVER_RADIUS_M=3200;
   const OSM_NATIVE_FRAME_PAD_M=180;
@@ -4502,7 +4561,7 @@
   function mappedPlayableHoleCoverage(course){
     let c=course;
     try{c=loadUserCourseData(userId(),courseId(course))||course;}catch(e){}
-    const expected=Math.max(1,Math.min(18,Number(automapperExpectedHoleCount())||18));
+    const expected=courseExpectedHoleCount(c);
     const holes=[];
     for(let hole=1;hole<=expected;hole++){
       const data=mappedHolePlayData(c,hole);
@@ -4523,7 +4582,7 @@
   }
   function courseDataMapReadiness(course,hole,wholeCourse){
     const h=validHoleNumber(hole)||1;
-    const expected=Math.max(1,Math.min(18,Number(automapperExpectedHoleCount())||18));
+    const expected=courseExpectedHoleCount(course);
     const holes=[];
     for(let n=1;n<=expected;n++){
       const data=mappedHolePlayData(course,n);
@@ -4554,7 +4613,7 @@
   function mappedCoursePlayRows(course){
     let c=course;
     try{c=loadUserCourseData(userId(),courseId(course))||course;}catch(e){}
-    const expected=Math.max(1,Math.min(18,Number(automapperExpectedHoleCount())||18));
+    const expected=courseExpectedHoleCount(c);
     const rows=[];
     for(let hole=1;hole<=expected;hole++){
       const data=mappedHolePlayData(c,hole);
@@ -5165,6 +5224,11 @@
           document.body.dataset.gdCourseAutoMappedHoles=String(autoMapResult&&autoMapResult.holes||0);
           document.body.dataset.gdCourseAutoMapSaved=String(autoMapResult&&autoMapResult.saved||0);
         }catch(e){}
+        /* A completed whole-course sweep is the only thing that actually knows
+           how many holes a course has. Record it so a 9, 17 or 27 hole course
+           stops being measured against an assumed 18 on every later entry.
+           Only for wholeCourse - a single-hole map says nothing about the total. */
+        if(request.wholeCourse!==false)recordDiscoveredHoleCount(c,autoMapResult&&autoMapResult.holes);
         const autoState=savedMapCanSatisfyRequest(c,h,request.wholeCourse);
         const autoPlayable=!!autoState.requestedPlayable;
 	        const autoReady=!!autoState.ready;
