@@ -92,6 +92,14 @@ The sandbox stays the source of truth for how a recipe *looks*; the worker must 
    Remaining: GPS play consuming cloud frames (currently only the admin preview does), and
    tile caching/throttling in the worker if snapshot volume grows.
 
+## Parked idea (Sam, 2026-07-22)
+
+The first floodlight implementation was a directional tee->green beam (a player-held torch
+following the target line). Wrong look for course floodlights, but worth resurrecting for
+**GPS play lock-in framing**: light the locked target line as part of the lock-in view.
+The cone code lives in git history (gd-course-visual-engine.js, floodlightMarkup before the
+overhead-pools rework).
+
 ## Interim stopgap (already shipped in-browser)
 
 Serial flatten queue (one canvas at a time), canvas released after encode, stitch waits scale

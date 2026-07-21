@@ -1860,27 +1860,41 @@
     var defs="";
     var maskContent='<rect width="100%" height="100%" fill="white"/>';
     if(tee&&green){
-      var throwKeep=Math.max(.05,1-cfg.throwOff);
-      /* The beam is a soft-edged CONE from the tee: narrow at the player, widening with
-         spread toward the green, dimming along the axis with throw-off. A plain axial
-         gradient had no lateral bounds and lit the whole frame. */
-      var dxA=green.x-tee.x,dyA=green.y-tee.y;
-      var axisLen=Math.max(1e-6,Math.sqrt(dxA*dxA+dyA*dyA));
-      var uxA=dxA/axisLen,uyA=dyA/axisLen,pxA=-uyA,pyA=uxA;
-      /* Spread at minimum is a tight torch line, not a floodlit half-frame. */
+      /* Overhead course lighting, not a handheld torch: banks of floods aimed at the playing
+         area, so the whole corridor from tee to green is lit EVENLY along the actual route
+         line. Spread is the corridor width, throw-off is how softly the light dies at the
+         corridor edge. (The old directional tee-cone reads like a player-held beam - worth
+         resurrecting for GPS play lock-in framing, not for this.) */
       var spreadT=clamp(cfg.spread,.05,1);
-      var wTee=Math.max(12,dims.width*(.015+spreadT*.06));
-      var wGreen=Math.max(wTee,dims.width*(.03+spreadT*.55));
-      var over=axisLen*.12;
-      var conePoints=[
-        {x:tee.x-pxA*wTee-uxA*over*.3,y:tee.y-pyA*wTee-uyA*over*.3},
-        {x:tee.x+pxA*wTee-uxA*over*.3,y:tee.y+pyA*wTee-uyA*over*.3},
-        {x:green.x+pxA*wGreen+uxA*over,y:green.y+pyA*wGreen+uyA*over},
-        {x:green.x-pxA*wGreen+uxA*over,y:green.y-pyA*wGreen+uyA*over}
-      ].map(function(p){return svgNum(p.x)+","+svgNum(p.y);}).join(" ");
-      defs+='<linearGradient id="cvFloodBeam" gradientUnits="userSpaceOnUse" x1="'+svgNum(tee.x)+'" y1="'+svgNum(tee.y)+'" x2="'+svgNum(green.x)+'" y2="'+svgNum(green.y)+'"><stop offset="0" stop-color="black" stop-opacity="'+svgNum(lit)+'"/><stop offset=".65" stop-color="black" stop-opacity="'+svgNum(lit*.7*throwKeep)+'"/><stop offset="1" stop-color="black" stop-opacity="'+svgNum(lit*.4*throwKeep)+'"/></linearGradient>';
-      defs+='<filter id="cvFloodSoft" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="'+svgNum(Math.max(6,dims.width*(.015+spreadT*.045)))+'"/></filter>';
-      maskContent+='<polygon points="'+conePoints+'" fill="url(#cvFloodBeam)" filter="url(#cvFloodSoft)"/>';
+      var routePts=(Array.isArray(pins.route)?pins.route:[]).map(function(pt){return project(pt);}).filter(Boolean);
+      if(routePts.length<2)routePts=[tee,green];
+      var corridorWidth=Math.max(24,dims.width*(.07+spreadT*.6));
+      /* A chain of overlapping radial pools sampled along the route - each one a soft-edged
+         cone of light from an overhead flood. Radial gradients are inherently soft, so no
+         blur filter is needed (filters inside <mask> are unreliable in librsvg, and the
+         server export must match). Edge falloff sets where each pool starts dying. */
+      var edgeStop=clamp(.35+(1-clamp(cfg.throwOff,0,1))*.5,.35,.85);
+      defs+='<radialGradient id="cvFloodPoolShape"><stop offset="0" stop-color="black" stop-opacity="'+svgNum(lit)+'"/><stop offset="'+svgNum(edgeStop)+'" stop-color="black" stop-opacity="'+svgNum(lit*.82)+'"/><stop offset="1" stop-color="black" stop-opacity="0"/></radialGradient>';
+      var poolR=corridorWidth*.72;
+      var step=Math.max(24,poolR*.6);
+      var samples=[];
+      for(var ri=1;ri<routePts.length;ri++){
+        var a=routePts[ri-1],b=routePts[ri];
+        var segLen=Math.max(1e-6,Math.sqrt((b.x-a.x)*(b.x-a.x)+(b.y-a.y)*(b.y-a.y)));
+        var n=Math.max(1,Math.ceil(segLen/step));
+        for(var si=0;si<=n;si++){
+          samples.push({x:a.x+(b.x-a.x)*si/n,y:a.y+(b.y-a.y)*si/n});
+        }
+      }
+      if(samples.length>64){
+        var keep=[];
+        for(var ki=0;ki<samples.length;ki+=Math.ceil(samples.length/64))keep.push(samples[ki]);
+        keep.push(samples[samples.length-1]);
+        samples=keep;
+      }
+      samples.forEach(function(p){
+        maskContent+='<circle cx="'+svgNum(p.x)+'" cy="'+svgNum(p.y)+'" r="'+svgNum(poolR)+'" fill="url(#cvFloodPoolShape)"/>';
+      });
       /* The pool sits on the REAL green: centred on the projected green polygon and sized from
          its extent, with the radius slider scaling outward from there. A frame-relative radius
          lit half the suburb on a par 3. Falls back to the pin + axis length when the package
@@ -1897,7 +1911,7 @@
           greenExtent=Math.max(greenExtent,Math.sqrt(dxS*dxS+dyS*dyS));
         });
       }
-      if(!greenExtent)greenExtent=axisLen*.06;
+      if(!greenExtent)greenExtent=corridorWidth*.5;
       var radius=Math.max(16,greenExtent*(1.2+clamp(cfg.greenPoolRadius,.05,1)*2.5));
       defs+='<radialGradient id="cvFloodPool" gradientUnits="userSpaceOnUse" cx="'+svgNum(poolCenter.x)+'" cy="'+svgNum(poolCenter.y)+'" r="'+svgNum(radius)+'"><stop offset="0" stop-color="black" stop-opacity="'+svgNum(lit*cfg.greenPool)+'"/><stop offset=".7" stop-color="black" stop-opacity="'+svgNum(lit*cfg.greenPool*.45)+'"/><stop offset="1" stop-color="black" stop-opacity="0"/></radialGradient>';
       maskContent+='<rect width="100%" height="100%" fill="url(#cvFloodPool)"/>';

@@ -1975,7 +1975,7 @@ function gdAdminCourseVisualControls(record,courseId){
     `<label class="gdAdminCourseVisualCheck"><input id="gdCourseVisualFloodOn" type="checkbox" ${floodOn?"checked":""} onchange="return gdAdminCourseVisualControlCommitted('${key}')"><span>Floodlight</span></label>`+
     rangeField("gdCourseVisualFloodAmbient","Ambient level","everything off the line drops to here",floodAmbient,0,100,1)+
     rangeField("gdCourseVisualFloodLit","Lit level","the playing line is brought back to here",floodLit,0,100,1)+
-    rangeField("gdCourseVisualFloodThrow","Throw falloff","dims down the hole, light sits behind you",floodThrow,0,1,.05)+
+    rangeField("gdCourseVisualFloodThrow","Edge falloff","how softly the light dies at the corridor edge",floodThrow,0,1,.05)+
     rangeField("gdCourseVisualFloodSpread","Beam spread","width of the lit corridor",floodSpread,.05,1,.05)+
     rangeField("gdCourseVisualFloodGreenPool","Green pool","own light at the green so falloff can't lose it",floodGreenPool,0,1,.05)+
     rangeField("gdCourseVisualFloodGreenRadius","Green pool size","",floodGreenRadius,.05,1,.01)+
