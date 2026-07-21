@@ -693,13 +693,20 @@
 
 	     De-duped by manifest key so repeated captures of the same frame don't refetch every tile. */
 	  var captureFlattenPending={};
+	  /* Flattens run ONE at a time. A full-course scan schedules ~60 captures in one burst;
+	     letting every flatten start at once meant ~60 full-size canvases and up to 20k tile
+	     fetches held in memory together, which killed the tab. The queue keeps peak memory to a
+	     single capture's canvas + tiles; each flatten still has its own internal timeout, so a
+	     hung one releases the queue. */
+	  var captureFlattenQueue=Promise.resolve();
 	  function scheduleCaptureFlatten(manifest,captureOpts){
 	    captureOpts=captureOpts||{};
 	    if(!manifest||captureOpts.skipFlatten===true)return null;
 	    if(manifest.imageData||manifest.imagePath)return null;
 	    var key=manifest.key||storageKey();
 	    if(captureFlattenPending[key])return captureFlattenPending[key];
-	    var job=flattenCaptureManifest(manifest,{quality:captureOpts.flattenQuality})
+	    var runFlatten=function(){return flattenCaptureManifest(manifest,{quality:captureOpts.flattenQuality});};
+	    var job=(captureFlattenQueue=captureFlattenQueue.then(runFlatten,runFlatten))
 	      .then(function(result){
 	        safe(function(){
 	          gdCoursePlayDebugEvent(result&&result.ok?"capture-flattened":"capture-flatten-skipped",{
