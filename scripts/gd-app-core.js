@@ -1702,18 +1702,21 @@ function gdAdminCourseVisualMergedSettings(presetId,overrides){
 function gdAdminCourseVisualProductFilterAttrs(record){
   return `class="gdAdminCourseVisualProducts"`;
 }
-// While a control is still moving: just record the recipe. Nothing is re-rendered, so dragging
-// stays cheap and nothing is layered over the baked surface.
+// While a control is still moving: touch NOTHING heavy. Saving to the engine per input tick
+// meant two full JSON clones of a record carrying every baked frame's pixels - hundreds of MB
+// of string copying per tick once captures became owned rasters, which froze the sliders.
+// The recipe is read from the form and saved ONCE on release (Committed below).
 function gdAdminCourseVisualControlChanged(courseId){
-  const engine=window.GDCourseVisualEngine;
-  if(engine&&typeof engine.saveCourseVisualSettings==="function"){
-    try{
-      const presetId=String(document.getElementById("gdCourseVisualPreset")?.value||"");
-      engine.saveCourseVisualSettings(courseId,gdAdminCourseVisualOverridesFromForm(),{presetId});
-    }catch(e){}
-  }
   gdAdminCoursePreviewApplyTilt();
   return false;
+}
+function gdAdminCourseVisualSaveRecipeFromForm(courseId){
+  const engine=window.GDCourseVisualEngine;
+  if(!engine||typeof engine.saveCourseVisualSettings!=="function")return;
+  try{
+    const presetId=String(document.getElementById("gdCourseVisualPreset")?.value||"");
+    engine.saveCourseVisualSettings(courseId,gdAdminCourseVisualOverridesFromForm(),{presetId});
+  }catch(e){}
 }
 // On release (change): bake the recipe once so every control - terrain included - shows its real
 // effect. This only re-renders the recipe from captures already on disk; it never re-captures
@@ -1721,6 +1724,7 @@ function gdAdminCourseVisualControlChanged(courseId){
 const gdAdminCourseVisualBakePending={};
 function gdAdminCourseVisualControlCommitted(courseId){
   gdAdminCourseVisualControlChanged(courseId);
+  gdAdminCourseVisualSaveRecipeFromForm(courseId);
   const engine=window.GDCourseVisualEngine;
   if(!engine||typeof engine.buildCourseVisualPreview!=="function")return false;
   if(gdAdminCourseVisualBakePending[courseId])return false;

@@ -1044,11 +1044,16 @@
     store.records[record.courseId]=persistableRecord(record);
     saveStore(store);
     if(!opts.skipCloudSync&&record.status==="published"&&record.publishedVisual&&!record.settingsDirty)queueCloudSync(record,"metadata");
-    return attachTransientAssets(clone(record));
+    /* Lean clone + reattach: dataUrl strings are immutable, so the returned copy shares them
+       by reference instead of round-tripping them through JSON (captureTransientAssets above
+       has just registered every one in the transient map). */
+    return attachTransientAssets(cloneWithoutPixels(record));
   }
   function captureTransientAssets(record){
     visualAssets(record).forEach(function(asset){
-      if(asset&&asset.path&&asset.dataUrl)saveAssetData(asset.path,asset.dataUrl);
+      /* Skip identical rewrites - every putRecord used to push ~20 multi-MB dataUrls back
+         into IndexedDB even when nothing changed. */
+      if(asset&&asset.path&&asset.dataUrl&&transientAssetDataByPath[asset.path]!==asset.dataUrl)saveAssetData(asset.path,asset.dataUrl);
     });
   }
   function attachTransientAssets(record){
@@ -1057,8 +1062,19 @@
     });
     return record;
   }
+  /* Strips pixels DURING serialisation. clone(record)-then-delete copied every asset's
+     multi-MB dataUrl through JSON first - hundreds of MB of string work per save once the
+     frames became owned rasters. The replacer drops them before they are ever copied. */
+  function cloneWithoutPixels(record){
+    return safe(function(){
+      return JSON.parse(JSON.stringify(record,function(key,value){
+        if(key==="dataUrl"||key==="imageData")return undefined;
+        return value;
+      }));
+    },null)||clone(record);
+  }
   function persistableRecord(record){
-    var out=clone(record);
+    var out=cloneWithoutPixels(record);
     delete out.captures;
     visualAssets(out).forEach(function(asset){
       if(asset){
