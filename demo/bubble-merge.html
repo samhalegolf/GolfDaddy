@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>Practice Bubble vs My Bubble</title>
+  <style>
+    :root{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#102219;background:#edf2ed}
+    *{box-sizing:border-box} body{margin:0;min-height:100vh;background:linear-gradient(180deg,#f8faf8 0%,#e9efe9 100%)}
+    .app{width:min(100%,390px);min-height:844px;margin:0 auto;background:#f7f9f7;overflow:hidden;position:relative}
+    header{height:94px;padding:48px 20px 14px;display:flex;align-items:center;justify-content:space-between;background:#fff;border-bottom:1px solid #dce5dc}
+    .back{font-size:24px;color:#315c3d}.title{font-weight:760;font-size:17px}.menu{font-size:22px;color:#315c3d}
+    main{padding:18px 18px 28px}.eyebrow{font-size:12px;letter-spacing:.11em;text-transform:uppercase;color:#64806a;font-weight:750}.headline{font-size:27px;line-height:1.08;margin:8px 0 8px;font-weight:820}.sub{font-size:14px;line-height:1.45;color:#5f7164;margin:0 0 16px}
+    .card{background:#fff;border:1px solid #d9e3da;border-radius:22px;padding:14px;box-shadow:0 12px 28px rgba(29,61,38,.08)}
+    .legend{display:flex;gap:14px;font-size:12px;color:#4e6354;margin-bottom:10px}.legend span{display:flex;align-items:center;gap:6px}.dot{width:9px;height:9px;border-radius:50%}.my{background:#173d27}.practice{background:#6dac73}
+    .plot{position:relative;height:355px;border-radius:17px;overflow:hidden;background:linear-gradient(#f4f7f4 1px,transparent 1px),linear-gradient(90deg,#f4f7f4 1px,transparent 1px),#fbfcfb;background-size:32px 32px}
+    .target{position:absolute;left:50%;top:50%;width:32px;height:32px;border:1px solid #bdcabc;border-radius:50%;transform:translate(-50%,-50%)}.target:before,.target:after{content:"";position:absolute;background:#bdcabc}.target:before{width:1px;height:48px;left:15px;top:-8px}.target:after{height:1px;width:48px;left:-8px;top:15px}
+    .bubble{position:absolute;border-radius:50%;transition:all 1.2s cubic-bezier(.2,.8,.2,1)}
+    .bubble.my-bubble{width:145px;height:205px;left:81px;top:82px;transform:rotate(-12deg);background:rgba(23,61,39,.13);border:2px solid #173d27}
+    .bubble.practice-bubble{width:170px;height:230px;left:145px;top:57px;transform:rotate(9deg);background:rgba(109,172,115,.20);border:2px solid #6dac73}
+    .shot{position:absolute;width:7px;height:7px;border-radius:50%;background:#4f9d59;box-shadow:0 0 0 2px rgba(255,255,255,.8);transition:all 1.2s cubic-bezier(.2,.8,.2,1)}
+    .labels{display:flex;justify-content:space-between;padding:12px 2px 0;font-size:12px;color:#617165}.metric{font-weight:780;color:#173d27}
+    .insight{margin:14px 2px 0;padding:13px 14px;border-radius:15px;background:#eef5ef;font-size:13px;line-height:1.4;color:#34533c}
+    button{width:100%;margin-top:15px;border:0;border-radius:16px;padding:16px 18px;background:#173d27;color:#fff;font-weight:800;font-size:15px;box-shadow:0 8px 18px rgba(23,61,39,.22)}
+    .status{display:none;text-align:center;margin-top:14px;font-size:13px;font-weight:750;color:#315c3d}
+    .merged .practice-bubble{width:150px;height:210px;left:97px;top:77px;transform:rotate(-8deg);background:rgba(23,61,39,.16);border-color:#173d27}
+    .merged .my-bubble{width:150px;height:210px;left:97px;top:77px;transform:rotate(-8deg);background:rgba(23,61,39,.12)}
+    .merged .status{display:block}.merged button{background:#dce7de;color:#315c3d;box-shadow:none}.merged .insight{background:#e6f0e8}
+  </style>
+</head>
+<body>
+<div class="app" id="app">
+  <header><div class="back">‹</div><div class="title">Bubble Studio</div><div class="menu">•••</div></header>
+  <main>
+    <div class="eyebrow">Practice Bubble</div>
+    <h1 class="headline">Your latest pattern is ready</h1>
+    <p class="sub">Compare what your swing produced in practice with the Bubble you currently take onto the course.</p>
+    <section class="card" data-testid="bubble-comparison">
+      <div class="legend"><span><i class="dot my"></i>My Bubble</span><span><i class="dot practice"></i>Practice Bubble</span></div>
+      <div class="plot">
+        <div class="target"></div><div class="bubble my-bubble"></div><div class="bubble practice-bubble"></div>
+        <i class="shot" style="left:52%;top:34%"></i><i class="shot" style="left:59%;top:41%"></i><i class="shot" style="left:64%;top:48%"></i><i class="shot" style="left:55%;top:55%"></i><i class="shot" style="left:68%;top:60%"></i><i class="shot" style="left:48%;top:62%"></i><i class="shot" style="left:61%;top:68%"></i><i class="shot" style="left:71%;top:72%"></i><i class="shot" style="left:44%;top:45%"></i><i class="shot" style="left:57%;top:76%"></i>
+      </div>
+      <div class="labels"><span>Current offset <b class="metric">2.1° right</b></span><span>Practice <b class="metric">4.8° right</b></span></div>
+      <div class="insight" id="insight">Your practice pattern has moved farther right and become slightly wider. Merge it only when it reflects the swing you want to take to the course.</div>
+      <button data-testid="merge-practice-bubble" id="merge">Merge into My Bubble</button>
+      <div class="status" data-testid="bubble-merge-complete">My Bubble updated</div>
+    </section>
+  </main>
+</div>
+<script>
+  const app=document.getElementById('app');
+  const button=document.getElementById('merge');
+  button.addEventListener('click',()=>{
+    app.classList.add('merged');
+    button.textContent='Merged into My Bubble';
+    document.getElementById('insight').textContent='Your My Bubble now reflects this newer practice pattern. It is ready to scale through your Bag and guide decisions in GPS Play.';
+    document.querySelectorAll('.shot').forEach((shot,index)=>{
+      const x=43+(index%4)*7+(index>5?2:0); const y=35+Math.floor(index/4)*14+(index%2)*4;
+      shot.style.left=x+'%'; shot.style.top=y+'%';
+    });
+  });
+</script>
+</body>
+</html>
