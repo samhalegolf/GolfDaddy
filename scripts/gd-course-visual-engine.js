@@ -954,7 +954,7 @@
         if(manifest)manifests.push(manifest);
       });
     }
-    var captures=manifests.map(function(item){return item&&item.tiles?manifestToCapture(item,{courseId:courseId}):item;}).filter(function(capture){return capture&&capture.width&&capture.height&&captureBounds(capture)&&(Array.isArray(capture.tiles)&&capture.tiles.length||capture.imageUrl||capture.imageData);});
+    var captures=manifests.map(function(item){return item&&item.tiles?manifestToCapture(item,{courseId:courseId}):item;}).filter(function(capture){return capture&&capture.width&&capture.height&&captureBounds(capture)&&(Array.isArray(capture.tiles)&&capture.tiles.length||capture.imageUrl||capture.imageData||capture.imagePath);});
     return {
       courseId:courseId,
       courseName:text(source.courseName||source.name||opts.courseName,180),
@@ -985,7 +985,7 @@
         var c=looksLikeManifest?manifestToCapture(capture,{courseId:courseId}):(capture&&capture.tiles?capture:manifestToCapture(capture,{courseId:courseId}));
         c=c&&typeof c==="object"?c:{};
         return Object.assign({},c,{id:text(c.id,180)||"capture-"+index,bounds:captureBounds(c),width:Math.max(0,Math.round(Number(c.width)||0)),height:Math.max(0,Math.round(Number(c.height)||0))});
-      }).filter(function(capture){return capture.bounds&&capture.width&&capture.height&&(Array.isArray(capture.tiles)&&capture.tiles.length||capture.imageUrl||capture.imageData);}),
+      }).filter(function(capture){return capture.bounds&&capture.width&&capture.height&&(Array.isArray(capture.tiles)&&capture.tiles.length||capture.imageUrl||capture.imageData||capture.imagePath);}),
       currentVisual:input.currentVisual||null
     };
   }
@@ -1112,10 +1112,10 @@
     return (Array.isArray(record&&record.captureRefs)?record.captureRefs:[]).map(function(ref){
       var manifest=ref&&ref.storagePath?readJson(ref.storagePath,null):null;
       return manifest?manifestToCapture(manifest,{courseId:record.courseId,role:ref&&ref.role,quality:ref&&ref.quality,stitchLayer:ref&&ref.stitchLayer,planId:ref&&ref.planId,captureLens:ref&&ref.captureLens,lensOrientation:ref&&ref.lensOrientation,captureAnchorPins:ref&&ref.captureAnchorPins}):null;
-    }).filter(function(capture){return capture&&capture.width&&capture.height&&captureBounds(capture)&&(Array.isArray(capture.tiles)&&capture.tiles.length||capture.imageUrl||capture.imageData);});
+    }).filter(function(capture){return capture&&capture.width&&capture.height&&captureBounds(capture)&&(Array.isArray(capture.tiles)&&capture.tiles.length||capture.imageUrl||capture.imageData||capture.imagePath);});
   }
   function renderableCapture(capture){
-    return !!(capture&&capture.width&&capture.height&&(Array.isArray(capture.tiles)&&capture.tiles.length||capture.imageUrl||capture.imageData));
+    return !!(capture&&capture.width&&capture.height&&(Array.isArray(capture.tiles)&&capture.tiles.length||capture.imageUrl||capture.imageData||capture.imagePath));
   }
   /* Our own flattened pixels win over tile references. A flattened capture keeps its tiles list
      for provenance, so checking tiles first would silently ignore the flat image and keep
@@ -2113,6 +2113,10 @@
       var latestRun=record&&record.diagnostics&&record.diagnostics.activeBuildRunId||"";
       if(newerBuildIsActive(latestRun))return record;
       var allCaptures=(Array.isArray(opts.captures)&&opts.captures.length?opts.captures:null)||transientCapturesByCourse[courseId]||capturesFromRecordRefs(record);
+      /* Owned pixels load before any stitching, whichever path supplied the captures - a
+         flattened manifest carries only an imagePath pointer, and stitching without hydrating
+         it would fall back to third-party tile references. */
+      return hydrateCaptureImages(allCaptures).then(function(){
       var split=splitVisualCaptures(allCaptures);
       var captures=split.imagery;
       var capturePlan=Array.isArray(opts.capturePlan)?opts.capturePlan:(record.diagnostics&&record.diagnostics.capturePlan||[]);
@@ -2179,6 +2183,7 @@
         recordEvent(record,"course-visual-build-failed",record.lastError);
       }
       return finishBuild(record);
+      });
     });
     inFlightBuilds[courseId]=promise.finally(function(){delete inFlightBuilds[courseId];});
     return inFlightBuilds[courseId];
@@ -2551,6 +2556,9 @@
       var courseOverrides=overrides!==undefined?clone(overrides||{}):clone(record.courseOverrides||{});
       var settings=mergePreset(preset,courseOverrides);
       var allCaptures=transientCapturesByCourse[record.courseId]||capturesFromRecordRefs(record);
+      /* Terrain shading reads the terrain-reference capture's pixels - hydrate flattened
+         captures here for the same reason the master build does. */
+      return hydrateCaptureImages(allCaptures).then(function(){
       var split=splitVisualCaptures(allCaptures);
       record.presetId=preset.id;
       record.presetVersion=preset.version;
@@ -2631,6 +2639,7 @@
         recordEvent(record,"course-visual-build-failed",record.lastError);
       }
       return putRecord(record);
+      });
     });
   }
   function publishCourseVisual(courseId,previewVersion){
@@ -3109,7 +3118,7 @@
     entries.forEach(function(entry){
       var score=scoreSnapshotCandidate(entry,entries.length);
       var capture=manifestToCapture(entry.manifest,Object.assign({},item||{},score));
-      if(capture&&capture.width&&capture.height&&captureBounds(capture)&&(Array.isArray(capture.tiles)&&capture.tiles.length||capture.imageUrl||capture.imageData)){
+      if(capture&&capture.width&&capture.height&&captureBounds(capture)&&(Array.isArray(capture.tiles)&&capture.tiles.length||capture.imageUrl||capture.imageData||capture.imagePath)){
         options.push({capture:capture,score:score});
       }
     });
@@ -3169,7 +3178,7 @@
         var manifest=executor(item);
         var selected=selectCaptureCandidate(manifest,item);
         var capture=selected&&selected.capture;
-        if(capture&&capture.width&&capture.height&&captureBounds(capture)&&(Array.isArray(capture.tiles)&&capture.tiles.length||capture.imageUrl||capture.imageData))captures.push(capture);
+        if(capture&&capture.width&&capture.height&&captureBounds(capture)&&(Array.isArray(capture.tiles)&&capture.tiles.length||capture.imageUrl||capture.imageData||capture.imagePath))captures.push(capture);
         else errors.push({planId:item&&item.id,role:item&&item.role,holeNumber:item&&item.holeNumber,code:"capture-empty"});
         if(selected&&selected.diagnostic)snapshotSelection.push(selected.diagnostic);
       }catch(error){
@@ -3227,10 +3236,34 @@
       });
     }
     input=Object.assign({},input,{captures:planned.captures,capturePlan:plan});
-    var record=ingestCourseVisualInput(input);
-    record.diagnostics=Object.assign({},record.diagnostics||{},{stageSettings:{enable3dBeta:enable3dBeta},capturePlan:input.capturePlan,capturePlanSummary:planSummary(plan,planned.captures),manifestResolution:{required:Array.isArray(frameRows)?frameRows.length:0,resolved:resolvedManifests.length,missing:missingManifests.length,repairedFrameIndex:repairedFrameIndex,resolvedManifests:resolvedManifests,missingManifests:missingManifests},captureExecution:{attempted:planned.executed,captured:planned.captures.length,errors:planned.errors,snapshotSelection:planned.snapshotSelection||[],fallbackReason:planned.fallbackReason||"",freshRun:opts.forceFresh===true||opts.requireFreshCaptures===true},activeBuildRunId:buildRunId,publishEnabled:!missingManifests.length});
-    putRecord(record);
-    return buildCourseVisualMaster(input.courseId,{captures:input.captures,capturePlan:plan,forceRebuild:opts.forceFresh===true,buildRunId:buildRunId});
+    /* Stitching happens at the END. The camera's flatten runs async after each shutter, so
+       stitching immediately would bake third-party tile references into every frame while our
+       own pixels arrive seconds later - which is exactly how tile-mosaic SVGs shipped as
+       "captures". Hold the stitch until the flattens settle, pull the owned pixels in, then
+       build. A timeout (offline, tile 404) degrades to tile stitching rather than hanging. */
+    return awaitPlannedCaptureFlattens(input.captures).then(function(){
+      return hydrateCaptureImages(input.captures);
+    }).then(function(){
+      var record=ingestCourseVisualInput(input);
+      record.diagnostics=Object.assign({},record.diagnostics||{},{stageSettings:{enable3dBeta:enable3dBeta},capturePlan:input.capturePlan,capturePlanSummary:planSummary(plan,planned.captures),manifestResolution:{required:Array.isArray(frameRows)?frameRows.length:0,resolved:resolvedManifests.length,missing:missingManifests.length,repairedFrameIndex:repairedFrameIndex,resolvedManifests:resolvedManifests,missingManifests:missingManifests},captureExecution:{attempted:planned.executed,captured:planned.captures.length,errors:planned.errors,snapshotSelection:planned.snapshotSelection||[],fallbackReason:planned.fallbackReason||"",freshRun:opts.forceFresh===true||opts.requireFreshCaptures===true},activeBuildRunId:buildRunId,publishEnabled:!missingManifests.length});
+      putRecord(record);
+      return buildCourseVisualMaster(input.courseId,{captures:input.captures,capturePlan:plan,forceRebuild:opts.forceFresh===true,buildRunId:buildRunId});
+    });
+  }
+  /* Waits for the camera's async flatten jobs covering these captures, then attaches the
+     resulting owned-pixel pointers so hydrateCaptureImages can load them before the stitch. */
+  function awaitPlannedCaptureFlattens(captures){
+    var waiter=root&&root.gdAwaitCaptureFlattens;
+    var list=(Array.isArray(captures)?captures:[]).filter(function(capture){return capture&&!capture.imageData&&!capture.imagePath&&capture.storagePath;});
+    if(typeof waiter!=="function"||!list.length)return Promise.resolve(captures);
+    return Promise.resolve(waiter(list.map(function(capture){return capture.storagePath;}),25000)).then(function(results){
+      results=results||{};
+      list.forEach(function(capture){
+        var hit=results[capture.storagePath];
+        if(hit&&hit.imagePath)capture.imagePath=hit.imagePath;
+      });
+      return captures;
+    }).catch(function(){return captures;});
   }
   function beta3dTiltPolicy(){
     var policy=capturePolicy("three-d-hole-beta")||{};

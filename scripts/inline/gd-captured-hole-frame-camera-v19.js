@@ -545,7 +545,23 @@
 			      manifest.routeLengthMeters=Number.isFinite(Number(captureOpts.routeLengthMeters))?Number(captureOpts.routeLengthMeters):null;
 				      manifest.visualCapturePolicy={role:manifest.visualRole,quality:manifest.visualQuality,targetZoom:z,requestedTargetZoom:captureOpts.targetZoom||null,minZoom:minZoom,maxZoom:maxZoom,maxTiles:maxTiles,bleedPx:bleed,lockBounds:captureOpts.lockBounds===true,includeAnchorPins:captureOpts.includeAnchorPins===true,tileSourceLabel:manifest.tileSourceLabel,captureLens:manifest.captureLens,lensShape:manifest.lensShape,lensAspectRatio:manifest.lensAspectRatio,lensOrientation:manifest.lensOrientation,lensFit:manifest.lensFit,segmentIndex:manifest.segmentIndex,segmentCount:manifest.segmentCount,segmentStartMeters:manifest.segmentStartMeters,segmentEndMeters:manifest.segmentEndMeters,routeLengthMeters:manifest.routeLengthMeters,cameraCapability:cameraCapability};
 			    }
-			    manifest=safe(function(){return typeof window.gdCapturedSurfaceWriteScan==="function"?window.gdCapturedSurfaceWriteScan(manifest,{reason:reason,storageKey:storageKey()}):manifest;},manifest)||manifest;
+			    /* A re-capture of an unchanged frame (same zoom, origin, dimensions) reuses the pixels
+	       already flattened for it - the tile lattice is identical, so refetching ~300 tiles to
+	       rebuild the exact same JPEG would be pure waste. Carrying the pointer forward also
+	       means scheduleCaptureFlatten skips, and the build below can stitch from owned pixels
+	       immediately instead of waiting on a flatten. */
+	    safe(function(){
+	      var stored=JSON.parse(localStorage.getItem(storageKey())||"null");
+	      if(stored&&stored.imagePath&&Number(stored.captureZoom)===z&&stored.originPx&&
+	         Math.round(Number(stored.originPx.x))===Math.round(origin.x)&&Math.round(Number(stored.originPx.y))===Math.round(origin.y)&&
+	         Math.round(Number(stored.imageWidth))===Math.round(width)&&Math.round(Number(stored.imageHeight))===Math.round(height)){
+	        manifest.imagePath=stored.imagePath;
+	        manifest.flattenedAt=stored.flattenedAt||stored.updatedAt||null;
+	        manifest.surfaceOwnership="clarity-owned-raster";
+	        manifest.flattenedFrom=stored.flattenedFrom||{tileCount:tiles.length};
+	      }
+	    });
+	    manifest=safe(function(){return typeof window.gdCapturedSurfaceWriteScan==="function"?window.gdCapturedSurfaceWriteScan(manifest,{reason:reason,storageKey:storageKey()}):manifest;},manifest)||manifest;
     if(captureOpts.backgroundCapture){
       window.__gdLastCourseVisualCaptureManifest=manifest;
     }else{
@@ -554,7 +570,12 @@
 	    window.__gdLastHoleImageCaptureManifest=manifest;
 	    window.__gdV19CapturedHoleFrameManifest=manifest;
     }
-	    safe(function(){localStorage.setItem(storageKey(),JSON.stringify(manifest));});
+	    safe(function(){
+	      // Once pixels are owned the tile list is dead weight in localStorage (~130KB/hole).
+	      var stored=manifest;
+	      if(manifest.imagePath){stored=Object.assign({},manifest);delete stored.tiles;}
+	      localStorage.setItem(storageKey(),JSON.stringify(stored));
+	    });
 	    if(!captureOpts.skipCoursePlayFrameRegister)gdRegisterCoursePlayFrameManifest(manifest,{generatedFrom:"v19-captured-surface",manifestKey:storageKey(),status:"generated"});
 	    // Turn the tile references into our own pixels, alongside rather than in the way.
 	    safe(function(){scheduleCaptureFlatten(manifest,captureOpts);});
@@ -701,6 +722,24 @@
 	    captureFlattenPending[key]=job;
 	    return job;
 	  }
+	  /* Lets the visual engine hold its stitch until the flattens for a set of captures have
+	     settled, then reports which manifests now own their pixels. Resolves on a timeout too,
+	     so an offline browser degrades to tile stitching instead of hanging the build. */
+	  function awaitCaptureFlattens(keys,timeoutMs){
+	    keys=(Array.isArray(keys)?keys:[]).map(String).filter(Boolean);
+	    var jobs=keys.map(function(key){return captureFlattenPending[key]||null;}).filter(Boolean);
+	    var settled=Promise.all(jobs.map(function(job){return job.catch(function(){return null;});}));
+	    var timer=new Promise(function(resolve){setTimeout(resolve,Math.max(1000,num(timeoutMs,25000)));});
+	    return Promise.race([settled,timer]).then(function(){
+	      var out={};
+	      keys.forEach(function(key){
+	        var stored=safe(function(){return JSON.parse(localStorage.getItem(key)||"null");},null);
+	        if(stored&&stored.imagePath)out[key]={imagePath:stored.imagePath,flattenedAt:stored.flattenedAt||null};
+	      });
+	      return out;
+	    });
+	  }
+	  window.gdAwaitCaptureFlattens=awaitCaptureFlattens;
 	  function loadCaptureManifest(){
 	    if(captureManifest&&manifestMatchesActive(captureManifest))return publishCaptureManifest(captureManifest);
 	    if(captureManifest&&!manifestMatchesActive(captureManifest))captureManifest=null;
