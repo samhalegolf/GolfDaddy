@@ -1,13 +1,7 @@
 {
-  "name": "Practice Bubble versus My Bubble merge",
-  "viewport": {
-    "width": 390,
-    "height": 844
-  },
-  "videoSize": {
-    "width": 390,
-    "height": 844
-  },
+  "name": "Real Practice Bubble versus My Bubble",
+  "viewport": { "width": 390, "height": 844 },
+  "videoSize": { "width": 390, "height": 844 },
   "locale": "en-NZ",
   "timezoneId": "Pacific/Auckland",
   "colorScheme": "light",
@@ -15,49 +9,26 @@
   "steps": [
     {
       "action": "goto",
-      "url": "{{baseUrl}}/demo/bubble-merge.html",
+      "url": "{{baseUrl}}/?demo=practice-bubble",
       "waitUntil": "networkidle",
-      "holdAfter": 1800
+      "holdAfter": 2600
     },
     {
       "action": "waitForAny",
       "candidates": [
-        { "testId": "bubble-comparison" },
-        { "text": "Your latest pattern is ready" }
-      ],
-      "holdAfter": 1800
-    },
-    {
-      "action": "screenshot",
-      "path": "01-practice-vs-my-bubble.png"
-    },
-    {
-      "action": "pause",
-      "duration": 2200
-    },
-    {
-      "action": "clickFirst",
-      "candidates": [
-        { "testId": "merge-practice-bubble" },
-        { "role": "button", "name": "Merge into My Bubble" }
-      ],
-      "holdAfter": 1600
-    },
-    {
-      "action": "waitForAny",
-      "candidates": [
-        { "testId": "bubble-merge-complete" },
-        { "text": "My Bubble updated" }
+        { "selector": "#practiceDataPanel.open" },
+        { "selector": "#gdPracticeDataVisual" },
+        { "text": "Practice Data" }
       ],
       "holdAfter": 2200
     },
     {
       "action": "screenshot",
-      "path": "02-merged-my-bubble.png"
+      "path": "01-real-practice-bubble.png"
     },
     {
       "action": "pause",
-      "duration": 1800
+      "duration": 2600
     }
   ]
 }
