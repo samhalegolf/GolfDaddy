@@ -1257,6 +1257,7 @@ function gdAdminCourseVisualScheduleAutoBuild(courseId,record,sourceStatus){
   gdAdminCourseVisualAutoBuildAttempted[key]=true;
   setTimeout(async()=>{
     try{
+      gdAdminCourseVisualEnsurePipelineCourse(courseId);
       const fresh=gdAdminCourseVisualRecord(courseId)||engine.getRecord(courseId);
       const overrides=fresh&&fresh.courseOverrides||{};
       const beta3d=!!(overrides.visualEngine&&overrides.visualEngine.enable3dBeta);
@@ -2032,10 +2033,30 @@ async function gdAdminCourseVisualBuildPreview(courseId){
   gdRenderAdminCourseDatabase();
   return false;
 }
+/* The engine builds from the LOCAL Course Play Pipeline. In a browser that never mapped the
+   course (fresh Chrome, new device) that pipeline is empty even though the course is in
+   Supabase - so Scan died with "No renderable tile captures found". Hydrate the pipeline from
+   the cloud package first; a browser that already has the holes skips this. */
+function gdAdminCourseVisualEnsurePipelineCourse(courseId){
+  const pipeline=window.GDCoursePlayPipeline;
+  if(!pipeline||typeof pipeline.ingestCourseLibraryCourse!=="function")return false;
+  try{
+    const summaries=gdAdminCourseDbSummaries().find(item=>item.id===String(courseId||""));
+    const local=typeof pipeline.loadCoursePlayPipeline==="function"?pipeline.loadCoursePlayPipeline():null;
+    const localCourse=local&&local.courses&&local.courses[String(courseId||"")];
+    const localHoles=localCourse&&localCourse.holes?Object.keys(localCourse.holes).length:0;
+    if(localHoles>0)return false;
+    const cloudCourse=summaries&&summaries.course||gdAdminCourseDbPayload(courseId);
+    if(!cloudCourse||!cloudCourse.objects)return false;
+    pipeline.ingestCourseLibraryCourse(cloudCourse,{source:"admin-visual-scan"});
+    return true;
+  }catch(e){return false;}
+}
 async function gdAdminCourseVisualRecapture(courseId){
   const engine=window.GDCourseVisualEngine;
   if(!engine){gdAdminCourseVisualToast("Course Visual Engine not loaded");return false;}
   try{
+    gdAdminCourseVisualEnsurePipelineCourse(courseId);
     const presetId=String(document.getElementById("gdCourseVisualPreset")?.value||"");
     const overrides=gdAdminCourseVisualOverridesFromForm();
     if(typeof engine.deleteCloudCourseVisual==="function")await engine.deleteCloudCourseVisual(courseId,{silent:true});
