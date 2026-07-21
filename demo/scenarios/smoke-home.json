@@ -1,0 +1,46 @@
+{
+  "name": "Clarity Caddy home smoke capture",
+  "viewport": {
+    "width": 390,
+    "height": 844
+  },
+  "videoSize": {
+    "width": 390,
+    "height": 844
+  },
+  "locale": "en-NZ",
+  "timezoneId": "Pacific/Auckland",
+  "colorScheme": "light",
+  "headless": true,
+  "storageState": {
+    "localStorage": {
+      "clarity_demo_capture": {
+        "enabled": true,
+        "scenario": "smoke-home",
+        "version": 1
+      }
+    }
+  },
+  "steps": [
+    {
+      "action": "goto",
+      "url": "{{baseUrl}}/",
+      "waitUntil": "networkidle",
+      "holdAfter": 1800
+    },
+    {
+      "action": "waitFor",
+      "selector": "body",
+      "state": "visible",
+      "holdAfter": 1200
+    },
+    {
+      "action": "screenshot",
+      "path": "home.png"
+    },
+    {
+      "action": "pause",
+      "duration": 1400
+    }
+  ]
+}
