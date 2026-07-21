@@ -135,7 +135,7 @@
         if (typeof GD_SCORECARD_CACHE_KEY === 'undefined' || typeof gdScorecardCourseKey !== 'function') return;
         var cacheKey = gdScorecardCourseKey(course || null);
         var cache = JSON.parse(localStorage.getItem(GD_SCORECARD_CACHE_KEY) || '{}') || {};
-        if (cacheKey && cache[cacheKey]) { delete cache[cacheKey]; localStorage.setItem(GD_SCORECARD_CACHE_KEY, JSON.stringify(cache)); }
+        if (cacheKey && cache[cacheKey]) { delete cache[cacheKey]; gdSafeLocalSet(GD_SCORECARD_CACHE_KEY, JSON.stringify(cache)); }
       });
       if (typeof selectedHole !== 'undefined') selectedHole = Math.max(1, Math.min(scorecard.holes.length || 18, Number(selectedHole) || 1));
       if (typeof renderScorecard === 'function') renderScorecard();

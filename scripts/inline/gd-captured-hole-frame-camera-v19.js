@@ -648,6 +648,12 @@
 	            // Persist the pointer, never the pixels.
 	            var lean=Object.assign({},flattened);
 	            delete lean.imageData;
+	            /* Drop the tile list too. Once we own the pixels those URLs are dead weight, and
+	               they are the single biggest consumer of the localStorage quota: ~155 bytes per
+	               tile, up to 320 tiles per capture, roughly 130KB per hole and ~2.3MB across 18
+	               holes - most of a 5MB budget. flattenedFrom keeps the provenance (tile count,
+	               source, zoom) in a few dozen bytes. */
+	            delete lean.tiles;
 	            safe(function(){localStorage.setItem(manifest.key||storageKey(),JSON.stringify(lean));});
 	            result.storedManifestBytes=JSON.stringify(lean).length;
 	          }

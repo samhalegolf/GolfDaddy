@@ -1004,6 +1004,21 @@ function payload() {
   assert.ok(hydratedMarkup.indexOf("OWNEDPIXELS") >= 0, "a hydrated capture renders from our own pixels");
   assert.ok(hydratedMarkup.indexOf("tiles.test") < 0, "a hydrated capture never falls back to the remote tiles");
 
+  // A flattened manifest drops its tile list - that array is the biggest consumer of the
+  // localStorage quota (~155 bytes/tile, up to 320 tiles/capture, ~2.3MB across 18 holes).
+  const tilelessManifest = Object.assign({}, flatManifest, { imagePath: imgPath });
+  delete tilelessManifest.tiles;
+  const tilelessCapture = engine.manifestToCapture(tilelessManifest, { courseId: "cromwell" });
+  assert.ok(tilelessCapture, "a flattened manifest with no tile list still yields a capture");
+  assert.equal(tilelessCapture.imagePath, imgPath, "it carries the pointer to our pixels");
+  await engine.hydrateCaptureImages(tilelessCapture);
+  assert.equal(tilelessCapture.imageData, ownedPixels, "and hydrates from the asset store");
+  assert.ok(svgText(engine.__test.stitchSvg([tilelessCapture], { courseId: "cromwell" }).dataUrl).indexOf("OWNEDPIXELS") >= 0, "and renders from our own pixels");
+  // ...but a manifest with neither tiles nor pixels is still rejected.
+  const emptyManifest = Object.assign({}, flatManifest);
+  delete emptyManifest.tiles;
+  assert.equal(engine.manifestToCapture(emptyManifest, { courseId: "cromwell" }), null, "a manifest with neither tiles nor pixels is still rejected");
+
   // Captures that were never flattened must pass through hydration untouched.
   const plain = engine.manifestToCapture(flatManifest, { courseId: "cromwell" });
   await engine.hydrateCaptureImages(plain);

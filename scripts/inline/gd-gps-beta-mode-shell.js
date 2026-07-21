@@ -264,7 +264,7 @@
       try{
         localStorage.setItem(MODE_KEY,nextMode);
         localStorage.setItem('gd_gps_play_mode',nextMode);
-        localStorage.setItem('gdGpsPlayMode',nextMode);
+        gdSafeLocalSet('gdGpsPlayMode',nextMode);
       }catch(e){}
       if(typeof window.setGpsPlayMode==='function') window.setGpsPlayMode(nextMode);
       else nextMode==='live'?enterLiveGps():enterTwoTap();
@@ -326,7 +326,7 @@
   function clearTargetOnly(){try{if(typeof target!=='undefined')target=null}catch(e){};try{mode='green'}catch(e){};document.querySelectorAll('.targetDot,.greenDot,.pinDot,.flagMarker').forEach(x=>x.remove());try{if(typeof renderShot==='function')renderShot()}catch(e){}}
 
   function enterTwoTap(){
-    localStorage.setItem(MODE_KEY,'twoTap');
+    gdSafeLocalSet(MODE_KEY,'twoTap');
     try{if(typeof gpsWatch!=='undefined'&&gpsWatch&&navigator.geolocation){navigator.geolocation.clearWatch(gpsWatch);gpsWatch=null}}catch(e){}
     setGpsLabel(false,'Manual');
     clearStartOnly();
@@ -336,7 +336,7 @@
     refresh();
   }
   function enterLiveGps(){
-    localStorage.setItem(MODE_KEY,'live');
+    gdSafeLocalSet(MODE_KEY,'live');
     setGpsLabel(true,'GPS…');setStateLabel('Requesting GPS');hint('Allow location permission');
     window.GDGpsLocationLifecycle?.locate?.();
     refresh();

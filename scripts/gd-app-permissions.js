@@ -38,7 +38,7 @@ function gdCoachCanSeeProfileFeature(key){
 function gdSetCoachProfileVisibility(key,value){
   const next=gdGetCoachProfileVisibility();
   next[key]=!!value;
-  localStorage.setItem(GD_COACH_PROFILE_VISIBILITY_KEY,JSON.stringify(next));
+  gdSafeLocalSet(GD_COACH_PROFILE_VISIBILITY_KEY,JSON.stringify(next));
   gdRenderPermissionsAdmin();
   try{if(typeof renderProfilePanel==="function")renderProfilePanel();}catch(e){}
   try{if(typeof toast==="function")toast("Coach profile visibility updated");}catch(e){}
@@ -68,7 +68,7 @@ function gdGetAccountPermission(){
 }
 function gdApplyAccountPermission(value,opts={}){
   const permission=gdNormalizePermission(value);
-  localStorage.setItem(GD_PERMISSION_STORE_KEY,permission);
+  gdSafeLocalSet(GD_PERMISSION_STORE_KEY,permission);
   let p=null;
   try{p=typeof activePlayerProfile==='function'?activePlayerProfile():null;}catch(e){}
   if(p){

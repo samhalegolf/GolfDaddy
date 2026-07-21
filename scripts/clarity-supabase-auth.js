@@ -95,7 +95,7 @@
       s.viewingProfileId = normalized.account.profileId;
       p.activeId = normalized.profile.id;
       localStorage.removeItem("gd_account_signed_out_v1");
-      localStorage.setItem("gd_account_keep_logged_in_v1", opts.keepLoggedIn === false ? "0" : "1");
+      gdSafeLocalSet("gd_account_keep_logged_in_v1", opts.keepLoggedIn === false ? "0" : "1");
       safe(function () { sessionStorage.setItem("gd_account_session_login_v1", "1"); });
     }
     saveJson(ACCOUNT_KEY, s);

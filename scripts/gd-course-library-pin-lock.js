@@ -1252,7 +1252,7 @@
         active.finderLat=active.courseFinderLat=lat;
         active.finderLng=active.courseFinderLng=lng;
         active.finderUpdatedAt=course.finderUpdatedAt;
-        localStorage.setItem('gd_active_course_v1',JSON.stringify(active));
+        gdSafeLocalSet('gd_active_course_v1',JSON.stringify(active));
       }
     }catch(e){}
     return course;
@@ -6179,7 +6179,7 @@
         delete active.courseFinderLat;
         delete active.courseFinderLng;
         delete active.finderUpdatedAt;
-        localStorage.setItem('gd_active_course_v1',JSON.stringify(active));
+        gdSafeLocalSet('gd_active_course_v1',JSON.stringify(active));
       }
     }catch(e){}
     clearCourseFinderLayer();

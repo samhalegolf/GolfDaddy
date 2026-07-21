@@ -1,3 +1,31 @@
+/* A storage write must never be able to crash the app.
+
+   localStorage throws QuotaExceededError once full, and an unguarded setItem in a boot path takes
+   the rest of boot with it - a full disk then presents as unrelated breakage (missing shell,
+   features that never initialise) rather than as a storage error. Writes are allowed to fail here;
+   they are never allowed to throw. Failures are reported rather than swallowed, and the
+   quota warning is shown once rather than on every subsequent write. */
+var GD_STORAGE_QUOTA_WARNED=false;
+/* Canonical implementation lives in gd-durable-storage.js, which loads first. This is the
+   fallback for contexts where that module is absent, so the 17 call sites below can never
+   become a ReferenceError. */
+function gdSafeLocalSet(key,value){
+  if(window.gdSafeLocalSet&&window.gdSafeLocalSet!==gdSafeLocalSet)return window.gdSafeLocalSet(key,value);
+  try{
+    localStorage.setItem(key,value);
+    return true;
+  }catch(error){
+    var quota=error&&(error.name==="QuotaExceededError"||error.code===22||error.code===1014);
+    console.warn("[GolfDaddy] storage write failed for "+key+(quota?" - localStorage is full":""),error);
+    try{window.ClarityErrorReporter&&window.ClarityErrorReporter.report&&window.ClarityErrorReporter.report(error,{source:"gdSafeLocalSet",key:key,quotaExceeded:!!quota});}catch(e){}
+    if(quota&&!GD_STORAGE_QUOTA_WARNED){
+      GD_STORAGE_QUOTA_WARNED=true;
+      try{toast("Device storage is full - some settings can't be saved. Clear site data to recover.");}catch(e){}
+    }
+    return false;
+  }
+}
+
 /* GolfDaddy app core. Extracted verbatim (split-02) from the inline
    <script> block at index.html:6547. Classic script: top-level const/
    function declarations remain global, loaded in the same document position. */
@@ -691,7 +719,7 @@ async function gdAdminCourseDbDelete(courseId){
     const store=api&&typeof api.loadCoursePlayPipeline==="function"?api.loadCoursePlayPipeline():JSON.parse(localStorage.getItem(key)||"null")||{courses:{}};
     if(store&&store.courses)delete store.courses[courseId];
     store.updatedAt=new Date().toISOString();
-    localStorage.setItem(key,JSON.stringify(store));
+    gdSafeLocalSet(key,JSON.stringify(store));
   }catch(error){console.warn("[GolfDaddy] course delete pipeline cleanup failed",error);}
   try{
     const api=window.GDCoursePlayPipeline;
@@ -699,7 +727,7 @@ async function gdAdminCourseDbDelete(courseId){
     const index=api&&typeof api.loadCoursePlayFrameIndex==="function"?api.loadCoursePlayFrameIndex():JSON.parse(localStorage.getItem(key)||"null")||{frames:{}};
     Object.keys(index.frames||{}).forEach(frameKey=>{if(String(frameKey).indexOf(courseId+":h")===0)delete index.frames[frameKey];});
     index.updatedAt=new Date().toISOString();
-    localStorage.setItem(key,JSON.stringify(index));
+    gdSafeLocalSet(key,JSON.stringify(index));
   }catch(error){console.warn("[GolfDaddy] course delete frame cleanup failed",error);}
   try{
     const engine=window.GDCourseVisualEngine;
@@ -2455,7 +2483,7 @@ function renderDevPanel(){
   const reset=document.createElement("button");reset.className="devResetSmall";reset.textContent=`Reset ${DEV_DEFS[group].label}`;reset.onclick=()=>resetDevSettings(group);box.appendChild(reset);
   root.appendChild(box);
   const select=root.querySelector("#gdDevGroupSelect");
-  if(select)select.onchange=()=>{activeDevGroup=select.value;localStorage.setItem("golf_daddy_active_dev_group",activeDevGroup);renderDevPanel();};
+  if(select)select.onchange=()=>{activeDevGroup=select.value;gdSafeLocalSet("golf_daddy_active_dev_group",activeDevGroup);renderDevPanel();};
   root.querySelectorAll("input[data-dev-path]").forEach(input=>{
     input.onchange=()=>{let v=Number(input.value);const f=DEV_FIELDS[input.dataset.devPath];if(!Number.isFinite(v))v=devDefault(input.dataset.devPath);v=Math.max(f.min,Math.min(f.max,v));setDev(input.dataset.devPath,v);};
   });
@@ -16129,7 +16157,7 @@ async function gdHandleRawCourseDataUpload(file){
     }
     const api=window.GolfDaddyShotEvents;
     if(api&&typeof api.replaceScopedStore==="function")api.replaceScopedStore(store);
-    else localStorage.setItem("gd_shot_events_v1",JSON.stringify(store));
+    else gdSafeLocalSet("gd_shot_events_v1",JSON.stringify(store));
     if(typeof renderStats==="function")renderStats();
     if(typeof renderDataHubStatus==="function")renderDataHubStatus();
     if(typeof renderCompareData==="function")renderCompareData();
@@ -20511,7 +20539,7 @@ function gdDiscardCurrentPlannedShot(){
       else{
         store.plannedShots=planned.filter(item=>item&&item.shotId!==shotId);
         store.updatedAt=new Date().toISOString();
-        localStorage.setItem(api.storageKey||"gd_shot_events_v1",JSON.stringify(store));
+        gdSafeLocalSet(api.storageKey||"gd_shot_events_v1",JSON.stringify(store));
       }
     }
   }catch(e){
@@ -24547,7 +24575,7 @@ function showModeDashboard(opts={}){
 }
 function setShellMode(mode){
   shellMode=mode;
-  localStorage.setItem('gd_shell_mode',mode);
+  gdSafeLocalSet('gd_shell_mode',mode);
   try{
     const p=activePlayerProfile&&activePlayerProfile();
     if(p){p.mode=mode;p.updatedAt=new Date().toISOString();savePlayerProfiles&&savePlayerProfiles();syncCoreProfileFromActive&&syncCoreProfileFromActive();}
@@ -24745,7 +24773,7 @@ function gdInstallPlaceholderProfile(force=false){
   if(existing)Object.assign(existing,demo);
   else GD_PROFILE_STATE.profiles.unshift(demo);
   GD_PROFILE_STATE.activeId=demo.id;
-  localStorage.setItem(GD_PLACEHOLDER_SEED_KEY,'1');
+  gdSafeLocalSet(GD_PLACEHOLDER_SEED_KEY,'1');
   return demo;
 }
 function completeProfileForHome(p){
@@ -24766,7 +24794,27 @@ function completeProfileForHome(p){
   return p;
 }
 function loadPlayerProfiles(){try{const raw=JSON.parse(localStorage.getItem(GD_PROFILE_STORE_KEY)||'{}');if(Array.isArray(raw.profiles)){GD_PROFILE_STATE={profiles:raw.profiles.map(completeProfileForHome),activeId:raw.activeId||raw.profiles[0]?.id||null,onboardingDraft:{...GD_ONBOARDING_DRAFT,...(raw.onboardingDraft||{})}}}else{GD_PROFILE_STATE={profiles:[],activeId:null,onboardingDraft:{...GD_ONBOARDING_DRAFT}}}}catch(e){GD_PROFILE_STATE={profiles:[],activeId:null,onboardingDraft:{...GD_ONBOARDING_DRAFT}}}}
-function savePlayerProfiles(){localStorage.setItem(GD_PROFILE_STORE_KEY,JSON.stringify(GD_PROFILE_STATE));}
+/* Never let a full localStorage take down boot.
+
+   savePlayerProfiles sits in the boot path (bootProfileShell -> ensureProfile -> here), and an
+   unguarded setItem throws QuotaExceededError once storage fills. That exception is uncaught, so
+   it aborts the rest of the boot sequence - which is why a full quota shows up as unrelated
+   breakage further down (missing shell, features that never initialise) rather than as a storage
+   error. The write is allowed to fail; boot is not. */
+function savePlayerProfiles(){
+  try{
+    localStorage.setItem(GD_PROFILE_STORE_KEY,JSON.stringify(GD_PROFILE_STATE));
+    return true;
+  }catch(error){
+    const quota=error&&(error.name==="QuotaExceededError"||error.code===22||error.code===1014);
+    console.warn("[GolfDaddy] player profiles could not be saved"+(quota?" - localStorage is full":""),error);
+    try{window.ClarityErrorReporter&&window.ClarityErrorReporter.report&&window.ClarityErrorReporter.report(error,{source:"savePlayerProfiles",quotaExceeded:!!quota});}catch(e){}
+    if(quota){
+      try{gdAdminCourseVisualToast("Device storage is full — settings can't be saved. Clear site data to recover.");}catch(e){}
+    }
+    return false;
+  }
+}
 function activePlayerProfile(){return GD_PROFILE_STATE.profiles.find(p=>p.id===GD_PROFILE_STATE.activeId)||GD_PROFILE_STATE.profiles[0]||null;}
 function ensureProfile(){let p=activePlayerProfile();if(!p){p=gdDefaultProfile();GD_PROFILE_STATE.profiles=[p];}completeProfileForHome(p);GD_PROFILE_STATE.activeId=p.id;savePlayerProfiles();return p;}
 function syncCoreProfileFromActive(){
@@ -24784,7 +24832,7 @@ function syncCoreProfileFromActive(){
     p.accountPermission=p.permission;
     p.mode=gdPermissionToMode(p.permission);
   }
-  localStorage.setItem(GD_PERMISSION_STORE_KEY,permission);
+  gdSafeLocalSet(GD_PERMISSION_STORE_KEY,permission);
   PLACEHOLDER_PLAYER_PROFILE.source=p.onboardingComplete?'player-profile':'profile-draft';
   PLACEHOLDER_PLAYER_PROFILE.playerId=p.id;
   PLACEHOLDER_PLAYER_PROFILE.handedness=p.handedness||'right';
@@ -24794,7 +24842,7 @@ function syncCoreProfileFromActive(){
   const baseClub=savedBubble?.club||'7i';
   const baseCarry=savedBubble?Number(savedBubble.baseCarry||gdDefaultCarryForClub(baseClub)):((PLACEHOLDER_PLAYER_PROFILE.standInBag.find(c=>c.club==='7i')?.baseCarry)||155);
   PLACEHOLDER_PLAYER_PROFILE.baseCalibration={...PLACEHOLDER_PLAYER_PROFILE.baseCalibration,club:baseClub,baseCarry,faceAlignmentOffsetDeg:centralOffset,faceOffsetDeg:centralOffset,dispersionMultiplier:1};
-  shellMode=gdPermissionToMode(permission)||shellMode||'player';localStorage.setItem('gd_shell_mode',shellMode);
+  shellMode=gdPermissionToMode(permission)||shellMode||'player';gdSafeLocalSet('gd_shell_mode',shellMode);
   gdRefreshPermissionChrome();
   try{window.ClaritySession&&window.ClaritySession.sync("permission-chrome");}catch(e){}
   updateProfileHomeUI();
@@ -24983,7 +25031,7 @@ function gdCleanLegacyExampleAccounts(){
   return doomed.length;
 }
 function gdAccountsSave(){
-  localStorage.setItem(GD_ACCOUNT_STORE_KEY,JSON.stringify(GD_ACCOUNT_STATE));
+  gdSafeLocalSet(GD_ACCOUNT_STORE_KEY,JSON.stringify(GD_ACCOUNT_STATE));
   window.GD_ACCOUNT_STATE=GD_ACCOUNT_STATE;
 }
 function gdAccountById(id){return GD_ACCOUNT_STATE.accounts.find(account=>account.accountId===id)||null}
@@ -25225,7 +25273,7 @@ function gdAccountCreate(data,opts={}){
     GD_ACCOUNT_STATE.activeId=accountId;
     GD_ACCOUNT_STATE.viewingProfileId=account.profileId;
     localStorage.removeItem(GD_ACCOUNT_SIGNED_OUT_KEY);
-    localStorage.setItem(GD_ACCOUNT_KEEP_LOGGED_IN_KEY,opts.keepLoggedIn===false?'0':'1');
+    gdSafeLocalSet(GD_ACCOUNT_KEEP_LOGGED_IN_KEY,opts.keepLoggedIn===false?'0':'1');
     try{sessionStorage.setItem(GD_ACCOUNT_SESSION_LOGIN_KEY,'1');}catch(e){}
   }
   gdAccountsSave();
@@ -25255,7 +25303,7 @@ function gdAccountLogin(email,password,opts={}){
   GD_ACCOUNT_STATE.viewingProfileId=account.profileId;
   localStorage.removeItem(GD_ACCOUNT_SIGNED_OUT_KEY);
   const keepLoggedIn=opts.keepLoggedIn!==false;
-  localStorage.setItem(GD_ACCOUNT_KEEP_LOGGED_IN_KEY,keepLoggedIn?'1':'0');
+  gdSafeLocalSet(GD_ACCOUNT_KEEP_LOGGED_IN_KEY,keepLoggedIn?'1':'0');
   try{sessionStorage.setItem(GD_ACCOUNT_SESSION_LOGIN_KEY,'1');}catch(e){}
   gdAccountsSave();
   gdAccountApplySession({silent:true});
@@ -25264,7 +25312,7 @@ function gdAccountLogin(email,password,opts={}){
 function gdAccountLogout(){
   GD_ACCOUNT_STATE.activeId=null;
   GD_ACCOUNT_STATE.viewingProfileId=null;
-  localStorage.setItem(GD_ACCOUNT_SIGNED_OUT_KEY,'1');
+  gdSafeLocalSet(GD_ACCOUNT_SIGNED_OUT_KEY,'1');
   try{sessionStorage.removeItem(GD_ACCOUNT_SESSION_LOGIN_KEY);}catch(e){}
   gdAccountsSave();
   localStorage.removeItem(GD_PERMISSION_STORE_KEY);
@@ -25369,7 +25417,7 @@ function gdCoachInviteLoad(){
   }catch(e){return [];}
 }
 function gdCoachInviteSave(invites){
-  localStorage.setItem(GD_COACH_INVITE_STORE_KEY,JSON.stringify(Array.isArray(invites)?invites:[]));
+  gdSafeLocalSet(GD_COACH_INVITE_STORE_KEY,JSON.stringify(Array.isArray(invites)?invites:[]));
 }
 function gdCoachInviteCode(account=gdCurrentAccount()){
   const words=String(account?.name||account?.email||'Coach').toUpperCase().match(/[A-Z0-9]+/g)||['COACH'];
@@ -25504,7 +25552,7 @@ function gdAccountReturnToOwnProfile(opts={}){
   const profile=gdAccountEnsureProfile(account);
   GD_ACCOUNT_STATE.viewingProfileId=account.profileId;
   GD_PROFILE_STATE.activeId=profile.id;
-  localStorage.setItem(GD_PERMISSION_STORE_KEY,gdAccountPermission(account.role));
+  gdSafeLocalSet(GD_PERMISSION_STORE_KEY,gdAccountPermission(account.role));
   gdAccountsSave();
   savePlayerProfiles();
   syncCoreProfileFromActive();
@@ -25523,7 +25571,7 @@ function gdAccountApplySession(opts={}){
   GD_ACCOUNT_STATE.viewingProfileId=profileId;
   const profile=gdProfileById(profileId)||gdAccountEnsureProfile(account);
   GD_PROFILE_STATE.activeId=profile.id;
-  localStorage.setItem(GD_PERMISSION_STORE_KEY,gdAccountPermission(account.role));
+  gdSafeLocalSet(GD_PERMISSION_STORE_KEY,gdAccountPermission(account.role));
   gdAccountsSave();
   savePlayerProfiles();
   syncCoreProfileFromActive();
@@ -25599,7 +25647,7 @@ function gdAccountsBootstrap(){
     lastLoginAt:new Date().toISOString()
   };
   GD_ACCOUNT_STATE={accounts:[account],activeId:null,viewingProfileId:null};
-  localStorage.setItem(GD_ACCOUNT_SIGNED_OUT_KEY,'1');
+  gdSafeLocalSet(GD_ACCOUNT_SIGNED_OUT_KEY,'1');
   gdAccountsSave();
   savePlayerProfiles();
   localStorage.removeItem(GD_PERMISSION_STORE_KEY);

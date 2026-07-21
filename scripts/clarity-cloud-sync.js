@@ -172,7 +172,7 @@
       });
       if (raw.activeId === oldId) raw.activeId = newId;
       if (oldProfileId && newProfileId && raw.viewingProfileId === oldProfileId) raw.viewingProfileId = newProfileId;
-      localStorage.setItem(ACCOUNT_KEY, JSON.stringify(raw));
+      gdSafeLocalSet(ACCOUNT_KEY, JSON.stringify(raw));
       if (window.GolfDaddyAccounts && typeof window.GolfDaddyAccounts.load === "function") window.GolfDaddyAccounts.load();
       var profileRaw = JSON.parse(localStorage.getItem(PROFILE_KEY) || "{}");
       var profiles = Array.isArray(profileRaw.profiles) ? profileRaw.profiles : [];
@@ -182,7 +182,7 @@
         if (oldProfileId && newProfileId && profile.id === oldProfileId) profile.id = newProfileId;
       });
       if (oldProfileId && newProfileId && profileRaw.activeId === oldProfileId) profileRaw.activeId = newProfileId;
-      localStorage.setItem(PROFILE_KEY, JSON.stringify(profileRaw));
+      gdSafeLocalSet(PROFILE_KEY, JSON.stringify(profileRaw));
     });
   }
 
@@ -298,13 +298,13 @@
       raw.accounts = accounts.filter(function (account) { return !account || account.accountId !== accountId; });
       if (raw.activeId === accountId) raw.activeId = null;
       if (removed && raw.viewingProfileId === removed.profileId) raw.viewingProfileId = null;
-      localStorage.setItem(ACCOUNT_KEY, JSON.stringify(raw));
+      gdSafeLocalSet(ACCOUNT_KEY, JSON.stringify(raw));
       if (window.GolfDaddyAccounts && typeof window.GolfDaddyAccounts.load === "function") window.GolfDaddyAccounts.load();
       var profileRaw = JSON.parse(localStorage.getItem(PROFILE_KEY) || "{}");
       var profiles = Array.isArray(profileRaw.profiles) ? profileRaw.profiles : [];
       profileRaw.profiles = profiles.filter(function (profile) { return !profile || profile.accountId !== accountId; });
       if (removed && profileRaw.activeId === removed.profileId) profileRaw.activeId = profileRaw.profiles[0] && profileRaw.profiles[0].id || null;
-      localStorage.setItem(PROFILE_KEY, JSON.stringify(profileRaw));
+      gdSafeLocalSet(PROFILE_KEY, JSON.stringify(profileRaw));
     });
     return true;
   }

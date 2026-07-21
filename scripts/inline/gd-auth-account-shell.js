@@ -1308,7 +1308,7 @@
 	      state.activeId = account.accountId;
 	      state.viewingProfileId = account.profileId;
 	      localStorage.removeItem(GD_ACCOUNT_SIGNED_OUT_KEY);
-	      localStorage.setItem(GD_ACCOUNT_KEEP_LOGGED_IN_KEY, document.getElementById('gd67KeepLoggedIn')?.checked === false ? '0' : '1');
+	      gdSafeLocalSet(GD_ACCOUNT_KEEP_LOGGED_IN_KEY, document.getElementById('gd67KeepLoggedIn')?.checked === false ? '0' : '1');
 	      try { sessionStorage.setItem(GD_ACCOUNT_SESSION_LOGIN_KEY,'1'); } catch(e) {}
 	      if (typeof api.save === 'function') api.save();
 	      if (typeof api.apply === 'function') api.apply({silent:true});
@@ -1358,7 +1358,7 @@
         try { if (window.ClarityCloudSync && typeof window.ClarityCloudSync.discardLocalAccount === 'function') window.ClarityCloudSync.discardLocalAccount(created && created.accountId); } catch(discardError) {}
         throw new Error(syncError && syncError.message ? syncError.message : 'Supabase did not confirm this account. Account was not created.');
       }
-      localStorage.setItem('gd_account_keep_logged_in_v1',document.getElementById('gd67KeepLoggedIn')?.checked===false?'0':'1');
+      gdSafeLocalSet('gd_account_keep_logged_in_v1',document.getElementById('gd67KeepLoggedIn')?.checked===false?'0':'1');
       try{sessionStorage.setItem('gd_account_session_login_v1','1');}catch(e){}
 	      saveSafe();
 	      document.documentElement.classList.remove('gdAuthRouteBoot','gdResetRouteBoot');

@@ -784,7 +784,10 @@
     })).then(function(){return Array.isArray(captures)?list:list[0];});
   }
   function manifestToCapture(manifest,opts){
-    if(!manifest||!Array.isArray(manifest.tiles)||!manifest.tiles.length)return null;
+    // A flattened capture owns its pixels, so it no longer needs - or stores - the tile list it
+    // was built from. Requiring tiles here would reject exactly the manifests we most want.
+    var hasOwnPixels=!!(manifest&&(manifest.imageData||manifest.imagePath||manifest.imageUrl));
+    if(!manifest||(!hasOwnPixels&&(!Array.isArray(manifest.tiles)||!manifest.tiles.length)))return null;
     var courseId=slug(manifest.courseKey||manifest.courseName||opts&&opts.courseId);
     var holeNumber=Math.max(1,Math.round(Number(manifest.holeNumber)||Number(opts&&opts.holeNumber)||1));
     var anchorBounds=captureBounds(manifest);
@@ -855,7 +858,8 @@
       snapshotSelectionReason:text(manifest.snapshotSelectionReason||opts&&opts.snapshotSelectionReason,220),
       sourceType:"leaflet-tile-manifest",
       originPx:manifest.originPx||null,
-      tiles:manifest.tiles.map(function(tile){
+      // Empty for a flattened capture, which no longer stores the tiles it was built from.
+      tiles:(Array.isArray(manifest.tiles)?manifest.tiles:[]).map(function(tile){
         return {
           x:Math.round(Number(tile.x)||0),
           y:Math.round(Number(tile.y)||0),

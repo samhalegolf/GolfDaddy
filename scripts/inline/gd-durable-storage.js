@@ -41,6 +41,35 @@
     try { return fn(); } catch (_e) { return fallback; }
   }
 
+  /* Shared quota-safe write, defined here because this module loads before every other app
+     script. localStorage throws QuotaExceededError once full, and an unguarded setItem in a boot
+     path takes the rest of boot with it - so a full disk presents as unrelated breakage rather
+     than as a storage error. Writes may fail; they may not throw. Failures are reported, never
+     swallowed, and the quota warning shows once rather than on every subsequent write.
+
+     Note the patched localStorage.setItem below deliberately does NOT swallow quota errors: it
+     must stay transparent so callers using this helper still see the failure. */
+  var quotaWarned = false;
+  function safeLocalSet(key, value) {
+    try {
+      window.localStorage.setItem(key, value);
+      return true;
+    } catch (error) {
+      var quota = error && (error.name === "QuotaExceededError" || error.code === 22 || error.code === 1014);
+      console.warn("[GolfDaddy] storage write failed for " + key + (quota ? " - localStorage is full" : ""), error);
+      safe(function () {
+        window.ClarityErrorReporter && window.ClarityErrorReporter.report &&
+          window.ClarityErrorReporter.report(error, { source: "gdSafeLocalSet", key: key, quotaExceeded: !!quota });
+      });
+      if (quota && !quotaWarned) {
+        quotaWarned = true;
+        safe(function () { window.toast && window.toast("Device storage is full - some settings can't be saved. Clear site data to recover."); });
+      }
+      return false;
+    }
+  }
+  window.gdSafeLocalSet = safeLocalSet;
+
   function isNative() {
     return !!(window.GDNative && window.GDNative.isNative);
   }
