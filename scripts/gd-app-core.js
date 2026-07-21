@@ -2151,13 +2151,22 @@ function gdAdminCourseVisualMarkup(selected){
     ].join("")}</div><pre class="gdAdminCourseVisualDiag">${gdEscapeHTML(JSON.stringify(diagnostics,null,2))}</pre></div></details></div>`
   ].join("");
 }
+/* The panel re-renders on a 2.2s interval while the developer panel is open.
+   Swapping innerHTML unconditionally destroyed every button and slider mid-tap,
+   so writes are skipped when the markup hasn't changed - the DOM (and any
+   in-flight tap, drag, or scroll) survives idle re-renders. */
+function gdAdminCourseDbSetHTML(el,html){
+  if(el.__gdLastHTML===html)return;
+  el.__gdLastHTML=html;
+  el.innerHTML=html;
+}
 function gdRenderAdminCourseDatabase(){
   const summary=document.getElementById("gdAdminCourseDbSummary");
   const list=document.getElementById("gdAdminCourseDbList");
   const detail=document.getElementById("gdAdminCourseDbDetail");
   if(!summary||!list||!detail)return;
   if(gdAdminCourseDbCloudState==="idle")gdLoadAdminCourseDbCloud();
-  summary.innerHTML=gdAdminCourseDbCloudStatusMarkup();
+  gdAdminCourseDbSetHTML(summary,gdAdminCourseDbCloudStatusMarkup());
   const all=gdAdminCourseDbSummaries();
   const search=String(document.getElementById("gdAdminCourseDbSearch")?.value||"").trim().toLowerCase();
   const filtered=all.filter(item=>{
@@ -2169,36 +2178,36 @@ function gdRenderAdminCourseDatabase(){
     gdAdminCourseDatabaseTab="overview";
   }
   if(!all.length){
-    list.innerHTML=gdAdminCourseDbCloudState==="loading"?'<div class="gdCoursePlayDebugEmpty">Loading courses from Supabase…</div>':gdAdminCourseDbCloudState==="ready"?'<div class="gdCoursePlayDebugEmpty">No courses published to the database yet.</div>':'<div class="gdCoursePlayDebugEmpty">No course records available. Supabase is unreachable and no local cache exists.</div>';
-    detail.innerHTML="";
+    gdAdminCourseDbSetHTML(list,gdAdminCourseDbCloudState==="loading"?'<div class="gdCoursePlayDebugEmpty">Loading courses from Supabase…</div>':gdAdminCourseDbCloudState==="ready"?'<div class="gdCoursePlayDebugEmpty">No courses published to the database yet.</div>':'<div class="gdCoursePlayDebugEmpty">No course records available. Supabase is unreachable and no local cache exists.</div>');
+    gdAdminCourseDbSetHTML(detail,"");
     return;
   }
-  list.innerHTML=filtered.length?`<div class="gdAdminCourseTableWrap"><table class="gdAdminCourseTable"><thead><tr><th>Course</th><th>Status</th><th>Sync</th><th>Holes</th><th>Play</th><th>Visual Engine</th><th>Updated</th></tr></thead><tbody>${filtered.map(item=>{
+  gdAdminCourseDbSetHTML(list,filtered.length?`<div class="gdAdminCourseTableWrap"><table class="gdAdminCourseTable"><thead><tr><th>Course</th><th>Status</th><th>Sync</th><th>Holes</th><th>Play</th><th>Visual Engine</th><th>Updated</th></tr></thead><tbody>${filtered.map(item=>{
     const visual=gdAdminCourseDbVisualState(item.id);
     const statusTone=gdAdminCourseDbStatusTone(item.status,["ready","play_data_ready","mapped_geometry_ready"]);
     const syncTone=gdAdminCourseDbStatusTone(item.syncStatus,["synced","cloud","ready"]);
     const active=item.id===gdAdminCourseDatabaseSelected?" active":"";
     return `<tr class="${active}" onclick="return gdAdminCourseDbOpen(${gdAdminJsArg(item.id)} ,'overview')"><td class="gdAdminCourseNameCell" title="${gdEscapeHTML(item.key)}">${gdEscapeHTML(item.name)}</td><td><span class="gdAdminCourseStatusDot ${statusTone}">${gdEscapeHTML(item.status)}</span></td><td><span class="gdAdminCourseStatusDot ${syncTone}">${gdEscapeHTML(item.syncStatus)}</span></td><td>${gdEscapeHTML(item.holeCount)}</td><td>${gdEscapeHTML(item.playReadyCount)}/${gdEscapeHTML(item.holeCount||0)}</td><td><span class="gdAdminCourseStatusDot ${visual.tone}">${gdEscapeHTML(visual.label)}</span></td><td>${gdEscapeHTML(gdCoursePlayDebugTime(item.updatedAt)||"unknown")}</td></tr>`;
-  }).join("")}</tbody></table></div>`:'<div class="gdCoursePlayDebugEmpty">No course records match the current search.</div>';
+  }).join("")}</tbody></table></div>`:'<div class="gdCoursePlayDebugEmpty">No course records match the current search.</div>');
   const selected=filtered.find(item=>item.id===gdAdminCourseDatabaseSelected);
-  if(!selected){detail.innerHTML="";return;}
+  if(!selected){gdAdminCourseDbSetHTML(detail,"");return;}
   const rows=selected.rows||[];
   const payload=gdAdminCourseDbPayload(selected.id);
   const header=`<div class="gdAdminCourseActionHead"><div><h4>${gdEscapeHTML(selected.name)}</h4><span>${gdEscapeHTML(selected.key)} · ${gdEscapeHTML(selected.status)} · ${gdEscapeHTML(selected.syncStatus)} · ${gdEscapeHTML(selected.source)}</span></div>${gdAdminCourseDbActionRail(selected)}</div>`;
   if(gdAdminCourseDatabaseTab==="visuals"){
-    detail.innerHTML=`<div class="gdAdminCourseActionPanel">${header}${gdAdminCourseVisualMarkup(selected)}</div>`;
+    gdAdminCourseDbSetHTML(detail,`<div class="gdAdminCourseActionPanel">${header}${gdAdminCourseVisualMarkup(selected)}</div>`);
     return;
   }
   if(gdAdminCourseDatabaseTab==="scorecard"){
-    detail.innerHTML=`<div class="gdAdminCourseActionPanel">${header}${gdAdminCourseScorecardMarkup(selected)}</div>`;
+    gdAdminCourseDbSetHTML(detail,`<div class="gdAdminCourseActionPanel">${header}${gdAdminCourseScorecardMarkup(selected)}</div>`);
     return;
   }
   if(gdAdminCourseDatabaseTab==="preview"){
-    detail.innerHTML=`<div class="gdAdminCourseActionPanel">${header}${gdAdminCoursePreviewMarkup(selected)}</div>`;
+    gdAdminCourseDbSetHTML(detail,`<div class="gdAdminCourseActionPanel">${header}${gdAdminCoursePreviewMarkup(selected)}</div>`);
     return;
   }
   if(gdAdminCourseDatabaseTab==="debug"){
-    detail.innerHTML=`<div class="gdAdminCourseActionPanel">${header}${gdAdminCourseDebugMarkup(selected)}</div>`;
+    gdAdminCourseDbSetHTML(detail,`<div class="gdAdminCourseActionPanel">${header}${gdAdminCourseDebugMarkup(selected)}</div>`);
     gdAdminCourseDebugRefresh();
     return;
   }
@@ -2212,15 +2221,15 @@ function gdRenderAdminCourseDatabase(){
   if(gdAdminCourseDatabaseTab==="geometry"){
     const totals=selected.objectTotals||{tees:0,greens:0,fairways:0};
     const geometryRows=rows.length?`<div class="gdAdminCourseHoleScroll"><table class="gdAdminCourseHoleTable"><thead><tr><th>Hole</th><th>State</th><th>Tee</th><th>Green</th><th>Fairways</th><th>Source</th></tr></thead><tbody>${rows.map(row=>`<tr><td>H${gdEscapeHTML(row.holeNumber)}</td><td>${gdEscapeHTML(row.state)}</td><td>${gdAdminCourseDbFlag(row.hasTee)}</td><td>${gdAdminCourseDbFlag(row.hasGreen)}${row.hasGreen?` <span class="gdAdminCourseHoleNote">${row.hasGreenShape?"polygon":"point"}</span>`:""}</td><td>${gdEscapeHTML(row.fairways)}</td><td>${gdEscapeHTML(row.source)}</td></tr>`).join("")}</tbody></table></div>`:'<div class="gdCoursePlayDebugEmpty">No geometry in the database for this course yet.</div>';
-    detail.innerHTML=`<div class="gdAdminCourseActionPanel">${header}<div class="gdAdminCourseWorkspace"><div class="gdAdminCourseStageLine">${[
+    gdAdminCourseDbSetHTML(detail,`<div class="gdAdminCourseActionPanel">${header}<div class="gdAdminCourseWorkspace"><div class="gdAdminCourseStageLine">${[
       `<span>${gdEscapeHTML(totals.tees)} tees</span>`,
       `<span>${gdEscapeHTML(totals.greens)} greens</span>`,
       `<span>${gdEscapeHTML(totals.fairways)} fairways</span>`,
       `<span class="${selected.playReadyCount===selected.holeCount&&selected.holeCount?"ready":"warn"}">${gdEscapeHTML(selected.playReadyCount)}/${gdEscapeHTML(selected.holeCount)} play ready</span>`
-    ].join("")}</div>${geometryRows}</div></div>`;
+    ].join("")}</div>${geometryRows}</div></div>`);
     return;
   }
-  detail.innerHTML=`<div class="gdAdminCourseActionPanel">${header}<div class="gdAdminCourseWorkspace">${stageLine}${gdAdminCourseLocationMarkup(selected,payload)}<details class="gdAdminCourseSettings"><summary>Database payload</summary><div class="gdAdminCourseSettingsBody"><pre class="gdAdminCourseVisualDiag">${gdEscapeHTML(JSON.stringify(payload,null,2))}</pre></div></details></div></div>`;
+  gdAdminCourseDbSetHTML(detail,`<div class="gdAdminCourseActionPanel">${header}<div class="gdAdminCourseWorkspace">${stageLine}${gdAdminCourseLocationMarkup(selected,payload)}<details class="gdAdminCourseSettings"><summary>Database payload</summary><div class="gdAdminCourseSettingsBody"><pre class="gdAdminCourseVisualDiag">${gdEscapeHTML(JSON.stringify(payload,null,2))}</pre></div></details></div></div>`);
 }
 function gdCoursePlayMonitorMetric(label,value){
   return `<div class="gdCpmMetric"><span>${gdEscapeHTML(label)}</span><strong>${gdEscapeHTML(value ?? "")}</strong></div>`;
