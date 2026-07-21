@@ -1608,11 +1608,15 @@ function gdAdminCourseVisualFilterStyleVars(record){
     `--gd-course-visual-mowing-opacity:${values.mowingOpacity}`
   ].join(";");
 }
+// The visuals tab shows the real baked products, so it must NOT layer the live recipe on top —
+// that double-applies the look. Only the preview sandbox gets the live CSS recipe.
 function gdAdminCourseVisualProductFilterAttrs(record){
-  return `class="gdAdminCourseVisualProducts filtered" style="${gdAdminCourseVisualFilterStyleVars(record)}"`;
+  return `class="gdAdminCourseVisualProducts"`;
 }
+// Live recipe preview. Cheap CSS only: it paints the current settings onto the RAW hole image
+// in the sandbox. No rebuild, no re-capture — the recipe is baked for real on Apply/Publish.
 function gdAdminCourseVisualApplyLiveFilter(courseId){
-  const targets=document.querySelectorAll(".gdAdminCourseVisualProducts,.gdAdminPhoneTuned");
+  const targets=document.querySelectorAll(".gdAdminPhoneTuned");
   if(!targets.length)return;
   const presetId=String(document.getElementById("gdCourseVisualPreset")?.value||"");
   const values=gdAdminCourseVisualLiveFilterValues(presetId,gdAdminCourseVisualOverridesFromForm());
@@ -1626,33 +1630,6 @@ function gdAdminCourseVisualApplyLiveFilter(courseId){
     target.classList.add("filtered","liveFiltering");
   });
 }
-const gdAdminCourseVisualLiveBuildTimers={};
-function gdAdminCourseVisualScheduleLiveBuild(courseId){
-  const engine=window.GDCourseVisualEngine;
-  if(!engine||typeof engine.buildCourseVisualPreview!=="function")return;
-  clearTimeout(gdAdminCourseVisualLiveBuildTimers[courseId]);
-  gdAdminCourseVisualLiveBuildTimers[courseId]=setTimeout(async()=>{
-    try{
-      const presetId=String(document.getElementById("gdCourseVisualPreset")?.value||"");
-      const overrides=gdAdminCourseVisualOverridesFromForm();
-      engine.saveCourseVisualSettings(courseId,overrides,{presetId});
-      const fresh=gdAdminCourseVisualRecord(courseId)||engine.getRecord(courseId);
-      const sourceStatus=gdAdminCourseVisualSourceStatus({id:courseId,key:courseId});
-      const beta3d=!!(overrides.visualEngine&&overrides.visualEngine.enable3dBeta);
-      if(!fresh||!fresh.rawMaster||!fresh.basicVisual||gdAdminCourseVisualNeedsAutoBuild(fresh,sourceStatus)||(beta3d&&!fresh.beta3dView)){
-        await engine.buildFromCourseDatabase(courseId,{enable3dBeta:beta3d});
-      }
-      await engine.buildCourseVisualPreview(courseId,presetId,overrides);
-      if(gdAdminCourseDatabaseSelected===courseId&&(gdAdminCourseDatabaseTab==="visuals"||gdAdminCourseDatabaseTab==="preview"))gdRenderAdminCourseDatabase();
-    }catch(error){
-      console.warn("[GolfDaddy] course visual live filter build failed",error);
-      gdAdminCourseVisualToast(error&&error.message?error.message:"Course visual filter build failed");
-      gdAdminCourseVisualApplyLiveFilter(courseId);
-    }finally{
-      delete gdAdminCourseVisualLiveBuildTimers[courseId];
-    }
-  },900);
-}
 function gdAdminCourseVisualControlChanged(courseId){
   const engine=window.GDCourseVisualEngine;
   if(engine&&typeof engine.saveCourseVisualSettings==="function"){
@@ -1663,7 +1640,6 @@ function gdAdminCourseVisualControlChanged(courseId){
   }
   gdAdminCourseVisualApplyLiveFilter(courseId);
   gdAdminCoursePreviewApplyTilt();
-  gdAdminCourseVisualScheduleLiveBuild(courseId);
   return false;
 }
 function gdAdminCourseVisualPresetChanged(courseId){
