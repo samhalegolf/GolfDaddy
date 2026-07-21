@@ -1158,7 +1158,7 @@ function gdAdminCoursePreviewMarkup(selected){
     const match=(Array.isArray(list)?list:[]).find(item=>Number(item&&item.holeNumber)===current&&item.dataUrl);
     if(match){asset=match;assetKind="local-styled";break;}
   }
-  const cloudFrame=asset?null:gdAdminCourseCloudFrameFor(selected.id,current);
+  const cloudFrame=asset||gdAdminCourseCloudFramesSuppressed[selected.id]?null:gdAdminCourseCloudFrameFor(selected.id,current);
   if(!asset&&!cloudFrame)for(const list of styledLists.concat(baseLists)){
     const match=(Array.isArray(list)?list:[]).find(item=>Number(item&&item.holeNumber)===current);
     if(match){asset=match;assetKind=match.dataUrl?"local-base":"hydrating";break;}
@@ -1174,12 +1174,13 @@ function gdAdminCoursePreviewMarkup(selected){
   // painting it again on top double-applied the look. Only the tilt (a view transform, not part
   // of the recipe) is applied here.
   const tilt=gdAdminCourseVisualTiltInfo(record);
+  const effects=gdAdminCourseVisualActiveEffects(record);
   const beta3dOn=!!(record&&record.courseOverrides&&record.courseOverrides.visualEngine&&record.courseOverrides.visualEngine.enable3dBeta);
   const previewTiltDeg=Math.min(52,Math.max(28,Math.round(Number(tilt.playTiltDeg||14)*2.6)));
   const screenStyle="--gd-phone-tilt:"+gdAdminCourseVisualSvgNum(previewTiltDeg)+"deg";
   const tiltClass=gdAdminCoursePreviewTiltActive(beta3dOn)?" gdAdminPhoneTilted":"";
   const dock=window.GDCourseVisualEngine?gdAdminCourseVisualControls(record,selected.id):"";
-  return `<div class="gdAdminPhonePreviewShell gdAdminPhonePreviewTuned"><div class="gdAdminPhoneInfo"><strong>${gdEscapeHTML(selected.name)} · Hole ${gdEscapeHTML(current)}</strong><span>Sandbox: dial a setting and release it — the recipe re-bakes for this hole so you see the real result, terrain and all. Scan re-runs the capture protocol; Publish applies the locked-in recipe to every hole.</span><div class="gdAdminPhoneControls"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev hole</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next hole</button>${scanButton}</div><div class="gdAdminCourseStageLine"><span class="${assetKind==="local-styled"||assetKind==="cloud-frame"?"ready":"warn"}">${gdEscapeHTML(assetKind==="local-styled"?"surface ready":assetKind==="cloud-frame"?"cloud frame":assetKind==="local-base"?"base capture":"hydrating")}</span><span>H${gdEscapeHTML(current)} · ${gdEscapeHTML(captured.length)}/${gdEscapeHTML(count)} captured</span><span>${gdEscapeHTML(cloudFrame?String(cloudFrame.path).split("/").slice(-3).join("/"):asset&&asset.path?String(asset.path).split("/").slice(-3).join("/"):"")}</span></div></div><div class="gdAdminPhoneStage"><div class="gdAdminPhone"><div class="gdAdminPhoneScreen${tiltClass}" style="${screenStyle}"><div class="gdAdminPhoneHud"><span>Clarity Play</span><b>H${gdEscapeHTML(current)}</b></div>${frame}<div class="gdAdminPhoneNav"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next</button></div></div></div>${dock}</div></div>`;
+  return `<div class="gdAdminPhonePreviewShell gdAdminPhonePreviewTuned"><div class="gdAdminPhoneInfo"><strong>${gdEscapeHTML(selected.name)} · Hole ${gdEscapeHTML(current)}</strong><span>Sandbox: dial a setting and release it — the recipe re-bakes for this hole so you see the real result, terrain and all. Scan re-runs the capture protocol; Publish applies the locked-in recipe to every hole.</span><div class="gdAdminPhoneControls"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev hole</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next hole</button>${scanButton}<button type="button" onclick="return gdAdminCourseVisualResetRecipe(${id})">Reset recipe</button></div><div class="gdAdminCourseStageLine"><span class="${assetKind==="local-styled"||assetKind==="cloud-frame"?"ready":"warn"}">${gdEscapeHTML(assetKind==="local-styled"?"surface ready":assetKind==="cloud-frame"?"cloud frame":assetKind==="local-base"?"original capture":"hydrating")}</span><span>H${gdEscapeHTML(current)} · ${gdEscapeHTML(captured.length)}/${gdEscapeHTML(count)} captured</span><span>${gdEscapeHTML(cloudFrame?String(cloudFrame.path).split("/").slice(-3).join("/"):asset&&asset.path?String(asset.path).split("/").slice(-3).join("/"):"")}</span></div><div class="gdAdminCourseStageLine">${(assetKind==="local-base"?["Original capture — no effects"]:(effects.length?effects:["No effects active"])).map(label=>`<span class="${assetKind==="local-base"?"":"ready"}">${gdEscapeHTML(label)}</span>`).join("")}</div></div><div class="gdAdminPhoneStage"><div class="gdAdminPhone"><div class="gdAdminPhoneScreen${tiltClass}" style="${screenStyle}"><div class="gdAdminPhoneHud"><span>Clarity Play</span><b>H${gdEscapeHTML(current)}</b></div>${frame}<div class="gdAdminPhoneNav"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next</button></div></div></div>${dock}</div></div>`;
 }
 function gdAdminCourseDebugMarkup(selected){
   return `<div class="gdAdminCourseDebugWindow"><div class="gdCoursePlayDebug" id="gdCoursePlayDebugPanel"><div class="gdCoursePlayDebugHead"><div><h3>Live scan feedback</h3><p>Local scan, frame-cache, sync, and runtime events on this browser. This is browser state, not the database.</p></div><div class="gdCoursePlayDebugActions"><button type="button" onclick="return gdAdminCourseDebugRefresh()">Refresh</button><button type="button" onclick="gdClearCoursePlayPipelineDebug();return gdAdminCourseDebugRefresh()">Clear log</button></div></div><div id="gdCoursePlayDebugSummary" class="gdCoursePlayDebugSummary"></div><div id="gdCoursePlayDebugTable"></div><div id="gdCoursePlayDebugTimeline" class="gdCoursePlayDebugTimeline"></div></div><div class="gdCoursePlayDebug gdCourseMappingDebug" id="gdCourseMappingDebugPanel"></div><details class="gdAdminCourseSettings"><summary>Visual engine internals</summary><div class="gdAdminCourseSettingsBody">${gdAdminCourseVisualMarkup(selected)}</div></details></div>`;
@@ -1710,6 +1711,43 @@ function gdAdminCourseVisualControlChanged(courseId){
   gdAdminCoursePreviewApplyTilt();
   return false;
 }
+/* After a recipe reset the preview must show the RAW captures - without this the cloud
+   frames (baked with the old recipe) would immediately cover them back up. Cleared by the
+   next slider commit or publish. */
+const gdAdminCourseCloudFramesSuppressed={};
+function gdAdminCourseVisualResetRecipe(courseId){
+  const engine=window.GDCourseVisualEngine;
+  if(!engine||typeof engine.resetCourseVisualRecipe!=="function"){gdAdminCourseVisualToast("Reset unavailable");return false;}
+  try{
+    engine.resetCourseVisualRecipe(courseId);
+    gdAdminCourseCloudFramesSuppressed[String(courseId||"")]=true;
+    const select=document.getElementById("gdCourseVisualPreset");
+    if(select&&engine.defaultPreset)select.value=String(engine.defaultPreset().id||"");
+    gdAdminCourseVisualToast("Recipe reset — showing original capture");
+    gdRenderAdminCourseDatabase();
+  }catch(error){
+    gdAdminCourseVisualToast(error&&error.message?error.message:"Recipe reset failed");
+  }
+  return false;
+}
+/* Human-readable feedback of what the current recipe actually has switched on. */
+function gdAdminCourseVisualActiveEffects(record){
+  const settings=gdAdminCourseVisualMergedSettings(record&&record.presetId,record&&record.courseOverrides)||{};
+  const turf=settings.turf||{},lighting=settings.lighting||{},tools=settings.visualTools||{};
+  const chips=[];
+  const terrain=tools.holeTerrainStrength!=null?Number(tools.holeTerrainStrength):.9;
+  if(terrain>.02)chips.push("Terrain relief");
+  if(settings.floodlight&&settings.floodlight.enabled===true)chips.push("Floodlight");
+  const greenStrength=turf.greenStrength!=null?Number(turf.greenStrength):.35;
+  if(greenStrength>.05)chips.push("Turf tone");
+  const contrast=lighting.contrastTarget!=null?Number(lighting.contrastTarget):1;
+  if(Math.abs(contrast-1)>.03)chips.push("Contrast");
+  const brightness=lighting.brightnessTarget!=null?Number(lighting.brightnessTarget):52;
+  if(Math.abs(brightness-52)>2)chips.push("Brightness");
+  if(Number(settings.mowingVisibility||0)>.02)chips.push("Mow lines");
+  if(record&&record.courseOverrides&&record.courseOverrides.visualEngine&&record.courseOverrides.visualEngine.enable3dBeta===true)chips.push("3D beta");
+  return chips;
+}
 function gdAdminCourseVisualSaveRecipeFromForm(courseId){
   const engine=window.GDCourseVisualEngine;
   if(!engine||typeof engine.saveCourseVisualSettings!=="function")return;
@@ -2170,6 +2208,7 @@ function gdAdminCourseVisualPublish(courseId){
          captures with this exact recipe - every device downloads the result. The local
          publish continues alongside until cloud frames fully replace it. */
       gdAdminCourseVisualEnqueueCloudJob(courseId,"export",{presetId:presetId,overrides:overrides});
+      delete gdAdminCourseCloudFramesSuppressed[String(courseId||"")];
       let record=gdAdminCourseVisualRecord(courseId)||engine.getRecord(courseId);
       const sourceStatus=gdAdminCourseVisualSourceStatus({id:courseId,key:courseId});
       const beta3d=!!(overrides.visualEngine&&overrides.visualEngine.enable3dBeta);

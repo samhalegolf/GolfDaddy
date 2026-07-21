@@ -2902,6 +2902,27 @@
     recordEvent(record,"course-visual-recapture-reset",{keepPublished:keepPublished});
     return putRecord(record,{skipCloudSync:true});
   }
+  /* Recipe reset: back to the original captures. Clears the recipe (global preset, no
+     overrides) and drops every STYLED output so the preview falls back to the raw baked
+     captures. Base frames, raw master, captures, and published assets are untouched - this
+     is the cheap "start the look again" button, not a re-scan. */
+  function resetCourseVisualRecipe(courseId,presetId){
+    var record=getRecord(courseId);
+    var preset=getPreset(presetId||defaultPreset().id);
+    record.presetId=preset.id;
+    record.presetVersion=preset.version;
+    record.courseOverrides={};
+    record.settingsDirty=false;
+    record.previewVisual=null;
+    record.terrainView=null;
+    record.singleHolePreviewVisual=null;
+    record.singleHoleTerrainView=null;
+    record.holeFramePreviewVisuals=[];
+    record.holeFrameTerrainViews=[];
+    record.status=record.publishedVisual?"published":record.basicVisual?"basic-ready":record.status;
+    recordEvent(record,"course-visual-settings-saved",{reset:"recipe-outputs",presetId:preset.id,presetVersion:preset.version});
+    return putRecord(record,{skipCloudSync:true});
+  }
   function resetToGlobalPreset(courseId,presetId){
     var record=getRecord(courseId);
     var preset=getPreset(presetId||defaultPreset().id);
@@ -3474,6 +3495,7 @@
     revertToPublishedVersion:revertToPublishedVersion,
     resetToPublished:resetToPublished,
     resetCourseVisualWorkingState:resetCourseVisualWorkingState,
+    resetCourseVisualRecipe:resetCourseVisualRecipe,
     resetToGlobalPreset:resetToGlobalPreset,
     resolveCourseVisual:resolveCourseVisual,
     outputForRecord:outputForRecord,
