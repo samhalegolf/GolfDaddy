@@ -39,14 +39,34 @@
     return window.GDCourseMappingDebug && typeof window.GDCourseMappingDebug.recordEvent === "function" ? window.GDCourseMappingDebug : null;
   }
 
+  /* A failure must never go dark.
+
+     Every non-success outcome carries a full debug package (status, fallbackReason, warnings,
+     scorecardEvidence, unresolvedHoles, tieBreakersUsed) precisely so it can be acted on - a
+     "Scorecard unavailable" refusal means the scorecard-finding logic needs work, while an
+     unresolved tie-break means the geometry did resolve but could not be trusted. Those are
+     different jobs, so losing the package loses the distinction.
+
+     This channel used to swallow the event whenever the mapping-debug module was absent or threw,
+     leaving a silent failure. Successes may stay quiet; failures always surface. */
   function recordMappingDebug(runId, event) {
+    var recorded = null;
     try {
       var api = mappingDebug();
-      if (!api) return null;
-      return api.recordEvent(runId, event);
+      if (api) recorded = api.recordEvent(runId, event);
     } catch (e) {
-      return null;
+      recorded = null;
     }
+    var failurePhase = event && (event.phase === "fallback" || event.phase === "failed");
+    if (recorded === null && failurePhase) {
+      try {
+        console.warn(
+          "[Clarity] " + (event.event || "native-resolver") + " - " + (event.summary || "resolver did not complete"),
+          event.details || event
+        );
+      } catch (e2) { /* console is the last resort; nothing further to try */ }
+    }
+    return recorded;
   }
 
   function attachMappingCheckpoint(runId, checkpoint) {
