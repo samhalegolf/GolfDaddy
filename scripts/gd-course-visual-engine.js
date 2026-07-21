@@ -475,7 +475,18 @@
         viewportFrame:play.viewportFrame?clone(play.viewportFrame):undefined,
         displayTransform:play.displayTransform?clone(play.displayTransform):undefined,
         objectProofOverlay:play.objectProofOverlay?clone(play.objectProofOverlay):undefined,
-        anchorPins:play.anchorPins?clone(play.anchorPins):undefined
+        anchorPins:play.anchorPins?clone(play.anchorPins):undefined,
+        /* Projection-critical fields - a handful of numbers each. Dropping playAxis here
+           silently downgraded every effect projector (terrain, airbrush, floodlight) to a
+           north-up asset-bounds mapping after any storage round-trip, skewing overlays on
+           rotated play-axis frames. */
+        model:play.model||undefined,
+        projection:play.projection||undefined,
+        stitchModel:play.stitchModel||undefined,
+        bleedPct:Number.isFinite(Number(play.bleedPct))?Number(play.bleedPct):undefined,
+        sourceBounds:play.sourceBounds?clone(play.sourceBounds):undefined,
+        outputDimensions:play.outputDimensions?clone(play.outputDimensions):undefined,
+        playAxis:play.playAxis?clone(play.playAxis):undefined
       };
     }
     return out;
@@ -1917,7 +1928,7 @@
       maskContent+='<rect width="100%" height="100%" fill="url(#cvFloodPool)"/>';
     }
     defs+='<mask id="cvFloodMask">'+maskContent+'</mask>';
-    var layer='<g data-role="floodlight"><rect width="100%" height="100%" fill="#04070b" opacity="'+svgNum(dark)+'" mask="url(#cvFloodMask)"/></g>';
+    var layer='<g data-role="floodlight" data-projector="'+escapeXml(projection&&projection.mode||"none")+'"><rect width="100%" height="100%" fill="#04070b" opacity="'+svgNum(dark)+'" mask="url(#cvFloodMask)"/></g>';
     return {defs:defs,layer:layer};
   }
   function nativeVisualAsset(asset,settings,meta){
