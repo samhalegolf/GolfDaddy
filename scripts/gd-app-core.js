@@ -344,7 +344,6 @@ function gdCoursePlayDebugMetric(label,value){
 let gdAdminCourseDatabaseSelected="";
 let gdAdminCourseDatabaseTab="overview";
 const gdAdminCoursePreviewHoleByCourse={};
-const gdAdminCourseDbStatusOpenByCourse={};
 function gdAdminCourseDbMetric(label,value){
   return `<div class="gdAdminDatabaseMetric"><span>${gdEscapeHTML(label)}</span><strong>${gdEscapeHTML(value ?? "")}</strong></div>`;
 }
@@ -382,10 +381,6 @@ function gdAdminCourseDbBadge(label,tone=""){
 }
 function gdAdminCourseDbFlag(value){
   return `<span class="gdCoursePlayDebugFlag ${value?'ok':'bad'}">${value?'Yes':'No'}</span>`;
-}
-function gdAdminCourseDbManifestPresent(key){
-  if(!key)return false;
-  try{return !!localStorage.getItem(String(key));}catch(e){return false;}
 }
 /* The admin Course Database screen is a LIVE view of Supabase (/api/course-maps),
    not the local Course Play Pipeline. It fetches once on first render and on
@@ -488,35 +483,63 @@ function gdAdminCourseDbPayload(courseId){
   }catch(e){return {error:e&&e.message?e.message:String(e)};}
   return null;
 }
+/* Hole rows are judged from the published package (objects_json/holes_json) -
+   the same data GPS consumes. Play ready = a green plus at least one more
+   point (tee or fairway), mirroring the pipeline's own viability test. The
+   pipeline-schema fields (teePoint/greenCentre/fairwayPoints) are read as a
+   fallback so the local-cache view still works when Supabase is unreachable. */
 function gdAdminCourseDbHoleRows(course){
-  const frames=gdAdminCourseDbFrameRows(course.courseId||course.courseKey);
-  const frameByHole={};
-  frames.forEach(frame=>{frameByHole[String(Number(frame&&frame.holeNumber)||0)]=frame;});
+  const objectsByHole={};
+  Object.keys(course.objects||{}).forEach(key=>{
+    const object=course.objects[key]||{};
+    const number=Number(object.holeNumber)||0;
+    if(!number)return;
+    const slot=objectsByHole[number]=objectsByHole[number]||{tee:null,green:null,fairways:0,sources:[]};
+    if(object.type==="tee")slot.tee=slot.tee||object;
+    else if(object.type==="green")slot.green=slot.green||object;
+    else if(object.type==="fairway")slot.fairways+=1;
+    if(object.source&&slot.sources.indexOf(object.source)<0)slot.sources.push(object.source);
+  });
   const seen={};
   Object.keys(course.holes||{}).forEach(key=>{seen[String(Number(key)||Number(course.holes[key]?.holeNumber)||0)]=true;});
-  frames.forEach(frame=>{seen[String(Number(frame&&frame.holeNumber)||0)]=true;});
+  Object.keys(objectsByHole).forEach(number=>{seen[String(number)]=true;});
   return Object.keys(seen).map(Number).filter(Boolean).sort((a,b)=>a-b).map(number=>{
     const hole=course.holes&&course.holes[String(number)]||{};
-    const frame=frameByHole[String(number)]||null;
-    const anchors=hole.frameAnchors||{};
-    const presentation=hole.presentation||{};
-    const manifestKey=frame&&frame.manifestKey||frame&&frame.capturedManifestKey||presentation.capturedManifestKey||null;
+    const slot=objectsByHole[number]||{tee:null,green:null,fairways:0,sources:[]};
+    const hasTee=!!(slot.tee||hole.teePoint);
+    const hasGreen=!!(slot.green||hole.greenCenter||hole.greenCentre||(hole.greenShape&&hole.greenShape.length));
+    const greenShape=slot.green&&(slot.green.greenShape||slot.green.shape)||hole.greenShape;
+    const hasGreenShape=!!(greenShape&&greenShape.length>=3);
+    const fairways=slot.fairways||(hole.fairwayPoints&&hole.fairwayPoints.length)||0;
+    const playReady=hasGreen&&(hasTee||fairways>0||(hole.routePoints&&hole.routePoints.length>=2));
+    const state=playReady?"play ready":(hasTee||hasGreen||fairways)?"incomplete":"empty";
+    const source=slot.sources.length?gdAdminCourseDbSourceLabel(slot.sources):hole.greenSource||hole.source||"unknown";
     return {
       holeNumber:number,
-      status:hole.status||"unknown",
-      hasTee:!!hole.teePoint,
-      hasGreen:!!hole.greenCentre,
-      hasRoute:!!(hole.routePoints&&hole.routePoints.length>=2),
-      hasFrameAnchor:!!(anchors.tee&&anchors.green&&(anchors.route&&anchors.route.length>=2||hole.routePoints&&hole.routePoints.length>=2)),
-      hasFrameIndex:!!frame,
-      hasManifest:gdAdminCourseDbManifestPresent(manifestKey),
-      manifestKey:manifestKey,
-      source:[hole.source,frame&&frame.generatedFrom].filter(Boolean).join(" / ")||"unknown",
-      confidence:hole.confidence||"",
-      syncStatus:hole.syncStatus||"local",
-      updatedAt:hole.updatedAt||frame&&frame.updatedAt||""
+      state:state,
+      playReady:playReady,
+      hasTee:hasTee,
+      hasGreen:hasGreen,
+      hasGreenShape:hasGreenShape,
+      fairways:fairways,
+      source:source
     };
   });
+}
+function gdAdminCourseDbSourceLabel(sources){
+  /* "osm_auto_tee, osm_auto_green_polygon, ..." collapses to "osm_auto". */
+  const stems=sources.map(source=>String(source).replace(/_(tee|green|fairway).*$/,""));
+  return stems.filter((stem,index)=>stems.indexOf(stem)===index).join(" / ");
+}
+function gdAdminCourseDbObjectTotals(course){
+  const totals={tees:0,greens:0,fairways:0};
+  Object.keys(course.objects||{}).forEach(key=>{
+    const type=course.objects[key]&&course.objects[key].type;
+    if(type==="tee")totals.tees+=1;
+    else if(type==="green")totals.greens+=1;
+    else if(type==="fairway")totals.fairways+=1;
+  });
+  return totals;
 }
 function gdAdminCourseDbSummaries(){
   const store=gdAdminCourseDbStore();
@@ -537,21 +560,12 @@ function gdAdminCourseDbSummaries(){
       updatedAt:course.updatedAt||"",
       source:course.source||"local",
       holeCount:rows.length,
-      geometryReadyCount:rows.filter(row=>row.hasTee&&row.hasGreen&&row.hasRoute).length,
-      playReadyCount:rows.filter(row=>row.status==="play_data_ready").length,
-      framesIndexedCount:rows.filter(row=>row.hasFrameIndex).length,
-      manifestCount:rows.filter(row=>row.hasManifest).length,
+      geometryReadyCount:rows.filter(row=>row.hasTee&&row.hasGreen).length,
+      playReadyCount:rows.filter(row=>row.playReady).length,
+      objectTotals:gdAdminCourseDbObjectTotals(course),
       rows:rows
     };
   }).sort((a,b)=>String(b.updatedAt||"").localeCompare(String(a.updatedAt||"")));
-}
-function gdAdminCourseDbFillFilter(id,values,current,label){
-  const select=document.getElementById(id);
-  if(!select)return;
-  const unique=values.filter(Boolean).filter((value,index,list)=>list.indexOf(value)===index).sort();
-  const html=`<option value="">${gdEscapeHTML(label)}</option>`+unique.map(value=>`<option value="${gdEscapeHTML(value)}" ${value===current?'selected':''}>${gdEscapeHTML(value)}</option>`).join("");
-  if(select.innerHTML!==html)select.innerHTML=html;
-  select.value=current||"";
 }
 function gdAdminCourseDbOpen(courseId){
   const next=String(courseId||"");
@@ -599,10 +613,6 @@ function gdAdminCourseDbSetTab(tab){
   gdRenderAdminCourseDatabase();
   return false;
 }
-function gdAdminCourseDbSetStatusOpen(courseId,open){
-  courseId=String(courseId||"");
-  if(courseId)gdAdminCourseDbStatusOpenByCourse[courseId]=!!open;
-}
 function gdAdminJsArg(value){
   return gdEscapeHTML(JSON.stringify(String(value||"")));
 }
@@ -612,20 +622,24 @@ function gdAdminCourseDbStatusTone(value,okValues){
   if(/fail|error|unavailable|missing|delete/i.test(value))return "bad";
   return "warn";
 }
+/* Visual engine lifecycle: live map (no engine record - GPS uses the live
+   basemap, a valid state, not an error) -> working -> preview -> published.
+   Red is reserved for an actual engine failure. */
 function gdAdminCourseDbVisualState(courseId){
   const record=gdAdminCourseVisualRecord(courseId);
-  if(!record)return {label:"live",tone:"warn"};
+  if(!record)return {label:"live map",tone:""};
   if(record.publishedVisual)return {label:"published",tone:"ok"};
   if(record.previewVisual||record.terrainView||record.singleHoleTerrainView)return {label:"preview",tone:"ok"};
   if(record.rawMaster||record.basicVisual)return {label:"working",tone:"warn"};
-  if(record.lastError)return {label:"error",tone:"bad"};
-  return {label:record.status||"live",tone:gdAdminCourseDbStatusTone(record.status,["preview-ready","published","basic-ready"])};
+  if(record.lastError||record.status==="failed")return {label:"error",tone:"bad"};
+  return {label:"live map",tone:""};
 }
 function gdAdminCourseDbActionRail(selected){
   const id=gdAdminJsArg(selected&&selected.id||"");
   const active=tab=>gdAdminCourseDatabaseTab===tab?" active":"";
   return `<div class="gdAdminCourseActionRail">
-    <button type="button" class="${active("visuals")}" onclick="return gdAdminCourseDbLoadVisual(${id})">Visuals</button>
+    <button type="button" class="${active("geometry")}" onclick="return gdAdminCourseDbShowGeometry(${id})">Geometry</button>
+    <button type="button" class="${active("visuals")}" onclick="return gdAdminCourseDbLoadVisual(${id})">Visual Engine</button>
     <button type="button" class="${active("scorecard")}" onclick="return gdAdminCourseDbShowScorecard(${id})">Score Card</button>
     <button type="button" class="${active("preview")}" onclick="return gdAdminCourseDbShowPreview(${id})">Hole Preview</button>
     <button type="button" class="${active("debug")}" onclick="return gdAdminCourseDbShowDebug(${id})">Debug</button>
@@ -635,6 +649,9 @@ function gdAdminCourseDbActionRail(selected){
 }
 function gdAdminCourseDbLoadVisual(courseId){
   return gdAdminCourseDbOpen(courseId,"visuals");
+}
+function gdAdminCourseDbShowGeometry(courseId){
+  return gdAdminCourseDbOpen(courseId,"geometry");
 }
 function gdAdminCourseDbShowScorecard(courseId){
   return gdAdminCourseDbOpen(courseId,"scorecard");
@@ -1070,7 +1087,7 @@ function gdAdminCoursePreviewMarkup(selected){
   return `<div class="gdAdminPhonePreviewShell gdAdminPhonePreviewTuned"><div class="gdAdminPhoneInfo"><strong>${gdEscapeHTML(selected.name)} · Hole ${gdEscapeHTML(current)}</strong><span>Sandbox: dial a setting and release it — the recipe re-bakes for this hole so you see the real result, terrain and all. No re-capturing. Publish applies the locked-in recipe to every hole.</span><div class="gdAdminPhoneControls"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev hole</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next hole</button></div><div class="gdAdminCourseStageLine"><span class="${asset&&asset.dataUrl?"ready":"warn"}">${asset&&asset.dataUrl?"surface ready":"needs visual"}</span><span>H${gdEscapeHTML(current)} / ${gdEscapeHTML(count)}</span><span>${gdEscapeHTML(asset&&asset.path?String(asset.path).split("/").slice(-3).join("/"):"live fallback")}</span></div></div><div class="gdAdminPhoneStage"><div class="gdAdminPhone"><div class="gdAdminPhoneScreen${tiltClass}" style="${screenStyle}"><div class="gdAdminPhoneHud"><span>Clarity Play</span><b>H${gdEscapeHTML(current)}</b></div>${frame}<div class="gdAdminPhoneNav"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next</button></div></div></div>${dock}</div></div>`;
 }
 function gdAdminCourseDebugMarkup(selected){
-  return `<div class="gdAdminCourseDebugWindow"><div class="gdAdminCourseStageLine"><span class="ready">${gdEscapeHTML(selected.playReadyCount||0)} play ready</span><span>${gdEscapeHTML(selected.framesIndexedCount||0)} frames</span><span>${gdEscapeHTML(selected.manifestCount||0)} manifests</span><span>${gdEscapeHTML(gdCoursePlayDebugTime(selected.updatedAt)||"unknown")} updated</span></div><div class="gdCoursePlayDebug" id="gdCoursePlayDebugPanel"><div class="gdCoursePlayDebugHead"><div><h3>Live scan feedback</h3><p>Course Play, frame, manifest, sync, and runtime events for this course.</p></div><div class="gdCoursePlayDebugActions"><button type="button" onclick="return gdAdminCourseDebugRefresh()">Refresh</button><button type="button" onclick="gdClearCoursePlayPipelineDebug();return gdAdminCourseDebugRefresh()">Clear log</button></div></div><div id="gdCoursePlayDebugSummary" class="gdCoursePlayDebugSummary"></div><div id="gdCoursePlayDebugTable"></div><div id="gdCoursePlayDebugTimeline" class="gdCoursePlayDebugTimeline"></div></div><div class="gdCoursePlayDebug gdCourseMappingDebug" id="gdCourseMappingDebugPanel"></div></div>`;
+  return `<div class="gdAdminCourseDebugWindow"><div class="gdCoursePlayDebug" id="gdCoursePlayDebugPanel"><div class="gdCoursePlayDebugHead"><div><h3>Live scan feedback</h3><p>Local scan, frame-cache, sync, and runtime events on this browser. This is browser state, not the database.</p></div><div class="gdCoursePlayDebugActions"><button type="button" onclick="return gdAdminCourseDebugRefresh()">Refresh</button><button type="button" onclick="gdClearCoursePlayPipelineDebug();return gdAdminCourseDebugRefresh()">Clear log</button></div></div><div id="gdCoursePlayDebugSummary" class="gdCoursePlayDebugSummary"></div><div id="gdCoursePlayDebugTable"></div><div id="gdCoursePlayDebugTimeline" class="gdCoursePlayDebugTimeline"></div></div><div class="gdCoursePlayDebug gdCourseMappingDebug" id="gdCourseMappingDebugPanel"></div></div>`;
 }
 function gdAdminCourseDebugRefresh(){
   try{gdRenderCoursePlayPipelineDebug();}catch(e){}
@@ -2094,9 +2111,7 @@ function gdAdminCourseVisualMarkup(selected){
   const autoBuildStatus=autoBuildKey&&gdAdminCourseVisualAutoBuildPending[autoBuildKey]?"building":autoBuildNeeded?(autoBuildKey&&gdAdminCourseVisualAutoBuildAttempted[autoBuildKey]?"check diagnostics":"queued"):"ready";
   const pipelineNeeded=!autoBuildNeeded&&gdAdminCourseVisualNeedsPipeline(record);
   const pipelineStatus=pipelineKey&&gdAdminCourseVisualPipelinePending[pipelineKey]?"native + terrain":pipelineNeeded?(pipelineKey&&gdAdminCourseVisualPipelineAttempted[pipelineKey]?"check diagnostics":"queued"):"ready";
-  const inputCaptureLabel=record&&record.input?record.input.captureCount:`${sourceStatus.renderableCount} available`;
   const planSummary=record&&record.diagnostics&&record.diagnostics.capturePlanSummary||null;
-  const planLabel=planSummary?`${planSummary.captured}/${planSummary.planned} captured`:"not planned";
   const beta3dOn=!!(record&&record.courseOverrides&&record.courseOverrides.visualEngine&&record.courseOverrides.visualEngine.enable3dBeta);
   const beta3dLabel=beta3dOn?(record&&record.beta3dView?"ready":"on"):"off";
   const products=gdAdminCourseVisualProducts(record);
@@ -2111,13 +2126,18 @@ function gdAdminCourseVisualMarkup(selected){
     diagnostics:record&&record.diagnostics||{},
     versions:(record&&record.versions||[]).slice(-6)
   };
+  /* Lifecycle: geometry (course package in) -> build -> preview -> publish.
+     The engine's only input is the course geometry; captures/tiles are its
+     own internal machinery and stay out of the headline. */
+  const lifecycleStage=record&&record.publishedVisual?"publish":record&&(record.previewVisual||record.terrainView||record.singleHoleTerrainView)?"preview":record&&(record.rawMaster||record.basicVisual)?"build":"geometry";
+  const holeFrames=(record&&(Array.isArray(record.holeFramePublishedVisuals)&&record.holeFramePublishedVisuals.length?record.holeFramePublishedVisuals:record.holeFrameVisuals)||[]).length;
+  const lifecycle=`<div class="gdAdminCourseStageLine gdAdminCourseVisualLifecycle">${["geometry","build","preview","publish"].map(stage=>`<span class="${stage===lifecycleStage?"ready":""}">${gdEscapeHTML(stage)}</span>`).join("<b>→</b>")}${holeFrames?`<span class="ready">${gdEscapeHTML(holeFrames)}/${gdEscapeHTML(selected.holeCount||0)} hole frames</span>`:""}</div>`;
   return [
-    `<div class="gdAdminCourseWorkspace"><div class="gdAdminCourseStageLine">${[
+    `<div class="gdAdminCourseWorkspace">${lifecycle}<div class="gdAdminCourseStageLine">${[
       `<span class="${record&&["preview-ready","published","basic-ready"].includes(record.status)?"ready":"warn"}">${gdEscapeHTML(record&&record.status||"unavailable")}</span>`,
       `<span>${gdEscapeHTML(record&&record.presetId||"global preset")}${gdEscapeHTML(dirty)}</span>`,
       `<span class="${autoBuildStatus==="ready"&&pipelineStatus==="ready"?"ready":"warn"}">${gdEscapeHTML(autoBuildStatus==="ready"?pipelineStatus:autoBuildStatus)}</span>`,
-      `<span>${gdEscapeHTML(inputCaptureLabel)} captures</span>`,
-      `<span>${gdEscapeHTML(planLabel)} plan</span>`,
+      `<span class="${selected.playReadyCount===selected.holeCount&&selected.holeCount?"ready":"warn"}">${gdEscapeHTML(selected.playReadyCount||0)}/${gdEscapeHTML(selected.holeCount||0)} geometry in</span>`,
       `<span>${gdEscapeHTML(beta3dLabel)} 3D</span>`,
       `<span class="${diagnostics.resolvedPlayAsset?"ready":"warn"}">${diagnostics.resolvedPlayAsset?"play visual":"live fallback"}</span>`
     ].join("")}</div>`,
@@ -2125,7 +2145,6 @@ function gdAdminCourseVisualMarkup(selected){
     record.lastError?`<div class="gdAdminCourseVisualNotice">${gdEscapeHTML(record.lastError.message||record.lastError.code||"Course visual pipeline needs attention.")}</div>`:"",
     `<div class="gdAdminCourseVisualNotice gdAdminCourseVisualTuningHint">Visual tuning now lives in the <button type="button" class="gdAdminInlineLink" onclick="return gdAdminCoursePreviewSetHole('${gdEscapeHTML(selected.id)}',${Number(gdAdminCoursePreviewHoleByCourse[selected.id])||1})">Hole preview</button> tab, where every change previews live on the phone surface.</div>`,
     `<details class="gdAdminCourseSettings"><summary>Diagnostics</summary><div class="gdAdminCourseSettingsBody"><div class="gdAdminDatabaseSummary">${[
-      gdAdminCourseDbMetric("Source manifests",`${sourceStatus.manifestCount}/${sourceStatus.frameCount}`),
       gdAdminCourseDbMetric("Current version",record.currentVersion||0),
       gdAdminCourseDbMetric("Published",record.publishedVersion||0),
       gdAdminCourseDbMetric("Layer model",planSummary?"live underlay + HD overlays":"live map fallback")
@@ -2141,13 +2160,9 @@ function gdRenderAdminCourseDatabase(){
   summary.innerHTML=gdAdminCourseDbCloudStatusMarkup();
   const all=gdAdminCourseDbSummaries();
   const search=String(document.getElementById("gdAdminCourseDbSearch")?.value||"").trim().toLowerCase();
-  const syncFilter=String(document.getElementById("gdAdminCourseDbSyncFilter")?.value||"");
-  const statusFilter=String(document.getElementById("gdAdminCourseDbStatusFilter")?.value||"");
-  gdAdminCourseDbFillFilter("gdAdminCourseDbSyncFilter",all.map(item=>item.syncStatus),syncFilter,"All sync states");
-  gdAdminCourseDbFillFilter("gdAdminCourseDbStatusFilter",all.map(item=>item.status),statusFilter,"All statuses");
   const filtered=all.filter(item=>{
     const hay=[item.name,item.key,item.status,item.syncStatus,item.source].join(" ").toLowerCase();
-    return (!search||hay.indexOf(search)>=0)&&(!syncFilter||item.syncStatus===syncFilter)&&(!statusFilter||item.status===statusFilter);
+    return !search||hay.indexOf(search)>=0;
   });
   if(gdAdminCourseDatabaseSelected&&!filtered.some(item=>item.id===gdAdminCourseDatabaseSelected)){
     gdAdminCourseDatabaseSelected="";
@@ -2158,13 +2173,13 @@ function gdRenderAdminCourseDatabase(){
     detail.innerHTML="";
     return;
   }
-  list.innerHTML=filtered.length?`<div class="gdAdminCourseTableWrap"><table class="gdAdminCourseTable"><thead><tr><th>Course</th><th>Status</th><th>Sync</th><th>Holes</th><th>Play</th><th>Frames</th><th>Manifests</th><th>Visual</th><th>Updated</th></tr></thead><tbody>${filtered.map(item=>{
+  list.innerHTML=filtered.length?`<div class="gdAdminCourseTableWrap"><table class="gdAdminCourseTable"><thead><tr><th>Course</th><th>Status</th><th>Sync</th><th>Holes</th><th>Play</th><th>Visual Engine</th><th>Updated</th></tr></thead><tbody>${filtered.map(item=>{
     const visual=gdAdminCourseDbVisualState(item.id);
     const statusTone=gdAdminCourseDbStatusTone(item.status,["ready","play_data_ready","mapped_geometry_ready"]);
     const syncTone=gdAdminCourseDbStatusTone(item.syncStatus,["synced","cloud","ready"]);
     const active=item.id===gdAdminCourseDatabaseSelected?" active":"";
-    return `<tr class="${active}" onclick="return gdAdminCourseDbOpen(${gdAdminJsArg(item.id)} ,'overview')"><td class="gdAdminCourseNameCell" title="${gdEscapeHTML(item.key)}">${gdEscapeHTML(item.name)}</td><td><span class="gdAdminCourseStatusDot ${statusTone}">${gdEscapeHTML(item.status)}</span></td><td><span class="gdAdminCourseStatusDot ${syncTone}">${gdEscapeHTML(item.syncStatus)}</span></td><td>${gdEscapeHTML(item.holeCount)}</td><td>${gdEscapeHTML(item.playReadyCount)}/${gdEscapeHTML(item.holeCount||0)}</td><td>${gdEscapeHTML(item.framesIndexedCount)}</td><td>${gdEscapeHTML(item.manifestCount)}</td><td><span class="gdAdminCourseStatusDot ${visual.tone}">${gdEscapeHTML(visual.label)}</span></td><td>${gdEscapeHTML(gdCoursePlayDebugTime(item.updatedAt)||"unknown")}</td></tr>`;
-  }).join("")}</tbody></table></div>`:'<div class="gdCoursePlayDebugEmpty">No course records match the current filters.</div>';
+    return `<tr class="${active}" onclick="return gdAdminCourseDbOpen(${gdAdminJsArg(item.id)} ,'overview')"><td class="gdAdminCourseNameCell" title="${gdEscapeHTML(item.key)}">${gdEscapeHTML(item.name)}</td><td><span class="gdAdminCourseStatusDot ${statusTone}">${gdEscapeHTML(item.status)}</span></td><td><span class="gdAdminCourseStatusDot ${syncTone}">${gdEscapeHTML(item.syncStatus)}</span></td><td>${gdEscapeHTML(item.holeCount)}</td><td>${gdEscapeHTML(item.playReadyCount)}/${gdEscapeHTML(item.holeCount||0)}</td><td><span class="gdAdminCourseStatusDot ${visual.tone}">${gdEscapeHTML(visual.label)}</span></td><td>${gdEscapeHTML(gdCoursePlayDebugTime(item.updatedAt)||"unknown")}</td></tr>`;
+  }).join("")}</tbody></table></div>`:'<div class="gdCoursePlayDebugEmpty">No course records match the current search.</div>';
   const selected=filtered.find(item=>item.id===gdAdminCourseDatabaseSelected);
   if(!selected){detail.innerHTML="";return;}
   const rows=selected.rows||[];
@@ -2187,22 +2202,25 @@ function gdRenderAdminCourseDatabase(){
     gdAdminCourseDebugRefresh();
     return;
   }
-  const geometryRows=rows.length?`<div class="gdAdminCourseHoleScroll"><table class="gdAdminCourseHoleTable"><thead><tr><th>Hole</th><th>State</th><th>Tee</th><th>Green</th><th>Route</th><th>Frame anchor</th><th>Frame index</th><th>Manifest</th><th>Source / confidence</th><th>Sync</th><th>Updated</th></tr></thead><tbody>${rows.map(row=>`<tr><td>H${gdEscapeHTML(row.holeNumber)}</td><td>${gdEscapeHTML(row.status)}</td><td>${gdAdminCourseDbFlag(row.hasTee)}</td><td>${gdAdminCourseDbFlag(row.hasGreen)}</td><td>${gdAdminCourseDbFlag(row.hasRoute)}</td><td>${gdAdminCourseDbFlag(row.hasFrameAnchor)}</td><td>${gdAdminCourseDbFlag(row.hasFrameIndex)}</td><td>${gdAdminCourseDbFlag(row.hasManifest)}<br>${gdEscapeHTML(row.manifestKey||"")}</td><td>${gdEscapeHTML(row.source)}<br>${gdEscapeHTML(row.confidence)}</td><td>${gdEscapeHTML(row.syncStatus)}</td><td>${gdEscapeHTML(gdCoursePlayDebugTime(row.updatedAt))}</td></tr>`).join("")}</tbody></table></div>`:'<div class="gdCoursePlayDebugEmpty">No holes found for this course yet.</div>';
-  const statusOpen=!!gdAdminCourseDbStatusOpenByCourse[selected.id];
-  detail.innerHTML=`<div class="gdAdminCourseActionPanel">${header}<div class="gdAdminCourseWorkspace"><div class="gdAdminCourseStageLine">${[
+  const visual=gdAdminCourseDbVisualState(selected.id);
+  const stageLine=`<div class="gdAdminCourseStageLine">${[
     `<span class="${selected.geometryReadyCount===selected.holeCount&&selected.holeCount?"ready":"warn"}">${gdEscapeHTML(selected.geometryReadyCount)}/${gdEscapeHTML(selected.holeCount)} geometry</span>`,
-    `<span class="${selected.playReadyCount?"ready":"warn"}">${gdEscapeHTML(selected.playReadyCount)} play ready</span>`,
-    `<span class="${selected.framesIndexedCount?"ready":"warn"}">${gdEscapeHTML(selected.framesIndexedCount)} frames</span>`,
-    `<span class="${selected.manifestCount?"ready":"warn"}">${gdEscapeHTML(selected.manifestCount)} manifests</span>`,
+    `<span class="${selected.playReadyCount===selected.holeCount&&selected.holeCount?"ready":"warn"}">${gdEscapeHTML(selected.playReadyCount)}/${gdEscapeHTML(selected.holeCount)} play ready</span>`,
+    `<span class="${visual.tone==="bad"?"warn":visual.tone==="ok"?"ready":""}">visual engine: ${gdEscapeHTML(visual.label)}</span>`,
     `<span>${gdEscapeHTML(gdCoursePlayDebugTime(selected.updatedAt)||"unknown")} updated</span>`
-  ].join("")}</div>${gdAdminCourseLocationMarkup(selected,payload)}<details class="gdAdminCourseSettings" ${statusOpen?"open":""} ontoggle="gdAdminCourseDbSetStatusOpen(${gdAdminJsArg(selected.id)},this.open)"><summary>Course status</summary><div class="gdAdminCourseSettingsBody"><div class="gdAdminDatabaseSummary">${[
-      gdAdminCourseDbMetric("Hole count",selected.holeCount),
-      gdAdminCourseDbMetric("Tee/green/route",selected.geometryReadyCount),
-      gdAdminCourseDbMetric("Play data ready",selected.playReadyCount),
-      gdAdminCourseDbMetric("Frames indexed",selected.framesIndexedCount),
-      gdAdminCourseDbMetric("Manifest count",selected.manifestCount),
-      gdAdminCourseDbMetric("Updated",gdCoursePlayDebugTime(selected.updatedAt)||"")
-    ].join("")}</div>${geometryRows}</div></details><details class="gdAdminCourseSettings"><summary>Database payload</summary><div class="gdAdminCourseSettingsBody"><pre class="gdAdminCourseVisualDiag">${gdEscapeHTML(JSON.stringify(payload,null,2))}</pre></div></details></div></div>`;
+  ].join("")}</div>`;
+  if(gdAdminCourseDatabaseTab==="geometry"){
+    const totals=selected.objectTotals||{tees:0,greens:0,fairways:0};
+    const geometryRows=rows.length?`<div class="gdAdminCourseHoleScroll"><table class="gdAdminCourseHoleTable"><thead><tr><th>Hole</th><th>State</th><th>Tee</th><th>Green</th><th>Fairways</th><th>Source</th></tr></thead><tbody>${rows.map(row=>`<tr><td>H${gdEscapeHTML(row.holeNumber)}</td><td>${gdEscapeHTML(row.state)}</td><td>${gdAdminCourseDbFlag(row.hasTee)}</td><td>${gdAdminCourseDbFlag(row.hasGreen)}${row.hasGreen?` <span class="gdAdminCourseHoleNote">${row.hasGreenShape?"polygon":"point"}</span>`:""}</td><td>${gdEscapeHTML(row.fairways)}</td><td>${gdEscapeHTML(row.source)}</td></tr>`).join("")}</tbody></table></div>`:'<div class="gdCoursePlayDebugEmpty">No geometry in the database for this course yet.</div>';
+    detail.innerHTML=`<div class="gdAdminCourseActionPanel">${header}<div class="gdAdminCourseWorkspace"><div class="gdAdminCourseStageLine">${[
+      `<span>${gdEscapeHTML(totals.tees)} tees</span>`,
+      `<span>${gdEscapeHTML(totals.greens)} greens</span>`,
+      `<span>${gdEscapeHTML(totals.fairways)} fairways</span>`,
+      `<span class="${selected.playReadyCount===selected.holeCount&&selected.holeCount?"ready":"warn"}">${gdEscapeHTML(selected.playReadyCount)}/${gdEscapeHTML(selected.holeCount)} play ready</span>`
+    ].join("")}</div>${geometryRows}</div></div>`;
+    return;
+  }
+  detail.innerHTML=`<div class="gdAdminCourseActionPanel">${header}<div class="gdAdminCourseWorkspace">${stageLine}${gdAdminCourseLocationMarkup(selected,payload)}<details class="gdAdminCourseSettings"><summary>Database payload</summary><div class="gdAdminCourseSettingsBody"><pre class="gdAdminCourseVisualDiag">${gdEscapeHTML(JSON.stringify(payload,null,2))}</pre></div></details></div></div>`;
 }
 function gdCoursePlayMonitorMetric(label,value){
   return `<div class="gdCpmMetric"><span>${gdEscapeHTML(label)}</span><strong>${gdEscapeHTML(value ?? "")}</strong></div>`;
@@ -2495,7 +2513,7 @@ window.gdTogglePreLockBlackoutFrame=gdTogglePreLockBlackoutFrame;
 window.gdRenderCoursePlayPipelineDebug=gdRenderCoursePlayPipelineDebug;
 window.gdRenderAdminCourseDatabase=gdRenderAdminCourseDatabase;
 window.gdAdminCourseDbOpen=gdAdminCourseDbOpen;
-window.gdAdminCourseDbSetStatusOpen=gdAdminCourseDbSetStatusOpen;
+window.gdAdminCourseDbShowGeometry=gdAdminCourseDbShowGeometry;
 window.gdAdminCourseDbShowDebug=gdAdminCourseDbShowDebug;
 window.gdAdminCourseLocationEdit=gdAdminCourseLocationEdit;
 window.gdAdminCourseLocationRemove=gdAdminCourseLocationRemove;
