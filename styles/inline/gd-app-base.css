@@ -469,7 +469,8 @@
     .gdAdminPhoneTuned:before{content:"";position:absolute;inset:0;pointer-events:none;z-index:1;background:var(--gd-course-visual-green-hex,#3cae5f);mix-blend-mode:hue;opacity:var(--gd-course-visual-green-bias,0)}
     .gdAdminPhoneTuned:after{content:"";position:absolute;inset:0;pointer-events:none;z-index:1;background:repeating-linear-gradient(108deg,rgba(255,255,255,.18) 0 1px,rgba(255,255,255,0) 1px 18px);mix-blend-mode:soft-light;opacity:var(--gd-course-visual-mowing-opacity,0)}
     .gdAdminPhoneScreen .gdAdminPhoneFrameCrop{transition:transform .42s cubic-bezier(.2,.7,.2,1)}
-    .gdAdminPhoneScreen.gdAdminPhoneTilted .gdAdminPhoneFrameCrop{transform:perspective(720px) rotateX(var(--gd-phone-tilt,14deg));transform-origin:50% 92%}
+    .gdAdminPhoneScreen.gdAdminPhoneTilted .gdAdminPhoneFrameCrop{transform:perspective(560px) rotateX(var(--gd-phone-tilt,34deg)) scale(.99);transform-origin:50% 98%}
+    .gdAdminPhoneScreen.gdAdminPhoneTilted .gdAdminPhoneFrameCrop:after{content:"";position:absolute;inset:0;pointer-events:none;z-index:3;background:linear-gradient(to top,rgba(0,0,0,0) 42%,rgba(6,10,7,.58))}
     .gdAdminPhoneTiltPanel{display:grid;gap:6px;padding:10px;border-radius:12px;background:rgba(0,0,0,.2);border:1px solid rgba(255,255,255,.08)}
     .gdAdminPhoneTiltReadout{display:flex;justify-content:space-between;align-items:center;font-size:9px;font-weight:950;color:rgba(255,255,255,.56);text-transform:uppercase;letter-spacing:.05em}
     .gdAdminPhoneTiltReadout b{color:#fff;font-size:12px}

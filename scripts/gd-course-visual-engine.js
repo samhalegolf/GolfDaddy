@@ -283,7 +283,7 @@
     var greenSquareLens={captureLens:"green-square",lensShape:"green-square",lensAspectRatio:1,lensOrientation:"map-axis",lensFit:"expand-bounds"};
     if(role==="green-surround")return Object.assign({role:role,label:"Super HD green surrounds",quality:"super-hd",targetZoom:20,minZoom:20,maxZoom:20,maxTiles:220,bleedMeters:26,bleedPx:220,stitchLayer:30,fixedZoom:true},greenSquareLens);
     if(role==="play-corridor")return Object.assign({role:role,label:"HD play corridor",quality:"hd",targetZoom:19,minZoom:19,maxZoom:19,maxTiles:320,bleedMeters:32,bleedPx:220,stitchLayer:20,fixedZoom:true,maxSegmentMeters:320,segmentOverlapMeters:42,maxSegments:6},mobileHoleLens);
-    if(role==="terrain-reference")return {role:role,label:"Terrain view reference",quality:"terrain-map",targetZoom:16,minZoom:14,maxZoom:17,maxTiles:260,bleedMeters:130,bleedPx:380,stitchLayer:5,terrainStageOnly:true,debugTerrain:true,tileSourceLabel:"Esri World Topographic Map",tileTemplate:"https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}"};
+    if(role==="terrain-reference")return {role:role,label:"Terrain relief reference",quality:"terrain-map",targetZoom:16,minZoom:14,maxZoom:17,maxTiles:260,bleedMeters:130,bleedPx:380,stitchLayer:5,terrainStageOnly:true,debugTerrain:true,tileSourceLabel:"Esri World Hillshade",tileTemplate:"https://services.arcgisonline.com/arcgis/rest/services/Elevation/World_Hillshade/MapServer/tile/{z}/{y}/{x}"};
     if(role==="three-d-hole-beta")return Object.assign({role:role,label:"3D view beta hole camera",quality:"3d-beta",targetZoom:18,minZoom:18,maxZoom:18,maxTiles:320,bleedMeters:64,bleedPx:620,stitchLayer:40,beta3dStageOnly:true,cameraMode:"3d-beta-toggle",captureTiltDeg:8,playTiltDeg:14,cameraTiltDeg:8,cameraBearingMode:"play-axis",enabledByDefault:false,fixedZoom:true,maxSegmentMeters:320,segmentOverlapMeters:42,maxSegments:6},mobileHoleLens);
     return {role:"course-backdrop",label:"Live map underlay",quality:"live-map-base",targetZoom:17,minZoom:16,maxZoom:18,maxTiles:260,bleedMeters:120,bleedPx:420,stitchLayer:0,debugUnderlay:true};
   }
@@ -1813,9 +1813,9 @@
     var strength=finite(meta.terrainStrength);
     if(strength==null)strength=String(meta.product||"")==="single-hole"?.9:.42;
     strength=clamp(strength,0,1.6);
-    var terrainTileOpacity=clamp(.2+strength*.36,.2,.76);
-    var terrainToneAlpha=clamp(.66+strength*.18,.66,.95);
-    var terrainToneSlope=clamp(1.02+strength*.12,1.02,1.24);
+    var terrainTileOpacity=clamp(.26+strength*.46,.26,.96);
+    var terrainToneSlope=clamp(1.05+strength*.16,1.05,1.32);
+    var terrainToneLift=clamp(.14-strength*.02,.08,.14);
     var reliefTop=clamp(.11+strength*.12,.1,.33);
     var reliefMid=clamp(.08+strength*.09,.07,.22);
     var reliefBottom=clamp(.14+strength*.12,.12,.36);
@@ -1845,8 +1845,8 @@
     }
     var role=text(meta.role,80)||"terrain-view";
     var stage=text(meta.stage,80)||"terrain-shading";
-    var terrainSource=terrain.length?"tile-reference-overlay":"deterministic-shading";
-    var svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+dims.width+'" height="'+dims.height+'" viewBox="0 0 '+dims.width+" "+dims.height+'" data-renderer="'+escapeXml(RENDERER_VERSION)+'" data-role="'+escapeXml(role)+'" data-stage="'+escapeXml(stage)+'" data-terrain-strength="'+svgNum(strength)+'"><defs><filter id="terrainTone"><feColorMatrix type="matrix" values=".32 .32 .32 0 0 .30 .30 .30 0 0 .26 .26 .26 0 0 0 0 0 '+svgNum(terrainToneAlpha)+' 0"/><feComponentTransfer><feFuncR type="linear" slope="'+svgNum(terrainToneSlope)+'" intercept="-.03"/><feFuncG type="linear" slope="'+svgNum(terrainToneSlope)+'" intercept="-.03"/><feFuncB type="linear" slope="'+svgNum(terrainToneSlope)+'" intercept="-.03"/></feComponentTransfer></filter><linearGradient id="terrainRelief" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="rgba(255,255,255,'+svgNum(reliefTop)+')"/><stop offset=".42" stop-color="rgba(255,255,255,0)"/><stop offset=".68" stop-color="rgba(20,42,26,'+svgNum(reliefMid)+')"/><stop offset="1" stop-color="rgba(0,0,0,'+svgNum(reliefBottom)+')"/></linearGradient><pattern id="terrainHatch" width="18" height="18" patternUnits="userSpaceOnUse" patternTransform="rotate(-28)"><path d="M0 0 L0 18" stroke="rgba(255,255,255,.10)" stroke-width="1"/></pattern></defs><rect width="100%" height="100%" fill="#10130f"/><g>'+source+'</g><rect width="100%" height="100%" fill="url(#terrainRelief)" opacity="'+svgNum(reliefOpacity)+'"/>'+terrainGroups+'<rect width="100%" height="100%" fill="rgba(44,67,42,'+svgNum(tintOpacity)+')"/><rect width="100%" height="100%" fill="url(#terrainHatch)" opacity="'+svgNum(hatchOpacity)+'"/></svg>';
+    var terrainSource=terrain.length?"hillshade-relief-shading":"deterministic-shading";
+    var svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+dims.width+'" height="'+dims.height+'" viewBox="0 0 '+dims.width+" "+dims.height+'" data-renderer="'+escapeXml(RENDERER_VERSION)+'" data-role="'+escapeXml(role)+'" data-stage="'+escapeXml(stage)+'" data-terrain-strength="'+svgNum(strength)+'"><defs><filter id="terrainTone"><feColorMatrix type="saturate" values="0"/><feComponentTransfer><feFuncR type="linear" slope="'+svgNum(terrainToneSlope)+'" intercept="'+svgNum(terrainToneLift)+'"/><feFuncG type="linear" slope="'+svgNum(terrainToneSlope)+'" intercept="'+svgNum(terrainToneLift)+'"/><feFuncB type="linear" slope="'+svgNum(terrainToneSlope)+'" intercept="'+svgNum(terrainToneLift)+'"/></feComponentTransfer></filter><linearGradient id="terrainRelief" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="rgba(255,255,255,'+svgNum(reliefTop)+')"/><stop offset=".42" stop-color="rgba(255,255,255,0)"/><stop offset=".68" stop-color="rgba(20,42,26,'+svgNum(reliefMid)+')"/><stop offset="1" stop-color="rgba(0,0,0,'+svgNum(reliefBottom)+')"/></linearGradient><pattern id="terrainHatch" width="18" height="18" patternUnits="userSpaceOnUse" patternTransform="rotate(-28)"><path d="M0 0 L0 18" stroke="rgba(255,255,255,.10)" stroke-width="1"/></pattern></defs><rect width="100%" height="100%" fill="#10130f"/><g>'+source+'</g><rect width="100%" height="100%" fill="url(#terrainRelief)" opacity="'+svgNum(reliefOpacity)+'"/>'+terrainGroups+'<rect width="100%" height="100%" fill="rgba(44,67,42,'+svgNum(tintOpacity)+')"/><rect width="100%" height="100%" fill="url(#terrainHatch)" opacity="'+svgNum(hatchOpacity)+'"/></svg>';
     return {dataUrl:dataUrl("image/svg+xml",svg),width:dims.width,height:dims.height,bounds:bounds,sourceCaptureIds:sourceCaptureIds,metadata:Object.assign({},inheritedSurfaceMetadata(asset),{rendererVersion:RENDERER_VERSION,format:"image/svg+xml",role:role,stage:stage,terrainSource:terrainSource,terrainStrength:+strength.toFixed(3),inputRole:asset&&asset.metadata&&asset.metadata.role||"",inputStage:asset&&asset.metadata&&asset.metadata.stage||"",outputDimensions:dims},meta)};
   }
   function terrainViewSvg(record,terrainCaptures,meta){
@@ -2935,6 +2935,6 @@
     pullCourseVisual:pullCourseVisual,
     buildFromCourseDatabase:buildFromCourseDatabase,
     hydrateCourseVisualAssets:hydrateCourseVisualAssets,
-    __test:{emptyStore:emptyStore,stitchSvg:stitchSvg,hashString:hashString,captureSignature:captureSignature,metadataForCloud:metadataForCloud,loadAssetData:loadAssetData,saveAssetData:saveAssetData,filterForSettings:filterForSettings,greenToneHex:greenToneHex,hslToHex:hslToHex}
+    __test:{emptyStore:emptyStore,stitchSvg:stitchSvg,hashString:hashString,captureSignature:captureSignature,metadataForCloud:metadataForCloud,loadAssetData:loadAssetData,saveAssetData:saveAssetData,filterForSettings:filterForSettings,greenToneHex:greenToneHex,hslToHex:hslToHex,capturePolicy:capturePolicy,terrainShadeAsset:terrainShadeAsset}
   };
 });

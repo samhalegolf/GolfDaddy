@@ -716,6 +716,42 @@ function payload() {
   assert.equal(typeof engine.greenToneHex, "function", "greenToneHex is exposed for the admin live preview");
   assert.equal(engine.greenToneHex(0), neutralFilter.greenHex, "public greenToneHex matches the render pipeline");
 
+  // Terrain: hillshade source + relief shading (not a pasted map), toggllable strength
+  const terrainPolicy = engine.__test.capturePolicy("terrain-reference");
+  assert.ok(/World_Hillshade/i.test(terrainPolicy.tileTemplate), "terrain reference captures the Esri hillshade relief layer");
+  assert.equal(terrainPolicy.tileSourceLabel, "Esri World Hillshade", "terrain source is labelled as hillshade");
+
+  const terrainAsset = {
+    dataUrl: "data:image/svg+xml," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"><rect width="200" height="200" fill="#3a7d4a"/></svg>'),
+    width: 200, height: 200,
+    bounds: { south: -45.02, west: 169.1, north: -45.01, east: 169.11 },
+    metadata: {}
+  };
+  const terrainCap = {
+    id: "terrain-cap-1", role: "terrain-reference", width: 256, height: 256,
+    imageData: "data:image/png;base64,iVBORw0KGgo=",
+    bounds: { south: -45.025, west: 169.095, north: -45.005, east: 169.115 }
+  };
+  const terrainOpts = (s) => ({ terrainStrength: s, role: "single-hole-terrain", stage: "terrain-shading", product: "single-hole", bounds: terrainAsset.bounds });
+  const terrainLow = engine.__test.terrainShadeAsset(terrainAsset, [terrainCap], terrainOpts(0));
+  const terrainHigh = engine.__test.terrainShadeAsset(terrainAsset, [terrainCap], terrainOpts(1.5));
+  assert.ok(terrainLow && terrainHigh, "terrain shade asset renders at both strengths");
+  const lowSvg = svgText(terrainLow.dataUrl);
+  const highSvg = svgText(terrainHigh.dataUrl);
+  assert.ok(/feColorMatrix type="saturate" values="0"/.test(highSvg), "terrain tiles are desaturated to pure relief luminance, not a coloured map overlay");
+  assert.ok(highSvg.indexOf(".32 .32 .32") < 0, "old colour-averaging terrain matrix is gone");
+  assert.ok(/data-role="terrain-reference"[^>]*mix-blend-mode:multiply/.test(highSvg) || /mix-blend-mode:multiply/.test(highSvg), "hillshade relief shades the surface via multiply (shadows carve in)");
+  assert.equal(terrainHigh.metadata.terrainSource, "hillshade-relief-shading", "terrain source is reported as relief shading");
+  const groupOpacity = (svg) => {
+    const m = svg.match(/data-role="terrain-reference" opacity="([0-9.]+)"/);
+    return m ? Number(m[1]) : null;
+  };
+  const lowOpacity = groupOpacity(lowSvg);
+  const highOpacity = groupOpacity(highSvg);
+  assert.ok(lowOpacity !== null && highOpacity !== null, "terrain relief group is present at both strengths");
+  assert.ok(highOpacity > lowOpacity, "higher terrain strength deepens the relief shading (toggllable degree)");
+  assert.ok(lowOpacity > 0, "strength 0 keeps a minimal baseline of relief shading, not fully off");
+
   console.log("course visual engine tests passed");
 })().catch((error) => {
   console.error(error);

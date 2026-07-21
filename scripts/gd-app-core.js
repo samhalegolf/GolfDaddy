@@ -884,8 +884,10 @@ function gdAdminCoursePreviewMarkup(selected){
   const frame=imageMarkup?gdAdminCoursePreviewPhoneFrameMarkup(imageMarkup,gdAdminCoursePreviewFrameBox(src)):`<div class="gdAdminPhoneEmpty">No visual surface yet. Use Update to build the Clarity play surface.</div>`;
   const filterStyle=gdAdminCourseVisualFilterStyleVars(record);
   const tilt=gdAdminCourseVisualTiltInfo(record);
-  const screenStyle=filterStyle+";--gd-phone-tilt:"+gdAdminCourseVisualSvgNum(tilt.playTiltDeg)+"deg";
-  const tiltClass=gdAdminCoursePreviewTilt?" gdAdminPhoneTilted":"";
+  const beta3dOn=!!(record&&record.courseOverrides&&record.courseOverrides.visualEngine&&record.courseOverrides.visualEngine.enable3dBeta);
+  const previewTiltDeg=Math.min(52,Math.max(28,Math.round(Number(tilt.playTiltDeg||14)*2.6)));
+  const screenStyle=filterStyle+";--gd-phone-tilt:"+gdAdminCourseVisualSvgNum(previewTiltDeg)+"deg";
+  const tiltClass=gdAdminCoursePreviewTiltActive(beta3dOn)?" gdAdminPhoneTilted":"";
   const dock=window.GDCourseVisualEngine?gdAdminCourseVisualControls(record,selected.id):"";
   return `<div class="gdAdminPhonePreviewShell gdAdminPhonePreviewTuned"><div class="gdAdminPhoneInfo"><strong>${gdEscapeHTML(selected.name)} · Hole ${gdEscapeHTML(current)}</strong><span>Tune the per-hole Clarity play surface with the tool tabs beside the phone — every change previews live before you publish.</span><div class="gdAdminPhoneControls"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev hole</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next hole</button></div><div class="gdAdminCourseStageLine"><span class="${asset&&asset.dataUrl?"ready":"warn"}">${asset&&asset.dataUrl?"surface ready":"needs visual"}</span><span>H${gdEscapeHTML(current)} / ${gdEscapeHTML(count)}</span><span>${gdEscapeHTML(asset&&asset.path?String(asset.path).split("/").slice(-3).join("/"):"live fallback")}</span></div></div><div class="gdAdminPhoneStage"><div class="gdAdminPhone"><div class="gdAdminPhoneScreen gdAdminPhoneTuned filtered${tiltClass}" style="${screenStyle}"><div class="gdAdminPhoneHud"><span>Clarity Play</span><b>H${gdEscapeHTML(current)}</b></div>${frame}<div class="gdAdminPhoneNav"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next</button></div></div></div>${dock}</div></div>`;
 }
@@ -1527,6 +1529,7 @@ function gdAdminCourseVisualControlChanged(courseId){
     }catch(e){}
   }
   gdAdminCourseVisualApplyLiveFilter(courseId);
+  gdAdminCoursePreviewApplyTilt();
   gdAdminCourseVisualScheduleLiveBuild(courseId);
   return false;
 }
@@ -1648,7 +1651,7 @@ function gdAdminCourseVisualSelectTool(group){
   });
   return false;
 }
-let gdAdminCoursePreviewTilt=false;
+let gdAdminCoursePreviewTilt=null; // null = follow the 3D view beta toggle; true/false = explicit override
 function gdAdminCourseVisualTiltInfo(record){
   const engine=window.GDCourseVisualEngine;
   let policy={captureTiltDeg:8,playTiltDeg:14,cameraTiltDeg:8,pitchStrategy:"faux-tilt-svg",nativePitchAvailable:false};
@@ -1662,26 +1665,41 @@ function gdAdminCourseVisualTiltInfo(record){
     pitchStrategy:(meta&&(meta.pitchStrategy||meta.mapCameraCapability&&meta.mapCameraCapability.pitchStrategy))||policy.pitchStrategy
   };
 }
-function gdAdminCoursePreviewToggleTilt(){
-  gdAdminCoursePreviewTilt=!gdAdminCoursePreviewTilt;
-  document.querySelectorAll(".gdAdminPhoneScreen").forEach(screen=>screen.classList.toggle("gdAdminPhoneTilted",gdAdminCoursePreviewTilt));
+function gdAdminCoursePreview3dEnabled(){
+  const cb=document.getElementById("gdCourseVisual3dBeta");
+  return cb?!!cb.checked:false;
+}
+function gdAdminCoursePreviewTiltActive(recordBeta){
+  const base=(typeof recordBeta==="boolean")?recordBeta:gdAdminCoursePreview3dEnabled();
+  return gdAdminCoursePreviewTilt===null?base:!!gdAdminCoursePreviewTilt;
+}
+function gdAdminCoursePreviewApplyTilt(){
+  const active=gdAdminCoursePreviewTiltActive();
+  document.querySelectorAll(".gdAdminPhoneScreen").forEach(screen=>screen.classList.toggle("gdAdminPhoneTilted",active));
   document.querySelectorAll(".gdAdminPhoneTiltBtn").forEach(btn=>{
-    btn.classList.toggle("active",gdAdminCoursePreviewTilt);
-    btn.setAttribute("aria-pressed",gdAdminCoursePreviewTilt?"true":"false");
+    btn.classList.toggle("active",active);
+    btn.setAttribute("aria-pressed",active?"true":"false");
   });
+  return active;
+}
+function gdAdminCoursePreviewToggleTilt(){
+  gdAdminCoursePreviewTilt=!gdAdminCoursePreviewTiltActive();
+  gdAdminCoursePreviewApplyTilt();
   return false;
 }
 function gdAdminCourseVisualDepthBody(record,beta3dField){
   const tilt=gdAdminCourseVisualTiltInfo(record);
   const built=!!(record&&record.beta3dView);
+  const beta3dOn=!!(record&&record.courseOverrides&&record.courseOverrides.visualEngine&&record.courseOverrides.visualEngine.enable3dBeta);
+  const tiltActive=gdAdminCoursePreviewTiltActive(beta3dOn);
   return beta3dField+
     `<div class="gdAdminPhoneTiltPanel" role="group" aria-label="Play tilt (read only)">`+
       `<div class="gdAdminPhoneTiltReadout"><span>Capture tilt</span><b>${tilt.captureTiltDeg}°</b></div>`+
       `<div class="gdAdminPhoneTiltReadout"><span>Play tilt</span><b>${tilt.playTiltDeg}°</b></div>`+
       `<div class="gdAdminPhoneTiltReadout"><span>Pitch</span><b>${tilt.nativePitchAvailable?"native":"faux tilt"}</b></div>`+
       `<div class="gdAdminPhoneTiltReadout"><span>3D asset</span><b class="${built?"ready":"warn"}">${built?"built":"not built"}</b></div>`+
-      `<button type="button" class="gdAdminPhoneTiltBtn${gdAdminCoursePreviewTilt?" active":""}" aria-pressed="${gdAdminCoursePreviewTilt?"true":"false"}" onclick="return gdAdminCoursePreviewToggleTilt()">Preview tilt</button>`+
-      `<span class="gdAdminPhoneTiltNote">Read-only — GPS Play sets the live tilt at runtime. This only previews it.</span>`+
+      `<button type="button" class="gdAdminPhoneTiltBtn${tiltActive?" active":""}" aria-pressed="${tiltActive?"true":"false"}" onclick="return gdAdminCoursePreviewToggleTilt()">${tiltActive?"Tilt on":"Preview tilt"}</button>`+
+      `<span class="gdAdminPhoneTiltNote">Enabling 3D view beta tilts the preview. Read-only — GPS Play sets the live tilt at runtime.</span>`+
     `</div>`;
 }
 function gdAdminCourseVisualControls(record,courseId){
