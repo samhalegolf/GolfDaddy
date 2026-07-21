@@ -10,6 +10,7 @@ const publicPaths = [
   "assets",
   "scripts",
   "styles",
+  "demo",
   // Deep-link verification files. Android reads assetlinks.json and iOS reads
   // apple-app-site-association from this path over https; if they are not
   // deployed, links open the browser instead of the app and the failure is
