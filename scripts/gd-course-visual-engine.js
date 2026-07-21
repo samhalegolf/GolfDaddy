@@ -1850,7 +1850,9 @@
     var project=projection&&projection.project;
     var tee=project&&pins.tee?project(pins.tee):null;
     var green=project&&pins.green?project(pins.green):null;
-    var dark=clamp((100-cfg.ambientLevel)/100*.82,0,.92);
+    /* Ambient 0 means pitch black off the line - the curve reaches full opacity instead of
+       stopping at a grey ceiling. */
+    var dark=clamp(Math.pow((100-cfg.ambientLevel)/100,1.15),0,1);
     var lit=clamp(cfg.litLevel/100,0,1);
     /* Masked darkness, not additive glow: one dark rect covers the frame, and the beam/pool
        paint BLACK into its luminance mask so lit areas show the untouched surface at full
@@ -1865,8 +1867,10 @@
       var dxA=green.x-tee.x,dyA=green.y-tee.y;
       var axisLen=Math.max(1e-6,Math.sqrt(dxA*dxA+dyA*dyA));
       var uxA=dxA/axisLen,uyA=dyA/axisLen,pxA=-uyA,pyA=uxA;
-      var wTee=Math.max(24,dims.width*.07);
-      var wGreen=Math.max(wTee,dims.width*(.14+clamp(cfg.spread,.05,1)*.5));
+      /* Spread at minimum is a tight torch line, not a floodlit half-frame. */
+      var spreadT=clamp(cfg.spread,.05,1);
+      var wTee=Math.max(12,dims.width*(.015+spreadT*.06));
+      var wGreen=Math.max(wTee,dims.width*(.03+spreadT*.55));
       var over=axisLen*.12;
       var conePoints=[
         {x:tee.x-pxA*wTee-uxA*over*.3,y:tee.y-pyA*wTee-uyA*over*.3},
@@ -1875,10 +1879,27 @@
         {x:green.x-pxA*wGreen+uxA*over,y:green.y-pyA*wGreen+uyA*over}
       ].map(function(p){return svgNum(p.x)+","+svgNum(p.y);}).join(" ");
       defs+='<linearGradient id="cvFloodBeam" gradientUnits="userSpaceOnUse" x1="'+svgNum(tee.x)+'" y1="'+svgNum(tee.y)+'" x2="'+svgNum(green.x)+'" y2="'+svgNum(green.y)+'"><stop offset="0" stop-color="black" stop-opacity="'+svgNum(lit)+'"/><stop offset=".65" stop-color="black" stop-opacity="'+svgNum(lit*.7*throwKeep)+'"/><stop offset="1" stop-color="black" stop-opacity="'+svgNum(lit*.4*throwKeep)+'"/></linearGradient>';
-      defs+='<filter id="cvFloodSoft" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="'+svgNum(Math.max(8,dims.width*.05))+'"/></filter>';
+      defs+='<filter id="cvFloodSoft" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="'+svgNum(Math.max(6,dims.width*(.015+spreadT*.045)))+'"/></filter>';
       maskContent+='<polygon points="'+conePoints+'" fill="url(#cvFloodBeam)" filter="url(#cvFloodSoft)"/>';
-      var radius=Math.max(dims.width,dims.height)*clamp(cfg.greenPoolRadius,.05,1);
-      defs+='<radialGradient id="cvFloodPool" gradientUnits="userSpaceOnUse" cx="'+svgNum(green.x)+'" cy="'+svgNum(green.y)+'" r="'+svgNum(radius)+'"><stop offset="0" stop-color="black" stop-opacity="'+svgNum(lit*cfg.greenPool)+'"/><stop offset=".7" stop-color="black" stop-opacity="'+svgNum(lit*cfg.greenPool*.45)+'"/><stop offset="1" stop-color="black" stop-opacity="0"/></radialGradient>';
+      /* The pool sits on the REAL green: centred on the projected green polygon and sized from
+         its extent, with the radius slider scaling outward from there. A frame-relative radius
+         lit half the suburb on a par 3. Falls back to the pin + axis length when the package
+         has no polygon. */
+      var shapePoints=(Array.isArray(pins.greenShape)?pins.greenShape:[]).map(function(pt){return project(pt);}).filter(Boolean);
+      var poolCenter=green;
+      var greenExtent=0;
+      if(shapePoints.length>=3){
+        var cxS=0,cyS=0;
+        shapePoints.forEach(function(p){cxS+=p.x;cyS+=p.y;});
+        poolCenter={x:cxS/shapePoints.length,y:cyS/shapePoints.length};
+        shapePoints.forEach(function(p){
+          var dxS=p.x-poolCenter.x,dyS=p.y-poolCenter.y;
+          greenExtent=Math.max(greenExtent,Math.sqrt(dxS*dxS+dyS*dyS));
+        });
+      }
+      if(!greenExtent)greenExtent=axisLen*.06;
+      var radius=Math.max(16,greenExtent*(1.2+clamp(cfg.greenPoolRadius,.05,1)*2.5));
+      defs+='<radialGradient id="cvFloodPool" gradientUnits="userSpaceOnUse" cx="'+svgNum(poolCenter.x)+'" cy="'+svgNum(poolCenter.y)+'" r="'+svgNum(radius)+'"><stop offset="0" stop-color="black" stop-opacity="'+svgNum(lit*cfg.greenPool)+'"/><stop offset=".7" stop-color="black" stop-opacity="'+svgNum(lit*cfg.greenPool*.45)+'"/><stop offset="1" stop-color="black" stop-opacity="0"/></radialGradient>';
       maskContent+='<rect width="100%" height="100%" fill="url(#cvFloodPool)"/>';
     }
     defs+='<mask id="cvFloodMask">'+maskContent+'</mask>';
