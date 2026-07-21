@@ -1283,6 +1283,14 @@
     return 18;
   }
 
+  /* This resolver exists for ONE case: OSM has the SHAPES but does not expose hole numbers, so
+     the numbering has to be worked out from geometry.
+
+     Where OSM does expose numbers - even partially - the automapper already numbers the course
+     correctly with no scorecard, so diverting here is a downgrade rather than a rescue: without a
+     scorecard, matchCandidatesToScorecard refuses outright (confidence 0, no assignments) and the
+     working map is displaced by a stale result. The previous gate fired on partial numbering, so a
+     single golf=hole element missing a ref - one out of eighteen - threw the whole course away. */
   function hasNumberingIssue(input) {
     var payload = input.osmPayload || {};
     var elements = payload.elements || input.elements || [];
@@ -1290,16 +1298,10 @@
     var refs = holeElements.map(function (element) {
       return validHoleNumber(tagText(element, "ref") || tagText(element, "name"));
     }).filter(Boolean);
-    var uniqueRefs = {};
-    refs.forEach(function (ref) { uniqueRefs[ref] = true; });
-    var bundleGuides = input.guideBundle && Array.isArray(input.guideBundle.guides) ? input.guideBundle.guides : [];
     var usefulGeometry = holeElements.length ||
       elements.some(function (element) { return golfTag(element) === "green" || golfTag(element) === "fairway"; });
     if (!usefulGeometry) return false;
-    if (holeElements.length && refs.length < holeElements.length) return true;
-    if (refs.length && Object.keys(uniqueRefs).length < refs.length) return true;
-    var expected = number(input.expectedHoleCount, 18);
-    return bundleGuides.length > 0 && bundleGuides.length < Math.min(expected, 18);
+    return !refs.length;
   }
 
   function supportedGolfGeometry(elements) {

@@ -141,6 +141,44 @@ async function main() {
     expectedHoleCount: 3
   }), false, "does not run when AutoMapper already has numbered guides");
 
+  /* The resolver is for shapes-without-numbers ONLY. It used to divert whenever numbering was
+     merely imperfect, which was a downgrade rather than a rescue: with no scorecard it refuses
+     outright, so a working map got displaced by a stale result. */
+  const partiallyLabelled = JSON.parse(JSON.stringify(labelled));
+  delete partiallyLabelled.filter((el) => el.tags.golf === "hole")[0].tags.ref;
+  assert.strictEqual(resolver.shouldRunForAutoMapper({
+    osmPayload: { elements: partiallyLabelled },
+    guideBundle: { guides: [] },
+    expectedHoleCount: 3
+  }), false, "does NOT run when only some holes carry a ref - the AutoMapper numbers those itself");
+
+  const duplicateRefs = JSON.parse(JSON.stringify(labelled));
+  duplicateRefs.filter((el) => el.tags.golf === "hole").forEach((el) => { el.tags.ref = "1"; });
+  assert.strictEqual(resolver.shouldRunForAutoMapper({
+    osmPayload: { elements: duplicateRefs },
+    guideBundle: { guides: [] },
+    expectedHoleCount: 3
+  }), false, "does NOT run on duplicate refs - numbers are exposed, so it is not this resolver's case");
+
+  assert.strictEqual(resolver.shouldRunForAutoMapper({
+    osmPayload: { elements: labelled },
+    guideBundle: { guides: [{ hole: 1 }] },
+    expectedHoleCount: 18
+  }), false, "does NOT run just because the guide bundle is short of the expected hole count");
+
+  const shapesOnly = elements.filter((el) => el.tags.golf !== "hole");
+  assert.strictEqual(resolver.shouldRunForAutoMapper({
+    osmPayload: { elements: shapesOnly },
+    guideBundle: { guides: [] },
+    expectedHoleCount: 3
+  }), true, "still runs for its actual case: shapes present, no hole numbers exposed");
+
+  assert.strictEqual(resolver.shouldRunForAutoMapper({
+    osmPayload: { elements: [] },
+    guideBundle: { guides: [] },
+    expectedHoleCount: 18
+  }), false, "does not run without usable geometry");
+
   const emptySource = await resolver.resolveCourseGeometryForAutoMapper({
     course: { courseId: "resolver-test", courseName: "Resolver Test Course", courseLat: baseLat, courseLng: baseLng },
     osmPayload: { elements: [] },
