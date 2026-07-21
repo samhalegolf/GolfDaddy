@@ -12,46 +12,18 @@
   "timezoneId": "Pacific/Auckland",
   "colorScheme": "light",
   "headless": true,
-  "storageState": {
-    "localStorage": {
-      "clarity_demo_capture": {
-        "enabled": true,
-        "scenario": "practice-vs-my-bubble-merge",
-        "version": 1
-      }
-    }
-  },
   "steps": [
     {
       "action": "goto",
-      "url": "{{baseUrl}}/",
+      "url": "{{baseUrl}}/demo/bubble-merge.html",
       "waitUntil": "networkidle",
-      "holdAfter": 1600
-    },
-    {
-      "action": "clickFirst",
-      "candidates": [
-        { "testId": "home-bubble-studio" },
-        { "role": "button", "name": "Bubble Studio" },
-        { "text": "Bubble Studio" }
-      ],
-      "holdAfter": 1200
-    },
-    {
-      "action": "clickFirst",
-      "candidates": [
-        { "testId": "practice-bubble" },
-        { "role": "button", "name": "Practice Bubble" },
-        { "text": "Practice Bubble" }
-      ],
-      "holdAfter": 1200
+      "holdAfter": 1800
     },
     {
       "action": "waitForAny",
       "candidates": [
         { "testId": "bubble-comparison" },
-        { "text": "My Bubble" },
-        { "text": "Practice Bubble" }
+        { "text": "Your latest pattern is ready" }
       ],
       "holdAfter": 1800
     },
@@ -67,32 +39,15 @@
       "action": "clickFirst",
       "candidates": [
         { "testId": "merge-practice-bubble" },
-        { "role": "button", "name": "Merge" },
-        { "role": "button", "name": "Merge into My Bubble" },
-        { "role": "button", "name": "Adopt as My Bubble" },
-        { "text": "Merge" }
+        { "role": "button", "name": "Merge into My Bubble" }
       ],
-      "holdAfter": 900
-    },
-    {
-      "action": "clickFirst",
-      "candidates": [
-        { "testId": "confirm-merge-practice-bubble" },
-        { "role": "button", "name": "Confirm Merge" },
-        { "role": "button", "name": "Confirm" },
-        { "role": "button", "name": "Merge" }
-      ],
-      "timeout": 3500,
       "holdAfter": 1600
     },
     {
       "action": "waitForAny",
       "candidates": [
         { "testId": "bubble-merge-complete" },
-        { "text": "Merged" },
-        { "text": "My Bubble updated" },
-        { "text": "Practice Bubble merged" },
-        { "text": "My Bubble" }
+        { "text": "My Bubble updated" }
       ],
       "holdAfter": 2200
     },
