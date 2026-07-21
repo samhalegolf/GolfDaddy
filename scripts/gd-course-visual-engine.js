@@ -2629,9 +2629,14 @@
             record.singleHoleTerrainView={path:"course-visuals/"+record.courseId+"/single-hole/terrain/"+version+".svg",dataUrl:holeTerrain.dataUrl,version:version,width:holeTerrain.width,height:holeTerrain.height,bounds:holeTerrain.bounds,sourceCaptureIds:holeTerrain.sourceCaptureIds,captureId:record.exampleHoleVisual.captureId,holeNumber:record.exampleHoleVisual.holeNumber,presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash,metadata:holeTerrain.metadata};
           }
         }
+        /* skipHoleFrames: the automatic pipeline bakes only overview + single hole; per-hole
+           frames bake on demand (scoped) and in full on Publish. Existing baked frames are
+           kept rather than wiped. */
+        if(!opts.skipHoleFrames){
         record.holeFramePreviewVisuals=[];
         record.holeFrameTerrainViews=[];
-        (Array.isArray(record.holeFrameVisuals)?record.holeFrameVisuals:[]).forEach(function(frame){
+        }
+        (opts.skipHoleFrames?[]:(Array.isArray(record.holeFrameVisuals)?record.holeFrameVisuals:[])).forEach(function(frame){
           if(!frame||!frame.dataUrl)return;
           var holeNumber=Math.max(0,Math.round(Number(frame.holeNumber)||0));
           if(!holeNumber)return;

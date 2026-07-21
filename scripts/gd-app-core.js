@@ -875,7 +875,28 @@ function gdAdminCoursePreviewSetHole(courseId,holeNumber){
   gdAdminCourseDatabaseSelected=courseId;
   gdAdminCourseDatabaseTab="preview";
   gdRenderAdminCourseDatabase();
+  setTimeout(()=>gdAdminCoursePreviewEnsureHoleBake(courseId,target),0);
   return false;
+}
+/* Bake the visible hole's styled frame on demand - the base frame shows immediately and the
+   styled bake replaces it when ready. This is how per-hole previews appear now that the
+   automatic pipeline no longer bakes all 18 frames up front. */
+function gdAdminCoursePreviewEnsureHoleBake(courseId,holeNumber){
+  const engine=window.GDCourseVisualEngine;
+  if(!engine||typeof engine.buildCourseVisualPreview!=="function")return;
+  const record=gdAdminCourseVisualRecord(courseId);
+  if(!record)return;
+  const hole=Number(holeNumber)||0;
+  if(!hole)return;
+  const baked=(record.holeFrameTerrainViews||[]).concat(record.holeFramePreviewVisuals||[]).some(asset=>Number(asset&&asset.holeNumber)===hole);
+  const hasBase=(record.holeFrameVisuals||[]).some(asset=>Number(asset&&asset.holeNumber)===hole);
+  if(baked||!hasBase)return;
+  if(gdAdminCourseVisualBakePending[courseId])return;
+  gdAdminCourseVisualBakePending[courseId]=true;
+  engine.buildCourseVisualPreview(courseId,record.presetId,undefined,{holeNumber:hole})
+    .then(()=>{if(gdAdminCourseDatabaseSelected===courseId&&gdAdminCourseDatabaseTab==="preview")gdRenderAdminCourseDatabase();})
+    .catch(error=>{console.warn("[GolfDaddy] hole preview bake failed",error);})
+    .finally(()=>{delete gdAdminCourseVisualBakePending[courseId];});
 }
 function gdAdminCoursePreviewStep(courseId,delta){
   courseId=String(courseId||gdAdminCourseDatabaseSelected||"");
@@ -1099,6 +1120,7 @@ function gdAdminCoursePreviewMarkup(selected){
   let current=Math.min(count,Math.max(1,Number(gdAdminCoursePreviewHoleByCourse[selected.id])||1));
   if(captured.indexOf(current)<0)current=captured.find(n=>n>=current)??captured[captured.length-1];
   gdAdminCoursePreviewHoleByCourse[selected.id]=current;
+  setTimeout(()=>gdAdminCoursePreviewEnsureHoleBake(selected.id,current),0);
   /* Per-hole native assets only - no falling back to the course-wide mosaic,
      which made empty holes look captured when they weren't. */
   const holeLists=[record&&record.holeFrameTerrainViews,record&&record.holeFramePreviewVisuals,record&&record.holeFramePublishedVisuals,record&&record.holeFrameVisuals];
@@ -1223,19 +1245,8 @@ function gdAdminCourseVisualNeedsAutoBuild(record,sourceStatus){
   return false;
 }
 function gdAdminCourseVisualAutoBuildKey(courseId,record,sourceStatus){
-  const plan=record&&record.diagnostics&&record.diagnostics.capturePlanSummary||{};
-  const beta3d=!!(record&&record.courseOverrides&&record.courseOverrides.visualEngine&&record.courseOverrides.visualEngine.enable3dBeta);
-  return [
-    courseId,
-    record&&record.currentVersion||0,
-    record&&record.updatedAt||"",
-    sourceStatus&&sourceStatus.frameCount||0,
-    sourceStatus&&sourceStatus.renderableCount||0,
-    plan&&plan.planned||0,
-    plan&&plan.captured||0,
-    plan&&plan.stitchModel||"",
-    beta3d?1:0
-  ].join("::");
+  /* courseId only - see gdAdminCourseVisualPipelineKey for why updatedAt must stay out. */
+  return String(courseId||"");
 }
 function gdAdminCourseVisualScheduleAutoBuild(courseId,record,sourceStatus){
   const engine=window.GDCourseVisualEngine;
@@ -1286,30 +1297,21 @@ function gdAdminCourseVisualNeedsPipeline(record){
   if(!gdAdminCourseVisualStageReady(record.terrainView,"terrain-shading","native-visuals"))return true;
   if(!gdAdminCourseVisualStageReady(record.singleHolePreviewVisual,"native-visuals"))return true;
   if(!gdAdminCourseVisualStageReady(record.singleHoleTerrainView,"terrain-shading"))return true;
-  const holeBaseCount=Array.isArray(record.holeFrameVisuals)?record.holeFrameVisuals.length:0;
+  /* Per-hole preview frames are deliberately NOT required here: they bake on demand per
+     visited hole (and in full on Publish). Requiring all of them made the auto pipeline
+     re-run the 18-frame bake that freezes the tab. */
   const holeNative=Array.isArray(record.holeFramePreviewVisuals)?record.holeFramePreviewVisuals:[];
-  const holeTerrain=Array.isArray(record.holeFrameTerrainViews)?record.holeFrameTerrainViews:[];
-  if(holeBaseCount&&(holeNative.length<holeBaseCount||holeNative.some(asset=>!gdAdminCourseVisualStageReady(asset,"native-visuals"))))return true;
-  if(holeBaseCount&&(holeTerrain.length<holeBaseCount||holeTerrain.some(asset=>!gdAdminCourseVisualStageReady(asset,"terrain-shading","native-visuals"))))return true;
   const nativeRenderer=String(record.previewVisual&&record.previewVisual.metadata&&record.previewVisual.metadata.rendererVersion||"");
   const holeRenderer=String(record.singleHolePreviewVisual&&record.singleHolePreviewVisual.metadata&&record.singleHolePreviewVisual.metadata.rendererVersion||"");
   const frameRenderer=String(holeNative[0]&&holeNative[0].metadata&&holeNative[0].metadata.rendererVersion||"");
   return !!(renderer&&(nativeRenderer&&nativeRenderer!==renderer||holeRenderer&&holeRenderer!==renderer||frameRenderer&&frameRenderer!==renderer));
 }
+/* One automatic attempt per course per page load. The key deliberately excludes
+   record.updatedAt: a failed build bumps updatedAt, which minted a fresh key on the next
+   render tick and retried the multi-minute build in an endless loop until the tab died.
+   After a failure, recovery is the explicit Scan button. */
 function gdAdminCourseVisualPipelineKey(courseId,record){
-  return [
-    courseId,
-    record&&record.currentVersion||0,
-    record&&record.updatedAt||"",
-    record&&record.presetId||"",
-    record&&record.settingsDirty?1:0,
-    record&&record.previewVisual&&record.previewVisual.path||"",
-    record&&record.terrainView&&record.terrainView.path||"",
-    record&&record.singleHolePreviewVisual&&record.singleHolePreviewVisual.path||"",
-    record&&record.singleHoleTerrainView&&record.singleHoleTerrainView.path||"",
-    Array.isArray(record&&record.holeFramePreviewVisuals)?record.holeFramePreviewVisuals.map(asset=>asset&&asset.path||"").join("|"):"",
-    Array.isArray(record&&record.holeFrameTerrainViews)?record.holeFrameTerrainViews.map(asset=>asset&&asset.path||"").join("|"):""
-  ].join("::");
+  return String(courseId||"");
 }
 function gdAdminCourseVisualSchedulePipeline(courseId,record,sourceStatus){
   const engine=window.GDCourseVisualEngine;
@@ -1325,7 +1327,10 @@ function gdAdminCourseVisualSchedulePipeline(courseId,record,sourceStatus){
       const presetId=String(fresh&&fresh.presetId||engine.defaultPreset?.().id||"");
       const overrides=fresh&&fresh.courseOverrides||{};
       gdAdminCourseVisualToast("Applying native visuals and terrain shading");
-      await engine.buildCourseVisualPreview(courseId,presetId,overrides);
+      /* The automatic pipeline bakes only the light products (overview + single hole).
+         Hole frames bake on demand as each hole is viewed, and in full on Publish - baking
+         all 18 owned-pixel frames here froze the tab for minutes. */
+      await engine.buildCourseVisualPreview(courseId,presetId,overrides,{skipHoleFrames:true});
     }catch(error){
       console.warn("[GolfDaddy] course visual pipeline failed",error);
     }finally{
