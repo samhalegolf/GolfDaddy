@@ -1689,8 +1689,11 @@ function gdAdminCourseVisualControlCommitted(courseId){
   gdAdminCourseVisualBakePending[courseId]=true;
   const presetId=String(document.getElementById("gdCourseVisualPreset")?.value||"");
   const overrides=gdAdminCourseVisualOverridesFromForm();
+  /* Slider releases on the preview bake only the visible hole - a full-course bake over
+     owned-pixel frames freezes the page for minutes. Apply preset / Publish still bake all. */
+  const scopedHole=gdAdminCourseDatabaseTab==="preview"?Number(gdAdminCoursePreviewHoleByCourse[courseId])||0:0;
   Promise.resolve()
-    .then(()=>engine.buildCourseVisualPreview(courseId,presetId,overrides))
+    .then(()=>engine.buildCourseVisualPreview(courseId,presetId,overrides,scopedHole?{holeNumber:scopedHole}:undefined))
     .then(()=>{
       if(gdAdminCourseDatabaseSelected===courseId&&(gdAdminCourseDatabaseTab==="preview"||gdAdminCourseDatabaseTab==="visuals"))gdRenderAdminCourseDatabase();
     })

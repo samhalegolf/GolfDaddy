@@ -2549,8 +2549,18 @@
     recordEvent(record,"course-visual-settings-saved",{published:false,presetId:record.presetId,presetVersion:record.presetVersion,overrideHash:hashString(record.courseOverrides)});
     return putRecord(record,{skipCloudSync:true});
   }
-  function buildCourseVisualPreview(courseId,presetOrId,overrides){
-    return Promise.resolve().then(function(){
+  function buildCourseVisualPreview(courseId,presetOrId,overrides,opts){
+    opts=opts||{};
+    /* opts.holeNumber scopes the bake to ONE hole frame - the sandbox contract is "dial a
+       setting and the recipe re-bakes for this hole". Since captures became owned rasters a
+       full-course re-bake grinds through ~20 multi-MB products and freezes the UI for minutes,
+       so slider releases bake only the visible hole; Apply preset and Publish still run the
+       full pass. */
+    var scopedHole=Math.max(0,Math.round(Number(opts.holeNumber))||0);
+    /* Bakes read baked dataUrls (rawMaster, hole frames) that live in the asset store and are
+       only pulled into the record lazily. In a fresh session they are still empty, so without
+       hydrating first every toggle died instantly with raw-master-missing. */
+    return hydrateCourseVisualAssets(courseId).catch(function(){return null;}).then(function(){
       var record=getRecord(courseId);
       var preset=typeof presetOrId==="string"?getPreset(presetOrId):(presetOrId||getPreset(record.presetId));
       var courseOverrides=overrides!==undefined?clone(overrides||{}):clone(record.courseOverrides||{});
@@ -2560,6 +2570,38 @@
          captures here for the same reason the master build does. */
       return hydrateCaptureImages(allCaptures).then(function(){
       var split=splitVisualCaptures(allCaptures);
+      if(scopedHole){
+        record.presetId=preset.id;
+        record.presetVersion=preset.version;
+        record.courseOverrides=clone(courseOverrides||{});
+        record.status="rendering";
+        recordEvent(record,"course-visual-preview-started",{presetId:preset.id,presetVersion:preset.version,scopedHole:scopedHole});
+        putRecord(record);
+        try{
+          var scopedVersion=(Number(record.currentVersion)||0)+1;
+          var scopedHash=hashString(courseOverrides);
+          var scopedAirbrush=Array.isArray(record.objects)?record.objects:[];
+          var baseFrame=(Array.isArray(record.holeFrameVisuals)?record.holeFrameVisuals:[]).find(function(frame){return frame&&frame.dataUrl&&Math.round(Number(frame.holeNumber))===scopedHole;});
+          if(!baseFrame)throw Object.assign(new Error("No base frame for hole "+scopedHole),{code:"hole-frame-missing"});
+          var scopedNative=nativeVisualAsset(baseFrame,settings,{role:"hole-frame-native-visuals",stage:"native-visuals",version:scopedVersion,product:"hole-frame",holeNumber:scopedHole,presetId:preset.id,presetVersion:preset.version,overrideHash:scopedHash,airbrushObjects:scopedAirbrush,visualAssemblyUnderlayPath:record.basicVisual&&record.basicVisual.path||""});
+          var scopedPreview={path:"course-visuals/"+record.courseId+"/holes/h"+scopedHole+"/preview/"+scopedVersion+".svg",dataUrl:scopedNative.dataUrl,version:scopedVersion,width:scopedNative.width,height:scopedNative.height,bounds:scopedNative.bounds,captureId:baseFrame.captureId,holeNumber:scopedHole,sourceCaptureIds:scopedNative.sourceCaptureIds&&scopedNative.sourceCaptureIds.length?scopedNative.sourceCaptureIds:baseFrame.sourceCaptureIds,presetId:preset.id,presetVersion:preset.version,overrideHash:scopedHash,metadata:Object.assign({},scopedNative.metadata||{},{playSurface:Object.assign({},baseFrame.metadata&&baseFrame.metadata.playSurface||{},{fallbackUnderlay:"live-gps",fallbackPolicy:"live-gps-only"})})};
+          record.holeFramePreviewVisuals=(Array.isArray(record.holeFramePreviewVisuals)?record.holeFramePreviewVisuals:[]).filter(function(frame){return Math.round(Number(frame&&frame.holeNumber))!==scopedHole;}).concat([scopedPreview]);
+          var scopedTerrain=terrainShadeAsset(scopedPreview,split.terrain,{role:"hole-frame-terrain",stage:"terrain-shading",version:scopedVersion,product:"hole-frame",holeNumber:scopedHole,terrainStrength:terrainStrengthForProduct(settings,"single-hole"),bounds:scopedPreview.bounds,presetId:preset.id,presetVersion:preset.version,overrideHash:scopedHash,visualAssemblyUnderlayPath:record.basicVisual&&record.basicVisual.path||""});
+          if(scopedTerrain){
+            record.holeFrameTerrainViews=(Array.isArray(record.holeFrameTerrainViews)?record.holeFrameTerrainViews:[]).filter(function(frame){return Math.round(Number(frame&&frame.holeNumber))!==scopedHole;}).concat([{path:"course-visuals/"+record.courseId+"/holes/h"+scopedHole+"/terrain/"+scopedVersion+".svg",dataUrl:scopedTerrain.dataUrl,version:scopedVersion,width:scopedTerrain.width,height:scopedTerrain.height,bounds:scopedTerrain.bounds,sourceCaptureIds:scopedTerrain.sourceCaptureIds,captureId:baseFrame.captureId,holeNumber:scopedHole,presetId:preset.id,presetVersion:preset.version,overrideHash:scopedHash,metadata:Object.assign({},scopedTerrain.metadata||{},{playSurface:Object.assign({},baseFrame.metadata&&baseFrame.metadata.playSurface||{},{fallbackUnderlay:"live-gps",fallbackPolicy:"live-gps-only"})})}]);
+          }
+          record.currentVersion=scopedVersion;
+          record.status="preview-ready";
+          record.settingsDirty=false;
+          record.lastError=null;
+          recordEvent(record,"course-visual-preview-ready",{version:scopedVersion,presetId:preset.id,presetVersion:preset.version,scopedHole:scopedHole});
+        }catch(error){
+          record.status="failed";
+          record.lastError={code:error&&error.code||"preview-failed",message:error&&error.message||String(error)};
+          recordEvent(record,"course-visual-build-failed",record.lastError);
+        }
+        return putRecord(record);
+      }
       record.presetId=preset.id;
       record.presetVersion=preset.version;
       record.courseOverrides=clone(courseOverrides||{});
