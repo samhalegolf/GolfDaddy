@@ -3303,7 +3303,11 @@
     var waiter=root&&root.gdAwaitCaptureFlattens;
     var list=(Array.isArray(captures)?captures:[]).filter(function(capture){return capture&&!capture.imageData&&!capture.imagePath&&capture.storagePath;});
     if(typeof waiter!=="function"||!list.length)return Promise.resolve(captures);
-    return Promise.resolve(waiter(list.map(function(capture){return capture.storagePath;}),25000)).then(function(results){
+    /* Flattens run through a serial queue (one canvas at a time), so a full-course scan takes
+       count * a-few-seconds. Scale the wait with the count; on timeout the stitch proceeds with
+       tiles and the next build picks up whatever finished flattening. */
+    var timeoutMs=Math.min(150000,5000+3000*list.length);
+    return Promise.resolve(waiter(list.map(function(capture){return capture.storagePath;}),timeoutMs)).then(function(results){
       results=results||{};
       list.forEach(function(capture){
         var hit=results[capture.storagePath];

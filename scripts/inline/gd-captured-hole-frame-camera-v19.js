@@ -641,7 +641,9 @@
 	        }
 	        var dataUrl;
 	        try{dataUrl=canvas.toDataURL("image/jpeg",quality);}
-	        catch(err){return resolve({ok:false,reason:"canvas-tainted",error:String(err&&err.name||err)});}
+	        catch(err){canvas.width=canvas.height=1;return resolve({ok:false,reason:"canvas-tainted",error:String(err&&err.name||err)});}
+	        // Release the backing store immediately - queued flattens must not stack canvases.
+	        canvas.width=canvas.height=1;
 	        if(!dataUrl||dataUrl.indexOf("data:image/jpeg")!==0)return resolve({ok:false,reason:"jpeg-encode-unavailable"});
 	        var flattened=Object.assign({},manifest,{
 	          imageData:dataUrl,
