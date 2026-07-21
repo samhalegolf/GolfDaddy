@@ -149,7 +149,37 @@ export default async function courseMaps(req) {
     if (storage !== "supabase") return json(503, { error: "Course map storage unavailable", warnings });
   }
 
+  /* Geometry changed -> the visual worker should re-snapshot this course. Fire-and-forget:
+     publish must never fail because the visual queue hiccuped, and the jobs endpoint dedupes
+     if a snapshot is already queued or running. */
+  if (storage === "supabase" && merge.accepted && (merge.accepted.objects || merge.accepted.holes)) {
+    try {
+      await enqueueVisualSnapshot(merge.course.id, req);
+    } catch (error) {
+      warnings.push({ storage: "visual-queue", message: storageMessage(error) });
+    }
+  }
+
   return json(200, Object.assign(current, { storage, warnings, mode, accepted: merge.accepted }));
+}
+
+async function enqueueVisualSnapshot(courseId, req) {
+  const id = String(courseId || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  if (!id || !hasSupabase()) return;
+  const existing = await supabaseFetch("course_visual_jobs?select=id&course_id=eq." + encodeURIComponent(id) + "&kind=eq.snapshot&status=in.(queued,running)&limit=1");
+  if (Array.isArray(existing) && existing.length) return;
+  await supabaseFetch("course_visual_jobs", {
+    method: "POST",
+    body: JSON.stringify([{ course_id: id, kind: "snapshot", status: "queued", requested_by: "course-maps-publish" }])
+  });
+  try {
+    const origin = new URL(req.url).origin;
+    fetch(origin + "/.netlify/functions/course-visual-worker-background", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({})
+    }).catch(() => {});
+  } catch (e) { /* queued job remains sweepable */ }
 }
 
 export const config = {

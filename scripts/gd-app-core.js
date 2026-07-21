@@ -849,13 +849,40 @@ function gdAdminCoursePreviewAsset(record,holeNumber){
   }
   return record&&record.exampleHoleVisual||record&&record.singleHolePublishedVisual||record&&record.singleHoleTerrainView||record&&record.singleHolePreviewVisual||null;
 }
-/* Holes that have a native capture baked by the engine - the preview only
-   walks these; holes the scan hasn't produced yet simply aren't on the reel. */
-function gdAdminCoursePreviewCapturedHoles(record){
+/* Frames exported by the server worker live in the course-visuals bucket behind
+   /api/course-visual-assets. The index is fetched once per course per session; when it
+   arrives the preview re-renders so cloud frames appear without local captures at all. */
+const gdAdminCourseCloudFramesCache={};
+function gdAdminCourseCloudFrames(courseId){
+  courseId=String(courseId||"");
+  if(!courseId)return null;
+  const cached=gdAdminCourseCloudFramesCache[courseId];
+  if(cached)return cached.index||null;
+  gdAdminCourseCloudFramesCache[courseId]={index:null};
+  fetch("/api/course-visual-assets?path="+encodeURIComponent(courseId+"/frames/index.json"),{headers:{Accept:"application/json"}})
+    .then(res=>res.ok?res.json():null)
+    .then(index=>{
+      gdAdminCourseCloudFramesCache[courseId]={index:index&&Array.isArray(index.holes)&&index.holes.length?index:null};
+      if(index&&gdAdminCourseDatabaseSelected===courseId&&gdAdminCourseDatabaseTab==="preview")gdRenderAdminCourseDatabase();
+    })
+    .catch(()=>{});
+  return null;
+}
+function gdAdminCourseCloudFrameFor(courseId,holeNumber){
+  const index=gdAdminCourseCloudFrames(courseId);
+  if(!index)return null;
+  return index.holes.find(hole=>Number(hole&&hole.holeNumber)===Number(holeNumber))||null;
+}
+/* Holes that have a native capture baked by the engine, or a cloud frame exported by the
+   server worker - the preview walks the union, so a fresh browser can browse a course it
+   never scanned locally. */
+function gdAdminCoursePreviewCapturedHoles(record,courseId){
   const seen={};
   [record&&record.holeFrameTerrainViews,record&&record.holeFramePreviewVisuals,record&&record.holeFramePublishedVisuals,record&&record.holeFrameVisuals].forEach(list=>{
     (Array.isArray(list)?list:[]).forEach(asset=>{const n=Number(asset&&asset.holeNumber);if(n)seen[n]=true;});
   });
+  const cloud=courseId?gdAdminCourseCloudFrames(courseId):null;
+  if(cloud)cloud.holes.forEach(hole=>{const n=Number(hole&&hole.holeNumber);if(n)seen[n]=true;});
   return Object.keys(seen).map(Number).sort((a,b)=>a-b);
 }
 function gdAdminCoursePreviewSetHole(courseId,holeNumber){
@@ -864,7 +891,7 @@ function gdAdminCoursePreviewSetHole(courseId,holeNumber){
   const record=gdAdminCourseVisualRecord(courseId);
   const count=gdAdminCoursePreviewHoleCount(selected,record);
   let target=Math.min(count,Math.max(1,Number(holeNumber)||1));
-  const captured=gdAdminCoursePreviewCapturedHoles(record);
+  const captured=gdAdminCoursePreviewCapturedHoles(record,courseId);
   if(captured.length&&captured.indexOf(target)<0){
     const current=Number(gdAdminCoursePreviewHoleByCourse[courseId])||1;
     const forward=target>=current;
@@ -1112,7 +1139,7 @@ function gdAdminCoursePreviewMarkup(selected){
   if(!autoBuildNeeded)gdAdminCourseVisualSchedulePipeline(selected.id,record,sourceStatus);
   const scanId=gdAdminJsArg(selected.id);
   const scanButton=`<button type="button" class="primary" onclick="return gdAdminCourseVisualRecapture(${scanId})">Scan course</button>`;
-  const captured=gdAdminCoursePreviewCapturedHoles(record);
+  const captured=gdAdminCoursePreviewCapturedHoles(record,selected.id);
   if(!captured.length){
     return `<div class="gdAdminPhonePreviewShell"><div class="gdAdminPhoneInfo"><strong>${gdEscapeHTML(selected.name)}</strong><span>No natively captured holes yet. Scan runs the capture protocol over the course geometry and bakes every hole — the preview fills in as holes complete.</span><div class="gdAdminPhoneControls">${scanButton}</div></div></div>`;
   }
@@ -1121,23 +1148,28 @@ function gdAdminCoursePreviewMarkup(selected){
   if(captured.indexOf(current)<0)current=captured.find(n=>n>=current)??captured[captured.length-1];
   gdAdminCoursePreviewHoleByCourse[selected.id]=current;
   setTimeout(()=>gdAdminCoursePreviewEnsureHoleBake(selected.id,current),0);
-  /* Per-hole native assets only - no falling back to the course-wide mosaic,
-     which made empty holes look captured when they weren't. */
-  const holeLists=[record&&record.holeFrameTerrainViews,record&&record.holeFramePreviewVisuals,record&&record.holeFramePublishedVisuals,record&&record.holeFrameVisuals];
-  let asset=null;
-  for(const list of holeLists){
+  /* Frame preference: a fresh local styled bake wins (that's the sandbox showing your
+     current recipe), then the server-exported cloud frame, then the local base capture.
+     Never the course-wide mosaic - that made empty holes look captured. */
+  const styledLists=[record&&record.holeFrameTerrainViews,record&&record.holeFramePreviewVisuals];
+  const baseLists=[record&&record.holeFramePublishedVisuals,record&&record.holeFrameVisuals];
+  let asset=null,assetKind="";
+  for(const list of styledLists){
     const match=(Array.isArray(list)?list:[]).find(item=>Number(item&&item.holeNumber)===current&&item.dataUrl);
-    if(match){asset=match;break;}
+    if(match){asset=match;assetKind="local-styled";break;}
   }
-  if(!asset)for(const list of holeLists){
+  const cloudFrame=asset?null:gdAdminCourseCloudFrameFor(selected.id,current);
+  if(!asset&&!cloudFrame)for(const list of styledLists.concat(baseLists)){
     const match=(Array.isArray(list)?list:[]).find(item=>Number(item&&item.holeNumber)===current);
-    if(match){asset=match;break;}
+    if(match){asset=match;assetKind=match.dataUrl?"local-base":"hydrating";break;}
   }
   const src=asset&&asset.dataUrl||"";
   const inline=gdAdminCourseVisualInlineSvg(src,`Hole ${current} play preview`,{preserveImages:true});
   const id=gdAdminJsArg(selected.id);
-  const imageMarkup=inline||src?inline||`<img src="${gdEscapeHTML(src)}" alt="Hole ${gdEscapeHTML(current)} play preview" loading="lazy" decoding="async">`:"";
-  const frame=imageMarkup?gdAdminCoursePreviewPhoneFrameMarkup(imageMarkup,gdAdminCoursePreviewFrameBox(src)):`<div class="gdAdminPhoneEmpty">Hydrating hole capture…</div>`;
+  const cloudSrc=cloudFrame?"/api/course-visual-assets?path="+encodeURIComponent(cloudFrame.path):"";
+  const imageMarkup=cloudSrc?`<img src="${gdEscapeHTML(cloudSrc)}" alt="Hole ${gdEscapeHTML(current)} cloud frame" loading="eager" decoding="async" style="width:100%;height:100%;object-fit:cover">`:(inline||src?inline||`<img src="${gdEscapeHTML(src)}" alt="Hole ${gdEscapeHTML(current)} play preview" loading="lazy" decoding="async">`:"");
+  const frame=imageMarkup?gdAdminCoursePreviewPhoneFrameMarkup(imageMarkup,cloudSrc?null:gdAdminCoursePreviewFrameBox(src)):`<div class="gdAdminPhoneEmpty">Hydrating hole capture…</div>`;
+  if(cloudFrame)assetKind="cloud-frame";
   // No CSS recipe is layered on the phone: the surface below is already the baked recipe, so
   // painting it again on top double-applied the look. Only the tilt (a view transform, not part
   // of the recipe) is applied here.
@@ -1147,7 +1179,7 @@ function gdAdminCoursePreviewMarkup(selected){
   const screenStyle="--gd-phone-tilt:"+gdAdminCourseVisualSvgNum(previewTiltDeg)+"deg";
   const tiltClass=gdAdminCoursePreviewTiltActive(beta3dOn)?" gdAdminPhoneTilted":"";
   const dock=window.GDCourseVisualEngine?gdAdminCourseVisualControls(record,selected.id):"";
-  return `<div class="gdAdminPhonePreviewShell gdAdminPhonePreviewTuned"><div class="gdAdminPhoneInfo"><strong>${gdEscapeHTML(selected.name)} · Hole ${gdEscapeHTML(current)}</strong><span>Sandbox: dial a setting and release it — the recipe re-bakes for this hole so you see the real result, terrain and all. Scan re-runs the capture protocol; Publish applies the locked-in recipe to every hole.</span><div class="gdAdminPhoneControls"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev hole</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next hole</button>${scanButton}</div><div class="gdAdminCourseStageLine"><span class="${asset&&asset.dataUrl?"ready":"warn"}">${asset&&asset.dataUrl?"surface ready":"hydrating"}</span><span>H${gdEscapeHTML(current)} · ${gdEscapeHTML(captured.length)}/${gdEscapeHTML(count)} captured</span><span>${gdEscapeHTML(asset&&asset.path?String(asset.path).split("/").slice(-3).join("/"):"")}</span></div></div><div class="gdAdminPhoneStage"><div class="gdAdminPhone"><div class="gdAdminPhoneScreen${tiltClass}" style="${screenStyle}"><div class="gdAdminPhoneHud"><span>Clarity Play</span><b>H${gdEscapeHTML(current)}</b></div>${frame}<div class="gdAdminPhoneNav"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next</button></div></div></div>${dock}</div></div>`;
+  return `<div class="gdAdminPhonePreviewShell gdAdminPhonePreviewTuned"><div class="gdAdminPhoneInfo"><strong>${gdEscapeHTML(selected.name)} · Hole ${gdEscapeHTML(current)}</strong><span>Sandbox: dial a setting and release it — the recipe re-bakes for this hole so you see the real result, terrain and all. Scan re-runs the capture protocol; Publish applies the locked-in recipe to every hole.</span><div class="gdAdminPhoneControls"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev hole</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next hole</button>${scanButton}</div><div class="gdAdminCourseStageLine"><span class="${assetKind==="local-styled"||assetKind==="cloud-frame"?"ready":"warn"}">${gdEscapeHTML(assetKind==="local-styled"?"surface ready":assetKind==="cloud-frame"?"cloud frame":assetKind==="local-base"?"base capture":"hydrating")}</span><span>H${gdEscapeHTML(current)} · ${gdEscapeHTML(captured.length)}/${gdEscapeHTML(count)} captured</span><span>${gdEscapeHTML(cloudFrame?String(cloudFrame.path).split("/").slice(-3).join("/"):asset&&asset.path?String(asset.path).split("/").slice(-3).join("/"):"")}</span></div></div><div class="gdAdminPhoneStage"><div class="gdAdminPhone"><div class="gdAdminPhoneScreen${tiltClass}" style="${screenStyle}"><div class="gdAdminPhoneHud"><span>Clarity Play</span><b>H${gdEscapeHTML(current)}</b></div>${frame}<div class="gdAdminPhoneNav"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next</button></div></div></div>${dock}</div></div>`;
 }
 function gdAdminCourseDebugMarkup(selected){
   return `<div class="gdAdminCourseDebugWindow"><div class="gdCoursePlayDebug" id="gdCoursePlayDebugPanel"><div class="gdCoursePlayDebugHead"><div><h3>Live scan feedback</h3><p>Local scan, frame-cache, sync, and runtime events on this browser. This is browser state, not the database.</p></div><div class="gdCoursePlayDebugActions"><button type="button" onclick="return gdAdminCourseDebugRefresh()">Refresh</button><button type="button" onclick="gdClearCoursePlayPipelineDebug();return gdAdminCourseDebugRefresh()">Clear log</button></div></div><div id="gdCoursePlayDebugSummary" class="gdCoursePlayDebugSummary"></div><div id="gdCoursePlayDebugTable"></div><div id="gdCoursePlayDebugTimeline" class="gdCoursePlayDebugTimeline"></div></div><div class="gdCoursePlayDebug gdCourseMappingDebug" id="gdCourseMappingDebugPanel"></div><details class="gdAdminCourseSettings"><summary>Visual engine internals</summary><div class="gdAdminCourseSettingsBody">${gdAdminCourseVisualMarkup(selected)}</div></details></div>`;
@@ -2052,11 +2084,39 @@ function gdAdminCourseVisualEnsurePipelineCourse(courseId){
     return true;
   }catch(e){return false;}
 }
+/* Phase 1 of the server worker (dev/VISUAL_ENGINE_SERVER_WORKER_PLAN.md): every Scan also
+   queues a server-side snapshot job, which bakes owned captures into Supabase Storage.
+   Fire-and-forget - the local scan proceeds regardless, and the cloud job is deduped
+   server-side if one is already queued or running. */
+async function gdAdminCourseVisualEnqueueCloudJob(courseId,kind,recipe){
+  try{
+    const token=await gdAdminCourseDbAccessToken();
+    if(!token)return null;
+    const res=await fetch("/api/course-visual-jobs",{
+      method:"POST",
+      headers:{"Content-Type":"application/json",Accept:"application/json",Authorization:"Bearer "+token},
+      body:JSON.stringify({courseId:courseId,kind:kind||"snapshot",recipe:recipe||null})
+    });
+    const data=await res.json().catch(()=>null);
+    if(res.ok&&data&&data.job){
+      const label=kind==="export"?"Cloud frame export":"Cloud snapshot";
+      gdAdminCourseVisualToast(data.deduped?label+" already in progress":label+" queued");
+      /* When the export lands, the frames index changes - drop the cache so the preview
+         picks up the new frames on its next render. */
+      if(kind==="export")delete gdAdminCourseCloudFramesCache[String(courseId||"")];
+    }
+    return data;
+  }catch(error){return null;}
+}
+function gdAdminCourseVisualEnqueueCloudSnapshot(courseId){
+  return gdAdminCourseVisualEnqueueCloudJob(courseId,"snapshot",null);
+}
 async function gdAdminCourseVisualRecapture(courseId){
   const engine=window.GDCourseVisualEngine;
   if(!engine){gdAdminCourseVisualToast("Course Visual Engine not loaded");return false;}
   try{
     gdAdminCourseVisualEnsurePipelineCourse(courseId);
+    gdAdminCourseVisualEnqueueCloudSnapshot(courseId);
     const presetId=String(document.getElementById("gdCourseVisualPreset")?.value||"");
     const overrides=gdAdminCourseVisualOverridesFromForm();
     if(typeof engine.deleteCloudCourseVisual==="function")await engine.deleteCloudCourseVisual(courseId,{silent:true});
@@ -2102,6 +2162,10 @@ function gdAdminCourseVisualPublish(courseId){
       const presetId=String(document.getElementById("gdCourseVisualPreset")?.value||"");
       const overrides=gdAdminCourseVisualOverridesFromForm();
       engine.saveCourseVisualSettings(courseId,overrides,{presetId});
+      /* Publish = the recipe is locked. The server worker bakes all frames from the cloud
+         captures with this exact recipe - every device downloads the result. The local
+         publish continues alongside until cloud frames fully replace it. */
+      gdAdminCourseVisualEnqueueCloudJob(courseId,"export",{presetId:presetId,overrides:overrides});
       let record=gdAdminCourseVisualRecord(courseId)||engine.getRecord(courseId);
       const sourceStatus=gdAdminCourseVisualSourceStatus({id:courseId,key:courseId});
       const beta3d=!!(overrides.visualEngine&&overrides.visualEngine.enable3dBeta);

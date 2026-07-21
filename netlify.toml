@@ -29,6 +29,16 @@
   status = 200
 
 [[redirects]]
+  from = "/api/course-visual-assets"
+  to = "/.netlify/functions/course-visual-assets"
+  status = 200
+
+[[redirects]]
+  from = "/api/course-visual-jobs"
+  to = "/.netlify/functions/course-visual-jobs"
+  status = 200
+
+[[redirects]]
   from = "/api/course-maps"
   to = "/.netlify/functions/course-maps"
   status = 200

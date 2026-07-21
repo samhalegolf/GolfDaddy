@@ -1,0 +1,338 @@
+/* Visual engine snapshot worker (Netlify background function - 15 min budget).
+
+   Claims a queued course_visual_jobs row, reads the published course package from
+   course_maps, computes the capture plan with the shared plan module (same policies as the
+   in-browser scan), fetches the tiles for every capture, composites each into a single
+   Clarity-owned raster with sharp, and uploads the results to the course-visuals Storage
+   bucket along with an index.json describing every capture (bounds, zoom, lens, path).
+
+   This is Phase 1 of dev/VISUAL_ENGINE_SERVER_WORKER_PLAN.md: the snapshot happens server
+   side, once, and browsers stop needing tile access at all. Export (recipe compose) is
+   Phase 2 and reads these captures back down. */
+
+import sharp from "sharp";
+import { planCourseCaptures, captureGrid, packageHoleData } from "./lib/gd-visual-plan-core.mjs";
+/* Static import so Netlify's bundler ships the engine with the function. The UMD factory runs
+   at import with root=globalThis and touches localStorage only at call time behind guards, so
+   installing the stubs later (loadEngine) is safe. */
+import engineModule from "../scripts/gd-course-visual-engine.js";
+
+const JOBS_TABLE = "course_visual_jobs";
+const MAPS_TABLE = "course_maps";
+const BUCKET = "course-visuals";
+const TILE_CONCURRENCY = 8;
+const TILE_TIMEOUT_MS = 15000;
+
+function env(name) { return process.env[name] || ""; }
+function supabaseBase() { return env("SUPABASE_URL").replace(/\/+$/, ""); }
+function supabaseKey() { return env("SUPABASE_SERVICE_ROLE_KEY"); }
+
+async function supabaseFetch(path, options = {}) {
+  const headers = Object.assign({
+    apikey: supabaseKey(),
+    Authorization: "Bearer " + supabaseKey(),
+    "Content-Type": "application/json"
+  }, options.headers || {});
+  const response = await fetch(supabaseBase() + "/rest/v1/" + path, Object.assign({}, options, { headers }));
+  const textBody = await response.text();
+  let body = null;
+  try { body = textBody ? JSON.parse(textBody) : null; } catch (e) { body = textBody; }
+  if (!response.ok) throw new Error("Supabase " + response.status + ": " + (typeof body === "string" ? body : JSON.stringify(body)));
+  return body;
+}
+
+async function storageUpload(path, buffer, contentType) {
+  const response = await fetch(supabaseBase() + "/storage/v1/object/" + BUCKET + "/" + path, {
+    method: "POST",
+    headers: {
+      apikey: supabaseKey(),
+      Authorization: "Bearer " + supabaseKey(),
+      "Content-Type": contentType,
+      "x-upsert": "true"
+    },
+    body: buffer
+  });
+  if (!response.ok) throw new Error("Storage upload " + response.status + " for " + path + ": " + (await response.text()).slice(0, 300));
+  return path;
+}
+
+async function claimJob(jobId) {
+  /* status=eq.queued in the filter makes the claim atomic - two workers racing the same row
+     can't both flip it to running. */
+  const filter = jobId ? "id=eq." + encodeURIComponent(jobId) + "&" : "";
+  const rows = await supabaseFetch(JOBS_TABLE + "?" + filter + "status=eq.queued&order=created_at.asc&limit=1", { method: "GET" });
+  const job = Array.isArray(rows) ? rows[0] : null;
+  if (!job) return null;
+  const claimed = await supabaseFetch(JOBS_TABLE + "?id=eq." + job.id + "&status=eq.queued", {
+    method: "PATCH",
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify({ status: "running", updated_at: new Date().toISOString() })
+  });
+  return Array.isArray(claimed) && claimed.length ? claimed[0] : null;
+}
+
+async function finishJob(id, patch) {
+  await supabaseFetch(JOBS_TABLE + "?id=eq." + id, {
+    method: "PATCH",
+    body: JSON.stringify(Object.assign({ updated_at: new Date().toISOString() }, patch))
+  });
+}
+
+async function loadCoursePackage(courseId) {
+  const rows = await supabaseFetch(MAPS_TABLE + "?select=course_id,course_name,objects_json,holes_json&course_id=eq." + encodeURIComponent(courseId) + "&published=eq.true&limit=1");
+  const row = Array.isArray(rows) ? rows[0] : null;
+  if (!row) return null;
+  return {
+    courseId: row.course_id,
+    courseName: row.course_name || row.course_id,
+    objects: row.objects_json || {},
+    holes: row.holes_json || {}
+  };
+}
+
+async function fetchTile(url) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TILE_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) throw new Error("HTTP " + response.status);
+    return Buffer.from(await response.arrayBuffer());
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/* Composite one capture: fetch its tile grid (bounded concurrency) and flatten onto a single
+   canvas. Coverage is enforced like the browser flatten - a capture with missing tiles is
+   refused rather than baked with holes in it. */
+async function buildCapture(grid, { format }) {
+  const tiles = grid.tiles;
+  const buffers = new Array(tiles.length);
+  let failed = 0;
+  let cursor = 0;
+  async function pump() {
+    while (cursor < tiles.length) {
+      const index = cursor++;
+      try {
+        buffers[index] = await fetchTile(tiles[index].url);
+      } catch (e) {
+        failed += 1;
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(TILE_CONCURRENCY, tiles.length) }, pump));
+  if (failed > 0) throw new Error("tile coverage incomplete: " + failed + "/" + tiles.length + " failed");
+  const canvas = sharp({
+    create: { width: grid.imageWidth, height: grid.imageHeight, channels: 3, background: { r: 16, g: 19, b: 15 } },
+    limitInputPixels: false
+  });
+  const composites = tiles.map((tile, index) => ({ input: buffers[index], left: tile.x, top: tile.y })).filter(layer =>
+    layer.left > -256 && layer.top > -256 && layer.left < grid.imageWidth && layer.top < grid.imageHeight);
+  const composed = canvas.composite(composites);
+  return format === "png"
+    ? composed.png({ compressionLevel: 9 }).toBuffer()
+    : composed.jpeg({ quality: 85 }).toBuffer();
+}
+
+async function runSnapshotJob(job) {
+  const pkg = await loadCoursePackage(job.course_id);
+  if (!pkg) throw new Error("course " + job.course_id + " not found in " + MAPS_TABLE);
+  const plan = planCourseCaptures(pkg);
+  if (!plan.length) throw new Error("capture plan is empty - no play-ready geometry");
+  const index = { version: 1, courseId: pkg.courseId, courseName: pkg.courseName, generatedAt: new Date().toISOString(), captures: [] };
+  const failures = [];
+  for (const item of plan) {
+    const grid = captureGrid(item);
+    const isTerrain = item.role === "terrain-reference";
+    const ext = isTerrain ? "png" : "jpg";
+    const path = pkg.courseId + "/captures/" + item.captureKey.replace(/:/g, "/") + "." + ext;
+    try {
+      const buffer = await buildCapture(grid, { format: isTerrain ? "png" : "jpeg" });
+      await storageUpload(path, buffer, isTerrain ? "image/png" : "image/jpeg");
+      index.captures.push({
+        id: item.id,
+        captureKey: item.captureKey,
+        role: item.role,
+        quality: item.quality,
+        stitchLayer: item.stitchLayer,
+        holeNumber: item.holeNumber,
+        segmentIndex: item.segmentIndex,
+        segmentCount: item.segmentCount,
+        captureZoom: grid.captureZoom,
+        width: grid.imageWidth,
+        height: grid.imageHeight,
+        bounds: grid.imageBounds,
+        originPx: grid.originPx,
+        lensOrientation: grid.lensOrientation,
+        lensCornersPx: grid.lensCornersPx,
+        anchorPins: item.anchorPins,
+        captureAnchorPins: item.captureAnchorPins,
+        terrainStageOnly: !!item.terrainStageOnly,
+        tileCount: grid.tiles.length,
+        bytes: null,
+        path
+      });
+    } catch (error) {
+      failures.push({ id: item.id, role: item.role, holeNumber: item.holeNumber, error: String(error && error.message || error).slice(0, 300) });
+    }
+  }
+  if (!index.captures.length) throw new Error("every capture failed: " + JSON.stringify(failures.slice(0, 3)));
+  await storageUpload(pkg.courseId + "/captures/index.json", Buffer.from(JSON.stringify(index)), "application/json");
+  return {
+    planItems: plan.length,
+    captured: index.captures.length,
+    failed: failures.length,
+    failures: failures.slice(0, 12),
+    indexPath: pkg.courseId + "/captures/index.json"
+  };
+}
+
+/* ---------- export job: recipe compose using the REAL engine ----------------------------- */
+
+async function storageDownload(path) {
+  const response = await fetch(supabaseBase() + "/storage/v1/object/" + BUCKET + "/" + path, {
+    headers: { apikey: supabaseKey(), Authorization: "Bearer " + supabaseKey() }
+  });
+  if (!response.ok) throw new Error("Storage download " + response.status + " for " + path);
+  return Buffer.from(await response.arrayBuffer());
+}
+
+/* The export runs the SAME code the browser sandbox runs - gd-course-visual-engine.js is UMD
+   and happily loads in Node behind a localStorage stub (the engine test suite has always done
+   this). Recipe parity is therefore by construction: identical stitch, identical filter
+   markup, and librsvg (sharp's SVG rasterizer) supports the filter primitives the recipe
+   uses (verified: feColorMatrix, feComponentTransfer, mix-blend-mode multiply). */
+let engineReady = false;
+function loadEngine() {
+  if (engineReady) return engineModule;
+  const data = {};
+  globalThis.localStorage = globalThis.localStorage || {
+    getItem: k => Object.prototype.hasOwnProperty.call(data, k) ? data[k] : null,
+    setItem: (k, v) => { data[k] = String(v); },
+    removeItem: k => { delete data[k]; },
+    clear: () => { Object.keys(data).forEach(k => delete data[k]); }
+  };
+  globalThis.dispatchEvent = globalThis.dispatchEvent || (() => {});
+  globalThis.CustomEvent = globalThis.CustomEvent || function CustomEvent(type, init) { return { type, detail: init && init.detail }; };
+  engineReady = true;
+  return engineModule;
+}
+
+function engineObjectsFromPackage(pkg) {
+  const holeData = packageHoleData(pkg);
+  const objects = [];
+  Object.keys(holeData).forEach(key => {
+    const data = holeData[key];
+    const holeNumber = Number(key);
+    if (data.green && data.green.position) objects.push({ id: "green:h" + holeNumber, type: "green", holeNumber, geometry: data.greenShape && data.greenShape.length ? { type: "LineString", points: data.greenShape } : { type: "Point", point: data.green.position } });
+    if (data.tee && data.tee.position) objects.push({ id: "tee:h" + holeNumber, type: "tee", holeNumber, geometry: { type: "Point", point: data.tee.position } });
+    if (data.route && data.route.length) objects.push({ id: "fairway:h" + holeNumber, type: "fairway", holeNumber, geometry: { type: "LineString", points: data.route } });
+  });
+  return objects;
+}
+
+async function rasterizeSvgDataUrl(dataUrl, { maxWidth, quality }) {
+  const comma = String(dataUrl || "").indexOf(",");
+  if (comma < 0) throw new Error("asset has no data url");
+  const body = String(dataUrl).slice(comma + 1);
+  const svg = Buffer.from(String(dataUrl).includes(";base64,") ? Buffer.from(body, "base64").toString("utf8") : decodeURIComponent(body), "utf8");
+  let image = sharp(svg, { limitInputPixels: false, density: 72 });
+  const meta = await image.metadata();
+  if (maxWidth && meta.width && meta.width > maxWidth) image = image.resize({ width: maxWidth });
+  return image.jpeg({ quality: quality || 82 }).toBuffer();
+}
+
+async function runExportJob(job) {
+  const engine = loadEngine();
+  const pkg = await loadCoursePackage(job.course_id);
+  if (!pkg) throw new Error("course " + job.course_id + " not found in " + MAPS_TABLE);
+  const indexRaw = await storageDownload(job.course_id + "/captures/index.json");
+  const capturesIndex = JSON.parse(indexRaw.toString("utf8"));
+  const entries = Array.isArray(capturesIndex && capturesIndex.captures) ? capturesIndex.captures : [];
+  if (!entries.length) throw new Error("no captures in index - run a snapshot job first");
+  const captures = [];
+  for (const entry of entries) {
+    const buffer = await storageDownload(entry.path);
+    const mime = entry.path.endsWith(".png") ? "image/png" : "image/jpeg";
+    captures.push({
+      id: entry.id,
+      storagePath: "cloud:" + entry.captureKey,
+      imageData: "data:" + mime + ";base64," + buffer.toString("base64"),
+      bounds: entry.bounds,
+      width: entry.width,
+      height: entry.height,
+      zoom: entry.captureZoom,
+      originPx: entry.originPx,
+      holeNumber: entry.holeNumber,
+      role: entry.role,
+      quality: entry.quality,
+      stitchLayer: entry.stitchLayer,
+      planId: entry.id,
+      segmentIndex: entry.segmentIndex,
+      segmentCount: entry.segmentCount,
+      terrainStageOnly: !!entry.terrainStageOnly,
+      anchorPins: entry.anchorPins || {},
+      captureAnchorPins: entry.captureAnchorPins || null,
+      captureLens: entry.lensOrientation === "play-axis" ? "mobile-hole" : "",
+      lensShape: entry.lensOrientation === "play-axis" ? "mobile-hole" : "",
+      lensOrientation: entry.lensOrientation || "",
+      lensLocalCorners: Array.isArray(entry.lensCornersPx) && entry.originPx
+        ? entry.lensCornersPx.map(p => ({ x: p.x - entry.originPx.x, y: p.y - entry.originPx.y }))
+        : []
+    });
+  }
+  const recipe = job.recipe || {};
+  const presetId = String(recipe.presetId || "") || (engine.defaultPreset && engine.defaultPreset().id) || "";
+  const overrides = recipe.overrides || recipe.courseOverrides || {};
+  engine.ingestCourseVisualInput({ courseId: pkg.courseId, courseName: pkg.courseName, objects: engineObjectsFromPackage(pkg), captures });
+  await engine.buildCourseVisualMaster(pkg.courseId, { captures, forceRebuild: true });
+  await engine.buildCourseVisualPreview(pkg.courseId, presetId, overrides);
+  const record = engine.getRecord(pkg.courseId);
+  if (record.lastError) throw new Error("engine bake failed: " + (record.lastError.message || record.lastError.code));
+  const version = "v" + (Number(record.currentVersion) || 1);
+  const framesDir = pkg.courseId + "/frames/" + version;
+  const framesIndex = { version: 1, courseId: pkg.courseId, exportVersion: version, presetId, overridesHash: null, generatedAt: new Date().toISOString(), overview: null, holes: [] };
+  const styledFrames = (record.holeFrameTerrainViews && record.holeFrameTerrainViews.length ? record.holeFrameTerrainViews : record.holeFramePreviewVisuals) || [];
+  for (const frame of styledFrames) {
+    if (!frame || !frame.dataUrl || !frame.holeNumber) continue;
+    const jpeg = await rasterizeSvgDataUrl(frame.dataUrl, { maxWidth: 2048, quality: 82 });
+    const path = framesDir + "/h" + frame.holeNumber + ".jpg";
+    await storageUpload(path, jpeg, "image/jpeg");
+    framesIndex.holes.push({ holeNumber: frame.holeNumber, path, width: frame.width, height: frame.height, bounds: frame.bounds, playSurface: frame.metadata && frame.metadata.playSurface || null });
+  }
+  const overviewAsset = record.terrainView || record.previewVisual;
+  if (overviewAsset && overviewAsset.dataUrl) {
+    const jpeg = await rasterizeSvgDataUrl(overviewAsset.dataUrl, { maxWidth: 2048, quality: 80 });
+    const path = framesDir + "/overview.jpg";
+    await storageUpload(path, jpeg, "image/jpeg");
+    framesIndex.overview = { path, width: overviewAsset.width, height: overviewAsset.height, bounds: overviewAsset.bounds };
+  }
+  if (!framesIndex.holes.length) throw new Error("no hole frames produced by the engine bake");
+  await storageUpload(pkg.courseId + "/frames/index.json", Buffer.from(JSON.stringify(framesIndex)), "application/json");
+  return {
+    exportVersion: version,
+    presetId,
+    holes: framesIndex.holes.length,
+    overview: !!framesIndex.overview,
+    indexPath: pkg.courseId + "/frames/index.json"
+  };
+}
+
+export default async function courseVisualWorker(req) {
+  if (!supabaseBase() || !supabaseKey()) return new Response("supabase not configured", { status: 503 });
+  let payload = {};
+  try { payload = await req.json(); } catch (e) { payload = {}; }
+  /* Process the named job, then sweep any other queued jobs while we have the budget. */
+  let job = await claimJob(payload && payload.jobId || null);
+  while (job) {
+    try {
+      const result = job.kind === "snapshot" ? await runSnapshotJob(job) : job.kind === "export" ? await runExportJob(job) : { skipped: "unknown kind " + job.kind };
+      await finishJob(job.id, { status: "done", result, error: null });
+    } catch (error) {
+      console.error("course-visual-worker job failed", job.id, error);
+      await finishJob(job.id, { status: "failed", error: String(error && error.message || error).slice(0, 900) }).catch(() => {});
+    }
+    job = await claimJob(null);
+  }
+  return new Response("ok", { status: 200 });
+}

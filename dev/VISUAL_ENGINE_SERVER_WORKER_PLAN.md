@@ -69,13 +69,28 @@ The sandbox stays the source of truth for how a recipe *looks*; the worker must 
 
 ## Phases
 
-1. **Shared plan module + snapshot worker**: extract plan/projection code, job table, enqueue
-   endpoint, worker that produces owned captures in Storage. Client downloads captures instead
-   of flattening locally when present.
-2. **Export worker + recipe port + golden test**: server produces finished frames; client
-   prefers them; publish flow = recipe lock + enqueue.
-3. **Cleanup**: remove browser fleet-bake, keep single-hole sandbox; auto-enqueue snapshot on
-   course publish / geometry change.
+1. **Shared plan module + snapshot worker** — DONE 2026-07-22.
+   `functions/lib/gd-visual-plan-core.mjs` (plan/policies/lens/tile math, verified against the
+   real Pupuke package: 44 captures / ~6.6k tiles), `course_visual_jobs` table + private
+   `course-visuals` bucket, `/api/course-visual-jobs` (admin-verified, deduped),
+   `course-visual-worker-background` snapshot job (tile fetch, coverage-enforced sharp
+   composite, uploads captures + index.json). Scan enqueues the cloud snapshot.
+2. **Export worker** — DONE 2026-07-22 (better than planned: instead of porting the recipe,
+   the worker STATICALLY IMPORTS the real gd-course-visual-engine.js behind a localStorage
+   stub — the engine test suite proved it runs in Node — so stitch/recipe/terrain markup are
+   IDENTICAL to the browser, and librsvg rasterizes it (filter primitives verified). Export
+   job: downloads captures, engine master+preview bake with the job's recipe, sharp-rasterizes
+   frames to JPEG (max 2048w), uploads frames/v{N}/ + frames/index.json. Verified locally
+   end-to-end: real tiles -> captures -> engine bake -> H1 frame JPEG. A separate golden test
+   is unnecessary under this architecture; visual spot-check remains a manual step.
+   Client: `/api/course-visual-assets` read proxy; preview prefers local styled bake >
+   cloud frame > base capture; captured reel is the union of local + cloud (fresh browser can
+   browse a course it never scanned); Publish enqueues an export job with the locked recipe.
+3. **Cleanup / automation** — PARTIAL 2026-07-22: course-maps publish auto-enqueues a
+   snapshot when geometry is accepted (server-side, warn-only). Publish still runs the local
+   fleet bake alongside the cloud export; retire it once cloud frames prove out in production.
+   Remaining: GPS play consuming cloud frames (currently only the admin preview does), and
+   tile caching/throttling in the worker if snapshot volume grows.
 
 ## Interim stopgap (already shipped in-browser)
 
