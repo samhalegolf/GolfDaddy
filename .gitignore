@@ -4,6 +4,9 @@
 # Dependencies
 node_modules/
 
+# Demo capture output
+/demo-output/
+
 # Archives / large binaries (keep source, not zipped bundles)
 *.zip
 
