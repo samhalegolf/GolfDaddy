@@ -1965,60 +1965,34 @@
     }
     return assets.slice().sort(function(a,b){return (Number(a.holeNumber)||999)-(Number(b.holeNumber)||999);})[0];
   }
+  // Birds-eye tiltable 3D asset. The shipped "3D" surface is the flat, edited/filtered
+  // play image mounted on a tiltable plane: viewed from directly above (the default) it
+  // is pixel-identical to the source image, and the viewer/player (GPS Play, or the admin
+  // preview) applies the tilt at view time to reveal perspective 3d-ness. No perspective is
+  // baked into the asset — only the tilt policy metadata travels with it.
+  function birdsEye3dSurfaceSvg(content,sourceWidth,sourceHeight,opts){
+    opts=opts||{};
+    sourceWidth=Math.max(1,Math.round(Number(sourceWidth)||1));
+    sourceHeight=Math.max(1,Math.round(Number(sourceHeight)||1));
+    var captureTilt=Math.min(28,Math.max(0,finite(opts.captureTiltDeg)||0));
+    var playTilt=Math.min(32,Math.max(0,finite(opts.playTiltDeg)||0));
+    var svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+sourceWidth+'" height="'+sourceHeight+'" viewBox="0 0 '+sourceWidth+" "+sourceHeight+'" data-renderer="'+escapeXml(RENDERER_VERSION)+'" data-role="birds-eye-tiltable-3d-plane" data-surface-model="birds-eye-tiltable-plane" data-default-view="birds-eye" data-tilt-applied-by="viewer-runtime" data-play-tilt-deg="'+svgNum(playTilt)+'" data-capture-tilt-deg="'+svgNum(captureTilt)+'"><g data-role="tiltable-3d-surface">'+content+'</g></svg>';
+    return {svg:svg,width:sourceWidth,height:sourceHeight,surface:{sourceWidth:sourceWidth,sourceHeight:sourceHeight,defaultView:"birds-eye",tiltAppliedBy:"viewer-runtime",playTiltDeg:playTilt,captureTiltDeg:captureTilt,surfaceModel:"birds-eye-tiltable-plane"}};
+  }
   function beta3dVisualAsset(asset,meta){
     meta=meta||{};
     if(!asset||!asset.dataUrl)return null;
     var sourceWidth=Math.max(1,Math.round(Number(asset.width)||1));
     var sourceHeight=Math.max(1,Math.round(Number(asset.height)||1));
     var captureTilt=finite(meta.captureTiltDeg);
-    if(captureTilt==null)captureTilt=10;
+    if(captureTilt==null)captureTilt=8;
     var playTilt=finite(meta.playTiltDeg);
-    if(playTilt==null)playTilt=16;
+    if(playTilt==null)playTilt=14;
     var image=visualAssetSourceMarkup(asset,sourceWidth,sourceHeight);
-    var cameraModel="faux-3d-svg-perspective";
-    var rendered=faux3dSurfaceSvg(image,sourceWidth,sourceHeight,{cameraModel:cameraModel,captureTiltDeg:captureTilt,playTiltDeg:playTilt,labelText:"3D view beta H"+(asset.holeNumber||asset.metadata&&asset.metadata.holeNumber||"?")+" · faux tilt",footerText:"Full play surface preserved; fake perspective is applied after the hole frame"});
+    var cameraModel="birds-eye-tiltable-plane";
+    var rendered=birdsEye3dSurfaceSvg(image,sourceWidth,sourceHeight,{captureTiltDeg:captureTilt,playTiltDeg:playTilt});
     var sourceMeta=asset.metadata||{};
-    return {dataUrl:dataUrl("image/svg+xml",rendered.svg),width:rendered.width,height:rendered.height,bounds:asset.bounds,sourceCaptureIds:asset.sourceCaptureIds||[],metadata:Object.assign({},inheritedSurfaceMetadata(asset),{rendererVersion:RENDERER_VERSION,format:"image/svg+xml",role:"3d-view-beta",stage:"3d-view-beta",holeNumber:asset.holeNumber||sourceMeta.holeNumber||null,cameraModel:cameraModel,captureTiltDeg:captureTilt,playTiltDeg:playTilt,nativePitchAvailable:false,mapCameraCapability:{provider:"leaflet",library:"leaflet",nativePitchAvailable:false,nativeBearingAvailable:false,pitchStrategy:"faux-tilt-svg",reason:"plain-leaflet-no-native-pitch"},cameraFallback:"leaflet-flat-capture-faux-tilt-stage",inputRole:sourceMeta.role||"",inputStage:sourceMeta.stage||"",sourceVisualPath:asset.path||"",sourceFraming:"preserve-full-play-surface",surfaceModel:"framed-play-surface-faux-3d",faux3dSurface:rendered.surface,outputDimensions:{width:rendered.width,height:rendered.height}},meta)};
-  }
-  function faux3dSurfaceSvg(content,sourceWidth,sourceHeight,opts){
-    opts=opts||{};
-    sourceWidth=Math.max(1,Math.round(Number(sourceWidth)||1));
-    sourceHeight=Math.max(1,Math.round(Number(sourceHeight)||1));
-    var width=Math.max(720,Math.min(4096,Math.round(sourceWidth*.92)));
-    var height=Math.max(680,Math.min(6144,Math.round(sourceHeight*.78)));
-    var sourceAspect=sourceWidth/sourceHeight;
-    var maxPlaneW=width*.72;
-    var maxPlaneH=height*.80;
-    var planeW=maxPlaneW;
-    var planeH=planeW/sourceAspect;
-    if(planeH>maxPlaneH){
-      planeH=maxPlaneH;
-      planeW=planeH*sourceAspect;
-    }
-    planeW=Math.max(320,Math.round(planeW));
-    planeH=Math.max(420,Math.round(planeH));
-    var planeX=Math.round((width-planeW)/2);
-    var planeY=Math.round((height-planeH)/2);
-    var captureTilt=Math.min(28,Math.max(0,finite(opts.captureTiltDeg)||0));
-    var playTilt=Math.min(32,Math.max(0,finite(opts.playTiltDeg)||0));
-    var skew=-Math.max(2,Math.min(8,captureTilt*.26+playTilt*.08));
-    var compress=1-Math.min(.18,playTilt*.006);
-    var cx=planeX+planeW/2;
-    var cy=planeY+planeH/2;
-    var drop=Math.max(54,Math.round(height*(.055+playTilt*.0018)));
-    var side=Math.max(36,Math.round(width*(.035+captureTilt*.0009)));
-    var deckTopY=Math.max(0,planeY-drop*.38);
-    var deckBottomY=Math.min(height,planeY+planeH+drop);
-    var labelText=text(opts.labelText||"",90);
-    var footerText=text(opts.footerText||"",140);
-    var cameraModel=opts.cameraModel||"faux-3d-svg-perspective";
-    var label=labelText?'<g transform="translate(14 14)"><rect x="0" y="0" width="'+svgNum(Math.max(370,labelText.length*7.6))+'" height="31" rx="7" fill="rgba(0,0,0,.64)"/><text x="10" y="21" font-size="14" fill="#fff" font-family="system-ui, sans-serif" font-weight="900">'+escapeXml(labelText)+'</text></g>':"";
-    var footer=footerText?'<text x="16" y="'+svgNum(height-18)+'" font-size="12" fill="rgba(255,255,255,.72)" font-family="system-ui, sans-serif" font-weight="850">'+escapeXml(footerText)+'</text>':"";
-    var deck='<polygon data-role="faux-3d-deck" points="'+svgNum(planeX+side)+','+svgNum(deckTopY)+' '+svgNum(planeX+planeW-side)+','+svgNum(deckTopY)+' '+svgNum(planeX+planeW+side)+','+svgNum(deckBottomY)+' '+svgNum(planeX-side)+','+svgNum(deckBottomY)+'" fill="#162016" stroke="rgba(255,255,255,.26)" stroke-width="2"/>';
-    var shadow='<ellipse data-role="faux-3d-shadow" cx="'+svgNum(cx)+'" cy="'+svgNum(deckBottomY-drop*.18)+'" rx="'+svgNum(planeW*.54)+'" ry="'+svgNum(Math.max(26,drop*.55))+'" fill="rgba(0,0,0,.45)"/>';
-    var transform='translate('+svgNum(cx)+" "+svgNum(cy)+') skewX('+svgNum(skew)+') scale(1 '+svgNum(compress)+') translate('+svgNum(-cx)+" "+svgNum(-cy)+')';
-    var svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+width+'" height="'+height+'" viewBox="0 0 '+width+" "+height+'" data-renderer="'+escapeXml(RENDERER_VERSION)+'" data-role="3d-view-beta" data-camera-model="'+escapeXml(cameraModel)+'" data-source-framing="preserve-full-play-surface"><defs><linearGradient id="depthShade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="rgba(255,255,255,.18)"/><stop offset=".54" stop-color="rgba(255,255,255,0)"/><stop offset="1" stop-color="rgba(0,0,0,.28)"/></linearGradient><linearGradient id="stageFade" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#182018"/><stop offset="1" stop-color="#0c0f0c"/></linearGradient></defs><rect width="100%" height="100%" fill="#10130f"/>'+shadow+deck+'<g data-role="faux-3d-source-plane" data-source-framing="preserve-full-play-surface" transform="'+transform+'"><rect x="'+svgNum(planeX-8)+'" y="'+svgNum(planeY-8)+'" width="'+svgNum(planeW+16)+'" height="'+svgNum(planeH+16)+'" rx="14" fill="rgba(0,0,0,.48)" stroke="rgba(255,255,255,.32)" stroke-width="2"/><svg x="'+svgNum(planeX)+'" y="'+svgNum(planeY)+'" width="'+svgNum(planeW)+'" height="'+svgNum(planeH)+'" viewBox="0 0 '+sourceWidth+" "+sourceHeight+'" preserveAspectRatio="xMidYMid meet" overflow="hidden">'+content+'</svg><rect x="'+svgNum(planeX)+'" y="'+svgNum(planeY)+'" width="'+svgNum(planeW)+'" height="'+svgNum(planeH)+'" fill="url(#depthShade)" opacity=".72"/><rect x="'+svgNum(planeX)+'" y="'+svgNum(planeY)+'" width="'+svgNum(planeW)+'" height="'+svgNum(planeH)+'" fill="none" stroke="rgba(111,255,166,.42)" stroke-width="3"/></g><rect width="100%" height="100%" fill="url(#stageFade)" opacity=".13"/>'+label+footer+'</svg>';
-    return {svg:svg,width:width,height:height,surface:{x:+planeX.toFixed(2),y:+planeY.toFixed(2),width:+planeW.toFixed(2),height:+planeH.toFixed(2),sourceWidth:sourceWidth,sourceHeight:sourceHeight,sourceFraming:"preserve-full-play-surface",skewDeg:+skew.toFixed(3),compressY:+compress.toFixed(3),captureTiltDeg:captureTilt,playTiltDeg:playTilt}};
+    return {dataUrl:dataUrl("image/svg+xml",rendered.svg),width:rendered.width,height:rendered.height,bounds:asset.bounds,sourceCaptureIds:asset.sourceCaptureIds||[],metadata:Object.assign({},inheritedSurfaceMetadata(asset),{rendererVersion:RENDERER_VERSION,format:"image/svg+xml",role:"3d-view-beta",stage:"3d-view-beta",holeNumber:asset.holeNumber||sourceMeta.holeNumber||null,cameraModel:cameraModel,captureTiltDeg:captureTilt,playTiltDeg:playTilt,defaultView:"birds-eye",tiltAppliedBy:"viewer-runtime",nativePitchAvailable:false,mapCameraCapability:{provider:"leaflet",library:"leaflet",nativePitchAvailable:false,nativeBearingAvailable:false,pitchStrategy:"faux-tilt-svg",reason:"plain-leaflet-no-native-pitch"},cameraFallback:"leaflet-flat-capture-faux-tilt-stage",inputRole:sourceMeta.role||"",inputStage:sourceMeta.stage||"",sourceVisualPath:asset.path||"",sourceFraming:"preserve-full-play-surface",surfaceModel:"birds-eye-tiltable-3d-plane",tiltableSurface:rendered.surface,outputDimensions:{width:rendered.width,height:rendered.height}},meta)};
   }
   function beta3dViewSvg(captures,meta){
     var valid=(Array.isArray(captures)?captures:[]).filter(renderableCapture).sort(function(a,b){
@@ -2043,11 +2017,10 @@
     var content=sourceAsset?visualAssetSourceMarkup(sourceAsset,sourceWidth,sourceHeight):captureContentSvg(capture);
     var capability=clone(capture.mapCameraCapability||null)||{};
     var nativePitch=valid.some(function(item){return item&&item.nativePitchAvailable===true||item&&item.mapCameraCapability&&item.mapCameraCapability.nativePitchAvailable===true;});
-    var cameraModel=nativePitch?"native-pitch-capture":"faux-3d-svg-perspective";
-    var labelText="3D view beta H"+(capture.holeNumber||"?")+" · "+(nativePitch?"native pitch":"faux tilt")+" "+captureTilt+" · play "+playTilt;
-    var rendered=faux3dSurfaceSvg(content,sourceWidth,sourceHeight,{cameraModel:cameraModel,captureTiltDeg:captureTilt,playTiltDeg:playTilt,labelText:labelText,footerText:nativePitch?"Native pitch capture path detected":"Plain Leaflet source: fake perspective from flat captures"});
+    var cameraModel="birds-eye-tiltable-plane";
+    var rendered=birdsEye3dSurfaceSvg(content,sourceWidth,sourceHeight,{captureTiltDeg:captureTilt,playTiltDeg:playTilt});
     var sourceIds=sourceAsset&&sourceAsset.sourceCaptureIds||valid.map(function(item){return item.id;}).filter(Boolean);
-    return {dataUrl:dataUrl("image/svg+xml",rendered.svg),width:rendered.width,height:rendered.height,bounds:sourceAsset&&sourceAsset.bounds||captureBounds(capture),sourceCaptureIds:sourceIds,metadata:Object.assign({rendererVersion:RENDERER_VERSION,format:"image/svg+xml",role:"3d-view-beta",stage:"3d-view-beta",holeNumber:capture.holeNumber||null,cameraModel:cameraModel,captureTiltDeg:captureTilt,playTiltDeg:playTilt,nativePitchAvailable:nativePitch,mapCameraCapability:capability.provider?capability:{provider:"leaflet",nativePitchAvailable:false,pitchStrategy:"faux-tilt-svg",reason:"plain-leaflet-no-native-pitch"},cameraFallback:nativePitch?"":"leaflet-flat-capture-faux-tilt-stage",sourceFraming:"preserve-full-play-surface",surfaceModel:"framed-play-surface-faux-3d",faux3dSurface:rendered.surface,outputDimensions:{width:rendered.width,height:rendered.height}},meta||{})};
+    return {dataUrl:dataUrl("image/svg+xml",rendered.svg),width:rendered.width,height:rendered.height,bounds:sourceAsset&&sourceAsset.bounds||captureBounds(capture),sourceCaptureIds:sourceIds,metadata:Object.assign({rendererVersion:RENDERER_VERSION,format:"image/svg+xml",role:"3d-view-beta",stage:"3d-view-beta",holeNumber:capture.holeNumber||null,cameraModel:cameraModel,captureTiltDeg:captureTilt,playTiltDeg:playTilt,defaultView:"birds-eye",tiltAppliedBy:"viewer-runtime",nativePitchAvailable:nativePitch,mapCameraCapability:capability.provider?capability:{provider:"leaflet",nativePitchAvailable:false,pitchStrategy:"faux-tilt-svg",reason:"plain-leaflet-no-native-pitch"},cameraFallback:nativePitch?"":"leaflet-flat-capture-faux-tilt-stage",sourceFraming:"preserve-full-play-surface",surfaceModel:"birds-eye-tiltable-3d-plane",tiltableSurface:rendered.surface,outputDimensions:{width:rendered.width,height:rendered.height}},meta||{})};
   }
   function buildCourseVisualMaster(courseId,opts){
     opts=opts||{};
@@ -2935,6 +2908,6 @@
     pullCourseVisual:pullCourseVisual,
     buildFromCourseDatabase:buildFromCourseDatabase,
     hydrateCourseVisualAssets:hydrateCourseVisualAssets,
-    __test:{emptyStore:emptyStore,stitchSvg:stitchSvg,hashString:hashString,captureSignature:captureSignature,metadataForCloud:metadataForCloud,loadAssetData:loadAssetData,saveAssetData:saveAssetData,filterForSettings:filterForSettings,greenToneHex:greenToneHex,hslToHex:hslToHex,capturePolicy:capturePolicy,terrainShadeAsset:terrainShadeAsset}
+    __test:{emptyStore:emptyStore,stitchSvg:stitchSvg,hashString:hashString,captureSignature:captureSignature,metadataForCloud:metadataForCloud,loadAssetData:loadAssetData,saveAssetData:saveAssetData,filterForSettings:filterForSettings,greenToneHex:greenToneHex,hslToHex:hslToHex,capturePolicy:capturePolicy,terrainShadeAsset:terrainShadeAsset,beta3dVisualAsset:beta3dVisualAsset,birdsEye3dSurfaceSvg:birdsEye3dSurfaceSvg}
   };
 });

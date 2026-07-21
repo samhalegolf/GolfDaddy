@@ -645,7 +645,11 @@ function gdAdminCoursePreviewHoleCount(selected,record){
   return Math.max(selected&&selected.holeCount||0,visualCount||0,18);
 }
 function gdAdminCoursePreviewAsset(record,holeNumber){
+  const beta3dOn=!!(record&&record.courseOverrides&&record.courseOverrides.visualEngine&&record.courseOverrides.visualEngine.enable3dBeta);
   const lists=[
+    // When 3D beta is on, the saved beta3dView IS the tiltable 3D asset (birds-eye). Show
+    // the real asset on its hole; other holes fall through to their birds-eye surfaces.
+    beta3dOn&&record&&record.beta3dView?[record.beta3dView]:null,
     record&&record.holeFramePublishedVisuals,
     record&&record.holeFrameTerrainViews,
     record&&record.holeFramePreviewVisuals,
@@ -1697,9 +1701,9 @@ function gdAdminCourseVisualDepthBody(record,beta3dField){
       `<div class="gdAdminPhoneTiltReadout"><span>Capture tilt</span><b>${tilt.captureTiltDeg}°</b></div>`+
       `<div class="gdAdminPhoneTiltReadout"><span>Play tilt</span><b>${tilt.playTiltDeg}°</b></div>`+
       `<div class="gdAdminPhoneTiltReadout"><span>Pitch</span><b>${tilt.nativePitchAvailable?"native":"faux tilt"}</b></div>`+
-      `<div class="gdAdminPhoneTiltReadout"><span>3D asset</span><b class="${built?"ready":"warn"}">${built?"built":"not built"}</b></div>`+
+      `<div class="gdAdminPhoneTiltReadout"><span>3D asset</span><b class="${built?"ready":"warn"}">${built?"birds-eye surface":"not built"}</b></div>`+
       `<button type="button" class="gdAdminPhoneTiltBtn${tiltActive?" active":""}" aria-pressed="${tiltActive?"true":"false"}" onclick="return gdAdminCoursePreviewToggleTilt()">${tiltActive?"Tilt on":"Preview tilt"}</button>`+
-      `<span class="gdAdminPhoneTiltNote">Enabling 3D view beta tilts the preview. Read-only — GPS Play sets the live tilt at runtime.</span>`+
+      `<span class="gdAdminPhoneTiltNote">Ships birds-eye as a tiltable 3D surface — GPS Play tilts it live to reveal depth. This only previews that tilt.</span>`+
     `</div>`;
 }
 function gdAdminCourseVisualControls(record,courseId){

@@ -495,8 +495,10 @@ function payload() {
   assert.equal(plannedBuilt.holeFrameVisuals[0].metadata.playSurface.useGpsPlayFraming, true, "planned hole surface is ready for GPS Play framing");
   assert.ok(plannedBuilt.terrainView && plannedBuilt.terrainView.dataUrl.startsWith("data:image/svg+xml"), "terrain view is built as a separate derived stage");
   assert.ok(plannedBuilt.beta3dView && plannedBuilt.beta3dView.dataUrl.startsWith("data:image/svg+xml"), "3D beta view is built as a separate opt-in stage");
-  assert.ok(svgText(plannedBuilt.beta3dView.dataUrl).includes('data-source-framing="preserve-full-play-surface"'), "3D beta preserves the full play surface instead of clipping a new trapezoid crop");
-  assert.equal(plannedBuilt.beta3dView.metadata.cameraModel, "faux-3d-svg-perspective", "3D beta uses faux perspective when Leaflet has no pitch");
+  assert.ok(svgText(plannedBuilt.beta3dView.dataUrl).includes('data-role="birds-eye-tiltable-3d-plane"'), "3D beta ships the full play surface birds-eye as a tiltable 3D plane (no baked trapezoid crop)");
+  assert.ok(svgText(plannedBuilt.beta3dView.dataUrl).includes('data-default-view="birds-eye"'), "3D beta asset defaults to the birds-eye view");
+  assert.equal(plannedBuilt.beta3dView.metadata.cameraModel, "birds-eye-tiltable-plane", "3D beta asset is a birds-eye tiltable plane, tilted by the viewer");
+  assert.equal(plannedBuilt.beta3dView.metadata.surfaceModel, "birds-eye-tiltable-3d-plane", "3D beta records the tiltable-plane surface model");
   assert.equal(plannedBuilt.beta3dView.metadata.nativePitchAvailable, false, "3D beta records native pitch as unavailable");
   assert.equal(plannedBuilt.beta3dView.metadata.mapCameraCapability.reason, "plain-leaflet-no-native-pitch", "3D beta records the Leaflet fallback reason");
   assert.equal(plannedBuilt.rawMaster.metadata.visualLayerModel, "live-underlay-plus-feathered-captures", "raw master records the visual layer model");
@@ -751,6 +753,26 @@ function payload() {
   assert.ok(lowOpacity !== null && highOpacity !== null, "terrain relief group is present at both strengths");
   assert.ok(highOpacity > lowOpacity, "higher terrain strength deepens the relief shading (toggllable degree)");
   assert.ok(lowOpacity > 0, "strength 0 keeps a minimal baseline of relief shading, not fully off");
+
+  // 3D asset: birds-eye tiltable plane (the edited image saved as a 3D asset, flat by default)
+  const holeSurface = {
+    dataUrl: "data:image/svg+xml," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="240" height="420"><rect width="240" height="420" fill="#3f8a4d"/><circle cx="120" cy="90" r="30" fill="#a7d98a"/></svg>'),
+    width: 240, height: 420, holeNumber: 4,
+    bounds: { south: -45.02, west: 169.1, north: -45.01, east: 169.11 },
+    sourceCaptureIds: ["cap-a"], metadata: { role: "hole-frame" }
+  };
+  const birdsEye = engine.__test.beta3dVisualAsset(holeSurface, { captureTiltDeg: 8, playTiltDeg: 14 });
+  assert.ok(birdsEye && birdsEye.dataUrl, "3D asset renders");
+  const birdsEyeSvg = svgText(birdsEye.dataUrl);
+  assert.ok(/data-role="birds-eye-tiltable-3d-plane"/.test(birdsEyeSvg), "3D asset declares itself a birds-eye tiltable plane");
+  assert.ok(/data-default-view="birds-eye"/.test(birdsEyeSvg), "3D asset defaults to birds-eye view");
+  assert.ok(birdsEyeSvg.indexOf('data-role="faux-3d-deck"') < 0 && birdsEyeSvg.indexOf("skewX(") < 0, "no perspective is baked into the asset — tilt is applied by the viewer");
+  assert.equal(birdsEye.width, holeSurface.width, "birds-eye asset keeps the source width (identical framing from directly above)");
+  assert.equal(birdsEye.height, holeSurface.height, "birds-eye asset keeps the source height");
+  assert.equal(birdsEye.metadata.surfaceModel, "birds-eye-tiltable-3d-plane", "asset metadata marks it as a tiltable 3D plane");
+  assert.equal(birdsEye.metadata.defaultView, "birds-eye", "asset metadata records the birds-eye default view");
+  assert.equal(birdsEye.metadata.tiltAppliedBy, "viewer-runtime", "tilt is owned by the viewer/player, not baked in");
+  assert.equal(birdsEye.metadata.playTiltDeg, 14, "asset carries the play tilt policy for the player to apply");
 
   console.log("course visual engine tests passed");
 })().catch((error) => {
