@@ -12,7 +12,7 @@
     "demo:list": "node demo/run-demo.mjs --list",
     "demo:capture": "node demo/run-demo.mjs",
     "demo:capture:local": "DEMO_BASE_URL=http://127.0.0.1:5173 node demo/run-demo.mjs",
-    "demo:install": "npx playwright install chromium",
+    "demo:install": "npx playwright-core install chromium",
     "native:sync": "npm run build:netlify && npx cap sync",
     "native:android": "npm run native:sync && npx cap open android",
     "native:ios": "npm run native:sync && npx cap open ios",
@@ -46,7 +46,6 @@
   },
   "devDependencies": {
     "@capacitor/cli": "8.4.2",
-    "@playwright/test": "^1.56.0",
     "playwright-core": "^1.56.0"
   }
 }
