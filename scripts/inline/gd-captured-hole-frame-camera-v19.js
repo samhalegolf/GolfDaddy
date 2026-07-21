@@ -556,8 +556,144 @@
     }
 	    safe(function(){localStorage.setItem(storageKey(),JSON.stringify(manifest));});
 	    if(!captureOpts.skipCoursePlayFrameRegister)gdRegisterCoursePlayFrameManifest(manifest,{generatedFrom:"v19-captured-surface",manifestKey:storageKey(),status:"generated"});
+	    // Turn the tile references into our own pixels, alongside rather than in the way.
+	    safe(function(){scheduleCaptureFlatten(manifest,captureOpts);});
 	    safe(function(){if(capturedGpsPlayActive())gdCoursePlayDebugEvent("gps-play-generated-new-frame",{reason:reason,manifestKey:storageKey(),tileCount:tiles.length,captureZoom:z,imageWidth:width,imageHeight:height});});
 	    return manifest;
+	  }
+	  /* ---------------------------------------------------------------------------
+	     Flatten a capture into our own image.
+
+	     A manifest records WHERE the tiles are, not what they look like - so every render
+	     re-fetches third-party tiles, nothing works offline, a failed tile leaves a hole in the
+	     lattice, and there is no owned raster to derive basic/HD/lite from. This composites the
+	     tiles once and hands back a single JPEG that is ours from that point on.
+
+	     Deliberately standalone and async: it runs per-shot after a capture, and equally as a
+	     consolidate pass over courses already captured, without re-shooting them.
+
+	     JPEG, not WebP: they are within 2% on size for aerial imagery, but WebP canvas encoding
+	     only landed in Safari 16/17 and older iOS webviews silently hand back PNG instead - which
+	     is ~7x larger and would breach the storage bucket's per-file limit without erroring.
+
+	     Coverage is enforced. Unlike a tile reference - which simply retries on the next view - a
+	     flattened image bakes its failures in permanently, so a partial composite is refused
+	     rather than quietly shipping a hole.
+	     --------------------------------------------------------------------------- */
+	  function flattenCaptureManifest(manifest,opts){
+	    opts=opts||{};
+	    return new Promise(function(resolve){
+	      if(!manifest)return resolve({ok:false,reason:"no-manifest"});
+	      if(manifest.imageData)return resolve({ok:true,reason:"already-flattened",manifest:manifest});
+	      var tiles=Array.isArray(manifest.tiles)?manifest.tiles.filter(function(t){return t&&t.url;}):[];
+	      if(!tiles.length)return resolve({ok:false,reason:"no-tiles"});
+	      var width=Math.max(1,Math.round(Number(manifest.imageWidth)||0));
+	      var height=Math.max(1,Math.round(Number(manifest.imageHeight)||0));
+	      if(width<2||height<2)return resolve({ok:false,reason:"no-capture-dimensions"});
+	      var minCoverage=Number.isFinite(Number(opts.minCoverage))?Number(opts.minCoverage):1;
+	      var quality=Number.isFinite(Number(opts.quality))?Number(opts.quality):.85;
+	      var canvas=document.createElement("canvas");
+	      canvas.width=width;canvas.height=height;
+	      var ctx=canvas.getContext("2d");
+	      if(!ctx)return resolve({ok:false,reason:"no-canvas-context"});
+	      var pending=tiles.length,loaded=0,failed=0,settled=false;
+	      var timer=setTimeout(function(){finish(true);},Math.max(4000,Number(opts.timeoutMs)||20000));
+	      tiles.forEach(function(tile){
+	        var img=new Image();
+	        img.crossOrigin="anonymous";
+	        img.onload=function(){
+	          try{ctx.drawImage(img,Number(tile.x)||0,Number(tile.y)||0,Number(tile.width)||256,Number(tile.height)||256);loaded++;}
+	          catch(err){failed++;}
+	          step();
+	        };
+	        img.onerror=function(){failed++;step();};
+	        img.src=tile.url;
+	      });
+	      function step(){if(--pending<=0)finish(false);}
+	      function finish(timedOut){
+	        if(settled)return;
+	        settled=true;
+	        clearTimeout(timer);
+	        var coverage=tiles.length?loaded/tiles.length:0;
+	        if(coverage<minCoverage){
+	          return resolve({ok:false,reason:timedOut?"tile-load-timeout":"incomplete-coverage",coverage:+coverage.toFixed(3),loaded:loaded,failed:failed,expected:tiles.length});
+	        }
+	        var dataUrl;
+	        try{dataUrl=canvas.toDataURL("image/jpeg",quality);}
+	        catch(err){return resolve({ok:false,reason:"canvas-tainted",error:String(err&&err.name||err)});}
+	        if(!dataUrl||dataUrl.indexOf("data:image/jpeg")!==0)return resolve({ok:false,reason:"jpeg-encode-unavailable"});
+	        var flattened=Object.assign({},manifest,{
+	          imageData:dataUrl,
+	          imageFormat:"image/jpeg",
+	          imageBytes:Math.round(dataUrl.length*0.75),
+	          surfaceOwnership:"clarity-owned-raster",
+	          flattenedAt:new Date().toISOString(),
+	          flattenedFrom:{tileCount:tiles.length,tileSourceLabel:manifest.tileSourceLabel||"",captureZoom:manifest.captureZoom||null}
+	        });
+	        var result={ok:true,manifest:flattened,dataUrl:dataUrl,coverage:+coverage.toFixed(3),loaded:loaded,failed:failed,bytes:flattened.imageBytes,width:width,height:height};
+	        var engine=window.GDCourseVisualEngine;
+	        if(opts.persist===false||!engine||typeof engine.saveCaptureImage!=="function"){
+	          result.persisted=false;
+	          return resolve(result);
+	        }
+	        /* The pixels go to the IndexedDB asset store and the manifest keeps only the pointer.
+	           A ~1.4MB base64 JPEG per hole would exhaust localStorage within a couple of holes and
+	           take every other manifest down with it. */
+	        var path=engine.captureImagePath(flattened);
+	        flattened.imagePath=path;
+	        Promise.resolve(engine.saveCaptureImage(path,dataUrl)).then(function(saved){
+	          result.persisted=saved===true;
+	          result.imagePath=path;
+	          if(saved===true&&opts.updateStoredManifest!==false){
+	            // Persist the pointer, never the pixels.
+	            var lean=Object.assign({},flattened);
+	            delete lean.imageData;
+	            safe(function(){localStorage.setItem(manifest.key||storageKey(),JSON.stringify(lean));});
+	            result.storedManifestBytes=JSON.stringify(lean).length;
+	          }
+	          resolve(result);
+	        }).catch(function(){result.persisted=false;resolve(result);});
+	      }
+	    });
+	  }
+	  /* Kick the flatten off after a capture without making the capture itself async.
+
+	     buildCaptureManifest stays synchronous and its return value is unchanged, so every existing
+	     caller behaves exactly as before. The flatten runs alongside: on success the manifest in
+	     storage gains an imagePath pointing at our own pixels in the asset store; on failure -
+	     offline, a tile 404, a tainted canvas - nothing is written and the capture keeps its tiles,
+	     degrading to precisely the behaviour we have today rather than breaking the capture.
+
+	     De-duped by manifest key so repeated captures of the same frame don't refetch every tile. */
+	  var captureFlattenPending={};
+	  function scheduleCaptureFlatten(manifest,captureOpts){
+	    captureOpts=captureOpts||{};
+	    if(!manifest||captureOpts.skipFlatten===true)return null;
+	    if(manifest.imageData||manifest.imagePath)return null;
+	    var key=manifest.key||storageKey();
+	    if(captureFlattenPending[key])return captureFlattenPending[key];
+	    var job=flattenCaptureManifest(manifest,{quality:captureOpts.flattenQuality})
+	      .then(function(result){
+	        safe(function(){
+	          gdCoursePlayDebugEvent(result&&result.ok?"capture-flattened":"capture-flatten-skipped",{
+	            manifestKey:key,
+	            reason:result&&result.reason||"",
+	            coverage:result&&result.coverage,
+	            kb:result&&result.bytes?Math.round(result.bytes/1024):null,
+	            imagePath:result&&result.imagePath||""
+	          });
+	        });
+	        if(result&&result.ok&&result.manifest){
+	          // Keep the live manifest objects pointing at our pixels for this session.
+	          if(captureManifest&&captureManifest.key===key)captureManifest.imagePath=result.imagePath||captureManifest.imagePath;
+	          safe(function(){if(window.gdHoleImageCaptureManifest&&window.gdHoleImageCaptureManifest.key===key)window.gdHoleImageCaptureManifest.imagePath=result.imagePath;});
+	        }
+	        return result;
+	      })
+	      .catch(function(error){return {ok:false,reason:"flatten-threw",error:String(error&&error.message||error)};})
+	      .then(function(result){delete captureFlattenPending[key];return result;});
+	    captureFlattenPending[key]=job;
+	    return job;
 	  }
 	  function loadCaptureManifest(){
 	    if(captureManifest&&manifestMatchesActive(captureManifest))return publishCaptureManifest(captureManifest);
@@ -1661,6 +1797,8 @@
 		  window.gdLoadHoleImageCaptureManifest=function(){return loadCaptureManifest();};
 		  window.gdEnsureCurrentCapturedSurfaceManifest=function(reason){return ensureCurrentCaptureManifest(reason||"ensure-current");};
 		  window.gdCapturedFrameUnavailable=gdCapturedFrameUnavailable;
+		  window.gdCaptureFlattenPending=function(key){return captureFlattenPending[key]||null;};
+		  window.gdFlattenCaptureManifest=function(manifest,opts){return flattenCaptureManifest(manifest,opts);};
 		  window.gdCapturedSurfaceManifestMatchesActive=function(manifest){return manifestMatchesActive(manifest||captureManifest||window.gdHoleImageCaptureManifest||window.__gdLastHoleImageCaptureManifest||window.__gdV19CapturedHoleFrameManifest);};
 		  window.gdRenderHoleImageCamera=function(manifest){return renderCaptureManifest(manifest||loadCaptureManifest());};
 		  window.gdBeginGpsHoleSwitchTransition=gdBeginGpsHoleSwitchTransition;

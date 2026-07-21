@@ -956,6 +956,60 @@ function payload() {
   for (let x = 26; x < 38; x++) texture.add(Math.round(lumaAt(lit, x, 70) * 10));
   assert.ok(texture.size > 3, "turf texture survives the relight rather than flattening to the target");
 
+  // Flattened captures: our own pixels must win over tile references, or the flatten is pointless.
+  const flatCapture = {
+    id: "flat-1", role: "play-corridor", width: 512, height: 512,
+    bounds: { south: -45.02, west: 169.1, north: -45.01, east: 169.11 },
+    imageData: "data:image/jpeg;base64,FLATTENEDPIXELS",
+    // provenance is kept, and must NOT cause the remote tiles to be used
+    tiles: [{ x: 0, y: 0, z: 17, url: "https://tiles.test/remote/0.png" }]
+  };
+  const flatSvg = engine.__test.stitchSvg([flatCapture], { courseId: "flat-course" });
+  const flatMarkup = svgText(flatSvg.dataUrl);
+  assert.ok(flatMarkup.indexOf("FLATTENEDPIXELS") >= 0, "a flattened capture renders from our own image");
+  assert.ok(flatMarkup.indexOf("tiles.test/remote") < 0, "a flattened capture never re-fetches the third-party tiles it came from");
+
+  // Un-flattened captures still fall back to tiles, so nothing regresses before the migration.
+  const tileCapture = Object.assign({}, flatCapture, { id: "tiled-1", imageData: undefined });
+  const tileMarkup = svgText(engine.__test.stitchSvg([tileCapture], { courseId: "tiled-course" }).dataUrl);
+  assert.ok(tileMarkup.indexOf("tiles.test/remote") >= 0, "captures that have not been flattened yet still render from tiles");
+
+  // Flattened-capture persistence: pixels go to the asset store, the manifest keeps a pointer.
+  const flatManifest = {
+    key: "gd_captured_hole_frame_v19_cromwell:h7", courseKey: "cromwell", holeNumber: 7,
+    captureZoom: 19, imageWidth: 768, imageHeight: 768, originPx: { x: 10, y: 20 },
+    tiles: [{ x: 0, y: 0, z: 19, url: "https://tiles.test/a.png" }],
+    anchorPins: { tee: { lat: -45.01, lng: 169.1 }, green: { lat: -45.012, lng: 169.104 } }
+  };
+  const imgPath = engine.captureImagePath(flatManifest);
+  assert.ok(/^captures\/cromwell\/h7\/[a-z0-9]+\.jpg$/.test(imgPath), "capture image path is scoped by course and hole, got " + imgPath);
+  assert.equal(engine.captureImagePath(flatManifest), imgPath, "the path is deterministic for the same capture");
+  assert.notEqual(engine.captureImagePath(Object.assign({}, flatManifest, { holeNumber: 8 })), imgPath, "a different hole gets its own path");
+
+  const ownedPixels = "data:image/jpeg;base64,OWNEDPIXELS";
+  // Under Node there is no IndexedDB, so the durable write reports false and the in-memory cache
+  // carries it; in the browser both happen. Either way the round-trip is the contract.
+  await engine.saveCaptureImage(imgPath, ownedPixels);
+  assert.equal(await engine.loadCaptureImage(imgPath), ownedPixels, "flattened pixels round-trip through the asset store");
+
+  // A manifest carrying only the pointer must hydrate into a capture that renders our pixels.
+  const pointerManifest = Object.assign({}, flatManifest, { imagePath: imgPath });
+  assert.ok(JSON.stringify(pointerManifest).length < 2000, "the stored manifest stays small - no base64 payload on it");
+  const pointerCapture = engine.manifestToCapture(pointerManifest, { courseId: "cromwell" });
+  assert.equal(pointerCapture.imagePath, imgPath, "capture carries the pointer through");
+  assert.equal(pointerCapture.imageData, null, "capture starts un-hydrated");
+  await engine.hydrateCaptureImages(pointerCapture);
+  assert.equal(pointerCapture.imageData, ownedPixels, "capture hydrates its pixels from the asset store");
+  const hydratedMarkup = svgText(engine.__test.stitchSvg([pointerCapture], { courseId: "cromwell" }).dataUrl);
+  assert.ok(hydratedMarkup.indexOf("OWNEDPIXELS") >= 0, "a hydrated capture renders from our own pixels");
+  assert.ok(hydratedMarkup.indexOf("tiles.test") < 0, "a hydrated capture never falls back to the remote tiles");
+
+  // Captures that were never flattened must pass through hydration untouched.
+  const plain = engine.manifestToCapture(flatManifest, { courseId: "cromwell" });
+  await engine.hydrateCaptureImages(plain);
+  assert.equal(plain.imageData, null, "un-flattened captures are left alone by hydration");
+  assert.ok(svgText(engine.__test.stitchSvg([plain], { courseId: "cromwell" }).dataUrl).indexOf("tiles.test") >= 0, "un-flattened captures still render from tiles");
+
   console.log("course visual engine tests passed");
 })().catch((error) => {
   console.error(error);

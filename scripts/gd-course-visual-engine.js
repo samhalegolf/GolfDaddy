@@ -753,6 +753,36 @@
     var pins=capture&&capture.anchorPins||capture&&capture.pins||{};
     return boundsFromPoints([pins.tee,pins.green].concat(points(pins.route),points(pins.greenShape)));
   }
+  /* ---------------------------------------------------------------------------
+     Flattened capture persistence.
+
+     A flattened hole is ~1.4MB of base64 JPEG. localStorage tops out around 5MB, so putting the
+     pixels on the manifest would blow the quota within a couple of holes and take the manifests
+     (and the captures they describe) down with it. The pixels therefore live in the IndexedDB
+     asset store keyed by path, exactly as the engine already does for rendered visuals, and the
+     manifest carries only the pointer.
+     --------------------------------------------------------------------------- */
+  function captureImagePath(manifest){
+    if(!manifest)return "";
+    var courseId=slug(manifest.courseKey||manifest.courseId||manifest.courseName||"course");
+    var hole=Math.max(0,Math.round(Number(manifest.holeNumber)||0));
+    var key=hashString([manifest.key||"",manifest.captureZoom||"",manifest.imageWidth||"",manifest.imageHeight||"",manifest.originPx&&manifest.originPx.x,manifest.originPx&&manifest.originPx.y].join(":"));
+    return "captures/"+courseId+"/"+(hole?"h"+hole:"course")+"/"+key+".jpg";
+  }
+  function saveCaptureImage(path,dataUrl){return saveAssetData(path,dataUrl);}
+  function loadCaptureImage(path){return loadAssetData(path);}
+  // Refill a capture's pixels from the asset store. Captures that already hold their pixels, or
+  // that were never flattened, pass through untouched.
+  function hydrateCaptureImages(captures){
+    var list=Array.isArray(captures)?captures:[captures];
+    return Promise.all(list.map(function(capture){
+      if(!capture||capture.imageData||!capture.imagePath)return Promise.resolve(capture);
+      return loadCaptureImage(capture.imagePath).then(function(dataUrl){
+        if(dataUrl)capture.imageData=dataUrl;
+        return capture;
+      }).catch(function(){return capture;});
+    })).then(function(){return Array.isArray(captures)?list:list[0];});
+  }
   function manifestToCapture(manifest,opts){
     if(!manifest||!Array.isArray(manifest.tiles)||!manifest.tiles.length)return null;
     var courseId=slug(manifest.courseKey||manifest.courseName||opts&&opts.courseId);
@@ -768,8 +798,11 @@
     var cameraCapability=clone(manifest.mapCameraCapability||manifest.visualCapturePolicy&&manifest.visualCapturePolicy.cameraCapability||opts&&opts.mapCameraCapability||null);
     return {
       id:text(manifest.scanId||manifest.activeScanId||manifest.key||("capture-"+courseId+"-h"+holeNumber),180),
-      imageUrl:null,
-      imageData:null,
+      // Flattened captures carry our own pixels (imageData) or a pointer to them in the asset
+      // store (imagePath). Without this a flattened manifest would still fall through to tiles.
+      imageUrl:text(manifest.imageUrl,600)||null,
+      imageData:manifest.imageData||null,
+      imagePath:text(manifest.imagePath,300)||null,
       storagePath:text(manifest.key||manifest.storageKey||"",220),
       bounds:bounds,
       boundsSource:useImageBounds?"manifest-image":anchorBounds?"anchor-pins":imageBounds?"manifest-image-unverified":"unknown",
@@ -1080,15 +1113,20 @@
   function renderableCapture(capture){
     return !!(capture&&capture.width&&capture.height&&(Array.isArray(capture.tiles)&&capture.tiles.length||capture.imageUrl||capture.imageData));
   }
+  /* Our own flattened pixels win over tile references. A flattened capture keeps its tiles list
+     for provenance, so checking tiles first would silently ignore the flat image and keep
+     re-fetching third-party tiles at render time - which is the whole thing flattening exists to
+     stop. Tiles remain the fallback for captures that have not been flattened yet. */
   function captureContentSvg(capture){
+    var href=capture&&capture.imageData||capture&&capture.imageUrl||"";
+    if(href)return '<image href="'+escapeXml(href)+'" x="0" y="0" width="'+svgNum(capture.width)+'" height="'+svgNum(capture.height)+'" preserveAspectRatio="none"/>';
     if(Array.isArray(capture&&capture.tiles)&&capture.tiles.length){
       return capture.tiles.map(function(tile){
         var tw=Number(tile.width)||256,th=Number(tile.height)||256;
         return '<image href="'+escapeXml(tile.url)+'" x="'+svgNum(Number(tile.x)||0)+'" y="'+svgNum(Number(tile.y)||0)+'" width="'+svgNum(tw)+'" height="'+svgNum(th)+'" preserveAspectRatio="none"/>';
       }).join("");
     }
-    var href=capture&&capture.imageData||capture&&capture.imageUrl||"";
-    return href?'<image href="'+escapeXml(href)+'" x="0" y="0" width="'+svgNum(capture.width)+'" height="'+svgNum(capture.height)+'" preserveAspectRatio="none"/>':"";
+    return "";
   }
   function chooseExampleCapture(captures){
     function rank(capture){
@@ -3215,6 +3253,10 @@
     measureSurfacePixels:measureSurfacePixels,
     normaliseSurfacePixels:normaliseSurfacePixels,
     applyFloodlightPixels:applyFloodlightPixels,
+    captureImagePath:captureImagePath,
+    saveCaptureImage:saveCaptureImage,
+    loadCaptureImage:loadCaptureImage,
+    hydrateCaptureImages:hydrateCaptureImages,
     presetForMode:presetForMode,
     courseVisualPresetList:courseVisualPresetList,
     loadPresets:loadPresets,
