@@ -210,6 +210,39 @@ function loadController(options = {}) {
   const localStorage = storage({
     gd_user_course_library_v1: JSON.stringify(options.savedMap ? playableStore() : { courses: {} })
   });
+  /* Storage-quota scenarios: the browser's localStorage bucket is full, so
+     setItem on the course library throws QuotaExceededError. "recoverable"
+     unblocks once the cloud-backed tile has been evicted; "hard" stays blocked
+     no matter what gets evicted. Seeds one tile whose scan is confirmed pushed
+     to Supabase (evictable) and one whose scan only exists locally (must
+     never be evicted). */
+  const SYNCED_TILE_KEY = "gd_captured_hole_frame_v19_other-course:h1";
+  const UNSYNCED_TILE_KEY = "gd_captured_hole_frame_v19_other-course:h2";
+  if (options.storageQuota) {
+    localStorage.data[SYNCED_TILE_KEY] = "tile-data-cloud-backed";
+    localStorage.data[UNSYNCED_TILE_KEY] = "tile-data-local-only";
+    localStorage.data.gd_captured_surface_scans_v1 = JSON.stringify({
+      version: 1,
+      scans: [
+        { id: "scan-synced", courseKey: "other-course", holeNumber: 1, updatedAt: "2026-07-01T00:00:00.000Z", storage: { legacyManifestKey: SYNCED_TILE_KEY } },
+        { id: "scan-local", courseKey: "other-course", holeNumber: 2, updatedAt: "2026-07-02T00:00:00.000Z", storage: { legacyManifestKey: UNSYNCED_TILE_KEY } }
+      ]
+    });
+    localStorage.data.gd_captured_surface_sync_v1 = JSON.stringify({ pushed: { "scan-synced": "2026-07-01T00:00:00.000Z" } });
+    Object.defineProperty(localStorage, "length", { get: () => Object.keys(localStorage.data).length });
+    localStorage.key = (index) => { const keys = Object.keys(localStorage.data); return index >= 0 && index < keys.length ? keys[index] : null; };
+    const baseSetItem = localStorage.setItem.bind(localStorage);
+    localStorage.setItem = (key, value) => {
+      const stillBlocked = options.storageQuota === "hard"
+        || (options.storageQuota === "recoverable" && Object.prototype.hasOwnProperty.call(localStorage.data, SYNCED_TILE_KEY));
+      if (key === "gd_user_course_library_v1" && stillBlocked) {
+        const error = new Error("Failed to execute 'setItem' on 'Storage'");
+        error.name = "QuotaExceededError";
+        throw error;
+      }
+      baseSetItem(key, value);
+    };
+  }
   const sessionStorage = storage();
   const body = elementStub();
   body.dataset = {};
@@ -664,6 +697,29 @@ async function main() {
   const resolvedHole3 = Object.values(resolvedCourse.objects || {}).filter((object) => Number(object.holeNumber) === 3);
   assert(resolvedHole3.length >= 3, "resolved native run persists hole 3 play objects");
   assert(resolvedHole3.every((object) => object.confirmed), "resolved native run marks hole 3 objects confirmed");
+
+  /* Full localStorage, but eviction can free enough: the automapper's saves
+     hit QuotaExceededError, evict the cloud-backed tile, retry, and succeed.
+     The locally-captured tile must survive - its scan exists nowhere else. */
+  env = await runScenario({ automapperSuccess: true, storageQuota: "recoverable" });
+  assert.strictEqual(env.result.playable, true, "quota hit with evictable caches still resolves play via the automapper");
+  assert.strictEqual(env.calls.native, 0, "recovered quota hit does not invoke the native resolver");
+  assert(!Object.prototype.hasOwnProperty.call(env.localStorage.data, "gd_captured_hole_frame_v19_other-course:h1"), "cloud-backed tile is evicted to make room");
+  assert(Object.prototype.hasOwnProperty.call(env.localStorage.data, "gd_captured_hole_frame_v19_other-course:h2"), "locally-captured tile is never evicted");
+  assert(!env.events.some((event) => event.event === "automapper-failed"), "recovered quota hit is not reported as an automapper failure");
+  assert(!env.events.some((event) => event.event === "automapper-persist-failed"), "recovered quota hit is not reported as a persist failure");
+
+  /* Full localStorage and eviction cannot free enough: the automapper mapped
+     the course, so this must surface as a persist failure - never as
+     "automapper failed" - and must not divert to the native resolver, which
+     persists through the same storage and so cannot succeed either. */
+  env = await runScenario({ automapperSuccess: true, storageQuota: "hard" });
+  assert.strictEqual(env.calls.native, 0, "persist failure on a numbered course does not divert to the native resolver");
+  assert(env.events.some((event) => event.event === "automapper-persist-failed"), "blocked persistence is reported as a persist failure");
+  assert(!env.events.some((event) => event.event === "automapper-failed"), "blocked persistence is not misreported as an automapper failure");
+  assert(env.events.some((event) => event.event === "native-resolver-skipped-numbered-course"), "resolver skip on a numbered course is explicitly logged");
+  assert.strictEqual(env.events.filter((event) => event.event === "manual-fallback-opened").length, 1, "persist failure opens one manual fallback");
+  assert(Object.prototype.hasOwnProperty.call(env.localStorage.data, "gd_captured_hole_frame_v19_other-course:h2"), "hard quota failure still never evicts a local-only tile");
 
   const noisyEvents = env.events.map((event) => event.event).filter(Boolean);
   assert(!noisyEvents.includes("automapper-invocation-requested"), "AutoMapper request noise is absent");

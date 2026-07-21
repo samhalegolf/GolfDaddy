@@ -924,7 +924,72 @@
       return parsed;
     }catch(e){return {courses:{}};}
   }
-  function saveStore(store){try{localStorage.setItem(STORE_KEY,JSON.stringify(store));}catch(e){}}
+  /* localStorage is a hard ~10MB bucket. When it fills, setItem throws
+     QuotaExceededError - and this file used to catch that and throw it away,
+     so the automapper would map a course, silently persist nothing, read back
+     nothing and report "automapper failed" (that is exactly what broke the
+     Pupuke scan). Quota errors are handled, never swallowed: evict
+     re-derivable caches, retry once, and if the write still fails, count it
+     so the mapping flow reports a persist failure instead of a mapping one. */
+  let storePersistFailures=0;
+  let lastStorePersistFailure=null;
+  function isStorageQuotaError(error){
+    return !!(error&&(error.name==='QuotaExceededError'||error.name==='NS_ERROR_DOM_QUOTA_REACHED'||error.code===22||error.code===1014));
+  }
+  /* Safe to evict: OSM guide caches (refetchable) and captured hole frame
+     tiles whose scan is already in Supabase - either pulled from it
+     (cloudHydrated) or confirmed pushed (sync meta records the pushed
+     updated_at). A tile whose scan has not reached the database yet is the
+     only copy of that capture and is never evicted. */
+  function evictableStorageKeys(){
+    let registry=null,syncMeta=null;
+    try{registry=JSON.parse(localStorage.getItem('gd_captured_surface_scans_v1')||'null');}catch(e){}
+    try{syncMeta=JSON.parse(localStorage.getItem('gd_captured_surface_sync_v1')||'null');}catch(e){}
+    const pushed=syncMeta&&syncMeta.pushed&&typeof syncMeta.pushed==='object'?syncMeta.pushed:{};
+    const protectedTiles=new Set();
+    (Array.isArray(registry&&registry.scans)?registry.scans:[]).forEach(scan=>{
+      if(!scan)return;
+      const tileKey=scan.storage&&scan.storage.legacyManifestKey;
+      if(!tileKey)return;
+      const inCloud=!!(scan.cloudHydrated||(scan.source&&scan.source.cloudHydrated))
+        ||(!!pushed[scan.id]&&String(pushed[scan.id])>=String(scan.updatedAt||scan.createdAt||''));
+      if(!inCloud)protectedTiles.add(tileKey);
+    });
+    const allKeys=[];
+    try{
+      if(typeof localStorage.length==='number'&&typeof localStorage.key==='function'){
+        for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k!=null)allKeys.push(k);}
+      }else{
+        for(const k in localStorage){if(Object.prototype.hasOwnProperty.call(localStorage,k))allKeys.push(k);}
+      }
+    }catch(e){}
+    return allKeys.filter(key=>key.startsWith(OSM_HOLE_GUIDE_CACHE_PREFIX)||(key.startsWith('gd_captured_hole_frame_')&&!protectedTiles.has(key)));
+  }
+  function storageSetEvicting(key,value,label){
+    try{localStorage.setItem(key,value);return true;}
+    catch(error){
+      if(!isStorageQuotaError(error)){
+        storePersistFailures++;
+        lastStorePersistFailure={at:Date.now(),key,label:label||'',error:String(error&&error.message||error),name:error&&error.name||''};
+        try{console.warn('[Clarity Caddy] storage write failed',key,error);}catch(e){}
+        return false;
+      }
+      const evicted=evictableStorageKeys();
+      evicted.forEach(k=>{try{localStorage.removeItem(k);}catch(e){}});
+      try{
+        localStorage.setItem(key,value);
+        try{console.warn(`[Clarity Caddy] storage quota hit saving ${label||key} - evicted ${evicted.length} cloud-backed cache entries and retried OK`);}catch(e){}
+        return true;
+      }catch(retryError){
+        storePersistFailures++;
+        lastStorePersistFailure={at:Date.now(),key,label:label||'',error:String(retryError&&retryError.message||retryError),name:retryError&&retryError.name||'',quota:true,evicted:evicted.length};
+        try{console.warn(`[Clarity Caddy] device storage full - ${label||key} could not be saved even after evicting ${evicted.length} cache entries`,retryError);}catch(e){}
+        toastSafe('Device storage full - map save failed');
+        return false;
+      }
+    }
+  }
+  function saveStore(store){return storageSetEvicting(STORE_KEY,JSON.stringify(store),'course-library');}
   function cloneData(value){try{return JSON.parse(JSON.stringify(value));}catch(e){return value;}}
   function loadPublishedStore(){
     try{
@@ -934,7 +999,7 @@
     }catch(e){return {version:1,courses:{}};}
   }
   function savePublishedStore(store){
-    try{localStorage.setItem(PUBLISHED_STORE_KEY,JSON.stringify(store));}catch(e){}
+    return storageSetEvicting(PUBLISHED_STORE_KEY,JSON.stringify(store),'published-course-library');
   }
   function isPublishedCourse(course){
     return !!(course&&(course.published||course.userId==='published'||String(course.id||'').startsWith('published::')));
@@ -1333,7 +1398,11 @@
     };
     course.updatedAt=nowIso();
     dedupeCourseObjects(course);
-    saveStore(store);
+    /* If the store did not persist, this object does not exist: callers count
+       the return value as a committed save and the play path re-reads the
+       store to judge success, so pretending here is what turned a full disk
+       into "automapper failed". */
+    if(!saveStore(store))return null;
     gdCLRefreshProfileCard();
     return course.objects[id];
   }
@@ -3860,7 +3929,8 @@
 	  async function persistOsmGuideBundle(course,bundle,opts={},debugRunId='',attempt=null){
 	    const coursePoint=guideCoursePoint(course);
 	    const guides=opts.hole?[bestGuideForHole(bundle&&bundle.guides,opts.hole,coursePoint)].filter(Boolean):chooseAutoMapGuides(bundle&&bundle.guides,coursePoint);
-	    if(!guides.length)return {saved:0,holes:0,polygons:0,fallbacks:0,refinedGreenShapes:0,refinementRejected:0,refinementSkipped:0,guides:[],guideBundle:bundle||null};
+	    if(!guides.length)return {saved:0,holes:0,polygons:0,fallbacks:0,refinedGreenShapes:0,refinementRejected:0,refinementSkipped:0,persistFailures:0,guides:[],guideBundle:bundle||null};
+	    const persistFailuresBefore=storePersistFailures;
 	    let saved=0,polygons=0,fallbacks=0,refinedGreenShapes=0,refinementRejected=0,refinementSkipped=0;
 	    for(const guide of guides){
 		      const result=await saveOsmAutoHole(guide,bundle&&bundle.greens,loadUserCourseData(userId(),courseId(course))||course,{replaceExisting:!!opts.replaceExisting,sessionCourse:course,debugRunId,debugAttemptContext:attempt});
@@ -3882,7 +3952,7 @@
 	      if(window.gdFullMappingMode)focusMapperHoleReference(active,{drawObjects:false,frame:true});
 	      else if(nextCourse)frameMappedHoleForPlay(nextCourse,active,{quiet:true,promptStart:!!opts.promptStart,allowAnyStart:true});
 	    }
-	    return {saved,holes:guides.length,polygons,fallbacks,refinedGreenShapes,refinementRejected,refinementSkipped,guides,guideBundle:bundle||null};
+	    return {saved,holes:guides.length,polygons,fallbacks,refinedGreenShapes,refinementRejected,refinementSkipped,persistFailures:storePersistFailures-persistFailuresBefore,guides,guideBundle:bundle||null};
 	  }
 	  async function autoMapOsmCourse(opts={}){
 	    cancelMapperCapture();
@@ -3935,7 +4005,8 @@
 	    if(!quiet){
 	      hintSafe(saved?`${label}: OSM base layer saved (${polygons} shaped green${polygons===1?'':'s'})`:`${label}: OSM base layer already exists`);
 	    }
-	    recordMappingDebug(debugRunId,{source:'persistence',phase:saved?'completed':'skipped',event:saved?'automapper-persistence-completed':'automapper-persistence-skipped',summary:saved?'AutoMapper geometry saved':'AutoMapper geometry already existed',details:{
+	    const persistFailed=!!(persisted.persistFailures&&!saved);
+	    recordMappingDebug(debugRunId,{source:'persistence',phase:persistFailed?'failed':saved?'completed':'skipped',event:persistFailed?'automapper-persistence-failed':saved?'automapper-persistence-completed':'automapper-persistence-skipped',summary:persistFailed?'AutoMapper mapped the course but storage rejected the save':saved?'AutoMapper geometry saved':'AutoMapper geometry already existed',details:{
 	      invokedBy:opts.reason||opts.source||'automapper',
 	      acceptedGuides:guides.length,
 	      savedObjects:saved,
@@ -3944,10 +4015,12 @@
 	      refinedGreenShapes:persisted.refinedGreenShapes||0,
 	      refinementRejected:persisted.refinementRejected||0,
 	      refinementSkipped:persisted.refinementSkipped||0,
+	      persistFailures:persisted.persistFailures||0,
+	      persistFailure:persisted.persistFailures?lastStorePersistFailure:null,
 	      hole:opts.hole?active:'',
-	      existingTrustedMap:!saved
+	      existingTrustedMap:!saved&&!persistFailed
 	    }});
-	    return Object.assign({saved,holes:guides.length,polygons,fallbacks,automapperStatus:'success',automapperError:bundle.automapperError||null},persisted);
+	    return Object.assign({saved,holes:guides.length,polygons,fallbacks,automapperStatus:persistFailed?'persist-failed':'success',automapperError:bundle.automapperError||null},persisted);
 	  }
 	  function scheduleOsmAutoMapForPlay(course,opts={}){
 	    try{
@@ -5246,10 +5319,29 @@
 	          const shown=await showResolvedCoursePlayHole(c,h,'automapper',opts);
 	          return Object.assign(shown,{partial:autoAccepted&&!autoReady,readiness:autoState,persisted:autoMapResult,holes:autoMapResult&&autoMapResult.holes||0,saved:autoMapResult&&autoMapResult.saved||0});
 	        }
-        if(!(autoMapResult&&autoMapResult.automapperError)){
-          recordMappingDebug(debugRunId,{source:'automapper',phase:'failed',event:'automapper-failed',summary:'AutoMapper failed',details:{hole:h,resolutionKey:key,attemptToken,guideCount:autoMapResult&&autoMapResult.holes||0,saved:autoMapResult&&autoMapResult.saved||0},error:autoMapResult&&autoMapResult.automapperError||null});
+        const autoGuideCount=autoMapResult&&autoMapResult.holes||0;
+        const autoPersistFailures=autoMapResult&&autoMapResult.persistFailures||0;
+        if(autoPersistFailures){
+          /* Not a mapping failure: the automapper produced the map and storage
+             refused the writes. Labelling this "automapper-failed" is what hid
+             the Pupuke quota problem. */
+          recordMappingDebug(debugRunId,{source:'automapper',phase:'failed',event:'automapper-persist-failed',summary:'AutoMapper mapped the course but could not save it',details:{hole:h,resolutionKey:key,attemptToken,guideCount:autoGuideCount,saved:autoMapResult&&autoMapResult.saved||0,persistFailures:autoPersistFailures,persistFailure:lastStorePersistFailure||null}});
+        }else if(!(autoMapResult&&autoMapResult.automapperError)){
+          recordMappingDebug(debugRunId,{source:'automapper',phase:'failed',event:'automapper-failed',summary:'AutoMapper failed',details:{hole:h,resolutionKey:key,attemptToken,guideCount:autoGuideCount,saved:autoMapResult&&autoMapResult.saved||0},error:autoMapResult&&autoMapResult.automapperError||null});
         }
         if(!mappingAttemptStillCurrent(request,attempt,'native-resolver'))return {playable:false,stale:true,reason:'superseded-before-native-resolver'};
+        if(autoGuideCount>0){
+          /* OSM exposed hole numbers, so the automapper is the authority for
+             this course. The native resolver exists only for courses that have
+             shapes but no numbers - and it persists through the same storage,
+             so when the failure is persistence it cannot succeed either. Fail
+             visibly with a debug package instead of diverting. */
+          const failureReason=autoPersistFailures?'automapper-persist-failed':'automapper-map-not-accepted';
+          recordMappingDebug(debugRunId,{source:'native-resolver',phase:'skipped',event:'native-resolver-skipped-numbered-course',summary:'Native resolver skipped: OSM already exposes hole numbers',details:{hole:h,resolutionKey:key,attemptToken,guideCount:autoGuideCount,saved:autoMapResult&&autoMapResult.saved||0,failureKind:autoPersistFailures?'persistence':'not-accepted'}});
+          recordCoursePlayDebug('course-mapping-automatic-unresolved',c,h,{reason:failureReason,resolutionKey:key,attemptToken});
+          return beginInteractiveGreenFallback(c,h,failureReason,{resolutionKey:key,activeResolutionKey:key,attemptToken,debugRunId,selectedAt,debugAttemptContext:attempt,callerFunction:'runCourseMappingAttempt',source:'mapping-controller'});
+        }
+        recordMappingDebug(debugRunId,{source:'native-resolver',phase:'started',event:'native-resolver-invoked',summary:'Native resolver invoked: automapper produced no numbered guides',details:{hole:h,resolutionKey:key,attemptToken,reason:'automapper-produced-no-guides'}});
         const nativeResult=await runNativeResolverStage(request,attempt,autoMapResult,opts);
         if(nativeResult&&nativeResult.stale)return {playable:false,stale:true,reason:'native-resolver-stale'};
         if(!mappingAttemptStillCurrent(request,attempt,'native-resolver'))return {playable:false,stale:true,reason:'superseded-after-native-resolver'};
