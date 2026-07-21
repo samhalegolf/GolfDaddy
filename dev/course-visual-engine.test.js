@@ -774,6 +774,30 @@ function payload() {
   assert.equal(birdsEye.metadata.tiltAppliedBy, "viewer-runtime", "tilt is owned by the viewer/player, not baked in");
   assert.equal(birdsEye.metadata.playTiltDeg, 14, "asset carries the play tilt policy for the player to apply");
 
+  // Lock in the 3D look, apply it to every hole, and publish per-hole tiltable 3D files for GPS Play
+  assert.notEqual(published.holeFramePublishedVisuals[0].metadata.surfaceModel, "birds-eye-tiltable-3d-plane", "with 3D off, published holes are plain surfaces");
+  const fresh3dPreset = engine.presetForMode("Fresh");
+  engine.ingestCourseVisualInput(Object.assign({}, input, { courseId: "cromwell-3d" }));
+  await engine.buildCourseVisualMaster("cromwell-3d");
+  engine.saveCourseVisualSettings("cromwell-3d", { visualEngine: { enable3dBeta: true } }, { presetId: fresh3dPreset.id });
+  const preview3d = await engine.buildCourseVisualPreview("cromwell-3d", fresh3dPreset, { visualEngine: { enable3dBeta: true } });
+  assert.ok(preview3d.previewVisual, "3D preview builds");
+  const published3d = engine.publishCourseVisual("cromwell-3d");
+  assert.equal(published3d.status, "published", "3D publish succeeds: " + JSON.stringify(published3d.lastError));
+  assert.ok(published3d.holeFramePublishedVisuals.length >= 1, "3D publish still emits per-hole GPS Play surfaces");
+  assert.equal(published3d.holeFramePublishedVisuals.length, preview3d.holeFramePreviewVisuals.length, "3D publish covers every hole the look was applied to");
+  published3d.holeFramePublishedVisuals.forEach((asset) => {
+    const label = "hole " + asset.holeNumber;
+    assert.equal(asset.metadata.surfaceModel, "birds-eye-tiltable-3d-plane", "every published hole ships as a tiltable 3D surface (" + label + ")");
+    assert.equal(asset.metadata.defaultView, "birds-eye", "published hole defaults to birds-eye (" + label + ")");
+    assert.equal(asset.metadata.tiltAppliedBy, "viewer-runtime", "player applies the tilt at runtime (" + label + ")");
+    assert.equal(asset.metadata.playTiltDeg, 14, "published hole carries the play tilt policy (" + label + ")");
+    assert.ok(svgText(asset.dataUrl).includes('data-role="birds-eye-tiltable-3d-plane"'), "the saved file declares the tiltable 3D plane (" + label + ")");
+    assert.equal(asset.metadata.role, "hole-frame-published", "published hole keeps its Play-facing role (" + label + ")");
+    assert.equal(asset.metadata.playSurface.fallbackPolicy, "live-gps-only", "published hole keeps the live-gps fallback policy (" + label + ")");
+  });
+  assert.equal(published3d.singleHolePublishedVisual.metadata.surfaceModel, "birds-eye-tiltable-3d-plane", "single-hole published is also a tiltable 3D surface");
+
   console.log("course visual engine tests passed");
 })().catch((error) => {
   console.error(error);

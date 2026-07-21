@@ -645,11 +645,10 @@ function gdAdminCoursePreviewHoleCount(selected,record){
   return Math.max(selected&&selected.holeCount||0,visualCount||0,18);
 }
 function gdAdminCoursePreviewAsset(record,holeNumber){
-  const beta3dOn=!!(record&&record.courseOverrides&&record.courseOverrides.visualEngine&&record.courseOverrides.visualEngine.enable3dBeta);
+  // Per-hole surfaces carry the locked-in look for every hole. When 3D beta is on these are
+  // published as birds-eye tiltable 3D surfaces; the preview shows them flat and the tilt
+  // (Preview tilt / GPS Play) reveals the 3d-ness. Published wins, then the latest working stage.
   const lists=[
-    // When 3D beta is on, the saved beta3dView IS the tiltable 3D asset (birds-eye). Show
-    // the real asset on its hole; other holes fall through to their birds-eye surfaces.
-    beta3dOn&&record&&record.beta3dView?[record.beta3dView]:null,
     record&&record.holeFramePublishedVisuals,
     record&&record.holeFrameTerrainViews,
     record&&record.holeFramePreviewVisuals,

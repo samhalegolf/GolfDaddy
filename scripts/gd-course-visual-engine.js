@@ -2290,17 +2290,31 @@
       return putRecord(record,{skipCloudSync:true});
     }
     var version=Number(preview.version)||((Number(record.currentVersion)||0)+1);
+    // When 3D beta is locked in, every published hole image ships as a birds-eye tiltable 3D
+    // surface (the edited/filtered pixels + tilt policy) so GPS Play can tilt it to reveal depth.
+    var enable3dBeta=!!(record.courseOverrides&&record.courseOverrides.visualEngine&&record.courseOverrides.visualEngine.enable3dBeta);
+    var tiltPolicy=beta3dTiltPolicy();
+    function publishAsTiltable3d(asset){
+      if(!enable3dBeta||!asset||!asset.dataUrl)return null;
+      return beta3dVisualAsset(asset,{captureTiltDeg:tiltPolicy.captureTiltDeg,playTiltDeg:tiltPolicy.playTiltDeg,holeNumber:asset.holeNumber});
+    }
+    function merge3dMeta(base,threeD){
+      if(!threeD)return base;
+      return Object.assign({},base,{surfaceModel:threeD.metadata.surfaceModel,defaultView:threeD.metadata.defaultView,tiltAppliedBy:threeD.metadata.tiltAppliedBy,cameraModel:threeD.metadata.cameraModel,playTiltDeg:threeD.metadata.playTiltDeg,captureTiltDeg:threeD.metadata.captureTiltDeg,tiltableSurface:threeD.metadata.tiltableSurface});
+    }
     var overviewFinal=record.terrainView&&Number(record.terrainView.version)===version?record.terrainView:record.terrainView||preview;
     var singleHoleFinal=record.singleHoleTerrainView&&Number(record.singleHoleTerrainView.version)===version?record.singleHoleTerrainView:record.singleHoleTerrainView||record.singleHolePreviewVisual||record.exampleHoleVisual;
     record.publishedVisual={path:"course-visuals/"+record.courseId+"/published/"+version+".svg",dataUrl:overviewFinal.dataUrl,version:version,width:overviewFinal.width,height:overviewFinal.height,bounds:overviewFinal.bounds,presetId:preview.presetId,presetVersion:preview.presetVersion,overrideHash:preview.overrideHash,publishedAt:now(),metadata:Object.assign({},overviewFinal.metadata||{},{role:"published",publishedFrom:overviewFinal.metadata&&overviewFinal.metadata.role||"preview"})};
     if(singleHoleFinal&&singleHoleFinal.dataUrl){
-      record.singleHolePublishedVisual={path:"course-visuals/"+record.courseId+"/single-hole/published/"+version+".svg",dataUrl:singleHoleFinal.dataUrl,version:version,width:singleHoleFinal.width,height:singleHoleFinal.height,bounds:singleHoleFinal.bounds,captureId:singleHoleFinal.captureId||record.exampleHoleVisual&&record.exampleHoleVisual.captureId,holeNumber:singleHoleFinal.holeNumber||record.exampleHoleVisual&&record.exampleHoleVisual.holeNumber,presetId:preview.presetId,presetVersion:preview.presetVersion,overrideHash:preview.overrideHash,publishedAt:record.publishedVisual.publishedAt,metadata:Object.assign({},singleHoleFinal.metadata||{},{role:"single-hole-published",publishedFrom:singleHoleFinal.metadata&&singleHoleFinal.metadata.role||"single-hole-preview"})};
+      var singleHole3d=publishAsTiltable3d(singleHoleFinal);
+      record.singleHolePublishedVisual={path:"course-visuals/"+record.courseId+"/single-hole/published/"+version+".svg",dataUrl:singleHole3d?singleHole3d.dataUrl:singleHoleFinal.dataUrl,version:version,width:singleHoleFinal.width,height:singleHoleFinal.height,bounds:singleHoleFinal.bounds,captureId:singleHoleFinal.captureId||record.exampleHoleVisual&&record.exampleHoleVisual.captureId,holeNumber:singleHoleFinal.holeNumber||record.exampleHoleVisual&&record.exampleHoleVisual.holeNumber,presetId:preview.presetId,presetVersion:preview.presetVersion,overrideHash:preview.overrideHash,publishedAt:record.publishedVisual.publishedAt,metadata:merge3dMeta(Object.assign({},singleHoleFinal.metadata||{},{role:"single-hole-published",publishedFrom:singleHoleFinal.metadata&&singleHoleFinal.metadata.role||"single-hole-preview"}),singleHole3d)};
     }
     var frameSources=(Array.isArray(record.holeFrameTerrainViews)&&record.holeFrameTerrainViews.length?record.holeFrameTerrainViews:Array.isArray(record.holeFramePreviewVisuals)&&record.holeFramePreviewVisuals.length?record.holeFramePreviewVisuals:record.holeFrameVisuals||[]).filter(function(asset){return asset&&asset.dataUrl;});
     record.holeFramePublishedVisuals=frameSources.map(function(asset){
       var holeNumber=Math.max(0,Math.round(Number(asset.holeNumber)||0));
       if(!holeNumber)return null;
-      return {path:"course-visuals/"+record.courseId+"/holes/h"+holeNumber+"/published/"+version+".svg",dataUrl:asset.dataUrl,version:version,width:asset.width,height:asset.height,bounds:asset.bounds,captureId:asset.captureId,holeNumber:holeNumber,sourceCaptureIds:asset.sourceCaptureIds,presetId:preview.presetId,presetVersion:preview.presetVersion,overrideHash:preview.overrideHash,publishedAt:record.publishedVisual.publishedAt,metadata:Object.assign({},asset.metadata||{},{role:"hole-frame-published",publishedFrom:asset.metadata&&asset.metadata.role||"hole-frame",publishedOverviewPath:record.publishedVisual.path,playSurface:Object.assign({},asset.metadata&&asset.metadata.playSurface||{},{fallbackUnderlay:"live-gps",fallbackPolicy:"live-gps-only",publishedOverviewPath:record.publishedVisual.path})})};
+      var frame3d=publishAsTiltable3d(asset);
+      return {path:"course-visuals/"+record.courseId+"/holes/h"+holeNumber+"/published/"+version+".svg",dataUrl:frame3d?frame3d.dataUrl:asset.dataUrl,version:version,width:asset.width,height:asset.height,bounds:asset.bounds,captureId:asset.captureId,holeNumber:holeNumber,sourceCaptureIds:asset.sourceCaptureIds,presetId:preview.presetId,presetVersion:preview.presetVersion,overrideHash:preview.overrideHash,publishedAt:record.publishedVisual.publishedAt,metadata:merge3dMeta(Object.assign({},asset.metadata||{},{role:"hole-frame-published",publishedFrom:asset.metadata&&asset.metadata.role||"hole-frame",publishedOverviewPath:record.publishedVisual.path,playSurface:Object.assign({},asset.metadata&&asset.metadata.playSurface||{},{fallbackUnderlay:"live-gps",fallbackPolicy:"live-gps-only",publishedOverviewPath:record.publishedVisual.path})}),frame3d)};
     }).filter(Boolean).sort(function(a,b){return Number(a.holeNumber)-Number(b.holeNumber);});
     record.publishedVersion=version;
     record.status="published";
