@@ -17,8 +17,40 @@ function supabaseKey() {
   return env("SUPABASE_SERVICE_ROLE_KEY");
 }
 
+function anonKey() {
+  return env("SUPABASE_ANON_KEY") || env("VITE_SUPABASE_ANON_KEY") || env("SUPABASE_PUBLIC_ANON_KEY") || "";
+}
+
 function hasSupabase() {
   return !!(supabaseBase() && supabaseKey());
+}
+
+/* Admin identity has to be PROVEN, not asserted. The caller's Supabase access
+   token is validated against /auth/v1/user, and the email that comes back is the
+   only email we trust - a body-supplied `actor` can no longer grant admin, so an
+   anonymous caller can no longer delete or reset a course map by claiming to be
+   one. Returns the verified admin email, or "" for everyone else. */
+async function verifiedAdminEmail(req, payload) {
+  const header = String((req && req.headers && typeof req.headers.get === "function" && req.headers.get("authorization")) || "");
+  const bearer = header.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : "";
+  const token = bearer || String(payload && (payload.accessToken || payload.access_token) || "").trim();
+  if (!token) return "";
+  const base = supabaseBase();
+  const key = anonKey() || supabaseKey();
+  if (!base || !key) return "";
+  try {
+    const response = await fetch(base + "/auth/v1/user", {
+      method: "GET",
+      headers: { apikey: key, Authorization: "Bearer " + token }
+    });
+    if (!response.ok) return "";
+    const user = await response.json();
+    const verified = String(user && user.email || "").trim().toLowerCase();
+    return user && user.id && ADMIN_EMAILS.has(verified) ? verified : "";
+  } catch (error) {
+    console.warn("course map admin verification failed", error && error.message || error);
+    return "";
+  }
 }
 
 async function supabaseFetch(path, options = {}) {
@@ -59,13 +91,21 @@ export default async function courseMaps(req) {
     return json(400, { error: "Invalid JSON" });
   }
 
-  const actor = payload && payload.actor || {};
-  const adminActor = isAdminActor(actor);
+  const claimedActor = payload && payload.actor || {};
+  /* Verified against Supabase Auth - never taken from the request body. */
+  const adminEmail = await verifiedAdminEmail(req, payload);
+  const adminActor = !!adminEmail;
+  const actor = adminActor ? Object.assign({}, claimedActor, { email: adminEmail, role: "admin" }) : claimedActor;
   const action = text(payload && payload.action, 40).toLowerCase() || "upsert";
   const generatedUpload = isGeneratedCourseUpload(payload);
 
   if (action === "delete" || action === "reset") {
-    if (!adminActor) return json(403, { error: "Admin delete only" });
+    if (!adminActor) {
+      return json(403, {
+        error: "Admin delete requires a verified admin session",
+        code: "admin_session_required"
+      });
+    }
     return deleteCourseMap(payload);
   }
 
@@ -354,11 +394,9 @@ function mergeMapSets(...sets) {
   return out;
 }
 
-function isAdminActor(actor) {
-  const email = String(actor && actor.email || "").trim().toLowerCase();
-  const role = String(actor && actor.role || "").trim().toLowerCase();
-  return role === "admin" && ADMIN_EMAILS.has(email);
-}
+/* Removed: isAdminActor() trusted actor.email/actor.role straight from the
+   request body, so anyone could claim admin and delete any course map. Admin is
+   now established by verifiedAdminEmail() against Supabase Auth. */
 
 function isGeneratedCourseUpload(payload) {
   if (!payload || payload.generated !== true) return false;

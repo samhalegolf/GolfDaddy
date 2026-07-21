@@ -79,7 +79,20 @@ test("admin is still privileged only for delete, not for the merge", () => {
   /* Admin remains gated for the explicit destructive delete action - that is a
      deliberate privileged op, unlike the accidental destruction the wholesale
      replace caused. */
-  assert.ok(/action === "delete"[\s\S]{0,80}Admin delete only/.test(SRC), "delete stays admin-only");
+  assert.ok(/action === "delete"[\s\S]{0,200}adminActor/.test(SRC), "delete stays admin-only");
+});
+
+test("admin identity is proven against Supabase Auth, never taken from the body", () => {
+  /* The old isAdminActor() read actor.email/actor.role straight off the request
+     body, so any anonymous caller could claim admin and delete any course map.
+     Admin must now come from a validated access token. */
+  assert.ok(!/function isAdminActor/.test(SRC), "the body-asserted admin check must be gone");
+  assert.ok(/verifiedAdminEmail/.test(SRC), "admin must be established by verifiedAdminEmail()");
+  assert.ok(/auth\/v1\/user/.test(SRC), "the caller's token must be validated against Supabase Auth");
+  assert.ok(
+    /const adminActor = !!adminEmail/.test(SRC),
+    "adminActor must derive from the verified email, not from payload.actor"
+  );
 });
 
 (async () => {

@@ -742,6 +742,11 @@ function payload() {
   const highSvg = svgText(terrainHigh.dataUrl);
   assert.ok(/feColorMatrix type="saturate" values="0"/.test(highSvg), "terrain tiles are desaturated to pure relief luminance, not a coloured map overlay");
   assert.ok(highSvg.indexOf(".32 .32 .32") < 0, "old colour-averaging terrain matrix is gone");
+  // Terrain paints FROM the hillshade only - no decoration stuck onto the finished image.
+  assert.ok(highSvg.indexOf("terrainHatch") < 0, "no hatch pattern is printed over the surface (that was the grid lines)");
+  assert.ok(highSvg.indexOf("terrainRelief") < 0, "no generic fixed relief gradient is stuck on the surface");
+  assert.ok(highSvg.indexOf("rgba(44,67,42") < 0, "no flat green tint wash is stuck on the surface");
+  assert.ok(highSvg.indexOf("<pattern") < 0, "terrain bakes no pattern fills at all");
   assert.ok(/data-role="terrain-reference"[^>]*mix-blend-mode:multiply/.test(highSvg) || /mix-blend-mode:multiply/.test(highSvg), "hillshade relief shades the surface via multiply (shadows carve in)");
   assert.equal(terrainHigh.metadata.terrainSource, "hillshade-relief-shading", "terrain source is reported as relief shading");
   const groupOpacity = (svg) => {
@@ -753,6 +758,27 @@ function payload() {
   assert.ok(lowOpacity !== null && highOpacity !== null, "terrain relief group is present at both strengths");
   assert.ok(highOpacity > lowOpacity, "higher terrain strength deepens the relief shading (toggllable degree)");
   assert.ok(lowOpacity > 0, "strength 0 keeps a minimal baseline of relief shading, not fully off");
+
+  // Terrain must land in the hole's OWN framing. A play-axis hole frame is rotated, so stamping
+  // the hillshade as a north-up rectangle skews a patch of raw tiles across the surface.
+  const rotatedFrame = Object.assign({}, terrainAsset, {
+    metadata: {
+      playSurface: {
+        sourceBounds: terrainAsset.bounds,
+        sourceDimensions: { width: 200, height: 200 },
+        displayTransform: { x: 12, y: 18, scale: 1, rotationDeg: 35 }
+      }
+    }
+  });
+  const rotatedTerrain = engine.__test.terrainShadeAsset(rotatedFrame, [terrainCap], terrainOpts(1.2));
+  assert.ok(rotatedTerrain, "terrain renders over a rotated play-axis frame");
+  assert.equal(rotatedTerrain.metadata.terrainProjector, "play-surface-display-transform", "terrain projects through the hole's display transform, not a north-up rectangle");
+  const rotatedSvg = svgText(rotatedTerrain.dataUrl);
+  const terrainMatrix = rotatedSvg.match(/data-role="terrain-reference"[^>]*transform="matrix\(([^)]+)\)"/);
+  assert.ok(terrainMatrix, "rotated frames place terrain with an affine matrix, not translate+scale");
+  const mv = terrainMatrix[1].trim().split(/\s+/).map(Number);
+  assert.ok(mv.length === 6 && mv.every((n) => Number.isFinite(n)), "terrain matrix is well formed");
+  assert.ok(Math.abs(mv[1]) > 1e-6 || Math.abs(mv[2]) > 1e-6, "terrain matrix carries the frame's rotation (off-diagonal terms are non-zero)");
 
   // 3D asset: birds-eye tiltable plane (the edited image saved as a 3D asset, flat by default)
   const holeSurface = {
@@ -797,6 +823,138 @@ function payload() {
     assert.equal(asset.metadata.playSurface.fallbackPolicy, "live-gps-only", "published hole keeps the live-gps fallback policy (" + label + ")");
   });
   assert.equal(published3d.singleHolePublishedVisual.metadata.surfaceModel, "birds-eye-tiltable-3d-plane", "single-hole published is also a tiltable 3D surface");
+
+  // Normalisation: drag the pixels onto the preset targets, so ANY source converges on one look.
+  const natural = engine.getPreset("clarity-course-natural-v1");
+  // Two deliberately different sources of the same scene: one dark/flat/desaturated, one bright
+  // and over-saturated with a yellow-green cast.
+  function synthSurface(build) {
+    const w = 64, h = 64, px = new Uint8ClampedArray(w * h * 4);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = (y * w + x) * 4;
+        const rgb = build(x / w, y / h);
+        px[i] = rgb[0]; px[i + 1] = rgb[1]; px[i + 2] = rgb[2]; px[i + 3] = 255;
+      }
+    }
+    return px;
+  }
+  const darkFlat = synthSurface((u, v) => {
+    const n = 30 + v * 26;                     // dark, narrow range
+    return [Math.round(n * 0.62), Math.round(n), Math.round(n * 0.66)];
+  });
+  const brightHot = synthSurface((u, v) => {
+    const n = 150 + v * 90;                    // bright, wide range, yellow-green cast
+    return [Math.round(n * 0.86), Math.round(n), Math.round(n * 0.38)];
+  });
+  const darkBefore = engine.measureSurfacePixels(darkFlat, { band: { min: 40, max: 200 } });
+  const brightBefore = engine.measureSurfacePixels(brightHot, { band: { min: 40, max: 200 } });
+  assert.ok(Math.abs(darkBefore.luma.mean - brightBefore.luma.mean) > 25, "the two sources really do start far apart in brightness");
+
+  const darkPlan = engine.normaliseSurfacePixels(darkFlat, natural);
+  const brightPlan = engine.normaliseSurfacePixels(brightHot, natural);
+
+  // Each source is measured, not nudged: the tone curve reports the real black/white points.
+  assert.ok(brightPlan.tone.whitePoint > darkPlan.tone.whitePoint + 20, "each source's own white point is measured, not assumed");
+  assert.ok(brightPlan.tone.blackPoint > darkPlan.tone.blackPoint + 15, "each source's own black point is measured, not assumed");
+  assert.notEqual(darkPlan.tone.gamma, brightPlan.tone.gamma, "each source gets its own correction, not a shared nudge");
+
+  // ...and both land on the preset's targets.
+  const target = natural.lighting.brightnessTarget;
+  assert.ok(Math.abs(darkPlan.after.luma.mean - target) < 12, "dark source is dragged onto the brightness target, got " + darkPlan.after.luma.mean.toFixed(1));
+  assert.ok(Math.abs(brightPlan.after.luma.mean - target) < 12, "bright source is dragged onto the brightness target, got " + brightPlan.after.luma.mean.toFixed(1));
+  assert.ok(Math.abs(darkPlan.after.luma.mean - brightPlan.after.luma.mean) < 10, "two very different sources converge on the same brightness");
+
+  // Turf is a RANGE guardrail: everything ends up inside the authored band, from either side.
+  const hueLo = natural.turf.hueMin, hueHi = natural.turf.hueMax;
+  [["dark", darkPlan], ["bright", brightPlan]].forEach(([label, plan]) => {
+    assert.ok(plan.turf.applied, label + " source found turf pixels to constrain");
+    const h = plan.after.turf.hue.p50;
+    assert.ok(h >= hueLo - 6 && h <= hueHi + 6, label + " turf hue lands inside the authored band " + hueLo + "-" + hueHi + ", got " + h);
+    const s = plan.after.turf.saturation.p50;
+    assert.ok(s >= natural.turf.saturationMin - 8 && s <= natural.turf.saturationMax + 8, label + " turf saturation lands inside the authored range, got " + s);
+  });
+  assert.equal(darkPlan.model, "measure-and-drag-to-target", "normalisation reports its model");
+
+  // The guardrail must NOT touch turf that is already inside the range - that is what stops it
+  // doing anything weird to a capture that was already good.
+  // A turf colour that already sits squarely inside every authored target.
+  const alreadyGood = synthSurface(() => [82, 185, 70]);   // hue ~114, sat ~45, lum 50
+  const goodBefore = engine.measureSurfacePixels(alreadyGood, { band: { min: 40, max: 200 } });
+  const goodHueBefore = goodBefore.turf.hue.p50, goodSatBefore = goodBefore.turf.saturation.p50;
+  assert.ok(goodHueBefore >= hueLo && goodHueBefore <= hueHi, "fixture starts inside the hue band (" + goodHueBefore + ")");
+  assert.ok(goodSatBefore >= natural.turf.saturationMin && goodSatBefore <= natural.turf.saturationMax, "fixture starts inside the saturation range (" + goodSatBefore + ")");
+  const goodPlan = engine.normaliseSurfacePixels(alreadyGood, natural);
+  assert.equal(goodPlan.after.turf.hue.p50, goodHueBefore, "hue already inside the range is left exactly alone");
+  assert.equal(goodPlan.after.turf.saturation.p50, goodSatBefore, "saturation already inside the range is left exactly alone");
+
+  // A different preset must pull to a DIFFERENT destination (presets are targets, not strengths).
+  const strong = engine.getPreset("clarity-course-strong-v1");
+  const strongPlan = engine.normaliseSurfacePixels(synthSurface((u, v) => {
+    const n = 30 + v * 26;
+    return [Math.round(n * 0.62), Math.round(n), Math.round(n * 0.66)];
+  }), strong);
+  assert.ok(Math.abs(strongPlan.after.luma.mean - strong.lighting.brightnessTarget) < 12, "a different preset drags the same source to its own target");
+
+  // Floodlight: ambient drops, the playing line stays lit, texture survives.
+  const FW = 64, FH = 96;
+  function litFrame() {
+    const px = new Uint8ClampedArray(FW * FH * 4);
+    for (let y = 0; y < FH; y++) {
+      for (let x = 0; x < FW; x++) {
+        const i = (y * FW + x) * 4;
+        // even turf with fine texture, already normalised to mean ~52
+        const jitter = ((x * 7 + y * 13) % 11) - 5;
+        const rgb = [82 + jitter, 185 + jitter, 70 + jitter];
+        px[i] = rgb[0]; px[i + 1] = rgb[1]; px[i + 2] = rgb[2]; px[i + 3] = 255;
+      }
+    }
+    return px;
+  }
+  const routePx = [{ x: 32, y: 92 }, { x: 32, y: 4 }];        // tee at bottom, green at top
+  const floodSettings = { lighting: { brightnessTarget: 52 }, floodlight: { enabled: true, ambientLevel: 20, litLevel: 66, throwOff: .3, spread: .5 } };
+
+  const off = engine.applyFloodlightPixels(litFrame(), FW, FH, { floodlight: { enabled: false } }, { routePx });
+  assert.equal(off.applied, false, "floodlight is opt-in");
+  const noRoute = engine.applyFloodlightPixels(litFrame(), FW, FH, floodSettings, { routePx: [] });
+  assert.equal(noRoute.reason, "no-play-axis-route", "floodlight needs a play axis to aim down");
+
+  const lit = litFrame();
+  const flood = engine.applyFloodlightPixels(lit, FW, FH, floodSettings, { routePx });
+  assert.equal(flood.applied, true, "floodlight applies off the play axis alone");
+  assert.equal(flood.maskApplied, false, "object mask stays off by default");
+  function lumaAt(px, x, y) {
+    const i = (y * FW + x) * 4;
+    const max = Math.max(px[i], px[i + 1], px[i + 2]), min = Math.min(px[i], px[i + 1], px[i + 2]);
+    return (max + min) / 2 / 255 * 100;
+  }
+  const onLine = lumaAt(lit, 32, 70);     // on the playing line, near the tee
+  const atEdge = lumaAt(lit, 1, 70);      // same distance down the hole, off to the side
+  assert.ok(onLine > atEdge + 20, "the playing line is far brighter than the surrounds (" + onLine.toFixed(1) + " vs " + atEdge.toFixed(1) + ")");
+  assert.ok(Math.abs(atEdge - floodSettings.floodlight.ambientLevel) < 12, "surrounds land near the ambient level, got " + atEdge.toFixed(1));
+  assert.ok(Math.abs(onLine - floodSettings.floodlight.litLevel) < 12, "the lit line lands near the lit level, got " + onLine.toFixed(1));
+
+  // Light sits behind the player, so the beam itself dims down the hole. Measured with the green
+  // pool off, so it's the falloff being tested and not the pool holding the far end up.
+  const beamOnly = litFrame();
+  engine.applyFloodlightPixels(beamOnly, FW, FH, { lighting: { brightnessTarget: 52 }, floodlight: { enabled: true, ambientLevel: 20, litLevel: 66, throwOff: .6, spread: .5, greenPool: 0 } }, { routePx });
+  const beamTee = lumaAt(beamOnly, 32, 80), beamGreen = lumaAt(beamOnly, 32, 10);
+  assert.ok(beamTee > beamGreen + 5, "the beam falls off down the fairway (tee " + beamTee.toFixed(1) + " > green " + beamGreen.toFixed(1) + ")");
+
+  // ...but the green keeps its own pool of light, so the thing you most need to read stays lit
+  // even with a hard falloff.
+  const withPool = litFrame();
+  const poolPlan = engine.applyFloodlightPixels(withPool, FW, FH, { lighting: { brightnessTarget: 52 }, floodlight: { enabled: true, ambientLevel: 20, litLevel: 66, throwOff: .6, spread: .5, greenPool: .9, greenPoolRadius: .3 } }, { routePx });
+  const pooledGreen = lumaAt(withPool, 32, 5);
+  assert.ok(poolPlan.greenPool === .9, "green pool is reported in the plan");
+  const beamGreenSame = lumaAt(beamOnly, 32, 5);
+  assert.ok(pooledGreen > beamGreenSame + 5, "the green pool holds the green lit despite the falloff (" + pooledGreen.toFixed(1) + " vs beam-only " + beamGreenSame.toFixed(1) + ")");
+  assert.ok(lumaAt(withPool, 2, 5) < pooledGreen - 10, "the pool is local to the green, not a global lift");
+
+  // Relighting is an offset from the known mean, so local texture is preserved, not flattened.
+  const texture = new Set();
+  for (let x = 26; x < 38; x++) texture.add(Math.round(lumaAt(lit, x, 70) * 10));
+  assert.ok(texture.size > 3, "turf texture survives the relight rather than flattening to the target");
 
   console.log("course visual engine tests passed");
 })().catch((error) => {

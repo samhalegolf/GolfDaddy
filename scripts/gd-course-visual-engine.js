@@ -1816,13 +1816,15 @@
     var terrainTileOpacity=clamp(.26+strength*.46,.26,.96);
     var terrainToneSlope=clamp(1.05+strength*.16,1.05,1.32);
     var terrainToneLift=clamp(.14-strength*.02,.08,.14);
-    var reliefTop=clamp(.11+strength*.12,.1,.33);
-    var reliefMid=clamp(.08+strength*.09,.07,.22);
-    var reliefBottom=clamp(.14+strength*.12,.12,.36);
-    var reliefOpacity=clamp(.28+strength*.34,.28,.82);
-    var tintOpacity=clamp(.06+strength*.1,.05,.24);
-    var hatchOpacity=clamp(.1+strength*.18,.08,.38);
     var overall=projectedBounds(bounds);
+    // The hillshade must land in the hole's OWN framing. A hole frame is a play-axis lens with a
+    // display transform (rotated, re-scaled), so placing terrain as a north-up rectangle stamps a
+    // skewed patch of raw tiles over the surface. Project through the same transform the surface
+    // used, so the relief is one coherent layer over the whole frame regardless of how the
+    // underlying captures were stitched or what zoom each piece was grabbed at.
+    var effectMeta=Object.assign({},inheritedSurfaceMetadata(asset),meta);
+    var terrainProjection=fairwayAirbrushProjector(bounds,dims,effectMeta);
+    var terrainProject=terrainProjection&&terrainProjection.project;
     var terrain=(Array.isArray(terrainCaptures)?terrainCaptures:[]).filter(renderableCapture).map(function(capture){
       var captureBoundsValue=captureBounds(capture);
       var projected=projectedBounds(captureBoundsValue);
@@ -1836,18 +1838,42 @@
       terrainGroups=terrain.map(function(item){
         var capture=item.capture;
         var p=item.projected;
-        var x=(p.left-overall.left)/spanX*dims.width;
-        var y=(p.top-overall.top)/spanY*dims.height;
-        var w=Math.max(1,(p.right-p.left)/spanX*dims.width);
-        var h=Math.max(1,(p.bottom-p.top)/spanY*dims.height);
-        return '<g data-capture-id="'+escapeXml(capture.id)+'" data-role="terrain-reference" opacity="'+svgNum(terrainTileOpacity)+'" style="mix-blend-mode:multiply" filter="url(#terrainTone)" transform="translate('+svgNum(x)+" "+svgNum(y)+') scale('+svgNum(w/(Number(capture.width)||1))+" "+svgNum(h/(Number(capture.height)||1))+')">'+captureContentSvg(capture)+'</g>';
+        var capW=Math.max(1,Number(capture.width)||1);
+        var capH=Math.max(1,Number(capture.height)||1);
+        var transform="";
+        if(terrainProject&&validBounds(item.bounds)){
+          // Affine fit from the capture's own pixel grid onto the hole frame, via three corners.
+          var tl=terrainProject({lat:item.bounds.north,lng:item.bounds.west});
+          var tr=terrainProject({lat:item.bounds.north,lng:item.bounds.east});
+          var bl=terrainProject({lat:item.bounds.south,lng:item.bounds.west});
+          if(tl&&tr&&bl){
+            var ax=(tr.x-tl.x)/capW,ay=(tr.y-tl.y)/capW;
+            var bx=(bl.x-tl.x)/capH,by=(bl.y-tl.y)/capH;
+            if(Math.abs(ax*by-ay*bx)>1e-12){
+              transform="matrix("+svgNum(ax)+" "+svgNum(ay)+" "+svgNum(bx)+" "+svgNum(by)+" "+svgNum(tl.x)+" "+svgNum(tl.y)+")";
+            }
+          }
+        }
+        if(!transform){
+          var x=(p.left-overall.left)/spanX*dims.width;
+          var y=(p.top-overall.top)/spanY*dims.height;
+          var w=Math.max(1,(p.right-p.left)/spanX*dims.width);
+          var h=Math.max(1,(p.bottom-p.top)/spanY*dims.height);
+          transform="translate("+svgNum(x)+" "+svgNum(y)+") scale("+svgNum(w/capW)+" "+svgNum(h/capH)+")";
+        }
+        return '<g data-capture-id="'+escapeXml(capture.id)+'" data-role="terrain-reference" opacity="'+svgNum(terrainTileOpacity)+'" style="mix-blend-mode:multiply" filter="url(#terrainTone)" transform="'+transform+'">'+captureContentSvg(capture)+'</g>';
       }).join("");
     }
     var role=text(meta.role,80)||"terrain-view";
     var stage=text(meta.stage,80)||"terrain-shading";
-    var terrainSource=terrain.length?"hillshade-relief-shading":"deterministic-shading";
-    var svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+dims.width+'" height="'+dims.height+'" viewBox="0 0 '+dims.width+" "+dims.height+'" data-renderer="'+escapeXml(RENDERER_VERSION)+'" data-role="'+escapeXml(role)+'" data-stage="'+escapeXml(stage)+'" data-terrain-strength="'+svgNum(strength)+'"><defs><filter id="terrainTone"><feColorMatrix type="saturate" values="0"/><feComponentTransfer><feFuncR type="linear" slope="'+svgNum(terrainToneSlope)+'" intercept="'+svgNum(terrainToneLift)+'"/><feFuncG type="linear" slope="'+svgNum(terrainToneSlope)+'" intercept="'+svgNum(terrainToneLift)+'"/><feFuncB type="linear" slope="'+svgNum(terrainToneSlope)+'" intercept="'+svgNum(terrainToneLift)+'"/></feComponentTransfer></filter><linearGradient id="terrainRelief" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="rgba(255,255,255,'+svgNum(reliefTop)+')"/><stop offset=".42" stop-color="rgba(255,255,255,0)"/><stop offset=".68" stop-color="rgba(20,42,26,'+svgNum(reliefMid)+')"/><stop offset="1" stop-color="rgba(0,0,0,'+svgNum(reliefBottom)+')"/></linearGradient><pattern id="terrainHatch" width="18" height="18" patternUnits="userSpaceOnUse" patternTransform="rotate(-28)"><path d="M0 0 L0 18" stroke="rgba(255,255,255,.10)" stroke-width="1"/></pattern></defs><rect width="100%" height="100%" fill="#10130f"/><g>'+source+'</g><rect width="100%" height="100%" fill="url(#terrainRelief)" opacity="'+svgNum(reliefOpacity)+'"/>'+terrainGroups+'<rect width="100%" height="100%" fill="rgba(44,67,42,'+svgNum(tintOpacity)+')"/><rect width="100%" height="100%" fill="url(#terrainHatch)" opacity="'+svgNum(hatchOpacity)+'"/></svg>';
-    return {dataUrl:dataUrl("image/svg+xml",svg),width:dims.width,height:dims.height,bounds:bounds,sourceCaptureIds:sourceCaptureIds,metadata:Object.assign({},inheritedSurfaceMetadata(asset),{rendererVersion:RENDERER_VERSION,format:"image/svg+xml",role:role,stage:stage,terrainSource:terrainSource,terrainStrength:+strength.toFixed(3),inputRole:asset&&asset.metadata&&asset.metadata.role||"",inputStage:asset&&asset.metadata&&asset.metadata.stage||"",outputDimensions:dims},meta)};
+    var terrainSource=terrain.length?"hillshade-relief-shading":"none-no-terrain-reference";
+    // Terrain is something to paint FROM, not decoration to stick on the finished product:
+    // the only thing composited here is the hillshade itself, desaturated to pure relief
+    // luminance and multiplied so real shadows carve into the surface. No generic gradient,
+    // no flat tint, no hatch pattern - those printed lines/vignettes over every hole and had
+    // nothing to do with the actual landform.
+    var svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+dims.width+'" height="'+dims.height+'" viewBox="0 0 '+dims.width+" "+dims.height+'" data-renderer="'+escapeXml(RENDERER_VERSION)+'" data-role="'+escapeXml(role)+'" data-stage="'+escapeXml(stage)+'" data-terrain-strength="'+svgNum(strength)+'"><defs><filter id="terrainTone"><feColorMatrix type="saturate" values="0"/><feComponentTransfer><feFuncR type="linear" slope="'+svgNum(terrainToneSlope)+'" intercept="'+svgNum(terrainToneLift)+'"/><feFuncG type="linear" slope="'+svgNum(terrainToneSlope)+'" intercept="'+svgNum(terrainToneLift)+'"/><feFuncB type="linear" slope="'+svgNum(terrainToneSlope)+'" intercept="'+svgNum(terrainToneLift)+'"/></feComponentTransfer></filter></defs><rect width="100%" height="100%" fill="#10130f"/><g>'+source+'</g>'+terrainGroups+'</svg>';
+    return {dataUrl:dataUrl("image/svg+xml",svg),width:dims.width,height:dims.height,bounds:bounds,sourceCaptureIds:sourceCaptureIds,metadata:Object.assign({},inheritedSurfaceMetadata(asset),{rendererVersion:RENDERER_VERSION,format:"image/svg+xml",role:role,stage:stage,terrainSource:terrainSource,terrainStrength:+strength.toFixed(3),terrainProjector:terrainProjection&&terrainProjection.mode||"none",inputRole:asset&&asset.metadata&&asset.metadata.role||"",inputStage:asset&&asset.metadata&&asset.metadata.stage||"",outputDimensions:dims},meta)};
   }
   function terrainViewSvg(record,terrainCaptures,meta){
     record=record||{};
@@ -2137,6 +2163,297 @@
     tone=clamp(finite(tone)==null?0:tone,-1,1);
     var hue=138-tone*34;
     return hslToHex(hue,.49,.46);
+  }
+  /* ---------------------------------------------------------------------------
+     Normalisation - drag the actual pixels onto the preset targets.
+
+     The presets were authored as targets and ranges (hueMin/hueMax, saturationMin/Max,
+     brightnessMin/Max, brightnessTarget, shadowFloor, highlightCeiling), i.e. "put the turf
+     here", not "push the turf a bit that way". An SVG filter cannot measure an image, so those
+     fields were never wired and the look degenerated into relative nudges whose result depended
+     entirely on whatever the source capture happened to look like.
+
+     These functions measure the real distribution and remap it onto the targets, so a dark
+     capture, a washed-out one, a different provider, season or sun angle all converge on the
+     same look. They are pure - RGBA in, RGBA out - so they run on a canvas in the browser and
+     under Node in tests.
+     --------------------------------------------------------------------------- */
+  function rgbToHsl(r,g,b){
+    r/=255;g/=255;b/=255;
+    var max=Math.max(r,g,b),min=Math.min(r,g,b),d=max-min;
+    var h=0,s=0,l=(max+min)/2;
+    if(d>1e-9){
+      s=l>.5?d/(2-max-min):d/(max+min);
+      if(max===r)h=(g-b)/d+(g<b?6:0);
+      else if(max===g)h=(b-r)/d+2;
+      else h=(r-g)/d+4;
+      h*=60;
+    }
+    return {h:h,s:s*100,l:l*100};
+  }
+  function hueChannel(p,q,t){
+    if(t<0)t+=1;
+    if(t>1)t-=1;
+    if(t<1/6)return p+(q-p)*6*t;
+    if(t<1/2)return q;
+    if(t<2/3)return p+(q-p)*(2/3-t)*6;
+    return p;
+  }
+  function hslToRgb(h,s,l){
+    h=(((Number(h)||0)%360)+360)%360/360;s=clamp(s,0,100)/100;l=clamp(l,0,100)/100;
+    if(s<=1e-9){var v=Math.round(l*255);return [v,v,v];}
+    var q=l<.5?l*(1+s):l+s-l*s,p=2*l-q;
+    return [Math.round(hueChannel(p,q,h+1/3)*255),Math.round(hueChannel(p,q,h)*255),Math.round(hueChannel(p,q,h-1/3)*255)];
+  }
+  function histogramPercentile(hist,total,fraction){
+    if(!total)return 0;
+    var target=total*clamp(fraction,0,1),run=0;
+    for(var i=0;i<hist.length;i++){run+=hist[i];if(run>=target)return i;}
+    return hist.length-1;
+  }
+  function turfBand(settings){
+    var turf=settings&&settings.turf||{};
+    var lo=finite(turf.hueMin),hi=finite(turf.hueMax);
+    if(lo==null)lo=86;
+    if(hi==null)hi=142;
+    // Measure across a band wider than the target so off-target turf is still caught and pulled in.
+    var pad=Math.max(24,(hi-lo)*.8);
+    return {min:Math.max(0,lo-pad),max:Math.min(360,hi+pad),targetMin:lo,targetMax:hi};
+  }
+  function measureSurfacePixels(pixels,opts){
+    opts=opts||{};
+    var band=opts.band||{min:40,max:200};
+    var satFloor=finite(opts.saturationFloor);
+    if(satFloor==null)satFloor=8;
+    var step=Math.max(1,Math.round(finite(opts.sampleStep)||1))*4;
+    var lum=new Array(101),turfHue=new Array(361),turfSat=new Array(101),turfLum=new Array(101);
+    var i;
+    for(i=0;i<101;i++){lum[i]=0;turfSat[i]=0;turfLum[i]=0;}
+    for(i=0;i<361;i++)turfHue[i]=0;
+    var total=0,turfTotal=0,lumSum=0,turfHueSum=0;
+    for(i=0;i+3<pixels.length;i+=step){
+      if(pixels[i+3]<8)continue;
+      var hsl=rgbToHsl(pixels[i],pixels[i+1],pixels[i+2]);
+      var li=Math.round(clamp(hsl.l,0,100));
+      lum[li]++;total++;lumSum+=hsl.l;
+      if(hsl.h>=band.min&&hsl.h<=band.max&&hsl.s>=satFloor){
+        turfHue[Math.round(clamp(hsl.h,0,360))]++;
+        turfSat[Math.round(clamp(hsl.s,0,100))]++;
+        turfLum[li]++;
+        turfTotal++;turfHueSum+=hsl.h;
+      }
+    }
+    function span(hist,count){
+      return {p5:histogramPercentile(hist,count,.05),p50:histogramPercentile(hist,count,.5),p95:histogramPercentile(hist,count,.95)};
+    }
+    return {
+      sampled:total,
+      luma:Object.assign({mean:total?lumSum/total:0,p1:histogramPercentile(lum,total,.01),p99:histogramPercentile(lum,total,.99)},span(lum,total)),
+      turf:{
+        coverage:total?turfTotal/total:0,
+        sampled:turfTotal,
+        hue:Object.assign({mean:turfTotal?turfHueSum/turfTotal:0},span(turfHue,turfTotal)),
+        saturation:span(turfSat,turfTotal),
+        luma:span(turfLum,turfTotal)
+      }
+    };
+  }
+  /* Range guardrail, not a stretch. Anything already inside [lo,hi] is left EXACTLY as it is -
+     good turf never gets recoloured - and only out-of-range values are pulled toward the edge.
+     pull=1 sits them on the boundary, pull<1 keeps some of the excursion so gradation survives
+     instead of banding flat against the edge. Tune the range, tune how hard it is enforced. */
+  function constrainToRange(value,lo,hi,pull){
+    if(lo>hi){var swap=lo;lo=hi;hi=swap;}
+    if(value>=lo&&value<=hi)return value;
+    var edge=value<lo?lo:hi;
+    return edge+(value-edge)*(1-clamp(pull,0,1));
+  }
+  /* Tone curve in LUMINANCE space (0-100), not per channel. The black/white points are measured
+     as luminance, so applying them per channel clips saturated pixels - a [206,240,91] turf pixel
+     collapses to [92,92,14] - which wrecks colour and shifts brightness. Mapping L only, and
+     carrying H/S through untouched, keeps the correction honest. */
+  function toneCurveLut(stats,settings){
+    var lighting=settings&&settings.lighting||{};
+    var shadowFloor=clamp(finite(lighting.shadowFloor)==null?14:lighting.shadowFloor,0,60);
+    var highlightCeiling=clamp(finite(lighting.highlightCeiling)==null?92:lighting.highlightCeiling,shadowFloor+5,100);
+    var brightnessTarget=clamp(finite(lighting.brightnessTarget)==null?52:lighting.brightnessTarget,shadowFloor,highlightCeiling);
+    var contrast=clamp(finite(lighting.contrastTarget)==null?1.04:lighting.contrastTarget,.55,2.2);
+    var black=clamp(stats&&stats.luma&&stats.luma.p1||0,0,100);
+    var white=clamp(stats&&stats.luma&&stats.luma.p99||100,black+1,100);
+    var mean=clamp(stats&&stats.luma&&stats.luma.mean||50,black,white);
+    // Where the measured mean should sit inside the target band, and where it sits now.
+    var wanted=clamp((brightnessTarget-shadowFloor)/Math.max(1e-6,highlightCeiling-shadowFloor),.02,.98);
+    var actual=clamp((mean-black)/Math.max(1e-6,white-black),.02,.98);
+    var gamma=Math.log(wanted)/Math.log(actual);
+    if(!Number.isFinite(gamma)||gamma<=0)gamma=1;
+    gamma=clamp(gamma,.35,3);
+    var lut=new Array(101),i;
+    // A flat or near-flat source has no range to stretch - stretching it would crush everything
+    // onto the shadow floor. Shift it onto the target instead and leave the (absent) contrast be.
+    if(white-black<2){
+      var shift=brightnessTarget-mean;
+      for(i=0;i<=100;i++)lut[i]=clamp(i+shift,0,100);
+      return {lut:lut,blackPoint:+black.toFixed(2),whitePoint:+white.toFixed(2),measuredMean:+mean.toFixed(2),gamma:1,degenerateRange:true,shadowFloor:shadowFloor,highlightCeiling:highlightCeiling,brightnessTarget:brightnessTarget,contrast:contrast};
+    }
+    for(i=0;i<=100;i++){
+      var x=clamp((i-black)/Math.max(1e-6,white-black),0,1);
+      var y=Math.pow(x,gamma);
+      y=.5+(y-.5)*contrast;
+      lut[i]=clamp(shadowFloor+clamp(y,0,1)*(highlightCeiling-shadowFloor),0,100);
+    }
+    return {lut:lut,blackPoint:+black.toFixed(2),whitePoint:+white.toFixed(2),measuredMean:+mean.toFixed(2),gamma:+gamma.toFixed(3),shadowFloor:shadowFloor,highlightCeiling:highlightCeiling,brightnessTarget:brightnessTarget,contrast:contrast};
+  }
+  /* Measure once, then a single pass: tone-map L, and where the pixel is turf drag H/S/L onto the
+     preset's authored targets. Mutates pixels in place and returns the plan for diagnostics.
+     The turf luminance target spans are pushed through the same tone curve first, because tone
+     moves L - hue and saturation are untouched by it, so they need no adjustment. */
+  function normaliseSurfacePixels(pixels,settings,opts){
+    opts=opts||{};
+    var band=turfBand(settings);
+    var sampleStep=Math.max(1,Math.round(finite(opts.sampleStep)||2));
+    var before=measureSurfacePixels(pixels,{band:band,sampleStep:sampleStep});
+    var tone=toneCurveLut(before,settings);
+    var toneLut=tone.lut;
+    function toneMap(l){return toneLut[Math.round(clamp(l,0,100))];}
+    var turfCfg=settings&&settings.turf||{};
+    var hueMin=finite(turfCfg.hueMin)==null?86:turfCfg.hueMin;
+    var hueMax=finite(turfCfg.hueMax)==null?142:turfCfg.hueMax;
+    var satMin=finite(turfCfg.saturationMin)==null?28:turfCfg.saturationMin;
+    var satMax=finite(turfCfg.saturationMax)==null?66:turfCfg.saturationMax;
+    var lumMin=finite(turfCfg.brightnessMin)==null?30:turfCfg.brightnessMin;
+    var lumMax=finite(turfCfg.brightnessMax)==null?72:turfCfg.brightnessMax;
+    var pull=finite(opts.pull);
+    if(pull==null)pull=finite(turfCfg.targetPull);
+    if(pull==null)pull=1;
+    pull=clamp(pull,0,1);
+    var m=before.turf,satFloor=8;
+    var hasTurf=!!(m&&m.sampled);
+    for(var i=0;i+3<pixels.length;i+=4){
+      if(pixels[i+3]<8)continue;
+      var hsl=rgbToHsl(pixels[i],pixels[i+1],pixels[i+2]);
+      var h=hsl.h,s=hsl.s,l=toneMap(hsl.l);
+      if(hasTurf&&hsl.h>=band.min&&hsl.h<=band.max&&hsl.s>=satFloor){
+        h=constrainToRange(h,hueMin,hueMax,pull);
+        s=constrainToRange(s,satMin,satMax,pull);
+        l=constrainToRange(l,lumMin,lumMax,pull);
+      }
+      var rgb=hslToRgb(h,clamp(s,0,100),clamp(l,0,100));
+      pixels[i]=rgb[0];pixels[i+1]=rgb[1];pixels[i+2]=rgb[2];
+    }
+    var after=measureSurfacePixels(pixels,{band:band,sampleStep:sampleStep});
+    return {
+      band:band,
+      before:before,
+      after:after,
+      tone:{blackPoint:tone.blackPoint,whitePoint:tone.whitePoint,measuredMean:tone.measuredMean,gamma:tone.gamma,shadowFloor:tone.shadowFloor,highlightCeiling:tone.highlightCeiling,brightnessTarget:tone.brightnessTarget,contrast:tone.contrast},
+      turf:hasTurf?{applied:true,hue:[hueMin,hueMax],saturation:[satMin,satMax],luma:[lumMin,lumMax],pull:+pull.toFixed(3),coverage:+m.coverage.toFixed(3)}:{applied:false,reason:"no-turf-pixels"},
+      model:"measure-and-drag-to-target"
+    };
+  }
+  /* ---------------------------------------------------------------------------
+     Floodlight - drop the ambient level, then bring light back down the playing line, as if a
+     big light sat behind the player shining at the green.
+
+     This can only be specified in absolute levels because the normaliser has already put the
+     image in a known state: the mean sits at brightnessTarget. So "ambient 22, lit 62" means the
+     same thing on every hole, every course and every capture day, and re-levelling a region is a
+     simple offset from that known mean - which keeps all the turf texture instead of flattening
+     it onto a target.
+
+     Aimed off the play-axis route, which always exists. The object-polygon mask is an opt-in
+     refinement (useObjectMask) for courses that have fairway/green geometry mapped; off by
+     default so this works everywhere.
+     --------------------------------------------------------------------------- */
+  function floodlightSettings(settings){
+    var f=settings&&settings.floodlight||{};
+    var ambient=finite(f.ambientLevel);
+    var lit=finite(f.litLevel);
+    var throwOff=finite(f.throwOff);
+    var spread=finite(f.spread);
+    var greenPool=finite(f.greenPool);
+    var greenPoolRadius=finite(f.greenPoolRadius);
+    return {
+      enabled:f.enabled===true,
+      ambientLevel:clamp(ambient==null?24:ambient,0,100),
+      litLevel:clamp(lit==null?64:lit,0,100),
+      throwOff:clamp(throwOff==null?.35:throwOff,0,1),
+      spread:clamp(spread==null?.45:spread,.05,1),
+      // The beam dims with distance like a real light behind the player, which would leave the
+      // green - the thing you most need to read - in the dark. This is its own pool of light so
+      // the target stays lit. Set to 0 for pure falloff.
+      greenPool:clamp(greenPool==null?.8:greenPool,0,1),
+      greenPoolRadius:clamp(greenPoolRadius==null?.22:greenPoolRadius,.05,1),
+      useObjectMask:f.useObjectMask===true
+    };
+  }
+  function smoothStep(edge0,edge1,x){
+    var t=clamp((x-edge0)/Math.max(1e-9,edge1-edge0),0,1);
+    return t*t*(3-2*t);
+  }
+  function routeMetrics(route){
+    var segs=[],total=0,i;
+    for(i=1;i<route.length;i++){
+      var ax=route[i-1].x,ay=route[i-1].y,bx=route[i].x,by=route[i].y;
+      var dx=bx-ax,dy=by-ay,len=Math.sqrt(dx*dx+dy*dy);
+      segs.push({ax:ax,ay:ay,dx:dx,dy:dy,lenSq:dx*dx+dy*dy,start:total,len:len});
+      total+=len;
+    }
+    return {segments:segs,total:total};
+  }
+  // Nearest perpendicular distance to the play axis, plus how far along it that point sits (0 at
+  // the tee, 1 at the green).
+  function routeDistance(px,py,metrics){
+    var best={dist:Infinity,along:0},i;
+    for(i=0;i<metrics.segments.length;i++){
+      var s=metrics.segments[i];
+      var t=s.lenSq<=1e-9?0:clamp(((px-s.ax)*s.dx+(py-s.ay)*s.dy)/s.lenSq,0,1);
+      var cx=s.ax+t*s.dx,cy=s.ay+t*s.dy;
+      var dx=px-cx,dy=py-cy,d=Math.sqrt(dx*dx+dy*dy);
+      if(d<best.dist)best={dist:d,along:metrics.total>1e-9?(s.start+t*s.len)/metrics.total:0};
+    }
+    return best;
+  }
+  function applyFloodlightPixels(pixels,width,height,settings,opts){
+    opts=opts||{};
+    var cfg=floodlightSettings(settings);
+    if(!cfg.enabled)return {applied:false,reason:"disabled"};
+    var route=(Array.isArray(opts.routePx)?opts.routePx:[]).filter(function(p){return finite(p&&p.x)!=null&&finite(p&&p.y)!=null;});
+    if(route.length<2)return {applied:false,reason:"no-play-axis-route"};
+    width=Math.max(1,Math.round(width));height=Math.max(1,Math.round(height));
+    var metrics=routeMetrics(route);
+    if(metrics.total<=1e-9)return {applied:false,reason:"degenerate-play-axis"};
+    // The light's reference level: what the normaliser guaranteed the image mean would be.
+    var reference=finite(opts.referenceLevel);
+    if(reference==null)reference=finite(settings&&settings.lighting&&settings.lighting.brightnessTarget);
+    if(reference==null)reference=52;
+    var halfWidth=Math.max(6,cfg.spread*Math.min(width,height)*.5);
+    // The green sits at the far end of the play axis unless one is given explicitly.
+    var greenPx=opts.greenPx&&finite(opts.greenPx.x)!=null&&finite(opts.greenPx.y)!=null?opts.greenPx:route[route.length-1];
+    var greenRadius=Math.max(8,cfg.greenPoolRadius*Math.min(width,height)*.5);
+    var x,y;
+    for(y=0;y<height;y++){
+      for(x=0;x<width;x++){
+        var i=(y*width+x)*4;
+        if(pixels[i+3]<8)continue;
+        var near=routeDistance(x+.5,y+.5,metrics);
+        var lateral=1-smoothStep(0,halfWidth,near.dist);
+        // Light sits behind the tee, so it dims with distance down the hole.
+        var axis=clamp(1-cfg.throwOff*near.along,0,1);
+        var w=lateral*axis;
+        if(cfg.greenPool>0){
+          var gdx=(x+.5)-greenPx.x,gdy=(y+.5)-greenPx.y;
+          var pool=(1-smoothStep(0,greenRadius,Math.sqrt(gdx*gdx+gdy*gdy)))*cfg.greenPool;
+          if(pool>w)w=pool;
+        }
+        var targetLevel=cfg.ambientLevel+(cfg.litLevel-cfg.ambientLevel)*w;
+        var offset=targetLevel-reference;
+        if(Math.abs(offset)<1e-6)continue;
+        var hsl=rgbToHsl(pixels[i],pixels[i+1],pixels[i+2]);
+        var rgb=hslToRgb(hsl.h,hsl.s,clamp(hsl.l+offset,0,100));
+        pixels[i]=rgb[0];pixels[i+1]=rgb[1];pixels[i+2]=rgb[2];
+      }
+    }
+    return {applied:true,ambientLevel:cfg.ambientLevel,litLevel:cfg.litLevel,throwOff:cfg.throwOff,spread:cfg.spread,greenPool:cfg.greenPool,greenPoolRadiusPx:Math.round(greenRadius),referenceLevel:reference,halfWidthPx:Math.round(halfWidth),useObjectMask:cfg.useObjectMask,maskApplied:false,model:"play-axis-floodlight"};
   }
   function filterForSettings(settings){
     var turf=settings&&settings.turf||{};
@@ -2895,6 +3212,9 @@
     defaultPreset:defaultPreset,
     greenToneHex:greenToneHex,
     beta3dTiltPolicy:beta3dTiltPolicy,
+    measureSurfacePixels:measureSurfacePixels,
+    normaliseSurfacePixels:normaliseSurfacePixels,
+    applyFloodlightPixels:applyFloodlightPixels,
     presetForMode:presetForMode,
     courseVisualPresetList:courseVisualPresetList,
     loadPresets:loadPresets,
