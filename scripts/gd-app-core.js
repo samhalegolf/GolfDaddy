@@ -359,7 +359,80 @@ function gdAdminCourseDbManifestPresent(key){
   if(!key)return false;
   try{return !!localStorage.getItem(String(key));}catch(e){return false;}
 }
+/* The admin Course Database screen is a LIVE view of Supabase (/api/course-maps),
+   not the local Course Play Pipeline. It fetches once on first render and on
+   explicit Refresh, caches the result, and only falls back to the local pipeline
+   when Supabase is unreachable - and even then the status banner says so, so the
+   source is never ambiguous. */
+let gdAdminCourseDbCloud=null;            // transformed {courses:{}} store from Supabase
+let gdAdminCourseDbCloudAt=0;             // Date.now() of the last successful load
+let gdAdminCourseDbCloudUpdatedAt="";     // the DB's own updatedAt
+let gdAdminCourseDbCloudState="idle";     // idle | loading | ready | error
+let gdAdminCourseDbCloudError="";
+let gdAdminCourseDbCloudInflight=null;
+function gdMapCloudMapsToAdminStore(maps){
+  const store={courses:{},updatedAt:maps&&maps.updatedAt||"",storage:maps&&maps.storage||"supabase"};
+  const courses=maps&&maps.courses||{};
+  Object.keys(courses).forEach(key=>{
+    const c=courses[key]||{};
+    const courseId=c.courseId||c.id||key;
+    store.courses[courseId]=Object.assign({},c,{
+      courseId:courseId,
+      courseKey:courseId,
+      courseName:c.courseName||c.name||courseId,
+      status:c.status||"published",
+      syncStatus:"cloud",
+      source:"supabase",
+      holes:c.holes||{},
+      updatedAt:c.updatedAt||c.publishedAt||store.updatedAt||""
+    });
+  });
+  return store;
+}
+function gdLoadAdminCourseDbCloud(opts){
+  opts=opts||{};
+  if(gdAdminCourseDbCloudInflight&&!opts.force)return gdAdminCourseDbCloudInflight;
+  if(typeof fetch!=="function"){gdAdminCourseDbCloudState="error";gdAdminCourseDbCloudError="fetch unavailable";return Promise.resolve(null);}
+  gdAdminCourseDbCloudState="loading";
+  gdAdminCourseDbCloudInflight=fetch("/api/course-maps",{headers:{Accept:"application/json"},cache:"no-store"})
+    .then(res=>{if(!res.ok)throw new Error("HTTP "+res.status);return res.json();})
+    .then(maps=>{
+      if(maps&&maps.unavailable){
+        gdAdminCourseDbCloudState="error";
+        gdAdminCourseDbCloudError=(maps.warnings&&maps.warnings[0]&&maps.warnings[0].message)||"Supabase unavailable";
+        return null;
+      }
+      gdAdminCourseDbCloud=gdMapCloudMapsToAdminStore(maps);
+      gdAdminCourseDbCloudAt=Date.now();
+      gdAdminCourseDbCloudUpdatedAt=(maps&&maps.updatedAt)||"";
+      gdAdminCourseDbCloudState="ready";
+      gdAdminCourseDbCloudError="";
+      return gdAdminCourseDbCloud;
+    })
+    .catch(err=>{
+      gdAdminCourseDbCloudState="error";
+      gdAdminCourseDbCloudError=err&&err.message||String(err);
+      return null;
+    })
+    .finally(()=>{gdAdminCourseDbCloudInflight=null;gdRenderAdminCourseDatabase();});
+  return gdAdminCourseDbCloudInflight;
+}
+function gdRefreshAdminCourseDbCloud(){gdLoadAdminCourseDbCloud({force:true});return false;}
+function gdAdminCourseDbCloudStatusMarkup(){
+  const state=gdAdminCourseDbCloudState;
+  const count=gdAdminCourseDbCloud?Object.keys(gdAdminCourseDbCloud.courses||{}).length:0;
+  const dbTime=gdAdminCourseDbCloudUpdatedAt?gdCoursePlayDebugTime(gdAdminCourseDbCloudUpdatedAt):"";
+  let tone="warn",label="Connecting to Supabase…";
+  if(state==="loading")label="Loading from Supabase…";
+  else if(state==="ready"){tone="ready";label=`🟢 Live from Supabase · ${count} course${count===1?"":"s"}${dbTime?" · DB updated "+dbTime:""}`;}
+  else if(state==="error")label=`⚠ Supabase unreachable — showing local cache (${gdEscapeHTML(gdAdminCourseDbCloudError||"unknown")})`;
+  const busy=state==="loading"||!!gdAdminCourseDbCloudInflight;
+  return `<div class="gdAdminDatabaseLive"><span class="gdAdminCourseStatusDot ${tone}">${label}</span><button type="button" onclick="return gdRefreshAdminCourseDbCloud()"${busy?" disabled":""}>${busy?"Refreshing…":"Refresh from database"}</button></div>`;
+}
 function gdAdminCourseDbStore(){
+  if(gdAdminCourseDbCloud&&gdAdminCourseDbCloudState==="ready")return gdAdminCourseDbCloud;
+  /* Only reached while the first load is in flight or after a Supabase failure -
+     the banner labels this as local cache so it is never mistaken for the DB. */
   const api=window.GDCoursePlayPipeline;
   if(api&&typeof api.loadCoursePlayPipeline==="function")return api.loadCoursePlayPipeline();
   try{return JSON.parse(localStorage.getItem("gd_course_play_pipeline_v1")||"null")||{courses:{}};}catch(e){return {courses:{}};}
@@ -377,6 +450,10 @@ function gdAdminCourseDbFrameRows(courseId){
   }catch(e){return [];}
 }
 function gdAdminCourseDbPayload(courseId){
+  if(gdAdminCourseDbCloud&&gdAdminCourseDbCloudState==="ready"){
+    const cloudCourse=gdAdminCourseDbCloud.courses[String(courseId||"")];
+    if(cloudCourse)return cloudCourse;
+  }
   try{
     if(typeof window.__gdExportCoursePlayPayload==="function")return window.__gdExportCoursePlayPayload(courseId);
     if(window.GDCoursePlayPipeline&&typeof window.GDCoursePlayPipeline.buildCoursePlayDbPayload==="function")return window.GDCoursePlayPipeline.buildCoursePlayDbPayload(courseId);
@@ -1940,6 +2017,8 @@ function gdRenderAdminCourseDatabase(){
   const list=document.getElementById("gdAdminCourseDbList");
   const detail=document.getElementById("gdAdminCourseDbDetail");
   if(!summary||!list||!detail)return;
+  if(gdAdminCourseDbCloudState==="idle")gdLoadAdminCourseDbCloud();
+  summary.innerHTML=gdAdminCourseDbCloudStatusMarkup();
   const all=gdAdminCourseDbSummaries();
   const search=String(document.getElementById("gdAdminCourseDbSearch")?.value||"").trim().toLowerCase();
   const syncFilter=String(document.getElementById("gdAdminCourseDbSyncFilter")?.value||"");
@@ -1954,9 +2033,8 @@ function gdRenderAdminCourseDatabase(){
     gdAdminCourseDatabaseSelected="";
     gdAdminCourseDatabaseTab="overview";
   }
-  summary.innerHTML="";
   if(!all.length){
-    list.innerHTML='<div class="gdCoursePlayDebugEmpty">No course database records yet. Map a course to create a local course-play record.</div>';
+    list.innerHTML=gdAdminCourseDbCloudState==="loading"?'<div class="gdCoursePlayDebugEmpty">Loading courses from Supabase…</div>':gdAdminCourseDbCloudState==="ready"?'<div class="gdCoursePlayDebugEmpty">No courses published to the database yet.</div>':'<div class="gdCoursePlayDebugEmpty">No course records available. Supabase is unreachable and no local cache exists.</div>';
     detail.innerHTML="";
     return;
   }
