@@ -1837,6 +1837,54 @@
     var opacity=clamp(.58+local*1.3,.58,1);
     return {top:+top.toFixed(3),bottom:+bottom.toFixed(3),opacity:+opacity.toFixed(3)};
   }
+  /* The torch. applyFloodlightPixels was the per-pixel implementation, but no build path ever
+     called it - the floodlight sliders wrote settings that nothing consumed. This is the same
+     light model expressed as SVG layers so it rides the normal bake (and the server export
+     renders it identically): ambient darkness over the frame, a beam from the tee along the
+     play axis that dims with throw-off, and a protected pool of light on the green. */
+  function floodlightMarkup(dims,bounds,settings,effectMeta){
+    var cfg=floodlightSettings(settings);
+    if(!cfg.enabled)return {defs:"",layer:""};
+    var pins=effectMeta&&effectMeta.playSurface&&effectMeta.playSurface.anchorPins||effectMeta&&effectMeta.anchorPins||{};
+    var projection=fairwayAirbrushProjector(bounds,dims,effectMeta);
+    var project=projection&&projection.project;
+    var tee=project&&pins.tee?project(pins.tee):null;
+    var green=project&&pins.green?project(pins.green):null;
+    var dark=clamp((100-cfg.ambientLevel)/100*.82,0,.92);
+    var lit=clamp(cfg.litLevel/100,0,1);
+    /* Masked darkness, not additive glow: one dark rect covers the frame, and the beam/pool
+       paint BLACK into its luminance mask so lit areas show the untouched surface at full
+       contrast instead of a milky screen-blend wash. */
+    var defs="";
+    var maskContent='<rect width="100%" height="100%" fill="white"/>';
+    if(tee&&green){
+      var throwKeep=Math.max(.05,1-cfg.throwOff);
+      /* The beam is a soft-edged CONE from the tee: narrow at the player, widening with
+         spread toward the green, dimming along the axis with throw-off. A plain axial
+         gradient had no lateral bounds and lit the whole frame. */
+      var dxA=green.x-tee.x,dyA=green.y-tee.y;
+      var axisLen=Math.max(1e-6,Math.sqrt(dxA*dxA+dyA*dyA));
+      var uxA=dxA/axisLen,uyA=dyA/axisLen,pxA=-uyA,pyA=uxA;
+      var wTee=Math.max(24,dims.width*.07);
+      var wGreen=Math.max(wTee,dims.width*(.14+clamp(cfg.spread,.05,1)*.5));
+      var over=axisLen*.12;
+      var conePoints=[
+        {x:tee.x-pxA*wTee-uxA*over*.3,y:tee.y-pyA*wTee-uyA*over*.3},
+        {x:tee.x+pxA*wTee-uxA*over*.3,y:tee.y+pyA*wTee-uyA*over*.3},
+        {x:green.x+pxA*wGreen+uxA*over,y:green.y+pyA*wGreen+uyA*over},
+        {x:green.x-pxA*wGreen+uxA*over,y:green.y-pyA*wGreen+uyA*over}
+      ].map(function(p){return svgNum(p.x)+","+svgNum(p.y);}).join(" ");
+      defs+='<linearGradient id="cvFloodBeam" gradientUnits="userSpaceOnUse" x1="'+svgNum(tee.x)+'" y1="'+svgNum(tee.y)+'" x2="'+svgNum(green.x)+'" y2="'+svgNum(green.y)+'"><stop offset="0" stop-color="black" stop-opacity="'+svgNum(lit)+'"/><stop offset=".65" stop-color="black" stop-opacity="'+svgNum(lit*.7*throwKeep)+'"/><stop offset="1" stop-color="black" stop-opacity="'+svgNum(lit*.4*throwKeep)+'"/></linearGradient>';
+      defs+='<filter id="cvFloodSoft" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="'+svgNum(Math.max(8,dims.width*.05))+'"/></filter>';
+      maskContent+='<polygon points="'+conePoints+'" fill="url(#cvFloodBeam)" filter="url(#cvFloodSoft)"/>';
+      var radius=Math.max(dims.width,dims.height)*clamp(cfg.greenPoolRadius,.05,1);
+      defs+='<radialGradient id="cvFloodPool" gradientUnits="userSpaceOnUse" cx="'+svgNum(green.x)+'" cy="'+svgNum(green.y)+'" r="'+svgNum(radius)+'"><stop offset="0" stop-color="black" stop-opacity="'+svgNum(lit*cfg.greenPool)+'"/><stop offset=".7" stop-color="black" stop-opacity="'+svgNum(lit*cfg.greenPool*.45)+'"/><stop offset="1" stop-color="black" stop-opacity="0"/></radialGradient>';
+      maskContent+='<rect width="100%" height="100%" fill="url(#cvFloodPool)"/>';
+    }
+    defs+='<mask id="cvFloodMask">'+maskContent+'</mask>';
+    var layer='<g data-role="floodlight"><rect width="100%" height="100%" fill="#04070b" opacity="'+svgNum(dark)+'" mask="url(#cvFloodMask)"/></g>';
+    return {defs:defs,layer:layer};
+  }
   function nativeVisualAsset(asset,settings,meta){
     meta=meta||{};
     var dims=visualAssetDimensions(asset,meta.width,meta.height);
@@ -1853,10 +1901,11 @@
     var effectMeta=Object.assign({},inherited,meta);
     var airbrush=fairwayAirbrushMarkup(source,dims,assetBounds,settings,effectMeta);
     var greenAirbrush=greenSurroundAirbrushMarkup(source,dims,assetBounds,settings,effectMeta);
+    var flood=floodlightMarkup(dims,assetBounds,settings,effectMeta);
     var greenLayer=f.greenBias?'<g data-role="green-strength" data-strength="'+svgNum(f.greenBias)+'" data-tone="'+svgNum(f.greenTone)+'"><rect width="100%" height="100%" fill="'+f.greenHex+'" opacity="'+svgNum(f.greenBias)+'" style="mix-blend-mode:hue"/><rect width="100%" height="100%" fill="#5fbe70" opacity="'+svgNum(f.greenBias*.42)+'" style="mix-blend-mode:saturation"/><rect width="100%" height="100%" fill="rgba(52,126,54,.18)" opacity="'+svgNum(f.greenBias*.32)+'" style="mix-blend-mode:soft-light"/></g>':"";
     var mowingPattern=mow?'<pattern id="cvMowingStripe" width="24" height="24" patternUnits="userSpaceOnUse" patternTransform="rotate(108)"><path d="M0 0 L0 24" stroke="rgba(255,255,255,.20)" stroke-width="1"/></pattern>':"";
     var mowingLayer=mow?'<rect width="100%" height="100%" fill="url(#cvMowingStripe)" opacity="'+mow+'"/>':"";
-    var svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+dims.width+'" height="'+dims.height+'" viewBox="0 0 '+dims.width+" "+dims.height+'" data-renderer="'+escapeXml(RENDERER_VERSION)+'" data-role="'+escapeXml(role)+'" data-stage="'+escapeXml(stage)+'"'+(version?' data-version="'+escapeXml(version)+'"':"")+'><defs><filter id="cvNative"><feColorMatrix type="saturate" values="'+f.saturation+'"/><feComponentTransfer><feFuncR type="linear" slope="'+f.contrast+'" intercept="'+((f.brightness-1)/2)+'"/><feFuncG type="linear" slope="'+f.contrast+'" intercept="'+((f.brightness-1)/2)+'"/><feFuncB type="linear" slope="'+f.contrast+'" intercept="'+((f.brightness-1)/2)+'"/></feComponentTransfer></filter><linearGradient id="cvNativeReadability" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="rgba(255,255,255,'+overlay.top+')"/><stop offset=".55" stop-color="rgba(255,255,255,0)"/><stop offset="1" stop-color="rgba(0,0,0,'+overlay.bottom+')"/></linearGradient>'+mowingPattern+(airbrush.defs||"")+(greenAirbrush.defs||"")+'</defs><rect width="100%" height="100%" fill="#10130f"/><g filter="url(#cvNative)">'+source+'</g>'+greenLayer+(airbrush.layer||"")+(greenAirbrush.layer||"")+'<rect width="100%" height="100%" fill="url(#cvNativeReadability)" opacity="'+overlay.opacity+'"/>'+mowingLayer+'</svg>';
+    var svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+dims.width+'" height="'+dims.height+'" viewBox="0 0 '+dims.width+" "+dims.height+'" data-renderer="'+escapeXml(RENDERER_VERSION)+'" data-role="'+escapeXml(role)+'" data-stage="'+escapeXml(stage)+'"'+(version?' data-version="'+escapeXml(version)+'"':"")+'><defs><filter id="cvNative"><feColorMatrix type="saturate" values="'+f.saturation+'"/><feComponentTransfer><feFuncR type="linear" slope="'+f.contrast+'" intercept="'+((f.brightness-1)/2)+'"/><feFuncG type="linear" slope="'+f.contrast+'" intercept="'+((f.brightness-1)/2)+'"/><feFuncB type="linear" slope="'+f.contrast+'" intercept="'+((f.brightness-1)/2)+'"/></feComponentTransfer></filter><linearGradient id="cvNativeReadability" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="rgba(255,255,255,'+overlay.top+')"/><stop offset=".55" stop-color="rgba(255,255,255,0)"/><stop offset="1" stop-color="rgba(0,0,0,'+overlay.bottom+')"/></linearGradient>'+mowingPattern+(airbrush.defs||"")+(greenAirbrush.defs||"")+(flood.defs||"")+'</defs><rect width="100%" height="100%" fill="#10130f"/><g filter="url(#cvNative)">'+source+'</g>'+greenLayer+(airbrush.layer||"")+(greenAirbrush.layer||"")+'<rect width="100%" height="100%" fill="url(#cvNativeReadability)" opacity="'+overlay.opacity+'"/>'+mowingLayer+(flood.layer||"")+'</svg>';
     var metaOut=Object.assign({},meta);
     delete metaOut.objects;
     delete metaOut.airbrushObjects;
