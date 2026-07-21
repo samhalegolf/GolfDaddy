@@ -617,10 +617,59 @@ function gdAdminCourseDbShowPreview(courseId){
 function gdAdminCourseDbShowDebug(courseId){
   return gdAdminCourseDbOpen(courseId,"debug");
 }
-function gdAdminCourseDbDelete(courseId){
+/* Mirrors ADMIN_EMAILS in functions/course-maps.mjs - the server is the real
+   gate (it 403s a non-admin actor); this only decides whether we bother asking. */
+const GD_ADMIN_DB_EMAILS=["samhalegolf@gmail.com","admin@clarity.local"];
+function gdAdminCourseDbActor(){
+  let account=null;
+  try{account=window.GolfDaddyAccounts&&typeof window.GolfDaddyAccounts.current==="function"?window.GolfDaddyAccounts.current():null;}catch(e){}
+  let profile=null;
+  try{profile=typeof activePlayerProfile==="function"?activePlayerProfile():null;}catch(e){}
+  let role="player";
+  try{role=typeof gdGetAccountPermission==="function"?gdGetAccountPermission():((account&&account.role)||(profile&&profile.permission)||"player");}catch(e){}
+  return {
+    name:(account&&account.name)||(profile&&profile.name)||"Admin",
+    email:String((account&&account.email)||(profile&&profile.email)||"").trim().toLowerCase(),
+    role:String((account&&account.role)||role||"player").trim().toLowerCase(),
+    accountId:(account&&account.accountId)||(profile&&profile.accountId)||""
+  };
+}
+function gdAdminCourseDbIsAdmin(){
+  const actor=gdAdminCourseDbActor();
+  return actor.role==="admin"&&GD_ADMIN_DB_EMAILS.indexOf(actor.email)>=0;
+}
+async function gdAdminCourseDbDeleteFromCloud(courseId,courseName){
+  const res=await fetch("/api/course-maps",{
+    method:"POST",
+    headers:{"Content-Type":"application/json",Accept:"application/json"},
+    body:JSON.stringify({action:"delete",courseId:courseId,courseName:courseName||"",actor:gdAdminCourseDbActor()})
+  });
+  let data=null;
+  try{data=await res.json();}catch(e){}
+  if(!res.ok)throw new Error((data&&data.error)||("HTTP "+res.status));
+  return data||{};
+}
+/* Deletes the published course from Supabase first, and only clears the local
+   remnants once the database confirms - a failed/refused delete must not leave
+   the device wiped while the course is still live for everyone else. */
+async function gdAdminCourseDbDelete(courseId){
   courseId=String(courseId||"");
   if(!courseId)return false;
-  if(!window.confirm(`Delete local course admin data for ${courseId}? Published cloud data is not removed.`))return false;
+  const summary=gdAdminCourseDbSummaries().find(item=>item.id===courseId);
+  const label=(summary&&summary.name)||courseId;
+  if(!gdAdminCourseDbIsAdmin()){
+    gdAdminCourseVisualToast("Admin only — sign in as an admin to delete from the database");
+    return false;
+  }
+  if(!window.confirm(`Permanently delete "${label}" from the Supabase course database?\n\nThis removes the published course map for every user and cannot be undone.`))return false;
+  let result=null;
+  try{
+    gdAdminCourseVisualToast(`Deleting ${label} from the database…`);
+    result=await gdAdminCourseDbDeleteFromCloud(courseId,label);
+  }catch(error){
+    gdAdminCourseVisualToast(`Database delete failed: ${error&&error.message||error}`);
+    return false;
+  }
   try{
     const api=window.GDCoursePlayPipeline;
     const key=api&&api.storageKey||"gd_course_play_pipeline_v1";
@@ -647,7 +696,11 @@ function gdAdminCourseDbDelete(courseId){
   }catch(error){console.warn("[GolfDaddy] course delete visual cleanup failed",error);}
   gdAdminCourseDatabaseSelected="";
   gdAdminCourseDatabaseTab="overview";
-  gdRenderAdminCourseDatabase();
+  /* Auto-sync: refetch so the dashboard reflects the database, not our assumption
+     about what the delete did. gdLoadAdminCourseDbCloud re-renders on completion. */
+  await gdLoadAdminCourseDbCloud({force:true});
+  const removed=Number(result&&result.deleted&&result.deleted.supabase)||0;
+  gdAdminCourseVisualToast(removed?`${label} deleted from the database`:`${label} was not in the database — local data cleared`);
   return false;
 }
 async function gdAdminCourseDbUpdate(courseId){
@@ -1621,15 +1674,18 @@ function gdAdminCourseVisualPresetChanged(courseId){
   try{preset=engine&&typeof engine.getPreset==="function"?engine.getPreset(presetId):null;}catch(e){preset=null;}
   if(preset){
     const green=document.getElementById("gdCourseVisualGreenStrength");
+    const greenTone=document.getElementById("gdCourseVisualGreenTone");
     const terrain=document.getElementById("gdCourseVisualTerrainStrength");
     const brightness=document.getElementById("gdCourseVisualBrightness");
     const contrast=document.getElementById("gdCourseVisualContrast");
     const mowing=document.getElementById("gdCourseVisualMowing");
     const presetGreen=Number(preset.turf&&preset.turf.greenStrength);
+    const presetGreenTone=Number(preset.turf&&preset.turf.greenTone);
     const presetTerrain=Number(preset.visualTools&&preset.visualTools.holeTerrainStrength);
     const presetBrightness=Number(preset.lighting&&preset.lighting.brightnessTarget);
     const presetContrast=Number(preset.lighting&&preset.lighting.contrastTarget);
     if(green)green.value=Number.isFinite(presetGreen)?presetGreen:.35;
+    if(greenTone)greenTone.value=Number.isFinite(presetGreenTone)?presetGreenTone:0;
     if(terrain)terrain.value=Number.isFinite(presetTerrain)?presetTerrain:.9;
     if(brightness)brightness.value=Number.isFinite(presetBrightness)?presetBrightness:52;
     if(contrast)contrast.value=Number.isFinite(presetContrast)?presetContrast:1.04;
