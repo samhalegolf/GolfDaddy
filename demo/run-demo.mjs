@@ -32,6 +32,31 @@ async function waitForStableFrame(page, milliseconds = 350) {
   }));
 }
 
+function semanticLocator(page, target) {
+  if (target.selector) return page.locator(target.selector);
+  if (target.testId) return page.getByTestId(target.testId);
+  if (target.text) return page.getByText(target.text, { exact: target.exact ?? true });
+  if (target.role) {
+    return page.getByRole(target.role, {
+      name: target.name,
+      exact: target.exact ?? true
+    });
+  }
+  throw new Error(`Step is missing a selector, testId, text, or role target: ${JSON.stringify(target)}`);
+}
+
+async function firstVisibleLocator(page, candidates, timeout = 10_000) {
+  const started = Date.now();
+  while (Date.now() - started < timeout) {
+    for (const candidate of candidates) {
+      const locator = semanticLocator(page, candidate).first();
+      if (await locator.isVisible().catch(() => false)) return locator;
+    }
+    await page.waitForTimeout(150);
+  }
+  throw new Error(`None of the candidate targets became visible: ${JSON.stringify(candidates)}`);
+}
+
 async function runStep(page, step) {
   const holdAfter = step.holdAfter ?? 500;
 
@@ -40,16 +65,24 @@ async function runStep(page, step) {
       await page.goto(step.url, { waitUntil: step.waitUntil ?? 'networkidle' });
       break;
     case 'click':
-      await page.locator(step.selector).click({ timeout: step.timeout ?? 10_000 });
+      await semanticLocator(page, step).click({ timeout: step.timeout ?? 10_000 });
       break;
+    case 'clickFirst': {
+      const locator = await firstVisibleLocator(page, step.candidates, step.timeout ?? 10_000);
+      await locator.click();
+      break;
+    }
     case 'fill':
-      await page.locator(step.selector).fill(step.value, { timeout: step.timeout ?? 10_000 });
+      await semanticLocator(page, step).fill(step.value, { timeout: step.timeout ?? 10_000 });
       break;
     case 'press':
-      await page.locator(step.selector ?? 'body').press(step.key);
+      await semanticLocator(page, step.selector || step.testId || step.text || step.role ? step : { selector: 'body' }).press(step.key);
       break;
     case 'waitFor':
-      await page.locator(step.selector).waitFor({ state: step.state ?? 'visible', timeout: step.timeout ?? 10_000 });
+      await semanticLocator(page, step).waitFor({ state: step.state ?? 'visible', timeout: step.timeout ?? 10_000 });
+      break;
+    case 'waitForAny':
+      await firstVisibleLocator(page, step.candidates, step.timeout ?? 10_000);
       break;
     case 'pause':
       await page.waitForTimeout(step.duration ?? 1000);
@@ -102,6 +135,10 @@ async function main() {
         localStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value));
       }
     }, scenario.storageState);
+  }
+
+  if (scenario.initScript) {
+    await context.addInitScript(scenario.initScript);
   }
 
   const page = await context.newPage();
