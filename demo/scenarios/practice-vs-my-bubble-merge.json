@@ -1,0 +1,108 @@
+{
+  "name": "Practice Bubble versus My Bubble merge",
+  "viewport": {
+    "width": 390,
+    "height": 844
+  },
+  "videoSize": {
+    "width": 390,
+    "height": 844
+  },
+  "locale": "en-NZ",
+  "timezoneId": "Pacific/Auckland",
+  "colorScheme": "light",
+  "headless": true,
+  "storageState": {
+    "localStorage": {
+      "clarity_demo_capture": {
+        "enabled": true,
+        "scenario": "practice-vs-my-bubble-merge",
+        "version": 1
+      }
+    }
+  },
+  "steps": [
+    {
+      "action": "goto",
+      "url": "{{baseUrl}}/",
+      "waitUntil": "networkidle",
+      "holdAfter": 1600
+    },
+    {
+      "action": "clickFirst",
+      "candidates": [
+        { "testId": "home-bubble-studio" },
+        { "role": "button", "name": "Bubble Studio" },
+        { "text": "Bubble Studio" }
+      ],
+      "holdAfter": 1200
+    },
+    {
+      "action": "clickFirst",
+      "candidates": [
+        { "testId": "practice-bubble" },
+        { "role": "button", "name": "Practice Bubble" },
+        { "text": "Practice Bubble" }
+      ],
+      "holdAfter": 1200
+    },
+    {
+      "action": "waitForAny",
+      "candidates": [
+        { "testId": "bubble-comparison" },
+        { "text": "My Bubble" },
+        { "text": "Practice Bubble" }
+      ],
+      "holdAfter": 1800
+    },
+    {
+      "action": "screenshot",
+      "path": "01-practice-vs-my-bubble.png"
+    },
+    {
+      "action": "pause",
+      "duration": 2200
+    },
+    {
+      "action": "clickFirst",
+      "candidates": [
+        { "testId": "merge-practice-bubble" },
+        { "role": "button", "name": "Merge" },
+        { "role": "button", "name": "Merge into My Bubble" },
+        { "role": "button", "name": "Adopt as My Bubble" },
+        { "text": "Merge" }
+      ],
+      "holdAfter": 900
+    },
+    {
+      "action": "clickFirst",
+      "candidates": [
+        { "testId": "confirm-merge-practice-bubble" },
+        { "role": "button", "name": "Confirm Merge" },
+        { "role": "button", "name": "Confirm" },
+        { "role": "button", "name": "Merge" }
+      ],
+      "timeout": 3500,
+      "holdAfter": 1600
+    },
+    {
+      "action": "waitForAny",
+      "candidates": [
+        { "testId": "bubble-merge-complete" },
+        { "text": "Merged" },
+        { "text": "My Bubble updated" },
+        { "text": "Practice Bubble merged" },
+        { "text": "My Bubble" }
+      ],
+      "holdAfter": 2200
+    },
+    {
+      "action": "screenshot",
+      "path": "02-merged-my-bubble.png"
+    },
+    {
+      "action": "pause",
+      "duration": 1800
+    }
+  ]
+}
