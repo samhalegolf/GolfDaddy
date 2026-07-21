@@ -72,8 +72,12 @@ export default async function courseVisualJobs(req) {
   if (!courseId) return json(400, { error: "courseId required" });
   const kind = String(payload && payload.kind || "snapshot") === "export" ? "export" : "snapshot";
 
-  /* One live job per course+kind - repeated Scan taps must not fan out duplicate workers. */
-  const existing = await supabaseFetch(TABLE + "?select=id,status&course_id=eq." + encodeURIComponent(courseId) + "&kind=eq." + kind + "&status=in.(queued,running)&limit=1");
+  /* One live job per course+kind - repeated Scan taps must not fan out duplicate workers.
+     Only FRESH jobs count: a job untouched for 20+ minutes is a corpse from a dead worker
+     (the worker reaps those), and letting it dedupe new requests silently swallowed a manual
+     Publish. */
+  const freshCutoff = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+  const existing = await supabaseFetch(TABLE + "?select=id,status&course_id=eq." + encodeURIComponent(courseId) + "&kind=eq." + kind + "&status=in.(queued,running)&updated_at=gt." + encodeURIComponent(freshCutoff) + "&limit=1");
   if (Array.isArray(existing) && existing.length) {
     return json(200, { job: existing[0], deduped: true });
   }

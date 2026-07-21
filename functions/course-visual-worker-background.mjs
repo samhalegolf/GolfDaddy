@@ -242,6 +242,96 @@ async function rasterizeSvgDataUrl(dataUrl, { maxWidth, quality }) {
   return image.jpeg({ quality: quality || 82 }).toBuffer();
 }
 
+/* Natural baseline: every effect off. Mirrors GD_VISUAL_OFF_OVERRIDES in the admin UI. */
+const NATURAL_OVERRIDES = {
+  turf: { greenStrength: 0, greenTone: 0 },
+  lighting: { brightnessTarget: 52, contrastTarget: 1 },
+  readability: { sharpness: 0, fairwaySeparation: 0 },
+  mowingVisibility: 0,
+  visualTools: { holeTerrainStrength: 0, courseTerrainStrength: 0, fairwayAirbrush: false },
+  floodlight: { enabled: false }
+};
+
+/* Hybrid publish model: after every successful snapshot the worker re-exports frames with the
+   course's last PUBLISHED recipe (or the natural/off baseline if it has never been published),
+   so players never see frames baked from stale captures. A manual Publish is the only thing
+   that changes which recipe is live. */
+async function latestPublishedRecipe(courseId) {
+  try {
+    const rows = await supabaseFetch("course_visuals?select=preset_id,course_overrides&course_id=eq." + encodeURIComponent(courseId) + "&order=updated_at.desc&limit=1");
+    const row = Array.isArray(rows) ? rows[0] : null;
+    if (row) return { presetId: row.preset_id || "", overrides: row.course_overrides || NATURAL_OVERRIDES };
+  } catch (e) { /* fall through to natural */ }
+  return { presetId: "", overrides: NATURAL_OVERRIDES };
+}
+
+async function enqueueFollowUpExport(courseId) {
+  const existing = await supabaseFetch(JOBS_TABLE + "?select=id&course_id=eq." + encodeURIComponent(courseId) + "&kind=eq.export&status=in.(queued,running)&limit=1");
+  if (Array.isArray(existing) && existing.length) return;
+  const recipe = await latestPublishedRecipe(courseId);
+  await supabaseFetch(JOBS_TABLE, {
+    method: "POST",
+    body: JSON.stringify([{ course_id: courseId, kind: "export", status: "queued", recipe, requested_by: "auto-after-snapshot" }])
+  });
+}
+
+/* Jobs stuck "running" belong to a worker that died mid-run (crash, 15-min cap). Left alone
+   they block the dedupe forever - exactly how a zombie export swallowed a manual Publish. */
+async function reapStaleJobs() {
+  const cutoff = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+  try {
+    await supabaseFetch(JOBS_TABLE + "?status=eq.running&updated_at=lt." + encodeURIComponent(cutoff), {
+      method: "PATCH",
+      body: JSON.stringify({ status: "failed", error: "stale-running-reaped: worker died mid-job", updated_at: new Date().toISOString() })
+    });
+  } catch (e) { /* reaping is best-effort */ }
+}
+
+/* The worker owns the course_visuals row - the browser no longer posts multi-MB asset
+   payloads through a size-limited function. uploaded_assets roles drive the existing
+   play_payload contract in /api/course-visuals. */
+async function writeCourseVisualRow(job, pkg, framesIndex, recipe) {
+  const versionNumber = Math.max(1, parseInt(String(framesIndex.exportVersion || "v1").replace(/[^0-9]/g, ""), 10) || 1);
+  const bounds = (framesIndex.holes || []).map(h => h.bounds).filter(Boolean);
+  const courseBounds = bounds.length ? {
+    south: Math.min(...bounds.map(b => Number(b.south))),
+    west: Math.min(...bounds.map(b => Number(b.west))),
+    north: Math.max(...bounds.map(b => Number(b.north))),
+    east: Math.max(...bounds.map(b => Number(b.east)))
+  } : {};
+  const uploadedAssets = [];
+  if (framesIndex.overview) uploadedAssets.push({ path: framesIndex.overview.path, role: "published", contentType: "image/jpeg", holeNumber: null, hole_number: null, metadata: { width: framesIndex.overview.width, height: framesIndex.overview.height, bounds: framesIndex.overview.bounds } });
+  (framesIndex.holes || []).forEach(frame => {
+    uploadedAssets.push({ path: frame.path, role: "hole-frame-published", contentType: "image/jpeg", holeNumber: frame.holeNumber, hole_number: frame.holeNumber, metadata: { width: frame.width, height: frame.height, bounds: frame.bounds, playSurface: frame.playSurface } });
+  });
+  const row = {
+    id: "cv-" + pkg.courseId,
+    course_id: pkg.courseId,
+    status: "published",
+    raw_master_path: null,
+    basic_image_path: null,
+    preview_image_path: null,
+    published_image_path: framesIndex.overview ? framesIndex.overview.path : (framesIndex.holes[0] && framesIndex.holes[0].path) || null,
+    course_bounds: courseBounds,
+    source_capture_ids: (framesIndex.holes || []).map(h => "h" + h.holeNumber),
+    preset_id: recipe.presetId || null,
+    preset_version: 0,
+    course_overrides: recipe.overrides || {},
+    current_version: versionNumber,
+    published_version: versionNumber,
+    last_error: {},
+    diagnostics: { source: "course-visual-worker", jobId: job.id, framesIndexPath: pkg.courseId + "/frames/index.json", generatedAt: framesIndex.generatedAt },
+    versions: [],
+    uploaded_assets: uploadedAssets,
+    updated_at: new Date().toISOString()
+  };
+  await supabaseFetch("course_visuals?on_conflict=id", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=representation" },
+    body: JSON.stringify(row)
+  });
+}
+
 async function runExportJob(job) {
   const engine = loadEngine();
   const pkg = await loadCoursePackage(job.course_id);
@@ -281,7 +371,7 @@ async function runExportJob(job) {
         : []
     });
   }
-  const recipe = job.recipe || {};
+  const recipe = job.recipe && (job.recipe.presetId || job.recipe.overrides || job.recipe.courseOverrides) ? job.recipe : await latestPublishedRecipe(job.course_id);
   const presetId = String(recipe.presetId || "") || (engine.defaultPreset && engine.defaultPreset().id) || "";
   const overrides = recipe.overrides || recipe.courseOverrides || {};
   engine.ingestCourseVisualInput({ courseId: pkg.courseId, courseName: pkg.courseName, objects: engineObjectsFromPackage(pkg), captures });
@@ -309,12 +399,14 @@ async function runExportJob(job) {
   }
   if (!framesIndex.holes.length) throw new Error("no hole frames produced by the engine bake");
   await storageUpload(pkg.courseId + "/frames/index.json", Buffer.from(JSON.stringify(framesIndex)), "application/json");
+  await writeCourseVisualRow(job, pkg, framesIndex, { presetId, overrides });
   return {
     exportVersion: version,
     presetId,
     holes: framesIndex.holes.length,
     overview: !!framesIndex.overview,
-    indexPath: pkg.courseId + "/frames/index.json"
+    indexPath: pkg.courseId + "/frames/index.json",
+    courseVisualRow: "cv-" + pkg.courseId
   };
 }
 
@@ -322,12 +414,15 @@ export default async function courseVisualWorker(req) {
   if (!supabaseBase() || !supabaseKey()) return new Response("supabase not configured", { status: 503 });
   let payload = {};
   try { payload = await req.json(); } catch (e) { payload = {}; }
+  await reapStaleJobs();
   /* Process the named job, then sweep any other queued jobs while we have the budget. */
   let job = await claimJob(payload && payload.jobId || null);
   while (job) {
     try {
       const result = job.kind === "snapshot" ? await runSnapshotJob(job) : job.kind === "export" ? await runExportJob(job) : { skipped: "unknown kind " + job.kind };
       await finishJob(job.id, { status: "done", result, error: null });
+      /* Hybrid: fresh captures always get re-exported with the live recipe (or natural). */
+      if (job.kind === "snapshot") await enqueueFollowUpExport(job.course_id).catch(() => {});
     } catch (error) {
       console.error("course-visual-worker job failed", job.id, error);
       await finishJob(job.id, { status: "failed", error: String(error && error.message || error).slice(0, 900) }).catch(() => {});

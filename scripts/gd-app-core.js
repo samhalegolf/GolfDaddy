@@ -1180,7 +1180,7 @@ function gdAdminCoursePreviewMarkup(selected){
   const screenStyle="--gd-phone-tilt:"+gdAdminCourseVisualSvgNum(previewTiltDeg)+"deg";
   const tiltClass=gdAdminCoursePreviewTiltActive(beta3dOn)?" gdAdminPhoneTilted":"";
   const dock=window.GDCourseVisualEngine?gdAdminCourseVisualControls(record,selected.id):"";
-  return `<div class="gdAdminPhonePreviewShell gdAdminPhonePreviewTuned"><div class="gdAdminPhoneInfo"><strong>${gdEscapeHTML(selected.name)} · Hole ${gdEscapeHTML(current)}</strong><span>Sandbox: dial a setting and release it — the recipe re-bakes for this hole so you see the real result, terrain and all. Scan re-runs the capture protocol; Publish applies the locked-in recipe to every hole.</span><div class="gdAdminPhoneControls"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev hole</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next hole</button>${scanButton}<button type="button" onclick="return gdAdminCourseVisualResetRecipe(${id})">Reset recipe</button></div><div class="gdAdminCourseStageLine"><span class="${assetKind==="local-styled"||assetKind==="cloud-frame"?"ready":"warn"}">${gdEscapeHTML(assetKind==="local-styled"?"surface ready":assetKind==="cloud-frame"?"cloud frame":assetKind==="local-base"?"original capture":"hydrating")}</span><span>H${gdEscapeHTML(current)} · ${gdEscapeHTML(captured.length)}/${gdEscapeHTML(count)} captured</span><span>${gdEscapeHTML(cloudFrame?String(cloudFrame.path).split("/").slice(-3).join("/"):asset&&asset.path?String(asset.path).split("/").slice(-3).join("/"):"")}</span></div><div class="gdAdminCourseStageLine">${(assetKind==="local-base"?["Original capture — no effects"]:(effects.length?effects:["No effects active"])).map(label=>`<span class="${assetKind==="local-base"?"":"ready"}">${gdEscapeHTML(label)}</span>`).join("")}</div></div><div class="gdAdminPhoneStage"><div class="gdAdminPhone"><div class="gdAdminPhoneScreen${tiltClass}" style="${screenStyle}"><div class="gdAdminPhoneHud"><span>Clarity Play</span><b>H${gdEscapeHTML(current)}</b></div>${frame}<div class="gdAdminPhoneNav"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next</button></div></div></div>${dock}</div></div>`;
+  return `<div class="gdAdminPhonePreviewShell gdAdminPhonePreviewTuned"><div class="gdAdminPhoneInfo"><strong>${gdEscapeHTML(selected.name)} · Hole ${gdEscapeHTML(current)}</strong><span>Sandbox: dial a setting and release it — the recipe re-bakes for this hole so you see the real result, terrain and all. Scan re-runs the capture protocol; Publish applies the locked-in recipe to every hole.</span><div class="gdAdminPhoneControls"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev hole</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next hole</button>${scanButton}<button type="button" onclick="return gdAdminCourseVisualResetRecipe(${id})">Reset recipe</button></div><div class="gdAdminCourseStageLine"><span class="${assetKind==="local-styled"||assetKind==="cloud-frame"?"ready":"warn"}">${gdEscapeHTML(assetKind==="local-styled"?"surface ready":assetKind==="cloud-frame"?"cloud frame":assetKind==="local-base"?"original capture":"hydrating")}</span><span>H${gdEscapeHTML(current)} · ${gdEscapeHTML(captured.length)}/${gdEscapeHTML(count)} captured</span><span>${gdEscapeHTML(cloudFrame?String(cloudFrame.path).split("/").slice(-3).join("/"):asset&&asset.path?String(asset.path).split("/").slice(-3).join("/"):"")}</span>${gdAdminCourseCloudJobChip(selected.id)}</div><div class="gdAdminCourseStageLine">${(assetKind==="local-base"?["Original capture — no effects"]:(effects.length?effects:["No effects active"])).map(label=>`<span class="${assetKind==="local-base"?"":"ready"}">${gdEscapeHTML(label)}</span>`).join("")}</div></div><div class="gdAdminPhoneStage"><div class="gdAdminPhone"><div class="gdAdminPhoneScreen${tiltClass}" style="${screenStyle}"><div class="gdAdminPhoneHud"><span>Clarity Play</span><b>H${gdEscapeHTML(current)}</b></div>${frame}<div class="gdAdminPhoneNav"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next</button></div></div></div>${dock}</div></div>`;
 }
 function gdAdminCourseDebugMarkup(selected){
   return `<div class="gdAdminCourseDebugWindow"><div class="gdCoursePlayDebug" id="gdCoursePlayDebugPanel"><div class="gdCoursePlayDebugHead"><div><h3>Live scan feedback</h3><p>Local scan, frame-cache, sync, and runtime events on this browser. This is browser state, not the database.</p></div><div class="gdCoursePlayDebugActions"><button type="button" onclick="return gdAdminCourseDebugRefresh()">Refresh</button><button type="button" onclick="gdClearCoursePlayPipelineDebug();return gdAdminCourseDebugRefresh()">Clear log</button></div></div><div id="gdCoursePlayDebugSummary" class="gdCoursePlayDebugSummary"></div><div id="gdCoursePlayDebugTable"></div><div id="gdCoursePlayDebugTimeline" class="gdCoursePlayDebugTimeline"></div></div><div class="gdCoursePlayDebug gdCourseMappingDebug" id="gdCourseMappingDebugPanel"></div><details class="gdAdminCourseSettings"><summary>Visual engine internals</summary><div class="gdAdminCourseSettingsBody">${gdAdminCourseVisualMarkup(selected)}</div></details></div>`;
@@ -1786,6 +1786,41 @@ function gdAdminCourseVisualApplyRecipe(courseId){
   }
   return false;
 }
+/* Latest cloud job per course, throttled to one fetch per 20s (the panel re-renders often).
+   Feeds the status chip on the preview so queued/running/failed publishes are visible instead
+   of silently dying, and refreshes the cloud frames cache when an export completes. */
+const gdAdminCourseCloudJobCache={};
+function gdAdminCourseCloudLatestJob(courseId){
+  courseId=String(courseId||"");
+  if(!courseId)return null;
+  const entry=gdAdminCourseCloudJobCache[courseId];
+  const nowMs=Date.now();
+  if(entry&&nowMs-entry.fetchedAt<20000)return entry.job;
+  gdAdminCourseCloudJobCache[courseId]={fetchedAt:nowMs,job:entry&&entry.job||null};
+  fetch("/api/course-visual-jobs?courseId="+encodeURIComponent(courseId),{headers:{Accept:"application/json"}})
+    .then(res=>res.ok?res.json():null)
+    .then(data=>{
+      const job=data&&Array.isArray(data.jobs)&&data.jobs.length?data.jobs[0]:null;
+      const previous=gdAdminCourseCloudJobCache[courseId]&&gdAdminCourseCloudJobCache[courseId].job;
+      gdAdminCourseCloudJobCache[courseId]={fetchedAt:Date.now(),job:job};
+      const changed=!!job&&(!previous||previous.id!==job.id||previous.status!==job.status);
+      if(job&&job.kind==="export"&&job.status==="done"&&changed){
+        delete gdAdminCourseCloudFramesCache[courseId];
+        delete gdAdminCourseCloudFramesSuppressed[courseId];
+      }
+      if(changed&&gdAdminCourseDatabaseSelected===courseId&&gdAdminCourseDatabaseTab==="preview")gdRenderAdminCourseDatabase();
+    })
+    .catch(()=>{});
+  return entry&&entry.job||null;
+}
+function gdAdminCourseCloudJobChip(courseId){
+  const job=gdAdminCourseCloudLatestJob(courseId);
+  if(!job)return "";
+  const label=(job.kind==="export"?"publish":"snapshot")+" "+job.status;
+  const tone=job.status==="done"?"ready":job.status==="failed"?"warn":"";
+  const title=job.status==="failed"&&job.error?String(job.error).slice(0,140):"";
+  return `<span class="${tone}"${title?` title="${gdEscapeHTML(title)}"`:""}>cloud: ${gdEscapeHTML(label)}</span>`;
+}
 /* Human-readable feedback of what the current recipe actually has switched on. */
 function gdAdminCourseVisualActiveEffects(record){
   const settings=gdAdminCourseVisualMergedSettings(record&&record.presetId,record&&record.courseOverrides)||{};
@@ -2262,38 +2297,15 @@ function gdAdminCourseVisualPublish(courseId){
       const presetId=String(document.getElementById("gdCourseVisualPreset")?.value||"");
       const overrides=gdAdminCourseVisualOverridesFromForm();
       engine.saveCourseVisualSettings(courseId,overrides,{presetId});
-      /* Publish = the recipe is locked. The server worker bakes all frames from the cloud
-         captures with this exact recipe - every device downloads the result. The local
-         publish continues alongside until cloud frames fully replace it. */
-      gdAdminCourseVisualEnqueueCloudJob(courseId,"export",{presetId:presetId,overrides:overrides});
+      /* Publish = lock the recipe and hand it to the WORKER - the only publish path. The
+         worker bakes all frames server-side from the cloud captures and writes the
+         course_visuals row itself. The old in-browser path (full 18-hole local bake + one
+         giant asset POST) died the day captures became owned pixels: the payload is tens of
+         MB against a ~6MB function body limit, and the local bake freezes the tab. */
+      const data=await gdAdminCourseVisualEnqueueCloudJob(courseId,"export",{presetId:presetId,overrides:overrides});
+      if(!data||!data.job)throw new Error("Could not queue the cloud publish — check you are signed in as admin");
       delete gdAdminCourseCloudFramesSuppressed[String(courseId||"")];
-      let record=gdAdminCourseVisualRecord(courseId)||engine.getRecord(courseId);
-      const sourceStatus=gdAdminCourseVisualSourceStatus({id:courseId,key:courseId});
-      const beta3d=!!(overrides.visualEngine&&overrides.visualEngine.enable3dBeta);
-      if(!record||!record.rawMaster||!record.basicVisual||gdAdminCourseVisualNeedsAutoBuild(record,sourceStatus)||(beta3d&&!record.beta3dView)){
-        gdAdminCourseVisualToast("Building course visual stitch");
-        await engine.buildFromCourseDatabase(courseId,{enable3dBeta:beta3d});
-      }
-      record=gdAdminCourseVisualRecord(courseId)||engine.getRecord(courseId);
-      if(gdAdminCourseVisualNeedsPipeline(record)||!record.previewVisual||record.settingsDirty||String(record.previewVisual.presetId||"")!==presetId){
-        gdAdminCourseVisualToast("Applying native visuals and terrain shading");
-        await engine.buildCourseVisualPreview(courseId,presetId,overrides);
-      }
-      record=gdAdminCourseVisualRecord(courseId)||engine.getRecord(courseId);
-      if(!record.previewVisual||!record.terrainView)throw new Error(record.lastError&&record.lastError.message||"Course overview pipeline did not build.");
-      if(!record.singleHolePreviewVisual||!record.singleHoleTerrainView)throw new Error(record.lastError&&record.lastError.message||"Single-hole pipeline did not build.");
-      const holeBaseCount=Array.isArray(record.holeFrameVisuals)?record.holeFrameVisuals.length:0;
-      const holeTerrainCount=Array.isArray(record.holeFrameTerrainViews)?record.holeFrameTerrainViews.length:0;
-      if(holeBaseCount&&holeTerrainCount<holeBaseCount)throw new Error(record.lastError&&record.lastError.message||"Per-hole GPS Play surfaces did not finish terrain shading.");
-      engine.publishCourseVisual(courseId);
-      if(typeof engine.syncPublishedCourseVisual==="function"){
-        gdAdminCourseVisualToast("Saving published map to Clarity Cloud");
-        const cloud=await engine.syncPublishedCourseVisual(courseId,"publish");
-        const payloadReady=!!(cloud&&cloud.play_payload||cloud&&cloud.playPayload);
-        gdAdminCourseVisualToast(payloadReady?"Published Clarity course map to Supabase":"Published Clarity course map");
-      }else{
-        gdAdminCourseVisualToast("Published Clarity course map");
-      }
+      gdAdminCourseVisualToast(data.deduped?"Cloud publish already in progress":"Recipe locked — cloud publish queued");
     }catch(error){
       console.warn("[GolfDaddy] course visual publish failed",error);
       gdAdminCourseVisualToast(error&&error.message?error.message:"Course visual publish failed");
