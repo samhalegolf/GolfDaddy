@@ -2906,12 +2906,14 @@
      overrides) and drops every STYLED output so the preview falls back to the raw baked
      captures. Base frames, raw master, captures, and published assets are untouched - this
      is the cheap "start the look again" button, not a re-scan. */
-  function resetCourseVisualRecipe(courseId,presetId){
+  function resetCourseVisualRecipe(courseId,presetId,overrides){
     var record=getRecord(courseId);
     var preset=getPreset(presetId||defaultPreset().id);
     record.presetId=preset.id;
     record.presetVersion=preset.version;
-    record.courseOverrides={};
+    /* Callers pass an explicit "everything off" overrides block so the baseline is a raw
+       capture, not the preset's own strengths. */
+    record.courseOverrides=clone(overrides||{});
     record.settingsDirty=false;
     record.previewVisual=null;
     record.terrainView=null;

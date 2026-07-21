@@ -92,6 +92,14 @@ The sandbox stays the source of truth for how a recipe *looks*; the worker must 
    Remaining: GPS play consuming cloud frames (currently only the admin preview does), and
    tile caching/throttling in the worker if snapshot volume grows.
 
+## Recipe model (Sam, 2026-07-22)
+
+Effects are LAYERS over the raw capture, all OFF by default. Reset = raw capture. The admin
+builds a filter stack, saves it as a NAMED RECIPE (local library `gd_course_visual_recipes_v1`
+for now). Next stage: recipes move to the cloud and the export worker takes one by name, so
+automation can bake "from natural" (off baseline) or from any saved recipe - create recipe /
+apply recipe / automate with recipe.
+
 ## Parked idea (Sam, 2026-07-22)
 
 The first floodlight implementation was a directional tee->green beam (a player-held torch
