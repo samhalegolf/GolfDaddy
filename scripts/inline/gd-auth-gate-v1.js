@@ -86,8 +86,8 @@
   }
   function demoMetric(key,value){return {candidateMetric:key,value:value,confidence:0.98,rawLabel:key};}
   function demoShots(){
-    const degrees=[3.6,4.1,4.4,4.7,5.0,5.2,4.8,4.5,5.4,4.2,4.9,5.1,3.9,4.6,5.3,4.3,4.8,5.0,4.4,5.2];
-    const carries=[148,151,149,153,150,147,152,154,149,151,150,148,155,152,149,153,150,151,147,154];
+    const degrees=[3.82,3.96,4.08,4.18,4.24,4.02,4.14,4.28,3.9,4.1,4.22,3.98,4.16,4.06,4.3,3.94,4.12,4.2,4.0,4.26];
+    const carries=[150,151,150,152,151,149,151,152,150,151,150,149,152,151,150,152,151,150,149,152];
     return degrees.map(function(deg,index){
       return {
         shotId:'demo-practice-shot-'+(index+1),
@@ -109,7 +109,7 @@
     if(!demoMode())return false;
     const api=window.GolfDaddyLaunchMonitorData;
     if(!api||typeof api.importCapture!=='function')return false;
-    const key='gd_demo_practice_bubble_seed_v3';
+    const key='gd_demo_practice_bubble_seed_v4';
     if(!sessionStorage.getItem(key)){
       safe(function(){
         api.clearStore();
