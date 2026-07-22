@@ -109,7 +109,7 @@
     if(!demoMode())return false;
     const api=window.GolfDaddyLaunchMonitorData;
     if(!api||typeof api.importCapture!=='function')return false;
-    const key='gd_demo_practice_bubble_seed_v2';
+    const key='gd_demo_practice_bubble_seed_v3';
     if(!sessionStorage.getItem(key)){
       safe(function(){
         api.clearStore();
@@ -118,7 +118,7 @@
           captureId:'demo-practice-capture',
           importBatchId:'demo-practice-import',
           label:'Clarity Demo Practice Session',
-          inputType:'photo',
+          inputType:'generated-demo',
           rawTextBlocks:['Trackman demo session','7 Iron practice pattern'],
           sourceIdentity:{providerGuess:'trackman',label:'Trackman',confidence:1,evidence:['demo']},
           startedAt:new Date(Date.now()-20*60000).toISOString(),
