@@ -215,15 +215,16 @@ async function captureLayer(axis, entry, buffer, tone) {
 
 /* ---- light-effect SVGs (gradients only, never any raster) ------------------------------- */
 
-function floodlightSvg(axis, pins, cfg) {
+function floodlightSvg(axis, pins, cfg, projectOverride) {
+  const project = projectOverride || ((pt) => frameProject(axis, pt));
   const w = axis.width, h = axis.height;
   const dark = clamp(Math.pow((100 - cfg.ambientLevel) / 100, 1.15), 0, 1);
   const lit = clamp(cfg.litLevel / 100, 0, 1);
-  const tee = frameProject(axis, pins.tee);
-  const green = frameProject(axis, pins.green);
+  const tee = project(pins.tee);
+  const green = project(pins.green);
   let defs = "", maskContent = '<rect width="100%" height="100%" fill="white"/>';
   if (tee && green) {
-    const route = (pins.route || []).map(pt => frameProject(axis, pt)).filter(Boolean);
+    const route = (pins.route || []).map(pt => project(pt)).filter(Boolean);
     const pts = route.length >= 2 ? route : [tee, green];
     const corridorWidth = Math.max(24, w * (0.07 + cfg.spread * 0.6));
     const edgeStop = clamp(0.35 + (1 - cfg.throwOff) * 0.5, 0.35, 0.85);
@@ -238,7 +239,7 @@ function floodlightSvg(axis, pins, cfg) {
       for (let s = 0; s <= n; s++) samples.push({ x: a.x + (b.x - a.x) * s / n, y: a.y + (b.y - a.y) * s / n });
     }
     samples.slice(0, 64).forEach(p => { maskContent += '<circle cx="' + p.x.toFixed(1) + '" cy="' + p.y.toFixed(1) + '" r="' + poolR.toFixed(1) + '" fill="url(#pool)"/>'; });
-    const shapePts = (pins.greenShape || []).map(pt => frameProject(axis, pt)).filter(Boolean);
+    const shapePts = (pins.greenShape || []).map(pt => project(pt)).filter(Boolean);
     let poolCenter = green, greenExtent = 0;
     if (shapePts.length >= 3) {
       poolCenter = { x: shapePts.reduce((s, p) => s + p.x, 0) / shapePts.length, y: shapePts.reduce((s, p) => s + p.y, 0) / shapePts.length };
@@ -302,6 +303,103 @@ export async function renderHoleFrame({ pins, captures, terrain, settings, width
     width: axis.width,
     height: axis.height,
     playAxis: { origin: axis.origin, ux: axis.ux, uy: axis.uy, px: axis.px, py: axis.py, centerCross: axis.centerCross, centerAlong: axis.centerAlong, scale: axis.scale, width: axis.width, height: axis.height }
+  };
+}
+
+function unworld(x, y) {
+  const lng = x * 360 - 180;
+  const n = Math.PI - 2 * Math.PI * y;
+  const lat = 180 / Math.PI * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
+  return { lat, lng };
+}
+
+/* North-up mercator hole surface - the frame GPS PLAY consumes. The v19 captured-surface
+   pipeline models a surface as (originPx, captureZoom, image): lat/lng projects to surface
+   pixels via mercator at captureZoom minus originPx. This renders the styled hole exactly on
+   that grid (fractional captureZoom encodes the downscale), so the client can hand it to the
+   existing renderer as a manifest with ONE tile - no new client-side projection code at all.
+   Rotation-free compositing also makes it the cheapest render in the family. */
+export async function renderHoleSurfaceMercator({ pins, captures, terrain, settings, maxDim = 2048, quality = 82 }) {
+  const rects = captures.map(item => ({ item, pb: projectedBounds(item.entry.bounds) })).filter(r => r.pb);
+  if (!rects.length) throw new Error("no positioned captures for mercator surface");
+  const merged = {
+    left: Math.min(...rects.map(r => r.pb.left)),
+    top: Math.min(...rects.map(r => r.pb.top)),
+    right: Math.max(...rects.map(r => r.pb.right)),
+    bottom: Math.max(...rects.map(r => r.pb.bottom))
+  };
+  const spanPx19 = Math.max((merged.right - merged.left), (merged.bottom - merged.top)) * 256 * Math.pow(2, 19);
+  const f = Math.min(1, maxDim / Math.max(1, spanPx19));
+  const captureZoom = 19 + Math.log2(f);
+  const scalePx = 256 * Math.pow(2, captureZoom);
+  const originPx = { x: merged.left * scalePx, y: merged.top * scalePx };
+  const W = Math.max(64, Math.round((merged.right - merged.left) * scalePx));
+  const H = Math.max(64, Math.round((merged.bottom - merged.top) * scalePx));
+  const fRecipe = recipeFilter(settings);
+  const composites = [];
+  rects.sort((a, b) => (num(a.item.entry.stitchLayer, 10) - num(b.item.entry.stitchLayer, 10)) || (num(a.item.entry.segmentIndex, 999) - num(b.item.entry.segmentIndex, 999)));
+  for (const { item, pb } of rects) {
+    const left = Math.round(pb.left * scalePx - originPx.x);
+    const top = Math.round(pb.top * scalePx - originPx.y);
+    const w = Math.max(1, Math.round((pb.right - pb.left) * scalePx));
+    const h = Math.max(1, Math.round((pb.bottom - pb.top) * scalePx));
+    const cropLeft = Math.max(0, -left), cropTop = Math.max(0, -top);
+    const visW = Math.min(w - cropLeft, W - Math.max(0, left));
+    const visH = Math.min(h - cropTop, H - Math.max(0, top));
+    if (visW <= 0 || visH <= 0) continue;
+    let layer = sharp(item.buffer, { limitInputPixels: false }).resize({ width: w, height: h, fit: "fill" })
+      .linear(fRecipe.contrast, 255 * ((fRecipe.brightness - 1) / 2))
+      .modulate({ saturation: fRecipe.saturation });
+    if (cropLeft || cropTop || visW < w || visH < h) layer = sharp(await layer.raw().toBuffer(), { raw: { width: w, height: h, channels: 3 }, limitInputPixels: false }).extract({ left: cropLeft, top: cropTop, width: visW, height: visH });
+    const buf = await layer.raw().toBuffer({ resolveWithObject: true });
+    composites.push({ input: buf.data, raw: { width: buf.info.width, height: buf.info.height, channels: buf.info.channels }, left: Math.max(0, left), top: Math.max(0, top) });
+  }
+  const terrainCfg = terrainParams(settings);
+  if (terrain && terrainCfg.strength > 0.02) {
+    const pb = projectedBounds(terrain.entry.bounds);
+    if (pb) {
+      const left = Math.round(pb.left * scalePx - originPx.x);
+      const top = Math.round(pb.top * scalePx - originPx.y);
+      const w = Math.max(1, Math.round((pb.right - pb.left) * scalePx));
+      const h = Math.max(1, Math.round((pb.bottom - pb.top) * scalePx));
+      /* The relief reference covers the whole course - clip it to the hole window. */
+      const cropLeft = Math.max(0, -left), cropTop = Math.max(0, -top);
+      const visW = Math.min(w - cropLeft, W - Math.max(0, left));
+      const visH = Math.min(h - cropTop, H - Math.max(0, top));
+      if (visW > 0 && visH > 0) {
+        let terrainLayer = sharp(terrain.buffer, { limitInputPixels: false }).resize({ width: w, height: h, fit: "fill" }).ensureAlpha();
+        if (cropLeft || cropTop || visW < w || visH < h) {
+          terrainLayer = sharp(await terrainLayer.png().toBuffer(), { limitInputPixels: false }).extract({ left: cropLeft, top: cropTop, width: visW, height: visH });
+        }
+        const placed = await sharp({ create: { width: W, height: H, channels: 4, background: { r: 255, g: 255, b: 255, alpha: 0 } }, limitInputPixels: false })
+          .composite([{ input: await terrainLayer.png().toBuffer(), left: Math.max(0, left), top: Math.max(0, top) }])
+          .greyscale()
+          .toColourspace("srgb")
+          .linear(terrainCfg.toneSlope, 255 * terrainCfg.toneLift)
+          .ensureAlpha(terrainCfg.opacity)
+          .raw().toBuffer({ resolveWithObject: true });
+        composites.push({ input: placed.data, raw: { width: placed.info.width, height: placed.info.height, channels: placed.info.channels }, blend: "multiply" });
+      }
+    }
+  }
+  const mercProject = (pt) => { const wp = world(pt); return wp ? { x: wp.x * scalePx - originPx.x, y: wp.y * scalePx - originPx.y } : null; };
+  const mow = mowingOpacity(settings && settings.mowingVisibility);
+  if (mow > 0) composites.push({ input: mowSvg(W, H, mow), blend: "over" });
+  const flood = floodlightSettings(settings);
+  if (flood.enabled) composites.push({ input: floodlightSvg({ width: W, height: H }, pins, flood, mercProject), blend: "over" });
+  const toneChannel = v => Math.round(Math.min(255, Math.max(0, v * fRecipe.contrast + 255 * ((fRecipe.brightness - 1) / 2))));
+  const jpeg = await sharp({ create: { width: W, height: H, channels: 3, background: { r: toneChannel(16), g: toneChannel(19), b: toneChannel(15) } }, limitInputPixels: false })
+    .composite(composites)
+    .jpeg({ quality }).toBuffer();
+  const nw = unworld(merged.left, merged.top);
+  const se = unworld(merged.right, merged.bottom);
+  return {
+    jpeg,
+    width: W,
+    height: H,
+    captureZoom,
+    originPx,
+    bounds: { north: nw.lat, west: nw.lng, south: se.lat, east: se.lng }
   };
 }
 

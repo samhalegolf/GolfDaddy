@@ -3154,7 +3154,11 @@
     rawAssets.forEach(function(asset){
       var normalized=normalizeCloudAsset(asset);
       if(!normalized||!normalized.role||!normalized.path&&!normalized.url)return;
-      var key=[normalized.role,normalized.holeNumber||0,normalized.path||normalized.url].join("::");
+      /* Normalize the path in the dedupe key - uploaded_assets carry "pupuke/frames/..."
+         while play_payload assets carry "course-visuals/pupuke/frames/...", which made every
+         frame appear twice (36 entries for 18 holes) with metadata split between the copies. */
+      var dedupePath=String(normalized.path||normalized.url||"").replace(/^\/+/,"").replace(/^course-visuals\//,"");
+      var key=[normalized.role,normalized.holeNumber||0,dedupePath].join("::");
       byKey[key]=Object.assign({},byKey[key]||{},normalized,{metadata:Object.assign({},byKey[key]&&byKey[key].metadata||{},normalized.metadata||{})});
     });
     var assets=Object.keys(byKey).map(function(key){return byKey[key];});

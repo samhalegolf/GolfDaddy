@@ -12,7 +12,7 @@
 
 import sharp from "sharp";
 import { planCourseCaptures, captureGrid, packageHoleData } from "./lib/gd-visual-plan-core.mjs";
-import { renderHoleFrame, renderOverview } from "./lib/gd-visual-export-core.mjs";
+import { renderHoleSurfaceMercator, renderOverview } from "./lib/gd-visual-export-core.mjs";
 
 const JOBS_TABLE = "course_visual_jobs";
 const MAPS_TABLE = "course_maps";
@@ -337,7 +337,7 @@ async function runExportJob(job, deadlineAt) {
   const recipe = job.recipe && (job.recipe.presetId || job.recipe.overrides || job.recipe.courseOverrides) ? job.recipe : await latestPublishedRecipe(job.course_id);
   const presetId = String(recipe.presetId || "");
   const overrides = recipe.overrides || recipe.courseOverrides || {};
-  const version = "r" + hashText(JSON.stringify({ presetId, overrides, snapshot: capturesIndex.generatedAt, out: 1440 }));
+  const version = "r" + hashText(JSON.stringify({ presetId, overrides, snapshot: capturesIndex.generatedAt, out: "mercator-2048" }));
   const framesDir = pkg.courseId + "/frames/" + version;
   const holeData = packageHoleData(pkg);
   const terrainEntry = entries.find(e => e.role === "terrain-reference");
@@ -387,10 +387,24 @@ async function runExportJob(job, deadlineAt) {
       const captures = [];
       for (const entry of holeEntries) captures.push({ entry: entryWithLensLocal(entry), buffer: await bufferFor(entry) });
       const terrain = terrainEntry ? { entry: terrainEntry, buffer: await bufferFor(terrainEntry) } : null;
-      const frame = await renderHoleFrame({ pins, captures, terrain, settings: overrides });
+      /* North-up mercator surface: the geometry the v19 GPS pipeline consumes natively
+         (originPx + captureZoom + one image). The runtime does the play-axis framing, same
+         as it does for locally captured surfaces. */
+      const frame = await renderHoleSurfaceMercator({ pins, captures, terrain, settings: overrides });
       await storageUpload(path, frame.jpeg, "image/jpeg");
       width = frame.width; height = frame.height;
-      playSurface = { model: "sharp-export-v1", projection: "play-axis-sharp", useGpsPlayFraming: true, fallbackUnderlay: "live-gps", fallbackPolicy: "live-gps-only", anchorPins: pins, sourceBounds: bounds, playAxis: frame.playAxis, outputDimensions: { width: frame.width, height: frame.height } };
+      playSurface = {
+        model: "mercator-image",
+        projection: "mercator-image",
+        useGpsPlayFraming: true,
+        fallbackUnderlay: "live-gps",
+        fallbackPolicy: "live-gps-only",
+        anchorPins: pins,
+        sourceBounds: frame.bounds,
+        captureZoom: frame.captureZoom,
+        originPx: frame.originPx,
+        outputDimensions: { width: frame.width, height: frame.height }
+      };
     }
     framesIndex.holes.push({ holeNumber, path, width, height, bounds, playSurface });
     await heartbeatJob(job, { version, holesDone: framesIndex.holes.length, holesTotal: holeNumbers.length });

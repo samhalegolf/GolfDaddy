@@ -1059,6 +1059,63 @@
 	      return window.GDCoursePlayPipeline.registerCoursePlayFrame(gdCoursePlayFrameCourseRef(),surfaceHoleNumber(),manifest,opts||{});
 	    },null);
 	  }
+	  /* Builds a v19 manifest from a worker-exported cloud surface. The export is a north-up
+	     mercator JPEG on an (originPx, captureZoom) grid - exactly the captured-surface model -
+	     so it enters the pipeline as a manifest whose tile list is ONE image covering the whole
+	     surface. Everything downstream (render, fit, shot projection, registration) is unchanged. */
+	  function cloudPublishedSurfaceManifest(reason){
+	    return safe(function(){
+	      var engine=window.GDCourseVisualEngine;
+	      if(!engine||typeof engine.getRecord!=="function")return null;
+	      var record=engine.getRecord(surfaceCourseKey());
+	      var hole=Number(surfaceHoleNumber())||0;
+	      if(!record||!hole)return null;
+	      var lists=[record.holeFramePublishedVisuals,record.holeFrameVisuals];
+	      var asset=null;
+	      for(var i=0;i<lists.length&&!asset;i++){
+	        asset=(Array.isArray(lists[i])?lists[i]:[]).find(function(item){
+	          var ps=item&&item.metadata&&item.metadata.playSurface;
+	          return item&&Number(item.holeNumber)===hole&&(item.url||item.publicUrl)&&ps&&ps.model==="mercator-image"&&ps.originPx&&Number.isFinite(Number(ps.captureZoom));
+	        })||null;
+	      }
+	      if(!asset)return null;
+	      var ps=asset.metadata.playSurface;
+	      var width=Math.round(Number(ps.outputDimensions&&ps.outputDimensions.width||asset.width)||0);
+	      var height=Math.round(Number(ps.outputDimensions&&ps.outputDimensions.height||asset.height)||0);
+	      if(!width||!height)return null;
+	      var pins=ps.anchorPins||{};
+	      var manifest={
+	        version:VERSION,
+	        key:storageKey(),
+	        reason:reason||"cloud-published-surface",
+	        surfaceModel:"captured-surface-v1",
+	        interactionOwner:"captured-surface",
+	        liveMapRole:"capture-source-diagnostic-reference",
+	        courseKey:surfaceCourseKey(),
+	        courseName:surfaceCourseName(),
+	        holeNumber:hole,
+	        captureZoom:Number(ps.captureZoom),
+	        originPx:{x:Number(ps.originPx.x),y:Number(ps.originPx.y)},
+	        imageWidth:width,
+	        imageHeight:height,
+	        anchorPins:pins,
+	        includeTee:!!pins.tee,
+	        teeLatLng:pins.tee||null,
+	        cloudPublishedSurface:true,
+	        tiles:[{x:0,y:0,width:width,height:height,z:null,url:String(asset.url||asset.publicUrl)}],
+	        createdAt:new Date().toISOString()
+	      };
+	      manifest=safe(function(){return typeof window.gdCapturedSurfaceWriteScan==="function"?window.gdCapturedSurfaceWriteScan(manifest,{reason:manifest.reason,storageKey:storageKey()}):manifest;},manifest)||manifest;
+	      captureManifest=manifest;
+	      window.gdHoleImageCaptureManifest=manifest;
+	      window.__gdLastHoleImageCaptureManifest=manifest;
+	      window.__gdV19CapturedHoleFrameManifest=manifest;
+	      safe(function(){localStorage.setItem(storageKey(),JSON.stringify(manifest));});
+	      gdRegisterCoursePlayFrameManifest(manifest,{generatedFrom:"cloud-published-surface",manifestKey:storageKey(),status:"generated"});
+	      gdCoursePlayDebugEvent("gps-play-loaded-cloud-surface",{manifestKey:storageKey(),holeNumber:hole,url:String(asset.url||asset.publicUrl).slice(0,140)});
+	      return manifest;
+	    },null);
+	  }
 	  function gdRenderCoursePlayHoleFrame(courseId,holeNumber,holePlayData,opts){
 	    opts=opts||{};
 	    if(window.gdFullMappingMode||document.body&&document.body.classList.contains("gdFullMappingMode"))return false;
@@ -1083,7 +1140,9 @@
 	      var loadedExisting=!!(manifest&&manifestMatchesActive(manifest));
 	      if(!manifest||!manifestMatchesActive(manifest)){
 	        captureManifest=null;
-	        manifest=buildCaptureManifest(bounds,opts.reason||"course-play-pipeline");
+	        /* Cloud-published surface first: a device that never scanned this course renders the
+	           worker-exported frame (styled, owned pixels) instead of re-shuttering live tiles. */
+	        manifest=cloudPublishedSurfaceManifest(opts.reason||"course-play-pipeline")||buildCaptureManifest(bounds,opts.reason||"course-play-pipeline");
 	      }
 	      if(!manifest||!manifestMatchesActive(manifest))return false;
 	      if(opts.cacheOnly)return true;
