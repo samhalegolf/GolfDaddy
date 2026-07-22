@@ -232,7 +232,10 @@ async function enqueueFollowUpExport(courseId) {
    pick up where it died - up to 3 attempts, then failed for good. The worker heartbeats after
    every hole, so only genuinely dead runs trip the 20-minute cutoff. */
 async function reapStaleJobs() {
-  const cutoff = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+  /* Heartbeats land every hole (~1 min); 6 minutes of silence means the invocation is dead.
+     Observed runtime cap in production is ~4 minutes per invocation, so a tight window here
+     keeps the requeue->resume loop moving instead of stalling 20 minutes per death. */
+  const cutoff = new Date(Date.now() - 6 * 60 * 1000).toISOString();
   try {
     const stale = await supabaseFetch(JOBS_TABLE + "?select=id,result&status=eq.running&updated_at=lt." + encodeURIComponent(cutoff));
     for (const row of Array.isArray(stale) ? stale : []) {
@@ -316,7 +319,7 @@ async function heartbeatJob(job, progress) {
    pure bitmap ops, no engine, no nested base64 SVGs, no librsvg megaparse. Seconds per hole,
    ~50MB peak. The version directory is a deterministic hash of (recipe, snapshot) and
    already-uploaded frames are skipped, so an interrupted run resumes where it stopped. */
-async function runExportJob(job) {
+async function runExportJob(job, deadlineAt) {
   const pkg = await loadCoursePackage(job.course_id);
   if (!pkg) throw new Error("course " + job.course_id + " not found in " + MAPS_TABLE);
   const capturesIndex = JSON.parse((await storageDownload(job.course_id + "/captures/index.json")).toString("utf8"));
@@ -375,6 +378,13 @@ async function runExportJob(job) {
     }
     framesIndex.holes.push({ holeNumber, path, width, height, bounds, playSurface });
     await heartbeatJob(job, { version, holesDone: framesIndex.holes.length, holesTotal: holeNumbers.length });
+    /* Production invocations get silently killed around the 4-minute mark regardless of the
+       advertised background budget. Rather than die mid-hole and wait for the reaper, hand
+       the job back to the queue at the soft deadline and chain a fresh invocation - uploaded
+       frames make the resume instant. */
+    if (deadlineAt && Date.now() > deadlineAt && framesIndex.holes.length < holeNumbers.length) {
+      return { requeue: true, progress: { version, holesDone: framesIndex.holes.length, holesTotal: holeNumbers.length } };
+    }
   }
   const overviewPath = framesDir + "/overview.jpg";
   if (backdropEntry) {
@@ -403,16 +413,37 @@ async function runExportJob(job) {
   };
 }
 
+const SOFT_DEADLINE_MS = 3 * 60 * 1000;
+
+function chainNextInvocation(req) {
+  try {
+    const origin = new URL(req.url).origin;
+    fetch(origin + "/.netlify/functions/course-visual-worker-background", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}"
+    }).catch(() => {});
+  } catch (e) { /* sweeper will pick it up */ }
+}
+
 export default async function courseVisualWorker(req) {
   if (!supabaseBase() || !supabaseKey()) return new Response("supabase not configured", { status: 503 });
   let payload = {};
   try { payload = await req.json(); } catch (e) { payload = {}; }
   await reapStaleJobs();
+  const deadlineAt = Date.now() + SOFT_DEADLINE_MS;
   /* Process the named job, then sweep any other queued jobs while we have the budget. */
   let job = await claimJob(payload && payload.jobId || null);
   while (job) {
     try {
-      const result = job.kind === "snapshot" ? await runSnapshotJob(job) : job.kind === "export" ? await runExportJob(job) : { skipped: "unknown kind " + job.kind };
+      const result = job.kind === "snapshot" ? await runSnapshotJob(job) : job.kind === "export" ? await runExportJob(job, deadlineAt) : { skipped: "unknown kind " + job.kind };
+      if (result && result.requeue) {
+        /* Soft deadline reached: hand the job back and chain a fresh invocation, which
+           resumes instantly from the frames already uploaded. */
+        await finishJob(job.id, { status: "queued", result: { progress: result.progress, attempts: job.result && Number(job.result.attempts) || 0 }, error: null });
+        chainNextInvocation(req);
+        break;
+      }
       await finishJob(job.id, { status: "done", result, error: null });
       /* Hybrid: fresh captures always get re-exported with the live recipe (or natural). */
       if (job.kind === "snapshot") await enqueueFollowUpExport(job.course_id).catch(() => {});
@@ -420,6 +451,7 @@ export default async function courseVisualWorker(req) {
       console.error("course-visual-worker job failed", job.id, error);
       await finishJob(job.id, { status: "failed", error: String(error && error.message || error).slice(0, 900) }).catch(() => {});
     }
+    if (Date.now() > deadlineAt) { chainNextInvocation(req); break; }
     job = await claimJob(null);
   }
   return new Response("ok", { status: 200 });
