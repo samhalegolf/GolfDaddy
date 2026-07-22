@@ -12,10 +12,7 @@
 
 import sharp from "sharp";
 import { planCourseCaptures, captureGrid, packageHoleData } from "./lib/gd-visual-plan-core.mjs";
-/* Static import so Netlify's bundler ships the engine with the function. The UMD factory runs
-   at import with root=globalThis and touches localStorage only at call time behind guards, so
-   installing the stubs later (loadEngine) is safe. */
-import engineModule from "../scripts/gd-course-visual-engine.js";
+import { renderHoleFrame, renderOverview } from "./lib/gd-visual-export-core.mjs";
 
 const JOBS_TABLE = "course_visual_jobs";
 const MAPS_TABLE = "course_maps";
@@ -197,51 +194,6 @@ async function storageDownload(path) {
   return Buffer.from(await response.arrayBuffer());
 }
 
-/* The export runs the SAME code the browser sandbox runs - gd-course-visual-engine.js is UMD
-   and happily loads in Node behind a localStorage stub (the engine test suite has always done
-   this). Recipe parity is therefore by construction: identical stitch, identical filter
-   markup, and librsvg (sharp's SVG rasterizer) supports the filter primitives the recipe
-   uses (verified: feColorMatrix, feComponentTransfer, mix-blend-mode multiply). */
-let engineReady = false;
-function loadEngine() {
-  if (engineReady) return engineModule;
-  const data = {};
-  globalThis.localStorage = globalThis.localStorage || {
-    getItem: k => Object.prototype.hasOwnProperty.call(data, k) ? data[k] : null,
-    setItem: (k, v) => { data[k] = String(v); },
-    removeItem: k => { delete data[k]; },
-    clear: () => { Object.keys(data).forEach(k => delete data[k]); }
-  };
-  globalThis.dispatchEvent = globalThis.dispatchEvent || (() => {});
-  globalThis.CustomEvent = globalThis.CustomEvent || function CustomEvent(type, init) { return { type, detail: init && init.detail }; };
-  engineReady = true;
-  return engineModule;
-}
-
-function engineObjectsFromPackage(pkg) {
-  const holeData = packageHoleData(pkg);
-  const objects = [];
-  Object.keys(holeData).forEach(key => {
-    const data = holeData[key];
-    const holeNumber = Number(key);
-    if (data.green && data.green.position) objects.push({ id: "green:h" + holeNumber, type: "green", holeNumber, geometry: data.greenShape && data.greenShape.length ? { type: "LineString", points: data.greenShape } : { type: "Point", point: data.green.position } });
-    if (data.tee && data.tee.position) objects.push({ id: "tee:h" + holeNumber, type: "tee", holeNumber, geometry: { type: "Point", point: data.tee.position } });
-    if (data.route && data.route.length) objects.push({ id: "fairway:h" + holeNumber, type: "fairway", holeNumber, geometry: { type: "LineString", points: data.route } });
-  });
-  return objects;
-}
-
-async function rasterizeSvgDataUrl(dataUrl, { maxWidth, quality }) {
-  const comma = String(dataUrl || "").indexOf(",");
-  if (comma < 0) throw new Error("asset has no data url");
-  const body = String(dataUrl).slice(comma + 1);
-  const svg = Buffer.from(String(dataUrl).includes(";base64,") ? Buffer.from(body, "base64").toString("utf8") : decodeURIComponent(body), "utf8");
-  let image = sharp(svg, { limitInputPixels: false, density: 72 });
-  const meta = await image.metadata();
-  if (maxWidth && meta.width && meta.width > maxWidth) image = image.resize({ width: maxWidth });
-  return image.jpeg({ quality: quality || 82 }).toBuffer();
-}
-
 /* Natural baseline: every effect off. Mirrors GD_VISUAL_OFF_OVERRIDES in the admin UI. */
 const NATURAL_OVERRIDES = {
   turf: { greenStrength: 0, greenTone: 0 },
@@ -360,96 +312,66 @@ async function heartbeatJob(job, progress) {
   }).catch(() => {});
 }
 
-function entryToCapture(entry, buffer) {
-  const mime = entry.path.endsWith(".png") ? "image/png" : "image/jpeg";
-  return {
-    id: entry.id,
-    storagePath: "cloud:" + entry.captureKey,
-    imageData: "data:" + mime + ";base64," + buffer.toString("base64"),
-    bounds: entry.bounds,
-    width: entry.width,
-    height: entry.height,
-    zoom: entry.captureZoom,
-    originPx: entry.originPx,
-    holeNumber: entry.holeNumber,
-    role: entry.role,
-    quality: entry.quality,
-    stitchLayer: entry.stitchLayer,
-    planId: entry.id,
-    segmentIndex: entry.segmentIndex,
-    segmentCount: entry.segmentCount,
-    terrainStageOnly: !!entry.terrainStageOnly,
-    anchorPins: entry.anchorPins || {},
-    captureAnchorPins: entry.captureAnchorPins || null,
-    captureLens: entry.lensOrientation === "play-axis" ? "mobile-hole" : "",
-    lensShape: entry.lensOrientation === "play-axis" ? "mobile-hole" : "",
-    lensOrientation: entry.lensOrientation || "",
-    lensLocalCorners: Array.isArray(entry.lensCornersPx) && entry.originPx
-      ? entry.lensCornersPx.map(p => ({ x: p.x - entry.originPx.x, y: p.y - entry.originPx.y }))
-      : []
-  };
-}
-
-/* Export bakes ONE HOLE AT A TIME through the engine. A whole-course bake holds hundreds of
-   MB of SVG strings at once - it OOM-killed the function the same way it froze browser tabs.
-   Per-hole mini-bakes keep peak memory to a few captures, the version directory is a
-   deterministic hash of (recipe, snapshot), and already-uploaded frames are skipped - so a
-   run that dies at hole 12 resumes at hole 12 when the reaper requeues it. */
+/* Export renders ONE HOLE AT A TIME with the sharp compositor (gd-visual-export-core) -
+   pure bitmap ops, no engine, no nested base64 SVGs, no librsvg megaparse. Seconds per hole,
+   ~50MB peak. The version directory is a deterministic hash of (recipe, snapshot) and
+   already-uploaded frames are skipped, so an interrupted run resumes where it stopped. */
 async function runExportJob(job) {
-  const engine = loadEngine();
   const pkg = await loadCoursePackage(job.course_id);
   if (!pkg) throw new Error("course " + job.course_id + " not found in " + MAPS_TABLE);
   const capturesIndex = JSON.parse((await storageDownload(job.course_id + "/captures/index.json")).toString("utf8"));
   const entries = Array.isArray(capturesIndex && capturesIndex.captures) ? capturesIndex.captures : [];
   if (!entries.length) throw new Error("no captures in index - run a snapshot job first");
   const recipe = job.recipe && (job.recipe.presetId || job.recipe.overrides || job.recipe.courseOverrides) ? job.recipe : await latestPublishedRecipe(job.course_id);
-  const presetId = String(recipe.presetId || "") || (engine.defaultPreset && engine.defaultPreset().id) || "";
+  const presetId = String(recipe.presetId || "");
   const overrides = recipe.overrides || recipe.courseOverrides || {};
   const version = "r" + hashText(JSON.stringify({ presetId, overrides, snapshot: capturesIndex.generatedAt }));
   const framesDir = pkg.courseId + "/frames/" + version;
-  const objects = engineObjectsFromPackage(pkg);
+  const holeData = packageHoleData(pkg);
   const terrainEntry = entries.find(e => e.role === "terrain-reference");
   const backdropEntry = entries.find(e => e.role === "course-backdrop");
   const cachedBuffers = {};
-  /* Captures are downscaled to the export's output resolution before being embedded. The SVG
-     lays images out by their LOGICAL width/height attributes, so shrinking the pixels changes
-     nothing about geometry or recipe - but it keeps the frame SVG well under librsvg's 10MB
-     XML buffer limit (full-res embeds blew straight through it) and cuts peak memory ~4x. */
+  /* Downscale captures to output resolution up front - geometry uses logical dims, so this
+     changes nothing visually at 2048 output while keeping memory small. */
   async function bufferFor(entry) {
     if (!cachedBuffers[entry.path]) {
       const raw = await storageDownload(entry.path);
       const isPng = entry.path.endsWith(".png");
       const resized = sharp(raw, { limitInputPixels: false }).resize({ width: 2048, height: 2048, fit: "inside", withoutEnlargement: true });
-      cachedBuffers[entry.path] = await (isPng ? resized.png({ compressionLevel: 9 }) : resized.jpeg({ quality: 82 })).toBuffer();
+      cachedBuffers[entry.path] = await (isPng ? resized.png({ compressionLevel: 9 }) : resized.jpeg({ quality: 88 })).toBuffer();
     }
     return cachedBuffers[entry.path];
+  }
+  function entryWithLensLocal(entry) {
+    return Object.assign({}, entry, {
+      lensLocalCorners: Array.isArray(entry.lensCornersPx) && entry.originPx
+        ? entry.lensCornersPx.map(p => ({ x: p.x - entry.originPx.x, y: p.y - entry.originPx.y }))
+        : []
+    });
   }
   const holeNumbers = [...new Set(entries.filter(e => e.holeNumber && !e.terrainStageOnly).map(e => Number(e.holeNumber)))].sort((a, b) => a - b);
   const framesIndex = { version: 1, courseId: pkg.courseId, exportVersion: version, presetId, generatedAt: capturesIndex.generatedAt, overview: null, holes: [] };
   for (const holeNumber of holeNumbers) {
     const path = framesDir + "/h" + holeNumber + ".jpg";
     const holeEntries = entries.filter(e => Number(e.holeNumber) === holeNumber && !e.terrainStageOnly);
-    const already = await storageExists(path);
-    let width = null, height = null, bounds = null, playSurface = null;
-    if (!already) {
-      const holeCaptures = [];
-      for (const entry of holeEntries) holeCaptures.push(entryToCapture(entry, await bufferFor(entry)));
-      if (terrainEntry) holeCaptures.push(entryToCapture(terrainEntry, await bufferFor(terrainEntry)));
-      const holeCourseId = pkg.courseId + "--h" + holeNumber;
-      engine.ingestCourseVisualInput({ courseId: holeCourseId, courseName: pkg.courseName, objects: objects.filter(o => Number(o.holeNumber) === holeNumber), captures: holeCaptures });
-      await engine.buildCourseVisualMaster(holeCourseId, { captures: holeCaptures, forceRebuild: true });
-      await engine.buildCourseVisualPreview(holeCourseId, presetId, overrides);
-      const record = engine.getRecord(holeCourseId);
-      if (record.lastError) throw new Error("hole " + holeNumber + " bake failed: " + (record.lastError.message || record.lastError.code));
-      const frame = ((record.holeFrameTerrainViews && record.holeFrameTerrainViews.length ? record.holeFrameTerrainViews : record.holeFramePreviewVisuals) || []).find(f => f && f.dataUrl && Number(f.holeNumber) === holeNumber);
-      if (!frame) throw new Error("hole " + holeNumber + " produced no styled frame");
-      width = frame.width; height = frame.height; bounds = frame.bounds; playSurface = frame.metadata && frame.metadata.playSurface || null;
-      const jpeg = await rasterizeSvgDataUrl(frame.dataUrl, { maxWidth: 2048, quality: 82 });
-      await storageUpload(path, jpeg, "image/jpeg");
-      engine.resetCourseVisualWorkingState(holeCourseId, { keepPublished: false });
-    } else {
-      const holeBounds = holeEntries.map(e => e.bounds).filter(Boolean);
-      bounds = holeBounds.length ? { south: Math.min(...holeBounds.map(b => b.south)), west: Math.min(...holeBounds.map(b => b.west)), north: Math.max(...holeBounds.map(b => b.north)), east: Math.max(...holeBounds.map(b => b.east)) } : null;
+    const holeBoundsList = holeEntries.map(e => e.bounds).filter(Boolean);
+    const bounds = holeBoundsList.length ? { south: Math.min(...holeBoundsList.map(b => b.south)), west: Math.min(...holeBoundsList.map(b => b.west)), north: Math.max(...holeBoundsList.map(b => b.north)), east: Math.max(...holeBoundsList.map(b => b.east)) } : null;
+    const data = holeData[holeNumber] || {};
+    const pins = {
+      tee: data.tee && data.tee.position || (holeEntries[0] && holeEntries[0].anchorPins && holeEntries[0].anchorPins.tee) || null,
+      green: data.green && data.green.position || (holeEntries[0] && holeEntries[0].anchorPins && holeEntries[0].anchorPins.green) || null,
+      route: data.route || [],
+      greenShape: data.greenShape || []
+    };
+    let width = null, height = null, playSurface = null;
+    if (!(await storageExists(path))) {
+      const captures = [];
+      for (const entry of holeEntries) captures.push({ entry: entryWithLensLocal(entry), buffer: await bufferFor(entry) });
+      const terrain = terrainEntry ? { entry: terrainEntry, buffer: await bufferFor(terrainEntry) } : null;
+      const frame = await renderHoleFrame({ pins, captures, terrain, settings: overrides });
+      await storageUpload(path, frame.jpeg, "image/jpeg");
+      width = frame.width; height = frame.height;
+      playSurface = { model: "sharp-export-v1", projection: "play-axis-sharp", useGpsPlayFraming: true, fallbackUnderlay: "live-gps", fallbackPolicy: "live-gps-only", anchorPins: pins, sourceBounds: bounds, playAxis: frame.playAxis, outputDimensions: { width: frame.width, height: frame.height } };
     }
     framesIndex.holes.push({ holeNumber, path, width, height, bounds, playSurface });
     await heartbeatJob(job, { version, holesDone: framesIndex.holes.length, holesTotal: holeNumbers.length });
@@ -457,25 +379,18 @@ async function runExportJob(job) {
   const overviewPath = framesDir + "/overview.jpg";
   if (backdropEntry) {
     if (!(await storageExists(overviewPath))) {
-      const overviewCaptures = [entryToCapture(backdropEntry, await bufferFor(backdropEntry))];
-      if (terrainEntry) overviewCaptures.push(entryToCapture(terrainEntry, await bufferFor(terrainEntry)));
-      const overviewCourseId = pkg.courseId + "--overview";
-      engine.ingestCourseVisualInput({ courseId: overviewCourseId, courseName: pkg.courseName, objects: [], captures: overviewCaptures });
-      await engine.buildCourseVisualMaster(overviewCourseId, { captures: overviewCaptures, forceRebuild: true });
-      await engine.buildCourseVisualPreview(overviewCourseId, presetId, overrides, { skipHoleFrames: true });
-      const overviewRecord = engine.getRecord(overviewCourseId);
-      const overviewAsset = overviewRecord.terrainView || overviewRecord.previewVisual || overviewRecord.rawMaster;
-      if (overviewAsset && overviewAsset.dataUrl) {
-        const jpeg = await rasterizeSvgDataUrl(overviewAsset.dataUrl, { maxWidth: 2048, quality: 80 });
-        await storageUpload(overviewPath, jpeg, "image/jpeg");
-        framesIndex.overview = { path: overviewPath, width: overviewAsset.width, height: overviewAsset.height, bounds: overviewAsset.bounds || backdropEntry.bounds };
-      }
-      engine.resetCourseVisualWorkingState(overviewCourseId, { keepPublished: false });
+      const overview = await renderOverview({
+        backdrop: { entry: backdropEntry, buffer: await bufferFor(backdropEntry) },
+        terrain: terrainEntry ? { entry: terrainEntry, buffer: await bufferFor(terrainEntry) } : null,
+        settings: overrides
+      });
+      await storageUpload(overviewPath, overview.jpeg, "image/jpeg");
+      framesIndex.overview = { path: overviewPath, width: overview.width, height: overview.height, bounds: backdropEntry.bounds };
     } else {
       framesIndex.overview = { path: overviewPath, width: backdropEntry.width, height: backdropEntry.height, bounds: backdropEntry.bounds };
     }
   }
-  if (!framesIndex.holes.length) throw new Error("no hole frames produced by the engine bake");
+  if (!framesIndex.holes.length) throw new Error("no hole frames produced");
   await storageUpload(pkg.courseId + "/frames/index.json", Buffer.from(JSON.stringify(framesIndex)), "application/json");
   await writeCourseVisualRow(job, pkg, framesIndex, { presetId, overrides });
   return {

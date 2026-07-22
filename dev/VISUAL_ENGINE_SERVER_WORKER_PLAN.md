@@ -92,6 +92,16 @@ The sandbox stays the source of truth for how a recipe *looks*; the worker must 
    Remaining: GPS play consuming cloud frames (currently only the admin preview does), and
    tile caching/throttling in the worker if snapshot volume grows.
 
+## Export engine note (2026-07-22, later)
+
+The engine-in-Node export (nested base64 SVGs) proved parity but was structurally heavy: it
+OOM-killed workers and tripped librsvg's 10MB XML limit. Replaced by
+`functions/lib/gd-visual-export-core.mjs` - a sharp compositor that ports the engine's
+play-axis layout math exactly and applies the recipe as libvips primitives (~2s/hole, ~50MB).
+First real publish (cv-pupuke, frames/r3vfiah) was produced by the engine path and visually
+matches the compositor output. v1 approximations vs the engine: green-hue tint layers and
+fairway airbrush are simplified; sat/brightness/contrast/terrain/floodlight/mow are exact.
+
 ## Recipe model (Sam, 2026-07-22)
 
 Effects are LAYERS over the raw capture, all OFF by default. Reset = raw capture. The admin
