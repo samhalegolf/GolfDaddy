@@ -366,12 +366,16 @@ async function runExportJob(job, deadlineAt) {
     });
   }
   const holeNumbers = [...new Set(entries.filter(e => e.holeNumber && !e.terrainStageOnly).map(e => Number(e.holeNumber)))].sort((a, b) => a - b);
+  /* Previous index (if any) is the metadata source for legally skipping already-uploaded
+     frames on a resume. Best effort - absent on first export. */
+  let previousIndex = null;
+  try { previousIndex = JSON.parse((await storageDownload(pkg.courseId + "/frames/index.json")).toString("utf8")); } catch (e) { previousIndex = null; }
   const framesIndex = { version: 1, courseId: pkg.courseId, exportVersion: version, presetId, generatedAt: capturesIndex.generatedAt, overview: null, holes: [] };
   for (const holeNumber of holeNumbers) {
     const path = framesDir + "/h" + holeNumber + ".jpg";
     const holeEntries = entries.filter(e => Number(e.holeNumber) === holeNumber && !e.terrainStageOnly);
     const holeBoundsList = holeEntries.map(e => e.bounds).filter(Boolean);
-    const bounds = holeBoundsList.length ? { south: Math.min(...holeBoundsList.map(b => b.south)), west: Math.min(...holeBoundsList.map(b => b.west)), north: Math.max(...holeBoundsList.map(b => b.north)), east: Math.max(...holeBoundsList.map(b => b.east)) } : null;
+    let bounds = holeBoundsList.length ? { south: Math.min(...holeBoundsList.map(b => b.south)), west: Math.min(...holeBoundsList.map(b => b.west)), north: Math.max(...holeBoundsList.map(b => b.north)), east: Math.max(...holeBoundsList.map(b => b.east)) } : null;
     const data = holeData[holeNumber] || {};
     const pins = {
       tee: data.tee && data.tee.position || (holeEntries[0] && holeEntries[0].anchorPins && holeEntries[0].anchorPins.tee) || null,
@@ -380,7 +384,16 @@ async function runExportJob(job, deadlineAt) {
       greenShape: data.greenShape || []
     };
     let width = null, height = null, playSurface = null;
-    if (!(await storageExists(path))) {
+    /* A frame may only be SKIPPED when its metadata is recoverable from the previous index -
+       skipping used to write playSurface:null, so every relay resume clobbered the GPS
+       geometry for the holes it skipped. No recoverable metadata means re-render. */
+    const prevEntry = previousIndex && previousIndex.exportVersion === version
+      ? (previousIndex.holes || []).find(h => h && Number(h.holeNumber) === holeNumber && h.playSurface && h.playSurface.originPx)
+      : null;
+    if (prevEntry && await storageExists(path)) {
+      width = prevEntry.width; height = prevEntry.height; playSurface = prevEntry.playSurface;
+      if (prevEntry.bounds) bounds = prevEntry.bounds;
+    } else {
       /* Stage marker BEFORE the render: a silent crash (OOM, native abort) writes no error,
          but this leaves a corpse marker in the job row saying exactly where it died. */
       await heartbeatJob(job, { version, holesDone: framesIndex.holes.length, holesTotal: holeNumbers.length, stage: "rendering h" + holeNumber, rssMb: Math.round(process.memoryUsage().rss / 1048576) });
