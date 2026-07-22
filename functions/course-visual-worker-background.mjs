@@ -411,8 +411,17 @@ async function runExportJob(job) {
   const terrainEntry = entries.find(e => e.role === "terrain-reference");
   const backdropEntry = entries.find(e => e.role === "course-backdrop");
   const cachedBuffers = {};
+  /* Captures are downscaled to the export's output resolution before being embedded. The SVG
+     lays images out by their LOGICAL width/height attributes, so shrinking the pixels changes
+     nothing about geometry or recipe - but it keeps the frame SVG well under librsvg's 10MB
+     XML buffer limit (full-res embeds blew straight through it) and cuts peak memory ~4x. */
   async function bufferFor(entry) {
-    if (!cachedBuffers[entry.path]) cachedBuffers[entry.path] = await storageDownload(entry.path);
+    if (!cachedBuffers[entry.path]) {
+      const raw = await storageDownload(entry.path);
+      const isPng = entry.path.endsWith(".png");
+      const resized = sharp(raw, { limitInputPixels: false }).resize({ width: 2048, height: 2048, fit: "inside", withoutEnlargement: true });
+      cachedBuffers[entry.path] = await (isPng ? resized.png({ compressionLevel: 9 }) : resized.jpeg({ quality: 82 })).toBuffer();
+    }
     return cachedBuffers[entry.path];
   }
   const holeNumbers = [...new Set(entries.filter(e => e.holeNumber && !e.terrainStageOnly).map(e => Number(e.holeNumber)))].sort((a, b) => a - b);
