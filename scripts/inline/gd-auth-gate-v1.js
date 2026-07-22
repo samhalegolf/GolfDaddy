@@ -13,7 +13,8 @@
     },null);
   }
   function locked(){return !demoMode()&&!account();}
-  let demoPracticeOpened=false;
+  let demoPracticeRetriesScheduled=false;
+  let demoPracticeOffsetApplied=false;
   function closeNonAuthSurfaces(){
     safe(()=>document.querySelectorAll('.modulePanel.open,.panel.open').forEach(el=>el.classList.remove('open')));
     safe(()=>{
@@ -130,6 +131,37 @@
     });
     return opened;
   }
+  function practiceDemoSurfaceVisible(){
+    return safe(function(){
+      const text=document.body?.innerText||'';
+      return document.body.classList.contains('gdShotDataOpen')&&/Practice Data|Sam Hale - Practice Data/.test(text);
+    },false);
+  }
+  function applyPracticeDemoOffset(){
+    if(demoPracticeOffsetApplied)return;
+    safe(function(){
+      if(typeof window.gdRenderPracticeData==='function')window.gdRenderPracticeData();
+      if(typeof window.gdRenderBubbleOffsetHub==='function')window.gdRenderBubbleOffsetHub(true);
+      const input=document.querySelector('#practiceDataPanel .gdBubbleFaceOffsetInput')||document.querySelector('.gdBubbleFaceOffsetInput');
+      if(input){
+        if(typeof window.gdBubbleOffsetEdit==='function')window.gdBubbleOffsetEdit();
+        input.value='2.1';
+        input.dispatchEvent(new Event('input',{bubbles:true}));
+        if(typeof window.gdBubbleOffsetSave==='function')window.gdBubbleOffsetSave();
+        demoPracticeOffsetApplied=true;
+      }
+    });
+  }
+  function schedulePracticeDemoSurfaceRetries(){
+    if(demoPracticeRetriesScheduled)return;
+    demoPracticeRetriesScheduled=true;
+    [0,450,1000,1800,3000,5000,7500].forEach(function(delay){
+      setTimeout(function(){
+        if(!practiceDemoSurfaceVisible())openRealPracticeDemoSurface();
+        if(practiceDemoSurfaceVisible())applyPracticeDemoOffset();
+      },delay);
+    });
+  }
   function seedRealPracticeDemo(){
     if(!demoMode())return false;
     const api=window.GolfDaddyLaunchMonitorData;
@@ -152,22 +184,7 @@
         sessionStorage.setItem(key,'1');
       });
     }
-    if(!demoPracticeOpened&&openRealPracticeDemoSurface()){
-      demoPracticeOpened=true;
-      setTimeout(function(){
-        safe(function(){
-          if(typeof window.gdRenderPracticeData==='function')window.gdRenderPracticeData();
-          if(typeof window.gdRenderBubbleOffsetHub==='function')window.gdRenderBubbleOffsetHub(true);
-          const input=document.querySelector('#practiceDataPanel .gdBubbleFaceOffsetInput')||document.querySelector('.gdBubbleFaceOffsetInput');
-          if(input){
-            if(typeof window.gdBubbleOffsetEdit==='function')window.gdBubbleOffsetEdit();
-            input.value='2.1';
-            input.dispatchEvent(new Event('input',{bubbles:true}));
-            if(typeof window.gdBubbleOffsetSave==='function')window.gdBubbleOffsetSave();
-          }
-        });
-      },350);
-    }
+    schedulePracticeDemoSurfaceRetries();
     return true;
   }
   function install(){
