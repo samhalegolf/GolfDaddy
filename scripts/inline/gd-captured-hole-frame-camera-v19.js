@@ -1067,9 +1067,14 @@
 	    return safe(function(){
 	      var engine=window.GDCourseVisualEngine;
 	      if(!engine||typeof engine.getRecord!=="function")return null;
-	      var record=engine.getRecord(surfaceCourseKey());
 	      var hole=Number(surfaceHoleNumber())||0;
-	      if(!record||!hole)return null;
+	      if(!hole)return null;
+	      /* Already built this hole's cloud manifest? Reuse the stored copy instead of
+	         re-registering on every render. */
+	      var stored=safe(function(){return JSON.parse(localStorage.getItem(storageKey())||"null");},null);
+	      if(stored&&stored.cloudPublishedSurface&&Number(stored.holeNumber)===hole&&manifestMatchesActive(stored))return stored;
+	      var record=engine.getRecord(surfaceCourseKey());
+	      if(!record)return null;
 	      var lists=[record.holeFramePublishedVisuals,record.holeFrameVisuals];
 	      var asset=null;
 	      for(var i=0;i<lists.length&&!asset;i++){
@@ -1078,7 +1083,21 @@
 	          return item&&Number(item.holeNumber)===hole&&(item.url||item.publicUrl)&&ps&&ps.model==="mercator-image"&&ps.originPx&&Number.isFinite(Number(ps.captureZoom));
 	        })||null;
 	      }
-	      if(!asset)return null;
+	      if(!asset){
+	        /* Record not pulled yet (fresh device, or entered play before the pull finished).
+	           Pull once, then re-render the hole - the cloud surface swaps in seconds later
+	           instead of the device being stuck on whatever it shuttered first. */
+	        var pullFlag="__gdCloudSurfacePullAt_"+surfaceCourseKey();
+	        if(typeof engine.pullCourseVisual==="function"&&(!window[pullFlag]||Date.now()-window[pullFlag]>60000)){
+	          window[pullFlag]=Date.now();
+	          safe(function(){
+	            engine.pullCourseVisual(surfaceCourseKey()).then(function(){
+	              safe(function(){if(typeof window.gdEnsureCoursePlayFrameRendered==="function")window.gdEnsureCoursePlayFrameRendered();});
+	            }).catch(function(){});
+	          });
+	        }
+	        return null;
+	      }
 	      var ps=asset.metadata.playSurface;
 	      var width=Math.round(Number(ps.outputDimensions&&ps.outputDimensions.width||asset.width)||0);
 	      var height=Math.round(Number(ps.outputDimensions&&ps.outputDimensions.height||asset.height)||0);
@@ -1136,13 +1155,16 @@
 	      if(!data)return false;
 	      var bounds=coursePlayGreenBounds(data);
 	      if(!validBounds(bounds))return false;
-	      var manifest=loadCaptureManifest();
-	      var loadedExisting=!!(manifest&&manifestMatchesActive(manifest));
+	      /* Priority: published cloud surface (styled, current recipe, owned pixels) beats any
+	         auto-shuttered local capture; local remains the fallback, the live shutter last.
+	         If the cloud record hasn't arrived yet, cloudPublishedSurfaceManifest pulls it and
+	         re-renders, so a fresh device self-upgrades seconds after first paint. */
+	      var cloudManifest=cloudPublishedSurfaceManifest(opts.reason||"course-play-pipeline");
+	      var manifest=cloudManifest||loadCaptureManifest();
+	      var loadedExisting=!cloudManifest&&!!(manifest&&manifestMatchesActive(manifest));
 	      if(!manifest||!manifestMatchesActive(manifest)){
 	        captureManifest=null;
-	        /* Cloud-published surface first: a device that never scanned this course renders the
-	           worker-exported frame (styled, owned pixels) instead of re-shuttering live tiles. */
-	        manifest=cloudPublishedSurfaceManifest(opts.reason||"course-play-pipeline")||buildCaptureManifest(bounds,opts.reason||"course-play-pipeline");
+	        manifest=buildCaptureManifest(bounds,opts.reason||"course-play-pipeline");
 	      }
 	      if(!manifest||!manifestMatchesActive(manifest))return false;
 	      if(opts.cacheOnly)return true;
