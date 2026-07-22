@@ -92,8 +92,10 @@ export default async function courseVisualJobs(req) {
   /* Ping the background worker; fire-and-forget. If the ping is lost the job stays queued and
      the next enqueue or a manual worker invocation sweeps it up. */
   try {
+    /* Awaited: an un-awaited fetch can be frozen with the process before it sends. The
+       background worker acks 202 immediately, so this costs a few hundred ms. */
     const origin = new URL(req.url).origin;
-    fetch(origin + "/.netlify/functions/course-visual-worker-background", {
+    await fetch(origin + "/.netlify/functions/course-visual-worker-background", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ jobId: job && job.id || null })

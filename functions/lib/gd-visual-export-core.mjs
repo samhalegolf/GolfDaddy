@@ -164,7 +164,7 @@ function applyMatrix(m, x, y) { return { x: m.a * x + m.c * y + m.e, y: m.b * x 
 
 /* ---- capture layer: mask (lens), scale, rotate, position -------------------------------- */
 
-async function captureLayer(axis, entry, buffer) {
+async function captureLayer(axis, entry, buffer, tone) {
   const m = captureMatrix(axis, entry);
   if (!m) return null;
   const meta = await sharp(buffer).metadata();
@@ -175,30 +175,42 @@ async function captureLayer(axis, entry, buffer) {
   if (lens) {
     const pts = lens.map(p => (p.x / k) + "," + (p.y / k)).join(" ");
     const maskSvg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="' + bufW + '" height="' + bufH + '"><polygon points="' + pts + '" fill="white"/></svg>');
-    image = sharp(await image.composite([{ input: maskSvg, blend: "dest-in" }]).png().toBuffer());
+    const masked = await image.composite([{ input: maskSvg, blend: "dest-in" }]).raw().toBuffer();
+    image = sharp(masked, { raw: { width: bufW, height: bufH, channels: 4 }, limitInputPixels: false });
   }
-  /* Uniform scale + rotation (the matrix is orthogonal by construction). */
+  /* Uniform scale + rotation (the matrix is orthogonal by construction). Tone applies here,
+     per layer, inside the same pipeline - per-pixel ops commute with compositing, so this is
+     identical to toning the finished composite while saving two full-canvas encode/decode
+     round-trips. Intermediates stay RAW: no PNG/JPEG churn between stages. */
   const s = Math.hypot(m.a, m.b) * k;
   const angleDeg = Math.atan2(m.b, m.a) * 180 / Math.PI;
   const scaledW = Math.max(1, Math.round(bufW * s));
   const scaledH = Math.max(1, Math.round(bufH * s));
-  const rotated = await image.resize({ width: scaledW, height: scaledH, fit: "fill" })
-    .rotate(angleDeg, { background: { r: 0, g: 0, b: 0, alpha: 0 } })
-    .png().toBuffer();
+  image = image.resize({ width: scaledW, height: scaledH, fit: "fill" })
+    .rotate(angleDeg, { background: { r: 0, g: 0, b: 0, alpha: 0 } });
+  if (tone) image = image.linear(tone.contrast, 255 * ((tone.brightness - 1) / 2)).modulate({ saturation: tone.saturation });
+  const rotated = await image.raw().toBuffer({ resolveWithObject: true });
+  const rW = rotated.info.width, rH = rotated.info.height;
   /* Position: the rotated output's bbox top-left equals the transformed rect's bbox. */
   const corners = [[0, 0], [m.capW, 0], [m.capW, m.capH], [0, m.capH]].map(([x, y]) => applyMatrix(m, x, y));
   const left = Math.round(Math.min(...corners.map(c => c.x)));
   const top = Math.round(Math.min(...corners.map(c => c.y)));
   /* Bleed deliberately overflows the frame; sharp requires overlays to fit inside the canvas,
      so clip each layer to its visible intersection and clamp the offset. */
-  const rmeta = await sharp(rotated).metadata();
   const cropLeft = Math.max(0, -left), cropTop = Math.max(0, -top);
-  const visW = Math.min(rmeta.width - cropLeft, axis.width - Math.max(0, left));
-  const visH = Math.min(rmeta.height - cropTop, axis.height - Math.max(0, top));
+  const visW = Math.min(rW - cropLeft, axis.width - Math.max(0, left));
+  const visH = Math.min(rH - cropTop, axis.height - Math.max(0, top));
   if (visW <= 0 || visH <= 0) return null;
-  const needsCrop = cropLeft || cropTop || visW < rmeta.width || visH < rmeta.height;
-  const input = needsCrop ? await sharp(rotated).extract({ left: cropLeft, top: cropTop, width: visW, height: visH }).png().toBuffer() : rotated;
-  return { input, left: Math.max(0, left), top: Math.max(0, top), layer: num(entry.stitchLayer, 10), segment: num(entry.segmentIndex, 999), id: String(entry.id || "") };
+  const needsCrop = cropLeft || cropTop || visW < rW || visH < rH;
+  const clipped = needsCrop
+    ? await sharp(rotated.data, { raw: { width: rW, height: rH, channels: rotated.info.channels }, limitInputPixels: false }).extract({ left: cropLeft, top: cropTop, width: visW, height: visH }).raw().toBuffer({ resolveWithObject: true })
+    : rotated;
+  return {
+    input: clipped.data,
+    raw: { width: clipped.info.width, height: clipped.info.height, channels: clipped.info.channels },
+    left: Math.max(0, left), top: Math.max(0, top),
+    layer: num(entry.stitchLayer, 10), segment: num(entry.segmentIndex, 999), id: String(entry.id || "")
+  };
 }
 
 /* ---- light-effect SVGs (gradients only, never any raster) ------------------------------- */
@@ -249,41 +261,42 @@ function mowSvg(width, height, opacity) {
 export async function renderHoleFrame({ pins, captures, terrain, settings, width = 2048, quality = 82 }) {
   const axis = frameAxis(pins, captures, width);
   if (!axis) throw new Error("play axis could not be derived (missing tee/green)");
+  const f = recipeFilter(settings);
   const layers = [];
   for (const item of captures) {
-    const layer = await captureLayer(axis, item.entry, item.buffer);
+    const layer = await captureLayer(axis, item.entry, item.buffer, f);
     if (layer) layers.push(layer);
   }
   if (!layers.length) throw new Error("no renderable capture layers");
   layers.sort((a, b) => a.layer - b.layer || a.segment - b.segment || a.id.localeCompare(b.id));
-  let base = sharp({ create: { width: axis.width, height: axis.height, channels: 3, background: { r: 16, g: 19, b: 15 } }, limitInputPixels: false })
-    .composite(layers.map(l => ({ input: l.input, left: l.left, top: l.top })));
-  /* Recipe tone pass (engine applies it to the capture group before overlays). */
-  const f = recipeFilter(settings);
-  base = sharp(await base.jpeg({ quality: 95 }).toBuffer(), { limitInputPixels: false })
-    .linear(f.contrast, 255 * ((f.brightness - 1) / 2))
-    .modulate({ saturation: f.saturation });
-  const overlays = [];
+  const composites = layers.map(l => ({ input: l.input, raw: l.raw, left: l.left, top: l.top }));
   /* Terrain relief: hillshade placed with the same matrix, desaturated, multiplied. */
   const terrainCfg = terrainParams(settings);
   if (terrain && terrainCfg.strength > 0.02) {
-    const layer = await captureLayer(axis, terrain.entry, terrain.buffer);
+    const layer = await captureLayer(axis, terrain.entry, terrain.buffer, null);
     if (layer) {
+      /* greyscale() collapses to a b-w colourspace; force back to srgb so the raw buffer has
+         the channel count the final composite expects. */
       const shaded = await sharp({ create: { width: axis.width, height: axis.height, channels: 4, background: { r: 255, g: 255, b: 255, alpha: 0 } }, limitInputPixels: false })
-        .composite([{ input: layer.input, left: layer.left, top: layer.top }])
+        .composite([{ input: layer.input, raw: layer.raw, left: layer.left, top: layer.top }])
         .greyscale()
+        .toColourspace("srgb")
         .linear(terrainCfg.toneSlope, 255 * terrainCfg.toneLift)
         .ensureAlpha(terrainCfg.opacity)
-        .png().toBuffer();
-      overlays.push({ input: shaded, blend: "multiply" });
+        .raw().toBuffer({ resolveWithObject: true });
+      composites.push({ input: shaded.data, raw: { width: shaded.info.width, height: shaded.info.height, channels: shaded.info.channels }, blend: "multiply" });
     }
   }
   const mow = mowingOpacity(settings && settings.mowingVisibility);
-  if (mow > 0) overlays.push({ input: await sharp(mowSvg(axis.width, axis.height, mow)).png().toBuffer(), blend: "over" });
+  if (mow > 0) composites.push({ input: mowSvg(axis.width, axis.height, mow), blend: "over" });
   const flood = floodlightSettings(settings);
-  if (flood.enabled) overlays.push({ input: await sharp(floodlightSvg(axis, pins, flood)).png().toBuffer(), blend: "over" });
-  if (overlays.length) base = sharp(await base.jpeg({ quality: 95 }).toBuffer(), { limitInputPixels: false }).composite(overlays);
-  const jpeg = await base.jpeg({ quality }).toBuffer();
+  if (flood.enabled) composites.push({ input: floodlightSvg(axis, pins, flood), blend: "over" });
+  /* Background pushed through the same tone math the layers got, then ONE composite pass and
+     ONE encode - the double full-canvas JPEG round-trip was a third of the render time. */
+  const toneChannel = v => Math.round(Math.min(255, Math.max(0, v * f.contrast + 255 * ((f.brightness - 1) / 2))));
+  const jpeg = await sharp({ create: { width: axis.width, height: axis.height, channels: 3, background: { r: toneChannel(16), g: toneChannel(19), b: toneChannel(15) } }, limitInputPixels: false })
+    .composite(composites)
+    .jpeg({ quality }).toBuffer();
   return {
     jpeg,
     width: axis.width,

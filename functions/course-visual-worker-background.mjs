@@ -146,7 +146,14 @@ async function runSnapshotJob(job) {
     try {
       const buffer = await buildCapture(grid, { format: isTerrain ? "png" : "jpeg" });
       await storageUpload(path, buffer, isTerrain ? "image/png" : "image/jpeg");
+      /* Export-ready rendition: pre-downscaled to the frame output resolution so the export
+         never has to download and decode the full-resolution capture again. Decoding 17MP
+         JPEGs per hole was most of the export's CPU bill on throttled serverless cores. */
+      const smallPath = pkg.courseId + "/captures/2048/" + item.captureKey.replace(/:/g, "/") + "." + ext;
+      const small = sharp(buffer, { limitInputPixels: false }).resize({ width: 2048, height: 2048, fit: "inside", withoutEnlargement: true });
+      await storageUpload(smallPath, await (isTerrain ? small.png({ compressionLevel: 6 }) : small.jpeg({ quality: 88 })).toBuffer(), isTerrain ? "image/png" : "image/jpeg");
       index.captures.push({
+        path2048: smallPath,
         id: item.id,
         captureKey: item.captureKey,
         role: item.role,
@@ -334,14 +341,18 @@ async function runExportJob(job, deadlineAt) {
   const terrainEntry = entries.find(e => e.role === "terrain-reference");
   const backdropEntry = entries.find(e => e.role === "course-backdrop");
   const cachedBuffers = {};
-  /* Downscale captures to output resolution up front - geometry uses logical dims, so this
-     changes nothing visually at 2048 output while keeping memory small. */
+  /* Prefer the pre-downscaled rendition written at snapshot time - small download, no 17MP
+     decode. Older snapshots without one fall back to download + downscale of full-res. */
   async function bufferFor(entry) {
     if (!cachedBuffers[entry.path]) {
-      const raw = await storageDownload(entry.path);
-      const isPng = entry.path.endsWith(".png");
-      const resized = sharp(raw, { limitInputPixels: false }).resize({ width: 2048, height: 2048, fit: "inside", withoutEnlargement: true });
-      cachedBuffers[entry.path] = await (isPng ? resized.png({ compressionLevel: 9 }) : resized.jpeg({ quality: 88 })).toBuffer();
+      if (entry.path2048) {
+        cachedBuffers[entry.path] = await storageDownload(entry.path2048);
+      } else {
+        const raw = await storageDownload(entry.path);
+        const isPng = entry.path.endsWith(".png");
+        const resized = sharp(raw, { limitInputPixels: false }).resize({ width: 2048, height: 2048, fit: "inside", withoutEnlargement: true });
+        cachedBuffers[entry.path] = await (isPng ? resized.png({ compressionLevel: 9 }) : resized.jpeg({ quality: 88 })).toBuffer();
+      }
     }
     return cachedBuffers[entry.path];
   }
@@ -415,14 +426,22 @@ async function runExportJob(job, deadlineAt) {
 
 const SOFT_DEADLINE_MS = 3 * 60 * 1000;
 
-function chainNextInvocation(req) {
+/* AWAITED, not fire-and-forget: serverless freezes the process the moment the handler
+   returns, so an un-awaited ping never leaves the building and the relay stalls until the
+   10-minute sweeper. The target is a background function that acks with 202 immediately,
+   so awaiting costs a few hundred ms. */
+async function chainNextInvocation(req) {
   try {
     const origin = new URL(req.url).origin;
-    fetch(origin + "/.netlify/functions/course-visual-worker-background", {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    await fetch(origin + "/.netlify/functions/course-visual-worker-background", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: "{}"
+      body: "{}",
+      signal: controller.signal
     }).catch(() => {});
+    clearTimeout(timer);
   } catch (e) { /* sweeper will pick it up */ }
 }
 
@@ -441,7 +460,7 @@ export default async function courseVisualWorker(req) {
         /* Soft deadline reached: hand the job back and chain a fresh invocation, which
            resumes instantly from the frames already uploaded. */
         await finishJob(job.id, { status: "queued", result: { progress: result.progress, attempts: job.result && Number(job.result.attempts) || 0 }, error: null });
-        chainNextInvocation(req);
+        await chainNextInvocation(req);
         break;
       }
       await finishJob(job.id, { status: "done", result, error: null });
@@ -451,7 +470,7 @@ export default async function courseVisualWorker(req) {
       console.error("course-visual-worker job failed", job.id, error);
       await finishJob(job.id, { status: "failed", error: String(error && error.message || error).slice(0, 900) }).catch(() => {});
     }
-    if (Date.now() > deadlineAt) { chainNextInvocation(req); break; }
+    if (Date.now() > deadlineAt) { await chainNextInvocation(req); break; }
     job = await claimJob(null);
   }
   return new Response("ok", { status: 200 });

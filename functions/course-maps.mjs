@@ -174,7 +174,7 @@ async function enqueueVisualSnapshot(courseId, req) {
   });
   try {
     const origin = new URL(req.url).origin;
-    fetch(origin + "/.netlify/functions/course-visual-worker-background", {
+    await fetch(origin + "/.netlify/functions/course-visual-worker-background", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({})
