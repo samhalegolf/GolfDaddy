@@ -379,6 +379,9 @@ async function runExportJob(job, deadlineAt) {
     };
     let width = null, height = null, playSurface = null;
     if (!(await storageExists(path))) {
+      /* Stage marker BEFORE the render: a silent crash (OOM, native abort) writes no error,
+         but this leaves a corpse marker in the job row saying exactly where it died. */
+      await heartbeatJob(job, { version, holesDone: framesIndex.holes.length, holesTotal: holeNumbers.length, stage: "rendering h" + holeNumber, rssMb: Math.round(process.memoryUsage().rss / 1048576) });
       const captures = [];
       for (const entry of holeEntries) captures.push({ entry: entryWithLensLocal(entry), buffer: await bufferFor(entry) });
       const terrain = terrainEntry ? { entry: terrainEntry, buffer: await bufferFor(terrainEntry) } : null;
