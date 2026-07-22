@@ -13,6 +13,7 @@
     },null);
   }
   function locked(){return !demoMode()&&!account();}
+  let demoPracticeOpened=false;
   function closeNonAuthSurfaces(){
     safe(()=>document.querySelectorAll('.modulePanel.open,.panel.open').forEach(el=>el.classList.remove('open')));
     safe(()=>{
@@ -86,8 +87,8 @@
   }
   function demoMetric(key,value){return {candidateMetric:key,value:value,confidence:0.98,rawLabel:key};}
   function demoShots(){
-    const degrees=[3.82,3.96,4.08,4.18,4.24,4.02,4.14,4.28,3.9,4.1,4.22,3.98,4.16,4.06,4.3,3.94,4.12,4.2,4.0,4.26];
-    const carries=[150,151,150,152,151,149,151,152,150,151,150,149,152,151,150,152,151,150,149,152];
+    const degrees=[2.42,2.5,2.56,2.62,2.68,2.52,2.6,2.7,2.46,2.58,2.66,2.54,2.64,2.48,2.72,2.5,2.58,2.62,2.52,2.68];
+    const carries=[150,151,150,151,151,150,151,151,150,151,150,150,151,151,150,151,151,150,150,151];
     return degrees.map(function(deg,index){
       return {
         shotId:'demo-practice-shot-'+(index+1),
@@ -109,7 +110,7 @@
     if(!demoMode())return false;
     const api=window.GolfDaddyLaunchMonitorData;
     if(!api||typeof api.importCapture!=='function')return false;
-    const key='gd_demo_practice_bubble_seed_v4';
+    const key='gd_demo_practice_bubble_seed_v5';
     if(!sessionStorage.getItem(key)){
       safe(function(){
         api.clearStore();
@@ -127,26 +128,29 @@
         sessionStorage.setItem(key,'1');
       });
     }
-    safe(function(){
-      document.documentElement.classList.remove('gdAuthRouteBoot');
-      document.body.classList.remove('gdAuthLocked','gdProfileOpen');
-      if(typeof window.gdOpenDataHub==='function')window.gdOpenDataHub();
-      if(typeof window.gdDataHubPracticeAction==='function')window.gdDataHubPracticeAction();
-      else if(typeof window.openPracticeData==='function')window.openPracticeData();
-    });
-    setTimeout(function(){
+    if(!demoPracticeOpened){
+      demoPracticeOpened=true;
       safe(function(){
-        if(typeof window.gdRenderPracticeData==='function')window.gdRenderPracticeData();
-        if(typeof window.gdRenderBubbleOffsetHub==='function')window.gdRenderBubbleOffsetHub(true);
-        const input=document.querySelector('#practiceDataPanel .gdBubbleFaceOffsetInput')||document.querySelector('.gdBubbleFaceOffsetInput');
-        if(input){
-          if(typeof window.gdBubbleOffsetEdit==='function')window.gdBubbleOffsetEdit();
-          input.value='2.1';
-          input.dispatchEvent(new Event('input',{bubbles:true}));
-          if(typeof window.gdBubbleOffsetSave==='function')window.gdBubbleOffsetSave();
-        }
+        document.documentElement.classList.remove('gdAuthRouteBoot');
+        document.body.classList.remove('gdAuthLocked','gdProfileOpen');
+        if(typeof window.gdOpenDataHub==='function')window.gdOpenDataHub();
+        if(typeof window.gdDataHubPracticeAction==='function')window.gdDataHubPracticeAction();
+        else if(typeof window.openPracticeData==='function')window.openPracticeData();
       });
-    },350);
+      setTimeout(function(){
+        safe(function(){
+          if(typeof window.gdRenderPracticeData==='function')window.gdRenderPracticeData();
+          if(typeof window.gdRenderBubbleOffsetHub==='function')window.gdRenderBubbleOffsetHub(true);
+          const input=document.querySelector('#practiceDataPanel .gdBubbleFaceOffsetInput')||document.querySelector('.gdBubbleFaceOffsetInput');
+          if(input){
+            if(typeof window.gdBubbleOffsetEdit==='function')window.gdBubbleOffsetEdit();
+            input.value='2.1';
+            input.dispatchEvent(new Event('input',{bubbles:true}));
+            if(typeof window.gdBubbleOffsetSave==='function')window.gdBubbleOffsetSave();
+          }
+        });
+      },350);
+    }
     return true;
   }
   function install(){
