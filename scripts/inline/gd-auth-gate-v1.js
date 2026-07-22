@@ -56,6 +56,10 @@
   }
   function releaseGate(){
     document.body.classList.remove('gdAuthLocked');
+    if(demoMode()){
+      document.body.classList.remove('gdProfileOpen','gdPasswordResetRoute');
+      safe(()=>document.getElementById('gdProfileV67')?.classList.add('hidden'));
+    }
     safe(function(){document.documentElement.classList.remove('gdAuthRouteBoot')});
     return true;
   }
