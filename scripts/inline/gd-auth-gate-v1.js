@@ -128,13 +128,20 @@
         window.openPracticeData();
         opened=true;
       }
+      const practiceCard=document.getElementById('gdPracticeDataOpenBtn');
+      if(practiceCard&&practiceCard.getAttribute('aria-expanded')!=='true'){
+        practiceCard.click();
+        opened=true;
+      }
     });
     return opened;
   }
   function practiceDemoSurfaceVisible(){
     return safe(function(){
       const text=document.body?.innerText||'';
-      return document.body.classList.contains('gdShotDataOpen')&&/Practice Data|Sam Hale - Practice Data/.test(text);
+      const card=document.getElementById('gdPracticeDataOpenBtn');
+      return document.body.classList.contains('gdShotDataOpen')
+        && (card?.getAttribute('aria-expanded')==='true'||/Sam Hale - Practice Data|Generate Bubble|Adopt Bubble/.test(text));
     },false);
   }
   function applyPracticeDemoOffset(){
