@@ -110,6 +110,26 @@
       };
     });
   }
+  function openRealPracticeDemoSurface(){
+    let opened=false;
+    safe(function(){
+      document.documentElement.classList.remove('gdAuthRouteBoot');
+      document.body.classList.remove('gdAuthLocked','gdProfileOpen','gdPasswordResetRoute');
+      document.getElementById('gdProfileV67')?.classList.add('hidden');
+      if(typeof window.gdOpenDataHub==='function'){
+        window.gdOpenDataHub();
+        opened=true;
+      }
+      if(typeof window.gdDataHubPracticeAction==='function'){
+        window.gdDataHubPracticeAction();
+        opened=true;
+      }else if(typeof window.openPracticeData==='function'){
+        window.openPracticeData();
+        opened=true;
+      }
+    });
+    return opened;
+  }
   function seedRealPracticeDemo(){
     if(!demoMode())return false;
     const api=window.GolfDaddyLaunchMonitorData;
@@ -132,15 +152,8 @@
         sessionStorage.setItem(key,'1');
       });
     }
-    if(!demoPracticeOpened){
+    if(!demoPracticeOpened&&openRealPracticeDemoSurface()){
       demoPracticeOpened=true;
-      safe(function(){
-        document.documentElement.classList.remove('gdAuthRouteBoot');
-        document.body.classList.remove('gdAuthLocked','gdProfileOpen');
-        if(typeof window.gdOpenDataHub==='function')window.gdOpenDataHub();
-        if(typeof window.gdDataHubPracticeAction==='function')window.gdDataHubPracticeAction();
-        else if(typeof window.openPracticeData==='function')window.openPracticeData();
-      });
       setTimeout(function(){
         safe(function(){
           if(typeof window.gdRenderPracticeData==='function')window.gdRenderPracticeData();
