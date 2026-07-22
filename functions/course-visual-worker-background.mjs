@@ -19,6 +19,16 @@ const MAPS_TABLE = "course_maps";
 const BUCKET = "course-visuals";
 const TILE_CONCURRENCY = 8;
 const TILE_TIMEOUT_MS = 15000;
+const TILE_RETRIES = 3;
+
+/* The export only ever reads the 2048 rendition, so the full-resolution master costs ~90MB per
+   course and is never read back. Deleting it is tempting but NOT free: the in-browser bake
+   works at up to 4096 (gd-course-visual-engine.js), so cloud frames are currently half the
+   linear resolution of the local preview. If that parity gap is ever closed by raising the
+   cloud output, these masters are the only way to do it without re-shooting 6.6k tiles.
+   Kept until that call is made - flipping this to false is a one-liner, un-flipping it needs a
+   fresh snapshot. */
+const KEEP_FULL_RES_MASTER = true;
 
 function env(name) { return process.env[name] || ""; }
 function supabaseBase() { return env("SUPABASE_URL").replace(/\/+$/, ""); }
@@ -87,7 +97,7 @@ async function loadCoursePackage(courseId) {
   };
 }
 
-async function fetchTile(url) {
+async function fetchTileOnce(url) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TILE_TIMEOUT_MS);
   try {
@@ -97,6 +107,23 @@ async function fetchTile(url) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+/* Coverage is all-or-nothing (see buildCapture), so a single transient 502 out of ~6.6k tile
+   fetches used to bin an entire capture. Retry transient failures before giving up; a 404 is
+   a real gap in the tile source and retrying it just burns the clock. */
+async function fetchTile(url) {
+  let lastError = null;
+  for (let attempt = 0; attempt < TILE_RETRIES; attempt++) {
+    try {
+      return await fetchTileOnce(url);
+    } catch (error) {
+      lastError = error;
+      if (/HTTP 4(0[34]|10)/.test(String(error && error.message || ""))) break;
+      if (attempt < TILE_RETRIES - 1) await new Promise(resolve => setTimeout(resolve, 250 * Math.pow(2, attempt)));
+    }
+  }
+  throw lastError || new Error("tile fetch failed");
 }
 
 /* Composite one capture: fetch its tile grid (bounded concurrency) and flatten onto a single
@@ -131,27 +158,44 @@ async function buildCapture(grid, { format }) {
     : composed.jpeg({ quality: 85 }).toBuffer();
 }
 
-async function runSnapshotJob(job) {
+/* Snapshot is resumable the same way export is, but cheaper: every field in a capture's index
+   entry is pure arithmetic over the course package (captureGrid), so a resumed run re-derives
+   the metadata for free and only needs to skip the tile fetch + composite. No sidecar needed.
+
+   The skip is gated on planKey - the plan ids embed a hash of each capture's padded bounds, so
+   if the course geometry moved, the key changes and every capture is re-shot rather than
+   silently reusing a stale image under the same captureKey. */
+async function runSnapshotJob(job, deadlineAt) {
   const pkg = await loadCoursePackage(job.course_id);
   if (!pkg) throw new Error("course " + job.course_id + " not found in " + MAPS_TABLE);
   const plan = planCourseCaptures(pkg);
   if (!plan.length) throw new Error("capture plan is empty - no play-ready geometry");
+  const planKey = hashText(plan.map(item => item.id).join("|"));
+  const resumable = !!(job.result && job.result.progress && job.result.progress.planKey === planKey);
   const index = { version: 1, courseId: pkg.courseId, courseName: pkg.courseName, generatedAt: new Date().toISOString(), captures: [] };
   const failures = [];
+  let shot = 0;
   for (const item of plan) {
     const grid = captureGrid(item);
     const isTerrain = item.role === "terrain-reference";
     const ext = isTerrain ? "png" : "jpg";
-    const path = pkg.courseId + "/captures/" + item.captureKey.replace(/:/g, "/") + "." + ext;
+    const fullPath = pkg.courseId + "/captures/" + item.captureKey.replace(/:/g, "/") + "." + ext;
+    const smallPath = pkg.courseId + "/captures/2048/" + item.captureKey.replace(/:/g, "/") + "." + ext;
+    /* The 2048 rendition is what the export reads, so its presence is what "already shot"
+       means. path stays pointed at whichever object actually exists. */
+    const path = KEEP_FULL_RES_MASTER ? fullPath : smallPath;
     try {
-      const buffer = await buildCapture(grid, { format: isTerrain ? "png" : "jpeg" });
-      await storageUpload(path, buffer, isTerrain ? "image/png" : "image/jpeg");
-      /* Export-ready rendition: pre-downscaled to the frame output resolution so the export
-         never has to download and decode the full-resolution capture again. Decoding 17MP
-         JPEGs per hole was most of the export's CPU bill on throttled serverless cores. */
-      const smallPath = pkg.courseId + "/captures/2048/" + item.captureKey.replace(/:/g, "/") + "." + ext;
-      const small = sharp(buffer, { limitInputPixels: false }).resize({ width: 2048, height: 2048, fit: "inside", withoutEnlargement: true });
-      await storageUpload(smallPath, await (isTerrain ? small.png({ compressionLevel: 6 }) : small.jpeg({ quality: 88 })).toBuffer(), isTerrain ? "image/png" : "image/jpeg");
+      if (!(resumable && await storageExists(smallPath))) {
+        await heartbeatJob(job, { planKey, capturesDone: index.captures.length, capturesTotal: plan.length, stage: "shooting " + item.captureKey, rssMb: Math.round(process.memoryUsage().rss / 1048576) });
+        const buffer = await buildCapture(grid, { format: isTerrain ? "png" : "jpeg" });
+        if (KEEP_FULL_RES_MASTER) await storageUpload(fullPath, buffer, isTerrain ? "image/png" : "image/jpeg");
+        /* Export-ready rendition: pre-downscaled to the frame output resolution so the export
+           never has to download and decode the full-resolution capture again. Decoding 17MP
+           JPEGs per hole was most of the export's CPU bill on throttled serverless cores. */
+        const small = sharp(buffer, { limitInputPixels: false }).resize({ width: 2048, height: 2048, fit: "inside", withoutEnlargement: true });
+        await storageUpload(smallPath, await (isTerrain ? small.png({ compressionLevel: 6 }) : small.jpeg({ quality: 88 })).toBuffer(), isTerrain ? "image/png" : "image/jpeg");
+        shot += 1;
+      }
       index.captures.push({
         path2048: smallPath,
         id: item.id,
@@ -178,6 +222,12 @@ async function runSnapshotJob(job) {
       });
     } catch (error) {
       failures.push({ id: item.id, role: item.role, holeNumber: item.holeNumber, error: String(error && error.message || error).slice(0, 300) });
+    }
+    /* Same soft-deadline relay as export. Snapshots average ~10 min against a ~4 min real
+       invocation cap, so before this they survived only by luck: a death meant the reaper
+       requeued a run that started again from capture 1. */
+    if (deadlineAt && Date.now() > deadlineAt && index.captures.length + failures.length < plan.length) {
+      return { requeue: true, rendered: shot, progress: { planKey, capturesDone: index.captures.length, capturesTotal: plan.length } };
     }
   }
   if (!index.captures.length) throw new Error("every capture failed: " + JSON.stringify(failures.slice(0, 3)));
@@ -366,11 +416,8 @@ async function runExportJob(job, deadlineAt) {
     });
   }
   const holeNumbers = [...new Set(entries.filter(e => e.holeNumber && !e.terrainStageOnly).map(e => Number(e.holeNumber)))].sort((a, b) => a - b);
-  /* Previous index (if any) is the metadata source for legally skipping already-uploaded
-     frames on a resume. Best effort - absent on first export. */
-  let previousIndex = null;
-  try { previousIndex = JSON.parse((await storageDownload(pkg.courseId + "/frames/index.json")).toString("utf8")); } catch (e) { previousIndex = null; }
   const framesIndex = { version: 1, courseId: pkg.courseId, exportVersion: version, presetId, generatedAt: capturesIndex.generatedAt, overview: null, holes: [] };
+  let rendered = 0;
   for (const holeNumber of holeNumbers) {
     const path = framesDir + "/h" + holeNumber + ".jpg";
     const holeEntries = entries.filter(e => Number(e.holeNumber) === holeNumber && !e.terrainStageOnly);
@@ -384,15 +431,17 @@ async function runExportJob(job, deadlineAt) {
       greenShape: data.greenShape || []
     };
     let width = null, height = null, playSurface = null;
-    /* A frame may only be SKIPPED when its metadata is recoverable from the previous index -
-       skipping used to write playSurface:null, so every relay resume clobbered the GPS
-       geometry for the holes it skipped. No recoverable metadata means re-render. */
-    const prevEntry = previousIndex && previousIndex.exportVersion === version
-      ? (previousIndex.holes || []).find(h => h && Number(h.holeNumber) === holeNumber && h.playSurface && h.playSurface.originPx)
-      : null;
-    if (prevEntry && await storageExists(path)) {
-      width = prevEntry.width; height = prevEntry.height; playSurface = prevEntry.playSurface;
-      if (prevEntry.bounds) bounds = prevEntry.bounds;
+    /* A frame may only be SKIPPED when its metadata is recoverable. The metadata sidecar is
+       written AT RENDER TIME next to each frame - recovering from the final index.json was a
+       livelock: that file only exists after a COMPLETE run, so relayed runs re-rendered from
+       h1 forever and died at the soft deadline every time. */
+    let sidecar = null;
+    if (await storageExists(path)) {
+      try { sidecar = JSON.parse((await storageDownload(path + ".json")).toString("utf8")); } catch (e) { sidecar = null; }
+    }
+    if (sidecar && sidecar.playSurface && sidecar.playSurface.originPx) {
+      width = sidecar.width; height = sidecar.height; playSurface = sidecar.playSurface;
+      if (sidecar.bounds) bounds = sidecar.bounds;
     } else {
       /* Stage marker BEFORE the render: a silent crash (OOM, native abort) writes no error,
          but this leaves a corpse marker in the job row saying exactly where it died. */
@@ -418,6 +467,8 @@ async function runExportJob(job, deadlineAt) {
         originPx: frame.originPx,
         outputDimensions: { width: frame.width, height: frame.height }
       };
+      await storageUpload(path + ".json", Buffer.from(JSON.stringify({ width, height, bounds, playSurface })), "application/json");
+      rendered += 1;
     }
     framesIndex.holes.push({ holeNumber, path, width, height, bounds, playSurface });
     await heartbeatJob(job, { version, holesDone: framesIndex.holes.length, holesTotal: holeNumbers.length });
@@ -426,7 +477,7 @@ async function runExportJob(job, deadlineAt) {
        the job back to the queue at the soft deadline and chain a fresh invocation - uploaded
        frames make the resume instant. */
     if (deadlineAt && Date.now() > deadlineAt && framesIndex.holes.length < holeNumbers.length) {
-      return { requeue: true, progress: { version, holesDone: framesIndex.holes.length, holesTotal: holeNumbers.length } };
+      return { requeue: true, rendered, progress: { version, holesDone: framesIndex.holes.length, holesTotal: holeNumbers.length } };
     }
   }
   const overviewPath = framesDir + "/overview.jpg";
@@ -457,6 +508,9 @@ async function runExportJob(job, deadlineAt) {
 }
 
 const SOFT_DEADLINE_MS = 3 * 60 * 1000;
+/* A full 18-hole export needs ~2-3 relays; a snapshot of 44 captures a few more. Anything
+   past this is a loop, not a long job. */
+const MAX_RELAYS = 12;
 
 /* AWAITED, not fire-and-forget: serverless freezes the process the moment the handler
    returns, so an un-awaited ping never leaves the building and the relay stalls until the
@@ -487,11 +541,28 @@ export default async function courseVisualWorker(req) {
   let job = await claimJob(payload && payload.jobId || null);
   while (job) {
     try {
-      const result = job.kind === "snapshot" ? await runSnapshotJob(job) : job.kind === "export" ? await runExportJob(job, deadlineAt) : { skipped: "unknown kind " + job.kind };
+      const result = job.kind === "snapshot" ? await runSnapshotJob(job, deadlineAt) : job.kind === "export" ? await runExportJob(job, deadlineAt) : { skipped: "unknown kind " + job.kind };
       if (result && result.requeue) {
         /* Soft deadline reached: hand the job back and chain a fresh invocation, which
-           resumes instantly from the frames already uploaded. */
-        await finishJob(job.id, { status: "queued", result: { progress: result.progress, attempts: job.result && Number(job.result.attempts) || 0 }, error: null });
+           resumes instantly from the work already uploaded.
+
+           The relay is only allowed to continue if this invocation actually produced
+           something new. A run that renders NOTHING and still hands the job back is a
+           livelock, not progress - that is exactly how an export burned 12 hours and ~250
+           invocations re-rendering the same 7 holes, heartbeating cheerfully the whole time
+           so the stale-job reaper never touched it. Loud failures were capped at 8 attempts;
+           this one looked healthy, so nothing stopped it. Now nothing has to: no forward
+           progress, or too many relays, and the job dies with a diagnosis. */
+        const relays = (job.result && Number(job.result.relays) || 0) + 1;
+        if (!result.rendered) {
+          await finishJob(job.id, { status: "failed", error: "relay livelock: hit the soft deadline having produced nothing new (" + JSON.stringify(result.progress) + "). Resume-skip is not matching already-uploaded work.", result: { progress: result.progress, relays } });
+          break;
+        }
+        if (relays > MAX_RELAYS) {
+          await finishJob(job.id, { status: "failed", error: "relay budget exhausted after " + relays + " invocations (" + JSON.stringify(result.progress) + ")", result: { progress: result.progress, relays } });
+          break;
+        }
+        await finishJob(job.id, { status: "queued", result: { progress: result.progress, relays, attempts: job.result && Number(job.result.attempts) || 0 }, error: null });
         await chainNextInvocation(req);
         break;
       }
