@@ -275,15 +275,21 @@ async function enqueueFollowUpExport(courseId) {
   });
 }
 
-/* Jobs stuck "running" belong to a worker that died mid-run (crash, 15-min cap). Left alone
-   they block the dedupe forever - exactly how a zombie export swallowed a manual Publish. */
+/* Jobs stuck "running" belong to a worker that died mid-run (crash, 15-min cap). Exports are
+   resumable (deterministic version dir + skip-existing frames), so a reaped job is REQUEUED to
+   pick up where it died - up to 3 attempts, then failed for good. The worker heartbeats after
+   every hole, so only genuinely dead runs trip the 20-minute cutoff. */
 async function reapStaleJobs() {
   const cutoff = new Date(Date.now() - 20 * 60 * 1000).toISOString();
   try {
-    await supabaseFetch(JOBS_TABLE + "?status=eq.running&updated_at=lt." + encodeURIComponent(cutoff), {
-      method: "PATCH",
-      body: JSON.stringify({ status: "failed", error: "stale-running-reaped: worker died mid-job", updated_at: new Date().toISOString() })
-    });
+    const stale = await supabaseFetch(JOBS_TABLE + "?select=id,result&status=eq.running&updated_at=lt." + encodeURIComponent(cutoff));
+    for (const row of Array.isArray(stale) ? stale : []) {
+      const attempts = (row.result && Number(row.result.attempts) || 0) + 1;
+      const patch = attempts >= 3
+        ? { status: "failed", error: "stale-running-reaped: worker died mid-job " + attempts + " times", updated_at: new Date().toISOString() }
+        : { status: "queued", error: null, result: Object.assign({}, row.result || {}, { attempts }), updated_at: new Date().toISOString() };
+      await supabaseFetch(JOBS_TABLE + "?id=eq." + row.id, { method: "PATCH", body: JSON.stringify(patch) });
+    }
   } catch (e) { /* reaping is best-effort */ }
 }
 
@@ -332,70 +338,133 @@ async function writeCourseVisualRow(job, pkg, framesIndex, recipe) {
   });
 }
 
+function hashText(text) {
+  let hash = 5381;
+  const s = String(text || "");
+  for (let i = 0; i < s.length; i++) hash = ((hash << 5) + hash + s.charCodeAt(i)) >>> 0;
+  return hash.toString(36);
+}
+
+async function storageExists(path) {
+  const response = await fetch(supabaseBase() + "/storage/v1/object/info/" + BUCKET + "/" + path, {
+    headers: { apikey: supabaseKey(), Authorization: "Bearer " + supabaseKey() }
+  });
+  return response.ok;
+}
+
+async function heartbeatJob(job, progress) {
+  /* Preserves result.attempts - the reaper's retry budget - across progress writes. */
+  await supabaseFetch(JOBS_TABLE + "?id=eq." + job.id, {
+    method: "PATCH",
+    body: JSON.stringify({ updated_at: new Date().toISOString(), result: { progress, attempts: job.result && Number(job.result.attempts) || 0 } })
+  }).catch(() => {});
+}
+
+function entryToCapture(entry, buffer) {
+  const mime = entry.path.endsWith(".png") ? "image/png" : "image/jpeg";
+  return {
+    id: entry.id,
+    storagePath: "cloud:" + entry.captureKey,
+    imageData: "data:" + mime + ";base64," + buffer.toString("base64"),
+    bounds: entry.bounds,
+    width: entry.width,
+    height: entry.height,
+    zoom: entry.captureZoom,
+    originPx: entry.originPx,
+    holeNumber: entry.holeNumber,
+    role: entry.role,
+    quality: entry.quality,
+    stitchLayer: entry.stitchLayer,
+    planId: entry.id,
+    segmentIndex: entry.segmentIndex,
+    segmentCount: entry.segmentCount,
+    terrainStageOnly: !!entry.terrainStageOnly,
+    anchorPins: entry.anchorPins || {},
+    captureAnchorPins: entry.captureAnchorPins || null,
+    captureLens: entry.lensOrientation === "play-axis" ? "mobile-hole" : "",
+    lensShape: entry.lensOrientation === "play-axis" ? "mobile-hole" : "",
+    lensOrientation: entry.lensOrientation || "",
+    lensLocalCorners: Array.isArray(entry.lensCornersPx) && entry.originPx
+      ? entry.lensCornersPx.map(p => ({ x: p.x - entry.originPx.x, y: p.y - entry.originPx.y }))
+      : []
+  };
+}
+
+/* Export bakes ONE HOLE AT A TIME through the engine. A whole-course bake holds hundreds of
+   MB of SVG strings at once - it OOM-killed the function the same way it froze browser tabs.
+   Per-hole mini-bakes keep peak memory to a few captures, the version directory is a
+   deterministic hash of (recipe, snapshot), and already-uploaded frames are skipped - so a
+   run that dies at hole 12 resumes at hole 12 when the reaper requeues it. */
 async function runExportJob(job) {
   const engine = loadEngine();
   const pkg = await loadCoursePackage(job.course_id);
   if (!pkg) throw new Error("course " + job.course_id + " not found in " + MAPS_TABLE);
-  const indexRaw = await storageDownload(job.course_id + "/captures/index.json");
-  const capturesIndex = JSON.parse(indexRaw.toString("utf8"));
+  const capturesIndex = JSON.parse((await storageDownload(job.course_id + "/captures/index.json")).toString("utf8"));
   const entries = Array.isArray(capturesIndex && capturesIndex.captures) ? capturesIndex.captures : [];
   if (!entries.length) throw new Error("no captures in index - run a snapshot job first");
-  const captures = [];
-  for (const entry of entries) {
-    const buffer = await storageDownload(entry.path);
-    const mime = entry.path.endsWith(".png") ? "image/png" : "image/jpeg";
-    captures.push({
-      id: entry.id,
-      storagePath: "cloud:" + entry.captureKey,
-      imageData: "data:" + mime + ";base64," + buffer.toString("base64"),
-      bounds: entry.bounds,
-      width: entry.width,
-      height: entry.height,
-      zoom: entry.captureZoom,
-      originPx: entry.originPx,
-      holeNumber: entry.holeNumber,
-      role: entry.role,
-      quality: entry.quality,
-      stitchLayer: entry.stitchLayer,
-      planId: entry.id,
-      segmentIndex: entry.segmentIndex,
-      segmentCount: entry.segmentCount,
-      terrainStageOnly: !!entry.terrainStageOnly,
-      anchorPins: entry.anchorPins || {},
-      captureAnchorPins: entry.captureAnchorPins || null,
-      captureLens: entry.lensOrientation === "play-axis" ? "mobile-hole" : "",
-      lensShape: entry.lensOrientation === "play-axis" ? "mobile-hole" : "",
-      lensOrientation: entry.lensOrientation || "",
-      lensLocalCorners: Array.isArray(entry.lensCornersPx) && entry.originPx
-        ? entry.lensCornersPx.map(p => ({ x: p.x - entry.originPx.x, y: p.y - entry.originPx.y }))
-        : []
-    });
-  }
   const recipe = job.recipe && (job.recipe.presetId || job.recipe.overrides || job.recipe.courseOverrides) ? job.recipe : await latestPublishedRecipe(job.course_id);
   const presetId = String(recipe.presetId || "") || (engine.defaultPreset && engine.defaultPreset().id) || "";
   const overrides = recipe.overrides || recipe.courseOverrides || {};
-  engine.ingestCourseVisualInput({ courseId: pkg.courseId, courseName: pkg.courseName, objects: engineObjectsFromPackage(pkg), captures });
-  await engine.buildCourseVisualMaster(pkg.courseId, { captures, forceRebuild: true });
-  await engine.buildCourseVisualPreview(pkg.courseId, presetId, overrides);
-  const record = engine.getRecord(pkg.courseId);
-  if (record.lastError) throw new Error("engine bake failed: " + (record.lastError.message || record.lastError.code));
-  const version = "v" + (Number(record.currentVersion) || 1);
+  const version = "r" + hashText(JSON.stringify({ presetId, overrides, snapshot: capturesIndex.generatedAt }));
   const framesDir = pkg.courseId + "/frames/" + version;
-  const framesIndex = { version: 1, courseId: pkg.courseId, exportVersion: version, presetId, overridesHash: null, generatedAt: new Date().toISOString(), overview: null, holes: [] };
-  const styledFrames = (record.holeFrameTerrainViews && record.holeFrameTerrainViews.length ? record.holeFrameTerrainViews : record.holeFramePreviewVisuals) || [];
-  for (const frame of styledFrames) {
-    if (!frame || !frame.dataUrl || !frame.holeNumber) continue;
-    const jpeg = await rasterizeSvgDataUrl(frame.dataUrl, { maxWidth: 2048, quality: 82 });
-    const path = framesDir + "/h" + frame.holeNumber + ".jpg";
-    await storageUpload(path, jpeg, "image/jpeg");
-    framesIndex.holes.push({ holeNumber: frame.holeNumber, path, width: frame.width, height: frame.height, bounds: frame.bounds, playSurface: frame.metadata && frame.metadata.playSurface || null });
+  const objects = engineObjectsFromPackage(pkg);
+  const terrainEntry = entries.find(e => e.role === "terrain-reference");
+  const backdropEntry = entries.find(e => e.role === "course-backdrop");
+  const cachedBuffers = {};
+  async function bufferFor(entry) {
+    if (!cachedBuffers[entry.path]) cachedBuffers[entry.path] = await storageDownload(entry.path);
+    return cachedBuffers[entry.path];
   }
-  const overviewAsset = record.terrainView || record.previewVisual;
-  if (overviewAsset && overviewAsset.dataUrl) {
-    const jpeg = await rasterizeSvgDataUrl(overviewAsset.dataUrl, { maxWidth: 2048, quality: 80 });
-    const path = framesDir + "/overview.jpg";
-    await storageUpload(path, jpeg, "image/jpeg");
-    framesIndex.overview = { path, width: overviewAsset.width, height: overviewAsset.height, bounds: overviewAsset.bounds };
+  const holeNumbers = [...new Set(entries.filter(e => e.holeNumber && !e.terrainStageOnly).map(e => Number(e.holeNumber)))].sort((a, b) => a - b);
+  const framesIndex = { version: 1, courseId: pkg.courseId, exportVersion: version, presetId, generatedAt: capturesIndex.generatedAt, overview: null, holes: [] };
+  for (const holeNumber of holeNumbers) {
+    const path = framesDir + "/h" + holeNumber + ".jpg";
+    const holeEntries = entries.filter(e => Number(e.holeNumber) === holeNumber && !e.terrainStageOnly);
+    const already = await storageExists(path);
+    let width = null, height = null, bounds = null, playSurface = null;
+    if (!already) {
+      const holeCaptures = [];
+      for (const entry of holeEntries) holeCaptures.push(entryToCapture(entry, await bufferFor(entry)));
+      if (terrainEntry) holeCaptures.push(entryToCapture(terrainEntry, await bufferFor(terrainEntry)));
+      const holeCourseId = pkg.courseId + "--h" + holeNumber;
+      engine.ingestCourseVisualInput({ courseId: holeCourseId, courseName: pkg.courseName, objects: objects.filter(o => Number(o.holeNumber) === holeNumber), captures: holeCaptures });
+      await engine.buildCourseVisualMaster(holeCourseId, { captures: holeCaptures, forceRebuild: true });
+      await engine.buildCourseVisualPreview(holeCourseId, presetId, overrides);
+      const record = engine.getRecord(holeCourseId);
+      if (record.lastError) throw new Error("hole " + holeNumber + " bake failed: " + (record.lastError.message || record.lastError.code));
+      const frame = ((record.holeFrameTerrainViews && record.holeFrameTerrainViews.length ? record.holeFrameTerrainViews : record.holeFramePreviewVisuals) || []).find(f => f && f.dataUrl && Number(f.holeNumber) === holeNumber);
+      if (!frame) throw new Error("hole " + holeNumber + " produced no styled frame");
+      width = frame.width; height = frame.height; bounds = frame.bounds; playSurface = frame.metadata && frame.metadata.playSurface || null;
+      const jpeg = await rasterizeSvgDataUrl(frame.dataUrl, { maxWidth: 2048, quality: 82 });
+      await storageUpload(path, jpeg, "image/jpeg");
+      engine.resetCourseVisualWorkingState(holeCourseId, { keepPublished: false });
+    } else {
+      const holeBounds = holeEntries.map(e => e.bounds).filter(Boolean);
+      bounds = holeBounds.length ? { south: Math.min(...holeBounds.map(b => b.south)), west: Math.min(...holeBounds.map(b => b.west)), north: Math.max(...holeBounds.map(b => b.north)), east: Math.max(...holeBounds.map(b => b.east)) } : null;
+    }
+    framesIndex.holes.push({ holeNumber, path, width, height, bounds, playSurface });
+    await heartbeatJob(job, { version, holesDone: framesIndex.holes.length, holesTotal: holeNumbers.length });
+  }
+  const overviewPath = framesDir + "/overview.jpg";
+  if (backdropEntry) {
+    if (!(await storageExists(overviewPath))) {
+      const overviewCaptures = [entryToCapture(backdropEntry, await bufferFor(backdropEntry))];
+      if (terrainEntry) overviewCaptures.push(entryToCapture(terrainEntry, await bufferFor(terrainEntry)));
+      const overviewCourseId = pkg.courseId + "--overview";
+      engine.ingestCourseVisualInput({ courseId: overviewCourseId, courseName: pkg.courseName, objects: [], captures: overviewCaptures });
+      await engine.buildCourseVisualMaster(overviewCourseId, { captures: overviewCaptures, forceRebuild: true });
+      await engine.buildCourseVisualPreview(overviewCourseId, presetId, overrides, { skipHoleFrames: true });
+      const overviewRecord = engine.getRecord(overviewCourseId);
+      const overviewAsset = overviewRecord.terrainView || overviewRecord.previewVisual || overviewRecord.rawMaster;
+      if (overviewAsset && overviewAsset.dataUrl) {
+        const jpeg = await rasterizeSvgDataUrl(overviewAsset.dataUrl, { maxWidth: 2048, quality: 80 });
+        await storageUpload(overviewPath, jpeg, "image/jpeg");
+        framesIndex.overview = { path: overviewPath, width: overviewAsset.width, height: overviewAsset.height, bounds: overviewAsset.bounds || backdropEntry.bounds };
+      }
+      engine.resetCourseVisualWorkingState(overviewCourseId, { keepPublished: false });
+    } else {
+      framesIndex.overview = { path: overviewPath, width: backdropEntry.width, height: backdropEntry.height, bounds: backdropEntry.bounds };
+    }
   }
   if (!framesIndex.holes.length) throw new Error("no hole frames produced by the engine bake");
   await storageUpload(pkg.courseId + "/frames/index.json", Buffer.from(JSON.stringify(framesIndex)), "application/json");
