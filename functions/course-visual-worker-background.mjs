@@ -247,7 +247,9 @@ async function reapStaleJobs() {
     const stale = await supabaseFetch(JOBS_TABLE + "?select=id,result&status=eq.running&updated_at=lt." + encodeURIComponent(cutoff));
     for (const row of Array.isArray(stale) ? stale : []) {
       const attempts = (row.result && Number(row.result.attempts) || 0) + 1;
-      const patch = attempts >= 3
+      /* Exports resume from uploaded frames, so retries are cheap - give them a longer leash
+         on heavily throttled invocations. */
+      const patch = attempts >= 8
         ? { status: "failed", error: "stale-running-reaped: worker died mid-job " + attempts + " times", updated_at: new Date().toISOString() }
         : { status: "queued", error: null, result: Object.assign({}, row.result || {}, { attempts }), updated_at: new Date().toISOString() };
       await supabaseFetch(JOBS_TABLE + "?id=eq." + row.id, { method: "PATCH", body: JSON.stringify(patch) });
@@ -335,7 +337,7 @@ async function runExportJob(job, deadlineAt) {
   const recipe = job.recipe && (job.recipe.presetId || job.recipe.overrides || job.recipe.courseOverrides) ? job.recipe : await latestPublishedRecipe(job.course_id);
   const presetId = String(recipe.presetId || "");
   const overrides = recipe.overrides || recipe.courseOverrides || {};
-  const version = "r" + hashText(JSON.stringify({ presetId, overrides, snapshot: capturesIndex.generatedAt }));
+  const version = "r" + hashText(JSON.stringify({ presetId, overrides, snapshot: capturesIndex.generatedAt, out: 1440 }));
   const framesDir = pkg.courseId + "/frames/" + version;
   const holeData = packageHoleData(pkg);
   const terrainEntry = entries.find(e => e.role === "terrain-reference");

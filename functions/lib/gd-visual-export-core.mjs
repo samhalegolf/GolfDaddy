@@ -258,7 +258,7 @@ function mowSvg(width, height, opacity) {
 
 /* ---- renderers -------------------------------------------------------------------------- */
 
-export async function renderHoleFrame({ pins, captures, terrain, settings, width = 2048, quality = 82 }) {
+export async function renderHoleFrame({ pins, captures, terrain, settings, width = 1440, quality = 82 }) {
   const axis = frameAxis(pins, captures, width);
   if (!axis) throw new Error("play axis could not be derived (missing tee/green)");
   const f = recipeFilter(settings);
@@ -305,7 +305,7 @@ export async function renderHoleFrame({ pins, captures, terrain, settings, width
   };
 }
 
-export async function renderOverview({ backdrop, terrain, settings, width = 2048, quality = 80 }) {
+export async function renderOverview({ backdrop, terrain, settings, width = 1440, quality = 80 }) {
   const meta = await sharp(backdrop.buffer).metadata();
   const f = recipeFilter(settings);
   let base = sharp(backdrop.buffer, { limitInputPixels: false })
