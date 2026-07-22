@@ -306,23 +306,29 @@ export async function renderHoleFrame({ pins, captures, terrain, settings, width
 }
 
 export async function renderOverview({ backdrop, terrain, settings, width = 1440, quality = 80 }) {
-  const meta = await sharp(backdrop.buffer).metadata();
+  /* Everything happens AT the output size. sharp applies resize before composite regardless
+     of call order, so mixing them in one pipeline shrank the base under a full-size overlay
+     ("image to composite must have same dimensions or smaller"). Downscaling first also makes
+     every subsequent op cheaper. */
   const f = recipeFilter(settings);
-  let base = sharp(backdrop.buffer, { limitInputPixels: false })
+  const baseSmall = await sharp(backdrop.buffer, { limitInputPixels: false })
+    .resize({ width, withoutEnlargement: true })
     .linear(f.contrast, 255 * ((f.brightness - 1) / 2))
-    .modulate({ saturation: f.saturation });
+    .modulate({ saturation: f.saturation })
+    .jpeg({ quality: 95 }).toBuffer();
+  const bMeta = await sharp(baseSmall).metadata();
+  let base = sharp(baseSmall, { limitInputPixels: false });
   const terrainCfg = terrainParams(settings);
   if (terrain && terrainCfg.strength > 0.02) {
     const shaded = await sharp(terrain.buffer, { limitInputPixels: false })
-      .resize({ width: meta.width, height: meta.height, fit: "fill" })
+      .resize({ width: bMeta.width, height: bMeta.height, fit: "fill" })
       .greyscale()
+      .toColourspace("srgb")
       .linear(terrainCfg.toneSlope, 255 * terrainCfg.toneLift)
       .ensureAlpha(terrainCfg.opacity)
-      .png().toBuffer();
-    base = sharp(await base.jpeg({ quality: 95 }).toBuffer(), { limitInputPixels: false }).composite([{ input: shaded, blend: "multiply" }]);
+      .raw().toBuffer({ resolveWithObject: true });
+    base = base.composite([{ input: shaded.data, raw: { width: shaded.info.width, height: shaded.info.height, channels: shaded.info.channels }, blend: "multiply" }]);
   }
-  const resized = base.resize({ width, withoutEnlargement: true });
-  const jpeg = await resized.jpeg({ quality }).toBuffer();
-  const out = await sharp(jpeg).metadata();
-  return { jpeg, width: out.width, height: out.height };
+  const jpeg = await base.jpeg({ quality }).toBuffer();
+  return { jpeg, width: bMeta.width, height: bMeta.height };
 }
