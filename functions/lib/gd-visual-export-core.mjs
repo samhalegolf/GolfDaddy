@@ -330,7 +330,14 @@ export async function renderHoleSurfaceMercator({ pins, captures, terrain, setti
   };
   const spanPx19 = Math.max((merged.right - merged.left), (merged.bottom - merged.top)) * 256 * Math.pow(2, 19);
   const f = Math.min(1, maxDim / Math.max(1, spanPx19));
-  const captureZoom = 19 + Math.log2(f);
+  /* captureZoom MUST be an integer. The GPS play renderer anchors the frame image to the map
+     at this zoom while it projects the tee/green/ball markers independently; the locally
+     captured surfaces it was built for are always whole-number zooms (z19/z20), and a
+     fractional zoom (e.g. 18.58) desynchronises the image from the markers - the exact "tee is
+     in the bushes" drift seen on cloud frames while local scans line up. Floor keeps the frame
+     at or under maxDim (never upscales past the source) at the cost of up to one half-step of
+     resolution; correctness over sharpness. */
+  const captureZoom = Math.max(1, Math.floor(19 + Math.log2(f)));
   const scalePx = 256 * Math.pow(2, captureZoom);
   const originPx = { x: merged.left * scalePx, y: merged.top * scalePx };
   const W = Math.max(64, Math.round((merged.right - merged.left) * scalePx));

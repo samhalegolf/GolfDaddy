@@ -387,7 +387,9 @@ async function runExportJob(job, deadlineAt) {
   const recipe = job.recipe && (job.recipe.presetId || job.recipe.overrides || job.recipe.courseOverrides) ? job.recipe : await latestPublishedRecipe(job.course_id);
   const presetId = String(recipe.presetId || "");
   const overrides = recipe.overrides || recipe.courseOverrides || {};
-  const version = "r" + hashText(JSON.stringify({ presetId, overrides, snapshot: capturesIndex.generatedAt, out: "mercator-2048" }));
+  /* out tag bumped to iz1 when captureZoom went integer-only (gd-visual-export-core): old
+     fractional-zoom frames must NOT be resumed/reused, so the version dir has to change. */
+  const version = "r" + hashText(JSON.stringify({ presetId, overrides, snapshot: capturesIndex.generatedAt, out: "mercator-2048-iz1" }));
   const framesDir = pkg.courseId + "/frames/" + version;
   const holeData = packageHoleData(pkg);
   const terrainEntry = entries.find(e => e.role === "terrain-reference");
