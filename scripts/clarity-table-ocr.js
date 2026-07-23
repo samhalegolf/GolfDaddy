@@ -142,7 +142,7 @@
     var medianWidth = median(widths) || 36;
     var sourceMax = Number(sourceWidth) || Math.max.apply(null, [0].concat((Array.isArray(boxes) ? boxes : []).map(function (b) { return Number(b.x1) || 0; })));
     var sourceLimit = sourceMax ? sourceMax * 0.018 : 28;
-    var corridorWidth = Math.max(8, Math.min(28, sourceLimit || 28, medianWidth * 0.38));
+    var corridorWidth = Math.max(12, Math.min(28, sourceLimit || 28, medianWidth * 0.38));
     return {
       corridorWidth: corridorWidth,
       half: corridorWidth / 2,
