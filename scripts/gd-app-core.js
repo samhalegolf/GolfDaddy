@@ -11607,7 +11607,7 @@ function gdLmClearanceCorridorConfig(boxes,sourceWidth=0){
   return {
     corridorWidth,
     half:corridorWidth/2,
-    mergeGap:Math.max(4,Math.min(16,corridorWidth*.65)),
+    mergeGap:Math.max(7,Math.min(16,corridorWidth*.65)),
     step:Math.max(1,Math.round(corridorWidth/4)),
     minColumnWidth:Math.max(42,corridorWidth*2.2,sourceMax*.024),
     edgeGuard:Math.max(8,corridorWidth*.65),
