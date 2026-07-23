@@ -251,6 +251,47 @@ async function storageDownload(path) {
   return Buffer.from(await response.arrayBuffer());
 }
 
+async function storageList(prefix) {
+  const response = await fetch(supabaseBase() + "/storage/v1/object/list/" + BUCKET, {
+    method: "POST",
+    headers: { apikey: supabaseKey(), Authorization: "Bearer " + supabaseKey(), "Content-Type": "application/json" },
+    body: JSON.stringify({ prefix, limit: 1000, offset: 0, sortBy: { column: "name", order: "asc" } })
+  });
+  if (!response.ok) throw new Error("Storage list " + response.status + " for " + prefix);
+  const rows = await response.json();
+  return Array.isArray(rows) ? rows : [];
+}
+
+async function storageRemove(paths) {
+  if (!paths.length) return;
+  const response = await fetch(supabaseBase() + "/storage/v1/object/" + BUCKET, {
+    method: "DELETE",
+    headers: { apikey: supabaseKey(), Authorization: "Bearer " + supabaseKey(), "Content-Type": "application/json" },
+    body: JSON.stringify({ prefixes: paths })
+  });
+  if (!response.ok) throw new Error("Storage remove " + response.status + ": " + (await response.text()).slice(0, 200));
+}
+
+/* Retire every frame version dir except the one just published. Each export writes a fresh
+   r{hash} dir; without this they accumulate (~11MB/version) forever. Best-effort and scoped
+   strictly to {courseId}/frames/{oldVersion}/* - never touches captures/, the live version, or
+   the index.json that points at it, so a bad list can only under-delete, never orphan Play. */
+async function sweepOldFrameVersions(courseId, liveVersion) {
+  const entries = await storageList(courseId + "/frames/");
+  /* Folder entries come back with id:null; the live version and the index.json file stay. */
+  const staleDirs = entries
+    .filter(e => e && e.id === null && e.name && e.name !== liveVersion && /^r[a-z0-9]+$/.test(e.name))
+    .map(e => e.name);
+  let removed = 0;
+  for (const dir of staleDirs) {
+    const files = await storageList(courseId + "/frames/" + dir + "/");
+    const paths = files.filter(f => f && f.id !== null && f.name).map(f => courseId + "/frames/" + dir + "/" + f.name);
+    await storageRemove(paths);
+    removed += paths.length;
+  }
+  return { staleDirs: staleDirs.length, removed };
+}
+
 /* Natural baseline: every effect off. Mirrors GD_VISUAL_OFF_OVERRIDES in the admin UI. */
 const NATURAL_OVERRIDES = {
   turf: { greenStrength: 0, greenTone: 0 },
@@ -499,13 +540,19 @@ async function runExportJob(job, deadlineAt) {
   if (!framesIndex.holes.length) throw new Error("no hole frames produced");
   await storageUpload(pkg.courseId + "/frames/index.json", Buffer.from(JSON.stringify(framesIndex)), "application/json");
   await writeCourseVisualRow(job, pkg, framesIndex, { presetId, overrides });
+  /* Index + row now point at this version, so every OTHER frame dir is dead. Retire them.
+     Best-effort: a sweep failure must never fail an otherwise-good export. */
+  let swept = null;
+  try { swept = await sweepOldFrameVersions(pkg.courseId, version); }
+  catch (e) { console.warn("frame-version sweep failed", pkg.courseId, e && e.message || e); }
   return {
     exportVersion: version,
     presetId,
     holes: framesIndex.holes.length,
     overview: !!framesIndex.overview,
     indexPath: pkg.courseId + "/frames/index.json",
-    courseVisualRow: "cv-" + pkg.courseId
+    courseVisualRow: "cv-" + pkg.courseId,
+    swept
   };
 }
 
