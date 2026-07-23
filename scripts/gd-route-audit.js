@@ -1123,6 +1123,11 @@
     if(!batches.length)return "";
     return `<div class="gdPracticeEmailRecent">${batches.slice(0,5).map(batch=>{
       const id=batch.import_batch_id||"";
+      if(batch.source_type==="email_photo"){
+        const photoCount=Array.isArray(batch.photos)?batch.photos.length:0;
+        const label=`${batch.source_name||"Practice email photo"} · ${photoCount} photo${photoCount===1?"":"s"}`;
+        return `<button type="button" onclick="return gdPracticeLoadEmailPhotoBatch(${gdEscapeHTML(JSON.stringify(id))})"><span>${gdEscapeHTML(label)}</span><b>Scan</b></button>`;
+      }
       const label=gdPracticeEmailBatchLabel(batch);
       const rows=Number(batch.row_count)||0;
       return `<button type="button" onclick="return gdPracticeLoadEmailBatch(${gdEscapeHTML(JSON.stringify(id))})"><span>${gdEscapeHTML(label)}</span><b>${rows} row${rows===1?"":"s"}</b></button>`;
@@ -1231,6 +1236,30 @@
     gdOpenNativePracticeDrawer();
     gdRenderNativePracticeImportLane();
     gdLmToast(`Loaded ${rows.length} email practice row${rows.length===1?"":"s"}`);
+    return false;
+  }
+  async function gdPracticeLoadEmailPhotoBatch(importBatchId){
+    const batches=Array.isArray(gdPracticeEmailLaneState?.batches)?gdPracticeEmailLaneState.batches:[];
+    const batch=batches.find(item=>String(item?.import_batch_id||"")===String(importBatchId||""));
+    const photo=batch&&Array.isArray(batch.photos)?batch.photos[0]:null;
+    if(!batch||!photo||!photo.url){
+      gdNativePracticeFeedbackPatch({status:"failed",lastAction:"Email photo missing",errors:["Staged email photo was not found or the link expired"],nextStep:"Refresh the email receiver and try again."});
+      gdLmToast("Email photo not available - refresh and try again");
+      return false;
+    }
+    gdPracticeFeedback("Loading photo from email...");
+    try{
+      const response=await fetch(photo.url,{cache:"no-store"});
+      if(!response.ok)throw new Error(`HTTP ${response.status}`);
+      const blob=await response.blob();
+      const file=new File([blob],photo.filename||"practice-email-photo.jpg",{type:photo.contentType||blob.type||"image/jpeg"});
+      gdPracticeEmailLaneOpen=false;
+      gdRenderPracticeEmailLane();
+      await gdHandleLaunchMonitorPhoto(file);
+    }catch(e){
+      gdNativePracticeFeedbackPatch({status:"failed",lastAction:"Email photo load failed",errors:[e&&e.message?e.message:"Could not load photo"],nextStep:"Refresh the email receiver and try again."});
+      gdPracticeFeedback(`Could not load the emailed photo: ${e&&e.message?e.message:e}`,"error");
+    }
     return false;
   }
   function gdPracticeEmailImportPending(event){
@@ -6748,6 +6777,7 @@
       gdPracticeCopyEmailAddress:gdPracticeCopyEmailAddress,
       gdPracticeRefreshEmailLane:gdPracticeRefreshEmailLane,
       gdPracticeLoadEmailBatch:gdPracticeLoadEmailBatch,
+      gdPracticeLoadEmailPhotoBatch:gdPracticeLoadEmailPhotoBatch,
       gdPracticeSetPlotMode:gdPracticeSetPlotMode,
       gdPracticeImportCanStart:gdPracticeImportCanStart,
       gdPracticeStartImportJob:gdPracticeStartImportJob,

@@ -17,6 +17,79 @@ const {
 
 const RESEND_API_BASE = "https://api.resend.com";
 const MAX_TEXT_ATTACHMENT_BYTES = 2 * 1024 * 1024;
+const MAX_PHOTO_ATTACHMENT_BYTES = 15 * 1024 * 1024;
+const PRACTICE_PHOTO_BUCKET = "practice-photos";
+const PHOTO_SIGNED_URL_TTL_SECONDS = 30 * 60;
+
+function storageBase() {
+  return String(env("SUPABASE_URL") || "").replace(/\/+$/, "");
+}
+
+function storageServiceKey() {
+  return env("SUPABASE_SERVICE_ROLE_KEY");
+}
+
+function storagePathSegment(value, fallback) {
+  const clean = String(value || "").trim().replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
+  return clean || fallback || "file";
+}
+
+function encodeStoragePath(path) {
+  return String(path || "").split("/").map(encodeURIComponent).join("/");
+}
+
+async function uploadPhotoToStorage(path, buffer, contentType) {
+  const base = storageBase();
+  const key = storageServiceKey();
+  if (!base || !key) {
+    const error = new Error("Supabase storage is not configured for practice photo intake");
+    error.status = 503;
+    throw error;
+  }
+  const response = await fetch(base + "/storage/v1/object/" + PRACTICE_PHOTO_BUCKET + "/" + encodeStoragePath(path), {
+    method: "POST",
+    headers: {
+      apikey: key,
+      Authorization: "Bearer " + key,
+      "Content-Type": contentType || "application/octet-stream",
+      "x-upsert": "true"
+    },
+    body: buffer
+  });
+  if (!response.ok) {
+    const bodyText = await response.text().catch(function () { return ""; });
+    const error = new Error("Could not store practice photo");
+    error.status = response.status;
+    error.body = bodyText;
+    throw error;
+  }
+  return path;
+}
+
+async function signPhotoUrl(path) {
+  const base = storageBase();
+  const key = storageServiceKey();
+  if (!base || !key || !path) return "";
+  try {
+    const response = await fetch(base + "/storage/v1/object/sign/" + PRACTICE_PHOTO_BUCKET + "/" + encodeStoragePath(path), {
+      method: "POST",
+      headers: {
+        apikey: key,
+        Authorization: "Bearer " + key,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ expiresIn: PHOTO_SIGNED_URL_TTL_SECONDS })
+    });
+    if (!response.ok) return "";
+    const body = await response.json().catch(function () { return null; });
+    const signedPath = body && (body.signedURL || body.signedUrl || body.signedPath);
+    if (!signedPath) return "";
+    if (/^https?:\/\//i.test(signedPath)) return signedPath;
+    return base + "/storage/v1" + (signedPath.indexOf("/") === 0 ? signedPath : "/" + signedPath);
+  } catch (_error) {
+    return "";
+  }
+}
 
 function cleanDomain(value) {
   const clean = String(value || "").trim().toLowerCase().replace(/^@+/, "").replace(/[^a-z0-9.-]/g, "");
@@ -200,6 +273,29 @@ async function downloadTextAttachment(url, filename) {
   return buffer.toString("utf8");
 }
 
+async function downloadBinaryAttachment(url, filename) {
+  if (!url) return null;
+  const response = await fetch(url, { method: "GET" });
+  if (!response.ok) {
+    const error = new Error("Could not download Resend attachment " + (filename || ""));
+    error.status = response.status;
+    throw error;
+  }
+  const declaredSize = Number(response.headers && response.headers.get && response.headers.get("content-length"));
+  if (Number.isFinite(declaredSize) && declaredSize > MAX_PHOTO_ATTACHMENT_BYTES) {
+    const error = new Error("Resend photo attachment is too large to store");
+    error.status = 413;
+    throw error;
+  }
+  const buffer = Buffer.from(await response.arrayBuffer());
+  if (buffer.length > MAX_PHOTO_ATTACHMENT_BYTES) {
+    const error = new Error("Resend photo attachment is too large to store");
+    error.status = 413;
+    throw error;
+  }
+  return buffer;
+}
+
 function resendRecipients(email, data) {
   return []
     .concat(email && email.to || [])
@@ -235,6 +331,12 @@ async function normalizeResendPayload(payload) {
     const lane = laneForAttachment(normalized);
     if ((lane.lane === "email_csv" || lane.lane === "email_json") && normalized.url) {
       normalized.content = await downloadTextAttachment(normalized.url, normalized.filename);
+    } else if (lane.lane === "email_photo" && normalized.url) {
+      try {
+        normalized.buffer = await downloadBinaryAttachment(normalized.url, normalized.filename);
+      } catch (_error) {
+        // Leave normalized.buffer unset - parseAttachmentRows treats it as unsupported below.
+      }
     }
     attachments.push(Object.assign(normalized, lane));
   }
@@ -360,6 +462,19 @@ function textFromAttachment(item) {
   return "";
 }
 
+function bufferFromAttachment(item) {
+  if (item && Buffer.isBuffer(item.buffer)) return item.buffer;
+  if (item && item.base64) {
+    const raw = String(item.base64);
+    try {
+      return Buffer.from(raw.includes(",") ? raw.split(",").pop() : raw, "base64");
+    } catch (_error) {
+      return null;
+    }
+  }
+  return null;
+}
+
 function normalizeInbound(payload) {
   const recipients = recipientEmails(payload);
   const receivedAt = new Date().toISOString();
@@ -433,7 +548,13 @@ function parseAttachmentRows(inbound) {
       return;
     }
     if (item.lane === "email_photo") {
-      pendingPhotos.push(item);
+      const buffer = bufferFromAttachment(item);
+      if (buffer && buffer.length) {
+        pendingPhotos.push(Object.assign({}, item, { buffer: buffer }));
+      } else {
+        unsupported.push(item);
+        errors.push((item.filename || "photo attachment") + " could not be downloaded for storage");
+      }
       return;
     }
     unsupported.push(item);
@@ -451,12 +572,63 @@ function eventStatus(parsed) {
   return "unsupported";
 }
 
+function stableId(prefix, seed) {
+  const hash = crypto.createHash("sha1").update(String(seed || "")).digest("hex").slice(0, 24);
+  return prefix + "-" + hash;
+}
+
+async function storePendingPhotos(inbound, parsed) {
+  if (!parsed.pendingPhotos.length) return;
+  const photoRecords = [];
+  for (const photo of parsed.pendingPhotos) {
+    const safeName = storagePathSegment(photo.filename, "photo-" + (photo.index + 1) + ".jpg");
+    const path = inbound.playerKey + "/" + storagePathSegment(inbound.intakeId, "email") + "/" + photo.index + "-" + safeName;
+    try {
+      await uploadPhotoToStorage(path, photo.buffer, photo.contentType || "image/jpeg");
+      photoRecords.push({ path: path, filename: photo.filename, contentType: photo.contentType || "", size: photo.buffer.length });
+    } catch (error) {
+      parsed.errors.push((photo.filename || "photo") + " could not be stored: " + (error.message || "upload failed"));
+    }
+  }
+  if (!photoRecords.length) return;
+  const batchId = stableId("practice-email-photo-batch", inbound.intakeId);
+  const now = new Date().toISOString();
+  await supabaseFetch("practice_import_batches?on_conflict=import_batch_id", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify({
+      import_batch_id: batchId,
+      session_id: batchId,
+      intake_id: inbound.intakeId,
+      account_id: inbound.accountId || null,
+      profile_id: inbound.profileId || null,
+      player_key: inbound.playerKey,
+      player_id: inbound.profileId || inbound.playerKey,
+      player_name: inbound.playerName,
+      source_type: "email_photo",
+      source_name: inbound.subject || "Practice email photo",
+      row_count: 0,
+      valid_count: 0,
+      invalid_count: 0,
+      status: "needs_review",
+      metadata: {
+        subject: inbound.subject,
+        from: inbound.from,
+        photos: photoRecords
+      },
+      created_at: inbound.receivedAt,
+      updated_at: now
+    })
+  });
+}
+
 async function storeInbound(inbound, parsed) {
   if (!hasSupabase()) {
     const error = new Error("Supabase is not configured for practice email intake");
     error.status = 503;
     throw error;
   }
+  await storePendingPhotos(inbound, parsed);
   const status = eventStatus(parsed);
   const now = new Date().toISOString();
   const eventRow = {
@@ -615,11 +787,19 @@ async function recentFor(params) {
     shotsByBatch[id] = shotsByBatch[id] || [];
     shotsByBatch[id].push(shot);
   });
+  const enrichedBatches = await Promise.all((Array.isArray(batches) ? batches : []).map(async function (batch) {
+    const photos = Array.isArray(batch && batch.metadata && batch.metadata.photos) ? batch.metadata.photos : [];
+    const signedPhotos = photos.length
+      ? await Promise.all(photos.map(async function (photo) {
+          const url = await signPhotoUrl(photo.path);
+          return Object.assign({}, photo, { url: url });
+        }))
+      : [];
+    return Object.assign({}, batch, { shots: shotsByBatch[batch.import_batch_id] || [], photos: signedPhotos });
+  }));
   return {
     configured: true,
-    batches: (Array.isArray(batches) ? batches : []).map(function (batch) {
-      return Object.assign({}, batch, { shots: shotsByBatch[batch.import_batch_id] || [] });
-    })
+    batches: enrichedBatches
   };
 }
 
