@@ -5177,7 +5177,7 @@
 	      if(Number.isFinite(dx)&&Number.isFinite(dy))myBubbleMotionStyle=`--gd-practice-adopt-x:${dx.toFixed(1)}px;--gd-practice-adopt-y:${dy.toFixed(1)}px;`;
 	    }
 	    const myBubbleKind=String(myBubbleState?.kind||"default");
-	    const myBubbleCombined=myBubbleKind==="pending"||myBubbleKind==="adopted-current"||adoptionMotionActive;
+	    const myBubbleCombined=myBubbleKind==="adopted-current"||adoptionMotionActive;
 	    const myBubbleLabel=myBubbleCombined?"My Bubble":String(myBubbleState?.graphLabel||"MY");
 	    const myBubbleLayer=myBubbleParts.length?gdPracticeNormalisedBubbleLayerMarkup(myBubbleParts,normalisedPlot,{
 	      offsetDeg:hubOffset,
