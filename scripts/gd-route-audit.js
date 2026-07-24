@@ -3557,14 +3557,26 @@
 		      importBatchIds
 		    };
 		  }
+	  // Every course record measures its shot from the CENTRE OF THE BUBBLE that was
+	  // on screen at the time (gd-shot-outcomes.js computeShotOutcome), so
+	  // resultBubble.normalizedDeg is a DEVIATION from the playing bubble - NOT an aim
+	  // from the target line. Plotting it raw on a target-line chart (Comparison) puts
+	  // the Course Bubble near straight-ahead instead of beside My Bubble. It must be
+	  // re-anchored: drawn offset = My Bubble's own aim + the measured deviation.
+	  // deviationDeg is kept raw because that is the number worth showing ("0.3L").
 	  function gdCourseBubbleSource(courseAnalysis,filteredAnalysis,records,p){
+    const aim=Number(gdBubbleCentralOffset(p));
+    const anchorDeg=Number.isFinite(aim)?aim:0;
     const fits=(filteredAnalysis?.bubbleFit||courseAnalysis?.bubbleFit||[]).slice().sort((a,b)=>(b.shots||0)-(a.shots||0));
     const fit=fits[0]||null;
     if(fit&&Number.isFinite(Number(fit.resultBubble?.normalizedDeg))){
       const fitRows=fit.club?(records||[]).filter(record=>record.club===fit.club):records||[];
       const baseDistance=gdShotBubbleMedian(fitRows.map(record=>Number(record.expectedDistanceM)||Number(record.actualDistanceM)))||155;
+      const deviationDeg=Number(fit.resultBubble.normalizedDeg);
       return{
-        offsetDeg:Number(fit.resultBubble.normalizedDeg),
+        offsetDeg:anchorDeg+deviationDeg,
+        deviationDeg:deviationDeg,
+        anchorOffsetDeg:anchorDeg,
         bubbleWidthM:Number(fit.resultBubble.widthM),
         bubbleDepthM:Number(fit.resultBubble.depthM),
         baseDistanceM:baseDistance,
@@ -3574,7 +3586,8 @@
     }
     const cross=filteredAnalysis?.clusterHunter?.crossClub||courseAnalysis?.clusterHunter?.crossClub||null;
     if(cross&&Number.isFinite(Number(cross.meanDeg))){
-      return{offsetDeg:Number(cross.meanDeg),lateralRadiusDeg:Number(cross.stdDeg)||.45,bubbleDepthM:16,baseDistanceM:155,club:(cross.clubs||[]).join(", "),shots:Number(cross.shots||0)};
+      const deviationDeg=Number(cross.meanDeg);
+      return{offsetDeg:anchorDeg+deviationDeg,deviationDeg:deviationDeg,anchorOffsetDeg:anchorDeg,lateralRadiusDeg:Number(cross.stdDeg)||.45,bubbleDepthM:16,baseDistanceM:155,club:(cross.clubs||[]).join(", "),shots:Number(cross.shots||0)};
     }
 		    return null;
 		  }
@@ -4902,79 +4915,83 @@
   function gdCourseDataSurfaceSvg(counts, analysis, opts={}){
     const records=Array.isArray(opts?.records)?opts.records:(Array.isArray(analysis?.records)?analysis.records:[]);
     const colourFor=typeof opts?.colourFor==="function"?opts.colourFor:null;
-    // Same plot box, same relative-% depth / absolute-degree angle axes as
-    // Practice and Comparison (gdPracticeNormalisedPlotLayout) - all three
-    // sections share one chart language now. Course Data still shows every
-    // club at once, so each club is anchored to its OWN real distance
-    // (saved bag setting, or failing that the median of its own actual
-    // shots here) rather than one shared anchor.
+    // COURSE IS THE DEVIATION FRAME. Zero here is THE PLAYING BUBBLE, not the
+    // target line. Every record already stores its shot measured from the centre
+    // of the bubble that was on screen at the time, in that bubble's own
+    // orientation (gd-shot-outcomes.js computeShotOutcome), so the deviations are
+    // plotted directly and no per-club anchoring is needed. The old bag-carry /
+    // median anchoring was redundant AND mixed frames (it rebuilt position from
+    // `expected + a bubble-relative delta`). Because the reference is stored per
+    // shot, settings changing between rounds cannot distort this picture.
     const plotLeft=38,plotRight=458,plotTop=82,plotBottom=224;
-    const actualDistanceForRecord=record=>{
-      const actual=Number(record.actualDistanceM);
-      if(Number.isFinite(actual))return actual;
-      const expected=Number(record.expectedDistanceM);
-      const depth=Number(record.depthM);
-      if(Number.isFinite(expected)&&Number.isFinite(depth))return expected+depth;
-      return Number.isFinite(expected)?expected:NaN;
-    };
-    const dataRows=records.map((record,index)=>{
-      const actual=actualDistanceForRecord(record);
-      const lateral=gdShotChartLateralInfo(record,actual);
-      return {club:record.club||"Unknown",actualDistanceM:actual,lateralM:lateral.value,hasLateral:lateral.hasLateral,counted:record.counted!==false,excluded:record.counted===false,record,index};
-    }).filter(row=>Number.isFinite(row.actualDistanceM)&&row.actualDistanceM>0);
-    const bagByClub={};
-    gdShotBubbleOverlayBagRows().forEach(row=>{bagByClub[gdShotBubbleOverlayClubKey(row.club)]=row;});
-    const anchorByClub={};
+    const dataRows=records.map((record,index)=>({
+      club:record.club||"Unknown",
+      counted:record.counted!==false,
+      excluded:record.counted===false,
+      record,
+      index
+    }));
+    // Per-club reference distance, used ONLY to express stored metres in the
+    // chart's units (% of carry for depth, degrees for lateral). This is NOT an
+    // anchor: it never moves a shot, it only scales it. Taken from the shots'
+    // own expected distances - never the bag.
+    const referenceByClub={};
     dataRows.forEach(row=>{
       const key=gdShotBubbleOverlayClubKey(row.club);
-      if(!key||Number.isFinite(anchorByClub[key]))return;
-      const bagCarry=Number(bagByClub[key]?.actualDistanceM);
-      if(Number.isFinite(bagCarry)&&bagCarry>0){anchorByClub[key]=bagCarry;return;}
-      const median=gdShotBubbleMedian(dataRows.filter(r=>gdShotBubbleOverlayClubKey(r.club)===key).map(r=>r.actualDistanceM));
-      if(Number.isFinite(median)&&median>0)anchorByClub[key]=median;
+      if(!key||Number.isFinite(referenceByClub[key]))return;
+      const median=gdShotBubbleMedian(dataRows
+        .filter(r=>gdShotBubbleOverlayClubKey(r.club)===key)
+        .map(r=>Number(r.record?.expectedDistanceM))
+        .filter(value=>Number.isFinite(value)&&value>0));
+      if(Number.isFinite(median)&&median>0)referenceByClub[key]=median;
     });
-    // Reference bubbles (My Bubble / overlay) can name a club that has no
-    // plotted shots - fall back to that club's saved bag carry so they still
-    // land on the chart instead of vanishing.
-    const anchorFor=club=>{
-      const key=gdShotBubbleOverlayClubKey(club);
-      const own=Number(anchorByClub[key]);
-      if(Number.isFinite(own)&&own>0)return own;
-      const bagCarry=Number(bagByClub[key]?.actualDistanceM);
-      return Number.isFinite(bagCarry)&&bagCarry>0?bagCarry:NaN;
-    };
+    const referenceFor=club=>Number(referenceByClub[gdShotBubbleOverlayClubKey(club)]);
     const relativeRows=dataRows.map(row=>{
-      const anchor=anchorFor(row.club);
-      if(!Number.isFinite(anchor)||anchor<=0)return null;
-      const angle=row.hasLateral!==false?Math.atan2(Number(row.lateralM)||0,row.actualDistanceM)*180/Math.PI:0;
-      return {club:row.club,normalisedDepthM:(row.actualDistanceM-anchor)/anchor*100,normalizedDeg:angle,hasLateral:row.hasLateral!==false,row,index:row.index};
+      const reference=referenceFor(row.club);
+      const depth=Number(row.record?.depthM);          // forward deviation from bubble centre, m
+      const angle=Number(row.record?.normalizedDeg);   // lateral deviation from bubble centre, deg
+      if(!Number.isFinite(reference)||reference<=0||!Number.isFinite(depth)||!Number.isFinite(angle))return null;
+      return {club:row.club,normalisedDepthM:depth/reference*100,normalizedDeg:angle,hasLateral:true,row,index:row.index};
     }).filter(Boolean);
-    // Per-club reference bubbles - grouped and run through the same
-    // gdBubbleRelativeParts engine Practice/Comparison use, just once per
-    // club instead of against one shared anchor.
-    function relativePartsFor(rows,offsetDeg){
-      const grouped={};
-      (rows||[]).forEach(row=>{
-        const key=gdShotBubbleOverlayClubKey(row.club);
-        const anchor=anchorFor(row.club);
-        if(!key||!Number.isFinite(anchor)||anchor<=0)return;
-        (grouped[key]=grouped[key]||[]).push(row);
-      });
-      return Object.keys(grouped).flatMap(key=>gdBubbleRelativeParts(grouped[key],offsetDeg,anchorFor(key)));
+    // Builds a drawable part straight in the deviation frame. centreDepthM /
+    // centreAngleDeg are the deviation of the bubble's centre from zero; widthM /
+    // depthM are its full extents.
+    function deviationPart(club,reference,centreDepthM,centreAngleDeg,widthM,depthM){
+      if(!Number.isFinite(reference)||reference<=0)return null;
+      if(!Number.isFinite(widthM)||widthM<=0||!Number.isFinite(depthM)||depthM<=0)return null;
+      return {
+        club:club||"Unknown",
+        depthM:(Number(centreDepthM)||0)/reference*100,
+        depthRadiusM:(depthM/2)/reference*100,
+        angleDeg:Number(centreAngleDeg)||0,
+        angleRadiusDeg:Math.max(.4,Math.atan2(widthM/2,reference)*180/Math.PI),
+        tiltDeg:0,
+        baseDistanceM:reference
+      };
     }
     const fitSource=Array.isArray(analysis?.bubbleFit)?analysis.bubbleFit:[];
-    const fitParts=fitSource.flatMap(fit=>{
-      const anchor=anchorFor(fit?.club);
-      const bubble=fit?.resultBubble;
-      if(!Number.isFinite(anchor)||anchor<=0||!bubble||!Number.isFinite(Number(bubble.widthM))||!Number.isFinite(Number(bubble.depthM)))return [];
-      const offset=Number.isFinite(Number(bubble.normalizedDeg))?Number(bubble.normalizedDeg):Number(fit.offsetDeg)||0;
-      const row={club:fit.club,actualDistanceM:anchor,bubbleDepthM:Number(bubble.depthM),bubbleWidthM:Number(bubble.widthM)};
-      return gdBubbleRelativeParts([row],offset,anchor);
-    });
-    const overlayRows=gdShotBubbleOverlayEnabled("course")?gdShotBubbleOverlayReferenceRows(dataRows):[];
-    const hubRows=gdShotBubbleOverlayReferenceRows(dataRows);
-    const overlayParts=relativePartsFor(overlayRows,gdStatsCurrentModelOffsetDeg());
-    const hubParts=relativePartsFor(hubRows,gdStatsCurrentModelOffsetDeg());
+    // Where the shots actually went: the measured bubble, drawn at its deviation
+    // from the bubble that was set.
+    const fitParts=fitSource.map(fit=>deviationPart(
+      fit?.club,
+      referenceFor(fit?.club),
+      Number(fit?.resultBubble?.depthOffsetM),
+      Number(fit?.resultBubble?.normalizedDeg),
+      Number(fit?.resultBubble?.widthM),
+      Number(fit?.resultBubble?.depthM)
+    )).filter(Boolean);
+    // The bubble that was actually on screen, drawn at zero - because in this
+    // frame, zero IS that bubble. Sizes come from the stored snapshots
+    // (presumedBubble = median of the real planned bubbles), never from the bag.
+    const overlayEnabled=gdShotBubbleOverlayEnabled("course");
+    const referenceParts=overlayEnabled?fitSource.map(fit=>deviationPart(
+      fit?.club,
+      referenceFor(fit?.club),
+      0,
+      0,
+      Number(fit?.presumedBubble?.widthM),
+      Number(fit?.presumedBubble?.depthM)
+    )).filter(Boolean):[];
     const plot=gdPracticeNormalisedPlotLayout({plotLeft,plotRight,plotTop,plotBottom});
     const pointFor=entry=>gdPracticeNormalisedPlotPoint(plot,entry,entry.index);
     const shotDots=relativeRows.slice(0,90).map(entry=>{
@@ -4989,8 +5006,16 @@
     const clubKeySvg=typeof opts?.keySvg==="string"
       ?opts.keySvg
       :clubKey.map((club,i)=>`<circle cx="${26+i*48}" cy="58" r="4.2" fill="${gdStatsClubColor(club)}"/><text x="${34+i*48}" y="61" fill="rgba(255,255,255,.68)" font-size="9" font-weight="850">${gdStatsSvgText(club)}</text>`).join("");
-    const hubUnderlaySvg=hubParts.length?gdPracticeNormalisedBubbleLayerMarkup(hubParts,plot,{groupClass:"gdShotBubbleOverlayLayer gdOffsetHubUnderlayLayer",source:"offset-hub-underlay",fillOpacity:".075",strokeOpacity:".62",strokeWidth:"1.35"}):"";
-    const overlaySvg=overlayParts.length?gdPracticeNormalisedBubbleLayerMarkup(overlayParts,plot,{groupClass:"gdShotBubbleOverlayLayer",source:"gps-bubble"}):"";
+    const hubUnderlaySvg="";
+    // When the overlay is on we always emit the layer group, even with no parts:
+    // gdApplyShotBubbleDomOverlay injects a legacy ABSOLUTE-frame bubble unless it
+    // finds a .gdShotBubbleOverlayLayer here, and that bubble would be drawn at the
+    // wrong scale on this normalised chart.
+    const overlaySvg=overlayEnabled
+      ?(referenceParts.length
+        ?gdPracticeNormalisedBubbleLayerMarkup(referenceParts,plot,{groupClass:"gdShotBubbleOverlayLayer",source:"gps-bubble",fillOpacity:".075",strokeOpacity:".62",strokeWidth:"1.35"})
+        :`<g class="gdShotBubbleOverlayLayer" aria-hidden="true"></g>`)
+      :"";
     // Real per-club fit ovals when analysis.bubbleFit has them; otherwise a
     // simple bounding oval around that club's own real dots (still real
     // data, just a looser fit) - never a generic model shape standing in.
@@ -6900,6 +6925,11 @@
       gdOpenPracticeData:openPracticeData,
       gdSetCourseDataTab:gdSetCourseDataTab,
       gdCourseDataSurfaceSvg:gdCourseDataSurfaceSvg,
+      // gd-app-core's gdCourseBubbleValueLabel guards on `typeof
+      // gdCourseBubbleSource === "function"`, which was always false while this
+      // stayed inside the IIFE - so the Course Bubble value read "Bubble not
+      // ready" no matter how good the fit was.
+      gdCourseBubbleSource:gdCourseBubbleSource,
       gdSetPracticeDataTab:gdSetPracticeDataTab,
       gdTogglePracticeAdmin:gdTogglePracticeAdmin,
       gdOpenPracticeAdminTab:gdOpenPracticeAdminTab,
