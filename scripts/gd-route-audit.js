@@ -3812,7 +3812,11 @@
 		    const selected=gdCompareClubKey(club);
 		    const exact=selected&&p.bubbleProfiles&&typeof p.bubbleProfiles==="object"?p.bubbleProfiles[selected]:null;
 		    const preview=p.previewBubbleSet&&(!selected||gdCompareClubKey(p.previewBubbleSet.club)===selected)?p.previewBubbleSet:null;
-		    const source=exact||preview||gdCompareManualProfileBubbleSource(p,selected,Number(ctx.current))||null;
+		    // No generic/model fallback here on purpose: My Bubble on Comparison
+		    // must be either a real saved bubble (bubbleProfiles/previewBubbleSet,
+		    // both only ever populated by an actual adopt+save) or nothing at all -
+		    // never a silently-generated textbook shape standing in for real data.
+		    const source=exact||preview||null;
 		    if(!source)return null;
 		    const baseDistance=Number(source.baseDistanceM||source.expectedDistanceM||source.meanExpectedM||source.baseCarry);
 		    const depth=Number(source.bubbleDepthM||source.clusterDepthM||source.visualDepthM);
@@ -4312,11 +4316,9 @@
       const strict=gdGpsReadyMyBubbleSource(profileSource,{offsetDeg:currentOffset,club:selected,handedness:p?.handedness});
       return strict?Object.assign({},strict,{shapeSource:strict.shapeSource||"my-bubble-current"}):null;
     }
-    const manual=gdCompareManualProfileBubbleSource(p,selected,currentOffset);
-    if(manual){
-      const fallback=gdGpsReadyMyBubbleSource(manual,{offsetDeg:currentOffset,club:selected,handedness:p?.handedness});
-      return fallback?Object.assign({},fallback,{shapeSource:fallback.shapeSource||"manual-profile"}):Object.assign({},manual,{offsetDeg:currentOffset});
-    }
+    // No generic/model fallback here on purpose: My Bubble must be either a
+    // real saved bubble or nothing at all, never a silently-generated
+    // textbook shape standing in for real data or an explicit setting.
     return null;
   }
   function gdRenderBubbleOffsetHub(manual=false){
