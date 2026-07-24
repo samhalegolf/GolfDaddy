@@ -23923,6 +23923,12 @@ function gdShotBubbleNormaliseDrawable(generated,row={},offsetDeg=0){
     handedness:gdBubbleHandednessForSource({...(generatedBase||{}),...(row||{})})
   },{normalizeAxes:true});
   if(!presentation)return null;
+  // A row with its own actualDistanceM is asking for a bubble at THAT specific
+  // distance (e.g. "my real shots averaged 147m") - the generic template's own
+  // baseCarry/centerDistanceM (typically snapped to a bag club's stored carry
+  // via getGDBForClub) must not silently override that, or two bubbles built
+  // from different real distances collapse onto the same generic position.
+  const hasRealDistance=Number.isFinite(distance)&&distance>0;
   const next=Object.assign({},generatedBase,row,{
     widthM:presentation.widthM,
     depthM:presentation.depthM,
@@ -23936,6 +23942,11 @@ function gdShotBubbleNormaliseDrawable(generated,row={},offsetDeg=0){
     visualYBias:Number.isFinite(Number(generatedBase.visualYBias))?Number(generatedBase.visualYBias):0,
     row
   });
+  if(hasRealDistance){
+    const centerForward=Number(generatedBase.centerDistanceM)-Number(generatedBase.baseDistanceM);
+    next.baseDistanceM=distance;
+    next.centerDistanceM=distance+(Number.isFinite(centerForward)?centerForward:0);
+  }
   next.tiltDeg=presentation.tiltDeg;
   return next;
 }
