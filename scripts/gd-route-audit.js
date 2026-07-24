@@ -3810,13 +3810,17 @@
 		    const p=ctx?.p;
 		    if(!p||(!p.practiceBubbleSource?.active&&p.placeholderProfile)||!Number.isFinite(Number(ctx?.current)))return null;
 		    const selected=gdCompareClubKey(club);
+		    // Pending (staged via Adopt Bubble, shape computed from real shots) takes
+		    // priority - same ordering Practice's own hub source uses - since it
+		    // represents what My Bubble is about to become, not a fallback.
+		    const pending=gdShotBubbleSafe(()=>typeof gdPracticePendingBubbleSource==="function"?gdPracticePendingBubbleSource(p):null,null);
+		    const pendingSource=pending&&pending.active&&pending.bubble&&Number.isFinite(Number(pending.offsetDeg))?pending.bubble:null;
 		    const exact=selected&&p.bubbleProfiles&&typeof p.bubbleProfiles==="object"?p.bubbleProfiles[selected]:null;
 		    const preview=p.previewBubbleSet&&(!selected||gdCompareClubKey(p.previewBubbleSet.club)===selected)?p.previewBubbleSet:null;
 		    // No generic/model fallback here on purpose: My Bubble on Comparison
-		    // must be either a real saved bubble (bubbleProfiles/previewBubbleSet,
-		    // both only ever populated by an actual adopt+save) or nothing at all -
+		    // must be real - pending, a fully saved bubble, or nothing at all -
 		    // never a silently-generated textbook shape standing in for real data.
-		    const source=exact||preview||null;
+		    const source=pendingSource||exact||preview||null;
 		    if(!source)return null;
 		    const baseDistance=Number(source.baseDistanceM||source.expectedDistanceM||source.meanExpectedM||source.baseCarry);
 		    const depth=Number(source.bubbleDepthM||source.clusterDepthM||source.visualDepthM);
