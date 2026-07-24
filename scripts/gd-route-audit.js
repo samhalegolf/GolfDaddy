@@ -2972,7 +2972,13 @@
       };
     }).filter(row=>row&&Number.isFinite(row.normalisedDepthM)&&Number.isFinite(row.normalizedDeg));
   }
-	  function gdPracticeNormalisedPlotLayout(rows,opts={}){
+	  // Fixed axes. Course / Comparison / Practice all share this domain, so an
+	  // identical bubble renders at an identical shape on every screen. Do NOT
+	  // fit the axes to the plotted rows - that is what made the same bubble look
+	  // stretched on Comparison (bubbles only) vs Practice (bubbles + scatter).
+	  const GD_NORMALISED_DEPTH_MAX=30;  // +/- % of anchor carry
+	  const GD_NORMALISED_ANGLE_MAX=10;  // +/- aim angle, degrees
+	  function gdPracticeNormalisedPlotLayout(opts={}){
 	    const chartWidth=Number(opts.width)||480;
 	    const chartHeight=Number(opts.height)||260;
 	    const plotLeft=Number(opts.plotLeft)||38;
@@ -2981,21 +2987,9 @@
 	    const plotBottom=Number(opts.plotBottom)||224;
 	    const plotMidX=(plotLeft+plotRight)/2;
 	    const plotMidY=(plotTop+plotBottom)/2;
-	    const depthValues=(rows||[]).map(row=>Math.abs(Number(row?.normalisedDepthM))).filter(Number.isFinite);
-	    const angleValues=(rows||[]).filter(row=>row?.hasLateral!==false).map(row=>Math.abs(Number(row?.normalizedDeg))).filter(Number.isFinite);
-	    const depthBase=depthValues.length>=8?gdShotChartQuantile(depthValues,.94):Math.max(8,...depthValues);
-	    const depthMax=gdShotChartNiceMax(Math.min(Math.max(depthBase*1.25+3,14),Number(opts.maxDepthM)||60),4,14);
-	    // Fit the angle axis on the SAME %-of-carry scale depth uses (a degree
-	    // value converted via tan), then convert the fitted max back to degrees -
-	    // otherwise depth (floor 14%) and angle (old floor 2.5deg, unrelated
-	    // units) get scaled independently and typical bubbles render wildly
-	    // stretched regardless of what the real dispersion shape looks like.
-	    const lateralPctValues=angleValues.map(deg=>Math.abs(Math.tan(deg*Math.PI/180))*100).filter(Number.isFinite);
-	    const lateralPctFloor=Math.max(2,depthMax*.18);
-	    const lateralPctBase=lateralPctValues.length>=8?gdShotChartQuantile(lateralPctValues,.94):Math.max(lateralPctFloor,...lateralPctValues,0);
-	    const lateralPctMax=gdShotChartNiceMax(Math.max(lateralPctBase*1.3+.6,lateralPctFloor),4,lateralPctFloor);
-	    const angleMax=gdShotChartClamp(Math.atan(lateralPctMax/100)*180/Math.PI,.6,Number(opts.maxAngleDeg)||30);
-	    return {chartWidth,chartHeight,plotLeft,plotRight,plotTop,plotBottom,plotMidX,plotMidY,depthMax,angleMax,depthRange:Math.max(1,depthMax),angleRange:Math.max(.5,angleMax)};
+	    const depthMax=GD_NORMALISED_DEPTH_MAX;
+	    const angleMax=GD_NORMALISED_ANGLE_MAX;
+	    return {chartWidth,chartHeight,plotLeft,plotRight,plotTop,plotBottom,plotMidX,plotMidY,depthMax,angleMax,depthRange:depthMax,angleRange:angleMax};
 	  }
 	  function gdPracticeGraphInternalGeometry(plot){
 	    if(!plot)return null;
@@ -3945,7 +3939,7 @@
 	    const allParts=bubblePartsByItem.flat();
 	    // Same plot box as Practice's chart (gd-route-audit.js practiceSvg) so
 	    // identical bubble data renders at an identical shape on both screens.
-	    const plot=gdPracticeNormalisedPlotLayout(gdPracticeNormalisedBubbleExtentRows(allParts),{width,height,plotLeft:38,plotRight:458,plotTop:82,plotBottom:224});
+	    const plot=gdPracticeNormalisedPlotLayout({width,height,plotLeft:38,plotRight:458,plotTop:82,plotBottom:224});
 	    const bubbleSvg=items.map((item,i)=>gdCompareBubbleLayerSvg(item,bubblePartsByItem[i],plot)).join("");
 	    return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="My Bubble, Course and Practice bubble comparison">
 	      ${gdPracticeNormalisedBackdropSvg(plot,gdShotDataGraphTitle("Comparison"),{subtitle:"Distance vs My Bubble (%) \u00b7 aim angle (\u00b0)"})}
@@ -4968,8 +4962,7 @@
     const hubRows=gdShotBubbleOverlayReferenceRows(dataRows);
     const overlayParts=relativePartsFor(overlayRows,gdStatsCurrentModelOffsetDeg());
     const hubParts=relativePartsFor(hubRows,gdStatsCurrentModelOffsetDeg());
-    const extentRows=gdPracticeNormalisedBubbleExtentRows(fitParts.concat(overlayParts).concat(hubParts));
-    const plot=gdPracticeNormalisedPlotLayout(relativeRows.concat(extentRows),{plotLeft,plotRight,plotTop,plotBottom});
+    const plot=gdPracticeNormalisedPlotLayout({plotLeft,plotRight,plotTop,plotBottom});
     const pointFor=entry=>gdPracticeNormalisedPlotPoint(plot,entry,entry.index);
     const shotDots=relativeRows.slice(0,90).map(entry=>{
       const point=pointFor(entry);
@@ -5132,16 +5125,6 @@
       };
     }).filter(Boolean);
   }
-	  function gdPracticeNormalisedBubbleExtentRows(parts){
-	    const rows=[];
-	    (parts||[]).forEach(part=>{
-	      rows.push({normalisedDepthM:part.depthM-part.depthRadiusM,normalizedDeg:part.angleDeg,hasLateral:true});
-	      rows.push({normalisedDepthM:part.depthM+part.depthRadiusM,normalizedDeg:part.angleDeg,hasLateral:true});
-	      rows.push({normalisedDepthM:part.depthM,normalizedDeg:part.angleDeg-part.angleRadiusDeg,hasLateral:true});
-	      rows.push({normalisedDepthM:part.depthM,normalizedDeg:part.angleDeg+part.angleRadiusDeg,hasLateral:true});
-	    });
-	    return rows;
-	  }
 	  function gdPracticeNormalisedBubbleLayerMarkup(parts,plot,opts={}){
 	    if(!Array.isArray(parts)||!parts.length)return "";
 	    const geo=gdPracticeGraphInternalGeometry(plot);
@@ -5173,7 +5156,7 @@
 	  function practiceSvg(analysis){
 	    const shots=gdPracticePlotShots(analysis||{});
 		    if(!shots.length){
-		      const emptyPlot=gdPracticeNormalisedPlotLayout([]);
+		      const emptyPlot=gdPracticeNormalisedPlotLayout();
 		      return `<svg class="gdPracticeGraphSvg" viewBox="0 0 480 260" role="img" aria-label="Practice Data relative plot"><g class="gdPracticeGraphCanvas">${gdPracticeNormalisedBackdropSvg(emptyPlot,"",{subtitle:"Distance vs My Bubble (%) \u00b7 aim angle (\u00b0)"})}</g></svg>${gdShotBubbleOverlayButton("practice")}`;
 	    }
     const plotAll=gdPracticePlotAllRowsForTest();
@@ -5346,7 +5329,7 @@
 	    const anchorRelativeRows=anchorDistanceM?gdBubbleRelativeShotRows(shots,anchorDistanceM):[];
 	    const myBubbleParts=anchorDistanceM&&hubRows.length&&gdPracticeHasBubbleOffset(hubOffset)?gdBubbleRelativeParts(hubRows,hubOffset,anchorDistanceM):[];
 	    const practiceBubbleParts=anchorDistanceM&&showPracticeLayer?gdBubbleRelativeParts(overlayRows,practiceBubbleOffset,anchorDistanceM):[];
-	    const normalisedPlot=gdPracticeNormalisedPlotLayout(anchorRelativeRows.concat(gdPracticeNormalisedBubbleExtentRows(myBubbleParts.concat(practiceBubbleParts))),{plotLeft:38,plotRight:458,plotTop,plotBottom});
+	    const normalisedPlot=gdPracticeNormalisedPlotLayout({plotLeft:38,plotRight:458,plotTop,plotBottom});
 	    const clubKeySource=anchorRelativeRows.length?anchorRelativeRows:dataRows;
 	    const clubKey=[...new Set(clubKeySource.map(row=>row.club||"Unknown"))].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})).slice(0,6);
 	    const clubKeyDropdown=gdPracticeClubKeyDropdownHTML(clubKey);
