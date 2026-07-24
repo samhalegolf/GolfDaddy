@@ -4896,8 +4896,12 @@
 	      counted:counted
 	    };
 	  }
-  function gdCourseDataSurfaceSvg(counts, analysis){
-    const records=Array.isArray(analysis?.records)?analysis.records:[];
+  // opts lets the Course Data default screen (gdStatsVisualSummary) reuse this
+  // renderer with its own filtered records, colour mode and legend, so both the
+  // default screen and this fallback plot on the SAME fixed normalised domain.
+  function gdCourseDataSurfaceSvg(counts, analysis, opts={}){
+    const records=Array.isArray(opts?.records)?opts.records:(Array.isArray(analysis?.records)?analysis.records:[]);
+    const colourFor=typeof opts?.colourFor==="function"?opts.colourFor:null;
     // Same plot box, same relative-% depth / absolute-degree angle axes as
     // Practice and Comparison (gdPracticeNormalisedPlotLayout) - all three
     // sections share one chart language now. Course Data still shows every
@@ -4929,7 +4933,16 @@
       const median=gdShotBubbleMedian(dataRows.filter(r=>gdShotBubbleOverlayClubKey(r.club)===key).map(r=>r.actualDistanceM));
       if(Number.isFinite(median)&&median>0)anchorByClub[key]=median;
     });
-    const anchorFor=club=>Number(anchorByClub[gdShotBubbleOverlayClubKey(club)]);
+    // Reference bubbles (My Bubble / overlay) can name a club that has no
+    // plotted shots - fall back to that club's saved bag carry so they still
+    // land on the chart instead of vanishing.
+    const anchorFor=club=>{
+      const key=gdShotBubbleOverlayClubKey(club);
+      const own=Number(anchorByClub[key]);
+      if(Number.isFinite(own)&&own>0)return own;
+      const bagCarry=Number(bagByClub[key]?.actualDistanceM);
+      return Number.isFinite(bagCarry)&&bagCarry>0?bagCarry:NaN;
+    };
     const relativeRows=dataRows.map(row=>{
       const anchor=anchorFor(row.club);
       if(!Number.isFinite(anchor)||anchor<=0)return null;
@@ -4968,12 +4981,14 @@
       const point=pointFor(entry);
       if(!point)return "";
       const counted=entry.row.record.counted!==false;
-      const fill=counted?gdStatsClubColor(entry.club):"#8f9a96";
+      const fill=counted?(colourFor?colourFor(entry.row.record,entry.club):gdStatsClubColor(entry.club)):"#8f9a96";
       const opacity=counted?".82":".18";
       return gdShotChartDotSvg(point,{fill,opacity,radius:counted?2.6:1.8,missing:entry.hasLateral===false});
     }).join("");
     const clubKey=[...new Set(dataRows.map(row=>row.club||"Unknown"))].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})).slice(0,6);
-    const clubKeySvg=clubKey.map((club,i)=>`<circle cx="${26+i*48}" cy="58" r="4.2" fill="${gdStatsClubColor(club)}"/><text x="${34+i*48}" y="61" fill="rgba(255,255,255,.68)" font-size="9" font-weight="850">${gdStatsSvgText(club)}</text>`).join("");
+    const clubKeySvg=typeof opts?.keySvg==="string"
+      ?opts.keySvg
+      :clubKey.map((club,i)=>`<circle cx="${26+i*48}" cy="58" r="4.2" fill="${gdStatsClubColor(club)}"/><text x="${34+i*48}" y="61" fill="rgba(255,255,255,.68)" font-size="9" font-weight="850">${gdStatsSvgText(club)}</text>`).join("");
     const hubUnderlaySvg=hubParts.length?gdPracticeNormalisedBubbleLayerMarkup(hubParts,plot,{groupClass:"gdShotBubbleOverlayLayer gdOffsetHubUnderlayLayer",source:"offset-hub-underlay",fillOpacity:".075",strokeOpacity:".62",strokeWidth:"1.35"}):"";
     const overlaySvg=overlayParts.length?gdPracticeNormalisedBubbleLayerMarkup(overlayParts,plot,{groupClass:"gdShotBubbleOverlayLayer",source:"gps-bubble"}):"";
     // Real per-club fit ovals when analysis.bubbleFit has them; otherwise a
@@ -6884,6 +6899,7 @@
       gdOpenCourseData:openCourseData,
       gdOpenPracticeData:openPracticeData,
       gdSetCourseDataTab:gdSetCourseDataTab,
+      gdCourseDataSurfaceSvg:gdCourseDataSurfaceSvg,
       gdSetPracticeDataTab:gdSetPracticeDataTab,
       gdTogglePracticeAdmin:gdTogglePracticeAdmin,
       gdOpenPracticeAdminTab:gdOpenPracticeAdminTab,

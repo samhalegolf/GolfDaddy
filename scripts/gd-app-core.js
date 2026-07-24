@@ -24319,13 +24319,30 @@ function gdStatsVisualSummary(analysis, filteredRecords, filteredAnalysis){
   const fit=fitSource.slice().sort((a,b)=>(b.shots||0)-(a.shots||0))[0];
   const modelFit=fit||((analysis?.bubbleFit||[]).slice().sort((a,b)=>(b.shots||0)-(a.shots||0))[0])||null;
   const hasVisualData=!!records.length;
+  const showAllClubs=(gdStatsView.club||"all")==="all";
+  const timeMode=gdStatsView.colourMode==="time";
+  const clubKey=showAllClubs?[...new Set(records.map(r=>r.club||"Unknown"))].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})).slice(0,6):[];
+  const clubKeySvg=clubKey.map((club,i)=>`<circle cx="${26+i*48}" cy="58" r="4.2" fill="${gdStatsClubColor(club)}"/><text x="${34+i*48}" y="61" fill="rgba(255,255,255,.68)" font-size="9" font-weight="850">${gdStatsSvgText(club)}</text>`).join("");
+  const timeKeySvg=gdStatsTimePalette.map((color,i)=>`<circle cx="${26+i*52}" cy="58" r="4.2" fill="${color}"/><text x="${34+i*52}" y="61" fill="rgba(255,255,255,.68)" font-size="9" font-weight="850">${i===0?"old":i===gdStatsTimePalette.length-1?"new":""}</text>`).join("");
+  // Course Data plots on the SAME fixed normalised domain as Practice and
+  // Comparison (gdPracticeNormalisedPlotLayout, via gdCourseDataSurfaceSvg) so
+  // identical bubble data renders at an identical shape on every screen. The
+  // legacy absolute-distance chart below only runs if the route-audit owner
+  // that provides that renderer has not loaded yet.
+  if(typeof window.gdCourseDataSurfaceSvg==="function"){
+    visual.innerHTML=window.gdCourseDataSurfaceSvg(null,{records,bubbleFit:fitSource},{
+      records,
+      colourFor:(record,club)=>timeMode?gdStatsTimeColor(record,records):gdStatsClubColor(club),
+      keySvg:hasVisualData?(timeMode?timeKeySvg:clubKeySvg):""
+    });
+    return;
+  }
 	  if(!hasVisualData){
 	    visual.innerHTML=gdShotBubbleOverlayStandaloneSvg("course",gdShotDataGraphTitle("Course Data"),width,height);
     return;
   }
   const fitsByClub={};
   fitSource.forEach(item=>{fitsByClub[item.club]=item});
-  const showAllClubs=(gdStatsView.club||"all")==="all";
   const plotLeft=30;
   const plotRight=450;
   const plotTop=82;
@@ -24363,9 +24380,6 @@ function gdStatsVisualSummary(analysis, filteredRecords, filteredAnalysis){
     const op=r.counted?".82":".18";
     return gdShotChartDotSvg(point,{fill,opacity:op,radius:r.counted?2.6:1.8,missing:row.hasLateral===false});
   }).join("");
-  const clubKey=showAllClubs?[...new Set(records.map(r=>r.club||"Unknown"))].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})).slice(0,6):[];
-  const clubKeySvg=clubKey.map((club,i)=>`<circle cx="${26+i*48}" cy="58" r="4.2" fill="${gdStatsClubColor(club)}"/><text x="${34+i*48}" y="61" fill="rgba(255,255,255,.68)" font-size="9" font-weight="850">${gdStatsSvgText(club)}</text>`).join("");
-  const timeKeySvg=gdStatsTimePalette.map((color,i)=>`<circle cx="${26+i*52}" cy="58" r="4.2" fill="${color}"/><text x="${34+i*52}" y="61" fill="rgba(255,255,255,.68)" font-size="9" font-weight="850">${i===0?"old":i===gdStatsTimePalette.length-1?"new":""}</text>`).join("");
   const hubUnderlaySvg=hubRows.length?gdOffsetHubUnderlayLayer(hubRows,plot,"course"):"";
   const overlaySvg=gdShotBubbleOverlayLayer(dataRows,plot,"course",{offsetDeg:gdStatsCurrentModelOffsetDeg()});
   const clubOvals=gdShotChartFitOvalsSvg(plot,fitSource,dataRows,{source:"course"})||gdShotChartClubOvalsSvg(plot,dataRows);
