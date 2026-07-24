@@ -2912,6 +2912,31 @@
 	      };
 	    }).filter(row=>row&&Number.isFinite(row.normalisedDepthM)&&Number.isFinite(row.normalizedDeg));
 	  }
+  // Shared relative-% chart rows: every shot/bubble is positioned against the SAME
+  // anchor (My Bubble's own current distance, tied to the bag) rather than each
+  // shot's own per-club expected baseline. This is what lets a Practice Bubble
+  // legitimately sit off-centre from My Bubble when the two distances differ -
+  // that gap is real (it's what the Distance Suggestion feature is meant to close)
+  // and must not be normalised away per-club.
+  function gdBubbleRelativeShotRows(shots,anchorDistanceM){
+    const anchor=Number(anchorDistanceM);
+    if(!Number.isFinite(anchor)||anchor<=0)return [];
+    return (Array.isArray(shots)?shots:[]).map((shot,index)=>{
+      const actual=gdPracticeShotActualDistance(shot);
+      if(!Number.isFinite(actual)||actual<=0)return null;
+      const angle=gdPracticeNormalisedAngleForShot(shot,anchor);
+      return {
+        club:shot?.club||"Unknown",
+        actualDistanceM:actual,
+        expectedDistanceM:anchor,
+        normalisedDepthM:(actual-anchor)/anchor*100,
+        normalizedDeg:Number.isFinite(angle)?angle:0,
+        hasLateral:Number.isFinite(angle),
+        shot,
+        index
+      };
+    }).filter(row=>row&&Number.isFinite(row.normalisedDepthM)&&Number.isFinite(row.normalizedDeg));
+  }
 	  function gdPracticeNormalisedPlotLayout(rows,opts={}){
 	    const chartWidth=Number(opts.width)||480;
 	    const chartHeight=Number(opts.height)||260;
@@ -2999,7 +3024,7 @@
 	    ).join("");
 	    return `<rect width="${width}" height="${height}" fill="rgba(0,0,0,.08)"/>
 	      ${titleText&&!hideText?`<text x="24" y="30" fill="rgba(255,255,255,.82)" font-size="14" font-weight="950">${gdStatsSvgText(titleText)}</text>`:""}
-	      ${hideText?"":`<text x="24" y="${subtitleY}" fill="rgba(255,255,255,.46)" font-size="9" font-weight="850">Depth against expected carry · lateral angle</text>`}
+	      ${hideText?"":`<text x="24" y="${subtitleY}" fill="rgba(255,255,255,.46)" font-size="9" font-weight="850">${gdStatsSvgText(opts.subtitle||"Depth against expected carry · lateral angle")}</text>`}
 	      <rect x="${(plot.plotLeft-8).toFixed(1)}" y="${(plot.plotTop-8).toFixed(1)}" width="${(plot.plotRight-plot.plotLeft+16).toFixed(1)}" height="${(plot.plotBottom-plot.plotTop+16).toFixed(1)}" rx="8" fill="rgba(255,255,255,.012)" stroke="rgba(255,255,255,.045)" stroke-width="1"/>
 	      ${grid}
 	      <line x1="${plot.plotMidX.toFixed(1)}" y1="${plot.plotTop}" x2="${plot.plotMidX.toFixed(1)}" y2="${plot.plotBottom}" stroke="rgba(255,255,255,.18)" stroke-width="1" stroke-dasharray="4 8" stroke-linecap="round"/>
@@ -3806,76 +3831,67 @@
 	    delete next.lateralRadiusDeg;
 	    return next;
 	  }
-		  function gdCompareBubbleSvg(item,plot,club){
-		    const rawOffset=Number(item.offset);
-		    const hasValue=Number.isFinite(rawOffset);
-		    const offset=hasValue?rawOffset:0;
-		    const size=gdCompareDisplayBubbleSize(gdCompareBubbleSize(item.source,club),item.kind,club);
-		    const carry=Number(size?.baseDistanceM||item.source?.baseDistanceM||item.source?.expectedDistanceM||item.source?.meanExpectedM);
-		    const depth=Number(size?.bubbleDepthM);
-		    const widthM=Number(size?.bubbleWidthM);
-		    const radiusDeg=Number(size?.lateralRadiusDeg);
-		    const modelClub=gdCompareClubKey(size?.club||club||"7i")||"7i";
-		    const hasShape=hasValue&&Number.isFinite(carry)&&carry>0&&Number.isFinite(depth)&&depth>0&&(Number.isFinite(widthM)&&widthM>0||Number.isFinite(radiusDeg)&&radiusDeg>0);
-		    const referenceRows=hasShape?[{
-		      club:modelClub,
-		      label:item.label,
-		      actualDistanceM:carry,
-		      lateralM:0,
-		      bubbleDepthM:depth,
-		      bubbleWidthM:Number.isFinite(widthM)&&widthM>0?widthM:null,
-		      lateralRadiusDeg:Number.isFinite(radiusDeg)&&radiusDeg>0?radiusDeg:null,
-		      handedness:item.source?.handedness,
-		      projectionSource:item.kind
-		    }]:[];
-		    const muted=hasValue&&hasShape?1:.34;
-		    const stroke=item.stroke;
-		    const className=item.kind==="playing"?"gdComparePlayingBubble":"gdCompareEvidenceBubble";
-		    const layer=hasShape?gdShotBubbleOverlayLayerMarkup([],plot,"compare",{
-		      referenceRows,
-		      maxBubbles:1,
-		      offsetDeg:offset,
-		      groupClass:`gdShotBubbleOverlayLayer gdCompareBubbleLayer gdCompareBubbleLayer-${item.kind}`,
-		      source:item.kind,
-		      colour:stroke,
-		      fillOpacity:item.fillOpacity||".12",
-		      strokeOpacity:item.strokeOpacity||".82",
-		      strokeWidth:item.kind==="playing"?"1.7":"1.55"
-		    }):"";
-		    return `<g class="${className}" opacity="${muted}">
-		      ${layer}
-		    </g>`;
-		  }
+	  function gdCompareBubbleParts(item,anchorDistanceM){
+	    const rawOffset=Number(item.offset);
+	    if(!Number.isFinite(rawOffset))return [];
+	    const size=gdCompareBubbleSize(item.source);
+	    const carry=Number(size?.baseDistanceM||item.source?.baseDistanceM||item.source?.expectedDistanceM||item.source?.meanExpectedM);
+	    const depth=Number(size?.bubbleDepthM);
+	    const widthM=Number(size?.bubbleWidthM);
+	    const radiusDeg=Number(size?.lateralRadiusDeg);
+	    const itemClub=gdCompareClubKey(size?.club||item.source?.club||"7i")||"7i";
+	    const anchor=Number(anchorDistanceM);
+	    const hasShape=Number.isFinite(anchor)&&anchor>0&&Number.isFinite(carry)&&carry>0&&Number.isFinite(depth)&&depth>0&&(Number.isFinite(widthM)&&widthM>0||Number.isFinite(radiusDeg)&&radiusDeg>0);
+	    if(!hasShape)return [];
+	    const referenceRows=[{
+	      club:itemClub,
+	      actualDistanceM:carry,
+	      bubbleDepthM:depth,
+	      bubbleWidthM:Number.isFinite(widthM)&&widthM>0?widthM:null,
+	      lateralRadiusDeg:Number.isFinite(radiusDeg)&&radiusDeg>0?radiusDeg:null,
+	      handedness:item.source?.handedness
+	    }];
+	    return gdBubbleRelativeParts(referenceRows,rawOffset,anchor);
+	  }
+	  function gdCompareBubbleLayerSvg(item,parts,plot){
+	    const className=item.kind==="playing"?"gdComparePlayingBubble":"gdCompareEvidenceBubble";
+	    const muted=parts.length?1:.34;
+	    const layer=parts.length?gdPracticeNormalisedBubbleLayerMarkup(parts,plot,{
+	      offsetDeg:Number(item.offset)||0,
+	      groupClass:`gdShotBubbleOverlayLayer gdCompareBubbleLayer gdCompareBubbleLayer-${item.kind}`,
+	      source:item.kind==="playing"?"my-bubble":item.kind,
+	      colour:item.stroke,
+	      fillOpacity:item.fillOpacity||".12",
+	      strokeOpacity:item.strokeOpacity||".82",
+	      strokeWidth:item.kind==="playing"?"1.7":"1.55",
+	      labelText:item.label
+	    }):"";
+	    return `<g class="${className}" opacity="${muted}">
+	      ${layer}
+	    </g>`;
+	  }
 	  function gdCompareSvg(ctx){
-	    const width=480,height=286;
+	    const width=480,height=260;
 	    const club=gdCompareLoadClub(ctx);
 	    const currentSource=gdCompareProfileBubbleSource(ctx,club);
 	    const courseSource=ctx.courseBubble||null;
 	    const practiceSource=ctx.practiceBubble||null;
 	    const items=[
-		      {kind:"playing",label:"My Bubble",offset:Number(ctx.current),source:currentSource,stroke:"#f4f8f3",fillOpacity:".10",strokeOpacity:".78"},
-		      {kind:"course",label:"Course Bubble",offset:Number(ctx.course),source:courseSource,stroke:"#37f28d",fillOpacity:".13",strokeOpacity:".84"},
-		      {kind:"practice",label:"Practice Bubble",offset:Number(ctx.practice),source:practiceSource,stroke:"#62d2ff",fillOpacity:".13",strokeOpacity:".84"}
-		    ];
-	    const shapeRows=items.map(item=>{
-	      const size=gdCompareDisplayBubbleSize(gdCompareBubbleSize(item.source,club),item.kind,club);
-	      const carry=Number(size?.baseDistanceM||item.source?.baseDistanceM||item.source?.expectedDistanceM||item.source?.meanExpectedM);
-	      const depth=Number(size?.bubbleDepthM);
-	      const widthM=Number(size?.bubbleWidthM);
-	      const radiusDeg=Number(size?.lateralRadiusDeg);
-	      if(!Number.isFinite(Number(item.offset))||!Number.isFinite(carry)||carry<=0||!Number.isFinite(depth)||depth<=0||!(Number.isFinite(widthM)&&widthM>0||Number.isFinite(radiusDeg)&&radiusDeg>0))return null;
-	      const lateralM=Number.isFinite(widthM)&&widthM>0?widthM/2:Math.tan(radiusDeg*Math.PI/180)*carry;
-	      return {club:gdCompareClubKey(size?.club||club||"7i")||"7i",label:item.label,actualDistanceM:carry,lateralM,offsetDeg:Number(item.offset),bubbleDepthM:depth,bubbleWidthM:widthM,lateralRadiusDeg:radiusDeg,handedness:item.source?.handedness};
-	    }).filter(Boolean);
-	    const domainRows=shapeRows.concat(shapeRows.map(row=>Object.assign({},row,{actualDistanceM:Math.max(1,Number(row.actualDistanceM)-Number(row.bubbleDepthM||0))})));
-	    const plot=gdShotChartLayout(domainRows,[],{plotLeft:30,plotRight:450,plotTop:64,plotBottom:224});
-	    const lateralMax=Math.max(22,...shapeRows.map(row=>Math.abs(Number(row.lateralM)||0)+Math.abs(Math.tan((Number(row.offsetDeg)||0)*Math.PI/180)*Number(row.actualDistanceM||0))));
-	    gdShotChartEnsureLateralRange(plot,lateralMax*1.22);
-	    const bubbleSvg=items.map(item=>gdCompareBubbleSvg(item,plot,club)).join("");
-	    const options=gdCompareClubOptions(club,ctx);
-	    const select=options?`<div class="gdCompareClubPick" data-gd-card-control><span>Club</span><select aria-label="Comparison bubble club" onchange="gdCompareSetClub(this.value)">${options}</select></div>`:"";
-	    return `${select}<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="My Bubble, Course and Practice bubble comparison">
-	      ${gdShotChartBackdropSvg(plot,gdShotDataGraphTitle("Comparison"))}
+	      {kind:"playing",label:"My Bubble",offset:Number(ctx.current),source:currentSource,stroke:"#f4f8f3",fillOpacity:".10",strokeOpacity:".78"},
+	      {kind:"course",label:"Course Bubble",offset:Number(ctx.course),source:courseSource,stroke:"#37f28d",fillOpacity:".13",strokeOpacity:".84"},
+	      {kind:"practice",label:"Practice Bubble",offset:Number(ctx.practice),source:practiceSource,stroke:"#62d2ff",fillOpacity:".13",strokeOpacity:".84"}
+	    ];
+	    // Anchor: My Bubble's own current distance, tied to the bag - never a
+	    // generic/display club. Course and Practice bubbles are positioned
+	    // relative to this, not forced onto a shared display club.
+	    const anchorSize=gdCompareBubbleSize(currentSource);
+	    const anchorDistanceM=Number(anchorSize?.baseDistanceM||currentSource?.baseDistanceM||currentSource?.expectedDistanceM||currentSource?.meanExpectedM)||null;
+	    const bubblePartsByItem=items.map(item=>gdCompareBubbleParts(item,anchorDistanceM));
+	    const allParts=bubblePartsByItem.flat();
+	    const plot=gdPracticeNormalisedPlotLayout(gdPracticeNormalisedBubbleExtentRows(allParts),{width,height,plotLeft:30,plotRight:450,plotTop:64,plotBottom:224});
+	    const bubbleSvg=items.map((item,i)=>gdCompareBubbleLayerSvg(item,bubblePartsByItem[i],plot)).join("");
+	    return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="My Bubble, Course and Practice bubble comparison">
+	      ${gdPracticeNormalisedBackdropSvg(plot,gdShotDataGraphTitle("Comparison"),{subtitle:"Distance vs My Bubble (%) \u00b7 aim angle (\u00b0)"})}
 	      ${bubbleSvg}
 	    </svg>`;
 	  }
@@ -4966,6 +4982,34 @@
 	      };
 	    }).filter(Boolean);
 	  }
+  // Bubble geometry for the shared relative-% chart. Position (depthM) is a
+  // percentage relative to the ANCHOR distance (My Bubble's own bag-tied
+  // distance) passed in - not each bubble's own distance and not a generic
+  // per-club baseline. Shape (depthRadiusM/angleRadiusDeg) stays relative to
+  // the bubble's OWN carry, so a driver's and a wedge's dispersion are still
+  // fairly comparable in size. Angle (angleDeg) is each bubble's own absolute
+  // offset from straight ahead, unchanged - never anchor-relative.
+  function gdBubbleRelativeParts(rows,offsetDeg,anchorDistanceM){
+    const anchor=Number(anchorDistanceM);
+    if(!Number.isFinite(anchor)||anchor<=0)return [];
+    const scale=gdShotBubbleOverlayScale();
+    return gdShotBubbleOverlayBubbleParts(rows,offsetDeg).map(bubble=>{
+      const carry=Number(bubble.centerDistanceM)||Number(bubble.baseDistanceM)||0;
+      if(!Number.isFinite(carry)||carry<=0)return null;
+      const lateralRadius=Math.max(1,Number(bubble.lateralRadiusM)||Number(bubble.widthM)/2||1)*scale;
+      const depthRadius=Math.max(1,Number(bubble.depthRadiusM)||Number(bubble.depthM)/2||1)*scale;
+      const angle=Number.isFinite(Number(bubble.offsetDeg))?Number(bubble.offsetDeg):Math.atan2(Number(bubble.centerLateralM)||0,carry)*180/Math.PI;
+      return{
+        club:bubble.club||bubble.row?.club||"Unknown",
+        depthM:(carry-anchor)/anchor*100,
+        depthRadiusM:depthRadius/carry*100,
+        angleDeg:angle,
+        angleRadiusDeg:Math.max(.4,Math.atan2(lateralRadius,Math.max(1,carry))*180/Math.PI),
+        tiltDeg:Number(bubble.tiltDeg)||0,
+        baseDistanceM:Number(bubble.baseDistanceM)||carry
+      };
+    }).filter(Boolean);
+  }
 	  function gdPracticeNormalisedBubbleExtentRows(parts){
 	    const rows=[];
 	    (parts||[]).forEach(part=>{
@@ -5008,9 +5052,7 @@
 	    const shots=gdPracticePlotShots(analysis||{});
 		    if(!shots.length){
 		      const emptyPlot=gdPracticeNormalisedPlotLayout([]);
-		      const emptyOriginBottom=gdPracticeGraphOriginBottom();
-		      const emptyTransform=emptyOriginBottom?gdPracticeGraphOriginBottomTransform(emptyPlot):"";
-		      return `<svg class="gdPracticeGraphSvg ${emptyOriginBottom?"originBottom":""}" viewBox="0 0 480 260" role="img" aria-label="Practice Data normalised plot" data-origin-bottom="${emptyOriginBottom?"1":"0"}"><g class="gdPracticeGraphCanvas"${emptyTransform?` transform="${emptyTransform}"`:""}>${gdPracticeNormalisedBackdropSvg(emptyPlot,"",{hideText:emptyOriginBottom})}</g></svg>${gdPracticeGraphRotateControlHTML(emptyOriginBottom)}${gdShotBubbleOverlayButton("practice")}`;
+		      return `<svg class="gdPracticeGraphSvg" viewBox="0 0 480 260" role="img" aria-label="Practice Data relative plot"><g class="gdPracticeGraphCanvas">${gdPracticeNormalisedBackdropSvg(emptyPlot,"",{subtitle:"Distance vs My Bubble (%) \u00b7 aim angle (\u00b0)"})}</g></svg>${gdShotBubbleOverlayButton("practice")}`;
 	    }
     const plotAll=gdPracticePlotAllRowsForTest();
     const cfg=safe(()=>window.GolfDaddyLaunchMonitorData?.settings?.(),{})||{};
@@ -5098,6 +5140,10 @@
     const hubBaseRows=gdPracticeMyBubbleHubRows(dataRows,analysis);
     const hubRows=gdPracticeHasBubbleOffset(myBubbleOffset)?hubBaseRows.filter(row=>Number.isFinite(Number(row.actualDistanceM))&&Number(row.actualDistanceM)>0):[];
     const hubOffset=gdPracticeHasBubbleOffset(myBubbleOffset)?myBubbleOffset:null;
+    // Shared anchor for the relative-% chart: My Bubble's own current distance
+    // (tied to the bag). Falls back to the live Practice Bubble's distance only
+    // when there is no My Bubble yet at all (fresh profile).
+    const anchorDistanceM=Number(hubRows[0]?.baseDistanceM)||Number(overlayRows[0]?.actualDistanceM)||null;
     const domainRows=overlayRows
       .concat(hubRows)
       .concat(showPracticeLayer?gdShotBubbleOverlayDistanceExtentRows(overlayRows,practiceBubbleOffset):[])
@@ -5175,17 +5221,14 @@
       const ry=gdShotChartClamp((maxY-minY)/2+7,9,32);
       return `<ellipse class="gdPracticeClusterMarker gdShotChartClubOval practice" data-source="cluster-marker" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" rx="${rx.toFixed(1)}" ry="${ry.toFixed(1)}" fill="rgba(255,210,135,.82)" fill-opacity=".014" stroke="rgba(255,210,135,.82)" stroke-width=".7" stroke-opacity=".46" stroke-dasharray="1 5" stroke-linecap="round" pointer-events="none"/>`;
     }
-	    const normalisedRows=gdPracticeNormalisedPlotRows(shots);
-	    const normalisedBaselines=gdPracticeNormalisedClubBaselines(shots);
-	    const myBubbleParts=hubRows.length&&gdPracticeHasBubbleOffset(hubOffset)?gdPracticeNormalisedBubbleParts(hubRows,hubOffset,normalisedBaselines):[];
-	    const practiceBubbleParts=showPracticeLayer?gdPracticeNormalisedBubbleParts(overlayRows,practiceBubbleOffset,normalisedBaselines):[];
-	    const normalisedPlot=gdPracticeNormalisedPlotLayout(normalisedRows.concat(gdPracticeNormalisedBubbleExtentRows(myBubbleParts.concat(practiceBubbleParts))),{plotLeft:38,plotRight:458,plotTop,plotBottom});
-	    const graphOriginBottom=gdPracticeGraphOriginBottom();
-	    const graphTransform=graphOriginBottom?gdPracticeGraphOriginBottomTransform(normalisedPlot):"";
-	    const clubKeySource=normalisedRows.length?normalisedRows:dataRows;
+	    const anchorRelativeRows=anchorDistanceM?gdBubbleRelativeShotRows(shots,anchorDistanceM):[];
+	    const myBubbleParts=anchorDistanceM&&hubRows.length&&gdPracticeHasBubbleOffset(hubOffset)?gdBubbleRelativeParts(hubRows,hubOffset,anchorDistanceM):[];
+	    const practiceBubbleParts=anchorDistanceM&&showPracticeLayer?gdBubbleRelativeParts(overlayRows,practiceBubbleOffset,anchorDistanceM):[];
+	    const normalisedPlot=gdPracticeNormalisedPlotLayout(anchorRelativeRows.concat(gdPracticeNormalisedBubbleExtentRows(myBubbleParts.concat(practiceBubbleParts))),{plotLeft:38,plotRight:458,plotTop,plotBottom});
+	    const clubKeySource=anchorRelativeRows.length?anchorRelativeRows:dataRows;
 	    const clubKey=[...new Set(clubKeySource.map(row=>row.club||"Unknown"))].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})).slice(0,6);
 	    const clubKeyDropdown=gdPracticeClubKeyDropdownHTML(clubKey);
-	    const pts=normalisedRows.slice(0,70).map(row=>{
+	    const pts=anchorRelativeRows.slice(0,70).map(row=>{
 	      const point=gdPracticeNormalisedPlotPoint(normalisedPlot,row,row.index);
 	      if(!point)return "";
 	      const state=pointStateByIndex.get(row.index)||{};
@@ -5195,13 +5238,13 @@
       return gdShotChartDotSvg(point,{fill:colour,opacity,radius:2.2,shape:"circle",stroke:point.clipped?"rgba(255,255,255,.26)":"",strokeWidth:"1"});
 	    }).join("");
 	    let myBubbleMotionStyle="";
-	    if(adoptionMotionActive&&myBubbleParts.length&&gdPracticeHasBubbleOffset(adoptionMotion.fromOffset)&&gdPracticeHasBubbleOffset(hubOffset)){
+	    if(adoptionMotionActive&&myBubbleParts.length&&anchorDistanceM&&gdPracticeHasBubbleOffset(adoptionMotion.fromOffset)&&gdPracticeHasBubbleOffset(hubOffset)){
 	      const geo=gdPracticeGraphInternalGeometry(normalisedPlot);
-	      const anchor=myBubbleParts[0];
-	      const toDistance=Number(adoptionMotion.toDistance)||Number(anchor.baseDistanceM)||155;
+	      const anchorPart=myBubbleParts[0];
+	      const toDistance=Number(adoptionMotion.toDistance)||Number(anchorPart.baseDistanceM)||anchorDistanceM;
 	      const fromDistance=Number(adoptionMotion.fromDistance)||toDistance;
-	      const anchorBaseline=(Number(anchor.baseDistanceM)||toDistance)-anchor.depthM;
-	      const dx=geo?geo.xForDepth(fromDistance-anchorBaseline)-geo.xForDepth(anchor.depthM):NaN;
+	      const fromDepthPct=(fromDistance-anchorDistanceM)/anchorDistanceM*100;
+	      const dx=geo?geo.xForDepth(fromDepthPct)-geo.xForDepth(anchorPart.depthM):NaN;
 	      const dy=geo?geo.yForAngle(Number(adoptionMotion.fromOffset)||0)-geo.yForAngle(Number(hubOffset)||0):NaN;
 	      if(Number.isFinite(dx)&&Number.isFinite(dy))myBubbleMotionStyle=`--gd-practice-adopt-x:${dx.toFixed(1)}px;--gd-practice-adopt-y:${dy.toFixed(1)}px;`;
 	    }
@@ -5222,14 +5265,14 @@
 	      labelText:"PRACTICE",
 	      label:!myBubbleCombined
 	    }):"";
-		    return `<svg class="gdPracticeGraphSvg ${graphOriginBottom?"originBottom":""}" viewBox="0 0 480 260" role="img" aria-label="Practice Data normalised plot" data-origin-bottom="${graphOriginBottom?"1":"0"}" data-practice-offset-deg="${gdPracticeHasBubbleOffset(practiceBubbleOffset)?Number(practiceBubbleOffset).toFixed(2):""}" data-hub-offset-deg="${gdPracticeHasBubbleOffset(hubOffset)?Number(hubOffset).toFixed(2):""}">
-		      <g class="gdPracticeGraphCanvas"${graphTransform?` transform="${graphTransform}"`:""}>
-		      ${gdPracticeNormalisedBackdropSvg(normalisedPlot,"",{hideText:graphOriginBottom})}
-	      ${pts}
-	      ${practiceBubbleLayer}
-	      ${myBubbleLayer}
-	      </g>
-	    </svg>${gdPracticeGraphRotateControlHTML(graphOriginBottom)}${clubKeyDropdown}${gdShotBubbleOverlayButton("practice")}`;
+		    return `<svg class="gdPracticeGraphSvg" viewBox="0 0 480 260" role="img" aria-label="Practice Data relative plot" data-practice-offset-deg="${gdPracticeHasBubbleOffset(practiceBubbleOffset)?Number(practiceBubbleOffset).toFixed(2):""}" data-hub-offset-deg="${gdPracticeHasBubbleOffset(hubOffset)?Number(hubOffset).toFixed(2):""}" data-anchor-distance-m="${anchorDistanceM?Number(anchorDistanceM).toFixed(1):""}">
+		      <g class="gdPracticeGraphCanvas">
+		      ${gdPracticeNormalisedBackdropSvg(normalisedPlot,"",{subtitle:"Distance vs My Bubble (%) \u00b7 aim angle (\u00b0)"})}
+      ${pts}
+      ${practiceBubbleLayer}
+      ${myBubbleLayer}
+      </g>
+    </svg>${clubKeyDropdown}${gdShotBubbleOverlayButton("practice")}`;
 	  }
   const gdPracticeBubbleToleranceFields=[
     "launchMonitorCluster.clusterHunterPct",
