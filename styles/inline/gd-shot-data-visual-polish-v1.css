@@ -401,7 +401,6 @@
 #gdPracticeDataVisual .gdPracticeMyBubbleAdopting{
   mix-blend-mode:normal!important;
 }
-#gdPracticeDataVisual .gdPracticeMyBubbleLayer-pending .gdOffsetHubBubble,
 #gdPracticeDataVisual .gdPracticeMyBubbleLayer-adopted-current .gdOffsetHubBubble,
 #gdPracticeDataVisual .gdPracticeMyBubbleAdopting .gdOffsetHubBubble{
   fill:#37f28d!important;
@@ -410,6 +409,19 @@
   stroke-opacity:1!important;
   stroke-width:2.35!important;
   filter:drop-shadow(0 0 20px rgba(55,242,141,.42))!important;
+}
+/* Pending = staged but not yet saved. Kept low-fill and dashed so it reads as
+   a ghost preview rather than a solid bubble - important because it often
+   sits exactly on top of the live Practice Bubble (same offset/distance
+   until you actually save), and a solid fill would fully hide it. */
+#gdPracticeDataVisual .gdPracticeMyBubbleLayer-pending .gdOffsetHubBubble{
+  fill:#37f28d!important;
+  fill-opacity:.14!important;
+  stroke:#37f28d!important;
+  stroke-opacity:1!important;
+  stroke-width:2.1!important;
+  stroke-dasharray:5 4!important;
+  filter:drop-shadow(0 0 14px rgba(55,242,141,.32))!important;
 }
 #gdPracticeDataVisual .gdPracticeBubbleProjectionLayer .gdOffsetHubBubble{
   fill:#62d2ff!important;

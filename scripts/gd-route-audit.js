@@ -2012,6 +2012,33 @@
     gdPracticeAdoptBubbleAsPlayingBubble();
     return false;
   }
+  // Undo the staging step from gdPracticeAdoptBubbleAsPlayingBubble - clears
+  // the pending preview (offset+shape only ever gets this far unless the
+  // separate Distance Suggestion flow also ran) without touching a bubble
+  // that has already been fully saved via gdBubbleOffsetSave.
+  function gdPracticeUnadoptBubbleFromAction(){
+    const p=safe(()=>ensureProfile(),null);
+    if(!p||!gdPracticePendingBubbleIsActive(p)){
+      gdLmToast("Nothing pending to undo");
+      return false;
+    }
+    const pendingMode=String(p.practiceBubblePendingSource?.distanceMode||"");
+    delete p.practiceBubblePendingSource;
+    delete p.practiceBubblePendingAt;
+    if(pendingMode!=="manual-preview"){
+      try{localStorage.removeItem(GD_PRACTICE_BAG_DRAFT_KEY);}catch(e){}
+    }
+    p.updatedAt=new Date().toISOString();
+    savePlayerProfiles();
+    syncCoreProfileFromActive();
+    gdPracticeBubbleAdoptionMotion=null;
+    gdShotBubbleSafe(()=>typeof gdRenderBubbleOffsetHub==="function"&&gdRenderBubbleOffsetHub());
+    renderPracticeData(true);
+    gdShotBubbleSafe(()=>typeof renderDataHubStatus==="function"&&renderDataHubStatus());
+    gdShotBubbleSafe(()=>typeof renderCompareData==="function"&&renderCompareData());
+    gdLmToast("Bubble un-adopted");
+    return false;
+  }
   function gdPracticeProjectorSummary(analysis,ctx){
     return ctx?.hasRealPracticeData&&ctx?.canProject?"Bubble ready":"Bubble not ready";
   }
@@ -2355,15 +2382,23 @@
 
   function gdPracticeProjectionControlsHTML(analysis){
     const ctx=gdPracticeProjectionContext(analysis);
-    const adopted=gdPracticePlayingBubbleIsAdopted(safe(()=>ensureProfile(),null));
+    const p=safe(()=>ensureProfile(),null);
+    const adopted=gdPracticePlayingBubbleIsAdopted(p);
+    const pending=p?.practiceBubblePendingSource||null;
+    // A pending stage counts toward the button's toggle state only while it
+    // still matches the CURRENTLY live practice bubble - if the underlying
+    // shots/analysis moved on since staging, treat it as stale rather than
+    // showing "Unadopt" for a bubble that's no longer what's on screen.
+    const pendingActive=!!(pending&&pending.active&&pending.fingerprint===gdPracticeBubbleFingerprint(analysis));
     const generated=ctx.canProject&&ctx.visible;
     const generateDisabled=ctx.canProject?"":"disabled";
-    const adoptDisabled=ctx.canProject&&ctx.visible&&!adopted?"":"disabled";
+    const adoptDisabled=pendingActive?"":(ctx.canProject&&ctx.visible&&!adopted?"":"disabled");
 	    const tone=generated?"generated":ctx.canProject?"ready":"waiting";
-	    const adoptLabel=adopted?"Bubble Adopted":"Adopt Bubble";
+	    const adoptLabel=pendingActive?"Unadopt Bubble":adopted?"Bubble Adopted":"Adopt Bubble";
+	    const adoptAction=pendingActive?"gdPracticeUnadoptBubbleFromAction()":"gdPracticeAdoptBubbleFromAction()";
 	    const bagSuggestion=gdPracticeBagSuggestionHTML(analysis);
 	    const bagNotice=gdPracticeBagSuggestionNoticeHTML(analysis);
-	    return `<div class="gdPracticeActionDock ${tone} ${bagSuggestion?"hasBagSuggestion":""} ${gdPracticeBagSuggestionOpen?"bagOpen":""}"><div class="gdPracticePrimaryActions"><button type="button" class="gdPracticeBubbleAction generate ${ctx.canProject?"ready":""} ${generated?"active":""}" aria-pressed="${generated?"true":"false"}" ${generateDisabled} onclick="return gdPracticeGenerateBubble()">Generate Bubble</button><button type="button" class="gdPracticeBubbleAction adopt ${adopted?"adopted":""}" aria-pressed="${adopted?"true":"false"}" ${adoptDisabled} onclick="return gdPracticeAdoptBubbleFromAction()">${gdEscapeHTML(adoptLabel)}</button></div>${bagSuggestion?`<div class="gdPracticeBagSuggestionSlot">${bagSuggestion}</div>`:""}</div>${gdPracticeSandboxControlsHTML("compact")}${bagNotice}`;
+	    return `<div class="gdPracticeActionDock ${tone} ${bagSuggestion?"hasBagSuggestion":""} ${gdPracticeBagSuggestionOpen?"bagOpen":""}"><div class="gdPracticePrimaryActions"><button type="button" class="gdPracticeBubbleAction generate ${ctx.canProject?"ready":""} ${generated?"active":""}" aria-pressed="${generated?"true":"false"}" ${generateDisabled} onclick="return gdPracticeGenerateBubble()">Generate Bubble</button><button type="button" class="gdPracticeBubbleAction adopt ${adopted?"adopted":""} ${pendingActive?"pending":""}" aria-pressed="${adopted||pendingActive?"true":"false"}" ${adoptDisabled} onclick="return ${adoptAction}">${gdEscapeHTML(adoptLabel)}</button></div>${bagSuggestion?`<div class="gdPracticeBagSuggestionSlot">${bagSuggestion}</div>`:""}</div>${gdPracticeSandboxControlsHTML("compact")}${bagNotice}`;
 	  }
 	  function gdRenderPracticeProjectionControls(analysis){
 	    const root=byId("gdPracticeProjectionControls");
@@ -6378,7 +6413,7 @@
     const compact=String(variant||"")==="compact";
     return `<div class="gdPracticeSandboxControls ${compact?"compact":""}"><div><strong>Local test inputs</strong><span>${compact?"Native-shaped sandbox rows.":"Temporary native-shaped rows for UI testing."}</span></div><div class="gdPracticeSandboxButtons"><button type="button" data-gd-practice-sandbox-action="simulate" data-gd-practice-sandbox-scenario="ready">Simulate import</button><button type="button" data-gd-practice-sandbox-action="load" data-gd-practice-sandbox-scenario="ready">Ready rows</button><button type="button" data-gd-practice-sandbox-action="load" data-gd-practice-sandbox-scenario="sparse">Sparse rows</button><button type="button" data-gd-practice-sandbox-action="load" data-gd-practice-sandbox-scenario="distance">Distance mismatch</button><button type="button" data-gd-practice-sandbox-action="clear">Clear</button><button type="button" data-gd-practice-sandbox-action="bag" data-gd-practice-sandbox-mode="empty">Bag empty</button><button type="button" data-gd-practice-sandbox-action="bag" data-gd-practice-sandbox-mode="matched">Bag matched</button><button type="button" data-gd-practice-sandbox-action="bag" data-gd-practice-sandbox-mode="different">Bag differs</button></div></div>`;
   }
-  Object.assign(window,{gdPracticeLoadSandboxNativeRows,gdPracticeSimulateSandboxImport,gdPracticeSetSandboxBag,gdPracticeClearSandboxData,gdPracticeSetDistanceLinkClub,gdPracticeGenerateBubble,gdPracticeAdoptBubbleFromAction,gdPracticeApplyBagSuggestions,gdPracticeToggleBagSuggestions,gdPracticeToggleBagAdapt,gdPracticeBagAdaptRemember,gdPracticeBagAdaptChanged,gdPracticeUndoBagAdapt});
+  Object.assign(window,{gdPracticeLoadSandboxNativeRows,gdPracticeSimulateSandboxImport,gdPracticeSetSandboxBag,gdPracticeClearSandboxData,gdPracticeSetDistanceLinkClub,gdPracticeGenerateBubble,gdPracticeAdoptBubbleFromAction,gdPracticeUnadoptBubbleFromAction,gdPracticeApplyBagSuggestions,gdPracticeToggleBagSuggestions,gdPracticeToggleBagAdapt,gdPracticeBagAdaptRemember,gdPracticeBagAdaptChanged,gdPracticeUndoBagAdapt});
 
 			  function gdRenderPracticeEvidenceList(analysis){
 			    const root=byId("gdPracticeEvidenceList");
