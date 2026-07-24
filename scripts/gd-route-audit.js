@@ -4902,58 +4902,122 @@
 	      counted:counted
 	    };
 	  }
-	  function gdCourseDataSurfaceSvg(counts, analysis){
-	    const width=480,height=260;
-	    const records=Array.isArray(analysis?.records)?analysis.records:[];
-	    // Same plot box as Practice/Comparison (practiceSvg/gdCompareSvg) so all
-	    // three sections' default charts share one consistent frame, even though
-	    // this one still plots real distances across multiple clubs.
-	    const plotLeft=38,plotRight=458,plotTop=82,plotBottom=224;
-	    const plotMidY=(plotTop+plotBottom)/2;
-	    const actualDistanceForRecord=record=>{
-	      const actual=Number(record.actualDistanceM);
-	      if(Number.isFinite(actual))return actual;
-	      const expected=Number(record.expectedDistanceM);
-	      const depth=Number(record.depthM);
-	      if(Number.isFinite(expected)&&Number.isFinite(depth))return expected+depth;
-	      return Number.isFinite(expected)?expected:NaN;
-	    };
-	    const dataRows=records.map((record,index)=>{
-	      const actual=actualDistanceForRecord(record);
-	      const lateral=gdShotChartLateralInfo(record,actual);
-	      return {club:record.club||"Unknown",actualDistanceM:actual,lateralM:lateral.value,hasLateral:lateral.hasLateral,counted:record.counted!==false,excluded:record.counted===false,record,index};
-	    }).filter(row=>Number.isFinite(row.actualDistanceM)&&row.actualDistanceM>0);
-	    const overlayRows=gdShotBubbleOverlayEnabled("course")?gdShotBubbleOverlayReferenceRows(dataRows):[];
-	    const hubRows=gdShotBubbleOverlayReferenceRows(dataRows);
-	    const hubDomainRows=hubRows.length?gdShotBubbleOverlayDistanceExtentRows(hubRows,gdStatsCurrentModelOffsetDeg()):[];
-	    const plot=gdShotChartLayout(dataRows,overlayRows.concat(hubDomainRows),{plotLeft,plotRight,plotTop,plotBottom});
-	    if(gdShotBubbleOverlayEnabled("course")||hubRows.length)gdShotChartEnsureLateralRange(
-	      plot,
-	      gdShotBubbleOverlayEnabled("course")?gdShotBubbleOverlayLateralMax(dataRows,gdStatsCurrentModelOffsetDeg()):0,
-	      hubRows.length?gdShotBubbleOverlayLateralMax(hubRows,gdStatsCurrentModelOffsetDeg()):0
-	    );
-	    const shotDots=dataRows.slice(0,90).map(row=>{
-	      const point=gdShotChartPoint(plot,row.actualDistanceM,row.lateralM,row.index,row.hasLateral);
-	      const counted=row.record.counted!==false;
-	      const fill=counted?gdStatsClubColor(row.club):"#8f9a96";
-	      const opacity=counted?".82":".18";
-	      return gdShotChartDotSvg(point,{fill,opacity,radius:counted?2.6:1.8,missing:row.hasLateral===false});
-	    }).join("");
-	    const clubKey=[...new Set(dataRows.map(row=>row.club||"Unknown"))].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})).slice(0,6);
-	    const clubKeySvg=clubKey.map((club,i)=>`<circle cx="${26+i*48}" cy="58" r="4.2" fill="${gdStatsClubColor(club)}"/><text x="${34+i*48}" y="61" fill="rgba(255,255,255,.68)" font-size="9" font-weight="850">${gdStatsSvgText(club)}</text>`).join("");
-	    const hubUnderlaySvg=hubRows.length?gdOffsetHubUnderlayLayer(hubRows,plot,"course"):"";
-	    const overlaySvg=gdShotBubbleOverlayLayer(dataRows,plot,"course",{offsetDeg:gdStatsCurrentModelOffsetDeg()});
-	    const fitSource=Array.isArray(analysis?.bubbleFit)?analysis.bubbleFit:[];
-	    const clubOvals=gdShotChartFitOvalsSvg(plot,fitSource,dataRows,{source:"course"})||gdShotChartClubOvalsSvg(plot,dataRows.slice(0,90));
-	    return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Course Data visual">
-	      ${gdShotChartBackdropSvg(plot,gdShotDataGraphTitle("Course Data"))}
-	      ${hubUnderlaySvg}
-	      ${overlaySvg}
-	      ${clubOvals}
-	      ${shotDots}
-	      ${clubKeySvg}
-	    </svg>${gdShotBubbleOverlayButton("course")}`;
-	  }
+  function gdCourseDataSurfaceSvg(counts, analysis){
+    const records=Array.isArray(analysis?.records)?analysis.records:[];
+    // Same plot box, same relative-% depth / absolute-degree angle axes as
+    // Practice and Comparison (gdPracticeNormalisedPlotLayout) - all three
+    // sections share one chart language now. Course Data still shows every
+    // club at once, so each club is anchored to its OWN real distance
+    // (saved bag setting, or failing that the median of its own actual
+    // shots here) rather than one shared anchor.
+    const plotLeft=38,plotRight=458,plotTop=82,plotBottom=224;
+    const actualDistanceForRecord=record=>{
+      const actual=Number(record.actualDistanceM);
+      if(Number.isFinite(actual))return actual;
+      const expected=Number(record.expectedDistanceM);
+      const depth=Number(record.depthM);
+      if(Number.isFinite(expected)&&Number.isFinite(depth))return expected+depth;
+      return Number.isFinite(expected)?expected:NaN;
+    };
+    const dataRows=records.map((record,index)=>{
+      const actual=actualDistanceForRecord(record);
+      const lateral=gdShotChartLateralInfo(record,actual);
+      return {club:record.club||"Unknown",actualDistanceM:actual,lateralM:lateral.value,hasLateral:lateral.hasLateral,counted:record.counted!==false,excluded:record.counted===false,record,index};
+    }).filter(row=>Number.isFinite(row.actualDistanceM)&&row.actualDistanceM>0);
+    const bagByClub={};
+    gdShotBubbleOverlayBagRows().forEach(row=>{bagByClub[gdShotBubbleOverlayClubKey(row.club)]=row;});
+    const anchorByClub={};
+    dataRows.forEach(row=>{
+      const key=gdShotBubbleOverlayClubKey(row.club);
+      if(!key||Number.isFinite(anchorByClub[key]))return;
+      const bagCarry=Number(bagByClub[key]?.actualDistanceM);
+      if(Number.isFinite(bagCarry)&&bagCarry>0){anchorByClub[key]=bagCarry;return;}
+      const median=gdShotBubbleMedian(dataRows.filter(r=>gdShotBubbleOverlayClubKey(r.club)===key).map(r=>r.actualDistanceM));
+      if(Number.isFinite(median)&&median>0)anchorByClub[key]=median;
+    });
+    const anchorFor=club=>Number(anchorByClub[gdShotBubbleOverlayClubKey(club)]);
+    const relativeRows=dataRows.map(row=>{
+      const anchor=anchorFor(row.club);
+      if(!Number.isFinite(anchor)||anchor<=0)return null;
+      const angle=row.hasLateral!==false?Math.atan2(Number(row.lateralM)||0,row.actualDistanceM)*180/Math.PI:0;
+      return {club:row.club,normalisedDepthM:(row.actualDistanceM-anchor)/anchor*100,normalizedDeg:angle,hasLateral:row.hasLateral!==false,row,index:row.index};
+    }).filter(Boolean);
+    // Per-club reference bubbles - grouped and run through the same
+    // gdBubbleRelativeParts engine Practice/Comparison use, just once per
+    // club instead of against one shared anchor.
+    function relativePartsFor(rows,offsetDeg){
+      const grouped={};
+      (rows||[]).forEach(row=>{
+        const key=gdShotBubbleOverlayClubKey(row.club);
+        const anchor=anchorFor(row.club);
+        if(!key||!Number.isFinite(anchor)||anchor<=0)return;
+        (grouped[key]=grouped[key]||[]).push(row);
+      });
+      return Object.keys(grouped).flatMap(key=>gdBubbleRelativeParts(grouped[key],offsetDeg,anchorFor(key)));
+    }
+    const fitSource=Array.isArray(analysis?.bubbleFit)?analysis.bubbleFit:[];
+    const fitParts=fitSource.flatMap(fit=>{
+      const anchor=anchorFor(fit?.club);
+      const bubble=fit?.resultBubble;
+      if(!Number.isFinite(anchor)||anchor<=0||!bubble||!Number.isFinite(Number(bubble.widthM))||!Number.isFinite(Number(bubble.depthM)))return [];
+      const offset=Number.isFinite(Number(bubble.normalizedDeg))?Number(bubble.normalizedDeg):Number(fit.offsetDeg)||0;
+      const row={club:fit.club,actualDistanceM:anchor,bubbleDepthM:Number(bubble.depthM),bubbleWidthM:Number(bubble.widthM)};
+      return gdBubbleRelativeParts([row],offset,anchor);
+    });
+    const overlayRows=gdShotBubbleOverlayEnabled("course")?gdShotBubbleOverlayReferenceRows(dataRows):[];
+    const hubRows=gdShotBubbleOverlayReferenceRows(dataRows);
+    const overlayParts=relativePartsFor(overlayRows,gdStatsCurrentModelOffsetDeg());
+    const hubParts=relativePartsFor(hubRows,gdStatsCurrentModelOffsetDeg());
+    const extentRows=gdPracticeNormalisedBubbleExtentRows(fitParts.concat(overlayParts).concat(hubParts));
+    const plot=gdPracticeNormalisedPlotLayout(relativeRows.concat(extentRows),{plotLeft,plotRight,plotTop,plotBottom});
+    const pointFor=entry=>gdPracticeNormalisedPlotPoint(plot,entry,entry.index);
+    const shotDots=relativeRows.slice(0,90).map(entry=>{
+      const point=pointFor(entry);
+      if(!point)return "";
+      const counted=entry.row.record.counted!==false;
+      const fill=counted?gdStatsClubColor(entry.club):"#8f9a96";
+      const opacity=counted?".82":".18";
+      return gdShotChartDotSvg(point,{fill,opacity,radius:counted?2.6:1.8,missing:entry.hasLateral===false});
+    }).join("");
+    const clubKey=[...new Set(dataRows.map(row=>row.club||"Unknown"))].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})).slice(0,6);
+    const clubKeySvg=clubKey.map((club,i)=>`<circle cx="${26+i*48}" cy="58" r="4.2" fill="${gdStatsClubColor(club)}"/><text x="${34+i*48}" y="61" fill="rgba(255,255,255,.68)" font-size="9" font-weight="850">${gdStatsSvgText(club)}</text>`).join("");
+    const hubUnderlaySvg=hubParts.length?gdPracticeNormalisedBubbleLayerMarkup(hubParts,plot,{groupClass:"gdShotBubbleOverlayLayer gdOffsetHubUnderlayLayer",source:"offset-hub-underlay",fillOpacity:".075",strokeOpacity:".62",strokeWidth:"1.35"}):"";
+    const overlaySvg=overlayParts.length?gdPracticeNormalisedBubbleLayerMarkup(overlayParts,plot,{groupClass:"gdShotBubbleOverlayLayer",source:"gps-bubble"}):"";
+    // Real per-club fit ovals when analysis.bubbleFit has them; otherwise a
+    // simple bounding oval around that club's own real dots (still real
+    // data, just a looser fit) - never a generic model shape standing in.
+    let clubOvals="";
+    if(fitParts.length){
+      clubOvals=gdPracticeNormalisedBubbleLayerMarkup(fitParts,plot,{groupClass:"gdShotChartClubOvals course",source:"course",fillOpacity:".07",strokeOpacity:".4",strokeWidth:".9"});
+    }else{
+      const groups=new Map();
+      relativeRows.forEach(entry=>{
+        if(entry.row.excluded)return;
+        const point=pointFor(entry);
+        if(!point)return;
+        const key=`course::${entry.club}`;
+        if(!groups.has(key))groups.set(key,[]);
+        groups.get(key).push(point);
+      });
+      clubOvals=[...groups.values()].filter(points=>points.length>=2).map(points=>{
+        const xs=points.map(p=>p.x),ys=points.map(p=>p.y);
+        const minX=Math.min(...xs),maxX=Math.max(...xs),minY=Math.min(...ys),maxY=Math.max(...ys);
+        const cx=(minX+maxX)/2,cy=(minY+maxY)/2;
+        const rx=gdShotChartClamp((maxX-minX)/2+10,20,56);
+        const ry=gdShotChartClamp((maxY-minY)/2+8,11,34);
+        return `<ellipse class="gdShotChartClubOval course" data-source="course" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" rx="${rx.toFixed(1)}" ry="${ry.toFixed(1)}" fill="rgba(255,210,135,.82)" fill-opacity=".014" stroke="rgba(255,210,135,.82)" stroke-width=".85" stroke-opacity=".34" stroke-dasharray="1 5" stroke-linecap="round" pointer-events="none"/>`;
+      }).join("");
+      clubOvals=clubOvals?`<g class="gdShotChartClubOvals" aria-hidden="true">${clubOvals}</g>`:"";
+    }
+    return `<svg viewBox="0 0 480 260" role="img" aria-label="Course Data visual">
+      ${gdPracticeNormalisedBackdropSvg(plot,gdShotDataGraphTitle("Course Data"),{subtitle:"Distance vs each club's own baseline (%) \u00b7 aim angle (\u00b0)"})}
+      ${hubUnderlaySvg}
+      ${overlaySvg}
+      ${clubOvals}
+      ${shotDots}
+      ${clubKeySvg}
+    </svg>${gdShotBubbleOverlayButton("course")}`;
+  }
 	  function gdCourseDataLandingStatus(counts){
 	    if(counts.shown)return `${counts.shown} shown`;
 	    if(counts.records)return `${counts.records} paired`;
