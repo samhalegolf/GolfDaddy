@@ -3943,7 +3943,9 @@
 	    const anchorDistanceM=Number(anchorSize?.baseDistanceM||currentSource?.baseDistanceM||currentSource?.expectedDistanceM||currentSource?.meanExpectedM)||null;
 	    const bubblePartsByItem=items.map(item=>gdCompareBubbleParts(item,anchorDistanceM));
 	    const allParts=bubblePartsByItem.flat();
-	    const plot=gdPracticeNormalisedPlotLayout(gdPracticeNormalisedBubbleExtentRows(allParts),{width,height,plotLeft:30,plotRight:450,plotTop:64,plotBottom:224});
+	    // Same plot box as Practice's chart (gd-route-audit.js practiceSvg) so
+	    // identical bubble data renders at an identical shape on both screens.
+	    const plot=gdPracticeNormalisedPlotLayout(gdPracticeNormalisedBubbleExtentRows(allParts),{width,height,plotLeft:38,plotRight:458,plotTop:82,plotBottom:224});
 	    const bubbleSvg=items.map((item,i)=>gdCompareBubbleLayerSvg(item,bubblePartsByItem[i],plot)).join("");
 	    return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="My Bubble, Course and Practice bubble comparison">
 	      ${gdPracticeNormalisedBackdropSvg(plot,gdShotDataGraphTitle("Comparison"),{subtitle:"Distance vs My Bubble (%) \u00b7 aim angle (\u00b0)"})}
@@ -4903,7 +4905,10 @@
 	  function gdCourseDataSurfaceSvg(counts, analysis){
 	    const width=480,height=260;
 	    const records=Array.isArray(analysis?.records)?analysis.records:[];
-	    const plotLeft=30,plotRight=450,plotTop=82,plotBottom=224;
+	    // Same plot box as Practice/Comparison (practiceSvg/gdCompareSvg) so all
+	    // three sections' default charts share one consistent frame, even though
+	    // this one still plots real distances across multiple clubs.
+	    const plotLeft=38,plotRight=458,plotTop=82,plotBottom=224;
 	    const plotMidY=(plotTop+plotBottom)/2;
 	    const actualDistanceForRecord=record=>{
 	      const actual=Number(record.actualDistanceM);
