@@ -23639,22 +23639,21 @@ function gdShotBubbleOverlayReferenceRows(points){
   const wanted=[...new Set(dataRows.map(row=>gdShotBubbleOverlayClubKey(row.club)).filter(Boolean))];
   const dataByClub={};
   dataRows.forEach(row=>{dataByClub[gdShotBubbleOverlayClubKey(row.club)]=row;});
-  const fallbackForClub=key=>{
+  // Real recorded data for a club wins outright; a saved bag row (a real
+  // setting) is the fallback when there's no real data for that club; never
+  // a generic hardcoded per-club distance table standing in for either.
+  const rowForClub=key=>{
     const data=dataByClub[key];
-    if(!data)return null;
-    const defaultCarry=gdShotBubbleSafe(()=>typeof gdDefaultCarryForClub==="function"?gdDefaultCarryForClub(data.club):NaN,NaN);
-    const carry=Number.isFinite(Number(defaultCarry))&&Number(defaultCarry)>0?Number(defaultCarry):Number(data.actualDistanceM);
-    return Number.isFinite(carry)&&carry>0?{club:data.club,actualDistanceM:carry,lateralM:0}:null;
+    if(data&&Number.isFinite(Number(data.actualDistanceM))&&Number(data.actualDistanceM)>0){
+      return {club:data.club,actualDistanceM:Number(data.actualDistanceM),lateralM:Number(data.lateralM)||0};
+    }
+    return bagByClub[key]||null;
   };
   if(wanted.length){
-    const rows=wanted.map(key=>bagByClub[key]||fallbackForClub(key)).filter(Boolean).map(row=>Object.assign({},row));
+    const rows=wanted.map(rowForClub).filter(Boolean).map(row=>Object.assign({},row));
     if(rows.length)return rows;
   }
-  return (bagRows.length?bagRows:dataRows.map(row=>{
-    const defaultCarry=gdShotBubbleSafe(()=>typeof gdDefaultCarryForClub==="function"?gdDefaultCarryForClub(row.club):NaN,NaN);
-    const carry=Number.isFinite(Number(defaultCarry))&&Number(defaultCarry)>0?Number(defaultCarry):Number(row.actualDistanceM);
-    return {club:row.club,actualDistanceM:carry,lateralM:0};
-  })).filter(row=>Number.isFinite(Number(row.actualDistanceM))&&Number(row.actualDistanceM)>0).map(row=>Object.assign({},row));
+  return bagRows.map(row=>Object.assign({},row)).filter(row=>Number.isFinite(Number(row.actualDistanceM))&&Number(row.actualDistanceM)>0);
 }
 function gdShotBubbleOverlayScale(){
   const scale=gdShotBubbleSafe(()=>typeof dev==="function"?Number(dev("bubbleVisuals.mainScale")):1.02,1.02);
@@ -24121,10 +24120,9 @@ function gdShotBubbleOverlayVisibleClubRows(view){
   return clubs.map(club=>{
     const key=gdShotBubbleOverlayClubKey(club);
     const bag=bagByClub[key];
-    if(bag)return Object.assign({},bag,{club});
-    const defaultCarry=gdShotBubbleSafe(()=>typeof gdDefaultCarryForClub==="function"?gdDefaultCarryForClub(club):NaN,NaN);
-    const carry=Number(defaultCarry);
-    return Number.isFinite(carry)&&carry>0?{club,actualDistanceM:carry,lateralM:0}:null;
+    // Real bag setting only - no generic per-club distance table standing in
+    // for a club that isn't actually in the bag.
+    return bag?Object.assign({},bag,{club}):null;
   }).filter(Boolean);
 }
 function gdShotBubbleOverlayRowsForView(view){

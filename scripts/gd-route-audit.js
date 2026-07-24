@@ -2984,9 +2984,17 @@
 	    const depthValues=(rows||[]).map(row=>Math.abs(Number(row?.normalisedDepthM))).filter(Number.isFinite);
 	    const angleValues=(rows||[]).filter(row=>row?.hasLateral!==false).map(row=>Math.abs(Number(row?.normalizedDeg))).filter(Number.isFinite);
 	    const depthBase=depthValues.length>=8?gdShotChartQuantile(depthValues,.94):Math.max(8,...depthValues);
-	    const angleBase=angleValues.length>=8?gdShotChartQuantile(angleValues,.94):Math.max(1.8,...angleValues);
 	    const depthMax=gdShotChartNiceMax(Math.min(Math.max(depthBase*1.25+3,14),Number(opts.maxDepthM)||60),4,14);
-	    const angleMax=gdShotChartNiceMax(Math.min(Math.max(angleBase*1.3+.4,2.5),Number(opts.maxAngleDeg)||12),4,2.5);
+	    // Fit the angle axis on the SAME %-of-carry scale depth uses (a degree
+	    // value converted via tan), then convert the fitted max back to degrees -
+	    // otherwise depth (floor 14%) and angle (old floor 2.5deg, unrelated
+	    // units) get scaled independently and typical bubbles render wildly
+	    // stretched regardless of what the real dispersion shape looks like.
+	    const lateralPctValues=angleValues.map(deg=>Math.abs(Math.tan(deg*Math.PI/180))*100).filter(Number.isFinite);
+	    const lateralPctFloor=Math.max(2,depthMax*.18);
+	    const lateralPctBase=lateralPctValues.length>=8?gdShotChartQuantile(lateralPctValues,.94):Math.max(lateralPctFloor,...lateralPctValues,0);
+	    const lateralPctMax=gdShotChartNiceMax(Math.max(lateralPctBase*1.3+.6,lateralPctFloor),4,lateralPctFloor);
+	    const angleMax=gdShotChartClamp(Math.atan(lateralPctMax/100)*180/Math.PI,.6,Number(opts.maxAngleDeg)||30);
 	    return {chartWidth,chartHeight,plotLeft,plotRight,plotTop,plotBottom,plotMidX,plotMidY,depthMax,angleMax,depthRange:Math.max(1,depthMax),angleRange:Math.max(.5,angleMax)};
 	  }
 	  function gdPracticeGraphInternalGeometry(plot){
@@ -3538,7 +3546,11 @@
 		    const anchor=(method.clubClusters||[]).find(cluster=>cluster.club===anchorClub)||null;
 		    const shots=(analysis?.acceptedShots||[]).filter(shot=>!anchorClub||shot.club===anchorClub);
 		    const importBatchIds=[...new Set(shots.map(shot=>shot.importBatchId||shot.importId||"").filter(Boolean))];
-		    const expected=anchor?.meanExpectedM||gdShotBubbleMedian(shots.map(shot=>shot.expectedM||shot.carryM))||155;
+		    // Real measured distance first (same helper the rest of Practice uses),
+		    // target/expected carry only as a last-resort fallback - this bubble is
+		    // meant to represent what these shots actually did, not what the club
+		    // is nominally supposed to carry.
+		    const expected=gdShotBubbleMedian(shots.map(shot=>gdPracticeShotActualDistance(shot)))||anchor?.meanExpectedM||155;
     const radiusDeg=Number(anchor?.radiusDeg||anchor?.stdDeg);
     const depthSpread=gdShotBubbleMedian(shots.map(shot=>Math.abs(Number(shot.depthM)||0)))*2;
     return{
