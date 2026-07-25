@@ -110,7 +110,10 @@ const DEV_DEFAULTS={
     widthScale:1,
     depthScale:1,
     tiltScale:1,
-    tiltMaxDeg:8,
+    // 14 so the standard per-club tilts (driver 14, wood 12, iron 10, wedge 7)
+    // all fit under the clamp. At the old 8 the clamp silently flattened every
+    // class above it to the same angle.
+    tiltMaxDeg:14,
     gpsMaxLateralPct:.13,
     gpsMaxDepthPct:.18,
     gpsMaxLateralM:28,
@@ -19818,7 +19821,7 @@ function gdBubbleGeometryTuning(){
     widthScale:gdClamp(num(get("bubbleGeometry.widthScale"),1),.3,2.5),
     depthScale:gdClamp(num(get("bubbleGeometry.depthScale"),1),.3,2.5),
     tiltScale:gdClamp(num(get("bubbleGeometry.tiltScale"),1),0,3),
-    tiltMaxDeg:gdClamp(num(get("bubbleGeometry.tiltMaxDeg"),8),1,25),
+    tiltMaxDeg:gdClamp(num(get("bubbleGeometry.tiltMaxDeg"),14),1,25),
     gpsMaxLateralPct:gdClamp(num(get("bubbleGeometry.gpsMaxLateralPct"),.13),.03,.5),
     gpsMaxDepthPct:gdClamp(num(get("bubbleGeometry.gpsMaxDepthPct"),.18),.04,.6),
     gpsMaxLateralM:gdClamp(num(get("bubbleGeometry.gpsMaxLateralM"),28),8,120),
@@ -24969,7 +24972,7 @@ function calculateCleanBubbleProfile(input={}){
   const tiltBase={driver:5,woodHybrid:4.5,iron:4,wedge:2.5}[group]??4;
   // Same maths board as the main engine: bubbleGeometry tunables govern this
   // (ghost/preview) copy too, so there is no separately-tuned bubble logic.
-  const geo=typeof gdBubbleGeometryTuning==="function"?gdBubbleGeometryTuning():{widthScale:1,depthScale:1,tiltScale:1,tiltMaxDeg:8};
+  const geo=typeof gdBubbleGeometryTuning==="function"?gdBubbleGeometryTuning():{widthScale:1,depthScale:1,tiltScale:1,tiltMaxDeg:14};
   const clusterTiltDeg=gdRound(gdClamp(gdHandednessSign(handedness)*(tiltBase+Math.abs(faceOffsetDeg)*.28+Math.abs(distanceTendencyPct)*.14)*geo.tiltScale,-geo.tiltMaxDeg,geo.tiltMaxDeg),2);
   return{club,baseCarry:gdRound(baseCarry,1),faceOffsetDeg:gdRound(faceOffsetDeg,2),faceAlignmentOffsetDeg:gdRound(faceOffsetDeg,2),aimOffsetDeg:aim.aimOffsetDeg,aimOffsetM:aim.aimOffsetM,clusterWidthM:gdRound(baseCarry*ratios.width*skill*geo.widthScale,1),clusterDepthM:gdRound(baseCarry*ratios.depth*skill*geo.depthScale,1),clusterTiltDeg,distanceTendencyPct,dispersionMultiplier:1,impactStatus:"Baseline",shapeSource:"engine-derived",skillLevel,handedness};
 }

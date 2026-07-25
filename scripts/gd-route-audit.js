@@ -4056,8 +4056,15 @@
 	    // identical bubble data renders at an identical shape on both screens.
 	    const plot=plotBox;
 	    const bubbleSvg=items.map((item,i)=>gdCompareBubbleLayerSvg(item,bubblePartsByItem[i],plot)).join("");
+	    // Same buffer band as Course, around the same My Bubble. This is where the
+	    // Course and Practice bubbles get read against the allowance, so it has to
+	    // be here too. Drawn under the bubbles so they stay legible on top.
+	    const bufferPct=gdCourseBubbleBufferPct();
+	    const playingPart=(bubblePartsByItem[0]||[])[0];
+	    const bufferSvg=gdGraphBufferBandMarkup(playingPart,gdGraphBufferPart(playingPart,1+bufferPct/100),plot);
 	    return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="My Bubble, Course and Practice bubble comparison">
-	      ${gdPracticeNormalisedBackdropSvg(plot,gdShotDataGraphTitle("Comparison"),{subtitle:`Distance vs ${anchorLabel||"My Bubble"} (%) \u00b7 aim angle (\u00b0)`})}
+	      ${gdPracticeNormalisedBackdropSvg(plot,gdShotDataGraphTitle("Comparison"),{subtitle:`Distance vs ${anchorLabel||"My Bubble"} (%) \u00b7 aim angle (\u00b0)${playingPart?` \u00b7 band = My Bubble +${Math.round(bufferPct)}%`:""}`})}
+	      ${bufferSvg}
 	      ${bubbleSvg}
 	    </svg>`;
 	  }
@@ -5284,7 +5291,7 @@
   const GD_MY_BUBBLE_COLOUR="#f4f8f3";
   const GD_COURSE_BUBBLE_COLOUR="#37f28d";
   const GD_COURSE_BUFFER_COLOUR="#ffb347";
-  const GD_COURSE_BUBBLE_BUFFER_PCT=20;
+  const GD_COURSE_BUBBLE_BUFFER_PCT=50;
   function gdCourseBubbleBufferPct(){
     const tuned=safe(()=>typeof dev==="function"?Number(dev("bubbleVisuals.courseBufferPct")):NaN,NaN);
     return Number.isFinite(tuned)&&tuned>=0?tuned:GD_COURSE_BUBBLE_BUFFER_PCT;
@@ -5398,9 +5405,7 @@
     // the picture is the answer.
     const bufferPct=gdCourseBubbleBufferPct();
     const bufferScale=1+bufferPct/100;
-    const bufferParts=bufferScale>1
-      ?[deviationPart(myBubbleClub,myBubbleCarry,0,0,myBubbleWidth*bufferScale,myBubbleDepth*bufferScale,{standardShape:true})].filter(Boolean)
-      :[];
+    const bufferPart=gdGraphBufferPart(myBubbleParts[0],bufferScale);
     const plot=gdPracticeNormalisedPlotLayout();
     const pointFor=entry=>gdPracticeNormalisedPlotPoint(plot,entry,entry.index);
     const shotDots=relativeRows.slice(0,90).map(entry=>{
@@ -5416,18 +5421,7 @@
       ?opts.keySvg
       :clubKey.map((club,i)=>`<circle cx="${26+i*48}" cy="58" r="4.2" fill="${gdStatsClubColor(club)}"/><text x="${34+i*48}" y="61" fill="rgba(255,255,255,.68)" font-size="9" font-weight="850">${gdStatsSvgText(club)}</text>`).join("");
     // Drawn first so it sits under My Bubble and the course result.
-    const hubUnderlaySvg=bufferParts.length?gdPracticeNormalisedBubbleLayerMarkup(bufferParts,plot,{
-      groupClass:"gdCourseBubbleBufferLayer",
-      ellipseClass:"gdCourseBubbleBufferRing",
-      source:"my-bubble",
-      colour:GD_COURSE_BUFFER_COLOUR,
-      label:false,
-      fillOpacity:".04",
-      strokeOpacity:".72",
-      strokeWidth:"1.15",
-      strokeDasharray:"3 5",
-      offsetDeg:0
-    }):"";
+    const hubUnderlaySvg=gdGraphBufferBandMarkup(myBubbleParts[0],bufferPart,plot);
     // The group is emitted even when there is no My Bubble to draw:
     // gdApplyShotBubbleDomOverlay injects a legacy ABSOLUTE-frame bubble unless it
     // finds a .gdShotBubbleOverlayLayer here, and that bubble would land at the
@@ -5461,7 +5455,7 @@
       })
       :"";
     return `<svg viewBox="${gdPracticeNormalisedViewBox(plot)}" role="img" aria-label="Course Data visual">
-      ${gdPracticeNormalisedBackdropSvg(plot,gdShotDataGraphTitle("Course Data"),{subtitle:`Distance vs the bubble you played (%) \u00b7 aim vs that bubble (\u00b0)${bufferParts.length?` \u00b7 dashed ring = My Bubble +${Math.round(bufferPct)}%`:""}`})}
+      ${gdPracticeNormalisedBackdropSvg(plot,gdShotDataGraphTitle("Course Data"),{subtitle:`Distance vs the bubble you played (%) \u00b7 aim vs that bubble (\u00b0)${bufferPart?` \u00b7 band = My Bubble +${Math.round(bufferPct)}%`:""}`})}
       ${hubUnderlaySvg}
       ${overlaySvg}
       ${clubOvals}
@@ -5619,6 +5613,45 @@
       return partFor(row.club,carry,angle,dims.widthM/2,dims.depthM/2,row?.handedness,carry);
     }).filter(Boolean);
   }
+	  // A buffered copy of a bubble part: the same centre and tilt, radii scaled.
+	  // Scaling the finished part (rather than the source metres) guarantees the
+	  // band stays exactly concentric with My Bubble and shares its tilt, which is
+	  // what makes a clean ring possible.
+	  function gdGraphBufferPart(part,scale){
+	    const k=Number(scale);
+	    if(!part||!Number.isFinite(k)||k<=1)return null;
+	    const angle=Number(part.angleRadiusDeg)||0;
+	    return Object.assign({},part,{
+	      depthRadiusM:(Number(part.depthRadiusM)||0)*k,
+	      angleRadiusDeg:Math.atan(Math.tan(angle*Math.PI/180)*k)*180/Math.PI
+	    });
+	  }
+	  // The buffer BAND: a filled ring between My Bubble's border and the buffer's
+	  // border, closed with a solid outer line. Drawn as one even-odd path so the
+	  // area between the two really is filled and My Bubble's own interior stays
+	  // clear - two stacked translucent ellipses would tint the middle instead.
+	  function gdGraphBufferBandMarkup(innerPart,outerPart,plot,opts={}){
+	    const geo=gdPracticeGraphInternalGeometry(plot);
+	    if(!geo||!innerPart||!outerPart)return "";
+	    const halfWidth=(plot.plotRight-plot.plotLeft)/2;
+	    const halfHeight=(plot.plotBottom-plot.plotTop)/2;
+	    const shape=part=>({
+	      cx:geo.xForAngle(part.angleDeg),
+	      cy:geo.yForDepth(part.depthM),
+	      rx:Math.max(3,((Number(part.angleRadiusDeg)||0)/Math.max(.5,plot.angleRange))*halfWidth),
+	      ry:Math.max(3,((Number(part.depthRadiusM)||0)/Math.max(1,plot.depthRange))*halfHeight)
+	    });
+	    const outer=shape(outerPart);
+	    const inner=shape(innerPart);
+	    const ring=e=>`M ${(e.cx-e.rx).toFixed(1)} ${e.cy.toFixed(1)} A ${e.rx.toFixed(1)} ${e.ry.toFixed(1)} 0 1 0 ${(e.cx+e.rx).toFixed(1)} ${e.cy.toFixed(1)} A ${e.rx.toFixed(1)} ${e.ry.toFixed(1)} 0 1 0 ${(e.cx-e.rx).toFixed(1)} ${e.cy.toFixed(1)} Z`;
+	    const tilt=Number(outerPart.tiltDeg)||0;
+	    const transform=tilt?` transform="rotate(${(-tilt).toFixed(1)} ${outer.cx.toFixed(1)} ${outer.cy.toFixed(1)})"`:"";
+	    const colour=opts.colour||GD_COURSE_BUFFER_COLOUR;
+	    return `<g class="gdCourseBubbleBufferLayer" aria-hidden="true"${transform}>`
+	      +`<path class="gdCourseBubbleBufferBand" d="${ring(outer)} ${ring(inner)}" fill-rule="evenodd" fill="${colour}" fill-opacity="${opts.fillOpacity||".16"}" stroke="none"/>`
+	      +`<ellipse class="gdCourseBubbleBufferRing" cx="${outer.cx.toFixed(1)}" cy="${outer.cy.toFixed(1)}" rx="${outer.rx.toFixed(1)}" ry="${outer.ry.toFixed(1)}" fill="none" stroke="${colour}" stroke-width="${opts.strokeWidth||"1.6"}" stroke-opacity="${opts.strokeOpacity||".9"}"/>`
+	      +`</g>`;
+	  }
 	  function gdPracticeNormalisedBubbleLayerMarkup(parts,plot,opts={}){
 	    if(!Array.isArray(parts)||!parts.length)return "";
 	    const geo=gdPracticeGraphInternalGeometry(plot);
