@@ -3049,49 +3049,51 @@
 	  // stretched on Comparison (bubbles only) vs Practice (bubbles + scatter).
 	  const GD_NORMALISED_DEPTH_MAX=30;  // +/- % of anchor carry
 	  const GD_NORMALISED_ANGLE_MAX=10;  // +/- aim angle, degrees
+	  // DOWN-THE-LINE IS THE ONLY ORIENTATION. The shot origin sits at the bottom
+	  // centre and the ball travels UP the page, so aim maps to the X axis (right
+	  // miss = right) and distance maps to the Y axis (long = up). This is built
+	  // natively rather than by rotating a landscape drawing - the old
+	  // originBottomTransform approach pushed long shots clean off the top of the
+	  // box, because rotating a 420x142 plot needs a 142-wide, 420-tall one.
+	  //
+	  // The plot fills the chart: everything outside it is the title block and an
+	  // 8px margin for the rounded surround.
+	  const GD_NORMALISED_CHART={width:480,height:460,left:34,right:446,top:92,bottom:436};
 	  function gdPracticeNormalisedPlotLayout(opts={}){
-	    const chartWidth=Number(opts.width)||480;
-	    const chartHeight=Number(opts.height)||260;
-	    const plotLeft=Number(opts.plotLeft)||38;
-	    const plotRight=Number(opts.plotRight)||458;
-	    const plotTop=Number(opts.plotTop)||82;
-	    const plotBottom=Number(opts.plotBottom)||224;
+	    const chartWidth=Number(opts.width)||GD_NORMALISED_CHART.width;
+	    const chartHeight=Number(opts.height)||GD_NORMALISED_CHART.height;
+	    const plotLeft=Number(opts.plotLeft)||GD_NORMALISED_CHART.left;
+	    const plotRight=Number(opts.plotRight)||GD_NORMALISED_CHART.right;
+	    const plotTop=Number(opts.plotTop)||GD_NORMALISED_CHART.top;
+	    const plotBottom=Number(opts.plotBottom)||GD_NORMALISED_CHART.bottom;
 	    const plotMidX=(plotLeft+plotRight)/2;
 	    const plotMidY=(plotTop+plotBottom)/2;
 	    const depthMax=GD_NORMALISED_DEPTH_MAX;
 	    const angleMax=GD_NORMALISED_ANGLE_MAX;
 	    return {chartWidth,chartHeight,plotLeft,plotRight,plotTop,plotBottom,plotMidX,plotMidY,depthMax,angleMax,depthRange:depthMax,angleRange:angleMax};
 	  }
+	  function gdPracticeNormalisedViewBox(plot){
+	    return `0 0 ${Number(plot?.chartWidth)||GD_NORMALISED_CHART.width} ${Number(plot?.chartHeight)||GD_NORMALISED_CHART.height}`;
+	  }
 	  function gdPracticeGraphInternalGeometry(plot){
 	    if(!plot)return null;
 	    const halfWidth=(plot.plotRight-plot.plotLeft)/2;
 	    const halfHeight=(plot.plotBottom-plot.plotTop)/2;
-	    const originX=Number(plot.plotLeft)||38;
-	    const originY=Number(plot.plotMidY)||130;
-	    const targetX=Number(plot.plotMidX)||((Number(plot.plotLeft)||0)+(Number(plot.plotRight)||0))/2||240;
-	    const targetY=Number(plot.plotBottom)||224;
+	    // Down the line: the player stands at the bottom centre and hits away from
+	    // the viewer, so aim runs across and distance runs up.
+	    const originX=Number(plot.plotMidX);
+	    const originY=Number(plot.plotBottom);
 	    return {
 	      originX,
 	      originY,
-	      xForDepth(depth){return plot.plotMidX+gdShotChartClamp((Number(depth)||0)/plot.depthRange,-1,1)*halfWidth;},
-	      // PLUS, not minus: a positive angle is a miss to the RIGHT, and this view
-	      // has the origin on the left with the ball travelling right, so it reads
-	      // as a bird's-eye view - where right of the line is DOWN the screen. With
-	      // the sign the other way the origin marker pointed at the wrong reading,
-	      // which is why the chart needed axis labels to be understood at all.
-	      yForAngle(angle){return plot.plotMidY+gdShotChartClamp((Number(angle)||0)/plot.angleRange,-1,1)*halfHeight;},
-	      yForUnknown(jitter=0){return plot.plotMidY+(Number(jitter)||0);},
-	      // Rotates the bird's-eye view so the origin sits at the bottom and the
-	      // ball travels up the screen. Determinant +1 - a true rotation. It used
-	      // to be matrix(0 -1 -1 0 ...), determinant -1, a REFLECTION: it only
-	      // looked right because it was mirroring an already-mirrored side-on view.
-	      // Two wrongs cancelling. With yForAngle fixed, this has to be a real
-	      // rotation or the rotated view flips left and right.
-	      originBottomTransform(){
-	        const e=targetX-originY;
-	        const f=targetY+originX;
-	        return `matrix(0 -1 1 0 ${e.toFixed(1)} ${f.toFixed(1)})`;
-	      }
+	      // Positive angle is a miss to the RIGHT, and the ball is travelling away
+	      // from the viewer, so right of the line is right of the screen.
+	      xForAngle(angle){return plot.plotMidX+gdShotChartClamp((Number(angle)||0)/plot.angleRange,-1,1)*halfWidth;},
+	      // MINUS: positive depth is LONG, which is further up the page.
+	      yForDepth(depth){return plot.plotMidY-gdShotChartClamp((Number(depth)||0)/plot.depthRange,-1,1)*halfHeight;},
+	      // A shot with no lateral reading still has a real distance - it sits on
+	      // the target line with only a nudge so overlaps stay visible.
+	      xForUnknown(jitter=0){return plot.plotMidX+(Number(jitter)||0);}
 	    };
 	  }
 	  function gdPracticeNormalisedPlotPoint(plot,row,index=0){
@@ -3102,30 +3104,15 @@
 	    const geo=gdPracticeGraphInternalGeometry(plot);
 	    if(!geo)return null;
 	    const jitter=((Number(index)||0)%5-2)*.85;
-	    const x=geo.xForDepth(depth);
-	    const y=row.hasLateral===false
-	      ?geo.yForUnknown(jitter)
-	      :geo.yForAngle(angle)+(Math.abs(angle)<.08?jitter:0);
+	    const x=row.hasLateral===false
+	      ?geo.xForUnknown(jitter)
+	      :geo.xForAngle(angle)+(Math.abs(angle)<.08?jitter:0);
+	    const y=geo.yForDepth(depth);
 	    return {x,y,clipped:Math.abs(depth)>plot.depthRange||Math.abs(angle)>plot.angleRange};
 	  }
-  const GD_PRACTICE_GRAPH_VIEW_KEY="gd_practice_graph_origin_bottom";
-  function gdPracticeGraphOriginBottom(){
-    return safe(()=>localStorage.getItem(GD_PRACTICE_GRAPH_VIEW_KEY)==="1",false);
-  }
-  function gdPracticeGraphOriginBottomTransform(plot){
-    if(!plot)return "";
-    const geo=gdPracticeGraphInternalGeometry(plot);
-    return geo?geo.originBottomTransform():"";
-  }
-  function gdPracticeToggleGraphOrigin(){
-    const next=!gdPracticeGraphOriginBottom();
-    safe(()=>localStorage.setItem(GD_PRACTICE_GRAPH_VIEW_KEY,next?"1":"0"),null);
-    renderPracticeData(true);
-    return false;
-  }
-  function gdPracticeGraphRotateControlHTML(active=false){
-    return `<button type="button" class="gdPracticeGraphRotateControl ${active?"active":""}" aria-pressed="${active?"true":"false"}" title="${active?"Show side-on graph":"Show shot origin at bottom"}" onclick="return gdPracticeToggleGraphOrigin()"><span aria-hidden="true">&#8635;</span></button>`;
-  }
+  // The origin-at-bottom toggle, its stored preference and its rotate button are
+  // gone: that orientation is now the only one, built into the geometry rather
+  // than applied as a transform. None of it had any call site anyway.
 	  function gdPracticeNormalisedBackdropSvg(plot,title,opts={}){
 	    const width=Number(plot.chartWidth)||480;
 	    const height=Number(plot.chartHeight)||260;
@@ -3146,11 +3133,11 @@
 	      ${hideText?"":`<text x="24" y="${subtitleY}" fill="rgba(255,255,255,.46)" font-size="9" font-weight="850">${gdStatsSvgText(opts.subtitle||"Depth against expected carry · lateral angle")}</text>`}
 	      <rect x="${(plot.plotLeft-8).toFixed(1)}" y="${(plot.plotTop-8).toFixed(1)}" width="${(plot.plotRight-plot.plotLeft+16).toFixed(1)}" height="${(plot.plotBottom-plot.plotTop+16).toFixed(1)}" rx="8" fill="rgba(255,255,255,.012)" stroke="rgba(255,255,255,.045)" stroke-width="1"/>
 	      ${grid}
-	      <line x1="${plot.plotMidX.toFixed(1)}" y1="${plot.plotTop}" x2="${plot.plotMidX.toFixed(1)}" y2="${plot.plotBottom}" stroke="rgba(255,255,255,.18)" stroke-width="1" stroke-dasharray="4 8" stroke-linecap="round"/>
-	      <line x1="${plot.plotLeft}" y1="${plot.plotMidY.toFixed(1)}" x2="${plot.plotRight}" y2="${plot.plotMidY.toFixed(1)}" stroke="rgba(248,250,247,.42)" stroke-width="1.55" stroke-dasharray="7 8" stroke-linecap="round"/>
-	      <path d="M ${(plot.plotLeft+7).toFixed(1)} ${plot.plotMidY.toFixed(1)} H ${(plot.plotLeft+48).toFixed(1)}" stroke="rgba(248,250,247,.76)" stroke-width="1.8" stroke-linecap="round"/>
-	      <circle cx="${plot.plotLeft}" cy="${plot.plotMidY.toFixed(1)}" r="6.4" fill="#f8faf7" stroke="rgba(0,0,0,.62)" stroke-width="1.45"/>
-	      <circle cx="${plot.plotLeft}" cy="${plot.plotMidY.toFixed(1)}" r="2.2" fill="#07100d"/>`;
+	      <line x1="${plot.plotLeft}" y1="${plot.plotMidY.toFixed(1)}" x2="${plot.plotRight}" y2="${plot.plotMidY.toFixed(1)}" stroke="rgba(255,255,255,.18)" stroke-width="1" stroke-dasharray="4 8" stroke-linecap="round"/>
+	      <line x1="${plot.plotMidX.toFixed(1)}" y1="${plot.plotTop}" x2="${plot.plotMidX.toFixed(1)}" y2="${plot.plotBottom}" stroke="rgba(248,250,247,.42)" stroke-width="1.55" stroke-dasharray="7 8" stroke-linecap="round"/>
+	      <path d="M ${plot.plotMidX.toFixed(1)} ${(plot.plotBottom-7).toFixed(1)} V ${(plot.plotBottom-48).toFixed(1)}" stroke="rgba(248,250,247,.76)" stroke-width="1.8" stroke-linecap="round"/>
+	      <circle cx="${plot.plotMidX.toFixed(1)}" cy="${plot.plotBottom}" r="6.4" fill="#f8faf7" stroke="rgba(0,0,0,.62)" stroke-width="1.45"/>
+	      <circle cx="${plot.plotMidX.toFixed(1)}" cy="${plot.plotBottom}" r="2.2" fill="#07100d"/>`;
 	  }
 	  function gdPracticeClubKeyDropdownHTML(clubs){
 	    const rows=(Array.isArray(clubs)?clubs:[]).filter(Boolean);
@@ -4015,7 +4002,8 @@
 	    </g>`;
 	  }
 	  function gdCompareSvg(ctx){
-	    const width=480,height=260;
+	    const plotBox=gdPracticeNormalisedPlotLayout();
+	    const width=plotBox.chartWidth,height=plotBox.chartHeight;
 	    const club=gdCompareLoadClub(ctx);
 	    const currentSource=gdCompareProfileBubbleSource(ctx,club);
 	    const courseSource=ctx.courseBubble||null;
@@ -4049,7 +4037,7 @@
 	    const allParts=bubblePartsByItem.flat();
 	    // Same plot box as Practice's chart (gd-route-audit.js practiceSvg) so
 	    // identical bubble data renders at an identical shape on both screens.
-	    const plot=gdPracticeNormalisedPlotLayout({width,height,plotLeft:38,plotRight:458,plotTop:82,plotBottom:224});
+	    const plot=plotBox;
 	    const bubbleSvg=items.map((item,i)=>gdCompareBubbleLayerSvg(item,bubblePartsByItem[i],plot)).join("");
 	    return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="My Bubble, Course and Practice bubble comparison">
 	      ${gdPracticeNormalisedBackdropSvg(plot,gdShotDataGraphTitle("Comparison"),{subtitle:`Distance vs ${anchorLabel||"My Bubble"} (%) \u00b7 aim angle (\u00b0)`})}
@@ -5298,7 +5286,6 @@
     // median anchoring was redundant AND mixed frames (it rebuilt position from
     // `expected + a bubble-relative delta`). Because the reference is stored per
     // shot, settings changing between rounds cannot distort this picture.
-    const plotLeft=38,plotRight=458,plotTop=82,plotBottom=224;
     const dataRows=records.map((record,index)=>({
       club:record.club||"Unknown",
       counted:record.counted!==false,
@@ -5380,7 +5367,12 @@
     const myBubbleCarry=Number(myBubbleSource?.baseDistanceM);
     const myBubbleWidth=Number(myBubbleSource?.bubbleWidthM);
     const myBubbleDepth=Number(myBubbleSource?.bubbleDepthM);
-    const myBubbleParts=[deviationPart(myBubbleClub,myBubbleCarry,0,0,myBubbleWidth,myBubbleDepth)].filter(Boolean);
+    // Standard shape here too. A practice-derived My Bubble can carry a tiny
+    // lateralRadiusDeg (~0.5deg is under 3m wide at 155m) against a ~19m depth,
+    // which renders as an 11:1 sliver. Comparison already normalises every bubble
+    // through gdBubblePresentationForRender(normalizeAxes:true), so leaving these
+    // raw made the SAME bubble look completely different on the two screens.
+    const myBubbleParts=[deviationPart(myBubbleClub,myBubbleCarry,0,0,myBubbleWidth,myBubbleDepth,{standardShape:true})].filter(Boolean);
     // BUFFER RING: My Bubble expanded by a chosen amount, drawn around it. Course
     // dispersion is wider than practice dispersion, so a bubble that is right for
     // the player still will not match the course result exactly. The buffer is the
@@ -5390,9 +5382,9 @@
     const bufferPct=gdCourseBubbleBufferPct();
     const bufferScale=1+bufferPct/100;
     const bufferParts=bufferScale>1
-      ?[deviationPart(myBubbleClub,myBubbleCarry,0,0,myBubbleWidth*bufferScale,myBubbleDepth*bufferScale)].filter(Boolean)
+      ?[deviationPart(myBubbleClub,myBubbleCarry,0,0,myBubbleWidth*bufferScale,myBubbleDepth*bufferScale,{standardShape:true})].filter(Boolean)
       :[];
-    const plot=gdPracticeNormalisedPlotLayout({plotLeft,plotRight,plotTop,plotBottom});
+    const plot=gdPracticeNormalisedPlotLayout();
     const pointFor=entry=>gdPracticeNormalisedPlotPoint(plot,entry,entry.index);
     const shotDots=relativeRows.slice(0,90).map(entry=>{
       const point=pointFor(entry);
@@ -5451,7 +5443,7 @@
         strokeWidth:"1.55"
       })
       :"";
-    return `<svg viewBox="0 0 480 260" role="img" aria-label="Course Data visual">
+    return `<svg viewBox="${gdPracticeNormalisedViewBox(plot)}" role="img" aria-label="Course Data visual">
       ${gdPracticeNormalisedBackdropSvg(plot,gdShotDataGraphTitle("Course Data"),{subtitle:`Distance vs the bubble you played (%) \u00b7 aim vs that bubble (\u00b0)${bufferParts.length?` \u00b7 dashed ring = My Bubble +${Math.round(bufferPct)}%`:""}`})}
       ${hubUnderlaySvg}
       ${overlaySvg}
@@ -5589,10 +5581,12 @@
 	    const groupStyle=opts.groupStyle?` style="${gdStatsSvgText(opts.groupStyle)}"`:"";
 	    const groupClass=opts.groupClass||"gdShotBubbleOverlayLayer";
 	    return `<g class="${groupClass}" data-offset-deg="${offsetDeg.toFixed(2)}"${groupStyle}>${parts.map(part=>{
-	      const cx=geo.xForDepth(part.depthM);
-	      const cy=geo.yForAngle(part.angleDeg);
-	      const rx=Math.max(3,(part.depthRadiusM/Math.max(1,plot.depthRange))*halfWidth);
-	      const ry=Math.max(3,(part.angleRadiusDeg/Math.max(.5,plot.angleRange))*halfHeight);
+	      // Down the line: aim spans the X axis, distance spans the Y axis - so the
+	      // horizontal radius comes from the angle and the vertical from the depth.
+	      const cx=geo.xForAngle(part.angleDeg);
+	      const cy=geo.yForDepth(part.depthM);
+	      const rx=Math.max(3,(part.angleRadiusDeg/Math.max(.5,plot.angleRange))*halfWidth);
+	      const ry=Math.max(3,(part.depthRadiusM/Math.max(1,plot.depthRange))*halfHeight);
 	      const label=(opts.labelText&&opts.label!==false&&parts.length===1)?(()=>{
 	        const fontSize=Math.max(5.2,Math.min(7.4,ry*.44));
 	        const isMy=String(opts.source||"").toLowerCase()==="my-bubble";
@@ -5607,7 +5601,7 @@
 	    const shots=gdPracticePlotShots(analysis||{});
 		    if(!shots.length){
 		      const emptyPlot=gdPracticeNormalisedPlotLayout();
-		      return `<svg class="gdPracticeGraphSvg" viewBox="0 0 480 260" role="img" aria-label="Practice Data relative plot"><g class="gdPracticeGraphCanvas">${gdPracticeNormalisedBackdropSvg(emptyPlot,"",{subtitle:"Distance vs My Bubble (%) \u00b7 aim angle (\u00b0)"})}</g></svg>${gdShotBubbleOverlayButton("practice")}`;
+		      return `<svg class="gdPracticeGraphSvg" viewBox="${gdPracticeNormalisedViewBox(emptyPlot)}" role="img" aria-label="Practice Data relative plot"><g class="gdPracticeGraphCanvas">${gdPracticeNormalisedBackdropSvg(emptyPlot,"",{subtitle:"Distance vs My Bubble (%) \u00b7 aim angle (\u00b0)"})}</g></svg>${gdShotBubbleOverlayButton("practice")}`;
 	    }
     const plotAll=gdPracticePlotAllRowsForTest();
     const cfg=safe(()=>window.GolfDaddyLaunchMonitorData?.settings?.(),{})||{};
@@ -5779,7 +5773,7 @@
 	    const anchorRelativeRows=anchorDistanceM?gdBubbleRelativeShotRows(shots,anchorDistanceM):[];
 	    const myBubbleParts=anchorDistanceM&&hubRows.length&&gdPracticeHasBubbleOffset(hubOffset)?gdBubbleRelativeParts(hubRows,hubOffset,anchorDistanceM):[];
 	    const practiceBubbleParts=anchorDistanceM&&showPracticeLayer?gdBubbleRelativeParts(overlayRows,practiceBubbleOffset,anchorDistanceM):[];
-	    const normalisedPlot=gdPracticeNormalisedPlotLayout({plotLeft:38,plotRight:458,plotTop,plotBottom});
+	    const normalisedPlot=gdPracticeNormalisedPlotLayout();
 	    const clubKeySource=anchorRelativeRows.length?anchorRelativeRows:dataRows;
 	    const clubKey=[...new Set(clubKeySource.map(row=>row.club||"Unknown"))].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})).slice(0,6);
 	    const clubKeyDropdown=gdPracticeClubKeyDropdownHTML(clubKey);
@@ -5799,8 +5793,9 @@
 	      const toDistance=Number(adoptionMotion.toDistance)||Number(anchorPart.baseDistanceM)||anchorDistanceM;
 	      const fromDistance=Number(adoptionMotion.fromDistance)||toDistance;
 	      const fromDepthPct=(fromDistance-anchorDistanceM)/anchorDistanceM*100;
-	      const dx=geo?geo.xForDepth(fromDepthPct)-geo.xForDepth(anchorPart.depthM):NaN;
-	      const dy=geo?geo.yForAngle(Number(adoptionMotion.fromOffset)||0)-geo.yForAngle(Number(hubOffset)||0):NaN;
+	      // Aim moves the bubble across, distance moves it up/down.
+	      const dx=geo?geo.xForAngle(Number(adoptionMotion.fromOffset)||0)-geo.xForAngle(Number(hubOffset)||0):NaN;
+	      const dy=geo?geo.yForDepth(fromDepthPct)-geo.yForDepth(anchorPart.depthM):NaN;
 	      if(Number.isFinite(dx)&&Number.isFinite(dy))myBubbleMotionStyle=`--gd-practice-adopt-x:${dx.toFixed(1)}px;--gd-practice-adopt-y:${dy.toFixed(1)}px;`;
 	    }
 	    const myBubbleKind=String(myBubbleState?.kind||"default");
@@ -5820,7 +5815,7 @@
 	      labelText:"PRACTICE",
 	      label:!myBubbleCombined
 	    }):"";
-		    return `<svg class="gdPracticeGraphSvg" viewBox="0 0 480 260" role="img" aria-label="Practice Data relative plot" data-practice-offset-deg="${gdPracticeHasBubbleOffset(practiceBubbleOffset)?Number(practiceBubbleOffset).toFixed(2):""}" data-hub-offset-deg="${gdPracticeHasBubbleOffset(hubOffset)?Number(hubOffset).toFixed(2):""}" data-anchor-distance-m="${anchorDistanceM?Number(anchorDistanceM).toFixed(1):""}">
+		    return `<svg class="gdPracticeGraphSvg" viewBox="${gdPracticeNormalisedViewBox(normalisedPlot)}" role="img" aria-label="Practice Data relative plot" data-practice-offset-deg="${gdPracticeHasBubbleOffset(practiceBubbleOffset)?Number(practiceBubbleOffset).toFixed(2):""}" data-hub-offset-deg="${gdPracticeHasBubbleOffset(hubOffset)?Number(hubOffset).toFixed(2):""}" data-anchor-distance-m="${anchorDistanceM?Number(anchorDistanceM).toFixed(1):""}">
 		      <g class="gdPracticeGraphCanvas">
 		      ${gdPracticeNormalisedBackdropSvg(normalisedPlot,"",{subtitle:"Distance vs My Bubble (%) \u00b7 aim angle (\u00b0)"})}
       ${pts}
