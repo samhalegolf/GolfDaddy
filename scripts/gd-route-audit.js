@@ -5828,18 +5828,40 @@
     // that row's carry. Nothing is invented; a row with no measurable practice
     // shape simply is not drawn.
     const practiceShape=safe(()=>gdPracticeBubbleSource(analysis),null);
-    const overlayRows=showPracticeLayer?projectionCtx.overlayRows.map(row=>{
+    // Built whether or not the layer is currently drawn: adoption hides the
+    // practice layer, and the anchor below has to keep reading the practice
+    // bubble's distance regardless, or the frame would move on adopt again.
+    const practiceRows=projectionCtx.overlayRows.map(row=>{
       const learned=learnedByClub[gdShotBubbleOverlayClubKey(row.club)];
       const next=learned?Object.assign({},row,{actualDistanceM:learned.actualDistanceM,projectionSource:"practice-distance-bubble"}):row;
       return gdGraphRowWithBubbleShape(next,practiceShape);
-    }):[];
+    });
+    const overlayRows=showPracticeLayer?practiceRows:[];
     const hubBaseRows=gdPracticeMyBubbleHubRows(dataRows,analysis);
     const hubRows=gdPracticeHasBubbleOffset(myBubbleOffset)?hubBaseRows.filter(row=>Number.isFinite(Number(row.actualDistanceM))&&Number(row.actualDistanceM)>0):[];
     const hubOffset=gdPracticeHasBubbleOffset(myBubbleOffset)?myBubbleOffset:null;
-    // Shared anchor for the relative-% chart: My Bubble's own current distance
-    // (tied to the bag). Falls back to the live Practice Bubble's distance only
-    // when there is no My Bubble yet at all (fresh profile).
-    const anchorDistanceM=Number(hubRows[0]?.baseDistanceM)||Number(overlayRows[0]?.actualDistanceM)||null;
+    // ANCHOR = THE PRACTICE BUBBLE'S OWN DISTANCE, always, on this screen.
+    //
+    // These are practice shots, so the practice bubble is the natural frame. It
+    // used to anchor to My Bubble's distance and fall back to practice only when
+    // no My Bubble existed - which meant the anchor CHANGED the instant you
+    // adopted (measured 142m -> My Bubble's 155m), and since every dot is plotted
+    // as a percentage of the anchor, the whole cluster jumped ~57px down on adopt
+    // and back on undo. Nothing about the shots had changed; only the denominator.
+    //
+    // Taken from practiceRows, not overlayRows (emptied on adopt) and not the
+    // source's nominal baseDistanceM - the row carries the LEARNED distance the
+    // practice bubble is actually drawn at, and anchoring to anything else leaves
+    // the practice bubble hanging off-centre in its own frame.
+    //
+    // Consequence, and the point of it: My Bubble's own distance difference is now
+    // visible as a vertical offset of its ellipse instead of being absorbed into
+    // the axis. That gap is real - it is what the Distance Suggestion closes.
+    const practiceAnchorM=Number(practiceRows[0]?.actualDistanceM);
+    const anchorDistanceM=(Number.isFinite(practiceAnchorM)&&practiceAnchorM>0?practiceAnchorM:null)
+      ||Number(practiceShape?.baseDistanceM)
+      ||Number(hubRows[0]?.baseDistanceM)
+      ||null;
     const domainRows=overlayRows
       .concat(hubRows)
       .concat(showPracticeLayer?gdShotBubbleOverlayDistanceExtentRows(overlayRows,practiceBubbleOffset):[])

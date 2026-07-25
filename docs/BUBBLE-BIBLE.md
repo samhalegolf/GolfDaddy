@@ -73,43 +73,84 @@ Analysis artifact: how tightly shots landed vs the bubble that was set.
 
 ---
 
-## 3a. Chart orientation — LAW
+## 3. Chart orientation — LAW
 
-The chart is a **bird's-eye view**. The origin marker sits on the left with the ball
-travelling right, and everything else must agree with that reading:
+**Down the line is the only orientation.** The shot origin sits at the bottom centre
+and the ball travels UP the page:
 
-- x: left = short, right = long
-- y: **down = missed RIGHT, up = missed LEFT** (`yForAngle` uses PLUS, not minus)
+- x = aim: **right miss = right** (`xForAngle`)
+- y = distance: **long = up** (`yForDepth`, minus)
 
-This is why the chart needs no axis labels: the origin marker states the orientation,
-and the axes obey it. If the y sign is ever flipped back, labels become mandatory,
-because the origin would then point at the wrong reading.
+This is why the chart needs no axis labels: the origin marker states the orientation
+and the axes obey it. Flip either sign and labels become mandatory, because the origin
+would then point at the wrong reading.
 
-`originBottomTransform` rotates this so the origin sits at the bottom and the ball
-travels up the screen. It must stay a TRUE rotation, `matrix(0 -1 1 0 ...)`,
-determinant +1. It was previously `matrix(0 -1 -1 0 ...)`, determinant -1 - a
-reflection that only looked correct because it was mirroring an already-mirrored
-side-on view. Two wrongs cancelling. Verified after the fix: origin lands exactly at
-bottom-centre, a right miss goes right, a long shot goes up.
+It is built NATIVELY in `gdPracticeGraphInternalGeometry`, not by rotating a landscape
+drawing. The old `originBottomTransform` approach pushed long shots clean off the top,
+because rotating a 420x142 plot needs a 142-wide, 420-tall one. The chart is now
+portrait (`GD_NORMALISED_CHART`, 480x460, plot 34-446 x 92-436) and the plot fills it -
+only the title block and an 8px surround sit outside.
+
+Consequences that must be kept in step: bubble `rx` comes from the ANGLE and `ry` from
+the DEPTH (they swap with the axes), and the target line is the vertical one while
+zero-distance is the horizontal.
+
+The origin-bottom toggle, its stored preference and the rotate button are gone - all
+dead code with no call sites, and keeping the transform would double-rotate the new
+geometry.
 
 ---
 
-## 3. Chart scale — LAW
+## 4. Chart scale — LAW
 
 Course / Practice / Comparison share one fixed normalised domain so identical bubble
-data renders at an identical shape everywhere: `GD_NORMALISED_DEPTH_MAX = 30` (% of
-anchor carry), `GD_NORMALISED_ANGLE_MAX = 10` (degrees), in
-`gdPracticeNormalisedPlotLayout`. Axes must never be fitted to the plotted rows —
-that is what made the same bubble look stretched on one screen and squat on another.
+data renders at an identical shape everywhere: `GD_NORMALISED_DEPTH_MAX = 25` (% of
+anchor carry), `GD_NORMALISED_ANGLE_MAX = 8` (degrees), in
+`gdPracticeNormalisedPlotLayout`. **These two numbers ARE the zoom** - the view
+window. Axes must never be fitted to the plotted rows; that is what made the same
+bubble look stretched on one screen and squat on another. Shots outside the window
+clip at the edge on purpose - the view never stretches to swallow an outlier.
 
-Anchoring differs by screen, deliberately:
-- Practice / Comparison: one shared anchor (My Bubble's own distance).
-- Course: each club against its own baseline (bag carry, else median of its own shots),
-  because Course shows every club at once.
+### The anchor must not move — LAW
+
+Everything is plotted as a percentage of the anchor, so **changing the anchor moves
+every dot and every bubble on the chart**. The anchor therefore has to be something
+that does not change while the player is looking at it.
+
+| screen | anchor |
+|---|---|
+| Practice | the practice bubble's own **drawn (learned) distance** |
+| Comparison | My Bubble, else Practice, else Course - whichever real bubble exists |
+| Course | zero is the bubble that was played; no per-club anchoring at all (see 5) |
+
+Comparison must NOT be gated on adoption. It shows whatever the home screens are
+already showing, so a Practice and a Course bubble with no My Bubble yet both belong
+there. It used to take the anchor from My Bubble alone, so a missing My Bubble left the
+anchor null and `gdCompareBubbleParts` dropped EVERY bubble - the screen sat empty
+waiting for an adoption that has nothing to do with it. The subtitle names whichever
+bubble the anchor came from, so the axis never claims a reference it isn't using.
+
+Practice used to anchor to My Bubble's distance and fall back to the practice bubble
+only when no My Bubble existed. That meant the anchor CHANGED the instant a bubble was
+adopted (measured 142m -> My Bubble's 155m) and the whole cluster jumped ~57px down on
+adopt and back on undo. Nothing about the shots had changed; only the denominator.
+
+Two things this rule needs, both learned the hard way:
+
+1. The anchor is read from rows built **unconditionally**, not from `overlayRows` -
+   adoption empties those, which reintroduces the jump by another route. Only the
+   *drawing* of the practice layer is gated on adoption, never the anchor.
+2. It is the row's **learned** distance, not the source's nominal `baseDistanceM`.
+   Those differ (142 vs 155), and anchoring to the nominal one leaves the practice
+   bubble hanging off-centre in its own frame.
+
+Consequence, and the point of it: My Bubble's distance difference now shows as a real
+vertical offset of its ellipse rather than being absorbed into the axis. That gap is
+what the Distance Suggestion exists to close, so it belongs on screen.
 
 ---
 
-## 4. Course deviation — LAW, and the frame bug it exposes
+## 5. Course deviation — LAW, and the frame bug it exposes
 
 **Every course shot is already measured from the bubble that was on screen at the
 time.** `computeShotOutcome` (gd-shot-outcomes.js:105) takes the planned bubble's
@@ -150,9 +191,9 @@ club changes - every shot ever recorded still answers the same question, and the
 aggregate always means the same thing. No re-basing, no migration, history never goes
 stale.
 
-Contrast with Practice, which anchors to My Bubble's CURRENT distance and therefore
-re-bases whenever My Bubble changes. Correct for a live proposal, but it means the
-practice picture shifts under the player. The course picture cannot.
+Practice reaches the same stability by a different route: it anchors to the practice
+bubble's own drawn distance, which does not move when a bubble is adopted (see 4).
+Course does not need an anchor at all - the reference is stored on every shot.
 
 Consequence: the per-club anchoring inside `gdCourseDataSurfaceSvg` (bag carry, else
 median of that club's own shots) is unnecessary. Depth is already bubble-relative;
@@ -244,7 +285,78 @@ wrong for any other consumer.
 
 ---
 
-## 4a. Sandbox data generator
+## 6. Two renderers, one set of numbers — LAW
+
+The graph bubble and the GPS bubble are different RENDERINGS of the same real data.
+
+| | what it is | built by |
+|---|---|---|
+| GPS bubble | the real thing projected into the world: rollout-inflated depth, physics tilt, visual skew, bag-roof clamping, screen caps | `gdGeneratedShotBubbleForClub` / `getGDBForClub` |
+| Graph bubble | the same saved numbers drawn in the charts' language, so bubbles sit beside each other and are comparable | `gdBubbleRelativeParts` / `deviationPart` |
+
+**Charts must never call the projector.** They used to:
+`gdShotBubbleOverlayBubbleParts` regenerates every bubble from club + carry and never
+reads the row's own saved dimensions, so one saved 20x26m My Bubble rendered at three
+different sizes across three screens (Course 97.6x60, Practice 107.5x66, Comparison
+124.6x76.7). Now all three are identical for identical data.
+
+Rules that fall out of this, each of which was a bug first:
+
+- **Real saved dimensions win, and there is NO fallback.** A row with no real shape is
+  not drawn. Where a row genuinely has no shape of its own (practice projection rows
+  are bag/data rows), give it the MEASURED shape - `gdGraphRowWithBubbleShape` scales
+  the practice bubble's own cluster radius/depth to that row's carry. Never invent one.
+- **The caller's offset wins for the angle.** Rows can carry a stale `offsetDeg`;
+  the caller passes the live one for that layer. Preferring the row's drew the bubble
+  at the wrong angle, and adopting then staged the real offset, so it visibly jumped.
+- **Size comes from the saved bubble, never from a presentation pass.**
+  `gdMyBubblePresentationMetrics` already normalises and scales; the graph renderer
+  normalises again, so feeding its output in sized Practice's My Bubble ~8% larger
+  than the same bubble elsewhere. Take only tilt/skew/handedness from it.
+- **Every graph bubble wears the standard shape** (`gdStandardDispersionAxes`):
+  area preserved (so size stays data-driven), aspect forced to the club ratio. Raw
+  percentile spreads have whatever aspect the sample happened to have - that is what
+  rendered the course bubble as a sliver, and a 0.45deg-wide My Bubble at 11:1.
+- **Tilt uses `gdStandardDispersionTiltDeg`** (club + handedness), governed by the dev
+  board's `tiltScale` / `tiltMaxDeg`. NOT the projector's tilt, which is physics tilt
+  (the aim offset) plus visual tilt - on a chart the aim is already the bubble's
+  position along the angle axis, so including it would count the same aim twice.
+- **A shape drawn around the dots is not a bubble.** The old course fallback fitted an
+  ellipse to the min/max of the plotted points with clamped radii and drew it in the
+  bubble's colours. Deleted. With no measured fit, the dots speak for themselves.
+
+Colours are shared so a bubble means the same thing on every screen: My Bubble white
+`#f4f8f3`, Course green `#37f28d`, Practice blue `#62d2ff`, buffer amber `#ffb347`.
+
+---
+
+## 7. Adopt -> Save — LAW
+
+Two steps, and the difference between them must be obvious on screen:
+
+- **Adopt** stages a pending bubble (`practiceBubblePendingSource`). Undoable. Nothing
+  the player plays with has changed yet.
+- **Save** commits it to My Bubble (`gdBubbleOffsetSave`). NOT undoable.
+
+The dock therefore reads: Save disabled -> `Adopt` | Save enabled + "Adopted, not
+saved" -> `Undo` | after Save, "✓ Saved" and `Adopted` both disabled, with a
+persistent line stating that Undo is no longer available. Being locked in is said
+outright, not implied by a greyed-out button.
+
+The old "Generate Bubble" button is gone. Its only job was switching the overlay on,
+and adopting never needed the overlay visible - so adopt depends on `canProject`
+alone. Gating it on `ctx.visible` would leave it permanently disabled without Generate.
+
+The buffer band (My Bubble +`courseBubbleBufferPct`, default 50%) is drawn on Course
+AND Comparison as one even-odd path - a genuine filled annulus between My Bubble's
+border and the buffer's, with a solid outer line. Two stacked translucent ellipses
+would tint My Bubble's interior instead of just the ring. It is built by scaling the
+finished part (`gdGraphBufferPart`), which guarantees it stays concentric and shares
+the tilt.
+
+---
+
+## 8. Sandbox data generator
 
 Lives in the Course Data admin panel (coach/admin gated). Randomise a batch, edit it
 by hand, then submit - the editable step is the point, so a specific case can be
@@ -310,7 +422,7 @@ dedicated sandbox player id would partition it with no flag logic.
 
 ---
 
-## 5. SUPERSEDED — the "tolerance cost" idea
+## 9. SUPERSEDED — the "tolerance cost" idea
 
 Kept as a record of a decision, not as a plan.
 
