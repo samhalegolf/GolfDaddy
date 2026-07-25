@@ -5271,6 +5271,14 @@
   // percentage. A chosen allowance for the course window being wider than the
   // practice window - not a measurement, and never a pass/fail threshold. Tunable
   // so the number can be argued about without touching the logic.
+  // Course Data draws three distinct things and they must never be mistaken for
+  // each other, so they share the Comparison screen's colour language:
+  //   My Bubble  = white   (same as Comparison's "playing" bubble)
+  //   Course     = green   (same as Comparison's "course" bubble)
+  //   Buffer     = amber   (its own colour - it is an allowance, not a bubble)
+  const GD_MY_BUBBLE_COLOUR="#f4f8f3";
+  const GD_COURSE_BUBBLE_COLOUR="#37f28d";
+  const GD_COURSE_BUFFER_COLOUR="#ffb347";
   const GD_COURSE_BUBBLE_BUFFER_PCT=20;
   function gdCourseBubbleBufferPct(){
     const tuned=safe(()=>typeof dev==="function"?Number(dev("bubbleVisuals.courseBufferPct")):NaN,NaN);
@@ -5323,15 +5331,27 @@
     // Builds a drawable part straight in the deviation frame. centreDepthM /
     // centreAngleDeg are the deviation of the bubble's centre from zero; widthM /
     // depthM are its full extents.
-    function deviationPart(club,reference,centreDepthM,centreAngleDeg,widthM,depthM){
+    function deviationPart(club,reference,centreDepthM,centreAngleDeg,widthM,depthM,opts={}){
       if(!Number.isFinite(reference)||reference<=0)return null;
       if(!Number.isFinite(widthM)||widthM<=0||!Number.isFinite(depthM)||depthM<=0)return null;
+      let lateralRadius=widthM/2;
+      let depthRadius=depthM/2;
+      // A bubble always wears the SAME generic shape - only its size and offset
+      // come from the data. Raw percentile spreads have whatever aspect the
+      // sample happened to have, which is what made the course bubble render as a
+      // narrow sliver. gdStandardDispersionAxes keeps the AREA (so size stays
+      // honestly data-driven) and forces the club's standard depth:width ratio.
+      if(opts.standardShape&&typeof gdStandardDispersionAxes==="function"){
+        const axes=safe(()=>gdStandardDispersionAxes(club,lateralRadius,depthRadius),null);
+        if(Number.isFinite(Number(axes?.lateralRadiusM))&&Number(axes.lateralRadiusM)>0)lateralRadius=Number(axes.lateralRadiusM);
+        if(Number.isFinite(Number(axes?.depthRadiusM))&&Number(axes.depthRadiusM)>0)depthRadius=Number(axes.depthRadiusM);
+      }
       return {
         club:club||"Unknown",
         depthM:(Number(centreDepthM)||0)/reference*100,
-        depthRadiusM:(depthM/2)/reference*100,
+        depthRadiusM:depthRadius/reference*100,
         angleDeg:Number(centreAngleDeg)||0,
-        angleRadiusDeg:Math.max(.4,Math.atan2(widthM/2,reference)*180/Math.PI),
+        angleRadiusDeg:Math.max(.4,Math.atan2(lateralRadius,reference)*180/Math.PI),
         tiltDeg:0,
         baseDistanceM:reference
       };
@@ -5345,7 +5365,8 @@
       Number(fit?.resultBubble?.depthOffsetM),
       Number(fit?.resultBubble?.normalizedDeg),
       Number(fit?.resultBubble?.widthM),
-      Number(fit?.resultBubble?.depthM)
+      Number(fit?.resultBubble?.depthM),
+      {standardShape:true}
     )).filter(Boolean);
     // MY BUBBLE SITS AT DEAD CENTRE, because in this frame the centre IS the
     // bubble. Deliberately the CURRENT saved shape rather than the median of the
@@ -5390,10 +5411,11 @@
       groupClass:"gdCourseBubbleBufferLayer",
       ellipseClass:"gdCourseBubbleBufferRing",
       source:"my-bubble",
+      colour:GD_COURSE_BUFFER_COLOUR,
       label:false,
-      fillOpacity:".02",
-      strokeOpacity:".34",
-      strokeWidth:".9",
+      fillOpacity:".04",
+      strokeOpacity:".72",
+      strokeWidth:"1.15",
       strokeDasharray:"3 5",
       offsetDeg:0
     }):"";
@@ -5405,36 +5427,30 @@
       ?gdPracticeNormalisedBubbleLayerMarkup(myBubbleParts,plot,{
         groupClass:"gdShotBubbleOverlayLayer gdPracticeMyBubbleLayer gdShotBubbleOverlayLens",
         source:"my-bubble",
+        colour:GD_MY_BUBBLE_COLOUR,
+        fillOpacity:".10",
+        strokeOpacity:".78",
+        strokeWidth:"1.55",
         labelText:"MY",
         offsetDeg:0
       })
       :`<g class="gdShotBubbleOverlayLayer" aria-hidden="true"></g>`;
-    // Real per-club fit ovals when analysis.bubbleFit has them; otherwise a
-    // simple bounding oval around that club's own real dots (still real
-    // data, just a looser fit) - never a generic model shape standing in.
-    let clubOvals="";
-    if(fitParts.length){
-      clubOvals=gdPracticeNormalisedBubbleLayerMarkup(fitParts,plot,{groupClass:"gdShotChartClubOvals course",source:"course",fillOpacity:".07",strokeOpacity:".4",strokeWidth:".9"});
-    }else{
-      const groups=new Map();
-      relativeRows.forEach(entry=>{
-        if(entry.row.excluded)return;
-        const point=pointFor(entry);
-        if(!point)return;
-        const key=`course::${entry.club}`;
-        if(!groups.has(key))groups.set(key,[]);
-        groups.get(key).push(point);
-      });
-      clubOvals=[...groups.values()].filter(points=>points.length>=2).map(points=>{
-        const xs=points.map(p=>p.x),ys=points.map(p=>p.y);
-        const minX=Math.min(...xs),maxX=Math.max(...xs),minY=Math.min(...ys),maxY=Math.max(...ys);
-        const cx=(minX+maxX)/2,cy=(minY+maxY)/2;
-        const rx=gdShotChartClamp((maxX-minX)/2+10,20,56);
-        const ry=gdShotChartClamp((maxY-minY)/2+8,11,34);
-        return `<ellipse class="gdShotChartClubOval course" data-source="course" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" rx="${rx.toFixed(1)}" ry="${ry.toFixed(1)}" fill="rgba(255,210,135,.82)" fill-opacity=".014" stroke="rgba(255,210,135,.82)" stroke-width=".85" stroke-opacity=".34" stroke-dasharray="1 5" stroke-linecap="round" pointer-events="none"/>`;
-      }).join("");
-      clubOvals=clubOvals?`<g class="gdShotChartClubOvals" aria-hidden="true">${clubOvals}</g>`:"";
-    }
+    // THE COURSE BUBBLE IS A BUBBLE, never a shape drawn around the dots. It wears
+    // the same generic oval as every other bubble; only its offset and size come
+    // from the data. There used to be a fallback here that fitted an ellipse to
+    // the min/max of the plotted points with clamped radii - that produced an
+    // arbitrary shape in the bubble's colours, which is exactly the thing that
+    // must not happen. With no measured fit yet, the dots speak for themselves.
+    const clubOvals=fitParts.length
+      ?gdPracticeNormalisedBubbleLayerMarkup(fitParts,plot,{
+        groupClass:"gdShotChartClubOvals course",
+        source:"course",
+        colour:GD_COURSE_BUBBLE_COLOUR,
+        fillOpacity:".13",
+        strokeOpacity:".84",
+        strokeWidth:"1.55"
+      })
+      :"";
     return `<svg viewBox="0 0 480 260" role="img" aria-label="Course Data visual">
       ${gdPracticeNormalisedBackdropSvg(plot,gdShotDataGraphTitle("Course Data"),{subtitle:`Distance vs the bubble you played (%) \u00b7 aim vs that bubble (\u00b0)${bufferParts.length?` \u00b7 dashed ring = My Bubble +${Math.round(bufferPct)}%`:""}`})}
       ${hubUnderlaySvg}
