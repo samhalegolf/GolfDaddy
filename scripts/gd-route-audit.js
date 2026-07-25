@@ -6609,22 +6609,27 @@
 		    if(!confirm(`Delete ${count} practice import${count===1?"":"s"}? This hides import metadata, source rows, native shots, debug events and the generated Practice Bubble for the import.${warning}`))return false;
 		    const nativeApi=gdNativePracticeApi&&gdNativePracticeApi();
 		    const launchApi=window.GolfDaddyLaunchMonitorData;
-		    let deletedRows=0;
-		    let deletedImports=0;
+		    // MAX, not sum. Since the native->launch-monitor bridge, one logical import
+		    // is mirrored in BOTH stores under the same importBatchId, so adding the two
+		    // results double-counts it - deleting one import of 6 shots reported
+		    // "2 imports (12 rows)". The larger of the two is the honest figure.
+		    let nativeRows=0,nativeImports=0,launchRows=0,launchImports=0;
 		    safe(()=>{
 		      if(nativeApi&&typeof nativeApi.deleteSelectedPracticeImports==="function"){
 		        const result=nativeApi.deleteSelectedPracticeImports(ids);
-		        deletedRows+=Number(result?.deletedRows)||0;
-		        deletedImports+=Number(result?.deletedImports)||0;
+		        nativeRows=Number(result?.deletedRows)||0;
+		        nativeImports=Number(result?.deletedImports)||0;
 		      }
 		    },null);
 		    safe(()=>{
 		      if(launchApi&&typeof launchApi.deleteSelectedPracticeImports==="function"){
 		        const result=launchApi.deleteSelectedPracticeImports(ids);
-		        deletedRows+=Number(result?.deletedShots)||0;
-		        deletedImports+=Number(result?.deletedImports)||0;
+		        launchRows=Number(result?.deletedShots)||0;
+		        launchImports=Number(result?.deletedImports)||0;
 		      }
 		    },null);
+		    const deletedRows=Math.max(nativeRows,launchRows);
+		    const deletedImports=Math.max(nativeImports,launchImports);
 		    ids.forEach(id=>delete gdPracticeImportSelected[id]);
 		    if(!gdPracticeSelectedImportIds().length)gdPracticeImportSelectMode=false;
 		    gdPracticeDebugEnsureRun({sourceName:"Practice import delete",sourceType:"admin"});
