@@ -2929,17 +2929,28 @@
       if(!Number.isFinite(distance)||distance<=0||!Number.isFinite(sourceDistance)||sourceDistance<=0)return null;
       const presentation=gdMyBubblePresentationMetrics(strict,{distanceM:distance,offsetDeg:offset,club:row?.club,handedness:p?.handedness});
       if(!presentation)return null;
+      // SIZE COMES FROM THE SAVED BUBBLE, not from the presentation pass.
+      // gdMyBubblePresentationMetrics already normalises and scales the shape, and
+      // the graph renderer normalises again on the way in - so taking its output
+      // here sized Practice's My Bubble ~8% larger than the identical bubble on
+      // Course and Comparison. Only the visual attributes (tilt/skew/handedness)
+      // are taken from it; the dimensions stay the player's own, scaled to this
+      // row's distance. No fallback: no real shape means no row.
+      const carryScale=distance/sourceDistance;
+      const savedWidthM=Number(strict.bubbleWidthM??strict.clusterWidthM)*carryScale;
+      const savedDepthM=Number(strict.bubbleDepthM??strict.clusterDepthM)*carryScale;
+      if(!Number.isFinite(savedWidthM)||savedWidthM<=0||!Number.isFinite(savedDepthM)||savedDepthM<=0)return null;
       const next=Object.assign({},row,{
         baseDistanceM:distance,
         expectedDistanceM:distance,
         meanExpectedM:distance,
-        bubbleWidthM:presentation.widthM,
-        clusterWidthM:presentation.widthM,
-        lateralRadiusM:presentation.lateralRadiusM,
-        bubbleDepthM:presentation.depthM,
-        clusterDepthM:presentation.depthM,
-        depthRadiusM:presentation.depthRadiusM,
-        radiusM:presentation.radiusM,
+        bubbleWidthM:savedWidthM,
+        clusterWidthM:savedWidthM,
+        lateralRadiusM:savedWidthM/2,
+        bubbleDepthM:savedDepthM,
+        clusterDepthM:savedDepthM,
+        depthRadiusM:savedDepthM/2,
+        radiusM:Math.max(savedWidthM,savedDepthM)/2,
         offsetDeg:offset,
         faceOffsetDeg:offset,
         faceAlignmentOffsetDeg:offset,
@@ -5522,54 +5533,68 @@
 	    Object.keys(byClub).forEach(key=>{map[key]=gdShotBubbleMedian(byClub[key]);});
 	    return map;
 	  }
-	  function gdPracticeNormalisedBubbleParts(rows,offsetDeg,baselines){
-	    const scale=gdShotBubbleOverlayScale();
-	    return gdShotBubbleOverlayBubbleParts(rows,offsetDeg).map(bubble=>{
-	      const carry=Number(bubble.centerDistanceM)||Number(bubble.baseDistanceM)||0;
-	      if(!Number.isFinite(carry)||carry<=0)return null;
-	      const key=gdShotBubbleOverlayClubKey(bubble.club||bubble.row?.club);
-	      const baselineRaw=Number(baselines&&baselines[key]);
-	      const baseline=Number.isFinite(baselineRaw)&&baselineRaw>0?baselineRaw:carry;
-	      const lateralRadius=Math.max(1,Number(bubble.lateralRadiusM)||Number(bubble.widthM)/2||1)*scale;
-	      const depthRadius=Math.max(1,Number(bubble.depthRadiusM)||Number(bubble.depthM)/2||1)*scale;
-	      const angle=Number.isFinite(Number(bubble.offsetDeg))?Number(bubble.offsetDeg):Math.atan2(Number(bubble.centerLateralM)||0,carry)*180/Math.PI;
-	      return{
-	        club:bubble.club||bubble.row?.club||"Unknown",
-	        depthM:carry-baseline,
-	        depthRadiusM:depthRadius,
-	        angleDeg:angle,
-	        angleRadiusDeg:Math.max(.4,Math.atan2(lateralRadius,Math.max(1,carry))*180/Math.PI),
-	        tiltDeg:Number(bubble.tiltDeg)||0,
-	        baseDistanceM:Number(bubble.baseDistanceM)||carry
-	      };
-	    }).filter(Boolean);
-	  }
-  // Bubble geometry for the shared relative-% chart. Position (depthM) is a
-  // percentage relative to the ANCHOR distance (My Bubble's own bag-tied
-  // distance) passed in - not each bubble's own distance and not a generic
-  // per-club baseline. Shape (depthRadiusM/angleRadiusDeg) stays relative to
-  // the bubble's OWN carry, so a driver's and a wedge's dispersion are still
-  // fairly comparable in size. Angle (angleDeg) is each bubble's own absolute
-  // offset from straight ahead, unchanged - never anchor-relative.
+	  // gdPracticeNormalisedBubbleParts is gone: it was an unused graph helper that
+	  // still routed through the GPS projector, i.e. a trap waiting to put world
+	  // geometry back onto a chart.
+  // THE GRAPH BUBBLE AND THE GPS BUBBLE ARE DIFFERENT RENDERINGS OF THE SAME DATA.
+  //
+  //   GPS bubble   - the real thing projected into the world: rollout-inflated
+  //                  depth, physics tilt, visual skew, bag-roof clamping, screen
+  //                  caps. Built by gdGeneratedShotBubbleForClub / getGDBForClub.
+  //   Graph bubble - the same saved numbers drawn in the charts' own language, so
+  //                  My Bubble sits beside the Practice and Course bubbles and is
+  //                  directly comparable to them.
+  //
+  // The charts must therefore NOT go through the GPS projector. They used to:
+  // gdShotBubbleOverlayBubbleParts regenerates every bubble from club + carry and
+  // never reads the row's own saved dimensions, so a saved 20x26m My Bubble was
+  // redrawn at the engine's 22.2x29.25m for a 7i at 150m - and Comparison, which
+  // feeds a different club label in, differed again. The same bubble rendered at
+  // three sizes across three screens.
+  //
+  // NO FALLBACK. A row without a real saved shape is not drawn. The charts never
+  // call the GPS projector - a bubble on a graph is always the player's own
+  // numbers, or nothing at all.
+  function gdGraphBubbleDimensions(row,carry){
+    const width=Number(row?.bubbleWidthM??row?.clusterWidthM??row?.widthM);
+    const depth=Number(row?.bubbleDepthM??row?.clusterDepthM??row?.depthM);
+    const radiusDeg=Number(row?.lateralRadiusDeg);
+    const resolvedWidth=Number.isFinite(width)&&width>0
+      ?width
+      :(Number.isFinite(radiusDeg)&&radiusDeg>0?Math.tan(radiusDeg*Math.PI/180)*Math.max(1,carry)*2:NaN);
+    if(!Number.isFinite(resolvedWidth)||resolvedWidth<=0)return null;
+    if(!Number.isFinite(depth)||depth<=0)return null;
+    return {widthM:resolvedWidth,depthM:depth};
+  }
   function gdBubbleRelativeParts(rows,offsetDeg,anchorDistanceM){
     const anchor=Number(anchorDistanceM);
     if(!Number.isFinite(anchor)||anchor<=0)return [];
-    const scale=gdShotBubbleOverlayScale();
-    return gdShotBubbleOverlayBubbleParts(rows,offsetDeg).map(bubble=>{
-      const carry=Number(bubble.centerDistanceM)||Number(bubble.baseDistanceM)||0;
-      if(!Number.isFinite(carry)||carry<=0)return null;
-      const lateralRadius=Math.max(1,Number(bubble.lateralRadiusM)||Number(bubble.widthM)/2||1)*scale;
-      const depthRadius=Math.max(1,Number(bubble.depthRadiusM)||Number(bubble.depthM)/2||1)*scale;
-      const angle=Number.isFinite(Number(bubble.offsetDeg))?Number(bubble.offsetDeg):Math.atan2(Number(bubble.centerLateralM)||0,carry)*180/Math.PI;
+    const partFor=(club,carry,angle,lateralRadius,depthRadius,tiltDeg,baseDistanceM)=>{
+      // Same generic oval every bubble wears; only size and offset are data.
+      let lateral=Math.max(1,lateralRadius);
+      let depth=Math.max(1,depthRadius);
+      if(typeof gdStandardDispersionAxes==="function"){
+        const axes=safe(()=>gdStandardDispersionAxes(club,lateral,depth),null);
+        if(Number.isFinite(Number(axes?.lateralRadiusM))&&Number(axes.lateralRadiusM)>0)lateral=Number(axes.lateralRadiusM);
+        if(Number.isFinite(Number(axes?.depthRadiusM))&&Number(axes.depthRadiusM)>0)depth=Number(axes.depthRadiusM);
+      }
       return{
-        club:bubble.club||bubble.row?.club||"Unknown",
+        club:club||"Unknown",
         depthM:(carry-anchor)/anchor*100,
-        depthRadiusM:depthRadius/carry*100,
+        depthRadiusM:depth/carry*100,
         angleDeg:angle,
-        angleRadiusDeg:Math.max(.4,Math.atan2(lateralRadius,Math.max(1,carry))*180/Math.PI),
-        tiltDeg:Number(bubble.tiltDeg)||0,
-        baseDistanceM:Number(bubble.baseDistanceM)||carry
+        angleRadiusDeg:Math.max(.4,Math.atan2(lateral,Math.max(1,carry))*180/Math.PI),
+        tiltDeg:Number(tiltDeg)||0,
+        baseDistanceM:Number(baseDistanceM)||carry
       };
+    };
+    return (rows||[]).map(row=>{
+      const carry=Number(row?.actualDistanceM)||Number(row?.baseDistanceM)||Number(row?.expectedDistanceM);
+      if(!Number.isFinite(carry)||carry<=0)return null;
+      const dims=gdGraphBubbleDimensions(row,carry);
+      if(!dims)return null;
+      const angle=Number.isFinite(Number(row?.offsetDeg))?Number(row.offsetDeg):Number(offsetDeg)||0;
+      return partFor(row.club,carry,angle,dims.widthM/2,dims.depthM/2,row?.tiltDeg,carry);
     }).filter(Boolean);
   }
 	  function gdPracticeNormalisedBubbleLayerMarkup(parts,plot,opts={}){
