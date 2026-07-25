@@ -5356,7 +5356,7 @@
         depthRadiusM:depthRadius/reference*100,
         angleDeg:Number(centreAngleDeg)||0,
         angleRadiusDeg:Math.max(.4,Math.atan2(lateralRadius,reference)*180/Math.PI),
-        tiltDeg:0,
+        tiltDeg:gdGraphBubbleTiltDeg(club),
         baseDistanceM:reference
       };
     }
@@ -5555,6 +5555,19 @@
   // NO FALLBACK. A row without a real saved shape is not drawn. The charts never
   // call the GPS projector - a bubble on a graph is always the player's own
   // numbers, or nothing at all.
+  // Tilt for graph bubbles. Every graph bubble wears the standard shape, so it
+  // wears the standard tilt that goes with it - the same club/handedness rule the
+  // GPS bubble uses (gdStandardDispersionTiltDeg).
+  //
+  // Deliberately NOT the projector's tiltDeg, which is physics tilt (the aim
+  // offset) PLUS visual tilt. On a chart the aim offset is already expressed as
+  // the bubble's position along the angle axis, so folding it into the tilt as
+  // well would count the same aim twice.
+  function gdGraphBubbleTiltDeg(club,handedness){
+    const hand=handedness||safe(()=>ensureProfile()?.handedness,null)||"right";
+    const tilt=safe(()=>typeof gdStandardDispersionTiltDeg==="function"?gdStandardDispersionTiltDeg(club||"7i",hand):0,0);
+    return Number.isFinite(Number(tilt))?Number(tilt):0;
+  }
   function gdGraphBubbleDimensions(row,carry){
     const width=Number(row?.bubbleWidthM??row?.clusterWidthM??row?.widthM);
     const depth=Number(row?.bubbleDepthM??row?.clusterDepthM??row?.depthM);
@@ -5569,7 +5582,7 @@
   function gdBubbleRelativeParts(rows,offsetDeg,anchorDistanceM){
     const anchor=Number(anchorDistanceM);
     if(!Number.isFinite(anchor)||anchor<=0)return [];
-    const partFor=(club,carry,angle,lateralRadius,depthRadius,tiltDeg,baseDistanceM)=>{
+    const partFor=(club,carry,angle,lateralRadius,depthRadius,handedness,baseDistanceM)=>{
       // Same generic oval every bubble wears; only size and offset are data.
       let lateral=Math.max(1,lateralRadius);
       let depth=Math.max(1,depthRadius);
@@ -5584,7 +5597,7 @@
         depthRadiusM:depth/carry*100,
         angleDeg:angle,
         angleRadiusDeg:Math.max(.4,Math.atan2(lateral,Math.max(1,carry))*180/Math.PI),
-        tiltDeg:Number(tiltDeg)||0,
+        tiltDeg:gdGraphBubbleTiltDeg(club,handedness),
         baseDistanceM:Number(baseDistanceM)||carry
       };
     };
@@ -5594,7 +5607,7 @@
       const dims=gdGraphBubbleDimensions(row,carry);
       if(!dims)return null;
       const angle=Number.isFinite(Number(row?.offsetDeg))?Number(row.offsetDeg):Number(offsetDeg)||0;
-      return partFor(row.club,carry,angle,dims.widthM/2,dims.depthM/2,row?.tiltDeg,carry);
+      return partFor(row.club,carry,angle,dims.widthM/2,dims.depthM/2,row?.handedness,carry);
     }).filter(Boolean);
   }
 	  function gdPracticeNormalisedBubbleLayerMarkup(parts,plot,opts={}){
