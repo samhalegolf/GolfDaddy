@@ -5563,10 +5563,19 @@
   // offset) PLUS visual tilt. On a chart the aim offset is already expressed as
   // the bubble's position along the angle axis, so folding it into the tilt as
   // well would count the same aim twice.
+  // The dev board's bubbleGeometry.tiltScale and tiltMaxDeg apply here too. They
+  // used to reach only gdDeriveClusterTilt (the cluster/GPS path), so "Bubble tilt
+  // scale" did nothing to the graphs and the class constants (10/12/14) quietly
+  // exceeded their own tiltMaxDeg clamp. Now the control governs every bubble:
+  // tiltScale 0 means no tilt anywhere.
   function gdGraphBubbleTiltDeg(club,handedness){
     const hand=handedness||safe(()=>ensureProfile()?.handedness,null)||"right";
-    const tilt=safe(()=>typeof gdStandardDispersionTiltDeg==="function"?gdStandardDispersionTiltDeg(club||"7i",hand):0,0);
-    return Number.isFinite(Number(tilt))?Number(tilt):0;
+    const base=Number(safe(()=>typeof gdStandardDispersionTiltDeg==="function"?gdStandardDispersionTiltDeg(club||"7i",hand):0,0));
+    if(!Number.isFinite(base))return 0;
+    const geo=safe(()=>typeof gdBubbleGeometryTuning==="function"?gdBubbleGeometryTuning():null,null)||{};
+    const scale=Number.isFinite(Number(geo.tiltScale))?Number(geo.tiltScale):1;
+    const max=Number.isFinite(Number(geo.tiltMaxDeg))?Math.abs(Number(geo.tiltMaxDeg)):Math.abs(base);
+    return Math.max(-max,Math.min(max,base*scale));
   }
   function gdGraphBubbleDimensions(row,carry){
     const width=Number(row?.bubbleWidthM??row?.clusterWidthM??row?.widthM);
