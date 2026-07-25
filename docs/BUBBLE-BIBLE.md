@@ -73,6 +73,27 @@ Analysis artifact: how tightly shots landed vs the bubble that was set.
 
 ---
 
+## 3a. Chart orientation — LAW
+
+The chart is a **bird's-eye view**. The origin marker sits on the left with the ball
+travelling right, and everything else must agree with that reading:
+
+- x: left = short, right = long
+- y: **down = missed RIGHT, up = missed LEFT** (`yForAngle` uses PLUS, not minus)
+
+This is why the chart needs no axis labels: the origin marker states the orientation,
+and the axes obey it. If the y sign is ever flipped back, labels become mandatory,
+because the origin would then point at the wrong reading.
+
+`originBottomTransform` rotates this so the origin sits at the bottom and the ball
+travels up the screen. It must stay a TRUE rotation, `matrix(0 -1 1 0 ...)`,
+determinant +1. It was previously `matrix(0 -1 -1 0 ...)`, determinant -1 - a
+reflection that only looked correct because it was mirroring an already-mirrored
+side-on view. Two wrongs cancelling. Verified after the fix: origin lands exactly at
+bottom-centre, a right miss goes right, a long shot goes up.
+
+---
+
 ## 3. Chart scale — LAW
 
 Course / Practice / Comparison share one fixed normalised domain so identical bubble

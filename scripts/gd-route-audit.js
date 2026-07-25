@@ -3003,12 +3003,23 @@
 	      originX,
 	      originY,
 	      xForDepth(depth){return plot.plotMidX+gdShotChartClamp((Number(depth)||0)/plot.depthRange,-1,1)*halfWidth;},
-	      yForAngle(angle){return plot.plotMidY-gdShotChartClamp((Number(angle)||0)/plot.angleRange,-1,1)*halfHeight;},
+	      // PLUS, not minus: a positive angle is a miss to the RIGHT, and this view
+	      // has the origin on the left with the ball travelling right, so it reads
+	      // as a bird's-eye view - where right of the line is DOWN the screen. With
+	      // the sign the other way the origin marker pointed at the wrong reading,
+	      // which is why the chart needed axis labels to be understood at all.
+	      yForAngle(angle){return plot.plotMidY+gdShotChartClamp((Number(angle)||0)/plot.angleRange,-1,1)*halfHeight;},
 	      yForUnknown(jitter=0){return plot.plotMidY+(Number(jitter)||0);},
+	      // Rotates the bird's-eye view so the origin sits at the bottom and the
+	      // ball travels up the screen. Determinant +1 - a true rotation. It used
+	      // to be matrix(0 -1 -1 0 ...), determinant -1, a REFLECTION: it only
+	      // looked right because it was mirroring an already-mirrored side-on view.
+	      // Two wrongs cancelling. With yForAngle fixed, this has to be a real
+	      // rotation or the rotated view flips left and right.
 	      originBottomTransform(){
-	        const e=targetX+originY;
+	        const e=targetX-originY;
 	        const f=targetY+originX;
-	        return `matrix(0 -1 -1 0 ${e.toFixed(1)} ${f.toFixed(1)})`;
+	        return `matrix(0 -1 1 0 ${e.toFixed(1)} ${f.toFixed(1)})`;
 	      }
 	    };
 	  }
@@ -4909,6 +4920,15 @@
 	      counted:counted
 	    };
 	  }
+  // How much bigger than My Bubble the buffer ring is drawn on Course Data, as a
+  // percentage. A chosen allowance for the course window being wider than the
+  // practice window - not a measurement, and never a pass/fail threshold. Tunable
+  // so the number can be argued about without touching the logic.
+  const GD_COURSE_BUBBLE_BUFFER_PCT=20;
+  function gdCourseBubbleBufferPct(){
+    const tuned=safe(()=>typeof dev==="function"?Number(dev("bubbleVisuals.courseBufferPct")):NaN,NaN);
+    return Number.isFinite(tuned)&&tuned>=0?tuned:GD_COURSE_BUBBLE_BUFFER_PCT;
+  }
   // opts lets the Course Data default screen (gdStatsVisualSummary) reuse this
   // renderer with its own filtered records, colour mode and legend, so both the
   // default screen and this fallback plot on the SAME fixed normalised domain.
@@ -4980,18 +5000,30 @@
       Number(fit?.resultBubble?.widthM),
       Number(fit?.resultBubble?.depthM)
     )).filter(Boolean);
-    // The bubble that was actually on screen, drawn at zero - because in this
-    // frame, zero IS that bubble. Sizes come from the stored snapshots
-    // (presumedBubble = median of the real planned bubbles), never from the bag.
-    const overlayEnabled=gdShotBubbleOverlayEnabled("course");
-    const referenceParts=overlayEnabled?fitSource.map(fit=>deviationPart(
-      fit?.club,
-      referenceFor(fit?.club),
-      0,
-      0,
-      Number(fit?.presumedBubble?.widthM),
-      Number(fit?.presumedBubble?.depthM)
-    )).filter(Boolean):[];
+    // MY BUBBLE SITS AT DEAD CENTRE, because in this frame the centre IS the
+    // bubble. Deliberately the CURRENT saved shape rather than the median of the
+    // bubbles that were historically on screen: the question this screen answers
+    // is "does the bubble I would play now contain where the ball actually goes",
+    // which is what makes expand-vs-tighten judgeable by eye.
+    // Never synthesised - gdMyBubbleHubSource returns null when there is no real
+    // saved bubble, and then nothing is drawn.
+    const myBubbleSource=safe(()=>gdMyBubbleHubSource(gdBubbleDataContext(),null,gdStatsCurrentModelOffsetDeg()),null);
+    const myBubbleClub=myBubbleSource?.club||"My Bubble";
+    const myBubbleCarry=Number(myBubbleSource?.baseDistanceM);
+    const myBubbleWidth=Number(myBubbleSource?.bubbleWidthM);
+    const myBubbleDepth=Number(myBubbleSource?.bubbleDepthM);
+    const myBubbleParts=[deviationPart(myBubbleClub,myBubbleCarry,0,0,myBubbleWidth,myBubbleDepth)].filter(Boolean);
+    // BUFFER RING: My Bubble expanded by a chosen amount, drawn around it. Course
+    // dispersion is wider than practice dispersion, so a bubble that is right for
+    // the player still will not match the course result exactly. The buffer is the
+    // allowance for that, and the whole reading is then visual: does the course
+    // bubble line up with the ring? No verdict is computed and none should be -
+    // the picture is the answer.
+    const bufferPct=gdCourseBubbleBufferPct();
+    const bufferScale=1+bufferPct/100;
+    const bufferParts=bufferScale>1
+      ?[deviationPart(myBubbleClub,myBubbleCarry,0,0,myBubbleWidth*bufferScale,myBubbleDepth*bufferScale)].filter(Boolean)
+      :[];
     const plot=gdPracticeNormalisedPlotLayout({plotLeft,plotRight,plotTop,plotBottom});
     const pointFor=entry=>gdPracticeNormalisedPlotPoint(plot,entry,entry.index);
     const shotDots=relativeRows.slice(0,90).map(entry=>{
@@ -5006,16 +5038,30 @@
     const clubKeySvg=typeof opts?.keySvg==="string"
       ?opts.keySvg
       :clubKey.map((club,i)=>`<circle cx="${26+i*48}" cy="58" r="4.2" fill="${gdStatsClubColor(club)}"/><text x="${34+i*48}" y="61" fill="rgba(255,255,255,.68)" font-size="9" font-weight="850">${gdStatsSvgText(club)}</text>`).join("");
-    const hubUnderlaySvg="";
-    // When the overlay is on we always emit the layer group, even with no parts:
+    // Drawn first so it sits under My Bubble and the course result.
+    const hubUnderlaySvg=bufferParts.length?gdPracticeNormalisedBubbleLayerMarkup(bufferParts,plot,{
+      groupClass:"gdCourseBubbleBufferLayer",
+      ellipseClass:"gdCourseBubbleBufferRing",
+      source:"my-bubble",
+      label:false,
+      fillOpacity:".02",
+      strokeOpacity:".34",
+      strokeWidth:".9",
+      strokeDasharray:"3 5",
+      offsetDeg:0
+    }):"";
+    // The group is emitted even when there is no My Bubble to draw:
     // gdApplyShotBubbleDomOverlay injects a legacy ABSOLUTE-frame bubble unless it
-    // finds a .gdShotBubbleOverlayLayer here, and that bubble would be drawn at the
+    // finds a .gdShotBubbleOverlayLayer here, and that bubble would land at the
     // wrong scale on this normalised chart.
-    const overlaySvg=overlayEnabled
-      ?(referenceParts.length
-        ?gdPracticeNormalisedBubbleLayerMarkup(referenceParts,plot,{groupClass:"gdShotBubbleOverlayLayer",source:"gps-bubble",fillOpacity:".075",strokeOpacity:".62",strokeWidth:"1.35"})
-        :`<g class="gdShotBubbleOverlayLayer" aria-hidden="true"></g>`)
-      :"";
+    const overlaySvg=myBubbleParts.length
+      ?gdPracticeNormalisedBubbleLayerMarkup(myBubbleParts,plot,{
+        groupClass:"gdShotBubbleOverlayLayer gdPracticeMyBubbleLayer gdShotBubbleOverlayLens",
+        source:"my-bubble",
+        labelText:"MY",
+        offsetDeg:0
+      })
+      :`<g class="gdShotBubbleOverlayLayer" aria-hidden="true"></g>`;
     // Real per-club fit ovals when analysis.bubbleFit has them; otherwise a
     // simple bounding oval around that club's own real dots (still real
     // data, just a looser fit) - never a generic model shape standing in.
@@ -5043,7 +5089,7 @@
       clubOvals=clubOvals?`<g class="gdShotChartClubOvals" aria-hidden="true">${clubOvals}</g>`:"";
     }
     return `<svg viewBox="0 0 480 260" role="img" aria-label="Course Data visual">
-      ${gdPracticeNormalisedBackdropSvg(plot,gdShotDataGraphTitle("Course Data"),{subtitle:"Distance vs each club's own baseline (%) \u00b7 aim angle (\u00b0)"})}
+      ${gdPracticeNormalisedBackdropSvg(plot,gdShotDataGraphTitle("Course Data"),{subtitle:`Distance vs the bubble you played (%) \u00b7 aim vs that bubble (\u00b0)${bufferParts.length?` \u00b7 dashed ring = My Bubble +${Math.round(bufferPct)}%`:""}`})}
       ${hubUnderlaySvg}
       ${overlaySvg}
       ${clubOvals}
@@ -5190,7 +5236,8 @@
 	        const line=(word,dx,dy,fill)=>`<text x="${(cx+dx).toFixed(1)}" y="${(cy+dy).toFixed(1)}" text-anchor="middle" dominant-baseline="middle" fill="${fill}" font-size="${fontSize.toFixed(1)}" font-weight="950">${gdStatsSvgText(word)}</text>`;
 	        return `<g class="gdPracticeBubbleEmbossLabel" data-source="practice-bubble-label" pointer-events="none" aria-hidden="true">${line(opts.labelText,-.55,-.55,"rgba(0,0,0,.58)")}${line(opts.labelText,.55,.6,isMy?"rgba(255,236,181,.24)":"rgba(160,255,201,.20)")}${line(opts.labelText,0,0,isMy?"rgba(28,17,2,.86)":"rgba(0,14,8,.84)")}</g>`;
 	      })():"";
-	      return `<ellipse class="gdOffsetHubBubble" data-club="${gdStatsSvgText(part.club)}" data-source="${gdStatsSvgText(opts.source||"")}" data-offset-deg="${Number(part.angleDeg).toFixed(2)}" data-base-distance-m="${Number(part.baseDistanceM).toFixed(1)}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" rx="${rx.toFixed(1)}" ry="${ry.toFixed(1)}"${part.tiltDeg?` transform="rotate(${(-part.tiltDeg).toFixed(1)} ${cx.toFixed(1)} ${cy.toFixed(1)})"`:""} fill="${colour}" fill-opacity="${fillOpacity}" stroke="${colour}" stroke-width="${strokeWidth}" stroke-opacity="${strokeOpacity}"/>${label}`;
+	      const dashAttr=opts.strokeDasharray?` stroke-dasharray="${gdStatsSvgText(opts.strokeDasharray)}" stroke-linecap="round"`:"";
+	      return `<ellipse class="gdOffsetHubBubble${opts.ellipseClass?` ${gdStatsSvgText(opts.ellipseClass)}`:""}" data-club="${gdStatsSvgText(part.club)}" data-source="${gdStatsSvgText(opts.source||"")}" data-offset-deg="${Number(part.angleDeg).toFixed(2)}" data-base-distance-m="${Number(part.baseDistanceM).toFixed(1)}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" rx="${rx.toFixed(1)}" ry="${ry.toFixed(1)}"${part.tiltDeg?` transform="rotate(${(-part.tiltDeg).toFixed(1)} ${cx.toFixed(1)} ${cy.toFixed(1)})"`:""} fill="${colour}" fill-opacity="${fillOpacity}" stroke="${colour}" stroke-width="${strokeWidth}" stroke-opacity="${strokeOpacity}"${dashAttr}/>${label}`;
 	    }).join("")}</g>`;
 	  }
 	  function practiceSvg(analysis){
