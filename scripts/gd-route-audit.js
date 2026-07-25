@@ -6601,12 +6601,49 @@
 		    if(sourceIds.some(id=>ids.has(id)))return " This import was used for the current My Bubble. My Bubble will remain unchanged.";
 		    return source?.active&&ids.size?" My Bubble will remain unchanged. Reset My Bubble separately if needed.":"";
 		  }
+		  // IN-APP CONFIRMATION. window.confirm is silently suppressed in the app's
+		  // embedded webview: it returns false INSTANTLY without ever showing a dialog.
+		  // Every destructive action gated on it therefore did nothing at all - no
+		  // toast, no error, no change - which is exactly what "delete isn't working"
+		  // turned out to be. Do not reintroduce window.confirm for these paths.
+		  function gdConfirmAction(options,onConfirm){
+		    const opts=typeof options==="string"?{message:options}:(options||{});
+		    const run=()=>{try{if(typeof onConfirm==="function")onConfirm();}catch(e){console.warn("[GolfDaddy] confirm action failed",e);}};
+		    if(!document?.body)     {run();return false;}
+		    document.getElementById("gdConfirmOverlay")?.remove();
+		    const overlay=document.createElement("div");
+		    overlay.id="gdConfirmOverlay";
+		    overlay.className="gdConfirmOverlay";
+		    overlay.innerHTML=`<div class="gdConfirmSheet" role="alertdialog" aria-modal="true" aria-label="${gdEscapeHTML(opts.title||"Are you sure?")}">
+		      <strong>${gdEscapeHTML(opts.title||"Are you sure?")}</strong>
+		      <p>${gdEscapeHTML(opts.message||"")}</p>
+		      <div class="gdConfirmActions">
+		        <button type="button" data-gd-confirm="cancel">${gdEscapeHTML(opts.cancelLabel||"Cancel")}</button>
+		        <button type="button" class="danger" data-gd-confirm="ok">${gdEscapeHTML(opts.confirmLabel||"Delete")}</button>
+		      </div>
+		    </div>`;
+		    const close=()=>overlay.remove();
+		    overlay.addEventListener("click",event=>{
+		      if(event.target===overlay)return close();
+		      const action=event.target?.dataset?.gdConfirm;
+		      if(action==="cancel")return close();
+		      if(action==="ok"){close();run();}
+		    });
+		    document.body.appendChild(overlay);
+		    return false;
+		  }
 		  function gdPracticeDeleteImports(importIds){
 		    const ids=(Array.isArray(importIds)?importIds:[importIds]).map(id=>String(id||"").trim()).filter(Boolean);
 		    if(!ids.length){gdLmToast("No practice imports selected");return false;}
 		    const warning=gdPracticeCurrentMyBubbleImportWarning(ids);
 		    const count=ids.length;
-		    if(!confirm(`Delete ${count} practice import${count===1?"":"s"}? This hides import metadata, source rows, native shots, debug events and the generated Practice Bubble for the import.${warning}`))return false;
+		    return gdConfirmAction({
+		      title:`Delete ${count} practice import${count===1?"":"s"}?`,
+		      message:`This hides import metadata, source rows, native shots, debug events and the generated Practice Bubble for the import.${warning}`,
+		      confirmLabel:"Delete"
+		    },()=>gdPracticeDeleteImportsConfirmed(ids));
+		  }
+		  function gdPracticeDeleteImportsConfirmed(ids){
 		    const nativeApi=gdNativePracticeApi&&gdNativePracticeApi();
 		    const launchApi=window.GolfDaddyLaunchMonitorData;
 		    // MAX, not sum. Since the native->launch-monitor bridge, one logical import
@@ -6654,7 +6691,13 @@
 		    const scope=safe(()=>launchApi?.activePlayerScope?.()||nativeApi?.activePlayerScope?.(),{})||{};
 		    const playerId=String(scope.playerId||"").trim();
 		    if(!playerId){gdLmToast("Player scope missing");return false;}
-		    if(!confirm("Clear all practice imports for this player? This is player-scoped only and My Bubble will remain unchanged."))return false;
+		    return gdConfirmAction({
+		      title:"Clear the practice library?",
+		      message:"Clears all practice imports for this player. Player-scoped only, and My Bubble is left unchanged.",
+		      confirmLabel:"Clear"
+		    },()=>gdPracticeClearLibraryForPlayerConfirmed(playerId,launchApi,nativeApi));
+		  }
+		  function gdPracticeClearLibraryForPlayerConfirmed(playerId,launchApi,nativeApi){
 		    let deleted=0;
 		    safe(()=>{if(nativeApi&&typeof nativeApi.clearPracticeLibraryForPlayer==="function")deleted+=Number(nativeApi.clearPracticeLibraryForPlayer(playerId)?.deletedImports)||0;},null);
 		    safe(()=>{if(launchApi&&typeof launchApi.clearPracticeLibraryForPlayer==="function")deleted+=Number(launchApi.clearPracticeLibraryForPlayer(playerId)?.deletedImports)||0;},null);
@@ -6758,7 +6801,13 @@
 	      gdLmToast("No practice shots selected");
 	      return false;
 	    }
-	    if(!confirm(`Delete ${ids.length} selected practice shot${ids.length===1?"":"s"}?`))return false;
+	    return gdConfirmAction({
+      title:`Delete ${ids.length} practice shot${ids.length===1?"":"s"}?`,
+      message:"The selected shots are removed from practice data.",
+      confirmLabel:"Delete"
+    },()=>gdPracticeDeleteSelectedEvidenceShotsConfirmed(ids));
+  }
+  function gdPracticeDeleteSelectedEvidenceShotsConfirmed(ids){
 	    const api=window.GolfDaddyLaunchMonitorData;
 	    if(!api||typeof api.deleteShots!=="function"){
 	      gdLmToast("Practice delete is not ready");
@@ -7323,6 +7372,9 @@
       gdOpenPracticeData:openPracticeData,
       gdSetCourseDataTab:gdSetCourseDataTab,
       gdCourseDataSurfaceSvg:gdCourseDataSurfaceSvg,
+      // Shared by gd-app-core's destructive actions too - window.confirm is dead
+      // in the embedded webview.
+      gdConfirmAction:gdConfirmAction,
       // Inline onclick handlers in the admin panel need these on window.
       gdSandboxGenerateCourse:gdSandboxGenerateCourse,
       gdSandboxInjectCourse:gdSandboxInjectCourse,

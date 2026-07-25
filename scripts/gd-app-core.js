@@ -23021,7 +23021,19 @@ function gdDeleteCourseShot(shotId){
   if(!gdCourseDataCanManage())return;
   const id=String(shotId||"");
   if(!id)return;
-  if(!confirm("Delete this paired course shot?"))return;
+  // window.confirm is silently suppressed in the embedded webview (returns false
+  // instantly, no dialog), which made this delete a no-op. Falls back to confirm
+  // only if the in-app dialog owner has not loaded yet.
+  if(typeof window.gdConfirmAction==="function"){
+    return window.gdConfirmAction({
+      title:"Delete this course shot?",
+      message:"Removes the paired shot and its outcome from course data.",
+      confirmLabel:"Delete"
+    },()=>gdDeleteCourseShotConfirmed(id));
+  }
+  return gdDeleteCourseShotConfirmed(id);
+}
+function gdDeleteCourseShotConfirmed(id){
   const api=window.GolfDaddyShotEvents;
   const store=safe(()=>api?.getScopedStore?.()||api?.getStore?.(),null);
   if(!api||!store){toast("Course data feed unavailable");return}
