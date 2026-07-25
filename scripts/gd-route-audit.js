@@ -4693,7 +4693,9 @@
   function gdCourseDataAdminFallbackHTML(){
     const badge=gdCourseDataAdminCanManage()?"Admin editable":"Locked by permission";
     if(!gdCourseDataAdminCanManage())return `<div class="gdShotAdminHead"><div><strong>Course Data admin</strong><span>Coach/admin only.</span></div><div class="gdShotAdminBadge">${badge}</div></div>`;
-    return `<div class="gdShotAdminHead"><div><strong>Course Data admin</strong><span>Permission-gated management lives here, away from the normal shot view.</span></div><div class="gdShotAdminBadge">${badge}</div></div>${gdRenderCourseDataUploadHTML()}${gdRenderCourseDataTuningHTML()}<div class="gdShotAdminList"><div class="gdShotAdminEmpty">No paired course shots to manage yet.</div></div>`;
+    // The sandbox generator has to be here too: an empty store is exactly when
+    // you need to feed the plumbing something.
+    return `<div class="gdShotAdminHead"><div><strong>Course Data admin</strong><span>Permission-gated management lives here, away from the normal shot view.</span></div><div class="gdShotAdminBadge">${badge}</div></div>${gdRenderCourseDataUploadHTML()}${gdRenderCourseDataTuningHTML()}${gdRenderSandboxGeneratorHTML()}<div class="gdShotAdminList"><div class="gdShotAdminEmpty">No paired course shots to manage yet.</div></div>`;
   }
   const gdCourseDataTuningFields=[
     "statsCluster.consistencyMinPct",
@@ -4865,6 +4867,222 @@
       input.onchange=()=>{if(document.getElementById("developerPanel")?.classList.contains("open"))renderDevPanel();};
     });
   }
+  // ---------------------------------------------------------------------------
+  // SANDBOX DATA GENERATOR
+  // Feeds the shot-data plumbing with made-up batches so the pipes can be tested
+  // without going and hitting balls. Both generators fill an EDITABLE textarea
+  // first - randomise, tweak by hand, then submit - so a specific case can be
+  // reproduced exactly rather than only sampled randomly.
+  //
+  // Neither generator bypasses the real intake:
+  //   Course   -> plannedShots + outcomes written to the shot-event store, the
+  //               same shapes gd-shot-outcomes.js produces from real GPS.
+  //   Practice -> native CSV pushed through gdParseNativePracticeImport(), the
+  //               exact path a real launch-monitor paste takes.
+  //
+  // NOTE: by choice there is no sandbox flag - injected shots are written into
+  // the live store and are indistinguishable from real ones. "Clear" in the
+  // Import panel above is the only way back.
+  // ---------------------------------------------------------------------------
+  const GD_SANDBOX_FIELDS={
+    course:[
+      {id:"gdSandboxCourseCount",label:"Shots",value:14,min:1,max:60,step:1},
+      {id:"gdSandboxCourseCarry",label:"Carry (m)",value:150,min:30,max:320,step:1},
+      {id:"gdSandboxCourseOffsetMin",label:"Aim min (°)",value:-3,min:-20,max:20,step:.1},
+      {id:"gdSandboxCourseOffsetMax",label:"Aim max (°)",value:3,min:-20,max:20,step:.1},
+      {id:"gdSandboxCourseDepthMin",label:"Depth min (%)",value:-8,min:-40,max:40,step:.5},
+      {id:"gdSandboxCourseDepthMax",label:"Depth max (%)",value:8,min:-40,max:40,step:.5}
+    ],
+    practice:[
+      {id:"gdSandboxPracticeCount",label:"Shots",value:14,min:1,max:60,step:1},
+      {id:"gdSandboxPracticeCarry",label:"Carry (m)",value:142,min:30,max:320,step:1},
+      {id:"gdSandboxPracticeCarrySpread",label:"Carry ± (m)",value:6,min:0,max:40,step:.5},
+      {id:"gdSandboxPracticeOffline",label:"Offline ± (m)",value:7,min:0,max:60,step:.5}
+    ]
+  };
+  function gdSandboxNumber(id,fallback){
+    const value=Number(byId(id)?.value);
+    return Number.isFinite(value)?value:fallback;
+  }
+  function gdSandboxFieldValue(kind,id){
+    const field=(GD_SANDBOX_FIELDS[kind]||[]).find(item=>item.id===id);
+    return gdSandboxNumber(id,Number(field?.value)||0);
+  }
+  function gdSandboxBetween(min,max,decimals=1){
+    const low=Math.min(min,max),high=Math.max(min,max);
+    const value=low+Math.random()*(high-low);
+    const factor=Math.pow(10,decimals);
+    return Math.round(value*factor)/factor;
+  }
+  function gdSandboxClub(){
+    const raw=String(byId("gdSandboxClub")?.value||"7i").trim();
+    return raw||"7i";
+  }
+  function gdSandboxCount(kind,id){
+    return Math.max(1,Math.min(60,Math.round(gdSandboxFieldValue(kind,id))));
+  }
+  // Course rows are the deviation values this screen actually plots: aim degrees
+  // and depth as a percentage of carry, both relative to the bubble that was set.
+  function gdSandboxGenerateCourse(){
+    const club=gdSandboxClub();
+    const carry=gdSandboxFieldValue("course","gdSandboxCourseCarry");
+    const lines=[];
+    for(let i=0;i<gdSandboxCount("course","gdSandboxCourseCount");i++){
+      const offset=gdSandboxBetween(gdSandboxFieldValue("course","gdSandboxCourseOffsetMin"),gdSandboxFieldValue("course","gdSandboxCourseOffsetMax"),2);
+      const depth=gdSandboxBetween(gdSandboxFieldValue("course","gdSandboxCourseDepthMin"),gdSandboxFieldValue("course","gdSandboxCourseDepthMax"),1);
+      lines.push(`${club},${carry},${offset},${depth}`);
+    }
+    const box=byId("gdSandboxCourseRows");
+    if(box)box.value=`club,carry_m,aim_deg,depth_pct\n${lines.join("\n")}`;
+    return false;
+  }
+  function gdSandboxParseCourseRows(text){
+    return String(text||"").split(/\r?\n/).map(line=>line.trim()).filter(Boolean).filter(line=>!/^club\s*,/i.test(line)).map(line=>{
+      const cells=line.split(",").map(cell=>cell.trim());
+      const carry=Number(cells[1]),aim=Number(cells[2]),depth=Number(cells[3]);
+      if(!cells[0]||!Number.isFinite(carry)||carry<=0||!Number.isFinite(aim)||!Number.isFinite(depth))return null;
+      return {club:cells[0],carryM:carry,aimDeg:aim,depthPct:depth};
+    }).filter(Boolean);
+  }
+  // The bubble each sandbox shot was "played with". Uses the real My Bubble when
+  // there is one so fitRatio has something honest to compare against, and a plain
+  // stated default otherwise - never a silently invented shape.
+  function gdSandboxPlannedBubbleYards(carryM){
+    const source=safe(()=>gdMyBubbleHubSource(gdBubbleDataContext(),null,gdStatsCurrentModelOffsetDeg()),null);
+    const carry=Number(source?.baseDistanceM);
+    const width=Number(source?.bubbleWidthM);
+    const depth=Number(source?.bubbleDepthM);
+    const usable=Number.isFinite(carry)&&carry>0&&Number.isFinite(width)&&width>0&&Number.isFinite(depth)&&depth>0;
+    const scale=usable?carryM/carry:1;
+    const widthM=usable?width*scale:carryM*.148;
+    const depthM=usable?depth*scale:carryM*.195;
+    return {widthYards:widthM*1.0936132983,lengthYards:depthM*1.0936132983,fromMyBubble:usable};
+  }
+  function gdSandboxInjectCourse(){
+    const api=safe(()=>window.GolfDaddyShotEvents||window.GolfDaddy?.modules?.shotEvents,null);
+    if(!api||typeof api.replaceScopedStore!=="function"){
+      safe(()=>toast("Shot events module is not ready"));
+      return false;
+    }
+    const rows=gdSandboxParseCourseRows(byId("gdSandboxCourseRows")?.value);
+    if(!rows.length){
+      safe(()=>toast("No usable sandbox rows - expected club,carry_m,aim_deg,depth_pct"));
+      return false;
+    }
+    const store=safe(()=>api.getScopedStore?.()||api.getStore?.(),null)||{ballEvents:[],plannedShots:[],outcomes:[]};
+    const plannedShots=Array.isArray(store.plannedShots)?store.plannedShots.slice():[];
+    const outcomes=Array.isArray(store.outcomes)?store.outcomes.slice():[];
+    const stamp=Date.now();
+    const iso=new Date().toISOString();
+    const roundId=`round-sandbox-${iso.slice(0,10)}`;
+    rows.forEach((row,index)=>{
+      const expectedYards=row.carryM*1.0936132983;
+      const bubble=gdSandboxPlannedBubbleYards(row.carryM);
+      // Same convention as a real outcome: errors measured from the bubble
+      // centre, positive lateral = right, positive forward = long.
+      const lateralYards=Math.tan(row.aimDeg*Math.PI/180)*expectedYards;
+      const depthYards=expectedYards*(row.depthPct/100);
+      const shotId=`sandbox-shot-${stamp}-${index}`;
+      const outcomeId=`sandbox-outcome-${stamp}-${index}`;
+      plannedShots.push({
+        shotId,
+        roundId,
+        holeId:`hole-${(index%18)+1}`,
+        originEventId:null,
+        origin:{lat:0,lng:0},
+        plannedBubble:{centerLat:0,centerLng:0,orientationDeg:0,lengthYards:Number(bubble.lengthYards.toFixed(1)),widthYards:Number(bubble.widthYards.toFixed(1)),shape:"oval"},
+        club:row.club,
+        expectedDistanceYards:Number(expectedYards.toFixed(1)),
+        renderKey:`sandbox:${shotId}`,
+        createdAt:iso,
+        pairedOutcomeId:outcomeId
+      });
+      outcomes.push({
+        outcomeId,
+        shotId,
+        resultEventId:null,
+        pairedConfidence:1,
+        insideBubble:Math.abs(lateralYards)<=bubble.widthYards/2&&Math.abs(depthYards)<=bubble.lengthYards/2,
+        relativeResult:"sandbox",
+        lateralErrorYards:Number(lateralYards.toFixed(1)),
+        distanceErrorYards:Number(depthYards.toFixed(1)),
+        gpsAccuracyM:null,
+        sourceConfidence:"sandbox",
+        computedAt:iso
+      });
+    });
+    api.replaceScopedStore({version:1,ballEvents:Array.isArray(store.ballEvents)?store.ballEvents:[],plannedShots,outcomes});
+    safe(()=>gdRefreshCourseDataSurfaces());
+    safe(()=>gdRenderCourseDataSurfaceFallback());
+    safe(()=>gdRenderCourseDataAdminPanel());
+    safe(()=>toast(`${rows.length} sandbox course shots added`));
+    return false;
+  }
+  // Practice rows are emitted in the app's own native paste format - the header
+  // is gdNativePracticeSample()'s, so this exercises the real parser.
+  function gdSandboxGeneratePractice(){
+    const club=gdSandboxClub();
+    const carry=gdSandboxFieldValue("practice","gdSandboxPracticeCarry");
+    const spread=gdSandboxFieldValue("practice","gdSandboxPracticeCarrySpread");
+    const offline=gdSandboxFieldValue("practice","gdSandboxPracticeOffline");
+    const lines=["club,carry,total,offline,face,path,start"];
+    for(let i=0;i<gdSandboxCount("practice","gdSandboxPracticeCount");i++){
+      const carryYards=gdSandboxBetween(carry-spread,carry+spread,1)*1.0936132983;
+      const rollYards=gdSandboxBetween(4,11,1);
+      lines.push([
+        club,
+        carryYards.toFixed(1),
+        (carryYards+rollYards).toFixed(1),
+        gdSandboxBetween(-offline,offline,1).toFixed(1),
+        gdSandboxBetween(-2.5,2.5,1).toFixed(1),
+        gdSandboxBetween(-4,4,1).toFixed(1),
+        gdSandboxBetween(-2,2,1).toFixed(1)
+      ].join(","));
+    }
+    const box=byId("gdSandboxPracticeRows");
+    if(box)box.value=lines.join("\n");
+    return false;
+  }
+  function gdSandboxSendPractice(){
+    const text=byId("gdSandboxPracticeRows")?.value||"";
+    if(!text.trim()){
+      safe(()=>toast("Generate practice rows first"));
+      return false;
+    }
+    safe(()=>gdOpenNativePracticeDrawer());
+    const target=byId("gdNativePracticeImportText");
+    if(!target){
+      safe(()=>toast("Open Practice Data once so the import lane exists, then retry"));
+      return false;
+    }
+    target.value=text;
+    safe(()=>gdNativePracticePasteChanged(target));
+    safe(()=>gdParseNativePracticeImport());
+    return false;
+  }
+  function gdSandboxFieldHTML(kind,field){
+    return `<label>${gdEscapeHTML(field.label)}<input id="${field.id}" type="number" value="${field.value}" min="${field.min}" max="${field.max}" step="${field.step}"></label>`;
+  }
+  function gdRenderSandboxGeneratorHTML(){
+    const courseFields=GD_SANDBOX_FIELDS.course.map(field=>gdSandboxFieldHTML("course",field)).join("");
+    const practiceFields=GD_SANDBOX_FIELDS.practice.map(field=>gdSandboxFieldHTML("practice",field)).join("");
+    return `<div class="gdSandboxPanel">
+      <div class="gdSandboxHead"><div><strong>Sandbox data generator</strong><span>Randomise a batch, edit it by hand, then push it through the real intake. Writes to live data - use Clear above to remove.</span></div></div>
+      <label class="gdSandboxClubRow">Club<input id="gdSandboxClub" type="text" value="7i" spellcheck="false"></label>
+      <div class="gdSandboxSection">
+        <div class="gdSandboxSectionHead"><strong>Course shots</strong><span>Aim ° and depth % relative to the bubble that was set.</span></div>
+        <div class="gdSandboxGrid">${courseFields}</div>
+        <div class="gdSandboxActions"><button type="button" onclick="return gdSandboxGenerateCourse()">Randomise</button><button type="button" onclick="return gdSandboxInjectCourse()">Add to course data</button></div>
+        <textarea id="gdSandboxCourseRows" rows="8" spellcheck="false" placeholder="club,carry_m,aim_deg,depth_pct"></textarea>
+      </div>
+      <div class="gdSandboxSection">
+        <div class="gdSandboxSectionHead"><strong>Practice shots</strong><span>Native paste format - goes through the same parser as a real launch monitor export.</span></div>
+        <div class="gdSandboxGrid">${practiceFields}</div>
+        <div class="gdSandboxActions"><button type="button" onclick="return gdSandboxGeneratePractice()">Randomise</button><button type="button" onclick="return gdSandboxSendPractice()">Send to practice import</button></div>
+        <textarea id="gdSandboxPracticeRows" rows="8" spellcheck="false" placeholder="club,carry,total,offline,face,path,start"></textarea>
+      </div>
+    </div>`;
+  }
   function gdRenderCourseDataAdminPanel(){
     const root=byId("gdCourseDataAdminPanel");
     if(!root)return;
@@ -4883,7 +5101,7 @@
       const action=canManage&&shotId?`<button type="button" onclick="event.stopPropagation();gdDeleteCourseShot('${escapedId}')">Delete</button>`:`<span class="gdShotAdminBadge">Locked</span>`;
       return `<div class="gdShotAdminRow"><div><strong>${gdEscapeHTML(record.club||"Unknown")} · ${Number(record.actualDistanceM||0).toFixed(0)}m</strong><span>${record.counted?"Counted":"Filtered"} · ${gdOffsetLabel(record.normalizedDeg||0)} · ${gdEscapeHTML(record.holeId||record.roundId||"course shot")}</span></div>${action}</div>`;
     }).join("");
-    root.innerHTML=rows?`<div class="gdShotAdminHead"><div><strong>Course Data admin</strong><span>Permission-gated management lives here, away from the normal shot view.</span></div><div class="gdShotAdminBadge">${badge}</div></div>${gdRenderCourseDataUploadHTML()}${gdRenderCourseDataTuningHTML()}<div class="gdShotAdminList">${rows}</div>`:gdCourseDataAdminFallbackHTML();
+    root.innerHTML=rows?`<div class="gdShotAdminHead"><div><strong>Course Data admin</strong><span>Permission-gated management lives here, away from the normal shot view.</span></div><div class="gdShotAdminBadge">${badge}</div></div>${gdRenderCourseDataUploadHTML()}${gdRenderCourseDataTuningHTML()}${gdRenderSandboxGeneratorHTML()}<div class="gdShotAdminList">${rows}</div>`:gdCourseDataAdminFallbackHTML();
     gdBindCourseDataTuningControls(root);
   }
   function gdSetCourseDataTab(tab, forceOpen){
@@ -6972,6 +7190,11 @@
       gdOpenPracticeData:openPracticeData,
       gdSetCourseDataTab:gdSetCourseDataTab,
       gdCourseDataSurfaceSvg:gdCourseDataSurfaceSvg,
+      // Inline onclick handlers in the admin panel need these on window.
+      gdSandboxGenerateCourse:gdSandboxGenerateCourse,
+      gdSandboxInjectCourse:gdSandboxInjectCourse,
+      gdSandboxGeneratePractice:gdSandboxGeneratePractice,
+      gdSandboxSendPractice:gdSandboxSendPractice,
       // gd-app-core's gdCourseBubbleValueLabel guards on `typeof
       // gdCourseBubbleSource === "function"`, which was always false while this
       // stayed inside the IIFE - so the Course Bubble value read "Bubble not

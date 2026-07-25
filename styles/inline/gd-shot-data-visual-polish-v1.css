@@ -4292,3 +4292,23 @@
 	    grid-template-columns:28px minmax(50px,.8fr) minmax(56px,1fr) minmax(56px,1fr)!important;
 	  }
 	}
+
+/* Sandbox data generator (Course Data admin). Randomise a batch, hand-edit it,
+   then push it through the real intake. Styled to sit with the other admin
+   panels rather than announce itself. */
+.gdSandboxPanel{display:grid;gap:10px;margin:0 0 8px;border-radius:14px;border:1px dashed rgba(255,210,135,.28);background:rgba(255,210,135,.035);padding:11px}
+.gdSandboxHead strong{display:block;color:#fff;font-size:13px;font-weight:950;line-height:1.1}
+.gdSandboxHead span{display:block;margin-top:3px;color:rgba(255,255,255,.55);font-size:10.5px;font-weight:780;line-height:1.3}
+.gdSandboxSection{display:grid;gap:8px;border-radius:12px;background:rgba(0,0,0,.18);border:1px solid rgba(255,255,255,.06);padding:9px}
+.gdSandboxSectionHead strong{display:block;color:#fff;font-size:12px;font-weight:950}
+.gdSandboxSectionHead span{display:block;margin-top:2px;color:rgba(255,255,255,.5);font-size:10px;font-weight:780;line-height:1.25}
+.gdSandboxGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(92px,1fr));gap:6px}
+.gdSandboxPanel label{display:grid;gap:3px;color:rgba(255,255,255,.6);font-size:9.5px;font-weight:900;text-transform:uppercase;letter-spacing:.02em}
+.gdSandboxPanel input{border-radius:10px;border:1px solid rgba(255,255,255,.1);background:rgba(0,0,0,.3);padding:7px 8px;color:#fff;font-size:12px;font-weight:850;width:100%}
+.gdSandboxClubRow{max-width:160px}
+.gdSandboxActions{display:flex;flex-wrap:wrap;gap:6px}
+.gdSandboxActions button{flex:1 1 auto;border-radius:11px!important;padding:8px 10px!important;background:rgba(255,210,135,.14)!important;border:1px solid rgba(255,210,135,.3)!important;color:#fff!important;font-size:11px!important;font-weight:900!important}
+.gdSandboxActions button+button{background:rgba(120,235,180,.14)!important;border-color:rgba(120,235,180,.3)!important}
+.gdSandboxPanel textarea{border-radius:11px;border:1px solid rgba(255,255,255,.1);background:rgba(0,0,0,.32);padding:8px;color:rgba(255,255,255,.9);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;line-height:1.45;width:100%;resize:vertical}
+#statsPanel.open .gdSandboxPanel{padding:9px;gap:8px}
+#statsPanel.open .gdSandboxPanel textarea{font-size:10px}

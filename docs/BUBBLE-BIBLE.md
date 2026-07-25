@@ -244,6 +244,29 @@ wrong for any other consumer.
 
 ---
 
+## 4a. Sandbox data generator
+
+Lives in the Course Data admin panel (coach/admin gated). Randomise a batch, edit it
+by hand, then submit - the editable step is the point, so a specific case can be
+reproduced exactly instead of only sampled.
+
+Neither generator bypasses the real intake:
+
+| | feeds | via |
+|---|---|---|
+| Course | `plannedShots` + `outcomes` | `replaceScopedStore`, same shapes `computeShotOutcome` produces from real GPS |
+| Practice | native CSV | `gdParseNativePracticeImport()`, the exact path a launch-monitor paste takes |
+
+Course rows are `club,carry_m,aim_deg,depth_pct` - the same deviation values the
+course chart plots. Practice rows use the header from `gdNativePracticeSample()`.
+
+**No sandbox flag, by choice.** Injected shots are written into the live store and are
+indistinguishable from real ones. Clear (Import panel) is the only way back. If this
+ever needs to co-exist with real data, the store is already player-scoped - a
+dedicated sandbox player id would partition it with no flag logic.
+
+---
+
 ## 5. SUPERSEDED — the "tolerance cost" idea
 
 Kept as a record of a decision, not as a plan.
