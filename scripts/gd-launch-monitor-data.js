@@ -310,7 +310,12 @@
       type === 'photo-ocr-digitised-table' ||
       type === 'clarity-table-ocr' ||
       type === 'screenshot' ||
-      type === 'generated-demo'
+      type === 'generated-demo' ||
+      // Bridged from the native practice store (email attachment or pasted CSV).
+      // Native rows are real practice evidence; they just arrive as a table
+      // rather than a photo.
+      type === 'email-csv' ||
+      type === 'native-csv'
     ) return 'practice_evidence';
     return 'raw_import';
   }

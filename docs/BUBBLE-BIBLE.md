@@ -261,24 +261,43 @@ Course rows are `club,carry_m,aim_deg,depth_pct` - the same deviation values the
 course chart plots. Practice rows are `club,carry_m,total_m,offline_m,face,path,start`
 in METRES, the launch-monitor store's own unit.
 
-### Why practice does NOT use the native CSV paste path
+### The native -> practice-engine bridge — FIXED
 
-It was tried and it does not work, for a reason worth recording:
+Two practice stores exist and only one is read by the engine:
 
-**Native practice imports never reach the practice graph.** `saveNativePracticeShots`
-writes to the NATIVE store (`gd_native_practice_shot_data_v1`), but the practice graph,
-cluster analysis and Practice Bubble all read the LAUNCH-MONITOR store
-(`gd_launch_monitor_data_v1`). Nothing bridges the two:
+| store | key | who reads it |
+|---|---|---|
+| native | `gd_native_practice_shot_data_v1` | the Shot Library |
+| launch monitor | `gd_launch_monitor_data_v1` | **the graph, cluster analysis, Practice Bubble** |
+
+`saveNativePracticeShots` writes to the native store only, and nothing bridged the two.
+So every native import - **including the email intake, which is the only live path** -
+was stored, listed, reported as saved, and never reached anything the player sees:
 
 - after a successful native save: native store 14 shots, launch-monitor store **0**
 - `gdPracticeDisplayAnalysis()` -> `accepted: 0`, `needs_more_data`
-- `buildPracticeGateInput` has **no consumer anywhere in the repo** - it is called once
-  inside the save purely to emit a debug checkpoint
-- `gd-launch-monitor-data.js` contains zero references to the native module
+- `buildPracticeGateInput` had **no consumer anywhere in the repo**
+- `gd-launch-monitor-data.js` had zero references to the native module
 
-The save's own message admits it: *"ready for the Practice Shot Data Gate. No Practice
-Bubble was generated."* The handoff was designed and never wired. Until it is, a pasted
-CSV cannot influence anything a player sees.
+Email intake shares this exactly: `gdPracticeLoadEmailBatch` builds the same
+`gdNativePracticeImportPreview` object that `gdSaveNativePracticeImport` consumes.
+
+**Now wired.** `gdBridgeNativePracticeToLaunchMonitor` runs after a successful save and
+pushes the stored rows through `importCapture()` with `inputType` `email-csv` or
+`native-csv` (both added to `captureDisplayLane`'s practice_evidence list). The SAME
+`importBatchId`/`sessionId` are reused, so one delete clears both stores.
+
+Verified through the real paste/save path: native +6, launch monitor 0 -> 6, display
+0 -> 6, engine `accepted: 0` -> **6, 1 cluster**.
+
+**Values pass through UNCONVERTED.** Neither store does any unit handling, so a
+conversion here would be guessing at the source's units.
+
+**A missing metric must never become 0.** `Number(null)` is `0` and `Number.isFinite(0)`
+is true, so a bare finite check writes a fabricated zero. That shipped briefly in the
+bridge and produced `faceToPathDeg: 0` - a dead-straight strike that passes the delivery
+gate and suppresses `normalizeShot`'s designed `faceAngle - clubPath` fallback. Guard
+`null`/`undefined`/`""` explicitly before the finite check.
 
 Also note `gdParseNativePracticeImport()` only builds a PREVIEW
 (`status:"ready_to_save"`, `dataSaved:false`); `gdSaveNativePracticeImport()` is a

@@ -1885,6 +1885,67 @@
     }
     return false;
   }
+  // Bridges saved native practice rows into the launch-monitor store.
+  //
+  // Why this has to exist: saveNativePracticeShots writes to the NATIVE store,
+  // but the practice graph, the cluster analysis and the Practice Bubble all read
+  // the LAUNCH-MONITOR store, and nothing else connects the two. Without this an
+  // emailed or pasted batch is stored, listed in the library, reported as saved -
+  // and never reaches anything the player actually sees. The save message's
+  // "ready for the Practice Shot Data Gate" handoff was designed but never wired.
+  //
+  // Values are passed through UNCONVERTED. Neither store does any unit handling,
+  // so inventing a conversion here would be guessing at the source's units.
+  //
+  // The same importBatchId/sessionId are reused on purpose, so one delete clears
+  // both stores (gdPracticeDeleteImports calls both APIs with the same ids).
+  function gdBridgeNativePracticeToLaunchMonitor(preview,api){
+    const lm=window.GolfDaddyLaunchMonitorData;
+    if(!lm||typeof lm.importCapture!=="function"||!preview)return null;
+    const importBatchId=String(preview.batch?.importBatchId||"").trim();
+    const sessionId=String(preview.session?.sessionId||"").trim();
+    const stored=typeof api?.loadNativePracticeShots==="function"
+      ? api.loadNativePracticeShots(sessionId?{sessionId}:{}).filter(row=>!importBatchId||row.importBatchId===importBatchId)
+      : (preview.rows||[]).filter(row=>!row.errors?.length);
+    if(!stored.length)return null;
+    // A MISSING metric must not become 0. Number(null) is 0 and Number.isFinite(0)
+    // is true, so a bare finite check silently turns "we don't know" into a hard
+    // zero - a fabricated dead-straight face-to-path that passes the delivery gate
+    // and suppresses normalizeShot's designed faceAngle-minus-clubPath fallback.
+    const metric=(candidateMetric,rawLabel,value)=>{
+      if(value===null||value===undefined||value==="")return [];
+      const number=Number(value);
+      return Number.isFinite(number)?[{candidateMetric,rawLabel,value:number,confidence:1}]:[];
+    };
+    const clubGroups=stored.map(row=>({
+      candidateClub:row.club,
+      originClubLabel:row.club,
+      timestamp:row.createdAt||"",
+      metrics:[].concat(
+        metric("carryDistance","Carry",row.carryDistance),
+        metric("totalDistance","Total",row.totalDistance),
+        metric("offline","Offline",row.offlineDistance),
+        metric("faceAngle","Face Angle",row.faceAngle),
+        metric("clubPath","Club Path",row.pathAngle),
+        metric("faceToPath","Face To Path",row.faceToPath),
+        metric("startDirection","Start Direction",row.startDirection),
+        metric("spinAxis","Spin Axis",row.spinAxis),
+        metric("totalSpin","Total Spin",row.totalSpin),
+        metric("launch","Launch",row.launchAngle),
+        metric("ballSpeed","Ball Speed",row.ballSpeed),
+        metric("clubSpeed","Club Speed",row.clubSpeed)
+      )
+    }));
+    const sourceType=String(preview.batch?.sourceType||"").toLowerCase();
+    return lm.importCapture({
+      importBatchId,
+      sessionId,
+      label:preview.batch?.sourceName||"Practice import",
+      inputType:sourceType.includes("email")?"email-csv":"native-csv",
+      clubGroups,
+      rawTextBlocks:[]
+    });
+  }
   function gdSaveNativePracticeImport(){
     const api=gdNativePracticeApi();
     if(!api||typeof api.saveNativePracticeShots!=="function"){
@@ -1942,6 +2003,13 @@
       if(gate){
         gdPracticeDebugCheckpoint("gate_handoff","success",{outputSummary:`Gate-ready accepted ${gate.counts?.gateReady||0}`,counts:gate.counts||{},raw:gate});
       }
+      // Past the gate: put the saved rows where the practice engine can see them.
+      const bridged=safe(()=>gdBridgeNativePracticeToLaunchMonitor(gdNativePracticeImportPreview,api),null);
+      const bridgedCount=Array.isArray(bridged?.shots)?bridged.shots.length:0;
+      gdPracticeDebugCheckpoint("practice_engine_handoff",bridgedCount?"success":"warning",{
+        outputSummary:bridgedCount?`${bridgedCount} row${bridgedCount===1?"":"s"} handed to the practice engine`:"Nothing reached the practice engine",
+        counts:{bridged:bridgedCount}
+      });
       gdPracticeDebugFinish("success",{dataSaved:(Number(result?.savedCount)||0)>0,errorMessage:""});
       gdNativePracticeFeedbackPatch({
         status:"saved",
@@ -1952,10 +2020,13 @@
         storageKey:api.storageKey||"gd_native_practice_shot_data_v1",
         warnings:Number(result?.rejectedCount)?[`${Number(result.rejectedCount)} invalid row${Number(result.rejectedCount)===1?"":"s"} not saved`]:[],
         errors:[],
-        nextStep:"Saved native rows are ready for the Practice Shot Data Gate. No Practice Bubble was generated."
+        nextStep:bridgedCount
+          ?"Saved rows are in practice data and visible to the graph. No Practice Bubble was generated - use Generate Bubble when ready."
+          :"Saved native rows are stored, but nothing reached the practice engine. Check the practice engine handoff."
       });
       gdNativePracticeImportPreview=null;
       gdRenderNativePracticeImportLane();
+      safe(()=>renderPracticeData(true));
       gdLmToast(`Saved ${Number(result?.savedCount)||0} native practice row${Number(result?.savedCount)===1?"":"s"}`);
     }catch(e){
       console.warn("[GolfDaddy] native practice save failed",e);
@@ -5072,7 +5143,13 @@
       safe(()=>toast("Launch monitor module is not ready"));
       return false;
     }
-    const metric=(candidateMetric,rawLabel,value)=>Number.isFinite(Number(value))?[{candidateMetric,rawLabel,value:Number(value),confidence:1}]:[];
+    // Missing must stay missing - see gdBridgeNativePracticeToLaunchMonitor:
+    // Number(null) is 0, so a bare finite check invents a zero.
+    const metric=(candidateMetric,rawLabel,value)=>{
+      if(value===null||value===undefined||value==="")return [];
+      const number=Number(value);
+      return Number.isFinite(number)?[{candidateMetric,rawLabel,value:number,confidence:1}]:[];
+    };
     const clubGroups=rows.map(row=>({
       candidateClub:row.club,
       originClubLabel:row.club,
