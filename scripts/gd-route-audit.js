@@ -4025,11 +4025,26 @@
 	      {kind:"course",label:"Course Bubble",offset:Number(ctx.course),source:courseSource,stroke:"#37f28d",fillOpacity:".13",strokeOpacity:".84"},
 	      {kind:"practice",label:"Practice Bubble",offset:Number(ctx.practice),source:practiceSource,stroke:"#62d2ff",fillOpacity:".13",strokeOpacity:".84"}
 	    ];
-	    // Anchor: My Bubble's own current distance, tied to the bag - never a
-	    // generic/display club. Course and Practice bubbles are positioned
-	    // relative to this, not forced onto a shared display club.
-	    const anchorSize=gdCompareBubbleSize(currentSource);
-	    const anchorDistanceM=Number(anchorSize?.baseDistanceM||currentSource?.baseDistanceM||currentSource?.expectedDistanceM||currentSource?.meanExpectedM)||null;
+	    // Anchor for the relative-% depth axis. Prefer My Bubble's own distance,
+	    // tied to the bag - never a generic/display club.
+	    //
+	    // But do NOT require it. Comparison shows whatever the home screens are
+	    // already showing, so it must not be gated on adoption: with a Practice and
+	    // a Course bubble but no My Bubble yet, both still belong here. This used to
+	    // read the anchor from My Bubble alone, so a missing My Bubble left the
+	    // anchor null and gdCompareBubbleParts dropped EVERY bubble - the screen sat
+	    // empty waiting for an adoption that has nothing to do with it.
+	    const anchorFor=source=>{
+	      if(!source)return null;
+	      const size=gdCompareBubbleSize(source);
+	      const distance=Number(size?.baseDistanceM||source.baseDistanceM||source.expectedDistanceM||source.meanExpectedM);
+	      return Number.isFinite(distance)&&distance>0?distance:null;
+	    };
+	    const anchorSource=[currentSource,practiceSource,courseSource].find(source=>anchorFor(source))||null;
+	    const anchorDistanceM=anchorFor(anchorSource);
+	    const anchorLabel=!anchorSource?""
+	      :anchorSource===currentSource?"My Bubble"
+	      :anchorSource===practiceSource?"Practice Bubble":"Course Bubble";
 	    const bubblePartsByItem=items.map(item=>gdCompareBubbleParts(item,anchorDistanceM));
 	    const allParts=bubblePartsByItem.flat();
 	    // Same plot box as Practice's chart (gd-route-audit.js practiceSvg) so
@@ -4037,7 +4052,7 @@
 	    const plot=gdPracticeNormalisedPlotLayout({width,height,plotLeft:38,plotRight:458,plotTop:82,plotBottom:224});
 	    const bubbleSvg=items.map((item,i)=>gdCompareBubbleLayerSvg(item,bubblePartsByItem[i],plot)).join("");
 	    return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="My Bubble, Course and Practice bubble comparison">
-	      ${gdPracticeNormalisedBackdropSvg(plot,gdShotDataGraphTitle("Comparison"),{subtitle:"Distance vs My Bubble (%) \u00b7 aim angle (\u00b0)"})}
+	      ${gdPracticeNormalisedBackdropSvg(plot,gdShotDataGraphTitle("Comparison"),{subtitle:`Distance vs ${anchorLabel||"My Bubble"} (%) \u00b7 aim angle (\u00b0)`})}
 	      ${bubbleSvg}
 	    </svg>`;
 	  }
