@@ -6606,30 +6606,43 @@
 		  // Every destructive action gated on it therefore did nothing at all - no
 		  // toast, no error, no change - which is exactly what "delete isn't working"
 		  // turned out to be. Do not reintroduce window.confirm for these paths.
-		  function gdConfirmAction(options,onConfirm){
+		  // Promise form, for await-style call sites:
+		  //   if(!await gdConfirmDialog({...}))return false;   // drop-in for confirm()
+		  // Resolves false if there is no DOM to draw into, so a missing dialog can
+		  // never silently approve a destructive action.
+		  function gdConfirmDialog(options){
 		    const opts=typeof options==="string"?{message:options}:(options||{});
-		    const run=()=>{try{if(typeof onConfirm==="function")onConfirm();}catch(e){console.warn("[GolfDaddy] confirm action failed",e);}};
-		    if(!document?.body)     {run();return false;}
-		    document.getElementById("gdConfirmOverlay")?.remove();
-		    const overlay=document.createElement("div");
-		    overlay.id="gdConfirmOverlay";
-		    overlay.className="gdConfirmOverlay";
-		    overlay.innerHTML=`<div class="gdConfirmSheet" role="alertdialog" aria-modal="true" aria-label="${gdEscapeHTML(opts.title||"Are you sure?")}">
-		      <strong>${gdEscapeHTML(opts.title||"Are you sure?")}</strong>
-		      <p>${gdEscapeHTML(opts.message||"")}</p>
-		      <div class="gdConfirmActions">
-		        <button type="button" data-gd-confirm="cancel">${gdEscapeHTML(opts.cancelLabel||"Cancel")}</button>
-		        <button type="button" class="danger" data-gd-confirm="ok">${gdEscapeHTML(opts.confirmLabel||"Delete")}</button>
-		      </div>
-		    </div>`;
-		    const close=()=>overlay.remove();
-		    overlay.addEventListener("click",event=>{
-		      if(event.target===overlay)return close();
-		      const action=event.target?.dataset?.gdConfirm;
-		      if(action==="cancel")return close();
-		      if(action==="ok"){close();run();}
+		    return new Promise(resolve=>{
+		      if(!document?.body){resolve(false);return;}
+		      document.getElementById("gdConfirmOverlay")?.remove();
+		      const overlay=document.createElement("div");
+		      overlay.id="gdConfirmOverlay";
+		      overlay.className="gdConfirmOverlay";
+		      overlay.innerHTML=`<div class="gdConfirmSheet" role="alertdialog" aria-modal="true" aria-label="${gdEscapeHTML(opts.title||"Are you sure?")}">
+		        <strong>${gdEscapeHTML(opts.title||"Are you sure?")}</strong>
+		        <p>${gdEscapeHTML(opts.message||"")}</p>
+		        <div class="gdConfirmActions">
+		          <button type="button" data-gd-confirm="cancel">${gdEscapeHTML(opts.cancelLabel||"Cancel")}</button>
+		          <button type="button" class="danger" data-gd-confirm="ok">${gdEscapeHTML(opts.confirmLabel||"Delete")}</button>
+		        </div>
+		      </div>`;
+		      let settled=false;
+		      const finish=value=>{if(settled)return;settled=true;overlay.remove();resolve(value);};
+		      overlay.addEventListener("click",event=>{
+		        if(event.target===overlay)return finish(false);
+		        const action=event.target?.dataset?.gdConfirm;
+		        if(action==="cancel")return finish(false);
+		        if(action==="ok")return finish(true);
+		      });
+		      document.body.appendChild(overlay);
 		    });
-		    document.body.appendChild(overlay);
+		  }
+		  // Callback form, for onclick handlers that must return false synchronously.
+		  function gdConfirmAction(options,onConfirm){
+		    gdConfirmDialog(options).then(ok=>{
+		      if(!ok||typeof onConfirm!=="function")return;
+		      try{onConfirm();}catch(e){console.warn("[GolfDaddy] confirm action failed",e);}
+		    });
 		    return false;
 		  }
 		  function gdPracticeDeleteImports(importIds){
@@ -7372,9 +7385,10 @@
       gdOpenPracticeData:openPracticeData,
       gdSetCourseDataTab:gdSetCourseDataTab,
       gdCourseDataSurfaceSvg:gdCourseDataSurfaceSvg,
-      // Shared by gd-app-core's destructive actions too - window.confirm is dead
+      // Shared by every destructive action across the app - window.confirm is dead
       // in the embedded webview.
       gdConfirmAction:gdConfirmAction,
+      gdConfirmDialog:gdConfirmDialog,
       // Inline onclick handlers in the admin panel need these on window.
       gdSandboxGenerateCourse:gdSandboxGenerateCourse,
       gdSandboxInjectCourse:gdSandboxInjectCourse,

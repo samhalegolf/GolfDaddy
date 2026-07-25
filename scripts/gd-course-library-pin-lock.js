@@ -4282,7 +4282,20 @@
 	  function clearCurrentMapperHole(){
 	    cancelMapperCapture();
 	    const h=mapperHole();
-	    if(!window.confirm||window.confirm(`Clear H${h} mapping? This removes green, tee and fairway for this hole only.`)){
+	    // window.confirm returns false instantly in the embedded webview without
+	    // drawing anything, so this clear silently did nothing there.
+	    if(typeof window.gdConfirmDialog==="function"){
+	      window.gdConfirmDialog({
+	        title:`Clear H${h} mapping?`,
+	        message:"Removes green, tee and fairway for this hole only.",
+	        confirmLabel:"Clear hole"
+	      }).then(ok=>{if(ok)clearCurrentMapperHoleConfirmed(h);});
+	      return;
+	    }
+	    if(!window.confirm||window.confirm(`Clear H${h} mapping? This removes green, tee and fairway for this hole only.`))clearCurrentMapperHoleConfirmed(h);
+	  }
+	  function clearCurrentMapperHoleConfirmed(h){
+	    {
 	      const uid=userId(),cid=courseId();
 	      const green=resetUserGreen(uid,cid,h)?1:0;
 	      const tees=deleteCourseObjectsForHole('tee',h,uid,cid);

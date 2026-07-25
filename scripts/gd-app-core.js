@@ -720,7 +720,17 @@ async function gdAdminCourseDbDelete(courseId){
     gdAdminCourseVisualToast("Admin only — sign in as an admin to delete from the database");
     return false;
   }
-  if(!window.confirm(`Permanently delete "${label}" from the Supabase course database?\n\nThis removes the published course map for every user and cannot be undone.`))return false;
+  // window.confirm is silently suppressed in the embedded webview (returns false
+  // instantly, no dialog), so this delete could never run there. In-app dialog
+  // instead; the confirm fallback only applies if the dialog owner has not loaded.
+  const confirmedDbDelete=typeof window.gdConfirmDialog==="function"
+    ? await window.gdConfirmDialog({
+        title:`Permanently delete "${label}"?`,
+        message:"This removes the published course map from the database for every user and cannot be undone.",
+        confirmLabel:"Delete forever"
+      })
+    : window.confirm(`Permanently delete "${label}" from the Supabase course database?\n\nThis removes the published course map for every user and cannot be undone.`);
+  if(!confirmedDbDelete)return false;
   let result=null;
   try{
     gdAdminCourseVisualToast(`Deleting ${label} from the database…`);

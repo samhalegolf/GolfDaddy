@@ -133,9 +133,23 @@
         var data = validateBackup(JSON.parse(String(reader.result || "{}")));
         var replace = !!document.getElementById("clarityBackupReplace")?.checked;
         var keys = Object.keys(data.localStorage || {}).length + Object.keys(data.sessionStorage || {}).length;
-        var ok = window.confirm("Import " + keys + " Clarity keys from " + (data.exportedAt || "backup") + "?");
-        if(!ok) return setStatus("Import cancelled.", "warn");
-        importBackup(data, {replace: replace});
+        // window.confirm returns false instantly in the embedded webview without
+        // showing anything, which made importing a backup impossible there.
+        var ask = typeof window.gdConfirmDialog === "function"
+          ? window.gdConfirmDialog({
+              title: "Import " + keys + " Clarity keys?",
+              message: "From " + (data.exportedAt || "backup") + ". " + (replace ? "Replaces existing keys." : "Merges with existing keys."),
+              confirmLabel: "Import"
+            })
+          : Promise.resolve(window.confirm("Import " + keys + " Clarity keys from " + (data.exportedAt || "backup") + "?"));
+        ask.then(function(ok){
+          if(!ok) return setStatus("Import cancelled.", "warn");
+          try{
+            importBackup(data, {replace: replace});
+          }catch(error){
+            setStatus(error && error.message ? error.message : "Import failed.", "bad");
+          }
+        });
       }catch(error){
         setStatus(error && error.message ? error.message : "Import failed.", "bad");
       }
