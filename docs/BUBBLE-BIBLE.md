@@ -255,10 +255,34 @@ Neither generator bypasses the real intake:
 | | feeds | via |
 |---|---|---|
 | Course | `plannedShots` + `outcomes` | `replaceScopedStore`, same shapes `computeShotOutcome` produces from real GPS |
-| Practice | native CSV | `gdParseNativePracticeImport()`, the exact path a launch-monitor paste takes |
+| Practice | `sessions` + `captures` + `shots` | `GolfDaddyLaunchMonitorData.importCapture()`, AFTER the gate, with `inputType:"generated-demo"` (an existing practice_evidence lane) |
 
 Course rows are `club,carry_m,aim_deg,depth_pct` - the same deviation values the
-course chart plots. Practice rows use the header from `gdNativePracticeSample()`.
+course chart plots. Practice rows are `club,carry_m,total_m,offline_m,face,path,start`
+in METRES, the launch-monitor store's own unit.
+
+### Why practice does NOT use the native CSV paste path
+
+It was tried and it does not work, for a reason worth recording:
+
+**Native practice imports never reach the practice graph.** `saveNativePracticeShots`
+writes to the NATIVE store (`gd_native_practice_shot_data_v1`), but the practice graph,
+cluster analysis and Practice Bubble all read the LAUNCH-MONITOR store
+(`gd_launch_monitor_data_v1`). Nothing bridges the two:
+
+- after a successful native save: native store 14 shots, launch-monitor store **0**
+- `gdPracticeDisplayAnalysis()` -> `accepted: 0`, `needs_more_data`
+- `buildPracticeGateInput` has **no consumer anywhere in the repo** - it is called once
+  inside the save purely to emit a debug checkpoint
+- `gd-launch-monitor-data.js` contains zero references to the native module
+
+The save's own message admits it: *"ready for the Practice Shot Data Gate. No Practice
+Bubble was generated."* The handoff was designed and never wired. Until it is, a pasted
+CSV cannot influence anything a player sees.
+
+Also note `gdParseNativePracticeImport()` only builds a PREVIEW
+(`status:"ready_to_save"`, `dataSaved:false`); `gdSaveNativePracticeImport()` is a
+separate call.
 
 **No sandbox flag, by choice.** Injected shots are written into the live store and are
 indistinguishable from real ones. Clear (Import panel) is the only way back. If this

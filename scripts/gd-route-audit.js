@@ -5018,21 +5018,23 @@
     safe(()=>toast(`${rows.length} sandbox course shots added`));
     return false;
   }
-  // Practice rows are emitted in the app's own native paste format - the header
-  // is gdNativePracticeSample()'s, so this exercises the real parser.
+  // Practice rows keep the native paste column order so they stay readable and
+  // hand-editable, but the values are METRES - the launch-monitor store's own
+  // unit - because these go straight into that store rather than through the
+  // yard-based paste parser.
   function gdSandboxGeneratePractice(){
     const club=gdSandboxClub();
     const carry=gdSandboxFieldValue("practice","gdSandboxPracticeCarry");
     const spread=gdSandboxFieldValue("practice","gdSandboxPracticeCarrySpread");
     const offline=gdSandboxFieldValue("practice","gdSandboxPracticeOffline");
-    const lines=["club,carry,total,offline,face,path,start"];
+    const lines=["club,carry_m,total_m,offline_m,face,path,start"];
     for(let i=0;i<gdSandboxCount("practice","gdSandboxPracticeCount");i++){
-      const carryYards=gdSandboxBetween(carry-spread,carry+spread,1)*1.0936132983;
-      const rollYards=gdSandboxBetween(4,11,1);
+      const carryM=gdSandboxBetween(carry-spread,carry+spread,1);
+      const rollM=gdSandboxBetween(3,10,1);
       lines.push([
         club,
-        carryYards.toFixed(1),
-        (carryYards+rollYards).toFixed(1),
+        carryM.toFixed(1),
+        (carryM+rollM).toFixed(1),
         gdSandboxBetween(-offline,offline,1).toFixed(1),
         gdSandboxBetween(-2.5,2.5,1).toFixed(1),
         gdSandboxBetween(-4,4,1).toFixed(1),
@@ -5043,21 +5045,56 @@
     if(box)box.value=lines.join("\n");
     return false;
   }
+  function gdSandboxParsePracticeRows(text){
+    return String(text||"").split(/\r?\n/).map(line=>line.trim()).filter(Boolean).filter(line=>!/^club\s*,/i.test(line)).map(line=>{
+      const cells=line.split(",").map(cell=>cell.trim());
+      const carry=Number(cells[1]);
+      if(!cells[0]||!Number.isFinite(carry)||carry<=0)return null;
+      const num=value=>{const n=Number(value);return Number.isFinite(n)?n:null;};
+      return {club:cells[0],carryM:carry,totalM:num(cells[2]),offlineM:num(cells[3]),faceDeg:num(cells[4]),pathDeg:num(cells[5]),startDeg:num(cells[6])};
+    }).filter(Boolean);
+  }
+  // Writes AFTER THE GATE, straight into the launch-monitor store that the
+  // practice graph and bubble engine actually read, via the module's own
+  // importCapture(). The native CSV paste path is deliberately skipped: it only
+  // reaches the native store, and nothing in the app bridges that to the launch
+  // monitor - so rows imported that way never appear on the practice screen.
+  // inputType "generated-demo" is an existing practice_evidence lane, so these
+  // land in the display store like any reviewed capture.
   function gdSandboxSendPractice(){
-    const text=byId("gdSandboxPracticeRows")?.value||"";
-    if(!text.trim()){
-      safe(()=>toast("Generate practice rows first"));
+    const rows=gdSandboxParsePracticeRows(byId("gdSandboxPracticeRows")?.value);
+    if(!rows.length){
+      safe(()=>toast("No usable practice rows - expected club,carry_m,total_m,offline_m,face,path,start"));
       return false;
     }
-    safe(()=>gdOpenNativePracticeDrawer());
-    const target=byId("gdNativePracticeImportText");
-    if(!target){
-      safe(()=>toast("Open Practice Data once so the import lane exists, then retry"));
+    const lm=window.GolfDaddyLaunchMonitorData;
+    if(!lm||typeof lm.importCapture!=="function"){
+      safe(()=>toast("Launch monitor module is not ready"));
       return false;
     }
-    target.value=text;
-    safe(()=>gdNativePracticePasteChanged(target));
-    safe(()=>gdParseNativePracticeImport());
+    const metric=(candidateMetric,rawLabel,value)=>Number.isFinite(Number(value))?[{candidateMetric,rawLabel,value:Number(value),confidence:1}]:[];
+    const clubGroups=rows.map(row=>({
+      candidateClub:row.club,
+      originClubLabel:row.club,
+      metrics:[].concat(
+        metric("carryDistance","Carry",row.carryM),
+        metric("totalDistance","Total",row.totalM),
+        metric("offline","Offline",row.offlineM),
+        metric("faceAngle","Face Angle",row.faceDeg),
+        metric("clubPath","Club Path",row.pathDeg),
+        metric("startDirection","Start Direction",row.startDeg)
+      )
+    }));
+    const result=lm.importCapture({
+      label:"Sandbox batch",
+      inputType:"generated-demo",
+      clubGroups,
+      rawTextBlocks:["sandbox generated practice batch"]
+    });
+    safe(()=>renderPracticeData(true));
+    safe(()=>{if(typeof window.gdRenderDataHubStatus==="function")window.gdRenderDataHubStatus();});
+    const saved=Array.isArray(result?.shots)?result.shots.length:0;
+    safe(()=>toast(`${saved} sandbox practice shot${saved===1?"":"s"} added`));
     return false;
   }
   function gdSandboxFieldHTML(kind,field){
@@ -5076,10 +5113,10 @@
         <textarea id="gdSandboxCourseRows" rows="8" spellcheck="false" placeholder="club,carry_m,aim_deg,depth_pct"></textarea>
       </div>
       <div class="gdSandboxSection">
-        <div class="gdSandboxSectionHead"><strong>Practice shots</strong><span>Native paste format - goes through the same parser as a real launch monitor export.</span></div>
+        <div class="gdSandboxSectionHead"><strong>Practice shots</strong><span>Metres. Written after the gate, straight into the launch monitor store the practice graph reads.</span></div>
         <div class="gdSandboxGrid">${practiceFields}</div>
-        <div class="gdSandboxActions"><button type="button" onclick="return gdSandboxGeneratePractice()">Randomise</button><button type="button" onclick="return gdSandboxSendPractice()">Send to practice import</button></div>
-        <textarea id="gdSandboxPracticeRows" rows="8" spellcheck="false" placeholder="club,carry,total,offline,face,path,start"></textarea>
+        <div class="gdSandboxActions"><button type="button" onclick="return gdSandboxGeneratePractice()">Randomise</button><button type="button" onclick="return gdSandboxSendPractice()">Add to practice data</button></div>
+        <textarea id="gdSandboxPracticeRows" rows="8" spellcheck="false" placeholder="club,carry_m,total_m,offline_m,face,path,start"></textarea>
       </div>
     </div>`;
   }
@@ -6514,10 +6551,16 @@
 		    ids.forEach(id=>delete gdPracticeImportSelected[id]);
 		    if(!gdPracticeSelectedImportIds().length)gdPracticeImportSelectMode=false;
 		    gdPracticeDebugEnsureRun({sourceName:"Practice import delete",sourceType:"admin"});
-		    gdPracticeDebugCheckpoint("practice_import_deleted","success",{counts:{imports:ids.length,rows:deletedRows},raw:{importIds:ids}});
+		    // Report what ACTUALLY happened. This used to toast
+		    // `deletedImports||ids.length`, so a delete that matched no records still
+		    // said "Deleted 1 practice import" - which is exactly why a broken delete
+		    // looked like a working one.
+		    const deletedNothing=!deletedImports&&!deletedRows;
+		    gdPracticeDebugCheckpoint("practice_import_deleted",deletedNothing?"warning":"success",{counts:{imports:deletedImports,rows:deletedRows,requested:ids.length},raw:{importIds:ids}});
 		    renderPracticeData(true);
 		    if(typeof window.gdRenderDataHubStatus==="function")window.gdRenderDataHubStatus();
-		    gdLmToast(`Deleted ${deletedImports||ids.length} practice import${(deletedImports||ids.length)===1?"":"s"}`);
+		    if(deletedNothing)gdLmToast(`Nothing deleted - no stored rows matched ${ids.length===1?"that import":"those imports"}`);
+		    else gdLmToast(`Deleted ${deletedImports||1} practice import${(deletedImports||1)===1?"":"s"} (${deletedRows} row${deletedRows===1?"":"s"})`);
 		    return false;
 		  }
 		  function gdPracticeDeleteSelectedImports(){
@@ -6814,8 +6857,14 @@
 			      const clubKey=gdPracticeClubKey(club);
 			      groupedByClub[clubKey]=groupedByClub[clubKey]||{club,rows:[],imports:{}};
 			      groupedByClub[clubKey].rows.push(row);
-			      const importId=String(row.importBatchId||row.captureId||row.sessionId||row.timestamp||"unknown").trim()||"unknown";
-			      groupedByClub[clubKey].imports[importId]=groupedByClub[clubKey].imports[importId]||{id:importId,meta:importMeta[importId]||{},rows:[]};
+			      // Both stores match a delete on importBatchId/importId/captureId/sessionId
+			      // and NOTHING else. Grouping may still fall back to timestamp/"unknown" so
+			      // the rows stay visible, but such a group can never be deleted - the id
+			      // matches no record. Track that so the UI can say so instead of firing a
+			      // delete that silently does nothing.
+			      const matchableId=String(row.importBatchId||row.captureId||row.sessionId||"").trim();
+			      const importId=matchableId||String(row.timestamp||"unknown").trim()||"unknown";
+			      groupedByClub[clubKey].imports[importId]=groupedByClub[clubKey].imports[importId]||{id:importId,deletable:!!matchableId,meta:importMeta[importId]||{},rows:[]};
 			      groupedByClub[clubKey].imports[importId].rows.push(row);
 			    });
 			    const clubs=Object.values(groupedByClub).sort((a,b)=>{
@@ -6842,7 +6891,9 @@
 			        const dateLabel=gdPracticeImportDate(meta.timestamp||importRows[0]?.timestamp||"");
 			        const selected=!!gdPracticeImportSelected[importId];
 			        const checkbox=adminOpen&&gdPracticeImportSelectMode?`<label class="gdPracticeEvidenceUploadSelect" onclick="event.stopPropagation()"><input type="checkbox" value="${gdEscapeHTML(importId)}" ${selected?"checked":""} onchange="gdPracticeToggleImportSelection(this)"><span>Select</span></label>`:"";
-			        const importActions=`<button type="button" class="danger gdPracticeDeleteX" title="Delete this import" aria-label="Delete this import" onclick="return gdPracticeDeleteImports(${gdPracticeJsArg(importId)})">&times;</button>`;
+			        const importActions=group.deletable
+			          ?`<button type="button" class="danger gdPracticeDeleteX" title="Delete this import" aria-label="Delete this import" onclick="return gdPracticeDeleteImports(${gdPracticeJsArg(importId)})">&times;</button>`
+			          :`<button type="button" class="danger gdPracticeDeleteX" disabled title="These rows carry no import id, so they cannot be deleted as an import. Use Clear practice library." aria-label="Not deletable - no import id">&times;</button>`;
 			        // Quiet row: just the upload date (club is the section header). Clicking
 			        // the row expands the import's raw data table directly beneath it.
 			        // (Buttons/inputs inside <summary> activate themselves, not the toggle.)
