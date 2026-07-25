@@ -3047,8 +3047,14 @@
 	  // identical bubble renders at an identical shape on every screen. Do NOT
 	  // fit the axes to the plotted rows - that is what made the same bubble look
 	  // stretched on Comparison (bubbles only) vs Practice (bubbles + scatter).
-	  const GD_NORMALISED_DEPTH_MAX=30;  // +/- % of anchor carry
-	  const GD_NORMALISED_ANGLE_MAX=10;  // +/- aim angle, degrees
+	  // THE VIEW WINDOW. These two numbers ARE the zoom: they say how much of the
+	  // world the box shows, and nothing else may change them. Shared by Course,
+	  // Practice and Comparison so the zoom is identical on all three - a bubble
+	  // that looks a given size on one screen looks that size on every screen.
+	  // Shots outside the window clip at the edge on purpose; the view never
+	  // stretches to swallow an outlier.
+	  const GD_NORMALISED_DEPTH_MAX=25;  // +/- % of anchor carry
+	  const GD_NORMALISED_ANGLE_MAX=8;   // +/- aim angle, degrees
 	  // DOWN-THE-LINE IS THE ONLY ORIENTATION. The shot origin sits at the bottom
 	  // centre and the ball travels UP the page, so aim maps to the X axis (right
 	  // miss = right) and distance maps to the Y axis (long = up). This is built
