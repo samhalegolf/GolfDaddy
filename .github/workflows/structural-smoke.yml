@@ -37,6 +37,7 @@ jobs:
           node dev/icon-assets.test.js
           node dev/image-assets.test.js
           node dev/visual-engine-client.test.js
+          node dev/ios-version-stamp.test.js
           node dev/app-permissions-smoke.test.js
           node dev/native-shell-owner.test.js
           node dev/store-billing.test.js
