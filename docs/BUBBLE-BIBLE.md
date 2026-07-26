@@ -317,7 +317,40 @@ wrong for any other consumer.
 
 ---
 
-## 6. Two renderers, one set of numbers — LAW
+## 6. Shape is preset. Data only places it. — LAW
+
+**A bubble's shape and size are NEVER formed from the data dots.** They come from
+rigid presets: the club and the carry, through `gdDeriveBasePatternSize`
+(`carry x GD_CLUB_PATTERN_RATIOS[group] x dispersionMultiplier x geo scale`).
+
+All the cluster-finding logic exists for one purpose: to decide WHERE the bubble
+goes - **offset and distance**. It never decides how big it is.
+
+`calculateBubbleProfile` has said so all along:
+
+> *"Offset places the shot data. Club/carry sizes it."*
+
+This holds on every surface. The GPS bubble needs a degree value and a bag (section
+2); the graph bubbles need the same preset plus the measured placement. Same rule,
+two renderers.
+
+What sizing bubbles from measured spread caused, all of it now fixed:
+
+- the same bubble rendering at three different sizes across three screens
+- a percentile spread with a lopsided sample rendering as a narrow sliver
+- a **0.45 deg fallback radius** masquerading as a measurement (under 3m wide at
+  155m, an 11:1 sliver) - see section 2's note on `gdPracticeBubbleSource`
+- axis re-normalisation (`gdStandardDispersionAxes`) being needed at all to rescue
+  the aspect afterwards. With a preset there is nothing to rescue, so the call is
+  gone from the graph path.
+
+Verified: identical club and distance with measured spreads of 4x5m and 40x50m both
+render at rx 109 / ry 67.2, identical to My Bubble; a fit placed +9m long and 2.2 deg
+left moves to (183.3, 222.7) at the same size.
+
+---
+
+## 6a. Two renderers, one set of numbers — LAW
 
 The graph bubble and the GPS bubble are different RENDERINGS of the same real data.
 
@@ -334,10 +367,9 @@ different sizes across three screens (Course 97.6x60, Practice 107.5x66, Compari
 
 Rules that fall out of this, each of which was a bug first:
 
-- **Real saved dimensions win, and there is NO fallback.** A row with no real shape is
-  not drawn. Where a row genuinely has no shape of its own (practice projection rows
-  are bag/data rows), give it the MEASURED shape - `gdGraphRowWithBubbleShape` scales
-  the practice bubble's own cluster radius/depth to that row's carry. Never invent one.
+- **SUPERSEDED by section 6.** This used to read "real saved dimensions win" - i.e.
+  take width/depth from the saved bubble. Wrong: shape is preset from club + carry,
+  and the saved dimensions are not a size source at all.
 - **The caller's offset wins for the angle.** Rows can carry a stale `offsetDeg`;
   the caller passes the live one for that layer. Preferring the row's drew the bubble
   at the wrong angle, and adopting then staged the real offset, so it visibly jumped.
@@ -345,10 +377,8 @@ Rules that fall out of this, each of which was a bug first:
   `gdMyBubblePresentationMetrics` already normalises and scales; the graph renderer
   normalises again, so feeding its output in sized Practice's My Bubble ~8% larger
   than the same bubble elsewhere. Take only tilt/skew/handedness from it.
-- **Every graph bubble wears the standard shape** (`gdStandardDispersionAxes`):
-  area preserved (so size stays data-driven), aspect forced to the club ratio. Raw
-  percentile spreads have whatever aspect the sample happened to have - that is what
-  rendered the course bubble as a sliver, and a 0.45deg-wide My Bubble at 11:1.
+- **SUPERSEDED by section 6.** Area-preserving normalisation was a workaround for
+  sizing bubbles from measured spread. With a preset there is nothing to normalise.
 - **Tilt uses `gdStandardDispersionTiltDeg`** (club + handedness), governed by the dev
   board's `tiltScale` / `tiltMaxDeg`. NOT the projector's tilt, which is physics tilt
   (the aim offset) plus visual tilt - on a chart the aim is already the bubble's

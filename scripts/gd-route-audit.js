@@ -5478,21 +5478,15 @@
     // Builds a drawable part straight in the deviation frame. centreDepthM /
     // centreAngleDeg are the deviation of the bubble's centre from zero; widthM /
     // depthM are its full extents.
-    function deviationPart(club,reference,centreDepthM,centreAngleDeg,widthM,depthM,opts={}){
+    // widthM/depthM are the PRESET size for the club (gdGraphBubbleDimensions);
+    // centreDepthM/centreAngleDeg are the measured placement. No axis
+    // re-normalisation: the preset already is the standard shape, so putting it
+    // through gdStandardDispersionAxes would only round-trip it.
+    function deviationPart(club,reference,centreDepthM,centreAngleDeg,widthM,depthM){
       if(!Number.isFinite(reference)||reference<=0)return null;
       if(!Number.isFinite(widthM)||widthM<=0||!Number.isFinite(depthM)||depthM<=0)return null;
-      let lateralRadius=widthM/2;
-      let depthRadius=depthM/2;
-      // A bubble always wears the SAME generic shape - only its size and offset
-      // come from the data. Raw percentile spreads have whatever aspect the
-      // sample happened to have, which is what made the course bubble render as a
-      // narrow sliver. gdStandardDispersionAxes keeps the AREA (so size stays
-      // honestly data-driven) and forces the club's standard depth:width ratio.
-      if(opts.standardShape&&typeof gdStandardDispersionAxes==="function"){
-        const axes=safe(()=>gdStandardDispersionAxes(club,lateralRadius,depthRadius),null);
-        if(Number.isFinite(Number(axes?.lateralRadiusM))&&Number(axes.lateralRadiusM)>0)lateralRadius=Number(axes.lateralRadiusM);
-        if(Number.isFinite(Number(axes?.depthRadiusM))&&Number(axes.depthRadiusM)>0)depthRadius=Number(axes.depthRadiusM);
-      }
+      const lateralRadius=widthM/2;
+      const depthRadius=depthM/2;
       return {
         club:club||"Unknown",
         depthM:(Number(centreDepthM)||0)/reference*100,
@@ -5504,17 +5498,22 @@
       };
     }
     const fitSource=Array.isArray(analysis?.bubbleFit)?analysis.bubbleFit:[];
-    // Where the shots actually went: the measured bubble, drawn at its deviation
-    // from the bubble that was set.
-    const fitParts=fitSource.map(fit=>deviationPart(
-      fit?.club,
-      referenceFor(fit?.club),
-      Number(fit?.resultBubble?.depthOffsetM),
-      Number(fit?.resultBubble?.normalizedDeg),
-      Number(fit?.resultBubble?.widthM),
-      Number(fit?.resultBubble?.depthM),
-      {standardShape:true}
-    )).filter(Boolean);
+    // Where the shots actually went. The fit supplies PLACEMENT ONLY - the depth
+    // and aim deviation of the cluster centre. Size is the preset for that club at
+    // its reference distance, never the measured spread (see gdGraphBubbleDimensions).
+    const fitParts=fitSource.map(fit=>{
+      const reference=referenceFor(fit?.club);
+      const dims=gdGraphBubbleDimensions(fit?.club,reference);
+      if(!dims)return null;
+      return deviationPart(
+        fit?.club,
+        reference,
+        Number(fit?.resultBubble?.depthOffsetM),
+        Number(fit?.resultBubble?.normalizedDeg),
+        dims.widthM,
+        dims.depthM
+      );
+    }).filter(Boolean);
     // MY BUBBLE SITS AT DEAD CENTRE, because in this frame the centre IS the
     // bubble. Deliberately the CURRENT saved shape rather than the median of the
     // bubbles that were historically on screen: the question this screen answers
@@ -5523,16 +5522,16 @@
     // Never synthesised - gdMyBubbleHubSource returns null when there is no real
     // saved bubble, and then nothing is drawn.
     const myBubbleSource=safe(()=>gdMyBubbleHubSource(gdBubbleDataContext(),null,gdStatsCurrentModelOffsetDeg()),null);
-    const myBubbleClub=myBubbleSource?.club||"My Bubble";
+    const myBubbleClub=myBubbleSource?.club||"7i";
     const myBubbleCarry=Number(myBubbleSource?.baseDistanceM);
-    const myBubbleWidth=Number(myBubbleSource?.bubbleWidthM);
-    const myBubbleDepth=Number(myBubbleSource?.bubbleDepthM);
-    // Standard shape here too. A practice-derived My Bubble can carry a tiny
-    // lateralRadiusDeg (~0.5deg is under 3m wide at 155m) against a ~19m depth,
-    // which renders as an 11:1 sliver. Comparison already normalises every bubble
-    // through gdBubblePresentationForRender(normalizeAxes:true), so leaving these
-    // raw made the SAME bubble look completely different on the two screens.
-    const myBubbleParts=[deviationPart(myBubbleClub,myBubbleCarry,0,0,myBubbleWidth,myBubbleDepth,{standardShape:true})].filter(Boolean);
+    // Preset size for the club at its carry - the stored width/depth on the saved
+    // bubble are not used. A practice-derived My Bubble can be carrying a 0.45deg
+    // fallback radius (under 3m wide at 155m) against a ~19m depth, which rendered
+    // as an 11:1 sliver; the preset cannot produce that.
+    const myBubbleDims=Number.isFinite(myBubbleCarry)&&myBubbleCarry>0?gdGraphBubbleDimensions(myBubbleClub,myBubbleCarry):null;
+    const myBubbleParts=myBubbleSource&&myBubbleDims
+      ?[deviationPart(myBubbleClub,myBubbleCarry,0,0,myBubbleDims.widthM,myBubbleDims.depthM)].filter(Boolean)
+      :[];
     // BUFFER RING: My Bubble expanded by a chosen amount, drawn around it. Course
     // dispersion is wider than practice dispersion, so a bubble that is right for
     // the player still will not match the course result exactly. The buffer is the
@@ -5725,29 +5724,30 @@
     const scale=carry/sourceCarry;
     return Object.assign({},row,{bubbleWidthM:width*scale,bubbleDepthM:depth*scale});
   }
-  function gdGraphBubbleDimensions(row,carry){
-    const width=Number(row?.bubbleWidthM??row?.clusterWidthM??row?.widthM);
-    const depth=Number(row?.bubbleDepthM??row?.clusterDepthM??row?.depthM);
-    const radiusDeg=Number(row?.lateralRadiusDeg);
-    const resolvedWidth=Number.isFinite(width)&&width>0
-      ?width
-      :(Number.isFinite(radiusDeg)&&radiusDeg>0?Math.tan(radiusDeg*Math.PI/180)*Math.max(1,carry)*2:NaN);
-    if(!Number.isFinite(resolvedWidth)||resolvedWidth<=0)return null;
-    if(!Number.isFinite(depth)||depth<=0)return null;
-    return {widthM:resolvedWidth,depthM:depth};
+  // SHAPE IS PRESET. A bubble's size is never formed from the data dots - it comes
+  // from the club and the carry, exactly as calculateBubbleProfile puts it:
+  // "Offset places the shot data. Club/carry sizes it."
+  //
+  // All the cluster-finding logic exists to decide WHERE the bubble goes (offset +
+  // distance), not how big it is. Sizing bubbles from measured spread is what made
+  // the same bubble render differently on every screen, and what let a 0.45deg
+  // fallback radius masquerade as a measurement.
+  function gdGraphBubbleDimensions(club,carry){
+    const size=safe(()=>gdDeriveBasePatternSize({club:club||"7i",baseCarry:carry}),null);
+    const widthM=Number(size?.clusterWidthM);
+    const depthM=Number(size?.clusterDepthM);
+    if(!Number.isFinite(widthM)||widthM<=0||!Number.isFinite(depthM)||depthM<=0)return null;
+    return {widthM,depthM};
   }
   function gdBubbleRelativeParts(rows,offsetDeg,anchorDistanceM){
     const anchor=Number(anchorDistanceM);
     if(!Number.isFinite(anchor)||anchor<=0)return [];
+    // Radii come in as the PRESET size for the club (gdGraphBubbleDimensions), so
+    // there is nothing left to normalise - the preset is the standard shape.
+    // Placement (carry, angle) is the only part that comes from the data.
     const partFor=(club,carry,angle,lateralRadius,depthRadius,handedness,baseDistanceM)=>{
-      // Same generic oval every bubble wears; only size and offset are data.
-      let lateral=Math.max(1,lateralRadius);
-      let depth=Math.max(1,depthRadius);
-      if(typeof gdStandardDispersionAxes==="function"){
-        const axes=safe(()=>gdStandardDispersionAxes(club,lateral,depth),null);
-        if(Number.isFinite(Number(axes?.lateralRadiusM))&&Number(axes.lateralRadiusM)>0)lateral=Number(axes.lateralRadiusM);
-        if(Number.isFinite(Number(axes?.depthRadiusM))&&Number(axes.depthRadiusM)>0)depth=Number(axes.depthRadiusM);
-      }
+      const lateral=Math.max(1,lateralRadius);
+      const depth=Math.max(1,depthRadius);
       return{
         club:club||"Unknown",
         depthM:(carry-anchor)/anchor*100,
@@ -5761,7 +5761,7 @@
     return (rows||[]).map(row=>{
       const carry=Number(row?.actualDistanceM)||Number(row?.baseDistanceM)||Number(row?.expectedDistanceM);
       if(!Number.isFinite(carry)||carry<=0)return null;
-      const dims=gdGraphBubbleDimensions(row,carry);
+      const dims=gdGraphBubbleDimensions(row?.club,carry);
       if(!dims)return null;
       // THE CALLER'S OFFSET WINS. It is the live one for this layer (the practice
       // bubble's own offset, or My Bubble's hub offset). Rows are bag/data rows
