@@ -4,6 +4,7 @@ const {
   ADMIN_COMPED_MEMBERSHIP_KEY,
   MONTHLY_MEMBERSHIP_KEY,
   MONTH_PASS_KEY,
+  authenticatedAccount,
   email,
   encodeFilter,
   env,
@@ -29,11 +30,18 @@ exports.handler = async function (event) {
 
   try {
     const auth = await adminContext(event);
+    if (!auth) return json(401, { error: "Sign in as an admin to manage payments", code: "token_required" });
+
+    /* GET is gated too. readSettings used to run before the isAdmin check, so it
+       returned product configuration, webhook failure counts and which server
+       secrets are present to any caller at all - a free reconnaissance endpoint
+       even without the write access below. */
+    if (!auth.isAdmin) return json(403, { error: "Admin access required" });
+
     if (event.httpMethod === "GET") return await readSettings(auth);
     if (event.httpMethod !== "POST") return json(405, { error: "Method not allowed" });
 
     const payload = parseBody(event);
-    if (!auth.isAdmin) return json(403, { error: "Admin access required" });
 
     if (payload.action === "upsertProduct") return await upsertProduct(payload.product, auth);
     if (payload.action === "setProductActive") return await setProductActive(payload.productKey, payload.active, auth);
@@ -66,25 +74,29 @@ function parseBody(event) {
   try { return JSON.parse(event.body || "{}"); } catch (_error) { return {}; }
 }
 
-function header(event, name) {
-  const headers = event.headers || {};
-  const lower = name.toLowerCase();
-  return headers[name] || headers[lower] || "";
-}
-
+/* Who is calling, and what are they allowed to do.
+ *
+ * Until 2026-07-27 this read the X-Clarity-Account-Id / X-Clarity-Account-Email
+ * REQUEST HEADERS, looked the account up, and handed back admin if that row said
+ * admin. Nothing proved the caller owned the account, and the headers are
+ * attacker-supplied - so an unauthenticated POST carrying the admin's email
+ * address was full billing-admin access: issuing free memberships, granting and
+ * revoking entitlements, rewriting product configuration. An email address is
+ * not a secret; ours is printed on our own privacy and support pages.
+ *
+ * Identity now comes from a validated Supabase access token and nothing else.
+ * authenticatedAccount() checks the bearer token against /auth/v1/user and
+ * returns the app_accounts row for the user that token actually belongs to, so
+ * the role is read from the database for a caller we have proven. Headers are
+ * ignored entirely - there is deliberately no fallback, because a fallback is
+ * exactly the hole being closed here.
+ *
+ * Returns null when there is no usable token; the caller turns that into a 401.
+ */
 async function adminContext(event) {
-  const accountId = text(header(event, "x-clarity-account-id"), 120);
-  const accountEmail = email(header(event, "x-clarity-account-email"));
-  let account = null;
-  if (accountId) {
-    const rows = await supabaseFetch("app_accounts?select=account_id,email,name,role&account_id=eq." + encodeFilter(accountId) + "&limit=1", { method: "GET" });
-    account = Array.isArray(rows) ? rows[0] : null;
-  }
-  if (!account && accountEmail) {
-    const rows = await supabaseFetch("app_accounts?select=account_id,email,name,role&email=eq." + encodeFilter(accountEmail) + "&limit=1", { method: "GET" });
-    account = Array.isArray(rows) ? rows[0] : null;
-  }
-  const role = String(account && account.role || "").toLowerCase();
+  const account = await authenticatedAccount(event);
+  if (!account) return null;
+  const role = String(account.role || "").toLowerCase();
   return {
     account,
     isAdmin: role === "admin",

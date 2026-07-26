@@ -59,6 +59,9 @@ jobs:
           node dev/durable-storage.test.js
           node dev/deep-links.test.js
           node dev/account-restore.test.js
+          node dev/auth-update-account.test.js
+          node dev/account-delete.test.js
+          node dev/payment-admin-auth.test.js
           node dev/store-referral-reversal.test.js
           node dev/email-public-url.test.js
           node dev/auth-refresh-resilience.test.js

@@ -47,13 +47,17 @@
     };
   }
 
-  function adminHeaders() {
-    var payload = accountPayload();
-    return Object.assign(requestHeaders(), {
-      "Content-Type": "application/json",
-      "X-Clarity-Account-Id": payload.accountId,
-      "X-Clarity-Account-Email": payload.email
-    });
+  /* The admin endpoint identifies the caller from the bearer token alone. It used
+     to read X-Clarity-Account-Id / X-Clarity-Account-Email instead, which meant
+     anyone who knew an admin's email could send it and be treated as that admin -
+     so those headers are gone rather than merely unused, to keep them from
+     looking like a supported way to identify yourself.
+
+     authedHeaders refreshes an expired token first: access tokens die roughly
+     hourly, and the previous sync helper sent whatever was in storage, so an
+     admin who had left the tab open got an unexplained failure. */
+  async function adminHeaders(forceRefresh) {
+    return await authedHeaders(forceRefresh);
   }
 
   function authToken() {
@@ -231,7 +235,12 @@
     var payload = accountPayload();
     if (!payload.accountId && !payload.email) return settings;
     try {
-      var response = await fetch(ADMIN_ENDPOINT, { method: "GET", headers: adminHeaders() });
+      var response = await fetch(ADMIN_ENDPOINT, { method: "GET", headers: await adminHeaders() });
+      /* One retry with a force-refreshed token: the server now rejects an expired
+         one, and a stale token is the likeliest cause of a 401 for a real admin. */
+      if (response.status === 401) {
+        response = await fetch(ADMIN_ENDPOINT, { method: "GET", headers: await adminHeaders(true) });
+      }
       var body = await response.json().catch(function () { return {}; });
       if (!response.ok) throw new Error(body.error || "Could not load payment settings");
       return saveSettings(body);
@@ -244,7 +253,11 @@
   async function adminAction(action, payload) {
     adminPending = true; render();
     try {
-      var response = await fetch(ADMIN_ENDPOINT, { method: "POST", headers: adminHeaders(), body: JSON.stringify(Object.assign({ action: action }, payload || {})) });
+      var requestBody = JSON.stringify(Object.assign({ action: action }, payload || {}));
+      var response = await fetch(ADMIN_ENDPOINT, { method: "POST", headers: await adminHeaders(), body: requestBody });
+      if (response.status === 401) {
+        response = await fetch(ADMIN_ENDPOINT, { method: "POST", headers: await adminHeaders(true), body: requestBody });
+      }
       var body = await response.json().catch(function () { return {}; });
       if (!response.ok) throw new Error(body.error || "Payment setting failed");
       adminPending = false;
