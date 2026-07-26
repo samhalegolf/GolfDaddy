@@ -128,7 +128,23 @@
     if (!existing) throw new Error("Sign in first");
     if (!existing.supabaseUserId) throw new Error("This account is not linked to Supabase Auth yet. Sign out and sign back in with Supabase Auth.");
     var nextPassword = String(data && data.password || "");
-    var body = await post("/api/auth-update-account", { supabaseUserId: existing.supabaseUserId, name: data && data.name, email: data && data.email, password: nextPassword, role: data && data.role || existing.role });
+    /* The access token is the proof of identity - the endpoint resolves the user
+       from it and refuses a request without one. Sending the account's own
+       supabaseUserId alongside is a consistency check, not the credential: the
+       server compares the two and rejects a mismatch.
+
+       `role` is passed through but carries no authority: app_accounts.role is
+       what grants admin, so the server honours a role only when the account is
+       already an admin and otherwise keeps the stored one. The account form only
+       shows the selector to admins, which is a UI nicety - the check that counts
+       is the server's. */
+    var token = await freshAccessToken();
+    if (!token) {
+      var expired = new Error("Your session has expired. Sign in again to update your account.");
+      expired.code = "session_expired";
+      throw expired;
+    }
+    var body = await post("/api/auth-update-account", { accessToken: token, supabaseUserId: existing.supabaseUserId, name: data && data.name, email: data && data.email, password: nextPassword, role: data && data.role || existing.role });
     var updated = commit(body, { activate: true });
     if (body && body.passwordUpdated && nextPassword) {
       clearStaleAuthState();
