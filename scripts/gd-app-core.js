@@ -24513,7 +24513,13 @@ function gdRenderStatsAnalysis(list){
     }
     if(label)label.textContent=`${gdStatsConsistencyPct}%`;
     const topFit=(filteredAnalysis.bubbleFit||[]).slice().sort((a,b)=>(b.shots||0)-(a.shots||0))[0];
-    if(hint)hint.textContent=topFit?`${topFit.club} ${gdStatsGuidanceLabel(topFit.fitGuidance,topFit.sizeDeltaPct)}`:"Shot Data fit";
+    // The slider now sizes the course bubble, so the hint reports what that size
+    // actually holds. Falls back to the fit guidance when there is no containment
+    // figure (no course bubble drawn yet).
+    const containment=window.gdCourseBubbleContainment;
+    if(hint)hint.textContent=containment
+      ?`${containment.pct}% inside (${containment.inside}/${containment.total})`
+      :(topFit?`${topFit.club} ${gdStatsGuidanceLabel(topFit.fitGuidance,topFit.sizeDeltaPct)}`:"Shot Data fit");
     gdRenderCourseClubGroups(list,filteredRecords,filteredAnalysis,cfg);
     return true;
   }catch(e){

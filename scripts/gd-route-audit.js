@@ -5467,6 +5467,91 @@
   // opts lets the Course Data default screen (gdStatsVisualSummary) reuse this
   // renderer with its own filtered records, colour mode and legend, so both the
   // default screen and this fallback plot on the SAME fixed normalised domain.
+  // THE COURSE BUBBLE SLIDER. Two live readings come off it and they are meant to
+  // be weighed against each other: how much of the result the bubble holds
+  // (containment), and how big it had to be to hold that (size vs the practice
+  // bubble). "80% inside at 20% bigger than practice" is one sentence made of both.
+  //
+  // 100% is exactly the preset size - the same size the practice bubble is drawn
+  // at - so the size reading is a direct comparison rather than an abstract number.
+  const GD_COURSE_BUBBLE_SCALE_KEY="gd_course_bubble_scale_pct_v1";
+  const GD_COURSE_BUBBLE_SCALE_MIN=40;
+  const GD_COURSE_BUBBLE_SCALE_MAX=200;
+  const GD_COURSE_BUBBLE_SCALE_DEFAULT=100;
+  function gdCourseBubbleScalePct(){
+    const stored=safe(()=>Number(localStorage.getItem(GD_COURSE_BUBBLE_SCALE_KEY)),NaN);
+    const value=Number.isFinite(stored)&&stored>0?stored:GD_COURSE_BUBBLE_SCALE_DEFAULT;
+    return Math.max(GD_COURSE_BUBBLE_SCALE_MIN,Math.min(GD_COURSE_BUBBLE_SCALE_MAX,Math.round(value)));
+  }
+  function gdCourseBubbleSizeLabel(pct){
+    const delta=Math.round(pct-100);
+    if(!delta)return "same as practice";
+    return `${delta>0?"+":""}${delta}% vs practice`;
+  }
+  function gdCourseBubbleScaleControlHTML(){
+    const pct=gdCourseBubbleScalePct();
+    return `<div class="gdCourseScaleControl">
+      <span class="gdCourseScaleValue">${pct}%</span>
+      <input class="gdCourseScaleSlider" type="range" orient="vertical" min="${GD_COURSE_BUBBLE_SCALE_MIN}" max="${GD_COURSE_BUBBLE_SCALE_MAX}" step="1" value="${pct}" aria-label="Course bubble size" oninput="return gdCourseBubbleScaleChanged(this)">
+      <span class="gdCourseScaleDelta">${gdEscapeHTML(gdCourseBubbleSizeLabel(pct))}</span>
+    </div>`;
+  }
+  // Recomputed straight from the DOM so dragging is live and cheap - re-rendering
+  // the whole chart on every input event would fight the drag.
+  function gdCourseBubbleApplyScale(pct){
+    const host=byId("gdStatsVisual");
+    if(!host)return;
+    const scale=Math.max(.01,Number(pct)/100);
+    const ellipse=host.querySelector(".gdCourseResultBubble");
+    const value=host.querySelector(".gdCourseScaleValue");
+    const delta=host.querySelector(".gdCourseScaleDelta");
+    if(value)value.textContent=`${Math.round(pct)}%`;
+    if(delta)delta.textContent=gdCourseBubbleSizeLabel(Number(pct));
+    if(!ellipse)return;
+    const rx=Number(ellipse.dataset.baseRx)*scale;
+    const ry=Number(ellipse.dataset.baseRy)*scale;
+    if(!Number.isFinite(rx)||!Number.isFinite(ry))return;
+    ellipse.setAttribute("rx",rx.toFixed(1));
+    ellipse.setAttribute("ry",ry.toFixed(1));
+    const cx=Number(ellipse.getAttribute("cx"));
+    const cy=Number(ellipse.getAttribute("cy"));
+    const t=-(Number(ellipse.dataset.tiltDeg)||0)*Math.PI/180;
+    const cos=Math.cos(t),sin=Math.sin(t);
+    let inside=0,total=0;
+    host.querySelectorAll(".gdCourseShotDot:not(.excluded)").forEach(dot=>{
+      total+=1;
+      const dx=Number(dot.getAttribute("cx"))-cx;
+      const dy=Number(dot.getAttribute("cy"))-cy;
+      const ux=dx*cos-dy*sin,uy=dx*sin+dy*cos;
+      if((ux*ux)/(rx*rx)+(uy*uy)/(ry*ry)<=1)inside+=1;
+    });
+    const pctText=host.querySelector(".gdCourseContainmentPct");
+    const subText=host.querySelector(".gdCourseContainmentSub");
+    if(pctText)pctText.textContent=total?`${Math.round(inside/total*100)}% inside`:"";
+    if(subText)subText.textContent=total?`${inside}/${total} shots`:"";
+    // THE TWO VALUES, published together: size and in-vs-out. Everything the
+    // screen says is these two numbers, so any logic built on top reads them from
+    // here rather than scraping the labels.
+    safe(()=>{
+      const containment=total?{inside,total,pct:Math.round(inside/total*100)}:null;
+      window.gdCourseBubbleContainment=containment;
+      window.gdCourseBubbleReading={
+        sizePct:Math.round(Number(pct)),
+        sizeVsPracticePct:Math.round(Number(pct)-100),
+        containmentPct:containment?containment.pct:null,
+        inside:containment?containment.inside:0,
+        outside:containment?containment.total-containment.inside:0,
+        total:containment?containment.total:0
+      };
+    });
+  }
+  function gdCourseBubbleScaleChanged(input){
+    const raw=Number(input?.value);
+    const pct=Math.max(GD_COURSE_BUBBLE_SCALE_MIN,Math.min(GD_COURSE_BUBBLE_SCALE_MAX,Math.round(Number.isFinite(raw)?raw:GD_COURSE_BUBBLE_SCALE_DEFAULT)));
+    safe(()=>localStorage.setItem(GD_COURSE_BUBBLE_SCALE_KEY,String(pct)));
+    gdCourseBubbleApplyScale(pct);
+    return false;
+  }
   function gdCourseDataSurfaceSvg(counts, analysis, opts={}){
     const records=Array.isArray(opts?.records)?opts.records:(Array.isArray(analysis?.records)?analysis.records:[]);
     const colourFor=typeof opts?.colourFor==="function"?opts.colourFor:null;
@@ -5529,6 +5614,10 @@
         baseDistanceM:reference
       };
     }
+    // THE SLIDER SIZES THE COURSE BUBBLE. Shape stays preset - this is an explicit
+    // player-driven scale on it, not a size derived from the data. 100% is exactly
+    // the preset size; the slider's whole output is the containment reading below.
+    const courseBubbleScale=gdCourseBubbleScalePct()/100;
     const fitSource=Array.isArray(analysis?.bubbleFit)?analysis.bubbleFit:[];
     // Where the shots actually went. The fit supplies PLACEMENT ONLY - the depth
     // and aim deviation of the cluster centre. Size is the preset for that club at
@@ -5542,93 +5631,89 @@
         reference,
         Number(fit?.resultBubble?.depthOffsetM),
         Number(fit?.resultBubble?.normalizedDeg),
-        dims.widthM,
-        dims.depthM
+        dims.widthM*courseBubbleScale,
+        dims.depthM*courseBubbleScale
       );
     }).filter(Boolean);
-    // MY BUBBLE SITS AT DEAD CENTRE, because in this frame the centre IS the
-    // bubble. Deliberately the CURRENT saved shape rather than the median of the
-    // bubbles that were historically on screen: the question this screen answers
-    // is "does the bubble I would play now contain where the ball actually goes",
-    // which is what makes expand-vs-tighten judgeable by eye.
-    // Never synthesised - gdMyBubbleHubSource returns null when there is no real
-    // saved bubble, and then nothing is drawn.
-    const myBubbleSource=safe(()=>gdMyBubbleHubSource(gdBubbleDataContext(),null,gdStatsCurrentModelOffsetDeg()),null);
-    const myBubbleClub=myBubbleSource?.club||"7i";
-    const myBubbleCarry=Number(myBubbleSource?.baseDistanceM);
-    // Preset size for the club at its carry - the stored width/depth on the saved
-    // bubble are not used. A practice-derived My Bubble can be carrying a 0.45deg
-    // fallback radius (under 3m wide at 155m) against a ~19m depth, which rendered
-    // as an 11:1 sliver; the preset cannot produce that.
-    const myBubbleDims=Number.isFinite(myBubbleCarry)&&myBubbleCarry>0?gdGraphBubbleDimensions(myBubbleClub,myBubbleCarry):null;
-    const myBubbleParts=myBubbleSource&&myBubbleDims
-      ?[deviationPart(myBubbleClub,myBubbleCarry,0,0,myBubbleDims.widthM,myBubbleDims.depthM)].filter(Boolean)
-      :[];
-    // BUFFER RING: My Bubble expanded by a chosen amount, drawn around it. Course
-    // dispersion is wider than practice dispersion, so a bubble that is right for
-    // the player still will not match the course result exactly. The buffer is the
-    // allowance for that, and the whole reading is then visual: does the course
-    // bubble line up with the ring? No verdict is computed and none should be -
-    // the picture is the answer.
-    const bufferPct=gdCourseBubbleBufferPct();
-    const bufferScale=1+bufferPct/100;
-    const bufferPart=gdGraphBufferPart(myBubbleParts[0],bufferScale);
     const plot=gdPracticeNormalisedPlotLayout();
     const pointFor=entry=>gdPracticeNormalisedPlotPoint(plot,entry,entry.index);
+    // Dots carry a class so the live slider can recount containment straight from
+    // the DOM without re-rendering the chart on every input event.
     const shotDots=relativeRows.slice(0,90).map(entry=>{
       const point=pointFor(entry);
       if(!point)return "";
       const counted=entry.row.record.counted!==false;
       const fill=counted?(colourFor?colourFor(entry.row.record,entry.club):gdStatsClubColor(entry.club)):"#8f9a96";
-      const opacity=counted?".82":".18";
-      return gdShotChartDotSvg(point,{fill,opacity,radius:counted?2.6:1.8,missing:entry.hasLateral===false});
+      return `<circle class="${counted?"gdCourseShotDot":"gdCourseShotDot excluded"}" cx="${point.x.toFixed(1)}" cy="${point.y.toFixed(1)}" r="${counted?2.6:1.8}" fill="${fill}" opacity="${counted?".82":".18"}"/>`;
     }).join("");
+    // CONTAINMENT is computed the same way the live slider recomputes it, from the
+    // drawn ellipse including its tilt - so the number always matches the picture.
+    // Counted shots only: a filtered-out shot is not a result to be contained.
+    const coursePart=fitParts[0]||null;
+    const courseGeo=(()=>{
+      if(!coursePart)return null;
+      const geo=gdPracticeGraphInternalGeometry(plot);
+      if(!geo)return null;
+      const halfWidth=(plot.plotRight-plot.plotLeft)/2;
+      const halfHeight=(plot.plotBottom-plot.plotTop)/2;
+      return {
+        cx:geo.xForAngle(coursePart.angleDeg),
+        cy:geo.yForDepth(coursePart.depthM),
+        rx:Math.max(3,((Number(coursePart.angleRadiusDeg)||0)/Math.max(.5,plot.angleRange))*halfWidth),
+        ry:Math.max(3,((Number(coursePart.depthRadiusM)||0)/Math.max(1,plot.depthRange))*halfHeight),
+        tilt:Number(coursePart.tiltDeg)||0
+      };
+    })();
+    const containment=(()=>{
+      if(!courseGeo)return null;
+      const t=-courseGeo.tilt*Math.PI/180;
+      const cos=Math.cos(t),sin=Math.sin(t);
+      let inside=0,total=0;
+      relativeRows.forEach(entry=>{
+        if(entry.row?.record?.counted===false)return;
+        const point=pointFor(entry);
+        if(!point)return;
+        total+=1;
+        const dx=point.x-courseGeo.cx,dy=point.y-courseGeo.cy;
+        const ux=dx*cos-dy*sin,uy=dx*sin+dy*cos;
+        if((ux*ux)/(courseGeo.rx*courseGeo.rx)+(uy*uy)/(courseGeo.ry*courseGeo.ry)<=1)inside+=1;
+      });
+      if(!total)return null;
+      return {inside,total,pct:Math.round(inside/total*100)};
+    })();
+    safe(()=>{
+      window.gdCourseBubbleContainment=containment;
+      const sizePct=Math.round(courseBubbleScale*100);
+      window.gdCourseBubbleReading={
+        sizePct,
+        sizeVsPracticePct:sizePct-100,
+        containmentPct:containment?containment.pct:null,
+        inside:containment?containment.inside:0,
+        outside:containment?containment.total-containment.inside:0,
+        total:containment?containment.total:0
+      };
+    });
     const clubKey=[...new Set(dataRows.map(row=>row.club||"Unknown"))].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})).slice(0,6);
     const clubKeySvg=typeof opts?.keySvg==="string"
       ?opts.keySvg
       :clubKey.map((club,i)=>`<circle cx="${26+i*48}" cy="58" r="4.2" fill="${gdStatsClubColor(club)}"/><text x="${34+i*48}" y="61" fill="rgba(255,255,255,.68)" font-size="9" font-weight="850">${gdStatsSvgText(club)}</text>`).join("");
-    // Drawn first so it sits under My Bubble and the course result.
-    const hubUnderlaySvg=gdGraphBufferBandMarkup(myBubbleParts[0],bufferPart,plot);
-    // The group is emitted even when there is no My Bubble to draw:
-    // gdApplyShotBubbleDomOverlay injects a legacy ABSOLUTE-frame bubble unless it
-    // finds a .gdShotBubbleOverlayLayer here, and that bubble would land at the
+    // ONE BUBBLE. Emitted directly rather than through the shared layer markup so
+    // it can carry its unscaled radii - the slider rescales from those without a
+    // re-render. The empty overlay group stays: gdApplyShotBubbleDomOverlay injects
+    // a legacy ABSOLUTE-frame bubble unless it finds one, which would land at the
     // wrong scale on this normalised chart.
-    const overlaySvg=myBubbleParts.length
-      ?gdPracticeNormalisedBubbleLayerMarkup(myBubbleParts,plot,{
-        groupClass:"gdShotBubbleOverlayLayer gdPracticeMyBubbleLayer gdShotBubbleOverlayLens",
-        source:"my-bubble",
-        colour:GD_MY_BUBBLE_COLOUR,
-        fillOpacity:".10",
-        strokeOpacity:".78",
-        strokeWidth:"1.55",
-        labelText:"MY",
-        offsetDeg:0
-      })
+    const courseBubbleSvg=courseGeo
+      ?`<g class="gdShotBubbleOverlayLayer gdCourseResultLayer" aria-hidden="true"><ellipse class="gdCourseResultBubble" data-base-rx="${(courseGeo.rx/Math.max(.01,courseBubbleScale)).toFixed(2)}" data-base-ry="${(courseGeo.ry/Math.max(.01,courseBubbleScale)).toFixed(2)}" data-tilt-deg="${courseGeo.tilt.toFixed(1)}" cx="${courseGeo.cx.toFixed(1)}" cy="${courseGeo.cy.toFixed(1)}" rx="${courseGeo.rx.toFixed(1)}" ry="${courseGeo.ry.toFixed(1)}"${courseGeo.tilt?` transform="rotate(${courseGeo.tilt.toFixed(1)} ${courseGeo.cx.toFixed(1)} ${courseGeo.cy.toFixed(1)})"`:""} fill="${GD_COURSE_BUBBLE_COLOUR}" fill-opacity=".13" stroke="${GD_COURSE_BUBBLE_COLOUR}" stroke-width="1.55" stroke-opacity=".84"/></g>`
       :`<g class="gdShotBubbleOverlayLayer" aria-hidden="true"></g>`;
-    // THE COURSE BUBBLE IS A BUBBLE, never a shape drawn around the dots. It wears
-    // the same generic oval as every other bubble; only its offset and size come
-    // from the data. There used to be a fallback here that fitted an ellipse to
-    // the min/max of the plotted points with clamped radii - that produced an
-    // arbitrary shape in the bubble's colours, which is exactly the thing that
-    // must not happen. With no measured fit yet, the dots speak for themselves.
-    const clubOvals=fitParts.length
-      ?gdPracticeNormalisedBubbleLayerMarkup(fitParts,plot,{
-        groupClass:"gdShotChartClubOvals course",
-        source:"course",
-        colour:GD_COURSE_BUBBLE_COLOUR,
-        fillOpacity:".13",
-        strokeOpacity:".84",
-        strokeWidth:"1.55"
-      })
-      :"";
-    return `<svg viewBox="${gdPracticeNormalisedViewBox(plot)}" role="img" aria-label="Course Data visual">
-      ${gdPracticeNormalisedBackdropSvg(plot,gdShotDataGraphTitle("Course Data"),{subtitle:`Distance vs the bubble you played (%) \u00b7 aim vs that bubble (\u00b0)${bufferPart?` \u00b7 band = My Bubble +${Math.round(bufferPct)}%`:""}`})}
-      ${hubUnderlaySvg}
-      ${overlaySvg}
-      ${clubOvals}
+    const svg=`<svg viewBox="${gdPracticeNormalisedViewBox(plot)}" role="img" aria-label="Course Data visual">
+      ${gdPracticeNormalisedBackdropSvg(plot,gdShotDataGraphTitle("Course Data"),{subtitle:"Shot endpoints relative to the bubble that was set"})}
+      <text class="gdCourseContainmentPct" x="456" y="61" text-anchor="end" fill="${GD_COURSE_BUBBLE_COLOUR}" font-size="13" font-weight="950">${containment?`${containment.pct}% inside`:""}</text>
+      <text class="gdCourseContainmentSub" x="456" y="75" text-anchor="end" fill="rgba(255,255,255,.5)" font-size="9" font-weight="800">${containment?`${containment.inside}/${containment.total} shots`:""}</text>
+      ${courseBubbleSvg}
       ${shotDots}
       ${clubKeySvg}
-    </svg>${gdShotBubbleOverlayButton("course")}`;
+    </svg>`;
+    return `<div class="gdCourseChartWrap">${svg}${gdCourseBubbleScaleControlHTML()}</div>`;
   }
 	  function gdCourseDataLandingStatus(counts){
 	    if(counts.shown)return `${counts.shown} shown`;
@@ -7767,6 +7852,7 @@
       gdOpenPracticeData:openPracticeData,
       gdSetCourseDataTab:gdSetCourseDataTab,
       gdCourseDataSurfaceSvg:gdCourseDataSurfaceSvg,
+      gdCourseBubbleScaleChanged:gdCourseBubbleScaleChanged,
       // Shared by every destructive action across the app - window.confirm is dead
       // in the embedded webview.
       gdConfirmAction:gdConfirmAction,

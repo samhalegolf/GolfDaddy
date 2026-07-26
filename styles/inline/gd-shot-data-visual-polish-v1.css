@@ -4357,3 +4357,23 @@
 }
 /* A bubble is saved, but the one on screen is new - adopting will replace it. */
 .gdPracticeAdoptStatus.fresh{border-color:rgba(98,210,255,.4);background:rgba(98,210,255,.1)}
+
+/* Course chart + its size slider, side by side. The slider is the screen's only
+   control: it sizes the bubble and both live readings come off it. */
+.gdCourseChartWrap{display:flex;align-items:stretch;gap:8px}
+.gdCourseChartWrap svg{flex:1 1 auto;min-width:0}
+.gdCourseScaleControl{
+  flex:0 0 auto;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:8px;padding:10px 6px;border-radius:14px;
+  border:1px solid rgba(55,242,141,.22);background:rgba(55,242,141,.06);
+}
+.gdCourseScaleValue{color:#37f28d;font-size:12px;font-weight:950;line-height:1}
+.gdCourseScaleDelta{
+  color:rgba(255,255,255,.6);font-size:9px;font-weight:850;line-height:1.15;
+  text-align:center;max-width:64px;
+}
+.gdCourseScaleSlider{
+  -webkit-appearance:slider-vertical;appearance:slider-vertical;
+  writing-mode:vertical-lr;direction:rtl;
+  width:26px;flex:1 1 auto;min-height:150px;accent-color:#37f28d;background:transparent;
+}
