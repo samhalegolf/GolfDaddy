@@ -5459,6 +5459,8 @@
   const GD_MY_BUBBLE_COLOUR="#f4f8f3";
   const GD_COURSE_BUBBLE_COLOUR="#37f28d";
   const GD_COURSE_BUFFER_COLOUR="#ffb347";
+  // Dots sit off-black until the bubble reaches them.
+  const GD_COURSE_DOT_OUTSIDE="#4a534f";
   const GD_COURSE_BUBBLE_BUFFER_PCT=50;
   function gdCourseBubbleBufferPct(){
     const tuned=safe(()=>typeof dev==="function"?Number(dev("bubbleVisuals.courseBufferPct")):NaN,NaN);
@@ -5523,7 +5525,13 @@
       const dx=Number(dot.getAttribute("cx"))-cx;
       const dy=Number(dot.getAttribute("cy"))-cy;
       const ux=dx*cos-dy*sin,uy=dx*sin+dy*cos;
-      if((ux*ux)/(rx*rx)+(uy*uy)/(ry*ry)<=1)inside+=1;
+      const within=(ux*ux)/(rx*rx)+(uy*uy)/(ry*ry)<=1;
+      if(within)inside+=1;
+      // Hydrate/dehydrate as the bubble sweeps over them - the colour IS the
+      // in/out answer, so it has to move with the slider, not lag a re-render.
+      dot.classList.toggle("inside",within);
+      dot.setAttribute("fill",within?GD_COURSE_BUBBLE_COLOUR:GD_COURSE_DOT_OUTSIDE);
+      dot.setAttribute("opacity",within?".95":".6");
     });
     const pctText=host.querySelector(".gdCourseContainmentPct");
     const subText=host.querySelector(".gdCourseContainmentSub");
@@ -5637,15 +5645,6 @@
     }).filter(Boolean);
     const plot=gdPracticeNormalisedPlotLayout();
     const pointFor=entry=>gdPracticeNormalisedPlotPoint(plot,entry,entry.index);
-    // Dots carry a class so the live slider can recount containment straight from
-    // the DOM without re-rendering the chart on every input event.
-    const shotDots=relativeRows.slice(0,90).map(entry=>{
-      const point=pointFor(entry);
-      if(!point)return "";
-      const counted=entry.row.record.counted!==false;
-      const fill=counted?(colourFor?colourFor(entry.row.record,entry.club):gdStatsClubColor(entry.club)):"#8f9a96";
-      return `<circle class="${counted?"gdCourseShotDot":"gdCourseShotDot excluded"}" cx="${point.x.toFixed(1)}" cy="${point.y.toFixed(1)}" r="${counted?2.6:1.8}" fill="${fill}" opacity="${counted?".82":".18"}"/>`;
-    }).join("");
     // CONTAINMENT is computed the same way the live slider recomputes it, from the
     // drawn ellipse including its tilt - so the number always matches the picture.
     // Counted shots only: a filtered-out shot is not a result to be contained.
@@ -5664,19 +5663,36 @@
         tilt:Number(coursePart.tiltDeg)||0
       };
     })();
+    // A dot is grey until the bubble reaches it, then it takes the bubble's own
+    // colour. Tested in the ellipse's ROTATED frame so what lights up is exactly
+    // what looks enclosed.
+    const insideBubble=point=>{
+      if(!courseGeo||!point)return false;
+      const t=-courseGeo.tilt*Math.PI/180;
+      const dx=point.x-courseGeo.cx,dy=point.y-courseGeo.cy;
+      const ux=dx*Math.cos(t)-dy*Math.sin(t);
+      const uy=dx*Math.sin(t)+dy*Math.cos(t);
+      return (ux*ux)/(courseGeo.rx*courseGeo.rx)+(uy*uy)/(courseGeo.ry*courseGeo.ry)<=1;
+    };
+    // Dots carry a class so the live slider can recolour and recount them straight
+    // from the DOM without re-rendering the chart on every input event.
+    const shotDots=relativeRows.slice(0,90).map(entry=>{
+      const point=pointFor(entry);
+      if(!point)return "";
+      const counted=entry.row.record.counted!==false;
+      if(!counted)return `<circle class="gdCourseShotDot excluded" cx="${point.x.toFixed(1)}" cy="${point.y.toFixed(1)}" r="1.8" fill="${GD_COURSE_DOT_OUTSIDE}" opacity=".18"/>`;
+      const inside=insideBubble(point);
+      return `<circle class="gdCourseShotDot${inside?" inside":""}" cx="${point.x.toFixed(1)}" cy="${point.y.toFixed(1)}" r="2.6" fill="${inside?GD_COURSE_BUBBLE_COLOUR:GD_COURSE_DOT_OUTSIDE}" opacity="${inside?".95":".6"}"/>`;
+    }).join("");
     const containment=(()=>{
       if(!courseGeo)return null;
-      const t=-courseGeo.tilt*Math.PI/180;
-      const cos=Math.cos(t),sin=Math.sin(t);
       let inside=0,total=0;
       relativeRows.forEach(entry=>{
         if(entry.row?.record?.counted===false)return;
         const point=pointFor(entry);
         if(!point)return;
         total+=1;
-        const dx=point.x-courseGeo.cx,dy=point.y-courseGeo.cy;
-        const ux=dx*cos-dy*sin,uy=dx*sin+dy*cos;
-        if((ux*ux)/(courseGeo.rx*courseGeo.rx)+(uy*uy)/(courseGeo.ry*courseGeo.ry)<=1)inside+=1;
+        if(insideBubble(point))inside+=1;
       });
       if(!total)return null;
       return {inside,total,pct:Math.round(inside/total*100)};
@@ -5711,7 +5727,6 @@
       <text class="gdCourseContainmentSub" x="456" y="75" text-anchor="end" fill="rgba(255,255,255,.5)" font-size="9" font-weight="800">${containment?`${containment.inside}/${containment.total} shots`:""}</text>
       ${courseBubbleSvg}
       ${shotDots}
-      ${clubKeySvg}
     </svg>`;
     return `<div class="gdCourseChartWrap">${svg}${gdCourseBubbleScaleControlHTML()}</div>`;
   }
