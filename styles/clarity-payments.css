@@ -531,3 +531,100 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* Account deletion dialog.
+ *
+ * Deliberately styled like the referral modal rather than as a destructive-red
+ * alert. The wording carries the weight, and the typed confirmation is the real
+ * guard; a wall of red on the settings screen reads as an error state.
+ * The confirm button is the only red thing here, because it is the only thing
+ * that destroys anything. */
+.clarityAccountDeleteOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(0,0,0,.72);
+  backdrop-filter: blur(12px);
+}
+
+.clarityAccountDeleteBox {
+  display: grid;
+  gap: 12px;
+  width: min(420px, 100%);
+  padding: 20px;
+  border: 1px solid rgba(255,255,255,.16);
+  border-radius: 14px;
+  background: #101614;
+  box-shadow: 0 24px 80px rgba(0,0,0,.42);
+}
+
+.clarityAccountDeleteBox strong {
+  color: #fff;
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.clarityAccountDeleteBox span,
+.clarityAccountDeleteBox label {
+  color: rgba(255,255,255,.72);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.clarityAccountDeleteBox label {
+  margin-top: 4px;
+  font-weight: 600;
+  color: rgba(255,255,255,.86);
+}
+
+.clarityAccountDeleteBox input {
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid rgba(255,255,255,.22);
+  border-radius: 10px;
+  background: rgba(0,0,0,.35);
+  color: #fff;
+  font-size: 15px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.clarityAccountDeleteError {
+  color: #ff8f8f !important;
+}
+
+.clarityAccountDeleteActions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.clarityAccountDeleteActions button {
+  flex: 1 1 150px;
+  padding: 12px 14px;
+  border: 0;
+  border-radius: 10px;
+  background: #d24a4a;
+  color: #fff;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.clarityAccountDeleteActions button.secondary {
+  background: rgba(255,255,255,.12);
+  color: #fff;
+}
+
+.clarityAccountDeleteActions button:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+
+.gdPlayerSettingsRowDanger strong {
+  color: #ff9c9c;
+}

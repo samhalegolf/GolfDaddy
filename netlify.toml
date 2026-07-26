@@ -109,6 +109,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/account-delete"
+  to = "/.netlify/functions/account-delete"
+  status = 200
+
+[[redirects]]
   from = "/api/shot-library-sync"
   to = "/.netlify/functions/shot-library-sync"
   status = 200
