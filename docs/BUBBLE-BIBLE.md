@@ -69,8 +69,17 @@ it can't be mistaken for an intended path.
 - **Affects play:** nothing. Ever. See rule 1.
 
 ### GPS play bubble — what you actually aim with
-- **Size from the BAG**, not from My Bubble: club ratios x carry.
-- **Aim from My Bubble**: the offset.
+**A DEGREE VALUE AND A BAG. Nothing else. — LAW**
+
+- **Aim** from My Bubble: the offset, in degrees.
+- **Size** from the bag: club ratios x carry.
+- The saved bubble's SHAPE is not used. `getActiveBubbleProfile` used to spread
+  `p.bubbleProfiles[club]` into the calibration, so a stored cluster width/depth
+  quietly resized the on-course bubble - which also made the played shape depend on
+  which KEY the bubble happened to be filed under. Verified after the fix: a saved
+  55x60m shape leaves the GPS bubble at 22.2x29.3m, identical to having no saved
+  shape at all; degrees move the aim (4.24m -> -10.49m) without resizing; bag
+  changes resize it (150m -> 190m gives 22.2 -> 28.1m wide).
 - Every rendered one is snapshotted as `plannedBubble`, which is what Course Data
   later grades. This is the loop that closes: bag sizes it, practice proposes,
   course reports.

@@ -19854,9 +19854,14 @@ function getActiveBubbleProfile(club="Bag",distance=155){
     const row=gdResolveShotBagClub(realBag?accountRows:gdGhostShotBagRows(),club,distance);
     if(row){
       const requested=row.club||"7i";
-      const exact=realBag&&p?.bubbleProfiles?p.bubbleProfiles[requested]:null;
-      const offset=gdProfileCentralOffset(p,exact?.faceOffsetDeg??exact?.faceAlignmentOffsetDeg??PLACEHOLDER_PLAYER_PROFILE.baseCalibration.faceAlignmentOffsetDeg);
-      const base={...PLACEHOLDER_PLAYER_PROFILE.baseCalibration,...(exact||{})};
+      // THE GPS BUBBLE NEEDS TWO THINGS: A DEGREE VALUE AND A BAG.
+      // Aim comes from My Bubble's offset; size comes from the bag carry through
+      // the club ratios. The saved bubble's SHAPE is deliberately not used here -
+      // it used to be spread into the calibration, which meant a stored cluster
+      // width/depth quietly resized the on-course bubble and made the played shape
+      // depend on which key the bubble happened to be filed under.
+      const offset=gdProfileCentralOffset(p,PLACEHOLDER_PLAYER_PROFILE.baseCalibration.faceAlignmentOffsetDeg);
+      const base={...PLACEHOLDER_PLAYER_PROFILE.baseCalibration};
       const profile=calculateBubbleProfile({...base,club:requested,baseCarry:gdCarryM(row)||base.baseCarry,handedness:p?.handedness||PLACEHOLDER_PLAYER_PROFILE.handedness,skillLevel:p?.skillLevel||p?.consistency,faceOffsetDeg:offset,faceAlignmentOffsetDeg:offset,totalM:gdTotalM(row)});
       return{...profile,totalM:gdTotalM(row),source:realBag?"account-profile":"ghost-bag",playerId:p?.id||"",accountId:p?.accountId||"",ghostBag:!realBag}
     }
