@@ -3706,15 +3706,25 @@
 		    const method=gdPracticeBubbleMethod(analysis);
 		    const offsetDeg=Number(method?.anchorDeg);
 		    if(!method||!Number.isFinite(offsetDeg))return null;
+		    // anchorClub can be a DISPLAY LABEL. The oval method pools every club into
+		    // one shape and calls it "Practice oval", which matches no club cluster and
+		    // no shot's club - so filtering by it selected NOTHING, and the measured
+		    // distance fell all the way through to the literal 155. That phantom 155m
+		    // was what sat above the real shots on the chart and got saved into My
+		    // Bubble. Only scope to a club when the anchor really is one; otherwise the
+		    // oval is formed from every accepted shot, so measure it from all of them.
 		    const anchorClub=method.anchorClub;
-		    const anchor=(method.clubClusters||[]).find(cluster=>cluster.club===anchorClub)||null;
-		    const shots=(analysis?.acceptedShots||[]).filter(shot=>!anchorClub||shot.club===anchorClub);
+		    const clubScoped=gdIsRealClubKey(anchorClub);
+		    const anchor=clubScoped?((method.clubClusters||[]).find(cluster=>cluster.club===anchorClub)||null):null;
+		    const accepted=Array.isArray(analysis?.acceptedShots)?analysis.acceptedShots:[];
+		    const shots=clubScoped?accepted.filter(shot=>shot.club===anchorClub):accepted;
 		    const importBatchIds=[...new Set(shots.map(shot=>shot.importBatchId||shot.importId||"").filter(Boolean))];
 		    // Real measured distance first (same helper the rest of Practice uses),
 		    // target/expected carry only as a last-resort fallback - this bubble is
 		    // meant to represent what these shots actually did, not what the club
 		    // is nominally supposed to carry.
-		    const expected=gdShotBubbleMedian(shots.map(shot=>gdPracticeShotActualDistance(shot)))||anchor?.meanExpectedM||155;
+		    const measured=gdShotBubbleMedian(shots.map(shot=>gdPracticeShotActualDistance(shot)));
+		    const expected=Number.isFinite(measured)&&measured>0?measured:(Number(anchor?.meanExpectedM)||155);
     const radiusDeg=Number(anchor?.radiusDeg||anchor?.stdDeg);
     const depthSpread=gdShotBubbleMedian(shots.map(shot=>Math.abs(Number(shot.depthM)||0)))*2;
     return{
@@ -3722,7 +3732,11 @@
       lateralRadiusDeg:Number.isFinite(radiusDeg)?Math.max(radiusDeg,.25):.45,
       bubbleDepthM:depthSpread||expected*.10,
 		      baseDistanceM:expected,
-		      club:anchorClub||"",
+		      // A real club for anything that keys or sizes off this; the label is kept
+		      // separately for display. Cross-club ovals normalise to the 7-iron view.
+		      club:clubScoped?anchorClub:GD_NORMALISED_VIEW_CLUB,
+		      displayClub:anchorClub||"",
+		      measuredDistance:Number.isFinite(measured)&&measured>0,
 		      shots:Number(anchor?.countedShots||anchor?.shots||shots.length||0),
 		      importBatchIds
 		    };
