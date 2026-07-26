@@ -158,6 +158,16 @@
   [headers.values]
     Cache-Control = "no-cache, no-store, must-revalidate"
 
+# The browser studio (admin/tuning surface). Same deploy, same /api functions,
+# same auth origin as the app at /; it just loads the studio-only panels the
+# phone build strips. Never cache its shell - the app index is uncached for the
+# same reason, and a stale studio index would load hashed asset URLs that no
+# longer exist.
+[[headers]]
+  for = "/studio/*"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
 [[headers]]
   for = "/scripts/*"
   [headers.values]

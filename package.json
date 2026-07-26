@@ -9,11 +9,12 @@
     "build:netlify": "node scripts/clarity-deploy-build.js",
     "test:payments": "node dev/payment-rollout-tests.js",
     "test:boot": "node dev/boot-smoke.test.js",
-    "native:sync": "npm run build:netlify && npx cap sync",
+    "build:app": "node scripts/clarity-deploy-build.js --app-only",
+    "native:sync": "npm run build:app && npx cap sync",
     "native:android": "npm run native:sync && npx cap open android",
     "native:ios": "npm run native:sync && npx cap open ios",
-    "native:release:aab": "npm run build:netlify && npx cap sync android && cd android && ./gradlew bundleRelease",
-    "native:release:apk": "npm run build:netlify && npx cap sync android && cd android && ./gradlew assembleRelease"
+    "native:release:aab": "npm run build:app && npx cap sync android && cd android && ./gradlew bundleRelease",
+    "native:release:apk": "npm run build:app && npx cap sync android && cd android && ./gradlew assembleRelease"
   },
   "codex": {
     "entry": "index.html",

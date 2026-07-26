@@ -74,7 +74,7 @@
       coachLine.textContent = coach ? "Connected to " + (coach.name || coach.email || "Coach") : "Enter the code from your coach.";
     }
     if (password) password.placeholder = activeAccount && activeAccount.requiresPasswordSetup ? "Choose your own password" : "New password";
-    if (photoImg) photoImg.src = photo || "assets/home/profile.png";
+    if (photoImg) photoImg.src = photo || "assets/home/profile.png?v=040483c4";
     if (photoPreview) photoPreview.classList.toggle("hasPhoto", !!photo);
 
     showSection(activeSection || "menu");

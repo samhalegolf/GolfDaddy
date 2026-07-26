@@ -23,7 +23,7 @@ async function sendEmail(to, name, actorName, setupLink) {
   if (!resendKey) return { sent: false, provider: "not_configured" };
   const from = env("CLARITY_EMAIL_FROM") || "Clarity Golf Systems <notifications@claritygolf.app>";
   const app = siteUrl();
-  const logoUrl = app + "/assets/brand/cg-logo-white-g.png";
+  const logoUrl = app + "/assets/brand/cg-logo-white-g.png?v=f3bf5530";
   const detail = "Your Clarity Caddy account has been created by " + (actorName || "your coach") + ". Use the secure button below to set your password. This link is unique to your account.";
   const html = [
     "<!doctype html><html><body style=\"margin:0;background:#07100b;color:#f7faf7;font-family:Arial,Helvetica,sans-serif\">",

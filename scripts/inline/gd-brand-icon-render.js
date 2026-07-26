@@ -5,7 +5,7 @@
   const ZOOM_SVG = '<svg aria-hidden="true" viewBox="0 0 48 48" fill="none"><circle cx="21" cy="21" r="10" stroke="currentColor" stroke-width="4"/><path d="M29 29l9 9" stroke="currentColor" stroke-width="4" stroke-linecap="round"/><path d="M21 15v12M15 21h12" stroke="currentColor" stroke-width="3.4" stroke-linecap="round"/></svg>';
   const SETTINGS_SVG = '<svg aria-hidden="true" viewBox="0 0 48 48" fill="none"><circle cx="24" cy="24" r="5.5" stroke="currentColor" stroke-width="3.6"/><path d="M24 8v6M24 34v6M10.1 16l5.2 3M32.7 29l5.2 3M10.1 32l5.2-3M32.7 19l5.2-3" stroke="currentColor" stroke-width="3.6" stroke-linecap="round"/></svg>';
 
-	  const CG_GPS_ICON_SRC = 'assets/brand/cg-gps-pin.png?v=clarity-cg-gps-20260601';
+	  const CG_GPS_ICON_SRC = 'assets/brand/cg-gps-pin.png?v=deb3313b';
 	  function icon(key) {
 	    const src = key === 'cgGps' ? CG_GPS_ICON_SRC : (GD66_ICONS[key] || '');
 	    const cls = key === 'cgGps' ? 'gdBrandIcon gdCgGpsIcon' : 'gdBrandIcon';

@@ -171,7 +171,7 @@
     return String(origin || "").replace(/\/+$/, "");
   }
   function logoUrl(){
-    return publicBase() + "/assets/brand/cg-logo-white-g.png?v=clarity-20260531";
+    return publicBase() + "/assets/brand/cg-logo-white-g.png?v=f3bf5530";
   }
   function appUrl(){
     return publicBase() + "/";

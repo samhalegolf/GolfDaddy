@@ -2442,7 +2442,7 @@
 	    const signature=gdPracticeBagSuggestionSignature(estimate,prefillRows,hasBag);
 	    const notify=!gdPracticeBagSuggestionSeen(signature);
 	    if(!gdPracticeBagSuggestionOpen){
-	      return `<button type="button" class="gdPracticeBagSuggestionIcon ${notify?"unseen":""} ${hasBag?"hasBag":"noBag"}" aria-label="Open bag distance suggestions" onclick="return gdPracticeToggleBagSuggestions(true)"><span class="gdPracticeBagSuggestionIconFrame"><img src="assets/home/bag.png" alt=""></span></button>`;
+	      return `<button type="button" class="gdPracticeBagSuggestionIcon ${notify?"unseen":""} ${hasBag?"hasBag":"noBag"}" aria-label="Open bag distance suggestions" onclick="return gdPracticeToggleBagSuggestions(true)"><span class="gdPracticeBagSuggestionIconFrame"><img src="assets/home/bag.png?v=ae58e8eb" alt=""></span></button>`;
 	    }
     const body=previewRows.map(row=>{
       const currentValue=row.currentCarry==null?"":String(Math.round(Number(row.currentCarry)||0));
@@ -2459,7 +2459,7 @@
         ? `<button type="button" onclick="return gdPracticeApplyBagSuggestions('suggested')">Adopt</button><button type="button" onclick="return gdPracticeToggleBagAdapt(true)">Adapt</button><button type="button" onclick="return gdPracticeApplyBagSuggestions('keep')">Not now</button>`
         : `<button type="button" onclick="return gdPracticeApplyBagSuggestions('suggested')">Adopt</button><button type="button" onclick="return gdPracticeApplyBagSuggestions('keep')">Not now</button>`);
 	    const linkCopy=link?`<div class="gdPracticeDistanceLink"><span>Distance link</span><strong>${gdEscapeHTML(link.club)} / ${Math.round(Number(link.trueDistanceM)||0)}m</strong></div>`:"";
-	    return `<div class="gdPracticeBagSuggestionPanel ${hasBag?"hasBag":"noBag"} ${gdPracticeBagAdaptOpen?"adapt":""}"><div class="gdPracticeBagSuggestionHead"><div class="gdPracticeBagSuggestionTitle"><img src="assets/home/bag.png" alt=""><span>Bag</span></div><button type="button" aria-label="Close" onclick="return gdPracticeToggleBagSuggestions(false)">×</button></div>${linkCopy}${linkChoices}<div class="gdPracticeBagSuggestionGrid"><span>Club</span><span>${gdPracticeBagAdaptOpen?"Edit current":hasBag?"Current":"Bag"}</span><span>Suggested</span><span>Diff</span>${body}</div><div class="gdPracticeBagSuggestionActions">${actions}</div></div>`;
+	    return `<div class="gdPracticeBagSuggestionPanel ${hasBag?"hasBag":"noBag"} ${gdPracticeBagAdaptOpen?"adapt":""}"><div class="gdPracticeBagSuggestionHead"><div class="gdPracticeBagSuggestionTitle"><img src="assets/home/bag.png?v=ae58e8eb" alt=""><span>Bag</span></div><button type="button" aria-label="Close" onclick="return gdPracticeToggleBagSuggestions(false)">×</button></div>${linkCopy}${linkChoices}<div class="gdPracticeBagSuggestionGrid"><span>Club</span><span>${gdPracticeBagAdaptOpen?"Edit current":hasBag?"Current":"Bag"}</span><span>Suggested</span><span>Diff</span>${body}</div><div class="gdPracticeBagSuggestionActions">${actions}</div></div>`;
 	  }
 	  function gdPracticeBagSuggestionNoticeHTML(analysis){
 	    if(gdPracticeBagSuggestionOpen)return"";
