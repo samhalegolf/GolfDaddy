@@ -3063,18 +3063,33 @@
   // legitimately sit off-centre from My Bubble when the two distances differ -
   // that gap is real (it's what the Distance Suggestion feature is meant to close)
   // and must not be normalised away per-club.
-  function gdBubbleRelativeShotRows(shots,anchorDistanceM){
-    const anchor=Number(anchorDistanceM);
-    if(!Number.isFinite(anchor)||anchor<=0)return [];
+  // PER-CLUB OUTCOME NORMALISATION. Every shot is plotted against ITS OWN club's
+  // baseline, so a wedge and a driver both centre on zero and a mixed bag reads
+  // correctly. The axis means "how far off your own number for THAT club" - the
+  // same thing everywhere, which is exactly why the reading holds with more than
+  // one club on screen.
+  //
+  // A single shared anchor was tried instead and cannot work with a mixed bag: a
+  // 105m wedge against a 142m anchor plots at -26%, off the bottom of the window,
+  // purely because it is a wedge - nothing to do with how it was struck.
+  //
+  // baselineFor(club) supplies the club's own number: the saved bag carry when the
+  // player has a real bag, otherwise the median of that club's own shots. Never a
+  // stand-in - a club with no baseline is not plotted.
+  function gdBubbleRelativeShotRows(shots,baselineFor){
+    const resolve=typeof baselineFor==="function"
+      ?baselineFor
+      :()=>Number(baselineFor);
     return (Array.isArray(shots)?shots:[]).map((shot,index)=>{
       const actual=gdPracticeShotActualDistance(shot);
-      if(!Number.isFinite(actual)||actual<=0)return null;
-      const angle=gdPracticeNormalisedAngleForShot(shot,anchor);
+      const baseline=Number(resolve(shot?.club,shot));
+      if(!Number.isFinite(actual)||actual<=0||!Number.isFinite(baseline)||baseline<=0)return null;
+      const angle=gdPracticeNormalisedAngleForShot(shot,baseline);
       return {
         club:shot?.club||"Unknown",
         actualDistanceM:actual,
-        expectedDistanceM:anchor,
-        normalisedDepthM:(actual-anchor)/anchor*100,
+        expectedDistanceM:baseline,
+        normalisedDepthM:(actual-baseline)/baseline*100,
         normalizedDeg:Number.isFinite(angle)?angle:0,
         hasLateral:Number.isFinite(angle),
         shot,
@@ -5963,7 +5978,25 @@
       const ry=gdShotChartClamp((maxY-minY)/2+7,9,32);
       return `<ellipse class="gdPracticeClusterMarker gdShotChartClubOval practice" data-source="cluster-marker" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" rx="${rx.toFixed(1)}" ry="${ry.toFixed(1)}" fill="rgba(255,210,135,.82)" fill-opacity=".014" stroke="rgba(255,210,135,.82)" stroke-width=".7" stroke-opacity=".46" stroke-dasharray="1 5" stroke-linecap="round" pointer-events="none"/>`;
     }
-	    const anchorRelativeRows=anchorDistanceM?gdBubbleRelativeShotRows(shots,anchorDistanceM):[];
+	    // Each club's own number: the saved bag carry when there is a real bag,
+	    // otherwise the median of that club's own shots. Same precedence as the
+	    // anchor above, so the dots and the bubbles are measured against the same
+	    // reference and "0" means the same thing for both.
+	    const clubShotDistances={};
+	    shots.forEach(shot=>{
+	      const key=gdShotBubbleOverlayClubKey(shot?.club);
+	      const actual=gdPracticeShotActualDistance(shot);
+	      if(!key||!Number.isFinite(actual)||actual<=0)return;
+	      (clubShotDistances[key]=clubShotDistances[key]||[]).push(actual);
+	    });
+	    const clubBaselineFor=club=>{
+	      const key=gdShotBubbleOverlayClubKey(club);
+	      const bagCarry=Number(anchorBagByClub[key]?.actualDistanceM);
+	      if(Number.isFinite(bagCarry)&&bagCarry>0)return bagCarry;
+	      const median=gdShotBubbleMedian(clubShotDistances[key]||[]);
+	      return Number.isFinite(median)&&median>0?median:NaN;
+	    };
+	    const anchorRelativeRows=gdBubbleRelativeShotRows(shots,clubBaselineFor);
 	    const myBubbleParts=anchorDistanceM&&hubRows.length&&gdPracticeHasBubbleOffset(hubOffset)?gdBubbleRelativeParts(hubRows,hubOffset,anchorDistanceM):[];
 	    const practiceBubbleParts=anchorDistanceM&&showPracticeLayer?gdBubbleRelativeParts(overlayRows,practiceBubbleOffset,anchorDistanceM):[];
 	    const normalisedPlot=gdPracticeNormalisedPlotLayout();
