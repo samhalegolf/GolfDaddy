@@ -380,47 +380,25 @@ async function resolveAccount(payload, options) {
   return account;
 }
 
-// Resolve an account for endpoints that must NOT hard-require a live JWT - e.g.
-// the referral dashboard, where a stale/unverifiable token would otherwise 401
-// even though the user is a known account.
-//
-// A verified Supabase-Auth token still wins when one is present: it is the
-// strongest identity we have, and it means an authenticated caller carrying no
-// X-Clarity-Account-* header (the common case) resolves instead of 401'ing, and
-// cannot be talked into acting as someone else by a spoofed payload accountId.
-// Only when there is no usable token do we fall back to client-supplied identity
-// (payload accountId/email or the X-Clarity-Account-* headers) - the same trust
-// model the rest of Caddie already uses, and resolveAccount's own fallback.
-async function resolveAccountByIdentity(payload, event) {
-  const authAccount = await authenticatedAccount(event).catch(function () { return null; });
-  if (authAccount) return authAccount;
-
-  const headers = (event && event.headers) || {};
-  const headerId = text(headers["x-clarity-account-id"] || headers["X-Clarity-Account-Id"], 120);
-  const headerEmail = email(headers["x-clarity-account-email"] || headers["X-Clarity-Account-Email"]);
-  const accountId = text(payload && (payload.accountId || payload.userId || payload.account_id || payload.user_id), 120) || headerId;
-  const accountEmail = email(payload && (payload.email || payload.accountEmail || payload.account_email)) || headerEmail;
-  if (!accountId && !accountEmail) {
-    const error = new Error("Sign in before continuing");
-    error.status = 401;
-    throw error;
-  }
-  let account = null;
-  if (accountId) {
-    const rows = await supabaseFetch("app_accounts?select=*&account_id=eq." + encodeFilter(accountId) + "&limit=1", { method: "GET" });
-    account = Array.isArray(rows) ? rows[0] : null;
-  }
-  if (!account && accountEmail) {
-    const rows = await supabaseFetch("app_accounts?select=*&email=eq." + encodeFilter(accountEmail) + "&limit=1", { method: "GET" });
-    account = Array.isArray(rows) ? rows[0] : null;
-  }
-  if (!account || !account.account_id) {
-    const error = new Error("Sign in before continuing");
-    error.status = 401;
-    throw error;
-  }
-  return account;
-}
+/* Removed 2026-07-27: resolveAccountByIdentity.
+ *
+ * It resolved an account from a verified token when one was present, but fell
+ * back to client-supplied identity when there was not - payload accountId/email
+ * or the X-Clarity-Account-Id / X-Clarity-Account-Email headers, none of them
+ * authenticated. Its only caller was functions/referrals.js, where the fallback
+ * meant an unauthenticated request carrying another member's account id or email
+ * was treated as that member.
+ *
+ * The fallback was there to keep a stale access token from 401'ing the referral
+ * dashboard. The clients now refresh an expired token before the request and
+ * retry once after a 401 (authedHeaders in scripts/clarity-payments.js), so the
+ * case it covered no longer occurs and referrals requires a validated token.
+ *
+ * Deliberately not replaced with a stricter variant: an identity helper that
+ * reads request headers is the shape of the bug, and leaving one exported is an
+ * invitation to reintroduce it. Endpoints needing a caller identity should use
+ * authenticatedAccount (token only) or resolveAccount (token, with the legacy
+ * payload path gated behind CLARITY_ALLOW_LEGACY_PAYMENT_ACCOUNT_PAYLOAD). */
 
 function accountCustomerId(account) {
   return text(account && (account.stripe_customer_id || account.metadata && account.metadata.stripe_customer_id), 200);
@@ -629,7 +607,6 @@ module.exports = {
   productPriceId,
   readPaidAccess,
   resolveAccount,
-  resolveAccountByIdentity,
   rowProductKey,
   stripeFetch,
   stripeSubscriptionBlocksNewCheckout,

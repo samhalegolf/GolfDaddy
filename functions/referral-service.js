@@ -104,6 +104,24 @@ function publicInvitation(row) {
   };
 }
 
+/* What an UNAUTHENTICATED caller sees for an invitation they hold the link to.
+   Much narrower than publicInvitation, which is a member's view of their own
+   invitations: this one is reached by anyone holding the token, and a referral
+   link gets forwarded, pasted into group chats and logged by link previewers.
+   So it carries nothing identifying about the invitee - no inviteeEmail, no
+   inviteeAccountId, no friendName - and no risk flags, which would tell an
+   attacker probing tokens how our fraud checks scored them. The landing page
+   needs the inviter's first name and the offer; that is all this returns. */
+function invitationPreview(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    status: row.status,
+    inviterName: row.attribution_metadata && row.attribution_metadata.inviter_name || "",
+    expiresAt: row.expires_at || ""
+  };
+}
+
 function publicReward(row) {
   if (!row) return null;
   return {
@@ -170,7 +188,15 @@ async function createReferralInvite(account, options) {
     token_hash: hashToken(token),
     status: "open",
     friend_name: text(payload.friendName || payload.friend_name, 160) || null,
-    invitee_email: email(payload.friendEmail || payload.inviteeEmail || payload.email) || null,
+    /* Only an explicitly named recipient. This used to fall back to
+       payload.email, which the client filled with the INVITER's own address (it
+       merged accountPayload() into the invite body), so every invite created
+       without a friend email was stored as addressed to the person who created
+       it - shown back to them on their own dashboard as the invite title, and
+       counted as `targeted` in analytics. The invitee's real address is recorded
+       at accept time as invitee_account_email; this column is only ever the
+       address the inviter typed in, and is null when they typed none. */
+    invitee_email: email(payload.friendEmail || payload.inviteeEmail || payload.friend_email) || null,
     expires_at: addDaysIso(now, cfg.inviteExpiryDays),
     created_by_ip_hash: requestHash(options.event, "x-forwarded-for"),
     attribution_metadata: {
@@ -275,7 +301,7 @@ async function openReferralToken(token, options) {
   const referral = await referralByToken(token);
   if (!referral) throw badRequest("Referral link is invalid", 404);
   const valid = validateReferralForOpening(referral);
-  if (!valid.ok) return { ok: false, invalid: true, reason: valid.reason, invitation: publicInvitation(referral) };
+  if (!valid.ok) return { ok: false, invalid: true, reason: valid.reason, invitation: invitationPreview(referral) };
   let row = referral;
   if (row.status === "open") {
     row = await patchReferral(row.id, {
@@ -290,7 +316,7 @@ async function openReferralToken(token, options) {
       metadata: { status: "opened" }
     });
   }
-  return { ok: true, invitation: publicInvitation(row), message: "A real free month. No card. No automatic renewal." };
+  return { ok: true, invitation: invitationPreview(row), message: "A real free month. No card. No automatic renewal." };
 }
 
 function validateReferralForOpening(referral) {

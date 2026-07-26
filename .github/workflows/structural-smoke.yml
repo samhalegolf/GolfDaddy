@@ -62,6 +62,10 @@ jobs:
           node dev/auth-update-account.test.js
           node dev/account-delete.test.js
           node dev/payment-admin-auth.test.js
+          node dev/referrals-auth.test.js
+          node dev/referral-invite-target.test.js
+          node dev/payment-checkout-client.test.js
+          node dev/payment-entitlement-auth.test.js
           node dev/store-referral-reversal.test.js
           node dev/email-public-url.test.js
           node dev/auth-refresh-resilience.test.js
