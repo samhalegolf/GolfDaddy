@@ -127,6 +127,12 @@ test("--app-only prunes studio-only files instead of shipping them dark", () => 
   refs(appOnlyHtml).forEach((ref) => {
     assert.ok(fs.existsSync(path.join(DIST, ref)), "pruned a file the app build still loads: " + ref);
   });
+  /* A directory the prune emptied still rides into the APK and the .app, where
+     an empty scripts/studio/ reads as "the studio code is in here". */
+  assert.ok(
+    !fs.existsSync(path.join(DIST, "scripts", "studio")),
+    "scripts/studio/ survived --app-only as an empty directory and would ship in the native bundle"
+  );
 });
 
 let failed = 0;

@@ -193,6 +193,14 @@ console.log("App surface: removed " + app.removed + " studio-only elements, stam
 
 if (APP_ONLY) {
   studioOnlyFiles.forEach(function (ref) { fs.rmSync(path.join(dist, ref), { force: true }); });
+  /* Pruning a file can leave its directory behind. An empty scripts/studio/ then
+     rides into the APK and the .app, where it reads as "the studio code is in
+     here" to anyone auditing the bundle. Remove directories the prune emptied. */
+  const emptied = new Set(studioOnlyFiles.map(function (ref) { return path.dirname(ref); }));
+  emptied.forEach(function (dir) {
+    const target = path.join(dist, dir);
+    if (fs.existsSync(target) && fs.readdirSync(target).length === 0) fs.rmdirSync(target);
+  });
   console.log("--app-only: no studio output; pruned " + studioOnlyFiles.length + " studio-only files from dist");
 } else {
   /* <base href="/"> rather than rewriting every path: the studio lives at
