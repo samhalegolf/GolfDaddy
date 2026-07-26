@@ -5831,7 +5831,12 @@
 	    const inner=shape(innerPart);
 	    const ring=e=>`M ${(e.cx-e.rx).toFixed(1)} ${e.cy.toFixed(1)} A ${e.rx.toFixed(1)} ${e.ry.toFixed(1)} 0 1 0 ${(e.cx+e.rx).toFixed(1)} ${e.cy.toFixed(1)} A ${e.rx.toFixed(1)} ${e.ry.toFixed(1)} 0 1 0 ${(e.cx-e.rx).toFixed(1)} ${e.cy.toFixed(1)} Z`;
 	    const tilt=Number(outerPart.tiltDeg)||0;
-	    const transform=tilt?` transform="rotate(${(-tilt).toFixed(1)} ${outer.cx.toFixed(1)} ${outer.cy.toFixed(1)})"`:"";
+	    // POSITIVE, not negated. The GPS bubble rotates its downrange axis toward
+	    // +lateral (right) for a right-hander; on this chart long is UP, so the far
+	    // end must swing right, which is a CLOCKWISE (positive) SVG rotation. The
+	    // old negation was correct only in the original side-on frame where up meant
+	    // right - flipping the y sign and then swapping the axes reversed it twice.
+	    const transform=tilt?` transform="rotate(${tilt.toFixed(1)} ${outer.cx.toFixed(1)} ${outer.cy.toFixed(1)})"`:"";
 	    const colour=opts.colour||GD_COURSE_BUFFER_COLOUR;
 	    return `<g class="gdCourseBubbleBufferLayer" aria-hidden="true"${transform}>`
 	      +`<path class="gdCourseBubbleBufferBand" d="${ring(outer)} ${ring(inner)}" fill-rule="evenodd" fill="${colour}" fill-opacity="${opts.fillOpacity||".16"}" stroke="none"/>`
@@ -5866,7 +5871,7 @@
 	        return `<g class="gdPracticeBubbleEmbossLabel" data-source="practice-bubble-label" pointer-events="none" aria-hidden="true">${line(opts.labelText,-.55,-.55,"rgba(0,0,0,.58)")}${line(opts.labelText,.55,.6,isMy?"rgba(255,236,181,.24)":"rgba(160,255,201,.20)")}${line(opts.labelText,0,0,isMy?"rgba(28,17,2,.86)":"rgba(0,14,8,.84)")}</g>`;
 	      })():"";
 	      const dashAttr=opts.strokeDasharray?` stroke-dasharray="${gdStatsSvgText(opts.strokeDasharray)}" stroke-linecap="round"`:"";
-	      return `<ellipse class="gdOffsetHubBubble${opts.ellipseClass?` ${gdStatsSvgText(opts.ellipseClass)}`:""}" data-club="${gdStatsSvgText(part.club)}" data-source="${gdStatsSvgText(opts.source||"")}" data-offset-deg="${Number(part.angleDeg).toFixed(2)}" data-base-distance-m="${Number(part.baseDistanceM).toFixed(1)}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" rx="${rx.toFixed(1)}" ry="${ry.toFixed(1)}"${part.tiltDeg?` transform="rotate(${(-part.tiltDeg).toFixed(1)} ${cx.toFixed(1)} ${cy.toFixed(1)})"`:""} fill="${colour}" fill-opacity="${fillOpacity}" stroke="${colour}" stroke-width="${strokeWidth}" stroke-opacity="${strokeOpacity}"${dashAttr}/>${label}`;
+	      return `<ellipse class="gdOffsetHubBubble${opts.ellipseClass?` ${gdStatsSvgText(opts.ellipseClass)}`:""}" data-club="${gdStatsSvgText(part.club)}" data-source="${gdStatsSvgText(opts.source||"")}" data-offset-deg="${Number(part.angleDeg).toFixed(2)}" data-base-distance-m="${Number(part.baseDistanceM).toFixed(1)}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" rx="${rx.toFixed(1)}" ry="${ry.toFixed(1)}"${part.tiltDeg?` transform="rotate(${Number(part.tiltDeg).toFixed(1)} ${cx.toFixed(1)} ${cy.toFixed(1)})"`:""} fill="${colour}" fill-opacity="${fillOpacity}" stroke="${colour}" stroke-width="${strokeWidth}" stroke-opacity="${strokeOpacity}"${dashAttr}/>${label}`;
 	    }).join("")}</g>`;
 	  }
 	  function practiceSvg(analysis){

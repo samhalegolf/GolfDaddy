@@ -116,6 +116,21 @@ Consequences that must be kept in step: bubble `rx` comes from the ANGLE and `ry
 the DEPTH (they swap with the axes), and the target line is the vertical one while
 zero-distance is the horizontal.
 
+**Tilt direction goes with the frame — LAW.** The SVG rotation is `rotate(+tiltDeg)`,
+NOT negated. The GPS bubble rotates its downrange axis toward +lateral (right) for a
+right-hander (`gdBubbleLocalToLatLng`, frame `x = downrange`, `y = right`), so on this
+chart - where long is UP - the far end must swing right, which is a CLOCKWISE, i.e.
+POSITIVE, SVG rotation.
+
+The negation that used to be there was correct in the ORIGINAL side-on frame, where up
+meant right. Flipping the y sign (section 3) and then swapping the axes each reversed
+the rotation sense, so it had to go. Any future change to which axis carries what must
+re-check this sign - it is not independent of the frame.
+
+Verified: right-handed 7i -> `rotate(10)`, far end lands right of centre, matching the
+GPS maths; left-handed mirrors it exactly at `rotate(-10)`; the buffer band matches its
+bubble.
+
 The origin-bottom toggle, its stored preference and the rotate button are gone - all
 dead code with no call sites, and keeping the transform would double-rotate the new
 geometry.
