@@ -4355,3 +4355,5 @@
   border:1px solid rgba(255,90,95,.3)!important;
   color:rgba(255,255,255,.8)!important;
 }
+/* A bubble is saved, but the one on screen is new - adopting will replace it. */
+.gdPracticeAdoptStatus.fresh{border-color:rgba(98,210,255,.4);background:rgba(98,210,255,.1)}

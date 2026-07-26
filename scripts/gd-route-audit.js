@@ -2468,7 +2468,16 @@
   function gdPracticeProjectionControlsHTML(analysis){
     const ctx=gdPracticeProjectionContext(analysis);
     const p=safe(()=>ensureProfile(),null);
-    const adopted=gdPracticePlayingBubbleIsAdopted(p);
+    // "Adopted" must mean THIS bubble, not "a bubble was adopted once".
+    // gdPracticePlayingBubbleIsAdopted only checks that a source is active and its
+    // offset matches the profile - it knows nothing about the live analysis, so
+    // once anything had been saved the dock locked to Adopted/Saved forever, even
+    // after new shots produced a completely different practice bubble. The
+    // fingerprint-aware check is the one that answers the real question.
+    const adopted=gdPracticeCurrentBubbleWasAdopted(p,analysis);
+    // A bubble is saved, but it is NOT the one on screen - so adopting is available
+    // again and will replace it.
+    const hasStaleSaved=!adopted&&gdPracticePlayingBubbleIsAdopted(p);
     const pending=p?.practiceBubblePendingSource||null;
     // A pending stage counts toward the button's toggle state only while it
     // still matches the CURRENTLY live practice bubble - if the underlying
@@ -2494,7 +2503,9 @@
 	      ?`<div class="gdPracticeAdoptStatus pending"><strong>Adopted, not saved</strong><span>Save to lock it into My Bubble, or Undo to drop it.</span></div>`
 	      :savedLocked
 	        ?`<div class="gdPracticeAdoptStatus saved"><strong>Saved to My Bubble</strong><span>Locked in — Undo is no longer available. Adopt a new bubble to replace it.</span></div>`
-	        :"";
+	        :hasStaleSaved
+	          ?`<div class="gdPracticeAdoptStatus fresh"><strong>New practice bubble</strong><span>This is not the bubble you saved. Adopting replaces it.</span></div>`
+	          :"";
 	    const bagSuggestion=gdPracticeBagSuggestionHTML(analysis);
 	    const bagNotice=gdPracticeBagSuggestionNoticeHTML(analysis);
 	    return `<div class="gdPracticeActionDock ${tone} ${bagSuggestion?"hasBagSuggestion":""} ${gdPracticeBagSuggestionOpen?"bagOpen":""}"><div class="gdPracticePrimaryActions"><button type="button" class="gdPracticeBubbleAction save ${pendingActive?"ready":""} ${savedLocked?"locked":""}" ${saveDisabled} onclick="return gdPracticeSaveBubbleFromAction()">${gdEscapeHTML(saveLabel)}</button><button type="button" class="gdPracticeBubbleAction adopt ${adopted?"adopted":""} ${pendingActive?"pending":""}" aria-pressed="${adopted||pendingActive?"true":"false"}" ${adoptDisabled} onclick="return ${adoptAction}">${gdEscapeHTML(adoptLabel)}</button></div>${adoptStatus}${bagSuggestion?`<div class="gdPracticeBagSuggestionSlot">${bagSuggestion}</div>`:""}</div>${gdPracticeSandboxControlsHTML("compact")}${bagNotice}`;

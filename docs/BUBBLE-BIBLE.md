@@ -405,6 +405,18 @@ saved" -> `Undo` | after Save, "✓ Saved" and `Adopted` both disabled, with a
 persistent line stating that Undo is no longer available. Being locked in is said
 outright, not implied by a greyed-out button.
 
+**"Adopted" must mean THIS bubble, not "a bubble was adopted once".** Use
+`gdPracticeCurrentBubbleWasAdopted(p, analysis)`, which compares the saved source's
+fingerprint against the live analysis - NOT `gdPracticePlayingBubbleIsAdopted`, which
+only checks that a source is active and its offset matches the profile. That one knows
+nothing about the shots on screen, so once anything had been saved the dock locked to
+Adopted/Saved permanently, even after new data produced a completely different bubble.
+
+When a bubble is saved but is not the one on screen, the dock unlocks and says so:
+*"New practice bubble - this is not the bubble you saved. Adopting replaces it."*
+Verified: adopt -> save locks both buttons; a new import unlocks `Adopt` and shows
+that line.
+
 The old "Generate Bubble" button is gone. Its only job was switching the overlay on,
 and adopting never needed the overlay visible - so adopt depends on `canProject`
 alone. Gating it on `ctx.visible` would leave it permanently disabled without Generate.
