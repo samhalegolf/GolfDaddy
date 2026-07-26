@@ -34,9 +34,21 @@ it can't be mistaken for an intended path.
   `p.previewBubbleSet`, `p.practiceBubbleSource` / `practiceBubblePendingSource`.
 - **Numbers from:** a real adoption or a real save. Nothing else.
 - **Never invented.** If there's no real saved bubble the code returns `null` rather
-  than a stand-in (`gdMyBubbleHubSource`, gd-route-audit.js:4312). Sources whose
-  `shapeSource` matches `placeholder|default|stand-in|fallback|ghost|manual-profile`
-  are rejected for GPS rendering by `gdMyBubbleGpsSourceLooksRenderable`.
+  than a stand-in (`gdMyBubbleHubSource`). Sources whose `shapeSource` matches
+  `placeholder|default|stand-in|fallback|ghost|manual-profile` are rejected for GPS
+  rendering by `gdMyBubbleGpsSourceLooksRenderable`.
+- **ONLY AN ACTIVE SOURCE COUNTS — LAW.** A saved *shape* on the profile is not a My
+  Bubble by itself. `gdMyBubbleHubSource` requires a pending stage or
+  `practiceBubbleSource.active === true` before it returns anything.
+
+  Why this had to be stated: nothing in the app ever deleted `previewBubbleSet` or
+  `bubbleProfiles`. Unadopting drops the pending stage, clearing practice data drops
+  the source - the shape outlives both. Reading the shape alone rendered a My Bubble
+  (and its buffer band) on Course while the UI, which reads `practiceBubbleSource` /
+  `faceOffsetDeg`, correctly reported none set. Same question, two answers.
+- **There is now a way to remove one.** `gdClearMyBubble()` wipes the source, the
+  pending stage AND the saved shapes together, so the state cannot split again.
+  Before it, a My Bubble could only be replaced by another save, never cleared.
 - **Affects play:** yes — supplies the sideways aim (`aimOffsetM = tan(offset) x carry`),
   and the saved shape when the bag is real.
 - **States:** `default` -> `pending` (adopted, unsaved) -> `saved` -> `adopted-current`.

@@ -4481,6 +4481,14 @@
       const pendingSource=gdGpsReadyMyBubbleSource(pending.bubble,{offsetDeg:Number(pending.offsetDeg),club:pending.club,handedness:p?.handedness});
       return pendingSource?Object.assign({},pendingSource,{shapeSource:pendingSource.shapeSource||"practice-pending-save"}):null;
     }
+    // ONLY AN ACTIVE SOURCE COUNTS. A saved SHAPE left on the profile is not a My
+    // Bubble on its own. Nothing in the app ever deletes `previewBubbleSet` or
+    // `bubbleProfiles`, so an old shape outlives everything - unadopting drops the
+    // pending stage, clearing practice data drops the source, and the shape stays.
+    // Reading the shape alone rendered a My Bubble on Course while the UI (which
+    // reads `practiceBubbleSource`/`faceOffsetDeg`) correctly reported none set.
+    // Same question, two answers. The source is the answer.
+    if(!p?.practiceBubbleSource||p.practiceBubbleSource.active!==true)return null;
     const selected=gdCompareClubKey(club)||gdCompareClubKey(p?.previewBubbleSet?.club)||"7i";
     const currentOffset=Number.isFinite(Number(offset))?Number(offset):0;
     const exactKey=selected&&p?.bubbleProfiles&&typeof p.bubbleProfiles==="object"
@@ -4737,6 +4745,45 @@
     gdRenderBubbleOffsetHub(true);
     face.focus();
     face.select?.();
+  }
+  // The only way to remove a My Bubble. Before this there was none: nothing in the
+  // app deleted previewBubbleSet or bubbleProfiles, so a saved bubble could only
+  // ever be replaced by another save, never cleared. Wipes the source, the pending
+  // stage and the saved shapes together, so the state cannot split again.
+  function gdClearMyBubble(){
+    const {p}=gdBubbleDataContext();
+    if(!p)return false;
+    const hasAnything=!!(p.practiceBubbleSource||p.practiceBubblePendingSource||p.previewBubbleSet||(p.bubbleProfiles&&Object.keys(p.bubbleProfiles).length));
+    if(!hasAnything){
+      gdLmToast("No My Bubble to clear");
+      return false;
+    }
+    return gdConfirmAction({
+      title:"Clear My Bubble?",
+      message:"Removes the saved bubble, its shape and any pending adoption. Your practice and course data are untouched.",
+      confirmLabel:"Clear"
+    },()=>{
+      delete p.practiceBubbleSource;
+      delete p.practiceBubblePendingSource;
+      delete p.practiceBubblePendingAt;
+      delete p.practiceBubblePreviousState;
+      delete p.practiceBubbleAdoptedAt;
+      delete p.previewBubbleSet;
+      delete p.bubbleProfiles;
+      p.faceOffsetDeg=0;
+      p.centralFaceOffsetDeg=0;
+      p.updatedAt=new Date().toISOString();
+      safe(()=>gdClearMyBubbleLanePreviewPendingSource());
+      savePlayerProfiles();
+      syncCoreProfileFromActive();
+      gdRenderBubbleOffsetHub();
+      renderPracticeData(true);
+      renderDataHubStatus();
+      if(document.getElementById("statsPanel")?.classList.contains("open"))renderStats();
+      renderCompareData();
+      safe(()=>typeof renderShot==="function"&&renderShot());
+      gdLmToast("My Bubble cleared");
+    });
   }
   function gdBubbleOffsetSave(){
     const {p}=gdBubbleDataContext();
@@ -7770,6 +7817,7 @@
 	      gdRenderBubbleOffsetHub:gdRenderBubbleOffsetHub,
       gdBubbleOffsetEdit:gdBubbleOffsetEdit,
       gdBubbleOffsetSave:gdBubbleOffsetSave,
+      gdClearMyBubble:gdClearMyBubble,
       gdLoadPracticeDemo:loadPracticeDemo,
       gdClearPracticeData:clearPracticeData,
 	      gdCanonicalShellBack:function(){return window.GDShell?.back?.({source:"legacy-canonical-back"});},
