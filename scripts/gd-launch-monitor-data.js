@@ -41,6 +41,13 @@
     launchToleranceDeg: 6,
     dynamicLoftToleranceDeg: 8,
     spinTolerancePct: 0.35,
+    // DYNAMIC GATE. The spin baselines below assume a reference ball speed. A
+    // slower player generates less speed AND less spin, so a fixed spin window
+    // fails their good shots and passes nothing useful. When enabled, the spin
+    // window is re-centred on the speed the shot was actually hit at.
+    dynamicGateEnabled: true,
+    dynamicGateMinRatio: 0.65,
+    dynamicGateMaxRatio: 1.35,
     // Bag-sync bubble scaling (replaces the retired cross-club verification
     // gate as the tunable surface): how saved bubbles rescale when bag
     // numbers change.
@@ -868,6 +875,52 @@
     return null;
   }
 
+  // Ball speed (mph) the clubBaseline spin figures assume. Same shape as the
+  // baseline table so the two stay in step.
+  function clubReferenceBallSpeed(club) {
+    var key = String(club || '').toLowerCase();
+    if (key === 'driver' || key === '1w') return 152;
+    if (key === '3w') return 142;
+    var iron = key.match(/^([2-9])i$/);
+    if (iron) return 141 - Number(iron[1]) * 3.6;
+    if (key === 'pw') return 100;
+    if (key === 'gw') return 95;
+    if (key === 'sw') return 88;
+    if (key === 'lw') return 82;
+    return 0;
+  }
+  // Launch monitors report ball speed in mph, m/s or km/h and rarely say which.
+  // A ratio built on the wrong unit would distort every gate, so anything that
+  // cannot be placed confidently returns 0 and the dynamic gate simply does not
+  // engage - no adjustment beats a wrong adjustment.
+  function ballSpeedToMph(value, club) {
+    var raw = Number(value);
+    if (!Number.isFinite(raw) || raw <= 0) return 0;
+    var ref = clubReferenceBallSpeed(club);
+    if (!ref) return 0;
+    var candidates = [raw, raw * 2.23694, raw * 0.621371];
+    var best = 0;
+    var bestGap = Infinity;
+    candidates.forEach(function (mph) {
+      var gap = Math.abs(mph - ref) / ref;
+      if (gap < bestGap) { bestGap = gap; best = mph; }
+    });
+    return bestGap <= 0.45 ? best : 0;
+  }
+  // How far this shot's speed sits from the model the baselines were written for.
+  // 1 = exactly the reference; below 1 = slower player, so a lower spin window.
+  function dynamicGateSpeedRatio(shot, cfg) {
+    if (!cfg || cfg.dynamicGateEnabled === false) return 1;
+    var club = shot && shot.club;
+    var ref = clubReferenceBallSpeed(club);
+    if (!ref) return 1;
+    var mph = ballSpeedToMph(metricValue(shot, ['ballSpeed', 'ball speed', 'ballspeed']), club);
+    if (!mph) return 1;
+    var min = Number.isFinite(Number(cfg.dynamicGateMinRatio)) ? Number(cfg.dynamicGateMinRatio) : 0.65;
+    var max = Number.isFinite(Number(cfg.dynamicGateMaxRatio)) ? Number(cfg.dynamicGateMaxRatio) : 1.35;
+    return clamp(mph / ref, min, max);
+  }
+
   // === Custom club/ball data gates ===
   // Admin-authored rules stored as a JSON array in cfg.customGates. A shot
   // matching any enabled rule is excluded from cluster consideration.
@@ -971,7 +1024,11 @@
     var base = clubBaseline(shot && shot.club);
     var spin = metricValue(shot, ['totalSpin', 'total spin', 'backspin', 'spin', 'spinRate']);
     var spinTolerance = Math.max(0.05, Number(cfg.spinTolerancePct) || 0.35);
-    if (!skip('totalSpin') && base && Number.isFinite(spin) && Math.abs(spin - base.spin) > base.spin * spinTolerance) return 'spin_amount';
+    // Dynamic gate: spin scales with ball speed, so the window is re-centred on
+    // the speed actually delivered rather than the model's reference speed.
+    var speedRatio = dynamicGateSpeedRatio(shot, cfg);
+    var expectedSpin = base ? base.spin * speedRatio : 0;
+    if (!skip('totalSpin') && base && Number.isFinite(spin) && Math.abs(spin - expectedSpin) > expectedSpin * spinTolerance) return 'spin_amount';
     var launch = metricValue(shot, ['launchAngle', 'launch']);
     if (!skip('launchAngle') && base && Number.isFinite(launch) && Math.abs(launch - base.launch) > Math.max(1, Number(cfg.launchToleranceDeg) || 6)) return 'launch_angle';
     var dynamicLoft = metricValue(shot, ['dynamicLoft']);
@@ -1326,6 +1383,8 @@
     analyzeDisplay: analyzeDisplay,
     customGateExclusionReason: function (shot, cfg) { return customGateExclusionReason(shot, cfg || settings()); },
     practiceQualityExclusionReason: function (shot, cfg) { return practiceQualityExclusionReason(shot, cfg || settings()); },
+    dynamicGateSpeedRatio: function (shot, cfg) { return dynamicGateSpeedRatio(shot, cfg || settings()); },
+    clubReferenceBallSpeed: clubReferenceBallSpeed,
     parseCustomGates: parseCustomGates,
     parseSourceTrust: parseSourceTrust,
     identifyProvider: identifyProviderFromText,
