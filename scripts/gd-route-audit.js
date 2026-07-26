@@ -2084,17 +2084,24 @@
       gdLmToast("Practice Bubble not ready");
       return false;
     }
-    if(!ctx.visible){
-      gdLmToast("Generate Practice Bubble first");
-      return false;
-    }
-    if(gdPracticePlayingBubbleIsAdopted(safe(()=>ensureProfile(),null))){
+    // No ctx.visible check: that required the overlay to be switched on, which was
+    // the old Generate button's job. With Generate gone this guard refused every
+    // adopt while the dock button sat enabled - a dead end with a misleading toast.
+    if(gdPracticeCurrentBubbleWasAdopted(safe(()=>ensureProfile(),null),analysis)){
       gdLmToast("Practice Bubble already adopted");
       return false;
     }
-    gdPracticeBagSuggestionOpen=false;
     gdPracticeBagAdaptOpen=false;
+    // ADOPT TAKES DIRECTION ONLY. Distance is a separate, explicit decision, so the
+    // bag opens straight afterwards with the suggestions to review rather than the
+    // player having to know to go looking for them.
+    const hasDistanceSuggestions=safe(()=>gdPracticePrefillRows(analysis).length>0,false);
+    gdPracticeBagSuggestionOpen=!!hasDistanceSuggestions;
     gdPracticeAdoptBubbleAsPlayingBubble();
+    gdLmToast(hasDistanceSuggestions
+      ?"Direction adopted - review distance suggestions"
+      :"Direction adopted");
+    safe(()=>gdPracticeRefreshProjectionSurfaces());
     return false;
   }
   // Undo the staging step from gdPracticeAdoptBubbleAsPlayingBubble - clears
@@ -2500,7 +2507,7 @@
 	    // The state line is the "locked in" feedback: it has to be unambiguous that
 	    // Undo has stopped being an option once Save has been pressed.
 	    const adoptStatus=pendingActive
-	      ?`<div class="gdPracticeAdoptStatus pending"><strong>Adopted, not saved</strong><span>Save to lock it into My Bubble, or Undo to drop it.</span></div>`
+	      ?`<div class="gdPracticeAdoptStatus pending"><strong>Direction adopted, not saved</strong><span>Review the distance suggestions in the bag, then Save to lock it in — or Undo to drop it.</span></div>`
 	      :savedLocked
 	        ?`<div class="gdPracticeAdoptStatus saved"><strong>Saved to My Bubble</strong><span>Locked in — Undo is no longer available. Adopt a new bubble to replace it.</span></div>`
 	        :hasStaleSaved
