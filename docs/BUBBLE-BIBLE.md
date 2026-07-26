@@ -119,7 +119,7 @@ that does not change while the player is looking at it.
 
 | screen | anchor |
 |---|---|
-| Practice | the practice bubble's own **drawn (learned) distance** |
+| Practice | the **saved bag** carry for the club; practice measurement only when no real bag is set |
 | Comparison | My Bubble, else Practice, else Course - whichever real bubble exists |
 | Course | zero is the bubble that was played; no per-club anchoring at all (see 5) |
 
@@ -135,18 +135,29 @@ only when no My Bubble existed. That meant the anchor CHANGED the instant a bubb
 adopted (measured 142m -> My Bubble's 155m) and the whole cluster jumped ~57px down on
 adopt and back on undo. Nothing about the shots had changed; only the denominator.
 
-Two things this rule needs, both learned the hard way:
+**The bag is the reference.** Bag-anchoring is deliberate: the bag is the fixed thing
+everything else is measured against, and it does not move when a bubble is adopted.
+The jump was never caused by bag-anchoring - it was caused by the anchor SWITCHING
+SOURCE (bag via `hubRows` when a My Bubble existed, practice distance when it did not),
+so adopting flipped it and every dot moved.
 
-1. The anchor is read from rows built **unconditionally**, not from `overlayRows` -
-   adoption empties those, which reintroduces the jump by another route. Only the
-   *drawing* of the practice layer is gated on adoption, never the anchor.
-2. It is the row's **learned** distance, not the source's nominal `baseDistanceM`.
-   Those differ (142 vs 155), and anchoring to the nominal one leaves the practice
-   bubble hanging off-centre in its own frame.
+Four traps, each of which produced the jump again on the way to getting this right:
 
-Consequence, and the point of it: My Bubble's distance difference now shows as a real
-vertical offset of its ellipse rather than being absorbed into the axis. That gap is
-what the Distance Suggestion exists to close, so it belongs on screen.
+1. **Never source the anchor from `hubRows`.** They only exist once a bubble is
+   adopted, so anything reading them switches on adopt by definition.
+2. **Saved bag, not the bag draft.** Adoption writes the learned distance into the
+   draft, so anchoring to the draft moves the frame on adopt all over again.
+3. **Only a REAL bag counts.** `gdPracticeSavedBagRows` happily returns the seeded
+   ghost bag; anchoring the chart to stand-in numbers is the same sin as drawing a
+   stand-in bubble. `gdPracticeHasUserBag()` is the test - false when the bag is a
+   seeded default the player has never touched. Only then does the practice
+   measurement take over.
+4. **Resolve the club against the bag, not the bubble's label.** The practice bubble's
+   `club` can be a display label ("Practice oval"), which keys to `"practice oval"`
+   and matches no bag row - looking that up first silently missed the bag every time.
+
+Verified: real bag 7i=150m -> anchor 150 through adopt AND save, 0px dot movement;
+ghost bag only -> anchor falls back to the measured 142m, also 0px.
 
 ---
 

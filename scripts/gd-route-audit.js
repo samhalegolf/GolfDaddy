@@ -5849,18 +5849,42 @@
     // as a percentage of the anchor, the whole cluster jumped ~57px down on adopt
     // and back on undo. Nothing about the shots had changed; only the denominator.
     //
-    // Taken from practiceRows, not overlayRows (emptied on adopt) and not the
-    // source's nominal baseDistanceM - the row carries the LEARNED distance the
-    // practice bubble is actually drawn at, and anchoring to anything else leaves
-    // the practice bubble hanging off-centre in its own frame.
+    // THE ANCHOR IS THE BAG DISTANCE. It is bag-tied on purpose: the bag is the
+    // fixed reference everything else is measured against, and it does NOT move
+    // when a bubble is adopted, so the frame holds still.
     //
-    // Consequence, and the point of it: My Bubble's own distance difference is now
-    // visible as a vertical offset of its ellipse instead of being absorbed into
-    // the axis. That gap is real - it is what the Distance Suggestion closes.
-    const practiceAnchorM=Number(practiceRows[0]?.actualDistanceM);
-    const anchorDistanceM=(Number.isFinite(practiceAnchorM)&&practiceAnchorM>0?practiceAnchorM:null)
+    // The jump was never caused by bag-anchoring - it was caused by the anchor
+    // SWITCHING SOURCE. It read the bag via hubRows when a My Bubble existed and
+    // fell back to the practice bubble's distance when one did not, so adopting
+    // flipped it (142m -> 155m) and every dot moved ~57px. Reading the bag
+    // directly, whether or not a bubble has been adopted, removes the switch
+    // without giving up the bag reference.
+    //
+    // Practice measured distance is the fallback ONLY when the player has no bag
+    // entry for the club at all - never a preference over the bag.
+    // Resolve against whichever candidate actually HAS a bag entry. The practice
+    // bubble's `club` can be a display label ("Practice oval"), which keys to
+    // "practice oval" and matches no bag row - looking it up first silently missed
+    // the bag every time and fell through to the practice distance.
+    // ONLY A REAL BAG ANCHORS. gdPracticeSavedBagRows happily returns the seeded
+    // ghost bag, and anchoring the whole chart to stand-in numbers would be the
+    // same sin as drawing a stand-in bubble. gdPracticeHasUserBag is the app's own
+    // test - false when the bag is a seeded default the player has never touched.
+    // With no real bag, the practice measurement below takes over.
+    const hasRealBag=safe(()=>gdPracticeHasUserBag(),false);
+    // SAVED bag, not the draft: adoption writes the learned distance into the bag
+    // draft, so anchoring to the draft moved the frame on adopt all over again.
+    // The committed bag only changes when the player commits it.
+    const anchorBagByClub=hasRealBag?(safe(()=>gdPracticeBagRowsByClub(gdPracticeSavedBagRows()),null)||{}):{};
+    const anchorBagCarry=[practiceRows[0]?.club,hubRows[0]?.club,practiceShape?.club]
+      .map(club=>Number(anchorBagByClub[gdShotBubbleOverlayClubKey(club)]?.actualDistanceM))
+      .find(carry=>Number.isFinite(carry)&&carry>0);
+    const bagAnchorM=Number(anchorBagCarry);
+    // No hubRows step: those only exist once a bubble is adopted, so including
+    // them anywhere in this chain reintroduces the switch-on-adopt by definition.
+    const anchorDistanceM=(Number.isFinite(bagAnchorM)&&bagAnchorM>0?bagAnchorM:null)
+      ||Number(practiceRows[0]?.actualDistanceM)
       ||Number(practiceShape?.baseDistanceM)
-      ||Number(hubRows[0]?.baseDistanceM)
       ||null;
     const domainRows=overlayRows
       .concat(hubRows)
