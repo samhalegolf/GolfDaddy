@@ -3211,8 +3211,49 @@
   function renderDataHubStatus(){
     gdRenderDataHubCards();
   }
+  // THE NORMALISED CLUB. Practice output is expressed in a 7-iron view - the
+  // cluster method pools every club into one oval and labels it "Practice oval",
+  // which is a DISPLAY LABEL, not a club. Storing that label as the bubbleProfiles
+  // key is what orphaned saved bubbles: `gdMyBubbleHubSource` looks up by real
+  // club, so Practice, Comparison and the GPS bubble all found nothing, while
+  // Course happened to find it only because it looks up with club=null and falls
+  // back to the bubble's own label. Keys are clubs; labels are for reading.
+  const GD_NORMALISED_VIEW_CLUB="7i";
+  function gdIsRealClubKey(club){
+    const key=String(gdCompareClubKey(club)||"").trim();
+    if(!key)return false;
+    if(/^(driver|\d{1,2}\s*(w|h|i)|[pgslaw]w)$/i.test(key.replace(/\s+/g,"")))return true;
+    return safe(()=>(typeof gdBagSourceRows==="function"?gdBagSourceRows():[])
+      .some(row=>gdCompareClubKey(row?.club||row?.name).toLowerCase()===key.toLowerCase()),false);
+  }
+  function gdMyBubbleStorageClub(club){
+    return gdIsRealClubKey(club)?(gdCompareClubKey(club)||GD_NORMALISED_VIEW_CLUB):GD_NORMALISED_VIEW_CLUB;
+  }
+  // Re-keys bubbles already saved under a label. Without this the fix would only
+  // help bubbles saved from now on, and an existing one would stay orphaned.
+  function gdMigrateMyBubbleClubKeys(p){
+    if(!p||typeof p!=="object")return p;
+    let changed=false;
+    if(p.bubbleProfiles&&typeof p.bubbleProfiles==="object"){
+      Object.keys(p.bubbleProfiles).forEach(key=>{
+        if(gdIsRealClubKey(key))return;
+        const bubble=p.bubbleProfiles[key];
+        delete p.bubbleProfiles[key];
+        if(bubble&&typeof bubble==="object"){
+          p.bubbleProfiles[GD_NORMALISED_VIEW_CLUB]=Object.assign({},bubble,{club:GD_NORMALISED_VIEW_CLUB});
+        }
+        changed=true;
+      });
+    }
+    if(p.previewBubbleSet&&typeof p.previewBubbleSet==="object"&&!gdIsRealClubKey(p.previewBubbleSet.club)){
+      p.previewBubbleSet=Object.assign({},p.previewBubbleSet,{club:GD_NORMALISED_VIEW_CLUB});
+      changed=true;
+    }
+    if(changed)safe(()=>savePlayerProfiles());
+    return p;
+  }
   function gdBubbleDataContext(){
-    const p=safe(()=>ensureProfile(),null);
+    const p=safe(()=>gdMigrateMyBubbleClubKeys(ensureProfile()),null)||safe(()=>ensureProfile(),null);
     return{p};
   }
   function gdBubbleCentralOffset(p){
@@ -4796,8 +4837,13 @@
       const club=pending.club||pendingBubble.club||gdCompareClub||"7i";
       const rawBaseDistance=Number(pendingBubble.baseDistanceM||pendingBubble.baseCarry||pendingBubble.expectedDistanceM)||gdShotBubbleSafe(()=>gdDefaultCarryForClub(club),155)||155;
       const baseDistance=pending.distanceMode==="manual-preview"?gdMyBubbleClampLaneDistance(rawBaseDistance,club,pendingBubble):rawBaseDistance;
+      // Store under the normalised club, never the practice label. `club` above can
+      // be "Practice oval" - a display label - and using it as the key orphaned the
+      // bubble from every lookup that asks by real club.
+      const storageClub=gdMyBubbleStorageClub(club);
       const bubble=Object.assign({},pendingBubble,{
-        club,
+        club:storageClub,
+        displayClub:club,
         baseCarry:baseDistance,
         baseDistanceM:baseDistance,
         faceOffsetDeg:offset,
@@ -4813,7 +4859,7 @@
       p.placeholderProfile=false;
       p.previewBubbleSet=bubble;
       p.bubbleProfiles=Object.assign({},p.bubbleProfiles||{});
-      p.bubbleProfiles[gdCompareClubKey(club)||"7i"]=bubble;
+      p.bubbleProfiles[storageClub]=bubble;
       p.practiceBubbleSource={
         active:true,
         offsetDeg:Number(offset.toFixed(2)),
