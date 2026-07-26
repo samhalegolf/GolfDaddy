@@ -40,6 +40,18 @@ const publicPaths = [
   "assets",
   "scripts",
   "styles",
+  // Legal pages, served at the site root. These are the URLs given to Apple and
+  // Google in the store listings, and Play fetches the privacy policy during
+  // review - a 404 there fails the submission. They shipped only under /assets
+  // until 2026-07-27, so https://caddy.claritygolf.app/privacy.html did not
+  // resolve at all. The /assets copies are now redirect stubs pointing here, so
+  // there is one canonical source and older links keep working.
+  "privacy.html",
+  "terms.html",
+  "support.html",
+  // Play Console requires a web-accessible account deletion URL for any app
+  // that allows account creation.
+  "delete-account.html",
   // Deep-link verification files. Android reads assetlinks.json and iOS reads
   // apple-app-site-association from this path over https; if they are not
   // deployed, links open the browser instead of the app and the failure is

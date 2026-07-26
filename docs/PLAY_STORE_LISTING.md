@@ -166,9 +166,15 @@ one.
 | Email | samhalegolf@gmail.com |
 | Website | https://caddy.claritygolf.app |
 | Privacy policy | https://caddy.claritygolf.app/privacy.html |
+| Account deletion | https://caddy.claritygolf.app/delete-account.html |
 
-Confirm the privacy URL resolves on the live site before submitting — Play
-fetches it, and a 404 fails review.
+**Both URLs only work once the site is redeployed.** Until 2026-07-27 the deploy
+build shipped the legal pages only under `/assets/`, so `/privacy.html` returned
+404 — verified against the live site. `privacy.html`, `terms.html`,
+`support.html` and `delete-account.html` are now in `publicPaths` in
+`scripts/clarity-deploy-build.js`, and the `/assets/` copies are redirect stubs
+so older links keep working. Confirm both URLs return 200 on the live site before
+submitting: Play fetches the privacy policy during review and a 404 fails it.
 
 ---
 
@@ -193,25 +199,38 @@ Data collected and linked to the user:
 Answers to the standard questions:
 
 - **Is data encrypted in transit?** Yes — all API traffic is HTTPS.
-- **Can users request data deletion?** (CONFIRM) You need a working deletion
-  path and a URL describing it. Play requires this. If there is no in-app
-  delete-account flow, the minimum is a documented email request route added to
-  `privacy.html`.
-- **Is any data shared with third parties?** Yes (CONFIRM the list) — payment and
-  entitlement data flows to RevenueCat and the store; account data sits in
-  Supabase; the site is hosted on Netlify. Processors acting on your behalf are
-  generally declared as processing rather than sharing, but the RevenueCat
-  relationship should be stated.
+- **Can users request data deletion?** Yes. Give Play
+  `https://caddy.claritygolf.app/delete-account.html`. That page documents an
+  email-verified request route, what is deleted, what is retained and why, and
+  how to cancel a store subscription first.
+
+  There is also an **in-app** route as of 2026-07-27 — Settings → Delete account
+  → type DELETE — backed by `functions/account-delete.js`. Play prefers seeing
+  both, and reviewers do look for the in-app path. The email route remains for
+  users who cannot sign in, and those requests are still actioned by hand within
+  the 30-day commitment.
+- **Is any data shared with third parties?** Processors are listed in
+  `privacy.html`: Supabase (database and auth), Netlify (hosting, functions,
+  blob storage), Stripe (web payments), RevenueCat (store purchase validation),
+  Apple/Google (in-app purchases), Resend (transactional email). These act on
+  your behalf, so they are declared as processing rather than sharing.
+
+  Separately, the device itself contacts Esri/ArcGIS, OpenStreetMap, the Overpass
+  API and Open-Meteo for tiles, course outlines and weather. Those see the
+  device's IP and the area being requested, but no account data. This is
+  disclosed in the policy.
 - **Location collected in the background?** **No.** The app holds a single
   foreground `watchPosition` for the round and the manifest declares no
   `ACCESS_BACKGROUND_LOCATION`. Keep it that way — declaring background location
   triggers a separate Play review with a video demonstration requirement and is a
   common multi-week delay.
 
-`privacy.html` is currently thin. It covers what is collected but does not state
-retention, deletion rights, or name the processors. That is acceptable for Play's
-letter but weak against the Data safety cross-check, and thin privacy policies
-are a recurring rejection cause. Worth expanding before submission.
+`privacy.html` was rewritten on 2026-07-27 to cover collection, location scope,
+photos, named processors, retention periods, deletion rights, security, children
+and change notification. The retention periods in it (30 days to live deletion,
+12 months to backup overwrite) were chosen as reasonable defaults — **confirm
+they match what you can actually deliver**, because they are now a public
+commitment.
 
 ---
 
@@ -241,10 +260,12 @@ subscription app does not want.
 - [ ] Upload keystore created and backed up off-machine
 - [ ] Signed AAB built
 - [ ] `.well-known/assetlinks.json` carries the Play App Signing fingerprint
-- [ ] Feature graphic made
+- [x] Feature graphic made (draft at `assets/store/play-feature-graphic.png`)
 - [ ] Screenshots captured on a real course
-- [ ] Privacy policy expanded with retention and deletion
-- [ ] Data deletion path exists and is documented
+- [x] Privacy policy expanded with retention and deletion
+- [x] Data deletion path documented at `/delete-account.html`
+- [ ] Site redeployed so `/privacy.html` and `/delete-account.html` return 200
+- [ ] Retention periods confirmed as deliverable
 - [ ] Billing products created and RevenueCat connected
 - [ ] Sandbox purchase completed end to end on a real device
 - [ ] Real-course GPS verified on a physical phone
