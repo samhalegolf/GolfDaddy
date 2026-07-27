@@ -11,6 +11,14 @@
    Phase 2 and reads these captures back down. */
 
 import sharp from "sharp";
+
+/* libvips caches decoded images and operation results so a repeated pipeline is cheap. This
+   worker is the opposite shape: ~50 large composites, each touched once and never again, so
+   the cache is pure retention. Measured on the Jacks Point snapshot, RSS climbed 725 -> 870MB
+   across a single minute (capture 12 of 50) against a 1024MB function, surviving only because
+   the 3-minute relay kept restarting the process before it burst. Turning the cache off costs
+   nothing here - there is no reuse to lose. */
+sharp.cache(false);
 import { planCourseCaptures, captureGrid, packageHoleData, courseBoundsFor } from "./lib/gd-visual-plan-core.mjs";
 import { resolveImagerySource, unscannableReason, attributionFor } from "./lib/gd-imagery-sources.mjs";
 import { renderHoleSurfaceMercator, renderOverview } from "./lib/gd-visual-export-core.mjs";
@@ -18,7 +26,12 @@ import { renderHoleSurfaceMercator, renderOverview } from "./lib/gd-visual-expor
 const JOBS_TABLE = "course_visual_jobs";
 const MAPS_TABLE = "course_maps";
 const BUCKET = "course-visuals";
-const TILE_CONCURRENCY = 8;
+/* Tile fetching is what a snapshot spends its time on: measured on Jacks Point, 13.1s per
+   capture against composites that take a fraction of that, so this number sets the wall clock.
+   8 was chosen when the source was a third-party endpoint we had no relationship with; LINZ and
+   USGS are CDN-fronted and licensed, so a course scan is no longer something to be shy about.
+   Raise further only with a failure rate to look at - a 429 storm costs more than it saves. */
+const TILE_CONCURRENCY = 16;
 const TILE_TIMEOUT_MS = 15000;
 const TILE_RETRIES = 3;
 
@@ -247,9 +260,19 @@ async function runSnapshotJob(job, deadlineAt) {
         }
         /* Export-ready rendition: pre-downscaled to the frame output resolution so the export
            never has to download and decode the full-resolution capture again. Decoding 17MP
-           JPEGs per hole was most of the export's CPU bill on throttled serverless cores. */
-        const small = sharp(buffer, { limitInputPixels: false }).resize({ width: EXPORT_RENDITION_PX, height: EXPORT_RENDITION_PX, fit: "inside", withoutEnlargement: true });
-        await storageUpload(renditionPath, await (isTerrain ? small.png({ compressionLevel: 6 }) : small.jpeg({ quality: 88 })).toBuffer(), isTerrain ? "image/png" : "image/jpeg");
+           JPEGs per hole was most of the export's CPU bill on throttled serverless cores.
+
+           At 3072 most captures are already at or under the cap - measured on Jacks Point, the
+           renditions came back within a few percent of their masters and the backdrop rendition
+           was LARGER than the one it came from. For those, resizing is a no-op and the encode
+           is a full decode + re-encode that changes nothing but the JPEG quality number. Skip
+           it and ship the composite as shot. */
+        const fitsAlready = grid.imageWidth <= EXPORT_RENDITION_PX && grid.imageHeight <= EXPORT_RENDITION_PX;
+        const renditionBuffer = fitsAlready ? buffer : await (() => {
+          const small = sharp(buffer, { limitInputPixels: false }).resize({ width: EXPORT_RENDITION_PX, height: EXPORT_RENDITION_PX, fit: "inside", withoutEnlargement: true });
+          return (isTerrain ? small.png({ compressionLevel: 6 }) : small.jpeg({ quality: 88 })).toBuffer();
+        })();
+        await storageUpload(renditionPath, renditionBuffer, isTerrain ? "image/png" : "image/jpeg");
         buffer = null;
         shot += 1;
       }
