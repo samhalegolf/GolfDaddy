@@ -11,6 +11,14 @@
   var STORE_KEY="gd_course_visual_engine_v1";
   var PRESET_KEY="gd_course_visual_presets_v1";
   var API_ENDPOINT="/api/course-visuals";
+  var JOBS_ENDPOINT="/api/course-visual-jobs";
+  var ASSET_ENDPOINT="/api/course-visual-assets";
+  /* THE flag for the interim state, and the only place it is decided. "live-until-ready" plays
+     the course over live tiles with its objects drawn on top while the server builds it;
+     "block-until-ready" is the identical flow behind a blocking loading screen. Nothing else in
+     the codebase may branch on this value - flipping it here is the whole change. */
+  var FRAMES_WAIT_MODE="live-until-ready";
+  var FRAMES_POLL_MS=20000;
   var ASSET_DB_NAME="gd_course_visual_assets_v1";
   var ASSET_STORE_NAME="assets";
   var VALID_STATUSES={unavailable:1,"input-ready":1,stitching:1,"basic-ready":1,rendering:1,"preview-ready":1,published:1,failed:1};
@@ -3202,6 +3210,203 @@
       return row?restoreCloudMetadata(row):getRecord(courseId);
     }).catch(function(){return getRecord(courseId);});
   }
+  /* ---------- cloud frames: the app surface's only visual source ---------------------------
+
+     A course IS 18 hole images in the database. Everything below is the consumer end of that
+     and nothing else: ask the server what state a course is in, download its frames once, keep
+     them in the asset store under their versioned paths, and play from there. There is no bake
+     path here - the app surface never authors a frame, it only ever reads one.
+
+     The asset store holds the bytes at a path: a data URL for images, and the raw JSON text
+     for index.json. The index is written LAST, after every frame it names is stored, so its
+     presence is the completion marker - a download interrupted at hole 14 leaves no index and
+     reads back as "not cached" rather than as a course that fails on the 14th tee. */
+
+  function courseAssetUrl(path){return ASSET_ENDPOINT+"?path="+encodeURIComponent(String(path||""));}
+  function courseFramesIndexPath(courseId){return slug(courseId)+"/frames/index.json";}
+  function courseFramePaths(index){
+    var paths=(index&&Array.isArray(index.holes)?index.holes:[]).map(function(hole){return hole&&hole.path||"";}).filter(Boolean);
+    if(index&&index.overview&&index.overview.path)paths.push(index.overview.path);
+    return paths;
+  }
+
+  /* Parsed body plus the status, because 429 and 404 are answers the caller must act on
+     differently from "the network is gone". */
+  function courseApiJson(url,init){
+    if(!root||typeof root.fetch!=="function")return Promise.resolve({ok:false,status:0,body:null});
+    return root.fetch(url,init||{headers:{Accept:"application/json"}}).then(function(res){
+      return res.json().catch(function(){return null;}).then(function(body){return {ok:!!res.ok,status:res.status,body:body};});
+    }).catch(function(){return {ok:false,status:0,body:null};});
+  }
+
+  /* "unknown" is deliberately NOT "none". A phone with no signal must never read an
+     unreachable server as "this course has never been built" and start a course scan. */
+  function courseBuildState(courseId){
+    return courseApiJson(JOBS_ENDPOINT+"?courseId="+encodeURIComponent(slug(courseId))).then(function(result){
+      var body=result.body;
+      if(!result.ok||!body||!body.state)return {state:"unknown",framesReady:false,framesVersion:null};
+      return body;
+    });
+  }
+
+  /* Player-triggered build. The token is passed in rather than read from an auth global so the
+     generated client stays closed over its own closure. */
+  function requestCourseBuild(courseId,accessToken){
+    if(!accessToken)return Promise.resolve({started:false,state:"none",reason:"sign-in-required"});
+    return courseApiJson(JOBS_ENDPOINT,{
+      method:"POST",
+      headers:{"Content-Type":"application/json",Accept:"application/json",Authorization:"Bearer "+accessToken},
+      body:JSON.stringify({courseId:slug(courseId),kind:"auto"})
+    }).then(function(result){
+      var body=result.body||{};
+      return {started:result.status===202,state:body.state||"unknown",status:result.status,reason:body.error||""};
+    });
+  }
+
+  function blobToDataUrl(blob){
+    return new Promise(function(resolve){
+      if(!blob||!root||typeof root.FileReader!=="function"){resolve(null);return;}
+      var reader=new root.FileReader();
+      reader.onload=function(){resolve(String(reader.result||"")||null);};
+      reader.onerror=function(){resolve(null);};
+      if(!safe(function(){reader.readAsDataURL(blob);return true;},false))resolve(null);
+    });
+  }
+
+  /* Every read goes through the same-origin /api proxy, never a Storage URL - that is what
+     keeps the Capacitor shells and mobile web on one code path (docs/NATIVE_SHELL.md). */
+  function downloadCourseAsset(path){
+    if(!root||typeof root.fetch!=="function")return Promise.resolve(null);
+    return root.fetch(courseAssetUrl(path)).then(function(res){
+      return res&&res.ok?res.blob():null;
+    }).then(function(blob){
+      return blob?blobToDataUrl(blob):null;
+    }).then(function(dataUrl){
+      if(!dataUrl)return null;
+      return saveAssetData(path,dataUrl).then(function(){return dataUrl;});
+    }).catch(function(){return null;});
+  }
+
+  function cachedCourseFrames(courseId){
+    var id=slug(courseId);
+    return loadAssetData(courseFramesIndexPath(id)).then(function(raw){
+      var index=raw?safe(function(){return JSON.parse(raw);},null):null;
+      if(!index||!Array.isArray(index.holes)||!index.holes.length)return null;
+      var paths=courseFramePaths(index);
+      return Promise.all(paths.map(function(path){return loadAssetData(path);})).then(function(list){
+        /* All or nothing. A partial set is worse than none: it plays fine until the hole whose
+           frame is missing, which is the middle of somebody's round. */
+        if(!list.length||list.some(function(data){return !data;}))return null;
+        return {courseId:id,index:index,version:String(index.exportVersion||""),holes:index.holes,overview:index.overview||null,complete:true};
+      });
+    }).catch(function(){return null;});
+  }
+
+  function downloadCourseFrames(courseId,opts){
+    opts=opts||{};
+    var id=slug(courseId);
+    var indexPath=courseFramesIndexPath(id);
+    if(!root||typeof root.fetch!=="function")return Promise.resolve(null);
+    return root.fetch(courseAssetUrl(indexPath),{headers:{Accept:"application/json"},cache:"no-store"}).then(function(res){
+      return res&&res.ok?res.json():null;
+    }).then(function(index){
+      if(!index||!Array.isArray(index.holes)||!index.holes.length)return null;
+      var paths=courseFramePaths(index);
+      var done=0;
+      /* Serial, not parallel: 19 concurrent image downloads on course mobile data is how you
+         turn a slow start into a failed one. */
+      return paths.reduce(function(chain,path){
+        return chain.then(function(ok){
+          if(!ok)return false;
+          return downloadCourseAsset(path).then(function(data){
+            if(!data)return false;
+            done+=1;
+            if(typeof opts.onProgress==="function")safe(function(){opts.onProgress({done:done,total:paths.length,path:path});});
+            return true;
+          });
+        });
+      },Promise.resolve(true)).then(function(ok){
+        if(!ok)return null;
+        return saveAssetData(indexPath,JSON.stringify(index)).then(function(){
+          return {courseId:id,index:index,version:String(index.exportVersion||""),holes:index.holes,overview:index.overview||null,complete:true};
+        });
+      });
+    }).catch(function(){return null;});
+  }
+
+  /* The whole automatic route from the app's side, as one call.
+
+     Cached frames are served IMMEDIATELY and without waiting on the network - that is both the
+     zero-network case and the offline story, since a course opened once plays in flight mode.
+     A revalidation runs behind that: index.json is small and carries the export version, so
+     comparing it is one cheap request and needs no assumptions about version numbering.
+
+     With no cached frames it asks the server where the course is up to, starts a build if it
+     has never been built, and polls until frames land. Play runs over live tiles with the
+     course objects drawn on top for the whole of that wait - see FRAMES_WAIT_MODE. */
+  function ensureCourseFrames(courseId,opts){
+    opts=opts||{};
+    var id=slug(courseId);
+    var pollMs=Math.max(5000,Number(opts.pollMs)||FRAMES_POLL_MS);
+    var stopped=false;
+    var timer=null;
+    function emit(name,payload){if(typeof opts[name]==="function")safe(function(){opts[name](payload);});}
+    function stop(){stopped=true;if(timer&&root&&root.clearTimeout)root.clearTimeout(timer);timer=null;}
+    function deliver(frames){if(stopped||!frames)return false;emit("onFrames",frames);return true;}
+    function fetchAndDeliver(){
+      return downloadCourseFrames(id,{onProgress:function(p){emit("onProgress",p);}}).then(function(frames){
+        if(frames){deliver(frames);stop();return true;}
+        return false;
+      });
+    }
+    function poll(){
+      if(stopped)return;
+      timer=root&&root.setTimeout?root.setTimeout(function(){
+        if(stopped)return;
+        courseBuildState(id).then(function(state){
+          if(stopped)return;
+          emit("onState",state);
+          if(state.state==="frames-ready")return fetchAndDeliver().then(function(ok){if(!ok)poll();});
+          if(state.state==="failed"){stop();return;}
+          poll();
+        });
+      },pollMs):null;
+    }
+    cachedCourseFrames(id).then(function(cached){
+      if(stopped)return;
+      if(cached){
+        deliver(Object.assign({},cached,{fromCache:true}));
+        /* Revalidate quietly. A newer export replaces the frames under the player without
+           interrupting the round; a failed check simply leaves the cached ones in place. */
+        courseApiJson(courseAssetUrl(courseFramesIndexPath(id))).then(function(result){
+          var index=result.ok&&result.body||null;
+          if(stopped||!index||String(index.exportVersion||"")===cached.version)return;
+          fetchAndDeliver();
+        });
+        return;
+      }
+      courseBuildState(id).then(function(state){
+        if(stopped)return;
+        emit("onState",state);
+        if(state.state==="frames-ready")return fetchAndDeliver().then(function(ok){if(!ok)poll();});
+        /* Offline or unreachable: play live and try again next time the course is opened.
+           Starting a build on a guess would be the one irreversible mistake available here. */
+        if(state.state==="unknown"){stop();return;}
+        if(state.state==="failed"){stop();return;}
+        if(state.state==="none"){
+          return requestCourseBuild(id,opts.accessToken).then(function(result){
+            if(stopped)return;
+            emit("onState",{state:result.started?"queued":result.state,requested:result.started,reason:result.reason});
+            if(result.started||result.state==="queued"||result.state==="running")poll();
+            else stop();
+          });
+        }
+        poll();
+      });
+    });
+    return {stop:stop,courseId:id};
+  }
+
   function captureCandidateList(output){
     if(!output)return [];
     if(Array.isArray(output))return output.map(function(item,index){return {manifest:item,raw:item,index:index};});
@@ -3473,6 +3678,15 @@
     storeKey:STORE_KEY,
     presetKey:PRESET_KEY,
     apiEndpoint:API_ENDPOINT,
+    jobsEndpoint:JOBS_ENDPOINT,
+    assetEndpoint:ASSET_ENDPOINT,
+    framesWaitMode:FRAMES_WAIT_MODE,
+    courseAssetUrl:courseAssetUrl,
+    courseBuildState:courseBuildState,
+    requestCourseBuild:requestCourseBuild,
+    cachedCourseFrames:cachedCourseFrames,
+    downloadCourseFrames:downloadCourseFrames,
+    ensureCourseFrames:ensureCourseFrames,
     defaultPreset:defaultPreset,
     greenToneHex:greenToneHex,
     beta3dTiltPolicy:beta3dTiltPolicy,
