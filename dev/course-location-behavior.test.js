@@ -76,7 +76,11 @@ assert(library.includes("owner.attachToCourse({...snap,courseCentre:opts.courseC
 assert(library.includes("const resolved=owner&&typeof owner.resolve==='function'&&!isManualGpsCourse(c)?owner.resolve(c,{requireConfirmed:false}):null;"), "assumed-course matching consults owner before GPS fallback");
 assert(library.includes("const resolved=owner&&typeof owner.get==='function'?owner.get(course):null;"), "Course Library finder reads owner-confirmed centre first");
 assert(library.includes("owner.confirm(c,{lat,lng},{source:source||'course-library-finder'})"), "Course Library finder saves through owner");
-assert(library.includes("owner.remove(saved,{source:'course-library-remove-location'})"), "Course Library clear removes through owner");
+/* The library's "clear this course's location" control went with the mapper UI
+   (2026-07-28). Removing a whole course replaced it, and carries the same
+   obligation: the owner holds the picker pin in a different store and caches the
+   active centre, so a delete that skips it strands both. */
+assert(library.includes("owner.remove(course,{source:'course-library-remove-course'})"), "Course Library course removal releases the location through owner");
 assert(resolver.includes("toPoint(input.courseCentre)") && resolver.includes("toPoint(input.courseCenter)"), "native resolver remains a consumer of centre input only");
 
 assert(courseMaps.includes("courseLocation: locationPoint ? {"), "cloud course-map sanitizer preserves owner metadata");

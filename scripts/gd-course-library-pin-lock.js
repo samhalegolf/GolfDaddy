@@ -3364,7 +3364,7 @@
     el=document.createElement('div');
     el.id='gdCourseConfirmOverlay';
     el.className='gdCourseConfirmOverlay hidden';
-    el.innerHTML=`<div class="gdCourseConfirmSheet"><div class="gdCourseConfirmHead"><div><h2>Playing at</h2><p>Confirm the course label for this GPS session. Saved mapper data will live under this course.</p></div><button class="gdSheetClose" type="button" onclick="gdCloseCourseConfirmation()">×</button></div><div id="gdCourseConfirmBody"></div></div>`;
+    el.innerHTML=`<div class="gdCourseConfirmSheet"><div class="gdCourseConfirmHead"><div><h2>Playing at</h2><p>Confirm which course this round is saved under.</p></div><button class="gdSheetClose" type="button" onclick="gdCloseCourseConfirmation()">×</button></div><div id="gdCourseConfirmBody"></div></div>`;
     el.addEventListener('click',ev=>{if(ev.target===el)gdCloseCourseConfirmation();});
     document.body.appendChild(el);
     return el;
@@ -3379,9 +3379,9 @@
     const rows=candidates
       .filter(course=>normalizeCourseName(course.courseName)!==currentNorm)
       .slice(0,5)
-      .map(course=>`<button class="gdCourseCandidate" type="button" data-course-name="${esc(course.courseName)}"><strong>${esc(course.courseName)}</strong><span>${Math.round(course.distanceM)}m away · ${courseSummaryLine(courseSummary(course))}</span></button>`)
+      .map(course=>`<button class="gdCourseCandidate" type="button" data-course-name="${esc(course.courseName)}"><strong>${esc(course.courseName)}</strong><span>${esc(distanceLabel(course.distanceM))} · ${esc(savedDataLabel(course))}</span></button>`)
       .join('');
-    body.innerHTML=`<div class="gdCourseCurrent"><span>Current session</span><strong>${esc(label)}</strong><small>${isUsefulCourseName(label)?'Selected course label':'Assumed from current GPS/map position'}</small></div>${rows?`<div class="gdCourseCandidateList"><p>Nearby saved courses</p>${rows}</div>`:`<div class="gdCourseCandidateEmpty">No nearby saved courses yet. Search by name if this assumption is wrong.</div>`}<div class="gdCourseConfirmActions"><button type="button" id="gdKeepCourseGuessBtn">Keep this</button><button type="button" id="gdSearchCourseGuessBtn">Change course</button></div>`;
+    body.innerHTML=`<div class="gdCourseCurrent"><span>Playing now</span><strong>${esc(label)}</strong><small>${isUsefulCourseName(label)?'You chose this':'Guessed from your location'}</small></div>${rows?`<div class="gdCourseCandidateList"><p>Saved courses nearby</p>${rows}</div>`:`<div class="gdCourseCandidateEmpty">No saved courses nearby. Search by name if this is wrong.</div>`}<div class="gdCourseConfirmActions"><button type="button" id="gdKeepCourseGuessBtn">Keep this</button><button type="button" id="gdSearchCourseGuessBtn">Change course</button></div>`;
     body.querySelectorAll('[data-course-name]').forEach(btn=>{
       btn.onclick=function(ev){
         ev.preventDefault();
@@ -5602,7 +5602,7 @@
     el=document.createElement('div');
     el.id='gdCourseLibraryOverlay';
     el.className='gdCourseLibraryOverlay hidden';
-    el.innerHTML=`<div class="gdCourseLibrarySheet"><div class="gdCourseLibraryHead"><div><h2>Saved Courses</h2><p>Objects are grouped by saved GPS course, with duplicates merged by course label.</p></div><button class="gdSheetClose" type="button" onclick="closeCourseLibraryPanel()">×</button></div><div class="gdCourseLibrarySearch"><input id="gdCourseLibrarySearchInput" type="search" placeholder="Search saved courses"><button id="gdCourseLibraryFindCourseBtn" type="button">Find course</button></div><div id="gdCourseLibraryList"></div></div>`;
+    el.innerHTML=`<div class="gdCourseLibrarySheet"><div class="gdCourseLibraryHead"><div><h2>Course Data</h2><p>Golf course data saved on this device, listed by course name.</p></div><button class="gdSheetClose" type="button" onclick="closeCourseLibraryPanel()">×</button></div><div class="gdCourseLibrarySearch"><input id="gdCourseLibrarySearchInput" type="search" placeholder="Search saved courses"><button id="gdCourseLibraryFindCourseBtn" type="button">Find course</button></div><div id="gdCourseLibraryList"></div></div>`;
     document.body.appendChild(el);
     el.addEventListener('click',ev=>{if(ev.target===el)closeCourseLibraryPanel();});
     el.querySelector('#gdCourseLibrarySearchInput').addEventListener('input',ev=>{
@@ -5636,52 +5636,10 @@
     const totalObjects=allObjects.length+legacyHoles.length;
     return {holes,greenObjects,bunkers,tees,fairways,otherObjects,savedGreens,shaped,totalObjects};
   }
-  function courseSummaryLine(s){
-    const parts=[];
-    if(s.savedGreens)parts.push(`${s.savedGreens} green target${s.savedGreens===1?'':'s'}`);
-    if(s.bunkers.length)parts.push(`${s.bunkers.length} bunker${s.bunkers.length===1?'':'s'}`);
-    if(s.tees.length)parts.push(`${s.tees.length} tee${s.tees.length===1?'':'s'}`);
-    if(s.fairways.length)parts.push(`${s.fairways.length} fairway${s.fairways.length===1?'':'s'}`);
-    return parts.length?parts.join(' · '):'No saved objects yet';
-  }
-  function objectRowTitle(object,label){
-    const h=validHoleNumber(object.holeNumber);
-    if(object.type==='green')return h?`Hole ${h} green`:'Green target';
-    if(object.type==='bunker')return h?`Hole ${h} bunker`:'Bunker';
-    if(h)return `Hole ${h} ${label}`;
-    return label.charAt(0).toUpperCase()+label.slice(1);
-  }
-  function renderObjectRow(list,course,object,opts={}){
-	    const row=document.createElement('div');
-	    row.className='gdCourseHoleRow';
-    const h=validHoleNumber(object.holeNumber);
-    const assigned=h?` · Hole ${h}`:'';
-    const label=opts.label||objectTypeLabel(object.type);
-    const badge=object.type==='green'&&object.greenShape?' <span class="gdSavedGreenBadge">shape</span>':` <span class="gdCourseObjectBadge">${esc(label)}</span>`;
-    const activeHole=activePlayingHole()||holeNumber();
-    const readOnly=isPublishedCourse(course);
-    const assignButton=readOnly?'':(!h||!object.confirmed?`<button type="button" data-action="assign">Use H${esc(activeHole)}</button>`:`<button type="button" data-action="unassign">Unassign</button>`);
-    const forgetButton=readOnly?'':`<button class="danger" type="button" data-action="forget">Forget</button>`;
-    const meta=object.type==='bunker'&&!assigned?'course bunker':`${esc(object.source||object.greenSource||'saved')}${assigned}`;
-	    row.innerHTML=`<strong>${esc(opts.title||objectRowTitle(object,label))}${badge}</strong><span>${meta} · updated ${esc(dateLabel(object.updatedAt))}</span><div class="gdCourseActions"><button type="button" data-action="open">${readOnly?'Open':'Mapping mode'}</button>${assignButton}${forgetButton}</div>`;
-    row.querySelector('[data-action="open"]').onclick=()=>gdCLOpenCourseFromLibrary(course.id,h||activeHole||1,object.id,true);
-    const assign=row.querySelector('[data-action="assign"]');
-    if(assign)assign.onclick=()=>window.gdCLAssignObject(course.id,object.id,activeHole);
-    const unassign=row.querySelector('[data-action="unassign"]');
-    if(unassign)unassign.onclick=()=>window.gdCLUnassignObject(course.id,object.id);
-	    const forget=row.querySelector('[data-action="forget"]');
-	    if(forget)forget.onclick=()=>{deleteCourseObject(object.id,course.userId,course.courseId);renderCourseLibraryPanel(course.id);};
-	    list.appendChild(row);
-	  }
 	  function objectsForHole(course,hole){
 	    const h=validHoleNumber(hole);
 	    if(!h)return [];
 	    return objectValues(course).filter(object=>Number(object.holeNumber)===Number(h)&&object.confirmed&&(object.type!=='green'||hasConfirmedGreenShape(object)||!!objectCenter(object)));
-	  }
-	  function unassignedObjects(course){
-	    return objectValues(course)
-	      .filter(object=>!validHoleNumber(object.holeNumber)||!object.confirmed)
-	      .sort((a,b)=>String(b.updatedAt||'').localeCompare(String(a.updatedAt||'')));
 	  }
 	  function mappedHoleNumbers(course,s){
 	    const set=new Set();
@@ -5689,143 +5647,6 @@
 	    objectValues(course).forEach(object=>{const n=validHoleNumber(object.holeNumber);if(n&&object.confirmed)set.add(n);});
 	    return Array.from(set).sort((a,b)=>a-b);
 	  }
-	  function holeSummaryLine(course,hole){
-	    const objects=objectsForHole(course,hole);
-	    const counts=objects.reduce((acc,o)=>{acc[o.type]=(acc[o.type]||0)+1;return acc;},{});
-	    const parts=[];
-	    if(counts.green)parts.push(`${counts.green} green`);
-	    if(counts.tee)parts.push(`${counts.tee} tee`);
-	    if(counts.fairway)parts.push(`${counts.fairway} fairway`);
-	    if(counts.bunker)parts.push(`${counts.bunker} bunker`);
-	    return parts.length?parts.join(' · '):'No mapped objects yet';
-	  }
-	  function renderHoleDetail(list,course,hole){
-	    const h=validHoleNumber(hole);
-	    if(!h)return;
-	    const objects=objectsForHole(course,h);
-	    const readOnly=isPublishedCourse(course);
-	    const card=document.createElement('details');
-	    card.className='gdCourseHoleDetail';
-	    card.innerHTML=`<summary class="gdCourseHoleDetailHead"><div><strong>Hole ${h}</strong><span>${esc(holeSummaryLine(course,h))}</span></div></summary>`;
-	    const body=document.createElement('div');
-	    body.className='gdCourseHoleObjects';
-	    body.insertAdjacentHTML('beforeend',`<button type="button" data-action="open-hole">Open mapping mode</button>`);
-	    if(objects.length){
-	      objects.sort((a,b)=>String(a.type).localeCompare(String(b.type))).forEach(object=>{
-	        const row=document.createElement('div');
-	        row.className='gdCourseHoleObject';
-	        const label=objectTypeLabel(object.type);
-	        row.innerHTML=readOnly
-	          ? `<div><strong>${esc(label)}</strong><span>${esc(object.source||object.greenSource||'saved')} · ${esc(dateLabel(object.updatedAt))}</span></div><button type="button" data-open-object="${esc(object.id)}">Open</button>`
-	          : `<div><strong>${esc(label)}</strong><span>${esc(object.source||object.greenSource||'saved')} · ${esc(dateLabel(object.updatedAt))}</span></div><label>Hole <input inputmode="numeric" min="1" max="18" value="${h}" data-object-hole="${esc(object.id)}"></label><button type="button" data-open-object="${esc(object.id)}">Open</button><button type="button" data-unassign-object="${esc(object.id)}">Unassign</button><button class="danger" type="button" data-delete-object="${esc(object.id)}">Forget</button>`;
-	        body.appendChild(row);
-	      });
-	    }else{
-	      body.insertAdjacentHTML('beforeend','<div class="gdCourseLibraryEmpty">Nothing assigned to this hole yet. Open mapping mode to save green, tee, fairway or bunker points here.</div>');
-	    }
-	    card.appendChild(body);
-	    card.querySelector('[data-action="open-hole"]').onclick=()=>gdCLOpenCourseFromLibrary(course.id,h,null,true);
-	    card.querySelectorAll('[data-object-hole]').forEach(input=>{
-	      input.onchange=()=>{
-	        const next=validHoleNumber(input.value);
-	        if(!next){input.value=h;toastSafe('Enter a valid hole number');return;}
-	        window.gdCLAssignObject(course.id,input.getAttribute('data-object-hole'),next);
-	      };
-	    });
-	    card.querySelectorAll('[data-open-object]').forEach(btn=>{
-	      btn.onclick=()=>gdCLOpenCourseFromLibrary(course.id,h,btn.getAttribute('data-open-object'),true);
-	    });
-	    card.querySelectorAll('[data-delete-object]').forEach(btn=>{
-	      btn.onclick=()=>{deleteCourseObject(btn.getAttribute('data-delete-object'),course.userId,course.courseId);renderCourseLibraryPanel(course.id);};
-	    });
-	    card.querySelectorAll('[data-unassign-object]').forEach(btn=>{
-	      btn.onclick=()=>window.gdCLUnassignObject(course.id,btn.getAttribute('data-unassign-object'));
-	    });
-	    list.appendChild(card);
-	  }
-	  function renderUnassignedDetail(list,course,objects){
-	    if(!objects.length)return;
-	    const readOnly=isPublishedCourse(course);
-	    const card=document.createElement('details');
-	    card.className='gdCourseHoleDetail gdCourseUnassignedDetail';
-	    card.innerHTML=`<summary class="gdCourseHoleDetailHead"><div><strong>Unassigned</strong><span>${objects.length} saved object${objects.length===1?'':'s'} without a hole</span></div></summary>`;
-	    const body=document.createElement('div');
-	    body.className='gdCourseHoleObjects';
-	    const activeHole=activePlayingHole()||holeNumber()||1;
-	    body.insertAdjacentHTML('beforeend',`<button type="button" data-action="open-unassigned">Open mapping mode</button>`);
-	    objects.forEach(object=>{
-	      const row=document.createElement('div');
-	      row.className='gdCourseHoleObject gdCourseUnassignedObject';
-	      const label=objectTypeLabel(object.type);
-	      row.innerHTML=readOnly
-	        ? `<div><strong>${esc(label)}</strong><span>${esc(object.source||object.greenSource||'saved')} · ${esc(dateLabel(object.updatedAt))}</span></div><button type="button" data-open-object="${esc(object.id)}">Open</button>`
-	        : `<div><strong>${esc(label)}</strong><span>${esc(object.source||object.greenSource||'saved')} · ${esc(dateLabel(object.updatedAt))}</span></div><label>Hole <input inputmode="numeric" min="1" max="18" value="${esc(activeHole)}" data-assign-hole="${esc(object.id)}"></label><button type="button" data-assign-object="${esc(object.id)}">Assign</button><button type="button" data-open-object="${esc(object.id)}">Mapping mode</button><button class="danger" type="button" data-delete-object="${esc(object.id)}">Forget</button>`;
-	      body.appendChild(row);
-	    });
-	    card.appendChild(body);
-	    card.querySelector('[data-action="open-unassigned"]').onclick=()=>gdCLOpenCourseFromLibrary(course.id,activeHole,null,true);
-	    card.querySelectorAll('[data-assign-object]').forEach(btn=>{
-	      btn.onclick=()=>{
-	        const input=btn.closest('.gdCourseHoleObject')?.querySelector('[data-assign-hole]');
-	        const h=validHoleNumber(input?.value);
-	        if(!h){toastSafe('Enter a valid hole number');return;}
-	        window.gdCLAssignObject(course.id,btn.getAttribute('data-assign-object'),h);
-	      };
-	    });
-	    card.querySelectorAll('[data-open-object]').forEach(btn=>{
-	      btn.onclick=()=>{
-	        const input=btn.closest('.gdCourseHoleObject')?.querySelector('[data-assign-hole]');
-	        gdCLOpenCourseFromLibrary(course.id,validHoleNumber(input?.value)||activeHole,btn.getAttribute('data-open-object'),true);
-	      };
-	    });
-	    card.querySelectorAll('[data-delete-object]').forEach(btn=>{
-	      btn.onclick=()=>{deleteCourseObject(btn.getAttribute('data-delete-object'),course.userId,course.courseId);renderCourseLibraryPanel(course.id);};
-	    });
-	    list.appendChild(card);
-	  }
-  function renderDetailTabs(list,course,s){
-    const tabs=[
-      ['greens','Greens',s.savedGreens],
-      ['bunkers','Bunkers',s.bunkers.length],
-      ['holes','Holes',mappedHoleNumbers(course,s).length],
-      ['points','Tee/Fairway',s.tees.length+s.fairways.length+s.otherObjects.length]
-    ];
-    if(!tabs.some(([id])=>id===courseLibraryDetailTab))courseLibraryDetailTab='greens';
-    const wrap=document.createElement('div');
-    wrap.className='gdCourseLibraryTabs';
-    tabs.forEach(([id,label,count])=>{
-      const btn=document.createElement('button');
-      btn.type='button';
-      btn.className=id===courseLibraryDetailTab?'active':'';
-      btn.textContent=`${label} ${count}`;
-      btn.onclick=()=>{courseLibraryDetailTab=id;renderCourseLibraryPanel(course.id);};
-      wrap.appendChild(btn);
-    });
-    list.appendChild(wrap);
-  }
-  function renderCourseFinderCard(list,course){
-    const point=courseFinderPoint(course);
-    const location=(()=>{try{return window.GDCourseLocation&&typeof window.GDCourseLocation.resolve==='function'?window.GDCourseLocation.resolve(course,{requireConfirmed:false}):null;}catch(e){return null;}})();
-    const card=document.createElement('div');
-    card.className=`gdCourseFinderCard${point?'':' empty'}`;
-    if(point){
-      const home={lat:Number(course.courseLat),lng:Number(course.courseLng)};
-      const moved=Number.isFinite(home.lat)&&Number.isFinite(home.lng)?distance(home,point):null;
-      const details=[
-        `Lat/Lng ${coordLabel(point)}`,
-        location&&location.source?`source ${location.source}`:null,
-        location?location.confirmed?'confirmed':'proposal':null,
-        Number.isFinite(moved)&&moved>2?`${Math.round(moved)}m from course centre`:null,
-        (location&&location.updatedAt||course.finderUpdatedAt)?`updated ${dateLabel(location&&location.updatedAt||course.finderUpdatedAt)}`:null
-      ].filter(Boolean).join(' · ');
-		      card.innerHTML=`<details class="gdCourseFinderDetails"><summary><div><small>Course location</small><strong>${location&&location.confirmed?'Confirmed course centre':'Course centre proposal'}</strong></div><span>Open</span></summary><div class="gdCourseFinderTop"><span>${esc(details)}</span></div><div class="gdCourseFinderActions"><button type="button" data-action="open">Show on map</button><button class="danger" type="button" data-action="clear">Remove</button></div></details>`;
-      card.querySelector('[data-action="open"]').onclick=()=>window.gdCLOpenCourseLocatorFromLibrary(course.id);
-      card.querySelector('[data-action="clear"]').onclick=()=>window.gdCLClearCourseFinder(course.id);
-    }else{
-	      card.innerHTML=`<details class="gdCourseFinderDetails"><summary><div><small>Course locator pin</small><strong>Not saved yet</strong></div><span>Open</span></summary><div class="gdCourseFinderTop"><span>Playing a hole will quietly save a general course centre for future searches.</span></div></details>`;
-    }
-    list.appendChild(card);
-  }
   function courseLibraryMappingAdmin(){
     const actor=currentAdminActor();
     const role=String((typeof gdGetAccountPermission==='function'&&gdGetAccountPermission())||actor.role||document.body?.dataset?.gdPermission||document.body?.dataset?.clarityAccountRole||document.body?.dataset?.accountRole||'player').toLowerCase();
@@ -5852,8 +5673,8 @@
     const title=overlay?.querySelector('.gdCourseLibraryHead h2');
     const sub=overlay?.querySelector('.gdCourseLibraryHead p');
     const input=overlay?.querySelector('#gdCourseLibrarySearchInput');
-    if(title)title.textContent=mappingView?'Saved Courses':'Recent Courses';
-    if(sub)sub.textContent=mappingView?'Objects are grouped by saved GPS course, with duplicates merged by course label.':'Recently played or selected courses.';
+    if(title)title.textContent=mappingView?'Course Data':'Recent Courses';
+    if(sub)sub.textContent=mappingView?'Golf course data saved on this device, listed by course name.':'Recently played or selected courses.';
     if(input)input.placeholder=mappingView?'Search saved courses':'Search recent courses';
   }
   function openRecentCourse(row){
@@ -5895,6 +5716,80 @@
       list.appendChild(card);
     });
   }
+  /* The library is a window onto what this device has stored, and nothing more.
+     It used to be a front-end for the mapper - per-hole cards, object rows,
+     assign/unassign, publish, "Mapping Mode" - which put mapping vocabulary in
+     front of anyone who opened it, and outlived the mapper itself. Course data is
+     stored under the course name, so that is what this shows: the name, how much
+     sits under it, and when it last changed. */
+  function courseStorageStats(course){
+    const s=courseSummary(course);
+    /* Measured on the record as stored, so the number answers "what is this
+       costing me" rather than counting entries the user cannot see. */
+    const bytes=(()=>{try{return JSON.stringify(course).length;}catch(e){return 0;}})();
+    /* Timestamps come from the saved points, NOT course.updatedAt: normalising the
+       store on load rewrites the record-level stamp, so it reads as "now" on every
+       open and would report every course as updated today. The points carry the
+       only stamp that tracks the data. Fall back to the record only when a course
+       holds nothing, where there is no better answer. */
+    const stamps=objectValues(course).map(o=>o&&o.updatedAt).filter(Boolean).sort();
+    return {holes:mappedHoleNumbers(course,s).length,points:s.totalObjects,bytes,updated:stamps[stamps.length-1]||course.updatedAt||''};
+  }
+  /* The confirmation sheet asks "which course is this?", so the useful signal about
+     each candidate is how much is already stored under it. A breakdown by object
+     type ("3 green targets · 2 bunkers") answered a question nobody is asking at
+     that moment, and named internals the reader cannot act on from there. */
+  function savedDataLabel(course){
+    const holes=mappedHoleNumbers(course,courseSummary(course)).length;
+    return holes?holes+' hole'+(holes===1?'':'s')+' saved':'nothing saved yet';
+  }
+  /* Candidates come from a 1.4km radius, so the tail of that range reads better in
+     kilometres than as a four-digit metre count. */
+  function distanceLabel(metres){
+    const m=Number(metres);
+    if(!Number.isFinite(m))return 'nearby';
+    /* Switch at a full kilometre, not before it: rounding 950m to one decimal
+       prints "0.9km away", which reads as nearer than the "949m away" a metre
+       earlier. */
+    return m<1000?Math.round(m)+'m away':(m/1000).toFixed(1)+'km away';
+  }
+  function sizeLabel(bytes){
+    if(!(bytes>0))return '0 KB';
+    if(bytes<1024)return bytes+' B';
+    if(bytes<1048576)return Math.round(bytes/1024)+' KB';
+    return (bytes/1048576).toFixed(1)+' MB';
+  }
+  function storageSummaryLine(stats){
+    const parts=[stats.holes+' hole'+(stats.holes===1?'':'s'),sizeLabel(stats.bytes)];
+    if(stats.updated)parts.push('updated '+dateLabel(stats.updated));
+    return parts.join(' · ');
+  }
+  /* Removing a whole course is the one write a storage window needs. Without it the
+     only way to clear an entry was to forget its objects one at a time through the
+     mapper UI that is now gone. Published-only entries have no local record to
+     delete, so the caller is told nothing was removed rather than being left to
+     assume it worked. */
+  function removeLibraryCourse(storeId){
+    const store=loadStore();
+    const key=Object.keys(store.courses||{}).find(k=>store.courses[k]&&store.courses[k].id===storeId);
+    if(!key)return false;
+    const course=store.courses[key];
+    /* Hand the location to its owner before dropping the record. GDCourseLocation
+       keeps this course's picker pin in a SEPARATE store and caches the active
+       centre in memory, so deleting the library record on its own strands both -
+       the course keeps surfacing as a locator pin for data it no longer has. */
+    try{
+      const owner=window.GDCourseLocation;
+      if(owner&&typeof owner.remove==='function')owner.remove(course,{source:'course-library-remove-course'});
+    }catch(e){}
+    /* Re-read before deleting: owner.remove writes this same store, so saving the
+       copy loaded above would put the record straight back, location fields and all. */
+    const fresh=loadStore();
+    const freshKey=Object.keys(fresh.courses||{}).find(k=>fresh.courses[k]&&fresh.courses[k].id===storeId);
+    if(freshKey)delete fresh.courses[freshKey];
+    saveStore(fresh);
+    return true;
+  }
   function renderCourseLibraryPanel(detailKey=null){
     const list=document.getElementById('gdCourseLibraryList');
     if(!list)return;
@@ -5909,40 +5804,48 @@
     const filter=normalizeCourseName(courseLibraryFilter);
     const courses=libraryCourses(uid)
       .filter(c=>!filter||normalizeCourseName(c.courseName).includes(filter))
-      .sort((a,b)=>String(a.courseName).localeCompare(String(b.courseName))||(isPublishedCourse(a)?1:0)-(isPublishedCourse(b)?1:0));
+      .sort((a,b)=>String(a.courseName).localeCompare(String(b.courseName)));
     if(!courses.length){
-      list.innerHTML=`<div class="gdCourseCard"><strong>${filter?'No matching courses':'No saved courses yet'}</strong><span>${filter?'Try another search or find/select a course from GPS.':'Scan a green or save a mapper pin in GPS and it will appear here.'}</span></div>`;
+      list.innerHTML=`<div class="gdCourseCard"><strong>${filter?'No matching courses':'Nothing saved yet'}</strong><span>${filter?'Try another search.':'Course data appears here once a course has been played.'}</span></div>`;
       return;
     }
     if(detailKey){
       const course=findLibraryCourse(detailKey,uid);
       if(!course){renderCourseLibraryPanel();return;}
-	      const s=courseSummary(course);
-	      const finderSuffix=courseFinderPoint(course)?' · locator pin':'';
-	      const published=isPublishedCourse(course);
-	      const hasPublished=hasPublishedCourseMap(course);
-	      const publishBtn=isAdminUser()&&!hasPublished?`<button type="button" onclick="gdCLPublishCourse('${esc(course.id)}')">Publish</button>`:'';
-	      const status=hasPublished?' · published':'';
-		      list.innerHTML=`<div class="gdCourseCard ${published?'published':''}"><strong>${esc(course.courseName)}</strong><span>${courseSummaryLine(s)}${finderSuffix}${status}</span><div class="gdCourseActions"><button type="button" onclick="renderCourseLibraryPanel()">Back</button><button type="button" onclick="gdCLOpenCourseFromLibrary('${esc(course.id)}')">Open Map</button><button class="primary" type="button" onclick="gdCLOpenCourseFromLibrary('${esc(course.id)}',1,null,true)">${published?'View Map':'Mapping Mode'}</button>${publishBtn}</div></div>`;
-	      renderCourseFinderCard(list,course);
-	      const holes=mappedHoleNumbers(course,s);
-	      const loose=unassignedObjects(course);
-	      if(holes.length)holes.forEach(h=>renderHoleDetail(list,course,h));
-	      renderUnassignedDetail(list,course,loose);
-	      if(!holes.length&&!loose.length){
-		        list.insertAdjacentHTML('beforeend',`<details class="gdCourseHoleDetail"><summary class="gdCourseHoleDetailHead"><div><strong>Hole 1</strong><span>No mapped objects yet</span></div></summary><div class="gdCourseHoleObjects"><button type="button" onclick="gdCLOpenCourseFromLibrary('${esc(course.id)}',1,null,true)">Open mapping mode</button><div class="gdCourseLibraryEmpty">Start here to map the first hole, then use the hole selector in mapping mode for the rest.</div></div></details>`);
-	      }
-	      return;
-	    }
+      const stats=courseStorageStats(course);
+      list.innerHTML=`<div class="gdCourseCard"><strong>${esc(course.courseName)}</strong><span>${esc(storageSummaryLine(stats))}</span><div class="gdCourseActions"><button type="button" data-action="back">Back</button><button class="danger" type="button" data-action="remove">Remove from device</button></div></div>`;
+      const facts=[
+        ['Holes with data',String(stats.holes)],
+        ['Saved points',String(stats.points)],
+        ['Storage used',sizeLabel(stats.bytes)],
+        ['Last updated',stats.updated?dateLabel(stats.updated):'—']
+      ];
+      list.insertAdjacentHTML('beforeend',`<div class="gdCourseCard gdCourseStorageFacts">${facts.map(([k,v])=>`<div class="gdCourseStorageRow"><span>${esc(k)}</span><strong>${esc(v)}</strong></div>`).join('')}</div>`);
+      list.querySelector('[data-action="back"]').onclick=()=>renderCourseLibraryPanel();
+      const removeBtn=list.querySelector('[data-action="remove"]');
+      /* Two taps rather than confirm(): this shell has already been seen to throw
+         "prompt() is not supported", and a dialog that never appears would either
+         block the delete or, worse, fall through to it. */
+      let armed=false;
+      removeBtn.onclick=()=>{
+        if(!armed){
+          armed=true;
+          removeBtn.textContent='Tap again to remove';
+          setTimeout(()=>{if(armed){armed=false;removeBtn.textContent='Remove from device';}},4000);
+          return;
+        }
+        const removed=removeLibraryCourse(course.id);
+        if(!removed)toastSafe('Nothing stored on this device for that course');
+        renderCourseLibraryPanel();
+      };
+      return;
+    }
     list.innerHTML='';
     courses.forEach(course=>{
-      const s=courseSummary(course);
-      const finderSuffix=courseFinderPoint(course)?' · locator pin':'';
-      const published=isPublishedCourse(course);
       const card=document.createElement('button');
-      card.className=`gdCourseCard${published?' published':''}`;
+      card.className='gdCourseCard';
       card.type='button';
-      card.innerHTML=`<strong>${esc(course.courseName)}</strong><span>${courseSummaryLine(s)}${finderSuffix}${hasPublishedCourseMap(course)?' · published':''}</span>`;
+      card.innerHTML=`<strong>${esc(course.courseName)}</strong><span>${esc(storageSummaryLine(courseStorageStats(course)))}</span>`;
       card.onclick=()=>renderCourseLibraryPanel(course.id);
       list.appendChild(card);
     });
@@ -6102,32 +6005,6 @@
   }
   window.gdCLSyncPublishedCourseMaps=syncPublishedCourseMaps;
   window.gdCLPublishCourse=publishCourseMap;
-	  window.gdCLAssignObject=function(courseStoreId,objectId,holeOverride=null){
-    const store=loadStore();
-    const course=store.courses[courseStoreId];
-    if(isPublishedCourse(findLibraryCourse(courseStoreId))){toastSafe('Published maps are read-only');return;}
-    const object=course?.objects?.[objectId];
-    if(!object)return;
-    const hole=Number(holeOverride||activePlayingHole()||object.holeNumber||holeNumber()||1);
-    if(!Number.isFinite(hole)||hole<1||hole>36){toastSafe('Enter a valid hole number');return;}
-	    rememberPlayingHole(hole);
-	    assignObjectToHole(objectId,hole,true,course.userId,course.courseId);
-	    toastSafe(`${objectTypeLabel(object.type)} assigned to hole ${hole}`);
-	    updateMapperToolCompletion();
-	    renderCourseLibraryPanel(courseStoreId);
-	  };
-	  window.gdCLUnassignObject=function(courseStoreId,objectId){
-    const store=loadStore();
-    const course=store.courses[courseStoreId];
-    if(isPublishedCourse(findLibraryCourse(courseStoreId))){toastSafe('Published maps are read-only');return;}
-    const object=course?.objects?.[objectId];
-	    if(!object)return;
-	    const oldHole=validHoleNumber(object.holeNumber);
-	    unassignObjectFromHole(objectId,course.userId,course.courseId);
-	    toastSafe(oldHole?`${objectTypeLabel(object.type)} unassigned from hole ${oldHole}`:`${objectTypeLabel(object.type)} is unassigned`);
-	    updateMapperToolCompletion();
-	    renderCourseLibraryPanel(courseStoreId);
-	  };
 	  window.gdCLOpenCourseSearch=function(){
     closeCourseLibraryPanel();
     try{document.getElementById('gdProfileV67')?.classList.add('hidden');}catch(e){}
@@ -6189,110 +6066,6 @@
 	      else drawMapperPointObject(object,opts);
 	    });
 	  }
-	  window.gdCLOpenCourseFromLibrary=function(courseStoreId,hole,objectId,mappingMode=false){
-	    const saved=findLibraryCourse(courseStoreId);
-	    if(!saved)return;
-	    closeCourseLibraryPanel();
-	    try{document.getElementById('gdProfileV67')?.classList.add('hidden');}catch(e){}
-    const finder=courseFinderPoint(saved);
-    const c={name:saved.courseName,courseId:saved.courseId,lat:finder?.lat??saved.courseLat??null,lng:finder?.lng??saved.courseLng??null,courseLat:saved.courseLat??null,courseLng:saved.courseLng??null};
-    if(finder){
-      c.finderLat=finder.lat;
-      c.finderLng=finder.lng;
-    }
-	    if(typeof openCourse==='function')openCourse(c);
-	    if(hole){
-	      setTimeout(()=>{
-	        try{
-	          rememberPlayingHole(Number(hole));
-	          const par=knownParForHole(Number(hole));
-	          setHole(par!==null?{hole:Number(hole),par}:{hole:Number(hole)});
-	        }catch(e){}
-	      },80);
-	    }
-	    setFullMappingMode(!!mappingMode,hole||null);
-	    setTimeout(()=>{
-	      const object=objectId?saved.objects?.[objectId]:null;
-	      if(mappingMode&&hole)drawHoleObjects(saved,Number(hole));
-	      if(object){
-	        if(object.type==='green'){
-	          window.gdPendingLibraryGreenRecord=asGreenRecord(object);
-	          focusCourseObject(object,{quiet:true,frame:true,applyTarget:false});
-	          hintSafe(mappingMode?'Mapping mode ready. Pin and save course objects without a shot.':'Green loaded. Tap your ball/start to build the shot.');
-	        }else{
-	          focusCourseObject(object);
-	        }
-	      }
-	      else if(hole)loadSavedGreenForActiveHole({quiet:true,frame:true});
-	      if(mappingMode){
-	        updateMapperHoleUi();
-	        updateMapperToolCompletion();
-	        const flyout=ensureMapperToolFlyout();
-	        flyout.classList.remove('hidden');
-	        positionMapperToolFlyout();
-	        updateMapperToolsButtonState();
-	        toastSafe(`Hole ${hole||mapperHole()} mapping mode`);
-	      }
-	    },220);
-	  };
-  window.gdCLOpenCourseLocatorFromLibrary=function(courseStoreId){
-    const store=loadStore();
-    const saved=store.courses[courseStoreId];
-    if(!saved)return;
-    const finder=courseFinderPoint(saved);
-    if(!finder){
-      toastSafe('No course locator pin saved');
-      return;
-    }
-    closeCourseLibraryPanel();
-    try{document.getElementById('gdProfileV67')?.classList.add('hidden');}catch(e){}
-    const c={name:saved.courseName,courseId:saved.courseId,lat:finder.lat,lng:finder.lng,courseLat:saved.courseLat||null,courseLng:saved.courseLng||null,finderLat:finder.lat,finderLng:finder.lng};
-    if(typeof openCourse==='function')openCourse(c);
-    setTimeout(()=>{
-      focusCourseFinder(saved);
-      toastSafe('Course locator pin');
-    },220);
-  };
-  window.gdCLClearCourseFinder=function(courseStoreId){
-    const store=loadStore();
-    const saved=store.courses[courseStoreId];
-    if(!saved)return;
-    try{
-      const owner=window.GDCourseLocation;
-      if(owner&&typeof owner.remove==='function'){
-        owner.remove(saved,{source:'course-library-remove-location'});
-        clearCourseFinderLayer();
-        gdCLRefreshProfileCard();
-        toastSafe('Course location removed');
-        renderCourseLibraryPanel(courseStoreId);
-        return;
-      }
-    }catch(e){}
-    delete saved.finderLat;
-    delete saved.finderLng;
-    delete saved.courseFinderLat;
-    delete saved.courseFinderLng;
-    delete saved.finderSource;
-    delete saved.finderUpdatedAt;
-    saved.updatedAt=nowIso();
-    saveStore(store);
-    try{
-      const active=JSON.parse(localStorage.getItem('gd_active_course_v1')||'null');
-      if(active&&normalizeCourseName(active.name||active.courseName)===normalizeCourseName(saved.courseName)){
-        delete active.finderLat;
-        delete active.finderLng;
-        delete active.courseFinderLat;
-        delete active.courseFinderLng;
-        delete active.finderUpdatedAt;
-        gdSafeLocalSet('gd_active_course_v1',JSON.stringify(active));
-      }
-    }catch(e){}
-    clearCourseFinderLayer();
-    gdCLRefreshProfileCard();
-    toastSafe('Course locator pin cleared');
-    renderCourseLibraryPanel(courseStoreId);
-  };
-
   function circleAround(center,radius=15){
     const pts=[];
     const axis=0;
