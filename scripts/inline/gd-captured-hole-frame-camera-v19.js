@@ -559,6 +559,11 @@
 	        manifest.flattenedAt=stored.flattenedAt||stored.updatedAt||null;
 	        manifest.surfaceOwnership="clarity-owned-raster";
 	        manifest.flattenedFrom=stored.flattenedFrom||{tileCount:tiles.length};
+	        /* Carry the coverage forward too, or a re-capture of a PARTIAL frame looks complete
+	           and scheduleCaptureFlatten skips the retry that would upgrade it. */
+	        manifest.imageCoverage=Number.isFinite(Number(stored.imageCoverage))?Number(stored.imageCoverage):1;
+	        manifest.imagePartial=stored.imagePartial===true;
+	        manifest.imageMissingTiles=Number(stored.imageMissingTiles)||0;
 	      }
 	    });
 	    manifest=safe(function(){return typeof window.gdCapturedSurfaceWriteScan==="function"?window.gdCapturedSurfaceWriteScan(manifest,{reason:reason,storageKey:storageKey()}):manifest;},manifest)||manifest;
@@ -597,10 +602,19 @@
 	     only landed in Safari 16/17 and older iOS webviews silently hand back PNG instead - which
 	     is ~7x larger and would breach the storage bucket's per-file limit without erroring.
 
-	     Coverage is enforced. Unlike a tile reference - which simply retries on the next view - a
-	     flattened image bakes its failures in permanently, so a partial composite is refused
-	     rather than quietly shipping a hole.
+	     Coverage is a threshold, not a demand for perfection. Requiring every tile meant one 404
+	     or one slow fetch out of ~270 threw the whole hole away and left it on tile references
+	     forever - the exact behaviour the flatten exists to end. A frame missing a couple of tiles
+	     at the edge is still worth owning, so a partial composite is kept.
+
+	     What makes that safe is that a partial is never final: the coverage is recorded on the
+	     manifest, the tile list is KEPT (a full-coverage frame drops it), and scheduleCaptureFlatten
+	     will re-run on a partial and replace it only if the new attempt covers more. So a hole
+	     captured on bad signal upgrades itself the next time it is captured on good signal, instead
+	     of baking its gaps in permanently.
 	     --------------------------------------------------------------------------- */
+	  /* Below this, the gaps are big enough to read as a broken image rather than a soft edge. */
+	  var DEFAULT_MIN_COVERAGE=0.92;
 	  function flattenCaptureManifest(manifest,opts){
 	    opts=opts||{};
 	    return new Promise(function(resolve){
@@ -611,7 +625,7 @@
 	      var width=Math.max(1,Math.round(Number(manifest.imageWidth)||0));
 	      var height=Math.max(1,Math.round(Number(manifest.imageHeight)||0));
 	      if(width<2||height<2)return resolve({ok:false,reason:"no-capture-dimensions"});
-	      var minCoverage=Number.isFinite(Number(opts.minCoverage))?Number(opts.minCoverage):1;
+	      var minCoverage=Number.isFinite(Number(opts.minCoverage))?Number(opts.minCoverage):DEFAULT_MIN_COVERAGE;
 	      var quality=Number.isFinite(Number(opts.quality))?Number(opts.quality):.85;
 	      var canvas=document.createElement("canvas");
 	      canvas.width=width;canvas.height=height;
@@ -645,11 +659,17 @@
 	        // Release the backing store immediately - queued flattens must not stack canvases.
 	        canvas.width=canvas.height=1;
 	        if(!dataUrl||dataUrl.indexOf("data:image/jpeg")!==0)return resolve({ok:false,reason:"jpeg-encode-unavailable"});
+	        var covered=+coverage.toFixed(3);
 	        var flattened=Object.assign({},manifest,{
 	          imageData:dataUrl,
 	          imageFormat:"image/jpeg",
 	          imageBytes:Math.round(dataUrl.length*0.75),
 	          surfaceOwnership:"clarity-owned-raster",
+	          /* Recorded so a later capture can tell whether it is an upgrade, and so a partial
+	             frame is identifiable downstream rather than passing as a complete one. */
+	          imageCoverage:covered,
+	          imagePartial:covered<1,
+	          imageMissingTiles:Math.max(0,tiles.length-loaded),
 	          flattenedAt:new Date().toISOString(),
 	          flattenedFrom:{tileCount:tiles.length,tileSourceLabel:manifest.tileSourceLabel||"",captureZoom:manifest.captureZoom||null}
 	        });
@@ -675,8 +695,12 @@
 	               they are the single biggest consumer of the localStorage quota: ~155 bytes per
 	               tile, up to 320 tiles per capture, roughly 130KB per hole and ~2.3MB across 18
 	               holes - most of a 5MB budget. flattenedFrom keeps the provenance (tile count,
-	               source, zoom) in a few dozen bytes. */
-	            delete lean.tiles;
+	               source, zoom) in a few dozen bytes.
+
+	               A PARTIAL frame keeps its tiles: they are the only way to re-composite it later,
+	               and dropping them is what would make the missing tiles permanent. The quota cost
+	               is bounded because it only applies to holes that have not yet flattened cleanly. */
+	            if(!flattened.imagePartial)delete lean.tiles;
 	            safe(function(){localStorage.setItem(manifest.key||storageKey(),JSON.stringify(lean));});
 	            result.storedManifestBytes=JSON.stringify(lean).length;
 	          }
@@ -704,10 +728,20 @@
 	  function scheduleCaptureFlatten(manifest,captureOpts){
 	    captureOpts=captureOpts||{};
 	    if(!manifest||captureOpts.skipFlatten===true)return null;
-	    if(manifest.imageData||manifest.imagePath)return null;
+	    /* Owning the pixels normally ends the job - except for a PARTIAL frame, which is worth
+	       another attempt while its tiles are still around. Tiles are the precondition: a complete
+	       frame has none by design, and flattenCaptureManifest would only answer "no-tiles". */
+	    var partialRetry=manifest.imagePartial===true&&Array.isArray(manifest.tiles)&&manifest.tiles.length>0;
+	    if((manifest.imageData||manifest.imagePath)&&!partialRetry)return null;
 	    var key=manifest.key||storageKey();
 	    if(captureFlattenPending[key])return captureFlattenPending[key];
-	    var runFlatten=function(){return flattenCaptureManifest(manifest,{quality:captureOpts.flattenQuality});};
+	    /* A retry has to BEAT what we already have, not merely clear the floor - otherwise a run of
+	       poor captures could walk a good frame back down. Raising the bar above the stored coverage
+	       makes the replacement strictly an improvement. */
+	    /* undefined, never null: the reader tests Number.isFinite, and Number(null) is 0 - which
+	       would hand a first flatten a floor of zero and accept any composite at all. */
+	    var retryFloor=partialRetry?Math.min(1,(Number(manifest.imageCoverage)||0)+0.001):undefined;
+	    var runFlatten=function(){return flattenCaptureManifest(manifest,{quality:captureOpts.flattenQuality,minCoverage:retryFloor});};
 	    var job=(captureFlattenQueue=captureFlattenQueue.then(runFlatten,runFlatten))
 	      .then(function(result){
 	        safe(function(){
