@@ -57,39 +57,55 @@ export const IMAGERY_SOURCES = [
     },
     imagery: {
       adapter: "xyz",
-      /* {layer} defaults to the national aerial mosaic. NOTE: that mosaic backfills gaps with
-         satellite imagery whose Maxar portions are NOT open - it is only safe to store where
-         real aerial coverage exists, which is what minTrustedZoom stands for: at capture zooms
-         the fill is not served. Verify per course before rolling a region out, and set
-         LINZ_BASEMAPS_LAYER to a specific survey where any doubt remains. */
+      /* Verified against LINZ's own MapLibre example, 2026-07-28.
+
+         The `aerial` tileset is a mosaic, and the licensing question is what else is in it.
+         Checked against linz/basemaps-config: of its 137 layers, 124 are real aerial
+         photography (Rural from z13, Urban from z14), and everything that is NOT open aerial is
+         either capped below our capture zooms - GEBCO bathymetry and the 8m DEM shades all stop
+         at z14 - or covers offshore islands (Chatham, Auckland, Antipodes, Bounty, Campbell,
+         Kermadec, Snares). So a mainland course shot at z19-20 gets LINZ aerial photography,
+         not the satellite fill.
+
+         The one layer to keep an eye on is "New Zealand 10m Satellite Imagery", the uncapped
+         national background. It only surfaces where no aerial survey exists, and at z19 a 10m
+         source is a visible smear rather than a subtle substitution - but a course that lands
+         on it must not be published. Set LINZ_BASEMAPS_LAYER to a specific survey if one ever
+         does. */
       urlTemplate: "https://basemaps.linz.govt.nz/v1/tiles/{layer}/WebMercatorQuad/{z}/{x}/{y}.webp?api={key}",
       layerEnv: "LINZ_BASEMAPS_LAYER",
       defaultLayer: "aerial",
       apiKeyEnv: "LINZ_BASEMAPS_API_KEY",
-      /* Urban surveys run 0.075-0.3m; z20 is the last zoom carrying real detail rather than
-         resampled pixels. */
+      /* Urban surveys run 0.05-0.1m and rural 0.2-0.3m; z20 (~0.15m/px at NZ latitudes) is the
+         last zoom carrying real detail for a rural course rather than resampled pixels. */
       maxUsefulZoom: 20,
       minTrustedZoom: 14
     },
-    /* LINZ elevation (LiDAR-derived where flown). Source of both the course elevation grid and
-       the computed hillshade. The exact tileset name and encoding must be confirmed against the
-       LINZ Basemaps catalogue before first use - hence the env override. */
+    /* LINZ elevation - source of both the course elevation grid and the computed relief.
+
+       The `pipeline=terrain-rgb` parameter is not optional: without it the tileset returns its
+       own rendering rather than elevation packed into RGB, i.e. a picture of the terrain
+       instead of the terrain. URL taken verbatim from LINZ's MapLibre elevation example. */
     dem: {
       adapter: "xyz",
-      urlTemplate: "https://basemaps.linz.govt.nz/v1/tiles/{layer}/WebMercatorQuad/{z}/{x}/{y}.png?api={key}",
+      urlTemplate: "https://basemaps.linz.govt.nz/v1/tiles/{layer}/WebMercatorQuad/{z}/{x}/{y}.png?pipeline=terrain-rgb&api={key}",
       layerEnv: "LINZ_ELEVATION_LAYER",
       defaultLayer: "elevation",
       apiKeyEnv: "LINZ_BASEMAPS_API_KEY",
-      /* terrain-rgb style: elevation packed into RGB. Decoders differ per provider, so the
-         encoding is named rather than assumed. */
       encoding: "terrain-rgb",
-      /* 1m LiDAR over most populated NZ - fine enough for the green-surround grid. */
+      /* Two-tier, per linz/basemaps-config: an 8m national DEM with 1m LiDAR laid over most
+         populated regions. Course-wide grids are fine on either; the fine green-surround grid
+         only exists where the LiDAR does, which is what nativeResolutionM vs fallback records. */
       nativeResolutionM: 1,
-      maxUsefulZoom: 15
+      fallbackResolutionM: 8,
+      /* z17 is ~0.95m/px at NZ latitudes - native for the 1m LiDAR. Higher only upscales. */
+      maxUsefulZoom: 17
     },
     attribution: {
       text: "Sourced from the LINZ Data Service and licensed for re-use under CC BY 4.0",
       url: "https://www.linz.govt.nz/data/linz-data/linz-data-copyright",
+      /* LINZ's own suggested short form, for places too small for the full statement. */
+      shortText: "© LINZ CC BY 4.0 © Imagery Basemap contributors",
       /* Per-survey licensor, resolved at capture time where available, so the rendered credit
          reads "...licensed by <licensor> for re-use under CC BY 4.0". */
       perSurvey: true

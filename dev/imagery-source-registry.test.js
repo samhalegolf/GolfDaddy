@@ -102,6 +102,19 @@ test("the US entry resolves to the export adapter with a low zoom ceiling", () =
   assert.ok(!/NAIPPlus/i.test(source.imagery.endpoint), "Plus blends contributed orthos whose terms are unconfirmed");
 });
 
+/* Both templates are verbatim from LINZ's own MapLibre example. They are asserted rather than
+   trusted because a wrong one fails as a whole course of missing tiles, hours into a scan. */
+test("the LINZ endpoints match LINZ's own published form", () => {
+  const source = mod.resolveImagerySource(PUPUKE_NZ, { env: NZ_ENV });
+  assert.strictEqual(source.imagery.urlTemplate,
+    "https://basemaps.linz.govt.nz/v1/tiles/aerial/WebMercatorQuad/{z}/{x}/{y}.webp?api=linz-test-key");
+  assert.ok(source.dem, "NZ ships an elevation source");
+  assert.ok(source.dem.urlTemplate.includes("pipeline=terrain-rgb"),
+    "without the pipeline parameter the tileset returns a picture of the terrain, not the terrain");
+  assert.ok(source.dem.urlTemplate.includes("api=linz-test-key"), "the DEM shares the imagery key");
+  assert.strictEqual(source.dem.encoding, "terrain-rgb");
+});
+
 test("every region carries a DEM and no region carries a hillshade raster", () => {
   mod.IMAGERY_SOURCES.forEach(entry => {
     assert.ok(entry.dem, entry.key + " must carry a DEM - it feeds both relief and plays-like");
