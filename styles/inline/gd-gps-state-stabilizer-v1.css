@@ -122,132 +122,230 @@ body.gps-active .shotTile .tileDist{
   overflow:hidden!important;
   text-overflow:ellipsis!important;
 }
+/* ---- Shot card: portrait column ----------------------------------------------
+   The card reads top to bottom in a narrow strip down the left edge. Rotating the
+   whole card got the shape but turned every number on its side, so the interior is
+   re-laid out here instead and the type stays upright.
+
+   The old 188x112 interior was built from absolutely positioned children pinned to
+   hardcoded pixel offsets, spread across four sheets, inside an overflow:hidden
+   box - which is why it could not be resized, only scaled. This releases them: the
+   card becomes a flex column, every child goes back to static flow, and `order`
+   sets the reading sequence rather than pixel coordinates. Height is intentionally
+   auto - the content decides, so a missing row (no slope reading yet, no front/back
+   pair) collapses instead of leaving a hole.
+
+   Selectors are #shotTile.visible so they outrank the .shotTile rules in
+   gd-app-base.css, which carry !important on the very properties being undone. */
 body.shell-gps #shotTile.visible,
 body.gdGpsActive #shotTile.visible,
 body.gps-active #shotTile.visible{
-  width:188px!important;
-  min-width:188px!important;
-  max-width:188px!important;
-  height:112px!important;
-  min-height:112px!important;
-  padding:0!important;
-  overflow:hidden!important;
+  width:108px!important;
+  min-width:108px!important;
+  max-width:108px!important;
+  height:auto!important;
+  min-height:0!important;
+  padding:11px 8px!important;
+  overflow:visible!important;
+  display:flex!important;
+  flex-direction:column!important;
+  align-items:center!important;
+  justify-content:flex-start!important;
+  gap:6px!important;
+  transform:none!important;
+  border-radius:16px!important;
 }
-body.shell-gps #shotTile .gdShotHoleChip,
-body.gdGpsActive #shotTile .gdShotHoleChip,
-body.gps-active #shotTile .gdShotHoleChip{
-  display:none!important;
+/* Interior arrangement. This block is the card's layout - the offsets in
+   gd-app-base.css are all superseded here, so this is the one place to change it.
+
+   It was a landscape 188x112 arrangement built from absolute coordinates: back
+   pinned top-left, slope top-right, club centre-left, distance centre-right. The
+   card is a portrait strip now, so the same readings stack in a column and every
+   child returns to normal flow. `order` carries the reading sequence, which means
+   a row that has no value to show simply collapses rather than leaving the gap an
+   absolute coordinate would hold open.
+
+   position/inset/transform/width/height are all reset together on each child: the
+   old rules set every one of them, and leaving a single property behind is enough
+   to yank the element back onto its old coordinate. */
+body.shell-gps #shotTile .tileBack,
+body.gdGpsActive #shotTile .tileBack,
+body.gps-active #shotTile .tileBack,
+body.shell-gps #shotTile .tileFront,
+body.gdGpsActive #shotTile .tileFront,
+body.gps-active #shotTile .tileFront,
+body.shell-gps #shotTile .tilePlays,
+body.gdGpsActive #shotTile .tilePlays,
+body.gps-active #shotTile .tilePlays,
+body.shell-gps #shotTile .tileClub,
+body.gdGpsActive #shotTile .tileClub,
+body.gps-active #shotTile .tileClub,
+body.shell-gps #shotTile .tileDist,
+body.gdGpsActive #shotTile .tileDist,
+body.gps-active #shotTile .tileDist,
+body.shell-gps #shotTile .tilePrimary,
+body.gdGpsActive #shotTile .tilePrimary,
+body.gps-active #shotTile .tilePrimary,
+body.shell-gps #shotTile .tileMain,
+body.gdGpsActive #shotTile .tileMain,
+body.gps-active #shotTile .tileMain{
+  position:static!important;
+  inset:auto!important;
+  left:auto!important;
+  right:auto!important;
+  top:auto!important;
+  bottom:auto!important;
+  transform:none!important;
+  width:auto!important;
+  min-width:0!important;
+  max-width:100%!important;
+  height:auto!important;
+  min-height:0!important;
+  margin:0!important;
+  text-align:center!important;
 }
-body.shell-gps #shotTile .tileTop,
-body.gdGpsActive #shotTile .tileTop,
-body.gps-active #shotTile .tileTop{
-  display:none!important;
+/* .tileMain is a positioning wrapper with no box of its own, so it is dissolved
+   rather than laid out. Left as a flex item it would form a sub-column, and the
+   bag button - ordered last inside it - would still land in the middle of the
+   card, splitting the readings. display:contents promotes its children to direct
+   items of the card so a single order scale sorts all six together. */
+body.shell-gps #shotTile .tileMain,
+body.gdGpsActive #shotTile .tileMain,
+body.gps-active #shotTile .tileMain{
+  display:contents!important;
+}
+/* Back and front are reference markers, so they read as one line - label, value.
+   Slope stacks its label above the number instead, so a glance cannot confuse it
+   with the two markers that bracket it. */
+body.shell-gps #shotTile .tileBack,
+body.gdGpsActive #shotTile .tileBack,
+body.gps-active #shotTile .tileBack,
+body.shell-gps #shotTile .tileFront,
+body.gdGpsActive #shotTile .tileFront,
+body.gps-active #shotTile .tileFront{
+  display:flex!important;
+  flex-direction:row!important;
+  align-items:baseline!important;
+  justify-content:center!important;
+  gap:3px!important;
+  opacity:.82!important;
 }
 body.shell-gps #shotTile .tileBack,
 body.gdGpsActive #shotTile .tileBack,
-body.gps-active #shotTile .tileBack{
-  position:absolute!important;
-  top:7px!important;
-  left:9px!important;
-  right:auto!important;
-  width:78px!important;
-  transform:none!important;
-  text-align:left!important;
-  max-width:none!important;
-  display:flex!important;
-  align-items:baseline!important;
-  justify-content:flex-start!important;
-  gap:2px!important;
-}
+body.gps-active #shotTile .tileBack{order:1!important}
+/* Plays pill. It lives inside .tileDist and hangs off its right edge, so it tracks
+   the distance wherever the column puts it. Tucked in and transparent at rest, it
+   slides out when gdPlaysOut arrives alongside a value.
+   pointer-events stay off: it is a readout, and a element overhanging the card that
+   swallowed taps meant for the map would be a regression. */
 body.shell-gps #shotTile .tilePlays,
 body.gdGpsActive #shotTile .tilePlays,
 body.gps-active #shotTile .tilePlays{
-  display:flex!important;
   position:absolute!important;
-  right:9px!important;
-  left:auto!important;
-  top:7px!important;
-  bottom:auto!important;
-  width:70px!important;
-  height:22px!important;
-  transform:none!important;
-  flex-direction:row!important;
-  align-items:baseline!important;
-  justify-content:flex-end!important;
-  gap:3px!important;
-  text-align:right!important;
-  opacity:.9!important;
-}
-body.shell-gps #shotTile .tileClub,
-body.gdGpsActive #shotTile .tileClub,
-body.gps-active #shotTile .tileClub{
-  position:absolute!important;
-  left:12px!important;
+  left:100%!important;
   top:50%!important;
   right:auto!important;
   bottom:auto!important;
-  width:66px!important;
-  height:68px!important;
-  transform:translateY(-50%)!important;
-  display:flex!important;
-  align-items:center!important;
-  justify-content:center!important;
-  text-align:center!important;
-}
-body.shell-gps #shotTile .tileDist,
-body.gdGpsActive #shotTile .tileDist,
-body.gps-active #shotTile .tileDist{
-  position:absolute!important;
-  left:94px!important;
-  right:8px!important;
-  top:36px!important;
-  bottom:auto!important;
-  width:auto!important;
-  height:66px!important;
-  transform:none!important;
   display:flex!important;
   flex-direction:column!important;
   align-items:center!important;
   justify-content:center!important;
   gap:0!important;
-  text-align:center!important;
+  width:max-content!important;
+  max-width:none!important;
+  padding:4px 8px!important;
+  border-radius:11px!important;
+  background:rgba(6,12,9,.9)!important;
+  border:1px solid rgba(255,255,255,.16)!important;
+  box-shadow:0 8px 20px rgba(0,0,0,.42)!important;
+  opacity:0!important;
+  transform:translate(-6px,-50%)!important;
+  pointer-events:none!important;
+  transition:opacity .18s ease,transform .18s ease!important;
+  z-index:2!important;
+}
+body.shell-gps #shotTile .tilePlays.gdPlaysOut,
+body.gdGpsActive #shotTile .tilePlays.gdPlaysOut,
+body.gps-active #shotTile .tilePlays.gdPlaysOut{
+  opacity:1!important;
+  transform:translate(8px,-50%)!important;
+}
+/* The wrapper is the pill's positioning context - it holds the distance and is
+   never rewritten, unlike #tileDist itself. overflow stays visible on both so the
+   pill can hang outside; the base sheet sets overflow:hidden on .tileDist for
+   ellipsis in the old narrow layout. */
+body.shell-gps #shotTile .gdDistAnchor,
+body.gdGpsActive #shotTile .gdDistAnchor,
+body.gps-active #shotTile .gdDistAnchor{
+  position:relative!important;
+  display:flex!important;
+  flex-direction:column!important;
+  align-items:center!important;
+  justify-content:center!important;
+  order:2!important;
+  overflow:visible!important;
+}
+body.shell-gps #shotTile .tileDist,
+body.gdGpsActive #shotTile .tileDist,
+body.gps-active #shotTile .tileDist{
+  overflow:visible!important;
+}
+@media (prefers-reduced-motion:reduce){
+  body.shell-gps #shotTile .tilePlays,
+  body.gdGpsActive #shotTile .tilePlays,
+  body.gps-active #shotTile .tilePlays{transition:none!important}
+}
+body.shell-gps #shotTile .tileFront,
+body.gdGpsActive #shotTile .tileFront,
+body.gps-active #shotTile .tileFront{order:5!important}
+body.shell-gps #shotTile .tileDist,
+body.gdGpsActive #shotTile .tileDist,
+body.gps-active #shotTile .tileDist{
+  display:flex!important;
+  flex-direction:column!important;
+  align-items:center!important;
+  justify-content:center!important;
+  gap:0!important;
+  order:2!important;
 }
 body.shell-gps #shotTile .tilePrimary,
 body.gdGpsActive #shotTile .tilePrimary,
 body.gps-active #shotTile .tilePrimary{
-  position:absolute!important;
-  left:76px!important;
-  right:auto!important;
-  top:58px!important;
-  bottom:auto!important;
-  width:34px!important;
-  min-width:34px!important;
-  height:28px!important;
-  transform:none!important;
   display:flex!important;
-  flex-direction:column-reverse!important;
+  flex-direction:column!important;
   align-items:center!important;
   justify-content:center!important;
-  gap:1px!important;
-  text-align:center!important;
+  gap:0!important;
+  order:3!important;
 }
-body.shell-gps #shotTile .tileFront,
-body.gdGpsActive #shotTile .tileFront,
-body.gps-active #shotTile .tileFront{
-  position:absolute!important;
-  left:9px!important;
-  right:auto!important;
-  width:80px!important;
-  top:auto!important;
-  bottom:7px!important;
-  transform:none!important;
-  text-align:left!important;
-  max-width:none!important;
-  display:flex!important;
-  align-items:baseline!important;
-  justify-content:flex-start!important;
-  gap:2px!important;
+/* Type sized for an 86px column rather than a 188px landscape card. */
+body.shell-gps #shotTile .tileDist .tileMetricValue,
+body.gdGpsActive #shotTile .tileDist .tileMetricValue,
+body.gps-active #shotTile .tileDist .tileMetricValue{
+  font-size:33px!important;
+  line-height:1!important;
 }
+body.shell-gps #shotTile .tileBack .tileMetricValue,
+body.gdGpsActive #shotTile .tileBack .tileMetricValue,
+body.gps-active #shotTile .tileBack .tileMetricValue,
+body.shell-gps #shotTile .tileFront .tileMetricValue,
+body.gdGpsActive #shotTile .tileFront .tileMetricValue,
+body.gps-active #shotTile .tileFront .tileMetricValue{
+  font-size:14px!important;
+  line-height:1!important;
+}
+body.shell-gps #shotTile .tilePlays .tileMetricValue,
+body.gdGpsActive #shotTile .tilePlays .tileMetricValue,
+body.gps-active #shotTile .tilePlays .tileMetricValue{
+  font-size:16px!important;
+  line-height:1.05!important;
+}
+/* The bag button lives in the tool rail, and the card already names the club it
+   picked - a second bag control here said the same thing twice. It is a
+   not-yet-set placeholder by design, so it has no job once a bag is in use. */
+body.shell-gps #shotTile .tileClub,
+body.gdGpsActive #shotTile .tileClub,
+body.gps-active #shotTile .tileClub,
 body.shell-gps #shotTile .tileMeta,
 body.gdGpsActive #shotTile .tileMeta,
 body.gps-active #shotTile .tileMeta,

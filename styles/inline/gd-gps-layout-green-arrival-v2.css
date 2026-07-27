@@ -136,6 +136,9 @@ body.gdGpsActive #gdGpsClearBtn {
   text-transform: none;
 }
 
+/* Size for the pre-reveal state only. Once the card gains .visible the stabilizer
+   sheet's #shotTile.visible rule takes over at 188x112 - an ID selector this one
+   cannot outrank - so this is not the size anyone actually sees in play. */
 body.gdGpsActive .shotTile {
   width: 142px !important;
   height: 104px !important;

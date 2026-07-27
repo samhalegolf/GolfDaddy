@@ -708,6 +708,30 @@ function gdWireManualGpsPlayButton(){
     if(typeof openBag==='function') openBag({fromGps:true});
     return false;
   };
+  /* The plays pill slides out beside the main distance, so it needs to be positioned
+     against that distance rather than against the card. Anchoring it to the card by
+     coordinates would need a top offset that is only right while every row above it
+     is present, and the back marker collapses when it has no value - the pill would
+     then point at the wrong row.
+
+     It cannot simply be moved INSIDE #tileDist either: gdResetShotDistanceDisplay
+     and the per-frame distance render both rewrite that element's innerHTML, which
+     would delete the pill the first time the number changed. So a wrapper is
+     inserted around the distance and the pill sits in there instead - the wrapper is
+     never written to, and #tileDist keeps its id and its own content untouched. */
+  safe(()=>{
+    const dist=document.getElementById('tileDist');
+    const plays=document.getElementById('tilePlays');
+    if(!dist||!plays||!dist.parentElement)return;
+    let anchor=dist.parentElement;
+    if(!anchor.classList.contains('gdDistAnchor')){
+      anchor=document.createElement('div');
+      anchor.className='gdDistAnchor';
+      dist.parentElement.insertBefore(anchor,dist);
+      anchor.appendChild(dist);
+    }
+    if(plays.parentElement!==anchor)anchor.appendChild(plays);
+  });
   const previousClosePanel=window.closePanel;
   if(typeof previousClosePanel==='function'&&!previousClosePanel.__gdBagReturnWrapped){
     const wrapped=function(id){

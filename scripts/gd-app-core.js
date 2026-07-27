@@ -18170,15 +18170,28 @@ function gdSlopeAdjustedDistanceData(origin,target,flatDistanceM){
    via gdRenderShotCardSlope since that tile landed, the legacy class carried no
    CSS, and leaving a second slope-render path in place invited exactly the kind
    of duplicate environmental handling the Conditions Engine consolidates. */
+/* "Plays" rather than "Slope": the number shown is the distance the shot plays to,
+   not the gradient itself. slopeData.label still carries the raw delta ("-3.2m
+   downhill") and that goes to the tooltip. */
 function gdRenderShotCardSlope(tilePlays,slopeData){
   if(!tilePlays)return;
   tilePlays.classList.remove("slopeOver","slopeUnder","slopeLevel");
   tilePlays.innerHTML="";
-  if(!slopeData)return;
+  /* Drop the reveal class whenever there is nothing to show, so the pill slides
+     away with the value instead of sitting empty beside the distance. */
+  if(!slopeData){tilePlays.classList.remove("gdPlaysOut");return;}
   const tone=slopeData.relation==="over"?"slopeOver":(slopeData.relation==="under"?"slopeUnder":"slopeLevel");
   tilePlays.classList.add(tone);
-  tilePlays.title=`Slope adjusted: ${slopeData.label||""}`;
-  tilePlays.innerHTML=gdShotMetricHtml("Slope",slopeData.adjusted);
+  tilePlays.title=`Plays: ${slopeData.label||""}`;
+  tilePlays.innerHTML=gdShotMetricHtml("Plays",slopeData.adjusted);
+  /* Force a reflow between the tucked-in state and the reveal, so the transition
+     has a start value to run from. Deliberately NOT requestAnimationFrame: a frame
+     callback never fires in a view that is not painting - a backgrounded tab, or a
+     webview the OS has throttled - and the pill would then stay invisible with a
+     live value behind it. Reading offsetWidth is synchronous and always applies. */
+  tilePlays.classList.remove("gdPlaysOut");
+  void tilePlays.offsetWidth;
+  tilePlays.classList.add("gdPlaysOut");
 }
 
 function gdClubTargetDeltaText(payload,centreDistanceM){
