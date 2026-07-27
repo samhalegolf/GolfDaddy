@@ -54,6 +54,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/scorecard-search"
+  to = "/.netlify/functions/scorecard-search"
+  status = 200
+
+[[redirects]]
   from = "/api/create-checkout-session"
   to = "/.netlify/functions/create-checkout-session"
   status = 200
