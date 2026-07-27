@@ -6,7 +6,7 @@
 
    The phone reads course visual records and caches capture pixels; it does not
    author them. Authoring - masters, previews, presets, stitching, terrain and
-   floodlight rendering, publishing, cloud sync - is 205KB of
+   floodlight rendering, publishing, cloud sync - is 207KB of
    gd-course-visual-engine.js that only the studio needs, and published frames
    are rendered server-side by the worker anyway.
 
@@ -27,6 +27,10 @@
   var STORE_KEY="gd_course_visual_engine_v1";
   var PRESET_KEY="gd_course_visual_presets_v1";
   var API_ENDPOINT="/api/course-visuals";
+  var JOBS_ENDPOINT="/api/course-visual-jobs";
+  var ASSET_ENDPOINT="/api/course-visual-assets";
+  var FRAMES_WAIT_MODE="live-until-ready";
+  var FRAMES_POLL_MS=20000;
   var ASSET_DB_NAME="gd_course_visual_assets_v1";
   var ASSET_STORE_NAME="assets";
   var VALID_STATUSES={unavailable:1,"input-ready":1,stitching:1,"basic-ready":1,rendering:1,"preview-ready":1,published:1,failed:1};
@@ -197,6 +201,27 @@
         req.onerror=function(){resolve(null);};
       });
     }).catch(function(){return null;});
+  }
+  function hydrateRecordAssets(record){
+    record=record&&typeof record==="object"?record:null;
+    if(!record)return Promise.resolve({record:record,hydratedCount:0});
+    var count=0;
+    return Promise.all(visualAssets(record).map(function(asset){
+      if(!asset||!asset.path||asset.dataUrl)return Promise.resolve(false);
+      return loadAssetData(asset.path).then(function(data){
+        if(!data)return false;
+        asset.dataUrl=data;
+        count+=1;
+        return true;
+      });
+    })).then(function(){return {record:attachTransientAssets(record),hydratedCount:count};});
+  }
+  function hydrateCourseVisualAssets(courseId){
+    var record=getRecord(courseId);
+    return hydrateRecordAssets(record).then(function(result){
+      captureTransientAssets(result.record);
+      return result;
+    });
   }
   function emptyStore(){
     return {schema:"gd.course_visual_engine.store",version:VERSION,rendererVersion:RENDERER_VERSION,updatedAt:null,records:{}};
@@ -605,6 +630,164 @@
       return row?restoreCloudMetadata(row):getRecord(courseId);
     }).catch(function(){return getRecord(courseId);});
   }
+  function courseAssetUrl(path){return ASSET_ENDPOINT+"?path="+encodeURIComponent(String(path||""));}
+  function courseFramesIndexPath(courseId){return slug(courseId)+"/frames/index.json";}
+  function courseFramePaths(index){
+    var paths=(index&&Array.isArray(index.holes)?index.holes:[]).map(function(hole){return hole&&hole.path||"";}).filter(Boolean);
+    if(index&&index.overview&&index.overview.path)paths.push(index.overview.path);
+    return paths;
+  }
+  function courseApiJson(url,init){
+    if(!root||typeof root.fetch!=="function")return Promise.resolve({ok:false,status:0,body:null});
+    return root.fetch(url,init||{headers:{Accept:"application/json"}}).then(function(res){
+      return res.json().catch(function(){return null;}).then(function(body){return {ok:!!res.ok,status:res.status,body:body};});
+    }).catch(function(){return {ok:false,status:0,body:null};});
+  }
+  function courseBuildState(courseId){
+    return courseApiJson(JOBS_ENDPOINT+"?courseId="+encodeURIComponent(slug(courseId))).then(function(result){
+      var body=result.body;
+      if(!result.ok||!body||!body.state)return {state:"unknown",framesReady:false,framesVersion:null};
+      return body;
+    });
+  }
+  function requestCourseBuild(courseId,accessToken){
+    if(!accessToken)return Promise.resolve({started:false,state:"none",reason:"sign-in-required"});
+    return courseApiJson(JOBS_ENDPOINT,{
+      method:"POST",
+      headers:{"Content-Type":"application/json",Accept:"application/json",Authorization:"Bearer "+accessToken},
+      body:JSON.stringify({courseId:slug(courseId),kind:"auto"})
+    }).then(function(result){
+      var body=result.body||{};
+      return {started:result.status===202,state:body.state||"unknown",status:result.status,reason:body.error||""};
+    });
+  }
+  function blobToDataUrl(blob){
+    return new Promise(function(resolve){
+      if(!blob||!root||typeof root.FileReader!=="function"){resolve(null);return;}
+      var reader=new root.FileReader();
+      reader.onload=function(){resolve(String(reader.result||"")||null);};
+      reader.onerror=function(){resolve(null);};
+      if(!safe(function(){reader.readAsDataURL(blob);return true;},false))resolve(null);
+    });
+  }
+  function downloadCourseAsset(path){
+    if(!root||typeof root.fetch!=="function")return Promise.resolve(null);
+    return root.fetch(courseAssetUrl(path)).then(function(res){
+      return res&&res.ok?res.blob():null;
+    }).then(function(blob){
+      return blob?blobToDataUrl(blob):null;
+    }).then(function(dataUrl){
+      if(!dataUrl)return null;
+      return saveAssetData(path,dataUrl).then(function(){return dataUrl;});
+    }).catch(function(){return null;});
+  }
+  function cachedCourseFrames(courseId){
+    var id=slug(courseId);
+    return loadAssetData(courseFramesIndexPath(id)).then(function(raw){
+      var index=raw?safe(function(){return JSON.parse(raw);},null):null;
+      if(!index||!Array.isArray(index.holes)||!index.holes.length)return null;
+      var paths=courseFramePaths(index);
+      return Promise.all(paths.map(function(path){return loadAssetData(path);})).then(function(list){
+        /* All or nothing. A partial set is worse than none: it plays fine until the hole whose
+           frame is missing, which is the middle of somebody's round. */
+        if(!list.length||list.some(function(data){return !data;}))return null;
+        return {courseId:id,index:index,version:String(index.exportVersion||""),holes:index.holes,overview:index.overview||null,complete:true};
+      });
+    }).catch(function(){return null;});
+  }
+  function downloadCourseFrames(courseId,opts){
+    opts=opts||{};
+    var id=slug(courseId);
+    var indexPath=courseFramesIndexPath(id);
+    if(!root||typeof root.fetch!=="function")return Promise.resolve(null);
+    return root.fetch(courseAssetUrl(indexPath),{headers:{Accept:"application/json"},cache:"no-store"}).then(function(res){
+      return res&&res.ok?res.json():null;
+    }).then(function(index){
+      if(!index||!Array.isArray(index.holes)||!index.holes.length)return null;
+      var paths=courseFramePaths(index);
+      var done=0;
+      /* Serial, not parallel: 19 concurrent image downloads on course mobile data is how you
+         turn a slow start into a failed one. */
+      return paths.reduce(function(chain,path){
+        return chain.then(function(ok){
+          if(!ok)return false;
+          return downloadCourseAsset(path).then(function(data){
+            if(!data)return false;
+            done+=1;
+            if(typeof opts.onProgress==="function")safe(function(){opts.onProgress({done:done,total:paths.length,path:path});});
+            return true;
+          });
+        });
+      },Promise.resolve(true)).then(function(ok){
+        if(!ok)return null;
+        return saveAssetData(indexPath,JSON.stringify(index)).then(function(){
+          return {courseId:id,index:index,version:String(index.exportVersion||""),holes:index.holes,overview:index.overview||null,complete:true};
+        });
+      });
+    }).catch(function(){return null;});
+  }
+  function ensureCourseFrames(courseId,opts){
+    opts=opts||{};
+    var id=slug(courseId);
+    var pollMs=Math.max(5000,Number(opts.pollMs)||FRAMES_POLL_MS);
+    var stopped=false;
+    var timer=null;
+    function emit(name,payload){if(typeof opts[name]==="function")safe(function(){opts[name](payload);});}
+    function stop(){stopped=true;if(timer&&root&&root.clearTimeout)root.clearTimeout(timer);timer=null;}
+    function deliver(frames){if(stopped||!frames)return false;emit("onFrames",frames);return true;}
+    function fetchAndDeliver(){
+      return downloadCourseFrames(id,{onProgress:function(p){emit("onProgress",p);}}).then(function(frames){
+        if(frames){deliver(frames);stop();return true;}
+        return false;
+      });
+    }
+    function poll(){
+      if(stopped)return;
+      timer=root&&root.setTimeout?root.setTimeout(function(){
+        if(stopped)return;
+        courseBuildState(id).then(function(state){
+          if(stopped)return;
+          emit("onState",state);
+          if(state.state==="frames-ready")return fetchAndDeliver().then(function(ok){if(!ok)poll();});
+          if(state.state==="failed"){stop();return;}
+          poll();
+        });
+      },pollMs):null;
+    }
+    cachedCourseFrames(id).then(function(cached){
+      if(stopped)return;
+      if(cached){
+        deliver(Object.assign({},cached,{fromCache:true}));
+        /* Revalidate quietly. A newer export replaces the frames under the player without
+           interrupting the round; a failed check simply leaves the cached ones in place. */
+        courseApiJson(courseAssetUrl(courseFramesIndexPath(id))).then(function(result){
+          var index=result.ok&&result.body||null;
+          if(stopped||!index||String(index.exportVersion||"")===cached.version)return;
+          fetchAndDeliver();
+        });
+        return;
+      }
+      courseBuildState(id).then(function(state){
+        if(stopped)return;
+        emit("onState",state);
+        if(state.state==="frames-ready")return fetchAndDeliver().then(function(ok){if(!ok)poll();});
+        /* Offline or unreachable: play live and try again next time the course is opened.
+           Starting a build on a guess would be the one irreversible mistake available here. */
+        if(state.state==="unknown"){stop();return;}
+        if(state.state==="failed"){stop();return;}
+        if(state.state==="none"){
+          return requestCourseBuild(id,opts.accessToken).then(function(result){
+            if(stopped)return;
+            emit("onState",{state:result.started?"queued":result.state,requested:result.started,reason:result.reason});
+            if(result.started||result.state==="queued"||result.state==="running")poll();
+            else stop();
+          });
+        }
+        poll();
+      });
+    });
+    return {stop:stop,courseId:id};
+  }
   function beta3dTiltPolicy(){
     var policy=capturePolicy("three-d-hole-beta")||{};
     return {
@@ -625,6 +808,9 @@
     storeKey:STORE_KEY,
     presetKey:PRESET_KEY,
     apiEndpoint:API_ENDPOINT,
+    jobsEndpoint:JOBS_ENDPOINT,
+    assetEndpoint:ASSET_ENDPOINT,
+    framesWaitMode:FRAMES_WAIT_MODE,
     captureImagePath:captureImagePath,
     saveCaptureImage:saveCaptureImage,
     loadCaptureImage:loadCaptureImage,
@@ -634,6 +820,13 @@
     pullCourseVisual:pullCourseVisual,
     loadStore:loadStore,
     saveStore:saveStore,
-    beta3dTiltPolicy:beta3dTiltPolicy
+    beta3dTiltPolicy:beta3dTiltPolicy,
+    courseAssetUrl:courseAssetUrl,
+    courseBuildState:courseBuildState,
+    requestCourseBuild:requestCourseBuild,
+    cachedCourseFrames:cachedCourseFrames,
+    downloadCourseFrames:downloadCourseFrames,
+    ensureCourseFrames:ensureCourseFrames,
+    hydrateCourseVisualAssets:hydrateCourseVisualAssets
   };
 });

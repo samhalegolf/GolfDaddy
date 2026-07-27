@@ -234,12 +234,40 @@
     }
     return null;
   }
+  /* Where a cloud frame's pixels come from, in the only order that works on a phone:
+
+       1. the cached data URL - the frame the app downloaded into the asset store. This is the
+          offline round: no request, no signal needed.
+       2. the same-origin /api/course-visual-assets proxy, built from the frame's storage path.
+
+     What is NOT here is the asset's own url/publicUrl. Those are direct Supabase Storage links
+     on a PRIVATE bucket, so they do not load at all, and even on a public one they would split
+     mobile web from the Capacitor shells (CORS, signed URLs) - see docs/NATIVE_SHELL.md. */
+  function cloudSurfaceSrc(asset){
+    if(!asset)return "";
+    if(asset.dataUrl)return String(asset.dataUrl);
+    var path=String(asset.path||asset.storagePath||"").replace(/^\/+/,"").replace(/^course-visuals\//,"");
+    if(!path)return "";
+    var engine=safe(function(){return window.GDCourseVisualEngine;},null);
+    if(engine&&typeof engine.courseAssetUrl==="function")return String(engine.courseAssetUrl(path)||"");
+    return "/api/course-visual-assets?path="+encodeURIComponent(path);
+  }
+  function cloudSurfaceUrlIsStale(manifest){
+    var url=String(manifest&&manifest.tiles&&manifest.tiles[0]&&manifest.tiles[0].url||"");
+    return !url||/\/storage\/v1\/object\//.test(url);
+  }
+
+  /* Fallback order in play is exactly two deep: this hole's published cloud frame, then live
+     tiles with the course objects drawn on top. The local styled bake used to sit between them
+     and is deliberately gone from the play experience - frames are baked once on the server and
+     served down, so a phone-side render here would be a second, divergent answer to what a hole
+     looks like. The studio preview pane keeps its local bake; this is GPS play. */
   function courseVisualHoleAsset(record){
     var hole=surfaceHoleNumber();
-    var frames=(Array.isArray(record&&record.holeFramePublishedVisuals)&&record.holeFramePublishedVisuals.length?record.holeFramePublishedVisuals:Array.isArray(record&&record.holeFrameTerrainViews)&&record.holeFrameTerrainViews.length?record.holeFrameTerrainViews:[]);
+    var frames=Array.isArray(record&&record.holeFramePublishedVisuals)?record.holeFramePublishedVisuals:[];
     var match=frames.filter(function(asset){return asset&&Math.round(Number(asset.holeNumber)||0)===Math.round(Number(hole)||0);})[0]||null;
     if(match)return match;
-    var single=record&&record.singleHolePublishedVisual||record&&record.singleHoleTerrainView||null;
+    var single=record&&record.singleHolePublishedVisual||null;
     var singleHole=Math.round(Number(single&&single.holeNumber)||0);
     if(single&&(!frames.length||singleHole===Math.round(Number(hole)||0)||singleHole<1&&Math.round(Number(hole)||0)===1))return single;
     return null;
@@ -1106,17 +1134,16 @@
 	      /* Already built this hole's cloud manifest? Reuse the stored copy instead of
 	         re-registering on every render. */
 	      var stored=safe(function(){return JSON.parse(localStorage.getItem(storageKey())||"null");},null);
-	      if(stored&&stored.cloudPublishedSurface&&Number(stored.holeNumber)===hole&&manifestMatchesActive(stored))return stored;
+	      /* A manifest cached before frames moved behind the /api proxy points at a Storage URL
+	         on a private bucket - it never loads, and reusing it would pin the hole to a broken
+	         image forever. Rebuild instead. */
+	      if(stored&&stored.cloudPublishedSurface&&Number(stored.holeNumber)===hole&&manifestMatchesActive(stored)&&!cloudSurfaceUrlIsStale(stored))return stored;
 	      var record=engine.getRecord(surfaceCourseKey());
 	      if(!record)return null;
-	      var lists=[record.holeFramePublishedVisuals,record.holeFrameVisuals];
-	      var asset=null;
-	      for(var i=0;i<lists.length&&!asset;i++){
-	        asset=(Array.isArray(lists[i])?lists[i]:[]).find(function(item){
-	          var ps=item&&item.metadata&&item.metadata.playSurface;
-	          return item&&Number(item.holeNumber)===hole&&(item.url||item.publicUrl)&&ps&&ps.model==="mercator-image"&&ps.originPx&&Number.isFinite(Number(ps.captureZoom));
-	        })||null;
-	      }
+	      var asset=(Array.isArray(record.holeFramePublishedVisuals)?record.holeFramePublishedVisuals:[]).find(function(item){
+	        var ps=item&&item.metadata&&item.metadata.playSurface;
+	        return item&&Number(item.holeNumber)===hole&&cloudSurfaceSrc(item)&&ps&&ps.model==="mercator-image"&&ps.originPx&&Number.isFinite(Number(ps.captureZoom));
+	      })||null;
 	      if(!asset){
 	        /* Record not pulled yet (fresh device, or entered play before the pull finished).
 	           Pull once, then re-render the hole - the cloud surface swaps in seconds later
@@ -1155,7 +1182,7 @@
 	        includeTee:!!pins.tee,
 	        teeLatLng:pins.tee||null,
 	        cloudPublishedSurface:true,
-	        tiles:[{x:0,y:0,width:width,height:height,z:null,url:String(asset.url||asset.publicUrl)}],
+	        tiles:[{x:0,y:0,width:width,height:height,z:null,url:cloudSurfaceSrc(asset)}],
 	        createdAt:new Date().toISOString()
 	      };
 	      manifest=safe(function(){return typeof window.gdCapturedSurfaceWriteScan==="function"?window.gdCapturedSurfaceWriteScan(manifest,{reason:manifest.reason,storageKey:storageKey()}):manifest;},manifest)||manifest;
@@ -1165,7 +1192,7 @@
 	      window.__gdV19CapturedHoleFrameManifest=manifest;
 	      safe(function(){localStorage.setItem(storageKey(),JSON.stringify(manifest));});
 	      gdRegisterCoursePlayFrameManifest(manifest,{generatedFrom:"cloud-published-surface",manifestKey:storageKey(),status:"generated"});
-	      gdCoursePlayDebugEvent("gps-play-loaded-cloud-surface",{manifestKey:storageKey(),holeNumber:hole,url:String(asset.url||asset.publicUrl).slice(0,140)});
+	      gdCoursePlayDebugEvent("gps-play-loaded-cloud-surface",{manifestKey:storageKey(),holeNumber:hole,url:cloudSurfaceSrc(asset).slice(0,140),offlineReady:!!(asset&&asset.dataUrl)});
 	      return manifest;
 	    },null);
 	  }

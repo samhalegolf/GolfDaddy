@@ -223,6 +223,10 @@
     var response = await fetch("/api/auth-public-config", { cache: "no-store" });
     var body = await response.json().catch(function () { return {}; });
     if (!response.ok || !body.supabaseUrl || !body.supabaseAnonKey) throw new Error("Supabase public auth config is missing");
+    /* The live map needs its imagery key before anyone signs in, and this is the only public
+       config fetch on the boot path. Published rather than returned so the map layer does not
+       have to become auth-aware to read one string. */
+    try { if (body.linzBasemapsKey) window.gdLinzBasemapsKey = String(body.linzBasemapsKey); } catch (e) {}
     return body;
   }
 

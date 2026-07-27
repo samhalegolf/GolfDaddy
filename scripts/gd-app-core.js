@@ -14210,12 +14210,21 @@ gdFocusPane.style.pointerEvents="none";
 let baseLayer=null;
 let activeMapSourceIndex=0;
 let autoSwitchedForSecurity=false;
+/* Live display only - these never feed a stored frame. Cloud frames come from the licensed
+   scan sources in functions/lib/gd-imagery-sources.mjs; this list is what a course plays over
+   while it has none.
+   The anonymous Esri World Imagery entry that used to lead this list is gone: those endpoints
+   are not licensed for commercial use at all, so they were wrong even for display. A keyed
+   ArcGIS Location Platform basemap is the intended replacement for regions LINZ does not
+   cover, and needs a token on every request. */
 const mapSources=[
   {
-    key:"esri",
-    name:"Esri",
-    label:"Esri World Imagery",
-    tileUrl:"https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    key:"linz",
+    name:"LINZ",
+    label:"LINZ Basemaps aerial (CC BY 4.0)",
+    tileUrl:"https://basemaps.linz.govt.nz/v1/tiles/aerial/WebMercatorQuad/{z}/{x}/{y}.webp?api={linzKey}",
+    requiresKey:"linzKey",
+    attribution:"Sourced from the LINZ Data Service, CC BY 4.0",
     options:{maxZoom:21,crossOrigin:true}
   },
   {
@@ -14236,8 +14245,25 @@ function updateMapSourceUI(){
   if(sub)sub.textContent=current.label;
 }
 
+/* A keyed source is only selectable once its key has arrived. Without this the LINZ layer
+   would mount with an empty api= and paint the map with 403s, which reads to a player as
+   "the app is broken" rather than "this build has no imagery key". */
+function mapSourceReady(source){
+  if(!source)return false;
+  if(source.requiresKey==="linzKey")return !!window.gdLinzBasemapsKey;
+  return !source.requiresKey;
+}
+function mapSourceTileUrl(source){
+  return String(source&&source.tileUrl||"").replace(/\{ *linzKey *\}/g,window.gdLinzBasemapsKey||"");
+}
+
 function setMapSource(index, reason="manual"){
-  activeMapSourceIndex=((index%mapSources.length)+mapSources.length)%mapSources.length;
+  const count=mapSources.length;
+  let resolved=((index%count)+count)%count;
+  /* Step past any source whose key is missing rather than mounting a dead layer. */
+  for(let step=0;step<count&&!mapSourceReady(mapSources[resolved]);step++)resolved=(resolved+1)%count;
+  if(!mapSourceReady(mapSources[resolved]))return;
+  activeMapSourceIndex=resolved;
   window.gdActiveMapSourceIndex=activeMapSourceIndex;
   const current=mapSources[activeMapSourceIndex];
 
@@ -14245,7 +14271,7 @@ function setMapSource(index, reason="manual"){
     try{map.removeLayer(baseLayer)}catch(e){}
   }
 
-  baseLayer=L.tileLayer(current.tileUrl,current.options).addTo(map);
+  baseLayer=L.tileLayer(mapSourceTileUrl(current),current.options).addTo(map);
   updateMapSourceUI();
 
   baseLayer.once("load",()=>{
@@ -14273,6 +14299,17 @@ function autoSwitchMapSource(){
 }
 
 setMapSource(0,"initial");
+
+/* Imagery key for the live map. Boots on OSM and upgrades to aerial the moment the key lands,
+   so a slow or failed config fetch degrades to a usable map instead of a blank one. */
+fetch("/api/auth-public-config",{cache:"no-store"})
+  .then(res=>res.ok?res.json():null)
+  .then(config=>{
+    if(!config||!config.linzBasemapsKey)return;
+    window.gdLinzBasemapsKey=String(config.linzBasemapsKey);
+    if(!mapSourceReady(mapSources[activeMapSourceIndex])||activeMapSourceIndex!==0)setMapSource(0,"initial");
+  })
+  .catch(()=>{});
 
 const app=document.getElementById("app");
 let mode="start", start=null, target=null, greenCentre=null, pin=null;
@@ -16042,6 +16079,92 @@ async function gdLoadCourseVisualForPlay(payload,opts={}){
   gdApplyCourseVisualForPlay(loaded,loadedKey,keys,opts.source);
   return result;
 }
+/* Cloud frames for the selected course.
+
+   A course is 18 hole images in the database and this is where the app goes and gets them.
+   Cached frames come back immediately - that is both the zero-network case and the offline
+   round - and an unbuilt course starts a server build and polls while play runs over live
+   tiles with the course objects drawn on top. Nothing here bakes anything; the app surface has
+   no capture or stitch path in it at all.
+
+   The interim-state decision lives in ONE place, the engine's framesWaitMode, and this is the
+   only code that reads it: "block-until-ready" is the same flow with a loading screen over the
+   wait, so flipping the flag is the whole change. */
+function gdCourseFramesWaitMode(){
+  const engine=window.GDCourseVisualEngine;
+  return String(engine&&engine.framesWaitMode||"live-until-ready");
+}
+function gdApplyCourseFramesState(courseId,state){
+  try{
+    const name=String(state&&state.state||"");
+    document.body.dataset.gdCourseFrames=name;
+    document.body.dataset.gdCourseFramesCourse=courseId||"";
+    /* The loading-screen variant hangs off this one attribute and nothing else. */
+    document.body.dataset.gdCourseFramesBlocking=gdCourseFramesWaitMode()==="block-until-ready"&&name&&name!=="frames-ready"?"1":"";
+  }catch(e){}
+  try{if(typeof gdCoursePlayDebugEvent==="function")gdCoursePlayDebugEvent("course-frames-state",{courseId,state:state&&state.state||"",building:!!(state&&state.building),progress:state&&state.progress||null});}catch(e){}
+}
+/* The picker hands over several candidate keys for one course (id, saved id, name, name minus
+   "Golf Club"). Only one of them is the course the server knows, and hasGeometry is how it
+   says so - without it "wrong key" and "never built" are both state "none", and the app would
+   start a build against a key that cannot produce one. */
+async function gdResolveCourseFramesKey(keys){
+  const engine=window.GDCourseVisualEngine;
+  if(!engine||typeof engine.courseBuildState!=="function")return null;
+  for(const key of keys){
+    let state=null;
+    try{state=await engine.courseBuildState(key);}catch(e){state=null;}
+    if(!state)continue;
+    /* Offline: stop asking. Every remaining key would answer the same way, and a course with
+       cached frames does not need this resolution at all. */
+    if(state.state==="unknown")return null;
+    if(state.hasGeometry||state.framesReady)return {key,state};
+  }
+  return null;
+}
+async function gdEnsureCourseFramesForPlay(payload,opts={}){
+  if(gdCoursePayloadIsManual(payload))return null;
+  const engine=window.GDCourseVisualEngine;
+  if(!engine||typeof engine.ensureCourseFrames!=="function")return null;
+  const keys=opts.keys||gdCourseVisualPlayKeys(payload);
+  if(!keys.length)return null;
+  const token=keys.join("|");
+  const active=window.__gdCourseFramesWatch;
+  if(active&&active.token===token)return active;
+  try{active?.stop?.();}catch(e){}
+  window.__gdCourseFramesWatch={token,stop(){}};
+
+  /* Cached frames answer before any of the key resolution below, so a course opened once
+     starts instantly and works with no signal at all. */
+  let courseId=keys[0];
+  for(const key of keys){
+    let cached=null;
+    try{cached=await engine.cachedCourseFrames(key);}catch(e){cached=null;}
+    if(cached){courseId=key;break;}
+  }
+  if(courseId===keys[0]){
+    const resolved=await gdResolveCourseFramesKey(keys);
+    if(resolved)courseId=resolved.key;
+  }
+
+  let accessToken="";
+  try{accessToken=await window.ClaritySupabaseAuth?.freshAccessToken?.()||"";}catch(e){}
+
+  const watch=engine.ensureCourseFrames(courseId,{
+    accessToken,
+    onState:state=>gdApplyCourseFramesState(courseId,state),
+    onFrames:async frames=>{
+      gdApplyCourseFramesState(courseId,{state:"frames-ready",framesVersion:frames&&frames.version||""});
+      /* The frames are in the asset store keyed by path; hydration is what puts their pixels
+         on the record's published assets, which is what GPS play actually renders from. */
+      try{await engine.hydrateCourseVisualAssets?.(courseId);}catch(e){}
+      try{await gdLoadCourseVisualForPlay(payload,{keys,force:true,setLoading:false,source:"course-frames-ready"});}catch(e){}
+      try{if(typeof gdCoursePlayDebugEvent==="function")gdCoursePlayDebugEvent("course-frames-ready",{courseId,holes:Array.isArray(frames&&frames.holes)?frames.holes.length:0,version:frames&&frames.version||"",fromCache:!!(frames&&frames.fromCache)});}catch(e){}
+    }
+  });
+  window.__gdCourseFramesWatch=Object.assign({token},watch);
+  return window.__gdCourseFramesWatch;
+}
 function gdScheduleCourseVisualPullForPlay(payload){
   if(gdCoursePayloadIsManual(payload))return false;
   const engine=window.GDCourseVisualEngine;
@@ -16055,6 +16178,10 @@ function gdScheduleCourseVisualPullForPlay(payload){
   window.__gdCourseVisualPlayPullAt=now;
   try{document.body.dataset.gdCourseVisualPlayPull="loading";}catch(e){}
   setTimeout(()=>{gdLoadCourseVisualForPlay(payload,{keys,force:true,setLoading:false,source:"course-visual-cloud-loaded"});},80);
+  /* Same trigger, the frames half: the record pull brings down what the course IS, this brings
+     down what it LOOKS like. Deliberately not awaited - play starts over live tiles now and
+     the frames swap in whenever they land, which may be minutes away on a first build. */
+  setTimeout(()=>{gdEnsureCourseFramesForPlay(payload,{keys});},120);
   return true;
 }
 window.GDCoursePickerCoreBridge={
@@ -16077,6 +16204,8 @@ window.GDCoursePickerCoreBridge={
   refreshGpsMapAfterCourseOpen:gdRefreshGpsMapAfterCourseOpen,
   prepareFirstHoleState:gdPrepareCoursePickerFirstHoleState,
   scheduleVisualPullForPlay:gdScheduleCourseVisualPullForPlay,
+  ensureCourseFramesForPlay:gdEnsureCourseFramesForPlay,
+  framesWaitMode:gdCourseFramesWaitMode,
   openManualCourse:function(payload){
     try{return openCourse(payload)}catch(e){
       console.warn("Clarity Caddy course picker fallback",e);

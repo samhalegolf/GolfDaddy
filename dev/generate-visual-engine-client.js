@@ -41,11 +41,19 @@ const CLIENT = path.join(ROOT, "scripts", "gd-course-visual-client.js");
 const PLAY_API = [
   "captureImagePath", "saveCaptureImage", "loadCaptureImage", "hydrateCaptureImages",
   "getRecord", "resolveCourseVisual", "pullCourseVisual", "loadStore", "saveStore",
-  "beta3dTiltPolicy"
+  "beta3dTiltPolicy",
+  /* Cloud frames - the app surface's visual source. All consumers: read the build state,
+     start a build, download frames, read cached ones, and fill a record's assets from the
+     store so a downloaded frame reaches the renderer (and reaches it offline). None of them
+     author anything. */
+  "courseAssetUrl", "courseBuildState", "requestCourseBuild",
+  "cachedCourseFrames", "downloadCourseFrames", "ensureCourseFrames",
+  "hydrateCourseVisualAssets"
 ];
 /* Constants the API object exposes as values rather than functions. */
 const CONSTANTS = ["version:VERSION", "rendererVersion:RENDERER_VERSION", "storeKey:STORE_KEY",
-  "presetKey:PRESET_KEY", "apiEndpoint:API_ENDPOINT"];
+  "presetKey:PRESET_KEY", "apiEndpoint:API_ENDPOINT", "jobsEndpoint:JOBS_ENDPOINT",
+  "assetEndpoint:ASSET_ENDPOINT", "framesWaitMode:FRAMES_WAIT_MODE"];
 
 /* Top-level function declarations inside the factory (two-space indent). */
 function parseFunctions(lines) {

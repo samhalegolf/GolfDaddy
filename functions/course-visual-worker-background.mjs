@@ -11,7 +11,8 @@
    Phase 2 and reads these captures back down. */
 
 import sharp from "sharp";
-import { planCourseCaptures, captureGrid, packageHoleData } from "./lib/gd-visual-plan-core.mjs";
+import { planCourseCaptures, captureGrid, packageHoleData, courseBoundsFor } from "./lib/gd-visual-plan-core.mjs";
+import { resolveImagerySource, unscannableReason, attributionFor } from "./lib/gd-imagery-sources.mjs";
 import { renderHoleSurfaceMercator, renderOverview } from "./lib/gd-visual-export-core.mjs";
 
 const JOBS_TABLE = "course_visual_jobs";
@@ -29,6 +30,19 @@ const TILE_RETRIES = 3;
    Kept until that call is made - flipping this to false is a one-liner, un-flipping it needs a
    fresh snapshot. */
 const KEEP_FULL_RES_MASTER = true;
+
+/* Longest edge of the export-ready rendition AND of the frames rendered from it. The two are
+   one number on purpose: the rendition exists so the export never decodes a 17MP master, so
+   shipping it smaller than the frame would just upscale mush, and shipping it larger would put
+   the decode cost straight back.
+
+   Was 2048, which dated from the dead engine-in-Node path that OOM-killed workers - the sharp
+   compositor that replaced it was never the thing that got stuck. The masters kept by
+   KEEP_FULL_RES_MASTER are shot well above this, so raising it re-renditions from storage and
+   never re-shoots tiles. 4096 is the next stop if worker memory holds (peak scales with the
+   square of this). Changing it MUST come with a bump to the out tag in runExportJob's version
+   hash, or already-uploaded frames at the old size get resumed as if they were current. */
+const EXPORT_RENDITION_PX = 3072;
 
 function env(name) { return process.env[name] || ""; }
 function supabaseBase() { return env("SUPABASE_URL").replace(/\/+$/, ""); }
@@ -168,36 +182,82 @@ async function buildCapture(grid, { format }) {
 async function runSnapshotJob(job, deadlineAt) {
   const pkg = await loadCoursePackage(job.course_id);
   if (!pkg) throw new Error("course " + job.course_id + " not found in " + MAPS_TABLE);
-  const plan = planCourseCaptures(pkg);
+  /* Licensing gate, before a single tile is fetched. No licensed source covering this course
+     is a legitimate answer - that course runs live-only - so the job fails with the reason
+     rather than falling back to whatever imagery happens to respond. */
+  const bounds = courseBoundsFor(pkg);
+  const source = resolveImagerySource(bounds);
+  if (!source) throw new Error("imagery-source-unavailable: " + unscannableReason(bounds));
+  const attribution = attributionFor(source, null);
+  /* No region ships a hillshade raster - relief is computed from the DEM - so no terrain
+     capture is planned. The natural recipe never composites relief anyway. */
+  const plan = planCourseCaptures(pkg, { terrainSource: source.terrain || null });
   if (!plan.length) throw new Error("capture plan is empty - no play-ready geometry");
-  const planKey = hashText(plan.map(item => item.id).join("|"));
+  /* The source is part of the key: masters shot from a different provider must never be
+     re-renditioned under a new one, both because the pixels differ and because the stored
+     credit would then be a lie about where they came from. */
+  const planKey = hashText(source.key + "|" + plan.map(item => item.id).join("|"));
   const resumable = !!(job.result && job.result.progress && job.result.progress.planKey === planKey);
-  const index = { version: 1, courseId: pkg.courseId, courseName: pkg.courseName, generatedAt: new Date().toISOString(), captures: [] };
+  /* Stored masters may only be reused when they were shot for THIS plan. The plan ids embed a
+     hash of each capture's padded bounds, so a course whose geometry moved gets a different
+     planKey and every capture is re-shot from tiles rather than re-renditioned from a master
+     that frames the old geometry. Snapshots written before this field existed have no planKey
+     and are therefore never trusted - they re-shoot once, then carry one. */
+  const storedPlanKey = await storedSnapshotPlanKey(pkg.courseId);
+  const mastersMatchPlan = !!storedPlanKey && storedPlanKey === planKey;
+  const index = {
+    version: 1, planKey, renditionPx: EXPORT_RENDITION_PX,
+    courseId: pkg.courseId, courseName: pkg.courseName,
+    generatedAt: new Date().toISOString(),
+    /* Travels with the captures so the credit is attached to the pixels, not reconstructed
+       later from whatever the registry happens to say at read time. */
+    source: { key: source.key, label: source.label, license: source.license && source.license.name || "", attribution },
+    captures: []
+  };
   const failures = [];
   let shot = 0;
+  /* Counted so the soft-deadline check below still knows when the plan is exhausted; without
+     this a skipped capture makes "done + failed < plan.length" permanently true and the job
+     requeues itself forever. */
+  let skipped = 0;
   for (const item of plan) {
-    const grid = captureGrid(item);
+    const grid = captureGrid(item, { source });
+    /* No licensed endpoint for this role (relief in a region with imagery but no elevation) -
+       drop the capture, keep the course. */
+    if (!grid) { skipped += 1; continue; }
     const isTerrain = item.role === "terrain-reference";
     const ext = isTerrain ? "png" : "jpg";
     const fullPath = pkg.courseId + "/captures/" + item.captureKey.replace(/:/g, "/") + "." + ext;
-    const smallPath = pkg.courseId + "/captures/2048/" + item.captureKey.replace(/:/g, "/") + "." + ext;
-    /* The 2048 rendition is what the export reads, so its presence is what "already shot"
-       means. path stays pointed at whichever object actually exists. */
-    const path = KEEP_FULL_RES_MASTER ? fullPath : smallPath;
+    const renditionPath = pkg.courseId + "/captures/" + EXPORT_RENDITION_PX + "/" + item.captureKey.replace(/:/g, "/") + "." + ext;
+    /* The export-ready rendition is what the export reads, so its presence is what "already
+       shot" means. path stays pointed at whichever object actually exists. */
+    const path = KEEP_FULL_RES_MASTER ? fullPath : renditionPath;
     try {
-      if (!(resumable && await storageExists(smallPath))) {
+      if (!(resumable && await storageExists(renditionPath))) {
         await heartbeatJob(job, { planKey, capturesDone: index.captures.length, capturesTotal: plan.length, stage: "shooting " + item.captureKey, rssMb: Math.round(process.memoryUsage().rss / 1048576) });
-        const buffer = await buildCapture(grid, { format: isTerrain ? "png" : "jpeg" });
-        if (KEEP_FULL_RES_MASTER) await storageUpload(fullPath, buffer, isTerrain ? "image/png" : "image/jpeg");
+        /* Raising the output size must not cost 6.6k tile fetches per course. When a master
+           for this exact plan is already in storage, the rendition is derived from it and the
+           tile source is never touched - that is the whole reason KEEP_FULL_RES_MASTER exists. */
+        let buffer = null;
+        if (mastersMatchPlan && await storageExists(fullPath)) {
+          buffer = await storageDownload(fullPath);
+        } else {
+          buffer = await buildCapture(grid, { format: isTerrain ? "png" : "jpeg" });
+          if (KEEP_FULL_RES_MASTER) await storageUpload(fullPath, buffer, isTerrain ? "image/png" : "image/jpeg");
+        }
         /* Export-ready rendition: pre-downscaled to the frame output resolution so the export
            never has to download and decode the full-resolution capture again. Decoding 17MP
            JPEGs per hole was most of the export's CPU bill on throttled serverless cores. */
-        const small = sharp(buffer, { limitInputPixels: false }).resize({ width: 2048, height: 2048, fit: "inside", withoutEnlargement: true });
-        await storageUpload(smallPath, await (isTerrain ? small.png({ compressionLevel: 6 }) : small.jpeg({ quality: 88 })).toBuffer(), isTerrain ? "image/png" : "image/jpeg");
+        const small = sharp(buffer, { limitInputPixels: false }).resize({ width: EXPORT_RENDITION_PX, height: EXPORT_RENDITION_PX, fit: "inside", withoutEnlargement: true });
+        await storageUpload(renditionPath, await (isTerrain ? small.png({ compressionLevel: 6 }) : small.jpeg({ quality: 88 })).toBuffer(), isTerrain ? "image/png" : "image/jpeg");
+        buffer = null;
         shot += 1;
       }
       index.captures.push({
-        path2048: smallPath,
+        pathExport: renditionPath,
+        renditionPx: EXPORT_RENDITION_PX,
+        sourceKey: grid.sourceKey || source.key,
+        sourceAdapter: grid.adapter,
         id: item.id,
         captureKey: item.captureKey,
         role: item.role,
@@ -226,7 +286,7 @@ async function runSnapshotJob(job, deadlineAt) {
     /* Same soft-deadline relay as export. Snapshots average ~10 min against a ~4 min real
        invocation cap, so before this they survived only by luck: a death meant the reaper
        requeued a run that started again from capture 1. */
-    if (deadlineAt && Date.now() > deadlineAt && index.captures.length + failures.length < plan.length) {
+    if (deadlineAt && Date.now() > deadlineAt && index.captures.length + failures.length + skipped < plan.length) {
       return { requeue: true, rendered: shot, progress: { planKey, capturesDone: index.captures.length, capturesTotal: plan.length } };
     }
   }
@@ -236,6 +296,9 @@ async function runSnapshotJob(job, deadlineAt) {
     planItems: plan.length,
     captured: index.captures.length,
     failed: failures.length,
+    skipped,
+    source: source.key,
+    license: source.license && source.license.name || "",
     failures: failures.slice(0, 12),
     indexPath: pkg.courseId + "/captures/index.json"
   };
@@ -381,7 +444,9 @@ async function writeCourseVisualRow(job, pkg, framesIndex, recipe) {
     current_version: versionNumber,
     published_version: versionNumber,
     last_error: {},
-    diagnostics: { source: "course-visual-worker", jobId: job.id, framesIndexPath: pkg.courseId + "/frames/index.json", generatedAt: framesIndex.generatedAt },
+    /* imagery/attribution ride in diagnostics because the row's shape is fixed by the existing
+       play_payload contract; the client reads them to render the credit over cloud frames. */
+    diagnostics: { source: "course-visual-worker", jobId: job.id, framesIndexPath: pkg.courseId + "/frames/index.json", generatedAt: framesIndex.generatedAt, imagery: framesIndex.source || null, attribution: framesIndex.source && framesIndex.source.attribution || null },
     versions: [],
     uploaded_assets: uploadedAssets,
     updated_at: new Date().toISOString()
@@ -398,6 +463,18 @@ function hashText(text) {
   const s = String(text || "");
   for (let i = 0; i < s.length; i++) hash = ((hash << 5) + hash + s.charCodeAt(i)) >>> 0;
   return hash.toString(36);
+}
+
+/* planKey of the snapshot currently in storage, or "" when there is no index or it predates
+   the field. Read once per snapshot run to decide whether stored masters frame current
+   geometry (see runSnapshotJob). */
+async function storedSnapshotPlanKey(courseId) {
+  try {
+    const index = JSON.parse((await storageDownload(courseId + "/captures/index.json")).toString("utf8"));
+    return String(index && index.planKey || "");
+  } catch (e) {
+    return "";
+  }
 }
 
 async function storageExists(path) {
@@ -430,22 +507,25 @@ async function runExportJob(job, deadlineAt) {
   const overrides = recipe.overrides || recipe.courseOverrides || {};
   /* out tag bumped to iz1 when captureZoom went integer-only (gd-visual-export-core): old
      fractional-zoom frames must NOT be resumed/reused, so the version dir has to change. */
-  const version = "r" + hashText(JSON.stringify({ presetId, overrides, snapshot: capturesIndex.generatedAt, out: "mercator-2048-iz1" }));
+  const version = "r" + hashText(JSON.stringify({ presetId, overrides, snapshot: capturesIndex.generatedAt, out: "mercator-" + EXPORT_RENDITION_PX + "-iz1" }));
   const framesDir = pkg.courseId + "/frames/" + version;
   const holeData = packageHoleData(pkg);
   const terrainEntry = entries.find(e => e.role === "terrain-reference");
   const backdropEntry = entries.find(e => e.role === "course-backdrop");
   const cachedBuffers = {};
   /* Prefer the pre-downscaled rendition written at snapshot time - small download, no 17MP
-     decode. Older snapshots without one fall back to download + downscale of full-res. */
+     decode. pathExport is the current field; path2048 is what snapshots written before the
+     rendition size became configurable carry, and reading it keeps those courses exporting
+     (at their old size) until they are re-snapshotted. Neither present: downscale the master. */
   async function bufferFor(entry) {
     if (!cachedBuffers[entry.path]) {
-      if (entry.path2048) {
-        cachedBuffers[entry.path] = await storageDownload(entry.path2048);
+      const rendition = entry.pathExport || entry.path2048 || "";
+      if (rendition) {
+        cachedBuffers[entry.path] = await storageDownload(rendition);
       } else {
         const raw = await storageDownload(entry.path);
         const isPng = entry.path.endsWith(".png");
-        const resized = sharp(raw, { limitInputPixels: false }).resize({ width: 2048, height: 2048, fit: "inside", withoutEnlargement: true });
+        const resized = sharp(raw, { limitInputPixels: false }).resize({ width: EXPORT_RENDITION_PX, height: EXPORT_RENDITION_PX, fit: "inside", withoutEnlargement: true });
         cachedBuffers[entry.path] = await (isPng ? resized.png({ compressionLevel: 9 }) : resized.jpeg({ quality: 88 })).toBuffer();
       }
     }
@@ -459,7 +539,9 @@ async function runExportJob(job, deadlineAt) {
     });
   }
   const holeNumbers = [...new Set(entries.filter(e => e.holeNumber && !e.terrainStageOnly).map(e => Number(e.holeNumber)))].sort((a, b) => a - b);
-  const framesIndex = { version: 1, courseId: pkg.courseId, exportVersion: version, presetId, generatedAt: capturesIndex.generatedAt, overview: null, holes: [] };
+  /* Carried through from the captures so a frame always ships with the credit for the imagery
+     it was made from - Play renders it from here, not from a client-side lookup table. */
+  const framesIndex = { version: 1, courseId: pkg.courseId, exportVersion: version, presetId, generatedAt: capturesIndex.generatedAt, source: capturesIndex.source || null, overview: null, holes: [] };
   let rendered = 0;
   for (const holeNumber of holeNumbers) {
     const path = framesDir + "/h" + holeNumber + ".jpg";
@@ -495,7 +577,7 @@ async function runExportJob(job, deadlineAt) {
       /* North-up mercator surface: the geometry the v19 GPS pipeline consumes natively
          (originPx + captureZoom + one image). The runtime does the play-axis framing, same
          as it does for locally captured surfaces. */
-      const frame = await renderHoleSurfaceMercator({ pins, captures, terrain, settings: overrides });
+      const frame = await renderHoleSurfaceMercator({ pins, captures, terrain, settings: overrides, maxDim: EXPORT_RENDITION_PX });
       await storageUpload(path, frame.jpeg, "image/jpeg");
       width = frame.width; height = frame.height;
       playSurface = {

@@ -6,15 +6,20 @@
    Zoom policies, tile budgets, bleeds, and corridor segmentation mirror the browser so a
    server snapshot frames the course the same way the in-browser scan does. */
 
-const DEFAULT_IMAGERY_TEMPLATE = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
+import { exportImageUrl } from "./gd-imagery-sources.mjs";
 
+/* Capture policies describe FRAMING - zoom, bleed, lens, budget. They no longer name a tile
+   source: which imagery a course may be shot from is a licensing decision resolved per region
+   in gd-imagery-sources.mjs and handed to captureGrid. A policy that hardcoded an endpoint
+   would route straight around that gate, which is exactly how Esri's display-only tiles ended
+   up baked into stored frames. */
 export function capturePolicy(role) {
   role = String(role || "");
   const mobileHoleLens = { captureLens: "mobile-hole", lensShape: "mobile-hole", lensAspectRatio: 9 / 16, lensOrientation: "play-axis", lensFit: "expand-bounds" };
   const greenSquareLens = { captureLens: "green-square", lensShape: "green-square", lensAspectRatio: 1, lensOrientation: "map-axis", lensFit: "expand-bounds" };
   if (role === "green-surround") return Object.assign({ role, label: "Super HD green surrounds", quality: "super-hd", targetZoom: 20, minZoom: 20, maxZoom: 20, maxTiles: 220, bleedMeters: 26, bleedPx: 220, stitchLayer: 30, fixedZoom: true }, greenSquareLens);
   if (role === "play-corridor") return Object.assign({ role, label: "HD play corridor", quality: "hd", targetZoom: 19, minZoom: 19, maxZoom: 19, maxTiles: 320, bleedMeters: 32, bleedPx: 220, stitchLayer: 20, fixedZoom: true, maxSegmentMeters: 320, segmentOverlapMeters: 42, maxSegments: 6 }, mobileHoleLens);
-  if (role === "terrain-reference") return { role, label: "Terrain relief reference", quality: "terrain-map", targetZoom: 16, minZoom: 14, maxZoom: 17, maxTiles: 260, bleedMeters: 130, bleedPx: 380, stitchLayer: 5, terrainStageOnly: true, tileSourceLabel: "Esri World Hillshade", tileTemplate: "https://services.arcgisonline.com/arcgis/rest/services/Elevation/World_Hillshade/MapServer/tile/{z}/{y}/{x}" };
+  if (role === "terrain-reference") return { role, label: "Terrain relief reference", quality: "terrain-map", targetZoom: 16, minZoom: 14, maxZoom: 17, maxTiles: 260, bleedMeters: 130, bleedPx: 380, stitchLayer: 5, terrainStageOnly: true };
   return { role: "course-backdrop", label: "Live map underlay", quality: "live-map-base", targetZoom: 17, minZoom: 16, maxZoom: 18, maxTiles: 260, bleedMeters: 120, bleedPx: 420, stitchLayer: 0 };
 }
 
@@ -217,6 +222,17 @@ function hashString(value) {
   return hash.toString(36);
 }
 
+/* Bounds of everything play-ready in a package. The imagery registry needs these BEFORE a plan
+   exists - which source may legally shoot this course decides whether there is a plan at all. */
+export function courseBoundsFor(pkg) {
+  const holeData = packageHoleData(pkg);
+  const all = Object.keys(holeData).map(Number).sort((a, b) => a - b).map(h => {
+    const anchors = holeAnchorPins(holeData[h]);
+    return boundsFromPoints([anchors.tee, anchors.green, ...anchors.route, ...anchors.greenShape].filter(Boolean));
+  }).filter(Boolean);
+  return mergeBounds(all);
+}
+
 export function planCourseCaptures(pkg, opts = {}) {
   const courseId = slug(pkg && (pkg.courseId || pkg.id));
   const courseName = String(pkg && (pkg.courseName || pkg.name) || courseId);
@@ -254,8 +270,18 @@ export function planCourseCaptures(pkg, opts = {}) {
   if (backdropBounds) {
     const backdrop = item("course-backdrop", backdropBounds, null, null);
     if (backdrop) plan.push(backdrop);
-    const terrain = item("terrain-reference", backdropBounds, null, null);
-    if (terrain) plan.push(terrain);
+    /* The relief capture fetches a ready-made hillshade RASTER, and no region has a licensed
+       one - shading is computed from the DEM instead, which is one fetch that also feeds the
+       offline plays-like maths. So this is planned only when a caller explicitly supplies a
+       terrain raster source, which today nothing does. It stays here rather than being deleted
+       because the capture slot itself survives the move to computed relief; only where the
+       pixels come from changes. Callers that resolve no sources at all (plan-shape tests) keep
+       the original behaviour. */
+    const wantsTerrain = !("terrainSource" in opts) || !!opts.terrainSource;
+    if (wantsTerrain) {
+      const terrain = item("terrain-reference", backdropBounds, null, null);
+      if (terrain) plan.push(terrain);
+    }
   }
   holeNumbers.forEach(holeNumber => {
     const data = holeData[holeNumber];
@@ -373,19 +399,17 @@ function tileCountFor(rect) {
   return Math.max(0, maxTx - minTx + 1) * Math.max(0, maxTy - minTy + 1);
 }
 
-export function captureGrid(item, opts = {}) {
-  const template = String(item.tileTemplate || opts.imageryTemplate || DEFAULT_IMAGERY_TEMPLATE);
-  const minZoom = Math.max(1, Math.round(Number(item.minZoom) || 15));
-  let zoom = Math.max(minZoom, Math.min(22, Math.round(Number(item.targetZoom) || 18)));
-  const maxTiles = Math.max(16, Math.round(Number(item.maxTiles) || 320));
-  let rect = pixelRect(item, zoom);
-  while (zoom > minZoom && tileCountFor(rect) > maxTiles) {
-    zoom -= 1;
-    rect = pixelRect(item, zoom);
-  }
-  const origin = { x: rect.minX, y: rect.minY };
-  const width = Math.max(256, rect.maxX - rect.minX);
-  const height = Math.max(256, rect.maxY - rect.minY);
+/* Which half of a resolved source a capture reads from: relief comes off the elevation
+   endpoint, everything else off imagery. */
+function specForItem(item, source) {
+  if (!source) return null;
+  return item.role === "terrain-reference" ? (source.terrain || null) : (source.imagery || null);
+}
+
+/* Slippy tiles - the original path, unchanged apart from taking its template from the
+   resolved source instead of a module constant. */
+function xyzTiles(spec, rect, origin, zoom) {
+  const template = String(spec.urlTemplate || "");
   const tiles = [];
   const minTx = Math.floor(rect.minX / 256), maxTx = Math.floor((rect.maxX - 1) / 256);
   const minTy = Math.floor(rect.minY / 256), maxTy = Math.floor((rect.maxY - 1) / 256);
@@ -400,6 +424,60 @@ export function captureGrid(item, opts = {}) {
       });
     }
   }
+  return tiles;
+}
+
+/* ImageServer exportImage - one request per block rather than per 256px tile, which is the
+   difference between ~300 requests and ~4 for the same capture. Blocks are emitted in the
+   same {x, y, url} shape as tiles and land on the same canvas, so the compositor cannot tell
+   the two adapters apart. Each block is requested at exactly its own pixel size, so nothing
+   is resampled on the way in. */
+function exportBlocks(spec, rect, origin, zoom) {
+  const block = Math.max(256, Math.round(Number(spec.blockPx) || 2048));
+  const width = rect.maxX - rect.minX;
+  const height = rect.maxY - rect.minY;
+  const blocks = [];
+  for (let by = 0; by < height; by += block) {
+    for (let bx = 0; bx < width; bx += block) {
+      const w = Math.min(block, width - bx);
+      const h = Math.min(block, height - by);
+      if (w <= 0 || h <= 0) continue;
+      blocks.push({
+        z: zoom, x: bx, y: by,
+        url: exportImageUrl(spec, { left: origin.x + bx, top: origin.y + by, width: w, height: h }, zoom)
+      });
+    }
+  }
+  return blocks;
+}
+
+export function captureGrid(item, opts = {}) {
+  const source = opts.source || null;
+  const spec = specForItem(item, source);
+  /* No licensed endpoint for this role means no capture. Returning an empty grid rather than
+     throwing lets the planner drop one role (relief) without failing the course. */
+  if (!spec || !(spec.urlTemplate || spec.endpoint)) return null;
+  /* Resolution ceiling from the source, not from the policy. NAIP is 0.6m, so asking it for
+     z19 buys nothing but upscaled mush at the same cost; and a fixedZoom policy (green
+     surrounds sit at z20) has to be allowed to come DOWN to the ceiling, hence the floor
+     moving too. */
+  const ceiling = Math.max(1, Math.min(22, Math.round(Number(spec.maxUsefulZoom) || 22)));
+  const minZoom = Math.min(ceiling, Math.max(1, Math.round(Number(item.minZoom) || 15)));
+  let zoom = Math.min(ceiling, Math.max(minZoom, Math.min(22, Math.round(Number(item.targetZoom) || 18))));
+  const maxTiles = Math.max(16, Math.round(Number(item.maxTiles) || 320));
+  let rect = pixelRect(item, zoom);
+  /* Budget is counted in 256px cells for both adapters so the step-down stays calibrated
+     against the same numbers it was tuned on. */
+  while (zoom > minZoom && tileCountFor(rect) > maxTiles) {
+    zoom -= 1;
+    rect = pixelRect(item, zoom);
+  }
+  const origin = { x: rect.minX, y: rect.minY };
+  const width = Math.max(256, rect.maxX - rect.minX);
+  const height = Math.max(256, rect.maxY - rect.minY);
+  const tiles = String(spec.adapter) === "arcgis-export"
+    ? exportBlocks(spec, rect, origin, zoom)
+    : xyzTiles(spec, rect, origin, zoom);
   const nw = unprojectPoint(origin.x, origin.y, zoom);
   const se = unprojectPoint(origin.x + width, origin.y + height, zoom);
   return {
@@ -410,6 +488,9 @@ export function captureGrid(item, opts = {}) {
     imageBounds: { north: nw.lat, west: nw.lng, south: se.lat, east: se.lng },
     lensCornersPx: rect.lensCornersPx || null,
     lensOrientation: rect.lensOrientation || item.lensOrientation || "",
+    sourceKey: source.key || "",
+    sourceLabel: source.label || "",
+    adapter: String(spec.adapter || "xyz"),
     tiles
   };
 }
