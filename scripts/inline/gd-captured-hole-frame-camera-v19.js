@@ -234,23 +234,22 @@
     }
     return null;
   }
-  /* Where a cloud frame's pixels come from, in the only order that works on a phone:
-
-       1. the cached data URL - the frame the app downloaded into the asset store. This is the
-          offline round: no request, no signal needed.
-       2. the same-origin /api/course-visual-assets proxy, built from the frame's storage path.
-
-     What is NOT here is the asset's own url/publicUrl. Those are direct Supabase Storage links
-     on a PRIVATE bucket, so they do not load at all, and even on a public one they would split
-     mobile web from the Capacitor shells (CORS, signed URLs) - see docs/NATIVE_SHELL.md. */
+  /* Where a cloud frame's pixels come from: the copy in the local library, and nowhere else. */
   function cloudSurfaceSrc(asset){
-    if(!asset)return "";
-    if(asset.dataUrl)return String(asset.dataUrl);
-    var path=String(asset.path||asset.storagePath||"").replace(/^\/+/,"").replace(/^course-visuals\//,"");
-    if(!path)return "";
-    var engine=safe(function(){return window.GDCourseVisualEngine;},null);
-    if(engine&&typeof engine.courseAssetUrl==="function")return String(engine.courseAssetUrl(path)||"");
-    return "/api/course-visual-assets?path="+encodeURIComponent(path);
+    /* The cached copy or nothing.
+
+       Streaming the frame from /api/course-visual-assets was tempting and is wrong. It costs
+       the same megabytes as downloading the course, on the same cellular connection, without
+       ever asking - and the player gets none of the benefit, because nothing is kept. Worse,
+       the proxy serves those bytes as immutable/max-age=31536000, so they settle in the
+       browser's HTTP cache: storage the library does not know about, cannot show a size for,
+       and cannot delete. That is the "secret storage" the two-tier model exists to prevent.
+
+       So a hole with no downloaded frame falls through to live tiles with the course objects
+       over them - "Live Map Available", which is a real product tier and a fully playable one -
+       until the player accepts the download. The proxy is still how frames are FETCHED
+       (downloadCourseAsset); it is just not how they are displayed. */
+    return asset && asset.dataUrl ? String(asset.dataUrl) : "";
   }
   function cloudSurfaceUrlIsStale(manifest){
     var url=String(manifest&&manifest.tiles&&manifest.tiles[0]&&manifest.tiles[0].url||"");
@@ -286,7 +285,11 @@
     return best.zoom;
   }
   function courseVisualManifestFromAsset(asset,record){
-    var src=String(asset&&asset.dataUrl||asset&&asset.url||asset&&asset.publicUrl||"");
+    /* Same rule as the mercator path: the downloaded copy or nothing. url/publicUrl on a cloud
+       asset is a direct Supabase Storage link on a PRIVATE bucket - it has never loaded - and
+       reinstating any network source here would put the streaming behaviour back through a
+       second door. */
+    var src=cloudSurfaceSrc(asset);
     if(!src)return null;
     var meta=asset&&asset.metadata||{};
     var playSurface=meta.playSurface||{};
