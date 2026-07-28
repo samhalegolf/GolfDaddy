@@ -141,10 +141,50 @@ async function fetchTileOnce(url) {
   }
 }
 
+/* Captures overlap, heavily and by design: corridor segments carry a 42m overlap, a green sits
+   inside its own corridor, and parallel holes share the axis-aligned box each rotated lens is
+   captured through. Measured on Jacks Point, 2250 tile requests covered 614 distinct tiles -
+   73% of the traffic was re-fetching bytes the run already had, one tile 18 times over.
+
+   So tiles are cached for the run. Bounded, because a course is not the only thing that has to
+   fit in the function: eviction is oldest-first, which suits a plan that sweeps the course
+   hole by hole and rarely returns to ground it has left. The cache survives between relayed
+   invocations of a warm container, which is a bonus rather than a correctness question - tile
+   pyramids do not change under us mid-scan. */
+const TILE_CACHE_BUDGET_BYTES = 64 * 1024 * 1024;
+const tileCache = new Map();
+let tileCacheBytes = 0;
+const tileCacheStats = { hits: 0, misses: 0 };
+
+function tileCacheGet(url) {
+  const hit = tileCache.get(url);
+  if (hit) tileCacheStats.hits += 1; else tileCacheStats.misses += 1;
+  return hit || null;
+}
+function tileCachePut(url, buffer) {
+  if (!buffer || tileCache.has(url)) return;
+  tileCache.set(url, buffer);
+  tileCacheBytes += buffer.length;
+  while (tileCacheBytes > TILE_CACHE_BUDGET_BYTES && tileCache.size) {
+    const oldest = tileCache.keys().next().value;
+    const dropped = tileCache.get(oldest);
+    tileCache.delete(oldest);
+    tileCacheBytes -= dropped ? dropped.length : 0;
+  }
+}
+
 /* Coverage is all-or-nothing (see buildCapture), so a single transient 502 out of ~6.6k tile
    fetches used to bin an entire capture. Retry transient failures before giving up; a 404 is
    a real gap in the tile source and retrying it just burns the clock. */
 async function fetchTile(url) {
+  const cached = tileCacheGet(url);
+  if (cached) return cached;
+  const fetched = await fetchTileUncached(url);
+  tileCachePut(url, fetched);
+  return fetched;
+}
+
+async function fetchTileUncached(url) {
   let lastError = null;
   for (let attempt = 0; attempt < TILE_RETRIES; attempt++) {
     try {
@@ -215,7 +255,10 @@ async function runSnapshotJob(job, deadlineAt) {
   const attribution = attributionFor(source, null);
   /* No region ships a hillshade raster - relief is computed from the DEM - so no terrain
      capture is planned. The natural recipe never composites relief anyway. */
-  const plan = planCourseCaptures(pkg, { terrainSource: source.terrain || null });
+  /* source is passed so the planner can grid each capture once and clamp every zoom to the
+     frame that capture actually lands in; maxOutputPx must be the export's own cap or the two
+     disagree and we go back to shooting detail the compositor throws away. */
+  const plan = planCourseCaptures(pkg, { terrainSource: source.terrain || null, source, maxOutputPx: EXPORT_RENDITION_PX });
   if (!plan.length) throw new Error("capture plan is empty - no play-ready geometry");
   /* The source is part of the key: masters shot from a different provider must never be
      re-renditioned under a new one, both because the pixels differ and because the stored
@@ -331,6 +374,8 @@ async function runSnapshotJob(job, deadlineAt) {
     captured: index.captures.length,
     failed: failures.length,
     skipped,
+    tileFetches: tileCacheStats.misses,
+    tileCacheHits: tileCacheStats.hits,
     source: source.key,
     license: source.license && source.license.name || "",
     failures: failures.slice(0, 12),

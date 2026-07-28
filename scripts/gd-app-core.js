@@ -16129,10 +16129,14 @@ async function gdEnsureCourseFramesForPlay(payload,opts={}){
   const keys=opts.keys||gdCourseVisualPlayKeys(payload);
   if(!keys.length)return null;
   const token=keys.join("|");
+  const acquire=opts.acquire===true;
   const active=window.__gdCourseFramesWatch;
-  if(active&&active.token===token)return active;
+  /* An observing watch must not swallow an accept. Same course, but the player has now asked
+     for the download - that is a different job, so replace the watch rather than returning the
+     one that was only ever going to look. */
+  if(active&&active.token===token&&(active.acquire||!acquire))return active;
   try{active?.stop?.();}catch(e){}
-  window.__gdCourseFramesWatch={token,stop(){}};
+  window.__gdCourseFramesWatch={token,acquire,stop(){}};
 
   /* Cached frames answer before any of the key resolution below, so a course opened once
      starts instantly and works with no signal at all. */
@@ -16152,7 +16156,24 @@ async function gdEnsureCourseFramesForPlay(payload,opts={}){
 
   const watch=engine.ensureCourseFrames(courseId,{
     accessToken,
+    /* Selecting a course is not consent to spend someone's cellular data. Without acquire this
+       watch only reads state and serves what the library already holds; the megabytes land when
+       the player accepts the offer below, arrives via a pre-search, or has Smart Download on. */
+    acquire,
     onState:state=>gdApplyCourseFramesState(courseId,state),
+    /* The server has this course built and the device does not have it. This is the
+       "Offline Map Available" moment - surfaced, not acted on. */
+    onOfflineAvailable:info=>{
+      try{
+        document.body.dataset.gdCourseOfflineAvailable=courseId;
+        document.body.dataset.gdCourseOfflineVersion=String(info&&info.framesVersion||"");
+      }catch(e){}
+      try{if(typeof gdCoursePlayDebugEvent==="function")gdCoursePlayDebugEvent("course-offline-available",{courseId,framesVersion:info&&info.framesVersion||null});}catch(e){}
+    },
+    /* Already downloaded, but the cloud has re-baked it. Advertised, never auto-pulled. */
+    onUpdateAvailable:info=>{
+      try{document.body.dataset.gdCourseOfflineUpdate=String(info&&info.framesVersion||"");}catch(e){}
+    },
     onFrames:async frames=>{
       gdApplyCourseFramesState(courseId,{state:"frames-ready",framesVersion:frames&&frames.version||""});
       /* The frames are in the asset store keyed by path; hydration is what puts their pixels
@@ -16162,7 +16183,7 @@ async function gdEnsureCourseFramesForPlay(payload,opts={}){
       try{if(typeof gdCoursePlayDebugEvent==="function")gdCoursePlayDebugEvent("course-frames-ready",{courseId,holes:Array.isArray(frames&&frames.holes)?frames.holes.length:0,version:frames&&frames.version||"",fromCache:!!(frames&&frames.fromCache)});}catch(e){}
     }
   });
-  window.__gdCourseFramesWatch=Object.assign({token},watch);
+  window.__gdCourseFramesWatch=Object.assign({token,acquire},watch);
   return window.__gdCourseFramesWatch;
 }
 function gdScheduleCourseVisualPullForPlay(payload){
@@ -16205,6 +16226,10 @@ window.GDCoursePickerCoreBridge={
   prepareFirstHoleState:gdPrepareCoursePickerFirstHoleState,
   scheduleVisualPullForPlay:gdScheduleCourseVisualPullForPlay,
   ensureCourseFramesForPlay:gdEnsureCourseFramesForPlay,
+  /* The accept action behind "Offline Map Available". Whatever surface offers the download -
+     play screen prompt, library screen, pre-search, Smart Download - calls THIS, and it is the
+     only path by which a course package reaches the device. */
+  downloadCourseToLibrary:payload=>gdEnsureCourseFramesForPlay(payload,{acquire:true}),
   framesWaitMode:gdCourseFramesWaitMode,
   openManualCourse:function(payload){
     try{return openCourse(payload)}catch(e){

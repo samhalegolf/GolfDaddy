@@ -302,8 +302,55 @@ export function planCourseCaptures(pkg, opts = {}) {
       });
     }
   });
+  /* Don't shoot sharper than the frame we render.
+
+     The export resamples every capture for a hole onto ONE mercator grid whose zoom is
+     driven by the hole's extent and the output cap - so detail above that grid is not
+     "extra quality", it is decoded, resampled and thrown away. Measured on Jacks Point,
+     18 of 18 holes were shot 2-4x sharper than the frame they landed in: 584 megapixels
+     composited to produce ~72MP of frames, with the biggest single capture at 37.9MP,
+     which is also what put the worker against its memory ceiling.
+
+     What the export merges is the capture IMAGE bounds - the lens-expanded, bleed-padded
+     rectangles - not the hole's metric bounds, and the lens expansion is large enough that
+     estimating from the metric bounds lands a whole zoom high. So when a source is available
+     this grids each capture once to find those bounds, then clamps. The second pass is stable
+     because bleedPx is now pinned to ground distance (see pixelRect), so re-gridding at a
+     lower zoom covers the same ground and cannot walk the frame zoom down again.
+
+     Without a source (plan-shape tests) it falls back to the metric bounds, which errs high -
+     shooting one zoom sharper than needed, never softer. */
+  const frameZoomByHole = {};
+  holeNumbers.forEach(holeNumber => {
+    const items = plan.filter(i => Number(i.holeNumber) === holeNumber && !i.terrainStageOnly);
+    let bounds = null;
+    if (opts.source) {
+      const grids = items.map(i => captureGrid(i, { source: opts.source })).filter(Boolean);
+      bounds = mergeBounds(grids.map(g => g.imageBounds));
+    }
+    if (!bounds) bounds = mergeBounds(items.map(i => i.bounds));
+    if (!bounds) return;
+    frameZoomByHole[holeNumber] = frameZoomFor(bounds, opts.maxOutputPx);
+  });
+  plan.forEach(item => {
+    const frameZoom = frameZoomByHole[item.holeNumber];
+    if (frameZoom) item.frameZoom = frameZoom;
+  });
   const limit = Math.max(0, Math.round(Number(opts.limit) || 0));
   return limit ? plan.slice(0, limit) : plan;
+}
+
+/* The zoom renderHoleSurfaceMercator will pick for these bounds. Kept in step with the export
+   deliberately - if the two ever disagree, captures are either wasted or upscaled. */
+export const DEFAULT_MAX_OUTPUT_PX = 3072;
+export function frameZoomFor(bounds, maxOutputPx) {
+  if (!validBounds(bounds)) return 0;
+  const maxDim = Math.max(256, Number(maxOutputPx) || DEFAULT_MAX_OUTPUT_PX);
+  const nw = projectPoint(bounds.north, bounds.west, 19);
+  const se = projectPoint(bounds.south, bounds.east, 19);
+  const span19 = Math.max(Math.abs(se.x - nw.x), Math.abs(se.y - nw.y));
+  const f = Math.min(1, maxDim / Math.max(1, span19));
+  return Math.max(1, Math.floor(19 + Math.log2(f)));
 }
 
 /* ---------- spherical mercator + tile grids (replaces the Leaflet shutter) --------------- */
@@ -332,7 +379,14 @@ function pixelRect(item, zoom) {
     { lat: item.bounds.north, lng: item.bounds.west }, { lat: item.bounds.north, lng: item.bounds.east },
     pins.tee, pins.green, ...(pins.route || []), ...(pins.greenShape || [])
   ].filter(Boolean);
-  const bleed = Math.max(0, Math.round(Number(item.bleedPx) || 0));
+  /* bleedPx is authored against the policy's target zoom, so it has to be rescaled whenever we
+     shoot at a different one - otherwise a constant pixel bleed silently DOUBLES its ground
+     coverage every time the zoom steps down. That matters more than it sounds: the capture
+     bounds feed the frame's extent, the frame's extent picks the frame zoom, and the frame
+     zoom now picks the capture zoom. Left unscaled, stepping down once widens the capture,
+     which widens the frame, which steps the zoom down again. */
+  const refZoom = Math.max(1, Math.round(Number(item.targetZoom) || zoom));
+  const bleed = Math.max(0, Math.round((Number(item.bleedPx) || 0) * Math.pow(2, zoom - refZoom)));
   const projected = surface.map(p => projectPoint(p.lat, p.lng, zoom));
   let rect = {
     minX: Math.floor(Math.min(...projected.map(p => p.x)) - bleed),
@@ -461,7 +515,11 @@ export function captureGrid(item, opts = {}) {
      z19 buys nothing but upscaled mush at the same cost; and a fixedZoom policy (green
      surrounds sit at z20) has to be allowed to come DOWN to the ceiling, hence the floor
      moving too. */
-  const ceiling = Math.max(1, Math.min(22, Math.round(Number(spec.maxUsefulZoom) || 22)));
+  /* Two ceilings, both hard: what the SOURCE actually resolves (above it we upscale mush) and
+     what the FRAME renders (above it we decode pixels the compositor discards). */
+  const sourceCeiling = Math.max(1, Math.min(22, Math.round(Number(spec.maxUsefulZoom) || 22)));
+  const frameCeiling = Math.max(1, Math.round(Number(item.frameZoom) || 22));
+  const ceiling = Math.min(sourceCeiling, frameCeiling);
   const minZoom = Math.min(ceiling, Math.max(1, Math.round(Number(item.minZoom) || 15)));
   let zoom = Math.min(ceiling, Math.max(minZoom, Math.min(22, Math.round(Number(item.targetZoom) || 18))));
   const maxTiles = Math.max(16, Math.round(Number(item.maxTiles) || 320));

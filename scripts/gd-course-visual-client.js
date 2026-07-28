@@ -6,7 +6,7 @@
 
    The phone reads course visual records and caches capture pixels; it does not
    author them. Authoring - masters, previews, presets, stitching, terrain and
-   floodlight rendering, publishing, cloud sync - is 207KB of
+   floodlight rendering, publishing, cloud sync - is 208KB of
    gd-course-visual-engine.js that only the studio needs, and published frames
    are rendered server-side by the worker anyway.
 
@@ -729,13 +729,23 @@
   function ensureCourseFrames(courseId,opts){
     opts=opts||{};
     var id=slug(courseId);
+    /* The single gate on megabytes touching the disk. Default false, deliberately: a caller
+       that forgets it gets the observing behaviour, not a silent download. */
+    var acquire=opts.acquire===true;
     var pollMs=Math.max(5000,Number(opts.pollMs)||FRAMES_POLL_MS);
     var stopped=false;
     var timer=null;
     function emit(name,payload){if(typeof opts[name]==="function")safe(function(){opts[name](payload);});}
     function stop(){stopped=true;if(timer&&root&&root.clearTimeout)root.clearTimeout(timer);timer=null;}
     function deliver(frames){if(stopped||!frames)return false;emit("onFrames",frames);return true;}
-    function fetchAndDeliver(){
+    /* Frames exist on the server. Whether that means "download them" or "tell the player they
+       can" is the whole distinction between the two map tiers, and it is decided here. */
+    function offerOrFetch(state){
+      if(!acquire){
+        emit("onOfflineAvailable",{courseId:id,framesVersion:state&&state.framesVersion||null});
+        stop();
+        return Promise.resolve(true);
+      }
       return downloadCourseFrames(id,{onProgress:function(p){emit("onProgress",p);}}).then(function(frames){
         if(frames){deliver(frames);stop();return true;}
         return false;
@@ -748,7 +758,7 @@
         courseBuildState(id).then(function(state){
           if(stopped)return;
           emit("onState",state);
-          if(state.state==="frames-ready")return fetchAndDeliver().then(function(ok){if(!ok)poll();});
+          if(state.state==="frames-ready")return offerOrFetch(state).then(function(ok){if(!ok)poll();});
           if(state.state==="failed"){stop();return;}
           poll();
         });
@@ -758,19 +768,22 @@
       if(stopped)return;
       if(cached){
         deliver(Object.assign({},cached,{fromCache:true}));
-        /* Revalidate quietly. A newer export replaces the frames under the player without
-           interrupting the round; a failed check simply leaves the cached ones in place. */
+        /* This course is already in the library, so check whether the cloud has re-baked it.
+           Reporting that is free; acting on it is not - re-pulling megabytes mid-round because
+           the studio happened to republish is exactly the silent download this avoids. Say
+           "update available" and let the library screen offer it. */
         courseApiJson(courseAssetUrl(courseFramesIndexPath(id))).then(function(result){
           var index=result.ok&&result.body||null;
           if(stopped||!index||String(index.exportVersion||"")===cached.version)return;
-          fetchAndDeliver();
+          emit("onUpdateAvailable",{courseId:id,haveVersion:cached.version,framesVersion:String(index.exportVersion||"")});
+          if(acquire)offerOrFetch(null);
         });
         return;
       }
       courseBuildState(id).then(function(state){
         if(stopped)return;
         emit("onState",state);
-        if(state.state==="frames-ready")return fetchAndDeliver().then(function(ok){if(!ok)poll();});
+        if(state.state==="frames-ready")return offerOrFetch(state).then(function(ok){if(!ok)poll();});
         /* Offline or unreachable: play live and try again next time the course is opened.
            Starting a build on a guess would be the one irreversible mistake available here. */
         if(state.state==="unknown"){stop();return;}

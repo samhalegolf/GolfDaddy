@@ -204,17 +204,61 @@ test("a signed-out player does not start a build", async () => {
   assert.deepStrictEqual(calls.posts, []);
 });
 
-test("a course whose frames are ready downloads them and hands them over", async () => {
+/* The storage rule. The device holds two very different things and only one is automatic:
+   course objects are kilobytes and cache freely (Live Map), while the frame package is
+   megabytes and lands only when the player asks for it (Offline Map). Selecting a course is
+   not consent to spend someone's cellular data, so the default must be to OFFER. */
+test("ready frames are offered, not downloaded, when nobody asked", async () => {
+  const engine = freshEngine();
+  const index = framesIndex();
+  const calls = server({ state: { state: "frames-ready", hasGeometry: true, framesReady: true, framesVersion: 3 }, index, bytes: frameBytes(index) });
+  const offered = [], delivered = [];
+  const watch = engine.ensureCourseFrames("pupuke", { accessToken: "t", onOfflineAvailable: (i) => offered.push(i), onFrames: (f) => delivered.push(f) });
+  await settle(60);
+  watch.stop();
+  assert.strictEqual(offered.length, 1, "the player is told the offline map exists");
+  assert.deepStrictEqual(delivered, [], "and nothing is downloaded");
+  assert.deepStrictEqual(calls.urls.filter(u => /\.jpg/.test(u)), [], "not one frame fetched");
+  assert.strictEqual(await engine.cachedCourseFrames("pupuke"), null, "nothing written to the device");
+});
+
+test("accepting the offer downloads the package", async () => {
   const engine = freshEngine();
   const index = framesIndex();
   server({ state: { state: "frames-ready", hasGeometry: true, framesReady: true, framesVersion: 3 }, index, bytes: frameBytes(index) });
   const delivered = [];
-  const watch = engine.ensureCourseFrames("pupuke", { accessToken: "t", onFrames: (f) => delivered.push(f) });
+  const watch = engine.ensureCourseFrames("pupuke", { accessToken: "t", acquire: true, onFrames: (f) => delivered.push(f) });
   await settle(60);
   watch.stop();
   assert.strictEqual(delivered.length, 1);
   assert.strictEqual(delivered[0].holes.length, 3);
   assert.ok(delivered[0].holes[0].playSurface, "the frame carries the surface GPS play projects against");
+  assert.ok(await engine.cachedCourseFrames("pupuke"), "and it is in the library afterwards");
+});
+
+test("a re-baked course is advertised, never silently re-pulled", async () => {
+  const engine = freshEngine();
+  const index = framesIndex();
+  server({ index, bytes: frameBytes(index) });
+  await engine.downloadCourseFrames("pupuke");
+
+  const next = framesIndex();
+  next.exportVersion = "rdef456";
+  next.holes.forEach((hole) => { hole.path = "pupuke/frames/rdef456/h" + hole.holeNumber + ".jpg"; });
+  next.overview.path = "pupuke/frames/rdef456/overview.jpg";
+  const calls = server({ index: next, bytes: frameBytes(next), state: { state: "frames-ready", hasGeometry: true, framesReady: true } });
+
+  const updates = [], delivered = [];
+  const watch = engine.ensureCourseFrames("pupuke", { accessToken: "t", onUpdateAvailable: (i) => updates.push(i), onFrames: (f) => delivered.push(f) });
+  await settle(80);
+  watch.stop();
+  assert.strictEqual(updates.length, 1, "the library screen is told an update exists");
+  assert.strictEqual(updates[0].haveVersion, VERSION);
+  assert.strictEqual(updates[0].framesVersion, "rdef456");
+  assert.strictEqual(delivered.length, 1, "the cached copy still plays immediately");
+  assert.strictEqual(delivered[0].fromCache, true);
+  assert.deepStrictEqual(calls.urls.filter(u => /rdef456.*\.jpg/.test(u)), [],
+    "re-pulling megabytes mid-round because the studio republished is exactly what this prevents");
 });
 
 test("a build already running is polled, not restarted", async () => {
@@ -239,7 +283,7 @@ test("a failed build stops rather than hammering the server", async () => {
   assert.deepStrictEqual(calls.posts, []);
 });
 
-test("cached frames are served first and a newer export replaces them", async () => {
+test("an accepted update swaps the newer export in", async () => {
   const engine = freshEngine();
   const index = framesIndex();
   server({ index, bytes: frameBytes(index) });
@@ -252,7 +296,7 @@ test("cached frames are served first and a newer export replaces them", async ()
   server({ index: next, bytes: frameBytes(next), state: { state: "frames-ready", hasGeometry: true, framesReady: true } });
 
   const delivered = [];
-  const watch = engine.ensureCourseFrames("pupuke", { accessToken: "t", onFrames: (f) => delivered.push(f) });
+  const watch = engine.ensureCourseFrames("pupuke", { accessToken: "t", acquire: true, onFrames: (f) => delivered.push(f) });
   await settle(80);
   watch.stop();
   assert.ok(delivered.length >= 1);
