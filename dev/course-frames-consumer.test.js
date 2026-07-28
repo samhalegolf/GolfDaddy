@@ -39,6 +39,10 @@ function installGlobals() {
   global.CustomEvent = function (type, init) { return { type, detail: init && init.detail }; };
   /* The store falls back to an in-memory path when IndexedDB is absent, which is exactly the
      behaviour under test - what matters is what is cached, not where. */
+  /* ...except where the POINT is where. Without a persistent layer the client's in-memory
+     transient map is the only store, so it is always warm and a cold start cannot be expressed:
+     a fresh module instance loses the download along with the map. assetDb() below is the
+     minimum IndexedDB that makes the two layers distinct - bytes that outlive the module. */
   global.FileReader = function () {
     this.readAsDataURL = (blob) => {
       this.result = "data:" + blob.type + ";base64," + Buffer.from(String(blob.body)).toString("base64");
@@ -71,6 +75,9 @@ function server(world) {
       }
       const bytes = world.bytes && world.bytes[assetPath];
       return bytes ? blobResponse(bytes) : json(404, { error: "missing" });
+    }
+    if (url.startsWith("/api/course-visuals")) {
+      return world.visual ? json(200, { visual: world.visual }) : json(404, { error: "no visual" });
     }
     return json(404, {});
   };
@@ -111,6 +118,42 @@ function frameBytes(index) {
 function freshEngine() {
   delete require.cache[require.resolve(CLIENT)];
   return require(CLIENT);
+}
+
+/* Enough IndexedDB for the asset store: open, one object store keyed by path, put and get.
+   Backed by a plain object the caller owns, so surviving a freshEngine() is the whole point -
+   that object is the phone's disk, and a new module instance is the app being reopened. */
+function assetDb(disk) {
+  const later = (fn) => setTimeout(fn, 0);
+  return {
+    open() {
+      const req = { result: null, onupgradeneeded: null, onsuccess: null, onerror: null, onblocked: null };
+      const store = {
+        put(record) { if (record && record.path) disk[record.path] = record; return {}; },
+        get(key) {
+          const out = { result: disk[key] || undefined, onsuccess: null, onerror: null };
+          later(() => out.onsuccess && out.onsuccess());
+          return out;
+        }
+      };
+      req.result = {
+        objectStoreNames: { contains: () => true },
+        createObjectStore: () => store,
+        /* oncomplete matters: saveAssetData resolves on it, so a transaction that never
+           completes leaves the download awaiting forever and the run just stops. */
+        transaction() {
+          const tx = { objectStore: () => store, oncomplete: null, onerror: null, onabort: null };
+          later(() => tx.oncomplete && tx.oncomplete());
+          return tx;
+        }
+      };
+      later(() => {
+        if (req.onupgradeneeded) req.onupgradeneeded();
+        if (req.onsuccess) req.onsuccess();
+      });
+      return req;
+    }
+  };
 }
 
 function settle(ms = 30) { return new Promise((resolve) => setTimeout(resolve, ms)); }
@@ -303,6 +346,66 @@ test("an accepted update swaps the newer export in", async () => {
   assert.strictEqual(delivered[0].fromCache, true, "the cached set plays immediately, before any network");
   assert.strictEqual(delivered[0].version, VERSION);
   assert.strictEqual(delivered[delivered.length - 1].version, "rdef456", "and the newer export swaps in behind it");
+});
+
+/* The published row as the server serves it: paths, and never pixels. The pixels only ever
+   exist on the device, put there by the download. */
+function publishedRow(index) {
+  return {
+    course_id: "pupuke", status: "published", current_version: 8, published_version: 8,
+    uploaded_assets: [{ role: "published", path: index.overview.path }].concat(
+      index.holes.map((hole) => ({ role: "hole-frame-published", path: hole.path, hole_number: hole.holeNumber }))
+    )
+  };
+}
+
+/* Downloading a course and then playing over live tiles anyway is the worst of both tiers: the
+   megabytes are spent, the storage is used, and the player gets none of it.
+ *
+ * It happened because a pull rebuilt the record from the cloud row and reattached pixels only
+ * from an in-memory map that nothing had filled yet - so the record play renders from carried
+ * paths and no data, and cloudSurfaceSrc correctly returned "" for every hole. The ordering that
+ * exposed it is the app's own: app-core schedules the pull ahead of the frames watch that
+ * hydrates, so the pull always won.
+ *
+ * Asserted on a pull with NO hydrate call in front of it, because that is the real sequence. */
+test("a downloaded course comes back from a pull with its pixels, not just its paths", async () => {
+  const index = framesIndex();
+  const disk = {};
+  global.indexedDB = assetDb(disk);
+
+  /* Session one: the player accepts the offer and the bytes land on the device. */
+  const first = freshEngine();
+  server({ index, bytes: frameBytes(index), visual: publishedRow(index) });
+  const frames = await first.downloadCourseFrames("pupuke");
+  assert.ok(frames && frames.complete, "the download must land before the pull means anything");
+  assert.ok(Object.keys(disk).length >= index.holes.length, "and must actually reach the disk, not just the module");
+
+  /* Session two: the app reopened. Same disk, and an empty in-memory map - which is the
+     condition the bug needed, and the condition every real round after the first one is in.
+     No hydrate call in front of the pull, because app-core does not make one: it schedules the
+     pull at +80ms and the frames watch that hydrates at +120ms. */
+  const next = freshEngine();
+  server({ index, bytes: frameBytes(index), visual: publishedRow(index) });
+  const record = await next.pullCourseVisual("pupuke");
+  const published = (record && record.holeFramePublishedVisuals) || [];
+  assert.strictEqual(published.length, index.holes.length, "every hole comes back on the record");
+  const withPixels = published.filter((asset) => asset && asset.dataUrl);
+  assert.strictEqual(withPixels.length, published.length,
+    "a downloaded frame with no dataUrl plays as live tiles - " + withPixels.length + "/" + published.length + " carried pixels");
+  delete global.indexedDB;
+});
+
+/* The other half of the same rule: nothing downloaded must still resolve, because "no library
+   copy" is the live-tile tier and a real one - not an error, and not a reason to stall play. */
+test("a course with nothing downloaded still pulls, and simply has no pixels", async () => {
+  const engine = freshEngine();
+  const index = framesIndex();
+  server({ index, visual: publishedRow(index) });
+  const record = await engine.pullCourseVisual("pupuke");
+  const published = (record && record.holeFramePublishedVisuals) || [];
+  assert.strictEqual(published.length, index.holes.length, "the paths are known even when the bytes are not");
+  assert.strictEqual(published.filter((asset) => asset && asset.dataUrl).length, 0, "and no pixels are invented");
 });
 
 (async function run() {

@@ -623,12 +623,32 @@
     if(cloudFramePublished.length)record.holeFramePublishedVisuals=cloudFramePublished.map(function(asset){return restoredFrameAsset(asset,record.publishedVersion||record.currentVersion||1);});
     return putRecord(record,{skipCloudSync:true});
   }
+  /* A pull returns the record play renders from, so it must come back with the downloaded
+     pixels attached - not just the paths where they would be.
+
+     restoreCloudMetadata rebuilds the record from the cloud row and reattaches pixels through
+     attachTransientAssets, which only knows what is already in memory. On a cold start that map
+     is empty, and the only thing that fills it is hydrateCourseVisualAssets reading IndexedDB.
+     So the result depended on call order: app-core schedules this pull at +80ms and the frames
+     watch (which hydrates) at +120ms, so the pull always won the race and handed play a record
+     of paths with no pixels. cloudSurfaceSrc returns "" for those, and a downloaded course
+     played over live tiles - the bytes were on the device the whole time.
+
+     Hydrating here makes that unordered: any pull, at any point, returns what the library
+     actually holds. */
   function pullCourseVisual(courseId){
-    if(!root||typeof root.fetch!=="function")return Promise.resolve(getRecord(courseId));
+    if(!root||typeof root.fetch!=="function")return hydratedRecord(getRecord(courseId));
     return root.fetch(API_ENDPOINT+"?courseId="+encodeURIComponent(slug(courseId)),{headers:{Accept:"application/json"},cache:"no-store"}).then(function(res){return res.ok?res.json():null;}).then(function(data){
       var row=data&&data.visual||null;
-      return row?restoreCloudMetadata(row):getRecord(courseId);
-    }).catch(function(){return getRecord(courseId);});
+      return hydratedRecord(row?restoreCloudMetadata(row):getRecord(courseId));
+    }).catch(function(){return hydratedRecord(getRecord(courseId));});
+  }
+  /* Fills a record's assets from the on-device store. Resolves to the record either way - a
+     course with nothing downloaded is the live-tile tier, not a failure. */
+  function hydratedRecord(record){
+    return hydrateRecordAssets(record).then(function(result){
+      return result&&result.record||record;
+    }).catch(function(){return record;});
   }
   function courseAssetUrl(path){return ASSET_ENDPOINT+"?path="+encodeURIComponent(String(path||""));}
   function courseFramesIndexPath(courseId){return slug(courseId)+"/frames/index.json";}

@@ -14222,15 +14222,42 @@ const mapSources=[
     key:"linz",
     name:"LINZ",
     label:"LINZ Basemaps aerial (CC BY 4.0)",
+    /* Mainland NZ, mirroring the linz-nz entry in the scan registry. Without a region this
+       layer mounts anywhere and paints a US course with 404s, which is what sent Pebble Beach
+       to the OSM guide in the first place. */
+    region:{south:-47.5,west:166.0,north:-34.0,east:179.0},
     tileUrl:"https://basemaps.linz.govt.nz/v1/tiles/aerial/WebMercatorQuad/{z}/{x}/{y}.webp?api={linzKey}",
     requiresKey:"linzKey",
     attribution:"Sourced from the LINZ Data Service, CC BY 4.0",
     options:{maxZoom:21,crossOrigin:true}
   },
   {
+    key:"naip",
+    name:"NAIP",
+    label:"USDA NAIP / USGS (public domain)",
+    /* Same ground as naip-us in functions/lib/gd-imagery-sources.mjs - the ImageServer's own
+       published extent. Kept deliberately identical so the live view and the stored frames
+       cover exactly the same courses; if one moves, move both. */
+    region:{south:24.49,west:-124.83,north:49.57,east:-66.86},
+    /* NAIP has no tile cache - /tile/{z}/{y}/{x} 404s, and USGSImageryOnly's cache stops at
+       z16, which is 1.9m/px and not something to play golf on. So this source is a bbox per
+       tile against the same exportImage endpoint the scan uses, which means the live map is
+       the same pixels the frames are baked from rather than a different provider's guess.
+       Measured at z19: 5-7KB and ~470ms a tile, against a viewport of ~20. */
+    bboxEndpoint:"https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPImagery/ImageServer/exportImage",
+    renderingRule:{rasterFunction:"NaturalColor"},
+    attribution:"Imagery courtesy of USDA NAIP / USGS The National Map",
+    /* maxNativeZoom is the registry's maxUsefulZoom: 0.24m/px against a 0.3m mosaic. Past it
+       Leaflet upscales the tile it already has instead of paying for a request that returns a
+       blur - the live-map equivalent of the capture ceiling. */
+    options:{maxZoom:21,maxNativeZoom:19,crossOrigin:true}
+  },
+  {
     key:"osm",
     name:"OSM Guide",
     label:"OpenStreetMap line guide",
+    /* No region: the guide is the global fallback, and a line map everywhere beats a blank
+       one. It is also the right surface for mapping, which is why it stays in the cycle. */
     tileUrl:"https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
     options:{maxZoom:21,subdomains:["a","b","c"],crossOrigin:true}
   }
@@ -14257,6 +14284,67 @@ function mapSourceTileUrl(source){
   return String(source&&source.tileUrl||"").replace(/\{ *linzKey *\}/g,window.gdLinzBasemapsKey||"");
 }
 
+/* ---- bbox-addressed imagery as slippy tiles ----
+   An ArcGIS ImageServer answers a bbox, not a {z}/{x}/{y} cell, so a source without a tile
+   cache cannot be expressed as a URL template. This is the whole of the difference: the tile's
+   own mercator bbox, requested at 256px, which lands on Leaflet's grid unresampled.
+
+   coords.x/y/z are already at the layer's native zoom when maxNativeZoom clamps, so they are
+   self-consistent and no zoom offset applies - hence coords.z rather than _getZoomForUrl(). */
+const GD_MERCATOR_HALF_M=20037508.342789244;
+const GdBboxTileLayer=L.TileLayer.extend({
+  getTileUrl:function(coords){
+    const spec=this.options.gdSource||{};
+    const mpp=(GD_MERCATOR_HALF_M*2)/(256*Math.pow(2,coords.z));
+    const left=coords.x*256, top=coords.y*256;
+    const west=left*mpp-GD_MERCATOR_HALF_M, east=(left+256)*mpp-GD_MERCATOR_HALF_M;
+    const north=GD_MERCATOR_HALF_M-top*mpp, south=GD_MERCATOR_HALF_M-(top+256)*mpp;
+    const params=new URLSearchParams({
+      bbox:[west,south,east,north].join(","),
+      bboxSR:"3857",imageSR:"3857",size:"256,256",format:"jpg",
+      interpolation:"RSP_BilinearInterpolation",f:"image"
+    });
+    if(spec.renderingRule)params.set("renderingRule",JSON.stringify(spec.renderingRule));
+    return String(spec.bboxEndpoint)+"?"+params.toString();
+  }
+});
+function gdBuildBaseLayer(source){
+  const options=Object.assign({},source&&source.options||{});
+  if(source&&source.bboxEndpoint){
+    options.gdSource=source;
+    return new GdBboxTileLayer("",options);
+  }
+  return L.tileLayer(mapSourceTileUrl(source),options);
+}
+
+/* Which sources can actually show this ground. A source with no region is global - the OSM
+   guide - and one with a region is offered only inside it, because a layer mounted outside its
+   coverage does not fail loudly: it paints 404s, or blank, and reads as a broken app. */
+function mapSourceCovers(source,lat,lng){
+  const box=source&&source.region;
+  if(!box)return true;
+  return Number(lat)>=box.south&&Number(lat)<=box.north&&Number(lng)>=box.west&&Number(lng)<=box.east;
+}
+/* The index to mount for a course. Ordered by the table, so aerial wins over the guide wherever
+   aerial exists; -1 when nothing is both covering and configured, which leaves the current
+   choice alone rather than yanking the map out from under the player. */
+function gdMapSourceIndexFor(lat,lng){
+  if(!Number.isFinite(Number(lat))||!Number.isFinite(Number(lng)))return -1;
+  for(let i=0;i<mapSources.length;i++){
+    if(mapSourceCovers(mapSources[i],lat,lng)&&mapSourceReady(mapSources[i]))return i;
+  }
+  return -1;
+}
+/* Called when a course is chosen. Manual GPS has no course point, so it keeps whatever the
+   player last picked. */
+function gdApplyMapSourceForCourse(course){
+  const index=gdMapSourceIndexFor(course&&course.lat,course&&course.lng);
+  if(index<0||index===activeMapSourceIndex)return;
+  autoSwitchedForSecurity=false;
+  setMapSource(index,"coverage");
+}
+window.gdApplyMapSourceForCourse=gdApplyMapSourceForCourse;
+
 function setMapSource(index, reason="manual"){
   const count=mapSources.length;
   let resolved=((index%count)+count)%count;
@@ -14271,7 +14359,7 @@ function setMapSource(index, reason="manual"){
     try{map.removeLayer(baseLayer)}catch(e){}
   }
 
-  baseLayer=L.tileLayer(mapSourceTileUrl(current),current.options).addTo(map);
+  baseLayer=gdBuildBaseLayer(current).addTo(map);
   updateMapSourceUI();
 
   baseLayer.once("load",()=>{
@@ -14301,13 +14389,20 @@ function autoSwitchMapSource(){
 setMapSource(0,"initial");
 
 /* Imagery key for the live map. Boots on OSM and upgrades to aerial the moment the key lands,
-   so a slow or failed config fetch degrades to a usable map instead of a blank one. */
+   so a slow or failed config fetch degrades to a usable map instead of a blank one.
+
+   The upgrade is to the aerial that COVERS the course, not to index 0. It used to be index 0
+   unconditionally, which raced the coverage pick: choose a US course, get NAIP, then have the
+   config land a moment later and force the map back to LINZ - a layer with no US tiles. */
 fetch("/api/auth-public-config",{cache:"no-store"})
   .then(res=>res.ok?res.json():null)
   .then(config=>{
     if(!config||!config.linzBasemapsKey)return;
     window.gdLinzBasemapsKey=String(config.linzBasemapsKey);
-    if(!mapSourceReady(mapSources[activeMapSourceIndex])||activeMapSourceIndex!==0)setMapSource(0,"initial");
+    const course=window.gdActiveCourse||null;
+    const covering=gdMapSourceIndexFor(course&&course.lat,course&&course.lng);
+    const target=covering>=0?covering:0;
+    if(!mapSourceReady(mapSources[activeMapSourceIndex])||activeMapSourceIndex!==target)setMapSource(target,"initial");
   })
   .catch(()=>{});
 
@@ -15517,6 +15612,10 @@ function gdStoreCoursePickerSelection(payload){
   try{currentCourse=payload;}catch(e){}
   try{window.currentCourse=payload;}catch(e){}
   try{window.gdActiveCourse=payload;}catch(e){}
+  /* Mount the aerial that covers this course. Before this the live map was whatever booted -
+     LINZ, or the OSM guide when its key was missing - so every course outside NZ played over a
+     street map regardless of what imagery existed for it. */
+  try{gdApplyMapSourceForCourse(payload);}catch(e){}
   try{window.gdActiveCourseDisplayName=payload.name||"";}catch(e){}
   try{window.gdManualGpsActive=payload.name==="Manual GPS";}catch(e){}
   try{document.body.dataset.gdActiveCourseName=payload.name||"";}catch(e){}
