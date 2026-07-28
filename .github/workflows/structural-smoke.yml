@@ -3,8 +3,11 @@ name: Structural smoke
 on:
   pull_request:
     branches: [main]
+  # main is here because it was not: the suite ran on PRs only, so anything pushed or merged
+  # straight to main was never verified again. A stale assertion sat red on main for at least
+  # four commits and surfaced as a failure on the next unrelated PR to open.
   push:
-    branches: [structural-rebuild]
+    branches: [main, structural-rebuild]
 
 permissions:
   contents: read
@@ -96,5 +99,6 @@ jobs:
           node dev/conditions-engine-behavior.test.js
           node dev/course-mapping-controller.test.js
           node dev/course-visual-engine.test.js
+          node dev/imagery-source-registry.test.js
           node dev/shell-navigation-owner.test.js
           node dev/payment-rollout-tests.js

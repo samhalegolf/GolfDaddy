@@ -78,7 +78,21 @@ assert(gpsRuntime.includes('if(!rail&&typeof window.gdEnsureAppRightRail==="func
 assert(betaShell.includes("if(!gpsActive()){"), "legacy beta shell does not attach mode switch while picker is active");
 assert(gpsRequestButton.includes("if(!rail)return;"), "GPS request helper treats missing rail as intentional");
 assert(library.includes("return recentGpsPoint();"), "library session center falls back only to actual recent GPS");
-assert(library.includes("lat:finder?.lat??saved.courseLat??null"), "course library open does not invent coordinates");
+/* This asserted the literal `lat:finder?.lat??saved.courseLat??null`. The locals were later
+   renamed - finder -> centre, saved -> snap - and a third fallback was added, so the literal
+   stopped matching while the behaviour it guards never changed. CI is PR-only, so nothing
+   caught it and every branch went red on an assertion about nobody's code.
+
+   The invariant was never the spelling of the chain. It is that each coordinate falls back to
+   null: a course with no known position must come back with no position, never a plausible
+   default that would drop a player on the wrong continent. Assert that, so a rename is free
+   and a hardcoded default is not. */
+const openCoords = library.match(/courseCentre:[^,]+,[\s\S]{0,300}?lng:[^\n]*/);
+assert(openCoords, "course library open still normalises coordinates in one place");
+assert((openCoords[0].match(/\?\?null/g) || []).length >= 4,
+  "course library open does not invent coordinates: every lat/lng must fall back to null");
+assert(!/\?\?\s*-?[0-9]/.test(openCoords[0]),
+  "course library open does not invent coordinates: no numeric default may terminate a coordinate chain");
 assert(library.includes("course?loadUserCourseData(userId(),courseId(course)):loadUserCourseData()"), "mapped checks load the explicit selected course instead of stale active course data");
 assert(library.includes("const hasTrustedPlayData=requestedHolePlayable(course,expected);"), "settled course-open UI requires trusted mapped data for the requested hole");
 assert(library.includes("async function publishedCourseMapAvailability(course,opts={})"), "course library exposes a DB-map-only availability check for the picker");
