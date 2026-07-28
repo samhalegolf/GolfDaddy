@@ -472,10 +472,12 @@ async function enqueueFollowUpExport(courseId) {
    pick up where it died - up to 3 attempts, then failed for good. The worker heartbeats after
    every hole, so only genuinely dead runs trip the 20-minute cutoff. */
 async function reapStaleJobs() {
-  /* Heartbeats land every hole (~1 min); 6 minutes of silence means the invocation is dead.
-     Observed runtime cap in production is ~4 minutes per invocation, so a tight window here
-     keeps the requeue->resume loop moving instead of stalling 20 minutes per death. */
-  const cutoff = new Date(Date.now() - 6 * 60 * 1000).toISOString();
+  /* Heartbeats now land every CAPTURE and every hole - seconds apart, not the ~1 minute this
+     window was originally sized for - so two minutes of silence is a corpse with room to
+     spare. The old six minutes stacked on top of the sweeper's ten to leave a dead job
+     untouched for up to a quarter of an hour, which is what Jacks Point spent its afternoon
+     doing. Still comfortably longer than any real gap between beats. */
+  const cutoff = new Date(Date.now() - 2 * 60 * 1000).toISOString();
   try {
     const stale = await supabaseFetch(JOBS_TABLE + "?select=id,result&status=eq.running&updated_at=lt." + encodeURIComponent(cutoff));
     for (const row of Array.isArray(stale) ? stale : []) {
