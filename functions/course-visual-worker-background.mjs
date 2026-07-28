@@ -636,7 +636,7 @@ async function runExportJob(job, deadlineAt) {
       route: data.route || [],
       greenShape: data.greenShape || []
     };
-    let width = null, height = null, playSurface = null;
+    let width = null, height = null, playSurface = null, bytes = null;
     /* A frame may only be SKIPPED when its metadata is recoverable. The metadata sidecar is
        written AT RENDER TIME next to each frame - recovering from the final index.json was a
        livelock: that file only exists after a COMPLETE run, so relayed runs re-rendered from
@@ -647,6 +647,7 @@ async function runExportJob(job, deadlineAt) {
     }
     if (sidecar && sidecar.playSurface && sidecar.playSurface.originPx) {
       width = sidecar.width; height = sidecar.height; playSurface = sidecar.playSurface;
+      bytes = Number(sidecar.bytes) || null;
       if (sidecar.bounds) bounds = sidecar.bounds;
     } else {
       /* Stage marker BEFORE the render: a silent crash (OOM, native abort) writes no error,
@@ -660,7 +661,7 @@ async function runExportJob(job, deadlineAt) {
          as it does for locally captured surfaces. */
       const frame = await renderHoleSurfaceMercator({ pins, captures, terrain, settings: overrides, maxDim: EXPORT_RENDITION_PX });
       await storageUpload(path, frame.jpeg, "image/jpeg");
-      width = frame.width; height = frame.height;
+      width = frame.width; height = frame.height; bytes = frame.jpeg.length;
       playSurface = {
         model: "mercator-image",
         projection: "mercator-image",
@@ -673,10 +674,10 @@ async function runExportJob(job, deadlineAt) {
         originPx: frame.originPx,
         outputDimensions: { width: frame.width, height: frame.height }
       };
-      await storageUpload(path + ".json", Buffer.from(JSON.stringify({ width, height, bounds, playSurface })), "application/json");
+      await storageUpload(path + ".json", Buffer.from(JSON.stringify({ width, height, bytes, bounds, playSurface })), "application/json");
       rendered += 1;
     }
-    framesIndex.holes.push({ holeNumber, path, width, height, bounds, playSurface });
+    framesIndex.holes.push({ holeNumber, path, width, height, bytes, bounds, playSurface });
     await heartbeatJob(job, { version, holesDone: framesIndex.holes.length, holesTotal: holeNumbers.length });
     /* Production invocations get silently killed around the 4-minute mark regardless of the
        advertised background budget. Rather than die mid-hole and wait for the reaper, hand
@@ -695,12 +696,20 @@ async function runExportJob(job, deadlineAt) {
         settings: overrides
       });
       await storageUpload(overviewPath, overview.jpeg, "image/jpeg");
-      framesIndex.overview = { path: overviewPath, width: overview.width, height: overview.height, bounds: backdropEntry.bounds };
+      framesIndex.overview = { path: overviewPath, width: overview.width, height: overview.height, bytes: overview.jpeg.length, bounds: backdropEntry.bounds };
     } else {
       framesIndex.overview = { path: overviewPath, width: backdropEntry.width, height: backdropEntry.height, bounds: backdropEntry.bounds };
     }
   }
   if (!framesIndex.holes.length) throw new Error("no hole frames produced");
+  /* Total download size, so the app can name a number in the offline-map prompt instead of
+     guessing. Summed from what was actually encoded rather than measured afterwards, which
+     would cost 19 HEAD requests from the phone. Null on any frame that was skipped by a resume
+     without a sidecar carrying its size - the app treats a missing total as "unknown", never
+     as zero. */
+  framesIndex.totalBytes = framesIndex.holes.every(h => Number(h.bytes) > 0)
+    ? framesIndex.holes.reduce((sum, h) => sum + Number(h.bytes), 0) + Number(framesIndex.overview && framesIndex.overview.bytes || 0)
+    : null;
   await storageUpload(pkg.courseId + "/frames/index.json", Buffer.from(JSON.stringify(framesIndex)), "application/json");
   await writeCourseVisualRow(job, pkg, framesIndex, { presetId, overrides });
   /* Index + row now point at this version, so every OTHER frame dir is dead. Retire them.

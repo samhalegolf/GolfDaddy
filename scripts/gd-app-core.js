@@ -16090,6 +16090,73 @@ async function gdLoadCourseVisualForPlay(payload,opts={}){
    The interim-state decision lives in ONE place, the engine's framesWaitMode, and this is the
    only code that reads it: "block-until-ready" is the same flow with a loading screen over the
    wait, so flipping the flag is the whole change. */
+/* "Offline Map Available" - the accept step for the course package.
+
+   The two tiers are a promise to the player about their data and their storage, so the moment
+   the megabytes are spent has to be a moment they chose. This is that moment: it names the
+   course, names the size, and does nothing until it is tapped. Dismissing is remembered for the
+   session so it cannot become a thing that nags between holes.
+
+   Not a modal. A player looking at this is on a golf course, possibly mid-round, and blocking
+   the screen to ask about a download would be worse than never offering it. */
+const gdCourseOfflineOfferDismissed = {};
+function gdCourseOfflineOfferEl(){
+  let el=document.getElementById("gdCourseOfflineOffer");
+  if(el)return el;
+  el=document.createElement("div");
+  el.id="gdCourseOfflineOffer";
+  el.className="gdCourseOfflineOffer";
+  el.hidden=true;
+  document.body.appendChild(el);
+  return el;
+}
+function gdFormatBytes(bytes){
+  const n=Number(bytes);
+  if(!Number.isFinite(n)||n<=0)return "";
+  return n>=1048576?(n/1048576).toFixed(1)+" MB":Math.max(1,Math.round(n/1024))+" KB";
+}
+function gdShowCourseOfflineOffer(courseId,payload,course){
+  if(gdCourseOfflineOfferDismissed[courseId])return;
+  const el=gdCourseOfflineOfferEl();
+  const size=gdFormatBytes(payload&&payload.totalBytes);
+  const holes=Number(payload&&payload.holes)||0;
+  const name=String(course&&(course.name||course.courseName)||"this course");
+  el.dataset.courseId=courseId;
+  el.innerHTML=
+    `<div class="gdCourseOfflineOfferText"><strong>Offline map available</strong>`
+    +`<span>${gdEscapeAttr(name)}${holes?` · ${holes} holes`:""}${size?` · ${size}`:""}</span></div>`
+    +`<div class="gdCourseOfflineOfferActions">`
+    +`<button type="button" class="gdCourseOfflineDismiss">Not now</button>`
+    +`<button type="button" class="gdCourseOfflineDownload">Download</button></div>`;
+  el.hidden=false;
+  el.querySelector(".gdCourseOfflineDismiss").onclick=()=>{
+    gdCourseOfflineOfferDismissed[courseId]=true;
+    gdHideCourseOfflineOffer();
+  };
+  el.querySelector(".gdCourseOfflineDownload").onclick=()=>gdAcceptCourseOfflineDownload(courseId,course);
+}
+function gdCourseOfflineOfferProgress(done,total){
+  const el=document.getElementById("gdCourseOfflineOffer");
+  if(!el||el.hidden)return;
+  const pct=total?Math.round(done/total*100):0;
+  el.innerHTML=`<div class="gdCourseOfflineOfferText"><strong>Downloading map</strong>`
+    +`<span>${done} of ${total} · ${pct}%</span></div>`
+    +`<div class="gdCourseOfflineBar"><i style="width:${pct}%"></i></div>`;
+}
+function gdHideCourseOfflineOffer(){
+  const el=document.getElementById("gdCourseOfflineOffer");
+  if(el)el.hidden=true;
+}
+/* The one accept path. Re-runs the watch with acquire:true, which is the only way a course
+   package reaches the device. */
+function gdAcceptCourseOfflineDownload(courseId,course){
+  gdCourseOfflineOfferProgress(0,18);
+  try{gdEnsureCourseFramesForPlay(course||{courseId},{acquire:true});}catch(e){}
+  return false;
+}
+function gdEscapeAttr(value){
+  return String(value==null?"":value).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
 function gdCourseFramesWaitMode(){
   const engine=window.GDCourseVisualEngine;
   return String(engine&&engine.framesWaitMode||"live-until-ready");
@@ -16168,14 +16235,25 @@ async function gdEnsureCourseFramesForPlay(payload,opts={}){
         document.body.dataset.gdCourseOfflineAvailable=courseId;
         document.body.dataset.gdCourseOfflineVersion=String(info&&info.framesVersion||"");
       }catch(e){}
-      try{if(typeof gdCoursePlayDebugEvent==="function")gdCoursePlayDebugEvent("course-offline-available",{courseId,framesVersion:info&&info.framesVersion||null});}catch(e){}
+      try{gdShowCourseOfflineOffer(courseId,info,payload);}catch(e){}
+      try{if(typeof gdCoursePlayDebugEvent==="function")gdCoursePlayDebugEvent("course-offline-available",{courseId,framesVersion:info&&info.framesVersion||null,totalBytes:info&&info.totalBytes||null});}catch(e){}
     },
+    onProgress:p=>{try{gdCourseOfflineOfferProgress(p&&p.done||0,p&&p.total||0);}catch(e){}},
     /* Already downloaded, but the cloud has re-baked it. Advertised, never auto-pulled. */
     onUpdateAvailable:info=>{
       try{document.body.dataset.gdCourseOfflineUpdate=String(info&&info.framesVersion||"");}catch(e){}
     },
     onFrames:async frames=>{
       gdApplyCourseFramesState(courseId,{state:"frames-ready",framesVersion:frames&&frames.version||""});
+      /* Cached frames arrive here too, on every course open - so only announce a download that
+         actually just happened, and never re-offer a course already in the library. */
+      try{
+        gdHideCourseOfflineOffer();
+        if(!(frames&&frames.fromCache)){
+          gdCourseOfflineOfferDismissed[courseId]=true;
+          toast("Course saved for offline play");
+        }
+      }catch(e){}
       /* The frames are in the asset store keyed by path; hydration is what puts their pixels
          on the record's published assets, which is what GPS play actually renders from. */
       try{await engine.hydrateCourseVisualAssets?.(courseId);}catch(e){}

@@ -742,9 +742,23 @@
        can" is the whole distinction between the two map tiers, and it is decided here. */
     function offerOrFetch(state){
       if(!acquire){
-        emit("onOfflineAvailable",{courseId:id,framesVersion:state&&state.framesVersion||null});
-        stop();
-        return Promise.resolve(true);
+        /* Read the index - a few hundred bytes - so the offer can name a size instead of asking
+           the player to accept an unknown number of megabytes. This is the one network call the
+           observing path makes beyond the status poll, and it stores nothing. */
+        return courseApiJson(courseAssetUrl(courseFramesIndexPath(id))).then(function(result){
+          var index=result.ok&&result.body||null;
+          emit("onOfflineAvailable",{
+            courseId:id,
+            framesVersion:state&&state.framesVersion||null,
+            exportVersion:index&&String(index.exportVersion||"")||"",
+            holes:index&&Array.isArray(index.holes)?index.holes.length:null,
+            /* null, never 0: a resumed export can leave a frame without a recorded size, and
+               "unknown" must not render as a free download. */
+            totalBytes:index&&Number(index.totalBytes)>0?Number(index.totalBytes):null
+          });
+          stop();
+          return true;
+        });
       }
       return downloadCourseFrames(id,{onProgress:function(p){emit("onProgress",p);}}).then(function(frames){
         if(frames){deliver(frames);stop();return true;}
