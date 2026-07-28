@@ -81,6 +81,78 @@ test("partial rights are not rights - all three must be granted", () => {
   });
 });
 
+/* ShareAlike is the interesting refusal, because it is the one that passes every other check.
+   A CC BY-SA source grants storage, derivatives and redistribution - so before this gate it
+   resolved, and the first anyone would have known about the copyleft obligation is when the
+   baked course packages were already shipped. */
+test("a ShareAlike source is refused even though it grants all three rights", () => {
+  const shareAlike = [{
+    key: "share-alike", label: "Openly licensed, with strings",
+    region: { bbox: { south: -90, west: -180, north: 90, east: 180 } },
+    license: { name: "CC BY-SA", storage: true, derivatives: true, redistribution: true, shareAlike: true },
+    imagery: { adapter: "xyz", urlTemplate: "https://example.test/{z}/{x}/{y}.jpg" },
+    attribution: {}
+  }];
+  assert.strictEqual(mod.resolveImagerySource(PUPUKE_NZ, { sources: shareAlike, env: {} }), null,
+    "storing it would license our own course packages on the same terms - that is a decision, not a default");
+  assert.strictEqual(mod.SHARE_ALIKE_ACCEPTED, false,
+    "the decision has not been made; flipping this must be a deliberate, reviewable act");
+
+  /* And the reason must say so. Reporting copyleft as display-only would hide a decision
+     somebody can still make from the person best placed to make it. */
+  const reason = mod.unscannableReason(PUPUKE_NZ, { sources: shareAlike });
+  assert.match(reason, /ShareAlike/);
+  assert.ok(!/display-only/.test(reason), "ShareAlike is not display-only - they are different answers");
+});
+
+test("a draft entry is refused however good its licence looks", () => {
+  /* Plain CC BY, all three rights, no key needed - and unverified endpoints, which fail as a
+     whole course of missing tiles hours into a scan rather than as an error. */
+  const draft = [{
+    key: "draft-entry", label: "Researched, not checked", draft: true,
+    region: { bbox: { south: -90, west: -180, north: 90, east: 180 } },
+    license: { name: "CC BY 4.0", storage: true, derivatives: true, redistribution: true },
+    imagery: { adapter: "arcgis-export", endpoint: "https://example.test/ImageServer/exportImage", apiKeyEnv: "" },
+    attribution: {}
+  }];
+  assert.strictEqual(mod.resolveImagerySource(PUPUKE_NZ, { sources: draft, env: {} }), null);
+  assert.match(mod.unscannableReason(PUPUKE_NZ, { sources: draft }), /draft|unverified/);
+});
+
+/* The two gates are independent on purpose: answering the ShareAlike question must not
+   promote an entry whose URLs nobody has opened. */
+test("accepting ShareAlike would still not release a draft entry", () => {
+  const both = [{
+    key: "draft-and-share-alike", label: "Both problems", draft: true,
+    region: { bbox: { south: -90, west: -180, north: 90, east: 180 } },
+    license: { name: "CC BY-SA", storage: true, derivatives: true, redistribution: true, shareAlike: true },
+    imagery: { adapter: "xyz", urlTemplate: "https://example.test/{z}/{x}/{y}.jpg" },
+    attribution: {}
+  }];
+  assert.strictEqual(mod.resolveImagerySource(PUPUKE_NZ, { sources: both, env: {} }), null);
+  assert.match(mod.unscannableReason(PUPUKE_NZ, { sources: both }), /draft|unverified/,
+    "the draft gate is reported first because it is the one no product decision can clear");
+});
+
+/* Australia is in the table as research. It must stay inert until someone does the work
+   listed in the entry, and these assertions are what "inert" means. */
+test("the Queensland entry is present, documented and refused", () => {
+  const qld = mod.IMAGERY_SOURCES.find(entry => entry.key === "qld-au");
+  assert.ok(qld, "the research belongs where the next person will find it");
+  assert.strictEqual(qld.draft, true, "endpoints are unverified");
+  assert.strictEqual(qld.license.shareAlike, true, "Queensland releases state program imagery under CC BY-SA");
+
+  /* A course on the Gold Coast - inside the Queensland bbox, and still not scannable. */
+  const GOLD_COAST_AU = { south: -28.02, west: 153.40, north: -28.00, east: 153.43 };
+  assert.strictEqual(mod.resolveImagerySource(GOLD_COAST_AU, { env: NZ_ENV }), null,
+    "a drafted entry must never be reachable from the real table");
+  assert.match(mod.unscannableReason(GOLD_COAST_AU), /draft|unverified/);
+
+  /* The restricted sibling service carries newer imagery under subscription terms that grant
+     none of this, and looks like the same service with fresher pixels. */
+  assert.ok(!/SISP|Restricted/i.test(qld.imagery.endpoint), "the _AllUsers service is the openly licensed one");
+});
+
 test("a licensed source with no API key configured is unusable, not degraded", () => {
   assert.strictEqual(mod.resolveImagerySource(PUPUKE_NZ, { env: {} }), null);
   assert.match(mod.unscannableReason(PUPUKE_NZ, { env: {} }), /not configured|unavailable/);

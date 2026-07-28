@@ -13,6 +13,13 @@
    bounds means no scan - that course runs live-only, indefinitely, which is a correct outcome
    and not a failure.
 
+   Two further gates, both of which refuse independently of the three rights above:
+     SHARE_ALIKE_ACCEPTED - a ShareAlike licence grants all three rights and then demands the
+                            same terms back on what we make, so it is a decision about our own
+                            course packages rather than about their imagery. One flag, off.
+     draft: true          - the entry's endpoints have not been checked against the provider's
+                            published form. Kept in the table as research, refused as a source.
+
    Adapters:
      xyz            - slippy tiles, the existing fetch path
      arcgis-export  - ArcGIS ImageServer exportImage: one request per image block instead of
@@ -32,10 +39,43 @@
 
 /* ---------- license predicate ------------------------------------------------------------ */
 
-/* All three must be true for a source to be scannable. "Credited = allowed" is NOT the rule;
-   attribution is a condition some licenses attach, never a right it grants. */
+/* ShareAlike is the case the three booleans below cannot express, and it is not a rare one -
+   most open government imagery outside NZ and the US carries it.
+
+   CC BY-SA grants storage AND derivatives AND redistribution, so a ShareAlike source walks
+   straight through a storage/derivatives/redistribution check with nothing to catch it. What
+   it also does is require that what you make from it be licensed on the same terms - and what
+   this pipeline makes is a baked course package shipped inside the app. So accepting ShareAlike
+   is a decision about how OUR output is licensed, not about whether we may read theirs.
+
+   That is a product call rather than a licensing fact, so it is one module-level flag rather
+   than a per-entry one: flipping it is a single visible, reviewable act that enables every
+   ShareAlike source at once, which is exactly what the decision actually means. Leaving it
+   false costs only the courses those sources cover, which run live-only - a correct outcome. */
+export const SHARE_ALIKE_ACCEPTED = false;
+
+/* All three must be true for a source to be scannable, and ShareAlike must be accepted where
+   the licence attaches it. "Credited = allowed" is NOT the rule; attribution is a condition
+   some licenses attach, never a right it grants. */
 function grantsStorageRights(license) {
-  return !!(license && license.storage === true && license.derivatives === true && license.redistribution === true);
+  if (!license) return false;
+  if (license.shareAlike === true && !SHARE_ALIKE_ACCEPTED) return false;
+  return !!(license.storage === true && license.derivatives === true && license.redistribution === true);
+}
+
+/* An entry whose endpoints have not been confirmed against the provider's own published form.
+
+   LINZ and NAIP were each checked against the provider's documentation before they were
+   trusted, and a draft entry is one that has not had that done to it yet. It sits in the table
+   because the research is worth keeping where the next person will find it, and it is refused
+   like any other unusable source until someone verifies it and deletes the flag.
+
+   This is a second gate rather than a comment because a wrong endpoint does not fail loudly:
+   it fails as a whole course of missing tiles, hours into a scan. It is also independent of
+   the licence gate - clearing SHARE_ALIKE_ACCEPTED must not silently promote an entry whose
+   URLs nobody has ever opened. */
+function isDraft(entry) {
+  return !!(entry && entry.draft === true);
 }
 
 /* ---------- registry --------------------------------------------------------------------- */
@@ -154,6 +194,101 @@ export const IMAGERY_SOURCES = [
       url: "https://www.usgs.gov/the-national-map-data-delivery",
       perSurvey: false
     }
+  },
+  {
+    key: "qld-au",
+    label: "Queensland imagery: latest state program",
+    /* DRAFT - refused by isDraft, and refused again by the ShareAlike gate. Do not clear
+       either flag without doing the work listed at the bottom of this entry.
+
+       Australia has no NAIP and no LINZ. The only national mosaics are Sentinel-2 derived at
+       10m, which at the z19-20 this pipeline captures at is the same visible smear the LINZ
+       note warns about, so "AU" is not one entry - it is one entry per state, each with its
+       own bbox, its own provider and its own licence. Queensland is first because its
+       provenance is the cleanest of the states: a single state capture program rather than a
+       mosaic of contributed third-party surveys.
+
+       NSW was the obvious first choice on course count and was rejected. Its public imagery
+       service is a mixed mosaic - LANDSAT, 50cm standard ortho, 10cm town imagery, plus
+       captures by AAM, VEKTA and Jacobs - and its own metadata declines to give a blanket
+       grant, saying each image series may carry different copyright permissions and the user
+       should check the constraints on each. That is precisely the blanket grant
+       grantsStorageRights exists to demand, so NSW cannot be added as a table row at all; it
+       needs either written confirmation from Spatial Services or a single named ortho series
+       pinned the way LINZ_BASEMAPS_LAYER can pin a survey. */
+    draft: true,
+    region: {
+      /* Mainland Queensland only. Excludes the Torres Strait islands and the Coral Sea
+         territories, on the same reasoning that excludes the Chathams from the LINZ entry:
+         they are separate captures and this bbox is not the place to discover that. */
+      bbox: { south: -29.2, west: 138.0, north: -10.7, east: 153.6 },
+      country: "AU"
+    },
+    license: {
+      name: "CC BY-SA",
+      url: "https://www.data.qld.gov.au/dataset/queensland-imagery-latest-state-program-public-basemap-service",
+      storage: true, derivatives: true, redistribution: true, commercial: true,
+      attributionRequired: true,
+      /* The whole reason this entry is here. Queensland releases state program imagery openly
+         once it is three years or older, but under ShareAlike rather than plain CC BY - so
+         every stored frame derived from it is arguably an adaptation that must itself be
+         licensed CC BY-SA. See SHARE_ALIKE_ACCEPTED. */
+      shareAlike: true
+    },
+    imagery: {
+      /* ImageServer, so the arcgis-export adapter built for NAIP applies unchanged - no new
+         adapter, no new geometry. (NSW, by contrast, publishes MapServer, whose export
+         operation is spelled differently and would need an adapter variant.) */
+      adapter: "arcgis-export",
+      endpoint: "https://spatial-img.information.qld.gov.au/arcgis/rest/services/Basemaps/LatestStateProgram_AllUsers/ImageServer/exportImage",
+      /* The _AllUsers service is the openly licensed one. There is an SISP-restricted sibling
+         carrying newer imagery under subscription terms that grant none of this - do not
+         substitute it because it looks like the same service with fresher pixels. */
+      apiKeyEnv: "",
+      /* PLACEHOLDER. Conservative until read off the service's own reported pixel size; the
+         state program mixes resolutions by region and this must not be guessed upward. */
+      maxUsefulZoom: 19,
+      minTrustedZoom: 12,
+      blockPx: 2048
+    },
+    /* Queensland's own DEM, chosen over Geoscience Australia's national ELVIS coverage only
+       because an entry carries ONE licence covering both specs, and GA publishes under plain
+       CC BY 4.0 rather than ShareAlike. That is the better DEM and the better licence, and
+       taking it would mean giving imagery and dem their own licence blocks. Worth doing - it
+       would also let a ShareAlike-blocked state still ship elevation - but it is a change to
+       the model, not to this row, so it is not smuggled in here. */
+    dem: {
+      adapter: "arcgis-export",
+      endpoint: "https://spatial-img.information.qld.gov.au/arcgis/rest/services/Elevation/QldDem/ImageServer/exportImage",
+      apiKeyEnv: "",
+      format: "tiff",
+      encoding: "float32",
+      /* PLACEHOLDER, as above - ELVIS publishes 1m, 2m and 5m tiers and which one backs this
+         service by region is exactly the sort of thing that must be read, not assumed. */
+      nativeResolutionM: 1,
+      fallbackResolutionM: 5,
+      maxUsefulZoom: 16,
+      blockPx: 2048
+    },
+    attribution: {
+      /* Wording is a placeholder: the Queensland department that owns this has been renamed
+         more than once, and CC BY-SA requires the licensor be named correctly. */
+      text: "© State of Queensland, licensed under CC BY-SA",
+      url: "https://www.data.qld.gov.au/dataset/queensland-imagery-latest-state-program-public-basemap-service",
+      shortText: "© State of Queensland CC BY-SA",
+      perSurvey: false
+    }
+    /* To take this out of draft:
+         1. Decide SHARE_ALIKE_ACCEPTED. If ShareAlike on baked course packages is not
+            acceptable, delete this entry - no amount of endpoint checking rescues it, and
+            the next candidates are the plain-CC-BY states (TAS, SA, WA are believed to be,
+            and are themselves unverified).
+         2. Open both ImageServer endpoints and confirm: they answer anonymously, exportImage
+            is a supported operation, and the extent really covers the bbox above.
+         3. Replace both PLACEHOLDER zoom/resolution values with the services' reported pixel
+            sizes, the way NAIP's z17 ceiling comes from its 0.6m ground sample.
+         4. Confirm the current legal name of the Queensland department for the credit line.
+         5. Delete `draft: true`. */
   }
 ];
 
@@ -210,6 +345,7 @@ export function resolveEndpoints(entry, envs) {
 export function resolveImagerySource(bounds, options = {}) {
   const table = Array.isArray(options.sources) ? options.sources : IMAGERY_SOURCES;
   for (const entry of table) {
+    if (isDraft(entry)) continue;
     if (!grantsStorageRights(entry && entry.license)) continue;
     if (!regionCovers(entry.region, bounds)) continue;
     const resolved = resolveEndpoints(entry, options.env);
@@ -226,8 +362,18 @@ export function unscannableReason(bounds, options = {}) {
   if (!validBounds(bounds)) return "course bounds are unusable";
   const covering = table.filter(entry => regionCovers(entry.region, bounds));
   if (!covering.length) return "no licensed imagery source covers this course";
-  const licensed = covering.filter(entry => grantsStorageRights(entry.license));
-  if (!licensed.length) return "imagery covering this course is display-only and may not be stored";
+  const ready = covering.filter(entry => !isDraft(entry));
+  if (!ready.length) return "imagery covering this course is a draft entry with unverified endpoints";
+  const licensed = ready.filter(entry => grantsStorageRights(entry.license));
+  if (!licensed.length) {
+    /* "We may not store this at all" and "we may, but only by licensing our own course
+       packages on the same terms" are different answers, and the second one is a decision
+       somebody can still go and make. Reporting both as display-only would hide that. */
+    if (ready.every(entry => entry.license && entry.license.shareAlike === true)) {
+      return "imagery covering this course is ShareAlike and storing it would license our course packages on the same terms";
+    }
+    return "imagery covering this course is display-only and may not be stored";
+  }
   const missing = licensed.map(entry => entry.imagery && entry.imagery.apiKeyEnv).filter(Boolean);
   return missing.length ? "imagery source is not configured (" + missing.join(", ") + ")" : "imagery source is unavailable";
 }
