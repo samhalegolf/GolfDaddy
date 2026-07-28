@@ -30,7 +30,6 @@
     "StatusBar": {
       "style": "DARK",
       "backgroundColor": "#050806"
-    },
-    "Geolocation": {}
+    }
   }
 }
