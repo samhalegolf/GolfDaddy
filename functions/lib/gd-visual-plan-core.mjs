@@ -52,6 +52,13 @@ export function mergeBounds(list) {
     east: Math.max(...values.map(b => Number(b.east)))
   };
 }
+/* Does `outer` already cover `inner`? Used to decide whether a capture would add any ground at
+   all, so a capture that reaches even slightly past is kept rather than rounded away. */
+export function boundsContain(outer, inner) {
+  if (!validBounds(outer) || !validBounds(inner)) return false;
+  return Number(outer.south) <= Number(inner.south) && Number(outer.north) >= Number(inner.north)
+    && Number(outer.west) <= Number(inner.west) && Number(outer.east) >= Number(inner.east);
+}
 export function padBounds(bounds, meters) {
   if (!validBounds(bounds)) return null;
   const pad = Math.max(0, Number(meters) || 0);
@@ -286,21 +293,34 @@ export function planCourseCaptures(pkg, opts = {}) {
   holeNumbers.forEach(holeNumber => {
     const data = holeData[holeNumber];
     const anchors = holeAnchorPins(data);
-    let greenBounds = boundsFromPoints([anchors.green, ...anchors.greenShape].filter(Boolean));
-    if (validBounds(greenBounds)) {
-      if (boundsSpanM(greenBounds).diag < 8) greenBounds = padBounds(greenBounds, 16);
-      const greenItem = item("green-surround", greenBounds, holeNumber, data);
-      if (greenItem) plan.push(greenItem);
-    }
+    const corridorItems = [];
     let corridorBounds = boundsFromPoints([anchors.tee, anchors.green, ...anchors.route, ...anchors.greenShape].filter(Boolean));
     if (validBounds(corridorBounds)) {
       if (boundsSpanM(corridorBounds).diag < 35) corridorBounds = padBounds(corridorBounds, 32);
       const corridorPolicy = capturePolicy("play-corridor");
       splitBoundsAlongRoute(corridorBounds, data, corridorPolicy).forEach(segment => {
         const corridorItem = item("play-corridor", segment.bounds, holeNumber, data, segment);
-        if (corridorItem) plan.push(corridorItem);
+        if (corridorItem) { plan.push(corridorItem); corridorItems.push(corridorItem); }
       });
     }
+    let greenBounds = boundsFromPoints([anchors.green, ...anchors.greenShape].filter(Boolean));
+    if (!validBounds(greenBounds)) return;
+    if (boundsSpanM(greenBounds).diag < 8) greenBounds = padBounds(greenBounds, 16);
+    const greenItem = item("green-surround", greenBounds, holeNumber, data);
+    if (!greenItem) return;
+    /* The green surround used to buy detail the corridor could not: z20 against the corridor's
+       z19. Now that every capture clamps to the zoom its frame renders at, the two sit at the
+       SAME zoom - so on a long hole the green surround is the identical ground at the identical
+       resolution, composited on top of itself, costing a fetch, decode, composite, encode and
+       upload per hole for pixels already present.
+
+       It is NOT redundant everywhere, and the difference is not about detail: the corridor is a
+       9/16 window along the play axis, so a SHORT hole gets a narrow one, while the green
+       surround is square. On Jacks Point's two shortest holes, dropping it took 47% and 30% off
+       the frame - lateral ground around the green, which is exactly where a player who has
+       missed is standing. So keep it only where it actually reaches past the corridor. */
+    if (corridorItems.length && boundsContain(mergeBounds(corridorItems.map(i => i.bounds)), greenItem.bounds)) return;
+    plan.push(greenItem);
   });
   /* Don't shoot sharper than the frame we render.
 
@@ -320,6 +340,29 @@ export function planCourseCaptures(pkg, opts = {}) {
 
      Without a source (plan-shape tests) it falls back to the metric bounds, which errs high -
      shooting one zoom sharper than needed, never softer. */
+  /* Second look at the green surrounds, now that footprints can be computed. The check above
+     compares METRIC bounds, but a corridor is captured through the axis-aligned box around a
+     rotated 9/16 lens, which covers far more ground than its metric bounds suggest - so that
+     check is conservative and keeps greens the corridor genuinely swallows. With a source in
+     hand the real footprints settle it, and a green is dropped only when the corridor's actual
+     captured rectangle already contains the green's. */
+  if (opts.source) {
+    const footprint = (i) => { const g = captureGrid(i, { source: opts.source }); return g ? g.imageBounds : null; };
+    holeNumbers.forEach(holeNumber => {
+      const items = plan.filter(i => Number(i.holeNumber) === holeNumber && !i.terrainStageOnly);
+      const greens = items.filter(i => i.role === "green-surround");
+      const corridors = items.filter(i => i.role === "play-corridor");
+      if (!greens.length || !corridors.length) return;
+      const covered = mergeBounds(corridors.map(footprint).filter(Boolean));
+      greens.forEach(green => {
+        const bounds = footprint(green);
+        if (!bounds || !boundsContain(covered, bounds)) return;
+        const at = plan.indexOf(green);
+        if (at >= 0) plan.splice(at, 1);
+      });
+    });
+  }
+
   const frameZoomByHole = {};
   holeNumbers.forEach(holeNumber => {
     const items = plan.filter(i => Number(i.holeNumber) === holeNumber && !i.terrainStageOnly);

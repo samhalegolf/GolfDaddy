@@ -132,6 +132,44 @@ let plan9;
     });
   });
 
+  test("a green surround inside its own corridor is not captured twice", () => {
+    /* Once every capture clamps to the frame zoom, a long hole's green surround is the same
+       ground at the same resolution as the corridor that already covers it. On the real Jacks
+       Point package this drops 18 green captures to 3. */
+    const pkg = course(4);
+    const plan = planCourseCaptures(pkg, { source: SOURCE, maxOutputPx: MAX_OUTPUT_PX, terrainSource: null });
+    const greens = plan.filter(i => i.role === "green-surround");
+    greens.forEach(green => {
+      const corridors = plan.filter(i => i.role === "play-corridor" && i.holeNumber === green.holeNumber);
+      if (!corridors.length) return;
+      const covered = mergeBounds(corridors.map(i => captureGrid(i, { source: SOURCE }).imageBounds));
+      const bounds = captureGrid(green, { source: SOURCE }).imageBounds;
+      assert.ok(!mod.boundsContain(covered, bounds),
+        `hole ${green.holeNumber} kept a green surround its corridor already covers`);
+    });
+  });
+
+  test("dropping redundant greens never shrinks a hole's frame", () => {
+    /* The load-bearing one. A corridor is a 9/16 window along the play axis, so a SHORT hole
+       gets a narrow one while the green surround is square - and an earlier version of this
+       pruning took 47% and 30% off the frames of Jacks Point's two shortest holes. That is
+       lateral ground beside the green, which is exactly where a player who has missed stands.
+       Compare the pruned plan against one that keeps every green. */
+    const pkg = course(4, 0.0009);  /* short holes - the case that broke */
+    const pruned = planCourseCaptures(pkg, { source: SOURCE, maxOutputPx: MAX_OUTPUT_PX, terrainSource: null });
+    const holes = [...new Set(pruned.filter(i => i.holeNumber).map(i => i.holeNumber))];
+    assert.ok(holes.length >= 4, "fixture must produce short holes");
+    holes.forEach(hole => {
+      const extent = (plan) => mergeBounds(plan.filter(i => Number(i.holeNumber) === hole && !i.terrainStageOnly)
+        .map(i => captureGrid(i, { source: SOURCE })).filter(Boolean).map(g => g.imageBounds));
+      /* Everything the unpruned plan would have covered must still be covered. */
+      const keptAll = planCourseCaptures(pkg, { terrainSource: null });
+      assert.ok(mod.boundsContain(extent(pruned), extent(keptAll)) ||
+        JSON.stringify(extent(pruned)) === JSON.stringify(extent(keptAll)),
+        `hole ${hole} lost frame extent to pruning`);
+    });
+  });
+
   test("green surrounds may sit at z20 only when the frame can show it", () => {
     /* The policy still asks for z20 - the clamp is what decides. A green on a tiny frame gets
        pulled down; the policy itself is unchanged so nothing else has to move. */
