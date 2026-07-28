@@ -45,9 +45,16 @@
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>
 	<string>Main</string>
+	<!-- arm64, not the armv7 the Cordova-era template shipped. Every device that
+	     can run this app is 64-bit (deployment target is iOS 15, and 32-bit
+	     hardware topped out at iOS 10), so armv7 described a requirement no
+	     supported device actually advertises. Apple still accepts it, which is
+	     why it survives in so many Capacitor projects - but a capability list
+	     that does not match the slices in the binary is a wrong answer waiting
+	     to matter, not a harmless one. -->
 	<key>UIRequiredDeviceCapabilities</key>
 	<array>
-		<string>armv7</string>
+		<string>arm64</string>
 	</array>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>

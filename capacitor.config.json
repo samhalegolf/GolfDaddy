@@ -8,7 +8,7 @@
   },
   "ios": {
     "path": "ios",
-    "scheme": "Clarity Caddy",
+    "scheme": "App",
     "contentInset": "always",
     "limitsNavigationsToAppBoundDomains": false
   },
