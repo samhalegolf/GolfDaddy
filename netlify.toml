@@ -3,6 +3,13 @@
   command = "npm run build:netlify"
   functions = "functions"
 
+# The practice parser is one file shared by the browser and the import
+# function, so it lives in scripts/ where index.html can load it. That puts it
+# outside the functions directory: pin it explicitly rather than trusting the
+# bundler to trace a require that leaves functions/.
+[functions]
+  included_files = ["scripts/gd-practice-parser-core.js"]
+
 [[redirects]]
   from = "/api/store-webhook"
   to = "/.netlify/functions/store-webhook"
@@ -116,6 +123,11 @@
 [[redirects]]
   from = "/api/account-delete"
   to = "/.netlify/functions/account-delete"
+  status = 200
+
+[[redirects]]
+  from = "/api/account-clear-data"
+  to = "/.netlify/functions/account-clear-data"
   status = 200
 
 [[redirects]]

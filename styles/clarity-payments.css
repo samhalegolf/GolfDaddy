@@ -555,13 +555,19 @@
   }
 }
 
-/* Account deletion dialog.
+/* Account deletion dialog, and the clear-golf-data dialog that reuses it.
  *
  * Deliberately styled like the referral modal rather than as a destructive-red
  * alert. The wording carries the weight, and the typed confirmation is the real
  * guard; a wall of red on the settings screen reads as an error state.
  * The confirm button is the only red thing here, because it is the only thing
- * that destroys anything. */
+ * that destroys anything.
+ *
+ * clarity-account-clear-data.js reuses these class names rather than cloning
+ * them under a Clear* prefix. The two dialogs are the same object at different
+ * severities, and a visual difference between them would suggest a structural
+ * one - the only thing that should distinguish them is what they say and which
+ * word you have to type. */
 .clarityAccountDeleteOverlay {
   position: fixed;
   inset: 0;
