@@ -19,6 +19,11 @@ import sharp from "sharp";
    the 3-minute relay kept restarting the process before it burst. Turning the cache off costs
    nothing here - there is no reuse to lose. */
 sharp.cache(false);
+/* One libvips worker thread, not one per core. Each thread carries its own tile buffers
+   through the pipeline, so on a 320-tile composite the thread count multiplies peak memory
+   rather than the work - and the work is not the bottleneck here anyway; tile fetching is.
+   Trading compositing throughput we are not using for headroom we keep running out of. */
+sharp.concurrency(1);
 import { planCourseCaptures, captureGrid, packageHoleData, courseBoundsFor } from "./lib/gd-visual-plan-core.mjs";
 import { resolveImagerySource, unscannableReason, attributionFor } from "./lib/gd-imagery-sources.mjs";
 import { renderHoleSurfaceMercator, renderOverview } from "./lib/gd-visual-export-core.mjs";
@@ -179,10 +184,16 @@ async function buildCapture(grid, { format }) {
   });
   const composites = tiles.map((tile, index) => ({ input: buffers[index], left: tile.x, top: tile.y })).filter(layer =>
     layer.left > -256 && layer.top > -256 && layer.left < grid.imageWidth && layer.top < grid.imageHeight);
+  /* The composites array now holds the only references that matter; dropping this one lets the
+     off-grid tiles the filter discarded be collected before the composite runs rather than
+     after it, which is exactly when the headroom is needed. */
+  buffers.length = 0;
   const composed = canvas.composite(composites);
-  return format === "png"
-    ? composed.png({ compressionLevel: 9 }).toBuffer()
-    : composed.jpeg({ quality: 85 }).toBuffer();
+  const out = format === "png"
+    ? await composed.png({ compressionLevel: 9 }).toBuffer()
+    : await composed.jpeg({ quality: 85 }).toBuffer();
+  composites.length = 0;
+  return out;
 }
 
 /* Snapshot is resumable the same way export is, but cheaper: every field in a capture's index

@@ -436,6 +436,21 @@
     .gdAdminCourseStageLine span{display:inline-flex;align-items:center;min-height:22px;border-radius:999px;padding:3px 8px;background:rgba(255,255,255,.07);color:rgba(255,255,255,.62);font-size:9px;font-weight:950;text-transform:uppercase;letter-spacing:.04em}
     .gdAdminCourseStageLine span.ready{background:rgba(31,211,109,.14);color:#83ffb7}
     .gdAdminCourseStageLine span.warn{background:rgba(255,210,135,.12);color:#ffd287}
+    /* Cloud build bar. A pill like its neighbours so the stage line stays one row, with the
+       fill behind the label rather than beside it - at this size a separate track and caption
+       would be two things to read instead of one. */
+    .gdAdminCourseStageLine span.gdAdminBuildBar{position:relative;overflow:hidden;min-width:190px;padding:3px 10px;background:rgba(255,255,255,.07)}
+    .gdAdminBuildBarFill{position:absolute;left:0;top:0;bottom:0;background:rgba(31,211,109,.28);transition:width .4s ease}
+    .gdAdminBuildBarText{position:relative;z-index:1;color:#d8ffe8;white-space:nowrap}
+    /* Stalled reads as amber, and stops the fill animating - a bar that keeps easing while
+       nothing is happening is the opposite of the signal wanted here. */
+    .gdAdminCourseStageLine span.gdAdminBuildBarStalled .gdAdminBuildBarFill{background:rgba(255,210,135,.26);transition:none}
+    .gdAdminCourseStageLine span.gdAdminBuildBarStalled .gdAdminBuildBarText{color:#ffd287}
+    /* display:inline, not the inherited inline-flex - a flex box swallows the space in front of
+       it, which ran the percentage straight into "stalled". */
+    .gdAdminBuildBarText .warn{display:inline;background:none;padding:0;min-height:0;color:#ffd287}
+    .gdAdminBuildNudge{border:1px solid rgba(255,210,135,.35);background:rgba(255,210,135,.1);color:#ffd287;border-radius:999px;padding:3px 10px;min-height:22px;font-size:9px;font-weight:950;text-transform:uppercase;letter-spacing:.04em;cursor:pointer}
+    .gdAdminBuildNudge:hover{background:rgba(255,210,135,.2)}
     .gdAdminCourseVisualLifecycle b{color:rgba(255,255,255,.35);font-size:10px;font-weight:400}
     .gdAdminCourseHoleNote{color:rgba(255,255,255,.45);font-size:9px;text-transform:uppercase;letter-spacing:.04em;margin-left:4px}
     .gdAdminCourseSettings{border-radius:12px;border:1px solid rgba(255,255,255,.08);background:rgba(0,0,0,.15);overflow:hidden}

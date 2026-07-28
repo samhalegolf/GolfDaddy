@@ -18,6 +18,13 @@ const ADMIN_EMAILS = new Set(["samhalegolf@gmail.com", "admin@clarity.local"]);
 const AUTO_RATE_WINDOW_MS = 30 * 60 * 1000;
 const AUTO_RATE_MAX_PER_USER = 3;
 
+/* How long a "running" job may go without a heartbeat before it is treated as a dead
+   invocation. The worker beats after every capture and every hole - roughly every 10 seconds -
+   so two minutes of silence is a corpse, not a slow job. Well under the reaper's own 6-minute
+   cutoff on purpose: the reaper is the automatic safety net and can afford to be sure, while a
+   nudge is a person looking at a stuck bar who already is. */
+const STALL_SECONDS = 120;
+
 function env(name) { return process.env[name] || ""; }
 function supabaseBase() { return env("SUPABASE_URL").replace(/\/+$/, ""); }
 function supabaseKey() { return env("SUPABASE_SERVICE_ROLE_KEY"); }
@@ -92,6 +99,13 @@ async function courseBuildState(courseId) {
   else if (jobs.some(job => job.kind === "snapshot" && job.status === "done")) state = "captures-ready";
   else if (jobs.length && jobs[0].status === "failed") state = "failed";
   else state = "none";
+  /* A worker heartbeats after every capture and every hole, so silence is the only honest
+     signal that an invocation died - status stays "running" on a process that is gone. The
+     reaper needs 6 minutes to be sure; the UI wants to say "this looks stuck" well before
+     that, which is what stalledSeconds is for. */
+  const stalledSeconds = live && live.updated_at
+    ? Math.max(0, Math.round((Date.now() - new Date(live.updated_at).getTime()) / 1000))
+    : null;
   return {
     state,
     hasGeometry: Array.isArray(mapRows) && mapRows.length > 0,
@@ -100,6 +114,8 @@ async function courseBuildState(courseId) {
     framesVersion: visual ? Number(visual.published_version) || null : null,
     building: !!live,
     activeKind: live ? live.kind : null,
+    stalledSeconds,
+    stalled: live && live.status === "running" && stalledSeconds != null && stalledSeconds > STALL_SECONDS,
     progress: live && live.result && live.result.progress || null,
     lastError: !live && jobs.length && jobs[0].status === "failed" ? String(jobs[0].error || "").slice(0, 300) : null,
     jobs
@@ -123,6 +139,7 @@ export default async function courseVisualJobs(req) {
 
   const requestedKind = String(payload && payload.kind || "snapshot");
   const auto = requestedKind === "auto";
+  const nudge = requestedKind === "nudge";
   const user = await verifiedUser(req, payload);
   if (!user) return json(401, { error: "Sign in required" });
   /* "auto" is the only kind a non-admin may enqueue, and it can only ever produce a snapshot
@@ -133,6 +150,28 @@ export default async function courseVisualJobs(req) {
 
   const courseId = slug(payload && (payload.courseId || payload.course_id));
   if (!courseId) return json(400, { error: "courseId required" });
+
+  /* Nudge: what an admin does when the progress bar has stopped moving. It queues nothing.
+     A job whose invocation died is still marked "running", and nothing will touch it until the
+     reaper's 6-minute cutoff and the next 10-minute sweeper tick - up to a quarter hour of a
+     bar sitting still. This hands that job back to the queue and wakes a worker now.
+     Deliberately refuses to touch a job that is still heartbeating: requeuing a live run would
+     hand the same course to two workers. */
+  if (nudge) {
+    const state = await courseBuildState(courseId);
+    let requeued = 0;
+    if (state.stalled) {
+      const cutoff = new Date(Date.now() - STALL_SECONDS * 1000).toISOString();
+      const revived = await supabaseFetch(TABLE + "?course_id=eq." + encodeURIComponent(courseId) + "&status=eq.running&updated_at=lt." + encodeURIComponent(cutoff), {
+        method: "PATCH",
+        headers: { Prefer: "return=representation" },
+        body: JSON.stringify({ status: "queued", error: null, updated_at: new Date().toISOString() })
+      });
+      requeued = Array.isArray(revived) ? revived.length : 0;
+    }
+    await pingWorker(req);
+    return json(200, Object.assign({ nudged: true, requeued }, await courseBuildState(courseId)));
+  }
 
   if (auto) {
     /* Frames already exist - nothing to build. Cheap guard so a client polling loop that
@@ -168,20 +207,25 @@ export default async function courseVisualJobs(req) {
   });
   const job = Array.isArray(inserted) ? inserted[0] : inserted;
 
-  /* Ping the background worker; fire-and-forget. If the ping is lost the job stays queued and
-     the next enqueue or a manual worker invocation sweeps it up. */
+  await pingWorker(req, job && job.id || null);
+
+  return json(202, { job, state: "queued" });
+}
+
+/* Wake the background worker. If the ping is lost the job stays queued and the next enqueue or
+   the 10-minute sweeper picks it up.
+   AWAITED, not fire-and-forget: serverless freezes the process the moment the handler returns,
+   so an un-awaited fetch never leaves the building. The worker acks 202 immediately, so this
+   costs a few hundred ms. */
+async function pingWorker(req, jobId) {
   try {
-    /* Awaited: an un-awaited fetch can be frozen with the process before it sends. The
-       background worker acks 202 immediately, so this costs a few hundred ms. */
     const origin = new URL(req.url).origin;
     await fetch(origin + "/.netlify/functions/course-visual-worker-background", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ jobId: job && job.id || null })
+      body: JSON.stringify({ jobId: jobId || null })
     }).catch(() => {});
   } catch (e) { /* queued job remains sweepable */ }
-
-  return json(202, { job, state: "queued" });
 }
 
 export const config = {

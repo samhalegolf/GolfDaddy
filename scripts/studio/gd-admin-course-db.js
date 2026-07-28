@@ -1493,13 +1493,105 @@ function gdAdminCourseCloudLatestJob(courseId){
     .catch(()=>{});
   return entry&&entry.job||null;
 }
+/* Build state for the progress bar, polled from /api/course-visual-jobs. Separate from the
+   job-list cache above because it refreshes far more often while a build is live: a bar that
+   updates once every 20 seconds is a bar you cannot tell is stuck. */
+const gdAdminCourseBuildStateCache={};
+let gdAdminCourseBuildTimer=null;
+function gdAdminCourseBuildState(courseId){
+  courseId=String(courseId||"");
+  if(!courseId)return null;
+  const entry=gdAdminCourseBuildStateCache[courseId];
+  const nowMs=Date.now();
+  /* Poll hard while something is moving, back off to a heartbeat when it is not - an idle
+     course database should not be talking to the server every five seconds. */
+  const live=entry&&entry.state&&(entry.state.building||entry.state.state==="queued");
+  const maxAge=live?5000:30000;
+  if(entry&&nowMs-entry.fetchedAt<maxAge)return entry.state||null;
+  gdAdminCourseBuildStateCache[courseId]={fetchedAt:nowMs,state:entry&&entry.state||null};
+  fetch("/api/course-visual-jobs?courseId="+encodeURIComponent(courseId),{headers:{Accept:"application/json"},cache:"no-store"})
+    .then(res=>res.ok?res.json():null)
+    .then(state=>{
+      if(!state)return;
+      const previous=gdAdminCourseBuildStateCache[courseId]&&gdAdminCourseBuildStateCache[courseId].state;
+      gdAdminCourseBuildStateCache[courseId]={fetchedAt:Date.now(),state};
+      /* Frames just landed - drop the frame cache so the preview shows the new bake. */
+      if(state.framesReady&&(!previous||!previous.framesReady)){
+        delete gdAdminCourseCloudFramesCache[courseId];
+        delete gdAdminCourseCloudFramesSuppressed[courseId];
+      }
+      if(gdAdminCourseDatabaseSelected===courseId)gdRenderAdminCourseDatabase();
+    })
+    .catch(()=>{});
+  return entry&&entry.state||null;
+}
+/* Keeps the bar moving while a build runs. Re-rendering is what re-reads the state, so without
+   a tick the bar only advances when the admin happens to click something. */
+function gdAdminCourseBuildWatch(courseId,live){
+  if(gdAdminCourseBuildTimer){clearTimeout(gdAdminCourseBuildTimer);gdAdminCourseBuildTimer=null;}
+  if(!live)return;
+  gdAdminCourseBuildTimer=setTimeout(()=>{
+    gdAdminCourseBuildTimer=null;
+    if(gdAdminCourseDatabaseSelected===courseId)gdRenderAdminCourseDatabase();
+  },5000);
+}
+function gdAdminCourseBuildProgress(state){
+  const p=state&&state.progress||null;
+  if(!p)return null;
+  const done=Number(p.capturesDone!=null?p.capturesDone:p.holesDone);
+  const total=Number(p.capturesTotal!=null?p.capturesTotal:p.holesTotal);
+  if(!Number.isFinite(done)||!Number.isFinite(total)||total<=0)return null;
+  return {done,total,pct:Math.max(0,Math.min(100,Math.round(done/total*100))),stage:String(p.stage||""),rssMb:Number(p.rssMb)||0};
+}
+/* The build bar. One line that answers: is this course built, is it building, how far, and has
+   it stopped moving. Rendered wherever the published/live area is shown. */
 function gdAdminCourseCloudJobChip(courseId){
-  const job=gdAdminCourseCloudLatestJob(courseId);
-  if(!job)return "";
-  const label=(job.kind==="export"?"publish":"snapshot")+" "+job.status;
-  const tone=job.status==="done"?"ready":job.status==="failed"?"warn":"";
-  const title=job.status==="failed"&&job.error?String(job.error).slice(0,140):"";
-  return `<span class="${tone}"${title?` title="${gdEscapeHTML(title)}"`:""}>cloud: ${gdEscapeHTML(label)}</span>`;
+  const state=gdAdminCourseBuildState(courseId);
+  if(!state)return "";
+  const live=!!state.building||state.state==="queued";
+  gdAdminCourseBuildWatch(courseId,live);
+  const progress=gdAdminCourseBuildProgress(state);
+  const kind=state.activeKind==="export"?"baking frames":state.activeKind==="snapshot"?"scanning":"";
+  const stalled=!!state.stalled;
+  const nudge=`<button type="button" class="gdAdminBuildNudge" onclick="return gdAdminCourseBuildNudge('${gdEscapeHTML(courseId)}')" title="Hand a dead job back to the queue and wake a worker">Nudge</button>`;
+
+  if(live){
+    /* An explicit percentage as well as the bar: "47%" is checkable against the last time you
+       looked, which is the whole point of putting this on screen. */
+    const pct=progress?progress.pct:0;
+    const detail=progress?`${progress.done}/${progress.total}`:"starting";
+    const stall=stalled?` · <span class="warn">stalled ${Math.round((state.stalledSeconds||0)/60)}m</span>`:"";
+    return `<span class="gdAdminBuildBar${stalled?" gdAdminBuildBarStalled":""}" title="${gdEscapeHTML(progress&&progress.stage||"")}">`
+      +`<span class="gdAdminBuildBarFill" style="width:${pct}%"></span>`
+      +`<span class="gdAdminBuildBarText">${gdEscapeHTML(kind||"building")} ${gdEscapeHTML(detail)} · ${pct}%${stall}</span>`
+      +`</span>${stalled?nudge:""}`;
+  }
+  if(state.state==="frames-ready")return `<span class="ready">cloud frames v${gdEscapeHTML(state.framesVersion||1)}</span>`;
+  if(state.state==="captures-ready")return `<span class="warn" title="Snapshot landed, frames did not - re-run Publish or nudge">captures only, no frames</span>${nudge}`;
+  if(state.state==="failed")return `<span class="warn" title="${gdEscapeHTML(String(state.lastError||"").slice(0,180))}">build failed</span>${nudge}`;
+  return `<span>not built</span>`;
+}
+async function gdAdminCourseBuildNudge(courseId){
+  courseId=String(courseId||"");
+  if(!courseId)return false;
+  try{
+    const token=await gdAdminCourseDbAccessToken();
+    if(!token){gdAdminCourseVisualToast("Sign in to nudge");return false;}
+    const res=await fetch("/api/course-visual-jobs",{
+      method:"POST",
+      headers:{"Content-Type":"application/json",Accept:"application/json",Authorization:"Bearer "+token},
+      body:JSON.stringify({courseId,kind:"nudge"})
+    });
+    const data=await res.json().catch(()=>null);
+    if(data&&data.nudged){
+      gdAdminCourseVisualToast(data.requeued?`Requeued ${data.requeued} stuck job`:"Worker woken");
+      gdAdminCourseBuildStateCache[courseId]={fetchedAt:0,state:data};
+      if(gdAdminCourseDatabaseSelected===courseId)gdRenderAdminCourseDatabase();
+    }else{
+      gdAdminCourseVisualToast("Nudge failed");
+    }
+  }catch(e){gdAdminCourseVisualToast("Nudge failed");}
+  return false;
 }
 /* Human-readable feedback of what the current recipe actually has switched on. */
 function gdAdminCourseVisualActiveEffects(record){
