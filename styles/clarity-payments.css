@@ -100,6 +100,29 @@
   line-height: 1.4;
 }
 
+/* Required links, sized as fine print: present and tappable without competing
+   with the purchase buttons. 44px min height keeps them inside Apple's touch
+   target guidance, since a link a reviewer cannot hit counts as not present. */
+.clarityPaymentLegal {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: center;
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, .45);
+}
+
+.clarityPaymentLegal a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: rgba(255, 255, 255, .72);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 @media (max-width: 430px) {
   .clarityPaymentPassGrid {
     grid-template-columns: 1fr;

@@ -591,9 +591,34 @@
       renderProductCards(),
       renderReferralSection(),
       '<div class="clarityPaymentActions"><button class="secondary" type="button" onclick="ClarityPayments.refresh()">Refresh Status</button></div>',
-      '<div class="clarityPaymentNote">Card details are handled by Stripe Checkout. Clarity unlocks access only after the Stripe webhook creates a Supabase entitlement.</div>',
+      renderBillingNote(),
+      renderLegalLinks(),
       isAdmin(activeAccount) ? renderAdminSettings() : ""
     ].join("");
+  }
+
+  /* Who takes the money, said accurately for the surface the user is on.
+     Naming Stripe inside the iOS or Android app is an in-app purchase red flag
+     even though buy() already blocks the web checkout path there - a reviewer
+     reads the screen, not the call graph, and "card details are handled by
+     Stripe Checkout" on a store build reads as payment taken outside the store.
+     Native builds therefore describe the store that actually charges them. */
+  function renderBillingNote() {
+    if (storeBillingBlocksWebCheckout()) {
+      var store = window.GDNative && window.GDNative.platform === "android"
+        ? "Google Play" : "the App Store";
+      return '<div class="clarityPaymentNote">Purchases are handled by ' + store
+        + '. Access unlocks once the purchase is confirmed.</div>';
+    }
+    return '<div class="clarityPaymentNote">Card details are handled by Stripe Checkout. Clarity unlocks access only after the Stripe webhook creates a Supabase entitlement.</div>';
+  }
+
+  /* Apple 3.1.2 wants both documents reachable from the purchase flow itself. */
+  function renderLegalLinks() {
+    if (window.ClarityLegalLinks && typeof window.ClarityLegalLinks.markup === "function") {
+      return window.ClarityLegalLinks.markup();
+    }
+    return '<div class="clarityPaymentLegal"><a href="terms.html">Terms of Service</a> · <a href="privacy.html">Privacy Policy</a></div>';
   }
 
   function renderExpiryBanner() {

@@ -22,11 +22,20 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<!-- When-in-use only. @capacitor/geolocation exposes no "always" permission
+	     (its types are 'location' | 'coarseLocation'), nothing requests always
+	     authorisation, and there is no UIBackgroundModes location entry - so the
+	     NSLocationAlwaysAndWhenInUseUsageDescription key that shipped in the
+	     Capacitor template was declaring a capability the app never asks for.
+	     Worse, it contradicted privacy.html, which tells players in plain words
+	     that the app "does not track your location in the background". Asking for
+	     background location you do not use invites a reviewer question you cannot
+	     answer well, so the key is gone rather than merely unused. -->
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Clarity Caddy uses your location to show distances to the green and track your shots while you play.</string>
-	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Clarity Caddy uses your location to show distances to the green and track your shots while you play.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Clarity Caddy uses the camera so you can add a profile photo and capture launch monitor readouts.</string>
