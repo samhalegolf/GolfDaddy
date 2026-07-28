@@ -3336,17 +3336,29 @@
 
   /* The whole automatic route from the app's side, as one call.
 
-     Cached frames are served IMMEDIATELY and without waiting on the network - that is both the
-     zero-network case and the offline story, since a course opened once plays in flight mode.
-     A revalidation runs behind that: index.json is small and carries the export version, so
-     comparing it is one cheap request and needs no assumptions about version numbering.
+     STORAGE RULE: this never writes a course's frames to the device unless the caller passes
+     acquire:true, which represents the user having asked for it. The device holds two very
+     different things and only one of them is automatic:
 
-     With no cached frames it asks the server where the course is up to, starts a build if it
-     has never been built, and polls until frames land. Play runs over live tiles with the
-     course objects drawn on top for the whole of that wait - see FRAMES_WAIT_MODE. */
+       course library  - course objects, kilobytes, cached freely. This is what "Live Map
+                         Available" plays from, and it needs no permission because it costs
+                         nothing.
+       offline package - frames, overview, elevation grid, scorecard. Megabytes. This is
+                         "Offline Map Available", and it lands only when the user accepts it,
+                         arrives via a pre-search, or has Smart Download on.
+
+     Without acquire this call is pure observation: it reads state, reports it, and serves
+     frames that are ALREADY in the library. Nothing is downloaded behind the player's back,
+     on their cellular data, for a course they merely tapped.
+
+     Cached frames are served IMMEDIATELY and without waiting on the network - that is both the
+     zero-network case and the offline round, since a downloaded course plays in flight mode. */
   function ensureCourseFrames(courseId,opts){
     opts=opts||{};
     var id=slug(courseId);
+    /* The single gate on megabytes touching the disk. Default false, deliberately: a caller
+       that forgets it gets the observing behaviour, not a silent download. */
+    var acquire=opts.acquire===true;
     var pollMs=Math.max(5000,Number(opts.pollMs)||FRAMES_POLL_MS);
     var stopped=false;
     var timer=null;
