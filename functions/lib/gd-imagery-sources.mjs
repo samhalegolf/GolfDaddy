@@ -114,7 +114,14 @@ export const IMAGERY_SOURCES = [
   {
     key: "naip-us",
     label: "NAIP via USGS National Map",
-    region: { bbox: { south: 24.5, west: -125.0, north: 49.5, east: -66.9 }, country: "US" },
+    /* The ImageServer's OWN published extent, rounded inward, not a hand-drawn CONUS box.
+       Read off .../USGSNAIPImagery/ImageServer?f=json on 2026-07-28: in 3857 it runs
+       x -13896162.9..-7441890.6, y 2812730.7..6372359.7, i.e. -124.8314..-66.8516 by
+       24.4859..49.5713. The old box claimed west to -125.0, which is 0.17 degrees of ocean the
+       service has no rasters for - and because this bbox IS the containment gate, a course out
+       there would have passed it and come back as empty blocks rather than as a refusal.
+       Alaska, Hawaii and the territories are outside NAIP; those courses run live-only. */
+    region: { bbox: { south: 24.49, west: -124.83, north: 49.57, east: -66.86 }, country: "US" },
     license: {
       name: "Public domain (USDA/USGS)",
       url: "https://www.usgs.gov/information-policies-and-instructions/copyrights-and-credits",
@@ -129,16 +136,41 @@ export const IMAGERY_SOURCES = [
          contributing layer is confirmed unrestricted. */
       endpoint: "https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPImagery/ImageServer/exportImage",
       apiKeyEnv: "",
-      /* Base NAIP is 0.6m. Requesting z19 here would upscale mush and cost the same, so the
-         planner steps down to this before it counts tiles. */
-      maxUsefulZoom: 17,
+      /* The mosaic is 4-band (R,G,B,NIR) and publishes FalseColorComposite and NDVI_Color
+         alongside NaturalColor. With no renderingRule the server picks its own default, which
+         today renders natural colour - verified byte-identical against an explicit
+         NaturalColor request - but that is the server's choice, not ours, and these pixels are
+         stored and served for years. Pin it, for the same reason the LINZ DEM pins
+         pipeline=terrain-rgb: a stored derivative must not depend on a remote default. */
+      renderingRule: { rasterFunction: "NaturalColor" },
+      /* The service reports pixelSizeX 0.3m, NOT the 0.6m the source imagery is usually quoted
+         at - the mosaic is served at 0.3. z19 is 0.24m/px at US latitudes, the first zoom at or
+         finer than that; z20 is 0.12m/px and comes back as a smooth upscale for 2.6x the bytes.
+
+         This was 17 (0.96m/px), which was not a saving but a defect: hole frames render at z18
+         on the standard 3072px output, so EVERY stored US frame was being composited from
+         imagery upscaled 2x linearly. The frame ceiling in captureGrid still binds first, so
+         raising this does not shoot above what the compositor keeps - it just stops the source
+         ceiling from silently landing below it. */
+      maxUsefulZoom: 19,
       minTrustedZoom: 12,
-      /* exportImage caps request size; blocks are assembled by the same compositor as tiles. */
+      /* exportImage caps request size; blocks are assembled by the same compositor as tiles.
+         The service's published cap is maxImageWidth/Height 4000 - 4001 is refused outright
+         with "The requested image exceeds the size limit" - and 4000 would cut an 18-hole plan
+         from 146 requests to 37. Not taken: a 4000px block is 48MB of decoded RGB, and at
+         TILE_CONCURRENCY 16 that is 768MB in a 1024MB worker, which is the OOM this pipeline
+         has already been bitten by once. 2048 is 12.6MB a block. Raise only alongside the
+         concurrency. */
       blockPx: 2048
     },
     /* 3DEP, requested as raw float elevation rather than as a pre-shaded image - shading is
        computed downstream, and the same fetch feeds plays-like. 1m LiDAR where flown, 10m
-       nationally, which is comfortably fit for relative elevation over a few hundred metres. */
+       nationally, which is comfortably fit for relative elevation over a few hundred metres.
+
+       Requesting raw is not the default here either: the service publishes Hillshade Gray,
+       Hillshade Multidirectional, Slope and Contour raster functions, so leaving renderingRule
+       unset is what gets measurements rather than a picture of them. Confirmed against a live
+       block: 32-bit sampleFormat 3, sensible metres. */
     dem: {
       adapter: "arcgis-export",
       endpoint: "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer/exportImage",
@@ -146,7 +178,11 @@ export const IMAGERY_SOURCES = [
       format: "tiff",
       encoding: "float32",
       nativeResolutionM: 1,
-      maxUsefulZoom: 16,
+      fallbackResolutionM: 10,
+      /* The service reports pixelSize 1.0m. z17 is ~0.96m/px at US latitudes - native - which
+         is the same number and the same reasoning as the LINZ 1m LiDAR above. 16 was 1.92m/px,
+         throwing away half the elevation detail the service actually holds. */
+      maxUsefulZoom: 17,
       blockPx: 2048
     },
     attribution: {
@@ -270,6 +306,10 @@ export function exportImageUrl(spec, rect, zoom) {
     interpolation: "RSP_BilinearInterpolation",
     f: "image"
   });
+  /* Only where the entry pins one. An absent rule means "the service's raw default", which is
+     what elevation wants - 3DEP's own function list is all hillshades and slope maps, and any
+     of those would store a picture of the terrain instead of the terrain. */
+  if (spec && spec.renderingRule) params.set("renderingRule", JSON.stringify(spec.renderingRule));
   if (spec && spec.apiKey) params.set("token", spec.apiKey);
   return String(spec.endpoint) + "?" + params.toString();
 }

@@ -93,13 +93,54 @@ test("region containment is containment, not overlap", () => {
   assert.strictEqual(mod.resolveImagerySource(straddling, { env: NZ_ENV }), null);
 });
 
-test("the US entry resolves to the export adapter with a low zoom ceiling", () => {
+test("the US entry resolves to the export adapter", () => {
   const source = mod.resolveImagerySource(PEBBLE_US, { env: {} });
   assert.ok(source, "NAIP needs no key");
   assert.strictEqual(source.key, "naip-us");
   assert.strictEqual(source.imagery.adapter, "arcgis-export");
-  assert.ok(source.imagery.maxUsefulZoom <= 18, "base NAIP is 0.6m - asking for z19 buys upscaled mush");
   assert.ok(!/NAIPPlus/i.test(source.imagery.endpoint), "Plus blends contributed orthos whose terms are unconfirmed");
+  /* exportImage refuses anything over 4000 outright, and a block that large is 48MB decoded. */
+  assert.ok(source.imagery.blockPx <= 4000, "the service refuses requests above 4000px a side");
+});
+
+/* The zoom ceilings are the numbers the SERVICES publish about themselves, not estimates from
+   what NAIP and 3DEP are usually quoted at. Both were previously a zoom too low, which is not a
+   saving - it is every stored US frame composited from upscaled pixels. Read off
+   .../ImageServer?f=json on 2026-07-28: NAIP pixelSizeX 0.3m, 3DEP pixelSize 1.0m. */
+test("the US ceilings match what the services actually resolve", () => {
+  const source = mod.resolveImagerySource(PEBBLE_US, { env: {} });
+  /* Ground resolution of a zoom at Pebble's latitude. z19 is 0.24m/px against a 0.3m mosaic -
+     the first zoom at or finer than native. z20 measurably returns a smooth upscale. */
+  const mPerPx = (z) => (156543.03392804097 / Math.pow(2, z)) * Math.cos(36.566 * Math.PI / 180);
+  assert.ok(mPerPx(source.imagery.maxUsefulZoom) <= 0.3,
+    "NAIP is served at 0.3m - a ceiling coarser than that discards imagery we are paying to fetch");
+  assert.ok(mPerPx(source.imagery.maxUsefulZoom + 1) < 0.3 / 1.5,
+    "and one zoom higher must be a genuine upscale, or the ceiling is set too low");
+  assert.ok(mPerPx(source.dem.maxUsefulZoom) <= 1.0, "3DEP is served at 1m");
+});
+
+/* NAIP is 4-band and publishes false-colour and NDVI renderings beside the natural one. The
+   default happens to be natural colour today; these pixels are stored for years. */
+test("the US imagery pins its rendering and the US elevation does not", () => {
+  const source = mod.resolveImagerySource(PEBBLE_US, { env: {} });
+  const imagery = new URL(mod.exportImageUrl(source.imagery, { left: 0, top: 0, width: 256, height: 256 }, 19));
+  assert.strictEqual(JSON.parse(imagery.searchParams.get("renderingRule")).rasterFunction, "NaturalColor",
+    "a stored derivative must not depend on a remote default");
+  const dem = new URL(mod.exportImageUrl(source.dem, { left: 0, top: 0, width: 256, height: 256 }, 17));
+  assert.strictEqual(dem.searchParams.get("renderingRule"), null,
+    "3DEP's own functions are all hillshades and slope maps - raw is what elevation means");
+});
+
+/* This bbox IS the containment gate, so claiming ground the service has no rasters for turns a
+   clean refusal into a course full of empty blocks. */
+test("the US region claims no more ground than the service holds", () => {
+  const entry = mod.IMAGERY_SOURCES.find(e => e.key === "naip-us");
+  const box = entry.region.bbox;
+  /* USGSNAIPImagery ImageServer extent, 2026-07-28, converted from EPSG:3857. */
+  const served = { west: -124.8314, east: -66.8516, south: 24.4859, north: 49.5713 };
+  assert.ok(box.west >= served.west, "west edge must not run past the last NAIP raster");
+  assert.ok(box.east <= served.east, "east edge must not run past the last NAIP raster");
+  assert.ok(box.south >= served.south && box.north <= served.north, "and neither may the latitudes");
 });
 
 /* Both templates are verbatim from LINZ's own MapLibre example. They are asserted rather than
