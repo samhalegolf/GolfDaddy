@@ -14224,14 +14224,43 @@ const mapSources=[
     label:"LINZ Basemaps aerial (CC BY 4.0)",
     tileUrl:"https://basemaps.linz.govt.nz/v1/tiles/aerial/WebMercatorQuad/{z}/{x}/{y}.webp?api={linzKey}",
     requiresKey:"linzKey",
+    /* LINZ covers New Zealand. Without this a keyed build mounted LINZ over Queensland,
+       California, anywhere - and painted an empty map, because "has a key" is not the same
+       question as "has pixels here". Same bounds as the scan registry's linz-nz entry. */
+    bbox:{south:-47.5,west:166.0,north:-34.0,east:179.0},
     attribution:"Sourced from the LINZ Data Service, CC BY 4.0",
+    options:{maxZoom:21,crossOrigin:true}
+  },
+  {
+    key:"qld",
+    name:"QLD Imagery",
+    label:"Queensland state program aerial (CC BY-SA)",
+    /* Queensland's imagery is ShareAlike, which is why the scan registry refuses it: a stored,
+       composited frame is Adapted Material, and distributing it inside a course package would
+       put our own packages under CC BY-SA.
+
+       Displaying a tile is none of those things. The player's device fetches from Queensland's
+       server and draws it; nothing is adapted and nothing is redistributed, so ShareAlike has
+       nothing to attach to. That is the whole reason this entry can exist here while qld-au
+       stays gated in functions/lib/gd-imagery-sources.mjs - live display and stored derivative
+       are different rights, and this list has only ever been about the first one.
+
+       Attribution IS required, and is rendered from `attribution` below. */
+    tileUrl:"https://spatial-img.information.qld.gov.au/arcgis/rest/services/Basemaps/LatestStateProgram_AllUsers/MapServer/tile/{z}/{y}/{x}",
+    /* Mainland Queensland, matching the qld-au registry entry. Excludes the Torres Strait and
+       Coral Sea territories. */
+    bbox:{south:-29.2,west:138.0,north:-10.7,east:153.6},
+    attribution:"© State of Queensland, licensed CC BY-SA",
     options:{maxZoom:21,crossOrigin:true}
   },
   {
     key:"osm",
     name:"OSM Guide",
     label:"OpenStreetMap line guide",
+    /* No bbox: the global fallback, and the reason a course outside every aerial region still
+       gets a usable map rather than a blank one. Must stay last. */
     tileUrl:"https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    attribution:"© OpenStreetMap contributors",
     options:{maxZoom:21,subdomains:["a","b","c"],crossOrigin:true}
   }
 ];
@@ -14242,16 +14271,45 @@ function updateMapSourceUI(){
   const btn=document.getElementById("mapSourceBtn");
   const sub=document.getElementById("mapSourceSub");
   if(btn)btn.textContent=current.name;
-  if(sub)sub.textContent=current.label;
+  /* The credit, not just the name. `attribution` was carried on every source and rendered
+     nowhere, so LINZ's CC BY credit has never actually been shown - and CC BY-SA on the
+     Queensland layer makes attribution a licence condition rather than a courtesy. This is the
+     surface that already describes the active source, so the credit belongs here. A persistent
+     on-map credit would be stronger; the map is built with attributionControl:false and adding
+     one is a UI change, not a one-line fix. */
+  if(sub)sub.textContent=current.attribution?current.label+" — "+current.attribution:current.label;
+}
+
+/* Where the map is looking, for the coverage test. The neutral boot centre is [0,0], which no
+   regional bbox contains - so a cold start picks the global fallback and upgrades once a course
+   moves the map somewhere real. */
+function mapViewCentre(){
+  try{return map.getCenter()}catch(e){return null}
+}
+
+/* A source with no bbox is global. One with a bbox only counts where it actually has pixels. */
+function mapSourceCovers(source,centre){
+  const box=source&&source.bbox;
+  if(!box)return true;
+  if(!centre)return false;
+  const lat=Number(centre.lat),lng=Number(centre.lng);
+  if(!Number.isFinite(lat)||!Number.isFinite(lng))return false;
+  return lat>=box.south&&lat<=box.north&&lng>=box.west&&lng<=box.east;
 }
 
 /* A keyed source is only selectable once its key has arrived. Without this the LINZ layer
    would mount with an empty api= and paint the map with 403s, which reads to a player as
-   "the app is broken" rather than "this build has no imagery key". */
-function mapSourceReady(source){
+   "the app is broken" rather than "this build has no imagery key".
+
+   Coverage is the same question asked about geography instead of credentials, and it was the
+   missing half: a configured key made LINZ "ready" everywhere on Earth, so every course outside
+   New Zealand mounted a layer that had nothing to draw. An empty map reads as broken in exactly
+   the same way an unkeyed one does. */
+function mapSourceReady(source,centre){
   if(!source)return false;
-  if(source.requiresKey==="linzKey")return !!window.gdLinzBasemapsKey;
-  return !source.requiresKey;
+  if(source.requiresKey==="linzKey"&&!window.gdLinzBasemapsKey)return false;
+  if(source.requiresKey&&source.requiresKey!=="linzKey")return false;
+  return mapSourceCovers(source,centre===undefined?mapViewCentre():centre);
 }
 function mapSourceTileUrl(source){
   return String(source&&source.tileUrl||"").replace(/\{ *linzKey *\}/g,window.gdLinzBasemapsKey||"");
@@ -14259,10 +14317,13 @@ function mapSourceTileUrl(source){
 
 function setMapSource(index, reason="manual"){
   const count=mapSources.length;
+  const centre=mapViewCentre();
   let resolved=((index%count)+count)%count;
-  /* Step past any source whose key is missing rather than mounting a dead layer. */
-  for(let step=0;step<count&&!mapSourceReady(mapSources[resolved]);step++)resolved=(resolved+1)%count;
-  if(!mapSourceReady(mapSources[resolved]))return;
+  /* Step past any source whose key is missing, or which does not cover where we are looking,
+     rather than mounting a dead layer. OSM is global and last, so this always terminates on
+     something that can draw. */
+  for(let step=0;step<count&&!mapSourceReady(mapSources[resolved],centre);step++)resolved=(resolved+1)%count;
+  if(!mapSourceReady(mapSources[resolved],centre))return;
   activeMapSourceIndex=resolved;
   window.gdActiveMapSourceIndex=activeMapSourceIndex;
   const current=mapSources[activeMapSourceIndex];
@@ -14271,7 +14332,9 @@ function setMapSource(index, reason="manual"){
     try{map.removeLayer(baseLayer)}catch(e){}
   }
 
-  baseLayer=L.tileLayer(mapSourceTileUrl(current),current.options).addTo(map);
+  /* Attribution is passed to Leaflet as well as rendered above, so the credit is correct if the
+     attribution control is ever turned on rather than having to be remembered twice. */
+  baseLayer=L.tileLayer(mapSourceTileUrl(current),Object.assign({attribution:current.attribution||""},current.options)).addTo(map);
   updateMapSourceUI();
 
   baseLayer.once("load",()=>{
@@ -14285,6 +14348,29 @@ function cycleMapSource(){
   autoSwitchedForSecurity=false;
   setMapSource(activeMapSourceIndex+1,"manual");
 }
+
+/* Pick the best source for where the map is now: first in list order that has its key and has
+   pixels here. Order is preference - regional aerial first, the global line guide last. */
+function selectBestMapSource(reason="coverage"){
+  const centre=mapViewCentre();
+  for(let i=0;i<mapSources.length;i++){
+    if(mapSourceReady(mapSources[i],centre)){
+      if(i!==activeMapSourceIndex)setMapSource(i,reason);
+      return;
+    }
+  }
+}
+
+/* Re-evaluate only when the ACTIVE source has stopped covering the view. That is precisely the
+   blank-map case, and it is the one worth overriding a manual choice for - a player who picked
+   a layer and then flew to another country is not asking to look at nothing. A manual choice
+   that still covers is left alone, which is why this tests the active source rather than
+   re-running the preference order on every pan. */
+try{
+  map.on("moveend",()=>{
+    if(!mapSourceCovers(mapSources[activeMapSourceIndex],mapViewCentre()))selectBestMapSource("coverage");
+  });
+}catch(e){}
 
 function autoSwitchMapSource(){
   if(mapSources.length<2) return false;
@@ -14307,7 +14393,10 @@ fetch("/api/auth-public-config",{cache:"no-store"})
   .then(config=>{
     if(!config||!config.linzBasemapsKey)return;
     window.gdLinzBasemapsKey=String(config.linzBasemapsKey);
-    if(!mapSourceReady(mapSources[activeMapSourceIndex])||activeMapSourceIndex!==0)setMapSource(0,"initial");
+    /* Re-pick rather than forcing index 0: the key arriving makes LINZ selectable, but only
+       where LINZ has pixels. Forcing 0 is what mounted an empty New Zealand layer over every
+       other country the moment a key was configured. */
+    selectBestMapSource("initial");
   })
   .catch(()=>{});
 
