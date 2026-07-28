@@ -295,11 +295,29 @@ function gdAdminCourseDbStatusTone(value,okValues){
 /* Visual engine lifecycle: live map (no engine record - GPS uses the live
    basemap, a valid state, not an error) -> working -> preview -> published.
    Red is reserved for an actual engine failure. */
+/* A course is 18 hole images in the database. So "published" is a fact about the DATABASE, and
+   the cloud build state answers it directly - it is not something to infer from what this
+   particular browser happens to have in its local store.
+
+   That inference is what put Jacks Point on "preview" while the database held 18 published
+   frames at version 5: a local scan in this browser had left a previewVisual behind, and no
+   cloud publish ever overwrites local artifacts, so the label described the browser rather
+   than the course. Any other machine would have said something different about the same course.
+
+   The local record is still consulted, but only BELOW the cloud answer and only for states the
+   cloud has no opinion on - a local sandbox bake that has not been published anywhere. */
 function gdAdminCourseDbVisualState(courseId){
+  const cloud=gdAdminCourseBuildState(courseId);
+  if(cloud){
+    if(cloud.framesReady)return {label:"published",tone:"ok"};
+    if(cloud.building)return {label:cloud.activeKind==="export"?"baking":"scanning",tone:"warn"};
+    if(cloud.state==="captures-ready")return {label:"captures only",tone:"warn"};
+    if(cloud.state==="failed")return {label:"build failed",tone:"bad"};
+  }
   const record=gdAdminCourseVisualRecord(courseId);
   if(!record)return {label:"live map",tone:""};
   if(record.publishedVisual)return {label:"published",tone:"ok"};
-  if(record.previewVisual||record.terrainView||record.singleHoleTerrainView)return {label:"preview",tone:"ok"};
+  if(record.previewVisual||record.terrainView||record.singleHoleTerrainView)return {label:"local preview",tone:"ok"};
   if(record.rawMaster||record.basicVisual)return {label:"working",tone:"warn"};
   if(record.lastError||record.status==="failed")return {label:"error",tone:"bad"};
   return {label:"live map",tone:""};
@@ -2128,15 +2146,26 @@ function gdAdminCourseVisualMarkup(selected){
     diagnostics:record&&record.diagnostics||{},
     versions:(record&&record.versions||[]).slice(-6)
   };
-  /* Lifecycle: geometry (course package in) -> build -> preview -> publish.
-     The engine's only input is the course geometry; captures/tiles are its
-     own internal machinery and stay out of the headline. */
-  const lifecycleStage=record&&record.publishedVisual?"publish":record&&(record.previewVisual||record.terrainView||record.singleHoleTerrainView)?"preview":record&&(record.rawMaster||record.basicVisual)?"build":"geometry";
-  const holeFrames=(record&&(Array.isArray(record.holeFramePublishedVisuals)&&record.holeFramePublishedVisuals.length?record.holeFramePublishedVisuals:record.holeFrameVisuals)||[]).length;
-  const lifecycle=`<div class="gdAdminCourseStageLine gdAdminCourseVisualLifecycle">${["geometry","build","preview","publish"].map(stage=>`<span class="${stage===lifecycleStage?"ready":""}">${gdEscapeHTML(stage)}</span>`).join("<b>→</b>")}${holeFrames?`<span class="ready">${gdEscapeHTML(holeFrames)}/${gdEscapeHTML(selected.holeCount||0)} hole frames</span>`:""}</div>`;
+  /* Lifecycle: geometry (course package in) -> scan -> bake -> published.
+     Read from the cloud build state, because that is where a course actually lives - the local
+     record only decides the stage for a course the server has never touched. Naming the stages
+     after the server jobs (scan, bake) rather than after browser artifacts (build, preview)
+     keeps the studio describing the same pipeline the app and the worker do. */
+  const cloudState=gdAdminCourseBuildState(selected.id);
+  const lifecycleStage=cloudState&&cloudState.framesReady?"published"
+    :cloudState&&cloudState.activeKind==="export"?"bake"
+    :cloudState&&(cloudState.building||cloudState.state==="captures-ready")?"scan"
+    :record&&record.publishedVisual?"published"
+    :record&&(record.previewVisual||record.terrainView||record.singleHoleTerrainView)?"bake"
+    :record&&(record.rawMaster||record.basicVisual)?"scan":"geometry";
+  /* Frame count follows the same rule: what the database serves, then what this browser baked. */
+  const cloudFrameIndex=gdAdminCourseCloudFrames(selected.id);
+  const holeFrames=(cloudState&&cloudState.framesReady&&cloudFrameIndex&&Array.isArray(cloudFrameIndex.holes)?cloudFrameIndex.holes.length:0)
+    ||(record&&(Array.isArray(record.holeFramePublishedVisuals)&&record.holeFramePublishedVisuals.length?record.holeFramePublishedVisuals:record.holeFrameVisuals)||[]).length;
+  const lifecycle=`<div class="gdAdminCourseStageLine gdAdminCourseVisualLifecycle">${["geometry","scan","bake","published"].map(stage=>`<span class="${stage===lifecycleStage?"ready":""}">${gdEscapeHTML(stage)}</span>`).join("<b>→</b>")}${holeFrames?`<span class="ready">${gdEscapeHTML(holeFrames)}/${gdEscapeHTML(selected.holeCount||0)} hole frames</span>`:""}${cloudState&&cloudState.framesReady?`<span class="ready">cloud v${gdEscapeHTML(cloudState.framesVersion||1)}</span>`:""}</div>`;
   return [
     `<div class="gdAdminCourseWorkspace">${lifecycle}<div class="gdAdminCourseStageLine">${[
-      `<span class="${record&&["preview-ready","published","basic-ready"].includes(record.status)?"ready":"warn"}">${gdEscapeHTML(record&&record.status||"unavailable")}</span>`,
+      `<span class="${cloudState&&cloudState.framesReady?"ready":record&&["preview-ready","published","basic-ready"].includes(record.status)?"ready":"warn"}">${gdEscapeHTML(cloudState&&cloudState.framesReady?"published":cloudState&&cloudState.building?cloudState.state:record&&record.status||"unavailable")}</span>`,
       `<span class="${autoBuildStatus==="ready"&&pipelineStatus==="ready"?"ready":"warn"}">${gdEscapeHTML(autoBuildStatus==="ready"?pipelineStatus:autoBuildStatus)}</span>`,
       `<span class="${selected.playReadyCount===selected.holeCount&&selected.holeCount?"ready":"warn"}">${gdEscapeHTML(selected.playReadyCount||0)}/${gdEscapeHTML(selected.holeCount||0)} geometry in</span>`
     ].join("")}</div>`,
