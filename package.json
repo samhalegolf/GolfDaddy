@@ -9,6 +9,7 @@
     "build:netlify": "node scripts/clarity-deploy-build.js",
     "test:payments": "node dev/payment-rollout-tests.js",
     "test:boot": "node dev/boot-smoke.test.js",
+    "test:practice-parser": "node dev/practice-parser-parity.test.js",
     "build:app": "node scripts/clarity-deploy-build.js --app-only",
     "native:sync": "npm run build:app && npx cap sync",
     "native:android": "npm run native:sync && npx cap open android",

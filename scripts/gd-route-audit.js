@@ -1824,7 +1824,10 @@
         raw:{headers:parsed.headers,warnings:parsed.warnings}
       });
       gdPracticeDebugCheckpoint("field_mapping","success",{outputSummary:"Native field aliases applied",counts:{headers:(parsed.headers||[]).length}});
-      const batch=api.createPracticeImportBatch(parsed.rows,{sourceType:parsed.sourceType||"csv",sourceName:"Practice Data paste",rawText:text});
+      // Forward the provenance the parse established - unit system, session
+      // date, provider - so the batch records what the numbers actually mean
+      // rather than being staged as bare figures.
+      const batch=api.createPracticeImportBatch(parsed.rows,{sourceType:parsed.sourceType||"csv",sourceName:"Practice Data paste",rawText:text,unitSystem:parsed.unitSystem,unitSource:parsed.unitSource,sessionDate:parsed.sessionDate,sessionDateSource:parsed.sessionDateSource,provider:parsed.provider});
       const valid=batch.rows.filter(row=>!row.errors?.length);
       const invalid=batch.rows.filter(row=>row.errors?.length);
       gdPracticeDebugCheckpoint("rows_parsed","success",{outputSummary:`${batch.rows.length} rows normalized`,counts:{rowsParsed:batch.rows.length}});

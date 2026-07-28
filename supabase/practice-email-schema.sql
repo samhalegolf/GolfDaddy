@@ -40,6 +40,12 @@ create table if not exists public.practice_import_batches (
   player_name text,
   source_type text not null,
   source_name text,
+  -- Provenance the observations engine cannot work without. unit_system is
+  -- nullable on purpose: "the source never declared one" is a real state, and
+  -- the import gate holds those batches rather than guessing metres vs yards.
+  provider text,
+  unit_system text check (unit_system is null or unit_system in ('metric', 'imperial')),
+  session_date date,
   row_count integer not null default 0,
   valid_count integer not null default 0,
   invalid_count integer not null default 0,
@@ -70,6 +76,11 @@ create table if not exists public.practice_native_shots (
   player_name text,
   club text,
   shot_number numeric,
+  -- When the ball was actually struck, where the provider reports it. Distinct
+  -- from created_at, which is when the import arrived. Zone-less on purpose:
+  -- monitors export wall-clock local time, and timestamptz would read that as
+  -- UTC and quietly move evening sessions to the next day.
+  hit_at timestamp,
   metrics_json jsonb not null default '{}'::jsonb,
   raw_source_json jsonb not null default '{}'::jsonb,
   unknown_fields_json jsonb not null default '{}'::jsonb,
@@ -102,11 +113,28 @@ add column if not exists deleted_by text;
 
 alter table public.practice_import_batches
 add column if not exists deleted_at timestamptz,
-add column if not exists deleted_by text;
+add column if not exists deleted_by text,
+add column if not exists provider text,
+add column if not exists unit_system text,
+add column if not exists session_date date;
+
+alter table public.practice_import_batches
+drop constraint if exists practice_import_batches_unit_system_check;
+
+alter table public.practice_import_batches
+add constraint practice_import_batches_unit_system_check
+check (unit_system is null or unit_system in ('metric', 'imperial'));
 
 alter table public.practice_native_shots
 add column if not exists deleted_at timestamptz,
-add column if not exists deleted_by text;
+add column if not exists deleted_by text,
+add column if not exists hit_at timestamp;
+
+create index if not exists practice_import_batches_session_date_idx
+on public.practice_import_batches (player_key, session_date desc);
+
+create index if not exists practice_native_shots_hit_at_idx
+on public.practice_native_shots (player_key, hit_at desc);
 
 alter table public.practice_email_intake_events
 drop constraint if exists practice_email_intake_events_status_check;

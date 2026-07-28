@@ -10,6 +10,8 @@ const {
   text
 } = require("./payment-utils");
 const {
+  batchGateStatus,
+  batchProvenanceGaps,
   createId,
   createPracticeImportBatch,
   parsePracticeImportText
@@ -532,11 +534,23 @@ function parseAttachmentRows(inbound) {
         errors.push((item.filename || "attachment") + " had no readable text");
         return;
       }
-      const parsed = parsePracticeImportText(content, { sourceType: item.lane, sourceName: item.filename || "practice email" });
+      /* The subject line is a provider hint, not a unit hint: it often names
+         the monitor ("TrackMan session export") but never reliably states a
+         unit, and a unit is the one thing we refuse to infer. */
+      const parsed = parsePracticeImportText(content, {
+        sourceType: item.lane,
+        sourceName: item.filename || "practice email",
+        providerHint: inbound.subject
+      });
       const batch = createPracticeImportBatch(parsed.rows || [], {
         sourceType: item.lane,
         sourceName: item.filename || "practice email",
-        rawText: content
+        rawText: content,
+        unitSystem: parsed.unitSystem,
+        unitSource: parsed.unitSource,
+        sessionDate: parsed.sessionDate,
+        sessionDateSource: parsed.sessionDateSource,
+        provider: parsed.provider
       }, {
         accountId: inbound.accountId,
         profileId: inbound.profileId || inbound.playerKey,
@@ -564,9 +578,11 @@ function parseAttachmentRows(inbound) {
 }
 
 function eventStatus(parsed) {
-  const validRows = parsed.imports.reduce(function (sum, item) { return sum + Number(item.batch.batch.validCount || 0); }, 0);
+  const stagedBatches = parsed.imports.filter(function (item) {
+    return batchGateStatus(item.batch.batch) === "staged";
+  }).length;
   const totalRows = parsed.imports.reduce(function (sum, item) { return sum + Number(item.batch.batch.rowCount || 0); }, 0);
-  if (validRows) return "staged";
+  if (stagedBatches) return "staged";
   if (totalRows || parsed.errors.length) return "needs_review";
   if (parsed.pendingPhotos.length) return "pending_photo";
   return "unsupported";
@@ -690,15 +706,25 @@ async function storeInbound(inbound, parsed) {
         player_name: session.playerName || inbound.playerName,
         source_type: batch.sourceType,
         source_name: batch.sourceName,
+        provider: batch.provider || null,
+        unit_system: batch.unitSystem,
+        session_date: batch.sessionDate,
         row_count: batch.rowCount,
         valid_count: batch.validCount,
         invalid_count: batch.invalidCount,
-        status: batch.validCount ? "staged" : "needs_review",
+        status: batchGateStatus(batch),
         metadata: {
           subject: inbound.subject,
           from: inbound.from,
           warnings: item.parsed.warnings || [],
-          parseErrors: item.parsed.errors || []
+          parseErrors: item.parsed.errors || [],
+          unitSource: batch.unitSource || null,
+          unitHints: item.parsed.unitHints || {},
+          sessionDateSource: batch.sessionDateSource || null,
+          /* What the source never told us. Recorded so the metric layer can
+             skip what it cannot compute and the report can say so - it does
+             not affect the status above. */
+          provenanceGaps: batchProvenanceGaps(batch)
         },
         created_at: batch.createdAt,
         updated_at: batch.updatedAt
@@ -718,6 +744,7 @@ async function storeInbound(inbound, parsed) {
         player_name: row.playerName || inbound.playerName,
         club: row.club || null,
         shot_number: Number.isFinite(Number(row.shotNumber)) ? Number(row.shotNumber) : null,
+        hit_at: row.hitAt || null,
         metrics_json: {
           ballSpeed: row.ballSpeed,
           clubSpeed: row.clubSpeed,
@@ -862,6 +889,11 @@ exports.handler = async function (event) {
           rowCount: item.batch.batch.rowCount,
           validCount: item.batch.batch.validCount,
           invalidCount: item.batch.batch.invalidCount,
+          provider: item.batch.batch.provider || null,
+          unitSystem: item.batch.batch.unitSystem,
+          sessionDate: item.batch.batch.sessionDate,
+          status: batchGateStatus(item.batch.batch),
+          provenanceGaps: batchProvenanceGaps(item.batch.batch),
           warnings: item.parsed.warnings || [],
           errors: item.parsed.errors || []
         };
