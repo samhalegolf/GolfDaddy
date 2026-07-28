@@ -219,6 +219,97 @@ test("attribution reads back the licensor per survey where the licence demands i
   assert.ok(perSurvey.text.includes("licensed by Auckland Council"), "CC BY names the licensor, which varies per survey");
 });
 
+/* Per-spec licences. The point is not tidiness - it is that an entry blocked on imagery can
+   still ship elevation, because plays-like is arithmetic over a DEM and does not care whether
+   a pixel was ever stored. */
+test("a ShareAlike imagery source does not infect a CC BY elevation source", () => {
+  const split = [{
+    key: "split-licence", label: "Copyleft imagery, open elevation",
+    region: { bbox: { south: -90, west: -180, north: 90, east: 180 } },
+    license: { name: "CC BY-SA", storage: true, derivatives: true, redistribution: true, shareAlike: true },
+    imagery: { adapter: "xyz", urlTemplate: "https://example.test/{z}/{x}/{y}.jpg" },
+    dem: {
+      adapter: "arcgis-export", endpoint: "https://example.test/dem/exportImage", apiKeyEnv: "",
+      license: { name: "CC BY 4.0", storage: true, derivatives: true, redistribution: true }
+    },
+    attribution: {}
+  }];
+  assert.strictEqual(mod.resolveImagerySource(PUPUKE_NZ, { sources: split, env: {} }), null,
+    "the imagery is still refused - the split does not launder ShareAlike");
+
+  const elevation = mod.resolveElevationSource(PUPUKE_NZ, { sources: split, env: {} });
+  assert.ok(elevation, "and the elevation, on its own licence, is still available");
+  assert.strictEqual(elevation.license.name, "CC BY 4.0", "reported under ITS licence, not the imagery's");
+});
+
+test("an unlicensed DEM is dropped without taking licensed imagery down", () => {
+  const badDem = [{
+    key: "bad-dem", label: "Open imagery, display-only elevation",
+    region: { bbox: { south: -90, west: -180, north: 90, east: 180 } },
+    license: { name: "CC BY 4.0", storage: true, derivatives: true, redistribution: true },
+    imagery: { adapter: "xyz", urlTemplate: "https://example.test/{z}/{x}/{y}.jpg" },
+    dem: {
+      adapter: "xyz", urlTemplate: "https://example.test/dem/{z}/{x}/{y}.png",
+      license: { name: "Display only", storage: false, derivatives: false, redistribution: false }
+    },
+    attribution: {}
+  }];
+  const source = mod.resolveImagerySource(PUPUKE_NZ, { sources: badDem, env: {} });
+  assert.ok(source, "the course still scans");
+  assert.strictEqual(source.dem, null, "and simply ships no elevation grid");
+  assert.strictEqual(mod.resolveElevationSource(PUPUKE_NZ, { sources: badDem, env: {} }), null);
+});
+
+/* NSW: the source that is only safe one named layer at a time. Without the pin the service
+   returns its mixed mosaic, so absence of a layer must be refusal, not a default. */
+test("a layer-pinned source is refused when the layer is not named", () => {
+  const nsw = mod.IMAGERY_SOURCES.find(entry => entry.key === "nsw-au");
+  assert.ok(nsw, "NSW is in the table as research");
+  assert.strictEqual(nsw.draft, true);
+  assert.strictEqual(nsw.imagery.layerRequired, true);
+  assert.ok(!("defaultLayer" in nsw.imagery), "a default layer here would be the unsafe blend");
+
+  const pinned = [Object.assign({}, nsw, { draft: false })];
+  const SYDNEY_AU = { south: -33.92, west: 151.20, north: -33.90, east: 151.23 };
+  assert.strictEqual(mod.resolveImagerySource(SYDNEY_AU, { sources: pinned, env: {} }), null,
+    "no pin means no source - never the mosaic");
+  assert.match(mod.unscannableReason(SYDNEY_AU, { sources: pinned, env: {} }), /NSW_IMAGERY_LAYER/,
+    "the status endpoint must name what is missing, as it does for a key");
+
+  const withLayer = mod.resolveImagerySource(SYDNEY_AU, { sources: pinned, env: { NSW_IMAGERY_LAYER: "3" } });
+  assert.ok(withLayer, "a pinned series resolves");
+  assert.strictEqual(withLayer.imagery.layer, "3");
+});
+
+test("the MapServer adapter pins the layer and never draws the stack", () => {
+  const spec = {
+    adapter: "arcgis-map-export", endpoint: "https://example.test/MapServer/export",
+    layer: "3", layerEnv: "NSW_IMAGERY_LAYER"
+  };
+  const url = new URL(mod.exportImageUrl(spec, { left: 0, top: 0, width: 512, height: 512 }, 18));
+  assert.strictEqual(url.searchParams.get("layers"), "show:3", "drawing every layer would store the blend");
+  assert.strictEqual(url.searchParams.get("interpolation"), null, "MapServer export takes no interpolation hint");
+  assert.strictEqual(url.searchParams.get("bboxSR"), "3857", "same geometry as the ImageServer adapter");
+
+  /* Refusing to build the URL is the last line of defence if the pin is ever lost downstream. */
+  assert.throws(() => mod.exportImageUrl(Object.assign({}, spec, { layer: "" }), { left: 0, top: 0, width: 512, height: 512 }, 18),
+    /requires a pinned layer/);
+});
+
+test("per-survey credit belongs to the source, not to whoever was first", () => {
+  /* This was LINZ's sentence hardcoded in attributionFor. A second perSurvey source would have
+     been credited to the LINZ Data Service - a false statement about who licensed the imagery. */
+  const nsw = mod.IMAGERY_SOURCES.find(entry => entry.key === "nsw-au");
+  const credit = mod.attributionFor({ key: "nsw-au", attribution: nsw.attribution, license: nsw.license },
+    { licensor: "AAM" });
+  assert.ok(!/LINZ/.test(credit.text), "NSW imagery is not sourced from the LINZ Data Service");
+  assert.ok(credit.text.includes("AAM"), "the capturing licensor is still named");
+
+  /* A perSurvey source with no wording of its own falls back rather than borrowing. */
+  const bare = mod.attributionFor({ key: "bare", attribution: { text: "© Someone", perSurvey: true } }, { licensor: "X" });
+  assert.strictEqual(bare.text, "© Someone");
+});
+
 test("an export block asks for the exact ground its pixels cover", () => {
   const zoom = 17;
   const spec = { endpoint: "https://example.test/ImageServer/exportImage", adapter: "arcgis-export" };
