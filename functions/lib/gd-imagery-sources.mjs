@@ -13,6 +13,13 @@
    bounds means no scan - that course runs live-only, indefinitely, which is a correct outcome
    and not a failure.
 
+   Two further gates, both of which refuse independently of the three rights above:
+     SHARE_ALIKE_ACCEPTED - a ShareAlike licence grants all three rights and then demands the
+                            same terms back on what we make, so it is a decision about our own
+                            course packages rather than about their imagery. One flag, off.
+     draft: true          - the entry's endpoints have not been checked against the provider's
+                            published form. Kept in the table as research, refused as a source.
+
    Adapters:
      xyz            - slippy tiles, the existing fetch path
      arcgis-export  - ArcGIS ImageServer exportImage: one request per image block instead of
@@ -32,10 +39,56 @@
 
 /* ---------- license predicate ------------------------------------------------------------ */
 
-/* All three must be true for a source to be scannable. "Credited = allowed" is NOT the rule;
-   attribution is a condition some licenses attach, never a right it grants. */
+/* ShareAlike is the case the three booleans below cannot express, and it is not a rare one -
+   most open government imagery outside NZ and the US carries it.
+
+   CC BY-SA grants storage AND derivatives AND redistribution, so a ShareAlike source walks
+   straight through a storage/derivatives/redistribution check with nothing to catch it. What
+   it also does is require that what you make from it be licensed on the same terms - and what
+   this pipeline makes is a baked course package shipped inside the app. So accepting ShareAlike
+   is a decision about how OUR output is licensed, not about whether we may read theirs.
+
+   That is a product call rather than a licensing fact, so it is one module-level flag rather
+   than a per-entry one: flipping it is a single visible, reviewable act that enables every
+   ShareAlike source at once, which is exactly what the decision actually means. Leaving it
+   false costs only the courses those sources cover, which run live-only - a correct outcome. */
+export const SHARE_ALIKE_ACCEPTED = false;
+
+/* All three must be true for a source to be scannable, and ShareAlike must be accepted where
+   the licence attaches it. "Credited = allowed" is NOT the rule; attribution is a condition
+   some licenses attach, never a right it grants. */
 function grantsStorageRights(license) {
-  return !!(license && license.storage === true && license.derivatives === true && license.redistribution === true);
+  if (!license) return false;
+  if (license.shareAlike === true && !SHARE_ALIKE_ACCEPTED) return false;
+  return !!(license.storage === true && license.derivatives === true && license.redistribution === true);
+}
+
+/* An entry whose endpoints have not been confirmed against the provider's own published form.
+
+   LINZ and NAIP were each checked against the provider's documentation before they were
+   trusted, and a draft entry is one that has not had that done to it yet. It sits in the table
+   because the research is worth keeping where the next person will find it, and it is refused
+   like any other unusable source until someone verifies it and deletes the flag.
+
+   This is a second gate rather than a comment because a wrong endpoint does not fail loudly:
+   it fails as a whole course of missing tiles, hours into a scan. It is also independent of
+   the licence gate - clearing SHARE_ALIKE_ACCEPTED must not silently promote an entry whose
+   URLs nobody has ever opened. */
+function isDraft(entry) {
+  return !!(entry && entry.draft === true);
+}
+
+/* Imagery and elevation are not always the same provider on the same terms, and pretending
+   otherwise costs real coverage. Australia is the case that forced this: Queensland's imagery
+   is ShareAlike, but the national elevation from Geoscience Australia is plain CC BY 4.0 - so
+   one licence per entry would refuse the elevation for no reason other than the company the
+   imagery keeps.
+
+   So each spec may carry its own `license` and falls back to the entry's when it does not.
+   The two are then gated separately: imagery that fails takes the entry down, elevation that
+   fails simply does not ship, exactly as an unconfigured DEM already behaves. */
+function licenseFor(entry, spec) {
+  return (spec && spec.license) || (entry && entry.license) || null;
 }
 
 /* ---------- registry --------------------------------------------------------------------- */
@@ -108,7 +161,8 @@ export const IMAGERY_SOURCES = [
       shortText: "© LINZ CC BY 4.0 © Imagery Basemap contributors",
       /* Per-survey licensor, resolved at capture time where available, so the rendered credit
          reads "...licensed by <licensor> for re-use under CC BY 4.0". */
-      perSurvey: true
+      perSurvey: true,
+      perSurveyText: "Sourced from the LINZ Data Service and licensed by {licensor} for re-use under CC BY 4.0"
     }
   },
   {
@@ -154,6 +208,212 @@ export const IMAGERY_SOURCES = [
       url: "https://www.usgs.gov/the-national-map-data-delivery",
       perSurvey: false
     }
+  },
+  {
+    key: "qld-au",
+    label: "Queensland imagery: latest state program",
+    /* DRAFT - refused by isDraft, and refused again by the ShareAlike gate. Do not clear
+       either flag without doing the work listed at the bottom of this entry.
+
+       Australia has no NAIP and no LINZ. The only national mosaics are Sentinel-2 derived at
+       10m, which at the z19-20 this pipeline captures at is the same visible smear the LINZ
+       note warns about, so "AU" is not one entry - it is one entry per state, each with its
+       own bbox, its own provider and its own licence. Queensland is first because its
+       provenance is the cleanest of the states: a single state capture program rather than a
+       mosaic of contributed third-party surveys.
+
+       NSW was the obvious first choice on course count and was rejected. Its public imagery
+       service is a mixed mosaic - LANDSAT, 50cm standard ortho, 10cm town imagery, plus
+       captures by AAM, VEKTA and Jacobs - and its own metadata declines to give a blanket
+       grant, saying each image series may carry different copyright permissions and the user
+       should check the constraints on each. That is precisely the blanket grant
+       grantsStorageRights exists to demand, so NSW cannot be added as a table row at all; it
+       needs either written confirmation from Spatial Services or a single named ortho series
+       pinned the way LINZ_BASEMAPS_LAYER can pin a survey. */
+    draft: true,
+    region: {
+      /* Mainland Queensland only. Excludes the Torres Strait islands and the Coral Sea
+         territories, on the same reasoning that excludes the Chathams from the LINZ entry:
+         they are separate captures and this bbox is not the place to discover that. */
+      bbox: { south: -29.2, west: 138.0, north: -10.7, east: 153.6 },
+      country: "AU"
+    },
+    license: {
+      name: "CC BY-SA",
+      url: "https://www.data.qld.gov.au/dataset/queensland-imagery-latest-state-program-public-basemap-service",
+      storage: true, derivatives: true, redistribution: true, commercial: true,
+      attributionRequired: true,
+      /* The whole reason this entry is here. Queensland releases state program imagery openly
+         once it is three years or older, but under ShareAlike rather than plain CC BY - so
+         every stored frame derived from it is arguably an adaptation that must itself be
+         licensed CC BY-SA. See SHARE_ALIKE_ACCEPTED. */
+      shareAlike: true
+    },
+    imagery: {
+      /* ImageServer, so the arcgis-export adapter built for NAIP applies unchanged - no new
+         adapter, no new geometry. (NSW, by contrast, publishes MapServer, whose export
+         operation is spelled differently and would need an adapter variant.) */
+      adapter: "arcgis-export",
+      endpoint: "https://spatial-img.information.qld.gov.au/arcgis/rest/services/Basemaps/LatestStateProgram_AllUsers/ImageServer/exportImage",
+      /* The _AllUsers service is the openly licensed one. There is an SISP-restricted sibling
+         carrying newer imagery under subscription terms that grant none of this - do not
+         substitute it because it looks like the same service with fresher pixels. */
+      apiKeyEnv: "",
+      /* PLACEHOLDER. Conservative until read off the service's own reported pixel size; the
+         state program mixes resolutions by region and this must not be guessed upward. */
+      maxUsefulZoom: 19,
+      minTrustedZoom: 12,
+      blockPx: 2048
+    },
+    /* Geoscience Australia's national elevation rather than Queensland's own, and carrying its
+       OWN licence: ELVIS is plain CC BY 4.0 with no ShareAlike, so the elevation here is not
+       infected by the imagery's copyleft and is gated separately. This is the entire point of
+       per-spec licences - a state blocked on imagery can still ship plays-like. */
+    dem: {
+      adapter: "arcgis-export",
+      endpoint: "https://services.ga.gov.au/gis/rest/services/DEM_LiDAR_5m/ImageServer/exportImage",
+      apiKeyEnv: "",
+      format: "tiff",
+      encoding: "float32",
+      license: {
+        name: "CC BY 4.0",
+        url: "https://www.ga.gov.au/scientific-topics/national-location-information/digital-elevation-data",
+        storage: true, derivatives: true, redistribution: true, commercial: true,
+        attributionRequired: true
+      },
+      /* PLACEHOLDER - ELVIS publishes 1m, 2m and 5m tiers and which one backs this service by
+         region is exactly the sort of thing that must be read, not assumed. */
+      nativeResolutionM: 5,
+      fallbackResolutionM: 30,
+      maxUsefulZoom: 15,
+      blockPx: 2048
+    },
+    /* Credited to GA, not to Queensland - a different licensor under a different licence. */
+    demAttribution: {
+      text: "Elevation © Commonwealth of Australia (Geoscience Australia), CC BY 4.0",
+      url: "https://www.ga.gov.au/scientific-topics/national-location-information/digital-elevation-data",
+      perSurvey: false
+    },
+    attribution: {
+      /* Wording is a placeholder: the Queensland department that owns this has been renamed
+         more than once, and CC BY-SA requires the licensor be named correctly. */
+      text: "© State of Queensland, licensed under CC BY-SA",
+      url: "https://www.data.qld.gov.au/dataset/queensland-imagery-latest-state-program-public-basemap-service",
+      shortText: "© State of Queensland CC BY-SA",
+      perSurvey: false
+    }
+    /* To take this out of draft:
+         1. Decide SHARE_ALIKE_ACCEPTED. If ShareAlike on baked course packages is not
+            acceptable, delete this entry - no amount of endpoint checking rescues it, and
+            the next candidates are the plain-CC-BY states (TAS, SA, WA are believed to be,
+            and are themselves unverified).
+         2. Open both ImageServer endpoints and confirm: they answer anonymously, exportImage
+            is a supported operation, and the extent really covers the bbox above.
+         3. Replace both PLACEHOLDER zoom/resolution values with the services' reported pixel
+            sizes, the way NAIP's z17 ceiling comes from its 0.6m ground sample.
+         4. Confirm the current legal name of the Queensland department for the credit line.
+         5. Delete `draft: true`. */
+  },
+  {
+    key: "nsw-au",
+    label: "NSW Imagery (pinned ortho series)",
+    /* DRAFT, and structurally different from every other entry: NSW is the source that cannot
+       be trusted as a whole, only one named layer at a time.
+
+       The public NSW_Imagery service is a mixed mosaic - LANDSAT satellite, 50cm standard
+       ortho, 10cm town imagery, and captures by AAM, VEKTA and Jacobs - and its own metadata
+       explicitly declines to give a blanket grant, stating each image series may carry
+       different copyright permissions and that the user should check the constraints on each.
+       A blanket grant is exactly what grantsStorageRights demands, so the service AS PUBLISHED
+       is not addable.
+
+       What is addable is one series at a time. `layerRequired` makes the pin mandatory: with
+       no NSW_IMAGERY_LAYER set, resolveSpec returns null and this entry is as dead as an
+       unlicensed one - the mixed mosaic is never the fallback, because there is no fallback.
+       That is the same shape as LINZ_BASEMAPS_LAYER pinning a survey, but enforced rather than
+       merely available, because here the unpinned default is the unsafe one.
+
+       Read the licence block below as a claim about A CORRECTLY PINNED SERIES, not about the
+       service. It is only true once someone has confirmed the specific series is Spatial
+       Services' own CC BY ortho rather than a contributed capture - which is step 1 below, and
+       why this is still draft. */
+    draft: true,
+    region: {
+      /* Mainland NSW. Excludes Lord Howe Island, on the same reasoning as the Chathams and the
+         Torres Strait. NOTE: the ACT is an enclave fully inside this bbox and is a separate
+         jurisdiction with its own imagery - a Canberra course would match here and find no
+         NSW coverage. Confirm before this leaves draft. */
+      bbox: { south: -37.51, west: 141.0, north: -28.16, east: 153.65 },
+      country: "AU"
+    },
+    license: {
+      /* Service metadata cites CC BY 3.0; Spatial Services' general published-material
+         statement is CC BY 4.0. Both grant all three rights. Which applies is per series. */
+      name: "CC BY (per pinned series)",
+      url: "https://www.spatial.nsw.gov.au/products_and_services/web_services",
+      storage: true, derivatives: true, redistribution: true, commercial: true,
+      attributionRequired: true
+    },
+    imagery: {
+      /* MapServer, not ImageServer - hence the adapter added for this entry. */
+      adapter: "arcgis-map-export",
+      endpoint: "https://maps.six.nsw.gov.au/arcgis/rest/services/public/NSW_Imagery/MapServer/export",
+      apiKeyEnv: "",
+      /* No defaultLayer, deliberately. A default here would be the blend. */
+      layerEnv: "NSW_IMAGERY_LAYER",
+      layerRequired: true,
+      /* PLACEHOLDER. 10cm town imagery would justify z20 and 50cm rural would not, so this
+         cannot be set until the pinned series is known - it is per series, not per service. */
+      maxUsefulZoom: 19,
+      minTrustedZoom: 12,
+      blockPx: 2048
+    },
+    /* Same national CC BY 4.0 elevation as Queensland, under its own licence. NSW imagery may
+       stay blocked indefinitely on the per-series question while elevation is never in doubt. */
+    dem: {
+      adapter: "arcgis-export",
+      endpoint: "https://services.ga.gov.au/gis/rest/services/DEM_LiDAR_5m/ImageServer/exportImage",
+      apiKeyEnv: "",
+      format: "tiff",
+      encoding: "float32",
+      license: {
+        name: "CC BY 4.0",
+        url: "https://www.ga.gov.au/scientific-topics/national-location-information/digital-elevation-data",
+        storage: true, derivatives: true, redistribution: true, commercial: true,
+        attributionRequired: true
+      },
+      nativeResolutionM: 5,
+      fallbackResolutionM: 30,
+      maxUsefulZoom: 15,
+      blockPx: 2048
+    },
+    attribution: {
+      /* Per series, like LINZ: CC BY names the licensor and the licensor is whoever captured
+         the pinned survey, which is the whole reason the series must be named. */
+      text: "© State of New South Wales (Spatial Services, DCS)",
+      url: "https://www.spatial.nsw.gov.au/products_and_services/web_services",
+      shortText: "© Spatial Services NSW CC BY",
+      perSurvey: true,
+      perSurveyText: "© State of New South Wales (Spatial Services, DCS), imagery captured by {licensor}, licensed CC BY"
+    },
+    demAttribution: {
+      text: "Elevation © Commonwealth of Australia (Geoscience Australia), CC BY 4.0",
+      url: "https://www.ga.gov.au/scientific-topics/national-location-information/digital-elevation-data",
+      perSurvey: false
+    }
+    /* To take this out of draft:
+         1. Identify one Spatial Services ortho series that is theirs, openly licensed, and
+            covers courses worth having - then confirm in writing, via the Customer Hub, that
+            storing and redistributing derivatives of THAT series is granted. The per-image
+            disclaimer means nothing else counts as confirmation.
+         2. Record its layer id and set NSW_IMAGERY_LAYER. Verify `export` returns only that
+            layer and that `layers=show:<id>` is honoured - a MapServer that ignores the pin
+            and draws the stack would silently store the blend.
+         3. Set maxUsefulZoom from that series' ground sample, not the service's best.
+         4. Resolve the ACT enclave - either confirm coverage or carve it out of the bbox.
+         5. Confirm whether attributionFor needs a NSW-specific per-survey string; today its
+            perSurvey branch is hardcoded to LINZ wording.
+         6. Delete `draft: true`. */
   }
 ];
 
@@ -180,17 +440,34 @@ function env(name, envs) {
 
 /* Fill {layer} and {key} from the environment. Returns null when a required key is absent -
    an unconfigured source is deliberately as unusable as an unlicensed one. */
-function resolveSpec(spec, envs, { required }) {
+function resolveSpec(spec, envs) {
   if (!spec) return null;
   const out = Object.assign({}, spec);
   const key = out.apiKeyEnv ? env(out.apiKeyEnv, envs) : "";
-  if (out.apiKeyEnv && !key) return required ? null : null;
+  if (out.apiKeyEnv && !key) return null;
   out.apiKey = key;
+  const layer = (out.layerEnv && env(out.layerEnv, envs)) || out.defaultLayer || "";
+  /* layerRequired is for a source whose default view is a blend we may not store. Without a
+     named layer there is no safe thing to fall back TO, so absence is refusal rather than a
+     default - see the NSW entry, where the unnamed view is the mixed mosaic. */
+  if (out.layerRequired && !layer) return null;
+  out.layer = layer;
   if (out.urlTemplate) {
-    const layer = (out.layerEnv && env(out.layerEnv, envs)) || out.defaultLayer || "";
     out.urlTemplate = out.urlTemplate.replace(/\{ *layer *\}/g, layer).replace(/\{ *key *\}/g, key);
   }
   return out;
+}
+
+/* Every environment variable an entry needs before it can be used, for the status endpoint to
+   name. A required layer is as load-bearing as a key and is reported the same way. */
+function missingConfig(spec, envs) {
+  if (!spec) return [];
+  const names = [];
+  if (spec.apiKeyEnv && !env(spec.apiKeyEnv, envs)) names.push(spec.apiKeyEnv);
+  if (spec.layerRequired && !((spec.layerEnv && env(spec.layerEnv, envs)) || spec.defaultLayer)) {
+    names.push(spec.layerEnv || "layer");
+  }
+  return names;
 }
 
 /* Resolve an entry's endpoints, or null when it cannot be used right now - which in practice
@@ -199,10 +476,18 @@ function resolveSpec(spec, envs, { required }) {
    ships no elevation grid and no computed relief. */
 export function resolveEndpoints(entry, envs) {
   if (!entry || !entry.imagery) return null;
-  const imagery = resolveSpec(entry.imagery, envs, { required: true });
+  if (!grantsStorageRights(licenseFor(entry, entry.imagery))) return null;
+  const imagery = resolveSpec(entry.imagery, envs);
   if (!imagery) return null;
-  const dem = resolveSpec(entry.dem, envs, { required: false });
-  return { key: entry.key, label: entry.label, license: entry.license, attribution: entry.attribution, imagery, dem };
+  /* The DEM is gated on its own licence and dropped on its own, never taking imagery with it. */
+  const demLicensed = entry.dem && grantsStorageRights(licenseFor(entry, entry.dem));
+  const dem = demLicensed ? resolveSpec(entry.dem, envs) : null;
+  return {
+    key: entry.key, label: entry.label,
+    license: licenseFor(entry, entry.imagery),
+    demLicense: dem ? licenseFor(entry, entry.dem) : null,
+    attribution: entry.attribution, imagery, dem
+  };
 }
 
 /* The gate. Returns a usable, licensed source for these course bounds, or null.
@@ -210,10 +495,34 @@ export function resolveEndpoints(entry, envs) {
 export function resolveImagerySource(bounds, options = {}) {
   const table = Array.isArray(options.sources) ? options.sources : IMAGERY_SOURCES;
   for (const entry of table) {
-    if (!grantsStorageRights(entry && entry.license)) continue;
+    if (isDraft(entry)) continue;
+    if (!grantsStorageRights(licenseFor(entry, entry && entry.imagery))) continue;
     if (!regionCovers(entry.region, bounds)) continue;
     const resolved = resolveEndpoints(entry, options.env);
     if (resolved) return resolved;
+  }
+  return null;
+}
+
+/* Elevation, asked for on its own.
+
+   Plays-like distance is elevation arithmetic - it needs a DEM and does not care whether a
+   single pixel of imagery was ever stored. Tying the two together meant a course whose imagery
+   is unlicensed got no elevation either, which is a licensing answer applied to a question
+   nobody asked. This resolves a DEM for bounds independently: same containment, same draft
+   gate, same rights test, run against the dem spec's own licence.
+
+   NOTE: nothing consumes this yet. The snapshot worker still enters through
+   resolveImagerySource, so wiring elevation-only packages into the course build is follow-up
+   work - this is the mechanism, not the feature. */
+export function resolveElevationSource(bounds, options = {}) {
+  const table = Array.isArray(options.sources) ? options.sources : IMAGERY_SOURCES;
+  for (const entry of table) {
+    if (isDraft(entry) || !entry.dem) continue;
+    if (!grantsStorageRights(licenseFor(entry, entry.dem))) continue;
+    if (!regionCovers(entry.region, bounds)) continue;
+    const dem = resolveSpec(entry.dem, options.env);
+    if (dem) return { key: entry.key, label: entry.label, license: licenseFor(entry, entry.dem), attribution: entry.demAttribution || entry.attribution, dem };
   }
   return null;
 }
@@ -226,9 +535,19 @@ export function unscannableReason(bounds, options = {}) {
   if (!validBounds(bounds)) return "course bounds are unusable";
   const covering = table.filter(entry => regionCovers(entry.region, bounds));
   if (!covering.length) return "no licensed imagery source covers this course";
-  const licensed = covering.filter(entry => grantsStorageRights(entry.license));
-  if (!licensed.length) return "imagery covering this course is display-only and may not be stored";
-  const missing = licensed.map(entry => entry.imagery && entry.imagery.apiKeyEnv).filter(Boolean);
+  const ready = covering.filter(entry => !isDraft(entry));
+  if (!ready.length) return "imagery covering this course is a draft entry with unverified endpoints";
+  const licensed = ready.filter(entry => grantsStorageRights(licenseFor(entry, entry.imagery)));
+  if (!licensed.length) {
+    /* "We may not store this at all" and "we may, but only by licensing our own course
+       packages on the same terms" are different answers, and the second one is a decision
+       somebody can still go and make. Reporting both as display-only would hide that. */
+    if (ready.every(entry => (licenseFor(entry, entry.imagery) || {}).shareAlike === true)) {
+      return "imagery covering this course is ShareAlike and storing it would license our course packages on the same terms";
+    }
+    return "imagery covering this course is display-only and may not be stored";
+  }
+  const missing = licensed.reduce((names, entry) => names.concat(missingConfig(entry.imagery, options.env)), []);
   return missing.length ? "imagery source is not configured (" + missing.join(", ") + ")" : "imagery source is unavailable";
 }
 
@@ -237,8 +556,14 @@ export function unscannableReason(bounds, options = {}) {
 export function attributionFor(source, survey) {
   const base = source && source.attribution || {};
   const licensor = survey && (survey.licensor || survey.attribution) || "";
-  const text = base.perSurvey && licensor
-    ? "Sourced from the LINZ Data Service and licensed by " + licensor + " for re-use under CC BY 4.0"
+  /* The per-survey wording belongs to the source, not to this function. It used to be LINZ's
+     sentence hardcoded here, which was harmless while LINZ was the only perSurvey entry and
+     became a false credit the moment a second one existed - a NSW capture would have been
+     announced as "Sourced from the LINZ Data Service". A perSurvey source with no wording of
+     its own falls back to its generic statement rather than borrowing someone else's. */
+  const template = String(base.perSurveyText || "");
+  const text = base.perSurvey && licensor && template
+    ? template.replace(/\{ *licensor *\}/g, licensor)
     : String(base.text || "");
   return { text, url: String(base.url || ""), sourceKey: source && source.key || "", license: source && source.license && source.license.name || "" };
 }
@@ -254,11 +579,18 @@ export function pixelToMercator(px, py, zoom) {
   return { x: px * mpp - MERCATOR_HALF_M, y: MERCATOR_HALF_M - py * mpp };
 }
 
-/* One exportImage URL for a pixel-space block. Requested in 3857 at exactly the block's pixel
-   size, so the returned image drops onto the capture canvas at (left, top) with no resampling. */
+/* One export URL for a pixel-space block. Requested in 3857 at exactly the block's pixel size,
+   so the returned image drops onto the capture canvas at (left, top) with no resampling.
+
+   Two ArcGIS server types, one geometry. ImageServer exposes exportImage over a single raster
+   dataset; MapServer exposes export over a stack of layers, takes no interpolation hint, and
+   defaults to drawing EVERY layer in the stack. For a source whose stack blends imagery we may
+   not store, drawing everything is precisely the wrong default, so arcgis-map-export always
+   pins `layers=show:<id>` and refuses to build a URL without one. */
 export function exportImageUrl(spec, rect, zoom) {
   const nw = pixelToMercator(rect.left, rect.top, zoom);
   const se = pixelToMercator(rect.left + rect.width, rect.top + rect.height, zoom);
+  const mapExport = spec && spec.adapter === "arcgis-map-export";
   const params = new URLSearchParams({
     bbox: [nw.x, se.y, se.x, nw.y].join(","),
     bboxSR: "3857",
@@ -267,9 +599,16 @@ export function exportImageUrl(spec, rect, zoom) {
     /* Elevation is requested as tiff so it arrives as measurements rather than as a picture of
        measurements; imagery stays jpg. */
     format: String(spec && spec.format || "jpg"),
-    interpolation: "RSP_BilinearInterpolation",
     f: "image"
   });
+  if (mapExport) {
+    const layer = String(spec.layer || "");
+    if (!layer) throw new Error("arcgis-map-export requires a pinned layer: " + (spec.layerEnv || "layer") + " is not set");
+    params.set("layers", "show:" + layer);
+    params.set("transparent", "false");
+  } else {
+    params.set("interpolation", "RSP_BilinearInterpolation");
+  }
   if (spec && spec.apiKey) params.set("token", spec.apiKey);
   return String(spec.endpoint) + "?" + params.toString();
 }
