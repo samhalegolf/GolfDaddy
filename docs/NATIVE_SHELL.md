@@ -65,13 +65,50 @@ Release configuration compiles, and the app installs and launches in the
 Simulator (auth gate renders, safe areas correct). It has still never run on a
 physical device.
 
-**iOS cannot be packaged for distribution here.** There are zero code-signing
-identities and zero provisioning profiles on this machine, so no archive can be
-signed. That needs an Apple Developer account signed into Xcode.
+**iOS signs and archives.** Superseded 2026-07-28: an Apple Developer account is
+signed into Xcode, `DEVELOPMENT_TEAM` is `9JL7847XQL` in both configs, and
+`xcodebuild archive` produces a signed archive — verified at 1.0.0 build 507,
+arm64, privacy manifest present, 3 dSYMs.
 
-**Nothing has run on real hardware.** The iOS app runs in the Simulator and the
-Android APK builds, but neither has been installed on a physical phone.
-Real-course GPS testing is still the gate before any public submission.
+Two things blocked it, and neither reported itself honestly.
+
+The project-level Release config pinned `CODE_SIGN_IDENTITY` to
+`"iPhone Developer"` — the pre-2019 name for a *development* certificate,
+straight from the Capacitor template. Archiving therefore asked for an iOS App
+Development profile and failed with "your team has no devices", which reads as
+an account problem rather than a build setting naming the wrong class of
+certificate. Release is now `"Apple Development"`, which is what automatic
+signing expects **at build time**: it signs the archive for development and
+re-signs for distribution at export. `"Apple Distribution"` is the tempting fix
+and is rejected outright as a conflicting manual identity. Debug keeps the
+legacy string — Xcode still maps it, and nothing about Debug was broken.
+
+`xcodebuild` registers a device only with `-allowProvisioningDeviceRegistration`.
+`-allowProvisioningUpdates` creates profiles and certificates but never devices,
+so on an account with none the archive fails identically whether or not a phone
+is plugged in. A first archive on a fresh account needs both flags:
+
+```
+xcodebuild archive -project ios/App/App.xcodeproj -scheme App \
+  -configuration Release -destination 'generic/platform=iOS' \
+  -archivePath <path>.xcarchive \
+  -allowProvisioningUpdates -allowProvisioningDeviceRegistration
+```
+
+The device also needs Developer Mode on (Settings → Privacy & Security). iOS 16+
+refuses development use without it, and Xcode will not register a device it
+cannot use — so the toggle looks unrelated and is not.
+
+**Nothing has been uploaded.** No App Store Connect app record existed as of
+2026-07-28 and no build has reached TestFlight. Upload runs from Xcode's
+Organizer, which reuses the account already signed into Xcode; `xcrun altool`
+wants an App Store Connect API key or app-specific password, and this machine
+has neither.
+
+**Nothing has run on real hardware.** Still true. A signed Debug build for the
+registered iPhone compiles, but it was never installed or launched, and the
+Android APK has never been on a phone either. Real-course GPS testing is still
+the gate before any public submission.
 
 **Store billing: code complete, unconfigured.** The webhook
 (`functions/store-webhook.js`), schema, entitlement read path, referral rewards and
