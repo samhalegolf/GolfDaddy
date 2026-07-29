@@ -14,7 +14,7 @@
 create table if not exists public.course_visual_jobs (
   id uuid primary key default gen_random_uuid(),
   course_id text not null,
-  kind text not null,
+  kind text not null default 'snapshot',
   status text not null default 'queued',
   recipe jsonb,
   result jsonb,

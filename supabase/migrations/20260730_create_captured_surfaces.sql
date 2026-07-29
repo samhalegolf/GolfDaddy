@@ -5,10 +5,15 @@
 -- that a clean, reviewable `drop table` migration later instead of dropping something that
 -- was never declared anywhere.
 --
--- Columns read directly off functions/captured-surface-sync.js's normaliseScan()/pull().
+-- Columns verified against the live table (list_tables against the clarity-caddie Supabase
+-- project) rather than inferred from client code alone - the actual primary key is a
+-- surrogate `id uuid`, with `client_scan_id` as a unique column, and there is a separate
+-- `created_at` alongside `client_created_at`. Matching this exactly matters beyond
+-- documentation: it is also what a fresh preview/branch database gets created with.
 
 create table if not exists public.captured_surfaces (
-  client_scan_id text primary key,
+  id uuid primary key default gen_random_uuid(),
+  client_scan_id text not null unique,
   account_id text,
   player_id text,
   course_key text not null,
@@ -22,6 +27,7 @@ create table if not exists public.captured_surfaces (
   manifest_json jsonb not null default '{}'::jsonb,
   client_created_at timestamptz,
   client_updated_at timestamptz not null default now(),
+  created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
