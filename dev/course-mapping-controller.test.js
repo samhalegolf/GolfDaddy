@@ -60,60 +60,6 @@ function course() {
   };
 }
 
-function projectPoint(origin, bearingRad, metres) {
-  const earth = 111320;
-  const lat = Number(origin && origin.lat);
-  const lng = Number(origin && origin.lng);
-  return {
-    lat: lat + (Math.cos(bearingRad) * metres) / earth,
-    lng: lng + (Math.sin(bearingRad) * metres) / (earth * Math.cos(lat * Math.PI / 180))
-  };
-}
-
-function scorecardHoles() {
-  return [
-    504, 332, 148, 471, 167, 348, 290, 363, 357,
-    323, 413, 334, 311, 149, 483, 357, 122, 372
-  ].map((distanceM, index) => ({
-    hole: index + 1,
-    par: [5, 4, 3, 5, 3, 4, 4, 4, 4, 4, 5, 4, 4, 3, 5, 4, 3, 4][index],
-    metres: distanceM,
-    tees: { White: { metres: distanceM, par: [5, 4, 3, 5, 3, 4, 4, 4, 4, 4, 5, 4, 4, 3, 5, 4, 3, 4][index] } }
-  }));
-}
-
-function cloudScan(holeNumber) {
-  const h = Number(holeNumber) || 1;
-  const baseLat = -36.9005 + h * 0.001;
-  const tee = { lat: baseLat, lng: 174.75 };
-  const fairway = { lat: baseLat + 0.00075, lng: 174.75 };
-  const green = { lat: baseLat + 0.0015, lng: 174.75 };
-  return {
-    client_scan_id: `controller-test-cloud-scan-${h}`,
-    course_key: "controller-test",
-    course_name: "Controller Test Golf Club",
-    hole_number: h,
-    source_type: "leaflet-tile-capture",
-    status: { latest: true, confidence: "cloud-scan" },
-    interaction: { owner: "captured-surface" },
-    projection: { type: "leaflet-pixel-origin", captureZoom: 19, originPx: { x: 1000 + h, y: 2000 + h }, imageWidth: 900, imageHeight: 1200 },
-    pins: {
-      tee,
-      green,
-      route: [tee, fairway, green],
-      greenShape: [
-        { lat: green.lat - 0.00006, lng: green.lng - 0.00006 },
-        { lat: green.lat - 0.00006, lng: green.lng + 0.00006 },
-        { lat: green.lat + 0.00006, lng: green.lng + 0.00006 },
-        { lat: green.lat + 0.00006, lng: green.lng - 0.00006 }
-      ]
-    },
-    manifest: { key: `gd_captured_hole_frame_v19_controller-test:h${h}`, courseKey: "controller-test", courseName: "Controller Test Golf Club", holeNumber: h, tileCount: 16, tiles: [], originPx: { x: 1000 + h, y: 2000 + h }, imageWidth: 900, imageHeight: 1200, captureZoom: 19 },
-    created_at: "2026-07-14T21:33:15.000Z",
-    updated_at: "2026-07-14T22:12:40.000Z"
-  };
-}
-
 function playableStore() {
   const c = course();
   return {
@@ -175,37 +121,34 @@ function publishedCourseMap(holeCount = 1) {
   };
 }
 
-function osmPayload(kind) {
-  if (kind === "success") {
+/* Server course-package fixture (functions/course-package.mjs's response shape, read here via
+   window.GDCoursePackageClient). This is what resolveGeometryFromServerPackage() consumes now
+   that there is no client-side AutoMapper or Native Geometry Resolver left - both run entirely
+   server-side (functions/lib/gd-automapper-core.mjs, functions/lib/gd-geometry-resolver-core.mjs,
+   functions/course-mapper-worker-background.mjs) and report back only as a finished package. */
+function serverPackage(holeCount = 1) {
+  const holes = Array.from({ length: holeCount }, (_, index) => {
+    const h = index + 1;
+    const baseLat = -36.9005 + h * 0.001;
     return {
-      elements: [
-        { type: "way", id: 101, tags: { golf: "hole", ref: "1" }, geometry: [{ lat: -36.9005, lon: 174.75 }, { lat: -36.899, lon: 174.75 }] },
-        { type: "way", id: 201, tags: { golf: "green", ref: "1" }, geometry: [{ lat: -36.8991, lon: 174.7499 }, { lat: -36.8991, lon: 174.7501 }, { lat: -36.8989, lon: 174.7501 }, { lat: -36.8989, lon: 174.7499 }, { lat: -36.8991, lon: 174.7499 }] }
-      ]
+      holeNumber: h,
+      tee: { lat: baseLat, lng: 174.75 },
+      green: { lat: baseLat + 0.0015, lng: 174.75 },
+      greenShape: [
+        { lat: baseLat + 0.00144, lng: 174.74994 },
+        { lat: baseLat + 0.00144, lng: 174.75006 },
+        { lat: baseLat + 0.00156, lng: 174.75006 }
+      ],
+      route: [{ lat: baseLat, lng: 174.75 }, { lat: baseLat + 0.00075, lng: 174.75 }, { lat: baseLat + 0.0015, lng: 174.75 }],
+      confidence: 0.83
     };
-  }
-  if (kind === "native") {
-    return {
-      elements: [
-        { type: "way", id: 301, tags: { golf: "green", ref: "1" }, geometry: [{ lat: -36.8991, lon: 174.7499 }, { lat: -36.8991, lon: 174.7501 }, { lat: -36.8989, lon: 174.7501 }, { lat: -36.8989, lon: 174.7499 }, { lat: -36.8991, lon: 174.7499 }] }
-      ]
-    };
-  }
-  if (kind === "frame") {
-    return {
-      elements: [
-        { type: "way", id: 401, tags: { golf: "green" }, geometry: [{ lat: -36.8991, lon: 174.7499 }, { lat: -36.8991, lon: 174.7501 }, { lat: -36.8989, lon: 174.7501 }, { lat: -36.8989, lon: 174.7499 }, { lat: -36.8991, lon: 174.7499 }] },
-        { type: "way", id: 402, tags: { golf: "fairway" }, geometry: [{ lat: -36.9006, lon: 174.7498 }, { lat: -36.9006, lon: 174.7502 }, { lat: -36.8992, lon: 174.7502 }, { lat: -36.8992, lon: 174.7498 }, { lat: -36.9006, lon: 174.7498 }] },
-        { type: "way", id: 403, tags: { golf: "tee" }, geometry: [{ lat: -36.9007, lon: 174.74995 }, { lat: -36.9007, lon: 174.75005 }, { lat: -36.9006, lon: 174.75005 }, { lat: -36.9006, lon: 174.74995 }, { lat: -36.9007, lon: 174.74995 }] }
-      ]
-    };
-  }
-  return { elements: [] };
+  });
+  return { status: "lite-geo-ready", holes };
 }
 
 function loadController(options = {}) {
   const events = [];
-  const calls = { fetch: 0, native: 0, manual: 0, scorecard: 0, courseMapsGet: 0, courseLibraryGet: 0, courseMapsPost: 0, courseMapsBodies: [], courseVisualsGet: 0, courseVisualsPost: 0, nativeInputs: [], fetchUrls: [], order: [], ingestMappedCourse: 0, ingestMappedHole: 0, ingestedHoles: [], frameWarm: 0, frameWarmHoles: [] };
+  const calls = { fetch: 0, courseMapsGet: 0, courseLibraryGet: 0, courseMapsPost: 0, courseMapsBodies: [], courseVisualsGet: 0, courseVisualsPost: 0, fetchUrls: [], order: [], ingestMappedCourse: 0, ingestMappedHole: 0, ingestedHoles: [], frameWarm: 0, frameWarmHoles: [], manual: 0 };
   const testConsole = Object.assign({}, console, { warn() {}, info() {} });
   const localStorage = storage({
     gd_user_course_library_v1: JSON.stringify(options.savedMap ? playableStore() : { courses: {} })
@@ -298,69 +241,6 @@ function loadController(options = {}) {
       }
       return false;
     },
-    GDCourseGeometryResolver: {
-      highConfidence: 0.76,
-      mediumConfidence: 0.58,
-      shouldRunForAutoMapper() { return true; },
-      async resolveCourseGeometryForAutoMapper(input) {
-        calls.native += 1;
-        calls.nativeInputs.push(input || {});
-        if (options.nativePartial) {
-          return {
-            status: "geometry-resolved-numbering-unavailable",
-            confidence: 0,
-            source: "test-native-resolver",
-            holes: [],
-            unresolvedCandidates: [{ candidateId: "native-geometry-1" }],
-            unresolvedScorecardHoles: [],
-            checkpoints: [
-              { stage: "initial-snapshot", imageDataUrl: "data:image/svg+xml,initial", metadata: {} },
-              { stage: "fairway-lines", imageDataUrl: "data:image/svg+xml,lines", metadata: {} },
-              { stage: "number-allocation", imageDataUrl: "data:image/svg+xml,numbers", metadata: { status: "unavailable", warning: "Scorecard unavailable" } }
-            ],
-            feedback: {
-              geometry: { greenCandidates: 1, acceptedGreens: 1, rejectedGreens: 0, fairwayCorridors: 1, candidatePaths: 1 },
-              assignment: { scorecardHoles: 0, resolvedHoles: 0, unresolvedHoles: [] },
-              distance: {},
-              tieBreakers: {}
-            },
-            warnings: ["Scorecard unavailable"]
-          };
-        }
-        if (options.nativeSuccess) {
-          const resolvedHoles = Array.from({ length: options.nativeSuccessHoles || 1 }, (_, index) => {
-            const holeNumber = index + 1;
-            const baseLat = -36.9005 + index * 0.001;
-            const confidence = Number(options.nativeLowConfidenceHole) === holeNumber ? 0.744 : 0.91;
-            return {
-              holeNumber,
-              confidence,
-              matchScore: confidence,
-              evidence: ["test"],
-              candidate: {
-                candidateId: `native-${holeNumber}`,
-                path: [{ lat: baseLat, lng: 174.75 }, { lat: baseLat + 0.0015, lng: 174.75 }]
-              }
-            };
-          });
-          return {
-            status: "resolved",
-            confidence: 0.91,
-            source: "test-native-resolver",
-            holes: resolvedHoles,
-            feedback: { geometry: {}, assignment: {}, distance: {}, tieBreakers: {} },
-            warnings: []
-          };
-        }
-        return {
-          status: "failed",
-          confidence: 0,
-          holes: [],
-          feedback: { geometry: {}, assignment: {}, distance: {}, tieBreakers: {} },
-          warnings: ["test native failure"]
-        };
-      }
-    },
     CustomEvent: function CustomEvent(type, init) { this.type = type; this.detail = init && init.detail; },
     GolfDaddyAccounts: {
       current() {
@@ -377,28 +257,16 @@ function loadController(options = {}) {
     clearInterval() {},
     MutationObserver: class { observe() {} disconnect() {} }
   };
-  if (options.scorecardDistances) {
-    win.gdEnsureScorecardForCourse = async () => {
-      calls.scorecard += 1;
-      calls.order.push("scorecard");
-      testScorecard.courseKey = "controller test golf club";
-      testScorecard.courseName = "Controller Test Golf Club";
-      testScorecard.source = "website";
-      testScorecard.sourceUrl = "https://example.test/controller-scorecard";
-      testScorecard.holes = scorecardHoles();
-      testScorecard.scorecardSources = [
-        { source: "website", sourceUrl: "https://example.test/controller-scorecard", holes: scorecardHoles() },
-        { source: "gps-app", sourceUrl: "https://example.test/controller-gps-scorecard", holes: scorecardHoles() }
-      ];
-    };
-  }
   if (options.resumeRound) {
     win.gdReadResumeRound = () => ({ updatedAt: Date.now(), course: course(), courseLabel: "Controller Test Golf Club", hole: 1, activated: true });
   }
   win.window = win;
   /* Stage 6 of the course-package migration plan: resolveGeometryFromServerPackage() reads
      window.GDCoursePackageClient, not a network call, so a scenario opts into the server
-     short-circuit by supplying a canned response here rather than stubbing fetch. */
+     result by supplying a canned response here rather than stubbing fetch. This is now the
+     ONLY way a scenario can produce a playable map that isn't already saved locally or
+     published to /api/course-maps - both the AutoMapper and the Native Geometry Resolver
+     fallback run entirely server-side and report back only through this client. */
   if (options.serverCoursePackage) {
     win.GDCoursePackageClient = { fetchPackage: async () => options.serverCoursePackage };
   }
@@ -409,7 +277,6 @@ function loadController(options = {}) {
     localStorage,
     sessionStorage,
     scorecard: testScorecard,
-    gdEnsureScorecardForCourse: win.gdEnsureScorecardForCourse,
     currentCourse: course(),
     map: {
       getContainer() { return elementStub(); },
@@ -422,7 +289,6 @@ function loadController(options = {}) {
         return Math.hypot(dx, dy);
       }
     },
-    project: projectPoint,
     L: {
       latLng(lat, lng) { return { lat: Number(lat), lng: Number(lng) }; },
       circleMarker() { return { addTo() { return this; }, setLatLng() {}, remove() {} }; },
@@ -506,16 +372,15 @@ function loadController(options = {}) {
         calls.order.push(method === "POST" ? "course-visuals-post" : "course-visuals-get");
         return { ok: true, status: 200, json: async () => ({ visual: null, storage: "supabase" }) };
       }
-      const overpass = href.includes("overpass-api");
-      if (!overpass) return { ok: true, json: async () => ({}) };
+      /* No production code path calls Overpass (or anything else) through fetch from within
+         runCourseMappingAttempt any more - there is no client-side OSM query left in this
+         function at all. This branch exists only as a safety net so an unexpected fetch
+         doesn't crash a scenario; calls.fetch is asserted to stay 0 below as the actual
+         regression check for "no client geometry fetch happens here". */
       calls.fetch += 1;
-      calls.order.push("osm-fetch");
+      calls.order.push("unexpected-fetch");
       calls.fetchUrls.push(href);
-      const sequence = Array.isArray(options.fetchSequence) ? options.fetchSequence : null;
-      const next = sequence && sequence.length ? sequence.shift() : null;
-      if (options.fetchFails || next === "fail") return { ok: false, status: 504, json: async () => ({}) };
-      const kind = next || (options.automapperSuccess ? "success" : options.nativeSuccess ? "native" : "zero");
-      return { ok: true, json: async () => osmPayload(kind) };
+      return { ok: true, json: async () => ({}) };
     },
     AbortController: class { constructor() { this.signal = {}; } abort() {} }
   };
@@ -528,9 +393,7 @@ async function runScenario(options) {
   const env = loadController(options);
   Object.assign(env.calls, {
     fetch: 0,
-    native: 0,
     manual: 0,
-    scorecard: 0,
     courseMapsGet: 0,
     courseMapsPost: 0,
     courseVisualsGet: 0,
@@ -540,7 +403,6 @@ async function runScenario(options) {
     frameWarm: 0
   });
   env.calls.courseMapsBodies.length = 0;
-  env.calls.nativeInputs.length = 0;
   env.calls.fetchUrls.length = 0;
   env.calls.order.length = 0;
   env.calls.ingestedHoles.length = 0;
@@ -561,18 +423,12 @@ async function runScenario(options) {
 async function main() {
   let env = await runScenario({ savedMap: true });
   assert.strictEqual(env.result.playable, true, "saved map resolves play");
-  assert.strictEqual(env.calls.fetch, 0, "saved map success prevents AutoMapper");
-  assert.strictEqual(env.calls.native, 0, "saved map success prevents native resolver");
-
-  env = await runScenario({ savedMap: true, wholeCourse: true, fetchSequence: ["fail", "native"], nativeSuccess: true });
-  assert.strictEqual(env.calls.native, 1, "partial saved map does not block whole-course native resolver");
-  assert(env.events.some((event) => event.event === "saved-map-incomplete"), "partial saved map is reported clearly");
-  assert(!env.events.some((event) => event.event === "saved-map-found"), "partial saved map is not treated as complete course evidence");
+  assert.strictEqual(env.calls.fetch, 0, "saved map success makes no unexpected fetch");
 
   env = await runScenario({ courseMapsHoles: 1 });
   assert.strictEqual(env.result.playable, true, "published object course map resolves play before a fresh scan");
   assert.strictEqual(env.calls.courseMapsGet, 1, "published object library is checked once on a new-round open");
-  assert.strictEqual(env.calls.fetch, 0, "published object map hit prevents OSM scan");
+  assert.strictEqual(env.calls.fetch, 0, "published object map hit makes no unexpected fetch");
   assert(env.events.some((event) => event.event === "course-map-cloud-lookup-started" && event.summary === "Course map loading"), "cloud map loading is reported truthfully");
   assert(env.events.some((event) => event.event === "course-map-cloud-loaded"), "published object map hit is logged");
   assert(env.events.some((event) => event.event === "saved-map-found"), "published object map is available to the saved-map check");
@@ -581,129 +437,35 @@ async function main() {
   env = await runScenario({ courseMapsHoles: 18, wholeCourse: true });
   assert.strictEqual(env.result.playable, true, "whole-course published object map resolves play");
   assert.strictEqual(env.calls.courseMapsGet, 1, "whole-course object library is checked once");
-  assert.strictEqual(env.calls.fetch, 0, "whole-course published object hit prevents OSM scan");
+  assert.strictEqual(env.calls.fetch, 0, "whole-course published object hit makes no unexpected fetch");
   assert.deepStrictEqual(env.calls.frameWarmHoles, Array.from({ length: 18 }, (_, index) => index + 1), "whole-course published object map collects every play frame on first load");
   assert.strictEqual(env.calls.ingestMappedCourse, 1, "whole-course published object map ingests the mapped course into the play pipeline");
 
-  env = await runScenario({ automapperSuccess: true });
-  /* The published database is still consulted before a fresh scan, but the
-     manifest answers "the server holds nothing" without pulling any payload -
-     so the check shows up as a course-library GET rather than a course-maps
-     one. Asserting course-maps here would require the expensive call to happen
-     precisely when there is nothing to fetch. */
-  assert.strictEqual(env.calls.courseLibraryGet, 1, "published object library is checked before fresh scan");
-  assert.strictEqual(env.calls.courseMapsGet, 0, "an empty library costs no payload pull");
-  assert(env.events.some((event) => event.event === "course-map-cloud-not-found"), "cloud miss is logged");
-  assert.strictEqual(env.calls.fetch, 1, "cloud miss falls through to the existing fresh scan");
-
-  env = await runScenario({ courseMapsFails: true, automapperSuccess: true });
-  assert.strictEqual(env.calls.courseMapsGet, 1, "database pull failure is attempted once");
-  assert(env.events.some((event) => event.event === "course-map-cloud-lookup-failed"), "database pull failure is logged as a cloud warning");
-  assert.strictEqual(env.calls.fetch, 1, "database pull failure falls through to the existing fresh scan");
-
-  env = await runScenario({ courseMapsHoles: 1, resumeRound: true, automapperSuccess: true });
-  /* The resolver must not run a cloud map lookup on a resume - that is what the
-     event assertion below proves. Counting course-maps GETs cannot express it:
-     a background startup sync populates the library independently of resume
-     state, so the count depends on whether a 520ms timer happens to land inside
-     the scenario rather than on the behaviour being tested. */
-  assert(!env.events.some((event) => String(event.event || "").startsWith("course-map-cloud")), "resume-round path has no cloud-map lifecycle noise");
-  assert.strictEqual(env.calls.fetch, 1, "resume-round skip leaves the existing scan path available");
-
-  /* There is no more client AutoMapper fast path (course-package migration, stage 8): when
-     the server has not mapped a course, the client goes straight to the native/image-based
-     resolver, which does its own OSM acquisition (reusing the same query/parse code that used
-     to belong to the removed client AutoMapper) and then always runs its real resolution -
-     good OSM hole numbering alone no longer short-circuits it the way client AutoMapper used to. */
-  env = await runScenario({ automapperSuccess: true, nativeSuccess: true });
-  assert.strictEqual(env.result.playable, true, "native resolver, seeded by its own OSM acquisition, resolves play");
-  assert.strictEqual(env.calls.fetch, 1, "one OSM fetch total - the native resolver's own source acquisition, not a separate AutoMapper pass");
-  assert.strictEqual(env.calls.native, 1, "native resolver runs directly now; there is no client AutoMapper fast path left to skip it");
-
-  /* Stage 6 of the course-package migration plan: when the server already has this course
-     mapped, the client must skip its own OSM fetch entirely and persist straight from the
-     server's answer - not run AutoMapper "just in case" and not fall back to the native
-     resolver either. */
-  env = await runScenario({
-    serverCoursePackage: {
-      status: "lite-geo-ready",
-      holes: [{
-        holeNumber: 1,
-        tee: { lat: -36.9006, lng: 174.75 },
-        green: { lat: -36.9008, lng: 174.75 },
-        greenShape: [{ lat: -36.90081, lng: 174.7501 }, { lat: -36.90079, lng: 174.7501 }, { lat: -36.9008, lng: 174.74995 }],
-        route: [{ lat: -36.9006, lng: 174.75 }, { lat: -36.9007, lng: 174.75 }, { lat: -36.9008, lng: 174.75 }],
-        confidence: 0.83
-      }]
-    }
-  });
+  /* Stage 6/8 of the course-package migration plan: when the server has already mapped this
+     course - whether by running the AutoMapper or, when OSM had shapes but no hole numbers,
+     falling back to the Native Geometry Resolver - the client just persists what it is handed.
+     Neither system runs on the client any more; resolveGeometryFromServerPackage() is now the
+     only source of a freshly generated map. */
+  env = await runScenario({ serverCoursePackage: serverPackage(1) });
   assert.strictEqual(env.result.playable, true, "server-provided geometry resolves play");
-  assert.strictEqual(env.calls.fetch, 0, "a server hit must skip the client's own OSM fetch");
-  assert.strictEqual(env.calls.native, 0, "a server hit must skip the native resolver too");
-  assert(env.events.some((event) => event.event === "server-course-package-hit"), "the server short-circuit is logged for diagnostics");
+  assert.strictEqual(env.calls.fetch, 0, "a server hit makes no unexpected fetch");
+  assert(env.events.some((event) => event.event === "server-course-package-hit"), "the server hit is logged for diagnostics");
+  assert(env.events.some((event) => event.event === "automapper-succeeded"), "a server hit is reported through the existing automapper-succeeded event");
 
-  /* Fails open: a course the server has never touched (or a response missing a "ready"
-     status) must fall straight through to today's AutoMapper path, unchanged. */
-  env = await runScenario({ serverCoursePackage: { status: "processing" }, automapperSuccess: true });
-  assert.strictEqual(env.calls.fetch, 1, "a non-ready server response falls through to the existing OSM fetch");
-  assert.strictEqual(env.result.playable, true);
-
-  /* fetchFails covers every OSM request, including the native resolver's own first attempt.
-     Previously a failed client-AutoMapper pass still seeded a payload the native resolver
-     could widen and retry from; with no client AutoMapper priming step left, the resolver's
-     own first attempt failing with nothing to build a retry frame from is terminal - one
-     fetch, not two. */
-  env = await runScenario({ fetchFails: true });
-  assert.strictEqual(env.calls.native, 1, "OSM fetch failure still invokes native resolver exactly once");
-  assert.strictEqual(env.calls.fetch, 1, "one failed OSM fetch - no payload to build a widened retry frame from");
-  assert(env.events.some((event) => event.event === "automapper-failed"), "the OSM fetch failure is terminally logged");
-  assert.strictEqual(env.events.filter((event) => event.event === "automapper-failed").length, 1, "OSM fetch failure is logged once");
-  assert(env.events.some((event) => event.event === "native-resolver-started"), "native resolver start is logged after the OSM fetch failure");
-  assert.strictEqual(env.calls.nativeInputs[0].sourceLoadError.code, "osm-request-failed", "native resolver receives a source-load error when its own acquisition fails");
-
-  /* The old ["fail","native"] two-fetch reload scenario (a failed client-AutoMapper pass
-     seeding a retry the native resolver's own acquisition then repeated) no longer applies:
-     there is no client AutoMapper fetch to fail first, and a failed first fetch has no
-     payload to build a retry frame from (see the fetchFails scenario above) - so it is now
-     identical in shape to that single-fetch-failure case and is not tested separately here. */
-
-  /* A single sparse element (the "native" fixture: one unnumbered green) is not enough for
-     the native resolver's own acquisition to compute a widen-retry frame from - it accepts
-     that one fetch and moves on, so this no longer exercises a second fetch (that needs the
-     richer "frame" fixture below, which has enough geometry to bound a real frame). */
-  env = await runScenario({ fetchSequence: ["native"] });
-  assert.strictEqual(env.calls.fetch, 1, "a single sparse OSM payload does not have enough geometry to compute a retry frame from");
-  assert.strictEqual(env.calls.nativeInputs[0].osmPayload.elements.length, 1, "native resolver receives what its own acquisition found");
-
-  env = await runScenario({ fetchSequence: ["frame", "success"] });
-  assert.strictEqual(env.calls.fetch, 2, "native resolver runs a framed second OSM query when first-pass source can frame the course");
-  assert(decodeURIComponent(env.calls.fetchUrls[0]).includes("around:1400"), "first pass is seeded from the selected course pin");
-  assert(!decodeURIComponent(env.calls.fetchUrls[1]).includes("around:"), "second pass is not another arbitrary radius query");
-  assert(decodeURIComponent(env.calls.fetchUrls[1]).includes("way("), "second pass uses a framed Overpass bbox query");
-  assert.strictEqual(env.calls.nativeInputs[0].osmPayload.elements.length, 2, "native resolver receives the framed source payload");
-  assert.strictEqual(env.calls.nativeInputs[0].courseBoundary, undefined, "native resolver does not receive a stale saved course boundary");
-
-  env = await runScenario({ fetchSequence: ["native"], nativePartial: true });
-  assert.strictEqual(env.calls.native, 1, "partial native resolver runs once");
-  assert(env.events.some((event) => event.event === "native-resolver-source-load-started"), "native source load start is logged");
-  assert(env.events.some((event) => event.event === "native-resolver-source-load-succeeded"), "native source load success is logged");
-  assert(!env.events.some((event) => event.event === "native-resolver-source-load-failed"), "scorecard-unavailable partial result is not logged as source-load-failed");
-  assert(env.events.some((event) => event.event === "native-resolver-failed"), "partial native result still falls through as unresolved");
-  assert.strictEqual(env.events.filter((event) => event.event === "manual-fallback-opened").length, 1, "partial native result opens manual fallback once");
-
-  env = await runScenario({ fetchSequence: ["native"], nativePartial: true, scorecardDistances: true });
-  assert.strictEqual(env.calls.scorecard, 1, "scorecard distances are fetched once for native resolver evidence");
-  assert(env.calls.order.indexOf("scorecard") >= 0 && env.calls.order.indexOf("scorecard") < env.calls.order.lastIndexOf("osm-fetch"), "scorecard fetch starts before native OSM acquisition");
-  assert.strictEqual(env.calls.nativeInputs[0].scorecardHoles.length, 18, "native resolver receives scorecard holes");
-  assert.strictEqual(env.calls.nativeInputs[0].scorecardEvidence.distanceCount, 18, "native resolver receives 18 scorecard distances");
-  assert.strictEqual(env.calls.nativeInputs[0].scorecardEvidence.sources.length, 2, "native resolver receives multiple scorecard evidence sources");
-  assert.deepStrictEqual(env.calls.nativeInputs[0].scorecardEvidence.lengthOrder.slice(0, 3).map((row) => row.hole), [1, 15, 4], "scorecard length order is exposed longest-to-shortest");
-
+  /* No server package, and nothing saved or published: the client has no second geometry
+     source of its own left to try (that used to be the native resolver's job) - it must fall
+     straight through to the interactive manual fallback. */
   env = await runScenario({});
-  assert.strictEqual(env.calls.native, 1, "AutoMapper zero-guide result invokes native resolver exactly once");
-  assert.strictEqual(env.events.filter((event) => event.event === "automapper-failed").length, 1, "AutoMapper zero-guide failure is logged once");
-  assert(env.events.some((event) => event.event === "native-resolver-failed"), "native resolver failure is terminally logged");
-  assert.strictEqual(env.events.filter((event) => event.event === "manual-fallback-opened").length, 1, "automatic failure opens one manual fallback");
+  assert.strictEqual(env.result.playable, false, "a miss with nothing else to try is not playable");
+  assert.strictEqual(env.result.fallback, "interactive-green", "a miss opens the interactive green fallback");
+  assert.strictEqual(env.calls.fetch, 0, "a miss makes no unexpected fetch - there is no client geometry source left to query");
+  assert(env.events.some((event) => event.event === "server-course-package-pending"), "an unmapped course is logged as pending on the server");
+  assert(env.events.some((event) => event.event === "automapper-failed"), "the miss is logged as automapper-failed for continuity with existing dashboards");
+  assert(env.events.some((event) => event.event === "manual-fallback-opened" && event.details && event.details.reason === "server-map-not-ready"), "the fallback records why: the server has not produced a map yet");
+  assert.strictEqual(env.calls.manual, 1, "exactly one manual fallback opens per miss");
+
+  /* Re-entry into a course whose fallback is already open must be blocked, not silently
+     restart the mapping attempt. */
   const reentry = await env.win.runCourseMappingAttempt({
     course: env.course,
     hole: 1,
@@ -719,19 +481,36 @@ async function main() {
   assert.strictEqual(env.events.filter((event) => event.event === "manual-fallback-opened").length, 1, "one attempt produces exactly one manual fallback opened event");
   assert(env.events.some((event) => event.event === "manual-fallback-terminal-reentry-blocked"), "blocked re-entry is explicitly logged");
 
-  env = await runScenario({ nativeSuccess: true });
-  assert.strictEqual(env.calls.native, 1, "native resolver success runs once");
-  assert.strictEqual(env.result.playable, true, "native resolver success resolves play");
-  assert.strictEqual(env.calls.manual, 0, "native resolver success prevents manual fallback");
-  assert(env.events.some((event) => event.event === "native-resolver-succeeded"), "native resolver success is terminally logged");
+  env = await runScenario({ courseMapsFails: true, serverCoursePackage: serverPackage(1) });
+  assert.strictEqual(env.calls.courseMapsGet, 1, "database pull failure is attempted once");
+  assert(env.events.some((event) => event.event === "course-map-cloud-lookup-failed"), "database pull failure is logged as a cloud warning");
+  assert.strictEqual(env.result.playable, true, "database pull failure still falls through to a server-package hit");
 
-  env = await runScenario({ fetchSequence: ["fail", "native"], nativeSuccess: true, nativeSuccessHoles: 3, wholeCourse: true });
-  assert.deepStrictEqual(env.calls.frameWarmHoles, [1, 2, 3], "first-load native success warms every newly mapped play frame");
-  assert.strictEqual(env.calls.ingestMappedCourse, 1, "first-load native success ingests the mapped course into the play pipeline");
+  env = await runScenario({ courseMapsHoles: 1, resumeRound: true, serverCoursePackage: serverPackage(1) });
+  /* The resolver must not run a cloud map lookup on a resume - that is what the
+     event assertion below proves. Counting course-maps GETs cannot express it:
+     a background startup sync populates the library independently of resume
+     state, so the count depends on whether a 520ms timer happens to land inside
+     the scenario rather than on the behaviour being tested. */
+  assert(!env.events.some((event) => String(event.event || "").startsWith("course-map-cloud")), "resume-round path has no cloud-map lifecycle noise");
+  assert.strictEqual(env.result.playable, true, "resume-round skip still resolves play from the server package");
 
-  env = await runScenario({ fetchSequence: ["fail", "native"], nativeSuccess: true, nativeSuccessHoles: 18, nativeLowConfidenceHole: 3, wholeCourse: true });
-  assert.strictEqual(env.result.playable, true, "resolved native run confirms every assigned hole even when one hole is below high-confidence threshold");
-  assert.strictEqual(env.calls.manual, 0, "full resolved native run does not fall through to manual fallback");
+  /* Unlike the old native-resolver stage - which warmed play frames for whatever holes it had
+     just persisted regardless of whether the rest of the course was mapped - the surviving
+     automapper branch only reaches showResolvedCoursePlayHole (where frame warming happens) once
+     the whole-course map is fully complete. A 3-of-18 server package is real progress but is not
+     "accepted" on its own; it falls through to the interactive fallback below like any other
+     server-map-not-ready miss, and produces no play frames at all. */
+  env = await runScenario({ wholeCourse: true, serverCoursePackage: serverPackage(3) });
+  assert.strictEqual(env.result.playable, false, "an incomplete whole-course server package is not accepted on its own");
+  assert.strictEqual(env.calls.frameWarm, 0, "an incomplete whole-course server package warms no play frames");
+  assert.strictEqual(env.calls.ingestMappedCourse, 0, "an incomplete whole-course server package does not ingest into the play pipeline");
+
+  env = await runScenario({ wholeCourse: true, serverCoursePackage: serverPackage(18) });
+  assert.strictEqual(env.result.playable, true, "resolved server-package run confirms every assigned hole");
+  assert.strictEqual(env.calls.manual, 0, "full resolved server-package run does not fall through to manual fallback");
+  assert.deepStrictEqual(env.calls.frameWarmHoles, Array.from({ length: 18 }, (_, index) => index + 1), "complete first-load server-package success warms every newly mapped play frame");
+  assert.strictEqual(env.calls.ingestMappedCourse, 1, "complete first-load server-package success ingests the mapped course into the play pipeline");
   assert.strictEqual(env.calls.courseMapsPost, 1, "complete generated object map syncs to the shared course-map library");
   assert.strictEqual(env.calls.courseVisualsPost, 0, "object map sync does not call the native visual publishing endpoint");
   assert.strictEqual(env.calls.courseMapsBodies[0].course.courseId, "controller-test", "generated object map sync uses the canonical course id");
@@ -739,33 +518,34 @@ async function main() {
   const resolvedStore = JSON.parse(env.localStorage.data.gd_user_course_library_v1);
   const resolvedCourse = resolvedStore.courses["user-local-player::controller-test"];
   const resolvedHole3 = Object.values(resolvedCourse.objects || {}).filter((object) => Number(object.holeNumber) === 3);
-  assert(resolvedHole3.length >= 3, "resolved native run persists hole 3 play objects");
-  assert(resolvedHole3.every((object) => object.confirmed), "resolved native run marks hole 3 objects confirmed");
+  assert(resolvedHole3.length >= 3, "resolved server-package run persists hole 3 play objects");
+  assert(resolvedHole3.every((object) => object.confirmed), "resolved server-package run marks hole 3 objects confirmed");
 
   /* Full localStorage, but eviction can free enough: persisting the resolved geometry hits
      QuotaExceededError, evicts the cloud-backed tile, retries, and succeeds. The
-     locally-captured tile must survive - its scan exists nowhere else. Persistence now
-     always runs through the native resolver (there is no more direct client-AutoMapper
-     persistence path), but the eviction logic itself lives in saveStore()/saveCourseObject()
-     and is caller-agnostic, so the same guarantee applies here as it always did. */
-  env = await runScenario({ automapperSuccess: true, nativeSuccess: true, storageQuota: "recoverable" });
-  assert.strictEqual(env.result.playable, true, "quota hit with evictable caches still resolves play via the native resolver");
-  assert.strictEqual(env.calls.native, 1, "native resolver runs (it always does now) and its persistence recovers from the quota hit");
+     locally-captured tile must survive - its scan exists nowhere else. Persistence now always
+     runs through resolveGeometryFromServerPackage() (there is no more client-AutoMapper or
+     native-resolver persistence path), but the eviction logic itself lives in
+     saveStore()/saveCourseObject() and is caller-agnostic, so the same guarantee applies here
+     as it always did. */
+  env = await runScenario({ serverCoursePackage: serverPackage(1), storageQuota: "recoverable" });
+  assert.strictEqual(env.result.playable, true, "quota hit with evictable caches still resolves play via the server package");
   assert(!Object.prototype.hasOwnProperty.call(env.localStorage.data, "gd_captured_hole_frame_v19_other-course:h1"), "cloud-backed tile is evicted to make room");
   assert(Object.prototype.hasOwnProperty.call(env.localStorage.data, "gd_captured_hole_frame_v19_other-course:h2"), "locally-captured tile is never evicted");
 
   /* Full localStorage and eviction cannot free enough: geometry was resolved, but storage
      rejected the save outright, so play cannot be resolved from it. */
-  env = await runScenario({ automapperSuccess: true, nativeSuccess: true, storageQuota: "hard" });
-  assert.strictEqual(env.calls.native, 1, "native resolver still runs and attempts to persist");
+  env = await runScenario({ serverCoursePackage: serverPackage(1), storageQuota: "hard" });
   assert.strictEqual(env.result.playable, false, "a hard quota failure leaves nothing playable to resolve");
   assert(Object.prototype.hasOwnProperty.call(env.localStorage.data, "gd_captured_hole_frame_v19_other-course:h2"), "hard quota failure still never evicts a local-only tile");
 
   const noisyEvents = env.events.map((event) => event.event).filter(Boolean);
-  assert(!noisyEvents.includes("automapper-invocation-requested"), "AutoMapper request noise is absent");
-  assert(!noisyEvents.includes("automapper-entered"), "AutoMapper entered noise is absent");
-  assert(!noisyEvents.includes("automapper-no-guides-to-save"), "AutoMapper no-guides duplicate is absent");
-  assert(!noisyEvents.includes("native-resolver-skipped-after-automapper"), "native skip-after-AutoMapper noise is absent");
+  assert(!noisyEvents.includes("automapper-invocation-requested"), "client AutoMapper request noise is absent");
+  assert(!noisyEvents.includes("automapper-entered"), "client AutoMapper entered noise is absent");
+  assert(!noisyEvents.includes("automapper-no-guides-to-save"), "client AutoMapper no-guides duplicate is absent");
+  assert(!noisyEvents.includes("native-resolver-invoked"), "native resolver invocation noise is absent - it no longer runs client-side");
+  assert(!noisyEvents.includes("native-resolver-succeeded"), "native resolver success noise is absent - it no longer runs client-side");
+  assert(!noisyEvents.includes("native-resolver-skipped-numbered-course"), "native resolver skip noise is absent - it no longer runs client-side");
 
   console.log("course-mapping-controller tests passed");
 }

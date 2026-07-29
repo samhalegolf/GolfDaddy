@@ -210,7 +210,7 @@ Outputs:
 
 Notes:
 - The picker calls only `runCourseMappingAttempt` / `gdRunCourseMappingAttempt` for mapping.
-- The mapping order remains saved playable course -> OSM AutoMapper -> native Course Geometry Resolver / hole labeller -> one-tap live-map fallback.
+- The mapping order remains saved playable course -> server course package (AutoMapper, falling back to the Native Course Geometry Resolver / hole labeller server-side if OSM has shapes but no hole numbers - both run entirely on the server now) -> one-tap live-map fallback.
 - Legacy globals remain compatibility aliases into `window.GDCoursePicker`.
 
 ---
@@ -355,27 +355,32 @@ Server split (course-package migration, 2026-07-29): the OSM query/parse/hole-re
 algorithm above is now ported server-side, verbatim-equivalent, in
 `functions/lib/gd-automapper-core.mjs`, run by `functions/course-mapper-worker-background.mjs`
 against jobs queued through `functions/course-mapper-jobs.mjs` (table `course_mapper_jobs`).
+The Native Geometry Resolver fallback (numbers holes via scorecard-distance matching when OSM
+exposes shapes but no hole numbers) made the same move the same day, to
+`functions/lib/gd-geometry-resolver-core.mjs`, invoked from the same worker immediately after
+the AutoMapper pass, before the job is marked done. **Both systems are now 100% server-side.**
 
 The client-side top-level AutoMapper orchestrator (`autoMapOsmCourse`) and its scheduler
-(the direct-call branch of `scheduleOsmAutoMapForPlay`) have been REMOVED - per the
-architecture doc's acceptance criterion "No AutoMapper logic runs on the user's phone".
-`runCourseMappingAttempt` (`scripts/gd-course-library-pin-lock.js`) now calls
-`resolveGeometryFromServerPackage()`, which checks `GET /api/course-package` and, as a side
-effect of that request, triggers a server mapping run if none exists yet. A miss there is not
-an error - it falls through exactly as a zero-guide AutoMapper result always did, into the
-Native Geometry Resolver and then manual/interactive fallback, both unchanged. The manual
-"Auto" tool in the full-mapping flyout now calls `runServerAutoMapTool()` (trigger + short
-poll + toast), not a local OSM scan.
+(the direct-call branch of `scheduleOsmAutoMapForPlay`), and separately the entire client-side
+Native Geometry Resolver integration (its own OSM source-acquisition step, scorecard-evidence
+gathering, guide/frame math, and the `resolveCourseGeometryGuideBundle` orchestration that used
+to run it inline from `loadOsmGuideBundle`) have all been REMOVED from
+`scripts/gd-course-library-pin-lock.js` - per the architecture doc's acceptance criterion "No
+AutoMapper logic runs on the user's phone", now extended to cover the Native Geometry Resolver
+too. `runCourseMappingAttempt` now calls `resolveGeometryFromServerPackage()`, which checks
+`GET /api/course-package` and, as a side effect of that request, triggers a server mapping run
+if none exists yet (the server worker tries AutoMapper geometry AND the Native Geometry
+Resolver fallback before giving up). A miss there is not an error - it falls straight through
+to the manual/interactive green fallback (reason `server-map-not-ready`); there is no second
+client-side geometry source left to try. The manual "Auto" tool in the full-mapping flyout
+calls `runServerAutoMapTool()` (trigger + short poll + toast), not a local OSM scan.
 
-One thing NOT removed: `loadOsmGuideBundle`/`persistOsmGuideBundle` and the OSM query/parse
-helpers still live in this file, because the Native Geometry Resolver's own source-acquisition
-step (`acquireNativeResolverSourceBundle`) reuses them as its OWN independent OSM fetch - a
-separate fallback for courses where OSM exposes shapes but no hole numbers, which has no
-server equivalent yet. This means the app can still make a client-side Overpass call, just
-never as a first-choice "AutoMapper" pass - only as part of the native resolver, which now
-runs unconditionally whenever the server has nothing (previously, well-numbered OSM data let
-AutoMapper skip the native resolver entirely; that fast path no longer exists client-side).
-Porting the Native Geometry Resolver server-side too is unstarted future work.
+The client has zero geometry-resolution logic left. The only client-side consumer of OSM data
+remaining is `loadOsmGuideBundle` (plus its shared fetch/parse/cache helpers and
+`automapperDebugDetails`), which is unrelated to `runCourseMappingAttempt` entirely - it now
+exists solely for the live, unrelated manual "Full Mapping Mode" guide-line overlay feature
+(an operator-facing visual aid, not an automatic mapping path). `runCourseMappingAttempt` makes
+no Overpass calls at all any more, whether AutoMapper or Native Geometry Resolver flavored.
 
 ---
 

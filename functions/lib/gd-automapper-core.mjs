@@ -462,20 +462,18 @@ function resolveGuideObjects(objects, courseId, guide, greens) {
   return { saved, greenPolygon: !!(match && match.green), fallback: !(match && match.green) };
 }
 
-/* Top-level entry: OSM Overpass payload -> a plain {objects, holes} pair shaped like
-   course_maps.objects_json/holes_json. courseId is a plain string; coursePoint is
-   {lat,lng} used to break ties between duplicate guides for the same hole number.
-   existingObjects (an array of already-saved object records, e.g. from a prior manual scan
-   or an earlier mapper run) is merged into rather than discarded - upsertResolvedObject's
-   nearestMatchingObject dedup treats them exactly like objects resolved this run, so a
-   hand-placed tee is updated in place rather than duplicated. */
-export function resolveCourseGeometry(payload, courseId, coursePoint, existingObjects = []) {
-  const bundle = parseOsmGuideBundle(payload);
-  const guides = chooseAutoMapGuides(bundle.guides, coursePoint);
+/* Shared by both the OSM-numbered path (resolveCourseGeometry below) and the Native Geometry
+   Resolver path (functions/lib/gd-geometry-resolver-core.mjs, via the worker): once ANY
+   source has produced a list of {hole, points, ...} guides, turning them into saved
+   tee/green/fairway objects and a holes map is identical regardless of where the guide came
+   from - a guide is a guide. existingObjects carries forward whatever the other path (or a
+   prior run) already resolved, so running both against the same course_maps row merges
+   rather than clobbers. */
+export function resolveGuidesIntoObjects(guides, courseId, greens, existingObjects = []) {
   const objects = (existingObjects || []).map(o => Object.assign({}, o));
   let saved = 0, polygons = 0, fallbacks = 0;
-  guides.forEach(guide => {
-    const result = resolveGuideObjects(objects, courseId, guide, bundle.greens);
+  (guides || []).forEach(guide => {
+    const result = resolveGuideObjects(objects, courseId, guide, greens || []);
     saved += result.saved;
     if (result.greenPolygon) polygons++;
     if (result.fallback) fallbacks++;
@@ -486,5 +484,19 @@ export function resolveCourseGeometry(payload, courseId, coursePoint, existingOb
   objects.filter(o => o.type === "green" && o.confirmed && validHoleNumber(o.holeNumber)).forEach(green => {
     holes[green.holeNumber] = asGreenRecord(green);
   });
-  return { objects: objectsMap, holes, guidesFound: bundle.guides.length, greensFound: bundle.greens.length, holesResolved: guides.length, saved, polygons, fallbacks };
+  return { objects: objectsMap, holes, saved, polygons, fallbacks };
+}
+
+/* Top-level entry: OSM Overpass payload -> a plain {objects, holes} pair shaped like
+   course_maps.objects_json/holes_json. courseId is a plain string; coursePoint is
+   {lat,lng} used to break ties between duplicate guides for the same hole number.
+   existingObjects (an array of already-saved object records, e.g. from a prior manual scan
+   or an earlier mapper run) is merged into rather than discarded - upsertResolvedObject's
+   nearestMatchingObject dedup treats them exactly like objects resolved this run, so a
+   hand-placed tee is updated in place rather than duplicated. */
+export function resolveCourseGeometry(payload, courseId, coursePoint, existingObjects = []) {
+  const bundle = parseOsmGuideBundle(payload);
+  const guides = chooseAutoMapGuides(bundle.guides, coursePoint);
+  const result = resolveGuidesIntoObjects(guides, courseId, bundle.greens, existingObjects);
+  return Object.assign(result, { guidesFound: bundle.guides.length, greensFound: bundle.greens.length, holesResolved: guides.length });
 }

@@ -61,14 +61,17 @@ assert(!fs.existsSync(path.join(root, "styles", "inline", "gd-wand-sample-truth-
 assertNotContains(pinLock, "function startMapperGreenWand", "mapper no longer opens standalone Wand UI");
 assertNotContains(pinLock, "hydrateMapperGreenForWand", "mapper no longer hydrates Wand-compatible globals");
 assertNotContains(pinLock, "saveCurrentGreen('wand_accepted')", "mapper no longer wraps accepted Wand output");
-assertContains(pinLock, "async function automapperRunGreenShapeRefinement", "AutoMapper owns a narrow Green Shape Engine refinement handoff");
-assertContains(pinLock, "automapperBuildGreenShapeCrop", "AutoMapper supplies a constrained imagery crop to the engine");
-assertContains(pinLock, "engine.detect", "AutoMapper calls the engine data API, not the standalone Wand UI");
-assertContains(pinLock, "automapper-green-shape-refinement-accepted", "AutoMapper records accepted refinement diagnostics");
-assertContains(pinLock, "automapper-green-shape-refinement-rejected", "AutoMapper records controlled rejection diagnostics");
-assertContains(pinLock, "automapper-green-shape-refinement-skipped", "AutoMapper records deterministic skip diagnostics");
-assertContains(pinLock, "osm_auto_green_refined", "accepted refinement is labelled as an AutoMapper refinement source");
-assertContains(pinLock, "await saveOsmAutoHole", "AutoMapper persistence awaits the internal refinement stage");
+/* The AutoMapper's Green Shape Engine refinement handoff (automapperRunGreenShapeRefinement,
+   automapperBuildGreenShapeCrop, engine.detect, the accepted/rejected/skipped diagnostics, and
+   the saveOsmAutoHole persistence step it fed) was a client-side integration point. The
+   AutoMapper itself moved fully server-side (functions/lib/gd-automapper-core.mjs); there is no
+   client-side AutoMapper run left to refine a green shape for, so this handoff was removed from
+   the mapper along with it. The engine (scripts/gd-green-shape-engine.js) still exposes
+   detect/validateDetection as a data-oriented contract (asserted above) for whichever future
+   consumer needs it - it is just not this one any more. */
+assertNotContains(pinLock, "automapperRunGreenShapeRefinement", "the AutoMapper Green Shape refinement handoff no longer runs client-side");
+assertNotContains(pinLock, "automapperBuildGreenShapeCrop", "the client no longer builds AutoMapper green-shape imagery crops");
+assertNotContains(pinLock, "await saveOsmAutoHole", "client-side AutoMapper persistence (saveOsmAutoHole) no longer exists");
 assertNotContains(pinLock, "openGpsWand({source:'automapper-green-shape-engine'", "refinement path does not activate Wand UI");
 assertNotContains(brandIcons, "greenToolBtn", "right rail no longer creates a standalone Wand button");
 assertNotContains(routeAudit, "dockGreen", "canonical route audit no longer routes a Green dock button");

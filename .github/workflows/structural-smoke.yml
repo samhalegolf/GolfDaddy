@@ -93,8 +93,6 @@ jobs:
           node dev/gps-scorecard-behavior.test.js
           node dev/green-shape-engine-owner.test.js
           node dev/green-shape-engine-behavior.test.js
-          node dev/automapper-green-refinement-owner.test.js
-          node dev/automapper-green-refinement-behavior.test.js
           node dev/gps-play-camera-tilt.test.js
           node dev/gps-play-runtime-owner.test.js
           node dev/conditions-engine.test.js
@@ -108,6 +106,7 @@ jobs:
           node dev/course-mapper-worker.test.js
           node dev/course-mapper-worker-integration.test.js
           node dev/automapper-core.test.js
+          node dev/geometry-resolver-core.test.js
           node dev/green-shape-core-smoke.test.js
           node dev/course-package.test.js
           node dev/course-package-trigger.test.js

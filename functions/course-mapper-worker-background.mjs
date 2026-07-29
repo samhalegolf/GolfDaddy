@@ -5,13 +5,21 @@
    queries Overpass for OSM golf-course geometry around it, resolves hole guides into
    tee/green/fairway objects (functions/lib/gd-automapper-core.mjs - a from-scratch port of
    the client AutoMapper's pure geometry pipeline), and writes the result into
-   course_maps.objects_json/holes_json/geometry_version. */
+   course_maps.objects_json/holes_json/geometry_version.
+
+   When OSM exposes shapes but no hole NUMBERS (hasNumberingIssue), falls through to the
+   Native Geometry Resolver (functions/lib/gd-geometry-resolver-core.mjs) - a separate
+   algorithm that infers numbering from geometry + scorecard evidence. This mirrors the
+   client's old two-stage mapping (AutoMapper, then the native resolver as its own fallback)
+   entirely server-side, so nothing client-side needs to run either stage anymore. */
 
 import { fetchOverpass } from "./lib/gd-overpass-client.mjs";
-import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, MAPPER_VERSION } from "./lib/gd-automapper-core.mjs";
+import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoObjects, MAPPER_VERSION } from "./lib/gd-automapper-core.mjs";
+import { hasNumberingIssue, resolveCourseGeometryForAutoMapper, guideFromResolvedHole } from "./lib/gd-geometry-resolver-core.mjs";
 
 const JOBS_TABLE = "course_mapper_jobs";
 const MAPS_TABLE = "course_maps";
+const SCORECARDS_TABLE = "course_scorecards";
 
 function env(name) { return process.env[name] || ""; }
 function supabaseBase() { return env("SUPABASE_URL").replace(/\/+$/, ""); }
@@ -95,9 +103,35 @@ async function saveResolvedGeometry(courseId, geometry) {
   });
 }
 
-/* fetch OSM golf geometry -> resolve into tee/green/fairway objects -> persist. Real pipeline
-   for stage 3 of the migration plan; replaces the stage 2 stub that only proved claim/
-   heartbeat mechanics. */
+/* course_scorecards.course_key is the course's DISPLAY NAME, lowercased and whitespace-
+   collapsed - NOT the dash-slugged course_id every other table uses. This has to match
+   gdScorecardCourseKey() (scripts/inline/gd-gps-scorecard-owner-v1.js:49) exactly or every
+   lookup here misses a scorecard that is sitting right there under a different-looking key. */
+function scorecardCourseKey(courseName) {
+  return String(courseName || "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+/* Read-only: this worker never scrapes a club website itself (that parsing lives client-side
+   and needs a DOM parser this runtime doesn't have) - it only reads what someone has already
+   shared to course_scorecards. No shared scorecard yet means the geometry resolver runs
+   without one and correctly reports geometry-resolved-numbering-unavailable rather than
+   guessing hole numbers. */
+async function fetchScorecardEvidence(courseName) {
+  const key = scorecardCourseKey(courseName);
+  if (!key) return null;
+  try {
+    const rows = await supabaseFetch(SCORECARDS_TABLE + "?select=holes_json,source,source_url,sources_json&course_key=eq." + encodeURIComponent(key) + "&limit=1");
+    const row = Array.isArray(rows) ? rows[0] : null;
+    if (!row || !Array.isArray(row.holes_json) || !row.holes_json.length) return null;
+    return { holes: row.holes_json, source: row.source || "", sourceUrl: row.source_url || "", sources: Array.isArray(row.sources_json) ? row.sources_json : [] };
+  } catch (e) {
+    return null;
+  }
+}
+
+/* fetch OSM golf geometry -> resolve into tee/green/fairway objects -> persist. When OSM has
+   shapes but no hole numbers, falls through to the Native Geometry Resolver (scorecard-backed
+   numbering) before giving up. */
 async function runMapperJob(job) {
   const course = await loadCourseCenter(job.course_id);
   if (!course) throw new Error("course " + job.course_id + " has no known location in " + MAPS_TABLE + " - cannot query Overpass");
@@ -107,8 +141,31 @@ async function runMapperJob(job) {
   const payload = await fetchOverpass(query);
   await heartbeatJob(job, { stage: "resolving-geometry" });
   const existingObjects = Object.values(course.objects || {}).filter(Boolean);
-  const geometry = resolveCourseGeometry(payload, course.courseId, course.center, existingObjects);
-  if (!geometry.holesResolved) throw new Error("no OSM hole geometry found within range of " + course.courseId);
+  let geometry = resolveCourseGeometry(payload, course.courseId, course.center, existingObjects);
+  let resolverStatus = null;
+  if (!geometry.holesResolved && hasNumberingIssue({ osmPayload: payload })) {
+    await heartbeatJob(job, { stage: "geometry-resolver" });
+    const scorecardEvidence = await fetchScorecardEvidence(course.courseName);
+    const result = await resolveCourseGeometryForAutoMapper({
+      osmPayload: payload,
+      courseId: course.courseId,
+      course: { courseId: course.courseId, courseName: course.courseName, courseCentre: course.center },
+      courseCentre: course.center,
+      scorecardHoles: scorecardEvidence ? scorecardEvidence.holes : [],
+      scorecardEvidence: scorecardEvidence || {}
+    });
+    resolverStatus = { status: result.status, confidence: result.confidence, warnings: result.warnings, hadScorecard: !!scorecardEvidence };
+    const guides = (result.holes || []).map(hole => guideFromResolvedHole(hole, result)).filter(Boolean);
+    if (guides.length) {
+      const resolverGreens = (result.debugEvidence && result.debugEvidence.greenCandidates || []).map(green => ({ center: green.centre, shape: green.polygon }));
+      const merged = resolveGuidesIntoObjects(guides, course.courseId, resolverGreens, Object.values(geometry.objects));
+      geometry = Object.assign({}, geometry, merged, { holesResolved: guides.length });
+    }
+  }
+  if (!geometry.holesResolved) {
+    const reason = resolverStatus ? "geometry resolver status: " + resolverStatus.status + (resolverStatus.hadScorecard ? "" : " (no shared scorecard found)") : "no OSM hole geometry within range";
+    throw new Error("no numbered hole geometry found for " + course.courseId + " (" + reason + ")");
+  }
   await saveResolvedGeometry(course.courseId, geometry);
   return {
     courseId: course.courseId,
@@ -118,7 +175,8 @@ async function runMapperJob(job) {
     holesResolved: geometry.holesResolved,
     saved: geometry.saved,
     polygons: geometry.polygons,
-    fallbacks: geometry.fallbacks
+    fallbacks: geometry.fallbacks,
+    resolverStatus
   };
 }
 
