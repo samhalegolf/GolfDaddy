@@ -140,6 +140,43 @@ function nativeStub(seeded) {
       assert.strictEqual(removed, undefined, "a signed-out session must not be resurrected on next boot");
     });
 
+    /* localStorage is a WebIDL legacy platform object with a named-property
+       setter, so `storage.setItem = fn` stores an ENTRY called "setItem" holding
+       the function's source text. Chromium ALSO overrides the method, so the
+       mirror appeared to work here while on iOS WebKit it did not override at
+       all - only boot-time seed() ever mirrored, and the durable copy of the
+       in-progress round sat hours stale. The install must therefore use
+       Object.defineProperty, and must not write its installed-flag onto storage.
+
+       Asserting on the stray entries rather than on override behaviour is what
+       makes this catchable in a Chromium-only harness: the entries appear in
+       both engines, the failed override only in WebKit. */
+    const strays = await page.evaluate(() => {
+      const names = ["setItem", "removeItem", "__gdDurableMirror"];
+      const keys = Object.keys(localStorage);
+      return {
+        present: names.filter((n) => keys.includes(n) || localStorage.getItem(n) !== null),
+        setItemIsFunction: typeof localStorage.setItem === "function",
+        mirrorPatched: localStorage.setItem.__gdDurableMirror === true
+      };
+    });
+
+    check("the mirror install writes no stray keys into the quota it protects", () => {
+      assert.deepStrictEqual(
+        strays.present, [],
+        "assigning onto localStorage stores an entry instead of setting a property - " +
+        "use Object.defineProperty and keep the installed flag off storage"
+      );
+    });
+
+    check("the patched setter is installed on the storage object itself", () => {
+      assert.strictEqual(strays.setItemIsFunction, true, "setItem must remain callable");
+      assert.strictEqual(
+        strays.mirrorPatched, true,
+        "the flag belongs on the patched function; a flag on storage is a storage write"
+      );
+    });
+
     await page.close();
     await context.close();
 

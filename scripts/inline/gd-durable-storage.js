@@ -99,7 +99,7 @@
     return cap && cap.Plugins && cap.Plugins.Preferences ? cap.Plugins.Preferences : null;
   }
 
-  var state = { restored: [], mirrored: 0, active: false };
+  var state = { restored: [], mirrored: 0, active: false, cleaned: 0 };
   /* Kept so restore() can write without going back through the patched setter,
      which would immediately mirror back the value it just read. */
   var originalSetItem = null;
@@ -122,31 +122,82 @@
     safe(function () { api.remove({ key: PREFIX + key }).then(function () {}, function () {}); });
   }
 
+  /* Keys a previous version of this file created by accident. See installMirror. */
+  var STRAY_KEYS = ["setItem", "removeItem", "__gdDurableMirror"];
+
   /* Patch localStorage so existing call sites keep working untouched. Wrapped so
-     a failure here can never break a write - the original is always called. */
+     a failure here can never break a write - the original is always called.
+
+     Every assignment here MUST go through Object.defineProperty. localStorage is
+     a WebIDL legacy platform object with a named-property setter, so a plain
+     `storage.setItem = fn` stores an ENTRY called "setItem" holding the
+     function's source text. An earlier version of this file did exactly that,
+     and the engines disagree about what else happens: Chromium also overrides
+     the method, so the mirror worked there and the test suite stayed green,
+     while iOS WebKit did not override at all. On WebKit that left only the
+     boot-time seed() mirroring - every write during a session went unmirrored,
+     and the durable copy of the in-progress round was found sitting over two
+     hours stale on a device. Restoring that after an eviction hands the player
+     back the wrong hole.
+
+     Both engines wrote the three junk keys ("setItem", "removeItem",
+     "__gdDurableMirror") into the same quota this module exists to protect,
+     which cleanStrayKeys below clears. Testing for those keys is also how this
+     stays catchable in a Chromium-only harness.
+
+     The installed flag lives on the patched function rather than on storage for
+     the same reason - a flag on storage is a storage write. */
   function installMirror() {
     var storage = window.localStorage;
-    if (!storage || storage.__gdDurableMirror) return;
+    if (!storage) return;
 
     var originalSet = storage.setItem.bind(storage);
     var originalRemove = storage.removeItem.bind(storage);
+    if (storage.setItem.__gdDurableMirror) { state.active = true; return; }
     originalSetItem = originalSet;
     var durable = {};
     DURABLE_KEYS.forEach(function (key) { durable[key] = true; });
 
-    storage.setItem = function (key, value) {
+    function define(name, fn) {
+      fn.__gdDurableMirror = true;
+      /* Returns false rather than throwing if the property will not take, so a
+         hostile or unusual Storage implementation degrades to no mirroring
+         instead of breaking every write in the app. */
+      return safe(function () {
+        Object.defineProperty(storage, name, {
+          value: fn, writable: true, configurable: true, enumerable: false
+        });
+        return storage[name] === fn;
+      }, false);
+    }
+
+    var setOk = define("setItem", function (key, value) {
       var result = originalSet(key, value);
       if (durable[key]) safe(function () { mirror(key, value); });
       return result;
-    };
-    storage.removeItem = function (key) {
+    });
+    var removeOk = define("removeItem", function (key) {
       var result = originalRemove(key);
       if (durable[key]) safe(function () { unmirror(key); });
       return result;
-    };
+    });
 
-    storage.__gdDurableMirror = true;
-    state.active = true;
+    cleanStrayKeys(originalRemove);
+    state.active = setOk && removeOk;
+  }
+
+  /* Drop the junk entries the old assignment created. Uses the captured native
+     removeItem: the patched one is in place by now, and these are not durable
+     keys, but going straight to the original keeps this independent of whether
+     the patch above actually took. */
+  function cleanStrayKeys(originalRemove) {
+    STRAY_KEYS.forEach(function (key) {
+      safe(function () {
+        if (window.localStorage.getItem(key) === null) return;
+        originalRemove(key);
+        state.cleaned += 1;
+      });
+    });
   }
 
   /* Copy anything already in localStorage up to Preferences, so the first run
@@ -278,7 +329,7 @@
     /* Exposed so the usage picture can be pulled on demand from a device
        console, not only when it crosses the reporting threshold. */
     usage: storageUsage,
-    state: function () { return { restored: state.restored.slice(), mirrored: state.mirrored, active: state.active }; },
+    state: function () { return { restored: state.restored.slice(), mirrored: state.mirrored, active: state.active, cleaned: state.cleaned }; },
     /* Exposed for tests and for a manual integrity check on a device. */
     seed: seed,
     restore: restore
