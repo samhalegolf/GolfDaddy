@@ -10,6 +10,8 @@
     "path": "ios",
     "scheme": "App",
     "contentInset": "always",
+    "backgroundColor": "#050806",
+    "webContentsDebuggingEnabled": true,
     "limitsNavigationsToAppBoundDomains": false
   },
   "server": {

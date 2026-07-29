@@ -17116,8 +17116,10 @@ window.gdTryEnterGreenFocusFromPoint=gdTryEnterGreenFocusFromPoint;
 window.gdEnterGreenFocusMode=gdEnterActiveGreenFocus;
 window.gdFinishActiveGreenFocus=gdFinishActiveGreenFocus;
 function gdUseMappedTeeAsStart(){
-  const payload=gdActiveMappedHolePlayData();
-  const ll=gdMappedPointToLatLng(payload?.data?.tee?.position)||gdMappedPointToLatLng(payload?.data?.route?.[0])||gdActiveMappedTeeStartPoint();
+  let payload=null;
+  try{payload=gdActiveMappedHolePlayData()}catch(e){}
+  let ll=null;
+  try{ll=gdMappedPointToLatLng(payload?.data?.tee?.position)||gdMappedPointToLatLng(payload?.data?.route?.[0])||gdActiveMappedTeeStartPoint()}catch(e){}
   if(!ll){toast("Tee box not mapped yet");return false}
   if(lockedFrame){toast("Unlock to change start");return false}
   try{document.body.classList.add("gdHeadToTeeFrameActive")}catch(e){}
