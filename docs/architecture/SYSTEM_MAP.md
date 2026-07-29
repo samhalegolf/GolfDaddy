@@ -351,6 +351,41 @@ Rules:
 - Fairway line supports orientation and unreachable-green anchoring.
 - Tee location is useful but not sacred.
 
+Server split (course-package migration, added 2026-07-29): the OSM query/parse/hole-resolution
+algorithm above is now ALSO ported server-side, verbatim-equivalent, in
+`functions/lib/gd-automapper-core.mjs`, run by `functions/course-mapper-worker-background.mjs`
+against jobs queued through `functions/course-mapper-jobs.mjs` (table `course_mapper_jobs`).
+Client behaviour is unchanged in scope (same rules above) but `runCourseMappingAttempt`
+(`scripts/gd-course-library-pin-lock.js`) now checks `GET /api/course-package` first via
+`resolveGeometryFromServerPackage()` and skips its own OSM fetch when the server already has
+this course resolved - a fail-open short-circuit, not a replacement. The client's own OSM
+fetch, native-resolver, and manual-fallback paths are all still live and still the only path
+for a course the server hasn't reached (which as of this writing is every course, since the
+server pipeline has not yet had a verified production run - see the migration plan's stage 8
+notes before removing any of this client code).
+
+---
+
+## Course Package Boundary Gate
+
+Owns:
+- The single decision of whether it is safe, right now, to swap a mid-round-arriving Full Map
+  Package into what GPS Play is rendering, versus holding it until the active hole changes.
+
+Must NOT own:
+- GPS Play rendering
+- Frame downloading, caching, or hydration
+- Hole tracking (it takes hole numbers as plain input; see
+  `scripts/inline/gd-course-package-boundary-gate-v1.js`)
+
+Inputs:
+- `armedAtHole` (the hole in play when a course-frames watch started) and `currentHole`
+  (read via `window.gdActivePlayingHole`), supplied by `gd-app-core.js`'s
+  `gdEnsureCourseFramesForPlay`/`gdActivateCourseVisualAtSafeBoundary`.
+
+Outputs:
+- `true`/`false` - safe to activate now, or hold and re-check later.
+
 ---
 
 ## Coach / Client Boundary

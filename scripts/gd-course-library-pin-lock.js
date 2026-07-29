@@ -5238,6 +5238,59 @@
 	    recordCoursePlayDebug('course-mapping-native-completed',request.course,request.hole,{playable,partial:playable&&!generatedState.ready,holes:persisted.holes||0,saved:persisted.saved||0,framesCollected:frameCollection.rows.length,framesWarmed:frameCollection.warmed,nativeStatus:resolvedBundle&&resolvedBundle.resolver&&resolvedBundle.resolver.status||'unknown',nativeConfidence:resolvedBundle&&resolvedBundle.resolver&&resolvedBundle.resolver.confidence||0,resolutionKey:request.resolutionKey,attemptToken:request.attemptToken});
 	    return {ran:true,playable,partial:playable&&!generatedState.ready,readiness:generatedState,persisted,bundle:resolvedBundle,framesCollected:frameCollection};
 	  }
+	  /* Stage 6 of the course-package migration plan: before running the client's own OSM
+	     fetch, ask the server (functions/course-package.mjs) whether it has already resolved
+	     this course - either as a durable Lite Geometry Pack or a full published package.
+	     Fails open on anything short of a definite hit: no GDCoursePackageClient (script not
+	     loaded on an older cached build), a network error, a timeout, or a "processing"/"none"
+	     status all return null here, and the caller falls through to autoMapOsmCourse exactly
+	     as before this stage existed. This function does not itself decide whether the OSM
+	     leg runs - runCourseMappingAttempt does, by checking this return value - so it never
+	     changes behavior for a course the server hasn't touched.
+
+	     Persists via the same saveCourseObject() path autoMapOsmCourse uses, so everything
+	     downstream (savedMapCanSatisfyRequest, recordDiscoveredHoleCount, cloud sync) sees an
+	     identical shape regardless of which source produced the geometry. */
+	  async function resolveGeometryFromServerPackage(course){
+	    const client=window.GDCoursePackageClient;
+	    if(!client||typeof client.fetchPackage!=='function')return null;
+	    const centre=guideCoursePoint(course);
+	    if(!Number.isFinite(centre?.lat)||!Number.isFinite(centre?.lng))return null;
+	    let pkg=null;
+	    try{
+	      pkg=await client.fetchPackage({courseId:courseId(course),courseName:courseName(course),courseLat:centre.lat,courseLng:centre.lng,timeoutMs:3500});
+	    }catch(e){return null;}
+	    if(!pkg||(pkg.status!=='lite-geo-ready'&&pkg.status!=='full-map-ready'))return null;
+	    const holes=Array.isArray(pkg.holes)?pkg.holes:[];
+	    if(!holes.length)return null;
+	    const cid=courseId(course);
+	    const name=courseName(course);
+	    let saved=0,polygons=0,fallbacks=0;
+	    holes.forEach(hole=>{
+	      const h=validHoleNumber(hole&&hole.holeNumber);
+	      if(!h)return;
+	      const geometry=pkg.status==='full-map-ready'?hole.geometry:hole;
+	      if(!geometry)return;
+	      const green=toPlain(geometry.green);
+	      if(green){
+	        const hasShape=Array.isArray(geometry.greenShape)&&geometry.greenShape.length>=3;
+	        const shape=hasShape?geometry.greenShape:fallbackGreenShape(green,16,40);
+	        const savedGreen=saveCourseObject({userId:userId(),courseId:cid,courseName:name,course,type:'green',position:green,shape,greenShape:shape,source:'server-course-package',holeNumber:h,confirmed:true,resolverConfidence:Number.isFinite(Number(hole.confidence))?Number(hole.confidence):undefined,maxDedupeDistanceM:4});
+	        if(savedGreen)saved++;
+	        if(hasShape)polygons++;else fallbacks++;
+	      }
+	      const tee=toPlain(geometry.tee);
+	      if(tee){
+	        if(saveCourseObject({userId:userId(),courseId:cid,courseName:name,course,type:'tee',position:tee,source:'server-course-package',holeNumber:h,confirmed:true,maxDedupeDistanceM:4}))saved++;
+	      }
+	      const route=Array.isArray(geometry.route)?geometry.route:[];
+	      route.slice(1,-1).forEach(point=>{
+	        const bend=toPlain(point);
+	        if(bend&&saveCourseObject({userId:userId(),courseId:cid,courseName:name,course,type:'fairway',position:bend,source:'server-course-package',holeNumber:h,confirmed:true,maxDedupeDistanceM:4}))saved++;
+	      });
+	    });
+	    return {saved,holes:holes.length,polygons,fallbacks,automapperStatus:'success',serverPackageStatus:pkg.status};
+	  }
 	  async function runCourseMappingAttempt(input={}){
 	    const opts=Object.assign({},input||{});
 	    const selectedAt=opts.selectedAt||nowIso();
@@ -5308,7 +5361,11 @@
         updateCourseLoading('Mapping from OSM',42);
         const mapOpts={quiet:true,frame:false,promptStart:true,fresh:opts.fresh!==false,course:c,__gdResolverOwned:true,skipGeometryResolver:true,resolutionKey:key,activeResolutionKey:key,attemptToken,debugRunId,selectedAt,reason:request.reason,debugAttemptContext:attempt,callerFunction:'runCourseMappingAttempt'};
         if(request.wholeCourse===false)mapOpts.hole=h;
-        const autoMapResult=await autoMapOsmCourse(mapOpts);
+        let autoMapResult=null;
+        try{autoMapResult=await resolveGeometryFromServerPackage(c);}catch(e){autoMapResult=null;}
+        if(autoMapResult)recordMappingDebug(debugRunId,{source:'automapper',phase:'completed',event:'server-course-package-hit',summary:'Server already had this course mapped',details:{hole:h,resolutionKey:key,attemptToken,serverPackageStatus:autoMapResult.serverPackageStatus,holes:autoMapResult.holes,saved:autoMapResult.saved}});
+        if(!mappingAttemptStillCurrent(request,attempt,'server-course-package'))return {playable:false,stale:true,reason:'superseded-after-server-course-package'};
+        if(!autoMapResult)autoMapResult=await autoMapOsmCourse(mapOpts);
         if(!mappingAttemptStillCurrent(request,attempt,'automapper'))return {playable:false,stale:true,reason:'superseded-after-automapper'};
         try{
           document.body.dataset.gdCourseAutoMappedHoles=String(autoMapResult&&autoMapResult.holes||0);

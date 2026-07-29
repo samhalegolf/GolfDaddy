@@ -31,6 +31,14 @@
   var ASSET_ENDPOINT="/api/course-visual-assets";
   var FRAMES_WAIT_MODE="live-until-ready";
   var FRAMES_POLL_MS=20000;
+  /* This IndexedDB store is a READ-THROUGH CACHE of bytes the server already published via
+     ASSET_ENDPOINT above - it is filled by hydrateCourseVisualAssets() reading server
+     responses, never by capturing/flattening anything on this device. That makes it a
+     different thing from the client-side capture/manifest subsystems the course-package
+     migration plan calls for removing (scripts/inline/gd-captured-hole-frame-camera-v19.js,
+     gd-captured-surface-model-v1.js): those GENERATE a course visual on-device; this only
+     avoids re-downloading one the server already generated. Kept deliberately - see the
+     migration plan's stage 8 "Open decisions" for the reasoning. */
   var ASSET_DB_NAME="gd_course_visual_assets_v1";
   var ASSET_STORE_NAME="assets";
   var VALID_STATUSES={unavailable:1,"input-ready":1,stitching:1,"basic-ready":1,rendering:1,"preview-ready":1,published:1,failed:1};

@@ -1,8 +1,11 @@
-/* Read-only proxy for the private course-visuals Storage bucket.
+/* Read-only proxy for the course-visuals Storage bucket.
    GET /api/course-visual-assets?path=<courseId>/frames/v3/h1.jpg
    Published course imagery is public to players by design; the proxy only allows the
    captures/ and frames/ prefixes and streams objects with long cache headers (paths are
-   versioned, so cached objects never go stale in place). */
+   versioned, so cached objects never go stale in place).
+   The bucket itself is created public (supabase/migrations/20260715_create_course_visuals.sql)
+   - this proxy's PATH_RE allow-list is the real access boundary either way, since nothing
+   reads the bucket directly. */
 
 const BUCKET = "course-visuals";
 const PATH_RE = /^[a-z0-9][a-z0-9-]{0,90}\/(captures|frames)\/[a-zA-Z0-9._\/-]{1,300}$/;

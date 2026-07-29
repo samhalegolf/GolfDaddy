@@ -396,6 +396,12 @@ function loadController(options = {}) {
     win.gdReadResumeRound = () => ({ updatedAt: Date.now(), course: course(), courseLabel: "Controller Test Golf Club", hole: 1, activated: true });
   }
   win.window = win;
+  /* Stage 6 of the course-package migration plan: resolveGeometryFromServerPackage() reads
+     window.GDCoursePackageClient, not a network call, so a scenario opts into the server
+     short-circuit by supplying a canned response here rather than stubbing fetch. */
+  if (options.serverCoursePackage) {
+    win.GDCoursePackageClient = { fetchPackage: async () => options.serverCoursePackage };
+  }
 
   const context = {
     window: win,
@@ -608,6 +614,34 @@ async function main() {
   assert.strictEqual(env.result.playable, true, "AutoMapper success resolves play");
   assert.strictEqual(env.calls.fetch, 1, "AutoMapper ran once");
   assert.strictEqual(env.calls.native, 0, "AutoMapper success prevents native resolver");
+
+  /* Stage 6 of the course-package migration plan: when the server already has this course
+     mapped, the client must skip its own OSM fetch entirely and persist straight from the
+     server's answer - not run AutoMapper "just in case" and not fall back to the native
+     resolver either. */
+  env = await runScenario({
+    serverCoursePackage: {
+      status: "lite-geo-ready",
+      holes: [{
+        holeNumber: 1,
+        tee: { lat: -36.9006, lng: 174.75 },
+        green: { lat: -36.9008, lng: 174.75 },
+        greenShape: [{ lat: -36.90081, lng: 174.7501 }, { lat: -36.90079, lng: 174.7501 }, { lat: -36.9008, lng: 174.74995 }],
+        route: [{ lat: -36.9006, lng: 174.75 }, { lat: -36.9007, lng: 174.75 }, { lat: -36.9008, lng: 174.75 }],
+        confidence: 0.83
+      }]
+    }
+  });
+  assert.strictEqual(env.result.playable, true, "server-provided geometry resolves play");
+  assert.strictEqual(env.calls.fetch, 0, "a server hit must skip the client's own OSM fetch");
+  assert.strictEqual(env.calls.native, 0, "a server hit must skip the native resolver too");
+  assert(env.events.some((event) => event.event === "server-course-package-hit"), "the server short-circuit is logged for diagnostics");
+
+  /* Fails open: a course the server has never touched (or a response missing a "ready"
+     status) must fall straight through to today's AutoMapper path, unchanged. */
+  env = await runScenario({ serverCoursePackage: { status: "processing" }, automapperSuccess: true });
+  assert.strictEqual(env.calls.fetch, 1, "a non-ready server response falls through to the existing OSM fetch");
+  assert.strictEqual(env.result.playable, true);
 
   env = await runScenario({ fetchFails: true });
   assert.strictEqual(env.calls.native, 1, "AutoMapper fetch failure invokes native resolver exactly once");

@@ -16351,7 +16351,15 @@ async function gdEnsureCourseFramesForPlay(payload,opts={}){
      one that was only ever going to look. */
   if(active&&active.token===token&&(active.acquire||!acquire))return active;
   try{active?.stop?.();}catch(e){}
-  window.__gdCourseFramesWatch={token,acquire,stop(){}};
+  /* armedAtHole: the hole the player was on when this watch started, read once here rather
+     than at swap time - it is what "safe boundary" is measured against, per
+     scripts/inline/gd-course-package-boundary-gate-v1.js. Cached frames (the overwhelming
+     common case: a course already in the library) resolve on the same tick with the player
+     on the same hole they are on right now, so the gate is a same-tick no-op there; it only
+     ever holds something back for a build that finishes minutes later, mid-hole. */
+  let armedAtHole=null;
+  try{armedAtHole=typeof window.gdActivePlayingHole==="function"?window.gdActivePlayingHole():null;}catch(e){}
+  window.__gdCourseFramesWatch={token,acquire,armedAtHole,stop(){}};
 
   /* Cached frames answer before any of the key resolution below, so a course opened once
      starts instantly and works with no signal at all. */
@@ -16405,12 +16413,43 @@ async function gdEnsureCourseFramesForPlay(payload,opts={}){
       /* The frames are in the asset store keyed by path; hydration is what puts their pixels
          on the record's published assets, which is what GPS play actually renders from. */
       try{await engine.hydrateCourseVisualAssets?.(courseId);}catch(e){}
-      try{await gdLoadCourseVisualForPlay(payload,{keys,force:true,setLoading:false,source:"course-frames-ready"});}catch(e){}
+      try{gdActivateCourseVisualAtSafeBoundary(courseId,payload,keys,window.__gdCourseFramesWatch&&window.__gdCourseFramesWatch.armedAtHole,token);}catch(e){}
       try{if(typeof gdCoursePlayDebugEvent==="function")gdCoursePlayDebugEvent("course-frames-ready",{courseId,holes:Array.isArray(frames&&frames.holes)?frames.holes.length:0,version:frames&&frames.version||"",fromCache:!!(frames&&frames.fromCache)});}catch(e){}
     }
   });
-  window.__gdCourseFramesWatch=Object.assign({token,acquire},watch);
+  window.__gdCourseFramesWatch=Object.assign({token,acquire,armedAtHole},watch);
   return window.__gdCourseFramesWatch;
+}
+
+/* Safe-boundary activation for a Full Map Package that becomes ready mid-round (stage 7 of
+   the course-package migration plan). Applies immediately when
+   scripts/inline/gd-course-package-boundary-gate-v1.js says it's safe (the common case - see
+   the armedAtHole comment above); otherwise polls until the player's hole changes, with a
+   hard timeout so a stuck round can never hold a downloaded package forever. Returns nothing
+   useful - callers do not need to know whether the apply happened now or later, only that it
+   will happen. */
+function gdActivateCourseVisualAtSafeBoundary(courseId,payload,keys,armedAtHole,token){
+  const apply=()=>gdLoadCourseVisualForPlay(payload,{keys,force:true,setLoading:false,source:"course-frames-ready"}).catch(()=>{});
+  const gate=window.GDCoursePackageBoundaryGate;
+  const currentHole=()=>{try{return typeof window.gdActivePlayingHole==="function"?window.gdActivePlayingHole():null;}catch(e){return null;}};
+  const safeNow=!gate||typeof gate.shouldActivateNow!=="function"||gate.shouldActivateNow({armedAtHole,currentHole:currentHole()});
+  if(safeNow){apply();return;}
+  const POLL_MS=5000;
+  /* A round abandoned mid-hole must not hold this forever - apply on the next course open
+     regardless (gdEnsureCourseFramesForPlay's cached-frames path handles that independently),
+     and stop polling well before that could matter. */
+  const MAX_WAIT_MS=20*60*1000;
+  const startedAt=Date.now();
+  const timer=setInterval(()=>{
+    /* A different course/acquire request has taken over this watch slot - this poll is for
+       a swap that no longer applies. */
+    if(!window.__gdCourseFramesWatch||window.__gdCourseFramesWatch.token!==token){clearInterval(timer);return;}
+    const overdue=Date.now()-startedAt>MAX_WAIT_MS;
+    if(overdue||!gate||typeof gate.shouldActivateNow!=="function"||gate.shouldActivateNow({armedAtHole,currentHole:currentHole()})){
+      clearInterval(timer);
+      apply();
+    }
+  },POLL_MS);
 }
 function gdScheduleCourseVisualPullForPlay(payload){
   if(gdCoursePayloadIsManual(payload))return false;

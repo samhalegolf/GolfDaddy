@@ -104,6 +104,13 @@ jobs:
           node dev/conditions-engine-behavior.test.js
           node dev/course-mapping-controller.test.js
           node dev/course-visual-engine.test.js
+          node dev/course-mapper-jobs.test.js
+          node dev/course-mapper-worker.test.js
+          node dev/course-mapper-worker-integration.test.js
+          node dev/automapper-core.test.js
+          node dev/green-shape-core-smoke.test.js
+          node dev/course-package.test.js
+          node dev/course-package-trigger.test.js
           node dev/imagery-source-registry.test.js
           node dev/map-source-coverage.test.js
           node dev/shell-navigation-owner.test.js
