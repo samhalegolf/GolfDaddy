@@ -73,6 +73,16 @@
       action: "upsert_account",
       reason: reason || "sync",
       clientTime: new Date().toISOString(),
+      /* When this sync was triggered by clarity:session-changed, say which
+         identity fields flipped and what they flipped from and to. The
+         production mystery this answers: bursts of session-changed rows every
+         ~10s during play, with the payload showing a stable profile id - so the
+         flapping field was invisible from the server. */
+      sessionChange: safe(function () {
+        var change = window.__gdLastSessionChange;
+        if (!change || !change.fields || !change.fields.length) return null;
+        return { fields: change.fields.slice(0, 5), reason: change.reason || "", from: change.from, to: change.to, at: change.at };
+      }, null),
       account: account,
       profile: profileFor(account)
     };

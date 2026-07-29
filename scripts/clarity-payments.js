@@ -1163,5 +1163,22 @@
   };
 
   document.addEventListener("DOMContentLoaded", function () { setTimeout(function () { install(); handleReturn(); refresh({ silent: true, auto: true }); loadReferralDashboard({ silent: true }); }, 150); });
-  window.addEventListener("clarity:session-changed", function () { setTimeout(function () { install(); acceptStoredReferral({ silent: true }); refresh({ silent: true, auto: true }); loadReferralDashboard({ silent: true }); }, 50); });
+  window.addEventListener("clarity:session-changed", function (event) {
+    /* Only re-run the full payment pipeline when WHO is signed in changed.
+       accountRole is partly derived from this module's own status (player ->
+       subscribedPlayer), so refreshing on a role-only change is the feedback
+       edge of a loop: refresh -> applyStatus -> ClaritySession.sync ->
+       session-changed -> refresh. And viewedProfileId is a coach flipping
+       between players, which does not alter whose entitlement this is.
+       Events without changedFields (older dispatchers) keep the old behaviour. */
+    var fields = event && event.detail && Array.isArray(event.detail.changedFields) ? event.detail.changedFields : null;
+    var identityChanged = !fields || fields.indexOf("accountId") !== -1 || fields.indexOf("isSignedIn") !== -1;
+    setTimeout(function () {
+      install();
+      if (!identityChanged) return;
+      acceptStoredReferral({ silent: true });
+      refresh({ silent: true, auto: true });
+      loadReferralDashboard({ silent: true });
+    }, 50);
+  });
 })();

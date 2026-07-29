@@ -145,7 +145,23 @@ async function upsertAccount(payload, action) {
       profile_id: profileId,
       event_type: action,
       status: "synced",
-      payload_json: { accountEmail, role, reason: text(payload.reason, 120), clientTime: payload.clientTime || null }
+      payload_json: {
+        accountEmail,
+        role,
+        reason: text(payload.reason, 120),
+        clientTime: payload.clientTime || null,
+        /* Diagnostic breadcrumb from the client: which session identity fields
+           changed to trigger this sync, with before/after values. Size-capped
+           via JSON round-trip of a small object; nothing here is trusted. */
+        sessionChange: payload.sessionChange && typeof payload.sessionChange === "object"
+          ? {
+              fields: Array.isArray(payload.sessionChange.fields) ? payload.sessionChange.fields.slice(0, 5).map((f) => text(f, 40)) : [],
+              reason: text(payload.sessionChange.reason, 60),
+              from: payload.sessionChange.from && typeof payload.sessionChange.from === "object" ? payload.sessionChange.from : null,
+              to: payload.sessionChange.to && typeof payload.sessionChange.to === "object" ? payload.sessionChange.to : null
+            }
+          : null
+      }
     })
   });
 

@@ -68,6 +68,7 @@ jobs:
           node dev/profile-hydrate.test.js
           node dev/payment-access-failsafe.test.js
           node dev/auth-config-cache.test.js
+          node dev/session-change-diagnostics.test.js
           node dev/payment-admin-auth.test.js
           node dev/referrals-auth.test.js
           node dev/referral-invite-target.test.js
