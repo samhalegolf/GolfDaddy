@@ -58,11 +58,11 @@ test("the pull runs before the saved-map check", () => {
   );
 });
 
-test("the pull runs before the automapper", () => {
+test("the pull runs before geometry resolution", () => {
   const hydrateAt = src.indexOf("await tryHydrateCapturedScansFromCloud(");
-  const autoMapAt = src.indexOf("const autoMapResult=await autoMapOsmCourse(");
-  assert.notStrictEqual(autoMapAt, -1, "automap call must exist");
-  assert.ok(hydrateAt < autoMapAt, "the automapper is what generates a fresh scan");
+  const resolveAt = src.indexOf("try{autoMapResult=await resolveGeometryFromServerPackage(");
+  assert.notStrictEqual(resolveAt, -1, "geometry resolution call must exist");
+  assert.ok(hydrateAt < resolveAt, "geometry resolution is what generates a fresh scan");
 });
 
 test("course identity is literal, with no candidate list", () => {

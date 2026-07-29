@@ -3603,7 +3603,6 @@
 	    lockMappedGreenFromStart:forceLockMappedGreenFromStart,
 	    mappedHolePlayData,
 	    mappedFairwayAxisForShot,
-	    autoMapOsmCourse,
 	    publishCourseMap,
 	    syncPublishedCourseMaps,
 	    publishedCourseMapAvailability,
@@ -3630,7 +3629,6 @@
   window.gdMappedHolePlayData=mappedHolePlayData;
   window.gdMappedFairwayAxisForShot=mappedFairwayAxisForShot;
   window.gdMappedFairwayLayupTarget=mappedFairwayLayupTarget;
-  window.gdAutoMapOsmCourse=autoMapOsmCourse;
   window.gdScheduleOsmAutoMapForPlay=scheduleOsmAutoMapForPlay;
 
 		  function ensureMapperToolsDrawer(){
@@ -3682,7 +3680,7 @@
 	      const replace=!!(window.gdFullMappingMode&&mapperToolDone(tool));
 	      if(tool==='green')startMapperGreenCapture(ev,{replaceExisting:replace});
 	      if(tool==='assignhole')assignActiveGreenFromToolbar();
-	      if(tool==='automap')autoMapOsmCourse();
+	      if(tool==='automap')runServerAutoMapTool();
 	      if(tool==='save')saveFullMappingMode();
 	      if(tool==='next')saveFullMappingMode({advance:true});
 	      if(tool==='clearhole')clearCurrentMapperHole();
@@ -3954,74 +3952,15 @@
 	    }
 	    return {saved,holes:guides.length,polygons,fallbacks,refinedGreenShapes,refinementRejected,refinementSkipped,persistFailures:storePersistFailures-persistFailuresBefore,guides,guideBundle:bundle||null};
 	  }
-	  async function autoMapOsmCourse(opts={}){
-	    cancelMapperCapture();
-	    const selectedAt=opts.selectedAt||nowIso();
-	    const course=mappingCourseSnapshot(opts.course||sessionCourse(courseObj()),Object.assign({},opts,{selectedAt}));
-	    const activeAttempt=activeMappingDebugAttempt(course,{hole:opts.hole||1});
-	    const directRun=!opts.debugRunId&&!activeAttempt&&!opts.__gdResolverOwned&&!opts.__gdMappingRunStarted;
-	    const debugRunId=opts.debugRunId||(activeAttempt&&activeAttempt.debugRunId)||mappingDebugRun(course,Object.assign({},opts,{selectedAt,newRun:directRun}));
-	    const attempt=opts.debugAttemptContext||mappingAttemptContext(course,opts.hole||1,Object.assign({},opts,{debugRunId,attemptToken:opts.attemptToken||activeAttempt&&activeAttempt.attemptToken||'',activeResolutionKey:activeAttempt&&activeAttempt.resolutionKey||opts.resolutionKey,selectedAt,source:opts.reason||opts.source||'automapper',callerFunction:opts.callerFunction||'autoMapOsmCourse'}));
-	    if(directRun)publishMappingAttempt(attempt);
-	    const quiet=!!opts.quiet;
-	    if(directRun){
-	      recordMappingDebug(debugRunId,{source:'course-loader',phase:'started',event:'mapping-attempt-started',summary:'Course mapping attempt started',details:{
-	        courseId:course.courseId,
-        courseName:course.courseName,
-        courseCentre:course.courseCentre,
-        selectedAt,
-        invokedBy:opts.reason||opts.source||'automapper',
-        attemptToken:opts.attemptToken||'',
-        resolutionKey:opts.resolutionKey||'',
-	      }});
-	    }
-	    else if(activeAttempt&&activeAttempt.debugRunId===debugRunId&&!opts.debugRunId){
-	      recordMappingDebug(debugRunId,{source:'course-loader',phase:'progress',event:'automapper-adopted-active-run',summary:'AutoMapper adopted active mapping run',details:{
-	        courseId:course.courseId,
-	        courseName:course.courseName,
-	        hole:opts.hole||1,
-	        resolutionKey:activeAttempt.resolutionKey||opts.resolutionKey||'',
-	        attemptToken:activeAttempt.attemptToken||opts.attemptToken||'',
-	        adoptedFrom:activeAttempt.source||'course-play-pipeline'
-	      }});
-	    }
-    if(!quiet)toastSafe('Auto mapping from OSM...');
-	    const bundle=await loadOsmGuideBundle(course,{needsGreens:true,fresh:!!opts.fresh,skipGeometryResolver:opts.skipGeometryResolver!==false,debugRunId,source:opts.source||opts.reason||'automapper',reason:opts.reason||opts.source||'automapper',debugAttemptContext:attempt,callerFunction:'autoMapOsmCourse'});
-	    if(bundle&&bundle.stale||!isCurrentMappingAttempt(attempt)){
-	      recordStaleMappingActivity(attempt,{eventSource:'automapper',event:'automapper-stale-result-rejected',summary:'AutoMapper stale result rejected',attemptedAction:'persist-geometry',callerFunction:'autoMapOsmCourse'});
-	      return false;
-	    }
-	    const persisted=await persistOsmGuideBundle(course,bundle,opts,debugRunId,attempt);
-	    if(!persisted.guides.length){
-	      if(!quiet)toastSafe('No OSM hole lines found');
-	      return Object.assign({saved:0,holes:0,polygons:0,fallbacks:0,automapperStatus:'failed',automapperError:bundle.automapperError||null},persisted);
-	    }
-	    const active=opts.hole?validHoleNumber(opts.hole):mapperHole();
-	    const saved=persisted.saved,polygons=persisted.polygons,fallbacks=persisted.fallbacks,guides=persisted.guides;
-	    const label=opts.hole?`H${active}`:`${guides.length} holes`;
-	    if(!quiet||saved){
-	      toastSafe(saved?`OSM base map ready`:`${label} already mapped`);
-	    }
-	    if(!quiet){
-	      hintSafe(saved?`${label}: OSM base layer saved (${polygons} shaped green${polygons===1?'':'s'})`:`${label}: OSM base layer already exists`);
-	    }
-	    const persistFailed=!!(persisted.persistFailures&&!saved);
-	    recordMappingDebug(debugRunId,{source:'persistence',phase:persistFailed?'failed':saved?'completed':'skipped',event:persistFailed?'automapper-persistence-failed':saved?'automapper-persistence-completed':'automapper-persistence-skipped',summary:persistFailed?'AutoMapper mapped the course but storage rejected the save':saved?'AutoMapper geometry saved':'AutoMapper geometry already existed',details:{
-	      invokedBy:opts.reason||opts.source||'automapper',
-	      acceptedGuides:guides.length,
-	      savedObjects:saved,
-	      shapedGreens:polygons,
-	      fallbackGreenShapes:fallbacks,
-	      refinedGreenShapes:persisted.refinedGreenShapes||0,
-	      refinementRejected:persisted.refinementRejected||0,
-	      refinementSkipped:persisted.refinementSkipped||0,
-	      persistFailures:persisted.persistFailures||0,
-	      persistFailure:persisted.persistFailures?lastStorePersistFailure:null,
-	      hole:opts.hole?active:'',
-	      existingTrustedMap:!saved&&!persistFailed
-	    }});
-	    return Object.assign({saved,holes:guides.length,polygons,fallbacks,automapperStatus:persistFailed?'persist-failed':'success',automapperError:bundle.automapperError||null},persisted);
-	  }
+	  /* autoMapOsmCourse (the client-side "run AutoMapper now" orchestrator) was removed here.
+	     Per the course-package architecture doc's acceptance criteria ("No AutoMapper logic
+	     runs on the user's phone"), the app no longer runs its own top-level AutoMapper pass -
+	     see resolveGeometryFromServerPackage/runServerAutoMapTool below, and
+	     functions/course-mapper-jobs.mjs + functions/lib/gd-automapper-core.mjs server-side.
+	     loadOsmGuideBundle/persistOsmGuideBundle and the OSM query/parse helpers above remain:
+	     they are also the Native Geometry Resolver's own source-acquisition step
+	     (acquireNativeResolverSourceBundle), a separate fallback for courses where OSM exposes
+	     shapes but no hole numbers, which has no server equivalent yet. */
 	  function scheduleOsmAutoMapForPlay(course,opts={}){
 	    try{
 	      const c=sessionCourse(course||courseObj());
@@ -4055,7 +3994,11 @@
 	        try{
 	          const active=sessionCourse(courseObj());
 	          if(mappedModeCourseIdentity(active)!==mappedModeCourseIdentity(c))return;
-	          autoMapOsmCourse({quiet:true,frame:opts.frame!==false,hole:opts.hole,promptStart:!!opts.promptStart,course:c}).catch(()=>{});
+	          /* Quiet background warm, same server-first/no-client-fetch rule as
+	             runCourseMappingAttempt: check (and, as a side effect, trigger) the server
+	             package; apply if it is already ready, otherwise this is a no-op for now and
+	             the course is picked up again the next time it is actually opened. */
+	          resolveGeometryFromServerPackage(c).catch(()=>{});
 	        }catch(e){}
 	      },opts.delayMs||900);
 	      return true;
@@ -5291,6 +5234,35 @@
 	    });
 	    return {saved,holes:holes.length,polygons,fallbacks,automapperStatus:'success',serverPackageStatus:pkg.status};
 	  }
+	  /* Manual "Auto" tool in the full-mapping flyout (data-map-tool="automap") - an
+	     operator-triggered request for the server to map this course now. Replaces the old
+	     direct autoMapOsmCourse() call: the server job is asynchronous, so this polls briefly
+	     rather than blocking on one request, and owns its own toasts since (unlike
+	     runCourseMappingAttempt's quiet background check) this IS the user-visible action. */
+	  async function runServerAutoMapTool(){
+	    const course=sessionCourse(courseObj());
+	    if(!course||isManualGpsCourse(course)){toastSafe('Select a course first');return null;}
+	    toastSafe('Requesting server mapping...');
+	    const POLL_MS=4000;
+	    const MAX_ATTEMPTS=15; // ~60s of polling before telling the operator to check back later
+	    for(let attempt=0;attempt<MAX_ATTEMPTS;attempt++){
+	      let result=null;
+	      try{result=await resolveGeometryFromServerPackage(course);}catch(e){result=null;}
+	      if(result&&(result.saved>0||result.holes>0)){
+	        const nextCourse=loadUserCourseData(userId(),courseId(course));
+	        if(nextCourse)drawHoleObjects(nextCourse,mapperHole());
+	        updateMapperHoleUi();
+	        updateMapperToolCompletion();
+	        renderCourseLibraryPanel();
+	        gdCLRefreshProfileCard();
+	        toastSafe(`Server map ready (${result.holes} hole${result.holes===1?'':'s'})`);
+	        return result;
+	      }
+	      if(attempt<MAX_ATTEMPTS-1)await sleep(POLL_MS);
+	    }
+	    toastSafe('Still mapping on the server - check back shortly');
+	    return null;
+	  }
 	  async function runCourseMappingAttempt(input={}){
 	    const opts=Object.assign({},input||{});
 	    const selectedAt=opts.selectedAt||nowIso();
@@ -5358,14 +5330,24 @@
           return showResolvedCoursePlayHole(c,h,'saved-map',opts);
         }
         if(!mappingAttemptStillCurrent(request,attempt,'saved-map'))return {playable:false,stale:true,reason:'superseded-before-automapper'};
-        updateCourseLoading('Mapping from OSM',42);
-        const mapOpts={quiet:true,frame:false,promptStart:true,fresh:opts.fresh!==false,course:c,__gdResolverOwned:true,skipGeometryResolver:true,resolutionKey:key,activeResolutionKey:key,attemptToken,debugRunId,selectedAt,reason:request.reason,debugAttemptContext:attempt,callerFunction:'runCourseMappingAttempt'};
-        if(request.wholeCourse===false)mapOpts.hole=h;
+        updateCourseLoading('Checking server map',42);
+        /* No client AutoMapper below this line - per the course-package architecture doc's
+           acceptance criteria, "No AutoMapper logic runs on the user's phone". The server
+           (functions/course-mapper-jobs.mjs / gd-automapper-core.mjs) owns OSM querying and
+           hole resolution now. resolveGeometryFromServerPackage() both checks AND, as a side
+           effect of the request it makes, triggers a server mapping run if none exists yet
+           (functions/course-package.mjs's buildCoursePackageWithTrigger) - so a course with
+           nothing to report here is already being mapped server-side in the background.
+           A miss here is NOT a failure: it falls through exactly as a zero-guide AutoMapper
+           result always has, to the native resolver and then manual fallback below. */
         let autoMapResult=null;
         try{autoMapResult=await resolveGeometryFromServerPackage(c);}catch(e){autoMapResult=null;}
         if(autoMapResult)recordMappingDebug(debugRunId,{source:'automapper',phase:'completed',event:'server-course-package-hit',summary:'Server already had this course mapped',details:{hole:h,resolutionKey:key,attemptToken,serverPackageStatus:autoMapResult.serverPackageStatus,holes:autoMapResult.holes,saved:autoMapResult.saved}});
         if(!mappingAttemptStillCurrent(request,attempt,'server-course-package'))return {playable:false,stale:true,reason:'superseded-after-server-course-package'};
-        if(!autoMapResult)autoMapResult=await autoMapOsmCourse(mapOpts);
+        if(!autoMapResult){
+          recordMappingDebug(debugRunId,{source:'automapper',phase:'skipped',event:'server-course-package-pending',summary:'Server has not mapped this course yet',details:{hole:h,resolutionKey:key,attemptToken}});
+          autoMapResult={saved:0,holes:0,polygons:0,fallbacks:0,automapperStatus:'server-pending'};
+        }
         if(!mappingAttemptStillCurrent(request,attempt,'automapper'))return {playable:false,stale:true,reason:'superseded-after-automapper'};
         try{
           document.body.dataset.gdCourseAutoMappedHoles=String(autoMapResult&&autoMapResult.holes||0);

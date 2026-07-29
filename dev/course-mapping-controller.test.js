@@ -610,10 +610,15 @@ async function main() {
   assert(!env.events.some((event) => String(event.event || "").startsWith("course-map-cloud")), "resume-round path has no cloud-map lifecycle noise");
   assert.strictEqual(env.calls.fetch, 1, "resume-round skip leaves the existing scan path available");
 
-  env = await runScenario({ automapperSuccess: true });
-  assert.strictEqual(env.result.playable, true, "AutoMapper success resolves play");
-  assert.strictEqual(env.calls.fetch, 1, "AutoMapper ran once");
-  assert.strictEqual(env.calls.native, 0, "AutoMapper success prevents native resolver");
+  /* There is no more client AutoMapper fast path (course-package migration, stage 8): when
+     the server has not mapped a course, the client goes straight to the native/image-based
+     resolver, which does its own OSM acquisition (reusing the same query/parse code that used
+     to belong to the removed client AutoMapper) and then always runs its real resolution -
+     good OSM hole numbering alone no longer short-circuits it the way client AutoMapper used to. */
+  env = await runScenario({ automapperSuccess: true, nativeSuccess: true });
+  assert.strictEqual(env.result.playable, true, "native resolver, seeded by its own OSM acquisition, resolves play");
+  assert.strictEqual(env.calls.fetch, 1, "one OSM fetch total - the native resolver's own source acquisition, not a separate AutoMapper pass");
+  assert.strictEqual(env.calls.native, 1, "native resolver runs directly now; there is no client AutoMapper fast path left to skip it");
 
   /* Stage 6 of the course-package migration plan: when the server already has this course
      mapped, the client must skip its own OSM fetch entirely and persist straight from the
@@ -643,27 +648,32 @@ async function main() {
   assert.strictEqual(env.calls.fetch, 1, "a non-ready server response falls through to the existing OSM fetch");
   assert.strictEqual(env.result.playable, true);
 
+  /* fetchFails covers every OSM request, including the native resolver's own first attempt.
+     Previously a failed client-AutoMapper pass still seeded a payload the native resolver
+     could widen and retry from; with no client AutoMapper priming step left, the resolver's
+     own first attempt failing with nothing to build a retry frame from is terminal - one
+     fetch, not two. */
   env = await runScenario({ fetchFails: true });
-  assert.strictEqual(env.calls.native, 1, "AutoMapper fetch failure invokes native resolver exactly once");
-  assert.strictEqual(env.calls.fetch, 2, "native resolver retries source geometry after AutoMapper fetch failure");
-  assert(env.events.some((event) => event.event === "automapper-failed"), "AutoMapper failure is terminally logged");
-  assert.strictEqual(env.events.filter((event) => event.event === "automapper-failed").length, 1, "AutoMapper fetch failure is logged once");
-  assert(env.events.some((event) => event.event === "native-resolver-started"), "native resolver start is logged after AutoMapper failure");
-  assert.strictEqual(env.calls.nativeInputs[0].sourceLoadError.code, "osm-request-failed", "native resolver receives a source-load error when geometry reload fails");
+  assert.strictEqual(env.calls.native, 1, "OSM fetch failure still invokes native resolver exactly once");
+  assert.strictEqual(env.calls.fetch, 1, "one failed OSM fetch - no payload to build a widened retry frame from");
+  assert(env.events.some((event) => event.event === "automapper-failed"), "the OSM fetch failure is terminally logged");
+  assert.strictEqual(env.events.filter((event) => event.event === "automapper-failed").length, 1, "OSM fetch failure is logged once");
+  assert(env.events.some((event) => event.event === "native-resolver-started"), "native resolver start is logged after the OSM fetch failure");
+  assert.strictEqual(env.calls.nativeInputs[0].sourceLoadError.code, "osm-request-failed", "native resolver receives a source-load error when its own acquisition fails");
 
-  env = await runScenario({ fetchSequence: ["fail", "native"] });
-  assert.strictEqual(env.calls.fetch, 2, "native resolver can independently reload source geometry");
-  assert.strictEqual(env.calls.native, 1, "native resolver still runs once after reload");
-  assert.strictEqual(env.calls.nativeInputs[0].sourceLoadError, null, "source reload clears the acquisition error");
-  assert.strictEqual(env.calls.nativeInputs[0].osmPayload.elements.length, 1, "native resolver receives reloaded OSM geometry");
-  assert(decodeURIComponent(env.calls.fetchUrls[0]).includes("around:1400"), "AutoMapper starts with the tighter course query");
-  assert(decodeURIComponent(env.calls.fetchUrls[1]).includes("around:1400"), "native resolver repeats the pin-based source query when AutoMapper acquisition failed");
+  /* The old ["fail","native"] two-fetch reload scenario (a failed client-AutoMapper pass
+     seeding a retry the native resolver's own acquisition then repeated) no longer applies:
+     there is no client AutoMapper fetch to fail first, and a failed first fetch has no
+     payload to build a retry frame from (see the fetchFails scenario above) - so it is now
+     identical in shape to that single-fetch-failure case and is not tested separately here. */
 
-  env = await runScenario({ fetchSequence: ["native", "success"] });
-  assert.strictEqual(env.calls.fetch, 2, "native resolver reloads when AutoMapper only found a narrow source slice");
-  assert(decodeURIComponent(env.calls.fetchUrls[0]).includes("around:1400"), "narrow source slice came from AutoMapper radius");
-  assert(decodeURIComponent(env.calls.fetchUrls[1]).includes("around:3200"), "native resolver zoomed out for full-course framing");
-  assert.strictEqual(env.calls.nativeInputs[0].osmPayload.elements.length, 2, "native resolver receives the widened source payload");
+  /* A single sparse element (the "native" fixture: one unnumbered green) is not enough for
+     the native resolver's own acquisition to compute a widen-retry frame from - it accepts
+     that one fetch and moves on, so this no longer exercises a second fetch (that needs the
+     richer "frame" fixture below, which has enough geometry to bound a real frame). */
+  env = await runScenario({ fetchSequence: ["native"] });
+  assert.strictEqual(env.calls.fetch, 1, "a single sparse OSM payload does not have enough geometry to compute a retry frame from");
+  assert.strictEqual(env.calls.nativeInputs[0].osmPayload.elements.length, 1, "native resolver receives what its own acquisition found");
 
   env = await runScenario({ fetchSequence: ["frame", "success"] });
   assert.strictEqual(env.calls.fetch, 2, "native resolver runs a framed second OSM query when first-pass source can frame the course");
@@ -673,7 +683,7 @@ async function main() {
   assert.strictEqual(env.calls.nativeInputs[0].osmPayload.elements.length, 2, "native resolver receives the framed source payload");
   assert.strictEqual(env.calls.nativeInputs[0].courseBoundary, undefined, "native resolver does not receive a stale saved course boundary");
 
-  env = await runScenario({ fetchSequence: ["fail", "native"], nativePartial: true });
+  env = await runScenario({ fetchSequence: ["native"], nativePartial: true });
   assert.strictEqual(env.calls.native, 1, "partial native resolver runs once");
   assert(env.events.some((event) => event.event === "native-resolver-source-load-started"), "native source load start is logged");
   assert(env.events.some((event) => event.event === "native-resolver-source-load-succeeded"), "native source load success is logged");
@@ -681,7 +691,7 @@ async function main() {
   assert(env.events.some((event) => event.event === "native-resolver-failed"), "partial native result still falls through as unresolved");
   assert.strictEqual(env.events.filter((event) => event.event === "manual-fallback-opened").length, 1, "partial native result opens manual fallback once");
 
-  env = await runScenario({ fetchSequence: ["fail", "native"], nativePartial: true, scorecardDistances: true });
+  env = await runScenario({ fetchSequence: ["native"], nativePartial: true, scorecardDistances: true });
   assert.strictEqual(env.calls.scorecard, 1, "scorecard distances are fetched once for native resolver evidence");
   assert(env.calls.order.indexOf("scorecard") >= 0 && env.calls.order.indexOf("scorecard") < env.calls.order.lastIndexOf("osm-fetch"), "scorecard fetch starts before native OSM acquisition");
   assert.strictEqual(env.calls.nativeInputs[0].scorecardHoles.length, 18, "native resolver receives scorecard holes");
@@ -732,27 +742,23 @@ async function main() {
   assert(resolvedHole3.length >= 3, "resolved native run persists hole 3 play objects");
   assert(resolvedHole3.every((object) => object.confirmed), "resolved native run marks hole 3 objects confirmed");
 
-  /* Full localStorage, but eviction can free enough: the automapper's saves
-     hit QuotaExceededError, evict the cloud-backed tile, retry, and succeed.
-     The locally-captured tile must survive - its scan exists nowhere else. */
-  env = await runScenario({ automapperSuccess: true, storageQuota: "recoverable" });
-  assert.strictEqual(env.result.playable, true, "quota hit with evictable caches still resolves play via the automapper");
-  assert.strictEqual(env.calls.native, 0, "recovered quota hit does not invoke the native resolver");
+  /* Full localStorage, but eviction can free enough: persisting the resolved geometry hits
+     QuotaExceededError, evicts the cloud-backed tile, retries, and succeeds. The
+     locally-captured tile must survive - its scan exists nowhere else. Persistence now
+     always runs through the native resolver (there is no more direct client-AutoMapper
+     persistence path), but the eviction logic itself lives in saveStore()/saveCourseObject()
+     and is caller-agnostic, so the same guarantee applies here as it always did. */
+  env = await runScenario({ automapperSuccess: true, nativeSuccess: true, storageQuota: "recoverable" });
+  assert.strictEqual(env.result.playable, true, "quota hit with evictable caches still resolves play via the native resolver");
+  assert.strictEqual(env.calls.native, 1, "native resolver runs (it always does now) and its persistence recovers from the quota hit");
   assert(!Object.prototype.hasOwnProperty.call(env.localStorage.data, "gd_captured_hole_frame_v19_other-course:h1"), "cloud-backed tile is evicted to make room");
   assert(Object.prototype.hasOwnProperty.call(env.localStorage.data, "gd_captured_hole_frame_v19_other-course:h2"), "locally-captured tile is never evicted");
-  assert(!env.events.some((event) => event.event === "automapper-failed"), "recovered quota hit is not reported as an automapper failure");
-  assert(!env.events.some((event) => event.event === "automapper-persist-failed"), "recovered quota hit is not reported as a persist failure");
 
-  /* Full localStorage and eviction cannot free enough: the automapper mapped
-     the course, so this must surface as a persist failure - never as
-     "automapper failed" - and must not divert to the native resolver, which
-     persists through the same storage and so cannot succeed either. */
-  env = await runScenario({ automapperSuccess: true, storageQuota: "hard" });
-  assert.strictEqual(env.calls.native, 0, "persist failure on a numbered course does not divert to the native resolver");
-  assert(env.events.some((event) => event.event === "automapper-persist-failed"), "blocked persistence is reported as a persist failure");
-  assert(!env.events.some((event) => event.event === "automapper-failed"), "blocked persistence is not misreported as an automapper failure");
-  assert(env.events.some((event) => event.event === "native-resolver-skipped-numbered-course"), "resolver skip on a numbered course is explicitly logged");
-  assert.strictEqual(env.events.filter((event) => event.event === "manual-fallback-opened").length, 1, "persist failure opens one manual fallback");
+  /* Full localStorage and eviction cannot free enough: geometry was resolved, but storage
+     rejected the save outright, so play cannot be resolved from it. */
+  env = await runScenario({ automapperSuccess: true, nativeSuccess: true, storageQuota: "hard" });
+  assert.strictEqual(env.calls.native, 1, "native resolver still runs and attempts to persist");
+  assert.strictEqual(env.result.playable, false, "a hard quota failure leaves nothing playable to resolve");
   assert(Object.prototype.hasOwnProperty.call(env.localStorage.data, "gd_captured_hole_frame_v19_other-course:h2"), "hard quota failure still never evicts a local-only tile");
 
   const noisyEvents = env.events.map((event) => event.event).filter(Boolean);
