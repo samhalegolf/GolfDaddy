@@ -1860,6 +1860,7 @@
 	    var shotLocked=safe(function(){return !!(lockedFrame&&start&&target);},false);
 	    if(shotLocked&&!opts.forceReset){
 	      var fb=greenBounds("hole");
+	      return fitCaptured(fb,"hole",num(opts.padding,.025),{objectName:"capturedGreenHoleFrame",reason:String(opts.reason||"setup")+"-frame-only",maxScale:7.2,fitRatio:.94})||fallbackNative(fb,"hole",num(opts.padding,.025),opts);
 	    }
 	    lockCameraFrozen=false;
 	    safe(function(){lockedFrame=false;});
