@@ -131,6 +131,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/account-profiles"
+  to = "/.netlify/functions/account-profiles"
+  status = 200
+
+[[redirects]]
   from = "/api/shot-library-sync"
   to = "/.netlify/functions/shot-library-sync"
   status = 200

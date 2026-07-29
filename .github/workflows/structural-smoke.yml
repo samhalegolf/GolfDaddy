@@ -65,6 +65,7 @@ jobs:
           node dev/auth-update-account.test.js
           node dev/account-delete.test.js
           node dev/account-clear-data.test.js
+          node dev/profile-hydrate.test.js
           node dev/payment-admin-auth.test.js
           node dev/referrals-auth.test.js
           node dev/referral-invite-target.test.js
