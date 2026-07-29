@@ -971,7 +971,12 @@
 	    return "Frame unavailable - remap this hole";
 	  }
 	  var HOLE_FRAME_LOADING_TIMEOUT_MS=1700;
+	  /* Longer than the plain loading overlay: a hole switch may be waiting on a
+	     cloud surface pull, not just a local fit. Still bounded - see
+	     gdBeginGpsHoleSwitchTransition. */
+	  var HOLE_SWITCH_TRANSITION_TIMEOUT_MS=6000;
 	  var holeFrameLoadingTimer=null;
+	  var holeSwitchTransitionTimer=null;
 	  var holeFrameLoadingKey="";
 	  var terminalCapturedFrameUnavailableByKey={};
 	  function holeSwitchMessage(hole){
@@ -1002,8 +1007,38 @@
 		      delete window.__gdGpsCapturedPresentationStamp;
 		      gdCoursePlayDebugEvent("gps-play-hole-transition-start",{reason:reason||"hole-switch",targetHole:hole,token:token||"",visibleOwner:visiblePreparingOwner()});
 	      if(typeof window.gdApplyGpsMapVisibilityOwner==="function")window.gdApplyGpsMapVisibilityOwner("hole-switch-start");
+	      armHoleSwitchTransitionTimeout(hole,reason,token);
 	    });
 	    return true;
+	  }
+	  /* The transition mask hides #map and covers the screen, and until this existed
+	     only gdEndGpsHoleSwitchTransition could take it down - which needs a manifest
+	     that matches the active hole (see its guards). A hole with no captured frame
+	     at all therefore left the mask up forever: black screen, "Loading Hole N
+	     frame..." pill, no way out but a relaunch. That is what a fresh install sees,
+	     because it has no captured frames yet.
+
+	     gdHoleFrameLoading already had this shape - a timer that resolves to
+	     unavailable. The hole-switch path simply never armed one. Resolution goes
+	     through missingCapturedManifest rather than straight to unavailable so a hole
+	     that is genuinely still preparing gets the pipeline-aware answer; that path
+	     is itself bounded by HOLE_FRAME_LOADING_TIMEOUT_MS, so it always terminates. */
+	  function armHoleSwitchTransitionTimeout(hole,reason,token){
+	    if(holeSwitchTransitionTimer){clearTimeout(holeSwitchTransitionTimer);holeSwitchTransitionTimer=null;}
+	    var key=holeFrameKey();
+	    holeSwitchTransitionTimer=setTimeout(function(){
+	      holeSwitchTransitionTimer=null;
+	      safe(function(){
+	        if(!document.body||!document.body.classList.contains("gdGpsHoleTransitioning"))return;
+	        /* A later switch superseded this one; that switch armed its own timer. */
+	        var live=window.__gdGpsHoleTransitioning||{};
+	        if(String(live.token||"")!==String(token||"")||holeFrameKey()!==key)return;
+	        /* Nothing may have re-run the ready check since the frame landed. */
+	        if(gdEndGpsHoleSwitchTransition("hole-switch-timeout-recheck"))return;
+	        gdCoursePlayDebugEvent("gps-play-hole-transition-timeout",{reason:reason||"hole-switch",targetHole:hole,token:token||"",visibleOwner:visiblePreparingOwner()});
+	        missingCapturedManifest("hole-switch-transition-timeout",{stage:"hole-switch-timeout",targetHole:hole,token:token||""});
+	      });
+	    },HOLE_SWITCH_TRANSITION_TIMEOUT_MS);
 	  }
 	  function gdEndGpsHoleSwitchTransition(reason){
 	    return safe(function(){
@@ -1025,6 +1060,7 @@
 		      if(Number.isFinite(stampHole)&&Math.round(stampHole)!==Math.round(active))return false;
 		      if(state.token&&String(stamp.transitionToken||"")!==String(state.token))return false;
 		      document.body.classList.remove("gdGpsHoleTransitioning","gdHoleFrameLoading","gdGpsFramePreparing");
+	      clearHoleSwitchTransitionTimer();
 	      delete window.__gdGpsHoleTransitioning;
 	      delete document.body.dataset.gdGpsHoleTransitionTarget;
 	      delete document.body.dataset.gdGpsHoleTransitionToken;
@@ -1219,14 +1255,29 @@
 	      if(!data)return false;
 	      var bounds=coursePlayGreenBounds(data);
 	      if(!validBounds(bounds))return false;
-	      /* Priority: published cloud surface (styled, current recipe, owned pixels) beats any
-	         auto-shuttered local capture; local remains the fallback, the live shutter last.
-	         If the cloud record hasn't arrived yet, cloudPublishedSurfaceManifest pulls it and
-	         re-renders, so a fresh device self-upgrades seconds after first paint. */
+	      /* Priority: published cloud surface (styled, current recipe, owned pixels), then a
+	         local capture that already exists. There is deliberately no third option during
+	         play. If the cloud record hasn't arrived yet, cloudPublishedSurfaceManifest pulls
+	         it and re-renders, so a fresh device self-upgrades seconds after first paint.
+
+	         This used to fall through to a live shutter - buildCaptureManifest during play -
+	         which is why phones accumulated ~300KB tile manifests per hole for courses with
+	         no published frames, blew the ~5MB WKWebView budget, and had iOS evict the
+	         in-progress round. Framing and flattening belong to the studio and the server
+	         worker; the app consumes cloud frames and otherwise plays on the live map.
+	         ensureCurrentCaptureManifest and fitCaptured already guarded this way - this call
+	         site was the only one that did not. */
 	      var cloudManifest=cloudPublishedSurfaceManifest(opts.reason||"course-play-pipeline");
 	      var manifest=cloudManifest||loadCaptureManifest();
 	      var loadedExisting=!cloudManifest&&!!(manifest&&manifestMatchesActive(manifest));
 	      if(!manifest||!manifestMatchesActive(manifest)){
+	        if(capturedGpsPlayActive()){
+	          /* Side effect only: this returns "did we render a frame", and we did not.
+	             missingCapturedManifest picks loading vs unavailable from pipeline state, and
+	             the unavailable state is what hands the hole to the live map. */
+	          missingCapturedManifest(opts.reason||"course-play-pipeline",{stage:"course-play-pipeline"});
+	          return false;
+	        }
 	        captureManifest=null;
 	        manifest=buildCaptureManifest(bounds,opts.reason||"course-play-pipeline");
 	      }
@@ -1375,6 +1426,15 @@
 	      document.body.dataset.gdTerminalCapturedFrameUnavailableClearedBy=String(reason||"captured-presentation-ready");
 	    });
 	  }
+	  function clearHoleSwitchTransitionTimer(){
+	    if(holeSwitchTransitionTimer){clearTimeout(holeSwitchTransitionTimer);holeSwitchTransitionTimer=null;}
+	  }
+	  /* Deliberately NOT cleared from clearHoleFrameLoading: two of its callers run
+	     when the surface has merely RENDERED, which is before fitCaptured ends the
+	     transition. Cancelling there would drop the safety net while the mask is
+	     still up. Cleared only where the transition has genuinely ended - see
+	     gdEndGpsHoleSwitchTransition and gdCapturedFrameUnavailable. The callback
+	     re-checks the class and token anyway, so a stale timer is inert. */
 	  function clearHoleFrameLoading(){
 	    safe(function(){
 	      if(holeFrameLoadingTimer){clearTimeout(holeFrameLoadingTimer);holeFrameLoadingTimer=null;}
@@ -1437,6 +1497,7 @@
 	  }
 	  function gdCapturedFrameUnavailable(reason,context){
 	    safe(function(){
+	      clearHoleSwitchTransitionTimer();
 	      clearHoleFrameLoading();
 	      clearStalePreparingOwners(reason||"captured-frame-unavailable");
 	      var el=document.getElementById("gdCapturedFrameUnavailable");

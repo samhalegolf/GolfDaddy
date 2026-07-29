@@ -2734,8 +2734,27 @@
 	  function manifestKey(manifest){
 	    return String(manifest&&(manifest.key||manifest.storageKey||manifest.scanId||manifest.activeScanId)||"");
 	  }
+	  /* A hole with no frame plays on the live map.
+
+	     The app consumes published cloud frames; it does not shutter its own. So a hole
+	     whose frame has not been published has nothing to present, and the answer is the
+	     live map rather than a dead end. Read as a body class, not as a reason string
+	     passed in by the caller: the frame owner sets gdCapturedFrameUnavailable in
+	     exactly one place, so this stays a single observable fact. A reason string would
+	     let any caller unlock the live map by naming itself.
+
+	     The stylesheet already assumed this - every #map suppression rule in
+	     gd-gps-play-runtime-owner-v1-css.css carries :not(.gdCapturedFrameUnavailable).
+	     What was missing is the grant: the hard gate is :not(.gdGpsLiveMapAllowed), and
+	     gdCapturedFrameUnavailable() removes that class before calling back into
+	     gdApplyGpsMapVisibilityOwner - which runs last, so this re-grants it. */
+	  function gdGpsNoCapturedFrameForHole(){
+	    return safe(function(){
+	      return !!(document.body&&document.body.classList.contains("gdCapturedFrameUnavailable"));
+	    },false);
+	  }
 	  function gdGpsLiveMapExplicitlyAllowed(reason){
-	    return pickerOpen()||document.body.classList.contains("gdCoursePickerOpen")||gdGpsExplicitMapMode(reason);
+	    return pickerOpen()||document.body.classList.contains("gdCoursePickerOpen")||gdGpsNoCapturedFrameForHole()||gdGpsExplicitMapMode(reason);
 	  }
 	  function gdGpsPresentationReady(){
 	    return safe(function(){

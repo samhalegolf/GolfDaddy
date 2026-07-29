@@ -50,6 +50,8 @@ jobs:
           node dev/course-key-normalisation.test.js
           node dev/course-identity-resolution.test.js
           node dev/captured-scan-hydrate.test.js
+          node dev/captured-frame-partial-flatten.test.js
+          node dev/app-frame-consumption.test.js
           node dev/auth-route-boot-release.test.js
           node dev/scan-push-filter.test.js
           node dev/password-reset-surface.test.js
