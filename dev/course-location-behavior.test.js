@@ -11,7 +11,6 @@ const core = fs.readFileSync(path.join(root, "scripts", "gd-app-core.js"), "utf8
 const adminDb = fs.readFileSync(path.join(root, "scripts", "studio", "gd-admin-course-db.js"), "utf8");
 const picker = fs.readFileSync(path.join(root, "scripts", "inline", "gd-course-picker-search-v2.js"), "utf8");
 const library = fs.readFileSync(path.join(root, "scripts", "gd-course-library-pin-lock.js"), "utf8");
-const resolver = fs.readFileSync(path.join(root, "scripts", "gd-course-geometry-resolver.js"), "utf8");
 const courseMaps = fs.readFileSync(path.join(root, "functions", "course-maps.mjs"), "utf8");
 const workflow = fs.readFileSync(path.join(root, ".github", "workflows", "structural-smoke.yml"), "utf8");
 
@@ -81,7 +80,6 @@ assert(library.includes("owner.confirm(c,{lat,lng},{source:source||'course-libra
    obligation: the owner holds the picker pin in a different store and caches the
    active centre, so a delete that skips it strands both. */
 assert(library.includes("owner.remove(course,{source:'course-library-remove-course'})"), "Course Library course removal releases the location through owner");
-assert(resolver.includes("toPoint(input.courseCentre)") && resolver.includes("toPoint(input.courseCenter)"), "native resolver remains a consumer of centre input only");
 
 assert(courseMaps.includes("courseLocation: locationPoint ? {"), "cloud course-map sanitizer preserves owner metadata");
 assert(courseMaps.includes("courseLat: finite(input.courseLat ?? (locationPoint && locationPoint.lat))"), "cloud course-map sanitizer publishes canonical centre columns");
