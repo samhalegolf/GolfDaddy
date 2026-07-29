@@ -1844,6 +1844,23 @@
 	  }
 	  function setup(opts){
 	    opts=opts||{};
+	    /* setup() has always done two unrelated jobs: frame the hole, and reset the
+	       shot back to the pre-lock prompt. It is exported under five names that all
+	       sound like pure camera work (gdSimpleFrameSetup, gdFrameMappedPreLockPreset,
+	       gdFrameMappedPreLockHoleView, gdQueueMappedPreLockHoleFrame,
+	       gdFocusMappedPreLockHole) and callers treat them exactly that way - on
+	       30/60/80/160ms fallback timers with reasons like "zoom-fallback" and
+	       "course-play-resolver". Each of those "reframes" silently unlocked the
+	       frame, wiped the bubble overlay and cleared the placed shot - which is why
+	       the bubble vanished shortly after Head To The Tee settled its frame.
+
+	       So: while a shot is placed and locked, a passive caller gets the framing
+	       WITHOUT the reset. Only an explicit reset - the Unlock bridge, which
+	       passes forceReset - may destroy a locked shot. */
+	    var shotLocked=safe(function(){return !!(lockedFrame&&start&&target);},false);
+	    if(shotLocked&&!opts.forceReset){
+	      var fb=greenBounds("hole");
+	    }
 	    lockCameraFrozen=false;
 	    safe(function(){lockedFrame=false;});
 	    safe(function(){if(typeof setMapGestures==="function")setMapGestures(true);});
