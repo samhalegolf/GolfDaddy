@@ -234,7 +234,23 @@
     } catch (error) {
       pending = false;
       var message = error && error.message ? error.message : "Could not check payment status";
-      saveStatus(Object.assign({}, status, { active: false, entitlements: [], connectionIssue: true, error: message, checkedAt: new Date().toISOString() }));
+      /* A failed request is not evidence of no entitlement, so the last
+         known-good access survives it. Only the success path above may downgrade,
+         because only the server knows.
+
+         This used to force active:false and empty the entitlements on any error,
+         which made a dropped request indistinguishable from a cancelled
+         membership. On a golf course that is not a rare edge: every signal blip
+         flipped access off and the next success flipped it back, and because
+         clarity-session derives accountRole from hasActiveAccess(), each flip
+         was an identity change. That fired clarity:session-changed, whose
+         listeners re-run install(), acceptStoredReferral(), refresh() and
+         loadReferralDashboard() here plus a full Supabase account sync in
+         clarity-cloud-sync - a cascade heavy enough to be visible mid-round, and
+         self-sustaining while the network stayed flaky.
+
+         The same reasoning already guards expired tokens a few lines above. */
+      saveStatus(Object.assign({}, status, { connectionIssue: true, error: message, checkedAt: new Date().toISOString() }));
       if (opts.silent || opts.auto) {
         safe(function () { console.warn("[ClarityPayments] payment status refresh skipped", message); });
       } else {
