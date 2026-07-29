@@ -67,6 +67,25 @@ test("identity comes from the token, never the body", () => {
   );
 });
 
+test("restoring data never navigates", () => {
+  /* Shipped in build 516 and caught on device: the restore ended with
+     showShellHome(). It runs on boot and on every clarity:session-changed, and a
+     fresh install has an empty list by definition, so the first restore threw
+     the player out of whatever they were doing - Head To The Tee landing on
+     home, and a half-drawn course picker afterwards from showing home over
+     mid-play state.
+
+     Restoring data and moving the user are separate jobs. Resume Round moves
+     people; this does not. */
+  const clientCode = stripComments(client);
+  ["showShellHome", "bootProfileShell", "location.reload", "location.replace"].forEach((call) => {
+    assert.ok(
+      !clientCode.includes(call),
+      "clarity-profile-hydrate calls " + call + " — a background restore must never move the user"
+    );
+  });
+});
+
 test("the endpoint is wired up", () => {
   assert.ok(
     /scripts\/clarity-profile-hydrate\.js/.test(indexHtml),

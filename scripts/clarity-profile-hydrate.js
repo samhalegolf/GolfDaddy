@@ -119,11 +119,20 @@
 
     ran = true;
 
-    /* Pull the new list into memory and redraw. Only reached when the list was
-       empty, which is the state where the user is staring at a blank player
-       list - so re-showing home is a fix, not an interruption. */
+    /* Pull the new list into memory. Nothing here navigates, and that is a hard
+       rule rather than an oversight.
+
+       This used to call showShellHome() on the theory that a user staring at an
+       empty player list wants to be shown home. It fires on boot AND on every
+       clarity:session-changed, so on a fresh install - where the list is empty
+       by definition - the first restore yanked the player out of whatever they
+       were doing. On device that showed up as Head To The Tee jumping straight
+       to home, and as a half-drawn course picker afterwards, because home was
+       being shown from mid-play state that had not been torn down.
+
+       Restoring data and moving the user are different jobs. This one only
+       restores; Resume Round is what moves anybody. */
     safe(function () { if (typeof window.loadPlayerProfiles === "function") window.loadPlayerProfiles(); });
-    safe(function () { if (typeof window.showShellHome === "function") window.showShellHome(); });
     safe(function () {
       window.dispatchEvent(new CustomEvent("clarity:profiles-restored", {
         detail: { count: restored.length, reason: reason || "" }
