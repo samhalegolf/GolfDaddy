@@ -235,6 +235,44 @@ function nativeStub(seeded) {
     );
   });
 
+  check("the round being played does not force a reload", () => {
+    /* The reload exists because app scripts read localStorage synchronously
+       while booting, so a restore they missed is invisible without loading
+       again. Nothing reads the round key during boot - the Resume Round button
+       and the resume prompt both read it lazily - so reloading for it throws the
+       player to home to fix something that was already working. On a device
+       where the webview evicts storage mid-round that was the difference between
+       an invisible recovery and losing your place. */
+    const block = /var RELOAD_REQUIRED_KEYS = \[([\s\S]*?)\];/.exec(src);
+    assert.ok(block, "RELOAD_REQUIRED_KEYS not found");
+    assert.ok(
+      !/gd_gps_resume_round_v1/.test(block[1]),
+      "the round key forces a reload — restoring it is already effective, and the reload costs the player their place"
+    );
+    ["clarity:supabase-auth-session:v1", "gd_accounts_v1", "gd_player_profiles_v27"].forEach((key) => {
+      assert.ok(
+        block[1].includes(key),
+        key + " is not in RELOAD_REQUIRED_KEYS — it is read synchronously at boot, so a restore without a reload is invisible"
+      );
+    });
+    assert.ok(
+      /var needsReload = restored\.some/.test(src),
+      "the reload is not conditional on which keys were restored"
+    );
+  });
+
+  check("storage usage is measured but stays quiet when it is fine", () => {
+    assert.ok(/function storageUsage\(/.test(src), "there is no way to measure what is filling the quota");
+    assert.ok(
+      /usage\.total < REPORT_BYTES\) return/.test(src),
+      "usage is reported unconditionally — routine sessions would be noise"
+    );
+    assert.ok(
+      /sessionStorage\.getItem\(USAGE_REPORTED\)/.test(src),
+      "usage is not limited to once per session"
+    );
+  });
+
   if (failed) { console.error("durable-storage failed: " + failed + " check(s)"); process.exit(1); }
   console.log("durable-storage passed");
 })().catch((err) => {
