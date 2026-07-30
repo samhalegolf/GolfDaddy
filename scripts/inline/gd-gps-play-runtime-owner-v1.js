@@ -2870,11 +2870,15 @@
     });
   }
 	  function setRouteLabel(label){if(document.body&&document.body.dataset)document.body.dataset.clarityRouteLabel=label||""}
-	  function cleanRouteClasses(route){
+	  function cleanRouteClasses(route,opts){
 		    if(!document.body)return;
 		    document.body.classList.remove("gps-open","manual-gps-active","gdCoursePinPromptActive","gdToolRailOpen");
 		    if(route!=="gps")releaseGpsFirstPaintGate(route||"leave-gps");
-		    if(route==="home")safe(function(){window.GDShell?.showHome?.({source:"gps-runtime-clean-route",replace:true});});
+		    /* opts.navigate===false is the already-on-home cleanup path. Both callers of
+	       forceHomeShell are guarded on shell-home, so re-entering home from there is
+	       never wanted: at best a no-op, at worst it cancels a transition the player
+	       just started. This ran on a 260ms interval and was the trip home. */
+	    if(route==="home"&&!(opts&&opts.navigate===false))safe(function(){window.GDShell?.showHome?.({source:"gps-runtime-clean-route",replace:true});});
 		    if(route==="gps")safe(function(){window.GDShell?.enterGps?.({source:"gps-runtime-clean-route",replace:true});});
 		    if(route==="module")safe(function(){window.GDShell?.openModule?.("module",{source:"gps-runtime-clean-route",replace:true});});
 	    if(document.body.dataset){
@@ -3696,8 +3700,10 @@
       });
     });
   }
+  /* DOM tidy only. A function reached from a setInterval must never navigate -
+     see the navigate:false note in cleanRouteClasses. */
   function forceHomeShell(){
-    cleanRouteClasses("home");
+    cleanRouteClasses("home",{navigate:false});
     safe(function(){var h=byId("shellHome");if(h){h.classList.remove("hidden");h.style.display="";h.style.visibility="";h.style.opacity=""}});
     safe(function(){var s=byId("courseScreen");if(s){s.classList.add("hidden");s.style.display="none";s.style.visibility="hidden";s.style.opacity="0"}});
   }
@@ -3714,6 +3720,13 @@
   }
   function homeGuardTick(){
     if(!document.body||!document.body.classList.contains("shell-home"))return;
+    /* The mapped-start prompt IS the Head To the Tee UI: gdRenderMappedStartHint
+       sets gdMappedStartPromptActive and puts the buttons in #hint, which trips two
+       of the dirty conditions below. Treating it as leftover meant this tick called
+       cleanGpsTransient - which strips gdMappedStartPromptActive, gdHeadToTeeFrameActive
+       and empties #hint - and so destroyed the prompt the player was looking at, four
+       times a second. A live prompt is a player mid-flow, not residue. */
+    if(document.body.classList.contains("gdMappedStartPromptActive"))return;
     liftShellTop();
     var hint=byId("hint");
     var dirty=document.body.classList.contains("gdMappedStartPromptActive")||

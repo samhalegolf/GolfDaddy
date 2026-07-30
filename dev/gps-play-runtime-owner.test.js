@@ -137,4 +137,21 @@ assertContains(lockAfterManualStart, "if(lockToken!==manualStartLockToken||Numbe
 assertContains(lockAfterManualStart, "if(currentHole()!==lockHole)return", "manual-start delayed lock rejects cross-hole callbacks");
 assertContains(lockAfterManualStart, 'document.body.classList.contains("gdGpsHoleTransitioning")', "manual-start delayed lock does not repaint during hole transitions");
 
+/* The home guard ran on setInterval(...,260) and called forceHomeShell ->
+   cleanRouteClasses("home") -> GDShell.showHome, so a housekeeping tick performed a
+   real route change. Two of its six "dirty" conditions - gdMappedStartPromptActive
+   and text in #hint - are set by gdRenderMappedStartHint, which draws the Head To
+   the Tee prompt. So the prompt made the guard think the surface was dirty, and the
+   guard responded by wiping the prompt (cleanGpsTransient strips those very classes)
+   and navigating home, four times a second. That was the trip home, and the repeated
+   showHome work is the likeliest cause of the freeze that came with it. */
+const homeGuard = sliceBetween("function homeGuardTick", "function toggleToolTab");
+assertContains(homeGuard, 'classList.contains("gdMappedStartPromptActive"))return', "home guard treats a live mapped-start prompt as player flow, not leftover dirt");
+
+const forceHome = sliceBetween("function forceHomeShell", "function queueHomeCleanup");
+assertContains(forceHome, 'cleanRouteClasses("home",{navigate:false})', "forceHomeShell tidies the DOM without navigating - it is reached from a 260ms interval");
+assertNotContains(forceHome, 'cleanRouteClasses("home");', "forceHomeShell must not use the navigating form");
+
+assertContains(runtimeScript, 'if(route==="home"&&!(opts&&opts.navigate===false))safe', "the home branch only navigates when the caller has not opted out");
+
 console.log("gps-play-runtime-owner tests passed");
