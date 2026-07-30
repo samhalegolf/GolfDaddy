@@ -28,8 +28,21 @@ body.gdTargetFrameDebugOn #gdCapturedBubbleDragHit{background:rgba(31,211,109,.0
 #gdHoleFrameLoading{position:fixed;left:50%;bottom:calc(max(14px,env(safe-area-inset-bottom)) + 92px);transform:translateX(-50%);z-index:2403;max-width:min(330px,calc(100vw - 32px));padding:10px 14px;border-radius:999px;background:rgba(5,13,9,.92);border:1px solid rgba(255,255,255,.22);color:#fff;font:900 13px/1.2 Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;text-align:center;box-shadow:0 14px 34px rgba(0,0,0,.38);pointer-events:none;display:none;}
 body.gdCapturedFrameUnavailable #gdCapturedFrameUnavailable{display:block;}
 body.gdHoleFrameLoading #gdHoleFrameLoading{display:block;}
-#gdCoursePlayHoleTransitionMask{position:fixed;inset:0;z-index:2402;display:none;align-items:center;justify-content:center;padding:24px;background:rgba(2,6,4,.74);color:#fff;font:900 13px/1.2 Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;text-align:center;pointer-events:none;}
-#gdCoursePlayHoleTransitionMask span{display:inline-flex;max-width:min(330px,calc(100vw - 32px));padding:10px 14px;border-radius:999px;background:rgba(5,13,9,.92);border:1px solid rgba(255,255,255,.22);box-shadow:0 14px 34px rgba(0,0,0,.38);}
+/* Loading screen for a hole switch. It hides #map and covers the viewport, so a
+   bare pill on near-black read as a hung app - hence the spinner. Opaque #050806
+   to match the native window backdrop, so there is no seam against the webview
+   during the first frames. */
+#gdCoursePlayHoleTransitionMask{position:fixed;inset:0;z-index:2402;display:none;align-items:center;justify-content:center;padding:24px;background:#050806;color:#fff;font:900 13px/1.2 Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;text-align:center;pointer-events:none;}
+.gdHoleFrameLoaderCard{display:inline-flex;align-items:center;gap:10px;max-width:min(330px,calc(100vw - 32px));padding:12px 16px;border-radius:999px;background:rgba(5,13,9,.92);border:1px solid rgba(255,255,255,.22);box-shadow:0 14px 34px rgba(0,0,0,.38);}
+.gdHoleFrameLoaderSpinner{width:14px;height:14px;flex:0 0 auto;border-radius:50%;border:2px solid rgba(255,255,255,.22);border-top-color:#1fd36d;animation:gdHoleFrameLoaderSpin .72s linear infinite;}
+#gdCoursePlayHoleTransitionMask span{min-width:0;}
+@keyframes gdHoleFrameLoaderSpin{to{transform:rotate(360deg)}}
+/* Reduced motion still needs a liveness cue, or the screen is indistinguishable
+   from a hang - the ring pulses instead of spinning. */
+@media (prefers-reduced-motion:reduce){
+  .gdHoleFrameLoaderSpinner{animation:gdHoleFrameLoaderPulse 1.4s ease-in-out infinite;}
+  @keyframes gdHoleFrameLoaderPulse{0%,100%{opacity:.35}50%{opacity:1}}
+}
 body.gdGpsHoleTransitioning #gdCoursePlayHoleTransitionMask{display:flex;}
 body.gdGpsHoleTransitioning #map{visibility:hidden!important;opacity:0!important;pointer-events:none!important;}
 body.gdGpsHoleTransitioning #app{background:#020604!important;}

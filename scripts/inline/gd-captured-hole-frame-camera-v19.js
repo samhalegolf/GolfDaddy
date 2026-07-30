@@ -973,8 +973,16 @@
 	  var HOLE_FRAME_LOADING_TIMEOUT_MS=1700;
 	  /* Longer than the plain loading overlay: a hole switch may be waiting on a
 	     cloud surface pull, not just a local fit. Still bounded - see
-	     gdBeginGpsHoleSwitchTransition. */
-	  var HOLE_SWITCH_TRANSITION_TIMEOUT_MS=6000;
+	     gdBeginGpsHoleSwitchTransition.
+
+	     Note this is not the whole wait, and the arithmetic understates it. Resolution
+	     runs through missingCapturedManifest, which for an unknown pipeline state
+	     hands off to gdHoleFrameLoading and its own HOLE_FRAME_LOADING_TIMEOUT_MS
+	     before the unavailable state lands and the live map is granted. That is
+	     3000 + 1700 in timers, but a traced run measured ~6s wall-clock: roughly
+	     1.8s of it is synchronous work inside the resolution path itself. Budget
+	     against the measured figure, not the sum, if this is ever retuned. */
+	  var HOLE_SWITCH_TRANSITION_TIMEOUT_MS=3000;
 	  var holeFrameLoadingTimer=null;
 	  var holeSwitchTransitionTimer=null;
 	  var holeFrameLoadingKey="";
@@ -982,9 +990,34 @@
 	  function holeSwitchMessage(hole){
 	    return "Loading Hole "+String(hole||surfaceHoleNumber()||1)+" frame...";
 	  }
+	  /* The mask is a loading screen, not a bare overlay: it hides #map and covers the
+	     whole viewport, so without a spinner it reads as the app having died rather
+	     than as work in progress. The structure is ensured on every call, not only on
+	     creation - an element left over from a build without the spinner would other-
+	     wise keep the old markup for the life of the page.
+
+	     The label stays the only <span> inside: ensureHoleSwitchMask and its callers
+	     find it with querySelector("span"), so the spinner is an <i> deliberately. */
 	  function ensureHoleSwitchMask(hole){
 	    var el=document.getElementById("gdCoursePlayHoleTransitionMask");
-	    if(!el&&document.body){el=document.createElement("div");el.id="gdCoursePlayHoleTransitionMask";el.setAttribute("role","status");el.setAttribute("aria-live","polite");el.innerHTML="<span></span>";document.body.appendChild(el);}
+	    if(!el&&document.body){
+	      el=document.createElement("div");
+	      el.id="gdCoursePlayHoleTransitionMask";
+	      el.setAttribute("role","status");
+	      el.setAttribute("aria-live","polite");
+	      document.body.appendChild(el);
+	    }
+	    if(el&&!el.querySelector(".gdHoleFrameLoaderCard")){
+	      el.innerHTML="";
+	      var card=document.createElement("div");
+	      card.className="gdHoleFrameLoaderCard";
+	      var spinner=document.createElement("i");
+	      spinner.className="gdHoleFrameLoaderSpinner";
+	      spinner.setAttribute("aria-hidden","true");
+	      card.appendChild(spinner);
+	      card.appendChild(document.createElement("span"));
+	      el.appendChild(card);
+	    }
 	    var label=el&&el.querySelector("span");
 	    if(label)label.textContent=holeSwitchMessage(hole);
 	    return el;
