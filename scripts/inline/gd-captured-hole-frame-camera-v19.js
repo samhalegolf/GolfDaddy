@@ -809,8 +809,17 @@
 	     to protect. localStorage survives an app update, so the guard that stopped new
 	     ones being written cannot clear the ones already on a device. */
 	  var LEGACY_FRAME_PREFIX="gd_captured_hole_frame_v19_";
+	  var purgeRan=false;
 	  function gdPurgeLegacyFatFrames(opts){
 	    opts=opts||{};
+	    /* install() is re-entrant - later layers call it during their own wire()
+	       passes - so the scheduler below fires once per call. On a device that
+	       ran the purge six times in six seconds: the first did the work and the
+	       other five were no-ops that flooded the 50-entry debug timeline and
+	       evicted the very events being investigated. The guard belongs here
+	       rather than at the call site so no future caller can reintroduce it. */
+	    if(purgeRan&&opts.force!==true&&opts.dryRun!==true)return null;
+	    if(opts.dryRun!==true)purgeRan=true;
 	    var doomed=[],bytes=0;
 	    safe(function(){
 	      for(var i=0;i<localStorage.length;i++){
@@ -839,7 +848,10 @@
 	        window.ClarityErrorReporter.flush();
 	      });
 	    }
-	    safe(function(){gdCoursePlayDebugEvent("legacy-fat-frames-purged",result);});
+	    /* Only when something actually went. The timeline holds 50 entries and is
+	       the only forensic record on a device; a no-op has nothing to say and
+	       costs a slot that a real event needs. */
+	    if(doomed.length)safe(function(){gdCoursePlayDebugEvent("legacy-fat-frames-purged",result);});
 	    return result;
 	  }
 	  /* Lets the visual engine hold its stitch until the flattens for a set of captures have

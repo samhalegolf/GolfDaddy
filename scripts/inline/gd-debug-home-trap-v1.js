@@ -34,10 +34,21 @@
 
   /* Send immediately rather than waiting for the 8s batch window: the events
      worth catching here are followed by a route change or a reload, and a
-     pending batch would be lost. */
-  function send(message, detail) {
+     pending batch would be lost.
+
+     Queue every row FIRST, then flush once. flush() sets the reporter's
+     `reporting` recursion guard and only clears it when the fetch settles, and
+     record() drops anything that arrives while it is set. So report-then-flush
+     per row silently discards every row after the first - which is exactly what
+     happened on build 533: the BOOT row landed and the TIMELINE row that
+     followed it never existed, on every boot, with no error anywhere. */
+  function send() {
+    var rows = Array.prototype.slice.call(arguments);
     safe(function () {
-      window.ClarityErrorReporter.report(TAG + " " + message, detail || "");
+      rows.forEach(function (row) {
+        if (!row || !row.message) return;
+        window.ClarityErrorReporter.report(TAG + " " + row.message, row.detail || "");
+      });
       window.ClarityErrorReporter.flush();
     });
   }
@@ -85,10 +96,12 @@
     }, "");
   }
 
-  function sendTimeline(label) {
+  /* Returns a row rather than sending: it must ride in the SAME flush as the row
+     it accompanies, or the recursion guard drops it. */
+  function timelineRow(label) {
     var tail = timelineTail();
-    if (!tail) return;
-    send("TIMELINE " + label, tail);
+    if (!tail) return null;
+    return { message: "TIMELINE " + label, detail: tail };
   }
 
   /* ---- 1. Who called showHome ---------------------------------------- */
@@ -108,11 +121,13 @@
       var classes = safe(function () { return String(document.body.className || ""); }, "");
       var stack = safe(function () { return String(new Error("home-nav").stack || ""); }, "");
 
-      send("HOME_NAV source=" + source, "classes: " + classes + "\n\nstack:\n" + stack);
-      /* The run-up, as a separate row: the stack says who called, the timeline
-         says what the app had been doing. Both are needed and neither fits in
-         one 1200-character detail field. */
-      sendTimeline("at-home-nav source=" + source);
+      /* Two rows, one flush. The stack says who called; the timeline says what
+         the app had been doing. Both are needed and neither fits in one
+         1200-character detail field. */
+      send(
+        { message: "HOME_NAV source=" + source, detail: "classes: " + classes + "\n\nstack:\n" + stack },
+        timelineRow("at-home-nav source=" + source)
+      );
 
       return original.apply(this, arguments);
     };
@@ -151,9 +166,12 @@
     }, false);
 
     send(
-      "BOOT nav=" + type + " resumeRoundPresent=" + hadRound,
-      "platform: " + safe(function () { return window.GDNative.platform; }, "web") +
-      "\nurl: " + safe(function () { return location.href; }, "")
+      {
+        message: "BOOT nav=" + type + " resumeRoundPresent=" + hadRound,
+        detail: "platform: " + safe(function () { return window.GDNative.platform; }, "web") +
+          "\nurl: " + safe(function () { return location.href; }, "")
+      },
+      BOOT_TAIL ? { message: "TIMELINE at-boot nav=" + type, detail: BOOT_TAIL } : null
     );
   }
 
@@ -168,7 +186,6 @@
   function start() {
     trapWithRetries();
     reportBoot();
-    if (BOOT_TAIL) send("TIMELINE at-boot nav=" + navigationType(), BOOT_TAIL);
   }
 
   if (document.readyState === "loading") {

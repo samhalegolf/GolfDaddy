@@ -178,6 +178,31 @@ test("the purge runs on native and reports what it reclaimed", () => {
   );
 });
 
+test("the purge runs once even though install() is re-entrant", () => {
+  /* install() is called again by later layers during their own wire() passes, so
+     a scheduler placed inside it fires once per call. On a device that meant six
+     purges in six seconds: one did the work, five were no-ops. The guard has to
+     be inside the function, not at the call site, or a future caller loses it. */
+  const fn = flat(CAMERA).match(/function gdPurgeLegacyFatFrames\(opts\)[\s\S]*?return result; \}/);
+  assert.ok(fn, "gdPurgeLegacyFatFrames must be findable");
+  assert.ok(/purgeRan/.test(fn[0]), "the one-shot guard must live inside the function");
+  assert.ok(/opts\.force/.test(fn[0]), "a forced pass must stay available for a device console");
+  assert.ok(
+    /opts\.dryRun!==true\)purgeRan=true/.test(fn[0].replace(/ /g, "")),
+    "a dry run must not consume the one-shot guard"
+  );
+});
+
+test("a no-op purge writes nothing to the 50-entry timeline", () => {
+  /* That timeline is the only forensic record on a device. Five no-op purge
+     entries evicted the events being investigated. */
+  const fn = flat(CAMERA).match(/function gdPurgeLegacyFatFrames\(opts\)[\s\S]*?return result; \}/);
+  assert.ok(
+    /if\(doomed\.length\)safe\(function\(\)\{gdCoursePlayDebugEvent\("legacy-fat-frames-purged"/.test(fn[0].replace(/ /g, "")),
+    "the debug event must be guarded on something actually having been removed"
+  );
+});
+
 let failed = 0;
 tests.forEach((t) => {
   try { t.fn(); console.log("  ok  " + t.name); }
