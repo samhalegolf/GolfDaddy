@@ -146,6 +146,38 @@ test("the transition timeout is not cancelled while the mask is still up", () =>
   );
 });
 
+test("legacy fat tile manifests are purged unconditionally", () => {
+  /* The app authors nothing - automapper is server-side and objects come from the
+     database - so every course-shaped key here is cache and there is no local
+     original to protect. An earlier draft carried evictableStorageKeys' "keep
+     anything not yet in the cloud" rule, which on a phone whose scans were never
+     flagged as synced would have skipped precisely the keys worth deleting. */
+  const fn = flat(CAMERA).match(/function gdPurgeLegacyFatFrames\(opts\)[\s\S]*?return result; \}/);
+  assert.ok(fn, "gdPurgeLegacyFatFrames must be findable");
+  assert.ok(
+    !/cloudHydrated|pushed\[|keptUnsynced/.test(fn[0]),
+    "the purge must not reintroduce a cloud-synced exemption - it would spare the fat keys"
+  );
+  assert.ok(
+    /Array\.isArray\(m\.tiles\)&&m\.tiles\.length/.test(fn[0].replace(/ /g, "")) ||
+    /Array\.isArray\(m\.tiles\)/.test(fn[0]),
+    "only manifests still carrying a tile list are removed; a lean imagePath manifest is what renders"
+  );
+  assert.ok(/dryRun/.test(fn[0]), "a dry run must be available for inspecting a device before deleting");
+});
+
+test("the purge runs on native and reports what it reclaimed", () => {
+  const src = flat(CAMERA);
+  assert.ok(
+    /GDNative&&window\.GDNative\.isNative[\s\S]{0,220}gdPurgeLegacyFatFrames/.test(src),
+    "the purge must be gated to native and scheduled at boot"
+  );
+  assert.ok(
+    /Purged legacy captured-frame manifests/.test(src),
+    "it must report through ClarityErrorReporter - the device that needs this is a phone with no inspector"
+  );
+});
+
 let failed = 0;
 tests.forEach((t) => {
   try { t.fn(); console.log("  ok  " + t.name); }

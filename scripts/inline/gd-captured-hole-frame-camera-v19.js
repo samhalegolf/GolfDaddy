@@ -796,6 +796,52 @@
 	    captureFlattenPending[key]=job;
 	    return job;
 	  }
+	  /* Purge legacy fat tile manifests.
+
+	     The app authors nothing: automapper runs server-side and objects arrive from
+	     the database, so everything course-shaped in localStorage is cache. A manifest
+	     still carrying a tile list is left over from the local shutter that used to
+	     run during play, at ~270-300KB each. Five of them plus the course library puts
+	     a phone at ~7.3MB against a ~5MB WKWebView budget, and what iOS evicts to make
+	     room is gd_gps_resume_round_v1.
+
+	     Deleting is therefore unconditional and lossless - there is no local original
+	     to protect. localStorage survives an app update, so the guard that stopped new
+	     ones being written cannot clear the ones already on a device. */
+	  var LEGACY_FRAME_PREFIX="gd_captured_hole_frame_v19_";
+	  function gdPurgeLegacyFatFrames(opts){
+	    opts=opts||{};
+	    var doomed=[],bytes=0;
+	    safe(function(){
+	      for(var i=0;i<localStorage.length;i++){
+	        var k=localStorage.key(i);
+	        if(!k||k.indexOf(LEGACY_FRAME_PREFIX)!==0)continue;
+	        var raw=localStorage.getItem(k);
+	        if(!raw)continue;
+	        /* Only manifests still carrying tiles. One that already points at owned
+	           pixels is small and is what the app actually renders from. */
+	        var m=safe(function(){return JSON.parse(raw);},null);
+	        if(!m||!Array.isArray(m.tiles)||!m.tiles.length)continue;
+	        	        doomed.push(k);
+	        bytes+=raw.length;
+	      }
+	    });
+	    if(opts.dryRun!==true)doomed.forEach(function(k){safe(function(){localStorage.removeItem(k);});});
+	    var result={removed:doomed.length,reclaimedKb:Math.round(bytes/1024),keys:doomed};
+	    /* Reported so the reclaim is visible from the client-errors table without an
+	       attached inspector - the device that needs this is a phone in the field. */
+	    if(doomed.length&&opts.dryRun!==true){
+	      safe(function(){
+	        window.ClarityErrorReporter.report(
+	          "Purged legacy captured-frame manifests",
+	          result.reclaimedKb+"KB over "+doomed.length+" keys | "+doomed.join(", ")
+		        );
+	        window.ClarityErrorReporter.flush();
+	      });
+	    }
+	    safe(function(){gdCoursePlayDebugEvent("legacy-fat-frames-purged",result);});
+	    return result;
+	  }
 	  /* Lets the visual engine hold its stitch until the flattens for a set of captures have
 	     settled, then reports which manifests now own their pixels. Resolves on a timeout too,
 	     so an offline browser degrades to tile stitching instead of hanging the build. */
@@ -2114,6 +2160,16 @@
 		  window.gdRenderHoleImageCamera=function(manifest){return renderCaptureManifest(manifest||loadCaptureManifest());};
 		  window.gdBeginGpsHoleSwitchTransition=gdBeginGpsHoleSwitchTransition;
 		  window.gdEndGpsHoleSwitchTransition=gdEndGpsHoleSwitchTransition;
+		  /* Exposed for a dry run or a forced pass from a console. */
+		  window.gdPurgeLegacyFatFrames=gdPurgeLegacyFatFrames;
+		  /* Native only, and early: this is a pure localStorage scan with no network,
+		     so it costs nothing, and the whole point is to be under budget before the
+		     player reaches a hole and the webview starts evicting. Deferred just past
+		     first paint so it never competes with the course being opened. */
+		  safe(function(){
+		    if(!(window.GDNative&&window.GDNative.isNative))return;
+		    setTimeout(function(){safe(gdPurgeLegacyFatFrames);},2500);
+		  });
 	    window.gdShowHoleImageCamera=function(on){if(on){var m=loadCaptureManifest();if(!m&&capturedGpsPlayActive())return missingCapturedManifest("show",{stage:"show"});if(!m)m=window.gdBuildHoleImageCaptureManifest("show");if(m)renderCaptureManifest(m);}document.body.classList.toggle("gdCapturedHoleFrameCameraOn",!!on);document.body.classList.toggle("gdHoleImageCameraOn",!!on);if(on)clearCapturedFrameUnavailable();return !!on;};
 		    window.gdFitCapturedHoleFrameToBoxV19=fitCaptured;
 		    window.gdFitHeadToTeeHoleFrameV19=headToTee;
