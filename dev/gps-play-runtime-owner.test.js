@@ -137,21 +137,32 @@ assertContains(lockAfterManualStart, "if(lockToken!==manualStartLockToken||Numbe
 assertContains(lockAfterManualStart, "if(currentHole()!==lockHole)return", "manual-start delayed lock rejects cross-hole callbacks");
 assertContains(lockAfterManualStart, 'document.body.classList.contains("gdGpsHoleTransitioning")', "manual-start delayed lock does not repaint during hole transitions");
 
-/* The home guard ran on setInterval(...,260) and called forceHomeShell ->
-   cleanRouteClasses("home") -> GDShell.showHome, so a housekeeping tick performed a
-   real route change. Two of its six "dirty" conditions - gdMappedStartPromptActive
-   and text in #hint - are set by gdRenderMappedStartHint, which draws the Head To
-   the Tee prompt. So the prompt made the guard think the surface was dirty, and the
-   guard responded by wiping the prompt (cleanGpsTransient strips those very classes)
-   and navigating home, four times a second. That was the trip home, and the repeated
-   showHome work is the likeliest cause of the freeze that came with it. */
+/* homeGuardTick ran on setInterval(...,260) and, when any of six body classes was
+   present, ran cleanGpsTransient + forceHomeShell. That is route-transition cleanup,
+   and a poller cannot do it: a class on document.body carries no timing information,
+   so the tick cannot distinguish "leftover from the route I left" from "state of the
+   route I am entering". It tore down the Head To the Tee prompt and courses mid-open
+   four times a second, and forceHomeShell hides #courseScreen - so the player was
+   thrown home, or stranded on a hidden surface. Exempting each state in turn does not
+   converge; the destructive half had to leave the interval entirely. */
 const homeGuard = sliceBetween("function homeGuardTick", "function toggleToolTab");
-assertContains(homeGuard, 'classList.contains("gdMappedStartPromptActive"))return', "home guard treats a live mapped-start prompt as player flow, not leftover dirt");
+assertNotContains(homeGuard, "cleanGpsTransient", "the 260ms tick must not run transition cleanup");
+assertNotContains(homeGuard, "forceHomeShell", "the 260ms tick must not force the home shell");
+assertNotContains(homeGuard, "dirty", "the tick must not classify body state as dirt at all");
+assertContains(homeGuard, "liftShellTop();", "the tick keeps its idempotent re-wiring");
+assertContains(homeGuard, "bindHomePlayTile();", "the tick keeps binding the play tile");
+
+/* The cleanup lives where the timing is known: on the actual route change, bounded,
+   and cancellable so tapping Play inside the 2.2s tail cannot be undone by a pending
+   tick firing forceHomeShell against a course that is opening. */
+const queueCleanup = sliceBetween("function queueHomeCleanup", "function homeGuardTick");
+assertContains(queueCleanup, "var token=++homeCleanupToken", "queued home cleanup takes a token");
+assertContains(queueCleanup, "if(token!==homeCleanupToken)return", "a superseded queued tick is a no-op");
+assertContains(runtimeScript, 'if(route!=="home")cancelHomeCleanup()', "any route change away from home cancels pending home cleanup");
+assertContains(runtimeScript, "function cancelHomeCleanup()", "the cancel hook is defined, not just called");
 
 const forceHome = sliceBetween("function forceHomeShell", "function queueHomeCleanup");
-assertContains(forceHome, 'cleanRouteClasses("home",{navigate:false})', "forceHomeShell tidies the DOM without navigating - it is reached from a 260ms interval");
-assertNotContains(forceHome, 'cleanRouteClasses("home");', "forceHomeShell must not use the navigating form");
-
+assertContains(forceHome, 'cleanRouteClasses("home",{navigate:false})', "forceHomeShell tidies without navigating");
 assertContains(runtimeScript, 'if(route==="home"&&!(opts&&opts.navigate===false))safe', "the home branch only navigates when the caller has not opted out");
 
 console.log("gps-play-runtime-owner tests passed");

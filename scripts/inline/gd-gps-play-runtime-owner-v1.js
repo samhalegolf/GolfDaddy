@@ -2872,6 +2872,8 @@
 	  function setRouteLabel(label){if(document.body&&document.body.dataset)document.body.dataset.clarityRouteLabel=label||""}
 	  function cleanRouteClasses(route,opts){
 		    if(!document.body)return;
+		    /* A route change away from home invalidates any home cleanup still queued. */
+		    if(route!=="home")cancelHomeCleanup();
 		    document.body.classList.remove("gps-open","manual-gps-active","gdCoursePinPromptActive","gdToolRailOpen");
 		    if(route!=="gps")releaseGpsFirstPaintGate(route||"leave-gps");
 		    /* opts.navigate===false is the already-on-home cleanup path. Both callers of
@@ -3707,9 +3709,21 @@
     safe(function(){var h=byId("shellHome");if(h){h.classList.remove("hidden");h.style.display="";h.style.visibility="";h.style.opacity=""}});
     safe(function(){var s=byId("courseScreen");if(s){s.classList.add("hidden");s.style.display="none";s.style.visibility="hidden";s.style.opacity="0"}});
   }
+  /* Cleanup queued when the player lands on home, out to 2.2s to catch state that
+     settles late. It has to be cancellable: tapping Play inside that window starts a
+     new flow, and a pending tick would then run forceHomeShell - which hides
+     #courseScreen - against a course that is opening. Any route change away from home
+     bumps the token, so the stale ticks become no-ops.
+
+     Bounded and tied to a real transition is what makes this safe. The perpetual
+     version of the same work is what homeGuardTick used to do, and could not be. */
+  var homeCleanupToken=0;
+  function cancelHomeCleanup(){homeCleanupToken+=1;}
   function queueHomeCleanup(reason){
+    var token=++homeCleanupToken;
     [40,120,300,700,1300,2200].forEach(function(delay){
       setTimeout(function(){
+        if(token!==homeCleanupToken)return;
         if(!document.body||!document.body.classList.contains("shell-home"))return;
         cleanGpsTransient((reason||"home")+"-late");
         forceHomeShell();
@@ -3718,28 +3732,27 @@
       },delay);
     });
   }
+  /* Idempotent re-wiring only. This runs on a 260ms interval, so nothing
+     destructive belongs in it.
+
+     It used to also compute a "dirty" set from body classes and, when any were
+     present, run cleanGpsTransient + forceHomeShell. That is route-transition
+     cleanup, and a poller cannot do it correctly: a class on document.body carries
+     no timing information, so the tick cannot tell "leftover from the route I just
+     left" from "state of the route I am entering". Both look identical. It tore
+     down the Head To the Tee prompt (gdMappedStartPromptActive + the buttons it puts
+     in #hint) and courses mid-open (gdCourseOpening), four times a second, and
+     forceHomeShell hides #courseScreen - so the player was thrown home, or stranded
+     on a hidden surface.
+
+     Exempting each state in turn does not fix it; there is always another one. The
+     cleanup lives where the timing is known instead: home() runs cleanGpsTransient
+     and queueHomeCleanup on the actual route change, and queueHomeCleanup repeats at
+     six bounded delays out to 2.2s to catch anything that settles late. */
   function homeGuardTick(){
     if(!document.body||!document.body.classList.contains("shell-home"))return;
-    /* The mapped-start prompt IS the Head To the Tee UI: gdRenderMappedStartHint
-       sets gdMappedStartPromptActive and puts the buttons in #hint, which trips two
-       of the dirty conditions below. Treating it as leftover meant this tick called
-       cleanGpsTransient - which strips gdMappedStartPromptActive, gdHeadToTeeFrameActive
-       and empties #hint - and so destroyed the prompt the player was looking at, four
-       times a second. A live prompt is a player mid-flow, not residue. */
-    if(document.body.classList.contains("gdMappedStartPromptActive"))return;
     liftShellTop();
-    var hint=byId("hint");
-    var dirty=document.body.classList.contains("gdMappedStartPromptActive")||
-      document.body.classList.contains("gdCapturedHoleFrameCameraOn")||
-      document.body.classList.contains("gdHoleImageCameraOn")||
-      document.body.classList.contains("gdMappedCourseMode")||
-      document.body.classList.contains("gdCourseOpening")||
-      !!(hint&&String(hint.textContent||"").trim());
     expose();
-    bindHomePlayTile();
-    if(!dirty)return;
-    cleanGpsTransient("home-guard");
-    forceHomeShell();
     bindHomePlayTile();
   }
   function toggleToolTab(event){
