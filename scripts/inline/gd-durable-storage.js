@@ -34,6 +34,26 @@
     "gd_player_profiles_v27",           /* profiles, bag, handicap - user-entered */
     "gd_gps_resume_round_v1"            /* the round being played right now */
   ];
+
+  /* Restoring these is not enough on its own: app scripts read them
+     synchronously as they load, so they have already seen an empty localStorage
+     by the time the async restore finishes. Only a reload makes them visible.
+
+     gd_gps_resume_round_v1 is deliberately NOT here. Nothing reads it during
+     boot - the Resume Round button and the resume prompt both read it lazily,
+     when the player opens Play - so restoring it is immediately effective and a
+     reload buys nothing.
+
+     That distinction is the whole point. A reload sends the player to home and
+     loses where they were, and on a device where the webview evicts storage
+     mid-round that was happening for a key that never needed it. Reloading only
+     for keys that genuinely cannot be seen otherwise turns a lot of those
+     interruptions into nothing at all. */
+  var RELOAD_REQUIRED_KEYS = [
+    "clarity:supabase-auth-session:v1",
+    "gd_accounts_v1",
+    "gd_player_profiles_v27"
+  ];
   var RELOAD_GUARD = "gd_durable_restore_reloaded_v1";
   var PREFIX = "durable:";
 
@@ -79,7 +99,7 @@
     return cap && cap.Plugins && cap.Plugins.Preferences ? cap.Plugins.Preferences : null;
   }
 
-  var state = { restored: [], mirrored: 0, active: false };
+  var state = { restored: [], mirrored: 0, active: false, cleaned: 0 };
   /* Kept so restore() can write without going back through the patched setter,
      which would immediately mirror back the value it just read. */
   var originalSetItem = null;
@@ -102,31 +122,82 @@
     safe(function () { api.remove({ key: PREFIX + key }).then(function () {}, function () {}); });
   }
 
+  /* Keys a previous version of this file created by accident. See installMirror. */
+  var STRAY_KEYS = ["setItem", "removeItem", "__gdDurableMirror"];
+
   /* Patch localStorage so existing call sites keep working untouched. Wrapped so
-     a failure here can never break a write - the original is always called. */
+     a failure here can never break a write - the original is always called.
+
+     Every assignment here MUST go through Object.defineProperty. localStorage is
+     a WebIDL legacy platform object with a named-property setter, so a plain
+     `storage.setItem = fn` stores an ENTRY called "setItem" holding the
+     function's source text. An earlier version of this file did exactly that,
+     and the engines disagree about what else happens: Chromium also overrides
+     the method, so the mirror worked there and the test suite stayed green,
+     while iOS WebKit did not override at all. On WebKit that left only the
+     boot-time seed() mirroring - every write during a session went unmirrored,
+     and the durable copy of the in-progress round was found sitting over two
+     hours stale on a device. Restoring that after an eviction hands the player
+     back the wrong hole.
+
+     Both engines wrote the three junk keys ("setItem", "removeItem",
+     "__gdDurableMirror") into the same quota this module exists to protect,
+     which cleanStrayKeys below clears. Testing for those keys is also how this
+     stays catchable in a Chromium-only harness.
+
+     The installed flag lives on the patched function rather than on storage for
+     the same reason - a flag on storage is a storage write. */
   function installMirror() {
     var storage = window.localStorage;
-    if (!storage || storage.__gdDurableMirror) return;
+    if (!storage) return;
 
     var originalSet = storage.setItem.bind(storage);
     var originalRemove = storage.removeItem.bind(storage);
+    if (storage.setItem.__gdDurableMirror) { state.active = true; return; }
     originalSetItem = originalSet;
     var durable = {};
     DURABLE_KEYS.forEach(function (key) { durable[key] = true; });
 
-    storage.setItem = function (key, value) {
+    function define(name, fn) {
+      fn.__gdDurableMirror = true;
+      /* Returns false rather than throwing if the property will not take, so a
+         hostile or unusual Storage implementation degrades to no mirroring
+         instead of breaking every write in the app. */
+      return safe(function () {
+        Object.defineProperty(storage, name, {
+          value: fn, writable: true, configurable: true, enumerable: false
+        });
+        return storage[name] === fn;
+      }, false);
+    }
+
+    var setOk = define("setItem", function (key, value) {
       var result = originalSet(key, value);
       if (durable[key]) safe(function () { mirror(key, value); });
       return result;
-    };
-    storage.removeItem = function (key) {
+    });
+    var removeOk = define("removeItem", function (key) {
       var result = originalRemove(key);
       if (durable[key]) safe(function () { unmirror(key); });
       return result;
-    };
+    });
 
-    storage.__gdDurableMirror = true;
-    state.active = true;
+    cleanStrayKeys(originalRemove);
+    state.active = setOk && removeOk;
+  }
+
+  /* Drop the junk entries the old assignment created. Uses the captured native
+     removeItem: the patched one is in place by now, and these are not durable
+     keys, but going straight to the original keeps this independent of whether
+     the patch above actually took. */
+  function cleanStrayKeys(originalRemove) {
+    STRAY_KEYS.forEach(function (key) {
+      safe(function () {
+        if (window.localStorage.getItem(key) === null) return;
+        originalRemove(key);
+        state.cleaned += 1;
+      });
+    });
   }
 
   /* Copy anything already in localStorage up to Preferences, so the first run
@@ -163,8 +234,56 @@
     return restored;
   }
 
+  /* What is actually filling the quota, measured on the device rather than
+     guessed at from the repo.
+
+     Eviction is the webview reclaiming space, so the only useful question is
+     which keys are big - and that cannot be answered from here. The obvious
+     suspects are already bounded (captured scans cap at 48, the sync outbox at
+     36), so the real consumer is something nobody has looked at. This reports
+     the total and the worst offenders once per session, and only when the total
+     is big enough to be worth acting on, so it costs nothing in the normal case.
+
+     Sizes are approximate on purpose: key.length + value.length in UTF-16 code
+     units is within a rounding error of what the quota counts, and computing it
+     exactly would mean walking every value twice. */
+  var REPORT_BYTES = 2 * 1024 * 1024;
+  var USAGE_REPORTED = "gd_durable_usage_reported_v1";
+
+  function storageUsage() {
+    var storage = window.localStorage;
+    if (!storage) return null;
+    var rows = [];
+    var total = 0;
+    for (var i = 0; i < storage.length; i += 1) {
+      var key = storage.key(i);
+      if (key === null) continue;
+      var value = safe(function () { return storage.getItem(key); }, "") || "";
+      var bytes = (key.length + value.length) * 2;
+      total += bytes;
+      rows.push({ key: key, bytes: bytes });
+    }
+    rows.sort(function (a, b) { return b.bytes - a.bytes; });
+    return { total: total, keys: rows.length, top: rows.slice(0, 6) };
+  }
+
+  function reportUsageIfHeavy() {
+    var already = safe(function () { return sessionStorage.getItem(USAGE_REPORTED) === "1"; }, false);
+    if (already) return;
+    var usage = storageUsage();
+    if (!usage || usage.total < REPORT_BYTES) return;
+    safe(function () { sessionStorage.setItem(USAGE_REPORTED, "1"); });
+    safe(function () {
+      if (!window.ClarityErrorReporter || typeof window.ClarityErrorReporter.report !== "function") return;
+      var detail = Math.round(usage.total / 1024) + "KB over " + usage.keys + " keys | " +
+        usage.top.map(function (row) { return row.key + "=" + Math.round(row.bytes / 1024) + "KB"; }).join(", ");
+      window.ClarityErrorReporter.report("Durable storage usage high", detail);
+    });
+  }
+
   async function boot() {
     if (!isNative()) return;
+    safe(reportUsageIfHeavy);
     var restored = await restore();
     state.restored = restored;
 
@@ -173,13 +292,8 @@
       return;
     }
 
-    /* Something was evicted and has been put back. App scripts have already read
-       an empty localStorage synchronously, so the only way to make them see the
-       restored state is to load again. Guarded so a persistent failure cannot
-       produce a reload loop. */
-    var alreadyReloaded = safe(function () { return sessionStorage.getItem(RELOAD_GUARD) === "1"; }, false);
-    if (alreadyReloaded) return;
-    safe(function () { sessionStorage.setItem(RELOAD_GUARD, "1"); });
+    /* Something was evicted and has been put back. Report it either way - the
+       eviction is the signal worth having, whether or not a reload follows. */
     safe(function () {
       if (window.ClarityErrorReporter && typeof window.ClarityErrorReporter.report === "function") {
         window.ClarityErrorReporter.report(
@@ -188,12 +302,34 @@
         );
       }
     });
+
+    /* Only reload for keys the app read synchronously while booting. If the
+       round was the only casualty it is already usable, and reloading would
+       throw the player to home to fix something that is not broken. */
+    var needsReload = restored.some(function (key) { return RELOAD_REQUIRED_KEYS.indexOf(key) !== -1; });
+    if (!needsReload) {
+      safe(function () {
+        window.dispatchEvent(new CustomEvent("clarity:durable-restored", { detail: { keys: restored.slice(), reloaded: false } }));
+      });
+      return;
+    }
+
+    /* App scripts have already read an empty localStorage synchronously, so the
+       only way to make them see the restored state is to load again. Guarded so
+       a persistent failure cannot produce a reload loop. */
+    var alreadyReloaded = safe(function () { return sessionStorage.getItem(RELOAD_GUARD) === "1"; }, false);
+    if (alreadyReloaded) return;
+    safe(function () { sessionStorage.setItem(RELOAD_GUARD, "1"); });
     safe(function () { location.reload(); });
   }
 
   window.GDDurableStorage = {
     keys: function () { return DURABLE_KEYS.slice(); },
-    state: function () { return { restored: state.restored.slice(), mirrored: state.mirrored, active: state.active }; },
+    reloadKeys: function () { return RELOAD_REQUIRED_KEYS.slice(); },
+    /* Exposed so the usage picture can be pulled on demand from a device
+       console, not only when it crosses the reporting threshold. */
+    usage: storageUsage,
+    state: function () { return { restored: state.restored.slice(), mirrored: state.mirrored, active: state.active, cleaned: state.cleaned }; },
     /* Exposed for tests and for a manual integrity check on a device. */
     seed: seed,
     restore: restore

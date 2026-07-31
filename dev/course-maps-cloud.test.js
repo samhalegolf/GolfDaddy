@@ -17,6 +17,7 @@ const { pathToFileURL } = require("url");
     mapsFromSupabaseRows,
     mergeMapSets,
     sanitizeCourse,
+    visualSnapshotCourseId,
     withMirrorSummary
   } = mod.__courseMapsTest;
 
@@ -165,6 +166,18 @@ const { pathToFileURL } = require("url");
   const duplicateMerge = mergeGeneratedCourse(generatedMerge.course, playerScan);
   assert.equal(duplicateMerge.accepted.objects, 0);
   assert.equal(duplicateMerge.accepted.holes, 0);
+
+  /* Publishing geometry auto-enqueues a visual snapshot, and the worker looks the course up by
+     course_maps.course_id. The hook used to pass `course.id` - the store key - so every publish
+     since it was added queued a snapshot for "published-<name>", the worker failed it with
+     "not found in course_maps", and the real course was never scanned. Two courses were
+     published in the days before this was spotted and neither got frames. */
+  assert.equal(visualSnapshotCourseId(course), "cromwell");
+  assert.equal(visualSnapshotCourseId(course), courseToSupabaseRow(course).course_id,
+    "the enqueued id must be the column the worker filters on");
+  assert.notEqual(visualSnapshotCourseId(course), course.id, "the store key is not a course id");
+  assert.equal(visualSnapshotCourseId({ id: "published::cromwell" }), "",
+    "a course carrying only a store key enqueues nothing rather than a phantom");
 
   const optionsResponse = await mod.default(new Request("https://clarity-caddie.test/api/course-maps", { method: "OPTIONS" }));
   assert.equal(optionsResponse.status, 200);

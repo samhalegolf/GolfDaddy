@@ -4,15 +4,16 @@
   var root = window.GolfDaddy = window.GolfDaddy || {};
   root.modules = root.modules || {};
 
+  /* Parsing lives in scripts/gd-practice-parser-core.js, shared verbatim with
+     the Netlify import function. This file owns only the browser side: the
+     localStorage store, the active-player scope, and the gate input. If the
+     core is missing the module still loads, but every parse throws rather than
+     silently returning nothing - a missing script tag should be loud. */
+  var core = window.GDPracticeParserCore;
+  if (!core) throw new Error('gd-native-practice-data: load scripts/gd-practice-parser-core.js first');
+
   var STORAGE_KEY = 'gd_native_practice_shot_data_v1';
-  var SCHEMA_VERSION = 1;
-  var VALID_STATUSES = {
-    imported: true,
-    native_valid: true,
-    native_invalid: true,
-    ready_for_gate: true,
-    rejected: true
-  };
+  var SCHEMA_VERSION = core.SCHEMA_VERSION;
 
   function safe(fn, fallback) {
     try {
@@ -83,16 +84,15 @@
     };
   }
 
-  function asNumber(value) {
-    if (value === null || value === undefined || value === '') return null;
-    var cleaned = typeof value === 'string' ? value.replace(/,/g, '').trim() : value;
-    var n = Number(cleaned);
-    return Number.isFinite(n) ? n : null;
-  }
+  var asNumber = core.asNumber;
+  var cleanString = core.cleanString;
 
-  function cleanString(value) {
-    return String(value === null || value === undefined ? '' : value).trim();
-  }
+  /* The core, bound to this platform: browser ids, and the signed-in player as
+     the ambient scope for an import that does not name one. */
+  var parser = core.createPracticeParser({
+    createId: createId,
+    resolveScope: activePlayerScope
+  });
 
   function activeStatus(item) {
     return cleanString(item && item.status || 'active').toLowerCase() !== 'deleted';
@@ -116,550 +116,40 @@
     }, {});
   }
 
-  function sideFromOffline(value, explicitSide) {
-    var side = cleanString(explicitSide).toLowerCase();
-    if (side === 'left' || side === 'l') return 'left';
-    if (side === 'right' || side === 'r') return 'right';
-    if (Number.isFinite(Number(value))) {
-      if (Number(value) < 0) return 'left';
-      if (Number(value) > 0) return 'right';
-    }
-    return '';
-  }
+  var parsePracticeImportText = parser.parsePracticeImportText;
+  var normalizeNativeShot = parser.normalizeNativeShot;
+  var validateNativePracticeShot = parser.validateNativePracticeShot;
 
-  function normalizeNativeShot(input, context) {
-    input = input || {};
-    context = context || {};
-    var scope = Object.assign({}, activePlayerScope(), context.playerScope || {});
-    var created = input.createdAt || nowIso();
-    var shot = {
-      shotId: cleanString(input.shotId) || createId('practice-shot'),
-      sessionId: cleanString(input.sessionId || context.sessionId) || '',
-      playerId: cleanString(input.playerId || scope.playerId),
-      playerName: cleanString(input.playerName || scope.playerName || 'Player'),
-      accountId: cleanString(input.accountId || scope.accountId),
-      club: cleanString(input.club),
-      shotNumber: asNumber(input.shotNumber),
-      ballSpeed: asNumber(input.ballSpeed),
-      clubSpeed: asNumber(input.clubSpeed),
-      launchAngle: asNumber(input.launchAngle),
-      spin: asNumber(input.spin),
-      carryDistance: asNumber(input.carryDistance),
-      totalDistance: asNumber(input.totalDistance),
-      offlineDistance: asNumber(input.offlineDistance),
-      side: sideFromOffline(input.offlineDistance, input.side),
-      faceAngle: asNumber(input.faceAngle),
-      pathAngle: asNumber(input.pathAngle),
-      faceToPath: asNumber(input.faceToPath),
-      startDirection: asNumber(input.startDirection),
-      curve: asNumber(input.curve),
-      targetLine: cleanString(input.targetLine),
-      sideSpin: asNumber(input.sideSpin),
-      totalSpin: asNumber(input.totalSpin),
-      backspin: asNumber(input.backspin),
-      spinAxis: asNumber(input.spinAxis),
-      rawSource: input.rawSource || null,
-      derivedMetrics: input.derivedMetrics && typeof input.derivedMetrics === 'object' ? Object.assign({}, input.derivedMetrics) : null,
-      sourceType: cleanString(input.sourceType || context.sourceType || 'text') || 'text',
-      importBatchId: cleanString(input.importBatchId || context.importBatchId),
-      status: VALID_STATUSES[input.status] ? input.status : 'imported',
-      schemaVersion: SCHEMA_VERSION,
-      createdAt: created,
-      updatedAt: input.updatedAt || created,
-      errors: Array.isArray(input.errors) ? input.errors.slice() : [],
-      warnings: Array.isArray(input.warnings) ? input.warnings.slice() : [],
-      unknownFields: input.unknownFields && typeof input.unknownFields === 'object' ? Object.assign({}, input.unknownFields) : {}
-    };
-    return validateNativePracticeShot(shot);
-  }
-
-  function validateNativePracticeShot(input) {
-    var shot = Object.assign({}, input || {});
-    var errors = Array.isArray(shot.errors) ? shot.errors.slice() : [];
-    var warnings = Array.isArray(shot.warnings) ? shot.warnings.slice() : [];
-    if (!cleanString(shot.club)) errors.push('missing_club');
-    if (!Number.isFinite(Number(shot.carryDistance)) && !Number.isFinite(Number(shot.totalDistance))) errors.push('missing_distance');
-    if (Number.isFinite(Number(shot.carryDistance)) && Number(shot.carryDistance) <= 0) errors.push('invalid_carry_distance');
-    if (Number.isFinite(Number(shot.totalDistance)) && Number(shot.totalDistance) <= 0) errors.push('invalid_total_distance');
-    if (!Number.isFinite(Number(shot.offlineDistance))) warnings.push('missing_offline_distance');
-    shot.errors = Array.from(new Set(errors));
-    shot.warnings = Array.from(new Set(warnings));
-    shot.status = shot.errors.length ? 'native_invalid' : 'native_valid';
-    shot.updatedAt = nowIso();
-    return shot;
-  }
-
+  /* The core builds the batch/session envelope the server also persists; the
+     browser store needs a few more fields on top - the local record status the
+     soft-delete path reads, the raw text kept for re-parsing, and importId,
+     the older key name still present in stored batches.
+     Note `status` here is the RECORD status (active vs deleted), which is not
+     the staging gate - that is gateStatus. provenanceGaps is advisory: it says
+     what the source never told us (unit, date, monitor) so the UI can offer to
+     fill it in, and it does not stop the import. */
   function createPracticeImportBatch(rows, source) {
     source = source || {};
-    var createdAt = nowIso();
-    var importBatchId = createId('practice-import');
-    var sessionId = cleanString(source.sessionId) || createId('practice-session');
+    var built = parser.createPracticeImportBatch(rows, source);
     var scope = activePlayerScope();
-    var nativeRows = (Array.isArray(rows) ? rows : []).map(function (row, index) {
-      return normalizeNativeShot(Object.assign({}, row, {
-        shotNumber: Number.isFinite(Number(row && row.shotNumber)) ? Number(row.shotNumber) : index + 1,
-        importBatchId: importBatchId,
-        sessionId: sessionId,
-        sourceType: source.sourceType || row && row.sourceType || 'text'
-      }), {
-        importBatchId: importBatchId,
-        sessionId: sessionId,
-        sourceType: source.sourceType || 'text',
-        playerScope: scope
-      });
-    });
-    var batch = {
-      importBatchId: importBatchId,
-      importId: importBatchId,
-      sessionId: sessionId,
+    var batch = Object.assign({}, built.batch, {
+      importId: built.batch.importBatchId,
       playerId: scope.playerId || '',
       playerName: scope.playerName || 'Player',
       accountId: scope.accountId || '',
-      sourceType: source.sourceType || 'text',
-      sourceName: source.sourceName || '',
       rawText: source.rawText || '',
-      rowCount: nativeRows.length,
-      validCount: nativeRows.filter(function (row) { return !row.errors.length; }).length,
-      invalidCount: nativeRows.filter(function (row) { return row.errors.length; }).length,
+      gateStatus: parser.batchGateStatus(built.batch),
+      provenanceGaps: parser.batchProvenanceGaps(built.batch),
       status: 'active',
       deletedAt: '',
-      deletedBy: '',
-      createdAt: createdAt,
-      updatedAt: createdAt
-    };
-    var session = {
-      sessionId: sessionId,
-      importBatchId: importBatchId,
-      playerId: scope.playerId || '',
-      playerName: scope.playerName || 'Player',
-      accountId: scope.accountId || '',
-      sourceType: batch.sourceType,
-      sourceName: batch.sourceName,
-      shotCount: nativeRows.length,
+      deletedBy: ''
+    });
+    var session = Object.assign({}, built.session, {
       status: 'active',
       deletedAt: '',
-      deletedBy: '',
-      createdAt: createdAt,
-      updatedAt: createdAt
-    };
-    return { batch: batch, session: session, rows: nativeRows };
-  }
-
-  function splitDelimitedLine(line) {
-    var cells = [];
-    var cell = '';
-    var quoted = false;
-    for (var i = 0; i < line.length; i += 1) {
-      var ch = line.charAt(i);
-      var next = line.charAt(i + 1);
-      if (ch === '"' && quoted && next === '"') {
-        cell += '"';
-        i += 1;
-      } else if (ch === '"') {
-        quoted = !quoted;
-      } else if (ch === ',' && !quoted) {
-        cells.push(cell.trim());
-        cell = '';
-      } else {
-        cell += ch;
-      }
-    }
-    cells.push(cell.trim());
-    return cells;
-  }
-
-  function splitPracticeLine(line, delimiter) {
-    if (delimiter === ',') return splitDelimitedLine(line);
-    return String(line || '').trim().split(/\t|\s{2,}|[|;]/).map(function (cell) { return cell.trim(); });
-  }
-
-  function detectDelimiter(lines) {
-    var candidates = [',', '\t', ';', '|'];
-    var scores = {
-      ',': 0,
-      '\t': 0,
-      ';': 0,
-      '|': 0
-    };
-    (Array.isArray(lines) ? lines : []).slice(0, 25).forEach(function (line) {
-      if (!String(line).trim()) return;
-      var text = String(line);
-      candidates.forEach(function (candidate) {
-        scores[candidate] += text.split(candidate).length - 1;
-      });
+      deletedBy: ''
     });
-    var best = ',';
-    var bestScore = -1;
-    candidates.forEach(function (candidate) {
-      if (scores[candidate] > bestScore) {
-        bestScore = scores[candidate];
-        best = candidate;
-      }
-    });
-    return bestScore > 0 ? best : ',';
-  }
-
-  function fieldLabel(field) {
-    return ({
-      club: 'club',
-      shotNumber: 'shot',
-      carryDistance: 'carry',
-      totalDistance: 'total',
-      offlineDistance: 'offline',
-      ballSpeed: 'ball speed',
-      clubSpeed: 'club speed',
-      launchAngle: 'launch',
-      spin: 'spin',
-      sideSpin: 'side spin',
-      totalSpin: 'total spin',
-      backspin: 'backspin',
-      spinAxis: 'spin axis',
-      faceAngle: 'face',
-      pathAngle: 'path',
-      faceToPath: 'face-to-path',
-      startDirection: 'start',
-      curve: 'curve',
-      targetLine: 'target',
-      side: 'side'
-    })[field] || field;
-  }
-
-  function isNumericField(field) {
-    return !!{
-      shotNumber: true,
-      carryDistance: true,
-      totalDistance: true,
-      offlineDistance: true,
-      ballSpeed: true,
-      clubSpeed: true,
-      launchAngle: true,
-      spin: true,
-      sideSpin: true,
-      totalSpin: true,
-      backspin: true,
-      spinAxis: true,
-      faceAngle: true,
-      pathAngle: true,
-      faceToPath: true,
-      startDirection: true,
-      curve: true
-    }[field];
-  }
-
-  function parseNumericValue(value) {
-    if (!value && value !== 0) return null;
-    return asNumber(value);
-  }
-
-  function inferClubValue(value) {
-    var text = cleanString(value).toLowerCase();
-    if (!text) return '';
-    if (/\d/.test(text) && /[a-z]/i.test(text)) return cleanString(value);
-    if (/^(sw|lw|mw|rw|gw|pw|u|driver|iron|wedge|wood|hybrid|hyb|putter|fw|uw|iw|[0-9]+i?)$/i.test(text)) return cleanString(value);
-    if (/^[0-9]+\s*(i|w|iron|wedge|wood)$/i.test(text)) return cleanString(value);
-    return '';
-  }
-
-  function parseClub(value) {
-    var text = inferClubValue(value);
-    return text ? cleanString(text) : '';
-  }
-
-  function deriveRowMetrics(row) {
-    var derived = {};
-    if (Number.isFinite(Number(row.spinAxis))) return derived;
-    var sideSpin = parseNumericValue(row.sideSpin);
-    var backspin = parseNumericValue(row.backspin) || parseNumericValue(row.totalSpin);
-    if (!Number.isFinite(sideSpin) || !Number.isFinite(backspin) || Math.abs(backspin) <= 100) return derived;
-    var axis = Math.atan2(sideSpin, Math.abs(backspin)) * 180 / Math.PI;
-    if (Number.isFinite(axis)) {
-      derived.spinAxis = Number.isFinite(axis) ? Math.round(axis * 100) / 100 : null;
-    }
-    return derived;
-  }
-
-  function buildColumns(cells, useDefaults) {
-    var defaults = ['club', 'carryDistance', 'totalDistance', 'offlineDistance', 'faceAngle', 'pathAngle', 'startDirection'];
-    var columns = [];
-    var used = {};
-    for (var i = 0; i < (cells || []).length; i += 1) {
-      var rawHeader = cleanString(cells[i]);
-      var key = useDefaults ? (defaults[i] || ('unknown' + (i + 1))) : canonicalField(rawHeader);
-      if (!key) key = 'unknown' + (i + 1);
-      if (!useDefaults && used[key]) {
-        key = 'unknown' + (i + 1);
-      } else {
-        used[key] = true;
-      }
-      columns.push({
-        index: i,
-        key: key,
-        rawHeader: rawHeader,
-        assigned: key.indexOf('unknown') !== 0
-      });
-    }
-    return columns;
-  }
-
-  function fieldKey(value) {
-    return String(value || '').trim().toLowerCase().replace(/\([^)]*\)/g, '').replace(/[^a-z0-9]+/g, '');
-  }
-
-  var FIELD_ALIASES = {
-    club: 'club',
-    clubname: 'club',
-    shot: 'shotNumber',
-    shotno: 'shotNumber',
-    shotnumber: 'shotNumber',
-    shotid: 'shotNumber',
-    ball: 'ballSpeed',
-    ballspeed: 'ballSpeed',
-    bs: 'ballSpeed',
-    ballspd: 'ballSpeed',
-    clubspeed: 'clubSpeed',
-    chs: 'clubSpeed',
-    clubspd: 'clubSpeed',
-    launch: 'launchAngle',
-    launchangle: 'launchAngle',
-    launchangledeg: 'launchAngle',
-    spin: 'spin',
-    spinrate: 'spin',
-    backspin: 'backspin',
-    sidespin: 'sideSpin',
-    side_spin: 'sideSpin',
-    sidespinrpm: 'sideSpin',
-    totalspin: 'totalSpin',
-    total_spin: 'totalSpin',
-    spinaxis: 'spinAxis',
-    carry: 'carryDistance',
-    carrydistance: 'carryDistance',
-    carrydistancey: 'carryDistance',
-    carrym: 'carryDistance',
-    total: 'totalDistance',
-    totaldistance: 'totalDistance',
-    totaldistm: 'totalDistance',
-    totalm: 'totalDistance',
-    offline: 'offlineDistance',
-    offlinedistance: 'offlineDistance',
-    offdistance: 'offlineDistance',
-    offdist: 'offlineDistance',
-    lr: 'offlineDistance',
-    left: 'offlineDistance',
-    right: 'offlineDistance',
-    side: 'side',
-    face: 'faceAngle',
-    faceangle: 'faceAngle',
-    faceangledeg: 'faceAngle',
-    path: 'pathAngle',
-    pathangle: 'pathAngle',
-    clubpath: 'pathAngle',
-    pathangledeg: 'pathAngle',
-    facetopath: 'faceToPath',
-    f2p: 'faceToPath',
-    start: 'startDirection',
-    startdirection: 'startDirection',
-    startdirectiondeg: 'startDirection',
-    startdir: 'startDirection',
-    curve: 'curve',
-    target: 'targetLine',
-    targetline: 'targetLine'
-  };
-
-  function canonicalField(name) {
-    return FIELD_ALIASES[fieldKey(name)] || '';
-  }
-
-  function looksLikeHeader(cells) {
-    var known = 0;
-    cells.forEach(function (cell) {
-      if (canonicalField(cell)) known += 1;
-    });
-    return known >= 2 || (known >= 1 && cells.some(function (cell) { return /club|carry|total|offline|face|path/i.test(cell); }));
-  }
-
-  function inferHeaders(width) {
-    var defaults = ['club', 'carryDistance', 'totalDistance', 'offlineDistance', 'faceAngle', 'pathAngle', 'startDirection'];
-    var headers = [];
-    for (var i = 0; i < width; i += 1) headers.push(defaults[i] || 'unknown' + (i + 1));
-    return headers;
-  }
-
-  function hasMappedHeaders(columns) {
-    return (Array.isArray(columns) ? columns : []).some(function (column) {
-      return column.assigned;
-    });
-  }
-
-  function parsePracticeImportText(text, opts) {
-    opts = opts || {};
-    var rawText = String(text || '');
-    var sourceLines = rawText
-      .split(/\r?\n/)
-      .map(function (line, index) {
-        return { text: String(line || '').trim(), lineNumber: index + 1 };
-      })
-      .filter(function (line) {
-        return !!line.text;
-      });
-    var warnings = [];
-
-    if (!sourceLines.length) {
-      return {
-        rows: [],
-        warnings: ['empty_input'],
-        errors: ['No rows detected'],
-        sourceType: opts.sourceType || 'text',
-        rawText: rawText
-      };
-    }
-
-    var delimiter = detectDelimiter(sourceLines.map(function (line) {
-      return line.text;
-    }));
-    var firstCells = splitPracticeLine(sourceLines[0].text, delimiter);
-    var hasHeader = opts.headers === true || (opts.headers !== false && looksLikeHeader(firstCells));
-    var columns = buildColumns(firstCells, !hasHeader);
-    if (!hasHeader) warnings.push('header_inferred');
-
-    if (hasHeader && !hasMappedHeaders(columns)) {
-      warnings.push('Unknown headers');
-      hasHeader = false;
-      columns = buildColumns(firstCells, true);
-    }
-
-    var dataLines = hasHeader ? sourceLines.slice(1) : sourceLines;
-    var headers = columns.map(function (column) { return column.key; });
-
-    var rows = dataLines
-      .map(function (line, index) {
-        var cells = splitPracticeLine(line.text, delimiter);
-        if (!cells.length || !cells.some(function (cell) { return cleanString(cell); })) return null;
-
-        var rawSource = {
-          line: line.text,
-          lineNumber: line.lineNumber,
-          lineIndex: index,
-          rowIndex: hasHeader ? index + 2 : index + 1,
-          cells: {},
-          cutouts: []
-        };
-
-        var unknownFields = {};
-        var row = {
-          rawSource: rawSource,
-          sourceType: opts.sourceType || 'text',
-          rowIndex: line.lineNumber,
-          errors: [],
-          warnings: [],
-          derivedMetrics: {}
-        };
-        var knownFieldCount = 0;
-
-        columns.forEach(function (column, cellIndex) {
-          var rawValue = cleanString(cells[cellIndex]);
-          rawSource.cells[column.key] = rawValue;
-          rawSource.cutouts.push({
-            index: column.index,
-            key: column.key,
-            header: column.rawHeader,
-            raw: rawValue
-          });
-
-          if (!rawValue) return;
-
-          if (column.key.indexOf('unknown') === 0) {
-            unknownFields[column.key] = rawValue;
-            return;
-          }
-
-          if (column.key === 'club') {
-            knownFieldCount += 1;
-            row.club = parseClub(rawValue);
-            if (!row.club) row.club = rawValue;
-            return;
-          }
-
-          if (isNumericField(column.key)) {
-            var numericValue = parseNumericValue(rawValue);
-            if (numericValue === null) {
-              row.errors.push('Invalid ' + fieldLabel(column.key));
-              return;
-            }
-            row[column.key] = numericValue;
-            knownFieldCount += 1;
-            return;
-          }
-
-          knownFieldCount += 1;
-          row[column.key] = rawValue;
-        });
-
-        for (var extraIndex = columns.length; extraIndex < cells.length; extraIndex += 1) {
-          var extraValue = cleanString(cells[extraIndex]);
-          if (!extraValue) continue;
-          var extraKey = 'unknown' + (extraIndex + 1);
-          unknownFields[extraKey] = extraValue;
-          rawSource.cells[extraKey] = extraValue;
-          rawSource.cutouts.push({
-            index: extraIndex,
-            key: extraKey,
-            header: '',
-            raw: extraValue
-          });
-        }
-
-        if (!row.club) {
-          var inferredClub = parseClub(cells[0]);
-          if (inferredClub) {
-            row.club = inferredClub;
-            row.warnings.push('Club inferred from first column');
-          }
-        }
-
-        if (Object.keys(unknownFields).length) {
-          row.warnings.push('Unknown fields');
-          row.unknownFields = unknownFields;
-        }
-
-        if (!row.club || (!Number.isFinite(Number(row.carryDistance)) && !Number.isFinite(Number(row.totalDistance)))) {
-          row.errors.push('Missing required fields');
-        }
-
-        if (!knownFieldCount) {
-          row.errors.push('No valid row fields');
-        }
-
-        var derived = deriveRowMetrics(row);
-        if (Object.keys(derived).length) row.derivedMetrics = derived;
-
-        if (!row.errors.length && row.derivedMetrics && row.derivedMetrics.spinAxis === null) {
-          delete row.derivedMetrics.spinAxis;
-        }
-
-        row.errors = Array.from(new Set(row.errors));
-        row.warnings = Array.from(new Set(row.warnings));
-        if (!Object.keys(unknownFields).length) {
-          row.unknownFields = {};
-        }
-
-        return row;
-      })
-      .filter(function (row) {
-        return !!row;
-      });
-
-    return {
-      rows: rows,
-      warnings: warnings,
-      sourceType: opts.sourceType || 'text',
-      sourceName: opts.sourceName || '',
-      rawText: rawText,
-      hasHeader: hasHeader,
-      headers: headers,
-      columns: columns,
-      delimiter: delimiter,
-      errors: rows.length ? [] : ['No rows detected']
-    };
+    return { batch: batch, session: session, rows: built.rows };
   }
 
   function saveNativePracticeShots(batchPayload) {

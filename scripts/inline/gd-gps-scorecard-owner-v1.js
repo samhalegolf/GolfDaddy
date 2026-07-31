@@ -66,6 +66,38 @@ function gdScorecardConfirmedCourse(){
 }
 function gdScorecardReadCache(){try{return JSON.parse(localStorage.getItem(GD_SCORECARD_CACHE_KEY)||"{}")||{}}catch(e){return {}}}
 function gdScorecardWriteCache(cache){try{localStorage.setItem(GD_SCORECARD_CACHE_KEY,JSON.stringify(cache||{}))}catch(e){}}
+/* The shared store sits between the device cache and the club website. Resolving
+   a scorecard is identical work for every player at a course, so the first player
+   to do it pays for everyone - and a reinstall no longer means re-resolving. */
+async function gdScorecardReadShared(key){
+  if(!key)return null;
+  try{
+    const res=await fetch(`/api/scorecard-store?courseKey=${encodeURIComponent(key)}`,{headers:{"Accept":"application/json"}});
+    if(!res.ok)return null;
+    const payload=await res.json();
+    return payload?.found&&payload.scorecard?.holes?.length?payload.scorecard:null;
+  }catch(e){
+    return null;
+  }
+}
+/* Contributing is best-effort and deliberately silent. A player whose round is
+   under way should never see an error because a cache write failed, and signed-out
+   players simply do not contribute. */
+async function gdScorecardShareResolved(key,loaded){
+  if(!key||!loaded?.holes?.length)return;
+  /* Shells and seeds are guesses, not resolved data, and a card we just adopted
+     from the store has nothing to add back to it. */
+  if(loaded.shared||loaded.source==="shell"||loaded.source==="seed")return;
+  try{
+    const token=await window.ClaritySupabaseAuth?.freshAccessToken?.();
+    if(!token)return;
+    await fetch("/api/scorecard-store",{
+      method:"POST",
+      headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},
+      body:JSON.stringify({courseKey:key,scorecard:loaded})
+    });
+  }catch(e){}
+}
 function gdScorecardSourceForCourse(course){
   const name=gdScorecardNormalizeName(course?.name||course?.clubName||"");
   return GD_SCORECARD_WEBSITE_SOURCES.find(s=>s.match.test(name))||null;
@@ -86,6 +118,29 @@ function gdScorecardWebsiteCandidates(course){
   }
   gdScorecardGpsAppCandidates(course).forEach(source=>list.push(source));
   return list.filter((item,index,arr)=>item.baseUrl&&arr.findIndex(x=>x.baseUrl===item.baseUrl)===index);
+}
+/* Last resort when the guessed URLs all miss. The guesses above only work when a
+   club's domain matches its name; this asks /api/scorecard-search to find the page
+   instead. Search costs an API call, so it runs only after the free guesses fail. */
+async function gdScorecardSearchCandidates(course){
+  const name=gdScorecardNormalizeName(course?.name||course?.clubName||"");
+  if(!name)return [];
+  try{
+    const res=await fetch("/api/scorecard-search",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name,region:course?.region||course?.country||""})});
+    if(!res.ok)return [];
+    const payload=await res.json();
+    return (payload?.results||[]).map(result=>({
+      name,
+      provider:"Search",
+      sourceKind:"search",
+      /* The hit is already the specific page, so the path list in
+         gdTryGenericWebsiteScorecard must not be appended to it. */
+      baseUrl:String(result.url||"").replace(/\/+$/,""),
+      exactUrl:true
+    })).filter(source=>source.baseUrl);
+  }catch(e){
+    return [];
+  }
 }
 function gdScorecardSlugVariants(course){
   const name=gdScorecardNormalizeName(course?.name||course?.courseName||course?.clubName||"").toLowerCase();
@@ -157,17 +212,29 @@ function gdScorecardDistanceCount(holes){
     return Number.isFinite(Number(h?.metres??h?.distanceM??tee?.metres??tee?.distanceM));
   }).length;
 }
+/* Proxy first, direct second. Club sites send no Access-Control-Allow-Origin, so
+   a direct cross-origin fetch can only ever succeed under the native shell, where
+   Capacitor routes the request around CORS. On web it is a guaranteed failure, so
+   we do not attempt it - it only cost a round trip and buried the real proxy error
+   behind a console CORS message. */
 async function gdFetchScorecardText(url){
+  let proxyError=null;
   try{
-    const res=await fetch(url,{mode:"cors",credentials:"omit",cache:"no-store",headers:{"Accept":"text/html,application/xhtml+xml"}});
-    if(!res.ok)throw new Error(`Website returned ${res.status}`);
-    return await res.text();
-  }catch(directError){
     const proxy=await fetch("/api/scorecard-fetch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({url})});
     let payload=null;
     try{payload=await proxy.json()}catch(e){}
-    if(!proxy.ok||!payload?.html)throw new Error(payload?.error||directError?.message||"Scorecard source unavailable");
-    return payload.html;
+    if(proxy.ok&&payload?.html)return payload.html;
+    proxyError=new Error(payload?.error||`Scorecard proxy returned ${proxy.status}`);
+  }catch(error){
+    proxyError=error;
+  }
+  if(!window.GDNative?.isNative)throw proxyError||new Error("Scorecard source unavailable");
+  try{
+    const res=await fetch(url,{credentials:"omit",cache:"no-store",headers:{"Accept":"text/html,application/xhtml+xml"}});
+    if(!res.ok)throw new Error(`Website returned ${res.status}`);
+    return await res.text();
+  }catch(directError){
+    throw proxyError||directError;
   }
 }
 function gdParseAkaranaHole(html,hole,sourceUrl){
@@ -307,7 +374,9 @@ function gdParseSimpleParHoles(html,sourceUrl){
   return Array.from({length:18},(_,i)=>holes.get(i+1)).filter(Boolean);
 }
 async function gdTryGenericWebsiteScorecard(source,course){
-  const paths=[source.holeListPath||"", "/hole-by-hole", "/scorecard", "/course-scorecard", "/tour", "/course", "/golf/course"];
+  /* A search hit is already the exact page; appending "/scorecard" to it would just
+     404. Only site roots get the path sweep. */
+  const paths=source.exactUrl?[""]:[source.holeListPath||"", "/hole-by-hole", "/scorecard", "/course-scorecard", "/tour", "/course", "/golf/course"];
   for(const path of paths){
     const url=`${source.baseUrl}${path}`;
     try{
@@ -360,15 +429,38 @@ async function gdEnsureScorecardForCourse(course){
   Object.assign(scorecard,{courseKey:key,courseName:gdScorecardNormalizeName(course?.name),source:"loading",sourceUrl:"",loading:true,error:"",holes:loadingShell.holes});
   renderScorecard();
   try{
-    if(!sources.length)throw new Error("No course website scorecard source found");
-    let loaded=null,lastError=null,seed=null,loadedSources=[];
-    for(const source of sources){
-      try{
-        const candidate=await gdLoadWebsiteScorecard(source,course);
-        loadedSources.push(candidate);
-        if(!loaded)loaded=candidate;
-      }catch(e){lastError=e;if(!seed)seed=gdScorecardSeed(source,course,e?.message)}
+    /* Someone has already resolved this course - take theirs and skip the club
+       site entirely. Checked before the website candidates, after the device
+       cache, so the fastest path stays the offline one. */
+    const shared=await gdScorecardReadShared(key);
+    if(shared){
+      /* Keep the original source/provider - where the card came from still matters
+         for debugging. `shared` records only how this device got it. */
+      const adopted=Object.assign({},shared,{courseKey:key,shared:true});
+      adopted.holes=gdScorecardMergeScores(adopted.holes,scorecard.holes);
+      Object.assign(scorecard,adopted,{loading:false});
+      cache[key]=adopted;
+      gdScorecardWriteCache(cache);
+      renderScorecard();
+      return;
     }
+    let loaded=null,lastError=null,seed=null,loadedSources=[];
+    const tried=new Set();
+    async function trySources(list){
+      for(const source of list||[]){
+        if(!source?.baseUrl||tried.has(source.baseUrl))continue;
+        tried.add(source.baseUrl);
+        try{
+          const candidate=await gdLoadWebsiteScorecard(source,course);
+          loadedSources.push(candidate);
+          if(!loaded)loaded=candidate;
+        }catch(e){lastError=e;if(!seed)seed=gdScorecardSeed(source,course,e?.message)}
+      }
+    }
+    await trySources(sources);
+    /* Guessed URLs found nothing - fall back to searching for the real page. */
+    if(!loadedSources.length)await trySources(await gdScorecardSearchCandidates(course));
+    if(!tried.size)throw new Error("No course website scorecard source found");
     if(loadedSources.length){
       const sortedSources=loadedSources.slice().sort((a,b)=>gdScorecardDistanceCount(b.holes)-gdScorecardDistanceCount(a.holes)||((b.holes||[]).length-(a.holes||[]).length));
       const sourceRows=loadedSources.map(source=>({
@@ -381,10 +473,15 @@ async function gdEnsureScorecardForCourse(course){
     }
     if(!loaded&&seed)loaded=seed;
     if(!loaded)throw lastError||new Error("No readable course scorecard found");
+    /* Snapshot the parsed card before the merge below folds this player's own
+       scores into it. Only the course data is shared; the scores are theirs. */
+    const shareable=Object.assign({},loaded,{holes:(loaded.holes||[]).map(hole=>Object.assign({},hole,{score:null,putts:null}))});
     loaded.holes=gdScorecardMergeScores(loaded.holes,scorecard.holes);
     Object.assign(scorecard,loaded,{loading:false});
     cache[key]=loaded;
     gdScorecardWriteCache(cache);
+    /* Not awaited - the round should not wait on a cache write for other players. */
+    gdScorecardShareResolved(key,shareable);
   }catch(e){
     const shell=gdScorecardShell(course,e?.message||"Course website scorecard was not available");
     shell.holes=gdScorecardMergeScores(shell.holes,scorecard.holes);

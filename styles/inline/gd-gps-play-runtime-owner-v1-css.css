@@ -17,29 +17,25 @@ body.gps-active:not(.gdGpsLiveMapAllowed) #map{display:block!important;visibilit
 body.shell-gps.gdGpsLiveMapAllowed #map,
 body.gdGpsActive.gdGpsLiveMapAllowed #map,
 body.gps-active.gdGpsLiveMapAllowed #map{display:block!important;visibility:visible!important;opacity:1!important;pointer-events:auto!important;}
-body.gdGpsLiveMapSuppressed #map,
-body.shell-gps:is(.gdCapturedHoleFrameCameraOn,.gdHoleImageCameraOn):not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #map,
-body.gdGpsActive:is(.gdCapturedHoleFrameCameraOn,.gdHoleImageCameraOn):not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #map,
-body.gps-active:is(.gdCapturedHoleFrameCameraOn,.gdHoleImageCameraOn):not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #map,
-body.gdGpsFramePreparing.shell-gps:not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #map,
-body.gdGpsFramePreparing.gdGpsActive:not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #map,
-body.gdGpsFramePreparing.gps-active:not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #map,
-body.gdMappedStartPromptActive.shell-gps:not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #map,
-body.gdMappedStartPromptActive.gdGpsActive:not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #map,
-body.gdMappedStartPromptActive.gps-active:not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #map{visibility:hidden!important;opacity:0!important;pointer-events:none!important;}
+/* Objects on the live map is the base state; a playing surface replaces it only
+   once presented. gdGpsLiveMapSuppressed is now set solely for that case, by
+   gdApplyGpsMapVisibilityOwner.
+
+   This replaces a block that hid #map for every preparing state - frame loading,
+   mapped-start prompt, captured camera on but not ready - each carrying its own
+   :not() exemptions. Those are all moments when no surface is on screen yet, so
+   under the current model they should show the map, not black. */
+body.gdGpsLiveMapSuppressed #map{visibility:hidden!important;opacity:0!important;pointer-events:none!important;}
 body.shell-gps.gdCoursePickerOpen #map,
 body.gdGpsActive.gdCoursePickerOpen #map,
 body.gps-active.gdCoursePickerOpen #map,
 body.shell-gps:has(#courseScreen:not(.hidden)) #map,
 body.gdGpsActive:has(#courseScreen:not(.hidden)) #map,
 body.gps-active:has(#courseScreen:not(.hidden)) #map{display:block!important;visibility:visible!important;opacity:1!important;pointer-events:auto!important;}
-body.gdGpsLiveMapSuppressed #app,
-body.shell-gps:is(.gdCapturedHoleFrameCameraOn,.gdHoleImageCameraOn):not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #app,
-body.gdGpsActive:is(.gdCapturedHoleFrameCameraOn,.gdHoleImageCameraOn):not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #app,
-body.gps-active:is(.gdCapturedHoleFrameCameraOn,.gdHoleImageCameraOn):not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #app,
-body.gdGpsFramePreparing.shell-gps:not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #app,
-body.gdGpsFramePreparing.gdGpsActive:not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #app,
-body.gdGpsFramePreparing.gps-active:not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #app{background:#020604!important;}
+/* Black backdrop only when a playing surface is actually up. The preparing-state
+   variants that used to be listed here blacked out the app while the live map was
+   the correct thing to be looking at. */
+body.gdGpsLiveMapSuppressed #app{background:#020604!important;}
 body.shell-home #gdHoleImageCameraLayer,
 body.shell-home #gdCapturedHoleFrameReadout,
 body.gdCapturedHoleFrameCameraOn:not(.gdTargetFrameDebugOn) #gdCapturedHoleFrameReadout{display:none!important;pointer-events:none!important;}
@@ -91,7 +87,11 @@ body.gdMappedStartPromptActive .shotTile.visible{display:none!important;opacity:
 	body.gps-active #shellHomeBtn{position:relative!important;z-index:2147483001!important;display:inline-flex!important;visibility:visible!important;opacity:1!important;align-items:center!important;justify-content:center!important;width:auto!important;min-width:66px!important;height:46px!important;padding:9px 14px!important;border-radius:999px!important;font-size:14px!important;line-height:1!important;font-weight:950!important;letter-spacing:0!important;color:#fff!important;text-transform:none!important;white-space:nowrap!important;background:rgba(0,0,0,.82)!important;border:1px solid rgba(255,255,255,.24)!important;box-shadow:0 18px 36px rgba(0,0,0,.46),inset 0 1px 0 rgba(255,255,255,.14)!important;pointer-events:auto!important;}
 	body.shell-gps #shellTop #shellSettingsBtn,
 	body.gdGpsActive #shellTop #shellSettingsBtn,
-	body.gps-active #shellTop #shellSettingsBtn{position:fixed!important;right:calc(10px + env(safe-area-inset-right))!important;top:calc(10px + env(safe-area-inset-top))!important;z-index:2147483002!important;display:inline-flex!important;visibility:visible!important;opacity:1!important;align-items:center!important;justify-content:center!important;width:auto!important;min-width:92px!important;height:46px!important;padding:9px 14px!important;border-radius:999px!important;font-size:14px!important;line-height:1!important;font-weight:950!important;letter-spacing:0!important;color:#fff!important;text-transform:none!important;white-space:nowrap!important;background:rgba(0,0,0,.82)!important;border:1px solid rgba(255,255,255,.24)!important;box-shadow:0 18px 36px rgba(0,0,0,.46),inset 0 1px 0 rgba(255,255,255,.14)!important;pointer-events:auto!important;}
+	/* Sits in the #shellTop flex row beside Back and Home rather than pinned to the
+	   opposite corner. It already carries order:3 from the viewport-lock sheet, which
+	   puts it straight after Home; taking it out of position:fixed is what lets that
+	   order apply at all, since a fixed element is out of flow and orders nothing. */
+	body.gps-active #shellTop #shellSettingsBtn{position:relative!important;right:auto!important;top:auto!important;z-index:2147483002!important;display:inline-flex!important;visibility:visible!important;opacity:1!important;align-items:center!important;justify-content:center!important;width:auto!important;min-width:92px!important;height:46px!important;padding:9px 14px!important;border-radius:999px!important;font-size:14px!important;line-height:1!important;font-weight:950!important;letter-spacing:0!important;color:#fff!important;text-transform:none!important;white-space:nowrap!important;background:rgba(0,0,0,.82)!important;border:1px solid rgba(255,255,255,.24)!important;box-shadow:0 18px 36px rgba(0,0,0,.46),inset 0 1px 0 rgba(255,255,255,.14)!important;pointer-events:auto!important;}
 	body.shell-gps #shellTop #shellSettingsBtn::before,
 	body.gdGpsActive #shellTop #shellSettingsBtn::before,
 	body.gps-active #shellTop #shellSettingsBtn::before{content:none!important;display:none!important;}

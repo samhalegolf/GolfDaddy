@@ -401,7 +401,6 @@
 #gdPracticeDataVisual .gdPracticeMyBubbleAdopting{
   mix-blend-mode:normal!important;
 }
-#gdPracticeDataVisual .gdPracticeMyBubbleLayer-pending .gdOffsetHubBubble,
 #gdPracticeDataVisual .gdPracticeMyBubbleLayer-adopted-current .gdOffsetHubBubble,
 #gdPracticeDataVisual .gdPracticeMyBubbleAdopting .gdOffsetHubBubble{
   fill:#37f28d!important;
@@ -410,6 +409,19 @@
   stroke-opacity:1!important;
   stroke-width:2.35!important;
   filter:drop-shadow(0 0 20px rgba(55,242,141,.42))!important;
+}
+/* Pending = staged but not yet saved. Kept low-fill and dashed so it reads as
+   a ghost preview rather than a solid bubble - important because it often
+   sits exactly on top of the live Practice Bubble (same offset/distance
+   until you actually save), and a solid fill would fully hide it. */
+#gdPracticeDataVisual .gdPracticeMyBubbleLayer-pending .gdOffsetHubBubble{
+  fill:#37f28d!important;
+  fill-opacity:.14!important;
+  stroke:#37f28d!important;
+  stroke-opacity:1!important;
+  stroke-width:2.1!important;
+  stroke-dasharray:5 4!important;
+  filter:drop-shadow(0 0 14px rgba(55,242,141,.32))!important;
 }
 #gdPracticeDataVisual .gdPracticeBubbleProjectionLayer .gdOffsetHubBubble{
   fill:#62d2ff!important;
@@ -4280,3 +4292,88 @@
 	    grid-template-columns:28px minmax(50px,.8fr) minmax(56px,1fr) minmax(56px,1fr)!important;
 	  }
 	}
+
+/* Sandbox data generator (Course Data admin). Randomise a batch, hand-edit it,
+   then push it through the real intake. Styled to sit with the other admin
+   panels rather than announce itself. */
+.gdSandboxPanel{display:grid;gap:10px;margin:0 0 8px;border-radius:14px;border:1px dashed rgba(255,210,135,.28);background:rgba(255,210,135,.035);padding:11px}
+.gdSandboxHead strong{display:block;color:#fff;font-size:13px;font-weight:950;line-height:1.1}
+.gdSandboxHead span{display:block;margin-top:3px;color:rgba(255,255,255,.55);font-size:10.5px;font-weight:780;line-height:1.3}
+.gdSandboxSection{display:grid;gap:8px;border-radius:12px;background:rgba(0,0,0,.18);border:1px solid rgba(255,255,255,.06);padding:9px}
+.gdSandboxSectionHead strong{display:block;color:#fff;font-size:12px;font-weight:950}
+.gdSandboxSectionHead span{display:block;margin-top:2px;color:rgba(255,255,255,.5);font-size:10px;font-weight:780;line-height:1.25}
+.gdSandboxGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(92px,1fr));gap:6px}
+.gdSandboxPanel label{display:grid;gap:3px;color:rgba(255,255,255,.6);font-size:9.5px;font-weight:900;text-transform:uppercase;letter-spacing:.02em}
+.gdSandboxPanel input{border-radius:10px;border:1px solid rgba(255,255,255,.1);background:rgba(0,0,0,.3);padding:7px 8px;color:#fff;font-size:12px;font-weight:850;width:100%}
+.gdSandboxClubRow{max-width:160px}
+.gdSandboxActions{display:flex;flex-wrap:wrap;gap:6px}
+.gdSandboxActions button{flex:1 1 auto;border-radius:11px!important;padding:8px 10px!important;background:rgba(255,210,135,.14)!important;border:1px solid rgba(255,210,135,.3)!important;color:#fff!important;font-size:11px!important;font-weight:900!important}
+.gdSandboxActions button+button{background:rgba(120,235,180,.14)!important;border-color:rgba(120,235,180,.3)!important}
+.gdSandboxPanel textarea{border-radius:11px;border:1px solid rgba(255,255,255,.1);background:rgba(0,0,0,.32);padding:8px;color:rgba(255,255,255,.9);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;line-height:1.45;width:100%;resize:vertical}
+#statsPanel.open .gdSandboxPanel{padding:9px;gap:8px}
+#statsPanel.open .gdSandboxPanel textarea{font-size:10px}
+
+/* In-app confirmation. Replaces window.confirm, which returns false instantly in
+   the embedded webview without ever showing a dialog - silently turning every
+   destructive action into a no-op. */
+.gdConfirmOverlay{position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;padding:22px;background:rgba(0,0,0,.62);backdrop-filter:blur(3px)}
+.gdConfirmSheet{width:100%;max-width:330px;display:grid;gap:9px;border-radius:18px;border:1px solid rgba(255,255,255,.1);background:#12201b;padding:16px;box-shadow:0 18px 50px rgba(0,0,0,.5)}
+.gdConfirmSheet strong{color:#fff;font-size:15px;font-weight:950;line-height:1.2}
+.gdConfirmSheet p{margin:0;color:rgba(255,255,255,.6);font-size:12px;font-weight:780;line-height:1.35}
+.gdConfirmActions{display:flex;gap:7px;margin-top:3px}
+.gdConfirmActions button{flex:1;border-radius:12px;padding:11px 10px;font-size:12px;font-weight:900;border:1px solid rgba(255,255,255,.13);background:rgba(255,255,255,.07);color:#fff}
+.gdConfirmActions button.danger{background:rgba(255,90,95,.2);border-color:rgba(255,90,95,.34)}
+
+/* Adopt -> Save flow. Save is the commit step, so it only lights up once a
+   bubble has actually been adopted, and reads as "done" once pressed. */
+.gdPracticeBubbleAction.save.ready{
+  color:#06100b!important;
+  background:linear-gradient(180deg,#ffb347,#d98a1f)!important;
+  border-color:rgba(255,179,71,.6)!important;
+}
+.gdPracticeBubbleAction.save.locked{
+  color:rgba(255,255,255,.72)!important;
+  background:rgba(55,242,141,.14)!important;
+  border-color:rgba(55,242,141,.4)!important;
+}
+.gdPracticeBubbleAction.save.locked::before{content:"✓ ";font-weight:950}
+/* The locked-in message. Undo disappearing is a real consequence, so it is
+   stated rather than implied by a greyed-out button. */
+.gdPracticeAdoptStatus{
+  display:grid;gap:2px;margin-top:8px;padding:9px 11px;border-radius:12px;
+  border:1px solid rgba(255,255,255,.1);background:rgba(0,0,0,.22);
+}
+.gdPracticeAdoptStatus strong{color:#fff;font-size:12px;font-weight:950;line-height:1.15}
+.gdPracticeAdoptStatus span{color:rgba(255,255,255,.6);font-size:10.5px;font-weight:800;line-height:1.3}
+.gdPracticeAdoptStatus.pending{border-color:rgba(255,179,71,.4);background:rgba(255,179,71,.1)}
+.gdPracticeAdoptStatus.saved{border-color:rgba(55,242,141,.4);background:rgba(55,242,141,.1)}
+
+/* Clear My Bubble. Destructive, so it reads as such rather than sitting level
+   with Edit/Apply. */
+.gdBubbleClearBtn{
+  background:rgba(255,90,95,.14)!important;
+  border:1px solid rgba(255,90,95,.3)!important;
+  color:rgba(255,255,255,.8)!important;
+}
+/* A bubble is saved, but the one on screen is new - adopting will replace it. */
+.gdPracticeAdoptStatus.fresh{border-color:rgba(98,210,255,.4);background:rgba(98,210,255,.1)}
+
+/* Course chart + its size slider, side by side. The slider is the screen's only
+   control: it sizes the bubble and both live readings come off it. */
+.gdCourseChartWrap{display:flex;align-items:stretch;gap:8px}
+.gdCourseChartWrap svg{flex:1 1 auto;min-width:0}
+.gdCourseScaleControl{
+  flex:0 0 auto;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:8px;padding:10px 6px;border-radius:14px;
+  border:1px solid rgba(55,242,141,.22);background:rgba(55,242,141,.06);
+}
+.gdCourseScaleValue{color:#37f28d;font-size:12px;font-weight:950;line-height:1}
+.gdCourseScaleDelta{
+  color:rgba(255,255,255,.6);font-size:9px;font-weight:850;line-height:1.15;
+  text-align:center;max-width:64px;
+}
+.gdCourseScaleSlider{
+  -webkit-appearance:slider-vertical;appearance:slider-vertical;
+  writing-mode:vertical-lr;direction:rtl;
+  width:26px;flex:1 1 auto;min-height:150px;accent-color:#37f28d;background:transparent;
+}

@@ -154,7 +154,12 @@ export default async function courseMaps(req) {
      if a snapshot is already queued or running. */
   if (storage === "supabase" && merge.accepted && (merge.accepted.objects || merge.accepted.holes)) {
     try {
-      await enqueueVisualSnapshot(merge.course.id, req);
+      /* courseId, NOT id. `course.id` is the STORE key, "published::helensville", which
+         slugifies to "published-helensville" - a course that does not exist. Every publish
+         since this hook was added enqueued a snapshot for that phantom id, the worker failed
+         it with "not found in course_maps", and the real course was never scanned. The
+         automatic route was dead on the publish path and said so in the job table for days. */
+      await enqueueVisualSnapshot(merge.course, req);
     } catch (error) {
       warnings.push({ storage: "visual-queue", message: storageMessage(error) });
     }
@@ -163,8 +168,17 @@ export default async function courseMaps(req) {
   return json(200, Object.assign(current, { storage, warnings, mode, accepted: merge.accepted }));
 }
 
-async function enqueueVisualSnapshot(courseId, req) {
-  const id = String(courseId || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+/* The id the visual worker looks a course up by - it reads course_maps.course_id, which is
+   `course.courseId`. Deliberately NOT `course.id`: that is the store key, "published::x", and
+   it slugifies to "published-x", a course that does not exist. Pulled out and exported so the
+   distinction is testable rather than a comment nobody reads at the call site. */
+function visualSnapshotCourseId(course) {
+  const raw = course && typeof course === "object" ? course.courseId : course;
+  return String(raw || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+async function enqueueVisualSnapshot(course, req) {
+  const id = visualSnapshotCourseId(course);
   if (!id || !hasSupabase()) return;
   const existing = await supabaseFetch("course_visual_jobs?select=id&course_id=eq." + encodeURIComponent(id) + "&kind=eq.snapshot&status=in.(queued,running)&limit=1");
   if (Array.isArray(existing) && existing.length) return;
@@ -174,7 +188,7 @@ async function enqueueVisualSnapshot(courseId, req) {
   });
   try {
     const origin = new URL(req.url).origin;
-    fetch(origin + "/.netlify/functions/course-visual-worker-background", {
+    await fetch(origin + "/.netlify/functions/course-visual-worker-background", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({})
@@ -733,5 +747,6 @@ export const __courseMapsTest = {
   mapsFromSupabaseRows,
   mergeMapSets,
   sanitizeCourse,
+  visualSnapshotCourseId,
   withMirrorSummary,
 };

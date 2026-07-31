@@ -3,8 +3,11 @@ name: Structural smoke
 on:
   pull_request:
     branches: [main]
+  # main is here because it was not: the suite ran on PRs only, so anything pushed or merged
+  # straight to main was never verified again. A stale assertion sat red on main for at least
+  # four commits and surfaced as a failure on the next unrelated PR to open.
   push:
-    branches: [structural-rebuild]
+    branches: [main, structural-rebuild]
 
 permissions:
   contents: read
@@ -33,6 +36,11 @@ jobs:
 
       - name: Run structural regression tests
         run: |
+          node dev/surface-split.test.js
+          node dev/icon-assets.test.js
+          node dev/image-assets.test.js
+          node dev/visual-engine-client.test.js
+          node dev/ios-version-stamp.test.js
           node dev/app-permissions-smoke.test.js
           node dev/native-shell-owner.test.js
           node dev/store-billing.test.js
@@ -40,10 +48,11 @@ jobs:
           node dev/store-billing-client.test.js
           node dev/native-back-button.test.js
           node dev/course-key-normalisation.test.js
+          node dev/fresh-app-boot.test.js
           node dev/course-identity-resolution.test.js
-          node dev/captured-scan-hydrate.test.js
+          node dev/captured-frame-partial-flatten.test.js
+          node dev/app-frame-consumption.test.js
           node dev/auth-route-boot-release.test.js
-          node dev/scan-push-filter.test.js
           node dev/password-reset-surface.test.js
           node dev/course-hole-count.test.js
           node dev/placeholder-profile-identity.test.js
@@ -54,6 +63,18 @@ jobs:
           node dev/durable-storage.test.js
           node dev/deep-links.test.js
           node dev/account-restore.test.js
+          node dev/auth-update-account.test.js
+          node dev/account-delete.test.js
+          node dev/account-clear-data.test.js
+          node dev/profile-hydrate.test.js
+          node dev/payment-access-failsafe.test.js
+          node dev/auth-config-cache.test.js
+          node dev/session-change-diagnostics.test.js
+          node dev/payment-admin-auth.test.js
+          node dev/referrals-auth.test.js
+          node dev/referral-invite-target.test.js
+          node dev/payment-checkout-client.test.js
+          node dev/payment-entitlement-auth.test.js
           node dev/store-referral-reversal.test.js
           node dev/email-public-url.test.js
           node dev/auth-refresh-resilience.test.js
@@ -73,8 +94,6 @@ jobs:
           node dev/gps-scorecard-behavior.test.js
           node dev/green-shape-engine-owner.test.js
           node dev/green-shape-engine-behavior.test.js
-          node dev/automapper-green-refinement-owner.test.js
-          node dev/automapper-green-refinement-behavior.test.js
           node dev/gps-play-camera-tilt.test.js
           node dev/gps-play-runtime-owner.test.js
           node dev/conditions-engine.test.js
@@ -84,5 +103,15 @@ jobs:
           node dev/conditions-engine-behavior.test.js
           node dev/course-mapping-controller.test.js
           node dev/course-visual-engine.test.js
+          node dev/course-mapper-jobs.test.js
+          node dev/course-mapper-worker.test.js
+          node dev/course-mapper-worker-integration.test.js
+          node dev/automapper-core.test.js
+          node dev/geometry-resolver-core.test.js
+          node dev/green-shape-core-smoke.test.js
+          node dev/course-package.test.js
+          node dev/course-package-trigger.test.js
+          node dev/imagery-source-registry.test.js
+          node dev/map-source-coverage.test.js
           node dev/shell-navigation-owner.test.js
           node dev/payment-rollout-tests.js

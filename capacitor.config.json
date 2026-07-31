@@ -8,8 +8,9 @@
   },
   "ios": {
     "path": "ios",
-    "scheme": "Clarity Caddy",
+    "scheme": "App",
     "contentInset": "always",
+    "backgroundColor": "#050806",
     "limitsNavigationsToAppBoundDomains": false
   },
   "server": {
@@ -30,7 +31,6 @@
     "StatusBar": {
       "style": "DARK",
       "backgroundColor": "#050806"
-    },
-    "Geolocation": {}
+    }
   }
 }

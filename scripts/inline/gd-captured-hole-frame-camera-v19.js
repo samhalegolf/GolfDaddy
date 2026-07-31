@@ -183,14 +183,28 @@
 	    var hole=safe(function(){return currentPlayingHole||selectedHole||gdMappedStartHoleNumber&&gdMappedStartHoleNumber()||1;},1);
 	    return "gd_captured_hole_frame_v19_"+String(course+":h"+hole).replace(/[^a-z0-9:_-]+/gi,"_");
 	  }
+	  /* Canonical course identity, always. Same rule as the slug in
+	     gd-captured-surface-sync.js, and for the same reason its test records: a course
+	     that lands under two keys is a course whose data cannot be read back.
+
+	     The fallback chain below ends at a DISPLAY NAME - currentCourse.name, or
+	     gdActiveCourseName - and the manifest key builder preserves case, so "Akarana
+	     Golf Club" became "Akarana_Golf_Club" while everything else used
+	     "akarana-golf-club". engine.getRecord() then missed, so 18 published per-hole
+	     play surfaces sitting in course_visuals were invisible to the app and the hole
+	     fell through to "no frame". Normalising here fixes the lookup and the storage
+	     key together, because both derive from this. */
+	  function canonicalCourseKey(value){
+	    return String(value||"course").toLowerCase().trim().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"")||"course";
+	  }
 	  function surfaceCourseKey(){
-	    if(renderSurfaceOverride&&renderSurfaceOverride.courseKey)return renderSurfaceOverride.courseKey;
+	    if(renderSurfaceOverride&&renderSurfaceOverride.courseKey)return canonicalCourseKey(renderSurfaceOverride.courseKey);
 	    /* courseId first: on a stored library record .id is the composite storage
 	       key `${userId}::${courseId}`, which is a location in the store, not a
 	       course identity. Preferring .id leaked keys like
 	       "user-<playerid>::akarana-golf-club" into captured_surfaces, splitting a
 	       course's scans across a per-user key nobody else can read back. */
-	    return safe(function(){return (currentCourse&&(currentCourse.courseId||currentCourse.key||currentCourse.id||currentCourse.name))||document.body.dataset.gdActiveCourseName||"course";},"course");
+	    return safe(function(){return canonicalCourseKey((currentCourse&&(currentCourse.courseId||currentCourse.key||currentCourse.id||currentCourse.name))||document.body.dataset.gdActiveCourseName||"course");},"course");
 	  }
 	  function surfaceCourseName(){
 	    if(renderSurfaceOverride&&renderSurfaceOverride.courseName)return renderSurfaceOverride.courseName;
@@ -234,12 +248,39 @@
     }
     return null;
   }
+  /* Where a cloud frame's pixels come from: the copy in the local library, and nowhere else. */
+  function cloudSurfaceSrc(asset){
+    /* The cached copy or nothing.
+
+       Streaming the frame from /api/course-visual-assets was tempting and is wrong. It costs
+       the same megabytes as downloading the course, on the same cellular connection, without
+       ever asking - and the player gets none of the benefit, because nothing is kept. Worse,
+       the proxy serves those bytes as immutable/max-age=31536000, so they settle in the
+       browser's HTTP cache: storage the library does not know about, cannot show a size for,
+       and cannot delete. That is the "secret storage" the two-tier model exists to prevent.
+
+       So a hole with no downloaded frame falls through to live tiles with the course objects
+       over them - "Live Map Available", which is a real product tier and a fully playable one -
+       until the player accepts the download. The proxy is still how frames are FETCHED
+       (downloadCourseAsset); it is just not how they are displayed. */
+    return asset && asset.dataUrl ? String(asset.dataUrl) : "";
+  }
+  function cloudSurfaceUrlIsStale(manifest){
+    var url=String(manifest&&manifest.tiles&&manifest.tiles[0]&&manifest.tiles[0].url||"");
+    return !url||/\/storage\/v1\/object\//.test(url);
+  }
+
+  /* Fallback order in play is exactly two deep: this hole's published cloud frame, then live
+     tiles with the course objects drawn on top. The local styled bake used to sit between them
+     and is deliberately gone from the play experience - frames are baked once on the server and
+     served down, so a phone-side render here would be a second, divergent answer to what a hole
+     looks like. The studio preview pane keeps its local bake; this is GPS play. */
   function courseVisualHoleAsset(record){
     var hole=surfaceHoleNumber();
-    var frames=(Array.isArray(record&&record.holeFramePublishedVisuals)&&record.holeFramePublishedVisuals.length?record.holeFramePublishedVisuals:Array.isArray(record&&record.holeFrameTerrainViews)&&record.holeFrameTerrainViews.length?record.holeFrameTerrainViews:[]);
+    var frames=Array.isArray(record&&record.holeFramePublishedVisuals)?record.holeFramePublishedVisuals:[];
     var match=frames.filter(function(asset){return asset&&Math.round(Number(asset.holeNumber)||0)===Math.round(Number(hole)||0);})[0]||null;
     if(match)return match;
-    var single=record&&record.singleHolePublishedVisual||record&&record.singleHoleTerrainView||null;
+    var single=record&&record.singleHolePublishedVisual||null;
     var singleHole=Math.round(Number(single&&single.holeNumber)||0);
     if(single&&(!frames.length||singleHole===Math.round(Number(hole)||0)||singleHole<1&&Math.round(Number(hole)||0)===1))return single;
     return null;
@@ -258,7 +299,11 @@
     return best.zoom;
   }
   function courseVisualManifestFromAsset(asset,record){
-    var src=String(asset&&asset.dataUrl||asset&&asset.url||asset&&asset.publicUrl||"");
+    /* Same rule as the mercator path: the downloaded copy or nothing. url/publicUrl on a cloud
+       asset is a direct Supabase Storage link on a PRIVATE bucket - it has never loaded - and
+       reinstating any network source here would put the streaming behaviour back through a
+       second door. */
+    var src=cloudSurfaceSrc(asset);
     if(!src)return null;
     var meta=asset&&asset.metadata||{};
     var playSurface=meta.playSurface||{};
@@ -559,6 +604,11 @@
 	        manifest.flattenedAt=stored.flattenedAt||stored.updatedAt||null;
 	        manifest.surfaceOwnership="clarity-owned-raster";
 	        manifest.flattenedFrom=stored.flattenedFrom||{tileCount:tiles.length};
+	        /* Carry the coverage forward too, or a re-capture of a PARTIAL frame looks complete
+	           and scheduleCaptureFlatten skips the retry that would upgrade it. */
+	        manifest.imageCoverage=Number.isFinite(Number(stored.imageCoverage))?Number(stored.imageCoverage):1;
+	        manifest.imagePartial=stored.imagePartial===true;
+	        manifest.imageMissingTiles=Number(stored.imageMissingTiles)||0;
 	      }
 	    });
 	    manifest=safe(function(){return typeof window.gdCapturedSurfaceWriteScan==="function"?window.gdCapturedSurfaceWriteScan(manifest,{reason:reason,storageKey:storageKey()}):manifest;},manifest)||manifest;
@@ -597,10 +647,19 @@
 	     only landed in Safari 16/17 and older iOS webviews silently hand back PNG instead - which
 	     is ~7x larger and would breach the storage bucket's per-file limit without erroring.
 
-	     Coverage is enforced. Unlike a tile reference - which simply retries on the next view - a
-	     flattened image bakes its failures in permanently, so a partial composite is refused
-	     rather than quietly shipping a hole.
+	     Coverage is a threshold, not a demand for perfection. Requiring every tile meant one 404
+	     or one slow fetch out of ~270 threw the whole hole away and left it on tile references
+	     forever - the exact behaviour the flatten exists to end. A frame missing a couple of tiles
+	     at the edge is still worth owning, so a partial composite is kept.
+
+	     What makes that safe is that a partial is never final: the coverage is recorded on the
+	     manifest, the tile list is KEPT (a full-coverage frame drops it), and scheduleCaptureFlatten
+	     will re-run on a partial and replace it only if the new attempt covers more. So a hole
+	     captured on bad signal upgrades itself the next time it is captured on good signal, instead
+	     of baking its gaps in permanently.
 	     --------------------------------------------------------------------------- */
+	  /* Below this, the gaps are big enough to read as a broken image rather than a soft edge. */
+	  var DEFAULT_MIN_COVERAGE=0.92;
 	  function flattenCaptureManifest(manifest,opts){
 	    opts=opts||{};
 	    return new Promise(function(resolve){
@@ -611,7 +670,7 @@
 	      var width=Math.max(1,Math.round(Number(manifest.imageWidth)||0));
 	      var height=Math.max(1,Math.round(Number(manifest.imageHeight)||0));
 	      if(width<2||height<2)return resolve({ok:false,reason:"no-capture-dimensions"});
-	      var minCoverage=Number.isFinite(Number(opts.minCoverage))?Number(opts.minCoverage):1;
+	      var minCoverage=Number.isFinite(Number(opts.minCoverage))?Number(opts.minCoverage):DEFAULT_MIN_COVERAGE;
 	      var quality=Number.isFinite(Number(opts.quality))?Number(opts.quality):.85;
 	      var canvas=document.createElement("canvas");
 	      canvas.width=width;canvas.height=height;
@@ -645,11 +704,17 @@
 	        // Release the backing store immediately - queued flattens must not stack canvases.
 	        canvas.width=canvas.height=1;
 	        if(!dataUrl||dataUrl.indexOf("data:image/jpeg")!==0)return resolve({ok:false,reason:"jpeg-encode-unavailable"});
+	        var covered=+coverage.toFixed(3);
 	        var flattened=Object.assign({},manifest,{
 	          imageData:dataUrl,
 	          imageFormat:"image/jpeg",
 	          imageBytes:Math.round(dataUrl.length*0.75),
 	          surfaceOwnership:"clarity-owned-raster",
+	          /* Recorded so a later capture can tell whether it is an upgrade, and so a partial
+	             frame is identifiable downstream rather than passing as a complete one. */
+	          imageCoverage:covered,
+	          imagePartial:covered<1,
+	          imageMissingTiles:Math.max(0,tiles.length-loaded),
 	          flattenedAt:new Date().toISOString(),
 	          flattenedFrom:{tileCount:tiles.length,tileSourceLabel:manifest.tileSourceLabel||"",captureZoom:manifest.captureZoom||null}
 	        });
@@ -675,8 +740,12 @@
 	               they are the single biggest consumer of the localStorage quota: ~155 bytes per
 	               tile, up to 320 tiles per capture, roughly 130KB per hole and ~2.3MB across 18
 	               holes - most of a 5MB budget. flattenedFrom keeps the provenance (tile count,
-	               source, zoom) in a few dozen bytes. */
-	            delete lean.tiles;
+	               source, zoom) in a few dozen bytes.
+
+	               A PARTIAL frame keeps its tiles: they are the only way to re-composite it later,
+	               and dropping them is what would make the missing tiles permanent. The quota cost
+	               is bounded because it only applies to holes that have not yet flattened cleanly. */
+	            if(!flattened.imagePartial)delete lean.tiles;
 	            safe(function(){localStorage.setItem(manifest.key||storageKey(),JSON.stringify(lean));});
 	            result.storedManifestBytes=JSON.stringify(lean).length;
 	          }
@@ -704,10 +773,20 @@
 	  function scheduleCaptureFlatten(manifest,captureOpts){
 	    captureOpts=captureOpts||{};
 	    if(!manifest||captureOpts.skipFlatten===true)return null;
-	    if(manifest.imageData||manifest.imagePath)return null;
+	    /* Owning the pixels normally ends the job - except for a PARTIAL frame, which is worth
+	       another attempt while its tiles are still around. Tiles are the precondition: a complete
+	       frame has none by design, and flattenCaptureManifest would only answer "no-tiles". */
+	    var partialRetry=manifest.imagePartial===true&&Array.isArray(manifest.tiles)&&manifest.tiles.length>0;
+	    if((manifest.imageData||manifest.imagePath)&&!partialRetry)return null;
 	    var key=manifest.key||storageKey();
 	    if(captureFlattenPending[key])return captureFlattenPending[key];
-	    var runFlatten=function(){return flattenCaptureManifest(manifest,{quality:captureOpts.flattenQuality});};
+	    /* A retry has to BEAT what we already have, not merely clear the floor - otherwise a run of
+	       poor captures could walk a good frame back down. Raising the bar above the stored coverage
+	       makes the replacement strictly an improvement. */
+	    /* undefined, never null: the reader tests Number.isFinite, and Number(null) is 0 - which
+	       would hand a first flatten a floor of zero and accept any composite at all. */
+	    var retryFloor=partialRetry?Math.min(1,(Number(manifest.imageCoverage)||0)+0.001):undefined;
+	    var runFlatten=function(){return flattenCaptureManifest(manifest,{quality:captureOpts.flattenQuality,minCoverage:retryFloor});};
 	    var job=(captureFlattenQueue=captureFlattenQueue.then(runFlatten,runFlatten))
 	      .then(function(result){
 	        safe(function(){
@@ -730,6 +809,64 @@
 	      .then(function(result){delete captureFlattenPending[key];return result;});
 	    captureFlattenPending[key]=job;
 	    return job;
+	  }
+	  /* Purge legacy fat tile manifests.
+
+	     The app authors nothing: automapper runs server-side and objects arrive from
+	     the database, so everything course-shaped in localStorage is cache. A manifest
+	     still carrying a tile list is left over from the local shutter that used to
+	     run during play, at ~270-300KB each. Five of them plus the course library puts
+	     a phone at ~7.3MB against a ~5MB WKWebView budget, and what iOS evicts to make
+	     room is gd_gps_resume_round_v1.
+
+	     Deleting is therefore unconditional and lossless - there is no local original
+	     to protect. localStorage survives an app update, so the guard that stopped new
+	     ones being written cannot clear the ones already on a device. */
+	  var LEGACY_FRAME_PREFIX="gd_captured_hole_frame_v19_";
+	  var purgeRan=false;
+	  function gdPurgeLegacyFatFrames(opts){
+	    opts=opts||{};
+	    /* install() is re-entrant - later layers call it during their own wire()
+	       passes - so the scheduler below fires once per call. On a device that
+	       ran the purge six times in six seconds: the first did the work and the
+	       other five were no-ops that flooded the 50-entry debug timeline and
+	       evicted the very events being investigated. The guard belongs here
+	       rather than at the call site so no future caller can reintroduce it. */
+	    if(purgeRan&&opts.force!==true&&opts.dryRun!==true)return null;
+	    if(opts.dryRun!==true)purgeRan=true;
+	    var doomed=[],bytes=0;
+	    safe(function(){
+	      for(var i=0;i<localStorage.length;i++){
+	        var k=localStorage.key(i);
+	        if(!k||k.indexOf(LEGACY_FRAME_PREFIX)!==0)continue;
+	        var raw=localStorage.getItem(k);
+	        if(!raw)continue;
+	        /* Only manifests still carrying tiles. One that already points at owned
+	           pixels is small and is what the app actually renders from. */
+	        var m=safe(function(){return JSON.parse(raw);},null);
+	        if(!m||!Array.isArray(m.tiles)||!m.tiles.length)continue;
+	        	        doomed.push(k);
+	        bytes+=raw.length;
+	      }
+	    });
+	    if(opts.dryRun!==true)doomed.forEach(function(k){safe(function(){localStorage.removeItem(k);});});
+	    var result={removed:doomed.length,reclaimedKb:Math.round(bytes/1024),keys:doomed};
+	    /* Reported so the reclaim is visible from the client-errors table without an
+	       attached inspector - the device that needs this is a phone in the field. */
+	    if(doomed.length&&opts.dryRun!==true){
+	      safe(function(){
+	        window.ClarityErrorReporter.report(
+	          "Purged legacy captured-frame manifests",
+	          result.reclaimedKb+"KB over "+doomed.length+" keys | "+doomed.join(", ")
+		        );
+	        window.ClarityErrorReporter.flush();
+	      });
+	    }
+	    /* Only when something actually went. The timeline holds 50 entries and is
+	       the only forensic record on a device; a no-op has nothing to say and
+	       costs a slot that a real event needs. */
+	    if(doomed.length)safe(function(){gdCoursePlayDebugEvent("legacy-fat-frames-purged",result);});
+	    return result;
 	  }
 	  /* Lets the visual engine hold its stitch until the flattens for a set of captures have
 	     settled, then reports which manifests now own their pixels. Resolves on a timeout too,
@@ -759,7 +896,9 @@
 	    if(m&&Array.isArray(m.tiles)&&m.originPx&&m.surfaceModel!=="captured-surface-v1")m=null;
 	    if(m&&!manifestMatchesActive(m))m=null;
 	    if(m&&Array.isArray(m.tiles)&&m.originPx){
-	      captureManifest=safe(function(){return typeof window.gdCapturedSurfaceWriteScan==="function"?window.gdCapturedSurfaceWriteScan(m,{reason:m.reason||"load",storageKey:storageKey()}):m;},m)||m;
+	      /* Loading a cached manifest is a read. Writing it back as a scan re-uploaded
+	         it on every load - see the cloud path above. */
+	      captureManifest=m;
 	      gdRegisterCoursePlayFrameManifest(captureManifest,{generatedFrom:"v19-captured-surface-cache",manifestKey:storageKey(),status:"loaded"});
 	      safe(function(){if(capturedGpsPlayActive())gdCoursePlayDebugEvent("gps-play-loaded-from-existing-frame",{reason:m.reason||"load",manifestKey:storageKey(),tileCount:(m.tiles||[]).length});});
 	      return publishCaptureManifest(captureManifest);
@@ -906,15 +1045,53 @@
 	    return "Frame unavailable - remap this hole";
 	  }
 	  var HOLE_FRAME_LOADING_TIMEOUT_MS=1700;
+	  /* Longer than the plain loading overlay: a hole switch may be waiting on a
+	     cloud surface pull, not just a local fit. Still bounded - see
+	     gdBeginGpsHoleSwitchTransition.
+
+	     Note this is not the whole wait, and the arithmetic understates it. Resolution
+	     runs through missingCapturedManifest, which for an unknown pipeline state
+	     hands off to gdHoleFrameLoading and its own HOLE_FRAME_LOADING_TIMEOUT_MS
+	     before the unavailable state lands and the live map is granted. That is
+	     3000 + 1700 in timers, but a traced run measured ~6s wall-clock: roughly
+	     1.8s of it is synchronous work inside the resolution path itself. Budget
+	     against the measured figure, not the sum, if this is ever retuned. */
+	  var HOLE_SWITCH_TRANSITION_TIMEOUT_MS=3000;
 	  var holeFrameLoadingTimer=null;
+	  var holeSwitchTransitionTimer=null;
 	  var holeFrameLoadingKey="";
 	  var terminalCapturedFrameUnavailableByKey={};
 	  function holeSwitchMessage(hole){
 	    return "Loading Hole "+String(hole||surfaceHoleNumber()||1)+" frame...";
 	  }
+	  /* The mask is a loading screen, not a bare overlay: it hides #map and covers the
+	     whole viewport, so without a spinner it reads as the app having died rather
+	     than as work in progress. The structure is ensured on every call, not only on
+	     creation - an element left over from a build without the spinner would other-
+	     wise keep the old markup for the life of the page.
+
+	     The label stays the only <span> inside: ensureHoleSwitchMask and its callers
+	     find it with querySelector("span"), so the spinner is an <i> deliberately. */
 	  function ensureHoleSwitchMask(hole){
 	    var el=document.getElementById("gdCoursePlayHoleTransitionMask");
-	    if(!el&&document.body){el=document.createElement("div");el.id="gdCoursePlayHoleTransitionMask";el.setAttribute("role","status");el.setAttribute("aria-live","polite");el.innerHTML="<span></span>";document.body.appendChild(el);}
+	    if(!el&&document.body){
+	      el=document.createElement("div");
+	      el.id="gdCoursePlayHoleTransitionMask";
+	      el.setAttribute("role","status");
+	      el.setAttribute("aria-live","polite");
+	      document.body.appendChild(el);
+	    }
+	    if(el&&!el.querySelector(".gdHoleFrameLoaderCard")){
+	      el.innerHTML="";
+	      var card=document.createElement("div");
+	      card.className="gdHoleFrameLoaderCard";
+	      var spinner=document.createElement("i");
+	      spinner.className="gdHoleFrameLoaderSpinner";
+	      spinner.setAttribute("aria-hidden","true");
+	      card.appendChild(spinner);
+	      card.appendChild(document.createElement("span"));
+	      el.appendChild(card);
+	    }
 	    var label=el&&el.querySelector("span");
 	    if(label)label.textContent=holeSwitchMessage(hole);
 	    return el;
@@ -937,8 +1114,38 @@
 		      delete window.__gdGpsCapturedPresentationStamp;
 		      gdCoursePlayDebugEvent("gps-play-hole-transition-start",{reason:reason||"hole-switch",targetHole:hole,token:token||"",visibleOwner:visiblePreparingOwner()});
 	      if(typeof window.gdApplyGpsMapVisibilityOwner==="function")window.gdApplyGpsMapVisibilityOwner("hole-switch-start");
+	      armHoleSwitchTransitionTimeout(hole,reason,token);
 	    });
 	    return true;
+	  }
+	  /* The transition mask hides #map and covers the screen, and until this existed
+	     only gdEndGpsHoleSwitchTransition could take it down - which needs a manifest
+	     that matches the active hole (see its guards). A hole with no captured frame
+	     at all therefore left the mask up forever: black screen, "Loading Hole N
+	     frame..." pill, no way out but a relaunch. That is what a fresh install sees,
+	     because it has no captured frames yet.
+
+	     gdHoleFrameLoading already had this shape - a timer that resolves to
+	     unavailable. The hole-switch path simply never armed one. Resolution goes
+	     through missingCapturedManifest rather than straight to unavailable so a hole
+	     that is genuinely still preparing gets the pipeline-aware answer; that path
+	     is itself bounded by HOLE_FRAME_LOADING_TIMEOUT_MS, so it always terminates. */
+	  function armHoleSwitchTransitionTimeout(hole,reason,token){
+	    if(holeSwitchTransitionTimer){clearTimeout(holeSwitchTransitionTimer);holeSwitchTransitionTimer=null;}
+	    var key=holeFrameKey();
+	    holeSwitchTransitionTimer=setTimeout(function(){
+	      holeSwitchTransitionTimer=null;
+	      safe(function(){
+	        if(!document.body||!document.body.classList.contains("gdGpsHoleTransitioning"))return;
+	        /* A later switch superseded this one; that switch armed its own timer. */
+	        var live=window.__gdGpsHoleTransitioning||{};
+	        if(String(live.token||"")!==String(token||"")||holeFrameKey()!==key)return;
+	        /* Nothing may have re-run the ready check since the frame landed. */
+	        if(gdEndGpsHoleSwitchTransition("hole-switch-timeout-recheck"))return;
+	        gdCoursePlayDebugEvent("gps-play-hole-transition-timeout",{reason:reason||"hole-switch",targetHole:hole,token:token||"",visibleOwner:visiblePreparingOwner()});
+	        missingCapturedManifest("hole-switch-transition-timeout",{stage:"hole-switch-timeout",targetHole:hole,token:token||""});
+	      });
+	    },HOLE_SWITCH_TRANSITION_TIMEOUT_MS);
 	  }
 	  function gdEndGpsHoleSwitchTransition(reason){
 	    return safe(function(){
@@ -960,6 +1167,7 @@
 		      if(Number.isFinite(stampHole)&&Math.round(stampHole)!==Math.round(active))return false;
 		      if(state.token&&String(stamp.transitionToken||"")!==String(state.token))return false;
 		      document.body.classList.remove("gdGpsHoleTransitioning","gdHoleFrameLoading","gdGpsFramePreparing");
+	      clearHoleSwitchTransitionTimer();
 	      delete window.__gdGpsHoleTransitioning;
 	      delete document.body.dataset.gdGpsHoleTransitionTarget;
 	      delete document.body.dataset.gdGpsHoleTransitionToken;
@@ -1059,6 +1267,85 @@
 	      return window.GDCoursePlayPipeline.registerCoursePlayFrame(gdCoursePlayFrameCourseRef(),surfaceHoleNumber(),manifest,opts||{});
 	    },null);
 	  }
+	  /* Builds a v19 manifest from a worker-exported cloud surface. The export is a north-up
+	     mercator JPEG on an (originPx, captureZoom) grid - exactly the captured-surface model -
+	     so it enters the pipeline as a manifest whose tile list is ONE image covering the whole
+	     surface. Everything downstream (render, fit, shot projection, registration) is unchanged. */
+	  function cloudPublishedSurfaceManifest(reason){
+	    return safe(function(){
+	      var engine=window.GDCourseVisualEngine;
+	      if(!engine||typeof engine.getRecord!=="function")return null;
+	      var hole=Number(surfaceHoleNumber())||0;
+	      if(!hole)return null;
+	      /* Already built this hole's cloud manifest? Reuse the stored copy instead of
+	         re-registering on every render. */
+	      var stored=safe(function(){return JSON.parse(localStorage.getItem(storageKey())||"null");},null);
+	      /* A manifest cached before frames moved behind the /api proxy points at a Storage URL
+	         on a private bucket - it never loads, and reusing it would pin the hole to a broken
+	         image forever. Rebuild instead. */
+	      if(stored&&stored.cloudPublishedSurface&&Number(stored.holeNumber)===hole&&manifestMatchesActive(stored)&&!cloudSurfaceUrlIsStale(stored))return stored;
+	      var record=engine.getRecord(surfaceCourseKey());
+	      if(!record)return null;
+	      var asset=(Array.isArray(record.holeFramePublishedVisuals)?record.holeFramePublishedVisuals:[]).find(function(item){
+	        var ps=item&&item.metadata&&item.metadata.playSurface;
+	        return item&&Number(item.holeNumber)===hole&&cloudSurfaceSrc(item)&&ps&&ps.model==="mercator-image"&&ps.originPx&&Number.isFinite(Number(ps.captureZoom));
+	      })||null;
+	      if(!asset){
+	        /* Record not pulled yet (fresh device, or entered play before the pull finished).
+	           Pull once, then re-render the hole - the cloud surface swaps in seconds later
+	           instead of the device being stuck on whatever it shuttered first. */
+	        var pullFlag="__gdCloudSurfacePullAt_"+surfaceCourseKey();
+	        if(typeof engine.pullCourseVisual==="function"&&(!window[pullFlag]||Date.now()-window[pullFlag]>60000)){
+	          window[pullFlag]=Date.now();
+	          safe(function(){
+	            engine.pullCourseVisual(surfaceCourseKey()).then(function(){
+	              safe(function(){if(typeof window.gdEnsureCoursePlayFrameRendered==="function")window.gdEnsureCoursePlayFrameRendered();});
+	            }).catch(function(){});
+	          });
+	        }
+	        return null;
+	      }
+	      var ps=asset.metadata.playSurface;
+	      var width=Math.round(Number(ps.outputDimensions&&ps.outputDimensions.width||asset.width)||0);
+	      var height=Math.round(Number(ps.outputDimensions&&ps.outputDimensions.height||asset.height)||0);
+	      if(!width||!height)return null;
+	      var pins=ps.anchorPins||{};
+	      var manifest={
+	        version:VERSION,
+	        key:storageKey(),
+	        reason:reason||"cloud-published-surface",
+	        surfaceModel:"captured-surface-v1",
+	        interactionOwner:"captured-surface",
+	        liveMapRole:"capture-source-diagnostic-reference",
+	        courseKey:surfaceCourseKey(),
+	        courseName:surfaceCourseName(),
+	        holeNumber:hole,
+	        captureZoom:Number(ps.captureZoom),
+	        originPx:{x:Number(ps.originPx.x),y:Number(ps.originPx.y)},
+	        imageWidth:width,
+	        imageHeight:height,
+	        anchorPins:pins,
+	        includeTee:!!pins.tee,
+	        teeLatLng:pins.tee||null,
+	        cloudPublishedSurface:true,
+	        tiles:[{x:0,y:0,width:width,height:height,z:null,url:cloudSurfaceSrc(asset)}],
+	        createdAt:new Date().toISOString()
+	      };
+	      /* Deliberately NOT written back through gdCapturedSurfaceWriteScan. This
+	         manifest was built FROM a published cloud visual; registering it as a scan
+	         made the sync push it to captured_surfaces as a tile manifest, so the app
+	         kept manufacturing the legacy rows it can no longer consume. The app is a
+	         consumer - it authors nothing. */
+	      captureManifest=manifest;
+	      window.gdHoleImageCaptureManifest=manifest;
+	      window.__gdLastHoleImageCaptureManifest=manifest;
+	      window.__gdV19CapturedHoleFrameManifest=manifest;
+	      safe(function(){localStorage.setItem(storageKey(),JSON.stringify(manifest));});
+	      gdRegisterCoursePlayFrameManifest(manifest,{generatedFrom:"cloud-published-surface",manifestKey:storageKey(),status:"generated"});
+	      gdCoursePlayDebugEvent("gps-play-loaded-cloud-surface",{manifestKey:storageKey(),holeNumber:hole,url:cloudSurfaceSrc(asset).slice(0,140),offlineReady:!!(asset&&asset.dataUrl)});
+	      return manifest;
+	    },null);
+	  }
 	  function gdRenderCoursePlayHoleFrame(courseId,holeNumber,holePlayData,opts){
 	    opts=opts||{};
 	    if(window.gdFullMappingMode||document.body&&document.body.classList.contains("gdFullMappingMode"))return false;
@@ -1079,9 +1366,30 @@
 	      if(!data)return false;
 	      var bounds=coursePlayGreenBounds(data);
 	      if(!validBounds(bounds))return false;
-	      var manifest=loadCaptureManifest();
-	      var loadedExisting=!!(manifest&&manifestMatchesActive(manifest));
+	      /* Priority: published cloud surface (styled, current recipe, owned pixels), then a
+	         local capture that already exists. There is deliberately no third option during
+	         play. If the cloud record hasn't arrived yet, cloudPublishedSurfaceManifest pulls
+	         it and re-renders, so a fresh device self-upgrades seconds after first paint.
+
+	         This used to fall through to a live shutter - buildCaptureManifest during play -
+	         which is why phones accumulated ~300KB tile manifests per hole for courses with
+	         no published frames, blew the ~5MB WKWebView budget, and had iOS evict the
+	         in-progress round. Framing and flattening belong to the studio and the server
+	         worker; the app consumes cloud frames and otherwise plays on the live map.
+	         ensureCurrentCaptureManifest and fitCaptured already guarded this way - this call
+	         site was the only one that did not. */
+	      var cloudManifest=cloudPublishedSurfaceManifest(opts.reason||"course-play-pipeline");
+	      var manifest=cloudManifest||loadCaptureManifest();
+	      var loadedExisting=!cloudManifest&&!!(manifest&&manifestMatchesActive(manifest));
 	      if(!manifest||!manifestMatchesActive(manifest)){
+	        if(capturedGpsPlayActive()){
+	          /* Side effect only: this returns "did we render a frame", and we did not.
+	             missingCapturedManifest picks loading vs unavailable from pipeline state,
+	             and gdCapturedFrameUnavailable is idempotent per hole, so a repeating
+	             caller costs nothing after the first. */
+	          missingCapturedManifest(opts.reason||"course-play-pipeline",{stage:"course-play-pipeline"});
+	          return false;
+	        }
 	        captureManifest=null;
 	        manifest=buildCaptureManifest(bounds,opts.reason||"course-play-pipeline");
 	      }
@@ -1230,6 +1538,15 @@
 	      document.body.dataset.gdTerminalCapturedFrameUnavailableClearedBy=String(reason||"captured-presentation-ready");
 	    });
 	  }
+	  function clearHoleSwitchTransitionTimer(){
+	    if(holeSwitchTransitionTimer){clearTimeout(holeSwitchTransitionTimer);holeSwitchTransitionTimer=null;}
+	  }
+	  /* Deliberately NOT cleared from clearHoleFrameLoading: two of its callers run
+	     when the surface has merely RENDERED, which is before fitCaptured ends the
+	     transition. Cancelling there would drop the safety net while the mask is
+	     still up. Cleared only where the transition has genuinely ended - see
+	     gdEndGpsHoleSwitchTransition and gdCapturedFrameUnavailable. The callback
+	     re-checks the class and token anyway, so a stale timer is inert. */
 	  function clearHoleFrameLoading(){
 	    safe(function(){
 	      if(holeFrameLoadingTimer){clearTimeout(holeFrameLoadingTimer);holeFrameLoadingTimer=null;}
@@ -1238,6 +1555,7 @@
 	    });
 	  }
 	  function clearCapturedFrameUnavailable(){
+	    capturedUnavailableFor="";
 	    safe(function(){document.body.classList.remove("gdCapturedFrameUnavailable");});
 	  }
 	  function gdHoleFrameLoading(reason,context){
@@ -1290,8 +1608,29 @@
 	    if(capturedGpsPlayActive()&&mappedGeometryExistsForActiveHole())return gdHoleFrameLoading(reason||"frame-loading",context||{});
 	    return !!gdCapturedFrameUnavailable(reason||"missing-frame",context||{});
 	  }
+	  /* Idempotent per hole.
+
+	     Several independent subsystems ask for the frame on their own schedules -
+	     observed on device as tool-sync, resume-round and resume-round-restore taking
+	     turns about 3.5 times a second. With no frame published for the course, each
+	     one re-ran this whole function: DOM writes, a class rewrite, a debug event and
+	     a map-visibility recompute. That is the spin that filled the timeline with
+	     fell-to-unavailable and kept the surface churning.
+
+	     Declaring "this hole has no frame" is a state, not an event, so repeating it
+	     costs nothing. The latch releases when the hole changes or when the state is
+	     cleared - clearCapturedFrameUnavailable - so a cloud surface arriving later
+	     still takes effect. */
+	  var capturedUnavailableFor="";
 	  function gdCapturedFrameUnavailable(reason,context){
+	    var alreadyDeclared=safe(function(){
+	      return capturedUnavailableFor===holeFrameKey()&&
+	        !!document.body&&document.body.classList.contains("gdCapturedFrameUnavailable");
+	    },false);
+	    if(alreadyDeclared)return null;
+	    safe(function(){capturedUnavailableFor=holeFrameKey();});
 	    safe(function(){
+	      clearHoleSwitchTransitionTimer();
 	      clearHoleFrameLoading();
 	      clearStalePreparingOwners(reason||"captured-frame-unavailable");
 	      var el=document.getElementById("gdCapturedFrameUnavailable");
@@ -1699,6 +2038,24 @@
 	  }
 	  function setup(opts){
 	    opts=opts||{};
+	    /* setup() has always done two unrelated jobs: frame the hole, and reset the
+	       shot back to the pre-lock prompt. It is exported under five names that all
+	       sound like pure camera work (gdSimpleFrameSetup, gdFrameMappedPreLockPreset,
+	       gdFrameMappedPreLockHoleView, gdQueueMappedPreLockHoleFrame,
+	       gdFocusMappedPreLockHole) and callers treat them exactly that way - on
+	       30/60/80/160ms fallback timers with reasons like "zoom-fallback" and
+	       "course-play-resolver". Each of those "reframes" silently unlocked the
+	       frame, wiped the bubble overlay and cleared the placed shot - which is why
+	       the bubble vanished shortly after Head To The Tee settled its frame.
+
+	       So: while a shot is placed and locked, a passive caller gets the framing
+	       WITHOUT the reset. Only an explicit reset - the Unlock bridge, which
+	       passes forceReset - may destroy a locked shot. */
+	    var shotLocked=safe(function(){return !!(lockedFrame&&start&&target);},false);
+	    if(shotLocked&&!opts.forceReset){
+	      var fb=greenBounds("hole");
+	      return fitCaptured(fb,"hole",num(opts.padding,.025),{objectName:"capturedGreenHoleFrame",reason:String(opts.reason||"setup")+"-frame-only",maxScale:7.2,fitRatio:.94})||fallbackNative(fb,"hole",num(opts.padding,.025),opts);
+	    }
 	    lockCameraFrozen=false;
 	    safe(function(){lockedFrame=false;});
 	    safe(function(){if(typeof setMapGestures==="function")setMapGestures(true);});
@@ -1851,12 +2208,20 @@
 		  window.gdLoadHoleImageCaptureManifest=function(){return loadCaptureManifest();};
 		  window.gdEnsureCurrentCapturedSurfaceManifest=function(reason){return ensureCurrentCaptureManifest(reason||"ensure-current");};
 		  window.gdCapturedFrameUnavailable=gdCapturedFrameUnavailable;
-		  window.gdCaptureFlattenPending=function(key){return captureFlattenPending[key]||null;};
-		  window.gdFlattenCaptureManifest=function(manifest,opts){return flattenCaptureManifest(manifest,opts);};
 		  window.gdCapturedSurfaceManifestMatchesActive=function(manifest){return manifestMatchesActive(manifest||captureManifest||window.gdHoleImageCaptureManifest||window.__gdLastHoleImageCaptureManifest||window.__gdV19CapturedHoleFrameManifest);};
 		  window.gdRenderHoleImageCamera=function(manifest){return renderCaptureManifest(manifest||loadCaptureManifest());};
 		  window.gdBeginGpsHoleSwitchTransition=gdBeginGpsHoleSwitchTransition;
 		  window.gdEndGpsHoleSwitchTransition=gdEndGpsHoleSwitchTransition;
+		  /* Exposed for a dry run or a forced pass from a console. */
+		  window.gdPurgeLegacyFatFrames=gdPurgeLegacyFatFrames;
+		  /* Native only, and early: this is a pure localStorage scan with no network,
+		     so it costs nothing, and the whole point is to be under budget before the
+		     player reaches a hole and the webview starts evicting. Deferred just past
+		     first paint so it never competes with the course being opened. */
+		  safe(function(){
+		    if(!(window.GDNative&&window.GDNative.isNative))return;
+		    setTimeout(function(){safe(gdPurgeLegacyFatFrames);},2500);
+		  });
 	    window.gdShowHoleImageCamera=function(on){if(on){var m=loadCaptureManifest();if(!m&&capturedGpsPlayActive())return missingCapturedManifest("show",{stage:"show"});if(!m)m=window.gdBuildHoleImageCaptureManifest("show");if(m)renderCaptureManifest(m);}document.body.classList.toggle("gdCapturedHoleFrameCameraOn",!!on);document.body.classList.toggle("gdHoleImageCameraOn",!!on);if(on)clearCapturedFrameUnavailable();return !!on;};
 		    window.gdFitCapturedHoleFrameToBoxV19=fitCaptured;
 		    window.gdFitHeadToTeeHoleFrameV19=headToTee;

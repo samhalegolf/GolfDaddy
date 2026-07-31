@@ -1,0 +1,84 @@
+/* Rule 2 is CSS policy: #map has no hidden state anywhere in this file. The
+   published surface overlays it; removing one class always lands back on the
+   live map. */
+* { box-sizing: border-box; margin: 0; }
+html, body { height: 100%; font-family: -apple-system, system-ui, sans-serif; background: #0d1b12; color: #f2f7f2; }
+
+.screen { position: fixed; inset: 0; display: none; }
+body.route-home #homeScreen { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; }
+body.route-play #playScreen { display: block; overflow: hidden; }
+
+#playTile { font-size: 20px; padding: 18px 48px; border-radius: 14px; border: 0; background: #2f8f4e; color: #fff; }
+
+#accountState { opacity: .75; font-size: 14px; }
+.linkButton { border: 0; background: none; color: #7fc99a; font-size: 15px; padding: 8px; text-decoration: underline; }
+
+body.route-signin #signInScreen { display: flex; align-items: center; justify-content: center; padding: 24px; }
+.signInCard { width: min(360px, 100%); display: flex; flex-direction: column; gap: 12px; }
+.signInCard h2 { font-size: 22px; }
+.signInCard input { padding: 14px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, .18); background: #07100b; color: #f2f7f2; font-size: 16px; }
+.signInCard button[type="submit"] { border: 0; border-radius: 12px; padding: 14px; background: #2f8f4e; color: #fff; font-size: 16px; }
+#signInStatus { min-height: 20px; font-size: 14px; color: #f0b26a; }
+
+body.route-picker #pickerScreen { display: flex; flex-direction: column; }
+.pickerHeader { display: flex; align-items: center; gap: 12px; padding: calc(env(safe-area-inset-top, 0px) + 12px) 16px 12px; }
+.pickerHeader h2 { font-size: 18px; }
+.pickerHeader button { border: 0; border-radius: 10px; padding: 10px 14px; background: rgba(255, 255, 255, .12); color: #f2f7f2; font-size: 16px; }
+#courseList { list-style: none; overflow-y: auto; padding: 0 16px 24px; }
+.courseRow { display: block; width: 100%; text-align: left; font-size: 17px; padding: 16px; margin-bottom: 10px; border: 0; border-radius: 12px; background: rgba(255, 255, 255, .08); color: #f2f7f2; }
+#pickerEmpty { padding: 24px 16px; opacity: .75; }
+.hiddenState { display: none; }
+
+/* z-index:0 is load-bearing: it makes #map a stacking context so Leaflet's
+   internal z-1000 controls (attribution) stay inside it, underneath a
+   presented surface, instead of painting over it. */
+#map { position: absolute; inset: 0; background: #16281c; z-index: 0; }
+
+/* The surface viewport carries the lock-stage tilt (ported from
+   gd-gps-play-camera-tilt: 32° at perspective 900px, origin 50% 70%, 1s ease,
+   scale 1+32/150). The image inside carries the frame matrix, and the dot
+   rides in the same space so the tilt projects them together. */
+/* overflow:hidden is load-bearing: the framed image extends far past the
+   viewport, and a transformed descendant still grows the scrollable overflow —
+   without the clip, focusing a button (the start pill) scroll-jumps the whole
+   play screen. */
+#surfaceViewport { position: absolute; inset: 0; display: none; z-index: 500; background: #0d1b12; transform-origin: 50% 70%; transition: transform 1000ms cubic-bezier(.18, .82, .24, 1); overflow: hidden; }
+body.surface-published #surfaceViewport { display: block; }
+body.tilt-lock #surfaceViewport { transform: perspective(900px) rotateX(32deg) scale(1.213); }
+@media (prefers-reduced-motion: reduce) { #surfaceViewport { transition-duration: 1ms; } }
+
+#surfaceImage { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+
+/* Projected position on a published surface. Positioned by play.js in screen
+   pixels; hidden whenever there is no fix or the fix is off-surface. */
+#gpsDot { position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%; background: #2f8fef; border: 2px solid #fff; z-index: 550; pointer-events: none; }
+
+/* Provenance chip: what image is on screen and where it came from. Tapping it
+   opens the full metadata panel. */
+#surfaceSource { position: absolute; top: calc(env(safe-area-inset-top, 0px) + 64px); left: 16px; z-index: 620; border: 0; border-radius: 8px; padding: 6px 10px; background: rgba(13, 27, 18, .8); color: #9fc7ab; font-size: 11px; font-family: ui-monospace, Menlo, monospace; }
+#surfaceSource.hiddenState { display: none; }
+#surfaceMetaPanel { position: absolute; top: calc(env(safe-area-inset-top, 0px) + 96px); left: 16px; right: 16px; max-height: 50vh; overflow: auto; z-index: 620; margin: 0; padding: 12px; border-radius: 12px; background: rgba(13, 27, 18, .92); color: #cfe3d6; font-size: 11px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; }
+#surfaceMetaPanel.hiddenState { display: none; }
+
+/* Standing Here / Head To the Tee pill — ported from the old app's
+   gdMappedStartPill (gd-app-base.css). Shown at the pre-frame state, when the
+   hole is framed but the player has no position yet. */
+#startPill { position: absolute; bottom: calc(98px + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); z-index: 640; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 4px; width: min(326px, calc(100vw - 40px)); padding: 4px; border-radius: 999px; background: rgba(5, 9, 7, .72); border: 1px solid rgba(255, 255, 255, .14); box-shadow: 0 14px 30px rgba(0, 0, 0, .32); backdrop-filter: blur(10px); }
+#startPill.hiddenState { display: none; }
+#startPill button { min-height: 38px; border: 0; border-radius: 999px; padding: 8px 10px; background: rgba(255, 255, 255, .09); color: rgba(255, 255, 255, .9); font-size: 12px; font-weight: 950; line-height: 1.05; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#startPill .headToTee { background: #1fd36d; color: #06110b; }
+#startPill button:active { transform: scale(.985); }
+
+/* Front / centre / back of green, metres. Hidden without a fix or a green.
+   Bottom-LEFT like the old app's #gdV62Distance — centre-bottom sits exactly
+   on the tee guide box, and a bar there hides the player's dot at the tee
+   (which read as "Head To the Tee did nothing"). */
+#distanceBar { position: absolute; left: 12px; bottom: calc(env(safe-area-inset-bottom, 0px) + 120px); display: flex; gap: 10px; align-items: baseline; padding: 9px 12px; border-radius: 14px; background: rgba(13, 27, 18, .85); z-index: 600; }
+#distanceBar.hiddenState { display: none; }
+.dist { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 15px; font-weight: 600; }
+.distMain { font-size: 22px; font-weight: 800; }
+.distLabel { font-size: 10px; font-weight: 600; opacity: .65; letter-spacing: .08em; }
+
+.playChrome { position: absolute; top: env(safe-area-inset-top, 12px); left: 0; right: 0; display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; z-index: 600; }
+.playChrome button { border: 0; border-radius: 10px; padding: 10px 14px; background: rgba(13, 27, 18, .82); color: #f2f7f2; font-size: 16px; }
+#holeNumber { font-size: 18px; font-weight: 700; }

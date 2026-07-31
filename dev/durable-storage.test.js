@@ -140,6 +140,43 @@ function nativeStub(seeded) {
       assert.strictEqual(removed, undefined, "a signed-out session must not be resurrected on next boot");
     });
 
+    /* localStorage is a WebIDL legacy platform object with a named-property
+       setter, so `storage.setItem = fn` stores an ENTRY called "setItem" holding
+       the function's source text. Chromium ALSO overrides the method, so the
+       mirror appeared to work here while on iOS WebKit it did not override at
+       all - only boot-time seed() ever mirrored, and the durable copy of the
+       in-progress round sat hours stale. The install must therefore use
+       Object.defineProperty, and must not write its installed-flag onto storage.
+
+       Asserting on the stray entries rather than on override behaviour is what
+       makes this catchable in a Chromium-only harness: the entries appear in
+       both engines, the failed override only in WebKit. */
+    const strays = await page.evaluate(() => {
+      const names = ["setItem", "removeItem", "__gdDurableMirror"];
+      const keys = Object.keys(localStorage);
+      return {
+        present: names.filter((n) => keys.includes(n) || localStorage.getItem(n) !== null),
+        setItemIsFunction: typeof localStorage.setItem === "function",
+        mirrorPatched: localStorage.setItem.__gdDurableMirror === true
+      };
+    });
+
+    check("the mirror install writes no stray keys into the quota it protects", () => {
+      assert.deepStrictEqual(
+        strays.present, [],
+        "assigning onto localStorage stores an entry instead of setting a property - " +
+        "use Object.defineProperty and keep the installed flag off storage"
+      );
+    });
+
+    check("the patched setter is installed on the storage object itself", () => {
+      assert.strictEqual(strays.setItemIsFunction, true, "setItem must remain callable");
+      assert.strictEqual(
+        strays.mirrorPatched, true,
+        "the flag belongs on the patched function; a flag on storage is a storage write"
+      );
+    });
+
     await page.close();
     await context.close();
 
@@ -232,6 +269,44 @@ function nativeStub(seeded) {
     assert.ok(
       /originalSetItem/.test(src),
       "using the patched setter would mirror back the value just read out of Preferences"
+    );
+  });
+
+  check("the round being played does not force a reload", () => {
+    /* The reload exists because app scripts read localStorage synchronously
+       while booting, so a restore they missed is invisible without loading
+       again. Nothing reads the round key during boot - the Resume Round button
+       and the resume prompt both read it lazily - so reloading for it throws the
+       player to home to fix something that was already working. On a device
+       where the webview evicts storage mid-round that was the difference between
+       an invisible recovery and losing your place. */
+    const block = /var RELOAD_REQUIRED_KEYS = \[([\s\S]*?)\];/.exec(src);
+    assert.ok(block, "RELOAD_REQUIRED_KEYS not found");
+    assert.ok(
+      !/gd_gps_resume_round_v1/.test(block[1]),
+      "the round key forces a reload — restoring it is already effective, and the reload costs the player their place"
+    );
+    ["clarity:supabase-auth-session:v1", "gd_accounts_v1", "gd_player_profiles_v27"].forEach((key) => {
+      assert.ok(
+        block[1].includes(key),
+        key + " is not in RELOAD_REQUIRED_KEYS — it is read synchronously at boot, so a restore without a reload is invisible"
+      );
+    });
+    assert.ok(
+      /var needsReload = restored\.some/.test(src),
+      "the reload is not conditional on which keys were restored"
+    );
+  });
+
+  check("storage usage is measured but stays quiet when it is fine", () => {
+    assert.ok(/function storageUsage\(/.test(src), "there is no way to measure what is filling the quota");
+    assert.ok(
+      /usage\.total < REPORT_BYTES\) return/.test(src),
+      "usage is reported unconditionally — routine sessions would be noise"
+    );
+    assert.ok(
+      /sessionStorage\.getItem\(USAGE_REPORTED\)/.test(src),
+      "usage is not limited to once per session"
     );
   });
 

@@ -92,6 +92,48 @@ The sandbox stays the source of truth for how a recipe *looks*; the worker must 
    Remaining: GPS play consuming cloud frames (currently only the admin preview does), and
    tile caching/throttling in the worker if snapshot volume grows.
 
+   2026-07-28: snapshot -> natural export already auto-chains (`enqueueFollowUpExport`), so a
+   course only ever needs a snapshot enqueued. `/api/course-visual-jobs` gained `kind:"auto"`
+   (any signed-in player, snapshot only, never a recipe, rate limited) and its GET now derives
+   a build state - `none | queued | running | captures-ready | frames-ready | failed` - that
+   the app can poll while it plays over live tiles. Export output raised 2048 -> 3072
+   (`EXPORT_RENDITION_PX`), re-renditioned from the kept masters rather than re-shooting tiles;
+   an already-shot course whose `planKey` still matches backfills straight from storage.
+   NOT yet verified on a phone, and per the imagery-source registry work the sharpness gate
+   should be judged on licensed (LINZ/NAIP) masters, not the Esri-era ones.
+
+   2026-07-28, imagery sources: `functions/lib/gd-imagery-sources.mjs` is the licensing gate -
+   a source is returned only if its licence grants storage AND derivatives AND redistribution,
+   its region CONTAINS the course bounds, and its key is configured; otherwise null and the
+   course runs live-only. LINZ (NZ, `xyz`) and NAIP (US CONUS, new `arcgis-export` adapter).
+   Capture policies no longer name a tile source. Entries carry `imagery` + `dem` and no
+   hillshade raster - relief is a computation over elevation, so the terrain-reference capture
+   is dormant until that lands (the natural recipe never composites it anyway). The source key
+   is folded into `planKey` so Esri-era masters cannot be re-renditioned under a new credit.
+   Anonymous Esri is out of `mapSources` too; live falls back to OSM without a LINZ key.
+
+   2026-07-28, GPS play consumes frames: engine gained a consumer-only API
+   (`courseBuildState`, `requestCourseBuild`, `cachedCourseFrames`, `downloadCourseFrames`,
+   `ensureCourseFrames`, `courseAssetUrl`) generated into the client. Cached frames are served
+   before any network - the offline round - with a quiet revalidation behind them; an unbuilt
+   course enqueues `kind:"auto"` and polls while play runs over live tiles. `index.json` is
+   written LAST so a partial download reads back as not cached. `FRAMES_WAIT_MODE` in the
+   engine is the single flag for the interim state.
+   The load-bearing fix: cloud frames used to reach play via a direct Supabase Storage public
+   URL on a PRIVATE bucket, so they never loaded and could not work offline. Play now reads the
+   cached data URL, falling back to same-origin `/api/course-visual-assets`. The local styled
+   bake is out of play's preference order; the studio preview keeps its own.
+
+## Export engine note (2026-07-22, later)
+
+The engine-in-Node export (nested base64 SVGs) proved parity but was structurally heavy: it
+OOM-killed workers and tripped librsvg's 10MB XML limit. Replaced by
+`functions/lib/gd-visual-export-core.mjs` - a sharp compositor that ports the engine's
+play-axis layout math exactly and applies the recipe as libvips primitives (~2s/hole, ~50MB).
+First real publish (cv-pupuke, frames/r3vfiah) was produced by the engine path and visually
+matches the compositor output. v1 approximations vs the engine: green-hue tint layers and
+fairway airbrush are simplified; sat/brightness/contrast/terrain/floodlight/mow are exact.
+
 ## Recipe model (Sam, 2026-07-22)
 
 Effects are LAYERS over the raw capture, all OFF by default. Reset = raw capture. The admin

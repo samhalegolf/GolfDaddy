@@ -11,6 +11,14 @@
   var STORE_KEY="gd_course_visual_engine_v1";
   var PRESET_KEY="gd_course_visual_presets_v1";
   var API_ENDPOINT="/api/course-visuals";
+  var JOBS_ENDPOINT="/api/course-visual-jobs";
+  var ASSET_ENDPOINT="/api/course-visual-assets";
+  /* THE flag for the interim state, and the only place it is decided. "live-until-ready" plays
+     the course over live tiles with its objects drawn on top while the server builds it;
+     "block-until-ready" is the identical flow behind a blocking loading screen. Nothing else in
+     the codebase may branch on this value - flipping it here is the whole change. */
+  var FRAMES_WAIT_MODE="live-until-ready";
+  var FRAMES_POLL_MS=20000;
   var ASSET_DB_NAME="gd_course_visual_assets_v1";
   var ASSET_STORE_NAME="assets";
   var VALID_STATUSES={unavailable:1,"input-ready":1,stitching:1,"basic-ready":1,rendering:1,"preview-ready":1,published:1,failed:1};
@@ -3154,7 +3162,11 @@
     rawAssets.forEach(function(asset){
       var normalized=normalizeCloudAsset(asset);
       if(!normalized||!normalized.role||!normalized.path&&!normalized.url)return;
-      var key=[normalized.role,normalized.holeNumber||0,normalized.path||normalized.url].join("::");
+      /* Normalize the path in the dedupe key - uploaded_assets carry "pupuke/frames/..."
+         while play_payload assets carry "course-visuals/pupuke/frames/...", which made every
+         frame appear twice (36 entries for 18 holes) with metadata split between the copies. */
+      var dedupePath=String(normalized.path||normalized.url||"").replace(/^\/+/,"").replace(/^course-visuals\//,"");
+      var key=[normalized.role,normalized.holeNumber||0,dedupePath].join("::");
       byKey[key]=Object.assign({},byKey[key]||{},normalized,{metadata:Object.assign({},byKey[key]&&byKey[key].metadata||{},normalized.metadata||{})});
     });
     var assets=Object.keys(byKey).map(function(key){return byKey[key];});
@@ -3191,13 +3203,266 @@
     if(cloudFramePublished.length)record.holeFramePublishedVisuals=cloudFramePublished.map(function(asset){return restoredFrameAsset(asset,record.publishedVersion||record.currentVersion||1);});
     return putRecord(record,{skipCloudSync:true});
   }
+  /* A pull returns the record play renders from, so it must come back with the downloaded
+     pixels attached - not just the paths where they would be.
+
+     restoreCloudMetadata rebuilds the record from the cloud row and reattaches pixels through
+     attachTransientAssets, which only knows what is already in memory. On a cold start that map
+     is empty, and the only thing that fills it is hydrateCourseVisualAssets reading IndexedDB.
+     So the result depended on call order: app-core schedules this pull at +80ms and the frames
+     watch (which hydrates) at +120ms, so the pull always won the race and handed play a record
+     of paths with no pixels. cloudSurfaceSrc returns "" for those, and a downloaded course
+     played over live tiles - the bytes were on the device the whole time.
+
+     Hydrating here makes that unordered: any pull, at any point, returns what the library
+     actually holds. */
   function pullCourseVisual(courseId){
-    if(!root||typeof root.fetch!=="function")return Promise.resolve(getRecord(courseId));
+    if(!root||typeof root.fetch!=="function")return hydratedRecord(getRecord(courseId));
     return root.fetch(API_ENDPOINT+"?courseId="+encodeURIComponent(slug(courseId)),{headers:{Accept:"application/json"},cache:"no-store"}).then(function(res){return res.ok?res.json():null;}).then(function(data){
       var row=data&&data.visual||null;
-      return row?restoreCloudMetadata(row):getRecord(courseId);
-    }).catch(function(){return getRecord(courseId);});
+      return hydratedRecord(row?restoreCloudMetadata(row):getRecord(courseId));
+    }).catch(function(){return hydratedRecord(getRecord(courseId));});
   }
+  /* Fills a record's assets from the on-device store. Resolves to the record either way - a
+     course with nothing downloaded is the live-tile tier, not a failure. */
+  function hydratedRecord(record){
+    return hydrateRecordAssets(record).then(function(result){
+      return result&&result.record||record;
+    }).catch(function(){return record;});
+  }
+  /* ---------- cloud frames: the app surface's only visual source ---------------------------
+
+     A course IS 18 hole images in the database. Everything below is the consumer end of that
+     and nothing else: ask the server what state a course is in, download its frames once, keep
+     them in the asset store under their versioned paths, and play from there. There is no bake
+     path here - the app surface never authors a frame, it only ever reads one.
+
+     The asset store holds the bytes at a path: a data URL for images, and the raw JSON text
+     for index.json. The index is written LAST, after every frame it names is stored, so its
+     presence is the completion marker - a download interrupted at hole 14 leaves no index and
+     reads back as "not cached" rather than as a course that fails on the 14th tee. */
+
+  function courseAssetUrl(path){return ASSET_ENDPOINT+"?path="+encodeURIComponent(String(path||""));}
+  function courseFramesIndexPath(courseId){return slug(courseId)+"/frames/index.json";}
+  function courseFramePaths(index){
+    var paths=(index&&Array.isArray(index.holes)?index.holes:[]).map(function(hole){return hole&&hole.path||"";}).filter(Boolean);
+    if(index&&index.overview&&index.overview.path)paths.push(index.overview.path);
+    return paths;
+  }
+
+  /* Parsed body plus the status, because 429 and 404 are answers the caller must act on
+     differently from "the network is gone". */
+  function courseApiJson(url,init){
+    if(!root||typeof root.fetch!=="function")return Promise.resolve({ok:false,status:0,body:null});
+    return root.fetch(url,init||{headers:{Accept:"application/json"}}).then(function(res){
+      return res.json().catch(function(){return null;}).then(function(body){return {ok:!!res.ok,status:res.status,body:body};});
+    }).catch(function(){return {ok:false,status:0,body:null};});
+  }
+
+  /* "unknown" is deliberately NOT "none". A phone with no signal must never read an
+     unreachable server as "this course has never been built" and start a course scan. */
+  function courseBuildState(courseId){
+    return courseApiJson(JOBS_ENDPOINT+"?courseId="+encodeURIComponent(slug(courseId))).then(function(result){
+      var body=result.body;
+      if(!result.ok||!body||!body.state)return {state:"unknown",framesReady:false,framesVersion:null};
+      return body;
+    });
+  }
+
+  /* Player-triggered build. The token is passed in rather than read from an auth global so the
+     generated client stays closed over its own closure. */
+  function requestCourseBuild(courseId,accessToken){
+    if(!accessToken)return Promise.resolve({started:false,state:"none",reason:"sign-in-required"});
+    return courseApiJson(JOBS_ENDPOINT,{
+      method:"POST",
+      headers:{"Content-Type":"application/json",Accept:"application/json",Authorization:"Bearer "+accessToken},
+      body:JSON.stringify({courseId:slug(courseId),kind:"auto"})
+    }).then(function(result){
+      var body=result.body||{};
+      return {started:result.status===202,state:body.state||"unknown",status:result.status,reason:body.error||""};
+    });
+  }
+
+  function blobToDataUrl(blob){
+    return new Promise(function(resolve){
+      if(!blob||!root||typeof root.FileReader!=="function"){resolve(null);return;}
+      var reader=new root.FileReader();
+      reader.onload=function(){resolve(String(reader.result||"")||null);};
+      reader.onerror=function(){resolve(null);};
+      if(!safe(function(){reader.readAsDataURL(blob);return true;},false))resolve(null);
+    });
+  }
+
+  /* Every read goes through the same-origin /api proxy, never a Storage URL - that is what
+     keeps the Capacitor shells and mobile web on one code path (docs/NATIVE_SHELL.md). */
+  function downloadCourseAsset(path){
+    if(!root||typeof root.fetch!=="function")return Promise.resolve(null);
+    return root.fetch(courseAssetUrl(path)).then(function(res){
+      return res&&res.ok?res.blob():null;
+    }).then(function(blob){
+      return blob?blobToDataUrl(blob):null;
+    }).then(function(dataUrl){
+      if(!dataUrl)return null;
+      return saveAssetData(path,dataUrl).then(function(){return dataUrl;});
+    }).catch(function(){return null;});
+  }
+
+  function cachedCourseFrames(courseId){
+    var id=slug(courseId);
+    return loadAssetData(courseFramesIndexPath(id)).then(function(raw){
+      var index=raw?safe(function(){return JSON.parse(raw);},null):null;
+      if(!index||!Array.isArray(index.holes)||!index.holes.length)return null;
+      var paths=courseFramePaths(index);
+      return Promise.all(paths.map(function(path){return loadAssetData(path);})).then(function(list){
+        /* All or nothing. A partial set is worse than none: it plays fine until the hole whose
+           frame is missing, which is the middle of somebody's round. */
+        if(!list.length||list.some(function(data){return !data;}))return null;
+        return {courseId:id,index:index,version:String(index.exportVersion||""),holes:index.holes,overview:index.overview||null,complete:true};
+      });
+    }).catch(function(){return null;});
+  }
+
+  function downloadCourseFrames(courseId,opts){
+    opts=opts||{};
+    var id=slug(courseId);
+    var indexPath=courseFramesIndexPath(id);
+    if(!root||typeof root.fetch!=="function")return Promise.resolve(null);
+    return root.fetch(courseAssetUrl(indexPath),{headers:{Accept:"application/json"},cache:"no-store"}).then(function(res){
+      return res&&res.ok?res.json():null;
+    }).then(function(index){
+      if(!index||!Array.isArray(index.holes)||!index.holes.length)return null;
+      var paths=courseFramePaths(index);
+      var done=0;
+      /* Serial, not parallel: 19 concurrent image downloads on course mobile data is how you
+         turn a slow start into a failed one. */
+      return paths.reduce(function(chain,path){
+        return chain.then(function(ok){
+          if(!ok)return false;
+          return downloadCourseAsset(path).then(function(data){
+            if(!data)return false;
+            done+=1;
+            if(typeof opts.onProgress==="function")safe(function(){opts.onProgress({done:done,total:paths.length,path:path});});
+            return true;
+          });
+        });
+      },Promise.resolve(true)).then(function(ok){
+        if(!ok)return null;
+        return saveAssetData(indexPath,JSON.stringify(index)).then(function(){
+          return {courseId:id,index:index,version:String(index.exportVersion||""),holes:index.holes,overview:index.overview||null,complete:true};
+        });
+      });
+    }).catch(function(){return null;});
+  }
+
+  /* The whole automatic route from the app's side, as one call.
+
+     STORAGE RULE: this never writes a course's frames to the device unless the caller passes
+     acquire:true, which represents the user having asked for it. The device holds two very
+     different things and only one of them is automatic:
+
+       course library  - course objects, kilobytes, cached freely. This is what "Live Map
+                         Available" plays from, and it needs no permission because it costs
+                         nothing.
+       offline package - frames, overview, elevation grid, scorecard. Megabytes. This is
+                         "Offline Map Available", and it lands only when the user accepts it,
+                         arrives via a pre-search, or has Smart Download on.
+
+     Without acquire this call is pure observation: it reads state, reports it, and serves
+     frames that are ALREADY in the library. Nothing is downloaded behind the player's back,
+     on their cellular data, for a course they merely tapped.
+
+     Cached frames are served IMMEDIATELY and without waiting on the network - that is both the
+     zero-network case and the offline round, since a downloaded course plays in flight mode. */
+  function ensureCourseFrames(courseId,opts){
+    opts=opts||{};
+    var id=slug(courseId);
+    /* The single gate on megabytes touching the disk. Default false, deliberately: a caller
+       that forgets it gets the observing behaviour, not a silent download. */
+    var acquire=opts.acquire===true;
+    var pollMs=Math.max(5000,Number(opts.pollMs)||FRAMES_POLL_MS);
+    var stopped=false;
+    var timer=null;
+    function emit(name,payload){if(typeof opts[name]==="function")safe(function(){opts[name](payload);});}
+    function stop(){stopped=true;if(timer&&root&&root.clearTimeout)root.clearTimeout(timer);timer=null;}
+    function deliver(frames){if(stopped||!frames)return false;emit("onFrames",frames);return true;}
+    /* Frames exist on the server. Whether that means "download them" or "tell the player they
+       can" is the whole distinction between the two map tiers, and it is decided here. */
+    function offerOrFetch(state){
+      if(!acquire){
+        /* Read the index - a few hundred bytes - so the offer can name a size instead of asking
+           the player to accept an unknown number of megabytes. This is the one network call the
+           observing path makes beyond the status poll, and it stores nothing. */
+        return courseApiJson(courseAssetUrl(courseFramesIndexPath(id))).then(function(result){
+          var index=result.ok&&result.body||null;
+          emit("onOfflineAvailable",{
+            courseId:id,
+            framesVersion:state&&state.framesVersion||null,
+            exportVersion:index&&String(index.exportVersion||"")||"",
+            holes:index&&Array.isArray(index.holes)?index.holes.length:null,
+            /* null, never 0: a resumed export can leave a frame without a recorded size, and
+               "unknown" must not render as a free download. */
+            totalBytes:index&&Number(index.totalBytes)>0?Number(index.totalBytes):null
+          });
+          stop();
+          return true;
+        });
+      }
+      return downloadCourseFrames(id,{onProgress:function(p){emit("onProgress",p);}}).then(function(frames){
+        if(frames){deliver(frames);stop();return true;}
+        return false;
+      });
+    }
+    function poll(){
+      if(stopped)return;
+      timer=root&&root.setTimeout?root.setTimeout(function(){
+        if(stopped)return;
+        courseBuildState(id).then(function(state){
+          if(stopped)return;
+          emit("onState",state);
+          if(state.state==="frames-ready")return offerOrFetch(state).then(function(ok){if(!ok)poll();});
+          if(state.state==="failed"){stop();return;}
+          poll();
+        });
+      },pollMs):null;
+    }
+    cachedCourseFrames(id).then(function(cached){
+      if(stopped)return;
+      if(cached){
+        deliver(Object.assign({},cached,{fromCache:true}));
+        /* This course is already in the library, so check whether the cloud has re-baked it.
+           Reporting that is free; acting on it is not - re-pulling megabytes mid-round because
+           the studio happened to republish is exactly the silent download this avoids. Say
+           "update available" and let the library screen offer it. */
+        courseApiJson(courseAssetUrl(courseFramesIndexPath(id))).then(function(result){
+          var index=result.ok&&result.body||null;
+          if(stopped||!index||String(index.exportVersion||"")===cached.version)return;
+          emit("onUpdateAvailable",{courseId:id,haveVersion:cached.version,framesVersion:String(index.exportVersion||"")});
+          if(acquire)offerOrFetch(null);
+        });
+        return;
+      }
+      courseBuildState(id).then(function(state){
+        if(stopped)return;
+        emit("onState",state);
+        if(state.state==="frames-ready")return offerOrFetch(state).then(function(ok){if(!ok)poll();});
+        /* Offline or unreachable: play live and try again next time the course is opened.
+           Starting a build on a guess would be the one irreversible mistake available here. */
+        if(state.state==="unknown"){stop();return;}
+        if(state.state==="failed"){stop();return;}
+        if(state.state==="none"){
+          return requestCourseBuild(id,opts.accessToken).then(function(result){
+            if(stopped)return;
+            emit("onState",{state:result.started?"queued":result.state,requested:result.started,reason:result.reason});
+            if(result.started||result.state==="queued"||result.state==="running")poll();
+            else stop();
+          });
+        }
+        poll();
+      });
+    });
+    return {stop:stop,courseId:id};
+  }
+
   function captureCandidateList(output){
     if(!output)return [];
     if(Array.isArray(output))return output.map(function(item,index){return {manifest:item,raw:item,index:index};});
@@ -3469,6 +3734,15 @@
     storeKey:STORE_KEY,
     presetKey:PRESET_KEY,
     apiEndpoint:API_ENDPOINT,
+    jobsEndpoint:JOBS_ENDPOINT,
+    assetEndpoint:ASSET_ENDPOINT,
+    framesWaitMode:FRAMES_WAIT_MODE,
+    courseAssetUrl:courseAssetUrl,
+    courseBuildState:courseBuildState,
+    requestCourseBuild:requestCourseBuild,
+    cachedCourseFrames:cachedCourseFrames,
+    downloadCourseFrames:downloadCourseFrames,
+    ensureCourseFrames:ensureCourseFrames,
     defaultPreset:defaultPreset,
     greenToneHex:greenToneHex,
     beta3dTiltPolicy:beta3dTiltPolicy,

@@ -3,6 +3,13 @@
   command = "npm run build:netlify"
   functions = "functions"
 
+# The practice parser is one file shared by the browser and the import
+# function, so it lives in scripts/ where index.html can load it. That puts it
+# outside the functions directory: pin it explicitly rather than trusting the
+# bundler to trace a require that leaves functions/.
+[functions]
+  included_files = ["scripts/gd-practice-parser-core.js"]
+
 [[redirects]]
   from = "/api/store-webhook"
   to = "/.netlify/functions/store-webhook"
@@ -39,6 +46,21 @@
   status = 200
 
 [[redirects]]
+  from = "/api/course-mapper-jobs"
+  to = "/.netlify/functions/course-mapper-jobs"
+  status = 200
+
+[[redirects]]
+  from = "/api/course-library"
+  to = "/.netlify/functions/course-library"
+  status = 200
+
+[[redirects]]
+  from = "/api/course-package"
+  to = "/.netlify/functions/course-package"
+  status = 200
+
+[[redirects]]
   from = "/api/course-maps"
   to = "/.netlify/functions/course-maps"
   status = 200
@@ -51,6 +73,11 @@
 [[redirects]]
   from = "/api/scorecard-fetch"
   to = "/.netlify/functions/scorecard-fetch"
+  status = 200
+
+[[redirects]]
+  from = "/api/scorecard-search"
+  to = "/.netlify/functions/scorecard-search"
   status = 200
 
 [[redirects]]
@@ -109,13 +136,23 @@
   status = 200
 
 [[redirects]]
-  from = "/api/shot-library-sync"
-  to = "/.netlify/functions/shot-library-sync"
+  from = "/api/account-delete"
+  to = "/.netlify/functions/account-delete"
   status = 200
 
 [[redirects]]
-  from = "/api/captured-surface-sync"
-  to = "/.netlify/functions/captured-surface-sync"
+  from = "/api/account-clear-data"
+  to = "/.netlify/functions/account-clear-data"
+  status = 200
+
+[[redirects]]
+  from = "/api/account-profiles"
+  to = "/.netlify/functions/account-profiles"
+  status = 200
+
+[[redirects]]
+  from = "/api/shot-library-sync"
+  to = "/.netlify/functions/shot-library-sync"
   status = 200
 
 [[redirects]]
@@ -155,6 +192,16 @@
 
 [[headers]]
   for = "/*.html"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
+# The browser studio (admin/tuning surface). Same deploy, same /api functions,
+# same auth origin as the app at /; it just loads the studio-only panels the
+# phone build strips. Never cache its shell - the app index is uncached for the
+# same reason, and a stale studio index would load hashed asset URLs that no
+# longer exist.
+[[headers]]
+  for = "/studio/*"
   [headers.values]
     Cache-Control = "no-cache, no-store, must-revalidate"
 

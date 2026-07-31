@@ -6,15 +6,20 @@
    Zoom policies, tile budgets, bleeds, and corridor segmentation mirror the browser so a
    server snapshot frames the course the same way the in-browser scan does. */
 
-const DEFAULT_IMAGERY_TEMPLATE = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
+import { exportImageUrl } from "./gd-imagery-sources.mjs";
 
+/* Capture policies describe FRAMING - zoom, bleed, lens, budget. They no longer name a tile
+   source: which imagery a course may be shot from is a licensing decision resolved per region
+   in gd-imagery-sources.mjs and handed to captureGrid. A policy that hardcoded an endpoint
+   would route straight around that gate, which is exactly how Esri's display-only tiles ended
+   up baked into stored frames. */
 export function capturePolicy(role) {
   role = String(role || "");
   const mobileHoleLens = { captureLens: "mobile-hole", lensShape: "mobile-hole", lensAspectRatio: 9 / 16, lensOrientation: "play-axis", lensFit: "expand-bounds" };
   const greenSquareLens = { captureLens: "green-square", lensShape: "green-square", lensAspectRatio: 1, lensOrientation: "map-axis", lensFit: "expand-bounds" };
   if (role === "green-surround") return Object.assign({ role, label: "Super HD green surrounds", quality: "super-hd", targetZoom: 20, minZoom: 20, maxZoom: 20, maxTiles: 220, bleedMeters: 26, bleedPx: 220, stitchLayer: 30, fixedZoom: true }, greenSquareLens);
   if (role === "play-corridor") return Object.assign({ role, label: "HD play corridor", quality: "hd", targetZoom: 19, minZoom: 19, maxZoom: 19, maxTiles: 320, bleedMeters: 32, bleedPx: 220, stitchLayer: 20, fixedZoom: true, maxSegmentMeters: 320, segmentOverlapMeters: 42, maxSegments: 6 }, mobileHoleLens);
-  if (role === "terrain-reference") return { role, label: "Terrain relief reference", quality: "terrain-map", targetZoom: 16, minZoom: 14, maxZoom: 17, maxTiles: 260, bleedMeters: 130, bleedPx: 380, stitchLayer: 5, terrainStageOnly: true, tileSourceLabel: "Esri World Hillshade", tileTemplate: "https://services.arcgisonline.com/arcgis/rest/services/Elevation/World_Hillshade/MapServer/tile/{z}/{y}/{x}" };
+  if (role === "terrain-reference") return { role, label: "Terrain relief reference", quality: "terrain-map", targetZoom: 16, minZoom: 14, maxZoom: 17, maxTiles: 260, bleedMeters: 130, bleedPx: 380, stitchLayer: 5, terrainStageOnly: true };
   return { role: "course-backdrop", label: "Live map underlay", quality: "live-map-base", targetZoom: 17, minZoom: 16, maxZoom: 18, maxTiles: 260, bleedMeters: 120, bleedPx: 420, stitchLayer: 0 };
 }
 
@@ -46,6 +51,13 @@ export function mergeBounds(list) {
     north: Math.max(...values.map(b => Number(b.north))),
     east: Math.max(...values.map(b => Number(b.east)))
   };
+}
+/* Does `outer` already cover `inner`? Used to decide whether a capture would add any ground at
+   all, so a capture that reaches even slightly past is kept rather than rounded away. */
+export function boundsContain(outer, inner) {
+  if (!validBounds(outer) || !validBounds(inner)) return false;
+  return Number(outer.south) <= Number(inner.south) && Number(outer.north) >= Number(inner.north)
+    && Number(outer.west) <= Number(inner.west) && Number(outer.east) >= Number(inner.east);
 }
 export function padBounds(bounds, meters) {
   if (!validBounds(bounds)) return null;
@@ -217,6 +229,17 @@ function hashString(value) {
   return hash.toString(36);
 }
 
+/* Bounds of everything play-ready in a package. The imagery registry needs these BEFORE a plan
+   exists - which source may legally shoot this course decides whether there is a plan at all. */
+export function courseBoundsFor(pkg) {
+  const holeData = packageHoleData(pkg);
+  const all = Object.keys(holeData).map(Number).sort((a, b) => a - b).map(h => {
+    const anchors = holeAnchorPins(holeData[h]);
+    return boundsFromPoints([anchors.tee, anchors.green, ...anchors.route, ...anchors.greenShape].filter(Boolean));
+  }).filter(Boolean);
+  return mergeBounds(all);
+}
+
 export function planCourseCaptures(pkg, opts = {}) {
   const courseId = slug(pkg && (pkg.courseId || pkg.id));
   const courseName = String(pkg && (pkg.courseName || pkg.name) || courseId);
@@ -254,30 +277,123 @@ export function planCourseCaptures(pkg, opts = {}) {
   if (backdropBounds) {
     const backdrop = item("course-backdrop", backdropBounds, null, null);
     if (backdrop) plan.push(backdrop);
-    const terrain = item("terrain-reference", backdropBounds, null, null);
-    if (terrain) plan.push(terrain);
+    /* The relief capture fetches a ready-made hillshade RASTER, and no region has a licensed
+       one - shading is computed from the DEM instead, which is one fetch that also feeds the
+       offline plays-like maths. So this is planned only when a caller explicitly supplies a
+       terrain raster source, which today nothing does. It stays here rather than being deleted
+       because the capture slot itself survives the move to computed relief; only where the
+       pixels come from changes. Callers that resolve no sources at all (plan-shape tests) keep
+       the original behaviour. */
+    const wantsTerrain = !("terrainSource" in opts) || !!opts.terrainSource;
+    if (wantsTerrain) {
+      const terrain = item("terrain-reference", backdropBounds, null, null);
+      if (terrain) plan.push(terrain);
+    }
   }
   holeNumbers.forEach(holeNumber => {
     const data = holeData[holeNumber];
     const anchors = holeAnchorPins(data);
-    let greenBounds = boundsFromPoints([anchors.green, ...anchors.greenShape].filter(Boolean));
-    if (validBounds(greenBounds)) {
-      if (boundsSpanM(greenBounds).diag < 8) greenBounds = padBounds(greenBounds, 16);
-      const greenItem = item("green-surround", greenBounds, holeNumber, data);
-      if (greenItem) plan.push(greenItem);
-    }
+    const corridorItems = [];
     let corridorBounds = boundsFromPoints([anchors.tee, anchors.green, ...anchors.route, ...anchors.greenShape].filter(Boolean));
     if (validBounds(corridorBounds)) {
       if (boundsSpanM(corridorBounds).diag < 35) corridorBounds = padBounds(corridorBounds, 32);
       const corridorPolicy = capturePolicy("play-corridor");
       splitBoundsAlongRoute(corridorBounds, data, corridorPolicy).forEach(segment => {
         const corridorItem = item("play-corridor", segment.bounds, holeNumber, data, segment);
-        if (corridorItem) plan.push(corridorItem);
+        if (corridorItem) { plan.push(corridorItem); corridorItems.push(corridorItem); }
       });
     }
+    let greenBounds = boundsFromPoints([anchors.green, ...anchors.greenShape].filter(Boolean));
+    if (!validBounds(greenBounds)) return;
+    if (boundsSpanM(greenBounds).diag < 8) greenBounds = padBounds(greenBounds, 16);
+    const greenItem = item("green-surround", greenBounds, holeNumber, data);
+    if (!greenItem) return;
+    /* The green surround used to buy detail the corridor could not: z20 against the corridor's
+       z19. Now that every capture clamps to the zoom its frame renders at, the two sit at the
+       SAME zoom - so on a long hole the green surround is the identical ground at the identical
+       resolution, composited on top of itself, costing a fetch, decode, composite, encode and
+       upload per hole for pixels already present.
+
+       It is NOT redundant everywhere, and the difference is not about detail: the corridor is a
+       9/16 window along the play axis, so a SHORT hole gets a narrow one, while the green
+       surround is square. On Jacks Point's two shortest holes, dropping it took 47% and 30% off
+       the frame - lateral ground around the green, which is exactly where a player who has
+       missed is standing. So keep it only where it actually reaches past the corridor. */
+    if (corridorItems.length && boundsContain(mergeBounds(corridorItems.map(i => i.bounds)), greenItem.bounds)) return;
+    plan.push(greenItem);
+  });
+  /* Don't shoot sharper than the frame we render.
+
+     The export resamples every capture for a hole onto ONE mercator grid whose zoom is
+     driven by the hole's extent and the output cap - so detail above that grid is not
+     "extra quality", it is decoded, resampled and thrown away. Measured on Jacks Point,
+     18 of 18 holes were shot 2-4x sharper than the frame they landed in: 584 megapixels
+     composited to produce ~72MP of frames, with the biggest single capture at 37.9MP,
+     which is also what put the worker against its memory ceiling.
+
+     What the export merges is the capture IMAGE bounds - the lens-expanded, bleed-padded
+     rectangles - not the hole's metric bounds, and the lens expansion is large enough that
+     estimating from the metric bounds lands a whole zoom high. So when a source is available
+     this grids each capture once to find those bounds, then clamps. The second pass is stable
+     because bleedPx is now pinned to ground distance (see pixelRect), so re-gridding at a
+     lower zoom covers the same ground and cannot walk the frame zoom down again.
+
+     Without a source (plan-shape tests) it falls back to the metric bounds, which errs high -
+     shooting one zoom sharper than needed, never softer. */
+  /* Second look at the green surrounds, now that footprints can be computed. The check above
+     compares METRIC bounds, but a corridor is captured through the axis-aligned box around a
+     rotated 9/16 lens, which covers far more ground than its metric bounds suggest - so that
+     check is conservative and keeps greens the corridor genuinely swallows. With a source in
+     hand the real footprints settle it, and a green is dropped only when the corridor's actual
+     captured rectangle already contains the green's. */
+  if (opts.source) {
+    const footprint = (i) => { const g = captureGrid(i, { source: opts.source }); return g ? g.imageBounds : null; };
+    holeNumbers.forEach(holeNumber => {
+      const items = plan.filter(i => Number(i.holeNumber) === holeNumber && !i.terrainStageOnly);
+      const greens = items.filter(i => i.role === "green-surround");
+      const corridors = items.filter(i => i.role === "play-corridor");
+      if (!greens.length || !corridors.length) return;
+      const covered = mergeBounds(corridors.map(footprint).filter(Boolean));
+      greens.forEach(green => {
+        const bounds = footprint(green);
+        if (!bounds || !boundsContain(covered, bounds)) return;
+        const at = plan.indexOf(green);
+        if (at >= 0) plan.splice(at, 1);
+      });
+    });
+  }
+
+  const frameZoomByHole = {};
+  holeNumbers.forEach(holeNumber => {
+    const items = plan.filter(i => Number(i.holeNumber) === holeNumber && !i.terrainStageOnly);
+    let bounds = null;
+    if (opts.source) {
+      const grids = items.map(i => captureGrid(i, { source: opts.source })).filter(Boolean);
+      bounds = mergeBounds(grids.map(g => g.imageBounds));
+    }
+    if (!bounds) bounds = mergeBounds(items.map(i => i.bounds));
+    if (!bounds) return;
+    frameZoomByHole[holeNumber] = frameZoomFor(bounds, opts.maxOutputPx);
+  });
+  plan.forEach(item => {
+    const frameZoom = frameZoomByHole[item.holeNumber];
+    if (frameZoom) item.frameZoom = frameZoom;
   });
   const limit = Math.max(0, Math.round(Number(opts.limit) || 0));
   return limit ? plan.slice(0, limit) : plan;
+}
+
+/* The zoom renderHoleSurfaceMercator will pick for these bounds. Kept in step with the export
+   deliberately - if the two ever disagree, captures are either wasted or upscaled. */
+export const DEFAULT_MAX_OUTPUT_PX = 3072;
+export function frameZoomFor(bounds, maxOutputPx) {
+  if (!validBounds(bounds)) return 0;
+  const maxDim = Math.max(256, Number(maxOutputPx) || DEFAULT_MAX_OUTPUT_PX);
+  const nw = projectPoint(bounds.north, bounds.west, 19);
+  const se = projectPoint(bounds.south, bounds.east, 19);
+  const span19 = Math.max(Math.abs(se.x - nw.x), Math.abs(se.y - nw.y));
+  const f = Math.min(1, maxDim / Math.max(1, span19));
+  return Math.max(1, Math.floor(19 + Math.log2(f)));
 }
 
 /* ---------- spherical mercator + tile grids (replaces the Leaflet shutter) --------------- */
@@ -306,7 +422,14 @@ function pixelRect(item, zoom) {
     { lat: item.bounds.north, lng: item.bounds.west }, { lat: item.bounds.north, lng: item.bounds.east },
     pins.tee, pins.green, ...(pins.route || []), ...(pins.greenShape || [])
   ].filter(Boolean);
-  const bleed = Math.max(0, Math.round(Number(item.bleedPx) || 0));
+  /* bleedPx is authored against the policy's target zoom, so it has to be rescaled whenever we
+     shoot at a different one - otherwise a constant pixel bleed silently DOUBLES its ground
+     coverage every time the zoom steps down. That matters more than it sounds: the capture
+     bounds feed the frame's extent, the frame's extent picks the frame zoom, and the frame
+     zoom now picks the capture zoom. Left unscaled, stepping down once widens the capture,
+     which widens the frame, which steps the zoom down again. */
+  const refZoom = Math.max(1, Math.round(Number(item.targetZoom) || zoom));
+  const bleed = Math.max(0, Math.round((Number(item.bleedPx) || 0) * Math.pow(2, zoom - refZoom)));
   const projected = surface.map(p => projectPoint(p.lat, p.lng, zoom));
   let rect = {
     minX: Math.floor(Math.min(...projected.map(p => p.x)) - bleed),
@@ -373,19 +496,17 @@ function tileCountFor(rect) {
   return Math.max(0, maxTx - minTx + 1) * Math.max(0, maxTy - minTy + 1);
 }
 
-export function captureGrid(item, opts = {}) {
-  const template = String(item.tileTemplate || opts.imageryTemplate || DEFAULT_IMAGERY_TEMPLATE);
-  const minZoom = Math.max(1, Math.round(Number(item.minZoom) || 15));
-  let zoom = Math.max(minZoom, Math.min(22, Math.round(Number(item.targetZoom) || 18)));
-  const maxTiles = Math.max(16, Math.round(Number(item.maxTiles) || 320));
-  let rect = pixelRect(item, zoom);
-  while (zoom > minZoom && tileCountFor(rect) > maxTiles) {
-    zoom -= 1;
-    rect = pixelRect(item, zoom);
-  }
-  const origin = { x: rect.minX, y: rect.minY };
-  const width = Math.max(256, rect.maxX - rect.minX);
-  const height = Math.max(256, rect.maxY - rect.minY);
+/* Which half of a resolved source a capture reads from: relief comes off the elevation
+   endpoint, everything else off imagery. */
+function specForItem(item, source) {
+  if (!source) return null;
+  return item.role === "terrain-reference" ? (source.terrain || null) : (source.imagery || null);
+}
+
+/* Slippy tiles - the original path, unchanged apart from taking its template from the
+   resolved source instead of a module constant. */
+function xyzTiles(spec, rect, origin, zoom) {
+  const template = String(spec.urlTemplate || "");
   const tiles = [];
   const minTx = Math.floor(rect.minX / 256), maxTx = Math.floor((rect.maxX - 1) / 256);
   const minTy = Math.floor(rect.minY / 256), maxTy = Math.floor((rect.maxY - 1) / 256);
@@ -400,6 +521,64 @@ export function captureGrid(item, opts = {}) {
       });
     }
   }
+  return tiles;
+}
+
+/* ImageServer exportImage - one request per block rather than per 256px tile, which is the
+   difference between ~300 requests and ~4 for the same capture. Blocks are emitted in the
+   same {x, y, url} shape as tiles and land on the same canvas, so the compositor cannot tell
+   the two adapters apart. Each block is requested at exactly its own pixel size, so nothing
+   is resampled on the way in. */
+function exportBlocks(spec, rect, origin, zoom) {
+  const block = Math.max(256, Math.round(Number(spec.blockPx) || 2048));
+  const width = rect.maxX - rect.minX;
+  const height = rect.maxY - rect.minY;
+  const blocks = [];
+  for (let by = 0; by < height; by += block) {
+    for (let bx = 0; bx < width; bx += block) {
+      const w = Math.min(block, width - bx);
+      const h = Math.min(block, height - by);
+      if (w <= 0 || h <= 0) continue;
+      blocks.push({
+        z: zoom, x: bx, y: by,
+        url: exportImageUrl(spec, { left: origin.x + bx, top: origin.y + by, width: w, height: h }, zoom)
+      });
+    }
+  }
+  return blocks;
+}
+
+export function captureGrid(item, opts = {}) {
+  const source = opts.source || null;
+  const spec = specForItem(item, source);
+  /* No licensed endpoint for this role means no capture. Returning an empty grid rather than
+     throwing lets the planner drop one role (relief) without failing the course. */
+  if (!spec || !(spec.urlTemplate || spec.endpoint)) return null;
+  /* Resolution ceiling from the source, not from the policy. NAIP is 0.6m, so asking it for
+     z19 buys nothing but upscaled mush at the same cost; and a fixedZoom policy (green
+     surrounds sit at z20) has to be allowed to come DOWN to the ceiling, hence the floor
+     moving too. */
+  /* Two ceilings, both hard: what the SOURCE actually resolves (above it we upscale mush) and
+     what the FRAME renders (above it we decode pixels the compositor discards). */
+  const sourceCeiling = Math.max(1, Math.min(22, Math.round(Number(spec.maxUsefulZoom) || 22)));
+  const frameCeiling = Math.max(1, Math.round(Number(item.frameZoom) || 22));
+  const ceiling = Math.min(sourceCeiling, frameCeiling);
+  const minZoom = Math.min(ceiling, Math.max(1, Math.round(Number(item.minZoom) || 15)));
+  let zoom = Math.min(ceiling, Math.max(minZoom, Math.min(22, Math.round(Number(item.targetZoom) || 18))));
+  const maxTiles = Math.max(16, Math.round(Number(item.maxTiles) || 320));
+  let rect = pixelRect(item, zoom);
+  /* Budget is counted in 256px cells for both adapters so the step-down stays calibrated
+     against the same numbers it was tuned on. */
+  while (zoom > minZoom && tileCountFor(rect) > maxTiles) {
+    zoom -= 1;
+    rect = pixelRect(item, zoom);
+  }
+  const origin = { x: rect.minX, y: rect.minY };
+  const width = Math.max(256, rect.maxX - rect.minX);
+  const height = Math.max(256, rect.maxY - rect.minY);
+  const tiles = String(spec.adapter) === "arcgis-export"
+    ? exportBlocks(spec, rect, origin, zoom)
+    : xyzTiles(spec, rect, origin, zoom);
   const nw = unprojectPoint(origin.x, origin.y, zoom);
   const se = unprojectPoint(origin.x + width, origin.y + height, zoom);
   return {
@@ -410,6 +589,9 @@ export function captureGrid(item, opts = {}) {
     imageBounds: { north: nw.lat, west: nw.lng, south: se.lat, east: se.lng },
     lensCornersPx: rect.lensCornersPx || null,
     lensOrientation: rect.lensOrientation || item.lensOrientation || "",
+    sourceKey: source.key || "",
+    sourceLabel: source.label || "",
+    adapter: String(spec.adapter || "xyz"),
     tiles
   };
 }

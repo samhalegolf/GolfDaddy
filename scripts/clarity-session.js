@@ -78,13 +78,22 @@
     };
   }
 
+  /* The five identity fields. A change in any of these is what "the session
+     changed" means; everything else in the snapshot is presentation. */
+  var IDENTITY_FIELDS = ["accountId", "accountRole", "ownProfileId", "viewedProfileId", "isSignedIn"];
+
+  function changedFields(a, b) {
+    if (!a || !b) return IDENTITY_FIELDS.slice();
+    var out = [];
+    for (var i = 0; i < IDENTITY_FIELDS.length; i += 1) {
+      var key = IDENTITY_FIELDS[i];
+      if (a[key] !== b[key]) out.push(key);
+    }
+    return out;
+  }
+
   function sameSession(a, b) {
-    return !!a && !!b &&
-      a.accountId === b.accountId &&
-      a.accountRole === b.accountRole &&
-      a.ownProfileId === b.ownProfileId &&
-      a.viewedProfileId === b.viewedProfileId &&
-      a.isSignedIn === b.isSignedIn;
+    return !!a && !!b && changedFields(a, b).length === 0;
   }
 
   function applyToDom(session) {
@@ -98,12 +107,30 @@
 
   function sync(reason) {
     var next = snapshot(reason);
-    var changed = !sameSession(current, next);
+    var diff = changedFields(current, next);
+    var previous = current;
     current = next;
     applyToDom(current);
-    if (changed) {
+    if (diff.length) {
+      /* Which fields flipped, why, and from what - recorded before dispatch so
+         every listener (and the sync payload that ends up in Supabase) can see
+         it. Production showed bursts of session-changed every ~10s during play
+         with no way to tell WHAT changed; this is that answer. */
+      var change = {
+        fields: diff.slice(),
+        reason: reason || "sync",
+        from: {},
+        to: {},
+        at: Date.now()
+      };
+      for (var i = 0; i < diff.length; i += 1) {
+        change.from[diff[i]] = previous ? previous[diff[i]] : undefined;
+        change.to[diff[i]] = next[diff[i]];
+      }
+      safe(function () { window.__gdLastSessionChange = change; });
       safe(function () {
-        window.dispatchEvent(new CustomEvent("clarity:session-changed", { detail: current }));
+        var detail = Object.assign({}, current, { changedFields: diff.slice(), changeReason: change.reason });
+        window.dispatchEvent(new CustomEvent("clarity:session-changed", { detail: detail }));
       });
     }
     return current;

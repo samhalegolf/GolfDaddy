@@ -34,6 +34,12 @@ Consolidate into single owners:
 
 Status unknown, confirm with Sam before touching: `gd-arcade-mode` (+ `gd-arcade-course-entry-v1`), `gd-tournament-mode-v1`, `gd-windross-seed`.
 
+## App / studio split
+
+Since 2026-07-26 the tree builds two surfaces from one `index.html`: the phone app
+and the browser admin/tuning studio at `/studio/`. Carves in Phase B below now also
+declare which surface the new owner file belongs to. See `docs/APP_STUDIO_SPLIT.md`.
+
 ## Sequence
 
 - **Phase A — collapse the patch layers.** Fold each patch file into its owner (wand first, then the caddie patches into GPS runtime), deleting the file+tag each time. This shrinks the load order from ~82 to ~35 scripts without touching core.

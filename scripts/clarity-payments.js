@@ -47,13 +47,17 @@
     };
   }
 
-  function adminHeaders() {
-    var payload = accountPayload();
-    return Object.assign(requestHeaders(), {
-      "Content-Type": "application/json",
-      "X-Clarity-Account-Id": payload.accountId,
-      "X-Clarity-Account-Email": payload.email
-    });
+  /* The admin endpoint identifies the caller from the bearer token alone. It used
+     to read X-Clarity-Account-Id / X-Clarity-Account-Email instead, which meant
+     anyone who knew an admin's email could send it and be treated as that admin -
+     so those headers are gone rather than merely unused, to keep them from
+     looking like a supported way to identify yourself.
+
+     authedHeaders refreshes an expired token first: access tokens die roughly
+     hourly, and the previous sync helper sent whatever was in storage, so an
+     admin who had left the tab open got an unexplained failure. */
+  async function adminHeaders(forceRefresh) {
+    return await authedHeaders(forceRefresh);
   }
 
   function authToken() {
@@ -65,18 +69,18 @@
     }, "");
   }
 
-  function requestHeaders() {
-    var headers = { "Content-Type": "application/json" };
-    var token = authToken();
-    if (token) headers.Authorization = "Bearer " + token;
-    return headers;
-  }
+  /* Removed 2026-07-27: requestHeaders(), which attached whatever access token
+     happened to be in storage without refreshing it. Every payment call now goes
+     through authedHeaders below and retries once on a 401. A helper that sends a
+     possibly-expired token is not worth keeping around now that all four
+     endpoints reject one. */
 
-  // Like requestHeaders, but first refreshes the Supabase access token if it has
-  // expired (the referral endpoint is JWT-gated, and tokens die ~hourly). Falls
-  // back to whatever is stored if the auth module isn't loaded. When forceRefresh
-  // is true it always exchanges the refresh token first - used to retry once
-  // after a 401 in case the server rejected a token we thought was still valid.
+  // Builds the request headers, first refreshing the Supabase access token if it
+  // has expired (every payment endpoint is JWT-gated, and tokens die ~hourly).
+  // Falls back to whatever is stored if the auth module isn't loaded. When
+  // forceRefresh is true it always exchanges the refresh token first - used to
+  // retry once after a 401 in case the server rejected a token we thought was
+  // still valid.
   async function authedHeaders(forceRefresh) {
     var headers = { "Content-Type": "application/json" };
     var token = "";
@@ -203,21 +207,50 @@
 
   async function refresh(opts) {
     opts = opts || {};
-    var payload = accountPayload();
-    if (opts.sessionId) payload.checkoutSessionId = opts.sessionId;
-    var refreshKey = [payload.accountId, payload.email, payload.checkoutSessionId].join("|");
-    if (!payload.accountId && !payload.email && !payload.checkoutSessionId) return saveStatus({ active: false, entitlements: [], configured: null, message: "Sign in to check payment status" });
+    /* Local signed-in gate and the de-dupe key only. The account is deliberately
+       not sent: payment-entitlement reports the access of whoever the validated
+       token belongs to, and used to take the account from this body with no
+       authentication at all. */
+    var signedIn = accountPayload();
+    var checkoutSessionId = opts.sessionId || "";
+    var refreshKey = [signedIn.accountId, signedIn.email, checkoutSessionId].join("|");
+    /* A checkout session id alone is no longer enough to ask. It never actually
+       was - the server echoed it without querying it, so a signed-out return
+       from Stripe got a blank "free_access" answer - and it is now a 401. */
+    if (!signedIn.accountId && !signedIn.email) return saveStatus({ active: false, entitlements: [], configured: null, message: "Sign in to check payment status" });
     if (pending && refreshKey === lastRefreshKey) return status;
     pending = true; lastRefreshKey = refreshKey; render();
     try {
-      var response = await fetch(STATUS_ENDPOINT, { method: "POST", headers: requestHeaders(), body: JSON.stringify(payload) });
+      var requestBody = JSON.stringify(checkoutSessionId ? { checkoutSessionId: checkoutSessionId } : {});
+      var response = await fetch(STATUS_ENDPOINT, { method: "POST", headers: await authedHeaders(false), body: requestBody });
+      /* Paid features lock when this call fails, so a token that expired while
+         the tab sat open must not read as "no access". Retry once refreshed. */
+      if (response.status === 401) {
+        response = await fetch(STATUS_ENDPOINT, { method: "POST", headers: await authedHeaders(true), body: requestBody });
+      }
       var body = await response.json().catch(function () { return {}; });
       if (!response.ok) throw new Error(body.error || "Could not check payment status");
       pending = false; return saveStatus(body);
     } catch (error) {
       pending = false;
       var message = error && error.message ? error.message : "Could not check payment status";
-      saveStatus(Object.assign({}, status, { active: false, entitlements: [], connectionIssue: true, error: message, checkedAt: new Date().toISOString() }));
+      /* A failed request is not evidence of no entitlement, so the last
+         known-good access survives it. Only the success path above may downgrade,
+         because only the server knows.
+
+         This used to force active:false and empty the entitlements on any error,
+         which made a dropped request indistinguishable from a cancelled
+         membership. On a golf course that is not a rare edge: every signal blip
+         flipped access off and the next success flipped it back, and because
+         clarity-session derives accountRole from hasActiveAccess(), each flip
+         was an identity change. That fired clarity:session-changed, whose
+         listeners re-run install(), acceptStoredReferral(), refresh() and
+         loadReferralDashboard() here plus a full Supabase account sync in
+         clarity-cloud-sync - a cascade heavy enough to be visible mid-round, and
+         self-sustaining while the network stayed flaky.
+
+         The same reasoning already guards expired tokens a few lines above. */
+      saveStatus(Object.assign({}, status, { connectionIssue: true, error: message, checkedAt: new Date().toISOString() }));
       if (opts.silent || opts.auto) {
         safe(function () { console.warn("[ClarityPayments] payment status refresh skipped", message); });
       } else {
@@ -231,7 +264,12 @@
     var payload = accountPayload();
     if (!payload.accountId && !payload.email) return settings;
     try {
-      var response = await fetch(ADMIN_ENDPOINT, { method: "GET", headers: adminHeaders() });
+      var response = await fetch(ADMIN_ENDPOINT, { method: "GET", headers: await adminHeaders() });
+      /* One retry with a force-refreshed token: the server now rejects an expired
+         one, and a stale token is the likeliest cause of a 401 for a real admin. */
+      if (response.status === 401) {
+        response = await fetch(ADMIN_ENDPOINT, { method: "GET", headers: await adminHeaders(true) });
+      }
       var body = await response.json().catch(function () { return {}; });
       if (!response.ok) throw new Error(body.error || "Could not load payment settings");
       return saveSettings(body);
@@ -244,7 +282,11 @@
   async function adminAction(action, payload) {
     adminPending = true; render();
     try {
-      var response = await fetch(ADMIN_ENDPOINT, { method: "POST", headers: adminHeaders(), body: JSON.stringify(Object.assign({ action: action }, payload || {})) });
+      var requestBody = JSON.stringify(Object.assign({ action: action }, payload || {}));
+      var response = await fetch(ADMIN_ENDPOINT, { method: "POST", headers: await adminHeaders(), body: requestBody });
+      if (response.status === 401) {
+        response = await fetch(ADMIN_ENDPOINT, { method: "POST", headers: await adminHeaders(true), body: requestBody });
+      }
       var body = await response.json().catch(function () { return {}; });
       if (!response.ok) throw new Error(body.error || "Payment setting failed");
       adminPending = false;
@@ -258,6 +300,14 @@
     }
   }
 
+  /* `payload` carries the ARGUMENTS of the action and never the caller. Since
+     2026-07-27 functions/referrals.js resolves the acting member solely from the
+     validated Supabase access token; account id and email in the body are
+     ignored, and sending them anyway makes a deleted authentication path look
+     supported. It also actively caused a bug: accountPayload() puts the user's
+     own address under the key `email`, which createReferralInvite read as the
+     invitee address whenever the friend-email field was left blank, so every
+     untargeted invite came back addressed to the person who sent it. */
   async function referralAction(action, payload, opts) {
     opts = opts || {};
     referralPending = true; render();
@@ -287,10 +337,14 @@
 
   async function loadReferralDashboard(opts) {
     opts = opts || {};
-    var payload = accountPayload();
-    if (!payload.accountId && !payload.email) return saveReferralState({ dashboard: null, shareUrl: referralState.shareUrl || "", error: "", lastChecked: "" });
+    /* A local "is anyone signed in" check, so a signed-out app does not fire a
+       request that can only 401. It is not identity: the dashboard returned is
+       whoever the access token belongs to, and the account is deliberately not
+       sent - see referralAction. */
+    var signedIn = accountPayload();
+    if (!signedIn.accountId && !signedIn.email) return saveReferralState({ dashboard: null, shareUrl: referralState.shareUrl || "", error: "", lastChecked: "" });
     try {
-      var body = await referralAction("dashboard", payload, { silent: true });
+      var body = await referralAction("dashboard", {}, { silent: true });
       return body;
     } catch (_error) {
       if (!opts.silent) safe(function () { return window.toast && window.toast(referralState.error || "Could not load referrals"); });
@@ -298,10 +352,17 @@
     }
   }
 
+  /* Sends only the invite itself - who it is for, not who is sending it. This
+     used to merge accountPayload() in, which put the inviter's own email under
+     the key `email`; the server read that as the invitee address whenever the
+     friend-email field was left blank, so untargeted invites came back
+     addressed to the person who created them. The caller's identity is not
+     needed here at all: since 2026-07-27 functions/referrals.js takes it solely
+     from the validated Supabase token and ignores payload identity. */
   async function createReferralInvite(opts) {
     opts = opts || {};
     try {
-      var body = await referralAction("createInvite", Object.assign({}, accountPayload(), opts.payload || {}), opts);
+      var body = await referralAction("createInvite", Object.assign({}, opts.payload || {}), opts);
       if (body && body.shareUrl) {
         saveReferralState(Object.assign({}, referralState, { shareUrl: body.shareUrl, error: "" }));
         if (opts.copy) await copyText(body.shareUrl);
@@ -341,7 +402,7 @@
     var token = safe(function () { return localStorage.getItem(REFERRAL_TOKEN_KEY) || ""; }, "");
     if (!token || !account()) return false;
     try {
-      var body = await referralAction("accept", Object.assign({}, accountPayload(), { referralToken: token }), { silent: !!opts.silent });
+      var body = await referralAction("accept", { referralToken: token }, { silent: !!opts.silent });
       safe(function () { localStorage.removeItem(REFERRAL_TOKEN_KEY); });
       await refresh({ silent: true });
       await loadReferralDashboard({ silent: true });
@@ -412,15 +473,29 @@
       safe(function () { return window.toast && window.toast("Purchases are unavailable right now"); });
       return false;
     }
-    var payload = accountPayload();
-    if (!payload.accountId && !payload.email) {
+    /* Local "is anyone signed in" check only, so a signed-out tap opens the
+       profile gate instead of firing a request that can only 401. The account is
+       deliberately not sent - create-checkout-session resolves the buyer with
+       resolveAccount(requireAuth: true), which takes the validated token and
+       never reads payload identity. */
+    var signedIn = accountPayload();
+    if (!signedIn.accountId && !signedIn.email) {
       safe(function () { return window.toast && window.toast("Sign in before buying access"); });
       safe(function () { if (window.gdOpenProfileV67) window.gdOpenProfileV67(); });
       return false;
     }
     pending = true; render();
     try {
-      var response = await fetch(CHECKOUT_ENDPOINT, { method: "POST", headers: requestHeaders(), body: JSON.stringify(Object.assign({}, payload, { productKey: productKey, passType: productKey })) });
+      var requestBody = JSON.stringify({ productKey: productKey, passType: productKey });
+      var response = await fetch(CHECKOUT_ENDPOINT, { method: "POST", headers: await authedHeaders(false), body: requestBody });
+      /* Access tokens die roughly hourly and this call used to send whatever was
+         in storage, so a member who had left the tab open got "Sign in before
+         buying access" while looking at a signed-in screen. Retrying once with a
+         force-refreshed token is safe: a 401 comes from the identity check,
+         which runs before any Stripe call, so no checkout session exists yet. */
+      if (response.status === 401) {
+        response = await fetch(CHECKOUT_ENDPOINT, { method: "POST", headers: await authedHeaders(true), body: requestBody });
+      }
       var body = await response.json().catch(function () { return {}; });
       if (body && body.existingMembership) {
         pending = false; render();
@@ -446,15 +521,23 @@
       safe(function () { return window.toast && window.toast("Your membership renews outside this app"); });
       return false;
     }
-    var payload = accountPayload();
-    if (!payload.accountId && !payload.email) {
+    /* Local signed-in check only; see buy(). create-billing-portal-session reads
+       nothing from the body at all - the account comes from the token, and the
+       Stripe customer from the account - so the request carries no payload. */
+    var signedIn = accountPayload();
+    if (!signedIn.accountId && !signedIn.email) {
       safe(function () { return window.toast && window.toast("Sign in before managing membership"); });
       safe(function () { if (window.gdOpenProfileV67) window.gdOpenProfileV67(); });
       return false;
     }
     pending = true; render();
     try {
-      var response = await fetch(PORTAL_ENDPOINT, { method: "POST", headers: requestHeaders(), body: JSON.stringify(payload) });
+      var requestBody = JSON.stringify({});
+      var response = await fetch(PORTAL_ENDPOINT, { method: "POST", headers: await authedHeaders(false), body: requestBody });
+      // Same stale-token retry as buy(); nothing has been created at this point.
+      if (response.status === 401) {
+        response = await fetch(PORTAL_ENDPOINT, { method: "POST", headers: await authedHeaders(true), body: requestBody });
+      }
       var body = await response.json().catch(function () { return {}; });
       if (!response.ok || !body.url) throw new Error(body.error || "Could not open membership management");
       window.location.assign(body.url);
@@ -524,9 +607,34 @@
       renderProductCards(),
       renderReferralSection(),
       '<div class="clarityPaymentActions"><button class="secondary" type="button" onclick="ClarityPayments.refresh()">Refresh Status</button></div>',
-      '<div class="clarityPaymentNote">Card details are handled by Stripe Checkout. Clarity unlocks access only after the Stripe webhook creates a Supabase entitlement.</div>',
+      renderBillingNote(),
+      renderLegalLinks(),
       isAdmin(activeAccount) ? renderAdminSettings() : ""
     ].join("");
+  }
+
+  /* Who takes the money, said accurately for the surface the user is on.
+     Naming Stripe inside the iOS or Android app is an in-app purchase red flag
+     even though buy() already blocks the web checkout path there - a reviewer
+     reads the screen, not the call graph, and "card details are handled by
+     Stripe Checkout" on a store build reads as payment taken outside the store.
+     Native builds therefore describe the store that actually charges them. */
+  function renderBillingNote() {
+    if (storeBillingBlocksWebCheckout()) {
+      var store = window.GDNative && window.GDNative.platform === "android"
+        ? "Google Play" : "the App Store";
+      return '<div class="clarityPaymentNote">Purchases are handled by ' + store
+        + '. Access unlocks once the purchase is confirmed.</div>';
+    }
+    return '<div class="clarityPaymentNote">Card details are handled by Stripe Checkout. Clarity unlocks access only after the Stripe webhook creates a Supabase entitlement.</div>';
+  }
+
+  /* Apple 3.1.2 wants both documents reachable from the purchase flow itself. */
+  function renderLegalLinks() {
+    if (window.ClarityLegalLinks && typeof window.ClarityLegalLinks.markup === "function") {
+      return window.ClarityLegalLinks.markup();
+    }
+    return '<div class="clarityPaymentLegal"><a href="terms.html">Terms of Service</a> · <a href="privacy.html">Privacy Policy</a></div>';
   }
 
   function renderExpiryBanner() {
@@ -944,7 +1052,7 @@
     },
     revokeReferralInvite: function (id) {
       if (!id) return false;
-      referralAction("revokeInvite", Object.assign({}, accountPayload(), { referralId: id, reason: "revoked_by_member" }))
+      referralAction("revokeInvite", { referralId: id, reason: "revoked_by_member" })
         .then(function () {
           safe(function () { return window.toast && window.toast("Referral link revoked"); });
           loadReferralDashboard({ silent: true });
@@ -1055,5 +1163,22 @@
   };
 
   document.addEventListener("DOMContentLoaded", function () { setTimeout(function () { install(); handleReturn(); refresh({ silent: true, auto: true }); loadReferralDashboard({ silent: true }); }, 150); });
-  window.addEventListener("clarity:session-changed", function () { setTimeout(function () { install(); acceptStoredReferral({ silent: true }); refresh({ silent: true, auto: true }); loadReferralDashboard({ silent: true }); }, 50); });
+  window.addEventListener("clarity:session-changed", function (event) {
+    /* Only re-run the full payment pipeline when WHO is signed in changed.
+       accountRole is partly derived from this module's own status (player ->
+       subscribedPlayer), so refreshing on a role-only change is the feedback
+       edge of a loop: refresh -> applyStatus -> ClaritySession.sync ->
+       session-changed -> refresh. And viewedProfileId is a coach flipping
+       between players, which does not alter whose entitlement this is.
+       Events without changedFields (older dispatchers) keep the old behaviour. */
+    var fields = event && event.detail && Array.isArray(event.detail.changedFields) ? event.detail.changedFields : null;
+    var identityChanged = !fields || fields.indexOf("accountId") !== -1 || fields.indexOf("isSignedIn") !== -1;
+    setTimeout(function () {
+      install();
+      if (!identityChanged) return;
+      acceptStoredReferral({ silent: true });
+      refresh({ silent: true, auto: true });
+      loadReferralDashboard({ silent: true });
+    }, 50);
+  });
 })();

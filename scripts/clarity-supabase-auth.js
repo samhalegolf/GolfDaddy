@@ -128,7 +128,23 @@
     if (!existing) throw new Error("Sign in first");
     if (!existing.supabaseUserId) throw new Error("This account is not linked to Supabase Auth yet. Sign out and sign back in with Supabase Auth.");
     var nextPassword = String(data && data.password || "");
-    var body = await post("/api/auth-update-account", { supabaseUserId: existing.supabaseUserId, name: data && data.name, email: data && data.email, password: nextPassword, role: data && data.role || existing.role });
+    /* The access token is the proof of identity - the endpoint resolves the user
+       from it and refuses a request without one. Sending the account's own
+       supabaseUserId alongside is a consistency check, not the credential: the
+       server compares the two and rejects a mismatch.
+
+       `role` is passed through but carries no authority: app_accounts.role is
+       what grants admin, so the server honours a role only when the account is
+       already an admin and otherwise keeps the stored one. The account form only
+       shows the selector to admins, which is a UI nicety - the check that counts
+       is the server's. */
+    var token = await freshAccessToken();
+    if (!token) {
+      var expired = new Error("Your session has expired. Sign in again to update your account.");
+      expired.code = "session_expired";
+      throw expired;
+    }
+    var body = await post("/api/auth-update-account", { accessToken: token, supabaseUserId: existing.supabaseUserId, name: data && data.name, email: data && data.email, password: nextPassword, role: data && data.role || existing.role });
     var updated = commit(body, { activate: true });
     if (body && body.passwordUpdated && nextPassword) {
       clearStaleAuthState();
@@ -203,11 +219,75 @@
     return requested ? { accessToken: accessToken, refreshToken: refreshToken, type: type, raw: hash.get("error") || params.get("error") || "" } : null;
   }
 
-  async function publicAuthConfig() {
-    var response = await fetch("/api/auth-public-config", { cache: "no-store" });
+  /* This config is public, per-deploy and effectively static - a Supabase URL, an
+     anon key and a basemaps key. It used to be fetched fresh on every call, with
+     cache:"no-store", which put a network round-trip in front of every token
+     refresh. On a golf course that turned patchy signal into two visible faults:
+
+       - doRefreshSession() below gives up when this throws and returns no token,
+         so /api/payment-entitlement answered 401, clarity-payments treated that
+         as "no access", and because clarity-session derives accountRole from
+         payment state the resulting flip fired clarity:session-changed and its
+         whole listener cascade;
+       - gdLinzBasemapsKey never got published, so gd-app-core rejects every
+         imagery source that requiresKey==="linzKey" and the map silently falls
+         back to street tiles.
+
+     So it is cached, in memory and in localStorage, and a cached copy is served
+     without waiting for the network. A refresh still runs in the background so a
+     rotated key propagates within the session; it just no longer sits on the
+     critical path. Only a complete response is ever cached - a partial one would
+     poison the cache with something that can never satisfy callers. */
+  var AUTH_CONFIG_KEY = "clarity:auth-config:v1";
+  var authConfigMemo = null;
+  var authConfigRefreshing = false;
+
+  function usableAuthConfig(body) {
+    return !!(body && body.supabaseUrl && body.supabaseAnonKey);
+  }
+
+  /* The live map needs its imagery key before anyone signs in, and this is the only public
+     config fetch on the boot path. Published rather than returned so the map layer does not
+     have to become auth-aware to read one string. */
+  function publishAuthConfigExtras(body) {
+    safe(function () { if (body && body.linzBasemapsKey) window.gdLinzBasemapsKey = String(body.linzBasemapsKey); });
+  }
+
+  async function fetchAuthConfig() {
+    var response = await fetch("/api/auth-public-config");
     var body = await response.json().catch(function () { return {}; });
-    if (!response.ok || !body.supabaseUrl || !body.supabaseAnonKey) throw new Error("Supabase public auth config is missing");
+    if (!response.ok || !usableAuthConfig(body)) throw new Error("Supabase public auth config is missing");
+    authConfigMemo = body;
+    saveJson(AUTH_CONFIG_KEY, body);
+    publishAuthConfigExtras(body);
     return body;
+  }
+
+  async function publicAuthConfig() {
+    if (!usableAuthConfig(authConfigMemo)) {
+      var cached = loadJson(AUTH_CONFIG_KEY, null);
+      if (usableAuthConfig(cached)) authConfigMemo = cached;
+    }
+
+    if (usableAuthConfig(authConfigMemo)) {
+      publishAuthConfigExtras(authConfigMemo);
+      /* Serve the cache, then quietly bring it up to date. Failures here are
+         ignored on purpose: the caller already has a usable config, and this is
+         the exact network call whose flakiness the cache exists to absorb. */
+      if (!authConfigRefreshing) {
+        authConfigRefreshing = true;
+        safe(function () {
+          fetchAuthConfig()
+            .catch(function () {})
+            .then(function () { authConfigRefreshing = false; });
+        });
+      }
+      return authConfigMemo;
+    }
+
+    /* Nothing cached - first run, or a wiped device. The network is the only
+       source, so this one still has to wait, and still throws if it cannot. */
+    return await fetchAuthConfig();
   }
 
   async function supabaseUser(config, accessToken) {

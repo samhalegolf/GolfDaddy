@@ -1123,6 +1123,11 @@
     if(!batches.length)return "";
     return `<div class="gdPracticeEmailRecent">${batches.slice(0,5).map(batch=>{
       const id=batch.import_batch_id||"";
+      if(batch.source_type==="email_photo"){
+        const photoCount=Array.isArray(batch.photos)?batch.photos.length:0;
+        const label=`${batch.source_name||"Practice email photo"} · ${photoCount} photo${photoCount===1?"":"s"}`;
+        return `<button type="button" onclick="return gdPracticeLoadEmailPhotoBatch(${gdEscapeHTML(JSON.stringify(id))})"><span>${gdEscapeHTML(label)}</span><b>Scan</b></button>`;
+      }
       const label=gdPracticeEmailBatchLabel(batch);
       const rows=Number(batch.row_count)||0;
       return `<button type="button" onclick="return gdPracticeLoadEmailBatch(${gdEscapeHTML(JSON.stringify(id))})"><span>${gdEscapeHTML(label)}</span><b>${rows} row${rows===1?"":"s"}</b></button>`;
@@ -1231,6 +1236,30 @@
     gdOpenNativePracticeDrawer();
     gdRenderNativePracticeImportLane();
     gdLmToast(`Loaded ${rows.length} email practice row${rows.length===1?"":"s"}`);
+    return false;
+  }
+  async function gdPracticeLoadEmailPhotoBatch(importBatchId){
+    const batches=Array.isArray(gdPracticeEmailLaneState?.batches)?gdPracticeEmailLaneState.batches:[];
+    const batch=batches.find(item=>String(item?.import_batch_id||"")===String(importBatchId||""));
+    const photo=batch&&Array.isArray(batch.photos)?batch.photos[0]:null;
+    if(!batch||!photo||!photo.url){
+      gdNativePracticeFeedbackPatch({status:"failed",lastAction:"Email photo missing",errors:["Staged email photo was not found or the link expired"],nextStep:"Refresh the email receiver and try again."});
+      gdLmToast("Email photo not available - refresh and try again");
+      return false;
+    }
+    gdPracticeFeedback("Loading photo from email...");
+    try{
+      const response=await fetch(photo.url,{cache:"no-store"});
+      if(!response.ok)throw new Error(`HTTP ${response.status}`);
+      const blob=await response.blob();
+      const file=new File([blob],photo.filename||"practice-email-photo.jpg",{type:photo.contentType||blob.type||"image/jpeg"});
+      gdPracticeEmailLaneOpen=false;
+      gdRenderPracticeEmailLane();
+      await gdHandleLaunchMonitorPhoto(file);
+    }catch(e){
+      gdNativePracticeFeedbackPatch({status:"failed",lastAction:"Email photo load failed",errors:[e&&e.message?e.message:"Could not load photo"],nextStep:"Refresh the email receiver and try again."});
+      gdPracticeFeedback(`Could not load the emailed photo: ${e&&e.message?e.message:e}`,"error");
+    }
     return false;
   }
   function gdPracticeEmailImportPending(event){
@@ -1795,7 +1824,10 @@
         raw:{headers:parsed.headers,warnings:parsed.warnings}
       });
       gdPracticeDebugCheckpoint("field_mapping","success",{outputSummary:"Native field aliases applied",counts:{headers:(parsed.headers||[]).length}});
-      const batch=api.createPracticeImportBatch(parsed.rows,{sourceType:parsed.sourceType||"csv",sourceName:"Practice Data paste",rawText:text});
+      // Forward the provenance the parse established - unit system, session
+      // date, provider - so the batch records what the numbers actually mean
+      // rather than being staged as bare figures.
+      const batch=api.createPracticeImportBatch(parsed.rows,{sourceType:parsed.sourceType||"csv",sourceName:"Practice Data paste",rawText:text,unitSystem:parsed.unitSystem,unitSource:parsed.unitSource,sessionDate:parsed.sessionDate,sessionDateSource:parsed.sessionDateSource,provider:parsed.provider});
       const valid=batch.rows.filter(row=>!row.errors?.length);
       const invalid=batch.rows.filter(row=>row.errors?.length);
       gdPracticeDebugCheckpoint("rows_parsed","success",{outputSummary:`${batch.rows.length} rows normalized`,counts:{rowsParsed:batch.rows.length}});
@@ -1856,6 +1888,67 @@
     }
     return false;
   }
+  // Bridges saved native practice rows into the launch-monitor store.
+  //
+  // Why this has to exist: saveNativePracticeShots writes to the NATIVE store,
+  // but the practice graph, the cluster analysis and the Practice Bubble all read
+  // the LAUNCH-MONITOR store, and nothing else connects the two. Without this an
+  // emailed or pasted batch is stored, listed in the library, reported as saved -
+  // and never reaches anything the player actually sees. The save message's
+  // "ready for the Practice Shot Data Gate" handoff was designed but never wired.
+  //
+  // Values are passed through UNCONVERTED. Neither store does any unit handling,
+  // so inventing a conversion here would be guessing at the source's units.
+  //
+  // The same importBatchId/sessionId are reused on purpose, so one delete clears
+  // both stores (gdPracticeDeleteImports calls both APIs with the same ids).
+  function gdBridgeNativePracticeToLaunchMonitor(preview,api){
+    const lm=window.GolfDaddyLaunchMonitorData;
+    if(!lm||typeof lm.importCapture!=="function"||!preview)return null;
+    const importBatchId=String(preview.batch?.importBatchId||"").trim();
+    const sessionId=String(preview.session?.sessionId||"").trim();
+    const stored=typeof api?.loadNativePracticeShots==="function"
+      ? api.loadNativePracticeShots(sessionId?{sessionId}:{}).filter(row=>!importBatchId||row.importBatchId===importBatchId)
+      : (preview.rows||[]).filter(row=>!row.errors?.length);
+    if(!stored.length)return null;
+    // A MISSING metric must not become 0. Number(null) is 0 and Number.isFinite(0)
+    // is true, so a bare finite check silently turns "we don't know" into a hard
+    // zero - a fabricated dead-straight face-to-path that passes the delivery gate
+    // and suppresses normalizeShot's designed faceAngle-minus-clubPath fallback.
+    const metric=(candidateMetric,rawLabel,value)=>{
+      if(value===null||value===undefined||value==="")return [];
+      const number=Number(value);
+      return Number.isFinite(number)?[{candidateMetric,rawLabel,value:number,confidence:1}]:[];
+    };
+    const clubGroups=stored.map(row=>({
+      candidateClub:row.club,
+      originClubLabel:row.club,
+      timestamp:row.createdAt||"",
+      metrics:[].concat(
+        metric("carryDistance","Carry",row.carryDistance),
+        metric("totalDistance","Total",row.totalDistance),
+        metric("offline","Offline",row.offlineDistance),
+        metric("faceAngle","Face Angle",row.faceAngle),
+        metric("clubPath","Club Path",row.pathAngle),
+        metric("faceToPath","Face To Path",row.faceToPath),
+        metric("startDirection","Start Direction",row.startDirection),
+        metric("spinAxis","Spin Axis",row.spinAxis),
+        metric("totalSpin","Total Spin",row.totalSpin),
+        metric("launch","Launch",row.launchAngle),
+        metric("ballSpeed","Ball Speed",row.ballSpeed),
+        metric("clubSpeed","Club Speed",row.clubSpeed)
+      )
+    }));
+    const sourceType=String(preview.batch?.sourceType||"").toLowerCase();
+    return lm.importCapture({
+      importBatchId,
+      sessionId,
+      label:preview.batch?.sourceName||"Practice import",
+      inputType:sourceType.includes("email")?"email-csv":"native-csv",
+      clubGroups,
+      rawTextBlocks:[]
+    });
+  }
   function gdSaveNativePracticeImport(){
     const api=gdNativePracticeApi();
     if(!api||typeof api.saveNativePracticeShots!=="function"){
@@ -1913,6 +2006,13 @@
       if(gate){
         gdPracticeDebugCheckpoint("gate_handoff","success",{outputSummary:`Gate-ready accepted ${gate.counts?.gateReady||0}`,counts:gate.counts||{},raw:gate});
       }
+      // Past the gate: put the saved rows where the practice engine can see them.
+      const bridged=safe(()=>gdBridgeNativePracticeToLaunchMonitor(gdNativePracticeImportPreview,api),null);
+      const bridgedCount=Array.isArray(bridged?.shots)?bridged.shots.length:0;
+      gdPracticeDebugCheckpoint("practice_engine_handoff",bridgedCount?"success":"warning",{
+        outputSummary:bridgedCount?`${bridgedCount} row${bridgedCount===1?"":"s"} handed to the practice engine`:"Nothing reached the practice engine",
+        counts:{bridged:bridgedCount}
+      });
       gdPracticeDebugFinish("success",{dataSaved:(Number(result?.savedCount)||0)>0,errorMessage:""});
       gdNativePracticeFeedbackPatch({
         status:"saved",
@@ -1923,10 +2023,13 @@
         storageKey:api.storageKey||"gd_native_practice_shot_data_v1",
         warnings:Number(result?.rejectedCount)?[`${Number(result.rejectedCount)} invalid row${Number(result.rejectedCount)===1?"":"s"} not saved`]:[],
         errors:[],
-        nextStep:"Saved native rows are ready for the Practice Shot Data Gate. No Practice Bubble was generated."
+        nextStep:bridgedCount
+          ?"Saved rows are in practice data and visible to the graph. No Practice Bubble was generated - use Generate Bubble when ready."
+          :"Saved native rows are stored, but nothing reached the practice engine. Check the practice engine handoff."
       });
       gdNativePracticeImportPreview=null;
       gdRenderNativePracticeImportLane();
+      safe(()=>renderPracticeData(true));
       gdLmToast(`Saved ${Number(result?.savedCount)||0} native practice row${Number(result?.savedCount)===1?"":"s"}`);
     }catch(e){
       console.warn("[GolfDaddy] native practice save failed",e);
@@ -1939,6 +2042,20 @@
       gdSetPracticePhotoProcessing(false,{skipJob:true});
       gdPracticeReleaseProcessingControls("native-save-finally");
     }
+    return false;
+  }
+  // Commits the staged (adopted) bubble into My Bubble. This is the point of no
+  // return in the flow - after it, Undo is gone and the only way back is adopting
+  // something else - so it refuses politely rather than silently doing nothing
+  // when there is nothing staged.
+  function gdPracticeSaveBubbleFromAction(){
+    const p=safe(()=>ensureProfile(),null);
+    const pending=p?.practiceBubblePendingSource;
+    if(!pending||!pending.active||!Number.isFinite(Number(pending.offsetDeg))){
+      gdLmToast("Adopt a bubble before saving");
+      return false;
+    }
+    gdBubbleOffsetSave();
     return false;
   }
   function gdPracticeGenerateBubble(){
@@ -1970,17 +2087,51 @@
       gdLmToast("Practice Bubble not ready");
       return false;
     }
-    if(!ctx.visible){
-      gdLmToast("Generate Practice Bubble first");
-      return false;
-    }
-    if(gdPracticePlayingBubbleIsAdopted(safe(()=>ensureProfile(),null))){
+    // No ctx.visible check: that required the overlay to be switched on, which was
+    // the old Generate button's job. With Generate gone this guard refused every
+    // adopt while the dock button sat enabled - a dead end with a misleading toast.
+    if(gdPracticeCurrentBubbleWasAdopted(safe(()=>ensureProfile(),null),analysis)){
       gdLmToast("Practice Bubble already adopted");
       return false;
     }
-    gdPracticeBagSuggestionOpen=false;
     gdPracticeBagAdaptOpen=false;
+    // ADOPT TAKES DIRECTION ONLY. Distance is a separate, explicit decision, so the
+    // bag opens straight afterwards with the suggestions to review rather than the
+    // player having to know to go looking for them.
+    const hasDistanceSuggestions=safe(()=>gdPracticePrefillRows(analysis).length>0,false);
+    gdPracticeBagSuggestionOpen=!!hasDistanceSuggestions;
     gdPracticeAdoptBubbleAsPlayingBubble();
+    gdLmToast(hasDistanceSuggestions
+      ?"Direction adopted - review distance suggestions"
+      :"Direction adopted");
+    safe(()=>gdPracticeRefreshProjectionSurfaces());
+    return false;
+  }
+  // Undo the staging step from gdPracticeAdoptBubbleAsPlayingBubble - clears
+  // the pending preview (offset+shape only ever gets this far unless the
+  // separate Distance Suggestion flow also ran) without touching a bubble
+  // that has already been fully saved via gdBubbleOffsetSave.
+  function gdPracticeUnadoptBubbleFromAction(){
+    const p=safe(()=>ensureProfile(),null);
+    if(!p||!gdPracticePendingBubbleIsActive(p)){
+      gdLmToast("Nothing pending to undo");
+      return false;
+    }
+    const pendingMode=String(p.practiceBubblePendingSource?.distanceMode||"");
+    delete p.practiceBubblePendingSource;
+    delete p.practiceBubblePendingAt;
+    if(pendingMode!=="manual-preview"){
+      try{localStorage.removeItem(GD_PRACTICE_BAG_DRAFT_KEY);}catch(e){}
+    }
+    p.updatedAt=new Date().toISOString();
+    savePlayerProfiles();
+    syncCoreProfileFromActive();
+    gdPracticeBubbleAdoptionMotion=null;
+    gdShotBubbleSafe(()=>typeof gdRenderBubbleOffsetHub==="function"&&gdRenderBubbleOffsetHub());
+    renderPracticeData(true);
+    gdShotBubbleSafe(()=>typeof renderDataHubStatus==="function"&&renderDataHubStatus());
+    gdShotBubbleSafe(()=>typeof renderCompareData==="function"&&renderCompareData());
+    gdLmToast("Bubble un-adopted");
     return false;
   }
   function gdPracticeProjectorSummary(analysis,ctx){
@@ -2294,7 +2445,7 @@
 	    const signature=gdPracticeBagSuggestionSignature(estimate,prefillRows,hasBag);
 	    const notify=!gdPracticeBagSuggestionSeen(signature);
 	    if(!gdPracticeBagSuggestionOpen){
-	      return `<button type="button" class="gdPracticeBagSuggestionIcon ${notify?"unseen":""} ${hasBag?"hasBag":"noBag"}" aria-label="Open bag distance suggestions" onclick="return gdPracticeToggleBagSuggestions(true)"><span class="gdPracticeBagSuggestionIconFrame"><img src="assets/home/bag.png" alt=""></span></button>`;
+	      return `<button type="button" class="gdPracticeBagSuggestionIcon ${notify?"unseen":""} ${hasBag?"hasBag":"noBag"}" aria-label="Open bag distance suggestions" onclick="return gdPracticeToggleBagSuggestions(true)"><span class="gdPracticeBagSuggestionIconFrame"><img src="assets/home/bag.png?v=ae58e8eb" alt=""></span></button>`;
 	    }
     const body=previewRows.map(row=>{
       const currentValue=row.currentCarry==null?"":String(Math.round(Number(row.currentCarry)||0));
@@ -2311,7 +2462,7 @@
         ? `<button type="button" onclick="return gdPracticeApplyBagSuggestions('suggested')">Adopt</button><button type="button" onclick="return gdPracticeToggleBagAdapt(true)">Adapt</button><button type="button" onclick="return gdPracticeApplyBagSuggestions('keep')">Not now</button>`
         : `<button type="button" onclick="return gdPracticeApplyBagSuggestions('suggested')">Adopt</button><button type="button" onclick="return gdPracticeApplyBagSuggestions('keep')">Not now</button>`);
 	    const linkCopy=link?`<div class="gdPracticeDistanceLink"><span>Distance link</span><strong>${gdEscapeHTML(link.club)} / ${Math.round(Number(link.trueDistanceM)||0)}m</strong></div>`:"";
-	    return `<div class="gdPracticeBagSuggestionPanel ${hasBag?"hasBag":"noBag"} ${gdPracticeBagAdaptOpen?"adapt":""}"><div class="gdPracticeBagSuggestionHead"><div class="gdPracticeBagSuggestionTitle"><img src="assets/home/bag.png" alt=""><span>Bag</span></div><button type="button" aria-label="Close" onclick="return gdPracticeToggleBagSuggestions(false)">×</button></div>${linkCopy}${linkChoices}<div class="gdPracticeBagSuggestionGrid"><span>Club</span><span>${gdPracticeBagAdaptOpen?"Edit current":hasBag?"Current":"Bag"}</span><span>Suggested</span><span>Diff</span>${body}</div><div class="gdPracticeBagSuggestionActions">${actions}</div></div>`;
+	    return `<div class="gdPracticeBagSuggestionPanel ${hasBag?"hasBag":"noBag"} ${gdPracticeBagAdaptOpen?"adapt":""}"><div class="gdPracticeBagSuggestionHead"><div class="gdPracticeBagSuggestionTitle"><img src="assets/home/bag.png?v=ae58e8eb" alt=""><span>Bag</span></div><button type="button" aria-label="Close" onclick="return gdPracticeToggleBagSuggestions(false)">×</button></div>${linkCopy}${linkChoices}<div class="gdPracticeBagSuggestionGrid"><span>Club</span><span>${gdPracticeBagAdaptOpen?"Edit current":hasBag?"Current":"Bag"}</span><span>Suggested</span><span>Diff</span>${body}</div><div class="gdPracticeBagSuggestionActions">${actions}</div></div>`;
 	  }
 	  function gdPracticeBagSuggestionNoticeHTML(analysis){
 	    if(gdPracticeBagSuggestionOpen)return"";
@@ -2326,15 +2477,48 @@
 
   function gdPracticeProjectionControlsHTML(analysis){
     const ctx=gdPracticeProjectionContext(analysis);
-    const adopted=gdPracticePlayingBubbleIsAdopted(safe(()=>ensureProfile(),null));
+    const p=safe(()=>ensureProfile(),null);
+    // "Adopted" must mean THIS bubble, not "a bubble was adopted once".
+    // gdPracticePlayingBubbleIsAdopted only checks that a source is active and its
+    // offset matches the profile - it knows nothing about the live analysis, so
+    // once anything had been saved the dock locked to Adopted/Saved forever, even
+    // after new shots produced a completely different practice bubble. The
+    // fingerprint-aware check is the one that answers the real question.
+    const adopted=gdPracticeCurrentBubbleWasAdopted(p,analysis);
+    // A bubble is saved, but it is NOT the one on screen - so adopting is available
+    // again and will replace it.
+    const hasStaleSaved=!adopted&&gdPracticePlayingBubbleIsAdopted(p);
+    const pending=p?.practiceBubblePendingSource||null;
+    // A pending stage counts toward the button's toggle state only while it
+    // still matches the CURRENTLY live practice bubble - if the underlying
+    // shots/analysis moved on since staging, treat it as stale rather than
+    // showing "Unadopt" for a bubble that's no longer what's on screen.
+    const pendingActive=!!(pending&&pending.active&&pending.fingerprint===gdPracticeBubbleFingerprint(analysis));
     const generated=ctx.canProject&&ctx.visible;
-    const generateDisabled=ctx.canProject?"":"disabled";
-    const adoptDisabled=ctx.canProject&&ctx.visible&&!adopted?"":"disabled";
+    // ADOPT -> SAVE is the flow. Adopt stages a pending bubble (undoable), Save
+    // commits it to My Bubble (not undoable). The old "Generate Bubble" button is
+    // gone: its only job was switching the overlay on, and adopting never needed
+    // the overlay to be visible - so adopt now depends on canProject alone,
+    // otherwise removing Generate would have left it permanently disabled.
+    const savedLocked=adopted&&!pendingActive;
+    const saveDisabled=pendingActive?"":"disabled";
+    const saveLabel=savedLocked?"Saved":"Save Bubble";
+    const adoptDisabled=pendingActive?"":(ctx.canProject&&!adopted?"":"disabled");
 	    const tone=generated?"generated":ctx.canProject?"ready":"waiting";
-	    const adoptLabel=adopted?"Bubble Adopted":"Adopt Bubble";
+	    const adoptLabel=pendingActive?"Undo":adopted?"Adopted":"Adopt";
+	    const adoptAction=pendingActive?"gdPracticeUnadoptBubbleFromAction()":"gdPracticeAdoptBubbleFromAction()";
+	    // The state line is the "locked in" feedback: it has to be unambiguous that
+	    // Undo has stopped being an option once Save has been pressed.
+	    const adoptStatus=pendingActive
+	      ?`<div class="gdPracticeAdoptStatus pending"><strong>Direction adopted, not saved</strong><span>Review the distance suggestions in the bag, then Save to lock it in — or Undo to drop it.</span></div>`
+	      :savedLocked
+	        ?`<div class="gdPracticeAdoptStatus saved"><strong>Saved to My Bubble</strong><span>Locked in — Undo is no longer available. Adopt a new bubble to replace it.</span></div>`
+	        :hasStaleSaved
+	          ?`<div class="gdPracticeAdoptStatus fresh"><strong>New practice bubble</strong><span>This is not the bubble you saved. Adopting replaces it.</span></div>`
+	          :"";
 	    const bagSuggestion=gdPracticeBagSuggestionHTML(analysis);
 	    const bagNotice=gdPracticeBagSuggestionNoticeHTML(analysis);
-	    return `<div class="gdPracticeActionDock ${tone} ${bagSuggestion?"hasBagSuggestion":""} ${gdPracticeBagSuggestionOpen?"bagOpen":""}"><div class="gdPracticePrimaryActions"><button type="button" class="gdPracticeBubbleAction generate ${ctx.canProject?"ready":""} ${generated?"active":""}" aria-pressed="${generated?"true":"false"}" ${generateDisabled} onclick="return gdPracticeGenerateBubble()">Generate Bubble</button><button type="button" class="gdPracticeBubbleAction adopt ${adopted?"adopted":""}" aria-pressed="${adopted?"true":"false"}" ${adoptDisabled} onclick="return gdPracticeAdoptBubbleFromAction()">${gdEscapeHTML(adoptLabel)}</button></div>${bagSuggestion?`<div class="gdPracticeBagSuggestionSlot">${bagSuggestion}</div>`:""}</div>${gdPracticeSandboxControlsHTML("compact")}${bagNotice}`;
+	    return `<div class="gdPracticeActionDock ${tone} ${bagSuggestion?"hasBagSuggestion":""} ${gdPracticeBagSuggestionOpen?"bagOpen":""}"><div class="gdPracticePrimaryActions"><button type="button" class="gdPracticeBubbleAction save ${pendingActive?"ready":""} ${savedLocked?"locked":""}" ${saveDisabled} onclick="return gdPracticeSaveBubbleFromAction()">${gdEscapeHTML(saveLabel)}</button><button type="button" class="gdPracticeBubbleAction adopt ${adopted?"adopted":""} ${pendingActive?"pending":""}" aria-pressed="${adopted||pendingActive?"true":"false"}" ${adoptDisabled} onclick="return ${adoptAction}">${gdEscapeHTML(adoptLabel)}</button></div>${adoptStatus}${bagSuggestion?`<div class="gdPracticeBagSuggestionSlot">${bagSuggestion}</div>`:""}</div>${gdPracticeSandboxControlsHTML("compact")}${bagNotice}`;
 	  }
 	  function gdRenderPracticeProjectionControls(analysis){
 	    const root=byId("gdPracticeProjectionControls");
@@ -2794,17 +2978,28 @@
       if(!Number.isFinite(distance)||distance<=0||!Number.isFinite(sourceDistance)||sourceDistance<=0)return null;
       const presentation=gdMyBubblePresentationMetrics(strict,{distanceM:distance,offsetDeg:offset,club:row?.club,handedness:p?.handedness});
       if(!presentation)return null;
+      // SIZE COMES FROM THE SAVED BUBBLE, not from the presentation pass.
+      // gdMyBubblePresentationMetrics already normalises and scales the shape, and
+      // the graph renderer normalises again on the way in - so taking its output
+      // here sized Practice's My Bubble ~8% larger than the identical bubble on
+      // Course and Comparison. Only the visual attributes (tilt/skew/handedness)
+      // are taken from it; the dimensions stay the player's own, scaled to this
+      // row's distance. No fallback: no real shape means no row.
+      const carryScale=distance/sourceDistance;
+      const savedWidthM=Number(strict.bubbleWidthM??strict.clusterWidthM)*carryScale;
+      const savedDepthM=Number(strict.bubbleDepthM??strict.clusterDepthM)*carryScale;
+      if(!Number.isFinite(savedWidthM)||savedWidthM<=0||!Number.isFinite(savedDepthM)||savedDepthM<=0)return null;
       const next=Object.assign({},row,{
         baseDistanceM:distance,
         expectedDistanceM:distance,
         meanExpectedM:distance,
-        bubbleWidthM:presentation.widthM,
-        clusterWidthM:presentation.widthM,
-        lateralRadiusM:presentation.lateralRadiusM,
-        bubbleDepthM:presentation.depthM,
-        clusterDepthM:presentation.depthM,
-        depthRadiusM:presentation.depthRadiusM,
-        radiusM:presentation.radiusM,
+        bubbleWidthM:savedWidthM,
+        clusterWidthM:savedWidthM,
+        lateralRadiusM:savedWidthM/2,
+        bubbleDepthM:savedDepthM,
+        clusterDepthM:savedDepthM,
+        depthRadiusM:savedDepthM/2,
+        radiusM:Math.max(savedWidthM,savedDepthM)/2,
         offsetDeg:offset,
         faceOffsetDeg:offset,
         faceAlignmentOffsetDeg:offset,
@@ -2883,42 +3078,103 @@
 	      };
 	    }).filter(row=>row&&Number.isFinite(row.normalisedDepthM)&&Number.isFinite(row.normalizedDeg));
 	  }
-	  function gdPracticeNormalisedPlotLayout(rows,opts={}){
-	    const chartWidth=Number(opts.width)||480;
-	    const chartHeight=Number(opts.height)||260;
-	    const plotLeft=Number(opts.plotLeft)||38;
-	    const plotRight=Number(opts.plotRight)||458;
-	    const plotTop=Number(opts.plotTop)||82;
-	    const plotBottom=Number(opts.plotBottom)||224;
+  // Shared relative-% chart rows: every shot/bubble is positioned against the SAME
+  // anchor (My Bubble's own current distance, tied to the bag) rather than each
+  // shot's own per-club expected baseline. This is what lets a Practice Bubble
+  // legitimately sit off-centre from My Bubble when the two distances differ -
+  // that gap is real (it's what the Distance Suggestion feature is meant to close)
+  // and must not be normalised away per-club.
+  // PER-CLUB OUTCOME NORMALISATION. Every shot is plotted against ITS OWN club's
+  // baseline, so a wedge and a driver both centre on zero and a mixed bag reads
+  // correctly. The axis means "how far off your own number for THAT club" - the
+  // same thing everywhere, which is exactly why the reading holds with more than
+  // one club on screen.
+  //
+  // A single shared anchor was tried instead and cannot work with a mixed bag: a
+  // 105m wedge against a 142m anchor plots at -26%, off the bottom of the window,
+  // purely because it is a wedge - nothing to do with how it was struck.
+  //
+  // baselineFor(club) supplies the club's own number: the saved bag carry when the
+  // player has a real bag, otherwise the median of that club's own shots. Never a
+  // stand-in - a club with no baseline is not plotted.
+  function gdBubbleRelativeShotRows(shots,baselineFor){
+    const resolve=typeof baselineFor==="function"
+      ?baselineFor
+      :()=>Number(baselineFor);
+    return (Array.isArray(shots)?shots:[]).map((shot,index)=>{
+      const actual=gdPracticeShotActualDistance(shot);
+      const baseline=Number(resolve(shot?.club,shot));
+      if(!Number.isFinite(actual)||actual<=0||!Number.isFinite(baseline)||baseline<=0)return null;
+      const angle=gdPracticeNormalisedAngleForShot(shot,baseline);
+      return {
+        club:shot?.club||"Unknown",
+        actualDistanceM:actual,
+        expectedDistanceM:baseline,
+        normalisedDepthM:(actual-baseline)/baseline*100,
+        normalizedDeg:Number.isFinite(angle)?angle:0,
+        hasLateral:Number.isFinite(angle),
+        shot,
+        index
+      };
+    }).filter(row=>row&&Number.isFinite(row.normalisedDepthM)&&Number.isFinite(row.normalizedDeg));
+  }
+	  // Fixed axes. Course / Comparison / Practice all share this domain, so an
+	  // identical bubble renders at an identical shape on every screen. Do NOT
+	  // fit the axes to the plotted rows - that is what made the same bubble look
+	  // stretched on Comparison (bubbles only) vs Practice (bubbles + scatter).
+	  // THE VIEW WINDOW. These two numbers ARE the zoom: they say how much of the
+	  // world the box shows, and nothing else may change them. Shared by Course,
+	  // Practice and Comparison so the zoom is identical on all three - a bubble
+	  // that looks a given size on one screen looks that size on every screen.
+	  // Shots outside the window clip at the edge on purpose; the view never
+	  // stretches to swallow an outlier.
+	  const GD_NORMALISED_DEPTH_MAX=25;  // +/- % of anchor carry
+	  const GD_NORMALISED_ANGLE_MAX=8;   // +/- aim angle, degrees
+	  // DOWN-THE-LINE IS THE ONLY ORIENTATION. The shot origin sits at the bottom
+	  // centre and the ball travels UP the page, so aim maps to the X axis (right
+	  // miss = right) and distance maps to the Y axis (long = up). This is built
+	  // natively rather than by rotating a landscape drawing - the old
+	  // originBottomTransform approach pushed long shots clean off the top of the
+	  // box, because rotating a 420x142 plot needs a 142-wide, 420-tall one.
+	  //
+	  // The plot fills the chart: everything outside it is the title block and an
+	  // 8px margin for the rounded surround.
+	  const GD_NORMALISED_CHART={width:480,height:460,left:34,right:446,top:92,bottom:436};
+	  function gdPracticeNormalisedPlotLayout(opts={}){
+	    const chartWidth=Number(opts.width)||GD_NORMALISED_CHART.width;
+	    const chartHeight=Number(opts.height)||GD_NORMALISED_CHART.height;
+	    const plotLeft=Number(opts.plotLeft)||GD_NORMALISED_CHART.left;
+	    const plotRight=Number(opts.plotRight)||GD_NORMALISED_CHART.right;
+	    const plotTop=Number(opts.plotTop)||GD_NORMALISED_CHART.top;
+	    const plotBottom=Number(opts.plotBottom)||GD_NORMALISED_CHART.bottom;
 	    const plotMidX=(plotLeft+plotRight)/2;
 	    const plotMidY=(plotTop+plotBottom)/2;
-	    const depthValues=(rows||[]).map(row=>Math.abs(Number(row?.normalisedDepthM))).filter(Number.isFinite);
-	    const angleValues=(rows||[]).filter(row=>row?.hasLateral!==false).map(row=>Math.abs(Number(row?.normalizedDeg))).filter(Number.isFinite);
-	    const depthBase=depthValues.length>=8?gdShotChartQuantile(depthValues,.94):Math.max(8,...depthValues);
-	    const angleBase=angleValues.length>=8?gdShotChartQuantile(angleValues,.94):Math.max(1.8,...angleValues);
-	    const depthMax=gdShotChartNiceMax(Math.min(Math.max(depthBase*1.25+3,14),Number(opts.maxDepthM)||60),4,14);
-	    const angleMax=gdShotChartNiceMax(Math.min(Math.max(angleBase*1.3+.4,2.5),Number(opts.maxAngleDeg)||12),4,2.5);
-	    return {chartWidth,chartHeight,plotLeft,plotRight,plotTop,plotBottom,plotMidX,plotMidY,depthMax,angleMax,depthRange:Math.max(1,depthMax),angleRange:Math.max(.5,angleMax)};
+	    const depthMax=GD_NORMALISED_DEPTH_MAX;
+	    const angleMax=GD_NORMALISED_ANGLE_MAX;
+	    return {chartWidth,chartHeight,plotLeft,plotRight,plotTop,plotBottom,plotMidX,plotMidY,depthMax,angleMax,depthRange:depthMax,angleRange:angleMax};
+	  }
+	  function gdPracticeNormalisedViewBox(plot){
+	    return `0 0 ${Number(plot?.chartWidth)||GD_NORMALISED_CHART.width} ${Number(plot?.chartHeight)||GD_NORMALISED_CHART.height}`;
 	  }
 	  function gdPracticeGraphInternalGeometry(plot){
 	    if(!plot)return null;
 	    const halfWidth=(plot.plotRight-plot.plotLeft)/2;
 	    const halfHeight=(plot.plotBottom-plot.plotTop)/2;
-	    const originX=Number(plot.plotLeft)||38;
-	    const originY=Number(plot.plotMidY)||130;
-	    const targetX=Number(plot.plotMidX)||((Number(plot.plotLeft)||0)+(Number(plot.plotRight)||0))/2||240;
-	    const targetY=Number(plot.plotBottom)||224;
+	    // Down the line: the player stands at the bottom centre and hits away from
+	    // the viewer, so aim runs across and distance runs up.
+	    const originX=Number(plot.plotMidX);
+	    const originY=Number(plot.plotBottom);
 	    return {
 	      originX,
 	      originY,
-	      xForDepth(depth){return plot.plotMidX+gdShotChartClamp((Number(depth)||0)/plot.depthRange,-1,1)*halfWidth;},
-	      yForAngle(angle){return plot.plotMidY-gdShotChartClamp((Number(angle)||0)/plot.angleRange,-1,1)*halfHeight;},
-	      yForUnknown(jitter=0){return plot.plotMidY+(Number(jitter)||0);},
-	      originBottomTransform(){
-	        const e=targetX+originY;
-	        const f=targetY+originX;
-	        return `matrix(0 -1 -1 0 ${e.toFixed(1)} ${f.toFixed(1)})`;
-	      }
+	      // Positive angle is a miss to the RIGHT, and the ball is travelling away
+	      // from the viewer, so right of the line is right of the screen.
+	      xForAngle(angle){return plot.plotMidX+gdShotChartClamp((Number(angle)||0)/plot.angleRange,-1,1)*halfWidth;},
+	      // MINUS: positive depth is LONG, which is further up the page.
+	      yForDepth(depth){return plot.plotMidY-gdShotChartClamp((Number(depth)||0)/plot.depthRange,-1,1)*halfHeight;},
+	      // A shot with no lateral reading still has a real distance - it sits on
+	      // the target line with only a nudge so overlaps stay visible.
+	      xForUnknown(jitter=0){return plot.plotMidX+(Number(jitter)||0);}
 	    };
 	  }
 	  function gdPracticeNormalisedPlotPoint(plot,row,index=0){
@@ -2929,30 +3185,15 @@
 	    const geo=gdPracticeGraphInternalGeometry(plot);
 	    if(!geo)return null;
 	    const jitter=((Number(index)||0)%5-2)*.85;
-	    const x=geo.xForDepth(depth);
-	    const y=row.hasLateral===false
-	      ?geo.yForUnknown(jitter)
-	      :geo.yForAngle(angle)+(Math.abs(angle)<.08?jitter:0);
+	    const x=row.hasLateral===false
+	      ?geo.xForUnknown(jitter)
+	      :geo.xForAngle(angle)+(Math.abs(angle)<.08?jitter:0);
+	    const y=geo.yForDepth(depth);
 	    return {x,y,clipped:Math.abs(depth)>plot.depthRange||Math.abs(angle)>plot.angleRange};
 	  }
-  const GD_PRACTICE_GRAPH_VIEW_KEY="gd_practice_graph_origin_bottom";
-  function gdPracticeGraphOriginBottom(){
-    return safe(()=>localStorage.getItem(GD_PRACTICE_GRAPH_VIEW_KEY)==="1",false);
-  }
-  function gdPracticeGraphOriginBottomTransform(plot){
-    if(!plot)return "";
-    const geo=gdPracticeGraphInternalGeometry(plot);
-    return geo?geo.originBottomTransform():"";
-  }
-  function gdPracticeToggleGraphOrigin(){
-    const next=!gdPracticeGraphOriginBottom();
-    safe(()=>localStorage.setItem(GD_PRACTICE_GRAPH_VIEW_KEY,next?"1":"0"),null);
-    renderPracticeData(true);
-    return false;
-  }
-  function gdPracticeGraphRotateControlHTML(active=false){
-    return `<button type="button" class="gdPracticeGraphRotateControl ${active?"active":""}" aria-pressed="${active?"true":"false"}" title="${active?"Show side-on graph":"Show shot origin at bottom"}" onclick="return gdPracticeToggleGraphOrigin()"><span aria-hidden="true">&#8635;</span></button>`;
-  }
+  // The origin-at-bottom toggle, its stored preference and its rotate button are
+  // gone: that orientation is now the only one, built into the geometry rather
+  // than applied as a transform. None of it had any call site anyway.
 	  function gdPracticeNormalisedBackdropSvg(plot,title,opts={}){
 	    const width=Number(plot.chartWidth)||480;
 	    const height=Number(plot.chartHeight)||260;
@@ -2970,14 +3211,14 @@
 	    ).join("");
 	    return `<rect width="${width}" height="${height}" fill="rgba(0,0,0,.08)"/>
 	      ${titleText&&!hideText?`<text x="24" y="30" fill="rgba(255,255,255,.82)" font-size="14" font-weight="950">${gdStatsSvgText(titleText)}</text>`:""}
-	      ${hideText?"":`<text x="24" y="${subtitleY}" fill="rgba(255,255,255,.46)" font-size="9" font-weight="850">Depth against expected carry · lateral angle</text>`}
+	      ${hideText?"":`<text x="24" y="${subtitleY}" fill="rgba(255,255,255,.46)" font-size="9" font-weight="850">${gdStatsSvgText(opts.subtitle||"Depth against expected carry · lateral angle")}</text>`}
 	      <rect x="${(plot.plotLeft-8).toFixed(1)}" y="${(plot.plotTop-8).toFixed(1)}" width="${(plot.plotRight-plot.plotLeft+16).toFixed(1)}" height="${(plot.plotBottom-plot.plotTop+16).toFixed(1)}" rx="8" fill="rgba(255,255,255,.012)" stroke="rgba(255,255,255,.045)" stroke-width="1"/>
 	      ${grid}
-	      <line x1="${plot.plotMidX.toFixed(1)}" y1="${plot.plotTop}" x2="${plot.plotMidX.toFixed(1)}" y2="${plot.plotBottom}" stroke="rgba(255,255,255,.18)" stroke-width="1" stroke-dasharray="4 8" stroke-linecap="round"/>
-	      <line x1="${plot.plotLeft}" y1="${plot.plotMidY.toFixed(1)}" x2="${plot.plotRight}" y2="${plot.plotMidY.toFixed(1)}" stroke="rgba(248,250,247,.42)" stroke-width="1.55" stroke-dasharray="7 8" stroke-linecap="round"/>
-	      <path d="M ${(plot.plotLeft+7).toFixed(1)} ${plot.plotMidY.toFixed(1)} H ${(plot.plotLeft+48).toFixed(1)}" stroke="rgba(248,250,247,.76)" stroke-width="1.8" stroke-linecap="round"/>
-	      <circle cx="${plot.plotLeft}" cy="${plot.plotMidY.toFixed(1)}" r="6.4" fill="#f8faf7" stroke="rgba(0,0,0,.62)" stroke-width="1.45"/>
-	      <circle cx="${plot.plotLeft}" cy="${plot.plotMidY.toFixed(1)}" r="2.2" fill="#07100d"/>`;
+	      <line x1="${plot.plotLeft}" y1="${plot.plotMidY.toFixed(1)}" x2="${plot.plotRight}" y2="${plot.plotMidY.toFixed(1)}" stroke="rgba(255,255,255,.18)" stroke-width="1" stroke-dasharray="4 8" stroke-linecap="round"/>
+	      <line x1="${plot.plotMidX.toFixed(1)}" y1="${plot.plotTop}" x2="${plot.plotMidX.toFixed(1)}" y2="${plot.plotBottom}" stroke="rgba(248,250,247,.42)" stroke-width="1.55" stroke-dasharray="7 8" stroke-linecap="round"/>
+	      <path d="M ${plot.plotMidX.toFixed(1)} ${(plot.plotBottom-7).toFixed(1)} V ${(plot.plotBottom-48).toFixed(1)}" stroke="rgba(248,250,247,.76)" stroke-width="1.8" stroke-linecap="round"/>
+	      <circle cx="${plot.plotMidX.toFixed(1)}" cy="${plot.plotBottom}" r="6.4" fill="#f8faf7" stroke="rgba(0,0,0,.62)" stroke-width="1.45"/>
+	      <circle cx="${plot.plotMidX.toFixed(1)}" cy="${plot.plotBottom}" r="2.2" fill="#07100d"/>`;
 	  }
 	  function gdPracticeClubKeyDropdownHTML(clubs){
 	    const rows=(Array.isArray(clubs)?clubs:[]).filter(Boolean);
@@ -2991,8 +3232,49 @@
   function renderDataHubStatus(){
     gdRenderDataHubCards();
   }
+  // THE NORMALISED CLUB. Practice output is expressed in a 7-iron view - the
+  // cluster method pools every club into one oval and labels it "Practice oval",
+  // which is a DISPLAY LABEL, not a club. Storing that label as the bubbleProfiles
+  // key is what orphaned saved bubbles: `gdMyBubbleHubSource` looks up by real
+  // club, so Practice, Comparison and the GPS bubble all found nothing, while
+  // Course happened to find it only because it looks up with club=null and falls
+  // back to the bubble's own label. Keys are clubs; labels are for reading.
+  const GD_NORMALISED_VIEW_CLUB="7i";
+  function gdIsRealClubKey(club){
+    const key=String(gdCompareClubKey(club)||"").trim();
+    if(!key)return false;
+    if(/^(driver|\d{1,2}\s*(w|h|i)|[pgslaw]w)$/i.test(key.replace(/\s+/g,"")))return true;
+    return safe(()=>(typeof gdBagSourceRows==="function"?gdBagSourceRows():[])
+      .some(row=>gdCompareClubKey(row?.club||row?.name).toLowerCase()===key.toLowerCase()),false);
+  }
+  function gdMyBubbleStorageClub(club){
+    return gdIsRealClubKey(club)?(gdCompareClubKey(club)||GD_NORMALISED_VIEW_CLUB):GD_NORMALISED_VIEW_CLUB;
+  }
+  // Re-keys bubbles already saved under a label. Without this the fix would only
+  // help bubbles saved from now on, and an existing one would stay orphaned.
+  function gdMigrateMyBubbleClubKeys(p){
+    if(!p||typeof p!=="object")return p;
+    let changed=false;
+    if(p.bubbleProfiles&&typeof p.bubbleProfiles==="object"){
+      Object.keys(p.bubbleProfiles).forEach(key=>{
+        if(gdIsRealClubKey(key))return;
+        const bubble=p.bubbleProfiles[key];
+        delete p.bubbleProfiles[key];
+        if(bubble&&typeof bubble==="object"){
+          p.bubbleProfiles[GD_NORMALISED_VIEW_CLUB]=Object.assign({},bubble,{club:GD_NORMALISED_VIEW_CLUB});
+        }
+        changed=true;
+      });
+    }
+    if(p.previewBubbleSet&&typeof p.previewBubbleSet==="object"&&!gdIsRealClubKey(p.previewBubbleSet.club)){
+      p.previewBubbleSet=Object.assign({},p.previewBubbleSet,{club:GD_NORMALISED_VIEW_CLUB});
+      changed=true;
+    }
+    if(changed)safe(()=>savePlayerProfiles());
+    return p;
+  }
   function gdBubbleDataContext(){
-    const p=safe(()=>ensureProfile(),null);
+    const p=safe(()=>gdMigrateMyBubbleClubKeys(ensureProfile()),null)||safe(()=>ensureProfile(),null);
     return{p};
   }
   function gdBubbleCentralOffset(p){
@@ -3445,11 +3727,25 @@
 		    const method=gdPracticeBubbleMethod(analysis);
 		    const offsetDeg=Number(method?.anchorDeg);
 		    if(!method||!Number.isFinite(offsetDeg))return null;
+		    // anchorClub can be a DISPLAY LABEL. The oval method pools every club into
+		    // one shape and calls it "Practice oval", which matches no club cluster and
+		    // no shot's club - so filtering by it selected NOTHING, and the measured
+		    // distance fell all the way through to the literal 155. That phantom 155m
+		    // was what sat above the real shots on the chart and got saved into My
+		    // Bubble. Only scope to a club when the anchor really is one; otherwise the
+		    // oval is formed from every accepted shot, so measure it from all of them.
 		    const anchorClub=method.anchorClub;
-		    const anchor=(method.clubClusters||[]).find(cluster=>cluster.club===anchorClub)||null;
-		    const shots=(analysis?.acceptedShots||[]).filter(shot=>!anchorClub||shot.club===anchorClub);
+		    const clubScoped=gdIsRealClubKey(anchorClub);
+		    const anchor=clubScoped?((method.clubClusters||[]).find(cluster=>cluster.club===anchorClub)||null):null;
+		    const accepted=Array.isArray(analysis?.acceptedShots)?analysis.acceptedShots:[];
+		    const shots=clubScoped?accepted.filter(shot=>shot.club===anchorClub):accepted;
 		    const importBatchIds=[...new Set(shots.map(shot=>shot.importBatchId||shot.importId||"").filter(Boolean))];
-		    const expected=anchor?.meanExpectedM||gdShotBubbleMedian(shots.map(shot=>shot.expectedM||shot.carryM))||155;
+		    // Real measured distance first (same helper the rest of Practice uses),
+		    // target/expected carry only as a last-resort fallback - this bubble is
+		    // meant to represent what these shots actually did, not what the club
+		    // is nominally supposed to carry.
+		    const measured=gdShotBubbleMedian(shots.map(shot=>gdPracticeShotActualDistance(shot)));
+		    const expected=Number.isFinite(measured)&&measured>0?measured:(Number(anchor?.meanExpectedM)||155);
     const radiusDeg=Number(anchor?.radiusDeg||anchor?.stdDeg);
     const depthSpread=gdShotBubbleMedian(shots.map(shot=>Math.abs(Number(shot.depthM)||0)))*2;
     return{
@@ -3457,19 +3753,35 @@
       lateralRadiusDeg:Number.isFinite(radiusDeg)?Math.max(radiusDeg,.25):.45,
       bubbleDepthM:depthSpread||expected*.10,
 		      baseDistanceM:expected,
-		      club:anchorClub||"",
+		      // A real club for anything that keys or sizes off this; the label is kept
+		      // separately for display. Cross-club ovals normalise to the 7-iron view.
+		      club:clubScoped?anchorClub:GD_NORMALISED_VIEW_CLUB,
+		      displayClub:anchorClub||"",
+		      measuredDistance:Number.isFinite(measured)&&measured>0,
 		      shots:Number(anchor?.countedShots||anchor?.shots||shots.length||0),
 		      importBatchIds
 		    };
 		  }
+	  // Every course record measures its shot from the CENTRE OF THE BUBBLE that was
+	  // on screen at the time (gd-shot-outcomes.js computeShotOutcome), so
+	  // resultBubble.normalizedDeg is a DEVIATION from the playing bubble - NOT an aim
+	  // from the target line. Plotting it raw on a target-line chart (Comparison) puts
+	  // the Course Bubble near straight-ahead instead of beside My Bubble. It must be
+	  // re-anchored: drawn offset = My Bubble's own aim + the measured deviation.
+	  // deviationDeg is kept raw because that is the number worth showing ("0.3L").
 	  function gdCourseBubbleSource(courseAnalysis,filteredAnalysis,records,p){
+    const aim=Number(gdBubbleCentralOffset(p));
+    const anchorDeg=Number.isFinite(aim)?aim:0;
     const fits=(filteredAnalysis?.bubbleFit||courseAnalysis?.bubbleFit||[]).slice().sort((a,b)=>(b.shots||0)-(a.shots||0));
     const fit=fits[0]||null;
     if(fit&&Number.isFinite(Number(fit.resultBubble?.normalizedDeg))){
       const fitRows=fit.club?(records||[]).filter(record=>record.club===fit.club):records||[];
       const baseDistance=gdShotBubbleMedian(fitRows.map(record=>Number(record.expectedDistanceM)||Number(record.actualDistanceM)))||155;
+      const deviationDeg=Number(fit.resultBubble.normalizedDeg);
       return{
-        offsetDeg:Number(fit.resultBubble.normalizedDeg),
+        offsetDeg:anchorDeg+deviationDeg,
+        deviationDeg:deviationDeg,
+        anchorOffsetDeg:anchorDeg,
         bubbleWidthM:Number(fit.resultBubble.widthM),
         bubbleDepthM:Number(fit.resultBubble.depthM),
         baseDistanceM:baseDistance,
@@ -3479,7 +3791,8 @@
     }
     const cross=filteredAnalysis?.clusterHunter?.crossClub||courseAnalysis?.clusterHunter?.crossClub||null;
     if(cross&&Number.isFinite(Number(cross.meanDeg))){
-      return{offsetDeg:Number(cross.meanDeg),lateralRadiusDeg:Number(cross.stdDeg)||.45,bubbleDepthM:16,baseDistanceM:155,club:(cross.clubs||[]).join(", "),shots:Number(cross.shots||0)};
+      const deviationDeg=Number(cross.meanDeg);
+      return{offsetDeg:anchorDeg+deviationDeg,deviationDeg:deviationDeg,anchorOffsetDeg:anchorDeg,lateralRadiusDeg:Number(cross.stdDeg)||.45,bubbleDepthM:16,baseDistanceM:155,club:(cross.clubs||[]).join(", "),shots:Number(cross.shots||0)};
     }
 		    return null;
 		  }
@@ -3721,9 +4034,17 @@
 		    const p=ctx?.p;
 		    if(!p||(!p.practiceBubbleSource?.active&&p.placeholderProfile)||!Number.isFinite(Number(ctx?.current)))return null;
 		    const selected=gdCompareClubKey(club);
+		    // Pending (staged via Adopt Bubble, shape computed from real shots) takes
+		    // priority - same ordering Practice's own hub source uses - since it
+		    // represents what My Bubble is about to become, not a fallback.
+		    const pending=gdShotBubbleSafe(()=>typeof gdPracticePendingBubbleSource==="function"?gdPracticePendingBubbleSource(p):null,null);
+		    const pendingSource=pending&&pending.active&&pending.bubble&&Number.isFinite(Number(pending.offsetDeg))?pending.bubble:null;
 		    const exact=selected&&p.bubbleProfiles&&typeof p.bubbleProfiles==="object"?p.bubbleProfiles[selected]:null;
 		    const preview=p.previewBubbleSet&&(!selected||gdCompareClubKey(p.previewBubbleSet.club)===selected)?p.previewBubbleSet:null;
-		    const source=exact||preview||gdCompareManualProfileBubbleSource(p,selected,Number(ctx.current))||null;
+		    // No generic/model fallback here on purpose: My Bubble on Comparison
+		    // must be real - pending, a fully saved bubble, or nothing at all -
+		    // never a silently-generated textbook shape standing in for real data.
+		    const source=pendingSource||exact||preview||null;
 		    if(!source)return null;
 		    const baseDistance=Number(source.baseDistanceM||source.expectedDistanceM||source.meanExpectedM||source.baseCarry);
 		    const depth=Number(source.bubbleDepthM||source.clusterDepthM||source.visualDepthM);
@@ -3777,76 +4098,92 @@
 	    delete next.lateralRadiusDeg;
 	    return next;
 	  }
-		  function gdCompareBubbleSvg(item,plot,club){
-		    const rawOffset=Number(item.offset);
-		    const hasValue=Number.isFinite(rawOffset);
-		    const offset=hasValue?rawOffset:0;
-		    const size=gdCompareDisplayBubbleSize(gdCompareBubbleSize(item.source,club),item.kind,club);
-		    const carry=Number(size?.baseDistanceM||item.source?.baseDistanceM||item.source?.expectedDistanceM||item.source?.meanExpectedM);
-		    const depth=Number(size?.bubbleDepthM);
-		    const widthM=Number(size?.bubbleWidthM);
-		    const radiusDeg=Number(size?.lateralRadiusDeg);
-		    const modelClub=gdCompareClubKey(size?.club||club||"7i")||"7i";
-		    const hasShape=hasValue&&Number.isFinite(carry)&&carry>0&&Number.isFinite(depth)&&depth>0&&(Number.isFinite(widthM)&&widthM>0||Number.isFinite(radiusDeg)&&radiusDeg>0);
-		    const referenceRows=hasShape?[{
-		      club:modelClub,
-		      label:item.label,
-		      actualDistanceM:carry,
-		      lateralM:0,
-		      bubbleDepthM:depth,
-		      bubbleWidthM:Number.isFinite(widthM)&&widthM>0?widthM:null,
-		      lateralRadiusDeg:Number.isFinite(radiusDeg)&&radiusDeg>0?radiusDeg:null,
-		      handedness:item.source?.handedness,
-		      projectionSource:item.kind
-		    }]:[];
-		    const muted=hasValue&&hasShape?1:.34;
-		    const stroke=item.stroke;
-		    const className=item.kind==="playing"?"gdComparePlayingBubble":"gdCompareEvidenceBubble";
-		    const layer=hasShape?gdShotBubbleOverlayLayerMarkup([],plot,"compare",{
-		      referenceRows,
-		      maxBubbles:1,
-		      offsetDeg:offset,
-		      groupClass:`gdShotBubbleOverlayLayer gdCompareBubbleLayer gdCompareBubbleLayer-${item.kind}`,
-		      source:item.kind,
-		      colour:stroke,
-		      fillOpacity:item.fillOpacity||".12",
-		      strokeOpacity:item.strokeOpacity||".82",
-		      strokeWidth:item.kind==="playing"?"1.7":"1.55"
-		    }):"";
-		    return `<g class="${className}" opacity="${muted}">
-		      ${layer}
-		    </g>`;
-		  }
+	  function gdCompareBubbleParts(item,anchorDistanceM){
+	    const rawOffset=Number(item.offset);
+	    if(!Number.isFinite(rawOffset))return [];
+	    const size=gdCompareBubbleSize(item.source);
+	    const carry=Number(size?.baseDistanceM||item.source?.baseDistanceM||item.source?.expectedDistanceM||item.source?.meanExpectedM);
+	    const depth=Number(size?.bubbleDepthM);
+	    const widthM=Number(size?.bubbleWidthM);
+	    const radiusDeg=Number(size?.lateralRadiusDeg);
+	    const itemClub=gdCompareClubKey(size?.club||item.source?.club||"7i")||"7i";
+	    const anchor=Number(anchorDistanceM);
+	    const hasShape=Number.isFinite(anchor)&&anchor>0&&Number.isFinite(carry)&&carry>0&&Number.isFinite(depth)&&depth>0&&(Number.isFinite(widthM)&&widthM>0||Number.isFinite(radiusDeg)&&radiusDeg>0);
+	    if(!hasShape)return [];
+	    const referenceRows=[{
+	      club:itemClub,
+	      actualDistanceM:carry,
+	      bubbleDepthM:depth,
+	      bubbleWidthM:Number.isFinite(widthM)&&widthM>0?widthM:null,
+	      lateralRadiusDeg:Number.isFinite(radiusDeg)&&radiusDeg>0?radiusDeg:null,
+	      handedness:item.source?.handedness
+	    }];
+	    return gdBubbleRelativeParts(referenceRows,rawOffset,anchor);
+	  }
+	  function gdCompareBubbleLayerSvg(item,parts,plot){
+	    const className=item.kind==="playing"?"gdComparePlayingBubble":"gdCompareEvidenceBubble";
+	    const muted=parts.length?1:.34;
+	    const layer=parts.length?gdPracticeNormalisedBubbleLayerMarkup(parts,plot,{
+	      offsetDeg:Number(item.offset)||0,
+	      groupClass:`gdShotBubbleOverlayLayer gdCompareBubbleLayer gdCompareBubbleLayer-${item.kind}`,
+	      source:item.kind==="playing"?"my-bubble":item.kind,
+	      colour:item.stroke,
+	      fillOpacity:item.fillOpacity||".12",
+	      strokeOpacity:item.strokeOpacity||".82",
+	      strokeWidth:item.kind==="playing"?"1.7":"1.55",
+	      labelText:item.label
+	    }):"";
+	    return `<g class="${className}" opacity="${muted}">
+	      ${layer}
+	    </g>`;
+	  }
 	  function gdCompareSvg(ctx){
-	    const width=480,height=286;
+	    const plotBox=gdPracticeNormalisedPlotLayout();
+	    const width=plotBox.chartWidth,height=plotBox.chartHeight;
 	    const club=gdCompareLoadClub(ctx);
 	    const currentSource=gdCompareProfileBubbleSource(ctx,club);
 	    const courseSource=ctx.courseBubble||null;
 	    const practiceSource=ctx.practiceBubble||null;
 	    const items=[
-		      {kind:"playing",label:"My Bubble",offset:Number(ctx.current),source:currentSource,stroke:"#f4f8f3",fillOpacity:".10",strokeOpacity:".78"},
-		      {kind:"course",label:"Course Bubble",offset:Number(ctx.course),source:courseSource,stroke:"#37f28d",fillOpacity:".13",strokeOpacity:".84"},
-		      {kind:"practice",label:"Practice Bubble",offset:Number(ctx.practice),source:practiceSource,stroke:"#62d2ff",fillOpacity:".13",strokeOpacity:".84"}
-		    ];
-	    const shapeRows=items.map(item=>{
-	      const size=gdCompareDisplayBubbleSize(gdCompareBubbleSize(item.source,club),item.kind,club);
-	      const carry=Number(size?.baseDistanceM||item.source?.baseDistanceM||item.source?.expectedDistanceM||item.source?.meanExpectedM);
-	      const depth=Number(size?.bubbleDepthM);
-	      const widthM=Number(size?.bubbleWidthM);
-	      const radiusDeg=Number(size?.lateralRadiusDeg);
-	      if(!Number.isFinite(Number(item.offset))||!Number.isFinite(carry)||carry<=0||!Number.isFinite(depth)||depth<=0||!(Number.isFinite(widthM)&&widthM>0||Number.isFinite(radiusDeg)&&radiusDeg>0))return null;
-	      const lateralM=Number.isFinite(widthM)&&widthM>0?widthM/2:Math.tan(radiusDeg*Math.PI/180)*carry;
-	      return {club:gdCompareClubKey(size?.club||club||"7i")||"7i",label:item.label,actualDistanceM:carry,lateralM,offsetDeg:Number(item.offset),bubbleDepthM:depth,bubbleWidthM:widthM,lateralRadiusDeg:radiusDeg,handedness:item.source?.handedness};
-	    }).filter(Boolean);
-	    const domainRows=shapeRows.concat(shapeRows.map(row=>Object.assign({},row,{actualDistanceM:Math.max(1,Number(row.actualDistanceM)-Number(row.bubbleDepthM||0))})));
-	    const plot=gdShotChartLayout(domainRows,[],{plotLeft:30,plotRight:450,plotTop:64,plotBottom:224});
-	    const lateralMax=Math.max(22,...shapeRows.map(row=>Math.abs(Number(row.lateralM)||0)+Math.abs(Math.tan((Number(row.offsetDeg)||0)*Math.PI/180)*Number(row.actualDistanceM||0))));
-	    gdShotChartEnsureLateralRange(plot,lateralMax*1.22);
-	    const bubbleSvg=items.map(item=>gdCompareBubbleSvg(item,plot,club)).join("");
-	    const options=gdCompareClubOptions(club,ctx);
-	    const select=options?`<div class="gdCompareClubPick" data-gd-card-control><span>Club</span><select aria-label="Comparison bubble club" onchange="gdCompareSetClub(this.value)">${options}</select></div>`:"";
-	    return `${select}<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="My Bubble, Course and Practice bubble comparison">
-	      ${gdShotChartBackdropSvg(plot,gdShotDataGraphTitle("Comparison"))}
+	      {kind:"playing",label:"My Bubble",offset:Number(ctx.current),source:currentSource,stroke:"#f4f8f3",fillOpacity:".10",strokeOpacity:".78"},
+	      {kind:"course",label:"Course Bubble",offset:Number(ctx.course),source:courseSource,stroke:"#37f28d",fillOpacity:".13",strokeOpacity:".84"},
+	      {kind:"practice",label:"Practice Bubble",offset:Number(ctx.practice),source:practiceSource,stroke:"#62d2ff",fillOpacity:".13",strokeOpacity:".84"}
+	    ];
+	    // Anchor for the relative-% depth axis. Prefer My Bubble's own distance,
+	    // tied to the bag - never a generic/display club.
+	    //
+	    // But do NOT require it. Comparison shows whatever the home screens are
+	    // already showing, so it must not be gated on adoption: with a Practice and
+	    // a Course bubble but no My Bubble yet, both still belong here. This used to
+	    // read the anchor from My Bubble alone, so a missing My Bubble left the
+	    // anchor null and gdCompareBubbleParts dropped EVERY bubble - the screen sat
+	    // empty waiting for an adoption that has nothing to do with it.
+	    const anchorFor=source=>{
+	      if(!source)return null;
+	      const size=gdCompareBubbleSize(source);
+	      const distance=Number(size?.baseDistanceM||source.baseDistanceM||source.expectedDistanceM||source.meanExpectedM);
+	      return Number.isFinite(distance)&&distance>0?distance:null;
+	    };
+	    const anchorSource=[currentSource,practiceSource,courseSource].find(source=>anchorFor(source))||null;
+	    const anchorDistanceM=anchorFor(anchorSource);
+	    const anchorLabel=!anchorSource?""
+	      :anchorSource===currentSource?"My Bubble"
+	      :anchorSource===practiceSource?"Practice Bubble":"Course Bubble";
+	    const bubblePartsByItem=items.map(item=>gdCompareBubbleParts(item,anchorDistanceM));
+	    const allParts=bubblePartsByItem.flat();
+	    // Same plot box as Practice's chart (gd-route-audit.js practiceSvg) so
+	    // identical bubble data renders at an identical shape on both screens.
+	    const plot=plotBox;
+	    const bubbleSvg=items.map((item,i)=>gdCompareBubbleLayerSvg(item,bubblePartsByItem[i],plot)).join("");
+	    // Same buffer band as Course, around the same My Bubble. This is where the
+	    // Course and Practice bubbles get read against the allowance, so it has to
+	    // be here too. Drawn under the bubbles so they stay legible on top.
+	    const bufferPct=gdCourseBubbleBufferPct();
+	    const playingPart=(bubblePartsByItem[0]||[])[0];
+	    const bufferSvg=gdGraphBufferBandMarkup(playingPart,gdGraphBufferPart(playingPart,1+bufferPct/100),plot);
+	    return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="My Bubble, Course and Practice bubble comparison">
+	      ${gdPracticeNormalisedBackdropSvg(plot,gdShotDataGraphTitle("Comparison"),{subtitle:`Distance vs ${anchorLabel||"My Bubble"} (%) \u00b7 aim angle (\u00b0)${playingPart?` \u00b7 band = My Bubble +${Math.round(bufferPct)}%`:""}`})}
+	      ${bufferSvg}
 	      ${bubbleSvg}
 	    </svg>`;
 	  }
@@ -4220,6 +4557,14 @@
       const pendingSource=gdGpsReadyMyBubbleSource(pending.bubble,{offsetDeg:Number(pending.offsetDeg),club:pending.club,handedness:p?.handedness});
       return pendingSource?Object.assign({},pendingSource,{shapeSource:pendingSource.shapeSource||"practice-pending-save"}):null;
     }
+    // ONLY AN ACTIVE SOURCE COUNTS. A saved SHAPE left on the profile is not a My
+    // Bubble on its own. Nothing in the app ever deletes `previewBubbleSet` or
+    // `bubbleProfiles`, so an old shape outlives everything - unadopting drops the
+    // pending stage, clearing practice data drops the source, and the shape stays.
+    // Reading the shape alone rendered a My Bubble on Course while the UI (which
+    // reads `practiceBubbleSource`/`faceOffsetDeg`) correctly reported none set.
+    // Same question, two answers. The source is the answer.
+    if(!p?.practiceBubbleSource||p.practiceBubbleSource.active!==true)return null;
     const selected=gdCompareClubKey(club)||gdCompareClubKey(p?.previewBubbleSet?.club)||"7i";
     const currentOffset=Number.isFinite(Number(offset))?Number(offset):0;
     const exactKey=selected&&p?.bubbleProfiles&&typeof p.bubbleProfiles==="object"
@@ -4232,11 +4577,9 @@
       const strict=gdGpsReadyMyBubbleSource(profileSource,{offsetDeg:currentOffset,club:selected,handedness:p?.handedness});
       return strict?Object.assign({},strict,{shapeSource:strict.shapeSource||"my-bubble-current"}):null;
     }
-    const manual=gdCompareManualProfileBubbleSource(p,selected,currentOffset);
-    if(manual){
-      const fallback=gdGpsReadyMyBubbleSource(manual,{offsetDeg:currentOffset,club:selected,handedness:p?.handedness});
-      return fallback?Object.assign({},fallback,{shapeSource:fallback.shapeSource||"manual-profile"}):Object.assign({},manual,{offsetDeg:currentOffset});
-    }
+    // No generic/model fallback here on purpose: My Bubble must be either a
+    // real saved bubble or nothing at all, never a silently-generated
+    // textbook shape standing in for real data or an explicit setting.
     return null;
   }
   function gdRenderBubbleOffsetHub(manual=false){
@@ -4479,6 +4822,45 @@
     face.focus();
     face.select?.();
   }
+  // The only way to remove a My Bubble. Before this there was none: nothing in the
+  // app deleted previewBubbleSet or bubbleProfiles, so a saved bubble could only
+  // ever be replaced by another save, never cleared. Wipes the source, the pending
+  // stage and the saved shapes together, so the state cannot split again.
+  function gdClearMyBubble(){
+    const {p}=gdBubbleDataContext();
+    if(!p)return false;
+    const hasAnything=!!(p.practiceBubbleSource||p.practiceBubblePendingSource||p.previewBubbleSet||(p.bubbleProfiles&&Object.keys(p.bubbleProfiles).length));
+    if(!hasAnything){
+      gdLmToast("No My Bubble to clear");
+      return false;
+    }
+    return gdConfirmAction({
+      title:"Clear My Bubble?",
+      message:"Removes the saved bubble, its shape and any pending adoption. Your practice and course data are untouched.",
+      confirmLabel:"Clear"
+    },()=>{
+      delete p.practiceBubbleSource;
+      delete p.practiceBubblePendingSource;
+      delete p.practiceBubblePendingAt;
+      delete p.practiceBubblePreviousState;
+      delete p.practiceBubbleAdoptedAt;
+      delete p.previewBubbleSet;
+      delete p.bubbleProfiles;
+      p.faceOffsetDeg=0;
+      p.centralFaceOffsetDeg=0;
+      p.updatedAt=new Date().toISOString();
+      safe(()=>gdClearMyBubbleLanePreviewPendingSource());
+      savePlayerProfiles();
+      syncCoreProfileFromActive();
+      gdRenderBubbleOffsetHub();
+      renderPracticeData(true);
+      renderDataHubStatus();
+      if(document.getElementById("statsPanel")?.classList.contains("open"))renderStats();
+      renderCompareData();
+      safe(()=>typeof renderShot==="function"&&renderShot());
+      gdLmToast("My Bubble cleared");
+    });
+  }
   function gdBubbleOffsetSave(){
     const {p}=gdBubbleDataContext();
     const previewPending=gdMyBubbleLanePreviewPendingSource();
@@ -4490,8 +4872,13 @@
       const club=pending.club||pendingBubble.club||gdCompareClub||"7i";
       const rawBaseDistance=Number(pendingBubble.baseDistanceM||pendingBubble.baseCarry||pendingBubble.expectedDistanceM)||gdShotBubbleSafe(()=>gdDefaultCarryForClub(club),155)||155;
       const baseDistance=pending.distanceMode==="manual-preview"?gdMyBubbleClampLaneDistance(rawBaseDistance,club,pendingBubble):rawBaseDistance;
+      // Store under the normalised club, never the practice label. `club` above can
+      // be "Practice oval" - a display label - and using it as the key orphaned the
+      // bubble from every lookup that asks by real club.
+      const storageClub=gdMyBubbleStorageClub(club);
       const bubble=Object.assign({},pendingBubble,{
-        club,
+        club:storageClub,
+        displayClub:club,
         baseCarry:baseDistance,
         baseDistanceM:baseDistance,
         faceOffsetDeg:offset,
@@ -4507,7 +4894,7 @@
       p.placeholderProfile=false;
       p.previewBubbleSet=bubble;
       p.bubbleProfiles=Object.assign({},p.bubbleProfiles||{});
-      p.bubbleProfiles[gdCompareClubKey(club)||"7i"]=bubble;
+      p.bubbleProfiles[storageClub]=bubble;
       p.practiceBubbleSource={
         active:true,
         offsetDeg:Number(offset.toFixed(2)),
@@ -4575,7 +4962,9 @@
   function gdCourseDataAdminFallbackHTML(){
     const badge=gdCourseDataAdminCanManage()?"Admin editable":"Locked by permission";
     if(!gdCourseDataAdminCanManage())return `<div class="gdShotAdminHead"><div><strong>Course Data admin</strong><span>Coach/admin only.</span></div><div class="gdShotAdminBadge">${badge}</div></div>`;
-    return `<div class="gdShotAdminHead"><div><strong>Course Data admin</strong><span>Permission-gated management lives here, away from the normal shot view.</span></div><div class="gdShotAdminBadge">${badge}</div></div>${gdRenderCourseDataUploadHTML()}${gdRenderCourseDataTuningHTML()}<div class="gdShotAdminList"><div class="gdShotAdminEmpty">No paired course shots to manage yet.</div></div>`;
+    // The sandbox generator has to be here too: an empty store is exactly when
+    // you need to feed the plumbing something.
+    return `<div class="gdShotAdminHead"><div><strong>Course Data admin</strong><span>Permission-gated management lives here, away from the normal shot view.</span></div><div class="gdShotAdminBadge">${badge}</div></div>${gdRenderCourseDataUploadHTML()}${gdRenderCourseDataTuningHTML()}${gdRenderSandboxGeneratorHTML()}<div class="gdShotAdminList"><div class="gdShotAdminEmpty">No paired course shots to manage yet.</div></div>`;
   }
   const gdCourseDataTuningFields=[
     "statsCluster.consistencyMinPct",
@@ -4747,6 +5136,265 @@
       input.onchange=()=>{if(document.getElementById("developerPanel")?.classList.contains("open"))renderDevPanel();};
     });
   }
+  // ---------------------------------------------------------------------------
+  // SANDBOX DATA GENERATOR
+  // Feeds the shot-data plumbing with made-up batches so the pipes can be tested
+  // without going and hitting balls. Both generators fill an EDITABLE textarea
+  // first - randomise, tweak by hand, then submit - so a specific case can be
+  // reproduced exactly rather than only sampled randomly.
+  //
+  // Neither generator bypasses the real intake:
+  //   Course   -> plannedShots + outcomes written to the shot-event store, the
+  //               same shapes gd-shot-outcomes.js produces from real GPS.
+  //   Practice -> native CSV pushed through gdParseNativePracticeImport(), the
+  //               exact path a real launch-monitor paste takes.
+  //
+  // NOTE: by choice there is no sandbox flag - injected shots are written into
+  // the live store and are indistinguishable from real ones. "Clear" in the
+  // Import panel above is the only way back.
+  // ---------------------------------------------------------------------------
+  const GD_SANDBOX_FIELDS={
+    course:[
+      {id:"gdSandboxCourseCount",label:"Shots",value:14,min:1,max:60,step:1},
+      {id:"gdSandboxCourseCarry",label:"Carry (m)",value:150,min:30,max:320,step:1},
+      {id:"gdSandboxCourseOffsetMin",label:"Aim min (°)",value:-3,min:-20,max:20,step:.1},
+      {id:"gdSandboxCourseOffsetMax",label:"Aim max (°)",value:3,min:-20,max:20,step:.1},
+      {id:"gdSandboxCourseDepthMin",label:"Depth min (%)",value:-8,min:-40,max:40,step:.5},
+      {id:"gdSandboxCourseDepthMax",label:"Depth max (%)",value:8,min:-40,max:40,step:.5}
+    ],
+    practice:[
+      {id:"gdSandboxPracticeCount",label:"Shots",value:14,min:1,max:60,step:1},
+      {id:"gdSandboxPracticeCarry",label:"Carry (m)",value:142,min:30,max:320,step:1},
+      {id:"gdSandboxPracticeCarrySpread",label:"Carry ± (m)",value:6,min:0,max:40,step:.5},
+      {id:"gdSandboxPracticeOffline",label:"Offline ± (m)",value:7,min:0,max:60,step:.5}
+    ]
+  };
+  function gdSandboxNumber(id,fallback){
+    const value=Number(byId(id)?.value);
+    return Number.isFinite(value)?value:fallback;
+  }
+  function gdSandboxFieldValue(kind,id){
+    const field=(GD_SANDBOX_FIELDS[kind]||[]).find(item=>item.id===id);
+    return gdSandboxNumber(id,Number(field?.value)||0);
+  }
+  function gdSandboxBetween(min,max,decimals=1){
+    const low=Math.min(min,max),high=Math.max(min,max);
+    const value=low+Math.random()*(high-low);
+    const factor=Math.pow(10,decimals);
+    return Math.round(value*factor)/factor;
+  }
+  function gdSandboxClub(){
+    const raw=String(byId("gdSandboxClub")?.value||"7i").trim();
+    return raw||"7i";
+  }
+  function gdSandboxCount(kind,id){
+    return Math.max(1,Math.min(60,Math.round(gdSandboxFieldValue(kind,id))));
+  }
+  // Course rows are the deviation values this screen actually plots: aim degrees
+  // and depth as a percentage of carry, both relative to the bubble that was set.
+  function gdSandboxGenerateCourse(){
+    const club=gdSandboxClub();
+    const carry=gdSandboxFieldValue("course","gdSandboxCourseCarry");
+    const lines=[];
+    for(let i=0;i<gdSandboxCount("course","gdSandboxCourseCount");i++){
+      const offset=gdSandboxBetween(gdSandboxFieldValue("course","gdSandboxCourseOffsetMin"),gdSandboxFieldValue("course","gdSandboxCourseOffsetMax"),2);
+      const depth=gdSandboxBetween(gdSandboxFieldValue("course","gdSandboxCourseDepthMin"),gdSandboxFieldValue("course","gdSandboxCourseDepthMax"),1);
+      lines.push(`${club},${carry},${offset},${depth}`);
+    }
+    const box=byId("gdSandboxCourseRows");
+    if(box)box.value=`club,carry_m,aim_deg,depth_pct\n${lines.join("\n")}`;
+    return false;
+  }
+  function gdSandboxParseCourseRows(text){
+    return String(text||"").split(/\r?\n/).map(line=>line.trim()).filter(Boolean).filter(line=>!/^club\s*,/i.test(line)).map(line=>{
+      const cells=line.split(",").map(cell=>cell.trim());
+      const carry=Number(cells[1]),aim=Number(cells[2]),depth=Number(cells[3]);
+      if(!cells[0]||!Number.isFinite(carry)||carry<=0||!Number.isFinite(aim)||!Number.isFinite(depth))return null;
+      return {club:cells[0],carryM:carry,aimDeg:aim,depthPct:depth};
+    }).filter(Boolean);
+  }
+  // The bubble each sandbox shot was "played with". Uses the real My Bubble when
+  // there is one so fitRatio has something honest to compare against, and a plain
+  // stated default otherwise - never a silently invented shape.
+  function gdSandboxPlannedBubbleYards(carryM){
+    const source=safe(()=>gdMyBubbleHubSource(gdBubbleDataContext(),null,gdStatsCurrentModelOffsetDeg()),null);
+    const carry=Number(source?.baseDistanceM);
+    const width=Number(source?.bubbleWidthM);
+    const depth=Number(source?.bubbleDepthM);
+    const usable=Number.isFinite(carry)&&carry>0&&Number.isFinite(width)&&width>0&&Number.isFinite(depth)&&depth>0;
+    const scale=usable?carryM/carry:1;
+    const widthM=usable?width*scale:carryM*.148;
+    const depthM=usable?depth*scale:carryM*.195;
+    return {widthYards:widthM*1.0936132983,lengthYards:depthM*1.0936132983,fromMyBubble:usable};
+  }
+  function gdSandboxInjectCourse(){
+    const api=safe(()=>window.GolfDaddyShotEvents||window.GolfDaddy?.modules?.shotEvents,null);
+    if(!api||typeof api.replaceScopedStore!=="function"){
+      safe(()=>toast("Shot events module is not ready"));
+      return false;
+    }
+    const rows=gdSandboxParseCourseRows(byId("gdSandboxCourseRows")?.value);
+    if(!rows.length){
+      safe(()=>toast("No usable sandbox rows - expected club,carry_m,aim_deg,depth_pct"));
+      return false;
+    }
+    const store=safe(()=>api.getScopedStore?.()||api.getStore?.(),null)||{ballEvents:[],plannedShots:[],outcomes:[]};
+    const plannedShots=Array.isArray(store.plannedShots)?store.plannedShots.slice():[];
+    const outcomes=Array.isArray(store.outcomes)?store.outcomes.slice():[];
+    const stamp=Date.now();
+    const iso=new Date().toISOString();
+    const roundId=`round-sandbox-${iso.slice(0,10)}`;
+    rows.forEach((row,index)=>{
+      const expectedYards=row.carryM*1.0936132983;
+      const bubble=gdSandboxPlannedBubbleYards(row.carryM);
+      // Same convention as a real outcome: errors measured from the bubble
+      // centre, positive lateral = right, positive forward = long.
+      const lateralYards=Math.tan(row.aimDeg*Math.PI/180)*expectedYards;
+      const depthYards=expectedYards*(row.depthPct/100);
+      const shotId=`sandbox-shot-${stamp}-${index}`;
+      const outcomeId=`sandbox-outcome-${stamp}-${index}`;
+      plannedShots.push({
+        shotId,
+        roundId,
+        holeId:`hole-${(index%18)+1}`,
+        originEventId:null,
+        origin:{lat:0,lng:0},
+        plannedBubble:{centerLat:0,centerLng:0,orientationDeg:0,lengthYards:Number(bubble.lengthYards.toFixed(1)),widthYards:Number(bubble.widthYards.toFixed(1)),shape:"oval"},
+        club:row.club,
+        expectedDistanceYards:Number(expectedYards.toFixed(1)),
+        renderKey:`sandbox:${shotId}`,
+        createdAt:iso,
+        pairedOutcomeId:outcomeId
+      });
+      outcomes.push({
+        outcomeId,
+        shotId,
+        resultEventId:null,
+        pairedConfidence:1,
+        insideBubble:Math.abs(lateralYards)<=bubble.widthYards/2&&Math.abs(depthYards)<=bubble.lengthYards/2,
+        relativeResult:"sandbox",
+        lateralErrorYards:Number(lateralYards.toFixed(1)),
+        distanceErrorYards:Number(depthYards.toFixed(1)),
+        gpsAccuracyM:null,
+        sourceConfidence:"sandbox",
+        computedAt:iso
+      });
+    });
+    api.replaceScopedStore({version:1,ballEvents:Array.isArray(store.ballEvents)?store.ballEvents:[],plannedShots,outcomes});
+    safe(()=>gdRefreshCourseDataSurfaces());
+    safe(()=>gdRenderCourseDataSurfaceFallback());
+    safe(()=>gdRenderCourseDataAdminPanel());
+    safe(()=>toast(`${rows.length} sandbox course shots added`));
+    return false;
+  }
+  // Practice rows keep the native paste column order so they stay readable and
+  // hand-editable, but the values are METRES - the launch-monitor store's own
+  // unit - because these go straight into that store rather than through the
+  // yard-based paste parser.
+  function gdSandboxGeneratePractice(){
+    const club=gdSandboxClub();
+    const carry=gdSandboxFieldValue("practice","gdSandboxPracticeCarry");
+    const spread=gdSandboxFieldValue("practice","gdSandboxPracticeCarrySpread");
+    const offline=gdSandboxFieldValue("practice","gdSandboxPracticeOffline");
+    const lines=["club,carry_m,total_m,offline_m,face,path,start"];
+    for(let i=0;i<gdSandboxCount("practice","gdSandboxPracticeCount");i++){
+      const carryM=gdSandboxBetween(carry-spread,carry+spread,1);
+      const rollM=gdSandboxBetween(3,10,1);
+      lines.push([
+        club,
+        carryM.toFixed(1),
+        (carryM+rollM).toFixed(1),
+        gdSandboxBetween(-offline,offline,1).toFixed(1),
+        gdSandboxBetween(-2.5,2.5,1).toFixed(1),
+        gdSandboxBetween(-4,4,1).toFixed(1),
+        gdSandboxBetween(-2,2,1).toFixed(1)
+      ].join(","));
+    }
+    const box=byId("gdSandboxPracticeRows");
+    if(box)box.value=lines.join("\n");
+    return false;
+  }
+  function gdSandboxParsePracticeRows(text){
+    return String(text||"").split(/\r?\n/).map(line=>line.trim()).filter(Boolean).filter(line=>!/^club\s*,/i.test(line)).map(line=>{
+      const cells=line.split(",").map(cell=>cell.trim());
+      const carry=Number(cells[1]);
+      if(!cells[0]||!Number.isFinite(carry)||carry<=0)return null;
+      const num=value=>{const n=Number(value);return Number.isFinite(n)?n:null;};
+      return {club:cells[0],carryM:carry,totalM:num(cells[2]),offlineM:num(cells[3]),faceDeg:num(cells[4]),pathDeg:num(cells[5]),startDeg:num(cells[6])};
+    }).filter(Boolean);
+  }
+  // Writes AFTER THE GATE, straight into the launch-monitor store that the
+  // practice graph and bubble engine actually read, via the module's own
+  // importCapture(). The native CSV paste path is deliberately skipped: it only
+  // reaches the native store, and nothing in the app bridges that to the launch
+  // monitor - so rows imported that way never appear on the practice screen.
+  // inputType "generated-demo" is an existing practice_evidence lane, so these
+  // land in the display store like any reviewed capture.
+  function gdSandboxSendPractice(){
+    const rows=gdSandboxParsePracticeRows(byId("gdSandboxPracticeRows")?.value);
+    if(!rows.length){
+      safe(()=>toast("No usable practice rows - expected club,carry_m,total_m,offline_m,face,path,start"));
+      return false;
+    }
+    const lm=window.GolfDaddyLaunchMonitorData;
+    if(!lm||typeof lm.importCapture!=="function"){
+      safe(()=>toast("Launch monitor module is not ready"));
+      return false;
+    }
+    // Missing must stay missing - see gdBridgeNativePracticeToLaunchMonitor:
+    // Number(null) is 0, so a bare finite check invents a zero.
+    const metric=(candidateMetric,rawLabel,value)=>{
+      if(value===null||value===undefined||value==="")return [];
+      const number=Number(value);
+      return Number.isFinite(number)?[{candidateMetric,rawLabel,value:number,confidence:1}]:[];
+    };
+    const clubGroups=rows.map(row=>({
+      candidateClub:row.club,
+      originClubLabel:row.club,
+      metrics:[].concat(
+        metric("carryDistance","Carry",row.carryM),
+        metric("totalDistance","Total",row.totalM),
+        metric("offline","Offline",row.offlineM),
+        metric("faceAngle","Face Angle",row.faceDeg),
+        metric("clubPath","Club Path",row.pathDeg),
+        metric("startDirection","Start Direction",row.startDeg)
+      )
+    }));
+    const result=lm.importCapture({
+      label:"Sandbox batch",
+      inputType:"generated-demo",
+      clubGroups,
+      rawTextBlocks:["sandbox generated practice batch"]
+    });
+    safe(()=>renderPracticeData(true));
+    safe(()=>{if(typeof window.gdRenderDataHubStatus==="function")window.gdRenderDataHubStatus();});
+    const saved=Array.isArray(result?.shots)?result.shots.length:0;
+    safe(()=>toast(`${saved} sandbox practice shot${saved===1?"":"s"} added`));
+    return false;
+  }
+  function gdSandboxFieldHTML(kind,field){
+    return `<label>${gdEscapeHTML(field.label)}<input id="${field.id}" type="number" value="${field.value}" min="${field.min}" max="${field.max}" step="${field.step}"></label>`;
+  }
+  function gdRenderSandboxGeneratorHTML(){
+    const courseFields=GD_SANDBOX_FIELDS.course.map(field=>gdSandboxFieldHTML("course",field)).join("");
+    const practiceFields=GD_SANDBOX_FIELDS.practice.map(field=>gdSandboxFieldHTML("practice",field)).join("");
+    return `<div class="gdSandboxPanel">
+      <div class="gdSandboxHead"><div><strong>Sandbox data generator</strong><span>Randomise a batch, edit it by hand, then push it through the real intake. Writes to live data - use Clear above to remove.</span></div></div>
+      <label class="gdSandboxClubRow">Club<input id="gdSandboxClub" type="text" value="7i" spellcheck="false"></label>
+      <div class="gdSandboxSection">
+        <div class="gdSandboxSectionHead"><strong>Course shots</strong><span>Aim ° and depth % relative to the bubble that was set.</span></div>
+        <div class="gdSandboxGrid">${courseFields}</div>
+        <div class="gdSandboxActions"><button type="button" onclick="return gdSandboxGenerateCourse()">Randomise</button><button type="button" onclick="return gdSandboxInjectCourse()">Add to course data</button></div>
+        <textarea id="gdSandboxCourseRows" rows="8" spellcheck="false" placeholder="club,carry_m,aim_deg,depth_pct"></textarea>
+      </div>
+      <div class="gdSandboxSection">
+        <div class="gdSandboxSectionHead"><strong>Practice shots</strong><span>Metres. Written after the gate, straight into the launch monitor store the practice graph reads.</span></div>
+        <div class="gdSandboxGrid">${practiceFields}</div>
+        <div class="gdSandboxActions"><button type="button" onclick="return gdSandboxGeneratePractice()">Randomise</button><button type="button" onclick="return gdSandboxSendPractice()">Add to practice data</button></div>
+        <textarea id="gdSandboxPracticeRows" rows="8" spellcheck="false" placeholder="club,carry_m,total_m,offline_m,face,path,start"></textarea>
+      </div>
+    </div>`;
+  }
   function gdRenderCourseDataAdminPanel(){
     const root=byId("gdCourseDataAdminPanel");
     if(!root)return;
@@ -4765,7 +5413,7 @@
       const action=canManage&&shotId?`<button type="button" onclick="event.stopPropagation();gdDeleteCourseShot('${escapedId}')">Delete</button>`:`<span class="gdShotAdminBadge">Locked</span>`;
       return `<div class="gdShotAdminRow"><div><strong>${gdEscapeHTML(record.club||"Unknown")} · ${Number(record.actualDistanceM||0).toFixed(0)}m</strong><span>${record.counted?"Counted":"Filtered"} · ${gdOffsetLabel(record.normalizedDeg||0)} · ${gdEscapeHTML(record.holeId||record.roundId||"course shot")}</span></div>${action}</div>`;
     }).join("");
-    root.innerHTML=rows?`<div class="gdShotAdminHead"><div><strong>Course Data admin</strong><span>Permission-gated management lives here, away from the normal shot view.</span></div><div class="gdShotAdminBadge">${badge}</div></div>${gdRenderCourseDataUploadHTML()}${gdRenderCourseDataTuningHTML()}<div class="gdShotAdminList">${rows}</div>`:gdCourseDataAdminFallbackHTML();
+    root.innerHTML=rows?`<div class="gdShotAdminHead"><div><strong>Course Data admin</strong><span>Permission-gated management lives here, away from the normal shot view.</span></div><div class="gdShotAdminBadge">${badge}</div></div>${gdRenderCourseDataUploadHTML()}${gdRenderCourseDataTuningHTML()}${gdRenderSandboxGeneratorHTML()}<div class="gdShotAdminList">${rows}</div>`:gdCourseDataAdminFallbackHTML();
     gdBindCourseDataTuningControls(root);
   }
   function gdSetCourseDataTab(tab, forceOpen){
@@ -4802,55 +5450,289 @@
 	      counted:counted
 	    };
 	  }
-	  function gdCourseDataSurfaceSvg(counts, analysis){
-	    const width=480,height=260;
-	    const records=Array.isArray(analysis?.records)?analysis.records:[];
-	    const plotLeft=30,plotRight=450,plotTop=82,plotBottom=224;
-	    const plotMidY=(plotTop+plotBottom)/2;
-	    const actualDistanceForRecord=record=>{
-	      const actual=Number(record.actualDistanceM);
-	      if(Number.isFinite(actual))return actual;
-	      const expected=Number(record.expectedDistanceM);
-	      const depth=Number(record.depthM);
-	      if(Number.isFinite(expected)&&Number.isFinite(depth))return expected+depth;
-	      return Number.isFinite(expected)?expected:NaN;
-	    };
-	    const dataRows=records.map((record,index)=>{
-	      const actual=actualDistanceForRecord(record);
-	      const lateral=gdShotChartLateralInfo(record,actual);
-	      return {club:record.club||"Unknown",actualDistanceM:actual,lateralM:lateral.value,hasLateral:lateral.hasLateral,counted:record.counted!==false,excluded:record.counted===false,record,index};
-	    }).filter(row=>Number.isFinite(row.actualDistanceM)&&row.actualDistanceM>0);
-	    const overlayRows=gdShotBubbleOverlayEnabled("course")?gdShotBubbleOverlayReferenceRows(dataRows):[];
-	    const hubRows=gdShotBubbleOverlayReferenceRows(dataRows);
-	    const hubDomainRows=hubRows.length?gdShotBubbleOverlayDistanceExtentRows(hubRows,gdStatsCurrentModelOffsetDeg()):[];
-	    const plot=gdShotChartLayout(dataRows,overlayRows.concat(hubDomainRows),{plotLeft,plotRight,plotTop,plotBottom});
-	    if(gdShotBubbleOverlayEnabled("course")||hubRows.length)gdShotChartEnsureLateralRange(
-	      plot,
-	      gdShotBubbleOverlayEnabled("course")?gdShotBubbleOverlayLateralMax(dataRows,gdStatsCurrentModelOffsetDeg()):0,
-	      hubRows.length?gdShotBubbleOverlayLateralMax(hubRows,gdStatsCurrentModelOffsetDeg()):0
-	    );
-	    const shotDots=dataRows.slice(0,90).map(row=>{
-	      const point=gdShotChartPoint(plot,row.actualDistanceM,row.lateralM,row.index,row.hasLateral);
-	      const counted=row.record.counted!==false;
-	      const fill=counted?gdStatsClubColor(row.club):"#8f9a96";
-	      const opacity=counted?".82":".18";
-	      return gdShotChartDotSvg(point,{fill,opacity,radius:counted?2.6:1.8,missing:row.hasLateral===false});
-	    }).join("");
-	    const clubKey=[...new Set(dataRows.map(row=>row.club||"Unknown"))].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})).slice(0,6);
-	    const clubKeySvg=clubKey.map((club,i)=>`<circle cx="${26+i*48}" cy="58" r="4.2" fill="${gdStatsClubColor(club)}"/><text x="${34+i*48}" y="61" fill="rgba(255,255,255,.68)" font-size="9" font-weight="850">${gdStatsSvgText(club)}</text>`).join("");
-	    const hubUnderlaySvg=hubRows.length?gdOffsetHubUnderlayLayer(hubRows,plot,"course"):"";
-	    const overlaySvg=gdShotBubbleOverlayLayer(dataRows,plot,"course",{offsetDeg:gdStatsCurrentModelOffsetDeg()});
-	    const fitSource=Array.isArray(analysis?.bubbleFit)?analysis.bubbleFit:[];
-	    const clubOvals=gdShotChartFitOvalsSvg(plot,fitSource,dataRows,{source:"course"})||gdShotChartClubOvalsSvg(plot,dataRows.slice(0,90));
-	    return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Course Data visual">
-	      ${gdShotChartBackdropSvg(plot,gdShotDataGraphTitle("Course Data"))}
-	      ${hubUnderlaySvg}
-	      ${overlaySvg}
-	      ${clubOvals}
-	      ${shotDots}
-	      ${clubKeySvg}
-	    </svg>${gdShotBubbleOverlayButton("course")}`;
-	  }
+  // How much bigger than My Bubble the buffer ring is drawn on Course Data, as a
+  // percentage. A chosen allowance for the course window being wider than the
+  // practice window - not a measurement, and never a pass/fail threshold. Tunable
+  // so the number can be argued about without touching the logic.
+  // Course Data draws three distinct things and they must never be mistaken for
+  // each other, so they share the Comparison screen's colour language:
+  //   My Bubble  = white   (same as Comparison's "playing" bubble)
+  //   Course     = green   (same as Comparison's "course" bubble)
+  //   Buffer     = amber   (its own colour - it is an allowance, not a bubble)
+  const GD_MY_BUBBLE_COLOUR="#f4f8f3";
+  const GD_COURSE_BUBBLE_COLOUR="#37f28d";
+  const GD_COURSE_BUFFER_COLOUR="#ffb347";
+  // Dots sit off-black until the bubble reaches them.
+  const GD_COURSE_DOT_OUTSIDE="#4a534f";
+  const GD_COURSE_BUBBLE_BUFFER_PCT=50;
+  function gdCourseBubbleBufferPct(){
+    const tuned=safe(()=>typeof dev==="function"?Number(dev("bubbleVisuals.courseBufferPct")):NaN,NaN);
+    return Number.isFinite(tuned)&&tuned>=0?tuned:GD_COURSE_BUBBLE_BUFFER_PCT;
+  }
+  // opts lets the Course Data default screen (gdStatsVisualSummary) reuse this
+  // renderer with its own filtered records, colour mode and legend, so both the
+  // default screen and this fallback plot on the SAME fixed normalised domain.
+  // THE COURSE BUBBLE SLIDER. Two live readings come off it and they are meant to
+  // be weighed against each other: how much of the result the bubble holds
+  // (containment), and how big it had to be to hold that (size vs the practice
+  // bubble). "80% inside at 20% bigger than practice" is one sentence made of both.
+  //
+  // 100% is exactly the preset size - the same size the practice bubble is drawn
+  // at - so the size reading is a direct comparison rather than an abstract number.
+  const GD_COURSE_BUBBLE_SCALE_KEY="gd_course_bubble_scale_pct_v1";
+  const GD_COURSE_BUBBLE_SCALE_MIN=40;
+  const GD_COURSE_BUBBLE_SCALE_MAX=200;
+  const GD_COURSE_BUBBLE_SCALE_DEFAULT=100;
+  function gdCourseBubbleScalePct(){
+    const stored=safe(()=>Number(localStorage.getItem(GD_COURSE_BUBBLE_SCALE_KEY)),NaN);
+    const value=Number.isFinite(stored)&&stored>0?stored:GD_COURSE_BUBBLE_SCALE_DEFAULT;
+    return Math.max(GD_COURSE_BUBBLE_SCALE_MIN,Math.min(GD_COURSE_BUBBLE_SCALE_MAX,Math.round(value)));
+  }
+  function gdCourseBubbleSizeLabel(pct){
+    const delta=Math.round(pct-100);
+    if(!delta)return "same as practice";
+    return `${delta>0?"+":""}${delta}% vs practice`;
+  }
+  function gdCourseBubbleScaleControlHTML(){
+    const pct=gdCourseBubbleScalePct();
+    return `<div class="gdCourseScaleControl">
+      <span class="gdCourseScaleValue">${pct}%</span>
+      <input class="gdCourseScaleSlider" type="range" orient="vertical" min="${GD_COURSE_BUBBLE_SCALE_MIN}" max="${GD_COURSE_BUBBLE_SCALE_MAX}" step="1" value="${pct}" aria-label="Course bubble size" oninput="return gdCourseBubbleScaleChanged(this)">
+      <span class="gdCourseScaleDelta">${gdEscapeHTML(gdCourseBubbleSizeLabel(pct))}</span>
+    </div>`;
+  }
+  // Recomputed straight from the DOM so dragging is live and cheap - re-rendering
+  // the whole chart on every input event would fight the drag.
+  function gdCourseBubbleApplyScale(pct){
+    const host=byId("gdStatsVisual");
+    if(!host)return;
+    const scale=Math.max(.01,Number(pct)/100);
+    const ellipse=host.querySelector(".gdCourseResultBubble");
+    const value=host.querySelector(".gdCourseScaleValue");
+    const delta=host.querySelector(".gdCourseScaleDelta");
+    if(value)value.textContent=`${Math.round(pct)}%`;
+    if(delta)delta.textContent=gdCourseBubbleSizeLabel(Number(pct));
+    if(!ellipse)return;
+    const rx=Number(ellipse.dataset.baseRx)*scale;
+    const ry=Number(ellipse.dataset.baseRy)*scale;
+    if(!Number.isFinite(rx)||!Number.isFinite(ry))return;
+    ellipse.setAttribute("rx",rx.toFixed(1));
+    ellipse.setAttribute("ry",ry.toFixed(1));
+    const cx=Number(ellipse.getAttribute("cx"));
+    const cy=Number(ellipse.getAttribute("cy"));
+    const t=-(Number(ellipse.dataset.tiltDeg)||0)*Math.PI/180;
+    const cos=Math.cos(t),sin=Math.sin(t);
+    let inside=0,total=0;
+    host.querySelectorAll(".gdCourseShotDot:not(.excluded)").forEach(dot=>{
+      total+=1;
+      const dx=Number(dot.getAttribute("cx"))-cx;
+      const dy=Number(dot.getAttribute("cy"))-cy;
+      const ux=dx*cos-dy*sin,uy=dx*sin+dy*cos;
+      const within=(ux*ux)/(rx*rx)+(uy*uy)/(ry*ry)<=1;
+      if(within)inside+=1;
+      // Hydrate/dehydrate as the bubble sweeps over them - the colour IS the
+      // in/out answer, so it has to move with the slider, not lag a re-render.
+      dot.classList.toggle("inside",within);
+      dot.setAttribute("fill",within?GD_COURSE_BUBBLE_COLOUR:GD_COURSE_DOT_OUTSIDE);
+      dot.setAttribute("opacity",within?".95":".6");
+    });
+    const pctText=host.querySelector(".gdCourseContainmentPct");
+    const subText=host.querySelector(".gdCourseContainmentSub");
+    if(pctText)pctText.textContent=total?`${Math.round(inside/total*100)}% inside`:"";
+    if(subText)subText.textContent=total?`${inside}/${total} shots`:"";
+    // THE TWO VALUES, published together: size and in-vs-out. Everything the
+    // screen says is these two numbers, so any logic built on top reads them from
+    // here rather than scraping the labels.
+    safe(()=>{
+      const containment=total?{inside,total,pct:Math.round(inside/total*100)}:null;
+      window.gdCourseBubbleContainment=containment;
+      window.gdCourseBubbleReading={
+        sizePct:Math.round(Number(pct)),
+        sizeVsPracticePct:Math.round(Number(pct)-100),
+        containmentPct:containment?containment.pct:null,
+        inside:containment?containment.inside:0,
+        outside:containment?containment.total-containment.inside:0,
+        total:containment?containment.total:0
+      };
+    });
+  }
+  function gdCourseBubbleScaleChanged(input){
+    const raw=Number(input?.value);
+    const pct=Math.max(GD_COURSE_BUBBLE_SCALE_MIN,Math.min(GD_COURSE_BUBBLE_SCALE_MAX,Math.round(Number.isFinite(raw)?raw:GD_COURSE_BUBBLE_SCALE_DEFAULT)));
+    safe(()=>localStorage.setItem(GD_COURSE_BUBBLE_SCALE_KEY,String(pct)));
+    gdCourseBubbleApplyScale(pct);
+    return false;
+  }
+  function gdCourseDataSurfaceSvg(counts, analysis, opts={}){
+    const records=Array.isArray(opts?.records)?opts.records:(Array.isArray(analysis?.records)?analysis.records:[]);
+    const colourFor=typeof opts?.colourFor==="function"?opts.colourFor:null;
+    // COURSE IS THE DEVIATION FRAME. Zero here is THE PLAYING BUBBLE, not the
+    // target line. Every record already stores its shot measured from the centre
+    // of the bubble that was on screen at the time, in that bubble's own
+    // orientation (gd-shot-outcomes.js computeShotOutcome), so the deviations are
+    // plotted directly and no per-club anchoring is needed. The old bag-carry /
+    // median anchoring was redundant AND mixed frames (it rebuilt position from
+    // `expected + a bubble-relative delta`). Because the reference is stored per
+    // shot, settings changing between rounds cannot distort this picture.
+    const dataRows=records.map((record,index)=>({
+      club:record.club||"Unknown",
+      counted:record.counted!==false,
+      excluded:record.counted===false,
+      record,
+      index
+    }));
+    // Per-club reference distance, used ONLY to express stored metres in the
+    // chart's units (% of carry for depth, degrees for lateral). This is NOT an
+    // anchor: it never moves a shot, it only scales it. Taken from the shots'
+    // own expected distances - never the bag.
+    const referenceByClub={};
+    dataRows.forEach(row=>{
+      const key=gdShotBubbleOverlayClubKey(row.club);
+      if(!key||Number.isFinite(referenceByClub[key]))return;
+      const median=gdShotBubbleMedian(dataRows
+        .filter(r=>gdShotBubbleOverlayClubKey(r.club)===key)
+        .map(r=>Number(r.record?.expectedDistanceM))
+        .filter(value=>Number.isFinite(value)&&value>0));
+      if(Number.isFinite(median)&&median>0)referenceByClub[key]=median;
+    });
+    const referenceFor=club=>Number(referenceByClub[gdShotBubbleOverlayClubKey(club)]);
+    const relativeRows=dataRows.map(row=>{
+      const reference=referenceFor(row.club);
+      const depth=Number(row.record?.depthM);          // forward deviation from bubble centre, m
+      const angle=Number(row.record?.normalizedDeg);   // lateral deviation from bubble centre, deg
+      if(!Number.isFinite(reference)||reference<=0||!Number.isFinite(depth)||!Number.isFinite(angle))return null;
+      return {club:row.club,normalisedDepthM:depth/reference*100,normalizedDeg:angle,hasLateral:true,row,index:row.index};
+    }).filter(Boolean);
+    // Builds a drawable part straight in the deviation frame. centreDepthM /
+    // centreAngleDeg are the deviation of the bubble's centre from zero; widthM /
+    // depthM are its full extents.
+    // widthM/depthM are the PRESET size for the club (gdGraphBubbleDimensions);
+    // centreDepthM/centreAngleDeg are the measured placement. No axis
+    // re-normalisation: the preset already is the standard shape, so putting it
+    // through gdStandardDispersionAxes would only round-trip it.
+    function deviationPart(club,reference,centreDepthM,centreAngleDeg,widthM,depthM){
+      if(!Number.isFinite(reference)||reference<=0)return null;
+      if(!Number.isFinite(widthM)||widthM<=0||!Number.isFinite(depthM)||depthM<=0)return null;
+      const lateralRadius=widthM/2;
+      const depthRadius=depthM/2;
+      return {
+        club:club||"Unknown",
+        depthM:(Number(centreDepthM)||0)/reference*100,
+        depthRadiusM:depthRadius/reference*100,
+        angleDeg:Number(centreAngleDeg)||0,
+        angleRadiusDeg:Math.max(.4,Math.atan2(lateralRadius,reference)*180/Math.PI),
+        tiltDeg:gdGraphBubbleTiltDeg(club),
+        baseDistanceM:reference
+      };
+    }
+    // THE SLIDER SIZES THE COURSE BUBBLE. Shape stays preset - this is an explicit
+    // player-driven scale on it, not a size derived from the data. 100% is exactly
+    // the preset size; the slider's whole output is the containment reading below.
+    const courseBubbleScale=gdCourseBubbleScalePct()/100;
+    const fitSource=Array.isArray(analysis?.bubbleFit)?analysis.bubbleFit:[];
+    // Where the shots actually went. The fit supplies PLACEMENT ONLY - the depth
+    // and aim deviation of the cluster centre. Size is the preset for that club at
+    // its reference distance, never the measured spread (see gdGraphBubbleDimensions).
+    const fitParts=fitSource.map(fit=>{
+      const reference=referenceFor(fit?.club);
+      const dims=gdGraphBubbleDimensions(fit?.club,reference);
+      if(!dims)return null;
+      return deviationPart(
+        fit?.club,
+        reference,
+        Number(fit?.resultBubble?.depthOffsetM),
+        Number(fit?.resultBubble?.normalizedDeg),
+        dims.widthM*courseBubbleScale,
+        dims.depthM*courseBubbleScale
+      );
+    }).filter(Boolean);
+    const plot=gdPracticeNormalisedPlotLayout();
+    const pointFor=entry=>gdPracticeNormalisedPlotPoint(plot,entry,entry.index);
+    // CONTAINMENT is computed the same way the live slider recomputes it, from the
+    // drawn ellipse including its tilt - so the number always matches the picture.
+    // Counted shots only: a filtered-out shot is not a result to be contained.
+    const coursePart=fitParts[0]||null;
+    const courseGeo=(()=>{
+      if(!coursePart)return null;
+      const geo=gdPracticeGraphInternalGeometry(plot);
+      if(!geo)return null;
+      const halfWidth=(plot.plotRight-plot.plotLeft)/2;
+      const halfHeight=(plot.plotBottom-plot.plotTop)/2;
+      return {
+        cx:geo.xForAngle(coursePart.angleDeg),
+        cy:geo.yForDepth(coursePart.depthM),
+        rx:Math.max(3,((Number(coursePart.angleRadiusDeg)||0)/Math.max(.5,plot.angleRange))*halfWidth),
+        ry:Math.max(3,((Number(coursePart.depthRadiusM)||0)/Math.max(1,plot.depthRange))*halfHeight),
+        tilt:Number(coursePart.tiltDeg)||0
+      };
+    })();
+    // A dot is grey until the bubble reaches it, then it takes the bubble's own
+    // colour. Tested in the ellipse's ROTATED frame so what lights up is exactly
+    // what looks enclosed.
+    const insideBubble=point=>{
+      if(!courseGeo||!point)return false;
+      const t=-courseGeo.tilt*Math.PI/180;
+      const dx=point.x-courseGeo.cx,dy=point.y-courseGeo.cy;
+      const ux=dx*Math.cos(t)-dy*Math.sin(t);
+      const uy=dx*Math.sin(t)+dy*Math.cos(t);
+      return (ux*ux)/(courseGeo.rx*courseGeo.rx)+(uy*uy)/(courseGeo.ry*courseGeo.ry)<=1;
+    };
+    // Dots carry a class so the live slider can recolour and recount them straight
+    // from the DOM without re-rendering the chart on every input event.
+    const shotDots=relativeRows.slice(0,90).map(entry=>{
+      const point=pointFor(entry);
+      if(!point)return "";
+      const counted=entry.row.record.counted!==false;
+      if(!counted)return `<circle class="gdCourseShotDot excluded" cx="${point.x.toFixed(1)}" cy="${point.y.toFixed(1)}" r="1.8" fill="${GD_COURSE_DOT_OUTSIDE}" opacity=".18"/>`;
+      const inside=insideBubble(point);
+      return `<circle class="gdCourseShotDot${inside?" inside":""}" cx="${point.x.toFixed(1)}" cy="${point.y.toFixed(1)}" r="2.6" fill="${inside?GD_COURSE_BUBBLE_COLOUR:GD_COURSE_DOT_OUTSIDE}" opacity="${inside?".95":".6"}"/>`;
+    }).join("");
+    const containment=(()=>{
+      if(!courseGeo)return null;
+      let inside=0,total=0;
+      relativeRows.forEach(entry=>{
+        if(entry.row?.record?.counted===false)return;
+        const point=pointFor(entry);
+        if(!point)return;
+        total+=1;
+        if(insideBubble(point))inside+=1;
+      });
+      if(!total)return null;
+      return {inside,total,pct:Math.round(inside/total*100)};
+    })();
+    safe(()=>{
+      window.gdCourseBubbleContainment=containment;
+      const sizePct=Math.round(courseBubbleScale*100);
+      window.gdCourseBubbleReading={
+        sizePct,
+        sizeVsPracticePct:sizePct-100,
+        containmentPct:containment?containment.pct:null,
+        inside:containment?containment.inside:0,
+        outside:containment?containment.total-containment.inside:0,
+        total:containment?containment.total:0
+      };
+    });
+    const clubKey=[...new Set(dataRows.map(row=>row.club||"Unknown"))].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})).slice(0,6);
+    const clubKeySvg=typeof opts?.keySvg==="string"
+      ?opts.keySvg
+      :clubKey.map((club,i)=>`<circle cx="${26+i*48}" cy="58" r="4.2" fill="${gdStatsClubColor(club)}"/><text x="${34+i*48}" y="61" fill="rgba(255,255,255,.68)" font-size="9" font-weight="850">${gdStatsSvgText(club)}</text>`).join("");
+    // ONE BUBBLE. Emitted directly rather than through the shared layer markup so
+    // it can carry its unscaled radii - the slider rescales from those without a
+    // re-render. The empty overlay group stays: gdApplyShotBubbleDomOverlay injects
+    // a legacy ABSOLUTE-frame bubble unless it finds one, which would land at the
+    // wrong scale on this normalised chart.
+    const courseBubbleSvg=courseGeo
+      ?`<g class="gdShotBubbleOverlayLayer gdCourseResultLayer" aria-hidden="true"><ellipse class="gdCourseResultBubble" data-base-rx="${(courseGeo.rx/Math.max(.01,courseBubbleScale)).toFixed(2)}" data-base-ry="${(courseGeo.ry/Math.max(.01,courseBubbleScale)).toFixed(2)}" data-tilt-deg="${courseGeo.tilt.toFixed(1)}" cx="${courseGeo.cx.toFixed(1)}" cy="${courseGeo.cy.toFixed(1)}" rx="${courseGeo.rx.toFixed(1)}" ry="${courseGeo.ry.toFixed(1)}"${courseGeo.tilt?` transform="rotate(${courseGeo.tilt.toFixed(1)} ${courseGeo.cx.toFixed(1)} ${courseGeo.cy.toFixed(1)})"`:""} fill="${GD_COURSE_BUBBLE_COLOUR}" fill-opacity=".13" stroke="${GD_COURSE_BUBBLE_COLOUR}" stroke-width="1.55" stroke-opacity=".84"/></g>`
+      :`<g class="gdShotBubbleOverlayLayer" aria-hidden="true"></g>`;
+    const svg=`<svg viewBox="${gdPracticeNormalisedViewBox(plot)}" role="img" aria-label="Course Data visual">
+      ${gdPracticeNormalisedBackdropSvg(plot,gdShotDataGraphTitle("Course Data"),{subtitle:"Shot endpoints relative to the bubble that was set"})}
+      <text class="gdCourseContainmentPct" x="456" y="61" text-anchor="end" fill="${GD_COURSE_BUBBLE_COLOUR}" font-size="13" font-weight="950">${containment?`${containment.pct}% inside`:""}</text>
+      <text class="gdCourseContainmentSub" x="456" y="75" text-anchor="end" fill="rgba(255,255,255,.5)" font-size="9" font-weight="800">${containment?`${containment.inside}/${containment.total} shots`:""}</text>
+      ${courseBubbleSvg}
+      ${shotDots}
+    </svg>`;
+    return `<div class="gdCourseChartWrap">${svg}${gdCourseBubbleScaleControlHTML()}</div>`;
+  }
 	  function gdCourseDataLandingStatus(counts){
 	    if(counts.shown)return `${counts.shown} shown`;
 	    if(counts.records)return `${counts.records} paired`;
@@ -4915,37 +5797,161 @@
 	    Object.keys(byClub).forEach(key=>{map[key]=gdShotBubbleMedian(byClub[key]);});
 	    return map;
 	  }
-	  function gdPracticeNormalisedBubbleParts(rows,offsetDeg,baselines){
-	    const scale=gdShotBubbleOverlayScale();
-	    return gdShotBubbleOverlayBubbleParts(rows,offsetDeg).map(bubble=>{
-	      const carry=Number(bubble.centerDistanceM)||Number(bubble.baseDistanceM)||0;
-	      if(!Number.isFinite(carry)||carry<=0)return null;
-	      const key=gdShotBubbleOverlayClubKey(bubble.club||bubble.row?.club);
-	      const baselineRaw=Number(baselines&&baselines[key]);
-	      const baseline=Number.isFinite(baselineRaw)&&baselineRaw>0?baselineRaw:carry;
-	      const lateralRadius=Math.max(1,Number(bubble.lateralRadiusM)||Number(bubble.widthM)/2||1)*scale;
-	      const depthRadius=Math.max(1,Number(bubble.depthRadiusM)||Number(bubble.depthM)/2||1)*scale;
-	      const angle=Number.isFinite(Number(bubble.offsetDeg))?Number(bubble.offsetDeg):Math.atan2(Number(bubble.centerLateralM)||0,carry)*180/Math.PI;
-	      return{
-	        club:bubble.club||bubble.row?.club||"Unknown",
-	        depthM:carry-baseline,
-	        depthRadiusM:depthRadius,
-	        angleDeg:angle,
-	        angleRadiusDeg:Math.max(.4,Math.atan2(lateralRadius,Math.max(1,carry))*180/Math.PI),
-	        tiltDeg:Number(bubble.tiltDeg)||0,
-	        baseDistanceM:Number(bubble.baseDistanceM)||carry
-	      };
-	    }).filter(Boolean);
-	  }
-	  function gdPracticeNormalisedBubbleExtentRows(parts){
-	    const rows=[];
-	    (parts||[]).forEach(part=>{
-	      rows.push({normalisedDepthM:part.depthM-part.depthRadiusM,normalizedDeg:part.angleDeg,hasLateral:true});
-	      rows.push({normalisedDepthM:part.depthM+part.depthRadiusM,normalizedDeg:part.angleDeg,hasLateral:true});
-	      rows.push({normalisedDepthM:part.depthM,normalizedDeg:part.angleDeg-part.angleRadiusDeg,hasLateral:true});
-	      rows.push({normalisedDepthM:part.depthM,normalizedDeg:part.angleDeg+part.angleRadiusDeg,hasLateral:true});
+	  // gdPracticeNormalisedBubbleParts is gone: it was an unused graph helper that
+	  // still routed through the GPS projector, i.e. a trap waiting to put world
+	  // geometry back onto a chart.
+  // THE GRAPH BUBBLE AND THE GPS BUBBLE ARE DIFFERENT RENDERINGS OF THE SAME DATA.
+  //
+  //   GPS bubble   - the real thing projected into the world: rollout-inflated
+  //                  depth, physics tilt, visual skew, bag-roof clamping, screen
+  //                  caps. Built by gdGeneratedShotBubbleForClub / getGDBForClub.
+  //   Graph bubble - the same saved numbers drawn in the charts' own language, so
+  //                  My Bubble sits beside the Practice and Course bubbles and is
+  //                  directly comparable to them.
+  //
+  // The charts must therefore NOT go through the GPS projector. They used to:
+  // gdShotBubbleOverlayBubbleParts regenerates every bubble from club + carry and
+  // never reads the row's own saved dimensions, so a saved 20x26m My Bubble was
+  // redrawn at the engine's 22.2x29.25m for a 7i at 150m - and Comparison, which
+  // feeds a different club label in, differed again. The same bubble rendered at
+  // three sizes across three screens.
+  //
+  // NO FALLBACK. A row without a real saved shape is not drawn. The charts never
+  // call the GPS projector - a bubble on a graph is always the player's own
+  // numbers, or nothing at all.
+  // Tilt for graph bubbles. Every graph bubble wears the standard shape, so it
+  // wears the standard tilt that goes with it - the same club/handedness rule the
+  // GPS bubble uses (gdStandardDispersionTiltDeg).
+  //
+  // Deliberately NOT the projector's tiltDeg, which is physics tilt (the aim
+  // offset) PLUS visual tilt. On a chart the aim offset is already expressed as
+  // the bubble's position along the angle axis, so folding it into the tilt as
+  // well would count the same aim twice.
+  // The dev board's bubbleGeometry.tiltScale and tiltMaxDeg apply here too. They
+  // used to reach only gdDeriveClusterTilt (the cluster/GPS path), so "Bubble tilt
+  // scale" did nothing to the graphs and the class constants (10/12/14) quietly
+  // exceeded their own tiltMaxDeg clamp. Now the control governs every bubble:
+  // tiltScale 0 means no tilt anywhere.
+  function gdGraphBubbleTiltDeg(club,handedness){
+    const hand=handedness||safe(()=>ensureProfile()?.handedness,null)||"right";
+    const base=Number(safe(()=>typeof gdStandardDispersionTiltDeg==="function"?gdStandardDispersionTiltDeg(club||"7i",hand):0,0));
+    if(!Number.isFinite(base))return 0;
+    const geo=safe(()=>typeof gdBubbleGeometryTuning==="function"?gdBubbleGeometryTuning():null,null)||{};
+    const scale=Number.isFinite(Number(geo.tiltScale))?Number(geo.tiltScale):1;
+    const max=Number.isFinite(Number(geo.tiltMaxDeg))?Math.abs(Number(geo.tiltMaxDeg)):Math.abs(base);
+    return Math.max(-max,Math.min(max,base*scale));
+  }
+  // Attaches a measured bubble source's real shape to a row that has none,
+  // scaled from the source's own carry to the row's. Used where the projector
+  // used to supply the shape. Returns the row untouched if the source has no
+  // real dimensions - the row is then dropped rather than drawn from nothing.
+  function gdGraphRowWithBubbleShape(row,source){
+    if(!row||!source)return row;
+    const carry=Number(row.actualDistanceM||row.baseDistanceM);
+    const sourceCarry=Number(source.baseDistanceM||source.expectedDistanceM||source.meanExpectedM||source.baseCarry);
+    if(!Number.isFinite(carry)||carry<=0||!Number.isFinite(sourceCarry)||sourceCarry<=0)return row;
+    const radiusDeg=Number(source.lateralRadiusDeg);
+    const width=Number.isFinite(Number(source.bubbleWidthM))&&Number(source.bubbleWidthM)>0
+      ?Number(source.bubbleWidthM)
+      :(Number.isFinite(radiusDeg)&&radiusDeg>0?Math.tan(radiusDeg*Math.PI/180)*sourceCarry*2:NaN);
+    const depth=Number(source.bubbleDepthM);
+    if(!Number.isFinite(width)||width<=0||!Number.isFinite(depth)||depth<=0)return row;
+    const scale=carry/sourceCarry;
+    return Object.assign({},row,{bubbleWidthM:width*scale,bubbleDepthM:depth*scale});
+  }
+  // SHAPE IS PRESET. A bubble's size is never formed from the data dots - it comes
+  // from the club and the carry, exactly as calculateBubbleProfile puts it:
+  // "Offset places the shot data. Club/carry sizes it."
+  //
+  // All the cluster-finding logic exists to decide WHERE the bubble goes (offset +
+  // distance), not how big it is. Sizing bubbles from measured spread is what made
+  // the same bubble render differently on every screen, and what let a 0.45deg
+  // fallback radius masquerade as a measurement.
+  function gdGraphBubbleDimensions(club,carry){
+    const size=safe(()=>gdDeriveBasePatternSize({club:club||"7i",baseCarry:carry}),null);
+    const widthM=Number(size?.clusterWidthM);
+    const depthM=Number(size?.clusterDepthM);
+    if(!Number.isFinite(widthM)||widthM<=0||!Number.isFinite(depthM)||depthM<=0)return null;
+    return {widthM,depthM};
+  }
+  function gdBubbleRelativeParts(rows,offsetDeg,anchorDistanceM){
+    const anchor=Number(anchorDistanceM);
+    if(!Number.isFinite(anchor)||anchor<=0)return [];
+    // Radii come in as the PRESET size for the club (gdGraphBubbleDimensions), so
+    // there is nothing left to normalise - the preset is the standard shape.
+    // Placement (carry, angle) is the only part that comes from the data.
+    const partFor=(club,carry,angle,lateralRadius,depthRadius,handedness,baseDistanceM)=>{
+      const lateral=Math.max(1,lateralRadius);
+      const depth=Math.max(1,depthRadius);
+      return{
+        club:club||"Unknown",
+        depthM:(carry-anchor)/anchor*100,
+        depthRadiusM:depth/carry*100,
+        angleDeg:angle,
+        angleRadiusDeg:Math.max(.4,Math.atan2(lateral,Math.max(1,carry))*180/Math.PI),
+        tiltDeg:gdGraphBubbleTiltDeg(club,handedness),
+        baseDistanceM:Number(baseDistanceM)||carry
+      };
+    };
+    return (rows||[]).map(row=>{
+      const carry=Number(row?.actualDistanceM)||Number(row?.baseDistanceM)||Number(row?.expectedDistanceM);
+      if(!Number.isFinite(carry)||carry<=0)return null;
+      const dims=gdGraphBubbleDimensions(row?.club,carry);
+      if(!dims)return null;
+      // THE CALLER'S OFFSET WINS. It is the live one for this layer (the practice
+      // bubble's own offset, or My Bubble's hub offset). Rows are bag/data rows
+      // that can still be carrying a stale offsetDeg from an earlier source -
+      // preferring that drew the bubble at the wrong angle, and adopting then
+      // staged the real offset, so the bubble visibly jumped on adopt.
+      const angle=Number.isFinite(Number(offsetDeg))
+        ?Number(offsetDeg)
+        :(Number.isFinite(Number(row?.offsetDeg))?Number(row.offsetDeg):0);
+      return partFor(row.club,carry,angle,dims.widthM/2,dims.depthM/2,row?.handedness,carry);
+    }).filter(Boolean);
+  }
+	  // A buffered copy of a bubble part: the same centre and tilt, radii scaled.
+	  // Scaling the finished part (rather than the source metres) guarantees the
+	  // band stays exactly concentric with My Bubble and shares its tilt, which is
+	  // what makes a clean ring possible.
+	  function gdGraphBufferPart(part,scale){
+	    const k=Number(scale);
+	    if(!part||!Number.isFinite(k)||k<=1)return null;
+	    const angle=Number(part.angleRadiusDeg)||0;
+	    return Object.assign({},part,{
+	      depthRadiusM:(Number(part.depthRadiusM)||0)*k,
+	      angleRadiusDeg:Math.atan(Math.tan(angle*Math.PI/180)*k)*180/Math.PI
 	    });
-	    return rows;
+	  }
+	  // The buffer BAND: a filled ring between My Bubble's border and the buffer's
+	  // border, closed with a solid outer line. Drawn as one even-odd path so the
+	  // area between the two really is filled and My Bubble's own interior stays
+	  // clear - two stacked translucent ellipses would tint the middle instead.
+	  function gdGraphBufferBandMarkup(innerPart,outerPart,plot,opts={}){
+	    const geo=gdPracticeGraphInternalGeometry(plot);
+	    if(!geo||!innerPart||!outerPart)return "";
+	    const halfWidth=(plot.plotRight-plot.plotLeft)/2;
+	    const halfHeight=(plot.plotBottom-plot.plotTop)/2;
+	    const shape=part=>({
+	      cx:geo.xForAngle(part.angleDeg),
+	      cy:geo.yForDepth(part.depthM),
+	      rx:Math.max(3,((Number(part.angleRadiusDeg)||0)/Math.max(.5,plot.angleRange))*halfWidth),
+	      ry:Math.max(3,((Number(part.depthRadiusM)||0)/Math.max(1,plot.depthRange))*halfHeight)
+	    });
+	    const outer=shape(outerPart);
+	    const inner=shape(innerPart);
+	    const ring=e=>`M ${(e.cx-e.rx).toFixed(1)} ${e.cy.toFixed(1)} A ${e.rx.toFixed(1)} ${e.ry.toFixed(1)} 0 1 0 ${(e.cx+e.rx).toFixed(1)} ${e.cy.toFixed(1)} A ${e.rx.toFixed(1)} ${e.ry.toFixed(1)} 0 1 0 ${(e.cx-e.rx).toFixed(1)} ${e.cy.toFixed(1)} Z`;
+	    const tilt=Number(outerPart.tiltDeg)||0;
+	    // POSITIVE, not negated. The GPS bubble rotates its downrange axis toward
+	    // +lateral (right) for a right-hander; on this chart long is UP, so the far
+	    // end must swing right, which is a CLOCKWISE (positive) SVG rotation. The
+	    // old negation was correct only in the original side-on frame where up meant
+	    // right - flipping the y sign and then swapping the axes reversed it twice.
+	    const transform=tilt?` transform="rotate(${tilt.toFixed(1)} ${outer.cx.toFixed(1)} ${outer.cy.toFixed(1)})"`:"";
+	    const colour=opts.colour||GD_COURSE_BUFFER_COLOUR;
+	    return `<g class="gdCourseBubbleBufferLayer" aria-hidden="true"${transform}>`
+	      +`<path class="gdCourseBubbleBufferBand" d="${ring(outer)} ${ring(inner)}" fill-rule="evenodd" fill="${colour}" fill-opacity="${opts.fillOpacity||".16"}" stroke="none"/>`
+	      +`<ellipse class="gdCourseBubbleBufferRing" cx="${outer.cx.toFixed(1)}" cy="${outer.cy.toFixed(1)}" rx="${outer.rx.toFixed(1)}" ry="${outer.ry.toFixed(1)}" fill="none" stroke="${colour}" stroke-width="${opts.strokeWidth||"1.6"}" stroke-opacity="${opts.strokeOpacity||".9"}"/>`
+	      +`</g>`;
 	  }
 	  function gdPracticeNormalisedBubbleLayerMarkup(parts,plot,opts={}){
 	    if(!Array.isArray(parts)||!parts.length)return "";
@@ -4962,26 +5968,27 @@
 	    const groupStyle=opts.groupStyle?` style="${gdStatsSvgText(opts.groupStyle)}"`:"";
 	    const groupClass=opts.groupClass||"gdShotBubbleOverlayLayer";
 	    return `<g class="${groupClass}" data-offset-deg="${offsetDeg.toFixed(2)}"${groupStyle}>${parts.map(part=>{
-	      const cx=geo.xForDepth(part.depthM);
-	      const cy=geo.yForAngle(part.angleDeg);
-	      const rx=Math.max(3,(part.depthRadiusM/Math.max(1,plot.depthRange))*halfWidth);
-	      const ry=Math.max(3,(part.angleRadiusDeg/Math.max(.5,plot.angleRange))*halfHeight);
+	      // Down the line: aim spans the X axis, distance spans the Y axis - so the
+	      // horizontal radius comes from the angle and the vertical from the depth.
+	      const cx=geo.xForAngle(part.angleDeg);
+	      const cy=geo.yForDepth(part.depthM);
+	      const rx=Math.max(3,(part.angleRadiusDeg/Math.max(.5,plot.angleRange))*halfWidth);
+	      const ry=Math.max(3,(part.depthRadiusM/Math.max(1,plot.depthRange))*halfHeight);
 	      const label=(opts.labelText&&opts.label!==false&&parts.length===1)?(()=>{
 	        const fontSize=Math.max(5.2,Math.min(7.4,ry*.44));
 	        const isMy=String(opts.source||"").toLowerCase()==="my-bubble";
 	        const line=(word,dx,dy,fill)=>`<text x="${(cx+dx).toFixed(1)}" y="${(cy+dy).toFixed(1)}" text-anchor="middle" dominant-baseline="middle" fill="${fill}" font-size="${fontSize.toFixed(1)}" font-weight="950">${gdStatsSvgText(word)}</text>`;
 	        return `<g class="gdPracticeBubbleEmbossLabel" data-source="practice-bubble-label" pointer-events="none" aria-hidden="true">${line(opts.labelText,-.55,-.55,"rgba(0,0,0,.58)")}${line(opts.labelText,.55,.6,isMy?"rgba(255,236,181,.24)":"rgba(160,255,201,.20)")}${line(opts.labelText,0,0,isMy?"rgba(28,17,2,.86)":"rgba(0,14,8,.84)")}</g>`;
 	      })():"";
-	      return `<ellipse class="gdOffsetHubBubble" data-club="${gdStatsSvgText(part.club)}" data-source="${gdStatsSvgText(opts.source||"")}" data-offset-deg="${Number(part.angleDeg).toFixed(2)}" data-base-distance-m="${Number(part.baseDistanceM).toFixed(1)}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" rx="${rx.toFixed(1)}" ry="${ry.toFixed(1)}"${part.tiltDeg?` transform="rotate(${(-part.tiltDeg).toFixed(1)} ${cx.toFixed(1)} ${cy.toFixed(1)})"`:""} fill="${colour}" fill-opacity="${fillOpacity}" stroke="${colour}" stroke-width="${strokeWidth}" stroke-opacity="${strokeOpacity}"/>${label}`;
+	      const dashAttr=opts.strokeDasharray?` stroke-dasharray="${gdStatsSvgText(opts.strokeDasharray)}" stroke-linecap="round"`:"";
+	      return `<ellipse class="gdOffsetHubBubble${opts.ellipseClass?` ${gdStatsSvgText(opts.ellipseClass)}`:""}" data-club="${gdStatsSvgText(part.club)}" data-source="${gdStatsSvgText(opts.source||"")}" data-offset-deg="${Number(part.angleDeg).toFixed(2)}" data-base-distance-m="${Number(part.baseDistanceM).toFixed(1)}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" rx="${rx.toFixed(1)}" ry="${ry.toFixed(1)}"${part.tiltDeg?` transform="rotate(${Number(part.tiltDeg).toFixed(1)} ${cx.toFixed(1)} ${cy.toFixed(1)})"`:""} fill="${colour}" fill-opacity="${fillOpacity}" stroke="${colour}" stroke-width="${strokeWidth}" stroke-opacity="${strokeOpacity}"${dashAttr}/>${label}`;
 	    }).join("")}</g>`;
 	  }
 	  function practiceSvg(analysis){
 	    const shots=gdPracticePlotShots(analysis||{});
 		    if(!shots.length){
-		      const emptyPlot=gdPracticeNormalisedPlotLayout([]);
-		      const emptyOriginBottom=gdPracticeGraphOriginBottom();
-		      const emptyTransform=emptyOriginBottom?gdPracticeGraphOriginBottomTransform(emptyPlot):"";
-		      return `<svg class="gdPracticeGraphSvg ${emptyOriginBottom?"originBottom":""}" viewBox="0 0 480 260" role="img" aria-label="Practice Data normalised plot" data-origin-bottom="${emptyOriginBottom?"1":"0"}"><g class="gdPracticeGraphCanvas"${emptyTransform?` transform="${emptyTransform}"`:""}>${gdPracticeNormalisedBackdropSvg(emptyPlot,"",{hideText:emptyOriginBottom})}</g></svg>${gdPracticeGraphRotateControlHTML(emptyOriginBottom)}${gdShotBubbleOverlayButton("practice")}`;
+		      const emptyPlot=gdPracticeNormalisedPlotLayout();
+		      return `<svg class="gdPracticeGraphSvg" viewBox="${gdPracticeNormalisedViewBox(emptyPlot)}" role="img" aria-label="Practice Data relative plot"><g class="gdPracticeGraphCanvas">${gdPracticeNormalisedBackdropSvg(emptyPlot,"",{subtitle:"Distance vs My Bubble (%) \u00b7 aim angle (\u00b0)"})}</g></svg>${gdShotBubbleOverlayButton("practice")}`;
 	    }
     const plotAll=gdPracticePlotAllRowsForTest();
     const cfg=safe(()=>window.GolfDaddyLaunchMonitorData?.settings?.(),{})||{};
@@ -5062,13 +6069,71 @@
     const practiceReady=gdPracticeHasBubbleOffset(practiceBubbleOffset)&&projectionCtx.overlayRows.length>0;
     const showPracticeLayer=(practiceReady&&!currentBubbleAdopted)||adoptionMotionActive;
     const learnedByClub=gdPracticeBagRowsByClub(distanceSummary.rows||[]);
-    const overlayRows=showPracticeLayer?projectionCtx.overlayRows.map(row=>{
+    // Projection rows are bag/data rows - they carry a club and a carry but no
+    // shape, because the shape used to be generated by the GPS projector. The
+    // graphs no longer call the projector, so the row has to bring its own real
+    // shape: the MEASURED practice bubble (cluster radius and depth), scaled to
+    // that row's carry. Nothing is invented; a row with no measurable practice
+    // shape simply is not drawn.
+    const practiceShape=safe(()=>gdPracticeBubbleSource(analysis),null);
+    // Built whether or not the layer is currently drawn: adoption hides the
+    // practice layer, and the anchor below has to keep reading the practice
+    // bubble's distance regardless, or the frame would move on adopt again.
+    const practiceRows=projectionCtx.overlayRows.map(row=>{
       const learned=learnedByClub[gdShotBubbleOverlayClubKey(row.club)];
-      return learned?Object.assign({},row,{actualDistanceM:learned.actualDistanceM,projectionSource:"practice-distance-bubble"}):row;
-    }):[];
+      const next=learned?Object.assign({},row,{actualDistanceM:learned.actualDistanceM,projectionSource:"practice-distance-bubble"}):row;
+      return gdGraphRowWithBubbleShape(next,practiceShape);
+    });
+    const overlayRows=showPracticeLayer?practiceRows:[];
     const hubBaseRows=gdPracticeMyBubbleHubRows(dataRows,analysis);
     const hubRows=gdPracticeHasBubbleOffset(myBubbleOffset)?hubBaseRows.filter(row=>Number.isFinite(Number(row.actualDistanceM))&&Number(row.actualDistanceM)>0):[];
     const hubOffset=gdPracticeHasBubbleOffset(myBubbleOffset)?myBubbleOffset:null;
+    // ANCHOR = THE PRACTICE BUBBLE'S OWN DISTANCE, always, on this screen.
+    //
+    // These are practice shots, so the practice bubble is the natural frame. It
+    // used to anchor to My Bubble's distance and fall back to practice only when
+    // no My Bubble existed - which meant the anchor CHANGED the instant you
+    // adopted (measured 142m -> My Bubble's 155m), and since every dot is plotted
+    // as a percentage of the anchor, the whole cluster jumped ~57px down on adopt
+    // and back on undo. Nothing about the shots had changed; only the denominator.
+    //
+    // THE ANCHOR IS THE BAG DISTANCE. It is bag-tied on purpose: the bag is the
+    // fixed reference everything else is measured against, and it does NOT move
+    // when a bubble is adopted, so the frame holds still.
+    //
+    // The jump was never caused by bag-anchoring - it was caused by the anchor
+    // SWITCHING SOURCE. It read the bag via hubRows when a My Bubble existed and
+    // fell back to the practice bubble's distance when one did not, so adopting
+    // flipped it (142m -> 155m) and every dot moved ~57px. Reading the bag
+    // directly, whether or not a bubble has been adopted, removes the switch
+    // without giving up the bag reference.
+    //
+    // Practice measured distance is the fallback ONLY when the player has no bag
+    // entry for the club at all - never a preference over the bag.
+    // Resolve against whichever candidate actually HAS a bag entry. The practice
+    // bubble's `club` can be a display label ("Practice oval"), which keys to
+    // "practice oval" and matches no bag row - looking it up first silently missed
+    // the bag every time and fell through to the practice distance.
+    // ONLY A REAL BAG ANCHORS. gdPracticeSavedBagRows happily returns the seeded
+    // ghost bag, and anchoring the whole chart to stand-in numbers would be the
+    // same sin as drawing a stand-in bubble. gdPracticeHasUserBag is the app's own
+    // test - false when the bag is a seeded default the player has never touched.
+    // With no real bag, the practice measurement below takes over.
+    const hasRealBag=safe(()=>gdPracticeHasUserBag(),false);
+    // SAVED bag, not the draft: adoption writes the learned distance into the bag
+    // draft, so anchoring to the draft moved the frame on adopt all over again.
+    // The committed bag only changes when the player commits it.
+    const anchorBagByClub=hasRealBag?(safe(()=>gdPracticeBagRowsByClub(gdPracticeSavedBagRows()),null)||{}):{};
+    const anchorBagCarry=[practiceRows[0]?.club,hubRows[0]?.club,practiceShape?.club]
+      .map(club=>Number(anchorBagByClub[gdShotBubbleOverlayClubKey(club)]?.actualDistanceM))
+      .find(carry=>Number.isFinite(carry)&&carry>0);
+    const bagAnchorM=Number(anchorBagCarry);
+    // No hubRows step: those only exist once a bubble is adopted, so including
+    // them anywhere in this chain reintroduces the switch-on-adopt by definition.
+    const anchorDistanceM=(Number.isFinite(bagAnchorM)&&bagAnchorM>0?bagAnchorM:null)
+      ||Number(practiceRows[0]?.actualDistanceM)
+      ||Number(practiceShape?.baseDistanceM)
+      ||null;
     const domainRows=overlayRows
       .concat(hubRows)
       .concat(showPracticeLayer?gdShotBubbleOverlayDistanceExtentRows(overlayRows,practiceBubbleOffset):[])
@@ -5146,17 +6211,32 @@
       const ry=gdShotChartClamp((maxY-minY)/2+7,9,32);
       return `<ellipse class="gdPracticeClusterMarker gdShotChartClubOval practice" data-source="cluster-marker" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" rx="${rx.toFixed(1)}" ry="${ry.toFixed(1)}" fill="rgba(255,210,135,.82)" fill-opacity=".014" stroke="rgba(255,210,135,.82)" stroke-width=".7" stroke-opacity=".46" stroke-dasharray="1 5" stroke-linecap="round" pointer-events="none"/>`;
     }
-	    const normalisedRows=gdPracticeNormalisedPlotRows(shots);
-	    const normalisedBaselines=gdPracticeNormalisedClubBaselines(shots);
-	    const myBubbleParts=hubRows.length&&gdPracticeHasBubbleOffset(hubOffset)?gdPracticeNormalisedBubbleParts(hubRows,hubOffset,normalisedBaselines):[];
-	    const practiceBubbleParts=showPracticeLayer?gdPracticeNormalisedBubbleParts(overlayRows,practiceBubbleOffset,normalisedBaselines):[];
-	    const normalisedPlot=gdPracticeNormalisedPlotLayout(normalisedRows.concat(gdPracticeNormalisedBubbleExtentRows(myBubbleParts.concat(practiceBubbleParts))),{plotLeft:38,plotRight:458,plotTop,plotBottom});
-	    const graphOriginBottom=gdPracticeGraphOriginBottom();
-	    const graphTransform=graphOriginBottom?gdPracticeGraphOriginBottomTransform(normalisedPlot):"";
-	    const clubKeySource=normalisedRows.length?normalisedRows:dataRows;
+	    // Each club's own number: the saved bag carry when there is a real bag,
+	    // otherwise the median of that club's own shots. Same precedence as the
+	    // anchor above, so the dots and the bubbles are measured against the same
+	    // reference and "0" means the same thing for both.
+	    const clubShotDistances={};
+	    shots.forEach(shot=>{
+	      const key=gdShotBubbleOverlayClubKey(shot?.club);
+	      const actual=gdPracticeShotActualDistance(shot);
+	      if(!key||!Number.isFinite(actual)||actual<=0)return;
+	      (clubShotDistances[key]=clubShotDistances[key]||[]).push(actual);
+	    });
+	    const clubBaselineFor=club=>{
+	      const key=gdShotBubbleOverlayClubKey(club);
+	      const bagCarry=Number(anchorBagByClub[key]?.actualDistanceM);
+	      if(Number.isFinite(bagCarry)&&bagCarry>0)return bagCarry;
+	      const median=gdShotBubbleMedian(clubShotDistances[key]||[]);
+	      return Number.isFinite(median)&&median>0?median:NaN;
+	    };
+	    const anchorRelativeRows=gdBubbleRelativeShotRows(shots,clubBaselineFor);
+	    const myBubbleParts=anchorDistanceM&&hubRows.length&&gdPracticeHasBubbleOffset(hubOffset)?gdBubbleRelativeParts(hubRows,hubOffset,anchorDistanceM):[];
+	    const practiceBubbleParts=anchorDistanceM&&showPracticeLayer?gdBubbleRelativeParts(overlayRows,practiceBubbleOffset,anchorDistanceM):[];
+	    const normalisedPlot=gdPracticeNormalisedPlotLayout();
+	    const clubKeySource=anchorRelativeRows.length?anchorRelativeRows:dataRows;
 	    const clubKey=[...new Set(clubKeySource.map(row=>row.club||"Unknown"))].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})).slice(0,6);
 	    const clubKeyDropdown=gdPracticeClubKeyDropdownHTML(clubKey);
-	    const pts=normalisedRows.slice(0,70).map(row=>{
+	    const pts=anchorRelativeRows.slice(0,70).map(row=>{
 	      const point=gdPracticeNormalisedPlotPoint(normalisedPlot,row,row.index);
 	      if(!point)return "";
 	      const state=pointStateByIndex.get(row.index)||{};
@@ -5166,18 +6246,19 @@
       return gdShotChartDotSvg(point,{fill:colour,opacity,radius:2.2,shape:"circle",stroke:point.clipped?"rgba(255,255,255,.26)":"",strokeWidth:"1"});
 	    }).join("");
 	    let myBubbleMotionStyle="";
-	    if(adoptionMotionActive&&myBubbleParts.length&&gdPracticeHasBubbleOffset(adoptionMotion.fromOffset)&&gdPracticeHasBubbleOffset(hubOffset)){
+	    if(adoptionMotionActive&&myBubbleParts.length&&anchorDistanceM&&gdPracticeHasBubbleOffset(adoptionMotion.fromOffset)&&gdPracticeHasBubbleOffset(hubOffset)){
 	      const geo=gdPracticeGraphInternalGeometry(normalisedPlot);
-	      const anchor=myBubbleParts[0];
-	      const toDistance=Number(adoptionMotion.toDistance)||Number(anchor.baseDistanceM)||155;
+	      const anchorPart=myBubbleParts[0];
+	      const toDistance=Number(adoptionMotion.toDistance)||Number(anchorPart.baseDistanceM)||anchorDistanceM;
 	      const fromDistance=Number(adoptionMotion.fromDistance)||toDistance;
-	      const anchorBaseline=(Number(anchor.baseDistanceM)||toDistance)-anchor.depthM;
-	      const dx=geo?geo.xForDepth(fromDistance-anchorBaseline)-geo.xForDepth(anchor.depthM):NaN;
-	      const dy=geo?geo.yForAngle(Number(adoptionMotion.fromOffset)||0)-geo.yForAngle(Number(hubOffset)||0):NaN;
+	      const fromDepthPct=(fromDistance-anchorDistanceM)/anchorDistanceM*100;
+	      // Aim moves the bubble across, distance moves it up/down.
+	      const dx=geo?geo.xForAngle(Number(adoptionMotion.fromOffset)||0)-geo.xForAngle(Number(hubOffset)||0):NaN;
+	      const dy=geo?geo.yForDepth(fromDepthPct)-geo.yForDepth(anchorPart.depthM):NaN;
 	      if(Number.isFinite(dx)&&Number.isFinite(dy))myBubbleMotionStyle=`--gd-practice-adopt-x:${dx.toFixed(1)}px;--gd-practice-adopt-y:${dy.toFixed(1)}px;`;
 	    }
 	    const myBubbleKind=String(myBubbleState?.kind||"default");
-	    const myBubbleCombined=myBubbleKind==="pending"||myBubbleKind==="adopted-current"||adoptionMotionActive;
+	    const myBubbleCombined=myBubbleKind==="adopted-current"||adoptionMotionActive;
 	    const myBubbleLabel=myBubbleCombined?"My Bubble":String(myBubbleState?.graphLabel||"MY");
 	    const myBubbleLayer=myBubbleParts.length?gdPracticeNormalisedBubbleLayerMarkup(myBubbleParts,normalisedPlot,{
 	      offsetDeg:hubOffset,
@@ -5193,14 +6274,14 @@
 	      labelText:"PRACTICE",
 	      label:!myBubbleCombined
 	    }):"";
-		    return `<svg class="gdPracticeGraphSvg ${graphOriginBottom?"originBottom":""}" viewBox="0 0 480 260" role="img" aria-label="Practice Data normalised plot" data-origin-bottom="${graphOriginBottom?"1":"0"}" data-practice-offset-deg="${gdPracticeHasBubbleOffset(practiceBubbleOffset)?Number(practiceBubbleOffset).toFixed(2):""}" data-hub-offset-deg="${gdPracticeHasBubbleOffset(hubOffset)?Number(hubOffset).toFixed(2):""}">
-		      <g class="gdPracticeGraphCanvas"${graphTransform?` transform="${graphTransform}"`:""}>
-		      ${gdPracticeNormalisedBackdropSvg(normalisedPlot,"",{hideText:graphOriginBottom})}
-	      ${pts}
-	      ${practiceBubbleLayer}
-	      ${myBubbleLayer}
-	      </g>
-	    </svg>${gdPracticeGraphRotateControlHTML(graphOriginBottom)}${clubKeyDropdown}${gdShotBubbleOverlayButton("practice")}`;
+		    return `<svg class="gdPracticeGraphSvg" viewBox="${gdPracticeNormalisedViewBox(normalisedPlot)}" role="img" aria-label="Practice Data relative plot" data-practice-offset-deg="${gdPracticeHasBubbleOffset(practiceBubbleOffset)?Number(practiceBubbleOffset).toFixed(2):""}" data-hub-offset-deg="${gdPracticeHasBubbleOffset(hubOffset)?Number(hubOffset).toFixed(2):""}" data-anchor-distance-m="${anchorDistanceM?Number(anchorDistanceM).toFixed(1):""}">
+		      <g class="gdPracticeGraphCanvas">
+		      ${gdPracticeNormalisedBackdropSvg(normalisedPlot,"",{subtitle:"Distance vs My Bubble (%) \u00b7 aim angle (\u00b0)"})}
+      ${pts}
+      ${practiceBubbleLayer}
+      ${myBubbleLayer}
+      </g>
+    </svg>${clubKeyDropdown}${gdShotBubbleOverlayButton("practice")}`;
 	  }
   const gdPracticeBubbleToleranceFields=[
     "launchMonitorCluster.clusterHunterPct",
@@ -6005,37 +7086,98 @@
 		    if(sourceIds.some(id=>ids.has(id)))return " This import was used for the current My Bubble. My Bubble will remain unchanged.";
 		    return source?.active&&ids.size?" My Bubble will remain unchanged. Reset My Bubble separately if needed.":"";
 		  }
+		  // IN-APP CONFIRMATION. window.confirm is silently suppressed in the app's
+		  // embedded webview: it returns false INSTANTLY without ever showing a dialog.
+		  // Every destructive action gated on it therefore did nothing at all - no
+		  // toast, no error, no change - which is exactly what "delete isn't working"
+		  // turned out to be. Do not reintroduce window.confirm for these paths.
+		  // Promise form, for await-style call sites:
+		  //   if(!await gdConfirmDialog({...}))return false;   // drop-in for confirm()
+		  // Resolves false if there is no DOM to draw into, so a missing dialog can
+		  // never silently approve a destructive action.
+		  function gdConfirmDialog(options){
+		    const opts=typeof options==="string"?{message:options}:(options||{});
+		    return new Promise(resolve=>{
+		      if(!document?.body){resolve(false);return;}
+		      document.getElementById("gdConfirmOverlay")?.remove();
+		      const overlay=document.createElement("div");
+		      overlay.id="gdConfirmOverlay";
+		      overlay.className="gdConfirmOverlay";
+		      overlay.innerHTML=`<div class="gdConfirmSheet" role="alertdialog" aria-modal="true" aria-label="${gdEscapeHTML(opts.title||"Are you sure?")}">
+		        <strong>${gdEscapeHTML(opts.title||"Are you sure?")}</strong>
+		        <p>${gdEscapeHTML(opts.message||"")}</p>
+		        <div class="gdConfirmActions">
+		          <button type="button" data-gd-confirm="cancel">${gdEscapeHTML(opts.cancelLabel||"Cancel")}</button>
+		          <button type="button" class="danger" data-gd-confirm="ok">${gdEscapeHTML(opts.confirmLabel||"Delete")}</button>
+		        </div>
+		      </div>`;
+		      let settled=false;
+		      const finish=value=>{if(settled)return;settled=true;overlay.remove();resolve(value);};
+		      overlay.addEventListener("click",event=>{
+		        if(event.target===overlay)return finish(false);
+		        const action=event.target?.dataset?.gdConfirm;
+		        if(action==="cancel")return finish(false);
+		        if(action==="ok")return finish(true);
+		      });
+		      document.body.appendChild(overlay);
+		    });
+		  }
+		  // Callback form, for onclick handlers that must return false synchronously.
+		  function gdConfirmAction(options,onConfirm){
+		    gdConfirmDialog(options).then(ok=>{
+		      if(!ok||typeof onConfirm!=="function")return;
+		      try{onConfirm();}catch(e){console.warn("[GolfDaddy] confirm action failed",e);}
+		    });
+		    return false;
+		  }
 		  function gdPracticeDeleteImports(importIds){
 		    const ids=(Array.isArray(importIds)?importIds:[importIds]).map(id=>String(id||"").trim()).filter(Boolean);
 		    if(!ids.length){gdLmToast("No practice imports selected");return false;}
 		    const warning=gdPracticeCurrentMyBubbleImportWarning(ids);
 		    const count=ids.length;
-		    if(!confirm(`Delete ${count} practice import${count===1?"":"s"}? This hides import metadata, source rows, native shots, debug events and the generated Practice Bubble for the import.${warning}`))return false;
+		    return gdConfirmAction({
+		      title:`Delete ${count} practice import${count===1?"":"s"}?`,
+		      message:`This hides import metadata, source rows, native shots, debug events and the generated Practice Bubble for the import.${warning}`,
+		      confirmLabel:"Delete"
+		    },()=>gdPracticeDeleteImportsConfirmed(ids));
+		  }
+		  function gdPracticeDeleteImportsConfirmed(ids){
 		    const nativeApi=gdNativePracticeApi&&gdNativePracticeApi();
 		    const launchApi=window.GolfDaddyLaunchMonitorData;
-		    let deletedRows=0;
-		    let deletedImports=0;
+		    // MAX, not sum. Since the native->launch-monitor bridge, one logical import
+		    // is mirrored in BOTH stores under the same importBatchId, so adding the two
+		    // results double-counts it - deleting one import of 6 shots reported
+		    // "2 imports (12 rows)". The larger of the two is the honest figure.
+		    let nativeRows=0,nativeImports=0,launchRows=0,launchImports=0;
 		    safe(()=>{
 		      if(nativeApi&&typeof nativeApi.deleteSelectedPracticeImports==="function"){
 		        const result=nativeApi.deleteSelectedPracticeImports(ids);
-		        deletedRows+=Number(result?.deletedRows)||0;
-		        deletedImports+=Number(result?.deletedImports)||0;
+		        nativeRows=Number(result?.deletedRows)||0;
+		        nativeImports=Number(result?.deletedImports)||0;
 		      }
 		    },null);
 		    safe(()=>{
 		      if(launchApi&&typeof launchApi.deleteSelectedPracticeImports==="function"){
 		        const result=launchApi.deleteSelectedPracticeImports(ids);
-		        deletedRows+=Number(result?.deletedShots)||0;
-		        deletedImports+=Number(result?.deletedImports)||0;
+		        launchRows=Number(result?.deletedShots)||0;
+		        launchImports=Number(result?.deletedImports)||0;
 		      }
 		    },null);
+		    const deletedRows=Math.max(nativeRows,launchRows);
+		    const deletedImports=Math.max(nativeImports,launchImports);
 		    ids.forEach(id=>delete gdPracticeImportSelected[id]);
 		    if(!gdPracticeSelectedImportIds().length)gdPracticeImportSelectMode=false;
 		    gdPracticeDebugEnsureRun({sourceName:"Practice import delete",sourceType:"admin"});
-		    gdPracticeDebugCheckpoint("practice_import_deleted","success",{counts:{imports:ids.length,rows:deletedRows},raw:{importIds:ids}});
+		    // Report what ACTUALLY happened. This used to toast
+		    // `deletedImports||ids.length`, so a delete that matched no records still
+		    // said "Deleted 1 practice import" - which is exactly why a broken delete
+		    // looked like a working one.
+		    const deletedNothing=!deletedImports&&!deletedRows;
+		    gdPracticeDebugCheckpoint("practice_import_deleted",deletedNothing?"warning":"success",{counts:{imports:deletedImports,rows:deletedRows,requested:ids.length},raw:{importIds:ids}});
 		    renderPracticeData(true);
 		    if(typeof window.gdRenderDataHubStatus==="function")window.gdRenderDataHubStatus();
-		    gdLmToast(`Deleted ${deletedImports||ids.length} practice import${(deletedImports||ids.length)===1?"":"s"}`);
+		    if(deletedNothing)gdLmToast(`Nothing deleted - no stored rows matched ${ids.length===1?"that import":"those imports"}`);
+		    else gdLmToast(`Deleted ${deletedImports||1} practice import${(deletedImports||1)===1?"":"s"} (${deletedRows} row${deletedRows===1?"":"s"})`);
 		    return false;
 		  }
 		  function gdPracticeDeleteSelectedImports(){
@@ -6047,7 +7189,13 @@
 		    const scope=safe(()=>launchApi?.activePlayerScope?.()||nativeApi?.activePlayerScope?.(),{})||{};
 		    const playerId=String(scope.playerId||"").trim();
 		    if(!playerId){gdLmToast("Player scope missing");return false;}
-		    if(!confirm("Clear all practice imports for this player? This is player-scoped only and My Bubble will remain unchanged."))return false;
+		    return gdConfirmAction({
+		      title:"Clear the practice library?",
+		      message:"Clears all practice imports for this player. Player-scoped only, and My Bubble is left unchanged.",
+		      confirmLabel:"Clear"
+		    },()=>gdPracticeClearLibraryForPlayerConfirmed(playerId,launchApi,nativeApi));
+		  }
+		  function gdPracticeClearLibraryForPlayerConfirmed(playerId,launchApi,nativeApi){
 		    let deleted=0;
 		    safe(()=>{if(nativeApi&&typeof nativeApi.clearPracticeLibraryForPlayer==="function")deleted+=Number(nativeApi.clearPracticeLibraryForPlayer(playerId)?.deletedImports)||0;},null);
 		    safe(()=>{if(launchApi&&typeof launchApi.clearPracticeLibraryForPlayer==="function")deleted+=Number(launchApi.clearPracticeLibraryForPlayer(playerId)?.deletedImports)||0;},null);
@@ -6151,7 +7299,13 @@
 	      gdLmToast("No practice shots selected");
 	      return false;
 	    }
-	    if(!confirm(`Delete ${ids.length} selected practice shot${ids.length===1?"":"s"}?`))return false;
+	    return gdConfirmAction({
+      title:`Delete ${ids.length} practice shot${ids.length===1?"":"s"}?`,
+      message:"The selected shots are removed from practice data.",
+      confirmLabel:"Delete"
+    },()=>gdPracticeDeleteSelectedEvidenceShotsConfirmed(ids));
+  }
+  function gdPracticeDeleteSelectedEvidenceShotsConfirmed(ids){
 	    const api=window.GolfDaddyLaunchMonitorData;
 	    if(!api||typeof api.deleteShots!=="function"){
 	      gdLmToast("Practice delete is not ready");
@@ -6306,7 +7460,7 @@
     const compact=String(variant||"")==="compact";
     return `<div class="gdPracticeSandboxControls ${compact?"compact":""}"><div><strong>Local test inputs</strong><span>${compact?"Native-shaped sandbox rows.":"Temporary native-shaped rows for UI testing."}</span></div><div class="gdPracticeSandboxButtons"><button type="button" data-gd-practice-sandbox-action="simulate" data-gd-practice-sandbox-scenario="ready">Simulate import</button><button type="button" data-gd-practice-sandbox-action="load" data-gd-practice-sandbox-scenario="ready">Ready rows</button><button type="button" data-gd-practice-sandbox-action="load" data-gd-practice-sandbox-scenario="sparse">Sparse rows</button><button type="button" data-gd-practice-sandbox-action="load" data-gd-practice-sandbox-scenario="distance">Distance mismatch</button><button type="button" data-gd-practice-sandbox-action="clear">Clear</button><button type="button" data-gd-practice-sandbox-action="bag" data-gd-practice-sandbox-mode="empty">Bag empty</button><button type="button" data-gd-practice-sandbox-action="bag" data-gd-practice-sandbox-mode="matched">Bag matched</button><button type="button" data-gd-practice-sandbox-action="bag" data-gd-practice-sandbox-mode="different">Bag differs</button></div></div>`;
   }
-  Object.assign(window,{gdPracticeLoadSandboxNativeRows,gdPracticeSimulateSandboxImport,gdPracticeSetSandboxBag,gdPracticeClearSandboxData,gdPracticeSetDistanceLinkClub,gdPracticeGenerateBubble,gdPracticeAdoptBubbleFromAction,gdPracticeApplyBagSuggestions,gdPracticeToggleBagSuggestions,gdPracticeToggleBagAdapt,gdPracticeBagAdaptRemember,gdPracticeBagAdaptChanged,gdPracticeUndoBagAdapt});
+  Object.assign(window,{gdPracticeLoadSandboxNativeRows,gdPracticeSimulateSandboxImport,gdPracticeSetSandboxBag,gdPracticeClearSandboxData,gdPracticeSetDistanceLinkClub,gdPracticeGenerateBubble,gdPracticeSaveBubbleFromAction,gdPracticeAdoptBubbleFromAction,gdPracticeUnadoptBubbleFromAction,gdPracticeApplyBagSuggestions,gdPracticeToggleBagSuggestions,gdPracticeToggleBagAdapt,gdPracticeBagAdaptRemember,gdPracticeBagAdaptChanged,gdPracticeUndoBagAdapt});
 
 			  function gdRenderPracticeEvidenceList(analysis){
 			    const root=byId("gdPracticeEvidenceList");
@@ -6332,8 +7486,14 @@
 			      const clubKey=gdPracticeClubKey(club);
 			      groupedByClub[clubKey]=groupedByClub[clubKey]||{club,rows:[],imports:{}};
 			      groupedByClub[clubKey].rows.push(row);
-			      const importId=String(row.importBatchId||row.captureId||row.sessionId||row.timestamp||"unknown").trim()||"unknown";
-			      groupedByClub[clubKey].imports[importId]=groupedByClub[clubKey].imports[importId]||{id:importId,meta:importMeta[importId]||{},rows:[]};
+			      // Both stores match a delete on importBatchId/importId/captureId/sessionId
+			      // and NOTHING else. Grouping may still fall back to timestamp/"unknown" so
+			      // the rows stay visible, but such a group can never be deleted - the id
+			      // matches no record. Track that so the UI can say so instead of firing a
+			      // delete that silently does nothing.
+			      const matchableId=String(row.importBatchId||row.captureId||row.sessionId||"").trim();
+			      const importId=matchableId||String(row.timestamp||"unknown").trim()||"unknown";
+			      groupedByClub[clubKey].imports[importId]=groupedByClub[clubKey].imports[importId]||{id:importId,deletable:!!matchableId,meta:importMeta[importId]||{},rows:[]};
 			      groupedByClub[clubKey].imports[importId].rows.push(row);
 			    });
 			    const clubs=Object.values(groupedByClub).sort((a,b)=>{
@@ -6360,7 +7520,9 @@
 			        const dateLabel=gdPracticeImportDate(meta.timestamp||importRows[0]?.timestamp||"");
 			        const selected=!!gdPracticeImportSelected[importId];
 			        const checkbox=adminOpen&&gdPracticeImportSelectMode?`<label class="gdPracticeEvidenceUploadSelect" onclick="event.stopPropagation()"><input type="checkbox" value="${gdEscapeHTML(importId)}" ${selected?"checked":""} onchange="gdPracticeToggleImportSelection(this)"><span>Select</span></label>`:"";
-			        const importActions=`<button type="button" class="danger gdPracticeDeleteX" title="Delete this import" aria-label="Delete this import" onclick="return gdPracticeDeleteImports(${gdPracticeJsArg(importId)})">&times;</button>`;
+			        const importActions=group.deletable
+			          ?`<button type="button" class="danger gdPracticeDeleteX" title="Delete this import" aria-label="Delete this import" onclick="return gdPracticeDeleteImports(${gdPracticeJsArg(importId)})">&times;</button>`
+			          :`<button type="button" class="danger gdPracticeDeleteX" disabled title="These rows carry no import id, so they cannot be deleted as an import. Use Clear practice library." aria-label="Not deletable - no import id">&times;</button>`;
 			        // Quiet row: just the upload date (club is the section header). Clicking
 			        // the row expands the import's raw data table directly beneath it.
 			        // (Buttons/inputs inside <summary> activate themselves, not the toggle.)
@@ -6707,6 +7869,22 @@
       gdOpenCourseData:openCourseData,
       gdOpenPracticeData:openPracticeData,
       gdSetCourseDataTab:gdSetCourseDataTab,
+      gdCourseDataSurfaceSvg:gdCourseDataSurfaceSvg,
+      gdCourseBubbleScaleChanged:gdCourseBubbleScaleChanged,
+      // Shared by every destructive action across the app - window.confirm is dead
+      // in the embedded webview.
+      gdConfirmAction:gdConfirmAction,
+      gdConfirmDialog:gdConfirmDialog,
+      // Inline onclick handlers in the admin panel need these on window.
+      gdSandboxGenerateCourse:gdSandboxGenerateCourse,
+      gdSandboxInjectCourse:gdSandboxInjectCourse,
+      gdSandboxGeneratePractice:gdSandboxGeneratePractice,
+      gdSandboxSendPractice:gdSandboxSendPractice,
+      // gd-app-core's gdCourseBubbleValueLabel guards on `typeof
+      // gdCourseBubbleSource === "function"`, which was always false while this
+      // stayed inside the IIFE - so the Course Bubble value read "Bubble not
+      // ready" no matter how good the fit was.
+      gdCourseBubbleSource:gdCourseBubbleSource,
       gdSetPracticeDataTab:gdSetPracticeDataTab,
       gdTogglePracticeAdmin:gdTogglePracticeAdmin,
       gdOpenPracticeAdminTab:gdOpenPracticeAdminTab,
@@ -6748,6 +7926,7 @@
       gdPracticeCopyEmailAddress:gdPracticeCopyEmailAddress,
       gdPracticeRefreshEmailLane:gdPracticeRefreshEmailLane,
       gdPracticeLoadEmailBatch:gdPracticeLoadEmailBatch,
+      gdPracticeLoadEmailPhotoBatch:gdPracticeLoadEmailPhotoBatch,
       gdPracticeSetPlotMode:gdPracticeSetPlotMode,
       gdPracticeImportCanStart:gdPracticeImportCanStart,
       gdPracticeStartImportJob:gdPracticeStartImportJob,
@@ -6825,6 +8004,7 @@
 	      gdRenderBubbleOffsetHub:gdRenderBubbleOffsetHub,
       gdBubbleOffsetEdit:gdBubbleOffsetEdit,
       gdBubbleOffsetSave:gdBubbleOffsetSave,
+      gdClearMyBubble:gdClearMyBubble,
       gdLoadPracticeDemo:loadPracticeDemo,
       gdClearPracticeData:clearPracticeData,
 	      gdCanonicalShellBack:function(){return window.GDShell?.back?.({source:"legacy-canonical-back"});},

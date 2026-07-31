@@ -210,7 +210,7 @@ Outputs:
 
 Notes:
 - The picker calls only `runCourseMappingAttempt` / `gdRunCourseMappingAttempt` for mapping.
-- The mapping order remains saved playable course -> OSM AutoMapper -> native Course Geometry Resolver / hole labeller -> one-tap live-map fallback.
+- The mapping order remains saved playable course -> server course package (AutoMapper, falling back to the Native Course Geometry Resolver / hole labeller server-side if OSM has shapes but no hole numbers - both run entirely on the server now) -> one-tap live-map fallback.
 - Legacy globals remain compatibility aliases into `window.GDCoursePicker`.
 
 ---
@@ -350,6 +350,59 @@ Rules:
 - Green truth is primary.
 - Fairway line supports orientation and unreachable-green anchoring.
 - Tee location is useful but not sacred.
+
+Server split (course-package migration, 2026-07-29): the OSM query/parse/hole-resolution
+algorithm above is now ported server-side, verbatim-equivalent, in
+`functions/lib/gd-automapper-core.mjs`, run by `functions/course-mapper-worker-background.mjs`
+against jobs queued through `functions/course-mapper-jobs.mjs` (table `course_mapper_jobs`).
+The Native Geometry Resolver fallback (numbers holes via scorecard-distance matching when OSM
+exposes shapes but no hole numbers) made the same move the same day, to
+`functions/lib/gd-geometry-resolver-core.mjs`, invoked from the same worker immediately after
+the AutoMapper pass, before the job is marked done. **Both systems are now 100% server-side.**
+
+The client-side top-level AutoMapper orchestrator (`autoMapOsmCourse`) and its scheduler
+(the direct-call branch of `scheduleOsmAutoMapForPlay`), and separately the entire client-side
+Native Geometry Resolver integration (its own OSM source-acquisition step, scorecard-evidence
+gathering, guide/frame math, and the `resolveCourseGeometryGuideBundle` orchestration that used
+to run it inline from `loadOsmGuideBundle`) have all been REMOVED from
+`scripts/gd-course-library-pin-lock.js` - per the architecture doc's acceptance criterion "No
+AutoMapper logic runs on the user's phone", now extended to cover the Native Geometry Resolver
+too. `runCourseMappingAttempt` now calls `resolveGeometryFromServerPackage()`, which checks
+`GET /api/course-package` and, as a side effect of that request, triggers a server mapping run
+if none exists yet (the server worker tries AutoMapper geometry AND the Native Geometry
+Resolver fallback before giving up). A miss there is not an error - it falls straight through
+to the manual/interactive green fallback (reason `server-map-not-ready`); there is no second
+client-side geometry source left to try. The manual "Auto" tool in the full-mapping flyout
+calls `runServerAutoMapTool()` (trigger + short poll + toast), not a local OSM scan.
+
+The client has zero geometry-resolution logic left. The only client-side consumer of OSM data
+remaining is `loadOsmGuideBundle` (plus its shared fetch/parse/cache helpers and
+`automapperDebugDetails`), which is unrelated to `runCourseMappingAttempt` entirely - it now
+exists solely for the live, unrelated manual "Full Mapping Mode" guide-line overlay feature
+(an operator-facing visual aid, not an automatic mapping path). `runCourseMappingAttempt` makes
+no Overpass calls at all any more, whether AutoMapper or Native Geometry Resolver flavored.
+
+---
+
+## Course Package Boundary Gate
+
+Owns:
+- The single decision of whether it is safe, right now, to swap a mid-round-arriving Full Map
+  Package into what GPS Play is rendering, versus holding it until the active hole changes.
+
+Must NOT own:
+- GPS Play rendering
+- Frame downloading, caching, or hydration
+- Hole tracking (it takes hole numbers as plain input; see
+  `scripts/inline/gd-course-package-boundary-gate-v1.js`)
+
+Inputs:
+- `armedAtHole` (the hole in play when a course-frames watch started) and `currentHole`
+  (read via `window.gdActivePlayingHole`), supplied by `gd-app-core.js`'s
+  `gdEnsureCourseFramesForPlay`/`gdActivateCourseVisualAtSafeBoundary`.
+
+Outputs:
+- `true`/`false` - safe to activate now, or hold and re-check later.
 
 ---
 

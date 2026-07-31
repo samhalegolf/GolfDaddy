@@ -143,7 +143,7 @@
     profileVisualCache.key = key;
     profileVisualCache.html = hasBubble
       ? `<div class="bubblePreview" style="--x:${b.x}%;--w:${b.w}px;--h:${b.h}px;--t:${b.t}deg"></div>`
-      : `<button class="profileIconPreview ${photo ? 'hasPhoto' : ''}" type="button" onclick="gd67OpenProfilePhotoPicker()" aria-label="Change profile photo"><img src="${esc(photo || 'assets/home/profile.png')}" alt="profile"></button>`;
+      : `<button class="profileIconPreview ${photo ? 'hasPhoto' : ''}" type="button" onclick="gd67OpenProfilePhotoPicker()" aria-label="Change profile photo"><img src="${esc(photo || 'assets/home/profile.png?v=040483c4')}" alt="profile"></button>`;
     return profileVisualCache.html;
   }
 
@@ -996,7 +996,7 @@
       <div class="wrap">
         <div class="heading authHeading">
           <div class="authBrand">
-            <span class="authMark" aria-hidden="true"><img src="assets/brand/cg-logo-white-g.png?v=clarity-20260531" alt=""></span>
+            <span class="authMark" aria-hidden="true"><img src="assets/brand/cg-logo-white-g.png?v=f3bf5530" alt=""></span>
             <div class="authTitle">Clarity Caddy</div>
           </div>
 	          <div class="authMode">${authMode === 'signup' ? 'Create account' : (authMode === 'reset' ? (isAccountSetupRoute() ? 'Set up account' : 'Set password') : 'Sign in')}</div>
@@ -1015,7 +1015,7 @@
         <div class="heading">
           <div class="kicker">Clarity Golf Systems</div>
           <div class="coachPortalTitle">
-            <span class="coachTitleMark" aria-hidden="true"><img src="assets/brand/cg-logo-white-g.png?v=clarity-20260531" alt=""></span>
+            <span class="coachTitleMark" aria-hidden="true"><img src="assets/brand/cg-logo-white-g.png?v=f3bf5530" alt=""></span>
             <h1>Coaching Portal</h1>
           </div>
           <p>${esc(`Signed in as ${account.name || 'Coach'}.`)} Select a player to open their profile and edit shot data.</p>
@@ -1558,13 +1558,28 @@
       return;
     }
     const label = target.name || target.email || 'this profile';
+    // window.confirm returns false instantly in the embedded webview without ever
+    // showing a dialog, so this removal silently did nothing there. The in-app
+    // dialog is used when available; the confirm fallback is kept so that a
+    // missing dialog owner can never approve the removal by default.
+    const run = () => {
+      accountAction(() => {
+        if (!api || typeof api.removeAccount !== 'function') throw new Error('Admin remove is not ready');
+        api.removeAccount(accountId);
+      }, 'Profile removed');
+      coachProfileView = 'directory';
+      scrollProfileTop();
+    };
+    if (typeof window.gdConfirmDialog === 'function') {
+      window.gdConfirmDialog({
+        title: `Remove ${label}?`,
+        message: 'Deletes the account, profile, bag and shot data from this workspace.',
+        confirmLabel: 'Remove'
+      }).then(ok => { if (ok) run(); });
+      return;
+    }
     if (!confirm(`Remove ${label}? This deletes the account, profile, bag and shot data from this workspace.`)) return;
-    accountAction(() => {
-      if (!api || typeof api.removeAccount !== 'function') throw new Error('Admin remove is not ready');
-      api.removeAccount(accountId);
-    }, 'Profile removed');
-    coachProfileView = 'directory';
-    scrollProfileTop();
+    run();
   }
 
   function generateCoachInvite() {

@@ -20,7 +20,7 @@ exports.handler = async function(event){
     ctaLabel: text(payload.ctaLabel, 80) || "Open Clarity",
     ctaUrl: safeUrl(payload.ctaUrl, siteUrl),
     eventType: text(payload.eventType, 80) || "account_activity",
-    logoUrl: safeUrl(payload.logoUrl, siteUrl) || new URL("/assets/brand/cg-logo-white-g.png", siteUrl).toString()
+    logoUrl: safeUrl(payload.logoUrl, siteUrl) || new URL("/assets/brand/cg-logo-white-g.png?v=f3bf5530", siteUrl).toString()
   };
 
   try{

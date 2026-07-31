@@ -6,9 +6,11 @@ const root = path.join(__dirname, "..");
 const index = fs.readFileSync(path.join(root, "index.html"), "utf8");
 const owner = fs.readFileSync(path.join(root, "scripts", "gd-course-location.js"), "utf8");
 const core = fs.readFileSync(path.join(root, "scripts", "gd-app-core.js"), "utf8");
+/* The admin Course Database moved out of core in the app/studio split - it is
+   studio-only now, so these assertions follow it rather than being deleted. */
+const adminDb = fs.readFileSync(path.join(root, "scripts", "studio", "gd-admin-course-db.js"), "utf8");
 const picker = fs.readFileSync(path.join(root, "scripts", "inline", "gd-course-picker-search-v2.js"), "utf8");
 const library = fs.readFileSync(path.join(root, "scripts", "gd-course-library-pin-lock.js"), "utf8");
-const resolver = fs.readFileSync(path.join(root, "scripts", "gd-course-geometry-resolver.js"), "utf8");
 const courseMaps = fs.readFileSync(path.join(root, "functions", "course-maps.mjs"), "utf8");
 const workflow = fs.readFileSync(path.join(root, ".github", "workflows", "structural-smoke.yml"), "utf8");
 
@@ -58,9 +60,10 @@ assert(core.includes("owner&&typeof owner.get===\"function\""), "core stored pin
 assert(core.includes("owner&&typeof owner.confirm===\"function\""), "core pin confirmation delegates to GDCourseLocation.confirm");
 assert(core.includes("owner&&typeof owner.attachToCourse===\"function\""), "core selected-course identity delegates to GDCourseLocation.attachToCourse");
 assert(core.includes('mark("confirmed-course-location");return false;'), "confirmed owner location can bypass the picker pin prompt");
-assert(core.includes("gdAdminCourseLocationMarkup(selected,payload)"), "Course Database/admin overview displays course-location status");
-assert(core.includes("window.gdAdminCourseLocationEdit=gdAdminCourseLocationEdit"), "Course Database/admin exposes edit location action");
-assert(core.includes("window.gdAdminCourseLocationRemove=gdAdminCourseLocationRemove"), "Course Database/admin exposes remove location action");
+assert(adminDb.includes("gdAdminCourseLocationMarkup(selected,payload)"), "Course Database/admin overview displays course-location status");
+assert(index.includes('data-gd-surface="studio" src="scripts/studio/gd-admin-course-db.js'), "the admin Course Database loads as a studio-only script");
+assert(adminDb.includes("window.gdAdminCourseLocationEdit=gdAdminCourseLocationEdit"), "Course Database/admin exposes edit location action");
+assert(adminDb.includes("window.gdAdminCourseLocationRemove=gdAdminCourseLocationRemove"), "Course Database/admin exposes remove location action");
 
 assert(picker.includes("window.GDCourseLocation.propose"), "picker GPS request creates proposal-only course-location context");
 assert(picker.includes("owner.attachToCourse(applied,{requireConfirmed:false})"), "picker normalizes selected-course identity through owner");
@@ -72,8 +75,11 @@ assert(library.includes("owner.attachToCourse({...snap,courseCentre:opts.courseC
 assert(library.includes("const resolved=owner&&typeof owner.resolve==='function'&&!isManualGpsCourse(c)?owner.resolve(c,{requireConfirmed:false}):null;"), "assumed-course matching consults owner before GPS fallback");
 assert(library.includes("const resolved=owner&&typeof owner.get==='function'?owner.get(course):null;"), "Course Library finder reads owner-confirmed centre first");
 assert(library.includes("owner.confirm(c,{lat,lng},{source:source||'course-library-finder'})"), "Course Library finder saves through owner");
-assert(library.includes("owner.remove(saved,{source:'course-library-remove-location'})"), "Course Library clear removes through owner");
-assert(resolver.includes("toPoint(input.courseCentre)") && resolver.includes("toPoint(input.courseCenter)"), "native resolver remains a consumer of centre input only");
+/* The library's "clear this course's location" control went with the mapper UI
+   (2026-07-28). Removing a whole course replaced it, and carries the same
+   obligation: the owner holds the picker pin in a different store and caches the
+   active centre, so a delete that skips it strands both. */
+assert(library.includes("owner.remove(course,{source:'course-library-remove-course'})"), "Course Library course removal releases the location through owner");
 
 assert(courseMaps.includes("courseLocation: locationPoint ? {"), "cloud course-map sanitizer preserves owner metadata");
 assert(courseMaps.includes("courseLat: finite(input.courseLat ?? (locationPoint && locationPoint.lat))"), "cloud course-map sanitizer publishes canonical centre columns");

@@ -1,0 +1,240 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Saved frame vs live map — speed test</title>
+<style>
+  body{font:14px/1.5 -apple-system,system-ui,sans-serif;margin:0;padding:20px;background:#0d1117;color:#e6edf3}
+  h1{font-size:18px;margin:0 0 4px}
+  .sub{color:#8b949e;margin-bottom:16px}
+  button{background:#238636;color:#fff;border:0;padding:10px 18px;border-radius:6px;font-size:14px;cursor:pointer}
+  button:disabled{background:#30363d;color:#8b949e;cursor:default}
+  table{border-collapse:collapse;margin-top:16px;width:100%;max-width:820px}
+  th,td{text-align:left;padding:6px 10px;border-bottom:1px solid #30363d;font-variant-numeric:tabular-nums}
+  th{color:#8b949e;font-weight:500}
+  .num{text-align:right}
+  #log{white-space:pre-wrap;font:12px/1.5 ui-monospace,Menlo,monospace;color:#8b949e;margin-top:16px;max-height:340px;overflow:auto}
+  .win{color:#3fb950;font-weight:600}
+  .lose{color:#f85149;font-weight:600}
+  label{color:#8b949e;margin-right:14px}
+  input{background:#161b22;border:1px solid #30363d;color:#e6edf3;padding:4px 6px;border-radius:4px;width:70px}
+</style>
+</head>
+<body>
+<h1>Saved frame vs live map</h1>
+<div class="sub">Real ArcGIS World_Imagery z18 tiles over Pupuke Golf Course (-36.7520, 174.7520). Mirrors what gd-captured-hole-frame-camera-v19 actually does.</div>
+
+<div style="margin-bottom:14px">
+  <label>master W <input id="cw" value="4084"></label>
+  <label>master H <input id="ch" value="3923"></label>
+  <label>viewport W <input id="vw" value="1080"></label>
+  <label>viewport H <input id="vh" value="2160"></label>
+  <label>JPEG q <input id="q" value="0.85"></label>
+</div>
+<button id="run">Run benchmark</button>
+
+<table id="results"></table>
+<div id="log"></div>
+
+<script>
+const TILE = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
+const Z = 18, LAT = -36.7520289829156, LNG = 174.752032756805;
+const DB = "gd_bench_assets", STORE = "assets";
+
+const logEl = document.getElementById("log");
+function log(m){ logEl.textContent += m + "\n"; logEl.scrollTop = 1e9; }
+const now = () => performance.now();
+
+// Slippy tile maths, same projection Leaflet uses.
+function lngToX(lng,z){ return (lng+180)/360*Math.pow(2,z); }
+function latToY(lat,z){
+  const r = lat*Math.PI/180;
+  return (1 - Math.log(Math.tan(r)+1/Math.cos(r))/Math.PI)/2*Math.pow(2,z);
+}
+function tileUrl(x,y,z,bust){
+  return TILE.replace("{z}",z).replace("{y}",y).replace("{x}",x) + (bust?("?_="+bust):"");
+}
+
+function loadImage(url){
+  return new Promise((res,rej)=>{
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = ()=>res(img);
+    img.onerror = ()=>rej(new Error("tile failed "+url));
+    img.src = url;
+  });
+}
+
+function openDb(){
+  return new Promise((res)=>{
+    const req = indexedDB.open(DB,1);
+    req.onupgradeneeded = ()=>{ req.result.createObjectStore(STORE,{keyPath:"path"}); };
+    req.onsuccess = ()=>res(req.result);
+    req.onerror = ()=>res(null);
+  });
+}
+function idbPut(db,path,value){
+  return new Promise((res)=>{
+    const tx = db.transaction(STORE,"readwrite");
+    tx.objectStore(STORE).put({path,dataUrl:value,updatedAt:Date.now()});
+    tx.oncomplete = ()=>res(true);
+    tx.onerror = tx.onabort = ()=>res(false);
+  });
+}
+function idbGet(db,path){
+  return new Promise((res)=>{
+    const tx = db.transaction(STORE,"readonly");
+    const r = tx.objectStore(STORE).get(path);
+    r.onsuccess = ()=>res(r.result ? r.result.dataUrl : null);
+    r.onerror = ()=>res(null);
+  });
+}
+
+const rows = [];
+function row(phase, metric, value, note){ rows.push({phase,metric,value,note:note||""}); render(); }
+function render(){
+  const t = document.getElementById("results");
+  t.innerHTML = "<tr><th>Phase</th><th>Metric</th><th class='num'>Value</th><th>Note</th></tr>" +
+    rows.map(r=>`<tr><td>${r.phase}</td><td>${r.metric}</td><td class='num'>${r.value}</td><td>${r.note}</td></tr>`).join("");
+}
+const ms = v => v.toFixed(0)+" ms";
+const mb = b => (b/1048576).toFixed(2)+" MB";
+
+async function run(){
+  rows.length = 0; logEl.textContent = "";
+  const CW = +cw.value, CH = +ch.value, VW = +vw.value, VH = +vh.value, Q = +q.value;
+
+  // ---------- Build the master exactly as the app does: composite z18 tiles ----------
+  const cols = Math.ceil(CW/256), tilesRows = Math.ceil(CH/256);
+  const cx = lngToX(LNG,Z), cy = latToY(LAT,Z);
+  const x0 = Math.floor(cx - cols/2), y0 = Math.floor(cy - tilesRows/2);
+  const total = cols*tilesRows;
+  log(`master ${CW}x${CH} = ${(CW*CH/1e6).toFixed(1)} MP, needs ${cols}x${tilesRows} = ${total} tiles @ z${Z}`);
+
+  const canvas = document.createElement("canvas");
+  canvas.width = CW; canvas.height = CH;
+  const ctx = canvas.getContext("2d");
+
+  let t = now(), loaded = 0, failed = 0;
+  const jobs = [];
+  for(let ty=0; ty<tilesRows; ty++){
+    for(let tx=0; tx<cols; tx++){
+      jobs.push(
+        loadImage(tileUrl(x0+tx, y0+ty, Z))
+          .then(img=>{ ctx.drawImage(img, tx*256, ty*256, 256, 256); loaded++; })
+          .catch(()=>{ failed++; })
+      );
+    }
+  }
+  await Promise.all(jobs);
+  const fetchMs = now()-t;
+  log(`composite: ${loaded} loaded, ${failed} failed in ${fetchMs.toFixed(0)} ms`);
+  row("0. capture","fetch + composite "+total+" tiles", ms(fetchMs), failed?`${failed} failed`:"full coverage");
+
+  // ---------- Encode: this is the real per-hole cost ----------
+  t = now();
+  const dataUrl = canvas.toDataURL("image/jpeg", Q);
+  const encodeMs = now()-t;
+  const jpegBytes = Math.round(dataUrl.length*0.75);
+  row("0. capture","toDataURL(jpeg,"+Q+")", ms(encodeMs), "");
+  row("0. capture","JPEG bytes / hole", mb(jpegBytes), "");
+  row("0. capture","base64 string in IDB", mb(dataUrl.length), "what the app actually stores");
+  row("0. capture","× 18 holes", mb(dataUrl.length*18), "per course on device");
+  log(`encoded ${mb(jpegBytes)} jpeg -> ${mb(dataUrl.length)} base64`);
+
+  // ---------- Store, both ways ----------
+  const db = await openDb();
+  if(!db){ log("IndexedDB unavailable"); return; }
+
+  t = now(); await idbPut(db,"bench/base64", dataUrl); row("1. write","IDB put (base64 string)", ms(now()-t), "current behaviour");
+
+  const blob = await new Promise(r=>canvas.toBlob(r,"image/jpeg",Q));
+  t = now(); await idbPut(db,"bench/blob", blob); row("1. write","IDB put (Blob)", ms(now()-t), mb(blob.size));
+
+  canvas.width = canvas.height = 1; // release, as the app does
+
+  // ---------- PATH A: saved frame ----------
+  const view = document.createElement("canvas");
+  view.width = VW; view.height = VH;
+  const vctx = view.getContext("2d");
+
+  const aRuns = [];
+  for(let i=0;i<3;i++){
+    const t0 = now();
+    const stored = await idbGet(db,"bench/base64");
+    const tRead = now();
+    const img = new Image();
+    img.src = stored;
+    await img.decode();
+    const tDecode = now();
+    vctx.drawImage(img, 0,0,img.width,img.height, 0,0,VW,VH);
+    const tDraw = now();
+    aRuns.push({read:tRead-t0, decode:tDecode-tRead, draw:tDraw-tDecode, total:tDraw-t0});
+    log(`path A run ${i+1}: read ${(tRead-t0).toFixed(0)} decode ${(tDecode-tRead).toFixed(0)} draw ${(tDraw-tDecode).toFixed(0)}`);
+  }
+  const aMed = k => aRuns.map(r=>r[k]).sort((x,y)=>x-y)[1];
+  row("2. saved frame","IDB read (base64)", ms(aMed("read")), "median of 3");
+  row("2. saved frame","decode "+(CW*CH/1e6).toFixed(1)+" MP JPEG", ms(aMed("decode")), "median of 3");
+  row("2. saved frame","draw to viewport", ms(aMed("draw")), "");
+  const aTotal = aMed("total");
+  row("2. saved frame","TOTAL to first paint", ms(aTotal), "offline-capable");
+
+  // Blob variant, for comparison
+  const bRuns = [];
+  for(let i=0;i<3;i++){
+    const t0 = now();
+    const storedBlob = await idbGet(db,"bench/blob");
+    const bmp = await createImageBitmap(storedBlob);
+    const t1 = now();
+    vctx.drawImage(bmp, 0,0,bmp.width,bmp.height, 0,0,VW,VH);
+    bmp.close();
+    bRuns.push(now()-t0);
+  }
+  const bMed = bRuns.sort((x,y)=>x-y)[1];
+  row("2b. saved (Blob)","TOTAL to first paint", ms(bMed), "Blob + createImageBitmap");
+
+  // ---------- PATH B: live map, only the visible tiles ----------
+  const vCols = Math.ceil(VW/256), vRows = Math.ceil(VH/256);
+  const vTotal = vCols*vRows;
+  log(`live: viewport needs ${vCols}x${vRows} = ${vTotal} tiles`);
+
+  async function livePaint(bust){
+    const t0 = now();
+    const js = [];
+    let ok = 0;
+    for(let ty=0; ty<vRows; ty++){
+      for(let tx=0; tx<vCols; tx++){
+        js.push(
+          loadImage(tileUrl(x0+tx+40, y0+ty+40, Z, bust))
+            .then(img=>{ vctx.drawImage(img, tx*256, ty*256, 256, 256); ok++; })
+            .catch(()=>{})
+        );
+      }
+    }
+    await Promise.all(js);
+    return { ms: now()-t0, ok };
+  }
+
+  const cold = await livePaint(Date.now());   // cache-busted = true cold fetch
+  row("3. live map","fetch + paint "+vTotal+" visible tiles (cold)", ms(cold.ms), cold.ok+"/"+vTotal+" ok");
+  const warm = await livePaint(0);            // HTTP cache warm
+  row("3. live map","same, warm HTTP cache", ms(warm.ms), "");
+
+  // ---------- Verdict ----------
+  const faster = aTotal < cold.ms ? "saved frame" : "live map";
+  const ratio = (Math.max(aTotal,cold.ms)/Math.min(aTotal,cold.ms)).toFixed(1);
+  rows.push({phase:"VERDICT", metric:"faster to first paint (cold network)",
+    value:`<span class="${faster==='saved frame'?'win':'lose'}">${faster}</span>`, note:ratio+"× — "+ms(aTotal)+" vs "+ms(cold.ms)});
+  render();
+  log(`\nVERDICT: ${faster} wins by ${ratio}x`);
+}
+
+document.getElementById("run").addEventListener("click", async (e)=>{
+  e.target.disabled = true; e.target.textContent = "Running…";
+  try{ await run(); }catch(err){ log("ERROR: "+(err&&err.message||err)); }
+  e.target.disabled = false; e.target.textContent = "Run again";
+});
+</script>
+</body>
+</html>

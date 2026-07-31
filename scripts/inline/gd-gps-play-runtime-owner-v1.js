@@ -523,8 +523,26 @@
     }
   }
 
+  /* Owning the camera requires actually HAVING a surface for this hole.
+
+     The three checks below only say the captured subsystem is engaged - a class is
+     on, a dataset flag is set, a policy object exists. None of them require a
+     surface to exist. On a course with no owned pixels that meant the captured
+     camera claimed the camera anyway, framePrelockPreset returned early at its
+     capturedSurfaceOwnsCamera() gate, and the object-driven fit to tee/green/route
+     never ran - so the live map sat wherever it was, over the player, instead of
+     being framed on the hole.
+
+     Same shape as the visibility default: "engaged" is not "presented". Gated on
+     having a matching manifest rather than on gdGpsPresentationReady, so ownership
+     does not flicker mid hole-switch on a course that does have surfaces. */
   function capturedSurfaceOwnsCamera(){
     return safe(function(){
+      var hasSurfaceForHole = safe(function(){
+        return typeof window.gdCapturedSurfaceManifestMatchesActive === "function" &&
+          !!window.gdCapturedSurfaceManifestMatchesActive();
+      }, false);
+      if(!hasSurfaceForHole) return false;
       return document.body.classList.contains("gdCapturedHoleFrameCameraOn") ||
         document.body.dataset.gdCapturedSurfaceOwner === "captured-surface" ||
         !!(window.gdCapturedSurfacePolicy && window.gdCapturedSurfacePolicy.owner === "captured-surface");
@@ -2734,8 +2752,27 @@
 	  function manifestKey(manifest){
 	    return String(manifest&&(manifest.key||manifest.storageKey||manifest.scanId||manifest.activeScanId)||"");
 	  }
+	  /* A hole with no frame plays on the live map.
+
+	     The app consumes published cloud frames; it does not shutter its own. So a hole
+	     whose frame has not been published has nothing to present, and the answer is the
+	     live map rather than a dead end. Read as a body class, not as a reason string
+	     passed in by the caller: the frame owner sets gdCapturedFrameUnavailable in
+	     exactly one place, so this stays a single observable fact. A reason string would
+	     let any caller unlock the live map by naming itself.
+
+	     The stylesheet already assumed this - every #map suppression rule in
+	     gd-gps-play-runtime-owner-v1-css.css carries :not(.gdCapturedFrameUnavailable).
+	     What was missing is the grant: the hard gate is :not(.gdGpsLiveMapAllowed), and
+	     gdCapturedFrameUnavailable() removes that class before calling back into
+	     gdApplyGpsMapVisibilityOwner - which runs last, so this re-grants it. */
+	  function gdGpsNoCapturedFrameForHole(){
+	    return safe(function(){
+	      return !!(document.body&&document.body.classList.contains("gdCapturedFrameUnavailable"));
+	    },false);
+	  }
 	  function gdGpsLiveMapExplicitlyAllowed(reason){
-	    return pickerOpen()||document.body.classList.contains("gdCoursePickerOpen")||gdGpsExplicitMapMode(reason);
+	    return pickerOpen()||document.body.classList.contains("gdCoursePickerOpen")||gdGpsNoCapturedFrameForHole()||gdGpsExplicitMapMode(reason);
 	  }
 	  function gdGpsPresentationReady(){
 	    return safe(function(){
@@ -2788,7 +2825,16 @@
 	      var ready=gdGpsPresentationReady();
 	      document.body.classList.toggle("gdGpsExplicitMapMode",!!explicit);
 	      document.body.classList.toggle("gdGpsPresentationReady",!!ready);
-	      document.body.classList.toggle("gdGpsLiveMapAllowed",!!(gpsOpen()&&explicit));
+	      /* The app is given objects and draws them on the live map. A playing surface
+	         is an UPGRADE that replaces the map when one has actually been presented -
+	         gdGpsPresentationReady means a captured surface is rendered and fitted, not
+	         merely hoped for. So the map is on unless that upgrade is on screen.
+
+	         It used to be the other way round: hidden by default, shown only by an
+	         allowlist of "explicit" reasons. Every hole without a published surface -
+	         and every moment before one loaded - was therefore black, and each new case
+	         needed another exemption. Inverting the default removes the whole class. */
+	      document.body.classList.toggle("gdGpsLiveMapAllowed",!!(gpsOpen()&&(explicit||!ready)));
 	      if(!gpsOpen()||pickerOpen()||homeOpen()||moduleOpen()){
 	        document.body.classList.toggle("gdGpsLiveMapAllowed",!!(gpsOpen()&&pickerOpen()));
 	        document.body.classList.remove("gdGpsLiveMapSuppressed");
@@ -2796,11 +2842,11 @@
 	        document.body.dataset.gdGpsMapVisibilityState=pickerOpen()?"picker-live-map":"not-gps";
 	        return true;
 	      }
-	      var mayExpose=gdGpsPlayMayExposeLiveMap(reason);
-	      var shouldSuppress=!mayExpose;
-	      document.body.classList.toggle("gdGpsLiveMapSuppressed",!!shouldSuppress);
+	      /* Suppress the map only when the surface that replaces it is actually up. */
+	      var mayExpose=explicit||!ready;
+	      document.body.classList.toggle("gdGpsLiveMapSuppressed",!!ready&&!explicit);
 	      document.body.dataset.gdGpsMapVisibilityOwner=String(reason||"gps-visibility");
-	      document.body.dataset.gdGpsMapVisibilityState=mayExpose?"explicit-live-map":ready?"captured-presentation":document.body.classList.contains("gdCapturedFrameUnavailable")?"unavailable":"live-map-hidden";
+	      document.body.dataset.gdGpsMapVisibilityState=explicit?"explicit-live-map":ready?"captured-presentation":"objects-on-live-map";
 	      return mayExpose;
 	    },true);
 	  }
@@ -2851,11 +2897,17 @@
     });
   }
 	  function setRouteLabel(label){if(document.body&&document.body.dataset)document.body.dataset.clarityRouteLabel=label||""}
-	  function cleanRouteClasses(route){
+	  function cleanRouteClasses(route,opts){
 		    if(!document.body)return;
+		    /* A route change away from home invalidates any home cleanup still queued. */
+		    if(route!=="home")cancelHomeCleanup();
 		    document.body.classList.remove("gps-open","manual-gps-active","gdCoursePinPromptActive","gdToolRailOpen");
 		    if(route!=="gps")releaseGpsFirstPaintGate(route||"leave-gps");
-		    if(route==="home")safe(function(){window.GDShell?.showHome?.({source:"gps-runtime-clean-route",replace:true});});
+		    /* opts.navigate===false is the already-on-home cleanup path. Both callers of
+	       forceHomeShell are guarded on shell-home, so re-entering home from there is
+	       never wanted: at best a no-op, at worst it cancels a transition the player
+	       just started. This ran on a 260ms interval and was the trip home. */
+	    if(route==="home"&&!(opts&&opts.navigate===false))safe(function(){window.GDShell?.showHome?.({source:"gps-runtime-clean-route",replace:true});});
 		    if(route==="gps")safe(function(){window.GDShell?.enterGps?.({source:"gps-runtime-clean-route",replace:true});});
 		    if(route==="module")safe(function(){window.GDShell?.openModule?.("module",{source:"gps-runtime-clean-route",replace:true});});
 	    if(document.body.dataset){
@@ -3677,14 +3729,28 @@
       });
     });
   }
+  /* DOM tidy only. A function reached from a setInterval must never navigate -
+     see the navigate:false note in cleanRouteClasses. */
   function forceHomeShell(){
-    cleanRouteClasses("home");
+    cleanRouteClasses("home",{navigate:false});
     safe(function(){var h=byId("shellHome");if(h){h.classList.remove("hidden");h.style.display="";h.style.visibility="";h.style.opacity=""}});
     safe(function(){var s=byId("courseScreen");if(s){s.classList.add("hidden");s.style.display="none";s.style.visibility="hidden";s.style.opacity="0"}});
   }
+  /* Cleanup queued when the player lands on home, out to 2.2s to catch state that
+     settles late. It has to be cancellable: tapping Play inside that window starts a
+     new flow, and a pending tick would then run forceHomeShell - which hides
+     #courseScreen - against a course that is opening. Any route change away from home
+     bumps the token, so the stale ticks become no-ops.
+
+     Bounded and tied to a real transition is what makes this safe. The perpetual
+     version of the same work is what homeGuardTick used to do, and could not be. */
+  var homeCleanupToken=0;
+  function cancelHomeCleanup(){homeCleanupToken+=1;}
   function queueHomeCleanup(reason){
+    var token=++homeCleanupToken;
     [40,120,300,700,1300,2200].forEach(function(delay){
       setTimeout(function(){
+        if(token!==homeCleanupToken)return;
         if(!document.body||!document.body.classList.contains("shell-home"))return;
         cleanGpsTransient((reason||"home")+"-late");
         forceHomeShell();
@@ -3693,21 +3759,27 @@
       },delay);
     });
   }
+  /* Idempotent re-wiring only. This runs on a 260ms interval, so nothing
+     destructive belongs in it.
+
+     It used to also compute a "dirty" set from body classes and, when any were
+     present, run cleanGpsTransient + forceHomeShell. That is route-transition
+     cleanup, and a poller cannot do it correctly: a class on document.body carries
+     no timing information, so the tick cannot tell "leftover from the route I just
+     left" from "state of the route I am entering". Both look identical. It tore
+     down the Head To the Tee prompt (gdMappedStartPromptActive + the buttons it puts
+     in #hint) and courses mid-open (gdCourseOpening), four times a second, and
+     forceHomeShell hides #courseScreen - so the player was thrown home, or stranded
+     on a hidden surface.
+
+     Exempting each state in turn does not fix it; there is always another one. The
+     cleanup lives where the timing is known instead: home() runs cleanGpsTransient
+     and queueHomeCleanup on the actual route change, and queueHomeCleanup repeats at
+     six bounded delays out to 2.2s to catch anything that settles late. */
   function homeGuardTick(){
     if(!document.body||!document.body.classList.contains("shell-home"))return;
     liftShellTop();
-    var hint=byId("hint");
-    var dirty=document.body.classList.contains("gdMappedStartPromptActive")||
-      document.body.classList.contains("gdCapturedHoleFrameCameraOn")||
-      document.body.classList.contains("gdHoleImageCameraOn")||
-      document.body.classList.contains("gdMappedCourseMode")||
-      document.body.classList.contains("gdCourseOpening")||
-      !!(hint&&String(hint.textContent||"").trim());
     expose();
-    bindHomePlayTile();
-    if(!dirty)return;
-    cleanGpsTransient("home-guard");
-    forceHomeShell();
     bindHomePlayTile();
   }
   function toggleToolTab(event){
