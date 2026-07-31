@@ -1,6 +1,6 @@
 {
   "name": "clarity-caddie-core",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "description": "Clarity Caddy app baseline with locked Green Wand green-centred tile crop.",
   "scripts": {
@@ -9,16 +9,18 @@
     "build:netlify": "node scripts/clarity-deploy-build.js",
     "test:payments": "node dev/payment-rollout-tests.js",
     "test:boot": "node dev/boot-smoke.test.js",
+    "test:practice-parser": "node dev/practice-parser-parity.test.js",
+    "build:app": "node scripts/clarity-deploy-build.js --app-only",
     "demo:list": "node demo/run-demo.mjs --list",
     "demo:capture": "node demo/run-demo.mjs",
     "demo:capture:local": "DEMO_BASE_URL=http://127.0.0.1:5173 node demo/run-demo.mjs",
     "demo:capture:bubble-merge": "DEMO_BASE_URL=http://127.0.0.1:5173 node demo/run-demo.mjs --scenario practice-vs-my-bubble-merge",
     "demo:install": "npx playwright-core install chromium",
-    "native:sync": "npm run build:netlify && npx cap sync",
+    "native:sync": "npm run build:app && npx cap sync",
     "native:android": "npm run native:sync && npx cap open android",
     "native:ios": "npm run native:sync && npx cap open ios",
-    "native:release:aab": "npm run build:netlify && npx cap sync android && cd android && ./gradlew bundleRelease",
-    "native:release:apk": "npm run build:netlify && npx cap sync android && cd android && ./gradlew assembleRelease"
+    "native:release:aab": "npm run build:app && npx cap sync android && cd android && ./gradlew bundleRelease",
+    "native:release:apk": "npm run build:app && npx cap sync android && cd android && ./gradlew assembleRelease"
   },
   "codex": {
     "entry": "index.html",
@@ -36,7 +38,6 @@
     "@capacitor/app": "8.1.1",
     "@capacitor/browser": "8.0.4",
     "@capacitor/core": "8.4.2",
-    "@capacitor/geolocation": "8.2.0",
     "@capacitor/ios": "8.4.2",
     "@capacitor/preferences": "8.0.1",
     "@capacitor/splash-screen": "8.0.2",
