@@ -333,6 +333,19 @@ async function bootCheck() {
     return { atTee, afterTap };
   }, AKARANA_H1);
 
+  /* Base imagery policy: LINZ aerial only with a key and only inside NZ;
+     everywhere else (and offline, keyless) the honest OSM fallback. */
+  const basemap = await page.evaluate(() => {
+    const app = window.ClarityApp;
+    const keyless = app.basemap.baseFor({ lat: -36.9, lng: 174.7 }).kind;
+    app.basemap.configure({ linzBasemapsKey: "test-key" });
+    return {
+      keyless,
+      nz: app.basemap.baseFor({ lat: -36.9, lng: 174.7 }).kind,
+      pebbleBeach: app.basemap.baseFor({ lat: 36.564, lng: -121.938 }).kind
+    };
+  });
+
   await browser.close();
   server.close();
 
@@ -354,6 +367,9 @@ async function bootCheck() {
   assert.ok(surfaceFirst.h1State.chip.startsWith("pkg"), "the chip names the package source, got: " + surfaceFirst.h1State.chip);
   assert.strictEqual(surfaceFirst.h2State.presented, false, "no visual on hole 2 → back on the live map");
   assert.ok(surfaceFirst.h2State.mapCreated, "the map is created the moment absence is the answer");
+  assert.strictEqual(basemap.keyless, "osm", "no LINZ key → OSM");
+  assert.strictEqual(basemap.nz, "linz", "keyed NZ centre → LINZ aerial");
+  assert.strictEqual(basemap.pebbleBeach, "osm", "outside LINZ coverage → OSM, never empty tiles");
   assert.ok(play.mapDisplayed, "rule 2: #map must be visible by default on the play route");
   assert.strictEqual(play.hole, 1, "play must start on hole 1");
   assert.strictEqual(play.courseKey, "akarana-golf-club");

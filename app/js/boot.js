@@ -100,6 +100,7 @@
       app.play.goHole(Math.min(18, app.play.state().hole + 1));
     });
     show("home");
+    app.basemap.prefetch();   // so base-layer choice is synchronous by map time
     app.booted = true;   // boot-test canary: the last line of the load order ran
   });
 })();

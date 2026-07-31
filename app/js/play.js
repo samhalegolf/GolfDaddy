@@ -38,15 +38,32 @@
     return store;
   }
 
-  function ensureMap() {
-    if (map || typeof L === "undefined") return map;
-    map = L.map("map", { zoomControl: false, attributionControl: false })
-      .setView([-36.9, 174.78], 15);
-    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(map);
-    /* Tap where you are standing — same contract as a real fix. */
-    map.on("click", function (e) {
-      if (e && e.latlng) app.position.set({ lat: e.latlng.lat, lng: e.latlng.lng }, "tap");
-    });
+  var baseKind = null;
+  var baseLayer = null;
+
+  /* Satellite where licensed (LINZ aerial inside NZ), OSM elsewhere. Chosen
+     per course centre and swapped only when the answer changes. */
+  function setBaseFor(centre) {
+    if (!map) return;
+    var base = app.basemap.baseFor(centre);
+    if (base.kind === baseKind) return;
+    if (baseLayer) baseLayer.remove();
+    baseKind = base.kind;
+    baseLayer = base.layer.addTo(map);
+  }
+
+  function ensureMap(centre) {
+    if (typeof L === "undefined") return map;
+    if (!map) {
+      map = L.map("map", { zoomControl: false, attributionControl: true })
+        .setView([-36.9, 174.78], 15);
+      map.attributionControl.setPrefix(false);
+      /* Tap where you are standing — same contract as a real fix. */
+      map.on("click", function (e) {
+        if (e && e.latlng) app.position.set({ lat: e.latlng.lat, lng: e.latlng.lng }, "tap");
+      });
+    }
+    setBaseFor(centre);
     return map;
   }
 
@@ -74,7 +91,8 @@
      normal outcomes, not errors. Creates the map: only the absence/failure
      paths call this, so OSM never renders under a declared surface. */
   function frameHole(rec) {
-    if (!ensureMap()) return;
+    var centre = (rec && (rec.green || rec.tee)) || current.centre;
+    if (!ensureMap(centre)) return;
     if (objectLayer) { objectLayer.remove(); objectLayer = null; }
     var pts = [];
     function push(p) { if (p && Number.isFinite(Number(p.lat)) && Number.isFinite(Number(p.lng))) pts.push([Number(p.lat), Number(p.lng)]); }
