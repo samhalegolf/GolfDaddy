@@ -29,7 +29,10 @@ body.route-picker #pickerScreen { display: flex; flex-direction: column; }
 #pickerEmpty { padding: 24px 16px; opacity: .75; }
 .hiddenState { display: none; }
 
-#map { position: absolute; inset: 0; background: #16281c; }
+/* z-index:0 is load-bearing: it makes #map a stacking context so Leaflet's
+   internal z-1000 controls (attribution) stay inside it, underneath a
+   presented surface, instead of painting over it. */
+#map { position: absolute; inset: 0; background: #16281c; z-index: 0; }
 
 /* The surface viewport carries the lock-stage tilt (ported from
    gd-gps-play-camera-tilt: 32° at perspective 900px, origin 50% 70%, 1s ease,
