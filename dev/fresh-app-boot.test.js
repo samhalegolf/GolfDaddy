@@ -392,9 +392,17 @@ async function bootCheck() {
     const pkg = { holes: [{ holeNumber: 1, tee: shift(h1.tee), green: shift(h1.green), greenShape: h1.greenShape.map(shift), route: [] }] };
     await app.play.start("remote-test-course", pkg, null);
     await new Promise((resolve) => setTimeout(resolve, 900));   // let any live fix arrive
+    const preFrame = {
+      pillShown: !document.getElementById("startPill").classList.contains("hiddenState"),
+      hasPosition: !!app.position.current(),
+      distanceHidden: document.getElementById("distanceBar").classList.contains("hiddenState")
+    };
+    document.getElementById("headToTeeBtn").click();
+    await new Promise((resolve) => setTimeout(resolve, 60));
     const atTee = {
       source: app.position.current() && app.position.current().source,
-      centre: Number(document.getElementById("distCentre").textContent)
+      centre: Number(document.getElementById("distCentre").textContent),
+      pillShown: !document.getElementById("startPill").classList.contains("hiddenState")
     };
     /* Tap 100m up the fairway from the tee (~0.0009° of latitude). */
     app.position.set({ lat: shift(h1.tee).lat - 0.0009, lng: shift(h1.tee).lng }, "tap");
@@ -402,7 +410,7 @@ async function bootCheck() {
       source: app.position.current().source,
       centre: Number(document.getElementById("distCentre").textContent)
     };
-    return { atTee, afterTap };
+    return { preFrame, atTee, afterTap };
   }, AKARANA_H1);
 
   /* Pre-locked framing in the page: a framed surface far from the granted fix
@@ -421,6 +429,8 @@ async function bootCheck() {
     const pkg = { holes: [{ holeNumber: 1, geometry: { tee, green, greenShape: [], route: [] }, visual: { url: PNG, playSurface: meta } }] };
     await app.play.start("framed-course", pkg, null);
     await new Promise((resolve) => setTimeout(resolve, 500));
+    document.getElementById("headToTeeBtn").click();   // leave the pre-frame state
+    await new Promise((resolve) => setTimeout(resolve, 60));
     const img = document.getElementById("surfaceImage");
     const dot = document.getElementById("gpsDot");
     return {
@@ -555,7 +565,11 @@ async function bootCheck() {
   assert.strictEqual(play.positionSource, "gps", "an on-hole fix must take over from the tee");
   assert.ok(play.distCentre > 60 && play.distCentre < 120,
     "centre distance from the granted fix must be ~90m, got " + play.distCentre);
-  assert.ok(remote.atTee.source === "tee", "far from the course, hole entry heads to the tee");
+  assert.ok(remote.preFrame.pillShown, "pre-frame state shows the Standing Here / Head To the Tee pill");
+  assert.ok(!remote.preFrame.hasPosition, "pre-frame state has no position - no pin exists yet");
+  assert.ok(remote.preFrame.distanceHidden, "no position → no distances");
+  assert.ok(!remote.atTee.pillShown, "placing the player retires the pill");
+  assert.ok(remote.atTee.source === "tee", "Head To the Tee places the player on the tee");
   assert.ok(remote.atTee.centre > 380 && remote.atTee.centre < 410,
     "tee position must give the ~395m tee shot, got " + remote.atTee.centre);
   assert.strictEqual(remote.afterTap.source, "tap");

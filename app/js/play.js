@@ -149,6 +149,10 @@
         positionMarker.setLatLng([pos.lat, pos.lng]);
       }
     }
+    /* The start pill owns the pre-frame state: hole framed, no position yet.
+       Any placement — pill, tap, adopted fix — retires it for the hole. */
+    var pill = document.getElementById("startPill");
+    if (pill) pill.classList.toggle("hiddenState", !!pos || startPillDismissed || !(current.rec && current.rec.tee));
     var dot = document.getElementById("gpsDot");
     if (!dot) return;
     var img = document.getElementById("surfaceImage");
@@ -198,6 +202,17 @@
     positionWired = true;
     app.position.onChange(renderPosition);
     if (app.gps) app.gps.onFix(maybeAdoptGpsFix);
+    /* The start pill: Head To the Tee places the player on the tee; Standing
+       Here dismisses the pill so a surface tap places them. */
+    var headToTee = document.getElementById("headToTeeBtn");
+    if (headToTee) headToTee.addEventListener("click", function () {
+      if (current.rec && current.rec.tee) app.position.set(current.rec.tee, "tee");
+    });
+    var standingHere = document.getElementById("standingHereBtn");
+    if (standingHere) standingHere.addEventListener("click", function () {
+      startPillDismissed = true;
+      renderPosition(app.position.current());
+    });
     /* The provenance chip toggles the full metadata panel. */
     var chip = document.getElementById("surfaceSource");
     var panel = document.getElementById("surfaceMetaPanel");
@@ -246,6 +261,7 @@
   var provenance = null;   // what is on screen and where it came from
   var activeFrame = null;  // the current stage's frame transform, null → contain fit
   var frameStage = "hole"; // hole | lock | zoom
+  var startPillDismissed = false;   // "Standing Here" chosen: tap places the player
 
   var ZOOM_GREEN_M = 45;   // inside this of the green centre → green zoom
   var LOCK_OFF_TEE_M = 12; // moved this far off the tee → lock (shot view)
@@ -419,15 +435,14 @@
       current.rec = holeRecord(current.pkg, current.hole);
       var holeEl = document.getElementById("holeNumber");
       if (holeEl) holeEl.textContent = String(current.hole);
-      /* Head to the tee: entering a hole places the player on its tee. A later
-         tap moves them; and if the last real fix is standing on this hole, it
-         outranks the tee immediately — on-course, you are where you are. */
-      if (current.rec && current.rec.tee) {
-        app.position.set(current.rec.tee, "tee");
-        if (app.gps) maybeAdoptGpsFix(app.gps.lastFix());
-      } else {
-        renderDistances(app.position.current());
-      }
+      /* Pre-frame state: the hole is framed but the player has no position —
+         no pin, no distances — until the pill (Head To the Tee), a tap, or an
+         on-hole GPS fix places them. Auto-head-to-tee belongs to the future
+         Actually Playing mode. */
+      app.position.clear();
+      startPillDismissed = false;
+      renderPosition(null);
+      if (app.gps) maybeAdoptGpsFix(app.gps.lastFix());
       /* A full package carries the hole's published surface inline — one
          request, nothing to reconcile, and no OSM underneath: the previous
          surface holds until the new one paints. The stale meta is cleared so

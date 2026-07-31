@@ -53,6 +53,15 @@ body.tilt-lock #surfaceViewport { transform: perspective(900px) rotateX(32deg) s
 #surfaceMetaPanel { position: absolute; top: calc(env(safe-area-inset-top, 0px) + 96px); left: 16px; right: 16px; max-height: 50vh; overflow: auto; z-index: 620; margin: 0; padding: 12px; border-radius: 12px; background: rgba(13, 27, 18, .92); color: #cfe3d6; font-size: 11px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; }
 #surfaceMetaPanel.hiddenState { display: none; }
 
+/* Standing Here / Head To the Tee pill — ported from the old app's
+   gdMappedStartPill (gd-app-base.css). Shown at the pre-frame state, when the
+   hole is framed but the player has no position yet. */
+#startPill { position: absolute; bottom: calc(98px + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); z-index: 640; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 4px; width: min(326px, calc(100vw - 40px)); padding: 4px; border-radius: 999px; background: rgba(5, 9, 7, .72); border: 1px solid rgba(255, 255, 255, .14); box-shadow: 0 14px 30px rgba(0, 0, 0, .32); backdrop-filter: blur(10px); }
+#startPill.hiddenState { display: none; }
+#startPill button { min-height: 38px; border: 0; border-radius: 999px; padding: 8px 10px; background: rgba(255, 255, 255, .09); color: rgba(255, 255, 255, .9); font-size: 12px; font-weight: 950; line-height: 1.05; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#startPill .headToTee { background: #1fd36d; color: #06110b; }
+#startPill button:active { transform: scale(.985); }
+
 /* Front / centre / back of green, metres. Hidden without a fix or a green. */
 #distanceBar { position: absolute; bottom: calc(env(safe-area-inset-bottom, 0px) + 16px); left: 50%; transform: translateX(-50%); display: flex; gap: 18px; align-items: baseline; padding: 12px 20px; border-radius: 16px; background: rgba(13, 27, 18, .85); z-index: 600; }
 #distanceBar.hiddenState { display: none; }
