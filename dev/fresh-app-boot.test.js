@@ -431,6 +431,9 @@ async function bootCheck() {
     await new Promise((resolve) => setTimeout(resolve, 500));
     document.getElementById("headToTeeBtn").click();   // leave the pre-frame state
     await new Promise((resolve) => setTimeout(resolve, 60));
+    const screen = document.getElementById("playScreen");
+    const scrollJumped = screen.scrollTop !== 0 || screen.scrollLeft !== 0
+      || document.getElementById("surfaceViewport").scrollTop !== 0;
     const img = document.getElementById("surfaceImage");
     const dot = document.getElementById("gpsDot");
     return {
@@ -439,7 +442,8 @@ async function bootCheck() {
       positionSource: app.position.current() && app.position.current().source,
       dotVisible: !dot.classList.contains("hiddenState"),
       dot: { left: parseFloat(dot.style.left), top: parseFloat(dot.style.top) },
-      view: { w: window.innerWidth, h: window.innerHeight }
+      view: { w: window.innerWidth, h: window.innerHeight },
+      scrollJumped
     };
   }, AKARANA_H1);
 
@@ -522,6 +526,7 @@ async function bootCheck() {
   assert.ok(surfaceFirst.h1State.chip.startsWith("pkg"), "the chip names the package source, got: " + surfaceFirst.h1State.chip);
   assert.strictEqual(surfaceFirst.h2State.presented, false, "no visual on hole 2 → back on the live map");
   assert.ok(surfaceFirst.h2State.mapCreated, "the map is created the moment absence is the answer");
+  assert.ok(!framed.scrollJumped, "clicking the pill must not scroll-jump the play screen");
   assert.ok(framed.presented, "framed course must present its surface");
   assert.ok(framed.transform.indexOf("matrix(") === 0, "the surface must carry the frame transform, got: " + framed.transform);
   assert.strictEqual(framed.positionSource, "tee", "far from the fix, the framed hole heads to the tee");

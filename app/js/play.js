@@ -435,6 +435,9 @@
       current.rec = holeRecord(current.pkg, current.hole);
       var holeEl = document.getElementById("holeNumber");
       if (holeEl) holeEl.textContent = String(current.hole);
+      /* Undo any focus scroll-jump from the previous hole's interactions. */
+      var screen = document.getElementById("playScreen");
+      if (screen) { screen.scrollTop = 0; screen.scrollLeft = 0; }
       /* Pre-frame state: the hole is framed but the player has no position —
          no pin, no distances — until the pill (Head To the Tee), a tap, or an
          on-hole GPS fix places them. Auto-head-to-tee belongs to the future

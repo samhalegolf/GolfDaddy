@@ -35,7 +35,11 @@ body.route-picker #pickerScreen { display: flex; flex-direction: column; }
    gd-gps-play-camera-tilt: 32° at perspective 900px, origin 50% 70%, 1s ease,
    scale 1+32/150). The image inside carries the frame matrix, and the dot
    rides in the same space so the tilt projects them together. */
-#surfaceViewport { position: absolute; inset: 0; display: none; z-index: 500; background: #0d1b12; transform-origin: 50% 70%; transition: transform 1000ms cubic-bezier(.18, .82, .24, 1); }
+/* overflow:hidden is load-bearing: the framed image extends far past the
+   viewport, and a transformed descendant still grows the scrollable overflow —
+   without the clip, focusing a button (the start pill) scroll-jumps the whole
+   play screen. */
+#surfaceViewport { position: absolute; inset: 0; display: none; z-index: 500; background: #0d1b12; transform-origin: 50% 70%; transition: transform 1000ms cubic-bezier(.18, .82, .24, 1); overflow: hidden; }
 body.surface-published #surfaceViewport { display: block; }
 body.tilt-lock #surfaceViewport { transform: perspective(900px) rotateX(32deg) scale(1.213); }
 @media (prefers-reduced-motion: reduce) { #surfaceViewport { transition-duration: 1ms; } }
