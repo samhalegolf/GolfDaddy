@@ -264,20 +264,17 @@
   var startPillDismissed = false;   // "Standing Here" chosen: tap places the player
 
   var ZOOM_GREEN_M = 45;   // inside this of the green centre → green zoom
-  var LOCK_OFF_TEE_M = 12; // moved this far off the tee → lock (shot view)
 
-  /* Which stage the current position asks for. Pure position→stage policy:
-     the guide contract says how each stage frames, this says when. */
+  /* Which stage the current position asks for. Placing the player IS the
+     lock-in — head-to-tee or a tap starts the shot, so any position locks the
+     shot view. The pre-locked hole frame exists only while the start pill is
+     up (no position yet); the green zoom takes over inside 45m. */
   function desiredStage(pos) {
     var rec = current.rec;
     if (!pos || !rec || !rec.green) return "hole";
     var toGreen = app.distance.haversineMeters(pos, rec.green);
     if (Number.isFinite(toGreen) && toGreen <= ZOOM_GREEN_M) return "zoom";
-    if (rec.tee) {
-      var offTee = app.distance.haversineMeters(pos, rec.tee);
-      if (Number.isFinite(offTee) && offTee > LOCK_OFF_TEE_M) return "lock";
-    }
-    return "hole";
+    return "lock";
   }
 
   /* Frame the surface for the stage the position asks for. Anchors prefer the

@@ -544,9 +544,9 @@ async function bootCheck() {
   assert.ok(Math.abs(framed.dot.left - expectedLeft) < 2 && Math.abs(framed.dot.top - expectedTop) < 2,
     "at the tee, the dot must sit on the tee guide box: got " + framed.dot.left + "," + framed.dot.top
     + " want " + expectedLeft + "," + expectedTop);
-  assert.strictEqual(stages.atTee.stage, "hole", "at the tee the pre-locked hole frame shows");
-  assert.ok(!stages.atTee.tilt, "the hole frame is flat");
-  assert.strictEqual(stages.lock.stage, "lock", "off the tee → lock stage");
+  assert.strictEqual(stages.atTee.stage, "lock", "placement IS the lock-in: head-to-tee locks the shot view");
+  assert.ok(stages.atTee.tilt, "the locked shot view carries the tilt from the tee");
+  assert.strictEqual(stages.lock.stage, "lock", "a tap up the fairway stays locked");
   assert.ok(stages.lock.tilt, "the lock stage carries the 32° tilt");
   assert.ok(stages.lock.dotVisible, "the player stays visible in lock");
   assert.strictEqual(stages.gpsHold.stage, "lock", "a same-stage GPS fix stays in lock");
@@ -555,7 +555,7 @@ async function bootCheck() {
   assert.strictEqual(stages.zoom.stage, "zoom", "inside 45m of the green → zoom stage");
   assert.ok(!stages.zoom.tilt, "green zoom is flat");
   assert.ok(stages.zoom.dotVisible, "the player stays visible in zoom");
-  assert.strictEqual(stages.back.stage, "hole", "back on the tee → hole frame again");
+  assert.strictEqual(stages.back.stage, "lock", "back on the tee still locks - only the pill state is pre-frame");
   assert.strictEqual(basemap.keylessNz, "osm", "no LINZ key → OSM even in NZ");
   assert.strictEqual(basemap.nz, "linz", "keyed NZ centre → LINZ aerial");
   assert.strictEqual(basemap.pebbleBeach, "naip", "US centre → NAIP aerial");
