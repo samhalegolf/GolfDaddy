@@ -808,9 +808,6 @@
 	     Deleting is therefore unconditional and lossless - there is no local original
 	     to protect. localStorage survives an app update, so the guard that stopped new
 	     ones being written cannot clear the ones already on a device. */
-	  /* Hole key we have already reported as having no frame. Cleared when a frame
-	     renders for that hole, so a cloud surface arriving later still takes effect. */
-	  var coursePlayUnavailableKey="";
 	  var LEGACY_FRAME_PREFIX="gd_captured_hole_frame_v19_";
 	  var purgeRan=false;
 	  function gdPurgeLegacyFatFrames(opts){
@@ -1366,21 +1363,10 @@
 	      var loadedExisting=!cloudManifest&&!!(manifest&&manifestMatchesActive(manifest));
 	      if(!manifest||!manifestMatchesActive(manifest)){
 	        if(capturedGpsPlayActive()){
-	          /* Latch per hole. This function is driven by a repeating tick, and with no
-	             local shutter left there is nothing to build, so every call would other-
-	             wise re-run the whole unavailable path - DOM writes, a debug event and a
-	             visibility recompute - several times a second. That spin is what put
-	             "fell-to-unavailable" through the timeline ~4x/sec and left the surface
-	             black.
-
-	             The existing terminal machinery cannot cover this: terminalCapturedUnavailable-
-	             Active() is gated on pipelineReadyForActiveHole(), and the case that spins is
-	             precisely the one where the pipeline reports no status at all. So the latch is
-	             keyed on the hole and released as soon as a manifest turns up or the hole
-	             changes, which is checked above before we ever get here. */
-	          var pipelineKey=String(surfaceCourseKey()||"course")+":h"+String(surfaceHoleNumber()||1);
-	          if(coursePlayUnavailableKey===pipelineKey)return false;
-	          coursePlayUnavailableKey=pipelineKey;
+	          /* Side effect only: this returns "did we render a frame", and we did not.
+	             missingCapturedManifest picks loading vs unavailable from pipeline state,
+	             and gdCapturedFrameUnavailable is idempotent per hole, so a repeating
+	             caller costs nothing after the first. */
 	          missingCapturedManifest(opts.reason||"course-play-pipeline",{stage:"course-play-pipeline"});
 	          return false;
 	        }
@@ -1392,7 +1378,6 @@
 	      if(!renderCaptureManifest(manifest))return false;
 	      var ok=fitCaptured(bounds,"hole",.025,{objectName:"coursePlayPipelineHoleFrame",reason:opts.reason||"course-play-pipeline",maxScale:7.2,fitRatio:.94});
 	      if(ok){
-	        coursePlayUnavailableKey="";
 	        clearTerminalCapturedUnavailable("course-play-pipeline-rendered");
 	        clearStalePreparingOwners("course-play-pipeline-rendered");
 	        safe(function(){
@@ -1550,6 +1535,7 @@
 	    });
 	  }
 	  function clearCapturedFrameUnavailable(){
+	    capturedUnavailableFor="";
 	    safe(function(){document.body.classList.remove("gdCapturedFrameUnavailable");});
 	  }
 	  function gdHoleFrameLoading(reason,context){
@@ -1602,7 +1588,27 @@
 	    if(capturedGpsPlayActive()&&mappedGeometryExistsForActiveHole())return gdHoleFrameLoading(reason||"frame-loading",context||{});
 	    return !!gdCapturedFrameUnavailable(reason||"missing-frame",context||{});
 	  }
+	  /* Idempotent per hole.
+
+	     Several independent subsystems ask for the frame on their own schedules -
+	     observed on device as tool-sync, resume-round and resume-round-restore taking
+	     turns about 3.5 times a second. With no frame published for the course, each
+	     one re-ran this whole function: DOM writes, a class rewrite, a debug event and
+	     a map-visibility recompute. That is the spin that filled the timeline with
+	     fell-to-unavailable and kept the surface churning.
+
+	     Declaring "this hole has no frame" is a state, not an event, so repeating it
+	     costs nothing. The latch releases when the hole changes or when the state is
+	     cleared - clearCapturedFrameUnavailable - so a cloud surface arriving later
+	     still takes effect. */
+	  var capturedUnavailableFor="";
 	  function gdCapturedFrameUnavailable(reason,context){
+	    var alreadyDeclared=safe(function(){
+	      return capturedUnavailableFor===holeFrameKey()&&
+	        !!document.body&&document.body.classList.contains("gdCapturedFrameUnavailable");
+	    },false);
+	    if(alreadyDeclared)return null;
+	    safe(function(){capturedUnavailableFor=holeFrameKey();});
 	    safe(function(){
 	      clearHoleSwitchTransitionTimer();
 	      clearHoleFrameLoading();
