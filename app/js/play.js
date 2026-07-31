@@ -193,14 +193,14 @@
       dot.style.left = onSurface.left + "px";
       dot.style.top = onSurface.top + "px";
     }
-    renderShotOverlays();
+    renderShotOverlays(pos);
     renderDistances(pos);
   }
 
   /* The aim bubble at the active shot's target, and the green ring in green
      focus — both live in the tilt viewport, positioned with the same frame
      transform as the dot, so all three project together. */
-  function renderShotOverlays() {
+  function renderShotOverlays(pos) {
     var img = document.getElementById("surfaceImage");
     var published = document.body.classList.contains("surface-published");
     var meta = null;
@@ -219,21 +219,85 @@
     var model = act && meta && window.GDBubbleEngine ? window.GDBubbleEngine.renderModel() : null;
     var svg = document.getElementById("bubbleSvg");
     if (svg) {
-      var paths = null;
-      if (model) {
-        paths = ["outer", "main", "inner"].map(function (ringName) {
+      var parts = [];
+      var centerScreen = model ? project(model.center) : null;
+      if (model && centerScreen) {
+        var ringPaths = ["outer", "main", "inner"].map(function (ringName) {
           var pts = model.rings[ringName].map(project).filter(Boolean);
           if (pts.length < model.rings[ringName].length * 0.6) return null;
           return { name: ringName, d: "M" + pts.map(function (p) { return p.left.toFixed(1) + "," + p.top.toFixed(1); }).join("L") + "Z" };
         }).filter(Boolean);
+        if (ringPaths.length === 3) {
+          var vw = window.innerWidth, vh = window.innerHeight;
+          /* The aim ray: player, through the bubble centre, on to the screen
+             edge (8px shy, at least 40px past the bubble) — the old contract,
+             computed fresh in screen space every pass so it moves exactly as
+             smoothly as the rings do. */
+          var playerScreen = pos ? project(pos) : null;
+          if (playerScreen) {
+            var dx = centerScreen.left - playerScreen.left, dy = centerScreen.top - playerScreen.top;
+            var len = Math.hypot(dx, dy);
+            if (len > 1) {
+              var ux = dx / len, uy = dy / len;
+              var limits = [
+                ux > 0 ? (vw - centerScreen.left) / ux : Infinity,
+                ux < 0 ? (0 - centerScreen.left) / ux : Infinity,
+                uy > 0 ? (vh - centerScreen.top) / uy : Infinity,
+                uy < 0 ? (0 - centerScreen.top) / uy : Infinity
+              ].filter(function (n) { return Number.isFinite(n) && n > 0; });
+              var past = limits.length ? Math.max(40, Math.min.apply(null, limits) - 8) : 40;
+              parts.push('<path class="aimLine" d="M' + playerScreen.left.toFixed(1) + "," + playerScreen.top.toFixed(1)
+                + "L" + (centerScreen.left + ux * past).toFixed(1) + "," + (centerScreen.top + uy * past).toFixed(1) + '"/>');
+            }
+          }
+          /* The middle guide: bubble → green, laying up only (the green sits
+             beyond the bag and beyond the bubble). Same rule as the old
+             gdShouldShowMiddleDistanceGuide, same trims and label offset. */
+          var rec = current.rec || {};
+          var greenScreen = rec.green ? project(rec.green) : null;
+          var maxCarry = window.GDBubbleEngine ? window.GDBubbleEngine.maxPlayableCarryM() : null;
+          if (pos && greenScreen && Number.isFinite(maxCarry)) {
+            var raw = app.distance.haversineMeters(pos, rec.green);
+            var playable = app.distance.haversineMeters(pos, model.center);
+            var gap = app.distance.haversineMeters(model.center, rec.green);
+            if (raw > maxCarry + 3 && gap > 4 && raw > playable + 4) {
+              /* The fairway line: the hole's route geometry — the line the
+                 layup target grabs onto — plus the green outline reference.
+                 Layup context specs from gdAddMappedReferenceGeometry. */
+              var routePts = [rec.tee].concat(rec.route || [], [rec.green])
+                .filter(Boolean).map(project).filter(Boolean);
+              if (routePts.length >= 2) {
+                parts.unshift('<path class="fairwayLine" d="M' + routePts.map(function (p) {
+                  return p.left.toFixed(1) + "," + p.top.toFixed(1);
+                }).join("L") + '"/>');
+              }
+              var shapePts = (rec.greenShape || []).map(project).filter(Boolean);
+              if (shapePts.length >= 3) {
+                parts.unshift('<path class="greenReference" d="M' + shapePts.map(function (p) {
+                  return p.left.toFixed(1) + "," + p.top.toFixed(1);
+                }).join("L") + 'Z"/>');
+              }
+              var gx = greenScreen.left - centerScreen.left, gy = greenScreen.top - centerScreen.top;
+              var glen = Math.hypot(gx, gy) || 1;
+              var trim = Math.min(10, glen * 0.05);
+              var gux = gx / glen, guy = gy / glen;
+              parts.push('<path class="middleGuide" d="M' + (centerScreen.left + gux * trim).toFixed(1) + "," + (centerScreen.top + guy * trim).toFixed(1)
+                + "L" + (greenScreen.left - gux * trim).toFixed(1) + "," + (greenScreen.top - guy * trim).toFixed(1) + '"/>');
+              var lx = centerScreen.left + gx * 0.52 + (-gy / glen) * 18;
+              var ly = centerScreen.top + gy * 0.52 + (gx / glen) * 18;
+              parts.push('<text class="middleGuideLabel" x="' + lx.toFixed(1) + '" y="' + ly.toFixed(1) + '">Green ' + Math.round(gap) + "m</text>");
+            }
+          }
+          ringPaths.forEach(function (p) {
+            var cls = "ring" + p.name.charAt(0).toUpperCase() + p.name.slice(1);
+            parts.push('<path class="' + cls + '" d="' + p.d + '"/>');
+          });
+        }
       }
-      svg.classList.toggle("hiddenState", !paths || paths.length < 3);
-      if (paths && paths.length === 3) {
+      svg.classList.toggle("hiddenState", !parts.length);
+      if (parts.length) {
         svg.setAttribute("viewBox", "0 0 " + window.innerWidth + " " + window.innerHeight);
-        svg.innerHTML = paths.map(function (p) {
-          var cls = "ring" + p.name.charAt(0).toUpperCase() + p.name.slice(1);
-          return '<path class="' + cls + '" d="' + p.d + '"/>';
-        }).join("");
+        svg.innerHTML = parts.join("");
       }
     }
     var bubble = document.getElementById("aimBubble");

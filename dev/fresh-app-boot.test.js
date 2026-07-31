@@ -527,8 +527,12 @@ async function bootCheck() {
       targetToGreen: act && act.target ? app.distance.haversineMeters(act.target, green) : null,
       maxCarry: window.GDBubbleEngine.maxPlayableCarryM(),
       shotRowShown: !document.getElementById("shotRow").classList.contains("hiddenState"),
-      ringPaths: document.querySelectorAll("#bubbleSvg path").length,
-      svgShown: !document.getElementById("bubbleSvg").classList.contains("hiddenState")
+      ringPaths: document.querySelectorAll("#bubbleSvg .ringOuter, #bubbleSvg .ringMain, #bubbleSvg .ringInner").length,
+      svgShown: !document.getElementById("bubbleSvg").classList.contains("hiddenState"),
+      aimLine: !!document.querySelector("#bubbleSvg .aimLine"),
+      middleGuide: !!document.querySelector("#bubbleSvg .middleGuide"),
+      middleLabel: (document.querySelector("#bubbleSvg .middleGuideLabel") || {}).textContent || "",
+      fairwayLine: !!document.querySelector("#bubbleSvg .fairwayLine")
     };
     return {
       presented: document.body.classList.contains("surface-published"),
@@ -655,6 +659,10 @@ async function bootCheck() {
       "the default aim sits at the max bag distance: " + Math.round(e.targetFromTee) + " vs " + Math.round(e.maxCarry));
     assert.ok(e.shotRowShown, "aimed short of the green from the tee → SHOT/REM row shows");
     assert.ok(e.svgShown && e.ringPaths === 3, "the engine's three cluster rings render on the surface, got " + e.ringPaths);
+    assert.ok(e.aimLine, "the aim ray renders with the bubble");
+    assert.ok(e.middleGuide, "laying up → the bubble→green middle guide shows");
+    assert.ok(/^Green \d+m$/.test(e.middleLabel), "the middle guide labels the remaining leg, got: " + e.middleLabel);
+    assert.ok(e.fairwayLine, "laying up → the fairway route line shows");
   }
   assert.ok(framed.presented, "framed course must present its surface");
   assert.ok(framed.transform.indexOf("matrix(") === 0, "the surface must carry the frame transform, got: " + framed.transform);
