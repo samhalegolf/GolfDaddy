@@ -89,39 +89,35 @@ test("every play-reachable capture site is guarded the same way", () => {
   assert.strictEqual(authoring, 1, "expected exactly one background/authoring capture site, found " + authoring);
 });
 
-test("a hole with no frame is granted the live map", () => {
+test("the live map is the base state, not an exception", () => {
+  /* The app is given objects and draws them on the live map; a playing surface is an
+     UPGRADE that replaces the map once presented. The owner used to invert this -
+     #map hidden unless an allowlist of "explicit" reasons granted it - so every hole
+     without a published surface, and every moment before one loaded, was black, and
+     each new case needed another exemption. */
+  const apply = flat(OWNER).match(/function gdApplyGpsMapVisibilityOwner\(reason\)[\s\S]*?return mayExpose; \}/);
+  assert.ok(apply, "gdApplyGpsMapVisibilityOwner must be findable");
   assert.ok(
-    /function gdGpsNoCapturedFrameForHole\(\)/.test(OWNER),
-    "the grant must be a named predicate, not inlined at the use site"
+    /gpsOpen\(\)&&\(explicit\|\|!ready\)/.test(apply[0].replace(/ /g, "")),
+    "the live map is allowed whenever no playing surface is presented"
   );
   assert.ok(
-    /gdGpsLiveMapExplicitlyAllowed\(reason\)\{[\s\S]*?gdGpsNoCapturedFrameForHole\(\)/.test(flat(OWNER).replace(/ /g, "")) ||
-    /gdGpsNoCapturedFrameForHole\(\)/.test(flat(OWNER).match(/function gdGpsLiveMapExplicitlyAllowed[\s\S]*?\}/)[0]),
-    "gdGpsLiveMapExplicitlyAllowed must consult it, or the map stays hidden"
-  );
-});
-
-test("the grant reads a body class, never a caller-supplied reason", () => {
-  const fn = flat(OWNER).match(/function gdGpsNoCapturedFrameForHole\(\)[\s\S]*?\},false\); \}/);
-  assert.ok(fn, "gdGpsNoCapturedFrameForHole must be findable");
-  assert.ok(
-    /classList\.contains\("gdCapturedFrameUnavailable"\)/.test(fn[0]),
-    "it must read the class the frame owner sets"
-  );
-  assert.ok(
-    !/reason/.test(fn[0]),
-    "a reason string would let any caller unlock the live map by naming itself"
+    /gdGpsLiveMapSuppressed",!!ready&&!explicit/.test(apply[0].replace(/ /g, "")),
+    "the map is suppressed only when a surface is actually up"
   );
 });
 
-test("the stylesheet's live-map gate still matches the grant", () => {
-  assert.ok(
-    /:not\(\.gdGpsLiveMapAllowed\) #map/.test(CSS),
-    "the hard gate this grant exists to satisfy must still be the one in the stylesheet"
+test("no preparing state blacks out the surface", () => {
+  /* frame-loading, mapped-start prompt and captured-camera-not-ready are all moments
+     when nothing has replaced the map yet, so they must not hide it or black the app. */
+  const suppress = CSS.split("\n").filter((l) => /#map|#app/.test(l) && /gdGpsFramePreparing|gdMappedStartPromptActive/.test(l));
+  assert.deepStrictEqual(
+    suppress, [],
+    "preparing states must not appear in #map/#app suppression rules - they are live-map moments"
   );
   assert.ok(
-    /:not\(\.gdCapturedFrameUnavailable\)/.test(CSS),
-    "the suppression rules must keep treating an unavailable frame as an exception"
+    /body\.gdGpsLiveMapSuppressed #map\{/.test(CSS),
+    "suppression is driven by the single owner-set class"
   );
 });
 

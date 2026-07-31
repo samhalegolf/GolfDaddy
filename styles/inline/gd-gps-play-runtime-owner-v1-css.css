@@ -17,29 +17,25 @@ body.gps-active:not(.gdGpsLiveMapAllowed) #map{display:block!important;visibilit
 body.shell-gps.gdGpsLiveMapAllowed #map,
 body.gdGpsActive.gdGpsLiveMapAllowed #map,
 body.gps-active.gdGpsLiveMapAllowed #map{display:block!important;visibility:visible!important;opacity:1!important;pointer-events:auto!important;}
-body.gdGpsLiveMapSuppressed #map,
-body.shell-gps:is(.gdCapturedHoleFrameCameraOn,.gdHoleImageCameraOn):not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #map,
-body.gdGpsActive:is(.gdCapturedHoleFrameCameraOn,.gdHoleImageCameraOn):not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #map,
-body.gps-active:is(.gdCapturedHoleFrameCameraOn,.gdHoleImageCameraOn):not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #map,
-body.gdGpsFramePreparing.shell-gps:not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #map,
-body.gdGpsFramePreparing.gdGpsActive:not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #map,
-body.gdGpsFramePreparing.gps-active:not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #map,
-body.gdMappedStartPromptActive.shell-gps:not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #map,
-body.gdMappedStartPromptActive.gdGpsActive:not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #map,
-body.gdMappedStartPromptActive.gps-active:not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #map{visibility:hidden!important;opacity:0!important;pointer-events:none!important;}
+/* Objects on the live map is the base state; a playing surface replaces it only
+   once presented. gdGpsLiveMapSuppressed is now set solely for that case, by
+   gdApplyGpsMapVisibilityOwner.
+
+   This replaces a block that hid #map for every preparing state - frame loading,
+   mapped-start prompt, captured camera on but not ready - each carrying its own
+   :not() exemptions. Those are all moments when no surface is on screen yet, so
+   under the current model they should show the map, not black. */
+body.gdGpsLiveMapSuppressed #map{visibility:hidden!important;opacity:0!important;pointer-events:none!important;}
 body.shell-gps.gdCoursePickerOpen #map,
 body.gdGpsActive.gdCoursePickerOpen #map,
 body.gps-active.gdCoursePickerOpen #map,
 body.shell-gps:has(#courseScreen:not(.hidden)) #map,
 body.gdGpsActive:has(#courseScreen:not(.hidden)) #map,
 body.gps-active:has(#courseScreen:not(.hidden)) #map{display:block!important;visibility:visible!important;opacity:1!important;pointer-events:auto!important;}
-body.gdGpsLiveMapSuppressed #app,
-body.shell-gps:is(.gdCapturedHoleFrameCameraOn,.gdHoleImageCameraOn):not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #app,
-body.gdGpsActive:is(.gdCapturedHoleFrameCameraOn,.gdHoleImageCameraOn):not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #app,
-body.gps-active:is(.gdCapturedHoleFrameCameraOn,.gdHoleImageCameraOn):not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #app,
-body.gdGpsFramePreparing.shell-gps:not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #app,
-body.gdGpsFramePreparing.gdGpsActive:not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #app,
-body.gdGpsFramePreparing.gps-active:not(.gdGpsPresentationReady):not(.gdCapturedFrameUnavailable):not(.gdGpsExplicitMapMode) #app{background:#020604!important;}
+/* Black backdrop only when a playing surface is actually up. The preparing-state
+   variants that used to be listed here blacked out the app while the live map was
+   the correct thing to be looking at. */
+body.gdGpsLiveMapSuppressed #app{background:#020604!important;}
 body.shell-home #gdHoleImageCameraLayer,
 body.shell-home #gdCapturedHoleFrameReadout,
 body.gdCapturedHoleFrameCameraOn:not(.gdTargetFrameDebugOn) #gdCapturedHoleFrameReadout{display:none!important;pointer-events:none!important;}

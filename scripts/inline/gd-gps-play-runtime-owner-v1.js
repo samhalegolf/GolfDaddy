@@ -2807,7 +2807,16 @@
 	      var ready=gdGpsPresentationReady();
 	      document.body.classList.toggle("gdGpsExplicitMapMode",!!explicit);
 	      document.body.classList.toggle("gdGpsPresentationReady",!!ready);
-	      document.body.classList.toggle("gdGpsLiveMapAllowed",!!(gpsOpen()&&explicit));
+	      /* The app is given objects and draws them on the live map. A playing surface
+	         is an UPGRADE that replaces the map when one has actually been presented -
+	         gdGpsPresentationReady means a captured surface is rendered and fitted, not
+	         merely hoped for. So the map is on unless that upgrade is on screen.
+
+	         It used to be the other way round: hidden by default, shown only by an
+	         allowlist of "explicit" reasons. Every hole without a published surface -
+	         and every moment before one loaded - was therefore black, and each new case
+	         needed another exemption. Inverting the default removes the whole class. */
+	      document.body.classList.toggle("gdGpsLiveMapAllowed",!!(gpsOpen()&&(explicit||!ready)));
 	      if(!gpsOpen()||pickerOpen()||homeOpen()||moduleOpen()){
 	        document.body.classList.toggle("gdGpsLiveMapAllowed",!!(gpsOpen()&&pickerOpen()));
 	        document.body.classList.remove("gdGpsLiveMapSuppressed");
@@ -2815,11 +2824,11 @@
 	        document.body.dataset.gdGpsMapVisibilityState=pickerOpen()?"picker-live-map":"not-gps";
 	        return true;
 	      }
-	      var mayExpose=gdGpsPlayMayExposeLiveMap(reason);
-	      var shouldSuppress=!mayExpose;
-	      document.body.classList.toggle("gdGpsLiveMapSuppressed",!!shouldSuppress);
+	      /* Suppress the map only when the surface that replaces it is actually up. */
+	      var mayExpose=explicit||!ready;
+	      document.body.classList.toggle("gdGpsLiveMapSuppressed",!!ready&&!explicit);
 	      document.body.dataset.gdGpsMapVisibilityOwner=String(reason||"gps-visibility");
-	      document.body.dataset.gdGpsMapVisibilityState=mayExpose?"explicit-live-map":ready?"captured-presentation":document.body.classList.contains("gdCapturedFrameUnavailable")?"unavailable":"live-map-hidden";
+	      document.body.dataset.gdGpsMapVisibilityState=explicit?"explicit-live-map":ready?"captured-presentation":"objects-on-live-map";
 	      return mayExpose;
 	    },true);
 	  }
