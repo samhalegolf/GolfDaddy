@@ -808,6 +808,9 @@
 	     Deleting is therefore unconditional and lossless - there is no local original
 	     to protect. localStorage survives an app update, so the guard that stopped new
 	     ones being written cannot clear the ones already on a device. */
+	  /* Hole key we have already reported as having no frame. Cleared when a frame
+	     renders for that hole, so a cloud surface arriving later still takes effect. */
+	  var coursePlayUnavailableKey="";
 	  var LEGACY_FRAME_PREFIX="gd_captured_hole_frame_v19_";
 	  var purgeRan=false;
 	  function gdPurgeLegacyFatFrames(opts){
@@ -1363,9 +1366,21 @@
 	      var loadedExisting=!cloudManifest&&!!(manifest&&manifestMatchesActive(manifest));
 	      if(!manifest||!manifestMatchesActive(manifest)){
 	        if(capturedGpsPlayActive()){
-	          /* Side effect only: this returns "did we render a frame", and we did not.
-	             missingCapturedManifest picks loading vs unavailable from pipeline state, and
-	             the unavailable state is what hands the hole to the live map. */
+	          /* Latch per hole. This function is driven by a repeating tick, and with no
+	             local shutter left there is nothing to build, so every call would other-
+	             wise re-run the whole unavailable path - DOM writes, a debug event and a
+	             visibility recompute - several times a second. That spin is what put
+	             "fell-to-unavailable" through the timeline ~4x/sec and left the surface
+	             black.
+
+	             The existing terminal machinery cannot cover this: terminalCapturedUnavailable-
+	             Active() is gated on pipelineReadyForActiveHole(), and the case that spins is
+	             precisely the one where the pipeline reports no status at all. So the latch is
+	             keyed on the hole and released as soon as a manifest turns up or the hole
+	             changes, which is checked above before we ever get here. */
+	          var pipelineKey=String(surfaceCourseKey()||"course")+":h"+String(surfaceHoleNumber()||1);
+	          if(coursePlayUnavailableKey===pipelineKey)return false;
+	          coursePlayUnavailableKey=pipelineKey;
 	          missingCapturedManifest(opts.reason||"course-play-pipeline",{stage:"course-play-pipeline"});
 	          return false;
 	        }
@@ -1377,6 +1392,7 @@
 	      if(!renderCaptureManifest(manifest))return false;
 	      var ok=fitCaptured(bounds,"hole",.025,{objectName:"coursePlayPipelineHoleFrame",reason:opts.reason||"course-play-pipeline",maxScale:7.2,fitRatio:.94});
 	      if(ok){
+	        coursePlayUnavailableKey="";
 	        clearTerminalCapturedUnavailable("course-play-pipeline-rendered");
 	        clearStalePreparingOwners("course-play-pipeline-rendered");
 	        safe(function(){

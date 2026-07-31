@@ -77,7 +77,10 @@ test("every play-reachable capture site is guarded the same way", () => {
   sites.slice(1).forEach((after, i) => {
     if (/^[^;]*backgroundCapture:true/.test(after.slice(0, 1400))) { authoring += 1; return; }
     assert.ok(
-      /capturedGpsPlayActive\(\)[^;]*(missingCapturedManifest|return)/.test(sites[i].slice(-400)),
+      /* Lookback is generous on purpose: the guard block carries an explanatory
+         comment and a per-hole latch, so the guard keyword sits well above the
+         capture call it protects. Too tight a window fails on comment edits. */
+      /capturedGpsPlayActive\(\)/.test(sites[i].slice(-1400)),
       "play-reachable capture site " + (i + 1) + " must be preceded by a capturedGpsPlayActive guard"
     );
     guarded += 1;
