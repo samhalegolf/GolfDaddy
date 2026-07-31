@@ -87,7 +87,20 @@
     else if (pts.length === 1) map.setView(pts[0], 17);
     else if (current.centre) map.setView([current.centre.lat, current.centre.lng], 15);
     if (pts.length) {
-      objectLayer = L.layerGroup(pts.map(function (p) { return L.circleMarker(p, { radius: 4 }); })).addTo(map);
+      var layers = [];
+      var shape = rec.greenShape.filter(function (p) { return p && Number.isFinite(Number(p.lat)); })
+        .map(function (p) { return [Number(p.lat), Number(p.lng)]; });
+      if (shape.length >= 3) {
+        layers.push(L.polygon(shape, { color: "#ffffff", weight: 2, fillColor: "#2f8f4e", fillOpacity: 0.25 }));
+      } else if (rec.green) {
+        layers.push(L.circleMarker([rec.green.lat, rec.green.lng], { radius: 6, color: "#ffffff", weight: 2, fillColor: "#2f8f4e", fillOpacity: 0.9 }));
+      }
+      var line = [rec.tee].concat(rec.route, [rec.green])
+        .filter(function (p) { return p && Number.isFinite(Number(p.lat)); })
+        .map(function (p) { return [Number(p.lat), Number(p.lng)]; });
+      if (line.length >= 2) layers.push(L.polyline(line, { color: "#ffffff", weight: 2, dashArray: "6 8", opacity: 0.7 }));
+      if (rec.tee) layers.push(L.circleMarker([rec.tee.lat, rec.tee.lng], { radius: 5, color: "#ffffff", weight: 2, fillColor: "#0d1b12", fillOpacity: 0.9 }));
+      objectLayer = L.layerGroup(layers).addTo(map);
     }
     var pos = app.position.current();
     if (pos) renderPosition(pos);
