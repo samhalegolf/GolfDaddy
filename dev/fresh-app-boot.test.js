@@ -156,6 +156,17 @@ assert.strictEqual(surface.fitContain({ x: 0, y: 0 }, { width: 0, height: 0 }, {
   assert.ok(Math.abs(greenLocked.left - lockAnchor.left) < 1e-6 && Math.abs(greenLocked.top - lockAnchor.top) < 1e-6,
     "lock: the green lands on the lock guide box");
 
+  /* An aimed shot: the TARGET, not the green, lands on the lock box. */
+  const aimPoint = { lat: -36.916, lng: 174.7402 };
+  const lockAimed = surface.stageFrameTransform(meta, "lock", { ...pts, target: aimPoint }, view);
+  const aimPx = surface.projectToSurface(meta, aimPoint.lat, aimPoint.lng);
+  const aimMapped = surface.transformApply(lockAimed, aimPx);
+  const posAimed = surface.transformApply(lockAimed, posPx);
+  assert.ok(Math.abs(aimMapped.left - lockAnchor.left) < 1e-6 && Math.abs(aimMapped.top - lockAnchor.top) < 1e-6,
+    "lock with an aim: the target lands on the lock box");
+  assert.ok(Math.abs(posAimed.left - teeAnchor.left) < 1e-6 && Math.abs(posAimed.top - teeAnchor.top) < 1e-6,
+    "lock with an aim: the player still lands on the tee box");
+
   const zoom = surface.stageFrameTransform(meta, "zoom", pts, view);
   assert.ok(zoom, "zoom stage must frame");
   const greenZoomed = surface.transformApply(zoom, greenPx);
@@ -482,13 +493,37 @@ async function bootCheck() {
       dotMoved: dotEl.style.top !== dotBefore,
       stage: document.body.dataset.frameStage
     };
+    /* The shot loop: aim off the green shows the shot row, and each tap
+       records the previous shot. */
+    const activeAfterLockTap = app.shot.active();
+    app.shot.aim({ lat: tee.lat - 0.0025, lng: tee.lng });
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    const aimed = {
+      shotRowShown: !document.getElementById("shotRow").classList.contains("hiddenState"),
+      shotDist: Number(document.getElementById("shotDist").textContent),
+      remDist: Number(document.getElementById("remDist").textContent),
+      bubbleShown: !document.getElementById("aimBubble").classList.contains("hiddenState")
+    };
     app.position.set({ lat: green.lat - 0.0002, lng: green.lng }, "tap");
     await new Promise((resolve) => setTimeout(resolve, 60));
     const zoom = read();
-    app.position.set(tee, "tap");
-    await new Promise((resolve) => setTimeout(resolve, 60));
-    const back = read();
-    return { atTee, lock, gpsHold, zoom, back };
+    const greenFocus = {
+      ringShown: !document.getElementById("greenRing").classList.contains("hiddenState"),
+      holeOutVisible: getComputedStyle(document.getElementById("holeOutBtn")).display !== "none",
+      shotsRecorded: app.shot.holeShots(1).length
+    };
+    document.getElementById("holeOutBtn").click();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const holedOut = {
+      hole: app.play.state().hole,
+      shots: app.shot.holeShots(1).length,
+      activeCleared: !app.shot.active()
+    };
+    return {
+      atTee, lock, gpsHold,
+      shotStart: activeAfterLockTap && activeAfterLockTap.start,
+      aimed, zoom, greenFocus, holedOut
+    };
   }, AKARANA_H1);
 
   /* Base imagery policy: aerial only inside a licensed source's coverage —
@@ -555,7 +590,18 @@ async function bootCheck() {
   assert.strictEqual(stages.zoom.stage, "zoom", "inside 45m of the green → zoom stage");
   assert.ok(!stages.zoom.tilt, "green zoom is flat");
   assert.ok(stages.zoom.dotVisible, "the player stays visible in zoom");
-  assert.strictEqual(stages.back.stage, "lock", "back on the tee still locks - only the pill state is pre-frame");
+  assert.ok(stages.shotStart, "a tap starts a shot");
+  assert.ok(stages.aimed.bubbleShown, "the aim bubble renders on the locked view");
+  assert.ok(stages.aimed.shotRowShown, "aiming off the green shows the shot row");
+  assert.ok(stages.aimed.shotDist > 80 && stages.aimed.shotDist < 140,
+    "shot distance must be the start→target number, got " + stages.aimed.shotDist);
+  assert.ok(stages.aimed.remDist > 80, "remaining must be target→green, got " + stages.aimed.remDist);
+  assert.ok(stages.greenFocus.ringShown, "green focus shows the green ring");
+  assert.ok(stages.greenFocus.holeOutVisible, "green focus offers Hole Out");
+  assert.strictEqual(stages.greenFocus.shotsRecorded, 2, "two shots recorded before holing out");
+  assert.strictEqual(stages.holedOut.shots, 3, "Hole Out records the final shot");
+  assert.strictEqual(stages.holedOut.hole, 2, "Hole Out advances to the next hole");
+  assert.ok(stages.holedOut.activeCleared, "no active shot after holing out");
   assert.strictEqual(basemap.keylessNz, "osm", "no LINZ key → OSM even in NZ");
   assert.strictEqual(basemap.nz, "linz", "keyed NZ centre → LINZ aerial");
   assert.strictEqual(basemap.pebbleBeach, "naip", "US centre → NAIP aerial");

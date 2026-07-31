@@ -134,6 +134,22 @@
     document.getElementById("distFront").textContent = d.front === null ? "–" : d.front;
     document.getElementById("distCentre").textContent = d.centre;
     document.getElementById("distBack").textContent = d.back === null ? "–" : d.back;
+    /* Aimed off the green: the shot number (start→target) and what remains
+       (target→green). Aimed at the green, F/C/B already IS the shot. */
+    var shotRow = document.getElementById("shotRow");
+    if (!shotRow) return;
+    var act = app.shot && app.shot.active();
+    var show = false;
+    if (act && act.target) {
+      var toTarget = app.distance.haversineMeters(fix, act.target);
+      var remaining = app.distance.haversineMeters(act.target, rec.green);
+      if (Number.isFinite(toTarget) && Number.isFinite(remaining) && remaining > 3) {
+        document.getElementById("shotDist").textContent = Math.round(toTarget);
+        document.getElementById("remDist").textContent = Math.round(remaining);
+        show = true;
+      }
+    }
+    shotRow.classList.toggle("hiddenState", !show);
   }
 
   /* One renderer for both presentations: the player's position moves the
@@ -177,7 +193,39 @@
       dot.style.left = onSurface.left + "px";
       dot.style.top = onSurface.top + "px";
     }
+    renderShotOverlays();
     renderDistances(pos);
+  }
+
+  /* The aim bubble at the active shot's target, and the green ring in green
+     focus — both live in the tilt viewport, positioned with the same frame
+     transform as the dot, so all three project together. */
+  function renderShotOverlays() {
+    var img = document.getElementById("surfaceImage");
+    var published = document.body.classList.contains("surface-published");
+    var meta = null;
+    if (published && img && img.dataset.playSurface && activeFrame) {
+      try { meta = JSON.parse(img.dataset.playSurface); } catch (e) { meta = null; }
+    }
+    function project(pt) {
+      if (!meta || !pt) return null;
+      var px = surfaceLib.projectToSurface(meta, pt.lat, pt.lng);
+      return px ? surfaceLib.transformApply(activeFrame, px) : null;
+    }
+    var bubble = document.getElementById("aimBubble");
+    if (bubble) {
+      var act = app.shot && app.shot.active();
+      var at = project(act && act.target);
+      bubble.classList.toggle("hiddenState", !at);
+      if (at) { bubble.style.left = at.left + "px"; bubble.style.top = at.top + "px"; }
+    }
+    var ring = document.getElementById("greenRing");
+    if (ring) {
+      var rec = current.rec || {};
+      var greenAt = frameStage === "zoom" ? project(rec.green) : null;
+      ring.classList.toggle("hiddenState", !greenAt);
+      if (greenAt) { ring.style.left = greenAt.left + "px"; ring.style.top = greenAt.top + "px"; }
+    }
   }
 
   /* A real fix only becomes the position when it is plausibly ON this hole —
@@ -200,8 +248,61 @@
   function wirePosition() {
     if (positionWired) return;
     positionWired = true;
+    /* Shot advance runs BEFORE the render listener so the frame and overlays
+       see the updated shot. Deliberate placements only — a GPS fix moves the
+       dot, never the shot (the Actually Playing mode will own that). */
+    app.position.onChange(function (pos) {
+      if (pos && (pos.source === "tap" || pos.source === "tee")) {
+        app.shot.place(pos, current.rec && current.rec.green);
+      }
+    });
     app.position.onChange(renderPosition);
     if (app.gps) app.gps.onFix(maybeAdoptGpsFix);
+    /* Aim changes re-render (and re-frame, unless mid-drag). */
+    app.shot.onChange(function () { renderPosition(app.position.current()); });
+
+    /* Dragging the aim bubble. The tilt flattens while dragging (CSS on
+       body.bubble-dragging) so the 2D frame inverse stays exact; the camera
+       holds until release, then re-frames start→target. */
+    var bubble = document.getElementById("aimBubble");
+    function endBubbleDrag() {
+      if (!document.body.classList.contains("bubble-dragging")) return;
+      document.body.classList.remove("bubble-dragging");
+      renderPosition(app.position.current());
+    }
+    if (bubble) {
+      bubble.addEventListener("pointerdown", function (e) {
+        if (!app.shot.active()) return;
+        bubble.setPointerCapture(e.pointerId);
+        document.body.classList.add("bubble-dragging");
+        e.preventDefault();
+      });
+      bubble.addEventListener("pointermove", function (e) {
+        if (!document.body.classList.contains("bubble-dragging") || !activeFrame) return;
+        var img = document.getElementById("surfaceImage");
+        if (!img || !img.dataset.playSurface) return;
+        try {
+          var meta = JSON.parse(img.dataset.playSurface);
+          var px = surfaceLib.transformInvert(activeFrame, { left: e.clientX, top: e.clientY });
+          var w = Number(meta.outputDimensions.width), h = Number(meta.outputDimensions.height);
+          if (px && px.x >= 0 && px.y >= 0 && px.x <= w && px.y <= h) {
+            app.shot.aim(surfaceLib.latLngFromWorldPx(
+              { x: Number(meta.originPx.x) + px.x, y: Number(meta.originPx.y) + px.y },
+              Number(meta.captureZoom)));
+          }
+        } catch (err) {}
+      });
+      bubble.addEventListener("pointerup", endBubbleDrag);
+      bubble.addEventListener("pointercancel", endBubbleDrag);
+    }
+
+    /* Hole Out: the final shot ends where the player stands; next hole opens
+       at its pre-frame state. */
+    var holeOut = document.getElementById("holeOutBtn");
+    if (holeOut) holeOut.addEventListener("click", function () {
+      app.shot.holeOut(app.position.current());
+      app.play.goHole(Math.min(18, current.hole + 1));
+    });
     /* The start pill: Head To the Tee places the player on the tee; Standing
        Here dismisses the pill so a surface tap places them. */
     var headToTee = document.getElementById("headToTeeBtn");
@@ -290,7 +391,8 @@
     var img = document.getElementById("surfaceImage");
     if (!img || !meta) return;
     var stage = desiredStage(pos);
-    var holdFrame = activeFrame && stage === frameStage && pos && pos.source === "gps";
+    var holdFrame = activeFrame && stage === frameStage
+      && (document.body.classList.contains("bubble-dragging") || (pos && pos.source === "gps"));
     frameStage = stage;
     document.body.dataset.frameStage = frameStage;
     document.body.classList.toggle("tilt-lock", frameStage === "lock");
@@ -298,11 +400,13 @@
     var view = { width: window.innerWidth, height: window.innerHeight };
     var pins = meta.anchorPins || {};
     var rec = current.rec || {};
+    var act = app.shot && app.shot.active();
     var pts = {
       tee: pins.tee || rec.tee || null,
       green: pins.green || rec.green || null,
       greenShape: (Array.isArray(pins.greenShape) && pins.greenShape.length ? pins.greenShape : rec.greenShape) || [],
-      position: pos || null
+      position: pos || null,
+      target: (act && act.target) || null
     };
     activeFrame = surfaceLib.stageFrameTransform(meta, frameStage, pts, view);
     if (activeFrame) {
@@ -423,6 +527,7 @@
         centre: Number.isFinite(lat) && Number.isFinite(lng) ? { lat: lat, lng: lng } : null
       };
       wirePosition();
+      app.shot.startRound();
       if (app.gps) app.gps.start();
       await this.goHole(1);
     },
@@ -440,6 +545,7 @@
          on-hole GPS fix places them. Auto-head-to-tee belongs to the future
          Actually Playing mode. */
       app.position.clear();
+      app.shot.startHole(current.hole);
       startPillDismissed = false;
       renderPosition(null);
       if (app.gps) maybeAdoptGpsFix(app.gps.lastFix());

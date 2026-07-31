@@ -53,6 +53,24 @@ body.tilt-lock #surfaceViewport { transform: perspective(900px) rotateX(32deg) s
    pixels; hidden whenever there is no fix or the fix is off-surface. */
 #gpsDot { position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%; background: #2f8fef; border: 2px solid #fff; z-index: 550; pointer-events: none; }
 
+/* The aim bubble: the active shot's target, draggable. While dragging, the
+   tilt flattens (below) so the 2D inverse stays exact. */
+#aimBubble { position: absolute; width: 38px; height: 38px; margin: -19px 0 0 -19px; border-radius: 50%; border: 2.5px solid #ffd75e; background: rgba(255, 215, 94, .14); z-index: 560; touch-action: none; cursor: grab; }
+#aimBubble .aimCore { position: absolute; left: 50%; top: 50%; width: 7px; height: 7px; margin: -3.5px 0 0 -3.5px; border-radius: 50%; background: #ffd75e; }
+body.bubble-dragging #aimBubble { cursor: grabbing; }
+body.bubble-dragging #surfaceViewport { transform: none !important; transition: none !important; }
+
+/* Green focus: the green centre ring in the zoom stage. */
+#greenRing { position: absolute; width: 20px; height: 20px; margin: -10px 0 0 -10px; border-radius: 50%; border: 2px solid #1fd36d; background: rgba(31, 211, 109, .1); z-index: 545; pointer-events: none; }
+
+/* Hole Out lives in green focus only. */
+#holeOutBtn { display: none; position: absolute; right: 16px; bottom: calc(env(safe-area-inset-bottom, 0px) + 40px); z-index: 640; border: 0; border-radius: 999px; padding: 12px 18px; background: #1fd36d; color: #06110b; font-size: 14px; font-weight: 950; }
+body[data-frame-stage="zoom"] #holeOutBtn { display: block; }
+
+#shotRow { display: flex; gap: 8px; align-items: baseline; justify-content: center; font-size: 15px; font-weight: 700; }
+#shotRow.hiddenState { display: none; }
+.fcbRow { display: flex; gap: 10px; align-items: baseline; }
+
 /* Provenance chip: what image is on screen and where it came from. Tapping it
    opens the full metadata panel. */
 #surfaceSource { position: absolute; top: calc(env(safe-area-inset-top, 0px) + 64px); left: 16px; z-index: 620; border: 0; border-radius: 8px; padding: 6px 10px; background: rgba(13, 27, 18, .8); color: #9fc7ab; font-size: 11px; font-family: ui-monospace, Menlo, monospace; }
@@ -73,7 +91,7 @@ body.tilt-lock #surfaceViewport { transform: perspective(900px) rotateX(32deg) s
    Bottom-LEFT like the old app's #gdV62Distance — centre-bottom sits exactly
    on the tee guide box, and a bar there hides the player's dot at the tee
    (which read as "Head To the Tee did nothing"). */
-#distanceBar { position: absolute; left: 12px; bottom: calc(env(safe-area-inset-bottom, 0px) + 120px); display: flex; gap: 10px; align-items: baseline; padding: 9px 12px; border-radius: 14px; background: rgba(13, 27, 18, .85); z-index: 600; }
+#distanceBar { position: absolute; left: 12px; bottom: calc(env(safe-area-inset-bottom, 0px) + 120px); display: flex; flex-direction: column; gap: 6px; align-items: stretch; padding: 9px 12px; border-radius: 14px; background: rgba(13, 27, 18, .85); z-index: 600; }
 #distanceBar.hiddenState { display: none; }
 .dist { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 15px; font-weight: 600; }
 .distMain { font-size: 22px; font-weight: 800; }

@@ -174,10 +174,13 @@
 
   /* Stage framing against the guide contract:
        hole — tee on the tee box, green on the hole box (pre-locked)
-       lock — the PLAYER on the tee box, green on the lock box (shot view;
-              the lock tilt is CSS on the viewport, not part of this matrix)
+       lock — the PLAYER on the tee box, the AIM TARGET on the lock box (the
+              locked shot view is start→target; the target defaults to the
+              green until the bubble moves it). Tilt is CSS on the viewport,
+              not part of this matrix.
        zoom — the green filling the zoom box, approach direction up, flat
-     pts: {tee, green, position, greenShape} in lat/lng. Null → contain fit. */
+     pts: {tee, green, position, target, greenShape} in lat/lng.
+     Null → contain fit. */
   function stageFrameTransform(meta, stage, pts, viewDims) {
     if (!meta || !pts) return null;
     if (!(Number(viewDims && viewDims.width) > 0 && Number(viewDims && viewDims.height) > 0)) return null;
@@ -186,8 +189,9 @@
     if (!greenPx) return null;
     if (stage === "lock") {
       var posPx = px(pts.position) || px(pts.tee);
+      var aimPx = px(pts.target) || greenPx;
       if (!posPx) return null;
-      return similarityFromPairs(posPx, frameAnchor("tee", viewDims), greenPx, frameAnchor("lock", viewDims));
+      return similarityFromPairs(posPx, frameAnchor("tee", viewDims), aimPx, frameAnchor("lock", viewDims));
     }
     if (stage === "zoom") {
       var fromPx = px(pts.position) || px(pts.tee);
