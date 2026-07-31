@@ -31,8 +31,16 @@ body.route-picker #pickerScreen { display: flex; flex-direction: column; }
 
 #map { position: absolute; inset: 0; background: #16281c; }
 
-#surfaceImage { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: none; z-index: 500; background: #0d1b12; }
-body.surface-published #surfaceImage { display: block; }
+/* The surface viewport carries the lock-stage tilt (ported from
+   gd-gps-play-camera-tilt: 32° at perspective 900px, origin 50% 70%, 1s ease,
+   scale 1+32/150). The image inside carries the frame matrix, and the dot
+   rides in the same space so the tilt projects them together. */
+#surfaceViewport { position: absolute; inset: 0; display: none; z-index: 500; background: #0d1b12; transform-origin: 50% 70%; transition: transform 1000ms cubic-bezier(.18, .82, .24, 1); }
+body.surface-published #surfaceViewport { display: block; }
+body.tilt-lock #surfaceViewport { transform: perspective(900px) rotateX(32deg) scale(1.213); }
+@media (prefers-reduced-motion: reduce) { #surfaceViewport { transition-duration: 1ms; } }
+
+#surfaceImage { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
 
 /* Projected position on a published surface. Positioned by play.js in screen
    pixels; hidden whenever there is no fix or the fix is off-surface. */

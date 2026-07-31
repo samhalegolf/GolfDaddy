@@ -153,15 +153,18 @@
     if (!dot) return;
     var img = document.getElementById("surfaceImage");
     var onSurface = null;
-    if (pos && img && document.body.classList.contains("surface-published") && img.dataset.playSurface) {
+    if (img && document.body.classList.contains("surface-published") && img.dataset.playSurface) {
       try {
         var meta = JSON.parse(img.dataset.playSurface);
-        var imagePx = surfaceLib.projectToSurface(meta, pos.lat, pos.lng);
-        if (imagePx) {
-          onSurface = activeFrame
-            ? surfaceLib.transformApply(activeFrame, imagePx)
-            : surfaceLib.fitContain(imagePx, meta.outputDimensions,
-                { width: img.clientWidth, height: img.clientHeight });
+        applySurfaceFrame(meta, pos);   // stage follows the position, event-driven
+        if (pos) {
+          var imagePx = surfaceLib.projectToSurface(meta, pos.lat, pos.lng);
+          if (imagePx) {
+            onSurface = activeFrame
+              ? surfaceLib.transformApply(activeFrame, imagePx)
+              : surfaceLib.fitContain(imagePx, meta.outputDimensions,
+                  { width: img.clientWidth, height: img.clientHeight });
+          }
         }
       } catch (e) { onSurface = null; }
     }
@@ -212,9 +215,12 @@
         var meta = JSON.parse(img.dataset.playSurface);
         var tapped = null;
         if (activeFrame) {
-          var px = surfaceLib.transformInvert(activeFrame, { left: e.clientX, top: e.clientY });
+          /* offsetX/Y are the browser's own inverse projection into the
+             element's local space — image pixels directly, and correct even
+             under the lock tilt where a 2D matrix inverse would not be. */
+          var px = { x: e.offsetX, y: e.offsetY };
           var w = Number(meta.outputDimensions.width), h = Number(meta.outputDimensions.height);
-          if (px && px.x >= 0 && px.y >= 0 && px.x <= w && px.y <= h) {
+          if (px.x >= 0 && px.y >= 0 && px.x <= w && px.y <= h) {
             tapped = surfaceLib.latLngFromWorldPx(
               { x: Number(meta.originPx.x) + px.x, y: Number(meta.originPx.y) + px.y },
               Number(meta.captureZoom));
@@ -228,30 +234,64 @@
         if (tapped) app.position.set(tapped, "tap");
       } catch (err) {}
     });
-    /* Re-frame on viewport changes — event-driven, no polling. */
+    /* Re-frame on viewport changes — event-driven, no polling. Dropping the
+       held frame forces a recompute at the new dimensions. */
     window.addEventListener("resize", function () {
-      if (!document.body.classList.contains("surface-published") || !img || !img.dataset.playSurface) return;
-      try { applySurfaceFrame(JSON.parse(img.dataset.playSurface)); } catch (e) {}
+      if (!document.body.classList.contains("surface-published")) return;
+      activeFrame = null;
       renderPosition(app.position.current());
     });
   }
 
   var provenance = null;   // what is on screen and where it came from
-  var activeFrame = null;  // the pre-locked frame transform, null → contain fit
+  var activeFrame = null;  // the current stage's frame transform, null → contain fit
+  var frameStage = "hole"; // hole | lock | zoom
 
-  /* Pre-locked hole framing: tee on the bottom guide box, green on the hole
-     box. Anchors come from the surface's own anchorPins; a surface published
-     without them falls back to the hole geometry, and with neither the
-     contain fit still shows the whole image. */
-  function applySurfaceFrame(meta) {
+  var ZOOM_GREEN_M = 45;   // inside this of the green centre → green zoom
+  var LOCK_OFF_TEE_M = 12; // moved this far off the tee → lock (shot view)
+
+  /* Which stage the current position asks for. Pure position→stage policy:
+     the guide contract says how each stage frames, this says when. */
+  function desiredStage(pos) {
+    var rec = current.rec;
+    if (!pos || !rec || !rec.green) return "hole";
+    var toGreen = app.distance.haversineMeters(pos, rec.green);
+    if (Number.isFinite(toGreen) && toGreen <= ZOOM_GREEN_M) return "zoom";
+    if (rec.tee) {
+      var offTee = app.distance.haversineMeters(pos, rec.tee);
+      if (Number.isFinite(offTee) && offTee > LOCK_OFF_TEE_M) return "lock";
+    }
+    return "hole";
+  }
+
+  /* Frame the surface for the stage the position asks for. Anchors prefer the
+     surface's own anchorPins, then the hole geometry; with neither the
+     contain fit still shows the whole image. The lock tilt is a viewport
+     class — the matrix stays 2D so dot and tap projections remain exact.
+
+     "Lock" means the frame LOCKS: it is captured on hole entry, on a
+     deliberate placement (tap / head-to-tee), on a stage boundary crossing,
+     and on resize. A GPS fix that stays inside the current stage moves the
+     dot only — the camera does not re-anchor under a walking player. */
+  function applySurfaceFrame(meta, pos) {
     var img = document.getElementById("surfaceImage");
     if (!img || !meta) return;
+    var stage = desiredStage(pos);
+    var holdFrame = activeFrame && stage === frameStage && pos && pos.source === "gps";
+    frameStage = stage;
+    document.body.dataset.frameStage = frameStage;
+    document.body.classList.toggle("tilt-lock", frameStage === "lock");
+    if (holdFrame) return;
     var view = { width: window.innerWidth, height: window.innerHeight };
     var pins = meta.anchorPins || {};
-    var anchors = pins.tee && pins.green ? pins
-      : current.rec && current.rec.tee && current.rec.green
-        ? { tee: current.rec.tee, green: current.rec.green } : null;
-    activeFrame = surfaceLib.playFrameTransform(meta, anchors, view);
+    var rec = current.rec || {};
+    var pts = {
+      tee: pins.tee || rec.tee || null,
+      green: pins.green || rec.green || null,
+      greenShape: (Array.isArray(pins.greenShape) && pins.greenShape.length ? pins.greenShape : rec.greenShape) || [],
+      position: pos || null
+    };
+    activeFrame = surfaceLib.stageFrameTransform(meta, frameStage, pts, view);
     if (activeFrame) {
       img.style.width = Number(meta.outputDimensions.width) + "px";
       img.style.height = Number(meta.outputDimensions.height) + "px";
@@ -288,6 +328,9 @@
       img.style.transform = ""; img.style.transformOrigin = "";
     }
     activeFrame = null;
+    frameStage = "hole";
+    delete document.body.dataset.frameStage;
+    document.body.classList.remove("tilt-lock");
     provenance = null;
     renderProvenance();
     renderPosition(app.position.current());
@@ -330,7 +373,6 @@
       if (token !== transitionToken) return;   // superseded: drop silently
       img.dataset.playSurface = JSON.stringify(asset.playSurface);
       img.src = url;   // decoded already — paints without a blank frame
-      applySurfaceFrame(asset.playSurface);
       provenance = {
         origin: origin,
         url: url,

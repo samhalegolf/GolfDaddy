@@ -165,6 +165,51 @@
     return similarityFromPairs(teePx, frameAnchor("tee", viewDims), greenPx, frameAnchor("hole", viewDims));
   }
 
+  /* One-point anchored variant of the similarity: rotation and scale are
+     chosen, not solved — for stages that fit a shape rather than two pins. */
+  function anchoredTransform(p, q, angleRad, scale) {
+    var a = scale * Math.cos(angleRad), b = scale * Math.sin(angleRad);
+    return { a: a, b: b, tx: q.left - (a * p.x - b * p.y), ty: q.top - (b * p.x + a * p.y) };
+  }
+
+  /* Stage framing against the guide contract:
+       hole — tee on the tee box, green on the hole box (pre-locked)
+       lock — the PLAYER on the tee box, green on the lock box (shot view;
+              the lock tilt is CSS on the viewport, not part of this matrix)
+       zoom — the green filling the zoom box, approach direction up, flat
+     pts: {tee, green, position, greenShape} in lat/lng. Null → contain fit. */
+  function stageFrameTransform(meta, stage, pts, viewDims) {
+    if (!meta || !pts) return null;
+    if (!(Number(viewDims && viewDims.width) > 0 && Number(viewDims && viewDims.height) > 0)) return null;
+    function px(pt) { return pt ? projectToSurface(meta, pt.lat, pt.lng) : null; }
+    var greenPx = px(pts.green);
+    if (!greenPx) return null;
+    if (stage === "lock") {
+      var posPx = px(pts.position) || px(pts.tee);
+      if (!posPx) return null;
+      return similarityFromPairs(posPx, frameAnchor("tee", viewDims), greenPx, frameAnchor("lock", viewDims));
+    }
+    if (stage === "zoom") {
+      var fromPx = px(pts.position) || px(pts.tee);
+      var dx = fromPx ? greenPx.x - fromPx.x : 0;
+      var dy = fromPx ? greenPx.y - fromPx.y : -1;
+      /* Rotate the approach direction to screen-up (0,-1). */
+      var angle = Math.atan2(-1, 0) - Math.atan2(dy, dx);
+      var radius = 0;
+      (Array.isArray(pts.greenShape) ? pts.greenShape : []).forEach(function (p) {
+        var sp = px(p);
+        if (sp) radius = Math.max(radius, Math.hypot(sp.x - greenPx.x, sp.y - greenPx.y));
+      });
+      if (!(radius > 0)) radius = 25;   // ~15m at the observed z18 when a green has no shape
+      var box = FRAME_GUIDE.zoom;
+      var boxMin = Math.min(Number(viewDims.width) * box.w, Number(viewDims.height) * box.h);
+      return anchoredTransform(greenPx, frameAnchor("zoom", viewDims), angle, (0.55 * boxMin) / (2 * radius));
+    }
+    var teePx = px(pts.tee);
+    if (!teePx) return null;
+    return similarityFromPairs(teePx, frameAnchor("tee", viewDims), greenPx, frameAnchor("hole", viewDims));
+  }
+
   /* Inverse of worldPx: world-mercator pixels at an integer zoom → lat/lng. */
   function latLngFromWorldPx(px, zoom) {
     if (!Number.isInteger(zoom)) throw new Error("captureZoom must be an integer, got " + zoom);
@@ -219,6 +264,8 @@
     similarityFromPairs: similarityFromPairs,
     transformApply: transformApply,
     transformInvert: transformInvert,
+    anchoredTransform: anchoredTransform,
+    stageFrameTransform: stageFrameTransform,
     playFrameTransform: playFrameTransform,
     latLngFromWorldPx: latLngFromWorldPx,
     projectToSurface: projectToSurface,

@@ -135,6 +135,45 @@ assert.strictEqual(surface.fitContain({ x: 0, y: 0 }, { width: 0, height: 0 }, {
     "a zero viewport must not produce a frame");
 }
 
+/* Lock and zoom stages against the same contract. */
+{
+  const view = { width: 375, height: 812 };
+  const frameOrigin = surface.worldPx(-36.9100, 174.7360, 18);
+  const meta = { captureZoom: 18, originPx: frameOrigin, outputDimensions: { width: 1341, height: 1889 } };
+  const position = { lat: -36.9150, lng: 174.7400 };   // mid-fairway
+  const pts = { tee: AKARANA_H1.tee, green: AKARANA_H1.green, greenShape: AKARANA_H1.greenShape, position };
+  const posPx = surface.projectToSurface(meta, position.lat, position.lng);
+  const greenPx = surface.projectToSurface(meta, AKARANA_H1.green.lat, AKARANA_H1.green.lng);
+
+  const lock = surface.stageFrameTransform(meta, "lock", pts, view);
+  assert.ok(lock, "lock stage must frame");
+  const posLocked = surface.transformApply(lock, posPx);
+  const greenLocked = surface.transformApply(lock, greenPx);
+  const teeAnchor = surface.frameAnchor("tee", view);
+  const lockAnchor = surface.frameAnchor("lock", view);
+  assert.ok(Math.abs(posLocked.left - teeAnchor.left) < 1e-6 && Math.abs(posLocked.top - teeAnchor.top) < 1e-6,
+    "lock: the player lands on the tee guide box");
+  assert.ok(Math.abs(greenLocked.left - lockAnchor.left) < 1e-6 && Math.abs(greenLocked.top - lockAnchor.top) < 1e-6,
+    "lock: the green lands on the lock guide box");
+
+  const zoom = surface.stageFrameTransform(meta, "zoom", pts, view);
+  assert.ok(zoom, "zoom stage must frame");
+  const greenZoomed = surface.transformApply(zoom, greenPx);
+  const zoomAnchor = surface.frameAnchor("zoom", view);
+  assert.ok(Math.abs(greenZoomed.left - zoomAnchor.left) < 1e-6 && Math.abs(greenZoomed.top - zoomAnchor.top) < 1e-6,
+    "zoom: the green centres on the zoom guide box");
+  const posZoomed = surface.transformApply(zoom, posPx);
+  assert.ok(posZoomed.top > greenZoomed.top, "zoom: the approach direction points up the screen");
+  let maxR = 0;
+  AKARANA_H1.greenShape.forEach((p) => {
+    const sp = surface.projectToSurface(meta, p.lat, p.lng);
+    const m = surface.transformApply(zoom, sp);
+    maxR = Math.max(maxR, Math.hypot(m.left - greenZoomed.left, m.top - greenZoomed.top));
+  });
+  const boxMin = Math.min(view.width * 0.687, view.height * 0.316);
+  assert.ok(Math.abs(maxR - (0.55 * boxMin) / 2) < 1e-6, "zoom: the green shape fills 55% of the zoom box");
+}
+
 /* Provenance label: compact, readable, and it names the source. */
 {
   const label = surface.provenanceLabel({
@@ -394,6 +433,43 @@ async function bootCheck() {
     };
   }, AKARANA_H1);
 
+  /* Stage transitions on the framed course: tee → hole frame; a tap up the
+     fairway → lock (tilted); a tap by the green → zoom (flat); back to the
+     tee → hole again. */
+  const stages = await page.evaluate(async (h1) => {
+    const app = window.ClarityApp;
+    const shift = (p) => ({ lat: p.lat - 1, lng: p.lng });
+    const tee = shift(h1.tee), green = shift(h1.green);
+    const read = () => ({
+      stage: document.body.dataset.frameStage,
+      tilt: document.body.classList.contains("tilt-lock"),
+      dotVisible: !document.getElementById("gpsDot").classList.contains("hiddenState")
+    });
+    const atTee = read();
+    app.position.set({ lat: tee.lat - 0.0015, lng: tee.lng }, "tap");
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    const lock = read();
+    /* A GPS fix inside the same stage must move the dot, not the camera. */
+    const img = document.getElementById("surfaceImage");
+    const dotEl = document.getElementById("gpsDot");
+    const frameBefore = img.style.transform;
+    const dotBefore = dotEl.style.top;
+    app.position.set({ lat: tee.lat - 0.0016, lng: tee.lng }, "gps");
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    const gpsHold = {
+      frameHeld: img.style.transform === frameBefore,
+      dotMoved: dotEl.style.top !== dotBefore,
+      stage: document.body.dataset.frameStage
+    };
+    app.position.set({ lat: green.lat - 0.0002, lng: green.lng }, "tap");
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    const zoom = read();
+    app.position.set(tee, "tap");
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    const back = read();
+    return { atTee, lock, gpsHold, zoom, back };
+  }, AKARANA_H1);
+
   /* Base imagery policy: aerial only inside a licensed source's coverage —
      LINZ (keyed, NZ), NAIP (US), QLD (AU) — and the honest OSM fallback
      everywhere else, including NZ when the key never arrived. */
@@ -445,6 +521,18 @@ async function bootCheck() {
   assert.ok(Math.abs(framed.dot.left - expectedLeft) < 2 && Math.abs(framed.dot.top - expectedTop) < 2,
     "at the tee, the dot must sit on the tee guide box: got " + framed.dot.left + "," + framed.dot.top
     + " want " + expectedLeft + "," + expectedTop);
+  assert.strictEqual(stages.atTee.stage, "hole", "at the tee the pre-locked hole frame shows");
+  assert.ok(!stages.atTee.tilt, "the hole frame is flat");
+  assert.strictEqual(stages.lock.stage, "lock", "off the tee → lock stage");
+  assert.ok(stages.lock.tilt, "the lock stage carries the 32° tilt");
+  assert.ok(stages.lock.dotVisible, "the player stays visible in lock");
+  assert.strictEqual(stages.gpsHold.stage, "lock", "a same-stage GPS fix stays in lock");
+  assert.ok(stages.gpsHold.frameHeld, "a same-stage GPS fix must NOT re-anchor the locked frame");
+  assert.ok(stages.gpsHold.dotMoved, "a same-stage GPS fix still moves the dot");
+  assert.strictEqual(stages.zoom.stage, "zoom", "inside 45m of the green → zoom stage");
+  assert.ok(!stages.zoom.tilt, "green zoom is flat");
+  assert.ok(stages.zoom.dotVisible, "the player stays visible in zoom");
+  assert.strictEqual(stages.back.stage, "hole", "back on the tee → hole frame again");
   assert.strictEqual(basemap.keylessNz, "osm", "no LINZ key → OSM even in NZ");
   assert.strictEqual(basemap.nz, "linz", "keyed NZ centre → LINZ aerial");
   assert.strictEqual(basemap.pebbleBeach, "naip", "US centre → NAIP aerial");
