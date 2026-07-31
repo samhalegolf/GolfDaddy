@@ -107,6 +107,64 @@
     };
   }
 
+  /* The pre-locked hole frame, ported from the guide contract
+     (scripts/inline/gd-hole-frame-guide-contract-v20.js): screen-fraction
+     boxes saying where the green and tee sit while a hole is framed — green
+     in the upper "hole" box, tee in the strip near the bottom. The lock and
+     zoom stages arrive with shot placement; the boxes are kept now so every
+     stage frames against one contract. */
+  var FRAME_GUIDE = {
+    zoom: { x: 0.152, y: 0.203, w: 0.687, h: 0.316 },
+    lock: { x: 0.247, y: 0.203, w: 0.497, h: 0.222 },
+    hole: { x: 0.308, y: 0.203, w: 0.375, h: 0.160 },
+    tee:  { x: 0.308, y: 0.881, w: 0.375, h: 0.037 }
+  };
+
+  function frameAnchor(kind, viewDims) {
+    var spec = FRAME_GUIDE[kind];
+    if (!spec) return null;
+    return {
+      left: Number(viewDims.width) * (spec.x + spec.w / 2),
+      top: Number(viewDims.height) * (spec.y + spec.h / 2)
+    };
+  }
+
+  /* Similarity transform (rotate + uniform scale + translate, no skew) fixed
+     by two point pairs: screenX = a*x - b*y + tx, screenY = b*x + a*y + ty. */
+  function similarityFromPairs(p1, q1, p2, q2) {
+    var dx = p2.x - p1.x, dy = p2.y - p1.y;
+    var det = dx * dx + dy * dy;
+    if (!(det > 0)) return null;
+    var ux = q2.left - q1.left, uy = q2.top - q1.top;
+    var a = (dx * ux + dy * uy) / det;
+    var b = (dx * uy - dy * ux) / det;
+    return { a: a, b: b, tx: q1.left - (a * p1.x - b * p1.y), ty: q1.top - (b * p1.x + a * p1.y) };
+  }
+
+  function transformApply(t, pt) {
+    return { left: t.a * pt.x - t.b * pt.y + t.tx, top: t.b * pt.x + t.a * pt.y + t.ty };
+  }
+
+  function transformInvert(t, screenPt) {
+    var det = t.a * t.a + t.b * t.b;
+    if (!(det > 0)) return null;
+    var sx = Number(screenPt.left) - t.tx, sy = Number(screenPt.top) - t.ty;
+    return { x: (t.a * sx + t.b * sy) / det, y: (t.a * sy - t.b * sx) / det };
+  }
+
+  /* Pre-locked play framing: one transform that puts the hole's tee anchor on
+     the tee guide box and its green anchor on the hole box — tee at the
+     bottom, green up top, whatever the hole's compass bearing. Null (callers
+     fall back to the contain fit) when anchors are missing or off-surface. */
+  function playFrameTransform(meta, anchors, viewDims) {
+    if (!meta || !anchors || !anchors.tee || !anchors.green) return null;
+    if (!(Number(viewDims && viewDims.width) > 0 && Number(viewDims && viewDims.height) > 0)) return null;
+    var teePx = projectToSurface(meta, anchors.tee.lat, anchors.tee.lng);
+    var greenPx = projectToSurface(meta, anchors.green.lat, anchors.green.lng);
+    if (!teePx || !greenPx) return null;
+    return similarityFromPairs(teePx, frameAnchor("tee", viewDims), greenPx, frameAnchor("hole", viewDims));
+  }
+
   /* Inverse of worldPx: world-mercator pixels at an integer zoom → lat/lng. */
   function latLngFromWorldPx(px, zoom) {
     if (!Number.isInteger(zoom)) throw new Error("captureZoom must be an integer, got " + zoom);
@@ -157,6 +215,11 @@
   return {
     worldPx: worldPx,
     provenanceLabel: provenanceLabel,
+    frameAnchor: frameAnchor,
+    similarityFromPairs: similarityFromPairs,
+    transformApply: transformApply,
+    transformInvert: transformInvert,
+    playFrameTransform: playFrameTransform,
     latLngFromWorldPx: latLngFromWorldPx,
     projectToSurface: projectToSurface,
     surfaceScreenToLatLng: surfaceScreenToLatLng,

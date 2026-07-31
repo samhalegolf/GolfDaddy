@@ -6,7 +6,7 @@ html, body { height: 100%; font-family: -apple-system, system-ui, sans-serif; ba
 
 .screen { position: fixed; inset: 0; display: none; }
 body.route-home #homeScreen { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; }
-body.route-play #playScreen { display: block; }
+body.route-play #playScreen { display: block; overflow: hidden; }
 
 #playTile { font-size: 20px; padding: 18px 48px; border-radius: 14px; border: 0; background: #2f8f4e; color: #fff; }
 

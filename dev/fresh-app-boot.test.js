@@ -102,6 +102,39 @@ assert.strictEqual(surface.fitContain({ x: 0, y: 0 }, { width: 0, height: 0 }, {
     "a tap in the letterbox is not on the course");
 }
 
+/* Pre-locked hole framing (guide contract v20): tee pinned to the bottom
+   guide box, green to the upper hole box, one similarity transform. */
+{
+  const view = { width: 375, height: 812 };
+  const teeAnchor = surface.frameAnchor("tee", view);
+  const holeAnchor = surface.frameAnchor("hole", view);
+  assert.ok(teeAnchor.top > holeAnchor.top, "tee anchor must sit below the green anchor");
+  assert.ok(Math.abs(teeAnchor.left - holeAnchor.left) < 1e-9, "both anchors sit on the same vertical axis");
+
+  const frameOrigin = surface.worldPx(-36.9100, 174.7360, 18);
+  const frameMeta = { captureZoom: 18, originPx: frameOrigin, outputDimensions: { width: 1341, height: 1889 } };
+  const anchors = { tee: AKARANA_H1.tee, green: AKARANA_H1.green };
+  const frame = surface.playFrameTransform(frameMeta, anchors, view);
+  assert.ok(frame, "the frame transform must exist for on-surface anchors");
+
+  const teePx = surface.projectToSurface(frameMeta, AKARANA_H1.tee.lat, AKARANA_H1.tee.lng);
+  const greenPx = surface.projectToSurface(frameMeta, AKARANA_H1.green.lat, AKARANA_H1.green.lng);
+  const teeMapped = surface.transformApply(frame, teePx);
+  const greenMapped = surface.transformApply(frame, greenPx);
+  assert.ok(Math.abs(teeMapped.left - teeAnchor.left) < 1e-6 && Math.abs(teeMapped.top - teeAnchor.top) < 1e-6,
+    "the tee must land on the tee guide box");
+  assert.ok(Math.abs(greenMapped.left - holeAnchor.left) < 1e-6 && Math.abs(greenMapped.top - holeAnchor.top) < 1e-6,
+    "the green must land on the hole guide box");
+
+  const roundTrip = surface.transformInvert(frame, teeMapped);
+  assert.ok(Math.abs(roundTrip.x - teePx.x) < 1e-6 && Math.abs(roundTrip.y - teePx.y) < 1e-6,
+    "the transform must invert exactly (taps depend on it)");
+
+  assert.strictEqual(surface.playFrameTransform(frameMeta, null, view), null, "no anchors → contain fallback");
+  assert.strictEqual(surface.playFrameTransform(frameMeta, anchors, { width: 0, height: 0 }), null,
+    "a zero viewport must not produce a frame");
+}
+
 /* Provenance label: compact, readable, and it names the source. */
 {
   const label = surface.provenanceLabel({
@@ -333,6 +366,34 @@ async function bootCheck() {
     return { atTee, afterTap };
   }, AKARANA_H1);
 
+  /* Pre-locked framing in the page: a framed surface far from the granted fix
+     keeps the tee position, and the dot renders exactly on the tee guide box. */
+  const framed = await page.evaluate(async (h1) => {
+    const app = window.ClarityApp;
+    const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+    const shift = (p) => ({ lat: p.lat - 1, lng: p.lng });
+    const tee = shift(h1.tee), green = shift(h1.green);
+    const origin = app.playSurface.worldPx(green.lat + 0.004, green.lng - 0.004, 18);
+    const meta = {
+      captureZoom: 18, originPx: { x: origin.x, y: origin.y },
+      outputDimensions: { width: 1341, height: 1889 },
+      anchorPins: { tee, green }
+    };
+    const pkg = { holes: [{ holeNumber: 1, geometry: { tee, green, greenShape: [], route: [] }, visual: { url: PNG, playSurface: meta } }] };
+    await app.play.start("framed-course", pkg, null);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const img = document.getElementById("surfaceImage");
+    const dot = document.getElementById("gpsDot");
+    return {
+      presented: document.body.classList.contains("surface-published"),
+      transform: img.style.transform,
+      positionSource: app.position.current() && app.position.current().source,
+      dotVisible: !dot.classList.contains("hiddenState"),
+      dot: { left: parseFloat(dot.style.left), top: parseFloat(dot.style.top) },
+      view: { w: window.innerWidth, h: window.innerHeight }
+    };
+  }, AKARANA_H1);
+
   /* Base imagery policy: aerial only inside a licensed source's coverage —
      LINZ (keyed, NZ), NAIP (US), QLD (AU) — and the honest OSM fallback
      everywhere else, including NZ when the key never arrived. */
@@ -375,6 +436,15 @@ async function bootCheck() {
   assert.ok(surfaceFirst.h1State.chip.startsWith("pkg"), "the chip names the package source, got: " + surfaceFirst.h1State.chip);
   assert.strictEqual(surfaceFirst.h2State.presented, false, "no visual on hole 2 → back on the live map");
   assert.ok(surfaceFirst.h2State.mapCreated, "the map is created the moment absence is the answer");
+  assert.ok(framed.presented, "framed course must present its surface");
+  assert.ok(framed.transform.indexOf("matrix(") === 0, "the surface must carry the frame transform, got: " + framed.transform);
+  assert.strictEqual(framed.positionSource, "tee", "far from the fix, the framed hole heads to the tee");
+  assert.ok(framed.dotVisible, "the position dot renders on the framed surface");
+  const expectedLeft = framed.view.w * (0.308 + 0.375 / 2);
+  const expectedTop = framed.view.h * (0.881 + 0.037 / 2);
+  assert.ok(Math.abs(framed.dot.left - expectedLeft) < 2 && Math.abs(framed.dot.top - expectedTop) < 2,
+    "at the tee, the dot must sit on the tee guide box: got " + framed.dot.left + "," + framed.dot.top
+    + " want " + expectedLeft + "," + expectedTop);
   assert.strictEqual(basemap.keylessNz, "osm", "no LINZ key → OSM even in NZ");
   assert.strictEqual(basemap.nz, "linz", "keyed NZ centre → LINZ aerial");
   assert.strictEqual(basemap.pebbleBeach, "naip", "US centre → NAIP aerial");

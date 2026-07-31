@@ -158,8 +158,10 @@
         var meta = JSON.parse(img.dataset.playSurface);
         var imagePx = surfaceLib.projectToSurface(meta, pos.lat, pos.lng);
         if (imagePx) {
-          onSurface = surfaceLib.fitContain(imagePx, meta.outputDimensions,
-            { width: img.clientWidth, height: img.clientHeight });
+          onSurface = activeFrame
+            ? surfaceLib.transformApply(activeFrame, imagePx)
+            : surfaceLib.fitContain(imagePx, meta.outputDimensions,
+                { width: img.clientWidth, height: img.clientHeight });
         }
       } catch (e) { onSurface = null; }
     }
@@ -200,22 +202,68 @@
       panel.classList.toggle("hiddenState");
       if (!panel.classList.contains("hiddenState")) panel.textContent = JSON.stringify(provenance, null, 2);
     });
-    /* Tap where you are standing, on the published surface. */
+    /* Tap where you are standing, on the published surface. Framed mode
+       inverts the frame transform (viewport coords — the play screen fills
+       it); contain mode inverts the letterbox fit. */
     var img = document.getElementById("surfaceImage");
     if (img) img.addEventListener("click", function (e) {
       if (!img.dataset.playSurface) return;
       try {
         var meta = JSON.parse(img.dataset.playSurface);
-        var rect = img.getBoundingClientRect();
-        var tapped = surfaceLib.surfaceScreenToLatLng(meta,
-          { left: e.clientX - rect.left, top: e.clientY - rect.top },
-          { width: rect.width, height: rect.height });
+        var tapped = null;
+        if (activeFrame) {
+          var px = surfaceLib.transformInvert(activeFrame, { left: e.clientX, top: e.clientY });
+          var w = Number(meta.outputDimensions.width), h = Number(meta.outputDimensions.height);
+          if (px && px.x >= 0 && px.y >= 0 && px.x <= w && px.y <= h) {
+            tapped = surfaceLib.latLngFromWorldPx(
+              { x: Number(meta.originPx.x) + px.x, y: Number(meta.originPx.y) + px.y },
+              Number(meta.captureZoom));
+          }
+        } else {
+          var rect = img.getBoundingClientRect();
+          tapped = surfaceLib.surfaceScreenToLatLng(meta,
+            { left: e.clientX - rect.left, top: e.clientY - rect.top },
+            { width: rect.width, height: rect.height });
+        }
         if (tapped) app.position.set(tapped, "tap");
       } catch (err) {}
+    });
+    /* Re-frame on viewport changes — event-driven, no polling. */
+    window.addEventListener("resize", function () {
+      if (!document.body.classList.contains("surface-published") || !img || !img.dataset.playSurface) return;
+      try { applySurfaceFrame(JSON.parse(img.dataset.playSurface)); } catch (e) {}
+      renderPosition(app.position.current());
     });
   }
 
   var provenance = null;   // what is on screen and where it came from
+  var activeFrame = null;  // the pre-locked frame transform, null → contain fit
+
+  /* Pre-locked hole framing: tee on the bottom guide box, green on the hole
+     box. Anchors come from the surface's own anchorPins; a surface published
+     without them falls back to the hole geometry, and with neither the
+     contain fit still shows the whole image. */
+  function applySurfaceFrame(meta) {
+    var img = document.getElementById("surfaceImage");
+    if (!img || !meta) return;
+    var view = { width: window.innerWidth, height: window.innerHeight };
+    var pins = meta.anchorPins || {};
+    var anchors = pins.tee && pins.green ? pins
+      : current.rec && current.rec.tee && current.rec.green
+        ? { tee: current.rec.tee, green: current.rec.green } : null;
+    activeFrame = surfaceLib.playFrameTransform(meta, anchors, view);
+    if (activeFrame) {
+      img.style.width = Number(meta.outputDimensions.width) + "px";
+      img.style.height = Number(meta.outputDimensions.height) + "px";
+      img.style.transformOrigin = "0 0";
+      /* CSS matrix(a,b,c,d,e,f): x'=a·x+c·y+e, y'=b·x+d·y+f — our similarity
+         with c=-b, d=a. */
+      img.style.transform = "matrix(" + activeFrame.a + "," + activeFrame.b + "," + (-activeFrame.b) + "," + activeFrame.a + "," + activeFrame.tx + "," + activeFrame.ty + ")";
+    } else {
+      img.style.width = ""; img.style.height = "";
+      img.style.transform = ""; img.style.transformOrigin = "";
+    }
+  }
 
   function renderProvenance() {
     var chip = document.getElementById("surfaceSource");
@@ -233,7 +281,13 @@
   function clearSurface() {
     document.body.classList.remove("surface-published");
     var img = document.getElementById("surfaceImage");
-    if (img) { img.removeAttribute("src"); img.dataset.playSurface = ""; }
+    if (img) {
+      img.removeAttribute("src");
+      img.dataset.playSurface = "";
+      img.style.width = ""; img.style.height = "";
+      img.style.transform = ""; img.style.transformOrigin = "";
+    }
+    activeFrame = null;
     provenance = null;
     renderProvenance();
     renderPosition(app.position.current());
@@ -276,6 +330,7 @@
       if (token !== transitionToken) return;   // superseded: drop silently
       img.dataset.playSurface = JSON.stringify(asset.playSurface);
       img.src = url;   // decoded already — paints without a blank frame
+      applySurfaceFrame(asset.playSurface);
       provenance = {
         origin: origin,
         url: url,
