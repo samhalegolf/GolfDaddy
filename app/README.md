@@ -33,6 +33,10 @@ or writes course data back.
   the mercator-image projection. Pure functions are node-requirable for tests.
 - `js/distance.js` — pure distance math: haversine, front/centre/back of green
   in metres. Node-requirable.
+- `js/position.js` — the player's position, one value one owner. Sources:
+  `tee` (hole entry heads to the tee), `tap` (tap where you are standing, on
+  map or surface), `gps` (real fixes, adopted only within 1.5km of the hole so
+  off-course testing is never clobbered). Policy lives in `play.js`.
 - `js/gps.js` — `watchPosition` wrapper. Event-driven, fail-open; "no fix" is a
   state the play surface renders fine, not an error.
 - `js/play.js` — play state machine: enter/leave hole, frame from objects,

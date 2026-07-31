@@ -76,6 +76,32 @@ assert.ok(Math.abs(corner.left - 0) < 1e-9, "width-limited fit has no horizontal
 assert.ok(corner.top > 0, "top-left corner sits below the vertical letterbox");
 assert.strictEqual(surface.fitContain({ x: 0, y: 0 }, { width: 0, height: 0 }, { width: 375, height: 812 }), null);
 
+/* Projection inverses: world-pixel and full tap round-trips must land back on
+   the same coordinates — a tap where the dot renders IS that lat/lng. */
+{
+  const start = { lat: -36.9174, lng: 174.74 };
+  const world = surface.worldPx(start.lat, start.lng, 18);
+  const back = surface.latLngFromWorldPx(world, 18);
+  assert.ok(Math.abs(back.lat - start.lat) < 1e-9 && Math.abs(back.lng - start.lng) < 1e-9,
+    "worldPx inverse must round-trip");
+
+  const originForTap = surface.worldPx(-36.9050, 174.7780, 18);
+  const tapMeta = {
+    captureZoom: 18,
+    originPx: { x: originForTap.x, y: originForTap.y },
+    outputDimensions: { width: 1341, height: 1889 }
+  };
+  const view = { width: 375, height: 812 };
+  const target = { lat: -36.9060, lng: 174.7790 };
+  const px = surface.projectToSurface(tapMeta, target.lat, target.lng);
+  const screen = surface.fitContain(px, tapMeta.outputDimensions, view);
+  const tapped = surface.surfaceScreenToLatLng(tapMeta, screen, view);
+  assert.ok(tapped && Math.abs(tapped.lat - target.lat) < 1e-7 && Math.abs(tapped.lng - target.lng) < 1e-7,
+    "surface tap must invert to the same lat/lng the dot renders at");
+  assert.strictEqual(surface.surfaceScreenToLatLng(tapMeta, { left: 5, top: 5 }, view), null,
+    "a tap in the letterbox is not on the course");
+}
+
 /* Distance math: one degree of latitude is ~111.2km, so 0.001° ≈ 111.2m. */
 const meridian = distance.haversineMeters({ lat: 0, lng: 0 }, { lat: 0.001, lng: 0 });
 assert.ok(Math.abs(meridian - 111.2) < 0.3, "0.001° latitude must be ~111.2m, got " + meridian);
@@ -227,6 +253,7 @@ async function bootCheck() {
       courseKey: app.play.state().courseKey,
       surfacePresented: document.body.classList.contains("surface-published"),
       gpsFix: app.gps.lastFix(),
+      positionSource: app.position.current() && app.position.current().source,
       gpsMarkerOnMap: !!document.querySelector("#map .gpsMarker"),
       gpsDotHidden: document.getElementById("gpsDot").classList.contains("hiddenState"),
       distanceBarShown: !document.getElementById("distanceBar").classList.contains("hiddenState"),
@@ -234,6 +261,29 @@ async function bootCheck() {
       distCentre: Number(document.getElementById("distCentre").textContent),
       distBack: Number(document.getElementById("distBack").textContent)
     };
+  }, AKARANA_H1);
+
+  /* Off-course play: a course far from the granted fix. Entering the hole
+     heads to the tee (the far fix is NOT adopted), and tapping where you are
+     standing moves the position — the whole flow works from the couch. */
+  const remote = await page.evaluate(async (h1) => {
+    const app = window.ClarityApp;
+    /* Same hole geometry shifted ~110km south — far outside the adopt radius. */
+    const shift = (p) => ({ lat: p.lat - 1, lng: p.lng });
+    const pkg = { holes: [{ holeNumber: 1, tee: shift(h1.tee), green: shift(h1.green), greenShape: h1.greenShape.map(shift), route: [] }] };
+    await app.play.start("remote-test-course", pkg, null);
+    await new Promise((resolve) => setTimeout(resolve, 900));   // let any live fix arrive
+    const atTee = {
+      source: app.position.current() && app.position.current().source,
+      centre: Number(document.getElementById("distCentre").textContent)
+    };
+    /* Tap 100m up the fairway from the tee (~0.0009° of latitude). */
+    app.position.set({ lat: shift(h1.tee).lat - 0.0009, lng: shift(h1.tee).lng }, "tap");
+    const afterTap = {
+      source: app.position.current().source,
+      centre: Number(document.getElementById("distCentre").textContent)
+    };
+    return { atTee, afterTap };
   }, AKARANA_H1);
 
   await browser.close();
@@ -261,9 +311,18 @@ async function bootCheck() {
   assert.ok(play.distanceBarShown, "with a fix and a green, the distance bar must show");
   assert.ok(play.distFront < play.distCentre && play.distCentre < play.distBack,
     "F < C < B, got " + play.distFront + "/" + play.distCentre + "/" + play.distBack);
-  /* The granted fix (-36.9174, 174.74) sits ~90m from Akarana green 1. */
+  /* The granted fix (-36.9174, 174.74) sits ~90m from Akarana green 1 — near
+     the hole, so it is adopted over the tee position. */
+  assert.strictEqual(play.positionSource, "gps", "an on-hole fix must take over from the tee");
   assert.ok(play.distCentre > 60 && play.distCentre < 120,
     "centre distance from the granted fix must be ~90m, got " + play.distCentre);
-  console.log("fresh-app boot passed: 0 uncaught exceptions, 0 intervals, picker empty-state, play on live map, GPS marker live, F/C/B "
-    + play.distFront + "/" + play.distCentre + "/" + play.distBack + "m");
+  assert.ok(remote.atTee.source === "tee", "far from the course, hole entry heads to the tee");
+  assert.ok(remote.atTee.centre > 380 && remote.atTee.centre < 410,
+    "tee position must give the ~395m tee shot, got " + remote.atTee.centre);
+  assert.strictEqual(remote.afterTap.source, "tap");
+  assert.ok(remote.afterTap.centre > remote.atTee.centre - 120 && remote.afterTap.centre < remote.atTee.centre - 80,
+    "a 100m tap up the fairway must shorten the shot ~100m, got " + remote.afterTap.centre);
+  console.log("fresh-app boot passed: 0 uncaught exceptions, 0 intervals, picker empty-state, GPS adopt "
+    + play.distFront + "/" + play.distCentre + "/" + play.distBack + "m, head-to-tee "
+    + remote.atTee.centre + "m, tap " + remote.afterTap.centre + "m");
 }

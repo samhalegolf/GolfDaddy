@@ -107,9 +107,39 @@
     };
   }
 
+  /* Inverse of worldPx: world-mercator pixels at an integer zoom → lat/lng. */
+  function latLngFromWorldPx(px, zoom) {
+    if (!Number.isInteger(zoom)) throw new Error("captureZoom must be an integer, got " + zoom);
+    var scale = TILE * Math.pow(2, zoom);
+    var n = Math.PI * (1 - (2 * Number(px.y)) / scale);
+    return {
+      lat: (Math.atan(Math.sinh(n)) * 180) / Math.PI,
+      lng: (Number(px.x) / scale) * 360 - 180
+    };
+  }
+
+  /* Inverse of projectToSurface + fitContain: a tap on the displayed surface
+     → lat/lng. Null when the tap lands in the letterbox — not on the course. */
+  function surfaceScreenToLatLng(meta, screenPx, viewDims) {
+    if (!meta || !meta.originPx || !meta.outputDimensions) return null;
+    var iw = Number(meta.outputDimensions.width), ih = Number(meta.outputDimensions.height);
+    var vw = Number(viewDims.width), vh = Number(viewDims.height);
+    if (!(iw > 0 && ih > 0 && vw > 0 && vh > 0)) return null;
+    var scale = Math.min(vw / iw, vh / ih);
+    var x = (Number(screenPx.left) - (vw - iw * scale) / 2) / scale;
+    var y = (Number(screenPx.top) - (vh - ih * scale) / 2) / scale;
+    if (!(x >= 0 && y >= 0 && x <= iw && y <= ih)) return null;
+    return latLngFromWorldPx(
+      { x: Number(meta.originPx.x) + x, y: Number(meta.originPx.y) + y },
+      Number(meta.captureZoom)
+    );
+  }
+
   return {
     worldPx: worldPx,
+    latLngFromWorldPx: latLngFromWorldPx,
     projectToSurface: projectToSurface,
+    surfaceScreenToLatLng: surfaceScreenToLatLng,
     holeSurfaceAsset: holeSurfaceAsset,
     fitContain: fitContain,
     createStore: createStore,

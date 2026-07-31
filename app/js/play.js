@@ -15,11 +15,13 @@
 
   var map = null;
   var objectLayer = null;
-  var gpsMarker = null;
-  var gpsWired = false;
+  var positionMarker = null;
+  var positionWired = false;
   var transitionToken = 0;
   var current = { courseKey: null, pkg: null, hole: 0, rec: null };
   var store = null;
+
+  var GPS_ADOPT_RADIUS_M = 1500;
 
   function ensureStore() {
     if (!store) {
@@ -41,6 +43,10 @@
     map = L.map("map", { zoomControl: false, attributionControl: false })
       .setView([-36.9, 174.78], 15);
     L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(map);
+    /* Tap where you are standing — same contract as a real fix. */
+    map.on("click", function (e) {
+      if (e && e.latlng) app.position.set({ lat: e.latlng.lat, lng: e.latlng.lng }, "tap");
+    });
     return map;
   }
 
@@ -94,27 +100,27 @@
     document.getElementById("distBack").textContent = d.back === null ? "–" : d.back;
   }
 
-  /* One renderer for both presentations: the same fix moves the Leaflet marker
-     and, when a surface is up, the projected dot. An off-surface or absent fix
-     hides the dot — a normal state, not an error. */
-  function renderFix(fix) {
-    if (fix && map) {
-      if (!gpsMarker) {
-        gpsMarker = L.circleMarker([fix.lat, fix.lng], {
+  /* One renderer for both presentations: the player's position moves the
+     Leaflet marker and, when a surface is up, the projected dot. An off-surface
+     or absent position hides the dot — a normal state, not an error. */
+  function renderPosition(pos) {
+    if (pos && map) {
+      if (!positionMarker) {
+        positionMarker = L.circleMarker([pos.lat, pos.lng], {
           radius: 7, weight: 2, color: "#ffffff", fillColor: "#2f8fef", fillOpacity: 1, className: "gpsMarker"
         }).addTo(map);
       } else {
-        gpsMarker.setLatLng([fix.lat, fix.lng]);
+        positionMarker.setLatLng([pos.lat, pos.lng]);
       }
     }
     var dot = document.getElementById("gpsDot");
     if (!dot) return;
     var img = document.getElementById("surfaceImage");
     var onSurface = null;
-    if (fix && img && document.body.classList.contains("surface-published") && img.dataset.playSurface) {
+    if (pos && img && document.body.classList.contains("surface-published") && img.dataset.playSurface) {
       try {
         var meta = JSON.parse(img.dataset.playSurface);
-        var imagePx = surfaceLib.projectToSurface(meta, fix.lat, fix.lng);
+        var imagePx = surfaceLib.projectToSurface(meta, pos.lat, pos.lng);
         if (imagePx) {
           onSurface = surfaceLib.fitContain(imagePx, meta.outputDimensions,
             { width: img.clientWidth, height: img.clientHeight });
@@ -126,20 +132,51 @@
       dot.style.left = onSurface.left + "px";
       dot.style.top = onSurface.top + "px";
     }
-    renderDistances(fix);
+    renderDistances(pos);
   }
 
-  function wireGps() {
-    if (gpsWired || !app.gps) return;
-    gpsWired = true;
-    app.gps.onFix(renderFix);
+  /* A real fix only becomes the position when it is plausibly ON this hole —
+     within 1.5km of its geometry. Off-course (testing from the couch), the fix
+     is simply ignored and head-to-tee / tap-to-stand keep driving. With no
+     geometry to judge against, a fix is adopted only if nothing has placed the
+     player yet, so it never clobbers a deliberate tap. */
+  function maybeAdoptGpsFix(fix) {
+    if (!fix) return;
+    var rec = current.rec;
+    var anchor = rec && (rec.green || rec.tee);
+    if (anchor) {
+      var away = app.distance.haversineMeters(fix, anchor);
+      if (Number.isFinite(away) && away <= GPS_ADOPT_RADIUS_M) app.position.set(fix, "gps");
+      return;
+    }
+    if (!app.position.current()) app.position.set(fix, "gps");
+  }
+
+  function wirePosition() {
+    if (positionWired) return;
+    positionWired = true;
+    app.position.onChange(renderPosition);
+    if (app.gps) app.gps.onFix(maybeAdoptGpsFix);
+    /* Tap where you are standing, on the published surface. */
+    var img = document.getElementById("surfaceImage");
+    if (img) img.addEventListener("click", function (e) {
+      if (!img.dataset.playSurface) return;
+      try {
+        var meta = JSON.parse(img.dataset.playSurface);
+        var rect = img.getBoundingClientRect();
+        var tapped = surfaceLib.surfaceScreenToLatLng(meta,
+          { left: e.clientX - rect.left, top: e.clientY - rect.top },
+          { width: rect.width, height: rect.height });
+        if (tapped) app.position.set(tapped, "tap");
+      } catch (err) {}
+    });
   }
 
   function clearSurface() {
     document.body.classList.remove("surface-published");
     var img = document.getElementById("surfaceImage");
     if (img) { img.removeAttribute("src"); img.dataset.playSurface = ""; }
-    renderFix(app.gps && app.gps.lastFix());
+    renderPosition(app.position.current());
   }
 
   function presentSurface(asset) {
@@ -148,7 +185,7 @@
     img.dataset.playSurface = JSON.stringify(asset.playSurface);
     img.onload = function () {
       document.body.classList.add("surface-published");
-      renderFix(app.gps && app.gps.lastFix());
+      renderPosition(app.position.current());
     };
     /* Load failure = stay on the live map; the class was never added. */
     img.onerror = clearSurface;
@@ -165,7 +202,7 @@
       if (m && centre && Number.isFinite(Number(centre.lat)) && Number.isFinite(Number(centre.lng))) {
         m.setView([Number(centre.lat), Number(centre.lng)], 15);
       }
-      wireGps();
+      wirePosition();
       if (app.gps) app.gps.start();
       await this.goHole(1);
     },
@@ -177,7 +214,10 @@
       var holeEl = document.getElementById("holeNumber");
       if (holeEl) holeEl.textContent = String(current.hole);
       frameHole(current.rec);
-      renderDistances(app.gps && app.gps.lastFix());
+      /* Head to the tee: entering a hole places the player on its tee. A later
+         tap or an on-hole GPS fix moves them from there. */
+      if (current.rec && current.rec.tee) app.position.set(current.rec.tee, "tee");
+      else renderDistances(app.position.current());
       /* A full package carries the hole's published surface inline — one
          request, nothing to reconcile. Only a lite package asks the visuals
          endpoint, and that absence answer is cached per hole. */
@@ -193,9 +233,10 @@
     stop() {
       transitionToken += 1;
       if (app.gps) app.gps.stop();
+      app.position.clear();
       clearSurface();
       if (objectLayer) { objectLayer.remove(); objectLayer = null; }
-      if (gpsMarker) { gpsMarker.remove(); gpsMarker = null; }
+      if (positionMarker) { positionMarker.remove(); positionMarker = null; }
       current = { courseKey: null, pkg: null, hole: 0, rec: null };
     },
     state: function () { return { courseKey: current.courseKey, hole: current.hole }; }
