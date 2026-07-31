@@ -523,8 +523,26 @@
     }
   }
 
+  /* Owning the camera requires actually HAVING a surface for this hole.
+
+     The three checks below only say the captured subsystem is engaged - a class is
+     on, a dataset flag is set, a policy object exists. None of them require a
+     surface to exist. On a course with no owned pixels that meant the captured
+     camera claimed the camera anyway, framePrelockPreset returned early at its
+     capturedSurfaceOwnsCamera() gate, and the object-driven fit to tee/green/route
+     never ran - so the live map sat wherever it was, over the player, instead of
+     being framed on the hole.
+
+     Same shape as the visibility default: "engaged" is not "presented". Gated on
+     having a matching manifest rather than on gdGpsPresentationReady, so ownership
+     does not flicker mid hole-switch on a course that does have surfaces. */
   function capturedSurfaceOwnsCamera(){
     return safe(function(){
+      var hasSurfaceForHole = safe(function(){
+        return typeof window.gdCapturedSurfaceManifestMatchesActive === "function" &&
+          !!window.gdCapturedSurfaceManifestMatchesActive();
+      }, false);
+      if(!hasSurfaceForHole) return false;
       return document.body.classList.contains("gdCapturedHoleFrameCameraOn") ||
         document.body.dataset.gdCapturedSurfaceOwner === "captured-surface" ||
         !!(window.gdCapturedSurfacePolicy && window.gdCapturedSurfacePolicy.owner === "captured-surface");
