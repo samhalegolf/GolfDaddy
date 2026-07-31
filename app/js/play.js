@@ -70,7 +70,9 @@
   }
 
   /* Frame the live map on the hole from package objects. Tolerant: with no
-     geometry it leaves the current view — a normal outcome, not an error. */
+     geometry it falls back to the course centre, then to the current view —
+     normal outcomes, not errors. Creates the map: only the absence/failure
+     paths call this, so OSM never renders under a declared surface. */
   function frameHole(rec) {
     if (!ensureMap()) return;
     if (objectLayer) { objectLayer.remove(); objectLayer = null; }
@@ -83,9 +85,12 @@
     }
     if (pts.length >= 2) map.fitBounds(L.latLngBounds(pts).pad(0.15));
     else if (pts.length === 1) map.setView(pts[0], 17);
+    else if (current.centre) map.setView([current.centre.lat, current.centre.lng], 15);
     if (pts.length) {
       objectLayer = L.layerGroup(pts.map(function (p) { return L.circleMarker(p, { radius: 4 }); })).addTo(map);
     }
+    var pos = app.position.current();
+    if (pos) renderPosition(pos);
   }
 
   function renderDistances(fix) {
@@ -203,26 +208,50 @@
     renderPosition(app.position.current());
   }
 
+  /* The live map is the fallback presentation: created (frameHole) the moment
+     absence or failure is the answer for this hole — never earlier, so OSM no
+     longer flashes under a surface that was always going to present. */
+  function surfaceFallback() {
+    clearSurface();
+    frameHole(current.rec);
+  }
+
   /* origin: "package" (inline in the course package) or "visuals" (the
-     course-visuals endpoint fallback). The token pins the load to the hole
-     transition that asked for it — a slow older image resolving after the
-     player moved on must not flash in over the current hole. */
+     course-visuals endpoint fallback). The image is preloaded off-DOM and the
+     visible img swaps only when it is decodable, so the previous hole's
+     surface holds until the new one paints — no map in between. The token pins
+     the load to the hole transition that asked for it: a slow older image
+     resolving after the player moved on must not flash in over the current
+     hole. The stall timer is bounded, transition-scoped, and cancelled by
+     settle or supersession — it exists so a hung request cannot leave the
+     player without any presentation (that would be the old blackout bug). */
   function presentSurface(asset, origin) {
     var img = document.getElementById("surfaceImage");
     if (!img) return;
     var token = transitionToken;
     var url = asset.url || surfaceLib.assetUrl(asset.path);
     var startedAt = Date.now();
-    img.dataset.playSurface = JSON.stringify(asset.playSurface);
-    img.onload = function () {
-      if (token !== transitionToken) return;   // superseded: stay on the live map
+    var settled = false;
+    var stallTimer = setTimeout(function () {
+      if (settled || token !== transitionToken) return;
+      settled = true;
+      surfaceFallback();
+    }, 8000);
+    var pre = new Image();
+    pre.onload = function () {
+      if (settled) return;
+      settled = true;
+      clearTimeout(stallTimer);
+      if (token !== transitionToken) return;   // superseded: drop silently
+      img.dataset.playSurface = JSON.stringify(asset.playSurface);
+      img.src = url;   // decoded already — paints without a blank frame
       provenance = {
         origin: origin,
         url: url,
         courseKey: current.courseKey,
         holeNumber: current.hole,
         loadMs: Date.now() - startedAt,
-        naturalSize: img.naturalWidth + "×" + img.naturalHeight,
+        naturalSize: pre.naturalWidth + "×" + pre.naturalHeight,
         loadedAt: new Date().toISOString(),
         playSurface: asset.playSurface
       };
@@ -230,44 +259,60 @@
       renderProvenance();
       renderPosition(app.position.current());
     };
-    /* Load failure = stay on the live map; the class was never added. */
-    img.onerror = function () { if (token === transitionToken) clearSurface(); };
-    img.src = url;
+    pre.onerror = function () {
+      if (settled) return;
+      settled = true;
+      clearTimeout(stallTimer);
+      if (token === transitionToken) surfaceFallback();
+    };
+    pre.src = url;
   }
 
   app.play = {
     /* centre: {lat,lng} from the library row — the view when the package has no
        geometry for a hole yet, so an unmapped course still opens on itself. */
+    /* centre: {lat,lng} from the library row — the view when the package has no
+       geometry for a hole yet, so an unmapped course still opens on itself.
+       No map is created here: the hole decides its own presentation. */
     async start(courseKey, pkg, centre) {
       transitionToken += 1;
-      current = { courseKey: app.courseKey(courseKey), pkg: pkg || null, hole: 0, rec: null };
-      var m = ensureMap();
-      if (m && centre && Number.isFinite(Number(centre.lat)) && Number.isFinite(Number(centre.lng))) {
-        m.setView([Number(centre.lat), Number(centre.lng)], 15);
-      }
+      var lat = Number(centre && centre.lat), lng = Number(centre && centre.lng);
+      current = {
+        courseKey: app.courseKey(courseKey), pkg: pkg || null, hole: 0, rec: null,
+        centre: Number.isFinite(lat) && Number.isFinite(lng) ? { lat: lat, lng: lng } : null
+      };
       wirePosition();
       if (app.gps) app.gps.start();
       await this.goHole(1);
     },
     async goHole(hole) {
       var token = ++transitionToken;
-      clearSurface();
       current.hole = Number(hole) || 1;
       current.rec = holeRecord(current.pkg, current.hole);
       var holeEl = document.getElementById("holeNumber");
       if (holeEl) holeEl.textContent = String(current.hole);
-      frameHole(current.rec);
       /* Head to the tee: entering a hole places the player on its tee. A later
-         tap or an on-hole GPS fix moves them from there. */
-      if (current.rec && current.rec.tee) app.position.set(current.rec.tee, "tee");
-      else renderDistances(app.position.current());
+         tap moves them; and if the last real fix is standing on this hole, it
+         outranks the tee immediately — on-course, you are where you are. */
+      if (current.rec && current.rec.tee) {
+        app.position.set(current.rec.tee, "tee");
+        if (app.gps) maybeAdoptGpsFix(app.gps.lastFix());
+      } else {
+        renderDistances(app.position.current());
+      }
       /* A full package carries the hole's published surface inline — one
-         request, nothing to reconcile. Only a lite package asks the visuals
-         endpoint, and that absence answer is cached per hole. */
+         request, nothing to reconcile, and no OSM underneath: the previous
+         surface holds until the new one paints. The stale meta is cleared so
+         the position dot waits for the new projection. */
       if (current.rec && current.rec.visual) {
+        var img = document.getElementById("surfaceImage");
+        if (img) img.dataset.playSurface = "";
+        renderPosition(app.position.current());
         presentSurface(current.rec.visual, "package");
         return;
       }
+      /* Absence path: the live map IS the presentation for this hole. */
+      surfaceFallback();
       var answer = await ensureStore().surfaceFor(current.courseKey, current.hole);
       if (token !== transitionToken) return;   // superseded transition: drop silently
       if (answer.state === "published") presentSurface(answer.asset, "visuals");
@@ -280,7 +325,7 @@
       clearSurface();
       if (objectLayer) { objectLayer.remove(); objectLayer = null; }
       if (positionMarker) { positionMarker.remove(); positionMarker = null; }
-      current = { courseKey: null, pkg: null, hole: 0, rec: null };
+      current = { courseKey: null, pkg: null, hole: 0, rec: null, centre: null };
     },
     state: function () { return { courseKey: current.courseKey, hole: current.hole }; }
   };

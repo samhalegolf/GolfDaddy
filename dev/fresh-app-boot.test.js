@@ -254,6 +254,35 @@ async function bootCheck() {
 
   /* Course tap-through with a stubbed library row: lands on the play route
      with the live map visible (rule 2) and framed on the course. */
+  /* Surface-first: a hole whose package declares a visual presents it without
+     ever creating the OSM map underneath; the map is created the moment a
+     hole with no surface is entered. */
+  const surfaceFirst = await page.evaluate(async (h1) => {
+    const app = window.ClarityApp;
+    const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+    const origin = app.playSurface.worldPx(h1.tee.lat + 0.003, h1.tee.lng - 0.003, 18);
+    const meta = { captureZoom: 18, originPx: { x: origin.x, y: origin.y }, outputDimensions: { width: 1341, height: 1889 } };
+    const pkg = { holes: [
+      { holeNumber: 1, geometry: { tee: h1.tee, green: h1.green, greenShape: h1.greenShape, route: [] }, visual: { url: PNG, playSurface: meta } },
+      { holeNumber: 2, geometry: { tee: h1.tee, green: h1.green, greenShape: [], route: [] } }
+    ] };
+    const mapEmptyBefore = document.getElementById("map").childElementCount === 0;
+    await app.play.start("surface-first-course", pkg, null);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const h1State = {
+      presented: document.body.classList.contains("surface-published"),
+      mapStillEmpty: document.getElementById("map").childElementCount === 0,
+      chip: document.getElementById("surfaceSource").textContent
+    };
+    await app.play.goHole(2);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const h2State = {
+      presented: document.body.classList.contains("surface-published"),
+      mapCreated: document.getElementById("map").childElementCount > 0
+    };
+    return { mapEmptyBefore, h1State, h2State };
+  }, AKARANA_H1);
+
   const play = await page.evaluate(async (h1) => {
     const app = window.ClarityApp;
     /* Lite-shaped package with the real hole 1 geometry: frames the hole AND
@@ -319,6 +348,12 @@ async function bootCheck() {
   assert.ok(picker.onPicker, "Play must open the course picker");
   assert.ok(picker.emptyShown, "offline picker must show its empty state");
   assert.strictEqual(picker.rows, 0, "offline picker must list no courses");
+  assert.ok(surfaceFirst.mapEmptyBefore, "no map exists before play starts");
+  assert.ok(surfaceFirst.h1State.presented, "a declared package visual must present");
+  assert.ok(surfaceFirst.h1State.mapStillEmpty, "no OSM is created under a declared surface");
+  assert.ok(surfaceFirst.h1State.chip.startsWith("pkg"), "the chip names the package source, got: " + surfaceFirst.h1State.chip);
+  assert.strictEqual(surfaceFirst.h2State.presented, false, "no visual on hole 2 → back on the live map");
+  assert.ok(surfaceFirst.h2State.mapCreated, "the map is created the moment absence is the answer");
   assert.ok(play.mapDisplayed, "rule 2: #map must be visible by default on the play route");
   assert.strictEqual(play.hole, 1, "play must start on hole 1");
   assert.strictEqual(play.courseKey, "akarana-golf-club");

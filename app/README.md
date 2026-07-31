@@ -11,8 +11,11 @@ or writes course data back.
 ## Ground rules (enforced, not aspirational)
 
 1. **One canonical course key** — `js/course-key.js` is the only slug function.
-2. **The live map is the default** — nothing hides `#map` by default; a
-   published surface earns its way on top and is removed on failure.
+2. **The live map is the fallback, never blocked** — nothing hides `#map` by
+   CSS; it is created the moment absence or failure is the answer for a hole,
+   never earlier. A hole whose package declares a visual presents
+   surface-first with no OSM underneath, and every load path settles: paint,
+   error → map, or a bounded transition-scoped stall timer → map.
 3. **No `setInterval`** — a grep for it in `app/` should return nothing.
    Transitions do their own cleanup, bounded and cancellable.
 4. **Absence is a state** — "no surface for this hole" is cached per hole and
