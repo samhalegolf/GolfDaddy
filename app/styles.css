@@ -38,6 +38,13 @@ body.surface-published #surfaceImage { display: block; }
    pixels; hidden whenever there is no fix or the fix is off-surface. */
 #gpsDot { position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%; background: #2f8fef; border: 2px solid #fff; z-index: 550; pointer-events: none; }
 
+/* Provenance chip: what image is on screen and where it came from. Tapping it
+   opens the full metadata panel. */
+#surfaceSource { position: absolute; top: calc(env(safe-area-inset-top, 0px) + 64px); left: 16px; z-index: 620; border: 0; border-radius: 8px; padding: 6px 10px; background: rgba(13, 27, 18, .8); color: #9fc7ab; font-size: 11px; font-family: ui-monospace, Menlo, monospace; }
+#surfaceSource.hiddenState { display: none; }
+#surfaceMetaPanel { position: absolute; top: calc(env(safe-area-inset-top, 0px) + 96px); left: 16px; right: 16px; max-height: 50vh; overflow: auto; z-index: 620; margin: 0; padding: 12px; border-radius: 12px; background: rgba(13, 27, 18, .92); color: #cfe3d6; font-size: 11px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; }
+#surfaceMetaPanel.hiddenState { display: none; }
+
 /* Front / centre / back of green, metres. Hidden without a fix or a green. */
 #distanceBar { position: absolute; bottom: calc(env(safe-area-inset-bottom, 0px) + 16px); left: 50%; transform: translateX(-50%); display: flex; gap: 18px; align-items: baseline; padding: 12px 20px; border-radius: 16px; background: rgba(13, 27, 18, .85); z-index: 600; }
 #distanceBar.hiddenState { display: none; }

@@ -102,6 +102,23 @@ assert.strictEqual(surface.fitContain({ x: 0, y: 0 }, { width: 0, height: 0 }, {
     "a tap in the letterbox is not on the course");
 }
 
+/* Provenance label: compact, readable, and it names the source. */
+{
+  const label = surface.provenanceLabel({
+    origin: "package",
+    url: "/api/course-visual-assets?path=akarana-golf-club%2Fframes%2Fr1alw6nz%2Fh1.jpg",
+    loadMs: 412.4,
+    playSurface: { captureZoom: 18, outputDimensions: { width: 1341, height: 1889 } }
+  });
+  assert.strictEqual(label, "pkg · r1alw6nz/h1.jpg · z18 · 1341×1889 · 412ms");
+  assert.strictEqual(surface.provenanceLabel(null), "");
+  const viaEndpoint = surface.provenanceLabel({
+    origin: "visuals", url: "/api/course-visual-assets?path=a%2Fframes%2Fx%2Fh2.jpg",
+    playSurface: { captureZoom: 18, outputDimensions: { width: 10, height: 20 } }
+  });
+  assert.ok(viaEndpoint.startsWith("visuals · "), "endpoint fallback must be labelled distinctly");
+}
+
 /* Distance math: one degree of latitude is ~111.2km, so 0.001° ≈ 111.2m. */
 const meridian = distance.haversineMeters({ lat: 0, lng: 0 }, { lat: 0.001, lng: 0 });
 assert.ok(Math.abs(meridian - 111.2) < 0.3, "0.001° latitude must be ~111.2m, got " + meridian);
@@ -257,6 +274,7 @@ async function bootCheck() {
       gpsMarkerOnMap: !!document.querySelector("#map .gpsMarker"),
       gpsDotHidden: document.getElementById("gpsDot").classList.contains("hiddenState"),
       distanceBarShown: !document.getElementById("distanceBar").classList.contains("hiddenState"),
+      sourceChipHidden: document.getElementById("surfaceSource").classList.contains("hiddenState"),
       distFront: Number(document.getElementById("distFront").textContent),
       distCentre: Number(document.getElementById("distCentre").textContent),
       distBack: Number(document.getElementById("distBack").textContent)
@@ -305,6 +323,7 @@ async function bootCheck() {
   assert.strictEqual(play.hole, 1, "play must start on hole 1");
   assert.strictEqual(play.courseKey, "akarana-golf-club");
   assert.strictEqual(play.surfacePresented, false, "no surface offline → live map, no overlay");
+  assert.ok(play.sourceChipHidden, "no surface → no provenance chip");
   assert.ok(play.gpsFix, "the granted geolocation fix must reach the watcher");
   assert.ok(play.gpsMarkerOnMap, "the GPS marker must render on the live map");
   assert.ok(play.gpsDotHidden, "with no surface up, the projected dot stays hidden");

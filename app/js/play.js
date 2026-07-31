@@ -157,6 +157,13 @@
     positionWired = true;
     app.position.onChange(renderPosition);
     if (app.gps) app.gps.onFix(maybeAdoptGpsFix);
+    /* The provenance chip toggles the full metadata panel. */
+    var chip = document.getElementById("surfaceSource");
+    var panel = document.getElementById("surfaceMetaPanel");
+    if (chip && panel) chip.addEventListener("click", function () {
+      panel.classList.toggle("hiddenState");
+      if (!panel.classList.contains("hiddenState")) panel.textContent = JSON.stringify(provenance, null, 2);
+    });
     /* Tap where you are standing, on the published surface. */
     var img = document.getElementById("surfaceImage");
     if (img) img.addEventListener("click", function (e) {
@@ -172,24 +179,60 @@
     });
   }
 
+  var provenance = null;   // what is on screen and where it came from
+
+  function renderProvenance() {
+    var chip = document.getElementById("surfaceSource");
+    var panel = document.getElementById("surfaceMetaPanel");
+    if (!chip) return;
+    var shown = !!provenance && document.body.classList.contains("surface-published");
+    chip.classList.toggle("hiddenState", !shown);
+    if (!shown) { if (panel) panel.classList.add("hiddenState"); return; }
+    chip.textContent = surfaceLib.provenanceLabel(provenance);
+    if (panel && !panel.classList.contains("hiddenState")) {
+      panel.textContent = JSON.stringify(provenance, null, 2);
+    }
+  }
+
   function clearSurface() {
     document.body.classList.remove("surface-published");
     var img = document.getElementById("surfaceImage");
     if (img) { img.removeAttribute("src"); img.dataset.playSurface = ""; }
+    provenance = null;
+    renderProvenance();
     renderPosition(app.position.current());
   }
 
-  function presentSurface(asset) {
+  /* origin: "package" (inline in the course package) or "visuals" (the
+     course-visuals endpoint fallback). The token pins the load to the hole
+     transition that asked for it — a slow older image resolving after the
+     player moved on must not flash in over the current hole. */
+  function presentSurface(asset, origin) {
     var img = document.getElementById("surfaceImage");
     if (!img) return;
+    var token = transitionToken;
+    var url = asset.url || surfaceLib.assetUrl(asset.path);
+    var startedAt = Date.now();
     img.dataset.playSurface = JSON.stringify(asset.playSurface);
     img.onload = function () {
+      if (token !== transitionToken) return;   // superseded: stay on the live map
+      provenance = {
+        origin: origin,
+        url: url,
+        courseKey: current.courseKey,
+        holeNumber: current.hole,
+        loadMs: Date.now() - startedAt,
+        naturalSize: img.naturalWidth + "×" + img.naturalHeight,
+        loadedAt: new Date().toISOString(),
+        playSurface: asset.playSurface
+      };
       document.body.classList.add("surface-published");
+      renderProvenance();
       renderPosition(app.position.current());
     };
     /* Load failure = stay on the live map; the class was never added. */
-    img.onerror = clearSurface;
-    img.src = asset.url || surfaceLib.assetUrl(asset.path);
+    img.onerror = function () { if (token === transitionToken) clearSurface(); };
+    img.src = url;
   }
 
   app.play = {
@@ -222,12 +265,12 @@
          request, nothing to reconcile. Only a lite package asks the visuals
          endpoint, and that absence answer is cached per hole. */
       if (current.rec && current.rec.visual) {
-        presentSurface(current.rec.visual);
+        presentSurface(current.rec.visual, "package");
         return;
       }
       var answer = await ensureStore().surfaceFor(current.courseKey, current.hole);
       if (token !== transitionToken) return;   // superseded transition: drop silently
-      if (answer.state === "published") presentSurface(answer.asset);
+      if (answer.state === "published") presentSurface(answer.asset, "visuals");
       /* answer.state === "none" needs no branch: the live map is already up. */
     },
     stop() {

@@ -135,8 +135,28 @@
     );
   }
 
+  /* One-line provenance label for the readout chip. Pure, for tests.
+     e.g. "pkg · r1alw6nz/h1.jpg · z18 · 1341×1889 · 412ms" */
+  function provenanceLabel(prov) {
+    if (!prov) return "";
+    var frame = String(prov.url || "").split("path=").pop();
+    try { frame = decodeURIComponent(frame); } catch (e) {}
+    var parts = frame.split("/");
+    var short = parts.slice(-2).join("/");
+    var meta = prov.playSurface || {};
+    var dims = meta.outputDimensions || {};
+    return [
+      prov.origin === "package" ? "pkg" : "visuals",
+      short,
+      "z" + meta.captureZoom,
+      (dims.width || "?") + "×" + (dims.height || "?"),
+      Number.isFinite(prov.loadMs) ? Math.round(prov.loadMs) + "ms" : null
+    ].filter(Boolean).join(" · ");
+  }
+
   return {
     worldPx: worldPx,
+    provenanceLabel: provenanceLabel,
     latLngFromWorldPx: latLngFromWorldPx,
     projectToSurface: projectToSurface,
     surfaceScreenToLatLng: surfaceScreenToLatLng,
