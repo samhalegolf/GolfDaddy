@@ -231,6 +231,28 @@ if (APP_ONLY) {
     + studioStamped.stamped + " assets");
 }
 
+/* The fresh /app/ surface carries no manual ?v= labels at all, so without this
+   a deploy leaves returning browsers on a stale mix - old cached modules under
+   new markup (a pill whose buttons exist but whose listeners never attached).
+   Stamp every local asset it loads, including the ../scripts and ../assets it
+   reuses at site root, with a content hash on the dist copy. */
+(function stampAppSurface() {
+  const appIndex = path.join(dist, "app", "index.html");
+  if (!fs.existsSync(appIndex)) return;
+  let stamped = 0;
+  const html = fs.readFileSync(appIndex, "utf8").replace(
+    /((?:src|href)=")([^"?]+\.(?:js|css))(?:\?v=[^"]*)?(")/g,
+    function (whole, pre, assetPath, post) {
+      const assetFile = path.join(dist, "app", assetPath);
+      if (!fs.existsSync(assetFile)) return whole; // leave unknown paths untouched
+      const hash = crypto.createHash("sha1").update(fs.readFileSync(assetFile)).digest("hex").slice(0, 10);
+      stamped += 1;
+      return pre + assetPath + "?v=" + hash + post;
+    });
+  fs.writeFileSync(appIndex, html);
+  console.log("Fresh app surface: stamped " + stamped + " assets");
+})();
+
 console.log("Prepared Netlify deploy output: " + path.relative(root, dist));
 console.log("Clarity Caddy app restored at site root: /");
 console.log("Public entries: " + publicPaths.filter(function (entry) { return fs.existsSync(path.join(root, entry)); }).join(", "));
