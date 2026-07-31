@@ -1,0 +1,269 @@
+/*
+ * Fresh app surface (app/) boot + projection test.
+ *
+ * Part 1 runs the pure projection functions under node — both engines' math is
+ * identical here, so this is the WebKit-safe half (audit rule 9: assert on what
+ * both engines can see).
+ * Part 2 boots /app/index.html in headless Chromium and fails on any uncaught
+ * exception, then asserts the boot canary and rule 2 (the map container is
+ * visible by default) and rule 3 (no setInterval fired during boot).
+ *
+ * Browser resolution mirrors dev/boot-smoke.test.js.
+ */
+const assert = require("assert");
+const http = require("http");
+const fs = require("fs");
+const path = require("path");
+
+const ROOT = path.join(__dirname, "..");
+const surface = require(path.join(ROOT, "app", "js", "play-surface.js"));
+const distance = require(path.join(ROOT, "app", "js", "distance.js"));
+const { courseKey } = require(path.join(ROOT, "app", "js", "course-key.js"));
+
+/* Real Akarana hole 1 geometry (course_maps, read 2026-07-31) — the numbers the
+   caddy display must reproduce. */
+const AKARANA_H1 = {
+  tee: { lat: -36.9133686, lng: 174.7409167 },
+  green: { lat: -36.91669425625, lng: 174.7393568875 },
+  greenShape: [
+    { lat: -36.9165816, lng: 174.7393482 }, { lat: -36.916599, lng: 174.7393085 },
+    { lat: -36.9166242, lng: 174.7392658 }, { lat: -36.9166733, lng: 174.7392379 },
+    { lat: -36.9167239, lng: 174.739228 }, { lat: -36.9167645, lng: 174.7392416 },
+    { lat: -36.9168041, lng: 174.7392738 }, { lat: -36.916823, lng: 174.7393185 },
+    { lat: -36.9168245, lng: 174.7393724 }, { lat: -36.9168017, lng: 174.7394238 },
+    { lat: -36.9167576, lng: 174.739466 }, { lat: -36.9167075, lng: 174.739487 },
+    { lat: -36.916655, lng: 174.7394796 }, { lat: -36.9166094, lng: 174.7394517 },
+    { lat: -36.9165831, lng: 174.7394189 }, { lat: -36.9165757, lng: 174.7393885 }
+  ]
+};
+
+/* ---- Part 1: node unit checks ---- */
+
+assert.strictEqual(courseKey("Akarana Golf Club"), "akarana-golf-club");
+assert.strictEqual(courseKey("Akarana_Golf_Club"), "akarana-golf-club");
+assert.strictEqual(courseKey(""), "course");
+
+/* World-mercator sanity: at zoom 18, x for lng 0 is half the world. */
+const half = surface.worldPx(0, 0, 18);
+assert.strictEqual(half.x, 256 * Math.pow(2, 18) / 2);
+assert.strictEqual(Math.round(half.y), 256 * Math.pow(2, 18) / 2);
+
+/* Fractional captureZoom is rejected, not rounded (rule 6). */
+assert.throws(() => surface.worldPx(0, 0, 18.5), /integer/);
+
+/* Round-trip a point through a synthetic surface at the observed zoom. */
+const origin = surface.worldPx(-36.9050, 174.7780, 18);
+const meta = {
+  captureZoom: 18,
+  originPx: { x: origin.x, y: origin.y },
+  outputDimensions: { width: 1341, height: 1889 }
+};
+const inside = surface.worldPx(-36.9060, 174.7790, 18);
+const projected = surface.projectToSurface(meta, -36.9060, 174.7790);
+assert.ok(projected, "a point inside the bounds must project");
+assert.ok(Math.abs(projected.x - (inside.x - origin.x)) < 1e-6);
+assert.strictEqual(surface.projectToSurface(meta, -36.0, 174.0), null, "off-surface points return null");
+
+/* object-fit: contain letterboxing: a 1341x1889 surface in a 375x812 viewport
+   scales by width; the image centre must land on the viewport's horizontal
+   centre, vertically centred within the letterbox. */
+const fitted = surface.fitContain(
+  { x: 1341 / 2, y: 1889 / 2 }, { width: 1341, height: 1889 }, { width: 375, height: 812 });
+assert.ok(Math.abs(fitted.left - 375 / 2) < 1e-9, "image centre must map to viewport centre x");
+assert.ok(Math.abs(fitted.top - 812 / 2) < 1e-9, "image centre must map to viewport centre y");
+const corner = surface.fitContain({ x: 0, y: 0 }, { width: 1341, height: 1889 }, { width: 375, height: 812 });
+assert.ok(Math.abs(corner.left - 0) < 1e-9, "width-limited fit has no horizontal letterbox");
+assert.ok(corner.top > 0, "top-left corner sits below the vertical letterbox");
+assert.strictEqual(surface.fitContain({ x: 0, y: 0 }, { width: 0, height: 0 }, { width: 375, height: 812 }), null);
+
+/* Distance math: one degree of latitude is ~111.2km, so 0.001° ≈ 111.2m. */
+const meridian = distance.haversineMeters({ lat: 0, lng: 0 }, { lat: 0.001, lng: 0 });
+assert.ok(Math.abs(meridian - 111.2) < 0.3, "0.001° latitude must be ~111.2m, got " + meridian);
+assert.strictEqual(distance.haversineMeters({ lat: 0, lng: 0 }, null), null);
+
+/* Tee shot on Akarana hole 1: tee to green centre is a ~395m par 4. */
+const teeToGreen = distance.haversineMeters(AKARANA_H1.tee, AKARANA_H1.green);
+assert.ok(teeToGreen > 380 && teeToGreen < 410, "Akarana 1 tee→green must be ~395m, got " + teeToGreen);
+
+const fcb = distance.greenDistances(AKARANA_H1.tee, AKARANA_H1);
+assert.ok(fcb.front < fcb.centre && fcb.centre < fcb.back, "front < centre < back from the tee");
+assert.ok(fcb.back - fcb.front > 10 && fcb.back - fcb.front < 60, "green depth must be plausible, got " + (fcb.back - fcb.front));
+
+const centreOnly = distance.greenDistances(AKARANA_H1.tee, { green: AKARANA_H1.green, greenShape: [] });
+assert.strictEqual(centreOnly.front, null, "no shape → no front number");
+assert.strictEqual(centreOnly.back, null, "no shape → no back number");
+assert.ok(centreOnly.centre > 0, "centre still answers without a shape");
+
+/* Asset picking: only published records with playSurface metadata answer. */
+const record = {
+  status: "published",
+  uploaded_assets: [
+    { holeNumber: 1, path: "a/h1.webp", metadata: { playSurface: meta } },
+    { holeNumber: 2, path: "a/h2.webp", metadata: {} }
+  ]
+};
+assert.strictEqual(surface.holeSurfaceAsset(record, 1).path, "a/h1.webp");
+assert.strictEqual(surface.holeSurfaceAsset(record, 2), null, "no playSurface metadata → no surface");
+assert.strictEqual(surface.holeSurfaceAsset({ ...record, status: "draft" }, 1), null, "unpublished → no surface");
+
+/* Absence is a state: the store answers "none" once and never refetches. */
+(async () => {
+  let fetches = 0;
+  const store = surface.createStore({ fetchRecord: async () => { fetches += 1; return null; } });
+  const first = await store.surfaceFor("akarana-golf-club", 1);
+  const second = await store.surfaceFor("akarana-golf-club", 1);
+  assert.strictEqual(first.state, "none");
+  assert.strictEqual(second, first, "asking twice must return the cached answer");
+  assert.strictEqual(fetches, 1, "absence must not refetch");
+  console.log("fresh-app projection/store checks passed");
+  await bootCheck();
+})().catch((err) => { console.error(err); process.exit(1); });
+
+/* ---- Part 2: headless boot ---- */
+
+const MIME = {
+  ".html": "text/html", ".js": "text/javascript", ".css": "text/css",
+  ".json": "application/json", ".png": "image/png", ".svg": "image/svg+xml", ".webp": "image/webp"
+};
+
+function startServer() {
+  return new Promise((resolve) => {
+    const server = http.createServer((req, res) => {
+      const urlPath = decodeURIComponent(req.url.split("?")[0]);
+      let filePath = path.join(ROOT, urlPath === "/" ? "index.html" : urlPath);
+      if (!filePath.startsWith(ROOT)) { res.writeHead(403); res.end(); return; }
+      fs.readFile(filePath, (err, data) => {
+        if (err) { res.writeHead(404); res.end("not found"); return; }
+        res.writeHead(200, { "Content-Type": MIME[path.extname(filePath)] || "application/octet-stream" });
+        res.end(data);
+      });
+    });
+    server.listen(0, "127.0.0.1", () => resolve(server));
+  });
+}
+
+async function launchBrowser(playwright) {
+  if (process.env.GD_BOOT_CHROMIUM) {
+    return playwright.chromium.launch({ executablePath: process.env.GD_BOOT_CHROMIUM });
+  }
+  try { return await playwright.chromium.launch(); }
+  catch (e) { return playwright.chromium.launch({ channel: "chrome" }); }
+}
+
+async function bootCheck() {
+  const playwright = require("playwright-core");
+  const server = await startServer();
+  const port = server.address().port;
+  const browser = await launchBrowser(playwright);
+  /* A granted geolocation permission plus a fixed position near Akarana lets the
+     GPS marker path run for real - watchPosition fires with this fix. */
+  const context = await browser.newContext({
+    geolocation: { latitude: -36.9174, longitude: 174.7400 },
+    permissions: ["geolocation"]
+  });
+  const page = await context.newPage();
+  const errors = [];
+  page.on("pageerror", (err) => errors.push(err && err.message || String(err)));
+  await page.addInitScript(() => {
+    window.__intervals = 0;
+    const orig = window.setInterval;
+    window.setInterval = function () { window.__intervals += 1; return orig.apply(window, arguments); };
+  });
+  await page.goto("http://127.0.0.1:" + port + "/app/index.html", { waitUntil: "load" });
+  await page.waitForTimeout(1500);
+
+  const state = await page.evaluate(() => ({
+    booted: !!(window.ClarityApp && window.ClarityApp.booted),
+    intervals: window.__intervals,
+    authLoaded: !!(window.ClaritySupabaseAuth && typeof window.ClaritySupabaseAuth.freshAccessToken === "function"),
+    signedOut: !window.ClarityApp.account.signedIn(),
+    accountLine: document.getElementById("accountState").textContent
+  }));
+
+  /* Sign-in offline: the form submits, the request fails, and the failure is a
+     status line — never an exception, never a retry loop. Fake credentials
+     only; this asserts the error path. */
+  const signIn = await page.evaluate(async () => {
+    document.getElementById("accountAction").click();
+    const onSignIn = document.body.classList.contains("route-signin");
+    document.getElementById("signInEmail").value = "nobody@example.com";
+    document.getElementById("signInPassword").value = "not-a-real-password";
+    document.getElementById("signInForm").dispatchEvent(new Event("submit", { cancelable: true }));
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    return {
+      onSignIn,
+      status: document.getElementById("signInStatus").textContent,
+      stillOnSignIn: document.body.classList.contains("route-signin")
+    };
+  });
+  await page.evaluate(() => document.getElementById("signInBack").click());
+
+  /* Picker flow, offline: Play opens the picker, the library fetch fails
+     (static server), and the empty state is the answer — no exception, no
+     retry loop. */
+  await page.click("#playTile");
+  await page.waitForTimeout(800);
+  const picker = await page.evaluate(() => ({
+    onPicker: document.body.classList.contains("route-picker"),
+    emptyShown: !document.getElementById("pickerEmpty").classList.contains("hiddenState"),
+    rows: document.querySelectorAll("#courseList .courseRow").length
+  }));
+
+  /* Course tap-through with a stubbed library row: lands on the play route
+     with the live map visible (rule 2) and framed on the course. */
+  const play = await page.evaluate(async (h1) => {
+    const app = window.ClarityApp;
+    /* Lite-shaped package with the real hole 1 geometry: frames the hole AND
+       feeds the distance bar once the granted fix arrives. */
+    const pkg = { holes: [{ holeNumber: 1, tee: h1.tee, green: h1.green, greenShape: h1.greenShape, route: [] }] };
+    await app.play.start("akarana-golf-club", pkg, { lat: -36.918, lng: 174.735 });
+    document.body.classList.remove("route-home", "route-picker");
+    document.body.classList.add("route-play");
+    await new Promise((resolve) => setTimeout(resolve, 1200));   // let watchPosition deliver
+    const style = getComputedStyle(document.getElementById("map"));
+    return {
+      mapDisplayed: style.visibility !== "hidden" && style.display !== "none",
+      hole: app.play.state().hole,
+      courseKey: app.play.state().courseKey,
+      surfacePresented: document.body.classList.contains("surface-published"),
+      gpsFix: app.gps.lastFix(),
+      gpsMarkerOnMap: !!document.querySelector("#map .gpsMarker"),
+      gpsDotHidden: document.getElementById("gpsDot").classList.contains("hiddenState"),
+      distanceBarShown: !document.getElementById("distanceBar").classList.contains("hiddenState"),
+      distFront: Number(document.getElementById("distFront").textContent),
+      distCentre: Number(document.getElementById("distCentre").textContent),
+      distBack: Number(document.getElementById("distBack").textContent)
+    };
+  }, AKARANA_H1);
+
+  await browser.close();
+  server.close();
+
+  assert.strictEqual(errors.length, 0, "uncaught exceptions during boot:\n" + errors.join("\n"));
+  assert.ok(state.booted, "ClarityApp.booted canary missing - the load order did not finish");
+  assert.strictEqual(state.intervals, 0, "rule 3: no setInterval may be registered at boot");
+  assert.ok(state.authLoaded, "clarity-supabase-auth must load in the fresh shell");
+  assert.ok(state.signedOut, "a fresh profile starts signed out");
+  assert.strictEqual(state.accountLine, "Not signed in");
+  assert.ok(signIn.onSignIn, "Sign in must open the sign-in screen");
+  assert.ok(signIn.status.length > 0, "an offline login must surface a status message");
+  assert.ok(signIn.stillOnSignIn, "a failed login stays on the sign-in screen");
+  assert.ok(picker.onPicker, "Play must open the course picker");
+  assert.ok(picker.emptyShown, "offline picker must show its empty state");
+  assert.strictEqual(picker.rows, 0, "offline picker must list no courses");
+  assert.ok(play.mapDisplayed, "rule 2: #map must be visible by default on the play route");
+  assert.strictEqual(play.hole, 1, "play must start on hole 1");
+  assert.strictEqual(play.courseKey, "akarana-golf-club");
+  assert.strictEqual(play.surfacePresented, false, "no surface offline → live map, no overlay");
+  assert.ok(play.gpsFix, "the granted geolocation fix must reach the watcher");
+  assert.ok(play.gpsMarkerOnMap, "the GPS marker must render on the live map");
+  assert.ok(play.gpsDotHidden, "with no surface up, the projected dot stays hidden");
+  assert.ok(play.distanceBarShown, "with a fix and a green, the distance bar must show");
+  assert.ok(play.distFront < play.distCentre && play.distCentre < play.distBack,
+    "F < C < B, got " + play.distFront + "/" + play.distCentre + "/" + play.distBack);
+  /* The granted fix (-36.9174, 174.74) sits ~90m from Akarana green 1. */
+  assert.ok(play.distCentre > 60 && play.distCentre < 120,
+    "centre distance from the granted fix must be ~90m, got " + play.distCentre);
+  console.log("fresh-app boot passed: 0 uncaught exceptions, 0 intervals, picker empty-state, play on live map, GPS marker live, F/C/B "
+    + play.distFront + "/" + play.distCentre + "/" + play.distBack + "m");
+}

@@ -51,6 +51,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/course-library"
+  to = "/.netlify/functions/course-library"
+  status = 200
+
+[[redirects]]
   from = "/api/course-package"
   to = "/.netlify/functions/course-package"
   status = 200
@@ -148,11 +153,6 @@
 [[redirects]]
   from = "/api/shot-library-sync"
   to = "/.netlify/functions/shot-library-sync"
-  status = 200
-
-[[redirects]]
-  from = "/api/captured-surface-sync"
-  to = "/.netlify/functions/captured-surface-sync"
   status = 200
 
 [[redirects]]

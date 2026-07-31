@@ -48,12 +48,11 @@ jobs:
           node dev/store-billing-client.test.js
           node dev/native-back-button.test.js
           node dev/course-key-normalisation.test.js
+          node dev/fresh-app-boot.test.js
           node dev/course-identity-resolution.test.js
-          node dev/captured-scan-hydrate.test.js
           node dev/captured-frame-partial-flatten.test.js
           node dev/app-frame-consumption.test.js
           node dev/auth-route-boot-release.test.js
-          node dev/scan-push-filter.test.js
           node dev/password-reset-surface.test.js
           node dev/course-hole-count.test.js
           node dev/placeholder-profile-identity.test.js

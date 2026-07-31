@@ -40,6 +40,10 @@ const publicPaths = [
   "assets",
   "scripts",
   "styles",
+  // The fresh consumer-only surface (see app/README.md), served at /app/ while
+  // it is built out alongside the current app. It reuses /assets and /scripts
+  // at the site root, so copying the directory verbatim is enough.
+  "app",
   // Legal pages, served at the site root. These are the URLs given to Apple and
   // Google in the store listings, and Play fetches the privacy policy during
   // review - a 404 there fails the submission. They shipped only under /assets
