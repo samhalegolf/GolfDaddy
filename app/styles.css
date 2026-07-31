@@ -66,12 +66,15 @@ body.tilt-lock #surfaceViewport { transform: perspective(900px) rotateX(32deg) s
 #startPill .headToTee { background: #1fd36d; color: #06110b; }
 #startPill button:active { transform: scale(.985); }
 
-/* Front / centre / back of green, metres. Hidden without a fix or a green. */
-#distanceBar { position: absolute; bottom: calc(env(safe-area-inset-bottom, 0px) + 16px); left: 50%; transform: translateX(-50%); display: flex; gap: 18px; align-items: baseline; padding: 12px 20px; border-radius: 16px; background: rgba(13, 27, 18, .85); z-index: 600; }
+/* Front / centre / back of green, metres. Hidden without a fix or a green.
+   Bottom-LEFT like the old app's #gdV62Distance — centre-bottom sits exactly
+   on the tee guide box, and a bar there hides the player's dot at the tee
+   (which read as "Head To the Tee did nothing"). */
+#distanceBar { position: absolute; left: 12px; bottom: calc(env(safe-area-inset-bottom, 0px) + 120px); display: flex; gap: 10px; align-items: baseline; padding: 9px 12px; border-radius: 14px; background: rgba(13, 27, 18, .85); z-index: 600; }
 #distanceBar.hiddenState { display: none; }
-.dist { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 18px; font-weight: 600; }
-.distMain { font-size: 26px; font-weight: 800; }
-.distLabel { font-size: 11px; font-weight: 600; opacity: .65; letter-spacing: .08em; }
+.dist { display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 15px; font-weight: 600; }
+.distMain { font-size: 22px; font-weight: 800; }
+.distLabel { font-size: 10px; font-weight: 600; opacity: .65; letter-spacing: .08em; }
 
 .playChrome { position: absolute; top: env(safe-area-inset-top, 12px); left: 0; right: 0; display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; z-index: 600; }
 .playChrome button { border: 0; border-radius: 10px; padding: 10px 14px; background: rgba(13, 27, 18, .82); color: #f2f7f2; font-size: 16px; }
