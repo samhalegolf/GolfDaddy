@@ -333,16 +333,24 @@ async function bootCheck() {
     return { atTee, afterTap };
   }, AKARANA_H1);
 
-  /* Base imagery policy: LINZ aerial only with a key and only inside NZ;
-     everywhere else (and offline, keyless) the honest OSM fallback. */
+  /* Base imagery policy: aerial only inside a licensed source's coverage —
+     LINZ (keyed, NZ), NAIP (US), QLD (AU) — and the honest OSM fallback
+     everywhere else, including NZ when the key never arrived. */
   const basemap = await page.evaluate(() => {
     const app = window.ClarityApp;
-    const keyless = app.basemap.baseFor({ lat: -36.9, lng: 174.7 }).kind;
+    const keylessNz = app.basemap.baseFor({ lat: -36.9, lng: 174.7 }).kind;
     app.basemap.configure({ linzBasemapsKey: "test-key" });
     return {
-      keyless,
+      keylessNz,
       nz: app.basemap.baseFor({ lat: -36.9, lng: 174.7 }).kind,
-      pebbleBeach: app.basemap.baseFor({ lat: 36.564, lng: -121.938 }).kind
+      pebbleBeach: app.basemap.baseFor({ lat: 36.564, lng: -121.938 }).kind,
+      brisbane: app.basemap.baseFor({ lat: -27.5, lng: 153.0 }).kind,
+      london: app.basemap.baseFor({ lat: 51.5, lng: -0.1 }).kind,
+      naipTileIsBbox: (() => {
+        const layer = app.basemap.baseFor({ lat: 36.564, lng: -121.938 }).layer;
+        const url = layer.getTileUrl({ x: 41522, y: 101387, z: 18 });
+        return url.includes("exportImage") && url.includes("bbox=");
+      })()
     };
   });
 
@@ -367,9 +375,12 @@ async function bootCheck() {
   assert.ok(surfaceFirst.h1State.chip.startsWith("pkg"), "the chip names the package source, got: " + surfaceFirst.h1State.chip);
   assert.strictEqual(surfaceFirst.h2State.presented, false, "no visual on hole 2 → back on the live map");
   assert.ok(surfaceFirst.h2State.mapCreated, "the map is created the moment absence is the answer");
-  assert.strictEqual(basemap.keyless, "osm", "no LINZ key → OSM");
+  assert.strictEqual(basemap.keylessNz, "osm", "no LINZ key → OSM even in NZ");
   assert.strictEqual(basemap.nz, "linz", "keyed NZ centre → LINZ aerial");
-  assert.strictEqual(basemap.pebbleBeach, "osm", "outside LINZ coverage → OSM, never empty tiles");
+  assert.strictEqual(basemap.pebbleBeach, "naip", "US centre → NAIP aerial");
+  assert.strictEqual(basemap.brisbane, "qld", "Queensland centre → QLD aerial");
+  assert.strictEqual(basemap.london, "osm", "outside every aerial region → OSM, never empty tiles");
+  assert.ok(basemap.naipTileIsBbox, "NAIP tiles are bbox exportImage requests");
   assert.ok(play.mapDisplayed, "rule 2: #map must be visible by default on the play route");
   assert.strictEqual(play.hole, 1, "play must start on hole 1");
   assert.strictEqual(play.courseKey, "akarana-golf-club");
