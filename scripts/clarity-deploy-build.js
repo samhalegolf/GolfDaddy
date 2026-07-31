@@ -40,6 +40,7 @@ const publicPaths = [
   "assets",
   "scripts",
   "styles",
+  "demo",
   // The fresh consumer-only surface (see app/README.md), served at /app/ while
   // it is built out alongside the current app. It reuses /assets and /scripts
   // at the site root, so copying the directory verbatim is enough.
@@ -173,7 +174,7 @@ function stampContentVersions(html) {
   const out = html.replace(/((?:src|href)=")((?:scripts|styles)\/[^"?]+\.(?:js|css))\?v=[^"]*(")/g,
     function (whole, pre, assetPath, post) {
       const assetFile = path.join(dist, assetPath);
-      if (!fs.existsSync(assetFile)) return whole; // leave unknown paths untouched
+      if (!fs.existsSync(assetFile)) return whole;
       const hash = crypto.createHash("sha1").update(fs.readFileSync(assetFile)).digest("hex").slice(0, 10);
       stamped += 1;
       return pre + assetPath + "?v=" + hash + post;
@@ -192,12 +193,6 @@ fs.mkdirSync(dist, { recursive: true });
 publicPaths.forEach(copyEntry);
 
 const sourceHtml = fs.readFileSync(path.join(dist, "index.html"), "utf8");
-/* The marking is two-way. Most of it is "studio only", stripped from the app.
-   A few things are the reverse - `data-gd-surface="app"` - because the app runs a
-   cut-down build of something the studio runs in full. The course visual engine
-   is the case that needed it: the phone loads a 35KB play/capture client and the
-   studio loads the 240KB authoring engine, and they both define
-   GDCourseVisualEngine, so exactly one of them must be present per surface. */
 const app = stripSurface(sourceHtml, STUDIO);
 const studio = stripSurface(sourceHtml, APP);
 const appOnlyFiles = [...assetRefs(sourceHtml)].filter(function (ref) { return !assetRefs(studio.html).has(ref); });
@@ -209,9 +204,6 @@ console.log("App surface: removed " + app.removed + " studio-only elements, stam
 
 if (APP_ONLY) {
   studioOnlyFiles.forEach(function (ref) { fs.rmSync(path.join(dist, ref), { force: true }); });
-  /* Pruning a file can leave its directory behind. An empty scripts/studio/ then
-     rides into the APK and the .app, where it reads as "the studio code is in
-     here" to anyone auditing the bundle. Remove directories the prune emptied. */
   const emptied = new Set(studioOnlyFiles.map(function (ref) { return path.dirname(ref); }));
   emptied.forEach(function (dir) {
     const target = path.join(dist, dir);
@@ -219,9 +211,6 @@ if (APP_ONLY) {
   });
   console.log("--app-only: no studio output; pruned " + studioOnlyFiles.length + " studio-only files from dist");
 } else {
-  /* <base href="/"> rather than rewriting every path: the studio lives at
-     /studio/ but loads the SAME files at site root, so there is one copy of
-     gd-app-core.js on the CDN and one cache entry, not two. */
   const studioHtml = stampTarget(studio.html, STUDIO).replace(/<head>/i, '<head>\n<base href="/">');
   const studioStamped = stampContentVersions(studioHtml);
   fs.mkdirSync(path.join(dist, STUDIO), { recursive: true });
@@ -231,11 +220,6 @@ if (APP_ONLY) {
     + studioStamped.stamped + " assets");
 }
 
-/* The fresh /app/ surface carries no manual ?v= labels at all, so without this
-   a deploy leaves returning browsers on a stale mix - old cached modules under
-   new markup (a pill whose buttons exist but whose listeners never attached).
-   Stamp every local asset it loads, including the ../scripts and ../assets it
-   reuses at site root, with a content hash on the dist copy. */
 (function stampAppSurface() {
   const appIndex = path.join(dist, "app", "index.html");
   if (!fs.existsSync(appIndex)) return;
@@ -244,7 +228,7 @@ if (APP_ONLY) {
     /((?:src|href)=")([^"?]+\.(?:js|css))(?:\?v=[^"]*)?(")/g,
     function (whole, pre, assetPath, post) {
       const assetFile = path.join(dist, "app", assetPath);
-      if (!fs.existsSync(assetFile)) return whole; // leave unknown paths untouched
+      if (!fs.existsSync(assetFile)) return whole;
       const hash = crypto.createHash("sha1").update(fs.readFileSync(assetFile)).digest("hex").slice(0, 10);
       stamped += 1;
       return pre + assetPath + "?v=" + hash + post;

@@ -2,6 +2,9 @@
 (function(){
   'use strict';
   function safe(fn,fallback){try{return fn()}catch(e){console.warn('[GD auth gate]',e);return fallback}}
+  function demoMode(){
+    return safe(function(){return new URLSearchParams(window.location.search).get('demo')==='practice-bubble'},false);
+  }
   function account(){
     return safe(function(){
       return window.GolfDaddyAccounts&&typeof window.GolfDaddyAccounts.current==='function'
@@ -9,42 +12,44 @@
         : null;
     },null);
   }
-  function locked(){return !account();}
-	  function closeNonAuthSurfaces(){
-	    safe(()=>document.querySelectorAll('.modulePanel.open,.panel.open').forEach(el=>el.classList.remove('open')));
-		    safe(()=>{
-		      const home=document.getElementById('shellHome');
-		      if(home){
-		        home.classList.add('hidden');
-		        home.style.display='';
-		        home.style.visibility='';
-		        home.style.pointerEvents='';
-	        home.style.opacity='';
-	      }
-	    });
-	    safe(()=>document.getElementById('courseScreen')?.classList.add('hidden'));
-	    safe(()=>document.getElementById('shellTop')?.classList.remove('visible'));
-	    safe(()=>document.getElementById('shellDock')?.classList.remove('visible'));
-		    safe(()=>document.getElementById('clarityBackupOverlay')?.classList.remove('open'));
-		    safe(()=>document.getElementById('claritySupportOverlay')?.classList.remove('open'));
-		    safe(()=>document.body.classList.remove('gps-open','manual-gps-active','gdStatsOpen','gdBubbleStudioOpen','gdShotDataOpen'));
-		  }
-	  function showLoginGate(){
-	    if(window.gd67OpenPasswordResetRoute&&safe(()=>window.gd67OpenPasswordResetRoute(),false)){
-		    closeNonAuthSurfaces();
-		    safe(()=>window.GDShell?.showAuth?.({source:'auth-gate-reset'}));
-		    document.body.classList.add('gdAuthLocked','gdProfileOpen','gdPasswordResetRoute');
-	      return false;
-	    }
-		    closeNonAuthSurfaces();
-		    safe(()=>window.GDShell?.showAuth?.({source:'auth-gate'}));
-		    document.body.classList.add('gdAuthLocked','gdProfileOpen');
+  function locked(){return !demoMode()&&!account();}
+  let demoPracticeRetriesScheduled=false;
+  let demoPracticeOffsetApplied=false;
+  function closeNonAuthSurfaces(){
+    safe(()=>document.querySelectorAll('.modulePanel.open,.panel.open').forEach(el=>el.classList.remove('open')));
+    safe(()=>{
+      const home=document.getElementById('shellHome');
+      if(home){
+        home.classList.add('hidden');
+        home.style.display='';
+        home.style.visibility='';
+        home.style.pointerEvents='';
+        home.style.opacity='';
+      }
+    });
+    safe(()=>document.getElementById('courseScreen')?.classList.add('hidden'));
+    safe(()=>document.getElementById('shellTop')?.classList.remove('visible'));
+    safe(()=>document.getElementById('shellDock')?.classList.remove('visible'));
+    safe(()=>document.getElementById('clarityBackupOverlay')?.classList.remove('open'));
+    safe(()=>document.getElementById('claritySupportOverlay')?.classList.remove('open'));
+    safe(()=>document.body.classList.remove('gps-open','manual-gps-active','gdStatsOpen','gdBubbleStudioOpen','gdShotDataOpen'));
+  }
+  function showLoginGate(){
+    if(window.gd67OpenPasswordResetRoute&&safe(()=>window.gd67OpenPasswordResetRoute(),false)){
+      closeNonAuthSurfaces();
+      safe(()=>window.GDShell?.showAuth?.({source:'auth-gate-reset'}));
+      document.body.classList.add('gdAuthLocked','gdProfileOpen','gdPasswordResetRoute');
+      return false;
+    }
+    closeNonAuthSurfaces();
+    safe(()=>window.GDShell?.showAuth?.({source:'auth-gate'}));
+    document.body.classList.add('gdAuthLocked','gdProfileOpen');
     const profile=document.getElementById('gdProfileV67');
     if(window.gdOpenProfileV67&&(!profile||profile.classList.contains('hidden')||!/Sign in/i.test(profile.textContent||''))){
-	      safe(()=>window.gdOpenProfileV67({authGate:true}));
-	      closeNonAuthSurfaces();
-	      safe(()=>window.GDShell?.showAuth?.({source:'auth-gate-profile'}));
-	      document.body.classList.add('gdAuthLocked','gdProfileOpen');
+      safe(()=>window.gdOpenProfileV67({authGate:true}));
+      closeNonAuthSurfaces();
+      safe(()=>window.GDShell?.showAuth?.({source:'auth-gate-profile'}));
+      document.body.classList.add('gdAuthLocked','gdProfileOpen');
     }else if(profile){
       profile.classList.remove('hidden');
     }
@@ -52,24 +57,14 @@
   }
   function releaseGate(){
     document.body.classList.remove('gdAuthLocked');
-    /* gdAuthRouteBoot is a pre-paint guess made from localStorage before any
-       script can verify it, and gd-app-base.css uses it to hide #shellHome,
-       #courseScreen, #shellTop, #shellDock and every panel with !important.
-       Four separate places are meant to clear it after sign-in; when none of
-       them do, the shell renders as a blank screen no matter what the router
-       says - route "home", no hidden class, and nothing visible.
-
-       This gate is the authoritative check, so the guess must not outlive it:
-       if an account exists, the boot class is stale by definition. Clearing it
-       here means a missed removal self-heals on the next gate pass rather than
-       stranding the user. gdResetRouteBoot is deliberately left alone - it has
-       no CSS and belongs to the password-reset flow. */
+    if(demoMode()){
+      document.body.classList.remove('gdProfileOpen','gdPasswordResetRoute');
+      safe(()=>document.getElementById('gdProfileV67')?.classList.add('hidden'));
+    }
     safe(function(){document.documentElement.classList.remove('gdAuthRouteBoot')});
     return true;
   }
-  function applyGate(){
-    return locked()?showLoginGate():releaseGate();
-  }
+  function applyGate(){return locked()?showLoginGate():releaseGate();}
   function guard(name){
     const old=window[name];
     if(typeof old!=='function'||old.__gdAuthGate)return;
@@ -95,6 +90,110 @@
     });
     api.__gdAuthGate=true;
   }
+  function demoMetric(key,value){return {candidateMetric:key,value:value,confidence:0.98,rawLabel:key};}
+  function demoShots(){
+    const degrees=[2.42,2.5,2.56,2.62,2.68,2.52,2.6,2.7,2.46,2.58,2.66,2.54,2.64,2.48,2.72,2.5,2.58,2.62,2.52,2.68];
+    const carries=[150,151,150,151,151,150,151,151,150,151,150,150,151,151,150,151,151,150,150,151];
+    return degrees.map(function(deg,index){
+      return {
+        shotId:'demo-practice-shot-'+(index+1),
+        candidateClub:'7 Iron',
+        originClubLabel:'7 Iron',
+        expectedDistanceM:151,
+        timestamp:new Date(Date.now()-((degrees.length-index)*45000)).toISOString(),
+        metrics:[
+          demoMetric('carryDistance',carries[index]),
+          demoMetric('offlineAngle',deg),
+          demoMetric('faceAngle',deg-0.4),
+          demoMetric('clubPath',0.3),
+          demoMetric('faceToPath',deg-0.7)
+        ]
+      };
+    });
+  }
+  function openRealPracticeDemoSurface(){
+    let opened=false;
+    safe(function(){
+      document.documentElement.classList.remove('gdAuthRouteBoot');
+      document.body.classList.remove('gdAuthLocked','gdProfileOpen','gdPasswordResetRoute');
+      document.getElementById('gdProfileV67')?.classList.add('hidden');
+      if(typeof window.gdOpenDataHub==='function'){
+        window.gdOpenDataHub();
+        opened=true;
+      }
+      if(typeof window.gdDataHubPracticeAction==='function'){
+        window.gdDataHubPracticeAction();
+        opened=true;
+      }else if(typeof window.openPracticeData==='function'){
+        window.openPracticeData();
+        opened=true;
+      }
+      const practiceCard=document.getElementById('gdPracticeDataOpenBtn');
+      if(practiceCard&&practiceCard.getAttribute('aria-expanded')!=='true'){
+        practiceCard.click();
+        opened=true;
+      }
+    });
+    return opened;
+  }
+  function practiceDemoSurfaceVisible(){
+    return safe(function(){
+      const text=document.body?.innerText||'';
+      const card=document.getElementById('gdPracticeDataOpenBtn');
+      return document.body.classList.contains('gdShotDataOpen')
+        && (card?.getAttribute('aria-expanded')==='true'||/Sam Hale - Practice Data|Generate Bubble|Adopt Bubble/.test(text));
+    },false);
+  }
+  function applyPracticeDemoOffset(){
+    if(demoPracticeOffsetApplied)return;
+    safe(function(){
+      if(typeof window.gdRenderPracticeData==='function')window.gdRenderPracticeData();
+      if(typeof window.gdRenderBubbleOffsetHub==='function')window.gdRenderBubbleOffsetHub(true);
+      const input=document.querySelector('#practiceDataPanel .gdBubbleFaceOffsetInput')||document.querySelector('.gdBubbleFaceOffsetInput');
+      if(input){
+        if(typeof window.gdBubbleOffsetEdit==='function')window.gdBubbleOffsetEdit();
+        input.value='2.1';
+        input.dispatchEvent(new Event('input',{bubbles:true}));
+        if(typeof window.gdBubbleOffsetSave==='function')window.gdBubbleOffsetSave();
+        demoPracticeOffsetApplied=true;
+      }
+    });
+  }
+  function schedulePracticeDemoSurfaceRetries(){
+    if(demoPracticeRetriesScheduled)return;
+    demoPracticeRetriesScheduled=true;
+    [0,450,1000,1800,3000,5000,7500].forEach(function(delay){
+      setTimeout(function(){
+        if(!practiceDemoSurfaceVisible())openRealPracticeDemoSurface();
+        if(practiceDemoSurfaceVisible())applyPracticeDemoOffset();
+      },delay);
+    });
+  }
+  function seedRealPracticeDemo(){
+    if(!demoMode())return false;
+    const api=window.GolfDaddyLaunchMonitorData;
+    if(!api||typeof api.importCapture!=='function')return false;
+    const key='gd_demo_practice_bubble_seed_v5';
+    if(!sessionStorage.getItem(key)){
+      safe(function(){
+        api.clearStore();
+        api.importCapture({
+          sessionId:'demo-practice-session',
+          captureId:'demo-practice-capture',
+          importBatchId:'demo-practice-import',
+          label:'Clarity Demo Practice Session',
+          inputType:'generated-demo',
+          rawTextBlocks:['Trackman demo session','7 Iron practice pattern'],
+          sourceIdentity:{providerGuess:'trackman',label:'Trackman',confidence:1,evidence:['demo']},
+          startedAt:new Date(Date.now()-20*60000).toISOString(),
+          clubGroups:demoShots()
+        });
+        sessionStorage.setItem(key,'1');
+      });
+    }
+    schedulePracticeDemoSurfaceRetries();
+    return true;
+  }
   function install(){
     wrapAccounts();
     ['showShellHome','showModePicker','enterGpsModule','openShellModule','openBag','openStats','openCourseData','openPracticeData','openDeveloperPanel','gdOpenPlayerSettingsPanel'].forEach(guard);
@@ -108,13 +207,16 @@
       window.gdCloseProfileV67=wrappedClose;
     }
     applyGate();
+    seedRealPracticeDemo();
   }
   window.gdApplyAuthGate=applyGate;
-  document.addEventListener('DOMContentLoaded',function(){setTimeout(install,0);setTimeout(install,500);});
-	  document.addEventListener('click',function(ev){
-	    if(ev.target&&ev.target.closest&&ev.target.closest('#gdProfileV67'))return;
-	    setTimeout(applyGate,0);
-	  },true);
+  window.gdSeedRealPracticeDemo=seedRealPracticeDemo;
+  document.addEventListener('DOMContentLoaded',function(){setTimeout(install,0);setTimeout(install,500);setTimeout(seedRealPracticeDemo,1200);});
+  document.addEventListener('click',function(ev){
+    if(ev.target&&ev.target.closest&&ev.target.closest('#gdProfileV67'))return;
+    setTimeout(applyGate,0);
+  },true);
   setTimeout(install,0);
   setTimeout(install,800);
+  setTimeout(seedRealPracticeDemo,1600);
 })();

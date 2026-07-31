@@ -1,0 +1,34 @@
+{
+  "name": "Real Practice Bubble versus My Bubble",
+  "viewport": { "width": 390, "height": 844 },
+  "videoSize": { "width": 390, "height": 844 },
+  "locale": "en-NZ",
+  "timezoneId": "Pacific/Auckland",
+  "colorScheme": "light",
+  "headless": true,
+  "steps": [
+    {
+      "action": "goto",
+      "url": "{{baseUrl}}/?demo=practice-bubble",
+      "waitUntil": "networkidle",
+      "holdAfter": 2600
+    },
+    {
+      "action": "waitForAny",
+      "candidates": [
+        { "selector": "#practiceDataPanel.open" },
+        { "selector": "#gdPracticeDataVisual" },
+        { "text": "Practice Data" }
+      ],
+      "holdAfter": 2200
+    },
+    {
+      "action": "screenshot",
+      "path": "01-real-practice-bubble.png"
+    },
+    {
+      "action": "pause",
+      "duration": 2600
+    }
+  ]
+}
