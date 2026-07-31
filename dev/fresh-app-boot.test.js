@@ -14,6 +14,7 @@ const assert = require("assert");
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
+const vm = require("vm");
 
 const ROOT = path.join(__dirname, "..");
 const surface = require(path.join(ROOT, "app", "js", "play-surface.js"));
@@ -100,6 +101,73 @@ assert.strictEqual(surface.fitContain({ x: 0, y: 0 }, { width: 0, height: 0 }, {
     "surface tap must invert to the same lat/lng the dot renders at");
   assert.strictEqual(surface.surfaceScreenToLatLng(tapMeta, { left: 5, top: 5 }, view), null,
     "a tap in the letterbox is not on the course");
+}
+
+/* ---- Bubble engine client: drift + behaviour ----
+   app/js/bubble-engine.js is GENERATED (dev/generate-bubble-engine-client.js)
+   with the engine functions copied verbatim from gd-app-core.js and the layup
+   helpers from pin-lock. Any copied block that is no longer byte-identical to
+   its source is a failure here — change the engine, re-run the generator. */
+{
+  const clientSrc = fs.readFileSync(path.join(ROOT, "app", "js", "bubble-engine.js"), "utf8");
+  const coreSrc = fs.readFileSync(path.join(ROOT, "scripts", "gd-app-core.js"), "utf8");
+  const pinlockSrc = fs.readFileSync(path.join(ROOT, "scripts", "gd-course-library-pin-lock.js"), "utf8");
+  const sections = clientSrc.split("/* ==== ");
+  const sourceFor = (title) => (title.includes("pin-lock") ? pinlockSrc : coreSrc);
+  let checked = 0;
+  sections.filter((s) => s.startsWith("VERBATIM")).forEach((section) => {
+    const title = section.slice(0, section.indexOf("\n"));
+    const body = section.slice(section.indexOf("*/") + 2).split("\n/* ==== ")[0].split("\n  /* ==== adapter")[0];
+    body.split(/\n(?=const |function |  function )/).map((b) => b.trim()).filter(Boolean).forEach((block) => {
+      assert.ok(sourceFor(title).includes(block),
+        "bubble-engine drift: block no longer matches its source (" + title + "): " + block.slice(0, 60) + "…");
+      checked += 1;
+    });
+  });
+  assert.ok(checked >= 70, "expected 70+ verbatim blocks, checked " + checked);
+
+  /* Behaviour, on the ghost bag (no account in this shell — the engine's own
+     stand-in, not an invented fallback). */
+  const distanceLib = require(path.join(ROOT, "app", "js", "distance.js"));
+  const sandbox = {
+    console,
+    localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+    document: { body: { classList: { contains: () => false } } },
+    L: { latLng: (lat, lng) => ({ lat, lng }), point: (x, y) => ({ x, y, distanceTo(o) { return Math.hypot(o.x - x, o.y - y); } }) }
+  };
+  sandbox.window = sandbox;
+  sandbox.window.ClarityApp = { distance: distanceLib };
+  vm.createContext(sandbox);
+  vm.runInContext(clientSrc, sandbox, { filename: "bubble-engine.js" });
+  const engine = sandbox.window.GDBubbleEngine;
+
+  const bag = engine.playableBag();
+  assert.ok(bag.length >= 10 && bag.every((r) => r.ghostBag), "ghost bag answers when no account bag is set");
+  const maxCarry = engine.maxPlayableCarryM();
+  assert.ok(maxCarry > 230 && maxCarry < 320, "ghost bag max playable total, got " + maxCarry);
+
+  const route = [AKARANA_H1.tee, { lat: -36.9145, lng: 174.7403 }, { lat: -36.9157, lng: 174.7398 }, AKARANA_H1.green];
+  engine.setHoleContext({ hole: 1, tee: AKARANA_H1.tee, green: AKARANA_H1.green, route });
+  engine.setShot(AKARANA_H1.tee, null);
+  const layup = engine.targetForGreenCentre(AKARANA_H1.green, { hole: 1 });
+  const layupShort = distanceLib.haversineMeters(layup, AKARANA_H1.green);
+  assert.ok(layupShort > 30, "green out of bag range → the target starts at the fairway point, "
+    + layupShort.toFixed(0) + "m short");
+  assert.ok(distanceLib.haversineMeters(AKARANA_H1.tee, layup) <= maxCarry + 3, "layup stays inside the bag");
+
+  engine.setShot({ lat: -36.9157, lng: 174.7398 }, null);
+  const reachable = engine.targetForGreenCentre(AKARANA_H1.green, { hole: 1 });
+  assert.ok(distanceLib.haversineMeters(reachable, AKARANA_H1.green) < 1, "green in range → the target IS the green");
+
+  engine.setShot(AKARANA_H1.tee, layup);
+  const model = engine.renderModel();
+  assert.ok(model && model.payload.club !== "GPS", "the calibrated engine payload answers, not the GPS fallback — got " + model.payload.club);
+  assert.strictEqual(model.rings.main.length, 168, "the engine's ring resolution");
+  const radii = model.rings.main.map((p) => distanceLib.haversineMeters(model.center, p));
+  assert.ok(Math.min(...radii) > 2 && Math.max(...radii) < 60 && Math.max(...radii) > Math.min(...radii),
+    "cluster ring is an engine-shaped ellipse, radii " + Math.min(...radii).toFixed(1) + "–" + Math.max(...radii).toFixed(1) + "m");
+  console.log("bubble-engine drift+behaviour passed: " + checked + " verbatim blocks, "
+    + bag.length + "-club ghost bag, layup " + layupShort.toFixed(0) + "m short, " + model.payload.club + " cluster");
 }
 
 /* Pre-locked hole framing (guide contract v20): tee pinned to the bottom
@@ -453,6 +521,15 @@ async function bootCheck() {
       && parseFloat(dotStyle.top) >= barRect.top && parseFloat(dotStyle.top) <= barRect.bottom;
     const img = document.getElementById("surfaceImage");
     const dot = document.getElementById("gpsDot");
+    const act = app.shot.active();
+    const engineDefault = {
+      targetFromTee: act && act.target ? app.distance.haversineMeters(tee, act.target) : null,
+      targetToGreen: act && act.target ? app.distance.haversineMeters(act.target, green) : null,
+      maxCarry: window.GDBubbleEngine.maxPlayableCarryM(),
+      shotRowShown: !document.getElementById("shotRow").classList.contains("hiddenState"),
+      ringPaths: document.querySelectorAll("#bubbleSvg path").length,
+      svgShown: !document.getElementById("bubbleSvg").classList.contains("hiddenState")
+    };
     return {
       presented: document.body.classList.contains("surface-published"),
       transform: img.style.transform,
@@ -461,7 +538,8 @@ async function bootCheck() {
       dot: { left: parseFloat(dot.style.left), top: parseFloat(dot.style.top) },
       view: { w: window.innerWidth, h: window.innerHeight },
       scrollJumped,
-      dotUnderBar
+      dotUnderBar,
+      engineDefault
     };
   }, AKARANA_H1);
 
@@ -570,6 +648,14 @@ async function bootCheck() {
   assert.ok(surfaceFirst.h2State.mapCreated, "the map is created the moment absence is the answer");
   assert.ok(!framed.scrollJumped, "clicking the pill must not scroll-jump the play screen");
   assert.ok(!framed.dotUnderBar, "the tee dot must not hide under the distance bar");
+  {
+    const e = framed.engineDefault;
+    assert.ok(e.targetToGreen > 30, "395m hole, " + Math.round(e.maxCarry) + "m bag → the default aim starts short of the green");
+    assert.ok(Math.abs(e.targetFromTee - e.maxCarry) < 8,
+      "the default aim sits at the max bag distance: " + Math.round(e.targetFromTee) + " vs " + Math.round(e.maxCarry));
+    assert.ok(e.shotRowShown, "aimed short of the green from the tee → SHOT/REM row shows");
+    assert.ok(e.svgShown && e.ringPaths === 3, "the engine's three cluster rings render on the surface, got " + e.ringPaths);
+  }
   assert.ok(framed.presented, "framed course must present its surface");
   assert.ok(framed.transform.indexOf("matrix(") === 0, "the surface must carry the frame transform, got: " + framed.transform);
   assert.strictEqual(framed.positionSource, "tee", "far from the fix, the framed hole heads to the tee");

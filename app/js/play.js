@@ -212,10 +212,33 @@
       var px = surfaceLib.projectToSurface(meta, pt.lat, pt.lng);
       return px ? surfaceLib.transformApply(activeFrame, px) : null;
     }
+    var act = app.shot && app.shot.active();
+    /* The engine's cluster rings, computed in lat/lng, projected here. The
+       drag handle sits on the engine's render centre (aim offset and bag
+       roof included), falling back to the raw target off-surface. */
+    var model = act && meta && window.GDBubbleEngine ? window.GDBubbleEngine.renderModel() : null;
+    var svg = document.getElementById("bubbleSvg");
+    if (svg) {
+      var paths = null;
+      if (model) {
+        paths = ["outer", "main", "inner"].map(function (ringName) {
+          var pts = model.rings[ringName].map(project).filter(Boolean);
+          if (pts.length < model.rings[ringName].length * 0.6) return null;
+          return { name: ringName, d: "M" + pts.map(function (p) { return p.left.toFixed(1) + "," + p.top.toFixed(1); }).join("L") + "Z" };
+        }).filter(Boolean);
+      }
+      svg.classList.toggle("hiddenState", !paths || paths.length < 3);
+      if (paths && paths.length === 3) {
+        svg.setAttribute("viewBox", "0 0 " + window.innerWidth + " " + window.innerHeight);
+        svg.innerHTML = paths.map(function (p) {
+          var cls = "ring" + p.name.charAt(0).toUpperCase() + p.name.slice(1);
+          return '<path class="' + cls + '" d="' + p.d + '"/>';
+        }).join("");
+      }
+    }
     var bubble = document.getElementById("aimBubble");
     if (bubble) {
-      var act = app.shot && app.shot.active();
-      var at = project(act && act.target);
+      var at = project(model ? model.center : act && act.target);
       bubble.classList.toggle("hiddenState", !at);
       if (at) { bubble.style.left = at.left + "px"; bubble.style.top = at.top + "px"; }
     }
@@ -250,16 +273,43 @@
     positionWired = true;
     /* Shot advance runs BEFORE the render listener so the frame and overlays
        see the updated shot. Deliberate placements only — a GPS fix moves the
-       dot, never the shot (the Actually Playing mode will own that). */
+       dot, never the shot (the Actually Playing mode will own that). The
+       default aim is the ENGINE's target rule: the green when the max bag
+       distance reaches it, the fairway layup point when it cannot. */
     app.position.onChange(function (pos) {
       if (pos && (pos.source === "tap" || pos.source === "tee")) {
-        app.shot.place(pos, current.rec && current.rec.green);
+        var green = current.rec && current.rec.green;
+        var target = green || null;
+        if (green && window.GDBubbleEngine) {
+          window.GDBubbleEngine.setShot(pos, null);
+          target = window.GDBubbleEngine.targetForGreenCentre(green, { hole: current.hole }) || green;
+        }
+        app.shot.place(pos, target);
       }
     });
     app.position.onChange(renderPosition);
     if (app.gps) app.gps.onFix(maybeAdoptGpsFix);
-    /* Aim changes re-render (and re-frame, unless mid-drag). */
-    app.shot.onChange(function () { renderPosition(app.position.current()); });
+    /* Aim changes sync the engine, then re-render (re-frame unless mid-drag). */
+    app.shot.onChange(function () {
+      var act = app.shot.active();
+      if (window.GDBubbleEngine) window.GDBubbleEngine.setShot(act && act.start, act && act.target);
+      renderPosition(app.position.current());
+    });
+    /* The engine's pixel caps see the real on-surface scale through this seam. */
+    if (window.GDBubbleEngine) window.GDBubbleEngine.setProjection({
+      toScreen: function (ll) {
+        try {
+          var img = document.getElementById("surfaceImage");
+          if (!img || !img.dataset.playSurface || !activeFrame) return null;
+          var meta = JSON.parse(img.dataset.playSurface);
+          var px = surfaceLib.projectToSurface(meta, ll.lat, ll.lng);
+          if (!px) return null;
+          var screen = surfaceLib.transformApply(activeFrame, px);
+          return { x: screen.left, y: screen.top };
+        } catch (e) { return null; }
+      },
+      viewSize: function () { return { x: window.innerWidth, y: window.innerHeight }; }
+    });
 
     /* Dragging the aim bubble. The tilt flattens while dragging (CSS on
        body.bubble-dragging) so the 2D frame inverse stays exact; the camera
@@ -545,6 +595,11 @@
          on-hole GPS fix places them. Auto-head-to-tee belongs to the future
          Actually Playing mode. */
       app.position.clear();
+      if (window.GDBubbleEngine && current.rec) {
+        window.GDBubbleEngine.setHoleContext({
+          hole: current.hole, tee: current.rec.tee, green: current.rec.green, route: current.rec.route
+        });
+      }
       app.shot.startHole(current.hole);
       startPillDismissed = false;
       renderPosition(null);

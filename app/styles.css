@@ -53,6 +53,14 @@ body.tilt-lock #surfaceViewport { transform: perspective(900px) rotateX(32deg) s
    pixels; hidden whenever there is no fix or the fix is off-surface. */
 #gpsDot { position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%; background: #2f8fef; border: 2px solid #fff; z-index: 550; pointer-events: none; }
 
+/* The engine's bubble rings, projected onto the surface. Opacities are the
+   engine's own bubbleVisuals defaults (gd-app-core DEV_DEFAULTS). */
+#bubbleSvg { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 555; pointer-events: none; }
+#bubbleSvg.hiddenState { display: none; }
+#bubbleSvg .ringOuter { fill: none; stroke: #fff; stroke-opacity: .16; stroke-width: 1; }
+#bubbleSvg .ringMain { fill: #fff; fill-opacity: .046; stroke: #fff; stroke-opacity: .44; stroke-width: 2; }
+#bubbleSvg .ringInner { fill: #000; fill-opacity: .085; stroke: none; }
+
 /* The aim bubble: the active shot's target, draggable. While dragging, the
    tilt flattens (below) so the 2D inverse stays exact. */
 #aimBubble { position: absolute; width: 38px; height: 38px; margin: -19px 0 0 -19px; border-radius: 50%; border: 2.5px solid #ffd75e; background: rgba(255, 215, 94, .14); z-index: 560; touch-action: none; cursor: grab; }

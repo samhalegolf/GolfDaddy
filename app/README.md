@@ -34,6 +34,12 @@ or writes course data back.
 - `js/course-package.js` — GET `/api/course-package` consumer, fail-open.
 - `js/play-surface.js` — published-surface lookup (`/api/course-visuals`) and
   the mercator-image projection. Pure functions are node-requirable for tests.
+- `js/bubble-engine.js` — GENERATED (dev/generate-bubble-engine-client.js):
+  the real shot bubble engine copied verbatim from gd-app-core.js (bag, ghost
+  bag, dispersion profiles, payloads, bag-roof clamp, green-or-layup target
+  rule) plus pin-lock's route layup helpers. Never hand-edit; change the
+  engine and re-run the generator. The adapter at the bottom supplies shot
+  state and the projection seam for drawing its lat/lng rings on the surface.
 - `js/distance.js` — pure distance math: haversine, front/centre/back of green
   in metres. Node-requirable.
 - `js/position.js` — the player's position, one value one owner. Sources:
