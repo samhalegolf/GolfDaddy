@@ -183,14 +183,28 @@
 	    var hole=safe(function(){return currentPlayingHole||selectedHole||gdMappedStartHoleNumber&&gdMappedStartHoleNumber()||1;},1);
 	    return "gd_captured_hole_frame_v19_"+String(course+":h"+hole).replace(/[^a-z0-9:_-]+/gi,"_");
 	  }
+	  /* Canonical course identity, always. Same rule as the slug in
+	     gd-captured-surface-sync.js, and for the same reason its test records: a course
+	     that lands under two keys is a course whose data cannot be read back.
+
+	     The fallback chain below ends at a DISPLAY NAME - currentCourse.name, or
+	     gdActiveCourseName - and the manifest key builder preserves case, so "Akarana
+	     Golf Club" became "Akarana_Golf_Club" while everything else used
+	     "akarana-golf-club". engine.getRecord() then missed, so 18 published per-hole
+	     play surfaces sitting in course_visuals were invisible to the app and the hole
+	     fell through to "no frame". Normalising here fixes the lookup and the storage
+	     key together, because both derive from this. */
+	  function canonicalCourseKey(value){
+	    return String(value||"course").toLowerCase().trim().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"")||"course";
+	  }
 	  function surfaceCourseKey(){
-	    if(renderSurfaceOverride&&renderSurfaceOverride.courseKey)return renderSurfaceOverride.courseKey;
+	    if(renderSurfaceOverride&&renderSurfaceOverride.courseKey)return canonicalCourseKey(renderSurfaceOverride.courseKey);
 	    /* courseId first: on a stored library record .id is the composite storage
 	       key `${userId}::${courseId}`, which is a location in the store, not a
 	       course identity. Preferring .id leaked keys like
 	       "user-<playerid>::akarana-golf-club" into captured_surfaces, splitting a
 	       course's scans across a per-user key nobody else can read back. */
-	    return safe(function(){return (currentCourse&&(currentCourse.courseId||currentCourse.key||currentCourse.id||currentCourse.name))||document.body.dataset.gdActiveCourseName||"course";},"course");
+	    return safe(function(){return canonicalCourseKey((currentCourse&&(currentCourse.courseId||currentCourse.key||currentCourse.id||currentCourse.name))||document.body.dataset.gdActiveCourseName||"course");},"course");
 	  }
 	  function surfaceCourseName(){
 	    if(renderSurfaceOverride&&renderSurfaceOverride.courseName)return renderSurfaceOverride.courseName;
@@ -882,7 +896,9 @@
 	    if(m&&Array.isArray(m.tiles)&&m.originPx&&m.surfaceModel!=="captured-surface-v1")m=null;
 	    if(m&&!manifestMatchesActive(m))m=null;
 	    if(m&&Array.isArray(m.tiles)&&m.originPx){
-	      captureManifest=safe(function(){return typeof window.gdCapturedSurfaceWriteScan==="function"?window.gdCapturedSurfaceWriteScan(m,{reason:m.reason||"load",storageKey:storageKey()}):m;},m)||m;
+	      /* Loading a cached manifest is a read. Writing it back as a scan re-uploaded
+	         it on every load - see the cloud path above. */
+	      captureManifest=m;
 	      gdRegisterCoursePlayFrameManifest(captureManifest,{generatedFrom:"v19-captured-surface-cache",manifestKey:storageKey(),status:"loaded"});
 	      safe(function(){if(capturedGpsPlayActive())gdCoursePlayDebugEvent("gps-play-loaded-from-existing-frame",{reason:m.reason||"load",manifestKey:storageKey(),tileCount:(m.tiles||[]).length});});
 	      return publishCaptureManifest(captureManifest);
@@ -1315,7 +1331,11 @@
 	        tiles:[{x:0,y:0,width:width,height:height,z:null,url:cloudSurfaceSrc(asset)}],
 	        createdAt:new Date().toISOString()
 	      };
-	      manifest=safe(function(){return typeof window.gdCapturedSurfaceWriteScan==="function"?window.gdCapturedSurfaceWriteScan(manifest,{reason:manifest.reason,storageKey:storageKey()}):manifest;},manifest)||manifest;
+	      /* Deliberately NOT written back through gdCapturedSurfaceWriteScan. This
+	         manifest was built FROM a published cloud visual; registering it as a scan
+	         made the sync push it to captured_surfaces as a tile manifest, so the app
+	         kept manufacturing the legacy rows it can no longer consume. The app is a
+	         consumer - it authors nothing. */
 	      captureManifest=manifest;
 	      window.gdHoleImageCaptureManifest=manifest;
 	      window.__gdLastHoleImageCaptureManifest=manifest;
@@ -2188,8 +2208,6 @@
 		  window.gdLoadHoleImageCaptureManifest=function(){return loadCaptureManifest();};
 		  window.gdEnsureCurrentCapturedSurfaceManifest=function(reason){return ensureCurrentCaptureManifest(reason||"ensure-current");};
 		  window.gdCapturedFrameUnavailable=gdCapturedFrameUnavailable;
-		  window.gdCaptureFlattenPending=function(key){return captureFlattenPending[key]||null;};
-		  window.gdFlattenCaptureManifest=function(manifest,opts){return flattenCaptureManifest(manifest,opts);};
 		  window.gdCapturedSurfaceManifestMatchesActive=function(manifest){return manifestMatchesActive(manifest||captureManifest||window.gdHoleImageCaptureManifest||window.__gdLastHoleImageCaptureManifest||window.__gdV19CapturedHoleFrameManifest);};
 		  window.gdRenderHoleImageCamera=function(manifest){return renderCaptureManifest(manifest||loadCaptureManifest());};
 		  window.gdBeginGpsHoleSwitchTransition=gdBeginGpsHoleSwitchTransition;

@@ -65,6 +65,33 @@ test("raw underscore and capitalised forms normalise", () => {
   assert.strictEqual(slug("  Windross Farm Golf Course  "), "windross-farm-golf-course");
 });
 
+/* The camera derives its manifest key AND its published-visual lookup from
+   surfaceCourseKey(), whose fallback chain ends at a display name. Its key builder
+   preserves case, so "Akarana Golf Club" became "Akarana_Golf_Club" while the rest
+   of the app used "akarana-golf-club" - and engine.getRecord() therefore missed 18
+   published per-hole play surfaces that were sitting in course_visuals. Same defect
+   this file already covers for the sync path, one file over. */
+function cameraCourseKey() {
+  const fs = require("fs");
+  const path = require("path");
+  const src = fs.readFileSync(
+    path.join(__dirname, "..", "scripts", "inline", "gd-captured-hole-frame-camera-v19.js"), "utf8");
+  const match = src.match(/function canonicalCourseKey\(value\)\{[\s\S]*?\n\t  \}/);
+  assert.ok(match, "canonicalCourseKey must exist in the captured-frame camera");
+  // eslint-disable-next-line no-new-func
+  return new Function(match[0].replace(/\t/g, " ") + "; return canonicalCourseKey;")();
+}
+
+test("the camera normalises course keys identically to the sync path", () => {
+  const cam = cameraCourseKey();
+  const slug = courseKeySlug();
+  ["Akarana Golf Club", "Akarana_Golf_Club", "akarana-golf-club", "  Akarana Golf Club  "]
+    .forEach((form) => assert.strictEqual(cam(form), "akarana-golf-club", "camera must canonicalise " + form));
+  ["Maungakiekie_Golf_Club", "Takapuna Golf Course", "Redlands_Country_Club"]
+    .forEach((form) => assert.strictEqual(cam(form), slug(form),
+      "camera and sync must agree on " + form + " or a push and a pull disagree"));
+});
+
 test("courses differing only by suffix stay distinct", () => {
   const slug = courseKeySlug();
   /* This is why the plain slug is canonical rather than the picker's stripped
