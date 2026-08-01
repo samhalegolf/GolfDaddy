@@ -394,25 +394,44 @@
        body.bubble-dragging) so the 2D frame inverse stays exact; the camera
        holds until release, then re-frames start→target. */
     var bubble = document.getElementById("aimBubble");
+    var bubbleDragOffset = null;   // grab offset: aim screen point − finger, held for the drag
     function endBubbleDrag() {
+      bubbleDragOffset = null;
       if (!document.body.classList.contains("bubble-dragging")) return;
       document.body.classList.remove("bubble-dragging");
       renderPosition(app.position.current());
     }
     if (bubble) {
       bubble.addEventListener("pointerdown", function (e) {
-        if (!app.shot.active()) return;
-        bubble.setPointerCapture(e.pointerId);
+        var act = app.shot.active();
+        if (!act || !act.target || !activeFrame) return;
+        /* DELTA dragging: the cluster centre sits offset from the aim (aim
+           offset, forward bias, bag roof), so grabbing it must not snap the
+           aim to the finger — remember the grab offset and move the aim by
+           the drag delta. */
+        var img = document.getElementById("surfaceImage");
+        try {
+          var meta = JSON.parse(img.dataset.playSurface);
+          var px = surfaceLib.projectToSurface(meta, act.target.lat, act.target.lng);
+          if (!px) return;
+          var targetScreen = surfaceLib.transformApply(activeFrame, px);
+          bubbleDragOffset = { x: targetScreen.left - e.clientX, y: targetScreen.top - e.clientY };
+        } catch (err) { return; }
+        /* Capture keeps the drag alive when the finger outruns the hit; if it
+           is unavailable the hit re-centres under the finger every render, so
+           dragging still works — a capture failure must not kill the drag. */
+        try { bubble.setPointerCapture(e.pointerId); } catch (err) {}
         document.body.classList.add("bubble-dragging");
         e.preventDefault();
       });
       bubble.addEventListener("pointermove", function (e) {
-        if (!document.body.classList.contains("bubble-dragging") || !activeFrame) return;
+        if (!document.body.classList.contains("bubble-dragging") || !activeFrame || !bubbleDragOffset) return;
         var img = document.getElementById("surfaceImage");
         if (!img || !img.dataset.playSurface) return;
         try {
           var meta = JSON.parse(img.dataset.playSurface);
-          var px = surfaceLib.transformInvert(activeFrame, { left: e.clientX, top: e.clientY });
+          var px = surfaceLib.transformInvert(activeFrame,
+            { left: e.clientX + bubbleDragOffset.x, top: e.clientY + bubbleDragOffset.y });
           var w = Number(meta.outputDimensions.width), h = Number(meta.outputDimensions.height);
           if (px && px.x >= 0 && px.y >= 0 && px.x <= w && px.y <= h) {
             app.shot.aim(surfaceLib.latLngFromWorldPx(

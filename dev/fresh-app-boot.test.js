@@ -608,6 +608,40 @@ async function bootCheck() {
     };
   }, AKARANA_H1);
 
+  /* Dragging the bubble: pointer events on the cluster hit move the aim and
+     the frame holds mid-drag. */
+  const bubbleDrag = await page.evaluate(async () => {
+    const app = window.ClarityApp;
+    /* Back to hole 1 (the stages scenario holed out onto hole 2). */
+    await app.play.goHole(1);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    document.getElementById("headToTeeBtn").click();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const hit = document.getElementById("aimBubble");
+    const before = app.shot.active().target;
+    const rect = hit.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
+    const img = document.getElementById("surfaceImage");
+    const frameBefore = img.style.transform;
+    hit.dispatchEvent(new PointerEvent("pointerdown", { pointerId: 9, clientX: cx, clientY: cy, bubbles: true }));
+    let midDragFrameHeld = null;
+    for (let i = 1; i <= 4; i++) {
+      hit.dispatchEvent(new PointerEvent("pointermove", { pointerId: 9, clientX: cx, clientY: cy - i * 12, bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      if (i === 2) midDragFrameHeld = img.style.transform === frameBefore;
+    }
+    hit.dispatchEvent(new PointerEvent("pointerup", { pointerId: 9, clientX: cx, clientY: cy - 48, bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const after = app.shot.active().target;
+    return {
+      hitSized: rect.width >= 44 && rect.height >= 44,
+      aimMovedM: app.distance.haversineMeters(before, after),
+      midDragFrameHeld,
+      draggingCleared: !document.body.classList.contains("bubble-dragging"),
+      reframedAfter: img.style.transform !== frameBefore
+    };
+  });
+
   /* Base imagery policy: aerial only inside a licensed source's coverage —
      LINZ (keyed, NZ), NAIP (US), QLD (AU) — and the honest OSM fallback
      everywhere else, including NZ when the key never arrived. */
@@ -696,6 +730,11 @@ async function bootCheck() {
   assert.strictEqual(stages.holedOut.shots, 3, "Hole Out records the final shot");
   assert.strictEqual(stages.holedOut.hole, 2, "Hole Out advances to the next hole");
   assert.ok(stages.holedOut.activeCleared, "no active shot after holing out");
+  assert.ok(bubbleDrag.hitSized, "the drag hit covers the cluster (44px minimum)");
+  assert.ok(bubbleDrag.aimMovedM > 5, "dragging the bubble moves the aim, got " + bubbleDrag.aimMovedM.toFixed(1) + "m");
+  assert.ok(bubbleDrag.midDragFrameHeld, "the camera holds mid-drag");
+  assert.ok(bubbleDrag.draggingCleared, "release clears the dragging state");
+  assert.ok(bubbleDrag.reframedAfter, "release re-frames start→target");
   assert.strictEqual(basemap.keylessNz, "osm", "no LINZ key → OSM even in NZ");
   assert.strictEqual(basemap.nz, "linz", "keyed NZ centre → LINZ aerial");
   assert.strictEqual(basemap.pebbleBeach, "naip", "US centre → NAIP aerial");
