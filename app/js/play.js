@@ -296,14 +296,30 @@
         svg.innerHTML = parts.join("");
       }
     }
-    /* The drag handle rides the AIM POINT — the aim line's endpoint — not the
-       offset cluster centre. Dragging it moves the aim; the engine re-offsets
-       the cluster around it. */
+    /* The drag hit covers the CLUSTER: grab the bubble anywhere to drag the
+       aim. Sized to the projected main ring's bounding box (44px minimum for
+       fingers), centred on the cluster centre. */
     var bubble = document.getElementById("aimBubble");
     if (bubble) {
-      var at = act && act.target ? project(act.target) : null;
-      bubble.classList.toggle("hiddenState", !at);
-      if (at) { bubble.style.left = at.left + "px"; bubble.style.top = at.top + "px"; }
+      var hit = null;
+      if (model && centerScreen) {
+        var mainPts = model.rings.main.map(project).filter(Boolean);
+        if (mainPts.length > 8) {
+          var minL = Infinity, maxL = -Infinity, minT = Infinity, maxT = -Infinity;
+          mainPts.forEach(function (p) {
+            if (p.left < minL) minL = p.left; if (p.left > maxL) maxL = p.left;
+            if (p.top < minT) minT = p.top; if (p.top > maxT) maxT = p.top;
+          });
+          hit = { w: Math.max(44, maxL - minL), h: Math.max(44, maxT - minT) };
+        }
+      }
+      bubble.classList.toggle("hiddenState", !hit);
+      if (hit) {
+        bubble.style.left = centerScreen.left + "px";
+        bubble.style.top = centerScreen.top + "px";
+        bubble.style.width = hit.w + "px";
+        bubble.style.height = hit.h + "px";
+      }
     }
     var ring = document.getElementById("greenRing");
     if (ring) {
