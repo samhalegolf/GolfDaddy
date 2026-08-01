@@ -124,7 +124,17 @@
     if (pos) renderPosition(pos);
   }
 
-  function renderDistances(fix) {
+  /* Club codes read tight in the shot row (the same 2-3 char shorthand the
+     legacy shot card used) — everything in the bag's club list is already
+     short except "Driver". */
+  function compactClub(label) {
+    var raw = String(label || "").trim();
+    if (!raw) return "GPS";
+    if (/^driver$/i.test(raw)) return "DR";
+    return raw.length <= 3 ? raw.toUpperCase() : raw.slice(0, 3).toUpperCase();
+  }
+
+  function renderDistances(fix, model) {
     var bar = document.getElementById("distanceBar");
     if (!bar) return;
     var rec = current.rec;
@@ -134,17 +144,24 @@
     document.getElementById("distFront").textContent = d.front === null ? "–" : d.front;
     document.getElementById("distCentre").textContent = d.centre;
     document.getElementById("distBack").textContent = d.back === null ? "–" : d.back;
-    /* Aimed off the green: the shot number (start→target) and what remains
-       (target→green). Aimed at the green, F/C/B already IS the shot. */
+    /* Aimed off the green: club/carry for this shot, the distance to where it
+       actually lands (the engine's render centre, not the raw aim point —
+       aim-offset and bag-roof already moved it), and what remains from there
+       to the green. Aimed at the green, F/C/B already IS the shot. */
     var shotRow = document.getElementById("shotRow");
     if (!shotRow) return;
     var act = app.shot && app.shot.active();
     var show = false;
     if (act && act.target) {
-      var toTarget = app.distance.haversineMeters(fix, act.target);
-      var remaining = app.distance.haversineMeters(act.target, rec.green);
+      var landing = (model && model.center) || act.target;
+      var toTarget = app.distance.haversineMeters(fix, landing);
+      var remaining = app.distance.haversineMeters(landing, rec.green);
       if (Number.isFinite(toTarget) && Number.isFinite(remaining) && remaining > 3) {
+        var payload = model && model.payload;
+        document.getElementById("shotClub").textContent = payload ? compactClub(payload.club) : "–";
         document.getElementById("shotDist").textContent = Math.round(toTarget);
+        document.getElementById("shotCarry").textContent = payload && Number.isFinite(Number(payload.baseCarry))
+          ? Math.round(Number(payload.baseCarry)) : "–";
         document.getElementById("remDist").textContent = Math.round(remaining);
         show = true;
       }
@@ -193,14 +210,19 @@
       dot.style.left = onSurface.left + "px";
       dot.style.top = onSurface.top + "px";
     }
-    renderShotOverlays(pos);
-    renderDistances(pos);
+    /* Computed once here, independent of the surface projection, so the shot
+       card's club/total/carry work on the live-map fallback too (rule 2) —
+       only the ring/aim-line drawing below needs a published surface. */
+    var act = app.shot && app.shot.active();
+    var model = act && window.GDBubbleEngine ? window.GDBubbleEngine.renderModel() : null;
+    renderShotOverlays(pos, model);
+    renderDistances(pos, model);
   }
 
   /* The aim bubble at the active shot's target, and the green ring in green
      focus — both live in the tilt viewport, positioned with the same frame
      transform as the dot, so all three project together. */
-  function renderShotOverlays(pos) {
+  function renderShotOverlays(pos, model) {
     var img = document.getElementById("surfaceImage");
     var published = document.body.classList.contains("surface-published");
     var meta = null;
@@ -213,10 +235,11 @@
       return px ? surfaceLib.transformApply(activeFrame, px) : null;
     }
     var act = app.shot && app.shot.active();
-    /* The engine's cluster rings, computed in lat/lng, projected here. The
-       drag handle sits on the engine's render centre (aim offset and bag
-       roof included), falling back to the raw target off-surface. */
-    var model = act && meta && window.GDBubbleEngine ? window.GDBubbleEngine.renderModel() : null;
+    /* The engine's cluster rings, computed in lat/lng, projected here (the
+       model itself came from renderPosition; project() no-ops without a
+       published surface, so rings only draw when one exists). The drag
+       handle sits on the engine's render centre (aim offset and bag roof
+       included), falling back to the raw target off-surface. */
     var svg = document.getElementById("bubbleSvg");
     if (svg) {
       var parts = [];
