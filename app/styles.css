@@ -135,6 +135,15 @@ body[data-frame-stage="zoom"] #holeOutBtn { display: block; }
 #startPill .headToTee { background: #1fd36d; color: #06110b; }
 #startPill button:active { transform: scale(.985); }
 
+/* Tool rail tab + panel — ported from the old app's #gdToolRailTab /
+   .rightRail (same top-right spot, same tap-to-drop-down behaviour), minus
+   its poller-driven sync; a hiddenState toggle is enough here. */
+#toolRailTab { position: absolute; top: calc(env(safe-area-inset-top, 0px) + 64px); right: 12px; z-index: 620; width: 44px; height: 44px; border: 0; border-radius: 14px; padding: 0; display: grid; place-items: center; background: rgba(13, 27, 18, .82); box-shadow: 0 12px 26px rgba(0, 0, 0, .3); }
+#toolRailTab img { width: 26px; height: 26px; display: block; object-fit: contain; }
+#toolRailTab[aria-expanded="true"] { background: linear-gradient(180deg, rgba(31, 211, 109, .34), rgba(4, 12, 8, .78)); box-shadow: 0 0 0 1px rgba(31, 211, 109, .18), 0 16px 34px rgba(0, 0, 0, .34); }
+#toolRail { position: absolute; top: calc(env(safe-area-inset-top, 0px) + 112px); right: 12px; z-index: 615; display: flex; flex-direction: column; gap: 8px; min-width: 44px; min-height: 44px; padding: 6px; border-radius: 14px; background: rgba(3, 8, 6, .82); box-shadow: 0 18px 38px rgba(0, 0, 0, .46); }
+#toolRail.hiddenState { display: none; }
+
 /* Front / centre / back of green, metres. Hidden without a fix or a green.
    Bottom-LEFT like the old app's #gdV62Distance — centre-bottom sits exactly
    on the tee guide box, and a bar there hides the player's dot at the tee
