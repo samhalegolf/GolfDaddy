@@ -63,7 +63,7 @@ body.tilt-lock #surfaceViewport { transform: perspective(900px) rotateX(32deg) s
 /* The aim ray and the layup middle guide — stroke specs from the old
    gdRenderAimLine / gdRenderMiddleDistanceGuide. */
 #bubbleSvg .aimLine { fill: none; stroke: #fff; stroke-opacity: .78; stroke-width: 3.25; stroke-dasharray: 8 10; stroke-linecap: round; stroke-linejoin: round; }
-#bubbleSvg .middleGuide { fill: none; stroke: #fff; stroke-opacity: .34; stroke-width: 1.45; stroke-dasharray: 1 9; stroke-linecap: round; stroke-linejoin: round; }
+#bubbleSvg .middleGuide { fill: none; stroke: #fff; stroke-opacity: .52; stroke-width: 1.8; stroke-dasharray: 2 8; stroke-linecap: round; stroke-linejoin: round; }
 #bubbleSvg .middleGuideLabel { fill: #fff; opacity: .9; font: 700 11px -apple-system, system-ui, sans-serif; text-anchor: middle; paint-order: stroke; stroke: rgba(5, 9, 7, .72); stroke-width: 3px; }
 /* The fairway line + green reference (layup context specs from the old
    gdAddMappedReferenceGeometry). */

@@ -229,25 +229,21 @@
         }).filter(Boolean);
         if (ringPaths.length === 3) {
           var vw = window.innerWidth, vh = window.innerHeight;
-          /* The aim ray: player, through the bubble centre, on to the screen
-             edge (8px shy, at least 40px past the bubble) — the old contract,
-             computed fresh in screen space every pass so it moves exactly as
-             smoothly as the rings do. */
+          /* The aim line: player to the AIM TARGET. The bubble is NOT on this
+             line — the engine offsets the cluster centre off the aim by the
+             payload's aimOffsetM (face-alignment tendency), forward bias and
+             bag roof, so the line ends at the aim point and the cluster
+             hangs beside it. Computed fresh in screen space every pass so it
+             moves exactly as smoothly as the rings do. */
           var playerScreen = pos ? project(pos) : null;
-          if (playerScreen) {
-            var dx = centerScreen.left - playerScreen.left, dy = centerScreen.top - playerScreen.top;
+          var targetScreen = act && act.target ? project(act.target) : null;
+          if (playerScreen && targetScreen) {
+            var dx = targetScreen.left - playerScreen.left, dy = targetScreen.top - playerScreen.top;
             var len = Math.hypot(dx, dy);
-            if (len > 1) {
+            if (len > 12) {
               var ux = dx / len, uy = dy / len;
-              var limits = [
-                ux > 0 ? (vw - centerScreen.left) / ux : Infinity,
-                ux < 0 ? (0 - centerScreen.left) / ux : Infinity,
-                uy > 0 ? (vh - centerScreen.top) / uy : Infinity,
-                uy < 0 ? (0 - centerScreen.top) / uy : Infinity
-              ].filter(function (n) { return Number.isFinite(n) && n > 0; });
-              var past = limits.length ? Math.max(40, Math.min.apply(null, limits) - 8) : 40;
               parts.push('<path class="aimLine" d="M' + playerScreen.left.toFixed(1) + "," + playerScreen.top.toFixed(1)
-                + "L" + (centerScreen.left + ux * past).toFixed(1) + "," + (centerScreen.top + uy * past).toFixed(1) + '"/>');
+                + "L" + (playerScreen.left + ux * (len - 6)).toFixed(1) + "," + (playerScreen.top + uy * (len - 6)).toFixed(1) + '"/>');
             }
           }
           /* The middle guide: bubble → green, laying up only (the green sits
@@ -300,9 +296,12 @@
         svg.innerHTML = parts.join("");
       }
     }
+    /* The drag handle rides the AIM POINT — the aim line's endpoint — not the
+       offset cluster centre. Dragging it moves the aim; the engine re-offsets
+       the cluster around it. */
     var bubble = document.getElementById("aimBubble");
     if (bubble) {
-      var at = project(model ? model.center : act && act.target);
+      var at = act && act.target ? project(act.target) : null;
       bubble.classList.toggle("hiddenState", !at);
       if (at) { bubble.style.left = at.left + "px"; bubble.style.top = at.top + "px"; }
     }
