@@ -456,7 +456,9 @@ async function bootCheck() {
       distanceBarShown: !document.getElementById("distanceBar").classList.contains("hiddenState"),
       sourceChipHidden: document.getElementById("surfaceSource").classList.contains("hiddenState"),
       distFront: Number(document.getElementById("distFront").textContent),
-      distCentre: Number(document.getElementById("distCentre").textContent),
+      /* Centre no longer renders on the card (front/back cover it) — the
+         underlying math still runs, so check it straight from the module. */
+      distCentre: Math.round(app.distance.haversineMeters(app.position.current(), h1.green)),
       distBack: Number(document.getElementById("distBack").textContent)
     };
   }, AKARANA_H1);
@@ -468,7 +470,8 @@ async function bootCheck() {
     const app = window.ClarityApp;
     /* Same hole geometry shifted ~110km south — far outside the adopt radius. */
     const shift = (p) => ({ lat: p.lat - 1, lng: p.lng });
-    const pkg = { holes: [{ holeNumber: 1, tee: shift(h1.tee), green: shift(h1.green), greenShape: h1.greenShape.map(shift), route: [] }] };
+    const green = shift(h1.green);
+    const pkg = { holes: [{ holeNumber: 1, tee: shift(h1.tee), green, greenShape: h1.greenShape.map(shift), route: [] }] };
     await app.play.start("remote-test-course", pkg, null);
     await new Promise((resolve) => setTimeout(resolve, 900));   // let any live fix arrive
     const preFrame = {
@@ -480,14 +483,15 @@ async function bootCheck() {
     await new Promise((resolve) => setTimeout(resolve, 60));
     const atTee = {
       source: app.position.current() && app.position.current().source,
-      centre: Number(document.getElementById("distCentre").textContent),
+      /* Centre no longer renders on the card — check the module directly. */
+      centre: Math.round(app.distance.haversineMeters(app.position.current(), green)),
       pillShown: !document.getElementById("startPill").classList.contains("hiddenState")
     };
     /* Tap 100m up the fairway from the tee (~0.0009° of latitude). */
     app.position.set({ lat: shift(h1.tee).lat - 0.0009, lng: shift(h1.tee).lng }, "tap");
     const afterTap = {
       source: app.position.current().source,
-      centre: Number(document.getElementById("distCentre").textContent)
+      centre: Math.round(app.distance.haversineMeters(app.position.current(), green))
     };
     return { preFrame, atTee, afterTap };
   }, AKARANA_H1);
@@ -583,7 +587,6 @@ async function bootCheck() {
     const aimed = {
       shotRowShown: !document.getElementById("shotRow").classList.contains("hiddenState"),
       shotDist: Number(document.getElementById("shotDist").textContent),
-      remDist: Number(document.getElementById("remDist").textContent),
       bubbleShown: !document.getElementById("aimBubble").classList.contains("hiddenState")
     };
     app.position.set({ lat: green.lat - 0.0002, lng: green.lng }, "tap");
@@ -723,7 +726,6 @@ async function bootCheck() {
   assert.ok(stages.aimed.shotRowShown, "aiming off the green shows the shot row");
   assert.ok(stages.aimed.shotDist > 80 && stages.aimed.shotDist < 140,
     "shot distance must be the start→target number, got " + stages.aimed.shotDist);
-  assert.ok(stages.aimed.remDist > 80, "remaining must be target→green, got " + stages.aimed.remDist);
   assert.ok(stages.greenFocus.ringShown, "green focus shows the green ring");
   assert.ok(stages.greenFocus.holeOutVisible, "green focus offers Hole Out");
   assert.strictEqual(stages.greenFocus.shotsRecorded, 2, "two shots recorded before holing out");

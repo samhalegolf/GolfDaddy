@@ -59,11 +59,14 @@
     <button id="headToTeeBtn" type="button" class="headToTee">Head To the Tee</button>
   </div>
   <div id="distanceBar" class="hiddenState">
-    <div id="shotRow" class="hiddenState"><span class="distLabel">CLUB</span><span id="shotClub">–</span><span class="distLabel">SHOT</span><span id="shotDist">–</span><span class="distLabel">CARRY</span><span id="shotCarry">–</span><span class="distLabel">REM</span><span id="remDist">–</span></div>
+    <div id="shotRow" class="hiddenState">
+      <div class="shotLine"><span id="clubLabel" class="distLabel">CLUB</span><span id="shotClub">–</span></div>
+      <div class="dist distMain shotMain"><span id="shotDist">–</span></div>
+      <div class="shotCarryLine"><span id="carryLabel" class="distLabel">CARRY</span><span id="shotCarry">–</span></div>
+    </div>
     <div class="fcbRow">
-      <div class="dist"><span class="distLabel">F</span><span id="distFront">–</span></div>
-      <div class="dist distMain"><span class="distLabel">C</span><span id="distCentre">–</span></div>
-      <div class="dist"><span class="distLabel">B</span><span id="distBack">–</span></div>
+      <div class="dist"><span id="frontLabel" class="distLabel">F</span><span id="distFront">–</span></div>
+      <div class="dist"><span id="backLabel" class="distLabel">B</span><span id="distBack">–</span></div>
     </div>
   </div>
 </section>

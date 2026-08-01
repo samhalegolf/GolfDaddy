@@ -142,12 +142,14 @@
     bar.classList.toggle("hiddenState", !d || d.centre === null);
     if (!d || d.centre === null) return;
     document.getElementById("distFront").textContent = d.front === null ? "–" : d.front;
-    document.getElementById("distCentre").textContent = d.centre;
     document.getElementById("distBack").textContent = d.back === null ? "–" : d.back;
-    /* Aimed off the green: club/carry for this shot, the distance to where it
-       actually lands (the engine's render centre, not the raw aim point —
-       aim-offset and bag-roof already moved it), and what remains from there
-       to the green. Aimed at the green, F/C/B already IS the shot. */
+    /* Aimed off the green: club/total/carry for this shot — total is the
+       distance to where it actually lands (the engine's render centre, not
+       the raw aim point — aim-offset and bag-roof already moved it). Green
+       centre is dropped (front/back already frame the green); what remains
+       to the green renders on the middle guide line itself (renderShotOverlays'
+       "Green Xm" label), not repeated here. Aimed at the green, F/B already
+       IS the shot. */
     var shotRow = document.getElementById("shotRow");
     if (!shotRow) return;
     var act = app.shot && app.shot.active();
@@ -162,7 +164,6 @@
         document.getElementById("shotDist").textContent = Math.round(toTarget);
         document.getElementById("shotCarry").textContent = payload && Number.isFinite(Number(payload.baseCarry))
           ? Math.round(Number(payload.baseCarry)) : "–";
-        document.getElementById("remDist").textContent = Math.round(remaining);
         show = true;
       }
     }

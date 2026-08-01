@@ -85,9 +85,39 @@ body.bubble-dragging #surfaceViewport { transform: none !important; transition: 
 #holeOutBtn { display: none; position: absolute; right: 16px; bottom: calc(env(safe-area-inset-bottom, 0px) + 40px); z-index: 640; border: 0; border-radius: 999px; padding: 12px 18px; background: #1fd36d; color: #06110b; font-size: 14px; font-weight: 950; }
 body[data-frame-stage="zoom"] #holeOutBtn { display: block; }
 
-#shotRow { display: flex; gap: 8px; align-items: baseline; justify-content: center; font-size: 15px; font-weight: 700; }
 #shotRow.hiddenState { display: none; }
-.fcbRow { display: flex; gap: 10px; align-items: baseline; }
+#shotRow .shotLine { font-size: 13px; font-weight: 700; opacity: .85; }
+#shotRow .shotLine .distLabel { font-size: 9px; }
+#shotRow .shotCarryLine { font-size: 9px; font-weight: 700; opacity: .78; }
+#shotRow .shotCarryLine .distLabel { font-size: 8px; }
+
+/* Hand-placed layout: every label/value below was dragged into position with
+   the box-layout.js editor and baked in here as its permanent spot, replacing
+   the flex flow that used to arrange them. #distanceBar carries an explicit
+   size because every real child is now position:absolute (out of flow) —
+   without it the card would collapse to nothing. */
+#distanceBar { width: 120px; height: 142px; padding: 0; }
+#distanceBar #clubLabel { position: absolute; left: 8px; top: 41px; }
+#distanceBar #shotClub { position: absolute; left: 11px; top: 63px; }
+#distanceBar #shotDist { position: absolute; left: 69px; top: 58px; }
+#distanceBar #carryLabel { position: absolute; left: 50px; top: 89px; }
+#distanceBar #shotCarry { position: absolute; left: 86px; top: 89px; }
+#distanceBar #frontLabel { position: absolute; left: 27px; top: 118px; }
+#distanceBar #distFront { position: absolute; left: 38px; top: 8px; }
+#distanceBar #backLabel { position: absolute; left: 25px; top: 8px; }
+#distanceBar #distBack { position: absolute; left: 41px; top: 116px; }
+
+/* Free-position layout (box-layout.js): every label/value is its own box —
+   the hand-placed rules above set WHERE it starts, this is what lets it still
+   be dragged/resized further from there without reflowing its neighbours. */
+#distanceBar [data-move] { position: relative; display: inline-block; }
+#distanceBar.layout-editing [data-move] { outline: 1px dashed rgba(255, 255, 255, .45); border-radius: 3px; cursor: grab; touch-action: none; }
+#distanceBar.layout-editing [data-move]:active { cursor: grabbing; }
+.boxHandle { display: none; position: absolute; right: -8px; bottom: -8px; width: 8px; height: 8px; border-radius: 50%; background: transparent; border: 1.5px solid rgba(255, 255, 255, .55); touch-action: none; }
+#distanceBar.layout-editing [data-move]:hover .boxHandle,
+#distanceBar.layout-editing [data-move]:active .boxHandle { display: block; }
+#cardEditToggle { position: absolute; top: -10px; right: -10px; width: 22px; height: 22px; border-radius: 50%; border: 0; background: rgba(255, 255, 255, .14); color: #f2f7f2; font-size: 12px; line-height: 22px; padding: 0; z-index: 2; }
+#distanceBar.layout-editing #cardEditToggle { background: #1fd36d; color: #06110b; }
 
 /* Provenance chip: what image is on screen and where it came from. Tapping it
    opens the full metadata panel. */

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Shot card preview</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- Dev-only: the shot card on its own, pre-filled with sample numbers, no
+     course/GPS/backend required. Not linked from index.html. -->
+<div id="distanceBar">
+  <div id="shotRow">
+    <div class="shotLine"><span id="clubLabel" class="distLabel" data-move>CLUB</span><span id="shotClub" data-move>DR</span></div>
+    <div class="dist distMain shotMain"><span id="shotDist" data-move>224</span></div>
+    <div class="shotCarryLine"><span id="carryLabel" class="distLabel" data-move>CARRY</span><span id="shotCarry" data-move>230</span></div>
+  </div>
+  <div class="fcbRow">
+    <div class="dist"><span id="frontLabel" class="distLabel" data-move>F</span><span id="distFront" data-move>381</span></div>
+    <div class="dist"><span id="backLabel" class="distLabel" data-move>B</span><span id="distBack" data-move>410</span></div>
+  </div>
+  <button id="cardEditToggle" type="button" aria-label="Edit shot card layout">&#9881;</button>
+</div>
+
+<script src="js/box-layout.js"></script>
+</body>
+</html>
