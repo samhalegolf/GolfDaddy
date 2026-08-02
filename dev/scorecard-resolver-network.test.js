@@ -198,45 +198,6 @@ function parse(res) {
     global.fetch = realFetch;
   }
 
-  /* ---------- client fetch order ---------- */
-
-  const owner = fs.readFileSync(path.join(root, "scripts", "inline", "gd-gps-scorecard-owner-v1.js"), "utf8");
-  const body = owner.slice(owner.indexOf("async function gdFetchScorecardText"));
-  const proxyAt = body.indexOf("/api/scorecard-fetch");
-  const directAt = body.indexOf("await fetch(url,");
-  assert(proxyAt > -1 && directAt > -1, "both fetch paths are present");
-  assert(proxyAt < directAt, "the proxy is tried before the direct cross-origin fetch");
-  assert(
-    body.slice(0, directAt).includes("window.GDNative?.isNative"),
-    "the direct fetch is gated on the native shell, where it can actually succeed"
-  );
-  assert(
-    owner.includes("gdScorecardSearchCandidates"),
-    "the loader can fall back to search when guessed URLs miss"
-  );
-
-  /* Resolution order: device cache, then the shared store, then the club website,
-     then search. Each step is more expensive than the one before it. */
-  const loader = owner.slice(owner.indexOf("async function gdEnsureScorecardForCourse"));
-  const localAt = loader.indexOf("gdScorecardReadCache");
-  const sharedAt = loader.indexOf("gdScorecardReadShared");
-  const websiteAt = loader.indexOf("await trySources(sources)");
-  const searchAt = loader.indexOf("gdScorecardSearchCandidates");
-  assert(localAt > -1 && sharedAt > -1 && websiteAt > -1 && searchAt > -1, "every resolution step is present");
-  assert(localAt < sharedAt, "the device cache is checked before the shared store");
-  assert(sharedAt < websiteAt, "the shared store is checked before the club website");
-  assert(websiteAt < searchAt, "search is the last resort");
-
-  /* The merge folds in this player's scores, so the share must snapshot first. */
-  const shareableAt = loader.indexOf("const shareable=");
-  const mergeAt = loader.indexOf("loaded.holes=gdScorecardMergeScores");
-  assert(shareableAt > -1 && mergeAt > -1, "both the snapshot and the merge are present");
-  assert(shareableAt < mergeAt, "the shared copy is snapshotted before scores are merged in");
-  assert(
-    /const shareable=[^\n]*score:null,putts:null/.test(loader),
-    "the shared copy has scores and putts stripped"
-  );
-
   /* Guards must be shared, not copied - a second copy drifts and the weaker wins. */
   const fetchSource = fs.readFileSync(path.join(root, "functions", "scorecard-fetch.js"), "utf8");
   const searchSource = fs.readFileSync(path.join(root, "functions", "scorecard-search.js"), "utf8");

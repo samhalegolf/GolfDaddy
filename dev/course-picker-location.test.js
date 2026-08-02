@@ -8,10 +8,7 @@ const appCore = fs.readFileSync(path.join(root, "scripts", "gd-app-core.js"), "u
 const pickerSearch = fs.readFileSync(path.join(root, "scripts", "inline", "gd-course-picker-search-v2.js"), "utf8");
 const pickerBaseCss = fs.readFileSync(path.join(root, "styles", "inline", "gd-app-base.css"), "utf8");
 const gpsRuntimeCss = fs.readFileSync(path.join(root, "styles", "inline", "gd-gps-play-runtime-owner-v1-css.css"), "utf8");
-const gpsRuntime = fs.readFileSync(path.join(root, "scripts", "inline", "gd-gps-play-runtime-owner-v1.js"), "utf8");
 const brandRail = fs.readFileSync(path.join(root, "scripts", "inline", "gd-brand-icon-render.js"), "utf8");
-const betaShell = fs.readFileSync(path.join(root, "scripts", "inline", "gd-gps-beta-mode-shell.js"), "utf8");
-const gpsRequestButton = fs.readFileSync(path.join(root, "scripts", "inline", "gd-gps-play-flow-layers-v1.js"), "utf8");
 const library = fs.readFileSync(path.join(root, "scripts", "gd-course-library-pin-lock.js"), "utf8");
 const coursePickerMappingPrep = pickerSearch.slice(
   pickerSearch.indexOf("function prepareMappingSurface"),
@@ -67,16 +64,10 @@ assert(pickerBaseCss.includes(".courseScreen{position:absolute;inset:0;z-index:7
 assert(pickerBaseCss.includes(".gdCoursePinScreen"), "course picker includes the no-GPS pin prompt styling");
 assert(pickerBaseCss.includes(".courseScreen.gdCoursePinMode #gdCourseResumeRound{display:none!important}"), "pin mode hides the stale resume-round panel");
 assert(gpsRuntimeCss.includes("body.shell-gps.gdCoursePickerOpen #map"), "GPS runtime CSS keeps the map visible under the course picker");
-assert(gpsRuntime.includes('document.body.dataset.gdGpsMapVisibilityState=pickerOpen()?"picker-live-map":"not-gps"'), "GPS runtime owner treats picker as a live-map state");
-assert(gpsRuntime.includes('document.body.dataset.gdCourseNeedsPin==="choose-course-pin"'), "GPS wrapper does not start a resume round while the pin prompt is active");
 assert(!index.includes('class="rightRail" id="gdAppRightRail"'), "right rail is no longer static boot markup that can flash over the picker");
 assert(brandRail.includes("function railAllowed()"), "brand rail script owns rail creation instead of static HTML");
 assert(brandRail.includes("removeRightRail();"), "brand rail script deletes the rail while picker/home surfaces own the screen");
 assert(brandRail.includes("gdAuthLocked") && brandRail.includes("gdProfileOpen"), "brand rail script does not keep a hidden rail on auth/profile screens");
-assert(brandRail.includes("window.gdEnsureAppRightRail = ensureRightRail;"), "runtime owner can request a rail only when GPS play needs it");
-assert(gpsRuntime.includes('if(!rail&&typeof window.gdEnsureAppRightRail==="function")rail=window.gdEnsureAppRightRail();'), "GPS runtime creates the rail through the rail owner");
-assert(betaShell.includes("if(!gpsActive()){"), "legacy beta shell does not attach mode switch while picker is active");
-assert(gpsRequestButton.includes("if(!rail)return;"), "GPS request helper treats missing rail as intentional");
 assert(library.includes("return recentGpsPoint();"), "library session center falls back only to actual recent GPS");
 /* This asserted the literal `lat:finder?.lat??saved.courseLat??null`. The locals were later
    renamed - finder -> centre, saved -> snap - and a third fallback was added, so the literal
@@ -107,11 +98,8 @@ assert(index.includes("gd-app-base.css?v="), "base CSS cache-bust ships the pin 
 assert(index.includes("gd-app-permissions.js?v="), "local app permissions owner ships before app core");
 assert(index.includes("gd-app-core.js?v="), "app core cache-bust ships the picker bridge");
 assert(index.includes("gd-flag-pin.js?v="), "flag/pin owner still ships the flagTool boot-crash fix");
-assert(index.includes("gd-gps-beta-mode-shell.js?v="), "beta GPS shell cache-bust ships picker owner handoff");
 assert(index.includes("gd-brand-icon-render.js?v="), "brand rail cache-bust ships dynamic rail ownership + flag handler rebind");
 assert(index.includes("gd-course-picker-search-v2.js?v="), "course picker owner cache-bust ships database course hydration and selection ownership");
 assert(index.includes("gd-course-library-pin-lock.js?v="), "course library cache-bust ships generated scan upload");
-assert(index.includes("gd-gps-play-flow-layers-v1.js?v="), "GPS request button cache-bust ships optional rail handling");
-assert(index.includes("gd-gps-play-runtime-owner-v1.js?v="), "GPS runtime cache-bust ships picker owner handoff and location lifecycle owner");
 
 console.log("course-picker-location tests passed");

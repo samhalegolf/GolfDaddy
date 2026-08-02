@@ -11,7 +11,6 @@
   var ENDPOINT = "/api/scorecard-store";
   var TIMEOUT_MS = 4000;
   var STORE_KEY = "clarity:scorecard:v1";
-  var HOLE_COUNT = 18;
 
   var parByHole = {};   // {1: 4, 2: 3, ...} — from the cache, or blank/editable
   var courseKey = null;
@@ -78,10 +77,19 @@
     return { value: sum, relative: relative };
   }
 
+  function holesToRender() {
+    var nines = app.play && app.play.state().nines;
+    if (nines) return nines.holesInPlay;
+    var out = [];
+    for (var hole = 1; hole <= 18; hole++) out.push(hole);
+    return out;
+  }
+
   function render() {
     var totalEl = document.getElementById("scoreTotal");
     var list = document.getElementById("scoreList");
     if (!list) return;
+    renderNinePicker();
     var t = total();
     if (totalEl) {
       totalEl.textContent = t
@@ -91,9 +99,45 @@
     var strokes = courseScores();
     var currentHole = (app.play && app.play.state().hole) || 0;
     list.textContent = "";
-    for (var hole = 1; hole <= HOLE_COUNT; hole++) {
+    holesToRender().forEach(function (hole) {
       list.appendChild(renderRow(hole, strokes[hole] || 0, hole === currentHole));
+    });
+  }
+
+  /* Only courses with more than two nines (e.g. a 27-hole club) get a
+     picker — the common two-nine course has nothing to choose and
+     app.play.state().nines is null for it. */
+  function renderNinePicker() {
+    var row = document.getElementById("ninePicker");
+    if (!row) return;
+    var nines = app.play && app.play.state().nines;
+    if (!nines || nines.available.length <= 2) {
+      row.classList.add("hiddenState");
+      row.textContent = "";
+      return;
     }
+    row.classList.remove("hiddenState");
+    row.textContent = "";
+    nines.available.forEach(function (nine) {
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "nineBtn" + (nines.selected.indexOf(nine.id) !== -1 ? " active" : "");
+      btn.textContent = nine.label;
+      btn.addEventListener("click", function () {
+        var current = nines.selected;
+        var next;
+        if (current.indexOf(nine.id) !== -1) {
+          if (current.length <= 1) return;   // keep at least one selected
+          next = current.filter(function (id) { return id !== nine.id; });
+        } else {
+          next = current.length >= 2 ? [current[1], nine.id] : current.concat([nine.id]);
+        }
+        if (next.length !== 2) return;
+        app.play.setNineSelection(next);
+        render();
+      });
+      row.appendChild(btn);
+    });
   }
 
   function renderRow(hole, strokes, isCurrent) {
