@@ -18,7 +18,7 @@
   var positionMarker = null;
   var positionWired = false;
   var transitionToken = 0;
-  var current = { courseKey: null, pkg: null, hole: 0, rec: null };
+  var current = { courseKey: null, pkg: null, hole: 0, rec: null, nines: null };
   var store = null;
   var viewLocked = false;   // Lock/Unlock: freezes map gestures + holds the surface frame
 
@@ -624,7 +624,7 @@
     var holeOut = document.getElementById("holeOutBtn");
     if (holeOut) holeOut.addEventListener("click", function () {
       app.shot.holeOut(app.position.current());
-      app.play.goHole(Math.min(18, current.hole + 1));
+      app.play.nextHole();
     });
     /* Shot End: "this is where that shot finished" using the freshest fix
        available — the freshest device GPS fix if there is one, else the
@@ -866,14 +866,15 @@
       var lat = Number(centre && centre.lat), lng = Number(centre && centre.lng);
       current = {
         courseKey: app.courseKey(courseKey), pkg: pkg || null, hole: 0, rec: null,
-        centre: Number.isFinite(lat) && Number.isFinite(lng) ? { lat: lat, lng: lng } : null
+        centre: Number.isFinite(lat) && Number.isFinite(lng) ? { lat: lat, lng: lng } : null,
+        nines: app.nines ? app.nines.forPackage(app.courseKey(courseKey), pkg) : null
       };
       wirePosition();
       app.shot.startRound();
       if (app.pin) app.pin.startRound();
       if (app.scorecard) app.scorecard.setCourse(current.courseKey);
       if (app.gps) app.gps.start();
-      await this.goHole(1);
+      await this.goHole(current.nines ? current.nines.holesInPlay[0] : 1);
     },
     async goHole(hole) {
       var token = ++transitionToken;
@@ -927,9 +928,38 @@
       if (objectLayer) { objectLayer.remove(); objectLayer = null; }
       if (positionMarker) { positionMarker.remove(); positionMarker = null; }
       if (pinMapMarker) { pinMapMarker.remove(); pinMapMarker = null; }
-      current = { courseKey: null, pkg: null, hole: 0, rec: null, centre: null };
+      current = { courseKey: null, pkg: null, hole: 0, rec: null, nines: null, centre: null };
     },
-    state: function () { return { courseKey: current.courseKey, hole: current.hole }; },
+    state: function () { return { courseKey: current.courseKey, hole: current.hole, nines: current.nines }; },
+    /* Steps through the selected nines' holes in order when the course has
+       more than two; otherwise the plain 1..18 sequence every course used
+       to have. */
+    nextHole: function () {
+      var list = current.nines && current.nines.holesInPlay;
+      if (list) {
+        var idx = list.indexOf(current.hole);
+        return this.goHole(idx >= 0 && idx < list.length - 1 ? list[idx + 1] : current.hole);
+      }
+      return this.goHole(Math.min(18, current.hole + 1));
+    },
+    prevHole: function () {
+      var list = current.nines && current.nines.holesInPlay;
+      if (list) {
+        var idx = list.indexOf(current.hole);
+        return this.goHole(idx > 0 ? list[idx - 1] : current.hole);
+      }
+      return this.goHole(Math.max(1, current.hole - 1));
+    },
+    /* Called from the scorecard's nine picker. Jumps to the new pairing's
+       first hole only if the current hole fell outside it. */
+    setNineSelection: function (ids) {
+      if (!current.pkg || !app.nines) return null;
+      var updated = app.nines.select(current.courseKey, current.pkg, ids);
+      if (!updated) return null;
+      current.nines = updated;
+      if (updated.holesInPlay.indexOf(current.hole) === -1) this.goHole(updated.holesInPlay[0]);
+      return updated;
+    },
     /* Viewport client coords → a course lat/lng, on whichever presentation is
        up — the second pin-placement method (drag the rail icon straight onto
        the map/surface and drop) needs this from outside play.js's own closure,

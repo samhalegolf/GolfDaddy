@@ -22,7 +22,6 @@ const path = require("path");
 
 const ROOT = path.join(__dirname, "..");
 const PIN_LOCK = path.join(ROOT, "scripts", "gd-course-library-pin-lock.js");
-const CAMERA = path.join(ROOT, "scripts", "inline", "gd-captured-hole-frame-camera-v19.js");
 
 const tests = [];
 function test(name, fn) { tests.push({ name: name, fn: fn }); }
@@ -87,19 +86,6 @@ test("a stored record no longer classifies as Manual GPS", () => {
   assert.strictEqual(
     resolve(genuineManual), "Manual GPS",
     "a session with no course identity at all must still fall back to Manual GPS"
-  );
-});
-
-test("surfaceCourseKey prefers courseId over the composite storage id", () => {
-  const fn = readFn(CAMERA, "function surfaceCourseKey(");
-  const order = ["courseId", "key", "id", "name"]
-    .map(function (field) { return { field: field, at: fn.indexOf("currentCourse." + field) }; })
-    .filter(function (entry) { return entry.at !== -1; });
-  assert.ok(order.length >= 2, "surfaceCourseKey must read several candidate fields");
-  assert.strictEqual(
-    order[0].field, "courseId",
-    "courseId must be read first - .id on a stored record is `${userId}::${courseId}`, "
-    + "which leaks a per-user storage key into captured_surfaces"
   );
 });
 

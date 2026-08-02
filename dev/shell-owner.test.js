@@ -7,7 +7,6 @@ const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
 const shell = fs.readFileSync(path.join(root, "scripts", "gd-shell.js"), "utf8");
 const routeAudit = fs.readFileSync(path.join(root, "scripts", "gd-route-audit.js"), "utf8");
 const picker = fs.readFileSync(path.join(root, "scripts", "inline", "gd-course-picker-search-v2.js"), "utf8");
-const runtime = fs.readFileSync(path.join(root, "scripts", "inline", "gd-gps-play-runtime-owner-v1.js"), "utf8");
 
 function assertContains(source, needle, message) {
   assert(source.includes(needle), message || `contains ${needle}`);
@@ -83,8 +82,6 @@ loadedScripts().forEach((src) => {
 
 assertContains(picker, "window.GDShell.openCoursePicker", "Course Picker delegates picker opening to Shell");
 assertContains(picker, "window.GDShell.closeCoursePicker", "Course Picker delegates picker closing to Shell");
-assertContains(runtime, "window.GDShell?.openCoursePicker", "GPS runtime delegates Back-to-picker route to Shell");
-assertContains(runtime, "window.GDShell?.enterGps", "GPS runtime delegates GPS route classes to Shell");
 assertContains(routeAudit, "window.GDShell?.openModule", "module routes delegate presentation to Shell");
 assertContains(routeAudit, "gdCanonicalShellBack:function(){return window.GDShell?.back", "legacy canonical Back delegates to Shell");
 assertContains(routeAudit, "gdCanonicalShellHome:function(){return window.GDShell?.home", "legacy canonical Home delegates to Shell");

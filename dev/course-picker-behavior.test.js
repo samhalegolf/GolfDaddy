@@ -152,6 +152,12 @@ function createHarness(options = {}) {
       invalidateSize() {},
       getCenter() { return { lat: 0, lng: 0 }; }
     },
+    /* Confirming a playable course now navigates to /app/ instead of calling back
+       into the bridge - the href write itself IS "entered GPS Play". */
+    location: {
+      set href(value) { calls.gps++; calls.lastGps = { href: value }; },
+      get href() { return (calls.lastGps && calls.lastGps.href) || ""; }
+    },
     gdGpsState: options.gpsState || {},
     GolfDaddyCourseLibrary: {
       knownCourseCandidates() { return options.knownCourses || []; },

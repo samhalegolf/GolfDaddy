@@ -482,11 +482,17 @@
   }
   function enterGpsPlay(course,result,opts={}){
     if(!(result&&result.playable))return false;
-    const entered=typeof bridge().enterGpsPlayAfterMapping==="function"
-      ? bridge().enterGpsPlayAfterMapping(course,result,opts)
-      : false;
-    if(entered)state.lastResult=result;
-    return entered;
+    state.lastResult=result;
+    navigateToAppPlay(course);
+    return true;
+  }
+  function navigateToAppPlay(course){
+    const parts=[];
+    if(course.courseId)parts.push("courseId="+encodeURIComponent(course.courseId));
+    if(course.courseName)parts.push("courseName="+encodeURIComponent(course.courseName));
+    if(Number.isFinite(course.courseLat))parts.push("courseLat="+encodeURIComponent(course.courseLat));
+    if(Number.isFinite(course.courseLng))parts.push("courseLng="+encodeURIComponent(course.courseLng));
+    window.location.href="/app/?"+parts.join("&");
   }
   function localSavedPlayable(course){
     const has=bridge().hasMappedPlayData;

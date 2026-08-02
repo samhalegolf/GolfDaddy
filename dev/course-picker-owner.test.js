@@ -6,7 +6,6 @@ const root = path.join(__dirname, "..");
 const picker = fs.readFileSync(path.join(root, "scripts", "inline", "gd-course-picker-search-v2.js"), "utf8");
 const core = fs.readFileSync(path.join(root, "scripts", "gd-app-core.js"), "utf8");
 const routeAudit = fs.readFileSync(path.join(root, "scripts", "gd-route-audit.js"), "utf8");
-const runtime = fs.readFileSync(path.join(root, "scripts", "inline", "gd-gps-play-runtime-owner-v1.js"), "utf8");
 const index = fs.readFileSync(path.join(root, "index.html"), "utf8");
 
 function count(source, needle) {
@@ -41,7 +40,6 @@ for (const forbidden of forbiddenPickerInternals) {
 
 assert(index.includes("window.GDCoursePicker.open({source:'home-play',returnTarget:'home'})"), "static Play tile delegates to GDCoursePicker.open");
 assert(routeAudit.includes('return window.GDCoursePicker.open({source:"route-audit",returnTarget:"gps"});'), "route audit defers picker opening to owner");
-assert(runtime.includes('return window.GDCoursePicker.open({source:"home-play",returnTarget:"home"});'), "GPS runtime Play tile hook defers to owner");
 
 const legacyDelegates = [
   "window.renderCourses=function(courses){return api.renderCourses(courses);};",

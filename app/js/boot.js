@@ -94,13 +94,31 @@
     document.getElementById("pickerBack").addEventListener("click", function () { show("home"); });
     document.getElementById("backHome").addEventListener("click", function () { show("home"); });
     document.getElementById("prevHole").addEventListener("click", function () {
-      app.play.goHole(Math.max(1, app.play.state().hole - 1));
+      app.play.prevHole();
     });
     document.getElementById("nextHole").addEventListener("click", function () {
-      app.play.goHole(Math.min(18, app.play.state().hole + 1));
+      app.play.nextHole();
     });
-    show("home");
+    var handoffCourseId = new URLSearchParams(window.location.search).get("courseId");
+    if (handoffCourseId) {
+      openPlay(courseFromUrl(handoffCourseId));
+    } else {
+      show("home");
+    }
     app.basemap.prefetch();   // so base-layer choice is synchronous by map time
     app.booted = true;   // boot-test canary: the last line of the load order ran
   });
+
+  /* The old course picker hands off a confirmed, already-mapped course by navigating
+     here with ?courseId=... (courseName/courseLat/courseLng optional) rather than
+     re-entering its own picker screen. */
+  function courseFromUrl(courseId) {
+    var params = new URLSearchParams(window.location.search);
+    return {
+      courseId: courseId,
+      courseName: params.get("courseName") || "",
+      courseLat: Number(params.get("courseLat")),
+      courseLng: Number(params.get("courseLng"))
+    };
+  }
 })();
