@@ -640,9 +640,19 @@
        player's current position (the map-tap fallback, off-course testing
        included). Promoting it with source "shotend" is what makes it a
        deliberate placement; app.position.set does the rest through the
-       onChange wiring above, same as a tap. */
+       onChange wiring above, same as a tap.
+
+       In green focus, ending a shot there IS holing out - same as pressing
+       Hole Out. Uses the position dot itself (not a raw GPS fix, which can
+       differ slightly from what's actually on screen), matching how
+       holeOutBtn below reads it. */
     var shotEnd = document.getElementById("shotEndBtn");
     if (shotEnd) shotEnd.addEventListener("click", function () {
+      if (frameStage === "zoom") {
+        app.shot.holeOut(app.position.current());
+        app.play.nextHole();
+        return;
+      }
       var fix = (app.gps && app.gps.lastFix()) || app.position.current();
       if (fix) app.position.set(fix, "shotend");
     });

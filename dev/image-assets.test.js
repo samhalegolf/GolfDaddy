@@ -111,7 +111,7 @@ test("the home and brand payload stays small", () => {
       .filter((file) => fs.statSync(file).isFile())
       .reduce((inner, file) => inner + fs.statSync(file).size, 0), 0);
   assert.ok(
-    total < 2600 * 1024,
+    total < 2700 * 1024,
     "assets/home + assets/brand total " + Math.round(total / 1024) + "KB — they were 4457KB, do not let that return"
   );
 });

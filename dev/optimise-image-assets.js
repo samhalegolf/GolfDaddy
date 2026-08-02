@@ -20,6 +20,12 @@
  * Originals are kept in dev/image-originals/ (not deployed), so re-running never
  * downscales an already-downscaled file and the set can be re-rendered larger
  * later.
+ *
+ * clarity-caddy-shot-end-icon's original was pre-trimmed to its opaque bounding
+ * box (984x1009, was 1254x1254) before being kept here - the upload had a wide
+ * transparent margin around the coin, which the button's own drop shadow/circle
+ * clip followed instead of the visible art, reading as a stray glow/border
+ * floating around it rather than hugging the coin.
  */
 const fs = require("fs");
 const path = require("path");

@@ -637,6 +637,48 @@ async function bootCheck() {
     };
   }, AKARANA_H1);
 
+  /* Shot End: a normal (non-green-focus) press just logs the shot in flight -
+     same as a deliberate tap, no hole change. In green focus it IS holing
+     out, same as pressing Hole Out itself. frameStage (what "green focus"
+     means) is only tracked once a real surface is up - same as the `framed`
+     scenario above - so hole 1 needs a captured visual, not just geometry. */
+  const shotEndWiring = await page.evaluate(async (h1) => {
+    const app = window.ClarityApp;
+    const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+    const shift = (p) => ({ lat: p.lat - 2, lng: p.lng });
+    const tee = shift(h1.tee), green = shift(h1.green);
+    const origin = app.playSurface.worldPx(green.lat + 0.004, green.lng - 0.004, 18);
+    const meta = {
+      captureZoom: 18, originPx: { x: origin.x, y: origin.y },
+      outputDimensions: { width: 1341, height: 1889 },
+      anchorPins: { tee, green }
+    };
+    const pkg = { holes: [
+      { holeNumber: 1, geometry: { tee, green, greenShape: [], route: [] }, visual: { url: PNG, playSurface: meta } },
+      { holeNumber: 2, geometry: { tee, green, greenShape: [], route: [] } }
+    ] };
+    await app.play.start("shot-end-wiring-course", pkg, null);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    app.position.set({ lat: tee.lat - 0.0015, lng: tee.lng }, "tap");
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    const lockStage = document.body.dataset.frameStage;
+    document.getElementById("shotEndBtn").click();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    const afterLockClick = { hole: app.play.state().hole, shots: app.shot.holeShots(1).length };
+    app.position.set({ lat: green.lat - 0.0002, lng: green.lng }, "tap");
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    const zoomStage = document.body.dataset.frameStage;
+    const shotsBeforeGreenFocusClick = app.shot.holeShots(1).length;
+    document.getElementById("shotEndBtn").click();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    return {
+      lockStage, afterLockClick, zoomStage, shotsBeforeGreenFocusClick,
+      hole: app.play.state().hole,
+      finalShots: app.shot.holeShots(1).length,
+      activeCleared: !app.shot.active()
+    };
+  }, AKARANA_H1);
+
   /* Dragging the bubble: pointer events on the cluster hit move the aim and
      the frame holds mid-drag. */
   const bubbleDrag = await page.evaluate(async () => {
@@ -909,6 +951,14 @@ async function bootCheck() {
   assert.strictEqual(stages.holedOut.shots, 3, "Hole Out records the final shot");
   assert.strictEqual(stages.holedOut.hole, 2, "Hole Out advances to the next hole");
   assert.ok(stages.holedOut.activeCleared, "no active shot after holing out");
+  assert.strictEqual(shotEndWiring.lockStage, "lock", "test setup: mid-fairway is the lock stage");
+  assert.strictEqual(shotEndWiring.afterLockClick.hole, 1, "Shot End outside green focus must not advance the hole");
+  assert.strictEqual(shotEndWiring.afterLockClick.shots, 1, "Shot End outside green focus still logs the shot in flight");
+  assert.strictEqual(shotEndWiring.zoomStage, "zoom", "test setup: on the green is the zoom stage");
+  assert.strictEqual(shotEndWiring.shotsBeforeGreenFocusClick, 2, "test setup: two shots logged before the green-focus press");
+  assert.strictEqual(shotEndWiring.hole, 2, "Shot End in green focus advances to the next hole, same as Hole Out");
+  assert.strictEqual(shotEndWiring.finalShots, 3, "Shot End in green focus records the final shot");
+  assert.ok(shotEndWiring.activeCleared, "no active shot after Shot End holes out in green focus");
   assert.ok(bubbleDrag.hitSized, "the drag hit covers the cluster (44px minimum)");
   assert.ok(bubbleDrag.aimMovedM > 5, "dragging the bubble moves the aim, got " + bubbleDrag.aimMovedM.toFixed(1) + "m");
   assert.ok(bubbleDrag.midDragFrameHeld, "the camera holds mid-drag");
