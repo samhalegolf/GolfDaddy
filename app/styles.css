@@ -157,3 +157,57 @@ body[data-frame-stage="zoom"] #holeOutBtn { display: block; }
 .playChrome { position: absolute; top: env(safe-area-inset-top, 12px); left: 0; right: 0; display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; z-index: 600; }
 .playChrome button { border: 0; border-radius: 10px; padding: 10px 14px; background: rgba(13, 27, 18, .82); color: #f2f7f2; font-size: 16px; }
 #holeNumber { font-size: 18px; font-weight: 700; }
+
+/* Rail tool buttons: one per tool, same 44px square as the tab itself. */
+.railBtn { width: 44px; height: 44px; border: 0; border-radius: 12px; padding: 0; display: grid; place-items: center; background: transparent; color: #f2f7f2; }
+.railBtn img { width: 24px; height: 24px; display: block; object-fit: contain; }
+.railBtn[aria-pressed="true"], .railBtn.active { background: linear-gradient(180deg, rgba(31, 211, 109, .34), rgba(4, 12, 8, .78)); box-shadow: 0 0 0 1px rgba(31, 211, 109, .28); }
+.railIcon { width: 24px; height: 24px; display: block; color: #f2f7f2; }
+.railIcon svg { width: 100%; height: 100%; }
+
+/* Wind popover: a small compass anchored under the rail. */
+.popover { position: absolute; top: calc(env(safe-area-inset-top, 0px) + 112px); right: 64px; z-index: 618; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 12px; border-radius: 14px; background: rgba(3, 8, 6, .9); box-shadow: 0 18px 38px rgba(0, 0, 0, .46); }
+.popover.hiddenState { display: none; }
+.windCompass { position: relative; width: 132px; height: 132px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, .28); background: radial-gradient(circle, rgba(255, 255, 255, .06), transparent 70%); }
+.windCompassLabel { position: absolute; inset: 0; display: grid; place-items: center; font-size: 11px; opacity: .7; text-align: center; padding: 0 20px; pointer-events: none; }
+
+/* Bottom sheets: Bag, Scorecard. Same dark chrome as the rest of the play
+   screen, docked to the bottom edge and scrollable past ~70% of the viewport. */
+.sheet { position: absolute; left: 0; right: 0; bottom: 0; z-index: 700; max-height: 72vh; display: flex; flex-direction: column; border-radius: 18px 18px 0 0; background: rgba(6, 14, 9, .96); box-shadow: 0 -18px 38px rgba(0, 0, 0, .5); }
+.sheet.hiddenState { display: none; }
+.sheetHeader { display: flex; align-items: center; justify-content: space-between; padding: 16px; border-bottom: 1px solid rgba(255, 255, 255, .08); }
+.sheetHeader strong { font-size: 17px; }
+.sheetClose { border: 0; border-radius: 10px; padding: 8px 14px; background: #1fd36d; color: #06110b; font-size: 14px; font-weight: 700; }
+.sheetBody { overflow-y: auto; padding: 14px 16px calc(env(safe-area-inset-bottom, 0px) + 16px); display: flex; flex-direction: column; gap: 12px; }
+
+.bagList { display: flex; flex-direction: column; gap: 8px; }
+.bagRow { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 10px; background: rgba(255, 255, 255, .06); }
+.bagRow input[type="text"] { width: 64px; }
+.bagRow input[type="number"] { width: 64px; }
+.bagRow .bagRowTotal { flex: 1; text-align: right; font-size: 12px; opacity: .65; }
+.bagRow .bagRowRemove { border: 0; background: none; color: #ff9a9a; font-size: 18px; line-height: 1; padding: 4px 6px; }
+.bagAddRow, .bagQuickRow { display: flex; gap: 8px; }
+.bagAddRow input, .bagQuickRow input, .bagRow input { padding: 10px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, .18); background: #07100b; color: #f2f7f2; font-size: 14px; min-width: 0; }
+.bagAddRow button, .bagQuickRow button { border: 0; border-radius: 8px; padding: 10px 14px; background: rgba(255, 255, 255, .14); color: #f2f7f2; font-size: 14px; white-space: nowrap; }
+.bagFirmnessRow { display: flex; gap: 8px; }
+.bagFirmnessRow button { flex: 1; border: 0; border-radius: 8px; padding: 10px; background: rgba(255, 255, 255, .1); color: #f2f7f2; font-size: 14px; }
+.bagFirmnessRow button[aria-pressed="true"] { background: #1fd36d; color: #06110b; font-weight: 700; }
+
+.scoreTotal { font-size: 22px; font-weight: 800; text-align: center; }
+.scoreList { display: flex; flex-direction: column; gap: 6px; }
+.scoreRow { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; background: rgba(255, 255, 255, .06); }
+.scoreRow.currentHole { background: rgba(31, 211, 109, .14); }
+.scoreRow .scoreHole { width: 26px; font-weight: 700; }
+.scoreRow .scorePar { width: 60px; opacity: .7; font-size: 12px; }
+.scoreRow .scorePar input { width: 40px; padding: 4px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, .18); background: #07100b; color: #f2f7f2; }
+.scoreRow .scoreStrokes { flex: 1; display: flex; align-items: center; justify-content: center; gap: 10px; }
+.scoreRow .scoreStrokes button { width: 28px; height: 28px; border: 0; border-radius: 50%; background: rgba(255, 255, 255, .14); color: #f2f7f2; font-size: 16px; line-height: 1; }
+.scoreRow .scoreStrokesValue { min-width: 22px; text-align: center; font-weight: 700; }
+
+/* Pin marker + distance label, drawn alongside the aim bubble overlay. */
+#pinMarker { position: absolute; width: 18px; height: 18px; margin: -18px 0 0 -3px; z-index: 552; pointer-events: none; }
+#pinMarker.hiddenState { display: none; }
+#pinMarker img { width: 100%; height: 100%; object-fit: contain; filter: drop-shadow(0 2px 4px rgba(0, 0, 0, .45)); }
+#pinDistance { position: absolute; z-index: 552; transform: translate(8px, -8px); font-size: 11px; font-weight: 700; color: #fff; text-shadow: 0 1px 3px rgba(0, 0, 0, .6); pointer-events: none; }
+#pinDistance.hiddenState { display: none; }
+#bubbleSvg .windLine { fill: none; stroke: #66dcff; stroke-opacity: .82; stroke-width: 3; stroke-dasharray: 6 8; stroke-linecap: round; }

@@ -48,9 +48,28 @@ or writes course data back.
   off-course testing is never clobbered). Policy lives in `play.js`.
 - `js/gps.js` — `watchPosition` wrapper. Event-driven, fail-open; "no fix" is a
   state the play surface renders fine, not an error.
+- `js/pin.js` — the pin/flag position, player-set and separate from the
+  package's green centre/shape. Per-hole, mirrors shot.js's shape (pure data,
+  no DOM); an unset pin is a normal state. Placement is armed from the tool
+  rail and consumed by play.js's existing tap handlers.
+- `js/bag.js` — the tool-rail bag editor (clubs, carry, firmness). Owns its own
+  storage (`clarity:bag:v1`, not the legacy per-account profile bag) and feeds
+  the engine through `GDBubbleEngine.setBag` — see the `gdShotActiveProfile`
+  rebind in `dev/generate-bubble-engine-client.js`.
+- `js/wind.js` — the tool-rail wind tool: tap cycles level, long-press opens a
+  compass to set direction. Drives `GDBubbleEngine.setWind`/`clearWind`, which
+  only ever swaps the *display* target the shot card/rings render against —
+  never the dispersion shape.
+- `js/scorecard.js` — score entry + running total. Par is read from the
+  existing `/api/scorecard-store` cache (fail-open, same pattern as
+  course-library.js/course-package.js); score state is its own storage
+  (`clarity:scorecard:v1`), keyed by course.
 - `js/play.js` — play state machine: enter/leave hole, frame from objects,
   present/remove surface, render the GPS fix on map and surface. Owns the
   Leaflet map.
+- `js/tool-rail.js` — the tab/rail toggle, and wires each rail button to its
+  tool module's entry point. Each tool module wires its own panel/popover
+  internals itself.
 - `js/boot.js` — wiring. Sets `ClarityApp.booted` as the test canary.
 
 Test: `node dev/fresh-app-boot.test.js` (registered in structural-smoke CI) —

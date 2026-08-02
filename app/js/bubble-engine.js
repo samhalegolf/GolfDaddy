@@ -145,6 +145,25 @@ function gdFairwayLineGrabAllowed(opts={}){
   }catch(e){}
   return gdStartIsInMappedTeeArea(opts.radiusM||78);
 }
+function gdNormAngle(a){
+  const full=Math.PI*2;
+  return ((Number(a)||0)%full+full)%full;
+}
+function gdWindEffectMeters(aimPoint=target){
+  const basis=start&&aimPoint?map.distance(start,aimPoint):(start&&greenCentre?map.distance(start,greenCentre):140);
+  const carry=Math.max(40,Math.min(260,Number(basis)||140));
+  const base=Math.max(4,Math.min(12,carry*.045));
+  return base*Math.max(1,Math.min(3,Number(gdWindLevel)||1));
+}
+function gdWindLandingFromAim(aimPoint){
+  if(!aimPoint||!gdHasWindVector())return aimPoint||null;
+  return project(aimPoint,gdNormAngle(gdWindOriginAngle+Math.PI),gdWindEffectMeters(aimPoint));
+}
+function gdSyncWindLandingFromAim(){
+  if(!gdHasWindVector()||!target){gdWindLandingTarget=null;return null;}
+  gdWindLandingTarget=gdWindLandingFromAim(target);
+  return gdWindLandingTarget;
+}
 function gdGetClubGroup(club="7i"){if(GD_CLUB_GROUPS.driver.test(club))return"driver";if(GD_CLUB_GROUPS.woodHybrid.test(club))return"woodHybrid";if(GD_CLUB_GROUPS.wedge.test(club))return"wedge";return"iron"}
 function gdDefaultCarryForClub(club="7i"){return GD_DEFAULT_CLUB_CARRY_M[club]??155}
 function gdGetClubPatternDefaults(club="7i"){return GD_CLUB_PATTERN_RATIOS[gdGetClubGroup(club)]}
@@ -558,8 +577,16 @@ function localPointToLatLng(center, shotBrg, x, y){
        verbatim copies take their intended branch rather than throwing).
      - window.gdMappedFairwayLayupTarget: in the old app pin-lock provides
        this seam; here the client provides it from the SAME verbatim layup
-       helpers, fed the hole route the package already carries. */
+       helpers, fed the hole route the package already carries.
+     - gdShotActiveProfile: the verbatim copy looks for a legacy account API
+       (window.GolfDaddyAccounts / ClarityCaddieAccounts) that does not exist
+       here. Rebinding it to read the fresh app's own bag store (set via
+       GDBubbleEngine.setBag) is a function REASSIGNMENT, not a source edit —
+       every copy above is still byte-identical to core, so the boot test's
+       verbatim assertion still holds. bag.js owns the real storage/editor. */
   var start = null, target = null, greenCentre = null;
+  var appBagRows = [];
+  gdShotActiveProfile = function () { return appBagRows.length ? { bag: appBagRows } : null; };
   var targetDragging = false, bubbleOrganic = true, bubbleBiasMode = "neutral";
   var currentHoleNumber = 0, currentTee = null, currentRoute = [];
   var projection = null;   // {toScreen(latlng)->{x,y}, viewSize()->{x,y}}
@@ -584,8 +611,12 @@ function localPointToLatLng(center, shotBrg, x, y){
     }
   };
 
-  function gdHasWindVector() { return false; }
+  /* Real wind state (wind.js drives it through setWind/clearWind below). The
+     verbatim gdShotDisplayTarget/gdWindLandingFromAim/gdSyncWindLandingFromAim
+     copies above already read exactly these three bindings by name. */
+  var gdWindActive = false, gdWindOriginAngle = null, gdWindLevel = 1;
   var gdWindLandingTarget = null;
+  function gdHasWindVector() { return !!gdWindActive && Number.isFinite(gdWindOriginAngle); }
   function activePlayerProfile() { return null; }
   function gdMappedStartHoleNumber() { return currentHoleNumber; }
   function toLatLng(value) {
@@ -619,8 +650,25 @@ function localPointToLatLng(center, shotBrg, x, y){
     setShot: function (startLL, targetLL) {
       start = toLatLng(startLL);
       target = toLatLng(targetLL);
+      gdSyncWindLandingFromAim();
     },
     setDragging: function (on) { targetDragging = !!on; },
+    setBag: function (rows) { appBagRows = Array.isArray(rows) ? rows : []; },
+    defaultBagRows: gdDefaultStandInBag,
+    setWind: function (originAngleRad, level) {
+      gdWindActive = true;
+      gdWindOriginAngle = gdNormAngle(Number(originAngleRad));
+      gdWindLevel = Math.max(1, Math.min(3, Number(level) || 1));
+      gdSyncWindLandingFromAim();
+    },
+    clearWind: function () {
+      gdWindActive = false;
+      gdWindLandingTarget = null;
+    },
+    windState: function () {
+      return gdHasWindVector() ? { originAngle: gdWindOriginAngle, level: gdWindLevel } : null;
+    },
+    windLanding: function () { return gdWindLandingTarget; },
     maxPlayableCarryM: gdMaxPlayableCarryM,
     playableBag: gdPlayableShotBagRows,
     targetForGreenCentre: function (green, opts) { return gdTargetForGreenCentre(toLatLng(green), opts || {}); },
