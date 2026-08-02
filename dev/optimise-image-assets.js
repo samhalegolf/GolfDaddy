@@ -39,11 +39,14 @@ const ORIGINAL_DIR = path.join(__dirname, "image-originals");
      functions all hardcode width="44").
    - clarity-app-icon is favicon and apple-touch-icon only; the native launcher
      icons are separate files under android/app/src/main/res and
-     ios/App/App/Assets.xcassets. apple-touch-icon tops out at 180px. */
+     ios/App/App/Assets.xcassets. apple-touch-icon tops out at 180px.
+   - clarity-caddy-course-library-icon is the Player Profile > Courses card
+     icon (#gdProfileCoursesCard .gdCourseLibraryCardIcon), 40px. */
 const PLAN = [
   { file: "assets/home/play.png", target: 768, maxRender: 235 },
   { file: "assets/home/bag.png", target: 768, maxRender: 235 },
   { file: "assets/home/profile.png", target: 768, maxRender: 235 },
+  { file: "assets/home/clarity-caddy-course-library-icon.png", target: 256, maxRender: 40 },
   { file: "assets/brand/cg-logo-white-g.png", target: 256, maxRender: 62 },
   { file: "assets/brand/cg-gps-pin.png", target: 256, maxRender: 46 },
   /* headroom 1: apple-touch-icon and favicon sizes are already device pixels -

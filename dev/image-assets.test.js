@@ -27,6 +27,7 @@ const EXPECTED = [
   { file: "assets/home/play.png", maxShipped: 768 },
   { file: "assets/home/bag.png", maxShipped: 768 },
   { file: "assets/home/profile.png", maxShipped: 768 },
+  { file: "assets/home/clarity-caddy-course-library-icon.png", maxShipped: 256 },
   { file: "assets/brand/cg-logo-white-g.png", maxShipped: 256 },
   { file: "assets/brand/cg-gps-pin.png", maxShipped: 256 },
   { file: "assets/brand/clarity-app-icon.png", maxShipped: 512 }

@@ -4762,7 +4762,7 @@
     btn.id='gdProfileCoursesCard';
     btn.className='card';
     btn.type='button';
-    btn.innerHTML=`<div class="gdCourseGreenIcon" aria-hidden="true"></div><div><strong>Courses</strong><span>${profileCardHtml()}</span></div>`;
+    btn.innerHTML=`<img class="gdCourseLibraryCardIcon" src="assets/home/clarity-caddy-course-library-icon.png?v=defd0c72" alt=""><div><strong>Courses</strong><span>${profileCardHtml()}</span></div>`;
     btn.onclick=function(ev){ev.preventDefault();openCourseLibraryPanel();return false;};
     grid.appendChild(btn);
   }
