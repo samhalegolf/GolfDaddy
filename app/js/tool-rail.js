@@ -36,11 +36,54 @@
       if (app.bag) app.bag.open();
     });
 
+    /* Pin has two placement methods, same split as the legacy flag tool:
+       a short tap arms placement (the next map/surface tap places it, wired
+       in play.js), or press-and-drag the icon itself straight onto the map/
+       surface and release to drop it there immediately — a ghost flag tracks
+       the finger for the drag. Distinguished by movement past a small
+       threshold, exactly like the legacy gdBindFlagPointerHandlers. */
     var pinBtn = document.getElementById("railPin");
-    if (pinBtn) pinBtn.addEventListener("click", function () {
-      close();
-      if (app.pin) app.pin.togglePlacement();
-    });
+    var pinGhost = document.getElementById("pinGhost");
+    if (pinBtn && app.pin) {
+      var pinDown = false, pinDragged = false, pinStartX = 0, pinStartY = 0;
+      pinBtn.addEventListener("pointerdown", function (e) {
+        pinDown = true;
+        pinDragged = false;
+        pinStartX = e.clientX;
+        pinStartY = e.clientY;
+        try { pinBtn.setPointerCapture(e.pointerId); } catch (err) {}
+      });
+      pinBtn.addEventListener("pointermove", function (e) {
+        if (!pinDown) return;
+        if (!pinDragged && Math.hypot(e.clientX - pinStartX, e.clientY - pinStartY) > 8) {
+          pinDragged = true;
+          if (pinGhost) pinGhost.classList.remove("hiddenState");
+        }
+        if (pinDragged && pinGhost) {
+          pinGhost.style.left = e.clientX + "px";
+          pinGhost.style.top = e.clientY + "px";
+        }
+      });
+      pinBtn.addEventListener("pointerup", function (e) {
+        if (!pinDown) return;
+        pinDown = false;
+        if (pinGhost) pinGhost.classList.add("hiddenState");
+        if (pinDragged) {
+          app.pin.disarm();
+          var ll = app.play && app.play.latLngAt(e.clientX, e.clientY);
+          if (ll) app.pin.set(ll);
+          close();
+        } else {
+          close();
+          app.pin.togglePlacement();
+        }
+      });
+      pinBtn.addEventListener("pointercancel", function () {
+        pinDown = false;
+        pinDragged = false;
+        if (pinGhost) pinGhost.classList.add("hiddenState");
+      });
+    }
 
     var gpsPinBtn = document.getElementById("railGpsPin");
     if (gpsPinBtn) gpsPinBtn.addEventListener("click", function () {

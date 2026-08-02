@@ -69,11 +69,17 @@
     <button id="railScorecard" type="button" class="railBtn" aria-label="Scorecard"><img src="../assets/icons/scorecard.png" alt=""></button>
   </div>
 
+  <div id="pinGhost" class="hiddenState"><img src="../assets/icons/flag.svg" alt=""></div>
+
   <div id="windPopover" class="popover hiddenState">
     <div id="windCompass" class="windCompass">
       <div class="windCompassLabel">Tap wind origin</div>
     </div>
-    <button id="windClear" type="button" class="linkButton">Clear wind</button>
+    <div class="windPopoverActions">
+      <button id="windAuto" type="button" class="linkButton">Use live wind</button>
+      <button id="windClear" type="button" class="linkButton">Clear wind</button>
+    </div>
+    <p id="windAutoStatus" class="windAutoStatus hiddenState"></p>
   </div>
 
   <div id="bagPanel" class="sheet hiddenState">

@@ -76,7 +76,7 @@ body.tilt-lock #surfaceViewport { transform: perspective(900px) rotateX(32deg) s
    (below) so the 2D inverse stays exact. */
 #aimBubble { position: absolute; transform: translate(-50%, -50%); border-radius: 50%; background: transparent; z-index: 560; touch-action: none; cursor: grab; }
 body.bubble-dragging #aimBubble { cursor: grabbing; }
-body.bubble-dragging #surfaceViewport { transform: none !important; transition: none !important; }
+body.bubble-dragging #surfaceViewport, body.pin-dragging #surfaceViewport { transform: none !important; transition: none !important; }
 
 /* Green focus: the green centre ring in the zoom stage. */
 #greenRing { position: absolute; width: 20px; height: 20px; margin: -10px 0 0 -10px; border-radius: 50%; border: 2px solid #1fd36d; background: rgba(31, 211, 109, .1); z-index: 545; pointer-events: none; }
@@ -170,6 +170,9 @@ body[data-frame-stage="zoom"] #holeOutBtn { display: block; }
 .popover.hiddenState { display: none; }
 .windCompass { position: relative; width: 132px; height: 132px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, .28); background: radial-gradient(circle, rgba(255, 255, 255, .06), transparent 70%); }
 .windCompassLabel { position: absolute; inset: 0; display: grid; place-items: center; font-size: 11px; opacity: .7; text-align: center; padding: 0 20px; pointer-events: none; }
+.windPopoverActions { display: flex; gap: 12px; }
+.windAutoStatus { font-size: 11px; opacity: .65; text-align: center; }
+.windAutoStatus.hiddenState { display: none; }
 
 /* Bottom sheets: Bag, Scorecard. Same dark chrome as the rest of the play
    screen, docked to the bottom edge and scrollable past ~70% of the viewport. */
@@ -205,9 +208,21 @@ body[data-frame-stage="zoom"] #holeOutBtn { display: block; }
 .scoreRow .scoreStrokesValue { min-width: 22px; text-align: center; font-weight: 700; }
 
 /* Pin marker + distance label, drawn alongside the aim bubble overlay. */
-#pinMarker { position: absolute; width: 18px; height: 18px; margin: -18px 0 0 -3px; z-index: 552; pointer-events: none; }
+/* touch-action:none + a real pointer-events target so #pinMarker can be
+   grabbed and dragged (see the pin-dragging block in play.js's wirePosition) —
+   plain "pointer-events: none" would make it just a label. */
+#pinMarker { position: absolute; width: 24px; height: 24px; margin: -24px 0 0 -6px; z-index: 552; cursor: grab; touch-action: none; }
 #pinMarker.hiddenState { display: none; }
-#pinMarker img { width: 100%; height: 100%; object-fit: contain; filter: drop-shadow(0 2px 4px rgba(0, 0, 0, .45)); }
+#pinMarker img { width: 100%; height: 100%; object-fit: contain; filter: drop-shadow(0 2px 4px rgba(0, 0, 0, .45)); pointer-events: none; }
+body.pin-dragging #pinMarker { cursor: grabbing; }
 #pinDistance { position: absolute; z-index: 552; transform: translate(8px, -8px); font-size: 11px; font-weight: 700; color: #fff; text-shadow: 0 1px 3px rgba(0, 0, 0, .6); pointer-events: none; }
 #pinDistance.hiddenState { display: none; }
 #bubbleSvg .windLine { fill: none; stroke: #66dcff; stroke-opacity: .82; stroke-width: 3; stroke-dasharray: 6 8; stroke-linecap: round; }
+
+/* Ghost flag that follows the pointer while dragging the Pin rail icon
+   straight onto the map/surface — the second placement method, alongside
+   arm-then-tap. Fixed positioning: it must track the finger across both the
+   rail (inside the dropdown) and the map underneath it. */
+#pinGhost { position: fixed; width: 26px; height: 26px; margin: -26px 0 0 -4px; z-index: 900; pointer-events: none; }
+#pinGhost.hiddenState { display: none; }
+#pinGhost img { width: 100%; height: 100%; object-fit: contain; filter: drop-shadow(0 2px 5px rgba(0, 0, 0, .5)); }
