@@ -8,8 +8,6 @@ html, body { height: 100%; font-family: -apple-system, system-ui, sans-serif; ba
 body.route-home #homeScreen { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; }
 body.route-play #playScreen { display: block; overflow: hidden; }
 
-#playTile { font-size: 20px; padding: 18px 48px; border-radius: 14px; border: 0; background: #2f8f4e; color: #fff; }
-
 #accountState { opacity: .75; font-size: 14px; }
 .linkButton { border: 0; background: none; color: #7fc99a; font-size: 15px; padding: 8px; text-decoration: underline; }
 
@@ -20,13 +18,6 @@ body.route-signin #signInScreen { display: flex; align-items: center; justify-co
 .signInCard button[type="submit"] { border: 0; border-radius: 12px; padding: 14px; background: #2f8f4e; color: #fff; font-size: 16px; }
 #signInStatus { min-height: 20px; font-size: 14px; color: #f0b26a; }
 
-body.route-picker #pickerScreen { display: flex; flex-direction: column; }
-.pickerHeader { display: flex; align-items: center; gap: 12px; padding: calc(env(safe-area-inset-top, 0px) + 12px) 16px 12px; }
-.pickerHeader h2 { font-size: 18px; }
-.pickerHeader button { border: 0; border-radius: 10px; padding: 10px 14px; background: rgba(255, 255, 255, .12); color: #f2f7f2; font-size: 16px; }
-#courseList { list-style: none; overflow-y: auto; padding: 0 16px 24px; }
-.courseRow { display: block; width: 100%; text-align: left; font-size: 17px; padding: 16px; margin-bottom: 10px; border: 0; border-radius: 12px; background: rgba(255, 255, 255, .08); color: #f2f7f2; }
-#pickerEmpty { padding: 24px 16px; opacity: .75; }
 .hiddenState { display: none; }
 
 /* z-index:0 is load-bearing: it makes #map a stacking context so Leaflet's
@@ -163,7 +154,14 @@ body[data-frame-stage="zoom"] #holeOutBtn { display: block; }
 .distMain { font-size: 22px; font-weight: 800; }
 .distLabel { font-size: 10px; font-weight: 600; opacity: .65; letter-spacing: .08em; }
 
-.playChrome { position: absolute; top: env(safe-area-inset-top, 12px); left: 0; right: 0; display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; z-index: 600; }
+/* The way in and out of GPS play - always on top (z-index above everything
+   else in the play screen), never hidden by a route change within this
+   page. */
+#globalNav { position: fixed; top: 0; left: 0; right: 0; z-index: 700; display: flex; align-items: center; gap: 4px; padding: calc(env(safe-area-inset-top, 0px) + 10px) 12px 10px; background: rgba(7, 16, 11, .92); }
+#globalNav button { border: 0; border-radius: 10px; padding: 10px 14px; background: rgba(255, 255, 255, .12); color: #f2f7f2; font-size: 15px; }
+#globalNav .spacer { flex: 1; }
+
+.playChrome { position: absolute; top: calc(env(safe-area-inset-top, 12px) + 52px); left: 0; right: 0; display: flex; justify-content: center; align-items: center; padding: 12px 16px; z-index: 600; }
 .playChrome button { border: 0; border-radius: 10px; padding: 10px 14px; background: rgba(13, 27, 18, .82); color: #f2f7f2; font-size: 16px; }
 #holeNumber { font-size: 18px; font-weight: 700; }
 

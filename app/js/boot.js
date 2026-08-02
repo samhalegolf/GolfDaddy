@@ -3,15 +3,26 @@
 (function () {
   "use strict";
   var app = (window.ClarityApp = window.ClarityApp || {});
-  var pickerToken = 0;
 
   function show(route) {
-    ["home", "picker", "play", "signin"].forEach(function (name) {
+    ["home", "play", "signin"].forEach(function (name) {
       document.body.classList.toggle("route-" + name, route === name);
     });
     if (route !== "play") app.play.stop();
-    if (route !== "picker") pickerToken += 1;   // cancel an in-flight library load
     if (route === "home") renderAccountState();
+  }
+
+  /* Exits GPS play back to the main site - the picker there is the only
+     other entry point into this page, so there's nothing of this page's own
+     to navigate back to. Home/Settings always land on the site root (no
+     deep link into a specific old-shell panel from here); Back prefers
+     actual browser history so it returns to the picker they came from. */
+  function exitToMainSite() {
+    window.location.href = "/";
+  }
+  function exitBack() {
+    if (window.history.length > 1) window.history.back();
+    else exitToMainSite();
   }
 
   function renderAccountState() {
@@ -43,32 +54,6 @@
     }
   }
 
-  function renderCourseList(courses) {
-    var list = document.getElementById("courseList");
-    var empty = document.getElementById("pickerEmpty");
-    list.textContent = "";
-    empty.classList.toggle("hiddenState", courses.length > 0);
-    courses.forEach(function (course) {
-      var item = document.createElement("li");
-      var button = document.createElement("button");
-      button.type = "button";
-      button.className = "courseRow";
-      button.textContent = course.courseName + (course.holeCount ? " · " + course.holeCount + " holes" : "");
-      button.addEventListener("click", function () { openPlay(course); });
-      item.appendChild(button);
-      list.appendChild(item);
-    });
-  }
-
-  async function openPicker() {
-    var token = ++pickerToken;
-    show("picker");
-    renderCourseList([]);   // empty state until the library answers
-    var courses = await app.fetchCourseLibrary();
-    if (token !== pickerToken) return;   // user navigated away meanwhile
-    renderCourseList(courses);
-  }
-
   async function openPlay(course) {
     show("play");
     var pkg = await app.fetchCoursePackage({
@@ -84,15 +69,15 @@
   }
 
   document.addEventListener("DOMContentLoaded", function () {
-    document.getElementById("playTile").addEventListener("click", openPicker);
     document.getElementById("accountAction").addEventListener("click", function () {
       if (app.account.signedIn()) { app.account.signOut(); renderAccountState(); }
       else show("signin");
     });
     document.getElementById("signInForm").addEventListener("submit", submitSignIn);
     document.getElementById("signInBack").addEventListener("click", function () { show("home"); });
-    document.getElementById("pickerBack").addEventListener("click", function () { show("home"); });
-    document.getElementById("backHome").addEventListener("click", function () { show("home"); });
+    document.getElementById("globalBackBtn").addEventListener("click", exitBack);
+    document.getElementById("globalHomeBtn").addEventListener("click", exitToMainSite);
+    document.getElementById("globalSettingsBtn").addEventListener("click", exitToMainSite);
     document.getElementById("prevHole").addEventListener("click", function () {
       app.play.prevHole();
     });

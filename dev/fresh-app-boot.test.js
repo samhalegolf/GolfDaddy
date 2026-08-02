@@ -392,15 +392,14 @@ async function bootCheck() {
   });
   await page.evaluate(() => document.getElementById("signInBack").click());
 
-  /* Picker flow, offline: Play opens the picker, the library fetch fails
-     (static server), and the empty state is the answer — no exception, no
-     retry loop. */
-  await page.click("#playTile");
-  await page.waitForTimeout(800);
-  const picker = await page.evaluate(() => ({
-    onPicker: document.body.classList.contains("route-picker"),
-    emptyShown: !document.getElementById("pickerEmpty").classList.contains("hiddenState"),
-    rows: document.querySelectorAll("#courseList .courseRow").length
+  /* No picker or Play tile here any more — the main site's picker is the
+     only entry point (via ?courseId=..., checked separately below); the
+     global Home/Back/Settings bar in the play screen is the only way out. */
+  const noOwnPicker = await page.evaluate(() => ({
+    noPickerScreen: !document.getElementById("pickerScreen"),
+    noPlayTile: !document.getElementById("playTile"),
+    globalNavExists: !!document.getElementById("globalHomeBtn")
+      && !!document.getElementById("globalBackBtn") && !!document.getElementById("globalSettingsBtn")
   }));
 
   /* Course tap-through with a stubbed library row: lands on the play route
@@ -440,7 +439,7 @@ async function bootCheck() {
        feeds the distance bar once the granted fix arrives. */
     const pkg = { holes: [{ holeNumber: 1, tee: h1.tee, green: h1.green, greenShape: h1.greenShape, route: [] }] };
     await app.play.start("akarana-golf-club", pkg, { lat: -36.918, lng: 174.735 });
-    document.body.classList.remove("route-home", "route-picker");
+    document.body.classList.remove("route-home");
     document.body.classList.add("route-play");
     await new Promise((resolve) => setTimeout(resolve, 1200));   // let watchPosition deliver
     const style = getComputedStyle(document.getElementById("map"));
@@ -666,6 +665,27 @@ async function bootCheck() {
     };
   });
 
+  /* The real hand-off: a fresh load with ?courseId=... must land directly on
+     the play route, and never paint the home screen first. The transient
+     pre-JS state can't be observed after waitUntil:"load" (this page's own
+     JS has already run), so the no-flash guarantee is checked statically
+     instead — the raw HTML must not default the body into a route class at
+     all, or the browser paints it before any script executes. */
+  const noDefaultRouteClass = !/<body[^>]*\bclass=/.test(fs.readFileSync(path.join(ROOT, "app", "index.html"), "utf8"));
+  const handoffPage = await (await browser.newContext()).newPage();
+  const handoffErrors = [];
+  handoffPage.on("pageerror", (err) => handoffErrors.push(err && err.message || String(err)));
+  await handoffPage.goto("http://127.0.0.1:" + port + "/app/index.html?courseId=akarana-golf-club&courseName=Akarana&courseLat=-36.9175&courseLng=174.74",
+    { waitUntil: "load" });
+  await handoffPage.waitForTimeout(500);
+  const handoff = await handoffPage.evaluate(() => ({
+    onPlay: document.body.classList.contains("route-play"),
+    onHome: document.body.classList.contains("route-home"),
+    hole: window.ClarityApp.play.state().hole,
+    courseKey: window.ClarityApp.play.state().courseKey
+  }));
+  await handoffPage.close();
+
   await browser.close();
   server.close();
 
@@ -678,9 +698,9 @@ async function bootCheck() {
   assert.ok(signIn.onSignIn, "Sign in must open the sign-in screen");
   assert.ok(signIn.status.length > 0, "an offline login must surface a status message");
   assert.ok(signIn.stillOnSignIn, "a failed login stays on the sign-in screen");
-  assert.ok(picker.onPicker, "Play must open the course picker");
-  assert.ok(picker.emptyShown, "offline picker must show its empty state");
-  assert.strictEqual(picker.rows, 0, "offline picker must list no courses");
+  assert.ok(noOwnPicker.noPickerScreen, "the picker screen must not exist in /app/ any more");
+  assert.ok(noOwnPicker.noPlayTile, "the Play tile must not exist in /app/ any more");
+  assert.ok(noOwnPicker.globalNavExists, "the global Home/Back/Settings bar must exist in the play screen");
   assert.ok(surfaceFirst.mapEmptyBefore, "no map exists before play starts");
   assert.ok(surfaceFirst.h1State.presented, "a declared package visual must present");
   assert.ok(surfaceFirst.h1State.mapStillEmpty, "no OSM is created under a declared surface");
@@ -743,6 +763,12 @@ async function bootCheck() {
   assert.strictEqual(basemap.brisbane, "qld", "Queensland centre → QLD aerial");
   assert.strictEqual(basemap.london, "osm", "outside every aerial region → OSM, never empty tiles");
   assert.ok(basemap.naipTileIsBbox, "NAIP tiles are bbox exportImage requests");
+  assert.ok(noDefaultRouteClass, "the body must not default into a route class - that's a flash of the wrong screen before this page's own JS runs");
+  assert.strictEqual(handoffErrors.length, 0, "uncaught exceptions on the ?courseId= hand-off:\n" + handoffErrors.join("\n"));
+  assert.ok(handoff.onPlay, "a ?courseId= hand-off must land directly on the play route");
+  assert.ok(!handoff.onHome, "a ?courseId= hand-off must never show the home screen");
+  assert.strictEqual(handoff.courseKey, "akarana-golf-club", "the hand-off's courseId must reach app.play.start");
+  assert.strictEqual(handoff.hole, 1, "a ?courseId= hand-off opens on hole 1");
   assert.ok(play.mapDisplayed, "rule 2: #map must be visible by default on the play route");
   assert.strictEqual(play.hole, 1, "play must start on hole 1");
   assert.strictEqual(play.courseKey, "akarana-golf-club");

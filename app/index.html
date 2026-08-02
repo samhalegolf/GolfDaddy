@@ -7,11 +7,14 @@
 <link rel="stylesheet" href="../assets/vendor/leaflet/leaflet.css">
 <link rel="stylesheet" href="styles.css">
 </head>
-<body class="route-home">
+<body>
 
+<!-- Entered exclusively via ?courseId=... from the course picker on the main
+     site - there is no picker or Play tile here any more. This screen only
+     shows if that hand-off didn't happen (e.g. a direct visit with no
+     courseId), so it's account status only, not a way into play. -->
 <section id="homeScreen" class="screen">
   <h1>Clarity Caddy</h1>
-  <button id="playTile" type="button">Play</button>
   <p id="accountState"></p>
   <button id="accountAction" type="button" class="linkButton"></button>
 </section>
@@ -27,16 +30,16 @@
   </form>
 </section>
 
-<section id="pickerScreen" class="screen">
-  <header class="pickerHeader">
-    <button id="pickerBack" type="button">Home</button>
-    <h2>Choose a course</h2>
-  </header>
-  <ul id="courseList"></ul>
-  <p id="pickerEmpty" class="hiddenState">No courses available. Check your connection and pull to retry.</p>
-</section>
-
 <section id="playScreen" class="screen">
+  <!-- The way in and out of GPS play: always on top, never hidden by a
+       route change within this page - the main site's picker is the only
+       other entry point, and these are the only exit. -->
+  <div id="globalNav">
+    <button id="globalBackBtn" type="button" aria-label="Back">Back</button>
+    <button id="globalHomeBtn" type="button" class="homeTextBtn" aria-label="Home">Home</button>
+    <div class="spacer"></div>
+    <button id="globalSettingsBtn" type="button" aria-label="Settings">Settings</button>
+  </div>
   <div id="map"></div>
   <div id="surfaceViewport">
     <img id="surfaceImage" alt="">
@@ -51,7 +54,6 @@
     <button id="shotEndBtn" type="button" class="hiddenState">Shot End</button>
   </div>
   <div class="playChrome">
-    <button id="backHome" type="button">Home</button>
     <div><button id="prevHole" type="button">&#8249;</button>
       <span id="holeNumber">1</span>
       <button id="nextHole" type="button">&#8250;</button></div>
