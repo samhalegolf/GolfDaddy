@@ -646,6 +646,27 @@ async function bootCheck() {
     };
   });
 
+  /* Hole picker: tapping the hole number opens a straight jump to any hole,
+     not just stepping one at a time. */
+  const holePicker = await page.evaluate(async (h1) => {
+    const app = window.ClarityApp;
+    const pkg = { holes: [1, 2, 3].map((n) => ({ holeNumber: n, tee: h1.tee, green: h1.green, greenShape: [], route: [] })) };
+    await app.play.start("hole-picker-course", pkg, null);
+    document.getElementById("holeNumber").click();
+    const opened = {
+      panelShown: !document.getElementById("holePickerPanel").classList.contains("hiddenState"),
+      buttons: Array.from(document.querySelectorAll("#holePickerGrid button")).map((b) => b.textContent),
+      activeButton: document.querySelector("#holePickerGrid button.active").textContent
+    };
+    document.querySelectorAll("#holePickerGrid button")[2].click();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    return {
+      opened,
+      jumpedToHole: app.play.state().hole,
+      panelClosedAfterPick: document.getElementById("holePickerPanel").classList.contains("hiddenState")
+    };
+  }, AKARANA_H1);
+
   /* Base imagery policy: aerial only inside a licensed source's coverage —
      LINZ (keyed, NZ), NAIP (US), QLD (AU) — and the honest OSM fallback
      everywhere else, including NZ when the key never arrived. */
@@ -761,6 +782,11 @@ async function bootCheck() {
   assert.ok(bubbleDrag.midDragFrameHeld, "the camera holds mid-drag");
   assert.ok(bubbleDrag.draggingCleared, "release clears the dragging state");
   assert.ok(bubbleDrag.reframedAfter, "release re-frames start→target");
+  assert.ok(holePicker.opened.panelShown, "tapping the hole number opens the picker panel");
+  assert.deepStrictEqual(holePicker.opened.buttons, ["1", "2", "3"], "the picker lists every hole the package has geometry for");
+  assert.strictEqual(holePicker.opened.activeButton, "1", "the current hole is marked active in the picker");
+  assert.strictEqual(holePicker.jumpedToHole, 3, "picking a hole jumps straight to it");
+  assert.ok(holePicker.panelClosedAfterPick, "picking a hole closes the picker");
   assert.strictEqual(basemap.keylessNz, "osm", "no LINZ key → OSM even in NZ");
   assert.strictEqual(basemap.nz, "linz", "keyed NZ centre → LINZ aerial");
   assert.strictEqual(basemap.pebbleBeach, "naip", "US centre → NAIP aerial");

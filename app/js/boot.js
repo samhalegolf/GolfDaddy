@@ -38,6 +38,30 @@
     window.location.href = "/?openGpsSettings=1";
   }
 
+  /* Tapping the hole number opens a grid of every hole in play - a straight
+     jump, not just stepping one at a time. Built fresh each open since the
+     available holes can change mid-round (a multi-nine pairing swap). */
+  function openHolePicker() {
+    var grid = document.getElementById("holePickerGrid");
+    var current = app.play.state().hole;
+    grid.textContent = "";
+    app.play.availableHoles().forEach(function (hole) {
+      var button = document.createElement("button");
+      button.type = "button";
+      button.textContent = String(hole);
+      button.className = hole === current ? "active" : "";
+      button.addEventListener("click", function () {
+        app.play.goHole(hole);
+        closeHolePicker();
+      });
+      grid.appendChild(button);
+    });
+    document.getElementById("holePickerPanel").classList.remove("hiddenState");
+  }
+  function closeHolePicker() {
+    document.getElementById("holePickerPanel").classList.add("hiddenState");
+  }
+
   function renderAccountState() {
     var state = document.getElementById("accountState");
     var action = document.getElementById("accountAction");
@@ -98,6 +122,8 @@
     document.getElementById("nextHole").addEventListener("click", function () {
       app.play.nextHole();
     });
+    document.getElementById("holeNumber").addEventListener("click", openHolePicker);
+    document.getElementById("holePickerClose").addEventListener("click", closeHolePicker);
     var handoffCourseId = new URLSearchParams(window.location.search).get("courseId");
     if (handoffCourseId) {
       openPlay(courseFromUrl(handoffCourseId));

@@ -168,9 +168,13 @@ body[data-frame-stage="zoom"] #holeOutBtn { display: block; }
 /* Bottom-left, directly above the shot card (#distanceBar: left 12px,
    bottom safe-area+120px, 142px tall) - same left edge, stacked just above
    its top edge. */
-.playChrome { position: absolute; left: 12px; bottom: calc(env(safe-area-inset-bottom, 0px) + 120px + 142px + 10px); display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 14px; background: rgba(13, 27, 18, .85); z-index: 600; }
+.playChrome { position: absolute; left: 12px; bottom: calc(env(safe-area-inset-bottom, 0px) + 120px + 142px + 10px); display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px; border-radius: 14px; background: rgba(13, 27, 18, .85); z-index: 600; }
 .playChrome button { border: 0; border-radius: 10px; padding: 8px 12px; background: rgba(255, 255, 255, .12); color: #f2f7f2; font-size: 16px; }
-#holeNumber { font-size: 18px; font-weight: 700; }
+#holeNumber { font-size: 18px; font-weight: 700; min-width: 34px; }
+
+.holePickerGrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.holePickerGrid button { border: 0; border-radius: 10px; padding: 14px 0; background: rgba(255, 255, 255, .08); color: #f2f7f2; font-size: 16px; font-weight: 700; }
+.holePickerGrid button.active { background: #1fd36d; color: #06110b; }
 
 /* Rail tool buttons: one per tool, same 44px square as the tab itself. */
 .railBtn { width: 44px; height: 44px; border: 0; border-radius: 12px; padding: 0; display: grid; place-items: center; background: transparent; color: #f2f7f2; }

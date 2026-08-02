@@ -942,6 +942,19 @@
       current = { courseKey: null, pkg: null, hole: 0, rec: null, nines: null, centre: null };
     },
     state: function () { return { courseKey: current.courseKey, hole: current.hole, nines: current.nines }; },
+    /* Every hole the player can jump straight to, in play order - the
+       selected nines' holes when the course has more than two, otherwise
+       every hole the package actually has geometry for (falling back to 18,
+       the plain sequence every course used to have, if the package hasn't
+       loaded yet). */
+    availableHoles: function () {
+      if (current.nines) return current.nines.holesInPlay;
+      var holes = current.pkg && Array.isArray(current.pkg.holes) ? current.pkg.holes : [];
+      var max = holes.reduce(function (m, h) { return Math.max(m, Number(h && h.holeNumber) || 0); }, 0);
+      var out = [];
+      for (var h = 1; h <= (max || 18); h++) out.push(h);
+      return out;
+    },
     /* Steps through the selected nines' holes in order when the course has
        more than two; otherwise the plain 1..18 sequence every course used
        to have. */
