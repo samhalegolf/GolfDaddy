@@ -4750,14 +4750,26 @@
     const coachEditing=/Coach Editing/i.test(kicker?.textContent||'');
     return coachEditing&&!(typeof window.gdCoachCanSeeProfileFeature==='function'&&window.gdCoachCanSeeProfileFeature('courses'));
   }
+  /* gd-auth-account-shell.js already renders this same card (same id) inline
+     wherever canShowProfileCard('courses') allows it, with a static "Recent
+     courses." placeholder - there is no download data at template-render
+     time to put there instead. Rather than fight over who owns the node,
+     this always brings whichever card is already in the DOM up to date with
+     the live download store, and only builds one from scratch on a surface
+     that never rendered it at all. */
   function gdCLInjectProfileCourseCard(){
-    const grid=document.querySelector('#gdProfileV67 .cards');
     const existing=document.getElementById('gdProfileCoursesCard');
     if(isCoachProfileCardView()){
       if(existing)existing.remove();
       return;
     }
-    if(!grid||document.getElementById('gdProfileCoursesCard'))return;
+    if(existing){
+      const span=existing.querySelector('span');
+      if(span)span.textContent=profileCardHtml();
+      return;
+    }
+    const grid=document.querySelector('#gdProfileV67 .cards');
+    if(!grid)return;
     const btn=document.createElement('button');
     btn.id='gdProfileCoursesCard';
     btn.className='card';
