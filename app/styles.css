@@ -10,7 +10,7 @@ body.route-play #playScreen { display: block; overflow: hidden; }
 
 #loadingScreen { position: fixed; inset: 0; z-index: 900; display: flex; align-items: center; justify-content: center; background: #0d1b12; }
 #loadingScreen.hiddenState { display: none; }
-.spinner { width: 34px; height: 34px; border-radius: 50%; border: 3px solid rgba(255, 255, 255, .18); border-top-color: #7fc99a; animation: spin .8s linear infinite; }
+.spinner { width: 34px; height: 34px; border-radius: 50%; border: 3px solid rgba(255, 255, 255, .18); border-top-color: #f2f7f2; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 #accountState { opacity: .75; font-size: 14px; }
