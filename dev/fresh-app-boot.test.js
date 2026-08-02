@@ -309,6 +309,31 @@ assert.strictEqual(surface.holeSurfaceAsset({ ...record, status: "draft" }, 1), 
   assert.strictEqual(first.state, "none");
   assert.strictEqual(second, first, "asking twice must return the cached answer");
   assert.strictEqual(fetches, 1, "absence must not refetch");
+
+  /* fetchRecord(courseKey) downloads the WHOLE course's visual record in one
+     call, every hole included - a second hole of the SAME course must be
+     answered from that one record, not trigger its own re-download. */
+  let multiFetches = 0;
+  const multiHoleRecord = {
+    status: "published",
+    uploaded_assets: [
+      { holeNumber: 1, path: "a/h1.jpg", metadata: { playSurface: meta } },
+      { holeNumber: 2, path: "a/h2.jpg", metadata: { playSurface: meta } }
+    ]
+  };
+  const multiStore = surface.createStore({ fetchRecord: async () => { multiFetches += 1; return multiHoleRecord; } });
+  const hole1 = await multiStore.surfaceFor("multi-hole-course", 1);
+  const hole2 = await multiStore.surfaceFor("multi-hole-course", 2);
+  assert.strictEqual(hole1.asset.path, "a/h1.jpg", "hole 1 gets its own asset from the shared record");
+  assert.strictEqual(hole2.asset.path, "a/h2.jpg", "hole 2 gets its own asset from the SAME shared record");
+  assert.strictEqual(multiFetches, 1, "a second hole of the same course must not re-download the course's visual record");
+
+  /* forget() is the explicit refresh - it must drop the cached record too,
+     or a stale record survives the very call meant to invalidate it. */
+  multiStore.forget("multi-hole-course");
+  await multiStore.surfaceFor("multi-hole-course", 1);
+  assert.strictEqual(multiFetches, 2, "forget() must force the next lookup to re-fetch the record");
+
   console.log("fresh-app projection/store checks passed");
   await bootCheck();
 })().catch((err) => { console.error(err); process.exit(1); });
