@@ -49,6 +49,8 @@ const CORE_FUNCS = [
   "gdMaxPlayableCarryM",
   // target rule
   "gdTargetForGreenCentre", "gdStartIsInMappedTeeArea", "gdFairwayLineGrabAllowed",
+  // wind (display-target drift only — never touches dispersion shape)
+  "gdNormAngle", "gdWindEffectMeters", "gdWindLandingFromAim", "gdSyncWindLandingFromAim",
   // profile / pattern derivation
   "gdGetClubGroup", "gdDefaultCarryForClub", "gdGetClubPatternDefaults",
   "gdBubbleGeometryTuning", "gdResolveFaceAlignmentOffsetDeg", "gdDeriveAimOffset",
@@ -132,8 +134,16 @@ const adapter = `
        verbatim copies take their intended branch rather than throwing).
      - window.gdMappedFairwayLayupTarget: in the old app pin-lock provides
        this seam; here the client provides it from the SAME verbatim layup
-       helpers, fed the hole route the package already carries. */
+       helpers, fed the hole route the package already carries.
+     - gdShotActiveProfile: the verbatim copy looks for a legacy account API
+       (window.GolfDaddyAccounts / ClarityCaddieAccounts) that does not exist
+       here. Rebinding it to read the fresh app's own bag store (set via
+       GDBubbleEngine.setBag) is a function REASSIGNMENT, not a source edit —
+       every copy above is still byte-identical to core, so the boot test's
+       verbatim assertion still holds. bag.js owns the real storage/editor. */
   var start = null, target = null, greenCentre = null;
+  var appBagRows = [];
+  gdShotActiveProfile = function () { return appBagRows.length ? { bag: appBagRows } : null; };
   var targetDragging = false, bubbleOrganic = true, bubbleBiasMode = "neutral";
   var currentHoleNumber = 0, currentTee = null, currentRoute = [];
   var projection = null;   // {toScreen(latlng)->{x,y}, viewSize()->{x,y}}
@@ -158,8 +168,12 @@ const adapter = `
     }
   };
 
-  function gdHasWindVector() { return false; }
+  /* Real wind state (wind.js drives it through setWind/clearWind below). The
+     verbatim gdShotDisplayTarget/gdWindLandingFromAim/gdSyncWindLandingFromAim
+     copies above already read exactly these three bindings by name. */
+  var gdWindActive = false, gdWindOriginAngle = null, gdWindLevel = 1;
   var gdWindLandingTarget = null;
+  function gdHasWindVector() { return !!gdWindActive && Number.isFinite(gdWindOriginAngle); }
   function activePlayerProfile() { return null; }
   function gdMappedStartHoleNumber() { return currentHoleNumber; }
   function toLatLng(value) {
@@ -193,8 +207,25 @@ const adapter = `
     setShot: function (startLL, targetLL) {
       start = toLatLng(startLL);
       target = toLatLng(targetLL);
+      gdSyncWindLandingFromAim();
     },
     setDragging: function (on) { targetDragging = !!on; },
+    setBag: function (rows) { appBagRows = Array.isArray(rows) ? rows : []; },
+    defaultBagRows: gdDefaultStandInBag,
+    setWind: function (originAngleRad, level) {
+      gdWindActive = true;
+      gdWindOriginAngle = gdNormAngle(Number(originAngleRad));
+      gdWindLevel = Math.max(1, Math.min(3, Number(level) || 1));
+      gdSyncWindLandingFromAim();
+    },
+    clearWind: function () {
+      gdWindActive = false;
+      gdWindLandingTarget = null;
+    },
+    windState: function () {
+      return gdHasWindVector() ? { originAngle: gdWindOriginAngle, level: gdWindLevel } : null;
+    },
+    windLanding: function () { return gdWindLandingTarget; },
     maxPlayableCarryM: gdMaxPlayableCarryM,
     playableBag: gdPlayableShotBagRows,
     targetForGreenCentre: function (green, opts) { return gdTargetForGreenCentre(toLatLng(green), opts || {}); },

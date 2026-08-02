@@ -61,7 +61,55 @@
   <button id="toolRailTab" type="button" aria-label="Tools" aria-expanded="false">
     <img src="../assets/home/tool-rail.png" alt="">
   </button>
-  <div id="toolRail" class="hiddenState"></div>
+  <div id="toolRail" class="hiddenState">
+    <button id="railBag" type="button" class="railBtn" aria-label="Bag"><img src="../assets/icons/bag.png" alt=""></button>
+    <button id="railWind" type="button" class="railBtn" aria-label="Wind"><span id="railWindIcon" class="railIcon"></span></button>
+    <button id="railPin" type="button" class="railBtn" aria-label="Pin" aria-pressed="false"><img src="../assets/icons/flag.svg" alt=""></button>
+    <button id="railGpsPin" type="button" class="railBtn" aria-label="GPS locate"><img src="../assets/brand/cg-gps-pin.png?v=deb3313b" alt=""></button>
+    <button id="railScorecard" type="button" class="railBtn" aria-label="Scorecard"><img src="../assets/icons/scorecard.png" alt=""></button>
+  </div>
+
+  <div id="windPopover" class="popover hiddenState">
+    <div id="windCompass" class="windCompass">
+      <div class="windCompassLabel">Tap wind origin</div>
+    </div>
+    <button id="windClear" type="button" class="linkButton">Clear wind</button>
+  </div>
+
+  <div id="bagPanel" class="sheet hiddenState">
+    <div class="sheetHeader">
+      <strong>Golf Bag</strong>
+      <button id="bagClose" type="button" class="sheetClose">Done</button>
+    </div>
+    <div class="sheetBody">
+      <div id="bagList" class="bagList"></div>
+      <div class="bagAddRow">
+        <input id="bagAddClub" type="text" placeholder="Club" aria-label="New club name">
+        <input id="bagAddCarry" type="number" inputmode="numeric" min="1" step="1" placeholder="Carry m" aria-label="New club carry metres">
+        <button id="bagAddBtn" type="button">Add</button>
+      </div>
+      <div class="bagQuickRow">
+        <input id="bagQuick7i" type="number" inputmode="numeric" min="1" step="1" placeholder="7i carry">
+        <button id="bagQuickBtn" type="button">Generate set</button>
+      </div>
+      <div class="bagFirmnessRow" id="bagFirmness" aria-label="Total distance setting">
+        <button type="button" data-firmness="soft">Soft</button>
+        <button type="button" data-firmness="medium">Medium</button>
+        <button type="button" data-firmness="hard">Hard</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="scorePanel" class="sheet hiddenState">
+    <div class="sheetHeader">
+      <strong>Scorecard</strong>
+      <button id="scoreClose" type="button" class="sheetClose">Done</button>
+    </div>
+    <div class="sheetBody">
+      <div id="scoreTotal" class="scoreTotal"></div>
+      <div id="scoreList" class="scoreList"></div>
+    </div>
+  </div>
   <div id="distanceBar" class="hiddenState">
     <div id="shotRow" class="hiddenState">
       <div class="shotLine"><span id="clubLabel" class="distLabel">CLUB</span><span id="shotClub">–</span></div>
@@ -82,11 +130,15 @@
 <script src="js/course-key.js"></script>
 <script src="js/course-library.js"></script>
 <script src="js/course-package.js"></script>
+<script src="js/scorecard.js"></script>
 <script src="js/basemap.js"></script>
 <script src="js/play-surface.js"></script>
 <script src="js/distance.js"></script>
 <script src="js/bubble-engine.js"></script>
+<script src="js/bag.js"></script>
+<script src="js/wind.js"></script>
 <script src="js/shot.js"></script>
+<script src="js/pin.js"></script>
 <script src="js/position.js"></script>
 <script src="js/gps.js"></script>
 <script src="js/play.js"></script>

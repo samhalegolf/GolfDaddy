@@ -58,9 +58,13 @@
       map = L.map("map", { zoomControl: false, attributionControl: true })
         .setView([-36.9, 174.78], 15);
       map.attributionControl.setPrefix(false);
-      /* Tap where you are standing — same contract as a real fix. */
+      /* Tap where you are standing — same contract as a real fix. A pin
+         placement armed via the tool rail intercepts the next tap instead. */
       map.on("click", function (e) {
-        if (e && e.latlng) app.position.set({ lat: e.latlng.lat, lng: e.latlng.lng }, "tap");
+        if (!e || !e.latlng) return;
+        var tapped = { lat: e.latlng.lat, lng: e.latlng.lng };
+        if (app.pin && app.pin.armed()) { app.pin.set(tapped); app.pin.disarm(); return; }
+        app.position.set(tapped, "tap");
       });
     }
     setBaseFor(centre);
@@ -218,6 +222,52 @@
     var model = act && window.GDBubbleEngine ? window.GDBubbleEngine.renderModel() : null;
     renderShotOverlays(pos, model);
     renderDistances(pos, model);
+    renderPin(pos);
+  }
+
+  var pinMapMarker = null;
+
+  function pinIcon() {
+    return L.icon({ iconUrl: "../assets/icons/flag.svg", iconSize: [22, 22], iconAnchor: [4, 20] });
+  }
+
+  /* The pin marker draws on whichever presentation is up: the live map (a
+     Leaflet marker, same as tee/green) and, when a surface is published, a
+     projected DOM marker + a "how far from here" label — the same projection
+     seam renderShotOverlays uses for the rings. */
+  function renderPin(fix) {
+    var pin = app.pin && app.pin.current();
+    if (map) {
+      if (pin) {
+        if (!pinMapMarker) pinMapMarker = L.marker([pin.lat, pin.lng], { icon: pinIcon(), interactive: false }).addTo(map);
+        else pinMapMarker.setLatLng([pin.lat, pin.lng]);
+      } else if (pinMapMarker) {
+        pinMapMarker.remove();
+        pinMapMarker = null;
+      }
+    }
+    var marker = document.getElementById("pinMarker");
+    var label = document.getElementById("pinDistance");
+    if (!marker || !label) return;
+    var published = document.body.classList.contains("surface-published");
+    var img = document.getElementById("surfaceImage");
+    var screen = null;
+    if (pin && published && img && img.dataset.playSurface && activeFrame) {
+      try {
+        var meta = JSON.parse(img.dataset.playSurface);
+        var px = surfaceLib.projectToSurface(meta, pin.lat, pin.lng);
+        screen = px ? surfaceLib.transformApply(activeFrame, px) : null;
+      } catch (e) { screen = null; }
+    }
+    marker.classList.toggle("hiddenState", !screen);
+    if (screen) { marker.style.left = screen.left + "px"; marker.style.top = screen.top + "px"; }
+    var dist = screen && fix ? app.distance.haversineMeters(fix, pin) : null;
+    label.classList.toggle("hiddenState", !Number.isFinite(dist));
+    if (Number.isFinite(dist)) {
+      label.textContent = Math.round(dist) + "m";
+      label.style.left = screen.left + "px";
+      label.style.top = screen.top + "px";
+    }
   }
 
   /* The aim bubble at the active shot's target, and the green ring in green
@@ -244,6 +294,18 @@
     var svg = document.getElementById("bubbleSvg");
     if (svg) {
       var parts = [];
+      /* Wind drift: aim → the wind-drifted landing point, exactly the legacy
+         dashed line. Independent of the bubble rings — draws whenever wind is
+         active, even before a bag exists to render a bubble at all. */
+      var eng = window.GDBubbleEngine;
+      var windLanding = eng && typeof eng.windLanding === "function" ? eng.windLanding() : null;
+      if (windLanding && act && act.target) {
+        var windTargetScreen = project(act.target), windLandingScreen = project(windLanding);
+        if (windTargetScreen && windLandingScreen) {
+          parts.push('<path class="windLine" d="M' + windTargetScreen.left.toFixed(1) + "," + windTargetScreen.top.toFixed(1)
+            + "L" + windLandingScreen.left.toFixed(1) + "," + windLandingScreen.top.toFixed(1) + '"/>');
+        }
+      }
       var centerScreen = model ? project(model.center) : null;
       if (model && centerScreen) {
         var ringPaths = ["outer", "main", "inner"].map(function (ringName) {
@@ -392,6 +454,9 @@
     });
     app.position.onChange(renderPosition);
     if (app.gps) app.gps.onFix(maybeAdoptGpsFix);
+    /* A pin placement/clear re-renders immediately — same render path as a
+       position change, just without one. */
+    if (app.pin) app.pin.onChange(function () { renderPosition(app.position.current()); });
     /* Aim changes sync the engine, then re-render (re-frame unless mid-drag). */
     app.shot.onChange(function () {
       var act = app.shot.active();
@@ -519,7 +584,10 @@
             { left: e.clientX - rect.left, top: e.clientY - rect.top },
             { width: rect.width, height: rect.height });
         }
-        if (tapped) app.position.set(tapped, "tap");
+        if (tapped) {
+          if (app.pin && app.pin.armed()) { app.pin.set(tapped); app.pin.disarm(); return; }
+          app.position.set(tapped, "tap");
+        }
       } catch (err) {}
     });
     /* Re-frame on viewport changes — event-driven, no polling. Dropping the
@@ -700,6 +768,8 @@
       };
       wirePosition();
       app.shot.startRound();
+      if (app.pin) app.pin.startRound();
+      if (app.scorecard) app.scorecard.setCourse(current.courseKey);
       if (app.gps) app.gps.start();
       await this.goHole(1);
     },
@@ -723,6 +793,7 @@
         });
       }
       app.shot.startHole(current.hole);
+      if (app.pin) app.pin.startHole(current.hole);
       startPillDismissed = false;
       renderPosition(null);
       if (app.gps) maybeAdoptGpsFix(app.gps.lastFix());
@@ -751,6 +822,7 @@
       clearSurface();
       if (objectLayer) { objectLayer.remove(); objectLayer = null; }
       if (positionMarker) { positionMarker.remove(); positionMarker = null; }
+      if (pinMapMarker) { pinMapMarker.remove(); pinMapMarker = null; }
       current = { courseKey: null, pkg: null, hole: 0, rec: null, centre: null };
     },
     state: function () { return { courseKey: current.courseKey, hole: current.hole }; }
