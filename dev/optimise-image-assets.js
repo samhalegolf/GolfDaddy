@@ -41,12 +41,15 @@ const ORIGINAL_DIR = path.join(__dirname, "image-originals");
      icons are separate files under android/app/src/main/res and
      ios/App/App/Assets.xcassets. apple-touch-icon tops out at 180px.
    - clarity-caddy-course-library-icon is the Player Profile > Courses card
-     icon (#gdProfileCoursesCard .gdCourseLibraryCardIcon), 40px. */
+     icon (#gdProfileCoursesCard .gdCourseLibraryCardIcon), 40px.
+   - clarity-caddy-shot-end-icon is the Shot End button on the play screen
+     (#shotEndBtn), 52px - the largest this button renders at. */
 const PLAN = [
   { file: "assets/home/play.png", target: 768, maxRender: 235 },
   { file: "assets/home/bag.png", target: 768, maxRender: 235 },
   { file: "assets/home/profile.png", target: 768, maxRender: 235 },
   { file: "assets/home/clarity-caddy-course-library-icon.png", target: 256, maxRender: 40 },
+  { file: "assets/home/clarity-caddy-shot-end-icon.png", target: 180, maxRender: 52 },
   { file: "assets/brand/cg-logo-white-g.png", target: 256, maxRender: 62 },
   { file: "assets/brand/cg-gps-pin.png", target: 256, maxRender: 46 },
   /* headroom 1: apple-touch-icon and favicon sizes are already device pixels -

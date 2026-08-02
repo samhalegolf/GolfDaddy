@@ -84,11 +84,15 @@ body[data-frame-stage="zoom"] #holeOutBtn { display: block; }
 /* Shot End dock: bottom-right, above the tee/standing pill, mirrors the
    legacy floating dock it used to share with a Lock button (removed - the
    view-locked state/logic it toggled is still live in play.js, pending a
-   new control). Only shows once a shot is active (play.js). */
+   new control). Only shows once a shot is active (play.js). The icon is
+   a complete circular badge on its own (coin art with the label baked in),
+   so the button is just a bare, borderless frame around it - no pill
+   background to double up with the art. */
 .shotDock { position: absolute; right: 16px; bottom: calc(env(safe-area-inset-bottom, 0px) + 172px); z-index: 630; display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }
-.shotDock button { border: 0; border-radius: 999px; padding: 10px 16px; background: rgba(13, 27, 18, .88); color: #f2f7f2; font-size: 13px; font-weight: 800; box-shadow: 0 10px 22px rgba(0, 0, 0, .3); }
+.shotDock button { border: 0; background: none; padding: 0; box-shadow: 0 10px 22px rgba(0, 0, 0, .35); border-radius: 50%; }
 .shotDock button.hiddenState { display: none; }
-#shotEndBtn { background: #2f8fef; color: #06110b; }
+#shotEndBtn { width: 52px; height: 52px; }
+#shotEndBtn img { display: block; width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
 
 #shotRow.hiddenState { display: none; }
 #shotRow .shotLine { font-size: 13px; font-weight: 700; opacity: .85; }
