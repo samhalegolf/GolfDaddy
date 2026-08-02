@@ -9,7 +9,18 @@
   "use strict";
   var app = (window.ClarityApp = window.ClarityApp || {});
 
+  var LEVEL3_KMH = 24, LEVEL2_KMH = 13;   // same thresholds as the legacy gdWindLevelForSpeed defaults
+  var FETCH_TIMEOUT_MS = 6000;
+
   function engine() { return window.GDBubbleEngine || null; }
+
+  function levelForSpeed(kmh) {
+    var speed = Number(kmh);
+    if (!Number.isFinite(speed)) return 1;
+    if (speed >= LEVEL3_KMH) return 3;
+    if (speed >= LEVEL2_KMH) return 2;
+    return 1;
+  }
 
   /* Same inline glyph as the legacy rail button (gd-brand-icon-render.js
      WIND_SVG) — reused verbatim as markup, no new asset needed. */
@@ -30,6 +41,8 @@
   function openPicker() {
     var picker = document.getElementById("windPopover");
     if (picker) picker.classList.remove("hiddenState");
+    var status = document.getElementById("windAutoStatus");
+    if (status) status.classList.add("hiddenState");
   }
 
   function closePicker() {
@@ -64,7 +77,44 @@
     syncIcon();
   }
 
-  app.wind = { press: press, openPicker: openPicker, syncIcon: syncIcon };
+  /* Live wind: the player's own position (the only location the fresh app
+     reliably has — no course-centre/map-centre fallback chain like legacy's
+     gdLiveWindLocation, since a hole with no position yet has nothing to ask
+     Open-Meteo about). Fail-open like every other fresh-app fetch: no
+     position, a timeout, or a bad response just leaves wind as it was. */
+  async function fetchLiveWind() {
+    var status = document.getElementById("windAutoStatus");
+    var pos = app.position && app.position.current();
+    if (!pos) {
+      if (status) { status.textContent = "No position yet"; status.classList.remove("hiddenState"); }
+      return;
+    }
+    if (status) { status.textContent = "Checking wind…"; status.classList.remove("hiddenState"); }
+    var controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+    var timer = controller ? setTimeout(function () { controller.abort(); }, FETCH_TIMEOUT_MS) : null;
+    try {
+      var url = "https://api.open-meteo.com/v1/forecast?latitude=" + encodeURIComponent(pos.lat.toFixed(5))
+        + "&longitude=" + encodeURIComponent(pos.lng.toFixed(5))
+        + "&current=wind_speed_10m,wind_direction_10m&wind_speed_unit=kmh&timezone=auto";
+      var res = await fetch(url, { headers: { Accept: "application/json" }, cache: "no-store", signal: controller ? controller.signal : undefined });
+      if (!res.ok) throw new Error("wind fetch failed");
+      var json = await res.json();
+      var current = (json && json.current) || {};
+      var speed = Number(current.wind_speed_10m), direction = Number(current.wind_direction_10m);
+      if (!Number.isFinite(speed) || !Number.isFinite(direction)) throw new Error("wind data missing");
+      var eng = engine();
+      var level = levelForSpeed(speed);
+      if (eng) eng.setWind(direction * Math.PI / 180, level);
+      closePicker();
+      syncIcon();
+    } catch (e) {
+      if (status) { status.textContent = "Live wind unavailable"; status.classList.remove("hiddenState"); }
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  app.wind = { press: press, openPicker: openPicker, syncIcon: syncIcon, fetchLiveWind: fetchLiveWind };
 
   document.addEventListener("DOMContentLoaded", function () {
     syncIcon();
@@ -77,5 +127,7 @@
       closePicker();
       syncIcon();
     });
+    var auto = document.getElementById("windAuto");
+    if (auto) auto.addEventListener("click", fetchLiveWind);
   });
 })();

@@ -239,8 +239,17 @@
     var pin = app.pin && app.pin.current();
     if (map) {
       if (pin) {
-        if (!pinMapMarker) pinMapMarker = L.marker([pin.lat, pin.lng], { icon: pinIcon(), interactive: false }).addTo(map);
-        else pinMapMarker.setLatLng([pin.lat, pin.lng]);
+        if (!pinMapMarker) {
+          pinMapMarker = L.marker([pin.lat, pin.lng], { icon: pinIcon(), draggable: true }).addTo(map);
+          /* Grab the placed pin on the live map and drag it to reposition —
+             Leaflet's own drag handles the pointer math here. */
+          pinMapMarker.on("dragend", function () {
+            var ll = pinMapMarker.getLatLng();
+            app.pin.set({ lat: ll.lat, lng: ll.lng });
+          });
+        } else if (!pinMapMarker.dragging || !pinMapMarker.dragging.moving()) {
+          pinMapMarker.setLatLng([pin.lat, pin.lng]);
+        }
       } else if (pinMapMarker) {
         pinMapMarker.remove();
         pinMapMarker = null;
@@ -531,6 +540,55 @@
       });
       bubble.addEventListener("pointerup", endBubbleDrag);
       bubble.addEventListener("pointercancel", endBubbleDrag);
+    }
+
+    /* Dragging the placed pin on a published surface — same delta-based
+       technique as the aim bubble, so it works under the lock tilt too. The
+       live-map pin (pinMapMarker in renderPin) drags through Leaflet's own
+       marker dragging instead; this block only covers the projected DOM
+       marker shown while a surface is up. */
+    var pinMarkerEl = document.getElementById("pinMarker");
+    var pinDragOffset = null;
+    function endPinDrag() {
+      pinDragOffset = null;
+      if (!document.body.classList.contains("pin-dragging")) return;
+      document.body.classList.remove("pin-dragging");
+      renderPosition(app.position.current());
+    }
+    if (pinMarkerEl) {
+      pinMarkerEl.addEventListener("pointerdown", function (e) {
+        var pin = app.pin && app.pin.current();
+        if (!pin || !activeFrame) return;
+        var img = document.getElementById("surfaceImage");
+        try {
+          var meta = JSON.parse(img.dataset.playSurface);
+          var px = surfaceLib.projectToSurface(meta, pin.lat, pin.lng);
+          if (!px) return;
+          var pinScreen = surfaceLib.transformApply(activeFrame, px);
+          pinDragOffset = { x: pinScreen.left - e.clientX, y: pinScreen.top - e.clientY };
+        } catch (err) { return; }
+        try { pinMarkerEl.setPointerCapture(e.pointerId); } catch (err) {}
+        document.body.classList.add("pin-dragging");
+        e.preventDefault();
+      });
+      pinMarkerEl.addEventListener("pointermove", function (e) {
+        if (!document.body.classList.contains("pin-dragging") || !activeFrame || !pinDragOffset) return;
+        var img = document.getElementById("surfaceImage");
+        if (!img || !img.dataset.playSurface) return;
+        try {
+          var meta = JSON.parse(img.dataset.playSurface);
+          var px = surfaceLib.transformInvert(activeFrame,
+            { left: e.clientX + pinDragOffset.x, top: e.clientY + pinDragOffset.y });
+          var w = Number(meta.outputDimensions.width), h = Number(meta.outputDimensions.height);
+          if (px && px.x >= 0 && px.y >= 0 && px.x <= w && px.y <= h) {
+            app.pin.set(surfaceLib.latLngFromWorldPx(
+              { x: Number(meta.originPx.x) + px.x, y: Number(meta.originPx.y) + px.y },
+              Number(meta.captureZoom)));
+          }
+        } catch (err) {}
+      });
+      pinMarkerEl.addEventListener("pointerup", endPinDrag);
+      pinMarkerEl.addEventListener("pointercancel", endPinDrag);
     }
 
     /* Hole Out: the final shot ends where the player stands; next hole opens
@@ -825,6 +883,42 @@
       if (pinMapMarker) { pinMapMarker.remove(); pinMapMarker = null; }
       current = { courseKey: null, pkg: null, hole: 0, rec: null, centre: null };
     },
-    state: function () { return { courseKey: current.courseKey, hole: current.hole }; }
+    state: function () { return { courseKey: current.courseKey, hole: current.hole }; },
+    /* Viewport client coords → a course lat/lng, on whichever presentation is
+       up — the second pin-placement method (drag the rail icon straight onto
+       the map/surface and drop) needs this from outside play.js's own closure,
+       since the drag gesture starts on a rail button tool-rail.js owns. Mirrors
+       the surface tap handler's own projection exactly; null off either
+       presentation, same "no answer" contract as everything else here. */
+    latLngAt: function (clientX, clientY) {
+      var published = document.body.classList.contains("surface-published");
+      var img = document.getElementById("surfaceImage");
+      if (published && img && img.dataset.playSurface) {
+        try {
+          var meta = JSON.parse(img.dataset.playSurface);
+          if (activeFrame) {
+            var px = surfaceLib.transformInvert(activeFrame, { left: clientX, top: clientY });
+            var w = Number(meta.outputDimensions.width), h = Number(meta.outputDimensions.height);
+            if (px && px.x >= 0 && px.y >= 0 && px.x <= w && px.y <= h) {
+              return surfaceLib.latLngFromWorldPx(
+                { x: Number(meta.originPx.x) + px.x, y: Number(meta.originPx.y) + px.y },
+                Number(meta.captureZoom));
+            }
+            return null;
+          }
+          var rect = img.getBoundingClientRect();
+          return surfaceLib.surfaceScreenToLatLng(meta,
+            { left: clientX - rect.left, top: clientY - rect.top },
+            { width: rect.width, height: rect.height });
+        } catch (e) { return null; }
+      }
+      if (map) {
+        try {
+          var ll = map.mouseEventToLatLng({ clientX: clientX, clientY: clientY });
+          return ll ? { lat: ll.lat, lng: ll.lng } : null;
+        } catch (e) { return null; }
+      }
+      return null;
+    }
   };
 })();
