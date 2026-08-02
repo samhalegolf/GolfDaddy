@@ -12,6 +12,14 @@
     if (route === "home") renderAccountState();
   }
 
+  /* Visible from first paint (see index.html) so it covers both the "which
+     route" decision and, on a hand-off, the course-package fetch — hidden
+     once there's something real underneath it to show. */
+  function hideLoadingScreen() {
+    var el = document.getElementById("loadingScreen");
+    if (el) el.classList.add("hiddenState");
+  }
+
   /* Exits GPS play back to the main site - the picker there is the only
      other entry point into this page, so there's nothing of this page's own
      to navigate back to. Home/Settings always land on the site root (no
@@ -66,6 +74,7 @@
     await app.play.start(course.courseId, pkg, {
       lat: course.courseLat, lng: course.courseLng
     });
+    hideLoadingScreen();
   }
 
   document.addEventListener("DOMContentLoaded", function () {
@@ -89,6 +98,7 @@
       openPlay(courseFromUrl(handoffCourseId));
     } else {
       show("home");
+      hideLoadingScreen();
     }
     app.basemap.prefetch();   // so base-layer choice is synchronous by map time
     app.booted = true;   // boot-test canary: the last line of the load order ran

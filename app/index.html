@@ -9,6 +9,11 @@
 </head>
 <body>
 
+<!-- Visible from first paint (no route class needed), covering both the
+     "which route" decision and the course-package fetch on a hand-off.
+     boot.js hides it once there's something real to show. -->
+<div id="loadingScreen"><div class="spinner"></div></div>
+
 <!-- Entered exclusively via ?courseId=... from the course picker on the main
      site - there is no picker or Play tile here any more. This screen only
      shows if that hand-off didn't happen (e.g. a direct visit with no

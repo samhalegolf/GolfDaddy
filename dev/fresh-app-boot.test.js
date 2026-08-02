@@ -371,7 +371,8 @@ async function bootCheck() {
     intervals: window.__intervals,
     authLoaded: !!(window.ClaritySupabaseAuth && typeof window.ClaritySupabaseAuth.freshAccessToken === "function"),
     signedOut: !window.ClarityApp.account.signedIn(),
-    accountLine: document.getElementById("accountState").textContent
+    accountLine: document.getElementById("accountState").textContent,
+    loadingScreenHidden: document.getElementById("loadingScreen").classList.contains("hiddenState")
   }));
 
   /* Sign-in offline: the form submits, the request fails, and the failure is a
@@ -682,7 +683,8 @@ async function bootCheck() {
     onPlay: document.body.classList.contains("route-play"),
     onHome: document.body.classList.contains("route-home"),
     hole: window.ClarityApp.play.state().hole,
-    courseKey: window.ClarityApp.play.state().courseKey
+    courseKey: window.ClarityApp.play.state().courseKey,
+    loadingScreenHidden: document.getElementById("loadingScreen").classList.contains("hiddenState")
   }));
   await handoffPage.close();
 
@@ -695,6 +697,7 @@ async function bootCheck() {
   assert.ok(state.authLoaded, "clarity-supabase-auth must load in the fresh shell");
   assert.ok(state.signedOut, "a fresh profile starts signed out");
   assert.strictEqual(state.accountLine, "Not signed in");
+  assert.ok(state.loadingScreenHidden, "the loading screen must hide once the home route is ready — no permanent spinner");
   assert.ok(signIn.onSignIn, "Sign in must open the sign-in screen");
   assert.ok(signIn.status.length > 0, "an offline login must surface a status message");
   assert.ok(signIn.stillOnSignIn, "a failed login stays on the sign-in screen");
@@ -769,6 +772,7 @@ async function bootCheck() {
   assert.ok(!handoff.onHome, "a ?courseId= hand-off must never show the home screen");
   assert.strictEqual(handoff.courseKey, "akarana-golf-club", "the hand-off's courseId must reach app.play.start");
   assert.strictEqual(handoff.hole, 1, "a ?courseId= hand-off opens on hole 1");
+  assert.ok(handoff.loadingScreenHidden, "the loading screen must hide once the course package has loaded and the hole is framed");
   assert.ok(play.mapDisplayed, "rule 2: #map must be visible by default on the play route");
   assert.strictEqual(play.hole, 1, "play must start on hole 1");
   assert.strictEqual(play.courseKey, "akarana-golf-club");
