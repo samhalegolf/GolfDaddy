@@ -20,6 +20,12 @@
  * Originals are kept in dev/image-originals/ (not deployed), so re-running never
  * downscales an already-downscaled file and the set can be re-rendered larger
  * later.
+ *
+ * clarity-caddy-shot-end-icon's original was pre-trimmed to its opaque bounding
+ * box (984x1009, was 1254x1254) before being kept here - the upload had a wide
+ * transparent margin around the coin, which the button's own drop shadow/circle
+ * clip followed instead of the visible art, reading as a stray glow/border
+ * floating around it rather than hugging the coin.
  */
 const fs = require("fs");
 const path = require("path");
@@ -39,11 +45,17 @@ const ORIGINAL_DIR = path.join(__dirname, "image-originals");
      functions all hardcode width="44").
    - clarity-app-icon is favicon and apple-touch-icon only; the native launcher
      icons are separate files under android/app/src/main/res and
-     ios/App/App/Assets.xcassets. apple-touch-icon tops out at 180px. */
+     ios/App/App/Assets.xcassets. apple-touch-icon tops out at 180px.
+   - clarity-caddy-course-library-icon is the Player Profile > Courses card
+     icon (#gdProfileCoursesCard .gdCourseLibraryCardIcon), 40px.
+   - clarity-caddy-shot-end-icon is the Shot End button on the play screen
+     (#shotEndBtn), 72px - the largest this button renders at. */
 const PLAN = [
   { file: "assets/home/play.png", target: 768, maxRender: 235 },
   { file: "assets/home/bag.png", target: 768, maxRender: 235 },
   { file: "assets/home/profile.png", target: 768, maxRender: 235 },
+  { file: "assets/home/clarity-caddy-course-library-icon.png", target: 256, maxRender: 40 },
+  { file: "assets/home/clarity-caddy-shot-end-icon.png", target: 216, maxRender: 72 },
   { file: "assets/brand/cg-logo-white-g.png", target: 256, maxRender: 62 },
   { file: "assets/brand/cg-gps-pin.png", target: 256, maxRender: 46 },
   /* headroom 1: apple-touch-icon and favicon sizes are already device pixels -

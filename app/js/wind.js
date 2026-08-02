@@ -14,6 +14,21 @@
 
   function engine() { return window.GDBubbleEngine || null; }
 
+  /* Captures whatever the engine's wind state is right now and pushes an
+     undo entry that puts it back - called just before every action below
+     that changes it, so Back can step wind changes off one at a time. */
+  function pushUndo() {
+    if (!app.undo) return;
+    var eng = engine();
+    var prev = eng && eng.windState();
+    app.undo.push(function () {
+      var e = engine();
+      if (!e) return;
+      if (prev) e.setWind(prev.originAngle, prev.level); else e.clearWind();
+      syncIcon();
+    });
+  }
+
   function levelForSpeed(kmh) {
     var speed = Number(kmh);
     if (!Number.isFinite(speed)) return 1;
@@ -60,7 +75,7 @@
     var dx = event.clientX - cx, dy = event.clientY - cy;
     var angle = Math.atan2(dx, -dy);
     var eng = engine();
-    if (eng) eng.setWind(angle, 1);
+    if (eng) { pushUndo(); eng.setWind(angle, 1); }
     closePicker();
     syncIcon();
   }
@@ -72,6 +87,7 @@
     if (!eng) return;
     var state = eng.windState();
     if (!state) { openPicker(); return; }
+    pushUndo();
     if (state.level >= 3) { eng.clearWind(); syncIcon(); return; }
     eng.setWind(state.originAngle, state.level + 1);
     syncIcon();
@@ -104,7 +120,7 @@
       if (!Number.isFinite(speed) || !Number.isFinite(direction)) throw new Error("wind data missing");
       var eng = engine();
       var level = levelForSpeed(speed);
-      if (eng) eng.setWind(direction * Math.PI / 180, level);
+      if (eng) { pushUndo(); eng.setWind(direction * Math.PI / 180, level); }
       closePicker();
       syncIcon();
     } catch (e) {
@@ -123,7 +139,7 @@
     var clear = document.getElementById("windClear");
     if (clear) clear.addEventListener("click", function () {
       var eng = engine();
-      if (eng) eng.clearWind();
+      if (eng && eng.windState()) { pushUndo(); eng.clearWind(); }
       closePicker();
       syncIcon();
     });

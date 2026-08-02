@@ -309,6 +309,31 @@ assert.strictEqual(surface.holeSurfaceAsset({ ...record, status: "draft" }, 1), 
   assert.strictEqual(first.state, "none");
   assert.strictEqual(second, first, "asking twice must return the cached answer");
   assert.strictEqual(fetches, 1, "absence must not refetch");
+
+  /* fetchRecord(courseKey) downloads the WHOLE course's visual record in one
+     call, every hole included - a second hole of the SAME course must be
+     answered from that one record, not trigger its own re-download. */
+  let multiFetches = 0;
+  const multiHoleRecord = {
+    status: "published",
+    uploaded_assets: [
+      { holeNumber: 1, path: "a/h1.jpg", metadata: { playSurface: meta } },
+      { holeNumber: 2, path: "a/h2.jpg", metadata: { playSurface: meta } }
+    ]
+  };
+  const multiStore = surface.createStore({ fetchRecord: async () => { multiFetches += 1; return multiHoleRecord; } });
+  const hole1 = await multiStore.surfaceFor("multi-hole-course", 1);
+  const hole2 = await multiStore.surfaceFor("multi-hole-course", 2);
+  assert.strictEqual(hole1.asset.path, "a/h1.jpg", "hole 1 gets its own asset from the shared record");
+  assert.strictEqual(hole2.asset.path, "a/h2.jpg", "hole 2 gets its own asset from the SAME shared record");
+  assert.strictEqual(multiFetches, 1, "a second hole of the same course must not re-download the course's visual record");
+
+  /* forget() is the explicit refresh - it must drop the cached record too,
+     or a stale record survives the very call meant to invalidate it. */
+  multiStore.forget("multi-hole-course");
+  await multiStore.surfaceFor("multi-hole-course", 1);
+  assert.strictEqual(multiFetches, 2, "forget() must force the next lookup to re-fetch the record");
+
   console.log("fresh-app projection/store checks passed");
   await bootCheck();
 })().catch((err) => { console.error(err); process.exit(1); });
@@ -371,7 +396,8 @@ async function bootCheck() {
     intervals: window.__intervals,
     authLoaded: !!(window.ClaritySupabaseAuth && typeof window.ClaritySupabaseAuth.freshAccessToken === "function"),
     signedOut: !window.ClarityApp.account.signedIn(),
-    accountLine: document.getElementById("accountState").textContent
+    accountLine: document.getElementById("accountState").textContent,
+    loadingScreenHidden: document.getElementById("loadingScreen").classList.contains("hiddenState")
   }));
 
   /* Sign-in offline: the form submits, the request fails, and the failure is a
@@ -392,15 +418,15 @@ async function bootCheck() {
   });
   await page.evaluate(() => document.getElementById("signInBack").click());
 
-  /* Picker flow, offline: Play opens the picker, the library fetch fails
-     (static server), and the empty state is the answer — no exception, no
-     retry loop. */
-  await page.click("#playTile");
-  await page.waitForTimeout(800);
-  const picker = await page.evaluate(() => ({
-    onPicker: document.body.classList.contains("route-picker"),
-    emptyShown: !document.getElementById("pickerEmpty").classList.contains("hiddenState"),
-    rows: document.querySelectorAll("#courseList .courseRow").length
+  /* No picker or Play tile here any more — the main site's picker is the
+     only entry point (via ?courseId=..., checked separately below); the
+     global Home/Back bar plus the tool rail's GPS Settings icon are the
+     only way out. */
+  const noOwnPicker = await page.evaluate(() => ({
+    noPickerScreen: !document.getElementById("pickerScreen"),
+    noPlayTile: !document.getElementById("playTile"),
+    globalNavExists: !!document.getElementById("globalHomeBtn")
+      && !!document.getElementById("globalBackBtn") && !!document.getElementById("railGpsSettings")
   }));
 
   /* Course tap-through with a stubbed library row: lands on the play route
@@ -440,7 +466,7 @@ async function bootCheck() {
        feeds the distance bar once the granted fix arrives. */
     const pkg = { holes: [{ holeNumber: 1, tee: h1.tee, green: h1.green, greenShape: h1.greenShape, route: [] }] };
     await app.play.start("akarana-golf-club", pkg, { lat: -36.918, lng: 174.735 });
-    document.body.classList.remove("route-home", "route-picker");
+    document.body.classList.remove("route-home");
     document.body.classList.add("route-play");
     await new Promise((resolve) => setTimeout(resolve, 1200));   // let watchPosition deliver
     const style = getComputedStyle(document.getElementById("map"));
@@ -611,6 +637,48 @@ async function bootCheck() {
     };
   }, AKARANA_H1);
 
+  /* Shot End: a normal (non-green-focus) press just logs the shot in flight -
+     same as a deliberate tap, no hole change. In green focus it IS holing
+     out, same as pressing Hole Out itself. frameStage (what "green focus"
+     means) is only tracked once a real surface is up - same as the `framed`
+     scenario above - so hole 1 needs a captured visual, not just geometry. */
+  const shotEndWiring = await page.evaluate(async (h1) => {
+    const app = window.ClarityApp;
+    const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+    const shift = (p) => ({ lat: p.lat - 2, lng: p.lng });
+    const tee = shift(h1.tee), green = shift(h1.green);
+    const origin = app.playSurface.worldPx(green.lat + 0.004, green.lng - 0.004, 18);
+    const meta = {
+      captureZoom: 18, originPx: { x: origin.x, y: origin.y },
+      outputDimensions: { width: 1341, height: 1889 },
+      anchorPins: { tee, green }
+    };
+    const pkg = { holes: [
+      { holeNumber: 1, geometry: { tee, green, greenShape: [], route: [] }, visual: { url: PNG, playSurface: meta } },
+      { holeNumber: 2, geometry: { tee, green, greenShape: [], route: [] } }
+    ] };
+    await app.play.start("shot-end-wiring-course", pkg, null);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    app.position.set({ lat: tee.lat - 0.0015, lng: tee.lng }, "tap");
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    const lockStage = document.body.dataset.frameStage;
+    document.getElementById("shotEndBtn").click();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    const afterLockClick = { hole: app.play.state().hole, shots: app.shot.holeShots(1).length };
+    app.position.set({ lat: green.lat - 0.0002, lng: green.lng }, "tap");
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    const zoomStage = document.body.dataset.frameStage;
+    const shotsBeforeGreenFocusClick = app.shot.holeShots(1).length;
+    document.getElementById("shotEndBtn").click();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    return {
+      lockStage, afterLockClick, zoomStage, shotsBeforeGreenFocusClick,
+      hole: app.play.state().hole,
+      finalShots: app.shot.holeShots(1).length,
+      activeCleared: !app.shot.active()
+    };
+  }, AKARANA_H1);
+
   /* Dragging the bubble: pointer events on the cluster hit move the aim and
      the frame holds mid-drag. */
   const bubbleDrag = await page.evaluate(async () => {
@@ -645,6 +713,71 @@ async function bootCheck() {
     };
   });
 
+  /* Hole picker: tapping the hole number opens a straight jump to any hole,
+     not just stepping one at a time. */
+  const holePicker = await page.evaluate(async (h1) => {
+    const app = window.ClarityApp;
+    const pkg = { holes: [1, 2, 3].map((n) => ({ holeNumber: n, tee: h1.tee, green: h1.green, greenShape: [], route: [] })) };
+    await app.play.start("hole-picker-course", pkg, null);
+    document.getElementById("holeNumber").click();
+    const opened = {
+      panelShown: !document.getElementById("holePickerPanel").classList.contains("hiddenState"),
+      buttons: Array.from(document.querySelectorAll("#holePickerGrid button")).map((b) => b.textContent),
+      activeButton: document.querySelector("#holePickerGrid button.active").textContent
+    };
+    document.querySelectorAll("#holePickerGrid button")[2].click();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    return {
+      opened,
+      jumpedToHole: app.play.state().hole,
+      panelClosedAfterPick: document.getElementById("holePickerPanel").classList.contains("hiddenState")
+    };
+  }, AKARANA_H1);
+
+  /* Back-as-undo: during play, Back steps off the most recent wind/pin
+     change instead of leaving the screen - only once there is nothing left
+     to undo does it fall through to leaving GPS play. */
+  const backUndo = await page.evaluate(async () => {
+    const app = window.ClarityApp;
+    const eng = window.GDBubbleEngine;
+    app.undo.clear();
+    eng.setWind(0, 1);   // seed a wind level directly - matches a real first press only opening the compass, not setting state
+    const beforeWindPress = eng.windState();
+    app.wind.press();   // level 1 -> 2, pushes an undo entry
+    const afterPress = eng.windState();
+    const anyAfterPress = app.undo.any();
+
+    const beforePin = app.pin.current();
+    app.pin.set({ lat: -36.9166, lng: 174.7393 });
+    const afterPinSet = app.pin.current();
+
+    const historyLenBefore = window.history.length;
+    document.getElementById("globalBackBtn").click();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const afterFirstBack = {
+      pin: app.pin.current(),
+      stillOnPlay: document.body.classList.contains("route-play"),
+      historyUnchanged: window.history.length === historyLenBefore
+    };
+
+    document.getElementById("globalBackBtn").click();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const afterSecondBack = {
+      wind: eng.windState(),
+      stillOnPlay: document.body.classList.contains("route-play"),
+      anyLeft: app.undo.any()
+    };
+
+    window.__historyBackCalled = false;
+    const origBack = window.history.back;
+    window.history.back = function () { window.__historyBackCalled = true; };
+    document.getElementById("globalBackBtn").click();
+    const fallthrough = { historyBackCalled: window.__historyBackCalled };
+    window.history.back = origBack;
+
+    return { beforeWindPress, afterPress, anyAfterPress, beforePin, afterPinSet, afterFirstBack, afterSecondBack, fallthrough };
+  });
+
   /* Base imagery policy: aerial only inside a licensed source's coverage —
      LINZ (keyed, NZ), NAIP (US), QLD (AU) — and the honest OSM fallback
      everywhere else, including NZ when the key never arrived. */
@@ -666,6 +799,91 @@ async function bootCheck() {
     };
   });
 
+  /* The real hand-off: a fresh load with ?courseId=... must land directly on
+     the play route, and never paint the home screen first. The transient
+     pre-JS state can't be observed after waitUntil:"load" (this page's own
+     JS has already run), so the no-flash guarantee is checked statically
+     instead — the raw HTML must not default the body into a route class at
+     all, or the browser paints it before any script executes. */
+  const noDefaultRouteClass = !/<body[^>]*\bclass=/.test(fs.readFileSync(path.join(ROOT, "app", "index.html"), "utf8"));
+  const handoffPage = await (await browser.newContext()).newPage();
+  const handoffErrors = [];
+  handoffPage.on("pageerror", (err) => handoffErrors.push(err && err.message || String(err)));
+  await handoffPage.goto("http://127.0.0.1:" + port + "/app/index.html?courseId=akarana-golf-club&courseName=Akarana&courseLat=-36.9175&courseLng=174.74",
+    { waitUntil: "load" });
+  await handoffPage.waitForTimeout(500);
+  const handoff = await handoffPage.evaluate(() => ({
+    onPlay: document.body.classList.contains("route-play"),
+    onHome: document.body.classList.contains("route-home"),
+    hole: window.ClarityApp.play.state().hole,
+    courseKey: window.ClarityApp.play.state().courseKey,
+    loadingScreenHidden: document.getElementById("loadingScreen").classList.contains("hiddenState")
+  }));
+  await handoffPage.close();
+
+  /* Course library: a course auto-downloads on its first visit with no
+     prompt (the auto-download bias only needs confirmation for a map
+     arriving mid-round, not one already there when play starts) - and a
+     second hand-off to the SAME course must load from that saved copy with
+     no second network call. A published map that arrives mid-round is a
+     PROMPT, and only becomes the saved copy once that prompt is accepted. */
+  const storeContext = await browser.newContext();
+  const storePage = await storeContext.newPage();
+  const storeErrors = [];
+  storePage.on("pageerror", (err) => storeErrors.push(err && err.message || String(err)));
+  let packageFetches = 0;
+  let packageStatus = "lite-geo-ready";
+  await storePage.route("**/api/course-package**", (route) => {
+    packageFetches += 1;
+    const url = new URL(route.request().url());
+    const courseId = url.searchParams.get("courseId");
+    const body = packageStatus === "full-map-ready"
+      ? {
+          courseId, status: "full-map-ready", packageVersion: 7, geometryVersion: "2026-08-01T00:00:00Z",
+          holes: [{ holeNumber: 1, geometry: { tee: AKARANA_H1.tee, green: AKARANA_H1.green, greenShape: [], route: [] }, visual: null }]
+        }
+      : {
+          courseId, status: "lite-geo-ready", geometryVersion: "2026-08-01T00:00:00Z",
+          holes: [{ holeNumber: 1, tee: AKARANA_H1.tee, green: AKARANA_H1.green, greenShape: [], route: [] }]
+        };
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
+  });
+  const storeUrl = "http://127.0.0.1:" + port
+    + "/app/index.html?courseId=store-test-course&courseName=Store+Test&courseLat=-36.9175&courseLng=174.74";
+
+  await storePage.goto(storeUrl, { waitUntil: "load" });
+  await storePage.waitForTimeout(400);
+  const firstVisit = await storePage.evaluate(() => {
+    const saved = window.ClarityApp.courseStore.load("store-test-course");
+    return { fetchesSoFar: undefined, savedMapType: saved && saved.mapType, hole: window.ClarityApp.play.state().hole };
+  });
+  const fetchesAfterFirstVisit = packageFetches;
+
+  await storePage.goto(storeUrl, { waitUntil: "load" });
+  await storePage.waitForTimeout(400);
+  const secondVisit = await storePage.evaluate(() => ({
+    courseKey: window.ClarityApp.play.state().courseKey,
+    hole: window.ClarityApp.play.state().hole
+  }));
+  const fetchesAfterSecondVisit = packageFetches;
+
+  /* Now simulate the published map appearing mid-round: the next hole
+     change's background check should find it and prompt, not auto-switch. */
+  packageStatus = "full-map-ready";
+  await storePage.evaluate(() => document.getElementById("nextHole").click());
+  await storePage.waitForTimeout(400);
+  const midRoundPrompt = await storePage.evaluate(() => ({
+    barShown: !document.getElementById("mapUpdateBar").classList.contains("hiddenState"),
+    stillObjectMapSaved: window.ClarityApp.courseStore.load("store-test-course").mapType
+  }));
+  await storePage.evaluate(() => document.getElementById("mapUpdateDownload").click());
+  await storePage.waitForTimeout(200);
+  const afterDownload = await storePage.evaluate(() => ({
+    barHidden: document.getElementById("mapUpdateBar").classList.contains("hiddenState"),
+    savedMapType: window.ClarityApp.courseStore.load("store-test-course").mapType
+  }));
+  await storePage.close();
+
   await browser.close();
   server.close();
 
@@ -675,12 +893,13 @@ async function bootCheck() {
   assert.ok(state.authLoaded, "clarity-supabase-auth must load in the fresh shell");
   assert.ok(state.signedOut, "a fresh profile starts signed out");
   assert.strictEqual(state.accountLine, "Not signed in");
+  assert.ok(state.loadingScreenHidden, "the loading screen must hide once the home route is ready — no permanent spinner");
   assert.ok(signIn.onSignIn, "Sign in must open the sign-in screen");
   assert.ok(signIn.status.length > 0, "an offline login must surface a status message");
   assert.ok(signIn.stillOnSignIn, "a failed login stays on the sign-in screen");
-  assert.ok(picker.onPicker, "Play must open the course picker");
-  assert.ok(picker.emptyShown, "offline picker must show its empty state");
-  assert.strictEqual(picker.rows, 0, "offline picker must list no courses");
+  assert.ok(noOwnPicker.noPickerScreen, "the picker screen must not exist in /app/ any more");
+  assert.ok(noOwnPicker.noPlayTile, "the Play tile must not exist in /app/ any more");
+  assert.ok(noOwnPicker.globalNavExists, "the global Home/Back/Settings bar must exist in the play screen");
   assert.ok(surfaceFirst.mapEmptyBefore, "no map exists before play starts");
   assert.ok(surfaceFirst.h1State.presented, "a declared package visual must present");
   assert.ok(surfaceFirst.h1State.mapStillEmpty, "no OSM is created under a declared surface");
@@ -732,17 +951,59 @@ async function bootCheck() {
   assert.strictEqual(stages.holedOut.shots, 3, "Hole Out records the final shot");
   assert.strictEqual(stages.holedOut.hole, 2, "Hole Out advances to the next hole");
   assert.ok(stages.holedOut.activeCleared, "no active shot after holing out");
+  assert.strictEqual(shotEndWiring.lockStage, "lock", "test setup: mid-fairway is the lock stage");
+  assert.strictEqual(shotEndWiring.afterLockClick.hole, 1, "Shot End outside green focus must not advance the hole");
+  assert.strictEqual(shotEndWiring.afterLockClick.shots, 1, "Shot End outside green focus still logs the shot in flight");
+  assert.strictEqual(shotEndWiring.zoomStage, "zoom", "test setup: on the green is the zoom stage");
+  assert.strictEqual(shotEndWiring.shotsBeforeGreenFocusClick, 2, "test setup: two shots logged before the green-focus press");
+  assert.strictEqual(shotEndWiring.hole, 2, "Shot End in green focus advances to the next hole, same as Hole Out");
+  assert.strictEqual(shotEndWiring.finalShots, 3, "Shot End in green focus records the final shot");
+  assert.ok(shotEndWiring.activeCleared, "no active shot after Shot End holes out in green focus");
   assert.ok(bubbleDrag.hitSized, "the drag hit covers the cluster (44px minimum)");
   assert.ok(bubbleDrag.aimMovedM > 5, "dragging the bubble moves the aim, got " + bubbleDrag.aimMovedM.toFixed(1) + "m");
   assert.ok(bubbleDrag.midDragFrameHeld, "the camera holds mid-drag");
   assert.ok(bubbleDrag.draggingCleared, "release clears the dragging state");
   assert.ok(bubbleDrag.reframedAfter, "release re-frames start→target");
+  assert.ok(holePicker.opened.panelShown, "tapping the hole number opens the picker panel");
+  assert.deepStrictEqual(holePicker.opened.buttons, ["1", "2", "3"], "the picker lists every hole the package has geometry for");
+  assert.strictEqual(holePicker.opened.activeButton, "1", "the current hole is marked active in the picker");
+  assert.strictEqual(holePicker.jumpedToHole, 3, "picking a hole jumps straight to it");
+  assert.ok(holePicker.panelClosedAfterPick, "picking a hole closes the picker");
+  assert.ok(backUndo.anyAfterPress, "a wind change must leave something to undo");
+  assert.strictEqual(backUndo.afterPress.level, backUndo.beforeWindPress.level + 1, "pressing wind bumps its level");
+  assert.ok(backUndo.afterPinSet && backUndo.afterPinSet.lat === -36.9166, "placing a pin must be readable back");
+  assert.strictEqual(backUndo.afterFirstBack.pin, backUndo.beforePin, "Back undoes the pin placement first (most recent action)");
+  assert.ok(backUndo.afterFirstBack.stillOnPlay, "undoing a pin placement must not leave the play screen");
+  assert.ok(backUndo.afterFirstBack.historyUnchanged, "undoing must not touch browser history");
+  assert.deepStrictEqual(backUndo.afterSecondBack.wind, backUndo.beforeWindPress, "a second Back undoes the wind change underneath it");
+  assert.ok(backUndo.afterSecondBack.stillOnPlay, "undoing a wind change must not leave the play screen");
+  assert.ok(!backUndo.afterSecondBack.anyLeft, "both actions undone → nothing left on the stack");
+  assert.ok(backUndo.fallthrough.historyBackCalled, "with nothing left to undo, Back falls through to leaving GPS play");
   assert.strictEqual(basemap.keylessNz, "osm", "no LINZ key → OSM even in NZ");
   assert.strictEqual(basemap.nz, "linz", "keyed NZ centre → LINZ aerial");
   assert.strictEqual(basemap.pebbleBeach, "naip", "US centre → NAIP aerial");
   assert.strictEqual(basemap.brisbane, "qld", "Queensland centre → QLD aerial");
   assert.strictEqual(basemap.london, "osm", "outside every aerial region → OSM, never empty tiles");
   assert.ok(basemap.naipTileIsBbox, "NAIP tiles are bbox exportImage requests");
+  assert.ok(noDefaultRouteClass, "the body must not default into a route class - that's a flash of the wrong screen before this page's own JS runs");
+  assert.strictEqual(handoffErrors.length, 0, "uncaught exceptions on the ?courseId= hand-off:\n" + handoffErrors.join("\n"));
+  assert.ok(handoff.onPlay, "a ?courseId= hand-off must land directly on the play route");
+  assert.ok(!handoff.onHome, "a ?courseId= hand-off must never show the home screen");
+  assert.strictEqual(handoff.courseKey, "akarana-golf-club", "the hand-off's courseId must reach app.play.start");
+  assert.strictEqual(handoff.hole, 1, "a ?courseId= hand-off opens on hole 1");
+  assert.ok(handoff.loadingScreenHidden, "the loading screen must hide once the course package has loaded and the hole is framed");
+
+  assert.strictEqual(storeErrors.length, 0, "uncaught exceptions in the course-library flow:\n" + storeErrors.join("\n"));
+  assert.strictEqual(firstVisit.savedMapType, "object", "a lite-geo-ready course auto-saves to the library with no prompt");
+  assert.strictEqual(firstVisit.hole, 1, "the first visit plays from the freshly-fetched package");
+  assert.strictEqual(fetchesAfterFirstVisit, 1, "the first visit fetches the package exactly once");
+  assert.strictEqual(secondVisit.courseKey, "store-test-course", "a second hand-off to the same course still starts play");
+  assert.strictEqual(secondVisit.hole, 1, "a second hand-off to the same course opens on hole 1 from the saved copy");
+  assert.strictEqual(fetchesAfterSecondVisit, fetchesAfterFirstVisit, "a second hand-off to an already-downloaded course must not re-fetch the package");
+  assert.ok(midRoundPrompt.barShown, "a published map appearing mid-round must prompt, not auto-switch");
+  assert.strictEqual(midRoundPrompt.stillObjectMapSaved, "object", "the saved copy must not change until the prompt is accepted");
+  assert.ok(afterDownload.barHidden, "accepting the prompt closes the update bar");
+  assert.strictEqual(afterDownload.savedMapType, "published", "accepting the prompt saves the published map as the new downloaded copy");
   assert.ok(play.mapDisplayed, "rule 2: #map must be visible by default on the play route");
   assert.strictEqual(play.hole, 1, "play must start on hole 1");
   assert.strictEqual(play.courseKey, "akarana-golf-club");

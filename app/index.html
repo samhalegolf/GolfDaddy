@@ -7,11 +7,19 @@
 <link rel="stylesheet" href="../assets/vendor/leaflet/leaflet.css">
 <link rel="stylesheet" href="styles.css">
 </head>
-<body class="route-home">
+<body>
 
+<!-- Visible from first paint (no route class needed), covering both the
+     "which route" decision and the course-package fetch on a hand-off.
+     boot.js hides it once there's something real to show. -->
+<div id="loadingScreen"><div class="spinner"></div></div>
+
+<!-- Entered exclusively via ?courseId=... from the course picker on the main
+     site - there is no picker or Play tile here any more. This screen only
+     shows if that hand-off didn't happen (e.g. a direct visit with no
+     courseId), so it's account status only, not a way into play. -->
 <section id="homeScreen" class="screen">
   <h1>Clarity Caddy</h1>
-  <button id="playTile" type="button">Play</button>
   <p id="accountState"></p>
   <button id="accountAction" type="button" class="linkButton"></button>
 </section>
@@ -27,16 +35,27 @@
   </form>
 </section>
 
-<section id="pickerScreen" class="screen">
-  <header class="pickerHeader">
-    <button id="pickerBack" type="button">Home</button>
-    <h2>Choose a course</h2>
-  </header>
-  <ul id="courseList"></ul>
-  <p id="pickerEmpty" class="hiddenState">No courses available. Check your connection and pull to retry.</p>
-</section>
-
 <section id="playScreen" class="screen">
+  <!-- The way in and out of GPS play: always on top, never hidden by a
+       route change within this page - the main site's picker is the only
+       other entry point, and these are the only exit. A single fixed column
+       stacks the nav row and the update-bar row in normal flow, so the bar
+       is never guessed into place under the nav row at a fixed pixel offset
+       - safe-area insets vary by device. -->
+  <div id="playTopBar">
+    <div id="globalNav">
+      <button id="globalBackBtn" type="button" aria-label="Back">Back</button>
+      <button id="globalHomeBtn" type="button" class="homeTextBtn" aria-label="Home">Home</button>
+    </div>
+    <!-- A published map arriving mid-round is a prompt, not an auto-switch -
+         the loading screen already covered the "available from the start"
+         case before play began. -->
+    <div id="mapUpdateBar" class="hiddenState">
+      <span id="mapUpdateLabel">Published map available</span>
+      <button id="mapUpdateDownload" type="button">Download</button>
+      <button id="mapUpdateDismiss" type="button" aria-label="Dismiss">&times;</button>
+    </div>
+  </div>
   <div id="map"></div>
   <div id="surfaceViewport">
     <img id="surfaceImage" alt="">
@@ -47,14 +66,9 @@
   </div>
   <button id="holeOutBtn" type="button">Hole Out</button>
   <div class="shotDock">
-    <button id="lockToggleBtn" type="button" aria-pressed="false">Lock</button>
-    <button id="shotEndBtn" type="button" class="hiddenState">Shot End</button>
-  </div>
-  <div class="playChrome">
-    <button id="backHome" type="button">Home</button>
-    <div><button id="prevHole" type="button">&#8249;</button>
-      <span id="holeNumber">1</span>
-      <button id="nextHole" type="button">&#8250;</button></div>
+    <button id="shotEndBtn" type="button" class="hiddenState" aria-label="Shot End">
+      <img src="../assets/home/clarity-caddy-shot-end-icon.png?v=0b094e11" alt="">
+    </button>
   </div>
   <button id="surfaceSource" type="button" class="hiddenState"></button>
   <pre id="surfaceMetaPanel" class="hiddenState"></pre>
@@ -71,6 +85,9 @@
     <button id="railPin" type="button" class="railBtn" aria-label="Pin" aria-pressed="false"><img src="../assets/icons/flag.svg" alt=""></button>
     <button id="railGpsPin" type="button" class="railBtn" aria-label="GPS locate"><img src="../assets/brand/cg-gps-pin.png?v=deb3313b" alt=""></button>
     <button id="railScorecard" type="button" class="railBtn" aria-label="Scorecard"><img src="../assets/icons/scorecard.png" alt=""></button>
+    <button id="railGpsSettings" type="button" class="railBtn" aria-label="GPS Settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+    </button>
   </div>
 
   <div id="pinGhost" class="hiddenState"><img src="../assets/icons/flag.svg" alt=""></div>
@@ -121,6 +138,20 @@
       <div id="scoreList" class="scoreList"></div>
     </div>
   </div>
+  <div class="playChrome">
+    <button id="nextHole" type="button" aria-label="Next hole">&#8250;</button>
+    <button id="holeNumber" type="button" aria-label="Choose a hole">1</button>
+    <button id="prevHole" type="button" aria-label="Previous hole">&#8249;</button>
+  </div>
+  <div id="holePickerPanel" class="sheet hiddenState">
+    <div class="sheetHeader">
+      <strong>Choose a hole</strong>
+      <button id="holePickerClose" type="button" class="sheetClose">Done</button>
+    </div>
+    <div class="sheetBody">
+      <div id="holePickerGrid" class="holePickerGrid"></div>
+    </div>
+  </div>
   <div id="distanceBar" class="hiddenState">
     <div id="shotRow" class="hiddenState">
       <div class="shotLine"><span id="clubLabel" class="distLabel">CLUB</span><span id="shotClub">–</span></div>
@@ -139,7 +170,9 @@
 <script src="../scripts/clarity-supabase-auth.js"></script>
 <script src="js/account.js"></script>
 <script src="js/course-key.js"></script>
+<script src="js/undo.js"></script>
 <script src="js/course-library.js"></script>
+<script src="js/course-store.js"></script>
 <script src="js/course-package.js"></script>
 <script src="js/scorecard.js"></script>
 <script src="js/basemap.js"></script>

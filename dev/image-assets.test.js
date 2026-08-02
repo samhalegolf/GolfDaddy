@@ -27,6 +27,8 @@ const EXPECTED = [
   { file: "assets/home/play.png", maxShipped: 768 },
   { file: "assets/home/bag.png", maxShipped: 768 },
   { file: "assets/home/profile.png", maxShipped: 768 },
+  { file: "assets/home/clarity-caddy-course-library-icon.png", maxShipped: 256 },
+  { file: "assets/home/clarity-caddy-shot-end-icon.png", maxShipped: 216 },
   { file: "assets/brand/cg-logo-white-g.png", maxShipped: 256 },
   { file: "assets/brand/cg-gps-pin.png", maxShipped: 256 },
   { file: "assets/brand/clarity-app-icon.png", maxShipped: 512 }
@@ -109,7 +111,7 @@ test("the home and brand payload stays small", () => {
       .filter((file) => fs.statSync(file).isFile())
       .reduce((inner, file) => inner + fs.statSync(file).size, 0), 0);
   assert.ok(
-    total < 2600 * 1024,
+    total < 2700 * 1024,
     "assets/home + assets/brand total " + Math.round(total / 1024) + "KB — they were 4457KB, do not let that return"
   );
 });

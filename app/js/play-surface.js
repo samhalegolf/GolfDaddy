@@ -64,19 +64,32 @@
     return null;
   }
 
-  /* Browser-side store. Wired in boot.js; inert under node. */
+  /* Browser-side store. Wired in boot.js; inert under node.
+
+     fetchRecord(courseKey) returns the WHOLE course's visual record — every
+     hole's asset in one call, not one hole's. That record is cached per
+     course (not per hole): every hole's answer is derived from the one
+     shared fetch, so switching to a hole that hasn't been visited yet this
+     session never re-downloads a record already in hand. */
   function createStore(deps) {
     var fetchRecord = deps.fetchRecord;   // async courseKey → course-visual record | null
+    var records = new Map();              // courseKey → Promise<record | null>
     var answers = new Map();              // "<courseKey>:h<hole>" → {state, asset}
 
     function keyFor(courseKey, hole) { return courseKey + ":h" + (Number(hole) || 1); }
+
+    function recordFor(courseKey) {
+      if (!records.has(courseKey)) {
+        records.set(courseKey, Promise.resolve().then(function () { return fetchRecord(courseKey); }).catch(function () { return null; }));
+      }
+      return records.get(courseKey);
+    }
 
     /* → {state: "published"|"none", asset} — idempotent per hole. */
     async function surfaceFor(courseKey, hole) {
       var key = keyFor(courseKey, hole);
       if (answers.has(key)) return answers.get(key);
-      var record = null;
-      try { record = await fetchRecord(courseKey); } catch (e) { record = null; }
+      var record = await recordFor(courseKey);
       var asset = holeSurfaceAsset(record, hole);
       var answer = asset ? { state: "published", asset: asset } : { state: "none", asset: null };
       /* A failed fetch and a genuine "none" both land here — cache it either
@@ -85,7 +98,11 @@
       return answer;
     }
 
+    /* Explicit refresh — drops both the shared record and every hole's
+       derived answer for this course, so the next surfaceFor() call
+       re-fetches instead of reusing a record known to be stale. */
     function forget(courseKey) {
+      records.delete(courseKey);
       Array.from(answers.keys()).forEach(function (k) {
         if (k.indexOf(courseKey + ":") === 0) answers.delete(k);
       });

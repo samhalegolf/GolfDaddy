@@ -22,6 +22,7 @@
 	  let mapperOsmAutoMapRunKey=null;
   let mapperPreviousMapSourceIndex=null;
   let courseLibraryFilter='';
+  let courseLibraryDetailKey=null;
   let courseLibraryDetailTab='greens';
   let courseFinderLayer=null;
   let mappedPlayAssist={armed:false,hole:null,courseKey:null,locked:false,lastFrameAt:0};
@@ -2972,17 +2973,6 @@
     toastSafe(object?`Green unassigned from H${h}`:`No allocated green on H${h}`);
     return object;
   }
-  function savedHoleCount(){
-    const store=loadStore();
-    const uid=userId();
-    return Object.values(store.courses||{})
-      .filter(course=>course.userId===uid)
-      .reduce((total,course)=>{
-        const objects=objectValues(course);
-        const legacy=Object.values(course.holes||{}).filter(h=>!objects.some(o=>o.confirmed&&Number(o.holeNumber)===Number(h.holeNumber)));
-        return total+objects.length+legacy.length;
-      },0);
-  }
 
   window.GolfDaddyCourseLibrary={
     saveOrUpdateUserGreen,
@@ -4750,27 +4740,41 @@
   }
 
   function profileCardHtml(){
-    const count=savedHoleCount();
-    return `${count} saved object${count===1?'':'s'}`;
+    const entries=downloadedCourseEntries();
+    if(!entries.length)return 'No courses downloaded';
+    const bytes=entries.reduce((sum,e)=>sum+(Number(e&&e.bytes)||0),0);
+    return `${entries.length} course${entries.length===1?'':'s'} downloaded · ${sizeLabel(bytes)}`;
   }
   function isCoachProfileCardView(){
     const kicker=document.querySelector('#gdProfileV67 .kicker');
     const coachEditing=/Coach Editing/i.test(kicker?.textContent||'');
     return coachEditing&&!(typeof window.gdCoachCanSeeProfileFeature==='function'&&window.gdCoachCanSeeProfileFeature('courses'));
   }
+  /* gd-auth-account-shell.js already renders this same card (same id) inline
+     wherever canShowProfileCard('courses') allows it, with a static "Recent
+     courses." placeholder - there is no download data at template-render
+     time to put there instead. Rather than fight over who owns the node,
+     this always brings whichever card is already in the DOM up to date with
+     the live download store, and only builds one from scratch on a surface
+     that never rendered it at all. */
   function gdCLInjectProfileCourseCard(){
-    const grid=document.querySelector('#gdProfileV67 .cards');
     const existing=document.getElementById('gdProfileCoursesCard');
     if(isCoachProfileCardView()){
       if(existing)existing.remove();
       return;
     }
-    if(!grid||document.getElementById('gdProfileCoursesCard'))return;
+    if(existing){
+      const span=existing.querySelector('span');
+      if(span)span.textContent=profileCardHtml();
+      return;
+    }
+    const grid=document.querySelector('#gdProfileV67 .cards');
+    if(!grid)return;
     const btn=document.createElement('button');
     btn.id='gdProfileCoursesCard';
     btn.className='card';
     btn.type='button';
-    btn.innerHTML=`<div class="gdCourseGreenIcon" aria-hidden="true"></div><div><strong>Courses</strong><span>${profileCardHtml()}</span></div>`;
+    btn.innerHTML=`<img class="gdCourseLibraryCardIcon" src="assets/home/clarity-caddy-course-library-icon.png?v=defd0c72" alt=""><div><strong>Courses</strong><span>${profileCardHtml()}</span></div>`;
     btn.onclick=function(ev){ev.preventDefault();openCourseLibraryPanel();return false;};
     grid.appendChild(btn);
   }
@@ -4817,7 +4821,7 @@
     el=document.createElement('div');
     el.id='gdCourseLibraryOverlay';
     el.className='gdCourseLibraryOverlay hidden';
-    el.innerHTML=`<div class="gdCourseLibrarySheet"><div class="gdCourseLibraryHead"><div><h2>Course Data</h2><p>Golf course data saved on this device, listed by course name.</p></div><button class="gdSheetClose" type="button" onclick="closeCourseLibraryPanel()">×</button></div><div class="gdCourseLibrarySearch"><input id="gdCourseLibrarySearchInput" type="search" placeholder="Search saved courses"><button id="gdCourseLibraryFindCourseBtn" type="button">Find course</button></div><div id="gdCourseLibraryList"></div></div>`;
+    el.innerHTML=`<div class="gdCourseLibrarySheet"><div class="gdCourseLibraryHead"><div><h2>Course Library</h2><p>Courses downloaded to this device for offline play.</p></div><button class="gdSheetClose" type="button" onclick="closeCourseLibraryPanel()">×</button></div><div class="gdCourseLibrarySearch"><input id="gdCourseLibrarySearchInput" type="search" placeholder="Search downloaded courses"><button id="gdCourseLibraryFindCourseBtn" type="button">Find course</button></div><div id="gdCourseLibraryList"></div></div>`;
     document.body.appendChild(el);
     el.addEventListener('click',ev=>{if(ev.target===el)closeCourseLibraryPanel();});
     el.querySelector('#gdCourseLibrarySearchInput').addEventListener('input',ev=>{
@@ -4862,81 +4866,53 @@
 	    objectValues(course).forEach(object=>{const n=validHoleNumber(object.holeNumber);if(n&&object.confirmed)set.add(n);});
 	    return Array.from(set).sort((a,b)=>a-b);
 	  }
-  function courseLibraryMappingAdmin(){
-    const actor=currentAdminActor();
-    const role=String((typeof gdGetAccountPermission==='function'&&gdGetAccountPermission())||actor.role||document.body?.dataset?.gdPermission||document.body?.dataset?.clarityAccountRole||document.body?.dataset?.accountRole||'player').toLowerCase();
-    return role==='admin'||role==='coach';
+  /* The device's actual downloaded-map store - written by /app/'s
+     course-store.js on the same origin, so what this panel shows is exactly
+     what /app/ will use next time this course is opened, not a separate
+     record of it. One record per course: {courseId, courseName, mapType:
+     "object"|"published", objectsVersion, mapVersion, pkg, savedAt, bytes}. */
+  const DOWNLOADED_COURSE_LIBRARY_KEY='clarity:course-library:v1';
+  function downloadedCourseEntries(){
+    try{
+      const raw=JSON.parse(localStorage.getItem(DOWNLOADED_COURSE_LIBRARY_KEY)||'{}');
+      return Object.keys(raw||{}).map(id=>raw[id]).filter(Boolean);
+    }catch(e){return [];}
   }
-  function courseRecentRows(){
-    const rows=(()=>{try{return JSON.parse(localStorage.getItem('gd_recent_course_picks_v1')||'[]');}catch(e){return [];}})();
-    return (Array.isArray(rows)?rows:[]).map(item=>{
-      const name=String(item?.name||item?.courseName||'').trim();
-      if(!name||/^manual gps$/i.test(name))return null;
-      return {
-        name,
-        courseName:name,
-        courseId:item?.courseId||item?.canonicalKey||slug(name),
-        canonicalKey:item?.canonicalKey||slug(name),
-        lat:Number.isFinite(Number(item?.lat))?Number(item.lat):null,
-        lng:Number.isFinite(Number(item?.lng))?Number(item.lng):null,
-        pickedAt:item?.pickedAt||item?.updatedAt||item?.createdAt||''
-      };
-    }).filter(Boolean);
+  function removeDownloadedCourseEntry(courseId){
+    try{
+      const raw=JSON.parse(localStorage.getItem(DOWNLOADED_COURSE_LIBRARY_KEY)||'{}');
+      if(!raw||!Object.prototype.hasOwnProperty.call(raw,courseId))return false;
+      delete raw[courseId];
+      localStorage.setItem(DOWNLOADED_COURSE_LIBRARY_KEY,JSON.stringify(raw));
+      return true;
+    }catch(e){return false;}
   }
-  function syncCourseLibraryHeading(mappingView){
-    const overlay=document.getElementById('gdCourseLibraryOverlay');
-    const title=overlay?.querySelector('.gdCourseLibraryHead h2');
-    const sub=overlay?.querySelector('.gdCourseLibraryHead p');
-    const input=overlay?.querySelector('#gdCourseLibrarySearchInput');
-    if(title)title.textContent=mappingView?'Course Data':'Recent Courses';
-    if(sub)sub.textContent=mappingView?'Golf course data saved on this device, listed by course name.':'Recently played or selected courses.';
-    if(input)input.placeholder=mappingView?'Search saved courses':'Search recent courses';
+  function mapTypeLabel(mapType){
+    return mapType==='published'?'Published map':'Course map';
   }
-  function openRecentCourse(row){
-    const course={
-      name:row.name,
-      courseName:row.name,
-      courseId:row.courseId||row.canonicalKey,
-      canonicalKey:row.canonicalKey||slug(row.name),
-      lat:Number.isFinite(Number(row.lat))?Number(row.lat):null,
-      lng:Number.isFinite(Number(row.lng))?Number(row.lng):null,
-      source:'recent-course'
-    };
-    if(typeof window.closeCourseLibraryPanel==='function')window.closeCourseLibraryPanel();
-    if(typeof window.gdOpenCoursePickerCourse==='function')return window.gdOpenCoursePickerCourse(course);
-    try{localStorage.setItem('gd_active_course_v1',JSON.stringify(course));sessionStorage.setItem('gd_assumed_course_name',course.name);}catch(e){}
-    if(typeof enterGpsModule==='function')return enterGpsModule({fromCoursePicker:true,selectedCourse:course});
-    return false;
+  /* Background freshness check against the same lightweight manifest /app/
+     uses (fetchCourseLibraryManifest, above) - the panel opens instantly from
+     what is already on the device, then a badge appears if the server turns
+     out to have moved on. Mirrors app.courseStore.updateAvailable() in
+     app/js/course-store.js exactly, since it is answering the same question. */
+  let courseLibraryManifestById=null;
+  function downloadedEntryHasUpdate(entry){
+    const remote=courseLibraryManifestById&&courseLibraryManifestById[entry.courseId];
+    if(!remote)return false;
+    const newerObjects=!!remote.objects_version&&(!entry.objectsVersion||String(remote.objects_version)>String(entry.objectsVersion));
+    const newerMap=Number.isFinite(Number(remote.clarity_map_version))&&Number(remote.clarity_map_version)>Number(entry.mapVersion||0);
+    return newerObjects||newerMap;
   }
-  function renderCourseLibraryRecents(){
-    const list=document.getElementById('gdCourseLibraryList');
-    if(!list)return;
-    syncCourseLibraryHeading(false);
-    const search=document.getElementById('gdCourseLibrarySearchInput');
-    if(search&&search.value!==courseLibraryFilter)search.value=courseLibraryFilter;
-    const filter=normalizeCourseName(courseLibraryFilter);
-    const rows=courseRecentRows().filter(row=>!filter||normalizeCourseName(row.name).includes(filter));
-    list.innerHTML='';
-    if(!rows.length){
-      list.innerHTML=`<div class="gdCourseCard"><strong>${filter?'No matching recents':'No recent courses yet'}</strong><span>${filter?'Try another search.':'Play or select a course and it will appear here.'}</span></div>`;
-      return;
-    }
-    rows.forEach(row=>{
-      const card=document.createElement('button');
-      card.className='gdCourseCard gdRecentCourseCard';
-      card.type='button';
-      const meta=row.pickedAt?`Recent · ${dateLabel(row.pickedAt)}`:'Recent';
-      card.innerHTML=`<strong>${esc(row.name)}</strong><span>${esc(meta)}</span>`;
-      card.onclick=()=>openRecentCourse(row);
-      list.appendChild(card);
+  function refreshCourseLibraryManifest(){
+    fetchCourseLibraryManifest().then(manifest=>{
+      if(!manifest||!Array.isArray(manifest.courses))return;
+      const byId={};
+      manifest.courses.forEach(row=>{if(row&&row.course_id)byId[row.course_id]=row;});
+      courseLibraryManifestById=byId;
+      const overlay=document.getElementById('gdCourseLibraryOverlay');
+      if(overlay&&!overlay.classList.contains('hidden'))renderCourseLibraryPanel(courseLibraryDetailKey);
     });
   }
-  /* The library is a window onto what this device has stored, and nothing more.
-     It used to be a front-end for the mapper - per-hole cards, object rows,
-     assign/unassign, publish, "Mapping Mode" - which put mapping vocabulary in
-     front of anyone who opened it, and outlived the mapper itself. Course data is
-     stored under the course name, so that is what this shows: the name, how much
-     sits under it, and when it last changed. */
   function courseStorageStats(course){
     const s=courseSummary(course);
     /* Measured on the record as stored, so the number answers "what is this
@@ -5005,35 +4981,40 @@
     saveStore(fresh);
     return true;
   }
+  /* Netflix-downloads model: what's on the device shows instantly from local
+     storage, an "update available" badge only appears once the background
+     manifest check (refreshCourseLibraryManifest, triggered on open) has
+     actually heard back from the server - never guessed at, never blocking
+     the initial render. */
   function renderCourseLibraryPanel(detailKey=null){
     const list=document.getElementById('gdCourseLibraryList');
     if(!list)return;
-    if(!courseLibraryMappingAdmin()){
-      renderCourseLibraryRecents();
-      return;
-    }
-    syncCourseLibraryHeading(true);
+    courseLibraryDetailKey=detailKey;
+    const overlay=document.getElementById('gdCourseLibraryOverlay');
+    const title=overlay&&overlay.querySelector('.gdCourseLibraryHead h2');
+    const sub=overlay&&overlay.querySelector('.gdCourseLibraryHead p');
+    if(title)title.textContent='Course Library';
+    if(sub)sub.textContent='Courses downloaded to this device for offline play.';
     const search=document.getElementById('gdCourseLibrarySearchInput');
     if(search&&search.value!==courseLibraryFilter)search.value=courseLibraryFilter;
-    const uid=userId();
     const filter=normalizeCourseName(courseLibraryFilter);
-    const courses=libraryCourses(uid)
-      .filter(c=>!filter||normalizeCourseName(c.courseName).includes(filter))
+    const entries=downloadedCourseEntries()
+      .filter(e=>!filter||normalizeCourseName(e.courseName).includes(filter))
       .sort((a,b)=>String(a.courseName).localeCompare(String(b.courseName)));
-    if(!courses.length){
-      list.innerHTML=`<div class="gdCourseCard"><strong>${filter?'No matching courses':'Nothing saved yet'}</strong><span>${filter?'Try another search.':'Course data appears here once a course has been played.'}</span></div>`;
+    if(!entries.length){
+      list.innerHTML=`<div class="gdCourseCard"><strong>${filter?'No matching courses':'No courses downloaded yet'}</strong><span>${filter?'Try another search.':'Courses download automatically the first time you play them.'}</span></div>`;
       return;
     }
     if(detailKey){
-      const course=findLibraryCourse(detailKey,uid);
-      if(!course){renderCourseLibraryPanel();return;}
-      const stats=courseStorageStats(course);
-      list.innerHTML=`<div class="gdCourseCard"><strong>${esc(course.courseName)}</strong><span>${esc(storageSummaryLine(stats))}</span><div class="gdCourseActions"><button type="button" data-action="back">Back</button><button class="danger" type="button" data-action="remove">Remove from device</button></div></div>`;
+      const entry=entries.find(e=>e.courseId===detailKey)||downloadedCourseEntries().find(e=>e.courseId===detailKey);
+      if(!entry){renderCourseLibraryPanel();return;}
+      const stale=downloadedEntryHasUpdate(entry);
+      list.innerHTML=`<div class="gdCourseCard${entry.mapType==='published'?' published':''}"><strong>${esc(entry.courseName)}</strong><span>${esc(mapTypeLabel(entry.mapType))} · ${esc(sizeLabel(entry.bytes))}</span><div class="gdCourseActions"><button type="button" data-action="back">Back</button><button class="danger" type="button" data-action="remove">Remove from device</button></div></div>`;
       const facts=[
-        ['Holes with data',String(stats.holes)],
-        ['Saved points',String(stats.points)],
-        ['Storage used',sizeLabel(stats.bytes)],
-        ['Last updated',stats.updated?dateLabel(stats.updated):'—']
+        ['Map type',mapTypeLabel(entry.mapType)],
+        ['Storage used',sizeLabel(entry.bytes)],
+        ['Downloaded',entry.savedAt?dateLabel(entry.savedAt):'—'],
+        ['Status',stale?'Update available':'Up to date']
       ];
       list.insertAdjacentHTML('beforeend',`<div class="gdCourseCard gdCourseStorageFacts">${facts.map(([k,v])=>`<div class="gdCourseStorageRow"><span>${esc(k)}</span><strong>${esc(v)}</strong></div>`).join('')}</div>`);
       list.querySelector('[data-action="back"]').onclick=()=>renderCourseLibraryPanel();
@@ -5049,19 +5030,23 @@
           setTimeout(()=>{if(armed){armed=false;removeBtn.textContent='Remove from device';}},4000);
           return;
         }
-        const removed=removeLibraryCourse(course.id);
-        if(!removed)toastSafe('Nothing stored on this device for that course');
+        removeDownloadedCourseEntry(entry.courseId);
+        gdCLRefreshProfileCard();
         renderCourseLibraryPanel();
       };
       return;
     }
     list.innerHTML='';
-    courses.forEach(course=>{
+    entries.forEach(entry=>{
+      const stale=downloadedEntryHasUpdate(entry);
       const card=document.createElement('button');
-      card.className='gdCourseCard';
+      card.className='gdCourseCard'+(entry.mapType==='published'?' published':'');
       card.type='button';
-      card.innerHTML=`<strong>${esc(course.courseName)}</strong><span>${esc(storageSummaryLine(courseStorageStats(course)))}</span>`;
-      card.onclick=()=>renderCourseLibraryPanel(course.id);
+      const meta=[sizeLabel(entry.bytes),entry.savedAt?dateLabel(entry.savedAt):null].filter(Boolean).join(' · ');
+      const typeBadge=`<span class="${entry.mapType==='published'?'gdSavedGreenBadge':'gdCourseObjectBadge'}">${esc(mapTypeLabel(entry.mapType))}</span>`;
+      const updateBadge=stale?`<span class="gdCourseObjectBadge">Update available</span>`:'';
+      card.innerHTML=`<strong>${esc(entry.courseName)}</strong><span>${esc(meta)}${typeBadge}${updateBadge}</span>`;
+      card.onclick=()=>renderCourseLibraryPanel(entry.courseId);
       list.appendChild(card);
     });
   }
@@ -5069,6 +5054,7 @@
   window.openCourseLibraryPanel=function(){
     ensureCourseLibraryOverlay().classList.remove('hidden');
     renderCourseLibraryPanel();
+    refreshCourseLibraryManifest();
   };
   window.closeCourseLibraryPanel=function(){
     document.getElementById('gdCourseLibraryOverlay')?.classList.add('hidden');

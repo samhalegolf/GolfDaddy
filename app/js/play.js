@@ -22,7 +22,12 @@
   var store = null;
   var viewLocked = false;   // Lock/Unlock: freezes map gestures + holds the surface frame
 
-  var GPS_ADOPT_RADIUS_M = 1500;
+  /* A rough course-footprint radius from the course centre, not from any one
+     hole's geometry - see maybeAdoptGpsFix. The question this answers is "is
+     this person actually at the golf course" (vs. checking the app from home),
+     not "are they on this specific hole" - a live fix anywhere on the grounds
+     should count, including while walking between holes. */
+  var GPS_ADOPT_RADIUS_M = 800;
 
   var GESTURE_HANDLERS = ["dragging", "touchZoom", "doubleClickZoom", "scrollWheelZoom", "boxZoom", "keyboard"];
 
@@ -452,21 +457,25 @@
     }
   }
 
-  /* A real fix only becomes the position when it is plausibly ON this hole —
-     within 1.5km of its geometry. Off-course (testing from the couch), the fix
-     is simply ignored and head-to-tee / tap-to-stand keep driving. With no
-     geometry to judge against, a fix is adopted only if nothing has placed the
-     player yet, so it never clobbers a deliberate tap. */
+  /* A live fix only starts driving position once it's confirmed to be
+     actually at the golf course — checked once per round against the course
+     centre, not per hole (so it isn't re-litigated, and wrongly rejected,
+     while walking between holes). Off-course (testing from the couch, or the
+     centre being unknown because the hand-off didn't carry one), the fix is
+     simply ignored and head-to-tee / tap-to-stand keep driving — an
+     unverified fix is never trusted as a fallback position. Once confirmed,
+     every subsequent fix this round is trusted without re-checking distance:
+     the player is expected to move around the course. */
+  var liveAtCourse = false;
   function maybeAdoptGpsFix(fix) {
     if (!fix) return;
-    var rec = current.rec;
-    var anchor = rec && (rec.green || rec.tee);
-    if (anchor) {
-      var away = app.distance.haversineMeters(fix, anchor);
-      if (Number.isFinite(away) && away <= GPS_ADOPT_RADIUS_M) app.position.set(fix, "gps");
-      return;
-    }
-    if (!app.position.current()) app.position.set(fix, "gps");
+    if (liveAtCourse) { app.position.set(fix, "gps"); return; }
+    var centre = current.centre;
+    if (!centre) return;
+    var away = app.distance.haversineMeters(fix, centre);
+    if (!Number.isFinite(away) || away > GPS_ADOPT_RADIUS_M) return;
+    liveAtCourse = true;
+    app.position.set(fix, "gps");
   }
 
   function wirePosition() {
@@ -631,9 +640,19 @@
        player's current position (the map-tap fallback, off-course testing
        included). Promoting it with source "shotend" is what makes it a
        deliberate placement; app.position.set does the rest through the
-       onChange wiring above, same as a tap. */
+       onChange wiring above, same as a tap.
+
+       In green focus, ending a shot there IS holing out - same as pressing
+       Hole Out. Uses the position dot itself (not a raw GPS fix, which can
+       differ slightly from what's actually on screen), matching how
+       holeOutBtn below reads it. */
     var shotEnd = document.getElementById("shotEndBtn");
     if (shotEnd) shotEnd.addEventListener("click", function () {
+      if (frameStage === "zoom") {
+        app.shot.holeOut(app.position.current());
+        app.play.nextHole();
+        return;
+      }
       var fix = (app.gps && app.gps.lastFix()) || app.position.current();
       if (fix) app.position.set(fix, "shotend");
     });
@@ -863,6 +882,7 @@
        No map is created here: the hole decides its own presentation. */
     async start(courseKey, pkg, centre) {
       transitionToken += 1;
+      liveAtCourse = false;
       var lat = Number(centre && centre.lat), lng = Number(centre && centre.lng);
       current = {
         courseKey: app.courseKey(courseKey), pkg: pkg || null, hole: 0, rec: null,
@@ -879,6 +899,7 @@
     async goHole(hole) {
       var token = ++transitionToken;
       setViewLocked(false);   // a new hole always opens unlocked
+      if (app.undo) app.undo.clear();   // undoing into a different hole's state would be more confusing than nothing left to undo
       current.hole = Number(hole) || 1;
       current.rec = holeRecord(current.pkg, current.hole);
       var holeEl = document.getElementById("holeNumber");
@@ -921,7 +942,9 @@
     },
     stop() {
       transitionToken += 1;
+      liveAtCourse = false;
       setViewLocked(false);
+      if (app.undo) app.undo.clear();
       if (app.gps) app.gps.stop();
       app.position.clear();
       clearSurface();
@@ -931,6 +954,19 @@
       current = { courseKey: null, pkg: null, hole: 0, rec: null, nines: null, centre: null };
     },
     state: function () { return { courseKey: current.courseKey, hole: current.hole, nines: current.nines }; },
+    /* Every hole the player can jump straight to, in play order - the
+       selected nines' holes when the course has more than two, otherwise
+       every hole the package actually has geometry for (falling back to 18,
+       the plain sequence every course used to have, if the package hasn't
+       loaded yet). */
+    availableHoles: function () {
+      if (current.nines) return current.nines.holesInPlay;
+      var holes = current.pkg && Array.isArray(current.pkg.holes) ? current.pkg.holes : [];
+      var max = holes.reduce(function (m, h) { return Math.max(m, Number(h && h.holeNumber) || 0); }, 0);
+      var out = [];
+      for (var h = 1; h <= (max || 18); h++) out.push(h);
+      return out;
+    },
     /* Steps through the selected nines' holes in order when the course has
        more than two; otherwise the plain 1..18 sequence every course used
        to have. */
@@ -959,6 +995,18 @@
       current.nines = updated;
       if (updated.holesInPlay.indexOf(current.hole) === -1) this.goHole(updated.holesInPlay[0]);
       return updated;
+    },
+    /* A published map arrived after the round started (course-store's
+       background freshness check). Re-frames the current hole under the new
+       package so the live-map presentation switches to the downloaded
+       surface without restarting the round - shot.startHole keeps a hole's
+       already-recorded shots, it only clears the in-flight aim, so nothing
+       already played is lost. */
+    updatePackage: function (pkg) {
+      if (!pkg) return;
+      current.pkg = pkg;
+      if (app.nines) current.nines = app.nines.forPackage(current.courseKey, pkg);
+      return this.goHole(current.hole);
     },
     /* Viewport client coords → a course lat/lng, on whichever presentation is
        up — the second pin-placement method (drag the rail icon straight onto

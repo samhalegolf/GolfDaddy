@@ -1065,7 +1065,7 @@
             <div><strong>${esc(playerPrefix ? `${playerPrefix} Shot Data` : 'Shot Data')}</strong><span>Compare course and practice patterns.</span></div>
           </button>` : ''}
           ${canShowProfileCard('courses') ? `<button class="card" id="gdProfileCoursesCard" type="button" onclick="try{openCourseLibraryPanel()}catch(e){}">
-            <div class="gdCourseGreenIcon" aria-hidden="true"></div>
+            <img class="gdCourseLibraryCardIcon" src="assets/home/clarity-caddy-course-library-icon.png?v=defd0c72" alt="">
             <div><strong>Courses</strong><span>Recent courses.</span></div>
           </button>` : ''}
           ${!coachViewingPlayer ? `<button class="card" onclick="gd67OpenMembershipSettings()">
