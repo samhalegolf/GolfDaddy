@@ -22,7 +22,12 @@
   var store = null;
   var viewLocked = false;   // Lock/Unlock: freezes map gestures + holds the surface frame
 
-  var GPS_ADOPT_RADIUS_M = 1500;
+  /* A rough course-footprint radius from the course centre, not from any one
+     hole's geometry - see maybeAdoptGpsFix. The question this answers is "is
+     this person actually at the golf course" (vs. checking the app from home),
+     not "are they on this specific hole" - a live fix anywhere on the grounds
+     should count, including while walking between holes. */
+  var GPS_ADOPT_RADIUS_M = 800;
 
   var GESTURE_HANDLERS = ["dragging", "touchZoom", "doubleClickZoom", "scrollWheelZoom", "boxZoom", "keyboard"];
 
@@ -452,21 +457,25 @@
     }
   }
 
-  /* A real fix only becomes the position when it is plausibly ON this hole —
-     within 1.5km of its geometry. Off-course (testing from the couch), the fix
-     is simply ignored and head-to-tee / tap-to-stand keep driving. With no
-     geometry to judge against, a fix is adopted only if nothing has placed the
-     player yet, so it never clobbers a deliberate tap. */
+  /* A live fix only starts driving position once it's confirmed to be
+     actually at the golf course — checked once per round against the course
+     centre, not per hole (so it isn't re-litigated, and wrongly rejected,
+     while walking between holes). Off-course (testing from the couch, or the
+     centre being unknown because the hand-off didn't carry one), the fix is
+     simply ignored and head-to-tee / tap-to-stand keep driving — an
+     unverified fix is never trusted as a fallback position. Once confirmed,
+     every subsequent fix this round is trusted without re-checking distance:
+     the player is expected to move around the course. */
+  var liveAtCourse = false;
   function maybeAdoptGpsFix(fix) {
     if (!fix) return;
-    var rec = current.rec;
-    var anchor = rec && (rec.green || rec.tee);
-    if (anchor) {
-      var away = app.distance.haversineMeters(fix, anchor);
-      if (Number.isFinite(away) && away <= GPS_ADOPT_RADIUS_M) app.position.set(fix, "gps");
-      return;
-    }
-    if (!app.position.current()) app.position.set(fix, "gps");
+    if (liveAtCourse) { app.position.set(fix, "gps"); return; }
+    var centre = current.centre;
+    if (!centre) return;
+    var away = app.distance.haversineMeters(fix, centre);
+    if (!Number.isFinite(away) || away > GPS_ADOPT_RADIUS_M) return;
+    liveAtCourse = true;
+    app.position.set(fix, "gps");
   }
 
   function wirePosition() {
@@ -863,6 +872,7 @@
        No map is created here: the hole decides its own presentation. */
     async start(courseKey, pkg, centre) {
       transitionToken += 1;
+      liveAtCourse = false;
       var lat = Number(centre && centre.lat), lng = Number(centre && centre.lng);
       current = {
         courseKey: app.courseKey(courseKey), pkg: pkg || null, hole: 0, rec: null,
@@ -921,6 +931,7 @@
     },
     stop() {
       transitionToken += 1;
+      liveAtCourse = false;
       setViewLocked(false);
       if (app.gps) app.gps.stop();
       app.position.clear();
