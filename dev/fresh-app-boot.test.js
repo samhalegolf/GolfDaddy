@@ -692,6 +692,50 @@ async function bootCheck() {
     };
   }, AKARANA_H1);
 
+  /* Back-as-undo: during play, Back steps off the most recent wind/pin
+     change instead of leaving the screen - only once there is nothing left
+     to undo does it fall through to leaving GPS play. */
+  const backUndo = await page.evaluate(async () => {
+    const app = window.ClarityApp;
+    const eng = window.GDBubbleEngine;
+    app.undo.clear();
+    eng.setWind(0, 1);   // seed a wind level directly - matches a real first press only opening the compass, not setting state
+    const beforeWindPress = eng.windState();
+    app.wind.press();   // level 1 -> 2, pushes an undo entry
+    const afterPress = eng.windState();
+    const anyAfterPress = app.undo.any();
+
+    const beforePin = app.pin.current();
+    app.pin.set({ lat: -36.9166, lng: 174.7393 });
+    const afterPinSet = app.pin.current();
+
+    const historyLenBefore = window.history.length;
+    document.getElementById("globalBackBtn").click();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const afterFirstBack = {
+      pin: app.pin.current(),
+      stillOnPlay: document.body.classList.contains("route-play"),
+      historyUnchanged: window.history.length === historyLenBefore
+    };
+
+    document.getElementById("globalBackBtn").click();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const afterSecondBack = {
+      wind: eng.windState(),
+      stillOnPlay: document.body.classList.contains("route-play"),
+      anyLeft: app.undo.any()
+    };
+
+    window.__historyBackCalled = false;
+    const origBack = window.history.back;
+    window.history.back = function () { window.__historyBackCalled = true; };
+    document.getElementById("globalBackBtn").click();
+    const fallthrough = { historyBackCalled: window.__historyBackCalled };
+    window.history.back = origBack;
+
+    return { beforeWindPress, afterPress, anyAfterPress, beforePin, afterPinSet, afterFirstBack, afterSecondBack, fallthrough };
+  });
+
   /* Base imagery policy: aerial only inside a licensed source's coverage —
      LINZ (keyed, NZ), NAIP (US), QLD (AU) — and the honest OSM fallback
      everywhere else, including NZ when the key never arrived. */
@@ -875,6 +919,16 @@ async function bootCheck() {
   assert.strictEqual(holePicker.opened.activeButton, "1", "the current hole is marked active in the picker");
   assert.strictEqual(holePicker.jumpedToHole, 3, "picking a hole jumps straight to it");
   assert.ok(holePicker.panelClosedAfterPick, "picking a hole closes the picker");
+  assert.ok(backUndo.anyAfterPress, "a wind change must leave something to undo");
+  assert.strictEqual(backUndo.afterPress.level, backUndo.beforeWindPress.level + 1, "pressing wind bumps its level");
+  assert.ok(backUndo.afterPinSet && backUndo.afterPinSet.lat === -36.9166, "placing a pin must be readable back");
+  assert.strictEqual(backUndo.afterFirstBack.pin, backUndo.beforePin, "Back undoes the pin placement first (most recent action)");
+  assert.ok(backUndo.afterFirstBack.stillOnPlay, "undoing a pin placement must not leave the play screen");
+  assert.ok(backUndo.afterFirstBack.historyUnchanged, "undoing must not touch browser history");
+  assert.deepStrictEqual(backUndo.afterSecondBack.wind, backUndo.beforeWindPress, "a second Back undoes the wind change underneath it");
+  assert.ok(backUndo.afterSecondBack.stillOnPlay, "undoing a wind change must not leave the play screen");
+  assert.ok(!backUndo.afterSecondBack.anyLeft, "both actions undone → nothing left on the stack");
+  assert.ok(backUndo.fallthrough.historyBackCalled, "with nothing left to undo, Back falls through to leaving GPS play");
   assert.strictEqual(basemap.keylessNz, "osm", "no LINZ key → OSM even in NZ");
   assert.strictEqual(basemap.nz, "linz", "keyed NZ centre → LINZ aerial");
   assert.strictEqual(basemap.pebbleBeach, "naip", "US centre → NAIP aerial");

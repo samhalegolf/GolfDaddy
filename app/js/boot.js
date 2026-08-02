@@ -42,7 +42,11 @@
   function exitToMainSite() {
     window.location.href = "/";
   }
+  /* During play, Back undoes the most recent wind/pin change before it
+     leaves the screen - only once there is nothing left to undo does it
+     fall through to leaving GPS play the way it always has. */
   function exitBack() {
+    if (app.undo && app.undo.pop()) return;
     if (window.history.length > 1) window.history.back();
     else exitToMainSite();
   }

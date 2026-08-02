@@ -33,10 +33,17 @@
     set: function (pos) {
       var here = pt(pos);
       if (!here) return;
+      var atHole = hole, prev = byHole[hole] || null;
+      if (app.undo) app.undo.push(function () {
+        if (prev) byHole[atHole] = prev; else delete byHole[atHole];
+        notify();
+      });
       byHole[hole] = here;
       notify();
     },
     clear: function () {
+      var atHole = hole, prev = byHole[hole] || null;
+      if (prev && app.undo) app.undo.push(function () { byHole[atHole] = prev; notify(); });
       delete byHole[hole];
       notify();
     },

@@ -889,6 +889,7 @@
     async goHole(hole) {
       var token = ++transitionToken;
       setViewLocked(false);   // a new hole always opens unlocked
+      if (app.undo) app.undo.clear();   // undoing into a different hole's state would be more confusing than nothing left to undo
       current.hole = Number(hole) || 1;
       current.rec = holeRecord(current.pkg, current.hole);
       var holeEl = document.getElementById("holeNumber");
@@ -933,6 +934,7 @@
       transitionToken += 1;
       liveAtCourse = false;
       setViewLocked(false);
+      if (app.undo) app.undo.clear();
       if (app.gps) app.gps.stop();
       app.position.clear();
       clearSurface();
