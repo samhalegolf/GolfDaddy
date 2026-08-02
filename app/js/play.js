@@ -984,6 +984,18 @@
       if (updated.holesInPlay.indexOf(current.hole) === -1) this.goHole(updated.holesInPlay[0]);
       return updated;
     },
+    /* A published map arrived after the round started (course-store's
+       background freshness check). Re-frames the current hole under the new
+       package so the live-map presentation switches to the downloaded
+       surface without restarting the round - shot.startHole keeps a hole's
+       already-recorded shots, it only clears the in-flight aim, so nothing
+       already played is lost. */
+    updatePackage: function (pkg) {
+      if (!pkg) return;
+      current.pkg = pkg;
+      if (app.nines) current.nines = app.nines.forPackage(current.courseKey, pkg);
+      return this.goHole(current.hole);
+    },
     /* Viewport client coords → a course lat/lng, on whichever presentation is
        up — the second pin-placement method (drag the rail icon straight onto
        the map/surface and drop) needs this from outside play.js's own closure,

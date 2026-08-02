@@ -2,7 +2,12 @@
    small row per published course (course_id, course_name, course_lat,
    course_lng, hole_count, versions) — no payloads. Fail-open: any failure
    resolves to [], and the picker shows its empty state; the server being
-   unreachable is a normal outcome, not an error path. */
+   unreachable is a normal outcome, not an error path.
+
+   objectsVersion/mapVersion are carried through (the server already
+   computes them; dropping them here just meant reinventing the freshness
+   check elsewhere) so app.courseStore.updateAvailable() has something to
+   compare a downloaded copy against without a second network round-trip. */
 (function () {
   "use strict";
   var app = (window.ClarityApp = window.ClarityApp || {});
@@ -22,7 +27,9 @@
             courseName: String(row.course_name),
             courseLat: Number(row.course_lat),
             courseLng: Number(row.course_lng),
-            holeCount: Number(row.hole_count) || null
+            holeCount: Number(row.hole_count) || null,
+            objectsVersion: row.objects_version || null,
+            mapVersion: Number.isFinite(Number(row.clarity_map_version)) ? Number(row.clarity_map_version) : null
           };
         })
         .sort(function (a, b) { return a.courseName.localeCompare(b.courseName); });

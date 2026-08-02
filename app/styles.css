@@ -162,8 +162,16 @@ body[data-frame-stage="zoom"] #holeOutBtn { display: block; }
 /* The way in and out of GPS play - always on top (z-index above everything
    else in the play screen), never hidden by a route change within this
    page. */
-#globalNav { position: fixed; top: 0; left: 0; right: 0; z-index: 700; display: flex; align-items: center; gap: 4px; padding: calc(env(safe-area-inset-top, 0px) + 10px) 12px 10px; background: rgba(7, 16, 11, .92); }
+#playTopBar { position: fixed; top: 0; left: 0; right: 0; z-index: 700; display: flex; flex-direction: column; }
+#globalNav { display: flex; align-items: center; gap: 4px; padding: calc(env(safe-area-inset-top, 0px) + 10px) 12px 10px; background: rgba(7, 16, 11, .92); }
 #globalNav button { border: 0; border-radius: 10px; padding: 10px 14px; background: rgba(255, 255, 255, .12); color: #f2f7f2; font-size: 15px; }
+
+#mapUpdateBar { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: rgba(31, 211, 109, .16); border-bottom: 1px solid rgba(31, 211, 109, .3); }
+#mapUpdateBar.hiddenState { display: none; }
+#mapUpdateBar span { flex: 1; font-size: 14px; }
+#mapUpdateBar button { border: 0; border-radius: 8px; padding: 6px 12px; font-size: 13px; }
+#mapUpdateDownload { background: #1fd36d; color: #06110b; font-weight: 700; }
+#mapUpdateDismiss { background: rgba(255, 255, 255, .12); color: #f2f7f2; padding: 6px 10px; }
 
 /* Bottom-left, directly above the shot card (#distanceBar: left 12px,
    bottom safe-area+120px, 142px tall) - same left edge, stacked just above

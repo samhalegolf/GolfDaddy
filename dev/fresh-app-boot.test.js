@@ -735,6 +735,69 @@ async function bootCheck() {
   }));
   await handoffPage.close();
 
+  /* Course library: a course auto-downloads on its first visit with no
+     prompt (the auto-download bias only needs confirmation for a map
+     arriving mid-round, not one already there when play starts) - and a
+     second hand-off to the SAME course must load from that saved copy with
+     no second network call. A published map that arrives mid-round is a
+     PROMPT, and only becomes the saved copy once that prompt is accepted. */
+  const storeContext = await browser.newContext();
+  const storePage = await storeContext.newPage();
+  const storeErrors = [];
+  storePage.on("pageerror", (err) => storeErrors.push(err && err.message || String(err)));
+  let packageFetches = 0;
+  let packageStatus = "lite-geo-ready";
+  await storePage.route("**/api/course-package**", (route) => {
+    packageFetches += 1;
+    const url = new URL(route.request().url());
+    const courseId = url.searchParams.get("courseId");
+    const body = packageStatus === "full-map-ready"
+      ? {
+          courseId, status: "full-map-ready", packageVersion: 7, geometryVersion: "2026-08-01T00:00:00Z",
+          holes: [{ holeNumber: 1, geometry: { tee: AKARANA_H1.tee, green: AKARANA_H1.green, greenShape: [], route: [] }, visual: null }]
+        }
+      : {
+          courseId, status: "lite-geo-ready", geometryVersion: "2026-08-01T00:00:00Z",
+          holes: [{ holeNumber: 1, tee: AKARANA_H1.tee, green: AKARANA_H1.green, greenShape: [], route: [] }]
+        };
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
+  });
+  const storeUrl = "http://127.0.0.1:" + port
+    + "/app/index.html?courseId=store-test-course&courseName=Store+Test&courseLat=-36.9175&courseLng=174.74";
+
+  await storePage.goto(storeUrl, { waitUntil: "load" });
+  await storePage.waitForTimeout(400);
+  const firstVisit = await storePage.evaluate(() => {
+    const saved = window.ClarityApp.courseStore.load("store-test-course");
+    return { fetchesSoFar: undefined, savedMapType: saved && saved.mapType, hole: window.ClarityApp.play.state().hole };
+  });
+  const fetchesAfterFirstVisit = packageFetches;
+
+  await storePage.goto(storeUrl, { waitUntil: "load" });
+  await storePage.waitForTimeout(400);
+  const secondVisit = await storePage.evaluate(() => ({
+    courseKey: window.ClarityApp.play.state().courseKey,
+    hole: window.ClarityApp.play.state().hole
+  }));
+  const fetchesAfterSecondVisit = packageFetches;
+
+  /* Now simulate the published map appearing mid-round: the next hole
+     change's background check should find it and prompt, not auto-switch. */
+  packageStatus = "full-map-ready";
+  await storePage.evaluate(() => document.getElementById("nextHole").click());
+  await storePage.waitForTimeout(400);
+  const midRoundPrompt = await storePage.evaluate(() => ({
+    barShown: !document.getElementById("mapUpdateBar").classList.contains("hiddenState"),
+    stillObjectMapSaved: window.ClarityApp.courseStore.load("store-test-course").mapType
+  }));
+  await storePage.evaluate(() => document.getElementById("mapUpdateDownload").click());
+  await storePage.waitForTimeout(200);
+  const afterDownload = await storePage.evaluate(() => ({
+    barHidden: document.getElementById("mapUpdateBar").classList.contains("hiddenState"),
+    savedMapType: window.ClarityApp.courseStore.load("store-test-course").mapType
+  }));
+  await storePage.close();
+
   await browser.close();
   server.close();
 
@@ -825,6 +888,18 @@ async function bootCheck() {
   assert.strictEqual(handoff.courseKey, "akarana-golf-club", "the hand-off's courseId must reach app.play.start");
   assert.strictEqual(handoff.hole, 1, "a ?courseId= hand-off opens on hole 1");
   assert.ok(handoff.loadingScreenHidden, "the loading screen must hide once the course package has loaded and the hole is framed");
+
+  assert.strictEqual(storeErrors.length, 0, "uncaught exceptions in the course-library flow:\n" + storeErrors.join("\n"));
+  assert.strictEqual(firstVisit.savedMapType, "object", "a lite-geo-ready course auto-saves to the library with no prompt");
+  assert.strictEqual(firstVisit.hole, 1, "the first visit plays from the freshly-fetched package");
+  assert.strictEqual(fetchesAfterFirstVisit, 1, "the first visit fetches the package exactly once");
+  assert.strictEqual(secondVisit.courseKey, "store-test-course", "a second hand-off to the same course still starts play");
+  assert.strictEqual(secondVisit.hole, 1, "a second hand-off to the same course opens on hole 1 from the saved copy");
+  assert.strictEqual(fetchesAfterSecondVisit, fetchesAfterFirstVisit, "a second hand-off to an already-downloaded course must not re-fetch the package");
+  assert.ok(midRoundPrompt.barShown, "a published map appearing mid-round must prompt, not auto-switch");
+  assert.strictEqual(midRoundPrompt.stillObjectMapSaved, "object", "the saved copy must not change until the prompt is accepted");
+  assert.ok(afterDownload.barHidden, "accepting the prompt closes the update bar");
+  assert.strictEqual(afterDownload.savedMapType, "published", "accepting the prompt saves the published map as the new downloaded copy");
   assert.ok(play.mapDisplayed, "rule 2: #map must be visible by default on the play route");
   assert.strictEqual(play.hole, 1, "play must start on hole 1");
   assert.strictEqual(play.courseKey, "akarana-golf-club");

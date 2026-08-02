@@ -38,10 +38,23 @@
 <section id="playScreen" class="screen">
   <!-- The way in and out of GPS play: always on top, never hidden by a
        route change within this page - the main site's picker is the only
-       other entry point, and these are the only exit. -->
-  <div id="globalNav">
-    <button id="globalBackBtn" type="button" aria-label="Back">Back</button>
-    <button id="globalHomeBtn" type="button" class="homeTextBtn" aria-label="Home">Home</button>
+       other entry point, and these are the only exit. A single fixed column
+       stacks the nav row and the update-bar row in normal flow, so the bar
+       is never guessed into place under the nav row at a fixed pixel offset
+       - safe-area insets vary by device. -->
+  <div id="playTopBar">
+    <div id="globalNav">
+      <button id="globalBackBtn" type="button" aria-label="Back">Back</button>
+      <button id="globalHomeBtn" type="button" class="homeTextBtn" aria-label="Home">Home</button>
+    </div>
+    <!-- A published map arriving mid-round is a prompt, not an auto-switch -
+         the loading screen already covered the "available from the start"
+         case before play began. -->
+    <div id="mapUpdateBar" class="hiddenState">
+      <span id="mapUpdateLabel">Published map available</span>
+      <button id="mapUpdateDownload" type="button">Download</button>
+      <button id="mapUpdateDismiss" type="button" aria-label="Dismiss">&times;</button>
+    </div>
   </div>
   <div id="map"></div>
   <div id="surfaceViewport">
@@ -157,6 +170,7 @@
 <script src="js/account.js"></script>
 <script src="js/course-key.js"></script>
 <script src="js/course-library.js"></script>
+<script src="js/course-store.js"></script>
 <script src="js/course-package.js"></script>
 <script src="js/scorecard.js"></script>
 <script src="js/basemap.js"></script>
