@@ -22,15 +22,20 @@
 
   /* Exits GPS play back to the main site - the picker there is the only
      other entry point into this page, so there's nothing of this page's own
-     to navigate back to. Home/Settings always land on the site root (no
-     deep link into a specific old-shell panel from here); Back prefers
-     actual browser history so it returns to the picker they came from. */
+     to navigate back to. Home lands on the site root; Back prefers actual
+     browser history so it returns to the picker they came from. GPS
+     Settings deep-links into the old shell's GPS settings panel, which
+     checks for this param on boot the same way it already does for the
+     password-reset route. */
   function exitToMainSite() {
     window.location.href = "/";
   }
   function exitBack() {
     if (window.history.length > 1) window.history.back();
     else exitToMainSite();
+  }
+  function openGpsSettings() {
+    window.location.href = "/?openGpsSettings=1";
   }
 
   function renderAccountState() {
@@ -86,7 +91,7 @@
     document.getElementById("signInBack").addEventListener("click", function () { show("home"); });
     document.getElementById("globalBackBtn").addEventListener("click", exitBack);
     document.getElementById("globalHomeBtn").addEventListener("click", exitToMainSite);
-    document.getElementById("globalSettingsBtn").addEventListener("click", exitToMainSite);
+    document.getElementById("railGpsSettings").addEventListener("click", openGpsSettings);
     document.getElementById("prevHole").addEventListener("click", function () {
       app.play.prevHole();
     });

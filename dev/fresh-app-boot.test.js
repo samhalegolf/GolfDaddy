@@ -395,12 +395,13 @@ async function bootCheck() {
 
   /* No picker or Play tile here any more — the main site's picker is the
      only entry point (via ?courseId=..., checked separately below); the
-     global Home/Back/Settings bar in the play screen is the only way out. */
+     global Home/Back bar plus the tool rail's GPS Settings icon are the
+     only way out. */
   const noOwnPicker = await page.evaluate(() => ({
     noPickerScreen: !document.getElementById("pickerScreen"),
     noPlayTile: !document.getElementById("playTile"),
     globalNavExists: !!document.getElementById("globalHomeBtn")
-      && !!document.getElementById("globalBackBtn") && !!document.getElementById("globalSettingsBtn")
+      && !!document.getElementById("globalBackBtn") && !!document.getElementById("railGpsSettings")
   }));
 
   /* Course tap-through with a stubbed library row: lands on the play route

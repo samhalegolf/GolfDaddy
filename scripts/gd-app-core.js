@@ -24088,7 +24088,13 @@ function gdPasswordResetRouteActive(){
   }catch(e){return false}
 }
 function gdAuthRouteBootActive(){return gdPasswordResetRouteActive()||document.documentElement.classList.contains('gdAuthRouteBoot')}
-function bootProfileShell(){loadPlayerProfiles();gdInstallPlaceholderProfile();ensureProfile();gdAccountsBootstrap();savePlayerProfiles();syncCoreProfileFromActive();if(!gdAuthRouteBootActive())showShellHome();}
+/* The fresh /app/ rebuild is a separate page/document, so its GPS Settings
+   rail button can't call openSettings() directly - it navigates here with
+   this param instead. */
+function gdOpenGpsSettingsRouteActive(){
+  try{return new URLSearchParams(location.search||'').has('openGpsSettings');}catch(e){return false}
+}
+function bootProfileShell(){loadPlayerProfiles();gdInstallPlaceholderProfile();ensureProfile();gdAccountsBootstrap();savePlayerProfiles();syncCoreProfileFromActive();if(!gdAuthRouteBootActive()){showShellHome();if(gdOpenGpsSettingsRouteActive())openSettings({fromGps:true});}}
 window.GolfDaddyProfiles={load:loadPlayerProfiles,save:savePlayerProfiles,active:activePlayerProfile,open:openProfilePanel,onboarding:openOnboarding,generateQuickBag:gdGenerateQuickBag,installPlaceholder:gdInstallPlaceholderProfile};
 window.GolfDaddyAccounts={load:gdAccountsLoad,save:gdAccountsSave,state:()=>GD_ACCOUNT_STATE,current:gdCurrentAccount,accountForProfile:gdAccountForProfile,linkedPlayers:gdAccountLinkedPlayers,allAccounts:gdAdminAllAccounts,coachAccounts:gdAccountCoachAccounts,coachInviteFor:gdCoachInviteFor,generateCoachInvite:gdCoachGenerateInvite,connectCoachByCode:gdAccountConnectCoachByCode,linkExistingPlayerByEmail:gdAccountLinkExistingPlayerByEmail,signup:(data)=>gdAccountCreate(data,{activate:true}),login:gdAccountLogin,logout:gdAccountLogout,update:gdAccountUpdate,addPlayer:gdCoachAddPlayerAccount,addCoach:gdCoachAddCoachAccount,removeAccount:gdAdminRemoveAccount,viewProfile:gdAccountViewProfile,adminViewProfile:gdAdminViewProfile,viewOwnProfile:gdAccountViewOwnProfile,returnToOwnProfile:gdAccountReturnToOwnProfile,apply:gdAccountApplySession,roleLabel:gdAccountPublicRole};
 window.ClarityCaddieProfiles=window.GolfDaddyProfiles;
