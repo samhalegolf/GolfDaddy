@@ -2,6 +2,9 @@
      "tee" — hole entry heads to the tee
      "tap" — the player tapped where they are standing
      "gps" — a real fix (play.js gates these to near-the-hole only)
+     "shotend" — the Shot End button: the player deliberately says "this is
+       where that shot finished," promoting the current fix into a shot
+       advance the same way a tap does (a passive GPS fix alone never does)
    Policy about which source wins lives in play.js; this file just holds the
    value and tells listeners when it changes. Event-driven, nothing polls. */
 (function () {

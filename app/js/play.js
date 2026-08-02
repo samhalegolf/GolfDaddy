@@ -20,8 +20,31 @@
   var transitionToken = 0;
   var current = { courseKey: null, pkg: null, hole: 0, rec: null };
   var store = null;
+  var viewLocked = false;   // Lock/Unlock: freezes map gestures + holds the surface frame
 
   var GPS_ADOPT_RADIUS_M = 1500;
+
+  var GESTURE_HANDLERS = ["dragging", "touchZoom", "doubleClickZoom", "scrollWheelZoom", "boxZoom", "keyboard"];
+
+  /* Freezes the live map's own pan/zoom/rotate handlers so it can't be bumped
+     off-frame mid-shot; taps to set position still work (only gesture
+     handlers are toggled, not the click listener). The surface's frame hold
+     lives in applySurfaceFrame's holdFrame check, driven by the same class. */
+  function setViewLocked(on) {
+    viewLocked = !!on;
+    document.body.classList.toggle("view-locked", viewLocked);
+    if (map) {
+      GESTURE_HANDLERS.forEach(function (name) {
+        var handler = map[name];
+        if (handler) { viewLocked ? handler.disable() : handler.enable(); }
+      });
+    }
+    var btn = document.getElementById("lockToggleBtn");
+    if (btn) {
+      btn.textContent = viewLocked ? "Unlock" : "Lock";
+      btn.setAttribute("aria-pressed", viewLocked ? "true" : "false");
+    }
+  }
 
   function ensureStore() {
     if (!store) {
@@ -223,6 +246,10 @@
     renderShotOverlays(pos, model);
     renderDistances(pos, model);
     renderPin(pos);
+    /* Shot End is available whenever a shot is in flight — any stage, not
+       just green focus (a chip that comes up short still needs logging). */
+    var shotEndBtn = document.getElementById("shotEndBtn");
+    if (shotEndBtn) shotEndBtn.classList.toggle("hiddenState", !act);
   }
 
   var pinMapMarker = null;
@@ -446,12 +473,13 @@
     if (positionWired) return;
     positionWired = true;
     /* Shot advance runs BEFORE the render listener so the frame and overlays
-       see the updated shot. Deliberate placements only — a GPS fix moves the
-       dot, never the shot (the Actually Playing mode will own that). The
-       default aim is the ENGINE's target rule: the green when the max bag
-       distance reaches it, the fairway layup point when it cannot. */
+       see the updated shot. Deliberate placements only — a passive GPS fix
+       moves the dot, never the shot; "shotend" is the Shot End button
+       promoting the current fix into a deliberate one. The default aim is the
+       ENGINE's target rule: the green when the max bag distance reaches it,
+       the fairway layup point when it cannot. */
     app.position.onChange(function (pos) {
-      if (pos && (pos.source === "tap" || pos.source === "tee")) {
+      if (pos && (pos.source === "tap" || pos.source === "tee" || pos.source === "shotend")) {
         var green = current.rec && current.rec.green;
         var target = green || null;
         if (green && window.GDBubbleEngine) {
@@ -598,6 +626,22 @@
       app.shot.holeOut(app.position.current());
       app.play.goHole(Math.min(18, current.hole + 1));
     });
+    /* Shot End: "this is where that shot finished" using the freshest fix
+       available — the freshest device GPS fix if there is one, else the
+       player's current position (the map-tap fallback, off-course testing
+       included). Promoting it with source "shotend" is what makes it a
+       deliberate placement; app.position.set does the rest through the
+       onChange wiring above, same as a tap. */
+    var shotEnd = document.getElementById("shotEndBtn");
+    if (shotEnd) shotEnd.addEventListener("click", function () {
+      var fix = (app.gps && app.gps.lastFix()) || app.position.current();
+      if (fix) app.position.set(fix, "shotend");
+    });
+    /* Lock/Unlock: freeze the camera so it can't be bumped mid-shot. */
+    var lockToggle = document.getElementById("lockToggleBtn");
+    if (lockToggle) lockToggle.addEventListener("click", function () {
+      setViewLocked(!viewLocked);
+    });
     /* The start pill: Head To the Tee places the player on the tee; Standing
        Here dismisses the pill so a surface tap places them. */
     var headToTee = document.getElementById("headToTeeBtn");
@@ -690,7 +734,7 @@
     if (!img || !meta) return;
     var stage = desiredStage(pos);
     var holdFrame = activeFrame && stage === frameStage
-      && (document.body.classList.contains("bubble-dragging") || (pos && pos.source === "gps"));
+      && (document.body.classList.contains("bubble-dragging") || viewLocked || (pos && pos.source === "gps"));
     frameStage = stage;
     document.body.dataset.frameStage = frameStage;
     document.body.classList.toggle("tilt-lock", frameStage === "lock");
@@ -833,6 +877,7 @@
     },
     async goHole(hole) {
       var token = ++transitionToken;
+      setViewLocked(false);   // a new hole always opens unlocked
       current.hole = Number(hole) || 1;
       current.rec = holeRecord(current.pkg, current.hole);
       var holeEl = document.getElementById("holeNumber");
@@ -875,6 +920,7 @@
     },
     stop() {
       transitionToken += 1;
+      setViewLocked(false);
       if (app.gps) app.gps.stop();
       app.position.clear();
       clearSurface();
