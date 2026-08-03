@@ -288,7 +288,8 @@
     if (!map) return;
     var stage = desiredStage(pos);
     var holdFrame = mapSide !== null && stage === frameStage
-      && (document.body.classList.contains("bubble-dragging") || viewLocked || (pos && pos.source === "gps"));
+      && (document.body.classList.contains("bubble-dragging") || document.body.classList.contains("ball-dragging")
+        || viewLocked || (pos && pos.source === "gps"));
     setStage(stage);
     if (holdFrame) return;
     var view = { width: window.innerWidth, height: window.innerHeight };
@@ -407,6 +408,9 @@
      to be current before anything draws. A position that cannot be projected
      hides the dot: a normal state, not an error. */
   function renderPosition(pos) {
+    /* Before the camera: entering green focus changes the stage, and the
+       stage is what applySurfaceFrame/applyLiveFrame frame against. */
+    updateGreenFocus(pos);
     var img = document.getElementById("surfaceImage");
     var published = document.body.classList.contains("surface-published");
     if (published && img && img.dataset.playSurface) {
@@ -434,7 +438,10 @@
         }
       } catch (e) { onScreen = null; }
     }
-    dot.classList.toggle("hiddenState", !onScreen);
+    /* In green focus the ball IS the marker — showing both would say the
+       player is in two places at once. */
+    var ballShown = renderGreenFocusBall(pos, proj);
+    dot.classList.toggle("hiddenState", !onScreen || ballShown);
     if (onScreen) {
       dot.style.left = onScreen.left + "px";
       dot.style.top = onScreen.top + "px";
@@ -446,9 +453,11 @@
     renderDistances(pos, model);
     renderPin(pos, proj);
     /* Shot End is available whenever a shot is in flight — any stage, not
-       just green focus (a chip that comes up short still needs logging). */
+       just green focus (a chip that comes up short still needs logging) — and
+       throughout green focus, which is the button that confirms the ball and
+       is the only way out of it besides Next Hole. */
     var shotEndBtn = document.getElementById("shotEndBtn");
-    if (shotEndBtn) shotEndBtn.classList.toggle("hiddenState", !act);
+    if (shotEndBtn) shotEndBtn.classList.toggle("hiddenState", !act && !greenFocus);
   }
 
   /* The pin marker draws on whichever presentation is up — one projected DOM
@@ -766,11 +775,55 @@
       pinMarkerEl.addEventListener("pointercancel", endPinDrag);
     }
 
+    /* Dragging the green-focus ball. Same delta technique as the pin and the
+       aim bubble, with one difference: a PARKED ball has no map anchor to
+       take a delta from, so the first drag drops it straight under the finger
+       — that is the whole "pick it up and put it where the shot finished"
+       gesture. Once it is on the map it drags by delta like everything else. */
+    var ballEl = document.getElementById("greenFocusBall");
+    var ballDragOffset = null;
+    function endBallDrag() {
+      ballDragOffset = null;
+      if (!document.body.classList.contains("ball-dragging")) return;
+      document.body.classList.remove("ball-dragging");
+      if (ballEl) ballEl.classList.remove("dragging");
+      renderPosition(app.position.current());
+    }
+    if (ballEl) {
+      ballEl.addEventListener("pointerdown", function (e) {
+        if (!greenFocus) return;
+        var proj = projector();
+        if (!proj) return;
+        var at = greenFocus.ball ? proj.toScreen(greenFocus.ball) : null;
+        var parked = ballEl.classList.contains("parked");
+        ballDragOffset = (!parked && at)
+          ? { x: at.left - e.clientX, y: at.top - e.clientY }
+          : { x: 0, y: 0 };
+        try { ballEl.setPointerCapture(e.pointerId); } catch (err) {}
+        document.body.classList.add("ball-dragging");
+        ballEl.classList.add("dragging");
+        e.preventDefault();
+        e.stopPropagation();
+      });
+      ballEl.addEventListener("pointermove", function (e) {
+        if (!document.body.classList.contains("ball-dragging") || !greenFocus || !ballDragOffset) return;
+        var proj = projector();
+        if (!proj) return;
+        var ll = proj.toLatLng({ left: e.clientX + ballDragOffset.x, top: e.clientY + ballDragOffset.y });
+        if (!ll) return;
+        greenFocus.ball = ll;
+        greenFocus.placed = true;   // yours now: it stops following the fix
+        renderPosition(app.position.current());
+      });
+      ballEl.addEventListener("pointerup", endBallDrag);
+      ballEl.addEventListener("pointercancel", endBallDrag);
+    }
+
     /* Hole Out: the final shot ends where the player stands; next hole opens
        at its pre-frame state. */
     var holeOut = document.getElementById("holeOutBtn");
     if (holeOut) holeOut.addEventListener("click", function () {
-      app.shot.holeOut(app.position.current());
+      app.shot.holeOut(shotEndPoint());
       app.play.nextHole();
     });
     /* Shot End: "this is where that shot finished" using the freshest fix
@@ -787,7 +840,10 @@
     var shotEnd = document.getElementById("shotEndBtn");
     if (shotEnd) shotEnd.addEventListener("click", function () {
       if (frameStage === "zoom") {
-        app.shot.holeOut(app.position.current());
+        /* Green focus: the BALL is where the shot finished, not the raw fix —
+           that is the entire point of letting it be dragged. Confirming holes
+           out and moves on, so green focus never outlives the hole. */
+        app.shot.holeOut(shotEndPoint());
         app.play.nextHole();
         return;
       }
@@ -907,7 +963,28 @@
     return !(current.rec && current.rec.green);
   }
 
-  var ZOOM_GREEN_M = 45;   // inside this of the green centre → green zoom
+  var ZOOM_GREEN_M = 40;   // inside this of the green centre → green focus
+
+  /* Green focus, ported from the legacy gdEnterActiveGreenFocus /
+     gdEnsureGreenFocusBall pair. Inside 40m of the green the position dot
+     becomes a golf ball you can drag to where the shot actually finished —
+     the fix is rarely exact once you are standing over it — and Shot End
+     confirms that spot.
+
+     It is STICKY. Walking back out of 40m does not close it, because the
+     whole point is being able to do the placement later, from the next tee:
+     the camera keeps holding the green you are logging (you cannot drag a
+     ball onto a green that is not on screen). Only Shot End or leaving the
+     hole ends it.
+
+     ball    — where the shot finished, once known. Follows the live fix while
+               you are still on the green and have not touched it; the moment
+               you drag, it is yours and stops following.
+     placed  — the drag happened, so stop tracking the fix.
+     The legacy screen-point fallback (gdGreenFocusScreenPoint) becomes the
+     "parked" state: no meaningful map anchor, so the ball waits at a fixed
+     pickup point to be dragged onto the green. */
+  var greenFocus = null;   // null | { ball: {lat,lng}|null, placed: bool }
 
   /* Which stage the current position asks for. Placing the player IS the
      lock-in — head-to-tee or a tap starts the shot, so any position locks the
@@ -915,10 +992,79 @@
      up (no position yet); the green zoom takes over inside 45m. */
   function desiredStage(pos) {
     var rec = current.rec;
+    /* Sticky: once green focus is open it owns the camera until Shot End or
+       a hole change, even after the player has walked away. */
+    if (greenFocus) return "zoom";
     if (!pos || !rec || !rec.green) return "hole";
     var toGreen = app.distance.haversineMeters(pos, rec.green);
     if (Number.isFinite(toGreen) && toGreen <= ZOOM_GREEN_M) return "zoom";
     return "lock";
+  }
+
+  /* Distance from the green centre, or null when either end is unknown. */
+  function metresFromGreen(pos) {
+    var green = current.rec && current.rec.green;
+    if (!pos || !green) return null;
+    var d = app.distance.haversineMeters(pos, green);
+    return Number.isFinite(d) ? d : null;
+  }
+
+  /* Open green focus on arrival, and keep the ball under the live fix until
+     the player takes hold of it. Called from the render pass, so it follows
+     position the same event-driven way everything else here does. */
+  function updateGreenFocus(pos) {
+    var away = metresFromGreen(pos);
+    if (!greenFocus) {
+      if (away === null || away > ZOOM_GREEN_M) return;
+      greenFocus = { ball: pos ? { lat: pos.lat, lng: pos.lng } : null, placed: false };
+      return;
+    }
+    /* Not placed yet: the ball is still just "where you are", so it tracks
+       the fix while that still means something. Off the green it stops
+       tracking and parks (renderGreenFocusBall decides that from `away`). */
+    if (!greenFocus.placed && pos && away !== null && away <= ZOOM_GREEN_M) {
+      greenFocus.ball = { lat: pos.lat, lng: pos.lng };
+    }
+  }
+
+  /* Where the ball says the shot finished — the placed/tracked point, or the
+     player's own position if green focus never opened. */
+  function shotEndPoint() {
+    if (greenFocus && greenFocus.ball) return greenFocus.ball;
+    return app.position.current();
+  }
+
+  var PARK_AT_M = ZOOM_GREEN_M;   // beyond this with the ball unplaced → park it
+
+  /* The ball, and the prompt that goes with it when parked. Hidden entirely
+     outside green focus, where the plain position dot is the right marker. */
+  function renderGreenFocusBall(pos, proj) {
+    var ball = document.getElementById("greenFocusBall");
+    var hint = document.getElementById("greenFocusHint");
+    if (!ball) return false;
+    if (!greenFocus) {
+      ball.classList.add("hiddenState");
+      ball.classList.remove("parked");
+      if (hint) hint.classList.add("hiddenState");
+      return false;
+    }
+    var away = metresFromGreen(pos);
+    /* Park when the ball has no anchor worth drawing: never placed and the
+       player has left the green (the next-tee case), or it simply cannot be
+       projected into the current frame. */
+    var screen = greenFocus.ball && proj ? proj.toScreen(greenFocus.ball) : null;
+    var parked = !screen || (!greenFocus.placed && (away === null || away > PARK_AT_M));
+    ball.classList.remove("hiddenState");
+    ball.classList.toggle("parked", parked);
+    if (!parked) {
+      ball.style.left = screen.left + "px";
+      ball.style.top = screen.top + "px";
+    } else {
+      ball.style.left = "";
+      ball.style.top = "";
+    }
+    if (hint) hint.classList.toggle("hiddenState", !parked);
+    return true;
   }
 
   /* Publishing the stage is what drives the stage-gated chrome — Hole Out
@@ -947,7 +1093,8 @@
     if (!img || !meta) return;
     var stage = desiredStage(pos);
     var holdFrame = activeFrame && stage === frameStage
-      && (document.body.classList.contains("bubble-dragging") || viewLocked || (pos && pos.source === "gps"));
+      && (document.body.classList.contains("bubble-dragging") || document.body.classList.contains("ball-dragging")
+        || viewLocked || (pos && pos.source === "gps"));
     setStage(stage);
     if (holdFrame) return;
     var view = { width: window.innerWidth, height: window.innerHeight };
@@ -1120,8 +1267,11 @@
       if (app.pin) app.pin.startHole(current.hole);
       startPillDismissed = false;
       /* Leaving the hole and coming back is how you change your mind about
-         the pill's choice — so the choice dies with the hole. */
+         the pill's choice — so the choice dies with the hole. Green focus
+         goes with it: Next Hole is the other way out of it, alongside the
+         Shot End that confirms the ball. */
       placement = null;
+      greenFocus = null;
       renderPosition(null);
       if (app.gps) maybeAdoptGpsFix(app.gps.lastFix());
       /* A full package carries the hole's published surface inline — one
@@ -1146,6 +1296,7 @@
       transitionToken += 1;
       liveAtCourse = false;
       placement = null;
+      greenFocus = null;
       setViewLocked(false);
       if (app.undo) app.undo.clear();
       if (app.gps) app.gps.stop();

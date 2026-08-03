@@ -105,6 +105,44 @@ body.bubble-dragging #surfaceViewport, body.pin-dragging #surfaceViewport { tran
 /* Green focus: the green centre ring in the zoom stage. */
 #greenRing { position: absolute; width: 20px; height: 20px; margin: -10px 0 0 -10px; border-radius: 50%; border: 2px solid #1fd36d; background: rgba(31, 211, 109, .1); z-index: 545; pointer-events: none; }
 
+/* The green-focus ball: the position dot becomes a draggable golf ball inside
+   40m of the green, so you can say where the shot actually finished rather
+   than trusting the fix. Ported verbatim from the legacy green focus
+   (styles/inline/gd-gps-state-stabilizer-v1.css .gdGreenFocusScreenBall) —
+   dimples and shading are pure radial-gradients, no asset. */
+#greenFocusBall { position: absolute; width: 36px; height: 36px; margin: -18px 0 0 -18px; border-radius: 999px; z-index: 558; touch-action: none; cursor: grab; pointer-events: auto;
+  background:
+    radial-gradient(circle at 38% 33%, rgba(255, 255, 255, .98) 0 3px, transparent 3.4px),
+    radial-gradient(circle at 58% 31%, rgba(215, 226, 215, .86) 0 2.2px, transparent 2.8px),
+    radial-gradient(circle at 49% 49%, rgba(194, 211, 193, .7) 0 2px, transparent 2.6px),
+    radial-gradient(circle at 33% 63%, rgba(176, 195, 176, .62) 0 2px, transparent 2.6px),
+    radial-gradient(circle at 64% 66%, rgba(170, 190, 170, .56) 0 2px, transparent 2.6px),
+    radial-gradient(circle at 39% 30%, #fff 0%, #f6f8f1 35%, #dce5d7 65%, #9caf96 100%);
+  border: 2px solid rgba(255, 255, 255, .96);
+  box-shadow:
+    inset -7px -9px 12px rgba(63, 86, 58, .32),
+    inset 6px 6px 10px rgba(255, 255, 255, .58),
+    0 0 0 7px rgba(88, 220, 126, .22),
+    0 0 30px rgba(88, 220, 126, .88),
+    0 16px 32px rgba(0, 0, 0, .45); }
+#greenFocusBall.hiddenState { display: none; }
+#greenFocusBall.dragging { cursor: grabbing;
+  box-shadow:
+    inset -7px -9px 12px rgba(63, 86, 58, .32),
+    inset 6px 6px 10px rgba(255, 255, 255, .58),
+    0 0 0 9px rgba(88, 220, 126, .28),
+    0 0 38px rgba(88, 220, 126, .96),
+    0 20px 38px rgba(0, 0, 0, .5); }
+/* Parked: walked off the green with the ball still unplaced. It sits at a
+   fixed pickup point clear of the Shot End dock, waiting to be dragged onto
+   the green the camera is still holding. A gentle pulse says "grab me". */
+#greenFocusBall.parked { left: auto; top: auto; right: 34px; bottom: calc(env(safe-area-inset-bottom, 0px) + 226px); margin: 0; animation: ballWaiting 1.9s ease-in-out infinite; }
+@keyframes ballWaiting { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+@media (prefers-reduced-motion: reduce) { #greenFocusBall.parked { animation: none; } }
+
+#greenFocusHint { position: absolute; right: 16px; bottom: calc(env(safe-area-inset-bottom, 0px) + 278px); z-index: 558; max-width: 58vw; text-align: right; padding: 7px 11px; border-radius: 10px; background: rgba(5, 9, 7, .78); color: #eafff1; font-size: 11px; font-weight: 700; line-height: 1.3; pointer-events: none; }
+#greenFocusHint.hiddenState { display: none; }
+
 /* Hole Out lives in green focus only. */
 #holeOutBtn { display: none; position: absolute; right: 16px; bottom: calc(env(safe-area-inset-bottom, 0px) + 40px); z-index: 640; border: 0; border-radius: 999px; padding: 12px 18px; background: #1fd36d; color: #06110b; font-size: 14px; font-weight: 950; }
 body[data-frame-stage="zoom"] #holeOutBtn { display: block; }
