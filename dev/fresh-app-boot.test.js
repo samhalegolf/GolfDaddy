@@ -602,6 +602,71 @@ async function bootCheck() {
   }, AKARANA_H1);
 
 
+  /* GPS Settings: the four legacy controls that survived the rebuild have to
+     actually reach the render, and the rail button must open the sheet in
+     place rather than navigating to the main site the way it used to. */
+  const gpsSettings = await page.evaluate(async (h1) => {
+    const app = window.ClarityApp, S = app.gpsSettings;
+    const wait = () => new Promise((resolve) => setTimeout(resolve, 220));
+    await app.play.start("settings-course", { holes: [{ holeNumber: 1,
+      tee: h1.tee, green: h1.green, greenShape: h1.greenShape,
+      route: [{ lat: -36.91860, lng: 174.74190 }] }] }, { lat: -36.918, lng: 174.735 });
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    document.getElementById("headToTeeBtn").click();
+    await wait();
+
+    const href = location.href;
+    document.getElementById("railGpsSettings").click();
+    const opened = { navigatedAway: location.href !== href,
+      panelOpen: !document.getElementById("gpsSettingsPanel").classList.contains("hiddenState") };
+
+    const front = () => document.getElementById("distFront").textContent;
+    const guide = () => (document.querySelector("#bubbleSvg .middleGuideLabel") || {}).textContent || "";
+    const angle = () => { const m = getComputedStyle(document.getElementById("map")).transform;
+      const n = m.match(/matrix\(([^,]+),([^,]+)/);
+      return n ? Math.round(Math.atan2(+n[2], +n[1]) * 180 / Math.PI) : null; };
+
+    const metres = { front: front(), guide: guide() };
+    S.set("units", "yd"); await wait();
+    const yards = { front: front(), guide: guide() };
+    S.set("units", "m"); await wait();
+
+    S.set("aimLine", false); await wait();
+    const aimOff = { line: !!document.querySelector("#bubbleSvg .aimLine"),
+      rings: !!document.querySelector("#bubbleSvg .ringMain") };
+    S.set("aimLine", true); await wait();
+    const aimOn = { line: !!document.querySelector("#bubbleSvg .aimLine") };
+
+    const rotated = angle();
+    S.set("shotUp", false); await wait();
+    const flat = angle();
+    S.set("shotUp", true); await wait();
+
+    /* Tightness in real terms: metres per screen pixel, read through the
+       same seam the overlays use (the pin marker). */
+    const a = h1.tee, b = { lat: h1.tee.lat + 0.001, lng: h1.tee.lng };
+    const apart = app.distance.haversineMeters(a, b);
+    const marker = document.getElementById("pinMarker");
+    const at = async (p) => { app.pin.set(p); await new Promise((r) => setTimeout(r, 60));
+      return [parseFloat(marker.style.left), parseFloat(marker.style.top)]; };
+    const scale = async () => { const pa = await at(a), pb = await at(b);
+      return apart / Math.hypot(pb[0] - pa[0], pb[1] - pa[1]); };
+    const mpp = {};
+    for (const t of ["wide", "medium", "tight"]) { S.set("frameTightness", t); await wait(); mpp[t] = await scale(); }
+    S.set("frameTightness", "medium"); app.pin.clear();
+
+    /* Every rail icon the same size - the gear used to fill its button. */
+    document.getElementById("toolRailTab").click();
+    const iconSizes = [...document.querySelectorAll("#toolRail .railBtn")].map((b) => {
+      const g = b.querySelector("img, svg"); const r = g.getBoundingClientRect();
+      return Math.round(r.width) + "x" + Math.round(r.height);
+    });
+    document.getElementById("toolRailTab").click();
+
+    try { localStorage.removeItem("clarity:gps-settings:v1"); } catch (e) {}
+    return { opened, metres, yards, aimOff, aimOn, rotated, flat, mpp, iconSizes };
+  }, AKARANA_H1);
+
   /* Off-course play: a course far from the granted fix. Entering the hole
      heads to the tee (the far fix is NOT adopted), and tapping where you are
      standing moves the position — the whole flow works from the couch. */
@@ -1172,6 +1237,31 @@ async function bootCheck() {
     "the opted-in tap lands on the green, got " + greenTap.optedIn.onGreen + "m off");
   assert.ok(greenTap.unmappedPlaces,
     "a hole with no mapped green IS manual play - taps must still place the player");
+
+  assert.ok(!gpsSettings.opened.navigatedAway,
+    "the GPS Settings rail button must open a sheet in place, not navigate away");
+  assert.ok(gpsSettings.opened.panelOpen, "the GPS Settings sheet must open");
+  assert.ok(/m$/.test(gpsSettings.metres.guide),
+    "the middle guide reads metres by default, got " + gpsSettings.metres.guide);
+  assert.ok(/yd$/.test(gpsSettings.yards.guide),
+    "Units: Yards must reach the middle guide label, got " + gpsSettings.yards.guide);
+  assert.ok(Math.abs(Number(gpsSettings.yards.front) / Number(gpsSettings.metres.front) - 1.0936) < 0.01,
+    "Units: Yards must convert the card, got " + gpsSettings.metres.front + "m -> "
+    + gpsSettings.yards.front + "yd");
+  assert.ok(!gpsSettings.aimOff.line, "Show aim line: Off must drop the aim ray");
+  assert.ok(gpsSettings.aimOff.rings, "Show aim line: Off must NOT drop the bubble rings");
+  assert.ok(gpsSettings.aimOn.line, "Show aim line: On brings the aim ray back");
+  assert.ok(Math.abs(gpsSettings.rotated) > 5,
+    "the shot-up frame rotates the live map, got " + gpsSettings.rotated + " deg");
+  assert.strictEqual(gpsSettings.flat, 0,
+    "Shot-up frame: Off must leave the live map north-up, got " + gpsSettings.flat + " deg");
+  assert.ok(gpsSettings.mpp.tight < gpsSettings.mpp.medium
+    && gpsSettings.mpp.medium < gpsSettings.mpp.wide,
+    "frame tightness must zoom monotonically, got "
+    + JSON.stringify(gpsSettings.mpp));
+  assert.ok(gpsSettings.iconSizes.every((s) => s === "24x24"),
+    "every tool-rail icon must be 24x24 (the inline gear used to fill its button), got "
+    + gpsSettings.iconSizes.join(", "));
 
   assert.ok(!remote.atTee.pillShown, "placing the player retires the pill");
   assert.ok(remote.atTee.source === "tee", "Head To the Tee places the player on the tee");

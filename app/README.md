@@ -84,6 +84,13 @@ or writes course data back.
   gestures and its `e.latlng` are both bypassed while framed — a rotated
   container makes both wrong. **Tilt is published-surface only**; Leaflet has
   no 3D camera.
+- `js/gps-settings.js` — the four legacy GPS Settings that survived the
+  rebuild: units (m/yd), show aim line, shot-up frame, lock frame tightness.
+  Owns its own storage (`clarity:gps-settings:v1`). The other nine controls
+  on the old panel (`../index.html` #settingsPanel) described decisions the
+  app no longer lets a player make — map source is chosen by imagery licence
+  and region, mapped-vs-manual is decided by whether the package has
+  geometry, and render/bias/texture were dev toggles the engine now bakes in.
 - `js/tool-rail.js` — the tab/rail toggle, and wires each rail button to its
   tool module's entry point. Each tool module wires its own panel/popover
   internals itself.

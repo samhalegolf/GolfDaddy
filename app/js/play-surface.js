@@ -219,7 +219,17 @@
       var posPx = at(pts.position) || at(pts.tee);
       var aimPx = at(pts.target) || greenPx;
       if (!posPx) return null;
-      return similarityFromPairs(posPx, frameAnchor("tee", viewDims), aimPx, frameAnchor("lock", viewDims));
+      var from = frameAnchor("tee", viewDims);
+      var to = frameAnchor("lock", viewDims);
+      /* Frame tightness (the GPS setting) stretches the gap between the two
+         anchors: pushing the aim target further from the player anchor makes
+         the same real distance span more pixels, i.e. a tighter, more zoomed
+         shot view. 1 leaves the guide contract exactly as authored. */
+      var k = Number(opts && opts.lockTightness);
+      if (Number.isFinite(k) && k > 0 && k !== 1) {
+        to = { left: from.left + (to.left - from.left) * k, top: from.top + (to.top - from.top) * k };
+      }
+      return similarityFromPairs(posPx, from, aimPx, to);
     }
     if (stage === "zoom") {
       var fromPx = at(pts.position) || at(pts.tee);
@@ -245,10 +255,22 @@
 
   /* The published surface's binding of stageFrame: image pixels, null → the
      contain fit. */
-  function stageFrameTransform(meta, stage, pts, viewDims) {
+  function stageFrameTransform(meta, stage, pts, viewDims, opts) {
     if (!meta) return null;
     return stageFrame(function (pt) { return projectToSurface(meta, pt.lat, pt.lng); },
-      stage, pts, viewDims);
+      stage, pts, viewDims, opts);
+  }
+
+  /* Strip the rotation out of a solved frame, keeping its scale and whatever
+     it placed at the viewport centre — "Shot-up frame: Off". Works on either
+     presentation's frame because both are the same similarity. */
+  function flattenFrame(frame, viewDims) {
+    if (!frame) return frame;
+    var scale = Math.hypot(frame.a, frame.b);
+    if (!(scale > 0)) return frame;
+    var centre = { left: Number(viewDims.width) / 2, top: Number(viewDims.height) / 2 };
+    var at = transformInvert(frame, centre);
+    return at ? anchoredTransform(at, centre, 0, scale) : frame;
   }
 
   /* The live map's binding: world-mercator pixels at a reference zoom. The
@@ -317,6 +339,7 @@
     anchoredTransform: anchoredTransform,
     stageFrame: stageFrame,
     stageFrameTransform: stageFrameTransform,
+    flattenFrame: flattenFrame,
     worldPxProjector: worldPxProjector,
     playFrameTransform: playFrameTransform,
     latLngFromWorldPx: latLngFromWorldPx,

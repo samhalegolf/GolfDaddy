@@ -301,11 +301,16 @@
       greenShape: rec.greenShape || [],
       position: pos || null,
       target: (act && act.target) || null
-    }, view, { defaultGreenRadiusPx: LIVE_GREEN_RADIUS_PX });
+    }, view, {
+      defaultGreenRadiusPx: LIVE_GREEN_RADIUS_PX,
+      lockTightness: app.gpsSettings ? app.gpsSettings.lockTightness() : 1
+    });
     if (!solved) { clearLiveFrame(); return; }
 
     var scale = Math.hypot(solved.a, solved.b);
-    var angle = Math.atan2(solved.b, solved.a);
+    /* "Shot-up frame: Off" keeps the stage's zoom and centring but drops the
+       rotation, leaving a plain north-up map. */
+    var angle = (app.gpsSettings && !app.gpsSettings.shotUp()) ? 0 : Math.atan2(solved.b, solved.a);
     if (!(scale > 0)) { clearLiveFrame(); return; }
     var wanted = REF_ZOOM + Math.log2(scale);
     var zoom = Math.max(map.getMinZoom(), Math.min(map.getMaxZoom(), wanted));
@@ -362,8 +367,14 @@
     var d = fix && rec && rec.green ? app.distance.greenDistances(fix, rec) : null;
     bar.classList.toggle("hiddenState", !d || d.centre === null);
     if (!d || d.centre === null) return;
-    document.getElementById("distFront").textContent = d.front === null ? "–" : d.front;
-    document.getElementById("distBack").textContent = d.back === null ? "–" : d.back;
+    /* Everything upstream is metres; the units setting only changes what the
+       card shows. Bare numbers by design — the F/B labels carry the meaning. */
+    var showDist = function (m) {
+      if (m === null || !Number.isFinite(Number(m))) return "–";
+      return app.gpsSettings ? app.gpsSettings.toDisplay(m) : Math.round(Number(m));
+    };
+    document.getElementById("distFront").textContent = showDist(d.front);
+    document.getElementById("distBack").textContent = showDist(d.back);
     /* Aimed off the green: club/total/carry for this shot — total is the
        distance to where it actually lands (the engine's render centre, not
        the raw aim point — aim-offset and bag-roof already moved it). Green
@@ -382,9 +393,9 @@
       if (Number.isFinite(toTarget) && Number.isFinite(remaining) && remaining > 3) {
         var payload = model && model.payload;
         document.getElementById("shotClub").textContent = payload ? compactClub(payload.club) : "–";
-        document.getElementById("shotDist").textContent = Math.round(toTarget);
+        document.getElementById("shotDist").textContent = showDist(toTarget);
         document.getElementById("shotCarry").textContent = payload && Number.isFinite(Number(payload.baseCarry))
-          ? Math.round(Number(payload.baseCarry)) : "–";
+          ? showDist(Number(payload.baseCarry)) : "–";
         show = true;
       }
     }
@@ -457,7 +468,7 @@
     var dist = screen && fix ? app.distance.haversineMeters(fix, pin) : null;
     label.classList.toggle("hiddenState", !Number.isFinite(dist));
     if (Number.isFinite(dist)) {
-      label.textContent = Math.round(dist) + "m";
+      label.textContent = app.gpsSettings ? app.gpsSettings.format(dist) : Math.round(dist) + "m";
       label.style.left = screen.left + "px";
       label.style.top = screen.top + "px";
     }
@@ -507,7 +518,10 @@
              moves exactly as smoothly as the rings do. */
           var playerScreen = pos ? project(pos) : null;
           var targetScreen = act && act.target ? project(act.target) : null;
-          if (playerScreen && targetScreen) {
+          /* "Show aim line: Off" drops only this ray — the cluster, the
+             middle guide and the layup context all still draw. */
+          var wantAimLine = !app.gpsSettings || app.gpsSettings.aimLine();
+          if (wantAimLine && playerScreen && targetScreen) {
             var dx = targetScreen.left - playerScreen.left, dy = targetScreen.top - playerScreen.top;
             var len = Math.hypot(dx, dy);
             if (len > 12) {
@@ -551,7 +565,8 @@
                 + "L" + (greenScreen.left - gux * trim).toFixed(1) + "," + (greenScreen.top - guy * trim).toFixed(1) + '"/>');
               var lx = centerScreen.left + gx * 0.52 + (-gy / glen) * 18;
               var ly = centerScreen.top + gy * 0.52 + (gx / glen) * 18;
-              parts.push('<text class="middleGuideLabel" x="' + lx.toFixed(1) + '" y="' + ly.toFixed(1) + '">Green ' + Math.round(gap) + "m</text>");
+              parts.push('<text class="middleGuideLabel" x="' + lx.toFixed(1) + '" y="' + ly.toFixed(1) + '">Green '
+                + (app.gpsSettings ? app.gpsSettings.format(gap) : Math.round(gap) + "m") + "</text>");
             }
           }
           ringPaths.forEach(function (p) {
@@ -649,6 +664,14 @@
     /* A pin placement/clear re-renders immediately — same render path as a
        position change, just without one. */
     if (app.pin) app.pin.onChange(function () { renderPosition(app.position.current()); });
+    /* A GPS setting change re-renders the same way. Units and the aim line
+       only need a repaint; shot-up and tightness change the frame itself, so
+       the held frame is dropped first to force a re-solve. */
+    if (app.gpsSettings) app.gpsSettings.onChange(function () {
+      activeFrame = null;
+      mapSide = null;
+      renderPosition(app.position.current());
+    });
     /* Aim changes sync the engine, then re-render (re-frame unless mid-drag). */
     app.shot.onChange(function () {
       var act = app.shot.active();
@@ -938,7 +961,14 @@
       position: pos || null,
       target: (act && act.target) || null
     };
-    activeFrame = surfaceLib.stageFrameTransform(meta, frameStage, pts, view);
+    activeFrame = surfaceLib.stageFrameTransform(meta, frameStage, pts, view, {
+      lockTightness: app.gpsSettings ? app.gpsSettings.lockTightness() : 1
+    });
+    /* "Shot-up frame: Off" — same setting, same meaning on the surface: keep
+       the stage's scale and centring, drop the rotation. */
+    if (activeFrame && app.gpsSettings && !app.gpsSettings.shotUp()) {
+      activeFrame = surfaceLib.flattenFrame(activeFrame, view);
+    }
     if (activeFrame) {
       img.style.width = Number(meta.outputDimensions.width) + "px";
       img.style.height = Number(meta.outputDimensions.height) + "px";

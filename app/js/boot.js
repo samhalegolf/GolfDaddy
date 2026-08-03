@@ -50,8 +50,15 @@
     if (window.history.length > 1) window.history.back();
     else exitToMainSite();
   }
+  /* GPS Settings is a sheet in this page now, not a hand-off. It used to
+     navigate to /?openGpsSettings=1, which meant leaving the round entirely
+     and landing on the main site's home shell — and if you were not signed
+     in, the legacy panel bailed to "Sign in first" and you just stayed on
+     home. The four settings that survived the rebuild are all local display
+     preferences, so none of that round trip was buying anything. */
   function openGpsSettings() {
-    window.location.href = "/?openGpsSettings=1";
+    if (app.toolRail) app.toolRail.close();
+    if (app.gpsSettings) app.gpsSettings.open();
   }
 
   /* Tapping the hole number opens a grid of every hole in play - a straight
