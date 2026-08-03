@@ -137,6 +137,37 @@
     </div>
   </div>
 
+  <!-- The four legacy GPS Settings that survived the rebuild; the other nine
+       described decisions the app no longer lets a player make (see
+       js/gps-settings.js). Same toggle idiom as the old panel: the button's
+       text is its current value. -->
+  <div id="gpsSettingsPanel" class="sheet hiddenState">
+    <div class="sheetHeader">
+      <strong>GPS Settings</strong>
+      <button id="gpsSettingsClose" type="button" class="sheetClose">Done</button>
+    </div>
+    <div class="sheetBody">
+      <div class="setGroup">Round</div>
+      <div class="setRow">
+        <div><strong>Units</strong><span>Distances shown in metres or yards.</span></div>
+        <button id="setUnits" type="button" class="toggle">Meters</button>
+      </div>
+      <div class="setGroup">Shot view</div>
+      <div class="setRow">
+        <div><strong>Show aim line</strong><span>Start to target guide.</span></div>
+        <button id="setAimLine" type="button" class="toggle">On</button>
+      </div>
+      <div class="setRow">
+        <div><strong>Shot-up frame</strong><span>Rotate the view so the shot runs up the screen.</span></div>
+        <button id="setShotUp" type="button" class="toggle">On</button>
+      </div>
+      <div class="setRow">
+        <div><strong>Lock frame tightness</strong><span id="setFrameTightSub">Balanced shot view</span></div>
+        <button id="setFrameTight" type="button" class="toggle">Medium</button>
+      </div>
+    </div>
+  </div>
+
   <div id="scorePanel" class="sheet hiddenState">
     <div class="sheetHeader">
       <strong>Scorecard</strong>
@@ -196,6 +227,7 @@
 <script src="js/position.js"></script>
 <script src="js/gps.js"></script>
 <script src="js/nines.js"></script>
+<script src="js/gps-settings.js"></script>
 <script src="js/play.js"></script>
 <script src="js/tool-rail.js"></script>
 <script src="js/boot.js"></script>

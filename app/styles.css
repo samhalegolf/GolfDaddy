@@ -225,7 +225,10 @@ body[data-frame-stage="zoom"] #holeOutBtn { display: block; }
 
 /* Rail tool buttons: one per tool, same 44px square as the tab itself. */
 .railBtn { width: 44px; height: 44px; border: 0; border-radius: 12px; padding: 0; display: grid; place-items: center; background: transparent; color: #f2f7f2; }
-.railBtn img { width: 24px; height: 24px; display: block; object-fit: contain; }
+/* svg alongside img: an inline icon has no intrinsic size to constrain it, so
+   without this the gear stretched to fill the whole 44px button and read a
+   size larger than every other rail icon. */
+.railBtn img, .railBtn > svg { width: 24px; height: 24px; display: block; object-fit: contain; }
 .railBtn[aria-pressed="true"], .railBtn.active { background: linear-gradient(180deg, rgba(31, 211, 109, .34), rgba(4, 12, 8, .78)); box-shadow: 0 0 0 1px rgba(31, 211, 109, .28); }
 .railIcon { width: 24px; height: 24px; display: block; color: #f2f7f2; }
 .railIcon svg { width: 100%; height: 100%; }
@@ -247,6 +250,17 @@ body[data-frame-stage="zoom"] #holeOutBtn { display: block; }
 .sheetHeader strong { font-size: 17px; }
 .sheetClose { border: 0; border-radius: 10px; padding: 8px 14px; background: #1fd36d; color: #06110b; font-size: 14px; font-weight: 700; }
 .sheetBody { overflow-y: auto; padding: 14px 16px calc(env(safe-area-inset-bottom, 0px) + 16px); display: flex; flex-direction: column; gap: 12px; }
+
+/* GPS Settings rows: label + sub-label on the left, a toggle whose text is
+   its own current value on the right — the legacy panel's idiom kept. */
+.setGroup { font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; opacity: .55; margin-top: 4px; }
+.setGroup:first-child { margin-top: 0; }
+.setRow { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 10px 12px; border-radius: 12px; background: rgba(255, 255, 255, .06); }
+.setRow > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.setRow strong { font-size: 14px; font-weight: 700; }
+.setRow span { font-size: 11px; opacity: .62; line-height: 1.35; }
+.setRow .toggle { flex: 0 0 auto; min-width: 74px; border: 1px solid rgba(255, 255, 255, .16); border-radius: 999px; padding: 8px 14px; background: rgba(255, 255, 255, .08); color: #f2f7f2; font-size: 12px; font-weight: 800; }
+.setRow .toggle[aria-pressed="true"] { background: #1fd36d; color: #06110b; border-color: #1fd36d; }
 
 .bagList { display: flex; flex-direction: column; gap: 8px; }
 .bagRow { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 10px; background: rgba(255, 255, 255, .06); }
