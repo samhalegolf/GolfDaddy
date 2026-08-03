@@ -114,10 +114,15 @@
         .then(configure, function () {});
       return pending;
     },
-    /* → {kind, layer} for the given course centre. Never throws, never waits. */
+    /* → {kind, layer, attribution} for the given course centre. Never throws,
+       never waits. The attribution string comes back separately because the
+       stage camera rotates the map element, which would carry Leaflet's own
+       attribution control off-screen with it — play.js renders it as fixed
+       chrome instead, and every source here is licensed on the condition that
+       it stays visible. */
     baseFor: function (centre) {
       var source = pick(centre);
-      return { kind: source.kind, layer: buildLayer(source) };
+      return { kind: source.kind, layer: buildLayer(source), attribution: source.attribution };
     }
   };
 })();

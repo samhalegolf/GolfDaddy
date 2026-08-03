@@ -24,6 +24,15 @@ or writes course data back.
    legacy key space. `captured_surfaces` and `gd_captured_hole_frame_v19_*` do
    not exist here.
 6. **Integer `captureZoom`** — the projection in `js/play-surface.js` asserts it.
+   The live map's frame is solved at an integer reference zoom for the same
+   reason, through the same `worldPx` assert.
+7. **One projection seam** — `projector()` in `js/play.js` answers
+   lat/lng ↔ viewport pixels for whichever presentation is up (published =
+   image pixels through the frame matrix, live = Leaflet container pixels
+   through the live frame matrix). Every overlay — dot, bubble rings, aim
+   line, wind line, middle guide, pin, green ring — goes through it and so
+   draws on both. Nothing may reach for `surfaceImage.dataset.playSurface`
+   directly to place a point; that is what made the live map bare.
 
 ## Layout
 
@@ -66,7 +75,15 @@ or writes course data back.
   (`clarity:scorecard:v1`), keyed by course.
 - `js/play.js` — play state machine: enter/leave hole, frame from objects,
   present/remove surface, render the GPS fix on map and surface. Owns the
-  Leaflet map.
+  Leaflet map, the projection seam (rule 7) and both stage cameras.
+  The live map frames against the SAME guide-box contract as the published
+  surface (`stageFrame` in play-surface.js): the solved similarity's scale
+  becomes Leaflet's own zoom so tiles stay native-resolution, and only the
+  rotation rides in a CSS matrix on `#map`, which is over-provisioned to the
+  viewport diagonal so a rotated corner can never show through. Leaflet's
+  gestures and its `e.latlng` are both bypassed while framed — a rotated
+  container makes both wrong. **Tilt is published-surface only**; Leaflet has
+  no 3D camera.
 - `js/tool-rail.js` — the tab/rail toggle, and wires each rail button to its
   tool module's entry point. Each tool module wires its own panel/popover
   internals itself.

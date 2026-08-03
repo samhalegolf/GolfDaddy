@@ -57,10 +57,20 @@
     </div>
   </div>
   <div id="map"></div>
+  <!-- Basemap credit, outside #map on purpose: the stage camera rotates and
+       oversizes the map element, so Leaflet's own attribution control would
+       ride off-screen with it. The imagery licences require it stays visible. -->
+  <div id="mapAttribution" class="hiddenState"></div>
+  <!-- The overlay viewport rides over BOTH presentations: the published
+       surface fills it with #surfaceImage, the live map shows through it.
+       Everything inside is positioned in viewport pixels by play.js through
+       one projection seam, so the same overlays draw either way. -->
   <div id="surfaceViewport">
     <img id="surfaceImage" alt="">
     <svg id="bubbleSvg" class="hiddenState"></svg>
     <div id="greenRing" class="hiddenState"></div>
+    <div id="pinDistance" class="hiddenState"></div>
+    <div id="pinMarker" class="hiddenState"><img src="../assets/icons/flag.svg" alt=""></div>
     <div id="gpsDot" class="hiddenState"></div>
     <div id="aimBubble" class="hiddenState"></div>
   </div>
