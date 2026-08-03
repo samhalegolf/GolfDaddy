@@ -477,8 +477,18 @@ async function bootCheck() {
       surfacePresented: document.body.classList.contains("surface-published"),
       gpsFix: app.gps.lastFix(),
       positionSource: app.position.current() && app.position.current().source,
-      gpsMarkerOnMap: !!document.querySelector("#map .gpsMarker"),
-      gpsDotHidden: document.getElementById("gpsDot").classList.contains("hiddenState"),
+      /* One projected dot serves both presentations now, so on the live map
+         it is the marker — and it must land inside the viewport, which is the
+         real check that the live frame projects rather than just that some
+         element exists. */
+      gpsDotShown: !document.getElementById("gpsDot").classList.contains("hiddenState"),
+      gpsDotAt: {
+        left: parseFloat(document.getElementById("gpsDot").style.left),
+        top: parseFloat(document.getElementById("gpsDot").style.top)
+      },
+      mapFramed: document.body.classList.contains("map-framed"),
+      frameStage: document.body.dataset.frameStage,
+      attribution: document.getElementById("mapAttribution").textContent,
       distanceBarShown: !document.getElementById("distanceBar").classList.contains("hiddenState"),
       sourceChipHidden: document.getElementById("surfaceSource").classList.contains("hiddenState"),
       distFront: Number(document.getElementById("distFront").textContent),
@@ -488,6 +498,109 @@ async function bootCheck() {
       distBack: Number(document.getElementById("distBack").textContent)
     };
   }, AKARANA_H1);
+
+  /* Head To the Tee is a PIN, not a nudge. On a course the granted fix is
+     genuinely near (so it would otherwise be adopted), choosing the tee has
+     to hold that coordinate against both a moving live fix and a map tap —
+     the only way to change your mind is to leave the hole and pick the other
+     option, which goHole's reset covers. */
+  const teePin = await page.evaluate(async (h1) => {
+    const app = window.ClarityApp;
+    const pkg = { holes: [{ holeNumber: 1, tee: h1.tee, green: h1.green,
+      greenShape: h1.greenShape, route: [] }] };
+    await app.play.start("tee-pin-course", pkg, { lat: -36.918, lng: 174.735 });
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    document.getElementById("headToTeeBtn").click();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    const offTee = () => Math.round(app.distance.haversineMeters(app.position.current(), h1.tee));
+    const atTee = { source: app.position.current().source, offTee: offTee() };
+    /* A map tap must move the pin, never the player. */
+    document.getElementById("map").dispatchEvent(
+      new MouseEvent("click", { clientX: 240, clientY: 300, bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    const afterTap = { source: app.position.current().source, offTee: offTee() };
+    return { atTee, afterTap };
+  }, AKARANA_H1);
+
+  /* A fresh live fix, delivered while pinned, must also be ignored. */
+  await context.setGeolocation({ latitude: -36.9179, longitude: 174.7409 });
+  await page.waitForTimeout(700);
+  const teePinAfterFix = await page.evaluate((h1) => {
+    const app = window.ClarityApp;
+    return {
+      source: app.position.current().source,
+      offTee: Math.round(app.distance.haversineMeters(app.position.current(), h1.tee)),
+      fixMoved: !!app.gps.lastFix()
+    };
+  }, AKARANA_H1);
+
+  /* Leaving the hole clears the choice: the same fix is adopted again. */
+  const afterLeaving = await page.evaluate(async () => {
+    const app = window.ClarityApp;
+    await app.play.goHole(1);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const pos = app.position.current();
+    return { source: pos && pos.source };
+  });
+
+  /* "Tap where the green is" is MANUAL play (gd-app-core's "Tap twice: ball
+     then green") and must not leak into a geo-mapped hole: with the green
+     coming from the package, tapping it has nothing to say and must not
+     teleport the player. It stays available where it is still the only way
+     to play — a hole with no mapped green — and after an explicit
+     "Standing Here". */
+  const greenTap = await page.evaluate(async (h1) => {
+    const app = window.ClarityApp;
+    const tapAtGreen = async () => {
+      /* Aim the tap at wherever the green is actually drawn on screen. */
+      const proj = app.play.latLngAt;
+      let hit = null;
+      for (let y = 60; y < 780 && !hit; y += 8) {
+        for (let x = 20; x < 360; x += 8) {
+          const ll = proj(x, y);
+          if (ll && app.distance.haversineMeters(ll, h1.green) < 6) { hit = [x, y]; break; }
+        }
+      }
+      if (!hit) return null;
+      document.getElementById("map").dispatchEvent(
+        new MouseEvent("click", { clientX: hit[0], clientY: hit[1], bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      return hit;
+    };
+
+    // Mapped hole, no pill choice made: a tap on the green must be ignored.
+    await app.play.start("green-tap-mapped", { holes: [{ holeNumber: 1,
+      tee: h1.tee, green: h1.green, greenShape: h1.greenShape, route: [] }] },
+      { lat: -36.918, lng: 174.735 });
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    const before = app.position.current();
+    const hit = await tapAtGreen();
+    const after = app.position.current();
+    const mapped = {
+      foundGreenOnScreen: !!hit,
+      movedM: before && after ? Math.round(app.distance.haversineMeters(before, after)) : null,
+      endedOnGreen: after ? Math.round(app.distance.haversineMeters(after, h1.green)) : null
+    };
+
+    // Same tap after choosing "Standing Here" — the explicit opt-in — works.
+    document.getElementById("standingHereBtn").click();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    await tapAtGreen();
+    const standing = app.position.current();
+    const optedIn = { source: standing && standing.source,
+      onGreen: standing ? Math.round(app.distance.haversineMeters(standing, h1.green)) : null };
+
+    // An UNMAPPED hole (no green in the package) is manual play: taps place.
+    await app.play.start("green-tap-unmapped", { holes: [{ holeNumber: 1 }] },
+      { lat: -36.918, lng: 174.735 });
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    document.getElementById("map").dispatchEvent(
+      new MouseEvent("click", { clientX: 200, clientY: 400, bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    const unmappedPos = app.position.current();
+    return { mapped, optedIn, unmappedPlaces: !!unmappedPos && unmappedPos.source === "tap" };
+  }, AKARANA_H1);
+
 
   /* Off-course play: a course far from the granted fix. Entering the hole
      heads to the tee (the far fix is NOT adopted), and tapping where you are
@@ -1010,8 +1123,15 @@ async function bootCheck() {
   assert.strictEqual(play.surfacePresented, false, "no surface offline → live map, no overlay");
   assert.ok(play.sourceChipHidden, "no surface → no provenance chip");
   assert.ok(play.gpsFix, "the granted geolocation fix must reach the watcher");
-  assert.ok(play.gpsMarkerOnMap, "the GPS marker must render on the live map");
-  assert.ok(play.gpsDotHidden, "with no surface up, the projected dot stays hidden");
+  assert.ok(play.gpsDotShown, "the projected dot must render on the live map");
+  assert.ok(Number.isFinite(play.gpsDotAt.left) && Number.isFinite(play.gpsDotAt.top)
+    && play.gpsDotAt.left >= 0 && play.gpsDotAt.left <= 1400
+    && play.gpsDotAt.top >= 0 && play.gpsDotAt.top <= 1400,
+    "the live-map dot must project inside the viewport, got " + JSON.stringify(play.gpsDotAt));
+  assert.ok(play.mapFramed, "a hole with tee+green geometry must stage-frame the live map");
+  assert.strictEqual(play.frameStage, "lock", "an on-hole fix 90m out locks the shot view on the live map");
+  assert.ok(/openstreetmap|linz/i.test(play.attribution || ""),
+    "the basemap credit must render as fixed chrome, got " + JSON.stringify(play.attribution));
   assert.ok(play.distanceBarShown, "with a fix and a green, the distance bar must show");
   assert.ok(play.distFront < play.distCentre && play.distCentre < play.distBack,
     "F < C < B, got " + play.distFront + "/" + play.distCentre + "/" + play.distBack);
@@ -1023,6 +1143,36 @@ async function bootCheck() {
   assert.ok(remote.preFrame.pillShown, "pre-frame state shows the Standing Here / Head To the Tee pill");
   assert.ok(!remote.preFrame.hasPosition, "pre-frame state has no position - no pin exists yet");
   assert.ok(remote.preFrame.distanceHidden, "no position → no distances");
+  assert.strictEqual(teePin.atTee.source, "tee", "Head To the Tee places the player on the tee");
+  assert.strictEqual(teePin.atTee.offTee, 0, "Head To the Tee lands exactly on the tee");
+  assert.strictEqual(teePin.afterTap.offTee, 0,
+    "a map tap must not move a player pinned to the tee, moved " + teePin.afterTap.offTee + "m");
+  assert.strictEqual(teePin.afterTap.source, "tee", "the pinned source stays 'tee' through a tap");
+  assert.ok(teePinAfterFix.fixMoved, "the moved geolocation must reach the watcher");
+  assert.strictEqual(teePinAfterFix.offTee, 0,
+    "a live on-course fix must not move a player pinned to the tee, moved "
+    + teePinAfterFix.offTee + "m");
+  assert.strictEqual(afterLeaving.source, "gps",
+    "leaving the hole clears the pin, so the live fix drives again");
+
+  assert.ok(greenTap.mapped.foundGreenOnScreen,
+    "the green must be projectable on screen for the tap test to mean anything");
+  assert.strictEqual(greenTap.mapped.movedM, 0,
+    "manual 'tap where the green is' must not leak into geo-mapped play - "
+    + "a tap on the mapped green moved the player " + greenTap.mapped.movedM + "m");
+  /* The stronger form of the same claim: the tap did not drop the player onto
+     the green. The granted fix sits ~90m out, so anything near 0 would mean
+     the tap teleported them there. */
+  assert.ok(greenTap.mapped.endedOnGreen > 20,
+    "a tap on the mapped green must not move the player onto it, ended "
+    + greenTap.mapped.endedOnGreen + "m from the green");
+  assert.strictEqual(greenTap.optedIn.source, "tap",
+    "'Standing Here' is the explicit opt-in: after it, a tap does place the player");
+  assert.ok(greenTap.optedIn.onGreen !== null && greenTap.optedIn.onGreen < 8,
+    "the opted-in tap lands on the green, got " + greenTap.optedIn.onGreen + "m off");
+  assert.ok(greenTap.unmappedPlaces,
+    "a hole with no mapped green IS manual play - taps must still place the player");
+
   assert.ok(!remote.atTee.pillShown, "placing the player retires the pill");
   assert.ok(remote.atTee.source === "tee", "Head To the Tee places the player on the tee");
   assert.ok(remote.atTee.centre > 380 && remote.atTee.centre < 410,

@@ -26,9 +26,27 @@ body.route-signin #signInScreen { display: flex; align-items: center; justify-co
 .hiddenState { display: none; }
 
 /* z-index:0 is load-bearing: it makes #map a stacking context so Leaflet's
-   internal z-1000 controls (attribution) stay inside it, underneath a
-   presented surface, instead of painting over it. */
+   internal z-1000 panes stay inside it, underneath a presented surface,
+   instead of painting over it. */
 #map { position: absolute; inset: 0; background: #16281c; z-index: 0; }
+
+/* Live-map stage framing. The map element is over-provisioned to a square of
+   the viewport diagonal and placed entirely by play.js's matrix, so rotating
+   it to tee-at-bottom can never expose a corner. Identical mechanism to the
+   surface image's frame matrix — same transform-origin, same matrix(a,b,-b,a)
+   similarity — which is what lets one projection seam serve both. */
+body.map-framed #map { inset: auto; left: 0; top: 0; transform-origin: 0 0; }
+
+/* The mapped route line is the pre-shot presentation only — once a shot is
+   live the SVG aim line and layup middle guide cover the same ground. */
+body.shot-active #map .holeRoute { display: none; }
+
+/* Basemap credit. Lives outside #map so the frame rotation cannot carry it
+   off-screen; hidden only when a published surface has replaced the imagery
+   it credits. */
+#mapAttribution { position: absolute; right: 8px; bottom: calc(env(safe-area-inset-bottom, 0px) + 4px); z-index: 610; max-width: 60vw; text-align: right; font-size: 9px; line-height: 1.3; color: rgba(226, 240, 230, .62); text-shadow: 0 1px 2px rgba(0, 0, 0, .8); pointer-events: none; }
+#mapAttribution.hiddenState { display: none; }
+body.surface-published #mapAttribution { display: none; }
 
 /* The surface viewport carries the lock-stage tilt (ported from
    gd-gps-play-camera-tilt: 32° at perspective 900px, origin 50% 70%, 1s ease,
@@ -38,15 +56,25 @@ body.route-signin #signInScreen { display: flex; align-items: center; justify-co
    viewport, and a transformed descendant still grows the scrollable overflow —
    without the clip, focusing a button (the start pill) scroll-jumps the whole
    play screen. */
-#surfaceViewport { position: absolute; inset: 0; display: none; z-index: 500; background: #0d1b12; transform-origin: 50% 70%; transition: transform 1000ms cubic-bezier(.18, .82, .24, 1); overflow: hidden; }
-body.surface-published #surfaceViewport { display: block; }
-body.tilt-lock #surfaceViewport { transform: perspective(900px) rotateX(32deg) scale(1.213); }
+/* Always displayed: the overlays inside it are the play instruments and they
+   draw over the live map too. Transparent and pointer-transparent by default
+   so the live map underneath still shows and still takes taps; the published
+   surface is what makes it opaque, and the few interactive children opt back
+   into pointer events themselves. */
+#surfaceViewport { position: absolute; inset: 0; display: block; z-index: 500; background: transparent; pointer-events: none; transform-origin: 50% 70%; transition: transform 1000ms cubic-bezier(.18, .82, .24, 1); overflow: hidden; }
+body.surface-published #surfaceViewport { background: #0d1b12; }
+/* Tilt is published-surface only. The live map is not tilted (Leaflet has no
+   3D camera and a CSS-perspectived tile grid would break its hit testing), so
+   the overlay it hosts must not be tilted either or the two would disagree. */
+body.surface-published.tilt-lock #surfaceViewport { transform: perspective(900px) rotateX(32deg) scale(1.213); }
 @media (prefers-reduced-motion: reduce) { #surfaceViewport { transition-duration: 1ms; } }
 
-#surfaceImage { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+#surfaceImage { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: none; pointer-events: auto; }
+body.surface-published #surfaceImage { display: block; }
 
-/* Projected position on a published surface. Positioned by play.js in screen
-   pixels; hidden whenever there is no fix or the fix is off-surface. */
+/* The player's projected position, on whichever presentation is up.
+   Positioned by play.js in viewport pixels; hidden whenever there is no fix
+   or the fix cannot be projected. */
 #gpsDot { position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%; background: #2f8fef; border: 2px solid #fff; z-index: 550; pointer-events: none; }
 
 /* The engine's bubble rings, projected onto the surface. Opacities are the
@@ -70,7 +98,7 @@ body.tilt-lock #surfaceViewport { transform: perspective(900px) rotateX(32deg) s
    gdCapturedBubbleDragHit contract) — grab the bubble, drag the aim. Sized
    per-render to the projected main ring. While dragging, the tilt flattens
    (below) so the 2D inverse stays exact. */
-#aimBubble { position: absolute; transform: translate(-50%, -50%); border-radius: 50%; background: transparent; z-index: 560; touch-action: none; cursor: grab; }
+#aimBubble { position: absolute; transform: translate(-50%, -50%); border-radius: 50%; background: transparent; z-index: 560; touch-action: none; cursor: grab; pointer-events: auto; }
 body.bubble-dragging #aimBubble { cursor: grabbing; }
 body.bubble-dragging #surfaceViewport, body.pin-dragging #surfaceViewport { transform: none !important; transition: none !important; }
 
@@ -113,10 +141,15 @@ body[data-frame-stage="zoom"] #holeOutBtn { display: block; }
 #distanceBar #shotDist { position: absolute; left: 69px; top: 58px; }
 #distanceBar #carryLabel { position: absolute; left: 50px; top: 89px; }
 #distanceBar #shotCarry { position: absolute; left: 86px; top: 89px; }
-#distanceBar #frontLabel { position: absolute; left: 27px; top: 118px; }
-#distanceBar #distFront { position: absolute; left: 38px; top: 8px; }
+/* Back on top, front on the bottom — the card mirrors the hole on screen,
+   where the green is up and so the back of it is the further number. The
+   label slots stay exactly where they were hand-placed; it was the two
+   VALUES that sat in each other's rows, so the card read its labels
+   backwards. */
 #distanceBar #backLabel { position: absolute; left: 25px; top: 8px; }
-#distanceBar #distBack { position: absolute; left: 41px; top: 116px; }
+#distanceBar #distBack { position: absolute; left: 38px; top: 8px; }
+#distanceBar #frontLabel { position: absolute; left: 27px; top: 118px; }
+#distanceBar #distFront { position: absolute; left: 41px; top: 116px; }
 
 /* Free-position layout (box-layout.js): every label/value is its own box —
    the hand-placed rules above set WHERE it starts, this is what lets it still
@@ -247,7 +280,7 @@ body[data-frame-stage="zoom"] #holeOutBtn { display: block; }
 /* touch-action:none + a real pointer-events target so #pinMarker can be
    grabbed and dragged (see the pin-dragging block in play.js's wirePosition) —
    plain "pointer-events: none" would make it just a label. */
-#pinMarker { position: absolute; width: 24px; height: 24px; margin: -24px 0 0 -6px; z-index: 552; cursor: grab; touch-action: none; }
+#pinMarker { position: absolute; width: 24px; height: 24px; margin: -24px 0 0 -6px; z-index: 552; cursor: grab; touch-action: none; pointer-events: auto; }
 #pinMarker.hiddenState { display: none; }
 #pinMarker img { width: 100%; height: 100%; object-fit: contain; filter: drop-shadow(0 2px 4px rgba(0, 0, 0, .45)); pointer-events: none; }
 body.pin-dragging #pinMarker { cursor: grabbing; }

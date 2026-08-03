@@ -197,38 +197,67 @@
               not part of this matrix.
        zoom — the green filling the zoom box, approach direction up, flat
      pts: {tee, green, position, target, greenShape} in lat/lng.
-     Null → contain fit. */
-  function stageFrameTransform(meta, stage, pts, viewDims) {
-    if (!meta || !pts) return null;
+     Null → caller's own fallback.
+
+     px is the presentation's projector: lat/lng → a planar pixel space, any
+     scale, returning null for points it cannot place. The published surface
+     passes projectToSurface (image pixels, null off the image edge); the
+     live map passes worldPx at a reference zoom (mercator pixels, never
+     null — there is no edge to fall off). The stage contract is identical
+     either way, which is the whole point of the seam: one framing rule, two
+     presentations.
+
+     opts.defaultGreenRadiusPx sizes the zoom stage when a green has no
+     shape — px-space dependent, so each presentation supplies its own. */
+  function stageFrame(px, stage, pts, viewDims, opts) {
+    if (typeof px !== "function" || !pts) return null;
     if (!(Number(viewDims && viewDims.width) > 0 && Number(viewDims && viewDims.height) > 0)) return null;
-    function px(pt) { return pt ? projectToSurface(meta, pt.lat, pt.lng) : null; }
-    var greenPx = px(pts.green);
+    function at(pt) { return pt ? px(pt) : null; }
+    var greenPx = at(pts.green);
     if (!greenPx) return null;
     if (stage === "lock") {
-      var posPx = px(pts.position) || px(pts.tee);
-      var aimPx = px(pts.target) || greenPx;
+      var posPx = at(pts.position) || at(pts.tee);
+      var aimPx = at(pts.target) || greenPx;
       if (!posPx) return null;
       return similarityFromPairs(posPx, frameAnchor("tee", viewDims), aimPx, frameAnchor("lock", viewDims));
     }
     if (stage === "zoom") {
-      var fromPx = px(pts.position) || px(pts.tee);
+      var fromPx = at(pts.position) || at(pts.tee);
       var dx = fromPx ? greenPx.x - fromPx.x : 0;
       var dy = fromPx ? greenPx.y - fromPx.y : -1;
       /* Rotate the approach direction to screen-up (0,-1). */
       var angle = Math.atan2(-1, 0) - Math.atan2(dy, dx);
       var radius = 0;
       (Array.isArray(pts.greenShape) ? pts.greenShape : []).forEach(function (p) {
-        var sp = px(p);
+        var sp = at(p);
         if (sp) radius = Math.max(radius, Math.hypot(sp.x - greenPx.x, sp.y - greenPx.y));
       });
-      if (!(radius > 0)) radius = 25;   // ~15m at the observed z18 when a green has no shape
+      /* ~15m at the observed z18 when a green has no shape. */
+      if (!(radius > 0)) radius = Number(opts && opts.defaultGreenRadiusPx) || 25;
       var box = FRAME_GUIDE.zoom;
       var boxMin = Math.min(Number(viewDims.width) * box.w, Number(viewDims.height) * box.h);
       return anchoredTransform(greenPx, frameAnchor("zoom", viewDims), angle, (0.55 * boxMin) / (2 * radius));
     }
-    var teePx = px(pts.tee);
+    var teePx = at(pts.tee);
     if (!teePx) return null;
     return similarityFromPairs(teePx, frameAnchor("tee", viewDims), greenPx, frameAnchor("hole", viewDims));
+  }
+
+  /* The published surface's binding of stageFrame: image pixels, null → the
+     contain fit. */
+  function stageFrameTransform(meta, stage, pts, viewDims) {
+    if (!meta) return null;
+    return stageFrame(function (pt) { return projectToSurface(meta, pt.lat, pt.lng); },
+      stage, pts, viewDims);
+  }
+
+  /* The live map's binding: world-mercator pixels at a reference zoom. The
+     solved similarity's SCALE is what the caller turns into a Leaflet zoom
+     (so tiles render at native resolution); only its rotation stays as a CSS
+     matrix. Reference zoom must be an integer — rule 6 applies here for the
+     same reason it applies to captureZoom. */
+  function worldPxProjector(zoom) {
+    return function (pt) { return worldPx(pt.lat, pt.lng, zoom); };
   }
 
   /* Inverse of worldPx: world-mercator pixels at an integer zoom → lat/lng. */
@@ -286,7 +315,9 @@
     transformApply: transformApply,
     transformInvert: transformInvert,
     anchoredTransform: anchoredTransform,
+    stageFrame: stageFrame,
     stageFrameTransform: stageFrameTransform,
+    worldPxProjector: worldPxProjector,
     playFrameTransform: playFrameTransform,
     latLngFromWorldPx: latLngFromWorldPx,
     projectToSurface: projectToSurface,
