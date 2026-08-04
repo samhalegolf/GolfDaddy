@@ -718,6 +718,7 @@ async function bootCheck() {
       aimPaths: document.getElementById("bubbleSvg").children.length,
       bubble: !document.getElementById("aimBubble").classList.contains("hiddenState"),
       shotRow: !document.getElementById("shotRow").classList.contains("hiddenState"),
+      distBarPaused: document.getElementById("distanceBar").classList.contains("hiddenState"),
       greenRing: !document.getElementById("greenRing").classList.contains("hiddenState"),
       /* The green's outline is green-focus only: down the fairway the imagery
          already shows the green, so drawing over it is clutter. */
@@ -771,6 +772,33 @@ async function bootCheck() {
         hole: app.play.state().hole,
         ballCleared: ball.classList.contains("hiddenState")
       }
+    };
+  }, AKARANA_H1);
+
+  /* The approach shot: standing inside the bag's reach with the aim on its
+     default (the green), club/total/carry must stay on the card. This used to
+     hide whenever the landing was within 3m of the green — which IS the
+     normal approach — so the numbers vanished exactly when they were wanted. */
+  const approachCard = await page.evaluate(async (h1) => {
+    const app = window.ClarityApp;
+    const wait = (n) => new Promise((resolve) => setTimeout(resolve, n || 250));
+    await app.play.start("approach-card-course", { holes: [{ holeNumber: 1,
+      tee: h1.tee, green: h1.green, greenShape: h1.greenShape, route: [] }] },
+      { lat: -36.918, lng: 174.735 });
+    await wait(700);
+    /* ~120m out: the green is comfortably inside the bag, so the default aim
+       lands on it and the old rule would have hidden the row. */
+    app.position.set({ lat: h1.green.lat - 0.00108, lng: h1.green.lng + 0.0004 }, "tap");
+    await wait(350);
+    const model = window.GDBubbleEngine.renderModel();
+    const act = app.shot.active();
+    const landing = (model && model.center) || (act && act.target);
+    return {
+      rowShown: !document.getElementById("shotRow").classList.contains("hiddenState"),
+      club: document.getElementById("shotClub").textContent,
+      dist: Number(document.getElementById("shotDist").textContent),
+      /* Proof the aim really is on the green - otherwise this asserts nothing. */
+      landingFromGreen: landing ? Math.round(app.distance.haversineMeters(landing, h1.green)) : null
     };
   }, AKARANA_H1);
 
@@ -1438,6 +1466,19 @@ async function bootCheck() {
     "green focus must clear the aim overlays - a bubble anchored on the green is a shot nobody is playing");
   assert.ok(!greenFocus.onGreen.bubble, "no aim bubble in green focus");
   assert.ok(!greenFocus.onGreen.shotRow, "no club/carry row in green focus - there is no shot to play");
+  assert.ok(greenFocus.onGreen.distBarPaused,
+    "the distance readout pauses in green focus - front/back of a green you are standing on is not a number you play to");
+  assert.ok(greenFocus.atNextTee.distBarPaused,
+    "it stays paused while deferred, rather than reading a 250m approach to a hole already finished");
+
+  assert.ok(approachCard.landingFromGreen !== null && approachCard.landingFromGreen <= 3,
+    "test setup: the default aim must land on the green, got " + approachCard.landingFromGreen + "m off");
+  assert.ok(approachCard.rowShown,
+    "club/total/carry must stay on the card for an approach aimed at the green");
+  assert.ok(approachCard.club && approachCard.club !== "-" && approachCard.club !== "–",
+    "the approach must name a club, got " + JSON.stringify(approachCard.club));
+  assert.ok(approachCard.dist > 80 && approachCard.dist < 180,
+    "the approach distance must be the real number, got " + approachCard.dist);
   assert.ok(greenFocus.onGreen.greenRing, "the green ring is not an aiming instrument and stays");
   assert.ok(!greenFocus.beforeArrival.greenOutline,
     "normal play must not draw the green outline over the imagery");

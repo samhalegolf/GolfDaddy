@@ -205,7 +205,14 @@
   <div id="distanceBar" class="hiddenState">
     <div id="shotRow" class="hiddenState">
       <div class="shotLine"><span id="clubLabel" class="distLabel">CLUB</span><span id="shotClub">–</span></div>
+      <!-- The plays-like value pops out beside the main distance whenever the
+           elevation lookup has an answer worth showing. -->
       <div class="dist distMain shotMain"><span id="shotDist">–</span></div>
+      <div id="playsPop" class="hiddenState">
+        <span class="playsLabel">PLAYS</span>
+        <span id="playsValue">–</span>
+        <span id="playsDelta"></span>
+      </div>
       <div class="shotCarryLine"><span id="carryLabel" class="distLabel">CARRY</span><span id="shotCarry">–</span></div>
     </div>
     <div class="fcbRow">
@@ -237,6 +244,7 @@
 <script src="js/gps.js"></script>
 <script src="js/nines.js"></script>
 <script src="js/gps-settings.js"></script>
+<script src="js/plays-like.js"></script>
 <script src="js/play.js"></script>
 <script src="js/tool-rail.js"></script>
 <script src="js/boot.js"></script>
