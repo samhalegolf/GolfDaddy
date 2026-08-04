@@ -1,0 +1,162 @@
+#gdStudioShellRoot {
+  --gdStudioBg: #0b0f0d;
+  --gdStudioPanel: #121815;
+  --gdStudioPanelAlt: #161d19;
+  --gdStudioBorder: rgba(97, 255, 159, 0.14);
+  --gdStudioAccent: #3cff8d;
+  --gdStudioAccentDim: #18bf63;
+  --gdStudioText: #e7f3ec;
+  --gdStudioMuted: #8fa79c;
+  --gdStudioWarn: #ffb54c;
+  position: fixed;
+  inset: 0;
+  z-index: 4000;
+  background: var(--gdStudioBg);
+  color: var(--gdStudioText);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+#gdStudioShellRoot[hidden] { display: none; }
+#gdStudioShellRoot .gdStudioShell {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  height: 100%;
+  min-height: 100vh;
+}
+#gdStudioShellRoot .gdStudioNavRail {
+  background: var(--gdStudioPanel);
+  border-right: 1px solid var(--gdStudioBorder);
+  padding: 18px 12px;
+  overflow-y: auto;
+}
+#gdStudioShellRoot .gdStudioBrand {
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: var(--gdStudioAccent);
+  padding: 6px 10px 16px;
+  font-size: 14px;
+  text-transform: uppercase;
+}
+#gdStudioShellRoot .gdStudioNavList { list-style: none; margin: 0; padding: 0; }
+#gdStudioShellRoot .gdStudioNavGroup { margin-bottom: 6px; }
+#gdStudioShellRoot .gdStudioNavItem {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--gdStudioText);
+  padding: 9px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+#gdStudioShellRoot .gdStudioNavGroupBtn { font-weight: 700; }
+#gdStudioShellRoot .gdStudioNavItem:hover { background: var(--gdStudioPanelAlt); }
+#gdStudioShellRoot .gdStudioNavItem.isActive { background: rgba(60, 255, 141, 0.12); color: var(--gdStudioAccent); }
+#gdStudioShellRoot .gdStudioNavChildren { list-style: none; margin: 2px 0 6px 8px; padding: 0; border-left: 1px solid var(--gdStudioBorder); }
+#gdStudioShellRoot .gdStudioNavChildren .gdStudioNavItem { font-size: 12.5px; padding: 7px 10px; }
+
+#gdStudioShellRoot .gdStudioMain { display: flex; flex-direction: column; min-width: 0; }
+#gdStudioShellRoot .gdStudioHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 22px;
+  border-bottom: 1px solid var(--gdStudioBorder);
+}
+#gdStudioShellRoot .gdStudioBreadcrumb { font-size: 13px; }
+#gdStudioShellRoot .gdStudioCrumbLink { background: none; border: none; color: var(--gdStudioMuted); cursor: pointer; padding: 0; font-size: 13px; }
+#gdStudioShellRoot .gdStudioCrumbLink:hover { color: var(--gdStudioAccent); }
+#gdStudioShellRoot .gdStudioCrumbCurrent { color: var(--gdStudioText); font-weight: 700; }
+#gdStudioShellRoot .gdStudioCrumbSep { margin: 0 6px; color: var(--gdStudioMuted); }
+#gdStudioShellRoot .gdStudioEnvStatus { font-size: 12px; color: var(--gdStudioMuted); }
+
+#gdStudioShellRoot .gdStudioTabStrip { display: flex; gap: 4px; padding: 0 22px; border-bottom: 1px solid var(--gdStudioBorder); }
+#gdStudioShellRoot .gdStudioTab {
+  background: none;
+  border: none;
+  color: var(--gdStudioMuted);
+  padding: 10px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+#gdStudioShellRoot .gdStudioTab.isActive { color: var(--gdStudioAccent); border-bottom-color: var(--gdStudioAccent); }
+
+#gdStudioShellRoot .gdStudioWorkspace { flex: 1; overflow-y: auto; padding: 22px; }
+
+#gdStudioShellRoot .gdStudioLede { color: var(--gdStudioMuted); max-width: 62ch; }
+#gdStudioShellRoot .gdStudioCardGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin-top: 16px; }
+#gdStudioShellRoot .gdStudioCard {
+  text-align: left;
+  background: var(--gdStudioPanel);
+  border: 1px solid var(--gdStudioBorder);
+  border-radius: 10px;
+  padding: 14px;
+  cursor: pointer;
+  color: var(--gdStudioText);
+}
+#gdStudioShellRoot .gdStudioCard:hover { border-color: var(--gdStudioAccentDim); }
+#gdStudioShellRoot .gdStudioCardLabel { font-weight: 700; margin-bottom: 4px; }
+#gdStudioShellRoot .gdStudioCardHint { font-size: 12px; color: var(--gdStudioMuted); }
+
+#gdStudioShellRoot .gdStudioPlaceholder { max-width: 62ch; }
+#gdStudioShellRoot .gdStudioPlaceholderBadge {
+  display: inline-block;
+  background: rgba(255, 181, 76, 0.14);
+  color: var(--gdStudioWarn);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+#gdStudioShellRoot .gdStudioNeedsVerification { color: var(--gdStudioWarn); font-size: 13px; }
+#gdStudioShellRoot .gdStudioMuted { color: var(--gdStudioMuted); }
+
+#gdStudioShellRoot .gdStudioInfo section { margin-bottom: 20px; }
+#gdStudioShellRoot .gdStudioInfo h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--gdStudioMuted); margin: 0 0 8px; }
+#gdStudioShellRoot .gdStudioInfo ul { margin: 4px 0; padding-left: 18px; }
+#gdStudioShellRoot .gdStudioInfo code { background: var(--gdStudioPanelAlt); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+#gdStudioShellRoot .gdStudioInfo a { color: var(--gdStudioAccent); }
+
+#gdStudioShellRoot .gdStudioRuntimeBadges { display: flex; gap: 6px; }
+#gdStudioShellRoot .gdStudioRuntimeBadge { border: 1px solid var(--gdStudioBorder); color: var(--gdStudioMuted); border-radius: 999px; padding: 3px 10px; font-size: 11px; text-transform: uppercase; }
+#gdStudioShellRoot .gdStudioRuntimeBadge.isOn { color: var(--gdStudioAccent); border-color: var(--gdStudioAccentDim); }
+
+#gdStudioShellRoot .gdStudioDiagram { background: var(--gdStudioPanel); border: 1px solid var(--gdStudioBorder); border-radius: 10px; padding: 16px; }
+#gdStudioShellRoot .gdStudioDiagramRow { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 10px; }
+#gdStudioShellRoot .gdStudioDiagramArrow { font-size: 12px; color: var(--gdStudioMuted); }
+#gdStudioShellRoot .gdStudioDiagramNode {
+  background: var(--gdStudioPanelAlt);
+  border: 1px solid var(--gdStudioBorder);
+  color: var(--gdStudioText);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+#gdStudioShellRoot .gdStudioDiagramNode:hover { border-color: var(--gdStudioAccentDim); }
+#gdStudioShellRoot .gdStudioDiagramNode.isFocus { border-color: var(--gdStudioAccent); color: var(--gdStudioAccent); font-weight: 700; }
+#gdStudioShellRoot .gdStudioDiagramConn { display: inline-flex; align-items: center; gap: 6px; }
+#gdStudioShellRoot .gdStudioDiagramConnLabel { font-size: 11px; color: var(--gdStudioMuted); }
+#gdStudioShellRoot .gdStudioDiagramControls { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+#gdStudioShellRoot .gdStudioDiagramBtn {
+  background: none;
+  border: 1px solid var(--gdStudioBorder);
+  color: var(--gdStudioMuted);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+#gdStudioShellRoot .gdStudioDiagramBtn:disabled { opacity: 0.4; cursor: default; }
+#gdStudioShellRoot .gdStudioDiagramBtn:not(:disabled):hover { color: var(--gdStudioAccent); border-color: var(--gdStudioAccentDim); }
+#gdStudioShellRoot .gdStudioDiagramDetail { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--gdStudioBorder); }
+#gdStudioShellRoot .gdStudioCopyPath { background: none; border: 1px solid var(--gdStudioBorder); color: var(--gdStudioMuted); border-radius: 6px; padding: 1px 6px; font-size: 11px; cursor: pointer; margin-left: 4px; }
+
+@media (max-width: 860px) {
+  #gdStudioShellRoot .gdStudioShell { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  #gdStudioShellRoot .gdStudioNavRail { border-right: none; border-bottom: 1px solid var(--gdStudioBorder); max-height: 40vh; }
+}
