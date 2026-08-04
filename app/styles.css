@@ -72,7 +72,13 @@ body.surface-published #surfaceViewport { background: #0d1b12; }
 /* Tilt is published-surface only. The live map is not tilted (Leaflet has no
    3D camera and a CSS-perspectived tile grid would break its hit testing), so
    the overlay it hosts must not be tilted either or the two would disagree. */
-body.surface-published.tilt-lock #surfaceViewport { transform: perspective(900px) rotateX(32deg) scale(1.213); }
+/* The tilt's three numbers live here as custom properties because play.js
+   has to invert this exact transform to drag anything under it (unTilt).
+   One source of truth, so the maths and the look cannot drift apart. */
+:root { --tiltDeg: 32; --tiltPerspective: 900; --tiltScale: 1.213; --tiltOriginY: 0.7; }
+body.surface-published.tilt-lock #surfaceViewport {
+  transform: perspective(calc(var(--tiltPerspective) * 1px)) rotateX(calc(var(--tiltDeg) * 1deg)) scale(var(--tiltScale));
+}
 @media (prefers-reduced-motion: reduce) { #surfaceViewport { transition-duration: 1ms; } }
 
 #surfaceImage { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: none; pointer-events: auto; }
@@ -106,7 +112,14 @@ body.surface-published #surfaceImage { display: block; }
    (below) so the 2D inverse stays exact. */
 #aimBubble { position: absolute; transform: translate(-50%, -50%); border-radius: 50%; background: transparent; z-index: 560; touch-action: none; cursor: grab; pointer-events: auto; }
 body.bubble-dragging #aimBubble { cursor: grabbing; }
-body.bubble-dragging #surfaceViewport, body.pin-dragging #surfaceViewport { transform: none !important; transition: none !important; }
+/* Dragging no longer flattens the tilt. It used to, because the frame's 2D
+   inverse is not valid under a 3D perspective — the view snapped to birds-eye
+   on grab and tilted back on release. play.js's unTilt() inverts the tilt
+   properly now, so the camera can simply stay put; only the transition is
+   suppressed, so the frame does not ease around under the finger. */
+body.bubble-dragging #surfaceViewport,
+body.pin-dragging #surfaceViewport,
+body.ball-dragging #surfaceViewport { transition: none !important; }
 
 /* Green focus: the green centre ring in the zoom stage. */
 #greenRing { position: absolute; width: 20px; height: 20px; margin: -10px 0 0 -10px; border-radius: 50%; border: 2px solid #1fd36d; background: rgba(31, 211, 109, .1); z-index: 545; pointer-events: none; }
@@ -164,8 +177,14 @@ body.bubble-dragging #surfaceViewport, body.pin-dragging #surfaceViewport { tran
 .shotDock button { border: 0; background: none; padding: 0; box-shadow: 0 10px 22px rgba(0, 0, 0, .35); border-radius: 50%; transform: scale(1); transition: transform .12s ease, box-shadow .12s ease; }
 .shotDock button:active { transform: scale(.88); box-shadow: 0 4px 10px rgba(0, 0, 0, .35); }
 .shotDock button.hiddenState { display: none; }
-#shotEndBtn { width: 72px; height: 72px; }
-#shotEndBtn img { display: block; width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
+#shotActionBtn { width: 72px; height: 72px; position: relative; }
+#shotActionBtn img { display: block; width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
+/* Coin art missing (a face whose asset has not landed yet): fall back to a
+   plain labelled disc so the control still reads and still works. */
+#shotActionLabel { display: none; }
+#shotActionBtn.noIcon img { display: none; }
+#shotActionBtn.noIcon { background: linear-gradient(180deg, #f4f7f2, #c9d3c6); border: 2px solid rgba(255, 255, 255, .9); }
+#shotActionBtn.noIcon #shotActionLabel { display: grid; place-items: center; width: 100%; height: 100%; padding: 0 6px; border-radius: 50%; color: #18240f; font-size: 12px; font-weight: 900; line-height: 1.1; text-align: center; text-transform: uppercase; }
 
 #shotRow.hiddenState { display: none; }
 #shotRow .shotLine { font-size: 13px; font-weight: 700; opacity: .85; }

@@ -552,16 +552,24 @@ async function bootCheck() {
   const greenTap = await page.evaluate(async (h1) => {
     const app = window.ClarityApp;
     const tapAtGreen = async () => {
-      /* Aim the tap at wherever the green is actually drawn on screen. */
+      /* Aim the tap at wherever the green is actually drawn on screen. Take
+         the CLOSEST point rather than the first inside a tolerance - the
+         metres-per-pixel varies a lot between stages, so a fixed tolerance
+         plus a fixed step can stride straight over the green. */
       const proj = app.play.latLngAt;
-      let hit = null;
-      for (let y = 60; y < 780 && !hit; y += 8) {
-        for (let x = 20; x < 360; x += 8) {
+      let hit = null, best = Infinity;
+      /* Scan the real viewport, not a hardcoded phone width - the stage
+         decides where on screen the green lands, and a fixed box can miss it
+         entirely once the framing changes. */
+      for (let y = 60; y < window.innerHeight - 40; y += 6) {
+        for (let x = 20; x < window.innerWidth - 20; x += 6) {
           const ll = proj(x, y);
-          if (ll && app.distance.haversineMeters(ll, h1.green) < 6) { hit = [x, y]; break; }
+          if (!ll) continue;
+          const d = app.distance.haversineMeters(ll, h1.green);
+          if (d < best) { best = d; hit = [x, y]; }
         }
       }
-      if (!hit) return null;
+      if (!hit || best > 12) return null;
       document.getElementById("map").dispatchEvent(
         new MouseEvent("click", { clientX: hit[0], clientY: hit[1], bubbles: true }));
       await new Promise((resolve) => setTimeout(resolve, 120));
@@ -577,6 +585,9 @@ async function bootCheck() {
     const hit = await tapAtGreen();
     const after = app.position.current();
     const mapped = {
+      /* If this ever fails, mapState is the thing to look at: a Leaflet size
+         of 0 means the camera was solved before the screen was measurable. */
+      mapState: JSON.stringify(app.play.mapState()),
       foundGreenOnScreen: !!hit,
       movedM: before && after ? Math.round(app.distance.haversineMeters(before, after)) : null,
       endedOnGreen: after ? Math.round(app.distance.haversineMeters(after, h1.green)) : null
@@ -698,7 +709,7 @@ async function bootCheck() {
       parked: ball.classList.contains("parked"),
       dot: !dot.classList.contains("hiddenState"),
       hint: !document.getElementById("greenFocusHint").classList.contains("hiddenState"),
-      shotEnd: !document.getElementById("shotEndBtn").classList.contains("hiddenState"),
+      shotEnd: !document.getElementById("shotActionBtn").classList.contains("hiddenState"),
       /* Aiming instruments. Standing on the green there is nothing to aim, so
          the engine must not be asked to model a shot from there - it answers
          with the shortest club and a bag-roof clamp that throws the cluster
@@ -743,7 +754,7 @@ async function bootCheck() {
     const droppedLL = app.play.latLngAt(drop[0], drop[1]);
     const playerPos = app.position.current();
 
-    document.getElementById("shotEndBtn").click();
+    document.getElementById("shotActionBtn").click();
     await wait(420);
     const shots = app.shot.holeShots(1);
     const last = shots[shots.length - 1];
@@ -900,11 +911,11 @@ async function bootCheck() {
       ringShown: !document.getElementById("greenRing").classList.contains("hiddenState"),
       /* Shot End is the single confirm now - Hole Out is gone, because in
          green focus the two had become the same action on the same point. */
-      confirmVisible: !document.getElementById("shotEndBtn").classList.contains("hiddenState"),
+      confirmVisible: !document.getElementById("shotActionBtn").classList.contains("hiddenState"),
       holeOutGone: !document.getElementById("holeOutBtn"),
       shotsRecorded: app.shot.holeShots(1).length
     };
-    document.getElementById("shotEndBtn").click();
+    document.getElementById("shotActionBtn").click();
     await new Promise((resolve) => setTimeout(resolve, 200));
     const holedOut = {
       hole: app.play.state().hole,
@@ -943,17 +954,31 @@ async function bootCheck() {
     app.position.set({ lat: tee.lat - 0.0015, lng: tee.lng }, "tap");
     await new Promise((resolve) => setTimeout(resolve, 60));
     const lockStage = document.body.dataset.frameStage;
-    document.getElementById("shotEndBtn").click();
-    await new Promise((resolve) => setTimeout(resolve, 60));
-    const afterLockClick = { hole: app.play.state().hole, shots: app.shot.holeShots(1).length };
+    /* Locked in, the dock button is Unlock, not Shot End: it releases the
+       view back to pre-frame and records nothing. The shot stays in flight
+       with its start at the last lock-in - the NEXT lock is what closes it. */
+    const lockedFace = document.getElementById("shotActionBtn").dataset.action;
+    document.getElementById("shotActionBtn").click();
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    const afterUnlock = {
+      hole: app.play.state().hole,
+      shots: app.shot.holeShots(1).length,
+      stage: document.body.dataset.frameStage,
+      stillInFlight: !!app.shot.active(),
+      face: document.getElementById("shotActionBtn").dataset.action,
+      /* Nothing to lock in FROM until a position exists again - off-course
+         that is the pill, in real play the next GPS fix. */
+      hidden: document.getElementById("shotActionBtn").classList.contains("hiddenState"),
+      hasPosition: !!app.position.current()
+    };
     app.position.set({ lat: green.lat - 0.0002, lng: green.lng }, "tap");
     await new Promise((resolve) => setTimeout(resolve, 60));
     const zoomStage = document.body.dataset.frameStage;
     const shotsBeforeGreenFocusClick = app.shot.holeShots(1).length;
-    document.getElementById("shotEndBtn").click();
+    document.getElementById("shotActionBtn").click();
     await new Promise((resolve) => setTimeout(resolve, 200));
     return {
-      lockStage, afterLockClick, zoomStage, shotsBeforeGreenFocusClick,
+      lockStage, lockedFace, afterUnlock, zoomStage, shotsBeforeGreenFocusClick,
       hole: app.play.state().hole,
       finalShots: app.shot.holeShots(1).length,
       activeCleared: !app.shot.active()
@@ -976,11 +1001,17 @@ async function bootCheck() {
     const img = document.getElementById("surfaceImage");
     const frameBefore = img.style.transform;
     hit.dispatchEvent(new PointerEvent("pointerdown", { pointerId: 9, clientX: cx, clientY: cy, bubbles: true }));
-    let midDragFrameHeld = null;
+    let midDragFrameHeld = null, tiltHeldMidDrag = null;
+    const vp = document.getElementById("surfaceViewport");
     for (let i = 1; i <= 4; i++) {
       hit.dispatchEvent(new PointerEvent("pointermove", { pointerId: 9, clientX: cx, clientY: cy - i * 12, bubbles: true }));
       await new Promise((resolve) => setTimeout(resolve, 25));
-      if (i === 2) midDragFrameHeld = img.style.transform === frameBefore;
+      if (i === 2) {
+        midDragFrameHeld = img.style.transform === frameBefore;
+        /* matrix3d means the perspective tilt is still applied. It used to be
+           forced to none for the duration of the drag. */
+        tiltHeldMidDrag = getComputedStyle(vp).transform.startsWith("matrix3d");
+      }
     }
     hit.dispatchEvent(new PointerEvent("pointerup", { pointerId: 9, clientX: cx, clientY: cy - 48, bubbles: true }));
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -988,7 +1019,7 @@ async function bootCheck() {
     return {
       hitSized: rect.width >= 44 && rect.height >= 44,
       aimMovedM: app.distance.haversineMeters(before, after),
-      midDragFrameHeld,
+      midDragFrameHeld, tiltHeldMidDrag,
       draggingCleared: !document.body.classList.contains("bubble-dragging"),
       reframedAfter: img.style.transform !== frameBefore
     };
@@ -1238,13 +1269,32 @@ async function bootCheck() {
   assert.strictEqual(stages.holedOut.hole, 2, "Hole Out advances to the next hole");
   assert.ok(stages.holedOut.activeCleared, "no active shot after holing out");
   assert.strictEqual(shotEndWiring.lockStage, "lock", "test setup: mid-fairway is the lock stage");
-  assert.strictEqual(shotEndWiring.afterLockClick.hole, 1, "Shot End outside green focus must not advance the hole");
-  assert.strictEqual(shotEndWiring.afterLockClick.shots, 1, "Shot End outside green focus still logs the shot in flight");
+  assert.strictEqual(shotEndWiring.lockedFace, "unlock",
+    "locked in, the dock button is Unlock - Shot End belongs to green focus only");
+  assert.strictEqual(shotEndWiring.afterUnlock.hole, 1, "unlocking must not advance the hole");
+  assert.strictEqual(shotEndWiring.afterUnlock.shots, 0,
+    "unlocking records nothing - the next lock-in is what closes the shot");
+  assert.ok(shotEndWiring.afterUnlock.stillInFlight,
+    "unlocking keeps the shot in flight; it costs the camera, never the shot");
+  assert.strictEqual(shotEndWiring.afterUnlock.stage, "hole",
+    "unlocking pulls back to the pre-frame view");
+  assert.ok(!shotEndWiring.afterUnlock.hasPosition,
+    "unlocking clears the position so pre-frame is genuinely pre-frame");
+  assert.strictEqual(shotEndWiring.afterUnlock.face, "lock",
+    "unlocked, the dock button offers Lock again");
+  assert.ok(shotEndWiring.afterUnlock.hidden,
+    "Lock waits for a position to lock in from - hidden until the pill or a fix supplies one");
   assert.strictEqual(shotEndWiring.zoomStage, "zoom", "test setup: on the green is the zoom stage");
-  assert.strictEqual(shotEndWiring.shotsBeforeGreenFocusClick, 2, "test setup: two shots logged before the green-focus press");
-  assert.strictEqual(shotEndWiring.hole, 2, "Shot End in green focus advances to the next hole, same as Hole Out");
-  assert.strictEqual(shotEndWiring.finalShots, 3, "Shot End in green focus records the final shot");
+  /* One shot, not two: the unlock in between is not a boundary. Course data
+     joins the last lock-in to the next lock-in, so the tee lock and the
+     on-green lock bracket exactly one shot. */
+  assert.strictEqual(shotEndWiring.shotsBeforeGreenFocusClick, 1,
+    "consecutive lock-ins bracket one shot - the unlock between them adds none");
+  assert.strictEqual(shotEndWiring.hole, 2, "Shot End in green focus advances to the next hole");
+  assert.strictEqual(shotEndWiring.finalShots, 2, "Shot End in green focus records the final shot");
   assert.ok(shotEndWiring.activeCleared, "no active shot after Shot End holes out in green focus");
+  assert.ok(bubbleDrag.tiltHeldMidDrag,
+    "the lock tilt must survive the drag - it used to flatten to birds-eye on grab and spring back on release");
   assert.ok(bubbleDrag.hitSized, "the drag hit covers the cluster (44px minimum)");
   assert.ok(bubbleDrag.aimMovedM > 5, "dragging the bubble moves the aim, got " + bubbleDrag.aimMovedM.toFixed(1) + "m");
   assert.ok(bubbleDrag.midDragFrameHeld, "the camera holds mid-drag");
@@ -1302,7 +1352,11 @@ async function bootCheck() {
     && play.gpsDotAt.top >= 0 && play.gpsDotAt.top <= 1400,
     "the live-map dot must project inside the viewport, got " + JSON.stringify(play.gpsDotAt));
   assert.ok(play.mapFramed, "a hole with tee+green geometry must stage-frame the live map");
-  assert.strictEqual(play.frameStage, "lock", "an on-hole fix 90m out locks the shot view on the live map");
+  /* A passive fix never locks you in. Walking the hole with GPS driving, you
+     stay in the pre-frame view with the dot moving along the map; the locked
+     shot view is earned by a lock-in (the dock's Lock, or the pill). */
+  assert.strictEqual(play.frameStage, "hole",
+    "an on-hole GPS fix must leave the live map pre-framed, not lock the shot view");
   assert.ok(/openstreetmap|linz/i.test(play.attribution || ""),
     "the basemap credit must render as fixed chrome, got " + JSON.stringify(play.attribution));
   assert.ok(play.distanceBarShown, "with a fix and a green, the distance bar must show");
@@ -1329,7 +1383,8 @@ async function bootCheck() {
     "leaving the hole clears the pin, so the live fix drives again");
 
   assert.ok(greenTap.mapped.foundGreenOnScreen,
-    "the green must be projectable on screen for the tap test to mean anything");
+    "the green must be projectable on screen for the tap test to mean anything; map was "
+    + greenTap.mapped.mapState);
   assert.strictEqual(greenTap.mapped.movedM, 0,
     "manual 'tap where the green is' must not leak into geo-mapped play - "
     + "a tap on the mapped green moved the player " + greenTap.mapped.movedM + "m");

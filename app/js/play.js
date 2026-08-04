@@ -139,6 +139,55 @@
   var liveFrame = IDENTITY_FRAME;   // Leaflet container px → viewport px
   var mapSide = null;               // current over-provisioned container side
 
+  /* Client coordinates → the overlay viewport's own PRE-TILT space, which is
+     what proj.toScreen answers in and what the frame inverse expects.
+
+     The lock stage tilts #surfaceViewport with
+     perspective(d) rotateX(θ) scale(s) about origin (50%, 70%), and a 2D
+     matrix inverse is simply wrong under that — which is why dragging used to
+     flatten the tilt to birds-eye and spring back on release. Undoing it
+     exactly is a closed form, so nothing has to be flattened:
+
+       screen y  ⇒  y1 = sy·d / (d + sy·tanθ)     (the perspective divide)
+                    Y  = y1 / cosθ                (undo the rotation)
+       screen x  ⇒  X  = sx·(d − y1·tanθ) / d
+       then divide both by the scale.
+
+     Identity whenever the tilt is not applied, so callers need no branch. The
+     constants come from the CSS custom properties, so the maths cannot drift
+     away from the look. */
+  function unTilt(clientX, clientY) {
+    var flat = { left: clientX, top: clientY };
+    var vp = document.getElementById("surfaceViewport");
+    if (!vp) return flat;
+    if (!(document.body.classList.contains("tilt-lock")
+      && document.body.classList.contains("surface-published"))) return flat;
+    var css = getComputedStyle(document.documentElement);
+    var deg = parseFloat(css.getPropertyValue("--tiltDeg"));
+    var d = parseFloat(css.getPropertyValue("--tiltPerspective"));
+    var s = parseFloat(css.getPropertyValue("--tiltScale"));
+    var originY = parseFloat(css.getPropertyValue("--tiltOriginY"));
+    if (!(Number.isFinite(deg) && Number.isFinite(d) && d > 0 && Number.isFinite(s) && s > 0
+      && Number.isFinite(originY))) return flat;
+    /* getBoundingClientRect() is the AABB of the TILTED box, so it cannot
+       give the origin. offsetWidth/Height are the untransformed size, and the
+       untransformed box starts at (0,0): #surfaceViewport is inset:0 inside
+       #playScreen, which is position:fixed inset:0 — the same assumption
+       renderShotOverlays already makes when it sizes the SVG viewBox to the
+       window. */
+    var w = vp.offsetWidth, h = vp.offsetHeight;
+    if (!(w > 0 && h > 0)) return flat;
+    var ox = w / 2, oy = h * originY;
+    var sx = clientX - ox, sy = clientY - oy;
+    var t = Math.tan((deg * Math.PI) / 180), c = Math.cos((deg * Math.PI) / 180);
+    var denom = d + sy * t;
+    if (!(Math.abs(denom) > 1e-6) || !(Math.abs(c) > 1e-6)) return flat;
+    var y1 = (sy * d) / denom;
+    var Y = y1 / c;
+    var X = (sx * (d - y1 * t)) / d;
+    return { left: X / s + w / 2, top: Y / s + h * originY };
+  }
+
   /* The one projection seam. Published: image pixels through the surface
      frame. Live: Leaflet container pixels through the live frame. Every
      overlay — dot, rings, aim line, pin, green ring — goes through this and
@@ -227,10 +276,16 @@
     /* A coarse opening view only. When the hole has enough geometry to solve
        a stage frame, applyLiveFrame replaces this on the very next render —
        this is the fallback for holes that do not (no green, no tee), where
-       the plain north-up fit is the honest presentation. */
-    if (pts.length >= 2) map.fitBounds(L.latLngBounds(pts).pad(0.15));
-    else if (pts.length === 1) map.setView(pts[0], 17);
-    else if (current.centre) map.setView([current.centre.lat, current.centre.lng], 15);
+       the plain north-up fit is the honest presentation.
+
+       animate:false is load-bearing. Leaflet animates a fitBounds/setView by
+       default and reports the target zoom immediately, so the stage frame
+       solved and applied straight afterwards looks like it won — then the
+       animation lands and silently clobbers it. The map ends up at a zoom no
+       frame ever chose, and every projection answers against it. */
+    if (pts.length >= 2) map.fitBounds(L.latLngBounds(pts).pad(0.15), { animate: false });
+    else if (pts.length === 1) map.setView(pts[0], 17, { animate: false });
+    else if (current.centre) map.setView([current.centre.lat, current.centre.lng], 15, { animate: false });
     if (pts.length) {
       var layers = [];
       var shape = rec.greenShape.filter(function (p) { return p && Number.isFinite(Number(p.lat)); })
@@ -259,6 +314,13 @@
       if (rec.tee) layers.push(L.circleMarker([rec.tee.lat, rec.tee.lng], { radius: 5, color: "#ffffff", weight: 2, fillColor: "#0d1b12", fillOpacity: 0.9 }));
       objectLayer = L.layerGroup(layers).addTo(map);
     }
+    /* The coarse view above has just moved the camera out from under whatever
+       frame was last applied, so the held frame no longer describes what is on
+       screen. Drop it: without this, a hole entered with a GPS fix already
+       adopted holds the stale frame (a gps fix is a hold condition), leaving
+       fitBounds' opening view in place and every projection answering against
+       a camera the frame never chose. */
+    mapSide = null;
     /* Unconditional: with no position yet this is what applies the pre-locked
        hole frame (tee low, green high) to the map we just created. */
     renderPosition(app.position.current());
@@ -338,14 +400,28 @@
     var side = Math.ceil(Math.hypot(view.width, view.height));
     var el = document.getElementById("map");
     if (!el) return;
-    if (mapSide !== side) {
-      mapSide = side;
+    /* Leaflet caches its container size and only re-measures on
+       invalidateSize. Sizing alone is not enough to know the cache is good:
+       if the frame is first solved while the play screen is still hidden,
+       Leaflet caches 0x0 and — because the side has not changed since — would
+       never re-measure, leaving setView clamped to zoom 0 and every
+       projection wrong for the rest of the round. Re-measure whenever the
+       cache disagrees with the element, which also self-heals that case the
+       moment the screen becomes visible. */
+    var measured = map.getSize();
+    if (measured.x !== side || measured.y !== side) {
       document.body.classList.add("map-framed");
       el.style.width = side + "px";
       el.style.height = side + "px";
       map.invalidateSize({ animate: false });
       applyGestureState();
     }
+    /* Still no size: the screen is not on yet. Claim NOTHING — mapSide is the
+       record that a frame is actually applied, and holdFrame trusts it. Set
+       it early and a skipped solve reads as "already framed", so the next GPS
+       fix holds a frame that was never applied and the camera stays wherever
+       the previous hole left it. */
+    if (!(map.getSize().x > 0)) { mapSide = null; return; }
     map.setView([centre.lat, centre.lng], zoom, { animate: false });
 
     /* Read the container point back rather than assuming side/2: Leaflet
@@ -356,6 +432,7 @@
       { left: view.width / 2, top: view.height / 2 }, angle, residual);
     el.style.transform = "matrix(" + liveFrame.a + "," + liveFrame.b + "," + (-liveFrame.b) + ","
       + liveFrame.a + "," + liveFrame.tx + "," + liveFrame.ty + ")";
+    mapSide = side;   // only now is a frame genuinely applied
   }
 
   /* Club codes read tight in the shot row (the same 2-3 char shorthand the
@@ -460,12 +537,7 @@
     renderShotOverlays(pos, model, proj);
     renderDistances(pos, model);
     renderPin(pos, proj);
-    /* Shot End is available whenever a shot is in flight — any stage, not
-       just green focus (a chip that comes up short still needs logging) — and
-       throughout green focus, which is the button that confirms the ball and
-       is the only way out of it besides Next Hole. */
-    var shotEndBtn = document.getElementById("shotEndBtn");
-    if (shotEndBtn) shotEndBtn.classList.toggle("hiddenState", !act && !greenFocus);
+    renderShotAction();
   }
 
   /* The pin marker draws on whichever presentation is up — one projected DOM
@@ -673,7 +745,13 @@
        ENGINE's target rule: the green when the max bag distance reaches it,
        the fairway layup point when it cannot. */
     app.position.onChange(function (pos) {
-      if (pos && (pos.source === "tap" || pos.source === "tee" || pos.source === "shotend")) {
+      /* Every deliberate placement is a lock-in: it closes the previous shot
+         at this point and starts the next one from here. "lock" is the dock
+         button; tap and tee are the pill and the map, which lock in by the
+         act of placing you. */
+      if (pos && (pos.source === "tap" || pos.source === "tee"
+        || pos.source === "shotend" || pos.source === "lock")) {
+        shotLocked = true;
         var green = current.rec && current.rec.green;
         var target = green || null;
         if (green && window.GDBubbleEngine) {
@@ -736,7 +814,11 @@
            the drag delta. */
         var targetScreen = proj.toScreen(act.target);
         if (!targetScreen) return;
-        bubbleDragOffset = { x: targetScreen.left - e.clientX, y: targetScreen.top - e.clientY };
+        /* The grab offset lives in PRE-TILT space, the same space
+           proj.toScreen answers in - mixing it with raw client coords only
+           worked while the tilt was being flattened for the drag. */
+        var grab = unTilt(e.clientX, e.clientY);
+        bubbleDragOffset = { x: targetScreen.left - grab.left, y: targetScreen.top - grab.top };
         /* Capture keeps the drag alive when the finger outruns the hit; if it
            is unavailable the hit re-centres under the finger every render, so
            dragging still works — a capture failure must not kill the drag. */
@@ -748,7 +830,8 @@
         if (!document.body.classList.contains("bubble-dragging") || !bubbleDragOffset) return;
         var proj = projector();
         if (!proj) return;
-        var ll = proj.toLatLng({ left: e.clientX + bubbleDragOffset.x, top: e.clientY + bubbleDragOffset.y });
+        var at = unTilt(e.clientX, e.clientY);
+        var ll = proj.toLatLng({ left: at.left + bubbleDragOffset.x, top: at.top + bubbleDragOffset.y });
         if (ll) app.shot.aim(ll);
       });
       bubble.addEventListener("pointerup", endBubbleDrag);
@@ -774,7 +857,8 @@
         if (!pin || !proj) return;
         var pinScreen = proj.toScreen(pin);
         if (!pinScreen) return;
-        pinDragOffset = { x: pinScreen.left - e.clientX, y: pinScreen.top - e.clientY };
+        var grabPin = unTilt(e.clientX, e.clientY);
+        pinDragOffset = { x: pinScreen.left - grabPin.left, y: pinScreen.top - grabPin.top };
         try { pinMarkerEl.setPointerCapture(e.pointerId); } catch (err) {}
         document.body.classList.add("pin-dragging");
         e.preventDefault();
@@ -783,7 +867,8 @@
         if (!document.body.classList.contains("pin-dragging") || !pinDragOffset) return;
         var proj = projector();
         if (!proj) return;
-        var ll = proj.toLatLng({ left: e.clientX + pinDragOffset.x, top: e.clientY + pinDragOffset.y });
+        var atPin = unTilt(e.clientX, e.clientY);
+        var ll = proj.toLatLng({ left: atPin.left + pinDragOffset.x, top: atPin.top + pinDragOffset.y });
         if (ll) app.pin.set(ll);
       });
       pinMarkerEl.addEventListener("pointerup", endPinDrag);
@@ -811,8 +896,9 @@
         if (!proj) return;
         var at = greenFocus.ball ? proj.toScreen(greenFocus.ball) : null;
         var parked = ballEl.classList.contains("parked");
+        var grabBall = unTilt(e.clientX, e.clientY);
         ballDragOffset = (!parked && at)
-          ? { x: at.left - e.clientX, y: at.top - e.clientY }
+          ? { x: at.left - grabBall.left, y: at.top - grabBall.top }
           : { x: 0, y: 0 };
         try { ballEl.setPointerCapture(e.pointerId); } catch (err) {}
         document.body.classList.add("ball-dragging");
@@ -824,7 +910,8 @@
         if (!document.body.classList.contains("ball-dragging") || !greenFocus || !ballDragOffset) return;
         var proj = projector();
         if (!proj) return;
-        var ll = proj.toLatLng({ left: e.clientX + ballDragOffset.x, top: e.clientY + ballDragOffset.y });
+        var atBall = unTilt(e.clientX, e.clientY);
+        var ll = proj.toLatLng({ left: atBall.left + ballDragOffset.x, top: atBall.top + ballDragOffset.y });
         if (!ll) return;
         greenFocus.ball = ll;
         greenFocus.placed = true;   // yours now: it stops following the fix
@@ -845,23 +932,44 @@
        green focus, but once the ball became the thing being confirmed the two
        were the same action on the same point — so Shot End carries both
        meanings: end this shot, and in green focus that ends the hole. */
-    var shotEnd = document.getElementById("shotEndBtn");
-    if (shotEnd) shotEnd.addEventListener("click", function () {
-      if (frameStage === "zoom") {
-        /* Green focus: the BALL is where the shot finished, not the raw fix —
-           that is the entire point of letting it be dragged. Confirming holes
-           out and moves on, so green focus never outlives the hole. */
+    var shotAction = document.getElementById("shotActionBtn");
+    if (shotAction) shotAction.addEventListener("click", function () {
+      var action = currentShotAction();
+
+      /* Green focus: the BALL is where the shot finished, not the raw fix —
+         that is the entire point of letting it be dragged. Confirming holes
+         out and moves on, so green focus never outlives the hole. */
+      if (action.key === "end") {
         app.shot.holeOut(shotEndPoint());
         app.play.nextHole();
         return;
       }
-      /* Pinned to the tee, the freshest fix is exactly what the player told
-         us to ignore — end the shot where the dot actually is instead, so
-         Shot End still advances the shot without teleporting them. */
+
+      /* Unlock: give the view back without giving the shot back. The position
+         is cleared so pre-frame is genuinely pre-frame — off-course that
+         brings the tee/tap pill up again, and when actually playing the next
+         GPS fix lands straight away and the dot simply moves along the map.
+         The in-flight shot is untouched: its start is still the last lock-in,
+         and the next lock closes it. The pill choice is reopened too, since
+         being back at the pill and unable to change your mind would be a
+         dead end. */
+      if (action.key === "unlock") {
+        shotLocked = false;
+        placement = null;
+        startPillDismissed = false;
+        app.position.clear();
+        renderPosition(null);
+        return;
+      }
+
+      /* Lock in here. Pinned to the tee, the freshest fix is exactly what the
+         player told us to ignore, so lock the dot where it actually is. */
       var fix = placement === "tee"
         ? app.position.current()
         : (app.gps && app.gps.lastFix()) || app.position.current();
-      if (fix) app.position.set(fix, "shotend");
+      if (!fix) return;
+      shotLocked = true;
+      app.position.set(fix, "lock");
     });
     /* Lock/Unlock: freeze the camera so it can't be bumped mid-shot. */
     var lockToggle = document.getElementById("lockToggleBtn");
@@ -994,6 +1102,18 @@
      pickup point to be dragged onto the green. */
   var greenFocus = null;   // null | { ball: {lat,lng}|null, placed: bool }
 
+  /* Is a shot locked in? Locking is what starts a shot and what closes the
+     previous one — the course data only ever needs the last lock-in joined to
+     the next lock-in, so every lock-in is a shot boundary and the walking in
+     between is not recorded.
+
+     Unlocking does NOT undo the lock-in. It releases the view back to
+     pre-frame — the start pill off-course, a freely moving GPS dot when
+     actually playing — while the shot stays in flight with its start where
+     you locked it. The next lock closes it. That is why unlock is safe to
+     press: it costs you the camera, never the shot. */
+  var shotLocked = false;
+
   /* Which stage the current position asks for. Placing the player IS the
      lock-in — head-to-tee or a tap starts the shot, so any position locks the
      shot view. The pre-locked hole frame exists only while the start pill is
@@ -1006,6 +1126,9 @@
     if (!pos || !rec || !rec.green) return "hole";
     var toGreen = app.distance.haversineMeters(pos, rec.green);
     if (Number.isFinite(toGreen) && toGreen <= ZOOM_GREEN_M) return "zoom";
+    /* Unlocked is the pre-frame view: the hole framed, the dot free to move
+       along it. Only a lock-in earns the locked shot view. */
+    if (!shotLocked) return "hole";
     return "lock";
   }
 
@@ -1040,6 +1163,52 @@
   function shotEndPoint() {
     if (greenFocus && greenFocus.ball) return greenFocus.ball;
     return app.position.current();
+  }
+
+  /* The dock button's three faces. One control in the same place, because at
+     any moment there is exactly one thing to do with the shot:
+
+       green focus  → Shot End: the ball is where it finished, confirm it
+       locked in    → Unlock Shot: release the view, keep the shot
+       otherwise    → Lock: lock in here, closing the previous shot
+
+     Coin art is per face; a face whose asset is missing falls back to its
+     label (the .noIcon class) rather than rendering a broken image. */
+  var SHOT_ACTIONS = {
+    zoom:     { key: "end",    label: "Shot End",    aria: "Shot End",
+                icon: "../assets/home/clarity-caddy-shot-end-icon.png?v=0b094e11" },
+    unlock:   { key: "unlock", label: "Unlock Shot", aria: "Unlock Shot",
+                icon: "../assets/home/clarity-caddy-unlock-shot-icon.png" },
+    lock:     { key: "lock",   label: "Lock",        aria: "Lock in the shot",
+                icon: "../assets/home/clarity-caddy-lock-shot-icon.png" }
+  };
+
+  function currentShotAction() {
+    if (greenFocus) return SHOT_ACTIONS.zoom;
+    if (shotLocked) return SHOT_ACTIONS.unlock;
+    return SHOT_ACTIONS.lock;
+  }
+
+  function renderShotAction() {
+    var btn = document.getElementById("shotActionBtn");
+    if (!btn) return;
+    /* Lock needs somewhere to lock in FROM, so it waits for a position.
+       Unlock and Shot End always have one by definition. */
+    var action = currentShotAction();
+    var usable = action.key !== "lock" || !!app.position.current();
+    btn.classList.toggle("hiddenState", !usable);
+    /* The face is kept current even while hidden, so the button never comes
+       back wearing the previous coin for a frame. */
+    if (btn.dataset.action === action.key) return;
+    btn.dataset.action = action.key;
+    btn.setAttribute("aria-label", action.aria);
+    var label = document.getElementById("shotActionLabel");
+    if (label) label.textContent = action.label;
+    var icon = document.getElementById("shotActionIcon");
+    if (!icon) return;
+    btn.classList.remove("noIcon");
+    icon.onerror = function () { btn.classList.add("noIcon"); };
+    icon.src = action.icon;
   }
 
   /* The active shot ONLY while it is still being aimed. A shot stays active
@@ -1298,6 +1467,14 @@
          Shot End that confirms the ball. */
       placement = null;
       greenFocus = null;
+      shotLocked = false;   // a new hole always opens unlocked, at pre-frame
+      /* Drop the held frame so the new hole solves its own. Without this a
+         solve that gets skipped — the frame held under a GPS fix, or the map
+         not measurable yet — leaves the PREVIOUS hole's camera in place while
+         every projection quietly answers against it. */
+      activeFrame = null;
+      mapSide = null;
+      liveFrame = IDENTITY_FRAME;
       renderPosition(null);
       if (app.gps) maybeAdoptGpsFix(app.gps.lastFix());
       /* A full package carries the hole's published surface inline — one
@@ -1323,6 +1500,7 @@
       liveAtCourse = false;
       placement = null;
       greenFocus = null;
+      shotLocked = false;
       setViewLocked(false);
       if (app.undo) app.undo.clear();
       if (app.gps) app.gps.stop();
@@ -1336,6 +1514,16 @@
       current = { courseKey: null, pkg: null, hole: 0, rec: null, nines: null, centre: null };
     },
     state: function () { return { courseKey: current.courseKey, hole: current.hole, nines: current.nines }; },
+    /* The live map's actual camera, for tests and for diagnosing a frame that
+       does not match what is on screen. Read-only. */
+    mapState: function () {
+      if (!map) return null;
+      try {
+        var c = map.getCenter(), s = map.getSize();
+        return { lat: c.lat, lng: c.lng, zoom: map.getZoom(), width: s.x, height: s.y,
+          minZoom: map.getMinZoom(), maxZoom: map.getMaxZoom() };
+      } catch (e) { return null; }
+    },
     /* Every hole the player can jump straight to, in play order - the
        selected nines' holes when the course has more than two, otherwise
        every hole the package actually has geometry for (falling back to 18,
@@ -1399,7 +1587,11 @@
     latLngAt: function (clientX, clientY) {
       var proj = projector();
       if (proj) {
-        var ll = proj.toLatLng({ left: clientX, top: clientY });
+        /* Through the tilt inverse first: the caller hands us raw client
+           coords (a tap, or the rail's pin drag) and the seam works in the
+           viewport's pre-tilt space. */
+        var at = unTilt(clientX, clientY);
+        var ll = proj.toLatLng({ left: at.left, top: at.top });
         if (ll) return ll;
       }
       /* Letterbox fallback: a published surface with no solved frame is shown
