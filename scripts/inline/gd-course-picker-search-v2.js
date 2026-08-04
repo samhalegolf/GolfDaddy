@@ -486,13 +486,21 @@
     navigateToAppPlay(course);
     return true;
   }
+  /* index.html is named explicitly rather than relying on directory-index
+     resolution, because the native shells do not do it. Both Capacitor local
+     servers treat a path with no file extension as an SPA route and serve the
+     BUNDLE ROOT index.html instead - iOS in Router.swift ("if there's no path
+     extension it also means the path is empty or a SPA route"), Android in
+     WebViewLocalServer's html5mode branch, which is on by default. So "/app/"
+     re-entered the old shell on a phone while working perfectly in every
+     browser and in CI, which is why nothing caught it. */
   function navigateToAppPlay(course){
     const parts=[];
     if(course.courseId)parts.push("courseId="+encodeURIComponent(course.courseId));
     if(course.courseName)parts.push("courseName="+encodeURIComponent(course.courseName));
     if(Number.isFinite(course.courseLat))parts.push("courseLat="+encodeURIComponent(course.courseLat));
     if(Number.isFinite(course.courseLng))parts.push("courseLng="+encodeURIComponent(course.courseLng));
-    window.location.href="/app/?"+parts.join("&");
+    window.location.href="/app/index.html?"+parts.join("&");
   }
   function localSavedPlayable(course){
     const has=bridge().hasMappedPlayData;
