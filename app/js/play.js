@@ -235,10 +235,17 @@
       var layers = [];
       var shape = rec.greenShape.filter(function (p) { return p && Number.isFinite(Number(p.lat)); })
         .map(function (p) { return [Number(p.lat), Number(p.lng)]; });
+      /* The green's own geometry — its outline, or a centre dot when the
+         package has no shape. Green focus only: playing down the fairway you
+         can already see the green in the imagery, so drawing a white pentagon
+         and a centre pip over it is clutter standing in front of the picture.
+         Zoomed in on the green it is the useful reference again. Kept in the
+         layer and hidden by CSS on the frame stage, not rebuilt per stage —
+         the geometry still drives distances and framing regardless. */
       if (shape.length >= 3) {
-        layers.push(L.polygon(shape, { color: "#ffffff", weight: 2, fillColor: "#2f8f4e", fillOpacity: 0.25 }));
+        layers.push(L.polygon(shape, { color: "#ffffff", weight: 2, fillColor: "#2f8f4e", fillOpacity: 0.25, className: "holeGreen" }));
       } else if (rec.green) {
-        layers.push(L.circleMarker([rec.green.lat, rec.green.lng], { radius: 6, color: "#ffffff", weight: 2, fillColor: "#2f8f4e", fillOpacity: 0.9 }));
+        layers.push(L.circleMarker([rec.green.lat, rec.green.lng], { radius: 6, color: "#ffffff", weight: 2, fillColor: "#2f8f4e", fillOpacity: 0.9, className: "holeGreen" }));
       }
       var line = [rec.tee].concat(rec.route, [rec.green])
         .filter(function (p) { return p && Number.isFinite(Number(p.lat)); })
@@ -561,12 +568,13 @@
                   return p.left.toFixed(1) + "," + p.top.toFixed(1);
                 }).join("L") + '"/>');
               }
-              var shapePts = (rec.greenShape || []).map(project).filter(Boolean);
-              if (shapePts.length >= 3) {
-                parts.unshift('<path class="greenReference" d="M' + shapePts.map(function (p) {
-                  return p.left.toFixed(1) + "," + p.top.toFixed(1);
-                }).join("L") + 'Z"/>');
-              }
+              /* The layup context used to trace the green outline here too
+                 (gdAddMappedReferenceGeometry's green reference). Dropped for
+                 the same reason as the Leaflet outline: laying up, the green
+                 is a long way up the screen and already visible in the
+                 imagery, so an extra ring around it is clutter. The middle
+                 guide's "Green Xm" label is what actually answers the layup
+                 question, and it stays. */
               var gx = greenScreen.left - centerScreen.left, gy = greenScreen.top - centerScreen.top;
               var glen = Math.hypot(gx, gy) || 1;
               var trim = Math.min(10, glen * 0.05);

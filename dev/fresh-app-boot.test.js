@@ -707,7 +707,14 @@ async function bootCheck() {
       aimPaths: document.getElementById("bubbleSvg").children.length,
       bubble: !document.getElementById("aimBubble").classList.contains("hiddenState"),
       shotRow: !document.getElementById("shotRow").classList.contains("hiddenState"),
-      greenRing: !document.getElementById("greenRing").classList.contains("hiddenState")
+      greenRing: !document.getElementById("greenRing").classList.contains("hiddenState"),
+      /* The green's outline is green-focus only: down the fairway the imagery
+         already shows the green, so drawing over it is clutter. */
+      greenOutline: (() => {
+        const g = document.querySelector("#map .holeGreen");
+        return g ? getComputedStyle(g).display !== "none" : false;
+      })(),
+      greenReference: !!document.querySelector("#bubbleSvg .greenReference")
     });
 
     const beforeArrival = state();
@@ -1377,6 +1384,12 @@ async function bootCheck() {
   assert.ok(!greenFocus.onGreen.bubble, "no aim bubble in green focus");
   assert.ok(!greenFocus.onGreen.shotRow, "no club/carry row in green focus - there is no shot to play");
   assert.ok(greenFocus.onGreen.greenRing, "the green ring is not an aiming instrument and stays");
+  assert.ok(!greenFocus.beforeArrival.greenOutline,
+    "normal play must not draw the green outline over the imagery");
+  assert.ok(!greenFocus.beforeArrival.greenReference,
+    "normal play must not draw the SVG green reference either");
+  assert.ok(greenFocus.onGreen.greenOutline,
+    "green focus brings the green outline back, where it is the useful reference");
   assert.strictEqual(greenFocus.atNextTee.aimPaths, 0,
     "the aim overlays stay cleared while green focus is deferred");
   assert.strictEqual(greenFocus.atNextTee.stage, "zoom",
