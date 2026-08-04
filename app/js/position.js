@@ -2,6 +2,10 @@
      "tee" — hole entry heads to the tee
      "tap" — the player tapped where they are standing
      "gps" — a real fix (play.js gates these to near-the-hole only)
+     "lock" — the dock's Lock button: the player locks in here, which closes
+       the previous shot at this point and starts the next. Course data only
+       needs the last lock-in joined to the next one, so these are the shot
+       boundaries and the walking between them is never recorded.
      "shotend" — the Shot End button: the player deliberately says "this is
        where that shot finished," promoting the current fix into a shot
        advance the same way a tap does (a passive GPS fix alone never does)
