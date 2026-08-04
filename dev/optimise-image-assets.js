@@ -48,14 +48,21 @@ const ORIGINAL_DIR = path.join(__dirname, "image-originals");
      ios/App/App/Assets.xcassets. apple-touch-icon tops out at 180px.
    - clarity-caddy-course-library-icon is the Player Profile > Courses card
      icon (#gdProfileCoursesCard .gdCourseLibraryCardIcon), 40px.
-   - clarity-caddy-shot-end-icon is the Shot End button on the play screen
-     (#shotEndBtn), 72px - the largest this button renders at. */
+   - tool-rail is the play screen's tool tab (#toolRailTab img), 26px. It was
+     shipping at 1254px and 1144KB - a megabyte for a 26px icon, and the single
+     biggest thing in assets/ - because it was never added to this plan.
+   - clarity-caddy-shot-end-icon, -lock-shot-icon and -unlock-shot-icon are the
+     three faces of the one dock button on the play screen (#shotActionBtn),
+     72px - the largest it renders at. */
 const PLAN = [
   { file: "assets/home/play.png", target: 768, maxRender: 235 },
   { file: "assets/home/bag.png", target: 768, maxRender: 235 },
   { file: "assets/home/profile.png", target: 768, maxRender: 235 },
   { file: "assets/home/clarity-caddy-course-library-icon.png", target: 256, maxRender: 40 },
   { file: "assets/home/clarity-caddy-shot-end-icon.png", target: 216, maxRender: 72 },
+  { file: "assets/home/tool-rail.png", target: 256, maxRender: 26 },
+  { file: "assets/home/clarity-caddy-lock-shot-icon.png", target: 216, maxRender: 72 },
+  { file: "assets/home/clarity-caddy-unlock-shot-icon.png", target: 216, maxRender: 72 },
   { file: "assets/brand/cg-logo-white-g.png", target: 256, maxRender: 62 },
   { file: "assets/brand/cg-gps-pin.png", target: 256, maxRender: 46 },
   /* headroom 1: apple-touch-icon and favicon sizes are already device pixels -
