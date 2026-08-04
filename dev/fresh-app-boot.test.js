@@ -698,7 +698,16 @@ async function bootCheck() {
       parked: ball.classList.contains("parked"),
       dot: !dot.classList.contains("hiddenState"),
       hint: !document.getElementById("greenFocusHint").classList.contains("hiddenState"),
-      shotEnd: !document.getElementById("shotEndBtn").classList.contains("hiddenState")
+      shotEnd: !document.getElementById("shotEndBtn").classList.contains("hiddenState"),
+      /* Aiming instruments. Standing on the green there is nothing to aim, so
+         the engine must not be asked to model a shot from there - it answers
+         with the shortest club and a bag-roof clamp that throws the cluster
+         well past the green, which showed up as a bubble anchored on the
+         green itself. */
+      aimPaths: document.getElementById("bubbleSvg").children.length,
+      bubble: !document.getElementById("aimBubble").classList.contains("hiddenState"),
+      shotRow: !document.getElementById("shotRow").classList.contains("hiddenState"),
+      greenRing: !document.getElementById("greenRing").classList.contains("hiddenState")
     });
 
     const beforeArrival = state();
@@ -1362,6 +1371,14 @@ async function bootCheck() {
   assert.ok(greenFocus.onGreen.ball, "green focus turns the position marker into the ball");
   assert.ok(!greenFocus.onGreen.dot, "the dot gives way to the ball - never both at once");
   assert.ok(!greenFocus.onGreen.parked, "standing on the green, the ball sits on the map");
+  assert.ok(greenFocus.beforeArrival.aimPaths > 0, "test setup: the aim overlays draw while aiming");
+  assert.strictEqual(greenFocus.onGreen.aimPaths, 0,
+    "green focus must clear the aim overlays - a bubble anchored on the green is a shot nobody is playing");
+  assert.ok(!greenFocus.onGreen.bubble, "no aim bubble in green focus");
+  assert.ok(!greenFocus.onGreen.shotRow, "no club/carry row in green focus - there is no shot to play");
+  assert.ok(greenFocus.onGreen.greenRing, "the green ring is not an aiming instrument and stays");
+  assert.strictEqual(greenFocus.atNextTee.aimPaths, 0,
+    "the aim overlays stay cleared while green focus is deferred");
   assert.strictEqual(greenFocus.atNextTee.stage, "zoom",
     "green focus is sticky: walking to the next tee must not close it");
   assert.ok(greenFocus.atNextTee.parked,

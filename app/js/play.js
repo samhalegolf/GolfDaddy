@@ -385,7 +385,7 @@
        IS the shot. */
     var shotRow = document.getElementById("shotRow");
     if (!shotRow) return;
-    var act = app.shot && app.shot.active();
+    var act = aimingShot();
     var show = false;
     if (act && act.target) {
       var landing = (model && model.center) || act.target;
@@ -448,7 +448,8 @@
     }
     var act = app.shot && app.shot.active();
     document.body.classList.toggle("shot-active", !!act);
-    var model = act && window.GDBubbleEngine ? window.GDBubbleEngine.renderModel() : null;
+    /* Aiming only — green focus has a shot but nothing to aim (aimingShot). */
+    var model = aimingShot() && window.GDBubbleEngine ? window.GDBubbleEngine.renderModel() : null;
     renderShotOverlays(pos, model, proj);
     renderDistances(pos, model);
     renderPin(pos, proj);
@@ -489,7 +490,7 @@
      presentation is up. */
   function renderShotOverlays(pos, model, proj) {
     function project(pt) { return pt && proj ? proj.toScreen(pt) : null; }
-    var act = app.shot && app.shot.active();
+    var act = aimingShot();
     /* The engine's cluster rings, computed in lat/lng, projected here (the
        model itself came from renderPosition; project() no-ops without a
        published surface, so rings only draw when one exists). The drag
@@ -588,6 +589,12 @@
       if (parts.length) {
         svg.setAttribute("viewBox", "0 0 " + window.innerWidth + " " + window.innerHeight);
         svg.innerHTML = parts.join("");
+      } else if (svg.innerHTML) {
+        /* Hiding the <svg> used to be the whole cleanup, which left the last
+           frame's paths sitting in the DOM — invisible, but ready to flash
+           back the moment anything un-hid it, and misleading to anyone
+           inspecting the overlay. Nothing to draw means nothing there. */
+        svg.innerHTML = "";
       }
     }
     /* The drag hit covers the CLUSTER: grab the bubble anywhere to drag the
@@ -1025,6 +1032,24 @@
   function shotEndPoint() {
     if (greenFocus && greenFocus.ball) return greenFocus.ball;
     return app.position.current();
+  }
+
+  /* The active shot ONLY while it is still being aimed. A shot stays active
+     through green focus — it is the one being confirmed — but by then there
+     is nothing left to aim: you are standing on the green. Asking the engine
+     to model a shot from there produces nonsense, because it answers the
+     question it was asked: shortest club in the bag, and a bag-roof clamp
+     that throws the cluster centre tens of metres past the green. What
+     reached the screen was a bubble anchored near the green and a "LW 11m /
+     carry 66" row for a shot nobody is playing.
+
+     So every aiming instrument — rings, aim line, wind drift, middle guide,
+     layup context, the drag hit and the shot row — hangs off this rather
+     than off app.shot.active(). The green ring, the ball, the pin and the
+     front/back distances are not aiming instruments and stay. */
+  function aimingShot() {
+    if (greenFocus) return null;
+    return (app.shot && app.shot.active()) || null;
   }
 
   var PARK_AT_M = ZOOM_GREEN_M;   // beyond this with the ball unplaced → park it
