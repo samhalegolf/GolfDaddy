@@ -480,10 +480,44 @@
       if(typeof b.storeSelection==="function")b.storeSelection(course);
     }
   }
+  /* The paid-access gate for GPS rounds.
+   *
+   * gd-gps-play-runtime-owner-v1.js was the only place in the codebase that
+   * enforced gps_round_start, and it was deleted with the old play system, so
+   * from that commit until now anyone could open a round for free. This is that
+   * same check restored, not a new policy: same permission key, same resolver,
+   * same message. It sits here rather than inside /app/ because this is where
+   * entry is decided and where clarity-permissions.js is already loaded - the
+   * play surface stays free of billing code.
+   *
+   * Fails CLOSED, matching the original: the resolver is the source of truth and
+   * a check that could not complete is not evidence of access. The two failure
+   * messages are kept distinct because they need different answers from the
+   * player - "buy access" versus "try again".
+   */
+  var GPS_ROUND_START_PERMISSION_KEY="gps_round_start";
+  function gpsStartPermission(){
+    if(!(window.ClarityPermissions&&typeof window.ClarityPermissions.canUse==="function")){
+      return Promise.resolve({allowed:false,reasons:["PERMISSIONS_HELPER_MISSING"]});
+    }
+    return window.ClarityPermissions.canUse(GPS_ROUND_START_PERMISSION_KEY,{route:"gps_round_start",resourceId:"gps-entry"});
+  }
   function enterGpsPlay(course,result,opts={}){
     if(!(result&&result.playable))return false;
     state.lastResult=result;
-    navigateToAppPlay(course);
+    /* Resuming a round already in progress bypasses the gate, exactly as the old
+       owner's shouldBypassGpsRoundStartPermission did - a player whose access
+       lapsed mid-round is not locked out of the holes they are standing on. */
+    if(opts.fromResume||opts.fromBack||opts.preserveState){
+      navigateToAppPlay(course);
+      return true;
+    }
+    gpsStartPermission().then(function(check){
+      if(check&&check.allowed){navigateToAppPlay(course);return;}
+      if(typeof toast==="function")toast("Start gate: active paid access is required for GPS rounds");
+    }).catch(function(){
+      if(typeof toast==="function")toast("Start gate check failed. Try again.");
+    });
     return true;
   }
   /* index.html is named explicitly rather than relying on directory-index

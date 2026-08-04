@@ -249,6 +249,65 @@ Genuinely done, and worth not re-litigating:
 
 ---
 
+## Status, end of 2026-08-04
+
+Everything below was fixed and is covered by `dev/app-native-contract.test.js`
+(registered in CI), which was mutation-tested against three reintroduced defects
+before being trusted. Full suite green: 27 structural tests plus boot smoke.
+
+| item | state |
+| --- | --- |
+| P0-1 extensionless `/app/` handoff | fixed |
+| P0-2 no API origin on `/app/` | fixed |
+| P1-3 durable storage | fixed — 5 `clarity:*` keys mirrored, 2 in the reload set |
+| P1-4 paid-tier gate | fixed — `gps_round_start` restored at the picker, fails closed |
+| P1-5 shot feed to My Bubble | **open — needs a product decision, see below** |
+| P1-6 Android back | fixed — wired to `/app/`'s own `exitBack` |
+| P1-7 error reporter | fixed |
+| P2-8 iOS universal links | files done; project wiring blocked, see below |
+| P2-9 silent location denial | fixed — `#gpsNotice`, denial only |
+| P2-10 no wake lock | fixed — `app/js/wake-lock.js` |
+| P2-11 offline expectations | unchanged; documented, not a defect |
+| P2-12 `demo/` in the binary | fixed — pruned by `--app-only` |
+| P2-13 "dead" stylesheet | **withdrawn — the finding was wrong** |
+| P2-14 CI blind to the native path | fixed |
+
+### P2-13 was wrong
+
+`styles/inline/gd-gps-play-runtime-owner-v1-css.css` is not dead. `gd-shell.js:128-131`
+still toggles `shell-gps`, `gdGpsActive` and `gps-active` for the **course-picker**
+route, not just the deleted GPS route, so the stylesheet is live every time the
+picker opens. The original finding inferred "dead" from the JS owner being
+deleted and did not check who else sets the classes. Left in place.
+
+### P2-8 is half-landed, and deliberately so
+
+`ios/App/App/App.entitlements`, `.well-known/apple-app-site-association` and the
+`application/json` header in `netlify.toml` are all in. The `CODE_SIGN_ENTITLEMENTS`
+wiring is **not**: pointing the target at the entitlements file makes the build
+demand a provisioning profile granting Associated Domains, and the cached App
+Store profile predates that capability, so the export fails outright. Trading a
+working release build for a P2 feature is the wrong way round. Enabling it needs
+an Apple ID signed into Xcode (Settings → Accounts), which regenerates the
+profile with the capability; the test goes strict automatically once the wiring
+lands.
+
+### P1-5 is the one genuine product fork
+
+Restated from `GPS_PLAY_DELETION_AUDIT_2026-08-02.md` §3b, which called it "a
+genuine product call, not an engineering oversight". The old runtime wrote every
+on-course shot into `gd_shot_events_v1` tagged `courseContext:"gps_course"`,
+which is what `gd-shot-cluster-analysis.js` fits My Bubble from. `/app/js/shot.js`
+holds shots in memory only. Two defensible answers:
+
+- **Restore it** — on-course shots feed My Bubble again. The contract is known,
+  so this is wiring, not design.
+- **Confirm the cut** — My Bubble becomes practice-import-only, which is
+  consistent with the rebuild's "the app authors nothing" rule, and the stats
+  panel should then say so rather than silently showing fewer shots.
+
+Doing nothing is the only bad option, because it is the silent one.
+
 ## Suggested order
 
 1. ~~`/app/index.html?…` in the picker (P0-1)~~ — **done**.

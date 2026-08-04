@@ -81,9 +81,20 @@
     if (already === signature) return false;
     safe(function () { sessionStorage.setItem(HANDLED_GUARD, signature); });
 
-    var target = location.pathname + (parts.query ? "?" + parts.query : "") + (parts.hash || "");
-    safe(function () { history.replaceState(null, "", target); });
-    safe(function () { location.reload(); });
+    /* The root shell, not location.pathname. Every parameter in ALLOWED_PARAMS
+       is read only by the root shell's startup, but a link arrives at whatever
+       page the app happens to have open - and since the picker hands off to
+       /app/index.html, that is very often the play screen. Copying the query
+       onto /app/ produced a page that reloaded and then ignored the reset
+       entirely, which looks exactly like the link being broken.
+
+       Safe to make unconditional: this module returns early on web, where the
+       link URL genuinely IS the page, and in the native bundle "/" is the root
+       shell on both platforms. */
+    var target = "/" + (parts.query ? "?" + parts.query : "") + (parts.hash || "");
+    var samePage = location.pathname === "/" || location.pathname === "/index.html";
+    safe(function () { if (samePage) history.replaceState(null, "", target); });
+    safe(function () { samePage ? location.reload() : location.replace(target); });
     return true;
   }
 

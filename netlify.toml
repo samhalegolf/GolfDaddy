@@ -236,3 +236,15 @@
   for = "/assets/*"
   [headers.values]
     Cache-Control = "public, max-age=604800"
+
+# Apple requires the association file to be served as application/json, and it
+# is the one file here with no extension - so nothing infers the type for it and
+# the default would be octet-stream. iOS rejects a wrong content type by simply
+# not verifying the domain, with no error surfaced anywhere, which is the same
+# silent-failure shape the assetlinks.json comment in AndroidManifest describes.
+# Cached short: changing which paths open the app should not wait on a CDN TTL.
+[[headers]]
+  for = "/.well-known/apple-app-site-association"
+  [headers.values]
+    Content-Type = "application/json"
+    Cache-Control = "public, max-age=300"

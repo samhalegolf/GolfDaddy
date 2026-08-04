@@ -209,7 +209,23 @@ if (APP_ONLY) {
     const target = path.join(dist, dir);
     if (fs.existsSync(target) && fs.readdirSync(target).length === 0) fs.rmdirSync(target);
   });
-  console.log("--app-only: no studio output; pruned " + studioOnlyFiles.length + " studio-only files from dist");
+  /* Directories that belong to the deployed site but not inside a store binary.
+     Same reasoning as the studio prune above: `npx cap sync` copies all of dist
+     into the native projects, so anything left here ships inside the APK/IPA
+     whether or not a single byte of it is reachable. `demo/` is the Playwright
+     capture harness - a dev tool, and one that has no business being in a
+     shipped app even at 20KB. On Netlify these stay, since the CDN serves them
+     and `npm run demo:capture` drives them. */
+  const NON_APP_DIRS = ["demo"];
+  let prunedDirs = 0;
+  NON_APP_DIRS.forEach(function (dir) {
+    const target = path.join(dist, dir);
+    if (!fs.existsSync(target)) return;
+    fs.rmSync(target, { recursive: true, force: true });
+    prunedDirs += 1;
+  });
+  console.log("--app-only: no studio output; pruned " + studioOnlyFiles.length
+    + " studio-only files and " + prunedDirs + " non-app director" + (prunedDirs === 1 ? "y" : "ies") + " from dist");
 } else {
   const studioHtml = stampTarget(studio.html, STUDIO).replace(/<head>/i, '<head>\n<base href="/">');
   const studioStamped = stampContentVersions(studioHtml);

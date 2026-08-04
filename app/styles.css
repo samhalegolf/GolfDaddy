@@ -285,6 +285,14 @@ body.ball-dragging #surfaceViewport { transition: none !important; }
 #mapUpdateBar span { flex: 1; font-size: 14px; }
 #mapUpdateBar button { border: 0; border-radius: 8px; padding: 6px 12px; font-size: 13px; }
 #mapUpdateDownload { background: #1fd36d; color: #06110b; font-weight: 700; }
+/* Same bar shape as the map-update row above, in a warning amber rather than
+   the brand green - this one reports something the player has to fix, not
+   something they can take. Both live in #playTopBar's normal flow, so they
+   stack rather than overlap if a published map lands while location is off. */
+#gpsNotice { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: rgba(240, 176, 66, .16); border-bottom: 1px solid rgba(240, 176, 66, .34); }
+#gpsNotice.hiddenState { display: none; }
+#gpsNotice span { flex: 1; font-size: 13px; line-height: 1.35; color: #f4dfba; }
+#gpsNotice button { border: 0; border-radius: 8px; padding: 6px 12px; font-size: 13px; background: transparent; color: #f4dfba; }
 #mapUpdateDismiss { background: rgba(255, 255, 255, .12); color: #f2f7f2; padding: 6px 10px; }
 
 /* Bottom-left, directly above the shot card (#distanceBar: left 12px,

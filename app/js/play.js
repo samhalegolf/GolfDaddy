@@ -1482,6 +1482,7 @@
       if (app.pin) app.pin.startRound();
       if (app.scorecard) app.scorecard.setCourse(current.courseKey);
       if (app.gps) app.gps.start();
+      if (app.wakeLock) app.wakeLock.start();
       await this.goHole(current.nines ? current.nines.holesInPlay[0] : 1);
     },
     async goHole(hole) {
@@ -1551,6 +1552,7 @@
       setViewLocked(false);
       if (app.undo) app.undo.clear();
       if (app.gps) app.gps.stop();
+      if (app.wakeLock) app.wakeLock.stop();
       app.position.clear();
       clearSurface();
       clearLiveFrame();

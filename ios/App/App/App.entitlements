@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Universal Links. Android has had the equivalent since the App Links
+	     intent-filter went into AndroidManifest.xml with autoVerify="true"; iOS
+	     had nothing, so a password-reset or account-setup email tapped on an
+	     iPhone opened Safari and reset in a different session than the app the
+	     player was signed into.
+
+	     applinks: is what makes iOS fetch
+	     https://caddy.claritygolf.app/.well-known/apple-app-site-association and
+	     match it against this app's Team ID + bundle ID. Both halves are
+	     required: without this entitlement the file is never fetched, and
+	     without the file this entitlement matches nothing. Neither half reports
+	     an error when it is missing - links simply keep opening the browser -
+	     which is why this went unnoticed.
+
+	     gd-native-deep-links.js is what turns the delivered URL into app state;
+	     this only gets the URL to the app. -->
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:caddy.claritygolf.app</string>
+	</array>
+</dict>
+</plist>

@@ -48,6 +48,7 @@ jobs:
           node dev/store-billing-client.test.js
           node dev/native-back-button.test.js
           node dev/fresh-app-boot.test.js
+          node dev/app-native-contract.test.js
           node dev/course-identity-resolution.test.js
           node dev/auth-route-boot-release.test.js
           node dev/password-reset-surface.test.js

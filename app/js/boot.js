@@ -50,6 +50,38 @@
     if (window.history.length > 1) window.history.back();
     else exitToMainSite();
   }
+
+  /* The location-denied notice. Only "denied" shows it: that is the one status
+     the player can act on, and the one that will never resolve on its own.
+     Dismissal lasts the round - re-nagging on every status event would be worse
+     than the silence it replaces. */
+  var gpsNoticeDismissed = false;
+  function renderGpsNotice(status) {
+    var el = document.getElementById("gpsNotice");
+    if (!el) return;
+    el.classList.toggle("hiddenState", gpsNoticeDismissed || status !== "denied");
+  }
+
+  /* Android's hardware Back, routed to the same handler as the on-screen one.
+     Without a listener the system default pops the WebView's history or closes
+     the app outright, which mid-round is the worst thing this app can do.
+
+     This page does not load gd-native-back-button.js on purpose: that module
+     asks GDShell for the current route, GDShell does not exist here, and a
+     missing route reads as "root" - so every Back press would have reached its
+     exitApp() branch and dropped the round. exitBack already encodes this
+     page's real semantics (undo a wind/pin change, then history, then the main
+     site), so Back means the same thing whichever way it is pressed.
+
+     iOS has no hardware back button and web has no plugin, so both no-op. */
+  function installNativeBack() {
+    if (!(window.GDNative && window.GDNative.isNative && window.GDNative.platform === "android")) return false;
+    var cap = window.Capacitor;
+    var api = cap && cap.Plugins && cap.Plugins.App;
+    if (!api || typeof api.addListener !== "function") return false;
+    try { api.addListener("backButton", function () { exitBack(); }); } catch (e) { return false; }
+    return true;
+  }
   /* GPS Settings is a sheet in this page now, not a hand-off. It used to
      navigate to /?openGpsSettings=1, which meant leaving the round entirely
      and landing on the main site's home shell — and if you were not signed
@@ -176,6 +208,7 @@
     show("play");
     activeCourse = course;
     mapUpdateDismissed = false;
+    gpsNoticeDismissed = false;
     var cached = app.courseStore.load(course.courseId);
     var pkg = cached && cached.pkg;
     if (pkg) {
@@ -230,7 +263,13 @@
       show("home");
       hideLoadingScreen();
     }
+    document.getElementById("gpsNoticeDismiss").addEventListener("click", function () {
+      gpsNoticeDismissed = true;
+      document.getElementById("gpsNotice").classList.add("hiddenState");
+    });
+    if (app.gps) app.gps.onStatus(renderGpsNotice);
     app.basemap.prefetch();   // so base-layer choice is synchronous by map time
+    app.nativeBackInstalled = installNativeBack();
     app.booted = true;   // boot-test canary: the last line of the load order ran
   });
 

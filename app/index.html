@@ -14,6 +14,18 @@
      design, so the whole thing degraded silently into "objects on an OSM map"
      rather than erroring. Inert on web: isNative false, fetch untouched. -->
 <script src="../scripts/inline/gd-native-bootstrap.js"></script>
+<!-- Mirrors the keys that cannot be re-fetched into @capacitor/preferences,
+     because a WebView evicts web storage under pressure and localStorage is
+     where the in-progress round lives. Second, because it patches
+     localStorage.setItem and must be in place before any module writes; it
+     also defines the real gdSafeLocalSet, which js/platform.js then leaves
+     alone (its shim is typeof-guarded). -->
+<script src="../scripts/inline/gd-durable-storage.js"></script>
+<!-- Third, so it is installed before the modules that can throw. Without it a
+     crash on the 9th tee produced nothing anywhere: this page had no reporter
+     and no onerror handler of its own. Posts to /api/client-errors, which
+     resolves natively only because the bootstrap above ran first. -->
+<script src="../scripts/clarity-error-reporter.js"></script>
 <link rel="stylesheet" href="../assets/vendor/leaflet/leaflet.css">
 <link rel="stylesheet" href="styles.css">
 </head>
@@ -64,6 +76,15 @@
       <span id="mapUpdateLabel">Published map available</span>
       <button id="mapUpdateDownload" type="button">Download</button>
       <button id="mapUpdateDismiss" type="button" aria-label="Dismiss">&times;</button>
+    </div>
+    <!-- Shown only when location was actually DENIED, which is the one GPS
+         state that will not resolve by waiting. "No fix yet" stays silent -
+         the surface renders fine without a dot and saying so would be noise on
+         every hole. Without this a denial looked identical to a slow fix: a
+         permanently dotless map with no explanation. -->
+    <div id="gpsNotice" class="hiddenState" role="status">
+      <span id="gpsNoticeLabel">Location is off, so distances can't follow you. Turn it on for Clarity Caddy in Settings.</span>
+      <button id="gpsNoticeDismiss" type="button" aria-label="Dismiss">&times;</button>
     </div>
   </div>
   <div id="map"></div>
@@ -252,11 +273,23 @@
 <script src="js/pin.js"></script>
 <script src="js/position.js"></script>
 <script src="js/gps.js"></script>
+<script src="js/wake-lock.js"></script>
 <script src="js/nines.js"></script>
 <script src="js/gps-settings.js"></script>
 <script src="js/plays-like.js"></script>
 <script src="js/play.js"></script>
 <script src="js/tool-rail.js"></script>
+<!-- Password-reset and account-setup links land on whatever page the app has
+     open, including this one. The handler hands them to the root shell, which
+     is the only surface that reads those parameters. Inert on web, where the
+     link URL simply IS the page.
+
+     NOTE: gd-native-back-button.js is deliberately NOT loaded here. It resolves
+     the current route through GDShell, which does not exist on this page, so
+     it would read every state as root and call exitApp() - dropping the round
+     on the first Back press, the exact failure it was written to prevent.
+     boot.js wires Android's Back to this page's own exitBack instead. -->
+<script src="../scripts/inline/gd-native-deep-links.js"></script>
 <script src="js/boot.js"></script>
 </body>
 </html>

@@ -121,7 +121,7 @@ function makeDocument() {
 
 function createHarness(options = {}) {
   const document = makeDocument();
-  const calls = { mapping: 0, gps: 0, resume: 0, panels: 0, geolocation: 0 };
+  const calls = { mapping: 0, gps: 0, resume: 0, panels: 0, geolocation: 0, toasts: [] };
   const storage = new Map();
   const pendingGeo = [];
   const mappingDeferred = [];
@@ -129,6 +129,17 @@ function createHarness(options = {}) {
   Object.assign(window, {
     document,
     console,
+    /* Entering a round resolves gps_round_start through ClarityPermissions
+       before it navigates - the paid-access gate the deleted play runtime used
+       to own. Default allowed so the existing entry assertions keep testing
+       entry; options.permission drives the denial and error cases. */
+    ClarityPermissions: {
+      canUse: () => {
+        if (options.permission === "error") return Promise.reject(new Error("resolver down"));
+        return Promise.resolve({ ok: true, allowed: options.permission !== "denied" });
+      }
+    },
+    toast: (message) => { calls.toasts.push(String(message)); },
     setTimeout: (fn) => { fn(); return 1; },
     clearTimeout: () => {},
     AbortController: class {
@@ -201,6 +212,15 @@ async function tick() {
   await Promise.resolve();
 }
 
+/* Entering a round is one promise deeper than it used to be: the mapping result
+   resolves, and then the gps_round_start permission check does. Kept separate
+   from tick() on purpose - the search assertions above are sensitive to how far
+   the queue is drained, and draining further there settles a different render
+   than they were written against. So only the entry assertions wait longer. */
+async function tickEntry() {
+  for (let i = 0; i < 6; i += 1) await Promise.resolve();
+}
+
 (async () => {
   assert(index.includes("window.GDCoursePicker.open({source:'home-play',returnTarget:'home'})"), "Play tile opens through GDCoursePicker.open");
 
@@ -233,8 +253,27 @@ async function tick() {
 
   const saved = createHarness();
   saved.window.GDCoursePicker.selectCourse({ name: "Saved Course", courseId: "saved", gdDatabaseMapChecked: true, gdDatabaseMapAvailable: true, databaseReady: true, savedPlayable: true });
+  await tickEntry();
   assert.strictEqual(saved.calls.mapping, 0, "saved playable course enters without mapping");
   assert.strictEqual(saved.calls.gps, 1, "saved playable course enters GPS Play once");
+  assert.ok(/\/app\/index\.html\?/.test(saved.calls.lastGps.href), "entry names index.html - the native routers collapse an extensionless /app/ to the bundle root");
+
+  /* The paid-access gate. gps_round_start was enforced only by the old play
+     runtime, so it vanished when that was deleted; these two cases are what
+     keep it from vanishing again silently. Both fail CLOSED - the resolver is
+     the source of truth, and a check that could not complete is not evidence
+     of access. */
+  const denied = createHarness({ permission: "denied" });
+  denied.window.GDCoursePicker.selectCourse({ name: "Saved Course", courseId: "saved", gdDatabaseMapChecked: true, gdDatabaseMapAvailable: true, databaseReady: true, savedPlayable: true });
+  await tickEntry();
+  assert.strictEqual(denied.calls.gps, 0, "no paid access means no round starts");
+  assert.ok(/paid access/i.test(denied.calls.toasts.join(" ")), "a denied player is told why, not left on a dead button");
+
+  const resolverDown = createHarness({ permission: "error" });
+  resolverDown.window.GDCoursePicker.selectCourse({ name: "Saved Course", courseId: "saved", gdDatabaseMapChecked: true, gdDatabaseMapAvailable: true, databaseReady: true, savedPlayable: true });
+  await tickEntry();
+  assert.strictEqual(resolverDown.calls.gps, 0, "a failed permission check fails closed");
+  assert.ok(/try again/i.test(resolverDown.calls.toasts.join(" ")), "a failed check reads as retryable, not as a paywall");
 
   const unmapped = createHarness();
   unmapped.window.GDCoursePicker.selectCourse({ name: "Unmapped", courseId: "unmapped", gdDatabaseMapChecked: true, gdDatabaseMapAvailable: false });
@@ -247,7 +286,7 @@ async function tick() {
   dbl.window.GDCoursePicker.selectCourse(course);
   assert.strictEqual(dbl.calls.mapping, 1, "double click does not create two mapping runs");
   dbl.mappingDeferred[0]({ playable: true, course });
-  await tick();
+  await tickEntry();
   assert.strictEqual(dbl.calls.gps, 1, "playable result enters GPS once");
 
   const failed = createHarness({ immediateMappingResult: { playable: false } });

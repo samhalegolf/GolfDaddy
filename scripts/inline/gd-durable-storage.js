@@ -28,11 +28,26 @@
 (function () {
   "use strict";
 
+  /* The /app/ surface owns its own key space (see app/README.md) and none of it
+     was listed here until 2026-08-04, so the rebuilt play screen had exactly the
+     exposure this module was written to close - including the live scorecard,
+     which is the same "round being played right now" case as the legacy resume
+     key one line above.
+
+     clarity:course-library:v1 is deliberately absent for the same reason the old
+     course library is: it is large and re-pulls from the server per course, so
+     mirroring it would spend quota protecting data that is already safe.
+     clarity:shot-card-boxes:v1 is absent because it is cosmetic box positions. */
   var DURABLE_KEYS = [
     "clarity:supabase-auth-session:v1", /* signed-in session - loss means logout */
     "gd_accounts_v1",                   /* accounts - loss means logout */
     "gd_player_profiles_v27",           /* profiles, bag, handicap - user-entered */
-    "gd_gps_resume_round_v1"            /* the round being played right now */
+    "gd_gps_resume_round_v1",           /* the round being played right now */
+    "clarity:scorecard:v1",             /* the live scorecard - user-entered, unrecoverable */
+    "clarity:bag:v1",                   /* /app/ bag: clubs and carries, user-entered */
+    "gd_bag_total_firmness_v1",         /* bag firmness preset, read by the bubble engine */
+    "clarity:gps-settings:v1",          /* units, aim line, shot-up frame, lock tightness */
+    "clarity:nines:v1"                  /* which nines are paired for a multi-nine course */
   ];
 
   /* Restoring these is not enough on its own: app scripts read them
@@ -48,11 +63,21 @@
      loses where they were, and on a device where the webview evicts storage
      mid-round that was happening for a key that never needed it. Reloading only
      for keys that genuinely cannot be seen otherwise turns a lot of those
-     interruptions into nothing at all. */
+     interruptions into nothing at all.
+
+     The two /app/ additions are here on the same test, applied by reading the
+     modules rather than by assuming: bag.js and gps-settings.js both take their
+     value at module load (`var clubs = load()`, `var state = load()`), so a
+     restore that lands afterwards is invisible until the page runs again. The
+     other /app/ keys read lazily - the scorecard when the panel opens, the
+     firmness preset when the engine asks, the nines pairing when a hole changes
+     - so like the resume key they restore into a running app for free. */
   var RELOAD_REQUIRED_KEYS = [
     "clarity:supabase-auth-session:v1",
     "gd_accounts_v1",
-    "gd_player_profiles_v27"
+    "gd_player_profiles_v27",
+    "clarity:bag:v1",
+    "clarity:gps-settings:v1"
   ];
   var RELOAD_GUARD = "gd_durable_restore_reloaded_v1";
   var PREFIX = "durable:";
