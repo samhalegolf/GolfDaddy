@@ -667,6 +667,86 @@ async function bootCheck() {
     return { opened, metres, yards, aimOff, aimOn, rotated, flat, mpp, iconSizes };
   }, AKARANA_H1);
 
+  /* Green focus: inside 40m the dot becomes a draggable ball, and the whole
+     point is that it is STICKY — you can walk to the next tee with it still
+     unplaced, and the camera keeps holding the green you are logging so the
+     parked ball has something to be dragged onto. Shot End then records where
+     the BALL is, not where the player is standing. */
+  const greenFocus = await page.evaluate(async (h1) => {
+    const app = window.ClarityApp;
+    const wait = (n) => new Promise((resolve) => setTimeout(resolve, n || 220));
+    const ball = document.getElementById("greenFocusBall");
+    const dot = document.getElementById("gpsDot");
+    await app.play.start("green-focus-course", { holes: [{ holeNumber: 1,
+      tee: h1.tee, green: h1.green, greenShape: h1.greenShape, route: [] }] },
+      { lat: -36.918, lng: 174.735 });
+    await wait(800);
+    document.getElementById("headToTeeBtn").click();
+    await wait();
+    const activeShot = !!app.shot.active();
+
+    /* Where the green is drawn — the parked ball has to be draggable onto it. */
+    const greenOnScreen = async () => {
+      app.pin.set(h1.green); await wait(60);
+      const m = document.getElementById("pinMarker");
+      return m.classList.contains("hiddenState") ? null
+        : [Math.round(parseFloat(m.style.left)), Math.round(parseFloat(m.style.top))];
+    };
+    const state = () => ({
+      stage: document.body.dataset.frameStage,
+      ball: !ball.classList.contains("hiddenState"),
+      parked: ball.classList.contains("parked"),
+      dot: !dot.classList.contains("hiddenState"),
+      hint: !document.getElementById("greenFocusHint").classList.contains("hiddenState"),
+      shotEnd: !document.getElementById("shotEndBtn").classList.contains("hiddenState")
+    });
+
+    const beforeArrival = state();
+    /* ~28m short of the green: inside the 40m zone. */
+    app.position.set({ lat: h1.green.lat - 0.00025, lng: h1.green.lng }, "gps");
+    await wait();
+    const onGreen = state();
+    const greenAtArrival = await greenOnScreen();
+
+    /* Walk 260m to the next tee without touching the ball. */
+    app.position.set({ lat: h1.green.lat + 0.0023, lng: h1.green.lng - 0.0006 }, "gps");
+    await wait(320);
+    const atNextTee = state();
+    const greenStillFramed = await greenOnScreen();
+    app.pin.clear(); await wait(60);
+
+    /* Pick the parked ball up and drop it on the green. */
+    const box = ball.getBoundingClientRect();
+    const grab = [Math.round(box.left + box.width / 2), Math.round(box.top + box.height / 2)];
+    const drop = greenStillFramed ? [greenStillFramed[0] - 22, greenStillFramed[1] + 34] : [180, 320];
+    for (const [type, xy] of [["pointerdown", grab], ["pointermove", drop], ["pointerup", drop]]) {
+      ball.dispatchEvent(new PointerEvent(type, { clientX: xy[0], clientY: xy[1], bubbles: true, pointerId: 7 }));
+    }
+    await wait();
+    const afterDrop = state();
+    const droppedLL = app.play.latLngAt(drop[0], drop[1]);
+    const playerPos = app.position.current();
+
+    document.getElementById("shotEndBtn").click();
+    await wait(420);
+    const shots = app.shot.holeShots(1);
+    const last = shots[shots.length - 1];
+    return {
+      activeShot, beforeArrival, onGreen, atNextTee, afterDrop,
+      greenHeld: greenAtArrival && greenStillFramed
+        && greenAtArrival[0] === greenStillFramed[0] && greenAtArrival[1] === greenStillFramed[1],
+      recorded: {
+        shots: shots.length,
+        offBall: last && last.end && droppedLL
+          ? Number(app.distance.haversineMeters(last.end, droppedLL).toFixed(1)) : null,
+        endFromGreen: last && last.end ? Math.round(app.distance.haversineMeters(last.end, h1.green)) : null,
+        playerFromGreen: Math.round(app.distance.haversineMeters(playerPos, h1.green)),
+        hole: app.play.state().hole,
+        ballCleared: ball.classList.contains("hiddenState")
+      }
+    };
+  }, AKARANA_H1);
+
   /* Off-course play: a course far from the granted fix. Entering the hole
      heads to the tee (the far fix is NOT adopted), and tapping where you are
      standing moves the position — the whole flow works from the couch. */
@@ -765,7 +845,11 @@ async function bootCheck() {
     const read = () => ({
       stage: document.body.dataset.frameStage,
       tilt: document.body.classList.contains("tilt-lock"),
-      dotVisible: !document.getElementById("gpsDot").classList.contains("hiddenState")
+      dotVisible: !document.getElementById("gpsDot").classList.contains("hiddenState"),
+      /* In green focus the dot is replaced by the draggable ball, so "the
+         player is visible" means one or the other, never both. */
+      ballVisible: !document.getElementById("greenFocusBall").classList.contains("hiddenState"),
+      ballParked: document.getElementById("greenFocusBall").classList.contains("parked")
     });
     const atTee = read();
     app.position.set({ lat: tee.lat - 0.0015, lng: tee.lng }, "tap");
@@ -798,10 +882,13 @@ async function bootCheck() {
     const zoom = read();
     const greenFocus = {
       ringShown: !document.getElementById("greenRing").classList.contains("hiddenState"),
-      holeOutVisible: getComputedStyle(document.getElementById("holeOutBtn")).display !== "none",
+      /* Shot End is the single confirm now - Hole Out is gone, because in
+         green focus the two had become the same action on the same point. */
+      confirmVisible: !document.getElementById("shotEndBtn").classList.contains("hiddenState"),
+      holeOutGone: !document.getElementById("holeOutBtn"),
       shotsRecorded: app.shot.holeShots(1).length
     };
-    document.getElementById("holeOutBtn").click();
+    document.getElementById("shotEndBtn").click();
     await new Promise((resolve) => setTimeout(resolve, 200));
     const holedOut = {
       hole: app.play.state().hole,
@@ -1115,16 +1202,21 @@ async function bootCheck() {
   assert.strictEqual(stages.gpsHold.stage, "lock", "a same-stage GPS fix stays in lock");
   assert.ok(stages.gpsHold.frameHeld, "a same-stage GPS fix must NOT re-anchor the locked frame");
   assert.ok(stages.gpsHold.dotMoved, "a same-stage GPS fix still moves the dot");
-  assert.strictEqual(stages.zoom.stage, "zoom", "inside 45m of the green → zoom stage");
+  assert.strictEqual(stages.zoom.stage, "zoom", "inside 40m of the green → zoom stage");
   assert.ok(!stages.zoom.tilt, "green zoom is flat");
-  assert.ok(stages.zoom.dotVisible, "the player stays visible in zoom");
+  assert.ok(stages.zoom.ballVisible, "green focus shows the ball");
+  assert.ok(!stages.zoom.dotVisible, "green focus replaces the dot with the ball, never both");
+  assert.ok(!stages.zoom.ballParked, "standing on the green, the ball sits on the map, not parked");
+  assert.ok(stages.lock.ballVisible === false, "no ball before green focus opens");
   assert.ok(stages.shotStart, "a tap starts a shot");
   assert.ok(stages.aimed.bubbleShown, "the aim bubble renders on the locked view");
   assert.ok(stages.aimed.shotRowShown, "aiming off the green shows the shot row");
   assert.ok(stages.aimed.shotDist > 80 && stages.aimed.shotDist < 140,
     "shot distance must be the start→target number, got " + stages.aimed.shotDist);
   assert.ok(stages.greenFocus.ringShown, "green focus shows the green ring");
-  assert.ok(stages.greenFocus.holeOutVisible, "green focus offers Hole Out");
+  assert.ok(stages.greenFocus.confirmVisible, "green focus offers the Shot End confirm");
+  assert.ok(stages.greenFocus.holeOutGone,
+    "Hole Out is collapsed into Shot End - there must be no second confirm button");
   assert.strictEqual(stages.greenFocus.shotsRecorded, 2, "two shots recorded before holing out");
   assert.strictEqual(stages.holedOut.shots, 3, "Hole Out records the final shot");
   assert.strictEqual(stages.holedOut.hole, 2, "Hole Out advances to the next hole");
@@ -1262,6 +1354,35 @@ async function bootCheck() {
   assert.ok(gpsSettings.iconSizes.every((s) => s === "24x24"),
     "every tool-rail icon must be 24x24 (the inline gear used to fill its button), got "
     + gpsSettings.iconSizes.join(", "));
+
+  assert.ok(greenFocus.activeShot, "test setup: a shot must be in flight from the tee");
+  assert.ok(!greenFocus.beforeArrival.ball, "no ball before green focus opens");
+  assert.ok(greenFocus.beforeArrival.dot, "the plain dot marks the player outside green focus");
+  assert.strictEqual(greenFocus.onGreen.stage, "zoom", "inside 40m of the green opens green focus");
+  assert.ok(greenFocus.onGreen.ball, "green focus turns the position marker into the ball");
+  assert.ok(!greenFocus.onGreen.dot, "the dot gives way to the ball - never both at once");
+  assert.ok(!greenFocus.onGreen.parked, "standing on the green, the ball sits on the map");
+  assert.strictEqual(greenFocus.atNextTee.stage, "zoom",
+    "green focus is sticky: walking to the next tee must not close it");
+  assert.ok(greenFocus.atNextTee.parked,
+    "an unplaced ball parks at the pickup point once the player leaves the green");
+  assert.ok(greenFocus.atNextTee.hint, "the parked ball asks to be dragged into place");
+  assert.ok(greenFocus.atNextTee.shotEnd, "Shot End stays available to confirm the ball");
+  assert.ok(greenFocus.greenHeld,
+    "the camera must keep holding the green being logged - a parked ball needs it on screen");
+  assert.ok(!greenFocus.afterDrop.parked, "dropping the ball on the green un-parks it");
+  assert.ok(!greenFocus.afterDrop.hint, "the prompt goes once the ball is placed");
+  assert.strictEqual(greenFocus.recorded.shots, 1, "Shot End records the shot");
+  assert.ok(greenFocus.recorded.offBall !== null && greenFocus.recorded.offBall < 1.5,
+    "Shot End must record where the BALL is, off by " + greenFocus.recorded.offBall + "m");
+  assert.ok(greenFocus.recorded.playerFromGreen > 200,
+    "test setup: the player must be far from the green when confirming, got "
+    + greenFocus.recorded.playerFromGreen + "m");
+  assert.ok(greenFocus.recorded.endFromGreen < 40,
+    "the recorded end is on the green, not at the player 260m away, got "
+    + greenFocus.recorded.endFromGreen + "m");
+  assert.strictEqual(greenFocus.recorded.hole, 2, "Shot End in green focus advances to the next hole");
+  assert.ok(greenFocus.recorded.ballCleared, "the ball clears when the hole does");
 
   assert.ok(!remote.atTee.pillShown, "placing the player retires the pill");
   assert.ok(remote.atTee.source === "tee", "Head To the Tee places the player on the tee");

@@ -57,6 +57,13 @@ or writes course data back.
   off-course testing is never clobbered). Policy lives in `play.js`.
 - `js/gps.js` — `watchPosition` wrapper. Event-driven, fail-open; "no fix" is a
   state the play surface renders fine, not an error.
+- Green focus lives in `js/play.js` (ported from gd-app-core's
+  `gdEnterActiveGreenFocus`/`gdEnsureGreenFocusBall`): inside 40m of the green
+  the position dot becomes a draggable golf ball, and Shot End records where
+  the BALL is rather than the fix. It is sticky — walking off the green does
+  not close it, and the camera keeps holding the green being logged, so the
+  placement can be done later from the next tee with the ball parked at a
+  fixed pickup point. Only Shot End or a hole change ends it.
 - `js/pin.js` — the pin/flag position, player-set and separate from the
   package's green centre/shape. Per-hole, mirrors shot.js's shape (pure data,
   no DOM); an unset pin is a normal state. Placement is armed from the tool
