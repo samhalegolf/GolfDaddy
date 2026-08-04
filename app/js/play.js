@@ -1479,6 +1479,7 @@
       };
       wirePosition();
       app.shot.startRound();
+      if (app.courseData) app.courseData.startRound(current.courseKey);
       if (app.pin) app.pin.startRound();
       if (app.scorecard) app.scorecard.setCourse(current.courseKey);
       if (app.gps) app.gps.start();

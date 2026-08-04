@@ -261,7 +261,7 @@ before being trusted. Full suite green: 27 structural tests plus boot smoke.
 | P0-2 no API origin on `/app/` | fixed |
 | P1-3 durable storage | fixed — 5 `clarity:*` keys mirrored, 2 in the reload set |
 | P1-4 paid-tier gate | fixed — `gps_round_start` restored at the picker, fails closed |
-| P1-5 shot feed to My Bubble | **open — needs a product decision, see below** |
+| P1-5 on-course shot feed | fixed — routed to **Course Data**, not My Bubble |
 | P1-6 Android back | fixed — wired to `/app/`'s own `exitBack` |
 | P1-7 error reporter | fixed |
 | P2-8 iOS universal links | files done; project wiring blocked, see below |
@@ -292,21 +292,47 @@ an Apple ID signed into Xcode (Settings → Accounts), which regenerates the
 profile with the capability; the test goes strict automatically once the wiring
 lands.
 
-### P1-5 is the one genuine product fork
+### P1-5 resolved: the feed goes to Course Data
 
-Restated from `GPS_PLAY_DELETION_AUDIT_2026-08-02.md` §3b, which called it "a
-genuine product call, not an engineering oversight". The old runtime wrote every
-on-course shot into `gd_shot_events_v1` tagged `courseContext:"gps_course"`,
-which is what `gd-shot-cluster-analysis.js` fits My Bubble from. `/app/js/shot.js`
-holds shots in memory only. Two defensible answers:
+The 2026-08-02 audit framed this as "restore the My Bubble feed or confirm the
+cut", but that framing was too narrow — it described where the *old* runtime
+happened to send shots (`gd_shot_events_v1`, tagged `courseContext:"gps_course"`),
+not where the architecture says they belong. `scripts/gd-shot-snapshot.js` is
+explicit:
 
-- **Restore it** — on-course shots feed My Bubble again. The contract is known,
-  so this is wiring, not design.
-- **Confirm the cut** — My Bubble becomes practice-import-only, which is
-  consistent with the rebuild's "the app authors nothing" rule, and the stats
-  panel should then say so rather than silently showing fewer shots.
+> GPS Play's only analytical output. At shot completion GPS Play builds a
+> complete raw snapshot … and submits it to Course Data. GPS Play performs no
+> wind correction, no slope correction, **no My Bubble comparison**, no variant
+> selection and no recommendation logic — it records what happened and what the
+> player chose.
 
-Doing nothing is the only bad option, because it is the silent one.
+So the feed now runs GPS Play → `buildShotSnapshot` → `CourseDataIntake.submitShotSnapshot`,
+and `gd-course-data-comparison.js` — the My Bubble comparison layer — is
+deliberately not loaded on the play surface. Comparing a shot to a bubble is a
+downstream question, asked where the analysis is read.
+
+`app/js/course-data.js` owns it; `app/js/shot.js` gained an `onComplete` seam
+(shot completion already lived there). Guarded by `dev/app-course-data-feed.test.js`,
+mutation-tested against four reintroduced defects.
+
+**Two real bugs surfaced while wiring it**, both the same `Number(null) === 0`
+trap and both invisible until shots started being persisted as measurements:
+
+- `buildShotSnapshot` runs numbers through `asNumber(value, null)`, so passing
+  `null` for an unmeasured field stored a finite **0**. "No wind reading" became
+  "wind measured at 0 km/h" — an invented observation, exactly what the snapshot
+  contract forbids. Absent numerics are now passed as `undefined`, which takes
+  the null fallback.
+- `app/js/shot.js`'s `pt()` answered `{lat:0, lng:0}` for a null input, because
+  `Number(null)` is 0 and 0 is finite. `holeOut(null)` was recording the ball in
+  the Gulf of Guinea rather than falling back to the aim. Harmless while shots
+  lived in memory for one round; not harmless once Course Data persists them.
+  Fixed at source, and hole-outs with no fix are now labelled
+  `hole-out-assumed-target` rather than passed off as observed.
+
+`gd_shot_snapshots_v1` is mirrored to durable storage — a shot is a measurement
+of a moment that cannot be retaken. The derived analyses beside it are not, since
+`reprocessShot` can rebuild them from the raw.
 
 ## Suggested order
 

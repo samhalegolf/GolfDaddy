@@ -47,7 +47,14 @@
     "clarity:bag:v1",                   /* /app/ bag: clubs and carries, user-entered */
     "gd_bag_total_firmness_v1",         /* bag firmness preset, read by the bubble engine */
     "clarity:gps-settings:v1",          /* units, aim line, shot-up frame, lock tightness */
-    "clarity:nines:v1"                  /* which nines are paired for a multi-nine course */
+    "clarity:nines:v1",                 /* which nines are paired for a multi-nine course */
+    /* Course Data's raw shot snapshots. The most irreplaceable thing the app
+       holds: a shot is a measurement of a moment that cannot be taken again,
+       and the intake writes each one exactly once. The derived analyses beside
+       it (gd_conditions_analyses_v1) are deliberately NOT mirrored - they are
+       recomputable from these by reprocessShot, so mirroring them would spend
+       quota on data that is already safe. */
+    "gd_shot_snapshots_v1"
   ];
 
   /* Restoring these is not enough on its own: app scripts read them

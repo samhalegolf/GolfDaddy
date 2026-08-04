@@ -277,6 +277,21 @@
 <script src="js/nines.js"></script>
 <script src="js/gps-settings.js"></script>
 <script src="js/plays-like.js"></script>
+<!-- Course Data. GPS Play's only analytical output: at shot completion it
+     submits an immutable raw snapshot here and returns. The Conditions Engine
+     runs off that on a deferred tick, inside the intake, so nothing below
+     blocks a round.
+
+     gd-course-data-comparison.js is deliberately absent. That is the My Bubble
+     comparison layer, and comparing a shot against a bubble is a downstream
+     question asked where the analysis is read - not during play. Recording is
+     this surface's whole job. gd-conditions-debug.js is studio-only. -->
+<script src="../scripts/gd-shot-snapshot.js"></script>
+<script src="../scripts/course-data/conditions-engine/gd-conditions-tolerance-profile.js"></script>
+<script src="../scripts/course-data/conditions-engine/gd-conditions-geometry.js"></script>
+<script src="../scripts/course-data/conditions-engine/gd-conditions-engine.js"></script>
+<script src="../scripts/course-data/gd-course-data-intake.js"></script>
+<script src="js/course-data.js"></script>
 <script src="js/play.js"></script>
 <script src="js/tool-rail.js"></script>
 <!-- Password-reset and account-setup links land on whatever page the app has

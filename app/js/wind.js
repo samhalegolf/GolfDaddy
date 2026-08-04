@@ -11,6 +11,7 @@
 
   var LEVEL3_KMH = 24, LEVEL2_KMH = 13;   // same thresholds as the legacy gdWindLevelForSpeed defaults
   var FETCH_TIMEOUT_MS = 6000;
+  var liveReading = null;   // last measured wind, for Course Data - see fetchLiveWind
 
   function engine() { return window.GDBubbleEngine || null; }
 
@@ -120,6 +121,19 @@
       if (!Number.isFinite(speed) || !Number.isFinite(direction)) throw new Error("wind data missing");
       var eng = engine();
       var level = levelForSpeed(speed);
+      /* Kept as measured, before levelForSpeed buckets it. The engine only
+         needs the level, but Course Data records evidence rather than the
+         display value derived from it - and comparing what the wind actually
+         was against what the player dialled in is the whole point of holding
+         both. Not persisted: it describes this moment, not the round. */
+      liveReading = {
+        speedKmh: speed,
+        directionDeg: direction,
+        level: level,
+        source: "open-meteo",
+        capturedAt: new Date().toISOString(),
+        at: { lat: pos.lat, lng: pos.lng }
+      };
       if (eng) { pushUndo(); eng.setWind(direction * Math.PI / 180, level); }
       closePicker();
       syncIcon();
@@ -130,7 +144,20 @@
     }
   }
 
-  app.wind = { press: press, openPicker: openPicker, syncIcon: syncIcon, fetchLiveWind: fetchLiveWind };
+  app.wind = {
+    press: press, openPicker: openPicker, syncIcon: syncIcon, fetchLiveWind: fetchLiveWind,
+    /* What the wind was measured to be, or null if it was never fetched this
+       round. Null is a real answer - "no live evidence" - and Course Data
+       records it as such rather than substituting the player's setting. */
+    liveReading: function () { return liveReading; },
+    /* What the player dialled in, which is intent, not evidence. */
+    selection: function () {
+      var eng = engine();
+      var state = eng && eng.windState();
+      if (!state) return null;
+      return { originAngleRad: state.originAngle, level: state.level };
+    }
+  };
 
   document.addEventListener("DOMContentLoaded", function () {
     syncIcon();

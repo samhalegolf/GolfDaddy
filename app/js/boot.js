@@ -268,6 +268,7 @@
       document.getElementById("gpsNotice").classList.add("hiddenState");
     });
     if (app.gps) app.gps.onStatus(renderGpsNotice);
+    if (app.courseData) app.courseDataFeedInstalled = app.courseData.install();
     app.basemap.prefetch();   // so base-layer choice is synchronous by map time
     app.nativeBackInstalled = installNativeBack();
     app.booted = true;   // boot-test canary: the last line of the load order ran
