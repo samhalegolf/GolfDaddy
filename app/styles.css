@@ -72,7 +72,13 @@ body.surface-published #surfaceViewport { background: #0d1b12; }
 /* Tilt is published-surface only. The live map is not tilted (Leaflet has no
    3D camera and a CSS-perspectived tile grid would break its hit testing), so
    the overlay it hosts must not be tilted either or the two would disagree. */
-body.surface-published.tilt-lock #surfaceViewport { transform: perspective(900px) rotateX(32deg) scale(1.213); }
+/* The tilt's three numbers live here as custom properties because play.js
+   has to invert this exact transform to drag anything under it (unTilt).
+   One source of truth, so the maths and the look cannot drift apart. */
+:root { --tiltDeg: 32; --tiltPerspective: 900; --tiltScale: 1.213; --tiltOriginY: 0.7; }
+body.surface-published.tilt-lock #surfaceViewport {
+  transform: perspective(calc(var(--tiltPerspective) * 1px)) rotateX(calc(var(--tiltDeg) * 1deg)) scale(var(--tiltScale));
+}
 @media (prefers-reduced-motion: reduce) { #surfaceViewport { transition-duration: 1ms; } }
 
 #surfaceImage { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: none; pointer-events: auto; }
@@ -106,7 +112,14 @@ body.surface-published #surfaceImage { display: block; }
    (below) so the 2D inverse stays exact. */
 #aimBubble { position: absolute; transform: translate(-50%, -50%); border-radius: 50%; background: transparent; z-index: 560; touch-action: none; cursor: grab; pointer-events: auto; }
 body.bubble-dragging #aimBubble { cursor: grabbing; }
-body.bubble-dragging #surfaceViewport, body.pin-dragging #surfaceViewport { transform: none !important; transition: none !important; }
+/* Dragging no longer flattens the tilt. It used to, because the frame's 2D
+   inverse is not valid under a 3D perspective — the view snapped to birds-eye
+   on grab and tilted back on release. play.js's unTilt() inverts the tilt
+   properly now, so the camera can simply stay put; only the transition is
+   suppressed, so the frame does not ease around under the finger. */
+body.bubble-dragging #surfaceViewport,
+body.pin-dragging #surfaceViewport,
+body.ball-dragging #surfaceViewport { transition: none !important; }
 
 /* Green focus: the green centre ring in the zoom stage. */
 #greenRing { position: absolute; width: 20px; height: 20px; margin: -10px 0 0 -10px; border-radius: 50%; border: 2px solid #1fd36d; background: rgba(31, 211, 109, .1); z-index: 545; pointer-events: none; }

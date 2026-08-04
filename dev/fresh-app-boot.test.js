@@ -1001,11 +1001,17 @@ async function bootCheck() {
     const img = document.getElementById("surfaceImage");
     const frameBefore = img.style.transform;
     hit.dispatchEvent(new PointerEvent("pointerdown", { pointerId: 9, clientX: cx, clientY: cy, bubbles: true }));
-    let midDragFrameHeld = null;
+    let midDragFrameHeld = null, tiltHeldMidDrag = null;
+    const vp = document.getElementById("surfaceViewport");
     for (let i = 1; i <= 4; i++) {
       hit.dispatchEvent(new PointerEvent("pointermove", { pointerId: 9, clientX: cx, clientY: cy - i * 12, bubbles: true }));
       await new Promise((resolve) => setTimeout(resolve, 25));
-      if (i === 2) midDragFrameHeld = img.style.transform === frameBefore;
+      if (i === 2) {
+        midDragFrameHeld = img.style.transform === frameBefore;
+        /* matrix3d means the perspective tilt is still applied. It used to be
+           forced to none for the duration of the drag. */
+        tiltHeldMidDrag = getComputedStyle(vp).transform.startsWith("matrix3d");
+      }
     }
     hit.dispatchEvent(new PointerEvent("pointerup", { pointerId: 9, clientX: cx, clientY: cy - 48, bubbles: true }));
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -1013,7 +1019,7 @@ async function bootCheck() {
     return {
       hitSized: rect.width >= 44 && rect.height >= 44,
       aimMovedM: app.distance.haversineMeters(before, after),
-      midDragFrameHeld,
+      midDragFrameHeld, tiltHeldMidDrag,
       draggingCleared: !document.body.classList.contains("bubble-dragging"),
       reframedAfter: img.style.transform !== frameBefore
     };
@@ -1287,6 +1293,8 @@ async function bootCheck() {
   assert.strictEqual(shotEndWiring.hole, 2, "Shot End in green focus advances to the next hole");
   assert.strictEqual(shotEndWiring.finalShots, 2, "Shot End in green focus records the final shot");
   assert.ok(shotEndWiring.activeCleared, "no active shot after Shot End holes out in green focus");
+  assert.ok(bubbleDrag.tiltHeldMidDrag,
+    "the lock tilt must survive the drag - it used to flatten to birds-eye on grab and spring back on release");
   assert.ok(bubbleDrag.hitSized, "the drag hit covers the cluster (44px minimum)");
   assert.ok(bubbleDrag.aimMovedM > 5, "dragging the bubble moves the aim, got " + bubbleDrag.aimMovedM.toFixed(1) + "m");
   assert.ok(bubbleDrag.midDragFrameHeld, "the camera holds mid-drag");

@@ -139,6 +139,55 @@
   var liveFrame = IDENTITY_FRAME;   // Leaflet container px → viewport px
   var mapSide = null;               // current over-provisioned container side
 
+  /* Client coordinates → the overlay viewport's own PRE-TILT space, which is
+     what proj.toScreen answers in and what the frame inverse expects.
+
+     The lock stage tilts #surfaceViewport with
+     perspective(d) rotateX(θ) scale(s) about origin (50%, 70%), and a 2D
+     matrix inverse is simply wrong under that — which is why dragging used to
+     flatten the tilt to birds-eye and spring back on release. Undoing it
+     exactly is a closed form, so nothing has to be flattened:
+
+       screen y  ⇒  y1 = sy·d / (d + sy·tanθ)     (the perspective divide)
+                    Y  = y1 / cosθ                (undo the rotation)
+       screen x  ⇒  X  = sx·(d − y1·tanθ) / d
+       then divide both by the scale.
+
+     Identity whenever the tilt is not applied, so callers need no branch. The
+     constants come from the CSS custom properties, so the maths cannot drift
+     away from the look. */
+  function unTilt(clientX, clientY) {
+    var flat = { left: clientX, top: clientY };
+    var vp = document.getElementById("surfaceViewport");
+    if (!vp) return flat;
+    if (!(document.body.classList.contains("tilt-lock")
+      && document.body.classList.contains("surface-published"))) return flat;
+    var css = getComputedStyle(document.documentElement);
+    var deg = parseFloat(css.getPropertyValue("--tiltDeg"));
+    var d = parseFloat(css.getPropertyValue("--tiltPerspective"));
+    var s = parseFloat(css.getPropertyValue("--tiltScale"));
+    var originY = parseFloat(css.getPropertyValue("--tiltOriginY"));
+    if (!(Number.isFinite(deg) && Number.isFinite(d) && d > 0 && Number.isFinite(s) && s > 0
+      && Number.isFinite(originY))) return flat;
+    /* getBoundingClientRect() is the AABB of the TILTED box, so it cannot
+       give the origin. offsetWidth/Height are the untransformed size, and the
+       untransformed box starts at (0,0): #surfaceViewport is inset:0 inside
+       #playScreen, which is position:fixed inset:0 — the same assumption
+       renderShotOverlays already makes when it sizes the SVG viewBox to the
+       window. */
+    var w = vp.offsetWidth, h = vp.offsetHeight;
+    if (!(w > 0 && h > 0)) return flat;
+    var ox = w / 2, oy = h * originY;
+    var sx = clientX - ox, sy = clientY - oy;
+    var t = Math.tan((deg * Math.PI) / 180), c = Math.cos((deg * Math.PI) / 180);
+    var denom = d + sy * t;
+    if (!(Math.abs(denom) > 1e-6) || !(Math.abs(c) > 1e-6)) return flat;
+    var y1 = (sy * d) / denom;
+    var Y = y1 / c;
+    var X = (sx * (d - y1 * t)) / d;
+    return { left: X / s + w / 2, top: Y / s + h * originY };
+  }
+
   /* The one projection seam. Published: image pixels through the surface
      frame. Live: Leaflet container pixels through the live frame. Every
      overlay — dot, rings, aim line, pin, green ring — goes through this and
@@ -765,7 +814,11 @@
            the drag delta. */
         var targetScreen = proj.toScreen(act.target);
         if (!targetScreen) return;
-        bubbleDragOffset = { x: targetScreen.left - e.clientX, y: targetScreen.top - e.clientY };
+        /* The grab offset lives in PRE-TILT space, the same space
+           proj.toScreen answers in - mixing it with raw client coords only
+           worked while the tilt was being flattened for the drag. */
+        var grab = unTilt(e.clientX, e.clientY);
+        bubbleDragOffset = { x: targetScreen.left - grab.left, y: targetScreen.top - grab.top };
         /* Capture keeps the drag alive when the finger outruns the hit; if it
            is unavailable the hit re-centres under the finger every render, so
            dragging still works — a capture failure must not kill the drag. */
@@ -777,7 +830,8 @@
         if (!document.body.classList.contains("bubble-dragging") || !bubbleDragOffset) return;
         var proj = projector();
         if (!proj) return;
-        var ll = proj.toLatLng({ left: e.clientX + bubbleDragOffset.x, top: e.clientY + bubbleDragOffset.y });
+        var at = unTilt(e.clientX, e.clientY);
+        var ll = proj.toLatLng({ left: at.left + bubbleDragOffset.x, top: at.top + bubbleDragOffset.y });
         if (ll) app.shot.aim(ll);
       });
       bubble.addEventListener("pointerup", endBubbleDrag);
@@ -803,7 +857,8 @@
         if (!pin || !proj) return;
         var pinScreen = proj.toScreen(pin);
         if (!pinScreen) return;
-        pinDragOffset = { x: pinScreen.left - e.clientX, y: pinScreen.top - e.clientY };
+        var grabPin = unTilt(e.clientX, e.clientY);
+        pinDragOffset = { x: pinScreen.left - grabPin.left, y: pinScreen.top - grabPin.top };
         try { pinMarkerEl.setPointerCapture(e.pointerId); } catch (err) {}
         document.body.classList.add("pin-dragging");
         e.preventDefault();
@@ -812,7 +867,8 @@
         if (!document.body.classList.contains("pin-dragging") || !pinDragOffset) return;
         var proj = projector();
         if (!proj) return;
-        var ll = proj.toLatLng({ left: e.clientX + pinDragOffset.x, top: e.clientY + pinDragOffset.y });
+        var atPin = unTilt(e.clientX, e.clientY);
+        var ll = proj.toLatLng({ left: atPin.left + pinDragOffset.x, top: atPin.top + pinDragOffset.y });
         if (ll) app.pin.set(ll);
       });
       pinMarkerEl.addEventListener("pointerup", endPinDrag);
@@ -840,8 +896,9 @@
         if (!proj) return;
         var at = greenFocus.ball ? proj.toScreen(greenFocus.ball) : null;
         var parked = ballEl.classList.contains("parked");
+        var grabBall = unTilt(e.clientX, e.clientY);
         ballDragOffset = (!parked && at)
-          ? { x: at.left - e.clientX, y: at.top - e.clientY }
+          ? { x: at.left - grabBall.left, y: at.top - grabBall.top }
           : { x: 0, y: 0 };
         try { ballEl.setPointerCapture(e.pointerId); } catch (err) {}
         document.body.classList.add("ball-dragging");
@@ -853,7 +910,8 @@
         if (!document.body.classList.contains("ball-dragging") || !greenFocus || !ballDragOffset) return;
         var proj = projector();
         if (!proj) return;
-        var ll = proj.toLatLng({ left: e.clientX + ballDragOffset.x, top: e.clientY + ballDragOffset.y });
+        var atBall = unTilt(e.clientX, e.clientY);
+        var ll = proj.toLatLng({ left: atBall.left + ballDragOffset.x, top: atBall.top + ballDragOffset.y });
         if (!ll) return;
         greenFocus.ball = ll;
         greenFocus.placed = true;   // yours now: it stops following the fix
@@ -1529,7 +1587,11 @@
     latLngAt: function (clientX, clientY) {
       var proj = projector();
       if (proj) {
-        var ll = proj.toLatLng({ left: clientX, top: clientY });
+        /* Through the tilt inverse first: the caller hands us raw client
+           coords (a tap, or the rail's pin drag) and the seam works in the
+           viewport's pre-tilt space. */
+        var at = unTilt(clientX, clientY);
+        var ll = proj.toLatLng({ left: at.left, top: at.top });
         if (ll) return ll;
       }
       /* Letterbox fallback: a published surface with no solved frame is shown
