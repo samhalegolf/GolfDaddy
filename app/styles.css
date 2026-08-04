@@ -41,6 +41,12 @@ body.map-framed #map { inset: auto; left: 0; top: 0; transform-origin: 0 0; }
    live the SVG aim line and layup middle guide cover the same ground. */
 body.shot-active #map .holeRoute { display: none; }
 
+/* The green outline / centre dot is green-focus only. Playing down the
+   fairway the imagery already shows the green, so drawing over it is clutter;
+   zoomed in on it the outline is the useful reference again. */
+#map .holeGreen { display: none; }
+body[data-frame-stage="zoom"] #map .holeGreen { display: inline; }
+
 /* Basemap credit. Lives outside #map so the frame rotation cannot carry it
    off-screen; hidden only when a published surface has replaced the imagery
    it credits. */
@@ -89,10 +95,10 @@ body.surface-published #surfaceImage { display: block; }
 #bubbleSvg .aimLine { fill: none; stroke: #fff; stroke-opacity: .78; stroke-width: 3.25; stroke-dasharray: 8 10; stroke-linecap: round; stroke-linejoin: round; }
 #bubbleSvg .middleGuide { fill: none; stroke: #fff; stroke-opacity: .52; stroke-width: 1.8; stroke-dasharray: 2 8; stroke-linecap: round; stroke-linejoin: round; }
 #bubbleSvg .middleGuideLabel { fill: #fff; opacity: .9; font: 700 11px -apple-system, system-ui, sans-serif; text-anchor: middle; paint-order: stroke; stroke: rgba(5, 9, 7, .72); stroke-width: 3px; }
-/* The fairway line + green reference (layup context specs from the old
-   gdAddMappedReferenceGeometry). */
+/* The fairway line (layup context spec from the old
+   gdAddMappedReferenceGeometry). Its green-reference companion is gone — the
+   green is not outlined during normal play. */
 #bubbleSvg .fairwayLine { fill: none; stroke: #eafff1; stroke-opacity: .18; stroke-width: 1.25; stroke-dasharray: 1 10; stroke-linecap: round; stroke-linejoin: round; }
-#bubbleSvg .greenReference { fill: #1fd36d; fill-opacity: .018; stroke: #f3fff8; stroke-opacity: .48; stroke-width: 1.45; stroke-linejoin: round; }
 
 /* The bubble drag hit: an INVISIBLE area over the cluster itself (the old
    gdCapturedBubbleDragHit contract) — grab the bubble, drag the aim. Sized

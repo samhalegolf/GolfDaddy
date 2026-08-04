@@ -235,10 +235,17 @@
       var layers = [];
       var shape = rec.greenShape.filter(function (p) { return p && Number.isFinite(Number(p.lat)); })
         .map(function (p) { return [Number(p.lat), Number(p.lng)]; });
+      /* The green's own geometry — its outline, or a centre dot when the
+         package has no shape. Green focus only: playing down the fairway you
+         can already see the green in the imagery, so drawing a white pentagon
+         and a centre pip over it is clutter standing in front of the picture.
+         Zoomed in on the green it is the useful reference again. Kept in the
+         layer and hidden by CSS on the frame stage, not rebuilt per stage —
+         the geometry still drives distances and framing regardless. */
       if (shape.length >= 3) {
-        layers.push(L.polygon(shape, { color: "#ffffff", weight: 2, fillColor: "#2f8f4e", fillOpacity: 0.25 }));
+        layers.push(L.polygon(shape, { color: "#ffffff", weight: 2, fillColor: "#2f8f4e", fillOpacity: 0.25, className: "holeGreen" }));
       } else if (rec.green) {
-        layers.push(L.circleMarker([rec.green.lat, rec.green.lng], { radius: 6, color: "#ffffff", weight: 2, fillColor: "#2f8f4e", fillOpacity: 0.9 }));
+        layers.push(L.circleMarker([rec.green.lat, rec.green.lng], { radius: 6, color: "#ffffff", weight: 2, fillColor: "#2f8f4e", fillOpacity: 0.9, className: "holeGreen" }));
       }
       var line = [rec.tee].concat(rec.route, [rec.green])
         .filter(function (p) { return p && Number.isFinite(Number(p.lat)); })
@@ -385,7 +392,7 @@
        IS the shot. */
     var shotRow = document.getElementById("shotRow");
     if (!shotRow) return;
-    var act = app.shot && app.shot.active();
+    var act = aimingShot();
     var show = false;
     if (act && act.target) {
       var landing = (model && model.center) || act.target;
@@ -448,7 +455,8 @@
     }
     var act = app.shot && app.shot.active();
     document.body.classList.toggle("shot-active", !!act);
-    var model = act && window.GDBubbleEngine ? window.GDBubbleEngine.renderModel() : null;
+    /* Aiming only — green focus has a shot but nothing to aim (aimingShot). */
+    var model = aimingShot() && window.GDBubbleEngine ? window.GDBubbleEngine.renderModel() : null;
     renderShotOverlays(pos, model, proj);
     renderDistances(pos, model);
     renderPin(pos, proj);
@@ -489,7 +497,7 @@
      presentation is up. */
   function renderShotOverlays(pos, model, proj) {
     function project(pt) { return pt && proj ? proj.toScreen(pt) : null; }
-    var act = app.shot && app.shot.active();
+    var act = aimingShot();
     /* The engine's cluster rings, computed in lat/lng, projected here (the
        model itself came from renderPosition; project() no-ops without a
        published surface, so rings only draw when one exists). The drag
@@ -560,12 +568,13 @@
                   return p.left.toFixed(1) + "," + p.top.toFixed(1);
                 }).join("L") + '"/>');
               }
-              var shapePts = (rec.greenShape || []).map(project).filter(Boolean);
-              if (shapePts.length >= 3) {
-                parts.unshift('<path class="greenReference" d="M' + shapePts.map(function (p) {
-                  return p.left.toFixed(1) + "," + p.top.toFixed(1);
-                }).join("L") + 'Z"/>');
-              }
+              /* The layup context used to trace the green outline here too
+                 (gdAddMappedReferenceGeometry's green reference). Dropped for
+                 the same reason as the Leaflet outline: laying up, the green
+                 is a long way up the screen and already visible in the
+                 imagery, so an extra ring around it is clutter. The middle
+                 guide's "Green Xm" label is what actually answers the layup
+                 question, and it stays. */
               var gx = greenScreen.left - centerScreen.left, gy = greenScreen.top - centerScreen.top;
               var glen = Math.hypot(gx, gy) || 1;
               var trim = Math.min(10, glen * 0.05);
@@ -588,6 +597,12 @@
       if (parts.length) {
         svg.setAttribute("viewBox", "0 0 " + window.innerWidth + " " + window.innerHeight);
         svg.innerHTML = parts.join("");
+      } else if (svg.innerHTML) {
+        /* Hiding the <svg> used to be the whole cleanup, which left the last
+           frame's paths sitting in the DOM — invisible, but ready to flash
+           back the moment anything un-hid it, and misleading to anyone
+           inspecting the overlay. Nothing to draw means nothing there. */
+        svg.innerHTML = "";
       }
     }
     /* The drag hit covers the CLUSTER: grab the bubble anywhere to drag the
@@ -1025,6 +1040,24 @@
   function shotEndPoint() {
     if (greenFocus && greenFocus.ball) return greenFocus.ball;
     return app.position.current();
+  }
+
+  /* The active shot ONLY while it is still being aimed. A shot stays active
+     through green focus — it is the one being confirmed — but by then there
+     is nothing left to aim: you are standing on the green. Asking the engine
+     to model a shot from there produces nonsense, because it answers the
+     question it was asked: shortest club in the bag, and a bag-roof clamp
+     that throws the cluster centre tens of metres past the green. What
+     reached the screen was a bubble anchored near the green and a "LW 11m /
+     carry 66" row for a shot nobody is playing.
+
+     So every aiming instrument — rings, aim line, wind drift, middle guide,
+     layup context, the drag hit and the shot row — hangs off this rather
+     than off app.shot.active(). The green ring, the ball, the pin and the
+     front/back distances are not aiming instruments and stay. */
+  function aimingShot() {
+    if (greenFocus) return null;
+    return (app.shot && app.shot.active()) || null;
   }
 
   var PARK_AT_M = ZOOM_GREEN_M;   // beyond this with the ball unplaced → park it
