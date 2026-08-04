@@ -213,6 +213,19 @@ body.ball-dragging #surfaceViewport { transition: none !important; }
 #distanceBar #frontLabel { position: absolute; left: 27px; top: 118px; }
 #distanceBar #distFront { position: absolute; left: 41px; top: 116px; }
 
+/* Plays-like: pops out to the RIGHT of the card, clear of the hand-placed
+   grid inside it, so it never fights the numbers it annotates. Slides out
+   from behind the distance readout when a value arrives. */
+#playsPop { position: absolute; left: 100%; top: 44px; margin-left: 8px; z-index: 601; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 6px 10px; border-radius: 10px; background: rgba(13, 27, 18, .92); box-shadow: 0 8px 18px rgba(0, 0, 0, .32); white-space: nowrap; animation: playsPopIn .18s ease-out; }
+#playsPop.hiddenState { display: none; }
+#playsPop .playsLabel { font-size: 8px; font-weight: 800; letter-spacing: .1em; opacity: .6; }
+#playsPop #playsValue { font-size: 21px; font-weight: 900; line-height: 1; }
+#playsPop #playsDelta { font-size: 9px; font-weight: 700; opacity: .72; }
+#playsPop.playsOver #playsValue { color: #ff9d6b; }
+#playsPop.playsUnder #playsValue { color: #7fd8ff; }
+@keyframes playsPopIn { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: translateX(0); } }
+@media (prefers-reduced-motion: reduce) { #playsPop { animation: none; } }
+
 /* Free-position layout (box-layout.js): every label/value is its own box —
    the hand-placed rules above set WHERE it starts, this is what lets it still
    be dragged/resized further from there without reflowing its neighbours. */

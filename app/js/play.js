@@ -450,8 +450,21 @@
     if (!bar) return;
     var rec = current.rec;
     var d = fix && rec && rec.green ? app.distance.greenDistances(fix, rec) : null;
-    bar.classList.toggle("hiddenState", !d || d.centre === null);
-    if (!d || d.centre === null) return;
+    /* Paused in green focus: you have arrived, and the front/back of a green
+       you are standing on is not a number you are playing to — worse, once
+       the placement is deferred to the next tee it reads as a confident
+       250m approach to a hole you already finished. */
+    var paused = !!greenFocus || !d || d.centre === null;
+    bar.classList.toggle("hiddenState", paused);
+    if (paused) {
+      /* Take the shot row and the plays pop-out down with it — returning
+         early without clearing them leaves whatever the last shot rendered
+         sitting there behind a hidden card, ready to reappear. */
+      var pausedRow = document.getElementById("shotRow");
+      if (pausedRow) pausedRow.classList.add("hiddenState");
+      renderPlaysLike(null, null, null);
+      return;
+    }
     /* Everything upstream is metres; the units setting only changes what the
        card shows. Bare numbers by design — the F/B labels carry the meaning. */
     var showDist = function (m) {
@@ -460,13 +473,19 @@
     };
     document.getElementById("distFront").textContent = showDist(d.front);
     document.getElementById("distBack").textContent = showDist(d.back);
-    /* Aimed off the green: club/total/carry for this shot — total is the
-       distance to where it actually lands (the engine's render centre, not
-       the raw aim point — aim-offset and bag-roof already moved it). Green
-       centre is dropped (front/back already frame the green); what remains
-       to the green renders on the middle guide line itself (renderShotOverlays'
-       "Green Xm" label), not repeated here. Aimed at the green, F/B already
-       IS the shot. */
+    /* Club/total/carry for this shot — total is the distance to where it
+       actually lands (the engine's render centre, not the raw aim point —
+       aim-offset and bag-roof already moved it). Green centre is dropped
+       (front/back already frame the green); what remains to the green renders
+       on the middle guide line itself (renderShotOverlays' "Green Xm" label),
+       not repeated here.
+
+       This used to hide the row when the landing was within 3m of the green,
+       on the reasoning that "aimed at the green, F/B already IS the shot".
+       In practice that is the normal approach shot — the aim defaults to the
+       green — so the club and the number vanished exactly when they were most
+       wanted, and came back only if you dragged the aim off the green. The
+       row now shows whenever there is a shot to play. */
     var shotRow = document.getElementById("shotRow");
     if (!shotRow) return;
     var act = aimingShot();
@@ -474,17 +493,40 @@
     if (act && act.target) {
       var landing = (model && model.center) || act.target;
       var toTarget = app.distance.haversineMeters(fix, landing);
-      var remaining = app.distance.haversineMeters(landing, rec.green);
-      if (Number.isFinite(toTarget) && Number.isFinite(remaining) && remaining > 3) {
+      if (Number.isFinite(toTarget)) {
         var payload = model && model.payload;
         document.getElementById("shotClub").textContent = payload ? compactClub(payload.club) : "–";
         document.getElementById("shotDist").textContent = showDist(toTarget);
         document.getElementById("shotCarry").textContent = payload && Number.isFinite(Number(payload.baseCarry))
           ? showDist(Number(payload.baseCarry)) : "–";
         show = true;
+        renderPlaysLike(fix, landing, toTarget);
       }
     }
+    if (!show) renderPlaysLike(null, null, null);
     shotRow.classList.toggle("hiddenState", !show);
+  }
+
+  /* The plays-like pop-out beside the main distance: what this shot plays to
+     once the ground under it is counted. Opportunistic — the lookup is a
+     third-party call over the network, so "no answer" is the normal state and
+     simply leaves the flat number standing on its own. Level shots say
+     nothing either: a pop-out that always reads the same as the number beside
+     it is noise. */
+  function renderPlaysLike(fix, landing, flatM) {
+    var pop = document.getElementById("playsPop");
+    if (!pop) return;
+    var data = (fix && landing && app.playsLike)
+      ? app.playsLike.forShot(fix, landing, flatM) : null;
+    var show = !!data && data.plays !== "level";
+    pop.classList.toggle("hiddenState", !show);
+    if (!show) return;
+    var value = document.getElementById("playsValue");
+    var delta = document.getElementById("playsDelta");
+    if (value) value.textContent = app.gpsSettings ? app.gpsSettings.toDisplay(data.adjustedM) : Math.round(data.adjustedM);
+    if (delta) delta.textContent = data.label;
+    pop.classList.toggle("playsOver", data.plays === "uphill");
+    pop.classList.toggle("playsUnder", data.plays === "downhill");
   }
 
   /* One renderer for both presentations. The stage camera runs first — every
@@ -769,6 +811,11 @@
     /* A GPS setting change re-renders the same way. Units and the aim line
        only need a repaint; shot-up and tightness change the frame itself, so
        the held frame is dropped first to force a re-solve. */
+    /* The elevation lookup lands after the render that asked for it — same
+       event-driven repaint as everything else here, no polling. */
+    if (app.playsLike) app.playsLike.onChange(function () {
+      renderPosition(app.position.current());
+    });
     if (app.gpsSettings) app.gpsSettings.onChange(function () {
       activeFrame = null;
       mapSide = null;
@@ -1178,9 +1225,9 @@
     zoom:     { key: "end",    label: "Shot End",    aria: "Shot End",
                 icon: "../assets/home/clarity-caddy-shot-end-icon.png?v=0b094e11" },
     unlock:   { key: "unlock", label: "Unlock Shot", aria: "Unlock Shot",
-                icon: "../assets/home/clarity-caddy-unlock-shot-icon.png" },
+                icon: "../assets/home/clarity-caddy-unlock-shot-icon.png?v=d410cc7f" },
     lock:     { key: "lock",   label: "Lock",        aria: "Lock in the shot",
-                icon: "../assets/home/clarity-caddy-lock-shot-icon.png" }
+                icon: "../assets/home/clarity-caddy-lock-shot-icon.png?v=e9a3e4ea" }
   };
 
   function currentShotAction() {

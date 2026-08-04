@@ -64,6 +64,11 @@ or writes course data back.
   not close it, and the camera keeps holding the green being logged, so the
   placement can be done later from the next tee with the ball parked at a
   fixed pickup point. Only Shot End or a hole change ends it.
+- `js/plays-like.js` — what a shot plays to once elevation is counted, ported
+  from gd-app-core's elevation channel: one Open-Meteo lookup for both ends of
+  the shot, cached per point, debounced. Opportunistic by contract — a
+  third-party call over the network during play, so every failure answers null
+  and the card just shows the flat number.
 - `js/pin.js` — the pin/flag position, player-set and separate from the
   package's green centre/shape. Per-hole, mirrors shot.js's shape (pure data,
   no DOM); an unset pin is a normal state. Placement is armed from the tool
