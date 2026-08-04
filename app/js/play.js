@@ -819,13 +819,6 @@
       ballEl.addEventListener("pointercancel", endBallDrag);
     }
 
-    /* Hole Out: the final shot ends where the player stands; next hole opens
-       at its pre-frame state. */
-    var holeOut = document.getElementById("holeOutBtn");
-    if (holeOut) holeOut.addEventListener("click", function () {
-      app.shot.holeOut(shotEndPoint());
-      app.play.nextHole();
-    });
     /* Shot End: "this is where that shot finished" using the freshest fix
        available — the freshest device GPS fix if there is one, else the
        player's current position (the map-tap fallback, off-course testing
@@ -833,10 +826,10 @@
        deliberate placement; app.position.set does the rest through the
        onChange wiring above, same as a tap.
 
-       In green focus, ending a shot there IS holing out - same as pressing
-       Hole Out. Uses the position dot itself (not a raw GPS fix, which can
-       differ slightly from what's actually on screen), matching how
-       holeOutBtn below reads it. */
+       This is the ONLY confirm button now. Hole Out used to sit beside it in
+       green focus, but once the ball became the thing being confirmed the two
+       were the same action on the same point — so Shot End carries both
+       meanings: end this shot, and in green focus that ends the hole. */
     var shotEnd = document.getElementById("shotEndBtn");
     if (shotEnd) shotEnd.addEventListener("click", function () {
       if (frameStage === "zoom") {

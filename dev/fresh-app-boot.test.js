@@ -882,10 +882,13 @@ async function bootCheck() {
     const zoom = read();
     const greenFocus = {
       ringShown: !document.getElementById("greenRing").classList.contains("hiddenState"),
-      holeOutVisible: getComputedStyle(document.getElementById("holeOutBtn")).display !== "none",
+      /* Shot End is the single confirm now - Hole Out is gone, because in
+         green focus the two had become the same action on the same point. */
+      confirmVisible: !document.getElementById("shotEndBtn").classList.contains("hiddenState"),
+      holeOutGone: !document.getElementById("holeOutBtn"),
       shotsRecorded: app.shot.holeShots(1).length
     };
-    document.getElementById("holeOutBtn").click();
+    document.getElementById("shotEndBtn").click();
     await new Promise((resolve) => setTimeout(resolve, 200));
     const holedOut = {
       hole: app.play.state().hole,
@@ -1211,7 +1214,9 @@ async function bootCheck() {
   assert.ok(stages.aimed.shotDist > 80 && stages.aimed.shotDist < 140,
     "shot distance must be the start→target number, got " + stages.aimed.shotDist);
   assert.ok(stages.greenFocus.ringShown, "green focus shows the green ring");
-  assert.ok(stages.greenFocus.holeOutVisible, "green focus offers Hole Out");
+  assert.ok(stages.greenFocus.confirmVisible, "green focus offers the Shot End confirm");
+  assert.ok(stages.greenFocus.holeOutGone,
+    "Hole Out is collapsed into Shot End - there must be no second confirm button");
   assert.strictEqual(stages.greenFocus.shotsRecorded, 2, "two shots recorded before holing out");
   assert.strictEqual(stages.holedOut.shots, 3, "Hole Out records the final shot");
   assert.strictEqual(stages.holedOut.hole, 2, "Hole Out advances to the next hole");
