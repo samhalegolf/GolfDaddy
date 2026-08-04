@@ -1225,9 +1225,9 @@
     zoom:     { key: "end",    label: "Shot End",    aria: "Shot End",
                 icon: "../assets/home/clarity-caddy-shot-end-icon.png?v=0b094e11" },
     unlock:   { key: "unlock", label: "Unlock Shot", aria: "Unlock Shot",
-                icon: "../assets/home/clarity-caddy-unlock-shot-icon.png" },
+                icon: "../assets/home/clarity-caddy-unlock-shot-icon.png?v=d410cc7f" },
     lock:     { key: "lock",   label: "Lock",        aria: "Lock in the shot",
-                icon: "../assets/home/clarity-caddy-lock-shot-icon.png" }
+                icon: "../assets/home/clarity-caddy-lock-shot-icon.png?v=e9a3e4ea" }
   };
 
   function currentShotAction() {
