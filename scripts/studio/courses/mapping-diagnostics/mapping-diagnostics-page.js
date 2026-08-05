@@ -17,9 +17,70 @@
  * gated on `#developerPanel.open`. Since this page is not `#developerPanel`, those do not fire;
  * this page's own poll (via GDStudioCourseDbHost) covers the Course Database summary/list, but
  * the embedded debug sub-panels only refresh on that poll's full gdRenderAdminCourseDatabase()
- * call, not on their own event-driven schedule. See CLARITY_STUDIO_WIRING_COMPARISON.md. */
+ * call, not on their own event-driven schedule. See CLARITY_STUDIO_WIRING_COMPARISON.md.
+ *
+ * Added 2026-08-05: a "Server Job History" section reading GET /api/course-mapper-jobs — the
+ * SAME public, pre-existing endpoint (functions/course-mapper-jobs.mjs) that already returns
+ * job rows/error/state for a course, which nothing in the app or Studio actually displayed
+ * anywhere. That blind spot is why a schema type-mismatch bug (course_maps.geometry_version
+ * declared integer, every consumer writes/compares it as a string) silently failed 100% of
+ * server-side geometry saves for 5 days before being found by querying the database directly —
+ * see supabase/migrations/20260805_fix_course_map_geometry_version_type.sql. This section would
+ * have surfaced that immediately. No new server code — this only adds visibility. */
 (function () {
   "use strict";
+
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  function selectedCourseId() {
+    try { return typeof gdAdminCourseDatabaseSelected !== "undefined" ? String(gdAdminCourseDatabaseSelected || "") : ""; }
+    catch (e) { return ""; }
+  }
+
+  function stateTone(state) {
+    if (state === "geometry-ready") return "ok";
+    if (state === "failed") return "bad";
+    if (state === "running" || state === "queued") return "warn";
+    return "";
+  }
+
+  function renderJobRows(jobs) {
+    if (!jobs || !jobs.length) return '<p class="gdStudioMuted">No mapping jobs recorded for this course.</p>';
+    return '<div class="gdStudioJobTableWrap"><table class="gdStudioJobTable"><thead><tr>' +
+      "<th>Status</th><th>Kind</th><th>Mapper</th><th>Error</th><th>Created</th><th>Updated</th>" +
+      "</tr></thead><tbody>" +
+      jobs.map(function (j) {
+        return "<tr><td><span class=\"gdAdminCourseStatusDot " + stateTone(j.status === "done" ? "geometry-ready" : j.status) + "\">" + esc(j.status) + "</span></td>" +
+          "<td>" + esc(j.kind) + "</td><td>" + esc(j.mapper_version) + "</td>" +
+          "<td>" + (j.error ? '<code class="gdStudioJobError">' + esc(j.error) + "</code>" : "—") + "</td>" +
+          "<td>" + esc(j.created_at) + "</td><td>" + esc(j.updated_at) + "</td></tr>";
+      }).join("") + "</tbody></table></div>";
+  }
+
+  function renderJobHistory(el, courseId) {
+    if (!courseId) {
+      el.innerHTML = '<p class="gdStudioMuted">Select a course above to see its server job history.</p>';
+      return;
+    }
+    fetch("/api/course-mapper-jobs?courseId=" + encodeURIComponent(courseId))
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status)); })
+      .then(function (data) {
+        var summary = '<div class="gdAdminCourseStageLine">' +
+          '<span class="' + stateTone(data.state) + '">state: ' + esc(data.state) + "</span>" +
+          '<span>geometry: ' + (data.hasGeometry ? "yes (" + esc(data.geometryVersion) + ")" : "no") + "</span>" +
+          (data.stalled ? '<span class="warn">stalled ' + esc(data.stalledSeconds) + "s</span>" : "") +
+          (data.lastError ? '<span class="bad">last error: ' + esc(data.lastError) + "</span>" : "") +
+          "</div>";
+        el.innerHTML = summary + renderJobRows(data.jobs);
+      })
+      .catch(function (e) {
+        el.innerHTML = '<p class="gdStudioNeedsVerification">Could not load job history: ' + esc(e && e.message || e) + "</p>";
+      });
+  }
 
   function render(containerEl) {
     var intro = document.createElement("div");
@@ -41,16 +102,34 @@
     });
     jumpRow.appendChild(jumpBtn);
 
+    var jobHistorySection = document.createElement("div");
+    jobHistorySection.innerHTML = '<h3 class="gdStudioJobHistoryHeading">Server Job History (live, from course_mapper_jobs)</h3>';
+    var jobHistoryBody = document.createElement("div");
+    jobHistorySection.appendChild(jobHistoryBody);
+    jobHistorySection.style.margin = "18px 0";
+
     var hostSlot = document.createElement("div");
     containerEl.appendChild(intro);
     containerEl.appendChild(jumpRow);
+    containerEl.appendChild(jobHistorySection);
     containerEl.appendChild(hostSlot);
 
-    if (!window.GDStudioCourseDbHost) {
+    renderJobHistory(jobHistoryBody, selectedCourseId());
+    var jobInterval = setInterval(function () {
+      renderJobHistory(jobHistoryBody, selectedCourseId());
+    }, 4000);
+
+    var hostCleanup = null;
+    if (window.GDStudioCourseDbHost) {
+      hostCleanup = window.GDStudioCourseDbHost.mount(hostSlot, { tab: "overview" });
+    } else {
       hostSlot.innerHTML = '<p class="gdStudioMuted">Course Database host module did not load.</p>';
-      return null;
     }
-    return window.GDStudioCourseDbHost.mount(hostSlot, { tab: "overview" });
+
+    return function cleanup() {
+      clearInterval(jobInterval);
+      if (typeof hostCleanup === "function") hostCleanup();
+    };
   }
 
   window.GDStudioPages = window.GDStudioPages || {};

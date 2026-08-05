@@ -229,20 +229,29 @@
     },
     {
       id: "mapping-diagnostics", label: "Mapping Diagnostics", parent: "courses",
-      function: "Observational diagnostics for course mapping and course-play-pipeline attempts. Never chooses the next mapping tool — display only.",
-      owner: "scripts/gd-course-mapping-debug.js + scripts/studio/gd-course-play-debug.js",
-      runtime: { app: false, studio: true, server: false },
+      function: "Observational diagnostics for course mapping and course-play-pipeline attempts. Never chooses the next mapping tool — display only. Since 2026-08-05 also shows a live Server Job History pulled from GET /api/course-mapper-jobs (functions/course-mapper-jobs.mjs) — the actual course_mapper_jobs status/error/stage for the selected course. That endpoint and its data already existed; nothing anywhere displayed it, which is why a schema type-mismatch bug (course_maps.geometry_version declared integer, every consumer writes/compares it as a string) silently failed 100% of server-side geometry saves for 5 days before being found by querying the database directly. See supabase/migrations/20260805_fix_course_map_geometry_version_type.sql.",
+      owner: "scripts/gd-course-mapping-debug.js + scripts/studio/gd-course-play-debug.js + functions/course-mapper-jobs.mjs (job data, read-only)",
+      runtime: { app: false, studio: true, server: true },
       code: [
         { role: "Mapping attempt diagnostics", path: "scripts/gd-course-mapping-debug.js" },
         { role: "Course-play pipeline debug renderers (unmoved)", path: "scripts/studio/gd-course-play-debug.js" },
-        { role: "Studio page wrapper", path: "scripts/studio/courses/mapping-diagnostics/mapping-diagnostics-page.js" }
+        { role: "Studio page wrapper + Server Job History section", path: "scripts/studio/courses/mapping-diagnostics/mapping-diagnostics-page.js" },
+        { role: "Job status API this page reads (GET only, public, pre-existing)", path: "functions/course-mapper-jobs.mjs" },
+        { role: "Server-side geometry resolution + save (what the job history is watching)", path: "functions/course-mapper-worker-background.mjs" }
       ],
-      inputs: ["Mapping attempt events", "Course-play pipeline debug events"], outputs: ["Diagnostic display only — no writes"],
-      owns: ["Diagnostic display state"], doesNotOwn: ["Mapping decisions", "Course-play pipeline state"],
+      inputs: ["Mapping attempt events", "Course-play pipeline debug events", "course_mapper_jobs rows (via API)"], outputs: ["Diagnostic display only — no writes"],
+      owns: ["Diagnostic display state"], doesNotOwn: ["Mapping decisions", "Course-play pipeline state", "course_mapper_jobs data (owned by functions/course-mapper-jobs.mjs)"],
       connections: [{ target: "course-mapping", direction: "reads-from", label: "Attempt evidence" }],
-      keyFunctions: [{ name: "gdRenderCoursePlayPipelineDebug", purpose: "Renders the pipeline debug table/timeline.", codePath: "scripts/studio/gd-course-play-debug.js" }],
+      keyFunctions: [
+        { name: "gdRenderCoursePlayPipelineDebug", purpose: "Renders the pipeline debug table/timeline.", codePath: "scripts/studio/gd-course-play-debug.js" },
+        { name: "renderJobHistory", purpose: "Fetches and renders the selected course's server_mapper_jobs status/error table, polled every 4s.", codePath: "scripts/studio/courses/mapping-diagnostics/mapping-diagnostics-page.js" }
+      ],
       status: "implemented", needsVerification: false,
-      warnings: ["Live refresh (2200ms interval + 2 CustomEvent listeners) is gated on #developerPanel.open — will not auto-refresh when only the new Studio shell is open. See CLARITY_STUDIO_WIRING_COMPARISON.md."]
+      warnings: [
+        "Live refresh (2200ms interval + 2 CustomEvent listeners) is gated on #developerPanel.open — will not auto-refresh when only the new Studio shell is open. See CLARITY_STUDIO_WIRING_COMPARISON.md.",
+        "The Server Job History section only shows the last 8 jobs (functions/course-mapper-jobs.mjs's mapperBuildState query is limit=8) and only for one course at a time — there is still no cross-course \"show me every currently failing course\" view. A future improvement worth doing: a dashboard query across all courses' latest job status.",
+        "The player-facing app itself still cannot see a job's error — GET /api/course-package's response never surfaces course_mapper_jobs.error to the client (functions/gd-course-package-shape.mjs's \"manual-required\" state is derived but never actually written by the worker). This Studio view is currently the only place a human can see why a course failed to map without querying Supabase directly."
+      ]
     },
 
     // ---- Shot System ----

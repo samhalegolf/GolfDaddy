@@ -156,6 +156,14 @@
 #gdStudioShellRoot .gdStudioDiagramDetail { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--gdStudioBorder); }
 #gdStudioShellRoot .gdStudioCopyPath { background: none; border: 1px solid var(--gdStudioBorder); color: var(--gdStudioMuted); border-radius: 6px; padding: 1px 6px; font-size: 11px; cursor: pointer; margin-left: 4px; }
 
+#gdStudioShellRoot .gdStudioJobHistoryHeading { font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--gdStudioMuted); margin: 0 0 8px; }
+#gdStudioShellRoot .gdStudioJobTableWrap { overflow-x: auto; border: 1px solid var(--gdStudioBorder); border-radius: 10px; margin-top: 10px; }
+#gdStudioShellRoot .gdStudioJobTable { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+#gdStudioShellRoot .gdStudioJobTable th, #gdStudioShellRoot .gdStudioJobTable td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--gdStudioBorder); white-space: nowrap; }
+#gdStudioShellRoot .gdStudioJobTable th { color: var(--gdStudioMuted); font-weight: 600; }
+#gdStudioShellRoot .gdStudioJobTable td { color: var(--gdStudioText); }
+#gdStudioShellRoot .gdStudioJobError { color: var(--gdStudioWarn); white-space: normal; word-break: break-word; }
+
 @media (max-width: 860px) {
   #gdStudioShellRoot .gdStudioShell { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
   #gdStudioShellRoot .gdStudioNavRail { border-right: none; border-bottom: 1px solid var(--gdStudioBorder); max-height: 40vh; }
