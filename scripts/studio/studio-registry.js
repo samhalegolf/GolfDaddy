@@ -268,15 +268,28 @@
     { id: "photo-scan-failures", label: "Failures", parent: "photo-scan", function: "Not yet documented — placeholder nav entry.", owner: "Needs verification", runtime: { app: true, studio: false, server: false }, code: [], inputs: [], outputs: [], owns: [], doesNotOwn: [], connections: [{ target: "photo-scan", direction: "child-of", label: "" }], keyFunctions: [], status: "placeholder", needsVerification: true },
 
     { id: "practice-data", label: "Practice Data", parent: "shot-system",
-      function: "Not yet moved into Studio. Local practice-shot gate/store and the shared parser core (also required server-side by functions/practice-data-parser.js).",
-      owner: "scripts/gd-native-practice-data.js + scripts/gd-practice-parser-core.js — app-facing, do not move",
-      runtime: { app: true, studio: false, server: true },
+      function: "The real, live Practice Data screen (#practiceDataPanel, embedded in #dataHubPanel) — app-facing, ships to every player. Three distinct things live under this one screen, not one: (1) the player-facing import/review flow (camera, email, OCR scan, CSV/text paste); (2) an Admin tab (tolerance/gate-tuning sliders) that the app itself already hides via CSS for player/subscribedPlayer permission and only exposes to admin/coach; (3) nested inside that Admin tab, a Studio-only live scan/import debug feed + raw-JSON dump that is physically stripped from the phone app build and additionally requires admin permission specifically (coach does not qualify for it, unlike (2)). This Studio page does not reimplement any of this — it opens the real screen, in admin mode, via the existing gdOpenPracticeAdminTab().",
+      owner: "Screen/admin-toggle: scripts/gd-route-audit.js. Live debug panel: scripts/gd-app-core.js. Parser/store: scripts/gd-native-practice-data.js + scripts/gd-practice-parser-core.js (also required server-side by functions/practice-data-parser.js). Visibility gating: styles/inline/gd-app-base.css.",
+      runtime: { app: true, studio: true, server: true },
       code: [
+        { role: "Screen shell, Admin tab toggle (gdTogglePracticeAdmin, gdOpenPracticeAdminTab) — app-facing, do not move", path: "scripts/gd-route-audit.js" },
+        { role: "Studio-only live scan/import debug feed (gdRenderPracticeLiveDebugPanel) — do not move", path: "scripts/gd-app-core.js" },
         { role: "Gate/store (do not move)", path: "scripts/gd-native-practice-data.js" },
-        { role: "Shared parser core (do not move — server also requires this file)", path: "scripts/gd-practice-parser-core.js" }
+        { role: "Shared parser core (do not move — server also requires this file)", path: "scripts/gd-practice-parser-core.js" },
+        { role: "Studio jump-in page (new, composition-only)", path: "scripts/studio/shot-system/practice-data/practice-data-page.js" },
+        { role: "Hides the Admin tab button for player/subscribedPlayer permission (.gdPracticeAdminExpander rule)", path: "styles/inline/gd-app-base.css" }
       ],
-      inputs: [], outputs: [], owns: [], doesNotOwn: [], connections: [{ target: "shot-system", direction: "child-of", label: "" }],
-      keyFunctions: [], status: "placeholder", needsVerification: false },
+      inputs: ["Camera/email/OCR import", "CSV/text paste"],
+      outputs: ["Native practice-shot store (gd_native_practice_shot_data_v1)", "Tolerance/gate settings (admin/coach only)"],
+      owns: ["Practice-shot import/review UI", "Tolerance/gate tuning controls"],
+      doesNotOwn: ["My Bubble computation", "Pattern Finder", "Course Data"],
+      connections: [{ target: "shot-system", direction: "child-of", label: "" }],
+      keyFunctions: [
+        { name: "gdOpenPracticeAdminTab", purpose: "Force-opens the real Practice Data screen with the Admin tab expanded, regardless of current state.", codePath: "scripts/gd-route-audit.js" },
+        { name: "gdTogglePracticeAdmin", purpose: "Toggles the Admin tab section and renders the tolerance controls.", codePath: "scripts/gd-route-audit.js" }
+      ],
+      status: "implemented", needsVerification: false,
+      warnings: ["The Admin tab's CSS-only visibility gate reads document.body's data-gd-permission attribute, which is only set at runtime by gdRefreshPermissionChrome() (not present in the initial static markup) — a narrow pre-boot window exists where the selector wouldn't yet match. Not observable in practice since the panel is closed at that point, but the gate is not watertight from first paint."] },
     { id: "pattern-finder", label: "Pattern Finder", parent: "shot-system",
       function: "Not yet moved into Studio. No standalone file — lives inside scripts/gd-app-core.js / scripts/gd-route-audit.js per this branch's recon; not read in depth.",
       owner: "Needs verification", runtime: { app: true, studio: false, server: false },

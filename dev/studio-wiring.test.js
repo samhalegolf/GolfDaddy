@@ -42,7 +42,8 @@ const STUDIO_SCRIPTS = [
   "scripts/studio/courses/course-mapping/course-mapping-page.js",
   "scripts/studio/courses/course-visuals/course-visuals-page.js",
   "scripts/studio/courses/publishing/course-publishing-page.js",
-  "scripts/studio/courses/mapping-diagnostics/mapping-diagnostics-page.js"
+  "scripts/studio/courses/mapping-diagnostics/mapping-diagnostics-page.js",
+  "scripts/studio/shot-system/practice-data/practice-data-page.js"
 ];
 const STUDIO_CSS = "scripts/studio/studio-shell.css";
 
