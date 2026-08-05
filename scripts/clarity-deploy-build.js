@@ -204,10 +204,19 @@ console.log("App surface: removed " + app.removed + " studio-only elements, stam
 
 if (APP_ONLY) {
   studioOnlyFiles.forEach(function (ref) { fs.rmSync(path.join(dist, ref), { force: true }); });
+  /* Walk each pruned file's directory up toward dist/, removing directories left
+     empty by the prune - not just the file's immediate parent. A single-level check
+     was enough while scripts/studio/ was flat; it silently leaves nested directories
+     (e.g. scripts/studio/courses/course-database/) behind once anything under
+     scripts/studio/ has its own subdirectory, and an empty directory still rides
+     into the native bundle via `npx cap sync` the same as a stray file would. */
   const emptied = new Set(studioOnlyFiles.map(function (ref) { return path.dirname(ref); }));
   emptied.forEach(function (dir) {
-    const target = path.join(dist, dir);
-    if (fs.existsSync(target) && fs.readdirSync(target).length === 0) fs.rmdirSync(target);
+    let target = path.join(dist, dir);
+    while (target !== dist && fs.existsSync(target) && fs.readdirSync(target).length === 0) {
+      fs.rmdirSync(target);
+      target = path.dirname(target);
+    }
   });
   /* Directories that belong to the deployed site but not inside a store binary.
      Same reasoning as the studio prune above: `npx cap sync` copies all of dist
