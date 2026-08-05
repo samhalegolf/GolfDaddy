@@ -38,25 +38,42 @@
     },
     {
       id: "players-coaches", label: "Players & Coaches", parent: null,
-      function: "Not yet moved into Studio. Player settings and profile hydration are handled by scripts/clarity-player-settings.js and scripts/clarity-profile-hydrate.js; no dedicated coach-facing module was found in this branch's recon.",
-      owner: "Needs verification", runtime: { app: true, studio: false, server: false },
+      function: "Player settings and profile hydration are app-facing (scripts/clarity-player-settings.js, scripts/clarity-profile-hydrate.js). The real admin/coach surface — an all-users roster + coach-account management for admins, a linked-players roster + invite QR flow for coaches — lives inline inside the Profile screen's Coaching Portal view (#gdProfileV67, created dynamically, not static markup), not a separate admin screen. Both render unconditionally as <details> blocks gated by role, with no manual toggle to call — opening the profile is enough.",
+      owner: "scripts/inline/gd-auth-account-shell.js (coachAdminPanel/coachPanel) + scripts/clarity-player-settings.js/gd-app-permissions.js for the underlying role data",
+      runtime: { app: true, studio: true, server: false },
       code: [
-        { role: "Player settings (app-facing, unconfirmed scope)", path: "scripts/clarity-player-settings.js" },
-        { role: "Profile hydration (app-facing, unconfirmed scope)", path: "scripts/clarity-profile-hydrate.js" }
+        { role: "Coaching Portal admin/coach panels (coachAdminPanel, coachPanel, coachInvitePanel)", path: "scripts/inline/gd-auth-account-shell.js" },
+        { role: "Studio jump-in page (new, composition-only)", path: "scripts/studio/players-coaches/players-coaches-page.js" },
+        { role: "Player settings (app-facing, unconfirmed full scope)", path: "scripts/clarity-player-settings.js" },
+        { role: "Profile hydration (app-facing, unconfirmed full scope)", path: "scripts/clarity-profile-hydrate.js" }
       ],
-      inputs: [], outputs: [], owns: [], doesNotOwn: [], connections: [], keyFunctions: [],
-      status: "placeholder", needsVerification: true
+      inputs: ["Account role (admin/coach/player/subscribedPlayer)"], outputs: ["Coach-account records", "Coach/player links"],
+      owns: ["All-users roster (admin)", "Coach-account creation (admin)", "Linked-players roster + invite (coach)"], doesNotOwn: ["Payment/commerce data", "Course/practice data itself"],
+      connections: [],
+      keyFunctions: [
+        { name: "coachAdminPanel", purpose: "All-users roster + coach-account management, role===\"admin\" only.", codePath: "scripts/inline/gd-auth-account-shell.js" },
+        { name: "coachPanel", purpose: "Linked-players roster + coach-invite QR flow, admin or coach.", codePath: "scripts/inline/gd-auth-account-shell.js" }
+      ],
+      status: "implemented", needsVerification: false
     },
     {
       id: "commerce", label: "Commerce", parent: null,
-      function: "Not yet moved into Studio. In-app purchase/subscription flow and checkout/billing-portal integration were located by filename but not read in depth this branch.",
-      owner: "Needs verification", runtime: { app: true, studio: false, server: false },
+      function: "In-app purchase/subscription flow is app-facing (scripts/clarity-store-billing.js — native RevenueCat bridge). The real admin surface is renderAdminSettings() in scripts/clarity-payments.js: Stripe/webhook/price connection status, product list + edit (Stripe Price ID, label, kind, active state), webhook/membership diagnostics, and an \"Advanced tools\" section (free-pass issuance, entitlement viewer + revoke, manual permission grant, permission-resolver tester). Gated role===\"admin\" only — unlike most other admin surfaces here, coach does not qualify. It renders inline at the bottom of Player Settings' Payments section, with no independent DOM to reparent.",
+      owner: "scripts/clarity-payments.js",
+      runtime: { app: true, studio: true, server: false },
       code: [
-        { role: "Store billing client (unconfirmed scope)", path: "scripts/clarity-store-billing.js" },
-        { role: "Checkout / billing portal (unconfirmed scope)", path: "scripts/clarity-payments.js" }
+        { role: "Full commerce admin (renderAdminSettings + product/diagnostics/advanced-tools)", path: "scripts/clarity-payments.js" },
+        { role: "Studio jump-in page (new, composition-only)", path: "scripts/studio/commerce/commerce-page.js" },
+        { role: "Native purchase bridge (app-facing, do not move)", path: "scripts/clarity-store-billing.js" }
       ],
-      inputs: [], outputs: [], owns: [], doesNotOwn: [], connections: [], keyFunctions: [],
-      status: "placeholder", needsVerification: true
+      inputs: ["Stripe webhook events", "Account role"], outputs: ["Product records", "Entitlement grants/revokes", "Membership state"],
+      owns: ["Commerce admin UI", "Manual entitlement grants"], doesNotOwn: ["Native purchase flow (owned by clarity-store-billing.js)", "Account role itself (owned by gd-app-permissions.js)"],
+      connections: [],
+      keyFunctions: [
+        { name: "renderAdminSettings", purpose: "Renders the full commerce admin block — products, diagnostics, advanced tools.", codePath: "scripts/clarity-payments.js" },
+        { name: "showSettings / showSection(\"payments\")", purpose: "Opens the Payments section of Player Settings that hosts the admin block.", codePath: "scripts/clarity-payments.js" }
+      ],
+      status: "implemented", needsVerification: false
     },
     {
       id: "communications", label: "Communications", parent: null,
@@ -316,15 +333,24 @@
       inputs: [], outputs: [], owns: [], doesNotOwn: [], connections: [{ target: "shot-system", direction: "child-of", label: "" }],
       keyFunctions: [], status: "placeholder", needsVerification: false },
     { id: "shot-system-course-data", label: "Course Data", parent: "shot-system",
-      function: "Not yet moved into Studio. Course-data intake/comparison, gated by gdCourseDataCanManage() (admin OR coach) — stays on the phone by design.",
-      owner: "scripts/course-data/gd-course-data-intake.js + gd-course-data-comparison.js — app-facing, do not move",
-      runtime: { app: true, studio: false, server: false },
+      function: "Course-data intake/comparison (scripts/course-data/gd-course-data-intake.js, gd-course-data-comparison.js) stays on the phone by design. The real admin surface is the .gdCourseAdminExpander button inside #statsPanel (\"Shot Data\") — raw upload, tuning fields, and a sandbox data generator that injects fake course/practice shots into live storage — gated gdCourseDataCanManage() (admin OR coach). Two definitions of gdRenderCourseDataAdminPanel exist (gd-app-core.js's simpler one, gd-route-audit.js's richer one); gd-route-audit.js's window export wins since it loads later, so that's the one actually shown.",
+      owner: "scripts/gd-route-audit.js (gdSetCourseDataTab, gdRenderCourseDataAdminPanel, openCourseData) + scripts/course-data/gd-course-data-intake.js/gd-course-data-comparison.js",
+      runtime: { app: true, studio: true, server: false },
       code: [
+        { role: "Course Data admin panel (upload/tuning/sandbox generator) — the effective one", path: "scripts/gd-route-audit.js" },
+        { role: "Studio jump-in page (new, composition-only)", path: "scripts/studio/shot-system/course-data/course-data-page.js" },
         { role: "Intake (do not move)", path: "scripts/course-data/gd-course-data-intake.js" },
         { role: "Comparison (do not move)", path: "scripts/course-data/gd-course-data-comparison.js" }
       ],
-      inputs: [], outputs: [], owns: [], doesNotOwn: [], connections: [{ target: "shot-system", direction: "child-of", label: "" }],
-      keyFunctions: [], status: "placeholder", needsVerification: false },
+      inputs: ["Uploaded/pasted course data", "Sandbox-generated shot data (admin only)"], outputs: ["Course data records", "Tuning field values"],
+      owns: ["Course data admin UI"], doesNotOwn: ["My Bubble computation", "Practice data store"],
+      connections: [{ target: "shot-system", direction: "child-of", label: "" }],
+      keyFunctions: [
+        { name: "openCourseData", purpose: "Opens #statsPanel via the Data Hub course accordion; {adminTab:true} jumps straight to the admin panel.", codePath: "scripts/gd-route-audit.js" },
+        { name: "gdSetCourseDataTab", purpose: "Toggles the admin panel open, permission-checked.", codePath: "scripts/gd-route-audit.js" }
+      ],
+      status: "implemented", needsVerification: false,
+      warnings: ["The sandbox data generator (gdRenderSandboxGeneratorHTML) injects fake shots into live storage — real, not a toy, treat with care when opened from Studio."] },
     { id: "conditions", label: "Conditions", parent: "shot-system",
       function: "Not yet moved into Studio. Course-conditions engine (geometry + tolerance profile). A Studio-only debug surface exists but is dead code (nothing calls it).",
       owner: "scripts/course-data/conditions-engine/*", runtime: { app: true, studio: false, server: false },
@@ -403,17 +429,47 @@
     // ---- System ----
     { id: "system-integrations", label: "Integrations", parent: "system", function: "Not yet documented — placeholder nav entry.", owner: "Needs verification", runtime: { app: true, studio: false, server: false }, code: [], inputs: [], outputs: [], owns: [], doesNotOwn: [], connections: [{ target: "system", direction: "child-of", label: "" }], keyFunctions: [], status: "placeholder", needsVerification: true },
     { id: "system-storage", label: "Storage", parent: "system",
-      function: "Not yet moved into Studio. Generic local key/value storage wrapper used across the app.",
-      owner: "scripts/clarity-store.js (unconfirmed full scope)", runtime: { app: true, studio: false, server: false },
-      code: [{ role: "Storage wrapper (unconfirmed full scope)", path: "scripts/clarity-store.js" }],
-      inputs: [], outputs: [], owns: [], doesNotOwn: [], connections: [{ target: "system", direction: "child-of", label: "" }],
-      keyFunctions: [], status: "placeholder", needsVerification: true },
+      function: "scripts/clarity-store.js is a generic local key/value wrapper (unconfirmed full scope). The real admin surface for storage is the Data Safety card (#clarityBackupCard, scripts/clarity-backup.js) — export/import this browser's local backup (profiles, coach/player links, course mapping, shot data, practice data, settings), reparented here from #developerPanel. No permission gate beyond reaching #developerPanel.",
+      owner: "scripts/clarity-backup.js (Data Safety card) + scripts/clarity-store.js (unconfirmed full scope)",
+      runtime: { app: true, studio: true, server: false },
+      code: [
+        { role: "Data Safety export/import card (unmoved, reparented)", path: "scripts/clarity-backup.js" },
+        { role: "Studio page (reparent host)", path: "scripts/studio/system/storage/storage-page.js" },
+        { role: "Storage wrapper (unconfirmed full scope)", path: "scripts/clarity-store.js" }
+      ],
+      inputs: ["Backup JSON file (import)"], outputs: ["Backup JSON file (export)"],
+      owns: ["Backup export/import UI"], doesNotOwn: ["The underlying local storage keys it backs up (owned by their respective modules)"],
+      connections: [{ target: "system", direction: "child-of", label: "" }],
+      keyFunctions: [{ name: "downloadBackup / handleImportFile", purpose: "Export/import the browser's Clarity data as JSON.", codePath: "scripts/clarity-backup.js" }],
+      status: "implemented", needsVerification: false,
+      warnings: ["A second entry point, window.gdOpenPlayerSettingsBackup (scripts/clarity-player-settings.js), has no button wired to it anywhere in index.html — looks dead. #developerPanel's card is the only live way to reach this today."] },
     { id: "system-diagnostics", label: "Diagnostics", parent: "system",
-      function: "Not yet moved into Studio as a general surface — the Courses area already has a working Mapping Diagnostics page (see courses > Mapping Diagnostics).",
-      owner: "n/a — see mapping-diagnostics", runtime: { app: false, studio: true, server: false },
-      code: [], inputs: [], outputs: [], owns: [], doesNotOwn: [], connections: [{ target: "system", direction: "child-of", label: "" }, { target: "mapping-diagnostics", direction: "see-also", label: "Existing diagnostics surface" }],
-      keyFunctions: [], status: "placeholder", needsVerification: false },
-    { id: "system-feature-controls", label: "Feature Controls", parent: "system", function: "Not yet documented — placeholder nav entry. No feature-flag system was confirmed in this branch's recon.", owner: "Needs verification", runtime: { app: true, studio: false, server: false }, code: [], inputs: [], outputs: [], owns: [], doesNotOwn: [], connections: [{ target: "system", direction: "child-of", label: "" }], keyFunctions: [], status: "placeholder", needsVerification: true }
+      function: "The Courses area already has a working Mapping Diagnostics page (see courses > Mapping Diagnostics). This page now also hosts the Launch Monitor Intake Test card (.gdLmAdmin, scripts/gd-app-core.js), reparented from #developerPanel — an admin-only test lane for captured practice data.",
+      owner: "scripts/gd-app-core.js (gdRenderLaunchMonitorAdmin) — see also mapping-diagnostics",
+      runtime: { app: false, studio: true, server: false },
+      code: [
+        { role: "Launch Monitor Intake Test card (unmoved, reparented)", path: "scripts/gd-app-core.js" },
+        { role: "Studio page (reparent host)", path: "scripts/studio/system/diagnostics/launch-monitor-diagnostics-page.js" }
+      ],
+      inputs: ["Uploaded launch-monitor practice data"], outputs: ["Diagnostic display only"],
+      owns: ["Launch monitor intake test UI"], doesNotOwn: ["Course mapping diagnostics (see mapping-diagnostics)"],
+      connections: [{ target: "system", direction: "child-of", label: "" }, { target: "mapping-diagnostics", direction: "see-also", label: "Existing diagnostics surface" }],
+      keyFunctions: [{ name: "gdRenderLaunchMonitorAdmin", purpose: "Renders launch-monitor intake analysis into the reparented card.", codePath: "scripts/gd-app-core.js" }],
+      status: "implemented", needsVerification: false },
+    { id: "system-feature-controls", label: "Feature Controls", parent: "system",
+      function: "No formal feature-flag system exists. The closest real thing is #devTuningControls (scripts/gd-app-core.js's renderDevPanel(), driven by DEV_DEFS/DEV_FIELDS) — numeric tuning across Shot Engine, Shot Visuals, GPS Behaviour, Live Wind, Wand Integration, Bubble Geometry, and more, several of which are literal 0/1 toggles. Reparented here from #developerPanel.",
+      owner: "scripts/gd-app-core.js (renderDevPanel, DEV_DEFS/DEV_FIELDS)",
+      runtime: { app: true, studio: true, server: false },
+      code: [
+        { role: "Dev tuning controls (unmoved, reparented)", path: "scripts/gd-app-core.js" },
+        { role: "Studio page (reparent host)", path: "scripts/studio/system/feature-controls/feature-controls-page.js" }
+      ],
+      inputs: [], outputs: ["Tuning field values (localStorage-backed)"],
+      owns: ["Dev tuning UI"], doesNotOwn: ["The systems each field tunes"],
+      connections: [{ target: "system", direction: "child-of", label: "" }],
+      keyFunctions: [{ name: "renderDevPanel", purpose: "Renders the full numeric tuning UI from DEV_DEFS/DEV_FIELDS.", codePath: "scripts/gd-app-core.js" }],
+      status: "implemented", needsVerification: false,
+      warnings: ["Not a real feature-flag registry — this is numeric dev tuning that happens to include some 0/1 toggle-shaped fields. Labelled honestly as the closest match, not a fabricated flag system."] }
   ];
 
   var byId = {};
