@@ -1634,6 +1634,9 @@
       }
       app.shot.startHole(current.hole);
       if (app.pin) app.pin.startHole(current.hole);
+      /* The hole is the round's position, and changing it is also the activity
+         that keeps a saved round from expiring. */
+      if (app.resume) app.resume.setHole(current.hole);
       startPillDismissed = false;
       /* Leaving the hole and coming back is how you change your mind about
          the pill's choice — so the choice dies with the hole. Green focus

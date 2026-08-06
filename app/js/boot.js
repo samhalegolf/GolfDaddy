@@ -208,11 +208,26 @@
     };
   }
 
-  async function openPlay(course) {
+  /* Resuming lands on the hole the round reached. start() has already opened
+     the first hole in play, so this is a second transition rather than a
+     parameter to it - which also means a stale or nonsense hole number simply
+     leaves the player on hole 1 rather than failing the whole entry. */
+  async function goResumeHole(hole) {
+    var n = Number(hole);
+    if (!Number.isFinite(n) || n < 1) return;
+    if (app.play.state().hole === n) return;
+    try { await app.play.goHole(n); } catch (e) {}
+  }
+
+  async function openPlay(course, resumeHole) {
     show("play");
     activeCourse = course;
     mapUpdateDismissed = false;
     gpsNoticeDismissed = false;
+    /* Record the round the moment it is genuinely up, so a phone that dies on
+       the 7th tee still has somewhere to come back to. play.js keeps the hole
+       current from here on. */
+    if (app.resume) app.resume.setCourse(course);
     var cached = app.courseStore.load(course.courseId);
     var pkg = cached && cached.pkg;
     if (pkg) {
@@ -220,6 +235,7 @@
          on a network round-trip for a course already on the device. */
       activeMapType = cached.mapType;
       await app.play.start(course.courseId, pkg, { lat: course.courseLat, lng: course.courseLng });
+      await goResumeHole(resumeHole);
       hideLoadingScreen();
     } else {
       pkg = await app.fetchCoursePackage({
@@ -231,6 +247,7 @@
       activeMapType = mapTypeOf(pkg);
       /* null package → live map only. Normal, per the handover. */
       await app.play.start(course.courseId, pkg, { lat: course.courseLat, lng: course.courseLng });
+      await goResumeHole(resumeHole);
       hideLoadingScreen();
       saveCourseToLibrary(course, pkg);
     }
@@ -262,7 +279,8 @@
     });
     var handoffCourseId = new URLSearchParams(window.location.search).get("courseId");
     if (handoffCourseId) {
-      openPlay(courseFromUrl(handoffCourseId));
+      openPlay(courseFromUrl(handoffCourseId),
+        new URLSearchParams(window.location.search).get("hole"));
     } else {
       show("home");
       hideLoadingScreen();
