@@ -22471,11 +22471,17 @@ function gdStatsVisualSummary(analysis, filteredRecords, filteredAnalysis){
   // legacy absolute-distance chart below only runs if the route-audit owner
   // that provides that renderer has not loaded yet.
   if(typeof window.gdCourseDataSurfaceSvg==="function"){
-    visual.innerHTML=window.gdCourseDataSurfaceSvg(null,{records,bubbleFit:fitSource},{
-      records,
-      colourFor:(record,club)=>timeMode?gdStatsTimeColor(record,records):gdStatsClubColor(club),
-      keySvg:hasVisualData?(timeMode?timeKeySvg:clubKeySvg):""
-    });
+    // CLUB COLOURING BELONGS TO THE CHART. It plots every club at once, so it
+    // deals distinct palette entries across the clubs actually on screen and
+    // builds its key from that same map - which a name hash cannot do without
+    // landing two clubs on one colour. Time mode still owns its own ramp, and
+    // hands in the matching key with it.
+    const courseOpts={records};
+    if(timeMode){
+      courseOpts.colourFor=record=>gdStatsTimeColor(record,records);
+      courseOpts.keySvg=hasVisualData?timeKeySvg:"";
+    }
+    visual.innerHTML=window.gdCourseDataSurfaceSvg(null,{records,bubbleFit:fitSource},courseOpts);
     return;
   }
 	  if(!hasVisualData){

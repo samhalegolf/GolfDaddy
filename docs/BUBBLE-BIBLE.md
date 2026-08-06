@@ -219,11 +219,50 @@ That makes the whole course story simple, and no gates or sweeps are needed to t
 - **spread of the deviations -> the size.**
 - Draw it: Course Bubble sits slightly left of the GPS bubble, and a bit bigger.
 
+That last line is about the **Comparison** chart, where both bubbles are drawn on a
+target-line axis. It is NOT a licence to shift the bubble on the Course chart - see
+directly below.
+
 ### The centre line is the bubble — LAW
 
 Course is the one screen whose zero is **the playing bubble**, not the target line.
 Everything plotted there is only ever relative to whatever bubble was live when the
 shot was hit.
+
+**Corollary: on the Course chart the bubble is drawn AT ZERO, dead centre.** The
+frame has already subtracted the bubble's centre from every dot, so drawing the
+ellipse at the cluster's median deviation adds the same miss back a second time -
+the bubble drifts off-centre by the median miss, and the size slider's containment
+reading silently changes question from "how much of my spread does my bubble cover"
+to "...a bubble parked on my average miss".
+
+### Course Data does no cluster finding — LAW
+
+The Course chart has exactly one piece of logic: **every stored outcome, scaled into
+the chart's units, plotted against one graph bubble at 0.0.** Nothing about where the
+shots went may move or resize that bubble - it is the fixed thing they are measured
+against, and the slider is the only thing that changes its size.
+
+- **Every club, one graph.** Each shot is scaled by its own club's reference carry
+  (depth as % of carry, aim in degrees). A club with no usable expected distance
+  falls back to the all-shot median rather than having its shots dropped.
+- **The bubble is a preset, not a fit.** It is `gdGraphBubbleDimensions` for the
+  normalised view club (7i), converted at the median reference carry. Because
+  `gdDeriveBasePatternSize` scales a preset with carry, that shape lands within
+  ~0.2% of the same drawn radii for a SW at 75m and a driver at 230m - which is what
+  lets one bubble legitimately stand for every club at once.
+- **The dot's colour is its club**, dealt from `gdStatsClubPalette` across the clubs
+  actually plotted, with the on-chart key built from the same map. Do NOT colour
+  these dots with `gdStatsClubColor`: it hashes the club NAME into the palette, which
+  is fine one club at a time but collides on an all-clubs graph (5i, SW and 3w all
+  land on the same purple). Inside/outside is stated in weight - opacity, radius and
+  a ring - never by taking the club's colour away.
+- **`analysis.bubbleFit` is not consulted at all.** A directional reading (which way
+  the cluster actually sits) is a **Comparison** screen question, derived there from
+  the existing cluster analysis. Note also that `bubbleFit` is one entry per club in
+  `groupBy` insertion order, so its `[0]` is meaningless - any single-bubble chart
+  that does want one must pick the club with the most shots, as `gdStatsVisualSummary`
+  does.
 
 The stored frame is self-contained and geographic:
 

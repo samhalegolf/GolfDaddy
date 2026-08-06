@@ -5530,11 +5530,18 @@
       const ux=dx*cos-dy*sin,uy=dx*sin+dy*cos;
       const within=(ux*ux)/(rx*rx)+(uy*uy)/(ry*ry)<=1;
       if(within)inside+=1;
-      // Hydrate/dehydrate as the bubble sweeps over them - the colour IS the
-      // in/out answer, so it has to move with the slider, not lag a re-render.
+      // Hydrate/dehydrate as the bubble sweeps over them - in/out has to move with
+      // the slider, not lag a re-render. It is stated in weight, never in hue: the
+      // fill stays the club's own colour (parked on the node at render) so a dot
+      // never stops saying which club hit it just because the bubble reached it.
       dot.classList.toggle("inside",within);
-      dot.setAttribute("fill",within?GD_COURSE_BUBBLE_COLOUR:GD_COURSE_DOT_OUTSIDE);
-      dot.setAttribute("opacity",within?".95":".6");
+      const clubColour=dot.dataset.clubColour;
+      if(clubColour)dot.setAttribute("fill",clubColour);
+      dot.setAttribute("r",within?"2.9":"2.4");
+      dot.setAttribute("opacity",within?".95":".42");
+      dot.setAttribute("stroke",within?GD_COURSE_BUBBLE_COLOUR:"none");
+      dot.setAttribute("stroke-width",within?"1":"0");
+      dot.setAttribute("stroke-opacity",within?".55":"0");
     });
     const pctText=host.querySelector(".gdCourseContainmentPct");
     const subText=host.querySelector(".gdCourseContainmentSub");
@@ -5595,7 +5602,18 @@
         .filter(value=>Number.isFinite(value)&&value>0));
       if(Number.isFinite(median)&&median>0)referenceByClub[key]=median;
     });
-    const referenceFor=club=>Number(referenceByClub[gdShotBubbleOverlayClubKey(club)]);
+    // EVERY SHOT LANDS ON THIS GRAPH. A club with no usable expected distance of
+    // its own falls back to the all-shot median rather than dropping its shots:
+    // the deviation is already measured and real, and the reference only ever
+    // scales it into the chart's units. Silently binning those shots made the
+    // picture and the containment count quietly disagree with the shot list.
+    const allExpected=dataRows.map(row=>Number(row.record?.expectedDistanceM)).filter(value=>Number.isFinite(value)&&value>0);
+    const fallbackReference=gdShotBubbleMedian(allExpected);
+    const referenceFor=club=>{
+      const own=Number(referenceByClub[gdShotBubbleOverlayClubKey(club)]);
+      if(Number.isFinite(own)&&own>0)return own;
+      return Number.isFinite(fallbackReference)&&fallbackReference>0?fallbackReference:NaN;
+    };
     const relativeRows=dataRows.map(row=>{
       const reference=referenceFor(row.club);
       const depth=Number(row.record?.depthM);          // forward deviation from bubble centre, m
@@ -5603,72 +5621,63 @@
       if(!Number.isFinite(reference)||reference<=0||!Number.isFinite(depth)||!Number.isFinite(angle))return null;
       return {club:row.club,normalisedDepthM:depth/reference*100,normalizedDeg:angle,hasLateral:true,row,index:row.index};
     }).filter(Boolean);
-    // Builds a drawable part straight in the deviation frame. centreDepthM /
-    // centreAngleDeg are the deviation of the bubble's centre from zero; widthM /
-    // depthM are its full extents.
-    // widthM/depthM are the PRESET size for the club (gdGraphBubbleDimensions);
-    // centreDepthM/centreAngleDeg are the measured placement. No axis
-    // re-normalisation: the preset already is the standard shape, so putting it
-    // through gdStandardDispersionAxes would only round-trip it.
-    function deviationPart(club,reference,centreDepthM,centreAngleDeg,widthM,depthM){
-      if(!Number.isFinite(reference)||reference<=0)return null;
-      if(!Number.isFinite(widthM)||widthM<=0||!Number.isFinite(depthM)||depthM<=0)return null;
-      const lateralRadius=widthM/2;
-      const depthRadius=depthM/2;
-      return {
-        club:club||"Unknown",
-        depthM:(Number(centreDepthM)||0)/reference*100,
-        depthRadiusM:depthRadius/reference*100,
-        angleDeg:Number(centreAngleDeg)||0,
-        angleRadiusDeg:Math.max(.4,Math.atan2(lateralRadius,reference)*180/Math.PI),
-        tiltDeg:gdGraphBubbleTiltDeg(club),
-        baseDistanceM:reference
-      };
-    }
     // THE SLIDER SIZES THE COURSE BUBBLE. Shape stays preset - this is an explicit
     // player-driven scale on it, not a size derived from the data. 100% is exactly
     // the preset size; the slider's whole output is the containment reading below.
     const courseBubbleScale=gdCourseBubbleScalePct()/100;
-    const fitSource=Array.isArray(analysis?.bubbleFit)?analysis.bubbleFit:[];
-    // Where the shots actually went. The fit supplies PLACEMENT ONLY - the depth
-    // and aim deviation of the cluster centre. Size is the preset for that club at
-    // its reference distance, never the measured spread (see gdGraphBubbleDimensions).
-    const fitParts=fitSource.map(fit=>{
-      const reference=referenceFor(fit?.club);
-      const dims=gdGraphBubbleDimensions(fit?.club,reference);
-      if(!dims)return null;
-      return deviationPart(
-        fit?.club,
-        reference,
-        Number(fit?.resultBubble?.depthOffsetM),
-        Number(fit?.resultBubble?.normalizedDeg),
-        dims.widthM*courseBubbleScale,
-        dims.depthM*courseBubbleScale
-      );
-    }).filter(Boolean);
     const plot=gdPracticeNormalisedPlotLayout();
     const pointFor=entry=>gdPracticeNormalisedPlotPoint(plot,entry,entry.index);
-    // CONTAINMENT is computed the same way the live slider recomputes it, from the
-    // drawn ellipse including its tilt - so the number always matches the picture.
-    // Counted shots only: a filtered-out shot is not a result to be contained.
-    const coursePart=fitParts[0]||null;
+    // NO CLUSTER FINDING ON THIS SCREEN. There is exactly one piece of logic here:
+    // every stored outcome, scaled into the chart's units, plotted against ONE
+    // graph bubble sitting at 0.0. Nothing about where the shots went may move or
+    // resize that bubble - it is the fixed thing they are being measured against.
+    //
+    // So the bubble no longer comes from `analysis.bubbleFit` at all. It is the
+    // preset shape for the normalised view club (the same 7i view Practice reads
+    // in), converted into chart units and scaled by the slider. Because
+    // gdDeriveBasePatternSize scales a preset with carry, that shape covers almost
+    // the same % depth and the same angular width at any carry - which is exactly
+    // what lets one bubble stand for every club on one graph.
+    //
+    // A directional reading (which way the cluster actually sits) is a COMPARISON
+    // screen question and is derived there from the existing cluster analysis. It
+    // is deliberately not computed, drawn or published here.
+    const bubbleReference=(()=>{
+      const median=gdShotBubbleMedian(Object.keys(referenceByClub).map(key=>Number(referenceByClub[key])).filter(value=>Number.isFinite(value)&&value>0));
+      if(Number.isFinite(median)&&median>0)return median;
+      return Number.isFinite(fallbackReference)&&fallbackReference>0?fallbackReference:NaN;
+    })();
     const courseGeo=(()=>{
-      if(!coursePart)return null;
       const geo=gdPracticeGraphInternalGeometry(plot);
-      if(!geo)return null;
+      if(!geo||!Number.isFinite(bubbleReference)||bubbleReference<=0)return null;
+      const dims=gdGraphBubbleDimensions(GD_NORMALISED_VIEW_CLUB,bubbleReference);
+      if(!dims)return null;
       const halfWidth=(plot.plotRight-plot.plotLeft)/2;
       const halfHeight=(plot.plotBottom-plot.plotTop)/2;
+      // Radii are built at 100% and then multiplied, NOT built from an already
+      // scaled width: the live slider rescales linearly off data-base-rx, and
+      // atan2 is not linear, so scaling before the conversion would leave the
+      // drawn bubble and the dragged bubble disagreeing at the ends of the range.
+      const angleRadiusDeg=Math.max(.4,Math.atan2(dims.widthM/2,bubbleReference)*180/Math.PI);
+      const depthRadiusPct=dims.depthM/2/bubbleReference*100;
+      const baseRx=Math.max(3,(angleRadiusDeg/Math.max(.5,plot.angleRange))*halfWidth);
+      const baseRy=Math.max(3,(depthRadiusPct/Math.max(1,plot.depthRange))*halfHeight);
       return {
-        cx:geo.xForAngle(coursePart.angleDeg),
-        cy:geo.yForDepth(coursePart.depthM),
-        rx:Math.max(3,((Number(coursePart.angleRadiusDeg)||0)/Math.max(.5,plot.angleRange))*halfWidth),
-        ry:Math.max(3,((Number(coursePart.depthRadiusM)||0)/Math.max(1,plot.depthRange))*halfHeight),
-        tilt:Number(coursePart.tiltDeg)||0
+        cx:geo.xForAngle(0),
+        cy:geo.yForDepth(0),
+        baseRx,
+        baseRy,
+        rx:baseRx*courseBubbleScale,
+        ry:baseRy*courseBubbleScale,
+        tilt:gdGraphBubbleTiltDeg(GD_NORMALISED_VIEW_CLUB)
       };
     })();
-    // A dot is grey until the bubble reaches it, then it takes the bubble's own
-    // colour. Tested in the ellipse's ROTATED frame so what lights up is exactly
-    // what looks enclosed.
+    // A dot always carries ITS OWN CLUB'S colour - that is how the graph says
+    // which club hit it, against the club key above. Being inside the bubble is a
+    // second, independent signal, so it is carried by weight rather than by hue:
+    // outside dots sit back at low opacity, inside dots come forward at full
+    // strength with a ring. Tested in the ellipse's ROTATED frame so what lights
+    // up is exactly what looks enclosed.
     const insideBubble=point=>{
       if(!courseGeo||!point)return false;
       const t=-courseGeo.tilt*Math.PI/180;
@@ -5677,20 +5686,52 @@
       const uy=dx*Math.sin(t)+dy*Math.cos(t);
       return (ux*ux)/(courseGeo.rx*courseGeo.rx)+(uy*uy)/(courseGeo.ry*courseGeo.ry)<=1;
     };
-    // Dots carry a class so the live slider can recolour and recount them straight
-    // from the DOM without re-rendering the chart on every input event.
-    const shotDots=relativeRows.slice(0,90).map(entry=>{
+    // NEWEST WINS when there are more shots than the chart can carry. The old cap
+    // sliced from the front, which quietly dropped the most recent rounds - the
+    // ones the player is actually asking about - and left the containment count
+    // (which walked every row) disagreeing with the picture.
+    const GD_COURSE_MAX_DOTS=240;
+    const plottedRows=relativeRows.slice(-GD_COURSE_MAX_DOTS);
+    // COLLISION-FREE CLUB COLOURS. gdStatsClubColor hashes the club name into the
+    // palette, which is fine where one club is on screen at a time but not here:
+    // this graph deliberately shows EVERY club at once, and the hash lands 5i, SW
+    // and 3w on the same purple - at which point the dot has stopped saying which
+    // club hit it. The clubs actually plotted are dealt distinct palette entries
+    // instead, and the key is built from the SAME map so the legend can never
+    // drift from the dots. Past a palette's worth of clubs it wraps and colours
+    // repeat; the key still says which is which.
+    const plottedClubs=[...new Set(plottedRows.map(entry=>entry.club||"Unknown"))].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
+    const clubPalette=safe(()=>Array.isArray(gdStatsClubPalette)?gdStatsClubPalette:null,null)||[];
+    const clubColourMap={};
+    plottedClubs.forEach((club,i)=>{clubColourMap[club]=clubPalette.length?clubPalette[i%clubPalette.length]:gdStatsClubColor(club);});
+    const clubColour=club=>clubColourMap[club]||gdStatsClubColor(club);
+    const dotColourFor=entry=>{
+      const club=entry.club||"Unknown";
+      // A caller colouring by something other than club (time of capture) owns
+      // both the colours and the key, so it wins outright.
+      const custom=colourFor?safe(()=>colourFor(entry.row?.record,club),null):null;
+      return custom||clubColour(club);
+    };
+    // Dots carry a class so the live slider can restate inside/outside and recount
+    // them straight from the DOM without re-rendering the chart on every input
+    // event. The club colour is parked on the node so that restating never has to
+    // guess it back.
+    const shotDots=plottedRows.map(entry=>{
       const point=pointFor(entry);
       if(!point)return "";
       const counted=entry.row.record.counted!==false;
-      if(!counted)return `<circle class="gdCourseShotDot excluded" cx="${point.x.toFixed(1)}" cy="${point.y.toFixed(1)}" r="1.8" fill="${GD_COURSE_DOT_OUTSIDE}" opacity=".18"/>`;
+      const colour=dotColourFor(entry);
+      if(!counted)return `<circle class="gdCourseShotDot excluded" data-club="${gdStatsSvgText(entry.club||"Unknown")}" data-club-colour="${colour}" cx="${point.x.toFixed(1)}" cy="${point.y.toFixed(1)}" r="1.8" fill="${GD_COURSE_DOT_OUTSIDE}" opacity=".18"/>`;
       const inside=insideBubble(point);
-      return `<circle class="gdCourseShotDot${inside?" inside":""}" cx="${point.x.toFixed(1)}" cy="${point.y.toFixed(1)}" r="2.6" fill="${inside?GD_COURSE_BUBBLE_COLOUR:GD_COURSE_DOT_OUTSIDE}" opacity="${inside?".95":".6"}"/>`;
+      return `<circle class="gdCourseShotDot${inside?" inside":""}" data-club="${gdStatsSvgText(entry.club||"Unknown")}" data-club-colour="${colour}" cx="${point.x.toFixed(1)}" cy="${point.y.toFixed(1)}" r="${inside?"2.9":"2.4"}" fill="${colour}" opacity="${inside?".95":".42"}" stroke="${inside?GD_COURSE_BUBBLE_COLOUR:"none"}" stroke-width="${inside?"1":"0"}" stroke-opacity="${inside?".55":"0"}"/>`;
     }).join("");
+    // Counts THE DRAWN DOTS, nothing else, so the reading and the picture can
+    // never drift apart - and so it agrees with what the slider recomputes from
+    // the DOM. A filtered-out shot is not a result to be contained.
     const containment=(()=>{
       if(!courseGeo)return null;
       let inside=0,total=0;
-      relativeRows.forEach(entry=>{
+      plottedRows.forEach(entry=>{
         if(entry.row?.record?.counted===false)return;
         const point=pointFor(entry);
         if(!point)return;
@@ -5712,22 +5753,28 @@
         total:containment?containment.total:0
       };
     });
-    const clubKey=[...new Set(dataRows.map(row=>row.club||"Unknown"))].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})).slice(0,6);
+    // THE KEY IS HOW A DOT SAYS WHICH CLUB HIT IT. Built from the clubs actually
+    // plotted, or supplied by the caller when it is colouring by something else
+    // (gd-app-core hands in a time-of-capture key in time mode, and the matching
+    // colourFor with it). It used to be computed here and then never emitted, so
+    // the dots had no legend at all.
+    const clubKey=plottedClubs.slice(0,6);
     const clubKeySvg=typeof opts?.keySvg==="string"
       ?opts.keySvg
-      :clubKey.map((club,i)=>`<circle cx="${26+i*48}" cy="58" r="4.2" fill="${gdStatsClubColor(club)}"/><text x="${34+i*48}" y="61" fill="rgba(255,255,255,.68)" font-size="9" font-weight="850">${gdStatsSvgText(club)}</text>`).join("");
-    // ONE BUBBLE. Emitted directly rather than through the shared layer markup so
-    // it can carry its unscaled radii - the slider rescales from those without a
-    // re-render. The empty overlay group stays: gdApplyShotBubbleDomOverlay injects
-    // a legacy ABSOLUTE-frame bubble unless it finds one, which would land at the
-    // wrong scale on this normalised chart.
+      :clubKey.map((club,i)=>`<circle cx="${26+i*48}" cy="58" r="4.2" fill="${clubColour(club)}"/><text x="${34+i*48}" y="61" fill="rgba(255,255,255,.68)" font-size="9" font-weight="850">${gdStatsSvgText(club)}</text>`).join("");
+    // ONE BUBBLE, AT 0.0. Emitted directly rather than through the shared layer
+    // markup so it can carry its unscaled radii - the slider rescales from those
+    // without a re-render. The empty overlay group stays: gdApplyShotBubbleDomOverlay
+    // injects a legacy ABSOLUTE-frame bubble unless it finds one, which would land
+    // at the wrong scale on this normalised chart.
     const courseBubbleSvg=courseGeo
-      ?`<g class="gdShotBubbleOverlayLayer gdCourseResultLayer" aria-hidden="true"><ellipse class="gdCourseResultBubble" data-base-rx="${(courseGeo.rx/Math.max(.01,courseBubbleScale)).toFixed(2)}" data-base-ry="${(courseGeo.ry/Math.max(.01,courseBubbleScale)).toFixed(2)}" data-tilt-deg="${courseGeo.tilt.toFixed(1)}" cx="${courseGeo.cx.toFixed(1)}" cy="${courseGeo.cy.toFixed(1)}" rx="${courseGeo.rx.toFixed(1)}" ry="${courseGeo.ry.toFixed(1)}"${courseGeo.tilt?` transform="rotate(${courseGeo.tilt.toFixed(1)} ${courseGeo.cx.toFixed(1)} ${courseGeo.cy.toFixed(1)})"`:""} fill="${GD_COURSE_BUBBLE_COLOUR}" fill-opacity=".13" stroke="${GD_COURSE_BUBBLE_COLOUR}" stroke-width="1.55" stroke-opacity=".84"/></g>`
+      ?`<g class="gdShotBubbleOverlayLayer gdCourseResultLayer" aria-hidden="true"><ellipse class="gdCourseResultBubble" data-base-rx="${courseGeo.baseRx.toFixed(2)}" data-base-ry="${courseGeo.baseRy.toFixed(2)}" data-tilt-deg="${courseGeo.tilt.toFixed(1)}" cx="${courseGeo.cx.toFixed(1)}" cy="${courseGeo.cy.toFixed(1)}" rx="${courseGeo.rx.toFixed(1)}" ry="${courseGeo.ry.toFixed(1)}"${courseGeo.tilt?` transform="rotate(${courseGeo.tilt.toFixed(1)} ${courseGeo.cx.toFixed(1)} ${courseGeo.cy.toFixed(1)})"`:""} fill="${GD_COURSE_BUBBLE_COLOUR}" fill-opacity=".13" stroke="${GD_COURSE_BUBBLE_COLOUR}" stroke-width="1.55" stroke-opacity=".84"/></g>`
       :`<g class="gdShotBubbleOverlayLayer" aria-hidden="true"></g>`;
     const svg=`<svg viewBox="${gdPracticeNormalisedViewBox(plot)}" role="img" aria-label="Course Data visual">
-      ${gdPracticeNormalisedBackdropSvg(plot,gdShotDataGraphTitle("Course Data"),{subtitle:"Shot endpoints relative to the bubble that was set"})}
+      ${gdPracticeNormalisedBackdropSvg(plot,gdShotDataGraphTitle("Course Data"),{subtitle:"Every club, scaled · endpoints relative to the bubble that was set"})}
       <text class="gdCourseContainmentPct" x="456" y="61" text-anchor="end" fill="${GD_COURSE_BUBBLE_COLOUR}" font-size="13" font-weight="950">${containment?`${containment.pct}% inside`:""}</text>
       <text class="gdCourseContainmentSub" x="456" y="75" text-anchor="end" fill="rgba(255,255,255,.5)" font-size="9" font-weight="800">${containment?`${containment.inside}/${containment.total} shots`:""}</text>
+      ${clubKeySvg}
       ${courseBubbleSvg}
       ${shotDots}
     </svg>`;
