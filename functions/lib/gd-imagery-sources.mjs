@@ -128,7 +128,7 @@ export const IMAGERY_SOURCES = [
       urlTemplate: "https://basemaps.linz.govt.nz/v1/tiles/{layer}/WebMercatorQuad/{z}/{x}/{y}.webp?api={key}",
       layerEnv: "LINZ_BASEMAPS_LAYER",
       defaultLayer: "aerial",
-      apiKeyEnv: "LINZ_BASEMAPS_API_KEY",
+      apiKeyEnv: ["LINZ_BASEMAPS_API_KEY", "LINZ_BASEMAPS_PUBLIC_KEY"],
       /* Urban surveys run 0.05-0.1m and rural 0.2-0.3m; z20 (~0.15m/px at NZ latitudes) is the
          last zoom carrying real detail for a rural course rather than resampled pixels. */
       maxUsefulZoom: 20,
@@ -144,7 +144,7 @@ export const IMAGERY_SOURCES = [
       urlTemplate: "https://basemaps.linz.govt.nz/v1/tiles/{layer}/WebMercatorQuad/{z}/{x}/{y}.png?pipeline=terrain-rgb&api={key}",
       layerEnv: "LINZ_ELEVATION_LAYER",
       defaultLayer: "elevation",
-      apiKeyEnv: "LINZ_BASEMAPS_API_KEY",
+      apiKeyEnv: ["LINZ_BASEMAPS_API_KEY", "LINZ_BASEMAPS_PUBLIC_KEY"],
       encoding: "terrain-rgb",
       /* Two-tier, per linz/basemaps-config: an 8m national DEM with 1m LiDAR laid over most
          populated regions. Course-wide grids are fine on either; the fine green-surround grid
@@ -474,13 +474,33 @@ function env(name, envs) {
   return String(store[name] || "");
 }
 
+/* A key may be published under more than one name. LINZ is: the live map reads
+   LINZ_BASEMAPS_PUBLIC_KEY or LINZ_BASEMAPS_API_KEY, and requiring only the
+   second here meant rotating the key under the first name left the map working
+   while every NZ capture failed as unconfigured - a split failure that looks
+   fine from the app. Accepting both names removes the trap rather than
+   documenting it. First name set wins; order is preference, not precedence. */
+function envNames(spec) {
+  if (!spec || !spec.apiKeyEnv) return [];
+  return (Array.isArray(spec.apiKeyEnv) ? spec.apiKeyEnv : [spec.apiKeyEnv]).filter(Boolean);
+}
+
+function firstEnv(names, envs) {
+  for (const name of names) {
+    const value = env(name, envs);
+    if (value) return value;
+  }
+  return "";
+}
+
 /* Fill {layer} and {key} from the environment. Returns null when a required key is absent -
    an unconfigured source is deliberately as unusable as an unlicensed one. */
 function resolveSpec(spec, envs) {
   if (!spec) return null;
   const out = Object.assign({}, spec);
-  const key = out.apiKeyEnv ? env(out.apiKeyEnv, envs) : "";
-  if (out.apiKeyEnv && !key) return null;
+  const keyNames = envNames(out);
+  const key = keyNames.length ? firstEnv(keyNames, envs) : "";
+  if (keyNames.length && !key) return null;
   out.apiKey = key;
   const layer = (out.layerEnv && env(out.layerEnv, envs)) || out.defaultLayer || "";
   /* layerRequired is for a source whose default view is a blend we may not store. Without a
@@ -499,7 +519,10 @@ function resolveSpec(spec, envs) {
 function missingConfig(spec, envs) {
   if (!spec) return [];
   const names = [];
-  if (spec.apiKeyEnv && !env(spec.apiKeyEnv, envs)) names.push(spec.apiKeyEnv);
+  const keyNames = envNames(spec);
+  /* Reported as one alternative rather than several missing things, so the
+     status line reads as the single decision it is. */
+  if (keyNames.length && !firstEnv(keyNames, envs)) names.push(keyNames.join(" or "));
   if (spec.layerRequired && !((spec.layerEnv && env(spec.layerEnv, envs)) || spec.defaultLayer)) {
     names.push(spec.layerEnv || "layer");
   }

@@ -42,6 +42,34 @@ test("a licensed source covering the course is resolved with its key filled in",
   assert.ok(!/\{ *key *\}|\{ *layer *\}/.test(source.imagery.urlTemplate), "no placeholder survives resolution");
 });
 
+test("the LINZ key is honoured under either env name it is published as", () => {
+  /* The live map reads LINZ_BASEMAPS_PUBLIC_KEY or LINZ_BASEMAPS_API_KEY; the scanner used to
+     require only the second. Rotating the key under the first name would have left the map
+     working while every NZ capture failed as unconfigured - a split failure that looks fine
+     from the app, which is the worst kind. Either name must work, for imagery AND elevation. */
+  const underPublic = mod.resolveImagerySource(PUPUKE_NZ, { env: { LINZ_BASEMAPS_PUBLIC_KEY: "public-name-key" } });
+  assert.ok(underPublic, "PUBLIC_KEY alone must configure the scanner");
+  assert.strictEqual(underPublic.key, "linz-nz");
+  assert.ok(underPublic.imagery.urlTemplate.includes("api=public-name-key"),
+    "the key from PUBLIC_KEY is substituted into the imagery template");
+
+  const dem = mod.resolveElevationSource(PUPUKE_NZ, { env: { LINZ_BASEMAPS_PUBLIC_KEY: "public-name-key" } });
+  assert.ok(dem && dem.dem && dem.dem.urlTemplate.includes("api=public-name-key"),
+    "elevation is keyed from PUBLIC_KEY too - a DEM left unconfigured ships no plays-like");
+
+  /* API_KEY stays the preferred name, so a deployment carrying both is unchanged. */
+  const both = mod.resolveImagerySource(PUPUKE_NZ, {
+    env: { LINZ_BASEMAPS_API_KEY: "api-name-key", LINZ_BASEMAPS_PUBLIC_KEY: "public-name-key" }
+  });
+  assert.ok(both.imagery.urlTemplate.includes("api=api-name-key"), "API_KEY wins when both are set");
+
+  /* And neither still refuses, naming both names so the fix is obvious from the message. */
+  assert.strictEqual(mod.resolveImagerySource(PUPUKE_NZ, { env: {} }), null,
+    "no key under any name must still refuse rather than fetch unkeyed");
+  assert.match(mod.unscannableReason(PUPUKE_NZ, { env: {} }),
+    /LINZ_BASEMAPS_API_KEY or LINZ_BASEMAPS_PUBLIC_KEY/);
+});
+
 test("a course outside every region resolves to nothing at all", () => {
   const source = mod.resolveImagerySource(ST_ANDREWS_UK, { env: NZ_ENV });
   assert.strictEqual(source, null, "no licensed source must never fall through to an unlicensed one");
