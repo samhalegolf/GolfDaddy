@@ -41,11 +41,18 @@ body.map-framed #map { inset: auto; left: 0; top: 0; transform-origin: 0 0; }
    live the SVG aim line and layup middle guide cover the same ground. */
 body.shot-active #map .holeRoute { display: none; }
 
-/* The green outline / centre dot is green-focus only. Playing down the
+/* The green outline / centre dot is green-zoom only. Playing down the
    fairway the imagery already shows the green, so drawing over it is clutter;
    zoomed in on it the outline is the useful reference again. */
 #map .holeGreen { display: none; }
 body[data-frame-stage="zoom"] #map .holeGreen { display: inline; }
+
+/* Green focus is a clean image of the green plus the placed pin — no boundary
+   outline, no centre pip, no hole corridor or tee marker carried in from the
+   overview. Last rule wins over the zoom-stage reveal above. */
+body.green-focus #map .holeGreen,
+body.green-focus #map .holeRoute,
+body.green-focus #map .holeTee { display: none; }
 
 /* Basemap credit. Lives outside #map so the frame rotation cannot carry it
    off-screen; hidden only when a published surface has replaced the imagery
@@ -257,9 +264,26 @@ body.ball-dragging #surfaceViewport { transition: none !important; }
 /* Tool rail tab + panel — ported from the old app's #gdToolRailTab /
    .rightRail (same top-right spot, same tap-to-drop-down behaviour), minus
    its poller-driven sync; a hiddenState toggle is enough here. */
-#toolRailTab { position: absolute; top: calc(env(safe-area-inset-top, 0px) + 64px); right: 12px; z-index: 620; width: 44px; height: 44px; border: 0; border-radius: 14px; padding: 0; display: grid; place-items: center; background: rgba(13, 27, 18, .82); box-shadow: 0 12px 26px rgba(0, 0, 0, .3); }
-#toolRailTab img { width: 26px; height: 26px; display: block; object-fit: contain; }
-#toolRailTab[aria-expanded="true"] { background: linear-gradient(180deg, rgba(31, 211, 109, .34), rgba(4, 12, 8, .78)); box-shadow: 0 0 0 1px rgba(31, 211, 109, .18), 0 16px 34px rgba(0, 0, 0, .34); }
+/* The supplied icon IS the button. It used to sit inside a dark rounded square
+   of its own, which read as two stacked shapes — the container competing with
+   the artwork it was holding.
+
+   The glow is a drop-shadow on the image, so it follows the icon's own alpha
+   silhouette rather than drawing a second box behind it: that is what softens
+   the outer edge and makes it read as touchable. Subtle when closed, deeper
+   and stronger when open, so the selected state is obvious without the control
+   gaining any bulk. The 44px button stays for the touch target; only the
+   painted shape shrank to the icon. */
+#toolRailTab { position: absolute; top: calc(env(safe-area-inset-top, 0px) + 64px); right: 12px; z-index: 620; width: 44px; height: 44px; border: 0; border-radius: 14px; padding: 0; display: grid; place-items: center; background: transparent; box-shadow: none; }
+/* NOTE: assets/home/tool-rail.png is itself an opaque 256x256 tile with a dark
+   rounded plate painted into it, so the container this rule drops is only half
+   of the box the report is describing. The radius below rounds and softens the
+   artwork's own edge; getting rid of the plate entirely needs a transparent
+   version of the icon, which is an asset change, not a CSS one. */
+#toolRailTab img { width: 38px; height: 38px; display: block; object-fit: contain; border-radius: 13px; filter: drop-shadow(0 0 5px rgba(31, 211, 109, .5)) drop-shadow(0 2px 6px rgba(0, 0, 0, .5)); transition: filter .18s ease; }
+#toolRailTab[aria-expanded="true"] { background: transparent; box-shadow: none; }
+#toolRailTab[aria-expanded="true"] img { filter: drop-shadow(0 0 8px rgba(31, 211, 109, .95)) drop-shadow(0 0 20px rgba(31, 211, 109, .6)) drop-shadow(0 2px 6px rgba(0, 0, 0, .5)); }
+@media (prefers-reduced-motion: reduce) { #toolRailTab img { transition: none; } }
 #toolRail { position: absolute; top: calc(env(safe-area-inset-top, 0px) + 112px); right: 12px; z-index: 615; display: flex; flex-direction: column; gap: 8px; min-width: 44px; min-height: 44px; padding: 6px; border-radius: 14px; background: rgba(3, 8, 6, .82); box-shadow: 0 18px 38px rgba(0, 0, 0, .46); }
 #toolRail.hiddenState { display: none; }
 
@@ -312,7 +336,16 @@ body.ball-dragging #surfaceViewport { transition: none !important; }
    without this the gear stretched to fill the whole 44px button and read a
    size larger than every other rail icon. */
 .railBtn img, .railBtn > svg { width: 24px; height: 24px; display: block; object-fit: contain; }
-.railBtn[aria-pressed="true"], .railBtn.active { background: linear-gradient(180deg, rgba(31, 211, 109, .34), rgba(4, 12, 8, .78)); box-shadow: 0 0 0 1px rgba(31, 211, 109, .28); }
+/* Selected reads as a glow on the icon, the same language as the tab: the
+   filled gradient plate it used to get made an already-small control bulky
+   inside an already-boxed rail. */
+.railBtn img, .railBtn > svg, .railIcon { filter: drop-shadow(0 0 4px rgba(31, 211, 109, .38)); transition: filter .18s ease; }
+.railBtn[aria-pressed="true"] img, .railBtn.active img,
+.railBtn[aria-pressed="true"] > svg, .railBtn.active > svg,
+.railBtn[aria-pressed="true"] .railIcon, .railBtn.active .railIcon {
+  filter: drop-shadow(0 0 7px rgba(31, 211, 109, .95)) drop-shadow(0 0 16px rgba(31, 211, 109, .5));
+}
+@media (prefers-reduced-motion: reduce) { .railBtn img, .railBtn > svg, .railIcon { transition: none; } }
 .railIcon { width: 24px; height: 24px; display: block; color: #f2f7f2; }
 .railIcon svg { width: 100%; height: 100%; }
 
@@ -322,6 +355,12 @@ body.ball-dragging #surfaceViewport { transition: none !important; }
 .windCompass { position: relative; width: 132px; height: 132px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, .28); background: radial-gradient(circle, rgba(255, 255, 255, .06), transparent 70%); }
 .windCompassLabel { position: absolute; inset: 0; display: grid; place-items: center; font-size: 11px; opacity: .7; text-align: center; padding: 0 20px; pointer-events: none; }
 .windPopoverActions { display: flex; gap: 12px; }
+/* Live-wind status dot. The icon shows a level whether the wind was measured
+   or dialled in by hand, and those are very different things to be playing to
+   — the dot is what tells them apart. Blue, matching the wind line. */
+#railWind { position: relative; }
+#railWind.live::after { content: ""; position: absolute; top: 5px; right: 5px; width: 7px; height: 7px; border-radius: 50%; background: #66dcff; box-shadow: 0 0 8px rgba(102, 220, 255, .9); }
+
 .windAutoStatus { font-size: 11px; opacity: .65; text-align: center; }
 .windAutoStatus.hiddenState { display: none; }
 
@@ -333,6 +372,28 @@ body.ball-dragging #surfaceViewport { transition: none !important; }
 .sheetHeader strong { font-size: 17px; }
 .sheetClose { border: 0; border-radius: 10px; padding: 8px 14px; background: #1fd36d; color: #06110b; font-size: 14px; font-weight: 700; }
 .sheetBody { overflow-y: auto; padding: 14px 16px calc(env(safe-area-inset-bottom, 0px) + 16px); display: flex; flex-direction: column; gap: 12px; }
+
+/* Pin tool. The choice popover carries the two methods as icon + label, so
+   which gesture each one wants is readable before you commit to it: the
+   crosshair calculates, the flag is picked up and dragged. */
+.pinChoice { display: flex; align-items: center; gap: 10px; width: 100%; border: 0; border-radius: 12px; padding: 10px 12px; background: rgba(255, 255, 255, .06); color: #f2f7f2; font-size: 14px; font-weight: 700; text-align: left; }
+.pinChoiceIcon { width: 26px; height: 26px; display: grid; place-items: center; color: #1fd36d; flex: 0 0 auto; }
+.pinChoiceIcon svg, .pinChoiceIcon img { width: 100%; height: 100%; display: block; object-fit: contain; }
+/* The flag is a drag source, so it says so by the cursor and by never
+   swallowing the gesture as a scroll. */
+.pinChoiceFlag { cursor: grab; }
+#pinChoiceDrag { touch-action: none; }
+
+#pinLockPanel { gap: 10px; padding: 16px 16px calc(env(safe-area-inset-bottom, 0px) + 16px); }
+#pinLockPanel h2 { font-size: 17px; margin: 0; }
+.sheetHint { font-size: 12px; opacity: .62; margin: 0; }
+/* Laid out as the green itself: back row above, front row below, left on the
+   left — so the button you press matches the picture you are looking at. */
+.pinQuadrantGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.pinQuadrantGrid button { border: 0; border-radius: 10px; padding: 14px 0; background: rgba(255, 255, 255, .08); color: #f2f7f2; font-size: 14px; font-weight: 700; }
+.pinQuadrantGrid button.active { background: #1fd36d; color: #06110b; }
+.pinLockField { font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; opacity: .55; }
+#pinLockDistance { border: 0; border-radius: 10px; padding: 12px; background: rgba(255, 255, 255, .08); color: #f2f7f2; font-size: 16px; }
 
 /* GPS Settings rows: label + sub-label on the left, a toggle whose text is
    its own current value on the right — the legacy panel's idiom kept. */

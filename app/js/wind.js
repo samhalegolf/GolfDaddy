@@ -13,6 +13,17 @@
   var FETCH_TIMEOUT_MS = 6000;
   var liveReading = null;   // last measured wind, for Course Data - see fetchLiveWind
 
+  /* Whether the wind on screen came from a live reading rather than the
+     player's own compass tap. Worth surfacing because the two look identical
+     on the icon - both just show a level - and "is this measured or did I
+     dial it in?" is the question a status dot exists to answer.
+
+     Bumping the level with the rail button keeps it: the DIRECTION is still
+     the measured one, and overriding the strength is exactly the manual
+     override live wind is meant to allow. Picking a direction by hand, or
+     clearing, drops it - at that point nothing measured is left. */
+  var liveActive = false;
+
   function engine() { return window.GDBubbleEngine || null; }
 
   /* Captures whatever the engine's wind state is right now and pushes an
@@ -22,10 +33,12 @@
     if (!app.undo) return;
     var eng = engine();
     var prev = eng && eng.windState();
+    var prevLive = liveActive;
     app.undo.push(function () {
       var e = engine();
       if (!e) return;
       if (prev) e.setWind(prev.originAngle, prev.level); else e.clearWind();
+      liveActive = prevLive;
       syncIcon();
     });
   }
@@ -49,9 +62,12 @@
     var eng = engine();
     var state = eng && eng.windState();
     btn.classList.toggle("active", !!state);
+    btn.classList.toggle("live", !!state && liveActive);
     icon.textContent = state ? String(state.level) : "";
     if (!state) icon.innerHTML = WIND_SVG;
-    btn.setAttribute("aria-label", state ? "Wind " + state.level : "Wind");
+    btn.setAttribute("aria-label", state
+      ? (liveActive ? "Live wind " + state.level : "Wind " + state.level)
+      : "Wind");
   }
 
   function openPicker() {
@@ -76,7 +92,7 @@
     var dx = event.clientX - cx, dy = event.clientY - cy;
     var angle = Math.atan2(dx, -dy);
     var eng = engine();
-    if (eng) { pushUndo(); eng.setWind(angle, 1); }
+    if (eng) { pushUndo(); eng.setWind(angle, 1); liveActive = false; }
     closePicker();
     syncIcon();
   }
@@ -89,7 +105,7 @@
     var state = eng.windState();
     if (!state) { openPicker(); return; }
     pushUndo();
-    if (state.level >= 3) { eng.clearWind(); syncIcon(); return; }
+    if (state.level >= 3) { eng.clearWind(); liveActive = false; syncIcon(); return; }
     eng.setWind(state.originAngle, state.level + 1);
     syncIcon();
   }
@@ -134,7 +150,10 @@
         capturedAt: new Date().toISOString(),
         at: { lat: pos.lat, lng: pos.lng }
       };
-      if (eng) { pushUndo(); eng.setWind(direction * Math.PI / 180, level); }
+      if (eng) { pushUndo(); eng.setWind(direction * Math.PI / 180, level); liveActive = true; }
+      /* The "Checking wind…" line has done its job; leaving it up made a
+         reading that had already landed look like it was still in flight. */
+      if (status) status.classList.add("hiddenState");
       closePicker();
       syncIcon();
     } catch (e) {
@@ -150,6 +169,8 @@
        round. Null is a real answer - "no live evidence" - and Course Data
        records it as such rather than substituting the player's setting. */
     liveReading: function () { return liveReading; },
+    /* Whether what is on the icon came from a live reading. */
+    isLive: function () { return liveActive && !!(engine() && engine().windState()); },
     /* What the player dialled in, which is intent, not evidence. */
     selection: function () {
       var eng = engine();
@@ -167,6 +188,7 @@
     if (clear) clear.addEventListener("click", function () {
       var eng = engine();
       if (eng && eng.windState()) { pushUndo(); eng.clearWind(); }
+      liveActive = false;
       closePicker();
       syncIcon();
     });

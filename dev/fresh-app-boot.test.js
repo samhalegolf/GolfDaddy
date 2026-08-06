@@ -720,8 +720,9 @@ async function bootCheck() {
       shotRow: !document.getElementById("shotRow").classList.contains("hiddenState"),
       distBarPaused: document.getElementById("distanceBar").classList.contains("hiddenState"),
       greenRing: !document.getElementById("greenRing").classList.contains("hiddenState"),
-      /* The green's outline is green-focus only: down the fairway the imagery
-         already shows the green, so drawing over it is clutter. */
+      /* The green's outline is green-ZOOM only, and green focus drops even
+         that: down the fairway the imagery already shows the green, and on it
+         the focus view is meant to be clean. */
       greenOutline: (() => {
         const g = document.querySelector("#map .holeGreen");
         return g ? getComputedStyle(g).display !== "none" : false;
@@ -1044,12 +1045,39 @@ async function bootCheck() {
     hit.dispatchEvent(new PointerEvent("pointerup", { pointerId: 9, clientX: cx, clientY: cy - 48, bubbles: true }));
     await new Promise((resolve) => setTimeout(resolve, 100));
     const after = app.shot.active().target;
+    const reframedAfter = img.style.transform !== frameBefore;
+
+    /* The edge exception: a bubble dragged into the edge band is the one thing
+       allowed to move a parked camera, because the player is asking for map
+       that is not on screen yet. */
+    const frameAfterInterior = img.style.transform;
+    const edgeHit = document.getElementById("aimBubble");
+    const edgeRect = edgeHit.getBoundingClientRect();
+    const sx = edgeRect.left + edgeRect.width / 2, sy = edgeRect.top + edgeRect.height / 2;
+    edgeHit.dispatchEvent(new PointerEvent("pointerdown", { pointerId: 11, clientX: sx, clientY: sy, bubbles: true }));
+    /* Dragged straight back toward the player - a layup, which the engine
+       lets the cluster follow all the way, unlike a lateral drag that the bag
+       roof clamps long before the screen edge. */
+    const edgeY = window.innerHeight - 8;
+    for (let i = 1; i <= 8; i++) {
+      const y = sy + (edgeY - sy) * (i / 8);
+      edgeHit.dispatchEvent(new PointerEvent("pointermove", { pointerId: 11, clientX: sx, clientY: y, bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    const edgePanned = img.style.transform !== frameAfterInterior;
+    edgeHit.dispatchEvent(new PointerEvent("pointerup", { pointerId: 11, clientX: sx, clientY: edgeY, bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const frameAfterEdge = img.style.transform;
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
     return {
       hitSized: rect.width >= 44 && rect.height >= 44,
       aimMovedM: app.distance.haversineMeters(before, after),
       midDragFrameHeld, tiltHeldMidDrag,
       draggingCleared: !document.body.classList.contains("bubble-dragging"),
-      reframedAfter: img.style.transform !== frameBefore
+      reframedAfter,
+      edgePanned,
+      stationaryAfterEdge: img.style.transform === frameAfterEdge
     };
   });
 
@@ -1288,7 +1316,8 @@ async function bootCheck() {
   assert.ok(stages.aimed.shotRowShown, "aiming off the green shows the shot row");
   assert.ok(stages.aimed.shotDist > 80 && stages.aimed.shotDist < 140,
     "shot distance must be the start→target number, got " + stages.aimed.shotDist);
-  assert.ok(stages.greenFocus.ringShown, "green focus shows the green ring");
+  assert.ok(!stages.greenFocus.ringShown,
+    "green focus is a clean image of the green plus the pin - no centre ring");
   assert.ok(stages.greenFocus.confirmVisible, "green focus offers the Shot End confirm");
   assert.ok(stages.greenFocus.holeOutGone,
     "Hole Out is collapsed into Shot End - there must be no second confirm button");
@@ -1327,7 +1356,12 @@ async function bootCheck() {
   assert.ok(bubbleDrag.aimMovedM > 5, "dragging the bubble moves the aim, got " + bubbleDrag.aimMovedM.toFixed(1) + "m");
   assert.ok(bubbleDrag.midDragFrameHeld, "the camera holds mid-drag");
   assert.ok(bubbleDrag.draggingCleared, "release clears the dragging state");
-  assert.ok(bubbleDrag.reframedAfter, "release re-frames start→target");
+  assert.ok(!bubbleDrag.reframedAfter,
+    "a locked shot view is stationary: ordinary bubble movement must not re-frame, on release or during");
+  assert.ok(bubbleDrag.edgePanned,
+    "dragging the bubble into the edge band pans the camera - the one exception to a parked view");
+  assert.ok(bubbleDrag.stationaryAfterEdge,
+    "the camera returns to fully stationary the moment the edge interaction ends");
   assert.ok(holePicker.opened.panelShown, "tapping the hole number opens the picker panel");
   assert.deepStrictEqual(holePicker.opened.buttons, ["1", "2", "3"], "the picker lists every hole the package has geometry for");
   assert.strictEqual(holePicker.opened.activeButton, "1", "the current hole is marked active in the picker");
@@ -1479,13 +1513,14 @@ async function bootCheck() {
     "the approach must name a club, got " + JSON.stringify(approachCard.club));
   assert.ok(approachCard.dist > 80 && approachCard.dist < 180,
     "the approach distance must be the real number, got " + approachCard.dist);
-  assert.ok(greenFocus.onGreen.greenRing, "the green ring is not an aiming instrument and stays");
+  assert.ok(!greenFocus.onGreen.greenRing,
+    "green focus drops the centre ring - it is a clean image of the green plus the pin");
   assert.ok(!greenFocus.beforeArrival.greenOutline,
     "normal play must not draw the green outline over the imagery");
   assert.ok(!greenFocus.beforeArrival.greenReference,
     "normal play must not draw the SVG green reference either");
-  assert.ok(greenFocus.onGreen.greenOutline,
-    "green focus brings the green outline back, where it is the useful reference");
+  assert.ok(!greenFocus.onGreen.greenOutline,
+    "green focus drops the boundary outline too - nothing drawn over the green but the pin");
   assert.strictEqual(greenFocus.atNextTee.aimPaths, 0,
     "the aim overlays stay cleared while green focus is deferred");
   assert.strictEqual(greenFocus.atNextTee.stage, "zoom",

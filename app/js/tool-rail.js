@@ -24,7 +24,24 @@
     if (tab) tab.setAttribute("aria-expanded", "false");
   }
 
-  app.toolRail = { toggle: toggle, close: close };
+  function openPinChoice() {
+    var el = document.getElementById("pinChoicePopover");
+    if (el) el.classList.remove("hiddenState");
+  }
+
+  function closePinChoice() {
+    var el = document.getElementById("pinChoicePopover");
+    if (el) el.classList.add("hiddenState");
+  }
+
+  function closePinLock() {
+    var panel = document.getElementById("pinLockPanel");
+    if (panel) panel.classList.add("hiddenState");
+    var status = document.getElementById("pinLockStatus");
+    if (status) status.classList.add("hiddenState");
+  }
+
+  app.toolRail = { toggle: toggle, close: close, openPinChoice: openPinChoice };
 
   document.addEventListener("DOMContentLoaded", function () {
     var tab = document.getElementById("toolRailTab");
@@ -36,54 +53,124 @@
       if (app.bag) app.bag.open();
     });
 
-    /* Pin has two placement methods, same split as the legacy flag tool:
-       a short tap arms placement (the next map/surface tap places it, wired
-       in play.js), or press-and-drag the icon itself straight onto the map/
-       surface and release to drop it there immediately — a ghost flag tracks
-       the finger for the drag. Distinguished by movement past a small
-       threshold, exactly like the legacy gdBindFlagPointerHandlers. */
-    var pinBtn = document.getElementById("railPin");
+    /* The pin tool's main tap only ever REVEALS its two placement methods —
+       the crosshair (calculated Pin Lock) and the flag (drag and place). It
+       used to arm placement directly, so the tap that opened the tool could be
+       read as the placing tap and drop a pin under the rail.
+
+       The flag is a drag SOURCE wherever it appears: press and drag it onto
+       the map/surface and release to drop the pin there, with a ghost flag
+       tracking the finger; a plain tap on it arms the next map tap instead.
+       Distinguished by movement past a small threshold, exactly like the
+       legacy gdBindFlagPointerHandlers. Wired onto both the rail icon and the
+       flag in the choice popover so the gesture means the same in both. */
     var pinGhost = document.getElementById("pinGhost");
-    if (pinBtn && app.pin) {
-      var pinDown = false, pinDragged = false, pinStartX = 0, pinStartY = 0;
-      pinBtn.addEventListener("pointerdown", function (e) {
-        pinDown = true;
-        pinDragged = false;
-        pinStartX = e.clientX;
-        pinStartY = e.clientY;
-        try { pinBtn.setPointerCapture(e.pointerId); } catch (err) {}
+
+    function wireFlagSource(btn, onTap) {
+      if (!btn || !app.pin) return;
+      var down = false, dragged = false, startX = 0, startY = 0;
+      btn.addEventListener("pointerdown", function (e) {
+        down = true;
+        dragged = false;
+        startX = e.clientX;
+        startY = e.clientY;
+        try { btn.setPointerCapture(e.pointerId); } catch (err) {}
       });
-      pinBtn.addEventListener("pointermove", function (e) {
-        if (!pinDown) return;
-        if (!pinDragged && Math.hypot(e.clientX - pinStartX, e.clientY - pinStartY) > 8) {
-          pinDragged = true;
+      btn.addEventListener("pointermove", function (e) {
+        if (!down) return;
+        if (!dragged && Math.hypot(e.clientX - startX, e.clientY - startY) > 8) {
+          dragged = true;
           if (pinGhost) pinGhost.classList.remove("hiddenState");
         }
-        if (pinDragged && pinGhost) {
+        if (dragged && pinGhost) {
           pinGhost.style.left = e.clientX + "px";
           pinGhost.style.top = e.clientY + "px";
         }
       });
-      pinBtn.addEventListener("pointerup", function (e) {
-        if (!pinDown) return;
-        pinDown = false;
+      btn.addEventListener("pointerup", function (e) {
+        if (!down) return;
+        down = false;
         if (pinGhost) pinGhost.classList.add("hiddenState");
-        if (pinDragged) {
+        if (dragged) {
           app.pin.disarm();
           var ll = app.play && app.play.latLngAt(e.clientX, e.clientY);
           if (ll) app.pin.set(ll);
           close();
-        } else {
-          close();
-          app.pin.togglePlacement();
+          closePinChoice();
+          return;
         }
+        onTap();
       });
-      pinBtn.addEventListener("pointercancel", function () {
-        pinDown = false;
-        pinDragged = false;
+      btn.addEventListener("pointercancel", function () {
+        down = false;
+        dragged = false;
         if (pinGhost) pinGhost.classList.add("hiddenState");
       });
     }
+
+    wireFlagSource(document.getElementById("railPin"), function () {
+      close();
+      if (app.pin) app.pin.disarm();
+      openPinChoice();
+    });
+
+    /* Flag, tapped rather than dragged: arm the next map/surface tap. */
+    wireFlagSource(document.getElementById("pinChoiceDrag"), function () {
+      closePinChoice();
+      if (app.pin) app.pin.arm();
+    });
+
+    /* Crosshair: the calculated route. */
+    var pinLockBtn = document.getElementById("pinChoiceLock");
+    if (pinLockBtn) pinLockBtn.addEventListener("click", function () {
+      closePinChoice();
+      if (app.pin) app.pin.disarm();
+      var panel = document.getElementById("pinLockPanel");
+      if (panel) panel.classList.remove("hiddenState");
+    });
+
+    /* Quadrant is a single choice, so selecting one clears the rest. */
+    var quadrantGrid = document.getElementById("pinQuadrantGrid");
+    if (quadrantGrid) quadrantGrid.addEventListener("click", function (e) {
+      var btn = e.target && e.target.closest ? e.target.closest("[data-quadrant]") : null;
+      if (!btn || !quadrantGrid.contains(btn)) return;
+      Array.prototype.forEach.call(quadrantGrid.querySelectorAll("[data-quadrant]"), function (b) {
+        b.classList.toggle("active", b === btn);
+      });
+    });
+
+    var pinLockCancel = document.getElementById("pinLockCancel");
+    if (pinLockCancel) pinLockCancel.addEventListener("click", closePinLock);
+
+    var pinLockPlace = document.getElementById("pinLockPlace");
+    if (pinLockPlace) pinLockPlace.addEventListener("click", function () {
+      var status = document.getElementById("pinLockStatus");
+      function fail(message) {
+        if (!status) return;
+        status.textContent = message;
+        status.classList.remove("hiddenState");
+      }
+      var chosen = quadrantGrid && quadrantGrid.querySelector("[data-quadrant].active");
+      if (!chosen) { fail("Pick the quadrant the flag is in"); return; }
+      var input = document.getElementById("pinLockDistance");
+      var distance = input ? Number(input.value) : NaN;
+      var hole = app.play && app.play.holeGeometry ? app.play.holeGeometry() : null;
+      var position = app.position && app.position.current();
+      /* Named failures rather than a pin dropped somewhere plausible: without
+         a position or a green there is nothing to calculate FROM. */
+      if (!position) { fail("No position yet - place yourself first"); return; }
+      if (!hole || !hole.green) { fail("This hole has no mapped green"); return; }
+      var placed = app.pin.lockedPin({
+        position: position,
+        green: hole.green,
+        greenShape: hole.greenShape,
+        quadrant: chosen.dataset.quadrant,
+        distanceM: distance
+      });
+      if (!placed) { fail("Could not work out the pin from that"); return; }
+      app.pin.set(placed);
+      closePinLock();
+    });
 
     var gpsPinBtn = document.getElementById("railGpsPin");
     if (gpsPinBtn) gpsPinBtn.addEventListener("click", function () {

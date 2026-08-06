@@ -142,6 +142,44 @@
 
   <div id="pinGhost" class="hiddenState"><img src="../assets/icons/flag.svg" alt=""></div>
 
+  <!-- The pin tool reveals its two placement methods rather than placing
+       anything itself. Crosshair = calculated Pin Lock; flag = pick it up and
+       drag it onto the green. -->
+  <div id="pinChoicePopover" class="popover hiddenState">
+    <button id="pinChoiceLock" type="button" class="pinChoice" aria-label="Pin Lock">
+      <span class="pinChoiceIcon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+          <circle cx="12" cy="12" r="7"/><path d="M12 1v5M12 18v5M1 12h5M18 12h5" stroke-linecap="round"/>
+        </svg>
+      </span>
+      <span class="pinChoiceLabel">Pin Lock</span>
+    </button>
+    <button id="pinChoiceDrag" type="button" class="pinChoice" aria-label="Drag and place">
+      <span class="pinChoiceIcon pinChoiceFlag" aria-hidden="true"><img src="../assets/icons/flag.svg" alt=""></span>
+      <span class="pinChoiceLabel">Drag &amp; place</span>
+    </button>
+  </div>
+
+  <!-- Pin Lock: the quadrant of the green the flag is in, plus what the
+       rangefinder read. -->
+  <div id="pinLockPanel" class="sheet hiddenState">
+    <h2>Pin Lock</h2>
+    <p class="sheetHint">Which quarter of the green is the flag in?</p>
+    <div id="pinQuadrantGrid" class="pinQuadrantGrid">
+      <button type="button" data-quadrant="back-left">Back left</button>
+      <button type="button" data-quadrant="back-right">Back right</button>
+      <button type="button" data-quadrant="front-left">Front left</button>
+      <button type="button" data-quadrant="front-right">Front right</button>
+    </div>
+    <label class="pinLockField" for="pinLockDistance">Rangefinder distance</label>
+    <input id="pinLockDistance" type="number" inputmode="decimal" min="1" max="400" step="1" placeholder="e.g. 148">
+    <p id="pinLockStatus" class="windAutoStatus hiddenState"></p>
+    <div class="windPopoverActions">
+      <button id="pinLockPlace" type="button" class="linkButton">Place pin</button>
+      <button id="pinLockCancel" type="button" class="linkButton">Cancel</button>
+    </div>
+  </div>
+
   <div id="windPopover" class="popover hiddenState">
     <div id="windCompass" class="windCompass">
       <div class="windCompassLabel">Tap wind origin</div>

@@ -42,5 +42,51 @@
     };
   }
 
-  return { haversineMeters: haversineMeters, greenDistances: greenDistances };
+  function toDeg(rad) { return (Number(rad) * 180) / Math.PI; }
+
+  /* Initial bearing a→b, radians clockwise from north. Null if either end is
+     unusable, so callers get a real answer rather than a plausible zero. */
+  function bearingRad(a, b) {
+    if (!a || !b) return null;
+    var lat1 = toRad(a.lat), lat2 = toRad(b.lat);
+    var dLng = toRad(Number(b.lng) - Number(a.lng));
+    if (![lat1, lat2, dLng].every(Number.isFinite)) return null;
+    var y = Math.sin(dLng) * Math.cos(lat2);
+    var x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+    return Math.atan2(y, x);
+  }
+
+  /* Destination `metres` from `from` along `bearing` (radians clockwise from
+     north). The inverse of bearingRad, on the same sphere haversineMeters
+     uses, so a round trip through the two closes to within a millimetre. */
+  function project(from, bearing, metres) {
+    if (!from) return null;
+    var lat1 = toRad(from.lat), lng1 = toRad(from.lng);
+    var d = Number(metres) / EARTH_RADIUS_M, brg = Number(bearing);
+    if (![lat1, lng1, d, brg].every(Number.isFinite)) return null;
+    var lat2 = Math.asin(Math.sin(lat1) * Math.cos(d) + Math.cos(lat1) * Math.sin(d) * Math.cos(brg));
+    var lng2 = lng1 + Math.atan2(Math.sin(brg) * Math.sin(d) * Math.cos(lat1),
+      Math.cos(d) - Math.sin(lat1) * Math.sin(lat2));
+    return { lat: toDeg(lat2), lng: ((toDeg(lng2) + 540) % 360) - 180 };
+  }
+
+  /* Rough radius of a green in metres: the mean distance from its centre to
+     its outline. Null with no usable shape — the caller decides what a green
+     of unknown size is worth, rather than getting a made-up number. */
+  function greenRadiusMeters(green) {
+    var centre = green && green.green;
+    var shape = (green && Array.isArray(green.greenShape) ? green.greenShape : [])
+      .map(function (p) { return haversineMeters(centre, p); })
+      .filter(function (d) { return Number.isFinite(d) && d > 0; });
+    if (!shape.length) return null;
+    return shape.reduce(function (sum, d) { return sum + d; }, 0) / shape.length;
+  }
+
+  return {
+    haversineMeters: haversineMeters,
+    greenDistances: greenDistances,
+    bearingRad: bearingRad,
+    project: project,
+    greenRadiusMeters: greenRadiusMeters
+  };
 });

@@ -42,10 +42,14 @@
   function exitToMainSite() {
     window.location.href = "/";
   }
-  /* During play, Back undoes the most recent wind/pin change before it
-     leaves the screen - only once there is nothing left to undo does it
-     fall through to leaving GPS play the way it always has. */
+  /* During play, Back peels one layer at a time. Green focus goes first: it is
+     a layer over the hole rather than a place, so closing it returns to the
+     same hole overview with the shot, standing location, club, bubble and pin
+     all intact. Then the most recent wind/pin change is undone - only once
+     there is nothing left to close or undo does Back fall through to leaving
+     GPS play the way it always has. */
   function exitBack() {
+    if (app.play && app.play.exitGreenFocus && app.play.exitGreenFocus()) return;
     if (app.undo && app.undo.pop()) return;
     if (window.history.length > 1) window.history.back();
     else exitToMainSite();

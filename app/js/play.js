@@ -119,6 +119,7 @@
         if (!tapped) return;
         if (app.pin && app.pin.armed()) { app.pin.set(tapped); app.pin.disarm(); return; }
         if (!tapCanPlacePlayer()) return;
+        consumeStandingTap();
         app.position.set(tapped, "tap");
       });
     }
@@ -311,7 +312,7 @@
          reads as a rendering fault. Hidden by CSS on body.shot-active rather
          than rebuilt, so it comes straight back between shots. */
       if (line.length >= 2) layers.push(L.polyline(line, { color: "#ffffff", weight: 2, dashArray: "6 8", opacity: 0.7, className: "holeRoute" }));
-      if (rec.tee) layers.push(L.circleMarker([rec.tee.lat, rec.tee.lng], { radius: 5, color: "#ffffff", weight: 2, fillColor: "#0d1b12", fillOpacity: 0.9 }));
+      if (rec.tee) layers.push(L.circleMarker([rec.tee.lat, rec.tee.lng], { radius: 5, color: "#ffffff", weight: 2, fillColor: "#0d1b12", fillOpacity: 0.9, className: "holeTee" }));
       objectLayer = L.layerGroup(layers).addTo(map);
     }
     /* The coarse view above has just moved the camera out from under whatever
@@ -341,6 +342,60 @@
     if (map) map.invalidateSize({ animate: false });
   }
 
+  /* One owner for "may the camera move right now?", asked by both the live
+     map and the published surface so they cannot drift apart.
+
+     A locked shot view is meant to be genuinely stationary — the bubble moves
+     over a fixed picture of the hole. But the lock frame is solved to hold
+     start→target, so re-solving it after every aim change made the camera
+     chase the bubble and re-frame again on release. Once a lock frame is
+     applied WITH a target it parks, and only an explicit change re-solves it:
+     a different stage, a new hole, an unlock, or the edge-pan exception.
+
+     Dragging still holds — during the drag and after it. A view the player
+     locked holds. A GPS fix never re-anchors a frame they are playing to. */
+  var cameraParked = false;
+
+  var EDGE_PAN_MARGIN_PX = 72;   // the band that counts as "at the edge"
+
+  /* The one thing allowed to move a parked camera: the bubble dragged all the
+     way to the edge of the screen, where the player is asking for map that
+     isn't on it yet. While the drag sits in the edge band the stage frame is
+     allowed to re-solve, which pans the view along with the target; the moment
+     it comes back to the interior the camera parks again. Expressed as
+     "release the hold" rather than a separate pan animation, so there is still
+     exactly one thing deciding where the camera points.
+
+     Measured on the FINGER, not the painted cluster. The cluster centre sits
+     well off the aim (aim offset, forward bias, bag roof) and the roof clamps
+     it hard, so it can be hundreds of pixels short of the edge while the drag
+     is already against the bezel — the gesture would simply never fire. */
+  var bubbleDragPoint = null;   // client coords of the live bubble drag
+
+  function bubbleAtEdge() {
+    if (!bubbleDragPoint) return false;
+    return bubbleDragPoint.x <= EDGE_PAN_MARGIN_PX
+      || bubbleDragPoint.y <= EDGE_PAN_MARGIN_PX
+      || bubbleDragPoint.x >= window.innerWidth - EDGE_PAN_MARGIN_PX
+      || bubbleDragPoint.y >= window.innerHeight - EDGE_PAN_MARGIN_PX;
+  }
+
+  function cameraHolds(stage, pos, applied) {
+    if (!applied || stage !== frameStage) return false;
+    if (document.body.classList.contains("bubble-dragging")) return !bubbleAtEdge();
+    if (document.body.classList.contains("ball-dragging")) return true;
+    if (viewLocked) return true;
+    if (pos && pos.source === "gps") return true;
+    return cameraParked;
+  }
+
+  /* Called after a frame is genuinely applied. Parking waits for the shot to
+     have a target: park before that and the lock-in frame, solved with nothing
+     to aim at, would be the one the whole shot is played against. */
+  function parkCamera(stage, act) {
+    cameraParked = stage === "lock" && !!(act && act.target);
+  }
+
   /* The live map's stage camera — the same guide-box contract the published
      surface frames against (play-surface.js stageFrame), solved in
      world-mercator pixels instead of image pixels.
@@ -356,9 +411,7 @@
   function applyLiveFrame(pos) {
     if (!map) return;
     var stage = desiredStage(pos);
-    var holdFrame = mapSide !== null && stage === frameStage
-      && (document.body.classList.contains("bubble-dragging") || document.body.classList.contains("ball-dragging")
-        || viewLocked || (pos && pos.source === "gps"));
+    var holdFrame = cameraHolds(stage, pos, mapSide !== null);
     setStage(stage);
     if (holdFrame) return;
     var view = { width: window.innerWidth, height: window.innerHeight };
@@ -433,6 +486,7 @@
     el.style.transform = "matrix(" + liveFrame.a + "," + liveFrame.b + "," + (-liveFrame.b) + ","
       + liveFrame.a + "," + liveFrame.tx + "," + liveFrame.ty + ")";
     mapSide = side;   // only now is a frame genuinely applied
+    parkCamera(stage, act);
   }
 
   /* Club codes read tight in the shot row (the same 2-3 char shorthand the
@@ -488,7 +542,7 @@
        row now shows whenever there is a shot to play. */
     var shotRow = document.getElementById("shotRow");
     if (!shotRow) return;
-    var act = aimingShot();
+    var act = aimingShot(fix);
     var show = false;
     if (act && act.target) {
       var landing = (model && model.center) || act.target;
@@ -537,6 +591,13 @@
     /* Before the camera: entering green focus changes the stage, and the
        stage is what applySurfaceFrame/applyLiveFrame frame against. */
     updateGreenFocus(pos);
+    /* Green focus is a clean image of the green plus the pin, so the hole
+       overview's own furniture — green outline, route corridor, tee marker,
+       centre ring — comes off. Published as a body class because the stage
+       alone no longer answers it: Back can dismiss green focus while the
+       player is still standing inside the zoom radius, and there the outline
+       is the useful reference again. */
+    document.body.classList.toggle("green-focus", !!greenFocus);
     var img = document.getElementById("surfaceImage");
     var published = document.body.classList.contains("surface-published");
     if (published && img && img.dataset.playSurface) {
@@ -575,7 +636,7 @@
     var act = app.shot && app.shot.active();
     document.body.classList.toggle("shot-active", !!act);
     /* Aiming only — green focus has a shot but nothing to aim (aimingShot). */
-    var model = aimingShot() && window.GDBubbleEngine ? window.GDBubbleEngine.renderModel() : null;
+    var model = aimingShot(pos) && window.GDBubbleEngine ? window.GDBubbleEngine.renderModel() : null;
     renderShotOverlays(pos, model, proj);
     renderDistances(pos, model);
     renderPin(pos, proj);
@@ -611,7 +672,7 @@
      presentation is up. */
   function renderShotOverlays(pos, model, proj) {
     function project(pt) { return pt && proj ? proj.toScreen(pt) : null; }
-    var act = aimingShot();
+    var act = aimingShot(pos);
     /* The engine's cluster rings, computed in lat/lng, projected here (the
        model itself came from renderPosition; project() no-ops without a
        published surface, so rings only draw when one exists). The drag
@@ -747,7 +808,10 @@
     var ring = document.getElementById("greenRing");
     if (ring) {
       var rec = current.rec || {};
-      var greenAt = frameStage === "zoom" ? project(rec.green) : null;
+      /* Not in green focus: the centre ring is one of the overlays the clean
+         green image is supposed to be free of. It stays for the plain green
+         zoom, which is the same camera without the ball workflow. */
+      var greenAt = (frameStage === "zoom" && !greenFocus) ? project(rec.green) : null;
       ring.classList.toggle("hiddenState", !greenAt);
       if (greenAt) { ring.style.left = greenAt.left + "px"; ring.style.top = greenAt.top + "px"; }
     }
@@ -846,6 +910,9 @@
     var bubbleDragOffset = null;   // grab offset: aim screen point − finger, held for the drag
     function endBubbleDrag() {
       bubbleDragOffset = null;
+      /* Cleared before the final render: the edge interaction is over, so the
+         camera must be stationary again from this pass on, not one pass later. */
+      bubbleDragPoint = null;
       if (!document.body.classList.contains("bubble-dragging")) return;
       document.body.classList.remove("bubble-dragging");
       renderPosition(app.position.current());
@@ -871,12 +938,14 @@
            dragging still works — a capture failure must not kill the drag. */
         try { bubble.setPointerCapture(e.pointerId); } catch (err) {}
         document.body.classList.add("bubble-dragging");
+        bubbleDragPoint = { x: e.clientX, y: e.clientY };
         e.preventDefault();
       });
       bubble.addEventListener("pointermove", function (e) {
         if (!document.body.classList.contains("bubble-dragging") || !bubbleDragOffset) return;
         var proj = projector();
         if (!proj) return;
+        bubbleDragPoint = { x: e.clientX, y: e.clientY };
         var at = unTilt(e.clientX, e.clientY);
         var ll = proj.toLatLng({ left: at.left + bubbleDragOffset.x, top: at.top + bubbleDragOffset.y });
         if (ll) app.shot.aim(ll);
@@ -1004,6 +1073,7 @@
         shotLocked = false;
         placement = null;
         startPillDismissed = false;
+        standingTapArmed = false;
         app.position.clear();
         renderPosition(null);
         return;
@@ -1035,6 +1105,7 @@
     if (standingHere) standingHere.addEventListener("click", function () {
       placement = "standing";
       startPillDismissed = true;
+      standingTapArmed = true;   // one tap, consumed on use
       renderPosition(app.position.current());
     });
     /* The provenance chip toggles the full metadata panel. */
@@ -1073,6 +1144,7 @@
         if (tapped) {
           if (app.pin && app.pin.armed()) { app.pin.set(tapped); app.pin.disarm(); return; }
           if (!tapCanPlacePlayer()) return;
+          consumeStandingTap();
           app.position.set(tapped, "tap");
         }
       } catch (err) {}
@@ -1120,10 +1192,27 @@
      explicit "Standing Here", which IS the player choosing to place
      themselves. Placing the pin is unaffected; that is a real per-day fact
      no package can carry. */
+  /* "Standing Here" is a SINGLE-USE action: pressing it arms one tap, and that
+     tap consumes it. Leaving it armed for the rest of the hole is what let an
+     ordinary tap — including the click that ends a bubble drag — silently
+     re-place the player mid-approach and, within 40m of the green, open green
+     focus off the back of it. Re-placing is deliberate: Unlock Shot brings the
+     start pill back, and Standing Here arms one more tap.
+
+     The unmapped-hole path below is untouched. There, tapping is the only way
+     to say anything at all, and with no green in the package green focus can
+     never open — so there is nothing to protect against. */
+  var standingTapArmed = false;
+
   function tapCanPlacePlayer() {
-    if (placement === "standing") return true;
+    if (placement === "standing") return standingTapArmed;
     if (placement === "tee") return false;
     return !(current.rec && current.rec.green);
+  }
+
+  /* Called by both tap paths once a tap has actually placed the player. */
+  function consumeStandingTap() {
+    standingTapArmed = false;
   }
 
   var ZOOM_GREEN_M = 40;   // inside this of the green centre → green focus
@@ -1148,6 +1237,13 @@
      "parked" state: no meaningful map anchor, so the ball waits at a fixed
      pickup point to be dragged onto the green. */
   var greenFocus = null;   // null | { ball: {lat,lng}|null, placed: bool }
+
+  /* Back closes green focus, which is the one way out of it that does NOT end
+     the shot — so proximity must not simply re-open it on the very next render
+     while the player is still standing on the green. Dismissal lasts as long as
+     they stay inside the radius and re-arms when they leave it, so walking up
+     to the green again still opens it on its own. */
+  var greenFocusDismissed = false;
 
   /* Is a shot locked in? Locking is what starts a shot and what closes the
      previous one — the course data only ever needs the last lock-in joined to
@@ -1193,7 +1289,8 @@
   function updateGreenFocus(pos) {
     var away = metresFromGreen(pos);
     if (!greenFocus) {
-      if (away === null || away > ZOOM_GREEN_M) return;
+      if (away === null || away > ZOOM_GREEN_M) { greenFocusDismissed = false; return; }
+      if (greenFocusDismissed) return;
       greenFocus = { ball: pos ? { lat: pos.lat, lng: pos.lng } : null, placed: false };
       return;
     }
@@ -1203,6 +1300,21 @@
     if (!greenFocus.placed && pos && away !== null && away <= ZOOM_GREEN_M) {
       greenFocus.ball = { lat: pos.lat, lng: pos.lng };
     }
+  }
+
+  /* Close green focus without ending the shot — the Back gesture. Green focus
+     is a layer over the hole, not a place, so leaving it restores the hole
+     overview and touches nothing else: position, standing location, club,
+     bubble, pin and the in-flight shot all stay exactly as they were. The
+     camera follows from desiredStage on the next render.
+
+     This is the third way out, alongside Shot End and a hole change. */
+  function exitGreenFocus() {
+    if (!greenFocus) return false;
+    greenFocus = null;
+    greenFocusDismissed = true;
+    renderPosition(app.position.current());
+    return true;
   }
 
   /* Where the ball says the shot finished — the placed/tracked point, or the
@@ -1271,8 +1383,18 @@
      layup context, the drag hit and the shot row — hangs off this rather
      than off app.shot.active(). The green ring, the ball, the pin and the
      front/back distances are not aiming instruments and stay. */
-  function aimingShot() {
+  /* An aiming shot needs somewhere to aim FROM. With no position placed, the
+     start pill owns the screen — the player has not said whether they are on
+     the tee or standing somewhere — and there is no shot to plan yet.
+
+     Drawing the cluster anyway is what put a bubble on the pre-tee screen, and
+     why it appeared with no aim line: the line is drawn player→target and
+     silently skipped itself for want of a player, while the rings had no such
+     check. One gate for both, so the bubble, the aim line, the wind drift line
+     and the layup guides enter and leave together. */
+  function aimingShot(pos) {
     if (greenFocus) return null;
+    if (!pos) return null;
     return (app.shot && app.shot.active()) || null;
   }
 
@@ -1334,9 +1456,7 @@
     var img = document.getElementById("surfaceImage");
     if (!img || !meta) return;
     var stage = desiredStage(pos);
-    var holdFrame = activeFrame && stage === frameStage
-      && (document.body.classList.contains("bubble-dragging") || document.body.classList.contains("ball-dragging")
-        || viewLocked || (pos && pos.source === "gps"));
+    var holdFrame = cameraHolds(stage, pos, !!activeFrame);
     setStage(stage);
     if (holdFrame) return;
     var view = { width: window.innerWidth, height: window.innerHeight };
@@ -1369,6 +1489,7 @@
       img.style.width = ""; img.style.height = "";
       img.style.transform = ""; img.style.transformOrigin = "";
     }
+    parkCamera(frameStage, act);
   }
 
   function renderProvenance() {
@@ -1463,6 +1584,10 @@
   }
 
   app.play = {
+    /* Back's first stop while a round is up: close green focus if it is open,
+       leaving the hole and the shot intact. Answers false when there was
+       nothing to close, so Back falls through to its next meaning. */
+    exitGreenFocus: exitGreenFocus,
     /* centre: {lat,lng} from the library row — the view when the package has no
        geometry for a hole yet, so an unmapped course still opens on itself. */
     /* centre: {lat,lng} from the library row — the view when the package has no
@@ -1515,7 +1640,9 @@
          goes with it: Next Hole is the other way out of it, alongside the
          Shot End that confirms the ball. */
       placement = null;
+      standingTapArmed = false;
       greenFocus = null;
+      greenFocusDismissed = false;
       shotLocked = false;   // a new hole always opens unlocked, at pre-frame
       /* Drop the held frame so the new hole solves its own. Without this a
          solve that gets skipped — the frame held under a GPS fix, or the map
@@ -1523,6 +1650,7 @@
          every projection quietly answers against it. */
       activeFrame = null;
       mapSide = null;
+      cameraParked = false;
       liveFrame = IDENTITY_FRAME;
       renderPosition(null);
       if (app.gps) maybeAdoptGpsFix(app.gps.lastFix());
@@ -1548,8 +1676,11 @@
       transitionToken += 1;
       liveAtCourse = false;
       placement = null;
+      standingTapArmed = false;
       greenFocus = null;
+      greenFocusDismissed = false;
       shotLocked = false;
+      cameraParked = false;
       setViewLocked(false);
       if (app.undo) app.undo.clear();
       if (app.gps) app.gps.stop();
@@ -1559,11 +1690,21 @@
       clearLiveFrame();
       frameStage = "hole";
       delete document.body.dataset.frameStage;
-      document.body.classList.remove("tilt-lock");
+      document.body.classList.remove("tilt-lock", "green-focus");
       if (objectLayer) { objectLayer.remove(); objectLayer = null; }
       current = { courseKey: null, pkg: null, hole: 0, rec: null, nines: null, centre: null };
     },
     state: function () { return { courseKey: current.courseKey, hole: current.hole, nines: current.nines }; },
+    /* The current hole's green, for tools that have to compute against it
+       (Pin Lock). A copy, so a tool cannot edit the package it was handed. */
+    holeGeometry: function () {
+      var rec = current.rec;
+      if (!rec) return null;
+      return {
+        green: rec.green ? { lat: rec.green.lat, lng: rec.green.lng } : null,
+        greenShape: (rec.greenShape || []).map(function (p) { return { lat: p.lat, lng: p.lng }; })
+      };
+    },
     /* The live map's actual camera, for tests and for diagnosing a frame that
        does not match what is on screen. Read-only. */
     mapState: function () {
