@@ -148,7 +148,7 @@ function serverPackage(holeCount = 1) {
 
 function loadController(options = {}) {
   const events = [];
-  const calls = { fetch: 0, courseMapsGet: 0, courseLibraryGet: 0, courseMapsPost: 0, courseMapsBodies: [], courseVisualsGet: 0, courseVisualsPost: 0, fetchUrls: [], order: [], ingestMappedCourse: 0, ingestMappedHole: 0, ingestedHoles: [], frameWarm: 0, frameWarmHoles: [], manual: 0 };
+  const calls = { fetch: 0, courseMapsGet: 0, courseLibraryGet: 0, courseMapsPost: 0, courseMapsBodies: [], courseVisualsGet: 0, courseVisualsPost: 0, fetchUrls: [], order: [], ingestMappedCourse: 0, ingestMappedHole: 0, ingestedHoles: [], frameWarm: 0, frameWarmHoles: [], manual: 0, packageFetches: 0 };
   const testConsole = Object.assign({}, console, { warn() {}, info() {} });
   const localStorage = storage({
     gd_user_course_library_v1: JSON.stringify(options.savedMap ? playableStore() : { courses: {} })
@@ -267,8 +267,19 @@ function loadController(options = {}) {
      ONLY way a scenario can produce a playable map that isn't already saved locally or
      published to /api/course-maps - both the AutoMapper and the Native Geometry Resolver
      fallback run entirely server-side and report back only through this client. */
+  /* An array opts into a SEQUENCE of responses, one per poll, so a scenario can reproduce the
+     real shape of a first visit: the server answers "processing" (the mapper job was enqueued
+     as a side effect of that very request) before it answers with geometry. The last entry
+     repeats once the queue drains, so a scenario can end on a state that never resolves. */
   if (options.serverCoursePackage) {
-    win.GDCoursePackageClient = { fetchPackage: async () => options.serverCoursePackage };
+    const queue = Array.isArray(options.serverCoursePackage) ? options.serverCoursePackage.slice() : null;
+    win.GDCoursePackageClient = {
+      fetchPackage: async () => {
+        calls.packageFetches++;
+        if (!queue) return options.serverCoursePackage;
+        return queue.length > 1 ? queue.shift() : queue[0];
+      }
+    };
   }
 
   const context = {
@@ -400,7 +411,8 @@ async function runScenario(options) {
     courseVisualsPost: 0,
     ingestMappedCourse: 0,
     ingestMappedHole: 0,
-    frameWarm: 0
+    frameWarm: 0,
+    packageFetches: 0
   });
   env.calls.courseMapsBodies.length = 0;
   env.calls.fetchUrls.length = 0;
@@ -415,7 +427,11 @@ async function runScenario(options) {
     selectedAt: "2026-07-14T00:00:00.000Z",
     attemptToken: `attempt-${Math.random().toString(36).slice(2)}`,
     debugRunId: "debug-run",
-    reason: "test"
+    reason: "test",
+    /* Real play waits 45s in 3s polls. Scenarios shrink that so the suite stays fast - the
+       branch being exercised is identical, only the clock is. */
+    serverWaitBudgetMs: options.serverWaitBudgetMs === undefined ? 120 : options.serverWaitBudgetMs,
+    serverWaitPollMs: options.serverWaitPollMs === undefined ? 10 : options.serverWaitPollMs
   });
   return Object.assign(env, { result });
 }
@@ -480,6 +496,38 @@ async function main() {
   assert.strictEqual(env.events.filter((event) => event.event === "mapping-attempt-started").length, 1, "manual fallback does not trigger course-loader re-entry");
   assert.strictEqual(env.events.filter((event) => event.event === "manual-fallback-opened").length, 1, "one attempt produces exactly one manual fallback opened event");
   assert(env.events.some((event) => event.event === "manual-fallback-terminal-reentry-blocked"), "blocked re-entry is explicitly logged");
+
+  /* The Taupo case: the very first request for an unmapped course is what ENQUEUES the mapper
+     job (functions/course-package.mjs buildCoursePackageWithTrigger), so the server's first
+     honest answer is "processing". Play must hold on the loading screen until the job lands
+     instead of reading that as "no map" - it used to arm the manual fallback immediately, and
+     because that fallback is terminal, the course could never open mapped on a first visit. */
+  env = await runScenario({ serverCoursePackage: [{ status: "processing", stage: "automap" }, { status: "processing", stage: "automap" }, serverPackage(1)] });
+  assert.strictEqual(env.result.playable, true, "play waits through processing and opens mapped once the server job lands");
+  assert.strictEqual(env.calls.manual, 0, "a course that maps while play waits never opens the manual fallback");
+  assert.strictEqual(env.calls.packageFetches, 3, "the wait polls rather than giving up on the first processing answer");
+  assert(env.events.some((event) => event.event === "server-course-package-hit" && event.summary === "Server finished mapping while play waited"), "waiting for the server job is distinguishable from an already-mapped hit");
+
+  /* The wait is bounded. A job that never finishes must still hand the player something. */
+  env = await runScenario({ serverCoursePackage: [{ status: "processing", stage: "automap" }], serverWaitBudgetMs: 40, serverWaitPollMs: 10 });
+  assert.strictEqual(env.result.playable, false, "a server job that never finishes is not playable");
+  assert.strictEqual(env.result.fallback, "interactive-green", "an exhausted wait still opens the manual fallback");
+  assert(env.calls.packageFetches > 1, "the wait actually polled before giving up");
+  assert(env.events.some((event) => event.event === "server-course-package-wait-timed-out"), "a timed-out wait is logged distinctly from a course the server never started");
+  assert(env.events.some((event) => event.event === "manual-fallback-opened" && event.details && event.details.reason === "server-map-timed-out"), "the fallback records that the wait ran out, not that the server had nothing");
+
+  /* "none" means the server did NOT enqueue anything - anonymous caller, no location, or the
+     per-user rate limit tripped. There is no job to wait on, so waiting would only stall the
+     player behind a job that will never exist. */
+  env = await runScenario({ serverCoursePackage: [{ status: "none" }] });
+  assert.strictEqual(env.result.fallback, "interactive-green", "a 'none' answer falls through to the manual fallback");
+  assert.strictEqual(env.calls.packageFetches, 1, "'none' is terminal - it is never polled");
+  assert(env.events.some((event) => event.event === "server-course-package-pending"), "a course the server never started is logged as pending, not timed out");
+
+  /* Likewise manual-required: the server has already given up on this course. */
+  env = await runScenario({ serverCoursePackage: [{ status: "manual-required", reason: "no numbered hole geometry" }] });
+  assert.strictEqual(env.result.fallback, "interactive-green", "manual-required falls through to the manual fallback");
+  assert.strictEqual(env.calls.packageFetches, 1, "manual-required is terminal - it is never polled");
 
   env = await runScenario({ courseMapsFails: true, serverCoursePackage: serverPackage(1) });
   assert.strictEqual(env.calls.courseMapsGet, 1, "database pull failure is attempted once");

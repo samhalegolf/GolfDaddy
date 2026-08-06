@@ -4388,17 +4388,18 @@
 	     Persists via the same saveCourseObject() path autoMapOsmCourse uses, so everything
 	     downstream (savedMapCanSatisfyRequest, recordDiscoveredHoleCount, cloud sync) sees an
 	     identical shape regardless of which source produced the geometry. */
-	  async function resolveGeometryFromServerPackage(course){
+	  async function fetchServerCoursePackage(course,timeoutMs){
 	    const client=window.GDCoursePackageClient;
 	    if(!client||typeof client.fetchPackage!=='function')return null;
 	    const centre=guideCoursePoint(course);
 	    if(!Number.isFinite(centre?.lat)||!Number.isFinite(centre?.lng))return null;
-	    let pkg=null;
 	    try{
-	      pkg=await client.fetchPackage({courseId:courseId(course),courseName:courseName(course),courseLat:centre.lat,courseLng:centre.lng,timeoutMs:3500});
+	      return await client.fetchPackage({courseId:courseId(course),courseName:courseName(course),courseLat:centre.lat,courseLng:centre.lng,timeoutMs:timeoutMs||3500});
 	    }catch(e){return null;}
-	    if(!pkg||(pkg.status!=='lite-geo-ready'&&pkg.status!=='full-map-ready'))return null;
-	    const holes=Array.isArray(pkg.holes)?pkg.holes:[];
+	  }
+	  function serverPackageIsReady(pkg){return !!pkg&&(pkg.status==='lite-geo-ready'||pkg.status==='full-map-ready');}
+	  function persistServerCoursePackage(course,pkg){
+	    const holes=Array.isArray(pkg&&pkg.holes)?pkg.holes:[];
 	    if(!holes.length)return null;
 	    const cid=courseId(course);
 	    const name=courseName(course);
@@ -4427,6 +4428,51 @@
 	      });
 	    });
 	    return {saved,holes:holes.length,polygons,fallbacks,automapperStatus:'success',serverPackageStatus:pkg.status};
+	  }
+	  async function resolveGeometryFromServerPackage(course){
+	    const pkg=await fetchServerCoursePackage(course);
+	    if(!serverPackageIsReady(pkg))return null;
+	    const result=persistServerCoursePackage(course,pkg);
+	    return result&&result.holes?result:null;
+	  }
+	  /* Play holds on the course-loading screen while the server mapper job runs, rather than
+	     dropping the player into the manual green-tap the instant the first request answers
+	     "processing". That first answer is nearly always "processing" for a course nobody has
+	     opened before, because the job is enqueued as a SIDE EFFECT of this very request
+	     (functions/course-package.mjs buildCoursePackageWithTrigger) - so treating "processing"
+	     as "no map" meant a new course could never open mapped on its first visit, and the
+	     terminal manual-fallback guard in runCourseMappingAttempt then blocked the retry that
+	     would have found it.
+
+	     "none" is terminal here, not pending. The server answers "none" only when it did NOT
+	     enqueue anything (anonymous caller, no location supplied, or the per-user rate limit
+	     tripped), so there is no job to wait on and waiting would just stall the player.
+	     "manual-required" is terminal for the same reason - the server has already given up. */
+	  const SERVER_PACKAGE_WAIT_MS=45000;
+	  const SERVER_PACKAGE_POLL_MS=3000;
+	  async function awaitServerCoursePackage(course,opts={}){
+	    const budgetMs=Number.isFinite(Number(opts.budgetMs))&&Number(opts.budgetMs)>=0?Number(opts.budgetMs):SERVER_PACKAGE_WAIT_MS;
+	    const pollMs=Number.isFinite(Number(opts.pollMs))&&Number(opts.pollMs)>0?Number(opts.pollMs):SERVER_PACKAGE_POLL_MS;
+	    const deadline=Date.now()+budgetMs;
+	    const onProgress=typeof opts.onProgress==='function'?opts.onProgress:null;
+	    const stillCurrent=typeof opts.stillCurrent==='function'?opts.stillCurrent:null;
+	    let polls=0;
+	    for(;;){
+	      const pkg=await fetchServerCoursePackage(course);
+	      polls++;
+	      const status=pkg&&pkg.status?String(pkg.status):'unreachable';
+	      if(serverPackageIsReady(pkg)){
+	        const result=persistServerCoursePackage(course,pkg);
+	        if(result&&result.holes)return {result,status,polls,timedOut:false};
+	        return {result:null,status,polls,timedOut:false,reason:'ready-but-empty'};
+	      }
+	      if(status!=='processing')return {result:null,status,polls,timedOut:false};
+	      if(stillCurrent&&!stillCurrent())return {result:null,status,polls,timedOut:false,superseded:true};
+	      const remaining=deadline-Date.now();
+	      if(remaining<=0)return {result:null,status,polls,timedOut:true};
+	      if(onProgress)onProgress({polls,remainingMs:remaining,status});
+	      await sleep(Math.min(pollMs,remaining));
+	    }
 	  }
 	  /* Manual "Auto" tool in the full-mapping flyout (data-map-tool="automap") - an
 	     operator-triggered request for the server to map this course now. Replaces the old
@@ -4535,12 +4581,28 @@
            A miss here is NOT a failure: it falls through exactly as a zero-guide AutoMapper
            result always has, to the native resolver and then manual fallback below. */
         let autoMapResult=null;
-        try{autoMapResult=await resolveGeometryFromServerPackage(c);}catch(e){autoMapResult=null;}
-        if(autoMapResult)recordMappingDebug(debugRunId,{source:'automapper',phase:'completed',event:'server-course-package-hit',summary:'Server already had this course mapped',details:{hole:h,resolutionKey:key,attemptToken,serverPackageStatus:autoMapResult.serverPackageStatus,holes:autoMapResult.holes,saved:autoMapResult.saved}});
+        let serverWait=null;
+        try{
+          serverWait=await awaitServerCoursePackage(c,{
+            budgetMs:opts.serverWaitBudgetMs,
+            pollMs:opts.serverWaitPollMs,
+            stillCurrent:()=>resolverAttemptCurrent(request.attemptToken,attempt),
+            onProgress:info=>{
+              /* Ramps 45 -> 80 across the wait so the loading screen keeps moving while the
+                 server job runs. Deliberately vague copy: the player does not need to know
+                 whether this is the Overpass leg or the geometry resolver. */
+              updateCourseLoading('Mapping this course',Math.min(80,45+info.polls*4));
+            }
+          });
+          autoMapResult=serverWait&&serverWait.result||null;
+        }catch(e){serverWait=null;autoMapResult=null;}
+        if(autoMapResult)recordMappingDebug(debugRunId,{source:'automapper',phase:'completed',event:'server-course-package-hit',summary:serverWait&&serverWait.polls>1?'Server finished mapping while play waited':'Server already had this course mapped',details:{hole:h,resolutionKey:key,attemptToken,serverPackageStatus:autoMapResult.serverPackageStatus,holes:autoMapResult.holes,saved:autoMapResult.saved,polls:serverWait&&serverWait.polls||1}});
         if(!mappingAttemptStillCurrent(request,attempt,'server-course-package'))return {playable:false,stale:true,reason:'superseded-after-server-course-package'};
         if(!autoMapResult){
-          recordMappingDebug(debugRunId,{source:'automapper',phase:'skipped',event:'server-course-package-pending',summary:'Server has not mapped this course yet',details:{hole:h,resolutionKey:key,attemptToken}});
-          autoMapResult={saved:0,holes:0,polygons:0,fallbacks:0,automapperStatus:'server-pending'};
+          const waitStatus=serverWait&&serverWait.status||'unreachable';
+          const waitTimedOut=!!(serverWait&&serverWait.timedOut);
+          recordMappingDebug(debugRunId,{source:'automapper',phase:'skipped',event:waitTimedOut?'server-course-package-wait-timed-out':'server-course-package-pending',summary:waitTimedOut?'Server was still mapping when play stopped waiting':'Server has not mapped this course yet',details:{hole:h,resolutionKey:key,attemptToken,serverPackageStatus:waitStatus,polls:serverWait&&serverWait.polls||0,timedOut:waitTimedOut,budgetMs:SERVER_PACKAGE_WAIT_MS}});
+          autoMapResult={saved:0,holes:0,polygons:0,fallbacks:0,automapperStatus:waitTimedOut?'server-timed-out':'server-pending',serverPackageStatus:waitStatus};
         }
         if(!mappingAttemptStillCurrent(request,attempt,'automapper'))return {playable:false,stale:true,reason:'superseded-after-automapper'};
         try{
@@ -4569,9 +4631,13 @@
            Resolver fallback before giving up (functions/course-mapper-worker-background.mjs) -
            so a miss here means the server has nothing playable yet, not that the client has a
            second geometry source of its own left to try. Straight to manual fallback. */
-        recordMappingDebug(debugRunId,{source:'automapper',phase:'failed',event:'automapper-failed',summary:'Server has no playable map for this course yet',details:{hole:h,resolutionKey:key,attemptToken,saved:autoMapResult&&autoMapResult.saved||0}});
-        recordCoursePlayDebug('course-mapping-automatic-unresolved',c,h,{reason:'server-map-not-ready',resolutionKey:key,attemptToken});
-        return beginInteractiveGreenFallback(c,h,'server-map-not-ready',{resolutionKey:key,activeResolutionKey:key,attemptToken,debugRunId,selectedAt,debugAttemptContext:attempt,callerFunction:'runCourseMappingAttempt',source:'mapping-controller'});
+        /* Reached only after awaitServerCoursePackage gave a terminal answer or burned its
+           whole wait budget - so this is no longer "the job had not started yet", it is
+           "the server has nothing playable and is not about to produce any". */
+        const unresolvedReason=autoMapResult&&autoMapResult.automapperStatus==='server-timed-out'?'server-map-timed-out':'server-map-not-ready';
+        recordMappingDebug(debugRunId,{source:'automapper',phase:'failed',event:'automapper-failed',summary:'Server has no playable map for this course yet',details:{hole:h,resolutionKey:key,attemptToken,saved:autoMapResult&&autoMapResult.saved||0,serverPackageStatus:autoMapResult&&autoMapResult.serverPackageStatus||'',reason:unresolvedReason}});
+        recordCoursePlayDebug('course-mapping-automatic-unresolved',c,h,{reason:unresolvedReason,resolutionKey:key,attemptToken});
+        return beginInteractiveGreenFallback(c,h,unresolvedReason,{resolutionKey:key,activeResolutionKey:key,attemptToken,debugRunId,selectedAt,debugAttemptContext:attempt,callerFunction:'runCourseMappingAttempt',source:'mapping-controller'});
       }catch(error){
         try{console.warn('[Clarity Caddy] course mapping attempt failed',error);}catch(e){}
         recordCoursePlayDebug('course-mapping-attempt-error',c,h,{reason:error&&error.message||'mapping-controller-error',resolutionKey:key,attemptToken});
