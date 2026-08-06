@@ -275,10 +275,10 @@ body.ball-dragging #surfaceViewport { transition: none !important; }
    gaining any bulk. The 44px button stays for the touch target; only the
    painted shape shrank to the icon. */
 #toolRailTab { position: absolute; top: calc(env(safe-area-inset-top, 0px) + 64px); right: 12px; z-index: 620; width: 44px; height: 44px; border: 0; border-radius: 14px; padding: 0; display: grid; place-items: center; background: transparent; box-shadow: none; }
-/* NOTE: assets/home/tool-rail.png is itself an opaque 256x256 tile with a dark
-   rounded plate painted into it, so the container this rule drops is only half
-   of the box the report is describing. The radius below rounds and softens the
-   artwork's own edge; getting rid of the plate entirely needs a transparent
+/* NOTE: the supplied tool-rail icon is itself an opaque 256x256 tile with a
+   dark rounded plate painted into it, so the container this rule drops is only
+   half of the box the report is describing. The radius below rounds and softens
+   the artwork's own edge; getting rid of the plate entirely needs a transparent
    version of the icon, which is an asset change, not a CSS one. */
 #toolRailTab img { width: 38px; height: 38px; display: block; object-fit: contain; border-radius: 13px; filter: drop-shadow(0 0 5px rgba(31, 211, 109, .5)) drop-shadow(0 2px 6px rgba(0, 0, 0, .5)); transition: filter .18s ease; }
 #toolRailTab[aria-expanded="true"] { background: transparent; box-shadow: none; }
