@@ -50,7 +50,8 @@ const STUDIO_SCRIPTS = [
   "scripts/studio/system/system-dev-panel-host.js",
   "scripts/studio/system/storage/storage-page.js",
   "scripts/studio/system/feature-controls/feature-controls-page.js",
-  "scripts/studio/system/diagnostics/launch-monitor-diagnostics-page.js"
+  "scripts/studio/system/diagnostics/launch-monitor-diagnostics-page.js",
+  "scripts/studio/gps-play/shot-planning/shot-planning-page.js"
 ];
 const STUDIO_CSS = "scripts/studio/studio-shell.css";
 
