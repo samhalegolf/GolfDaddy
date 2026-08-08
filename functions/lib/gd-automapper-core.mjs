@@ -94,6 +94,69 @@ export function courseMatchesIdentity(course, candidateId, candidateName) {
   return !!(probe && courseNameKey && probe === courseNameKey);
 }
 
+/* ---------- facility vs course identity --------------------------------------------------- */
+
+/* A FACILITY is a club; a COURSE is one loop within it. "Taupo Golf Club Centennial" and
+   "Taupo Golf Club Tauhara" are two courses at one facility and each need their own geometry.
+   The 4km duplicate check in functions/course-package.mjs used to collapse any two courses
+   within range into one, so the second course at a facility served the first's holes and
+   never got a mapper job of its own - it could not be mapped at all.
+
+   splitCourseName pulls a name apart at an explicit separator, or otherwise at the club
+   designator:
+     "Taupo Golf Club Centennial"  -> facility "Taupo Golf Club",    label "Centennial"
+     "Taupo Golf Club - Tauhara"   -> facility "Taupo Golf Club",    label "Tauhara"
+     "Riverside Golf Club (Par 3)" -> facility "Riverside Golf Club", label "Par 3"
+     "Muriwai Golf Club"           -> facility "Muriwai Golf Club",   label ""
+   An empty label means the name does not identify a particular loop. Bare "golf" is
+   deliberately NOT a designator - it would split ordinary course names that merely contain
+   the word. */
+const COURSE_DESIGNATOR = /\b(golf links|golf club|golf course|golf centre|golf center|golf resort|country club|gc)\b/i;
+
+export function splitCourseName(raw) {
+  const text = String(raw || "").replace(/\s+/g, " ").trim();
+  if (!text) return { facility: "", label: "" };
+  /* A trailing parenthetical always names the loop: "X Golf Club (Par 3)". */
+  const paren = text.match(/^(.*?)\s*\(([^()]+)\)\s*$/);
+  if (paren && paren[1].trim()) return { facility: paren[1].trim(), label: paren[2].trim() };
+  /* A dash/colon separator splits facility from loop, but only when the left side still looks
+     like a club - "Wairakei - Taupo" is one course's name, not a facility and a loop. */
+  const separated = text.match(/^(.*?)\s+[-–—:]\s+(.*)$/);
+  if (separated && COURSE_DESIGNATOR.test(separated[1])) return { facility: separated[1].trim(), label: separated[2].trim() };
+  /* Otherwise whatever trails the club designator names the loop. */
+  const designator = text.match(COURSE_DESIGNATOR);
+  if (designator) {
+    const cut = designator.index + designator[0].length;
+    const label = text.slice(cut).trim();
+    if (label) return { facility: text.slice(0, cut).trim(), label };
+  }
+  return { facility: text, label: "" };
+}
+
+export function facilityIdentity(course) {
+  const key = normalizeCourseName(splitCourseName(course && (course.courseName || course.name)).facility);
+  if (key) return "facility:" + key;
+  return "facility-id:" + slug((course && (course.courseId || course.id)) || "assumed-golf-course");
+}
+
+export function courseLabelKey(course) {
+  const label = splitCourseName(course && (course.courseName || course.name)).label;
+  return label ? slug(label) : "";
+}
+
+/* Same facility and same loop - or one side not naming a loop at all - is the SAME course
+   under a different id/name, and should still be redirected to the already-mapped copy: that
+   is what the duplicate check exists for, so two players' spellings don't each start a job.
+   Same facility with two different named loops is a SIBLING pair, and both must be mapped.
+   A bare club name matches any loop on purpose: someone who typed only "Taupo Golf Club"
+   most likely means the main course, and sending them to it is the useful old behaviour. */
+export function classifyCourseRelationship(a, b) {
+  if (facilityIdentity(a) !== facilityIdentity(b)) return "unrelated";
+  const aLabel = courseLabelKey(a);
+  const bLabel = courseLabelKey(b);
+  return !aLabel || !bLabel || aLabel === bLabel ? "duplicate" : "sibling";
+}
+
 /* Nearby-course matching by distance, ported from nearbyKnownCourses/nearestKnownCourse
    (gd-course-library-pin-lock.js:498-527) but taking a plain candidate list instead of
    reading from localStorage/window globals - the server's candidate list is a Supabase
@@ -266,12 +329,27 @@ export function bestGuideForHole(guides, hole, coursePoint) {
     })[0] || null;
 }
 
+/* At a multi-course facility the Overpass sweep (OSM_AUTOMAPPER_RADIUS_M, 1400m) covers BOTH
+   courses, and both return holes numbered 1-18. Left alone, one course's hole 7 competes with
+   the other's for a single slot in byHole below, decided by whichever happens to be longer -
+   so a course could be assembled out of its neighbour's holes.
+
+   Assign each guide to the nearest course centre instead: a guide strictly closer to a
+   sibling's centre than to this one's belongs to that sibling. No siblings means no filtering
+   at all, so a single-course facility behaves exactly as before. */
+export function guideBelongsToCourse(guide, coursePoint, siblingPoints) {
+  if (!coursePoint || !(siblingPoints || []).length) return true;
+  const own = guideDistanceToPoint(guide, coursePoint);
+  if (!Number.isFinite(own)) return true;
+  return !siblingPoints.some(point => guideDistanceToPoint(guide, point) < own);
+}
+
 /* One best guide per hole number, preferring the guide nearest the course center (within
    120m) and otherwise the longer one - identical selection rule to the client's
    chooseAutoMapGuides. */
-export function chooseAutoMapGuides(guides, coursePoint) {
+export function chooseAutoMapGuides(guides, coursePoint, siblingPoints = []) {
   const byHole = new Map();
-  (guides || []).forEach(guide => {
+  (guides || []).filter(guide => guideBelongsToCourse(guide, coursePoint, siblingPoints)).forEach(guide => {
     const h = validHoleNumber(guide.hole);
     if (!h) return;
     const prev = byHole.get(h);
@@ -494,9 +572,9 @@ export function resolveGuidesIntoObjects(guides, courseId, greens, existingObjec
    or an earlier mapper run) is merged into rather than discarded - upsertResolvedObject's
    nearestMatchingObject dedup treats them exactly like objects resolved this run, so a
    hand-placed tee is updated in place rather than duplicated. */
-export function resolveCourseGeometry(payload, courseId, coursePoint, existingObjects = []) {
+export function resolveCourseGeometry(payload, courseId, coursePoint, existingObjects = [], siblingPoints = []) {
   const bundle = parseOsmGuideBundle(payload);
-  const guides = chooseAutoMapGuides(bundle.guides, coursePoint);
+  const guides = chooseAutoMapGuides(bundle.guides, coursePoint, siblingPoints);
   const result = resolveGuidesIntoObjects(guides, courseId, bundle.greens, existingObjects);
   return Object.assign(result, { guidesFound: bundle.guides.length, greensFound: bundle.greens.length, holesResolved: guides.length });
 }
