@@ -24,7 +24,7 @@
    course don't each get their own mapper job and their own copy of the same geometry. */
 
 import { deriveCoursePackageState, shapeLitePackage, shapeFullPackage, hasGeometryPayload } from "./lib/gd-course-package-shape.mjs";
-import { nearbyKnownCourses } from "./lib/gd-automapper-core.mjs";
+import { nearbyKnownCourses, classifyCourseRelationship } from "./lib/gd-automapper-core.mjs";
 import { enqueueMapperJob } from "./course-mapper-jobs.mjs";
 
 const MAPS_TABLE = "course_maps";
@@ -75,7 +75,7 @@ function slug(value) { return String(value || "").toLowerCase().trim().replace(/
 /* A generous bounding box narrows the candidate set before the exact-distance check in
    nearbyKnownCourses - avoids a full-table scan while staying wide enough that
    ASSUMED_COURSE_MATCH_RADIUS_M (4000m, roughly 0.036 degrees of latitude) is never clipped. */
-async function findDuplicateCourseWithGeometry(courseId, center) {
+async function findDuplicateCourseWithGeometry(courseId, courseName, center) {
   const pad = 0.06;
   const rows = await supabaseFetch(
     MAPS_TABLE + "?select=course_id,course_name,course_lat,course_lng,objects_json,holes_json&published=eq.true" +
@@ -86,7 +86,17 @@ async function findDuplicateCourseWithGeometry(courseId, center) {
     .filter(row => row.course_id !== courseId && hasGeometryPayload(row))
     .map(row => ({ courseId: row.course_id, courseName: row.course_name, courseLat: row.course_lat, courseLng: row.course_lng }));
   const nearby = nearbyKnownCourses(center, candidates, ASSUMED_COURSE_MATCH_RADIUS_M);
-  return nearby[0] || null;
+  /* Proximity alone is NOT duplication. Every course at a 36-hole facility sits within
+     ASSUMED_COURSE_MATCH_RADIUS_M of its siblings, so taking the nearest mapped course meant
+     the second course at a facility was permanently shadowed by the first: it was handed the
+     sibling's geometry and never enqueued a job of its own. Only redirect when the candidate
+     is genuinely the same course under a different id/name.
+
+     The courseId fallback matters for callers that send a location but no display name - ids
+     here are slugs of the name ("taupo-golf-club-centennial"), so un-slugging the hyphens
+     recovers enough for the facility/label split to work. */
+  const request = { courseId, courseName: courseName || String(courseId || "").replace(/-+/g, " ") };
+  return nearby.find(candidate => classifyCourseRelationship(request, candidate) === "duplicate") || null;
 }
 
 async function loadCoursePackageRows(courseId) {
@@ -134,7 +144,7 @@ export async function buildCoursePackageWithTrigger(courseId, { center, courseNa
   const result = await buildCoursePackage(courseId);
   if (result.status !== "none") return result;
   if (center) {
-    const duplicate = await findDuplicateCourseWithGeometry(courseId, center);
+    const duplicate = await findDuplicateCourseWithGeometry(courseId, courseName, center);
     if (duplicate) {
       const canonical = await buildCoursePackage(duplicate.courseId);
       return Object.assign({}, canonical, { redirectedFrom: courseId });
