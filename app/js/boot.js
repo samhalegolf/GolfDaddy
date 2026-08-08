@@ -299,13 +299,32 @@
   /* The old course picker hands off a confirmed, already-mapped course by navigating
      here with ?courseId=... (courseName/courseLat/courseLng optional) rather than
      re-entering its own picker screen. */
+  /* Number(null) is 0, and so is Number("") — both finite, and both a real
+     point in the Gulf of Guinea. The picker only appends courseLat/courseLng
+     when its own row carried them (gd-course-picker-search-v2.js), so a course
+     handed off without them used to start the round with a centre 15,000km
+     away. play.js measures its "is this person actually at the golf course"
+     check against that centre, so EVERY GPS fix was rejected for the whole
+     round: no dot, no green focus, no distances that follow you — and silent,
+     because a rejected fix looks exactly like a phone that never got one.
+
+     Absent has to read as absent, so play.js falls through to deriving the
+     centre from the package's own geometry. Same null-is-zero trap shot.js's
+     pt() already guards against. */
+  function coordParam(params, name) {
+    var raw = params.get(name);
+    if (raw === null || String(raw).trim() === "") return NaN;
+    var n = Number(raw);
+    return Number.isFinite(n) ? n : NaN;
+  }
+
   function courseFromUrl(courseId) {
     var params = new URLSearchParams(window.location.search);
     return {
       courseId: courseId,
       courseName: params.get("courseName") || "",
-      courseLat: Number(params.get("courseLat")),
-      courseLng: Number(params.get("courseLng"))
+      courseLat: coordParam(params, "courseLat"),
+      courseLng: coordParam(params, "courseLng")
     };
   }
 })();

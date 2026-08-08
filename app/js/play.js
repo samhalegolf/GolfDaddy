@@ -19,7 +19,6 @@
   var transitionToken = 0;
   var current = { courseKey: null, pkg: null, hole: 0, rec: null, nines: null };
   var store = null;
-  var viewLocked = false;   // Lock/Unlock: freezes map gestures + holds the surface frame
 
   /* A rough course-footprint radius from the course centre, not from any one
      hole's geometry - see maybeAdoptGpsFix. The question this answers is "is
@@ -28,36 +27,29 @@
      should count, including while walking between holes. */
   var GPS_ADOPT_RADIUS_M = 800;
 
+  /* Walked off the tee: how far from the pinned tee a fix has to be, and how
+     many fixes in a row have to say so, before "Head To the Tee" lets go. One
+     wild fix must not release the pin, and a tee box is about 20m deep, so 25m
+     is the first distance that unambiguously means "left the tee". */
+  var TEE_PIN_RELEASE_M = 25;
+  var TEE_PIN_RELEASE_FIXES = 2;
+
   var GESTURE_HANDLERS = ["dragging", "touchZoom", "doubleClickZoom", "scrollWheelZoom", "boxZoom", "keyboard"];
 
   /* Leaflet's own gestures are off whenever the stage camera owns the view:
-     while the frame is locked by hand, and whenever a live frame is applied.
-     Under a live frame the map element is rotated, so a drag would pan along
-     a rotated axis and a pinch would fight the stage's own zoom — and the
-     published surface has no pan/zoom at all, so switching them off is what
-     makes the two presentations behave the same. Taps still work: only the
-     gesture handlers are toggled, never the click listener. */
+     whenever a live frame is applied. Under a live frame the map element is
+     rotated, so a drag would pan along a rotated axis and a pinch would fight
+     the stage's own zoom — and the published surface has no pan/zoom at all,
+     so switching them off is what makes the two presentations behave the same.
+     Taps still work: only the gesture handlers are toggled, never the click
+     listener. */
   function applyGestureState() {
     if (!map) return;
-    var frozen = viewLocked || document.body.classList.contains("map-framed");
+    var frozen = document.body.classList.contains("map-framed");
     GESTURE_HANDLERS.forEach(function (name) {
       var handler = map[name];
       if (handler) { frozen ? handler.disable() : handler.enable(); }
     });
-  }
-
-  /* Freezes the camera so it can't be bumped off-frame mid-shot. The frame
-     hold itself lives in applySurfaceFrame/applyLiveFrame's holdFrame check,
-     driven by the same flag. */
-  function setViewLocked(on) {
-    viewLocked = !!on;
-    document.body.classList.toggle("view-locked", viewLocked);
-    applyGestureState();
-    var btn = document.getElementById("lockToggleBtn");
-    if (btn) {
-      btn.textContent = viewLocked ? "Unlock" : "Lock";
-      btn.setAttribute("aria-pressed", viewLocked ? "true" : "false");
-    }
   }
 
   function ensureStore() {
@@ -259,6 +251,29 @@
     };
   }
 
+  /* The course centre is what decides whether a live fix is trusted at all
+     (maybeAdoptGpsFix), and it arrives on the hand-off URL as courseLat/
+     courseLng — which the picker only appends when its own row carried them
+     (scripts/inline/gd-course-picker-search-v2.js). With no centre every fix
+     was silently discarded for the whole round, which looks exactly like a
+     phone that never got a fix.
+
+     The package already knows where the course is, so derive it: the mean of
+     every hole's tee and green. Only the 800m trust radius is measured from
+     this, so a centroid is as good an answer as the library row's own. */
+  function packageCentre(pkg) {
+    var holes = pkg && Array.isArray(pkg.holes) ? pkg.holes : [];
+    var sumLat = 0, sumLng = 0, n = 0;
+    holes.forEach(function (h) {
+      var geometry = (h && h.geometry) || h || {};
+      [geometry.tee, geometry.green].forEach(function (p) {
+        var lat = Number(p && p.lat), lng = Number(p && p.lng);
+        if (Number.isFinite(lat) && Number.isFinite(lng)) { sumLat += lat; sumLng += lng; n += 1; }
+      });
+    });
+    return n ? { lat: sumLat / n, lng: sumLng / n } : null;
+  }
+
   /* Frame the live map on the hole from package objects. Tolerant: with no
      geometry it falls back to the course centre, then to the current view —
      normal outcomes, not errors. Creates the map: only the absence/failure
@@ -384,7 +399,6 @@
     if (!applied || stage !== frameStage) return false;
     if (document.body.classList.contains("bubble-dragging")) return !bubbleAtEdge();
     if (document.body.classList.contains("ball-dragging")) return true;
-    if (viewLocked) return true;
     if (pos && pos.source === "gps") return true;
     return cameraParked;
   }
@@ -672,6 +686,7 @@
      presentation is up. */
   function renderShotOverlays(pos, model, proj) {
     function project(pt) { return pt && proj ? proj.toScreen(pt) : null; }
+    var rec = current.rec || {};
     var act = aimingShot(pos);
     /* The engine's cluster rings, computed in lat/lng, projected here (the
        model itself came from renderPosition; project() no-ops without a
@@ -725,7 +740,6 @@
           /* The middle guide: bubble → green, laying up only (the green sits
              beyond the bag and beyond the bubble). Same rule as the old
              gdShouldShowMiddleDistanceGuide, same trims and label offset. */
-          var rec = current.rec || {};
           var greenScreen = rec.green ? project(rec.green) : null;
           var maxCarry = window.GDBubbleEngine ? window.GDBubbleEngine.maxPlayableCarryM() : null;
           if (pos && greenScreen && Number.isFinite(maxCarry)) {
@@ -807,7 +821,6 @@
     }
     var ring = document.getElementById("greenRing");
     if (ring) {
-      var rec = current.rec || {};
       /* Not in green focus: the centre ring is one of the overlays the clean
          green image is supposed to be free of. It stays for the plain green
          zoom, which is the same camera without the ball workflow. */
@@ -827,17 +840,46 @@
      every subsequent fix this round is trusted without re-checking distance:
      the player is expected to move around the course. */
   var liveAtCourse = false;
+
+  /* Consecutive trusted fixes that have landed clear of the pinned tee. */
+  var teePinAwayFixes = 0;
+
+  /* "Head To the Tee" pins the player to the tee coordinate, and a passing fix
+     does not get to argue with that — but it used to hold for the whole hole,
+     which meant a player who pressed it and then walked was never tracked
+     again: the dot stayed on the tee, so they never came within the green-focus
+     radius and the shot could only advance by re-locking the same point.
+
+     The pin now releases itself. Two consecutive fixes clear of the tee is the
+     player plainly having walked off it, which is the thing the pin was never
+     meant to override. Unlock still releases it immediately, and a hole change
+     still clears it. */
+  function teePinReleasedBy(fix) {
+    var tee = current.rec && current.rec.tee;
+    if (!tee) return true;   // nothing to be pinned to
+    var away = app.distance.haversineMeters(fix, tee);
+    if (!Number.isFinite(away) || away <= TEE_PIN_RELEASE_M) { teePinAwayFixes = 0; return false; }
+    teePinAwayFixes += 1;
+    if (teePinAwayFixes < TEE_PIN_RELEASE_FIXES) return false;
+    teePinAwayFixes = 0;
+    return true;
+  }
+
   function maybeAdoptGpsFix(fix) {
     if (!fix) return;
-    /* Pinned to the tee: the player told us where they are, and a live fix
-       does not get to argue with that. */
-    if (placement === "tee") return;
-    if (liveAtCourse) { app.position.set(fix, "gps"); return; }
-    var centre = current.centre;
-    if (!centre) return;
-    var away = app.distance.haversineMeters(fix, centre);
-    if (!Number.isFinite(away) || away > GPS_ADOPT_RADIUS_M) return;
-    liveAtCourse = true;
+    /* The trust gate runs first, so an unverified fix cannot release the tee
+       pin either — off-course testing must not walk the player off the tee. */
+    if (!liveAtCourse) {
+      var centre = current.centre;
+      if (!centre) return;
+      var away = app.distance.haversineMeters(fix, centre);
+      if (!Number.isFinite(away) || away > GPS_ADOPT_RADIUS_M) return;
+      liveAtCourse = true;
+    }
+    if (placement === "tee") {
+      if (!teePinReleasedBy(fix)) return;
+      placement = null;
+    }
     app.position.set(fix, "gps");
   }
 
@@ -1072,6 +1114,7 @@
       if (action.key === "unlock") {
         shotLocked = false;
         placement = null;
+        teePinAwayFixes = 0;
         startPillDismissed = false;
         standingTapArmed = false;
         app.position.clear();
@@ -1085,13 +1128,7 @@
         ? app.position.current()
         : (app.gps && app.gps.lastFix()) || app.position.current();
       if (!fix) return;
-      shotLocked = true;
       app.position.set(fix, "lock");
-    });
-    /* Lock/Unlock: freeze the camera so it can't be bumped mid-shot. */
-    var lockToggle = document.getElementById("lockToggleBtn");
-    if (lockToggle) lockToggle.addEventListener("click", function () {
-      setViewLocked(!viewLocked);
     });
     /* The start pill: Head To the Tee places the player on the tee; Standing
        Here dismisses the pill so a surface tap places them. */
@@ -1099,6 +1136,7 @@
     if (headToTee) headToTee.addEventListener("click", function () {
       if (!(current.rec && current.rec.tee)) return;
       placement = "tee";
+      teePinAwayFixes = 0;
       app.position.set(current.rec.tee, "tee");
     });
     var standingHere = document.getElementById("standingHereBtn");
@@ -1392,9 +1430,18 @@
      silently skipped itself for want of a player, while the rings had no such
      check. One gate for both, so the bubble, the aim line, the wind drift line
      and the layup guides enter and leave together. */
+  /* And it needs a LOCK-IN. Unlock Shot deliberately leaves the shot in flight
+     — its start is still the last lock-in and the next lock closes it, which is
+     what Course Data needs — but the player is back at the pre-frame view with
+     nothing aimed. Without this gate the next GPS fix redrew the whole cluster
+     from the OLD start against the OLD target, with the aim line running from
+     where the player now stands to a target two shots stale: the bubble that
+     appeared out of nowhere. desiredStage already reads an unlocked shot as
+     pre-frame ("hole"); this makes the instruments agree with the camera. */
   function aimingShot(pos) {
     if (greenFocus) return null;
     if (!pos) return null;
+    if (!shotLocked) return null;
     return (app.shot && app.shot.active()) || null;
   }
 
@@ -1596,10 +1643,12 @@
     async start(courseKey, pkg, centre) {
       transitionToken += 1;
       liveAtCourse = false;
+      teePinAwayFixes = 0;
       var lat = Number(centre && centre.lat), lng = Number(centre && centre.lng);
       current = {
         courseKey: app.courseKey(courseKey), pkg: pkg || null, hole: 0, rec: null,
-        centre: Number.isFinite(lat) && Number.isFinite(lng) ? { lat: lat, lng: lng } : null,
+        centre: (Number.isFinite(lat) && Number.isFinite(lng) ? { lat: lat, lng: lng } : null)
+          || packageCentre(pkg),
         nines: app.nines ? app.nines.forPackage(app.courseKey(courseKey), pkg) : null
       };
       wirePosition();
@@ -1613,7 +1662,6 @@
     },
     async goHole(hole) {
       var token = ++transitionToken;
-      setViewLocked(false);   // a new hole always opens unlocked
       if (app.undo) app.undo.clear();   // undoing into a different hole's state would be more confusing than nothing left to undo
       current.hole = Number(hole) || 1;
       current.rec = holeRecord(current.pkg, current.hole);
@@ -1643,6 +1691,7 @@
          goes with it: Next Hole is the other way out of it, alongside the
          Shot End that confirms the ball. */
       placement = null;
+      teePinAwayFixes = 0;
       standingTapArmed = false;
       greenFocus = null;
       greenFocusDismissed = false;
@@ -1679,12 +1728,12 @@
       transitionToken += 1;
       liveAtCourse = false;
       placement = null;
+      teePinAwayFixes = 0;
       standingTapArmed = false;
       greenFocus = null;
       greenFocusDismissed = false;
       shotLocked = false;
       cameraParked = false;
-      setViewLocked(false);
       if (app.undo) app.undo.clear();
       if (app.gps) app.gps.stop();
       if (app.wakeLock) app.wakeLock.stop();
@@ -1769,6 +1818,10 @@
     updatePackage: function (pkg) {
       if (!pkg) return;
       current.pkg = pkg;
+      /* A round that started with no geometry had no centre to derive, so a
+         package arriving mid-round is the first chance to answer it — and
+         without it GPS stays untrusted for the rest of the round. */
+      if (!current.centre) current.centre = packageCentre(pkg);
       if (app.nines) current.nines = app.nines.forPackage(current.courseKey, pkg);
       return this.goHole(current.hole);
     },
