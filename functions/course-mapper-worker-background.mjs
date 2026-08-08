@@ -14,7 +14,7 @@
    entirely server-side, so nothing client-side needs to run either stage anymore. */
 
 import { fetchOverpass } from "./lib/gd-overpass-client.mjs";
-import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoObjects, MAPPER_VERSION } from "./lib/gd-automapper-core.mjs";
+import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoObjects, classifyCourseRelationship, MAPPER_VERSION } from "./lib/gd-automapper-core.mjs";
 import { hasNumberingIssue, resolveCourseGeometryForAutoMapper, guideFromResolvedHole } from "./lib/gd-geometry-resolver-core.mjs";
 
 const JOBS_TABLE = "course_mapper_jobs";
@@ -96,6 +96,30 @@ async function loadCourseCenter(courseId) {
   return { courseId: row.course_id, courseName: row.course_name, center: { lat, lng }, objects: row.objects_json || {}, holes: row.holes_json || {} };
 }
 
+/* The Overpass sweep around a course centre also covers any sibling course at the same
+   facility, and both come back with holes numbered 1-18. Handing those sibling centres to
+   resolveCourseGeometry lets it drop guides that belong to the neighbour instead of letting
+   them compete for the same hole slots. Sibling rows do NOT need geometry of their own - an
+   unmapped sibling still has a centre, and that is all the partition needs.
+
+   Bounding box first to keep this off a full-table scan, same shape as
+   course-package.mjs's findDuplicateCourseWithGeometry. */
+const SIBLING_SEARCH_PAD_DEG = 0.06;
+
+async function loadSiblingCentres(course) {
+  const { center } = course;
+  const rows = await supabaseFetch(
+    MAPS_TABLE + "?select=course_id,course_name,course_lat,course_lng" +
+    "&course_lat=gte." + (center.lat - SIBLING_SEARCH_PAD_DEG) + "&course_lat=lte." + (center.lat + SIBLING_SEARCH_PAD_DEG) +
+    "&course_lng=gte." + (center.lng - SIBLING_SEARCH_PAD_DEG) + "&course_lng=lte." + (center.lng + SIBLING_SEARCH_PAD_DEG) + "&limit=50"
+  ).catch(() => []);
+  return (Array.isArray(rows) ? rows : [])
+    .filter(row => row.course_id !== course.courseId)
+    .filter(row => classifyCourseRelationship(course, { courseId: row.course_id, courseName: row.course_name }) === "sibling")
+    .map(row => ({ lat: Number(row.course_lat), lng: Number(row.course_lng) }))
+    .filter(point => Number.isFinite(point.lat) && Number.isFinite(point.lng));
+}
+
 async function saveResolvedGeometry(courseId, geometry) {
   await supabaseFetch(MAPS_TABLE + "?course_id=eq." + encodeURIComponent(courseId), {
     method: "PATCH",
@@ -141,7 +165,8 @@ async function runMapperJob(job) {
   const payload = await fetchOverpass(query);
   await heartbeatJob(job, { stage: "resolving-geometry" });
   const existingObjects = Object.values(course.objects || {}).filter(Boolean);
-  let geometry = resolveCourseGeometry(payload, course.courseId, course.center, existingObjects);
+  const siblingCentres = await loadSiblingCentres(course).catch(() => []);
+  let geometry = resolveCourseGeometry(payload, course.courseId, course.center, existingObjects, siblingCentres);
   let resolverStatus = null;
   if (!geometry.holesResolved && hasNumberingIssue({ osmPayload: payload })) {
     await heartbeatJob(job, { stage: "geometry-resolver" });
