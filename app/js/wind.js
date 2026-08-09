@@ -117,7 +117,7 @@
      position, a timeout, or a bad response just leaves wind as it was. */
   async function fetchLiveWind() {
     var status = document.getElementById("windAutoStatus");
-    var pos = app.position && app.position.current();
+    var pos = app.marshal && app.marshal.player();
     if (!pos) {
       if (status) { status.textContent = "No position yet"; status.classList.remove("hiddenState"); }
       return;

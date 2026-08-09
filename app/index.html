@@ -87,6 +87,17 @@
       <button id="gpsNoticeDismiss" type="button" aria-label="Dismiss">&times;</button>
     </div>
   </div>
+  <!-- Which flow you are in, as a readout rather than a decoration: it renders
+       from the same derived `flow` as everything else (marshal.js), so it
+       cannot say LIVE while the app behaves as PREVIEW. If it flickers, that is
+       a real flow flicker and Trace has the Signal that caused it. Preview's
+       version carries the way back, so a look ahead is never somewhere you get
+       stuck. -->
+  <div id="playBanner" class="hiddenState">
+    <span id="playBannerDot" aria-hidden="true"></span>
+    <span id="playBannerLabel"></span>
+    <button id="playBannerReturn" type="button" class="hiddenState"></button>
+  </div>
   <div id="map"></div>
   <!-- Basemap credit, outside #map on purpose: the stage camera rotates and
        oversizes the map element, so Leaflet's own attribution control would
@@ -102,29 +113,71 @@
     <div id="greenRing" class="hiddenState"></div>
     <div id="pinDistance" class="hiddenState"></div>
     <div id="pinMarker" class="hiddenState"><img src="../assets/icons/flag.svg" alt=""></div>
-    <!-- Green focus: inside 40m of the green the position dot becomes a ball
-         you can drag to where the shot actually finished. Parked bottom-right
-         once you have walked off the green with it still unplaced. -->
+    <!-- Finish: the ball you drag to where the shot actually finished, and the
+         shot's ORIGIN so you can see the shot you are reconstructing rather
+         than guessing from a bare green — which is what makes logging a hole
+         from the next tee, or three holes later, possible at all. Parked at a
+         fixed pickup point when it has no anchor worth drawing. -->
+    <div id="finishOrigin" class="hiddenState" aria-hidden="true"></div>
     <div id="greenFocusBall" class="hiddenState" role="button" aria-label="Ball position"></div>
     <div id="greenFocusHint" class="hiddenState">Drag the ball to where the shot finished</div>
     <div id="gpsDot" class="hiddenState"></div>
+    <!-- The distance shown beside an edge-clamped dot: the camera frames the
+         hole and never widens to fit a player who is not on it, so a fix that
+         does not land on screen is pinned to the bezel with how far that way it
+         really is. -->
+    <div id="edgeDistance" class="hiddenState"></div>
     <div id="aimBubble" class="hiddenState"></div>
   </div>
-  <!-- The dock button has three faces, chosen by the frame stage (play.js
-       renderShotAction): Lock in pre-frame, Unlock Shot once locked in, and
-       Shot End in green focus. The label is the fallback that shows if the
-       coin art is missing, so the control still works without it. -->
+  <!-- The dock: Lock in Track, Unlock Shot while aiming. Shot End sits beside
+       it rather than being a third face, because while aiming BOTH are things
+       you might do. The label is the fallback that shows if the coin art is
+       missing, so the control still works without it. -->
   <div class="shotDock">
+    <button id="shotEndBtn" type="button" class="hiddenState dockSide" aria-label="Shot End">Shot End</button>
     <button id="shotActionBtn" type="button" class="hiddenState" aria-label="Lock">
       <img id="shotActionIcon" src="" alt="">
       <span id="shotActionLabel"></span>
     </button>
+    <!-- Offered exactly when this hole has a shot with no end on it. Nothing
+         arms it and nothing expires it — it is a view of the record, so it is
+         right retroactively and is how you catch up on a hole later. -->
+    <button id="finishControl" type="button" class="hiddenState dockSide" aria-label="Log where the shot finished">Log shot</button>
   </div>
+
+  <!-- Where Shot End and Finish both land. It reports the shot, takes the
+       score, and WAITS: the round only moves when you press the next hole's
+       number, so logging from the next tee cannot put the app a hole ahead of
+       you. "Back" matters — after logging the approach you still have to putt. -->
+  <div id="loggedScreen" class="hiddenState">
+    <div class="loggedCard">
+      <strong class="loggedTitle">Shot logged</strong>
+      <span id="loggedDetail" class="loggedDetail"></span>
+      <div class="loggedScoreRow">
+        <span class="loggedScoreLabel">Score</span>
+        <button id="loggedScoreDown" type="button" aria-label="One less">&minus;</button>
+        <span id="loggedScore">4</span>
+        <button id="loggedScoreUp" type="button" aria-label="One more">+</button>
+      </div>
+      <button id="loggedNext" type="button" class="loggedNext"></button>
+      <button id="loggedBack" type="button" class="linkButton">Back to this hole</button>
+    </div>
+  </div>
+
+  <!-- Live starts one way. Gated on a trusted fix saying you are at the course,
+       so on the couch it simply is not there and Preview is the only thing on
+       offer. It names the hole it will start, because it starts the hole you
+       are STANDING on rather than the one on screen. -->
+  <button id="playButton" type="button" class="hiddenState">Play</button>
   <button id="surfaceSource" type="button" class="hiddenState"></button>
   <pre id="surfaceMetaPanel" class="hiddenState"></pre>
+  <!-- Preview's way of answering "where am I playing from". Tapping works
+       without arming anything — placing yourself IS the plan here, so there is
+       no Standing Here button to press first and no armed-tap state to leave
+       switched on. -->
   <div id="startPill" class="hiddenState">
-    <button id="standingHereBtn" type="button">Standing Here</button>
     <button id="headToTeeBtn" type="button" class="headToTee">Head To the Tee</button>
+    <span id="startPillHint">or tap where you'd stand</span>
   </div>
   <button id="toolRailTab" type="button" aria-label="Tools" aria-expanded="false">
     <img src="../assets/home/tool-rail.png?v=930770b2" alt="">
@@ -292,6 +345,10 @@
 </section>
 
 <script src="../assets/vendor/leaflet/leaflet.js"></script>
+<!-- First of the app modules: it shadows the watched elements so a leak during
+     boot is caught like any other. The signal log runs whatever the setting is,
+     which is what makes an unplanned on-course capture possible. -->
+<script src="js/trace.js"></script>
 <script src="js/platform.js"></script>
 <script src="../scripts/clarity-supabase-auth.js"></script>
 <script src="js/account.js"></script>
@@ -307,9 +364,7 @@
 <script src="js/bubble-engine.js"></script>
 <script src="js/bag.js"></script>
 <script src="js/wind.js"></script>
-<script src="js/shot.js"></script>
 <script src="js/pin.js"></script>
-<script src="js/position.js"></script>
 <script src="js/gps.js"></script>
 <script src="js/wake-lock.js"></script>
 <script src="js/nines.js"></script>
@@ -330,7 +385,16 @@
 <script src="../scripts/course-data/conditions-engine/gd-conditions-engine.js"></script>
 <script src="../scripts/course-data/gd-course-data-intake.js"></script>
 <script src="js/course-data.js"></script>
-<script src="js/play.js"></script>
+<!-- The Marshal decides; the Painter draws. Nothing between them, and nothing
+     else writes play state. PLAY_OWNER_CONCEPT.md §10.
+
+     play.js, shot.js and position.js are gone rather than adapted: play.js
+     decided as well as drew, and the other two held one value each that the
+     Marshal now derives — the player IS the trusted fix in Live and IS your
+     placement in Preview, so a position with a source tag and a policy had
+     nothing left to be. -->
+<script src="js/marshal.js"></script>
+<script src="js/painter.js"></script>
 <script src="js/resume.js"></script>
 <script src="js/tool-rail.js"></script>
 <!-- Password-reset and account-setup links land on whatever page the app has

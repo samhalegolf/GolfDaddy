@@ -151,7 +151,7 @@
     var snapshot = lib.buildShotSnapshot(Object.assign({
       shotId: shotIdFor(meta.hole, sequence),
       roundId: roundId,
-      courseId: (app.play && app.play.state && app.play.state().courseKey) || null,
+      courseId: (app.marshal && app.marshal.round().courseKey) || null,
       holeNumber: meta.hole,
       capturedAt: new Date().toISOString(),
 
@@ -192,15 +192,14 @@
     },
     roundId: function () { return roundId; },
     stats: function () { return Object.assign({}, state); },
-    /* Exposed for tests: the same path a completed shot takes, without needing
-       a round on screen to drive it. */
-    submit: submit,
-    install: function () {
-      if (!app.shot || typeof app.shot.onComplete !== "function") return false;
-      app.shot.onComplete(function (shot, meta) {
-        try { submit(shot, meta); } catch (e) { report(e, { stage: "onComplete" }); }
-      });
-      return true;
+    /* The Marshal calls this through its shotCompleted effect (wired in
+       boot.js). There is no install() any more: subscribing to a shot module's
+       own listener list was how this used to find out, and that module is gone
+       — a completed shot is now something the Marshal states rather than
+       something this file listens for. */
+    submit: function (shot, meta) {
+      try { return submit(shot, meta); }
+      catch (e) { report(e, { stage: "shotCompleted" }); return null; }
     }
   };
 })();

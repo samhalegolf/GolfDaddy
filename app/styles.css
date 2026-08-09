@@ -255,7 +255,7 @@ body.ball-dragging #surfaceViewport { transition: none !important; }
 /* Standing Here / Head To the Tee pill — ported from the old app's
    gdMappedStartPill (gd-app-base.css). Shown at the pre-frame state, when the
    hole is framed but the player has no position yet. */
-#startPill { position: absolute; bottom: calc(98px + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); z-index: 640; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 4px; width: min(326px, calc(100vw - 40px)); padding: 4px; border-radius: 999px; background: rgba(5, 9, 7, .72); border: 1px solid rgba(255, 255, 255, .14); box-shadow: 0 14px 30px rgba(0, 0, 0, .32); backdrop-filter: blur(10px); }
+#startPill { position: absolute; bottom: calc(162px + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); z-index: 640; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 4px; width: min(326px, calc(100vw - 40px)); padding: 4px; border-radius: 999px; background: rgba(5, 9, 7, .72); border: 1px solid rgba(255, 255, 255, .14); box-shadow: 0 14px 30px rgba(0, 0, 0, .32); backdrop-filter: blur(10px); }
 #startPill.hiddenState { display: none; }
 #startPill button { min-height: 38px; border: 0; border-radius: 999px; padding: 8px 10px; background: rgba(255, 255, 255, .09); color: rgba(255, 255, 255, .9); font-size: 12px; font-weight: 950; line-height: 1.05; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #startPill .headToTee { background: #1fd36d; color: #06110b; }
@@ -453,3 +453,117 @@ body.pin-dragging #pinMarker { cursor: grabbing; }
 #pinGhost { position: fixed; width: 26px; height: 26px; margin: -26px 0 0 -4px; z-index: 900; pointer-events: none; }
 #pinGhost.hiddenState { display: none; }
 #pinGhost img { width: 100%; height: 100%; object-fit: contain; filter: drop-shadow(0 2px 5px rgba(0, 0, 0, .5)); }
+
+/* ── Trace ────────────────────────────────────────────────────────────────
+   The debug window (js/trace.js, PLAY_OWNER_CONCEPT.md §11). Debug-only, so
+   it sits above everything including the tool rail — when it is up, reading it
+   IS the task. Monospace because the columns only line up if the digits do. */
+#tracePanel { position: fixed; left: 0; right: 0; top: calc(86px + env(safe-area-inset-top, 0px)); z-index: 9000; max-height: 38vh; display: flex; flex-direction: column;
+  background: rgba(4, 8, 6, .94); border-top: 1px solid rgba(255, 255, 255, .16); border-bottom: 1px solid rgba(255, 255, 255, .16); backdrop-filter: blur(12px);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; line-height: 1.35; color: #d7e6dd; }
+#tracePanel.hiddenState { display: none; }
+#traceHead { display: flex; align-items: center; gap: 10px; padding: 7px 12px calc(7px + env(safe-area-inset-bottom, 0px) * 0); border-bottom: 1px solid rgba(255, 255, 255, .1); }
+#traceHead strong { letter-spacing: .12em; font-size: 10px; color: #eafff1; }
+#traceCount { margin-right: auto; color: #6f8a7c; }
+#traceCount.traceLeaky { color: #ffb64d; font-weight: 700; }
+#traceHead button { border: 1px solid rgba(255, 255, 255, .18); background: transparent; color: #d7e6dd; border-radius: 6px; padding: 3px 8px; font: inherit; }
+#traceList { overflow-y: auto; padding: 4px 0 calc(6px + env(safe-area-inset-bottom, 0px)); -webkit-overflow-scrolling: touch; }
+
+/* One row per Order / Leak / flow change / inert signal. Grid rather than flex
+   so the timestamp and icon columns stay put and the eye can run down them. */
+.traceRow { display: grid; grid-template-columns: 68px 12px 66px minmax(0, 1fr) minmax(0, 1.1fr); gap: 6px; align-items: baseline; padding: 2px 12px; }
+.traceAt { color: #52685d; }
+.traceIcon { text-align: center; }
+.traceHeadCol { color: #8fa89a; text-transform: uppercase; letter-spacing: .06em; overflow: hidden; text-overflow: ellipsis; }
+.traceBody { color: #eafff1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.traceFoot { color: #7d9488; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* A leak is the row you are looking for, so it is the only one that shouts.
+   Not an error state — a system acting on its own is sometimes fine — but it
+   has to be findable at a glance in a scrolling list. */
+.trace-leak { background: rgba(255, 138, 0, .12); }
+.trace-leak .traceIcon, .trace-leak .traceHeadCol { color: #ffb64d; }
+.trace-leak .traceFoot { color: #ffd9a0; }
+.trace-flow .traceIcon, .trace-flow .traceHeadCol { color: #6ec8ff; }
+.trace-flow .traceBody { color: #6ec8ff; }
+.trace-order .traceIcon { color: #38d17a; }
+.trace-inert { opacity: .62; }
+.trace-inert .traceIcon { color: #8fa89a; }
+
+/* ── Flow banner ──────────────────────────────────────────────────────────
+   A readout of the derived flow (marshal.js), not a decoration — if it says
+   PREVIEW the app IS in Preview. Sits under the nav row in the same fixed
+   column, so it never has to be guessed into place at a pixel offset. */
+#playBanner { display: flex; align-items: center; gap: 8px; padding: 5px 12px; font-size: 11px; font-weight: 800; letter-spacing: .06em; }
+#playBanner.hiddenState { display: none; }
+#playBannerDot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; }
+#playBanner.livePlay { background: rgba(31, 211, 109, .14); color: #8ef0b6; }
+#playBanner.livePlay #playBannerDot { background: #1fd36d; box-shadow: 0 0 0 3px rgba(31, 211, 109, .22); }
+#playBanner.previewPlay { background: rgba(255, 255, 255, .07); color: rgba(255, 255, 255, .66); }
+#playBanner.previewPlay #playBannerDot { background: transparent; border: 1px solid rgba(255, 255, 255, .45); }
+#playBannerReturn { margin-left: auto; border: 0; background: rgba(255, 255, 255, .13); color: #eafff1; border-radius: 999px; padding: 3px 10px; font: inherit; }
+#playBannerReturn.hiddenState { display: none; }
+
+/* ── Play ─────────────────────────────────────────────────────────────────
+   The one way into Live, and only present when a trusted fix says you are at
+   the course. Big, central, unmissable — it is the start of the round. */
+#playButton { position: absolute; left: 50%; bottom: calc(96px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 660;
+  min-width: 210px; min-height: 52px; border: 0; border-radius: 999px; background: #1fd36d; color: #06110b;
+  font-size: 15px; font-weight: 950; letter-spacing: .03em; box-shadow: 0 16px 34px rgba(0, 0, 0, .38); }
+#playButton.hiddenState { display: none; }
+#playButton:active { transform: translateX(-50%) scale(.985); }
+
+/* ── The dock's side controls ─────────────────────────────────────────────
+   Shot End and Log shot flank the main coin rather than being extra faces on
+   it: while aiming you might do either, so one control cannot carry both. */
+.shotDock { display: flex; align-items: center; justify-content: center; gap: 10px; }
+.dockSide { min-height: 38px; border: 1px solid rgba(255, 255, 255, .18); border-radius: 999px; padding: 8px 14px;
+  background: rgba(5, 9, 7, .74); color: #eafff1; font-size: 12px; font-weight: 800; backdrop-filter: blur(10px); }
+.dockSide.hiddenState { display: none; }
+#finishControl { border-color: rgba(255, 182, 77, .5); color: #ffd9a0; }
+
+/* ── The edge-clamped dot ─────────────────────────────────────────────────
+   The camera frames the hole and never widens to fit a player who is not on
+   it, so a fix that does not land on screen is pinned to the bezel pointing
+   at where it really is, with the distance along that same line. */
+#gpsDot.edged { opacity: .9; }
+#gpsDot.stale { opacity: .45; }
+#edgeDistance { position: absolute; z-index: 559; padding: 2px 7px; border-radius: 999px; background: rgba(5, 9, 7, .82);
+  border: 1px solid rgba(255, 255, 255, .2); color: #eafff1; font-size: 10px; font-weight: 800; white-space: nowrap; pointer-events: none; }
+#edgeDistance.hiddenState { display: none; }
+
+/* The shot's origin while logging it — what makes reconstructing a hole from
+   the next tee (or three holes later) possible rather than guesswork. */
+#finishOrigin { position: absolute; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; z-index: 556;
+  background: rgba(255, 255, 255, .18); border: 1.5px dashed rgba(255, 255, 255, .7); pointer-events: none; }
+#finishOrigin.hiddenState { display: none; }
+
+/* ── The Logged screen ────────────────────────────────────────────────────
+   Where Shot End and Finish both land. It WAITS: nothing here advances the
+   round except pressing the next hole's number. */
+#loggedScreen { position: absolute; inset: 0; z-index: 800; display: flex; align-items: center; justify-content: center;
+  padding: 20px; background: rgba(3, 7, 5, .82); backdrop-filter: blur(8px); }
+#loggedScreen.hiddenState { display: none; }
+.loggedCard { display: flex; flex-direction: column; align-items: center; gap: 14px; width: min(340px, 100%);
+  padding: 26px 22px; border-radius: 20px; background: rgba(10, 18, 13, .96); border: 1px solid rgba(255, 255, 255, .12);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, .5); text-align: center; }
+.loggedTitle { font-size: 19px; font-weight: 950; color: #eafff1; }
+.loggedDetail { font-size: 12px; font-weight: 700; color: rgba(255, 255, 255, .6); letter-spacing: .04em; }
+.loggedScoreRow { display: flex; align-items: center; gap: 12px; margin-top: 2px; }
+.loggedScoreLabel { font-size: 11px; font-weight: 800; letter-spacing: .1em; color: rgba(255, 255, 255, .5); }
+.loggedScoreRow button { width: 38px; height: 38px; border-radius: 50%; border: 1px solid rgba(255, 255, 255, .2);
+  background: rgba(255, 255, 255, .08); color: #eafff1; font-size: 18px; font-weight: 800; }
+#loggedScore { min-width: 34px; font-size: 26px; font-weight: 950; color: #eafff1; }
+.loggedNext { width: 100%; min-height: 50px; border: 0; border-radius: 14px; background: #1fd36d; color: #06110b;
+  font-size: 15px; font-weight: 950; }
+.loggedNext:active { transform: scale(.99); }
+
+/* ── The picker flag ──────────────────────────────────────────────────────
+   A dot on any hole still holding a shot with no end. A dot rather than a
+   recoloured tile, because the tile background already carries "this is the
+   hole you are on" and a colour would fight it. */
+.holeTile { position: relative; }
+.holeTile.pending::after { content: ""; position: absolute; top: 5px; right: 5px; width: 6px; height: 6px;
+  border-radius: 50%; background: #ffb64d; box-shadow: 0 0 0 2px rgba(10, 18, 13, .9); }
+
+#startPillHint { display: block; align-self: center; padding: 0 8px; font-size: 11px; font-weight: 700; color: rgba(255, 255, 255, .55); }

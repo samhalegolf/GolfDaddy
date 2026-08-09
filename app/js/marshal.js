@@ -445,6 +445,33 @@
         return true;
       },
 
+      /* A published map arrived after the round started (course-store's
+         background freshness check). The round is NOT restarted — shots
+         already recorded stay, the live hole stays, the mode stays. Only the
+         geometry underneath changes, plus the centre if the round began with
+         nothing to derive one from. */
+      PACKAGE_UPDATED: function (p) {
+        if (!p || !p.pkg) return false;
+        S.round.pkg = p.pkg;
+        if (!S.round.centre) S.round.centre = packageCentre(p.pkg);
+        if (p.nines) S.round.nines = p.nines;
+        enterHole(S.viewHole);
+        return true;
+      },
+
+      /* The scorecard's nine picker. Jumps to the new pairing's first hole only
+         when the current one fell outside it. */
+      SET_NINES: function (p) {
+        if (!p || !p.nines) return false;
+        S.round.nines = p.nines;
+        var list = holesInPlay();
+        if (list.indexOf(S.viewHole) === -1) {
+          if (S.live.hole !== null) S.live = { hole: list[0], mode: "track", awayFixes: 0 };
+          enterHole(list[0]);
+        }
+        return true;
+      },
+
       SCORE_SET: function (p) {
         var hole = Number((p && p.hole) != null ? p.hole : S.viewHole);
         var strokes = Number(p && p.strokes);
@@ -515,7 +542,19 @@
           hole: S.fix.point ? nearestHole(S.fix.point) : null
         },
 
+        /* Two different questions, deliberately two fields.
+
+           `player` is who the FLOW is playing as: the trusted fix in Live, your
+           placement in Preview. It is what the distances measure from, because
+           "if I stood here, how far is the green" is the whole question Preview
+           answers.
+
+           `locator` is where you ACTUALLY are, in both flows. It is what the dot
+           draws, so the dot means one thing everywhere — and it is what makes
+           the edge clamp work while previewing hole 5 from the 3rd fairway,
+           which is the case §6 exists for. */
         player: who,
+        locator: S.fix.point ? { lat: S.fix.point.lat, lng: S.fix.point.lng, stale: !S.fix.fresh } : null,
 
         /* The one rule the whole audit was about: no bubble unless you asked
            for one. In Live that means a Lock; in Preview, a placement. */
@@ -541,8 +580,13 @@
         },
 
         /* Offered exactly when this hole has an open shot. Derived from the
-           record, so it is right retroactively and cannot be left armed. */
-        finishControl: { show: !!openShot(S.viewHole) && m !== "finish" && m !== "logged" },
+           record, so it is right retroactively and cannot be left armed.
+
+           Only from a resting mode: while Aiming, Shot End is the thing to press
+           and a third control beside it would be clutter for an action you can
+           reach a moment later from Track. Preview's SETUP is a resting mode
+           too, which is what makes catching up on an old hole possible. */
+        finishControl: { show: !!openShot(S.viewHole) && (m === "track" || m === "setup") },
 
         finish: S.finish ? {
           show: true,
@@ -631,6 +675,24 @@
       signal: signal,
       scene: function () { return lastScene || (lastScene = scene()); },
       onScene: function (fn) { if (typeof fn === "function") sceneListeners.push(fn); },
+
+      /* The small, purposeful reads the tool modules need. Deliberately not a
+         general "give me the state" — each of these is a question something
+         actually asks (wind wants a point to look up, the scorecard wants the
+         nines, Course Data wants the course key), and keeping them named means
+         a new caller has to say what it wants rather than helping itself. */
+      round: function () {
+        return {
+          courseKey: S.round.courseKey,
+          hole: S.viewHole,
+          liveHole: S.live.hole,
+          nines: S.round.nines,
+          holesInPlay: holesInPlay()
+        };
+      },
+      player: player,
+      lastFix: function () { return S.fix.point; },
+
       /* Read-only, for Trace and for tests. Never a way in. */
       state: function () { return JSON.parse(JSON.stringify(S)); },
       shots: function (hole) { return (S.shots[hole] || []).slice(); },

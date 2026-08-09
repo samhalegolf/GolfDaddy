@@ -93,7 +93,7 @@
         if (pinGhost) pinGhost.classList.add("hiddenState");
         if (dragged) {
           app.pin.disarm();
-          var ll = app.play && app.play.latLngAt(e.clientX, e.clientY);
+          var ll = app.painter && app.painter.latLngAt(e.clientX, e.clientY);
           if (ll) app.pin.set(ll);
           close();
           closePinChoice();
@@ -154,8 +154,8 @@
       if (!chosen) { fail("Pick the quadrant the flag is in"); return; }
       var input = document.getElementById("pinLockDistance");
       var distance = input ? Number(input.value) : NaN;
-      var hole = app.play && app.play.holeGeometry ? app.play.holeGeometry() : null;
-      var position = app.position && app.position.current();
+      var hole = app.painter && app.painter.holeGeometry ? app.painter.holeGeometry() : null;
+      var position = app.marshal && app.marshal.player();
       /* Named failures rather than a pin dropped somewhere plausible: without
          a position or a green there is nothing to calculate FROM. */
       if (!position) { fail("No position yet - place yourself first"); return; }
@@ -172,11 +172,15 @@
       closePinLock();
     });
 
+    /* "Put me where I actually am" — a PREVIEW placement, since that is the
+       only flow where where-you-are is a question you answer. In Live the dot
+       already follows the fix, so the Marshal refuses this and Trace shows it
+       as an accepted-but-inert signal rather than it silently doing nothing. */
     var gpsPinBtn = document.getElementById("railGpsPin");
     if (gpsPinBtn) gpsPinBtn.addEventListener("click", function () {
       close();
       var fix = app.gps && app.gps.lastFix();
-      if (fix && app.position) app.position.set(fix, "gps");
+      if (fix && app.marshal) app.marshal.signal("PLACED", { point: fix });
     });
 
     var scoreBtn = document.getElementById("railScorecard");

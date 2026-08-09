@@ -12,12 +12,106 @@
   var mapUpdateDismissed = false;
   var updateCheckToken = 0;
 
-  function show(route) {
-    ["home", "play", "signin"].forEach(function (name) {
-      document.body.classList.toggle("route-" + name, route === name);
+  /* Build the Marshal and hand it the effects it is allowed to cause. It is
+     pure by construction — no globals, no DOM — so everything with a side
+     effect arrives here, which is also why the whole transition table can be
+     driven in node (dev/marshal.test.js).
+
+     Note what is NOT in this list: anything that draws. The Painter is a Scene
+     subscriber, not an effect, because drawing is not something the Marshal
+     asks for — it is what the Scene IS. */
+  function ensureMarshal() {
+    if (app.marshal) return app.marshal;
+    app.marshal = app.createMarshal({
+      trace: app.trace || null,
+      /* The engine's own target rule: the green when the bag reaches it, the
+         fairway layup point when it cannot. */
+      defaultTarget: function (start, rec) {
+        var green = rec && rec.green;
+        if (!green) return null;
+        if (!window.GDBubbleEngine) return green;
+        try {
+          window.GDBubbleEngine.setShot(start, null);
+          return window.GDBubbleEngine.targetForGreenCentre(green, { hole: rec.holeNumber }) || green;
+        } catch (e) { return green; }
+      },
+      effects: {
+        roundStarted: function (courseKey) {
+          if (app.courseData) app.courseData.startRound(courseKey);
+          if (app.pin) app.pin.startRound();
+          if (app.scorecard) app.scorecard.setCourse(courseKey);
+          if (app.gps) app.gps.start();
+          if (app.wakeLock) app.wakeLock.start();
+        },
+        roundEnded: function () {
+          if (app.gps) app.gps.stop();
+          if (app.wakeLock) app.wakeLock.stop();
+        },
+        holeEntered: function (hole, rec) {
+          if (app.pin) app.pin.startHole(hole);
+          if (app.undo) app.undo.clear();
+          if (app.resume) app.resume.setHole(hole);
+          if (window.GDBubbleEngine && rec) {
+            window.GDBubbleEngine.setHoleContext({
+              hole: hole, tee: rec.tee, green: rec.green, route: rec.route
+            });
+          }
+        },
+        shotChanged: function (start, target) {
+          if (window.GDBubbleEngine) window.GDBubbleEngine.setShot(start || null, target || null);
+        },
+        /* GPS Play's only analytical output. Wrapped because nothing about
+           Course Data may interrupt a round. */
+        shotCompleted: function (shot, meta) {
+          try { if (app.courseData) app.courseData.submit(shot, meta); } catch (e) {}
+        },
+        scoreSet: function (hole, strokes) {
+          if (app.scorecard && app.scorecard.setScore) app.scorecard.setScore(hole, strokes);
+        }
+      }
     });
+    if (app.painter) app.painter.attach(app.marshal);
+    /* The only two things that turn the outside world into Signals. A fix that
+       is not trusted is refused inside the Marshal, not here — this file does
+       not get to decide what counts. */
+    if (app.gps) {
+      app.gps.onFix(function (fix) { app.marshal.signal("FIX_RECEIVED", { point: fix }); });
+      app.gps.onStatus(function (status) {
+        renderGpsNotice(status);
+        if (status === "denied" || status === "unsupported") app.marshal.signal("FIX_LOST");
+      });
+    }
+    return app.marshal;
+  }
+
+  function startRound(course, pkg) {
+    ensureMarshal().signal("ROUND_OPENED", {
+      courseKey: app.courseKey(course.courseId),
+      pkg: pkg || null,
+      centre: Number.isFinite(course.courseLat) && Number.isFinite(course.courseLng)
+        ? { lat: course.courseLat, lng: course.courseLng } : null,
+      nines: app.nines ? app.nines.forPackage(app.courseKey(course.courseId), pkg) : null
+    });
+  }
+
+  /* Which SCREEN the app is on — home, play or sign-in — is genuinely outside
+     the Marshal's remit: it owns the round, not the route. But an unattributed
+     write to a watched element is a Leak whoever did it, and it should be,
+     so this declares itself instead of quietly slipping past. Trace showed it
+     as `body.class.toggle ← boot.js` on the very first boot, which is the
+     mechanism working. */
+  function show(route) {
+    function paintRoute() {
+      ["home", "play", "signin"].forEach(function (name) {
+        document.body.classList.toggle("route-" + name, route === name);
+      });
+    }
+    if (app.trace) app.trace.paint("ROUTE_CHANGED", route, paintRoute);
+    else paintRoute();
     if (route !== "play") {
-      app.play.stop();
+      if (app.marshal) app.marshal.signal("END_ROUND");
+      if (app.gps) app.gps.stop();
+      if (app.wakeLock) app.wakeLock.stop();
       activeCourse = null;
       activeMapType = null;
     }
@@ -49,7 +143,10 @@
      there is nothing left to close or undo does Back fall through to leaving
      GPS play the way it always has. */
   function exitBack() {
-    if (app.play && app.play.exitGreenFocus && app.play.exitGreenFocus()) return;
+    /* Back peels one layer at a time, and the Marshal owns what a layer is:
+       it answers false when there was nothing to close, so Back falls through
+       to its next meaning rather than this file guessing at the play state. */
+    if (app.marshal && app.marshal.signal("BACK")) return;
     if (app.undo && app.undo.pop()) return;
     if (window.history.length > 1) window.history.back();
     else exitToMainSite();
@@ -100,22 +197,11 @@
   /* Tapping the hole number opens a grid of every hole in play - a straight
      jump, not just stepping one at a time. Built fresh each open since the
      available holes can change mid-round (a multi-nine pairing swap). */
+  /* The grid itself is drawn by the Painter, because the tile that matters is
+     the flagged one — a hole still holding a shot with no end — and that is a
+     view of the Marshal's record, not something this file can know. Opening the
+     panel is all that is left here. */
   function openHolePicker() {
-    var grid = document.getElementById("holePickerGrid");
-    var current = app.play.state().hole;
-    grid.textContent = "";
-    app.play.availableHoles().forEach(function (hole) {
-      var button = document.createElement("button");
-      button.type = "button";
-      button.textContent = String(hole);
-      button.className = hole === current ? "active" : "";
-      button.addEventListener("click", function () {
-        app.play.goHole(hole);
-        closeHolePicker();
-        checkForMapUpdate();
-      });
-      grid.appendChild(button);
-    });
     document.getElementById("holePickerPanel").classList.remove("hiddenState");
   }
   function closeHolePicker() {
@@ -203,7 +289,7 @@
     document.getElementById("mapUpdateDownload").onclick = function () {
       saveCourseToLibrary(course, pkg);
       activeMapType = mapType;
-      app.play.updatePackage(pkg);
+      app.marshal.signal("PACKAGE_UPDATED", { pkg: pkg });
       bar.classList.add("hiddenState");
     };
   }
@@ -212,11 +298,11 @@
      the first hole in play, so this is a second transition rather than a
      parameter to it - which also means a stale or nonsense hole number simply
      leaves the player on hole 1 rather than failing the whole entry. */
-  async function goResumeHole(hole) {
+  function goResumeHole(hole) {
     var n = Number(hole);
     if (!Number.isFinite(n) || n < 1) return;
-    if (app.play.state().hole === n) return;
-    try { await app.play.goHole(n); } catch (e) {}
+    if (app.marshal.round().hole === n) return;
+    app.marshal.signal("VIEW_HOLE_CHANGED", { hole: n });
   }
 
   async function openPlay(course, resumeHole) {
@@ -234,8 +320,8 @@
       /* Bias to the downloaded copy: play starts immediately, never waits
          on a network round-trip for a course already on the device. */
       activeMapType = cached.mapType;
-      await app.play.start(course.courseId, pkg, { lat: course.courseLat, lng: course.courseLng });
-      await goResumeHole(resumeHole);
+      startRound(course, pkg);
+      goResumeHole(resumeHole);
       hideLoadingScreen();
     } else {
       pkg = await app.fetchCoursePackage({
@@ -246,8 +332,8 @@
       });
       activeMapType = mapTypeOf(pkg);
       /* null package → live map only. Normal, per the handover. */
-      await app.play.start(course.courseId, pkg, { lat: course.courseLat, lng: course.courseLng });
-      await goResumeHole(resumeHole);
+      startRound(course, pkg);
+      goResumeHole(resumeHole);
       hideLoadingScreen();
       saveCourseToLibrary(course, pkg);
     }
@@ -263,14 +349,10 @@
     document.getElementById("globalBackBtn").addEventListener("click", exitBack);
     document.getElementById("globalHomeBtn").addEventListener("click", exitToMainSite);
     document.getElementById("railGpsSettings").addEventListener("click", openGpsSettings);
-    document.getElementById("prevHole").addEventListener("click", function () {
-      app.play.prevHole();
-      checkForMapUpdate();
-    });
-    document.getElementById("nextHole").addEventListener("click", function () {
-      app.play.nextHole();
-      checkForMapUpdate();
-    });
+    /* The hole controls send their own Signals (painter.js). This listener is
+       only the background "has a published map appeared" check riding along. */
+    document.getElementById("prevHole").addEventListener("click", checkForMapUpdate);
+    document.getElementById("nextHole").addEventListener("click", checkForMapUpdate);
     document.getElementById("holeNumber").addEventListener("click", openHolePicker);
     document.getElementById("holePickerClose").addEventListener("click", closeHolePicker);
     document.getElementById("mapUpdateDismiss").addEventListener("click", function () {
@@ -289,8 +371,7 @@
       gpsNoticeDismissed = true;
       document.getElementById("gpsNotice").classList.add("hiddenState");
     });
-    if (app.gps) app.gps.onStatus(renderGpsNotice);
-    if (app.courseData) app.courseDataFeedInstalled = app.courseData.install();
+    app.courseDataFeedInstalled = !!(app.courseData && app.courseData.submit);
     app.basemap.prefetch();   // so base-layer choice is synchronous by map time
     app.nativeBackInstalled = installNativeBack();
     app.booted = true;   // boot-test canary: the last line of the load order ran
@@ -301,16 +382,10 @@
      re-entering its own picker screen. */
   /* Number(null) is 0, and so is Number("") — both finite, and both a real
      point in the Gulf of Guinea. The picker only appends courseLat/courseLng
-     when its own row carried them (gd-course-picker-search-v2.js), so a course
-     handed off without them used to start the round with a centre 15,000km
-     away. play.js measures its "is this person actually at the golf course"
-     check against that centre, so EVERY GPS fix was rejected for the whole
-     round: no dot, no green focus, no distances that follow you — and silent,
-     because a rejected fix looks exactly like a phone that never got one.
-
-     Absent has to read as absent, so play.js falls through to deriving the
-     centre from the package's own geometry. Same null-is-zero trap shot.js's
-     pt() already guards against. */
+     when its own row carried them, so a course handed off without them used to
+     start the round with a centre 15,000km away, and every GPS fix was rejected
+     for the whole round. Absent has to read as absent so the Marshal falls
+     through to deriving the centre from the package's own geometry. */
   function coordParam(params, name) {
     var raw = params.get(name);
     if (raw === null || String(raw).trim() === "") return NaN;

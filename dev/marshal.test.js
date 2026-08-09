@@ -254,8 +254,13 @@ check("Finish is offered exactly when the hole has an open shot", () => {
   const { m } = playing();
   assert.strictEqual(m.scene().finishControl.show, false, "nothing outstanding");
   m.signal("LOCK");
-  assert.strictEqual(m.scene().finishControl.show, true);
-  m.signal("SHOT_END");
+  assert.strictEqual(m.scene().mode, "aim");
+  assert.strictEqual(m.scene().finishControl.show, false, "Shot End is the action while aiming");
+  m.signal("UNLOCK");
+  assert.strictEqual(m.scene().finishControl.show, true, "back at rest, with a shot outstanding");
+  m.signal("FINISH_OPENED", { hole: 1 });
+  m.signal("BALL_MOVED", { point: GREEN });
+  m.signal("FINISH_LOGGED");
   m.signal("BACK");
   assert.strictEqual(m.scene().finishControl.show, false, "logged, so nothing to offer");
 });

@@ -1,28 +1,22 @@
-/* GPS Play continuity regression.
-   fresh-app-boot.test.js proves the app BOOTS. This proves the round HOLDS
-   TOGETHER: it serves the real tree, stubs /api, grants a geolocation, and then
-   walks a scripted round through the three sequences that broke on course on
-   2026-08-08 (see GPS_PLAY_OWNERSHIP_2026-08-08.md).
+/* GPS Play continuity, end to end.
 
-   Every check here fails on the code as it was that day, so this is a
-   regression test rather than a description of the current behaviour:
-     1. A hand-off with no courseLat/courseLng must still trust GPS.
-        Number(null) is 0, so the round used to start with a centre at
-        (0, 0) and reject every fix for the whole round.
-     2. "Head To the Tee" must let go once the player has plainly walked off.
-        It used to hold for the whole hole, so the dot never moved and green
-        focus could never open.
-     3. "Unlock Shot" must stop drawing the aim cluster. The shot stays in
-        flight for Course Data, but the next GPS fix used to redraw the whole
-        bubble from the OLD start against the OLD target.
+   marshal.test.js proves the transition table in node. This proves the whole
+   thing assembled: Marshal → Scene → Painter → screen, in a real browser, with
+   Leaflet, the bubble engine and the real DOM.
+
+   It walks a scripted round through every flow in PLAY_OWNER_CONCEPT.md and
+   finishes on the check that keeps the architecture honest: **Trace reports
+   zero leaks**. If any module writes to a watched element without going through
+   the Painter, that check fails and names the file.
 
    Run: node dev/gps-play-continuity.test.js
-   GD_BOOT_CHROMIUM=/path/to/chromium overrides the browser, same as
-   fresh-app-boot.test.js. */
+   GD_BOOT_CHROMIUM=/path/to/chromium overrides the browser. */
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const playwright = require("playwright");
+
+const ROOT = path.join(__dirname, "..");
 
 async function launchBrowser() {
   if (process.env.GD_BOOT_CHROMIUM) {
@@ -32,53 +26,45 @@ async function launchBrowser() {
   catch (e) { return playwright.chromium.launch({ channel: "chrome" }); }
 }
 
-const ROOT = path.join(__dirname, "..");
 const MIME = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css",
   ".png": "image/png", ".svg": "image/svg+xml", ".json": "application/json" };
 
-/* Akarana-ish. Hole 1 tee → green is 300m, holes spread over ~600m so the
-   derived centroid sits well inside the 800m trust radius of both. */
 const TEE = { lat: -36.9174, lng: 174.7400 };
-const GREEN = { lat: -36.9201, lng: 174.7400 };   // ~300m south of the tee
-
 function offsetM(base, northM, eastM) {
   return { lat: base.lat + northM / 111320,
     lng: base.lng + eastM / (111320 * Math.cos(base.lat * Math.PI / 180)) };
 }
+const GREEN = offsetM(TEE, -300, 0);
 
 const PKG = {
-  status: "lite-geo-ready",
-  geometryVersion: "v1",
-  packageVersion: 1,
+  status: "lite-geo-ready", geometryVersion: "v1", packageVersion: 1,
   holes: [
     { holeNumber: 1, tee: TEE, green: GREEN, greenShape: [], route: [] },
-    { holeNumber: 2, tee: offsetM(TEE, -320, 80), green: offsetM(TEE, -600, 80), greenShape: [], route: [] }
+    { holeNumber: 2, tee: offsetM(TEE, -340, 60), green: offsetM(TEE, -640, 60), greenShape: [], route: [] },
+    { holeNumber: 3, tee: offsetM(TEE, -700, 0), green: offsetM(TEE, -900, 0), greenShape: [], route: [] }
   ]
 };
 
 const server = http.createServer((req, res) => {
-  const url = new URL(req.url, "http://x");
-  const p = url.pathname;
+  const p = new URL(req.url, "http://x").pathname;
   if (p.startsWith("/api/course-package")) {
     res.writeHead(200, { "Content-Type": "application/json" });
     return res.end(JSON.stringify(PKG));
   }
   if (p.startsWith("/api/client-errors")) { res.writeHead(200); return res.end("{}"); }
   if (p.startsWith("/api/")) { res.writeHead(404); return res.end("{}"); }
-  const file = path.join(ROOT, decodeURIComponent(p));
-  fs.readFile(file, (err, body) => {
+  fs.readFile(path.join(ROOT, decodeURIComponent(p)), (err, body) => {
     if (err) { res.writeHead(404); return res.end("not found"); }
-    res.writeHead(200, { "Content-Type": MIME[path.extname(file)] || "application/octet-stream" });
+    res.writeHead(200, { "Content-Type": MIME[path.extname(p)] || "application/octet-stream" });
     res.end(body);
   });
 });
 
 const results = [];
 function check(name, ok, detail) {
-  results.push({ name, ok, detail });
+  results.push({ name, ok });
   console.log((ok ? "  PASS  " : "  FAIL  ") + name + (detail ? "  — " + detail : ""));
 }
-
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 (async () => {
@@ -91,107 +77,192 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   });
   const page = await context.newPage();
   const errors = [];
-  page.on("pageerror", (e) => errors.push(String(e)));
+  page.on("pageerror", (e) => errors.push(String(e).split("\n")[0]));
 
-  /* NO courseLat/courseLng on the hand-off — the case that silently killed GPS
-     for the whole round before packageCentre existed. */
-  await page.goto(`http://127.0.0.1:${port}/app/index.html?courseId=verify-course&courseName=Verify`,
+  /* NO courseLat/courseLng: the hand-off case that used to hand the round a
+     centre at (0,0) and reject every fix for the whole round. */
+  await page.goto(`http://127.0.0.1:${port}/app/index.html?trace=1&courseId=verify&courseName=Verify`,
     { waitUntil: "load" });
-  await page.waitForFunction(() => window.ClarityApp && window.ClarityApp.booted, null, { timeout: 15000 });
-  await page.waitForFunction(() => window.ClarityApp.play.state().hole === 1, null, { timeout: 15000 });
+  await page.waitForFunction(() => window.ClarityApp && window.ClarityApp.booted, { timeout: 15000 });
+  await page.waitForFunction(() => window.ClarityApp.marshal, { timeout: 15000 });
+  await wait(600);
 
-  const pos = () => page.evaluate(() => window.ClarityApp.position.current());
+  const look = (fn) => page.evaluate(fn);
+  const scene = () => page.evaluate(() => window.ClarityApp.marshal.scene());
   const setFix = async (pt) => {
     await context.setGeolocation({ latitude: pt.lat, longitude: pt.lng });
-    await wait(450);
+    await wait(420);
   };
+  const visible = (id) => page.evaluate(
+    (x) => { const e = document.getElementById(x); return !!e && !e.classList.contains("hiddenState"); }, id);
 
-  /* ---- 1. The course centre, derived from the package ----
-     current.centre is private, so this is proved through the behaviour that
-     depends on it: a fix is only adopted once the centre says the player is
-     at the golf course. */
-  await setFix(offsetM(TEE, -10, 5));
-  let p = await pos();
-  check("GPS adopted with no courseLat/courseLng on the URL (derived centre)",
-    !!p && p.source === "gps", p ? `source=${p.source}` : "no position");
+  console.log("\n— opening in Preview —");
 
-  // ---- 2. The tee pin releases itself once you walk off ----
-  /* A live fix retires the start pill, so get back to pre-frame the way a
-     player does: lock in, then Unlock Shot. */
-  await page.click("#shotActionBtn");           // Lock in here
-  await wait(200);
-  await page.click("#shotActionBtn");           // Unlock Shot → pill returns
-  await wait(200);
-  check("Unlock brings the start pill back", await page.isVisible("#startPill"));
+  let s = await scene();
+  check("a round opens in Preview", s.flow === "preview" && s.mode === "setup", `${s.flow}/${s.mode}`);
+  check("the banner says so", (await look(() => document.getElementById("playBannerLabel").textContent))
+    === "PREVIEW · Hole 1");
+  check("the start pill is up and there is no bubble",
+    (await visible("startPill")) && !(await visible("aimBubble")));
+
+  check("Play is offered, because a trusted fix says we are at the course",
+    await visible("playButton"), "with no courseLat/courseLng on the URL — the derived centre");
+
+  console.log("\n— Preview: placing yourself IS the plan —");
+
   await page.click("#headToTeeBtn");
-  p = await pos();
-  check("Head To the Tee pins the player to the tee", !!p && p.source === "tee",
-    p ? `source=${p.source}` : "no position");
-
-  await setFix(offsetM(TEE, -12, 0));          // still on the tee (12m)
-  p = await pos();
-  check("A fix ON the tee does not break the pin", p.source === "tee", `source=${p.source}`);
-
-  await setFix(offsetM(TEE, -60, 0));          // walked off — fix 1 of 2
-  p = await pos();
-  check("One fix clear of the tee is not enough to release it", p.source === "tee",
-    `source=${p.source}`);
-
-  await setFix(offsetM(TEE, -90, 0));          // fix 2 of 2 → release
-  p = await pos();
-  check("Two consecutive fixes clear of the tee release the pin", p.source === "gps",
-    `source=${p.source}`);
-
-  await setFix(offsetM(TEE, -140, 0));
-  p = await pos();
-  const walked = Math.abs(p.lat - TEE.lat) * 111320;
-  check("The dot keeps following the player down the hole", p.source === "gps" && walked > 120,
-    `${Math.round(walked)}m from the tee`);
-
-  // ---- 3. No stale bubble after Unlock ----
-  /* Placing the player IS the lock-in, so Head To the Tee above already put a
-     shot in flight and the dock is showing Unlock Shot. */
-  let face = await page.getAttribute("#shotActionBtn", "data-action");
-  check("A placed player leaves the dock on the Unlock face", face === "unlock", `face=${face}`);
-  const bubbleShownAfterLock = await page.evaluate(() =>
-    !document.getElementById("aimBubble").classList.contains("hiddenState"));
-  check("A locked-in shot draws the aim bubble", bubbleShownAfterLock);
-
-  await page.click("#shotActionBtn");           // Unlock Shot
-  await wait(250);
-  await setFix(offsetM(TEE, -180, 12));         // the fix that used to resurrect it
-  await setFix(offsetM(TEE, -200, 12));
-  const after = await page.evaluate(() => ({
-    bubble: !document.getElementById("aimBubble").classList.contains("hiddenState"),
-    svg: !document.getElementById("bubbleSvg").classList.contains("hiddenState"),
-    svgHtml: document.getElementById("bubbleSvg").innerHTML.length,
-    shotStillInFlight: !!window.ClarityApp.shot.active(),
-    face: document.getElementById("shotActionBtn").dataset.action
-  }));
-  check("No bubble after Unlock, even once GPS fixes resume",
-    !after.bubble && !after.svg && after.svgHtml === 0,
-    `bubble=${after.bubble} svg=${after.svg} paths=${after.svgHtml}`);
-  check("Unlock still leaves the shot in flight for Course Data",
-    after.shotStillInFlight === true);
-  check("Unlock returns the dock button to the Lock face", after.face === "lock",
-    `face=${after.face}`);
-
-  // ---- green focus opens on arrival, now that position keeps flowing ----
-  await setFix(offsetM(GREEN, 25, 0));          // 25m short of the green
   await wait(300);
-  const gf = await page.evaluate(() => ({
-    cls: document.body.classList.contains("green-focus"),
-    stage: document.body.dataset.frameStage,
-    face: document.getElementById("shotActionBtn").dataset.action,
-    ball: !document.getElementById("greenFocusBall").classList.contains("hiddenState")
-  }));
-  check("Walking to the green opens green focus", gf.cls && gf.stage === "zoom",
-    `green-focus=${gf.cls} stage=${gf.stage}`);
-  check("Green focus shows the ball and the Shot End face",
-    gf.ball && gf.face === "end", `ball=${gf.ball} face=${gf.face}`);
+  s = await scene();
+  check("Head To the Tee places you and the bubble is there with nothing pressed",
+    s.mode === "aim" && s.bubble.show, `${s.mode}, bubble=${s.bubble.show}`);
+  check("the pill has gone", !(await visible("startPill")));
+  check("no Lock exists in Preview",
+    (await look(() => ClarityApp.marshal.signal("LOCK"))) === false);
+  check("and nothing was recorded",
+    (await look(() => ClarityApp.marshal.shots(1).length)) === 0);
 
-  check("No uncaught exceptions during the whole sequence", errors.length === 0,
-    errors.slice(0, 3).join(" | "));
+  await page.evaluate(() => ClarityApp.marshal.signal("UNLOCK"));
+  await wait(250);
+  check("Unlock returns the pill — Preview rests at Setup",
+    (await visible("startPill")) && !(await visible("aimBubble")));
+
+  console.log("\n— going Live —");
+
+  await setFix(offsetM(TEE, -6, 0));
+  await page.click("#playButton");
+  await wait(400);
+  s = await scene();
+  check("Play starts the hole you are standing on", s.flow === "live" && s.hole.number === 1);
+  check("the banner switches to LIVE",
+    (await look(() => document.getElementById("playBannerLabel").textContent)) === "LIVE · Hole 1");
+  check("Play is gone once the round is up", !(await visible("playButton")));
+  check("Track shows the distances and no bubble",
+    (await visible("distanceBar")) && !(await visible("aimBubble")));
+
+  await setFix(offsetM(TEE, -40, 0));
+  await setFix(offsetM(TEE, -80, 0));
+  check("fixes move the dot but never raise a bubble",
+    !(await visible("aimBubble")) && (await scene()).mode === "track");
+
+  console.log("\n— Lock, and the stale-bubble regression —");
+
+  await page.click("#shotActionBtn");
+  await wait(300);
+  check("Lock raises the bubble", await visible("aimBubble"));
+  check("Shot End and Log shot are laid out sensibly",
+    (await visible("shotEndBtn")) && !(await visible("finishControl")),
+    "while aiming, Shot End is the action");
+
+  await page.click("#shotActionBtn");     // Unlock
+  await wait(250);
+  await setFix(offsetM(TEE, -140, 8));
+  await setFix(offsetM(TEE, -170, 8));
+  check("Unlock hides the bubble, and later fixes do not resurrect it",
+    !(await visible("aimBubble")) && !(await visible("bubbleSvg")));
+  check("the shot is still in flight for Course Data",
+    await look(() => !!ClarityApp.marshal.openShot(1)));
+  check("Log shot appears now there is something outstanding and we are at rest",
+    await visible("finishControl"));
+
+  console.log("\n— Aim releases itself —");
+
+  await page.click("#shotActionBtn");     // Lock again (closes the first shot)
+  await wait(250);
+  check("locking again closed the previous shot",
+    (await look(() => ClarityApp.marshal.shots(1).length)) === 2);
+  await setFix(offsetM(TEE, -180, 8));    // near the lock point
+  check("a fix near the lock point holds Aim", (await scene()).mode === "aim");
+  await setFix(offsetM(TEE, -230, 8));
+  await setFix(offsetM(TEE, -260, 8));
+  check("two fixes clear of it release Aim back to Track",
+    (await scene()).mode === "track", "you hit and walked");
+
+  console.log("\n— arriving at the green —");
+
+  await setFix(offsetM(GREEN, 12, 3));
+  await wait(300);
+  s = await scene();
+  check("Finish opens on arrival, because there is a shot to log", s.mode === "finish");
+  check("the ball and the shot's origin are both drawn",
+    (await visible("greenFocusBall")) && (await visible("finishOrigin")));
+
+  await page.evaluate(() => ClarityApp.marshal.signal("BALL_MOVED", { point: { lat: -36.92, lng: 174.74 } }));
+  await page.evaluate(() => ClarityApp.marshal.signal("FINISH_LOGGED"));
+  await wait(300);
+  check("logging lands on the Logged screen", await visible("loggedScreen"));
+  check("which offers the next hole and waits",
+    (await look(() => document.getElementById("loggedNext").textContent)) === "Hole 2"
+      && (await scene()).hole.number === 1, "you still have to putt");
+
+  await page.click("#loggedScoreUp");
+  await wait(200);
+  check("the score stepper writes through to the scorecard",
+    (await look(() => ClarityApp.marshal.state().scores["1"])) > 0,
+    `score=${await look(() => ClarityApp.marshal.state().scores["1"])}`);
+
+  await page.click("#loggedNext");
+  await wait(400);
+  s = await scene();
+  check("pressing the hole number advances the round",
+    s.hole.number === 2 && s.flow === "live" && s.mode === "track");
+
+  console.log("\n— catching up on a hole later —");
+
+  await page.evaluate(() => ClarityApp.marshal.signal("LOCK"));
+  await page.evaluate(() => ClarityApp.marshal.signal("NEXT_HOLE"));
+  await wait(350);
+  check("hole 2 is flagged in the picker, left with an open shot",
+    (await scene()).picker.flagged.join(",") === "2");
+  check("and the tile carries the dot",
+    await look(() => {
+      const t = document.querySelector('#holePickerGrid [data-hole="2"]');
+      return !!t && t.classList.contains("pending");
+    }));
+
+  await page.evaluate(() => ClarityApp.marshal.signal("VIEW_HOLE_CHANGED", { hole: 2 }));
+  await wait(350);
+  s = await scene();
+  check("looking back at it is Preview, and it says so",
+    s.flow === "preview"
+      && (await look(() => document.getElementById("playBannerLabel").textContent)) === "PREVIEW · Hole 2");
+  check("the way back to the live hole is right there",
+    (await visible("playBannerReturn"))
+      && (await look(() => document.getElementById("playBannerReturn").textContent)) === "Return to 3");
+  check("Log shot is offered on it, because the shot is still open",
+    await visible("finishControl"));
+
+  console.log("\n— the camera never chases —");
+
+  const edged = await look(() => ({
+    dot: !document.getElementById("gpsDot").classList.contains("hiddenState"),
+    clamped: document.getElementById("gpsDot").classList.contains("edged"),
+    label: document.getElementById("edgeDistance").textContent,
+    labelShown: !document.getElementById("edgeDistance").classList.contains("hiddenState")
+  }));
+  check("a player who is not on the previewed hole is clamped to the edge with a distance",
+    edged.dot && edged.clamped && edged.labelShown && /\d/.test(edged.label),
+    `${edged.label}`);
+
+  console.log("\n— losing GPS —");
+
+  await page.evaluate(() => ClarityApp.marshal.signal("VIEW_HOLE_CHANGED", { hole: 3 }));
+  await page.evaluate(() => ClarityApp.marshal.signal("FIX_LOST"));
+  await wait(300);
+  s = await scene();
+  check("losing GPS does not end the round", s.flow === "live" && s.hole.number === 3);
+  check("the dot goes quiet rather than vanishing",
+    await look(() => document.getElementById("gpsDot").classList.contains("stale")));
+
+  console.log("\n— the architecture holds —");
+
+  const leaks = await look(() => ClarityApp.trace.rows()
+    .filter((r) => r.kind === "leak").map((r) => `${r.target}.${r.field} ← ${r.from}`));
+  check("Trace reports ZERO leaks across the whole round", leaks.length === 0,
+    leaks.slice(0, 5).join(" | "));
+  check("no uncaught exceptions", errors.length === 0, errors.slice(0, 3).join(" | "));
+
+  const replay = await look(() => JSON.parse(ClarityApp.trace.exportLog()).signals.length);
+  check("and the round is replayable from its signal log", replay > 20, `${replay} signals`);
 
   await browser.close();
   server.close();

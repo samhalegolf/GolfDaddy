@@ -78,7 +78,7 @@
   }
 
   function holesToRender() {
-    var nines = app.play && app.play.state().nines;
+    var nines = app.marshal && app.marshal.round().nines;
     if (nines) return nines.holesInPlay;
     var out = [];
     for (var hole = 1; hole <= 18; hole++) out.push(hole);
@@ -97,7 +97,7 @@
         : "–";
     }
     var strokes = courseScores();
-    var currentHole = (app.play && app.play.state().hole) || 0;
+    var currentHole = (app.marshal && app.marshal.round().hole) || 0;
     list.textContent = "";
     holesToRender().forEach(function (hole) {
       list.appendChild(renderRow(hole, strokes[hole] || 0, hole === currentHole));
@@ -106,11 +106,11 @@
 
   /* Only courses with more than two nines (e.g. a 27-hole club) get a
      picker — the common two-nine course has nothing to choose and
-     app.play.state().nines is null for it. */
+     marshal.round().nines is null for it. */
   function renderNinePicker() {
     var row = document.getElementById("ninePicker");
     if (!row) return;
-    var nines = app.play && app.play.state().nines;
+    var nines = app.marshal && app.marshal.round().nines;
     if (!nines || nines.available.length <= 2) {
       row.classList.add("hiddenState");
       row.textContent = "";
@@ -133,7 +133,7 @@
           next = current.length >= 2 ? [current[1], nine.id] : current.concat([nine.id]);
         }
         if (next.length !== 2) return;
-        app.play.setNineSelection(next);
+        applyNineSelection(next);
         render();
       });
       row.appendChild(btn);
@@ -195,10 +195,22 @@
     return row;
   }
 
+  /* The nine picker hands its new pairing to the Marshal rather than acting on
+     it: which holes are in play changes what hole you are on, and that is the
+     Marshal's to decide. */
+  function applyNineSelection(ids) {
+    if (!app.marshal || !app.nines) return null;
+    var round = app.marshal.round();
+    var updated = app.nines.select(round.courseKey, app.marshal.state().round.pkg, ids);
+    if (!updated) return null;
+    app.marshal.signal("SET_NINES", { nines: updated });
+    return updated;
+  }
+
   app.scorecard = {
-    /* Called by play.js on course open — resolves the canonical key and goes
-       to fetch its cached par card; a hole change or a slow/failed fetch never
-       blocks play, it only affects what the (separately opened) panel shows. */
+    /* Called on round open — resolves the canonical key and goes to fetch its
+       cached par card; a hole change or a slow/failed fetch never blocks play,
+       it only affects what the (separately opened) panel shows. */
     setCourse: async function (key) {
       var token = ++loadToken;
       courseKey = app.courseKey(key);
@@ -216,6 +228,20 @@
     close: function () {
       var panel = document.getElementById("scorePanel");
       if (panel) panel.classList.add("hiddenState");
+    },
+    /* Written through by the Logged screen's stepper, which is the one moment
+       a hole is definitely finished — the cheapest place in the round to record
+       a score, and the reason the panel is now somewhere you go to CHECK the
+       card rather than somewhere you have to go to fill it in. */
+    setScore: function (hole, strokes) {
+      setScore(Number(hole), Math.max(0, Math.round(Number(strokes)) || 0));
+      render();
+    },
+    /* What the Logged screen's stepper opens on, so the common case is one
+       glance and no taps. */
+    parFor: function (hole) {
+      var par = Number(parByHole[Number(hole)]);
+      return Number.isFinite(par) && par > 0 ? par : null;
     }
   };
 
