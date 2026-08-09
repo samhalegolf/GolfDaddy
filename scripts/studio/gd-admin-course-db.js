@@ -1617,7 +1617,11 @@ function gdAdminCourseVisualActiveEffects(record){
   const turf=settings.turf||{},lighting=settings.lighting||{},tools=settings.visualTools||{};
   const chips=[];
   const terrain=tools.holeTerrainStrength!=null?Number(tools.holeTerrainStrength):.9;
-  if(terrain>.02)chips.push("Terrain relief");
+  /* Relief is baked by the cloud export from LINZ elevation, not by the local sandbox bake,
+     so the chip has to say where it will show up. It used to just say "Terrain relief" at any
+     strength above zero, which read as "this is on in front of you" while the effect was in
+     fact wired to nothing at all. */
+  if(terrain>.02)chips.push("Terrain relief (on publish)");
   if(settings.floodlight&&settings.floodlight.enabled===true)chips.push("Floodlight");
   const greenStrength=turf.greenStrength!=null?Number(turf.greenStrength):.35;
   if(greenStrength>.05)chips.push("Turf tone");

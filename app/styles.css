@@ -96,22 +96,41 @@ body.surface-published #surfaceImage { display: block; }
    or the fix cannot be projected. */
 #gpsDot { position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%; background: #2f8fef; border: 2px solid #fff; z-index: 550; pointer-events: none; }
 
-/* The engine's bubble rings, projected onto the surface. Opacities are the
-   engine's own bubbleVisuals defaults (gd-app-core DEV_DEFAULTS). */
+/* The engine's bubble, projected onto the surface. One shape now, not three
+   rings: an even white fill and a single hairline border, with the real carry
+   distance knocked out of both (GPS-BUBBLE-V2.md). The fill/stroke opacities
+   that describe the SHAPE live in js/bubble-visual.js, next to the geometry
+   that uses them — only the things that are not geometry are here. */
 #bubbleSvg { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 555; pointer-events: none; }
 #bubbleSvg.hiddenState { display: none; }
-#bubbleSvg .ringOuter { fill: none; stroke: #fff; stroke-opacity: .16; stroke-width: 1; }
-#bubbleSvg .ringMain { fill: #fff; fill-opacity: .046; stroke: #fff; stroke-opacity: .44; stroke-width: 2; }
-#bubbleSvg .ringInner { fill: #000; fill-opacity: .085; stroke: none; }
+#bubbleSvg .bubbleEdge { pointer-events: none; }
 /* The aim ray and the layup middle guide — stroke specs from the old
-   gdRenderAimLine / gdRenderMiddleDistanceGuide. */
-#bubbleSvg .aimLine { fill: none; stroke: #fff; stroke-opacity: .78; stroke-width: 3.25; stroke-dasharray: 8 10; stroke-linecap: round; stroke-linejoin: round; }
+   gdRenderAimLine / gdRenderMiddleDistanceGuide. Quieter than the old ray:
+   the bubble's border is the bright thing now, not the line into it. */
+#bubbleSvg .aimLine { fill: none; stroke: #fff; stroke-opacity: .45; stroke-width: 2.2; stroke-dasharray: 9 12; stroke-linecap: round; stroke-linejoin: round; }
+#bubbleSvg .aimEnd { stroke: #fff; stroke-opacity: .6; stroke-width: 1.6; stroke-linecap: round; }
 #bubbleSvg .middleGuide { fill: none; stroke: #fff; stroke-opacity: .52; stroke-width: 1.8; stroke-dasharray: 2 8; stroke-linecap: round; stroke-linejoin: round; }
 #bubbleSvg .middleGuideLabel { fill: #fff; opacity: .9; font: 700 11px -apple-system, system-ui, sans-serif; text-anchor: middle; paint-order: stroke; stroke: rgba(5, 9, 7, .72); stroke-width: 3px; }
 /* The fairway line (layup context spec from the old
    gdAddMappedReferenceGeometry). Its green-reference companion is gone — the
    green is not outlined during normal play. */
 #bubbleSvg .fairwayLine { fill: none; stroke: #eafff1; stroke-opacity: .18; stroke-width: 1.25; stroke-dasharray: 1 10; stroke-linecap: round; stroke-linejoin: round; }
+
+/* The club the bubble is sized from, at the head of the aim line, with the
+   trumpet flaring back from it into the shape. DOM for text crispness — same
+   reasoning as #pinDistance. */
+#bubbleClub { position: absolute; transform: translate(-50%, -50%); z-index: 556; padding: 2px 9px; border-radius: 5px; background: rgba(13, 27, 18, .86); border: 1px solid rgba(255, 255, 255, .45); color: #fff; font: 800 12px/1 -apple-system, system-ui, sans-serif; letter-spacing: .04em; white-space: nowrap; pointer-events: none; }
+#bubbleClub.hiddenState { display: none; }
+/* Motion is a state change only: the trumpet and chip fade in when a shot
+   comes up. Nothing loops — the bubble tracks the finger during a drag and an
+   idle animation fights that. The painter adds .bubbleEnter for one beat. */
+@keyframes bubbleEnterFade { from { opacity: 0; } to { opacity: 1; } }
+#bubbleSvg.bubbleEnter .bubbleTrumpet,
+#bubbleClub.bubbleEnter { animation: bubbleEnterFade 140ms ease-out both; }
+@media (prefers-reduced-motion: reduce) {
+  #bubbleSvg.bubbleEnter .bubbleTrumpet,
+  #bubbleClub.bubbleEnter { animation: none; }
+}
 
 /* The bubble drag hit: an INVISIBLE area over the cluster itself (the old
    gdCapturedBubbleDragHit contract) — grab the bubble, drag the aim. Sized

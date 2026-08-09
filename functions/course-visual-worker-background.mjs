@@ -27,6 +27,7 @@ sharp.concurrency(1);
 import { planCourseCaptures, captureGrid, packageHoleData, courseBoundsFor } from "./lib/gd-visual-plan-core.mjs";
 import { resolveImagerySource, unscannableReason, attributionFor } from "./lib/gd-imagery-sources.mjs";
 import { renderHoleSurfaceMercator, renderOverview } from "./lib/gd-visual-export-core.mjs";
+import { reliefFromTerrainRgb, RELIEF_DEFAULTS } from "./lib/gd-relief-core.mjs";
 
 const JOBS_TABLE = "course_visual_jobs";
 const MAPS_TABLE = "course_maps";
@@ -61,6 +62,12 @@ const KEEP_FULL_RES_MASTER = true;
    square of this). Changing it MUST come with a bump to the out tag in runExportJob's version
    hash, or already-uploaded frames at the old size get resumed as if they were current. */
 const EXPORT_RENDITION_PX = 3072;
+
+/* Stamps the relief lighting into cache keys. Bump it whenever the shading constants in
+   gd-relief-core.mjs change: stored terrain captures hold shaded pixels, so a new
+   exaggeration or light angle makes every one of them stale, and neither the plan ids nor
+   the recipe hash would notice. */
+const RELIEF_STAMP = "relief1-x" + RELIEF_DEFAULTS.exaggeration + "-az" + RELIEF_DEFAULTS.azimuth + "-al" + RELIEF_DEFAULTS.altitude;
 
 function env(name) { return process.env[name] || ""; }
 function supabaseBase() { return env("SUPABASE_URL").replace(/\/+$/, ""); }
@@ -253,8 +260,9 @@ async function runSnapshotJob(job, deadlineAt) {
   const source = resolveImagerySource(bounds);
   if (!source) throw new Error("imagery-source-unavailable: " + unscannableReason(bounds));
   const attribution = attributionFor(source, null);
-  /* No region ships a hillshade raster - relief is computed from the DEM - so no terrain
-     capture is planned. The natural recipe never composites relief anyway. */
+  /* Relief is computed, not fetched: source.terrain is the DEM spec tagged for the job, and
+     is null wherever the DEM is not tiled terrain-RGB. Null plans no terrain capture and the
+     course renders exactly as it does without relief. */
   /* source is passed so the planner can grid each capture once and clamp every zoom to the
      frame that capture actually lands in; maxOutputPx must be the export's own cap or the two
      disagree and we go back to shooting detail the compositor throws away. */
@@ -262,8 +270,12 @@ async function runSnapshotJob(job, deadlineAt) {
   if (!plan.length) throw new Error("capture plan is empty - no play-ready geometry");
   /* The source is part of the key: masters shot from a different provider must never be
      re-renditioned under a new one, both because the pixels differ and because the stored
-     credit would then be a lie about where they came from. */
-  const planKey = hashText(source.key + "|" + plan.map(item => item.id).join("|"));
+     credit would then be a lie about where they came from.
+
+     RELIEF_STAMP is in the key for the same reason. What gets stored for a terrain capture is
+     shading, not elevation, so the lighting constants are baked into those bytes - change the
+     exaggeration and every stored relief is stale in a way no other signal would catch. */
+  const planKey = hashText(source.key + "|" + RELIEF_STAMP + "|" + plan.map(item => item.id).join("|"));
   const resumable = !!(job.result && job.result.progress && job.result.progress.planKey === planKey);
   /* Stored masters may only be reused when they were shot for THIS plan. The plan ids embed a
      hash of each capture's padded bounds, so a course whose geometry moved gets a different
@@ -310,6 +322,23 @@ async function runSnapshotJob(job, deadlineAt) {
           buffer = await storageDownload(fullPath);
         } else {
           buffer = await buildCapture(grid, { format: isTerrain ? "png" : "jpeg" });
+          /* A terrain capture comes back as elevation packed into RGB, which is data, not a
+             picture. Shade it here, at snapshot time, and store the shading: the lighting is
+             the same for every hole and every recipe, so computing it once per course beats
+             recomputing it per frame, and what lands in storage is then something a human can
+             look at and immediately see is right or wrong. Strength stays at export time -
+             that is the slider, and it only scales what is already drawn. */
+          if (isTerrain) {
+            const relief = await reliefFromTerrainRgb(buffer, {
+              latitude: (grid.imageBounds.north + grid.imageBounds.south) / 2,
+              zoom: grid.captureZoom
+            }, { encoding: (source.terrain && source.terrain.encoding) || "terrain-rgb" });
+            console.log("[visual-worker] relief " + item.captureKey + " " + relief.width + "x" + relief.height +
+              " z" + grid.captureZoom + " " + relief.encoding +
+              " elev " + relief.elevation.min.toFixed(1) + ".." + relief.elevation.max.toFixed(1) + "m" +
+              " (" + (relief.elevation.max - relief.elevation.min).toFixed(1) + "m relief, " + relief.exaggeration + "x)");
+            buffer = relief.png;
+          }
           if (KEEP_FULL_RES_MASTER) await storageUpload(fullPath, buffer, isTerrain ? "image/png" : "image/jpeg");
         }
         /* Export-ready rendition: pre-downscaled to the frame output resolution so the export
@@ -587,8 +616,10 @@ async function runExportJob(job, deadlineAt) {
   const presetId = String(recipe.presetId || "");
   const overrides = recipe.overrides || recipe.courseOverrides || {};
   /* out tag bumped to iz1 when captureZoom went integer-only (gd-visual-export-core): old
-     fractional-zoom frames must NOT be resumed/reused, so the version dir has to change. */
-  const version = "r" + hashText(JSON.stringify({ presetId, overrides, snapshot: capturesIndex.generatedAt, out: "mercator-" + EXPORT_RENDITION_PX + "-iz1" }));
+     fractional-zoom frames must NOT be resumed/reused, so the version dir has to change.
+     RELIEF_STAMP rides along for the same reason - relief changes published pixels, and
+     without it every already-exported frame resumes as current and nothing re-renders. */
+  const version = "r" + hashText(JSON.stringify({ presetId, overrides, snapshot: capturesIndex.generatedAt, out: "mercator-" + EXPORT_RENDITION_PX + "-iz1-" + RELIEF_STAMP }));
   const framesDir = pkg.courseId + "/frames/" + version;
   const holeData = packageHoleData(pkg);
   const terrainEntry = entries.find(e => e.role === "terrain-reference");

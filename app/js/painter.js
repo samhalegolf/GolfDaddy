@@ -508,17 +508,39 @@
     }
   }
 
+  /* Gesture/presentation fact, not play state: was the bubble on screen last
+     pass. Only used to fire the enter fade once, never branched on. */
+  var shotWasVisible = false;
+  var bubbleEnterTimer = null;
+
+  function markBubbleEnter(svg, chipEl, visible) {
+    var entering = visible && !shotWasVisible;
+    shotWasVisible = visible;
+    if (!entering) return;
+    if (bubbleEnterTimer) clearTimeout(bubbleEnterTimer);
+    if (svg) svg.classList.add("bubbleEnter");
+    if (chipEl) chipEl.classList.add("bubbleEnter");
+    bubbleEnterTimer = setTimeout(function () {
+      bubbleEnterTimer = null;
+      if (svg) svg.classList.remove("bubbleEnter");
+      if (chipEl) chipEl.classList.remove("bubbleEnter");
+    }, 200);
+  }
+
   /* The engine's cluster, the aim line, the wind drift line and the layup
      guides — all of them gated on scene.bubble.show, which is the Marshal
      saying you asked for a shot view. Nothing here decides. */
   function drawShot(scene, proj) {
     var svg = el("bubbleSvg");
     var bubble = el("aimBubble");
+    var chipEl = el("bubbleClub");
     if (!svg) return;
     if (!scene.bubble.show || !proj) {
       show(svg, false);
       if (svg.innerHTML) svg.innerHTML = "";
       show(bubble, false);
+      show(chipEl, false);
+      shotWasVisible = false;
       return;
     }
     function project(pt) { return pt ? proj.toScreen(pt) : null; }
@@ -534,25 +556,25 @@
       }
     }
     var centerScreen = model ? project(model.center) : null;
+    var payload = model ? model.payload : null;
     var r = scene.hole.rec || {};
+    var vis = null;
     if (model && centerScreen) {
-      var rings = ["outer", "main", "inner"].map(function (name) {
-        var pts = model.rings[name].map(project).filter(Boolean);
-        if (pts.length < model.rings[name].length * 0.6) return null;
-        return { name: name, d: "M" + pts.map(function (p) { return p.left.toFixed(1) + "," + p.top.toFixed(1); }).join("L") + "Z" };
-      }).filter(Boolean);
-      if (rings.length === 3) {
-        var startScreen = project(scene.bubble.start);
-        var targetScreen = project(scene.bubble.target);
-        if ((!settings() || settings().aimLine()) && startScreen && targetScreen) {
-          var dx = targetScreen.left - startScreen.left, dy = targetScreen.top - startScreen.top;
-          var len = Math.hypot(dx, dy);
-          if (len > 12) {
-            parts.push('<path class="aimLine" d="M' + startScreen.left.toFixed(1) + "," + startScreen.top.toFixed(1)
-              + "L" + (startScreen.left + dx / len * (len - 6)).toFixed(1) + ","
-              + (startScreen.top + dy / len * (len - 6)).toFixed(1) + '"/>');
-          }
-        }
+      var mainProjected = model.rings.main.map(project).filter(Boolean);
+      if (mainProjected.length >= model.rings.main.length * 0.6) {
+        /* One shape — even fill, one border, the real carry knocked out of it —
+           plus the aim ray and the trumpet that ties the club chip to it. The
+           builder owns the geometry; nothing here decides. */
+        vis = window.GDBubbleVisual ? window.GDBubbleVisual.buildBubbleParts({
+          project: project,
+          model: model,
+          start: scene.bubble.start,
+          target: scene.bubble.target,
+          carryM: payload && Number(payload.baseCarry),
+          corridor: settings() ? settings().corridor() : false,
+          aimLine: settings() ? settings().aimLine() : true,
+          idPrefix: "gdb"
+        }) : null;
         var greenScreen = r.green ? project(r.green) : null;
         var maxCarry = engine ? engine.maxPlayableCarryM() : null;
         if (greenScreen && Number.isFinite(maxCarry) && scene.bubble.start) {
@@ -578,11 +600,26 @@
               + (settings() ? settings().format(gap) : Math.round(gap) + "m") + "</text>");
           }
         }
-        rings.forEach(function (p) {
-          parts.push('<path class="ring' + p.name.charAt(0).toUpperCase() + p.name.slice(1) + '" d="' + p.d + '"/>');
-        });
+        if (vis) {
+          parts.push("<defs>" + vis.defs + "</defs>");
+          vis.parts.forEach(function (p) { parts.push(p); });
+        }
       }
     }
+    /* The club chip is DOM, not SVG — crisper text at 12px, and the same
+       pattern #pinDistance already uses. Positioned in viewport pixels from
+       the builder's own aim geometry, so it rides the shot, not the screen. */
+    var clubLabel = payload ? compactClub(payload.club) : null;
+    show(chipEl, !!(vis && clubLabel));
+    if (chipEl && vis && clubLabel) {
+      chipEl.textContent = clubLabel;
+      chipEl.style.left = vis.chip.left + "px";
+      chipEl.style.top = vis.chip.top + "px";
+    }
+    /* Motion, per the handoff: the trumpet and chip fade in on the state
+       change only. Nothing loops — the bubble moves under the finger during a
+       drag and an idle animation would fight that. */
+    markBubbleEnter(svg, chipEl, !!vis);
     show(svg, parts.length > 0);
     if (parts.length) {
       svg.setAttribute("viewBox", "0 0 " + window.innerWidth + " " + window.innerHeight);

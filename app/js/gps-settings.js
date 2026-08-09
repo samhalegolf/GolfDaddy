@@ -27,7 +27,10 @@
   };
   var TIGHTNESS_ORDER = ["tight", "medium", "wide"];
 
-  var DEFAULTS = { units: "m", aimLine: true, shotUp: true, frameTightness: "medium" };
+  /* corridor is deliberately not in the panel yet: it is the dispersion
+     corridor from the v2 bubble design, off until it has been played with.
+     Stored like the rest so turning it on survives a reload. */
+  var DEFAULTS = { units: "m", aimLine: true, shotUp: true, frameTightness: "medium", corridor: false };
 
   var state = load();
   var listeners = [];
@@ -39,7 +42,8 @@
         units: raw.units === "yd" ? "yd" : "m",
         aimLine: raw.aimLine !== false,
         shotUp: raw.shotUp !== false,
-        frameTightness: TIGHTNESS[raw.frameTightness] ? raw.frameTightness : DEFAULTS.frameTightness
+        frameTightness: TIGHTNESS[raw.frameTightness] ? raw.frameTightness : DEFAULTS.frameTightness,
+        corridor: raw.corridor === true
       };
     } catch (e) { return Object.assign({}, DEFAULTS); }
   }
@@ -57,6 +61,7 @@
     units: function () { return state.units; },
     aimLine: function () { return state.aimLine; },
     shotUp: function () { return state.shotUp; },
+    corridor: function () { return state.corridor; },
     /* The lock stage's anchor spread. >1 pushes the aim target further from
        the player anchor, so the same real distance spans more pixels — a
        tighter, more zoomed shot view. */

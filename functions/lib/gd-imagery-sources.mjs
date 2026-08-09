@@ -32,10 +32,11 @@
    download of the same information under a second licence. The DEM is also what the elevation
    grid shipped with each course package is resampled from.
 
-   Until that computation lands, no hillshade raster exists for any region, so the tile-based
-   terrain-reference capture is simply not planned. That costs nothing on the automatic route:
-   the natural recipe - the only recipe it ever bakes - has terrain strength 0 and never
-   composites relief at all. */
+   That computation now lands in gd-relief-core.mjs, so the terrain-reference capture is
+   planned wherever the DEM is tiled terrain-RGB: the planner shoots elevation tiles through
+   the same grid it shoots imagery through, and the worker shades the mosaic before storing
+   it. See reliefSpec below for why "wherever the DEM is tiled terrain-RGB" is narrower than
+   "wherever there is a DEM". */
 
 /* ---------- license predicate ------------------------------------------------------------ */
 
@@ -545,8 +546,28 @@ export function resolveEndpoints(entry, envs) {
     key: entry.key, label: entry.label,
     license: licenseFor(entry, entry.imagery),
     demLicense: dem ? licenseFor(entry, entry.dem) : null,
-    attribution: entry.attribution, imagery, dem
+    attribution: entry.attribution, imagery, dem,
+    terrain: reliefSpec(dem)
   };
+}
+
+/* The relief source, which is the DEM wearing a different hat.
+
+   The note at the top of this file rules out fetching a hillshade raster: relief is computed
+   from elevation, so there is nothing to add to the table for it. What the capture planner
+   needs is a spec it can grid and fetch tiles from, and the DEM already is one - the planner
+   shoots terrain-RGB tiles exactly as it shoots imagery tiles, and the worker turns the
+   mosaic into shading before it is stored. Hence: same spec, tagged so the fetcher knows the
+   bytes are heights rather than a picture.
+
+   Only tiled terrain-RGB qualifies. The US and AU DEMs are ArcGIS float32 exports on a
+   different adapter with a different decode, and quietly feeding those to a terrain-RGB
+   decoder would produce shading from noise. Returning null there means those regions plan no
+   relief capture and composite no relief - the behaviour they have today - rather than
+   shipping something wrong. Widening this is a decode question, not a licensing one. */
+function reliefSpec(dem) {
+  if (!dem || dem.adapter !== "xyz" || dem.encoding !== "terrain-rgb") return null;
+  return { ...dem, role: "relief", computed: "hillshade-from-dem" };
 }
 
 /* The gate. Returns a usable, licensed source for these course bounds, or null.

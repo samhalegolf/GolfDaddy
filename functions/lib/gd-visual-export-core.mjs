@@ -7,7 +7,7 @@
    land exactly where the browser sandbox puts them. The recipe applies as libvips primitives:
      feColorMatrix saturate        -> modulate({saturation})
      feComponentTransfer linear    -> linear(contrast, 255*(brightness-1)/2)
-     terrain multiply layer        -> greyscale+linear hillshade composited blend:multiply
+     terrain relief layer          -> hillshade mask laid on flattened pixels with soft-light
      floodlight / mow lines        -> tiny raster-free SVGs (librsvg's happy path)
    The only SVGs rasterized are a few KB of gradients - no embedded images anywhere. */
 
@@ -47,16 +47,83 @@ export function recipeFilter(settings) {
     contrast
   };
 }
+/* Relief strength, as one number.
+
+   toneSlope/toneLift used to live here and are gone. They existed to make a multiply blend
+   behave: multiply leaves white untouched, so the mask had to be biased bright and only dip
+   dark in the shadows. Soft-light's neutral is mid-grey, so that same bias pushed the entire
+   mask above neutral and the blend could only ever lighten - turning the slider up washed
+   the hole out instead of moulding it. Under soft-light the correct and sufficient control
+   is how far the mask is allowed to travel from mid-grey, which is opacity. Two of the three
+   knobs were compensating for the blend, so they went with it.
+
+   The ramp is linear from zero rather than starting at 0.26: a slider nudged just off the
+   stop should show a hint of relief, not snap straight to a quarter strength. */
 function terrainParams(settings) {
   const tools = settings && settings.visualTools || {};
   const strength = clamp(num(tools.holeTerrainStrength, 0.9), 0, 1.6);
-  return {
-    strength,
-    opacity: clamp(0.26 + strength * 0.46, 0.26, 0.96),
-    toneSlope: clamp(1.05 + strength * 0.16, 1.05, 1.32),
-    toneLift: clamp(0.14 - strength * 0.02, 0.08, 0.14)
-  };
+  return { strength, opacity: clamp(strength * 0.6, 0, 0.96) };
 }
+/* Lay relief onto flattened pixels with soft-light.
+
+   Multiply, which this used to do, can only darken. You get the shadowed side of every roll
+   and nothing at all on the lit side, so ground looks smudged rather than moulded and the
+   whole frame loses brightness as strength rises - turning the slider up made the hole
+   dimmer instead of more three-dimensional. Soft-light darkens below mid-grey and lightens
+   above it, so a ridge gets its highlight and that is what reads as raised.
+
+   sharp has no soft-light blend, hence raw pixels. The 256x256 lookup table costs 65k
+   evaluations once and saves one pow and several branches per subpixel; at 3072x3072x3
+   that is the difference between milliseconds and seconds.
+
+   Call this AFTER the imagery is flattened and BEFORE mow lines and floodlight go on. Those
+   are drawn marks, not ground - shading them would be shading the annotation. */
+function softLightTable(opacity) {
+  const table = new Uint8Array(256 * 256);
+  for (let s = 0; s < 256; s++) {
+    /* Fold opacity into the shade rather than cross-fading the result: pulling the mask
+       toward mid-grey is exactly "less relief", and it keeps this to one pass. */
+    const shade = 0.5 + (s / 255 - 0.5) * opacity;
+    for (let b = 0; b < 256; b++) {
+      const base = b / 255;
+      const d = base <= 0.25 ? ((16 * base - 12) * base + 4) * base : Math.sqrt(base);
+      const v = shade <= 0.5
+        ? base - (1 - 2 * shade) * base * (1 - base)
+        : base + (2 * shade - 1) * (d - base);
+      table[s * 256 + b] = Math.round(Math.min(1, Math.max(0, v)) * 255);
+    }
+  }
+  return table;
+}
+
+function applyRelief(rgb, mask, opacity, channels) {
+  if (!mask || !(opacity > 0)) return rgb;
+  const table = softLightTable(opacity);
+  const pixels = Math.min(mask.length, Math.floor(rgb.length / channels));
+  for (let i = 0, p = 0; i < pixels; i++, p += channels) {
+    const row = mask[i] * 256;
+    rgb[p] = table[row + rgb[p]];
+    rgb[p + 1] = table[row + rgb[p + 1]];
+    rgb[p + 2] = table[row + rgb[p + 2]];
+  }
+  return rgb;
+}
+
+/* Flatten imagery, lay relief on the ground, then draw the overlays on top. One helper so
+   the three renderers cannot drift apart on ordering, which is exactly how the old multiply
+   ended up in three slightly different shapes. */
+async function flattenWithRelief({ width, height, background, composites, relief, overlays, quality }) {
+  let surface = sharp({ create: { width, height, channels: 3, background }, limitInputPixels: false })
+    .composite(composites);
+  if (relief) {
+    const flat = await surface.raw().toBuffer({ resolveWithObject: true });
+    applyRelief(flat.data, relief.data, relief.opacity, flat.info.channels);
+    surface = sharp(flat.data, { raw: { width: flat.info.width, height: flat.info.height, channels: flat.info.channels }, limitInputPixels: false });
+  }
+  if (overlays && overlays.length) surface = surface.composite(overlays);
+  return surface.jpeg({ quality }).toBuffer();
+}
+
 function mowingOpacity(value) {
   value = String(value || "");
   if (value === "Low") return 0.12;
@@ -271,33 +338,33 @@ export async function renderHoleFrame({ pins, captures, terrain, settings, width
   if (!layers.length) throw new Error("no renderable capture layers");
   layers.sort((a, b) => a.layer - b.layer || a.segment - b.segment || a.id.localeCompare(b.id));
   const composites = layers.map(l => ({ input: l.input, raw: l.raw, left: l.left, top: l.top }));
-  /* Terrain relief: hillshade placed with the same matrix, desaturated, multiplied. */
+  /* Terrain relief: shading placed with the same matrix, as a single-channel mask. */
   const terrainCfg = terrainParams(settings);
+  let relief = null;
   if (terrain && terrainCfg.strength > 0.02) {
     const layer = await captureLayer(axis, terrain.entry, terrain.buffer, null);
     if (layer) {
-      /* greyscale() collapses to a b-w colourspace; force back to srgb so the raw buffer has
-         the channel count the final composite expects. */
-      const shaded = await sharp({ create: { width: axis.width, height: axis.height, channels: 4, background: { r: 255, g: 255, b: 255, alpha: 0 } }, limitInputPixels: false })
+      const shaded = await sharp({ create: { width: axis.width, height: axis.height, channels: 3, background: { r: 128, g: 128, b: 128 } }, limitInputPixels: false })
         .composite([{ input: layer.input, raw: layer.raw, left: layer.left, top: layer.top }])
         .greyscale()
-        .toColourspace("srgb")
-        .linear(terrainCfg.toneSlope, 255 * terrainCfg.toneLift)
-        .ensureAlpha(terrainCfg.opacity)
+        .toColourspace("b-w")
         .raw().toBuffer({ resolveWithObject: true });
-      composites.push({ input: shaded.data, raw: { width: shaded.info.width, height: shaded.info.height, channels: shaded.info.channels }, blend: "multiply" });
+      relief = { data: shaded.data, opacity: terrainCfg.opacity };
     }
   }
+  const overlays = [];
   const mow = mowingOpacity(settings && settings.mowingVisibility);
-  if (mow > 0) composites.push({ input: mowSvg(axis.width, axis.height, mow), blend: "over" });
+  if (mow > 0) overlays.push({ input: mowSvg(axis.width, axis.height, mow), blend: "over" });
   const flood = floodlightSettings(settings);
-  if (flood.enabled) composites.push({ input: floodlightSvg(axis, pins, flood), blend: "over" });
+  if (flood.enabled) overlays.push({ input: floodlightSvg(axis, pins, flood), blend: "over" });
   /* Background pushed through the same tone math the layers got, then ONE composite pass and
      ONE encode - the double full-canvas JPEG round-trip was a third of the render time. */
   const toneChannel = v => Math.round(Math.min(255, Math.max(0, v * f.contrast + 255 * ((f.brightness - 1) / 2))));
-  const jpeg = await sharp({ create: { width: axis.width, height: axis.height, channels: 3, background: { r: toneChannel(16), g: toneChannel(19), b: toneChannel(15) } }, limitInputPixels: false })
-    .composite(composites)
-    .jpeg({ quality }).toBuffer();
+  const jpeg = await flattenWithRelief({
+    width: axis.width, height: axis.height,
+    background: { r: toneChannel(16), g: toneChannel(19), b: toneChannel(15) },
+    composites, relief, overlays, quality
+  });
   return {
     jpeg,
     width: axis.width,
@@ -362,6 +429,7 @@ export async function renderHoleSurfaceMercator({ pins, captures, terrain, setti
     composites.push({ input: buf.data, raw: { width: buf.info.width, height: buf.info.height, channels: buf.info.channels }, left: Math.max(0, left), top: Math.max(0, top) });
   }
   const terrainCfg = terrainParams(settings);
+  let reliefMask = null;
   if (terrain && terrainCfg.strength > 0.02) {
     const pb = projectedBounds(terrain.entry.bounds);
     if (pb) {
@@ -378,26 +446,27 @@ export async function renderHoleSurfaceMercator({ pins, captures, terrain, setti
         if (cropLeft || cropTop || visW < w || visH < h) {
           terrainLayer = sharp(await terrainLayer.png().toBuffer(), { limitInputPixels: false }).extract({ left: cropLeft, top: cropTop, width: visW, height: visH });
         }
-        const placed = await sharp({ create: { width: W, height: H, channels: 4, background: { r: 255, g: 255, b: 255, alpha: 0 } }, limitInputPixels: false })
+        const placed = await sharp({ create: { width: W, height: H, channels: 3, background: { r: 128, g: 128, b: 128 } }, limitInputPixels: false })
           .composite([{ input: await terrainLayer.png().toBuffer(), left: Math.max(0, left), top: Math.max(0, top) }])
           .greyscale()
-          .toColourspace("srgb")
-          .linear(terrainCfg.toneSlope, 255 * terrainCfg.toneLift)
-          .ensureAlpha(terrainCfg.opacity)
+          .toColourspace("b-w")
           .raw().toBuffer({ resolveWithObject: true });
-        composites.push({ input: placed.data, raw: { width: placed.info.width, height: placed.info.height, channels: placed.info.channels }, blend: "multiply" });
+        reliefMask = { data: placed.data, opacity: terrainCfg.opacity };
       }
     }
   }
   const mercProject = (pt) => { const wp = world(pt); return wp ? { x: wp.x * scalePx - originPx.x, y: wp.y * scalePx - originPx.y } : null; };
+  const overlays = [];
   const mow = mowingOpacity(settings && settings.mowingVisibility);
-  if (mow > 0) composites.push({ input: mowSvg(W, H, mow), blend: "over" });
+  if (mow > 0) overlays.push({ input: mowSvg(W, H, mow), blend: "over" });
   const flood = floodlightSettings(settings);
-  if (flood.enabled) composites.push({ input: floodlightSvg({ width: W, height: H }, pins, flood, mercProject), blend: "over" });
+  if (flood.enabled) overlays.push({ input: floodlightSvg({ width: W, height: H }, pins, flood, mercProject), blend: "over" });
   const toneChannel = v => Math.round(Math.min(255, Math.max(0, v * fRecipe.contrast + 255 * ((fRecipe.brightness - 1) / 2))));
-  const jpeg = await sharp({ create: { width: W, height: H, channels: 3, background: { r: toneChannel(16), g: toneChannel(19), b: toneChannel(15) } }, limitInputPixels: false })
-    .composite(composites)
-    .jpeg({ quality }).toBuffer();
+  const jpeg = await flattenWithRelief({
+    width: W, height: H,
+    background: { r: toneChannel(16), g: toneChannel(19), b: toneChannel(15) },
+    composites, relief: reliefMask, overlays, quality
+  });
   const nw = unworld(merged.left, merged.top);
   const se = unworld(merged.right, merged.bottom);
   return {
@@ -428,11 +497,11 @@ export async function renderOverview({ backdrop, terrain, settings, width = 1440
     const shaded = await sharp(terrain.buffer, { limitInputPixels: false })
       .resize({ width: bMeta.width, height: bMeta.height, fit: "fill" })
       .greyscale()
-      .toColourspace("srgb")
-      .linear(terrainCfg.toneSlope, 255 * terrainCfg.toneLift)
-      .ensureAlpha(terrainCfg.opacity)
+      .toColourspace("b-w")
       .raw().toBuffer({ resolveWithObject: true });
-    base = base.composite([{ input: shaded.data, raw: { width: shaded.info.width, height: shaded.info.height, channels: shaded.info.channels }, blend: "multiply" }]);
+    const flat = await base.raw().toBuffer({ resolveWithObject: true });
+    applyRelief(flat.data, shaded.data, terrainCfg.opacity, flat.info.channels);
+    base = sharp(flat.data, { raw: { width: flat.info.width, height: flat.info.height, channels: flat.info.channels }, limitInputPixels: false });
   }
   const jpeg = await base.jpeg({ quality }).toBuffer();
   return { jpeg, width: bMeta.width, height: bMeta.height };

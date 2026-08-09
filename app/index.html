@@ -116,6 +116,10 @@
   <div id="surfaceViewport">
     <img id="surfaceImage" alt="">
     <svg id="bubbleSvg" class="hiddenState"></svg>
+    <!-- The club the bubble is sized from, sitting at the head of the aim line.
+         DOM rather than SVG for the same reason #pinDistance is: crisper text
+         at this size. The painter positions it from the visual builder. -->
+    <div id="bubbleClub" class="hiddenState"></div>
     <div id="pinDistance" class="hiddenState"></div>
     <div id="pinMarker" class="hiddenState"><img src="../assets/icons/flag.svg" alt=""></div>
     <!-- Finish: the ball you drag to where the shot actually finished, and the
@@ -368,6 +372,7 @@
 <script src="js/play-surface.js"></script>
 <script src="js/distance.js"></script>
 <script src="js/bubble-engine.js"></script>
+<script src="js/bubble-visual.js"></script>
 <script src="js/bag.js"></script>
 <script src="js/wind.js"></script>
 <script src="js/pin.js"></script>

@@ -644,7 +644,7 @@ async function bootCheck() {
 
     S.set("aimLine", false); await wait();
     const aimOff = { line: !!document.querySelector("#bubbleSvg .aimLine"),
-      rings: !!document.querySelector("#bubbleSvg .ringMain") };
+      bubble: !!document.querySelector("#bubbleSvg .bubbleFill") };
     S.set("aimLine", true); await wait();
     const aimOn = { line: !!document.querySelector("#bubbleSvg .aimLine") };
 
@@ -871,7 +871,13 @@ async function bootCheck() {
       targetToGreen: act && act.target ? app.distance.haversineMeters(act.target, green) : null,
       maxCarry: window.GDBubbleEngine.maxPlayableCarryM(),
       shotRowShown: !document.getElementById("shotRow").classList.contains("hiddenState"),
-      ringPaths: document.querySelectorAll("#bubbleSvg .ringOuter, #bubbleSvg .ringMain, #bubbleSvg .ringInner").length,
+      bubbleShapes: document.querySelectorAll("#bubbleSvg .bubbleFill, #bubbleSvg .bubbleEdge").length,
+      legacyRings: document.querySelectorAll("#bubbleSvg .ringOuter, #bubbleSvg .ringMain, #bubbleSvg .ringInner").length,
+      carryKnockout: !!document.querySelector("#bubbleSvg mask[id$='-carry']"),
+      clubChip: (function () {
+        var c = document.getElementById("bubbleClub");
+        return c && !c.classList.contains("hiddenState") ? c.textContent : null;
+      })(),
       svgShown: !document.getElementById("bubbleSvg").classList.contains("hiddenState"),
       aimLine: !!document.querySelector("#bubbleSvg .aimLine"),
       middleGuide: !!document.querySelector("#bubbleSvg .middleGuide"),
@@ -1282,7 +1288,11 @@ async function bootCheck() {
     assert.ok(Math.abs(e.targetFromTee - e.maxCarry) < 8,
       "the default aim sits at the max bag distance: " + Math.round(e.targetFromTee) + " vs " + Math.round(e.maxCarry));
     assert.ok(e.shotRowShown, "aimed short of the green from the tee → SHOT/REM row shows");
-    assert.ok(e.svgShown && e.ringPaths === 3, "the engine's three cluster rings render on the surface, got " + e.ringPaths);
+    assert.ok(e.svgShown && e.bubbleShapes === 2 && e.legacyRings === 0,
+      "the bubble renders as ONE shape (fill + border), not three rings: "
+      + e.bubbleShapes + " shapes, " + e.legacyRings + " legacy rings");
+    assert.ok(e.carryKnockout, "the real carry distance is knocked out of the bubble");
+    assert.ok(e.clubChip, "the club chip sits at the head of the aim line, got " + e.clubChip);
     assert.ok(e.aimLine, "the aim ray renders with the bubble");
     assert.ok(e.middleGuide, "laying up → the bubble→green middle guide shows");
     assert.ok(/^Green \d+m$/.test(e.middleLabel), "the middle guide labels the remaining leg, got: " + e.middleLabel);
@@ -1474,7 +1484,7 @@ async function bootCheck() {
     "Units: Yards must convert the card, got " + gpsSettings.metres.front + "m -> "
     + gpsSettings.yards.front + "yd");
   assert.ok(!gpsSettings.aimOff.line, "Show aim line: Off must drop the aim ray");
-  assert.ok(gpsSettings.aimOff.rings, "Show aim line: Off must NOT drop the bubble rings");
+  assert.ok(gpsSettings.aimOff.bubble, "Show aim line: Off must NOT drop the bubble itself");
   assert.ok(gpsSettings.aimOn.line, "Show aim line: On brings the aim ray back");
   assert.ok(Math.abs(gpsSettings.rotated) > 5,
     "the shot-up frame rotates the live map, got " + gpsSettings.rotated + " deg");
