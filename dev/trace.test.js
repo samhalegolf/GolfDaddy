@@ -28,6 +28,7 @@ const PAGE = `<!doctype html><html><body>
 <div id="gpsDot"></div><div id="aimBubble" class="hiddenState"></div><svg id="bubbleSvg"></svg>
 <div id="distanceBar"></div><button id="shotActionBtn"></button>
 <div id="startPill"></div><div id="map"></div>
+<link rel="stylesheet" href="/app/styles.css">
 <script src="/app/js/trace.js"></script>
 <script src="/leaky-module.js"></script>
 </body></html>`;
@@ -50,7 +51,12 @@ const server = http.createServer((req, res) => {
   if (p === "/leaky-module.js") { res.writeHead(200, { "Content-Type": "text/javascript" }); return res.end(LEAKY); }
   fs.readFile(path.join(ROOT, decodeURIComponent(p)), (err, body) => {
     if (err) { res.writeHead(404); return res.end(); }
-    res.writeHead(200, { "Content-Type": "text/javascript" });
+    /* The panel's collapsed state is CSS, so the stylesheet has to arrive with
+       a stylesheet mime type or the browser refuses it and the test measures
+       an unstyled div. */
+    res.writeHead(200, {
+      "Content-Type": p.endsWith(".css") ? "text/css" : "text/javascript"
+    });
     res.end(body);
   });
 });
@@ -136,12 +142,23 @@ const server = http.createServer((req, res) => {
     Array.isArray(log.leaks) && log.leaks.length === 2);
 
   // ---- the window ----
-  check("the window renders the rows",
+  /* Collapsed by default so the panel does not sit on top of the play
+     controls; the leak count still shows in the header. */
+  check("collapsed, it shows the leak count and no rows",
     await page.evaluate(async () => {
       await new Promise((r) => requestAnimationFrame(r));
+      const list = document.getElementById("traceList");
+      return getComputedStyle(list).display === "none"
+        && /leak/.test(document.getElementById("traceCount").textContent);
+    }));
+
+  check("tapping the header opens the log",
+    await page.evaluate(async () => {
+      document.getElementById("traceHead").click();
       await new Promise((r) => requestAnimationFrame(r));
-      const el = document.getElementById("traceList");
-      return !!el && el.children.length > 0;
+      await new Promise((r) => requestAnimationFrame(r));
+      const list = document.getElementById("traceList");
+      return getComputedStyle(list).display !== "none" && list.children.length > 0;
     }));
 
   check("no uncaught exceptions", errors.length === 0, errors.slice(0, 2).join(" | "));

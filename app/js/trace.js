@@ -284,8 +284,19 @@
     document.body.appendChild(panel);
     list = panel.querySelector("#traceList");
     count = panel.querySelector("#traceCount");
-    panel.querySelector("#traceClose").addEventListener("click", function () { app.trace.disable(); });
-    panel.querySelector("#traceCopy").addEventListener("click", function () {
+    panel.querySelector("#traceClose").addEventListener("click", function (e) {
+      e.stopPropagation();
+      app.trace.disable();
+    });
+    /* Tap the header to open the log. Collapsed it is one strip carrying the
+       leak count; expanded it covers the play controls, which is fine when you
+       are reading it and not fine the rest of the time. */
+    panel.querySelector("#traceHead").addEventListener("click", function () {
+      panel.classList.toggle("expanded");
+      render();
+    });
+    panel.querySelector("#traceCopy").addEventListener("click", function (e) {
+      e.stopPropagation();
       var text = app.trace.exportLog();
       try { navigator.clipboard.writeText(text); } catch (e) {}
       var blob = new Blob([text], { type: "application/json" });
@@ -314,6 +325,14 @@
   var pending = false;
   function render() {
     if (!enabled || !list || pending) return;
+    if (panel && !panel.classList.contains("expanded")) {
+      /* Collapsed: keep the count live, skip the row work entirely. */
+      if (count) {
+        count.textContent = leakCount ? leakCount + (leakCount === 1 ? " leak" : " leaks") : "clean";
+        count.className = leakCount ? "traceLeaky" : "";
+      }
+      return;
+    }
     pending = true;
     requestAnimationFrame(function () {
       pending = false;

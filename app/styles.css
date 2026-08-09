@@ -129,7 +129,6 @@ body.pin-dragging #surfaceViewport,
 body.ball-dragging #surfaceViewport { transition: none !important; }
 
 /* Green focus: the green centre ring in the zoom stage. */
-#greenRing { position: absolute; width: 20px; height: 20px; margin: -10px 0 0 -10px; border-radius: 50%; border: 2px solid #1fd36d; background: rgba(31, 211, 109, .1); z-index: 545; pointer-events: none; }
 
 /* The green-focus ball: the position dot becomes a draggable golf ball inside
    40m of the green, so you can say where the shot actually finished rather
@@ -458,7 +457,7 @@ body.pin-dragging #pinMarker { cursor: grabbing; }
    The debug window (js/trace.js, PLAY_OWNER_CONCEPT.md §11). Debug-only, so
    it sits above everything including the tool rail — when it is up, reading it
    IS the task. Monospace because the columns only line up if the digits do. */
-#tracePanel { position: fixed; left: 0; right: 0; top: calc(86px + env(safe-area-inset-top, 0px)); z-index: 9000; max-height: 38vh; display: flex; flex-direction: column;
+#tracePanel { position: fixed; left: 0; right: 0; top: calc(124px + env(safe-area-inset-top, 0px)); z-index: 9000; max-height: 38vh; display: flex; flex-direction: column;
   background: rgba(4, 8, 6, .94); border-top: 1px solid rgba(255, 255, 255, .16); border-bottom: 1px solid rgba(255, 255, 255, .16); backdrop-filter: blur(12px);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; line-height: 1.35; color: #d7e6dd; }
 #tracePanel.hiddenState { display: none; }
@@ -467,7 +466,13 @@ body.pin-dragging #pinMarker { cursor: grabbing; }
 #traceCount { margin-right: auto; color: #6f8a7c; }
 #traceCount.traceLeaky { color: #ffb64d; font-weight: 700; }
 #traceHead button { border: 1px solid rgba(255, 255, 255, .18); background: transparent; color: #d7e6dd; border-radius: 6px; padding: 3px 8px; font: inherit; }
-#traceList { overflow-y: auto; padding: 4px 0 calc(6px + env(safe-area-inset-bottom, 0px)); -webkit-overflow-scrolling: touch; }
+/* Collapsed to its header by default. Expanded it is 38vh of overlay, which
+   sits straight on top of the hole arrows — a debug tool must not take the
+   controls away from you to tell you about them. The leak count lives in the
+   header, so you still notice without opening it. */
+#traceList { display: none; overflow-y: auto; padding: 4px 0 calc(6px + env(safe-area-inset-bottom, 0px)); -webkit-overflow-scrolling: touch; }
+#tracePanel.expanded #traceList { display: block; }
+#traceHead { cursor: pointer; }
 
 /* One row per Order / Leak / flow change / inert signal. Grid rather than flex
    so the timestamp and icon columns stay put and the eye can run down them. */

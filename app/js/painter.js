@@ -40,6 +40,11 @@
   var provenance = null;
   var transitionToken = 0;
   var loadedHole = null;       // which hole's surface is presented
+  var loadedVisual = null;     // WHICH surface, so a package arriving mid-round re-presents
+  /* "loading" is a real state, not a gap. While a hole DECLARES a surface, the
+     previous picture holds and no map is created underneath it — creating one
+     is what used to flash OSM under every published hole (README rule 2). */
+  var presentation = "live";   // "loading" | "published" | "live"
   var lastCameraKey = null;    // so a solved camera is not re-solved every pass
   var currentScene = null;
 
@@ -79,8 +84,12 @@
     return map;
   }
 
+  /* No centre guard: basemap.baseFor() already falls through to OSM for a
+     missing or unusable centre, and the licence for every source in there is
+     conditional on the attribution being visible. Returning early left an
+     unmapped hole as a blank dark rectangle with no tiles and no credit. */
   function setBaseFor(centre) {
-    if (!map || !centre) return;
+    if (!map) return;
     var base = app.basemap.baseFor(centre);
     if (base.kind === baseKind) return;
     if (baseLayer) baseLayer.remove();
@@ -128,6 +137,32 @@
           return surfaceLib.latLngFromWorldPx(
             { x: Number(meta.originPx.x) + px.x, y: Number(meta.originPx.y) + px.y },
             Number(meta.captureZoom));
+        }
+      };
+    }
+    /* A published surface that could not solve a frame is shown CONTAINED —
+       scaled to fit, letterboxed. That is a real presentation with its own
+       projection, so it gets a real projector rather than a patch at each call
+       site. Returning it here (instead of falling through) is what stops the
+       hidden live map answering for a picture it knows nothing about, which
+       would place a confident dot in completely the wrong place. */
+    if (published && img && img.dataset.playSurface) {
+      var containMeta;
+      try { containMeta = JSON.parse(img.dataset.playSurface); } catch (e) { return null; }
+      var dims = { width: img.clientWidth, height: img.clientHeight };
+      var rect = img.getBoundingClientRect();
+      return {
+        toScreen: function (ll) {
+          if (!ll) return null;
+          var px = surfaceLib.projectToSurface(containMeta, ll.lat, ll.lng);
+          if (!px) return null;
+          var at = surfaceLib.fitContain(px, containMeta.outputDimensions, dims);
+          return at ? { left: at.left + rect.left, top: at.top + rect.top } : null;
+        },
+        toLatLng: function (screenPt) {
+          return surfaceLib.surfaceScreenToLatLng(containMeta,
+            { left: screenPt.left - rect.left, top: screenPt.top - rect.top },
+            { width: rect.width, height: rect.height });
         }
       };
     }
@@ -296,7 +331,9 @@
      Leaflet's own zoom so tiles stay native-resolution, and only the ROTATION
      rides in a CSS matrix on an over-provisioned square element. */
   function applyLiveCamera(stage, scene) {
-    if (!ensureMap((scene.camera.hole && (scene.camera.hole.green || scene.camera.hole.tee)) || null)) return;
+    var anchor = (scene.camera.hole && (scene.camera.hole.green || scene.camera.hole.tee))
+      || scene.camera.centre || null;
+    if (!ensureMap(anchor)) return;
     var view = { width: window.innerWidth, height: window.innerHeight };
     if (!(view.width > 0 && view.height > 0)) return;
     var solved = surfaceLib.stageFrame(refPx, stage, framePoints(scene, null), view, {
@@ -351,7 +388,19 @@
      keep drawing on holes that cannot be staged. */
   function plainMap(scene) {
     liveFrame = { a: 1, b: 0, tx: 0, ty: 0 };
-    if (!ensureMap(null)) return;
+    if (!ensureMap((scene && scene.camera.centre) || null)) return;
+    /* Give the element its viewport size back FIRST. Fitting while it is still
+       the over-provisioned square solves the fit for a ~930px container and
+       then applies it to a 390px viewport — the hole lands about 2.4x too
+       zoomed with the tee and green off the sides. */
+    if (mapSide !== null) {
+      mapSide = null;
+      var node = el("map");
+      if (node) { node.style.width = ""; node.style.height = ""; node.style.transform = ""; }
+      document.body.classList.remove("map-framed");
+      applyGestureState();
+      map.invalidateSize({ animate: false });
+    }
     var r = scene && scene.camera.hole;
     var pts = [];
     if (r) [r.tee, r.green].concat(r.route || [], r.greenShape || []).forEach(function (p) {
@@ -359,13 +408,7 @@
     });
     if (pts.length >= 2) map.fitBounds(L.latLngBounds(pts).pad(0.15), { animate: false });
     else if (pts.length === 1) map.setView(pts[0], 17, { animate: false });
-    if (mapSide === null) return;
-    mapSide = null;
-    var node = el("map");
-    if (node) { node.style.width = ""; node.style.height = ""; node.style.transform = ""; }
-    document.body.classList.remove("map-framed");
-    applyGestureState();
-    map.invalidateSize({ animate: false });
+    else if (scene && scene.camera.centre) map.setView([scene.camera.centre.lat, scene.camera.centre.lng], 15, { animate: false });
   }
 
   // ------------------------------------------------------------ hole layers
@@ -573,21 +616,14 @@
      never placed and off the green, or simply not projectable — which is the
      "pick it up and put it where the shot finished" gesture. */
   function drawFinish(scene, proj) {
-    var ball = el("greenFocusBall"), hint = el("greenFocusHint"), ring = el("greenRing");
+    var ball = el("greenFocusBall"), hint = el("greenFocusHint");
     var origin = el("finishOrigin");
     if (!ball) return;
     if (!scene.finish.show) {
       show(ball, false); show(hint, false); show(origin, false);
       ball.classList.remove("parked");
-      show(ring, scene.camera.stage === "green" && !!(scene.hole.rec && scene.hole.rec.green) && !!proj);
-      if (ring && scene.hole.rec && scene.hole.rec.green && proj) {
-        var g = proj.toScreen(scene.hole.rec.green);
-        show(ring, !!g);
-        if (g) { ring.style.left = g.left + "px"; ring.style.top = g.top + "px"; }
-      }
       return;
     }
-    show(ring, false);
     var at = scene.finish.ball && proj ? proj.toScreen(scene.finish.ball) : null;
     var parked = !at;
     show(ball, true);
@@ -653,7 +689,9 @@
 
     var dock = el("shotActionBtn");
     show(dock, scene.dock.show);
-    if (dock && scene.dock.show) setDockFace(dock, scene);
+    /* Updated even while hidden, so the button never comes back wearing the
+       previous coin for the frame it takes the new PNG to decode. */
+    if (dock) setDockFace(dock, scene);
     show(el("shotEndBtn"), scene.dock.canShotEnd);
 
     show(el("finishControl"), scene.finishControl.show);
@@ -818,6 +856,7 @@
         img.dataset.playSurface = JSON.stringify(asset.playSurface);
         img.src = url;
         published = true;
+        presentation = "published";
         document.body.classList.add("surface-published");
         provenance = {
           origin: origin, url: url, courseKey: courseKey, holeNumber: hole,
@@ -828,6 +867,10 @@
         };
         renderProvenance();
         lastCameraKey = null;
+        /* Draw it. Without this the image appeared with no solved frame — a
+           letterboxed picture with the dot still placed from the live map's
+           camera — and only corrected itself on the next Signal. */
+        if (marshal) render(marshal.scene());
       });
     };
     pre.onerror = function () {
@@ -839,26 +882,49 @@
     pre.src = url;
   }
 
+  /* The stall timer and the error path both land here. It has to draw, or a
+     hung request leaves the player with nothing at all — which is the blackout
+     the bounded timer exists to prevent. */
   function surfaceFallback() {
     repaint("SURFACE_FAILED", function () {
+      presentation = "live";
       clearSurface();
       lastCameraKey = null;
+      if (marshal) render(marshal.scene());
     });
   }
 
   async function loadSurfaceFor(scene) {
     var hole = scene.hole.number;
+    var r = scene.hole.rec;
     var courseKey = marshal.state().round.courseKey;
     var token = ++transitionToken;
     loadedHole = hole;
-    clearSurface();
+    loadedVisual = (r && r.visual && (r.visual.url || r.visual.path)) || null;
     lastCameraKey = null;
-    var r = scene.hole.rec;
-    if (r && r.visual) { presentSurface(r.visual, "package", hole, courseKey); return; }
+    /* The stale METADATA goes at once, so nothing is ever projected against the
+       previous hole's surface. The stale IMAGE stays: it is the only thing on
+       screen until the new one decodes, and blanking it is what put a map in
+       between two published holes. */
+    var img = el("surfaceImage");
+    if (img) img.dataset.playSurface = "";
+
+    if (r && r.visual) {
+      presentation = "loading";
+      presentSurface(r.visual, "package", hole, courseKey);
+      return;
+    }
+    /* Absence is the answer for this hole: the live map IS the presentation,
+       so create it now. */
+    presentation = "live";
+    clearSurface();
     if (!courseKey) return;
     var answer = await ensureStore().surfaceFor(courseKey, hole);
     if (token !== transitionToken) return;
-    if (answer.state === "published") presentSurface(answer.asset, "visuals", hole, courseKey);
+    if (answer.state === "published") {
+      presentation = "loading";
+      presentSurface(answer.asset, "visuals", hole, courseKey);
+    }
   }
 
   // ---------------------------------------------------------------- render
@@ -870,7 +936,25 @@
      changes. */
   function render(scene) {
     currentScene = scene;
-    if (scene.hole.number !== loadedHole) loadSurfaceFor(scene);
+    var r = scene.hole.rec;
+    var visualKey = (r && r.visual && (r.visual.url || r.visual.path)) || null;
+    /* Re-present when the HOLE changes or when the surface for it does — a
+       published map downloaded mid-round arrives as a package update on the
+       same hole, and without the second test the round stayed on the live map
+       for good. */
+    if (scene.hole.number !== loadedHole || visualKey !== loadedVisual) {
+      /* Undo any focus scroll-jump from the previous hole. Every overlay is
+         positioned in viewport coordinates while the map scrolls with the
+         container, so an offset screen puts the dot and bubble off the
+         picture until the hole is re-entered. */
+      var screenEl = el("playScreen");
+      if (screenEl) { screenEl.scrollTop = 0; screenEl.scrollLeft = 0; }
+      loadSurfaceFor(scene);
+    }
+    /* A declared surface is on its way: hold the previous picture, draw no map
+       and place no overlays. They would be projected against metadata that has
+       already been cleared. */
+    if (presentation === "loading") { drawChrome(scene); drawPicker(scene); return; }
     applyCamera(scene);
     if (!published) drawHoleLayers(scene);
     document.body.classList.toggle("flow-preview", scene.flow === "preview");
@@ -900,18 +984,6 @@
     var proj = projector();
     var at = unTilt(clientX, clientY);
     var ll = proj ? proj.toLatLng({ left: at.left, top: at.top }) : null;
-    if (!ll && published && !activeFrame) {
-      var img = el("surfaceImage");
-      if (img && img.dataset.playSurface) {
-        try {
-          var meta = JSON.parse(img.dataset.playSurface);
-          var rect = img.getBoundingClientRect();
-          ll = surfaceLib.surfaceScreenToLatLng(meta,
-            { left: clientX - rect.left, top: clientY - rect.top },
-            { width: rect.width, height: rect.height });
-        } catch (e) { ll = null; }
-      }
-    }
     if (!ll) return;
     if (app.pin && app.pin.armed()) { app.pin.set(ll); app.pin.disarm(); return; }
     /* A tap places you in Preview and nowhere else. In Live your position is
@@ -990,9 +1062,14 @@
     var img = el("surfaceImage");
     if (img) img.addEventListener("click", function (e) { onSurfaceTap(e.clientX, e.clientY); });
 
+    /* Three faces, three meanings — the dock is the one control that always
+       says what there is to do with the shot right now. */
     var dock = el("shotActionBtn");
     if (dock) dock.addEventListener("click", function () {
-      send(dock.dataset.action === "unlock" ? "UNLOCK" : "LOCK");
+      var face = dock.dataset.action;
+      if (face === "shotEnd") send("FINISH_LOGGED");
+      else if (face === "unlock") send("UNLOCK");
+      else send("LOCK");
     });
 
     var play = el("playButton");
@@ -1015,9 +1092,6 @@
     if (finish) finish.addEventListener("click", function () {
       send("FINISH_OPENED", { hole: currentScene ? currentScene.hole.number : null });
     });
-
-    var finishDone = el("finishDone");
-    if (finishDone) finishDone.addEventListener("click", function () { send("FINISH_LOGGED"); });
 
     var shotEnd = el("shotEndBtn");
     if (shotEnd) shotEnd.addEventListener("click", function () { send("SHOT_END"); });
@@ -1093,25 +1167,40 @@
       });
       return true;
     },
+    /* Leaving play. Without this, presentation state outlived the round: open
+       course A, go Home, open course B, and B's hole 1 matched the loadedHole
+       we were already on — so A's image stayed up and every projection was
+       solved against A's metadata on B's hole. The token bump also drops any
+       surface load still in flight. */
+    detach: function () {
+      transitionToken += 1;
+      loadedHole = null;
+      loadedVisual = null;
+      lastCameraKey = null;
+      presentation = "live";
+      currentScene = null;
+      repaint("ROUND_ENDED", function () {
+        clearSurface();
+        if (objectLayer) { objectLayer.remove(); objectLayer = null; }
+        if (mapSide !== null) {
+          mapSide = null;
+          var node = el("map");
+          if (node) { node.style.width = ""; node.style.height = ""; node.style.transform = ""; }
+          document.body.classList.remove("map-framed");
+          if (map) map.invalidateSize({ animate: false });
+        }
+        liveFrame = { a: 1, b: 0, tx: 0, ty: 0 };
+        document.body.classList.remove("tilt-lock", "green-focus", "shot-active", "flow-preview");
+        delete document.body.dataset.frameStage;
+      });
+      return true;
+    },
     /* Viewport client coords → a course lat/lng, for the pin drag that starts
        on a tool-rail button outside this closure. */
     latLngAt: function (clientX, clientY) {
       var proj = projector();
       var at = unTilt(clientX, clientY);
-      var ll = proj ? proj.toLatLng({ left: at.left, top: at.top }) : null;
-      if (ll) return ll;
-      if (published && !activeFrame) {
-        var img = el("surfaceImage");
-        if (!img || !img.dataset.playSurface) return null;
-        try {
-          var meta = JSON.parse(img.dataset.playSurface);
-          var rect = img.getBoundingClientRect();
-          return surfaceLib.surfaceScreenToLatLng(meta,
-            { left: clientX - rect.left, top: clientY - rect.top },
-            { width: rect.width, height: rect.height });
-        } catch (e) { return null; }
-      }
-      return null;
+      return proj ? proj.toLatLng({ left: at.left, top: at.top }) : null;
     },
     /* The current hole's green, for tools that compute against it (Pin Lock). */
     holeGeometry: function () {

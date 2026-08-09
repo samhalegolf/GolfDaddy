@@ -110,6 +110,7 @@
     else paintRoute();
     if (route !== "play") {
       if (app.marshal) app.marshal.signal("END_ROUND");
+      if (app.painter && app.painter.detach) app.painter.detach();
       if (app.gps) app.gps.stop();
       if (app.wakeLock) app.wakeLock.stop();
       activeCourse = null;

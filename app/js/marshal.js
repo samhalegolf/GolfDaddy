@@ -346,12 +346,33 @@
       PREV_HOLE: function () { return stepRound(-1); },
 
       /* Preview only: placing yourself IS the plan, so the lock-in is automatic
-         and the bubble is there with nothing to press (§3). */
+         and the bubble is there with nothing to press (§3).
+
+         SETUP only. Once you have placed yourself the bubble is up and you are
+         aiming, and an ordinary tap must not move where you are playing from —
+         a tap near the origin dragged it sideways and everything downstream
+         (default target, cluster, guides) re-solved around the new point, over
+         and over. Unlock is how you change your mind: it clears the placement
+         and brings the pill back, which is the resting state of this flow (§5).
+         play.js had the same trap and solved it with a single-use armed tap;
+         gating on the mode says the same thing without a flag to leave on. */
       PLACED: function (p) {
-        if (flow() !== "preview") return false;
+        if (flow() !== "preview" || S.preview.mode !== "setup") return false;
         var point = pt(p && p.point);
         if (!point) return false;
         S.preview.placement = point;
+        /* On the green, that is green focus — the ball and Shot End, the same
+           as in play. It records nothing (Preview never does, §3); the point is
+           that the green behaves the same way you are used to. Off the green it
+           is the shot view, because that is what you are planning. */
+        var green = (rec() || {}).green;
+        if (green && (metres(point, green) || Infinity) <= GREEN_FOCUS_M) {
+          S.preview.target = null;
+          S.preview.mode = "finish";
+          S.finish = { hole: S.viewHole, ball: point, placed: false };
+          syncEngine();
+          return true;
+        }
         S.preview.target = pt(defaultTarget(point, rec()));
         S.preview.mode = "aim";
         syncEngine();
@@ -418,9 +439,14 @@
          opened; what it may never do is open one. */
       FINISH_OPENED: function (p) {
         var hole = Number((p && p.hole) != null ? p.hole : S.viewHole);
-        var open = openShot(hole);
-        if (!open) return false;
-        S.finish = { hole: hole, ball: S.finish && S.finish.hole === hole ? S.finish.ball : null, placed: false };
+        /* Live opens it to close something outstanding, so it needs an open
+           shot. Preview opens it to look at the green, so it needs nothing. */
+        if (flow() === "live" && !openShot(hole)) return false;
+        S.finish = {
+          hole: hole,
+          ball: (S.finish && S.finish.hole === hole ? S.finish.ball : null) || player() || null,
+          placed: false
+        };
         setMode("finish");
         return true;
       },
@@ -438,10 +464,20 @@
         var hole = S.finish.hole;
         var open = openShot(hole);
         var ball = S.finish.ball || S.fix.point;
-        if (!open || !ball) return false;
-        completeShot(hole, open, ball, S.finish.placed ? "ball-placed" : "ball-tracked");
+        /* Something outstanding: this is the real log, and it lands on the
+           Logged screen. Note the guard is "is there an open shot", not "which
+           flow" — catching up on an old hole happens FROM Preview (§4.3) and
+           must still record. */
+        if (open && ball) {
+          completeShot(hole, open, ball, S.finish.placed ? "ball-placed" : "ball-tracked");
+          S.finish = null;
+          setMode("logged");
+          return true;
+        }
+        /* Nothing outstanding — the green was a look. Close it and go back to
+           the flow's resting state, with nothing written. */
         S.finish = null;
-        setMode("logged");
+        setMode(flow() === "live" ? "track" : "setup");
         return true;
       },
 
@@ -573,10 +609,17 @@
 
         startPill: { show: f === "preview" && m === "setup" && !!(r && r.tee) },
 
+        /* Aiming ALWAYS offers Unlock, in either flow — it is the only way back
+           to the flow's resting state (§5), and without it Preview's Head To
+           the Tee was a one-way door: placed, bubble up, no pill, no way to
+           change your mind short of leaving the hole.
+
+           Lock is Live-only (Preview has no shots to open) and so is Shot End
+           (Preview records nothing). Unlock is the one control both share. */
         dock: {
-          show: live && (m === "track" ? !!S.fix.point : m === "aim"),
-          face: m === "aim" ? "unlock" : "lock",
-          canShotEnd: m === "aim" && !!S.fix.point
+          show: m === "aim" || m === "finish" || (live && m === "track" && !!S.fix.point),
+          face: m === "finish" ? "shotEnd" : (m === "aim" ? "unlock" : "lock"),
+          canShotEnd: live && m === "aim" && !!S.fix.point
         },
 
         /* Offered exactly when this hole has an open shot. Derived from the
@@ -613,7 +656,11 @@
         camera: {
           stage: m === "finish" ? "green" : (aiming ? "shot" : "hole"),
           hole: r,
-          shot: aimShot
+          shot: aimShot,
+          /* The course centre, so a hole with no tee or green still has
+             somewhere to point the map — and so the basemap can be chosen at
+             all, which is what keeps the imagery attribution on screen. */
+          centre: S.round.centre
         }
       };
     }

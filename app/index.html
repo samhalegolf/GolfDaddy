@@ -69,6 +69,19 @@
       <button id="globalBackBtn" type="button" aria-label="Back">Back</button>
       <button id="globalHomeBtn" type="button" class="homeTextBtn" aria-label="Home">Home</button>
     </div>
+    <!-- Which flow you are in, as a readout rather than a decoration: it
+         renders from the same derived `flow` as everything else (marshal.js),
+         so it cannot say LIVE while the app behaves as PREVIEW. Preview's
+         version carries the way back, so a look ahead is never somewhere you
+         get stuck.
+
+         Inside the top bar's column on purpose: as a sibling of #map it was
+         painted underneath the fixed nav row, and Return could not be tapped. -->
+    <div id="playBanner" class="hiddenState">
+      <span id="playBannerDot" aria-hidden="true"></span>
+      <span id="playBannerLabel"></span>
+      <button id="playBannerReturn" type="button" class="hiddenState"></button>
+    </div>
     <!-- A published map arriving mid-round is a prompt, not an auto-switch -
          the loading screen already covered the "available from the start"
          case before play began. -->
@@ -87,17 +100,6 @@
       <button id="gpsNoticeDismiss" type="button" aria-label="Dismiss">&times;</button>
     </div>
   </div>
-  <!-- Which flow you are in, as a readout rather than a decoration: it renders
-       from the same derived `flow` as everything else (marshal.js), so it
-       cannot say LIVE while the app behaves as PREVIEW. If it flickers, that is
-       a real flow flicker and Trace has the Signal that caused it. Preview's
-       version carries the way back, so a look ahead is never somewhere you get
-       stuck. -->
-  <div id="playBanner" class="hiddenState">
-    <span id="playBannerDot" aria-hidden="true"></span>
-    <span id="playBannerLabel"></span>
-    <button id="playBannerReturn" type="button" class="hiddenState"></button>
-  </div>
   <div id="map"></div>
   <!-- Basemap credit, outside #map on purpose: the stage camera rotates and
        oversizes the map element, so Leaflet's own attribution control would
@@ -110,7 +112,6 @@
   <div id="surfaceViewport">
     <img id="surfaceImage" alt="">
     <svg id="bubbleSvg" class="hiddenState"></svg>
-    <div id="greenRing" class="hiddenState"></div>
     <div id="pinDistance" class="hiddenState"></div>
     <div id="pinMarker" class="hiddenState"><img src="../assets/icons/flag.svg" alt=""></div>
     <!-- Finish: the ball you drag to where the shot actually finished, and the

@@ -121,7 +121,14 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   check("and nothing was recorded",
     (await look(() => ClarityApp.marshal.shots(1).length)) === 0);
 
-  await page.evaluate(() => ClarityApp.marshal.signal("UNLOCK"));
+  /* Click the real control, not the signal: Head To the Tee was a one-way door
+     because the dock was gated on Live, so Preview aiming had no button at all
+     and there was no way back to the pill. */
+  check("Preview aiming shows a way back", await visible("shotActionBtn"),
+    `face=${await look(() => document.getElementById("shotActionBtn").dataset.action)}`);
+  check("and it does not offer Shot End, since Preview records nothing",
+    !(await visible("shotEndBtn")));
+  await page.click("#shotActionBtn");
   await wait(250);
   check("Unlock returns the pill — Preview rests at Setup",
     (await visible("startPill")) && !(await visible("aimBubble")));
@@ -186,8 +193,15 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   check("the ball and the shot's origin are both drawn",
     (await visible("greenFocusBall")) && (await visible("finishOrigin")));
 
+  /* Confirm by CLICKING the dock, not by firing the signal. Green focus had a
+     ball and no way to confirm it — the dock was hidden in finish mode and the
+     #finishDone button the painter listened for did not exist in the shell.
+     Driving signals in the test is exactly what hid that. */
+  check("green focus offers Shot End on the dock",
+    (await visible("shotActionBtn"))
+      && (await look(() => document.getElementById("shotActionBtn").dataset.action)) === "shotEnd");
   await page.evaluate(() => ClarityApp.marshal.signal("BALL_MOVED", { point: { lat: -36.92, lng: 174.74 } }));
-  await page.evaluate(() => ClarityApp.marshal.signal("FINISH_LOGGED"));
+  await page.click("#shotActionBtn");
   await wait(300);
   check("logging lands on the Logged screen", await visible("loggedScreen"));
   check("which offers the next hole and waits",
@@ -208,8 +222,9 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
   console.log("\n— catching up on a hole later —");
 
-  await page.evaluate(() => ClarityApp.marshal.signal("LOCK"));
-  await page.evaluate(() => ClarityApp.marshal.signal("NEXT_HOLE"));
+  await page.click("#shotActionBtn");        // Lock
+  await wait(200);
+  await page.click("#nextHole");             // the real arrow
   await wait(350);
   check("hole 2 is flagged in the picker, left with an open shot",
     (await scene()).picker.flagged.join(",") === "2");
@@ -219,7 +234,11 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
       return !!t && t.classList.contains("pending");
     }));
 
-  await page.evaluate(() => ClarityApp.marshal.signal("VIEW_HOLE_CHANGED", { hole: 2 }));
+  /* Navigate by the real picker tile, which is also the control that carries
+     the pending flag. */
+  await page.click("#holeNumber");
+  await wait(150);
+  await page.click('#holePickerGrid [data-hole="2"]');
   await wait(350);
   s = await scene();
   check("looking back at it is Preview, and it says so",
@@ -245,7 +264,10 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
   console.log("\n— losing GPS —");
 
-  await page.evaluate(() => ClarityApp.marshal.signal("VIEW_HOLE_CHANGED", { hole: 3 }));
+  await page.click("#playBannerReturn");     // the banner's way back
+  await wait(300);
+  check("the banner's Return button goes back to the live hole",
+    (await scene()).flow === "live");
   await page.evaluate(() => ClarityApp.marshal.signal("FIX_LOST"));
   await wait(300);
   s = await scene();
@@ -264,9 +286,8 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   /* Get back onto the LIVE hole — Lock does not exist in Preview, so a drag
      test has to run where a shot can actually be opened. */
   const liveHole = await look(() => ClarityApp.marshal.round().liveHole);
-  await page.evaluate((h) => ClarityApp.marshal.signal("VIEW_HOLE_CHANGED", { hole: h }), liveHole);
   await setFix(offsetM(TEE, -700 + 6, 0));      // hole 3's tee
-  await page.evaluate(() => ClarityApp.marshal.signal("LOCK"));
+  await page.click("#shotActionBtn");           // Lock, by the button
   await wait(300);
   check("locked in on the live hole, ready to drag",
     (await scene()).mode === "aim" && (await visible("aimBubble")), `hole ${liveHole}`);
@@ -294,6 +315,38 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   const aimAfter = await look((h) => JSON.stringify(ClarityApp.marshal.openShot(h).target), liveHole);
   check("but the aim actually moved", aimBefore !== aimAfter && !!aimAfter,
     `${aimBefore} → ${aimAfter}`);
+
+  console.log("\n— the guards the old play.js earned —");
+
+  /* Each of these existed in play.js with a comment explaining what broke
+     without it, and each was dropped in the rewrite. */
+
+  check("the dock's face is current even while it is hidden",
+    await look(() => {
+      /* Logged hides the dock. If the face is only refreshed while shown, it
+         comes back wearing the previous coin until the new PNG decodes. */
+      const before = document.getElementById("shotActionBtn").dataset.action;
+      return before === ClarityApp.marshal.scene().dock.face;
+    }), "no stale coin on the way back");
+
+  check("leaving the round tears the presentation down",
+    await look(() => {
+      ClarityApp.painter.detach();
+      return !document.body.classList.contains("surface-published")
+        && !document.body.classList.contains("map-framed")
+        && document.body.dataset.frameStage === undefined;
+    }), "so the next course cannot open on this one's surface");
+
+  check("and a second round re-presents from scratch",
+    await look(() => {
+      ClarityApp.marshal.signal("ROUND_OPENED", {
+        courseKey: "second", pkg: { status: "lite-geo-ready", holes: [
+          { holeNumber: 1, tee: { lat: -36.8, lng: 174.7 }, green: { lat: -36.803, lng: 174.7 }, greenShape: [], route: [] }
+        ] }, hole: 1
+      });
+      return ClarityApp.marshal.round().courseKey === "second"
+        && ClarityApp.marshal.scene().hole.number === 1;
+    }));
 
   console.log("\n— the architecture holds —");
 

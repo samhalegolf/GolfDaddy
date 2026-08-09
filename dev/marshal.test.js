@@ -218,6 +218,82 @@ check("Unlock in Preview returns the pill, not a GPS dot", () => {
   assert.strictEqual(m.scene().player, null, "the placement is un-given");
 });
 
+check("Preview aiming offers Unlock, or Head To the Tee is a one-way door", () => {
+  const { m } = newRound();
+  m.signal("PLACED", { point: TEE });
+  const dock = m.scene().dock;
+  assert.strictEqual(dock.show, true, "there must be a way back to the pill");
+  assert.strictEqual(dock.face, "unlock");
+  assert.strictEqual(dock.canShotEnd, false, "Preview records nothing, so no Shot End");
+  m.signal("UNLOCK");
+  assert.strictEqual(m.scene().startPill.show, true);
+  assert.strictEqual(m.scene().dock.show, false, "back at the pill, nothing to unlock");
+});
+
+check("a tap while aiming does NOT move the origin", () => {
+  const { m } = newRound();
+  m.signal("PLACED", { point: TEE });
+  const origin = JSON.stringify(m.scene().bubble.start);
+  /* The tap that ends a bubble drag, a stray thumb, a second look at the
+     green — none of them may re-place you once the bubble is up. */
+  assert.strictEqual(m.signal("PLACED", { point: offsetM(TEE, -20, 30) }), false);
+  assert.strictEqual(JSON.stringify(m.scene().bubble.start), origin);
+});
+
+check("Unlock is how you change your mind about where you are playing from", () => {
+  const { m } = newRound();
+  m.signal("PLACED", { point: TEE });
+  m.signal("UNLOCK");
+  assert.strictEqual(m.scene().mode, "setup");
+  const moved = offsetM(TEE, -20, 30);
+  assert.strictEqual(m.signal("PLACED", { point: moved }), true);
+  assert.strictEqual(m.scene().bubble.start.lat.toFixed(5), moved.lat.toFixed(5));
+});
+
+check("standing on the green in Preview opens real green focus", () => {
+  const { m } = newRound();
+  m.signal("PLACED", { point: offsetM(GREEN, 8, 4) });
+  const s = m.scene();
+  assert.strictEqual(s.mode, "finish", "the ball workflow, same as in play");
+  assert.strictEqual(s.finish.show, true, "there is a ball");
+  assert.strictEqual(s.camera.stage, "green");
+  assert.strictEqual(s.bubble.show, false, "a shot modelled from the green is nonsense");
+  assert.strictEqual(s.dock.show, true, "and a Shot End to confirm with");
+  assert.strictEqual(s.dock.face, "shotEnd");
+});
+
+check("the Preview ball drags, and Shot End records NOTHING", () => {
+  const { m, effects } = newRound();
+  m.signal("PLACED", { point: offsetM(GREEN, 8, 4) });
+  m.signal("BALL_MOVED", { point: offsetM(GREEN, 2, 6) });
+  assert.strictEqual(m.scene().finish.placed, true);
+  assert.strictEqual(m.signal("FINISH_LOGGED"), true, "the button works");
+  assert.strictEqual(effects.completed.length, 0, "but nothing was written");
+  assert.deepStrictEqual(m.shots(1), []);
+  assert.strictEqual(m.scene().mode, "setup", "back at the pill");
+});
+
+check("placing off the green still gives the shot view", () => {
+  const { m } = newRound();
+  m.signal("PLACED", { point: offsetM(GREEN, 120, 0) });
+  assert.strictEqual(m.scene().mode, "aim");
+  assert.strictEqual(m.scene().camera.stage, "shot");
+  assert.strictEqual(m.scene().bubble.show, true);
+});
+
+check("catching up from Preview still records, because a shot IS outstanding", () => {
+  const { m, effects } = playing();
+  m.signal("LOCK");
+  m.signal("NEXT_HOLE");
+  m.signal("VIEW_HOLE_CHANGED", { hole: 1 });
+  assert.strictEqual(m.scene().flow, "preview");
+  m.signal("FINISH_OPENED", { hole: 1 });
+  m.signal("BALL_MOVED", { point: GREEN });
+  m.signal("FINISH_LOGGED");
+  assert.strictEqual(effects.completed.length, 1, "the open shot was closed");
+  assert.strictEqual(m.scene().mode, "logged");
+});
+
 check("Preview cannot open a shot", () => {
   const { m } = newRound();
   m.signal("PLACED", { point: TEE });
