@@ -84,32 +84,14 @@ const metresPerPixel = (lat, zoom) =>
 const AERIAL = (z, x, y) =>
   `https://basemaps.linz.govt.nz/v1/tiles/aerial/WebMercatorQuad/${z}/${x}/${y}.webp?api=${KEY}`;
 
-// LINZ publishes an elevation tileset in terrain-RGB. The tileset slug has
-// moved around, so probe rather than hard-code, and cache what worked.
-const ELEVATION_CANDIDATES = [
-  (z, x, y) => `https://basemaps.linz.govt.nz/v1/tiles/elevation/WebMercatorQuad/${z}/${x}/${y}.png?api=${KEY}`,
-  (z, x, y) => `https://basemaps.linz.govt.nz/v1/tiles/elevation.terrain-rgb/WebMercatorQuad/${z}/${x}/${y}.png?api=${KEY}`,
-  (z, x, y) => `https://basemaps.linz.govt.nz/v1/tiles/topographic/terrain-rgb/WebMercatorQuad/${z}/${x}/${y}.png?api=${KEY}`,
-];
-let elevationUrl = null;
-
-async function probeElevation(z, x, y) {
-  for (const make of ELEVATION_CANDIDATES) {
-    const url = make(z, x, y);
-    try {
-      const r = await fetch(url);
-      if (r.ok) {
-        elevationUrl = make;
-        console.log(`  elevation tileset: ${url.split('?')[0].replace(/\/\d+\/\d+\/\d+\.png$/, '')}`);
-        return Buffer.from(await r.arrayBuffer());
-      }
-    } catch { /* try next */ }
-  }
-  throw new Error(
-    'No LINZ elevation tileset responded. Check the tileset list at ' +
-    'https://basemaps.linz.govt.nz/v1/tiles.json and update ELEVATION_CANDIDATES.'
-  );
-}
+// Taken verbatim from the `dem` spec already in functions/lib/gd-imagery-sources.mjs
+// (LINZ entry, `urlTemplate`). `pipeline=terrain-rgb` is NOT optional — without it
+// the tileset returns its own rendering, i.e. a picture of the terrain rather than
+// elevation packed into RGB. The decoder below would then read hillshade greys as
+// heights and produce plausible-looking nonsense.
+const ELEVATION_LAYER = process.env.LINZ_ELEVATION_LAYER || 'elevation';
+const elevationUrl = (z, x, y) =>
+  `https://basemaps.linz.govt.nz/v1/tiles/${ELEVATION_LAYER}/WebMercatorQuad/${z}/${x}/${y}.png?pipeline=terrain-rgb&api=${KEY}`;
 
 async function getTile(url) {
   const r = await fetch(url);
@@ -118,7 +100,7 @@ async function getTile(url) {
 }
 
 /** Stitch a tile grid into one raw RGB buffer covering [originPx, originPx+size). */
-async function mosaic({ zoom, originPx, size, makeUrl, probe }) {
+async function mosaic({ zoom, originPx, size, makeUrl }) {
   const tx0 = Math.floor(originPx.x / TILE);
   const ty0 = Math.floor(originPx.y / TILE);
   const tx1 = Math.floor((originPx.x + size - 1) / TILE);
@@ -130,9 +112,7 @@ async function mosaic({ zoom, originPx, size, makeUrl, probe }) {
   let got = 0;
   for (let ty = ty0; ty <= ty1; ty++) {
     for (let tx = tx0; tx <= tx1; tx++) {
-      let buf;
-      if (probe && !elevationUrl) buf = await probeElevation(zoom, tx, ty);
-      else buf = await getTile(makeUrl(zoom, tx, ty));
+      const buf = await getTile(makeUrl(zoom, tx, ty));
       if (!buf) continue;
       got++;
       composites.push({
@@ -315,10 +295,9 @@ function composite(aerial, w, h, channels, shade) {
     const o = { x: Math.round(originPx.x * f), y: Math.round(originPx.y * f) };
     const sz = Math.max(64, Math.round(SIZE * f));
     try {
-      dem = await mosaic({ zoom: demZoom, originPx: o, size: sz, makeUrl: (z, x, y) => elevationUrl(z, x, y), probe: true });
+      dem = await mosaic({ zoom: demZoom, originPx: o, size: sz, makeUrl: elevationUrl });
       break;
     } catch (e) {
-      elevationUrl = null;
       if (demZoom === ZOOM - 6) throw e;
     }
   }
