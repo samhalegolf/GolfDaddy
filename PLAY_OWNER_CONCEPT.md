@@ -1,11 +1,15 @@
 # The Play Owner — concept
 
-Design only. No code. The thing this describes is `app/js/play-state.js`; when
-it's agreed, `play.js` keeps Leaflet, the DOM and the projection seam, and reads
-everything else from here.
+Design only. No code. The thing this describes is `app/js/marshal.js`; when it's
+agreed, `play.js` keeps Leaflet, the DOM and the projection seam, and takes every
+decision from it. Names for all the pieces are in §10.
 
 Companion to `GPS_PLAY_OWNERSHIP_2026-08-08.md`, which is the audit of why the
 current arrangement drifts.
+
+*Rev 6 — Live is sticky, and the banners. (Rev 5: the Marshal and Trace. Rev 4:
+open shots and deferred logging. Rev 3: the Logged screen. Rev 2: Play button,
+Preview unlock, edge dot.)*
 
 ---
 
@@ -29,32 +33,87 @@ depending on eleven booleans.
 Two facts, and the flow is the answer to both:
 
 ```
-liveHole   — the hole GPS says you are on, once you have affirmed it. Can be null.
+liveHole   — the hole you pressed Play on. Null until you do.
 viewHole   — the hole on screen.
 
 flow = (liveHole !== null && viewHole === liveHole) ? 'live' : 'preview'
 ```
 
-`flow` is **derived, never stored**. There is no mode flag to get out of sync,
+`flow` is **derived, never stored**. There is no mode flag to fall out of sync,
 and no toggle for you to leave set wrong.
 
 Consequences that fall out for free:
 
-- No fix, denied, or off course → `liveHole` is null → everything is Preview.
-  That is the off-course-testing case, and it is a normal state rather than a
-  broken one.
-- Flick ahead to hole 5 while standing on 3 → `viewHole` 5, `liveHole` 3 →
-  Preview. Hole 3 is untouched. Come back and Live resumes exactly as it was.
-- Walk to the next tee → GPS proposes the new hole → affirm → `liveHole` moves.
+- Never pressed Play → `liveHole` is null → everything is Preview. Off-course
+  testing is a normal state, not a broken one.
+- Flick ahead to hole 5 while playing 3 → `viewHole` 5, `liveHole` 3 → Preview.
+  Hole 3 is untouched. Come back and Live resumes exactly as it was.
 
-### Affirming the hole
+### Losing GPS does not end the round
 
-On entering the round, the first trusted fix proposes the nearest hole:
-*"Looks like you're on hole 1 — playing it?"* Affirming sets `liveHole`.
+**`liveHole` is set by Play and cleared by End Round. Nothing else touches it.**
 
-Until you affirm, the round is in Preview. That is honest: the app genuinely
-does not know where you are yet, and Preview is a perfectly good place to be
-while it finds out.
+Not a dropped fix, not a denied permission, not a walk into trees, not a phone
+that slept for twenty minutes. You are on hole 7 because you said so, and the
+app does not get to decide otherwise on the strength of a bad signal.
+
+Two facts that were tangled together, now separate:
+
+| | |
+|---|---|
+| **Am I in a round, on this hole?** | `liveHole`. Sticky. Play sets it, End Round clears it. |
+| **Do I have a usable fix right now?** | Its own fact. Affects what Track can *show* — never which flow you are in. |
+
+So GPS quality gates exactly one thing: **whether the Play button is offered.**
+You cannot start a round the app cannot place you in. Once started, it holds.
+
+With no fix, Track stays Track on the hole you are playing: the dot goes quiet,
+the distances hold their last honest value, the camera does not move, and a
+small "no fix" note says why. When one returns it simply carries on. Nothing
+lurches, nothing switches, nothing is lost.
+
+(A round left running is caught by the existing 3-hour resume expiry, not by
+GPS. Forgetting to press End Round costs nothing.)
+
+### The Play button
+
+Live starts one way: a big **Play** button.
+
+- It appears **only when a trusted fix says you are at the course** — the same
+  course-radius check `maybeAdoptGpsFix` already does, now that the centre is
+  derived properly. At home on the couch it simply is not there, so Preview is
+  the only thing on offer and that is correct.
+- It names the hole it will start: **"Play hole 7"** when GPS can resolve which
+  hole you are on, plain **"Play"** when it can only tell you are at the course.
+- Pressing it starts **the hole you are standing on**, moving the view there if
+  that is not the hole on screen. You play where you are. Naming the hole on the
+  button is what makes that unsurprising before you press it.
+- If it cannot resolve a hole, it starts the one on screen.
+
+No prompt, no dialogue, no confirmation step. One button that is either there or
+not.
+
+### The banner
+
+A single thin strip at the top, in the same slot either way, saying which flow
+you are in:
+
+```
+   ●  LIVE · Hole 7                              ← green
+   ◌  PREVIEW · Hole 5          Return to 7 ›    ← grey
+```
+
+Two things it is doing:
+
+1. **It is a readout, not a decoration.** It renders from the same derived
+   `flow` as everything else, so it cannot say Live while the app behaves as
+   Preview. If it flickers, that is a real flow flicker and Trace has the
+   Signal that caused it (§11) — which is the point of having it at all.
+2. **Preview's version carries the way back.** "Return to 7" is one tap, so a
+   look ahead can never become a place you are stuck.
+
+Flow changes are a first-class Trace row, so *"why did it switch?"* is always
+one glance: `FLOW live→preview ← VIEW_HOLE_CHANGED`.
 
 ---
 
@@ -62,46 +121,73 @@ while it finds out.
 
 The purpose is to look at a hole and see what a shot from a spot looks like.
 
-| | |
-|---|---|
-| **How you get in** | Open a hole you are not standing on. Or open the round before GPS has confirmed anything. |
-| **Camera** | The hole, tee to green. |
-| **Placing yourself** | Head To the Tee, or tap where you'd stand. |
-| **The bubble** | Appears the moment you place yourself. Seeing the shot is the entire point of being here. Drag to aim. |
-| **What is recorded** | **Nothing.** No shots, no Course Data, no pin, no scorecard. |
-| **Lock** | Does not exist in this flow. |
-| **Green focus** | Does not exist in this flow. Nothing to log. |
-| **How you get out** | Navigate to another hole, or back to the live one. |
+It has two modes and you cycle between them:
 
-Preview writing nothing is load-bearing, not a simplification. It means
-previewing hole 5 can never record a shot on hole 5, and it means you can hand
-someone the phone to look at a hole without touching the round.
+```
+( SETUP ) ──── place yourself ────► ( AIM )
+     ▲                                 │
+     └────────── Unlock ───────────────┘
+```
+
+**SETUP** — the pill is up: *Head To the Tee* / *Tap where you're standing*.
+The hole is framed tee to green. No bubble.
+
+**AIM** — you placed yourself, so **the lock-in is automatic** and the bubble,
+aim line and rings are there straight away. Seeing the shot is the entire point
+of being here, so there is nothing to press. Drag to aim.
+
+**Unlock** is the way back. It clears the placement and returns you to SETUP
+with the pill up, so you can change your mind about the tee or tap somewhere
+else. That is its whole job in this flow.
+
+**Preview cannot open a shot.** There is no Lock here, and nothing you do
+creates a record — no Course Data, no pin, no scorecard. That is load-bearing,
+not a simplification: previewing hole 5 must never be able to invent a shot on
+hole 5, and you should be able to hand someone the phone to look at a hole
+without touching the round.
+
+The one thing it *can* do is **close a shot that Live already opened** — the
+deferred logging in §4.3. Finishing something you actually hit is not the same
+as inventing something you did not, so the rule is "Preview never starts", not
+"Preview never writes".
 
 ---
 
 ## 4. Live
 
-Three modes. One resting state and two deliberate excursions.
+Four modes. One resting state, two excursions, and one screen you land on when
+the hole's play is done.
 
 ```
-                        ┌──────────────────────────────┐
-                        │                              │
-       Lock             ▼          moved off the lock   │
-   ┌──────────────►  ( AIM )  ──────────────────────────┘
-   │                    │
-   │                    │ Shot End / Unlock
-   │                    ▼
-( TRACK ) ◄────────────────────────────────┐
-   │  ▲                                    │
-   │  │                                    │ logged, or Back
-   │  └────────────────────────────────────┤
-   │                                       │
-   └──────────────►  ( FINISH )  ──────────┘
-      arrive at green, or the access point
+                    Unlock, or moved off the lock
+                  ┌──────────────────────────────┐
+       Lock       ▼                              │
+   ┌──────────► ( AIM ) ─────────────────────────┘
+   │                │
+( TRACK ) ◄─────────┤ Shot End
+   │  ▲             │
+   │  │ Back        ▼
+   │  └────── ( LOGGED ) ────── [ Hole 4 ] ──────► next hole, TRACK
+   │                ▲
+   │                │ confirm
+   └──────────► ( FINISH ) ◄──── also reachable from Preview, for any
+      arrive at green, or             hole still holding an open shot
+      the hole has an open shot
 ```
 
 **TRACK is the resting state. Everything returns to it. Nothing else is
 sticky.**
+
+### 4.0 Why Shot End is always the last shot
+
+**Lock closes the previous shot and opens the next one.** Lock on the tee starts
+shot 1; walking to the ball and locking again ends shot 1 there and starts shot
+2. So mid-hole boundaries need no separate action — the next Lock is the
+boundary.
+
+Which leaves **Shot End as the only thing that closes a shot without opening
+another** — the last one of the hole. That is why it earns a screen of its own
+rather than quietly returning you to Track.
 
 ### 4.1 Track — the default
 
@@ -109,114 +195,438 @@ This is what you see when you pull the phone out of your pocket. Every time.
 
 - The dot follows GPS.
 - Front / centre / back to the green, always on screen.
-- The camera frames the hole so you and the green are both visible.
+- The camera frames you and the green.
 - **No bubble. No aim line. No rings.**
-
-That last line is the rule you asked for: you do not see a bubble unless you
-explicitly asked for one.
 
 ### 4.2 Aim — entered by Lock
 
-Lock means *"I am standing over this shot."*
+Lock means *"I am standing over this shot."* In Live it is deliberate, which is
+the difference from Preview: there, placing yourself was the plan; here, GPS
+already knows where you are, so pressing Lock is the only thing that says you
+are about to hit.
 
 - The bubble, aim line and rings appear at your position.
 - The camera locks to start → target and stops chasing you.
-- Drag to aim.
 
-**Aim releases itself once you have clearly walked off the lock point** — same
-pattern as the tee-pin release: two consecutive fixes more than ~30m away. You
-locked in, you hit, you walked. A bubble anchored where you stood three minutes
-ago is precisely the thing that looked random on course.
+**Aim releases itself once you have clearly walked off the lock point** — two
+consecutive fixes more than ~30m away, the same pattern as the tee-pin release.
+You locked in, you hit, you walked. A bubble anchored where you stood three
+minutes ago is precisely the thing that looked random on course.
 
 Releasing the view does not end the shot. The shot stays in flight; the next
 Lock closes it, or Finish does. You lose the picture, never the record.
 
-Exits: **Shot End** (records where it finished, → Track), **Unlock** (abandons
+Exits: **Shot End** (records where it finished, → Logged), **Unlock** (abandons
 the view, → Track), or the auto-release above.
 
 ### 4.3 Finish — logging where the shot ended
 
-Finish is the precise version of Shot End, for when a raw fix is not good
-enough — which is any shot that ended on or near the green.
+Finish is the precise version of Shot End, for when a raw fix is not good enough
+— which is any shot that ended on or near the green.
 
 - The dot becomes a ball you drag to where the shot actually finished.
-- The camera holds the green being logged.
-- Confirming records it and returns to Track.
+- The shot's **origin** is drawn where you locked in, so you can see the shot you
+  are reconstructing rather than guessing from a bare green.
+- Confirming records it and lands on Logged.
 
-**It arms per hole and stays available.** The first time you come within the
-green radius on a hole, the access point appears — and it stays there until the
-hole changes, however far you walk afterwards.
+#### The open shot
 
-That is the cart case: hit the approach, drive to the next tee, park, open
-Finish for the hole you just played, drag the ball onto the green where the
-approach finished, log it. Then walk back and putt.
+Lock writes a start. Shot End writes an end. A shot with a start and no end is
+**open**, and that single condition is the whole availability rule:
 
-It still opens on its own when you arrive at the green, because that is the
-common case. The access point is what makes it reachable again afterwards.
+> **Finish exists for a hole exactly when that hole has an open shot.**
+
+Nothing arms, nothing expires, nothing has to be remembered. It follows from the
+data, so it cannot drift out of step with it:
+
+- Everything logged → no open shot → Finish is not offered, and arriving at the
+  green does not open it. Correct, because there is nothing to log.
+- You locked in, hit, and walked off → open shot → Finish stays reachable for
+  that hole for as long as it takes you to get round to it.
+
+Proximity still decides when it **opens itself** — arriving at the green with an
+open shot is the common case and should not need a tap. The open shot decides
+whether it is **possible at all**.
+
+#### Logging holes later
+
+Because the rule is data and not proximity, you can play several holes quickly
+and log them afterwards:
+
+1. Play 4, 5 and 6 on feel — lock in, hit, next hole, without ever pressing Shot
+   End. Each hole is left with one open shot.
+2. Holes with an open shot are **flagged in the hole picker**, so the catch-up
+   list is the thing you were already going to use to navigate.
+3. Tap 4. You are in Preview (you are standing on 7), the origin bubble shows
+   where you played from, and Finish is available because the shot is open.
+4. Drag the ball to where it finished. Log. The flag clears.
+5. Do 5 and 6.
+
+#### The picker flag
+
+The hole picker already exists — tap the hole number and you get a grid of every
+hole in play, tap one to jump there. The flag is a **small dot in the corner of
+any tile whose hole has an open shot**:
+
+```
+   ┌────┬────┬────┬────┬────┬────┐
+   │ 1  │ 2  │ 3  │ 4 ᵒ│ 5 ᵒ│ 6 ᵒ│      ᵒ = outcome not logged
+   ├────┼────┼────┼────┼────┼────┤
+   │[7] │ 8  │ 9  │ 10 │ 11 │ 12 │      [ ] = the hole you are on
+   └────┴────┴────┴────┴────┴────┘
+```
+
+- **What it means:** that hole has a shot with a start and no end. Something is
+  outstanding.
+- **Where it comes from:** read straight off `shots[hole]` — any entry with
+  `end === null`. Nothing sets it and nothing clears it; it is a view of the
+  record, so it cannot go stale or get left behind on a hole change.
+- **What it clears it:** logging that shot. Nothing else.
+- **Why the picker:** it is already how you would navigate to hole 4 from hole
+  7, and it already lists every hole. The catch-up list and the navigation are
+  the same list, so there is no second screen to build or to find.
+
+A **dot rather than a recoloured tile**, because the tile background is already
+carrying "this is the hole you are on". A dot composes with that; a colour
+fights it.
+
+This is also the cart case, just with a shorter gap: hit the approach, drive to
+the next tee, park, open Finish for the hole you just played, drag the ball onto
+the green, log it. Then walk back and putt.
+
+Pressing Next Hole with a shot still open is **not** warned about. Leaving it
+open is the feature, and the flag in the picker is the reminder.
+
+### 4.4 Logged — the in-between screen
+
+Where Shot End and Finish both land. It says the shot is recorded and offers the
+next hole, and it **waits** — you press the button when you are actually at the
+next tee, not when the app decides you have moved on.
+
+```
+   ┌──────────────────────────────┐
+   │                              │
+   │        Shot logged           │
+   │        3rd · 148m · 7i       │
+   │                              │
+   │      Score      ─   4   +    │
+   │                              │
+   │      ┌────────────────┐      │
+   │      │    Hole 4  →   │      │
+   │      └────────────────┘      │
+   │                              │
+   │      Back to hole 3          │
+   │                              │
+   └──────────────────────────────┘
+```
+
+**The score stepper** starts at par for the hole and writes straight to the
+scorecard. This is the one moment you have definitely finished a hole, so it is
+the cheapest place in the round to record it — no trip to the tool rail. Leaving
+it alone records par; the scorecard stays editable either way.
+
+**Pressing Hole 4** advances the round: `liveHole` and `viewHole` both move, and
+you land in Track on the new hole. No second Play press — you already told it you
+have moved on.
+
+**The button reads the situation.** Logging the hole you are playing offers the
+next one. Logging a hole you are catching up on (§4.3) offers **"Next pending:
+hole 5"** if another is outstanding, and **"Back to hole 7"** if that was the
+last of them — so batch-logging walks itself through the list and puts you back
+where you were playing.
+
+**Back to hole 3** dismisses it and returns to Track on the hole you are on. This
+one is not optional: after logging the approach you still have to putt, and a
+screen that traps you at the next tee while you are standing on the green would
+be worse than no screen at all. It is also the way out of a Shot End you did not
+mean to press.
+
+So the cart sequence reads straight through: hit the approach → drive to the
+next tee → open Finish → drag the ball onto the green → **Shot logged** → walk
+back and putt (Back to hole 3, or just leave it sitting there) → return to the
+cart → **Hole 4**.
 
 ---
 
-## 5. What the owner holds
+## 5. Unlock, in one line
 
-The whole of it:
+**Unlock always returns you to the resting state of the flow you are in.**
+Preview rests at SETUP, so Unlock brings the pill back. Live rests at TRACK, so
+Unlock hands the dot back to GPS. Same button, same meaning — "stop aiming" —
+and the flow decides where that lands you.
+
+---
+
+## 6. The camera never chases a distant fix
+
+**The camera frames the hole. It never widens to fit a player who is not on it.**
+
+Today the frame solver takes your position as one of the points it must fit, so
+standing 600m away blows the frame out until the hole is a speck and the whole
+thing lurches every time a fix lands. That is the jumping around.
+
+Instead: if the live fix projects outside the viewport, it is **clamped to the
+edge** — on the line from the centre of the framed view toward where it really
+is — and labelled with how far that way it actually is.
+
+```
+   ┌──────────────────────────────┐
+   │                              │
+   │            ▲ green           │
+   │            │                 │
+   │            │                 │
+ ◄─┤ ● 640m     │                 │      the dot, pinned to the edge,
+   │            │                 │      pointing at the real location
+   │            ▲ tee             │
+   └──────────────────────────────┘
+```
+
+No threshold and no magic number: the question is simply *does it fit on
+screen*, and the answer is already known once it has been projected. Two
+behaviours, one rule.
+
+Where it shows up:
+
+- **Preview** — always, since you are by definition not on the hole you are
+  viewing. Look ahead at hole 5 from the 3rd fairway and you get hole 5 framed
+  properly with "you are 380m back that way".
+- **Before Play** — sitting in the car park looking at hole 1, the hole is
+  framed and you are on the edge with a number.
+- **Live/Track** — should not normally happen, since you are on the hole. If it
+  does, the same rule handles it rather than the frame exploding.
+
+The distance is measured from the centre of what is on screen, so the arrow and
+the number describe the same line. (Alternative worth a moment's thought:
+measure from the tee instead, since that is where the hole begins. I have gone
+with screen centre because it matches what the arrow is doing.)
+
+---
+
+## 7. What the Marshal holds
 
 ```
 round:  { courseKey, pkg, centre, nines }
-liveHole: number | null          // affirmed; null until GPS says so
+liveHole: number | null          // set by Play, cleared by End Round. Nothing else.
+hasFix:   boolean                // affects what Track draws, never the flow
 viewHole: number                 // what is on screen
-mode:   'track' | 'aim' | 'finish'      // live only; preview has no modes
-player: { point, source }
-shot:   { start, target }        // in flight, or null
-finish: { armedForHole, ball, placed }
+mode:   'setup' | 'track' | 'aim' | 'finish' | 'logged'
+player: { point, source }        // in Preview this is your placement
+shots:  { [hole]: [ {start, target, end|null} ] }   // end null = OPEN
+finish: { ball, placed }         // the drag in progress, nothing more
+logged: { record }               // what the Logged screen is reporting
 camera: { stage, frame, parked }
 ```
 
-Derived, never stored: `flow`, whether the bubble draws, which face the dock
-button wears, whether the start pill is up, whether the access point shows.
+`shots` is the only record of what happened, and **an open shot is just one with
+`end === null`**. Everything about availability reads off that — no arming flag,
+no lifetime, nothing to reset at a hole change.
 
-The events it accepts:
+Preview uses `setup` and `aim`. Live uses `track`, `aim`, `finish` and `logged`.
+**Aim is the same mode in both** — what differs is how you get in (a placement vs
+a Lock) and whether anything is recorded on the way out.
 
-`ROUND_OPENED` · `FIX_RECEIVED` · `HOLE_AFFIRMED` · `VIEW_HOLE_CHANGED` ·
-`PLACED` · `LOCK` · `UNLOCK` · `AIM_DRAGGED` · `SHOT_END` · `FINISH_OPENED` ·
-`BALL_MOVED` · `FINISH_LOGGED` · `BACK` · `NEXT_HOLE`
+Derived, never stored: `flow`, whether the bubble draws, whether the Play button
+shows and what it says, which face the dock button wears, whether the pill is
+up, **whether Finish is offered (open shot on this hole)**, **which holes are
+flagged in the picker (open shot anywhere)**, what the Logged button says, and
+whether the dot is edge-clamped.
 
-Nothing else writes state. Every `(mode, event)` pair either has a defined
+Signals:
+
+`ROUND_OPENED` · `FIX_RECEIVED` · `FIX_LOST` · `PLAY_PRESSED` · `END_ROUND` ·
+`VIEW_HOLE_CHANGED` · `PLACED` · `LOCK` · `UNLOCK` · `AIM_DRAGGED` · `SHOT_END` ·
+`FINISH_OPENED` · `BALL_MOVED` · `FINISH_LOGGED` · `SCORE_SET` · `BACK` ·
+`NEXT_HOLE`
+
+`FIX_LOST` is worth calling out: it changes what Track can draw and **nothing
+else**. It cannot touch `liveHole`, so it can never move you between flows.
+
+Nothing else writes state. Every `(mode, signal)` pair either has a defined
 result or is explicitly ignored — which is the part that does not exist today,
-and the reason nobody can say what the app should do in a given combination.
+and the reason nobody can say what the app should do in a given combination. An
+ignored signal is not silence: Trace shows it (§11).
 
 ---
 
-## 6. Three decisions still open
+## 8. Decisions
 
-I have put my recommendation on each rather than leaving them blank. Push back
-and I will change the model, not work around it.
+**a) Shot End → the Logged screen. SETTLED (§4.4).**
+Not a return to Track and not an auto-advance: an in-between screen that reports
+the shot and holds a **Hole 4** button until you press it. Nothing advances on
+the app's initiative.
 
-**a) Shot End should not advance the hole.**
-Your flow logs the approach from the next tee and then walks back to putt, so
-auto-advancing would put the app a hole ahead of you. Recommendation: Shot End
-records and returns to Track. **Next Hole is the only thing that advances**, and
-the hole is over when you say so.
+**b) Finish is offered whenever the hole has an open shot. SETTLED (§4.3).**
+Better than the arming flag I proposed: derived from the record rather than from
+proximity with a lifetime, so it is right retroactively and cannot drift. It
+lives in a small control of its own — the dock is busy with
+Lock / Shot End / Unlock. The picker flag is a dot, not a recoloured tile.
 
-**b) The Finish access point needs its own control, not a dock face.**
-Once it is armed, Track has two things you might do — Lock, and Finish — so one
-button cannot carry both. Recommendation: the dock stays the shot control
-(Lock / Shot End / Unlock) and Finish gets a small control of its own that
-appears when armed and disappears at the hole change. It reads as what it is: a
-thing that became available.
+**c) Both flows get a banner. SETTLED (§2).**
+Not just Preview: Live gets one too, in the same slot, so the strip is a
+continuous readout rather than something that appears when things go odd. Wired
+to the derived `flow`, so it cannot disagree with the app's actual behaviour,
+and flow changes are a Trace row so a slip is one glance from an explanation.
 
-**c) Preview should not be reachable by accident.**
-With flow derived from `viewHole`, tapping Next Hole while playing silently
-drops you into Preview. Recommendation: say so on screen — a plain "Previewing
-hole 5 · Return to hole 3" strip. One line, and the flow is never ambiguous.
+**d) Live is sticky. SETTLED (§2).**
+Losing GPS does not end the round. `liveHole` survives every signal except End
+Round.
+
+Nothing open. The next move is code.
 
 ---
 
-## 7. What this buys
+## 9. What this buys
 
-- The bubble cannot appear without you asking, in either flow, because in Live
-  it needs `mode === 'aim'` and in Preview it needs a placement you made.
+- The bubble cannot appear without you asking. In Live it needs a Lock; in
+  Preview it needs a placement you made.
 - A hole you preview cannot record anything, because Preview has no writes.
 - Picking the phone up mid-round always shows the same thing, because Track is
   the resting state and both excursions release themselves.
+- The camera cannot lurch, because it frames one thing and clamps everything
+  else to the edge.
+- The round never advances on its own, and never ends on its own. The only
+  things that move you are pressing the next hole's number and pressing End
+  Round. A bad signal cannot do either.
+- No shot can be quietly lost. An unfinished one is visible in the picker until
+  you close it, and closing it is available from anywhere.
+- Scores get recorded, because the ask arrives at the one moment you have
+  definitely finished the hole.
+
+---
+
+## 10. The systems, and what they are called
+
+Six words. Everything in the build should be one of them.
+
+| Name | What it is | Where it lives |
+|---|---|---|
+| **Marshal** | The controller. Owns every piece of state, is the only thing allowed to change it, and decides what should be on screen. Directs the other systems; is never directed by them. | `js/marshal.js` → `ClarityApp.marshal` |
+| **Signal** | Something happened — a fix, a tap, a button, a resize. **The only way in.** | `marshal.signal("LOCK", …)` |
+| **Scene** | What should be on screen right now, as plain data. Derived fresh from state on every signal. Holds no opinions of its own. | `marshal.scene()` |
+| **Painter** | Makes the Scene real — Leaflet, the DOM, the overlays. Diffs the new Scene against the last and applies the difference. **Never decides anything.** | `js/play.js` |
+| **Order** | One field of that diff being applied, tagged with the Signal that caused it. Not authored — it falls out of the diff. Exists so there is a word for the unit Trace records. | — |
+| **Trace** | The provenance log, and the debug window that shows it. | `js/trace.js` → `ClarityApp.trace` |
+
+A golf marshal keeps play moving and stops things happening out of order, which
+is exactly the job. If the metaphor grates, `controller` reads fine and nothing
+else in the design depends on the word.
+
+The flow is one direction, always:
+
+```
+   Signal ──► Marshal ──► Scene ──► Painter ──► screen
+                 │
+                 └──► the other modules (gps, shot, pin, wind, bag,
+                      scorecard, course-data, bubble engine)
+```
+
+Two rules that make it hold:
+
+1. **The other modules never call each other, and never touch the DOM.** They
+   answer questions and hold records. The Marshal is their only caller.
+2. **Nothing reads state back off the screen.** No
+   `classList.contains("map-framed")` deciding behaviour. That habit is what
+   turned the DOM into a state store, and it is the thing being retired.
+
+---
+
+## 11. Trace — where did that come from?
+
+The point of a controller that guarantees the visual state is being able to
+*prove* it does. Trace is that proof.
+
+**If something changes on screen it either came through the Marshal or it did
+not, and Trace says which.**
+
+### The Watch
+
+Trace watches the elements the Marshal guarantees, and only those:
+
+`#gpsDot` · `#aimBubble` · `#bubbleSvg` · `#greenRing` · `#pinMarker` ·
+`#pinDistance` · `#greenFocusBall` · `#distanceBar` · `#shotActionBtn` ·
+`#startPill` · `#map` (style) · `#surfaceImage` · `body` (class list)
+
+That list is the contract, written down. Leaflet's own tiles and panes are
+outside it, so its constant churn is not noise in the log.
+
+### The two attributions
+
+Every change to a watched element is one of:
+
+- **`✓ via marshal`** — an Order, carrying the Signal that caused it.
+- **`⚠ LEAK`** — the element changed and no Order was in flight.
+
+A leak is not automatically a bug, and Trace does not throw. It is a system
+acting on its own — which, as you say, looks fine right up until it does not.
+The value is that it is *visible* the moment it appears, rather than three weeks
+later as a symptom nobody can place.
+
+### How a leak gets caught
+
+Legitimate writes go through the Painter, which stamps them. For everything
+else, in debug builds only, Trace wraps the write paths on watched elements —
+`classList` add/remove/toggle, `setAttribute`, the `style` setters — and grabs
+`new Error().stack`. The first frame that is not Trace's own is the culprit, so
+the log names the file and line rather than just saying "something did this".
+
+That is why the answer is a wrapper and not a `MutationObserver` on its own: the
+observer tells you an element changed, but not who changed it, which is the only
+part you actually need.
+
+### The window
+
+Newest at the top, and a leak count on the tab so you notice without opening it.
+
+```
+ ┌── TRACE ───────────────────────────── 1 leak ──┐
+ │ 09:41:22.180 ✓ TRACK      gpsDot.pos           │
+ │                           ← FIX_RECEIVED       │
+ │ 09:41:22.180 ✓ TRACK      distances.front/back │
+ │                           ← FIX_RECEIVED       │
+ │ 09:41:19.902 ✓ AIM→TRACK  bubble.hide          │
+ │                           ← UNLOCK             │
+ │ 09:41:19.902 ✓ AIM→TRACK  svg.clear            │
+ │                           ← UNLOCK             │
+ │ 09:41:19.870 ⚠ LEAK       body.class -shot     │
+ │                           ← tool-rail.js:88    │
+ │ 09:41:19.410 ⇄ FLOW       live → preview       │
+ │                           ← VIEW_HOLE_CHANGED  │
+ │ 09:41:14.006 · TRACK      FIX_LOST             │
+ │                           no flow change       │
+ └────────────────────────────────────────────────┘
+```
+
+Four row types, because each answers a question you actually ask on course:
+
+- **`✓`** — a change, its mode (with the transition when there was one), and the
+  Signal behind it. *"Why did that move?"*
+- **`⚠`** — a change with no Signal behind it, and the code that did it.
+  *"Where the hell did that come from?"*
+- **`⇄`** — a flow change, and what caused it. *"Why am I suddenly in preview?"*
+  The banner tells you that you switched; this row tells you why.
+- **`·`** — a Signal the Marshal accepted that changed nothing. *"I pressed it
+  and nothing happened."* Invisible in every other kind of logging, and usually
+  the confusing case. `FIX_LOST` logging as *no flow change* is the everyday
+  version: proof the round held.
+
+### The part worth building it for
+
+Every visual state comes from a Scene, every Scene comes from a Signal, and the
+Marshal holds no hidden state. So **the Signal list replays the round exactly.**
+
+Trace records signals with timestamps; export it and feed it back in and you get
+the identical sequence of Scenes at your desk. A weird thing on the 9th stops
+being "I think the bubble did something" and becomes a file you can step
+through. That is worth more than the leak detection on its own, and it is only
+possible because there is one way in.
+
+Debug-only: the wrapping costs something, so the window and the write hooks are
+behind a flag (a query param and a stored setting). Trace's signal recording is
+cheap enough to leave on always, which is what makes an on-course capture
+possible without planning for it.
 - "Which state am I in" has one answer, derived from two numbers, instead of
   eleven booleans and nine CSS classes.
+- Anything that slips the leash announces itself, with a file and a line, the
+  first time it happens rather than three weeks later.
+- A round can be replayed from its signal log, so an on-course oddity becomes
+  something you can step through at a desk.
