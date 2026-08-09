@@ -2,7 +2,11 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- maximum-scale/user-scalable: WKWebView honours these (mobile Safari does
+     not), and this is a map application where every zoom is chosen by the stage
+     camera. An accidental pinch or double-tap put the page at a scale with no
+     control to undo it. -->
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Clarity Caddy</title>
 <!-- Sole owner of native-vs-web platform detection and API origin, and the
      first script here for the same reason it is first in the root shell: it

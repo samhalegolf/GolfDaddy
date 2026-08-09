@@ -1168,3 +1168,12 @@ body.shell-home .gdAssumedCourseBadge,
 body.shell-module .gdAssumedCourseBadge{
   display:none!important;
 }
+
+/* Update map: the action for a course the manifest says has moved on. Green
+   like the other affirmative actions, and only rendered when there is actually
+   something to update — the panel used to state "Update available" and offer
+   no way to act on it. */
+.gdCourseActions .gdCourseUpdateBtn{
+  color:#06110b;background:#1fd36d;border-color:transparent;font-weight:800;
+}
+.gdCourseActions .gdCourseUpdateBtn:disabled{opacity:.6}

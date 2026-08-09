@@ -316,6 +316,30 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   check("but the aim actually moved", aimBefore !== aimAfter && !!aimAfter,
     `${aimBefore} → ${aimAfter}`);
 
+  console.log("\n— no free-hand zoom, and say what is on screen —");
+
+  check("every Leaflet gesture handler is off",
+    await look(() => {
+      const m = ClarityApp.painter.mapState();
+      return !!m && ClarityApp.painter.gesturesEnabled() === false;
+    }), "the camera owns the view; a pinch has no way back");
+
+  check("the page itself cannot be zoomed",
+    await look(() => {
+      const v = document.querySelector('meta[name=viewport]').content;
+      return /user-scalable=no/.test(v) && /maximum-scale=1/.test(v);
+    }));
+
+  check("the source tag says what is on screen",
+    await look(() => {
+      const chip = document.getElementById("surfaceSource");
+      return !!chip && !chip.classList.contains("hiddenState")
+        && /LIVE MAP · /.test(chip.textContent);
+    }), await look(() => document.getElementById("surfaceSource").textContent));
+
+  check("and it names the basemap rather than guessing",
+    await look(() => document.getElementById("surfaceSource").dataset.source) === "live");
+
   console.log("\n— the guards the old play.js earned —");
 
   /* Each of these existed in play.js with a comment explaining what broke

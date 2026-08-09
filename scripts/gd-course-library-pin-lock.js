@@ -4956,6 +4956,51 @@
   function mapTypeLabel(mapType){
     return mapType==='published'?'Published map':'Course map';
   }
+  function mapTypeForPackage(pkg){
+    if(pkg&&pkg.status==='full-map-ready')return 'published';
+    if(pkg&&pkg.status==='lite-geo-ready')return 'object';
+    return null;   // processing/manual-required/none - nothing worth keeping
+  }
+  /* Re-download a course whose stored copy the manifest says is stale.
+
+     The record is written in EXACTLY the shape app/js/course-store.js writes,
+     into the same key, because this panel is a view of /app/'s store rather
+     than a second copy of it - anything else and the two would disagree about
+     what is on the device.
+
+     The panel could report "Update available" and offer no way to act on it,
+     which is what it did: the badge is computed from the manifest but the
+     detail card only ever rendered Back and Remove. A stale map is one the
+     course has actually changed under, so the fix has to be reachable from
+     where the problem is stated. */
+  async function updateDownloadedCourseEntry(entry){
+    var client=window.GDCoursePackageClient;
+    if(!client||typeof client.fetchPackage!=='function')return {ok:false,reason:'offline'};
+    var pkg=await client.fetchPackage({
+      courseId:entry.courseId,
+      courseName:entry.courseName,
+      courseLat:entry.courseLat,
+      courseLng:entry.courseLng
+    });
+    var mapType=mapTypeForPackage(pkg);
+    if(!mapType)return {ok:false,reason:'not-ready'};
+    try{
+      var raw=JSON.parse(localStorage.getItem(DOWNLOADED_COURSE_LIBRARY_KEY)||'{}')||{};
+      var body=JSON.stringify(pkg);
+      raw[entry.courseId]={
+        courseId:entry.courseId,
+        courseName:entry.courseName||entry.courseId,
+        mapType:mapType,
+        objectsVersion:pkg.geometryVersion||null,
+        mapVersion:Number.isFinite(Number(pkg.packageVersion))?Number(pkg.packageVersion):null,
+        pkg:pkg,
+        savedAt:Date.now(),
+        bytes:body.length
+      };
+      localStorage.setItem(DOWNLOADED_COURSE_LIBRARY_KEY,JSON.stringify(raw));
+      return {ok:true,mapType:mapType};
+    }catch(e){return {ok:false,reason:'storage'};}
+  }
   /* Background freshness check against the same lightweight manifest /app/
      uses (fetchCourseLibraryManifest, above) - the panel opens instantly from
      what is already on the device, then a badge appears if the server turns
@@ -5075,7 +5120,8 @@
       const entry=entries.find(e=>e.courseId===detailKey)||downloadedCourseEntries().find(e=>e.courseId===detailKey);
       if(!entry){renderCourseLibraryPanel();return;}
       const stale=downloadedEntryHasUpdate(entry);
-      list.innerHTML=`<div class="gdCourseCard${entry.mapType==='published'?' published':''}"><strong>${esc(entry.courseName)}</strong><span>${esc(mapTypeLabel(entry.mapType))} · ${esc(sizeLabel(entry.bytes))}</span><div class="gdCourseActions"><button type="button" data-action="back">Back</button><button class="danger" type="button" data-action="remove">Remove from device</button></div></div>`;
+      const updateAction=stale?`<button type="button" data-action="update" class="gdCourseUpdateBtn">Update map</button>`:'';
+      list.innerHTML=`<div class="gdCourseCard${entry.mapType==='published'?' published':''}"><strong>${esc(entry.courseName)}</strong><span>${esc(mapTypeLabel(entry.mapType))} · ${esc(sizeLabel(entry.bytes))}</span><div class="gdCourseActions"><button type="button" data-action="back">Back</button>${updateAction}<button class="danger" type="button" data-action="remove">Remove from device</button></div></div>`;
       const facts=[
         ['Map type',mapTypeLabel(entry.mapType)],
         ['Storage used',sizeLabel(entry.bytes)],
@@ -5084,6 +5130,29 @@
       ];
       list.insertAdjacentHTML('beforeend',`<div class="gdCourseCard gdCourseStorageFacts">${facts.map(([k,v])=>`<div class="gdCourseStorageRow"><span>${esc(k)}</span><strong>${esc(v)}</strong></div>`).join('')}</div>`);
       list.querySelector('[data-action="back"]').onclick=()=>renderCourseLibraryPanel();
+      const updateBtn=list.querySelector('[data-action="update"]');
+      if(updateBtn)updateBtn.onclick=async()=>{
+        if(updateBtn.disabled)return;
+        updateBtn.disabled=true;
+        updateBtn.textContent='Updating…';
+        const result=await updateDownloadedCourseEntry(entry);
+        if(result.ok){
+          /* Re-check freshness against the server rather than assuming the
+             download cleared it - if the manifest has moved on again the badge
+             should stay, and saying "done" when it has not would be a lie. */
+          courseLibraryManifestById=null;
+          refreshCourseLibraryManifest();
+          gdCLRefreshProfileCard();
+          renderCourseLibraryPanel(entry.courseId);
+          toastSafe('Map updated');
+          return;
+        }
+        updateBtn.disabled=false;
+        updateBtn.textContent='Update map';
+        toastSafe(result.reason==='not-ready'?'No newer map published yet'
+          :result.reason==='storage'?'Not enough space to save the update'
+          :'Could not reach the server');
+      };
       const removeBtn=list.querySelector('[data-action="remove"]');
       /* Two taps rather than confirm(): this shell has already been seen to throw
          "prompt() is not supported", and a dialog that never appears would either

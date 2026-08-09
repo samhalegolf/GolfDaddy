@@ -114,6 +114,16 @@
         .then(configure, function () {});
       return pending;
     },
+    /* Settles when the LINZ key fetch is done, one way or the other. The key
+       decides whether New Zealand gets aerial imagery or the drawn OSM map, and
+       it arrives over the network — so the first map is built before the answer
+       exists and picks OSM. Callers use this to re-pick once, which is why
+       hole 1 no longer opens on OSM and then swaps to satellite. */
+    ready: function () {
+      return pending || Promise.resolve();
+    },
+    /* Which source is up, for the on-screen source tag. */
+    kindFor: function (centre) { return pick(centre).kind; },
     /* → {kind, layer, attribution} for the given course centre. Never throws,
        never waits. The attribution string comes back separately because the
        stage camera rotates the map element, which would carry Leaflet's own

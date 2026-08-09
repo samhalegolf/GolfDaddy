@@ -52,7 +52,6 @@
   var refPx = surfaceLib.worldPxProjector(REF_ZOOM);
   var LIVE_GREEN_RADIUS_PX = 25 * Math.pow(2, REF_ZOOM - 18);
   var EDGE_MARGIN_PX = 26;     // how far in from the bezel a clamped dot sits
-  var GESTURE_HANDLERS = ["dragging", "touchZoom", "doubleClickZoom", "scrollWheelZoom", "boxZoom", "keyboard"];
 
   function el(id) { return document.getElementById(id); }
   function show(node, on) { if (node) node.classList.toggle("hiddenState", !on); }
@@ -72,8 +71,17 @@
       /* zoomSnap:0 is load-bearing: the camera solves a continuous scale and
          hands log2 of it to setView. Snapping would put the anchors off their
          guide boxes. */
-      map = L.map("map", { zoomControl: false, attributionControl: false, zoomSnap: 0 })
-        .setView([-36.9, 174.78], 15);
+      /* Every gesture handler off, permanently. The stage camera owns where
+         the view is and at what scale; a pinch or a drag can only put the
+         picture somewhere no frame chose, and there is no control to get back
+         from it — which is exactly the "I zoomed and got stuck" trap. Taps are
+         unaffected: only the gesture handlers are disabled, never the click
+         listener, so tap-to-place still works. */
+      map = L.map("map", {
+        zoomControl: false, attributionControl: false, zoomSnap: 0,
+        dragging: false, touchZoom: false, doubleClickZoom: false,
+        scrollWheelZoom: false, boxZoom: false, keyboard: false
+      }).setView([-36.9, 174.78], 15);
       map.on("click", function (e) {
         var native = e && e.originalEvent;
         if (!native) return;
@@ -88,13 +96,32 @@
      missing or unusable centre, and the licence for every source in there is
      conditional on the attribution being visible. Returning early left an
      unmapped hole as a blank dark rectangle with no tiles and no credit. */
+  var lastBaseCentre = null;
+  var basemapWaiting = false;
+
   function setBaseFor(centre) {
     if (!map) return;
+    lastBaseCentre = centre || lastBaseCentre;
+    /* The LINZ key arrives over the network, so the FIRST map is always built
+       without it and falls through to OSM. Re-pick once it settles — otherwise
+       hole 1 opens on the drawn map and only swaps to aerial when the centre
+       next changes, i.e. on hole 2. */
+    if (!basemapWaiting && app.basemap.ready) {
+      basemapWaiting = true;
+      app.basemap.ready().then(function () {
+        repaint("BASEMAP_READY", function () {
+          baseKind = null;
+          setBaseFor(lastBaseCentre);
+          renderSourceTag();
+        });
+      });
+    }
     var base = app.basemap.baseFor(centre);
     if (base.kind === baseKind) return;
     if (baseLayer) baseLayer.remove();
     baseKind = base.kind;
     baseLayer = base.layer.addTo(map);
+    renderSourceTag();
     var credit = el("mapAttribution");
     if (credit) {
       credit.textContent = base.attribution || "";
@@ -102,14 +129,6 @@
     }
   }
 
-  function applyGestureState() {
-    if (!map) return;
-    var frozen = mapSide !== null;
-    GESTURE_HANDLERS.forEach(function (name) {
-      var handler = map[name];
-      if (handler) { frozen ? handler.disable() : handler.enable(); }
-    });
-  }
 
   // --------------------------------------------------------- the projection
 
@@ -368,7 +387,6 @@
       node.style.width = side + "px";
       node.style.height = side + "px";
       map.invalidateSize({ animate: false });
-      applyGestureState();
     }
     if (!(map.getSize().x > 0)) { mapSide = null; lastCameraKey = null; return; }
     map.setView([centre.lat, centre.lng], zoom, { animate: false });
@@ -398,7 +416,6 @@
       var node = el("map");
       if (node) { node.style.width = ""; node.style.height = ""; node.style.transform = ""; }
       document.body.classList.remove("map-framed");
-      applyGestureState();
       map.invalidateSize({ animate: false });
     }
     var r = scene && scene.camera.hole;
@@ -822,11 +839,31 @@
     renderProvenance();
   }
 
+  /* What am I actually looking at? Always on, because "is this the published
+     map or the live one, and which imagery" is a question you should never have
+     to infer from how the picture looks. Published still opens the full
+     provenance panel on tap. */
+  function renderSourceTag() {
+    var chip = el("surfaceSource");
+    if (!chip) return;
+    var text, kind;
+    if (presentation === "loading") { text = "LOADING MAP…"; kind = "loading"; }
+    else if (published) {
+      text = "PUBLISHED";
+      kind = "published";
+    } else {
+      text = "LIVE MAP · " + (baseKind ? String(baseKind).toUpperCase() : "…");
+      kind = "live";
+    }
+    chip.textContent = text;
+    chip.dataset.source = kind;
+    show(chip, true);
+  }
+
   function renderProvenance() {
-    var chip = el("surfaceSource"), panel = el("surfaceMetaPanel");
-    show(chip, !!provenance && published);
+    renderSourceTag();
+    var panel = el("surfaceMetaPanel");
     if (!provenance || !published) { if (panel) show(panel, false); return; }
-    chip.textContent = surfaceLib.provenanceLabel(provenance);
     if (panel && !panel.classList.contains("hiddenState")) panel.textContent = JSON.stringify(provenance, null, 2);
   }
 
@@ -954,7 +991,7 @@
     /* A declared surface is on its way: hold the previous picture, draw no map
        and place no overlays. They would be projected against metadata that has
        already been cleared. */
-    if (presentation === "loading") { drawChrome(scene); drawPicker(scene); return; }
+    if (presentation === "loading") { drawChrome(scene); drawPicker(scene); renderSourceTag(); return; }
     applyCamera(scene);
     if (!published) drawHoleLayers(scene);
     document.body.classList.toggle("flow-preview", scene.flow === "preview");
@@ -967,6 +1004,7 @@
     drawPin(scene, proj);
     drawChrome(scene);
     drawPicker(scene);
+    renderSourceTag();
   }
 
   function repaint(cause, fn) {
@@ -1217,6 +1255,14 @@
        regression is "this climbs on every pointermove", so a test can watch it
        rather than trying to describe what "went crazy" looks like. */
     cameraSolves: function () { return cameraSolves; },
+    /* Whether Leaflet would respond to a pinch or drag. Always false — the
+       stage camera owns the view — and a test watches it, because "we disabled
+       zoom" is the sort of thing a later refactor re-enables by accident. */
+    gesturesEnabled: function () {
+      if (!map) return false;
+      return ["dragging", "touchZoom", "doubleClickZoom", "scrollWheelZoom", "boxZoom", "keyboard"]
+        .some(function (name) { return map[name] && map[name].enabled(); });
+    },
     mapState: function () {
       if (!map) return null;
       try {
