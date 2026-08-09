@@ -194,12 +194,52 @@
   function cameraKey(scene) {
     var cam = scene.camera;
     var r = cam.hole || {};
+    /* The aim target is DELIBERATELY not in this key.
+
+       A locked shot view is meant to be genuinely stationary: the bubble moves
+       over a fixed picture of the hole. The lock frame is solved to hold
+       start→target, so keying on the target re-solved the camera on every
+       pointermove of a drag — and because the engine reads the on-screen scale
+       back through the same projection seam to clamp its cluster, the camera
+       moved the projection, which moved the model, which moved the camera. A
+       feedback loop, and it looked exactly as bad as it sounds.
+
+       So the frame is solved ONCE on entering a stage, with whatever the target
+       was at that moment, and then parks. Only a real change re-solves it: a
+       different stage, a new hole, a presentation swap, a resize, a settings
+       change — or the edge-pan exception below.
+
+       (play.js had this as cameraHolds(); dropping it in the rewrite is what
+       broke bubble dragging.) */
     return [cam.stage, scene.hole.number, published ? "p" : "l",
-      cam.shot && cam.shot.target ? cam.shot.target.lat.toFixed(6) + "," + cam.shot.target.lng.toFixed(6) : "-",
-      cam.shot && cam.shot.start ? cam.shot.start.lat.toFixed(6) + "," + cam.shot.start.lng.toFixed(6) : "-",
       r.holeNumber, window.innerWidth, window.innerHeight,
-      settings() ? (settings().shotUp() ? 1 : 0) + ":" + settings().lockTightness() : ""
+      settings() ? (settings().shotUp() ? 1 : 0) + ":" + settings().lockTightness() : "",
+      edgePanKey()
     ].join("|");
+  }
+
+  /* The one thing allowed to move a parked camera: the bubble dragged all the
+     way to the edge of the screen, where the player is asking for map that is
+     not on it yet. While the finger sits in the edge band the frame is allowed
+     to re-solve, which pans the view along with the target; the moment it comes
+     back to the interior the camera parks again.
+
+     Measured on the FINGER, not the painted cluster: the cluster centre sits
+     well off the aim (aim offset, forward bias, bag roof) and the roof clamps
+     it hard, so it can be hundreds of pixels short of the edge while the drag
+     is already against the bezel — the gesture would simply never fire. */
+  var EDGE_PAN_MARGIN_PX = 72;
+  var dragPoint = null;
+
+  function edgePanKey() {
+    if (!dragPoint) return "-";
+    var atEdge = dragPoint.x <= EDGE_PAN_MARGIN_PX
+      || dragPoint.y <= EDGE_PAN_MARGIN_PX
+      || dragPoint.x >= window.innerWidth - EDGE_PAN_MARGIN_PX
+      || dragPoint.y >= window.innerHeight - EDGE_PAN_MARGIN_PX;
+    /* Vary the key while the finger is in the band so the frame keeps
+       re-solving and the map keeps panning; freeze it the moment it is not. */
+    return atEdge ? "edge:" + Math.round(dragPoint.x) + "," + Math.round(dragPoint.y) : "-";
   }
 
   function framePoints(scene, pins) {
@@ -214,10 +254,13 @@
     };
   }
 
+  var cameraSolves = 0;   // exposed on app.painter for the drag regression test
+
   function applyCamera(scene) {
     var key = cameraKey(scene);
     if (key === lastCameraKey) return;
     lastCameraKey = key;
+    cameraSolves += 1;
     var stage = STAGE[scene.camera.stage] || "hole";
     document.body.dataset.frameStage = stage;
     document.body.classList.toggle("tilt-lock", stage === "lock");
@@ -881,8 +924,17 @@
     var offset = null;
     function end() {
       offset = null;
+      /* Cleared BEFORE the final render: the edge interaction is over, so the
+         camera has to be stationary again from this pass on, not one later. */
+      if (opts.trackPoint) dragPoint = null;
       if (!document.body.classList.contains(opts.busyClass)) return;
-      document.body.classList.remove(opts.busyClass);
+      /* A gesture flag is still a write to a watched element, so it declares
+         itself rather than showing up as an unattributed Leak. Trace caught
+         this the first time the drag test ran, which is the mechanism earning
+         its keep on its own author. */
+      repaint(opts.busyClass + ":end", function () {
+        document.body.classList.remove(opts.busyClass);
+      });
       if (opts.onEnd) opts.onEnd();
     }
     node.addEventListener("pointerdown", function (e) {
@@ -897,7 +949,10 @@
          straight under the finger — that IS the pick-it-up gesture. */
       offset = at ? { x: at.left - grab.left, y: at.top - grab.top } : { x: 0, y: 0 };
       try { node.setPointerCapture(e.pointerId); } catch (err) {}
-      document.body.classList.add(opts.busyClass);
+      repaint(opts.busyClass + ":start", function () {
+        document.body.classList.add(opts.busyClass);
+      });
+      if (opts.trackPoint) dragPoint = { x: e.clientX, y: e.clientY };
       e.preventDefault();
       if (opts.stop) e.stopPropagation();
     });
@@ -905,6 +960,7 @@
       if (!offset || !document.body.classList.contains(opts.busyClass)) return;
       var proj = projector();
       if (!proj) return;
+      if (opts.trackPoint) dragPoint = { x: e.clientX, y: e.clientY };
       var at = unTilt(e.clientX, e.clientY);
       var ll = proj.toLatLng({ left: at.left + offset.x, top: at.top + offset.y });
       if (ll) opts.onMove(ll);
@@ -915,7 +971,7 @@
 
   function wireInput() {
     dragHandler(el("aimBubble"), {
-      busyClass: "bubble-dragging",
+      busyClass: "bubble-dragging", trackPoint: true,
       anchor: function () { return currentScene && currentScene.bubble.target; },
       onMove: function (ll) { send("AIM_DRAGGED", { point: ll }); }
     });
@@ -1068,6 +1124,10 @@
     },
     /* Read-only, for tests and for diagnosing a frame that does not match what
        is on screen. */
+    /* How many times the stage camera has actually re-solved. The bubble drag
+       regression is "this climbs on every pointermove", so a test can watch it
+       rather than trying to describe what "went crazy" looks like. */
+    cameraSolves: function () { return cameraSolves; },
     mapState: function () {
       if (!map) return null;
       try {

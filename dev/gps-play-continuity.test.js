@@ -87,7 +87,7 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   await page.waitForFunction(() => window.ClarityApp.marshal, { timeout: 15000 });
   await wait(600);
 
-  const look = (fn) => page.evaluate(fn);
+  const look = (fn, arg) => page.evaluate(fn, arg);
   const scene = () => page.evaluate(() => window.ClarityApp.marshal.scene());
   const setFix = async (pt) => {
     await context.setGeolocation({ latitude: pt.lat, longitude: pt.lng });
@@ -252,6 +252,48 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   check("losing GPS does not end the round", s.flow === "live" && s.hole.number === 3);
   check("the dot goes quiet rather than vanishing",
     await look(() => document.getElementById("gpsDot").classList.contains("stale")));
+
+  console.log("\n— dragging the bubble does not move the camera —");
+
+  /* The regression: painter.js used to key the stage camera on the aim target,
+     so every pointermove of a drag re-solved the whole frame. And because the
+     bubble engine reads the on-screen scale back through the same projection
+     seam to clamp its cluster, the camera moved the projection, which moved the
+     model, which moved the camera. On a phone that reads as the map going
+     berserk under your finger. A locked shot view has to be stationary. */
+  /* Get back onto the LIVE hole — Lock does not exist in Preview, so a drag
+     test has to run where a shot can actually be opened. */
+  const liveHole = await look(() => ClarityApp.marshal.round().liveHole);
+  await page.evaluate((h) => ClarityApp.marshal.signal("VIEW_HOLE_CHANGED", { hole: h }), liveHole);
+  await setFix(offsetM(TEE, -700 + 6, 0));      // hole 3's tee
+  await page.evaluate(() => ClarityApp.marshal.signal("LOCK"));
+  await wait(300);
+  check("locked in on the live hole, ready to drag",
+    (await scene()).mode === "aim" && (await visible("aimBubble")), `hole ${liveHole}`);
+  const before = await look(() => ClarityApp.painter.cameraSolves());
+
+  /* Drive the real pointer handlers rather than the mouse: the cluster can
+     render off-screen depending on bag and hole, and this regression is about
+     what the handler does with the events, not where the art happens to be.
+     Coordinates sit mid-viewport, well inside the edge-pan band. */
+  const aimBefore = await look((h) => JSON.stringify(ClarityApp.marshal.openShot(h).target), liveHole);
+  await page.evaluate(() => {
+    const el = document.getElementById("aimBubble");
+    const cx = window.innerWidth / 2, cy = window.innerHeight / 2;
+    const ev = (type, x, y) => el.dispatchEvent(new PointerEvent(type, {
+      clientX: x, clientY: y, bubbles: true, cancelable: true, pointerId: 1
+    }));
+    ev("pointerdown", cx, cy);
+    for (let i = 1; i <= 12; i++) ev("pointermove", cx + i * 4, cy + i * 3);
+    ev("pointerup", cx + 48, cy + 36);
+  });
+  await wait(250);
+  const after = await look(() => ClarityApp.painter.cameraSolves());
+  check("12 drag moves re-solve the camera zero times", after - before === 0,
+    `${after - before} solves`);
+  const aimAfter = await look((h) => JSON.stringify(ClarityApp.marshal.openShot(h).target), liveHole);
+  check("but the aim actually moved", aimBefore !== aimAfter && !!aimAfter,
+    `${aimBefore} → ${aimAfter}`);
 
   console.log("\n— the architecture holds —");
 
