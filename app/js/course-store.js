@@ -64,9 +64,10 @@
     updateAvailable: function (courseId, remote) {
       var local = this.load(courseId);
       if (!local || !remote) return false;
-      var newerObjects = !!remote.objectsVersion && (!local.objectsVersion || String(remote.objectsVersion) > String(local.objectsVersion));
-      var newerMap = Number.isFinite(Number(remote.mapVersion)) && Number(remote.mapVersion) > Number(local.mapVersion || 0);
-      return newerObjects || newerMap;
+      return app.courseVersions.isStale(local, {
+        objectsVersion: remote.objectsVersion,
+        mapVersion: remote.mapVersion
+      });
     }
   };
 })();

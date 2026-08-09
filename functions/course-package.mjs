@@ -101,7 +101,7 @@ async function findDuplicateCourseWithGeometry(courseId, courseName, center) {
 
 async function loadCoursePackageRows(courseId) {
   const [mapRows, visualRows, visualJobRows, mapperJobRows] = await Promise.all([
-    supabaseFetch(MAPS_TABLE + "?select=course_id,course_name,published,geometry_version,objects_json,holes_json&course_id=eq." + encodeURIComponent(courseId) + "&published=eq.true&limit=1").catch(() => []),
+    supabaseFetch(MAPS_TABLE + "?select=course_id,course_name,published,geometry_version,published_at,updated_at,objects_json,holes_json&course_id=eq." + encodeURIComponent(courseId) + "&published=eq.true&limit=1").catch(() => []),
     supabaseFetch(VISUALS_TABLE + "?select=published_version,current_version,status,diagnostics,uploaded_assets,updated_at&course_id=eq." + encodeURIComponent(courseId) + "&limit=1").catch(() => []),
     supabaseFetch(VISUAL_JOBS_TABLE + "?select=id,kind,status,created_at,updated_at&course_id=eq." + encodeURIComponent(courseId) + "&order=created_at.desc&limit=5").catch(() => []),
     supabaseFetch(MAPPER_JOBS_TABLE + "?select=id,kind,status,error,created_at,updated_at&course_id=eq." + encodeURIComponent(courseId) + "&order=created_at.desc&limit=5").catch(() => [])

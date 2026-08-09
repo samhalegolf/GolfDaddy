@@ -254,7 +254,12 @@
       courseId: course.courseId,
       courseName: course.courseName,
       mapType: mapType,
-      objectsVersion: pkg.geometryVersion || null,
+      /* pkg.objectsVersion, NOT pkg.geometryVersion: the freshness check
+         compares this against /api/course-library's objects_version, and
+         geometryVersion is a different field entirely (the mapper algorithm
+         version, "v1"). Storing the wrong one is what made every course read
+         as permanently "Update available". */
+      objectsVersion: pkg.objectsVersion || null,
       mapVersion: pkg.packageVersion || null,
       pkg: pkg
     });

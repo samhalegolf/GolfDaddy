@@ -9,6 +9,24 @@
    uploaded_assets this reads) - kept in one small module so the two ends of the contract
    cannot drift independently of each other. */
 
+/* The version of a course's OBJECTS (geometry) as the rest of the system counts
+   it: the newest of published_at/updated_at on course_maps. published_at is the
+   meaningful one for a published course, but fall back to updated_at so a row
+   touched without a republish still invalidates a stale local copy.
+
+   Defined here rather than in course-library.mjs so /api/course-library and
+   /api/course-package report the SAME value. They did not: the manifest
+   reported this timestamp while the package reported course_maps.geometry_version
+   (the mapper algorithm version, "v1" or null). A client comparing one against
+   the other was comparing two unrelated things, so every course with a null
+   geometry_version read as permanently "Update available". */
+export function objectsVersion(map) {
+  const published = map && map.published_at ? String(map.published_at) : "";
+  const updated = map && map.updated_at ? String(map.updated_at) : "";
+  if (published && updated) return published > updated ? published : updated;
+  return published || updated || null;
+}
+
 function finitePoint(value) {
   const lat = Number(value && value.lat);
   const lng = Number(value && value.lng);
@@ -47,7 +65,7 @@ export function courseBoundsFromObjects(objectsJson) {
   };
 }
 
-/* Doc shape: {courseId, status:"lite-geo-ready", geometryVersion, courseBounds,
+/* Doc shape: {courseId, status:"lite-geo-ready", objectsVersion, geometryVersion, courseBounds,
    holes:[{holeNumber, tee, green, greenShape, route, confidence}], visualJob:{status}}. */
 export function shapeLitePackage(map, visualJobStatus) {
   const byHole = objectsByHole(map.objects_json);
@@ -66,6 +84,7 @@ export function shapeLitePackage(map, visualJobStatus) {
   return {
     courseId: map.course_id,
     status: "lite-geo-ready",
+    objectsVersion: objectsVersion(map),
     geometryVersion: map.geometry_version || null,
     courseBounds: courseBoundsFromObjects(map.objects_json),
     holes,
@@ -84,7 +103,7 @@ function assetUrl(path) {
   return "/api/course-visual-assets?path=" + encodeURIComponent(path);
 }
 
-/* Doc shape: {courseId, status:"full-map-ready", packageVersion, geometryVersion,
+/* Doc shape: {courseId, status:"full-map-ready", packageVersion, objectsVersion, geometryVersion,
    generatedAt, holes:[{holeNumber, geometry, visual:{url,width,height,anchorPins,transform,
    checksum}}]}.
 
@@ -132,6 +151,7 @@ export function shapeFullPackage(map, visual) {
     courseId: map.course_id,
     status: "full-map-ready",
     packageVersion: visual.published_version || null,
+    objectsVersion: objectsVersion(map),
     geometryVersion: map.geometry_version || null,
     generatedAt: (visual.diagnostics && visual.diagnostics.generatedAt) || visual.updated_at || null,
     holes

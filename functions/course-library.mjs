@@ -16,6 +16,8 @@
  * new Clarity map available".
  */
 
+import { objectsVersion } from "./lib/gd-course-package-shape.mjs";
+
 const COURSE_TABLE = "course_maps";
 const VISUAL_TABLE = "course_visuals";
 
@@ -86,16 +88,6 @@ function integer(value) {
   if (value === null || value === undefined || value === "") return null;
   const n = Number(value);
   return Number.isFinite(n) ? Math.round(n) : null;
-}
-
-/* The newest timestamp a course carries. published_at is the meaningful one for
-   a published course, but fall back to updated_at so a row touched without a
-   republish still invalidates a stale local copy. */
-function objectsVersion(row) {
-  const published = text(row && row.published_at);
-  const updated = text(row && row.updated_at);
-  if (published && updated) return published > updated ? published : updated;
-  return published || updated || null;
 }
 
 export default async function courseLibrary(req) {

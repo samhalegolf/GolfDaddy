@@ -4991,7 +4991,9 @@
         courseId:entry.courseId,
         courseName:entry.courseName||entry.courseId,
         mapType:mapType,
-        objectsVersion:pkg.geometryVersion||null,
+        /* pkg.objectsVersion, NOT pkg.geometryVersion - see
+           downloadedEntryHasUpdate below for why those are not the same thing. */
+        objectsVersion:pkg.objectsVersion||null,
         mapVersion:Number.isFinite(Number(pkg.packageVersion))?Number(pkg.packageVersion):null,
         pkg:pkg,
         savedAt:Date.now(),
@@ -5004,15 +5006,19 @@
   /* Background freshness check against the same lightweight manifest /app/
      uses (fetchCourseLibraryManifest, above) - the panel opens instantly from
      what is already on the device, then a badge appears if the server turns
-     out to have moved on. Mirrors app.courseStore.updateAvailable() in
-     app/js/course-store.js exactly, since it is answering the same question. */
+     out to have moved on. Delegates to app.courseVersions.isStale(), the same
+     rule app.courseStore.updateAvailable() uses, since it is answering the same
+     question and a second copy of it would drift. */
   let courseLibraryManifestById=null;
   function downloadedEntryHasUpdate(entry){
     const remote=courseLibraryManifestById&&courseLibraryManifestById[entry.courseId];
     if(!remote)return false;
-    const newerObjects=!!remote.objects_version&&(!entry.objectsVersion||String(remote.objects_version)>String(entry.objectsVersion));
-    const newerMap=Number.isFinite(Number(remote.clarity_map_version))&&Number(remote.clarity_map_version)>Number(entry.mapVersion||0);
-    return newerObjects||newerMap;
+    /* The rule itself lives in app/js/course-versions.js, loaded by both shells.
+       If it is absent the honest answer is "we do not know", and an unproven
+       badge is the exact bug this is fixing - so say nothing. */
+    const shared=window.ClarityApp&&window.ClarityApp.courseVersions;
+    if(!shared||typeof shared.isStale!=='function')return false;
+    return shared.isStale(entry,{objectsVersion:remote.objects_version,mapVersion:remote.clarity_map_version});
   }
   function refreshCourseLibraryManifest(){
     fetchCourseLibraryManifest().then(manifest=>{
