@@ -45,6 +45,9 @@
      previous picture holds and no map is created underneath it — creating one
      is what used to flash OSM under every published hole (README rule 2). */
   var presentation = "live";   // "loading" | "published" | "live"
+  /* A surface was DECLARED for this hole and did not arrive. Distinct from
+     "this hole has no surface", which is a normal answer. */
+  var surfaceFailed = null;    // null | { reason, url }
   var lastCameraKey = null;    // so a solved camera is not re-solved every pass
   var currentScene = null;
 
@@ -809,6 +812,28 @@
 
   // ------------------------------------------------------------- the surface
 
+  /* Absolute on native, untouched on web.
+
+     gd-native-bootstrap.js rewrites relative /api/* paths by patching fetch.
+     A surface image is loaded with `new Image().src`, which is NOT a fetch and
+     so never went through that patch. On a native build the page lives at
+     capacitor://localhost, so /api/course-visual-assets?path=... resolved
+     against the webview itself, failed, and presentSurface's onerror fell
+     straight to the live map — every published course silently playing as
+     objects on a drawn map. That is the exact degradation index.html warns
+     about in its first comment; the fetch patch fixed it for the package, the
+     par card and the LINZ key, and left the imagery behind because images do
+     not use fetch.
+
+     The endpoint is safe to hit this way: it authenticates with the service key
+     server-side and answers Access-Control-Allow-Origin: *, so an <img> with no
+     headers is exactly what it expects. */
+  function apiUrl(url) {
+    var origin = (window.GDNative && window.GDNative.apiOrigin) || "";
+    if (!origin || !url || /^[a-z][a-z0-9+.-]*:\/\//i.test(url)) return url;
+    return origin + url;
+  }
+
   function ensureStore() {
     if (!store) {
       store = surfaceLib.createStore({
@@ -851,6 +876,12 @@
     else if (published) {
       text = "PUBLISHED";
       kind = "published";
+    } else if (surfaceFailed) {
+      /* Not the same as "this hole has no surface". The server published one
+         and it did not arrive, so say that rather than letting it read as the
+         normal live-map case. */
+      text = "PUBLISHED MAP FAILED · ON LIVE MAP";
+      kind = "failed";
     } else {
       text = "LIVE MAP · " + (baseKind ? String(baseKind).toUpperCase() : "…");
       kind = "live";
@@ -875,13 +906,13 @@
     var img = el("surfaceImage");
     if (!img) return;
     var token = transitionToken;
-    var url = asset.url || surfaceLib.assetUrl(asset.path);
+    var url = apiUrl(asset.url || surfaceLib.assetUrl(asset.path));
     var startedAt = Date.now();
     var settled = false;
     var stall = setTimeout(function () {
       if (settled || token !== transitionToken) return;
       settled = true;
-      surfaceFallback();
+      surfaceFallback("timeout", url);
     }, 8000);
     var pre = new Image();
     pre.onload = function () {
@@ -894,6 +925,7 @@
         img.src = url;
         published = true;
         presentation = "published";
+        surfaceFailed = null;
         document.body.classList.add("surface-published");
         provenance = {
           origin: origin, url: url, courseKey: courseKey, holeNumber: hole,
@@ -914,15 +946,31 @@
       if (settled) return;
       settled = true;
       clearTimeout(stall);
-      if (token === transitionToken) surfaceFallback();
+      if (token === transitionToken) surfaceFallback("load-error", url);
     };
     pre.src = url;
   }
 
-  /* The stall timer and the error path both land here. It has to draw, or a
-     hung request leaves the player with nothing at all — which is the blackout
-     the bounded timer exists to prevent. */
-  function surfaceFallback() {
+  /* The stall timer and the error path both land here — and ONLY those. A hole
+     with no published surface never comes this way; it takes the absence branch
+     in loadSurfaceFor. So reaching here always means the server said a surface
+     exists and we could not show it.
+
+     That is worth saying out loud. Falling back to the live map is the right
+     behaviour — a round must never stop for want of a picture — but doing it
+     silently is how a published course quietly played as objects on a drawn map
+     for weeks. The tag says so, and the error reporter gets told, so the same
+     thing happening to somebody else is visible without them reporting it. */
+  function surfaceFallback(reason, url) {
+    surfaceFailed = { reason: reason || "error", url: url || null };
+    try {
+      if (window.ClarityErrorReporter && window.ClarityErrorReporter.report) {
+        window.ClarityErrorReporter.report(
+          new Error("published surface did not load: " + surfaceFailed.reason),
+          { source: "painter-surface", url: surfaceFailed.url,
+            hole: currentScene ? currentScene.hole.number : null });
+      }
+    } catch (e) {}
     repaint("SURFACE_FAILED", function () {
       presentation = "live";
       clearSurface();
@@ -939,6 +987,7 @@
     loadedHole = hole;
     loadedVisual = (r && r.visual && (r.visual.url || r.visual.path)) || null;
     lastCameraKey = null;
+    surfaceFailed = null;
     /* The stale METADATA goes at once, so nothing is ever projected against the
        previous hole's surface. The stale IMAGE stays: it is the only thing on
        screen until the new one decodes, and blanking it is what put a map in
@@ -1255,6 +1304,10 @@
        regression is "this climbs on every pointermove", so a test can watch it
        rather than trying to describe what "went crazy" looks like. */
     cameraSolves: function () { return cameraSolves; },
+    /* null, or {reason, url} when a declared surface did not arrive. */
+    surfaceFailure: function () { return surfaceFailed; },
+    /* Exposed so the native-origin rewrite can be tested without a phone. */
+    apiUrl: apiUrl,
     /* Whether Leaflet would respond to a pinch or drag. Always false — the
        stage camera owns the view — and a test watches it, because "we disabled
        zoom" is the sort of thing a later refactor re-enables by accident. */

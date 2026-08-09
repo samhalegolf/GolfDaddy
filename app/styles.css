@@ -593,3 +593,7 @@ body.pin-dragging #pinMarker { cursor: grabbing; }
 #surfaceSource[data-source="published"] { color: #8ef0b6; border-color: rgba(31, 211, 109, .45); }
 #surfaceSource[data-source="live"] { color: #9fd0ff; border-color: rgba(110, 200, 255, .38); }
 #surfaceSource[data-source="loading"] { color: rgba(255, 255, 255, .5); }
+/* A published surface that did not arrive is not the same as a hole that never
+   had one. It reads as a warning because it is one: the round is playable, but
+   on less than it should be. */
+#surfaceSource[data-source="failed"] { color: #ffb64d; border-color: rgba(255, 182, 77, .5); }

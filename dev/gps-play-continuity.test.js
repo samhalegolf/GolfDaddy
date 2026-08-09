@@ -52,6 +52,21 @@ const server = http.createServer((req, res) => {
     return res.end(JSON.stringify(PKG));
   }
   if (p.startsWith("/api/client-errors")) { res.writeHead(200); return res.end("{}"); }
+  /* A published surface the server SAYS exists but cannot serve — the exact
+     shape of the native-origin bug, and the case that used to degrade to the
+     live map without saying anything. */
+  if (p.startsWith("/api/course-visual-assets")) { res.writeHead(500); return res.end("boom"); }
+  if (p.startsWith("/api/course-visuals")) {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    return res.end(JSON.stringify({ record: {
+      status: "published",
+      uploaded_assets: [{
+        role: "hole-frame-published", holeNumber: 1, path: "verify/h1.jpg",
+        metadata: { playSurface: { captureZoom: 18, originPx: { x: 0, y: 0 },
+          outputDimensions: { width: 800, height: 1200 } } }
+      }]
+    } }));
+  }
   if (p.startsWith("/api/")) { res.writeHead(404); return res.end("{}"); }
   fs.readFile(path.join(ROOT, decodeURIComponent(p)), (err, body) => {
     if (err) { res.writeHead(404); return res.end("not found"); }
@@ -339,6 +354,46 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
   check("and it names the basemap rather than guessing",
     await look(() => document.getElementById("surfaceSource").dataset.source) === "live");
+
+  console.log("\n— published imagery reaches a native build —");
+
+  /* The surface image is loaded with new Image().src, which is not a fetch, so
+     gd-native-bootstrap's fetch patch never touched it. On capacitor://localhost
+     a relative /api/ path resolved against the webview, failed, and the fallback
+     put every published course on the live map. */
+  check("on web the asset URL is left alone",
+    (await look(() => ClarityApp.painter.apiUrl("/api/course-visual-assets?path=x"))) === "/api/course-visual-assets?path=x");
+
+  check("on native it is resolved against the deployed origin",
+    (await look(() => {
+      const saved = window.GDNative;
+      window.GDNative = { isNative: true, apiOrigin: "https://caddy.claritygolf.app" };
+      const out = ClarityApp.painter.apiUrl("/api/course-visual-assets?path=x");
+      window.GDNative = saved;
+      return out;
+    })) === "https://caddy.claritygolf.app/api/course-visual-assets?path=x");
+
+  check("an already-absolute URL is never double-prefixed",
+    (await look(() => {
+      const saved = window.GDNative;
+      window.GDNative = { isNative: true, apiOrigin: "https://caddy.claritygolf.app" };
+      const out = ClarityApp.painter.apiUrl("https://cdn.example/h1.jpg");
+      window.GDNative = saved;
+      return out;
+    })) === "https://cdn.example/h1.jpg");
+
+  console.log("\n— a published surface that fails says so —");
+
+  await page.evaluate(() => ClarityApp.marshal.signal("VIEW_HOLE_CHANGED", { hole: 1 }));
+  await wait(1200);
+  const failure = await look(() => ClarityApp.painter.surfaceFailure());
+  check("a declared surface that will not load is recorded as a failure",
+    !!failure && failure.reason === "load-error", failure ? failure.reason : "none");
+  check("and the tag says so rather than reading as a normal live map",
+    (await look(() => document.getElementById("surfaceSource").dataset.source)) === "failed",
+    await look(() => document.getElementById("surfaceSource").textContent));
+  check("the round keeps playing on the live map regardless",
+    (await scene()).hole.number === 1 && !(await visible("loggedScreen")));
 
   console.log("\n— the guards the old play.js earned —");
 
