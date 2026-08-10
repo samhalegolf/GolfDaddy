@@ -243,3 +243,91 @@ export async function reliefFromTerrainRgb(buffer, geo = {}, options = {}) {
     exaggeration: settings.exaggeration
   };
 }
+
+/* Ground bearing from one point to another, degrees clockwise from north.
+   Used to keep the light where the eye expects it - see reliefAzimuthForPlayAxis. */
+export function bearingDeg(from, to) {
+  if (!from || !to) return 0;
+  const toRad = Math.PI / 180;
+  const dLng = (to.lng - from.lng) * toRad;
+  const lat1 = from.lat * toRad, lat2 = to.lat * toRad;
+  const y = Math.sin(dLng) * Math.cos(lat2);
+  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+  return (Math.atan2(y, x) / toRad + 360) % 360;
+}
+
+/* Where to put the sun so it lands upper-left ON SCREEN.
+
+   Frames are baked north-up, and Play rotates them so the hole plays up the screen. A light
+   fixed in world space therefore swings around the screen hole by hole: a hole playing north
+   gets it from the upper left, a hole playing south from the lower right. That second case is
+   not a cosmetic difference - light from below inverts perceived relief, so the greens on
+   roughly half a course would read as craters. Shading is baked, so it cannot be recomputed
+   per frame; the light has to be aimed per hole instead, offset by the play axis.
+
+   Exact only for the stages that frame on the tee-green axis. The lock stage aims at the
+   player's target, so the light drifts by however far the aim is off the hole's axis - a few
+   degrees usually, and a wrong-by-degrees light still reads correctly where a wrong-by-180
+   one does not. The real fix for the residue is a mesh, where nothing is baked at all. */
+export function reliefAzimuthForPlayAxis(tee, green, baseAzimuth = RELIEF_DEFAULTS.azimuth) {
+  return (baseAzimuth + bearingDeg(tee, green) + 360) % 360;
+}
+
+/* Cut a lat/lng window out of a north-up mercator raster.
+
+   Web mercator is linear in longitude but not in latitude, so the vertical edges are found
+   through the same projection the raster was built with rather than by proportion. Getting
+   that wrong shifts the relief against the imagery by a few metres, which reads as the
+   shading being "slightly off" rather than as a projection bug. */
+export async function cropByBounds(buffer, sourceBounds, targetBounds, options = {}) {
+  const mercY = lat => {
+    const s = Math.sin(Math.max(-85.05112878, Math.min(85.05112878, lat)) * Math.PI / 180);
+    return 0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI);
+  };
+  const image = sharp(buffer, { limitInputPixels: false });
+  const meta = await image.metadata();
+  const W = meta.width, H = meta.height;
+  if (!W || !H) throw new Error("crop source has no pixels");
+
+  const spanX = (sourceBounds.east - sourceBounds.west) || 1e-12;
+  const y0 = mercY(sourceBounds.north), y1 = mercY(sourceBounds.south);
+  const spanY = (y1 - y0) || 1e-12;
+
+  const pad = Number.isFinite(options.padPx) ? options.padPx : 2;
+  const left = Math.floor((targetBounds.west - sourceBounds.west) / spanX * W) - pad;
+  const right = Math.ceil((targetBounds.east - sourceBounds.west) / spanX * W) + pad;
+  const top = Math.floor((mercY(targetBounds.north) - y0) / spanY * H) - pad;
+  const bottom = Math.ceil((mercY(targetBounds.south) - y0) / spanY * H) + pad;
+
+  const cl = Math.max(0, Math.min(W - 1, left));
+  const ct = Math.max(0, Math.min(H - 1, top));
+  const cw = Math.max(1, Math.min(W - cl, right - cl));
+  const chh = Math.max(1, Math.min(H - ct, bottom - ct));
+
+  /* A window that barely overlaps the source clamps down to a sliver, and a sliver stretched
+     back across a hole is a smear the compositor would lay over the imagery as if it meant
+     something. Refuse instead, and let the caller ship the hole unshaded. */
+  const minPx = Number.isFinite(options.minPx) ? options.minPx : 16;
+  if (cw < minPx || chh < minPx) {
+    throw new Error("crop window overlaps the source by only " + cw + "x" + chh + "px (need " + minPx + ")");
+  }
+
+  /* The bounds returned describe the pixels actually cut, not the window asked for - the
+     window is clamped to the source, and a consumer that placed the crop with the requested
+     bounds would smear it across the difference. */
+  const unmercY = t => {
+    const n = Math.PI - 2 * Math.PI * t;
+    return 180 / Math.PI * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
+  };
+  return {
+    buffer: await sharp(buffer, { limitInputPixels: false })
+      .extract({ left: cl, top: ct, width: cw, height: chh }).png({ compressionLevel: 9 }).toBuffer(),
+    width: cw, height: chh,
+    bounds: {
+      west: sourceBounds.west + (cl / W) * spanX,
+      east: sourceBounds.west + ((cl + cw) / W) * spanX,
+      north: unmercY(y0 + (ct / H) * spanY),
+      south: unmercY(y0 + ((ct + chh) / H) * spanY)
+    }
+  };
+}

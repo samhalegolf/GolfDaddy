@@ -27,7 +27,7 @@ sharp.concurrency(1);
 import { planCourseCaptures, captureGrid, packageHoleData, courseBoundsFor } from "./lib/gd-visual-plan-core.mjs";
 import { resolveImagerySource, unscannableReason, attributionFor } from "./lib/gd-imagery-sources.mjs";
 import { renderHoleSurfaceMercator, renderOverview } from "./lib/gd-visual-export-core.mjs";
-import { reliefFromTerrainRgb, RELIEF_DEFAULTS } from "./lib/gd-relief-core.mjs";
+import { reliefFromTerrainRgb, cropByBounds, reliefAzimuthForPlayAxis, RELIEF_DEFAULTS } from "./lib/gd-relief-core.mjs";
 
 const JOBS_TABLE = "course_visual_jobs";
 const MAPS_TABLE = "course_maps";
@@ -67,7 +67,7 @@ const EXPORT_RENDITION_PX = 3072;
    gd-relief-core.mjs change: stored terrain captures hold shaded pixels, so a new
    exaggeration or light angle makes every one of them stale, and neither the plan ids nor
    the recipe hash would notice. */
-const RELIEF_STAMP = "relief1-x" + RELIEF_DEFAULTS.exaggeration + "-az" + RELIEF_DEFAULTS.azimuth + "-al" + RELIEF_DEFAULTS.altitude;
+const RELIEF_STAMP = "relief2-perhole-x" + RELIEF_DEFAULTS.exaggeration + "-az" + RELIEF_DEFAULTS.azimuth + "-al" + RELIEF_DEFAULTS.altitude;
 
 function env(name) { return process.env[name] || ""; }
 function supabaseBase() { return env("SUPABASE_URL").replace(/\/+$/, ""); }
@@ -322,23 +322,18 @@ async function runSnapshotJob(job, deadlineAt) {
           buffer = await storageDownload(fullPath);
         } else {
           buffer = await buildCapture(grid, { format: isTerrain ? "png" : "jpeg" });
-          /* A terrain capture comes back as elevation packed into RGB, which is data, not a
-             picture. Shade it here, at snapshot time, and store the shading: the lighting is
-             the same for every hole and every recipe, so computing it once per course beats
-             recomputing it per frame, and what lands in storage is then something a human can
-             look at and immediately see is right or wrong. Strength stays at export time -
-             that is the slider, and it only scales what is already drawn. */
-          if (isTerrain) {
-            const relief = await reliefFromTerrainRgb(buffer, {
-              latitude: (grid.imageBounds.north + grid.imageBounds.south) / 2,
-              zoom: grid.captureZoom
-            }, { encoding: (source.terrain && source.terrain.encoding) || "terrain-rgb" });
-            console.log("[visual-worker] relief " + item.captureKey + " " + relief.width + "x" + relief.height +
-              " z" + grid.captureZoom + " " + relief.encoding +
-              " elev " + relief.elevation.min.toFixed(1) + ".." + relief.elevation.max.toFixed(1) + "m" +
-              " (" + (relief.elevation.max - relief.elevation.min).toFixed(1) + "m relief, " + relief.exaggeration + "x)");
-            buffer = relief.png;
-          }
+          /* A terrain capture is stored as the elevation it arrived as, not as shading.
+
+             It used to be shaded here, once per course, which was cheaper - but the frames
+             are baked north-up and Play rotates them so the hole runs up the screen, so one
+             fixed light swings around the screen hole by hole and ends up below the eye on
+             roughly half of them. Light from below inverts perceived relief: those greens
+             read as craters. Shading per hole at export, aimed off the play axis, is what
+             fixes that, and it needs the heights rather than somebody's picture of them.
+
+             Storing elevation is the better artefact anyway. It is the input to the terrain
+             mesh, and to real slope for plays-like, neither of which can be recovered from a
+             greyscale of one lighting choice. */
           if (KEEP_FULL_RES_MASTER) await storageUpload(fullPath, buffer, isTerrain ? "image/png" : "image/jpeg");
         }
         /* Export-ready rendition: pre-downscaled to the frame output resolution so the export
@@ -686,7 +681,54 @@ async function runExportJob(job, deadlineAt) {
       await heartbeatJob(job, { version, holesDone: framesIndex.holes.length, holesTotal: holeNumbers.length, stage: "rendering h" + holeNumber, rssMb: Math.round(process.memoryUsage().rss / 1048576) });
       const captures = [];
       for (const entry of holeEntries) captures.push({ entry: entryWithLensLocal(entry), buffer: await bufferFor(entry) });
-      const terrain = terrainEntry ? { entry: terrainEntry, buffer: await bufferFor(terrainEntry) } : null;
+
+      /* Elevation for THIS hole, cut from the course-wide capture, then shaded for it.
+
+         Two products come out of the same crop. The elevation goes to storage beside the
+         frame, because it is measurements and everything downstream that wants to know how
+         the ground actually lies - the terrain mesh, real slope for plays-like - needs those
+         and cannot get them back from a picture. The relief is a drawing made from them, lit
+         off this hole's play axis so the light lands upper-left once Play has rotated the
+         frame. Course-wide shading could not do that; the light is only correct for one
+         heading and every hole has its own. */
+      let terrain = null;
+      let elevation = null;
+      if (terrainEntry && bounds) {
+        try {
+          const demBuffer = await bufferFor(terrainEntry);
+          const crop = await cropByBounds(demBuffer, terrainEntry.bounds, bounds);
+          const azimuth = reliefAzimuthForPlayAxis(pins.tee, pins.green);
+          const shaded = await reliefFromTerrainRgb(crop.buffer, {
+            latitude: (crop.bounds.north + crop.bounds.south) / 2,
+            zoom: terrainEntry.captureZoom
+          }, { azimuth });
+          terrain = { entry: { role: "terrain-reference", bounds: crop.bounds }, buffer: shaded.png };
+          elevation = {
+            buffer: crop.buffer,
+            path: framesDir + "/h" + holeNumber + ".elevation.png",
+            meta: {
+              encoding: shaded.encoding,
+              bounds: crop.bounds,
+              width: crop.width,
+              height: crop.height,
+              captureZoom: terrainEntry.captureZoom,
+              metresPerPixel: shaded.metresPerPixel,
+              elevationRange: shaded.elevation,
+              reliefAzimuth: azimuth,
+              /* Recorded so a consumer can tell drawing decisions from measurements: the
+                 heights in this file are true, the exaggeration is only how the sibling
+                 frame was drawn. */
+              reliefExaggeration: shaded.exaggeration
+            }
+          };
+        } catch (error) {
+          /* Relief is a finish, not the frame. A course whose elevation is missing or
+             undecodable still ships its holes, unshaded, with the reason in the log. */
+          console.log("[visual-worker] relief skipped for h" + holeNumber + ": " + (error && error.message || error));
+          terrain = null;
+          elevation = null;
+        }
+      }
       /* North-up mercator surface: the geometry the v19 GPS pipeline consumes natively
          (originPx + captureZoom + one image). The runtime does the play-axis framing, same
          as it does for locally captured surfaces. */
@@ -705,6 +747,13 @@ async function runExportJob(job, deadlineAt) {
         originPx: frame.originPx,
         outputDimensions: { width: frame.width, height: frame.height }
       };
+      if (elevation) {
+        await storageUpload(elevation.path, elevation.buffer, "image/png");
+        playSurface.elevation = Object.assign({ path: elevation.path }, elevation.meta);
+        console.log("[visual-worker] elevation h" + holeNumber + " " + elevation.meta.width + "x" + elevation.meta.height +
+          " " + elevation.meta.elevationRange.min.toFixed(1) + ".." + elevation.meta.elevationRange.max.toFixed(1) + "m" +
+          " light az " + Math.round(elevation.meta.reliefAzimuth) + " (" + (elevation.buffer.length / 1024).toFixed(0) + "KB)");
+      }
       await storageUpload(path + ".json", Buffer.from(JSON.stringify({ width, height, bytes, bounds, playSurface })), "application/json");
       rendered += 1;
     }
