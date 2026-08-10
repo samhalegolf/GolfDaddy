@@ -200,11 +200,13 @@ export default async function courseMapperJobs(req) {
 
   const requestedKind = String(payload && payload.kind || "automap");
   const nudge = requestedKind === "nudge";
+  const remap = requestedKind === "remap";
   const user = await verifiedUser(req, payload);
   if (!user) return json(401, { error: "Sign in required" });
-  /* Only "automap" may be enqueued by an ordinary player. "nudge" is an operator action on a
-     stuck run, same split as course-visual-jobs.mjs's export/nudge paths. */
-  if (nudge && !user.isAdmin) return json(403, { error: "Admin verification failed" });
+  /* Only "automap" may be enqueued by an ordinary player. "nudge" and "remap" are operator
+     actions - one on a stuck run, one on a bad map - same split as course-visual-jobs.mjs's
+     export/nudge paths. */
+  if ((nudge || remap) && !user.isAdmin) return json(403, { error: "Admin verification failed" });
   const kind = "automap";
 
   const courseId = slug(payload && (payload.courseId || payload.course_id));
@@ -226,6 +228,37 @@ export default async function courseMapperJobs(req) {
     return json(200, Object.assign({ nudged: true, requeued }, await mapperBuildState(courseId)));
   }
 
+  /* Remap: forget the geometry, keep the course.
+
+     Deleting the course_maps row was the only way to force a fresh map, and it is too blunt -
+     that row is also the course's entry in the picker's list AND the centre the pin gate and
+     the Overpass query both read. Deleting it does not reset the map, it removes the course:
+     the picker stops offering it, the pin gate fires, no package request is made and nothing
+     is ever enqueued. (It also strands the worker, which reads the centre from this row -
+     "has no known location in course_maps" in the job history is exactly that.)
+
+     So clear what is actually stale - the geometry and its version - and leave the identity
+     and the location alone. Emptying objects_json also clears the dedupe in enqueueMapperJob,
+     which is what makes the enqueue below take rather than come back deduped. */
+  if (remap) {
+    const cleared = await supabaseFetch(MAPS_TABLE + "?course_id=eq." + encodeURIComponent(courseId), {
+      method: "PATCH",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify({
+        objects_json: {}, holes_json: {}, geometry_version: null,
+        hole_count: null, updated_at: new Date().toISOString()
+      })
+    });
+    if (!Array.isArray(cleared) || !cleared.length) {
+      /* No row to clear. Enqueuing anyway would hand the worker a course with no centre and
+         earn a "no known location" failure, so say what is wrong instead. */
+      return json(404, {
+        error: "no course_maps row for " + courseId,
+        detail: "Remap clears geometry from an existing course. A course with no row has to be added through the picker first, which creates its centre."
+      });
+    }
+  }
+
   const result = await enqueueMapperJob({
     courseId,
     courseLat: payload && payload.courseLat,
@@ -235,8 +268,8 @@ export default async function courseMapperJobs(req) {
     origin: new URL(req.url).origin
   });
   if (result.rateLimited) return json(429, { error: "too many course mapping runs started recently", state: result.state });
-  if (result.deduped) return json(200, Object.assign({ deduped: true }, result));
-  return json(202, { job: result.job, state: "queued" });
+  if (result.deduped) return json(200, Object.assign({ deduped: true, remapped: remap }, result));
+  return json(202, { job: result.job, state: "queued", remapped: remap });
 }
 
 /* AWAITED, not fire-and-forget - see course-visual-jobs.mjs's pingWorker for why: serverless
