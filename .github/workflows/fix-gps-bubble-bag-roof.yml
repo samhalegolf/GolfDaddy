@@ -1,0 +1,99 @@
+name: Fix GPS bubble bag roof
+
+on:
+  push:
+    branches:
+      - codex/fix-gps-bubble-bag-roof
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/fix-gps-bubble-bag-roof
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Apply narrow GPS bubble fix
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          core_path = Path('scripts/gd-app-core.js')
+          core = core_path.read_text()
+          old = 'return gdClampBubbleCenterToBagRoof(rawCenter,payload);'
+          new = 'return rawCenter;'
+          count = core.count(old)
+          if count != 1:
+              raise SystemExit(f'Expected exactly one bag-roof render-center return, found {count}')
+          core = core.replace(old, new, 1)
+          core_path.write_text(core)
+
+          test_path = Path('dev/gps-bubble-bag-roof-regression.test.js')
+          test_path.write_text(r'''const fs = require('fs');
+const assert = require('assert');
+
+const core = fs.readFileSync('scripts/gd-app-core.js', 'utf8');
+const client = fs.readFileSync('app/js/bubble-engine.js', 'utf8');
+
+function fn(source, name) {
+  const marker = `function ${name}(`;
+  const start = source.indexOf(marker);
+  assert(start >= 0, `${name} exists`);
+  let open = source.indexOf('{', start);
+  let depth = 0;
+  for (let i = open; i < source.length; i++) {
+    if (source[i] === '{') depth++;
+    else if (source[i] === '}') {
+      depth--;
+      if (depth === 0) return source.slice(start, i + 1);
+    }
+  }
+  throw new Error(`Unclosed ${name}`);
+}
+
+for (const [label, source] of [['core', core], ['generated client', client]]) {
+  const renderCenter = fn(source, 'gdBubbleRenderCenter');
+  assert(renderCenter.includes('return rawCenter;'), `${label}: render centre keeps its natural calculated position`);
+  assert(!renderCenter.includes('gdClampBubbleCenterToBagRoof(rawCenter,payload)'), `${label}: render centre is not translated backwards by the bag roof`);
+}
+
+const reachRule = fn(core, 'gdTargetForGreenCentre');
+assert(reachRule.includes('gdMaxPlayableCarryM()'), 'green-vs-layup reach rule still uses the playable bag maximum');
+
+const gdb = fn(core, 'getGDBForClub');
+assert(gdb.includes('Math.max(carryM'), 'club total remains constrained to at least carry');
+assert(gdb.includes('rolloutM'), 'carry-to-total rollout remains part of bubble geometry');
+
+console.log('GPS bubble bag-roof regression: ok');
+''')
+          PY
+
+      - name: Regenerate bubble client
+        run: node dev/generate-bubble-engine-client.js
+
+      - name: Run focused regression
+        run: node dev/gps-bubble-bag-roof-regression.test.js
+
+      - name: Run fresh-app parity test
+        run: node dev/fresh-app-boot.test.js
+
+      - name: Commit fix and remove temporary workflow
+        shell: bash
+        run: |
+          rm .github/workflows/fix-gps-bubble-bag-roof.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- scripts/gd-app-core.js app/js/bubble-engine.js dev/gps-bubble-bag-roof-regression.test.js .github/workflows/fix-gps-bubble-bag-roof.yml
+          git diff --cached --check
+          git commit -m "fix: stop GPS bubble pinning to bag total"
+          git push origin HEAD:codex/fix-gps-bubble-bag-roof
