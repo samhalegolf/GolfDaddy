@@ -30,6 +30,8 @@
   var configured = false;
   var identifiedAs = "";
   var busy = false;
+  var prices = null;        /* productKey -> localized store price, once loaded */
+  var pricesLoading = false;
 
   function isNative() {
     return !!(window.GDNative && window.GDNative.isNative);
@@ -151,6 +153,42 @@
     })[0] || null;
   }
 
+  /* Store prices for the paywall cards. The store is the only honest source of
+     what the user will actually be charged - the Stripe-derived labels describe
+     the web price, which can differ by currency and by Apple/Google price tier,
+     and "Configured in Stripe" on a store build is exactly the wording a
+     reviewer reads as payment taken outside the store. Loaded once after
+     configure; clarity-payments reads the cache synchronously via price(). */
+  async function loadPrices() {
+    if (prices || pricesLoading || !available()) return prices;
+    pricesLoading = true;
+    try {
+      await ensureConfigured();
+      var cfg = await loadConfig();
+      var offerings = await plugin().getOfferings();
+      var found = {};
+      Object.keys(cfg.products || {}).forEach(function (productKey) {
+        var pkg = findPackage(offerings, cfg.products[productKey], productKey);
+        var priceString = pkg && pkg.product && pkg.product.priceString;
+        if (priceString) found[productKey] = String(priceString);
+      });
+      prices = found;
+      /* Cards may already be rendered with the placeholder - repaint them. */
+      refreshPaymentsUi();
+    } catch (_e) {
+      /* A missing price is a display gap, not a failure - buy() resolves the
+         package itself. Leave the cache null so a later render can retry. */
+    } finally {
+      pricesLoading = false;
+    }
+    return prices;
+  }
+
+  function price(productKey) {
+    if (!prices) loadPrices();
+    return prices && prices[String(productKey || "")] || "";
+  }
+
   /* Ask our backend what it now believes, retrying while the webhook lands. */
   async function awaitEntitlement(account) {
     var payload = { accountId: account.accountId, email: account.email };
@@ -267,6 +305,8 @@
     identify: identify,
     restore: restore,
     signOut: signOut,
+    price: price,
+    loadPrices: loadPrices,
     /* Exposed for the boot smoke test and for diagnostics. */
     __state: function () {
       return { configured: configured, identifiedAs: identifiedAs, busy: busy, native: isNative() };
@@ -274,10 +314,11 @@
   };
 
   /* Configure early on native so the first paywall tap is not waiting on a network
-     round trip. Failure is silent by design - buy() reports it in context. */
+     round trip, then warm the price cache so the paywall opens with real store
+     prices. Failure is silent by design - buy() reports it in context. */
   if (isNative()) {
     document.addEventListener("DOMContentLoaded", function () {
-      ensureConfigured().catch(function () {});
+      ensureConfigured().then(function () { return loadPrices(); }).catch(function () {});
     });
   }
 })();

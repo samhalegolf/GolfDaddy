@@ -465,6 +465,28 @@
     return !!(window.GDNative && window.GDNative.isNative);
   }
 
+  /* The store's localized price for a product, from clarity-store-billing's
+     cache. Empty until the offerings have loaded once - the module repaints
+     this panel when they arrive. */
+  function storePrice(productKey) {
+    return safe(function () {
+      return window.ClarityStoreBilling && typeof window.ClarityStoreBilling.price === "function"
+        ? String(window.ClarityStoreBilling.price(productKey) || "")
+        : "";
+    }, "");
+  }
+
+  /* Store-build restore path (Apple 3.1.1): delegate to the store module, which
+     restores with the store and then re-asks our backend what is entitled. */
+  function restorePurchases() {
+    if (!storeBillingBlocksWebCheckout()) return false;
+    if (window.ClarityStoreBilling && typeof window.ClarityStoreBilling.restore === "function") {
+      return window.ClarityStoreBilling.restore();
+    }
+    safe(function () { return window.toast && window.toast("Purchases are unavailable right now"); });
+    return false;
+  }
+
   async function buy(productKey) {
     if (storeBillingBlocksWebCheckout()) {
       if (window.ClarityStoreBilling && typeof window.ClarityStoreBilling.buy === "function") {
@@ -606,7 +628,12 @@
       renderExpiryBanner(),
       renderProductCards(),
       renderReferralSection(),
-      '<div class="clarityPaymentActions"><button class="secondary" type="button" onclick="ClarityPayments.refresh()">Refresh Status</button></div>',
+      /* Restore Purchases only exists on store builds: Apple rejects a
+         subscription app without a visible restore path (3.1.1), and on the
+         web there is nothing to restore - Stripe access follows the account. */
+      '<div class="clarityPaymentActions"><button class="secondary" type="button" onclick="ClarityPayments.refresh()">Refresh Status</button>'
+        + (storeBillingBlocksWebCheckout() ? '<button class="secondary" type="button" onclick="ClarityPayments.restorePurchases()">Restore Purchases</button>' : '')
+        + '</div>',
       renderBillingNote(),
       renderLegalLinks(),
       isAdmin(activeAccount) ? renderAdminSettings() : ""
@@ -661,8 +688,18 @@
       var price = rowPriceMalformed ? "Invalid Price ID" : (moneyText(product.price_label) || (priceConfigured || product.stripe_price_id ? "Configured in Stripe" : "Not linked yet"));
       var disabledReason = "";
       if (product.active === false) disabledReason = "Not active yet";
-      if (rowPriceMalformed) disabledReason = "Invalid Price ID";
-      if (!priceConfigured && !product.stripe_price_id) disabledReason = "Not linked yet";
+      if (storeBillingBlocksWebCheckout()) {
+        /* A store build charges the store's price, so the card must quote the
+           store - the Stripe label is the web price and can differ by currency
+           and price tier, and "Configured in Stripe" on an iOS screen reads as
+           payment taken outside the store. Stripe link problems are equally a
+           web-only concern: the store path never touches a Price ID, so they
+           must not disable a store card either. */
+        price = storePrice(key) || "Price shown at purchase";
+      } else {
+        if (rowPriceMalformed) disabledReason = "Invalid Price ID";
+        if (!priceConfigured && !product.stripe_price_id) disabledReason = "Not linked yet";
+      }
       var action = isMembershipProduct ? "Start Membership" : "Buy One Month";
       var onclick = 'ClarityPayments.buy(&quot;' + escapeHTML(key) + '&quot;)';
       if (isMembershipProduct && hasMembership) {
@@ -1010,6 +1047,7 @@
   window.ClarityPayments = {
     buy: buy,
     manageMembership: manageMembership,
+    restorePurchases: restorePurchases,
     refresh: refresh,
     render: render,
     status: function () { return status; },
