@@ -5172,6 +5172,7 @@
       {id:"gdSandboxPracticeCount",label:"Shots",value:14,min:1,max:60,step:1},
       {id:"gdSandboxPracticeCarry",label:"Carry (m)",value:142,min:30,max:320,step:1},
       {id:"gdSandboxPracticeCarrySpread",label:"Carry ± (m)",value:6,min:0,max:40,step:.5},
+      {id:"gdSandboxPracticeLateralBias",label:"Lateral bias (°)",value:0,min:-20,max:20,step:.1},
       {id:"gdSandboxPracticeOffline",label:"Offline ± (m)",value:7,min:0,max:60,step:.5}
     ]
   };
@@ -5302,15 +5303,21 @@
     const carry=gdSandboxFieldValue("practice","gdSandboxPracticeCarry");
     const spread=gdSandboxFieldValue("practice","gdSandboxPracticeCarrySpread");
     const offline=gdSandboxFieldValue("practice","gdSandboxPracticeOffline");
+    // Bias is entered in degrees because that is what the gate reports back:
+    // buildPracticeGateInput() derives normalizedDeg as atan2(offline, carry).
+    // Converting per shot (not once off the nominal carry) keeps the group
+    // centred on the requested angle even as carry scatters.
+    const biasDeg=gdSandboxFieldValue("practice","gdSandboxPracticeLateralBias");
     const lines=["club,carry_m,total_m,offline_m,face,path,start"];
     for(let i=0;i<gdSandboxCount("practice","gdSandboxPracticeCount");i++){
       const carryM=gdSandboxBetween(carry-spread,carry+spread,1);
       const rollM=gdSandboxBetween(3,10,1);
+      const biasM=carryM*Math.tan(biasDeg*Math.PI/180);
       lines.push([
         club,
         carryM.toFixed(1),
         (carryM+rollM).toFixed(1),
-        gdSandboxBetween(-offline,offline,1).toFixed(1),
+        gdSandboxBetween(biasM-offline,biasM+offline,1).toFixed(1),
         gdSandboxBetween(-2.5,2.5,1).toFixed(1),
         gdSandboxBetween(-4,4,1).toFixed(1),
         gdSandboxBetween(-2,2,1).toFixed(1)
@@ -5394,7 +5401,7 @@
         <textarea id="gdSandboxCourseRows" rows="8" spellcheck="false" placeholder="club,carry_m,aim_deg,depth_pct"></textarea>
       </div>
       <div class="gdSandboxSection">
-        <div class="gdSandboxSectionHead"><strong>Practice shots</strong><span>Metres. Written after the gate, straight into the launch monitor store the practice graph reads.</span></div>
+        <div class="gdSandboxSectionHead"><strong>Practice shots</strong><span>Metres, except lateral bias in degrees - the group centres on that angle, offline ± is the scatter around it. Negative is left. Written after the gate, straight into the launch monitor store the practice graph reads.</span></div>
         <div class="gdSandboxGrid">${practiceFields}</div>
         <div class="gdSandboxActions"><button type="button" onclick="return gdSandboxGeneratePractice()">Randomise</button><button type="button" onclick="return gdSandboxSendPractice()">Add to practice data</button></div>
         <textarea id="gdSandboxPracticeRows" rows="8" spellcheck="false" placeholder="club,carry_m,total_m,offline_m,face,path,start"></textarea>
