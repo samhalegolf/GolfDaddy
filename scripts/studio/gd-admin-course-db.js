@@ -1925,7 +1925,7 @@ function gdAdminCourseVisualControls(record,courseId){
     rangeField("gdCourseVisualContrast","Contrast","",contrast,.55,2.2,.01)+
     `<span class="gdAdminPhoneTiltNote">Exposure is normalised: whatever the capture's real range is, it's mapped between floor and ceiling and its mean driven to the target.</span>`;
   const mowingField=`<label>Mowing visibility<select id="gdCourseVisualMowing" onchange="return gdAdminCourseVisualControlCommitted('${key}')">${["Unknown","Low","Clear","Prominent"].map(value=>`<option value="${value}" ${mowing===value?"selected":""}>${value}</option>`).join("")}</select></label>`;
-  const actionsField=`<div class="gdAdminCourseVisualActions"><button type="button" onclick="return gdAdminCourseVisualBuildBasic('${key}')">Build base</button><button type="button" onclick="return gdAdminCourseVisualBuildPreview('${key}')">Apply preset</button><button type="button" onclick="return gdAdminCourseVisualRecapture('${key}')">Re-run captures</button><button class="primary" type="button" onclick="return gdAdminCourseVisualPublish('${key}')">Publish Clarity map</button></div>`;
+  const actionsField=`<div class="gdAdminCourseVisualActions"><button type="button" onclick="return gdAdminCourseRemap('${key}')">Remap from OSM</button><button type="button" onclick="return gdAdminCourseVisualBuildBasic('${key}')">Build base</button><button type="button" onclick="return gdAdminCourseVisualBuildPreview('${key}')">Apply preset</button><button type="button" onclick="return gdAdminCourseVisualRecapture('${key}')">Re-run captures</button><button class="primary" type="button" onclick="return gdAdminCourseVisualPublish('${key}')">Publish Clarity map</button></div>`;
   const groups=[
     {id:"preset",icon:"🎨",label:"Preset",body:presetField+presetRail+recipeField},
     {id:"turf",icon:"🌱",label:"Turf & green",body:turfFields},
@@ -2026,6 +2026,38 @@ function gdAdminCourseVisualEnsurePipelineCourse(courseId){
    queues a server-side snapshot job, which bakes owned captures into Supabase Storage.
    Fire-and-forget - the local scan proceeds regardless, and the cloud job is deduped
    server-side if one is already queued or running. */
+/* Remap a course from OSM without deleting it.
+
+   The only way to force a fresh map used to be deleting the course_maps row, which is not
+   "reset the map" - that row is also the course's entry in the picker's list and the centre
+   that both the pin gate and the Overpass query read. Delete it and the course disappears
+   from the picker, the pin dialog fires instead of a package request, and nothing is ever
+   enqueued. This clears the geometry and leaves the identity and the location alone. */
+async function gdAdminCourseRemap(courseId){
+  courseId=String(courseId||"");
+  if(!courseId)return false;
+  if(!window.confirm("Remap "+courseId+" from OpenStreetMap?\n\nClears the mapped tees, greens and holes and queues a fresh run. The course, its name and its location are kept, so it stays in the picker while it remaps."))return false;
+  try{
+    const token=await gdAdminCourseDbAccessToken();
+    if(!token){gdAdminCourseVisualToast("Sign in again to remap");return false;}
+    const res=await fetch("/api/course-mapper-jobs",{
+      method:"POST",
+      headers:{"Content-Type":"application/json",Accept:"application/json",Authorization:"Bearer "+token},
+      body:JSON.stringify({courseId:courseId,kind:"remap"})
+    });
+    const data=await res.json().catch(()=>null);
+    if(res.status===404){gdAdminCourseVisualToast((data&&data.detail)||"No map row for this course");return false;}
+    if(res.status===403){gdAdminCourseVisualToast("Admin only");return false;}
+    if(res.status===429){gdAdminCourseVisualToast("Too many mapping runs started recently");return false;}
+    if(!res.ok){gdAdminCourseVisualToast("Remap failed ("+res.status+")");return false;}
+    gdAdminCourseVisualToast(data&&data.deduped?"A mapping run is already in progress":"Remapping "+courseId+" - the worker picks it up within ~3 minutes");
+    return true;
+  }catch(error){
+    gdAdminCourseVisualToast("Remap failed to send");
+    return false;
+  }
+}
+
 async function gdAdminCourseVisualEnqueueCloudJob(courseId,kind,recipe){
   try{
     const token=await gdAdminCourseDbAccessToken();

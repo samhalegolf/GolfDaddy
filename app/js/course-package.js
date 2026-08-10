@@ -33,11 +33,34 @@
     var headers = { Accept: "application/json" };
     var token = await accessToken();
     if (token) headers.Authorization = "Bearer " + token;
+    /* Same reasoning as scripts/gd-course-package-client.js: null stays the answer, because
+       the caller only branches on ready/not-ready, but the reason is recorded rather than
+       thrown away. A signed-out player and an unmapped course looked identical from here. */
+    function note(status, detail) {
+      try {
+        if (!document || !document.body) return;
+        document.body.dataset.gdCoursePackageOutcome = status;
+        if (detail) document.body.dataset.gdCoursePackageDetail = String(detail).slice(0, 120);
+        else delete document.body.dataset.gdCoursePackageDetail;
+      } catch (e) {}
+    }
+    if (!token) note("no-token");
     try {
       var response = await fetch(ENDPOINT + "?" + params, { headers: headers, signal: controller ? controller.signal : undefined });
-      if (!response.ok) return null;
-      return await response.json();
+      if (!response.ok) {
+        note(response.status === 401 || response.status === 403 ? "unauthorized"
+          : response.status === 429 ? "rate-limited"
+          : response.status >= 500 ? "server-error" : "rejected", "HTTP " + response.status);
+        return null;
+      }
+      var body = await response.json();
+      var state = body && body.status ? String(body.status) : "none";
+      note(state === "none" && !token ? "none-signed-out" : state,
+        body && body.triggerError ? String(body.triggerError) : "");
+      return body;
     } catch (e) {
+      var aborted = e && (e.name === "AbortError" || String(e).indexOf("abort") >= 0);
+      note(aborted ? "timeout" : "network-error", e && e.message ? e.message : "");
       return null;
     } finally {
       if (timer) clearTimeout(timer);
