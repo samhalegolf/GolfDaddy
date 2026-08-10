@@ -60,23 +60,6 @@ function gdTotalM(row){
   return saved>=carry&&saved>0?saved:gdBagTotalForCarry(row?.club||row?.name,carry);
 }
 function gdDefaultStandInBag(){return Object.entries(GD_DEFAULT_CLUB_CARRY_M).map(([club,baseCarry])=>({club,baseCarry,totalM:gdBagTotalForCarry(club,baseCarry)}))}
-function gdShotActiveProfile(){
-  try{
-    const api=window.GolfDaddyAccounts||window.ClarityCaddieAccounts;
-    const account=api&&typeof api.current==="function"?api.current():null;
-    if(account){
-      let profile=null;
-      try{profile=typeof gdActiveAccountProfile==="function"?gdActiveAccountProfile(account):null;}catch(e){}
-      if(!profile&&account.profileId&&typeof gdProfileById==="function")profile=gdProfileById(account.profileId);
-      if(profile&&!profile.placeholderProfile)return profile;
-    }
-  }catch(e){}
-  try{
-    const p=activePlayerProfile&&activePlayerProfile();
-    if(p&&!p.placeholderProfile)return p;
-  }catch(e){}
-  return null;
-}
 function gdNormaliseBagRow(c){const club=String(c?.club||c?.name||'').trim();const baseCarry=Math.round(Number(c?.baseCarry??c?.carry??c?.distance??c?.meters)||0);if(!club||baseCarry<=0)return null;const totalM=Math.max(baseCarry,gdTotalM({...c,club,baseCarry}));return{club,baseCarry,totalM}}
 function gdNormaliseShotBagRows(rows){
   return (Array.isArray(rows)?rows:[]).map(row=>gdNormaliseBagRow(row)).filter(row=>row&&String(row.club||"").trim()&&gdCarryM(row)>0).sort((a,b)=>gdTotalM(b)-gdTotalM(a));
@@ -464,7 +447,14 @@ function gdBubbleRenderCenter(payloadInput){
   if(!renderTarget)return null;
   const payload=gdBubblePayloadForRender(payloadInput);
   const shotBrg=gdBubbleShotBearing();
-  const sideLimit=Math.max(2,gdFiniteNumber(payload.lateralRadiusM,payload.radius)*.78);
+  // The aim is a REAL offset (tan(deg) x carry). It is NOT a function of how big
+  // the bubble happens to be. Clamping it to 0.78 x lateralRadius truncated any
+  // offset past roughly 4 deg: the stated degrees kept climbing while the drawn
+  // bubble stopped moving, which is worse than no clamp at all. The bound left
+  // here is geometric sanity only - a quarter of the carry is about 14 deg, far
+  // outside any aim a player can set.
+  const aimBase=Math.max(1,gdFiniteNumber(payload.baseCarry,gdFiniteNumber(payload.radius,1)*10));
+  const sideLimit=Math.max(2,aimBase*.25);
   const sideOffset=gdClamp(gdFiniteNumber(payload.aimOffsetM,0),-sideLimit,sideLimit);
   const forwardBias=gdClamp(gdFiniteNumber(payload.visual&&payload.visual.visualYBias,0),-.18,.18)*Math.max(1,gdFiniteNumber(payload.depthRadiusM,payload.radius));
   const rawCenter=projectOffset(renderTarget,shotBrg,forwardBias,sideOffset);
@@ -578,15 +568,29 @@ function localPointToLatLng(center, shotBrg, x, y){
      - window.gdMappedFairwayLayupTarget: in the old app pin-lock provides
        this seam; here the client provides it from the SAME verbatim layup
        helpers, fed the hole route the package already carries.
-     - gdShotActiveProfile: the verbatim copy looks for a legacy account API
+     - gdShotActiveProfile: core's version looks for a legacy account API
        (window.GolfDaddyAccounts / ClarityCaddieAccounts) that does not exist
-       here. Rebinding it to read the fresh app's own bag store (set via
-       GDBubbleEngine.setBag) is a function REASSIGNMENT, not a source edit —
-       every copy above is still byte-identical to core, so the boot test's
-       verbatim assertion still holds. bag.js owns the real storage/editor. */
+       here, so it is not copied at all — the fresh app declares its own,
+       backed by the two things this shell really owns: the bag (bag.js, via
+       setBag) and the saved My Bubble (my-bubble.js, via setBubble).
+
+       This used to return { bag } and nothing else, so gdProfileCentralOffset
+       never found a faceOffsetDeg and every GPS bubble on the course aimed at
+       the placeholder 1.4 deg right — whatever the player had adopted and
+       saved, and for left-handers too. A degree value and a bag is the whole
+       of the GPS bubble (Bubble Bible s2); half of it was missing. */
   var start = null, target = null, greenCentre = null;
   var appBagRows = [];
-  gdShotActiveProfile = function () { return appBagRows.length ? { bag: appBagRows } : null; };
+  var appBubble = null;   // { offsetDeg, handedness } — my-bubble.js owns it
+  function gdShotActiveProfile() {
+    if (!appBagRows.length && !appBubble) return null;
+    return {
+      bag: appBagRows,
+      faceOffsetDeg: appBubble ? appBubble.offsetDeg : undefined,
+      centralFaceOffsetDeg: appBubble ? appBubble.offsetDeg : undefined,
+      handedness: appBubble ? appBubble.handedness : undefined
+    };
+  }
   var targetDragging = false, bubbleOrganic = true, bubbleBiasMode = "neutral";
   var currentHoleNumber = 0, currentTee = null, currentRoute = [];
   var projection = null;   // {toScreen(latlng)->{x,y}, viewSize()->{x,y}}
@@ -617,7 +621,6 @@ function localPointToLatLng(center, shotBrg, x, y){
   var gdWindActive = false, gdWindOriginAngle = null, gdWindLevel = 1;
   var gdWindLandingTarget = null;
   function gdHasWindVector() { return !!gdWindActive && Number.isFinite(gdWindOriginAngle); }
-  function activePlayerProfile() { return null; }
   function gdMappedStartHoleNumber() { return currentHoleNumber; }
   function toLatLng(value) {
     var lat = Number(value && value.lat), lng = Number(value && value.lng);
@@ -654,6 +657,21 @@ function localPointToLatLng(center, shotBrg, x, y){
     },
     setDragging: function (on) { targetDragging = !!on; },
     setBag: function (rows) { appBagRows = Array.isArray(rows) ? rows : []; },
+    /* The saved My Bubble: a degree value and a handedness, nothing else —
+       the bubble's SHAPE is never taken from it (Bubble Bible s2). Pass a
+       non-finite offset to clear it. my-bubble.js reads the value from the
+       profile store that the studio's Adopt -> Save writes to. */
+    setBubble: function (bubble) {
+      /* Guard null/undefined/"" BEFORE the finite check — Number(null) is 0 and
+         Number.isFinite(0) is true, so a bare finite test turns "no bubble" into
+         a fabricated 0.0 deg aim (Bubble Bible s8, same trap as the practice
+         bridge). setBubble(null) must clear, not zero. */
+      var raw = bubble == null ? null : bubble.offsetDeg;
+      var deg = (raw === null || raw === undefined || raw === "") ? NaN : Number(raw);
+      appBubble = Number.isFinite(deg)
+        ? { offsetDeg: deg, handedness: (bubble && bubble.handedness) === "left" ? "left" : "right" }
+        : null;
+    },
     defaultBagRows: gdDefaultStandInBag,
     setWind: function (originAngleRad, level) {
       gdWindActive = true;

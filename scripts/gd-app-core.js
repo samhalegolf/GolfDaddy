@@ -18219,7 +18219,14 @@ function gdBubbleRenderCenter(payloadInput){
   if(!renderTarget)return null;
   const payload=gdBubblePayloadForRender(payloadInput);
   const shotBrg=gdBubbleShotBearing();
-  const sideLimit=Math.max(2,gdFiniteNumber(payload.lateralRadiusM,payload.radius)*.78);
+  // The aim is a REAL offset (tan(deg) x carry). It is NOT a function of how big
+  // the bubble happens to be. Clamping it to 0.78 x lateralRadius truncated any
+  // offset past roughly 4 deg: the stated degrees kept climbing while the drawn
+  // bubble stopped moving, which is worse than no clamp at all. The bound left
+  // here is geometric sanity only - a quarter of the carry is about 14 deg, far
+  // outside any aim a player can set.
+  const aimBase=Math.max(1,gdFiniteNumber(payload.baseCarry,gdFiniteNumber(payload.radius,1)*10));
+  const sideLimit=Math.max(2,aimBase*.25);
   const sideOffset=gdClamp(gdFiniteNumber(payload.aimOffsetM,0),-sideLimit,sideLimit);
   const forwardBias=gdClamp(gdFiniteNumber(payload.visual&&payload.visual.visualYBias,0),-.18,.18)*Math.max(1,gdFiniteNumber(payload.depthRadiusM,payload.radius));
   const rawCenter=projectOffset(renderTarget,shotBrg,forwardBias,sideOffset);
@@ -21363,9 +21370,21 @@ function gdShotChartLateralInfo(source,distance){
   }
   return{value:0,hasLateral:false};
 }
+// LANDSCAPE FRAME - LAW. Ball left, target right, lateral vertical. Rotate the
+// portrait chart (Bubble Bible s3: right miss = right, long = up) 90 degrees
+// clockwise into this frame and a RIGHT miss lands BELOW the centre line. So
+// positive lateral is +y, not -y.
+//
+// This used to subtract, drawing right-of-target above the line - directly
+// contradicting gdShotChartOfflineGridSvg below, which labels above "L" and
+// below "R". Every dot on the landscape chart sat on the opposite side to its
+// own axis label, and the My Bubble lane at the top of Shot Data inherited the
+// same flip through gdShotBubbleModelEndpoint (gd-route-audit.js), which was
+// fixed with it. Positive lateral IS right: gd-shot-outcomes.js reads
+// delta.lateral > limit as 'right'.
 function gdShotChartYForLateral(plot,lateral){
   const half=(plot.plotBottom-plot.plotTop)/2;
-  return plot.plotMidY-gdShotChartClamp((Number(lateral)||0)/Math.max(1,plot.lateralMax),-1,1)*half;
+  return plot.plotMidY+gdShotChartClamp((Number(lateral)||0)/Math.max(1,plot.lateralMax),-1,1)*half;
 }
 function gdShotChartPoint(plot,distance,lateral,index,hasLateral=true){
   const actual=Number(distance);

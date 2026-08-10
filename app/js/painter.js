@@ -1545,6 +1545,9 @@
     if (app.pin) app.pin.onChange(function () {
       if (marshal) repaint("PIN_CHANGED", function () { render(marshal.scene()); });
     });
+    if (app.myBubble) app.myBubble.onChange(function () {
+      if (marshal) repaint("MY_BUBBLE_CHANGED", function () { render(marshal.scene()); });
+    });
     if (app.playsLike) app.playsLike.onChange(function () {
       if (marshal) repaint("ELEVATION_READY", function () { render(marshal.scene()); });
     });

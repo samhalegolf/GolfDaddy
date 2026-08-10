@@ -3344,7 +3344,13 @@
   function gdShotBubbleModelEndpoint(offset,frame){
     const n=Number(offset);
     const dx=Math.max(1,frame.zeroXModel-frame.startXModel);
-    const rawDy=Number.isFinite(n)?-Math.tan(n*Math.PI/180)*dx:0;
+    // POSITIVE, not negated - same landscape law as gdShotChartYForLateral
+    // (gd-app-core.js). Ball left, target right, so a RIGHT offset (positive n)
+    // draws BELOW the line, which is +y in SVG. The negation drew it above.
+    // Model +y therefore means RIGHT, which also makes the bubble's physics
+    // tilt (positive = far end swings right) come out the correct way round in
+    // gdShotBubbleSimulatedModelPath - both were mirrored before.
+    const rawDy=Number.isFinite(n)?Math.tan(n*Math.PI/180)*dx:0;
     const minY=frame.modelH*.30;
     const maxY=frame.modelH*.80;
     const y=gdShotBubbleClamp(frame.yModel+rawDy,minY,maxY);

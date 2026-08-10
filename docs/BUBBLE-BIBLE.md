@@ -83,6 +83,18 @@ it can't be mistaken for an intended path.
 - Every rendered one is snapshotted as `plannedBubble`, which is what Course Data
   later grades. This is the loop that closes: bag sizes it, practice proposes,
   course reports.
+- **The play surface has to be GIVEN the degree.** `app/` does not load the
+  profile store; its engine adapter returned `{ bag }` alone, so
+  `gdProfileCentralOffset` fell through to the placeholder **1.4 deg right** on
+  every GPS bubble ever drawn there - whatever had been adopted and saved, and
+  for left-handers too. `app/js/my-bubble.js` now reads the saved bubble and
+  feeds it in through `GDBubbleEngine.setBubble`; with no ACTIVE source it
+  passes an explicit `0.0`, because a fabricated aim bias is the same stand-in
+  this file rejects everywhere else. Covered by `dev/my-bubble-aim.test.js`.
+- **The aim is not clamped by the bubble's own size.** `gdBubbleRenderCenter`
+  bounded `aimOffsetM` at `0.78 x lateralRadius`, so past roughly 4 deg the
+  number kept climbing while the bubble stopped moving. The bound is now a
+  quarter of the carry (about 14 deg) - geometric sanity, never a real aim.
 
 ### Offset Hub bubble — display blend
 Sizes = median of Course + Practice; aim = your current My Bubble offset. Underlay
@@ -134,6 +146,37 @@ bubble.
 The origin-bottom toggle, its stored preference and the rotate button are gone - all
 dead code with no call sites, and keeping the transform would double-rotate the new
 geometry.
+
+### 3a. The landscape frame — LAW
+
+Two charts are not portrait: the **Course Data** chart and the **My Bubble lane**
+at the top of Shot Data. Both run ball-left, target-right, with lateral on the
+vertical axis. Rotate the portrait frame above 90 degrees CLOCKWISE to get there,
+and a **right miss lands BELOW the centre line**. Positive lateral is therefore
+`+y`, not `-y`.
+
+Both renderers had it backwards, and the Course chart contradicted itself:
+
+| | did | should |
+|---|---|---|
+| `gdShotChartYForLateral` (gd-app-core.js) | `midY - lateral` -> right ABOVE | `midY + lateral` |
+| `gdShotBubbleModelEndpoint` (gd-route-audit.js) | `-tan(deg)` -> right ABOVE | `+tan(deg)` |
+| `gdShotChartOfflineGridSvg` labels | above = "L", below = "R" | unchanged - it was right |
+
+So every dot on the Course chart sat on the opposite side to its own axis label,
+and the lane strip drew a saved right offset to the left. Positive lateral IS
+right - `gd-shot-outcomes.js` reads `delta.lateral > limit` as `'right'`, and
+`gdOffsetLabel` prints `n > 0` as `R`.
+
+The endpoint sign also fixes the tilt for free: model `+y` now means right, so
+the physics tilt (positive = far end swings toward +lateral) comes out the
+correct way round in `gdShotBubbleSimulatedModelPath`. Both were mirrored
+together, which is why neither looked obviously wrong on its own.
+
+Same warning as section 3: this sign is NOT independent of the frame. Any change
+to which axis carries what has to re-check it - and the axis labels are the
+cheapest check there is, which is why `dev/my-bubble-aim.test.js` asserts the
+labels and the data agree rather than hard-coding a direction.
 
 ---
 

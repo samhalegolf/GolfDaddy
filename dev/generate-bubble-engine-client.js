@@ -43,7 +43,11 @@ const CORE_FUNCS = [
   // bag
   "gdBagFirmness", "gdBagFirmnessMultiplier", "gdRolloutBasePct",
   "gdBagTotalForCarry", "gdCarryM", "gdTotalM", "gdDefaultStandInBag",
-  "gdShotActiveProfile", "gdNormaliseBagRow", "gdNormaliseShotBagRows",
+  // gdShotActiveProfile is deliberately NOT copied. Core's version hunts a
+  // legacy account API that does not exist in this shell and the adapter
+  // replaced it wholesale anyway, so the copy was dead lines that existed
+  // only to be overwritten. The adapter declares the real one instead.
+  "gdNormaliseBagRow", "gdNormaliseShotBagRows",
   "gdAccountShotBagRows", "gdGhostShotBagRows", "gdPlayableShotBagRows",
   "gdActiveShotBagRows", "gdHasPlayableBag", "gdResolveShotBagClub",
   "gdMaxPlayableCarryM",
@@ -135,15 +139,29 @@ const adapter = `
      - window.gdMappedFairwayLayupTarget: in the old app pin-lock provides
        this seam; here the client provides it from the SAME verbatim layup
        helpers, fed the hole route the package already carries.
-     - gdShotActiveProfile: the verbatim copy looks for a legacy account API
+     - gdShotActiveProfile: core's version looks for a legacy account API
        (window.GolfDaddyAccounts / ClarityCaddieAccounts) that does not exist
-       here. Rebinding it to read the fresh app's own bag store (set via
-       GDBubbleEngine.setBag) is a function REASSIGNMENT, not a source edit —
-       every copy above is still byte-identical to core, so the boot test's
-       verbatim assertion still holds. bag.js owns the real storage/editor. */
+       here, so it is not copied at all — the fresh app declares its own,
+       backed by the two things this shell really owns: the bag (bag.js, via
+       setBag) and the saved My Bubble (my-bubble.js, via setBubble).
+
+       This used to return { bag } and nothing else, so gdProfileCentralOffset
+       never found a faceOffsetDeg and every GPS bubble on the course aimed at
+       the placeholder 1.4 deg right — whatever the player had adopted and
+       saved, and for left-handers too. A degree value and a bag is the whole
+       of the GPS bubble (Bubble Bible s2); half of it was missing. */
   var start = null, target = null, greenCentre = null;
   var appBagRows = [];
-  gdShotActiveProfile = function () { return appBagRows.length ? { bag: appBagRows } : null; };
+  var appBubble = null;   // { offsetDeg, handedness } — my-bubble.js owns it
+  function gdShotActiveProfile() {
+    if (!appBagRows.length && !appBubble) return null;
+    return {
+      bag: appBagRows,
+      faceOffsetDeg: appBubble ? appBubble.offsetDeg : undefined,
+      centralFaceOffsetDeg: appBubble ? appBubble.offsetDeg : undefined,
+      handedness: appBubble ? appBubble.handedness : undefined
+    };
+  }
   var targetDragging = false, bubbleOrganic = true, bubbleBiasMode = "neutral";
   var currentHoleNumber = 0, currentTee = null, currentRoute = [];
   var projection = null;   // {toScreen(latlng)->{x,y}, viewSize()->{x,y}}
@@ -174,7 +192,6 @@ const adapter = `
   var gdWindActive = false, gdWindOriginAngle = null, gdWindLevel = 1;
   var gdWindLandingTarget = null;
   function gdHasWindVector() { return !!gdWindActive && Number.isFinite(gdWindOriginAngle); }
-  function activePlayerProfile() { return null; }
   function gdMappedStartHoleNumber() { return currentHoleNumber; }
   function toLatLng(value) {
     var lat = Number(value && value.lat), lng = Number(value && value.lng);
@@ -211,6 +228,21 @@ const adapter = `
     },
     setDragging: function (on) { targetDragging = !!on; },
     setBag: function (rows) { appBagRows = Array.isArray(rows) ? rows : []; },
+    /* The saved My Bubble: a degree value and a handedness, nothing else —
+       the bubble's SHAPE is never taken from it (Bubble Bible s2). Pass a
+       non-finite offset to clear it. my-bubble.js reads the value from the
+       profile store that the studio's Adopt -> Save writes to. */
+    setBubble: function (bubble) {
+      /* Guard null/undefined/"" BEFORE the finite check — Number(null) is 0 and
+         Number.isFinite(0) is true, so a bare finite test turns "no bubble" into
+         a fabricated 0.0 deg aim (Bubble Bible s8, same trap as the practice
+         bridge). setBubble(null) must clear, not zero. */
+      var raw = bubble == null ? null : bubble.offsetDeg;
+      var deg = (raw === null || raw === undefined || raw === "") ? NaN : Number(raw);
+      appBubble = Number.isFinite(deg)
+        ? { offsetDeg: deg, handedness: (bubble && bubble.handedness) === "left" ? "left" : "right" }
+        : null;
+    },
     defaultBagRows: gdDefaultStandInBag,
     setWind: function (originAngleRad, level) {
       gdWindActive = true;

@@ -3,7 +3,8 @@
    engine's ghost-bag fallback (bubble-engine.js's PLACEHOLDER_PLAYER_PROFILE)
    only applies until the player has actually set clubs here. Persists locally;
    feeds the engine through GDBubbleEngine.setBag on every change (see the
-   gdShotActiveProfile rebind in dev/generate-bubble-engine-client.js). */
+   gdShotActiveProfile declaration in dev/generate-bubble-engine-client.js;
+   my-bubble.js supplies the other half of that profile, the saved aim). */
 (function () {
   "use strict";
   var app = (window.ClarityApp = window.ClarityApp || {});
