@@ -1400,10 +1400,14 @@ function gdAdminCourseVisualReliefSrc(courseId){
     courseId:String(courseId), hole:String(hole), size:"768",
     strength:String(val("gdCourseVisualTerrainStrength",.9)),
     exaggeration:String(val("gdReliefExaggeration",5)),
-    azimuth:String(val("gdReliefAzimuth",315)),
     altitude:String(val("gdReliefAltitude",42)),
     ambient:String(val("gdReliefAmbient",.18))
   });
+  /* Left to the server unless overridden. The bake aims the light off each hole's play axis
+     so it lands upper-left once Play has rotated the frame; sending a fixed bearing from
+     here would preview a hole lit differently from the one that ships. */
+  const auto=(document.getElementById("gdReliefAutoAzimuth")||{checked:true}).checked;
+  if(!auto)q.set("azimuth",String(val("gdReliefAzimuth",315)));
   if(shadeOnly)q.set("mode","shade");
   return {url:"/api/relief-preview?"+q.toString(),hole:hole};
 }
@@ -1897,7 +1901,8 @@ function gdAdminCourseVisualControls(record,courseId){
         `<div id="gdReliefPreviewStatus" style="position:absolute;left:0;right:0;bottom:0;padding:4px 8px;font:11px/1.5 system-ui;background:rgba(0,0,0,.62);color:#cfe3cf"></div>`+
       `</div>`+
       reliefKnob("gdReliefExaggeration","Exaggeration","how far the ground is stretched before it is lit",5,1,12,.5)+
-      reliefKnob("gdReliefAzimuth","Light direction","compass bearing the light comes from",315,0,360,5)+
+      `<label class="gdAdminCourseVisualCheck"><input id="gdReliefAutoAzimuth" type="checkbox" checked onchange="return gdAdminCourseVisualReliefRefresh('${key}')"><span>Light follows the play axis</span></label>`+
+    reliefKnob("gdReliefAzimuth","Light direction","world bearing, only used when the box above is off",315,0,360,5)+
       reliefKnob("gdReliefAltitude","Light height","a lower sun digs deeper shadows",42,10,80,1)+
       reliefKnob("gdReliefAmbient","Hollow shading","fills dents so they read as dents, not grey patches",.18,0,1,.02)+
       `<label class="gdAdminCourseVisualCheck"><input id="gdReliefShadeOnly" type="checkbox" onchange="return gdAdminCourseVisualReliefRefresh('${key}')"><span>Show shading only</span></label>`+

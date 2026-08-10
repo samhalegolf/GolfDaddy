@@ -6,23 +6,33 @@
 
    The idea is small: a flat grid of vertices covering the hole, each pushed up by the height
    the DEM records at that point, textured with the aerial photograph. Because the relief is
-   now geometry, the camera can move through it - near ground slides past far ground, a mound
-   hides what is behind it, and the light is recomputed every frame instead of painted on at
-   bake time. That last part is what the flat frame can never do.
+   geometry rather than paint, a mound has an edge that hides what is behind it, the green
+   pad stands off the ground it sits on, and the light is recomputed every frame instead of
+   being fixed at bake time. A flat frame can do none of those, however well it is shaded.
 
    Elevation arrives as terrain-RGB, the same bytes the tile server sends, decoded in the
-   vertex shader. No CPU-side decode, no second format to keep in sync with the bake. */
+   vertex shader. No CPU-side decode, no second format to keep in sync with the bake.
+
+   What it deliberately does NOT do is own a camera. The published surface is already framed
+   by stageFrame's 2D similarity and tilted by CSS, and that framing is correct - ground at
+   elevation zero belongs exactly where it lands today. So height is applied as an offset
+   INSIDE the frame rather than by moving a viewpoint: d = h . pxPerMetre . tan(tilt), which
+   after the tilt compresses it by cos(tilt) lands where a true vertical would. The surface
+   gains relief and the projector, the tap maths and the framing rule all stay untouched.
+
+   The cost of that choice is honest: no parallax from the player moving, because the camera
+   never moves. What you get is the hole standing up inside its own frame. */
 
 (function (root) {
   "use strict";
 
   const VERT = `
-    attribute vec2 aGrid;              // 0..1 across the hole
+    attribute vec2 aGrid;              // 0..1 across the frame
     uniform sampler2D uElevation;
-    uniform mat4 uViewProj;
-    uniform vec2 uMetres;              // ground size of the patch, metres
     uniform float uExaggeration;
     uniform float uSeaLevel;           // lowest height in the patch, so the model sits at 0
+    uniform vec2 uShear;               // image-space pixels per metre of height
+    uniform vec2 uImagePx;             // frame size in image pixels
     varying vec2 vUv;
     varying float vHeight;
 
@@ -36,11 +46,22 @@
     void main() {
       vUv = aGrid;
       float h = (heightAt(aGrid) - uSeaLevel) * uExaggeration;
+      /* Drop the outermost ring back to the ground plane. Displacing the patch edge lifts it
+         off the frame and opens a gap onto the background - a hard bright seam along the top
+         of the hole. Tucking the border down hides it behind the terrain instead. */
+      vec2 edge = min(aGrid, 1.0 - aGrid);
+      h *= smoothstep(0.0, 0.012, min(edge.x, edge.y));
       vHeight = h;
-      /* Centre the patch on the origin so rotation happens about the middle of the hole
-         rather than its corner. */
-      vec3 pos = vec3((aGrid.x - 0.5) * uMetres.x, h, (aGrid.y - 0.5) * uMetres.y);
-      gl_Position = uViewProj * vec4(pos, 1.0);
+      /* The frame stays exactly the frame the 2D solver produced. Ground at elevation zero
+         lands on the pixel it lands on today; only height moves anything, and it moves it
+         WITHIN the image, along the direction that becomes screen-up once the existing CSS
+         matrix has rotated the surface. So the published transform, the projector and the
+         tap maths all keep working untouched - the picture gains relief without the camera
+         gaining a single degree of freedom. */
+      vec2 px = aGrid * uImagePx + uShear * h;
+      vec2 clip = vec2(px.x / uImagePx.x * 2.0 - 1.0, 1.0 - px.y / uImagePx.y * 2.0);
+      /* Depth from height so a mound occludes what is behind it. */
+      gl_Position = vec4(clip, -h * 0.0004, 1.0);
     }
   `;
 
@@ -139,37 +160,10 @@
     return t;
   }
 
-  /* ---- minimal 4x4 maths (column-major, as GL wants) ---- */
-  function perspective(fovY, aspect, near, far) {
-    const f = 1 / Math.tan(fovY / 2);
-    return [f / aspect, 0, 0, 0, 0, f, 0, 0, 0, 0, (far + near) / (near - far), -1, 0, 0, (2 * far * near) / (near - far), 0];
-  }
-  function multiply(a, b) {
-    const o = new Array(16);
-    for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) {
-      o[c * 4 + r] = a[r] * b[c * 4] + a[4 + r] * b[c * 4 + 1] + a[8 + r] * b[c * 4 + 2] + a[12 + r] * b[c * 4 + 3];
-    }
-    return o;
-  }
-  /* Camera orbiting the centre of the hole: pitch 0 is straight down, 90 is on the deck. */
-  function view(pitchDeg, yawDeg, distance, height) {
-    const p = pitchDeg * Math.PI / 180, y = yawDeg * Math.PI / 180;
-    const ex = Math.sin(p) * Math.sin(y) * distance;
-    const ez = Math.sin(p) * Math.cos(y) * distance;
-    const ey = Math.cos(p) * distance + height;
-    return lookAt([ex, ey, ez], [0, height * 0.15, 0], [0, 1, 0]);
-  }
-  function lookAt(eye, at, up) {
-    const z = norm([eye[0] - at[0], eye[1] - at[1], eye[2] - at[2]]);
-    const x = norm(cross(up, z));
-    const y = cross(z, x);
-    return [x[0], y[0], z[0], 0, x[1], y[1], z[1], 0, x[2], y[2], z[2], 0,
-      -(x[0] * eye[0] + x[1] * eye[1] + x[2] * eye[2]),
-      -(y[0] * eye[0] + y[1] * eye[1] + y[2] * eye[2]),
-      -(z[0] * eye[0] + z[1] * eye[1] + z[2] * eye[2]), 1];
-  }
-  const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
-  const norm = (v) => { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
+  /* No camera maths here on purpose. The frame is solved by play-surface.js's stageFrame and
+     written to the element as a CSS matrix, exactly as it is for the flat image; this renderer
+     only fills that frame in. A projection of its own would be a second framing rule to keep
+     in step with the first. */
 
   function create(canvas, options) {
     const gl = canvas.getContext("webgl", { antialias: true, alpha: false });
@@ -178,7 +172,7 @@
     const mesh = grid(gl, options.segments || 192);
     const aGrid = gl.getAttribLocation(prog, "aGrid");
     const u = {};
-    ["uElevation", "uAerial", "uViewProj", "uMetres", "uExaggeration", "uSeaLevel", "uTexel", "uMetresPerTexel", "uLight", "uAmbient"]
+    ["uElevation", "uAerial", "uExaggeration", "uSeaLevel", "uShear", "uImagePx", "uTexel", "uMetresPerTexel", "uLight", "uAmbient"]
       .forEach(name => { u[name] = gl.getUniformLocation(prog, name); });
 
     const elevation = texture(gl, options.elevation);
@@ -187,11 +181,14 @@
     gl.enable(gl.DEPTH_TEST);
 
     const state = {
-      pitch: 58, yaw: 0, exaggeration: 2.5, ambient: 0.55,
+      /* Everything the frame already knows. tiltDeg and frameRotationDeg come straight from
+         the CSS custom property and the solved matrix - this renderer never decides them. */
+      tiltDeg: 32, frameRotationDeg: 0,
+      exaggeration: 2.5, ambient: 0.55,
       metres: options.metres || [300, 300],
       demSize: options.demSize || [1024, 1024],
+      imagePx: options.imagePx || [1024, 1024],
       seaLevel: options.seaLevel || 0,
-      distance: (options.metres ? options.metres[1] : 300) * 1.15,
       light: [-0.6, 0.75, -0.35]
     };
 
@@ -202,11 +199,15 @@
       gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
       gl.useProgram(prog);
 
-      const proj = perspective(45 * Math.PI / 180, w / h, 1, state.distance * 6);
-      const vp = multiply(proj, view(state.pitch, state.yaw, state.distance, 0));
-
-      gl.uniformMatrix4fv(u.uViewProj, false, new Float32Array(vp));
-      gl.uniform2f(u.uMetres, state.metres[0], state.metres[1]);
+      /* d = h . pxPerMetre . tan(tilt): the in-image offset that, after the CSS tilt has
+         compressed it by cos(tilt), lands where a real vertical of that height would.
+         Directed along image-space "up after rotation", so it survives the frame's own
+         rotation without the renderer knowing anything about the framing rule. */
+      const pxPerMetre = state.imagePx[0] / state.metres[0];
+      const shearPx = pxPerMetre * Math.tan(state.tiltDeg * Math.PI / 180);
+      const rot = -state.frameRotationDeg * Math.PI / 180;
+      gl.uniform2f(u.uShear, Math.sin(rot) * shearPx, -Math.cos(rot) * shearPx);
+      gl.uniform2f(u.uImagePx, state.imagePx[0], state.imagePx[1]);
       gl.uniform1f(u.uExaggeration, state.exaggeration);
       gl.uniform1f(u.uSeaLevel, state.seaLevel);
       gl.uniform2f(u.uTexel, 1 / state.demSize[0], 1 / state.demSize[1]);
@@ -225,8 +226,32 @@
       gl.finish();
     }
 
-    return { gl, state, render };
+    function dispose() {
+      /* GPU memory is not garbage collected on a timescale that matters here: a round walks
+         eighteen holes, and a context per hole is how a phone reaches CONTEXT_LOST somewhere
+         around the twelfth with nothing in the log to say why. */
+      try {
+        gl.deleteTexture(elevation);
+        gl.deleteTexture(aerial);
+        gl.deleteBuffer(mesh.vb);
+        gl.deleteBuffer(mesh.ib);
+        gl.deleteProgram(prog);
+        var lose = gl.getExtension("WEBGL_lose_context");
+        if (lose) lose.loseContext();
+      } catch (e) { /* already gone */ }
+    }
+
+    return { gl, state, render, dispose };
   }
 
-  root.GDTerrainMesh = { create };
+  /* Cheap enough to call before committing to the mesh path, and the answer is the whole
+     decision: no WebGL means the flat frame stays up, which is a complete picture already. */
+  function supported() {
+    try {
+      var probe = document.createElement("canvas");
+      return !!(probe.getContext("webgl") || probe.getContext("experimental-webgl"));
+    } catch (e) { return false; }
+  }
+
+  root.GDTerrainMesh = { create: create, supported: supported };
 })(typeof window !== "undefined" ? window : this);

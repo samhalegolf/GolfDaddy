@@ -33,7 +33,16 @@
   var store = null;
 
   /* Presentation state. Not play state — the Marshal owns that. */
-  var activeFrame = null;      // published surface transform, null → contain fit
+  var activeFrame = null;
+  /* The terrain mesh, when one is up. Null is the normal, complete state: no WebGL, no
+     elevation beside the frame, or a texture that would not load - all mean the flat frame
+     stays, and the flat frame is already a finished picture. */
+  var mesh = null;
+  /* Backing store cap. Frames go to 3072, and a 3072-square canvas is ~37MB of GPU memory per
+     hole on a device that also has the texture and the elevation resident. The canvas is
+     stretched to the frame's own size by CSS, so this costs sharpness the tilt hides and
+     nothing else. */
+  var MESH_MAX_PX = 2048;      // published surface transform, null → contain fit
   var liveFrame = { a: 1, b: 0, tx: 0, ty: 0 };
   var mapSide = null;          // over-provisioned container side, null → plain map
   var published = false;       // is a published surface currently up
@@ -347,6 +356,7 @@
       img.style.width = ""; img.style.height = "";
       img.style.transform = ""; img.style.transformOrigin = "";
     }
+    applyMeshFrame();
   }
 
   /* The live map's camera. The solved similarity is split: its SCALE becomes
@@ -1042,6 +1052,7 @@
       img.style.width = ""; img.style.height = "";
       img.style.transform = ""; img.style.transformOrigin = "";
     }
+    disposeMesh();
     activeFrame = null;
     provenance = null;
     renderProvenance();
@@ -1085,6 +1096,118 @@
      previous hole's surface holds until the new one paints. The token pins the
      load to the transition that asked for it; the bounded stall timer exists so
      a hung request cannot leave the player with no presentation at all. */
+  function disposeMesh() {
+    if (mesh && mesh.dispose) { try { mesh.dispose(); } catch (e) { /* context already lost */ } }
+    mesh = null;
+    document.body.classList.remove("surface-mesh");
+    var canvas = el("surfaceMesh");
+    if (canvas) {
+      canvas.style.width = ""; canvas.style.height = "";
+      canvas.style.transform = ""; canvas.style.transformOrigin = "";
+    }
+  }
+
+  /* Stand the surface up.
+
+     Everything here is best-effort by design. The flat frame is already showing and is
+     already correct; the mesh is an improvement on top of it, so every failure - no WebGL, no
+     elevation published beside this frame, a texture that will not decode, a shader that will
+     not compile on some driver - leaves the picture exactly as it was and says so once. What
+     must never happen is a half-state, so the class that reveals the canvas goes on only
+     after a frame has actually been drawn into it. */
+  function attachMesh(meta, surfaceUrlValue) {
+    disposeMesh();
+    var elevation = meta && meta.elevation;
+    var canvas = el("surfaceMesh");
+    if (!canvas || !elevation || !elevation.path) return;
+    if (!window.GDTerrainMesh || !window.GDTerrainMesh.supported()) return;
+
+    var token = transitionToken;
+    var elevationUrl = apiUrl(surfaceLib.assetUrl(elevation.path));
+    var out = meta.outputDimensions || {};
+    var frameW = Number(out.width) || 0, frameH = Number(out.height) || 0;
+    if (!frameW || !frameH) return;
+
+    var loaded = 0, aerialImg = new Image(), elevationImg = new Image();
+    aerialImg.crossOrigin = elevationImg.crossOrigin = "anonymous";
+
+    function ready() {
+      if (++loaded < 2 || token !== transitionToken) return;
+      try {
+        var scale = Math.min(1, MESH_MAX_PX / Math.max(frameW, frameH));
+        canvas.width = Math.max(1, Math.round(frameW * scale));
+        canvas.height = Math.max(1, Math.round(frameH * scale));
+        /* Ground metres across the frame, from the elevation sidecar rather than guessed:
+           the shear is pixels-per-metre, so this number IS the height scale. */
+        var metresX = Number(elevation.metresPerPixel) * Number(elevation.width) || 0;
+        var metresY = Number(elevation.metresPerPixel) * Number(elevation.height) || 0;
+        if (!metresX || !metresY) return;
+        mesh = window.GDTerrainMesh.create(canvas, {
+          aerial: aerialImg,
+          elevation: elevationImg,
+          metres: [metresX, metresY],
+          demSize: [Number(elevation.width), Number(elevation.height)],
+          imagePx: [canvas.width, canvas.height],
+          seaLevel: elevation.elevationRange ? Number(elevation.elevationRange.min) : 0
+        });
+        /* The texture is the published frame, which already carries baked relief aimed off
+           this hole's play axis. Lighting it again from scratch would shade it twice, so the
+           mesh runs mostly ambient and contributes geometry - the silhouette, the pad edges,
+           the occlusion - rather than a second set of shadows. */
+        mesh.state.ambient = 0.78;
+        mesh.state.exaggeration = 2.5;
+        applyMeshFrame();
+        document.body.classList.add("surface-mesh");
+      } catch (error) {
+        /* Reported rather than swallowed: a driver that will not compile the shader is
+           something to learn about from the field, not from a support ticket describing a
+           flat hole. The picture is unaffected either way. */
+        disposeMesh();
+        try {
+          if (window.ClarityErrorReporter && window.ClarityErrorReporter.report) {
+            window.ClarityErrorReporter.report(error, {
+              source: "painter-mesh",
+              hole: currentScene ? currentScene.hole.number : null
+            });
+          }
+        } catch (e) {}
+      }
+    }
+    function failed() {
+      if (token !== transitionToken) return;
+      /* Not a fallback - there is nothing to fall back to. The frame is up. */
+      disposeMesh();
+    }
+    aerialImg.onload = elevationImg.onload = ready;
+    aerialImg.onerror = elevationImg.onerror = failed;
+    aerialImg.src = surfaceUrlValue;
+    elevationImg.src = elevationUrl;
+  }
+
+  /* Put the canvas where the image is, and tell the mesh which way is up.
+
+     The mesh needs exactly one number from the framing: the angle the frame is rotated by, so
+     it can push height along whatever direction ends up as screen-up. That comes straight out
+     of the solved similarity - it never solves anything itself. */
+  function applyMeshFrame() {
+    var canvas = el("surfaceMesh");
+    var img = el("surfaceImage");
+    if (!mesh || !canvas || !img) return;
+    canvas.style.width = img.style.width;
+    canvas.style.height = img.style.height;
+    canvas.style.transformOrigin = img.style.transformOrigin;
+    canvas.style.transform = img.style.transform;
+    if (activeFrame) {
+      mesh.state.frameRotationDeg = Math.atan2(activeFrame.b, activeFrame.a) * 180 / Math.PI;
+    }
+    var css = getComputedStyle(document.documentElement);
+    var tilt = parseFloat(css.getPropertyValue("--tiltDeg"));
+    /* Only the lock stage is tilted (styles.css), so anywhere else the height offset must be
+       zero or the surface shears against a frame that is not leaning. */
+    mesh.state.tiltDeg = document.body.classList.contains("tilt-lock") && isFinite(tilt) ? tilt : 0;
+    try { mesh.render(); } catch (e) { disposeMesh(); }
+  }
+
   function presentSurface(asset, origin, hole, courseKey) {
     var img = el("surfaceImage");
     if (!img) return;
@@ -1119,6 +1242,7 @@
           playSurface: asset.playSurface
         };
         renderProvenance();
+        attachMesh(asset.playSurface, url);
         lastCameraKey = null;
         /* Draw it. Without this the image appeared with no solved frame — a
            letterboxed picture with the dot still placed from the live map's

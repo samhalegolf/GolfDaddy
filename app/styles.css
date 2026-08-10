@@ -89,6 +89,12 @@ body.surface-published.tilt-lock #surfaceViewport {
 @media (prefers-reduced-motion: reduce) { #surfaceViewport { transition-duration: 1ms; } }
 
 #surfaceImage { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: none; pointer-events: auto; }
+/* The mesh overlays the image at exactly its geometry - the painter writes the same width,
+   height and matrix to both, so they cannot disagree about where the ground is. Taps stay
+   with the img (pointer-events: none here) because the tap already resolves against the
+   ground plane, which is the img's plane. */
+#surfaceMesh { position: absolute; top: 0; left: 0; display: none; pointer-events: none; }
+body.surface-published.surface-mesh #surfaceMesh { display: block; }
 body.surface-published #surfaceImage { display: block; }
 
 /* The player's projected position, on whichever presentation is up.

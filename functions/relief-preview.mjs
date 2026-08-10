@@ -15,7 +15,7 @@
    Whatever wins here gets written into RELIEF_DEFAULTS and baked. */
 
 import sharp from "sharp";
-import { reliefFromTerrainRgb, RELIEF_DEFAULTS } from "./lib/gd-relief-core.mjs";
+import { reliefFromTerrainRgb, reliefAzimuthForPlayAxis, RELIEF_DEFAULTS } from "./lib/gd-relief-core.mjs";
 import { resolveImagerySource } from "./lib/gd-imagery-sources.mjs";
 
 const MAPS_TABLE = "course_maps";
@@ -166,7 +166,9 @@ export default async function reliefPreview(req) {
 
   const shade = {
     exaggeration: numParam(params, "exaggeration", RELIEF_DEFAULTS.exaggeration, 0.5, 20),
-    azimuth: numParam(params, "azimuth", RELIEF_DEFAULTS.azimuth, 0, 360),
+    /* Filled in below once the hole is known - the bake aims the light off the play axis, and
+       a preview lit from anywhere else is a preview of something we are not going to ship. */
+    azimuth: null,
     altitude: numParam(params, "altitude", RELIEF_DEFAULTS.altitude, 5, 89),
     ambient: numParam(params, "ambient", RELIEF_DEFAULTS.ambient, 0, 1),
     multi: params.get("multi") === "1"
@@ -190,6 +192,14 @@ export default async function reliefPreview(req) {
       detail: source.key + " has no tiled terrain-RGB elevation, so relief cannot be computed here."
     });
   }
+
+  /* Match the bake: azimuth is measured off this hole's play axis unless one is given
+     explicitly, in which case that is taken as a world bearing so the tuning knob can still
+     sweep the light right round. */
+  const azimuthParam = params.get("azimuth");
+  shade.azimuth = azimuthParam === null || azimuthParam === ""
+    ? reliefAzimuthForPlayAxis(hole.tee, hole.green)
+    : numParam(params, "azimuth", RELIEF_DEFAULTS.azimuth, 0, 360);
 
   const frame = frameHole(hole.tee, hole.green, size);
   const aerialZoom = Math.min(frame.zoom, source.imagery.maxUsefulZoom || frame.zoom);
@@ -249,7 +259,7 @@ export default async function reliefPreview(req) {
       "X-Relief-Encoding": relief.encoding,
       "X-Relief-Zoom": String(frame.zoom) + " aerial z" + aerialZoom + " dem z" + demZoom,
       "X-Relief-Elevation": relief.elevation.min.toFixed(1) + ".." + relief.elevation.max.toFixed(1) + "m",
-      "X-Relief-Shade": "exag " + shade.exaggeration + " az " + shade.azimuth + " alt " + shade.altitude +
+      "X-Relief-Shade": "exag " + shade.exaggeration + " az " + Math.round(shade.azimuth) + " alt " + shade.altitude +
         " ambient " + shade.ambient + " strength " + strength
     })
   });

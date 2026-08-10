@@ -115,6 +115,11 @@
        one projection seam, so the same overlays draw either way. -->
   <div id="surfaceViewport">
     <img id="surfaceImage" alt="">
+    <!-- The same surface as geometry. Sits directly over #surfaceImage at the identical size
+         and transform, so the frame, the projection and the tap maths are the img's either
+         way; only what fills the frame changes. Absent WebGL or elevation, it never shows and
+         the img underneath is the picture. -->
+    <canvas id="surfaceMesh"></canvas>
     <svg id="bubbleSvg" class="hiddenState"></svg>
     <!-- The club the bubble is sized from, sitting at the head of the aim line.
          DOM rather than SVG for the same reason #pinDistance is: crisper text
@@ -405,6 +410,7 @@
      placement in Preview, so a position with a source tag and a policy had
      nothing left to be. -->
 <script src="js/marshal.js"></script>
+<script src="js/gd-terrain-mesh.js"></script>
 <script src="js/painter.js"></script>
 <script src="js/resume.js"></script>
 <script src="js/tool-rail.js"></script>
