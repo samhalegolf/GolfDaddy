@@ -102,7 +102,9 @@ function visualManifest(id, request, xOffset) {
     anchorPins: request.anchorPins || base.anchorPins,
     captureAnchorPins: request.captureAnchorPins || {},
     debugUnderlay: !!request.debugUnderlay,
+    debugTerrain: !!request.debugTerrain,
     terrainStageOnly: !!request.terrainStageOnly,
+    beta3dStageOnly: !!request.beta3dStageOnly,
     cameraMode: request.cameraMode || "",
     cameraTiltDeg: Number.isFinite(Number(request.cameraTiltDeg)) ? Number(request.cameraTiltDeg) : null,
     captureTiltDeg: Number.isFinite(Number(request.captureTiltDeg)) ? Number(request.captureTiltDeg) : null,
@@ -176,9 +178,12 @@ function payload() {
   const plan = engine.planCourseVisualCaptures(input);
   const planRoles = plan.map((item) => item.role);
   assert.ok(planRoles.includes("course-backdrop"), "planned captures include a live map underlay");
+  assert.ok(planRoles.includes("terrain-reference"), "planned captures include a terrain-reference stage");
   assert.ok(planRoles.includes("green-surround"), "planned captures include super-HD green surrounds");
   assert.ok(planRoles.includes("play-corridor"), "planned captures include HD play corridor");
-  assert.equal(planRoles.includes("three-d-hole-beta"), false, "the 3D beta capture stage is gone (client-side 3D beta was removed)");
+  assert.equal(planRoles.includes("three-d-hole-beta"), false, "3D beta capture is opt-in");
+  const betaPlan = engine.planCourseVisualCaptures(input, { enable3dBeta: true });
+  assert.ok(betaPlan.some((item) => item.role === "three-d-hole-beta"), "3D beta capture can be enabled");
   assert.ok(plan.find((item) => item.role === "green-surround").targetZoom > plan.find((item) => item.role === "play-corridor").targetZoom, "green capture asks for more pixels than corridor capture");
   assert.ok(plan.find((item) => item.role === "play-corridor").targetZoom > plan.find((item) => item.role === "course-backdrop").targetZoom, "corridor capture asks for more pixels than live underlay");
   assert.equal(plan.find((item) => item.role === "green-surround").captureLens, "green-square", "green captures remain square super-HD tiles");
@@ -193,6 +198,9 @@ function payload() {
   assert.ok(corridorSegments.every((item) => item.includeAnchorPins === true && item.captureAnchorPins && Array.isArray(item.captureAnchorPins.route) && item.captureAnchorPins.route.length >= 2), "corridor segments carry a wider donor-image route into capture");
   assert.ok(corridorSegments.every((item) => item.anchorPins && item.anchorPins.green && Array.isArray(item.anchorPins.route) && item.anchorPins.route.length >= item.captureAnchorPins.route.length), "corridor segments keep the full-hole anchors for GPS Play");
   assert.equal(plan.find((item) => item.role === "course-backdrop").captureLens, undefined, "course underlay remains a broad map capture");
+  assert.equal(plan.find((item) => item.role === "terrain-reference").captureLens, undefined, "terrain reference remains course-wide");
+  assert.equal(betaPlan.find((item) => item.role === "three-d-hole-beta").captureLens, "mobile-hole", "3D beta captures use the same mobile lens");
+  assert.equal(betaPlan.find((item) => item.role === "three-d-hole-beta").lensOrientation, "play-axis", "3D beta captures use the hole axis too");
 
   const record = engine.ingestCourseVisualInput(input);
   assert.equal(record.status, "input-ready");
@@ -218,11 +226,13 @@ function payload() {
   assert.equal(built.holeFrameVisuals[0].metadata.playSurface.useGpsPlayFraming, true, "hole surfaces tell Play to frame on the per-hole surface");
   assert.equal(built.holeFrameVisuals[0].metadata.playSurface.fallbackUnderlay, "live-gps", "hole surfaces fall back only to live GPS");
   assert.equal(built.holeFrameVisuals[0].metadata.playSurface.fallbackPolicy, "live-gps-only", "hole surfaces do not point Play at a stitched fallback");
+  assert.ok(built.terrainView && built.terrainView.dataUrl.startsWith("data:image/svg+xml"), "course overview enters a terrain shading stage after the base stitch");
   assert.equal(built.rawMaster.dataUrl, built.basicVisual.dataUrl, "raw master feeds basic delivery without recompression");
   const persistedAfterBuild = JSON.parse(localStorage.getItem(engine.storeKey));
   assert.equal(persistedAfterBuild.records.cromwell.rawMaster.dataUrl, undefined, "raw data URL is not persisted into localStorage");
   assert.equal(persistedAfterBuild.records.cromwell.basicVisual.dataUrl, undefined, "basic data URL is not persisted into localStorage");
   assert.equal(persistedAfterBuild.records.cromwell.exampleHoleVisual.dataUrl, undefined, "example-hole data URL is not persisted into localStorage");
+  assert.equal(persistedAfterBuild.records.cromwell.terrainView.dataUrl, undefined, "terrain data URL is not persisted into localStorage");
 
   const failed = engine.ingestCourseVisualInput({ courseId: "no-captures", objects: input.objects, captures: [] });
   assert.equal(failed.status, "unavailable");
@@ -249,7 +259,9 @@ function payload() {
   assert.ok(overviewSvg.includes("green-strength"), "green strength is baked into native visuals as a visible layer");
   assert.ok(!overviewSvg.includes("fairway-airbrush"), "course overview native visuals do not apply the airbrush pass");
   assert.equal(preview.previewVisual.metadata.fairwayAirbrush.enabled, false, "course overview explicitly records airbrush as disabled");
-  assert.equal(preview.terrainView, undefined, "no client-side terrain product is baked (relief is derived server-side now)");
+  assert.equal(preview.terrainView.metadata.stage, "terrain-shading", "course overview enters terrain shading after native visuals");
+  assert.equal(preview.terrainView.metadata.inputStage, "native-visuals", "overview terrain shading consumes the native visual output");
+  assert.equal(preview.terrainView.metadata.terrainStrength, 0.42, "course overview keeps the softer terrain strength");
   assert.ok(preview.singleHolePreviewVisual.path.includes("/single-hole/preview/"), "single-hole visual enters native visuals");
   assert.equal(preview.singleHolePreviewVisual.metadata.stage, "native-visuals", "single-hole native visual records the native stage");
   const singleHoleNativeSvg = svgText(preview.singleHolePreviewVisual.dataUrl);
@@ -269,16 +281,21 @@ function payload() {
   assert.equal(preview.singleHolePreviewVisual.metadata.overflowVisible, true, "single-hole preview exposes the captured overflow outside the phone frame");
   assert.equal(preview.singleHolePreviewVisual.metadata.playSurface.useGpsPlayFraming, true, "single-hole preview is derived from the GPS Play surface");
   assert.equal(preview.singleHolePreviewVisual.metadata.objectProofOverlay.enabled, true, "single-hole preview carries object proof metadata");
+  assert.ok(preview.singleHoleTerrainView.path.includes("/single-hole/terrain/"), "single-hole visual enters terrain shading");
+  assert.equal(preview.singleHoleTerrainView.metadata.inputRole, "single-hole-native-visuals", "single-hole terrain view consumes the direct native hole window");
+  assert.equal(preview.singleHoleTerrainView.metadata.inputStage, "native-visuals", "single-hole terrain view follows the native stage");
+  assert.equal(preview.singleHoleTerrainView.metadata.terrainStrength, 0.85, "single-hole terrain uses the stronger preset terrain strength");
   assert.ok(preview.holeFramePreviewVisuals.length >= 1, "every hole frame enters native visuals");
-  assert.equal(preview.holeFrameTerrainViews, undefined, "hole frames have no separate terrain product");
-  assert.equal(preview.holeFramePreviewVisuals[0].metadata.playSurface.useGpsPlayFraming, true, "hole frame preview keeps play-surface metadata");
+  assert.ok(preview.holeFrameTerrainViews.length >= 1, "every hole frame enters terrain shading");
+  assert.equal(preview.holeFrameTerrainViews[0].metadata.role, "hole-frame-terrain", "hole frame terrain output carries its own role");
+  assert.equal(preview.holeFrameTerrainViews[0].metadata.playSurface.useGpsPlayFraming, true, "terrain hole frame keeps play-surface metadata");
   assert.equal(preview.publishedVisual, null, "preview does not publish");
 
   const published = engine.publishCourseVisual("cromwell");
   assert.equal(published.status, "published", "publish changes active version");
   assert.equal(published.publishedVersion, preview.previewVisual.version);
-  assert.equal(published.publishedVisual.dataUrl, published.previewVisual.dataUrl, "published overview uses the native-visual product");
-  assert.ok(published.singleHolePublishedVisual && published.singleHolePublishedVisual.dataUrl === published.singleHolePreviewVisual.dataUrl, "publish includes the native single-hole product");
+  assert.equal(published.publishedVisual.dataUrl, published.terrainView.dataUrl, "published overview uses the terrain-shaded product");
+  assert.ok(published.singleHolePublishedVisual && published.singleHolePublishedVisual.dataUrl === published.singleHoleTerrainView.dataUrl, "publish includes the terrain-shaded single-hole product");
   assert.ok(published.holeFramePublishedVisuals.length >= 1, "publish includes per-hole GPS Play surfaces");
   assert.equal(published.holeFramePublishedVisuals[0].metadata.role, "hole-frame-published", "published hole frames have the Play-facing role");
   assert.equal(published.holeFramePublishedVisuals[0].metadata.playSurface.fallbackUnderlay, "live-gps", "published hole frames keep live GPS as the only fallback");
@@ -441,17 +458,30 @@ function payload() {
   global.gdBuildCourseVisualCaptureManifest = function buildVisualCapture(request) {
     visualRequests.push(request);
     const capture = visualManifest("visual-" + request.role + "-" + (request.holeNumber || "course"), request, visualRequests.length * 20);
+    if (request.role === "three-d-hole-beta") {
+      capture.mapCameraCapability = {
+        provider: "leaflet",
+        library: "leaflet",
+        nativePitchAvailable: false,
+        nativeBearingAvailable: false,
+        pitchStrategy: "faux-tilt-svg",
+        reason: "plain-leaflet-no-native-pitch"
+      };
+      capture.cameraFallback = "leaflet-flat-capture-faux-tilt-stage";
+    }
     return capture;
   };
-  const plannedBuilt = await engine.buildFromCourseDatabase("planned-course");
+  const plannedBuilt = await engine.buildFromCourseDatabase("planned-course", { enable3dBeta: true });
   const plannedRawSvg = svgText(plannedBuilt.rawMaster.dataUrl);
   const requestedRoles = visualRequests.map((request) => request.role);
   assert.ok(requestedRoles.includes("course-backdrop"), "Build Basic asks browser capture for the live underlay");
+  assert.ok(requestedRoles.includes("terrain-reference"), "Build Basic asks browser capture for terrain reference");
   assert.ok(requestedRoles.includes("green-surround"), "Build Basic asks browser capture for super-HD green");
   assert.ok(requestedRoles.includes("play-corridor"), "Build Basic asks browser capture for HD corridor");
+  assert.ok(requestedRoles.includes("three-d-hole-beta"), "Build Basic asks browser capture for 3D beta when toggled");
   assert.ok(visualRequests.filter((request) => request.role === "green-surround").every((request) => request.captureLens === "green-square" && request.lensAspectRatio === 1), "green capture requests carry the green-square lens into the browser capture step");
-  assert.ok(visualRequests.filter((request) => request.role === "play-corridor").every((request) => request.captureLens === "mobile-hole" && request.lensAspectRatio === 9 / 16), "corridor capture requests carry the mobile-hole lens into the browser capture step");
-  assert.ok(visualRequests.filter((request) => request.role === "play-corridor").every((request) => request.lensOrientation === "play-axis" && request.includeAnchorPins === true), "mobile-hole capture requests are aimed by the hole axis and include the donor route");
+  assert.ok(visualRequests.filter((request) => request.role === "play-corridor" || request.role === "three-d-hole-beta").every((request) => request.captureLens === "mobile-hole" && request.lensAspectRatio === 9 / 16), "corridor and 3D capture requests carry the mobile-hole lens into the browser capture step");
+  assert.ok(visualRequests.filter((request) => request.role === "play-corridor" || request.role === "three-d-hole-beta").every((request) => request.lensOrientation === "play-axis" && request.includeAnchorPins === true), "mobile-hole capture requests are aimed by the hole axis and include the donor route");
   assert.ok(visualRequests.filter((request) => request.holeNumber).every((request) => request.anchorPins && request.anchorPins.green && Array.isArray(request.anchorPins.route) && request.anchorPins.route.length >= 2), "planned hole captures carry the real green and route anchors into the browser snapshot step");
   assert.ok(visualRequests.filter((request) => request.role === "play-corridor").every((request) => request.captureAnchorPins && Array.isArray(request.captureAnchorPins.route) && request.captureAnchorPins.route.length >= 2), "planned corridor captures give the browser a segment route for the wider donor image");
   assert.ok(plannedRawSvg.includes('data-lens-clip="oriented-mobile-hole"'), "mobile-hole captures are clipped to the oriented donor lens instead of showing the north-up tile AABB");
@@ -463,9 +493,16 @@ function payload() {
   assert.ok(plannedBuilt.exampleHoleVisual.metadata.sourceCaptureCount > 1, "single-hole window stitches hole captures instead of picking one square");
   assert.ok(plannedBuilt.holeFrameVisuals.length >= 1, "planned build creates per-hole play surfaces");
   assert.equal(plannedBuilt.holeFrameVisuals[0].metadata.playSurface.useGpsPlayFraming, true, "planned hole surface is ready for GPS Play framing");
-  assert.equal(plannedBuilt.terrainView, undefined, "no terrain product is derived client-side");
-  assert.equal(plannedBuilt.beta3dView, undefined, "no 3D beta product is derived client-side");
+  assert.ok(plannedBuilt.terrainView && plannedBuilt.terrainView.dataUrl.startsWith("data:image/svg+xml"), "terrain view is built as a separate derived stage");
+  assert.ok(plannedBuilt.beta3dView && plannedBuilt.beta3dView.dataUrl.startsWith("data:image/svg+xml"), "3D beta view is built as a separate opt-in stage");
+  assert.ok(svgText(plannedBuilt.beta3dView.dataUrl).includes('data-role="birds-eye-tiltable-3d-plane"'), "3D beta ships the full play surface birds-eye as a tiltable 3D plane (no baked trapezoid crop)");
+  assert.ok(svgText(plannedBuilt.beta3dView.dataUrl).includes('data-default-view="birds-eye"'), "3D beta asset defaults to the birds-eye view");
+  assert.equal(plannedBuilt.beta3dView.metadata.cameraModel, "birds-eye-tiltable-plane", "3D beta asset is a birds-eye tiltable plane, tilted by the viewer");
+  assert.equal(plannedBuilt.beta3dView.metadata.surfaceModel, "birds-eye-tiltable-3d-plane", "3D beta records the tiltable-plane surface model");
+  assert.equal(plannedBuilt.beta3dView.metadata.nativePitchAvailable, false, "3D beta records native pitch as unavailable");
+  assert.equal(plannedBuilt.beta3dView.metadata.mapCameraCapability.reason, "plain-leaflet-no-native-pitch", "3D beta records the Leaflet fallback reason");
   assert.equal(plannedBuilt.rawMaster.metadata.visualLayerModel, "live-underlay-plus-feathered-captures", "raw master records the visual layer model");
+  assert.equal(plannedBuilt.diagnostics.stageSettings.enable3dBeta, true, "3D beta toggle is recorded in diagnostics");
 
   const snapshotChoiceRequests = [];
   global.GDCoursePlayPipeline = {
@@ -680,6 +717,112 @@ function payload() {
   assert.equal(engine.__test.filterForSettings({ turf: { greenTone: -9 } }).greenTone, -1, "greenTone clamps to -1");
   assert.equal(typeof engine.greenToneHex, "function", "greenToneHex is exposed for the admin live preview");
   assert.equal(engine.greenToneHex(0), neutralFilter.greenHex, "public greenToneHex matches the render pipeline");
+
+  // Terrain: hillshade source + relief shading (not a pasted map), toggllable strength
+  const terrainPolicy = engine.__test.capturePolicy("terrain-reference");
+  assert.ok(/World_Hillshade/i.test(terrainPolicy.tileTemplate), "terrain reference captures the Esri hillshade relief layer");
+  assert.equal(terrainPolicy.tileSourceLabel, "Esri World Hillshade", "terrain source is labelled as hillshade");
+
+  const terrainAsset = {
+    dataUrl: "data:image/svg+xml," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"><rect width="200" height="200" fill="#3a7d4a"/></svg>'),
+    width: 200, height: 200,
+    bounds: { south: -45.02, west: 169.1, north: -45.01, east: 169.11 },
+    metadata: {}
+  };
+  const terrainCap = {
+    id: "terrain-cap-1", role: "terrain-reference", width: 256, height: 256,
+    imageData: "data:image/png;base64,iVBORw0KGgo=",
+    bounds: { south: -45.025, west: 169.095, north: -45.005, east: 169.115 }
+  };
+  const terrainOpts = (s) => ({ terrainStrength: s, role: "single-hole-terrain", stage: "terrain-shading", product: "single-hole", bounds: terrainAsset.bounds });
+  const terrainLow = engine.__test.terrainShadeAsset(terrainAsset, [terrainCap], terrainOpts(0));
+  const terrainHigh = engine.__test.terrainShadeAsset(terrainAsset, [terrainCap], terrainOpts(1.5));
+  assert.ok(terrainLow && terrainHigh, "terrain shade asset renders at both strengths");
+  const lowSvg = svgText(terrainLow.dataUrl);
+  const highSvg = svgText(terrainHigh.dataUrl);
+  assert.ok(/feColorMatrix type="saturate" values="0"/.test(highSvg), "terrain tiles are desaturated to pure relief luminance, not a coloured map overlay");
+  assert.ok(highSvg.indexOf(".32 .32 .32") < 0, "old colour-averaging terrain matrix is gone");
+  // Terrain paints FROM the hillshade only - no decoration stuck onto the finished image.
+  assert.ok(highSvg.indexOf("terrainHatch") < 0, "no hatch pattern is printed over the surface (that was the grid lines)");
+  assert.ok(highSvg.indexOf("terrainRelief") < 0, "no generic fixed relief gradient is stuck on the surface");
+  assert.ok(highSvg.indexOf("rgba(44,67,42") < 0, "no flat green tint wash is stuck on the surface");
+  assert.ok(highSvg.indexOf("<pattern") < 0, "terrain bakes no pattern fills at all");
+  assert.ok(/data-role="terrain-reference"[^>]*mix-blend-mode:multiply/.test(highSvg) || /mix-blend-mode:multiply/.test(highSvg), "hillshade relief shades the surface via multiply (shadows carve in)");
+  assert.equal(terrainHigh.metadata.terrainSource, "hillshade-relief-shading", "terrain source is reported as relief shading");
+  const groupOpacity = (svg) => {
+    const m = svg.match(/data-role="terrain-reference" opacity="([0-9.]+)"/);
+    return m ? Number(m[1]) : null;
+  };
+  const lowOpacity = groupOpacity(lowSvg);
+  const highOpacity = groupOpacity(highSvg);
+  assert.ok(lowOpacity !== null && highOpacity !== null, "terrain relief group is present at both strengths");
+  assert.ok(highOpacity > lowOpacity, "higher terrain strength deepens the relief shading (toggllable degree)");
+  assert.ok(lowOpacity > 0, "strength 0 keeps a minimal baseline of relief shading, not fully off");
+
+  // Terrain must land in the hole's OWN framing. A play-axis hole frame is rotated, so stamping
+  // the hillshade as a north-up rectangle skews a patch of raw tiles across the surface.
+  const rotatedFrame = Object.assign({}, terrainAsset, {
+    metadata: {
+      playSurface: {
+        sourceBounds: terrainAsset.bounds,
+        sourceDimensions: { width: 200, height: 200 },
+        displayTransform: { x: 12, y: 18, scale: 1, rotationDeg: 35 }
+      }
+    }
+  });
+  const rotatedTerrain = engine.__test.terrainShadeAsset(rotatedFrame, [terrainCap], terrainOpts(1.2));
+  assert.ok(rotatedTerrain, "terrain renders over a rotated play-axis frame");
+  assert.equal(rotatedTerrain.metadata.terrainProjector, "play-surface-display-transform", "terrain projects through the hole's display transform, not a north-up rectangle");
+  const rotatedSvg = svgText(rotatedTerrain.dataUrl);
+  const terrainMatrix = rotatedSvg.match(/data-role="terrain-reference"[^>]*transform="matrix\(([^)]+)\)"/);
+  assert.ok(terrainMatrix, "rotated frames place terrain with an affine matrix, not translate+scale");
+  const mv = terrainMatrix[1].trim().split(/\s+/).map(Number);
+  assert.ok(mv.length === 6 && mv.every((n) => Number.isFinite(n)), "terrain matrix is well formed");
+  assert.ok(Math.abs(mv[1]) > 1e-6 || Math.abs(mv[2]) > 1e-6, "terrain matrix carries the frame's rotation (off-diagonal terms are non-zero)");
+
+  // 3D asset: birds-eye tiltable plane (the edited image saved as a 3D asset, flat by default)
+  const holeSurface = {
+    dataUrl: "data:image/svg+xml," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="240" height="420"><rect width="240" height="420" fill="#3f8a4d"/><circle cx="120" cy="90" r="30" fill="#a7d98a"/></svg>'),
+    width: 240, height: 420, holeNumber: 4,
+    bounds: { south: -45.02, west: 169.1, north: -45.01, east: 169.11 },
+    sourceCaptureIds: ["cap-a"], metadata: { role: "hole-frame" }
+  };
+  const birdsEye = engine.__test.beta3dVisualAsset(holeSurface, { captureTiltDeg: 8, playTiltDeg: 14 });
+  assert.ok(birdsEye && birdsEye.dataUrl, "3D asset renders");
+  const birdsEyeSvg = svgText(birdsEye.dataUrl);
+  assert.ok(/data-role="birds-eye-tiltable-3d-plane"/.test(birdsEyeSvg), "3D asset declares itself a birds-eye tiltable plane");
+  assert.ok(/data-default-view="birds-eye"/.test(birdsEyeSvg), "3D asset defaults to birds-eye view");
+  assert.ok(birdsEyeSvg.indexOf('data-role="faux-3d-deck"') < 0 && birdsEyeSvg.indexOf("skewX(") < 0, "no perspective is baked into the asset — tilt is applied by the viewer");
+  assert.equal(birdsEye.width, holeSurface.width, "birds-eye asset keeps the source width (identical framing from directly above)");
+  assert.equal(birdsEye.height, holeSurface.height, "birds-eye asset keeps the source height");
+  assert.equal(birdsEye.metadata.surfaceModel, "birds-eye-tiltable-3d-plane", "asset metadata marks it as a tiltable 3D plane");
+  assert.equal(birdsEye.metadata.defaultView, "birds-eye", "asset metadata records the birds-eye default view");
+  assert.equal(birdsEye.metadata.tiltAppliedBy, "viewer-runtime", "tilt is owned by the viewer/player, not baked in");
+  assert.equal(birdsEye.metadata.playTiltDeg, 14, "asset carries the play tilt policy for the player to apply");
+
+  // Lock in the 3D look, apply it to every hole, and publish per-hole tiltable 3D files for GPS Play
+  assert.notEqual(published.holeFramePublishedVisuals[0].metadata.surfaceModel, "birds-eye-tiltable-3d-plane", "with 3D off, published holes are plain surfaces");
+  const fresh3dPreset = engine.presetForMode("Fresh");
+  engine.ingestCourseVisualInput(Object.assign({}, input, { courseId: "cromwell-3d" }));
+  await engine.buildCourseVisualMaster("cromwell-3d");
+  engine.saveCourseVisualSettings("cromwell-3d", { visualEngine: { enable3dBeta: true } }, { presetId: fresh3dPreset.id });
+  const preview3d = await engine.buildCourseVisualPreview("cromwell-3d", fresh3dPreset, { visualEngine: { enable3dBeta: true } });
+  assert.ok(preview3d.previewVisual, "3D preview builds");
+  const published3d = engine.publishCourseVisual("cromwell-3d");
+  assert.equal(published3d.status, "published", "3D publish succeeds: " + JSON.stringify(published3d.lastError));
+  assert.ok(published3d.holeFramePublishedVisuals.length >= 1, "3D publish still emits per-hole GPS Play surfaces");
+  assert.equal(published3d.holeFramePublishedVisuals.length, preview3d.holeFramePreviewVisuals.length, "3D publish covers every hole the look was applied to");
+  published3d.holeFramePublishedVisuals.forEach((asset) => {
+    const label = "hole " + asset.holeNumber;
+    assert.equal(asset.metadata.surfaceModel, "birds-eye-tiltable-3d-plane", "every published hole ships as a tiltable 3D surface (" + label + ")");
+    assert.equal(asset.metadata.defaultView, "birds-eye", "published hole defaults to birds-eye (" + label + ")");
+    assert.equal(asset.metadata.tiltAppliedBy, "viewer-runtime", "player applies the tilt at runtime (" + label + ")");
+    assert.equal(asset.metadata.playTiltDeg, 14, "published hole carries the play tilt policy (" + label + ")");
+    assert.ok(svgText(asset.dataUrl).includes('data-role="birds-eye-tiltable-3d-plane"'), "the saved file declares the tiltable 3D plane (" + label + ")");
+    assert.equal(asset.metadata.role, "hole-frame-published", "published hole keeps its Play-facing role (" + label + ")");
+    assert.equal(asset.metadata.playSurface.fallbackPolicy, "live-gps-only", "published hole keeps the live-gps fallback policy (" + label + ")");
+  });
+  assert.equal(published3d.singleHolePublishedVisual.metadata.surfaceModel, "birds-eye-tiltable-3d-plane", "single-hole published is also a tiltable 3D surface");
 
   // Normalisation: drag the pixels onto the preset targets, so ANY source converges on one look.
   const natural = engine.getPreset("clarity-course-natural-v1");

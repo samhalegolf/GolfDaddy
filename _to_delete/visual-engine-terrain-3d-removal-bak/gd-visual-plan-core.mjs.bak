@@ -183,7 +183,7 @@ function holeAnchorPins(holeData) {
   };
 }
 function holeCaptureAnchorPins(holeData, role, extra) {
-  if (role !== "play-corridor") return null;
+  if (role !== "play-corridor" && role !== "three-d-hole-beta") return null;
   const anchors = holeAnchorPins(holeData);
   let route = anchors.route;
   if (!route.length && anchors.tee && anchors.green) route = [anchors.tee, anchors.green];

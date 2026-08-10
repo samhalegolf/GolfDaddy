@@ -4,7 +4,7 @@
  *
  * gd-course-visual-engine.js is 240KB and the app surface uses six methods of
  * it. The rest is authoring: building masters and previews, presets, stitching,
- * floodlight rendering, publishing and cloud sync. That work
+ * terrain/floodlight/birds-eye rendering, publishing and cloud sync. That work
  * happens in the browser studio, and published frames are rendered server-side
  * by the worker, so GPS play only ever reads records and caches capture pixels.
  *
@@ -41,6 +41,7 @@ const CLIENT = path.join(ROOT, "scripts", "gd-course-visual-client.js");
 const PLAY_API = [
   "captureImagePath", "saveCaptureImage", "loadCaptureImage", "hydrateCaptureImages",
   "getRecord", "resolveCourseVisual", "pullCourseVisual", "loadStore", "saveStore",
+  "beta3dTiltPolicy",
   /* Cloud frames - the app surface's visual source. All consumers: read the build state,
      start a build, download frames, read cached ones, and fill a record's assets from the
      store so a downloaded frame reaches the renderer (and reaches it offline). None of them
@@ -131,8 +132,8 @@ const output = `/* Clarity Caddy course visual engine - PLAY/CAPTURE CLIENT.
    exists per build. See docs/APP_STUDIO_SPLIT.md.
 
    The phone reads course visual records and caches capture pixels; it does not
-   author them. Authoring - masters, previews, presets, stitching, floodlight
-   rendering, publishing, cloud sync - is ${Math.round((source.length - allBodies.length) / 1024)}KB of
+   author them. Authoring - masters, previews, presets, stitching, terrain and
+   floodlight rendering, publishing, cloud sync - is ${Math.round((source.length - allBodies.length) / 1024)}KB of
    gd-course-visual-engine.js that only the studio needs, and published frames
    are rendered server-side by the worker anyway.
 

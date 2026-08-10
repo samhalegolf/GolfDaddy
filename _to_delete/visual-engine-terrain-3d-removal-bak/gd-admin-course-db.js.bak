@@ -317,7 +317,7 @@ function gdAdminCourseDbVisualState(courseId){
   const record=gdAdminCourseVisualRecord(courseId);
   if(!record)return {label:"live map",tone:""};
   if(record.publishedVisual)return {label:"published",tone:"ok"};
-  if(record.previewVisual)return {label:"local preview",tone:"ok"};
+  if(record.previewVisual||record.terrainView||record.singleHoleTerrainView)return {label:"local preview",tone:"ok"};
   if(record.rawMaster||record.basicVisual)return {label:"working",tone:"warn"};
   if(record.lastError||record.status==="failed")return {label:"error",tone:"bad"};
   return {label:"live map",tone:""};
@@ -472,8 +472,9 @@ async function gdAdminCourseDbUpdate(courseId){
     const record=gdAdminCourseVisualRecord(courseId)||engine?.getRecord?.(courseId);
     const presetId=String(record&&record.presetId||engine?.defaultPreset?.().id||"");
     const overrides=record&&record.courseOverrides||{};
+    const beta3d=!!(overrides.visualEngine&&overrides.visualEngine.enable3dBeta);
     gdAdminCourseVisualToast("Updating course admin data");
-    if(engine&&typeof engine.buildFromCourseDatabase==="function")await engine.buildFromCourseDatabase(courseId,{forceFresh:false});
+    if(engine&&typeof engine.buildFromCourseDatabase==="function")await engine.buildFromCourseDatabase(courseId,{enable3dBeta:beta3d,forceFresh:false});
     if(engine&&typeof engine.buildCourseVisualPreview==="function")await engine.buildCourseVisualPreview(courseId,presetId,overrides);
     gdAdminCourseVisualToast("Course admin data updated");
   }catch(error){
@@ -524,6 +525,7 @@ function gdAdminCourseScorecardMarkup(selected){
 function gdAdminCoursePreviewHoleCount(selected,record){
   const visualCount=Math.max(...[
     record&&record.holeFramePublishedVisuals&&record.holeFramePublishedVisuals.length||0,
+    record&&record.holeFrameTerrainViews&&record.holeFrameTerrainViews.length||0,
     record&&record.holeFramePreviewVisuals&&record.holeFramePreviewVisuals.length||0,
     record&&record.holeFrameVisuals&&record.holeFrameVisuals.length||0
   ]);
@@ -534,6 +536,7 @@ function gdAdminCoursePreviewAsset(record,holeNumber){
   // shows its real effect. The recipe is re-baked when a control is released, and nothing is
   // layered on top of it in CSS — layering double-applied the look and made settings look stuck.
   const lists=[
+    record&&record.holeFrameTerrainViews,
     record&&record.holeFramePreviewVisuals,
     record&&record.holeFramePublishedVisuals,
     record&&record.holeFrameVisuals
@@ -542,7 +545,7 @@ function gdAdminCoursePreviewAsset(record,holeNumber){
     const match=(Array.isArray(list)?list:[]).find(asset=>Number(asset&&asset.holeNumber)===Number(holeNumber)&&asset.dataUrl);
     if(match)return match;
   }
-  return record&&record.exampleHoleVisual||record&&record.singleHolePublishedVisual||record&&record.singleHolePreviewVisual||null;
+  return record&&record.exampleHoleVisual||record&&record.singleHolePublishedVisual||record&&record.singleHoleTerrainView||record&&record.singleHolePreviewVisual||null;
 }
 /* Frames exported by the server worker live in the course-visuals bucket behind
    /api/course-visual-assets. The index is fetched once per course per session; when it
@@ -573,7 +576,7 @@ function gdAdminCourseCloudFrameFor(courseId,holeNumber){
    never scanned locally. */
 function gdAdminCoursePreviewCapturedHoles(record,courseId){
   const seen={};
-  [record&&record.holeFramePreviewVisuals,record&&record.holeFramePublishedVisuals,record&&record.holeFrameVisuals].forEach(list=>{
+  [record&&record.holeFrameTerrainViews,record&&record.holeFramePreviewVisuals,record&&record.holeFramePublishedVisuals,record&&record.holeFrameVisuals].forEach(list=>{
     (Array.isArray(list)?list:[]).forEach(asset=>{const n=Number(asset&&asset.holeNumber);if(n)seen[n]=true;});
   });
   const cloud=courseId?gdAdminCourseCloudFrames(courseId):null;
@@ -610,7 +613,7 @@ function gdAdminCoursePreviewEnsureHoleBake(courseId,holeNumber){
   if(!record)return;
   const hole=Number(holeNumber)||0;
   if(!hole)return;
-  const baked=(record.holeFramePreviewVisuals||[]).some(asset=>Number(asset&&asset.holeNumber)===hole);
+  const baked=(record.holeFrameTerrainViews||[]).concat(record.holeFramePreviewVisuals||[]).some(asset=>Number(asset&&asset.holeNumber)===hole);
   const hasBase=(record.holeFrameVisuals||[]).some(asset=>Number(asset&&asset.holeNumber)===hole);
   if(baked||!hasBase)return;
   if(gdAdminCourseVisualBakePending[courseId])return;
@@ -846,7 +849,7 @@ function gdAdminCoursePreviewMarkup(selected){
   /* Frame preference: a fresh local styled bake wins (that's the sandbox showing your
      current recipe), then the server-exported cloud frame, then the local base capture.
      Never the course-wide mosaic - that made empty holes look captured. */
-  const styledLists=[record&&record.holeFramePreviewVisuals];
+  const styledLists=[record&&record.holeFrameTerrainViews,record&&record.holeFramePreviewVisuals];
   const baseLists=[record&&record.holeFramePublishedVisuals,record&&record.holeFrameVisuals];
   let asset=null,assetKind="";
   for(const list of styledLists){
@@ -866,10 +869,16 @@ function gdAdminCoursePreviewMarkup(selected){
   const frame=imageMarkup?gdAdminCoursePreviewPhoneFrameMarkup(imageMarkup,cloudSrc?null:gdAdminCoursePreviewFrameBox(src)):`<div class="gdAdminPhoneEmpty">Hydrating hole capture…</div>`;
   if(cloudFrame)assetKind="cloud-frame";
   // No CSS recipe is layered on the phone: the surface below is already the baked recipe, so
-  // painting it again on top double-applied the look.
+  // painting it again on top double-applied the look. Only the tilt (a view transform, not part
+  // of the recipe) is applied here.
+  const tilt=gdAdminCourseVisualTiltInfo(record);
   const effects=gdAdminCourseVisualActiveEffects(record);
+  const beta3dOn=!!(record&&record.courseOverrides&&record.courseOverrides.visualEngine&&record.courseOverrides.visualEngine.enable3dBeta);
+  const previewTiltDeg=Math.min(52,Math.max(28,Math.round(Number(tilt.playTiltDeg||14)*2.6)));
+  const screenStyle="--gd-phone-tilt:"+gdAdminCourseVisualSvgNum(previewTiltDeg)+"deg";
+  const tiltClass=gdAdminCoursePreviewTiltActive(beta3dOn)?" gdAdminPhoneTilted":"";
   const dock=window.GDCourseVisualEngine?gdAdminCourseVisualControls(record,selected.id):"";
-  return `<div class="gdAdminPhonePreviewShell gdAdminPhonePreviewTuned"><div class="gdAdminPhoneInfo"><strong>${gdEscapeHTML(selected.name)} · Hole ${gdEscapeHTML(current)}</strong><span>Sandbox: dial a setting and release it — the recipe re-bakes for this hole so you see the real result, terrain and all. Scan re-runs the capture protocol; Publish applies the locked-in recipe to every hole.</span><div class="gdAdminPhoneControls"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev hole</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next hole</button>${scanButton}<button type="button" onclick="return gdAdminCourseVisualResetRecipe(${id})">Reset recipe</button><button type="button" onclick="return gdAdminCourseVisualSaveRecipe(${id})">Save recipe</button><button type="button" class="primary" onclick="return gdAdminCourseVisualPublish(${id})">Publish recipe</button></div><div class="gdAdminCourseStageLine"><span class="${assetKind==="local-styled"||assetKind==="cloud-frame"?"ready":"warn"}">${gdEscapeHTML(assetKind==="local-styled"?"surface ready":assetKind==="cloud-frame"?"cloud frame":assetKind==="local-base"?"original capture":"hydrating")}</span><span>H${gdEscapeHTML(current)} · ${gdEscapeHTML(captured.length)}/${gdEscapeHTML(count)} captured</span><span>${gdEscapeHTML(cloudFrame?String(cloudFrame.path).split("/").slice(-3).join("/"):asset&&asset.path?String(asset.path).split("/").slice(-3).join("/"):"")}</span>${gdAdminCourseCloudJobChip(selected.id)}</div><div class="gdAdminCourseStageLine">${(assetKind==="local-base"?["Original capture — no effects"]:(effects.length?effects:["No effects active"])).map(label=>`<span class="${assetKind==="local-base"?"":"ready"}">${gdEscapeHTML(label)}</span>`).join("")}</div></div><div class="gdAdminPhoneStage"><div class="gdAdminPhone"><div class="gdAdminPhoneScreen"><div class="gdAdminPhoneHud"><span>Clarity Play</span><b>H${gdEscapeHTML(current)}</b></div>${frame}<div class="gdAdminPhoneNav"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next</button></div></div></div>${dock}</div></div>`;
+  return `<div class="gdAdminPhonePreviewShell gdAdminPhonePreviewTuned"><div class="gdAdminPhoneInfo"><strong>${gdEscapeHTML(selected.name)} · Hole ${gdEscapeHTML(current)}</strong><span>Sandbox: dial a setting and release it — the recipe re-bakes for this hole so you see the real result, terrain and all. Scan re-runs the capture protocol; Publish applies the locked-in recipe to every hole.</span><div class="gdAdminPhoneControls"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev hole</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next hole</button>${scanButton}<button type="button" onclick="return gdAdminCourseVisualResetRecipe(${id})">Reset recipe</button><button type="button" onclick="return gdAdminCourseVisualSaveRecipe(${id})">Save recipe</button><button type="button" class="primary" onclick="return gdAdminCourseVisualPublish(${id})">Publish recipe</button></div><div class="gdAdminCourseStageLine"><span class="${assetKind==="local-styled"||assetKind==="cloud-frame"?"ready":"warn"}">${gdEscapeHTML(assetKind==="local-styled"?"surface ready":assetKind==="cloud-frame"?"cloud frame":assetKind==="local-base"?"original capture":"hydrating")}</span><span>H${gdEscapeHTML(current)} · ${gdEscapeHTML(captured.length)}/${gdEscapeHTML(count)} captured</span><span>${gdEscapeHTML(cloudFrame?String(cloudFrame.path).split("/").slice(-3).join("/"):asset&&asset.path?String(asset.path).split("/").slice(-3).join("/"):"")}</span>${gdAdminCourseCloudJobChip(selected.id)}</div><div class="gdAdminCourseStageLine">${(assetKind==="local-base"?["Original capture — no effects"]:(effects.length?effects:["No effects active"])).map(label=>`<span class="${assetKind==="local-base"?"":"ready"}">${gdEscapeHTML(label)}</span>`).join("")}</div></div><div class="gdAdminPhoneStage"><div class="gdAdminPhone"><div class="gdAdminPhoneScreen${tiltClass}" style="${screenStyle}"><div class="gdAdminPhoneHud"><span>Clarity Play</span><b>H${gdEscapeHTML(current)}</b></div>${frame}<div class="gdAdminPhoneNav"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next</button></div></div></div>${dock}</div></div>`;
 }
 function gdAdminCourseDebugMarkup(selected){
   return `<div class="gdAdminCourseDebugWindow"><div class="gdCoursePlayDebug" id="gdCoursePlayDebugPanel"><div class="gdCoursePlayDebugHead"><div><h3>Live scan feedback</h3><p>Local scan, frame-cache, sync, and runtime events on this browser. This is browser state, not the database.</p></div><div class="gdCoursePlayDebugActions"><button type="button" onclick="return gdAdminCourseDebugRefresh()">Refresh</button><button type="button" onclick="gdClearCoursePlayPipelineDebug();return gdAdminCourseDebugRefresh()">Clear log</button></div></div><div id="gdCoursePlayDebugSummary" class="gdCoursePlayDebugSummary"></div><div id="gdCoursePlayDebugTable"></div><div id="gdCoursePlayDebugTimeline" class="gdCoursePlayDebugTimeline"></div></div><div class="gdCoursePlayDebug gdCourseMappingDebug" id="gdCourseMappingDebugPanel"></div><details class="gdAdminCourseSettings"><summary>Visual engine internals</summary><div class="gdAdminCourseSettingsBody">${gdAdminCourseVisualMarkup(selected)}</div></details></div>`;
@@ -892,8 +901,12 @@ function gdAdminCourseVisualAssets(record){
     record&&record.exampleHoleVisual,
     list(record&&record.holeFrameVisuals),
     record&&record.previewVisual,
+    record&&record.terrainView,
     record&&record.singleHolePreviewVisual,
+    record&&record.singleHoleTerrainView,
     list(record&&record.holeFramePreviewVisuals),
+    list(record&&record.holeFrameTerrainViews),
+    record&&record.beta3dView,
     record&&record.publishedVisual,
     record&&record.singleHolePublishedVisual,
     list(record&&record.holeFramePublishedVisuals)
@@ -953,11 +966,13 @@ function gdAdminCourseVisualNeedsAutoBuild(record,sourceStatus){
   if(record&&String(record.status||"")==="rendering")return false;
   if(!gdAdminCourseVisualAutoBuildSignal(record,sourceStatus)&&!(record&&record.rawMaster))return false;
   const plan=record&&record.diagnostics&&record.diagnostics.capturePlanSummary||null;
+  const beta3d=!!(record&&record.courseOverrides&&record.courseOverrides.visualEngine&&record.courseOverrides.visualEngine.enable3dBeta);
   if(!record||!record.rawMaster||!record.basicVisual)return true;
   if(window.GDCourseVisualEngine&&record.rawMaster&&record.rawMaster.metadata&&String(record.rawMaster.metadata.rendererVersion||"")!==String(window.GDCourseVisualEngine.rendererVersion||""))return true;
   if(!plan||String(plan.stitchModel||"")!=="geo-rectangle-table-over-live-map")return true;
   if(record.rawMaster&&record.rawMaster.metadata&&String(record.rawMaster.metadata.stitchModel||"")!=="geo-rectangle-table-over-live-map")return true;
   if(Number(plan.planned)>0&&Number(plan.captured)<Number(plan.planned))return true;
+  if(beta3d&&!record.beta3dView)return true;
   return false;
 }
 function gdAdminCourseVisualAutoBuildKey(courseId,record,sourceStatus){
@@ -976,8 +991,9 @@ function gdAdminCourseVisualScheduleAutoBuild(courseId,record,sourceStatus){
       gdAdminCourseVisualEnsurePipelineCourse(courseId);
       const fresh=gdAdminCourseVisualRecord(courseId)||engine.getRecord(courseId);
       const overrides=fresh&&fresh.courseOverrides||{};
+      const beta3d=!!(overrides.visualEngine&&overrides.visualEngine.enable3dBeta);
       gdAdminCourseVisualToast("Building course visual stitch");
-      await engine.buildFromCourseDatabase(courseId);
+      await engine.buildFromCourseDatabase(courseId,{enable3dBeta:beta3d});
     }catch(error){
       console.warn("[GolfDaddy] course visual auto-build failed",error);
     }finally{
@@ -1010,7 +1026,9 @@ function gdAdminCourseVisualNeedsPipeline(record){
   if(activePresetVersion&&Number(record.presetVersion||0)!==activePresetVersion)return true;
   if(activePresetVersion&&record.previewVisual&&Number(record.previewVisual.presetVersion||0)!==activePresetVersion)return true;
   if(!gdAdminCourseVisualStageReady(record.previewVisual,"native-visuals"))return true;
+  if(!gdAdminCourseVisualStageReady(record.terrainView,"terrain-shading","native-visuals"))return true;
   if(!gdAdminCourseVisualStageReady(record.singleHolePreviewVisual,"native-visuals"))return true;
+  if(!gdAdminCourseVisualStageReady(record.singleHoleTerrainView,"terrain-shading"))return true;
   /* Per-hole preview frames are deliberately NOT required here: they bake on demand per
      visited hole (and in full on Publish). Requiring all of them made the auto pipeline
      re-run the 18-frame bake that freezes the tab. */
@@ -1040,7 +1058,7 @@ function gdAdminCourseVisualSchedulePipeline(courseId,record,sourceStatus){
       const fresh=gdAdminCourseVisualRecord(courseId)||engine.getRecord(courseId);
       const presetId=String(fresh&&fresh.presetId||engine.defaultPreset?.().id||"");
       const overrides=fresh&&fresh.courseOverrides||{};
-      gdAdminCourseVisualToast("Applying native visuals");
+      gdAdminCourseVisualToast("Applying native visuals and terrain shading");
       /* The automatic pipeline bakes only the light products (overview + single hole).
          Hole frames bake on demand as each hole is viewed, and in full on Publish - baking
          all 18 owned-pixel frames here froze the tab for minutes. */
@@ -1346,18 +1364,24 @@ function gdAdminCourseVisualProductBase(record){
 }
 function gdAdminCourseVisualSuppressPublishedFallback(record){
   if(!record||!(record.diagnostics&&record.diagnostics.recaptureRequestedAt))return false;
-  const hasWorking=!!(record.rawMaster||record.basicVisual||record.exampleHoleVisual||record.previewVisual||record.singleHolePreviewVisual);
+  const hasWorking=!!(record.rawMaster||record.basicVisual||record.exampleHoleVisual||record.previewVisual||record.terrainView||record.singleHolePreviewVisual||record.singleHoleTerrainView);
   if(hasWorking)return false;
   return ["stitching","rendering","failed","unavailable"].includes(String(record.status||""))||record.settingsDirty===true;
 }
 function gdAdminCourseVisualProducts(record){
   const overviewNative=gdAdminCourseVisualStageReady(record&&record.previewVisual,"native-visuals")?record.previewVisual:null;
+  const overviewTerrain=gdAdminCourseVisualStageReady(record&&record.terrainView,"terrain-shading","native-visuals")?record.terrainView:null;
   const holeNative=gdAdminCourseVisualStageReady(record&&record.singleHolePreviewVisual,"native-visuals")?record.singleHolePreviewVisual:null;
+  const holeTerrain=gdAdminCourseVisualStageReady(record&&record.singleHoleTerrainView,"terrain-shading")?record.singleHoleTerrainView:null;
+  const beta3dOn=!!(record&&record.courseOverrides&&record.courseOverrides.visualEngine&&record.courseOverrides.visualEngine.enable3dBeta);
   const suppressPublishedFallback=gdAdminCourseVisualSuppressPublishedFallback(record);
   const products=[
-    {key:"course-overview",label:"Course overview",base:gdAdminCourseVisualProductBase(record),native:overviewNative,published:record&&record.publishedVisual||null,suppressPublishedFallback:suppressPublishedFallback},
-    {key:"single-hole",label:"Single hole",base:record&&record.exampleHoleVisual||null,native:holeNative,published:record&&record.singleHolePublishedVisual||null,suppressPublishedFallback:suppressPublishedFallback,holeNumber:record&&record.exampleHoleVisual&&record.exampleHoleVisual.holeNumber||null}
+    {key:"course-overview",label:"Course overview",base:gdAdminCourseVisualProductBase(record),native:overviewNative,terrain:overviewTerrain,published:record&&record.publishedVisual||null,suppressPublishedFallback:suppressPublishedFallback},
+    {key:"single-hole",label:"Single hole",base:record&&record.exampleHoleVisual||null,native:holeNative,terrain:holeTerrain,published:record&&record.singleHolePublishedVisual||null,suppressPublishedFallback:suppressPublishedFallback,holeNumber:record&&record.exampleHoleVisual&&record.exampleHoleVisual.holeNumber||record&&record.singleHoleTerrainView&&record.singleHoleTerrainView.holeNumber||null}
   ];
+  if(beta3dOn||record&&record.beta3dView){
+    products.push({key:"3d-beta",label:"3D view beta",beta:record&&record.beta3dView||null,stages:[{label:"Faux 3D",asset:record&&record.beta3dView||null}],holeNumber:record&&record.beta3dView&&record.beta3dView.metadata&&record.beta3dView.metadata.holeNumber||null});
+  }
   return products;
 }
 function gdAdminCourseVisualClampedNumber(value,min,max,fallback){
@@ -1408,6 +1432,9 @@ function gdAdminCourseVisualReliefSrc(courseId){
   return {url:"/api/relief-preview?"+q.toString(),hole:hole};
 }
 function gdAdminCourseVisualReliefRefresh(courseId){
+  /* Keep the recipe's own live behaviour - the strength slider still drives the phone tilt
+     preview the way every other control does. */
+  gdAdminCoursePreviewApplyTilt();
   const img=document.getElementById("gdReliefPreviewImg");
   const status=document.getElementById("gdReliefPreviewStatus");
   if(!img)return false;
@@ -1441,6 +1468,7 @@ function gdAdminCourseVisualReliefRefresh(courseId){
   return false;
 }
 function gdAdminCourseVisualControlChanged(courseId){
+  gdAdminCoursePreviewApplyTilt();
   return false;
 }
 /* After a recipe reset the preview must show the RAW captures - without this the cloud
@@ -1664,6 +1692,7 @@ function gdAdminCourseVisualActiveEffects(record){
   const brightness=lighting.brightnessTarget!=null?Number(lighting.brightnessTarget):52;
   if(Math.abs(brightness-52)>2)chips.push("Brightness");
   if(Number(settings.mowingVisibility||0)>.02)chips.push("Mow lines");
+  if(record&&record.courseOverrides&&record.courseOverrides.visualEngine&&record.courseOverrides.visualEngine.enable3dBeta===true)chips.push("3D beta");
   return chips;
 }
 function gdAdminCourseVisualSaveRecipeFromForm(courseId){
@@ -1776,7 +1805,7 @@ function gdAdminCourseVisualControlEvent(event){
     gdAdminCourseVisualPresetChanged(courseId);
     return;
   }
-  if(["gdCourseVisualHueMin","gdCourseVisualHueMax","gdCourseVisualSatMin","gdCourseVisualSatMax","gdCourseVisualLumMin","gdCourseVisualLumMax","gdCourseVisualTargetPull","gdCourseVisualBrightness","gdCourseVisualShadowFloor","gdCourseVisualHighlightCeiling","gdCourseVisualContrast","gdCourseVisualTerrainStrength","gdCourseVisualFloodOn","gdCourseVisualFloodAmbient","gdCourseVisualFloodLit","gdCourseVisualFloodThrow","gdCourseVisualFloodSpread","gdCourseVisualFloodGreenPool","gdCourseVisualFloodGreenRadius","gdCourseVisualFloodMask","gdCourseVisualMowing"].includes(target.id)){
+  if(["gdCourseVisualHueMin","gdCourseVisualHueMax","gdCourseVisualSatMin","gdCourseVisualSatMax","gdCourseVisualLumMin","gdCourseVisualLumMax","gdCourseVisualTargetPull","gdCourseVisualBrightness","gdCourseVisualShadowFloor","gdCourseVisualHighlightCeiling","gdCourseVisualContrast","gdCourseVisualTerrainStrength","gdCourseVisualFloodOn","gdCourseVisualFloodAmbient","gdCourseVisualFloodLit","gdCourseVisualFloodThrow","gdCourseVisualFloodSpread","gdCourseVisualFloodGreenPool","gdCourseVisualFloodGreenRadius","gdCourseVisualFloodMask","gdCourseVisualMowing","gdCourseVisual3dBeta"].includes(target.id)){
     // "input" fires while the control is still moving; "change" fires on release - bake then.
     if(String(event.type)==="change")gdAdminCourseVisualControlCommitted(courseId);
     else gdAdminCourseVisualControlChanged(courseId);
@@ -1789,12 +1818,12 @@ if(!window.__gdAdminCourseVisualControlsBound){
   document.addEventListener("change",gdAdminCourseVisualControlEvent,true);
 }
 function gdAdminCourseVisualProductCard(product){
-  const visual=product.native||(!product.suppressPublishedFallback?product.published:null)||product.base||null;
+  const visual=product.beta||product.terrain||product.native||(!product.suppressPublishedFallback?product.published:null)||product.base||null;
   const src=visual&&visual.dataUrl||"";
   const width=Number(visual&&visual.width||visual&&visual.metadata&&visual.metadata.outputDimensions&&visual.metadata.outputDimensions.width||0)||0;
   const height=Number(visual&&visual.height||visual&&visual.metadata&&visual.metadata.outputDimensions&&visual.metadata.outputDimensions.height||0)||0;
   const dims=width&&height?`${Math.round(width)}×${Math.round(height)}`:"";
-  const activeStage=product.native?"Native visuals":!product.suppressPublishedFallback&&product.published?"Published":product.base?"Base capture":product.suppressPublishedFallback?"Fresh run needed":"Waiting";
+  const activeStage=product.beta?"Faux 3D":product.terrain?"Terrain shading":product.native?"Native visuals":!product.suppressPublishedFallback&&product.published?"Published":product.base?"Base capture":product.suppressPublishedFallback?"Fresh run needed":"Waiting";
   const aspect=width&&height?width/height:0;
   const scrollClass=aspect&&(aspect<.35||aspect>3.25)?" scroll":"";
   const inline=gdAdminCourseVisualInlineSvg(src,product.label);
@@ -1836,6 +1865,57 @@ function gdAdminCourseVisualSelectTool(group){
   }
   return false;
 }
+let gdAdminCoursePreviewTilt=null; // null = follow the 3D view beta toggle; true/false = explicit override
+function gdAdminCourseVisualTiltInfo(record){
+  const engine=window.GDCourseVisualEngine;
+  let policy={captureTiltDeg:8,playTiltDeg:14,cameraTiltDeg:8,pitchStrategy:"faux-tilt-svg",nativePitchAvailable:false};
+  try{if(engine&&typeof engine.beta3dTiltPolicy==="function")policy=Object.assign(policy,engine.beta3dTiltPolicy());}catch(e){}
+  const meta=record&&record.beta3dView&&record.beta3dView.metadata||null;
+  const num=(value,fallback)=>Number.isFinite(Number(value))?Number(value):fallback;
+  return {
+    captureTiltDeg:num(meta&&meta.captureTiltDeg,policy.captureTiltDeg),
+    playTiltDeg:num(meta&&meta.playTiltDeg,policy.playTiltDeg),
+    nativePitchAvailable:meta?!!meta.nativePitchAvailable:!!policy.nativePitchAvailable,
+    pitchStrategy:(meta&&(meta.pitchStrategy||meta.mapCameraCapability&&meta.mapCameraCapability.pitchStrategy))||policy.pitchStrategy
+  };
+}
+function gdAdminCoursePreview3dEnabled(){
+  const cb=document.getElementById("gdCourseVisual3dBeta");
+  return cb?!!cb.checked:false;
+}
+function gdAdminCoursePreviewTiltActive(recordBeta){
+  const base=(typeof recordBeta==="boolean")?recordBeta:gdAdminCoursePreview3dEnabled();
+  return gdAdminCoursePreviewTilt===null?base:!!gdAdminCoursePreviewTilt;
+}
+function gdAdminCoursePreviewApplyTilt(){
+  const active=gdAdminCoursePreviewTiltActive();
+  document.querySelectorAll(".gdAdminPhoneScreen").forEach(screen=>screen.classList.toggle("gdAdminPhoneTilted",active));
+  document.querySelectorAll(".gdAdminPhoneTiltBtn").forEach(btn=>{
+    btn.classList.toggle("active",active);
+    btn.setAttribute("aria-pressed",active?"true":"false");
+  });
+  return active;
+}
+function gdAdminCoursePreviewToggleTilt(){
+  gdAdminCoursePreviewTilt=!gdAdminCoursePreviewTiltActive();
+  gdAdminCoursePreviewApplyTilt();
+  return false;
+}
+function gdAdminCourseVisualDepthBody(record,beta3dField){
+  const tilt=gdAdminCourseVisualTiltInfo(record);
+  const built=!!(record&&record.beta3dView);
+  const beta3dOn=!!(record&&record.courseOverrides&&record.courseOverrides.visualEngine&&record.courseOverrides.visualEngine.enable3dBeta);
+  const tiltActive=gdAdminCoursePreviewTiltActive(beta3dOn);
+  return beta3dField+
+    `<div class="gdAdminPhoneTiltPanel" role="group" aria-label="Play tilt (read only)">`+
+      `<div class="gdAdminPhoneTiltReadout"><span>Capture tilt</span><b>${tilt.captureTiltDeg}°</b></div>`+
+      `<div class="gdAdminPhoneTiltReadout"><span>Play tilt</span><b>${tilt.playTiltDeg}°</b></div>`+
+      `<div class="gdAdminPhoneTiltReadout"><span>Pitch</span><b>${tilt.nativePitchAvailable?"native":"faux tilt"}</b></div>`+
+      `<div class="gdAdminPhoneTiltReadout"><span>3D asset</span><b class="${built?"ready":"warn"}">${built?"birds-eye surface":"not built"}</b></div>`+
+      `<button type="button" class="gdAdminPhoneTiltBtn${tiltActive?" active":""}" aria-pressed="${tiltActive?"true":"false"}" onclick="return gdAdminCoursePreviewToggleTilt()">${tiltActive?"Tilt on":"Preview tilt"}</button>`+
+      `<span class="gdAdminPhoneTiltNote">Ships birds-eye as a tiltable 3D surface — GPS Play tilts it live to reveal depth. This only previews that tilt.</span>`+
+    `</div>`;
+}
 function gdAdminCourseVisualControls(record,courseId){
   const preset=(record&&record.presetId)||"clarity-course-natural-v1";
   const presets=gdAdminCourseVisualPresetList();
@@ -1865,6 +1945,7 @@ function gdAdminCourseVisualControls(record,courseId){
   const terrain=gdAdminCourseVisualClampedNumber(settings.visualTools&&settings.visualTools.holeTerrainStrength,0,1.6,.9);
   const brightness=gdAdminCourseVisualClampedNumber(settings.lighting&&settings.lighting.brightnessTarget,0,100,52);
   const contrast=gdAdminCourseVisualClampedNumber(settings.lighting&&settings.lighting.contrastTarget,.55,2.2,1.04);
+  const beta3d=!!(settings.visualEngine&&settings.visualEngine.enable3dBeta);
   const key=gdEscapeHTML(courseId||record&&record.courseId||"");
   const presetField=`<label>Preset<select id="gdCourseVisualPreset" oninput="return gdAdminCourseVisualPresetChanged('${key}')" onchange="return gdAdminCourseVisualPresetChanged('${key}')">${presets.map(p=>`<option value="${gdEscapeHTML(p&&p.id||p&&p.mode||p&&p.name||"")}" ${preset===(p&&p.id)?"selected":""}>${gdEscapeHTML(p&&p.name||p&&p.mode||p&&p.id||"Preset")}</option>`).join("")}</select></label>`;
   const presetRail=`<div class="gdAdminCourseVisualPresetRail">${presets.map(p=>{const id=p&&p.id||p&&p.mode||p&&p.name||"";return `<button type="button" data-preset-id="${gdEscapeHTML(id)}" class="${preset===id?"active":""}" onclick="return gdAdminCourseVisualPresetButtonChanged('${key}','${gdEscapeHTML(id)}')">${gdEscapeHTML(p&&p.name||p&&p.mode||id||"Preset")}</button>`;}).join("")}</div>`;
@@ -1920,6 +2001,7 @@ function gdAdminCourseVisualControls(record,courseId){
     rangeField("gdCourseVisualContrast","Contrast","",contrast,.55,2.2,.01)+
     `<span class="gdAdminPhoneTiltNote">Exposure is normalised: whatever the capture's real range is, it's mapped between floor and ceiling and its mean driven to the target.</span>`;
   const mowingField=`<label>Mowing visibility<select id="gdCourseVisualMowing" onchange="return gdAdminCourseVisualControlCommitted('${key}')">${["Unknown","Low","Clear","Prominent"].map(value=>`<option value="${value}" ${mowing===value?"selected":""}>${value}</option>`).join("")}</select></label>`;
+  const beta3dField=`<label class="gdAdminCourseVisualCheck"><input id="gdCourseVisual3dBeta" type="checkbox" ${beta3d?"checked":""} onchange="return gdAdminCourseVisualControlCommitted('${key}')"><span>3D view beta</span></label>`;
   const actionsField=`<div class="gdAdminCourseVisualActions"><button type="button" onclick="return gdAdminCourseVisualBuildBasic('${key}')">Build base</button><button type="button" onclick="return gdAdminCourseVisualBuildPreview('${key}')">Apply preset</button><button type="button" onclick="return gdAdminCourseVisualRecapture('${key}')">Re-run captures</button><button class="primary" type="button" onclick="return gdAdminCourseVisualPublish('${key}')">Publish Clarity map</button></div>`;
   const groups=[
     {id:"preset",icon:"🎨",label:"Preset",body:presetField+presetRail+recipeField},
@@ -1928,6 +2010,7 @@ function gdAdminCourseVisualControls(record,courseId){
     {id:"flood",icon:"🔦",label:"Floodlight",body:floodlightFields},
     {id:"terrain",icon:"⛰️",label:"Terrain",body:terrainBody},
     {id:"lines",icon:"🌾",label:"Mow lines",body:mowingField},
+    {id:"depth",icon:"🧊",label:"3D depth",body:gdAdminCourseVisualDepthBody(record,beta3dField)},
     {id:"actions",icon:"⚙️",label:"Actions",body:actionsField}
   ];
   const active=gdAdminCourseVisualActiveTool;
@@ -1968,7 +2051,8 @@ function gdAdminCourseVisualOverridesFromForm(){
       useObjectMask:document.getElementById("gdCourseVisualFloodMask")?.checked===true
     },
     visualTools:{holeTerrainStrength:num("gdCourseVisualTerrainStrength",0,1.6,.9)},
-    mowingVisibility:String(document.getElementById("gdCourseVisualMowing")?.value||"Unknown")
+    mowingVisibility:String(document.getElementById("gdCourseVisualMowing")?.value||"Unknown"),
+    visualEngine:{enable3dBeta:document.getElementById("gdCourseVisual3dBeta")?.checked===true}
   };
 }
 function gdAdminCourseVisualToast(text){
@@ -1984,7 +2068,7 @@ async function gdAdminCourseVisualBuildBasic(courseId){
   const overrides=gdAdminCourseVisualOverridesFromForm();
   engine.saveCourseVisualSettings(courseId,overrides,{presetId});
   gdAdminCourseVisualToast("Building visual captures");
-  await engine.buildFromCourseDatabase(courseId);
+  await engine.buildFromCourseDatabase(courseId,{enable3dBeta:overrides.visualEngine&&overrides.visualEngine.enable3dBeta===true});
   gdRenderAdminCourseDatabase();
   return false;
 }
@@ -2056,7 +2140,7 @@ async function gdAdminCourseVisualRecapture(courseId){
     if(typeof engine.resetCourseVisualWorkingState==="function")engine.resetCourseVisualWorkingState(courseId,{keepPublished:false});
     engine.saveCourseVisualSettings(courseId,overrides,{presetId});
     gdAdminCourseVisualToast("Recapturing course visuals");
-    const buildOpts={forceFresh:true,requireFreshCaptures:true};
+    const buildOpts={enable3dBeta:overrides.visualEngine&&overrides.visualEngine.enable3dBeta===true,forceFresh:true,requireFreshCaptures:true};
     let record=null;
     let lastMessage="";
     for(let attempt=1;attempt<=2;attempt+=1){
@@ -2074,7 +2158,7 @@ async function gdAdminCourseVisualRecapture(courseId){
     }
     await engine.buildCourseVisualPreview(courseId,presetId,overrides);
     record=gdAdminCourseVisualRecord(courseId)||engine.getRecord(courseId);
-    if(!record.previewVisual||!record.singleHolePreviewVisual){
+    if(!record.previewVisual||!record.singleHoleTerrainView){
       const message=record&&record.lastError&&record.lastError.message||"Fresh capture did not produce course and single-hole previews.";
       throw new Error(message);
     }
@@ -2140,7 +2224,7 @@ function gdAdminCourseVisualMarkup(selected){
   const pipelineKey=autoBuildNeeded?"":gdAdminCourseVisualSchedulePipeline(selected.id,record,sourceStatus);
   const autoBuildStatus=autoBuildKey&&gdAdminCourseVisualAutoBuildPending[autoBuildKey]?"building":autoBuildNeeded?(autoBuildKey&&gdAdminCourseVisualAutoBuildAttempted[autoBuildKey]?"check diagnostics":"queued"):"ready";
   const pipelineNeeded=!autoBuildNeeded&&gdAdminCourseVisualNeedsPipeline(record);
-  const pipelineStatus=pipelineKey&&gdAdminCourseVisualPipelinePending[pipelineKey]?"native visuals":pipelineNeeded?(pipelineKey&&gdAdminCourseVisualPipelineAttempted[pipelineKey]?"check diagnostics":"queued"):"ready";
+  const pipelineStatus=pipelineKey&&gdAdminCourseVisualPipelinePending[pipelineKey]?"native + terrain":pipelineNeeded?(pipelineKey&&gdAdminCourseVisualPipelineAttempted[pipelineKey]?"check diagnostics":"queued"):"ready";
   const planSummary=record&&record.diagnostics&&record.diagnostics.capturePlanSummary||null;
   const products=gdAdminCourseVisualProducts(record);
   const diagnostics={
@@ -2164,7 +2248,7 @@ function gdAdminCourseVisualMarkup(selected){
     :cloudState&&cloudState.activeKind==="export"?"bake"
     :cloudState&&(cloudState.building||cloudState.state==="captures-ready")?"scan"
     :record&&record.publishedVisual?"published"
-    :record&&record.previewVisual?"bake"
+    :record&&(record.previewVisual||record.terrainView||record.singleHoleTerrainView)?"bake"
     :record&&(record.rawMaster||record.basicVisual)?"scan":"geometry";
   /* Frame count follows the same rule: what the database serves, then what this browser baked. */
   const cloudFrameIndex=gdAdminCourseCloudFrames(selected.id);

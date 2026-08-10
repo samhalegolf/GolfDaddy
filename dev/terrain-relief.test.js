@@ -87,8 +87,8 @@ let lighter=0, darker=0;
 for (let i=0;i<off.length;i+=997){ if (high[i]>off[i]+2) lighter++; else if (high[i]<off[i]-2) darker++; }
 assert.ok(lighter > 0, 'soft-light must produce highlights - multiply never did');
 assert.ok(darker  > 0, 'and shadows');
-console.log('5. highlights %d / shadows %d (multiply would give 0 highlights); mean %.1f -> %.1f',
-  lighter, darker, mean(off), mean(high));
+console.log('5. highlights %d / shadows %d (multiply would give 0 highlights); mean %s -> %s',
+  lighter, darker, mean(off).toFixed(1), mean(high).toFixed(1));
 
 // ---- 6. A rendered picture must never decode as elevation.
 //         This is the whole reason pipeline=terrain-rgb is pinned in the DEM urlTemplate:

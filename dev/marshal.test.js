@@ -62,6 +62,19 @@ function playing(opts = {}) {
   return r;
 }
 
+/* The only way the round moves on now: physically arrive at the next tee and
+   press Play. Every test that used to walk the round with NEXT_HOLE does this
+   instead, which is the point of the change. */
+const TEES = { 1: TEE, 2: H2_TEE, 3: offsetM(TEE, -700, 0) };
+function walkTo(m, hole) {
+  m.signal("FIX_RECEIVED", { point: offsetM(TEES[hole], -4, 0) });
+  m.signal("VIEW_HOLE_CHANGED", { hole });
+  assert.strictEqual(m.scene().playButton.show, true, `Play should be offered at hole ${hole}`);
+  m.signal("PLAY_PRESSED");
+  assert.strictEqual(m.scene().flow, "live");
+  assert.strictEqual(m.scene().hole.number, hole);
+}
+
 console.log("\n— flow derivation —");
 
 check("a round opens in Preview, because Play has not been pressed", () => {
@@ -109,6 +122,54 @@ check("looking at another hole is Preview; the live hole is untouched", () => {
   m.signal("VIEW_HOLE_CHANGED", { hole: 1 });
   assert.strictEqual(m.scene().flow, "live");
   assert.strictEqual(m.scene().mode, "aim", "the live hole comes back exactly as it was");
+});
+
+console.log("\n— the round moves when you say so —");
+
+/* The arrows used to walk the round while Live: skip ahead to read the next
+   hole and the app quietly decided you were playing it, with the dot and the
+   green numbers reporting a hole you were nowhere near. They browse now. */
+check("the arrows never move the live hole", () => {
+  const { m } = playing();
+  m.signal("NEXT_HOLE");
+  assert.strictEqual(m.scene().hole.number, 2, "the view moved");
+  assert.strictEqual(m.scene().flow, "preview", "but you are not playing it");
+  m.signal("NEXT_HOLE");
+  assert.strictEqual(m.scene().hole.number, 3);
+  m.signal("VIEW_HOLE_CHANGED", { hole: 1 });
+  assert.strictEqual(m.scene().flow, "live", "hole 1 was the live hole the whole time");
+  assert.strictEqual(m.scene().mode, "track");
+});
+
+check("scroll ahead and Play appears only on the hole you have reached", () => {
+  const { m } = playing();
+  m.signal("NEXT_HOLE");
+  assert.strictEqual(m.scene().playButton.show, false, "you are still on the 1st tee");
+  m.signal("NEXT_HOLE");
+  assert.strictEqual(m.scene().playButton.show, false);
+  m.signal("FIX_RECEIVED", { point: offsetM(H2_TEE, -8, 0) });   // walk to the 2nd
+  assert.strictEqual(m.scene().playButton.show, false, "looking at 3, standing at 2");
+  m.signal("VIEW_HOLE_CHANGED", { hole: 2 });
+  assert.strictEqual(m.scene().playButton.show, true, "there it is");
+  assert.strictEqual(m.scene().playButton.hole, 2, "and it plays the hole on screen");
+  m.signal("PLAY_PRESSED");
+  assert.strictEqual(m.scene().flow, "live");
+  assert.strictEqual(m.scene().hole.number, 2);
+});
+
+check("Play is inert on a hole you are only looking at", () => {
+  const { m } = playing();
+  m.signal("VIEW_HOLE_CHANGED", { hole: 3 });
+  assert.strictEqual(m.signal("PLAY_PRESSED"), false);
+  assert.strictEqual(m.scene().hole.number, 3);
+  assert.strictEqual(m.scene().flow, "preview", "still just looking");
+});
+
+check("before the round Play still starts the nearest hole, from anywhere", () => {
+  const { m } = newRound();
+  m.signal("FIX_RECEIVED", { point: offsetM(TEE, 250, 0) });   // car park, 250m off the 1st
+  assert.strictEqual(m.scene().playButton.show, true, "or you could never get going");
+  assert.strictEqual(m.scene().playButton.hole, 1);
 });
 
 console.log("\n— Live is sticky —");
@@ -250,27 +311,28 @@ check("Unlock is how you change your mind about where you are playing from", () 
   assert.strictEqual(m.scene().bubble.start.lat.toFixed(5), moved.lat.toFixed(5));
 });
 
-check("standing on the green in Preview opens real green focus", () => {
+/* Preview has exactly two modes. It used to grow a third when a tap landed
+   near a green, which meant the mode you were in depended on where your finger
+   went rather than on anything you chose — and it dragged the finish state into
+   a flow that records nothing. */
+check("standing on the green in Preview is still just Preview", () => {
   const { m } = newRound();
   m.signal("PLACED", { point: offsetM(GREEN, 8, 4) });
   const s = m.scene();
-  assert.strictEqual(s.mode, "finish", "the ball workflow, same as in play");
-  assert.strictEqual(s.finish.show, true, "there is a ball");
-  assert.strictEqual(s.camera.stage, "green");
-  assert.strictEqual(s.bubble.show, false, "a shot modelled from the green is nonsense");
-  assert.strictEqual(s.dock.show, true, "and a Shot End to confirm with");
-  assert.strictEqual(s.dock.face, "shotEnd");
+  assert.strictEqual(s.mode, "aim", "placing yourself always means the shot view");
+  assert.strictEqual(s.finish.show, false, "no ball, no Shot End, nothing to log");
+  assert.strictEqual(s.dock.face, "unlock");
 });
 
-check("the Preview ball drags, and Shot End records NOTHING", () => {
-  const { m, effects } = newRound();
-  m.signal("PLACED", { point: offsetM(GREEN, 8, 4) });
-  m.signal("BALL_MOVED", { point: offsetM(GREEN, 2, 6) });
-  assert.strictEqual(m.scene().finish.placed, true);
-  assert.strictEqual(m.signal("FINISH_LOGGED"), true, "the button works");
-  assert.strictEqual(effects.completed.length, 0, "but nothing was written");
-  assert.deepStrictEqual(m.shots(1), []);
-  assert.strictEqual(m.scene().mode, "setup", "back at the pill");
+check("Preview has no way into green focus at all", () => {
+  const { m } = playing();
+  m.signal("LOCK");                       // hole 1 now has an open shot
+  m.signal("VIEW_HOLE_CHANGED", { hole: 3 });
+  assert.strictEqual(m.scene().flow, "preview");
+  assert.strictEqual(m.signal("FINISH_OPENED", { hole: 1 }), false, "not from Preview");
+  assert.strictEqual(m.signal("FINISH_OPENED", { hole: 3 }), false, "and not on this hole either");
+  assert.strictEqual(m.scene().mode, "setup");
+  assert.strictEqual(m.scene().finishControl.show, false, "the control is Live-only now");
 });
 
 check("placing off the green still gives the shot view", () => {
@@ -281,18 +343,6 @@ check("placing off the green still gives the shot view", () => {
   assert.strictEqual(m.scene().bubble.show, true);
 });
 
-check("catching up from Preview still records, because a shot IS outstanding", () => {
-  const { m, effects } = playing();
-  m.signal("LOCK");
-  m.signal("NEXT_HOLE");
-  m.signal("VIEW_HOLE_CHANGED", { hole: 1 });
-  assert.strictEqual(m.scene().flow, "preview");
-  m.signal("FINISH_OPENED", { hole: 1 });
-  m.signal("BALL_MOVED", { point: GREEN });
-  m.signal("FINISH_LOGGED");
-  assert.strictEqual(effects.completed.length, 1, "the open shot was closed");
-  assert.strictEqual(m.scene().mode, "logged");
-});
 
 check("Preview cannot open a shot", () => {
   const { m } = newRound();
@@ -353,30 +403,98 @@ check("arriving at the green opens Finish only if there is something to log", ()
   assert.strictEqual(m.scene().finish.show, true);
 });
 
-check("the picker flags every hole holding an open shot", () => {
+console.log("\n— the picker's marks —");
+
+check("an origin with no outcome is an open mark; logging it makes it done", () => {
   const { m } = playing();
   m.signal("LOCK");
-  m.signal("NEXT_HOLE");
-  m.signal("LOCK");
-  m.signal("NEXT_HOLE");
-  assert.deepStrictEqual(m.scene().picker.flagged, [1, 2]);
+  assert.deepStrictEqual(m.scene().picker.marks[1], { done: 0, open: 1 }, "0");
+  m.signal("SHOT_END");
+  assert.deepStrictEqual(m.scene().picker.marks[1], { done: 1, open: 0 }, "0-0");
 });
 
-check("a hole can be finished later, from Preview, on the shot Live opened", () => {
+check("a par 5 taking three locks counts three, which is what x3 is for", () => {
+  const { m } = playing();
+  for (let i = 0; i < 3; i++) {
+    m.signal("FIX_RECEIVED", { point: offsetM(TEE, -60 * i, 0) });
+    m.signal("FIX_RECEIVED", { point: offsetM(TEE, -60 * i - 2, 0) });   // release aim
+    m.signal("LOCK");
+  }
+  const marks = m.scene().picker.marks[1];
+  assert.strictEqual(marks.done, 2, "each Lock closed the one before it");
+  assert.strictEqual(marks.open, 1, "and left the last one open");
+});
+
+check("holes with nothing on them carry no mark at all", () => {
+  const { m } = playing();
+  m.signal("LOCK");
+  assert.deepStrictEqual(Object.keys(m.scene().picker.marks), ["1"]);
+});
+
+console.log("\n— Logging: catching up from the picker —");
+
+check("the open mark is the only way in, and it needs something to close", () => {
+  const { m } = playing();
+  assert.strictEqual(m.signal("LOG_OPENED", { hole: 2 }), false, "nothing outstanding on 2");
+  m.signal("LOCK");
+  assert.strictEqual(m.signal("LOG_OPENED", { hole: 1 }), true);
+  assert.strictEqual(m.scene().flow, "logging", "its own flow, not Preview wearing a finish");
+  assert.strictEqual(m.scene().mode, "finish");
+  assert.strictEqual(m.scene().camera.stage, "green");
+  assert.ok(m.scene().finish.origin, "the origin is shown so you can reconstruct the shot");
+});
+
+check("logging records the outcome and puts you straight back", () => {
   const { m, effects } = playing();
-  m.signal("LOCK");                       // opens a shot on hole 1
-  m.signal("NEXT_HOLE");                  // walk on without logging
-  assert.strictEqual(m.scene().hole.number, 2);
-  m.signal("VIEW_HOLE_CHANGED", { hole: 1 });
-  assert.strictEqual(m.scene().flow, "preview", "hole 1 is not the live hole any more");
-  assert.strictEqual(m.scene().finishControl.show, true, "but it still has an open shot");
-  m.signal("FINISH_OPENED", { hole: 1 });
-  assert.ok(m.scene().finish.origin, "the origin is shown so you can reconstruct it");
+  m.signal("LOCK");                          // hole 1 open
+  walkTo(m, 2);                              // you are now live on hole 2
+  m.signal("LOG_OPENED", { hole: 1 });
+  assert.strictEqual(m.scene().hole.number, 1, "it takes you to the hole being logged");
   m.signal("BALL_MOVED", { point: offsetM(GREEN, 3, 2) });
   m.signal("FINISH_LOGGED");
-  assert.strictEqual(effects.completed.length, 1);
+  assert.strictEqual(effects.completed.length, 1, "the shot Live opened was closed");
   assert.strictEqual(effects.completed[0].meta.captureMethod, "ball-placed");
-  assert.deepStrictEqual(m.scene().picker.flagged, [], "hole 1's flag has cleared");
+  assert.strictEqual(m.scene().hole.number, 2, "and it puts you back where you were");
+  assert.strictEqual(m.scene().flow, "live", "in the flow you were in");
+  assert.strictEqual(m.scene().mode, "track", "with no Logged screen in the way");
+  assert.strictEqual(m.scene().picker.marks[1].open, 0, "the mark is closed");
+});
+
+check("backing out of a catch-up writes nothing and leaves the mark", () => {
+  const { m, effects } = playing();
+  m.signal("LOCK");
+  walkTo(m, 2);
+  m.signal("LOG_OPENED", { hole: 1 });
+  m.signal("BALL_MOVED", { point: GREEN });
+  assert.strictEqual(m.signal("BACK"), true);
+  assert.strictEqual(effects.completed.length, 0, "nothing written");
+  assert.strictEqual(m.scene().hole.number, 2, "back where you were");
+  assert.strictEqual(m.scene().flow, "live");
+  assert.strictEqual(m.scene().picker.marks[1].open, 1, "still outstanding");
+});
+
+check("Logging can never open a shot, only close one", () => {
+  const { m } = playing();
+  m.signal("LOCK");
+  m.signal("LOG_OPENED", { hole: 1 });
+  assert.strictEqual(m.signal("LOCK"), false, "no Lock in Logging");
+  assert.strictEqual(m.signal("PLACED", { point: GREEN }), false, "and no placing");
+  assert.strictEqual(m.signal("SHOT_END"), false);
+  assert.strictEqual(m.shots(1).length, 1, "still the one shot Live opened");
+});
+
+check("a catch-up does not disturb the live hole", () => {
+  const { m } = playing();
+  m.signal("LOCK");
+  walkTo(m, 2);
+  m.signal("LOCK");                          // aiming on hole 2
+  m.signal("LOG_OPENED", { hole: 1 });
+  m.signal("BALL_MOVED", { point: GREEN });
+  m.signal("FINISH_LOGGED");
+  assert.strictEqual(m.scene().flow, "live");
+  assert.strictEqual(m.scene().hole.number, 2);
+  assert.strictEqual(m.scene().mode, "aim", "hole 2 comes back exactly as it was");
+  assert.ok(m.openShot(2), "and its shot is still open");
 });
 
 console.log("\n— the Logged screen —");
@@ -388,7 +506,29 @@ check("Shot End lands on Logged, offering the next hole", () => {
   const logged = m.scene().logged;
   assert.strictEqual(logged.show, true);
   assert.strictEqual(logged.next.label, "Hole 2");
-  assert.strictEqual(logged.next.signal, "NEXT_HOLE");
+  assert.strictEqual(logged.next.signal, "ADVANCE_TO_HOLE");
+  assert.deepStrictEqual(logged.next.payload, { hole: 2 });
+});
+
+/* The asymmetry is deliberate. The arrows are browsing, so they always land in
+   Preview and wait for Play. This button names a hole and you pressed it having
+   just finished a shot, so if the fix agrees you are there it commits. */
+check("the Logged button goes live when you have arrived, Preview when you have not", () => {
+  const near = playing();
+  near.m.signal("LOCK");
+  near.m.signal("SHOT_END");
+  near.m.signal("FIX_RECEIVED", { point: offsetM(H2_TEE, -6, 0) });   // walked to the 2nd
+  near.m.signal("ADVANCE_TO_HOLE", { hole: 2 });
+  assert.strictEqual(near.m.scene().flow, "live", "you are there, so play it");
+  assert.strictEqual(near.m.scene().hole.number, 2);
+
+  const far = playing();
+  far.m.signal("LOCK");
+  far.m.signal("SHOT_END");
+  far.m.signal("ADVANCE_TO_HOLE", { hole: 2 });                        // still on the 1st green
+  assert.strictEqual(far.m.scene().flow, "preview", "not there yet");
+  assert.strictEqual(far.m.scene().hole.number, 2);
+  assert.strictEqual(far.m.scene().playButton.show, false, "and Play waits until you arrive");
 });
 
 check("Logged does not advance the hole on its own", () => {
@@ -407,20 +547,17 @@ check("Back leaves Logged and returns to Track on the same hole", () => {
   assert.strictEqual(m.scene().hole.number, 1);
 });
 
-check("catching up offers the next pending hole, then the way back", () => {
+/* Logged is about the hole you just played, and nothing else. An older hole
+   left outstanding is the picker's business — surfacing it here would put a
+   detour in the middle of the one flow that should never have one. */
+check("an older outstanding hole does not hijack the Logged button", () => {
   const { m } = playing();
-  m.signal("LOCK"); m.signal("NEXT_HOLE");        // 1 left open
-  m.signal("LOCK"); m.signal("NEXT_HOLE");        // 2 left open, now live on 3
-  m.signal("VIEW_HOLE_CHANGED", { hole: 1 });
-  m.signal("FINISH_OPENED", { hole: 1 });
-  m.signal("BALL_MOVED", { point: GREEN });
-  m.signal("FINISH_LOGGED");
-  assert.strictEqual(m.scene().logged.next.label, "Next pending: hole 2");
-  m.signal("VIEW_HOLE_CHANGED", { hole: 2 });
-  m.signal("FINISH_OPENED", { hole: 2 });
-  m.signal("BALL_MOVED", { point: H2_GREEN });
-  m.signal("FINISH_LOGGED");
-  assert.strictEqual(m.scene().logged.next.label, "Back to hole 3", "last one done");
+  m.signal("LOCK");                               // 1 left open
+  walkTo(m, 2);
+  m.signal("LOCK");
+  m.signal("SHOT_END");                           // 2 logged, 1 still outstanding
+  assert.strictEqual(m.scene().logged.next.label, "Hole 3");
+  assert.strictEqual(m.scene().picker.marks[1].open, 1, "1 is still flagged on the card");
 });
 
 check("the score stepper writes through to the scorecard", () => {
@@ -471,7 +608,8 @@ check("every signal the concept lists has a handler", () => {
   ["ROUND_OPENED", "FIX_RECEIVED", "FIX_LOST", "PLAY_PRESSED", "END_ROUND",
     "VIEW_HOLE_CHANGED", "PLACED", "LOCK", "UNLOCK", "AIM_DRAGGED", "SHOT_END",
     "FINISH_OPENED", "BALL_MOVED", "FINISH_LOGGED", "SCORE_SET", "BACK",
-    "NEXT_HOLE", "PREV_HOLE"].forEach((name) => {
+    "NEXT_HOLE", "PREV_HOLE", "ADVANCE_TO_HOLE", "LOG_OPENED",
+    "PACKAGE_UPDATED", "SET_NINES"].forEach((name) => {
       // A handler exists if the signal is not reported as unknown. Unknown and
       // inert both answer false, so probe the scene subscription instead.
       let sawUnknown = false;

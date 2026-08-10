@@ -36,8 +36,14 @@ Two facts, and the flow is the answer to both:
 liveHole   — the hole you pressed Play on. Null until you do.
 viewHole   — the hole on screen.
 
-flow = (liveHole !== null && viewHole === liveHole) ? 'live' : 'preview'
+flow = logging ? 'logging'
+     : (liveHole !== null && viewHole === liveHole) ? 'live' : 'preview'
 ```
+
+`logging` is the third flow, added later and described in §4.3. It is a
+deliberate excursion with one job and one way in, and it sits **outside** the
+other two rather than inside Preview — which is where it started, and where it
+caused trouble.
 
 `flow` is **derived, never stored**. There is no mode flag to fall out of sync,
 and no toggle for you to leave set wrong.
@@ -48,6 +54,14 @@ Consequences that fall out for free:
   testing is a normal state, not a broken one.
 - Flick ahead to hole 5 while playing 3 → `viewHole` 5, `liveHole` 3 → Preview.
   Hole 3 is untouched. Come back and Live resumes exactly as it was.
+
+**The arrows browse. They do not move you on.** Next / Previous move `viewHole`
+and nothing else, exactly like the picker, so stepping off the live hole is
+Preview. They used to walk the round while Live, which meant the hole you were
+"playing" kept up with your thumb rather than with your feet: skip ahead to read
+the next hole and the app quietly decided you were on it, with the live dot and
+the green numbers reporting a hole you were nowhere near. **`liveHole` moves
+when you press Play, and at no other time.**
 
 ### Losing GPS does not end the round
 
@@ -83,12 +97,22 @@ Live starts one way: a big **Play** button.
   course-radius check `maybeAdoptGpsFix` already does, now that the centre is
   derived properly. At home on the couch it simply is not there, so Preview is
   the only thing on offer and that is correct.
-- It names the hole it will start: **"Play hole 7"** when GPS can resolve which
-  hole you are on, plain **"Play"** when it can only tell you are at the course.
-- Pressing it starts **the hole you are standing on**, moving the view there if
-  that is not the hole on screen. You play where you are. Naming the hole on the
-  button is what makes that unsurprising before you press it.
-- If it cannot resolve a hole, it starts the one on screen.
+- It names the hole it will start: **"Play hole 7"**.
+
+**Before the round** it starts **the hole you are standing on** — the nearest one
+to your fix — and moves the view there. You have not chosen a hole yet, so the
+app picks the obvious one, and naming it on the button makes that unsurprising
+before you press. That is also what makes starting from the car park work.
+
+**During the round** it is the answer to *"can I start the hole I am looking
+at?"*. Scroll to a hole and Play appears on it **once your fix says you have
+arrived** — within `HOLE_ARRIVAL_M` (100m) of its tee, falling back to its
+green. Looking at hole 12 from the 4th fairway offers nothing, because you are
+not there.
+
+So the round moves on like this: finish a hole, arrow or picker your way to the
+next one, walk to it, and Play comes up. Two facts have to agree — the hole you
+chose and the ground you are standing on — and only then does `liveHole` move.
 
 No prompt, no dialogue, no confirmation step. One button that is either there or
 not.
@@ -101,6 +125,7 @@ you are in:
 ```
    ●  LIVE · Hole 7                              ← green
    ◌  PREVIEW · Hole 5          Return to 7 ›    ← grey
+   ●  LOGGING · Hole 4          Cancel ›         ← amber
 ```
 
 Two things it is doing:
@@ -110,7 +135,14 @@ Two things it is doing:
    Preview. If it flickers, that is a real flow flicker and Trace has the
    Signal that caused it (§11) — which is the point of having it at all.
 2. **Preview's version carries the way back.** "Return to 7" is one tap, so a
-   look ahead can never become a place you are stuck.
+   look ahead can never become a place you are stuck. Logging's version is
+   **Cancel**, because leaving that flow throws away the ball you placed rather
+   than merely changing which hole is on screen.
+
+Logging gets its own banner rather than borrowing Preview's for a reason: it is
+the one state you can be in for a hole you are not standing on where the button
+in front of you **writes to the card**. Reading "PREVIEW" there would be a lie
+about what Shot End is about to do.
 
 Flow changes are a first-class Trace row, so *"why did it switch?"* is always
 one glance: `FLOW live→preview ← VIEW_HOLE_CHANGED`.
@@ -146,10 +178,19 @@ not a simplification: previewing hole 5 must never be able to invent a shot on
 hole 5, and you should be able to hand someone the phone to look at a hole
 without touching the round.
 
-The one thing it *can* do is **close a shot that Live already opened** — the
-deferred logging in §4.3. Finishing something you actually hit is not the same
-as inventing something you did not, so the rule is "Preview never starts", not
-"Preview never writes".
+**Preview cannot log anything either.** It has exactly two modes and no way into
+a third.
+
+This is a correction. Preview used to grow a finish mode when a placement landed
+within 40m of a green — you tapped near the putting surface and got the ball and
+the Shot End button. It read as a convenience and behaved as a trapdoor: the
+mode you ended up in depended on where your finger went rather than on anything
+you chose, and it pulled `finish` state into a flow that is supposed to be inert.
+That is what "some general preview state leaking into the system" meant.
+
+Placing yourself now always means the shot view, wherever you place it. Closing
+a shot Live opened is a real and necessary thing to be able to do, but it is its
+own flow with its own entrance — §4.3.
 
 ---
 
@@ -248,54 +289,76 @@ Proximity still decides when it **opens itself** — arriving at the green with 
 open shot is the common case and should not need a tap. The open shot decides
 whether it is **possible at all**.
 
-#### Logging holes later
+#### Logging holes later — the Logging flow
 
 Because the rule is data and not proximity, you can play several holes quickly
 and log them afterwards:
 
 1. Play 4, 5 and 6 on feel — lock in, hit, next hole, without ever pressing Shot
    End. Each hole is left with one open shot.
-2. Holes with an open shot are **flagged in the hole picker**, so the catch-up
-   list is the thing you were already going to use to navigate.
-3. Tap 4. You are in Preview (you are standing on 7), the origin bubble shows
-   where you played from, and Finish is available because the shot is open.
-4. Drag the ball to where it finished. Log. The flag clears.
+2. Those holes are **marked in the hole picker**, so the catch-up list is the
+   thing you were already going to use to navigate.
+3. Tap the **0** on hole 4. That is the only way in. The origin is drawn where
+   you played from and there is a ball to place.
+4. Drag it to where the shot finished. Shot End. **You are put straight back on
+   hole 7, in the flow you were in**, with no Logged screen in the way.
 5. Do 5 and 6.
 
-#### The picker flag
+**Logging is its own flow**, not Preview with a finish mode bolted on:
+
+- **One entrance.** The picker's outstanding badge, and nothing else. There is
+  no proximity rule, no control that appears in Preview, no signal that leaks in
+  from somewhere adjacent.
+- **One job.** Close a shot something else opened. It can never Lock, never
+  place, never open a shot. There is deliberately no way to add a shot after the
+  fact: the thing worth catching up on is the outcome of an approach you already
+  locked, and a retro-add would be a second, unverifiable way for shots to exist.
+- **It remembers where you came from.** Confirming or cancelling both put you
+  back on the hole you were viewing, in the flow you were in. Going to the picker
+  to close one thing out should not cost you your place. Cancel writes nothing
+  and leaves the mark on the card.
+
+#### The picker's marks
 
 The hole picker already exists — tap the hole number and you get a grid of every
-hole in play, tap one to jump there. The flag is a **small dot in the corner of
-any tile whose hole has an open shot**:
+hole in play, tap one to jump there. Each tile now also carries what the record
+says about that hole:
 
 ```
-   ┌────┬────┬────┬────┬────┬────┐
-   │ 1  │ 2  │ 3  │ 4 ᵒ│ 5 ᵒ│ 6 ᵒ│      ᵒ = outcome not logged
-   ├────┼────┼────┼────┼────┼────┤
-   │[7] │ 8  │ 9  │ 10 │ 11 │ 12 │      [ ] = the hole you are on
-   └────┴────┴────┴────┴────┴────┘
+   ┌──────┬──────┬──────┬──────┬──────┬──────┐
+   │  1   │  2   │  3   │  4   │  5   │  6   │
+   │ 0-0  │0-0 x2│ 0-0  │  0   │  0   │      │
+   ├──────┼──────┼──────┼──────┼──────┼──────┤
+   │ [7]  │  8   │  9   │  10  │  11  │  12  │
+   └──────┴──────┴──────┴──────┴──────┴──────┘
+
+   0        an origin locked, outcome still missing — and a BUTTON
+   0-0      a shot with both ends
+   0-0 x2   more than one, which a par 5 legitimately is
+   [ ]      the hole you are on
 ```
 
-- **What it means:** that hole has a shot with a start and no end. Something is
-  outstanding.
-- **Where it comes from:** read straight off `shots[hole]` — any entry with
-  `end === null`. Nothing sets it and nothing clears it; it is a view of the
-  record, so it cannot go stale or get left behind on a hole change.
-- **What it clears it:** logging that shot. Nothing else.
-- **Why the picker:** it is already how you would navigate to hole 4 from hole
-  7, and it already lists every hole. The catch-up list and the navigation are
-  the same list, so there is no second screen to build or to find.
+- **Where it comes from:** counted straight off `shots[hole]` — entries with an
+  `end` are `done`, entries without are `open`. Nothing sets it and nothing
+  clears it; it is a view of the record, so it cannot go stale or get left behind
+  on a hole change.
+- **What clears the 0:** logging that shot. Nothing else.
+- **Two intents, one tile.** Tapping the **0** opens Logging for that hole.
+  Tapping anywhere else on the tile just looks at the hole. The target you hit
+  says which — no mode, no long-press, no second screen.
+- **Why the picker:** it is already how you would navigate to hole 4 from hole 7,
+  and it already lists every hole. The catch-up list and the navigation are the
+  same list.
 
-A **dot rather than a recoloured tile**, because the tile background is already
-carrying "this is the hole you are on". A dot composes with that; a colour
-fights it.
+`x2` and `x3` exist because a par 5 is honestly two or three locks, and a card
+that collapsed them into one would be lying about what you did.
 
 This is also the cart case, just with a shorter gap: hit the approach, drive to
 the next tee, park, open Finish for the hole you just played, drag the ball onto
 the green, log it. Then walk back and putt.
 
 Pressing Next Hole with a shot still open is **not** warned about. Leaving it
-open is the feature, and the flag in the picker is the reminder.
+open is the feature, and the mark in the picker is the reminder.
 
 ### 4.4 Logged — the in-between screen
 
@@ -325,15 +388,21 @@ scorecard. This is the one moment you have definitely finished a hole, so it is
 the cheapest place in the round to record it — no trip to the tool rail. Leaving
 it alone records par; the scorecard stays editable either way.
 
-**Pressing Hole 4** advances the round: `liveHole` and `viewHole` both move, and
-you land in Track on the new hole. No second Play press — you already told it you
-have moved on.
+**Pressing Hole 4** is the one place an arrow-like control is allowed to commit,
+and it checks: if the fix agrees you have arrived at the 4th, `liveHole` and
+`viewHole` both move and you land in Track there. If it does not, it previews
+hole 4 and leaves **Play** waiting for you.
 
-**The button reads the situation.** Logging the hole you are playing offers the
-next one. Logging a hole you are catching up on (§4.3) offers **"Next pending:
-hole 5"** if another is outstanding, and **"Back to hole 7"** if that was the
-last of them — so batch-logging walks itself through the list and puts you back
-where you were playing.
+The asymmetry with the arrows is deliberate. The arrows are browsing, so they
+always land in Preview. This button names a hole and you pressed it having just
+finished a shot, so it is a statement of intent — and the fix is what decides
+whether that intent has caught up with your feet yet.
+
+**Logged is about the hole you just played, and nothing else.** A catch-up
+returns you where you were rather than routing through here, so this screen has
+one button with one job: the next hole, or the end of the round. It used to
+branch three more ways for finding the next outstanding hole and getting back
+from it; that is the picker's job now.
 
 **Back to hole 3** dismisses it and returns to Track on the hole you are on. This
 one is not optional: after logging the approach you still have to putt, and a
@@ -412,8 +481,9 @@ viewHole: number                 // what is on screen
 mode:   'setup' | 'track' | 'aim' | 'finish' | 'logged'
 player: { point, source }        // in Preview this is your placement
 shots:  { [hole]: [ {start, target, end|null} ] }   // end null = OPEN
-finish: { ball, placed }         // the drag in progress, nothing more
-logged: { record }               // what the Logged screen is reporting
+finish:  { ball, placed }        // the drag in progress, nothing more
+logging: { hole, ball, placed, from } | null        // the catch-up, and where to return
+logged:  { record }              // what the Logged screen is reporting
 camera: { stage, frame, parked }
 ```
 
@@ -422,21 +492,31 @@ camera: { stage, frame, parked }
 no lifetime, nothing to reset at a hole change.
 
 Preview uses `setup` and `aim`. Live uses `track`, `aim`, `finish` and `logged`.
-**Aim is the same mode in both** — what differs is how you get in (a placement vs
-a Lock) and whether anything is recorded on the way out.
+Logging has exactly one mode, `finish`, and no way to set another — which is
+enforced in `setMode`, so a future signal cannot write a live or preview mode
+while a catch-up is open.
+**Aim is the same mode in Preview and Live** — what differs is how you get in (a
+placement vs a Lock) and whether anything is recorded on the way out.
 
 Derived, never stored: `flow`, whether the bubble draws, whether the Play button
 shows and what it says, which face the dock button wears, whether the pill is
-up, **whether Finish is offered (open shot on this hole)**, **which holes are
-flagged in the picker (open shot anywhere)**, what the Logged button says, and
-whether the dot is edge-clamped.
+up, **whether Finish is offered (open shot on this hole)**, **whether Play is
+offered (arrived at the hole on screen)**, **what each picker tile is marked
+with (counted off `shots`)**, what the Logged button says, and whether the dot
+is edge-clamped.
 
 Signals:
 
 `ROUND_OPENED` · `FIX_RECEIVED` · `FIX_LOST` · `PLAY_PRESSED` · `END_ROUND` ·
-`VIEW_HOLE_CHANGED` · `PLACED` · `LOCK` · `UNLOCK` · `AIM_DRAGGED` · `SHOT_END` ·
-`FINISH_OPENED` · `BALL_MOVED` · `FINISH_LOGGED` · `SCORE_SET` · `BACK` ·
-`NEXT_HOLE`
+`VIEW_HOLE_CHANGED` · `NEXT_HOLE` · `PREV_HOLE` · `ADVANCE_TO_HOLE` · `PLACED` ·
+`LOCK` · `UNLOCK` · `AIM_DRAGGED` · `SHOT_END` · `FINISH_OPENED` · `LOG_OPENED` ·
+`BALL_MOVED` · `FINISH_LOGGED` · `SCORE_SET` · `BACK` · `PACKAGE_UPDATED` ·
+`SET_NINES`
+
+`PLAY_PRESSED` and `ADVANCE_TO_HOLE` are the only two signals that can write
+`liveHole`. `NEXT_HOLE` and `PREV_HOLE` cannot, and `LOG_OPENED` cannot — which
+is what makes "the round moves when you say so" a property of the table rather
+than a habit.
 
 `FIX_LOST` is worth calling out: it changes what Track can draw and **nothing
 else**. It cannot touch `liveHole`, so it can never move you between flows.
@@ -459,19 +539,36 @@ the app's initiative.
 Better than the arming flag I proposed: derived from the record rather than from
 proximity with a lifetime, so it is right retroactively and cannot drift. It
 lives in a small control of its own — the dock is busy with
-Lock / Shot End / Unlock. The picker flag is a dot, not a recoloured tile.
+Lock / Shot End / Unlock.
 
-**c) Both flows get a banner. SETTLED (§2).**
+**c) Every flow gets a banner. SETTLED (§2).**
 Not just Preview: Live gets one too, in the same slot, so the strip is a
 continuous readout rather than something that appears when things go odd. Wired
 to the derived `flow`, so it cannot disagree with the app's actual behaviour,
 and flow changes are a Trace row so a slip is one glance from an explanation.
+Logging got the third when it became its own flow.
 
 **d) Live is sticky. SETTLED (§2).**
 Losing GPS does not end the round. `liveHole` survives every signal except End
 Round.
 
-Nothing open. The next move is code.
+**e) The arrows browse; only Play moves the round. SETTLED (§2). Revised.**
+The first build let Next / Previous walk `liveHole` while Live, on the reasoning
+that the arrow meant "I have moved on". On the course it meant the opposite: it
+was also how you read ahead, so glancing at the next hole made the app believe
+you were standing on it. Splitting the two — arrows for the view, Play for the
+round, gated on having actually arrived — costs one press per hole and removes a
+whole class of "why is it showing me that hole" from the round.
+
+**f) Logging is its own flow, not a Preview mode. SETTLED (§4.3). Revised.**
+Catching up on a hole started as Preview + `finish`, reachable both from a
+control in Preview and from a placement that landed near a green. Both were
+mistakes: the second meant your finger position chose the mode, and the first
+meant a flow defined as "records nothing" carried the button that records. It is
+now a third flow with one entrance (the picker's outstanding badge), one job
+(close a shot something else opened), and a memory of where to put you back.
+
+Nothing open.
 
 ---
 

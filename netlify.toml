@@ -88,6 +88,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/relief-preview"
+  to = "/.netlify/functions/relief-preview"
+  status = 200
+
+[[redirects]]
   from = "/api/scorecard-fetch"
   to = "/.netlify/functions/scorecard-fetch"
   status = 200

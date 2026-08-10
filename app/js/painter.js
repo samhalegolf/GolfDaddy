@@ -520,10 +520,17 @@
     if (bubbleEnterTimer) clearTimeout(bubbleEnterTimer);
     if (svg) svg.classList.add("bubbleEnter");
     if (chipEl) chipEl.classList.add("bubbleEnter");
+    /* The fade-out lands 200ms later, which is still the Painter drawing —
+       so it goes through a paint window like everything else. Left bare it
+       reported as a Leak from painter.js itself, and a Leak the Painter causes
+       is the most misleading kind: it says the architecture is broken when the
+       only thing wrong is that a timer forgot to say who it was. */
     bubbleEnterTimer = setTimeout(function () {
       bubbleEnterTimer = null;
-      if (svg) svg.classList.remove("bubbleEnter");
-      if (chipEl) chipEl.classList.remove("bubbleEnter");
+      repaint("BUBBLE_ENTER_SETTLED", function () {
+        if (svg) svg.classList.remove("bubbleEnter");
+        if (chipEl) chipEl.classList.remove("bubbleEnter");
+      });
     }, 200);
   }
 
@@ -701,14 +708,22 @@
   function drawChrome(scene) {
     var banner = el("playBanner");
     if (banner) {
-      var live = scene.banner.flow === "live";
-      banner.classList.toggle("livePlay", live);
-      banner.classList.toggle("previewPlay", !live);
+      /* Three flows, three banners. Logging says so out loud because it is the
+         one state you can be in for a hole you are not standing on, and reading
+         "PREVIEW" there would be a lie about what the Shot End button is about
+         to do. */
+      var f = scene.banner.flow;
+      banner.classList.toggle("livePlay", f === "live");
+      banner.classList.toggle("previewPlay", f === "preview");
+      banner.classList.toggle("loggingPlay", f === "logging");
       var text = el("playBannerLabel");
-      if (text) text.textContent = (live ? "LIVE · Hole " : "PREVIEW · Hole ") + scene.banner.hole;
+      var word = f === "live" ? "LIVE · Hole " : f === "logging" ? "LOGGING · Hole " : "PREVIEW · Hole ";
+      if (text) text.textContent = word + scene.banner.hole;
       var back = el("playBannerReturn");
       show(back, scene.banner.returnTo !== null);
-      if (back && scene.banner.returnTo !== null) back.textContent = "Return to " + scene.banner.returnTo;
+      if (back && scene.banner.returnTo !== null) {
+        back.textContent = f === "logging" ? "Cancel" : "Return to " + scene.banner.returnTo;
+      }
       show(banner, true);
     }
 
@@ -775,7 +790,11 @@
     var icon = el("shotActionIcon");
     if (!icon) return;
     dock.classList.remove("noIcon");
-    icon.onerror = function () { dock.classList.add("noIcon"); };
+    /* Same again: the icon failing to load is an async answer, and dropping to
+       the text-only dock because of it is a paint. */
+    icon.onerror = function () {
+      repaint("DOCK_ICON_MISSING", function () { dock.classList.add("noIcon"); });
+    };
     icon.src = face.icon;
   }
 
@@ -832,18 +851,51 @@
     catch (e) { return null; }
   }
 
+  /* What a hole's shot record looks like on the card.
+
+       0        an origin is locked and the outcome is still missing
+       0-0      a shot with both ends
+       0-0 x2   more than one, which is a normal par 5
+
+     The 0 is a button in its own right — tapping it is the ONLY way into
+     Logging, which is the whole point of putting it here. Tapping anywhere else
+     on the tile just looks at the hole. */
+  function markHtml(mark) {
+    if (!mark) return "";
+    var bits = [];
+    if (mark.done) bits.push('<span class="holeMarkDone">0-0' + (mark.done > 1 ? " x" + mark.done : "") + "</span>");
+    if (mark.open) bits.push('<span class="holeMarkOpen" data-log="1">0</span>');
+    return bits.length ? '<span class="holeMark">' + bits.join("") + "</span>" : "";
+  }
+
+  function markKey(marks) {
+    return Object.keys(marks || {}).sort().map(function (h) {
+      return h + ":" + marks[h].done + "/" + marks[h].open;
+    }).join(",");
+  }
+
+  /* The cache key has to carry the HOLES as well as the current one and the
+     marks. Without them, opening a different course that also starts on hole 1
+     with nothing outstanding matched the previous round's key and left the
+     previous COURSE's tiles in the grid — 18 of them on a 9-hole club. */
   function drawPicker(scene) {
     var grid = el("holePickerGrid");
-    if (!grid || grid.dataset.built === "1" && grid.dataset.hole === String(scene.hole.number)
-      && grid.dataset.flagged === scene.picker.flagged.join(",")) return;
+    if (!grid) return;
+    var key = markKey(scene.picker.marks);
+    if (grid.dataset.built === "1" && grid.dataset.hole === String(scene.hole.number)
+      && grid.dataset.holes === scene.picker.holes.join(",")
+      && grid.dataset.marks === key) return;
     grid.dataset.built = "1";
     grid.dataset.hole = String(scene.hole.number);
-    grid.dataset.flagged = scene.picker.flagged.join(",");
+    grid.dataset.holes = scene.picker.holes.join(",");
+    grid.dataset.marks = key;
     grid.innerHTML = scene.picker.holes.map(function (hole) {
+      var mark = scene.picker.marks[hole];
       var classes = ["holeTile"];
       if (hole === scene.picker.current) classes.push("active");
-      if (scene.picker.flagged.indexOf(hole) !== -1) classes.push("pending");
-      return '<button type="button" class="' + classes.join(" ") + '" data-hole="' + hole + '">' + hole + "</button>";
+      if (mark && mark.open) classes.push("pending");
+      return '<button type="button" class="' + classes.join(" ") + '" data-hole="' + hole + '">'
+        + hole + markHtml(mark) + "</button>";
     }).join("");
   }
 
@@ -869,6 +921,100 @@
     var origin = (window.GDNative && window.GDNative.apiOrigin) || "";
     if (!origin || !url || /^[a-z][a-z0-9+.-]*:\/\//i.test(url)) return url;
     return origin + url;
+  }
+
+  /* ------------------------------------------------------------ warming
+
+     Hold the whole course, not one hole at a time.
+
+     A published frame is a multi-megabyte JPEG behind /api/course-visual-assets,
+     and nothing ever pre-fetched them: every hole change asked the server for
+     that hole's picture at the moment you needed it, and held the screen on
+     LOADING MAP until it arrived. Downloading a course did not help either —
+     the library stores the package JSON in localStorage and no imagery at all,
+     so "downloaded" never meant the pictures were on the device.
+
+     The pictures for a round cannot change during it, so ask for all of them
+     once, in the background, nearest hole first. The browser's own disk cache is
+     the local copy; by the time you walk to a hole its picture is already there
+     and the change is instant. The asset endpoint answers
+     Cache-Control: public, max-age=31536000, immutable and the path carries the
+     publish build id, so a republish is a different URL and a stale frame can
+     never be served — which is what makes warming safe as well as useful.
+
+     Nothing here keeps the Image object. A 1341x1889 frame is ~10MB decoded, so
+     holding eighteen of them would kill the phone. The handlers are dropped on
+     settle, the bitmap is collectable, and only the encoded bytes survive — in
+     the cache, where they belong. */
+  var WARM_PARALLEL = 2;
+  var warmed = new Set();   // urls already asked for this session
+  var warmQueue = [];
+  var warmActive = 0;
+
+  function warmPush(urls) {
+    urls.forEach(function (url) {
+      if (!url || warmed.has(url)) return;
+      warmed.add(url);
+      warmQueue.push(url);
+    });
+    warmPump();
+  }
+
+  /* One request, in its own scope. The scope matters: a `var` inside the pump
+     loop would let the second image's closure overwrite the first one's. */
+  function warmOne(url) {
+    warmActive += 1;
+    var img = new Image();
+    var settle = function () {
+      img.onload = img.onerror = null;
+      img = null;
+      warmActive -= 1;
+      warmPump();
+    };
+    img.onload = settle;
+    img.onerror = settle;
+    img.src = url;
+  }
+
+  function warmPump() {
+    while (warmActive < WARM_PARALLEL && warmQueue.length) warmOne(warmQueue.shift());
+  }
+
+  function surfaceUrl(visual) {
+    if (!visual) return null;
+    return apiUrl(visual.url || surfaceLib.assetUrl(visual.path));
+  }
+
+  /* Called once the hole you are actually looking at has settled, so the
+     visible picture never queues behind the warm-up. */
+  function warmCourse() {
+    if (!marshal || !currentScene) return;
+    var round = marshal.state().round;
+    var holes = (round.pkg && Array.isArray(round.pkg.holes)) ? round.pkg.holes.slice() : [];
+    if (!holes.length) return;
+    var here = currentScene.hole.number;
+    holes.sort(function (a, b) {
+      return Math.abs((Number(a && a.holeNumber) || 0) - here)
+           - Math.abs((Number(b && b.holeNumber) || 0) - here);
+    });
+
+    /* A downloaded package carries its own visuals — warm straight from it. */
+    var fromPkg = holes.map(function (h) { return surfaceUrl(h && h.visual); }).filter(Boolean);
+    if (fromPkg.length) { warmPush(fromPkg); return; }
+
+    /* Otherwise the course-visual record holds every hole's asset, and the store
+       fetched it once already for the current hole, so this costs a lookup. */
+    var courseKey = round.courseKey;
+    if (!courseKey) return;
+    Promise.all(holes.map(function (h) {
+      var n = Number(h && h.holeNumber);
+      if (!n) return null;
+      return ensureStore().surfaceFor(courseKey, n).catch(function () { return null; });
+    })).then(function (answers) {
+      warmPush(answers.map(function (a) {
+        return a && a.state === "published" ? surfaceUrl(a.asset) : null;
+      }).filter(Boolean));
+    }, function () {});
   }
 
   function ensureStore() {
@@ -943,7 +1089,7 @@
     var img = el("surfaceImage");
     if (!img) return;
     var token = transitionToken;
-    var url = apiUrl(asset.url || surfaceLib.assetUrl(asset.path));
+    var url = surfaceUrl(asset);
     var startedAt = Date.now();
     var settled = false;
     var stall = setTimeout(function () {
@@ -957,6 +1103,7 @@
       settled = true;
       clearTimeout(stall);
       if (token !== transitionToken) return;
+      warmed.add(url);   // it is in the cache now; never queue it
       repaint("SURFACE_READY", function () {
         img.dataset.playSurface = JSON.stringify(asset.playSurface);
         img.src = url;
@@ -978,6 +1125,8 @@
            camera — and only corrected itself on the next Signal. */
         if (marshal) render(marshal.scene());
       });
+      /* The hole you are looking at is up. Now go and get the rest. */
+      setTimeout(warmCourse, 0);
     };
     pre.onerror = function () {
       if (settled) return;
@@ -1080,7 +1229,6 @@
     if (presentation === "loading") { drawChrome(scene); drawPicker(scene); renderSourceTag(); return; }
     applyCamera(scene);
     if (!published) drawHoleLayers(scene);
-    document.body.classList.toggle("flow-preview", scene.flow === "preview");
     document.body.classList.toggle("green-focus", scene.finish.show);
     document.body.classList.toggle("shot-active", scene.bubble.show);
     var proj = projector();
@@ -1207,9 +1355,12 @@
 
     var back = el("playBannerReturn");
     if (back) back.addEventListener("click", function () {
-      if (currentScene && currentScene.banner.returnTo !== null) {
-        send("VIEW_HOLE_CHANGED", { hole: currentScene.banner.returnTo });
-      }
+      if (!currentScene || currentScene.banner.returnTo === null) return;
+      /* Abandoning a catch-up is BACK, not a hole change: the Marshal has to
+         throw away the ball you placed and put you back itself, because only it
+         knows which hole you came from. */
+      if (currentScene.flow === "logging") return send("BACK");
+      send("VIEW_HOLE_CHANGED", { hole: currentScene.banner.returnTo });
     });
 
     var finish = el("finishControl");
@@ -1244,7 +1395,12 @@
     if (grid) grid.addEventListener("click", function (e) {
       var btn = e.target && e.target.closest ? e.target.closest("[data-hole]") : null;
       if (!btn) return;
-      send("VIEW_HOLE_CHANGED", { hole: Number(btn.dataset.hole) });
+      var hole = Number(btn.dataset.hole);
+      /* The 0 badge means "this hole has an origin and no outcome". Tapping it
+         goes and logs that outcome; tapping the rest of the tile just looks at
+         the hole. Same tile, two intents, and the target you hit says which. */
+      var onBadge = e.target.closest ? e.target.closest("[data-log]") : null;
+      send(onBadge ? "LOG_OPENED" : "VIEW_HOLE_CHANGED", { hole: hole });
       var panel = el("holePickerPanel");
       if (panel) show(panel, false);
     });
@@ -1314,7 +1470,7 @@
           if (map) map.invalidateSize({ animate: false });
         }
         liveFrame = { a: 1, b: 0, tx: 0, ty: 0 };
-        document.body.classList.remove("tilt-lock", "green-focus", "shot-active", "flow-preview");
+        document.body.classList.remove("tilt-lock", "green-focus", "shot-active");
         delete document.body.dataset.frameStage;
       });
       return true;
@@ -1345,6 +1501,11 @@
     surfaceFailure: function () { return surfaceFailed; },
     /* Exposed so the native-origin rewrite can be tested without a phone. */
     apiUrl: apiUrl,
+    /* Which surfaces have been asked for. "the course warms nearest-hole-first,
+       once each" is the whole claim, and a test can read it straight off. */
+    warmState: function () {
+      return { requested: Array.from(warmed), queued: warmQueue.length, active: warmActive };
+    },
     /* Whether Leaflet would respond to a pinch or drag. Always false — the
        stage camera owns the view — and a test watches it, because "we disabled
        zoom" is the sort of thing a later refactor re-enables by accident. */

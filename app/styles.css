@@ -525,6 +525,10 @@ body.pin-dragging #pinMarker { cursor: grabbing; }
 #playBanner.livePlay #playBannerDot { background: #1fd36d; box-shadow: 0 0 0 3px rgba(31, 211, 109, .22); }
 #playBanner.previewPlay { background: rgba(255, 255, 255, .07); color: rgba(255, 255, 255, .66); }
 #playBanner.previewPlay #playBannerDot { background: transparent; border: 1px solid rgba(255, 255, 255, .45); }
+/* Logging is neither of the other two and must not be mistaken for Preview —
+   the Shot End button in this state writes to the card. */
+#playBanner.loggingPlay { background: rgba(255, 182, 77, .16); color: #ffcf8f; }
+#playBanner.loggingPlay #playBannerDot { background: #ffb64d; box-shadow: 0 0 0 3px rgba(255, 182, 77, .22); }
 #playBannerReturn { margin-left: auto; border: 0; background: rgba(255, 255, 255, .13); color: #eafff1; border-radius: 999px; padding: 3px 10px; font: inherit; }
 #playBannerReturn.hiddenState { display: none; }
 
@@ -582,13 +586,24 @@ body.pin-dragging #pinMarker { cursor: grabbing; }
   font-size: 15px; font-weight: 950; }
 .loggedNext:active { transform: scale(.99); }
 
-/* ── The picker flag ──────────────────────────────────────────────────────
-   A dot on any hole still holding a shot with no end. A dot rather than a
-   recoloured tile, because the tile background already carries "this is the
-   hole you are on" and a colour would fight it. */
-.holeTile { position: relative; }
-.holeTile.pending::after { content: ""; position: absolute; top: 5px; right: 5px; width: 6px; height: 6px;
-  border-radius: 50%; background: #ffb64d; box-shadow: 0 0 0 2px rgba(10, 18, 13, .9); }
+/* ── The picker's shot marks ──────────────────────────────────────────────
+   What the card says about each hole:
+
+     0        an origin locked, outcome still missing — and a BUTTON: this is
+              the only way into logging a shot end for a hole you are not on
+     0-0      a shot with both ends
+     0-0 x2   more than one, which a par 5 legitimately is
+
+   The outstanding 0 is filled and warm so it reads as the thing to press;
+   completed marks are quiet, because they are a record rather than an action.
+   Tapping the tile anywhere else still just looks at the hole, so the two
+   intents live side by side without a mode. */
+.holeTile { position: relative; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 10px 0 8px; }
+.holeMark { display: flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 800; letter-spacing: .04em; line-height: 1; }
+.holeMarkDone { color: rgba(255, 255, 255, .5); }
+.holeMarkOpen { min-width: 16px; padding: 2px 5px; border-radius: 999px;
+  background: #ffb64d; color: #16110a; box-shadow: 0 0 0 2px rgba(10, 18, 13, .9); }
+.holeTile.active .holeMarkDone { color: rgba(6, 17, 11, .55); }
 
 #startPillHint { display: block; align-self: center; padding: 0 8px; font-size: 11px; font-weight: 700; color: rgba(255, 255, 255, .55); }
 
