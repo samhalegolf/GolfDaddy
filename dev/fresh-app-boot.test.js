@@ -345,10 +345,43 @@ const MIME = {
   ".json": "application/json", ".png": "image/png", ".svg": "image/svg+xml", ".webp": "image/webp"
 };
 
+/* The hand-off package the harness round opens on. Hole 1 declares a captured
+   visual, hole 2 does not — which is the surface-first pair: the declared
+   surface must present without an OSM map ever being created underneath it,
+   and the map must appear the moment a hole without one is entered. It has to
+   be the FIRST round in the page, because "no map exists yet" stops being
+   observable once any round has put one there. */
+/* Every scenario that presents a surface uses its OWN tiny PNG. The painter
+   re-presents when the hole or its surface URL changes, so two different
+   courses sharing one URL would sit behind that cache instead of exercising
+   it — a shape only a test ever builds, and one that quietly leaves the
+   previous course's projection metadata in place. */
+const SURFACE_PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+function surfaceFirstPackage() {
+  const origin = surface.worldPx(AKARANA_H1.tee.lat + 0.003, AKARANA_H1.tee.lng - 0.003, 18);
+  const meta = { captureZoom: 18, originPx: { x: origin.x, y: origin.y },
+    outputDimensions: { width: 1341, height: 1889 } };
+  return {
+    courseId: "surface-first-course", status: "full-map-ready", packageVersion: 1,
+    holes: [
+      { holeNumber: 1, geometry: { tee: AKARANA_H1.tee, green: AKARANA_H1.green,
+        greenShape: AKARANA_H1.greenShape, route: [] },
+        visual: { url: SURFACE_PNG, playSurface: meta } },
+      { holeNumber: 2, geometry: { tee: AKARANA_H1.tee, green: AKARANA_H1.green, greenShape: [], route: [] } }
+    ]
+  };
+}
+
 function startServer() {
   return new Promise((resolve) => {
     const server = http.createServer((req, res) => {
       const urlPath = decodeURIComponent(req.url.split("?")[0]);
+      if (urlPath === "/api/course-package") {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(surfaceFirstPackage()));
+        return;
+      }
+      if (urlPath.startsWith("/api/")) { res.writeHead(404); res.end("{}"); return; }
       let filePath = path.join(ROOT, urlPath === "/" ? "index.html" : urlPath);
       if (!filePath.startsWith(ROOT)) { res.writeHead(403); res.end(); return; }
       fs.readFile(filePath, (err, data) => {
@@ -397,7 +430,9 @@ async function bootCheck() {
     authLoaded: !!(window.ClaritySupabaseAuth && typeof window.ClaritySupabaseAuth.freshAccessToken === "function"),
     signedOut: !window.ClarityApp.account.signedIn(),
     accountLine: document.getElementById("accountState").textContent,
-    loadingScreenHidden: document.getElementById("loadingScreen").classList.contains("hiddenState")
+    loadingScreenHidden: document.getElementById("loadingScreen").classList.contains("hiddenState"),
+    /* Before any round: nothing has created a Leaflet map yet. */
+    mapEmpty: document.getElementById("map").childElementCount === 0
   }));
 
   /* Sign-in offline: the form submits, the request fails, and the failure is a
@@ -429,59 +464,138 @@ async function bootCheck() {
       && !!document.getElementById("globalBackBtn") && !!document.getElementById("railGpsSettings")
   }));
 
-  /* Course tap-through with a stubbed library row: lands on the play route
-     with the live map visible (rule 2) and framed on the course. */
-  /* Surface-first: a hole whose package declares a visual presents it without
-     ever creating the OSM map underneath; the map is created the moment a
-     hole with no surface is entered. */
-  const surfaceFirst = await page.evaluate(async (h1) => {
+  /* ---- into a round ----
+     Every scenario below plays one, and a round belongs to the Marshal now:
+     play.js, position.js and shot.js were retired with the Marshal/Painter
+     rewrite, so `app.play`, `app.position` and `app.shot` no longer exist.
+     boot.js builds the Marshal once, on the hand-off (?courseId=...), and hands
+     it the effects it is allowed to cause. So the way in is the hand-off, and
+     from there the scenarios drive the SAME Signals the screen does, through
+     the marshal boot itself wired — not a stand-in built by the test. */
+  await page.goto("http://127.0.0.1:" + port
+    + "/app/index.html?courseId=surface-first-course&courseName=Surface+First&courseLat=-36.9175&courseLng=174.74",
+    { waitUntil: "load" });
+  await page.waitForFunction(() => window.ClarityApp && window.ClarityApp.marshal, { timeout: 15000 });
+  await page.waitForTimeout(600);
+  await page.evaluate(() => {
     const app = window.ClarityApp;
-    const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
-    const origin = app.playSurface.worldPx(h1.tee.lat + 0.003, h1.tee.lng - 0.003, 18);
-    const meta = { captureZoom: 18, originPx: { x: origin.x, y: origin.y }, outputDimensions: { width: 1341, height: 1889 } };
-    const pkg = { holes: [
-      { holeNumber: 1, geometry: { tee: h1.tee, green: h1.green, greenShape: h1.greenShape, route: [] }, visual: { url: PNG, playSurface: meta } },
-      { holeNumber: 2, geometry: { tee: h1.tee, green: h1.green, greenShape: [], route: [] } }
-    ] };
-    const mapEmptyBefore = document.getElementById("map").childElementCount === 0;
-    await app.play.start("surface-first-course", pkg, null);
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms === undefined ? 220 : ms));
+    const sig = (name, payload) => app.marshal.signal(name, payload);
+    window.__gd = {
+      wait,
+      /* Poll rather than sleep. A surface decode, a camera solve and a dock
+         face all settle on their own schedule, and a fixed sleep that is long
+         enough today is the thing that makes a suite flaky next month. */
+      async until(fn, label) {
+        const deadline = Date.now() + 5000;
+        while (Date.now() < deadline) {
+          try { if (fn()) return true; } catch (e) {}
+          await wait(40);
+        }
+        throw new Error("timed out waiting for " + (label || "condition"));
+      },
+      /* boot.js's own startRound(), reachable from a test — preceded by the
+         painter.detach() that boot does on the way OUT of the previous round.
+         Both halves are load-bearing: without the detach, a second course whose
+         hole 1 also declares a surface matches loadedHole/loadedVisual and
+         keeps the FIRST course's image and metadata, so every projection is
+         solved against the wrong hole (painter.js's own note on detach). The
+         route class comes with it because boot's show("play") is part of
+         opening a round, and the camera cannot measure a screen that is down. */
+      async open(courseKey, pkg, centre, settle) {
+        /* Back to back, with nothing awaited in between: a GPS fix landing in
+           the gap would publish the OUTGOING round's scene, and the painter
+           would re-present its surface — repopulating exactly the state the
+           detach just cleared, so the new course never loads its own. */
+        app.painter.detach();
+        sig("ROUND_OPENED", { courseKey: courseKey, pkg: pkg, centre: centre || null, nines: null });
+        /* The browser's geolocation watch only fires on CHANGE, so a second
+           round in the same page never hears the fix the first one consumed —
+           and every round starts from a blank state. Replay the watcher's last
+           reading through the same handler boot wires, so a round opened
+           mid-test starts where a freshly-loaded one would. Courses far from
+           it still refuse it, which is the point of the off-course cases. */
+        const last = app.gps && app.gps.lastFix && app.gps.lastFix();
+        if (last) sig("FIX_RECEIVED", { point: last });
+        document.body.classList.remove("route-home");
+        document.body.classList.add("route-play");
+        await wait(settle === undefined ? 600 : settle);
+      },
+      /* Into Live: a trusted fix at the course, then Play. Preview needs
+         neither — placing yourself is the whole gesture there. */
+      async live(point, settle) {
+        sig("FIX_RECEIVED", { point: point });
+        await wait(120);
+        sig("PLAY_PRESSED");
+        await wait(settle === undefined ? 320 : settle);
+      },
+      async fix(point, settle) { sig("FIX_RECEIVED", { point: point }); await wait(settle); },
+      async place(point, settle) { sig("PLACED", { point: point }); await wait(settle); },
+      async goHole(n, settle) { sig("VIEW_HOLE_CHANGED", { hole: n }); await wait(settle); },
+      async send(name, payload, settle) { sig(name, payload); await wait(settle); },
+      async tap(id, settle) { document.getElementById(id).click(); await wait(settle); },
+      scene: () => app.marshal.scene(),
+      player: () => app.marshal.player(),
+      hole: () => app.marshal.round().hole,
+      courseKey: () => app.marshal.round().courseKey,
+      shots: (h) => app.marshal.shots(h),
+      openShot: (h) => app.marshal.openShot(h),
+      shown: (id) => { const e = document.getElementById(id); return !!e && !e.classList.contains("hiddenState"); }
+    };
+  });
+
+  /* Surface-first, read off that very hand-off: hole 1 declares a visual and
+     presents it without ever creating the OSM map underneath; the map is
+     created the moment hole 2 — which has no surface — is entered. */
+  const surfaceFirst = await page.evaluate(async () => {
+    const gd = window.__gd;
     const h1State = {
+      hole: gd.hole(),
       presented: document.body.classList.contains("surface-published"),
       mapStillEmpty: document.getElementById("map").childElementCount === 0,
-      chip: document.getElementById("surfaceSource").textContent
+      chip: document.getElementById("surfaceSource").textContent,
+      chipKind: document.getElementById("surfaceSource").dataset.source
     };
-    await app.play.goHole(2);
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    await gd.goHole(2, 600);
     const h2State = {
       presented: document.body.classList.contains("surface-published"),
       mapCreated: document.getElementById("map").childElementCount > 0
     };
-    return { mapEmptyBefore, h1State, h2State };
-  }, AKARANA_H1);
+    return { h1State, h2State };
+  });
 
   const play = await page.evaluate(async (h1) => {
-    const app = window.ClarityApp;
+    const app = window.ClarityApp, gd = window.__gd;
     /* Lite-shaped package with the real hole 1 geometry: frames the hole AND
        feeds the distance bar once the granted fix arrives. */
     const pkg = { holes: [{ holeNumber: 1, tee: h1.tee, green: h1.green, greenShape: h1.greenShape, route: [] }] };
-    await app.play.start("akarana-golf-club", pkg, { lat: -36.918, lng: 174.735 });
-    document.body.classList.remove("route-home");
-    document.body.classList.add("route-play");
-    await new Promise((resolve) => setTimeout(resolve, 1200));   // let watchPosition deliver
+    await gd.open("akarana-golf-club", pkg, { lat: -36.918, lng: 174.735 });
+    await gd.until(() => !!app.gps.lastFix(), "the granted geolocation to reach the watcher");
+    await gd.until(() => !!gd.scene().locator, "the trusted fix to reach the scene");
+    /* The granted fix is at the course, so Play is offered — and pressing it is
+       what makes the fix the PLAYER. In Preview the fix is only ever the
+       locator (it draws the dot); the distances measure from your placement,
+       and there isn't one yet. */
+    const playOffered = gd.scene().playButton.show;
+    const previewDotShown = gd.shown("gpsDot");
+    const previewDistances = gd.scene().distances.show;
+    await gd.send("PLAY_PRESSED");
+    await gd.until(() => gd.scene().flow === "live", "Play to start the round");
+    await gd.until(() => gd.shown("distanceBar"), "the distance bar to read off the fix");
     const style = getComputedStyle(document.getElementById("map"));
     return {
       mapDisplayed: style.visibility !== "hidden" && style.display !== "none",
-      hole: app.play.state().hole,
-      courseKey: app.play.state().courseKey,
+      hole: gd.hole(),
+      courseKey: gd.courseKey(),
       surfacePresented: document.body.classList.contains("surface-published"),
       gpsFix: app.gps.lastFix(),
-      positionSource: app.position.current() && app.position.current().source,
+      playOffered, previewDotShown, previewDistances,
+      flow: gd.scene().flow,
       /* One projected dot serves both presentations now, so on the live map
          it is the marker — and it must land inside the viewport, which is the
          real check that the live frame projects rather than just that some
          element exists. */
-      gpsDotShown: !document.getElementById("gpsDot").classList.contains("hiddenState"),
+      gpsDotShown: gd.shown("gpsDot"),
       gpsDotAt: {
         left: parseFloat(document.getElementById("gpsDot").style.left),
         top: parseFloat(document.getElementById("gpsDot").style.top)
@@ -489,74 +603,85 @@ async function bootCheck() {
       mapFramed: document.body.classList.contains("map-framed"),
       frameStage: document.body.dataset.frameStage,
       attribution: document.getElementById("mapAttribution").textContent,
-      distanceBarShown: !document.getElementById("distanceBar").classList.contains("hiddenState"),
-      sourceChipHidden: document.getElementById("surfaceSource").classList.contains("hiddenState"),
+      distanceBarShown: gd.shown("distanceBar"),
+      sourceChipKind: document.getElementById("surfaceSource").dataset.source,
+      sourceChipText: document.getElementById("surfaceSource").textContent,
       distFront: Number(document.getElementById("distFront").textContent),
       /* Centre no longer renders on the card (front/back cover it) — the
          underlying math still runs, so check it straight from the module. */
-      distCentre: Math.round(app.distance.haversineMeters(app.position.current(), h1.green)),
+      distCentre: Math.round(app.distance.haversineMeters(gd.player(), h1.green)),
       distBack: Number(document.getElementById("distBack").textContent)
     };
   }, AKARANA_H1);
 
-  /* Head To the Tee is a PIN, not a nudge. On a course the granted fix is
-     genuinely near (so it would otherwise be adopted), choosing the tee has
-     to hold that coordinate against both a moving live fix and a map tap —
-     the only way to change your mind is to leave the hole and pick the other
-     option, which goHole's reset covers. */
+  /* Head To the Tee is a PIN, not a nudge. Preview SETUP offers two ways to
+     place yourself — the tee button or a tap where you'd stand — and once you
+     have used either, you are AIMING: a further tap must not drag the origin
+     sideways, and a live fix must not quietly adopt you somewhere else. The
+     way to change your mind is Unlock (back to SETUP with the pill up) or
+     leaving the hole, both of which clear the placement. */
   const teePin = await page.evaluate(async (h1) => {
-    const app = window.ClarityApp;
+    const app = window.ClarityApp, gd = window.__gd;
     const pkg = { holes: [{ holeNumber: 1, tee: h1.tee, green: h1.green,
       greenShape: h1.greenShape, route: [] }] };
-    await app.play.start("tee-pin-course", pkg, { lat: -36.918, lng: 174.735 });
-    await new Promise((resolve) => setTimeout(resolve, 900));
-    document.getElementById("headToTeeBtn").click();
-    await new Promise((resolve) => setTimeout(resolve, 60));
-    const offTee = () => Math.round(app.distance.haversineMeters(app.position.current(), h1.tee));
-    const atTee = { source: app.position.current().source, offTee: offTee() };
+    await gd.open("tee-pin-course", pkg, { lat: -36.918, lng: 174.735 }, 900);
+    const setup = { flow: gd.scene().flow, mode: gd.scene().mode,
+      pillShown: gd.shown("startPill"), placed: !!gd.player() };
+    await gd.tap("headToTeeBtn", 60);
+    const offTee = () => Math.round(app.distance.haversineMeters(gd.player(), h1.tee));
+    const atTee = { mode: gd.scene().mode, offTee: offTee(), pillShown: gd.shown("startPill") };
     /* A map tap must move the pin, never the player. */
     document.getElementById("map").dispatchEvent(
       new MouseEvent("click", { clientX: 240, clientY: 300, bubbles: true }));
-    await new Promise((resolve) => setTimeout(resolve, 120));
-    const afterTap = { source: app.position.current().source, offTee: offTee() };
-    return { atTee, afterTap };
+    await gd.wait(120);
+    const afterTap = { mode: gd.scene().mode, offTee: offTee() };
+    return { setup, atTee, afterTap };
   }, AKARANA_H1);
 
-  /* A fresh live fix, delivered while pinned, must also be ignored. */
+  /* A fresh live fix, delivered while placed, must also be ignored: in Preview
+     the fix is the locator, never the player. */
   await context.setGeolocation({ latitude: -36.9179, longitude: 174.7409 });
   await page.waitForTimeout(700);
   const teePinAfterFix = await page.evaluate((h1) => {
-    const app = window.ClarityApp;
+    const app = window.ClarityApp, gd = window.__gd;
     return {
-      source: app.position.current().source,
-      offTee: Math.round(app.distance.haversineMeters(app.position.current(), h1.tee)),
-      fixMoved: !!app.gps.lastFix()
+      offTee: Math.round(app.distance.haversineMeters(gd.player(), h1.tee)),
+      fixMoved: !!app.gps.lastFix(),
+      locatorMoved: !!gd.scene().locator
     };
   }, AKARANA_H1);
 
-  /* Leaving the hole clears the choice: the same fix is adopted again. */
+  /* Unlock, and leaving the hole, both give the choice back. */
   const afterLeaving = await page.evaluate(async () => {
-    const app = window.ClarityApp;
-    await app.play.goHole(1);
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    const pos = app.position.current();
-    return { source: pos && pos.source };
+    const gd = window.__gd;
+    await gd.send("UNLOCK", null, 200);
+    const unlocked = { mode: gd.scene().mode, placed: !!gd.player(), pillShown: gd.shown("startPill") };
+    await gd.place({ lat: -36.9140, lng: 174.7405 }, 200);
+    const replaced = { mode: gd.scene().mode, placed: !!gd.player() };
+    await gd.goHole(2, 400);
+    await gd.goHole(1, 400);
+    return { unlocked, replaced, afterHoleChange: { mode: gd.scene().mode, placed: !!gd.player() } };
   });
 
-  /* "Tap where the green is" is MANUAL play (gd-app-core's "Tap twice: ball
-     then green") and must not leak into a geo-mapped hole: with the green
-     coming from the package, tapping it has nothing to say and must not
-     teleport the player. It stays available where it is still the only way
-     to play — a hole with no mapped green — and after an explicit
-     "Standing Here". */
+  /* The tap seam, end to end. "or tap where you'd stand" is half of Preview's
+     SETUP pill, so a tap has to land you exactly where you touched — which is
+     only true if screen → latLng round-trips through the same projection the
+     overlays draw with. Aim it at the green, because the package knows where
+     the green is and so the answer is checkable to the metre.
+
+     (What this scenario used to assert — that a tap on a MAPPED hole must be
+     ignored unless you first pressed "Standing Here" — was play.js's policy.
+     There is no Standing Here button any more: placing yourself IS Preview,
+     mapped or not, and the rule that replaced it is teePin's above, that a tap
+     stops moving you the moment you have placed yourself.) */
   const greenTap = await page.evaluate(async (h1) => {
-    const app = window.ClarityApp;
+    const app = window.ClarityApp, gd = window.__gd;
     const tapAtGreen = async () => {
       /* Aim the tap at wherever the green is actually drawn on screen. Take
          the CLOSEST point rather than the first inside a tolerance - the
          metres-per-pixel varies a lot between stages, so a fixed tolerance
          plus a fixed step can stride straight over the green. */
-      const proj = app.play.latLngAt;
+      const proj = app.painter.latLngAt;
       let hit = null, best = Infinity;
       /* Scan the real viewport, not a hardcoded phone width - the stage
          decides where on screen the green lands, and a fixed box can miss it
@@ -576,40 +701,35 @@ async function bootCheck() {
       return hit;
     };
 
-    // Mapped hole, no pill choice made: a tap on the green must be ignored.
-    await app.play.start("green-tap-mapped", { holes: [{ holeNumber: 1,
+    // A mapped hole, in SETUP: tapping the green puts you on the green.
+    await gd.open("green-tap-mapped", { holes: [{ holeNumber: 1,
       tee: h1.tee, green: h1.green, greenShape: h1.greenShape, route: [] }] },
-      { lat: -36.918, lng: 174.735 });
-    await new Promise((resolve) => setTimeout(resolve, 900));
-    const before = app.position.current();
+      { lat: -36.918, lng: 174.735 }, 900);
+    const before = gd.player();
     const hit = await tapAtGreen();
-    const after = app.position.current();
+    const after = gd.player();
     const mapped = {
       /* If this ever fails, mapState is the thing to look at: a Leaflet size
          of 0 means the camera was solved before the screen was measurable. */
-      mapState: JSON.stringify(app.play.mapState()),
+      mapState: JSON.stringify(app.painter.mapState()),
       foundGreenOnScreen: !!hit,
-      movedM: before && after ? Math.round(app.distance.haversineMeters(before, after)) : null,
-      endedOnGreen: after ? Math.round(app.distance.haversineMeters(after, h1.green)) : null
+      placedFromNothing: !before && !!after,
+      landedOnGreen: after ? Math.round(app.distance.haversineMeters(after, h1.green)) : null,
+      /* Even on the green, placing yourself is AIM. Preview has exactly two
+         modes now: a tap near a green used to drop you into green focus, which
+         made the mode depend on where your finger landed rather than on
+         anything you asked for. */
+      mode: gd.scene().mode,
+      flow: gd.scene().flow
     };
 
-    // Same tap after choosing "Standing Here" — the explicit opt-in — works.
-    document.getElementById("standingHereBtn").click();
-    await new Promise((resolve) => setTimeout(resolve, 60));
-    await tapAtGreen();
-    const standing = app.position.current();
-    const optedIn = { source: standing && standing.source,
-      onGreen: standing ? Math.round(app.distance.haversineMeters(standing, h1.green)) : null };
-
-    // An UNMAPPED hole (no green in the package) is manual play: taps place.
-    await app.play.start("green-tap-unmapped", { holes: [{ holeNumber: 1 }] },
-      { lat: -36.918, lng: 174.735 });
-    await new Promise((resolve) => setTimeout(resolve, 700));
+    // An UNMAPPED hole (no geometry at all) still takes the tap.
+    await gd.open("green-tap-unmapped", { holes: [{ holeNumber: 1 }] },
+      { lat: -36.918, lng: 174.735 }, 700);
     document.getElementById("map").dispatchEvent(
       new MouseEvent("click", { clientX: 200, clientY: 400, bubbles: true }));
-    await new Promise((resolve) => setTimeout(resolve, 120));
-    const unmappedPos = app.position.current();
-    return { mapped, optedIn, unmappedPlaces: !!unmappedPos && unmappedPos.source === "tap" };
+    await gd.wait(120);
+    return { mapped, unmappedPlaces: !!gd.player() };
   }, AKARANA_H1);
 
 
@@ -617,14 +737,12 @@ async function bootCheck() {
      actually reach the render, and the rail button must open the sheet in
      place rather than navigating to the main site the way it used to. */
   const gpsSettings = await page.evaluate(async (h1) => {
-    const app = window.ClarityApp, S = app.gpsSettings;
-    const wait = () => new Promise((resolve) => setTimeout(resolve, 220));
-    await app.play.start("settings-course", { holes: [{ holeNumber: 1,
+    const app = window.ClarityApp, gd = window.__gd, S = app.gpsSettings;
+    const wait = () => gd.wait(220);
+    await gd.open("settings-course", { holes: [{ holeNumber: 1,
       tee: h1.tee, green: h1.green, greenShape: h1.greenShape,
-      route: [{ lat: -36.91860, lng: 174.74190 }] }] }, { lat: -36.918, lng: 174.735 });
-    await new Promise((resolve) => setTimeout(resolve, 800));
-    document.getElementById("headToTeeBtn").click();
-    await wait();
+      route: [{ lat: -36.91860, lng: 174.74190 }] }] }, { lat: -36.918, lng: 174.735 }, 800);
+    await gd.tap("headToTeeBtn");
 
     const href = location.href;
     document.getElementById("railGpsSettings").click();
@@ -678,90 +796,87 @@ async function bootCheck() {
     return { opened, metres, yards, aimOff, aimOn, rotated, flat, mpp, iconSizes };
   }, AKARANA_H1);
 
-  /* Green focus: inside 40m the dot becomes a draggable ball, and the whole
-     point is that it is STICKY — you can walk to the next tee with it still
-     unplaced, and the camera keeps holding the green you are logging so the
-     parked ball has something to be dragged onto. Shot End then records where
-     the BALL is, not where the player is standing. */
+  /* Green focus: arriving at the green with a shot outstanding opens Finish by
+     itself, and the whole point is that it is STICKY — you can walk on to the
+     next tee with the ball still where you arrived and the camera keeps holding
+     the green you are logging, so the ball has something to be dragged onto.
+     Shot End then records where the BALL is, not where the player is standing.
+
+     Live only: Finish opens off a trusted fix and needs an open shot, so this
+     walks the real route — fix at the course, Play, Lock, then walk in. */
   const greenFocus = await page.evaluate(async (h1) => {
-    const app = window.ClarityApp;
-    const wait = (n) => new Promise((resolve) => setTimeout(resolve, n || 220));
+    const app = window.ClarityApp, gd = window.__gd;
     const ball = document.getElementById("greenFocusBall");
-    const dot = document.getElementById("gpsDot");
-    await app.play.start("green-focus-course", { holes: [{ holeNumber: 1,
+    const near = (m) => ({ lat: h1.green.lat + m / 111320, lng: h1.green.lng });
+    await gd.open("green-focus-course", { holes: [{ holeNumber: 1,
       tee: h1.tee, green: h1.green, greenShape: h1.greenShape, route: [] }] },
       { lat: -36.918, lng: 174.735 });
-    await wait(800);
-    document.getElementById("headToTeeBtn").click();
-    await wait();
-    const activeShot = !!app.shot.active();
+    await gd.live(h1.tee);
+    await gd.send("LOCK");                            // opens the shot to log
+    await gd.until(() => gd.scene().mode === "aim", "Lock to raise the shot view");
+    const openedShot = !!gd.openShot(1);
 
-    /* Where the green is drawn — the parked ball has to be draggable onto it. */
+    /* Where the green is drawn — the ball has to be draggable onto it. */
     const greenOnScreen = async () => {
-      app.pin.set(h1.green); await wait(60);
+      app.pin.set(h1.green); await gd.wait(60);
       const m = document.getElementById("pinMarker");
       return m.classList.contains("hiddenState") ? null
         : [Math.round(parseFloat(m.style.left)), Math.round(parseFloat(m.style.top))];
     };
     const state = () => ({
+      mode: gd.scene().mode,
       stage: document.body.dataset.frameStage,
-      ball: !ball.classList.contains("hiddenState"),
-      parked: ball.classList.contains("parked"),
-      dot: !dot.classList.contains("hiddenState"),
-      hint: !document.getElementById("greenFocusHint").classList.contains("hiddenState"),
-      shotEnd: !document.getElementById("shotActionBtn").classList.contains("hiddenState"),
+      ball: gd.shown("greenFocusBall"),
+      origin: gd.shown("finishOrigin"),
+      hint: gd.shown("greenFocusHint"),
+      dock: gd.shown("shotActionBtn"),
+      dockFace: document.getElementById("shotActionBtn").dataset.action,
       /* Aiming instruments. Standing on the green there is nothing to aim, so
          the engine must not be asked to model a shot from there - it answers
          with the shortest club and a bag-roof clamp that throws the cluster
          well past the green, which showed up as a bubble anchored on the
          green itself. */
       aimPaths: document.getElementById("bubbleSvg").children.length,
-      bubble: !document.getElementById("aimBubble").classList.contains("hiddenState"),
-      shotRow: !document.getElementById("shotRow").classList.contains("hiddenState"),
-      distBarPaused: document.getElementById("distanceBar").classList.contains("hiddenState"),
-      greenRing: !document.getElementById("greenRing").classList.contains("hiddenState"),
-      /* The green's outline is green-ZOOM only, and green focus drops even
-         that: down the fairway the imagery already shows the green, and on it
-         the focus view is meant to be clean. */
-      greenOutline: (() => {
-        const g = document.querySelector("#map .holeGreen");
-        return g ? getComputedStyle(g).display !== "none" : false;
-      })(),
-      greenReference: !!document.querySelector("#bubbleSvg .greenReference")
+      bubble: gd.shown("aimBubble"),
+      shotRow: gd.shown("shotRow"),
+      distBarPaused: !gd.shown("distanceBar")
     });
 
+    /* Two fixes clear of the lock point release Aim back to Track (§4), which
+       is the state arriving at a green is judged from. 120m out, then 28m. */
+    await gd.fix(near(120));
+    await gd.fix(near(120));
+    await gd.until(() => gd.scene().mode === "track", "Aim to release back to Track");
     const beforeArrival = state();
-    /* ~28m short of the green: inside the 40m zone. */
-    app.position.set({ lat: h1.green.lat - 0.00025, lng: h1.green.lng }, "gps");
-    await wait();
+    await gd.fix(near(28));
+    await gd.until(() => gd.scene().mode === "finish", "arrival to open Finish");
     const onGreen = state();
     const greenAtArrival = await greenOnScreen();
 
-    /* Walk 260m to the next tee without touching the ball. */
-    app.position.set({ lat: h1.green.lat + 0.0023, lng: h1.green.lng - 0.0006 }, "gps");
-    await wait(320);
+    /* Walk 260m past the green to the next tee without touching the ball. */
+    await gd.fix(near(-260), 320);
     const atNextTee = state();
     const greenStillFramed = await greenOnScreen();
-    app.pin.clear(); await wait(60);
+    app.pin.clear(); await gd.wait(60);
 
-    /* Pick the parked ball up and drop it on the green. */
+    /* Pick the ball up and drop it on the green. */
     const box = ball.getBoundingClientRect();
     const grab = [Math.round(box.left + box.width / 2), Math.round(box.top + box.height / 2)];
     const drop = greenStillFramed ? [greenStillFramed[0] - 22, greenStillFramed[1] + 34] : [180, 320];
     for (const [type, xy] of [["pointerdown", grab], ["pointermove", drop], ["pointerup", drop]]) {
       ball.dispatchEvent(new PointerEvent(type, { clientX: xy[0], clientY: xy[1], bubbles: true, pointerId: 7 }));
     }
-    await wait();
+    await gd.wait();
     const afterDrop = state();
-    const droppedLL = app.play.latLngAt(drop[0], drop[1]);
-    const playerPos = app.position.current();
+    const droppedLL = app.painter.latLngAt(drop[0], drop[1]);
+    const playerPos = gd.player();
 
-    document.getElementById("shotActionBtn").click();
-    await wait(420);
-    const shots = app.shot.holeShots(1);
+    await gd.tap("shotActionBtn");
+    await gd.until(() => gd.scene().mode === "logged", "the shot to land on Logged");
+    const shots = gd.shots(1);
     const last = shots[shots.length - 1];
     return {
-      activeShot, beforeArrival, onGreen, atNextTee, afterDrop,
+      openedShot, beforeArrival, onGreen, atNextTee, afterDrop,
       greenHeld: greenAtArrival && greenStillFramed
         && greenAtArrival[0] === greenStillFramed[0] && greenAtArrival[1] === greenStillFramed[1],
       recorded: {
@@ -770,8 +885,9 @@ async function bootCheck() {
           ? Number(app.distance.haversineMeters(last.end, droppedLL).toFixed(1)) : null,
         endFromGreen: last && last.end ? Math.round(app.distance.haversineMeters(last.end, h1.green)) : null,
         playerFromGreen: Math.round(app.distance.haversineMeters(playerPos, h1.green)),
-        hole: app.play.state().hole,
-        ballCleared: ball.classList.contains("hiddenState")
+        method: last && last.method,
+        hole: gd.hole(),
+        loggedShown: gd.shown("loggedScreen")
       }
     };
   }, AKARANA_H1);
@@ -781,21 +897,19 @@ async function bootCheck() {
      hide whenever the landing was within 3m of the green — which IS the
      normal approach — so the numbers vanished exactly when they were wanted. */
   const approachCard = await page.evaluate(async (h1) => {
-    const app = window.ClarityApp;
-    const wait = (n) => new Promise((resolve) => setTimeout(resolve, n || 250));
-    await app.play.start("approach-card-course", { holes: [{ holeNumber: 1,
+    const app = window.ClarityApp, gd = window.__gd;
+    await gd.open("approach-card-course", { holes: [{ holeNumber: 1,
       tee: h1.tee, green: h1.green, greenShape: h1.greenShape, route: [] }] },
-      { lat: -36.918, lng: 174.735 });
-    await wait(700);
+      { lat: -36.918, lng: 174.735 }, 700);
     /* ~120m out: the green is comfortably inside the bag, so the default aim
-       lands on it and the old rule would have hidden the row. */
-    app.position.set({ lat: h1.green.lat - 0.00108, lng: h1.green.lng + 0.0004 }, "tap");
-    await wait(350);
+       lands on it and the old rule would have hidden the row. Placing yourself
+       is an automatic lock-in, so the bubble and the card are up with nothing
+       else pressed (§3). */
+    await gd.place({ lat: h1.green.lat - 0.00108, lng: h1.green.lng + 0.0004 }, 350);
     const model = window.GDBubbleEngine.renderModel();
-    const act = app.shot.active();
-    const landing = (model && model.center) || (act && act.target);
+    const landing = (model && model.center) || gd.scene().bubble.target;
     return {
-      rowShown: !document.getElementById("shotRow").classList.contains("hiddenState"),
+      rowShown: gd.shown("shotRow"),
       club: document.getElementById("shotClub").textContent,
       dist: Number(document.getElementById("shotDist").textContent),
       /* Proof the aim really is on the green - otherwise this asserts nothing. */
@@ -803,44 +917,47 @@ async function bootCheck() {
     };
   }, AKARANA_H1);
 
-  /* Off-course play: a course far from the granted fix. Entering the hole
-     heads to the tee (the far fix is NOT adopted), and tapping where you are
-     standing moves the position — the whole flow works from the couch. */
+  /* Off-course play: a course far from the granted fix. The far fix is refused
+     outright (it is not at THIS course), so there is no Play button and no
+     position — just the pill — and the whole flow still works from the couch:
+     head to the tee, unlock, place yourself somewhere else. */
   const remote = await page.evaluate(async (h1) => {
-    const app = window.ClarityApp;
+    const app = window.ClarityApp, gd = window.__gd;
     /* Same hole geometry shifted ~110km south — far outside the adopt radius. */
     const shift = (p) => ({ lat: p.lat - 1, lng: p.lng });
-    const green = shift(h1.green);
-    const pkg = { holes: [{ holeNumber: 1, tee: shift(h1.tee), green, greenShape: h1.greenShape.map(shift), route: [] }] };
-    await app.play.start("remote-test-course", pkg, null);
-    await new Promise((resolve) => setTimeout(resolve, 900));   // let any live fix arrive
+    const tee = shift(h1.tee), green = shift(h1.green);
+    const pkg = { holes: [{ holeNumber: 1, tee, green, greenShape: h1.greenShape.map(shift), route: [] }] };
+    await gd.open("remote-test-course", pkg, null, 900);          // let any live fix arrive
     const preFrame = {
-      pillShown: !document.getElementById("startPill").classList.contains("hiddenState"),
-      hasPosition: !!app.position.current(),
-      distanceHidden: document.getElementById("distanceBar").classList.contains("hiddenState")
+      pillShown: gd.shown("startPill"),
+      hasPosition: !!gd.player(),
+      playOffered: gd.scene().playButton.show,
+      distanceHidden: !gd.shown("distanceBar")
     };
-    document.getElementById("headToTeeBtn").click();
-    await new Promise((resolve) => setTimeout(resolve, 60));
+    await gd.tap("headToTeeBtn", 60);
     const atTee = {
-      source: app.position.current() && app.position.current().source,
+      flow: gd.scene().flow,
       /* Centre no longer renders on the card — check the module directly. */
-      centre: Math.round(app.distance.haversineMeters(app.position.current(), green)),
-      pillShown: !document.getElementById("startPill").classList.contains("hiddenState")
+      centre: Math.round(app.distance.haversineMeters(gd.player(), green)),
+      pillShown: gd.shown("startPill")
     };
-    /* Tap 100m up the fairway from the tee (~0.0009° of latitude). */
-    app.position.set({ lat: shift(h1.tee).lat - 0.0009, lng: shift(h1.tee).lng }, "tap");
+    /* Unlock, then place 100m up the fairway from the tee (~0.0009° of lat). */
+    await gd.send("UNLOCK", null, 120);
+    await gd.place({ lat: tee.lat - 0.0009, lng: tee.lng }, 120);
     const afterTap = {
-      source: app.position.current().source,
-      centre: Math.round(app.distance.haversineMeters(app.position.current(), green))
+      flow: gd.scene().flow,
+      centre: Math.round(app.distance.haversineMeters(gd.player(), green))
     };
     return { preFrame, atTee, afterTap };
   }, AKARANA_H1);
 
   /* Pre-locked framing in the page: a framed surface far from the granted fix
-     keeps the tee position, and the dot renders exactly on the tee guide box. */
+     holds the tee placement, and the shot it raises lands on screen. The dot is
+     NOT the confirmation any more — it draws where you ACTUALLY are (§6), and
+     off-course that is nowhere; placing yourself shows up as the bubble. */
   const framed = await page.evaluate(async (h1) => {
-    const app = window.ClarityApp;
-    const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+    const app = window.ClarityApp, gd = window.__gd;
+    const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC";
     const shift = (p) => ({ lat: p.lat - 1, lng: p.lng });
     const tee = shift(h1.tee), green = shift(h1.green);
     const origin = app.playSurface.worldPx(green.lat + 0.004, green.lng - 0.004, 18);
@@ -850,27 +967,35 @@ async function bootCheck() {
       anchorPins: { tee, green }
     };
     const pkg = { holes: [{ holeNumber: 1, geometry: { tee, green, greenShape: [], route: [] }, visual: { url: PNG, playSurface: meta } }] };
-    await app.play.start("framed-course", pkg, null);
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    document.getElementById("headToTeeBtn").click();   // leave the pre-frame state
-    await new Promise((resolve) => setTimeout(resolve, 60));
+    await gd.open("framed-course", pkg, null);
+    await gd.until(() => document.body.classList.contains("surface-published"), "the surface to present");
+    await gd.tap("headToTeeBtn");                      // leave the pre-frame state
+    await gd.until(() => gd.shown("aimBubble"), "the bubble to come up on the surface");
     const screen = document.getElementById("playScreen");
     const scrollJumped = screen.scrollTop !== 0 || screen.scrollLeft !== 0
       || document.getElementById("surfaceViewport").scrollTop !== 0;
-    /* Head To the Tee's visible confirmation is the dot appearing — it must
-       not be hidden underneath the distance bar. */
+    /* Head To the Tee's visible confirmation is the bubble coming up — it must
+       land on screen and not underneath the distance bar. */
     const barRect = document.getElementById("distanceBar").getBoundingClientRect();
-    const dotStyle = document.getElementById("gpsDot").style;
-    const dotUnderBar = parseFloat(dotStyle.left) >= barRect.left && parseFloat(dotStyle.left) <= barRect.right
-      && parseFloat(dotStyle.top) >= barRect.top && parseFloat(dotStyle.top) <= barRect.bottom;
+    const aim = document.getElementById("aimBubble").getBoundingClientRect();
+    const bubbleUnderBar = aim.left < barRect.right && aim.right > barRect.left
+      && aim.top < barRect.bottom && aim.bottom > barRect.top;
     const img = document.getElementById("surfaceImage");
-    const dot = document.getElementById("gpsDot");
-    const act = app.shot.active();
+    const shot = gd.scene().bubble;
+    /* Where the tee lands on screen, read through the same projection seam the
+       overlays draw with. The dot used to be this check; off-course there is no
+       dot to read, and the pin marker answers the same question. */
+    app.pin.set(tee);
+    await gd.wait(80);
+    const marker = document.getElementById("pinMarker");
+    const teeOnScreen = { left: parseFloat(marker.style.left), top: parseFloat(marker.style.top) };
+    app.pin.clear();
+    await gd.wait(60);
     const engineDefault = {
-      targetFromTee: act && act.target ? app.distance.haversineMeters(tee, act.target) : null,
-      targetToGreen: act && act.target ? app.distance.haversineMeters(act.target, green) : null,
+      targetFromTee: shot.target ? app.distance.haversineMeters(tee, shot.target) : null,
+      targetToGreen: shot.target ? app.distance.haversineMeters(shot.target, green) : null,
       maxCarry: window.GDBubbleEngine.maxPlayableCarryM(),
-      shotRowShown: !document.getElementById("shotRow").classList.contains("hiddenState"),
+      shotRowShown: gd.shown("shotRow"),
       bubbleShapes: document.querySelectorAll("#bubbleSvg .bubbleFill, #bubbleSvg .bubbleEdge").length,
       legacyRings: document.querySelectorAll("#bubbleSvg .ringOuter, #bubbleSvg .ringMain, #bubbleSvg .ringInner").length,
       carryKnockout: !!document.querySelector("#bubbleSvg mask[id$='-carry']"),
@@ -878,7 +1003,7 @@ async function bootCheck() {
         var c = document.getElementById("bubbleClub");
         return c && !c.classList.contains("hiddenState") ? c.textContent : null;
       })(),
-      svgShown: !document.getElementById("bubbleSvg").classList.contains("hiddenState"),
+      svgShown: gd.shown("bubbleSvg"),
       aimLine: !!document.querySelector("#bubbleSvg .aimLine"),
       middleGuide: !!document.querySelector("#bubbleSvg .middleGuide"),
       middleLabel: (document.querySelector("#bubbleSvg .middleGuideLabel") || {}).textContent || "",
@@ -887,91 +1012,98 @@ async function bootCheck() {
     return {
       presented: document.body.classList.contains("surface-published"),
       transform: img.style.transform,
-      positionSource: app.position.current() && app.position.current().source,
-      dotVisible: !dot.classList.contains("hiddenState"),
-      dot: { left: parseFloat(dot.style.left), top: parseFloat(dot.style.top) },
+      flow: gd.scene().flow,
+      offTee: Math.round(app.distance.haversineMeters(gd.player(), tee)),
+      /* The granted fix is 110km away, so it is refused: no locator, no dot. */
+      dotVisible: gd.shown("gpsDot"),
+      bubbleVisible: gd.shown("aimBubble"),
+      teeOnScreen,
       view: { w: window.innerWidth, h: window.innerHeight },
       scrollJumped,
-      dotUnderBar,
+      bubbleUnderBar,
       engineDefault
     };
   }, AKARANA_H1);
 
-  /* Stage transitions on the framed course: tee → hole frame; a tap up the
-     fairway → lock (tilted); a tap by the green → zoom (flat); back to the
-     tee → hole again. */
+  /* Camera stages on the framed course, driven by the MODE rather than by
+     where the player is standing: SETUP frames the hole, AIM is the tilted
+     shot view, and placing yourself on the green is the flat green view. This
+     is Preview, so the other half of the check is that walking the whole
+     sequence records absolutely nothing (§3) — Preview cannot open a shot. */
   const stages = await page.evaluate(async (h1) => {
-    const app = window.ClarityApp;
+    const gd = window.__gd;
     const shift = (p) => ({ lat: p.lat - 1, lng: p.lng });
     const tee = shift(h1.tee), green = shift(h1.green);
     const read = () => ({
+      mode: gd.scene().mode,
       stage: document.body.dataset.frameStage,
       tilt: document.body.classList.contains("tilt-lock"),
-      dotVisible: !document.getElementById("gpsDot").classList.contains("hiddenState"),
+      dotVisible: gd.shown("gpsDot"),
       /* In green focus the dot is replaced by the draggable ball, so "the
          player is visible" means one or the other, never both. */
-      ballVisible: !document.getElementById("greenFocusBall").classList.contains("hiddenState"),
-      ballParked: document.getElementById("greenFocusBall").classList.contains("parked")
+      ballVisible: gd.shown("greenFocusBall")
     });
+    /* framed left us placed at the tee — Unlock is the way back to SETUP. */
+    await gd.send("UNLOCK");
+    await gd.until(() => document.body.dataset.frameStage === "hole", "the hole frame");
     const atTee = read();
-    app.position.set({ lat: tee.lat - 0.0015, lng: tee.lng }, "tap");
-    await new Promise((resolve) => setTimeout(resolve, 60));
+    await gd.place({ lat: tee.lat - 0.0015, lng: tee.lng });
+    await gd.until(() => document.body.dataset.frameStage === "lock", "the locked shot view");
     const lock = read();
-    /* A GPS fix inside the same stage must move the dot, not the camera. */
+    /* A fix inside the same stage must move the dot, not the camera — and in
+       Preview it must not move the PLAYER either (teePin's rule, seen from the
+       camera's side). The round's centre came from this package, so a fix on
+       this course is trusted even though the browser's granted one is not. */
     const img = document.getElementById("surfaceImage");
     const dotEl = document.getElementById("gpsDot");
     const frameBefore = img.style.transform;
-    const dotBefore = dotEl.style.top;
-    app.position.set({ lat: tee.lat - 0.0016, lng: tee.lng }, "gps");
-    await new Promise((resolve) => setTimeout(resolve, 60));
+    const placedBefore = JSON.stringify(gd.player());
+    await gd.fix({ lat: tee.lat - 0.0016, lng: tee.lng }, 200);
     const gpsHold = {
       frameHeld: img.style.transform === frameBefore,
-      dotMoved: dotEl.style.top !== dotBefore,
+      dotAppeared: gd.shown("gpsDot") && !!dotEl.style.top,
+      playerHeld: JSON.stringify(gd.player()) === placedBefore,
       stage: document.body.dataset.frameStage
     };
-    /* The shot loop: aim off the green shows the shot row, and each tap
-       records the previous shot. */
-    const activeAfterLockTap = app.shot.active();
-    app.shot.aim({ lat: tee.lat - 0.0025, lng: tee.lng });
-    await new Promise((resolve) => setTimeout(resolve, 60));
+    /* Dragging the aim keeps the shot row live and never re-frames. */
+    await gd.send("AIM_DRAGGED", { point: { lat: tee.lat - 0.0025, lng: tee.lng } }, 120);
     const aimed = {
-      shotRowShown: !document.getElementById("shotRow").classList.contains("hiddenState"),
+      shotRowShown: gd.shown("shotRow"),
       shotDist: Number(document.getElementById("shotDist").textContent),
-      bubbleShown: !document.getElementById("aimBubble").classList.contains("hiddenState")
+      bubbleShown: gd.shown("aimBubble")
     };
-    app.position.set({ lat: green.lat - 0.0002, lng: green.lng }, "tap");
-    await new Promise((resolve) => setTimeout(resolve, 60));
-    const zoom = read();
-    const greenFocus = {
-      ringShown: !document.getElementById("greenRing").classList.contains("hiddenState"),
-      /* Shot End is the single confirm now - Hole Out is gone, because in
-         green focus the two had become the same action on the same point. */
-      confirmVisible: !document.getElementById("shotActionBtn").classList.contains("hiddenState"),
+    /* And the green is not a trapdoor: Preview has SETUP and AIM and nothing
+       else, so standing yourself on the green is still the shot view. Green
+       focus belongs to Live arrival and to the picker's catch-up, both of
+       which need an open shot — and Preview can never open one. */
+    await gd.send("UNLOCK");
+    await gd.until(() => gd.scene().mode === "setup", "Preview to rest at SETUP");
+    await gd.place({ lat: green.lat - 0.0002, lng: green.lng });
+    await gd.until(() => gd.scene().mode === "aim", "the green placement to be an ordinary AIM");
+    const onGreen = read();
+    const greenIsNotATrapdoor = {
+      offGreen: Math.round(gd.scene().hole.rec
+        ? window.ClarityApp.distance.haversineMeters(gd.player(), gd.scene().hole.rec.green) : -1),
+      ballVisible: gd.shown("greenFocusBall"),
+      /* Shot End is the single confirm - Hole Out is gone, because in green
+         focus the two had become the same action on the same point. */
       holeOutGone: !document.getElementById("holeOutBtn"),
-      shotsRecorded: app.shot.holeShots(1).length
+      dockFace: document.getElementById("shotActionBtn").dataset.action,
+      shotsRecorded: gd.shots(1).length
     };
-    document.getElementById("shotActionBtn").click();
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    const holedOut = {
-      hole: app.play.state().hole,
-      shots: app.shot.holeShots(1).length,
-      activeCleared: !app.shot.active()
-    };
-    return {
-      atTee, lock, gpsHold,
-      shotStart: activeAfterLockTap && activeAfterLockTap.start,
-      aimed, zoom, greenFocus, holedOut
-    };
+    return { atTee, lock, gpsHold, aimed, onGreen, greenIsNotATrapdoor };
   }, AKARANA_H1);
 
-  /* Shot End: a normal (non-green-focus) press just logs the shot in flight -
-     same as a deliberate tap, no hole change. In green focus it IS holing
-     out, same as pressing Hole Out itself. frameStage (what "green focus"
-     means) is only tracked once a real surface is up - same as the `framed`
-     scenario above - so hole 1 needs a captured visual, not just geometry. */
+  /* The dock's three faces, in Live, where all three exist. Track offers Lock;
+     Lock opens a shot and the face becomes Unlock, which releases the VIEW and
+     records nothing — the shot stays in flight and the NEXT lock closes it; on
+     the green the face is Shot End, and that one really does log.
+     frameStage (what "green focus" means) is only tracked once a real surface
+     is up - same as the `framed` scenario above - so hole 1 needs a captured
+     visual, not just geometry. */
   const shotEndWiring = await page.evaluate(async (h1) => {
-    const app = window.ClarityApp;
-    const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+    const app = window.ClarityApp, gd = window.__gd;
+    const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNg+M8AAAICAQB7CYF4AAAAAElFTkSuQmCC";
     const shift = (p) => ({ lat: p.lat - 2, lng: p.lng });
     const tee = shift(h1.tee), green = shift(h1.green);
     const origin = app.playSurface.worldPx(green.lat + 0.004, green.lng - 0.004, 18);
@@ -984,54 +1116,81 @@ async function bootCheck() {
       { holeNumber: 1, geometry: { tee, green, greenShape: [], route: [] }, visual: { url: PNG, playSurface: meta } },
       { holeNumber: 2, geometry: { tee, green, greenShape: [], route: [] } }
     ] };
-    await app.play.start("shot-end-wiring-course", pkg, null);
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    app.position.set({ lat: tee.lat - 0.0015, lng: tee.lng }, "tap");
-    await new Promise((resolve) => setTimeout(resolve, 60));
+    const face = () => document.getElementById("shotActionBtn").dataset.action;
+    await gd.open("shot-end-wiring-course", pkg, null);
+    await gd.until(() => document.body.classList.contains("surface-published"), "the surface to present");
+    await gd.live({ lat: tee.lat - 0.0015, lng: tee.lng });
+    await gd.until(() => face() === "lock", "the dock to offer Lock");
+    const tracking = { mode: gd.scene().mode, stage: document.body.dataset.frameStage, face: face() };
+    await gd.tap("shotActionBtn");                      // Lock
+    await gd.until(() => face() === "unlock", "the dock to offer Unlock");
     const lockStage = document.body.dataset.frameStage;
-    /* Locked in, the dock button is Unlock, not Shot End: it releases the
-       view back to pre-frame and records nothing. The shot stays in flight
-       with its start at the last lock-in - the NEXT lock is what closes it. */
-    const lockedFace = document.getElementById("shotActionBtn").dataset.action;
-    document.getElementById("shotActionBtn").click();
-    await new Promise((resolve) => setTimeout(resolve, 80));
+    const lockedFace = face();
+    const openedShot = gd.openShot(1);
+    await gd.tap("shotActionBtn");                      // Unlock
+    await gd.until(() => gd.scene().mode === "track", "Live to return to Track");
     const afterUnlock = {
-      hole: app.play.state().hole,
-      shots: app.shot.holeShots(1).length,
+      hole: gd.hole(),
+      mode: gd.scene().mode,
+      shots: gd.shots(1).length,
       stage: document.body.dataset.frameStage,
-      stillInFlight: !!app.shot.active(),
-      face: document.getElementById("shotActionBtn").dataset.action,
-      /* Nothing to lock in FROM until a position exists again - off-course
-         that is the pill, in real play the next GPS fix. */
-      hidden: document.getElementById("shotActionBtn").classList.contains("hiddenState"),
-      hasPosition: !!app.position.current()
+      stillInFlight: !!gd.openShot(1),
+      face: face(),
+      /* The dock stays offered in Track, because the next Lock is right there.
+         What it must NOT have done is record an end. */
+      shown: gd.shown("shotActionBtn"),
+      endRecorded: !!(gd.shots(1)[0] || {}).end
     };
-    app.position.set({ lat: green.lat - 0.0002, lng: green.lng }, "tap");
-    await new Promise((resolve) => setTimeout(resolve, 60));
+    /* Walk in: the arrival fix opens Finish because a shot is outstanding. */
+    await gd.fix({ lat: green.lat - 0.0002, lng: green.lng });
+    await gd.until(() => gd.scene().mode === "finish", "arrival to open Finish");
+    await gd.until(() => face() === "shotEnd", "the dock to offer Shot End");
     const zoomStage = document.body.dataset.frameStage;
-    const shotsBeforeGreenFocusClick = app.shot.holeShots(1).length;
-    document.getElementById("shotActionBtn").click();
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    const greenFace = face();
+    const shotsBeforeGreenFocusClick = gd.shots(1).length;
+    await gd.tap("shotActionBtn");                      // Shot End
+    await gd.until(() => gd.scene().mode === "logged", "the shot to land on Logged");
+    const logged = gd.shots(1);
     return {
-      lockStage, lockedFace, afterUnlock, zoomStage, shotsBeforeGreenFocusClick,
-      hole: app.play.state().hole,
-      finalShots: app.shot.holeShots(1).length,
-      activeCleared: !app.shot.active()
+      tracking, lockStage, lockedFace, afterUnlock, zoomStage, greenFace,
+      shotsBeforeGreenFocusClick,
+      lockStartOffTee: openedShot
+        ? Math.round(app.distance.haversineMeters(openedShot.start, { lat: tee.lat - 0.0015, lng: tee.lng })) : null,
+      hole: gd.hole(),
+      mode: gd.scene().mode,
+      finalShots: logged.length,
+      allClosed: logged.every((s) => !!s.end),
+      loggedShown: gd.shown("loggedScreen")
     };
   }, AKARANA_H1);
 
   /* Dragging the bubble: pointer events on the cluster hit move the aim and
      the frame holds mid-drag. */
-  const bubbleDrag = await page.evaluate(async () => {
-    const app = window.ClarityApp;
-    /* Back to hole 1 (the stages scenario holed out onto hole 2). */
-    await app.play.goHole(1);
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    document.getElementById("headToTeeBtn").click();
-    await new Promise((resolve) => setTimeout(resolve, 200));
+  const bubbleDrag = await page.evaluate(async (h1) => {
+    const app = window.ClarityApp, gd = window.__gd;
+    /* Its own round rather than the tail of the last one: the tilt only exists
+       on a published surface in the locked shot view, and inheriting whatever
+       mode the previous scenario finished in is how this drifts. */
+    const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYPgPAAEDAQAIicLsAAAAAElFTkSuQmCC";
+    const shift = (p) => ({ lat: p.lat - 3, lng: p.lng });
+    const tee = shift(h1.tee), green = shift(h1.green);
+    const origin = app.playSurface.worldPx(green.lat + 0.004, green.lng - 0.004, 18);
+    const meta = { captureZoom: 18, originPx: { x: origin.x, y: origin.y },
+      outputDimensions: { width: 1341, height: 1889 }, anchorPins: { tee, green } };
+    await gd.open("bubble-drag-course", { holes: [{ holeNumber: 1,
+      geometry: { tee, green, greenShape: [], route: [] },
+      visual: { url: PNG, playSurface: meta } }] }, null);
+    await gd.until(() => document.body.classList.contains("surface-published"), "the surface to present");
+    await gd.tap("headToTeeBtn");
+    await gd.until(() => gd.shown("aimBubble"), "the bubble to come up on the surface");
     const hit = document.getElementById("aimBubble");
-    const before = app.shot.active().target;
+    const before = gd.scene().bubble.target;
     const rect = hit.getBoundingClientRect();
+    /* The 44px floor is a LAYOUT size the painter sets, read BEFORE the drags —
+       the client rect is that box after the tilt's perspective, which is
+       legitimately smaller up the screen, and by the end of the block the aim
+       has been dragged to the bezel. */
+    const hitBox = { w: hit.offsetWidth, h: hit.offsetHeight };
     const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
     const img = document.getElementById("surfaceImage");
     const frameBefore = img.style.transform;
@@ -1050,7 +1209,7 @@ async function bootCheck() {
     }
     hit.dispatchEvent(new PointerEvent("pointerup", { pointerId: 9, clientX: cx, clientY: cy - 48, bubbles: true }));
     await new Promise((resolve) => setTimeout(resolve, 100));
-    const after = app.shot.active().target;
+    const after = gd.scene().bubble.target;
     const reframedAfter = img.style.transform !== frameBefore;
 
     /* The edge exception: a bubble dragged into the edge band is the one thing
@@ -1077,7 +1236,8 @@ async function bootCheck() {
     await new Promise((resolve) => setTimeout(resolve, 150));
 
     return {
-      hitSized: rect.width >= 44 && rect.height >= 44,
+      hitSized: hitBox.w >= 44 && hitBox.h >= 44,
+      hitBox: hitBox.w + "x" + hitBox.h,
       aimMovedM: app.distance.haversineMeters(before, after),
       midDragFrameHeld, tiltHeldMidDrag,
       draggingCleared: !document.body.classList.contains("bubble-dragging"),
@@ -1085,26 +1245,26 @@ async function bootCheck() {
       edgePanned,
       stationaryAfterEdge: img.style.transform === frameAfterEdge
     };
-  });
+  }, AKARANA_H1);
 
   /* Hole picker: tapping the hole number opens a straight jump to any hole,
      not just stepping one at a time. */
   const holePicker = await page.evaluate(async (h1) => {
-    const app = window.ClarityApp;
+    const gd = window.__gd;
     const pkg = { holes: [1, 2, 3].map((n) => ({ holeNumber: n, tee: h1.tee, green: h1.green, greenShape: [], route: [] })) };
-    await app.play.start("hole-picker-course", pkg, null);
-    document.getElementById("holeNumber").click();
+    await gd.open("hole-picker-course", pkg, null, 400);
+    await gd.tap("holeNumber", 60);
     const opened = {
-      panelShown: !document.getElementById("holePickerPanel").classList.contains("hiddenState"),
+      panelShown: gd.shown("holePickerPanel"),
       buttons: Array.from(document.querySelectorAll("#holePickerGrid button")).map((b) => b.textContent),
       activeButton: document.querySelector("#holePickerGrid button.active").textContent
     };
     document.querySelectorAll("#holePickerGrid button")[2].click();
-    await new Promise((resolve) => setTimeout(resolve, 60));
+    await gd.wait(120);
     return {
       opened,
-      jumpedToHole: app.play.state().hole,
-      panelClosedAfterPick: document.getElementById("holePickerPanel").classList.contains("hiddenState")
+      jumpedToHole: gd.hole(),
+      panelClosedAfterPick: !gd.shown("holePickerPanel")
     };
   }, AKARANA_H1);
 
@@ -1189,8 +1349,8 @@ async function bootCheck() {
   const handoff = await handoffPage.evaluate(() => ({
     onPlay: document.body.classList.contains("route-play"),
     onHome: document.body.classList.contains("route-home"),
-    hole: window.ClarityApp.play.state().hole,
-    courseKey: window.ClarityApp.play.state().courseKey,
+    hole: window.ClarityApp.marshal.round().hole,
+    courseKey: window.ClarityApp.marshal.round().courseKey,
     loadingScreenHidden: document.getElementById("loadingScreen").classList.contains("hiddenState")
   }));
   await handoffPage.close();
@@ -1229,15 +1389,15 @@ async function bootCheck() {
   await storePage.waitForTimeout(400);
   const firstVisit = await storePage.evaluate(() => {
     const saved = window.ClarityApp.courseStore.load("store-test-course");
-    return { fetchesSoFar: undefined, savedMapType: saved && saved.mapType, hole: window.ClarityApp.play.state().hole };
+    return { fetchesSoFar: undefined, savedMapType: saved && saved.mapType, hole: window.ClarityApp.marshal.round().hole };
   });
   const fetchesAfterFirstVisit = packageFetches;
 
   await storePage.goto(storeUrl, { waitUntil: "load" });
   await storePage.waitForTimeout(400);
   const secondVisit = await storePage.evaluate(() => ({
-    courseKey: window.ClarityApp.play.state().courseKey,
-    hole: window.ClarityApp.play.state().hole
+    courseKey: window.ClarityApp.marshal.round().courseKey,
+    hole: window.ClarityApp.marshal.round().hole
   }));
   const fetchesAfterSecondVisit = packageFetches;
 
@@ -1274,14 +1434,16 @@ async function bootCheck() {
   assert.ok(noOwnPicker.noPickerScreen, "the picker screen must not exist in /app/ any more");
   assert.ok(noOwnPicker.noPlayTile, "the Play tile must not exist in /app/ any more");
   assert.ok(noOwnPicker.globalNavExists, "the global Home/Back/Settings bar must exist in the play screen");
-  assert.ok(surfaceFirst.mapEmptyBefore, "no map exists before play starts");
+  assert.ok(state.mapEmpty, "no map exists before play starts");
+  assert.strictEqual(surfaceFirst.h1State.hole, 1, "the hand-off opens on hole 1");
   assert.ok(surfaceFirst.h1State.presented, "a declared package visual must present");
   assert.ok(surfaceFirst.h1State.mapStillEmpty, "no OSM is created under a declared surface");
-  assert.ok(surfaceFirst.h1State.chip.startsWith("pkg"), "the chip names the package source, got: " + surfaceFirst.h1State.chip);
+  assert.strictEqual(surfaceFirst.h1State.chipKind, "published",
+    "the chip must say the surface is the published one, got: " + surfaceFirst.h1State.chip);
   assert.strictEqual(surfaceFirst.h2State.presented, false, "no visual on hole 2 → back on the live map");
   assert.ok(surfaceFirst.h2State.mapCreated, "the map is created the moment absence is the answer");
   assert.ok(!framed.scrollJumped, "clicking the pill must not scroll-jump the play screen");
-  assert.ok(!framed.dotUnderBar, "the tee dot must not hide under the distance bar");
+  assert.ok(!framed.bubbleUnderBar, "the bubble Head To the Tee raises must not hide under the distance bar");
   {
     const e = framed.engineDefault;
     assert.ok(e.targetToGreen > 30, "395m hole, " + Math.round(e.maxCarry) + "m bag → the default aim starts short of the green");
@@ -1300,69 +1462,77 @@ async function bootCheck() {
   }
   assert.ok(framed.presented, "framed course must present its surface");
   assert.ok(framed.transform.indexOf("matrix(") === 0, "the surface must carry the frame transform, got: " + framed.transform);
-  assert.strictEqual(framed.positionSource, "tee", "far from the fix, the framed hole heads to the tee");
-  assert.ok(framed.dotVisible, "the position dot renders on the framed surface");
+  assert.strictEqual(framed.flow, "preview", "far from any usable fix, a round stays in Preview");
+  assert.strictEqual(framed.offTee, 0, "Head To the Tee places you exactly on the tee");
+  assert.ok(!framed.dotVisible,
+    "the dot is where you ACTUALLY are - 110km away is nowhere on this hole, so there is no dot to draw");
+  assert.ok(framed.bubbleVisible, "placing yourself IS the lock-in: the bubble is up with nothing pressed");
   const expectedLeft = framed.view.w * (0.308 + 0.375 / 2);
   const expectedTop = framed.view.h * (0.881 + 0.037 / 2);
-  assert.ok(Math.abs(framed.dot.left - expectedLeft) < 2 && Math.abs(framed.dot.top - expectedTop) < 2,
-    "at the tee, the dot must sit on the tee guide box: got " + framed.dot.left + "," + framed.dot.top
+  assert.ok(Math.abs(framed.teeOnScreen.left - expectedLeft) < 2 && Math.abs(framed.teeOnScreen.top - expectedTop) < 2,
+    "the tee must project onto the tee guide box: got " + framed.teeOnScreen.left + "," + framed.teeOnScreen.top
     + " want " + expectedLeft + "," + expectedTop);
-  assert.strictEqual(stages.atTee.stage, "lock", "placement IS the lock-in: head-to-tee locks the shot view");
-  assert.ok(stages.atTee.tilt, "the locked shot view carries the tilt from the tee");
-  assert.strictEqual(stages.lock.stage, "lock", "a tap up the fairway stays locked");
+  assert.strictEqual(stages.atTee.mode, "setup", "Unlock returns Preview to SETUP");
+  assert.strictEqual(stages.atTee.stage, "hole", "SETUP frames the whole hole, tee to green");
+  assert.ok(!stages.atTee.tilt, "the pre-frame hole view is flat");
+  assert.strictEqual(stages.lock.mode, "aim", "placing yourself IS the lock-in");
+  assert.strictEqual(stages.lock.stage, "lock", "AIM is the locked shot view");
   assert.ok(stages.lock.tilt, "the lock stage carries the 32° tilt");
-  assert.ok(stages.lock.dotVisible, "the player stays visible in lock");
-  assert.strictEqual(stages.gpsHold.stage, "lock", "a same-stage GPS fix stays in lock");
-  assert.ok(stages.gpsHold.frameHeld, "a same-stage GPS fix must NOT re-anchor the locked frame");
-  assert.ok(stages.gpsHold.dotMoved, "a same-stage GPS fix still moves the dot");
-  assert.strictEqual(stages.zoom.stage, "zoom", "inside 40m of the green → zoom stage");
-  assert.ok(!stages.zoom.tilt, "green zoom is flat");
-  assert.ok(stages.zoom.ballVisible, "green focus shows the ball");
-  assert.ok(!stages.zoom.dotVisible, "green focus replaces the dot with the ball, never both");
-  assert.ok(!stages.zoom.ballParked, "standing on the green, the ball sits on the map, not parked");
-  assert.ok(stages.lock.ballVisible === false, "no ball before green focus opens");
-  assert.ok(stages.shotStart, "a tap starts a shot");
+  assert.strictEqual(stages.gpsHold.stage, "lock", "a same-stage fix stays in lock");
+  assert.ok(stages.gpsHold.frameHeld, "a same-stage fix must NOT re-anchor the locked frame");
+  assert.ok(stages.gpsHold.dotAppeared, "a trusted fix still draws the dot - it is the locator, in either flow");
+  assert.ok(stages.gpsHold.playerHeld,
+    "in Preview the fix is the locator and never the player: it must not move where you placed yourself");
+  assert.ok(stages.lock.ballVisible === false, "no ball in the shot view");
   assert.ok(stages.aimed.bubbleShown, "the aim bubble renders on the locked view");
   assert.ok(stages.aimed.shotRowShown, "aiming off the green shows the shot row");
   assert.ok(stages.aimed.shotDist > 80 && stages.aimed.shotDist < 140,
     "shot distance must be the start→target number, got " + stages.aimed.shotDist);
-  assert.ok(!stages.greenFocus.ringShown,
-    "green focus is a clean image of the green plus the pin - no centre ring");
-  assert.ok(stages.greenFocus.confirmVisible, "green focus offers the Shot End confirm");
-  assert.ok(stages.greenFocus.holeOutGone,
+  assert.ok(stages.greenIsNotATrapdoor.offGreen >= 0 && stages.greenIsNotATrapdoor.offGreen < 40,
+    "test setup: the placement must be inside the green-focus radius, got "
+    + stages.greenIsNotATrapdoor.offGreen + "m");
+  assert.strictEqual(stages.onGreen.mode, "aim",
+    "and it is still AIM - the mode must depend on what you asked for, not on where your finger landed");
+  assert.strictEqual(stages.onGreen.stage, "lock", "so the camera is still the shot view");
+  assert.ok(!stages.greenIsNotATrapdoor.ballVisible, "no ball: Preview has nothing to log");
+  assert.strictEqual(stages.greenIsNotATrapdoor.dockFace, "unlock",
+    "and the dock still offers Unlock, not a Shot End for a shot that does not exist");
+  assert.ok(stages.greenIsNotATrapdoor.holeOutGone,
     "Hole Out is collapsed into Shot End - there must be no second confirm button");
-  assert.strictEqual(stages.greenFocus.shotsRecorded, 2, "two shots recorded before holing out");
-  assert.strictEqual(stages.holedOut.shots, 3, "Hole Out records the final shot");
-  assert.strictEqual(stages.holedOut.hole, 2, "Hole Out advances to the next hole");
-  assert.ok(stages.holedOut.activeCleared, "no active shot after holing out");
-  assert.strictEqual(shotEndWiring.lockStage, "lock", "test setup: mid-fairway is the lock stage");
+  assert.strictEqual(stages.greenIsNotATrapdoor.shotsRecorded, 0,
+    "Preview cannot open a shot - previewing hole 5 must never invent a shot on hole 5");
+  assert.strictEqual(shotEndWiring.tracking.face, "lock", "in Track the dock offers Lock");
+  assert.strictEqual(shotEndWiring.tracking.stage, "hole", "Track is the pre-frame hole view");
+  assert.strictEqual(shotEndWiring.lockStage, "lock", "Lock raises the locked shot view");
   assert.strictEqual(shotEndWiring.lockedFace, "unlock",
     "locked in, the dock button is Unlock - Shot End belongs to green focus only");
+  assert.strictEqual(shotEndWiring.lockStartOffTee, 0, "the shot opens from where you locked in");
   assert.strictEqual(shotEndWiring.afterUnlock.hole, 1, "unlocking must not advance the hole");
-  assert.strictEqual(shotEndWiring.afterUnlock.shots, 0,
+  assert.strictEqual(shotEndWiring.afterUnlock.mode, "track", "unlocking returns Live to its resting state");
+  assert.ok(!shotEndWiring.afterUnlock.endRecorded,
     "unlocking records nothing - the next lock-in is what closes the shot");
   assert.ok(shotEndWiring.afterUnlock.stillInFlight,
     "unlocking keeps the shot in flight; it costs the camera, never the shot");
   assert.strictEqual(shotEndWiring.afterUnlock.stage, "hole",
     "unlocking pulls back to the pre-frame view");
-  assert.ok(!shotEndWiring.afterUnlock.hasPosition,
-    "unlocking clears the position so pre-frame is genuinely pre-frame");
   assert.strictEqual(shotEndWiring.afterUnlock.face, "lock",
     "unlocked, the dock button offers Lock again");
-  assert.ok(shotEndWiring.afterUnlock.hidden,
-    "Lock waits for a position to lock in from - hidden until the pill or a fix supplies one");
-  assert.strictEqual(shotEndWiring.zoomStage, "zoom", "test setup: on the green is the zoom stage");
+  assert.ok(shotEndWiring.afterUnlock.shown,
+    "and it stays offered, because the next Lock is the thing to press");
+  assert.strictEqual(shotEndWiring.zoomStage, "zoom", "arriving at the green opens the green view");
+  assert.strictEqual(shotEndWiring.greenFace, "shotEnd", "and the dock turns into Shot End");
   /* One shot, not two: the unlock in between is not a boundary. Course data
-     joins the last lock-in to the next lock-in, so the tee lock and the
-     on-green lock bracket exactly one shot. */
+     joins the last lock-in to the next lock-in, so one lock plus the on-green
+     Shot End bracket exactly one shot. */
   assert.strictEqual(shotEndWiring.shotsBeforeGreenFocusClick, 1,
-    "consecutive lock-ins bracket one shot - the unlock between them adds none");
-  assert.strictEqual(shotEndWiring.hole, 2, "Shot End in green focus advances to the next hole");
-  assert.strictEqual(shotEndWiring.finalShots, 2, "Shot End in green focus records the final shot");
-  assert.ok(shotEndWiring.activeCleared, "no active shot after Shot End holes out in green focus");
+    "one lock-in opened exactly one shot - the unlock between added none");
+  assert.strictEqual(shotEndWiring.finalShots, 1, "Shot End closes that shot rather than opening another");
+  assert.ok(shotEndWiring.allClosed, "and it leaves nothing in flight");
+  assert.ok(shotEndWiring.loggedShown, "Shot End in green focus lands on the Logged screen");
+  assert.strictEqual(shotEndWiring.mode, "logged", "which is the mode it puts the round into");
   assert.ok(bubbleDrag.tiltHeldMidDrag,
     "the lock tilt must survive the drag - it used to flatten to birds-eye on grab and spring back on release");
-  assert.ok(bubbleDrag.hitSized, "the drag hit covers the cluster (44px minimum)");
+  assert.ok(bubbleDrag.hitSized, "the drag hit covers the cluster (44px minimum), got " + bubbleDrag.hitBox);
   assert.ok(bubbleDrag.aimMovedM > 5, "dragging the bubble moves the aim, got " + bubbleDrag.aimMovedM.toFixed(1) + "m");
   assert.ok(bubbleDrag.midDragFrameHeld, "the camera holds mid-drag");
   assert.ok(bubbleDrag.draggingCleared, "release clears the dragging state");
@@ -1397,7 +1567,7 @@ async function bootCheck() {
   assert.strictEqual(handoffErrors.length, 0, "uncaught exceptions on the ?courseId= hand-off:\n" + handoffErrors.join("\n"));
   assert.ok(handoff.onPlay, "a ?courseId= hand-off must land directly on the play route");
   assert.ok(!handoff.onHome, "a ?courseId= hand-off must never show the home screen");
-  assert.strictEqual(handoff.courseKey, "akarana-golf-club", "the hand-off's courseId must reach app.play.start");
+  assert.strictEqual(handoff.courseKey, "akarana-golf-club", "the hand-off's courseId must reach the round the Marshal opens");
   assert.strictEqual(handoff.hole, 1, "a ?courseId= hand-off opens on hole 1");
   assert.ok(handoff.loadingScreenHidden, "the loading screen must hide once the course package has loaded and the hole is framed");
 
@@ -1416,7 +1586,8 @@ async function bootCheck() {
   assert.strictEqual(play.hole, 1, "play must start on hole 1");
   assert.strictEqual(play.courseKey, "akarana-golf-club");
   assert.strictEqual(play.surfacePresented, false, "no surface offline → live map, no overlay");
-  assert.ok(play.sourceChipHidden, "no surface → no provenance chip");
+  assert.strictEqual(play.sourceChipKind, "live",
+    "no surface → the chip says which live basemap is up rather than going quiet, got: " + play.sourceChipText);
   assert.ok(play.gpsFix, "the granted geolocation fix must reach the watcher");
   assert.ok(play.gpsDotShown, "the projected dot must render on the live map");
   assert.ok(Number.isFinite(play.gpsDotAt.left) && Number.isFinite(play.gpsDotAt.top)
@@ -1434,44 +1605,56 @@ async function bootCheck() {
   assert.ok(play.distanceBarShown, "with a fix and a green, the distance bar must show");
   assert.ok(play.distFront < play.distCentre && play.distCentre < play.distBack,
     "F < C < B, got " + play.distFront + "/" + play.distCentre + "/" + play.distBack);
-  /* The granted fix (-36.9174, 174.74) sits ~90m from Akarana green 1 — near
-     the hole, so it is adopted over the tee position. */
-  assert.strictEqual(play.positionSource, "gps", "an on-hole fix must take over from the tee");
+  /* The granted fix (-36.9174, 174.74) sits ~90m from Akarana green 1 — at the
+     course, so it is trusted, which is what Play needs. Until Play is pressed
+     the fix is only the locator: it draws the dot and measures nothing. */
+  assert.ok(play.playOffered, "a trusted fix at the course must offer Play");
+  assert.ok(play.previewDotShown, "the fix draws the dot before Play, because that is where you actually are");
+  assert.ok(!play.previewDistances, "but it measures nothing until it is the player - Preview measures from a placement");
+  assert.strictEqual(play.flow, "live", "pressing Play starts the round on the hole you are standing on");
   assert.ok(play.distCentre > 60 && play.distCentre < 120,
     "centre distance from the granted fix must be ~90m, got " + play.distCentre);
-  assert.ok(remote.preFrame.pillShown, "pre-frame state shows the Standing Here / Head To the Tee pill");
-  assert.ok(!remote.preFrame.hasPosition, "pre-frame state has no position - no pin exists yet");
+  assert.ok(remote.preFrame.pillShown, "pre-frame state shows the Head To the Tee / tap-where-you'd-stand pill");
+  assert.ok(!remote.preFrame.hasPosition, "pre-frame state has no position - nothing is placed yet");
+  assert.ok(!remote.preFrame.playOffered,
+    "a fix 110km from this course is refused outright, so there is no round to start from it");
   assert.ok(remote.preFrame.distanceHidden, "no position → no distances");
-  assert.strictEqual(teePin.atTee.source, "tee", "Head To the Tee places the player on the tee");
+  assert.strictEqual(teePin.setup.flow, "preview", "no trusted fix → the round rests in Preview");
+  assert.strictEqual(teePin.setup.mode, "setup", "which opens at SETUP with the pill up");
+  assert.ok(teePin.setup.pillShown && !teePin.setup.placed, "nothing placed, nothing measured");
+  assert.strictEqual(teePin.atTee.mode, "aim", "Head To the Tee places you, and the lock-in is automatic");
   assert.strictEqual(teePin.atTee.offTee, 0, "Head To the Tee lands exactly on the tee");
+  assert.ok(!teePin.atTee.pillShown, "placing the player retires the pill");
   assert.strictEqual(teePin.afterTap.offTee, 0,
-    "a map tap must not move a player pinned to the tee, moved " + teePin.afterTap.offTee + "m");
-  assert.strictEqual(teePin.afterTap.source, "tee", "the pinned source stays 'tee' through a tap");
+    "a map tap must not drag the origin off a placement, moved " + teePin.afterTap.offTee + "m");
+  assert.strictEqual(teePin.afterTap.mode, "aim", "and it must not knock you out of AIM either");
   assert.ok(teePinAfterFix.fixMoved, "the moved geolocation must reach the watcher");
+  assert.ok(teePinAfterFix.locatorMoved, "and it must reach the scene as the locator");
   assert.strictEqual(teePinAfterFix.offTee, 0,
-    "a live on-course fix must not move a player pinned to the tee, moved "
+    "a live on-course fix must not move a player placed on the tee, moved "
     + teePinAfterFix.offTee + "m");
-  assert.strictEqual(afterLeaving.source, "gps",
-    "leaving the hole clears the pin, so the live fix drives again");
+  assert.strictEqual(afterLeaving.unlocked.mode, "setup", "Unlock is the way back to SETUP");
+  assert.ok(!afterLeaving.unlocked.placed && afterLeaving.unlocked.pillShown,
+    "and it clears the placement and brings the pill back - that is its whole job in this flow");
+  assert.strictEqual(afterLeaving.replaced.mode, "aim", "so you can change your mind and place yourself elsewhere");
+  assert.strictEqual(afterLeaving.afterHoleChange.mode, "setup",
+    "leaving the hole and coming back also clears the placement");
+  assert.ok(!afterLeaving.afterHoleChange.placed, "a hole you have just arrived at has nobody standing on it");
 
   assert.ok(greenTap.mapped.foundGreenOnScreen,
     "the green must be projectable on screen for the tap test to mean anything; map was "
     + greenTap.mapped.mapState);
-  assert.strictEqual(greenTap.mapped.movedM, 0,
-    "manual 'tap where the green is' must not leak into geo-mapped play - "
-    + "a tap on the mapped green moved the player " + greenTap.mapped.movedM + "m");
-  /* The stronger form of the same claim: the tap did not drop the player onto
-     the green. The granted fix sits ~90m out, so anything near 0 would mean
-     the tap teleported them there. */
-  assert.ok(greenTap.mapped.endedOnGreen > 20,
-    "a tap on the mapped green must not move the player onto it, ended "
-    + greenTap.mapped.endedOnGreen + "m from the green");
-  assert.strictEqual(greenTap.optedIn.source, "tap",
-    "'Standing Here' is the explicit opt-in: after it, a tap does place the player");
-  assert.ok(greenTap.optedIn.onGreen !== null && greenTap.optedIn.onGreen < 8,
-    "the opted-in tap lands on the green, got " + greenTap.optedIn.onGreen + "m off");
+  assert.ok(greenTap.mapped.placedFromNothing,
+    "'or tap where you'd stand' is half the pill: from SETUP, a tap places you");
+  assert.ok(greenTap.mapped.landedOnGreen !== null && greenTap.mapped.landedOnGreen < 8,
+    "and it lands where you touched - tapping the green puts you on the green, got "
+    + greenTap.mapped.landedOnGreen + "m off");
+  assert.strictEqual(greenTap.mapped.mode, "aim",
+    "placing yourself is AIM wherever you put it - Preview has two modes, and a tap near a green "
+    + "must not be a trapdoor into a third");
+  assert.strictEqual(greenTap.mapped.flow, "preview", "and it is still Preview, not some other flow");
   assert.ok(greenTap.unmappedPlaces,
-    "a hole with no mapped green IS manual play - taps must still place the player");
+    "a hole with no geometry at all still takes the tap - it is the only way to play one");
 
   assert.ok(!gpsSettings.opened.navigatedAway,
     "the GPS Settings rail button must open a sheet in place, not navigate away");
@@ -1498,14 +1681,16 @@ async function bootCheck() {
     "every tool-rail icon must be 24x24 (the inline gear used to fill its button), got "
     + gpsSettings.iconSizes.join(", "));
 
-  assert.ok(greenFocus.activeShot, "test setup: a shot must be in flight from the tee");
+  assert.ok(greenFocus.openedShot, "test setup: Lock must open a shot from the tee");
   assert.ok(!greenFocus.beforeArrival.ball, "no ball before green focus opens");
-  assert.ok(greenFocus.beforeArrival.dot, "the plain dot marks the player outside green focus");
+  assert.strictEqual(greenFocus.beforeArrival.mode, "track",
+    "two fixes clear of the lock point release Aim back to Track");
+  assert.strictEqual(greenFocus.onGreen.mode, "finish",
+    "arriving at the green with a shot outstanding opens Finish by itself");
   assert.strictEqual(greenFocus.onGreen.stage, "zoom", "inside 40m of the green opens green focus");
   assert.ok(greenFocus.onGreen.ball, "green focus turns the position marker into the ball");
-  assert.ok(!greenFocus.onGreen.dot, "the dot gives way to the ball - never both at once");
-  assert.ok(!greenFocus.onGreen.parked, "standing on the green, the ball sits on the map");
-  assert.ok(greenFocus.beforeArrival.aimPaths > 0, "test setup: the aim overlays draw while aiming");
+  assert.ok(greenFocus.onGreen.origin, "and draws the shot's ORIGIN, so you can see the shot you are reconstructing");
+  assert.ok(greenFocus.beforeArrival.aimPaths === 0, "no aim overlays in Track - the shot view is earned by a Lock");
   assert.strictEqual(greenFocus.onGreen.aimPaths, 0,
     "green focus must clear the aim overlays - a bubble anchored on the green is a shot nobody is playing");
   assert.ok(!greenFocus.onGreen.bubble, "no aim bubble in green focus");
@@ -1523,27 +1708,21 @@ async function bootCheck() {
     "the approach must name a club, got " + JSON.stringify(approachCard.club));
   assert.ok(approachCard.dist > 80 && approachCard.dist < 180,
     "the approach distance must be the real number, got " + approachCard.dist);
-  assert.ok(!greenFocus.onGreen.greenRing,
-    "green focus drops the centre ring - it is a clean image of the green plus the pin");
-  assert.ok(!greenFocus.beforeArrival.greenOutline,
-    "normal play must not draw the green outline over the imagery");
-  assert.ok(!greenFocus.beforeArrival.greenReference,
-    "normal play must not draw the SVG green reference either");
-  assert.ok(!greenFocus.onGreen.greenOutline,
-    "green focus drops the boundary outline too - nothing drawn over the green but the pin");
   assert.strictEqual(greenFocus.atNextTee.aimPaths, 0,
     "the aim overlays stay cleared while green focus is deferred");
-  assert.strictEqual(greenFocus.atNextTee.stage, "zoom",
+  assert.strictEqual(greenFocus.atNextTee.mode, "finish",
     "green focus is sticky: walking to the next tee must not close it");
-  assert.ok(greenFocus.atNextTee.parked,
-    "an unplaced ball parks at the pickup point once the player leaves the green");
-  assert.ok(greenFocus.atNextTee.hint, "the parked ball asks to be dragged into place");
-  assert.ok(greenFocus.atNextTee.shotEnd, "Shot End stays available to confirm the ball");
+  assert.strictEqual(greenFocus.atNextTee.stage, "zoom",
+    "and the camera keeps holding the green being logged, not the hole you walked to");
+  assert.ok(greenFocus.atNextTee.hint, "the unplaced ball still asks to be dragged into place");
+  assert.ok(greenFocus.atNextTee.dock, "Shot End stays available to confirm the ball");
+  assert.strictEqual(greenFocus.atNextTee.dockFace, "shotEnd", "and it is still wearing the Shot End face");
   assert.ok(greenFocus.greenHeld,
-    "the camera must keep holding the green being logged - a parked ball needs it on screen");
-  assert.ok(!greenFocus.afterDrop.parked, "dropping the ball on the green un-parks it");
+    "the camera must keep holding the green being logged - the ball needs it on screen");
   assert.ok(!greenFocus.afterDrop.hint, "the prompt goes once the ball is placed");
   assert.strictEqual(greenFocus.recorded.shots, 1, "Shot End records the shot");
+  assert.strictEqual(greenFocus.recorded.method, "ball-placed",
+    "and records that the end was placed by hand rather than tracked");
   assert.ok(greenFocus.recorded.offBall !== null && greenFocus.recorded.offBall < 1.5,
     "Shot End must record where the BALL is, off by " + greenFocus.recorded.offBall + "m");
   assert.ok(greenFocus.recorded.playerFromGreen > 200,
@@ -1552,16 +1731,16 @@ async function bootCheck() {
   assert.ok(greenFocus.recorded.endFromGreen < 40,
     "the recorded end is on the green, not at the player 260m away, got "
     + greenFocus.recorded.endFromGreen + "m");
-  assert.strictEqual(greenFocus.recorded.hole, 2, "Shot End in green focus advances to the next hole");
-  assert.ok(greenFocus.recorded.ballCleared, "the ball clears when the hole does");
+  assert.ok(greenFocus.recorded.loggedShown, "Shot End lands on the Logged screen");
+  assert.strictEqual(greenFocus.recorded.hole, 1,
+    "and stays on the hole it logged - advancing is the Logged screen's offer, not something Shot End does for you");
 
   assert.ok(!remote.atTee.pillShown, "placing the player retires the pill");
-  assert.ok(remote.atTee.source === "tee", "Head To the Tee places the player on the tee");
+  assert.strictEqual(remote.atTee.flow, "preview", "off-course play is Preview, start to finish");
   assert.ok(remote.atTee.centre > 380 && remote.atTee.centre < 410,
     "tee position must give the ~395m tee shot, got " + remote.atTee.centre);
-  assert.strictEqual(remote.afterTap.source, "tap");
   assert.ok(remote.afterTap.centre > remote.atTee.centre - 120 && remote.afterTap.centre < remote.atTee.centre - 80,
-    "a 100m tap up the fairway must shorten the shot ~100m, got " + remote.afterTap.centre);
+    "unlock, then a 100m tap up the fairway must shorten the shot ~100m, got " + remote.afterTap.centre);
   console.log("fresh-app boot passed: 0 uncaught exceptions, 0 intervals, picker empty-state, GPS adopt "
     + play.distFront + "/" + play.distCentre + "/" + play.distBack + "m, head-to-tee "
     + remote.atTee.centre + "m, tap " + remote.afterTap.centre + "m");
