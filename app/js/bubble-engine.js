@@ -468,7 +468,7 @@ function gdBubbleRenderCenter(payloadInput){
   const sideOffset=gdClamp(gdFiniteNumber(payload.aimOffsetM,0),-sideLimit,sideLimit);
   const forwardBias=gdClamp(gdFiniteNumber(payload.visual&&payload.visual.visualYBias,0),-.18,.18)*Math.max(1,gdFiniteNumber(payload.depthRadiusM,payload.radius));
   const rawCenter=projectOffset(renderTarget,shotBrg,forwardBias,sideOffset);
-  return gdClampBubbleCenterToBagRoof(rawCenter,payload);
+  return rawCenter;
 }
 function gdBubbleAxes(payloadInput,scale=1){
   const payload=gdBubblePayloadForRender(payloadInput);

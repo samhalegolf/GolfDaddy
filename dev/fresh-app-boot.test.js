@@ -166,6 +166,46 @@ assert.strictEqual(surface.fitContain({ x: 0, y: 0 }, { width: 0, height: 0 }, {
   const radii = model.rings.main.map((p) => distanceLib.haversineMeters(model.center, p));
   assert.ok(Math.min(...radii) > 2 && Math.max(...radii) < 60 && Math.max(...radii) > Math.min(...radii),
     "cluster ring is an engine-shaped ellipse, radii " + Math.min(...radii).toFixed(1) + "–" + Math.max(...radii).toFixed(1) + "m");
+
+  /* The bag still owns reachability, but it must not be allowed to move the
+     final visual centre. A Driver can carry 210 m and finish at 260 m; its
+     bubble naturally extends beyond carry. Raising the separate maximum-reach
+     club used to release the bag-roof clamp and visibly move the same Driver
+     bubble forwards. The Driver payload, centre, and rings must now be
+     identical either side of that reach change. */
+  const driverOnlyBag = [{ club: "Driver", baseCarry: 210, totalM: 260 }];
+  const longerReachBag = driverOnlyBag.concat([{ club: "Long reach", baseCarry: 240, totalM: 300 }]);
+  const driverTarget = { lat: -36.915525, lng: 174.7409167 };
+  engine.setBag(driverOnlyBag);
+  engine.setShot(AKARANA_H1.tee, driverTarget);
+  const driverRoofModel = engine.renderModel();
+  assert.strictEqual(driverRoofModel.payload.club, "Driver", "the Driver remains the selected bubble profile");
+  assert.ok(distanceLib.haversineMeters(AKARANA_H1.tee, driverRoofModel.center) > 220,
+    "the Driver bubble centre naturally remains beyond its 210 m carry");
+
+  engine.setBag(longerReachBag);
+  engine.setShot(AKARANA_H1.tee, driverTarget);
+  const driverLongReachModel = engine.renderModel();
+  assert.strictEqual(driverLongReachModel.payload.club, "Driver", "changing reach must not select a different bubble profile");
+  assert.ok(distanceLib.haversineMeters(driverRoofModel.center, driverLongReachModel.center) < .01,
+    "bag reach must not shift the completed Driver bubble centre");
+  assert.strictEqual(driverRoofModel.rings.main.length, driverLongReachModel.rings.main.length);
+  driverRoofModel.rings.main.forEach((point, i) => {
+    assert.ok(distanceLib.haversineMeters(point, driverLongReachModel.rings.main[i]) < .01,
+      "bag reach must not deform the completed Driver bubble shape at point " + i);
+  });
+
+  const greenBeyondDriver = { lat: -36.91597, lng: 174.7409167 };
+  engine.setBag(driverOnlyBag);
+  engine.setShot(AKARANA_H1.tee, null);
+  const driverLayup = engine.targetForGreenCentre(greenBeyondDriver, { hole: 1 });
+  assert.ok(distanceLib.haversineMeters(driverLayup, greenBeyondDriver) > 20,
+    "the 260 m Driver reach still produces a lay-up for a farther green");
+  engine.setBag(longerReachBag);
+  const longerReachTarget = engine.targetForGreenCentre(greenBeyondDriver, { hole: 1 });
+  assert.ok(distanceLib.haversineMeters(longerReachTarget, greenBeyondDriver) < .01,
+    "the 300 m bag reach still makes that green reachable");
+
   console.log("bubble-engine drift+behaviour passed: " + checked + " verbatim blocks, "
     + bag.length + "-club ghost bag, layup " + layupShort.toFixed(0) + "m short, " + model.payload.club + " cluster");
 }
