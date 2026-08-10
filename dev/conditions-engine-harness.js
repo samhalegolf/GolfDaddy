@@ -22,6 +22,8 @@ const MODULES = [
   "scripts/course-data/conditions-engine/gd-conditions-engine.js",
   "scripts/course-data/gd-course-data-intake.js",
   "scripts/course-data/gd-course-data-comparison.js",
+  "scripts/course-data/gd-course-transfer-score.js",
+  "scripts/course-data/gd-course-implementation-insight.js",
   "scripts/course-data/gd-conditions-debug.js"
 ];
 
@@ -71,6 +73,8 @@ function load(options) {
     tolerances: context.window.GolfDaddyConditionsToleranceProfile,
     intake: context.window.GolfDaddyCourseDataIntake,
     comparison: context.window.GolfDaddyCourseDataComparison,
+    transferScore: context.window.GolfDaddyCourseTransferScore,
+    insight: context.window.GolfDaddyCourseImplementationInsight,
     debug: context.window.GolfDaddyConditionsDebug,
     snapshotBuilder: context.window.GolfDaddyShotSnapshot,
     pendingTimers,

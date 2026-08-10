@@ -3838,6 +3838,12 @@
   function gdCourseDataComparison(){
     return window.GolfDaddyCourseDataComparison||window.GolfDaddy?.modules?.courseDataComparison||null;
   }
+  function gdCourseTransferScore(){
+    return window.GolfDaddyCourseTransferScore||window.GolfDaddy?.modules?.courseTransferScore||null;
+  }
+  function gdCourseImplementationInsight(){
+    return window.GolfDaddyCourseImplementationInsight||window.GolfDaddy?.modules?.courseImplementationInsight||null;
+  }
   function gdCompareCoursePoints(ctx){
     const records=(ctx.courseRecords||[]).slice(0,70);
     if(!records.length)return [];
@@ -5493,13 +5499,37 @@
     if(!delta)return "same as practice";
     return `${delta>0?"+":""}${delta}% vs practice`;
   }
-  function gdCourseBubbleScaleControlHTML(){
+  // The notch shows WHERE THE SCORE CAME FROM. The player is free to drag
+  // anywhere; the score is fixed to this mark, so leaving it visible is what
+  // stops the two being confused for each other.
+  function gdCourseScaleMarkerHTML(analysis){
+    const required=Number(analysis?.requiredScalePercent);
+    if(!Number.isFinite(required))return "";
+    if(required<GD_COURSE_BUBBLE_SCALE_MIN||required>GD_COURSE_BUBBLE_SCALE_MAX)return "";
+    const span=GD_COURSE_BUBBLE_SCALE_MAX-GD_COURSE_BUBBLE_SCALE_MIN;
+    const at=((required-GD_COURSE_BUBBLE_SCALE_MIN)/span)*100;
+    const target=Math.round((Number(analysis?.targetCoverage)||0)*100);
+    return `<span class="gdCourseScaleMarker" style="bottom:${at.toFixed(1)}%" aria-hidden="true" title="${Math.round(required)}% holds ${target}% of your shots"></span>`;
+  }
+  function gdCourseBubbleScaleControlHTML(analysis){
     const pct=gdCourseBubbleScalePct();
     return `<div class="gdCourseScaleControl">
       <span class="gdCourseScaleValue">${pct}%</span>
-      <input class="gdCourseScaleSlider" type="range" orient="vertical" min="${GD_COURSE_BUBBLE_SCALE_MIN}" max="${GD_COURSE_BUBBLE_SCALE_MAX}" step="1" value="${pct}" aria-label="Course bubble size" oninput="return gdCourseBubbleScaleChanged(this)">
+      <div class="gdCourseScaleTrack"><input class="gdCourseScaleSlider" type="range" orient="vertical" min="${GD_COURSE_BUBBLE_SCALE_MIN}" max="${GD_COURSE_BUBBLE_SCALE_MAX}" step="1" value="${pct}" aria-label="Course bubble size" oninput="return gdCourseBubbleScaleChanged(this)">${gdCourseScaleMarkerHTML(analysis)}</div>
       <span class="gdCourseScaleDelta">${gdEscapeHTML(gdCourseBubbleSizeLabel(pct))}</span>
     </div>`;
+  }
+  // The insight area. Every sentence comes from the insight module - nothing is
+  // phrased here - so the copy-safety rules are enforced in one testable place.
+  function gdCourseInsightHTML(analysis){
+    const mod=gdCourseImplementationInsight();
+    const built=analysis&&mod?safe(()=>mod.buildCourseInsight(analysis),null):null;
+    if(!built)return "";
+    const rows=built.sections.map(section=>{
+      const head=section.headline?`<strong>${gdEscapeHTML(section.headline)}</strong>`:"";
+      return `<div class="gdCourseInsightRow"><span>${gdEscapeHTML(section.title)}</span>${head}<p>${gdEscapeHTML(section.body)}</p></div>`;
+    }).join("");
+    return `<div class="gdCourseInsight" data-state="${gdEscapeHTML(built.state)}">${rows}</div>`;
   }
   // Recomputed straight from the DOM so dragging is live and cheap - re-rendering
   // the whole chart on every input event would fight the drag.
@@ -5518,17 +5548,25 @@
     if(!Number.isFinite(rx)||!Number.isFinite(ry))return;
     ellipse.setAttribute("rx",rx.toFixed(1));
     ellipse.setAttribute("ry",ry.toFixed(1));
-    const cx=Number(ellipse.getAttribute("cx"));
-    const cy=Number(ellipse.getAttribute("cy"));
-    const t=-(Number(ellipse.dataset.tiltDeg)||0)*Math.PI/180;
-    const cos=Math.cos(t),sin=Math.sin(t);
+    // The bubble at 100%, read back off the node it was rendered with. The drag
+    // asks the score module the same question the render did, so a dot cannot
+    // light up here and be counted differently there.
+    const mod=gdCourseTransferScore();
+    const baseEllipse={
+      cx:Number(ellipse.getAttribute("cx")),
+      cy:Number(ellipse.getAttribute("cy")),
+      rx:Number(ellipse.dataset.baseRx),
+      ry:Number(ellipse.dataset.baseRy),
+      tiltDeg:Number(ellipse.dataset.tiltDeg)||0
+    };
     let inside=0,total=0;
     host.querySelectorAll(".gdCourseShotDot:not(.excluded)").forEach(dot=>{
       total+=1;
-      const dx=Number(dot.getAttribute("cx"))-cx;
-      const dy=Number(dot.getAttribute("cy"))-cy;
-      const ux=dx*cos-dy*sin,uy=dx*sin+dy*cos;
-      const within=(ux*ux)/(rx*rx)+(uy*uy)/(ry*ry)<=1;
+      const within=!!mod&&mod.isPointInsideScaledBubble(
+        {x:Number(dot.getAttribute("cx")),y:Number(dot.getAttribute("cy"))},
+        baseEllipse,
+        Number(pct)
+      );
       if(within)inside+=1;
       // Hydrate/dehydrate as the bubble sweeps over them - in/out has to move with
       // the slider, not lag a re-render. It is stated in weight, never in hue: the
@@ -5547,19 +5585,23 @@
     const subText=host.querySelector(".gdCourseContainmentSub");
     if(pctText)pctText.textContent=total?`${Math.round(inside/total*100)}% inside`:"";
     if(subText)subText.textContent=total?`${inside}/${total} shots`:"";
-    // THE TWO VALUES, published together: size and in-vs-out. Everything the
-    // screen says is these two numbers, so any logic built on top reads them from
-    // here rather than scraping the labels.
+    // WHAT THE DRAG IS ALLOWED TO CHANGE: where the slider is, and what that
+    // size holds. The transfer score is deliberately untouched - it comes from
+    // the automatically found threshold, not from wherever the player is
+    // currently dragging, and the notch on the track stays put to say so.
     safe(()=>{
       const containment=total?{inside,total,pct:Math.round(inside/total*100)}:null;
       window.gdCourseBubbleContainment=containment;
-      window.gdCourseBubbleReading={
-        sizePct:Math.round(Number(pct)),
-        sizeVsPracticePct:Math.round(Number(pct)-100),
-        containmentPct:containment?containment.pct:null,
-        inside:containment?containment.inside:0,
-        outside:containment?containment.total-containment.inside:0,
-        total:containment?containment.total:0
+      const analysis=window.gdCourseBubbleAnalysis;
+      if(!analysis)return;
+      analysis.currentSliderScalePercent=Number(pct);
+      analysis.currentSliderCoverage={
+        scalePercent:Number(pct),
+        sampleSize:total,
+        inside,
+        outside:total-inside,
+        insidePercent:total?inside/total*100:0,
+        outsidePercent:total?(total-inside)/total*100:0
       };
     });
   }
@@ -5678,13 +5720,17 @@
     // outside dots sit back at low opacity, inside dots come forward at full
     // strength with a ring. Tested in the ellipse's ROTATED frame so what lights
     // up is exactly what looks enclosed.
+    // The bubble at 100%, which is what the analysis grows from. courseGeo.rx/ry
+    // are the same shape already multiplied by the slider.
+    const courseEllipse=courseGeo?{cx:courseGeo.cx,cy:courseGeo.cy,rx:courseGeo.baseRx,ry:courseGeo.baseRy,tiltDeg:courseGeo.tilt}:null;
+    // ONE inside/outside test for the whole screen. It used to be written out
+    // three times - here, in the live drag handler, and again in the score - and
+    // three copies of a rotated-ellipse test is three chances for the picture and
+    // the number to disagree.
     const insideBubble=point=>{
-      if(!courseGeo||!point)return false;
-      const t=-courseGeo.tilt*Math.PI/180;
-      const dx=point.x-courseGeo.cx,dy=point.y-courseGeo.cy;
-      const ux=dx*Math.cos(t)-dy*Math.sin(t);
-      const uy=dx*Math.sin(t)+dy*Math.cos(t);
-      return (ux*ux)/(courseGeo.rx*courseGeo.rx)+(uy*uy)/(courseGeo.ry*courseGeo.ry)<=1;
+      const mod=gdCourseTransferScore();
+      if(!mod||!courseEllipse||!point)return false;
+      return mod.isPointInsideScaledBubble(point,courseEllipse,courseBubbleScale*100);
     };
     // NEWEST WINS when there are more shots than the chart can carry. The old cap
     // sliced from the front, which quietly dropped the most recent rounds - the
@@ -5692,6 +5738,23 @@
     // (which walked every row) disagreeing with the picture.
     const GD_COURSE_MAX_DOTS=240;
     const plottedRows=relativeRows.slice(-GD_COURSE_MAX_DOTS);
+    // THE ANALYSIS RUNS ON THE DRAWN DOTS, in the drawn frame, against the drawn
+    // bubble. No second validity rule is invented here: a shot is eligible if the
+    // Course Data pipeline counted it and the chart could place it, which is the
+    // same test the picture uses. yAxisDown because screen y grows downwards, so
+    // a LONG shot sits above the centre.
+    const courseAnalysis=(()=>{
+      const mod=gdCourseTransferScore();
+      if(!mod||!courseEllipse)return null;
+      const points=[];
+      plottedRows.forEach(entry=>{
+        if(entry.row?.record?.counted===false)return;
+        const point=pointFor(entry);
+        if(!point)return;
+        points.push({x:point.x,y:point.y,club:entry.club,id:entry.row?.record?.shotId||null});
+      });
+      return safe(()=>mod.analyse(points,courseEllipse,{yAxisDown:true,sliderScalePercent:courseBubbleScale*100}),null);
+    })();
     // COLLISION-FREE CLUB COLOURS. gdStatsClubColor hashes the club name into the
     // palette, which is fine where one club is on screen at a time but not here:
     // this graph deliberately shows EVERY club at once, and the hash lands 5i, SW
@@ -5725,33 +5788,16 @@
       const inside=insideBubble(point);
       return `<circle class="gdCourseShotDot${inside?" inside":""}" data-club="${gdStatsSvgText(entry.club||"Unknown")}" data-club-colour="${colour}" cx="${point.x.toFixed(1)}" cy="${point.y.toFixed(1)}" r="${inside?"2.9":"2.4"}" fill="${colour}" opacity="${inside?".95":".42"}" stroke="${inside?GD_COURSE_BUBBLE_COLOUR:"none"}" stroke-width="${inside?"1":"0"}" stroke-opacity="${inside?".55":"0"}"/>`;
     }).join("");
-    // Counts THE DRAWN DOTS, nothing else, so the reading and the picture can
-    // never drift apart - and so it agrees with what the slider recomputes from
-    // the DOM. A filtered-out shot is not a result to be contained.
-    const containment=(()=>{
-      if(!courseGeo)return null;
-      let inside=0,total=0;
-      plottedRows.forEach(entry=>{
-        if(entry.row?.record?.counted===false)return;
-        const point=pointFor(entry);
-        if(!point)return;
-        total+=1;
-        if(insideBubble(point))inside+=1;
-      });
-      if(!total)return null;
-      return {inside,total,pct:Math.round(inside/total*100)};
-    })();
+    // Reads off the analysis rather than recounting, so the headline figure and
+    // the score are answers from the same pass over the same dots.
+    const containment=courseAnalysis&&courseAnalysis.sampleSize?{
+      inside:courseAnalysis.currentSliderCoverage.inside,
+      total:courseAnalysis.sampleSize,
+      pct:Math.round(courseAnalysis.currentSliderCoverage.insidePercent)
+    }:null;
     safe(()=>{
       window.gdCourseBubbleContainment=containment;
-      const sizePct=Math.round(courseBubbleScale*100);
-      window.gdCourseBubbleReading={
-        sizePct,
-        sizeVsPracticePct:sizePct-100,
-        containmentPct:containment?containment.pct:null,
-        inside:containment?containment.inside:0,
-        outside:containment?containment.total-containment.inside:0,
-        total:containment?containment.total:0
-      };
+      window.gdCourseBubbleAnalysis=courseAnalysis;
     });
     // THE KEY IS HOW A DOT SAYS WHICH CLUB HIT IT. Built from the clubs actually
     // plotted, or supplied by the caller when it is colouring by something else
@@ -5778,7 +5824,7 @@
       ${courseBubbleSvg}
       ${shotDots}
     </svg>`;
-    return `<div class="gdCourseChartWrap">${svg}${gdCourseBubbleScaleControlHTML()}</div>`;
+    return `<div class="gdCourseChartWrap">${svg}${gdCourseBubbleScaleControlHTML(courseAnalysis)}</div>${gdCourseInsightHTML(courseAnalysis)}`;
   }
 	  function gdCourseDataLandingStatus(counts){
 	    if(counts.shown)return `${counts.shown} shown`;

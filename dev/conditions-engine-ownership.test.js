@@ -41,6 +41,8 @@ const ENGINE_FILES = [
 const COURSE_DATA_FILES = ENGINE_FILES.concat([
   "scripts/course-data/gd-course-data-intake.js",
   "scripts/course-data/gd-course-data-comparison.js",
+  "scripts/course-data/gd-course-transfer-score.js",
+  "scripts/course-data/gd-course-implementation-insight.js",
   "scripts/course-data/gd-conditions-debug.js"
 ]);
 
@@ -71,6 +73,8 @@ const html = read("index.html");
     "scripts/course-data/conditions-engine/gd-conditions-engine.js",
     "scripts/course-data/gd-course-data-intake.js",
     "scripts/course-data/gd-course-data-comparison.js",
+    "scripts/course-data/gd-course-transfer-score.js",
+    "scripts/course-data/gd-course-implementation-insight.js",
     "scripts/course-data/gd-conditions-debug.js"
   ];
 

@@ -4377,3 +4377,29 @@
   writing-mode:vertical-lr;direction:rtl;
   width:26px;flex:1 1 auto;min-height:150px;accent-color:#37f28d;background:transparent;
 }
+/* The track exists so the 75% notch has something to sit against. The slider
+   keeps its own sizing; the track just gives it a positioning context. */
+.gdCourseScaleTrack{position:relative;flex:1 1 auto;display:flex;min-height:150px}
+.gdCourseScaleTrack .gdCourseScaleSlider{min-height:0}
+/* WHERE THE SCORE CAME FROM. Amber, not green: it is a calculated mark, not a
+   bubble and not the players current size. */
+.gdCourseScaleMarker{
+  position:absolute;left:50%;transform:translate(-50%,50%);
+  width:20px;height:2px;border-radius:2px;background:#ffb347;
+  box-shadow:0 0 0 1px rgba(0,0,0,.35);pointer-events:none;
+}
+/* The insight area sits UNDER the graph and stays visually subordinate to it -
+   this is Course Data with a readout, not an analytics dashboard. */
+.gdCourseInsight{
+  display:flex;flex-direction:column;gap:8px;margin-top:10px;padding:10px 12px;
+  border-radius:14px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);
+}
+.gdCourseInsightRow{display:flex;flex-direction:column;gap:2px}
+.gdCourseInsightRow span{
+  color:rgba(255,255,255,.45);font-size:9px;font-weight:900;letter-spacing:.08em;text-transform:uppercase;
+}
+.gdCourseInsightRow strong{color:#37f28d;font-size:15px;font-weight:950;line-height:1.1}
+.gdCourseInsightRow p{margin:0;color:rgba(255,255,255,.72);font-size:11px;font-weight:700;line-height:1.4}
+/* Nothing to conclude yet reads quieter than a real reading. */
+.gdCourseInsight[data-state="insufficient_data"] .gdCourseInsightRow strong,
+.gdCourseInsight[data-state="unreadable"] .gdCourseInsightRow strong{color:rgba(255,255,255,.6)}
