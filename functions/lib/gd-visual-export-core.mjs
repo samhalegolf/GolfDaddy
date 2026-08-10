@@ -1,10 +1,16 @@
 /* Sharp-based frame compositor - the light export path.
 
-   Renders a hole's play frame directly as bitmap operations instead of asking the engine to
+   Renders a hole's surface directly as bitmap operations instead of asking the engine to
    build nested SVGs of base64 (which wrapped the same pixels 4-5x over, blew librsvg's 10MB
-   XML limit, and OOM-killed workers). The layout math is a faithful port of the engine's
-   playAxisSurfaceAsset: identical axis, padding, margins, and per-capture affine, so frames
-   land exactly where the browser sandbox puts them. The recipe applies as libvips primitives:
+   XML limit, and OOM-killed workers).
+
+   Everything here is NORTH-UP mercator (renderHoleSurfaceMercator) plus the course overview.
+   There used to be a second renderer that baked the play-axis framing into the pixels, a port
+   of the engine's playAxisSurfaceAsset - rotated per-capture affines, lens masks, the lot. It
+   is gone: Play does its own framing at runtime from (originPx, captureZoom, image), so baking
+   a second copy of that maths server-side only gave it somewhere to drift out of step.
+
+   The recipe applies as libvips primitives:
      feColorMatrix saturate        -> modulate({saturation})
      feComponentTransfer linear    -> linear(contrast, 255*(brightness-1)/2)
      terrain relief layer          -> hillshade mask laid on flattened pixels with soft-light
@@ -12,8 +18,6 @@
    The only SVGs rasterized are a few KB of gradients - no embedded images anywhere. */
 
 import sharp from "sharp";
-
-const FRAME_ASPECT = 9 / 16;
 
 function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, Number(v))); }
 function num(v, fb) { const n = Number(v); return Number.isFinite(n) ? n : fb; }
@@ -145,146 +149,11 @@ function floodlightSettings(settings) {
   };
 }
 
-/* ---- play-axis frame layout (port of playAxisSurfaceAsset) ------------------------------ */
-
-function frameAxis(pins, captures, width) {
-  const tee = world(pins.tee);
-  const green = world(pins.green);
-  if (!tee || !green) return null;
-  const dx = green.x - tee.x, dy = green.y - tee.y;
-  const axisLen = Math.sqrt(dx * dx + dy * dy);
-  if (!Number.isFinite(axisLen) || axisLen <= 1e-12) return null;
-  const ux = dx / axisLen, uy = dy / axisLen, px = -uy, py = ux;
-  const axisPoints = [];
-  const push = (w) => { if (w) axisPoints.push({ cross: (w.x - tee.x) * px + (w.y - tee.y) * py, along: (w.x - tee.x) * ux + (w.y - tee.y) * uy }); };
-  [pins.tee, pins.green, ...(pins.route || []), ...(pins.greenShape || [])].forEach(pt => push(world(pt)));
-  captures.forEach(({ entry }) => {
-    const pb = projectedBounds(entry.bounds);
-    if (!pb) return;
-    const capW = Math.max(1, Number(entry.width) || 1);
-    const capH = Math.max(1, Number(entry.height) || 1);
-    /* Like the engine: the LENS corners frame the axis, not the capture's axis-aligned cover
-       (which is ~4x the lens for rotated corridors and would shrink everything to a stamp). */
-    const lens = Array.isArray(entry.lensLocalCorners) && entry.lensLocalCorners.length >= 4
-      ? entry.lensLocalCorners
-      : [{ x: 0, y: 0 }, { x: capW, y: 0 }, { x: capW, y: capH }, { x: 0, y: capH }];
-    lens.forEach(p => push({
-      x: pb.left + (p.x / capW) * (pb.right - pb.left),
-      y: pb.top + (p.y / capH) * (pb.bottom - pb.top)
-    }));
-  });
-  if (axisPoints.length < 2) return null;
-  let minCross = Math.min(...axisPoints.map(p => p.cross));
-  let maxCross = Math.max(...axisPoints.map(p => p.cross));
-  let minAlong = Math.min(...axisPoints.map(p => p.along));
-  let maxAlong = Math.max(...axisPoints.map(p => p.along));
-  let alongSpan = Math.max(axisLen, maxAlong - minAlong, 1e-12);
-  let crossSpan = Math.max(maxCross - minCross, axisLen * 0.42, 1e-12);
-  const crossPad = Math.max(crossSpan * 0.12, axisLen * 0.08);
-  const alongPad = Math.max(alongSpan * 0.08, axisLen * 0.06);
-  minCross -= crossPad; maxCross += crossPad; minAlong -= alongPad; maxAlong += alongPad;
-  crossSpan = Math.max(1e-12, maxCross - minCross);
-  alongSpan = Math.max(1e-12, maxAlong - minAlong);
-  const height = Math.round(width / FRAME_ASPECT);
-  const marginX = width * 0.07, marginY = height * 0.06;
-  const scale = Math.min((width - marginX * 2) / crossSpan, (height - marginY * 2) / alongSpan);
-  if (!Number.isFinite(scale) || scale <= 0) return null;
-  return {
-    origin: tee, ux, uy, px, py,
-    centerCross: (minCross + maxCross) / 2,
-    centerAlong: (minAlong + maxAlong) / 2,
-    scale, width, height
-  };
-}
-
-function frameProject(axis, pt) {
-  const w = world(pt);
-  if (!w) return null;
-  const dx = w.x - axis.origin.x, dy = w.y - axis.origin.y;
-  const cross = dx * axis.px + dy * axis.py;
-  const along = dx * axis.ux + dy * axis.uy;
-  return { x: axis.width / 2 + (cross - axis.centerCross) * axis.scale, y: axis.height / 2 - (along - axis.centerAlong) * axis.scale };
-}
-
-/* Engine group matrix: capture-local logical pixel -> frame pixel. */
-function captureMatrix(axis, entry) {
-  const pb = projectedBounds(entry.bounds);
-  if (!pb) return null;
-  const capW = Math.max(1, Number(entry.width) || 1);
-  const capH = Math.max(1, Number(entry.height) || 1);
-  const spanX = Math.max(1e-12, pb.right - pb.left);
-  const spanY = Math.max(1e-12, pb.bottom - pb.top);
-  const { origin, ux, uy, px, py, scale, width, height, centerCross, centerAlong } = axis;
-  const baseCross = (pb.left - origin.x) * px + (pb.top - origin.y) * py;
-  const baseAlong = (pb.left - origin.x) * ux + (pb.top - origin.y) * uy;
-  return {
-    a: spanX / capW * px * scale,
-    b: -(spanX / capW) * ux * scale,
-    c: spanY / capH * py * scale,
-    d: -(spanY / capH) * uy * scale,
-    e: width / 2 + (baseCross - centerCross) * scale,
-    f: height / 2 - (baseAlong - centerAlong) * scale,
-    capW, capH
-  };
-}
-function applyMatrix(m, x, y) { return { x: m.a * x + m.c * y + m.e, y: m.b * x + m.d * y + m.f }; }
-
-/* ---- capture layer: mask (lens), scale, rotate, position -------------------------------- */
-
-async function captureLayer(axis, entry, buffer, tone) {
-  const m = captureMatrix(axis, entry);
-  if (!m) return null;
-  const meta = await sharp(buffer).metadata();
-  const bufW = meta.width, bufH = meta.height;
-  const k = m.capW / bufW; /* logical px per buffer px */
-  let image = sharp(buffer).ensureAlpha();
-  const lens = Array.isArray(entry.lensLocalCorners) && entry.lensLocalCorners.length >= 4 ? entry.lensLocalCorners : null;
-  if (lens) {
-    const pts = lens.map(p => (p.x / k) + "," + (p.y / k)).join(" ");
-    const maskSvg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="' + bufW + '" height="' + bufH + '"><polygon points="' + pts + '" fill="white"/></svg>');
-    const masked = await image.composite([{ input: maskSvg, blend: "dest-in" }]).raw().toBuffer();
-    image = sharp(masked, { raw: { width: bufW, height: bufH, channels: 4 }, limitInputPixels: false });
-  }
-  /* Uniform scale + rotation (the matrix is orthogonal by construction). Tone applies here,
-     per layer, inside the same pipeline - per-pixel ops commute with compositing, so this is
-     identical to toning the finished composite while saving two full-canvas encode/decode
-     round-trips. Intermediates stay RAW: no PNG/JPEG churn between stages. */
-  const s = Math.hypot(m.a, m.b) * k;
-  const angleDeg = Math.atan2(m.b, m.a) * 180 / Math.PI;
-  const scaledW = Math.max(1, Math.round(bufW * s));
-  const scaledH = Math.max(1, Math.round(bufH * s));
-  image = image.resize({ width: scaledW, height: scaledH, fit: "fill" })
-    .rotate(angleDeg, { background: { r: 0, g: 0, b: 0, alpha: 0 } });
-  if (tone) image = image.linear(tone.contrast, 255 * ((tone.brightness - 1) / 2)).modulate({ saturation: tone.saturation });
-  const rotated = await image.raw().toBuffer({ resolveWithObject: true });
-  const rW = rotated.info.width, rH = rotated.info.height;
-  /* Position: the rotated output's bbox top-left equals the transformed rect's bbox. */
-  const corners = [[0, 0], [m.capW, 0], [m.capW, m.capH], [0, m.capH]].map(([x, y]) => applyMatrix(m, x, y));
-  const left = Math.round(Math.min(...corners.map(c => c.x)));
-  const top = Math.round(Math.min(...corners.map(c => c.y)));
-  /* Bleed deliberately overflows the frame; sharp requires overlays to fit inside the canvas,
-     so clip each layer to its visible intersection and clamp the offset. */
-  const cropLeft = Math.max(0, -left), cropTop = Math.max(0, -top);
-  const visW = Math.min(rW - cropLeft, axis.width - Math.max(0, left));
-  const visH = Math.min(rH - cropTop, axis.height - Math.max(0, top));
-  if (visW <= 0 || visH <= 0) return null;
-  const needsCrop = cropLeft || cropTop || visW < rW || visH < rH;
-  const clipped = needsCrop
-    ? await sharp(rotated.data, { raw: { width: rW, height: rH, channels: rotated.info.channels }, limitInputPixels: false }).extract({ left: cropLeft, top: cropTop, width: visW, height: visH }).raw().toBuffer({ resolveWithObject: true })
-    : rotated;
-  return {
-    input: clipped.data,
-    raw: { width: clipped.info.width, height: clipped.info.height, channels: clipped.info.channels },
-    left: Math.max(0, left), top: Math.max(0, top),
-    layer: num(entry.stitchLayer, 10), segment: num(entry.segmentIndex, 999), id: String(entry.id || "")
-  };
-}
-
 /* ---- light-effect SVGs (gradients only, never any raster) ------------------------------- */
 
-function floodlightSvg(axis, pins, cfg, projectOverride) {
-  const project = projectOverride || ((pt) => frameProject(axis, pt));
-  const w = axis.width, h = axis.height;
+/* size is just {width, height}; project maps a lat/lng onto those pixels. */
+function floodlightSvg(size, pins, cfg, project) {
+  const w = size.width, h = size.height;
   const dark = clamp(Math.pow((100 - cfg.ambientLevel) / 100, 1.15), 0, 1);
   const lit = clamp(cfg.litLevel / 100, 0, 1);
   const tee = project(pins.tee);
@@ -322,55 +191,6 @@ function floodlightSvg(axis, pins, cfg, projectOverride) {
 
 function mowSvg(width, height, opacity) {
   return Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="' + width + '" height="' + height + '"><defs><pattern id="mow" width="24" height="24" patternUnits="userSpaceOnUse" patternTransform="rotate(108)"><path d="M0 0 L0 24" stroke="rgba(255,255,255,' + (0.2 * opacity / 0.28).toFixed(3) + ')" stroke-width="1"/></pattern></defs><rect width="100%" height="100%" fill="url(#mow)"/></svg>');
-}
-
-/* ---- renderers -------------------------------------------------------------------------- */
-
-export async function renderHoleFrame({ pins, captures, terrain, settings, width = 1440, quality = 82 }) {
-  const axis = frameAxis(pins, captures, width);
-  if (!axis) throw new Error("play axis could not be derived (missing tee/green)");
-  const f = recipeFilter(settings);
-  const layers = [];
-  for (const item of captures) {
-    const layer = await captureLayer(axis, item.entry, item.buffer, f);
-    if (layer) layers.push(layer);
-  }
-  if (!layers.length) throw new Error("no renderable capture layers");
-  layers.sort((a, b) => a.layer - b.layer || a.segment - b.segment || a.id.localeCompare(b.id));
-  const composites = layers.map(l => ({ input: l.input, raw: l.raw, left: l.left, top: l.top }));
-  /* Terrain relief: shading placed with the same matrix, as a single-channel mask. */
-  const terrainCfg = terrainParams(settings);
-  let relief = null;
-  if (terrain && terrainCfg.strength > 0.02) {
-    const layer = await captureLayer(axis, terrain.entry, terrain.buffer, null);
-    if (layer) {
-      const shaded = await sharp({ create: { width: axis.width, height: axis.height, channels: 3, background: { r: 128, g: 128, b: 128 } }, limitInputPixels: false })
-        .composite([{ input: layer.input, raw: layer.raw, left: layer.left, top: layer.top }])
-        .greyscale()
-        .toColourspace("b-w")
-        .raw().toBuffer({ resolveWithObject: true });
-      relief = { data: shaded.data, opacity: terrainCfg.opacity };
-    }
-  }
-  const overlays = [];
-  const mow = mowingOpacity(settings && settings.mowingVisibility);
-  if (mow > 0) overlays.push({ input: mowSvg(axis.width, axis.height, mow), blend: "over" });
-  const flood = floodlightSettings(settings);
-  if (flood.enabled) overlays.push({ input: floodlightSvg(axis, pins, flood), blend: "over" });
-  /* Background pushed through the same tone math the layers got, then ONE composite pass and
-     ONE encode - the double full-canvas JPEG round-trip was a third of the render time. */
-  const toneChannel = v => Math.round(Math.min(255, Math.max(0, v * f.contrast + 255 * ((f.brightness - 1) / 2))));
-  const jpeg = await flattenWithRelief({
-    width: axis.width, height: axis.height,
-    background: { r: toneChannel(16), g: toneChannel(19), b: toneChannel(15) },
-    composites, relief, overlays, quality
-  });
-  return {
-    jpeg,
-    width: axis.width,
-    height: axis.height,
-    playAxis: { origin: axis.origin, ux: axis.ux, uy: axis.uy, px: axis.px, py: axis.py, centerCross: axis.centerCross, centerAlong: axis.centerAlong, scale: axis.scale, width: axis.width, height: axis.height }
-  };
 }
 
 function unworld(x, y) {

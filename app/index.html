@@ -109,6 +109,12 @@
        oversizes the map element, so Leaflet's own attribution control would
        ride off-screen with it. The imagery licences require it stays visible. -->
   <div id="mapAttribution" class="hiddenState"></div>
+  <!-- The stage carries the lock-stage tilt and nothing else. It is the screen
+       grown by the overscan (styles.css) purely so the tilted box still covers
+       the screen once perspective has pushed its far edge toward the vanishing
+       line; it clips everything back to the screen edge. The viewport inside it
+       stays exactly the screen rectangle, so the coordinates never move. -->
+  <div id="surfaceStage">
   <!-- The overlay viewport rides over BOTH presentations: the published
        surface fills it with #surfaceImage, the live map shows through it.
        Everything inside is positioned in viewport pixels by play.js through
@@ -142,6 +148,7 @@
          really is. -->
     <div id="edgeDistance" class="hiddenState"></div>
     <div id="aimBubble" class="hiddenState"></div>
+  </div>
   </div>
   <!-- The dock: Lock in Track, Unlock Shot while aiming. Shot End sits beside
        it rather than being a third face, because while aiming BOTH are things

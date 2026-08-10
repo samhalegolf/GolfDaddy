@@ -4358,48 +4358,105 @@
 /* A bubble is saved, but the one on screen is new - adopting will replace it. */
 .gdPracticeAdoptStatus.fresh{border-color:rgba(98,210,255,.4);background:rgba(98,210,255,.1)}
 
-/* Course chart + its size slider, side by side. The slider is the screen's only
-   control: it sizes the bubble and both live readings come off it. */
+/* Course chart. The bubble is drawn at its preset size and nothing on the screen
+   resizes it, so the wrap has no control beside it any more - it stays a flex
+   row so the svg keeps shrinking to the card rather than overflowing it. */
 .gdCourseChartWrap{display:flex;align-items:stretch;gap:8px}
 .gdCourseChartWrap svg{flex:1 1 auto;min-width:0}
-.gdCourseScaleControl{
-  flex:0 0 auto;display:flex;flex-direction:column;align-items:center;justify-content:center;
-  gap:8px;padding:10px 6px;border-radius:14px;
-  border:1px solid rgba(55,242,141,.22);background:rgba(55,242,141,.06);
+
+/* THE DATE RANGE, the screen's only control. Sits above the graph because it
+   decides what the graph is of - every figure below it is the analysis of
+   whichever pill is lit. */
+.gdCourseRangeRow{display:flex;align-items:center;gap:6px;margin-bottom:10px}
+.gdCourseRangeIcon{
+  flex:0 0 auto;width:28px;height:28px;border-radius:9px;
+  border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.03);
+  display:flex;align-items:center;justify-content:center;
 }
-.gdCourseScaleValue{color:#37f28d;font-size:12px;font-weight:950;line-height:1}
-.gdCourseScaleDelta{
-  color:rgba(255,255,255,.6);font-size:9px;font-weight:850;line-height:1.15;
-  text-align:center;max-width:64px;
+.gdCourseRangePills{display:flex;gap:5px;flex:1 1 auto}
+.gdCourseRangePill{
+  padding:5px 10px;border-radius:9px;cursor:pointer;
+  font-size:11px;font-weight:900;letter-spacing:.02em;line-height:1;
+  border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.03);
+  color:rgba(255,255,255,.6);
 }
-.gdCourseScaleSlider{
-  -webkit-appearance:slider-vertical;appearance:slider-vertical;
-  writing-mode:vertical-lr;direction:rtl;
-  width:26px;flex:1 1 auto;min-height:150px;accent-color:#37f28d;background:transparent;
+.gdCourseRangePill.active{
+  border-color:rgba(55,242,141,.4);background:rgba(55,242,141,.14);color:#37f28d;
 }
-/* The track exists so the 75% notch has something to sit against. The slider
-   keeps its own sizing; the track just gives it a positioning context. */
-.gdCourseScaleTrack{position:relative;flex:1 1 auto;display:flex;min-height:150px}
-.gdCourseScaleTrack .gdCourseScaleSlider{min-height:0}
-/* WHERE THE SCORE CAME FROM. Amber, not green: it is a calculated mark, not a
-   bubble and not the players current size. */
-.gdCourseScaleMarker{
-  position:absolute;left:50%;transform:translate(-50%,50%);
-  width:20px;height:2px;border-radius:2px;background:#ffb347;
-  box-shadow:0 0 0 1px rgba(0,0,0,.35);pointer-events:none;
-}
-/* The insight area sits UNDER the graph and stays visually subordinate to it -
-   this is Course Data with a readout, not an analytics dashboard. */
+
+/* THE SCORE BLOCK. Sits UNDER the graph and stays visually subordinate to it -
+   this is Course Data with a readout, not an analytics dashboard. Its border and
+   background take the score's own tone at low alpha, so the block itself is part
+   of the reading rather than a neutral box with a coloured number in it. */
 .gdCourseInsight{
-  display:flex;flex-direction:column;gap:8px;margin-top:10px;padding:10px 12px;
+  display:flex;flex-direction:column;gap:11px;margin-top:10px;padding:12px;
   border-radius:14px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.03);
 }
-.gdCourseInsightRow{display:flex;flex-direction:column;gap:2px}
-.gdCourseInsightRow span{
+.gdCourseInsight[data-tone="low"]{border-color:rgba(255,90,95,.22);background:rgba(255,90,95,.05)}
+.gdCourseInsight[data-tone="mid"]{border-color:rgba(255,179,71,.22);background:rgba(255,179,71,.05)}
+.gdCourseInsight[data-tone="high"]{border-color:rgba(55,242,141,.22);background:rgba(55,242,141,.05)}
+
+.gdCourseScoreHead{display:flex;align-items:flex-end;gap:9px}
+.gdCourseScoreLabel{
+  flex:1 1 auto;
   color:rgba(255,255,255,.45);font-size:9px;font-weight:900;letter-spacing:.08em;text-transform:uppercase;
 }
-.gdCourseInsightRow strong{color:#37f28d;font-size:15px;font-weight:950;line-height:1.1}
-.gdCourseInsightRow p{margin:0;color:rgba(255,255,255,.72);font-size:11px;font-weight:700;line-height:1.4}
-/* Nothing to conclude yet reads quieter than a real reading. */
-.gdCourseInsight[data-state="insufficient_data"] .gdCourseInsightRow strong,
-.gdCourseInsight[data-state="unreadable"] .gdCourseInsightRow strong{color:rgba(255,255,255,.6)}
+/* State and sample size travel together: what the score is worth, and on how
+   much. Neutral in every state - the colour belongs to the number. */
+.gdCourseScoreChip{
+  padding:3px 7px;border-radius:6px;
+  background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);
+  color:rgba(255,255,255,.6);font-size:9px;font-weight:900;letter-spacing:.04em;
+  text-transform:uppercase;white-space:nowrap;
+}
+.gdCourseScoreValue{display:flex;align-items:baseline;gap:8px}
+.gdCourseScoreValue strong{font-size:34px;font-weight:950;line-height:.9;letter-spacing:-.02em}
+.gdCourseScoreValue span{color:rgba(255,255,255,.4);font-size:15px;font-weight:900}
+
+/* THE COLOUR IS THE MESSAGE. No band names and no threshold text anywhere on the
+   rail - a red 3 and a green 9 need no caption, and captioning them turns a
+   glance into a paragraph. The hexes live here and nowhere else; the insight
+   module decides only which band the score is in. */
+.gdCourseInsight[data-tone="none"] .gdCourseScoreValue strong{color:rgba(255,255,255,.45)}
+.gdCourseInsight[data-tone="low"] .gdCourseScoreValue strong{color:#ff5a5f}
+.gdCourseInsight[data-tone="mid"] .gdCourseScoreValue strong{color:#ffb347}
+.gdCourseInsight[data-tone="high"] .gdCourseScoreValue strong{color:#37f28d}
+
+.gdCourseRail{display:flex;flex-direction:column;gap:5px}
+.gdCourseRailSegs{display:flex;gap:3px;height:8px}
+.gdCourseRailSeg{flex:1;border-radius:2px;background:rgba(255,255,255,.08)}
+.gdCourseRailEnds{
+  display:flex;justify-content:space-between;
+  color:rgba(255,255,255,.35);font-size:9px;font-weight:850;
+}
+/* EACH SEGMENT WEARS ITS OWN BAND, not the score's. A 7 shows the red stretch it
+   climbed out of and the green it has not reached, so the rail is the whole
+   scale rather than a progress bar that happens to be amber today. Lit up to the
+   score, full strength AT it: the run behind is only distance travelled, the one
+   bright segment is the reading. The band a segment belongs to is decided in the
+   insight module - this only holds the hexes. */
+.gdCourseRailSeg[data-band="low"][data-seg="on"]{background:rgba(255,90,95,.33)}
+.gdCourseRailSeg[data-band="low"][data-seg="at"]{background:#ff5a5f}
+.gdCourseRailSeg[data-band="mid"][data-seg="on"]{background:rgba(255,179,71,.33)}
+.gdCourseRailSeg[data-band="mid"][data-seg="at"]{background:#ffb347}
+.gdCourseRailSeg[data-band="high"][data-seg="on"]{background:rgba(55,242,141,.33)}
+.gdCourseRailSeg[data-band="high"][data-seg="at"]{background:#37f28d}
+
+/* EVERYTHING ELSE IS BEHIND THIS TAB, collapsed on every load. What the score
+   measures and how much the bubble actually held are worth having; neither is
+   worth reading twice, and a screen that explains itself permanently is a screen
+   that does not trust its own number. */
+.gdCourseInsightMore{border-top:1px solid rgba(255,255,255,.08);padding-top:9px}
+.gdCourseInsightMore summary{
+  list-style:none;cursor:pointer;display:flex;align-items:center;gap:7px;
+  color:rgba(255,255,255,.55);font-size:10px;font-weight:900;letter-spacing:.06em;text-transform:uppercase;
+}
+.gdCourseInsightMore summary::-webkit-details-marker{display:none}
+.gdCourseInsightInfo{
+  width:15px;height:15px;border-radius:50%;border:1px solid rgba(255,255,255,.28);
+  display:flex;align-items:center;justify-content:center;
+  font-size:9px;font-weight:900;font-style:italic;
+}
+.gdCourseInsightBody{display:flex;flex-direction:column;gap:9px;padding-top:10px}
+.gdCourseInsightBody p{margin:0;color:rgba(255,255,255,.72);font-size:11.5px;font-weight:700;line-height:1.45}
+.gdCourseInsightBody .gdCourseInsightNote{color:rgba(255,255,255,.5);font-size:11px;font-weight:750;line-height:1.4}

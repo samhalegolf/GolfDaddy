@@ -5475,8 +5475,12 @@
   const GD_MY_BUBBLE_COLOUR="#f4f8f3";
   const GD_COURSE_BUBBLE_COLOUR="#37f28d";
   const GD_COURSE_BUFFER_COLOUR="#ffb347";
-  // Dots sit off-black until the bubble reaches them.
-  const GD_COURSE_DOT_OUTSIDE="#4a534f";
+  // Dots say one thing: inside the plan, or outside it. Bright bone inside,
+  // grey-green outside, and off-black for a shot the pipeline did not count -
+  // present, because it happened, but never mistaken for evidence.
+  const GD_COURSE_DOT_INSIDE="#f4f8f3";
+  const GD_COURSE_DOT_OUTSIDE="#8b968f";
+  const GD_COURSE_DOT_UNCOUNTED="#4a534f";
   const GD_COURSE_BUBBLE_BUFFER_PCT=50;
   function gdCourseBubbleBufferPct(){
     const tuned=safe(()=>typeof dev==="function"?Number(dev("bubbleVisuals.courseBufferPct")):NaN,NaN);
@@ -5485,142 +5489,123 @@
   // opts lets the Course Data default screen (gdStatsVisualSummary) reuse this
   // renderer with its own filtered records, colour mode and legend, so both the
   // default screen and this fallback plot on the SAME fixed normalised domain.
-  // THE COURSE BUBBLE SLIDER. Two live readings come off it and they are meant to
-  // be weighed against each other: how much of the result the bubble holds
-  // (containment), and how big it had to be to hold that (size vs the practice
-  // bubble). "80% inside at 20% bigger than practice" is one sentence made of both.
-  //
-  // 100% is exactly the preset size - the same size the practice bubble is drawn
-  // at - so the size reading is a direct comparison rather than an abstract number.
-  const GD_COURSE_BUBBLE_SCALE_KEY="gd_course_bubble_scale_pct_v1";
-  const GD_COURSE_BUBBLE_SCALE_MIN=40;
-  const GD_COURSE_BUBBLE_SCALE_MAX=200;
-  const GD_COURSE_BUBBLE_SCALE_DEFAULT=100;
-  function gdCourseBubbleScalePct(){
-    const stored=safe(()=>Number(localStorage.getItem(GD_COURSE_BUBBLE_SCALE_KEY)),NaN);
-    const value=Number.isFinite(stored)&&stored>0?stored:GD_COURSE_BUBBLE_SCALE_DEFAULT;
-    return Math.max(GD_COURSE_BUBBLE_SCALE_MIN,Math.min(GD_COURSE_BUBBLE_SCALE_MAX,Math.round(value)));
+  // THE BUBBLE IS DRAWN AT ITS PRESET SIZE, FULL STOP. There used to be a slider
+  // sizing it, and it was the screen's most misread control: the score never came
+  // off it (the score is the automatically found threshold), so dragging changed
+  // the picture and not the number, and the two looked like they disagreed. The
+  // bubble is the plan; the dots are what happened; the score says how far apart
+  // they are. Nothing on this screen resizes the plan.
+  const GD_COURSE_BUBBLE_SCALE=1;
+  // THE DATE RANGE. The only control on the screen, and it does exactly one
+  // thing: it decides which rows reach the chart. Everything after that - dots,
+  // score, chip, rail, the four quadrant percentages, the containment line - is
+  // the ordinary analysis of whatever subset came through, so there is no
+  // per-range maths anywhere and no way for one reading to be filtered while
+  // another is not.
+  const GD_COURSE_RANGE_KEY="gd_course_data_range_v1";
+  const GD_COURSE_RANGE_DEFAULT="month";
+  const GD_COURSE_RANGES=[
+    {key:"week",label:"Week",days:7},
+    {key:"month",label:"Month",days:30},
+    {key:"year",label:"Year",days:365},
+    {key:"all",label:"All",days:null}
+  ];
+  function gdCourseRangeFor(key){
+    return GD_COURSE_RANGES.filter(range=>range.key===key)[0]||null;
   }
-  function gdCourseBubbleSizeLabel(pct){
-    const delta=Math.round(pct-100);
-    if(!delta)return "same as practice";
-    return `${delta>0?"+":""}${delta}% vs practice`;
+  function gdCourseRangeKey(){
+    const stored=safe(()=>JSON.parse(localStorage.getItem(GD_COURSE_RANGE_KEY)||"null"),null);
+    const key=stored&&typeof stored.range==="string"?stored.range:null;
+    return gdCourseRangeFor(key)?key:GD_COURSE_RANGE_DEFAULT;
   }
-  // The notch shows WHERE THE SCORE CAME FROM. The player is free to drag
-  // anywhere; the score is fixed to this mark, so leaving it visible is what
-  // stops the two being confused for each other.
-  function gdCourseScaleMarkerHTML(analysis){
-    const required=Number(analysis?.requiredScalePercent);
-    if(!Number.isFinite(required))return "";
-    if(required<GD_COURSE_BUBBLE_SCALE_MIN||required>GD_COURSE_BUBBLE_SCALE_MAX)return "";
-    const span=GD_COURSE_BUBBLE_SCALE_MAX-GD_COURSE_BUBBLE_SCALE_MIN;
-    const at=((required-GD_COURSE_BUBBLE_SCALE_MIN)/span)*100;
-    const target=Math.round((Number(analysis?.targetCoverage)||0)*100);
-    return `<span class="gdCourseScaleMarker" style="bottom:${at.toFixed(1)}%" aria-hidden="true" title="${Math.round(required)}% holds ${target}% of your shots"></span>`;
+  function gdCourseSetRangeKey(key){
+    const valid=gdCourseRangeFor(key)?key:GD_COURSE_RANGE_DEFAULT;
+    safe(()=>localStorage.setItem(GD_COURSE_RANGE_KEY,JSON.stringify({range:valid,updatedAt:new Date().toISOString()})));
+    return valid;
   }
-  function gdCourseBubbleScaleControlHTML(analysis){
-    const pct=gdCourseBubbleScalePct();
-    return `<div class="gdCourseScaleControl">
-      <span class="gdCourseScaleValue">${pct}%</span>
-      <div class="gdCourseScaleTrack"><input class="gdCourseScaleSlider" type="range" orient="vertical" min="${GD_COURSE_BUBBLE_SCALE_MIN}" max="${GD_COURSE_BUBBLE_SCALE_MAX}" step="1" value="${pct}" aria-label="Course bubble size" oninput="return gdCourseBubbleScaleChanged(this)">${gdCourseScaleMarkerHTML(analysis)}</div>
-      <span class="gdCourseScaleDelta">${gdEscapeHTML(gdCourseBubbleSizeLabel(pct))}</span>
+  // 0 means no limit. A record with no readable capture time is never dropped:
+  // the same rule the stats filter uses, because binning undated rows would make
+  // the shot list and the graph quietly disagree about how many shots there are.
+  function gdCourseRangeCutoff(key){
+    const range=gdCourseRangeFor(key);
+    if(!range||!range.days)return 0;
+    return Date.now()-range.days*24*60*60*1000;
+  }
+  function gdCourseRecordTime(record){
+    return safe(()=>typeof gdStatsShotTime==="function"?gdStatsShotTime(record):Date.parse(record?.timestamp||""),0)||0;
+  }
+  function gdCourseRecordsInRange(records,key){
+    const cutoff=gdCourseRangeCutoff(key);
+    if(!cutoff)return records;
+    return records.filter(record=>{
+      const at=gdCourseRecordTime(record);
+      return !at||at>=cutoff;
+    });
+  }
+  function gdCourseRangeRowHTML(){
+    const active=gdCourseRangeKey();
+    const pills=GD_COURSE_RANGES.map(range=>`<button type="button" class="gdCourseRangePill${range.key===active?" active":""}" aria-pressed="${range.key===active}" onclick="return gdCourseRangeChanged('${range.key}')">${gdEscapeHTML(range.label)}</button>`).join("");
+    return `<div class="gdCourseRangeRow">
+      <span class="gdCourseRangeIcon" aria-hidden="true"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="rgba(255,255,255,.65)" stroke-width="1.8" stroke-linecap="round"><rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M3.5 9.5 H20.5"/><path d="M8 2.8 V5.6"/><path d="M16 2.8 V5.6"/></svg></span>
+      <div class="gdCourseRangePills" role="group" aria-label="Date range">${pills}</div>
     </div>`;
+  }
+  // A full re-render, not a live update: the range changes which shots exist, so
+  // every figure on the screen has to be recomputed from the new subset. The old
+  // slider had a DOM-patching fast path because it changed nothing but the
+  // picture; this changes the data, and nothing here may patch a number in place.
+  function gdCourseRangeChanged(key){
+    gdCourseSetRangeKey(key);
+    if(typeof renderStats==="function")safe(()=>renderStats());
+    else safe(()=>gdRenderCourseDataSurfaceFallback());
+    return false;
   }
   // The insight area. Every sentence comes from the insight module - nothing is
   // phrased here - so the copy-safety rules are enforced in one testable place.
+  // What this function owns is presentation only: which band the tone maps to is
+  // the module's call, and the stylesheet holds the colour it means.
   function gdCourseInsightHTML(analysis){
     const mod=gdCourseImplementationInsight();
     const built=analysis&&mod?safe(()=>mod.buildCourseInsight(analysis),null):null;
     if(!built)return "";
-    const rows=built.sections.map(section=>{
-      const head=section.headline?`<strong>${gdEscapeHTML(section.headline)}</strong>`:"";
-      return `<div class="gdCourseInsightRow"><span>${gdEscapeHTML(section.title)}</span>${head}<p>${gdEscapeHTML(section.body)}</p></div>`;
-    }).join("");
-    return `<div class="gdCourseInsight" data-state="${gdEscapeHTML(built.state)}">${rows}</div>`;
-  }
-  // Recomputed straight from the DOM so dragging is live and cheap - re-rendering
-  // the whole chart on every input event would fight the drag.
-  function gdCourseBubbleApplyScale(pct){
-    const host=byId("gdStatsVisual");
-    if(!host)return;
-    const scale=Math.max(.01,Number(pct)/100);
-    const ellipse=host.querySelector(".gdCourseResultBubble");
-    const value=host.querySelector(".gdCourseScaleValue");
-    const delta=host.querySelector(".gdCourseScaleDelta");
-    if(value)value.textContent=`${Math.round(pct)}%`;
-    if(delta)delta.textContent=gdCourseBubbleSizeLabel(Number(pct));
-    if(!ellipse)return;
-    const rx=Number(ellipse.dataset.baseRx)*scale;
-    const ry=Number(ellipse.dataset.baseRy)*scale;
-    if(!Number.isFinite(rx)||!Number.isFinite(ry))return;
-    ellipse.setAttribute("rx",rx.toFixed(1));
-    ellipse.setAttribute("ry",ry.toFixed(1));
-    // The bubble at 100%, read back off the node it was rendered with. The drag
-    // asks the score module the same question the render did, so a dot cannot
-    // light up here and be counted differently there.
-    const mod=gdCourseTransferScore();
-    const baseEllipse={
-      cx:Number(ellipse.getAttribute("cx")),
-      cy:Number(ellipse.getAttribute("cy")),
-      rx:Number(ellipse.dataset.baseRx),
-      ry:Number(ellipse.dataset.baseRy),
-      tiltDeg:Number(ellipse.dataset.tiltDeg)||0
-    };
-    let inside=0,total=0;
-    host.querySelectorAll(".gdCourseShotDot:not(.excluded)").forEach(dot=>{
-      total+=1;
-      const within=!!mod&&mod.isPointInsideScaledBubble(
-        {x:Number(dot.getAttribute("cx")),y:Number(dot.getAttribute("cy"))},
-        baseEllipse,
-        Number(pct)
-      );
-      if(within)inside+=1;
-      // Hydrate/dehydrate as the bubble sweeps over them - in/out has to move with
-      // the slider, not lag a re-render. It is stated in weight, never in hue: the
-      // fill stays the club's own colour (parked on the node at render) so a dot
-      // never stops saying which club hit it just because the bubble reached it.
-      dot.classList.toggle("inside",within);
-      const clubColour=dot.dataset.clubColour;
-      if(clubColour)dot.setAttribute("fill",clubColour);
-      dot.setAttribute("r",within?"2.9":"2.4");
-      dot.setAttribute("opacity",within?".95":".42");
-      dot.setAttribute("stroke",within?GD_COURSE_BUBBLE_COLOUR:"none");
-      dot.setAttribute("stroke-width",within?"1":"0");
-      dot.setAttribute("stroke-opacity",within?".55":"0");
-    });
-    const pctText=host.querySelector(".gdCourseContainmentPct");
-    const subText=host.querySelector(".gdCourseContainmentSub");
-    if(pctText)pctText.textContent=total?`${Math.round(inside/total*100)}% inside`:"";
-    if(subText)subText.textContent=total?`${inside}/${total} shots`:"";
-    // WHAT THE DRAG IS ALLOWED TO CHANGE: where the slider is, and what that
-    // size holds. The transfer score is deliberately untouched - it comes from
-    // the automatically found threshold, not from wherever the player is
-    // currently dragging, and the notch on the track stays put to say so.
-    safe(()=>{
-      const containment=total?{inside,total,pct:Math.round(inside/total*100)}:null;
-      window.gdCourseBubbleContainment=containment;
-      const analysis=window.gdCourseBubbleAnalysis;
-      if(!analysis)return;
-      analysis.currentSliderScalePercent=Number(pct);
-      analysis.currentSliderCoverage={
-        scalePercent:Number(pct),
-        sampleSize:total,
-        inside,
-        outside:total-inside,
-        insidePercent:total?inside/total*100:0,
-        outsidePercent:total?(total-inside)/total*100:0
-      };
-    });
-  }
-  function gdCourseBubbleScaleChanged(input){
-    const raw=Number(input?.value);
-    const pct=Math.max(GD_COURSE_BUBBLE_SCALE_MIN,Math.min(GD_COURSE_BUBBLE_SCALE_MAX,Math.round(Number.isFinite(raw)?raw:GD_COURSE_BUBBLE_SCALE_DEFAULT)));
-    safe(()=>localStorage.setItem(GD_COURSE_BUBBLE_SCALE_KEY,String(pct)));
-    gdCourseBubbleApplyScale(pct);
-    return false;
+    const score=built.sections.filter(section=>section.key==="score")[0];
+    const explain=built.sections.filter(section=>section.key==="explain")[0];
+    if(!score)return "";
+    // The rail comes built. Each segment already knows the band it sits in and
+    // whether it is lit, so nothing here decides where red becomes amber - the
+    // band boundaries live with the score, and this only spends them.
+    const rail=(score.rail||[]).map(seg=>
+      `<span class="gdCourseRailSeg" data-band="${gdEscapeHTML(seg.band)}" data-seg="${gdEscapeHTML(seg.state)}"></span>`
+    ).join("");
+    const note=explain&&explain.note?`<p class="gdCourseInsightNote">${gdEscapeHTML(explain.note)}</p>`:"";
+    // Collapsed on every load. The open state is deliberately not persisted: the
+    // score is the screen, and a tab that remembers itself open turns the
+    // explanation into permanent furniture.
+    const more=explain?`<details class="gdCourseInsightMore">
+        <summary><span class="gdCourseInsightInfo" aria-hidden="true">i</span>${gdEscapeHTML(explain.title)}</summary>
+        <div class="gdCourseInsightBody"><p>${gdEscapeHTML(explain.body)}</p>${note}</div>
+      </details>`:"";
+    return `<div class="gdCourseInsight" data-state="${gdEscapeHTML(built.state)}" data-tone="${gdEscapeHTML(score.tone||"none")}">
+      <div class="gdCourseScoreHead">
+        <span class="gdCourseScoreLabel">${gdEscapeHTML(score.title)}</span>
+        <span class="gdCourseScoreChip">${gdEscapeHTML(score.chip||"")}</span>
+      </div>
+      <div class="gdCourseScoreValue"><strong>${gdEscapeHTML(score.headline)}</strong><span>/${Number(score.outOf)||10}</span></div>
+      <div class="gdCourseRail">
+        <div class="gdCourseRailSegs">${rail}</div>
+        <div class="gdCourseRailEnds"><span>1</span><span>${Number(score.outOf)||10}</span></div>
+      </div>
+      ${more}
+    </div>`;
   }
   function gdCourseDataSurfaceSvg(counts, analysis, opts={}){
-    const records=Array.isArray(opts?.records)?opts.records:(Array.isArray(analysis?.records)?analysis.records:[]);
+    const suppliedRecords=Array.isArray(opts?.records)?opts.records:(Array.isArray(analysis?.records)?analysis.records:[]);
+    // THE RANGE FILTER IS THE FIRST THING THAT HAPPENS. Cutting the rows here,
+    // before a single position is computed, is what makes every downstream figure
+    // automatically consistent with the pill: the rest of this function has no
+    // idea a filter exists.
+    const rangeKey=gdCourseRangeKey();
+    const records=gdCourseRecordsInRange(suppliedRecords,rangeKey);
     const colourFor=typeof opts?.colourFor==="function"?opts.colourFor:null;
     // COURSE IS THE DEVIATION FRAME. Zero here is THE PLAYING BUBBLE, not the
     // target line. Every record already stores its shot measured from the centre
@@ -5670,10 +5655,10 @@
       if(!Number.isFinite(reference)||reference<=0||!Number.isFinite(depth)||!Number.isFinite(angle))return null;
       return {club:row.club,normalisedDepthM:depth/reference*100,normalizedDeg:angle,hasLateral:true,row,index:row.index};
     }).filter(Boolean);
-    // THE SLIDER SIZES THE COURSE BUBBLE. Shape stays preset - this is an explicit
-    // player-driven scale on it, not a size derived from the data. 100% is exactly
-    // the preset size; the slider's whole output is the containment reading below.
-    const courseBubbleScale=gdCourseBubbleScalePct()/100;
+    // THE BUBBLE IS THE PRESET SHAPE AT ITS PRESET SIZE. Fixed at 1 rather than
+    // read from anywhere: nothing on this screen resizes the plan, and the score
+    // never came off a size the player chose.
+    const courseBubbleScale=GD_COURSE_BUBBLE_SCALE;
     const plot=gdPracticeNormalisedPlotLayout();
     const pointFor=entry=>gdPracticeNormalisedPlotPoint(plot,entry,entry.index);
     // NO CLUSTER FINDING ON THIS SCREEN. There is exactly one piece of logic here:
@@ -5762,38 +5747,28 @@
       });
       return safe(()=>mod.analyse(points,courseEllipse,{yAxisDown:true,sliderScalePercent:courseBubbleScale*100}),null);
     })();
-    // COLLISION-FREE CLUB COLOURS. gdStatsClubColor hashes the club name into the
-    // palette, which is fine where one club is on screen at a time but not here:
-    // this graph deliberately shows EVERY club at once, and the hash lands 5i, SW
-    // and 3w on the same purple - at which point the dot has stopped saying which
-    // club hit it. The clubs actually plotted are dealt distinct palette entries
-    // instead, and the key is built from the SAME map so the legend can never
-    // drift from the dots. Past a palette's worth of clubs it wraps and colours
-    // repeat; the key still says which is which.
-    const plottedClubs=[...new Set(plottedRows.map(entry=>entry.club||"Unknown"))].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
-    const clubPalette=safe(()=>Array.isArray(gdStatsClubPalette)?gdStatsClubPalette:null,null)||[];
-    const clubColourMap={};
-    plottedClubs.forEach((club,i)=>{clubColourMap[club]=clubPalette.length?clubPalette[i%clubPalette.length]:gdStatsClubColor(club);});
-    const clubColour=club=>clubColourMap[club]||gdStatsClubColor(club);
+    // ONE QUESTION PER DOT, AND IT IS NOT WHICH CLUB. Course Data asks how the
+    // whole bag transferred against one plan, so a dot's only job here is inside
+    // or outside - which is carried by fill and weight, with no hue left over to
+    // mean anything else. The club key went with the colours: a legend for a
+    // distinction the screen no longer draws is just clutter to read past.
+    //
+    // A caller colouring by something else (gd-app-core's time-of-capture mode)
+    // still owns both its colours and its key, and that branch is untouched.
     const dotColourFor=entry=>{
-      const club=entry.club||"Unknown";
-      // A caller colouring by something other than club (time of capture) owns
-      // both the colours and the key, so it wins outright.
-      const custom=colourFor?safe(()=>colourFor(entry.row?.record,club),null):null;
-      return custom||clubColour(club);
+      if(!colourFor)return null;
+      return safe(()=>colourFor(entry.row?.record,entry.club||"Unknown"),null);
     };
-    // Dots carry a class so the live slider can restate inside/outside and recount
-    // them straight from the DOM without re-rendering the chart on every input
-    // event. The club colour is parked on the node so that restating never has to
-    // guess it back.
     const shotDots=plottedRows.map(entry=>{
       const point=pointFor(entry);
       if(!point)return "";
       const counted=entry.row.record.counted!==false;
-      const colour=dotColourFor(entry);
-      if(!counted)return `<circle class="gdCourseShotDot excluded" data-club="${gdStatsSvgText(entry.club||"Unknown")}" data-club-colour="${colour}" cx="${point.x.toFixed(1)}" cy="${point.y.toFixed(1)}" r="1.8" fill="${GD_COURSE_DOT_OUTSIDE}" opacity=".18"/>`;
+      const custom=dotColourFor(entry);
+      if(!counted)return `<circle class="gdCourseShotDot excluded" data-club="${gdStatsSvgText(entry.club||"Unknown")}" cx="${point.x.toFixed(1)}" cy="${point.y.toFixed(1)}" r="1.8" fill="${GD_COURSE_DOT_UNCOUNTED}" opacity=".3"/>`;
       const inside=insideBubble(point);
-      return `<circle class="gdCourseShotDot${inside?" inside":""}" data-club="${gdStatsSvgText(entry.club||"Unknown")}" data-club-colour="${colour}" cx="${point.x.toFixed(1)}" cy="${point.y.toFixed(1)}" r="${inside?"2.9":"2.4"}" fill="${colour}" opacity="${inside?".95":".42"}" stroke="${inside?GD_COURSE_BUBBLE_COLOUR:"none"}" stroke-width="${inside?"1":"0"}" stroke-opacity="${inside?".55":"0"}"/>`;
+      const colour=custom||(inside?GD_COURSE_DOT_INSIDE:GD_COURSE_DOT_OUTSIDE);
+      const opacity=custom?(inside?".95":".42"):(inside?".92":".6");
+      return `<circle class="gdCourseShotDot${inside?" inside":""}" data-club="${gdStatsSvgText(entry.club||"Unknown")}" cx="${point.x.toFixed(1)}" cy="${point.y.toFixed(1)}" r="${inside?"2.9":"2.4"}" fill="${colour}" opacity="${opacity}" stroke="${inside?GD_COURSE_BUBBLE_COLOUR:"none"}" stroke-width="${inside?"1":"0"}" stroke-opacity="${inside?".55":"0"}"/>`;
     }).join("");
     // Reads off the analysis rather than recounting, so the headline figure and
     // the score are answers from the same pass over the same dots.
@@ -5806,32 +5781,69 @@
       window.gdCourseBubbleContainment=containment;
       window.gdCourseBubbleAnalysis=courseAnalysis;
     });
-    // THE KEY IS HOW A DOT SAYS WHICH CLUB HIT IT. Built from the clubs actually
-    // plotted, or supplied by the caller when it is colouring by something else
-    // (gd-app-core hands in a time-of-capture key in time mode, and the matching
-    // colourFor with it). It used to be computed here and then never emitted, so
-    // the dots had no legend at all.
-    const clubKey=plottedClubs.slice(0,6);
-    const clubKeySvg=typeof opts?.keySvg==="string"
-      ?opts.keySvg
-      :clubKey.map((club,i)=>`<circle cx="${26+i*48}" cy="58" r="4.2" fill="${clubColour(club)}"/><text x="${34+i*48}" y="61" fill="rgba(255,255,255,.68)" font-size="9" font-weight="850">${gdStatsSvgText(club)}</text>`).join("");
+    // The Course Data call site has no key of its own any more - its dots are
+    // neutral. A caller colouring by something else supplies one with its colours.
+    const clubKeySvg=typeof opts?.keySvg==="string"?opts.keySvg:"";
+    // THE QUADRANT READ, DRAWN WHERE IT HAPPENED. It used to be a sentence under
+    // the graph ("47% of your shots are concentrated short-left"), which made the
+    // player translate words back into a corner of a picture they were already
+    // looking at. All four corners are stated instead, and the one over the
+    // threshold is the only one that gets a colour - so a balanced set says
+    // "balanced" by having nothing lit, without a sentence claiming it.
+    //
+    // Every number and the threshold come off the analysis. Nothing is recomputed
+    // here, and the 35 is read from the config so tuning it moves the wash too.
+    const quadrantSvg=(()=>{
+      if(!courseAnalysis||!courseAnalysis.sampleSize||!courseGeo)return "";
+      const flagAt=Number(courseAnalysis.config?.quadrantThresholds?.noticeableMinPercent);
+      // The quadrants are the plot rect split at the bubble centre, which is where
+      // Short/Long and Left/Right are split in the analysis too - the same divide,
+      // read off the same geometry, so the wash cannot land on a different corner
+      // from the one the percentage belongs to.
+      const cx=courseGeo.cx,cy=courseGeo.cy;
+      const leftW=cx-plot.plotLeft,rightW=plot.plotRight-cx;
+      const topH=cy-plot.plotTop,bottomH=plot.plotBottom-cy;
+      const corners=[
+        {label:"LONG LEFT",share:courseAnalysis.longLeftShare,x:plot.plotLeft+10,anchor:"start",labelY:plot.plotTop+16,valueY:plot.plotTop+30,rectX:plot.plotLeft,rectY:plot.plotTop,w:leftW,h:topH},
+        {label:"LONG RIGHT",share:courseAnalysis.longRightShare,x:plot.plotRight-10,anchor:"end",labelY:plot.plotTop+16,valueY:plot.plotTop+30,rectX:cx,rectY:plot.plotTop,w:rightW,h:topH},
+        {label:"SHORT LEFT",share:courseAnalysis.shortLeftShare,x:plot.plotLeft+10,anchor:"start",labelY:plot.plotBottom-26,valueY:plot.plotBottom-12,rectX:plot.plotLeft,rectY:cy,w:leftW,h:bottomH},
+        {label:"SHORT RIGHT",share:courseAnalysis.shortRightShare,x:plot.plotRight-10,anchor:"end",labelY:plot.plotBottom-26,valueY:plot.plotBottom-12,rectX:cx,rectY:cy,w:rightW,h:bottomH}
+      ];
+      return corners.map(corner=>{
+        const share=Number(corner.share)||0;
+        const flagged=Number.isFinite(flagAt)&&share>=flagAt;
+        const labelFill=flagged?GD_COURSE_BUFFER_COLOUR:"rgba(255,255,255,.4)";
+        const valueFill=flagged?GD_COURSE_BUFFER_COLOUR:"rgba(255,255,255,.62)";
+        // Drawn before the bubble and the dots, so the wash never sits over them.
+        const wash=flagged
+          ?`<rect x="${corner.rectX.toFixed(1)}" y="${corner.rectY.toFixed(1)}" width="${corner.w.toFixed(1)}" height="${corner.h.toFixed(1)}" fill="${GD_COURSE_BUFFER_COLOUR}" opacity=".07"/>`
+          :"";
+        const anchor=corner.anchor==="end"?` text-anchor="end"`:"";
+        return `${wash}<text x="${corner.x.toFixed(1)}" y="${corner.labelY.toFixed(1)}"${anchor} fill="${labelFill}" font-size="8" font-weight="900" letter-spacing=".08em">${corner.label}</text>`
+          +`<text x="${corner.x.toFixed(1)}" y="${corner.valueY.toFixed(1)}"${anchor} fill="${valueFill}" font-size="12" font-weight="950">${Math.round(share)}%</text>`;
+      }).join("");
+    })();
     // ONE BUBBLE, AT 0.0. Emitted directly rather than through the shared layer
-    // markup so it can carry its unscaled radii - the slider rescales from those
-    // without a re-render. The empty overlay group stays: gdApplyShotBubbleDomOverlay
-    // injects a legacy ABSOLUTE-frame bubble unless it finds one, which would land
-    // at the wrong scale on this normalised chart.
+    // markup so it can carry its unscaled radii. The empty overlay group stays:
+    // gdApplyShotBubbleDomOverlay injects a legacy ABSOLUTE-frame bubble unless it
+    // finds one, which would land at the wrong scale on this normalised chart.
     const courseBubbleSvg=courseGeo
       ?`<g class="gdShotBubbleOverlayLayer gdCourseResultLayer" aria-hidden="true"><ellipse class="gdCourseResultBubble" data-base-rx="${courseGeo.baseRx.toFixed(2)}" data-base-ry="${courseGeo.baseRy.toFixed(2)}" data-tilt-deg="${courseGeo.tilt.toFixed(1)}" cx="${courseGeo.cx.toFixed(1)}" cy="${courseGeo.cy.toFixed(1)}" rx="${courseGeo.rx.toFixed(1)}" ry="${courseGeo.ry.toFixed(1)}"${courseGeo.tilt?` transform="rotate(${courseGeo.tilt.toFixed(1)} ${courseGeo.cx.toFixed(1)} ${courseGeo.cy.toFixed(1)})"`:""} fill="${GD_COURSE_BUBBLE_COLOUR}" fill-opacity=".13" stroke="${GD_COURSE_BUBBLE_COLOUR}" stroke-width="1.55" stroke-opacity=".84"/></g>`
       :`<g class="gdShotBubbleOverlayLayer" aria-hidden="true"></g>`;
+    // THE GRAPH CARRIES THE PLAYER'S NAME AND NOTHING ELSE. The card header
+    // directly above it already says Course Data, and the containment figure now
+    // lives in the info tab under the score - stating either one twice was the
+    // graph competing with its own header for the top of the screen.
+    const playerName=safe(()=>typeof gdShotDataPlayerLabel==="function"?gdShotDataPlayerLabel():"","")||"";
     const svg=`<svg viewBox="${gdPracticeNormalisedViewBox(plot)}" role="img" aria-label="Course Data visual">
-      ${gdPracticeNormalisedBackdropSvg(plot,gdShotDataGraphTitle("Course Data"),{subtitle:"Every club, scaled · endpoints relative to the bubble that was set"})}
-      <text class="gdCourseContainmentPct" x="456" y="61" text-anchor="end" fill="${GD_COURSE_BUBBLE_COLOUR}" font-size="13" font-weight="950">${containment?`${containment.pct}% inside`:""}</text>
-      <text class="gdCourseContainmentSub" x="456" y="75" text-anchor="end" fill="rgba(255,255,255,.5)" font-size="9" font-weight="800">${containment?`${containment.inside}/${containment.total} shots`:""}</text>
+      ${gdPracticeNormalisedBackdropSvg(plot,"",{hideText:true})}
+      ${playerName?`<text x="24" y="34" fill="rgba(255,255,255,.82)" font-size="14" font-weight="950">${gdStatsSvgText(playerName)}</text>`:""}
       ${clubKeySvg}
+      ${quadrantSvg}
       ${courseBubbleSvg}
       ${shotDots}
     </svg>`;
-    return `<div class="gdCourseChartWrap">${svg}${gdCourseBubbleScaleControlHTML(courseAnalysis)}</div>${gdCourseInsightHTML(courseAnalysis)}`;
+    return `${gdCourseRangeRowHTML()}<div class="gdCourseChartWrap">${svg}</div>${gdCourseInsightHTML(courseAnalysis)}`;
   }
 	  function gdCourseDataLandingStatus(counts){
 	    if(counts.shown)return `${counts.shown} shown`;
@@ -7970,7 +7982,7 @@
       gdOpenPracticeData:openPracticeData,
       gdSetCourseDataTab:gdSetCourseDataTab,
       gdCourseDataSurfaceSvg:gdCourseDataSurfaceSvg,
-      gdCourseBubbleScaleChanged:gdCourseBubbleScaleChanged,
+      gdCourseRangeChanged:gdCourseRangeChanged,
       // Shared by every destructive action across the app - window.confirm is dead
       // in the embedded webview.
       gdConfirmAction:gdConfirmAction,

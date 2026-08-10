@@ -54,42 +54,140 @@
     'long-right': 'long-right'
   };
 
+  /*
+    The state word on the chip. 'valid' has no word: a full sample is the
+    unqualified case, and labelling it would make the ordinary state look like
+    a warning.
+  */
+  var STATE_WORD = {
+    insufficient_data: 'Collecting',
+    provisional: 'Provisional',
+    unreadable: 'Unreadable'
+  };
+
+  /*
+    THE SCORE'S COLOUR IS A BAND, NOT A SENTENCE. The screen used to be told
+    "10/10 (provisional)" and had to colour it green because the copy said so.
+    Now the band is named here and the stylesheet holds the hexes, so the colour
+    decision is testable in the same place the score is read, and no hex ever
+    reaches this layer.
+  */
+  var TONE_BANDS = [
+    { maxScore: 4, tone: 'low' },
+    { maxScore: 7, tone: 'mid' }
+  ];
+
+  var SCALE_MAX = 10;
+
   function pct(value) {
     return Math.round(Number(value) || 0) + '%';
   }
 
+  function shotCount(n) {
+    return n + (n === 1 ? ' shot' : ' shots');
+  }
+
+  function toneFor(score) {
+    if (score === null) return 'none';
+    for (var i = 0; i < TONE_BANDS.length; i++) {
+      if (score <= TONE_BANDS[i].maxScore) return TONE_BANDS[i].tone;
+    }
+    return 'high';
+  }
+
+  /*
+    THE RAIL IS THE WHOLE SCALE, NOT A PROGRESS BAR. Each segment carries the
+    band IT sits in rather than the band the score landed in, so a 7 shows the
+    red stretch it climbed out of and the green it has not reached. Built here
+    because the band boundaries are TONE_BANDS: derived on the screen instead,
+    the 4 and the 7 would exist twice and a tuning change would recolour the
+    number without recolouring the rail underneath it.
+
+    state: 'at' is the reading. 'on' is ground already covered and is dimmed to
+    a third, so exactly one segment is ever at full strength.
+  */
+  function railFor(score) {
+    var out = [];
+    for (var n = 1; n <= SCALE_MAX; n++) {
+      out.push({
+        value: n,
+        band: toneFor(n),
+        state: score === null || n > score ? 'off' : (n === score ? 'at' : 'on')
+      });
+    }
+    return out;
+  }
+
+  /*
+    'PROVISIONAL · 14 SHOTS'. The sample size travels with the state word
+    because the two are the same fact -- the state IS what this many shots has
+    earned -- and splitting them lets a screen show one without the other.
+  */
+  function chipFor(analysis) {
+    var word = STATE_WORD[analysis.analysisState];
+    var shots = shotCount(Math.max(0, Math.round(Number(analysis.sampleSize) || 0)));
+    return word ? word + ' · ' + shots : shots;
+  }
+
+  /*
+    Absent stays absent. Number(null) is 0 -- a finite value -- so reading the
+    score with a plain Number() would turn "there is no score yet" into a hard
+    zero: a red 0/10 on the rail for a player who has simply not logged ten
+    shots. Same trap the score layer documents at asNumber, same answer.
+  */
+  function scoreValue(analysis) {
+    var raw = analysis.transferScore;
+    if (raw === null || raw === undefined || raw === '') return null;
+    var n = Number(raw);
+    return Number.isFinite(n) ? n : null;
+  }
+
   function scoreSection(analysis) {
-    var target = pct((analysis.targetCoverage || 0) * 100);
+    var score = scoreValue(analysis);
 
-    if (analysis.analysisState === 'insufficient_data') {
-      var needed = analysis.config ? analysis.config.provisionalMinShots : 10;
-      return {
-        key: 'score',
-        title: 'Course Transfer',
-        headline: 'Collecting data',
-        body: analysis.sampleSize + ' of ' + needed + ' shots needed before a transfer score means anything.'
-      };
-    }
-
-    if (analysis.analysisState === 'unreadable') {
-      return {
-        key: 'score',
-        title: 'Course Transfer',
-        headline: 'Outside the readable range',
-        body: 'Even at ' + pct(analysis.config.maxScalePercent) + ' the bubble does not reach ' + target
-          + ' of your shots, so there is no reliable score to give yet.'
-      };
-    }
-
-    var provisional = analysis.analysisState === 'provisional';
     return {
       key: 'score',
-      title: 'Course Transfer',
-      headline: analysis.transferScore + '/10' + (provisional ? ' (provisional)' : ''),
-      body: '+' + pct(analysis.requiredGrowthPercent) + ' bubble growth captures ' + target + ' of your shots.'
+      title: 'Course Score',
+      // The bare number. '/10' is a fixed denominator the screen draws beside
+      // it, not part of the reading, and 'provisional' is the chip's job now.
+      headline: score === null ? '—' : String(score),
+      body: '',
+      score: score,
+      outOf: SCALE_MAX,
+      tone: toneFor(score),
+      rail: railFor(score),
+      chip: chipFor(analysis)
     };
   }
 
+  /*
+    Everything the score does NOT say on its face, in one place the player opens
+    only if they want it: what the number measures, and how much of the pattern
+    the bubble actually held. Both are read straight off the analysis.
+  */
+  function explainSection(analysis) {
+    var coverage = analysis.coverageAtMyBubble;
+    var held = coverage && coverage.sampleSize
+      ? coverage.inside + ' of ' + shotCount(coverage.sampleSize) + ' — ' + pct(coverage.insidePercent)
+        + ' — finished inside the bubble.'
+      : null;
+
+    return {
+      key: 'explain',
+      title: 'What this means',
+      body: 'Out of 10, how close your course performance was to where you aimed the GPS bubble.',
+      note: held
+    };
+  }
+
+  /*
+    RETIRED FROM THE SCREEN, KEPT IN THE LAYER. Alignment, distance and the
+    quadrant sentence are no longer rendered -- the quadrant read moved onto the
+    graph as four corner percentages, and the other two were removed from the
+    Course Data card. The wording stays here, exercised by the copy-safety
+    tests, so bringing a section back is a render decision rather than a rewrite
+    of language that has already been argued over.
+  */
   function alignmentSection(analysis) {
     if (analysis.alignmentConfidence === 'none') {
       return {
@@ -152,31 +250,36 @@
     };
   }
 
+  /*
+    TWO SECTIONS, AND THE SECOND ONE IS FOLDED AWAY. The screen is a score and
+    the evidence behind it; every other reading either moved onto the graph or
+    was cut. A shot set below the sample gate still gets both -- the score
+    renders as a dash and the chip says Collecting -- because hiding the block
+    would leave a player who has logged six shots with nothing to tell them why.
+  */
   function buildCourseInsight(analysis) {
     if (!analysis || typeof analysis !== 'object') return null;
 
     var score = scoreSection(analysis);
-    var sections = [score];
-
-    // Below the sample gate there is nothing to say about direction, and saying
-    // it anyway is how a screen starts inventing coaching.
-    if (analysis.analysisState !== 'insufficient_data') {
-      sections.push(alignmentSection(analysis));
-      sections.push(distanceSection(analysis));
-      var pattern = quadrantSection(analysis);
-      if (pattern) sections.push(pattern);
-    }
+    var explain = explainSection(analysis);
 
     return {
       state: analysis.analysisState,
       headline: score.headline,
-      detail: score.body,
-      sections: sections
+      detail: explain.body,
+      sections: [score, explain]
     };
   }
 
   var api = {
-    buildCourseInsight: buildCourseInsight
+    buildCourseInsight: buildCourseInsight,
+    // Not used by the Course Data screen. Exported so the retired sections stay
+    // reachable and testable rather than becoming quietly dead code.
+    retiredSections: {
+      alignment: alignmentSection,
+      distance: distanceSection,
+      quadrant: quadrantSection
+    }
   };
 
   root.modules.courseImplementationInsight = api;

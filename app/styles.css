@@ -61,32 +61,83 @@ body.green-focus #map .holeTee { display: none; }
 #mapAttribution.hiddenState { display: none; }
 body.surface-published #mapAttribution { display: none; }
 
-/* The surface viewport carries the lock-stage tilt (ported from
-   gd-gps-play-camera-tilt: 32° at perspective 900px, origin 50% 70%, 1s ease,
-   scale 1+32/150). The image inside carries the frame matrix, and the dot
-   rides in the same space so the tilt projects them together. */
-/* overflow:hidden is load-bearing: the framed image extends far past the
-   viewport, and a transformed descendant still grows the scrollable overflow —
-   without the clip, focusing a button (the start pill) scroll-jumps the whole
-   play screen. */
+/* The tilt's numbers live here as custom properties because play.js has to
+   invert this exact transform to drag anything under it (unTilt). One source
+   of truth, so the maths and the look cannot drift apart. */
+/* The overscan is why #surfaceStage exists at all. Tilting a SCREEN-SIZED box
+   can never fill the screen: rotateX pushes the box's own far edge toward the
+   vanishing line, so its top edge lands ~19% down an 852px screen and the top
+   corners pinch in — a black trapezoid nothing in the picture can fill, because
+   what is short is the box, not the image. Closing that by --tiltScale alone
+   needs ~2.04 and crops everything else to nothing. So the tilted box is
+   over-provisioned instead and clipped back to the screen, the same trick #map
+   uses to stop rotation exposing a corner.
+   How much it takes grows with screen HEIGHT, because the perspective is a
+   fixed 900px: 0.34 of height at 667px, 0.49 at 852px, 0.60 at 956px. 1 / 0.5
+   covers every phone with room to spare and holds to ~1180px tall. Past that
+   (a full-height iPad, a tall desktop window) the far edge creeps back on
+   screen; the honest fix there is scaling --tiltPerspective with the viewport
+   so the tilt reads the same on every screen, which is a look change, not this.
+   Overscan beyond what the tilt pulls into view is never visible, so erring
+   generous costs compositing area and nothing else. */
+:root {
+  --tiltDeg: 32; --tiltPerspective: 900; --tiltScale: 1.213; --tiltOriginY: 0.7;
+  --surfaceOverscanX: 0.5; --surfaceOverscanY: 1;
+}
+
+/* The tilted stage: the screen grown by the overscan (upward and sideways only
+   — below the origin the tilt magnifies, so the bottom edge leaves the screen
+   on its own). transform-origin is derived, not authored, so the pivot stays on
+   the SAME screen point the overscan numbers move around: unTilt() assumes it
+   sits at (50%, --tiltOriginY) of the screen, and this keeps that true. */
+/* overflow:hidden is load-bearing: the framed image extends far past the stage,
+   and a transformed descendant still grows the scrollable overflow — without
+   the clip, focusing a button (the start pill) scroll-jumps the whole play
+   screen. */
+#surfaceStage {
+  position: absolute;
+  left: calc(var(--surfaceOverscanX) * -100%);
+  right: calc(var(--surfaceOverscanX) * -100%);
+  top: calc(var(--surfaceOverscanY) * -100%);
+  bottom: 0;
+  z-index: 500;
+  background: transparent;
+  pointer-events: none;
+  overflow: hidden;
+  transform-origin: 50% calc((var(--surfaceOverscanY) + var(--tiltOriginY)) / (1 + var(--surfaceOverscanY)) * 100%);
+  transition: transform 1000ms cubic-bezier(.18, .82, .24, 1);
+}
+body.surface-published #surfaceStage { background: #0d1b12; }
+/* Tilt is published-surface only. The live map is not tilted (Leaflet has no
+   3D camera and a CSS-perspectived tile grid would break its hit testing), so
+   the overlay it hosts must not be tilted either or the two would disagree. */
+body.surface-published.tilt-lock #surfaceStage {
+  transform: perspective(calc(var(--tiltPerspective) * 1px)) rotateX(calc(var(--tiltDeg) * 1deg)) scale(var(--tiltScale));
+}
+@media (prefers-reduced-motion: reduce) { #surfaceStage { transition-duration: 1ms; } }
+
+/* The viewport stays exactly the screen rectangle inside the stage, because
+   everything in it is positioned in VIEWPORT PIXELS by the painter's one
+   projection seam and those are client pixels. Undoing the overscan here is
+   what lets the stage grow without a single number changing in painter.js.
+   overflow is visible so the image can spill into the overscan; the stage is
+   what clips now. */
 /* Always displayed: the overlays inside it are the play instruments and they
    draw over the live map too. Transparent and pointer-transparent by default
    so the live map underneath still shows and still takes taps; the published
    surface is what makes it opaque, and the few interactive children opt back
    into pointer events themselves. */
-#surfaceViewport { position: absolute; inset: 0; display: block; z-index: 500; background: transparent; pointer-events: none; transform-origin: 50% 70%; transition: transform 1000ms cubic-bezier(.18, .82, .24, 1); overflow: hidden; }
-body.surface-published #surfaceViewport { background: #0d1b12; }
-/* Tilt is published-surface only. The live map is not tilted (Leaflet has no
-   3D camera and a CSS-perspectived tile grid would break its hit testing), so
-   the overlay it hosts must not be tilted either or the two would disagree. */
-/* The tilt's three numbers live here as custom properties because play.js
-   has to invert this exact transform to drag anything under it (unTilt).
-   One source of truth, so the maths and the look cannot drift apart. */
-:root { --tiltDeg: 32; --tiltPerspective: 900; --tiltScale: 1.213; --tiltOriginY: 0.7; }
-body.surface-published.tilt-lock #surfaceViewport {
-  transform: perspective(calc(var(--tiltPerspective) * 1px)) rotateX(calc(var(--tiltDeg) * 1deg)) scale(var(--tiltScale));
+#surfaceViewport {
+  position: absolute;
+  left: calc(var(--surfaceOverscanX) / (1 + 2 * var(--surfaceOverscanX)) * 100%);
+  top: calc(var(--surfaceOverscanY) / (1 + var(--surfaceOverscanY)) * 100%);
+  width: calc(100% / (1 + 2 * var(--surfaceOverscanX)));
+  height: calc(100% / (1 + var(--surfaceOverscanY)));
+  display: block;
+  background: transparent;
+  pointer-events: none;
+  overflow: visible;
 }
-@media (prefers-reduced-motion: reduce) { #surfaceViewport { transition-duration: 1ms; } }
 
 #surfaceImage { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: none; pointer-events: auto; }
 /* The mesh overlays the image at exactly its geometry - the painter writes the same width,
@@ -149,9 +200,9 @@ body.bubble-dragging #aimBubble { cursor: grabbing; }
    on grab and tilted back on release. play.js's unTilt() inverts the tilt
    properly now, so the camera can simply stay put; only the transition is
    suppressed, so the frame does not ease around under the finger. */
-body.bubble-dragging #surfaceViewport,
-body.pin-dragging #surfaceViewport,
-body.ball-dragging #surfaceViewport { transition: none !important; }
+body.bubble-dragging #surfaceStage,
+body.pin-dragging #surfaceStage,
+body.ball-dragging #surfaceStage { transition: none !important; }
 
 /* Green focus: the green centre ring in the zoom stage. */
 

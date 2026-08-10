@@ -263,28 +263,104 @@ const insight = h.load().insight;
   const built = insight.buildCourseInsight(leftShort);
 
   assert.strictEqual(built.state, "valid", "a full sample builds a valid insight");
-  const alignment = built.sections.filter((s) => s.key === "alignment")[0];
+
+  // TWO SECTIONS, ALWAYS: the score, and the tab behind it. Alignment, distance
+  // and the quadrant sentence are no longer rendered - the quadrant read moved
+  // onto the graph as four corner percentages - so the screen cannot show them
+  // even if a future edit puts them back in the array by accident.
+  assert.strictEqual(built.sections.map((s) => s.key).join(","), "score,explain",
+    "the screen is a score and the evidence behind it, nothing else");
+
+  const scoreSection = built.sections[0];
+  assert.strictEqual(scoreSection.title, "Course Score", "the section is named for what it is");
+  assert.strictEqual(scoreSection.headline, String(leftShort.transferScore), "the headline is the bare number");
+  assert.strictEqual(scoreSection.outOf, 10, "with a fixed denominator the screen draws beside it");
+  assert(scoreSection.headline.indexOf("/10") === -1, "the denominator is not baked into the reading");
+  assert(scoreSection.headline.indexOf("provisional") === -1, "and provisional is the chip's job");
+
+  // The colour is a named band, never a hex: the stylesheet owns the hexes so
+  // the decision stays testable here.
+  const BANDS = [[1, "low"], [4, "low"], [5, "mid"], [7, "mid"], [8, "high"], [10, "high"]];
+  BANDS.forEach(([value, tone]) => {
+    const at = insight.buildCourseInsight(Object.assign({}, leftShort, { transferScore: value }));
+    assert.strictEqual(at.sections[0].tone, tone, `a ${value} is in the ${tone} band`);
+    assert(!/#[0-9a-f]{3,6}/i.test(at.sections[0].tone), "the insight layer names bands, not colours");
+  });
+
+  // THE RAIL IS THE WHOLE SCALE. Each segment carries the band IT sits in, not
+  // the band the score landed in, so a 7 shows red behind it and green ahead.
+  // Built here because the boundaries are the same ones tone uses - derived on
+  // the screen instead, a tuning change would recolour the number and leave the
+  // rail under it saying something else.
+  {
+    const at7 = insight.buildCourseInsight(Object.assign({}, leftShort, { transferScore: 7 })).sections[0];
+    assert.strictEqual(at7.rail.length, 10, "ten segments, one per point on the scale");
+    assert.strictEqual(at7.rail.map((s) => s.band).join(","), "low,low,low,low,mid,mid,mid,high,high,high",
+      "the bands are fixed to the scale, not to the score");
+    assert.strictEqual(at7.rail.map((s) => s.state).join(","), "on,on,on,on,on,on,at,off,off,off",
+      "lit up to the score, and exactly one segment is AT it");
+    BANDS.forEach(([value]) => {
+      const rail = insight.buildCourseInsight(Object.assign({}, leftShort, { transferScore: value })).sections[0].rail;
+      assert.strictEqual(rail.filter((s) => s.state === "at").length, 1, `a ${value} lights exactly one segment`);
+      assert.strictEqual(rail.filter((s) => s.state !== "off").length, value, `and ${value} segments in total`);
+      assert.strictEqual(rail[value - 1].band, insight.buildCourseInsight(
+        Object.assign({}, leftShort, { transferScore: value })).sections[0].tone,
+        "the segment AT the score wears the same band as the number above it");
+    });
+    const none = insight.buildCourseInsight(score.analyse(mix({ "short-left": 6 }), ELLIPSE)).sections[0].rail;
+    assert.strictEqual(none.filter((s) => s.state !== "off").length, 0, "no score lights nothing");
+    assert.strictEqual(none.map((s) => s.band).join(","), at7.rail.map((s) => s.band).join(","),
+      "but the scale underneath is the same one");
+  }
+
+  // The retired wording is kept, and kept correct, so restoring a section is a
+  // render decision rather than a rewrite.
+  const alignment = insight.retiredSections.alignment(leftShort);
   assert(alignment.body.indexOf("finished left") !== -1, "the evidence is stated first");
   assert(alignment.body.indexOf("tending right") !== -1, "then framed as an alignment tendency the other way");
-
-  // Balanced data must say so rather than invent criticism.
-  const balanced = insight.buildCourseInsight(
+  const balancedAlignment = insight.retiredSections.alignment(
     score.analyse(mix({ "short-left": 5, "short-right": 5, "long-left": 5, "long-right": 5 }), ELLIPSE)
   );
-  const balancedAlignment = balanced.sections.filter((s) => s.key === "alignment")[0];
   assert(balancedAlignment.body.indexOf("well matched") !== -1, "balanced alignment is stated positively");
-  assert.strictEqual(balanced.sections.filter((s) => s.key === "pattern").length, 0,
-    "no quadrant advice when nothing stands out");
+  assert.strictEqual(
+    insight.retiredSections.quadrant(
+      score.analyse(mix({ "short-left": 5, "short-right": 5, "long-left": 5, "long-right": 5 }), ELLIPSE)
+    ),
+    null,
+    "no quadrant sentence when nothing stands out"
+  );
 
-  // Below the gate: a collecting state, no score, no direction.
+  // Below the gate: a dash and a Collecting chip, never a fabricated score.
   const collecting = insight.buildCourseInsight(score.analyse(mix({ "short-left": 6 }), ELLIPSE));
   assert.strictEqual(collecting.state, "insufficient_data", "under the gate it is a collecting state");
-  assert.strictEqual(collecting.sections.length, 1, "and says nothing about alignment or distance");
+  assert.strictEqual(collecting.sections[0].headline, "—", "with no number to show");
+  assert.strictEqual(collecting.sections[0].tone, "none", "and no colour to imply one");
+  assert(collecting.sections[0].chip.indexOf("Collecting") === 0, "the chip says which state this is");
+  assert(collecting.sections[0].chip.indexOf("6 shots") !== -1, "and on how many shots");
+
+  // A full sample states the sample size and nothing else.
+  assert.strictEqual(built.sections[0].chip, `${leftShort.sampleSize} shots`,
+    "a valid sample is the unqualified case and carries no state word");
 
   const unreadable = insight.buildCourseInsight(
     score.analyse(Array.from({ length: 20 }, () => atRadius(2.6)), ELLIPSE)
   );
-  assert(unreadable.headline.indexOf("readable range") !== -1, "an unreachable threshold is named as such");
+  assert.strictEqual(unreadable.sections[0].headline, "1", "an unreachable threshold still scores, at the floor");
+  assert(unreadable.sections[0].chip.indexOf("Unreadable") === 0, "and the chip says why it is a 1");
+
+  // The info tab: what the score measures, then how much the bubble held. Both
+  // read off the analysis - the containment figure is not recounted here.
+  const explain = built.sections[1];
+  assert.strictEqual(explain.title, "What this means", "the tab names itself");
+  assert(explain.body.indexOf("Out of 10") === 0, "the definition comes first");
+  assert(explain.note.indexOf("finished inside the bubble") !== -1, "then the containment line");
+  assert.strictEqual(
+    explain.note.indexOf(`${leftShort.coverageAtMyBubble.inside} of ${leftShort.coverageAtMyBubble.sampleSize} shots`),
+    0,
+    "counted at the bubble's own size, straight off the analysis"
+  );
+  assert.strictEqual(insight.buildCourseInsight(score.analyse([], ELLIPSE)).sections[1].note, null,
+    "with no shots there is no containment line to draw");
 }
 
 /* --------------------------------------------------------------------------
@@ -294,7 +370,11 @@ const insight = h.load().insight;
   const FORBIDDEN = [
     "move the bubble", "moving the bubble", "reposition", "re-position",
     "placed incorrectly", "placement is wrong", "wrong bubble", "bad placement",
-    "should have aimed", "you aimed", "aim further", "aim more",
+    // "you aimed" on its own is not the offence - the score block's definition
+    // sentence refers to where the player aimed the bubble, which is a neutral
+    // statement of what the number is measured against. What is banned is any
+    // phrasing that treats that aim as the thing to change.
+    "should have aimed", "you aimed too", "you aimed wrong", "aim further", "aim more",
     "swing", "your fault", "fix your"
   ];
 
