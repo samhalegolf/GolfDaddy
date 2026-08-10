@@ -97,3 +97,5 @@ console.log('GPS bubble bag-roof regression: ok');
           git diff --cached --check
           git commit -m "fix: stop GPS bubble pinning to bag total"
           git push origin HEAD:codex/fix-gps-bubble-bag-roof
+
+# Triggered after the workflow existed on the branch.
