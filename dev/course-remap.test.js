@@ -6,6 +6,11 @@
    stopped offering the course, the pin dialog fired instead of a package request, and not one
    mapper job was ever enqueued. The assertion that matters here is check 1's course_lat - if
    remap ever starts clearing the location too, it has become the delete it replaced.
+
+   Checks 4-6 cover the other half of the same theme: a job that cannot possibly succeed
+   should be refused where there is a caller to tell, not queued to die in a worker log three
+   minutes later. kelvin-heights-road did exactly that - a road out of a geocode, no
+   coordinates, one failed row and no way to act on it.
 */
 
 /* The remap kind, on a stubbed Supabase. No network, no keys. */
@@ -77,4 +82,31 @@ assert.equal(res.status, 403, 'non-admin remap must be refused, got '+res.status
 console.log('3. non-admin remap -> 403');
 globalThis.fetch = realFetch;
 
-console.log('\nremap passed: 10 checks');
+// 4. A course with no coordinates anywhere must be refused, not queued to fail later.
+//    kelvin-heights-road is the real case: a road out of a geocode, no course_maps row, a
+//    job that could only ever die on "has no known location".
+state.maps.length = 0; state.jobs.length = 0;
+res = await post({courseId:'kelvin-heights-road', kind:'automap'});
+assert.equal(res.status, 422, 'expected 422, got '+res.status);
+const b4 = await res.json();
+assert.match(b4.error, /no location for kelvin-heights-road/);
+assert.equal(state.jobs.length, 0, 'and no job was queued to fail three minutes later');
+console.log('4. unlocatable course -> 422, zero jobs queued');
+
+// 5. Coordinates in the request are enough — the centre row gets created on the way through.
+state.maps.length = 0; state.jobs.length = 0;
+res = await post({courseId:'new-course', kind:'automap', courseLat:-45.07, courseLng:168.74, courseName:'New Course'});
+assert.ok([200,202].includes(res.status), 'expected accept, got '+res.status);
+assert.equal(state.jobs.length, 1, 'job queued');
+console.log('5. a request carrying lat/lng creates the centre and queues normally');
+
+// 6. An existing row with coordinates is enough on its own, with none in the request.
+state.maps.length = 0; state.jobs.length = 0;
+state.maps.push({course_id:'has-centre',published:true,geometry_version:null,
+                 objects_json:{},holes_json:{},course_lat:-36.75,course_lng:174.75});
+res = await post({courseId:'has-centre', kind:'automap'});
+assert.ok([200,202].includes(res.status), 'expected accept, got '+res.status);
+assert.equal(state.jobs.length, 1, 'job queued from the stored centre alone');
+console.log('6. a stored centre is enough with no coordinates in the request');
+
+console.log('\ncourse-remap passed: 17 checks');

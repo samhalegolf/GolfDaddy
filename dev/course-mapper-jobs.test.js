@@ -117,7 +117,11 @@ test("an anonymous automap request is refused before it touches the database", a
 
 test("a signed-in player starts a mapping run on an unmapped course", async () => {
   const calls = stubFetch(unmappedCourse());
-  const result = await call(post({ courseId: "pupuke", kind: "automap" }, "player-token"));
+  /* Coordinates travel with the request because the real caller always has them: the picker
+     reaches this through /api/course-package, which returns "none" without a centre. This
+     test used to omit them and still expect a queued job - the behaviour that let
+     kelvin-heights-road queue a run that could only fail on "has no known location". */
+  const result = await call(post({ courseId: "pupuke", kind: "automap", courseLat: -36.78, courseLng: 174.76 }, "player-token"));
   assert.strictEqual(result.status, 202);
   assert.strictEqual(result.body.state, "queued");
   const inserted = jobInserts(calls);
@@ -185,6 +189,24 @@ test("no courseLat/courseLng in the payload means no course_maps write at all", 
   const calls = stubFetch(unmappedCourse());
   await call(post({ courseId: "pupuke", kind: "automap" }, "player-token"));
   assert.deepStrictEqual(calls.inserts.filter(insert => insert.table === "course_maps"), []);
+});
+
+test("a course with no coordinates anywhere is refused rather than queued to fail", async () => {
+  const calls = stubFetch(unmappedCourse());
+  const result = await call(post({ courseId: "kelvin-heights-road", kind: "automap" }, "player-token"));
+  assert.strictEqual(result.status, 422);
+  assert.match(String(result.body.error || ""), /no location/);
+  assert.strictEqual(jobInserts(calls).length, 0, "nothing is queued that the worker could only fail");
+  assert.strictEqual(calls.workerPings, 0, "and the worker is not woken for it");
+});
+
+test("a stored centre is enough on its own to start a run", async () => {
+  const calls = stubFetch(unmappedCourse({
+    maps: [{ course_id: "pupuke", published: true, course_lat: -36.78, course_lng: 174.76, objects_json: {}, holes_json: {} }]
+  }));
+  const result = await call(post({ courseId: "pupuke", kind: "automap" }, "player-token"));
+  assert.strictEqual(result.status, 202);
+  assert.strictEqual(jobInserts(calls).length, 1);
 });
 
 test("the status read is public and derives the mapping state", async () => {

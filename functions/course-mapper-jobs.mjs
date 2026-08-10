@@ -127,10 +127,13 @@ async function mapperBuildState(courseId) {
    objects_json/holes_json on a course that already has geometry are left untouched. Mirrors
    the "published::"+courseId id convention functions/course-maps.mjs uses, so a row created
    here and a row later published through the normal course-maps flow are the same record. */
+/* Returns true when the course has a usable centre afterwards - either one was written from
+   the request, or a row with coordinates already existed. The worker cannot query Overpass
+   without one, so this answer decides whether enqueuing is worth anything at all. */
 async function ensureCourseCenter(courseId, payload) {
   const lat = Number(payload && payload.courseLat);
   const lng = Number(payload && payload.courseLng);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return await hasKnownCentre(courseId);
   try {
     await supabaseFetch(MAPS_TABLE + "?on_conflict=id", {
       method: "POST",
@@ -144,8 +147,22 @@ async function ensureCourseCenter(courseId, payload) {
         published: true
       }])
     });
+    return true;
   } catch (error) {
     console.warn("course-mapper-jobs: ensureCourseCenter failed", courseId, error && error.message || error);
+    return await hasKnownCentre(courseId);
+  }
+}
+
+async function hasKnownCentre(courseId) {
+  try {
+    const rows = await supabaseFetch(MAPS_TABLE + "?select=course_lat,course_lng&course_id=eq." + encodeURIComponent(courseId) + "&limit=1");
+    const row = Array.isArray(rows) ? rows[0] : null;
+    return !!(row && Number.isFinite(Number(row.course_lat)) && Number.isFinite(Number(row.course_lng)));
+  } catch (error) {
+    /* Unknown beats false here: a transient read failure should not turn into "this course
+       can never be mapped". The worker's own check is the real gate. */
+    return true;
   }
 }
 
@@ -157,7 +174,7 @@ async function ensureCourseCenter(courseId, payload) {
    requested_by provenance are both keyed to it); callers without a verified user must not
    reach this function. */
 export async function enqueueMapperJob({ courseId, courseLat, courseLng, courseName, userId, origin }) {
-  await ensureCourseCenter(courseId, { courseLat, courseLng, courseName });
+  const located = await ensureCourseCenter(courseId, { courseLat, courseLng, courseName });
 
   const state = await mapperBuildState(courseId);
   if (state.hasGeometry && state.geometryVersion === MAPPER_VERSION) {
@@ -172,6 +189,17 @@ export async function enqueueMapperJob({ courseId, courseLat, courseLng, courseN
   const freshCutoff = new Date(Date.now() - 20 * 60 * 1000).toISOString();
   const existing = await supabaseFetch(TABLE + "?select=id,status&course_id=eq." + encodeURIComponent(courseId) + "&kind=eq.automap&status=in.(queued,running)&updated_at=gt." + encodeURIComponent(freshCutoff) + "&limit=1");
   if (Array.isArray(existing) && existing.length) return { deduped: true, job: existing[0], state: "queued" };
+
+  /* Last gate, deliberately after the dedupe and rate-limit answers rather than before them.
+
+     A job for a course with no coordinates cannot succeed - the worker reads the centre from
+     course_maps to build the Overpass query and dies on "has no known location", which is how
+     kelvin-heights-road (a road out of a geocode, not a golf course) burned a queue slot and
+     left a failed row nobody could act on. But "already building" and "slow down" are truer
+     answers when they apply: a course mid-build plainly has a centre, and a rate-limited
+     caller should hear about the limit. Only a genuinely new, genuinely unlocatable request
+     reaches here. */
+  if (!located) return { unlocatable: true, state: state.state };
 
   const inserted = await supabaseFetch(TABLE, {
     method: "POST",
@@ -267,6 +295,12 @@ export default async function courseMapperJobs(req) {
     userId: user.id,
     origin: new URL(req.url).origin
   });
+  if (result.unlocatable) {
+    return json(422, {
+      error: "no location for " + courseId,
+      detail: "Mapping needs the course's coordinates. Send courseLat and courseLng, or pin the course first."
+    });
+  }
   if (result.rateLimited) return json(429, { error: "too many course mapping runs started recently", state: result.state });
   if (result.deduped) return json(200, Object.assign({ deduped: true, remapped: remap }, result));
   return json(202, { job: result.job, state: "queued", remapped: remap });
