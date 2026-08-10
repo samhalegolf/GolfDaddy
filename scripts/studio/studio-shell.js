@@ -135,9 +135,29 @@
     }
   }
 
+  /* Read the loader's own state, not a global nothing assigns.
+
+     This used to test window.GD_ADMIN_COURSE_DB_CLOUD, which is set nowhere in the codebase,
+     so the banner read "local fallback" permanently - including while Studio was showing live
+     Supabase rows. A status line that is wrong in exactly one direction is worse than none:
+     it sent a real investigation after a connection problem that did not exist. */
   function renderEnvStatus() {
-    var source = (window.GD_ADMIN_COURSE_DB_CLOUD && window.GD_ADMIN_COURSE_DB_CLOUD.length) ? "cloud" : "local fallback";
+    var state = typeof gdAdminCourseDbCloudState === "string" ? gdAdminCourseDbCloudState : "";
+    var count = safeCourseCount();
+    var source = state === "ready" ? "Supabase · " + count + " course" + (count === 1 ? "" : "s")
+      : state === "loading" ? "loading from Supabase…"
+      : state === "error" ? "Supabase unreachable — " + (typeof gdAdminCourseDbCloudError === "string" && gdAdminCourseDbCloudError ? gdAdminCourseDbCloudError : "unknown error")
+      : "not loaded yet";
     envStatusEl.textContent = "Studio · database source: " + source;
+  }
+  function safeCourseCount() {
+    try {
+      /* let-declared at the top of gd-admin-course-db.js: a global lexical binding, reachable
+         by name from here, but never a property of window - which is why the old check
+         against window.GD_ADMIN_COURSE_DB_CLOUD could not have worked. */
+      var store = typeof gdAdminCourseDbCloud !== "undefined" ? gdAdminCourseDbCloud : null;
+      return store && store.courses ? Object.keys(store.courses).length : 0;
+    } catch (e) { return 0; }
   }
 
   function onRouteChange() {

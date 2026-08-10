@@ -121,10 +121,28 @@ async function loadSiblingCentres(course) {
 }
 
 async function saveResolvedGeometry(courseId, geometry) {
-  await supabaseFetch(MAPS_TABLE + "?course_id=eq." + encodeURIComponent(courseId), {
+  const holeCount = Object.keys(geometry.holes || {}).length || null;
+  const written = await supabaseFetch(MAPS_TABLE + "?course_id=eq." + encodeURIComponent(courseId), {
     method: "PATCH",
-    body: JSON.stringify({ objects_json: geometry.objects, holes_json: geometry.holes, geometry_version: MAPPER_VERSION, updated_at: new Date().toISOString() })
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify({
+      objects_json: geometry.objects,
+      holes_json: geometry.holes,
+      geometry_version: MAPPER_VERSION,
+      /* Denormalised for /api/course-library, which reports hole counts from this column
+         rather than reading holes_json. course-maps.mjs writes it on every Studio publish;
+         the mapper did not, so a course that had only ever been auto-mapped reported zero
+         holes there while Studio - which derives from holes_json - showed eighteen. */
+      hole_count: holeCount,
+      updated_at: new Date().toISOString()
+    })
   });
+  /* The PATCH filters on course_id and does not upsert, so with no row it writes nothing and
+     still returns 200. Saying "saved" then would be a lie the job result carries forever. */
+  if (!Array.isArray(written) || !written.length) {
+    throw new Error("course " + courseId + " has no course_maps row to save geometry into");
+  }
+  return holeCount;
 }
 
 /* course_scorecards.course_key is the course's DISPLAY NAME, lowercased and whitespace-
