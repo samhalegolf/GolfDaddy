@@ -88,6 +88,58 @@ test("courseMatchesIdentity matches on courseId first, then normalised name", ()
   assert.ok(!core.courseMatchesIdentity(course, "different-course", "Different Course"));
 });
 
+test("osmGuideQuery includes the course footprint selectors", () => {
+  const query = core.osmGuideQuery({ selector: "(around:1400,-36.8,174.7)" });
+  assert.ok(query.includes('"leisure"="golf_course"'));
+  assert.ok(query.includes('"golf"="course"'));
+});
+
+test("courseFootprintFrame derives a padded bbox from the course polygon, null without one", () => {
+  const payload = { elements: [{ type: "way", id: 1, tags: { leisure: "golf_course" }, geometry: [
+    { lat: -36.336, lon: 174.769 }, { lat: -36.354, lon: 174.769 }, { lat: -36.354, lon: 174.784 }, { lat: -36.336, lon: 174.784 }
+  ] }] };
+  const frame = core.courseFootprintFrame(payload);
+  assert.ok(frame, "footprint polygon should yield a frame");
+  assert.ok(frame.south < -36.354 && frame.north > -36.336, "frame is padded beyond the polygon");
+  assert.ok(frame.west < 174.769 && frame.east > 174.784);
+  assert.strictEqual(core.courseFootprintFrame({ elements: [] }), null);
+});
+
+test("scopeContainsFrame: a long thin course footprint escapes the default 1400m circle", () => {
+  const scope = core.osmQueryScope({}, { lat: -36.33609, lng: 174.77174 });
+  const omahaLike = { south: -36.3545, west: 174.7690, north: -36.3320, east: 174.7850 };
+  assert.strictEqual(core.scopeContainsFrame(scope, omahaLike), false, "southern loop lies outside the circle - must requery");
+  const tight = { south: -36.340, west: 174.770, north: -36.333, east: 174.776 };
+  assert.strictEqual(core.scopeContainsFrame(scope, tight), true, "a compact course needs no second query");
+  const bbox = core.osmQueryScope({ osmFrame: omahaLike });
+  assert.strictEqual(core.scopeContainsFrame(bbox, tight), true);
+});
+
+test("osmCourseHoleCountTag reads holes=N from the course polygon", () => {
+  const payload = { elements: [{ type: "way", tags: { leisure: "golf_course", holes: "18" }, geometry: [] }] };
+  assert.strictEqual(core.osmCourseHoleCountTag(payload), 18);
+  assert.strictEqual(core.osmCourseHoleCountTag({ elements: [] }), null);
+});
+
+test("one green polygon cannot be claimed by two guides - the loser gets an estimated circle", () => {
+  /* Omaha Beach regression: hole 5 has no OSM green, its guide ends within 95m of hole 6's
+     green, and the old per-guide matching let hole 5 claim it before hole 6's own guide
+     re-claimed it via the dedupe - flipping the green to hole 6 and leaving hole 5 with no
+     green at all. */
+  const green = { id: "way-9", ref: null, center: { lat: -36.8, lng: 174.7 }, span: 30, shape: [
+    { lat: -36.8001, lng: 174.6999 }, { lat: -36.8001, lng: 174.7001 }, { lat: -36.7999, lng: 174.7001 }, { lat: -36.7999, lng: 174.6999 }
+  ] };
+  const guide5 = { hole: 5, points: [{ lat: -36.796, lng: 174.699 }, { lat: -36.7998, lng: 174.6999 }] };
+  const guide6 = { hole: 6, points: [{ lat: -36.796, lng: 174.7 }, { lat: -36.80001, lng: 174.70001 }] };
+  const result = core.resolveGuidesIntoObjects([guide5, guide6], "omaha-like", [green]);
+  assert.ok(result.holes[5], "hole 5 keeps a green record");
+  assert.ok(result.holes[6], "hole 6 keeps a green record");
+  assert.strictEqual(result.holes[6].greenSource, "osm_auto_green_polygon", "the nearer guide keeps the real polygon");
+  assert.strictEqual(result.holes[5].greenSource, "osm_auto_green_estimate", "the loser falls back to a circle at its own guide end");
+  assert.strictEqual(result.polygons, 1);
+  assert.strictEqual(result.fallbacks, 1);
+});
+
 test("chooseAutoMapGuides picks the longer guide when two candidates for the same hole tie on distance", () => {
   const guides = [
     { hole: 1, points: [{ lat: -36.80, lng: 174.70 }, { lat: -36.8001, lng: 174.7001 }] },

@@ -20,8 +20,10 @@
 /* Bumped whenever this module's resolution algorithm changes in a way that should make an
    already-mapped course eligible to be remapped. Compared against course_maps.geometry_version
    by functions/course-mapper-jobs.mjs and written by functions/course-mapper-worker-background.mjs -
-   the single source of truth for both, per the migration plan's stage 3 note. */
-export const MAPPER_VERSION = "v1";
+   the single source of truth for both, per the migration plan's stage 3 note.
+   v2: footprint-bbox querying (long thin courses no longer clipped by the 1400m circle) and
+   one-green-one-hole assignment (a guide can no longer steal a neighbouring hole's green). */
+export const MAPPER_VERSION = "v2";
 
 export const OSM_AUTOMAPPER_RADIUS_M = 1400; // gd-course-library-pin-lock.js:2109
 export const OSM_AUTO_GREEN_MATCH_RADIUS_M = 95; // gd-course-library-pin-lock.js:40
@@ -206,7 +208,85 @@ export function osmQueryScope(opts = {}, center) {
     return { mode: "bbox", selector: "(" + box + ")", frame };
   }
   const radiusM = osmQueryRadius(opts);
-  return { mode: "around", selector: "(around:" + radiusM + "," + center.lat + "," + center.lng + ")", radiusM };
+  return { mode: "around", selector: "(around:" + radiusM + "," + center.lat + "," + center.lng + ")", radiusM, center: toPlain(center) };
+}
+
+/* ---------- course footprint frame (why: Omaha Beach) --------------------------------------
+   The around-radius query circles the stored course PIN, which usually sits at the clubhouse
+   - not the centroid. On a long thin course (Omaha Beach runs ~2.3km down a spit with the pin
+   at the north end) the far loop sits entirely outside the 1400m circle, so Overpass never
+   returns those holes and the mapper "succeeds" with a partial course. The course's own
+   footprint polygon (golf=course / leisure=golf_course) is the honest query area: derive a
+   padded bbox from it and requery in bbox mode when it spills outside the circle. */
+
+export function expandOsmFrame(frame, padM = 0) {
+  const f = normalizedOsmFrame(frame);
+  if (!f) return null;
+  const centerLat = (f.south + f.north) / 2;
+  const latPad = padM / 111320;
+  const lngPad = padM / (111320 * Math.max(0.2, Math.cos(centerLat * Math.PI / 180)));
+  return { south: f.south - latPad, west: f.west - lngPad, north: f.north + latPad, east: f.east + lngPad };
+}
+
+function isCourseFootprintElement(element) {
+  const t = (element && element.tags) || {};
+  return String(t.golf || "").toLowerCase() === "course" || String(t.leisure || "").toLowerCase() === "golf_course";
+}
+
+export function courseFootprintFrame(payload, padM = 160) {
+  const pts = [];
+  ((payload && payload.elements) || []).filter(isCourseFootprintElement).forEach(element => {
+    osmGuidePointsFromElement(element).forEach(p => pts.push(p));
+  });
+  if (!pts.length) return null;
+  let south = Infinity, west = Infinity, north = -Infinity, east = -Infinity;
+  pts.forEach(p => {
+    south = Math.min(south, p.lat); north = Math.max(north, p.lat);
+    west = Math.min(west, p.lng); east = Math.max(east, p.lng);
+  });
+  return expandOsmFrame({ south, west, north, east }, padM);
+}
+
+/* The course polygon's holes=N tag is the only hole-count evidence available without a shared
+   scorecard - enough to notice "the card says 18, I resolved 15" and retry/warn. Max across
+   footprint elements because an 18-hole facility often maps its main polygon plus a par-3
+   loop; overstating only costs a warning, understating hides a clipped course. */
+export function osmCourseHoleCountTag(payload) {
+  let best = null;
+  ((payload && payload.elements) || []).filter(isCourseFootprintElement).forEach(element => {
+    const n = Number(element.tags && element.tags.holes);
+    if (Number.isFinite(n) && n >= 1 && n <= 45) best = Math.max(best || 0, Math.round(n));
+  });
+  return best;
+}
+
+/* True when everything inside `frame` would already have been returned by `scope`'s query -
+   i.e. requerying with the frame cannot add elements, so don't. */
+export function scopeContainsFrame(scope, frame) {
+  const f = normalizedOsmFrame(frame);
+  if (!scope || !f) return false;
+  if (scope.mode === "bbox" && scope.frame) {
+    const s = scope.frame;
+    return f.south >= s.south && f.west >= s.west && f.north <= s.north && f.east <= s.east;
+  }
+  if (scope.mode === "around" && scope.center && Number.isFinite(scope.radiusM)) {
+    const corners = [
+      { lat: f.south, lng: f.west }, { lat: f.south, lng: f.east },
+      { lat: f.north, lng: f.west }, { lat: f.north, lng: f.east }
+    ];
+    return corners.every(corner => distance(scope.center, corner) <= scope.radiusM);
+  }
+  return false;
+}
+
+/* A square frame equivalent to what the scope already covered, so a wider retry can grow from
+   it regardless of which mode the first pass used. */
+export function osmScopeFrame(scope, center) {
+  if (scope && scope.frame) return normalizedOsmFrame(scope.frame);
+  const origin = toPlain((scope && scope.center) || center);
+  if (!origin) return null;
+  const r = Number(scope && scope.radiusM) || OSM_AUTOMAPPER_RADIUS_M;
+  return expandOsmFrame({ south: origin.lat, west: origin.lng, north: origin.lat, east: origin.lng }, r);
 }
 
 export function osmGuideQuery(scope) {
@@ -220,7 +300,10 @@ export function osmGuideQuery(scope) {
     ["way", "golf", "bunker"], ["relation", "golf", "bunker"],
     ["way", "golf", "water_hazard"], ["relation", "golf", "water_hazard"],
     ["way", "golf", "lateral_water_hazard"], ["relation", "golf", "lateral_water_hazard"],
-    ["way", "natural", "water"], ["relation", "natural", "water"]
+    ["way", "natural", "water"], ["relation", "natural", "water"],
+    /* Course footprint: many courses tag only leisure=golf_course, not golf=course. Needed by
+       courseFootprintFrame so the worker can requery long thin courses by their real extent. */
+    ["way", "leisure", "golf_course"], ["relation", "leisure", "golf_course"]
   ];
   return "[out:json][timeout:18];(" + selectors.map(([type, key, value]) => type + selector + '["' + key + '"="' + value + '"];').join("") + ");out geom tags;";
 }
@@ -517,11 +600,10 @@ function upsertResolvedObject(objects, input) {
    image buffers, not just the OSM payload) and everything UI/telemetry-related. Green shape
    defaults to a simple circle (fallbackGreenShape) here; the worker replaces it with a
    refined shape from gd-green-shape-core.mjs when imagery is available. */
-function resolveGuideObjects(objects, courseId, guide, greens) {
+function resolveGuideObjects(objects, courseId, guide, match) {
   const pts = (guide.points || []).map(toPlain).filter(Boolean);
   const h = validHoleNumber(guide.hole);
   if (!h || pts.length < 2) return { saved: 0, greenPolygon: false, fallback: false };
-  const match = bestOsmGreenForGuide(guide, greens);
   const ordered = match && match.endpointIndex === 0 ? [...pts].reverse() : pts;
   const tee = ordered[0];
   const greenEnd = ordered[ordered.length - 1];
@@ -547,11 +629,33 @@ function resolveGuideObjects(objects, courseId, guide, greens) {
    from - a guide is a guide. existingObjects carries forward whatever the other path (or a
    prior run) already resolved, so running both against the same course_maps row merges
    rather than clobbers. */
+/* One green polygon, one hole. Without this, per-guide matching lets two guides claim the
+   same green: at Omaha Beach hole 5 has no green polygon in OSM, its guide ends within the
+   95m match radius of hole 6's green, and the upsert dedupe (identical centre) then flipped
+   that green's holeNumber from 5 to 6 as the guides processed in order - leaving hole 5 with
+   a tee and fairway but no green at all ("incomplete" in Studio, polygons > greensFound in
+   the job result). Assign each green to the single guide whose endpoint sits closest to it;
+   every losing guide gets an estimated circle at its own guide end instead. */
+export function assignGreensToGuides(guides, greens) {
+  const matches = (guides || []).map(guide => ({ guide, match: bestOsmGreenForGuide(guide, greens || []) }));
+  const winnerByGreen = new Map();
+  matches.forEach(row => {
+    if (!row.match || !row.match.green) return;
+    const key = row.match.green.id;
+    const prev = winnerByGreen.get(key);
+    if (!prev || row.match.distance < prev.match.distance) winnerByGreen.set(key, row);
+  });
+  return matches.map(row => {
+    if (!row.match || !row.match.green) return row;
+    return winnerByGreen.get(row.match.green.id) === row ? row : { guide: row.guide, match: null };
+  });
+}
+
 export function resolveGuidesIntoObjects(guides, courseId, greens, existingObjects = []) {
   const objects = (existingObjects || []).map(o => Object.assign({}, o));
   let saved = 0, polygons = 0, fallbacks = 0;
-  (guides || []).forEach(guide => {
-    const result = resolveGuideObjects(objects, courseId, guide, greens || []);
+  assignGreensToGuides(guides, greens).forEach(({ guide, match }) => {
+    const result = resolveGuideObjects(objects, courseId, guide, match);
     saved += result.saved;
     if (result.greenPolygon) polygons++;
     if (result.fallback) fallbacks++;

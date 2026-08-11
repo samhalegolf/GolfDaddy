@@ -14,7 +14,7 @@
    entirely server-side, so nothing client-side needs to run either stage anymore. */
 
 import { fetchOverpass } from "./lib/gd-overpass-client.mjs";
-import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoObjects, classifyCourseRelationship, MAPPER_VERSION } from "./lib/gd-automapper-core.mjs";
+import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoObjects, classifyCourseRelationship, courseFootprintFrame, osmCourseHoleCountTag, scopeContainsFrame, osmScopeFrame, expandOsmFrame, MAPPER_VERSION } from "./lib/gd-automapper-core.mjs";
 import { hasNumberingIssue, resolveCourseGeometryForAutoMapper, guideFromResolvedHole } from "./lib/gd-geometry-resolver-core.mjs";
 import { courseBoundsFor } from "./lib/gd-visual-plan-core.mjs";
 import { resolveImagerySource, unscannableReason } from "./lib/gd-imagery-sources.mjs";
@@ -174,43 +174,101 @@ async function fetchScorecardEvidence(courseName) {
   }
 }
 
-/* fetch OSM golf geometry -> resolve into tee/green/fairway objects -> persist. When OSM has
-   shapes but no hole numbers, falls through to the Native Geometry Resolver (scorecard-backed
-   numbering) before giving up. */
+/* How many holes the shared scorecard actually lists - distinct valid hole numbers, since a
+   card row per tee-set would otherwise double-count. */
+function scorecardHoleCount(evidence) {
+  if (!evidence || !Array.isArray(evidence.holes)) return null;
+  const seen = new Set();
+  evidence.holes.forEach(row => {
+    const n = Number(row && (row.holeNumber ?? row.hole ?? row.number));
+    if (Number.isFinite(n) && n >= 1 && n <= 45) seen.add(Math.round(n));
+  });
+  return seen.size || null;
+}
+
+/* fetch OSM golf geometry -> resolve into tee/green/fairway objects -> persist.
+
+   Query area, in order of preference: the course's own footprint bbox when it spills outside
+   the default 1400m circle (long thin courses - Omaha Beach lost holes 7-9 to the circle),
+   otherwise the circle as before. After resolution the hole count is checked against the best
+   available expectation (shared scorecard, else the OSM course polygon's holes=N tag): coming
+   up short triggers one retry on a wider frame, and if STILL short, the Native Geometry
+   Resolver runs with OSM hole numbers ignored - numbering worked out from geometry +
+   scorecard instead - and its answer is used when it covers more holes. A scan that remains
+   short saves what it has but carries a loud warning on the job result instead of silently
+   publishing a partial course. The resolver also still runs in its original case: OSM has
+   shapes but no hole numbers at all. */
+const WIDER_RETRY_PAD_M = 700;
+
 async function runMapperJob(job) {
   const course = await loadCourseCenter(job.course_id);
   if (!course) throw new Error("course " + job.course_id + " has no known location in " + MAPS_TABLE + " - cannot query Overpass");
   await heartbeatJob(job, { stage: "querying-overpass" });
-  const scope = osmQueryScope({}, course.center);
-  const query = osmGuideQuery(scope);
-  const payload = await fetchOverpass(query);
+  let scope = osmQueryScope({}, course.center);
+  let payload = await fetchOverpass(osmGuideQuery(scope));
+  const queryStages = ["around:" + scope.radiusM];
+  const footprint = courseFootprintFrame(payload);
+  if (footprint && !scopeContainsFrame(scope, footprint)) {
+    scope = osmQueryScope({ osmFrame: footprint }, course.center);
+    payload = await fetchOverpass(osmGuideQuery(scope));
+    queryStages.push("footprint-bbox");
+  }
   await heartbeatJob(job, { stage: "resolving-geometry" });
   const existingObjects = Object.values(course.objects || {}).filter(Boolean);
   const siblingCentres = await loadSiblingCentres(course).catch(() => []);
   let geometry = resolveCourseGeometry(payload, course.courseId, course.center, existingObjects, siblingCentres);
+
+  const scorecardEvidence = await fetchScorecardEvidence(course.courseName);
+  const expectedHoles = scorecardHoleCount(scorecardEvidence) || osmCourseHoleCountTag(payload) || null;
+  const warnings = [];
+
+  if (expectedHoles && geometry.holesResolved < expectedHoles) {
+    await heartbeatJob(job, { stage: "retry-wider-frame" });
+    const widerFrame = expandOsmFrame(osmScopeFrame(scope, course.center), WIDER_RETRY_PAD_M);
+    if (widerFrame) {
+      const widerPayload = await fetchOverpass(osmGuideQuery(osmQueryScope({ osmFrame: widerFrame }, course.center)));
+      const widerGeometry = resolveCourseGeometry(widerPayload, course.courseId, course.center, existingObjects, siblingCentres);
+      if (widerGeometry.holesResolved > geometry.holesResolved) {
+        geometry = widerGeometry;
+        payload = widerPayload;
+        queryStages.push("wider-retry");
+      }
+    }
+  }
+
   let resolverStatus = null;
-  if (!geometry.holesResolved && hasNumberingIssue({ osmPayload: payload })) {
+  const numberingIssue = !geometry.holesResolved && hasNumberingIssue({ osmPayload: payload });
+  const shortOfExpected = !!(expectedHoles && geometry.holesResolved < expectedHoles);
+  if (numberingIssue || shortOfExpected) {
     await heartbeatJob(job, { stage: "geometry-resolver" });
-    const scorecardEvidence = await fetchScorecardEvidence(course.courseName);
     const result = await resolveCourseGeometryForAutoMapper({
       osmPayload: payload,
       courseId: course.courseId,
       course: { courseId: course.courseId, courseName: course.courseName, courseCentre: course.center },
       courseCentre: course.center,
+      expectedHoleCount: expectedHoles || undefined,
       scorecardHoles: scorecardEvidence ? scorecardEvidence.holes : [],
       scorecardEvidence: scorecardEvidence || {}
     });
-    resolverStatus = { status: result.status, confidence: result.confidence, warnings: result.warnings, hadScorecard: !!scorecardEvidence };
+    resolverStatus = { status: result.status, confidence: result.confidence, warnings: result.warnings, hadScorecard: !!scorecardEvidence, trigger: numberingIssue ? "no-osm-numbering" : "short-of-expected" };
     const guides = (result.holes || []).map(hole => guideFromResolvedHole(hole, result)).filter(Boolean);
-    if (guides.length) {
+    /* The resolver's numbering (scorecard-derived, OSM refs ignored) only replaces the
+       OSM-numbered answer when it genuinely covers MORE holes - a lower-coverage resolver run
+       must not clobber good numbered geometry. In the no-numbering case anything it found is
+       strictly better than the nothing OSM numbering produced. */
+    if (guides.length > geometry.holesResolved) {
       const resolverGreens = (result.debugEvidence && result.debugEvidence.greenCandidates || []).map(green => ({ center: green.centre, shape: green.polygon }));
-      const merged = resolveGuidesIntoObjects(guides, course.courseId, resolverGreens, Object.values(geometry.objects));
+      const base = numberingIssue ? Object.values(geometry.objects) : existingObjects;
+      const merged = resolveGuidesIntoObjects(guides, course.courseId, resolverGreens, base);
       geometry = Object.assign({}, geometry, merged, { holesResolved: guides.length });
     }
   }
   if (!geometry.holesResolved) {
     const reason = resolverStatus ? "geometry resolver status: " + resolverStatus.status + (resolverStatus.hadScorecard ? "" : " (no shared scorecard found)") : "no OSM hole geometry within range";
     throw new Error("no numbered hole geometry found for " + course.courseId + " (" + reason + ")");
+  }
+  if (expectedHoles && geometry.holesResolved < expectedHoles) {
+    warnings.push("expected " + expectedHoles + " holes (" + (scorecardHoleCount(scorecardEvidence) ? "shared scorecard" : "OSM holes tag") + ") but resolved " + geometry.holesResolved + " - published incomplete after wider retry" + (resolverStatus ? " and geometry resolver" : ""));
   }
   await saveResolvedGeometry(course.courseId, geometry);
   return {
@@ -222,6 +280,9 @@ async function runMapperJob(job) {
     saved: geometry.saved,
     polygons: geometry.polygons,
     fallbacks: geometry.fallbacks,
+    queryStages,
+    expectedHoles,
+    warnings: warnings.length ? warnings : undefined,
     resolverStatus,
     /* Same bounds the visual planner would compute for this geometry - carried on the result
        so chainVisualSnapshot below can run the licensing check without re-reading the row it
