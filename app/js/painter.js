@@ -46,7 +46,6 @@
   var liveFrame = { a: 1, b: 0, tx: 0, ty: 0 };
   var mapSide = null;          // over-provisioned container side, null → plain map
   var published = false;       // is a published surface currently up
-  var provenance = null;
   var transitionToken = 0;
   var loadedHole = null;       // which hole's surface is presented
   var loadedVisual = null;     // WHICH surface, so a package arriving mid-round re-presents
@@ -124,7 +123,6 @@
         repaint("BASEMAP_READY", function () {
           baseKind = null;
           setBaseFor(lastBaseCentre);
-          renderSourceTag();
         });
       });
     }
@@ -133,7 +131,6 @@
     if (baseLayer) baseLayer.remove();
     baseKind = base.kind;
     baseLayer = base.layer.addTo(map);
-    renderSourceTag();
     var credit = el("mapAttribution");
     if (credit) {
       credit.textContent = base.attribution || "";
@@ -1054,42 +1051,6 @@
     }
     disposeMesh();
     activeFrame = null;
-    provenance = null;
-    renderProvenance();
-  }
-
-  /* What am I actually looking at? Always on, because "is this the published
-     map or the live one, and which imagery" is a question you should never have
-     to infer from how the picture looks. Published still opens the full
-     provenance panel on tap. */
-  function renderSourceTag() {
-    var chip = el("surfaceSource");
-    if (!chip) return;
-    var text, kind;
-    if (presentation === "loading") { text = "LOADING MAP…"; kind = "loading"; }
-    else if (published) {
-      text = "PUBLISHED";
-      kind = "published";
-    } else if (surfaceFailed) {
-      /* Not the same as "this hole has no surface". The server published one
-         and it did not arrive, so say that rather than letting it read as the
-         normal live-map case. */
-      text = "PUBLISHED MAP FAILED · ON LIVE MAP";
-      kind = "failed";
-    } else {
-      text = "LIVE MAP · " + (baseKind ? String(baseKind).toUpperCase() : "…");
-      kind = "live";
-    }
-    chip.textContent = text;
-    chip.dataset.source = kind;
-    show(chip, true);
-  }
-
-  function renderProvenance() {
-    renderSourceTag();
-    var panel = el("surfaceMetaPanel");
-    if (!provenance || !published) { if (panel) show(panel, false); return; }
-    if (panel && !panel.classList.contains("hiddenState")) panel.textContent = JSON.stringify(provenance, null, 2);
   }
 
   /* The image is preloaded off-DOM and swapped only once decodable, so the
@@ -1208,12 +1169,11 @@
     try { mesh.render(); } catch (e) { disposeMesh(); }
   }
 
-  function presentSurface(asset, origin, hole, courseKey) {
+  function presentSurface(asset) {
     var img = el("surfaceImage");
     if (!img) return;
     var token = transitionToken;
     var url = surfaceUrl(asset);
-    var startedAt = Date.now();
     var settled = false;
     var stall = setTimeout(function () {
       if (settled || token !== transitionToken) return;
@@ -1234,14 +1194,6 @@
         presentation = "published";
         surfaceFailed = null;
         document.body.classList.add("surface-published");
-        provenance = {
-          origin: origin, url: url, courseKey: courseKey, holeNumber: hole,
-          loadMs: Date.now() - startedAt,
-          naturalSize: pre.naturalWidth + "×" + pre.naturalHeight,
-          loadedAt: new Date().toISOString(),
-          playSurface: asset.playSurface
-        };
-        renderProvenance();
         attachMesh(asset.playSurface, url);
         lastCameraKey = null;
         /* Draw it. Without this the image appeared with no solved frame — a
@@ -1307,7 +1259,7 @@
 
     if (r && r.visual) {
       presentation = "loading";
-      presentSurface(r.visual, "package", hole, courseKey);
+      presentSurface(r.visual);
       return;
     }
     /* Absence is the answer for this hole: the live map IS the presentation,
@@ -1319,7 +1271,7 @@
     if (token !== transitionToken) return;
     if (answer.state === "published") {
       presentation = "loading";
-      presentSurface(answer.asset, "visuals", hole, courseKey);
+      presentSurface(answer.asset);
     }
   }
 
@@ -1350,7 +1302,7 @@
     /* A declared surface is on its way: hold the previous picture, draw no map
        and place no overlays. They would be projected against metadata that has
        already been cleared. */
-    if (presentation === "loading") { drawChrome(scene); drawPicker(scene); renderSourceTag(); return; }
+    if (presentation === "loading") { drawChrome(scene); drawPicker(scene); return; }
     applyCamera(scene);
     if (!published) drawHoleLayers(scene);
     document.body.classList.toggle("green-focus", scene.finish.show);
@@ -1362,7 +1314,6 @@
     drawPin(scene, proj);
     drawChrome(scene);
     drawPicker(scene);
-    renderSourceTag();
   }
 
   function repaint(cause, fn) {

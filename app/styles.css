@@ -320,13 +320,6 @@ body.ball-dragging #surfaceStage { transition: none !important; }
 #cardEditToggle { position: absolute; top: -10px; right: -10px; width: 22px; height: 22px; border-radius: 50%; border: 0; background: rgba(255, 255, 255, .14); color: #f2f7f2; font-size: 12px; line-height: 22px; padding: 0; z-index: 2; }
 #distanceBar.layout-editing #cardEditToggle { background: #1fd36d; color: #06110b; }
 
-/* Provenance chip: what image is on screen and where it came from. Tapping it
-   opens the full metadata panel. */
-#surfaceSource { position: absolute; top: calc(env(safe-area-inset-top, 0px) + 64px); left: 16px; z-index: 620; border: 0; border-radius: 8px; padding: 6px 10px; background: rgba(13, 27, 18, .8); color: #9fc7ab; font-size: 11px; font-family: ui-monospace, Menlo, monospace; }
-#surfaceSource.hiddenState { display: none; }
-#surfaceMetaPanel { position: absolute; top: calc(env(safe-area-inset-top, 0px) + 96px); left: 16px; right: 16px; max-height: 50vh; overflow: auto; z-index: 620; margin: 0; padding: 12px; border-radius: 12px; background: rgba(13, 27, 18, .92); color: #cfe3d6; font-size: 11px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; }
-#surfaceMetaPanel.hiddenState { display: none; }
-
 /* Standing Here / Head To the Tee pill — ported from the old app's
    gdMappedStartPill (gd-app-base.css). Shown at the pre-frame state, when the
    hole is framed but the player has no position yet. */
@@ -673,18 +666,3 @@ body.pin-dragging #pinMarker { cursor: grabbing; }
 #map, #surfaceViewport, #playTopBar, .shotDock, .playChrome { touch-action: none; }
 .sheet, .sheetBody, #scoreList, #bagList, #traceList { touch-action: pan-y; }
 
-/* ── What am I looking at ─────────────────────────────────────────────────
-   Published surface vs live map, and which imagery. Always on: it should never
-   be something you infer from how the picture looks. */
-#surfaceSource { position: absolute; left: 12px; top: calc(96px + env(safe-area-inset-top, 0px)); z-index: 620;
-  border: 1px solid rgba(255, 255, 255, .18); border-radius: 999px; padding: 3px 9px;
-  background: rgba(5, 9, 7, .8); color: rgba(255, 255, 255, .72);
-  font-size: 9px; font-weight: 900; letter-spacing: .1em; backdrop-filter: blur(8px); }
-#surfaceSource.hiddenState { display: none; }
-#surfaceSource[data-source="published"] { color: #8ef0b6; border-color: rgba(31, 211, 109, .45); }
-#surfaceSource[data-source="live"] { color: #9fd0ff; border-color: rgba(110, 200, 255, .38); }
-#surfaceSource[data-source="loading"] { color: rgba(255, 255, 255, .5); }
-/* A published surface that did not arrive is not the same as a hole that never
-   had one. It reads as a warning because it is one: the round is playable, but
-   on less than it should be. */
-#surfaceSource[data-source="failed"] { color: #ffb64d; border-color: rgba(255, 182, 77, .5); }
