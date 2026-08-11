@@ -16,10 +16,13 @@
 import { fetchOverpass } from "./lib/gd-overpass-client.mjs";
 import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoObjects, classifyCourseRelationship, MAPPER_VERSION } from "./lib/gd-automapper-core.mjs";
 import { hasNumberingIssue, resolveCourseGeometryForAutoMapper, guideFromResolvedHole } from "./lib/gd-geometry-resolver-core.mjs";
+import { courseBoundsFor } from "./lib/gd-visual-plan-core.mjs";
+import { resolveImagerySource, unscannableReason } from "./lib/gd-imagery-sources.mjs";
 
 const JOBS_TABLE = "course_mapper_jobs";
 const MAPS_TABLE = "course_maps";
 const SCORECARDS_TABLE = "course_scorecards";
+const VISUAL_JOBS_TABLE = "course_visual_jobs";
 
 function env(name) { return process.env[name] || ""; }
 function supabaseBase() { return env("SUPABASE_URL").replace(/\/+$/, ""); }
@@ -219,19 +222,69 @@ async function runMapperJob(job) {
     saved: geometry.saved,
     polygons: geometry.polygons,
     fallbacks: geometry.fallbacks,
-    resolverStatus
+    resolverStatus,
+    /* Same bounds the visual planner would compute for this geometry - carried on the result
+       so chainVisualSnapshot below can run the licensing check without re-reading the row it
+       just wrote, and so a job's record shows what ground the mapper actually covered. */
+    courseBounds: courseBoundsFor({ courseId: course.courseId, objects: geometry.objects, holes: geometry.holes })
   };
+}
+
+/* The missing link in the hands-off chain: a successful mapping run used to end right here,
+   so a brand-new course got geometry but no frames until a player happened to REOPEN it -
+   the app's own kind:"auto" visual request had already been refused ("no published
+   geometry") while mapping was still running, and it does not retry. Enqueue the snapshot
+   the moment geometry lands; the visual worker auto-chains the export, which completes
+   select course -> automap -> snapshot -> export -> frames with nobody in Studio.
+
+   Same shape as the two existing auto-enqueue hooks (course-maps.mjs publish -> snapshot,
+   visual worker snapshot -> export): deduped against a live snapshot, and warn-only - the
+   mapping job it rides on has already succeeded and must never be failed by queue trouble.
+
+   Licensing is checked first only to avoid queueing a job whose one possible outcome is
+   "imagery-source-unavailable" (the visual worker stays the real gate) - an unlicensed-region
+   course keeps its geometry and plays live tiles, exactly as before. No confidence gate
+   beyond the ones that already exist: the mapper fails outright without numbered holes, and
+   the visual planner only shoots play-ready holes and refuses an empty plan. */
+async function chainVisualSnapshot(courseId, courseBounds, origin) {
+  const source = resolveImagerySource(courseBounds);
+  if (!source) return { chained: false, reason: "imagery-source-unavailable: " + unscannableReason(courseBounds) };
+  const existing = await supabaseFetch(VISUAL_JOBS_TABLE + "?select=id&course_id=eq." + encodeURIComponent(courseId) + "&kind=eq.snapshot&status=in.(queued,running)&limit=1");
+  if (Array.isArray(existing) && existing.length) return { chained: false, reason: "snapshot-already-live" };
+  await supabaseFetch(VISUAL_JOBS_TABLE, {
+    method: "POST",
+    body: JSON.stringify([{ course_id: courseId, kind: "snapshot", status: "queued", requested_by: "auto-after-automap" }])
+  });
+  /* Wake the visual worker now rather than waiting for its 10-minute sweeper. Awaited with a
+     swallow, same reasoning as course-visual-jobs.mjs's pingWorker: a lost ping only means
+     the queued job waits for the sweep. */
+  if (origin) {
+    await fetch(origin + "/.netlify/functions/course-visual-worker-background", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({})
+    }).catch(() => {});
+  }
+  return { chained: true };
 }
 
 export default async function courseMapperWorker(req) {
   if (!supabaseBase() || !supabaseKey()) return new Response("supabase not configured", { status: 503 });
   let payload = {};
   try { payload = await req.json(); } catch (e) { payload = {}; }
+  let origin = "";
+  try { origin = new URL(req.url).origin; } catch (e) { origin = ""; }
   await reapStaleJobs();
   let job = await claimJob(payload && payload.jobId || null);
   while (job) {
     try {
       const result = await runMapperJob(job);
+      /* Chained BEFORE finishJob so the outcome rides on the job's own result row - a course
+         whose frames never appeared should say why in the same place everything else about
+         the run is recorded. The catch keeps the contract above: geometry saved means the
+         job is "done", whatever the visual queue thought of it. */
+      result.visualChain = await chainVisualSnapshot(job.course_id, result.courseBounds, origin)
+        .catch(error => ({ chained: false, reason: String(error && error.message || error).slice(0, 300) }));
       await finishJob(job.id, { status: "done", result, error: null });
     } catch (error) {
       console.error("course-mapper-worker job failed", job.id, error);
@@ -242,4 +295,4 @@ export default async function courseMapperWorker(req) {
   return new Response("ok", { status: 200 });
 }
 
-export const __courseMapperWorkerTest = { claimJob, finishJob, heartbeatJob, reapStaleJobs, runMapperJob };
+export const __courseMapperWorkerTest = { claimJob, finishJob, heartbeatJob, reapStaleJobs, runMapperJob, chainVisualSnapshot };

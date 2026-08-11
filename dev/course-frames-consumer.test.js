@@ -326,6 +326,35 @@ test("a failed build stops rather than hammering the server", async () => {
   assert.deepStrictEqual(calls.posts, []);
 });
 
+/* The full hands-off chain, from the player's chair: selecting a brand-new course races the
+   AutoMapper enqueue (the build request can be refused before the mapper job is visible),
+   mapping takes minutes, and the mapper worker chains the snapshot server-side. The watch
+   must survive that whole window - and when frames land, the player gets the OFFER, never a
+   silent swap. Runs on real poll ticks (the 5s floor), so this test takes ~11s on purpose. */
+test("a course being automapped keeps its watch, and ready frames arrive as the offer", async () => {
+  const engine = freshEngine();
+  const index = framesIndex();
+  const world = { state: { state: "none", hasGeometry: false }, enqueueStatus: 404, enqueueBody: { error: "course has no published geometry", state: "none" } };
+  const calls = server(world);
+  const offered = [], delivered = [], seen = [];
+  const watch = engine.ensureCourseFrames("pupuke", { accessToken: "t", pollMs: 5000, onState: (s) => seen.push(s.state), onOfflineAvailable: (i) => offered.push(i), onFrames: (f) => delivered.push(f) });
+  await settle(60);
+  assert.strictEqual(calls.posts.length, 1, "the build request went out and was refused - mapping had not surfaced yet");
+  /* The mapper job becomes visible a beat later; the one-poll re-check catches it. */
+  world.state = { state: "mapping", hasGeometry: false };
+  await settle(5300);
+  assert.ok(seen.includes("mapping"), "the watch heard mapping instead of dying on the refusal");
+  /* Mapper finished; the worker chained snapshot -> export server-side; frames published. */
+  world.state = { state: "frames-ready", hasGeometry: true, framesReady: true, framesVersion: 1 };
+  world.index = index;
+  world.bytes = frameBytes(index);
+  await settle(5300);
+  watch.stop();
+  assert.strictEqual(offered.length, 1, "the player is offered the new map when it is ready");
+  assert.deepStrictEqual(delivered, [], "and nothing swapped in on its own");
+  assert.strictEqual(calls.posts.length, 1, "no second build request was manufactured along the way");
+});
+
 test("an accepted update swaps the newer export in", async () => {
   const engine = freshEngine();
   const index = framesIndex();

@@ -710,6 +710,11 @@
     var pollMs=Math.max(5000,Number(opts.pollMs)||FRAMES_POLL_MS);
     var stopped=false;
     var timer=null;
+    /* "none" is ambiguous for exactly one poll: the AutoMapper enqueue this watch races at
+       course selection can land a beat after the first status exchange. One re-check turns a
+       racing "none" into "mapping"/"queued"; a second "none" means nothing is coming and the
+       watch ends rather than polling a course that will never build. */
+    var noneStreak=0;
     function emit(name,payload){if(typeof opts[name]==="function")safe(function(){opts[name](payload);});}
     function stop(){stopped=true;if(timer&&root&&root.clearTimeout)root.clearTimeout(timer);timer=null;}
     function deliver(frames){if(stopped||!frames)return false;emit("onFrames",frames);return true;}
@@ -749,6 +754,11 @@
           emit("onState",state);
           if(state.state==="frames-ready")return offerOrFetch(state).then(function(ok){if(!ok)poll();});
           if(state.state==="failed"){stop();return;}
+          if(state.state==="none"){if(noneStreak<1){noneStreak+=1;poll();}else stop();return;}
+          /* "mapping" (and any state that is not an ending) keeps the watch alive: the mapper
+             worker chains the snapshot itself when geometry lands, so the frames-ready this
+             watch exists for arrives through this same poll - and with acquire false it
+             surfaces as the offer, never a silent swap. */
           poll();
         });
       },pollMs):null;
@@ -781,7 +791,12 @@
           return requestCourseBuild(id,opts.accessToken).then(function(result){
             if(stopped)return;
             emit("onState",{state:result.started?"queued":result.state,requested:result.started,reason:result.reason});
-            if(result.started||result.state==="queued"||result.state==="running")poll();
+            /* "mapping" is the server saying "the AutoMapper has this course and will chain
+               the snapshot itself" - a build is coming, just not one this watch may start.
+               A refused "none" gets the noneStreak re-check in poll() for the enqueue race
+               described above; anything else refused is an ending. */
+            if(result.started||result.state==="queued"||result.state==="running"||result.state==="mapping")poll();
+            else if(result.state==="none"){noneStreak+=1;poll();}
             else stop();
           });
         }

@@ -11,6 +11,7 @@
 const TABLE = "course_visual_jobs";
 const MAPS_TABLE = "course_maps";
 const VISUALS_TABLE = "course_visuals";
+const MAPPER_JOBS_TABLE = "course_mapper_jobs";
 const ADMIN_EMAILS = new Set(["samhalegolf@gmail.com", "admin@clarity.local"]);
 
 /* A player tap is cheap for them and expensive for us (a course snapshot is ~6.6k tile fetches),
@@ -99,6 +100,15 @@ async function courseBuildState(courseId) {
   else if (jobs.some(job => job.kind === "snapshot" && job.status === "done")) state = "captures-ready";
   else if (jobs.length && jobs[0].status === "failed") state = "failed";
   else state = "none";
+  /* "none" while the AutoMapper is still resolving this course is unfinished truth: the
+     mapper worker chains the snapshot itself when geometry lands (chainVisualSnapshot in
+     course-mapper-worker-background.mjs), so a client that hears "mapping" keeps its watch
+     alive and catches the frames-ready that follows - where "none" would rightly end it.
+     Read only on the none branch, so the common states cost nothing extra per poll. */
+  if (state === "none") {
+    const mapper = await supabaseFetch(MAPPER_JOBS_TABLE + "?select=id&course_id=eq." + encodeURIComponent(courseId) + "&status=in.(queued,running)&limit=1").catch(() => []);
+    if (Array.isArray(mapper) && mapper.length) state = "mapping";
+  }
   /* A worker heartbeats after every capture and every hole, so silence is the only honest
      signal that an invocation died - status stays "running" on a process that is gone. The
      reaper needs 6 minutes to be sure; the UI wants to say "this looks stuck" well before
@@ -179,9 +189,25 @@ export default async function courseVisualJobs(req) {
     const state = await courseBuildState(courseId);
     if (state.framesReady || state.building) return json(200, { state: state.state, deduped: true, framesVersion: state.framesVersion });
     /* A course with no published geometry has nothing to shoot; fail fast rather than
-       enqueueing a job whose only outcome is "capture plan is empty". */
-    const maps = await supabaseFetch(MAPS_TABLE + "?select=course_id&course_id=eq." + encodeURIComponent(courseId) + "&published=eq.true&limit=1");
-    if (!Array.isArray(maps) || !maps.length) return json(404, { error: "course has no published geometry", state: "none" });
+       enqueueing a job whose only outcome is "capture plan is empty". Geometry is judged by
+       CONTENT, not row existence: course-mapper-jobs.mjs's ensureCourseCenter creates the
+       published row (identity + centre only) before the mapper has resolved anything, so for
+       the whole automap window "a published row exists" and "there is something to shoot"
+       genuinely differ - and this check used to conflate them, minting a doomed snapshot job
+       whose failure the player then saw. */
+    const maps = await supabaseFetch(MAPS_TABLE + "?select=course_id,objects_json,holes_json&course_id=eq." + encodeURIComponent(courseId) + "&published=eq.true&limit=1");
+    const map = Array.isArray(maps) ? maps[0] : null;
+    const objectCount = map && map.objects_json && typeof map.objects_json === "object" ? Object.keys(map.objects_json).length : 0;
+    const holeCount = map && map.holes_json && typeof map.holes_json === "object" ? Object.keys(map.holes_json).length : 0;
+    if (!objectCount && !holeCount) {
+      /* While the AutoMapper is resolving this course the honest answer is "mapping", not
+         "none": the mapper worker chains the snapshot itself the moment geometry lands
+         (chainVisualSnapshot in course-mapper-worker-background.mjs), so nothing needs
+         enqueueing here on the client's behalf. courseBuildState above already asked the
+         mapper queue on its none branch - reuse its answer rather than asking twice. */
+      if (state.state === "mapping") return json(200, { state: "mapping", deduped: true });
+      return json(404, { error: "course has no published geometry", state: "none" });
+    }
     const since = new Date(Date.now() - AUTO_RATE_WINDOW_MS).toISOString();
     const recent = await supabaseFetch(TABLE + "?select=id&requested_by=eq." + encodeURIComponent("auto:" + user.id) + "&created_at=gt." + encodeURIComponent(since) + "&limit=" + (AUTO_RATE_MAX_PER_USER + 1));
     if (Array.isArray(recent) && recent.length >= AUTO_RATE_MAX_PER_USER) return json(429, { error: "too many course builds started recently", state: state.state });

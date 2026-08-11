@@ -84,6 +84,54 @@ test("a job stalled 8 times in a row is failed for good, not requeued forever", 
   assert.strictEqual(patches[0].status, "failed");
 });
 
+/* NZ mainland bounds (LINZ-covered, key stubbed in run() below) and an Australian course
+   (no licensed imagery source) - the two sides of chainVisualSnapshot's licensing guard. */
+const NZ_BOUNDS = { south: -36.79, west: 174.75, north: -36.77, east: 174.77 };
+const AU_BOUNDS = { south: -33.9, west: 151.2, north: -33.88, east: 151.22 };
+
+test("a successful mapping run chains a visual snapshot and wakes the visual worker", async () => {
+  const inserts = [];
+  let pinged = false;
+  global.fetch = async (url, options = {}) => {
+    url = String(url);
+    const method = String(options.method || "GET").toUpperCase();
+    if (url.includes("course-visual-worker-background")) { pinged = true; return jsonResponse(202, {}); }
+    if (method === "GET") return jsonResponse(200, []);
+    if (method === "POST") { inserts.push(JSON.parse(options.body || "[]")); return jsonResponse(201, []); }
+    return jsonResponse(200, []);
+  };
+  const outcome = await worker.chainVisualSnapshot("pupuke", NZ_BOUNDS, "https://clarity.test");
+  assert.strictEqual(outcome.chained, true);
+  assert.strictEqual(inserts.length, 1);
+  assert.strictEqual(inserts[0][0].course_id, "pupuke");
+  assert.strictEqual(inserts[0][0].kind, "snapshot");
+  assert.strictEqual(inserts[0][0].requested_by, "auto-after-automap");
+  assert.strictEqual(pinged, true, "the visual worker should be woken rather than left to the sweeper");
+});
+
+test("no licensed imagery -> no snapshot job is minted", async () => {
+  let touchedQueue = false;
+  global.fetch = async () => { touchedQueue = true; return jsonResponse(200, []); };
+  const outcome = await worker.chainVisualSnapshot("bondi-links", AU_BOUNDS, "https://clarity.test");
+  assert.strictEqual(outcome.chained, false);
+  assert.ok(String(outcome.reason).startsWith("imagery-source-unavailable"), "reason should carry the licensing verdict: " + outcome.reason);
+  assert.strictEqual(touchedQueue, false, "an unlicensed course should never reach the job queue");
+});
+
+test("a live snapshot job dedupes the chain instead of stacking a second worker", async () => {
+  const posts = [];
+  global.fetch = async (url, options = {}) => {
+    const method = String(options.method || "GET").toUpperCase();
+    if (method === "GET") return jsonResponse(200, [{ id: "job-live" }]);
+    posts.push(String(url));
+    return jsonResponse(201, []);
+  };
+  const outcome = await worker.chainVisualSnapshot("pupuke", NZ_BOUNDS, "https://clarity.test");
+  assert.strictEqual(outcome.chained, false);
+  assert.strictEqual(outcome.reason, "snapshot-already-live");
+  assert.strictEqual(posts.length, 0);
+});
+
 function jsonResponse(status, body) {
   return {
     ok: status >= 200 && status < 300,
@@ -96,6 +144,9 @@ function jsonResponse(status, body) {
 (async function run() {
   process.env.SUPABASE_URL = "https://stub.supabase.co";
   process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role-stub";
+  /* Makes LINZ resolvable so the chain tests exercise the licensed path - the imagery table
+     refuses a source whose key is not configured, which is itself what the AU test relies on. */
+  process.env.LINZ_BASEMAPS_API_KEY = "stub-linz-key";
   const mod = await import(path.join(root, "functions", "course-mapper-worker-background.mjs"));
   worker = mod.__courseMapperWorkerTest;
   let failures = 0;

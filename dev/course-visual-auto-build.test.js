@@ -57,6 +57,7 @@ function stubFetch(world) {
     calls.reads.push(rest);
     if (table === "course_visuals") return jsonResponse(200, world.visuals || []);
     if (table === "course_maps") return jsonResponse(200, world.maps || []);
+    if (table === "course_mapper_jobs") return jsonResponse(200, world.mapperJobs || []);
     if (table === "course_visual_jobs") {
       /* The rate-limit read is the only one filtered by requested_by; every other read of this
          table wants the course's job history. */
@@ -105,7 +106,10 @@ async function call(request) {
 function unbuiltCourse(overrides = {}) {
   return Object.assign({
     sessions: { "player-token": PLAYER, "admin-token": ADMIN },
-    maps: [{ course_id: "pupuke" }],
+    /* objects_json is not decoration: the auto path judges geometry by CONTENT, because the
+       mapper's ensureCourseCenter publishes a centre-only row before any geometry exists. A
+       bare { course_id } row is that pre-mapping state, which its own test covers below. */
+    maps: [{ course_id: "pupuke", objects_json: { "pupuke-h1-green": { type: "green", holeNumber: 1 } } }],
     visuals: [],
     jobs: [],
     userJobs: []
@@ -181,6 +185,19 @@ test("a course with no published geometry fails fast instead of queueing an empt
   const calls = stubFetch(unbuiltCourse({ maps: [] }));
   const result = await call(post({ courseId: "pupuke", kind: "auto" }, "player-token"));
   assert.strictEqual(result.status, 404);
+  assert.deepStrictEqual(jobInserts(calls), []);
+});
+
+test("a centre-only row mid-automap answers 'mapping' instead of minting a doomed job", async () => {
+  /* ensureCourseCenter publishes { course_id, centre } with no geometry the moment a mapper
+     job is enqueued. An auto request in that window used to pass the row-exists check and
+     queue a snapshot whose only possible outcome was "capture plan is empty" - the player
+     then saw a failed build for a course that was mapping fine. The mapper worker chains the
+     snapshot itself when geometry lands, so the right answer here is a quiet "mapping". */
+  const calls = stubFetch(unbuiltCourse({ maps: [{ course_id: "pupuke" }], mapperJobs: [{ id: "map-live" }] }));
+  const result = await call(post({ courseId: "pupuke", kind: "auto" }, "player-token"));
+  assert.strictEqual(result.status, 200);
+  assert.strictEqual(result.body.state, "mapping");
   assert.deepStrictEqual(jobInserts(calls), []);
 });
 
