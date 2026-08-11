@@ -207,6 +207,42 @@
   to = "/.netlify/functions/admin-diagnostics"
   status = 200
 
+# Pretty URLs for the review-facing pages. Store review forms and humans both
+# type these without the extension; a 404 at /privacy while privacy.html works
+# is the kind of thing a reviewer notices and a rejection cites.
+[[redirects]]
+  from = "/privacy"
+  to = "/privacy.html"
+  status = 301
+
+[[redirects]]
+  from = "/terms"
+  to = "/terms.html"
+  status = 301
+
+[[redirects]]
+  from = "/support"
+  to = "/support.html"
+  status = 301
+
+[[redirects]]
+  from = "/delete-account"
+  to = "/delete-account.html"
+  status = 301
+
+[[redirects]]
+  from = "/welcome"
+  to = "/welcome.html"
+  status = 301
+
+# The landing's original "Create account" target. The app has no separate
+# signup page - the auth panel handles both - so this lands on the app shell
+# with the landing redirect suppressed. 302 in case a real page appears later.
+[[redirects]]
+  from = "/signup"
+  to = "/?login=1"
+  status = 302
+
 [[headers]]
   for = "/index.html"
   [headers.values]

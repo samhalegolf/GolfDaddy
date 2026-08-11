@@ -57,6 +57,10 @@ const publicPaths = [
   // Play Console requires a web-accessible account deletion URL for any app
   // that allows account creation.
   "delete-account.html",
+  // The public landing page. Signed-out web visitors are sent here by
+  // gd-landing-redirect-v1.js; its images live under assets/landing/, which
+  // rides along with the assets entry above. Web-only - see NON_APP_FILES.
+  "welcome.html",
   // Deep-link verification files. Android reads assetlinks.json and iOS reads
   // apple-app-site-association from this path over https; if they are not
   // deployed, links open the browser instead of the app and the failure is
@@ -225,7 +229,12 @@ if (APP_ONLY) {
      capture harness - a dev tool, and one that has no business being in a
      shipped app even at 20KB. On Netlify these stay, since the CDN serves them
      and `npm run demo:capture` drives them. */
-  const NON_APP_DIRS = ["demo"];
+  const NON_APP_DIRS = ["demo", "assets/landing"];
+  /* welcome.html and its assets/landing images are the web landing page for
+     signed-out visitors. The native apps never navigate there - the redirect
+     script bails when GDNative reports native - so inside a store binary the
+     page is unreachable weight, and the landing images alone are megabytes. */
+  const NON_APP_FILES = ["welcome.html"];
   let prunedDirs = 0;
   NON_APP_DIRS.forEach(function (dir) {
     const target = path.join(dist, dir);
@@ -233,8 +242,12 @@ if (APP_ONLY) {
     fs.rmSync(target, { recursive: true, force: true });
     prunedDirs += 1;
   });
+  NON_APP_FILES.forEach(function (file) {
+    fs.rmSync(path.join(dist, file), { force: true });
+  });
   console.log("--app-only: no studio output; pruned " + studioOnlyFiles.length
-    + " studio-only files and " + prunedDirs + " non-app director" + (prunedDirs === 1 ? "y" : "ies") + " from dist");
+    + " studio-only files, " + NON_APP_FILES.length + " web-only file(s), and "
+    + prunedDirs + " non-app director" + (prunedDirs === 1 ? "y" : "ies") + " from dist");
 } else {
   const studioHtml = stampTarget(studio.html, STUDIO).replace(/<head>/i, '<head>\n<base href="/">');
   const studioStamped = stampContentVersions(studioHtml);
