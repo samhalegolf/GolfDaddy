@@ -666,6 +666,50 @@
     }
   }
 
+  /* The wind banner: the one unmissable "wind is ON" readout. Level (or an
+     ellipsis while a live check is in flight), LIVE when the reading was
+     measured, and the arrow rotated to the direction the wind is blowing ON
+     SCREEN — solved by projecting a short step along the blow bearing, so it
+     stays true whatever the camera rotation is doing. Reads the engine's
+     wind state the same way drawShot reads the render model: wind.js owns
+     the state, this only says it out loud. */
+  function drawWind(scene, proj) {
+    var banner = el("windBanner");
+    if (!banner) return;
+    var engine = window.GDBubbleEngine;
+    var state = engine && engine.windState ? engine.windState() : null;
+    var checking = !!(app.wind && app.wind.checking && app.wind.checking());
+    show(banner, !!state || checking);
+    if (!state && !checking) return;
+    banner.classList.toggle("checkingWind", !state && checking);
+    var label = el("windBannerLabel");
+    if (label) label.textContent = state ? "WIND " + state.level : "WIND …";
+    show(el("windBannerLive"), !!state && !!(app.wind && app.wind.isLive && app.wind.isLive()));
+    var arrow = el("windBannerArrow");
+    if (!arrow) return;
+    var angle = state ? windScreenAngleDeg(scene, proj, state) : null;
+    show(arrow, angle !== null);
+    if (angle !== null) arrow.style.transform = "rotate(" + angle.toFixed(1) + "deg)";
+  }
+
+  /* Screen angle (deg, 0 = pointing right) of the wind's BLOW direction —
+     originAngle is where the wind comes FROM, so the blow bearing is half a
+     turn on. Anchored at the aim when a shot is up, the green otherwise, so
+     the arrow is solved where the wind is actually being judged. Null when
+     nothing projects — the banner then just shows the level. */
+  function windScreenAngleDeg(scene, proj, state) {
+    if (!proj || !window.GDBubbleVisual) return null;
+    var anchor = (scene.bubble.show && scene.bubble.target)
+      || (scene.hole.rec && scene.hole.rec.green)
+      || scene.player || null;
+    if (!anchor) return null;
+    var blowDeg = (((state.originAngle + Math.PI) * 180) / Math.PI) % 360;
+    var from = proj.toScreen(anchor);
+    var to = proj.toScreen(window.GDBubbleVisual.destination(anchor, blowDeg, 30));
+    if (!from || !to) return null;
+    return (Math.atan2(to.top - from.top, to.left - from.left) * 180) / Math.PI;
+  }
+
   function drawPin(scene, proj) {
     var pin = app.pin && app.pin.current();
     var marker = el("pinMarker"), label = el("pinDistance");
@@ -1302,7 +1346,7 @@
     /* A declared surface is on its way: hold the previous picture, draw no map
        and place no overlays. They would be projected against metadata that has
        already been cleared. */
-    if (presentation === "loading") { drawChrome(scene); drawPicker(scene); return; }
+    if (presentation === "loading") { drawChrome(scene); drawWind(scene, null); drawPicker(scene); return; }
     applyCamera(scene);
     if (!published) drawHoleLayers(scene);
     document.body.classList.toggle("green-focus", scene.finish.show);
@@ -1312,6 +1356,7 @@
     drawShot(scene, proj);
     drawFinish(scene, proj);
     drawPin(scene, proj);
+    drawWind(scene, proj);
     drawChrome(scene);
     drawPicker(scene);
   }
@@ -1501,6 +1546,13 @@
     });
     if (app.playsLike) app.playsLike.onChange(function () {
       if (marshal) repaint("ELEVATION_READY", function () { render(marshal.scene()); });
+    });
+    /* Wind moving is a paint like a pin moving: the bubble slides to the new
+       landing, the drift line redraws and the banner updates the moment the
+       level, direction or live check changes — not on the next unrelated
+       scene publish. */
+    if (app.wind && app.wind.onChange) app.wind.onChange(function () {
+      if (marshal) repaint("WIND_CHANGED", function () { render(marshal.scene()); });
     });
   }
 

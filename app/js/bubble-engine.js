@@ -692,11 +692,20 @@ function localPointToLatLng(center, shotBrg, x, y){
     targetForGreenCentre: function (green, opts) { return gdTargetForGreenCentre(toLatLng(green), opts || {}); },
     /* The old renderShot pipeline, minus the Leaflet layers: distance →
        payload → render centre → display payload → the three shell rings as
-       lat/lng arrays for the surface to project. */
+       lat/lng arrays for the surface to project.
+
+       The AIM distance (start → target) sizes the payload, NOT the distance
+       to the blown landing. With wind on, the bubble sits at the landing but
+       the club has to fly the aim distance — that is the whole counteract
+       gesture: wind blows the bubble off the target, the player drags it
+       back on, the aim walks upwind, and the club follows the aim. Sized
+       from the landing it never moved: drag the bubble onto a 150m flag into
+       any headwind and it still said the calm-air 150m club. Without wind
+       the two points are the same and nothing on the calm path changes. */
     renderModel: function () {
       var displayTarget = gdShotDisplayTarget();
       if (!start || !displayTarget) return null;
-      var d = map.distance(start, displayTarget);
+      var d = target ? map.distance(start, target) : map.distance(start, displayTarget);
       if (!Number.isFinite(d) || d <= 0) return null;
       var raw = getGpsBubblePayload(d);
       var center = gdBubbleRenderCenter(raw) || displayTarget || target;

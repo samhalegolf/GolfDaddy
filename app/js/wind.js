@@ -1,10 +1,14 @@
-/* Wind: tap the rail icon to cycle level (calm→1→2→3→off), long-press to open
-   a compass and set direction — same split as the legacy rail button
-   (gdWindToolPressed / gdOpenWindPicker). Wind never touches the dispersion
-   shape, only the display target the shot card/rings render against —
-   entirely owned by GDBubbleEngine's setWind/clearWind/windState
-   (see dev/generate-bubble-engine-client.js). No storage: wind resets with
-   the shot like the legacy tool did, nothing persists across a hole. */
+/* Wind: tap the rail icon to turn wind ON — live wind first, no direction
+   prompt when a reading is available (the level lands as 1/2/3 straight from
+   the measured speed). Once on, taps cycle the level (1→2→3→off). The compass
+   popover is the FALLBACK, not the front door: it opens when live wind cannot
+   answer (offline, no position, bad response) and on long-press for a manual
+   override — same long-press as the legacy rail button (gdOpenWindPicker).
+   Wind never touches the dispersion shape, only the display target the shot
+   card/rings render against — entirely owned by GDBubbleEngine's
+   setWind/clearWind/windState (see dev/generate-bubble-engine-client.js).
+   No storage, and wind is PER SHOT: boot.js calls reset() the moment the
+   shot's start point changes, so every shot starts calm. */
 (function () {
   "use strict";
   var app = (window.ClarityApp = window.ClarityApp || {});
@@ -24,6 +28,19 @@
      clearing, drops it - at that point nothing measured is left. */
   var liveActive = false;
 
+  /* A live fetch in flight from the rail tap. The banner shows it (painter
+     drawWind), and a second tap while checking does nothing rather than
+     stacking fetches. */
+  var checking = false;
+
+  /* The painter listens here so the bubble, the drift line and the wind
+     banner move the moment wind changes — the same onChange seam pin.js and
+     my-bubble.js already use. Without it a wind change only showed up when
+     something else happened to repaint. */
+  var listeners = [];
+  function notify() { listeners.forEach(function (fn) { try { fn(); } catch (e) {} }); }
+  function changed() { syncIcon(); notify(); }
+
   function engine() { return window.GDBubbleEngine || null; }
 
   /* Captures whatever the engine's wind state is right now and pushes an
@@ -39,7 +56,7 @@
       if (!e) return;
       if (prev) e.setWind(prev.originAngle, prev.level); else e.clearWind();
       liveActive = prevLive;
-      syncIcon();
+      changed();
     });
   }
 
@@ -82,6 +99,17 @@
     if (picker) picker.classList.add("hiddenState");
   }
 
+  /* The fallback path: live wind could not answer, so the compass takes the
+     question, with the reason on its status line rather than a silent open. */
+  function fallBackToPicker(message) {
+    openPicker();
+    var status = document.getElementById("windAutoStatus");
+    if (status && message) {
+      status.textContent = message;
+      status.classList.remove("hiddenState");
+    }
+  }
+
   /* Tap origin on the compass ring: angle from its centre to the tap point,
      0 = north (up), clockwise — matches gdWindPickDirection. */
   function pickDirection(event) {
@@ -94,35 +122,62 @@
     var eng = engine();
     if (eng) { pushUndo(); eng.setWind(angle, 1); liveActive = false; }
     closePicker();
-    syncIcon();
+    changed();
   }
 
-  /* Short tap: cycles level 1→2→3→off if active, or arms the compass to pick
-     a direction if wind hasn't been set yet — mirrors gdWindToolPressed. */
+  /* Short tap. Wind off: turn it ON — live first, so there is no direction
+     prompt when a reading is available; the compass only appears when live
+     wind cannot answer. Wind on: cycle the level 1→2→3→off, keeping the
+     direction (measured or picked) as it is. */
   function press() {
     var eng = engine();
     if (!eng) return;
     var state = eng.windState();
-    if (!state) { openPicker(); return; }
+    if (!state) {
+      if (checking) return;   // a live check is already in flight
+      fetchLiveWind({ fallbackToPicker: true });
+      return;
+    }
     pushUndo();
-    if (state.level >= 3) { eng.clearWind(); liveActive = false; syncIcon(); return; }
+    if (state.level >= 3) { eng.clearWind(); liveActive = false; changed(); return; }
     eng.setWind(state.originAngle, state.level + 1);
-    syncIcon();
+    changed();
+  }
+
+  /* Wind is per shot. Called by boot.js whenever the shot's start point
+     changes (a new lock, a new placement, unlock, a hole change) — the next
+     shot starts calm, exactly like putting a fresh ball down. Deliberately
+     no undo entry: nothing was pressed, so there is nothing Back should
+     re-litigate. */
+  function reset() {
+    var eng = engine();
+    var had = !!(eng && eng.windState());
+    if (!had && !liveActive && !checking) return;
+    if (eng) eng.clearWind();
+    liveActive = false;
+    checking = false;
+    changed();
   }
 
   /* Live wind: the player's own position (the only location the fresh app
      reliably has — no course-centre/map-centre fallback chain like legacy's
      gdLiveWindLocation, since a hole with no position yet has nothing to ask
      Open-Meteo about). Fail-open like every other fresh-app fetch: no
-     position, a timeout, or a bad response just leaves wind as it was. */
-  async function fetchLiveWind() {
+     position, a timeout, or a bad response just leaves wind as it was —
+     from the rail tap that means falling back to the compass, from the
+     popover's own button it stays a status line. */
+  async function fetchLiveWind(opts) {
+    opts = opts || {};
     var status = document.getElementById("windAutoStatus");
     var pos = app.marshal && app.marshal.player();
     if (!pos) {
+      if (opts.fallbackToPicker) { fallBackToPicker("No position yet — tap the wind origin"); return; }
       if (status) { status.textContent = "No position yet"; status.classList.remove("hiddenState"); }
       return;
     }
-    if (status) { status.textContent = "Checking wind…"; status.classList.remove("hiddenState"); }
+    if (!opts.fallbackToPicker && status) { status.textContent = "Checking wind…"; status.classList.remove("hiddenState"); }
+    checking = true;
+    notify();   // the banner shows the check, so a rail tap is never silent
     var controller = typeof AbortController !== "undefined" ? new AbortController() : null;
     var timer = controller ? setTimeout(function () { controller.abort(); }, FETCH_TIMEOUT_MS) : null;
     try {
@@ -155,9 +210,13 @@
          reading that had already landed look like it was still in flight. */
       if (status) status.classList.add("hiddenState");
       closePicker();
-      syncIcon();
+      checking = false;
+      changed();
     } catch (e) {
-      if (status) { status.textContent = "Live wind unavailable"; status.classList.remove("hiddenState"); }
+      checking = false;
+      if (opts.fallbackToPicker) fallBackToPicker("Live wind unavailable — tap the wind origin");
+      else if (status) { status.textContent = "Live wind unavailable"; status.classList.remove("hiddenState"); }
+      notify();
     } finally {
       if (timer) clearTimeout(timer);
     }
@@ -165,19 +224,23 @@
 
   app.wind = {
     press: press, openPicker: openPicker, syncIcon: syncIcon, fetchLiveWind: fetchLiveWind,
+    reset: reset,
     /* What the wind was measured to be, or null if it was never fetched this
        round. Null is a real answer - "no live evidence" - and Course Data
        records it as such rather than substituting the player's setting. */
     liveReading: function () { return liveReading; },
     /* Whether what is on the icon came from a live reading. */
     isLive: function () { return liveActive && !!(engine() && engine().windState()); },
+    /* A rail-tap live check still in flight — the banner's "…" state. */
+    checking: function () { return checking; },
     /* What the player dialled in, which is intent, not evidence. */
     selection: function () {
       var eng = engine();
       var state = eng && eng.windState();
       if (!state) return null;
       return { originAngleRad: state.originAngle, level: state.level };
-    }
+    },
+    onChange: function (fn) { if (typeof fn === "function") listeners.push(fn); }
   };
 
   document.addEventListener("DOMContentLoaded", function () {
@@ -190,9 +253,9 @@
       if (eng && eng.windState()) { pushUndo(); eng.clearWind(); }
       liveActive = false;
       closePicker();
-      syncIcon();
+      changed();
     });
     var auto = document.getElementById("windAuto");
-    if (auto) auto.addEventListener("click", fetchLiveWind);
+    if (auto) auto.addEventListener("click", function () { fetchLiveWind(); });
   });
 })();

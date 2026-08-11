@@ -86,6 +86,17 @@
       <span id="playBannerLabel"></span>
       <button id="playBannerReturn" type="button" class="hiddenState"></button>
     </div>
+    <!-- The wind tell. Wind is easy to leave on and invisible when the bubble
+         is down, so while wind is set this says so out loud: the level, LIVE
+         when the reading was measured rather than dialled in, and an arrow
+         rotated to the direction the wind is BLOWING on screen — the same
+         direction the bubble was pushed. Hidden when calm. The painter draws
+         it from the engine's wind state (drawWind); wind.js owns that state. -->
+    <div id="windBanner" class="hiddenState" role="status">
+      <span id="windBannerArrow" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 12h15M13.5 6.5 19 12l-5.5 5.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+      <span id="windBannerLabel">WIND</span>
+      <span id="windBannerLive" class="hiddenState">LIVE</span>
+    </div>
     <!-- A published map arriving mid-round is a prompt, not an auto-switch -
          the loading screen already covered the "available from the start"
          case before play began. -->

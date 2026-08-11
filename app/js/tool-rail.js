@@ -189,8 +189,10 @@
       if (app.scorecard) app.scorecard.open();
     });
 
-    /* Wind: short tap cycles level (calm→1→2→3→off); a long press opens the
-       compass to set/change direction — same split as the legacy rail button. */
+    /* Wind: short tap turns wind on (live wind first — the compass only
+       appears when live can't answer) then cycles the level (1→2→3→off);
+       a long press opens the compass for a manual direction override —
+       same long-press as the legacy rail button. */
     var windBtn = document.getElementById("railWind");
     if (windBtn && app.wind) {
       var pressTimer = null, longPressed = false;

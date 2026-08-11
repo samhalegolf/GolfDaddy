@@ -12,6 +12,11 @@
   var mapUpdateDismissed = false;
   var updateCheckToken = 0;
 
+  /* The start point of the shot the engine was last handed, as a value key.
+     shotChanged compares against it to tell "the shot moved on" (reset wind)
+     from "the same shot's aim is being dragged" (leave wind alone). */
+  var lastShotStartKey = null;
+
   /* Build the Marshal and hand it the effects it is allowed to cause. It is
      pure by construction — no globals, no DOM — so everything with a side
      effect arrives here, which is also why the whole transition table can be
@@ -59,6 +64,15 @@
         },
         shotChanged: function (start, target) {
           if (window.GDBubbleEngine) window.GDBubbleEngine.setShot(start || null, target || null);
+          /* Wind is per shot. A different start point — or no shot at all —
+             is the next shot, and it starts calm (wind.js reset). Dragging
+             the aim only moves the TARGET, so a drag never lands here; a new
+             lock, a new placement, an unlock and a hole change all do. */
+          var key = start ? Number(start.lat).toFixed(7) + "," + Number(start.lng).toFixed(7) : null;
+          if (key !== lastShotStartKey) {
+            lastShotStartKey = key;
+            if (app.wind && app.wind.reset) app.wind.reset();
+          }
         },
         /* GPS Play's only analytical output. Wrapped because nothing about
            Course Data may interrupt a round. */

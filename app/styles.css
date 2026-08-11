@@ -582,6 +582,18 @@ body.pin-dragging #pinMarker { cursor: grabbing; }
 #playBannerReturn { margin-left: auto; border: 0; background: rgba(255, 255, 255, .13); color: #eafff1; border-radius: 999px; padding: 3px 10px; font: inherit; }
 #playBannerReturn.hiddenState { display: none; }
 
+/* The wind tell — same strip idiom as #playBanner, in the drift line's cyan
+   so banner, rail dot and on-map drift read as one system. The arrow is
+   rotated by the painter to the on-screen blow direction. */
+#windBanner { display: flex; align-items: center; gap: 7px; padding: 4px 12px; font-size: 11px; font-weight: 800; letter-spacing: .06em; background: rgba(102, 220, 255, .13); color: #9fe6ff; }
+#windBanner.hiddenState { display: none; }
+#windBanner.checkingWind { opacity: .7; }
+#windBannerArrow { display: inline-flex; width: 14px; height: 14px; flex: 0 0 auto; transform-origin: 50% 50%; }
+#windBannerArrow svg { width: 100%; height: 100%; }
+#windBannerArrow.hiddenState { display: none; }
+#windBannerLive { font-size: 9px; padding: 1px 6px; border-radius: 999px; background: rgba(102, 220, 255, .22); color: #d9f6ff; }
+#windBannerLive.hiddenState { display: none; }
+
 /* ── Play ─────────────────────────────────────────────────────────────────
    The one way into Live, and only present when a trusted fix says you are at
    the course. Big, central, unmissable — it is the start of the round. */

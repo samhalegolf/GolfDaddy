@@ -1315,7 +1315,7 @@ async function bootCheck() {
     const app = window.ClarityApp;
     const eng = window.GDBubbleEngine;
     app.undo.clear();
-    eng.setWind(0, 1);   // seed a wind level directly - matches a real first press only opening the compass, not setting state
+    eng.setWind(0, 1);   // seed a wind level directly - a real first press goes through the live-wind fetch, which a test cannot wait on
     const beforeWindPress = eng.windState();
     app.wind.press();   // level 1 -> 2, pushes an undo entry
     const afterPress = eng.windState();
