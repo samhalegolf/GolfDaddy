@@ -369,15 +369,12 @@ body.ball-dragging #surfaceStage { transition: none !important; }
    else in the play screen), never hidden by a route change within this
    page. */
 #playTopBar { position: fixed; top: 0; left: 0; right: 0; z-index: 700; display: flex; flex-direction: column; }
-/* Transparent until lock-in: pre-lock the map runs to the top of the screen
-   and the header block only hid it. During lock the map tilts and the sky
-   behind it shows, so the block comes back (body.tilt-lock, painter.js) to
-   cap the view. The buttons carry their own dark fill so Back/Home stay
-   readable over bright fairway when the block is gone. */
-#globalNav { display: flex; align-items: center; gap: 4px; padding: calc(env(safe-area-inset-top, 0px) + 10px) 12px 10px; background: transparent; transition: background .25s ease; }
-body.tilt-lock #globalNav { background: rgba(7, 16, 11, .92); }
+/* No header block: the map runs to the top of the screen in every state,
+   including the tilted lock-in view. The buttons carry their own dark fill
+   so Back/Home stay readable over bright fairway (and over the sky behind
+   the tilted map). */
+#globalNav { display: flex; align-items: center; gap: 4px; padding: calc(env(safe-area-inset-top, 0px) + 10px) 12px 10px; }
 #globalNav button { border: 0; border-radius: 10px; padding: 10px 14px; background: rgba(7, 16, 11, .55); color: #f2f7f2; font-size: 15px; }
-body.tilt-lock #globalNav button { background: rgba(255, 255, 255, .12); }
 
 #mapUpdateBar { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: rgba(31, 211, 109, .16); border-bottom: 1px solid rgba(31, 211, 109, .3); }
 #mapUpdateBar.hiddenState { display: none; }
