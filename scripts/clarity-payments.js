@@ -26,7 +26,8 @@
   var freePassDraft = { email: "", accountId: "", note: "" };
   var freePassFeedback = { status: "", message: "" };
   var issuedPassesState = { rows: [], loading: false, loaded: false, error: "" };
-  var adminDetailsState = { diagnostics: false, advanced: false };
+  var adminDetailsState = { diagnostics: false, advanced: false, users: false };
+  var adminUsersState = { rows: [], loading: false, loaded: false, error: "", filter: "" };
   var resolverTestState = { permissionKey: "gps_live_bubble", accountId: "", accountEmail: "", profileId: "", loading: false, result: null, error: "" };
   var editingProductKey = "";
   var originalShowSection = null;
@@ -361,6 +362,56 @@
       issuedPassesState = { rows: issuedPassesState.rows, loading: false, loaded: true, error: error && error.message ? error.message : "Could not load issued passes" };
       render();
     });
+  }
+
+  function loadAdminUsers() {
+    adminUsersState.loading = true;
+    adminUsersState.error = "";
+    render();
+    return adminQuery("listUsers", {}).then(function (body) {
+      adminUsersState = { rows: Array.isArray(body.users) ? body.users : [], loading: false, loaded: true, error: "", filter: adminUsersState.filter };
+      render();
+    }).catch(function (error) {
+      adminUsersState = { rows: adminUsersState.rows, loading: false, loaded: true, error: error && error.message ? error.message : "Could not load users", filter: adminUsersState.filter };
+      render();
+    });
+  }
+
+  function filteredAdminUsers() {
+    var query = String(adminUsersState.filter || "").toLowerCase();
+    var rows = Array.isArray(adminUsersState.rows) ? adminUsersState.rows : [];
+    if (!query) return rows;
+    return rows.filter(function (row) {
+      return (String(row.email || "") + " " + String(row.name || "") + " " + String(row.accountId || "") + " " + String(row.role || "") + " " + String(row.access || "")).toLowerCase().indexOf(query) !== -1;
+    });
+  }
+
+  function adminUserRowHTML(row) {
+    var accessLine = row.active
+      ? row.access + (row.expiresAt ? " until " + (formatDate(row.expiresAt) || row.expiresAt) : " (no expiry)") + (row.paymentStatus ? " · " + row.paymentStatus : "")
+      : "No active access";
+    var identityLine = (row.email || row.accountId || "")
+      + " · joined " + (formatDate(row.signedUpAt) || "unknown")
+      + (row.memberSince ? " · member since " + (formatDate(row.memberSince) || row.memberSince) : "");
+    return '<div class="gdShotAdminListRow"><strong>' + escapeHTML(row.name || row.email || row.accountId || "account") + '</strong><span>' + escapeHTML(row.role || "player") + '</span><em>' + escapeHTML(accessLine) + '</em><small>' + escapeHTML(identityLine) + '</small></div>';
+  }
+
+  function adminUserRowsHTML() {
+    var rows = filteredAdminUsers();
+    return rows.map(adminUserRowHTML).join("")
+      || '<div class="gdShotAdminEmpty">' + (adminUsersState.loading ? "Loading users..." : adminUsersState.loaded ? "No users match." : "Open this section to load users.") + '</div>';
+  }
+
+  function renderAdminUsers() {
+    var total = (adminUsersState.rows || []).length;
+    var activeCount = (adminUsersState.rows || []).filter(function (row) { return row.active; }).length;
+    return '<div class="clarityPaymentAdminSection">'
+      + '<div class="clarityPaymentDiagGrid"><span>Total users <b>' + total + '</b></span><span>With active access <b>' + activeCount + '</b></span></div>'
+      + '<form class="clarityPaymentForm" onsubmit="return false"><input name="userFilter" placeholder="Filter by email, name, role or pass type" value="' + escapeHTML(adminUsersState.filter) + '" oninput="ClarityPayments.adminUsersFilter(this.value)"></form>'
+      + '<div class="clarityPaymentAdminActions"><button type="button" onclick="return ClarityPayments.reloadAdminUsers()">' + (adminUsersState.loading ? "Loading..." : "Refresh") + '</button><button type="button" onclick="return ClarityPayments.downloadAdminUsersCsv()">Download CSV</button></div>'
+      + (adminUsersState.error ? '<div class="clarityPaymentStatus warning"><strong>' + escapeHTML(adminUsersState.error) + '</strong></div>' : "")
+      + '<div class="gdShotAdminList" id="gdAdminUserRows">' + adminUserRowsHTML() + '</div>'
+      + '</div>';
   }
 
   /* `payload` carries the ARGUMENTS of the action and never the caller. Since
@@ -896,6 +947,7 @@
          form they were mid-way through (2026-08-13, "every time I hit a button
          the tab hides"). */
       '<details class="clarityPaymentAdminDetails"' + (adminDetailsState.diagnostics ? " open" : "") + ' ontoggle="ClarityPayments.adminDetailsToggle(&quot;diagnostics&quot;, this.open)"><summary><strong>Diagnostics</strong><span>Webhook, portal and membership health</span></summary>' + renderAdminDiagnostics() + '</details>',
+      '<details class="clarityPaymentAdminDetails"' + (adminDetailsState.users ? " open" : "") + ' ontoggle="ClarityPayments.adminDetailsToggle(&quot;users&quot;, this.open)"><summary><strong>Users</strong><span>Everyone, with membership dates and payment status</span></summary>' + renderAdminUsers() + '</details>',
       '<details class="clarityPaymentAdminDetails"' + (adminDetailsState.advanced ? " open" : "") + ' ontoggle="ClarityPayments.adminDetailsToggle(&quot;advanced&quot;, this.open)"><summary><strong>Advanced tools</strong><span>Comp access, entitlement lookup and resolver checks</span></summary>' + renderFreePassForm() + renderEntitlementViewer() + renderManualGrantForm() + renderResolverTester() + '<div class="clarityPaymentNote">Use Stripe Product/Price IDs here, never secret keys. Create the product/price in Stripe, then paste the public-looking <code>price_...</code> ID into this settings page.</div></details>',
       '</div>'
     ].join("");
@@ -1233,7 +1285,39 @@
       });
       return false;
     },
-    adminDetailsToggle: function (key, open) { if (adminDetailsState.hasOwnProperty(key)) adminDetailsState[key] = !!open; },
+    adminDetailsToggle: function (key, open) {
+      if (adminDetailsState.hasOwnProperty(key)) adminDetailsState[key] = !!open;
+      /* The user list is the one drawer with a real query behind it - load it
+         the first time it is opened rather than on every panel visit. */
+      if (key === "users" && open && !adminUsersState.loaded && !adminUsersState.loading) loadAdminUsers();
+    },
+    reloadAdminUsers: function () { loadAdminUsers(); return false; },
+    adminUsersFilter: function (value) {
+      adminUsersState.filter = String(value == null ? "" : value);
+      /* Patch only the list rows - a full render() would rebuild the input
+         mid-keystroke and throw the cursor out of it. */
+      var list = document.getElementById("gdAdminUserRows");
+      if (list) list.innerHTML = adminUserRowsHTML();
+    },
+    downloadAdminUsersCsv: function () {
+      var rows = filteredAdminUsers();
+      var head = ["email", "name", "role", "account_id", "signed_up", "last_login", "access", "active", "member_since", "expires", "payment_status", "stripe_customer"];
+      var csv = [head.join(",")].concat(rows.map(function (row) {
+        return [row.email, row.name, row.role, row.accountId, row.signedUpAt, row.lastLoginAt, row.access, row.active ? "yes" : "no", row.memberSince || "", row.expiresAt || "", row.paymentStatus || "", row.stripeCustomer ? "yes" : "no"].map(function (cell) {
+          cell = String(cell == null ? "" : cell);
+          return /[",\n]/.test(cell) ? '"' + cell.replace(/"/g, '""') + '"' : cell;
+        }).join(",");
+      })).join("\n");
+      var blob = new Blob([csv], { type: "text/csv" });
+      var link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = "clarity-users.csv";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(function () { URL.revokeObjectURL(link.href); }, 5000);
+      return false;
+    },
     freePassDraftUpdate: function (input) {
       if (!input || !input.name) return;
       if (input.name === "email") freePassDraft.email = input.value;

@@ -49,6 +49,7 @@ exports.handler = async function (event) {
     if (payload.action === "issueFreePass") return await issueFreePass(payload, auth);
     if (payload.action === "queryEntitlements") return await queryEntitlements(payload, auth);
     if (payload.action === "listIssuedPasses") return await listIssuedPasses(payload, auth);
+    if (payload.action === "listUsers") return await listUsers(payload, auth);
     if (payload.action === "manualGrantPermission") return await manualGrantPermission(payload, auth);
     if (payload.action === "manualRevokePermission") return await manualRevokePermission(payload, auth);
     if (payload.action === "seedDefaults") return await seedDefaults(auth);
@@ -237,6 +238,84 @@ async function listIssuedPasses(payload, auth) {
     { method: "GET" }
   );
   return json(200, { ok: true, passes: Array.isArray(rows) ? rows : [] });
+}
+
+/* The whole user base with each person's access state: who they are, when they
+   signed up, what pass they hold, when it ends and how it is paying. Reads the
+   same three tables the entitlement resolver reads and merges them here, so the
+   admin screen gets one row per account instead of doing N lookups. Read-only,
+   so not audit-logged (same reasoning as listIssuedPasses). Capped at 500
+   accounts / 1000 entitlements - revisit with pagination if the user base
+   outgrows that, and the cap is stated in the response so the screen can say
+   so instead of silently truncating. */
+async function listUsers(payload, auth) {
+  const accounts = await supabaseFetch("app_accounts?select=account_id,profile_id,email,name,role,created_at,last_login_at,stripe_customer_id&order=created_at.desc&limit=500", { method: "GET" });
+  const entitlements = await supabaseFetch("user_entitlements?select=user_id,account_email,profile_id,product_key,entitlement_type,status,starts_at,expires_at,source_type,entitlement_reason&order=created_at.desc&limit=1000", { method: "GET" }).catch(function () { return []; });
+  const memberships = await supabaseFetch("caddie_memberships?select=user_id,account_email,status,access_until,grace_until,current_period_end&limit=500", { method: "GET" }).catch(function () { return []; });
+  const nowMs = Date.now();
+
+  const stillLive = (value) => !value || new Date(value).getTime() > nowMs;
+  const entitlementLabel = (row) => {
+    const key = String(row.product_key || row.entitlement_type || "");
+    const reason = String(row.entitlement_reason || row.source_type || "");
+    if (key === "month_pass" || key === "store_month_pass") return "Month Pass";
+    if (key === "admin_comped_membership" || reason.indexOf("admin_comped") !== -1) return "Comped Membership";
+    if (key === "referral_membership" || reason.indexOf("referral") !== -1) return "Referral month";
+    if (key === "free_pass" || reason.indexOf("free_pass") !== -1) return "Free pass";
+    return "Paid access";
+  };
+
+  const users = (Array.isArray(accounts) ? accounts : []).map((acct) => {
+    const mine = (Array.isArray(entitlements) ? entitlements : []).filter((row) =>
+      (row.user_id && row.user_id === acct.account_id)
+      || (row.account_email && acct.email && row.account_email === acct.email)
+      || (row.profile_id && acct.profile_id && row.profile_id === acct.profile_id));
+    const activeRows = mine.filter((row) => String(row.status || "") === "active" && stillLive(row.expires_at));
+    const membership = (Array.isArray(memberships) ? memberships : []).find((row) =>
+      (row.user_id && row.user_id === acct.account_id)
+      || (row.account_email && acct.email && row.account_email === acct.email)) || null;
+    const membershipLive = !!membership && (
+      ["active", "trialing"].indexOf(String(membership.status || "")) !== -1
+      || (membership.grace_until && new Date(membership.grace_until).getTime() > nowMs)
+    );
+    /* "Best" = the active entitlement that lasts longest; no-expiry beats dated. */
+    const best = activeRows.slice().sort((a, b) => {
+      const aEnd = a.expires_at ? new Date(a.expires_at).getTime() : Infinity;
+      const bEnd = b.expires_at ? new Date(b.expires_at).getTime() : Infinity;
+      return bEnd - aEnd;
+    })[0] || null;
+    const activeStarts = activeRows.map((row) => row.starts_at).filter(Boolean).sort();
+
+    let access = "None";
+    let expiresAt = null;
+    let paymentStatus = "";
+    if (membershipLive) {
+      access = "Membership";
+      expiresAt = membership.current_period_end || membership.access_until || null;
+      paymentStatus = String(membership.status || "active");
+    } else if (best) {
+      access = entitlementLabel(best);
+      expiresAt = best.expires_at || null;
+      paymentStatus = String(best.status || "active");
+    }
+
+    return {
+      accountId: acct.account_id,
+      email: acct.email || "",
+      name: acct.name || "",
+      role: acct.role || "player",
+      signedUpAt: acct.created_at || "",
+      lastLoginAt: acct.last_login_at || "",
+      stripeCustomer: !!acct.stripe_customer_id,
+      active: membershipLive || !!best,
+      access: access,
+      memberSince: activeStarts[0] || null,
+      expiresAt: expiresAt,
+      paymentStatus: paymentStatus
+    };
+  });
+
+  return json(200, { ok: true, users: users, capped: users.length >= 500 });
 }
 
 async function manualGrantPermission(payload, auth) {

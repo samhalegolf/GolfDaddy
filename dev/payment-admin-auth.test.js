@@ -34,6 +34,7 @@ const PRIVILEGED_ACTIONS = [
   "issueFreePass",
   "queryEntitlements",
   "listIssuedPasses",
+  "listUsers",
   "manualGrantPermission",
   "manualRevokePermission",
   "seedDefaults"
