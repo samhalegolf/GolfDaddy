@@ -1050,6 +1050,7 @@
             <div>
               <div class="name">${esc(p.name)}</div>
               <div class="meta">Handicap ${esc(hcp)} · ${esc(hand)} handed · ${esc(mode)} account</div>
+              ${window.ClarityPayments && typeof window.ClarityPayments.accessBadgeHTML === 'function' ? window.ClarityPayments.accessBadgeHTML('profile') : ''}
             </div>
             ${profileVisual(p,b,hasBubble)}
           </div>

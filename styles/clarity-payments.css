@@ -657,3 +657,31 @@
 .gdPlayerSettingsRowDanger strong {
   color: #ff9c9c;
 }
+
+/* Access badges - the MEMBER / MONTH PASS pills (assets/brand/clarity-*-badge.png).
+   The art is a wide pill (~3.1:1); each surface sets a height and width follows. */
+.clarityAccessBadge {
+  display: block;
+  width: auto;
+}
+
+.clarityAccessBadge--settings {
+  height: 34px;
+  margin: 0 0 8px;
+}
+
+.clarityAccessBadge--profile {
+  height: 28px;
+  margin-top: 8px;
+}
+
+.clarityAccessBadge--home {
+  height: 22px;
+  margin: 0 auto;
+}
+
+.gdHomeAccessBadgeSlot {
+  text-align: center;
+  margin-top: 6px;
+  min-height: 0;
+}

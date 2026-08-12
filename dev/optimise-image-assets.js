@@ -65,6 +65,11 @@ const PLAN = [
   { file: "assets/home/clarity-caddy-unlock-shot-icon.png", target: 216, maxRender: 72 },
   { file: "assets/brand/cg-logo-white-g.png", target: 256, maxRender: 62 },
   { file: "assets/brand/cg-gps-pin.png", target: 256, maxRender: 46 },
+  /* MEMBER / MONTH PASS pills, shown on the home header (22px tall), profile
+     hero (28px) and the payments status card (34px). The art is ~3.1:1, so the
+     largest render is ~105px wide; 512 covers 3x DPR with room. */
+  { file: "assets/brand/clarity-member-badge.png", target: 512, maxRender: 105 },
+  { file: "assets/brand/clarity-month-pass-badge.png", target: 512, maxRender: 105 },
   /* headroom 1: apple-touch-icon and favicon sizes are already device pixels -
      the OS does not multiply them by the display's pixel ratio. 512 is the
      largest size a PWA install prompt asks for, so it is the ceiling. */

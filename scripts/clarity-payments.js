@@ -206,10 +206,36 @@
     return account() ? "Choose a pass or membership to unlock full Clarity Caddy access." : "Sign in before buying access.";
   }
 
+  /* Which badge artwork matches the current paid state. Month Pass has its own
+     pill; every membership-shaped state (paid, cancelled-but-active, grace,
+     comped, referral, store, legacy) shows MEMBER. Null when access is not
+     active - and staff deliberately get no badge, because the badge describes
+     a pass someone holds, not a role. */
+  function accessBadge() {
+    if (!(status && status.active)) return null;
+    var state = String(status.paymentState || "");
+    if (state === "month_pass_active" || state === "store_month_pass_active") {
+      return { src: "assets/brand/clarity-month-pass-badge.png?v=fd5af913", alt: "Month Pass" };
+    }
+    return { src: "assets/brand/clarity-member-badge.png?v=7d48a79a", alt: "Member" };
+  }
+
+  function accessBadgeHTML(context) {
+    var badge = accessBadge();
+    if (!badge) return "";
+    return '<img class="clarityAccessBadge' + (context ? " clarityAccessBadge--" + escapeHTML(context) : "") + '" src="' + badge.src + '" alt="' + escapeHTML(badge.alt) + '" title="' + escapeHTML(badge.alt) + '">';
+  }
+
+  function updateHomeBadge() {
+    var slot = document.getElementById("gdHomeAccessBadge");
+    if (slot) slot.innerHTML = accessBadgeHTML("home");
+  }
+
   function applyStatus() {
     if (!document.body) return;
     document.body.dataset.clarityPaidAccess = hasActiveAccess() ? "active" : "inactive";
     document.body.dataset.clarityPaymentStatus = accessLabel();
+    updateHomeBadge();
     safe(function () { if (window.ClaritySession && typeof window.ClaritySession.sync === "function") window.ClaritySession.sync("payment-status"); });
     safe(function () { if (typeof window.gdRefreshPermissionChrome === "function") window.gdRefreshPermissionChrome(); });
   }
@@ -661,7 +687,7 @@
     var statusClass = hasActiveAccess() ? "active" : status && status.configured === false ? "warning" : "";
 
     target.innerHTML = [
-      '<div class="clarityPaymentStatus ' + statusClass + '"><strong>' + escapeHTML(accessLabel()) + '</strong><span>' + escapeHTML(accessDetail()) + '</span></div>',
+      '<div class="clarityPaymentStatus ' + statusClass + '">' + accessBadgeHTML("settings") + '<strong>' + escapeHTML(accessLabel()) + '</strong><span>' + escapeHTML(accessDetail()) + '</span></div>',
       renderExpiryBanner(),
       renderProductCards(),
       renderReferralSection(),
@@ -1150,6 +1176,7 @@
     settings: function () { return settings; },
     hasActiveAccess: hasActiveAccess,
     accessLabel: accessLabel,
+    accessBadgeHTML: accessBadgeHTML,
     showSettings: function () { return showSection("payments"); },
     reloadAdminSettings: loadAdminSettings,
     seedDefaults: function () { return adminAction("seedDefaults", {}); },

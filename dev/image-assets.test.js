@@ -34,7 +34,9 @@ const EXPECTED = [
   { file: "assets/home/clarity-caddy-unlock-shot-icon.png", maxShipped: 216 },
   { file: "assets/brand/cg-logo-white-g.png", maxShipped: 256 },
   { file: "assets/brand/cg-gps-pin.png", maxShipped: 256 },
-  { file: "assets/brand/clarity-app-icon.png", maxShipped: 512 }
+  { file: "assets/brand/clarity-app-icon.png", maxShipped: 512 },
+  { file: "assets/brand/clarity-member-badge.png", maxShipped: 512 },
+  { file: "assets/brand/clarity-month-pass-badge.png", maxShipped: 512 }
 ];
 
 const REF_EXTENSIONS = [".js", ".mjs", ".html", ".css", ".json"];
