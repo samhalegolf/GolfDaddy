@@ -26,6 +26,7 @@
   var freePassDraft = { email: "", accountId: "", note: "" };
   var freePassFeedback = { status: "", message: "" };
   var issuedPassesState = { rows: [], loading: false, loaded: false, error: "" };
+  var adminDetailsState = { diagnostics: false, advanced: false };
   var resolverTestState = { permissionKey: "gps_live_bubble", accountId: "", accountEmail: "", profileId: "", loading: false, result: null, error: "" };
   var editingProductKey = "";
   var originalShowSection = null;
@@ -862,8 +863,14 @@
       '<div class="clarityPaymentAdminActions"><button type="button" onclick="ClarityPayments.reloadAdminSettings()">Reload</button><button type="button" onclick="ClarityPayments.seedDefaults()">Seed defaults</button></div>',
       '<div class="clarityPaymentProductList">' + all.map(renderAdminProduct).join("") + '</div>',
       editingProduct ? renderProductForm(editingProduct) : '<div class="clarityPaymentAdminHint">Tap Edit on a product to change its Stripe Price ID, price label, or live state.</div>',
-      '<details class="clarityPaymentAdminDetails"><summary><strong>Diagnostics</strong><span>Webhook, portal and membership health</span></summary>' + renderAdminDiagnostics() + '</details>',
-      '<details class="clarityPaymentAdminDetails"><summary><strong>Advanced tools</strong><span>Comp access, entitlement lookup and resolver checks</span></summary>' + renderFreePassForm() + renderEntitlementViewer() + renderManualGrantForm() + renderResolverTester() + '<div class="clarityPaymentNote">Use Stripe Product/Price IDs here, never secret keys. Create the product/price in Stripe, then paste the public-looking <code>price_...</code> ID into this settings page.</div></details>',
+      /* Both drawers carry their open state through re-renders. Every admin
+         button (and each background refresh) rebuilds this section's HTML, and
+         a bare <details> re-renders CLOSED - so clicking any button inside
+         Advanced tools slammed the drawer shut and threw the admin out of the
+         form they were mid-way through (2026-08-13, "every time I hit a button
+         the tab hides"). */
+      '<details class="clarityPaymentAdminDetails"' + (adminDetailsState.diagnostics ? " open" : "") + ' ontoggle="ClarityPayments.adminDetailsToggle(&quot;diagnostics&quot;, this.open)"><summary><strong>Diagnostics</strong><span>Webhook, portal and membership health</span></summary>' + renderAdminDiagnostics() + '</details>',
+      '<details class="clarityPaymentAdminDetails"' + (adminDetailsState.advanced ? " open" : "") + ' ontoggle="ClarityPayments.adminDetailsToggle(&quot;advanced&quot;, this.open)"><summary><strong>Advanced tools</strong><span>Comp access, entitlement lookup and resolver checks</span></summary>' + renderFreePassForm() + renderEntitlementViewer() + renderManualGrantForm() + renderResolverTester() + '<div class="clarityPaymentNote">Use Stripe Product/Price IDs here, never secret keys. Create the product/price in Stripe, then paste the public-looking <code>price_...</code> ID into this settings page.</div></details>',
       '</div>'
     ].join("");
   }
@@ -1025,8 +1032,8 @@
     return '<div class="clarityPaymentAdminSection">'
       + '<strong>Issue comped access</strong>'
       + '<form class="clarityPaymentForm" oninput="ClarityPayments.freePassDraftUpdate(event.target)" onsubmit="return ClarityPayments.issueFreePassFromForm(this)">'
-      + '<input name="email" placeholder="Player email" value="' + escapeHTML(draft.email) + '">'
-      + '<input name="accountId" placeholder="Or account ID" value="' + escapeHTML(draft.accountId) + '">'
+      + '<label><span class="gdFieldLabel">Player email</span><input name="email" placeholder="name@example.com" value="' + escapeHTML(draft.email) + '"></label>'
+      + '<label><span class="gdFieldLabel">Or account ID</span><input name="accountId" placeholder="acct_..." value="' + escapeHTML(draft.accountId) + '"></label>'
       + '<select name="productKey"><option value="admin_comped_membership" selected>Comped Membership month</option><option value="free_pass">Promotional free pass</option></select>'
       + '<input name="durationHours" type="number" min="1" step="1" value="720">'
       + '<label><input type="checkbox" name="allowMemberReferrals" checked> Allow member referrals</label>'
@@ -1180,6 +1187,7 @@
       });
       return false;
     },
+    adminDetailsToggle: function (key, open) { if (adminDetailsState.hasOwnProperty(key)) adminDetailsState[key] = !!open; },
     freePassDraftUpdate: function (input) {
       if (!input || !input.name) return;
       if (input.name === "email") freePassDraft.email = input.value;
