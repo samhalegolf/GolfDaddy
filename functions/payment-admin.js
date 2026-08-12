@@ -47,6 +47,7 @@ exports.handler = async function (event) {
     if (payload.action === "setProductActive") return await setProductActive(payload.productKey, payload.active, auth);
     if (payload.action === "issueFreePass") return await issueFreePass(payload, auth);
     if (payload.action === "queryEntitlements") return await queryEntitlements(payload, auth);
+    if (payload.action === "listIssuedPasses") return await listIssuedPasses(payload, auth);
     if (payload.action === "manualGrantPermission") return await manualGrantPermission(payload, auth);
     if (payload.action === "manualRevokePermission") return await manualRevokePermission(payload, auth);
     if (payload.action === "seedDefaults") return await seedDefaults(auth);
@@ -218,6 +219,23 @@ async function queryEntitlements(payload, auth) {
     target: { accountId: accountId, accountEmail: accountEmail },
     entitlements: Array.isArray(entitlements) ? entitlements : []
   });
+}
+
+/* Everything an admin has issued by hand - comped memberships, promotional free
+   passes and manual grants - newest first. Exists so the admin screen can show
+   what is currently out there without the admin having to remember who to look
+   up. Stripe-purchased entitlements are deliberately excluded; they have their
+   own diagnostics. Read-only, so it is not written to payment_admin_events -
+   logging every screen load would bury the actual grant/revoke audit trail. */
+async function listIssuedPasses(payload, auth) {
+  const limit = Number(payload && payload.limit || 50);
+  const resolvedLimit = Number.isFinite(limit) && limit > 0 ? Math.min(limit, 200) : 50;
+  const adminSources = "or=(source_type.eq.admin_free_pass,source_type.eq.admin_comped_membership,entitlement_reason.eq.admin_manual_grant,entitlement_reason.eq.admin_comped_membership)";
+  const rows = await supabaseFetch(
+    "user_entitlements?select=id,user_id,account_email,entitlement_type,product_key,status,starts_at,expires_at,entitlement_reason,metadata,created_at&" + adminSources + "&order=created_at.desc&limit=" + resolvedLimit,
+    { method: "GET" }
+  );
+  return json(200, { ok: true, passes: Array.isArray(rows) ? rows : [] });
 }
 
 async function manualGrantPermission(payload, auth) {

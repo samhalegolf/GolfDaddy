@@ -18,6 +18,14 @@
   var adminPending = false;
   var referralPending = false;
   var entitlementQueryState = { accountId: "", accountEmail: "", entitlements: [], loading: false, error: "", lastChecked: "" };
+  /* The comp-access form gives its result inline, not just as a toast: a pass
+     issued with a typo'd email used to fail with no visible outcome at all
+     (2026-08-12 - the 400 surfaced only as an unhandled rejection in the error
+     log while the admin sat wondering). Draft values survive re-renders so a
+     validation failure does not eat what was typed. */
+  var freePassDraft = { email: "", accountId: "", note: "" };
+  var freePassFeedback = { status: "", message: "" };
+  var issuedPassesState = { rows: [], loading: false, loaded: false, error: "" };
   var resolverTestState = { permissionKey: "gps_live_bubble", accountId: "", accountEmail: "", profileId: "", loading: false, result: null, error: "" };
   var editingProductKey = "";
   var originalShowSection = null;
@@ -298,6 +306,34 @@
       safe(function () { return window.toast && window.toast(error && error.message ? error.message : "Payment setting failed"); });
       throw error;
     }
+  }
+
+  /* adminAction toasts on success, which is right for writes but pure noise for
+     reads - loading the issued-pass list is not "Payment settings saved". */
+  async function adminQuery(action, payload) {
+    var requestBody = JSON.stringify(Object.assign({ action: action }, payload || {}));
+    var response = await fetch(ADMIN_ENDPOINT, { method: "POST", headers: await adminHeaders(), body: requestBody });
+    if (response.status === 401) {
+      response = await fetch(ADMIN_ENDPOINT, { method: "POST", headers: await adminHeaders(true), body: requestBody });
+    }
+    var body = await response.json().catch(function () { return {}; });
+    if (!response.ok) throw new Error(body.error || "Payment admin query failed");
+    return body;
+  }
+
+  function loadIssuedPasses(opts) {
+    opts = opts || {};
+    if (!isAdmin(account())) return Promise.resolve();
+    issuedPassesState.loading = true;
+    issuedPassesState.error = "";
+    if (!opts.silent) render();
+    return adminQuery("listIssuedPasses", {}).then(function (body) {
+      issuedPassesState = { rows: Array.isArray(body.passes) ? body.passes : [], loading: false, loaded: true, error: "" };
+      render();
+    }).catch(function (error) {
+      issuedPassesState = { rows: issuedPassesState.rows, loading: false, loaded: true, error: error && error.message ? error.message : "Could not load issued passes" };
+      render();
+    });
   }
 
   /* `payload` carries the ARGUMENTS of the action and never the caller. Since
@@ -609,7 +645,7 @@
     var menu = document.getElementById("gdPlayerSettingsMenu");
     if (panel) panel.hidden = name !== "payments";
     if (menu && name === "payments") menu.hidden = true;
-    if (name === "payments") { render(); refresh({ silent: true }); loadReferralDashboard({ silent: true }); loadAdminSettings(); }
+    if (name === "payments") { render(); refresh({ silent: true }); loadReferralDashboard({ silent: true }); loadAdminSettings(); loadIssuedPasses({ silent: true }); }
   }
 
   function render() {
@@ -980,7 +1016,48 @@
   }
 
   function renderFreePassForm() {
-    return '<form class="clarityPaymentForm" onsubmit="return ClarityPayments.issueFreePassFromForm(this)"><strong>Issue comped access</strong><input name="email" placeholder="Player email"><input name="accountId" placeholder="Or account ID"><select name="productKey"><option value="admin_comped_membership" selected>Comped Membership month</option><option value="free_pass">Promotional free pass</option></select><input name="durationHours" type="number" min="1" step="1" value="720"><label><input type="checkbox" name="allowMemberReferrals" checked> Allow member referrals</label><textarea name="note" placeholder="Internal note"></textarea><button type="submit">Issue comped access</button></form>';
+    var draft = freePassDraft;
+    var feedback = "";
+    if (freePassFeedback.message) {
+      var feedbackClass = freePassFeedback.status === "ok" ? "active" : freePassFeedback.status === "error" ? "warning" : "";
+      feedback = '<div class="clarityPaymentStatus ' + feedbackClass + '"><strong>' + escapeHTML(freePassFeedback.message) + '</strong></div>';
+    }
+    return '<div class="clarityPaymentAdminSection">'
+      + '<strong>Issue comped access</strong>'
+      + '<form class="clarityPaymentForm" oninput="ClarityPayments.freePassDraftUpdate(event.target)" onsubmit="return ClarityPayments.issueFreePassFromForm(this)">'
+      + '<input name="email" placeholder="Player email" value="' + escapeHTML(draft.email) + '">'
+      + '<input name="accountId" placeholder="Or account ID" value="' + escapeHTML(draft.accountId) + '">'
+      + '<select name="productKey"><option value="admin_comped_membership" selected>Comped Membership month</option><option value="free_pass">Promotional free pass</option></select>'
+      + '<input name="durationHours" type="number" min="1" step="1" value="720">'
+      + '<label><input type="checkbox" name="allowMemberReferrals" checked> Allow member referrals</label>'
+      + '<textarea name="note" placeholder="Internal note">' + escapeHTML(draft.note) + '</textarea>'
+      + '<button type="submit">' + (adminPending ? "Issuing..." : "Issue comped access") + '</button>'
+      + '</form>'
+      + feedback
+      + renderIssuedPassesList()
+      + '</div>';
+  }
+
+  function renderIssuedPassesList() {
+    var rows = Array.isArray(issuedPassesState.rows) ? issuedPassesState.rows : [];
+    var rowsHTML = rows.map(function (row) {
+      var target = row.account_email || row.user_id || "unknown account";
+      var kindLabel = row.product_key || row.entitlement_type || "pass";
+      var isActive = String(row.status || "") === "active";
+      var isExpired = row.expires_at && new Date(row.expires_at).getTime() < Date.now();
+      var stateLabel = !isActive ? (row.status || "inactive") : isExpired ? "expired" : "active";
+      var revoke = isActive && !isExpired && row.id
+        ? '<button type="button" class="secondary" onclick="return ClarityPayments.adminRevokeIssuedPass(&quot;' + escapeHTML(row.id) + '&quot;)">Revoke</button>'
+        : "";
+      return '<div class="gdShotAdminListRow"><strong>' + escapeHTML(kindLabel) + '</strong><span>' + escapeHTML(stateLabel) + '</span><em>' + escapeHTML((formatDate(row.starts_at) || "No start") + " - " + (formatDate(row.expires_at) || "No expiry")) + '</em><small>' + escapeHTML(target) + '</small>' + revoke + '</div>';
+    }).join("");
+    if (!rowsHTML) rowsHTML = '<div class="gdShotAdminEmpty">' + (issuedPassesState.loading ? "Loading issued passes..." : issuedPassesState.loaded ? "No comped passes issued yet." : "List not loaded yet.") + '</div>';
+    return '<div class="clarityPaymentAdminSection">'
+      + '<strong>Issued passes</strong>'
+      + '<div class="clarityPaymentAdminActions"><button type="button" onclick="return ClarityPayments.reloadIssuedPasses()">' + (issuedPassesState.loading ? "Loading..." : "Refresh list") + '</button></div>'
+      + (issuedPassesState.error ? '<div class="clarityPaymentStatus warning"><strong>List error</strong><span>' + escapeHTML(issuedPassesState.error) + '</span></div>' : "")
+      + '<div class="gdShotAdminList">' + rowsHTML + '</div>'
+      + '</div>';
   }
 
   function formData(form) { var data = {}; Array.prototype.forEach.call(new FormData(form).entries(), function (entry) { data[entry[0]] = entry[1]; }); data.active = !!form.elements.active && form.elements.active.checked; return data; }
@@ -1071,8 +1148,53 @@
     },
     closeProductEditor: function () { editingProductKey = ""; render(); return false; },
     saveProductFromForm: function (form) { var data = productFormData(form); editingProductKey = data.product_key || editingProductKey; adminAction("upsertProduct", { product: data }); return false; },
-    issueFreePassFromForm: function (form) { var data = formData(form); adminAction("issueFreePass", data).then(function () { form.reset(); if (form.elements.productKey) form.elements.productKey.value = "admin_comped_membership"; if (form.elements.durationHours) form.elements.durationHours.value = "720"; if (form.elements.allowMemberReferrals) form.elements.allowMemberReferrals.checked = true; refresh({ silent: true }); }); return false; }
-    ,
+    issueFreePassFromForm: function (form) {
+      var data = formData(form);
+      var emailValue = String(data.email || "").trim();
+      var accountIdValue = String(data.accountId || "").trim();
+      freePassDraft = { email: emailValue, accountId: accountIdValue, note: String(data.note || "") };
+      /* Validate here so a bad email is caught while the admin is still looking
+         at the form, with the offending value shown back. The server rejects
+         these too, but its 400 used to surface as nothing at all. */
+      if (!emailValue && !accountIdValue) {
+        freePassFeedback = { status: "error", message: "Enter the player's email (or account ID) first. Nothing was issued." };
+        render();
+        return false;
+      }
+      if (emailValue && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailValue)) {
+        freePassFeedback = { status: "error", message: 'That email does not look right: "' + emailValue + '". Type it plainly, like name@example.com. Nothing was issued.' };
+        render();
+        return false;
+      }
+      data.email = emailValue;
+      freePassFeedback = { status: "pending", message: "Issuing..." };
+      adminAction("issueFreePass", data).then(function () {
+        freePassDraft = { email: "", accountId: "", note: "" };
+        freePassFeedback = { status: "ok", message: "Pass issued to " + (emailValue || accountIdValue) + ". It appears in the list below." };
+        render();
+        loadIssuedPasses({ silent: true });
+        refresh({ silent: true });
+      }).catch(function (error) {
+        freePassFeedback = { status: "error", message: (error && error.message ? error.message : "Issuing failed") + " Nothing was issued." };
+        render();
+      });
+      return false;
+    },
+    freePassDraftUpdate: function (input) {
+      if (!input || !input.name) return;
+      if (input.name === "email") freePassDraft.email = input.value;
+      if (input.name === "accountId") freePassDraft.accountId = input.value;
+      if (input.name === "note") freePassDraft.note = input.value;
+    },
+    reloadIssuedPasses: function () { loadIssuedPasses({ silent: false }); return false; },
+    adminRevokeIssuedPass: function (entitlementId) {
+      if (!entitlementId) return false;
+      adminAction("manualRevokePermission", { entitlementId: entitlementId }).then(function () {
+        loadIssuedPasses({ silent: true });
+        refresh({ silent: true });
+      }).catch(function () { loadIssuedPasses({ silent: true }); });
+      return false;
+    },
     createReferralFromForm: function (form, mode) {
       var data = form ? formData(form) : {};
       createReferralInvite({ copy: mode === "copy", share: mode === "share", payload: data }).then(function (body) {
@@ -1143,9 +1265,10 @@
             accountEmail: entitlementQueryState.accountEmail || data.accountEmail
           }).then(function (response) {
             updateAdminQueryState({ entitlements: (response && response.entitlements) || [], lastChecked: new Date().toISOString() });
-          });
+          }).catch(function () {});
         }
-      });
+        loadIssuedPasses({ silent: true });
+      }).catch(function () {});
       return false;
     },
     adminRevokeManualEntitlement: function (entitlementId) {
@@ -1160,9 +1283,10 @@
             accountEmail: entitlementQueryState.accountEmail
           }).then(function (response) {
             updateAdminQueryState({ entitlements: (response && response.entitlements) || [], lastChecked: new Date().toISOString() });
-          });
+          }).catch(function () {});
         }
-      });
+        loadIssuedPasses({ silent: true });
+      }).catch(function () {});
       return false;
     },
     adminTestResolver: function (form) {
