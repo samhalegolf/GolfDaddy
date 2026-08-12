@@ -275,11 +275,17 @@ async function stripeFetch(method, path, data, fetchOptions) {
   return body;
 }
 
+/* No length cap here. This used to truncate the header to 500 characters, which
+   silently chopped every Supabase access token (JWTs run 800-1100+ chars) mid-
+   payload - GoTrue then rejected it as "token contains an invalid number of
+   segments", so every token-authenticated payment/admin endpoint failed with
+   "Sign in again" for a caller who was signed in. Netlify already bounds header
+   size, so there is nothing to defend against by slicing it ourselves. */
 function bearerToken(event) {
   const headers = event && event.headers || {};
-  const header = text(headers.authorization || headers.Authorization, 500);
+  const header = String(headers.authorization || headers.Authorization || "").trim();
   const match = /^Bearer\s+(.+)$/i.exec(header);
-  return match ? text(match[1], 500) : "";
+  return match ? match[1].trim() : "";
 }
 
 function subjectFilters(accountId, accountEmail, profileId) {

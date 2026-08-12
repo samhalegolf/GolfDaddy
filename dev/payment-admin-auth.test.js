@@ -192,6 +192,18 @@ test("the admin client sends a refreshable token and no identity headers", () =>
     "sending these again would make a removed authentication path look supported");
 });
 
+/* A real Supabase access token is a JWT of 800-1100+ characters. bearerToken
+   used to slice the Authorization header at 500, cutting the token mid-payload;
+   GoTrue rejected the remainder as "invalid number of segments" and every
+   admin/payment endpoint answered "Sign in again" to a signed-in caller. The
+   truncation is gone; this pins full-length tokens passing through intact. */
+test("bearerToken returns a long JWT untruncated", () => {
+  const utils = require(path.join(ROOT, "functions", "payment-utils.js"));
+  const token = "eyJ" + "a".repeat(600) + "." + "b".repeat(600) + "." + "c".repeat(80);
+  const out = utils.bearerToken({ headers: { authorization: "Bearer " + token } });
+  assert.strictEqual(out, token, "the token must reach Supabase exactly as sent");
+});
+
 (async () => {
   let failed = 0;
   for (const t of tests) {
