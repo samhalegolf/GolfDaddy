@@ -37,8 +37,19 @@
 
 <!-- Visible from first paint (no route class needed), covering both the
      "which route" decision and the course-package fetch on a hand-off.
-     boot.js hides it once there's something real to show. -->
-<div id="loadingScreen"><div class="spinner"></div></div>
+     boot.js hides it once there's something real to show. Same bar-and-text
+     layout as the main site's course loading overlay (gd-course-library-
+     pin-lock.js ensureCourseLoadingOverlay), because the picker hands off
+     to this page mid-load - a spinner here after a bar there read as two
+     different loading screens for one load. -->
+<div id="loadingScreen">
+  <div class="loadingSheet">
+    <div class="loadingEyebrow">Clarity Caddy</div>
+    <strong id="loadingTitle">Loading course</strong>
+    <span id="loadingSub">Getting ready</span>
+    <div class="loadingTrack"><i id="loadingBar"></i></div>
+  </div>
+</div>
 
 <!-- Entered exclusively via ?courseId=... from the course picker on the main
      site - there is no picker or Play tile here any more. This screen only

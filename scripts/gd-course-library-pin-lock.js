@@ -4241,6 +4241,7 @@
       recordMappingDebug(state.debugRunId,{source:'manual-fallback',phase:superseded?'superseded':'cancelled',event:superseded?'manual-fallback-superseded':'manual-fallback-cancelled',summary:superseded?'Manual fallback superseded by new active mapping attempt':'Manual fallback cancelled',details:Object.assign({hole:state.hole,reason:reason||'clear',resolutionKey:state.resolutionKey,attemptToken:state.attemptToken},details||{})});
 	    }
 	    try{delete window.__gdCoursePlayInteractiveFallbackActive;}catch(e){}
+	    try{stopFallbackPackageWatch();}catch(e){}
 	  }
 	  window.gdClearInteractiveGreenFallback=clearInteractiveGreenFallback;
 	  function finishInteractiveGreenFallback(point){
@@ -4277,6 +4278,71 @@
       try{showHint('Tap where you are standing');}catch(e){}
     }
     return true;
+  }
+  /* While manual green-tap fallback is armed, the server mapper job that put us here is
+     usually still running (the wait above gave up, the job did not). This keeps polling
+     quietly in the background and, when the package lands, persists it and offers a
+     one-tap switch - the same "prompt, don't yank" rule as the mid-round map update bar
+     in /app: the player may be mid-tap, so arriving data asks rather than takes over.
+     Tapping the prompt clears the fallback FIRST (the terminal-reentry guard in
+     runCourseMappingAttempt keys off it) and then re-enters through the picker's own
+     selectCourse path, so the paid-access gate and the /app hand-off happen exactly as
+     they do on a normal entry - this replaces the player backing out and re-entering by
+     hand, which was the only way in before. The watch dies with the fallback: any
+     clearInteractiveGreenFallback (green tapped, superseded, this prompt) stops it. */
+  const FALLBACK_WATCH_POLL_MS=6000;
+  const FALLBACK_WATCH_BUDGET_MS=600000;
+  let fallbackPackageWatch=null;
+  function ensureServerMapReadyPrompt(){
+    let el=document.getElementById('gdServerMapReadyPrompt');
+    if(el)return el;
+    el=document.createElement('button');
+    el.type='button';
+    el.id='gdServerMapReadyPrompt';
+    el.className='gdServerMapReadyPrompt hidden';
+    el.textContent='Course map ready - tap to use it';
+    document.body.appendChild(el);
+    if(!document.getElementById('gdServerMapReadyPromptStyle')){
+      const style=document.createElement('style');
+      style.id='gdServerMapReadyPromptStyle';
+      style.textContent='.gdServerMapReadyPrompt{position:fixed;left:50%;bottom:calc(max(12px,env(safe-area-inset-bottom)) + 148px);transform:translateX(-50%);z-index:1900;border:1px solid rgba(156,255,54,.42);border-radius:999px;background:rgba(3,18,9,.88);color:#f6fff7;padding:10px 15px;font-size:13px;font-weight:950;box-shadow:0 12px 28px rgba(0,0,0,.34),0 0 22px rgba(31,211,109,.16);backdrop-filter:blur(14px)}.gdServerMapReadyPrompt.hidden{display:none!important}';
+      document.head.appendChild(style);
+    }
+    return el;
+  }
+  function stopFallbackPackageWatch(){
+    fallbackPackageWatch=null;
+    try{document.getElementById('gdServerMapReadyPrompt')?.classList.add('hidden');}catch(e){}
+  }
+  function startFallbackPackageWatch(course,hole,resolutionKey){
+    const token={startedAt:Date.now()};
+    fallbackPackageWatch=token;
+    (async()=>{
+      for(;;){
+        await sleep(FALLBACK_WATCH_POLL_MS);
+        if(fallbackPackageWatch!==token)return;
+        const state=interactiveGreenFallbackState;
+        if(!state||String(state.resolutionKey||'')!==String(resolutionKey))return stopFallbackPackageWatch();
+        if(Date.now()-token.startedAt>FALLBACK_WATCH_BUDGET_MS)return stopFallbackPackageWatch();
+        let pkg=null;
+        try{pkg=await fetchServerCoursePackage(course);}catch(e){pkg=null;}
+        if(fallbackPackageWatch!==token)return;
+        if(!serverPackageIsReady(pkg))continue;
+        const persisted=persistServerCoursePackage(course,pkg);
+        if(!(persisted&&persisted.holes))return stopFallbackPackageWatch();   // ready but empty: nothing will improve by waiting
+        recordCoursePlayDebug('server-map-arrived-during-manual-fallback',course,hole,{resolutionKey,holes:persisted.holes,saved:persisted.saved,serverPackageStatus:pkg.status});
+        const prompt=ensureServerMapReadyPrompt();
+        prompt.onclick=()=>{
+          stopFallbackPackageWatch();
+          clearInteractiveGreenFallback('server-map-ready');
+          const picker=window.GDCoursePicker;
+          if(picker&&typeof picker.selectCourse==='function')picker.selectCourse(course,{source:'server-map-ready'});
+          else runCourseMappingAttempt({course,hole,showLoading:true,wholeCourse:true,reason:'server-map-ready'});
+        };
+        prompt.classList.remove('hidden');
+        return;   // polling done - the prompt holds the result; the fallback clearing hides it
+      }
+    })();
   }
   function beginInteractiveGreenFallback(course,hole,reason,opts={}){
     const h=validHoleNumber(hole||opts.hole)||1;
@@ -4350,6 +4416,7 @@
     mapEl.addEventListener('click',handler,true);
     try{window.__gdInteractiveGreenFallback=interactiveGreenFallbackState;}catch(e){}
     try{window.__gdCoursePlayInteractiveFallbackActive={course:c,courseId:courseId(c),courseName:courseName(c),hole:h,reason:reason||'automatic-resolution-failed',key,resolutionKey:key,attemptToken,debugRunId,runId:debugRunId,source:opts.source||'unknown',callerFunction:incomingAttempt.callerFunction||'beginInteractiveGreenFallback',at:Date.now()};}catch(e){}
+    try{startFallbackPackageWatch(c,h,key);}catch(e){}
     return {playable:false,fallback:'interactive-green',armed:true};
   }
   async function showResolvedCoursePlayHole(course,hole,reason,opts={}){
@@ -4447,9 +4514,23 @@
 	     "none" is terminal here, not pending. The server answers "none" only when it did NOT
 	     enqueue anything (anonymous caller, no location supplied, or the per-user rate limit
 	     tripped), so there is no job to wait on and waiting would just stall the player.
-	     "manual-required" is terminal for the same reason - the server has already given up. */
-	  const SERVER_PACKAGE_WAIT_MS=45000;
+	     "manual-required" is terminal for the same reason - the server has already given up.
+
+	     Everything else that is not "processing" is a TRANSIENT miss, not a verdict: a fetch
+	     timeout on flaky mobile data, a 5xx, a dropped connection. One of those used to abort
+	     the whole wait instantly, which dumped a player into manual green-tap while the mapper
+	     job was mid-run - the exact "the data arrives but I had to back out and re-enter" bug.
+	     Now only a RUN of consecutive misses gives up; a single "processing" answer resets it.
+
+	     The budget is ~4 minutes because the enqueue's immediate worker kick is allowed to
+	     fail (course-mapper-jobs.mjs swallows it - "queued job remains sweepable"), in which
+	     case the job waits for course-mapper-sweeper.mjs, which runs every 3 minutes. A 45s
+	     budget could never cover that path, so first visits fell through to manual even though
+	     the map showed up a minute later. Polls back off from 3s to 6s after the first 30s so
+	     the long tail does not hammer the endpoint. */
+	  const SERVER_PACKAGE_WAIT_MS=240000;
 	  const SERVER_PACKAGE_POLL_MS=3000;
+	  const SERVER_PACKAGE_MAX_CONSECUTIVE_MISSES=4;
 	  async function awaitServerCoursePackage(course,opts={}){
 	    const budgetMs=Number.isFinite(Number(opts.budgetMs))&&Number(opts.budgetMs)>=0?Number(opts.budgetMs):SERVER_PACKAGE_WAIT_MS;
 	    const pollMs=Number.isFinite(Number(opts.pollMs))&&Number(opts.pollMs)>0?Number(opts.pollMs):SERVER_PACKAGE_POLL_MS;
@@ -4457,6 +4538,7 @@
 	    const onProgress=typeof opts.onProgress==='function'?opts.onProgress:null;
 	    const stillCurrent=typeof opts.stillCurrent==='function'?opts.stillCurrent:null;
 	    let polls=0;
+	    let consecutiveMisses=0;
 	    for(;;){
 	      const pkg=await fetchServerCoursePackage(course);
 	      polls++;
@@ -4466,12 +4548,18 @@
 	        if(result&&result.holes)return {result,status,polls,timedOut:false};
 	        return {result:null,status,polls,timedOut:false,reason:'ready-but-empty'};
 	      }
-	      if(status!=='processing')return {result:null,status,polls,timedOut:false};
+	      if(status==='none'||status==='manual-required')return {result:null,status,polls,timedOut:false};
+	      if(status==='processing')consecutiveMisses=0;
+	      else{
+	        consecutiveMisses++;
+	        if(consecutiveMisses>=SERVER_PACKAGE_MAX_CONSECUTIVE_MISSES)return {result:null,status,polls,timedOut:false,unreachable:true};
+	      }
 	      if(stillCurrent&&!stillCurrent())return {result:null,status,polls,timedOut:false,superseded:true};
 	      const remaining=deadline-Date.now();
 	      if(remaining<=0)return {result:null,status,polls,timedOut:true};
-	      if(onProgress)onProgress({polls,remainingMs:remaining,status});
-	      await sleep(Math.min(pollMs,remaining));
+	      const waitedMs=budgetMs-remaining;
+	      if(onProgress)onProgress({polls,remainingMs:remaining,waitedMs,budgetMs,status});
+	      await sleep(Math.min(waitedMs>30000?pollMs*2:pollMs,remaining));
 	    }
 	  }
 	  /* Manual "Auto" tool in the full-mapping flyout (data-map-tool="automap") - an
@@ -4590,8 +4678,10 @@
             onProgress:info=>{
               /* Ramps 45 -> 80 across the wait so the loading screen keeps moving while the
                  server job runs. Deliberately vague copy: the player does not need to know
-                 whether this is the Overpass leg or the geometry resolver. */
-              updateCourseLoading('Mapping this course',Math.min(80,45+info.polls*4));
+                 whether this is the Overpass leg or the geometry resolver. After 30s the
+                 copy admits this is a longer wait - honest feedback beats a stuck bar. */
+              const pct=Math.min(80,45+35*((info.waitedMs||0)/(info.budgetMs||SERVER_PACKAGE_WAIT_MS)));
+              updateCourseLoading((info.waitedMs||0)>30000?'Still mapping - a first visit can take a couple of minutes':'Mapping this course',pct);
             }
           });
           autoMapResult=serverWait&&serverWait.result||null;

@@ -66,4 +66,43 @@
       if (timer) clearTimeout(timer);
     }
   };
+
+  /* Same fetch, but held open while the server answers "processing" - which is the
+     normal first answer for a course nobody has opened before, because the request
+     itself enqueues the mapping job (functions/course-package.mjs). Mirrors
+     awaitServerCoursePackage in scripts/gd-course-library-pin-lock.js: "none" and
+     "manual-required" are terminal, anything else short of ready is a transient miss
+     tolerated a few times in a row, and the ~4-minute budget covers the mapper
+     sweeper's 3-minute worst case. Resolves to the last body seen (or null), so the
+     caller's ready/not-ready branch is unchanged - a timeout here just means the
+     round starts on the live map exactly as it would have before.
+
+     opts.onProgress({waitedMs, budgetMs, polls, status}) fires between polls so the
+     loading screen can keep talking while the player waits. */
+  var WAIT_BUDGET_MS = 240000;
+  var WAIT_POLL_MS = 3000;
+  var WAIT_MAX_CONSECUTIVE_MISSES = 4;
+  function sleep(ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); }
+  app.awaitCoursePackage = async function (opts) {
+    opts = opts || {};
+    var onProgress = typeof opts.onProgress === "function" ? opts.onProgress : null;
+    var deadline = Date.now() + WAIT_BUDGET_MS;
+    var misses = 0;
+    var polls = 0;
+    var pkg = null;
+    for (;;) {
+      pkg = await app.fetchCoursePackage(opts);
+      polls++;
+      var status = pkg && pkg.status ? String(pkg.status) : "unreachable";
+      if (status === "full-map-ready" || status === "lite-geo-ready") return pkg;
+      if (status === "none" || status === "manual-required") return pkg;
+      if (status === "processing") misses = 0;
+      else if (++misses >= WAIT_MAX_CONSECUTIVE_MISSES) return pkg;
+      var remaining = deadline - Date.now();
+      if (remaining <= 0) return pkg;
+      var waitedMs = WAIT_BUDGET_MS - remaining;
+      if (onProgress) onProgress({ waitedMs: waitedMs, budgetMs: WAIT_BUDGET_MS, polls: polls, status: status });
+      await sleep(Math.min(waitedMs > 30000 ? WAIT_POLL_MS * 2 : WAIT_POLL_MS, remaining));
+    }
+  };
 })();

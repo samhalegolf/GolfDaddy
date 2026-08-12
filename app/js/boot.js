@@ -135,10 +135,23 @@
 
   /* Visible from first paint (see index.html) so it covers both the "which
      route" decision and, on a hand-off, the course-package fetch — hidden
-     once there's something real underneath it to show. */
+     once there's something real underneath it to show. Same bar-and-text
+     shape as the main site's course loading overlay, on purpose: the picker
+     hands off to this page mid-load, and two different loading screens in a
+     row read as two different apps. */
   function hideLoadingScreen() {
     var el = document.getElementById("loadingScreen");
     if (el) el.classList.add("hiddenState");
+  }
+  function setLoading(text, pct) {
+    var sub = document.getElementById("loadingSub");
+    var bar = document.getElementById("loadingBar");
+    if (sub && text) sub.textContent = text;
+    if (bar && Number.isFinite(Number(pct))) bar.style.width = Math.max(8, Math.min(100, Number(pct))) + "%";
+  }
+  function setLoadingTitle(text) {
+    var title = document.getElementById("loadingTitle");
+    if (title && text) title.textContent = text;
   }
 
   /* Exits GPS play back to the main site - the picker there is the only
@@ -344,11 +357,25 @@
       goResumeHole(resumeHole);
       hideLoadingScreen();
     } else {
-      pkg = await app.fetchCoursePackage({
+      /* awaitCoursePackage, not fetchCoursePackage: for a course the server
+         is still mapping ("processing"), this holds the player behind the
+         loading screen until the map lands rather than silently starting a
+         live-map-only round they would have to leave and re-enter to fix.
+         A terminal answer or a timeout still falls through to the live map
+         exactly as a plain null fetch always has. */
+      setLoadingTitle(course.courseName);
+      setLoading("Downloading course map", 24);
+      pkg = await app.awaitCoursePackage({
         courseId: course.courseId,
         courseName: course.courseName,
         courseLat: course.courseLat,
-        courseLng: course.courseLng
+        courseLng: course.courseLng,
+        onProgress: function (info) {
+          setLoading(info.waitedMs > 30000
+            ? "Still mapping - a first visit can take a couple of minutes"
+            : "Mapping this course",
+            Math.min(90, 30 + 60 * (info.waitedMs / info.budgetMs)));
+        }
       });
       activeMapType = mapTypeOf(pkg);
       /* null package → live map only. Normal, per the handover. */
