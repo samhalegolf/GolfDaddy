@@ -1067,7 +1067,18 @@
       + '</div>';
   }
 
-  function formData(form) { var data = {}; Array.prototype.forEach.call(new FormData(form).entries(), function (entry) { data[entry[0]] = entry[1]; }); data.active = !!form.elements.active && form.elements.active.checked; return data; }
+  /* new FormData(form).entries() returns an ITERATOR, and Array.prototype.forEach
+     iterates by .length - which an iterator does not have - so the previous
+     Array.prototype.forEach.call(...entries()...) looped zero times and every
+     form that used this helper submitted an EMPTY payload no matter what was
+     typed (found 2026-08-13: comped-pass form kept reporting "email required"
+     for a filled-in field). FormData's own forEach actually iterates. */
+  function formData(form) {
+    var data = {};
+    new FormData(form).forEach(function (value, key) { data[key] = value; });
+    data.active = !!form.elements.active && form.elements.active.checked;
+    return data;
+  }
 
   function formElement(form, name) {
     return form && form.elements ? form.elements[name] : null;

@@ -205,6 +205,19 @@ test("bearerToken returns a long JWT untruncated", () => {
   assert.strictEqual(out, token, "the token must reach Supabase exactly as sent");
 });
 
+/* formData() used to do Array.prototype.forEach.call(new FormData(form)
+   .entries(), ...). entries() returns an iterator with no .length, so that
+   looped ZERO times - every admin form submitted an empty payload regardless
+   of what was typed. This pins the fixed shape (FormData's own forEach). */
+test("the form reader iterates FormData with its own forEach", () => {
+  const fs = require("fs");
+  const src = fs.readFileSync(path.join(ROOT, "scripts", "clarity-payments.js"), "utf8");
+  assert.ok(!/Array\.prototype\.forEach\.call\(new FormData/.test(src),
+    "Array.prototype.forEach over a FormData iterator silently reads nothing");
+  assert.ok(/new FormData\(form\)\.forEach\(/.test(src),
+    "formData must iterate FormData via its own forEach");
+});
+
 (async () => {
   let failed = 0;
   for (const t of tests) {
