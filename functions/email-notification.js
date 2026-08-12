@@ -108,7 +108,7 @@ function safeUrl(value, fallbackOrigin){ if(!String(value || "").trim())return "
 function escapeHTML(value){ return String(value == null ? "" : value).replace(/[&<>"']/g, function(ch){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]; }); }
 function firstName(value){ return (String(value || "there").trim().split(/\s+/)[0] || "there").replace(/[^\w'-]/g, "") || "there"; }
 function subjectFor(message){ if(message.eventType === "password_recovery")return "Reset your Clarity password"; if(message.eventType === "account_created")return "Set up your Clarity account"; return "Clarity update: " + message.title; }
-function isServiceEmail(message){ return ["account_created", "password_recovery"].indexOf(message.eventType) !== -1; }
+function isServiceEmail(message){ return ["account_created", "password_recovery", "comped_access_granted"].indexOf(message.eventType) !== -1; }
 
 function renderEmail(message){
   var recipientName = firstName(message.recipientName);
@@ -119,3 +119,72 @@ function renderEmail(message){
 }
 
 function json(statusCode, body){ return {statusCode: statusCode, headers: {"Content-Type": "application/json", "Cache-Control": "no-store"}, body: JSON.stringify(body)}; }
+
+/* Comped-access notification, sent by payment-admin when an admin issues a
+ * comped membership or promotional pass. Two variants of the same branded
+ * renderEmail layout, chosen by whether the address already has an account:
+ *
+ * - existing account: "it's already live on your account, open the app".
+ * - no account yet: the auth user is created here (via the same
+ *   createSetupLinkForAccount the invite flow uses) and the CTA becomes their
+ *   secure set-password link - so this email doubles as their first login.
+ *
+ * The copy lives in this file, next to renderEmail, so ALL email wording is
+ * edited in one place. It is a service email (it describes an account access
+ * change), so like account_created it sends without EMAIL_NOTIFICATIONS_ENABLED.
+ * Callers must treat a throw here as email-only failure: the pass has already
+ * been written by the time this runs and must not be rolled back or reported
+ * as unissued because a notification bounced. */
+async function sendCompedAccessEmail(options){
+  options = options || {};
+  var to = email(options.to);
+  if(!to)return {sent: false, reason: "invalid_email"};
+  var siteUrl = env("CLARITY_SITE_URL") || "https://caddy.claritygolf.app";
+  var periodLabel = text(options.periodLabel, 40) || "a month";
+  var giftLabel = options.membership ? "Clarity Membership" : "full Clarity access";
+  var expiresLabel = text(options.expiresLabel, 60);
+  var siteHost = siteUrl.replace(/^https?:\/\//, "").replace(/\/+$/, "");
+
+  var message = {
+    to: to,
+    recipientName: text(options.recipientName, 120) || "there",
+    actorName: text(options.issuedByName, 120) || "Clarity Golf",
+    eventType: "comped_access_granted",
+    logoUrl: new URL("/assets/brand/cg-logo-white-g.png?v=f3bf5530", siteUrl).toString(),
+    ctaLabel: "Open Clarity",
+    ctaUrl: siteUrl,
+    title: "You've been given " + periodLabel + " of " + giftLabel
+  };
+
+  var subject;
+  if(options.hasAccount){
+    subject = "You've been given " + periodLabel + " of " + giftLabel;
+    message.detail = "Full access has been added to your Clarity account (this email address). There's nothing to set up and nothing to pay - open the app and it's live."
+      + (expiresLabel ? " Your access runs until " + expiresLabel + " and won't auto-renew or ask for a card." : "");
+  }else{
+    subject = periodLabel[0].toUpperCase() + periodLabel.slice(1) + " of " + giftLabel + " is waiting for you";
+    message.detail = "You've been set up with free full access to Clarity Caddy - no card, no auto-renewal. It's tied to this email address: set your password below, then sign in on the app or at " + siteHost + " and your access unlocks automatically."
+      + (expiresLabel ? " Your access runs until " + expiresLabel + "." : "");
+    var invite = await createSetupLinkForAccount(to, options.recipientName, message.actorName, siteUrl);
+    if(invite && invite.link){
+      message.ctaLabel = "Set your password & get started";
+      message.ctaUrl = invite.link;
+    }
+  }
+
+  var resendKey = env("RESEND_API_KEY");
+  if(!resendKey)return {sent: false, reason: "not_configured"};
+  var rendered = renderEmail(message);
+  var from = env("CLARITY_EMAIL_FROM") || "Clarity Golf Systems <notifications@claritygolf.systems>";
+  var response = await fetch("https://api.resend.com/emails", {method: "POST", headers: {"Authorization": "Bearer " + resendKey, "Content-Type": "application/json"}, body: JSON.stringify({from: from, to: [to], subject: subject, html: rendered.html, text: rendered.text})});
+  var body = await response.json().catch(function(){ return null; });
+  if(!response.ok){
+    var failure = new Error("Email provider rejected the comped-access message");
+    failure.status = response.status;
+    failure.body = body;
+    throw failure;
+  }
+  return {sent: true, id: body && body.id || null};
+}
+
+exports.sendCompedAccessEmail = sendCompedAccessEmail;

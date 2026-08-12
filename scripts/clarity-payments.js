@@ -1037,6 +1037,7 @@
       + '<select name="productKey"><option value="admin_comped_membership" selected>Comped Membership month</option><option value="free_pass">Promotional free pass</option></select>'
       + '<input name="durationHours" type="number" min="1" step="1" value="720">'
       + '<label><input type="checkbox" name="allowMemberReferrals" checked> Allow member referrals</label>'
+      + '<label><input type="checkbox" name="sendEmail" checked> Email them about it (new players get a set-password link)</label>'
       + '<textarea name="note" placeholder="Internal note">' + escapeHTML(draft.note) + '</textarea>'
       + '<button type="submit">' + (adminPending ? "Issuing..." : "Issue comped access") + '</button>'
       + '</form>'
@@ -1185,10 +1186,17 @@
         return false;
       }
       data.email = emailValue;
+      /* Explicit true/false: an unticked checkbox is simply ABSENT from
+         FormData, and the server defaults a missing sendEmail to true - so
+         without this an untick would still email the player. */
+      data.sendEmail = form.elements.sendEmail && form.elements.sendEmail.checked ? "true" : "false";
       freePassFeedback = { status: "pending", message: "Issuing..." };
-      adminAction("issueFreePass", data).then(function () {
+      adminAction("issueFreePass", data).then(function (body) {
+        var emailNote = body && body.emailStatus === "sent" ? " Notification email sent."
+          : body && body.emailStatus === "failed" ? " The pass is live, but the notification email failed to send."
+          : "";
         freePassDraft = { email: "", accountId: "", note: "" };
-        freePassFeedback = { status: "ok", message: "Pass issued to " + (emailValue || accountIdValue) + ". It appears in the list below." };
+        freePassFeedback = { status: "ok", message: "Pass issued to " + (emailValue || accountIdValue) + "." + emailNote + " It appears in the list below." };
         render();
         loadIssuedPasses({ silent: true });
         refresh({ silent: true });

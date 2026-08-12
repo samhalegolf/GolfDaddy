@@ -17,6 +17,7 @@ const {
   text
 } = require("./payment-utils");
 const { sendSystemAlert } = require("./alert-utils");
+const { sendCompedAccessEmail } = require("./email-notification");
 
 const PRODUCT_FIELDS = "id,product_key,product_kind,name,description,stripe_product_id,stripe_price_id,price_label,duration_hours,billing_schedule,active,colour,sort_order,metadata,created_at,updated_at";
 const DEFAULT_PRODUCTS = [
@@ -371,8 +372,36 @@ async function issueFreePass(payload, auth) {
       }
     })
   });
-  await logAdmin(auth, "issue_free_pass", { accountEmail, accountId, productKey, hours: cleanHours });
-  return json(200, { ok: true, message: "Free pass issued" });
+  /* Notify the recipient, after the entitlement is safely written. A failed
+     email is reported in emailStatus but never fails the request - the pass
+     exists either way, and claiming otherwise is how this screen used to lie.
+     The template branches on whether the address already has an account
+     (gift email) or not (welcome email whose CTA is a set-password link that
+     doubles as their first login). Untick "Email them about it" on the form
+     for silent comps like the App Store review account. */
+  let emailStatus = "skipped";
+  if (boolFlag(payload.sendEmail, true) && accountEmail) {
+    try {
+      const accountRows = await supabaseFetch("app_accounts?select=account_id,name&email=eq." + encodeFilter(accountEmail) + "&limit=1", { method: "GET" });
+      const existingAccount = Array.isArray(accountRows) ? accountRows[0] : null;
+      const days = Math.round(cleanHours / 24);
+      const result = await sendCompedAccessEmail({
+        to: accountEmail,
+        recipientName: existingAccount && existingAccount.name || "",
+        hasAccount: !!existingAccount,
+        membership: isCompedMembership,
+        periodLabel: days >= 28 && days <= 31 ? "a month" : days + " days",
+        expiresLabel: expires.toLocaleDateString("en-NZ", { day: "numeric", month: "long", year: "numeric" }),
+        issuedByName: "Clarity Golf"
+      });
+      emailStatus = result && result.sent ? "sent" : "skipped";
+    } catch (_error) {
+      emailStatus = "failed";
+    }
+  }
+
+  await logAdmin(auth, "issue_free_pass", { accountEmail, accountId, productKey, hours: cleanHours, emailStatus });
+  return json(200, { ok: true, message: "Free pass issued", emailStatus });
 }
 
 function boolFlag(value, defaultValue) {
