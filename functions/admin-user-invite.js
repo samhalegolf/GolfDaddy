@@ -2,6 +2,7 @@
 
 const { email, hasAuth, json, role, supabaseAuth, supabaseRest, text, upsertAccount } = require("./auth-utils");
 const { sendSystemAlert } = require("./alert-utils");
+const { isStaffRole, resolveCaller } = require("./clarity-caller");
 
 function env(name) { return process.env[name] || ""; }
 function siteUrl() { return (env("CLARITY_SITE_URL") || env("APP_URL") || "https://caddy.claritygolf.app").replace(/\/+$/, ""); }
@@ -106,9 +107,32 @@ exports.handler = async function(event) {
   const name = text(body.name, 160) || (accountEmail ? accountEmail.split("@")[0] : "Player");
   const accountRole = role(body.role);
   const actorName = text(body.actorName, 120) || "your coach";
-  const actorAccountId = cleanId(body.actorAccountId || body.coachAccountId || "");
   const targetAccountId = cleanId(body.targetAccountId || body.accountId || "");
   if (!accountEmail) return json(400, { error: "Enter a valid email" });
+
+  /* This endpoint creates Supabase Auth users, sends account-setup emails from
+     the Clarity domain, and writes coach-player relationships. It used to take
+     the actor straight from the request body with no verification at all, so
+     anyone who knew the URL could invite any address and attach themselves as
+     coach to any player. The caller is now established from a Supabase bearer
+     token (a signed-in coach or admin) or the shared service secret (Booking's
+     server), and the actor is whoever that resolves to -- not whoever the body
+     claims. */
+  let caller;
+  try {
+    caller = await resolveCaller(event, { actorAccountId: cleanId(body.actorAccountId || body.coachAccountId || "") });
+  } catch (error) {
+    return json(error.status || 401, { error: error.message || "Sign in again", code: "token_invalid" });
+  }
+  if (!caller) return json(401, { error: "Sign in as a coach or admin to invite a user", code: "token_required" });
+  if (!caller.isStaff) return json(403, { error: "Coach or admin access required" });
+  /* Only an admin may mint another coach or admin. A coach inviting someone can
+     only create a player. */
+  if (isStaffRole(accountRole) && !caller.isAdmin) {
+    return json(403, { error: "Only an admin can invite a coach or admin account" });
+  }
+  const actorAccountId = cleanId(caller.actorAccountId || "");
+
   try {
     const authUser = await createOrFindUser(accountEmail, name, accountRole);
     const pack = await upsertAccount(authUser, { accountId: targetAccountId, email: accountEmail, name, role: accountRole, coachId: actorAccountId || null, eventType: "admin_user_invite" });

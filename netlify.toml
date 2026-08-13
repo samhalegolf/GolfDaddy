@@ -27,6 +27,13 @@
   framework = "#custom"
   autoLaunch = false
 
+# The single Booking <-> Caddy integration seam. Authenticated by a signed-in
+# coach/admin token or the shared service secret (CLARITY_SERVICE_SECRET).
+[[redirects]]
+  from = "/api/clarity-integration"
+  to = "/.netlify/functions/clarity-integration"
+  status = 200
+
 [[redirects]]
   from = "/api/store-webhook"
   to = "/.netlify/functions/store-webhook"

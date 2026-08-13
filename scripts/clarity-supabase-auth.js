@@ -20,8 +20,19 @@
   function permission(value) { var r = role(value); if (r === "admin") return "admin"; if (r === "coach") return "coach"; return r === "subscribedPlayer" ? "subscribed" : "player"; }
   function mode(value) { var r = role(value); return r === "admin" || r === "coach" ? "coach" : "player"; }
 
-  async function post(url, payload) {
-    var response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload || {}) });
+  /* `authed` sends the signed-in user's Supabase access token. Endpoints that
+     create accounts or link coaches to players verify it server-side -- the
+     role check in invitePlayer() below is a UI convenience and proves nothing
+     on its own, since anyone can call the endpoint directly. */
+  async function post(url, payload, authed) {
+    var headers = { "Content-Type": "application/json" };
+    if (authed) {
+      var token = "";
+      try { token = await freshAccessToken(); } catch (_error) { token = ""; }
+      if (!token) throw new Error("Sign in again to continue");
+      headers.Authorization = "Bearer " + token;
+    }
+    var response = await fetch(url, { method: "POST", headers: headers, body: JSON.stringify(payload || {}) });
     var body = await response.json().catch(function () { return {}; });
     if (!response.ok || body.ok === false) {
       var error = new Error(body.error || "Supabase Auth request failed");
@@ -202,9 +213,10 @@
       email: data && data.email,
       role: "player",
       actorName: coach.name || coach.email || "your coach",
+      // Sent for continuity, but the server takes the actor from the token.
       actorAccountId: coach.accountId || "",
       targetAccountId: data && data.accountId || ""
-    });
+    }, true);
     var player = commit(body, { activate: false });
     return linkLocalCoachPlayer(coach.accountId, player);
   }
