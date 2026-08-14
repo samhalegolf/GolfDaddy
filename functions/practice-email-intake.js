@@ -744,7 +744,13 @@ async function storeInbound(inbound, parsed) {
         player_name: row.playerName || inbound.playerName,
         club: row.club || null,
         shot_number: Number.isFinite(Number(row.shotNumber)) ? Number(row.shotNumber) : null,
-        hit_at: row.hitAt || null,
+        /* Only a date the parser actually resolved. An unrecognised one is kept
+           on the row as raw text ("07/08/2026") because it is still evidence -
+           but handing that to a timestamp column lets Postgres guess the very
+           thing the parser refuses to guess, and silently store July 8 for a
+           shot hit on 7 August. Unknown stays unknown; the raw text is still in
+           raw_source_json. */
+        hit_at: /^\d{4}-\d{2}-\d{2}/.test(String(row.hitAt || "")) ? row.hitAt : null,
         metrics_json: {
           ballSpeed: row.ballSpeed,
           clubSpeed: row.clubSpeed,

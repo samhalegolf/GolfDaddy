@@ -224,6 +224,17 @@
   /* Fields whose unit decides the batch's declared system. */
   var UNIT_SYSTEM_FIELDS = { carryDistance: true, totalDistance: true, offlineDistance: true };
 
+  /* Fields that can carry a left/right marker instead of a sign. Only offline
+     is in here: it is the one field with a documented sign convention, so a
+     marker on it has an unambiguous meaning. Adding a field is one line, but
+     only do it for a field where L and R genuinely mean negative and positive. */
+  var DIRECTION_MARKER_FIELDS = { offlineDistance: true };
+
+  /* Row labels that are a summary of the shots above rather than a shot.
+     Deliberately loose about spacing and punctuation - "STD. DEV" and "Std Dev"
+     are the same row. */
+  var SUMMARY_LABEL_PATTERN = /^(average|avg|mean|median|total|totals|std\.?\s*dev(iation)?|standard\s*deviation|sd|summary)$/;
+
   /* Launch monitors, matched against the file name and any hint the caller
      passes (an email subject, say). Unknown stays unknown - the point of the
      column is to let rules skip monitors that cannot measure what they test,
@@ -374,30 +385,104 @@
     return token ? UNIT_TOKENS[token] : null;
   }
 
+  /* A unit written in the cell rather than the header - "142 m", "118.4 mph",
+     "1.2 deg". A stated unit is a stated unit wherever it is written, and a
+     file that plainly says metres should not be read as unusable because the
+     word sits one row lower than we expected. The degree symbol is the same
+     thing typed differently. */
+  function unitTokenFromCell(text) {
+    var token = cleanString(text).toLowerCase();
+    if (!token) return '';
+    if (token === '°') return 'deg';
+    return UNIT_TOKENS[token] ? token : '';
+  }
+
+  /* Read one numeric cell. Returns the number, the unit the cell stated (if
+     any), and the side a direction marker declared (if any).
+
+     value === null means the cell was genuinely unreadable - the caller rejects
+     the row on that, as it always has. What has changed is that a readable
+     number wearing a unit or a direction letter is no longer counted as
+     unreadable. */
+  function readNumericCell(raw, field) {
+    var text = cleanString(raw);
+    var empty = { value: null, unit: '', side: '' };
+    if (!text) return empty;
+
+    var direct = asNumber(text);
+    if (direct !== null) return { value: direct, unit: '', side: '' };
+
+    if (DIRECTION_MARKER_FIELDS[field]) {
+      /* "6.2R", "6.2 R", "L 4.2", "4.2L". The marker carries the direction and
+         the number is written unsigned, so the sign is ours to apply: left is
+         negative, the same convention the rest of the parser uses. */
+      var marker = text.match(/^([LR])\s*([-+]?[\d.,]+)$/i) || text.match(/^([-+]?[\d.,]+)\s*([LR])$/i);
+      if (marker) {
+        var letter = (/^[LR]$/i.test(marker[1]) ? marker[1] : marker[2]).toUpperCase();
+        var magnitude = asNumber(/^[LR]$/i.test(marker[1]) ? marker[2] : marker[1]);
+        if (magnitude !== null) {
+          var side = letter === 'L' ? 'left' : 'right';
+          return { value: side === 'left' ? -Math.abs(magnitude) : Math.abs(magnitude), unit: '', side: side };
+        }
+      }
+    }
+
+    var suffixed = text.match(/^([-+]?[\d.,]+)\s*([a-z/]{1,6}|°)$/i);
+    if (suffixed) {
+      var token = unitTokenFromCell(suffixed[2]);
+      var numeric = asNumber(suffixed[1]);
+      if (token && numeric !== null) return { value: numeric, unit: token, side: '' };
+    }
+
+    return empty;
+  }
+
+  function isSummaryLabel(value) {
+    var text = cleanString(value).toLowerCase().replace(/\s+/g, ' ');
+    if (!text) return false;
+    return SUMMARY_LABEL_PATTERN.test(text);
+  }
+
   /* Decide the batch's unit system from the distance columns. Returns a null
      system rather than a default when the headers are silent or disagree - the
      caller is expected to hold the batch, not to pick one. */
-  function resolveUnitSystem(columns, opts) {
+  function resolveUnitSystem(columns, opts, cellUnits) {
     opts = opts || {};
+    cellUnits = cellUnits || {};
     var hints = {};
-    var systems = {};
+    var headerSystems = {};
+    var cellSystems = {};
     (Array.isArray(columns) ? columns : []).forEach(function (column) {
       if (!column.unit) return;
       hints[column.key] = column.unit.unit;
-      if (column.unit.system && UNIT_SYSTEM_FIELDS[column.key]) systems[column.unit.system] = true;
+      if (column.unit.system && UNIT_SYSTEM_FIELDS[column.key]) headerSystems[column.unit.system] = true;
     });
-    var found = Object.keys(systems);
 
-    /* An explicit declaration from the caller outranks the headers: it comes
-       from a provider profile or an operator who knows the source, whereas a
-       header is only a label someone typed. */
+    /* Cells only speak where the header was silent. A header is the source's
+       own statement about the whole column; a cell is one row's. */
+    Object.keys(cellUnits).forEach(function (key) {
+      var info = UNIT_TOKENS[cellUnits[key]];
+      if (!info || hints[key]) return;
+      hints[key] = info.unit;
+      if (info.system && UNIT_SYSTEM_FIELDS[key]) cellSystems[info.system] = true;
+    });
+
+    /* An explicit declaration from the caller outranks both: it comes from a
+       provider profile or an operator who knows the source, whereas a header is
+       only a label someone typed. */
     var declared = cleanString(opts.unitSystem).toLowerCase();
     if (declared === 'metric' || declared === 'imperial') {
       return { unitSystem: declared, unitSource: 'declared', unitHints: hints, unitConflict: false };
     }
 
-    if (found.length === 1) return { unitSystem: found[0], unitSource: 'header', unitHints: hints, unitConflict: false };
-    if (found.length > 1) return { unitSystem: null, unitSource: '', unitHints: hints, unitConflict: true };
+    var fromHeaders = Object.keys(headerSystems);
+    if (fromHeaders.length === 1) return { unitSystem: fromHeaders[0], unitSource: 'header', unitHints: hints, unitConflict: false };
+    if (fromHeaders.length > 1) return { unitSystem: null, unitSource: '', unitHints: hints, unitConflict: true };
+
+    var fromCells = Object.keys(cellSystems);
+    if (fromCells.length === 1) return { unitSystem: fromCells[0], unitSource: 'cell', unitHints: hints, unitConflict: false };
+    if (fromCells.length > 1) return { unitSystem: null, unitSource: '', unitHints: hints, unitConflict: true };
+
     return { unitSystem: null, unitSource: '', unitHints: hints, unitConflict: false };
   }
 
@@ -475,8 +560,7 @@
 
   /* Sign convention: negative offline = left. An explicit side column wins over
      the sign, because a source that ships "6" plus "L" means left and the
-     number carries no sign to read. Note this only labels the shot - the stored
-     offlineDistance keeps whatever sign the source gave it. */
+     number carries no sign to read. */
   function sideFromOffline(value, explicitSide) {
     var side = cleanString(explicitSide).toLowerCase();
     if (side === 'left' || side === 'l') return 'left';
@@ -486,6 +570,20 @@
       if (Number(value) > 0) return 'right';
     }
     return '';
+  }
+
+  /* Make the stored number agree with the side we resolved. A source that says
+     "6" plus "left" means six metres left, and everything downstream reads the
+     SIGN, not the label - the gate derives its offline angle from it and the
+     bubble plots from that. Leaving +6 on a row labelled left put the miss on
+     the wrong side of the target, so the label wins here too, not just in the
+     text. A row with no side resolved keeps whatever sign the source gave it. */
+  function signedOffline(value, side) {
+    var number = asNumber(value);
+    if (number === null || !side) return number;
+    if (side === 'left') return -Math.abs(number);
+    if (side === 'right') return Math.abs(number);
+    return number;
   }
 
   /* Spin axis when the monitor reported the spin components but not the axis.
@@ -531,6 +629,42 @@
     }
 
     var delimiter = detectDelimiter(sourceLines.map(function (line) { return line.text; }));
+
+    /* Exports often open with a title, a player name and a date before the
+       table starts. Assuming line 1 is the header read that preamble as the
+       column names and threw the whole file away, so look for the header
+       instead of assuming where it is.
+
+       The guard against eating real data: a preamble line has fewer cells than
+       the table. A data row has the table's shape, so anything with as many
+       cells as the header row stops the search - if line 1 already looks like
+       data, nothing is skipped and the old headerless handling takes over. */
+    var cellCountOf = function (line) { return splitPracticeLine(line.text, delimiter).length; };
+    var providerLine = sourceLines[0].text;
+    var headerLineIndex = -1;
+    for (var scan = 0; scan < Math.min(sourceLines.length, 10); scan += 1) {
+      if (looksLikeHeader(splitPracticeLine(sourceLines[scan].text, delimiter))) {
+        headerLineIndex = scan;
+        break;
+      }
+    }
+    if (headerLineIndex > 0) {
+      /* Only skip lines that are narrower than the header. A data row has the
+         table's shape, so this cannot swallow shots: if anything above the
+         candidate header is as wide as the table, we are not looking at a
+         preamble and nothing is dropped. */
+      var headerWidth = cellCountOf(sourceLines[headerLineIndex]);
+      var preambleOnly = sourceLines.slice(0, headerLineIndex).every(function (line) {
+        return cellCountOf(line) < headerWidth;
+      });
+      if (preambleOnly) {
+        /* Skipped lines leave the table but not the evidence: the title is
+           often the only place the monitor is named. */
+        sourceLines = sourceLines.slice(headerLineIndex);
+        warnings.push('preamble_skipped');
+      }
+    }
+
     var firstCells = splitPracticeLine(sourceLines[0].text, delimiter);
     var hasHeader = opts.headers === true || (opts.headers !== false && looksLikeHeader(firstCells));
     var columns = buildColumns(firstCells, !hasHeader);
@@ -545,17 +679,24 @@
     var dataLines = hasHeader ? sourceLines.slice(1) : sourceLines;
     var headers = columns.map(function (column) { return column.key; });
 
-    var units = resolveUnitSystem(columns, opts);
-    if (units.unitConflict) warnings.push('unit_system_conflict');
-    if (!units.unitSystem) warnings.push('unit_system_undeclared');
-
-    var provider = cleanString(opts.provider) || detectProvider(opts.sourceName, opts.providerHint, sourceLines[0].text);
+    var provider = cleanString(opts.provider) || detectProvider(opts.sourceName, opts.providerHint, providerLine);
     var shotDates = [];
+    var cellUnits = {};
+    var summaryRowsSkipped = 0;
 
     var rows = dataLines
       .map(function (line, index) {
         var cells = splitPracticeLine(line.text, delimiter);
         if (!cells.length || !cells.some(function (cell) { return cleanString(cell); })) return null;
+
+        /* AVERAGE and STD DEV are a description of the shots above, not another
+           shot. Importing them adds a fake shot that drags every average it
+           lands in - so they are dropped here, the way the photo scanner
+           already drops them. */
+        if (isSummaryLabel(cells[0])) {
+          summaryRowsSkipped += 1;
+          return null;
+        }
 
         /* rawSource is the audit trail: the original line, the cell each value
            came from, and the header it was read under. Downstream work is
@@ -604,12 +745,17 @@
           }
 
           if (isNumericField(column.key)) {
-            var numericValue = asNumber(rawValue);
-            if (numericValue === null) {
+            var reading = readNumericCell(rawValue, column.key);
+            if (reading.unit && !cellUnits[column.key]) cellUnits[column.key] = reading.unit;
+            if (reading.value === null) {
               row.errors.push('Invalid ' + fieldLabel(column.key));
               return;
             }
-            row[column.key] = numericValue;
+            /* A marker told us the direction outright. It is stored as the side
+               rather than inferred later, and the value it produced is already
+               signed to match. */
+            if (reading.side) row.side = reading.side;
+            row[column.key] = reading.value;
             knownFieldCount += 1;
             return;
           }
@@ -668,6 +814,14 @@
         return row;
       })
       .filter(function (row) { return !!row; });
+
+    if (summaryRowsSkipped) warnings.push('summary_rows_skipped');
+
+    /* Units are resolved after the rows, not before: a unit stated in the cells
+       is only visible once the cells have been read. */
+    var units = resolveUnitSystem(columns, opts, cellUnits);
+    if (units.unitConflict) warnings.push('unit_system_conflict');
+    if (!units.unitSystem) warnings.push('unit_system_undeclared');
 
     /* A session is dated by its earliest shot. Sorting strings is safe here
        because parseShotDate only ever emits YYYY-MM-DD. */
@@ -782,7 +936,7 @@
         spin: asNumber(input.spin),
         carryDistance: asNumber(input.carryDistance),
         totalDistance: asNumber(input.totalDistance),
-        offlineDistance: asNumber(input.offlineDistance),
+        offlineDistance: signedOffline(input.offlineDistance, sideFromOffline(input.offlineDistance, input.side)),
         side: sideFromOffline(input.offlineDistance, input.side),
         faceAngle: asNumber(input.faceAngle),
         pathAngle: asNumber(input.pathAngle),
@@ -921,6 +1075,9 @@
     inferClubValue: inferClubValue,
     parseClub: parseClub,
     sideFromOffline: sideFromOffline,
+    signedOffline: signedOffline,
+    readNumericCell: readNumericCell,
+    isSummaryLabel: isSummaryLabel,
     deriveRowMetrics: deriveRowMetrics,
     parsePracticeImportText: parsePracticeImportText,
     validateNativePracticeShot: validateNativePracticeShot

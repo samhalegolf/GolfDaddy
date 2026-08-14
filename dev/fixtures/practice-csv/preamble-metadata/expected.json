@@ -1,14 +1,24 @@
 {
   "why": "A title and metadata block above the table. The header row is not line 1.",
-  "pending": "The header row is assumed to be line 1, so the preamble is read as the header and every real row is parsed positionally against it - the whole file lands invalid.",
   "parse": {
     "delimiter": ",",
     "hasHeader": true,
-    "headers": ["club", "carryDistance", "totalDistance", "offlineDistance"],
-    "warnings": ["preamble_skipped"],
+    "headers": [
+      "club",
+      "carryDistance",
+      "totalDistance",
+      "offlineDistance"
+    ],
+    "warnings": [
+      "preamble_skipped"
+    ],
     "unitSystem": "metric",
     "unitSource": "header",
-    "unitHints": { "carryDistance": "m", "totalDistance": "m", "offlineDistance": "m" },
+    "unitHints": {
+      "carryDistance": "m",
+      "totalDistance": "m",
+      "offlineDistance": "m"
+    },
     "provider": "trackman",
     "sessionDate": null,
     "sessionDateSource": ""
@@ -21,7 +31,9 @@
     "sessionDate": null,
     "provider": "trackman",
     "gateStatus": "staged",
-    "provenanceGaps": ["session_date_unknown"]
+    "provenanceGaps": [
+      "session_date_unknown"
+    ]
   },
   "rows": [
     {

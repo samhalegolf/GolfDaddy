@@ -138,7 +138,16 @@ assert(signedRows[1].side === 'right' && signedRows[1].offlineDistance === 6, 'p
 const labelled = server.parsePracticeImportText('Club,Carry,Offline,Side\n7i,142,6,left', {});
 const labelledRows = server.createPracticeImportBatch(labelled.rows, {}, SCOPE).rows;
 assert(labelledRows[0].side === 'left', 'explicit side column wins over the sign');
-assert(labelledRows[0].offlineDistance === 6, 'explicit side does NOT rewrite the stored sign (spec §9.2 gap)');
+// Was the spec §9.2 gap: the side column labelled the row but left the number
+// positive, so a left miss was stored as +6 and plotted right. Everything
+// downstream reads the sign, so the label has to correct it.
+assert(labelledRows[0].offlineDistance === -6, 'explicit side corrects the stored sign');
+
+const markerRows = server.createPracticeImportBatch(
+  server.parsePracticeImportText('Club,Carry,Offline\n7i,142,6.2R\n7i,140,L 4.2', {}).rows, {}, SCOPE
+).rows;
+assert(markerRows[0].offlineDistance === 6.2 && markerRows[0].side === 'right', 'a trailing R marker reads as a right miss');
+assert(markerRows[1].offlineDistance === -4.2 && markerRows[1].side === 'left', 'a leading L marker reads as a signed left miss');
 
 // ---- Unit system: read where stated, recorded where not, never guessed
 //      (spec §2a, §9.1). Missing provenance does not hold up an import - it is

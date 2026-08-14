@@ -1,14 +1,23 @@
 {
   "why": "Delivery numbers exported with a degree symbol. The symbol is a unit, not part of the number.",
-  "pending": "A trailing degree symbol is not stripped, so face and path fail asNumber() and the row is rejected.",
   "parse": {
     "delimiter": ",",
     "hasHeader": true,
-    "headers": ["club", "carryDistance", "faceAngle", "pathAngle"],
-    "warnings": ["unit_system_undeclared"],
+    "headers": [
+      "club",
+      "carryDistance",
+      "faceAngle",
+      "pathAngle"
+    ],
+    "warnings": [
+      "unit_system_undeclared"
+    ],
     "unitSystem": null,
     "unitSource": "",
-    "unitHints": { "faceAngle": "deg", "pathAngle": "deg" },
+    "unitHints": {
+      "faceAngle": "deg",
+      "pathAngle": "deg"
+    },
     "provider": "",
     "sessionDate": null,
     "sessionDateSource": ""
@@ -21,7 +30,11 @@
     "sessionDate": null,
     "provider": "",
     "gateStatus": "staged",
-    "provenanceGaps": ["unit_system_undeclared", "session_date_unknown", "provider_unknown"]
+    "provenanceGaps": [
+      "unit_system_undeclared",
+      "session_date_unknown",
+      "provider_unknown"
+    ]
   },
   "rows": [
     {
@@ -31,7 +44,9 @@
       "faceAngle": 1.2,
       "pathAngle": 3.1,
       "status": "native_valid",
-      "warnings": ["missing_offline_distance"]
+      "warnings": [
+        "missing_offline_distance"
+      ]
     }
   ]
 }

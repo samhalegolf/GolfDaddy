@@ -1,13 +1,12 @@
 {
-  "why": "An explicit side column tells us the direction the number does not carry. Left must end up stored as negative, because the sign is what the graph reads.",
+  "why": "Offline written as 6.2R / L 4.2 instead of a signed number. Left must end up negative, right positive.",
   "parse": {
     "delimiter": ",",
     "hasHeader": true,
     "headers": [
       "club",
       "carryDistance",
-      "offlineDistance",
-      "side"
+      "offlineDistance"
     ],
     "warnings": [
       "unit_system_undeclared"
@@ -38,16 +37,16 @@
       "club": "7 Iron",
       "shotNumber": 1,
       "carryDistance": 142,
-      "offlineDistance": -6,
-      "side": "left",
+      "offlineDistance": 6.2,
+      "side": "right",
       "status": "native_valid"
     },
     {
       "club": "7 Iron",
       "shotNumber": 2,
       "carryDistance": 140,
-      "offlineDistance": 6,
-      "side": "right",
+      "offlineDistance": -4.2,
+      "side": "left",
       "status": "native_valid"
     }
   ]

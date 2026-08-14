@@ -1,0 +1,68 @@
+{
+  "why": "AVERAGE and STD DEV rows at the foot of the table are not shots and must not import as shots.",
+  "parse": {
+    "delimiter": ",",
+    "hasHeader": true,
+    "headers": [
+      "club",
+      "carryDistance",
+      "totalDistance",
+      "offlineDistance"
+    ],
+    "warnings": [
+      "summary_rows_skipped"
+    ],
+    "unitSystem": "metric",
+    "unitSource": "header",
+    "unitHints": {
+      "carryDistance": "m",
+      "totalDistance": "m",
+      "offlineDistance": "m"
+    },
+    "provider": "",
+    "sessionDate": null,
+    "sessionDateSource": ""
+  },
+  "batch": {
+    "rowCount": 3,
+    "validCount": 3,
+    "invalidCount": 0,
+    "unitSystem": "metric",
+    "sessionDate": null,
+    "provider": "",
+    "gateStatus": "staged",
+    "provenanceGaps": [
+      "session_date_unknown",
+      "provider_unknown"
+    ]
+  },
+  "rows": [
+    {
+      "club": "7 Iron",
+      "shotNumber": 1,
+      "carryDistance": 142,
+      "totalDistance": 151,
+      "offlineDistance": -6,
+      "side": "left",
+      "status": "native_valid"
+    },
+    {
+      "club": "7 Iron",
+      "shotNumber": 2,
+      "carryDistance": 139,
+      "totalDistance": 148,
+      "offlineDistance": 4,
+      "side": "right",
+      "status": "native_valid"
+    },
+    {
+      "club": "7 Iron",
+      "shotNumber": 3,
+      "carryDistance": 144,
+      "totalDistance": 153,
+      "offlineDistance": -2,
+      "side": "left",
+      "status": "native_valid"
+    }
+  ]
+}
