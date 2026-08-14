@@ -44,7 +44,7 @@ assert(
 
 // ---- the domain ----
 
-assert(intake.intakeDomain() === 'claritydata.app', 'practice mail lands on claritydata.app by default');
+assert(intake.intakeDomain() === 'claritygolf.app', 'practice mail lands on claritygolf.app by default');
 assert(
   /CLARITY_PRACTICE_EMAIL_DOMAIN/.test(fs.readFileSync(path.join(ROOT, 'functions/practice-email-intake.js'), 'utf8')),
   'and an env var still overrides it, so a deploy can move it without a code change'

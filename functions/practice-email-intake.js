@@ -95,15 +95,16 @@ async function signPhotoUrl(path) {
 
 function cleanDomain(value) {
   const clean = String(value || "").trim().toLowerCase().replace(/^@+/, "").replace(/[^a-z0-9.-]/g, "");
-  return clean && clean.includes(".") ? clean : "claritydata.app";
+  return clean && clean.includes(".") ? clean : "claritygolf.app";
 }
 
-/* claritydata.app is the practice inbox domain. The env vars still win, so a
-   deploy can point somewhere else without a code change, but the default is the
-   real domain rather than the app's own - practice mail and the app do not have
-   to live in the same place. */
+/* claritygolf.app is the practice inbox domain: it is already verified in
+   Resend with receiving enabled and a root MX, so inbound mail works without
+   any extra DNS. The env vars still win, so a deploy can move practice mail to
+   its own domain later without a code change. Note the root MX means every
+   address at this domain reaches the intake, not just the practice ones. */
 function intakeDomain() {
-  return cleanDomain(env("CLARITY_PRACTICE_EMAIL_DOMAIN") || env("CLARITY_EMAIL_INTAKE_DOMAIN") || "claritydata.app");
+  return cleanDomain(env("CLARITY_PRACTICE_EMAIL_DOMAIN") || env("CLARITY_EMAIL_INTAKE_DOMAIN") || "claritygolf.app");
 }
 
 function slug(value, fallback) {
