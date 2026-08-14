@@ -6627,8 +6627,28 @@
 	      return Number.isFinite(median)&&median>0?median:NaN;
 	    };
 	    const anchorRelativeRows=gdBubbleRelativeShotRows(shots,clubBaselineFor);
-	    const myBubbleParts=anchorDistanceM&&hubRows.length&&gdPracticeHasBubbleOffset(hubOffset)?gdBubbleRelativeParts(hubRows,hubOffset,anchorDistanceM):[];
-	    const practiceBubbleParts=anchorDistanceM&&showPracticeLayer?gdBubbleRelativeParts(overlayRows,practiceBubbleOffset,anchorDistanceM):[];
+	    // ONE BUBBLE PER LAYER. THIS is the heap.
+	    //
+	    // gdPracticeNormalisedBubbleLayerMarkup does parts.map(part => <ellipse>), and
+	    // both layers were handed EVERY bag club's overlay row - so six clubs drew six
+	    // stacked ellipses. The count tracked the BAG, not the data, which is why it
+	    // never responded to anything about the shots.
+	    //
+	    // The Practice Bubble is a single proposal and My Bubble is a single saved
+	    // bubble (Bubble Bible s2). Neither is a per-club thing, so neither should ever
+	    // emit more than one shape.
+	    //
+	    // One row is enough because shape is a PRESET scaled by carry (s6), not a fit to
+	    // the dots: the preset lands within ~0.2% of the same drawn radii across the bag,
+	    // which is exactly what lets the Course chart have one bubble stand for every
+	    // club at once (s5). Prefer the 7 iron, since the shared graph is a 7 iron frame.
+	    const singleBubbleRow=rows=>{
+	      if(!Array.isArray(rows)||!rows.length)return [];
+	      const seven=rows.find(row=>gdShotBubbleOverlayClubKey(row?.club)==="7i");
+	      return [seven||rows[0]];
+	    };
+	    const myBubbleParts=anchorDistanceM&&hubRows.length&&gdPracticeHasBubbleOffset(hubOffset)?gdBubbleRelativeParts(singleBubbleRow(hubRows),hubOffset,anchorDistanceM):[];
+	    const practiceBubbleParts=anchorDistanceM&&showPracticeLayer?gdBubbleRelativeParts(singleBubbleRow(overlayRows),practiceBubbleOffset,anchorDistanceM):[];
 	    const normalisedPlot=gdPracticeNormalisedPlotLayout();
 	    const clubKeySource=anchorRelativeRows.length?anchorRelativeRows:dataRows;
 	    const clubKey=[...new Set(clubKeySource.map(row=>row.club||"Unknown"))].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})).slice(0,6);
