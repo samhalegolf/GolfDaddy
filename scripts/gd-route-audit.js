@@ -2314,10 +2314,40 @@
     if(p.bagSeededDefault&&!p.bagSlotsTouched)return false;
     return true;
   }
+  // Measured carry for ANY club -> the 7 iron carry that implies.
+  //
+  // This is the inverse of gdGenerateQuickBag, so it has to walk the SAME ladder
+  // gdGenerateQuickBag walks. It used to read GD_DEFAULT_CLUB_CARRY_M instead, and
+  // the two ladders do not agree: relative to the 7 iron the table has Driver +75
+  // and 4H +25, the generator has +90 and +35. Only PW matched. So a driver-only
+  // import measured at 245m implied a 170m 7 iron, and the bag generated from that
+  // handed the driver back 260m - the app silently telling the player they hit it
+  // 15m further than they just did. 9i was +3m out, SW +1m, and so on.
+  //
+  // Deriving the offset from the generator makes the round trip exact by
+  // construction and leaves ONE ladder in play. GD_DEFAULT_CLUB_CARRY_M stays the
+  // fallback for clubs the generator does not emit (4i, oddities, custom names).
+  const GD_PRACTICE_SEVEN_REF_CARRY=155;
+  let gdPracticeQuickBagOffsetCache=null;
+  function gdPracticeQuickBagOffsets(){
+    if(gdPracticeQuickBagOffsetCache)return gdPracticeQuickBagOffsetCache;
+    const rows=gdShotBubbleSafe(()=>typeof gdGenerateQuickBag==="function"?gdGenerateQuickBag(GD_PRACTICE_SEVEN_REF_CARRY):[],[])||[];
+    const map={};
+    rows.forEach(row=>{
+      const key=gdShotBubbleOverlayClubKey(row?.club);
+      const carry=Number(row?.baseCarry);
+      if(key&&Number.isFinite(carry))map[key]=carry-GD_PRACTICE_SEVEN_REF_CARRY;
+    });
+    if(Object.keys(map).length)gdPracticeQuickBagOffsetCache=map;
+    return map;
+  }
   function gdPracticeClubDefaultSevenCarry(club,carry){
     const c=String(club||"").trim();
     const n=Number(carry);
     if(!c||!Number.isFinite(n)||n<=0)return NaN;
+    const offsets=gdPracticeQuickBagOffsets();
+    const key=gdShotBubbleOverlayClubKey(c);
+    if(key&&Number.isFinite(offsets[key]))return n-offsets[key];
     const defaultClub=gdShotBubbleSafe(()=>typeof gdDefaultCarryForClub==="function"?gdDefaultCarryForClub(c):NaN,NaN);
     const defaultSeven=Number(typeof GD_DEFAULT_BAG_7I_CARRY!=="undefined"?GD_DEFAULT_BAG_7I_CARRY:155)||155;
     if(!Number.isFinite(defaultClub)||defaultClub<=0)return NaN;
@@ -2598,6 +2628,65 @@
     gdLmToast(action==="adapted"?"Adapted bag saved":"Bag distances adopted");
     return gdPracticeRefreshProjectionSurfaces();
   }
+  // Auto-bag from the shots themselves.
+  //
+  // With no real bag this chart has no legitimate anchor: everything is plotted as a
+  // percentage of the anchor, and a seeded ghost bag is not allowed to stand in for
+  // one (Bubble Bible s4, trap 3 - anchoring to stand-in numbers is the same sin as
+  // drawing a stand-in bubble). The practice import IS a real measurement, so it can
+  // supply the bag instead of the player being asked for one before they can see
+  // anything.
+  //
+  // No new estimator: this is the same chain the distance-suggestion panel already
+  // runs - per-club medians -> implied 7 iron -> gdGenerateQuickBag - just applied
+  // without waiting for a click. gdBagPersistRows clears bagSeededDefault and sets
+  // bagSlotsTouched, so the result reads as a real bag from here on and the anchor
+  // has something fixed to sit on.
+  let gdPracticeAutoBagInFlight=false;
+  function gdPracticeAutoBagFromData(analysis){
+    // gdBagPersistRows re-enters through gdPracticeSyncBubbleSourcesToBag; without
+    // this the first render would recurse.
+    if(gdPracticeAutoBagInFlight)return false;
+    if(safe(()=>gdPracticeHasUserBag(),false))return false;
+    const estimate=safe(()=>gdPracticeEstimatedBagRowsFromEvidence(analysis),null);
+    const rows=estimate?.rows||[];
+    if(!rows.length)return false;
+    gdPracticeAutoBagInFlight=true;
+    try{
+      const persist=gdBagSortRows(rows.map(row=>{
+        const carry=Math.max(1,Math.round(Number(row.baseCarry)||0));
+        return{club:row.club,baseCarry:carry,totalM:gdBagTotalForCarry(row.club,carry)};
+      }));
+      if(typeof gdBagPersistRows==="function")gdBagPersistRows(persist,{silent:true,render:false});
+      else safe(()=>{
+        const p=ensureProfile();
+        p.bag=persist;
+        p.bagSlotsTouched=true;
+        p.bagSeededDefault=false;
+        savePlayerProfiles();
+        syncCoreProfileFromActive();
+      });
+      // Provenance, so the panel can say where these numbers came from and a later
+      // real bag edit can be told apart from this.
+      safe(()=>{
+        const p=ensureProfile();
+        p.bagSource="practice-data";
+        p.bagSourceSevenCarryM=Number(estimate?.sevenCarryM)||null;
+        p.bagSourceLinkClub=String(estimate?.link?.club||"")||null;
+        savePlayerProfiles();
+        syncCoreProfileFromActive();
+      });
+      gdPracticeSyncBubbleSourcesToBag({skipRender:true});
+      gdLmToast("Set generated from data");
+    }finally{
+      gdPracticeAutoBagInFlight=false;
+    }
+    return true;
+  }
+  function gdPracticeBagGeneratedFromData(){
+    const p=safe(()=>ensureProfile(),null)||{};
+    return p.bagSource==="practice-data";
+  }
   function gdPracticeBagSuggestionHTML(analysis){
     const hasBag=gdPracticeHasUserBag();
     const estimate=gdPracticeEstimatedBagRowsFromEvidence(analysis);
@@ -2628,7 +2717,8 @@
         ? `<button type="button" onclick="return gdPracticeApplyBagSuggestions('suggested')">Adopt</button><button type="button" onclick="return gdPracticeToggleBagAdapt(true)">Adapt</button><button type="button" onclick="return gdPracticeApplyBagSuggestions('keep')">Not now</button>`
         : `<button type="button" onclick="return gdPracticeApplyBagSuggestions('suggested')">Adopt</button><button type="button" onclick="return gdPracticeApplyBagSuggestions('keep')">Not now</button>`);
 	    const linkCopy=link?`<div class="gdPracticeDistanceLink"><span>Distance link</span><strong>${gdEscapeHTML(link.club)} / ${Math.round(Number(link.trueDistanceM)||0)}m</strong></div>`:"";
-	    return `<div class="gdPracticeBagSuggestionPanel ${hasBag?"hasBag":"noBag"} ${gdPracticeBagAdaptOpen?"adapt":""}"><div class="gdPracticeBagSuggestionHead"><div class="gdPracticeBagSuggestionTitle"><img src="assets/home/bag.png?v=ae58e8eb" alt=""><span>Bag</span></div><button type="button" aria-label="Close" onclick="return gdPracticeToggleBagSuggestions(false)">×</button></div>${linkCopy}${linkChoices}<div class="gdPracticeBagSuggestionGrid"><span>Club</span><span>${gdPracticeBagAdaptOpen?"Edit current":hasBag?"Current":"Bag"}</span><span>Suggested</span><span>Diff</span>${body}</div><div class="gdPracticeBagSuggestionActions">${actions}</div></div>`;
+	    const generatedCopy=gdPracticeBagGeneratedFromData()?`<div class="gdPracticeBagGeneratedNote">Set generated from data</div>`:"";
+	    return `<div class="gdPracticeBagSuggestionPanel ${hasBag?"hasBag":"noBag"} ${gdPracticeBagAdaptOpen?"adapt":""}"><div class="gdPracticeBagSuggestionHead"><div class="gdPracticeBagSuggestionTitle"><img src="assets/home/bag.png?v=ae58e8eb" alt=""><span>Bag</span></div><button type="button" aria-label="Close" onclick="return gdPracticeToggleBagSuggestions(false)">×</button></div>${generatedCopy}${linkCopy}${linkChoices}<div class="gdPracticeBagSuggestionGrid"><span>Club</span><span>${gdPracticeBagAdaptOpen?"Edit current":hasBag?"Current":"Bag"}</span><span>Suggested</span><span>Diff</span>${body}</div><div class="gdPracticeBagSuggestionActions">${actions}</div></div>`;
 	  }
 	  function gdPracticeBagSuggestionNoticeHTML(analysis){
 	    if(gdPracticeBagSuggestionOpen)return"";
@@ -6408,10 +6498,33 @@
     // draft, so anchoring to the draft moved the frame on adopt all over again.
     // The committed bag only changes when the player commits it.
     const anchorBagByClub=hasRealBag?(safe(()=>gdPracticeBagRowsByClub(gdPracticeSavedBagRows()),null)||{}):{};
-    const anchorBagCarry=[practiceRows[0]?.club,hubRows[0]?.club,practiceShape?.club]
-      .map(club=>Number(anchorBagByClub[gdShotBubbleOverlayClubKey(club)]?.actualDistanceM))
-      .find(carry=>Number.isFinite(carry)&&carry>0);
-    const bagAnchorM=Number(anchorBagCarry);
+    // THE FRAME IS A 7 IRON.
+    //
+    // Two different jobs, and they were tangled together. anchorBagByClub above is
+    // the per-club SCALING: clubBaselineFor divides each club's dots by that club's
+    // own bag carry, which is what lets a wedge and a driver share one graph. This
+    // is the FRAME those scaled dots land in, and the shared graph is a 7 iron by
+    // nature - so it has to be ONE fixed club, not whichever club happens to sort
+    // first.
+    //
+    // The old chain took the first of practiceRows[0] / hubRows[0] / practiceShape
+    // that had a bag entry. hubRows only exist once a bubble is adopted (s4 trap 1),
+    // so adopting could change which club supplied the frame and every dot moved -
+    // the same jump this section was written to kill, one layer up. A fixed 7 iron
+    // row cannot switch.
+    const bagAnchorM=(()=>{
+      if(!hasRealBag)return NaN;
+      const direct=Number(anchorBagByClub[gdShotBubbleOverlayClubKey("7i")]?.actualDistanceM);
+      if(Number.isFinite(direct)&&direct>0)return direct;
+      // Bag with no 7 iron in it. Put the bag's own rows on the 7 iron ladder and
+      // take the median, so the frame is still one fixed number derived only from
+      // the committed bag - still nothing adoption can move.
+      const implied=Object.values(anchorBagByClub)
+        .map(row=>gdPracticeClubDefaultSevenCarry(row?.club,Number(row?.actualDistanceM)))
+        .filter(value=>Number.isFinite(value)&&value>0);
+      const median=gdShotBubbleMedian(implied);
+      return Number.isFinite(median)&&median>0?median:NaN;
+    })();
     // No hubRows step: those only exist once a bubble is adopted, so including
     // them anywhere in this chain reintroduces the switch-on-adopt by definition.
     const anchorDistanceM=(Number.isFinite(bagAnchorM)&&bagAnchorM>0?bagAnchorM:null)
@@ -7782,7 +7895,11 @@
 		      if(!skipTolerances&&gdPracticeAdminIsOpen())gdRenderPracticeToleranceControls();
 		      return;
 		    }
-		    const analysis=gdPracticeDisplayAnalysis();
+		    let analysis=gdPracticeDisplayAnalysis();
+	    // No real bag yet: generate one from these shots before anything is drawn.
+	    // The bag is the chart's denominator, so this has to settle before the
+	    // analysis is read - recompute if it fired.
+	    if(gdPracticeAutoBagFromData(analysis))analysis=gdPracticeDisplayAnalysis();
     const totals=analysis?.totals||{};
 	    const rec=analysis?.recommendation||{};
 	    const bubbleMethod=gdPracticeBubbleMethod(analysis);
