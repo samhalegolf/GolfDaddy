@@ -311,27 +311,35 @@ assert(built.session.playerId === 'player-1' && built.session.shotCount === 2, '
 assert(built.rows[0].schemaVersion === server.SCHEMA_VERSION, 'rows are stamped with the schema version');
 assert(/^practice-shot-/.test(built.rows[0].shotId), 'server ids use the practice-shot prefix');
 
-// ---- Browser-only half: store, gate input, soft delete ----
+// ---- Browser-only half: the batch envelope and the gate input ----
 
 const parsed = client.parsePracticeImportText('Club,Carry,Total,Offline\n7i,142,151,-6\nPW,118,121,3', {});
 const batchPayload = client.createPracticeImportBatch(parsed.rows, { sourceType: 'text', rawText: 'x' });
-assert(batchPayload.batch.status === 'active', 'browser batch carries a local record status');
 assert(batchPayload.batch.importId === batchPayload.batch.importBatchId, 'browser batch keeps the legacy importId key');
 assert(batchPayload.batch.rawText === 'x', 'browser batch keeps the raw text for re-parsing');
-assert(batchPayload.session.status === 'active', 'browser session carries a local record status');
+assert(batchPayload.batch.gateStatus === 'staged', 'browser batch carries the gate status');
+assert(Array.isArray(batchPayload.batch.provenanceGaps), 'browser batch carries the provenance gaps');
 
-const saved = client.saveNativePracticeShots(batchPayload);
-assert(saved.savedCount === 2 && saved.rejectedCount === 0, 'valid shots are stored');
-assert(client.loadNativePracticeShots({}).length === 2, 'stored shots load back');
-
-const gate = client.buildPracticeGateInput(batchPayload.session.sessionId, {});
+// The gate reads the rows it is handed. It used to read a second localStorage
+// shot store, which held a duplicate copy of everything already in the Clarity
+// Shot Library - see gd-native-practice-data.js for why that store is gone.
+const gate = client.buildPracticeGateInput(batchPayload.rows, { sessionId: batchPayload.session.sessionId });
 assert(gate.accepted.length === 2, 'gate input accepts both shots');
 assert(gate.accepted[0].lateralM === -6, 'gate input keeps the signed lateral value');
 assert(Math.abs(gate.accepted[0].normalizedDeg + 2.42) < 0.05, 'gate input derives a signed offline angle');
+assert(gate.sessionId === batchPayload.session.sessionId, 'gate input reports the session it was built for');
 
-const deleted = client.deletePracticeImport(batchPayload.batch.importBatchId, { deletedBy: 'test' });
-assert(deleted.deletedImports === 1 && deleted.deletedRows === 2, 'soft delete marks the batch and its rows');
-assert(client.loadNativePracticeShots({}).length === 0, 'soft-deleted shots stop loading');
+const rejectedGate = client.buildPracticeGateInput([{ club: '', carryDistance: null }], {});
+assert(rejectedGate.accepted.length === 0 && rejectedGate.rejected.length === 1, 'an unusable row is rejected by the gate, not accepted');
+
+// The duplicate store is gone, not merely unused.
+['saveNativePracticeShots', 'loadNativePracticeShots', 'getStore', 'saveStore', 'storageKey', 'clearNativePracticeData', 'deletePracticeImport', 'deleteSelectedPracticeImports', 'clearPracticeLibraryForPlayer'].forEach((name) => {
+  assert(client[name] === undefined, 'the retired native shot store no longer exposes ' + name);
+});
+assert(
+  !/localStorage\s*\./.test(fs.readFileSync(path.join(ROOT, 'scripts/gd-native-practice-data.js'), 'utf8')),
+  'gd-native-practice-data.js no longer reads or writes localStorage'
+);
 
 console.log(failures ? '\n' + failures + ' failing' : '\nall passing');
 process.exitCode = failures ? 1 : 0;

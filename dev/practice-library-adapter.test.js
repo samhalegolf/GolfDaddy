@@ -107,6 +107,58 @@ const zeroed = adapter.nativeRowsToLibraryPayload(
 assert(metricValue(zeroed.clubGroups[0], 'offline') === 0, 'a real zero offline is carried');
 assert(metricValue(zeroed.clubGroups[0], 'total') === undefined, 'a null total is left out rather than sent as 0');
 
+// ---- units are converted to what the library stores, and the source kept ----
+
+function payloadFor(text, opts) {
+  const parsed = parser.parsePracticeImportText(text, {});
+  const built = parser.createPracticeImportBatch(parsed.rows, {
+    unitSystem: parsed.unitSystem,
+    unitSource: parsed.unitSource,
+    provider: parsed.provider
+  }, { playerId: 'p1' });
+  return adapter.nativeRowsToLibraryPayload(built.rows, Object.assign({
+    unitSystem: built.batch.unitSystem,
+    unitHints: parsed.unitHints
+  }, opts || {}), deps);
+}
+
+const yards = payloadFor('Club,Carry (yds),Total (yds),Offline (yds)\n7 Iron,155,169,6');
+const yardCarry = (yards.clubGroups[0].metrics || []).find((m) => m.candidateMetric === 'carry');
+assert(yardCarry.value === 141.73, '155 yards is stored as 141.73 metres');
+assert(yardCarry.unit === 'm', 'the stored metric is labelled metres');
+assert(yardCarry.sourceValue === 155 && yardCarry.sourceUnit === 'yd', 'the source value and unit stay on the metric');
+assert(yardCarry.rawValue === '155', 'rawValue is what the file said, not the converted number');
+assert(
+  metricValue(yards.clubGroups[0], 'offline') === 5.49,
+  'offline is converted too, so the plot and the carry stay in the same unit'
+);
+assert(
+  yards.unitConversions.length === 3 && yards.unitConversions.every((c) => c.from === 'yd' && c.to === 'm'),
+  'the payload records which fields were converted and from what'
+);
+
+const metres = payloadFor('Club,Carry (m),Total (m)\n7 Iron,142,151');
+const metreCarry = (metres.clubGroups[0].metrics || []).find((m) => m.candidateMetric === 'carry');
+assert(metreCarry.value === 142, 'a metric batch is passed through untouched');
+assert(metreCarry.sourceUnit === undefined, 'and carries no conversion record, because nothing was converted');
+assert(metres.unitConversions.length === 0, 'no conversions are reported for a metric batch');
+
+const silent = payloadFor('Club,Carry,Total\n7 Iron,142,151');
+assert(metricValue(silent.clubGroups[0], 'carry') === 142, 'an undeclared batch is NOT converted');
+assert(silent.unitConversions.length === 0, 'because converting an unknown unit would be guessing');
+
+const feet = payloadFor('Club,Carry (ft)\n7 Iron,465');
+assert(metricValue(feet.clubGroups[0], 'carry') === 141.73, 'a per-field foot unit converts to metres');
+
+// Speeds are not all stored in the same unit, so each goes to its own target.
+const speeds = payloadFor('Club,Carry (m),Ball Speed (kph),Club Speed (mph)\n7 Iron,142,190,83');
+assert(metricValue(speeds.clubGroups[0], 'ballSpeed') === 118.06, 'ball speed converts kph to the mph the library stores');
+assert(metricValue(speeds.clubGroups[0], 'clubSpeed') === 37.1, 'club speed converts mph to the m/s the library stores');
+
+const angles = payloadFor('Club,Carry (yds),Face,Path\n7 Iron,155,1.2,3.1');
+assert(metricValue(angles.clubGroups[0], 'faceAngle') === 1.2, 'angles are never touched by a distance conversion');
+assert(metricValue(angles.clubGroups[0], 'clubPath') === 3.1, 'club path is left alone too');
+
 // ---- provenance rides along ----
 
 const stamped = adapter.nativeRowsToLibraryPayload(
@@ -117,6 +169,16 @@ const stamped = adapter.nativeRowsToLibraryPayload(
 assert(stamped.unitSystem === 'imperial', 'the batch unit system is carried on the payload');
 assert(stamped.sessionDate === '2026-07-28', 'the session date is carried on the payload');
 assert(stamped.label === 'range.csv', 'the label is the source name');
+
+// ---- the provider is never invented ----
+
+const noProvider = adapter.nativeRowsToLibraryPayload(rowsFrom('Club,Carry\n7 Iron,142'), {}, deps);
+assert(
+  noProvider.sourceIdentity.providerGuess === 'unknown',
+  'an unnamed source stays unknown, so the library fingerprints it itself'
+);
+const named = adapter.nativeRowsToLibraryPayload(rowsFrom('Club,Carry\n7 Iron,142'), { provider: 'trackman' }, deps);
+assert(named.sourceIdentity.providerGuess === 'trackman', 'a known provider is passed through');
 
 // ---- the seam has to line up with the library it feeds ----
 
@@ -150,6 +212,47 @@ assert(
 assert(
   uploadFn.includes('gdPracticeNativePayloadFromText'),
   'file upload builds its payload through the Clarity-native seam'
+);
+
+// The paste and email lanes save through gd-route-audit's bridge. It used to
+// hand-roll its own copy of the mapping, which is how it ended up without
+// expectedDistanceM - every pasted shot plotted at zero depth.
+const auditText = fs.readFileSync(path.join(ROOT, 'scripts', 'gd-route-audit.js'), 'utf8');
+const bridge = auditText.slice(
+  auditText.indexOf('function gdBridgeNativePracticeToLaunchMonitor'),
+  auditText.indexOf('function gdSaveNativePracticeImport')
+);
+assert(bridge.length > 0, 'the native -> library bridge was found');
+assert(
+  bridge.includes('nativeRowsToLibraryPayload'),
+  'the paste/email bridge maps through the adapter rather than its own table'
+);
+assert(
+  !/candidateMetric\s*:/.test(bridge) && !bridge.includes('"carryDistance"'),
+  'the bridge no longer hand-builds metric objects'
+);
+assert(
+  bridge.includes('unitHints') && bridge.includes('unitSystem'),
+  'the bridge passes the batch provenance, so an emailed yard file converts too'
+);
+
+// One store. The save path must not write a second copy anywhere, and the
+// delete path must not have a second store to keep in step.
+assert(
+  !/saveNativePracticeShots|loadNativePracticeShots/.test(auditText),
+  'nothing writes or reads the retired native shot store'
+);
+assert(
+  auditText.includes('gdMigrateLegacyNativePracticeStore'),
+  'rows left in the retired store are carried across before the key is dropped'
+);
+const deleteFn = auditText.slice(
+  auditText.indexOf('function gdPracticeDeleteImportsConfirmed'),
+  auditText.indexOf('function gdPracticeDeleteSelectedImports')
+);
+assert(
+  !deleteFn.includes('nativeApi'),
+  'deleting an import touches one store, so the counts cannot double-count'
 );
 
 const markup = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');

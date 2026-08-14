@@ -50,6 +50,62 @@
 
   var NATIVE_FIELDS = Object.keys(NATIVE_TO_LIBRARY_METRIC);
 
+  /* The unit the library stores each metric in (from the alias registry's
+     metricConfig). Distances are metres; speeds are not all the same, which is
+     why this is a table and not a constant. */
+  var LIBRARY_METRIC_UNIT = {
+    carry: 'm',
+    total: 'm',
+    offline: 'm',
+    ballSpeed: 'mph',
+    clubSpeed: 'm/s',
+    launch: 'deg',
+    backspin: 'rpm',
+    sideSpin: 'rpm',
+    totalSpin: 'rpm',
+    spinAxis: 'deg',
+    faceAngle: 'deg',
+    clubPath: 'deg',
+    faceToPath: 'deg',
+    launchDirection: 'deg'
+  };
+
+  /* Only the distance fields take their unit from the batch's declared system.
+     A speed or an angle has to state its own unit or go unconverted. */
+  var DISTANCE_FIELDS = { carryDistance: true, totalDistance: true, offlineDistance: true };
+
+  var IN_METRES = { m: 1, cm: 0.01, km: 1000, yd: 0.9144, ft: 0.3048, in: 0.0254 };
+  var IN_METRES_PER_SECOND = { 'm/s': 1, mph: 0.44704, kph: 1 / 3.6 };
+
+  function round2(value) {
+    return Math.round(Number(value) * 100) / 100;
+  }
+
+  /* Returns the converted number, or null when no conversion applies - which
+     covers the case that matters most: a source that never said what unit it
+     was in is left exactly as it was. We convert what we were told; we do not
+     convert what we guessed. */
+  function convertValue(value, fromUnit, toUnit) {
+    if (!fromUnit || !toUnit || fromUnit === toUnit) return null;
+    if (IN_METRES[fromUnit] && IN_METRES[toUnit]) return round2(value * IN_METRES[fromUnit] / IN_METRES[toUnit]);
+    if (IN_METRES_PER_SECOND[fromUnit] && IN_METRES_PER_SECOND[toUnit]) {
+      return round2(value * IN_METRES_PER_SECOND[fromUnit] / IN_METRES_PER_SECOND[toUnit]);
+    }
+    return null;
+  }
+
+  /* What unit the source stated for this field: the per-field hint the parser
+     read off a header or a cell first, then the batch's declared system for
+     distances. An undeclared batch yields '' and nothing is converted. */
+  function sourceUnitFor(field, opts) {
+    var hint = (opts.unitHints || {})[field];
+    if (hint) return hint;
+    if (!DISTANCE_FIELDS[field]) return '';
+    if (opts.unitSystem === 'imperial') return 'yd';
+    if (opts.unitSystem === 'metric') return 'm';
+    return '';
+  }
+
   function cleanClub(value, fallback) {
     var club = String(value === null || value === undefined ? '' : value).trim();
     return club || fallback || 'Unknown';
@@ -78,6 +134,7 @@
 
     var clubGroups = [];
     var rejectedRows = [];
+    var conversions = {};
 
     (Array.isArray(rows) ? rows : []).forEach(function (row) {
       if (!row) return;
@@ -93,8 +150,25 @@
            carry is a very different claim from a missing one. */
         if (value === null || value === undefined || value === '') return;
         if (!Number.isFinite(Number(value))) return;
-        var metric = metricForKey(NATIVE_TO_LIBRARY_METRIC[field], Number(value));
-        if (metric) metrics.push(metric);
+        var number = Number(value);
+        var libraryKey = NATIVE_TO_LIBRARY_METRIC[field];
+        var sourceUnit = sourceUnitFor(field, opts);
+        var targetUnit = LIBRARY_METRIC_UNIT[libraryKey] || '';
+        var converted = convertValue(number, sourceUnit, targetUnit);
+        var metric = metricForKey(libraryKey, converted === null ? number : converted);
+        if (!metric) return;
+        if (converted !== null) {
+          /* The library holds the converted number because that is the unit it
+             stores in. The number the source actually wrote stays on the metric
+             beside it, so the import can always be read back against the file
+             it came from rather than taken on trust. */
+          metric.rawValue = String(number);
+          metric.sourceValue = number;
+          metric.sourceUnit = sourceUnit;
+          metric.convertedTo = targetUnit;
+          conversions[field] = { field: field, metric: libraryKey, from: sourceUnit, to: targetUnit };
+        }
+        metrics.push(metric);
       });
       if (!metrics.length) {
         rejectedRows.push({ club: club, errors: ['no_library_metrics'] });
@@ -117,15 +191,20 @@
          the two files to the same list. */
       inputType: opts.inputType || 'native-csv',
       timestamp: opts.timestamp || new Date().toISOString(),
+      /* 'unknown' when the source never named a monitor - importCapture treats
+         that as "fingerprint it yourself" and reads the text. Putting a
+         made-up provider here would stop that and leave every native import
+         permanently attributed to a monitor nobody used. */
       sourceIdentity: opts.sourceIdentity || {
-        providerGuess: opts.provider || 'clarity_native',
-        confidence: opts.provider ? 0.9 : 0.7,
+        providerGuess: opts.provider || 'unknown',
+        confidence: opts.provider ? 0.9 : 0,
         evidence: [opts.label || 'Clarity-native practice rows']
       },
-      /* Carried for the record, not acted on here: the library stores distances
-         as metres, and an imperial batch is not converted at this seam. The
-         batch says what it is so the layer that does the conversion can see it. */
+      /* The unit system the SOURCE was in. The values above are in the
+         library's units - unitConversions says which fields were changed on the
+         way through and from what. */
       unitSystem: opts.unitSystem || null,
+      unitConversions: Object.keys(conversions).map(function (field) { return conversions[field]; }),
       sessionDate: opts.sessionDate || null,
       rawTextBlocks: Array.isArray(opts.rawTextBlocks) ? opts.rawTextBlocks : [],
       clubGroups: clubGroups,

@@ -1203,6 +1203,13 @@
         sessionId:batch.session_id,
         sourceType:batch.source_type||"email_csv",
         sourceName:batch.source_name||"Practice email",
+        // Provenance the server already established when it parsed the
+        // attachment. Without it an emailed yard file reaches the library as if
+        // it were metres, while the same file uploaded from the phone converts.
+        provider:batch.provider||"",
+        unitSystem:batch.unit_system||null,
+        unitHints:batch.metadata?.unitHints||{},
+        sessionDate:batch.session_date||null,
         rowCount:rows.length,
         validCount:valid,
         invalidCount:invalid,
@@ -1578,11 +1585,11 @@
     gdPracticeEmailLaneOpen=false;
     try{localStorage.removeItem(GD_PRACTICE_IMPORT_OPEN_KEY);}catch(e){}
     if(gdPracticeImportOpen){
-      const savedRows=gdNativePracticeApi()?.loadNativePracticeShots?.({})||[];
+      gdMigrateLegacyNativePracticeStore();
       gdNativePracticeFeedbackPatch({
         status:"waiting",
         lastAction:"Import opened",
-        savedCount:savedRows.length,
+        savedCount:gdPracticeLibraryShotCount(),
         warnings:[],
         errors:[],
         nextStep:"Upload a text file, paste CSV, or take/upload a photo."
@@ -1678,7 +1685,7 @@
         ${gdNativePracticeFeedbackItem("Invalid rows",Number(state.invalidCount)||0)}
         ${gdNativePracticeFeedbackItem("Saved native rows",Number(state.savedCount)||0)}
         ${gdNativePracticeFeedbackItem("Updated",updatedText)}
-        ${gdNativePracticeFeedbackItem("Storage",state.storageKey||"gd_native_practice_shot_data_v1")}
+        ${gdNativePracticeFeedbackItem("Storage",state.storageKey||"gd_launch_monitor_data_v1")}
       </div>
       <div class="gdNativePracticeFeedbackLists">
         <div class="warn"><b>Warnings:</b> ${gdEscapeHTML(warnings.join("; "))}</div>
@@ -1696,6 +1703,35 @@
       .concat(Array.isArray(row?.warnings)?row.warnings:[])
       .concat(Object.keys(row?.unknownFields||{}).length?["unknown_fields"]:[]);
   }
+  /* Library shots in the shape the review table reads. The table speaks
+     Clarity-native (carryDistance, offlineDistance, ...) because that is what a
+     parsed row looks like; a stored shot keeps the same numbers under the
+     library's own names, so this is a rename, not a second conversion. */
+  function gdPracticeLibraryRowsForReview(){
+    const lm=window.GolfDaddyLaunchMonitorData;
+    const store=safe(()=>typeof lm?.getScopedStore==="function"?lm.getScopedStore():lm?.getStore?.(),null)||{};
+    return (Array.isArray(store.shots)?store.shots:[])
+      .filter(shot=>String(shot?.status||"active").toLowerCase()!=="deleted")
+      .slice()
+      .reverse()
+      .map((shot,index)=>({
+        shotNumber:index+1,
+        club:shot.club||shot.originClubLabel||"",
+        carryDistance:shot.carryM,
+        totalDistance:shot.totalM,
+        offlineDistance:shot.lateralM,
+        faceAngle:shot.delivery?.faceAngleDeg??null,
+        pathAngle:shot.delivery?.clubPathDeg??null,
+        // Left blank on purpose: the library keeps a single delivery signal
+        // (face-to-path, or face minus path), not a start direction. Showing
+        // that number under a "Start" heading would be a different measurement
+        // wearing the wrong label.
+        startDirection:null,
+        status:"saved",
+        errors:[],
+        warnings:[]
+      }));
+  }
   function gdNativePracticeRowsTable(rows,opts={}){
     if(!rows||!rows.length)return `<div class="gdNativePracticeEmpty">${gdEscapeHTML(opts.empty||"No native practice rows yet.")}</div>`;
     const limited=rows.slice(0,Number(opts.limit)||24);
@@ -1712,27 +1748,27 @@
     return `<div class="gdNativePracticeTableWrap"><table class="gdNativePracticeTable"><thead><tr><th>#</th><th>Club</th><th>Carry</th><th>Total</th><th>Offline</th><th>Face</th><th>Path</th><th>Start</th><th>Status</th></tr></thead><tbody>${body}</tbody></table></div>`;
   }
   function gdRenderNativePracticeImportLane(){
-    const api=gdNativePracticeApi();
     const text=byId("gdNativePracticeImportText");
     const summary=byId("gdNativePracticeSummary");
     const preview=byId("gdNativePracticePreview");
     const saved=byId("gdNativePracticeSaved");
     const saveBtn=byId("gdNativePracticeSaveBtn");
     if(!summary||!preview||!saved)return;
-    const savedRows=api&&typeof api.loadNativePracticeShots==="function"?api.loadNativePracticeShots({}):[];
+    gdMigrateLegacyNativePracticeStore();
+    const savedCount=gdPracticeLibraryShotCount();
     const rows=gdNativePracticeImportPreview?.rows||[];
     const valid=rows.filter(row=>!row.errors?.length).length;
     const invalid=rows.filter(row=>row.errors?.length).length;
-    gdNativePracticeFeedbackState.savedCount=savedRows.length;
-    gdNativePracticeFeedbackState.storageKey=api?.storageKey||"gd_native_practice_shot_data_v1";
+    gdNativePracticeFeedbackState.savedCount=savedCount;
+    gdNativePracticeFeedbackState.storageKey=window.GolfDaddyLaunchMonitorData?.storageKey||"gd_launch_monitor_data_v1";
     gdRenderNativePracticeFeedback();
     summary.innerHTML=[
       gdNativePracticeMetricHTML("Parsed",rows.length||0),
       gdNativePracticeMetricHTML("Valid",valid),
-      gdNativePracticeMetricHTML("Saved native",savedRows.length||0)
+      gdNativePracticeMetricHTML("Saved shots",savedCount)
     ].join("");
     preview.innerHTML=rows.length?`<div class="gdNativePracticeHead"><div><strong>Review parsed rows</strong><span>${valid} valid · ${invalid} invalid · save writes only valid rows.</span></div></div>${gdNativePracticeRowsTable(rows,{empty:"No parsed rows."})}`:`<div class="gdNativePracticeEmpty">Paste CSV/text and parse to review native rows.</div>`;
-    saved.innerHTML=`<div class="gdNativePracticeHead"><div><strong>Saved native rows</strong><span>${savedRows.length} rows in gd_native_practice_shot_data_v1.</span></div></div>${gdNativePracticeRowsTable(savedRows.slice().reverse(),{empty:"No saved native practice rows yet.",limit:12})}`;
+    saved.innerHTML=`<div class="gdNativePracticeHead"><div><strong>Saved shots</strong><span>${savedCount} shot${savedCount===1?"":"s"} in the Clarity Shot Library.</span></div></div>${gdNativePracticeRowsTable(gdPracticeLibraryRowsForReview(),{empty:"No saved practice shots yet.",limit:12})}`;
     if(saveBtn){
       const wasDisabled=!!saveBtn.disabled;
       saveBtn.disabled=!valid;
@@ -1828,6 +1864,10 @@
       // date, provider - so the batch records what the numbers actually mean
       // rather than being staged as bare figures.
       const batch=api.createPracticeImportBatch(parsed.rows,{sourceType:parsed.sourceType||"csv",sourceName:"Practice Data paste",rawText:text,unitSystem:parsed.unitSystem,unitSource:parsed.unitSource,sessionDate:parsed.sessionDate,sessionDateSource:parsed.sessionDateSource,provider:parsed.provider});
+      // Per-field units (a yard column in a metric file, a mph speed) only exist
+      // on the parse. Keep them on the batch so the library bridge can convert
+      // each column from what it actually said.
+      if(batch.batch)batch.batch.unitHints=parsed.unitHints||{};
       const valid=batch.rows.filter(row=>!row.errors?.length);
       const invalid=batch.rows.filter(row=>row.errors?.length);
       gdPracticeDebugCheckpoint("rows_parsed","success",{outputSummary:`${batch.rows.length} rows normalized`,counts:{rowsParsed:batch.rows.length}});
@@ -1890,72 +1930,113 @@
   }
   // Bridges saved native practice rows into the launch-monitor store.
   //
-  // Why this has to exist: saveNativePracticeShots writes to the NATIVE store,
-  // but the practice graph, the cluster analysis and the Practice Bubble all read
-  // the LAUNCH-MONITOR store, and nothing else connects the two. Without this an
-  // emailed or pasted batch is stored, listed in the library, reported as saved -
-  // and never reaches anything the player actually sees. The save message's
-  // "ready for the Practice Shot Data Gate" handoff was designed but never wired.
+  // Why this exists: the graph, the cluster analysis and the Practice Bubble all
+  // read the Clarity Shot Library, so this is how a parsed import becomes
+  // something the player can actually see.
   //
-  // Values are passed through UNCONVERTED. Neither store does any unit handling,
-  // so inventing a conversion here would be guessing at the source's units.
+  // The mapping itself lives in scripts/gd-practice-library-adapter.js, which is
+  // the one place Clarity-native rows become library metrics. This used to be a
+  // hand-rolled copy of that mapping, and it had drifted: it omitted
+  // expectedDistanceM (so every pasted or emailed shot had a depth of zero and
+  // plotted in a vertical line), sent "startDirection" where the library's key
+  // is launchDirection, dropped side spin and backspin, and passed yards through
+  // as if they were metres.
   //
-  // The same importBatchId/sessionId are reused on purpose, so one delete clears
-  // both stores (gdPracticeDeleteImports calls both APIs with the same ids).
-  function gdBridgeNativePracticeToLaunchMonitor(preview,api){
+  // This is now the whole save: the Clarity Shot Library is the only store.
+  function gdBridgeNativePracticeToLaunchMonitor(preview){
     const lm=window.GolfDaddyLaunchMonitorData;
-    if(!lm||typeof lm.importCapture!=="function"||!preview)return null;
+    const adapter=window.GDPracticeLibraryAdapter;
+    if(!lm||typeof lm.importCapture!=="function"||!adapter||!preview)return null;
     const importBatchId=String(preview.batch?.importBatchId||"").trim();
     const sessionId=String(preview.session?.sessionId||"").trim();
-    const stored=typeof api?.loadNativePracticeShots==="function"
-      ? api.loadNativePracticeShots(sessionId?{sessionId}:{}).filter(row=>!importBatchId||row.importBatchId===importBatchId)
-      : (preview.rows||[]).filter(row=>!row.errors?.length);
+    const stored=(preview.rows||[]).filter(row=>!row.errors?.length);
     if(!stored.length)return null;
-    // A MISSING metric must not become 0. Number(null) is 0 and Number.isFinite(0)
-    // is true, so a bare finite check silently turns "we don't know" into a hard
-    // zero - a fabricated dead-straight face-to-path that passes the delivery gate
-    // and suppresses normalizeShot's designed faceAngle-minus-clubPath fallback.
-    const metric=(candidateMetric,rawLabel,value)=>{
-      if(value===null||value===undefined||value==="")return [];
-      const number=Number(value);
-      return Number.isFinite(number)?[{candidateMetric,rawLabel,value:number,confidence:1}]:[];
-    };
-    const clubGroups=stored.map(row=>({
-      candidateClub:row.club,
-      originClubLabel:row.club,
-      timestamp:row.createdAt||"",
-      metrics:[].concat(
-        metric("carryDistance","Carry",row.carryDistance),
-        metric("totalDistance","Total",row.totalDistance),
-        metric("offline","Offline",row.offlineDistance),
-        metric("faceAngle","Face Angle",row.faceAngle),
-        metric("clubPath","Club Path",row.pathAngle),
-        metric("faceToPath","Face To Path",row.faceToPath),
-        metric("startDirection","Start Direction",row.startDirection),
-        metric("spinAxis","Spin Axis",row.spinAxis),
-        metric("totalSpin","Total Spin",row.totalSpin),
-        metric("launch","Launch",row.launchAngle),
-        metric("ballSpeed","Ball Speed",row.ballSpeed),
-        metric("clubSpeed","Club Speed",row.clubSpeed)
-      )
-    }));
     const sourceType=String(preview.batch?.sourceType||"").toLowerCase();
-    return lm.importCapture({
-      importBatchId,
-      sessionId,
+    // The batch carries what the source declared about itself, so an emailed
+    // yard file is converted here the same way an uploaded one is.
+    const payload=adapter.nativeRowsToLibraryPayload(stored,{
       label:preview.batch?.sourceName||"Practice import",
       inputType:sourceType.includes("email")?"email-csv":"native-csv",
-      clubGroups,
-      rawTextBlocks:[]
+      provider:preview.batch?.provider||"",
+      unitSystem:preview.batch?.unitSystem||null,
+      unitHints:preview.batch?.unitHints||{},
+      sessionDate:preview.batch?.sessionDate||null
     });
+    if(!payload.clubGroups.length)return null;
+    return lm.importCapture(Object.assign(payload,{importBatchId,sessionId}));
+  }
+  function gdPracticeLibraryShotCount(){
+    const lm=window.GolfDaddyLaunchMonitorData;
+    const store=safe(()=>typeof lm?.getScopedStore==="function"?lm.getScopedStore():lm?.getStore?.(),null)||{};
+    return (Array.isArray(store.shots)?store.shots:[]).filter(shot=>String(shot?.status||"active").toLowerCase()!=="deleted").length;
+  }
+  /* One-time move of anything left in the retired native store.
+     gd_native_practice_shot_data_v1 held a second copy of every imported shot.
+     Imports saved before the library bridge existed live ONLY there, so they
+     are carried across before the key is dropped - a player who imported last
+     month should not lose those shots because the storage changed. Rows whose
+     batch is already in the library are skipped rather than duplicated.
+     Once the key is gone this is a no-op, and it can be deleted in a later
+     release. */
+  let gdLegacyNativeStoreChecked=false;
+  function gdMigrateLegacyNativePracticeStore(){
+    if(gdLegacyNativeStoreChecked)return null;
+    gdLegacyNativeStoreChecked=true;
+    const KEY="gd_native_practice_shot_data_v1";
+    const lm=window.GolfDaddyLaunchMonitorData;
+    const adapter=window.GDPracticeLibraryAdapter;
+    if(!lm||typeof lm.importCapture!=="function"||!adapter)return null;
+    const legacy=safe(()=>{
+      const raw=localStorage.getItem(KEY);
+      return raw?JSON.parse(raw):null;
+    },null);
+    if(!legacy)return null;
+    const shots=(Array.isArray(legacy.shots)?legacy.shots:[]).filter(row=>row&&String(row.recordStatus||"active").toLowerCase()!=="deleted");
+    const known=new Set();
+    safe(()=>{
+      const store=lm.getStore?.()||{};
+      (Array.isArray(store.sessions)?store.sessions:[]).forEach(session=>{
+        const id=String(session?.importBatchId||session?.importId||"").trim();
+        if(id)known.add(id);
+      });
+    },null);
+    const byBatch={};
+    shots.forEach(row=>{
+      const id=String(row.importBatchId||row.importId||"").trim();
+      if(!id||known.has(id))return;
+      (byBatch[id]=byBatch[id]||[]).push(row);
+    });
+    let moved=0;
+    Object.keys(byBatch).forEach(importBatchId=>{
+      const rows=byBatch[importBatchId];
+      const batch=(Array.isArray(legacy.importBatches)?legacy.importBatches:[])
+        .find(item=>String(item?.importBatchId||item?.importId||"")===importBatchId)||{};
+      const payload=adapter.nativeRowsToLibraryPayload(rows,{
+        label:batch.sourceName||"Imported practice data",
+        inputType:String(batch.sourceType||"").toLowerCase().includes("email")?"email-csv":"native-csv",
+        provider:batch.provider||"",
+        unitSystem:batch.unitSystem||null,
+        unitHints:batch.unitHints||{},
+        sessionDate:batch.sessionDate||null
+      });
+      if(!payload.clubGroups.length)return;
+      safe(()=>{
+        lm.importCapture(Object.assign(payload,{importBatchId,sessionId:rows[0]?.sessionId||importBatchId}));
+        moved+=payload.clubGroups.length;
+      },null);
+    });
+    safe(()=>localStorage.removeItem(KEY),null);
+    if(moved)gdLmToast(`Moved ${moved} earlier practice shot${moved===1?"":"s"} into the Clarity Shot Library`);
+    return {moved};
   }
   function gdSaveNativePracticeImport(){
+    gdMigrateLegacyNativePracticeStore();
     const api=gdNativePracticeApi();
-    if(!api||typeof api.saveNativePracticeShots!=="function"){
-      gdPracticeFailImportJob(new Error("Native Practice Data store is not ready"),"Native Practice Data store is not ready. Refresh the app and try again.");
-      gdNativePracticeFeedbackPatch({status:"failed",lastAction:"Save failed",errors:["Native Practice Data store is not ready"],nextStep:"Refresh the app and try again."});
-      gdPracticeDebugFailed("save_failed",new Error("Native Practice Data store is not ready"),{outputSummary:"Save API unavailable"});
-      gdLmToast("Native Practice Data store is not ready");
+    if(!api||!window.GolfDaddyLaunchMonitorData||typeof window.GolfDaddyLaunchMonitorData.importCapture!=="function"){
+      gdPracticeFailImportJob(new Error("Clarity Shot Library is not ready"),"Clarity Shot Library is not ready. Refresh the app and try again.");
+      gdNativePracticeFeedbackPatch({status:"failed",lastAction:"Save failed",errors:["Clarity Shot Library is not ready"],nextStep:"Refresh the app and try again."});
+      gdPracticeDebugFailed("save_failed",new Error("Clarity Shot Library is not ready"),{outputSummary:"Save API unavailable"});
+      gdLmToast("Clarity Shot Library is not ready");
       return false;
     }
     if(!gdNativePracticeImportPreview||!gdNativePracticeImportPreview.rows?.length){
@@ -1984,48 +2065,43 @@
         stageIndex:2,
         progress:84
       });
-      gdNativePracticeFeedbackPatch({status:"parsing",lastAction:"Saving native rows",warnings:[],errors:[],nextStep:"Saving valid rows to native storage..."});
+      gdNativePracticeFeedbackPatch({status:"parsing",lastAction:"Saving rows",warnings:[],errors:[],nextStep:"Saving valid rows to the Clarity Shot Library..."});
       if(saveBtn)saveBtn.disabled=true;
       gdPracticeDebugRecordButtonState(true,"native-save-start");
       gdPracticeDebugCheckpoint("save_started","running",{inputSummary:`${gdNativePracticeImportPreview.rows.length} preview rows`});
       gdPracticeAssertImportNotCanceled();
-      const result=api.saveNativePracticeShots(gdNativePracticeImportPreview);
+      const gate=typeof api.buildPracticeGateInput==="function"
+        ?api.buildPracticeGateInput(validRows,{sessionId:gdNativePracticeImportPreview.session?.sessionId||"",importBatchId:gdNativePracticeImportPreview.batch?.importBatchId||""})
+        :null;
+      if(gate){
+        gdPracticeDebugCheckpoint("gate_handoff","success",{outputSummary:`Gate-ready accepted ${gate.counts?.gateReady||0}`,counts:gate.counts||{},raw:gate});
+      }
+      // The save IS the handoff: one store, so a row that reaches the library
+      // has been saved and a row that does not has not.
+      const bridged=gdBridgeNativePracticeToLaunchMonitor(gdNativePracticeImportPreview);
+      const savedCount=Array.isArray(bridged?.shots)?bridged.shots.length:0;
+      if(!savedCount)throw new Error("Nothing reached the Clarity Shot Library");
       gdPracticeCompleteImportJob(null,null,{
-        nativeRows:Number(result?.savedCount)||0,
+        nativeRows:savedCount,
         validCount:validRows.length,
-        invalidCount:Number(result?.rejectedCount)||invalidRows.length,
+        invalidCount:invalidRows.length,
         rawRows:gdNativePracticeImportPreview.rows.length,
         importBatchId:gdNativePracticeImportPreview.batch?.importBatchId||"",
         sessionId:gdNativePracticeImportPreview.session?.sessionId||"",
         importDate:gdNativePracticeImportPreview.batch?.createdAt||gdNativePracticeImportPreview.session?.createdAt||gdPracticeNowISO()
       });
-      gdPracticeDebugCheckpoint("save_completed","success",{outputSummary:`Saved ${Number(result?.savedCount)||0} native rows`,counts:{saved:Number(result?.savedCount)||0,rejected:Number(result?.rejectedCount)||0}});
-      const gate=typeof api.buildPracticeGateInput==="function"&&gdNativePracticeImportPreview?.session?.sessionId
-        ?api.buildPracticeGateInput(gdNativePracticeImportPreview.session.sessionId,{importBatchId:gdNativePracticeImportPreview.batch?.importBatchId})
-        :null;
-      if(gate){
-        gdPracticeDebugCheckpoint("gate_handoff","success",{outputSummary:`Gate-ready accepted ${gate.counts?.gateReady||0}`,counts:gate.counts||{},raw:gate});
-      }
-      // Past the gate: put the saved rows where the practice engine can see them.
-      const bridged=safe(()=>gdBridgeNativePracticeToLaunchMonitor(gdNativePracticeImportPreview,api),null);
-      const bridgedCount=Array.isArray(bridged?.shots)?bridged.shots.length:0;
-      gdPracticeDebugCheckpoint("practice_engine_handoff",bridgedCount?"success":"warning",{
-        outputSummary:bridgedCount?`${bridgedCount} row${bridgedCount===1?"":"s"} handed to the practice engine`:"Nothing reached the practice engine",
-        counts:{bridged:bridgedCount}
-      });
-      gdPracticeDebugFinish("success",{dataSaved:(Number(result?.savedCount)||0)>0,errorMessage:""});
+      gdPracticeDebugCheckpoint("save_completed","success",{outputSummary:`Saved ${savedCount} row${savedCount===1?"":"s"} to the Clarity Shot Library`,counts:{saved:savedCount,rejected:invalidRows.length}});
+      gdPracticeDebugFinish("success",{dataSaved:savedCount>0,errorMessage:""});
       gdNativePracticeFeedbackPatch({
         status:"saved",
-        lastAction:`Saved ${Number(result?.savedCount)||0} native row${Number(result?.savedCount)===1?"":"s"}`,
-        savedCount:api.loadNativePracticeShots({}).length,
+        lastAction:`Saved ${savedCount} row${savedCount===1?"":"s"}`,
+        savedCount:gdPracticeLibraryShotCount(),
         savedBatchId:gdNativePracticeImportPreview.batch?.importBatchId||"",
         savedSessionId:gdNativePracticeImportPreview.session?.sessionId||"",
-        storageKey:api.storageKey||"gd_native_practice_shot_data_v1",
-        warnings:Number(result?.rejectedCount)?[`${Number(result.rejectedCount)} invalid row${Number(result.rejectedCount)===1?"":"s"} not saved`]:[],
+        storageKey:window.GolfDaddyLaunchMonitorData?.storageKey||"gd_launch_monitor_data_v1",
+        warnings:invalidRows.length?[`${invalidRows.length} invalid row${invalidRows.length===1?"":"s"} not saved`]:[],
         errors:[],
-        nextStep:bridgedCount
-          ?"Saved rows are in practice data and visible to the graph. No Practice Bubble was generated - use Generate Bubble when ready."
-          :"Saved native rows are stored, but nothing reached the practice engine. Check the practice engine handoff."
+        nextStep:"Saved rows are in practice data and visible to the graph. No Practice Bubble was generated - use Generate Bubble when ready."
       });
       gdNativePracticeImportPreview=null;
       gdRenderNativePracticeImportLane();
@@ -5360,31 +5436,31 @@
       safe(()=>toast("Launch monitor module is not ready"));
       return false;
     }
-    // Missing must stay missing - see gdBridgeNativePracticeToLaunchMonitor:
-    // Number(null) is 0, so a bare finite check invents a zero.
-    const metric=(candidateMetric,rawLabel,value)=>{
-      if(value===null||value===undefined||value==="")return [];
-      const number=Number(value);
-      return Number.isFinite(number)?[{candidateMetric,rawLabel,value:number,confidence:1}]:[];
-    };
-    const clubGroups=rows.map(row=>({
-      candidateClub:row.club,
-      originClubLabel:row.club,
-      metrics:[].concat(
-        metric("carryDistance","Carry",row.carryM),
-        metric("totalDistance","Total",row.totalM),
-        metric("offline","Offline",row.offlineM),
-        metric("faceAngle","Face Angle",row.faceDeg),
-        metric("clubPath","Club Path",row.pathDeg),
-        metric("startDirection","Start Direction",row.startDeg)
-      )
-    }));
-    const result=lm.importCapture({
+    // The point of the sandbox is to push a batch through the REAL intake, so it
+    // goes through the same Clarity-native seam every import uses. Doing its own
+    // mapping made it a test of a path nothing else takes - and it inherited the
+    // same defects: no expectedDistanceM, and a startDirection key the library
+    // does not read.
+    const adapter=window.GDPracticeLibraryAdapter;
+    if(!adapter){
+      safe(()=>toast("Practice library adapter is not ready"));
+      return false;
+    }
+    const payload=adapter.nativeRowsToLibraryPayload(rows.map(row=>({
+      club:row.club,
+      carryDistance:row.carryM,
+      totalDistance:row.totalM,
+      offlineDistance:row.offlineM,
+      faceAngle:row.faceDeg,
+      pathAngle:row.pathDeg,
+      startDirection:row.startDeg,
+      errors:[]
+    })),{
       label:"Sandbox batch",
       inputType:"generated-demo",
-      clubGroups,
       rawTextBlocks:["sandbox generated practice batch"]
     });
+    const result=lm.importCapture(payload);
     safe(()=>renderPracticeData(true));
     safe(()=>{if(typeof window.gdRenderDataHubStatus==="function")window.gdRenderDataHubStatus();});
     const saved=Array.isArray(result?.shots)?result.shots.length:0;
@@ -6910,8 +6986,6 @@
 		  function gdPracticeEvidenceRows(analysis){
 		    const store=gdPracticeDisplayStore()||{};
 		    const shots=Array.isArray(store.shots)?store.shots:[];
-		    const nativeApi=gdNativePracticeApi&&gdNativePracticeApi();
-		    const nativeRows=safe(()=>typeof nativeApi?.loadNativePracticeShots==="function"?nativeApi.loadNativePracticeShots({}):[],[])||[];
 		    const accepted=Array.isArray(analysis?.acceptedShots)?analysis.acceptedShots:[];
 		    const rejected=Array.isArray(analysis?.rejectedShots)?analysis.rejectedShots:[];
 		    const acceptedIndexById=new Map(accepted.map((shot,index)=>[shot?.shotId,index]));
@@ -6964,42 +7038,8 @@
 		        timestamp:shot.timestamp||shot.capturedAt||shot.time||""
 		      };
 		    });
-		    const nativeOnly=nativeRows.filter(shot=>shot?.shotId&&!seen.has(shot.shotId)).map((shot,index)=>{
-		      const rawCarry=Number(shot.carryDistance);
-		      const expected=Number(shot.totalDistance)||rawCarry||gdDefaultCarryForClub(shot.club||"")||155;
-		      const lateral=Number(shot.offlineDistance);
-		      const normalized=Number.isFinite(lateral)&&Number.isFinite(expected)&&expected>0?Math.atan2(lateral,expected)*180/Math.PI:null;
-		      return{
-		        source:"native-practice",
-		        index:launchRows.length+index,
-		        shotId:shot.shotId||"",
-		        club:shot.club||"Unknown",
-		        actualDistanceM:Number.isFinite(rawCarry)?rawCarry:null,
-		        expectedDistanceM:Math.max(1,Number(expected)||155),
-		        lateralM:Number.isFinite(lateral)?lateral:null,
-		        depthM:0,
-		        normalizedDeg:normalized,
-		        counted:false,
-		        excluded:false,
-		        plotDeselected:false,
-		        rejectReason:"",
-		        captureId:"",
-		        sessionId:shot.sessionId||"",
-		        importBatchId:shot.importBatchId||shot.importId||shot.sessionId||"",
-		        playerId:shot.playerId||shot.profileId||"",
-		        accountId:shot.accountId||"",
-		        sourceType:shot.sourceType||"native",
-		        providerGuess:shot.sourceType||"native",
-		        rawSource:shot.rawSource||null,
-		        warnings:Array.isArray(shot.warnings)?shot.warnings:[],
-		        errors:Array.isArray(shot.errors)?shot.errors:[],
-		        plotSource:"native",
-		        plotSimulated:false,
-		        plotComplete:Number.isFinite(normalized),
-		        timestamp:shot.createdAt||shot.updatedAt||""
-		      };
-		    });
-		    return launchRows.concat(nativeOnly);
+		    // One store now: there is no "native only" pile left to reconcile.
+		    return launchRows;
 		  }
 	  function gdPracticeEvidencePlotLabel(row){
 	    const source=String(row?.plotSource||"").replace(/_/g," ");
@@ -7058,8 +7098,6 @@
 			  }
 		  function gdPracticeImportMetadataMap(){
 		    const store=gdPracticeDisplayStore()||{};
-		    const nativeApi=gdNativePracticeApi&&gdNativePracticeApi();
-		    const nativeStore=safe(()=>typeof nativeApi?.getStore==="function"?nativeApi.getStore():null,null)||{};
 		    const map={};
 		    (store.sessions||[]).forEach(session=>{
 		      const id=String(session?.importBatchId||session?.importId||session?.sessionId||"").trim();
@@ -7088,22 +7126,6 @@
 		        timestamp:capture.timestamp||map[id]?.timestamp||"",
 		        playerId:capture.playerId||map[id]?.playerId||"",
 		        accountId:capture.accountId||map[id]?.accountId||""
-		      });
-		    });
-		    (nativeStore.importBatches||[]).forEach(batch=>{
-		      if(String(batch?.status||"active").toLowerCase()==="deleted")return;
-		      const id=String(batch?.importBatchId||batch?.importId||"").trim();
-		      if(!id)return;
-		      map[id]=Object.assign({},map[id]||{},{
-		        id,
-		        sessionId:batch.sessionId||map[id]?.sessionId||"",
-		        label:batch.sourceName||map[id]?.label||"Native Practice Data",
-		        sourceName:batch.sourceName||map[id]?.sourceName||"Native Practice Data",
-		        sourceType:batch.sourceType||map[id]?.sourceType||"native",
-		        timestamp:batch.createdAt||map[id]?.timestamp||"",
-		        playerId:batch.playerId||map[id]?.playerId||"",
-		        accountId:batch.accountId||map[id]?.accountId||"",
-		        nativeRowCount:Number(batch.rowCount)||0
 		      });
 		    });
 		    return map;
@@ -7260,20 +7282,12 @@
 		    },()=>gdPracticeDeleteImportsConfirmed(ids));
 		  }
 		  function gdPracticeDeleteImportsConfirmed(ids){
-		    const nativeApi=gdNativePracticeApi&&gdNativePracticeApi();
 		    const launchApi=window.GolfDaddyLaunchMonitorData;
-		    // MAX, not sum. Since the native->launch-monitor bridge, one logical import
-		    // is mirrored in BOTH stores under the same importBatchId, so adding the two
-		    // results double-counts it - deleting one import of 6 shots reported
-		    // "2 imports (12 rows)". The larger of the two is the honest figure.
-		    let nativeRows=0,nativeImports=0,launchRows=0,launchImports=0;
-		    safe(()=>{
-		      if(nativeApi&&typeof nativeApi.deleteSelectedPracticeImports==="function"){
-		        const result=nativeApi.deleteSelectedPracticeImports(ids);
-		        nativeRows=Number(result?.deletedRows)||0;
-		        nativeImports=Number(result?.deletedImports)||0;
-		      }
-		    },null);
+		    // One store, one delete. This used to delete from the native store and the
+		    // library and then take the MAX of the two counts, because the same import
+		    // was mirrored in both under one importBatchId and adding them reported a
+		    // 6-shot delete as 12 rows.
+		    let launchRows=0,launchImports=0;
 		    safe(()=>{
 		      if(launchApi&&typeof launchApi.deleteSelectedPracticeImports==="function"){
 		        const result=launchApi.deleteSelectedPracticeImports(ids);
@@ -7281,8 +7295,8 @@
 		        launchImports=Number(result?.deletedImports)||0;
 		      }
 		    },null);
-		    const deletedRows=Math.max(nativeRows,launchRows);
-		    const deletedImports=Math.max(nativeImports,launchImports);
+		    const deletedRows=launchRows;
+		    const deletedImports=launchImports;
 		    ids.forEach(id=>delete gdPracticeImportSelected[id]);
 		    if(!gdPracticeSelectedImportIds().length)gdPracticeImportSelectMode=false;
 		    gdPracticeDebugEnsureRun({sourceName:"Practice import delete",sourceType:"admin"});
@@ -7315,7 +7329,6 @@
 		  }
 		  function gdPracticeClearLibraryForPlayerConfirmed(playerId,launchApi,nativeApi){
 		    let deleted=0;
-		    safe(()=>{if(nativeApi&&typeof nativeApi.clearPracticeLibraryForPlayer==="function")deleted+=Number(nativeApi.clearPracticeLibraryForPlayer(playerId)?.deletedImports)||0;},null);
 		    safe(()=>{if(launchApi&&typeof launchApi.clearPracticeLibraryForPlayer==="function")deleted+=Number(launchApi.clearPracticeLibraryForPlayer(playerId)?.deletedImports)||0;},null);
 		    Object.keys(gdPracticeImportSelected).forEach(id=>delete gdPracticeImportSelected[id]);
 		    gdPracticeImportSelectMode=false;
@@ -7734,7 +7747,6 @@
 	    const scopedPlayer=String(playerId||safe(()=>launchApi?.activePlayerScope?.().playerId||nativeApi?.activePlayerScope?.().playerId,"")||"").trim();
 	    if(!scopedPlayer){gdLmToast("Player scope missing");return false;}
 	    let deleted=0;
-	    safe(()=>{if(nativeApi&&typeof nativeApi.clearPracticeLibraryForPlayer==="function")deleted+=Number(nativeApi.clearPracticeLibraryForPlayer(scopedPlayer)?.deletedImports)||0;},null);
 	    safe(()=>{if(launchApi&&typeof launchApi.clearPracticeLibraryForPlayer==="function")deleted+=Number(launchApi.clearPracticeLibraryForPlayer(scopedPlayer)?.deletedImports)||0;},null);
 	    Object.keys(gdPracticeImportSelected).forEach(id=>delete gdPracticeImportSelected[id]);
 	    gdPracticeImportSelectMode=false;

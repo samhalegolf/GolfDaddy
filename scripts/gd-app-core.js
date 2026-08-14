@@ -2087,6 +2087,9 @@ function gdPracticeNativePayloadFromText(text,label){
     label,
     provider:parsed.provider,
     unitSystem:built.batch.unitSystem,
+    // Per-field units the parser read off headers or cells. The adapter needs
+    // these to convert a yard column into the metres the library stores.
+    unitHints:parsed.unitHints,
     sessionDate:built.batch.sessionDate,
     rawTextBlocks:String(text||"").split(/\r?\n/).map(line=>line.trim()).filter(Boolean).slice(0,8)
   });
@@ -2118,16 +2121,25 @@ async function gdHandleLaunchMonitorUpload(file){
     }
     // Provenance the file never stated. Advisory, exactly as it is on the email
     // lane: it does not hold the import up, it just says what is unknown.
-    const gaps=(payload.provenanceGaps||[]).includes("unit_system_undeclared")?["The file did not say whether distances are metres or yards."]:[];
+    const notes=[];
+    if((payload.provenanceGaps||[]).includes("unit_system_undeclared"))notes.push("The file did not say whether distances are metres or yards, so the numbers were stored exactly as written.");
+    const converted=payload.unitConversions||[];
+    if(converted.length){
+      const from=Array.from(new Set(converted.map(item=>item.from))).join(", ");
+      notes.push(`Converted ${converted.length} column${converted.length===1?"":"s"} from ${from} into the units the Shot Library stores. Each shot keeps the original value.`);
+      // The conversion is a real change to the numbers, so it goes on the record
+      // where a scan is being traced, not just in a toast that disappears.
+      if(gdPracticeDebugCurrentRun())gdPracticeDebugCheckpointSafe("unit_conversion","success",{outputSummary:converted.map(item=>`${item.field}: ${item.from} -> ${item.to}`).join(", "),counts:{columns:converted.length}});
+    }
     if(gdPracticeToleranceCanEditSafe()){
       gdPracticeUpdateImportJob({status:"validating",checkpointText:"Extraction checkpoint ready",accepted:payload.clubGroups.length,rejected,rawRows:payload.clubGroups.length+rejected,clubs:gdPracticePayloadClubLabels(payload),progress:68});
       gdSetPracticePhotoProcessing(false,{skipJob:true});
-      gdNativePracticeFeedbackBridge({status:"parsed",lastAction:`Upload parsed ${payload.clubGroups.length} row${payload.clubGroups.length===1?"":"s"}`,parsedCount:payload.clubGroups.length+rejected,validCount:payload.clubGroups.length,invalidCount:rejected,warnings:gaps,errors:[],nextStep:"Review the extraction checkpoint, then save."});
+      gdNativePracticeFeedbackBridge({status:"parsed",lastAction:`Upload parsed ${payload.clubGroups.length} row${payload.clubGroups.length===1?"":"s"}`,parsedCount:payload.clubGroups.length+rejected,validCount:payload.clubGroups.length,invalidCount:rejected,warnings:notes,errors:[],nextStep:"Review the extraction checkpoint, then save."});
       gdPracticeSetExtractionPreview(payload,`Uploaded file: ${file.name||"practice data"}`);
       return;
     }
     await gdImportLaunchMonitorPayload(payload,"Uploaded practice data");
-    gdNativePracticeFeedbackBridge({status:"saved",lastAction:`Upload imported ${payload.clubGroups.length} row${payload.clubGroups.length===1?"":"s"}`,parsedCount:payload.clubGroups.length+rejected,validCount:payload.clubGroups.length,invalidCount:rejected,warnings:gaps,errors:[],nextStep:"Saved to the Clarity Shot Library."});
+    gdNativePracticeFeedbackBridge({status:"saved",lastAction:`Upload imported ${payload.clubGroups.length} row${payload.clubGroups.length===1?"":"s"}`,parsedCount:payload.clubGroups.length+rejected,validCount:payload.clubGroups.length,invalidCount:rejected,warnings:notes,errors:[],nextStep:"Saved to the Clarity Shot Library."});
   }catch(e){
     console.warn("[GolfDaddy] launch monitor upload failed",e);
     gdPracticeFailImportJob(e,e&&e.message?e.message:"Could not read file");
