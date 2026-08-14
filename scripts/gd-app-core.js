@@ -2065,34 +2065,69 @@ async function gdHandleNativePracticeTextFile(file){
   }
   return false;
 }
+// An uploaded file is the same job as a pasted CSV, so it now runs the same
+// parser instead of the old whitespace/label-value builder - which could not
+// read a comma-delimited file at all, and answered "no usable shots" to
+// perfectly good exports. Rows land through the single Clarity-native seam
+// (gd-practice-library-adapter.js).
+function gdPracticeNativePayloadFromText(text,label){
+  const core=window.GDPracticeDataImport||window.GolfDaddyNativePracticeData;
+  const adapter=window.GDPracticeLibraryAdapter;
+  if(!core||!adapter)throw new Error("Practice parser is not loaded");
+  const source={sourceType:"file",sourceName:label,rawText:String(text||"")};
+  const parsed=core.parsePracticeImportText(text,{sourceType:"file",sourceName:label});
+  const built=core.createPracticeImportBatch(parsed.rows,Object.assign({},source,{
+    unitSystem:parsed.unitSystem,
+    unitSource:parsed.unitSource,
+    sessionDate:parsed.sessionDate,
+    sessionDateSource:parsed.sessionDateSource,
+    provider:parsed.provider
+  }));
+  const payload=adapter.nativeRowsToLibraryPayload(built.rows,{
+    label,
+    provider:parsed.provider,
+    unitSystem:built.batch.unitSystem,
+    sessionDate:built.batch.sessionDate,
+    rawTextBlocks:String(text||"").split(/\r?\n/).map(line=>line.trim()).filter(Boolean).slice(0,8)
+  });
+  payload.parseWarnings=parsed.warnings||[];
+  payload.provenanceGaps=built.batch.provenanceGaps||[];
+  payload.invalidCount=built.batch.invalidCount||0;
+  return payload;
+}
 async function gdHandleLaunchMonitorUpload(file){
   if(!file)return;
-  if(!gdPracticeImportCanStart(file.name||"Plain text file"))return false;
-  gdPracticeStartImportJob("practice-file",file.name||"Plain text file",{status:"queued",checkpointText:"Queued file import",stageIndex:0,progress:8,source:"file"});
-  gdNativePracticeFeedbackBridge({status:"file_selected",lastAction:`Legacy text upload selected: ${file.name||"plain text"}`,warnings:["This upload also feeds the existing launch-monitor intake path."],errors:[],nextStep:"Reading upload..."});
-  gdLmSetStatus("Status","Reading upload",file.name||"Plain text file","needs_more_data");
+  if(!gdPracticeImportCanStart(file.name||"Practice data file"))return false;
+  gdPracticeStartImportJob("practice-file",file.name||"Practice data file",{status:"queued",checkpointText:"Queued file import",stageIndex:0,progress:8,source:"file"});
+  gdNativePracticeFeedbackBridge({status:"file_selected",lastAction:`File selected: ${file.name||"practice data"}`,warnings:[],errors:[],nextStep:"Reading upload..."});
+  gdLmSetStatus("Status","Reading upload",file.name||"Practice data file","needs_more_data");
   gdSetPracticePhotoProcessing(true,{clubs:["Upload"],stageIndex:0,progress:12,quietScanSurface:true});
   try{
     const text=await file.text();
     gdPracticeAssertImportNotCanceled();
     gdPracticeUpdateImportJob({status:"parsing",checkpointText:"Parsing uploaded text",stageIndex:1,progress:38});
-    const payload=gdBuildLaunchMonitorTextCapture(text,file.name||"Plain text launch monitor upload");
+    const payload=gdPracticeNativePayloadFromText(text,file.name||"Practice data file");
+    const rejected=payload.invalidCount||0;
     if(!(payload.clubGroups||[]).length){
-      gdPracticeFailImportJob(new Error("No usable shots found"),"No usable shots found. Use pasted CSV with headers: club, carry, total, offline, face, path, start.");
-      gdNativePracticeFeedbackBridge({status:"failed",lastAction:"Legacy upload parsed 0 rows",errors:["No rows detected"],nextStep:"Use pasted CSV with headers: club, carry, total, offline, face, path, start."});
-      gdLmSetStatus("Status","No usable shots found","Use lines like: 7i Carry 142 Offline 5 FaceToPath 1.6 ClubPath 0.2","conflict_check");
-      gdLmToast("No launch monitor shots found");
+      const reason=rejected?`Every row was rejected (${rejected}). Check the club and distance columns.`:"No rows detected in that file.";
+      gdPracticeFailImportJob(new Error("No usable shots found"),reason);
+      gdNativePracticeFeedbackBridge({status:"failed",lastAction:"Upload parsed 0 usable rows",errors:[reason],nextStep:"A file needs a club column and a carry or total column."});
+      gdLmSetStatus("Status","No usable shots found",reason,"conflict_check");
+      gdLmToast("No practice shots found in that file");
       return;
     }
+    // Provenance the file never stated. Advisory, exactly as it is on the email
+    // lane: it does not hold the import up, it just says what is unknown.
+    const gaps=(payload.provenanceGaps||[]).includes("unit_system_undeclared")?["The file did not say whether distances are metres or yards."]:[];
     if(gdPracticeToleranceCanEditSafe()){
-      gdPracticeUpdateImportJob({status:"validating",checkpointText:"Extraction checkpoint ready",accepted:payload.clubGroups.length,rawRows:payload.clubGroups.length,clubs:gdPracticePayloadClubLabels(payload),progress:68});
+      gdPracticeUpdateImportJob({status:"validating",checkpointText:"Extraction checkpoint ready",accepted:payload.clubGroups.length,rejected,rawRows:payload.clubGroups.length+rejected,clubs:gdPracticePayloadClubLabels(payload),progress:68});
       gdSetPracticePhotoProcessing(false,{skipJob:true});
-      gdNativePracticeFeedbackBridge({status:"parsed",lastAction:`Legacy upload parsed ${payload.clubGroups.length} row${payload.clubGroups.length===1?"":"s"}`,parsedCount:payload.clubGroups.length,validCount:payload.clubGroups.length,invalidCount:0,warnings:["Parsed into the existing launch-monitor review checkpoint, not native storage yet."],errors:[],nextStep:"Review the extraction checkpoint or use pasted CSV for native save."});
-      gdPracticeSetExtractionPreview(payload,`Uploaded text: ${file.name||"launch monitor file"}`);
+      gdNativePracticeFeedbackBridge({status:"parsed",lastAction:`Upload parsed ${payload.clubGroups.length} row${payload.clubGroups.length===1?"":"s"}`,parsedCount:payload.clubGroups.length+rejected,validCount:payload.clubGroups.length,invalidCount:rejected,warnings:gaps,errors:[],nextStep:"Review the extraction checkpoint, then save."});
+      gdPracticeSetExtractionPreview(payload,`Uploaded file: ${file.name||"practice data"}`);
       return;
     }
-    await gdImportLaunchMonitorPayload(payload,"Uploaded launch monitor text");
-    gdNativePracticeFeedbackBridge({status:"saved",lastAction:`Legacy upload imported ${payload.clubGroups.length} row${payload.clubGroups.length===1?"":"s"}`,parsedCount:payload.clubGroups.length,validCount:payload.clubGroups.length,invalidCount:0,warnings:["Saved through existing launch-monitor intake, not the native row store."],errors:[],nextStep:"Use pasted CSV if you want rows in native practice storage."});
+    await gdImportLaunchMonitorPayload(payload,"Uploaded practice data");
+    gdNativePracticeFeedbackBridge({status:"saved",lastAction:`Upload imported ${payload.clubGroups.length} row${payload.clubGroups.length===1?"":"s"}`,parsedCount:payload.clubGroups.length+rejected,validCount:payload.clubGroups.length,invalidCount:rejected,warnings:gaps,errors:[],nextStep:"Saved to the Clarity Shot Library."});
   }catch(e){
     console.warn("[GolfDaddy] launch monitor upload failed",e);
     gdPracticeFailImportJob(e,e&&e.message?e.message:"Could not read file");
@@ -14163,7 +14198,7 @@ document.addEventListener("change",event=>{
   else gdHandleLaunchMonitorUpload(file);
   input.value="";
 },true);
-Object.assign(window,{gdLoadLaunchMonitorDemo,gdClearLaunchMonitorDemo,gdPickLaunchMonitorFile,gdPickPracticePhotoFile,gdAdjustPracticeGeneratedBox,gdHandleNativePracticeTextFile,gdHandleLaunchMonitorUpload,gdHandleLaunchMonitorPhoto,gdScanPracticePhotoCrop,gdPracticePrimaryScanAction,gdOpenPracticeManualQuadTool,gdApplyPracticeManualQuad,gdRunDefaultPracticePhotoScanFromCheckpoint,gdClarityTableOcrScanFromCheckpoint,gdRunValueCorridorMappingFromCheckpoint,gdRunPracticeHeaderStripScanFromColumnScan,gdRunPracticeColumnStripValueScan,gdSetPracticePhotoProcessing,gdPracticeHardStopScan,gdPracticeRefreshDebugTools,gdImportReviewedPracticeOcr,gdDownloadFlattenedGrid,gdCancelPracticePhotoScan,gdCancelPracticeOcrReview,gdPracticeScanClubLabel,gdPracticeScanClubLabels,gdLoadExtractedPractice7iData,gdPracticeSetExtractionPreview,gdPracticeClearExtractionPreview,gdImportPracticeExtractionPreview,gdBuildLaunchMonitorTextCapture,gdCleanLaunchMonitorOcrText,gdLmCaptureToReviewText,gdAnalyzeFlatTableImage,gdFitFlatTableTemplateFromAnalysis,gdBuildFlatTableTemplateColumnScan,gdOpenPracticeFlatTableFailureWindow,gdRenderFlatTableFailureWindow,gdOpenPracticeTemplateOutcomes,gdRunOcrGeneratedTemplateFallbackFromCheckpoint,gdRunFlatTemplateBridgeFromCheckpoint,gdRunPracticeGridExperiment,gdRunFittedCellGridOcr,gdBuildFlatDigitizedTable,gdRenderFlatDigitizedTable,gdPracticeOpenScanOutcomeFromDebug,gdPickRawCourseDataFile,gdHandleRawCourseDataUpload,gdClearCourseShotData,gdPracticeHandleImportJobAction});
+Object.assign(window,{gdLoadLaunchMonitorDemo,gdClearLaunchMonitorDemo,gdPickLaunchMonitorFile,gdPickPracticePhotoFile,gdAdjustPracticeGeneratedBox,gdHandleNativePracticeTextFile,gdHandleLaunchMonitorUpload,gdPracticeNativePayloadFromText,gdHandleLaunchMonitorPhoto,gdScanPracticePhotoCrop,gdPracticePrimaryScanAction,gdOpenPracticeManualQuadTool,gdApplyPracticeManualQuad,gdRunDefaultPracticePhotoScanFromCheckpoint,gdClarityTableOcrScanFromCheckpoint,gdRunValueCorridorMappingFromCheckpoint,gdRunPracticeHeaderStripScanFromColumnScan,gdRunPracticeColumnStripValueScan,gdSetPracticePhotoProcessing,gdPracticeHardStopScan,gdPracticeRefreshDebugTools,gdImportReviewedPracticeOcr,gdDownloadFlattenedGrid,gdCancelPracticePhotoScan,gdCancelPracticeOcrReview,gdPracticeScanClubLabel,gdPracticeScanClubLabels,gdLoadExtractedPractice7iData,gdPracticeSetExtractionPreview,gdPracticeClearExtractionPreview,gdImportPracticeExtractionPreview,gdBuildLaunchMonitorTextCapture,gdCleanLaunchMonitorOcrText,gdLmCaptureToReviewText,gdAnalyzeFlatTableImage,gdFitFlatTableTemplateFromAnalysis,gdBuildFlatTableTemplateColumnScan,gdOpenPracticeFlatTableFailureWindow,gdRenderFlatTableFailureWindow,gdOpenPracticeTemplateOutcomes,gdRunOcrGeneratedTemplateFallbackFromCheckpoint,gdRunFlatTemplateBridgeFromCheckpoint,gdRunPracticeGridExperiment,gdRunFittedCellGridOcr,gdBuildFlatDigitizedTable,gdRenderFlatDigitizedTable,gdPracticeOpenScanOutcomeFromDebug,gdPickRawCourseDataFile,gdHandleRawCourseDataUpload,gdClearCourseShotData,gdPracticeHandleImportJobAction});
 function gdLmStatusClass(status){
   if(["corroborated","cross_distance_verified","verified_by_result","cluster_candidate","delivery_only","result_only"].includes(status))return "good";
   if(["conflict_check","alignment_signal"].includes(status))return "warn";
