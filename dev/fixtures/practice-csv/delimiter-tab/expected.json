@@ -1,0 +1,56 @@
+{
+  "why": "Tab separated, as pasted straight out of a spreadsheet.",
+  "parse": {
+    "delimiter": "\\t",
+    "hasHeader": true,
+    "headers": [
+      "club",
+      "carryDistance",
+      "totalDistance",
+      "offlineDistance"
+    ],
+    "warnings": [
+      "unit_system_undeclared"
+    ],
+    "unitSystem": null,
+    "unitSource": "",
+    "unitHints": {},
+    "provider": "",
+    "sessionDate": null,
+    "sessionDateSource": ""
+  },
+  "batch": {
+    "rowCount": 2,
+    "validCount": 2,
+    "invalidCount": 0,
+    "unitSystem": null,
+    "sessionDate": null,
+    "provider": "",
+    "gateStatus": "staged",
+    "provenanceGaps": [
+      "unit_system_undeclared",
+      "session_date_unknown",
+      "provider_unknown"
+    ]
+  },
+  "rows": [
+    {
+      "club": "3 Wood",
+      "shotNumber": 1,
+      "carryDistance": 205,
+      "totalDistance": 228,
+      "offlineDistance": 11,
+      "side": "right",
+      "status": "native_valid"
+    },
+    {
+      "club": "Driver",
+      "shotNumber": 2,
+      "carryDistance": 248,
+      "totalDistance": 272,
+      "offlineDistance": -14,
+      "side": "left",
+      "status": "native_valid"
+    }
+  ]
+}

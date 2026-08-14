@@ -1,0 +1,47 @@
+{
+  "why": "Semicolon separated, as European locale exports do.",
+  "parse": {
+    "delimiter": ";",
+    "hasHeader": true,
+    "headers": [
+      "club",
+      "carryDistance",
+      "totalDistance",
+      "offlineDistance"
+    ],
+    "warnings": [
+      "unit_system_undeclared"
+    ],
+    "unitSystem": null,
+    "unitSource": "",
+    "unitHints": {},
+    "provider": "",
+    "sessionDate": null,
+    "sessionDateSource": ""
+  },
+  "batch": {
+    "rowCount": 1,
+    "validCount": 1,
+    "invalidCount": 0,
+    "unitSystem": null,
+    "sessionDate": null,
+    "provider": "",
+    "gateStatus": "staged",
+    "provenanceGaps": [
+      "unit_system_undeclared",
+      "session_date_unknown",
+      "provider_unknown"
+    ]
+  },
+  "rows": [
+    {
+      "club": "9 Iron",
+      "shotNumber": 1,
+      "carryDistance": 125,
+      "totalDistance": 131,
+      "offlineDistance": 4,
+      "side": "right",
+      "status": "native_valid"
+    }
+  ]
+}

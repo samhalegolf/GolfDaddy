@@ -1,0 +1,62 @@
+{
+  "why": "Rows with fewer or more cells than the header.",
+  "parse": {
+    "delimiter": ",",
+    "hasHeader": true,
+    "headers": [
+      "club",
+      "carryDistance",
+      "totalDistance",
+      "offlineDistance"
+    ],
+    "warnings": [
+      "unit_system_undeclared"
+    ],
+    "unitSystem": null,
+    "unitSource": "",
+    "unitHints": {},
+    "provider": "",
+    "sessionDate": null,
+    "sessionDateSource": ""
+  },
+  "batch": {
+    "rowCount": 2,
+    "validCount": 2,
+    "invalidCount": 0,
+    "unitSystem": null,
+    "sessionDate": null,
+    "provider": "",
+    "gateStatus": "staged",
+    "provenanceGaps": [
+      "unit_system_undeclared",
+      "session_date_unknown",
+      "provider_unknown"
+    ]
+  },
+  "rows": [
+    {
+      "club": "7 Iron",
+      "shotNumber": 1,
+      "carryDistance": 142,
+      "status": "native_valid",
+      "warnings": [
+        "missing_offline_distance"
+      ]
+    },
+    {
+      "club": "8 Iron",
+      "shotNumber": 2,
+      "carryDistance": 131,
+      "totalDistance": 140,
+      "offlineDistance": 3,
+      "side": "right",
+      "status": "native_valid",
+      "warnings": [
+        "Unknown fields"
+      ],
+      "unknownFields": {
+        "unknown5": "extra"
+      }
+    }
+  ]
+}

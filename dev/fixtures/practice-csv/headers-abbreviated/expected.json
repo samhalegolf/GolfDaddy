@@ -1,0 +1,66 @@
+{
+  "why": "Monitor shorthand: CHS, BS, F2P.",
+  "parse": {
+    "delimiter": ",",
+    "hasHeader": true,
+    "headers": [
+      "club",
+      "ballSpeed",
+      "clubSpeed",
+      "carryDistance",
+      "totalDistance",
+      "faceToPath"
+    ],
+    "warnings": [
+      "unit_system_undeclared"
+    ],
+    "unitSystem": null,
+    "unitSource": "",
+    "unitHints": {},
+    "provider": "",
+    "sessionDate": null,
+    "sessionDateSource": ""
+  },
+  "batch": {
+    "rowCount": 2,
+    "validCount": 2,
+    "invalidCount": 0,
+    "unitSystem": null,
+    "sessionDate": null,
+    "provider": "",
+    "gateStatus": "staged",
+    "provenanceGaps": [
+      "unit_system_undeclared",
+      "session_date_unknown",
+      "provider_unknown"
+    ]
+  },
+  "rows": [
+    {
+      "club": "Driver",
+      "shotNumber": 1,
+      "carryDistance": 248,
+      "totalDistance": 272,
+      "ballSpeed": 152.4,
+      "clubSpeed": 108.2,
+      "faceToPath": -1.4,
+      "status": "native_valid",
+      "warnings": [
+        "missing_offline_distance"
+      ]
+    },
+    {
+      "club": "3 Wood",
+      "shotNumber": 2,
+      "carryDistance": 225,
+      "totalDistance": 247,
+      "ballSpeed": 141,
+      "clubSpeed": 101.5,
+      "faceToPath": 0.6,
+      "status": "native_valid",
+      "warnings": [
+        "missing_offline_distance"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,63 @@
+{
+  "why": "Full club names are kept verbatim, not normalised away.",
+  "parse": {
+    "delimiter": ",",
+    "hasHeader": true,
+    "headers": [
+      "club",
+      "carryDistance"
+    ],
+    "warnings": [
+      "unit_system_undeclared"
+    ],
+    "unitSystem": null,
+    "unitSource": "",
+    "unitHints": {},
+    "provider": "",
+    "sessionDate": null,
+    "sessionDateSource": ""
+  },
+  "batch": {
+    "rowCount": 3,
+    "validCount": 3,
+    "invalidCount": 0,
+    "unitSystem": null,
+    "sessionDate": null,
+    "provider": "",
+    "gateStatus": "staged",
+    "provenanceGaps": [
+      "unit_system_undeclared",
+      "session_date_unknown",
+      "provider_unknown"
+    ]
+  },
+  "rows": [
+    {
+      "club": "Pitching Wedge",
+      "shotNumber": 1,
+      "carryDistance": 118,
+      "status": "native_valid",
+      "warnings": [
+        "missing_offline_distance"
+      ]
+    },
+    {
+      "club": "Sand Wedge",
+      "shotNumber": 2,
+      "carryDistance": 92,
+      "status": "native_valid",
+      "warnings": [
+        "missing_offline_distance"
+      ]
+    },
+    {
+      "club": "3 Hybrid",
+      "shotNumber": 3,
+      "carryDistance": 188,
+      "status": "native_valid",
+      "warnings": [
+        "missing_offline_distance"
+      ]
+    }
+  ]
+}

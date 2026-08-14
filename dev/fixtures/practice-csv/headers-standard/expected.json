@@ -1,0 +1,77 @@
+{
+  "why": "The plainest possible export: the seven columns the app documents.",
+  "parse": {
+    "delimiter": ",",
+    "hasHeader": true,
+    "headers": [
+      "club",
+      "carryDistance",
+      "totalDistance",
+      "offlineDistance",
+      "faceAngle",
+      "pathAngle",
+      "startDirection"
+    ],
+    "warnings": [
+      "unit_system_undeclared"
+    ],
+    "unitSystem": null,
+    "unitSource": "",
+    "unitHints": {},
+    "provider": "",
+    "sessionDate": null,
+    "sessionDateSource": ""
+  },
+  "batch": {
+    "rowCount": 3,
+    "validCount": 3,
+    "invalidCount": 0,
+    "unitSystem": null,
+    "sessionDate": null,
+    "provider": "",
+    "gateStatus": "staged",
+    "provenanceGaps": [
+      "unit_system_undeclared",
+      "session_date_unknown",
+      "provider_unknown"
+    ]
+  },
+  "rows": [
+    {
+      "club": "7 Iron",
+      "shotNumber": 1,
+      "carryDistance": 142,
+      "totalDistance": 151,
+      "offlineDistance": -6,
+      "side": "left",
+      "faceAngle": 1.2,
+      "pathAngle": 3.1,
+      "startDirection": 0.8,
+      "status": "native_valid"
+    },
+    {
+      "club": "7 Iron",
+      "shotNumber": 2,
+      "carryDistance": 139,
+      "totalDistance": 148,
+      "offlineDistance": 4,
+      "side": "right",
+      "faceAngle": -0.6,
+      "pathAngle": 2.4,
+      "startDirection": -0.3,
+      "status": "native_valid"
+    },
+    {
+      "club": "PW",
+      "shotNumber": 3,
+      "carryDistance": 118,
+      "totalDistance": 124,
+      "offlineDistance": 2,
+      "side": "right",
+      "faceAngle": 0.4,
+      "pathAngle": 1.1,
+      "startDirection": 0.2,
+      "status": "native_valid"
+    }
+  ]
+}

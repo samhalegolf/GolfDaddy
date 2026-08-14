@@ -1,0 +1,81 @@
+{
+  "why": "The short forms players actually use.",
+  "parse": {
+    "delimiter": ",",
+    "hasHeader": true,
+    "headers": [
+      "club",
+      "carryDistance"
+    ],
+    "warnings": [
+      "unit_system_undeclared"
+    ],
+    "unitSystem": null,
+    "unitSource": "",
+    "unitHints": {},
+    "provider": "",
+    "sessionDate": null,
+    "sessionDateSource": ""
+  },
+  "batch": {
+    "rowCount": 5,
+    "validCount": 5,
+    "invalidCount": 0,
+    "unitSystem": null,
+    "sessionDate": null,
+    "provider": "",
+    "gateStatus": "staged",
+    "provenanceGaps": [
+      "unit_system_undeclared",
+      "session_date_unknown",
+      "provider_unknown"
+    ]
+  },
+  "rows": [
+    {
+      "club": "7i",
+      "shotNumber": 1,
+      "carryDistance": 142,
+      "status": "native_valid",
+      "warnings": [
+        "missing_offline_distance"
+      ]
+    },
+    {
+      "club": "PW",
+      "shotNumber": 2,
+      "carryDistance": 118,
+      "status": "native_valid",
+      "warnings": [
+        "missing_offline_distance"
+      ]
+    },
+    {
+      "club": "3W",
+      "shotNumber": 3,
+      "carryDistance": 205,
+      "status": "native_valid",
+      "warnings": [
+        "missing_offline_distance"
+      ]
+    },
+    {
+      "club": "4H",
+      "shotNumber": 4,
+      "carryDistance": 178,
+      "status": "native_valid",
+      "warnings": [
+        "missing_offline_distance"
+      ]
+    },
+    {
+      "club": "Driver",
+      "shotNumber": 5,
+      "carryDistance": 248,
+      "status": "native_valid",
+      "warnings": [
+        "missing_offline_distance"
+      ]
+    }
+  ]
+}

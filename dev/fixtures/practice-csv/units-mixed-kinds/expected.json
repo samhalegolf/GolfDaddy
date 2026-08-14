@@ -1,0 +1,47 @@
+{
+  "why": "Distance in metres, speed in mph. Normal, and not a conflict.",
+  "parse": {
+    "delimiter": ",",
+    "hasHeader": true,
+    "headers": [
+      "club",
+      "carryDistance",
+      "ballSpeed"
+    ],
+    "warnings": [],
+    "unitSystem": "metric",
+    "unitSource": "header",
+    "unitHints": {
+      "carryDistance": "m",
+      "ballSpeed": "mph"
+    },
+    "provider": "",
+    "sessionDate": null,
+    "sessionDateSource": ""
+  },
+  "batch": {
+    "rowCount": 1,
+    "validCount": 1,
+    "invalidCount": 0,
+    "unitSystem": "metric",
+    "sessionDate": null,
+    "provider": "",
+    "gateStatus": "staged",
+    "provenanceGaps": [
+      "session_date_unknown",
+      "provider_unknown"
+    ]
+  },
+  "rows": [
+    {
+      "club": "7 Iron",
+      "shotNumber": 1,
+      "carryDistance": 142,
+      "ballSpeed": 118.4,
+      "status": "native_valid",
+      "warnings": [
+        "missing_offline_distance"
+      ]
+    }
+  ]
+}

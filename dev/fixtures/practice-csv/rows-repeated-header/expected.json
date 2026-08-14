@@ -1,0 +1,71 @@
+{
+  "why": "Two exports concatenated, so the header line appears again mid-file. It is rejected as an unreadable row, never imported as a shot.",
+  "parse": {
+    "delimiter": ",",
+    "hasHeader": true,
+    "headers": [
+      "club",
+      "carryDistance",
+      "totalDistance"
+    ],
+    "warnings": [
+      "unit_system_undeclared"
+    ],
+    "unitSystem": null,
+    "unitSource": "",
+    "unitHints": {},
+    "provider": "",
+    "sessionDate": null,
+    "sessionDateSource": ""
+  },
+  "batch": {
+    "rowCount": 3,
+    "validCount": 2,
+    "invalidCount": 1,
+    "unitSystem": null,
+    "sessionDate": null,
+    "provider": "",
+    "gateStatus": "staged",
+    "provenanceGaps": [
+      "unit_system_undeclared",
+      "session_date_unknown",
+      "provider_unknown"
+    ]
+  },
+  "rows": [
+    {
+      "club": "7 Iron",
+      "shotNumber": 1,
+      "carryDistance": 142,
+      "totalDistance": 151,
+      "status": "native_valid",
+      "warnings": [
+        "missing_offline_distance"
+      ]
+    },
+    {
+      "club": "Club",
+      "shotNumber": 2,
+      "status": "native_invalid",
+      "errors": [
+        "Invalid carry",
+        "Invalid total",
+        "Missing required fields",
+        "missing_distance"
+      ],
+      "warnings": [
+        "missing_offline_distance"
+      ]
+    },
+    {
+      "club": "8 Iron",
+      "shotNumber": 3,
+      "carryDistance": 131,
+      "totalDistance": 140,
+      "status": "native_valid",
+      "warnings": [
+        "missing_offline_distance"
+      ]
+    }
+  ]
+}

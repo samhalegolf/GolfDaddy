@@ -1,0 +1,30 @@
+{
+  "why": "An explicit side column tells us the direction the number does not carry. Left must end up stored as negative, because the sign is what the graph reads.",
+  "pending": "The side column labels the shot but does not rewrite the sign, so a left miss is stored as +6 and plots on the right. Known as the spec 9.2 gap in practice-parser-parity.test.js.",
+  "parse": {
+    "delimiter": ",",
+    "hasHeader": true,
+    "headers": ["club", "carryDistance", "offlineDistance", "side"],
+    "warnings": ["unit_system_undeclared"],
+    "unitSystem": null,
+    "unitSource": "",
+    "unitHints": {},
+    "provider": "",
+    "sessionDate": null,
+    "sessionDateSource": ""
+  },
+  "batch": {
+    "rowCount": 2,
+    "validCount": 2,
+    "invalidCount": 0,
+    "unitSystem": null,
+    "sessionDate": null,
+    "provider": "",
+    "gateStatus": "staged",
+    "provenanceGaps": ["unit_system_undeclared", "session_date_unknown", "provider_unknown"]
+  },
+  "rows": [
+    { "club": "7 Iron", "shotNumber": 1, "carryDistance": 142, "offlineDistance": -6, "side": "left", "status": "native_valid" },
+    { "club": "7 Iron", "shotNumber": 2, "carryDistance": 140, "offlineDistance": 6, "side": "right", "status": "native_valid" }
+  ]
+}

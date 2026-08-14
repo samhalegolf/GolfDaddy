@@ -1,0 +1,36 @@
+{
+  "why": "The unit travels in the cell rather than the header. A stated unit is a stated unit wherever it is written.",
+  "pending": "Cell-level unit suffixes are not stripped, so the value fails asNumber() and the row is rejected. A file that plainly says metres is read as unusable.",
+  "parse": {
+    "delimiter": ",",
+    "hasHeader": true,
+    "headers": ["club", "carryDistance", "ballSpeed"],
+    "warnings": [],
+    "unitSystem": "metric",
+    "unitSource": "cell",
+    "unitHints": { "carryDistance": "m", "ballSpeed": "mph" },
+    "provider": "",
+    "sessionDate": null,
+    "sessionDateSource": ""
+  },
+  "batch": {
+    "rowCount": 1,
+    "validCount": 1,
+    "invalidCount": 0,
+    "unitSystem": "metric",
+    "sessionDate": null,
+    "provider": "",
+    "gateStatus": "staged",
+    "provenanceGaps": ["session_date_unknown", "provider_unknown"]
+  },
+  "rows": [
+    {
+      "club": "7 Iron",
+      "shotNumber": 1,
+      "carryDistance": 142,
+      "ballSpeed": 118.4,
+      "status": "native_valid",
+      "warnings": ["missing_offline_distance"]
+    }
+  ]
+}

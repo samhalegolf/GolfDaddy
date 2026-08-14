@@ -1,0 +1,68 @@
+{
+  "why": "Everything a good monitor exports, all at once.",
+  "parse": {
+    "delimiter": ",",
+    "hasHeader": true,
+    "headers": [
+      "club",
+      "ballSpeed",
+      "clubSpeed",
+      "launchAngle",
+      "backspin",
+      "sideSpin",
+      "carryDistance",
+      "totalDistance",
+      "offlineDistance",
+      "faceAngle",
+      "pathAngle",
+      "startDirection",
+      "curve"
+    ],
+    "warnings": [
+      "unit_system_undeclared"
+    ],
+    "unitSystem": null,
+    "unitSource": "",
+    "unitHints": {},
+    "provider": "",
+    "sessionDate": null,
+    "sessionDateSource": ""
+  },
+  "batch": {
+    "rowCount": 1,
+    "validCount": 1,
+    "invalidCount": 0,
+    "unitSystem": null,
+    "sessionDate": null,
+    "provider": "",
+    "gateStatus": "staged",
+    "provenanceGaps": [
+      "unit_system_undeclared",
+      "session_date_unknown",
+      "provider_unknown"
+    ]
+  },
+  "rows": [
+    {
+      "club": "7 Iron",
+      "shotNumber": 1,
+      "carryDistance": 142,
+      "totalDistance": 151,
+      "offlineDistance": -6,
+      "side": "left",
+      "ballSpeed": 118.4,
+      "clubSpeed": 84.1,
+      "launchAngle": 17.2,
+      "backspin": 6200,
+      "sideSpin": -420,
+      "faceAngle": 1.2,
+      "pathAngle": 3.1,
+      "startDirection": 0.8,
+      "curve": -2.1,
+      "status": "native_valid",
+      "derivedMetrics": {
+        "spinAxis": -3.88
+      }
+    }
+  ]
+}

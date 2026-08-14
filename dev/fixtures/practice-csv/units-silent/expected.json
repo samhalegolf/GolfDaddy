@@ -1,0 +1,56 @@
+{
+  "why": "No unit anywhere. Recorded as unknown - never guessed from magnitude.",
+  "parse": {
+    "delimiter": ",",
+    "hasHeader": true,
+    "headers": [
+      "club",
+      "carryDistance",
+      "totalDistance",
+      "offlineDistance"
+    ],
+    "warnings": [
+      "unit_system_undeclared"
+    ],
+    "unitSystem": null,
+    "unitSource": "",
+    "unitHints": {},
+    "provider": "",
+    "sessionDate": null,
+    "sessionDateSource": ""
+  },
+  "batch": {
+    "rowCount": 2,
+    "validCount": 2,
+    "invalidCount": 0,
+    "unitSystem": null,
+    "sessionDate": null,
+    "provider": "",
+    "gateStatus": "staged",
+    "provenanceGaps": [
+      "unit_system_undeclared",
+      "session_date_unknown",
+      "provider_unknown"
+    ]
+  },
+  "rows": [
+    {
+      "club": "7 Iron",
+      "shotNumber": 1,
+      "carryDistance": 142,
+      "totalDistance": 151,
+      "offlineDistance": -6,
+      "side": "left",
+      "status": "native_valid"
+    },
+    {
+      "club": "Driver",
+      "shotNumber": 2,
+      "carryDistance": 275,
+      "totalDistance": 301,
+      "offlineDistance": 12,
+      "side": "right",
+      "status": "native_valid"
+    }
+  ]
+}

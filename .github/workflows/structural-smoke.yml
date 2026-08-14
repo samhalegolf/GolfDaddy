@@ -109,3 +109,9 @@ jobs:
           node dev/map-source-coverage.test.js
           node dev/shell-navigation-owner.test.js
           node dev/payment-rollout-tests.js
+
+      # Practice data ingestion. These suites existed and passed but nothing ran
+      # them, so a parser change could land unnoticed - which is exactly the
+      # thing the CSV pipeline cannot afford.
+      - name: Practice data suites
+        run: npm run test:practice

@@ -1,0 +1,74 @@
+{
+  "why": "A whole bag in one file.",
+  "parse": {
+    "delimiter": ",",
+    "hasHeader": true,
+    "headers": [
+      "club",
+      "carryDistance",
+      "totalDistance",
+      "offlineDistance"
+    ],
+    "warnings": [
+      "unit_system_undeclared"
+    ],
+    "unitSystem": null,
+    "unitSource": "",
+    "unitHints": {},
+    "provider": "",
+    "sessionDate": null,
+    "sessionDateSource": ""
+  },
+  "batch": {
+    "rowCount": 4,
+    "validCount": 4,
+    "invalidCount": 0,
+    "unitSystem": null,
+    "sessionDate": null,
+    "provider": "",
+    "gateStatus": "staged",
+    "provenanceGaps": [
+      "unit_system_undeclared",
+      "session_date_unknown",
+      "provider_unknown"
+    ]
+  },
+  "rows": [
+    {
+      "club": "Driver",
+      "shotNumber": 1,
+      "carryDistance": 248,
+      "totalDistance": 272,
+      "offlineDistance": -14,
+      "side": "left",
+      "status": "native_valid"
+    },
+    {
+      "club": "3 Wood",
+      "shotNumber": 2,
+      "carryDistance": 205,
+      "totalDistance": 228,
+      "offlineDistance": 11,
+      "side": "right",
+      "status": "native_valid"
+    },
+    {
+      "club": "7 Iron",
+      "shotNumber": 3,
+      "carryDistance": 142,
+      "totalDistance": 151,
+      "offlineDistance": -6,
+      "side": "left",
+      "status": "native_valid"
+    },
+    {
+      "club": "PW",
+      "shotNumber": 4,
+      "carryDistance": 118,
+      "totalDistance": 124,
+      "offlineDistance": 2,
+      "side": "right",
+      "status": "native_valid"
+    }
+  ]
+}

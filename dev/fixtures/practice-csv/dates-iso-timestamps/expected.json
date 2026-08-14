@@ -1,0 +1,55 @@
+{
+  "why": "The session takes its date from its earliest shot.",
+  "parse": {
+    "delimiter": ",",
+    "hasHeader": true,
+    "headers": [
+      "hitAt",
+      "club",
+      "carryDistance"
+    ],
+    "warnings": [],
+    "unitSystem": "metric",
+    "unitSource": "header",
+    "unitHints": {
+      "carryDistance": "m"
+    },
+    "provider": "",
+    "sessionDate": "2026-07-28",
+    "sessionDateSource": "shot_times"
+  },
+  "batch": {
+    "rowCount": 2,
+    "validCount": 2,
+    "invalidCount": 0,
+    "unitSystem": "metric",
+    "sessionDate": "2026-07-28",
+    "provider": "",
+    "gateStatus": "staged",
+    "provenanceGaps": [
+      "provider_unknown"
+    ]
+  },
+  "rows": [
+    {
+      "club": "7 Iron",
+      "shotNumber": 1,
+      "hitAt": "2026-07-28T14:07:00",
+      "carryDistance": 140,
+      "status": "native_valid",
+      "warnings": [
+        "missing_offline_distance"
+      ]
+    },
+    {
+      "club": "7 Iron",
+      "shotNumber": 2,
+      "hitAt": "2026-07-28T14:03:00",
+      "carryDistance": 142,
+      "status": "native_valid",
+      "warnings": [
+        "missing_offline_distance"
+      ]
+    }
+  ]
+}

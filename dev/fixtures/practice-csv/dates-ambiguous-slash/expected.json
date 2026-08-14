@@ -1,0 +1,47 @@
+{
+  "why": "07/08/2026 is refused rather than guessed. The original text is kept on the row as evidence of when it was hit.",
+  "parse": {
+    "delimiter": ",",
+    "hasHeader": true,
+    "headers": [
+      "hitAt",
+      "club",
+      "carryDistance"
+    ],
+    "warnings": [],
+    "unitSystem": "metric",
+    "unitSource": "header",
+    "unitHints": {
+      "carryDistance": "m"
+    },
+    "provider": "",
+    "sessionDate": null,
+    "sessionDateSource": ""
+  },
+  "batch": {
+    "rowCount": 1,
+    "validCount": 1,
+    "invalidCount": 0,
+    "unitSystem": "metric",
+    "sessionDate": null,
+    "provider": "",
+    "gateStatus": "staged",
+    "provenanceGaps": [
+      "session_date_unknown",
+      "provider_unknown"
+    ]
+  },
+  "rows": [
+    {
+      "club": "7 Iron",
+      "shotNumber": 1,
+      "hitAt": "07/08/2026",
+      "carryDistance": 142,
+      "status": "native_valid",
+      "warnings": [
+        "Unrecognised shot time format",
+        "missing_offline_distance"
+      ]
+    }
+  ]
+}

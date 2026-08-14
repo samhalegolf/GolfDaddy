@@ -1,0 +1,59 @@
+{
+  "why": "A non-numeric value in a numeric column rejects that row only - the rest of the file still imports.",
+  "parse": {
+    "delimiter": ",",
+    "hasHeader": true,
+    "headers": [
+      "club",
+      "carryDistance",
+      "totalDistance"
+    ],
+    "warnings": [
+      "unit_system_undeclared"
+    ],
+    "unitSystem": null,
+    "unitSource": "",
+    "unitHints": {},
+    "provider": "",
+    "sessionDate": null,
+    "sessionDateSource": ""
+  },
+  "batch": {
+    "rowCount": 2,
+    "validCount": 1,
+    "invalidCount": 1,
+    "unitSystem": null,
+    "sessionDate": null,
+    "provider": "",
+    "gateStatus": "staged",
+    "provenanceGaps": [
+      "unit_system_undeclared",
+      "session_date_unknown",
+      "provider_unknown"
+    ]
+  },
+  "rows": [
+    {
+      "club": "7 Iron",
+      "shotNumber": 1,
+      "totalDistance": 151,
+      "status": "native_invalid",
+      "errors": [
+        "Invalid carry"
+      ],
+      "warnings": [
+        "missing_offline_distance"
+      ]
+    },
+    {
+      "club": "7 Iron",
+      "shotNumber": 2,
+      "carryDistance": 139,
+      "totalDistance": 148,
+      "status": "native_valid",
+      "warnings": [
+        "missing_offline_distance"
+      ]
+    }
+  ]
+}

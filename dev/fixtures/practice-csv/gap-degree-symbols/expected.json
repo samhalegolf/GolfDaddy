@@ -1,0 +1,37 @@
+{
+  "why": "Delivery numbers exported with a degree symbol. The symbol is a unit, not part of the number.",
+  "pending": "A trailing degree symbol is not stripped, so face and path fail asNumber() and the row is rejected.",
+  "parse": {
+    "delimiter": ",",
+    "hasHeader": true,
+    "headers": ["club", "carryDistance", "faceAngle", "pathAngle"],
+    "warnings": ["unit_system_undeclared"],
+    "unitSystem": null,
+    "unitSource": "",
+    "unitHints": { "faceAngle": "deg", "pathAngle": "deg" },
+    "provider": "",
+    "sessionDate": null,
+    "sessionDateSource": ""
+  },
+  "batch": {
+    "rowCount": 1,
+    "validCount": 1,
+    "invalidCount": 0,
+    "unitSystem": null,
+    "sessionDate": null,
+    "provider": "",
+    "gateStatus": "staged",
+    "provenanceGaps": ["unit_system_undeclared", "session_date_unknown", "provider_unknown"]
+  },
+  "rows": [
+    {
+      "club": "7 Iron",
+      "shotNumber": 1,
+      "carryDistance": 142,
+      "faceAngle": 1.2,
+      "pathAngle": 3.1,
+      "status": "native_valid",
+      "warnings": ["missing_offline_distance"]
+    }
+  ]
+}

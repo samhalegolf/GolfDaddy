@@ -1,0 +1,72 @@
+{
+  "why": "Nothing recognisable in the header row: fall back to positional order, say so, and keep the header line itself as a rejected row rather than dropping it silently.",
+  "parse": {
+    "delimiter": ",",
+    "hasHeader": false,
+    "headers": [
+      "club",
+      "carryDistance",
+      "totalDistance",
+      "offlineDistance"
+    ],
+    "warnings": [
+      "header_inferred",
+      "unit_system_undeclared"
+    ],
+    "unitSystem": null,
+    "unitSource": "",
+    "unitHints": {},
+    "provider": "",
+    "sessionDate": null,
+    "sessionDateSource": ""
+  },
+  "batch": {
+    "rowCount": 3,
+    "validCount": 2,
+    "invalidCount": 1,
+    "unitSystem": null,
+    "sessionDate": null,
+    "provider": "",
+    "gateStatus": "staged",
+    "provenanceGaps": [
+      "unit_system_undeclared",
+      "session_date_unknown",
+      "provider_unknown"
+    ]
+  },
+  "rows": [
+    {
+      "club": "alpha",
+      "shotNumber": 1,
+      "status": "native_invalid",
+      "errors": [
+        "Invalid carry",
+        "Invalid total",
+        "Invalid offline",
+        "Missing required fields",
+        "missing_distance"
+      ],
+      "warnings": [
+        "missing_offline_distance"
+      ]
+    },
+    {
+      "club": "7i",
+      "shotNumber": 2,
+      "carryDistance": 142,
+      "totalDistance": 151,
+      "offlineDistance": -6,
+      "side": "left",
+      "status": "native_valid"
+    },
+    {
+      "club": "8i",
+      "shotNumber": 3,
+      "carryDistance": 131,
+      "totalDistance": 140,
+      "offlineDistance": 3,
+      "side": "right",
+      "status": "native_valid"
+    }
+  ]
+}

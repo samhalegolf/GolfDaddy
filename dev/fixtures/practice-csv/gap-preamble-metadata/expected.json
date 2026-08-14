@@ -1,0 +1,46 @@
+{
+  "why": "A title and metadata block above the table. The header row is not line 1.",
+  "pending": "The header row is assumed to be line 1, so the preamble is read as the header and every real row is parsed positionally against it - the whole file lands invalid.",
+  "parse": {
+    "delimiter": ",",
+    "hasHeader": true,
+    "headers": ["club", "carryDistance", "totalDistance", "offlineDistance"],
+    "warnings": ["preamble_skipped"],
+    "unitSystem": "metric",
+    "unitSource": "header",
+    "unitHints": { "carryDistance": "m", "totalDistance": "m", "offlineDistance": "m" },
+    "provider": "trackman",
+    "sessionDate": null,
+    "sessionDateSource": ""
+  },
+  "batch": {
+    "rowCount": 2,
+    "validCount": 2,
+    "invalidCount": 0,
+    "unitSystem": "metric",
+    "sessionDate": null,
+    "provider": "trackman",
+    "gateStatus": "staged",
+    "provenanceGaps": ["session_date_unknown"]
+  },
+  "rows": [
+    {
+      "club": "7 Iron",
+      "shotNumber": 1,
+      "carryDistance": 142,
+      "totalDistance": 151,
+      "offlineDistance": -6,
+      "side": "left",
+      "status": "native_valid"
+    },
+    {
+      "club": "7 Iron",
+      "shotNumber": 2,
+      "carryDistance": 139,
+      "totalDistance": 148,
+      "offlineDistance": 4,
+      "side": "right",
+      "status": "native_valid"
+    }
+  ]
+}
