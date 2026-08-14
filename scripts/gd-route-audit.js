@@ -6268,6 +6268,16 @@
 	      return `<ellipse class="gdOffsetHubBubble${opts.ellipseClass?` ${gdStatsSvgText(opts.ellipseClass)}`:""}" data-club="${gdStatsSvgText(part.club)}" data-source="${gdStatsSvgText(opts.source||"")}" data-offset-deg="${Number(part.angleDeg).toFixed(2)}" data-base-distance-m="${Number(part.baseDistanceM).toFixed(1)}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" rx="${rx.toFixed(1)}" ry="${ry.toFixed(1)}"${part.tiltDeg?` transform="rotate(${Number(part.tiltDeg).toFixed(1)} ${cx.toFixed(1)} ${cy.toFixed(1)})"`:""} fill="${colour}" fill-opacity="${fillOpacity}" stroke="${colour}" stroke-width="${strokeWidth}" stroke-opacity="${strokeOpacity}"${dashAttr}/>${label}`;
 	    }).join("")}</g>`;
 	  }
+  /* The 7 iron's distance from the bag - the fixed reference this screen is
+     relative to. gdPracticeSavedBagRows returns the seeded ghost bag when the
+     player has not set one, which is deliberate: a scale is needed either way,
+     and the ghost 7 iron is a stand-in the real bag overwrites. */
+  function gdPractice7IronAnchorM(){
+    const rows=safe(()=>gdPracticeBagRowsByClub(gdPracticeSavedBagRows()),null)||{};
+    const row=rows[gdShotBubbleOverlayClubKey("7i")]||rows[gdShotBubbleOverlayClubKey("7 Iron")];
+    const carry=Number(row?.actualDistanceM);
+    return Number.isFinite(carry)&&carry>0?carry:null;
+  }
 	  function practiceSvg(analysis){
 	    const shots=gdPracticePlotShots(analysis||{});
 		    if(!shots.length){
@@ -6372,52 +6382,32 @@
     const hubBaseRows=gdPracticeMyBubbleHubRows(dataRows,analysis);
     const hubRows=gdPracticeHasBubbleOffset(myBubbleOffset)?hubBaseRows.filter(row=>Number.isFinite(Number(row.actualDistanceM))&&Number(row.actualDistanceM)>0):[];
     const hubOffset=gdPracticeHasBubbleOffset(myBubbleOffset)?myBubbleOffset:null;
-    // ANCHOR = THE PRACTICE BUBBLE'S OWN DISTANCE, always, on this screen.
+    // THE ANCHOR IS THE 7 IRON. ALWAYS. WHATEVER CLUB HIT THE SHOT.
     //
-    // These are practice shots, so the practice bubble is the natural frame. It
-    // used to anchor to My Bubble's distance and fall back to practice only when
-    // no My Bubble existed - which meant the anchor CHANGED the instant you
-    // adopted (measured 142m -> My Bubble's 155m), and since every dot is plotted
-    // as a percentage of the anchor, the whole cluster jumped ~57px down on adopt
-    // and back on undo. Nothing about the shots had changed; only the denominator.
+    // This screen is one scale, not a view per club: every dot is plotted as a
+    // percentage of one distance, so that distance has to be a fixed reference
+    // rather than something read off the data. The 7 iron is that reference -
+    // the notional middle of the bag - and the graph is relative to it.
     //
-    // THE ANCHOR IS THE BAG DISTANCE. It is bag-tied on purpose: the bag is the
-    // fixed reference everything else is measured against, and it does NOT move
-    // when a bubble is adopted, so the frame holds still.
+    // It used to resolve the anchor from the first overlay row's club, falling
+    // back through the practice bubble's own measurement. With one club in the
+    // library that is the 7 iron by accident, which is why it looked correct for
+    // as long as there was only ever 7 iron data. Import a second club and the
+    // denominator became whichever club happened to sort first, so every shot in
+    // the session was measured against an arbitrary club.
     //
-    // The jump was never caused by bag-anchoring - it was caused by the anchor
-    // SWITCHING SOURCE. It read the bag via hubRows when a My Bubble existed and
-    // fell back to the practice bubble's distance when one did not, so adopting
-    // flipped it (142m -> 155m) and every dot moved ~57px. Reading the bag
-    // directly, whether or not a bubble has been adopted, removes the switch
-    // without giving up the bag reference.
+    // Reading one fixed club also removes the switch-on-adopt bug the previous
+    // version fought at length: the anchor moved when its SOURCE changed (bag vs
+    // practice measurement), and every dot jumped ~57px. A denominator that is
+    // always the same bag row cannot switch source, so the frame holds still by
+    // construction rather than by careful ordering.
     //
-    // Practice measured distance is the fallback ONLY when the player has no bag
-    // entry for the club at all - never a preference over the bag.
-    // Resolve against whichever candidate actually HAS a bag entry. The practice
-    // bubble's `club` can be a display label ("Practice oval"), which keys to
-    // "practice oval" and matches no bag row - looking it up first silently missed
-    // the bag every time and fell through to the practice distance.
-    // ONLY A REAL BAG ANCHORS. gdPracticeSavedBagRows happily returns the seeded
-    // ghost bag, and anchoring the whole chart to stand-in numbers would be the
-    // same sin as drawing a stand-in bubble. gdPracticeHasUserBag is the app's own
-    // test - false when the bag is a seeded default the player has never touched.
-    // With no real bag, the practice measurement below takes over.
-    const hasRealBag=safe(()=>gdPracticeHasUserBag(),false);
-    // SAVED bag, not the draft: adoption writes the learned distance into the bag
-    // draft, so anchoring to the draft moved the frame on adopt all over again.
-    // The committed bag only changes when the player commits it.
-    const anchorBagByClub=hasRealBag?(safe(()=>gdPracticeBagRowsByClub(gdPracticeSavedBagRows()),null)||{}):{};
-    const anchorBagCarry=[practiceRows[0]?.club,hubRows[0]?.club,practiceShape?.club]
-      .map(club=>Number(anchorBagByClub[gdShotBubbleOverlayClubKey(club)]?.actualDistanceM))
-      .find(carry=>Number.isFinite(carry)&&carry>0);
-    const bagAnchorM=Number(anchorBagCarry);
-    // No hubRows step: those only exist once a bubble is adopted, so including
-    // them anywhere in this chain reintroduces the switch-on-adopt by definition.
-    const anchorDistanceM=(Number.isFinite(bagAnchorM)&&bagAnchorM>0?bagAnchorM:null)
-      ||Number(practiceRows[0]?.actualDistanceM)
-      ||Number(practiceShape?.baseDistanceM)
-      ||null;
+    // The ghost bag counts here. It was excluded before because anchoring the
+    // chart to stand-in numbers was treated as inventing data - but a player with
+    // no bag still needs a scale, and the seeded 7 iron is a better one than a
+    // number derived from whatever they happened to import. A real bag replaces
+    // it the moment one is set.
+    const anchorDistanceM=gdPractice7IronAnchorM()
     const domainRows=overlayRows
       .concat(hubRows)
       .concat(showPracticeLayer?gdShotBubbleOverlayDistanceExtentRows(overlayRows,practiceBubbleOffset):[])
@@ -6495,23 +6485,20 @@
       const ry=gdShotChartClamp((maxY-minY)/2+7,9,32);
       return `<ellipse class="gdPracticeClusterMarker gdShotChartClubOval practice" data-source="cluster-marker" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" rx="${rx.toFixed(1)}" ry="${ry.toFixed(1)}" fill="rgba(255,210,135,.82)" fill-opacity=".014" stroke="rgba(255,210,135,.82)" stroke-width=".7" stroke-opacity=".46" stroke-dasharray="1 5" stroke-linecap="round" pointer-events="none"/>`;
     }
-	    // Each club's own number: the saved bag carry when there is a real bag,
-	    // otherwise the median of that club's own shots. Same precedence as the
-	    // anchor above, so the dots and the bubbles are measured against the same
-	    // reference and "0" means the same thing for both.
-	    const clubShotDistances={};
-	    shots.forEach(shot=>{
-	      const key=gdShotBubbleOverlayClubKey(shot?.club);
-	      const actual=gdPracticeShotActualDistance(shot);
-	      if(!key||!Number.isFinite(actual)||actual<=0)return;
-	      (clubShotDistances[key]=clubShotDistances[key]||[]).push(actual);
-	    });
-	    const clubBaselineFor=club=>{
-	      const key=gdShotBubbleOverlayClubKey(club);
-	      const bagCarry=Number(anchorBagByClub[key]?.actualDistanceM);
-	      if(Number.isFinite(bagCarry)&&bagCarry>0)return bagCarry;
-	      const median=gdShotBubbleMedian(clubShotDistances[key]||[]);
-	      return Number.isFinite(median)&&median>0?median:NaN;
+	    // ONE REFERENCE FOR EVERYTHING ON THIS SCREEN: the 7 iron, same number the
+	    // bubbles are anchored to below. A dot is where that shot finished as a
+	    // percentage of the 7 iron, whatever club hit it - so a drive sits high on
+	    // the chart and a wedge sits low, and that separation is the reading, not
+	    // a fault. Giving each club its own denominator would put every club's
+	    // good shots on the same line at 100% and throw away the only thing this
+	    // axis is measuring.
+	    //
+	    // The per-club median fallback that used to live here is gone with it. It
+	    // existed to give a club a denominator when the bag had no row for it,
+	    // which cannot happen when there is exactly one denominator.
+	    const clubBaselineFor=()=>{
+	      const anchor=Number(anchorDistanceM);
+	      return Number.isFinite(anchor)&&anchor>0?anchor:NaN;
 	    };
 	    const anchorRelativeRows=gdBubbleRelativeShotRows(shots,clubBaselineFor);
 	    const myBubbleParts=anchorDistanceM&&hubRows.length&&gdPracticeHasBubbleOffset(hubOffset)?gdBubbleRelativeParts(hubRows,hubOffset,anchorDistanceM):[];
