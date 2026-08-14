@@ -5938,10 +5938,20 @@
     // A directional reading (which way the cluster actually sits) is a COMPARISON
     // screen question and is derived there from the existing cluster analysis. It
     // is deliberately not computed, drawn or published here.
+    // THE FRAME DRAWS BEFORE THE DATA DOES. With no shots there is no measured
+    // reference, and the whole screen used to collapse to a bare backdrop - no
+    // bubble, no quadrant labels, no score card - so a player who had not yet
+    // logged a round saw nothing and had no idea what the screen would come to
+    // tell them. The player's own view-club carry (their bag value, or the club
+    // default) is a fine scale for an empty frame: it moves no shot, because
+    // there are none, and the first real shot replaces it with the measured
+    // median. It is a drawing scale only and never reaches the score.
     const bubbleReference=(()=>{
       const median=gdShotBubbleMedian(Object.keys(referenceByClub).map(key=>Number(referenceByClub[key])).filter(value=>Number.isFinite(value)&&value>0));
       if(Number.isFinite(median)&&median>0)return median;
-      return Number.isFinite(fallbackReference)&&fallbackReference>0?fallbackReference:NaN;
+      if(Number.isFinite(fallbackReference)&&fallbackReference>0)return fallbackReference;
+      const preset=Number(safe(()=>gdCompareDisplayCarryForClub(GD_NORMALISED_VIEW_CLUB),NaN));
+      return Number.isFinite(preset)&&preset>0?preset:NaN;
     })();
     const courseGeo=(()=>{
       const geo=gdPracticeGraphInternalGeometry(plot);
@@ -6056,7 +6066,12 @@
     // Every number and the threshold come off the analysis. Nothing is recomputed
     // here, and the 35 is read from the config so tuning it moves the wash too.
     const quadrantSvg=(()=>{
-      if(!courseAnalysis||!courseAnalysis.sampleSize||!courseGeo)return "";
+      // Drawn with or without shots. An empty set gets the four labels and a
+      // dash instead of a percentage: the corners are the screen's vocabulary
+      // and should be readable before there is anything to read, but "0%" would
+      // be a claim about shots that do not exist.
+      if(!courseAnalysis||!courseGeo)return "";
+      const hasShots=courseAnalysis.sampleSize>0;
       const flagAt=Number(courseAnalysis.config?.quadrantThresholds?.noticeableMinPercent);
       // The quadrants are the plot rect split at the bubble centre, which is where
       // Short/Long and Left/Right are split in the analysis too - the same divide,
@@ -6073,7 +6088,7 @@
       ];
       return corners.map(corner=>{
         const share=Number(corner.share)||0;
-        const flagged=Number.isFinite(flagAt)&&share>=flagAt;
+        const flagged=hasShots&&Number.isFinite(flagAt)&&share>=flagAt;
         const labelFill=flagged?GD_COURSE_BUFFER_COLOUR:"rgba(255,255,255,.4)";
         const valueFill=flagged?GD_COURSE_BUFFER_COLOUR:"rgba(255,255,255,.62)";
         // Drawn before the bubble and the dots, so the wash never sits over them.
@@ -6082,7 +6097,7 @@
           :"";
         const anchor=corner.anchor==="end"?` text-anchor="end"`:"";
         return `${wash}<text x="${corner.x.toFixed(1)}" y="${corner.labelY.toFixed(1)}"${anchor} fill="${labelFill}" font-size="8" font-weight="900" letter-spacing=".08em">${corner.label}</text>`
-          +`<text x="${corner.x.toFixed(1)}" y="${corner.valueY.toFixed(1)}"${anchor} fill="${valueFill}" font-size="12" font-weight="950">${Math.round(share)}%</text>`;
+          +`<text x="${corner.x.toFixed(1)}" y="${corner.valueY.toFixed(1)}"${anchor} fill="${valueFill}" font-size="12" font-weight="950">${hasShots?Math.round(share)+"%":"—"}</text>`;
       }).join("");
     })();
     // ONE BUBBLE, AT 0.0. Emitted directly rather than through the shared layer
