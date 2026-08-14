@@ -316,6 +316,26 @@
       ],
       status: "implemented", needsVerification: false,
       warnings: ["The Admin tab's CSS-only visibility gate reads document.body's data-gd-permission attribute, which is only set at runtime by gdRefreshPermissionChrome() (not present in the initial static markup) — a narrow pre-boot window exists where the selector wouldn't yet match. Not observable in practice since the panel is closed at that point, but the gate is not watertight from first paint."] },
+    { id: "practice-email", label: "Practice Email", parent: "shot-system",
+      function: "Read-only admin view of the practice email intake: what arrived at the practice inbox, which attachment it carried, and how far it got - parsed and staged, landed but unreadable, or a photo waiting for a player's device to scan it. Unlike Practice Data this is not a jump-in to an app screen, because no app screen shows this: the app shows a player their own address and their own imports, never the picture across all players. The intake tables are RLS'd to the service role, so the page reads through /api/practice-email-admin rather than querying Supabase, and that function checks the caller is an admin first.",
+      owner: "functions/practice-email-admin.js (read) + functions/practice-email-intake.js (the webhook that writes what this shows)",
+      runtime: { app: false, studio: true, server: true },
+      code: [
+        { role: "Studio page (read-only)", path: "scripts/studio/shot-system/practice-email/practice-email-page.js" },
+        { role: "Admin read endpoint", path: "functions/practice-email-admin.js" },
+        { role: "Inbound webhook that writes the rows shown here (do not move)", path: "functions/practice-email-intake.js" },
+        { role: "Shared parser core - decides row counts and units (do not move)", path: "scripts/gd-practice-parser-core.js" }
+      ],
+      inputs: ["practice_email_intake_events", "practice_import_batches", "practice_email_addresses", "practice_email_senders"],
+      outputs: ["Nothing - the page never writes"],
+      owns: ["Cross-player view of practice email intake"],
+      doesNotOwn: ["Sender approval/revocation (the player's own screen)", "Parsing itself", "Photo scanning"],
+      connections: [{ target: "shot-system", direction: "child-of", label: "" }],
+      keyFunctions: [
+        { name: "handler", purpose: "GET only, admin only. Returns recent intakes with their batches, plus issued addresses and their approved senders.", codePath: "functions/practice-email-admin.js" }
+      ],
+      status: "implemented", needsVerification: false,
+      warnings: ["Read-only by design. Revoking a sender is a real action against a player's account and is deliberately not wired here."] },
     { id: "pattern-finder", label: "Pattern Finder", parent: "shot-system",
       function: "Not yet moved into Studio. No standalone file — lives inside scripts/gd-app-core.js / scripts/gd-route-audit.js per this branch's recon; not read in depth.",
       owner: "Needs verification", runtime: { app: true, studio: false, server: false },
@@ -509,7 +529,7 @@
   var NAV_TREE = [
     { id: "overview" },
     { id: "courses", children: ["course-database", "course-mapping", "course-visuals", "publishing"] },
-    { id: "shot-system", children: ["photo-scan", "practice-data", "pattern-finder", "my-bubble", "shot-system-course-data", "conditions", "recommendations"] },
+    { id: "shot-system", children: ["photo-scan", "practice-data", "practice-email", "pattern-finder", "my-bubble", "shot-system-course-data", "conditions", "recommendations"] },
     { id: "gps-play", children: ["gps-course-selection", "gps-round-setup", "gps-hole-lifecycle", "gps-map-camera", "gps-shot-planning", "gps-shot-capture", "gps-scorecard", "gps-course-data-capture", "gps-sync-recovery", "gps-demo-mode"] },
     { id: "players-coaches" },
     { id: "commerce" },

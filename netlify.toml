@@ -55,6 +55,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/practice-email-admin"
+  to = "/.netlify/functions/practice-email-admin"
+  status = 200
+
+[[redirects]]
   from = "/api/support-ticket"
   to = "/.netlify/functions/support-ticket"
   status = 200
