@@ -177,5 +177,60 @@ assert(
   'and it checks that identity before it changes anything'
 );
 
+// ---- an emailed CSV imports itself ----
+
+/* The review step used to be the whole point of the lane. It was also
+   unreachable: the Save button lives inside the manual paste drawer, which
+   gdRenderPracticeImportPanel force-closes for anyone without the Admin tab
+   expanded - and the Admin tab is hidden from players entirely. So an emailed
+   CSV could be loaded and never saved. It imports on arrival now, and the
+   approved-sender list is what makes that safe. */
+
+assert(
+  !lane.includes('gdPracticeLoadEmailBatch'),
+  'the load-into-review button is gone - it opened a drawer players cannot see'
+);
+assert(
+  lane.includes('function gdPracticeAutoImportEmailBatches'),
+  'the lane imports qualifying batches itself'
+);
+assert(
+  /gdPracticeAutoImportEmailBatches\(\)[\s\S]{0,200}gdRenderPracticeEmailLane\(\)/.test(lane),
+  'and does it before the render, so the row never claims pending and then corrects itself'
+);
+assert(
+  /function gdPracticeEmailBatchAutoImportable[\s\S]{0,400}senderVerified===false\)return false/.test(lane),
+  'an unapproved sender is not imported - it stays flagged with an Approve button'
+);
+assert(
+  /function gdPracticeEmailBatchAutoImportable[\s\S]{0,400}source_type==="email_photo"\)return false/.test(lane),
+  'and a photo is not imported either, because nothing has read it yet'
+);
+assert(
+  /function gdPracticeEmailBatchAutoImportable[\s\S]{0,400}!gdPracticeEmailBatchInLibrary/.test(lane),
+  'a batch already in the library is not imported twice'
+);
+assert(
+  /function gdPracticeEmailBatchInLibrary[\s\S]{0,500}getScopedStore/.test(lane),
+  'and that check asks the library itself rather than keeping a second list of what was imported'
+);
+assert(
+  /function gdPracticeEmailBatchInLibrary[\s\S]{0,600}\["sessions","captures","shots"\]/.test(lane),
+  'checking every record type, including soft-deleted ones, so a deleted import does not come back'
+);
+assert(
+  /function gdPracticeApproveEmailSender[\s\S]{0,2200}gdPracticeRefreshEmailLane\(\)/.test(lane),
+  'approving a sender refreshes the lane, which is what pulls their held import in'
+);
+assert(
+  /function gdPracticeEmailBatchToPreview/.test(lane)
+  && /gdPracticeEmailBatchToPreview\(batch\)/.test(lane),
+  'the row-to-preview mapping is one function, shared rather than written twice'
+);
+assert(
+  /gdPracticeEmailBatchToPreview[\s\S]{0,900}unitSystem:batch\.unit_system/.test(lane),
+  'and it still carries the unit system the server parsed, so an emailed yard file converts'
+);
+
 console.log(failures ? '\n' + failures + ' failing' : '\nall passing');
 process.exitCode = failures ? 1 : 0;

@@ -1148,8 +1148,15 @@
         return `<div class="gdPracticeEmailRow${unapproved?" unapproved":""}"><button type="button" onclick="return gdPracticeLoadEmailPhotoBatch(${gdEscapeHTML(JSON.stringify(id))})"><span>${unapproved?"⚑ ":""}${gdEscapeHTML(label)}</span><b>Scan</b></button>${flag}</div>`;
       }
       const label=gdPracticeEmailBatchLabel(batch);
-      const rows=Number(batch.row_count)||0;
-      return `<div class="gdPracticeEmailRow${unapproved?" unapproved":""}"><button type="button" onclick="return gdPracticeLoadEmailBatch(${gdEscapeHTML(JSON.stringify(id))})"><span>${unapproved?"⚑ ":""}${gdEscapeHTML(label)}</span><b>${rows} row${rows===1?"":"s"}</b></button>${flag}</div>`;
+      /* No button. A CSV from an approved sender is already in the library by
+         the time this renders, so the row reports what happened rather than
+         offering an action that has nothing left to do. */
+      const state=unapproved
+        ? "waiting for you to approve the sender"
+        : (gdPracticeEmailBatchInLibrary(id)
+          ? `${Number(batch.valid_count)||0} shot${Number(batch.valid_count)===1?"":"s"} imported`
+          : (Number(batch.valid_count) ? "could not be imported" : "no readable rows"));
+      return `<div class="gdPracticeEmailRow${unapproved?" unapproved":""}"><div class="gdPracticeEmailRowMain"><span>${unapproved?"⚑ ":""}${gdEscapeHTML(label)}</span><b>${gdEscapeHTML(state)}</b></div>${flag}</div>`;
     }).join("")}</div>`;
   }
   function gdRenderPracticeEmailLane(){
@@ -1226,70 +1233,107 @@
         error:e&&e.message?`Receiver check failed: ${e.message}`:"Receiver check failed"
       });
     }
+    /* Import before the render, so the lane paints its final state once rather
+       than showing every batch as pending and then correcting itself. */
+    safe(()=>gdPracticeAutoImportEmailBatches(),null);
     gdRenderPracticeEmailLane();
     return false;
   }
-  function gdPracticeLoadEmailBatch(importBatchId){
-    const batches=Array.isArray(gdPracticeEmailLaneState?.batches)?gdPracticeEmailLaneState.batches:[];
-    const batch=batches.find(item=>String(item?.import_batch_id||"")===String(importBatchId||""));
-    if(!batch){
-      gdNativePracticeFeedbackPatch({status:"failed",lastAction:"Email batch missing",errors:["Staged email batch was not found"],nextStep:"Refresh the email receiver and try again."});
-      return false;
-    }
-    const rows=(Array.isArray(batch.shots)?batch.shots:[]).map(row=>gdPracticeEmailShotToNative(row,batch));
-    if(!rows.length){
-      gdNativePracticeFeedbackPatch({status:"failed",lastAction:"Email batch has no rows",errors:["No native rows were returned for this email batch"],nextStep:"Refresh the email receiver or check the inbound email attachment."});
-      return false;
-    }
+  /* An emailed batch, in the shape the library bridge already understands.
+     Pure - it decides nothing about whether the batch should be imported. */
+  function gdPracticeEmailBatchToPreview(batch){
+    const rows=(Array.isArray(batch?.shots)?batch.shots:[]).map(row=>gdPracticeEmailShotToNative(row,batch));
+    if(!rows.length)return null;
     const valid=rows.filter(row=>!row.errors?.length).length;
-    const invalid=rows.length-valid;
-    gdNativePracticeImportPreview={
-      batch:{
-        importBatchId:batch.import_batch_id,
-        sessionId:batch.session_id,
-        sourceType:batch.source_type||"email_csv",
-        sourceName:batch.source_name||"Practice email",
-        // Provenance the server already established when it parsed the
-        // attachment. Without it an emailed yard file reaches the library as if
-        // it were metres, while the same file uploaded from the phone converts.
-        provider:batch.provider||"",
-        unitSystem:batch.unit_system||null,
-        unitHints:batch.metadata?.unitHints||{},
-        sessionDate:batch.session_date||null,
-        rowCount:rows.length,
-        validCount:valid,
-        invalidCount:invalid,
-        createdAt:batch.created_at||new Date().toISOString(),
-        updatedAt:batch.updated_at||new Date().toISOString()
+    return {
+      preview:{
+        batch:{
+          importBatchId:batch.import_batch_id,
+          sessionId:batch.session_id,
+          sourceType:batch.source_type||"email_csv",
+          sourceName:batch.source_name||"Practice email",
+          // Provenance the server already established when it parsed the
+          // attachment. Without it an emailed yard file reaches the library as if
+          // it were metres, while the same file uploaded from the phone converts.
+          provider:batch.provider||"",
+          unitSystem:batch.unit_system||null,
+          unitHints:batch.metadata?.unitHints||{},
+          sessionDate:batch.session_date||null,
+          rowCount:rows.length,
+          validCount:valid,
+          invalidCount:rows.length-valid,
+          createdAt:batch.created_at||new Date().toISOString(),
+          updatedAt:batch.updated_at||new Date().toISOString()
+        },
+        session:{
+          sessionId:batch.session_id,
+          importBatchId:batch.import_batch_id,
+          playerId:batch.player_id||batch.player_key||"",
+          playerName:batch.player_name||"Player",
+          accountId:batch.account_id||"",
+          sourceType:batch.source_type||"email_csv",
+          sourceName:batch.source_name||"Practice email",
+          shotCount:rows.length,
+          createdAt:batch.created_at||new Date().toISOString(),
+          updatedAt:batch.updated_at||new Date().toISOString()
+        },
+        rows
       },
-      session:{
-        sessionId:batch.session_id,
-        importBatchId:batch.import_batch_id,
-        playerId:batch.player_id||batch.player_key||"",
-        playerName:batch.player_name||"Player",
-        accountId:batch.account_id||"",
-        sourceType:batch.source_type||"email_csv",
-        sourceName:batch.source_name||"Practice email",
-        shotCount:rows.length,
-        createdAt:batch.created_at||new Date().toISOString(),
-        updatedAt:batch.updated_at||new Date().toISOString()
-      },
-      rows
+      valid,
+      invalid:rows.length-valid
     };
-    gdNativePracticeFeedbackPatch({
-      status:valid?"ready_to_save":"failed",
-      lastAction:`Loaded email batch ${valid} valid / ${invalid} flagged`,
-      parsedCount:rows.length,
-      validCount:valid,
-      invalidCount:invalid,
-      warnings:invalid?[`${invalid} row${invalid===1?"":"s"} flagged before save`]:[],
-      errors:valid?[]:["0 valid rows in email batch"],
-      nextStep:valid?"Review the email rows, then save valid rows to native practice data.":"Check the email attachment fields before saving."
+  }
+  /* Has this batch already been through the library? Deleted records count as
+     yes: the id stays on the soft-deleted rows, so a batch the player threw
+     away does not come back on the next refresh. */
+  function gdPracticeEmailBatchInLibrary(importBatchId){
+    const id=String(importBatchId||"").trim();
+    if(!id)return false;
+    const lm=window.GolfDaddyLaunchMonitorData;
+    const store=safe(()=>typeof lm?.getScopedStore==="function"?lm.getScopedStore():lm?.getStore?.(),null)||{};
+    return ["sessions","captures","shots"].some(key=>
+      (Array.isArray(store[key])?store[key]:[]).some(record=>String(record?.importBatchId||record?.importId||"").trim()===id));
+  }
+  /* Mail from a sender the player approved goes straight in. An unapproved
+     sender still lands and is still shown, flagged, with an Approve button -
+     approving it refreshes the lane, which brings it back through here. */
+  function gdPracticeEmailBatchAutoImportable(batch){
+    if(!batch||batch.source_type==="email_photo")return false;
+    if(String(batch.status||"")!=="staged")return false;
+    if(batch.metadata?.senderVerified===false)return false;
+    if(!Number(batch.valid_count))return false;
+    return !gdPracticeEmailBatchInLibrary(batch.import_batch_id);
+  }
+  function gdPracticeAutoImportEmailBatches(){
+    const batches=Array.isArray(gdPracticeEmailLaneState?.batches)?gdPracticeEmailLaneState.batches:[];
+    let importedBatches=0,importedShots=0;
+    // Oldest first, so a session imported today does not sort above one from
+    // last week purely because of the order the lane happened to return them.
+    batches.slice().reverse().forEach(batch=>{
+      if(!gdPracticeEmailBatchAutoImportable(batch))return;
+      const built=gdPracticeEmailBatchToPreview(batch);
+      if(!built||!built.valid)return;
+      try{
+        const bridged=gdBridgeNativePracticeToLaunchMonitor(built.preview);
+        const saved=Array.isArray(bridged?.shots)?bridged.shots.length:0;
+        if(!saved)return;
+        importedBatches+=1;
+        importedShots+=saved;
+      }catch(e){
+        gdNativePracticeFeedbackPatch({
+          status:"failed",
+          lastAction:"Email auto-import failed",
+          errors:[e&&e.message?e.message:"Could not import an emailed batch"],
+          nextStep:"Refresh the email receiver to try again."
+        });
+      }
     });
-    gdOpenNativePracticeDrawer();
-    gdRenderNativePracticeImportLane();
-    gdLmToast(`Loaded ${rows.length} email practice row${rows.length===1?"":"s"}`);
-    return false;
+    if(importedBatches){
+      gdLmToast(`Imported ${importedShots} shot${importedShots===1?"":"s"} from ${importedBatches} email${importedBatches===1?"":"s"}`);
+      try{gdRenderShotDataPanel?.();}catch(e){}
+      try{gdRenderPracticeDataVisual?.();}catch(e){}
+    }
+    return {batches:importedBatches,shots:importedShots};
   }
   async function gdPracticeLoadEmailPhotoBatch(importBatchId){
     const batches=Array.isArray(gdPracticeEmailLaneState?.batches)?gdPracticeEmailLaneState.batches:[];
@@ -8101,7 +8145,6 @@
       gdPracticeEmailImportPending:gdPracticeEmailImportPending,
       gdPracticeCopyEmailAddress:gdPracticeCopyEmailAddress,
       gdPracticeRefreshEmailLane:gdPracticeRefreshEmailLane,
-      gdPracticeLoadEmailBatch:gdPracticeLoadEmailBatch,
       gdPracticeLoadEmailPhotoBatch:gdPracticeLoadEmailPhotoBatch,
       gdPracticeApproveEmailSender:gdPracticeApproveEmailSender,
       gdPracticeSetPlotMode:gdPracticeSetPlotMode,
