@@ -20148,7 +20148,9 @@ function placePin(ll){undoStack.push({type:"pin",value:pin});pin=ll;if(!pinMarke
 function updatePinLine(){[pinLine,pinLabel].forEach(l=>l&&map.removeLayer(l));pinLine=pinLabel=null;const el=document.getElementById("pinDiff");if(el)el.style.display="none";if(typeof gdTournamentModeEnabled==="function"&&gdTournamentModeEnabled()){return;}const bubbleTarget=gdShotDisplayTarget();const diff=gdShotPinDiffData();if(!pin||!bubbleTarget||!diff)return;if(el){el.classList.add("tilePinMetric");el.textContent=`Pin diff ${diff.value}${diff.unit}`;el.style.display="block";}pinLine=L.polyline([bubbleTarget,pin],{color:"#fff",weight:2,opacity:.52,dashArray:"3,7"}).addTo(map)}
 
 
-/* Standalone Wand UI retired. Green Shape Engine ownership lives in scripts/gd-green-shape-engine.js. */
+/* Standalone Wand UI retired. The Green Shape Engine is server-side only now -
+   functions/lib/gd-green-shape-core.mjs. The browser copy was deleted: nothing
+   called it after the AutoMapper moved off the client. */
 
 function drawGreenPolygon(pts,label,opts={}){
   [greenOutline,greenSoft,greenLabel,frontLabel,backLabel].forEach(l=>l&&map.removeLayer(l));

@@ -1,17 +1,14 @@
 /* functions/lib/gd-green-shape-core.mjs: hermetic smoke test.
  *
- * This is NOT the browser-parity calibration test the migration plan calls for (comparing
- * this sharp-based port's output against scripts/gd-green-shape-engine.js's Canvas-filter
- * output on real course imagery, with a tolerance) - that needs saved sample aerial images
- * and a way to run the browser engine's canvas path (headless browser or a DOM shim), which
- * this Node-only dev/ suite does not have. Flagged here rather than silently skipped: do not
- * trust this port's green polygons in production until that calibration test exists and
- * passes.
+ * This is NOT a calibration test. The engine's sharp filter chain was never compared against
+ * the Canvas-filter output it was ported from on real course imagery, and now cannot be: the
+ * browser engine that was the reference has been deleted (it had no caller left). So the
+ * standing caveat is unchanged and now permanent unless someone recalibrates from scratch -
+ * do not treat these green polygons as verified.
  *
- * What this DOES prove, hermetically: the Node port runs end-to-end against a synthetic
- * image (no external imagery needed), produces a plausible polygon around a bright disc on a
- * dark background, and degrades gracefully on invalid input - the same shape of guarantee
- * dev/green-shape-engine-behavior.test.js gives the browser engine. */
+ * What this DOES prove, hermetically: the engine runs end-to-end against a synthetic image
+ * (no external imagery needed), produces a plausible polygon around a bright disc on a dark
+ * background, and degrades gracefully on invalid input. */
 
 const assert = require("assert");
 const path = require("path");

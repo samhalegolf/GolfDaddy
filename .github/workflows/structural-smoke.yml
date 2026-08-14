@@ -89,7 +89,6 @@ jobs:
           node dev/course-picker-owner.test.js
           node dev/course-picker-behavior.test.js
           node dev/green-shape-engine-owner.test.js
-          node dev/green-shape-engine-behavior.test.js
           node dev/conditions-engine.test.js
           node dev/course-data-intake.test.js
           node dev/course-data-comparison.test.js

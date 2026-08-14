@@ -1,19 +1,23 @@
-/* Server-side Green Shape (Green Wand) engine: a near-verbatim port of
-   scripts/gd-green-shape-engine.js. Every function below lines 39-720 of that file is pure
-   pixel-array math against a {data,width,height} object indistinguishable from a decoded
-   image buffer - only two functions in the original ever touched the DOM:
-     - toCanvasImageSource(image) - a no-op passthrough, deleted here (nothing to pass through)
+/* Green Shape (Green Wand) engine. Server-side, and now the only copy.
+   
+   It began as a near-verbatim port of scripts/gd-green-shape-engine.js, kept
+   deliberately diffable against it. That browser file has been deleted: the
+   AutoMapper moved fully server-side (gd-automapper-core.mjs), which left the
+   client engine with no caller, and a 700-line copy nothing runs is a copy that
+   drifts silently. This file is the owner now, so edit it directly rather than
+   looking for a client original to match.
+
+   Two functions in the original touched the DOM and did not survive the port:
+     - toCanvasImageSource(image) - a no-op passthrough, deleted (nothing to pass through)
      - analyzeGreenWand(image,width,height,options) - built two <canvas> elements, applied a
        CSS `filter` string via ctx.filter, and read back ImageData. Replaced below with a
        sharp-based renderFilteredBuffers() that reproduces the same six-filter chain
-       (buildFilterString) as libvips ops. This is a CALIBRATION risk, not an architecture
-       risk: sharp's ops are not bit-identical to Canvas 2D's `filter` CSS property, so this
-       must not be trusted for production green polygons until
-       dev/green-shape-core-parity.test.js's tolerance comparison against the browser engine
-       passes on real sample imagery.
+       (buildFilterString) as libvips ops.
 
-   Everything else is copied verbatim from gd-green-shape-engine.js, including comments where
-   present, so the two files can be diffed directly when the client algorithm changes. */
+   CALIBRATION, still open: sharp's ops are not bit-identical to Canvas 2D's `filter` CSS
+   property, so these polygons were never calibrated against the browser's output on real
+   imagery. The reference implementation that comparison would have run against now exists
+   only in git history. Treat the numbers as uncalibrated rather than verified. */
 
 import sharp from "sharp";
 
@@ -547,8 +551,9 @@ function validateDetection(result, constraints) {
   return { ok: true, reason: "accepted" };
 }
 
-/* image: a Buffer readable by sharp. Everything else matches gd-green-shape-engine.js's
-   detect() signature exactly. */
+/* image: a Buffer readable by sharp. The rest of the signature is inherited from the
+   deleted browser engine's detect() and kept as-is, so callers written against that
+   contract still work. */
 export async function detect(input) {
   const request = input || {};
   const image = request.image || null;
