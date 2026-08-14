@@ -95,11 +95,15 @@ async function signPhotoUrl(path) {
 
 function cleanDomain(value) {
   const clean = String(value || "").trim().toLowerCase().replace(/^@+/, "").replace(/[^a-z0-9.-]/g, "");
-  return clean && clean.includes(".") ? clean : "claritygolf.app";
+  return clean && clean.includes(".") ? clean : "claritydata.app";
 }
 
+/* claritydata.app is the practice inbox domain. The env vars still win, so a
+   deploy can point somewhere else without a code change, but the default is the
+   real domain rather than the app's own - practice mail and the app do not have
+   to live in the same place. */
 function intakeDomain() {
-  return cleanDomain(env("CLARITY_PRACTICE_EMAIL_DOMAIN") || env("CLARITY_EMAIL_INTAKE_DOMAIN"));
+  return cleanDomain(env("CLARITY_PRACTICE_EMAIL_DOMAIN") || env("CLARITY_EMAIL_INTAKE_DOMAIN") || "claritydata.app");
 }
 
 function slug(value, fallback) {
@@ -166,10 +170,144 @@ function verifyResendSignature(event) {
   });
 }
 
+/* Who is asking, for the actions the APP performs. The webhook secret proves
+   "this is Resend"; it says nothing about which player is tapping Approve, so
+   sender approval verifies a real signed-in user against Supabase instead. */
+async function verifiedUser(event, payload) {
+  const header0 = String(header(event, "authorization") || "");
+  const bearer = header0.toLowerCase().indexOf("bearer ") === 0 ? header0.slice(7).trim() : "";
+  const token = bearer || String((payload && (payload.accessToken || payload.access_token)) || "").trim();
+  if (!token) return null;
+  const base = String(env("SUPABASE_URL") || "").replace(/\/+$/, "");
+  const key = env("SUPABASE_ANON_KEY") || env("VITE_SUPABASE_ANON_KEY") || env("SUPABASE_PUBLIC_ANON_KEY") || env("SUPABASE_SERVICE_ROLE_KEY");
+  if (!base || !key) return null;
+  try {
+    const response = await fetch(base + "/auth/v1/user", { method: "GET", headers: { apikey: key, Authorization: "Bearer " + token } });
+    if (!response.ok) return null;
+    const user = await response.json();
+    if (!user || !user.id) return null;
+    return { id: String(user.id), email: String(user.email || "").trim().toLowerCase() };
+  } catch (_error) {
+    return null;
+  }
+}
+
 function authorized(event) {
   const secret = env("CLARITY_PRACTICE_EMAIL_SECRET");
   if (secret && (safeEqual(header(event, "x-clarity-email-secret"), secret) || safeEqual(query(event).secret, secret))) return true;
   return verifyResendSignature(event);
+}
+
+/* A local part a person can read out. Built from a name or the local part of
+   an email, never from an id: "practice+8f3c9a2e-..." was correct, unguessable
+   and completely unusable over the phone. Collisions get a number, which is the
+   only place a digit belongs. */
+function preferredLocalPart(input) {
+  const source = String(
+    (input && (input.name || input.playerName || input.player_name)) ||
+    (input && input.email ? String(input.email).split("@")[0] : "") ||
+    ""
+  ).toLowerCase();
+  const clean = source.replace(/[^a-z0-9]+/g, "");
+  /* A short name is fine - "jo" is a real name, and a second Jo becomes jo2.
+     Guessability stopped being the defence when the sender allowlist arrived. */
+  if (clean) return clean.slice(0, 24);
+  /* Nothing usable to build a name from - fall back to the player key, which is
+     at least stable, rather than inventing a name for someone. */
+  return slug(playerKey(input), "player").replace(/-/g, "").slice(0, 24) || "player";
+}
+
+async function localPartIsTaken(localPart) {
+  const rows = await supabaseFetch(
+    "practice_email_addresses?select=local_part&local_part=eq." + encodeFilter(localPart) + "&limit=1",
+    { method: "GET" }
+  );
+  return Array.isArray(rows) && rows.length > 0;
+}
+
+async function allocateAddress(input) {
+  const key = playerKey(input);
+  const base = preferredLocalPart(input);
+  let localPart = base;
+  for (let attempt = 2; attempt <= 40 && await localPartIsTaken(localPart); attempt += 1) {
+    localPart = base + attempt;
+  }
+  const address = localPart + "@" + intakeDomain();
+  const now = new Date().toISOString();
+  await supabaseFetch("practice_email_addresses?on_conflict=address", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify({
+      address,
+      local_part: localPart,
+      player_key: key,
+      player_id: text(input.profileId || input.profile_id || input.playerId || input.player_id, 120) || key,
+      account_id: text(input.accountId || input.account_id, 120) || null,
+      profile_id: text(input.profileId || input.profile_id, 120) || null,
+      active: true,
+      created_at: now,
+      updated_at: now
+    })
+  });
+  /* The player's own sign-up address is trusted from the start. Anything else
+     they have to say yes to once. */
+  const own = String(input.email || "").trim().toLowerCase();
+  if (own) await addVerifiedSender(key, own, "signup");
+  return { address, localPart, playerKey: key, allocated: true };
+}
+
+async function addressForPlayer(input, opts) {
+  const key = playerKey(input);
+  const rows = await supabaseFetch(
+    "practice_email_addresses?select=*&player_key=eq." + encodeFilter(key) + "&active=is.true&order=created_at.asc&limit=1",
+    { method: "GET" }
+  );
+  const existing = Array.isArray(rows) && rows[0];
+  if (existing) return { address: existing.address, localPart: existing.local_part, playerKey: key, allocated: false };
+  if (opts && opts.allocate === false) return null;
+  return allocateAddress(input);
+}
+
+async function playerForAddress(address) {
+  const clean = String(address || "").trim().toLowerCase();
+  if (!clean) return null;
+  const rows = await supabaseFetch(
+    "practice_email_addresses?select=*&address=eq." + encodeFilter(clean) + "&active=is.true&limit=1",
+    { method: "GET" }
+  );
+  return (Array.isArray(rows) && rows[0]) || null;
+}
+
+async function verifiedSenders(key) {
+  const rows = await supabaseFetch(
+    "practice_email_senders?select=sender_email,source,verified_at&player_key=eq." + encodeFilter(key) + "&order=created_at.asc",
+    { method: "GET" }
+  );
+  return Array.isArray(rows) ? rows : [];
+}
+
+async function addVerifiedSender(key, senderEmail, source) {
+  const clean = String(senderEmail || "").trim().toLowerCase();
+  if (!key || !clean) return false;
+  await supabaseFetch("practice_email_senders?on_conflict=player_key,sender_email", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+    body: JSON.stringify({
+      player_key: key,
+      sender_email: clean,
+      source: ["signup", "approved", "admin"].includes(String(source)) ? source : "approved",
+      verified_at: new Date().toISOString()
+    })
+  });
+  return true;
+}
+
+function senderIsVerified(senders, senderEmail) {
+  const clean = String(senderEmail || "").trim().toLowerCase();
+  if (!clean) return false;
+  return (Array.isArray(senders) ? senders : []).some(function (row) {
+    return String(row && row.sender_email || "").trim().toLowerCase() === clean;
+  });
 }
 
 function playerKey(input) {
@@ -630,6 +768,7 @@ async function storePendingPhotos(inbound, parsed) {
       metadata: {
         subject: inbound.subject,
         from: inbound.from,
+        senderVerified: inbound.senderVerified !== false,
         photos: photoRecords
       },
       created_at: inbound.receivedAt,
@@ -657,6 +796,7 @@ async function storeInbound(inbound, parsed) {
     subject: inbound.subject || null,
     provider_message_id: inbound.intakeId,
     status,
+    sender_verified: inbound.senderVerified !== false,
     routing_json: Object.assign({}, inbound.routing, {
       pendingPhotos: parsed.pendingPhotos.length,
       unsupported: parsed.unsupported.length,
@@ -716,6 +856,12 @@ async function storeInbound(inbound, parsed) {
         metadata: {
           subject: inbound.subject,
           from: inbound.from,
+          /* Accepted, and flagged. The address is readable now, so it is
+             guessable; rather than holding a coach's export hostage until it is
+             approved, the import goes through wearing a mark that says who sent
+             it and that they are not on the approved list. The player can then
+             approve them once, or delete the import. */
+          senderVerified: inbound.senderVerified !== false,
           warnings: item.parsed.warnings || [],
           parseErrors: item.parsed.errors || [],
           unitSource: batch.unitSource || null,
@@ -795,6 +941,50 @@ async function storeInbound(inbound, parsed) {
   return { stored: true, status };
 }
 
+/* Approving a sender clears the flag on what they have already sent, so the
+   imports stop being marked once the player has said yes. Nothing changes about
+   whether the data is there - it was never held back - only about whether it is
+   still wearing a warning. */
+async function clearSenderFlagFor(key, sender, intakeId) {
+  const clean = String(sender || "").toLowerCase();
+  const events = await supabaseFetch(
+    "practice_email_intake_events?select=intake_id&player_key=eq." + encodeFilter(key) +
+    "&sender_verified=is.false&sender_email=eq." + encodeFilter(clean) +
+    (intakeId ? "&intake_id=eq." + encodeFilter(String(intakeId)) : ""),
+    { method: "GET" }
+  );
+  const ids = (Array.isArray(events) ? events : []).map(function (row) { return row.intake_id; }).filter(Boolean);
+  if (!ids.length) return { events: 0, batches: 0 };
+  const inList = ids.map(function (id) { return encodeURIComponent("\"" + id + "\""); }).join(",");
+  await supabaseFetch("practice_email_intake_events?intake_id=in.(" + inList + ")", {
+    method: "PATCH",
+    headers: { Prefer: "return=minimal" },
+    body: JSON.stringify({ sender_verified: true, updated_at: new Date().toISOString() })
+  });
+  /* The flag lives inside the batch's metadata, and PostgREST cannot patch one
+     key of a jsonb column - so each batch is read and written back with the
+     rest of its metadata intact. There are only ever a handful. */
+  const batches = await supabaseFetch(
+    "practice_import_batches?select=import_batch_id,metadata&intake_id=in.(" + inList + ")",
+    { method: "GET" }
+  );
+  let updated = 0;
+  for (const batch of (Array.isArray(batches) ? batches : [])) {
+    const metadata = batch && batch.metadata && typeof batch.metadata === "object" ? batch.metadata : {};
+    if (metadata.senderVerified === true) continue;
+    await supabaseFetch("practice_import_batches?import_batch_id=eq." + encodeFilter(batch.import_batch_id), {
+      method: "PATCH",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({
+        metadata: Object.assign({}, metadata, { senderVerified: true }),
+        updated_at: new Date().toISOString()
+      })
+    });
+    updated += 1;
+  }
+  return { events: ids.length, batches: updated };
+}
+
 async function recentFor(params) {
   const key = playerKey(params);
   if (!hasSupabase()) return { configured: false, batches: [] };
@@ -847,13 +1037,29 @@ exports.handler = async function (event) {
       email: params.email,
       name: params.name
     };
+    if (!hasSupabase()) {
+      /* No storage means no allocation table, so fall back to the derived
+         address rather than pretending one was issued. */
+      return json(200, {
+        address: practiceEmailAddress(input),
+        localPart: "practice+" + playerKey(input),
+        domain: intakeDomain(),
+        playerKey: playerKey(input),
+        configured: false,
+        status: "storage_not_configured"
+      });
+    }
+    const issued = await addressForPlayer(input);
+    const senders = await verifiedSenders(playerKey(input));
     const response = {
-      address: practiceEmailAddress(input),
-      localPart: "practice+" + playerKey(input),
+      address: issued.address,
+      localPart: issued.localPart,
       domain: intakeDomain(),
-      playerKey: playerKey(input),
-      configured: hasSupabase(),
-      status: hasSupabase() ? "ready" : "storage_not_configured"
+      playerKey: issued.playerKey,
+      allocated: issued.allocated,
+      senders: senders.map(function (row) { return { email: row.sender_email, source: row.source, verifiedAt: row.verified_at }; }),
+      configured: true,
+      status: "ready"
     };
     if (params.recent === "1" || params.includeRecent === "1" || params.action === "recent") {
       response.recent = await recentFor(input);
@@ -861,14 +1067,67 @@ exports.handler = async function (event) {
     return json(200, response);
   }
   if (event.httpMethod !== "POST") return json(405, { error: "Method not allowed" });
+
+  /* Two very different callers arrive on POST. Resend proves itself with the
+     webhook secret; the player's own app proves itself with a Supabase session.
+     Neither credential is allowed to do the other's job. */
+  const requestBody = parseBody(event);
+  const action = String(requestBody && requestBody.action || "").trim();
+  if (action === "approve_sender" || action === "revoke_sender") {
+    if (!hasSupabase()) return json(503, { error: "Practice email storage is not configured" });
+    const user = await verifiedUser(event, requestBody);
+    if (!user) return json(401, { error: "Sign in to manage practice email senders" });
+    const input = {
+      playerKey: requestBody.playerKey || requestBody.player_key,
+      profileId: requestBody.profileId || requestBody.profile_id,
+      accountId: requestBody.accountId || requestBody.account_id,
+      email: user.email,
+      name: requestBody.name
+    };
+    const issued = await addressForPlayer(input, { allocate: false });
+    const key = issued ? issued.playerKey : playerKey(input);
+    const sender = String(requestBody.sender || requestBody.senderEmail || "").trim().toLowerCase();
+    if (!sender) return json(400, { error: "A sender address is required" });
+    if (action === "revoke_sender") {
+      await supabaseFetch(
+        "practice_email_senders?player_key=eq." + encodeFilter(key) + "&sender_email=eq." + encodeFilter(sender),
+        { method: "DELETE", headers: { Prefer: "return=minimal" } }
+      );
+      return json(200, { revoked: true, sender, playerKey: key });
+    }
+    await addVerifiedSender(key, sender, "approved");
+    /* Approving the sender releases what they already sent. The rows were
+       parsed and stored when the email arrived - held, not discarded - so this
+       is a status change rather than a re-import. */
+    const cleared = await clearSenderFlagFor(key, sender, requestBody.intakeId);
+    return json(200, { approved: true, sender, playerKey: key, cleared });
+  }
+
   if (!env("CLARITY_PRACTICE_EMAIL_SECRET") && !env("RESEND_WEBHOOK_SECRET")) {
     return json(503, { error: "Practice email intake authorization is not configured", code: "secret_not_configured" });
   }
   if (!authorized(event)) return json(401, { error: "Practice email intake is not authorized" });
 
   try {
-    const payload = await normalizeResendPayload(parseBody(event));
+    const payload = await normalizeResendPayload(requestBody);
     const inbound = normalizeInbound(payload);
+    /* The address the mail was sent TO decides whose data this is. The stored
+       table is the answer; the legacy practice+<key> form still parses, so
+       addresses handed out before this existed keep working. */
+    if (hasSupabase()) {
+      for (const recipient of inbound.recipients) {
+        const owner = await playerForAddress(recipient);
+        if (!owner) continue;
+        inbound.playerKey = owner.player_key || inbound.playerKey;
+        inbound.profileId = inbound.profileId || owner.profile_id || owner.player_id || "";
+        inbound.accountId = inbound.accountId || owner.account_id || "";
+        break;
+      }
+      const senders = await verifiedSenders(inbound.playerKey);
+      inbound.senderVerified = senderIsVerified(senders, inbound.from);
+    } else {
+      inbound.senderVerified = true;
+    }
     const parsed = parseAttachmentRows(inbound);
     const storage = await storeInbound(inbound, parsed);
     const validRows = parsed.imports.reduce(function (sum, item) { return sum + Number(item.batch.batch.validCount || 0); }, 0);
@@ -877,6 +1136,8 @@ exports.handler = async function (event) {
       accepted: true,
       stored: storage.stored,
       status: storage.status,
+      senderVerified: inbound.senderVerified !== false,
+      sender: inbound.from || null,
       playerKey: inbound.playerKey,
       intakeId: inbound.intakeId,
       counts: {
@@ -913,4 +1174,20 @@ exports.handler = async function (event) {
       details: error.body || null
     });
   }
+};
+
+/* Pure helpers, exported for dev/practice-email-intake.test.js. The handler
+   above is the only production entry point; these are the decisions worth
+   holding still - what an address looks like, whether a sender is trusted, and
+   what happens to mail from one who is not. */
+exports.__testables = {
+  preferredLocalPart,
+  senderIsVerified,
+  eventStatus,
+  playerKeyFromRecipients,
+  practiceEmailAddress,
+  laneForAttachment,
+  looksLikeCsvBody,
+  intakeDomain,
+  slug
 };

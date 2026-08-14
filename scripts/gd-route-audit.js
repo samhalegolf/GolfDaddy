@@ -1045,13 +1045,24 @@
       profileId:profile.id||session.profileId||"",
       accountId:session.accountId||"",
       email:profile.email||session.email||"",
-      name:profile.name||session.accountName||"player"
+      name:profile.name||session.accountName||"player",
+      // The key the server files this player's mail under. Sent with sender
+      // approval so the server scopes the change to the same player the lane is
+      // showing, not to whatever it would derive on its own.
+      playerKey:gdPracticeEmailLaneState?.playerKey||""
     };
   }
-  function gdPracticeEmailAddressLocal(identity){
-    const id=identity||gdPracticeEmailIdentity();
-    const owner=gdPracticeEmailSlug(id.profileId||id.accountId||id.email||id.name,"player");
-    return `practice+${owner}@claritygolf.app`;
+  /* There is no local guess any more. The address is ALLOCATED and stored by the
+     server - name-based, with a number only when a name is already taken - so
+     nothing here can work it out. Printing a derived practice+<id> address as a
+     stand-in would show the player an address that does not receive mail, which
+     is worse than saying we could not fetch it. */
+  const GD_PRACTICE_EMAIL_UNKNOWN="Not issued yet - refresh to fetch it";
+  function gdPracticeEmailAddressLocal(){
+    return GD_PRACTICE_EMAIL_UNKNOWN;
+  }
+  function gdPracticeEmailAddressIsKnown(value){
+    return !!String(value||"").includes("@");
   }
   function gdPracticeEmailQuery(identity){
     const id=identity||gdPracticeEmailIdentity();
@@ -1123,14 +1134,22 @@
     if(!batches.length)return "";
     return `<div class="gdPracticeEmailRecent">${batches.slice(0,5).map(batch=>{
       const id=batch.import_batch_id||"";
+      // The import came in either way. When it came from a sender the player has
+      // not approved it is marked, with an approve button beside it, so the
+      // choice is theirs: say yes to that sender once, or delete the import.
+      const unapproved=batch.metadata?.senderVerified===false;
+      const senderEmail=String(batch.metadata?.from||"").trim();
+      const flag=unapproved
+        ? `<button type="button" class="gdPracticeEmailFlag" onclick="return gdPracticeApproveEmailSender(${gdEscapeHTML(JSON.stringify(senderEmail))},${gdEscapeHTML(JSON.stringify(batch.intake_id||""))})" title="${gdEscapeHTML(senderEmail||"Unknown sender")} is not on your approved list">Approve ${gdEscapeHTML(senderEmail||"sender")}</button>`
+        : "";
       if(batch.source_type==="email_photo"){
         const photoCount=Array.isArray(batch.photos)?batch.photos.length:0;
         const label=`${batch.source_name||"Practice email photo"} · ${photoCount} photo${photoCount===1?"":"s"}`;
-        return `<button type="button" onclick="return gdPracticeLoadEmailPhotoBatch(${gdEscapeHTML(JSON.stringify(id))})"><span>${gdEscapeHTML(label)}</span><b>Scan</b></button>`;
+        return `<div class="gdPracticeEmailRow${unapproved?" unapproved":""}"><button type="button" onclick="return gdPracticeLoadEmailPhotoBatch(${gdEscapeHTML(JSON.stringify(id))})"><span>${unapproved?"⚑ ":""}${gdEscapeHTML(label)}</span><b>Scan</b></button>${flag}</div>`;
       }
       const label=gdPracticeEmailBatchLabel(batch);
       const rows=Number(batch.row_count)||0;
-      return `<button type="button" onclick="return gdPracticeLoadEmailBatch(${gdEscapeHTML(JSON.stringify(id))})"><span>${gdEscapeHTML(label)}</span><b>${rows} row${rows===1?"":"s"}</b></button>`;
+      return `<div class="gdPracticeEmailRow${unapproved?" unapproved":""}"><button type="button" onclick="return gdPracticeLoadEmailBatch(${gdEscapeHTML(JSON.stringify(id))})"><span>${unapproved?"⚑ ":""}${gdEscapeHTML(label)}</span><b>${rows} row${rows===1?"":"s"}</b></button>${flag}</div>`;
     }).join("")}</div>`;
   }
   function gdRenderPracticeEmailLane(){
@@ -1149,8 +1168,35 @@
     const status=gdPracticeEmailLaneState.status||"Address generated locally";
     root.innerHTML=`<div class="gdPracticeEmailHead"><div><strong>Email receiver</strong><span>${gdEscapeHTML(status)}</span></div><div class="gdPracticeEmailActions"><button type="button" onclick="return gdPracticeRefreshEmailLane()">Refresh</button><button type="button" onclick="return gdPracticeCopyEmailAddress()">Copy</button></div></div><div class="gdPracticeEmailAddress">${gdEscapeHTML(address)}</div>${gdPracticeEmailBatchesHTML()}`;
   }
+  async function gdPracticeApproveEmailSender(sender,intakeId){
+    const auth=window.ClaritySupabaseAuth;
+    const token=await safe(()=>typeof auth?.freshAccessToken==="function"?auth.freshAccessToken():"",null)||"";
+    if(!token){
+      gdLmToast("Sign in to approve a sender");
+      return false;
+    }
+    const identity=gdPracticeEmailIdentity();
+    try{
+      const response=await fetch("/api/practice-email-intake",{
+        method:"POST",
+        headers:{"Content-Type":"application/json",Authorization:"Bearer "+token},
+        body:JSON.stringify({action:"approve_sender",sender,intakeId,playerKey:identity.playerKey,profileId:identity.profileId,accountId:identity.accountId})
+      });
+      const body=await response.json().catch(()=>null);
+      if(!response.ok||!body?.approved)throw new Error(body?.error||`HTTP ${response.status}`);
+      gdLmToast(`${sender} approved - their imports will stop being flagged`);
+      return gdPracticeRefreshEmailLane();
+    }catch(e){
+      gdLmToast(e&&e.message?`Could not approve sender: ${e.message}`:"Could not approve sender");
+      return false;
+    }
+  }
   function gdPracticeCopyEmailAddress(){
-    const address=gdPracticeEmailLaneState.address||gdPracticeEmailAddressLocal();
+    const address=gdPracticeEmailLaneState.address||"";
+    if(!gdPracticeEmailAddressIsKnown(address)){
+      gdLmToast("No address to copy yet - refresh the receiver");
+      return false;
+    }
     safe(()=>navigator?.clipboard?.writeText?.(address),null);
     gdLmToast("Practice email address copied");
     return false;
@@ -1174,8 +1220,8 @@
       };
     }catch(e){
       gdPracticeEmailLaneState=Object.assign({},gdPracticeEmailLaneState,{
-        address:gdPracticeEmailAddressLocal(identity),
-        status:"Address generated locally",
+        address:gdPracticeEmailLaneState.address||gdPracticeEmailAddressLocal(),
+        status:"Could not reach the receiver",
         loading:false,
         error:e&&e.message?`Receiver check failed: ${e.message}`:"Receiver check failed"
       });
@@ -8057,6 +8103,7 @@
       gdPracticeRefreshEmailLane:gdPracticeRefreshEmailLane,
       gdPracticeLoadEmailBatch:gdPracticeLoadEmailBatch,
       gdPracticeLoadEmailPhotoBatch:gdPracticeLoadEmailPhotoBatch,
+      gdPracticeApproveEmailSender:gdPracticeApproveEmailSender,
       gdPracticeSetPlotMode:gdPracticeSetPlotMode,
       gdPracticeImportCanStart:gdPracticeImportCanStart,
       gdPracticeStartImportJob:gdPracticeStartImportJob,

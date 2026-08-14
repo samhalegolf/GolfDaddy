@@ -20656,6 +20656,7 @@ function gdPracticeImportStatusLabel(status){
     saving:"Import saving",
     completed:"Import completed",
     failed:"Import failed - review",
+    interrupted:"Scan interrupted",
     canceled:"Import canceled"
   })[String(status||"")]||"Import status";
 }
@@ -20668,7 +20669,7 @@ function gdPracticeImportCanStart(sourceLabel){
     try{if(typeof renderPracticeData==="function")renderPracticeData(true);}catch(e){}
     return false;
   }
-  if(String(job?.status||"")==="failed")gdPracticeWriteImportJob(null);
+  if(["failed","interrupted"].includes(String(job?.status||"")))gdPracticeWriteImportJob(null);
   return true;
 }
 function gdPracticePayloadClubLabels(payload){
@@ -20878,9 +20879,43 @@ function gdPracticeProcessingStageState(){
 }
 function gdPracticeProcessingRefresh(){
   if(!gdPracticeScanProgressIsActive())return;
-  gdPracticeHydrateImportJob();
+  const job=gdPracticeHydrateImportJob();
+  gdPracticeCheckScanStall(job);
   try{if(typeof renderPracticeData==="function")renderPracticeData(true);}catch(e){}
   try{gdPracticeSyncLibraryProcessingSurface();}catch(e){}
+}
+// A scan that stops moving has to say so. Every OCR call is bounded at 9s and
+// the job updates its checkpoint after each box, strip and row, so a minute and
+// a half of complete silence is a dead run, not a slow one - and a beta feature
+// that hangs forever reads as a broken app rather than a rough edge.
+const GD_PRACTICE_SCAN_STALL_MS=90000;
+var gdPracticeScanStallSignature="";
+var gdPracticeScanStallSince=0;
+function gdPracticeResetScanStallWatch(){
+  gdPracticeScanStallSignature="";
+  gdPracticeScanStallSince=0;
+}
+function gdPracticeCheckScanStall(job){
+  if(!job||!gdPracticeImportIsActive(job)){
+    gdPracticeResetScanStallWatch();
+    return false;
+  }
+  const signature=`${job.status||""}|${job.checkpointText||""}|${job.progress||0}|${job.stageIndex||0}`;
+  const now=Date.now();
+  if(signature!==gdPracticeScanStallSignature){
+    gdPracticeScanStallSignature=signature;
+    gdPracticeScanStallSince=now;
+    return false;
+  }
+  if(!gdPracticeScanStallSince)gdPracticeScanStallSince=now;
+  if(now-gdPracticeScanStallSince<GD_PRACTICE_SCAN_STALL_MS)return false;
+  gdPracticeResetScanStallWatch();
+  gdPracticeFailImportJob(
+    new Error("Scan stalled with no progress for "+Math.round(GD_PRACTICE_SCAN_STALL_MS/1000)+"s"),
+    "Scan stopped. The photo took too long to read - try again, or use a clearer picture of the table."
+  );
+  try{gdLmToast("Scan stopped - try again");}catch(e){}
+  return true;
 }
 function gdPracticeProcessingStart(){
   gdPracticePhotoProcessingStartedAt=Date.now();
@@ -20938,12 +20973,25 @@ if(!window.__gdShotDataLibraryToggleBound){
     return gdToggleShotDataLibrary(toggle.dataset.gdShotLibraryKind||"practice",event);
   },true);
 }
+// What the player is told while a scan runs. The job's checkpointText is the
+// engineering log - "Reading the offcut (club + summary rows)", "Deep scan strip
+// 2/5" - and it keeps flowing, unchanged, to the Studio debug feed. It is not a
+// sentence to put in front of someone waiting for their shots.
+const GD_PRACTICE_SCAN_USER_STATUS=["Scanning","Reading shot data","Preparing your data","Almost finished"];
+function gdPracticeUserFacingScanStatus(job,stageIndex){
+  const status=String(job?.status||"");
+  if(status==="queued")return "Getting ready";
+  if(status==="saving")return "Almost finished";
+  if(status==="parsing"||status==="validating")return "Preparing your data";
+  const index=Number.isFinite(Number(stageIndex))?Number(stageIndex):0;
+  return GD_PRACTICE_SCAN_USER_STATUS[Math.max(0,Math.min(GD_PRACTICE_SCAN_USER_STATUS.length-1,index))]||"Scanning";
+}
 function gdNativeShotDataProcessingTrackHTML(clubLabel=""){
   const job=gdPracticeHydrateImportJob();
   const state=gdPracticeProcessingStageState();
-  const label=gdPracticeImportIsActive(job)&&job?.checkpointText
-    ?String(job.checkpointText)
-    :(GD_PRACTICE_PROCESSING_STAGES[state.index]||"Processing");
+  const label=gdPracticeImportIsActive(job)
+    ?gdPracticeUserFacingScanStatus(job,state.index)
+    :(job?.userMessage?String(job.userMessage):(GD_PRACTICE_PROCESSING_STAGES[state.index]||"Processing"));
   const stages=GD_PRACTICE_PROCESSING_STAGES.map((stageLabel,index)=>{
     const tone=index<state.index?"done":(index===state.index?"active":"pending");
     return `<span class="gdNativeProcessingNode ${tone}" aria-label="${gdEscapeHTML(stageLabel)}"><span>${index+1}</span></span>`;
@@ -21105,7 +21153,10 @@ function gdSetPracticePhotoProcessing(active,opts={}){
           clubs:gdPracticePhotoProcessingClubs
         });
       }else if(String(job.status)!=="saving"){
-        gdPracticeUpdateImportJob({status:"failed",checkpointText:"Import stopped before it completed",userMessage:"Import stopped before it completed"});
+        // Interrupted, not failed: the work stopped because the page went away,
+        // which is not the same as the scan going wrong. The photo is still
+        // there, so the honest offer is "start it again", not an error.
+        gdPracticeUpdateImportJob({status:"interrupted",checkpointText:"Scan interrupted",userMessage:"Scan interrupted before it finished. Start the scan again when you are ready.",progress:0});
       }
     }
   }
