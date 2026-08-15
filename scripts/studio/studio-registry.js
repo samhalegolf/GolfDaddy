@@ -336,6 +336,47 @@
       ],
       status: "implemented", needsVerification: false,
       warnings: ["Read-only by design. Revoking a sender is a real action against a player's account and is deliberately not wired here."] },
+    {
+      id: "bubble-geometry", label: "Bubble Geometry", parent: "shot-system",
+      function: "The authoritative surface for the Bubble Micro-Geometry model: which Bubble Signals a set of practice data triggers, what evidence route each one used, how much the eight bubble regions move as a result, and whether that is published. A real workspace rather than a jump-in, because no app screen shows any of it - a player sees their bubble, not the reasoning that shaped it. Runs the same scripts/gd-bubble-signals-core.js the server runs (no second copy of the model), draws Base from the live engine's own getGDBForClub() payload, and can POST the same rows to /api/bubble-model to prove the two agree. Also hosts the Bubble Signal Test Data Generator (seeded, provider-flavoured, plants a chosen relationship) and the six pre-loaded scenarios including the Control set whose contract is that Base and Adjusted come out identical.",
+      owner: "scripts/gd-bubble-signals-core.js (the model) + functions/bubble-model.js (persistence and publishing) + this page (the view)",
+      runtime: { app: false, studio: true, server: true },
+      code: [
+        { role: "Studio workspace", path: "scripts/studio/shot-system/bubble-geometry/bubble-geometry-page.js" },
+        { role: "The model itself - shared verbatim with the server, do not fork", path: "scripts/gd-bubble-signals-core.js" },
+        { role: "Seeded test-data generator (Studio-only, stripped from the phone build)", path: "scripts/gd-bubble-signal-test-data.js" },
+        { role: "Server binding: analyse, persist, publish", path: "functions/bubble-model.js" },
+        { role: "Cache-first client that feeds the engine (both shells)", path: "scripts/gd-bubble-model-client.js" },
+        { role: "Render-time application: region factors + axis correction", path: "scripts/gd-app-core.js" },
+        { role: "Generated mirror for the fresh app shell - do not hand-edit", path: "app/js/bubble-engine.js" },
+        { role: "Tables: bubble_geometry_configs, bubble_player_models", path: "supabase/migrations/20260815_bubble_micro_geometry.sql" }
+      ],
+      inputs: ["Practice rows (Shot Library, gate input, or generated)", "Published geometry config version"],
+      outputs: ["Versioned player-model payload (base, geometry, signals, projection)", "New geometry config versions"],
+      owns: ["Signal definitions", "Evidence aliases and route confidence", "Region deformation amounts", "Axis caps", "Minimum sample gates", "Geometry config versions"],
+      doesNotOwn: [
+        "The Bubble itself - club progression, size and aim are unchanged and remain primary",
+        "My Bubble's aim (only Practice Bubble adoption may change it - Bubble Bible s1)",
+        "Practice import/parsing (owned by gd-practice-parser-core.js)"
+      ],
+      connections: [
+        { target: "shot-system", direction: "child-of", label: "" },
+        { target: "practice-data", direction: "reads-from", label: "Practice rows" },
+        { target: "gps-bubble-projection", direction: "writes", label: "Approved region geometry + axis correction" }
+      ],
+      keyFunctions: [
+        { name: "detectSignals", purpose: "Runs all five Signals over a row set and reports, for each, whether it fired and why not if it did not.", codePath: "scripts/gd-bubble-signals-core.js" },
+        { name: "buildMicroGeometry", purpose: "Merges fired Signals into eight region multipliers plus an axis correction, under hard caps. Returns identity when the engine is disabled.", codePath: "scripts/gd-bubble-signals-core.js" },
+        { name: "buildPlayerModel", purpose: "The versioned payload the phone hydrates: base, geometry, signals, projection.", codePath: "scripts/gd-bubble-signals-core.js" },
+        { name: "gdMicroGeometryRadiusFactor", purpose: "Where the approved geometry actually reaches the drawn ring, inside buildBubbleShape's rel loop.", codePath: "scripts/gd-app-core.js" }
+      ],
+      status: "implemented", needsVerification: false,
+      warnings: [
+        "SHIPPED OFF. defaultConfig().enabled is false and every Signal is disabled, so the rendered bubble is byte-identical to the one that shipped before this layer existed. dev/bubble-micro-geometry.test.js pins that against the real generated client, not against the core's own idea of identity. Turning the engine on is a Studio publish, not a code change.",
+        "The 1x/5x/10x exaggeration is a magnifying glass, not a setting. It drives this page's drawing and the dev-only bubbleGeometry.microExaggeration field, and is deliberately not part of the published config. Production deformation is a fraction of a percent by design - do not judge a real bubble with it above 1.",
+        "Publishing marks EVERY stored player model stale in one statement. Each rebuilds on its next analysis and the phone keeps rendering its cached model until then, so nobody waits - but the write does touch every row."
+      ]
+    },
     { id: "pattern-finder", label: "Pattern Finder", parent: "shot-system",
       function: "Not yet moved into Studio. No standalone file — lives inside scripts/gd-app-core.js / scripts/gd-route-audit.js per this branch's recon; not read in depth.",
       owner: "Needs verification", runtime: { app: true, studio: false, server: false },
@@ -529,7 +570,7 @@
   var NAV_TREE = [
     { id: "overview" },
     { id: "courses", children: ["course-database", "course-mapping", "course-visuals", "publishing"] },
-    { id: "shot-system", children: ["photo-scan", "practice-data", "practice-email", "pattern-finder", "my-bubble", "shot-system-course-data", "conditions", "recommendations"] },
+    { id: "shot-system", children: ["photo-scan", "practice-data", "practice-email", "bubble-geometry", "pattern-finder", "my-bubble", "shot-system-course-data", "conditions", "recommendations"] },
     { id: "gps-play", children: ["gps-course-selection", "gps-round-setup", "gps-hole-lifecycle", "gps-map-camera", "gps-shot-planning", "gps-shot-capture", "gps-scorecard", "gps-course-data-capture", "gps-sync-recovery", "gps-demo-mode"] },
     { id: "players-coaches" },
     { id: "commerce" },

@@ -7905,6 +7905,15 @@
 			    }).join("");
 			    root.innerHTML=gdPracticeLibraryShellHTML(analysis,rows.length,`${gdPracticePlotModeControls()}${tools}<div class="gdPracticeShotLibrary${rows.length>18?" gdPracticeEvidenceClubRowsScrollable":""}">${clubSections}</div>`);
 			  }
+  /* Normalised Practice is the PRIMARY view and this wrapper is why it stays
+     that way: with the Projected Clubs module absent, or throwing, the exact
+     normalised markup that was passed in is what gets rendered. The secondary
+     view can never take the primary one down with it. */
+  function gdPracticeVisualHTML(normalisedHTML,analysis){
+    const view=window.GDPracticeProjectedClubs;
+    if(!view||typeof view.practiceVisualHtml!=="function")return normalisedHTML;
+    try{return view.practiceVisualHtml(normalisedHTML,analysis)}catch(e){return normalisedHTML}
+  }
   function renderPracticeData(skipTolerances=false){
     gdPracticeReleaseInactiveProcessingSurface();
     const visual=byId("gdPracticeDataVisual");
@@ -7920,7 +7929,7 @@
     gdRenderNativePracticeImportLane();
     gdSyncPracticeSampleImportButton();
 	    if(!api||typeof api.analyze!=="function"){
-	      if(visual)visual.innerHTML=practiceSvg({acceptedShots:[],recommendation:{status:"module loading",offsetDeg:0}});
+	      if(visual)visual.innerHTML=gdPracticeVisualHTML(practiceSvg({acceptedShots:[],recommendation:{status:"module loading",offsetDeg:0}}),null);
 	      if(evidenceList)evidenceList.innerHTML="";
 	      gdRenderPracticeProjectionControls(null);
 	      gdRenderPracticeRecommendations(null);
@@ -7943,7 +7952,10 @@
 	    gdPracticeMaybeAutoShowProjection(visualAnalysis);
 	    gdRenderPracticeAutoFlow(visualAnalysis);
 	    gdRenderPracticeProjectionControls(analysis);
-	    if(visual)visual.innerHTML=practiceSvg(totals.rawShots?visualAnalysis:{acceptedShots:[],recommendation:{status:"no practice data",offsetDeg:0}});
+	    if(visual){
+	      const visualSource=totals.rawShots?visualAnalysis:{acceptedShots:[],recommendation:{status:"no practice data",offsetDeg:0}};
+	      visual.innerHTML=gdPracticeVisualHTML(practiceSvg(visualSource),visualSource);
+	    }
     gdRenderPracticeEvidenceList(analysis);
     gdRenderPracticeRecommendations(analysis);
 	    gdRenderPracticeMasterTolerance();

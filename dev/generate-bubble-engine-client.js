@@ -66,6 +66,9 @@ const CORE_FUNCS = [
   "gdNormalizeGpsBubblePayload", "gdScaleGpsBubblePayloadForDisplay",
   "gdFallbackGpsBubblePayload", "getGpsBubblePayload", "gdGpsBubbleDisplayPayload",
   "gdBubblePayloadForRender",
+  // micro-geometry (the approved player model, applied at render time)
+  "gdSetBubbleMicroGeometry", "gdBubbleMicroGeometry", "gdMicroGeometryExaggeration",
+  "gdMicroGeometryRadiusFactor", "gdMicroGeometryAxisDeg",
   // bubble geometry / render model
   "bubbleRadiusFactor", "bubbleTextureFactor", "gdBubbleShotBearing",
   "gdBubbleRoofMaxDistanceM", "gdBubbleForwardDistanceFromStart",
@@ -162,6 +165,12 @@ const adapter = `
       handedness: appBubble ? appBubble.handedness : undefined
     };
   }
+  /* The approved Micro-Geometry model. Declared here for the same reason
+     start/target are: the verbatim copies above read this binding by name, and
+     it is state the shell owns rather than anything core could supply. null is
+     the shipped value and renders the bubble unchanged - app/js/bubble-model.js
+     fills it in when a cached or freshly-hydrated model arrives. */
+  var gdMicroGeometryModel = null;
   var targetDragging = false, bubbleOrganic = true, bubbleBiasMode = "neutral";
   var currentHoleNumber = 0, currentTee = null, currentRoute = [];
   var projection = null;   // {toScreen(latlng)->{x,y}, viewSize()->{x,y}}
@@ -243,6 +252,12 @@ const adapter = `
         ? { offsetDeg: deg, handedness: (bubble && bubble.handedness) === "left" ? "left" : "right" }
         : null;
     },
+    /* The server-decided player model, handed straight to the renderer.
+       app/js/bubble-model.js owns fetching and caching it; the engine only
+       renders what it is given, and setMicroGeometry(null) puts the bubble
+       back to exactly the shape it had before this layer existed. */
+    setMicroGeometry: function (geometry) { return gdSetBubbleMicroGeometry(geometry); },
+    microGeometry: gdBubbleMicroGeometry,
     defaultBagRows: gdDefaultStandInBag,
     setWind: function (originAngleRad, level) {
       gdWindActive = true;

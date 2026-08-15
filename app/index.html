@@ -403,8 +403,16 @@
 <script src="js/basemap.js"></script>
 <script src="js/play-surface.js"></script>
 <script src="js/distance.js"></script>
+<!-- The Signal engine defines what the geometry numbers mean, so the engine's
+     render loop delegates its interpolation to it rather than keeping a second
+     copy. Pure file, no platform APIs, shared verbatim with the server. -->
+<script src="../scripts/gd-bubble-signals-core.js"></script>
 <script src="js/bubble-engine.js"></script>
 <script src="js/my-bubble.js"></script>
+<!-- Cache-first: hydrates the last good model synchronously, refreshes in the
+     background. Must load after bubble-engine.js (it needs setMicroGeometry)
+     and after my-bubble.js (it reads the saved aim to send upstream). -->
+<script src="../scripts/gd-bubble-model-client.js"></script>
 <script src="js/bubble-visual.js"></script>
 <script src="js/bag.js"></script>
 <script src="js/wind.js"></script>

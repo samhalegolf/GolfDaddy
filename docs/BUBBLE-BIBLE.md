@@ -447,6 +447,108 @@ left moves to (183.3, 222.7) at the same size.
 
 ---
 
+## 6b. Micro-Geometry moulds the preset. It does not replace it. — LAW
+
+Section 6 is unchanged: shape and size still come from the club and the carry.
+Bubble Micro-Geometry is a layer that runs **after** the club profile is calculated
+and moulds the result by fractions of a percent. It never sizes anything, never
+places anything, and never touches the aim.
+
+```
+Base Bubble
+→ normal club progression        (section 6 — unchanged, still primary)
+→ Bubble Signals                 (evidence, gated)
+→ tiny axis correction if justified
+→ local region deformation
+→ Final Bubble
+```
+
+**Off is the shipped state, and off means byte-identical.** `defaultConfig().enabled`
+is `false` and every Signal is `enabled: false`, so `buildMicroGeometry()` returns
+identity — every region `1.0`, axis `0` — and the drawn ring is exactly the ring that
+rendered before this layer existed. `dev/bubble-micro-geometry.test.js` asserts that
+against the real generated client, not against the core's own idea of identity.
+Turning it on is a Studio publish, not a code change.
+
+### The eight regions, and which way they point — LAW
+
+`buildBubbleShape` walks `rel = 0..2pi` building `{x: cos(rel)*depth, y: sin(rel)*lateral}`,
+and `localPointToLatLng` turns that into `shotBearing + atan2(y, x)`. So **x is along
+the shot and y is to its right**:
+
+| rel | region |
+|---|---|
+| 0 | Long |
+| pi/4 | Long Right |
+| pi/2 | Right |
+| pi | Short |
+| 3pi/2 | Left |
+
+Right and Left are sides of the **target line**, not of the player, so this layer needs
+no handedness — every evidence value it reads (spin axis, start direction, offline) is
+already signed in target-line space. Handedness belongs to the aim, which this layer
+never touches. Same warning as sections 3 and 3a: if that loop's parameterisation ever
+changes, the region model changes with it.
+
+The eight control values are interpolated into one continuous closed shape by a
+periodic Catmull-Rom, so the curve passes exactly through each control value — the
+region table Studio prints is literally what the ring does there — with no crease at
+the control points when Studio magnifies it 10x.
+
+### Only Curvature Bias may rotate — LAW
+
+Every other Signal deforms or obscures. Curvature Bias alone may request an axis
+correction, capped at **±0.5°**, and that request is clamped twice: once in the core
+against `caps.maxAxisDeg`, and again in `gdMicroGeometryAxisDeg()` at render time. The
+correction is *added to* the engine's own cluster tilt, never substituted for it.
+
+### Evidence, not devices — LAW
+
+A Signal consumes a Clarity **observation**, and an observation can be reached by more
+than one **evidence route**. `CURVATURE_BIAS` resolves from Face-to-Path, or Spin Axis,
+or start-vs-finish; the Signal engine is never told which. There is no separate model
+for weak devices. A weak route is asked for a bigger sample **and** a stronger trend,
+and its effect is capped lower — but it is never locked out.
+
+That last part is a correction to how this was first built: authority used to multiply
+into evidence strength, which made a low-authority route unfirable at any sample size
+rather than merely demanding. Weak evidence needs more evidence, not a closed door.
+Insufficient evidence means `modifier = 0`, not a small guess.
+
+### Every observation is a departure from normal — LAW
+
+Not a raw value. A real bag runs out more with the long clubs than the wedges, so the
+carry:total slope through the bag is positive for **everybody** — reading it raw would
+fire Rollout Character on ordinary golf. Each observation is measured against a
+configured normal (`normals.*`), and the Control test dataset is generated to sit
+exactly on those normals, which is what makes "Base and Adjusted are identical" a
+result rather than a coincidence.
+
+### Where it lives
+
+The model is **not** in the phone. `scripts/gd-bubble-signals-core.js` is one file,
+loaded by the browser and required by `functions/bubble-model.js`, for the same reason
+the practice parser is one file. The server decides the player model when the data
+changes and persists it; the phone hydrates the last good one from cache
+**synchronously**, renders immediately, and refreshes in the background. No screen
+waits on an analysis. Rules like *"Dynamic Lie + Start Direction progression means pull
+the right side by X%"* are config, published from Studio, versioned in
+`bubble_geometry_configs` — never a phone release.
+
+### Projected clubs are projections — LAW
+
+A projected 5i bubble may exist with no 5i shots in the session. Club labels establish
+relationships **across** the set; they do not make those rows the owner of that club's
+bubble. This is the same idea GPS Play already uses, and it is why Practice Session
+Comparison asks *"what player model does Session A imply versus Session B"* and never
+*"what bubble do these 6i rows make for the 6i"*.
+
+Normalised Practice remains the **primary** view. Projected Clubs is secondary, and
+`gdPracticeVisualHTML` is written so that the secondary view being absent or throwing
+returns the primary markup untouched.
+
+---
+
 ## 6a. Two renderers, one set of numbers — LAW
 
 The graph bubble and the GPS bubble are different RENDERINGS of the same real data.

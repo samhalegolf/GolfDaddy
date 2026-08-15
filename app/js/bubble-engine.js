@@ -372,6 +372,39 @@ function gdBubblePayloadForRender(input){
   payload.visual.visualDepthM=gdRound(radius*2,1);
   return payload;
 }
+function gdSetBubbleMicroGeometry(geometry){
+  const core=typeof window!=="undefined"?window.GDBubbleSignalsCore:null;
+  if(!geometry||!core||typeof core.microGeometryFactor!=="function"){gdMicroGeometryModel=null;return false}
+  /* Identity is stored as null on purpose: an all-1.0 model and no model are
+     the same picture, and keeping them the same object means the ring loop
+     takes the same branch for both. */
+  if(typeof core.isIdentityGeometry==="function"&&core.isIdentityGeometry(geometry)){gdMicroGeometryModel=null;return true}
+  gdMicroGeometryModel=geometry;
+  return true;
+}
+function gdBubbleMicroGeometry(){return gdMicroGeometryModel}
+function gdMicroGeometryExaggeration(){
+  try{
+    const value=typeof dev==="function"?Number(dev("bubbleGeometry.microExaggeration")):NaN;
+    return Number.isFinite(value)?gdClamp(value,1,10):1;
+  }catch(e){return 1}
+}
+function gdMicroGeometryRadiusFactor(rel){
+  const geometry=gdMicroGeometryModel;
+  if(!geometry)return 1;
+  const core=typeof window!=="undefined"?window.GDBubbleSignalsCore:null;
+  if(!core||typeof core.microGeometryFactor!=="function")return 1;
+  const factor=Number(core.microGeometryFactor(geometry,rel,gdMicroGeometryExaggeration()));
+  /* A published config could never produce this, but a hand-edited cache
+     could, and a bubble is not the place to find out. */
+  return Number.isFinite(factor)?gdClamp(factor,.85,1.15):1;
+}
+function gdMicroGeometryAxisDeg(){
+  const geometry=gdMicroGeometryModel;
+  if(!geometry)return 0;
+  const deg=Number(geometry.axisAdjustmentDeg);
+  return Number.isFinite(deg)?gdClamp(deg,-.5,.5)*gdMicroGeometryExaggeration():0;
+}
 function bubbleRadiusFactor(rel,payload=null){
   const front=Math.cos(rel);
   const frontPos=Math.max(0,front);
@@ -468,7 +501,10 @@ function gdBubbleAxes(payloadInput,scale=1){
 }
 function gdBubbleLocalToLatLng(center,payloadInput,x,y){
   const payload=gdBubblePayloadForRender(payloadInput);
-  const tilt=((gdFiniteNumber(payload.visual&&payload.visual.visualTiltDeg,payload.clusterTiltDeg)||0)*Math.PI)/180;
+  /* The Micro-Geometry axis correction rides on the engine's own cluster tilt
+     rather than replacing it. The club progression stays primary; this adds at
+     most half a degree on top of whatever tilt the profile already derived. */
+  const tilt=(((gdFiniteNumber(payload.visual&&payload.visual.visualTiltDeg,payload.clusterTiltDeg)||0)+gdMicroGeometryAxisDeg())*Math.PI)/180;
   const skew=((gdFiniteNumber(payload.visual&&payload.visual.visualSkewDeg,0)||0)*Math.PI)/180;
   const skewedY=y + Math.tan(skew)*x*.42;
   const rx=x*Math.cos(tilt)-skewedY*Math.sin(tilt);
@@ -497,7 +533,16 @@ function buildBubbleShape(center, payloadInput, scale=1){
   const steps=168;
   for(let i=0;i<steps;i++){
     const rel=(Math.PI*2*i)/steps;
-    const rf=bubbleRadiusFactor(rel,payload);
+    /* rel is the SAME parameter the region model is written against: rel=0 is
+       Long (+x, down the shot line), rel=pi/2 is Right (+y). See the region
+       orientation note in scripts/gd-bubble-signals-core.js - if this loop's
+       parameterisation ever changes, that note changes with it.
+
+       Applied as a separate multiplier rather than folded into
+       bubbleRadiusFactor: that function clamps itself to +/-4% for the
+       distance tendency it owns, and mixing a second effect into the same
+       clamp would let one silently eat the other. */
+    const rf=bubbleRadiusFactor(rel,payload)*gdMicroGeometryRadiusFactor(rel);
     pts.push({x:Math.cos(rel)*axes.depth*rf,y:Math.sin(rel)*axes.lateral*rf});
   }
   return gdSmoothBubbleLocalRing(pts,2).map(point=>gdBubbleLocalToLatLng(center,payload,point.x,point.y));
@@ -591,6 +636,12 @@ function localPointToLatLng(center, shotBrg, x, y){
       handedness: appBubble ? appBubble.handedness : undefined
     };
   }
+  /* The approved Micro-Geometry model. Declared here for the same reason
+     start/target are: the verbatim copies above read this binding by name, and
+     it is state the shell owns rather than anything core could supply. null is
+     the shipped value and renders the bubble unchanged - app/js/bubble-model.js
+     fills it in when a cached or freshly-hydrated model arrives. */
+  var gdMicroGeometryModel = null;
   var targetDragging = false, bubbleOrganic = true, bubbleBiasMode = "neutral";
   var currentHoleNumber = 0, currentTee = null, currentRoute = [];
   var projection = null;   // {toScreen(latlng)->{x,y}, viewSize()->{x,y}}
@@ -672,6 +723,12 @@ function localPointToLatLng(center, shotBrg, x, y){
         ? { offsetDeg: deg, handedness: (bubble && bubble.handedness) === "left" ? "left" : "right" }
         : null;
     },
+    /* The server-decided player model, handed straight to the renderer.
+       app/js/bubble-model.js owns fetching and caching it; the engine only
+       renders what it is given, and setMicroGeometry(null) puts the bubble
+       back to exactly the shape it had before this layer existed. */
+    setMicroGeometry: function (geometry) { return gdSetBubbleMicroGeometry(geometry); },
+    microGeometry: gdBubbleMicroGeometry,
     defaultBagRows: gdDefaultStandInBag,
     setWind: function (originAngleRad, level) {
       gdWindActive = true;

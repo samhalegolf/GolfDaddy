@@ -179,6 +179,15 @@
     safe(function () {
       window.dispatchEvent(new CustomEvent(UPDATE_EVENT, { detail: { at: new Date().toISOString() } }));
     });
+    /* The player's shots just changed, so the Bubble model built from them is
+       now out of date. This is the ONLY trigger the Micro-Geometry engine
+       wants: analysis follows the data, never a screen opening.
+       onPracticeDataSaved() never throws, never blocks, and the phone carries
+       on rendering its cached model while the rebuild happens. */
+    safe(function () {
+      var model = window.GDBubbleModelClient;
+      if (model && typeof model.onPracticeDataSaved === 'function') model.onPracticeDataSaved();
+    });
     // Mirror the app's own refresh pattern: only re-render when the practice
     // panel is open, so we never disturb an unrelated screen.
     safe(function () {

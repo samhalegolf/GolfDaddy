@@ -136,8 +136,26 @@
           faceAngleDeg: asNumber(shot.faceAngle),
           pathAngleDeg: asNumber(shot.pathAngle),
           faceToPathDeg: asNumber(shot.faceToPath),
-          startDirectionDeg: asNumber(shot.startDirection)
+          startDirectionDeg: asNumber(shot.startDirection),
+          /* Signal-engine delivery variables. Each is null unless the monitor
+             actually reported it - the Bubble Signal engine gates on presence,
+             so a missing value must stay missing rather than become a zero. */
+          dynamicLoftDeg: asNumber(shot.dynamicLoft),
+          dynamicLieDeg: asNumber(shot.dynamicLie),
+          attackAngleDeg: asNumber(shot.attackAngle)
         },
+        /* Ball-flight variables, same rule: present or null, never defaulted. */
+        flight: {
+          launchAngleDeg: asNumber(shot.launchAngle),
+          spinRpm: asNumber(shot.spin) === null ? asNumber(shot.totalSpin) : asNumber(shot.spin),
+          spinAxisDeg: asNumber(shot.spinAxis),
+          peakHeight: asNumber(shot.peakHeight),
+          descentAngleDeg: asNumber(shot.descentAngle),
+          hangTimeSec: asNumber(shot.hangTime),
+          ballSpeed: asNumber(shot.ballSpeed),
+          clubSpeed: asNumber(shot.clubSpeed)
+        },
+        providerGuess: shot.providerGuess || (shot.rawSource && shot.rawSource.providerGuess) || '',
         sourceType: shot.sourceType,
         sourceNative: true,
         rawSource: shot.rawSource || null

@@ -355,6 +355,19 @@
 <script src="scripts/gd-practice-parser-core.js?v=practice-parser-core-001"></script>
 <script src="scripts/gd-native-practice-data.js?v=native-practice-data-001"></script>
 <script src="scripts/gd-practice-library-adapter.js?v=native-library-adapter-001"></script>
+<!-- Bubble Micro-Geometry. The Signal engine is the same file functions/bubble-model.js
+     requires server-side, and it is pure - no platform APIs - so it loads anywhere.
+     It must come before gd-bubble-model-client.js, which reads its version gate and
+     its interpolation, and before the bubble engine renders anything. The test-data
+     generator is Studio-only; the phone build strips it. -->
+<script src="scripts/gd-bubble-signals-core.js?v=bubble-signals-core-001"></script>
+<script src="scripts/gd-bubble-model-client.js?v=bubble-model-client-001"></script>
+<script src="scripts/gd-bubble-geometry-view.js?v=bubble-geometry-view-001"></script>
+<!-- Projected Clubs and Compare Practice Sessions. Ships to the phone: the
+     comparison is a player-facing feature that Studio is only another entry
+     point into, not a Studio-only tool. -->
+<script src="scripts/gd-practice-projected-clubs.js?v=practice-projected-clubs-001"></script>
+<script data-gd-surface="studio" src="scripts/gd-bubble-signal-test-data.js?v=bubble-signal-test-data-001"></script>
 <script id="gdCanonicalRouteAuditV1" src="scripts/gd-route-audit.js?v=dot-hydration-20260726i"></script>
 <script src="scripts/inline/gd-native-back-button.js?v=20260721a"></script>
 <script src="scripts/inline/gd-native-deep-links.js?v=deeplinks-20260720"></script>
@@ -406,6 +419,7 @@
 <script data-gd-surface="studio" src="scripts/studio/shot-system/practice-data/practice-data-page.js?v=ownership-shell-002"></script>
 <script data-gd-surface="studio" src="scripts/studio/shot-system/course-data/course-data-page.js?v=ownership-shell-003"></script>
 <script data-gd-surface="studio" src="scripts/studio/shot-system/practice-email/practice-email-page.js?v=ownership-shell-004"></script>
+<script data-gd-surface="studio" src="scripts/studio/shot-system/bubble-geometry/bubble-geometry-page.js?v=bubble-geometry-001"></script>
 <script data-gd-surface="studio" src="scripts/studio/commerce/commerce-page.js?v=ownership-shell-003"></script>
 <script data-gd-surface="studio" src="scripts/studio/players-coaches/players-coaches-page.js?v=ownership-shell-003"></script>
 <script data-gd-surface="studio" src="scripts/studio/system/system-dev-panel-host.js?v=ownership-shell-003"></script>

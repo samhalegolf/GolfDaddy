@@ -99,7 +99,36 @@
     startdirection: 'startDirection',
     startdirectiondeg: 'startDirection',
     startdir: 'startDirection',
+    launchdirection: 'startDirection',
+    horizontallaunch: 'startDirection',
     curve: 'curve',
+    /* Delivery/flight fields the Bubble Signal engine reads. Optional
+       everywhere: a monitor that does not report them still imports, and a
+       Signal that needs one simply does not fire. See
+       scripts/gd-bubble-signals-core.js EVIDENCE_ROUTES. */
+    dynamicloft: 'dynamicLoft',
+    dynloft: 'dynamicLoft',
+    dynamicloftdeg: 'dynamicLoft',
+    loftangle: 'dynamicLoft',
+    dynamiclie: 'dynamicLie',
+    dynlie: 'dynamicLie',
+    lie: 'dynamicLie',
+    lieangle: 'dynamicLie',
+    attackangle: 'attackAngle',
+    angleofattack: 'attackAngle',
+    aoa: 'attackAngle',
+    attackangledeg: 'attackAngle',
+    descentangle: 'descentAngle',
+    angleofdescent: 'descentAngle',
+    landingangle: 'descentAngle',
+    peakheight: 'peakHeight',
+    apex: 'peakHeight',
+    apexheight: 'peakHeight',
+    maxheight: 'peakHeight',
+    height: 'peakHeight',
+    hangtime: 'hangTime',
+    flighttime: 'hangTime',
+    airtime: 'hangTime',
     target: 'targetLine',
     targetline: 'targetLine',
     date: 'hitAt',
@@ -132,6 +161,12 @@
     faceToPath: 'face-to-path',
     startDirection: 'start',
     curve: 'curve',
+    dynamicLoft: 'dynamic loft',
+    dynamicLie: 'dynamic lie',
+    attackAngle: 'attack angle',
+    descentAngle: 'descent angle',
+    peakHeight: 'peak height',
+    hangTime: 'hang time',
     targetLine: 'target',
     side: 'side',
     hitAt: 'shot time'
@@ -154,7 +189,13 @@
     pathAngle: true,
     faceToPath: true,
     startDirection: true,
-    curve: true
+    curve: true,
+    dynamicLoft: true,
+    dynamicLie: true,
+    attackAngle: true,
+    descentAngle: true,
+    peakHeight: true,
+    hangTime: true
   };
 
   /* Column order assumed when a file arrives with no usable header row. */
@@ -943,6 +984,15 @@
         faceToPath: asNumber(input.faceToPath),
         startDirection: asNumber(input.startDirection),
         curve: asNumber(input.curve),
+        /* Optional Signal-engine inputs. null when the monitor did not report
+           them - never defaulted to 0, because a fabricated 0 deg dynamic lie
+           is exactly the stand-in a progression Signal would read as evidence. */
+        dynamicLoft: asNumber(input.dynamicLoft),
+        dynamicLie: asNumber(input.dynamicLie),
+        attackAngle: asNumber(input.attackAngle),
+        descentAngle: asNumber(input.descentAngle),
+        peakHeight: asNumber(input.peakHeight),
+        hangTime: asNumber(input.hangTime),
         targetLine: cleanString(input.targetLine),
         sideSpin: asNumber(input.sideSpin),
         totalSpin: asNumber(input.totalSpin),

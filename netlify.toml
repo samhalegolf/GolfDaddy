@@ -3,12 +3,16 @@
   command = "npm run build:netlify"
   functions = "functions"
 
-# The practice parser is one file shared by the browser and the import
-# function, so it lives in scripts/ where index.html can load it. That puts it
-# outside the functions directory: pin it explicitly rather than trusting the
-# bundler to trace a require that leaves functions/.
+# The practice parser and the bubble Signal engine are each one file shared by
+# the browser and a function, so they live in scripts/ where index.html can
+# load them. That puts them outside the functions directory: pin them
+# explicitly rather than trusting the bundler to trace a require that leaves
+# functions/.
 [functions]
-  included_files = ["scripts/gd-practice-parser-core.js"]
+  included_files = [
+    "scripts/gd-practice-parser-core.js",
+    "scripts/gd-bubble-signals-core.js"
+  ]
 
 # Local dev with the /api/* functions actually running. `python3 -m http.server`
 # alone serves the source tree but no functions, so /api/auth-public-config 404s
@@ -187,6 +191,11 @@
 [[redirects]]
   from = "/api/shot-library-sync"
   to = "/.netlify/functions/shot-library-sync"
+  status = 200
+
+[[redirects]]
+  from = "/api/bubble-model"
+  to = "/.netlify/functions/bubble-model"
   status = 200
 
 [[redirects]]

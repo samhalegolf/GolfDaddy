@@ -118,7 +118,11 @@ const DEV_DEFAULTS={
     gpsMaxDepthPct:.18,
     gpsMaxLateralM:28,
     gpsMaxDepthM:38,
-    gpsPixelCapScale:1
+    gpsPixelCapScale:1,
+    // Studio's 1x/5x/10x Micro-Geometry viewer. DEVELOPMENT ONLY - production
+    // deformation is meant to be almost invisible, and anything above 1 here
+    // is a magnifying glass, not a setting.
+    microExaggeration:1
   },
   statsCluster:{
     consistencyMinPct:51,
@@ -247,6 +251,7 @@ const DEV_FIELDS={
   "bubbleGeometry.gpsMaxLateralM":{label:"GPS max width cap",step:1,min:10,max:80,unit:"m",help:"Absolute ceiling on GPS bubble half-width regardless of distance."},
   "bubbleGeometry.gpsMaxDepthM":{label:"GPS max depth cap",step:1,min:12,max:100,unit:"m",help:"Absolute ceiling on GPS bubble half-depth regardless of distance."},
   "bubbleGeometry.gpsPixelCapScale":{label:"GPS screen-size cap scale",step:.05,min:.5,max:2.5,help:"Multiplier on the on-screen pixel cap that stops the bubble dominating the map. 1 = current behaviour."},
+  "bubbleGeometry.microExaggeration":{label:"Micro-Geometry exaggeration",step:1,min:1,max:10,unit:"x",help:"DEV ONLY. Magnifies the Bubble Signal region deformation and axis correction so it can be seen. 1 = real production geometry. Studio's Bubble Geometry page drives this; leave it at 1 anywhere a real bubble is being judged."},
   "statsCluster.consistencyMinPct":{label:"Consistency slider min",step:1,min:40,max:75,unit:"%",help:"Lowest result-shot containment setting."},
   "statsCluster.consistencyMaxPct":{label:"Consistency slider max",step:1,min:60,max:90,unit:"%",help:"Highest result-shot containment setting."},
   "statsCluster.consistencyDefaultPct":{label:"Default consistency",step:1,min:51,max:80,unit:"%",help:"Default containment setting for Shot Data fit checks."},
@@ -18184,6 +18189,58 @@ function normAng(a){
 function bubbleModeLabel(){
   return bubbleRenderMode==="classic" ? "classic" : `engine oval · ${bubbleBiasMode}${bubbleOrganic?" · texture":""}`;
 }
+/* ---- Bubble Micro-Geometry -------------------------------------------------
+   The approved player model, as it arrives from the server. A degree of axis
+   correction and eight region multipliers, nothing else - the engine is not
+   told why longRight is 1.006, only what to draw.
+
+   null is the shipped state and means "no model": every factor is 1, the axis
+   moves 0 degrees, and the bubble is byte-for-byte the one that rendered
+   before this layer existed. That is the V1 success condition, and it is why
+   the read path degrades to 1 at every step rather than throwing. */
+let gdMicroGeometryModel=null;
+function gdSetBubbleMicroGeometry(geometry){
+  const core=typeof window!=="undefined"?window.GDBubbleSignalsCore:null;
+  if(!geometry||!core||typeof core.microGeometryFactor!=="function"){gdMicroGeometryModel=null;return false}
+  /* Identity is stored as null on purpose: an all-1.0 model and no model are
+     the same picture, and keeping them the same object means the ring loop
+     takes the same branch for both. */
+  if(typeof core.isIdentityGeometry==="function"&&core.isIdentityGeometry(geometry)){gdMicroGeometryModel=null;return true}
+  gdMicroGeometryModel=geometry;
+  return true;
+}
+function gdBubbleMicroGeometry(){return gdMicroGeometryModel}
+/* Studio's 1x/5x/10x control. Development only - production reads 1, and the
+   dev field is absent on the phone build, where dev() returns undefined and
+   the exaggeration falls back to 1. */
+function gdMicroGeometryExaggeration(){
+  try{
+    const value=typeof dev==="function"?Number(dev("bubbleGeometry.microExaggeration")):NaN;
+    return Number.isFinite(value)?gdClamp(value,1,10):1;
+  }catch(e){return 1}
+}
+/* The multiplier at one point on the ring. Delegates to the shared core so the
+   curve Studio draws and the curve the map draws are the same function, not
+   two implementations that agree today. */
+function gdMicroGeometryRadiusFactor(rel){
+  const geometry=gdMicroGeometryModel;
+  if(!geometry)return 1;
+  const core=typeof window!=="undefined"?window.GDBubbleSignalsCore:null;
+  if(!core||typeof core.microGeometryFactor!=="function")return 1;
+  const factor=Number(core.microGeometryFactor(geometry,rel,gdMicroGeometryExaggeration()));
+  /* A published config could never produce this, but a hand-edited cache
+     could, and a bubble is not the place to find out. */
+  return Number.isFinite(factor)?gdClamp(factor,.85,1.15):1;
+}
+/* The only rotation this layer is allowed. Curvature Bias is the one Signal
+   permitted to move the axis at all, and the core has already capped its
+   request at half a degree; this clamp is the second, independent one. */
+function gdMicroGeometryAxisDeg(){
+  const geometry=gdMicroGeometryModel;
+  if(!geometry)return 0;
+  const deg=Number(geometry.axisAdjustmentDeg);
+  return Number.isFinite(deg)?gdClamp(deg,-.5,.5)*gdMicroGeometryExaggeration():0;
+}
 function bubbleRadiusFactor(rel,payload=null){
   const front=Math.cos(rel);
   const frontPos=Math.max(0,front);
@@ -18287,7 +18344,10 @@ function gdBubbleAxes(payloadInput,scale=1){
 }
 function gdBubbleLocalToLatLng(center,payloadInput,x,y){
   const payload=gdBubblePayloadForRender(payloadInput);
-  const tilt=((gdFiniteNumber(payload.visual&&payload.visual.visualTiltDeg,payload.clusterTiltDeg)||0)*Math.PI)/180;
+  /* The Micro-Geometry axis correction rides on the engine's own cluster tilt
+     rather than replacing it. The club progression stays primary; this adds at
+     most half a degree on top of whatever tilt the profile already derived. */
+  const tilt=(((gdFiniteNumber(payload.visual&&payload.visual.visualTiltDeg,payload.clusterTiltDeg)||0)+gdMicroGeometryAxisDeg())*Math.PI)/180;
   const skew=((gdFiniteNumber(payload.visual&&payload.visual.visualSkewDeg,0)||0)*Math.PI)/180;
   const skewedY=y + Math.tan(skew)*x*.42;
   const rx=x*Math.cos(tilt)-skewedY*Math.sin(tilt);
@@ -18316,7 +18376,16 @@ function buildBubbleShape(center, payloadInput, scale=1){
   const steps=168;
   for(let i=0;i<steps;i++){
     const rel=(Math.PI*2*i)/steps;
-    const rf=bubbleRadiusFactor(rel,payload);
+    /* rel is the SAME parameter the region model is written against: rel=0 is
+       Long (+x, down the shot line), rel=pi/2 is Right (+y). See the region
+       orientation note in scripts/gd-bubble-signals-core.js - if this loop's
+       parameterisation ever changes, that note changes with it.
+
+       Applied as a separate multiplier rather than folded into
+       bubbleRadiusFactor: that function clamps itself to +/-4% for the
+       distance tendency it owns, and mixing a second effect into the same
+       clamp would let one silently eat the other. */
+    const rf=bubbleRadiusFactor(rel,payload)*gdMicroGeometryRadiusFactor(rel);
     pts.push({x:Math.cos(rel)*axes.depth*rf,y:Math.sin(rel)*axes.lateral*rf});
   }
   return gdSmoothBubbleLocalRing(pts,2).map(point=>gdBubbleLocalToLatLng(center,payload,point.x,point.y));
