@@ -260,7 +260,7 @@
 	    const code = String((error && error.code) || (error && error.body && error.body.code) || '').trim();
 	    const message = String(error && error.message || '').trim();
 	    if (code === 'account_not_found' || /account.*not found|not found/i.test(message)) return 'Account does not exist.';
-	    if (code === 'auth_not_configured' || /not configured/i.test(message)) return 'Supabase Auth is not configured.';
+	    if (code === 'auth_not_configured' || /not configured/i.test(message)) return 'Sign-in is not available right now. Please try again later.';
 	    if (code === 'password_changed_relogin_required') return 'Password changed in another session. Sign in again with your new password.';
 	    if (code === 'sign_in_failed' && /wrong|expired|invalid|stale|site/i.test(message)) return 'Sign in failed. Check your password, and if you recently changed it, sign in again with the new password.';
 	    if (/password/i.test(message)) return 'Incorrect password.';
@@ -1351,14 +1351,15 @@
         password: document.getElementById('gd67AuthPassword')?.value,
         role: 'player'
       });
-      setAuthFeedback('Confirming account in Supabase...', 'info');
+      setAuthFeedback('Setting up your account...', 'info');
       try {
-        if (!window.ClarityCloudSync || typeof window.ClarityCloudSync.requireAccountSynced !== 'function') throw new Error('Supabase account sync is not ready');
+        if (!window.ClarityCloudSync || typeof window.ClarityCloudSync.requireAccountSynced !== 'function') throw new Error('Account sync is not ready');
         await window.ClarityCloudSync.requireAccountSynced(created, 'signup');
       } catch(syncError) {
         try { if (window.ClarityCloudSync && typeof window.ClarityCloudSync.discardLocalAccount === 'function') window.ClarityCloudSync.discardLocalAccount(created && created.accountId); } catch(discardError) {}
-        throw new Error(syncError && syncError.message ? syncError.message : 'Supabase did not confirm this account. Account was not created.');
+        throw new Error(syncError && syncError.message ? syncError.message : 'We could not confirm this account, so it was not created. Please try again.');
       }
+      setAuthFeedback('', 'info');
       gdSafeLocalSet('gd_account_keep_logged_in_v1',document.getElementById('gd67KeepLoggedIn')?.checked===false?'0':'1');
       try{sessionStorage.setItem('gd_account_session_login_v1','1');}catch(e){}
 	      saveSafe();
@@ -1404,9 +1405,13 @@
         document.getElementById('gd67AuthPassword')?.value,
         {keepLoggedIn: document.getElementById('gd67KeepLoggedIn')?.checked !== false}
       );
-      setAuthFeedback('Confirming account in Supabase...', 'info');
-      if (!window.ClarityCloudSync || typeof window.ClarityCloudSync.requireAccountSynced !== 'function') throw new Error('Supabase account sync is not ready');
+      setAuthFeedback('Signing you in...', 'info');
+      if (!window.ClarityCloudSync || typeof window.ClarityCloudSync.requireAccountSynced !== 'function') throw new Error('Account sync is not ready');
       await window.ClarityCloudSync.requireAccountSynced(loggedIn, 'login');
+	      /* Clear the progress message before closing - it used to be left set,
+	         so the next time the login card rendered it still read as if a
+	         sign-in was mid-flight. */
+	      setAuthFeedback('', 'info');
 	      finishLogin(loggedIn);
 	    } catch(e) {
 	      /* No account-restore fallback here: a successful login already merges the
@@ -1414,7 +1419,7 @@
 	         exist there - restoring cannot help, and there is no recovery token
 	         during a normal login to authorise one. The setup/reset flow is where
 	         restoreAccounts belongs, and it is wired there. */
-	      if (/supabase|confirm account|sync/i.test(String(e && e.message || ''))) {
+	      if (/supabase|confirm (your |this )?account|sync/i.test(String(e && e.message || ''))) {
 	        try { if (api && typeof api.logout === 'function') api.logout(); } catch(logoutError) {}
 	      }
 	      if (forgotHelp) forgotHelp.textContent = '';

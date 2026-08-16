@@ -35,7 +35,7 @@
     var response = await fetch(url, { method: "POST", headers: headers, body: JSON.stringify(payload || {}) });
     var body = await response.json().catch(function () { return {}; });
     if (!response.ok || body.ok === false) {
-      var error = new Error(body.error || "Supabase Auth request failed");
+      var error = new Error(body.error || "Sign-in request failed. Please try again.");
       error.code = body.code || "request_failed";
       error.status = response.status;
       error.body = body;
@@ -137,7 +137,7 @@
   async function updateAccount(data) {
     var existing = currentAccount();
     if (!existing) throw new Error("Sign in first");
-    if (!existing.supabaseUserId) throw new Error("This account is not linked to Supabase Auth yet. Sign out and sign back in with Supabase Auth.");
+    if (!existing.supabaseUserId) throw new Error("This account needs to be re-linked. Sign out and sign back in, then try again.");
     var nextPassword = String(data && data.password || "");
     /* The access token is the proof of identity - the endpoint resolves the user
        from it and refuses a request without one. Sending the account's own
@@ -268,7 +268,7 @@
   async function fetchAuthConfig() {
     var response = await fetch("/api/auth-public-config");
     var body = await response.json().catch(function () { return {}; });
-    if (!response.ok || !usableAuthConfig(body)) throw new Error("Supabase public auth config is missing");
+    if (!response.ok || !usableAuthConfig(body)) throw new Error("Sign-in is not available right now. Please try again later.");
     authConfigMemo = body;
     saveJson(AUTH_CONFIG_KEY, body);
     publishAuthConfigExtras(body);

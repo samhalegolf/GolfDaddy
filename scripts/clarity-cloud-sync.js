@@ -156,7 +156,7 @@
     });
     var body = await response.json().catch(function () { return {}; });
     if (!response.ok || body.synced === false) {
-      var error = new Error(body.error || "Could not confirm account in Supabase");
+      var error = new Error(body.error || "Could not confirm your account. Check your connection and try again.");
       error.status = response.status;
       error.body = body;
       throw error;
@@ -217,7 +217,7 @@
   async function requireAccountSynced(account, reason) {
     var payload = payloadFor(account, reason || "required");
     if (!payload.account || !payload.account.accountId) throw new Error("No local account to sync");
-    saveStatus({ state: "checking", label: "Confirming account in Supabase…", error: "" });
+    saveStatus({ state: "checking", label: "Confirming your account…", error: "" });
     try {
       var result = await post(payload);
       adoptCanonicalIds(result);
@@ -227,10 +227,10 @@
       enqueue(payload, error);
       saveStatus({
         state: isAutomaticReason(reason) ? "pending" : "blocked",
-        label: isAutomaticReason(reason) ? "Pending sync" : "Supabase connection issue",
+        label: isAutomaticReason(reason) ? "Pending sync" : "Connection issue — tap to retry",
         reason: reason || "required",
         silent: isAutomaticReason(reason),
-        error: error && error.message ? error.message : "Could not confirm account in Supabase"
+        error: error && error.message ? error.message : "Could not confirm your account. Check your connection and try again."
       });
       throw error;
     }
@@ -240,6 +240,14 @@
     var account = currentAccount();
     if (!account) return saveStatus({ state: "signed_out", label: "Signed out", error: "" });
     if (pending) return status;
+    /* Logging in already confirms the account with the server, and the login
+       fires clarity:session-changed straight after - which landed here 300ms
+       later and ran the whole check a second time over the home screen. If a
+       sync just succeeded and nothing is queued, that repeat is pure noise. */
+    if (reason === "session-changed" && status.state === "synced" && !outbox().length) {
+      var last = Date.parse(status.lastSyncedAt || "") || 0;
+      if (Date.now() - last < 10000) return status;
+    }
     pending = true;
     try {
       await requireAccountSynced(account, reason || "manual");
@@ -349,7 +357,11 @@
   function renderBadge() {
     var account = currentAccount();
     var silentAutoStatus = status && status.silent && isAutomaticReason(status.reason);
-    var shouldShow = account && !silentAutoStatus && status && status.state && ["blocked", "pending", "checking"].indexOf(status.state) !== -1;
+    /* "checking" is a transient state that resolves itself within a second or
+       two - flashing a banner for it (over the login card and again over the
+       home screen right after login) just made the flow feel jumpy. Only the
+       actionable states earn a badge. */
+    var shouldShow = account && !silentAutoStatus && status && status.state && ["blocked", "pending"].indexOf(status.state) !== -1;
     var existing = document.getElementById("clarityCloudSyncBadge");
     if (!shouldShow) {
       if (existing) existing.remove();
@@ -363,7 +375,7 @@
       existing.onclick = function () { syncNow("badge-click").catch(function () {}); };
       document.body.appendChild(existing);
     }
-    existing.textContent = status.state === "checking" ? "Checking Supabase…" : (status.label || "Pending sync");
+    existing.textContent = status.label || "Pending sync";
     existing.title = status.error || "Tap to retry sync";
   }
 
