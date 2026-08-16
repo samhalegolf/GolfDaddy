@@ -208,7 +208,12 @@ const adapter = `
   }
   function distance(a, b) { return map.distance(a, b); }
   function projectFramePoint(origin, brg, meters) { return project(origin, brg, meters); }
-  function gdMappedTeeAreaPoint() { return currentTee; }
+  /* The verbatim copy of gdStartIsInMappedTeeArea reads THIS name — it is the
+     gate on the whole fairway-line layup rule. The adapter used to supply it
+     as gdMappedTeeAreaPoint(), which nothing read, so the gate never opened
+     and every out-of-reach hole laid up on the straight line to the green,
+     cutting the dogleg, instead of on the fairway line. */
+  function gdActiveMappedTeeStartPoint() { return currentTee; }
 
   window.gdMappedFairwayLayupTarget = function (startLike, greenLike, carryM) {
     try {

@@ -270,39 +270,139 @@
        So the frame is solved ONCE on entering a stage, with whatever the target
        was at that moment, and then parks. Only a real change re-solves it: a
        different stage, a new hole, a presentation swap, a resize, a settings
-       change — or the edge-pan exception below.
+       change. The edge-pan below SLIDES the solved frame instead of re-solving
+       it, so it never comes through this key at all.
 
        (play.js had this as cameraHolds(); dropping it in the rewrite is what
        broke bubble dragging.) */
     return [cam.stage, scene.hole.number, published ? "p" : "l",
       r.holeNumber, window.innerWidth, window.innerHeight,
-      settings() ? (settings().shotUp() ? 1 : 0) + ":" + settings().lockTightness() : "",
-      edgePanKey()
+      settings() ? (settings().shotUp() ? 1 : 0) + ":" + settings().lockTightness() : ""
     ].join("|");
   }
 
   /* The one thing allowed to move a parked camera: the bubble dragged all the
      way to the edge of the screen, where the player is asking for map that is
-     not on it yet. While the finger sits in the edge band the frame is allowed
-     to re-solve, which pans the view along with the target; the moment it comes
-     back to the interior the camera parks again.
+     not on it yet.
+
+     The pan is a pure TRANSLATION of the parked frame — same zoom, same
+     rotation, only the offset slides. It must be, and the first version of
+     this exception is why: it re-solved the whole stage frame while the finger
+     sat in the band, and the lock frame is solved to hold start→target. The
+     target is read back through the projection the solve had just changed, so
+     each pass fed the next — zoom and bearing ran away within a few moves and
+     the camera looked like it was spinning. A translation has no gain to feed:
+     the mapping the finger converts through only slides, so the loop is dead
+     by construction and the view stays exactly the picture the player locked,
+     just shifted.
+
+     While the finger sits in the band the view slides toward that edge —
+     faster the deeper in — and the aim is re-derived under the finger each
+     frame, so a stationary finger at the bezel still pulls the target onto the
+     ground being revealed, which is the whole point of the gesture. Leave the
+     band or release, and the camera is parked right where the pan left it; the
+     next real solve (stage, hole, presentation, resize, settings) starts from
+     a clean frame.
 
      Measured on the FINGER, not the painted cluster: the cluster centre sits
      well off the aim (aim offset, forward bias, bag roof) and the roof clamps
      it hard, so it can be hundreds of pixels short of the edge while the drag
      is already against the bezel — the gesture would simply never fire. */
   var EDGE_PAN_MARGIN_PX = 72;
-  var dragPoint = null;
+  var EDGE_PAN_MAX_PX_PER_FRAME = 11;
+  var dragPoint = null;    // client coords of the live trackPoint drag
+  var activeDrag = null;   // { grab, onMove } while a trackPoint drag runs
+  var panLoopId = null;
 
-  function edgePanKey() {
-    if (!dragPoint) return "-";
-    var atEdge = dragPoint.x <= EDGE_PAN_MARGIN_PX
-      || dragPoint.y <= EDGE_PAN_MARGIN_PX
-      || dragPoint.x >= window.innerWidth - EDGE_PAN_MARGIN_PX
-      || dragPoint.y >= window.innerHeight - EDGE_PAN_MARGIN_PX;
-    /* Vary the key while the finger is in the band so the frame keeps
-       re-solving and the map keeps panning; freeze it the moment it is not. */
-    return atEdge ? "edge:" + Math.round(dragPoint.x) + "," + Math.round(dragPoint.y) : "-";
+  /* Screen-space slide for this frame: the band the finger is in decides the
+     direction (content moves INTO the screen from that edge), the depth decides
+     the speed. Null when the finger is in the interior. */
+  function edgePanVector() {
+    if (!dragPoint) return null;
+    var m = EDGE_PAN_MARGIN_PX, w = window.innerWidth, h = window.innerHeight;
+    function speed(depth) {
+      return Math.min(EDGE_PAN_MAX_PX_PER_FRAME, 2 + (depth / m) * (EDGE_PAN_MAX_PX_PER_FRAME - 2));
+    }
+    var v = { x: 0, y: 0 };
+    if (dragPoint.x <= m) v.x = speed(m - dragPoint.x);
+    else if (dragPoint.x >= w - m) v.x = -speed(dragPoint.x - (w - m));
+    if (dragPoint.y <= m) v.y = speed(m - dragPoint.y);
+    else if (dragPoint.y >= h - m) v.y = -speed(dragPoint.y - (h - m));
+    return (v.x || v.y) ? v : null;
+  }
+
+  /* A surface pan must not slide past the picture: published imagery is finite
+     and beyond its border there is nothing to reveal — the projector already
+     refuses to answer out there. Measured as how far the viewport's corners
+     fall OUTSIDE the image (in image px, summed), because a rotated lock frame
+     can legitimately start with corners poking out — the rule is that a step
+     may never make that overshoot worse, not that coverage must be perfect.
+     Checked per axis by the caller, so hitting the top of the image still
+     allows sliding along it. */
+  function surfacePanViolation(frame, meta) {
+    var w = Number(meta.outputDimensions.width), h = Number(meta.outputDimensions.height);
+    var corners = [
+      { left: 0, top: 0 }, { left: window.innerWidth, top: 0 },
+      { left: 0, top: window.innerHeight }, { left: window.innerWidth, top: window.innerHeight }
+    ];
+    var total = 0;
+    for (var i = 0; i < corners.length; i++) {
+      var px = surfaceLib.transformInvert(frame, corners[i]);
+      if (!px) return Infinity;
+      total += Math.max(0, -px.x) + Math.max(0, px.x - w)
+        + Math.max(0, -px.y) + Math.max(0, px.y - h);
+    }
+    return total;
+  }
+
+  function surfacePanAllowed(frame, meta, v) {
+    var shifted = { a: frame.a, b: frame.b, tx: frame.tx + v.x, ty: frame.ty + v.y };
+    return surfacePanViolation(shifted, meta) <= surfacePanViolation(frame, meta) + 0.5;
+  }
+
+  /* PUBLISHED SURFACES ONLY. The live map is the fallback for unmapped holes
+     and has no captured picture to slide around — its frame already holds
+     tee→green, and unbounded map reveal is complexity nothing needs yet, so
+     there the camera stays fully parked, edge band included. Returns whether
+     the view actually moved. */
+  function applyEdgePanStep(v) {
+    if (!published) return false;
+    var img = el("surfaceImage");
+    if (!img || !img.dataset.playSurface || !activeFrame) return false;
+    var meta;
+    try { meta = JSON.parse(img.dataset.playSurface); } catch (e) { return false; }
+    /* Per-axis clamp: sliding into the image border kills that axis only. */
+    var step = { x: v.x, y: v.y };
+    if (step.x && !surfacePanAllowed(activeFrame, meta, { x: step.x, y: 0 })) step.x = 0;
+    if (step.y && !surfacePanAllowed(activeFrame, meta, { x: 0, y: step.y })) step.y = 0;
+    if (!step.x && !step.y) return false;
+    activeFrame = { a: activeFrame.a, b: activeFrame.b,
+      tx: activeFrame.tx + step.x, ty: activeFrame.ty + step.y };
+    img.style.transform = "matrix(" + activeFrame.a + "," + activeFrame.b + ","
+      + (-activeFrame.b) + "," + activeFrame.a + "," + activeFrame.tx + "," + activeFrame.ty + ")";
+    applyMeshFrame();
+    return true;
+  }
+
+  /* One rAF loop per trackPoint drag, started on grab and cancelled on
+     release. Each frame: slide if the finger is in the band, and only if the
+     view really moved re-derive the aim from the finger through the shifted
+     projector — the same grab offset and the same onMove seam a real
+     pointermove uses. A clamped or live-map "pan" moves nothing, so the aim
+     is left to the pointermove handler that already owns it. */
+  function edgePanLoop() {
+    panLoopId = null;
+    if (!activeDrag || !dragPoint) return;
+    var v = edgePanVector();
+    if (v && applyEdgePanStep(v)) {
+      var proj = projector();
+      if (proj) {
+        var at = unTilt(dragPoint.x, dragPoint.y);
+        var ll = proj.toLatLng({ left: at.left + activeDrag.grab.x, top: at.top + activeDrag.grab.y });
+        if (ll) activeDrag.onMove(ll);
+      }
+    }
+    panLoopId = window.requestAnimationFrame(edgePanLoop);
   }
 
   function framePoints(scene, pins) {
@@ -1390,7 +1490,11 @@
       offset = null;
       /* Cleared BEFORE the final render: the edge interaction is over, so the
          camera has to be stationary again from this pass on, not one later. */
-      if (opts.trackPoint) dragPoint = null;
+      if (opts.trackPoint) {
+        dragPoint = null;
+        activeDrag = null;
+        if (panLoopId !== null) { window.cancelAnimationFrame(panLoopId); panLoopId = null; }
+      }
       if (!document.body.classList.contains(opts.busyClass)) return;
       /* A gesture flag is still a write to a watched element, so it declares
          itself rather than showing up as an unattributed Leak. Trace caught
@@ -1416,7 +1520,11 @@
       repaint(opts.busyClass + ":start", function () {
         document.body.classList.add(opts.busyClass);
       });
-      if (opts.trackPoint) dragPoint = { x: e.clientX, y: e.clientY };
+      if (opts.trackPoint) {
+        dragPoint = { x: e.clientX, y: e.clientY };
+        activeDrag = { grab: offset, onMove: opts.onMove };
+        if (panLoopId === null) panLoopId = window.requestAnimationFrame(edgePanLoop);
+      }
       e.preventDefault();
       if (opts.stop) e.stopPropagation();
     });
