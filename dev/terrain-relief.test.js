@@ -173,4 +173,32 @@ assert.throws(() => fillNoData(new Float32Array(64).fill(-3.4e38)), /no plausibl
   'a block with no real ground must be refused, not filled');
 console.log('10. nodata filled at %sm; all-nodata refused', wetRange.min.toFixed(1));
 
-console.log('\nterrain-relief passed: 14 checks + float32 path (8-10)');
+// ---- 11. The terrarium leg (EU terrain tiles): a terrarium mosaic shades under its declared
+//          encoding, and normalising it to terrain-RGB - what buildCapture stores - preserves
+//          the ground within the coarser of the two encodings' steps.
+const terrEnc = h => { const v = Math.round((h + 32768) * 256); return [(v >> 16) & 255, (v >> 8) & 255, v & 255]; };
+const terrRaw = Buffer.alloc(FW * FH * 3);
+for (let i = 0; i < truth.length; i++) {
+  const [r, g, b] = terrEnc(truth[i]);
+  terrRaw[i * 3] = r; terrRaw[i * 3 + 1] = g; terrRaw[i * 3 + 2] = b;
+}
+const terrPng = await sharp(terrRaw, { raw: { width: FW, height: FH, channels: 3 } }).png().toBuffer();
+const terrRelief = await reliefFromTerrainRgb(terrPng, { latitude: 49.19, zoom: 13 }, { encoding: 'terrarium' });
+assert.equal(terrRelief.encoding, 'terrarium', 'a terrarium mosaic must be recognised as terrarium, not misread as terrain-rgb');
+const truthLo = Math.min(...truth), truthHi = Math.max(...truth);
+assert.ok(Math.abs(terrRelief.elevation.min - truthLo) < 0.1 && Math.abs(terrRelief.elevation.max - truthHi) < 0.1,
+  'terrarium decode must recover the fixture ground ' + truthLo.toFixed(1) + '..' + truthHi.toFixed(1) +
+  ', got ' + terrRelief.elevation.min + '..' + terrRelief.elevation.max);
+const terrRawBack = await sharp(terrPng).raw().toBuffer({ resolveWithObject: true });
+const terrHeights = decodeElevation(terrRawBack.data, FW, FH, terrRawBack.info.channels, 'terrarium');
+const normalised = await terrainRgbPngFromHeights(terrHeights.heights, FW, FH);
+const normBack = await sharp(normalised).raw().toBuffer({ resolveWithObject: true });
+const normDecoded = decodeElevation(normBack.data, FW, FH, normBack.info.channels, 'terrain-rgb');
+assert.equal(normDecoded.encoding, 'terrain-rgb', 'the stored artefact must be terrain-RGB - the phone mesh decodes nothing else');
+let normErr = 0;
+for (let i = 0; i < truth.length; i++) normErr = Math.max(normErr, Math.abs(normDecoded.heights[i] - truth[i]));
+assert.ok(normErr <= 0.06, 'terrarium -> terrain-RGB normalisation must hold ground within the packing steps, got ' + normErr);
+console.log('11. terrarium decode %s..%sm; normalised to terrain-RGB within %sm',
+  terrRelief.elevation.min.toFixed(1), terrRelief.elevation.max.toFixed(1), normErr.toFixed(3));
+
+console.log('\nterrain-relief passed: 14 checks + float32 path (8-10) + terrarium path (11)');

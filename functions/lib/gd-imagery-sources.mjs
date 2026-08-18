@@ -95,6 +95,45 @@ function licenseFor(entry, spec) {
 
 /* ---------- registry --------------------------------------------------------------------- */
 
+/* One elevation source for all of Europe: Mapzen/Tilezen Terrain Tiles on AWS Open Data -
+   keyless xyz PNG in the terrarium encoding gd-relief-core already decodes, so this rides the
+   existing tiled path end to end (the capture normalises terrarium to terrain-RGB before
+   storing, so the artefact on disk stays one format - see buildCapture).
+
+   What it actually is over Europe: Copernicus EU-DEM at 25m as the base, with better national
+   data patched in where Tilezen ingested it (Austria 10m, Norway 10m, parts of England 2m).
+   That is an honest but COARSE answer - "this fairway rolls away left" renders; green-scale
+   moulding does not - and it is the deliberate v1 trade: the national LiDAR that would match
+   LINZ (AHN 0.5m, RGE ALTI 1m, MDT02 2m) ships as WCS/downloads in national projections,
+   which is a new adapter plus reprojection nothing else needs yet. Carried per-spec so the
+   licence is the DEM's own (public-domain/attribution mix, NOT the imagery entry's national
+   licence) and so swapping in real LiDAR later means editing this one constant.
+
+   z13 is ~13m/px at European golf latitudes - at or finer than the 10m patches, one step of
+   honest upscale over the 25m base. Above it there is nothing left to fetch. */
+const EU_TERRAIN_TILES_DEM = {
+  adapter: "xyz",
+  urlTemplate: "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png",
+  apiKeyEnv: "",
+  encoding: "terrarium",
+  nativeResolutionM: 10,
+  fallbackResolutionM: 25,
+  maxUsefulZoom: 13,
+  license: {
+    name: "Open (Mapzen Terrain Tiles: SRTM public domain, EU-DEM Copernicus attribution)",
+    url: "https://github.com/tilezen/joerd/blob/master/docs/attribution.md",
+    storage: true, derivatives: true, redistribution: true, commercial: true,
+    attributionRequired: true
+  }
+};
+const EU_TERRAIN_TILES_ATTRIBUTION = {
+  /* The wording Copernicus itself asks for, plus the courtesy credits the joerd attribution
+     doc lists for the patched-in sources. */
+  text: "Elevation: Mapzen Terrain Tiles. Produced using Copernicus data and information funded by the European Union - EU-DEM layers; SRTM data courtesy of the U.S. Geological Survey",
+  url: "https://github.com/tilezen/joerd/blob/master/docs/attribution.md",
+  perSurvey: false
+};
+
 export const IMAGERY_SOURCES = [
   {
     key: "linz-nz",
@@ -452,6 +491,172 @@ export const IMAGERY_SOURCES = [
          5. Confirm whether attributionFor needs a NSW-specific per-survey string; today its
             perSurvey branch is hardcoded to LINZ wording.
          6. Delete `draft: true`. */
+  },
+
+  /* ---------- Europe -----------------------------------------------------------------------
+
+     Three national programmes whose imagery clears the storage/derivative/redistribution bar
+     the way LINZ and NAIP do: the Netherlands (Beeldmateriaal via PDOK, CC BY 4.0), Spain
+     (PNOA via IGN-E, CC BY 4.0), and France (IGN via the Geoplateforme, Licence Ouverte 2.0 -
+     Etalab's open licence, attribution-only and explicitly commercial-reuse, the reason all
+     three can exist here at all). The countries NOT here are absent for licensing, not
+     oversight: the UK and Ireland publish no openly licensed national aerial imagery
+     (Getmapping/APGB and OSi are both restricted), Germany is per-Land with no national grant,
+     Italy is regional, and the Nordics outside Denmark are mixed - those courses run
+     live-only, which is the truthful answer.
+
+     Regions are BOXES, and western Europe does not partition into boxes. The entries are
+     ordered most-specific-first (NL, then ES, then FR) and each comment names exactly which
+     foreign ground its box swallows. A course that mis-matches fails LOUDLY: WMTS tiles
+     outside a national mosaic 404 (or fall outside the layer's TileMatrixSetLimits), and
+     buildCapture's all-or-nothing coverage check refuses the capture rather than baking
+     blank frames. Polygon regions are the real fix if border-zone courses ever matter.
+
+     Elevation: every entry shares EU_TERRAIN_TILES_DEM below - honest but coarse. The
+     national LiDAR that would match LINZ quality (AHN 0.5m, RGE ALTI 1m, MDT02 2m) ships as
+     WCS/download services in national projections, which is a new adapter plus reprojection;
+     until that exists, 25m relief that says "this rolls away from you" beats no relief, and
+     the DEM is gated per-spec so improving it later touches one constant. */
+  {
+    key: "pdok-nl",
+    label: "Beeldmateriaal Nederland aerial (PDOK)",
+    /* The Netherlands minus nothing - the box is naturally tight. It still swallows Flanders
+       north of 50.74 and a strip of Germany east of the border; those courses 404 on the
+       mosaic edge and are refused, not blank-baked. */
+    region: { bbox: { south: 50.74, west: 3.35, north: 53.56, east: 7.23 }, country: "NL" },
+    license: {
+      name: "CC BY 4.0",
+      /* "Deze luchtfotoservices zijn voor iedereen kosteloos en vrij beschikbaar voor alle
+         toepassingen, onder hantering van het CC BY 4.0 gebruiksrecht" - PDOK's own wording,
+         read 2026-08-19. Licensor is the Beeldmateriaal partnership (Het Waterschapshuis). */
+      url: "https://www.pdok.nl/introductie/-/article/luchtfoto-pdok",
+      storage: true, derivatives: true, redistribution: true, commercial: true,
+      attributionRequired: true
+    },
+    imagery: {
+      adapter: "xyz",
+      /* RESTful WMTS read off the service's own capabilities, 2026-08-19: the EPSG:3857
+         matrix set runs to level 21 and the path is {TileMatrix}/{TileCol}/{TileRow} - i.e.
+         plain z/x/y. Actueel_orthoHR is the 8cm current-year national mosaic; the layer env
+         exists to pin a vintage year (e.g. "2024_orthoHR") the way LINZ_BASEMAPS_LAYER pins
+         a survey. */
+      urlTemplate: "https://service.pdok.nl/hwh/luchtfotorgb/wmts/v1_0/{layer}/EPSG:3857/{z}/{x}/{y}.jpeg",
+      layerEnv: "PDOK_LUCHTFOTO_LAYER",
+      defaultLayer: "Actueel_orthoHR",
+      apiKeyEnv: "",
+      /* 8cm source. z20 is 0.091m/px at Dutch latitudes - just coarser than native - so z21
+         (0.046m/px) is the first zoom at or finer than the mosaic, same rule as NAIP's z19.
+         The frame ceiling almost always binds below this anyway. */
+      maxUsefulZoom: 21,
+      minTrustedZoom: 13
+    },
+    dem: { ...EU_TERRAIN_TILES_DEM },
+    demAttribution: EU_TERRAIN_TILES_ATTRIBUTION,
+    attribution: {
+      text: "Luchtfoto © Beeldmateriaal Nederland, via PDOK, CC BY 4.0",
+      url: "https://www.pdok.nl/introductie/-/article/luchtfoto-pdok",
+      shortText: "© Beeldmateriaal Nederland CC BY 4.0",
+      perSurvey: false
+    }
+  },
+  {
+    key: "pnoa-es",
+    label: "PNOA orthophotos (IGN España)",
+    /* Mainland Spain plus the Balearics, minus everything a box cannot keep out of Portugal:
+       the west edge sits at -6.0 because Portugal's own border reaches -6.19, and that costs
+       Galicia and the far west of Andalucía (Huelva). The north edge at 43.60 keeps the whole
+       Cantabrian coast (Gijón 43.55, Santander 43.46) at the price of the French Basque coast
+       below it - Biarritz (43.47) lands in this box, fails on empty PNOA coverage, and runs
+       live-only until regions are polygons. The Canaries are a separate PNOA capture and a
+       separate bbox if ever wanted. Ordered BEFORE france-fr so Catalonia and the Cantabrian
+       coast resolve here rather than into France's wider box. */
+    region: { bbox: { south: 36.0, west: -6.0, north: 43.6, east: 4.34 }, country: "ES" },
+    license: {
+      name: "CC BY 4.0",
+      /* The service's own GetCapabilities AccessConstraints read "CC BY 4.0 scne.es",
+         2026-08-19 - IGN-E moved its geographic services to attribution-only in 2015. The
+         licensor to name is the Sistema Cartográfico Nacional (scne.es). */
+      url: "https://www.scne.es/",
+      storage: true, derivatives: true, redistribution: true, commercial: true,
+      attributionRequired: true
+    },
+    imagery: {
+      adapter: "xyz",
+      /* KVP GetTile, which the xyz adapter speaks unchanged - it only substitutes {z}/{x}/{y}
+         and a WMTS KVP URL is just a template with those in TILEMATRIX/TILECOL/TILEROW
+         clothing. Layer, matrix set and formats read off the service's capabilities,
+         2026-08-19: GoogleMapsCompatible to level 20, jpeg pre-generated to 19.
+
+         OI.OrthoimageCoverage is "máxima actualidad": PNOA orthophoto at capture zooms,
+         Sentinel-2 fill at LOW zooms only - which is what minTrustedZoom fences off, same
+         reasoning as the LINZ satellite-fill note. 25cm source: z19 is 0.229m/px at Spanish
+         latitudes, the first zoom at or finer than native. */
+      urlTemplate: "https://www.ign.es/wmts/pnoa-ma?SERVICE=WMTS&VERSION=1.0.0&REQUEST=GetTile&LAYER={layer}&STYLE=default&TILEMATRIXSET=GoogleMapsCompatible&FORMAT=image/jpeg&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}",
+      layerEnv: "PNOA_WMTS_LAYER",
+      defaultLayer: "OI.OrthoimageCoverage",
+      apiKeyEnv: "",
+      maxUsefulZoom: 19,
+      minTrustedZoom: 13
+    },
+    dem: { ...EU_TERRAIN_TILES_DEM },
+    demAttribution: EU_TERRAIN_TILES_ATTRIBUTION,
+    attribution: {
+      text: "PNOA orthophotography © Instituto Geográfico Nacional de España, CC BY 4.0 scne.es",
+      url: "https://www.ign.es/",
+      shortText: "PNOA © IGN España CC BY 4.0",
+      perSurvey: false
+    }
+  },
+  {
+    key: "geopf-fr",
+    label: "IGN France BD ORTHO (Géoplateforme)",
+    /* Mainland France and Corsica. The box swallows southern Belgium, Luxembourg, western
+       Switzerland and the Ligurian corner of Italy - all fail loudly on missing coverage -
+       and its south edge reaches 41.3 for Corsica, which would also cover Catalonia were
+       pnoa-es not ordered first. French Basque coast north of 43.60 (Hossegor and up)
+       resolves here correctly; Biarritz itself is inside pnoa-es's box - see that entry. */
+    region: { bbox: { south: 41.3, west: -5.15, north: 51.1, east: 9.57 }, country: "FR" },
+    license: {
+      /* Etalab's Licence Ouverte 2.0 - the French state open licence: free reuse, including
+         commercial, including redistribution and derivatives, requiring attribution and the
+         last-updated date. IGN moved ALL its public data (BD ORTHO included) under it on
+         2021-01-01; the Géoplateforme WMTS serves those datasets keylessly. Deliberately
+         recorded under its own name rather than "CC BY equivalent" - the licence itself
+         declares CC BY 2.0 compatibility, but the obligation wording is Etalab's. */
+      name: "Licence Ouverte 2.0 (Etalab)",
+      url: "https://www.etalab.gouv.fr/licence-ouverte-open-licence/",
+      storage: true, derivatives: true, redistribution: true, commercial: true,
+      attributionRequired: true
+    },
+    imagery: {
+      adapter: "xyz",
+      /* KVP GetTile built VERBATIM from IGN's own capabilities annexe
+         (data.geopf.fr/annexes/ressources/wmts/ortho.xml, read 2026-08-19): layer
+         HR.ORTHOIMAGERY.ORTHOPHOTOS (the 20cm BD ORTHO), style "normal", matrix set
+         "PM_6_19" (web-mercator, levels 6-19), image/jpeg.
+
+         CAVEAT, deliberately loud: an automated proxy fetch of one tile answered 400, which
+         is more likely the proxy re-encoding the query than the template - every field is
+         quoted from the annexe - but "more likely" is not "verified". Open ONE tile URL in a
+         browser before the first French scan; a wrong template fails a whole course loudly,
+         never silently. */
+      urlTemplate: "https://data.geopf.fr/wmts?SERVICE=WMTS&VERSION=1.0.0&REQUEST=GetTile&LAYER={layer}&STYLE=normal&TILEMATRIXSET=PM_6_19&FORMAT=image/jpeg&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}",
+      layerEnv: "GEOPF_ORTHO_LAYER",
+      defaultLayer: "HR.ORTHOIMAGERY.ORTHOPHOTOS",
+      apiKeyEnv: "",
+      /* 20cm source, and the layer's matrix set also stops at 19: z19 is 0.20m/px at central
+         French latitudes - exactly native, the ceiling twice over. */
+      maxUsefulZoom: 19,
+      minTrustedZoom: 13
+    },
+    dem: { ...EU_TERRAIN_TILES_DEM },
+    demAttribution: EU_TERRAIN_TILES_ATTRIBUTION,
+    attribution: {
+      text: "Orthophotographie © IGN France, Licence Ouverte 2.0 (Etalab)",
+      url: "https://www.ign.fr/geoplateforme",
+      shortText: "© IGN France Licence Ouverte 2.0",
+      perSurvey: false
+    }
   }
 ];
 
@@ -573,7 +778,10 @@ export function resolveEndpoints(entry, envs) {
    shipping something wrong. */
 function reliefSpec(dem) {
   if (!dem) return null;
-  const tiled = dem.adapter === "xyz" && dem.encoding === "terrain-rgb";
+  /* terrarium (the EU terrain tiles) qualifies alongside terrain-rgb because the decoder
+     already speaks it - the capture normalises it to terrain-RGB before storage, so only the
+     fetch leg ever sees the difference. */
+  const tiled = dem.adapter === "xyz" && (dem.encoding === "terrain-rgb" || dem.encoding === "terrarium");
   const floatExport = dem.adapter === "arcgis-export" && dem.encoding === "float32";
   if (!tiled && !floatExport) return null;
   return { ...dem, role: "relief", computed: "hillshade-from-dem" };

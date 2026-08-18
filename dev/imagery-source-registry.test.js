@@ -27,6 +27,13 @@ function test(name, fn) { tests.push({ name, fn }); }
    Pupuke is the course with existing published frames to compare against. */
 const PUPUKE_NZ = { south: -36.784, west: 174.762, north: -36.775, east: 174.773 };
 const PEBBLE_US = { south: 36.560, west: -121.955, north: 36.573, east: -121.936 };
+/* Europe: one course box per wired country, plus the border cases the bbox comments promise. */
+const CHANTILLY_FR = { south: 49.185, west: 2.475, north: 49.195, east: 2.490 };      // Oise, France
+const NOORDWIJK_NL = { south: 52.245, west: 4.435, north: 52.255, east: 4.450 };      // Dutch coast
+const VALDERRAMA_ES = { south: 36.270, west: -5.395, north: 36.285, east: -5.380 };   // Andalucía
+const BARCELONA_ES = { south: 41.375, west: 2.085, north: 41.385, east: 2.100 };      // inside FR's box too
+const BIARRITZ_FR = { south: 43.468, west: -1.565, north: 43.478, east: -1.552 };     // the documented leak
+const SUNNINGDALE_UK = { south: 51.385, west: -0.660, north: 51.395, east: -0.645 };  // no open UK source
 const ST_ANDREWS_UK = { south: 56.340, west: -2.816, north: 56.352, east: -2.795 };
 
 const NZ_ENV = { LINZ_BASEMAPS_API_KEY: "linz-test-key" };
@@ -217,6 +224,62 @@ test("the US ceilings match what the services actually resolve", () => {
   assert.ok(mPerPx(source.imagery.maxUsefulZoom + 1) < 0.3 / 1.5,
     "and one zoom higher must be a genuine upscale, or the ceiling is set too low");
   assert.ok(mPerPx(source.dem.maxUsefulZoom) <= 1.0, "3DEP is served at 1m");
+});
+
+/* ---- Europe ------------------------------------------------------------------------------ */
+
+test("the three European entries resolve keylessly on the xyz adapter", () => {
+  const fr = mod.resolveImagerySource(CHANTILLY_FR, { env: {} });
+  const nl = mod.resolveImagerySource(NOORDWIJK_NL, { env: {} });
+  const es = mod.resolveImagerySource(VALDERRAMA_ES, { env: {} });
+  assert.strictEqual(fr && fr.key, "geopf-fr");
+  assert.strictEqual(nl && nl.key, "pdok-nl");
+  assert.strictEqual(es && es.key, "pnoa-es");
+  [fr, nl, es].forEach(source => {
+    assert.strictEqual(source.imagery.adapter, "xyz");
+    assert.ok(!source.imagery.urlTemplate.includes("{key}"), source.key + " needs no key");
+    assert.ok(source.license.storage && source.license.derivatives && source.license.redistribution,
+      source.key + " must clear the same storage bar as LINZ and NAIP");
+  });
+  /* The layer is substituted at resolve time, exactly like LINZ's - a template still carrying
+     {layer} would 400 every tile. */
+  assert.ok(fr.imagery.urlTemplate.includes("HR.ORTHOIMAGERY.ORTHOPHOTOS"));
+  assert.ok(nl.imagery.urlTemplate.includes("Actueel_orthoHR"));
+  assert.ok(es.imagery.urlTemplate.includes("OI.OrthoimageCoverage"));
+});
+
+test("every European entry ships the shared terrarium DEM as a relief source", () => {
+  [CHANTILLY_FR, NOORDWIJK_NL, VALDERRAMA_ES].forEach(bounds => {
+    const source = mod.resolveImagerySource(bounds, { env: {} });
+    assert.ok(source.dem, source.key + " must carry elevation");
+    assert.strictEqual(source.dem.encoding, "terrarium");
+    assert.ok(source.terrain, source.key + " terrarium DEM must be offered as relief - the decoder speaks it");
+    assert.strictEqual(source.terrain.encoding, "terrarium");
+    /* The DEM's licence is its own (Mapzen/Copernicus mix), never the national imagery
+       licence - same per-spec separation the QLD entry exists to prove. */
+    assert.ok(source.demLicense && /Mapzen/.test(source.demLicense.name),
+      source.key + " elevation must be licensed as the terrain tiles, not as the national imagery");
+  });
+});
+
+test("the Iberian ordering holds: Spain resolves before France's wider box", () => {
+  /* Barcelona sits inside BOTH boxes; pnoa-es is ordered first precisely so this stays
+     Spanish. If this fails, someone reordered the registry. */
+  const source = mod.resolveImagerySource(BARCELONA_ES, { env: {} });
+  assert.strictEqual(source && source.key, "pnoa-es");
+});
+
+test("the documented border leak leaks exactly as documented", () => {
+  /* Biarritz is French ground inside pnoa-es's box - the bbox comment names it. It must
+     resolve to pnoa-es (where empty PNOA coverage fails the scan loudly), NOT fall through to
+     geopf-fr, and NOT silently disappear. If regions ever become polygons, flip this test to
+     assert geopf-fr and delete the comment it guards. */
+  const source = mod.resolveImagerySource(BIARRITZ_FR, { env: {} });
+  assert.strictEqual(source && source.key, "pnoa-es");
+});
+
+test("the UK stays truthfully unscannable - no open national imagery exists", () => {
+  assert.strictEqual(mod.resolveImagerySource(SUNNINGDALE_UK, { env: {} }), null);
 });
 
 /* Relief for the US rides the same DEM: 3DEP is public domain and float32-decodable, so the

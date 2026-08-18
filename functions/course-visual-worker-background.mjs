@@ -27,7 +27,7 @@ sharp.concurrency(1);
 import { planCourseCaptures, captureGrid, packageHoleData, courseBoundsFor } from "./lib/gd-visual-plan-core.mjs";
 import { resolveImagerySource, unscannableReason, attributionFor } from "./lib/gd-imagery-sources.mjs";
 import { renderHoleSurfaceMercator, renderOverview } from "./lib/gd-visual-export-core.mjs";
-import { reliefFromTerrainRgb, cropByBounds, reliefAzimuthForPlayAxis, RELIEF_DEFAULTS, heightsFromFloat32Tiff, terrainRgbPngFromHeights } from "./lib/gd-relief-core.mjs";
+import { reliefFromTerrainRgb, cropByBounds, reliefAzimuthForPlayAxis, RELIEF_DEFAULTS, heightsFromFloat32Tiff, terrainRgbPngFromHeights, decodeElevation } from "./lib/gd-relief-core.mjs";
 
 const JOBS_TABLE = "course_visual_jobs";
 const MAPS_TABLE = "course_maps";
@@ -262,6 +262,16 @@ async function buildCapture(grid, { format }) {
     ? await composed.png({ compressionLevel: 9 }).toBuffer()
     : await composed.jpeg({ quality: 85 }).toBuffer();
   composites.length = 0;
+  /* Terrarium tiles (the EU terrain source) composite losslessly - they are ordinary 8-bit
+     RGB - but they must not be STORED as terrarium: the stored terrain artefact is
+     terrain-RGB everywhere else, and the phone's terrain mesh decodes only that. Decode the
+     stitched mosaic under its declared encoding and re-pack, same normalisation the float32
+     branch above performs for the US. */
+  if (format === "png" && grid.encoding === "terrarium") {
+    const { data, info } = await sharp(out, { limitInputPixels: false }).raw().toBuffer({ resolveWithObject: true });
+    const decoded = decodeElevation(data, info.width, info.height, info.channels, "terrarium");
+    return await terrainRgbPngFromHeights(decoded.heights, info.width, info.height);
+  }
   return out;
 }
 
