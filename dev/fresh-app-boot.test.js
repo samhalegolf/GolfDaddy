@@ -1353,14 +1353,17 @@ async function bootCheck() {
   });
 
   /* Base imagery policy: aerial only inside a licensed source's coverage —
-     LINZ (keyed, NZ), NAIP (US), QLD (AU) — and the honest OSM fallback
-     everywhere else, including NZ when the key never arrived. */
+     LINZ (keyed, NZ), NAIP (US), QLD (AU) — then the keyed global Esri layer
+     for everywhere no open program covers, and the honest OSM fallback when
+     no key ever arrived. */
   const basemap = await page.evaluate(() => {
     const app = window.ClarityApp;
     const keylessNz = app.basemap.baseFor({ lat: -36.9, lng: 174.7 }).kind;
-    app.basemap.configure({ linzBasemapsKey: "test-key" });
+    const keylessLondon = app.basemap.baseFor({ lat: 51.5, lng: -0.1 }).kind;
+    app.basemap.configure({ linzBasemapsKey: "test-key", esriApiKey: "esri-test-key" });
     return {
       keylessNz,
+      keylessLondon,
       nz: app.basemap.baseFor({ lat: -36.9, lng: 174.7 }).kind,
       pebbleBeach: app.basemap.baseFor({ lat: 36.564, lng: -121.938 }).kind,
       brisbane: app.basemap.baseFor({ lat: -27.5, lng: 153.0 }).kind,
@@ -1601,7 +1604,8 @@ async function bootCheck() {
   assert.strictEqual(basemap.nz, "linz", "keyed NZ centre → LINZ aerial");
   assert.strictEqual(basemap.pebbleBeach, "naip", "US centre → NAIP aerial");
   assert.strictEqual(basemap.brisbane, "qld", "Queensland centre → QLD aerial");
-  assert.strictEqual(basemap.london, "osm", "outside every aerial region → OSM, never empty tiles");
+  assert.strictEqual(basemap.keylessLondon, "osm", "outside every open region with no Esri key → OSM, never empty tiles");
+  assert.strictEqual(basemap.london, "esri", "outside every open region, the keyed global Esri aerial answers before the drawn map");
   assert.ok(basemap.naipTileIsBbox, "NAIP tiles are bbox exportImage requests");
   assert.ok(noDefaultRouteClass, "the body must not default into a route class - that's a flash of the wrong screen before this page's own JS runs");
   assert.strictEqual(handoffErrors.length, 0, "uncaught exceptions on the ?courseId= hand-off:\n" + handoffErrors.join("\n"));

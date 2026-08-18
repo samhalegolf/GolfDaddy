@@ -81,18 +81,41 @@ test("the global fallback is global, and is last", () => {
 
 /* The selection walk in setMapSource steps through the list in order and takes the first
    ready-and-covering source. Modelled here so the OUTCOME is asserted, not the loop. */
-function pick(place, hasLinzKey) {
+/* `keys` names which requiresKey values have arrived, because there are now two keyed sources
+   and "has a key" stopped being one question the day the second one landed. */
+function pick(place, keys) {
+  keys = keys || {};
   return (mapSources.find(s =>
-    (s.requiresKey !== "linzKey" || hasLinzKey) && mapSourceCovers(s, place)
+    (!s.requiresKey || keys[s.requiresKey]) && mapSourceCovers(s, place)
   ) || {}).key || null;
 }
+const ALL_KEYS = { linzKey: true, esriKey: true };
 
 test("every course lands on the best layer that can actually draw", () => {
-  assert.strictEqual(pick(AUCKLAND_NZ, true), "linz", "NZ with a key gets aerial");
-  assert.strictEqual(pick(AUCKLAND_NZ, false), "osm", "NZ without a key degrades, it does not blank");
-  assert.strictEqual(pick(GOLD_COAST_AU, true), "qld", "Queensland gets Queensland aerial, not empty LINZ");
-  assert.strictEqual(pick(PEBBLE_US, true), "naip", "the US has a live aerial source now - the same NAIP the scan stores");
-  assert.strictEqual(pick(ST_ANDREWS_UK, true), "osm", "the UK still has none, and gets the guide rather than a blank");
+  assert.strictEqual(pick(AUCKLAND_NZ, ALL_KEYS), "linz", "NZ with a key gets LINZ - the open regional aerial outranks paid Esri");
+  assert.strictEqual(pick(AUCKLAND_NZ, {}), "osm", "NZ without any key degrades, it does not blank");
+  assert.strictEqual(pick(AUCKLAND_NZ, { esriKey: true }), "esri", "NZ missing only the LINZ key still gets an aerial, just the paid one");
+  assert.strictEqual(pick(GOLD_COAST_AU, ALL_KEYS), "qld", "Queensland gets Queensland aerial, not empty LINZ");
+  assert.strictEqual(pick(PEBBLE_US, ALL_KEYS), "naip", "the US has a live aerial source now - the same NAIP the scan stores");
+  assert.strictEqual(pick(ST_ANDREWS_UK, ALL_KEYS), "esri", "the UK has no open program, and now gets paid aerial rather than the line guide");
+  assert.strictEqual(pick(ST_ANDREWS_UK, { linzKey: true }), "osm", "without the Esri key the UK degrades to the guide, it does not blank");
+});
+
+test("the paid global aerial is global, keyed, and sits between the open programs and the guide", () => {
+  const esri = source("esri");
+  assert.ok(!esri.bbox, "a bbox on the one source that exists FOR the uncovered regions would recreate the gap");
+  assert.strictEqual(esri.requiresKey, "esriKey", "unkeyed ibasemaps-api answers 403s, which paint as a broken map");
+  assert.ok(/ibasemaps-api\.arcgis\.com/.test(esri.tileUrl),
+    "the anonymous services.arcgisonline.com endpoint grants no commercial licence - never again");
+  assert.ok(/\{ *esriKey *\}/.test(esri.tileUrl), "the template must carry the key placeholder");
+  assert.strictEqual(mapSources.findIndex(s => s.key === "esri"), mapSources.length - 2,
+    "preference order: every open regional aerial first, paid Esri next, the line guide last");
+  /* Display-only, like Queensland: the licence the key buys is display, so the scan registry
+     must never grow an Esri imagery entry. Asserted against the registry source because that
+     is exactly where the mistake would be made. */
+  const registry = fs.readFileSync(path.join(root, "functions", "lib", "gd-imagery-sources.mjs"), "utf8");
+  assert.ok(!/ibasemaps-api|World_Imagery/.test(registry),
+    "Esri World Imagery in the SCAN registry would store pixels the licence only lets us display");
 });
 
 /* NAIP is the one source here that is not a URL template. Its ImageServer has no tile cache at
@@ -118,13 +141,17 @@ test("the US source is bbox-addressed, and pinned to the same ground the scan st
     "live NAIP and stored NAIP must cover identical ground");
 });
 
-test("a cold boot at the neutral centre picks the fallback, then upgrades", () => {
-  /* GD_NEUTRAL_MAP_CENTER is [0,0]. No regional source contains it, which is what makes
-     "boots on OSM and upgrades once we know where we are" fall out of the coverage test
-     rather than needing to be special-cased. */
-  assert.strictEqual(pick(NEUTRAL_BOOT, true), "osm");
+test("a cold boot at the neutral centre never blanks", () => {
+  /* GD_NEUTRAL_MAP_CENTER is [0,0], zoom 2 - a whole-world view. No REGIONAL source contains
+     it, so a keyless boot still lands on OSM. The global Esri layer does contain it (it
+     contains everywhere - that is its whole job), so a keyed boot mounts World Imagery
+     instead, which at zoom 2 draws the entire earth. Either way the invariant this test
+     protects holds: the boot view draws something, it does not 403 or paint empty ocean of a
+     regional layer. */
+  assert.strictEqual(pick(NEUTRAL_BOOT, {}), "osm", "keyless boot degrades to the guide");
+  assert.strictEqual(pick(NEUTRAL_BOOT, ALL_KEYS), "esri", "a keyed boot mounts the global aerial - fine at a whole-world zoom");
   assert.ok(core.includes("GD_NEUTRAL_MAP_CENTER=[0,0]"),
-    "if the neutral centre moves into a covered region, cold boot stops degrading gracefully");
+    "if the neutral centre moves into a covered REGIONAL box, cold boot stops degrading gracefully");
 });
 
 test("no source is missing a credit", () => {

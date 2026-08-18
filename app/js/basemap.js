@@ -12,6 +12,13 @@
    - Queensland state program aerial — QLD Australia, CC BY-SA. Live display
      only: a stored composite would be Adapted Material, but drawing a fetched
      tile adapts and redistributes nothing.
+   - Esri World Imagery — global, PAID (ArcGIS Location Platform, keyed via
+     /api/auth-public-config like LINZ). The licence the key buys is display,
+     which is why this layer exists here and must never exist in the scan
+     registry. It is what the regions no open program covers — the UK, Ireland,
+     Canada, the rest of Australia — play over instead of the drawn map. NOT
+     the anonymous arcgisonline endpoint the first paragraph is about: that one
+     grants nothing; ibasemaps-api with a token grants display.
    - OSM — global, last, always able to draw. */
 (function () {
   "use strict";
@@ -19,6 +26,7 @@
 
   var MERCATOR_HALF_M = 20037508.342789244;
   var linzKey = null;
+  var esriKey = null;
   var pending = null;
 
   /* An ArcGIS ImageServer answers a bbox, not a {z}/{x}/{y} cell: the tile's
@@ -68,6 +76,18 @@
       options: { maxZoom: 21, crossOrigin: true }
     },
     {
+      kind: "esri",
+      requiresEsriKey: true,
+      /* No bbox: global, so it answers exactly where every open region above
+         has declined. Esri's tile order is {z}/{y}/{x} — y before x — and
+         Leaflet substitutes by name, so do not "fix" the template against a
+         slippy-map example. maxNativeZoom 19: same policy as NAIP, upscale
+         past the mosaic instead of paying for tiles it does not have. */
+      tileUrl: "https://ibasemaps-api.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}?token={esriKey}",
+      attribution: "Powered by Esri — Maxar, Earthstar Geographics, and the GIS User Community",
+      options: { maxZoom: 21, maxNativeZoom: 19, crossOrigin: true }
+    },
+    {
       kind: "osm",
       tileUrl: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
       attribution: "© OpenStreetMap contributors",
@@ -77,6 +97,7 @@
 
   function configure(config) {
     linzKey = (config && String(config.linzBasemapsKey || "")) || null;
+    esriKey = (config && String(config.esriApiKey || "")) || null;
   }
 
   function covers(source, centre) {
@@ -91,6 +112,7 @@
     for (var i = 0; i < SOURCES.length; i++) {
       var source = SOURCES[i];
       if (source.requiresLinzKey && !linzKey) continue;
+      if (source.requiresEsriKey && !esriKey) continue;
       if (covers(source, centre)) return source;
     }
     return SOURCES[SOURCES.length - 1];
@@ -102,7 +124,7 @@
       options.gdSource = source;
       return new BboxTileLayer("", options);
     }
-    return L.tileLayer(String(source.tileUrl).replace("{linzKey}", linzKey || ""), options);
+    return L.tileLayer(String(source.tileUrl).replace("{linzKey}", linzKey || "").replace("{esriKey}", esriKey || ""), options);
   }
 
   app.basemap = {

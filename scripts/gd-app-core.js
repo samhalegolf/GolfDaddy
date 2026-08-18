@@ -14326,6 +14326,34 @@ const mapSources=[
     options:{maxZoom:21,crossOrigin:true}
   },
   {
+    key:"esri",
+    name:"Esri Imagery",
+    label:"Esri World Imagery (Location Platform)",
+    /* The global PAID aerial: everywhere the open regional programs above have no pixels -
+       the UK, Ireland, Canada, the rest of Australia - this is what a course plays over
+       instead of the line guide. It sits BELOW the regional sources on purpose: where an open
+       program covers, it is usually fresher, higher-res, and free, so Esri only answers when
+       nothing above it does.
+
+       This is NOT the anonymous services.arcgisonline.com endpoint this pipeline started on -
+       that one grants no commercial licence at all and was rightly torn out. ibasemaps-api is
+       the keyed ArcGIS Location Platform service (2M tiles/month free, then $0.15/1k), and
+       what the key licenses is DISPLAY. Storage stays refused: this entry must never appear in
+       functions/lib/gd-imagery-sources.mjs, and the green-shape refiner only reads pixels that
+       registry resolves, so nothing here can feed a stored frame or a derived polygon. Same
+       live/stored split as the Queensland layer, different licensor.
+
+       Esri's tile order is {z}/{y}/{x} - y before x. Leaflet substitutes by name, so the
+       template is order-agnostic, but do not "fix" this URL against a slippy-map example. */
+    tileUrl:"https://ibasemaps-api.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}?token={esriKey}",
+    requiresKey:"esriKey",
+    /* No bbox: World Imagery is global. Resolution varies by region though, so maxNativeZoom
+       19 (~0.3m/px where available) with Leaflet upscaling past it - the NAIP policy: an
+       upscaled tile beats a paid request for a level the mosaic does not have. */
+    attribution:"Powered by Esri — Maxar, Earthstar Geographics, and the GIS User Community",
+    options:{maxZoom:21,maxNativeZoom:19,crossOrigin:true}
+  },
+  {
     key:"osm",
     name:"OSM Guide",
     label:"OpenStreetMap line guide",
@@ -14378,14 +14406,23 @@ function mapSourceCovers(source,centre){
    missing half: a configured key made LINZ "ready" everywhere on Earth, so every course outside
    New Zealand mounted a layer that had nothing to draw. An empty map reads as broken in exactly
    the same way an unkeyed one does. */
+/* One place that knows which window global each requiresKey name reads. An unknown name
+   returns "", which keeps the old failure mode: a source demanding a key nobody publishes is
+   never ready, rather than mounting with an empty token and painting 403s. */
+function mapSourceKeyValue(name){
+  if(name==="linzKey")return String(window.gdLinzBasemapsKey||"");
+  if(name==="esriKey")return String(window.gdEsriApiKey||"");
+  return "";
+}
 function mapSourceReady(source,centre){
   if(!source)return false;
-  if(source.requiresKey==="linzKey"&&!window.gdLinzBasemapsKey)return false;
-  if(source.requiresKey&&source.requiresKey!=="linzKey")return false;
+  if(source.requiresKey&&!mapSourceKeyValue(source.requiresKey))return false;
   return mapSourceCovers(source,centre===undefined?mapViewCentre():centre);
 }
 function mapSourceTileUrl(source){
-  return String(source&&source.tileUrl||"").replace(/\{ *linzKey *\}/g,window.gdLinzBasemapsKey||"");
+  return String(source&&source.tileUrl||"")
+    .replace(/\{ *linzKey *\}/g,mapSourceKeyValue("linzKey"))
+    .replace(/\{ *esriKey *\}/g,mapSourceKeyValue("esriKey"));
 }
 
 /* ---- bbox-addressed imagery as slippy tiles ----
@@ -14501,12 +14538,15 @@ setMapSource(0,"initial");
 fetch("/api/auth-public-config",{cache:"no-store"})
   .then(res=>res.ok?res.json():null)
   .then(config=>{
-    if(!config||!config.linzBasemapsKey)return;
-    window.gdLinzBasemapsKey=String(config.linzBasemapsKey);
-    /* Re-pick rather than forcing index 0: the key arriving makes LINZ selectable, but only
-       where LINZ has pixels. Forcing 0 is what mounted an empty New Zealand layer over every
-       other country the moment a key was configured - and it also raced the coverage pick, so a
-       US course would land on NAIP and then be dragged back to LINZ when the config arrived. */
+    if(!config)return;
+    let keyArrived=false;
+    if(config.linzBasemapsKey){window.gdLinzBasemapsKey=String(config.linzBasemapsKey);keyArrived=true;}
+    if(config.esriApiKey){window.gdEsriApiKey=String(config.esriApiKey);keyArrived=true;}
+    if(!keyArrived)return;
+    /* Re-pick rather than forcing index 0: a key arriving makes its source selectable, but only
+       where that source has pixels. Forcing 0 is what mounted an empty New Zealand layer over
+       every other country the moment a key was configured - and it also raced the coverage pick,
+       so a US course would land on NAIP and then be dragged back to LINZ when the config arrived. */
     selectBestMapSource("initial");
   })
   .catch(()=>{});

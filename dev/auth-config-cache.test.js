@@ -90,10 +90,13 @@ test("the map imagery key is published from the cached config too", () => {
     /publishAuthConfigExtras\(authConfigMemo\)/.test(auth),
     "a cache hit does not publish gdLinzBasemapsKey — the map would still fall back to street tiles"
   );
+  /* The gate generalised when the Esri key joined the LINZ key: sources now declare a
+     requiresKey NAME and mapSourceKeyValue() maps names to window globals. The premise this
+     test protects is unchanged — an unpublished key must make its source unselectable. */
   assert.ok(
-    /requiresKey==="linzKey"&&!window\.gdLinzBasemapsKey/.test(coreSource.replace(/\s+/g, "")) ||
-      /requiresKey === "linzKey"/.test(coreSource),
-    "gd-app-core no longer gates imagery on gdLinzBasemapsKey — this test's premise has moved"
+    /name==="linzKey"/.test(coreSource.replace(/\s+/g, "")) &&
+      /source\.requiresKey&&!mapSourceKeyValue\(source\.requiresKey\)/.test(coreSource.replace(/\s+/g, "")),
+    "gd-app-core no longer gates imagery on published keys — this test's premise has moved"
   );
 });
 

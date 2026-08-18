@@ -263,6 +263,7 @@
      have to become auth-aware to read one string. */
   function publishAuthConfigExtras(body) {
     safe(function () { if (body && body.linzBasemapsKey) window.gdLinzBasemapsKey = String(body.linzBasemapsKey); });
+    safe(function () { if (body && body.esriApiKey) window.gdEsriApiKey = String(body.esriApiKey); });
   }
 
   async function fetchAuthConfig() {

@@ -17,7 +17,14 @@ exports.handler = async function(event) {
          it has no cloud frames. It is a public, per-domain key by design (it ends up in tile
          URLs the browser fetches), which is why it belongs in the public config rather than
          behind a proxy. Stored frames are shot server-side and never use this. */
-      linzBasemapsKey: process.env.LINZ_BASEMAPS_PUBLIC_KEY || process.env.LINZ_BASEMAPS_API_KEY || ""
+      linzBasemapsKey: process.env.LINZ_BASEMAPS_PUBLIC_KEY || process.env.LINZ_BASEMAPS_API_KEY || "",
+      /* ArcGIS Location Platform key, same live-map-only role as the LINZ key: it feeds the
+         global Esri World Imagery display layer for courses no open regional program covers.
+         Also a public, referrer-scoped key by design (it ends up in tile URLs the browser
+         fetches) - restrict it to this domain in the ArcGIS dashboard and grant it basemap
+         privileges only. The scan pipeline must never read it: Esri's licence here is display,
+         not storage. */
+      esriApiKey: process.env.ARCGIS_API_KEY || process.env.ESRI_API_KEY || ""
     })
   };
 };
