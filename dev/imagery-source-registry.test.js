@@ -34,6 +34,11 @@ const VALDERRAMA_ES = { south: 36.270, west: -5.395, north: 36.285, east: -5.380
 const BARCELONA_ES = { south: 41.375, west: 2.085, north: 41.385, east: 2.100 };      // inside FR's box too
 const BIARRITZ_FR = { south: 43.468, west: -1.565, north: 43.478, east: -1.552 };     // the documented leak
 const SUNNINGDALE_UK = { south: 51.385, west: -0.660, north: 51.395, east: -0.645 };  // no open UK source
+/* Japan and the boxes' promised exclusions, plus the South African draft. */
+const KAWAGOE_JP = { south: 35.900, west: 139.450, north: 35.910, east: 139.465 };     // Saitama, main islands
+const NAHA_JP = { south: 26.190, west: 127.720, north: 26.200, east: 127.735 };        // Okinawa, Ryukyu box
+const SEOUL_KR = { south: 37.530, west: 127.020, north: 37.540, east: 127.035 };       // must match nothing
+const FANCOURT_ZA = { south: -33.985, west: 22.395, north: -33.975, east: 22.410 };    // draft until NGI confirms
 const ST_ANDREWS_UK = { south: 56.340, west: -2.816, north: 56.352, east: -2.795 };
 
 const NZ_ENV = { LINZ_BASEMAPS_API_KEY: "linz-test-key" };
@@ -280,6 +285,46 @@ test("the documented border leak leaks exactly as documented", () => {
 
 test("the UK stays truthfully unscannable - no open national imagery exists", () => {
   assert.strictEqual(mod.resolveImagerySource(SUNNINGDALE_UK, { env: {} }), null);
+});
+
+/* ---- Japan ------------------------------------------------------------------------------- */
+
+test("Japan resolves keylessly on both boxes, with GSI elevation offered as relief", () => {
+  const main = mod.resolveImagerySource(KAWAGOE_JP, { env: {} });
+  const ryukyu = mod.resolveImagerySource(NAHA_JP, { env: {} });
+  assert.strictEqual(main && main.key, "gsi-jp");
+  assert.strictEqual(ryukyu && ryukyu.key, "gsi-jp-ryukyu");
+  [main, ryukyu].forEach(source => {
+    assert.ok(source.imagery.urlTemplate.includes("seamlessphoto"), "the layer is substituted at resolve time");
+    assert.ok(!source.imagery.urlTemplate.includes("{key}"), "GSI needs no key");
+    assert.strictEqual(source.dem.encoding, "gsi-dem-png");
+    assert.ok(source.dem.urlTemplate.includes("dem_png"), "the default DEM tier must be the nationwide one - dem5a strands courses outside its coverage");
+    assert.ok(source.terrain, "the GSI encoding is decodable, so relief must be offered");
+    assert.strictEqual(source.terrain.encoding, "gsi-dem-png");
+  });
+  /* The mosaic only exists from z14, so nothing below it may be trusted or requested. */
+  assert.strictEqual(main.imagery.minTrustedZoom, 14);
+});
+
+test("the main-islands box excludes Korea entirely", () => {
+  /* The west edge at 129.6 exists for exactly this: a Korean course must match NOTHING, not
+     fetch GSI tiles of empty sea. */
+  assert.strictEqual(mod.resolveImagerySource(SEOUL_KR, { env: {} }), null);
+});
+
+/* ---- South Africa ------------------------------------------------------------------------ */
+
+test("South Africa is drafted and refused until NGI's licence exists in writing", () => {
+  /* The entry is research, not a source: no published licence and no stable endpoint. When
+     the NGI confirmation lands and the entry is de-drafted, this flips to asserting ngi-za
+     resolves - with its terrarium elevation already in place. */
+  assert.strictEqual(mod.resolveImagerySource(FANCOURT_ZA, { env: {} }), null);
+  const entry = mod.IMAGERY_SOURCES.find(e => e.key === "ngi-za");
+  assert.ok(entry, "the research entry must exist in the table");
+  assert.ok(entry.draft === true, "and must stay draft until the licence is confirmed");
+  assert.strictEqual(entry.license.storage, false, "no right may be claimed that nobody granted");
+  assert.strictEqual(entry.imagery.urlTemplate, "", "no endpoint may be named that does not exist");
+  assert.strictEqual(entry.dem.encoding, "terrarium", "elevation is already solvable - SRTM covers ZA today");
 });
 
 /* Relief for the US rides the same DEM: 3DEP is public domain and float32-decodable, so the

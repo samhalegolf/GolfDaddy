@@ -34,21 +34,18 @@ const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
    elevation, not an assertion about any particular course. */
 const ENCODINGS = {
   "terrain-rgb": (R, G, B) => -10000 + (R * 65536 + G * 256 + B) * 0.1,
-  terrarium: (R, G, B) => R * 256 + G + B / 256 - 32768
-};
-
-/* Earth's land runs -430m (Dead Sea shore) to 8849m. A DEM tile covering a few hundred
-   metres of golf course that claims 3km of relief is not elevation, it is a picture. */
-function plausible(heights) {
-  let lo = Infinity, hi = -Infinity;
-  for (let i = 0; i < heights.length; i++) {
-    const v = heights[i];
-    if (!Number.isFinite(v)) return null;
-    if (v < lo) lo = v;
-    if (v > hi) hi = v;
+  terrarium: (R, G, B) => R * 256 + G + B / 256 - 32768,
+  /* GSI Japan's PNG elevation tiles (標高タイル): x = R*2^16 + G*2^8 + B packs centimetres,
+     two's-complement around 2^23, with x = 2^23 exactly - the pixel RGB(128,0,0) - reserved
+     as the NoData sentinel GSI paints over the sea. Decoded to NaN here and tolerated below:
+     a Japanese coastal course WILL have sentinel pixels in its padded terrain window, and
+     refusing the whole mosaic over honest sea would un-map half the country's golf. */
+  "gsi-dem-png": (R, G, B) => {
+    const x = R * 65536 + G * 256 + B;
+    if (x === 8388608) return NaN;
+    return (x > 8388608 ? x - 16777216 : x) * 0.01;
   }
-  return { lo, hi, ok: lo > -500 && hi < 9000 && hi - lo < 3000 };
-}
+};
 
 export function decodeElevation(raw, width, height, channels, declaredEncoding) {
   const names = declaredEncoding && ENCODINGS[declaredEncoding]
@@ -61,9 +58,26 @@ export function decodeElevation(raw, width, height, channels, declaredEncoding) 
     for (let i = 0, p = 0; i < heights.length; i++, p += channels) {
       heights[i] = decode(raw[p], raw[p + 1], raw[p + 2]);
     }
-    const range = plausible(heights);
-    if (range && range.ok) return { heights, encoding: name, min: range.lo, max: range.hi };
-    attempts.push(name + " " + (range ? range.lo.toFixed(0) + ".." + range.hi.toFixed(0) + "m" : "non-finite"));
+    /* Earth's land runs -430m (Dead Sea shore) to 8849m; a course-sized window claiming 3km
+       of relief is a picture, not elevation. Sentinel/NoData pixels are tolerated - filled
+       with the lowest REAL ground, exactly like the float32 path's fillNoData - but only
+       when real, plausible ground is actually present: a decode that is nearly all sentinel
+       is a wrong encoding or a rendered image wearing one, and stays refused. The 2% floor
+       is deliberately tiny because the RANGE check does the heavy lifting against
+       misreads - see the test that feeds a rendered picture to every encoding. */
+    let lo = Infinity, hi = -Infinity, valid = 0;
+    for (let i = 0; i < heights.length; i++) {
+      const v = heights[i];
+      if (Number.isFinite(v) && v > -500 && v < 9000) { valid++; if (v < lo) lo = v; if (v > hi) hi = v; }
+    }
+    if (valid >= Math.max(1, Math.floor(heights.length * 0.02)) && hi - lo < 3000) {
+      for (let i = 0; i < heights.length; i++) {
+        const v = heights[i];
+        if (!(Number.isFinite(v) && v > -500 && v < 9000)) heights[i] = lo;
+      }
+      return { heights, encoding: name, min: lo, max: hi };
+    }
+    attempts.push(name + " " + (valid ? lo.toFixed(0) + ".." + hi.toFixed(0) + "m over " + valid + "px" : "no plausible ground"));
   }
   throw new Error("elevation decode failed - no encoding produced plausible ground: " + attempts.join(", "));
 }

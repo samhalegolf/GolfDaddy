@@ -95,7 +95,8 @@ function licenseFor(entry, spec) {
 
 /* ---------- registry --------------------------------------------------------------------- */
 
-/* One elevation source for all of Europe: Mapzen/Tilezen Terrain Tiles on AWS Open Data -
+/* One elevation source for anywhere without a national one: Mapzen/Tilezen Terrain Tiles on
+   AWS Open Data (global coverage - Europe, Africa, Australia, everywhere) -
    keyless xyz PNG in the terrarium encoding gd-relief-core already decodes, so this rides the
    existing tiled path end to end (the capture normalises terrarium to terrain-RGB before
    storing, so the artefact on disk stays one format - see buildCapture).
@@ -111,7 +112,7 @@ function licenseFor(entry, spec) {
 
    z13 is ~13m/px at European golf latitudes - at or finer than the 10m patches, one step of
    honest upscale over the 25m base. Above it there is nothing left to fetch. */
-const EU_TERRAIN_TILES_DEM = {
+const GLOBAL_TERRAIN_TILES_DEM = {
   adapter: "xyz",
   urlTemplate: "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png",
   apiKeyEnv: "",
@@ -126,11 +127,68 @@ const EU_TERRAIN_TILES_DEM = {
     attributionRequired: true
   }
 };
-const EU_TERRAIN_TILES_ATTRIBUTION = {
+const GLOBAL_TERRAIN_TILES_ATTRIBUTION = {
   /* The wording Copernicus itself asks for, plus the courtesy credits the joerd attribution
      doc lists for the patched-in sources. */
   text: "Elevation: Mapzen Terrain Tiles. Produced using Copernicus data and information funded by the European Union - EU-DEM layers; SRTM data courtesy of the U.S. Geological Survey",
   url: "https://github.com/tilezen/joerd/blob/master/docs/attribution.md",
+  perSurvey: false
+};
+
+/* GSI Japan, shared by the two Japanese region entries below.
+
+   Licence: the Government of Japan Standard Terms of Use via GSI's own content terms
+   (gsi.go.jp/kikakuchousei/kikakuchousei40182.html, read 2026-08-19) - attribution-based
+   ("出典：国土地理院"), modification and commercial reuse permitted, stated by the government
+   itself to be CC BY 4.0 compatible. Real-time web/app use of the tiles requires attribution
+   only, no application. */
+const GSI_JP_LICENSE = {
+  name: "Government of Japan Standard Terms of Use (CC BY 4.0 compatible)",
+  url: "https://www.gsi.go.jp/kikakuchousei/kikakuchousei40182.html",
+  storage: true, derivatives: true, redistribution: true, commercial: true,
+  attributionRequired: true
+};
+const GSI_JP_IMAGERY = {
+  adapter: "xyz",
+  /* The seamless national photo mosaic, read off GSI's own tile catalogue 2026-08-19: plain
+     z/x/y jpg, zooms 14-18 ONLY - hence minTrustedZoom 14, there is nothing below it. The
+     mosaic is aerial orthophoto over settled Japan with Landsat-8 and Axelspace GRUS
+     satellite fill in remote areas - same watch-the-fill posture as the LINZ satellite note,
+     and the same practical comfort: at the z16-18 capture zooms a golf course sits on the
+     aerial programme, not the fill. */
+  urlTemplate: "https://cyberjapandata.gsi.go.jp/xyz/{layer}/{z}/{x}/{y}.jpg",
+  layerEnv: "GSI_PHOTO_LAYER",
+  defaultLayer: "seamlessphoto",
+  apiKeyEnv: "",
+  /* z18 is the service's own ceiling (~0.49m/px at Japanese latitudes against a 20-40cm
+     urban programme) - the cap and the source resolution land on the same number. */
+  maxUsefulZoom: 18,
+  minTrustedZoom: 14
+};
+const GSI_JP_DEM = {
+  adapter: "xyz",
+  /* GSI's PNG elevation tiles: heights packed as centimetres in RGB with RGB(128,0,0) as the
+     NoData sentinel over the sea - the gsi-dem-png encoding in gd-relief-core, which fills
+     sentinels with the lowest real ground so coastal courses decode. dem_png is the DEM10B
+     10m grid, NATIONWIDE, capped at z14 (~9.6m/px - native). The 5m dem5a_png tiles reach
+     z15 but cover only part of the country, and a partial source fails the all-or-nothing
+     coverage check wherever it thins out - pin GSI_DEM_LAYER to dem5a_png per-scan if a
+     course is known to be covered; the default must be the tier that cannot strand a course. */
+  urlTemplate: "https://cyberjapandata.gsi.go.jp/xyz/{layer}/{z}/{x}/{y}.png",
+  layerEnv: "GSI_DEM_LAYER",
+  defaultLayer: "dem_png",
+  apiKeyEnv: "",
+  encoding: "gsi-dem-png",
+  nativeResolutionM: 10,
+  fallbackResolutionM: 10,
+  maxUsefulZoom: 14
+};
+const GSI_JP_ATTRIBUTION = {
+  /* GSI's required 出典 wording, plus the per-source credits the seamless mosaic's own
+     catalogue entry asks for where satellite fill appears. */
+  text: "Imagery and elevation: GSI Japan (出典：国土地理院). Includes Landsat-8 imagery (courtesy NASA/USGS) and GRUS imagery (© Axelspace) in places",
+  url: "https://maps.gsi.go.jp/development/ichiran.html",
+  shortText: "出典：国土地理院 (GSI Japan)",
   perSurvey: false
 };
 
@@ -295,9 +353,24 @@ export const IMAGERY_SOURCES = [
        Australia has no NAIP and no LINZ. The only national mosaics are Sentinel-2 derived at
        10m, which at the z19-20 this pipeline captures at is the same visible smear the LINZ
        note warns about, so "AU" is not one entry - it is one entry per state, each with its
-       own bbox, its own provider and its own licence. Queensland is first because its
-       provenance is the cleanest of the states: a single state capture program rather than a
-       mosaic of contributed third-party surveys.
+       own bbox, its own provider and its own licence. Queensland was first because its
+       provenance LOOKED the cleanest of the states: a single state capture program rather
+       than a mosaic of contributed third-party surveys.
+
+       That premise died on 2026-08-19. The _AllUsers service's own metadata now reads
+       "Includes material © State of Queensland ... © Planet Labs Netherlands B.V. reproduced
+       under licence from Planet and Geoplex, all rights reserved, 2026" - the openly
+       licensed layer has commercial satellite imagery blended INTO it, with no way to know
+       which pixels are whose. Until Queensland publishes a state-program-only raster (or
+       confirms the Planet fill sits below capture zooms the way LINZ's bathymetry does),
+       this service cannot be stored from even with ShareAlike accepted. The same check
+       usefully verified the mechanics: anonymous access works, WKID 102100, extent matching
+       the bbox below, maxImageWidth 7680.
+
+       Elsewhere in Australia, checked the same day: Tasmania's basemap orthophoto -
+       Barnbougle country - is CC BY-NC-ND 3.0 AU, refused twice over (no derivatives, no
+       commercial); NSW remains as below; SA and WA remain unresearched and are the next
+       genuine candidates.
 
        NSW was the obvious first choice on course count and was rejected. Its public imagery
        service is a mixed mosaic - LANDSAT, 50cm standard ortho, 10cm town imagery, plus
@@ -342,35 +415,15 @@ export const IMAGERY_SOURCES = [
       minTrustedZoom: 12,
       blockPx: 2048
     },
-    /* Geoscience Australia's national elevation rather than Queensland's own, and carrying its
-       OWN licence: ELVIS is plain CC BY 4.0 with no ShareAlike, so the elevation here is not
-       infected by the imagery's copyleft and is gated separately. This is the entire point of
-       per-spec licences - a state blocked on imagery can still ship plays-like. */
-    dem: {
-      adapter: "arcgis-export",
-      endpoint: "https://services.ga.gov.au/gis/rest/services/DEM_LiDAR_5m/ImageServer/exportImage",
-      apiKeyEnv: "",
-      format: "tiff",
-      encoding: "float32",
-      license: {
-        name: "CC BY 4.0",
-        url: "https://www.ga.gov.au/scientific-topics/national-location-information/digital-elevation-data",
-        storage: true, derivatives: true, redistribution: true, commercial: true,
-        attributionRequired: true
-      },
-      /* PLACEHOLDER - ELVIS publishes 1m, 2m and 5m tiers and which one backs this service by
-         region is exactly the sort of thing that must be read, not assumed. */
-      nativeResolutionM: 5,
-      fallbackResolutionM: 30,
-      maxUsefulZoom: 15,
-      blockPx: 2048
-    },
-    /* Credited to GA, not to Queensland - a different licensor under a different licence. */
-    demAttribution: {
-      text: "Elevation © Commonwealth of Australia (Geoscience Australia), CC BY 4.0",
-      url: "https://www.ga.gov.au/scientific-topics/national-location-information/digital-elevation-data",
-      perSurvey: false
-    },
+    /* Was Geoscience Australia's DEM_LiDAR_5m ImageServer, and it is GONE: the endpoint
+       404s (checked 2026-08-19) and GA's own catalogue now points at a DEM_LiDAR_5m_2025
+       MapServer/WMS - which serves a RENDERED PICTURE of the terrain, not float measurements,
+       so it cannot replace it (the CC BY 4.0 licence survives; the delivery shape does not).
+       GA also lists a WCS for the same grid, which is the same follow-up adapter the European
+       national LiDAR needs. Until either lands, the global terrain tiles carry Australia at
+       SRTM ~30m - coarse, but real, and it un-blocks relief the day any AU imagery clears. */
+    dem: { ...GLOBAL_TERRAIN_TILES_DEM },
+    demAttribution: GLOBAL_TERRAIN_TILES_ATTRIBUTION,
     attribution: {
       /* Wording is a placeholder: the Queensland department that owns this has been renamed
          more than once, and CC BY-SA requires the licensor be named correctly. */
@@ -379,17 +432,23 @@ export const IMAGERY_SOURCES = [
       shortText: "© State of Queensland CC BY-SA",
       perSurvey: false
     }
-    /* To take this out of draft:
-         1. Decide SHARE_ALIKE_ACCEPTED. If ShareAlike on baked course packages is not
-            acceptable, delete this entry - no amount of endpoint checking rescues it, and
-            the next candidates are the plain-CC-BY states (TAS, SA, WA are believed to be,
-            and are themselves unverified).
-         2. Open both ImageServer endpoints and confirm: they answer anonymously, exportImage
-            is a supported operation, and the extent really covers the bbox above.
-         3. Replace both PLACEHOLDER zoom/resolution values with the services' reported pixel
-            sizes, the way NAIP's z17 ceiling comes from its 0.6m ground sample.
-         4. Confirm the current legal name of the Queensland department for the credit line.
-         5. Delete `draft: true`. */
+    /* To take this out of draft (rewritten 2026-08-19 after the Planet finding above):
+         1. THE BLOCKER: get from Queensland either a state-program-only raster/service with
+            no Planet material, or written confirmation of which zoom levels the Planet fill
+            occupies and that captures at z16+ never touch it. Without one of these the
+            ShareAlike question is moot - "all rights reserved" material cannot be stored no
+            matter what we license our packages as.
+         2. THEN decide SHARE_ALIKE_ACCEPTED for the state-program pixels themselves.
+         3. Endpoint mechanics are already verified (2026-08-19: anonymous, WKID 102100,
+            extent matches, maxImageWidth 7680) - re-read the pixel size off the clean
+            service from step 1 and set maxUsefulZoom from it, the way NAIP's ceiling comes
+            from its 0.3m ground sample. The mixed service reports a pixelSize that is not
+            credible for the state program alone.
+         4. Confirm the current legal name of the Queensland department for the credit line
+            (the 2026 metadata says "Department of Natural Resources and Mines, Manufacturing
+            and Regional and Rural Development").
+         5. Delete `draft: true`.
+       TAS is researched and dead: CC BY-NC-ND. SA and WA are the unresearched candidates. */
   },
   {
     key: "nsw-au",
@@ -512,7 +571,7 @@ export const IMAGERY_SOURCES = [
      buildCapture's all-or-nothing coverage check refuses the capture rather than baking
      blank frames. Polygon regions are the real fix if border-zone courses ever matter.
 
-     Elevation: every entry shares EU_TERRAIN_TILES_DEM below - honest but coarse. The
+     Elevation: every entry shares GLOBAL_TERRAIN_TILES_DEM below - honest but coarse. The
      national LiDAR that would match LINZ quality (AHN 0.5m, RGE ALTI 1m, MDT02 2m) ships as
      WCS/download services in national projections, which is a new adapter plus reprojection;
      until that exists, 25m relief that says "this rolls away from you" beats no relief, and
@@ -550,8 +609,8 @@ export const IMAGERY_SOURCES = [
       maxUsefulZoom: 21,
       minTrustedZoom: 13
     },
-    dem: { ...EU_TERRAIN_TILES_DEM },
-    demAttribution: EU_TERRAIN_TILES_ATTRIBUTION,
+    dem: { ...GLOBAL_TERRAIN_TILES_DEM },
+    demAttribution: GLOBAL_TERRAIN_TILES_ATTRIBUTION,
     attribution: {
       text: "Luchtfoto © Beeldmateriaal Nederland, via PDOK, CC BY 4.0",
       url: "https://www.pdok.nl/introductie/-/article/luchtfoto-pdok",
@@ -598,8 +657,8 @@ export const IMAGERY_SOURCES = [
       maxUsefulZoom: 19,
       minTrustedZoom: 13
     },
-    dem: { ...EU_TERRAIN_TILES_DEM },
-    demAttribution: EU_TERRAIN_TILES_ATTRIBUTION,
+    dem: { ...GLOBAL_TERRAIN_TILES_DEM },
+    demAttribution: GLOBAL_TERRAIN_TILES_ATTRIBUTION,
     attribution: {
       text: "PNOA orthophotography © Instituto Geográfico Nacional de España, CC BY 4.0 scne.es",
       url: "https://www.ign.es/",
@@ -649,14 +708,120 @@ export const IMAGERY_SOURCES = [
       maxUsefulZoom: 19,
       minTrustedZoom: 13
     },
-    dem: { ...EU_TERRAIN_TILES_DEM },
-    demAttribution: EU_TERRAIN_TILES_ATTRIBUTION,
+    dem: { ...GLOBAL_TERRAIN_TILES_DEM },
+    demAttribution: GLOBAL_TERRAIN_TILES_ATTRIBUTION,
     attribution: {
       text: "Orthophotographie © IGN France, Licence Ouverte 2.0 (Etalab)",
       url: "https://www.ign.fr/geoplateforme",
       shortText: "© IGN France Licence Ouverte 2.0",
       perSurvey: false
     }
+  },
+
+  /* ---------- Japan ------------------------------------------------------------------------
+
+     GSI (国土地理院, the national mapping agency) publishes exactly the shapes this pipeline
+     already eats: plain slippy tiles for both imagery and elevation, keyless, under the
+     Government of Japan Standard Terms of Use - attribution-based, explicitly
+     commercial-reuse, and by GSI's own statement CC BY 4.0 compatible. Japan is the world's
+     second-largest golf market, which makes this the cheapest coverage-per-line entry in the
+     table.
+
+     TWO entries share these specs because one bbox cannot hold the archipelago without
+     swallowing South Korea: the main-islands box must start east of Korea's own east coast
+     (Guryongpo reaches 129.57°E), which strands the Ryukyus (Okinawa sits at 127.6°E) in a
+     second box of their own. Same one-source-two-regions shape a Canaries box would give
+     pnoa-es. */
+  {
+    key: "gsi-jp",
+    label: "GSI Japan seamless orthophoto",
+    /* Honshu, Hokkaido, Kyushu, Shikoku and their near islands. West edge 129.6 excludes all
+       of South Korea (and with it Tsushima and the Goto islands - near-zero golf); north 45.65
+       stays south of Sakhalin; east 146.0 takes Nemuro and stops before the disputed Kurils.
+       Amami and everything south-west of 129.6 is the gsi-jp-ryukyu entry. */
+    region: { bbox: { south: 30.1, west: 129.6, north: 45.65, east: 146.0 }, country: "JP" },
+    license: GSI_JP_LICENSE,
+    imagery: { ...GSI_JP_IMAGERY },
+    dem: { ...GSI_JP_DEM },
+    attribution: GSI_JP_ATTRIBUTION
+  },
+  {
+    key: "gsi-jp-ryukyu",
+    label: "GSI Japan seamless orthophoto (Ryukyu Islands)",
+    /* Okinawa, Amami and the south-western islands - real golf tourism, unreachable from the
+       main box. West edge 122.8 keeps Yonaguni (122.93) and excludes Taiwan (whose north-east
+       tip stops at 122.0). */
+    region: { bbox: { south: 23.9, west: 122.8, north: 28.6, east: 130.1 }, country: "JP" },
+    license: GSI_JP_LICENSE,
+    imagery: { ...GSI_JP_IMAGERY },
+    dem: { ...GSI_JP_DEM },
+    attribution: GSI_JP_ATTRIBUTION
+  },
+
+  /* ---------- South Africa -----------------------------------------------------------------
+
+     DRAFT, and unlike qld-au the blocker is not endpoint verification - it is that NO formal
+     licence exists to verify. CD:NGI flies a genuinely national 25cm orthophoto programme
+     (~45,000 GeoTIFFs) and gives it away gratis, but the terms are an absence: the OSM
+     community's reading is "NGI have never placed any licensing restrictions on usage",
+     availability traces to the Promotion of Access to Information Act, and when someone in
+     that same thread asked for the actual licence, nobody could produce one. PAIA grants
+     ACCESS; grantsStorageRights demands an explicit grant of storage, derivatives and
+     redistribution, and silence is not one. Same principle that keeps NSW drafted.
+
+     Delivery is the second gap: NGI ships GeoTIFF downloads, not a tile service. The
+     community runs a TiTiler/COG mosaic and SAEON has talked about hosting a public one, but
+     baked frames must not depend on a volunteer's endpoint. Courses are tiny, so the likely
+     real shape is fetching NGI GeoTIFFs per course bbox - an adapter decision for whoever
+     clears step 1.
+
+     Elevation needs neither of those answers: the global terrain tiles carry SRTM 30m over
+     South Africa today, so the moment imagery clears, relief and plays-like ship with it. */
+  {
+    key: "ngi-za",
+    label: "CD:NGI South Africa 25cm orthophotos",
+    draft: true,
+    /* South Africa's outline, minus nothing a box can save: Lesotho and Eswatini sit INSIDE
+       it (enclaves - their courses would match here and fail on NGI's coverage edge), and the
+       north-east corner clips southern Mozambique. */
+    region: { bbox: { south: -34.9, west: 16.4, north: -22.1, east: 32.9 }, country: "ZA" },
+    license: {
+      /* Read this block as the ANSWER STILL WANTED, not a grant: every right is false until
+         NGI confirms in writing. When the letter lands, flip the booleans, cite it here by
+         date, and delete draft. */
+      name: "Unconfirmed - PAIA access, no published licence",
+      url: "https://ngi.dalrrd.gov.za/index.php/what-we-do/maps-and-geospatial-information",
+      storage: false, derivatives: false, redistribution: false, commercial: false,
+      attributionRequired: true
+    },
+    imagery: {
+      adapter: "xyz",
+      /* Deliberately empty - there is no stable service to name yet. Fill with SAEON's
+         TiTiler once it is a commitment rather than a plan, or with our own COG-subset
+         endpoint. captureGrid refuses a spec with no template, so even de-drafting by
+         mistake cannot fetch from nothing. */
+      urlTemplate: "",
+      apiKeyEnv: "",
+      maxUsefulZoom: 19,
+      minTrustedZoom: 13
+    },
+    dem: { ...GLOBAL_TERRAIN_TILES_DEM },
+    demAttribution: GLOBAL_TERRAIN_TILES_ATTRIBUTION,
+    attribution: {
+      text: "Aerial imagery © Chief Directorate: National Geo-spatial Information, South Africa",
+      url: "https://ngi.dalrrd.gov.za/",
+      shortText: "© CD:NGI South Africa",
+      perSurvey: false
+    }
+    /* To take this out of draft:
+         1. Written confirmation from CD:NGI that storage, derivatives and commercial
+            redistribution of the orthophoto programme are granted. The OSM thread's
+            "effectively CC BY 4.0" is an interpretation of silence, not a grant.
+         2. A stable endpoint: SAEON's public TiTiler if it materialises, or a self-hosted
+            per-course COG subset. Record it in urlTemplate with its real zoom ceiling.
+         3. Decide the enclave question: carve Lesotho/Eswatini out (polygon regions) or
+            accept their courses failing loudly on the coverage edge.
+         4. Flip the licence booleans with the confirmation cited, and delete `draft: true`. */
   }
 ];
 
@@ -778,10 +943,12 @@ export function resolveEndpoints(entry, envs) {
    shipping something wrong. */
 function reliefSpec(dem) {
   if (!dem) return null;
-  /* terrarium (the EU terrain tiles) qualifies alongside terrain-rgb because the decoder
-     already speaks it - the capture normalises it to terrain-RGB before storage, so only the
-     fetch leg ever sees the difference. */
-  const tiled = dem.adapter === "xyz" && (dem.encoding === "terrain-rgb" || dem.encoding === "terrarium");
+  /* Every tiled encoding gd-relief-core's ENCODINGS table speaks - keep this list in step
+     with that table. terrain-rgb is stored as-is; the others (terrarium for the global
+     terrain tiles, gsi-dem-png for Japan) are normalised to terrain-RGB at capture, so only
+     the fetch leg ever sees the difference. */
+  const TILED_ENCODINGS = ["terrain-rgb", "terrarium", "gsi-dem-png"];
+  const tiled = dem.adapter === "xyz" && TILED_ENCODINGS.includes(dem.encoding);
   const floatExport = dem.adapter === "arcgis-export" && dem.encoding === "float32";
   if (!tiled && !floatExport) return null;
   return { ...dem, role: "relief", computed: "hillshade-from-dem" };

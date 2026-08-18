@@ -262,14 +262,15 @@ async function buildCapture(grid, { format }) {
     ? await composed.png({ compressionLevel: 9 }).toBuffer()
     : await composed.jpeg({ quality: 85 }).toBuffer();
   composites.length = 0;
-  /* Terrarium tiles (the EU terrain source) composite losslessly - they are ordinary 8-bit
-     RGB - but they must not be STORED as terrarium: the stored terrain artefact is
-     terrain-RGB everywhere else, and the phone's terrain mesh decodes only that. Decode the
-     stitched mosaic under its declared encoding and re-pack, same normalisation the float32
-     branch above performs for the US. */
-  if (format === "png" && grid.encoding === "terrarium") {
+  /* Foreign-encoded elevation tiles (terrarium for Europe, gsi-dem-png for Japan) composite
+     losslessly - they are ordinary 8-bit RGB - but they must not be STORED as themselves:
+     the stored terrain artefact is terrain-RGB everywhere else, and the phone's terrain mesh
+     decodes only that. Decode the stitched mosaic under its declared encoding (which also
+     fills NoData sentinels - GSI paints the sea RGB(128,0,0)) and re-pack, the same
+     normalisation the float32 branch above performs for the US. */
+  if (format === "png" && grid.encoding && grid.encoding !== "terrain-rgb") {
     const { data, info } = await sharp(out, { limitInputPixels: false }).raw().toBuffer({ resolveWithObject: true });
-    const decoded = decodeElevation(data, info.width, info.height, info.channels, "terrarium");
+    const decoded = decodeElevation(data, info.width, info.height, info.channels, grid.encoding);
     return await terrainRgbPngFromHeights(decoded.heights, info.width, info.height);
   }
   return out;

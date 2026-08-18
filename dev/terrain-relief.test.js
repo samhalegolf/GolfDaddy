@@ -201,4 +201,34 @@ assert.ok(normErr <= 0.06, 'terrarium -> terrain-RGB normalisation must hold gro
 console.log('11. terrarium decode %s..%sm; normalised to terrain-RGB within %sm',
   terrRelief.elevation.min.toFixed(1), terrRelief.elevation.max.toFixed(1), normErr.toFixed(3));
 
-console.log('\nterrain-relief passed: 14 checks + float32 path (8-10) + terrarium path (11)');
+// ---- 12. The GSI leg (Japan): centimetre-packed RGB with the RGB(128,0,0) NoData sentinel
+//          GSI paints over the sea. A coastal mosaic must decode with the sentinels FILLED
+//          from real ground - refusing it would un-map half of Japan's golf - while a mosaic
+//          that is nothing but sentinel stays refused.
+const gsiEnc = h => { let x = Math.round(h * 100); if (x < 0) x += 16777216; return [(x >> 16) & 255, (x >> 8) & 255, x & 255]; };
+const gsiRaw = Buffer.alloc(FW * FH * 3);
+for (let i = 0; i < truth.length; i++) {
+  const [r, g, b] = gsiEnc(truth[i]);
+  gsiRaw[i * 3] = r; gsiRaw[i * 3 + 1] = g; gsiRaw[i * 3 + 2] = b;
+}
+for (let x = 0; x < FW; x++) { gsiRaw[x * 3] = 128; gsiRaw[x * 3 + 1] = 0; gsiRaw[x * 3 + 2] = 0; } // top row: sea
+const gsiPng = await sharp(gsiRaw, { raw: { width: FW, height: FH, channels: 3 } }).png().toBuffer();
+const gsiRelief = await reliefFromTerrainRgb(gsiPng, { latitude: 35.9, zoom: 14 }, { encoding: 'gsi-dem-png' });
+assert.equal(gsiRelief.encoding, 'gsi-dem-png', 'a GSI mosaic must be recognised under its declared encoding');
+assert.ok(Math.abs(gsiRelief.elevation.min - truthLo) < 0.02 && Math.abs(gsiRelief.elevation.max - truthHi) < 0.02,
+  'GSI decode must recover the fixture ground to its 1cm step, sentinels excluded: got ' +
+  gsiRelief.elevation.min + '..' + gsiRelief.elevation.max);
+/* An all-sentinel mosaic must never be ACCEPTED AS GSI - there is no ground in it. What
+   actually happens is a happy coincidence worth pinning: GSI's sentinel RGB(128,0,0) is
+   byte-identical to terrarium's encoding of 0m, so the fallback guesser reads an all-sea
+   mosaic as a flat plane at sea level - which shades as flat sea, the correct picture. The
+   property this guards is "declared-gsi with no ground never returns gsi-decoded garbage". */
+const allSea = Buffer.alloc(64 * 64 * 3);
+for (let i = 0; i < 64 * 64; i++) allSea[i * 3] = 128;
+const seaResult = decodeElevation(allSea, 64, 64, 3, 'gsi-dem-png');
+assert.notEqual(seaResult.encoding, 'gsi-dem-png', 'no ground means the gsi reading must be refused');
+assert.ok(seaResult.min === 0 && seaResult.max === 0, 'the terrarium coincidence reads all-sea as flat 0m - benign, and pinned here so a change is noticed');
+console.log('12. GSI decode %s..%sm with a sentinel row filled; all-sentinel falls to flat sea via %s',
+  gsiRelief.elevation.min.toFixed(1), gsiRelief.elevation.max.toFixed(1), seaResult.encoding);
+
+console.log('\nterrain-relief passed: 14 checks + float32 (8-10) + terrarium (11) + gsi (12)');
