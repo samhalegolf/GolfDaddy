@@ -529,6 +529,16 @@ async function main() {
   assert.strictEqual(env.result.fallback, "interactive-green", "manual-required falls through to the manual fallback");
   assert.strictEqual(env.calls.packageFetches, 1, "manual-required is terminal - it is never polled");
 
+  /* And "failed" (2026-08-18): the server tried, the run died, and it says why. Polling
+     cannot change the answer - the server no longer re-enqueues a failed course as a side
+     effect of reading its state, so waiting here would stall the player behind nothing. The
+     reason must reach the debug report; "all the debug reports are showing null" for a
+     rate-limit-starved course is the failure mode that motivated this state. */
+  env = await runScenario({ serverCoursePackage: [{ status: "failed", reason: "no OSM hole geometry within range" }] });
+  assert.strictEqual(env.result.fallback, "interactive-green", "failed falls through to the manual fallback");
+  assert.strictEqual(env.calls.packageFetches, 1, "failed is terminal - it is never polled");
+  assert(env.events.some((event) => event.event === "server-course-package-failed" && event.details && event.details.serverReason === "no OSM hole geometry within range"), "the server's failure reason lands in the debug timeline instead of null");
+
   env = await runScenario({ courseMapsFails: true, serverCoursePackage: serverPackage(1) });
   assert.strictEqual(env.calls.courseMapsGet, 1, "database pull failure is attempted once");
   assert(env.events.some((event) => event.event === "course-map-cloud-lookup-failed"), "database pull failure is logged as a cloud warning");

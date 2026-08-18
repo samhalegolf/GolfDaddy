@@ -84,6 +84,17 @@ test("a located but unauthenticated caller does not trigger a job", async () => 
   assert.deepStrictEqual(calls.mapperJobInserts, [], "identity must be verified before this read endpoint may cause a write");
 });
 
+test("a course whose last run failed is NOT re-enqueued by a poll - failed comes back, no insert", async () => {
+  /* The 2026-08-18 regression this guards: failed collapsed to "none", so every poll of a
+     fast-failing course enqueued another identical job until the per-user rate limit tripped
+     and unrelated courses stopped getting jobs at all. */
+  const calls = stubFetch({ nearbyMaps: [], mapperJobs: [{ id: "job-1", kind: "automap", status: "failed", error: "no OSM hole geometry within range" }] });
+  const result = await buildCoursePackageWithTrigger("doomed-course", { center: { lat: -36.8, lng: 174.7 }, courseName: "Doomed Course", userId: "user-1", origin: "https://clarity.example" });
+  assert.strictEqual(result.status, "failed");
+  assert.ok(result.reason.includes("no OSM hole geometry"));
+  assert.deepStrictEqual(calls.mapperJobInserts, [], "a failed course must not be re-enqueued as a side effect of reading its state");
+});
+
 test("a rate-limited caller gets the underlying state back with a trigger error, not a fabricated success", async () => {
   stubFetch({ nearbyMaps: [], userJobs: [{ id: "a" }, { id: "b" }, { id: "c" }, { id: "d" }, { id: "e" }] });
   const result = await buildCoursePackageWithTrigger("brand-new-course", { center: { lat: -36.8, lng: 174.7 }, userId: "user-1", origin: "https://clarity.example" });

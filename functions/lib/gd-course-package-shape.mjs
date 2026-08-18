@@ -1,7 +1,8 @@
 /* Shapes the four backing tables (course_maps, course_visuals, course_visual_jobs,
    course_mapper_jobs) into the response contract described by the course-package
    architecture doc: one of Full Map Package / Lite Geometry Pack / Processing /
-   Manual Action Required / None.
+   Manual Action Required / Failed / None. ("Failed" is a post-doc addition - see
+   deriveCoursePackageState for why a failed run must not read as "none".)
 
    Shared between functions/course-package.mjs (the reader) and, indirectly, the writers that
    produce the source data (functions/course-mapper-worker-background.mjs writes
@@ -184,10 +185,20 @@ export function deriveCoursePackageState({ map, visual, visualJobs, mapperJobs }
   const liveVisualJob = liveJob(visualJobs);
   const lastMapperJob = (mapperJobs || [])[0];
   const manualRequired = !!(lastMapperJob && lastMapperJob.status === "manual-required");
+  /* "failed" is a real state, not a flavor of "none". Collapsing it into "none" meant
+     buildCoursePackageWithTrigger re-enqueued a fresh mapper job on every poll of a course
+     whose runs fail fast: 2026-08-18, a mis-matched "california" course burned 5 identical
+     failed jobs in 40 seconds, which exhausted the per-user auto rate limit
+     (course-mapper-jobs.mjs AUTO_RATE_MAX_PER_USER) and silently starved the two real LA
+     courses scanned right after it of any mapper job at all. A failed run against unchanged
+     OSM data will fail identically; retrying it is a deliberate act (the mapping flyout's
+     Auto tool, or an admin remap), never an automatic side effect of reading state. */
+  const lastFailed = !!(lastMapperJob && lastMapperJob.status === "failed");
   if (fullReady) return "full-map-ready";
   if (hasGeometry) return "lite-geo-ready";
   if (manualRequired) return "manual-required";
   if (liveMapperJob || liveVisualJob) return "processing";
+  if (lastFailed) return "failed";
   return "none";
 }
 

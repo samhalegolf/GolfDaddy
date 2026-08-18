@@ -82,10 +82,25 @@ test("a course with a live visual job and no geometry yet also reports processin
   assert.strictEqual(result.status, "processing");
 });
 
-test("a failed mapper job with no geometry and nothing live reports none, not a permanent error state", async () => {
+test("a failed mapper job with no geometry and nothing live reports failed with the job's error", async () => {
+  /* This used to assert "none" ("a failed run is retryable, not a dead end"). That reading
+     let buildCoursePackageWithTrigger re-enqueue the same doomed job on every poll of a
+     fast-failing course, which on 2026-08-18 burned the per-user auto rate limit in 40s and
+     starved every later scan of a mapper job. Failed is terminal now; retrying is a
+     deliberate POST to /api/course-mapper-jobs (the mapping flyout's Auto tool / remap). */
   stubFetch({ mapperJobs: [{ id: "job-1", kind: "automap", status: "failed", error: "no OSM data" }] });
   const result = await buildCoursePackage("brand-new-course");
-  assert.strictEqual(result.status, "none", "a failed run with nothing live is retryable, not a dead end - see acceptance criteria for repeat requests");
+  assert.strictEqual(result.status, "failed");
+  assert.ok(result.reason.includes("no OSM data"), "the job's error travels as reason so debug reports can show it");
+});
+
+test("a failed job is outranked by a newer live run - a retry reports processing, not failed", async () => {
+  stubFetch({ mapperJobs: [
+    { id: "job-2", kind: "automap", status: "queued" },
+    { id: "job-1", kind: "automap", status: "failed", error: "no OSM data" }
+  ] });
+  const result = await buildCoursePackage("brand-new-course");
+  assert.strictEqual(result.status, "processing");
 });
 
 test("a mapper job explicitly flagged manual-required is surfaced as manual-required", async () => {

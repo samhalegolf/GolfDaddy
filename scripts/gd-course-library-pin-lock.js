@@ -4318,12 +4318,18 @@
     const token={startedAt:Date.now()};
     fallbackPackageWatch=token;
     (async()=>{
+      /* Counted in polls, not wall-clock: FALLBACK_WATCH_BUDGET_MS/FALLBACK_WATCH_POLL_MS
+         requests is the same 10-minute watch when timers are real, but it also guarantees the
+         loop terminates when they are not (the controller test harness runs setTimeout
+         callbacks immediately, which made a Date.now() budget an infinite spin). */
+      const maxPolls=Math.ceil(FALLBACK_WATCH_BUDGET_MS/FALLBACK_WATCH_POLL_MS);
+      let watchPolls=0;
       for(;;){
         await sleep(FALLBACK_WATCH_POLL_MS);
         if(fallbackPackageWatch!==token)return;
         const state=interactiveGreenFallbackState;
         if(!state||String(state.resolutionKey||'')!==String(resolutionKey))return stopFallbackPackageWatch();
-        if(Date.now()-token.startedAt>FALLBACK_WATCH_BUDGET_MS)return stopFallbackPackageWatch();
+        if(++watchPolls>maxPolls)return stopFallbackPackageWatch();
         let pkg=null;
         try{pkg=await fetchServerCoursePackage(course);}catch(e){pkg=null;}
         if(fallbackPackageWatch!==token)return;
@@ -4416,7 +4422,16 @@
     mapEl.addEventListener('click',handler,true);
     try{window.__gdInteractiveGreenFallback=interactiveGreenFallbackState;}catch(e){}
     try{window.__gdCoursePlayInteractiveFallbackActive={course:c,courseId:courseId(c),courseName:courseName(c),hole:h,reason:reason||'automatic-resolution-failed',key,resolutionKey:key,attemptToken,debugRunId,runId:debugRunId,source:opts.source||'unknown',callerFunction:incomingAttempt.callerFunction||'beginInteractiveGreenFallback',at:Date.now()};}catch(e){}
-    try{startFallbackPackageWatch(c,h,key);}catch(e){}
+    /* Only watch for a server map that could actually arrive. "none" (the server declined to
+       enqueue - signed out, no location, rate limited), "failed" and "manual-required" are
+       terminal answers: nothing is building, so a 10-minute 6s poll would be 100 pointless
+       requests - and before "failed" became terminal server-side (2026-08-18), each of those
+       polls RE-ENQUEUED the same doomed mapper job, which is how one bad course burned the
+       per-user rate limit and starved every later scan. A timed-out or unreachable wait (or a
+       caller that does not know the status) still watches, because there a job may genuinely
+       still be running. */
+    const watchStatus=String(opts.serverPackageStatus||'');
+    if(watchStatus!=='none'&&watchStatus!=='failed'&&watchStatus!=='manual-required')try{startFallbackPackageWatch(c,h,key);}catch(e){}
     return {playable:false,fallback:'interactive-green',armed:true};
   }
   async function showResolvedCoursePlayHole(course,hole,reason,opts={}){
@@ -4514,7 +4529,10 @@
 	     "none" is terminal here, not pending. The server answers "none" only when it did NOT
 	     enqueue anything (anonymous caller, no location supplied, or the per-user rate limit
 	     tripped), so there is no job to wait on and waiting would just stall the player.
-	     "manual-required" is terminal for the same reason - the server has already given up.
+	     "manual-required" and "failed" are terminal for the same reason - the server has
+	     already tried and said why it stopped. "failed" carries the job's error in `reason`;
+	     waiting longer cannot change it, and (since 2026-08-18) the server no longer
+	     re-enqueues a failed course as a side effect of polling, so there is nothing coming.
 
 	     Everything else that is not "processing" is a TRANSIENT miss, not a verdict: a fetch
 	     timeout on flaky mobile data, a 5xx, a dropped connection. One of those used to abort
@@ -4548,7 +4566,7 @@
 	        if(result&&result.holes)return {result,status,polls,timedOut:false};
 	        return {result:null,status,polls,timedOut:false,reason:'ready-but-empty'};
 	      }
-	      if(status==='none'||status==='manual-required')return {result:null,status,polls,timedOut:false};
+	      if(status==='none'||status==='manual-required'||status==='failed')return {result:null,status,polls,timedOut:false,serverReason:pkg&&pkg.reason||null};
 	      if(status==='processing')consecutiveMisses=0;
 	      else{
 	        consecutiveMisses++;
@@ -4571,11 +4589,33 @@
 	    const course=sessionCourse(courseObj());
 	    if(!course||isManualGpsCourse(course)){toastSafe('Select a course first');return null;}
 	    toastSafe('Requesting server mapping...');
+	    /* Explicit enqueue, not just the course-package side effect. Since "failed" became a
+	       terminal package state (2026-08-18), polling course-package never restarts a failed
+	       course's mapping - by design. This tool IS the deliberate retry, so it asks
+	       /api/course-mapper-jobs directly; the poll loop below then watches the result. A
+	       network miss here is non-fatal - for a never-mapped course the first poll's
+	       side-effect trigger still applies. */
+	    try{
+	      const centre=guideCoursePoint(course);
+	      const auth=window.ClaritySupabaseAuth;
+	      const token=auth&&typeof auth.freshAccessToken==='function'?await auth.freshAccessToken():'';
+	      const res=await fetch('/api/course-mapper-jobs',{method:'POST',headers:Object.assign({'Content-Type':'application/json'},token?{Authorization:'Bearer '+token}:{}),body:JSON.stringify({courseId:courseId(course),courseName:courseName(course),courseLat:centre&&centre.lat,courseLng:centre&&centre.lng})});
+	      if(res.status===429){toastSafe('Too many mapping runs started recently - try again in a few minutes');return null;}
+	      if(res.status===401){toastSafe('Sign in to start server mapping');return null;}
+	      if(res.status===422){toastSafe('Pin the course location first - the mapper needs coordinates');return null;}
+	    }catch(e){}
 	    const POLL_MS=4000;
 	    const MAX_ATTEMPTS=15; // ~60s of polling before telling the operator to check back later
 	    for(let attempt=0;attempt<MAX_ATTEMPTS;attempt++){
 	      let result=null;
-	      try{result=await resolveGeometryFromServerPackage(course);}catch(e){result=null;}
+	      try{
+	        const pkg=await fetchServerCoursePackage(course);
+	        /* A failed run is an answer, not a miss - polling to the attempt cap and saying
+	           "still mapping" when the server already said why it stopped is exactly the
+	           null-debug-report experience this state exists to end. */
+	        if(pkg&&pkg.status==='failed'){toastSafe('Server mapping failed: '+(pkg.reason||'no reason recorded'));return null;}
+	        if(serverPackageIsReady(pkg))result=persistServerCoursePackage(course,pkg);
+	      }catch(e){result=null;}
 	      if(result&&(result.saved>0||result.holes>0)){
 	        const nextCourse=loadUserCourseData(userId(),courseId(course));
 	        if(nextCourse)drawHoleObjects(nextCourse,mapperHole());
@@ -4691,8 +4731,10 @@
         if(!autoMapResult){
           const waitStatus=serverWait&&serverWait.status||'unreachable';
           const waitTimedOut=!!(serverWait&&serverWait.timedOut);
-          recordMappingDebug(debugRunId,{source:'automapper',phase:'skipped',event:waitTimedOut?'server-course-package-wait-timed-out':'server-course-package-pending',summary:waitTimedOut?'Server was still mapping when play stopped waiting':'Server has not mapped this course yet',details:{hole:h,resolutionKey:key,attemptToken,serverPackageStatus:waitStatus,polls:serverWait&&serverWait.polls||0,timedOut:waitTimedOut,budgetMs:SERVER_PACKAGE_WAIT_MS}});
-          autoMapResult={saved:0,holes:0,polygons:0,fallbacks:0,automapperStatus:waitTimedOut?'server-timed-out':'server-pending',serverPackageStatus:waitStatus};
+          const waitFailed=waitStatus==='failed';
+          const serverReason=serverWait&&serverWait.serverReason||null;
+          recordMappingDebug(debugRunId,{source:'automapper',phase:'skipped',event:waitFailed?'server-course-package-failed':waitTimedOut?'server-course-package-wait-timed-out':'server-course-package-pending',summary:waitFailed?('Server mapping failed: '+(serverReason||'no reason recorded')):waitTimedOut?'Server was still mapping when play stopped waiting':'Server has not mapped this course yet',details:{hole:h,resolutionKey:key,attemptToken,serverPackageStatus:waitStatus,serverReason,polls:serverWait&&serverWait.polls||0,timedOut:waitTimedOut,budgetMs:SERVER_PACKAGE_WAIT_MS}});
+          autoMapResult={saved:0,holes:0,polygons:0,fallbacks:0,automapperStatus:waitFailed?'server-failed':waitTimedOut?'server-timed-out':'server-pending',serverPackageStatus:waitStatus,serverReason};
         }
         if(!mappingAttemptStillCurrent(request,attempt,'automapper'))return {playable:false,stale:true,reason:'superseded-after-automapper'};
         try{
@@ -4727,7 +4769,7 @@
         const unresolvedReason=autoMapResult&&autoMapResult.automapperStatus==='server-timed-out'?'server-map-timed-out':'server-map-not-ready';
         recordMappingDebug(debugRunId,{source:'automapper',phase:'failed',event:'automapper-failed',summary:'Server has no playable map for this course yet',details:{hole:h,resolutionKey:key,attemptToken,saved:autoMapResult&&autoMapResult.saved||0,serverPackageStatus:autoMapResult&&autoMapResult.serverPackageStatus||'',reason:unresolvedReason}});
         recordCoursePlayDebug('course-mapping-automatic-unresolved',c,h,{reason:unresolvedReason,resolutionKey:key,attemptToken});
-        return beginInteractiveGreenFallback(c,h,unresolvedReason,{resolutionKey:key,activeResolutionKey:key,attemptToken,debugRunId,selectedAt,debugAttemptContext:attempt,callerFunction:'runCourseMappingAttempt',source:'mapping-controller'});
+        return beginInteractiveGreenFallback(c,h,unresolvedReason,{resolutionKey:key,activeResolutionKey:key,attemptToken,debugRunId,selectedAt,debugAttemptContext:attempt,callerFunction:'runCourseMappingAttempt',source:'mapping-controller',serverPackageStatus:autoMapResult&&autoMapResult.serverPackageStatus||''});
       }catch(error){
         try{console.warn('[Clarity Caddy] course mapping attempt failed',error);}catch(e){}
         recordCoursePlayDebug('course-mapping-attempt-error',c,h,{reason:error&&error.message||'mapping-controller-error',resolutionKey:key,attemptToken});

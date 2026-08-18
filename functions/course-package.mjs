@@ -126,6 +126,15 @@ export async function buildCoursePackage(courseId) {
     const lastMapperJob = rows.mapperJobs[0] || null;
     return { courseId, status: "manual-required", reason: (lastMapperJob && lastMapperJob.error) || "manual correction required" };
   }
+  /* Terminal like manual-required, and for the same reason: the server has already tried and
+     said why it could not. Answering "none" here instead made buildCoursePackageWithTrigger
+     re-enqueue the identical doomed job on every poll (see deriveCoursePackageState). The
+     error travels in `reason` so the client's debug report can show the actual failure
+     instead of nothing. */
+  if (state === "failed") {
+    const lastMapperJob = rows.mapperJobs[0] || null;
+    return { courseId, status: "failed", reason: (lastMapperJob && lastMapperJob.error) || "mapping run failed" };
+  }
   if (state === "processing") {
     const live = rows.mapperJobs.find(j => j.status === "running" || j.status === "queued") || rows.visualJobs.find(j => j.status === "running" || j.status === "queued");
     return { courseId, status: "processing", stage: live ? live.kind : null };
