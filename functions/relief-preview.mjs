@@ -15,8 +15,8 @@
    Whatever wins here gets written into RELIEF_DEFAULTS and baked. */
 
 import sharp from "sharp";
-import { reliefFromTerrainRgb, reliefAzimuthForPlayAxis, RELIEF_DEFAULTS } from "./lib/gd-relief-core.mjs";
-import { resolveImagerySource } from "./lib/gd-imagery-sources.mjs";
+import { reliefFromTerrainRgb, reliefAzimuthForPlayAxis, RELIEF_DEFAULTS, heightsFromFloat32Tiff, terrainRgbPngFromHeights } from "./lib/gd-relief-core.mjs";
+import { resolveImagerySource, exportImageUrl } from "./lib/gd-imagery-sources.mjs";
 
 const MAPS_TABLE = "course_maps";
 const TILE = 256;
@@ -70,6 +70,17 @@ function tileUrl(spec, z, x, y) {
 }
 
 async function mosaic(spec, zoom, originPx, size) {
+  /* arcgis-export sources (US) answer the whole preview window in ONE exportImage request -
+     a preview is at most 1536px against the service's 4000px cap, so there is no grid to
+     assemble. A float32 elevation answer is transcoded to terrain-RGB here, exactly as the
+     capture path does, so everything downstream of mosaic() stays one format. */
+  if (spec.adapter === "arcgis-export") {
+    const buf = await fetchTile(exportImageUrl(spec, { left: originPx.x, top: originPx.y, width: size, height: size }, zoom));
+    if (!buf) return null;
+    if (spec.encoding !== "float32") return buf;
+    const { heights, width, height } = await heightsFromFloat32Tiff(buf);
+    return terrainRgbPngFromHeights(heights, width, height);
+  }
   const tx0 = Math.floor(originPx.x / TILE), ty0 = Math.floor(originPx.y / TILE);
   const tx1 = Math.floor((originPx.x + size - 1) / TILE), ty1 = Math.floor((originPx.y + size - 1) / TILE);
   const jobs = [];
@@ -189,7 +200,7 @@ export default async function reliefPreview(req) {
   if (!source.terrain) {
     return json(422, {
       error: "No relief source for this region",
-      detail: source.key + " has no tiled terrain-RGB elevation, so relief cannot be computed here."
+      detail: source.key + " has no elevation source the pipeline can decode, so relief cannot be computed here."
     });
   }
 
@@ -218,8 +229,12 @@ export default async function reliefPreview(req) {
 
   let relief;
   try {
+    /* A float32 source was transcoded to terrain-RGB by mosaic(), so that is what the bytes
+       in hand actually are - declaring "float32" here would just cost decodeElevation a
+       wasted first attempt. */
+    const heldEncoding = source.terrain.encoding === "float32" ? "terrain-rgb" : source.terrain.encoding;
     relief = await reliefFromTerrainRgb(demPng, { latitude: frame.centre.lat, zoom: demZoom }, {
-      ...shade, encoding: source.terrain.encoding, outputWidth: size, outputHeight: size
+      ...shade, encoding: heldEncoding, outputWidth: size, outputHeight: size
     });
   } catch (e) {
     /* The decoder refuses greys that are not plausible ground. Nearly always this means the

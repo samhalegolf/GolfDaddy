@@ -219,6 +219,18 @@ test("the US ceilings match what the services actually resolve", () => {
   assert.ok(mPerPx(source.dem.maxUsefulZoom) <= 1.0, "3DEP is served at 1m");
 });
 
+/* Relief for the US rides the same DEM: 3DEP is public domain and float32-decodable, so the
+   planner must be offered a terrain spec, tagged so the capture path transcodes floats to
+   terrain-RGB instead of compositing them as an image. Before the float32 decode existed this
+   came back null by design - see reliefSpec. */
+test("the US elevation is offered as a relief source, tagged for the float32 transcode", () => {
+  const source = mod.resolveImagerySource(PEBBLE_US, { env: {} });
+  assert.ok(source.terrain, "3DEP is licensed and decodable - US courses must plan relief");
+  assert.strictEqual(source.terrain.adapter, "arcgis-export");
+  assert.strictEqual(source.terrain.encoding, "float32");
+  assert.strictEqual(source.terrain.computed, "hillshade-from-dem");
+});
+
 /* NAIP is 4-band and publishes false-colour and NDVI renderings beside the natural one. The
    default happens to be natural colour today; these pixels are stored for years. */
 test("the US imagery pins its rendering and the US elevation does not", () => {

@@ -33,9 +33,10 @@
    grid shipped with each course package is resampled from.
 
    That computation now lands in gd-relief-core.mjs, so the terrain-reference capture is
-   planned wherever the DEM is tiled terrain-RGB: the planner shoots elevation tiles through
-   the same grid it shoots imagery through, and the worker shades the mosaic before storing
-   it. See reliefSpec below for why "wherever the DEM is tiled terrain-RGB" is narrower than
+   planned wherever the DEM has a decode the pipeline speaks - tiled terrain-RGB fetched
+   as-is, or arcgis float32 blocks transcoded to terrain-RGB at capture: the planner shoots
+   elevation through the same grid it shoots imagery through, and the worker stores a
+   terrain-RGB mosaic either way. See reliefSpec below for why that is still narrower than
    "wherever there is a DEM". */
 
 /* ---------- license predicate ------------------------------------------------------------ */
@@ -560,13 +561,21 @@ export function resolveEndpoints(entry, envs) {
    mosaic into shading before it is stored. Hence: same spec, tagged so the fetcher knows the
    bytes are heights rather than a picture.
 
-   Only tiled terrain-RGB qualifies. The US and AU DEMs are ArcGIS float32 exports on a
-   different adapter with a different decode, and quietly feeding those to a terrain-RGB
-   decoder would produce shading from noise. Returning null there means those regions plan no
-   relief capture and composite no relief - the behaviour they have today - rather than
-   shipping something wrong. Widening this is a decode question, not a licensing one. */
+   Two shapes qualify. Tiled terrain-RGB (LINZ) is fetched and stored as-is. ArcGIS float32
+   exports (US 3DEP, AU ELVIS) carry the same information as measurements rather than packed
+   RGB, so they are tagged with their encoding and the capture path transcodes the floats to
+   terrain-RGB before anything is stored (gd-relief-core's heightsFromFloat32Tiff /
+   terrainRgbPngFromHeights) - the stored artefact is then identical in kind to a LINZ one and
+   every consumer after the fetch is unchanged. Feeding float bytes to the terrain-RGB decoder
+   directly would produce shading from noise, which is why the encoding tag travels on the
+   spec instead of being sniffed later. Anything else - no DEM, or a shape without a decode -
+   returns null: that region plans no relief capture and composites no relief, rather than
+   shipping something wrong. */
 function reliefSpec(dem) {
-  if (!dem || dem.adapter !== "xyz" || dem.encoding !== "terrain-rgb") return null;
+  if (!dem) return null;
+  const tiled = dem.adapter === "xyz" && dem.encoding === "terrain-rgb";
+  const floatExport = dem.adapter === "arcgis-export" && dem.encoding === "float32";
+  if (!tiled && !floatExport) return null;
   return { ...dem, role: "relief", computed: "hillshade-from-dem" };
 }
 

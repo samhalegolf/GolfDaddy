@@ -68,6 +68,71 @@ export function decodeElevation(raw, width, height, channels, declaredEncoding) 
   throw new Error("elevation decode failed - no encoding produced plausible ground: " + attempts.join(", "));
 }
 
+/* ---- float32 elevation (US 3DEP, AU ELVIS) ----------------------------------------------
+
+   The arcgis-export DEMs arrive as float32 GeoTIFF blocks - measurements, not packed RGB -
+   so they cannot ride the decodeElevation path. Rather than teaching every downstream
+   consumer (crop, shade, the phone's terrain mesh, plays-like) a second storage format,
+   floats are transcoded to Mapbox terrain-RGB at the capture boundary: heightsFromFloat32Tiff
+   reads the block, terrainRgbFromHeights packs the mosaic, and everything after that is
+   byte-for-byte the same kind of artefact a LINZ course stores. The 0.1m quantisation the
+   packing costs is the same quantisation the whole relief pipeline is already built to hide
+   (see blur above), and plays-like has no use for sub-decimetre precision. */
+
+/* Read one float32 TIFF block into heights. sharp/libvips handles the TIFF container
+   (uncompressed, LZW and deflate all confirmed); `depth: "float"` is what stops the values
+   being cast to uchar on the way out, which would clamp every course above 255m into a
+   plateau. libvips expands single-band images to 3 channels, hence the stride. */
+export async function heightsFromFloat32Tiff(buffer) {
+  const { data, info } = await sharp(buffer, { limitInputPixels: false })
+    .raw({ depth: "float" }).toBuffer({ resolveWithObject: true });
+  const width = info.width, height = info.height;
+  if (!width || !height) throw new Error("float32 elevation block has no pixels");
+  const floats = new Float32Array(data.buffer, data.byteOffset, data.byteLength / 4);
+  const stride = info.channels;
+  const heights = new Float32Array(width * height);
+  for (let i = 0; i < heights.length; i++) heights[i] = floats[i * stride];
+  return { heights, width, height };
+}
+
+/* NoData is real in these services - 3DEP marks water and unflown ground with a huge
+   negative sentinel rather than omitting it. Filled with the block's own lowest real ground
+   (the least-wrong flat answer: a shoreline hole shades as if the water were beach-height,
+   instead of as a kilometre-deep pit at the sixth green). Mutates in place and returns the
+   real range; refuses a block with no real ground at all, which is what an error page or a
+   rendered picture read as floats looks like here. */
+export function fillNoData(heights) {
+  let lo = Infinity, hi = -Infinity;
+  const valid = v => Number.isFinite(v) && v > -500 && v < 9000;
+  for (let i = 0; i < heights.length; i++) {
+    const v = heights[i];
+    if (valid(v)) { if (v < lo) lo = v; if (v > hi) hi = v; }
+  }
+  if (!(lo <= hi)) throw new Error("float32 elevation contains no plausible ground");
+  for (let i = 0; i < heights.length; i++) if (!valid(heights[i])) heights[i] = lo;
+  return { min: lo, max: hi };
+}
+
+/* Inverse of the terrain-rgb formula in ENCODINGS. Exact to the 0.1m step by construction:
+   encode-then-decode round-trips within 0.05m, which the tests hold it to. */
+export function terrainRgbFromHeights(heights, width, height) {
+  fillNoData(heights);
+  const raw = Buffer.allocUnsafe(width * height * 3);
+  for (let i = 0, p = 0; i < heights.length; i++, p += 3) {
+    const v = Math.max(0, Math.min(0xffffff, Math.round((heights[i] + 10000) / 0.1)));
+    raw[p] = (v >> 16) & 255;
+    raw[p + 1] = (v >> 8) & 255;
+    raw[p + 2] = v & 255;
+  }
+  return raw;
+}
+
+export async function terrainRgbPngFromHeights(heights, width, height) {
+  const raw = terrainRgbFromHeights(heights, width, height);
+  return sharp(raw, { raw: { width, height, channels: 3 }, limitInputPixels: false })
+    .png({ compressionLevel: 9 }).toBuffer();
+}
+
 /* Separable Gaussian. Present because of a specific failure, not for general tidiness:
    terrain-RGB quantises height to 0.1m steps, and once the surface is exaggerated those
    steps become gradient discontinuities that light up as concentric contour rings. The

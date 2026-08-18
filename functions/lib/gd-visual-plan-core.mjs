@@ -592,6 +592,9 @@ export function captureGrid(item, opts = {}) {
     sourceKey: source.key || "",
     sourceLabel: source.label || "",
     adapter: String(spec.adapter || "xyz"),
+    /* Travels so the fetch side knows HOW to read the bytes, not just where from - a float32
+       DEM block decoded as an image quietly clamps every height into 0..255. */
+    encoding: String(spec.encoding || ""),
     tiles
   };
 }

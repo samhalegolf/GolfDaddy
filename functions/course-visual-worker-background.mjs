@@ -27,7 +27,7 @@ sharp.concurrency(1);
 import { planCourseCaptures, captureGrid, packageHoleData, courseBoundsFor } from "./lib/gd-visual-plan-core.mjs";
 import { resolveImagerySource, unscannableReason, attributionFor } from "./lib/gd-imagery-sources.mjs";
 import { renderHoleSurfaceMercator, renderOverview } from "./lib/gd-visual-export-core.mjs";
-import { reliefFromTerrainRgb, cropByBounds, reliefAzimuthForPlayAxis, RELIEF_DEFAULTS } from "./lib/gd-relief-core.mjs";
+import { reliefFromTerrainRgb, cropByBounds, reliefAzimuthForPlayAxis, RELIEF_DEFAULTS, heightsFromFloat32Tiff, terrainRgbPngFromHeights } from "./lib/gd-relief-core.mjs";
 
 const JOBS_TABLE = "course_visual_jobs";
 const MAPS_TABLE = "course_maps";
@@ -225,6 +225,28 @@ async function buildCapture(grid, { format }) {
   }
   await Promise.all(Array.from({ length: Math.min(TILE_CONCURRENCY, tiles.length) }, pump));
   if (failed > 0) throw new Error("tile coverage incomplete: " + failed + "/" + tiles.length + " failed");
+  /* Float32 DEM blocks (US 3DEP, AU ELVIS) cannot go through the image compositor below - it
+     flattens onto an 8-bit canvas, which would clamp every height into 0..255m. They are
+     decoded as measurements, assembled as floats, and stored as the SAME terrain-RGB PNG a
+     LINZ course stores, so the crop/shade/mesh/plays-like consumers never learn a second
+     format existed. Decoded one block at a time: a 2048px block is 16.8MB of floats, and the
+     mosaic itself is already width*height*4 bytes of headroom this worker has to find. */
+  if (grid.encoding === "float32") {
+    const mosaic = new Float32Array(grid.imageWidth * grid.imageHeight).fill(NaN);
+    for (let index = 0; index < tiles.length; index++) {
+      const block = await heightsFromFloat32Tiff(buffers[index]);
+      buffers[index] = null;
+      const left = tiles[index].x, top = tiles[index].y;
+      const w = Math.min(block.width, grid.imageWidth - left);
+      const h = Math.min(block.height, grid.imageHeight - top);
+      for (let y = 0; y < h; y++) {
+        const src = y * block.width, dst = (top + y) * grid.imageWidth + left;
+        for (let x = 0; x < w; x++) mosaic[dst + x] = block.heights[src + x];
+      }
+    }
+    buffers.length = 0;
+    return await terrainRgbPngFromHeights(mosaic, grid.imageWidth, grid.imageHeight);
+  }
   const canvas = sharp({
     create: { width: grid.imageWidth, height: grid.imageHeight, channels: 3, background: { r: 16, g: 19, b: 15 } },
     limitInputPixels: false
@@ -345,7 +367,13 @@ async function runSnapshotJob(job, deadlineAt) {
            was LARGER than the one it came from. For those, resizing is a no-op and the encode
            is a full decode + re-encode that changes nothing but the JPEG quality number. Skip
            it and ship the composite as shot. */
-        const fitsAlready = grid.imageWidth <= EXPORT_RENDITION_PX && grid.imageHeight <= EXPORT_RENDITION_PX;
+        /* A terrain capture is NEVER resampled on the way to its rendition: the pixels are
+           packed heights, and bilinear interpolation of terrain-RGB blends the byte planes
+           into elevations that were never measured. Terrain mosaics are shot at z16-17 and
+           essentially always fit anyway; on the rare course where one would not, storing it
+           full-size costs bytes where resizing it would cost the ground truth. (Latent for
+           NZ before the float32 path made it explicit - no NZ course has tripped it.) */
+        const fitsAlready = isTerrain || (grid.imageWidth <= EXPORT_RENDITION_PX && grid.imageHeight <= EXPORT_RENDITION_PX);
         const renditionBuffer = fitsAlready ? buffer : await (() => {
           const small = sharp(buffer, { limitInputPixels: false }).resize({ width: EXPORT_RENDITION_PX, height: EXPORT_RENDITION_PX, fit: "inside", withoutEnlargement: true });
           return (isTerrain ? small.png({ compressionLevel: 6 }) : small.jpeg({ quality: 88 })).toBuffer();

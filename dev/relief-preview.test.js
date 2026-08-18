@@ -29,12 +29,47 @@ async function tile(kind,z,x,y){
   return sharp(b,{raw:{width:TILE,height:TILE,channels:3}}).png().toBuffer();
 }
 
-const calls={dem:0,aerial:0,noPipeline:0};
+/* Two stubbed courses: Pupuke exercises the NZ tiled path, "pebble" the US exportImage one. */
+const COURSES={
+  pupuke:{course_id:'pupuke',course_name:'Pupuke',
+    objects_json:{ t1:{id:'t1',type:'tee',holeNumber:1,position:{lat:-36.7525,lng:174.7515}},
+                   g1:{id:'g1',type:'green',holeNumber:1,position:{lat:-36.7505,lng:174.7530}} } },
+  pebble:{course_id:'pebble',course_name:'Pebble Beach',
+    objects_json:{ t1:{id:'t1',type:'tee',holeNumber:1,position:{lat:36.5680,lng:-121.9400}},
+                   g1:{id:'g1',type:'green',holeNumber:1,position:{lat:36.5660,lng:-121.9380}} } }
+};
+const { float32Tiff } = await import('./float32-tiff-fixture.mjs');
+const calls={dem:0,aerial:0,noPipeline:0,usDem:0,usAerial:0};
 globalThis.fetch=async(url)=>{
   const u=String(url);
-  if(u.includes('/rest/v1/course_maps')) return { ok:true, json:async()=>[{course_id:'pupuke',course_name:'Pupuke',
-    objects_json:{ t1:{id:'t1',type:'tee',holeNumber:1,position:{lat:-36.7525,lng:174.7515}},
-                   g1:{id:'g1',type:'green',holeNumber:1,position:{lat:-36.7505,lng:174.7530}} } }] };
+  if(u.includes('/rest/v1/course_maps')){
+    const id=(u.match(/course_id=eq\.([a-z-]+)/)||[])[1];
+    return { ok:true, json:async()=>COURSES[id]?[COURSES[id]]:[] };
+  }
+  /* US exportImage blocks: one request per layer, sized in the URL. The elevation answer is a
+     float32 TIFF - measurements, exactly what 3DEP serves - so a preview that renders it had
+     to transcode, not composite. */
+  if(u.includes('nationalmap.gov')){
+    const size=(u.match(/size=(\d+)%2C(\d+)/)||u.match(/size=(\d+),(\d+)/)||[]).slice(1).map(Number);
+    if(size.length!==2) return {ok:false};
+    const [W,H]=size;
+    let buf;
+    if(u.includes('elevation.nationalmap.gov')){
+      if(!/format=tiff/.test(u)) return {ok:false};
+      calls.usDem++;
+      const heights=new Float32Array(W*H);
+      for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+        const dx=x-W/2, dy=y-H/2;
+        heights[y*W+x]=52+11*Math.exp(-(dx*dx+dy*dy)/(W*H/40))+1.2*Math.sin(x/17);
+      }
+      heights[0]=-3.4028234663852886e38; // one nodata corner - must be filled, not shaded
+      buf=float32Tiff(heights,W,H);
+    } else {
+      calls.usAerial++;
+      buf=await sharp({create:{width:W,height:H,channels:3,background:{r:96,g:120,b:60}}}).jpeg().toBuffer();
+    }
+    return {ok:true, arrayBuffer:async()=>buf.buffer.slice(buf.byteOffset,buf.byteOffset+buf.byteLength)};
+  }
   const m=u.match(/\/(\d+)\/(\d+)\/(\d+)\.(png|webp)/);
   if(!m) return {ok:false};
   const z=+m[1],x=+m[2],y=+m[3];
@@ -79,4 +114,17 @@ assert.equal((await call('courseId=../etc&hole=1')).status, 400);
 assert.equal((await call('courseId=pupuke&hole=17')).status, 404);
 console.log('4. bad courseId -> 400, unmapped hole -> 404');
 
-console.log('\nrelief-preview passed: 12 checks   (%d aerial + %d dem tiles fetched)', calls.aerial, calls.dem);
+// 5. the US path: one exportImage request per layer, and the float32 elevation is transcoded
+//    to terrain-RGB before shading - the whole 3DEP leg end to end, nodata included.
+res = await call('courseId=pebble&hole=1&size=512');
+assert.equal(res.status,200,'US preview must render, got '+res.status+' '+(res.status!==200?await res.text():''));
+assert.equal(res.headers.get('X-Relief-Source'),'naip-us');
+assert.equal(res.headers.get('X-Relief-Encoding'),'terrain-rgb','the shaded bytes must be the transcode, not raw floats');
+const [usLo,usHi]=String(res.headers.get('X-Relief-Elevation')).split('..').map(parseFloat);
+assert.ok(usLo>45&&usHi<70&&usHi>usLo+5,'elevation must be the fixture ground, not the nodata sentinel: '+usLo+'..'+usHi);
+assert.equal(calls.usAerial,1,'imagery is one exportImage block, not a tile grid');
+assert.equal(calls.usDem,1,'and so is elevation');
+console.log('5. US 3DEP preview: %s | %s (1 aerial + 1 dem exportImage)',
+  res.headers.get('X-Relief-Elevation'), res.headers.get('X-Relief-Zoom'));
+
+console.log('\nrelief-preview passed: 18 checks   (%d aerial + %d dem tiles fetched)', calls.aerial, calls.dem);
