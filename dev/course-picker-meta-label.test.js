@@ -16,14 +16,22 @@ const ROOT = path.join(__dirname, "..");
 const PICKER = path.join(ROOT, "scripts", "inline", "gd-course-picker-search-v2.js");
 const src = fs.readFileSync(PICKER, "utf8");
 
-/* Run the real metaText against course fixtures. */
+/* Run the real metaText against course fixtures. placeLabel comes along with
+   it because metaText calls it for the town/country subtitle - lifting metaText
+   on its own would throw on the first call instead of testing anything. */
 function loadMetaText() {
   const idx = src.indexOf("function metaText(course)");
   assert.notStrictEqual(idx, -1, "metaText must exist");
   const end = src.indexOf("\n  }", idx);
   assert.notStrictEqual(end, -1, "could not bound metaText");
+  const placeStart = src.indexOf("function placeLabel(course)");
+  assert.notStrictEqual(placeStart, -1, "placeLabel must exist");
+  const placeEnd = src.indexOf("\n  }", placeStart);
+  assert.notStrictEqual(placeEnd, -1, "could not bound placeLabel");
   // eslint-disable-next-line no-new-func
-  return new Function(src.slice(idx, end + 4) + "\nreturn metaText;")();
+  return new Function(
+    src.slice(placeStart, placeEnd + 4) + "\n" + src.slice(idx, end + 4) + "\nreturn metaText;"
+  )();
 }
 
 const metaText = loadMetaText();
@@ -49,6 +57,25 @@ test("distance is still shown for a database course", () => {
     "removing the badge must not remove the useful part of the line"
   );
   assert.strictEqual(metaText({ hasDatabaseMap: true, distanceM: 2400 }), "2.4km away");
+});
+
+test("town and country lead the line when they are known", () => {
+  assert.strictEqual(
+    metaText({ source: "database-course", locality: "Auckland", country: "New Zealand", distanceM: 850 }),
+    "Auckland, New Zealand · 850m away"
+  );
+  assert.strictEqual(
+    metaText({ source: "remote-search", locality: "St Andrews", country: "United Kingdom" }),
+    "St Andrews, United Kingdom · search result"
+  );
+});
+
+test("a course with no known place is unchanged", () => {
+  /* Every case below this line predates the subtitle. None of them may gain a
+     leading separator because a place was looked for and not found. */
+  assert.strictEqual(metaText({ source: "recent-course", distanceM: 400 }), "400m away · Recent");
+  assert.ok(!metaText({ source: "database-course" }).startsWith("·"));
+  assert.ok(!metaText({ source: "database-course", country: "" }).startsWith(","));
 });
 
 test("other sources keep their labels", () => {

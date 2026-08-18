@@ -42,6 +42,38 @@
       .trim();
   }
   function keyForName(name){return slug(cleanName(name)||name)}
+  /* Where a course is, in words. "Riverside" is four different clubs in four
+     different countries, so a name on its own is not an identification - the
+     town and country under it are what let a player pick the right one.
+
+     Settlement keys are tried largest first because Nominatim names the
+     settlement by how the place is administered, not by size: a rural club may
+     only have a village or hamlet, a metro one has both city and suburb, and
+     the largest present is the one a player recognises. Matches
+     functions/lib/gd-course-place.mjs, which does the same job server-side. */
+  const PLACE_SETTLEMENT_KEYS=["city","town","municipality","village","hamlet","suburb","county"];
+  function placeFromAddress(address){
+    if(!address||typeof address!=="object")return null;
+    const country=String(address.country||"").trim().slice(0,80);
+    const countryCode=String(address.country_code||"").trim().slice(0,8).toUpperCase();
+    if(!country&&!countryCode)return null;
+    let locality="";
+    for(const key of PLACE_SETTLEMENT_KEYS){
+      locality=String(address[key]||"").trim().slice(0,120);
+      if(locality)break;
+    }
+    return {locality,country,countryCode};
+  }
+  /* "Auckland, New Zealand", or just the country when the town is unknown, or
+     "" when nothing is known - callers render "" as no subtitle rather than a
+     stray separator. Falls back to the country code so a course geocoded
+     before country names were stored still says something. */
+  function placeLabel(course){
+    if(!course||typeof course!=="object")return "";
+    const locality=String(course.locality||"").trim();
+    const country=String(course.country||"").trim()||String(course.countryCode||"").trim().toUpperCase();
+    return [locality,country].filter(Boolean).join(", ");
+  }
   function distance(a,b){
     const lat1=Number(a?.lat),lng1=Number(a?.lng),lat2=Number(b?.lat),lng2=Number(b?.lng);
     if(![lat1,lng1,lat2,lng2].every(Number.isFinite))return Infinity;
@@ -154,6 +186,9 @@
     return Object.assign({},src,{
       name,
       courseName:name,
+      locality:String(src.locality||"").trim(),
+      country:String(src.country||"").trim(),
+      countryCode:String(src.countryCode||src.country_code||"").trim().toUpperCase(),
       courseId:src.courseId||src.id||canonicalKey,
       canonicalKey,
       courseLat:Number.isFinite(lat)?lat:null,
@@ -179,6 +214,12 @@
         courseLng:raw.courseLng,
         finderLat:raw.finderLat,
         finderLng:raw.finderLng,
+        /* Absent on rows written before the subtitle existed. Those show no
+           subtitle until the course is picked again, which is honest - we do
+           not know where they are and will not guess. */
+        locality:raw.locality,
+        country:raw.country,
+        countryCode:raw.countryCode,
         source:"recent-course"
       });
       course.hasSavedData=false;
@@ -196,6 +237,9 @@
       canonicalKey:course.canonicalKey||keyForName(course.name),
       lat:Number.isFinite(Number(course.lat))?Number(course.lat):null,
       lng:Number.isFinite(Number(course.lng))?Number(course.lng):null,
+      locality:course.locality||"",
+      country:course.country||"",
+      countryCode:course.countryCode||"",
       pickedAt:new Date().toISOString(),
       source:"recent-course"
     };
@@ -218,6 +262,9 @@
 	      courseLng:raw?.courseLng??raw?.lng,
 	      finderLat:raw?.finderLat??raw?.courseFinderLat,
 	      finderLng:raw?.finderLng??raw?.courseFinderLng,
+	      locality:raw?.locality,
+	      country:raw?.country,
+	      countryCode:raw?.countryCode??raw?.country_code,
 	      source:"database-course"
 	    });
 	    course.hasDatabaseMap=true;
@@ -270,6 +317,15 @@
 	          existing.courseId=course.courseId||existing.courseId;
 	          existing.source="database-course";
 	        }
+        /* First place wins. The same course arriving from search, the database
+           and recents should not flicker between two spellings of the same
+           town, and a duplicate that knows nothing must not blank out one that
+           does. */
+        if(!existing.country&&!existing.countryCode&&(course.country||course.countryCode)){
+          existing.locality=course.locality;
+          existing.country=course.country;
+          existing.countryCode=course.countryCode;
+        }
         if(Number.isFinite(Number(course.finderLat))&&Number.isFinite(Number(course.finderLng))){
           existing.finderLat=course.finderLat;
           existing.finderLng=course.finderLng;
@@ -316,7 +372,11 @@
         if(!label||!Number.isFinite(lat)||!Number.isFinite(lng))return null;
         const text=`${label} ${item.display_name||""} ${item.type||""} ${item.class||""}`;
         if(!/golf|course|club|links/i.test(text))return null;
-        return basePayload({name:label,lat,lng,source:"remote-search"});
+        /* addressdetails=1 was already on the request but the address was being
+           thrown away - this is the only place in the app that gets a course's
+           town and country for free, so it is where they enter the system. */
+        const place=placeFromAddress(item.address)||{};
+        return basePayload({name:label,lat,lng,locality:place.locality,country:place.country,countryCode:place.countryCode,source:"remote-search"});
       }).filter(Boolean);
     }catch(e){return []}
     finally{clearTimeout(timer)}
@@ -347,6 +407,11 @@
   }
   function metaText(course){
     const parts=[];
+	    /* Town and country lead the line. It is the part that identifies the
+	       course rather than describing our relationship to it, and it is what a
+	       player scans for when two results share a name. */
+	    const place=placeLabel(course);
+	    if(place)parts.push(place);
 	    if(Number.isFinite(course.distanceM))parts.push(course.distanceM<1000?`${Math.round(course.distanceM)}m away`:`${(course.distanceM/1000).toFixed(1)}km away`);
 	    if(course.source==="recent-course")parts.push("Recent");
 	    /* No label for a course we already hold a map for. Where the map came

@@ -1,3 +1,5 @@
+import { placeFromCourse, reverseGeocodePlace } from "./lib/gd-course-place.mjs";
+
 const STORE_NAME = "clarity-course-maps";
 const STORE_KEY = "published-course-maps-v1";
 const TABLE = "course_maps";
@@ -113,6 +115,7 @@ export default async function courseMaps(req) {
 
   const course = sanitizeCourse(payload && payload.course, adminActor ? actor : communityScanActor(actor));
   if (!course) return json(400, { error: "Course map is required" });
+  await ensureCoursePlace(course);
 
   const current = await readMaps();
   const existingKey = findCourseMapKey(current, course);
@@ -338,7 +341,7 @@ async function writeBlobMaps(maps) {
 
 async function readSupabaseMaps() {
   const rows = await supabaseFetch(
-    TABLE + "?select=id,course_id,course_name,course_lat,course_lng,finder_lat,finder_lng,published,published_at,published_by_json,objects_json,holes_json,assets_json,course_json,created_at,updated_at&published=eq.true&order=updated_at.desc&limit=500",
+    TABLE + "?select=id,course_id,course_name,course_lat,course_lng,finder_lat,finder_lng,locality,country,country_code,published,published_at,published_by_json,objects_json,holes_json,assets_json,course_json,created_at,updated_at&published=eq.true&order=updated_at.desc&limit=500",
     { method: "GET" }
   );
   return mapsFromSupabaseRows(rows);
@@ -385,6 +388,13 @@ function courseToSupabaseRow(course) {
     course_lng: finite(course && course.courseLng),
     finder_lat: finite(course && (course.finderLat ?? course.courseFinderLat)),
     finder_lng: finite(course && (course.finderLng ?? course.courseFinderLng)),
+    /* Columns rather than course_json only, so the picker's course list can
+       read the subtitle without unpacking a payload per course, and so the
+       backfill can find the rows it still has to visit. Null when unknown -
+       an empty string would read as "resolved to nothing" and be skipped. */
+    locality: text(course && course.locality, 120) || null,
+    country: text(course && course.country, 80) || null,
+    country_code: text(course && course.countryCode, 8).toUpperCase() || null,
     published: true,
     published_at: text(course && course.publishedAt, 80) || now,
     published_by_json: jsonObject(course && course.publishedBy),
@@ -413,6 +423,9 @@ function courseFromSupabaseRow(row) {
     finderLng: finite(row.finder_lng ?? base.finderLng ?? base.courseFinderLng),
     courseFinderLat: finite(row.finder_lat ?? base.courseFinderLat ?? base.finderLat),
     courseFinderLng: finite(row.finder_lng ?? base.courseFinderLng ?? base.finderLng),
+    locality: text(row.locality ?? base.locality, 120),
+    country: text(row.country ?? base.country, 80),
+    countryCode: text(row.country_code ?? base.countryCode, 8).toUpperCase(),
     published: true,
     publishedAt: text(row.published_at || base.publishedAt, 80),
     publishedBy: jsonObject(row.published_by_json || base.publishedBy),
@@ -567,6 +580,7 @@ function sanitizeCourse(input, actor) {
   const now = new Date().toISOString();
   const locationPoint = point(input.courseLocation && (input.courseLocation.centre || input.courseLocation.center || input.courseLocation) || input.courseCentre || input.courseCenter);
   const locationConfirmed = input.courseLocationConfirmed === true || !!(input.courseLocation && input.courseLocation.confirmed === true);
+  const place = placeFromCourse(input);
   const course = {
     id,
     userId: "published",
@@ -587,6 +601,12 @@ function sanitizeCourse(input, actor) {
     } : undefined,
     courseLocationSource: text(input.courseLocationSource || input.courseLocation && input.courseLocation.source, 120),
     courseLocationConfirmed: locationConfirmed,
+    /* Town and country as words. Taken from the client when it already knows
+       (a course picked out of search carries what the geocoder said), and
+       filled in from the coordinates otherwise - see ensureCoursePlace. */
+    locality: text(place && place.locality, 120),
+    country: text(place && place.country, 80),
+    countryCode: text(place && place.countryCode, 8).toUpperCase(),
     courseLocationUpdatedAt: text(input.courseLocationUpdatedAt || input.courseLocation && input.courseLocation.updatedAt, 80),
     createdAt: text(input.createdAt, 80) || now,
     updatedAt: now,
@@ -609,6 +629,32 @@ function sanitizeCourse(input, actor) {
     const hole = sanitizeHole(raw, courseId);
     if (hole && hole.holeNumber) course.holes[hole.holeNumber] = hole;
   });
+  return course;
+}
+
+/* Fill in a course's town and country from its coordinates when the client did
+   not send them.
+ *
+ * Doing this on the server rather than trusting the client is what makes the
+ * subtitle actually appear on every saved course. A course reaches this
+ * endpoint by several routes - admin publish, community scan sync, a replayed
+ * draft - and only the search-result route ever had the geocoder's answer to
+ * pass on. Resolving once here covers all of them.
+ *
+ * Publishing is rare and this is one request, so the cost is not a concern.
+ * It must never block a publish though: reverseGeocodePlace resolves to null on
+ * any failure and the course saves with no place, which the backfill picks up
+ * later. Mutates in place because the caller already owns the object. */
+async function ensureCoursePlace(course) {
+  if (!course || course.countryCode || course.country) return course;
+  const place = await reverseGeocodePlace(
+    course.courseLat ?? course.finderLat,
+    course.courseLng ?? course.finderLng
+  );
+  if (!place) return course;
+  course.locality = text(place.locality, 120);
+  course.country = text(place.country, 80);
+  course.countryCode = text(place.countryCode, 8).toUpperCase();
   return course;
 }
 
