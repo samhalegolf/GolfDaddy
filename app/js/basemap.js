@@ -12,6 +12,12 @@
    - Queensland state program aerial — QLD Australia, CC BY-SA. Live display
      only: a stored composite would be Adapted Material, but drawing a fetched
      tile adapts and redistributes nothing.
+   - PDOK / PNOA / IGN France — the three European scan sources mirrored
+     live (all keyless, all openly licensed), so a course there plays over the
+     same pixels its frames are baked from instead of paying Esri. Spain is
+     ordered before France like the scan registry; the boxes overlap along the
+     Pyrenees and the blank-layer demotion below handles the border slivers a
+     rectangle cannot keep out.
    - Esri World Imagery — global, PAID (ArcGIS Location Platform, keyed via
      /api/auth-public-config like LINZ). The licence the key buys is display,
      which is why this layer exists here and must never exist in the scan
@@ -76,6 +82,32 @@
       options: { maxZoom: 21, crossOrigin: true }
     },
     {
+      kind: "pdok",
+      bbox: { south: 50.74, west: 3.35, north: 53.56, east: 7.23 },
+      tileUrl: "https://service.pdok.nl/hwh/luchtfotorgb/wmts/v1_0/Actueel_orthoHR/EPSG:3857/{z}/{x}/{y}.jpeg",
+      attribution: "Luchtfoto © Beeldmateriaal Nederland, via PDOK, CC BY 4.0",
+      options: { maxZoom: 21, crossOrigin: true }
+    },
+    {
+      kind: "pnoa",
+      /* KVP GetTile — a WMTS KVP URL is a plain template with {z}/{x}/{y} in
+         TILEMATRIX/TILECOL/TILEROW clothing. Same bbox as the scan registry;
+         the overlap with geopf along the Pyrenees is documented there. */
+      bbox: { south: 36.0, west: -6.0, north: 43.6, east: 4.34 },
+      tileUrl: "https://www.ign.es/wmts/pnoa-ma?SERVICE=WMTS&VERSION=1.0.0&REQUEST=GetTile&LAYER=OI.OrthoimageCoverage&STYLE=default&TILEMATRIXSET=GoogleMapsCompatible&FORMAT=image/jpeg&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}",
+      attribution: "PNOA orthophotography © Instituto Geográfico Nacional de España, CC BY 4.0 scne.es",
+      options: { maxZoom: 21, maxNativeZoom: 19, crossOrigin: true }
+    },
+    {
+      kind: "geopf",
+      /* 20cm BD ORTHO, matrix set PM_6_19 (levels 6-19). Template validated by
+         the first French scan: 42/42 captures at La Boulie, 2026-08-19. */
+      bbox: { south: 41.3, west: -5.15, north: 51.1, east: 9.57 },
+      tileUrl: "https://data.geopf.fr/wmts?SERVICE=WMTS&VERSION=1.0.0&REQUEST=GetTile&LAYER=HR.ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&TILEMATRIXSET=PM_6_19&FORMAT=image/jpeg&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}",
+      attribution: "© IGN France, BD ORTHO via Géoplateforme, Licence Ouverte 2.0 (Etalab)",
+      options: { maxZoom: 21, maxNativeZoom: 19, crossOrigin: true }
+    },
+    {
       kind: "esri",
       requiresEsriKey: true,
       /* No bbox: global, so it answers exactly where every open region above
@@ -108,11 +140,26 @@
       && lng >= source.bbox.west && lng <= source.bbox.east;
   }
 
+  /* Where a mounted source has PROVEN blank — every tile errored, none loaded.
+     A bbox is a promise the service never made: national mosaics 404 outside
+     their true coverage, and the ES/FR rectangles overlap along the Pyrenees,
+     so some border ground always lands on the wrong national layer. Keyed by
+     kind + a coarse (~5km) cell of the centre it failed at, so PNOA dying over
+     Biarritz does not kill PNOA over Madrid. Session-lived on purpose — an
+     outage should not be remembered into next week. */
+  var deadCells = {};
+  function cellKey(kind, centre) {
+    var lat = Number(centre && centre.lat), lng = Number(centre && centre.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return kind + ":?";
+    return kind + ":" + Math.round(lat * 20) + ":" + Math.round(lng * 20);
+  }
+
   function pick(centre) {
     for (var i = 0; i < SOURCES.length; i++) {
       var source = SOURCES[i];
       if (source.requiresLinzKey && !linzKey) continue;
       if (source.requiresEsriKey && !esriKey) continue;
+      if (deadCells[cellKey(source.kind, centre)]) continue;
       if (covers(source, centre)) return source;
     }
     return SOURCES[SOURCES.length - 1];
@@ -143,6 +190,27 @@
        hole 1 no longer opens on OSM and then swaps to satellite. */
     ready: function () {
       return pending || Promise.resolve();
+    },
+    /* Blank-layer demotion, the live equivalent of the scan's all-or-nothing
+       coverage refusal. The painter calls this after mounting baseFor's layer;
+       if the layer errors several tiles and loads NONE, the source is marked
+       dead for this centre's cell and onDead fires so the caller re-picks —
+       which walks to the next covering source instead of a blank map. Any
+       single loaded tile vetoes demotion (a mosaic-edge course keeps its
+       half). OSM is never watched: there is nothing below it to demote to. */
+    watch: function (base, centre, onDead) {
+      var layer = base && base.layer;
+      if (!layer || typeof layer.on !== "function") return;
+      if (!base.kind || base.kind === "osm") return;
+      var loads = 0, errors = 0, done = false;
+      layer.on("tileload", function () { loads++; });
+      layer.on("tileerror", function () {
+        errors++;
+        if (done || loads > 0 || errors < 4) return;
+        done = true;
+        deadCells[cellKey(base.kind, centre)] = true;
+        if (typeof onDead === "function") onDead();
+      });
     },
     /* Which source is up, for the on-screen source tag. */
     kindFor: function (centre) { return pick(centre).kind; },

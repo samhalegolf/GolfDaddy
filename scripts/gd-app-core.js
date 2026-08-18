@@ -14325,6 +14325,49 @@ const mapSources=[
     attribution:"© State of Queensland, licensed CC BY-SA",
     options:{maxZoom:21,crossOrigin:true}
   },
+  /* The three European scan sources, mirrored live so a course in NL/ES/FR plays over the
+     same pixels its frames are baked from - the NAIP precedent - instead of paying Esri for
+     ground the open programmes give away. All three are keyless. Same bbox numbers as the
+     scan registry on purpose; the parity test in dev/map-source-coverage.test.js pins them.
+
+     Ordering: pnoa BEFORE geopf, exactly like the registry - the two boxes overlap along the
+     Pyrenees and Spain-first is the documented choice. A rectangle cannot trace that border,
+     so some French border ground (Biarritz, Perpignan) lands on PNOA, which has no pixels
+     there and 404s. That is what the blank-layer demotion below setMapSource is for: a
+     mounted source that errors every tile and loads none is stepped past, which for these
+     border slivers means falling through to geopf or Esri instead of a blank map. */
+  {
+    key:"pdok",
+    name:"PDOK",
+    label:"Beeldmateriaal Nederland aerial (CC BY 4.0)",
+    /* RESTful WMTS, plain z/x/y, 8cm current-year mosaic - same layer the scan stores. */
+    tileUrl:"https://service.pdok.nl/hwh/luchtfotorgb/wmts/v1_0/Actueel_orthoHR/EPSG:3857/{z}/{x}/{y}.jpeg",
+    bbox:{south:50.74,west:3.35,north:53.56,east:7.23},
+    attribution:"Luchtfoto © Beeldmateriaal Nederland, via PDOK, CC BY 4.0",
+    options:{maxZoom:21,crossOrigin:true}
+  },
+  {
+    key:"pnoa",
+    name:"PNOA",
+    label:"PNOA orthophotos, IGN España (CC BY 4.0)",
+    /* KVP GetTile - a WMTS KVP URL is just a template with {z}/{x}/{y} in TILEMATRIX/
+       TILECOL/TILEROW clothing. 25cm source: z19 is the last native zoom, upscale past it. */
+    tileUrl:"https://www.ign.es/wmts/pnoa-ma?SERVICE=WMTS&VERSION=1.0.0&REQUEST=GetTile&LAYER=OI.OrthoimageCoverage&STYLE=default&TILEMATRIXSET=GoogleMapsCompatible&FORMAT=image/jpeg&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}",
+    bbox:{south:36.0,west:-6.0,north:43.6,east:4.34},
+    attribution:"PNOA orthophotography © Instituto Geográfico Nacional de España, CC BY 4.0 scne.es",
+    options:{maxZoom:21,maxNativeZoom:19,crossOrigin:true}
+  },
+  {
+    key:"geopf",
+    name:"IGN France",
+    label:"IGN BD ORTHO via Géoplateforme (Licence Ouverte 2.0)",
+    /* The 20cm BD ORTHO, matrix set PM_6_19 (levels 6-19). Template validated by the first
+       French scan: 42/42 captures at La Boulie, 2026-08-19. */
+    tileUrl:"https://data.geopf.fr/wmts?SERVICE=WMTS&VERSION=1.0.0&REQUEST=GetTile&LAYER=HR.ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&TILEMATRIXSET=PM_6_19&FORMAT=image/jpeg&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}",
+    bbox:{south:41.3,west:-5.15,north:51.1,east:9.57},
+    attribution:"© IGN France, BD ORTHO via Géoplateforme, Licence Ouverte 2.0 (Etalab)",
+    options:{maxZoom:21,maxNativeZoom:19,crossOrigin:true}
+  },
   {
     key:"esri",
     name:"Esri Imagery",
@@ -14464,6 +14507,38 @@ function gdBuildBaseLayer(source){
   return L.tileLayer(mapSourceTileUrl(source),options);
 }
 
+/* ---- blank-layer demotion ----
+   A bbox is a promise the service never made. National WMTS mosaics 404 outside their true
+   coverage, and every regional rectangle necessarily swallows some neighbour ground - the
+   ES/FR overlap along the Pyrenees is the documented case (see the pnoa entry above). The
+   scan side has an all-or-nothing coverage check that refuses such captures loudly; this is
+   the live map's equivalent: a mounted source that has errored several tiles and loaded NONE
+   is demonstrably unable to draw here, so step past it to the next covering source - which,
+   with the global Esri layer in the list, is always aerial or the OSM guide, never a blank.
+
+   Deliberately conservative: any single loaded tile vetoes demotion (a mosaic-edge course
+   half-in-coverage keeps its half rather than bouncing), the watch is bound to the mount so
+   a torn-down layer's stragglers cannot demote the layer that replaced it, and OSM (last)
+   is never watched because there is nothing below it to demote to. Manual picks are watched
+   too: a player staring at a blank map is not asking to keep staring at it. */
+let gdBaseLayerWatch=null;
+function gdWatchBaseLayerHealth(layer,sourceIndex){
+  const watch={errors:0,loads:0,done:false};
+  gdBaseLayerWatch=watch;
+  if(sourceIndex>=mapSources.length-1)return;
+  try{
+    layer.on("tileload",()=>{watch.loads++;});
+    layer.on("tileerror",()=>{
+      watch.errors++;
+      if(watch.done||watch!==gdBaseLayerWatch)return;
+      if(watch.loads===0&&watch.errors>=4){
+        watch.done=true;
+        setMapSource(sourceIndex+1,"coverage-fallback");
+      }
+    });
+  }catch(e){}
+}
+
 function setMapSource(index, reason="manual"){
   const count=mapSources.length;
   const centre=mapViewCentre();
@@ -14482,6 +14557,7 @@ function setMapSource(index, reason="manual"){
   }
 
   baseLayer=gdBuildBaseLayer(current).addTo(map);
+  gdWatchBaseLayerHealth(baseLayer,resolved);
   updateMapSourceUI();
 
   baseLayer.once("load",()=>{

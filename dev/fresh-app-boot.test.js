@@ -1360,10 +1360,15 @@ async function bootCheck() {
     const app = window.ClarityApp;
     const keylessNz = app.basemap.baseFor({ lat: -36.9, lng: 174.7 }).kind;
     const keylessLondon = app.basemap.baseFor({ lat: 51.5, lng: -0.1 }).kind;
+    const keylessParis = app.basemap.baseFor({ lat: 49.19, lng: 2.48 }).kind;
     app.basemap.configure({ linzBasemapsKey: "test-key", esriApiKey: "esri-test-key" });
     return {
       keylessNz,
       keylessLondon,
+      keylessParis,
+      amsterdam: app.basemap.baseFor({ lat: 52.35, lng: 4.9 }).kind,
+      barcelona: app.basemap.baseFor({ lat: 41.38, lng: 2.09 }).kind,
+      hasWatch: typeof app.basemap.watch === "function",
       nz: app.basemap.baseFor({ lat: -36.9, lng: 174.7 }).kind,
       pebbleBeach: app.basemap.baseFor({ lat: 36.564, lng: -121.938 }).kind,
       brisbane: app.basemap.baseFor({ lat: -27.5, lng: 153.0 }).kind,
@@ -1606,6 +1611,10 @@ async function bootCheck() {
   assert.strictEqual(basemap.brisbane, "qld", "Queensland centre → QLD aerial");
   assert.strictEqual(basemap.keylessLondon, "osm", "outside every open region with no Esri key → OSM, never empty tiles");
   assert.strictEqual(basemap.london, "esri", "outside every open region, the keyed global Esri aerial answers before the drawn map");
+  assert.strictEqual(basemap.keylessParis, "geopf", "France is keyless IGN — the free national layers need no key at all");
+  assert.strictEqual(basemap.amsterdam, "pdok", "Dutch centre → PDOK aerial");
+  assert.strictEqual(basemap.barcelona, "pnoa", "Barcelona is inside both Pyrenees boxes and must resolve Spanish");
+  assert.ok(basemap.hasWatch, "the blank-layer demotion hook must exist for the painter to attach");
   assert.ok(basemap.naipTileIsBbox, "NAIP tiles are bbox exportImage requests");
   assert.ok(noDefaultRouteClass, "the body must not default into a route class - that's a flash of the wrong screen before this page's own JS runs");
   assert.strictEqual(handoffErrors.length, 0, "uncaught exceptions on the ?courseId= hand-off:\n" + handoffErrors.join("\n"));

@@ -47,6 +47,10 @@ const AUCKLAND_NZ = { lat: -36.78, lng: 174.76 };
 const GOLD_COAST_AU = { lat: -28.01, lng: 153.41 };
 const PEBBLE_US = { lat: 36.57, lng: -121.95 };
 const ST_ANDREWS_UK = { lat: 56.34, lng: -2.80 };
+const CHANTILLY_FR = { lat: 49.19, lng: 2.48 };
+const AMSTERDAM_NL = { lat: 52.35, lng: 4.90 };
+const BARCELONA_ES = { lat: 41.38, lng: 2.09 };   // inside FR's box too — ES order wins
+const BIARRITZ_FR = { lat: 43.47, lng: -1.56 };   // the documented leak: inside ES's box
 const NEUTRAL_BOOT = { lat: 0, lng: 0 };
 
 function source(key) {
@@ -99,6 +103,48 @@ test("every course lands on the best layer that can actually draw", () => {
   assert.strictEqual(pick(PEBBLE_US, ALL_KEYS), "naip", "the US has a live aerial source now - the same NAIP the scan stores");
   assert.strictEqual(pick(ST_ANDREWS_UK, ALL_KEYS), "esri", "the UK has no open program, and now gets paid aerial rather than the line guide");
   assert.strictEqual(pick(ST_ANDREWS_UK, { linzKey: true }), "osm", "without the Esri key the UK degrades to the guide, it does not blank");
+});
+
+test("the European open programmes answer before paid Esri, and need no key at all", () => {
+  assert.strictEqual(pick(CHANTILLY_FR, ALL_KEYS), "geopf", "France gets IGN, not paid Esri");
+  assert.strictEqual(pick(AMSTERDAM_NL, ALL_KEYS), "pdok", "the Netherlands gets PDOK");
+  assert.strictEqual(pick(CHANTILLY_FR, {}), "geopf", "keyless: the free national layers must not depend on any key arriving");
+  assert.strictEqual(pick(AMSTERDAM_NL, {}), "pdok");
+  /* The Pyrenees overlap. Spain-first is the registry's documented ordering: Barcelona sits
+     inside BOTH boxes and must resolve Spanish. The price is Biarritz — French ground inside
+     Spain's rectangle, where PNOA has no pixels. The bbox walk cannot know that; the
+     blank-layer demotion (asserted below) is what turns that from a blank map into geopf. */
+  assert.strictEqual(pick(BARCELONA_ES, ALL_KEYS), "pnoa", "Barcelona is in both boxes and must be Spanish");
+  assert.strictEqual(pick(BIARRITZ_FR, ALL_KEYS), "pnoa", "Biarritz lands on PNOA by bbox — the known leak the demotion exists for");
+});
+
+test("live European bboxes are the scan registry's numbers, verbatim", () => {
+  /* Same invariant as NAIP: the live view and the stored frames must cover identical ground,
+     or one silently promises what the other refuses. If a registry box moves, move both. */
+  const registry = fs.readFileSync(path.join(root, "functions", "lib", "gd-imagery-sources.mjs"), "utf8");
+  [["pdok", "pdok-nl"], ["pnoa", "pnoa-es"], ["geopf", "geopf-fr"]].forEach(([liveKey, scanKey]) => {
+    const scanBox = new RegExp(
+      'key: "' + scanKey + '",[\\s\\S]*?bbox: \\{ south: ([\\d.-]+), west: ([\\d.-]+), north: ([\\d.-]+), east: ([\\d.-]+) \\}'
+    ).exec(registry);
+    assert.ok(scanBox, scanKey + " must still declare a bbox in the scan registry");
+    const live = source(liveKey).bbox;
+    assert.deepStrictEqual(
+      [live.south, live.west, live.north, live.east],
+      scanBox.slice(1, 5).map(Number),
+      "live " + liveKey + " and scan " + scanKey + " must cover identical ground");
+  });
+});
+
+test("a source that cannot draw is demoted, not stared at", () => {
+  /* The demotion is wired into the live layer path, so it is asserted structurally: the
+     health watch exists, counts errors against loads, and is attached at every mount. The
+     behavioural twin (dead-cell re-pick) runs as real code in app-basemap-fallback.test.js
+     against the app shell's implementation of the same policy. */
+  assert.ok(core.includes("function gdWatchBaseLayerHealth("), "the health watch must exist");
+  assert.ok(/gdWatchBaseLayerHealth\(baseLayer,resolved\)/.test(core), "and be attached where the base layer is mounted");
+  assert.ok(core.includes('"tileerror"') && core.includes('"tileload"'),
+    "demotion must weigh errors AGAINST loads — errors alone would demote a half-covered mosaic edge");
+  assert.ok(core.includes('"coverage-fallback"'), "the demoted remount names its reason");
 });
 
 test("the paid global aerial is global, keyed, and sits between the open programs and the guide", () => {

@@ -131,6 +131,15 @@
     if (baseLayer) baseLayer.remove();
     baseKind = base.kind;
     baseLayer = base.layer.addTo(map);
+    /* If the mounted source proves blank (every tile errors, none load — the
+       Pyrenees border slivers, or an outage), basemap marks it dead for this
+       spot and we re-pick, which walks to the next source that can draw. */
+    if (app.basemap.watch) app.basemap.watch(base, centre, function () {
+      repaint("BASEMAP_DEMOTED", function () {
+        baseKind = null;
+        setBaseFor(lastBaseCentre);
+      });
+    });
     var credit = el("mapAttribution");
     if (credit) {
       credit.textContent = base.attribution || "";
