@@ -317,6 +317,82 @@ export function osmGuideHoleRef(value) {
   return match ? validHoleNumber(match[0]) : null;
 }
 
+/* Two features carrying the same hole number, far enough apart to be different
+   ground.
+ *
+ * Royal Auckland is 27 holes and published as 9. OSM numbers each loop of a
+ * multi-nine site 1-9, and every layer below this keys holes by number
+ * (holes[green.holeNumber]), so three loops collapse into nine holes. The
+ * safety net that catches short scans is `expectedHoles && holesResolved <
+ * expectedHoles`, and expectedHoles was null - no shared scorecard, no OSM
+ * holes=N tag - so nine looked like a whole course and the job reported done.
+ *
+ * Distance is what separates a real second loop from OSM's habit of tagging one
+ * hole as both a way and a relation: duplicate representations sit on top of
+ * each other, a different loop does not. LOOP_SEPARATION_M is deliberately well
+ * above a green's own span (OSM_AUTO_GREEN_MAX_SPAN_M is 145m) and well below
+ * the distance between loops on any real site.
+ *
+ * A neighbouring course caught inside the query radius produces the same signal,
+ * which is correct: both mean "do not publish this silently". The caller gets
+ * the numbers and the separation so the difference is readable rather than
+ * guessed at. */
+export const LOOP_SEPARATION_M = 250;
+
+function centroidOfPoints(points) {
+  const list = (points || []).map(toPlain).filter(p => p && Number.isFinite(p.lat) && Number.isFinite(p.lng));
+  if (!list.length) return null;
+  return {
+    lat: list.reduce((sum, p) => sum + p.lat, 0) / list.length,
+    lng: list.reduce((sum, p) => sum + p.lng, 0) / list.length
+  };
+}
+
+export function detectHoleNumberCollision(payload) {
+  const byNumber = new Map();
+  ((payload && payload.elements) || []).forEach(element => {
+    const tags = (element && element.tags) || {};
+    if (String(tags.golf || "").toLowerCase() !== "hole") return;
+    const number = osmGuideHoleRef(tags.ref || tags.name);
+    if (!number) return;
+    const centre = centroidOfPoints(osmGuidePointsFromElement(element));
+    if (!centre) return;
+    if (!byNumber.has(number)) byNumber.set(number, []);
+    byNumber.get(number).push(centre);
+  });
+
+  let loops = 1;
+  let widestSeparationM = 0;
+  const collidedHoles = [];
+  byNumber.forEach((centres, number) => {
+    /* Single-link clustering: a centre joins the first cluster it is within
+       LOOP_SEPARATION_M of, otherwise it starts one. */
+    const clusters = [];
+    centres.forEach(centre => {
+      const near = clusters.find(cluster => cluster.some(member => distance(member, centre) <= LOOP_SEPARATION_M));
+      if (near) near.push(centre); else clusters.push([centre]);
+    });
+    if (clusters.length < 2) return;
+    collidedHoles.push(number);
+    loops = Math.max(loops, clusters.length);
+    clusters.forEach((a, i) => clusters.slice(i + 1).forEach(b => {
+      widestSeparationM = Math.max(widestSeparationM, Math.round(distance(a[0], b[0])));
+    }));
+  });
+
+  collidedHoles.sort((a, b) => a - b);
+  return {
+    multiLoop: loops > 1,
+    loops,
+    collidedHoles,
+    widestSeparationM,
+    /* What the course would publish as if this went unnoticed - the count that
+       made Royal Auckland look like a finished 9-hole course. */
+    distinctNumbers: byNumber.size,
+    holeFeatures: [...byNumber.values()].reduce((sum, list) => sum + list.length, 0)
+  };
+}
+
 export function osmGuidePointsFromElement(element) {
   const pts = [];
   const add = p => {

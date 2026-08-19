@@ -14,7 +14,7 @@
    entirely server-side, so nothing client-side needs to run either stage anymore. */
 
 import { fetchOverpass } from "./lib/gd-overpass-client.mjs";
-import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoObjects, classifyCourseRelationship, courseFootprintFrame, osmCourseHoleCountTag, scopeContainsFrame, osmScopeFrame, expandOsmFrame, MAPPER_VERSION } from "./lib/gd-automapper-core.mjs";
+import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoObjects, classifyCourseRelationship, courseFootprintFrame, osmCourseHoleCountTag, detectHoleNumberCollision, scopeContainsFrame, osmScopeFrame, expandOsmFrame, MAPPER_VERSION } from "./lib/gd-automapper-core.mjs";
 import { hasNumberingIssue, resolveCourseGeometryForAutoMapper, guideFromResolvedHole } from "./lib/gd-geometry-resolver-core.mjs";
 import { courseBoundsFor } from "./lib/gd-visual-plan-core.mjs";
 import { resolveImagerySource, unscannableReason } from "./lib/gd-imagery-sources.mjs";
@@ -71,6 +71,38 @@ async function heartbeatJob(job, progress) {
     body: JSON.stringify({ updated_at: new Date().toISOString(), result: { progress, attempts: job.result && Number(job.result.attempts) || 0 } })
   }).catch(() => {});
 }
+
+/* Is this failure worth trying again?
+ *
+ * Every job error used to end the same way - status "failed", permanently, with
+ * attempts still at 0. That is right for "no OSM hole geometry within range",
+ * which will be just as true tomorrow. It is wrong for "Overpass 504", which
+ * means a shared public endpoint was busy for a moment and says nothing at all
+ * about the course.
+ *
+ * Large courses feel this most: a site bigger than the default 1400m circle is
+ * re-queried on its footprint bbox, and again with WIDER_RETRY_PAD_M if it
+ * comes up short of the expected hole count, so a 27-hole complex can send
+ * three progressively larger Overpass queries. Bigger queries are the ones that
+ * time out, which is why the multi-nine courses were the ones failing.
+ *
+ * Deliberately a allowlist of transient causes rather than a denylist of
+ * terminal ones: an unrecognised error stays terminal and visible, instead of
+ * being retried forever because nobody thought to classify it. */
+function transientMapperFailure(error) {
+  const status = Number(error && error.status);
+  /* Upstream said "not now": gateway/proxy failures and explicit rate limits. */
+  if (status === 429 || status === 502 || status === 503 || status === 504) return true;
+  const message = String(error && error.message || error || "").toLowerCase();
+  if (/\b(429|502|503|504)\b/.test(message)) return true;
+  return /timeout|timed out|etimedout|econnreset|econnrefused|enotfound|socket hang up|network|fetch failed|too many requests|rate limit|temporarily unavailable/.test(message);
+}
+
+/* Four attempts, spaced by the sweeper's own 3-minute cadence, so a course gets
+   about twelve minutes to get past a busy Overpass before anyone is told it
+   failed. No backoff column is needed for that - requeuing is enough, the
+   sweeper supplies the spacing, and gd-overpass-client.mjs still throttles. */
+const MAX_TRANSIENT_ATTEMPTS = 4;
 
 /* Jobs stuck "running" belong to a worker that died mid-run. Same reasoning and cutoff as
    course-visual-worker-background.mjs's reapStaleJobs, sized to this job's much shorter
@@ -222,6 +254,34 @@ async function runMapperJob(job) {
   const expectedHoles = scorecardHoleCount(scorecardEvidence) || osmCourseHoleCountTag(payload) || null;
   const warnings = [];
 
+  /* Stop before saving when hole numbers repeat at separated locations.
+   *
+   * This is the multi-nine case, and it is the one failure that was worse than
+   * failing: Royal Auckland's three loops are each numbered 1-9 in OSM, they
+   * collapsed into nine holes because everything keys by hole number, and with
+   * no scorecard and no OSM holes=N tag there was no expectedHoles to notice
+   * the shortfall. The job said done and a 27-hole course published as 9.
+   *
+   * Refusing is the honest answer until physical numbering can actually be
+   * derived - a partial course presented as a whole one is worse than no
+   * course, because nothing downstream can tell it is wrong. The message
+   * carries the evidence so the row can be read rather than guessed at. */
+  const collision = detectHoleNumberCollision(payload);
+  if (collision.multiLoop) {
+    throw new Error(
+      "multi-loop course: hole number" + (collision.collidedHoles.length === 1 ? " " : "s ")
+      + collision.collidedHoles.join(", ")
+      + " appear in " + collision.loops + " separate locations up to "
+      + collision.widestSeparationM + "m apart"
+      + " - " + collision.holeFeatures + " hole features resolve to only "
+      + collision.distinctNumbers + " distinct numbers."
+      + " Physical numbering needs a scorecard or a loop order; publishing would"
+      + " have saved a " + collision.distinctNumbers + "-hole course."
+      + " (A neighbouring course inside the query radius looks the same and is"
+      + " also not safe to publish.)"
+    );
+  }
+
   if (expectedHoles && geometry.holesResolved < expectedHoles) {
     await heartbeatJob(job, { stage: "retry-wider-frame" });
     const widerFrame = expandOsmFrame(osmScopeFrame(scope, course.center), WIDER_RETRY_PAD_M);
@@ -349,11 +409,21 @@ export default async function courseMapperWorker(req) {
       await finishJob(job.id, { status: "done", result, error: null });
     } catch (error) {
       console.error("course-mapper-worker job failed", job.id, error);
-      await finishJob(job.id, { status: "failed", error: String(error && error.message || error).slice(0, 900) }).catch(() => {});
+      const attempts = (job.result && Number(job.result.attempts) || 0) + 1;
+      const retryable = transientMapperFailure(error) && attempts < MAX_TRANSIENT_ATTEMPTS;
+      const message = String(error && error.message || error).slice(0, 900);
+      /* Requeued rather than failed: the sweeper picks it back up on its next
+         pass. attempts is carried on the job result, the same counter the stale
+         reaper uses, so the two retry paths cannot disagree about how many
+         goes a job has had. */
+      const patch = retryable
+        ? { status: "queued", error: null, result: Object.assign({}, job.result || {}, { attempts, lastTransientError: message }) }
+        : { status: "failed", error: attempts > 1 ? message + " (after " + attempts + " attempts)" : message, result: Object.assign({}, job.result || {}, { attempts }) };
+      await finishJob(job.id, patch).catch(() => {});
     }
     job = await claimJob(null);
   }
   return new Response("ok", { status: 200 });
 }
 
-export const __courseMapperWorkerTest = { claimJob, finishJob, heartbeatJob, reapStaleJobs, runMapperJob, chainVisualSnapshot };
+export const __courseMapperWorkerTest = { claimJob, finishJob, heartbeatJob, reapStaleJobs, runMapperJob, chainVisualSnapshot, transientMapperFailure, MAX_TRANSIENT_ATTEMPTS };
