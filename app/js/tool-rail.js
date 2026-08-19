@@ -183,9 +183,14 @@
       if (fix && app.marshal) app.marshal.signal("PLACED", { point: fix });
     });
 
+    /* The scorecard is round history, so a rangefinder-only session is offered
+       the way in rather than shown an empty card that will not save. The bag
+       beside it stays open to everyone: club distances are local, and they are
+       part of the distance answer. */
     var scoreBtn = document.getElementById("railScorecard");
     if (scoreBtn) scoreBtn.addEventListener("click", function () {
       close();
+      if (app.access && !app.access.roundFeatures()) { app.access.prompt("keep score"); return; }
       if (app.scorecard) app.scorecard.open();
     });
 

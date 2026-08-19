@@ -35,7 +35,7 @@
     var SKIP_PARAMS = [
       "login", "claritySetPassword", "clarityResetPassword",
       "clarityAccountSetup", "access_token", "type", "payment",
-      "session_id", "ref", "referral", "demo"
+      "session_id", "ref", "referral", "demo", "membership"
     ];
     for (var i = 0; i < SKIP_PARAMS.length; i++) {
       if (search.has(SKIP_PARAMS[i])) return;

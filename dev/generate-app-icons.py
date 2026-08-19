@@ -102,4 +102,25 @@ for density, size in FOREGROUND.items():
     write(centred(mark, size, (0, 0, 0, 0), 0.56),
           "android", "app", "src", "main", "res", "mipmap-" + density, "ic_launcher_foreground.png")
 
+# Android splash screens are per-density AND per-orientation, and unlike the iOS
+# one they are used at their own aspect ratio rather than centre-cropped - so the
+# mark is sized against the SHORT edge to stay comfortable in both.
+SPLASH = {
+    "drawable": (480, 320),
+    "drawable-land-mdpi": (480, 320), "drawable-port-mdpi": (320, 480),
+    "drawable-land-hdpi": (800, 480), "drawable-port-hdpi": (480, 800),
+    "drawable-land-xhdpi": (1280, 720), "drawable-port-xhdpi": (720, 1280),
+    "drawable-land-xxhdpi": (1600, 960), "drawable-port-xxhdpi": (960, 1600),
+    "drawable-land-xxxhdpi": (1920, 1280), "drawable-port-xxxhdpi": (1280, 1920),
+}
+
+print("Android splash:")
+for folder, (w, h) in SPLASH.items():
+    short = min(w, h)
+    ratio = (short * 0.30) / max(mark.size)
+    sized = mark.resize((max(1, round(mark.width * ratio)), max(1, round(mark.height * ratio))), Image.LANCZOS)
+    canvas = Image.new("RGBA", (w, h), SPLASH_BG + (255,))
+    canvas.paste(sized, ((w - sized.width) // 2, (h - sized.height) // 2), sized)
+    write(canvas.convert("RGB"), "android", "app", "src", "main", "res", folder, "splash.png")
+
 print("done")

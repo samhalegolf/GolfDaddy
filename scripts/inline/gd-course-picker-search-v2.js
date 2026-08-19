@@ -590,11 +590,24 @@
       navigateToAppPlay(course);
       return true;
     }
+    /* This used to end the journey: no active membership, no round, just a
+       toast. App Store review rejected build 740 partly for that shape, and it
+       was poor product besides - the rangefinder underneath needs neither an
+       account nor a payment to work (nothing in app/js/gps.js, distance.js or
+       pin.js reads either).
+       So a failed check no longer refuses entry, it downgrades it: the player
+       gets the map and the distances, and app/js/access.js - which re-reads the
+       account itself rather than trusting this URL - withholds the scorecard,
+       the round record, resume and the bubble.
+       Still fails CLOSED for the PAID features. A check that could not complete
+       is not evidence of access, so a transient failure lands in rangefinder
+       mode too; it just says so instead of saying no. */
     gpsStartPermission().then(function(check){
       if(check&&check.allowed){navigateToAppPlay(course);return;}
-      if(typeof toast==="function")toast("Start gate: active paid access is required for GPS rounds");
+      navigateToAppPlay(course,{rangefinder:true});
     }).catch(function(){
-      if(typeof toast==="function")toast("Start gate check failed. Try again.");
+      if(typeof toast==="function")toast("Couldn't check your membership - distances only for this round.");
+      navigateToAppPlay(course,{rangefinder:true});
     });
     return true;
   }
@@ -606,8 +619,9 @@
      WebViewLocalServer's html5mode branch, which is on by default. So "/app/"
      re-entered the old shell on a phone while working perfectly in every
      browser and in CI, which is why nothing caught it. */
-  function navigateToAppPlay(course){
+  function navigateToAppPlay(course,opts){
     const parts=[];
+    if(opts&&opts.rangefinder)parts.push("rangefinder=1");
     if(course.courseId)parts.push("courseId="+encodeURIComponent(course.courseId));
     if(course.courseName)parts.push("courseName="+encodeURIComponent(course.courseName));
     if(Number.isFinite(course.courseLat))parts.push("courseLat="+encodeURIComponent(course.courseLat));

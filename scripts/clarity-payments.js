@@ -1215,7 +1215,12 @@
     if (payment === "success" && sessionId) refresh({ sessionId: sessionId }).then(function () { safe(function () { return window.toast && window.toast(hasActiveAccess() ? "Pass active" : "Payment received. Access is updating."); }); });
     if (payment === "cancelled") safe(function () { return window.toast && window.toast("Checkout cancelled"); });
     if (payment === "portal_return") refresh({ silent: true }).then(function () { safe(function () { return window.toast && window.toast("Membership settings updated"); }); });
-    if (payment || handledReferral) safe(function () { var clean = window.location.pathname + window.location.hash; window.history.replaceState({}, document.title, clean || "/"); });
+    /* app/js/access.js sends a rangefinder-only player here when they reach for
+       something a membership covers. Without this the "Membership" button would
+       drop them on the home screen to go and find it themselves. */
+    var membership = params.get("membership") === "1";
+    if (membership) safe(function () { return showSection("payments"); });
+    if (payment || membership || handledReferral) safe(function () { var clean = window.location.pathname + window.location.hash; window.history.replaceState({}, document.title, clean || "/"); });
   }
 
   window.ClarityPayments = {

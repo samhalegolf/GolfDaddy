@@ -1479,7 +1479,14 @@
 
   // ---------------------------------------------------------------- input
 
-  function send(name, payload) { if (marshal) marshal.signal(name, payload); }
+  /* Every control on the surface raises its Signal through here, which makes
+     it the one place a rangefinder-only session can be turned back - and it
+     explains itself rather than the button appearing dead. access.js decides
+     which Signals those are; this file does not get to know. */
+  function send(name, payload) {
+    if (app.access && !app.access.signalAllowed(name)) return;
+    if (marshal) marshal.signal(name, payload);
+  }
 
   function onSurfaceTap(clientX, clientY) {
     var proj = projector();

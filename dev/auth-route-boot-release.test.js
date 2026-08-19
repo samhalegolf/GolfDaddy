@@ -77,22 +77,75 @@ async function launchBrowser(playwright) {
     );
   });
 
-  check("releaseGate clears the stale pre-paint boot class", () => {
-    const idx = gate.indexOf("function releaseGate(");
-    assert.notStrictEqual(idx, -1, "releaseGate must exist");
+  /* applyGate is what the gate exports as window.gdApplyAuthGate, and clearing
+     the stale pre-paint class is now its whole job - releaseGate was folded into
+     it when the gate stopped being a wall (see gd-auth-gate-v1.js). The contract
+     under test is unchanged: something authoritative must clear gdAuthRouteBoot. */
+  check("applyGate clears the stale pre-paint boot class", () => {
+    const idx = gate.indexOf("function applyGate(");
+    assert.notStrictEqual(idx, -1, "applyGate must exist");
     const fn = gate.slice(idx, idx + 1200);
     assert.ok(
       /documentElement\.classList\.remove\('gdAuthRouteBoot'\)/.test(fn),
-      "releaseGate must clear gdAuthRouteBoot, or a missed removal leaves a blank screen"
+      "applyGate must clear gdAuthRouteBoot, or a missed removal leaves a blank screen"
+    );
+  });
+
+  check("applyGate is what the gate exports", () => {
+    assert.ok(
+      /window\.gdApplyAuthGate\s*=\s*applyGate/.test(gate),
+      "the browser half of this test calls window.gdApplyAuthGate"
     );
   });
 
   check("the password-reset boot class is left alone", () => {
-    const idx = gate.indexOf("function releaseGate(");
+    const idx = gate.indexOf("function applyGate(");
     const fn = gate.slice(idx, idx + 1200);
     assert.ok(
       !/remove\([^)]*gdResetRouteBoot/.test(fn),
       "gdResetRouteBoot belongs to the reset flow and has no CSS - releasing it here would be scope creep"
+    );
+  });
+
+  /* The rejection guard. Build 740 was rejected under guideline 5.1.1(v) for
+     requiring an account to reach features that are not account based, and the
+     two lines below are where that wall used to be re-armed. If either comes
+     back, the app ships a login wall again. */
+  check("no route is gated on merely having an account", () => {
+    const bootstrap = fs.readFileSync(path.join(ROOT, "scripts", "inline", "gd-auth-reset-route-bootstrap.js"), "utf8");
+    assert.ok(
+      !/signedOut/.test(bootstrap),
+      "gd-auth-reset-route-bootstrap must not hide the shell for a signed-out visitor"
+    );
+    const audit = fs.readFileSync(path.join(ROOT, "scripts", "gd-route-audit.js"), "utf8");
+    assert.ok(
+      !/gdBrowserHasAccount/.test(audit),
+      "browser back must not route a signed-out player into the auth screen"
+    );
+  });
+
+  /* The rangefinder is the feature Apple said must stay reachable. These pin
+     the two halves of that: the signals that measure distance are never gated,
+     and a failed membership check downgrades entry rather than refusing it. */
+  check("the rangefinder signals are never gated", () => {
+    const access = fs.readFileSync(path.join(ROOT, "app", "js", "access.js"), "utf8");
+    const gated = access.slice(access.indexOf("var GATED_SIGNALS"), access.indexOf("function rangefinderParam"));
+    ["FIX_RECEIVED", "PLACED", "BALL_MOVED", "LOCK", "UNLOCK", "NEXT_HOLE", "PREV_HOLE"].forEach((sig) => {
+      assert.ok(!gated.includes(sig), sig + " is how the rangefinder works and must not need an account");
+    });
+    assert.ok(gated.includes("SCORE_SET"), "keeping score is account-based and must stay gated");
+  });
+
+  check("a failed membership check downgrades rather than refuses", () => {
+    const picker = fs.readFileSync(path.join(ROOT, "scripts", "inline", "gd-course-picker-search-v2.js"), "utf8");
+    const fn = picker.slice(picker.indexOf("function enterGpsPlay("), picker.indexOf("function navigateToAppPlay("));
+    assert.ok(
+      !/active paid access is required/.test(fn),
+      "refusing entry outright is the shape that was rejected under 5.1.1(v)"
+    );
+    assert.strictEqual(
+      (fn.match(/rangefinder:\s*true/g) || []).length, 2,
+      "both the denied branch and the check-failed branch must fall through to rangefinder mode"
     );
   });
 

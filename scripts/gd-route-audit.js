@@ -219,9 +219,6 @@
   const GD_BROWSER_ROUTE_STATE_KEY="gdShellRouteV1";
   let gdBrowserRouteRestoring=false;
   let gdBrowserRouteInstalled=false;
-  function gdBrowserHasAccount(){
-    return safe(()=>!!window.GolfDaddyAccounts?.current?.(),false);
-  }
   function gdBrowserAdminAllowed(){
     const session=safe(()=>window.ClaritySession?.get?.(),null);
     const role=String(session?.accountRole||"");
@@ -230,7 +227,7 @@
   function gdBrowserRouteState(route){
     return {
       [GD_BROWSER_ROUTE_STATE_KEY]:true,
-      route:gdBrowserHasAccount()?String(route||"home"):"auth",
+      route:String(route||"home"),
       backTarget:String(window.__gdBackTarget||""),
       profileReturnProfileId:String(window.__gdProfileReturnProfileId||""),
       profileReturnName:String(window.__gdProfileReturnName||"")
@@ -286,7 +283,11 @@
   }
   function gdRestoreBrowserRoute(state){
     const route=String(state?.route||"home");
-    if(route==="auth"||!gdBrowserHasAccount())return gdShowBrowserAuthGate();
+    /* Only an explicitly recorded auth route reopens the auth screen. This used
+       to also fire whenever no account existed, which meant a signed-out player
+       pressing Back anywhere in the app was thrown into sign-in - see
+       scripts/inline/gd-auth-gate-v1.js for why that is gone. */
+    if(route==="auth")return gdShowBrowserAuthGate();
     gdBrowserRouteRestoring=true;
     try{
       gdRestoreBrowserBackTarget(state);
@@ -334,7 +335,7 @@
     gdBrowserRouteInstalled=true;
     gdRememberBrowserRoute(window.lastShellModule||"home",true);
     window.addEventListener("popstate",event=>{
-      const state=event.state&&event.state[GD_BROWSER_ROUTE_STATE_KEY]?event.state:{[GD_BROWSER_ROUTE_STATE_KEY]:true,route:gdBrowserHasAccount()?"home":"auth"};
+      const state=event.state&&event.state[GD_BROWSER_ROUTE_STATE_KEY]?event.state:{[GD_BROWSER_ROUTE_STATE_KEY]:true,route:"home"};
       const route=String(state.route||"home");
       if(gdBrowserRouteIsHomeVisible()&&route!=="home"&&route!=="auth"){
         gdKeepHomeOnBrowserBack();
@@ -6149,6 +6150,10 @@
 	    }
 	  }
   function openDataHub(opts){
+    /* Account-based route: this is the player's own data, one of the few things
+       that legitimately needs a sign-in. gd-auth-gate-v1.js owns the decision
+       and opens the sign-in screen itself when the answer is no. */
+    if(window.gdAuthGateAllows&&!window.gdAuthGateAllows("shotData"))return false;
     rememberProfileReturn(opts);
     openModulePanel("dataHubPanel","Data","",opts);
     gdInitDataHubAccordion();
@@ -6159,6 +6164,7 @@
     return false;
   }
 	  function openCourseData(opts){
+	    if(window.gdAuthGateAllows&&!window.gdAuthGateAllows("courseData"))return false;
 	    rememberProfileReturn(opts);
 	    openModulePanel("dataHubPanel","Course Data","",opts);
 	    gdHubSetSection("course",{force:true});
@@ -7965,6 +7971,7 @@
     if(!skipTolerances&&gdPracticeAdminIsOpen())gdRenderPracticeToleranceControls();
   }
   function openPracticeData(opts){
+    if(window.gdAuthGateAllows&&!window.gdAuthGateAllows("practiceData"))return false;
     openModulePanel("dataHubPanel","Practice Data","",opts);
     gdHubSetSection("practice",{force:true});
     gdSetPracticeDataTab(opts&&opts.adminTab?"admin":"data");
@@ -8009,6 +8016,7 @@
 	    return {deletedImports:deleted,playerId:scopedPlayer};
 	  }
 	  function openDeveloper(opts){
+    if(window.gdAuthGateAllows&&!window.gdAuthGateAllows("admin"))return false;
     const priorBackTarget=window.__gdBackTarget||"";
     const explicitGps=!!(opts&&opts.fromGps);
     const explicitHome=!!(opts&&opts.fromHome);
@@ -8098,6 +8106,9 @@
     return false;
   }
   function openBubbleStable(opts){
+    /* openDataHub carries the gate; stop here too rather than re-labelling the
+       shell for a panel that never opened. */
+    if(window.gdAuthGateAllows&&!window.gdAuthGateAllows("shotData"))return false;
     openDataHub(opts);
     setDock("bubble");
     setRouteLabel("Shot Data");
@@ -8574,9 +8585,9 @@
 	        return openGpsStable({replace:false,fromHome:homeContext});
 	      }
       if(target.id==="dockBubble"||target.classList.contains("gdBubbleTile")){event.preventDefault();event.stopImmediatePropagation();openBubbleStable();return;}
-      if(target.id==="gdCourseDataOpenBtn"){event.preventDefault();event.stopImmediatePropagation();gdHubSetSection("course");return;}
-      if(target.id==="gdPracticeDataOpenBtn"){event.preventDefault();event.stopImmediatePropagation();gdHubSetSection("practice");return;}
-      if(target.id==="gdCompareDataOpenBtn"){event.preventDefault();event.stopImmediatePropagation();gdHubSetSection("compare");return;}
+      if(target.id==="gdCourseDataOpenBtn"){event.preventDefault();event.stopImmediatePropagation();if(window.gdAuthGateAllows&&!window.gdAuthGateAllows("courseData"))return;gdHubSetSection("course");return;}
+      if(target.id==="gdPracticeDataOpenBtn"){event.preventDefault();event.stopImmediatePropagation();if(window.gdAuthGateAllows&&!window.gdAuthGateAllows("practiceData"))return;gdHubSetSection("practice");return;}
+      if(target.id==="gdCompareDataOpenBtn"){event.preventDefault();event.stopImmediatePropagation();if(window.gdAuthGateAllows&&!window.gdAuthGateAllows("shotData"))return;gdHubSetSection("compare");return;}
       if(on.includes("gdBubbleOffsetEdit")){event.preventDefault();event.stopImmediatePropagation();gdBubbleOffsetEdit();return;}
       if(on.includes("gdBubbleOffsetSave")){event.preventDefault();event.stopImmediatePropagation();gdBubbleOffsetSave();return;}
       if(target.classList.contains("gdProfileTile")){

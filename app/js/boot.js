@@ -25,6 +25,13 @@
      Note what is NOT in this list: anything that draws. The Painter is a Scene
      subscriber, not an effect, because drawing is not something the Marshal
      asks for — it is what the Scene IS. */
+  /* access.js owns the rule; this is just the short name for it. Defaults to
+     TRUE when access.js is somehow absent, so a load failure cannot silently
+     stop a paying member's round from being saved. */
+  function roundFeatures() {
+    return !app.access || app.access.roundFeatures();
+  }
+
   function ensureMarshal() {
     if (app.marshal) return app.marshal;
     app.marshal = app.createMarshal({
@@ -41,12 +48,17 @@
         } catch (e) { return green; }
       },
       effects: {
+        /* Split by who owns it. The pin, the fix and the wake lock are the
+           rangefinder and run for everybody; Course Data and the scorecard are
+           round history, and a rangefinder-only session never opens either -
+           so nothing is left half-written when it ends. */
         roundStarted: function (courseKey) {
-          if (app.courseData) app.courseData.startRound(courseKey);
           if (app.pin) app.pin.startRound();
-          if (app.scorecard) app.scorecard.setCourse(courseKey);
           if (app.gps) app.gps.start();
           if (app.wakeLock) app.wakeLock.start();
+          if (!roundFeatures()) return;
+          if (app.courseData) app.courseData.startRound(courseKey);
+          if (app.scorecard) app.scorecard.setCourse(courseKey);
         },
         roundEnded: function () {
           if (app.gps) app.gps.stop();
@@ -55,6 +67,7 @@
         holeEntered: function (hole, rec) {
           if (app.pin) app.pin.startHole(hole);
           if (app.undo) app.undo.clear();
+          if (!roundFeatures()) return;
           if (app.resume) app.resume.setHole(hole);
           if (window.GDBubbleEngine && rec) {
             window.GDBubbleEngine.setHoleContext({
@@ -63,7 +76,9 @@
           }
         },
         shotChanged: function (start, target) {
-          if (window.GDBubbleEngine) window.GDBubbleEngine.setShot(start || null, target || null);
+          /* The bubble is a member feature; wind is part of the distance
+             answer, so it keeps running either way. */
+          if (window.GDBubbleEngine && roundFeatures()) window.GDBubbleEngine.setShot(start || null, target || null);
           /* Wind is per shot. A different start point — or no shot at all —
              is the next shot, and it starts calm (wind.js reset). Dragging
              the aim only moves the TARGET, so a drag never lands here; a new
@@ -77,9 +92,11 @@
         /* GPS Play's only analytical output. Wrapped because nothing about
            Course Data may interrupt a round. */
         shotCompleted: function (shot, meta) {
+          if (!roundFeatures()) return;
           try { if (app.courseData) app.courseData.submit(shot, meta); } catch (e) {}
         },
         scoreSet: function (hole, strokes) {
+          if (!roundFeatures()) return;
           if (app.scorecard && app.scorecard.setScore) app.scorecard.setScore(hole, strokes);
         }
       }
@@ -122,6 +139,9 @@
     }
     if (app.trace) app.trace.paint("ROUTE_CHANGED", route, paintRoute);
     else paintRoute();
+    /* Lets CSS soften anything that is only meaningful with a round behind it,
+       without any module having to ask twice. */
+    document.body.classList.toggle("rangefinderOnly", !roundFeatures());
     if (route !== "play") {
       if (app.marshal) app.marshal.signal("END_ROUND");
       if (app.painter && app.painter.detach) app.painter.detach();
@@ -346,7 +366,7 @@
     /* Record the round the moment it is genuinely up, so a phone that dies on
        the 7th tee still has somewhere to come back to. play.js keeps the hole
        current from here on. */
-    if (app.resume) app.resume.setCourse(course);
+    if (app.resume && roundFeatures()) app.resume.setCourse(course);
     var cached = app.courseStore.load(course.courseId);
     var pkg = cached && cached.pkg;
     if (pkg) {
@@ -419,6 +439,7 @@
       document.getElementById("gpsNotice").classList.add("hiddenState");
     });
     app.courseDataFeedInstalled = !!(app.courseData && app.courseData.submit);
+    app.showRoute = show;   // access.js offers sign-in without leaving the page
     app.basemap.prefetch();   // so base-layer choice is synchronous by map time
     app.nativeBackInstalled = installNativeBack();
     app.booted = true;   // boot-test canary: the last line of the load order ran
