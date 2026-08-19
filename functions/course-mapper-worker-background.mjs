@@ -11,7 +11,18 @@
    Native Geometry Resolver (functions/lib/gd-geometry-resolver-core.mjs) - a separate
    algorithm that infers numbering from geometry + scorecard evidence. This mirrors the
    client's old two-stage mapping (AutoMapper, then the native resolver as its own fallback)
-   entirely server-side, so nothing client-side needs to run either stage anymore. */
+   entirely server-side, so nothing client-side needs to run either stage anymore.
+
+   Multi-loop courses (hole numbers repeating across separated loops - the Royal Auckland
+   case) also hand off to the resolver now instead of refusing outright: the resolver ignores
+   OSM refs and numbers holes from scorecard distances, which is exactly the evidence a
+   multi-nine site needs. The refusal only remains for the case it was written for - no
+   scorecard, or a resolver answer that cannot beat the collapsed count.
+
+   Every run also carries a diagnostics object (queried centre, query stages, OSM feature
+   counts, scorecard/resolver state) that is saved on the job result for FAILED runs too, via
+   error.diagnostics - a failed row used to keep nothing but the error sentence and an attempt
+   counter, which made "wrong centre coordinates" indistinguishable from "course not in OSM". */
 
 import { fetchOverpass } from "./lib/gd-overpass-client.mjs";
 import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoObjects, classifyCourseRelationship, courseFootprintFrame, osmCourseHoleCountTag, detectHoleNumberCollision, scopeContainsFrame, osmScopeFrame, expandOsmFrame, MAPPER_VERSION } from "./lib/gd-automapper-core.mjs";
@@ -218,6 +229,25 @@ function scorecardHoleCount(evidence) {
   return seen.size || null;
 }
 
+/* What Overpass actually returned, in numbers a failed job row can carry. "0 golf features
+   at this centre" and "40 features, 0 numbered holes" are different problems with different
+   fixes, and neither is readable from the error sentence alone. */
+function golfFeatureCounts(payload) {
+  const elements = (payload && payload.elements) || [];
+  const counts = { elements: elements.length, holes: 0, numberedHoles: 0, greens: 0, fairways: 0, tees: 0 };
+  elements.forEach(element => {
+    const tags = (element && element.tags) || {};
+    const golf = String(tags.golf || "").toLowerCase();
+    if (golf === "hole") {
+      counts.holes += 1;
+      if (String(tags.ref || tags.name || "").trim()) counts.numberedHoles += 1;
+    } else if (golf === "green") counts.greens += 1;
+    else if (golf === "fairway") counts.fairways += 1;
+    else if (golf === "tee") counts.tees += 1;
+  });
+  return counts;
+}
+
 /* fetch OSM golf geometry -> resolve into tee/green/fairway objects -> persist.
 
    Query area, in order of preference: the course's own footprint bbox when it spills outside
@@ -235,6 +265,19 @@ const WIDER_RETRY_PAD_M = 700;
 async function runMapperJob(job) {
   const course = await loadCourseCenter(job.course_id);
   if (!course) throw new Error("course " + job.course_id + " has no known location in " + MAPS_TABLE + " - cannot query Overpass");
+  /* Everything learned along the way, attached to any throw via fail() so the default
+     handler can save it on the failed job row. The centre goes first because it is the
+     question a dead-end failure most needs answered: north-shore failed with "no OSM hole
+     geometry within range" while its centre sat in Michigan, and the row had no way to say so. */
+  const diagnostics = {
+    centre: { lat: course.center.lat, lng: course.center.lng },
+    courseName: course.courseName || null
+  };
+  const fail = message => {
+    const error = new Error(message);
+    error.diagnostics = diagnostics;
+    return error;
+  };
   await heartbeatJob(job, { stage: "querying-overpass" });
   let scope = osmQueryScope({}, course.center);
   let payload = await fetchOverpass(osmGuideQuery(scope));
@@ -245,6 +288,8 @@ async function runMapperJob(job) {
     payload = await fetchOverpass(osmGuideQuery(scope));
     queryStages.push("footprint-bbox");
   }
+  diagnostics.queryStages = queryStages;
+  diagnostics.osmFeatures = golfFeatureCounts(payload);
   await heartbeatJob(job, { stage: "resolving-geometry" });
   const existingObjects = Object.values(course.objects || {}).filter(Boolean);
   const siblingCentres = await loadSiblingCentres(course).catch(() => []);
@@ -252,37 +297,73 @@ async function runMapperJob(job) {
 
   const scorecardEvidence = await fetchScorecardEvidence(course.courseName);
   const expectedHoles = scorecardHoleCount(scorecardEvidence) || osmCourseHoleCountTag(payload) || null;
+  diagnostics.scorecardFound = !!scorecardEvidence;
+  diagnostics.expectedHoles = expectedHoles;
   const warnings = [];
 
-  /* Stop before saving when hole numbers repeat at separated locations.
+  /* Hole numbers repeating at separated locations - the multi-nine case.
    *
-   * This is the multi-nine case, and it is the one failure that was worse than
-   * failing: Royal Auckland's three loops are each numbered 1-9 in OSM, they
-   * collapsed into nine holes because everything keys by hole number, and with
-   * no scorecard and no OSM holes=N tag there was no expectedHoles to notice
-   * the shortfall. The job said done and a 27-hole course published as 9.
+   * This was the one failure that was worse than failing: Royal Auckland's
+   * three loops are each numbered 1-9 in OSM, they collapsed into nine holes
+   * because everything keys by hole number, and with no scorecard and no OSM
+   * holes=N tag there was no expectedHoles to notice the shortfall. The job
+   * said done and a 27-hole course published as 9.
    *
-   * Refusing is the honest answer until physical numbering can actually be
-   * derived - a partial course presented as a whole one is worse than no
-   * course, because nothing downstream can tell it is wrong. The message
-   * carries the evidence so the row can be read rather than guessed at. */
+   * OSM numbering is unusable here by definition, so this now hands off to the
+   * Native Geometry Resolver, which ignores OSM refs and derives physical
+   * numbering from scorecard distances - exactly the evidence a multi-nine
+   * site needs, and the handoff this refusal's own message always asked for
+   * ("physical numbering needs a scorecard"). Refusing remains the honest
+   * answer when that path cannot work: no shared scorecard, or a resolver
+   * answer that cannot beat the collapsed count - a partial course presented
+   * as a whole one is still worse than no course. */
   const collision = detectHoleNumberCollision(payload);
+  let resolverStatus = null;
   if (collision.multiLoop) {
-    throw new Error(
-      "multi-loop course: hole number" + (collision.collidedHoles.length === 1 ? " " : "s ")
-      + collision.collidedHoles.join(", ")
-      + " appear in " + collision.loops + " separate locations up to "
-      + collision.widestSeparationM + "m apart"
-      + " - " + collision.holeFeatures + " hole features resolve to only "
-      + collision.distinctNumbers + " distinct numbers."
-      + " Physical numbering needs a scorecard or a loop order; publishing would"
-      + " have saved a " + collision.distinctNumbers + "-hole course."
-      + " (A neighbouring course inside the query radius looks the same and is"
-      + " also not safe to publish.)"
-    );
+    diagnostics.collision = {
+      loops: collision.loops,
+      collidedHoles: collision.collidedHoles,
+      widestSeparationM: collision.widestSeparationM,
+      distinctNumbers: collision.distinctNumbers,
+      holeFeatures: collision.holeFeatures
+    };
+    await heartbeatJob(job, { stage: "geometry-resolver" });
+    const result = await resolveCourseGeometryForAutoMapper({
+      osmPayload: payload,
+      courseId: course.courseId,
+      course: { courseId: course.courseId, courseName: course.courseName, courseCentre: course.center },
+      courseCentre: course.center,
+      expectedHoleCount: expectedHoles || undefined,
+      scorecardHoles: scorecardEvidence ? scorecardEvidence.holes : [],
+      scorecardEvidence: scorecardEvidence || {}
+    });
+    resolverStatus = { status: result.status, confidence: result.confidence, warnings: result.warnings, hadScorecard: !!scorecardEvidence, trigger: "multi-loop" };
+    diagnostics.resolverStatus = resolverStatus;
+    const guides = (result.holes || []).map(hole => guideFromResolvedHole(hole, result)).filter(Boolean);
+    /* Publishable only when the resolver genuinely separated the loops - more holes than the
+       collapsed count the collision measured. Anything less keeps the refusal. */
+    if (guides.length > collision.distinctNumbers) {
+      const resolverGreens = (result.debugEvidence && result.debugEvidence.greenCandidates || []).map(green => ({ center: green.centre, shape: green.polygon }));
+      const merged = resolveGuidesIntoObjects(guides, course.courseId, resolverGreens, existingObjects);
+      geometry = Object.assign({}, geometry, merged, { holesResolved: guides.length });
+    } else {
+      throw fail(
+        "multi-loop course: hole number" + (collision.collidedHoles.length === 1 ? " " : "s ")
+        + collision.collidedHoles.join(", ")
+        + " appear in " + collision.loops + " separate locations up to "
+        + collision.widestSeparationM + "m apart"
+        + " - " + collision.holeFeatures + " hole features resolve to only "
+        + collision.distinctNumbers + " distinct numbers."
+        + (scorecardEvidence
+          ? " Geometry resolver ran on scorecard evidence but resolved only " + guides.length + " holes (status: " + result.status + ") - not enough to separate the loops."
+          : " No shared scorecard to derive physical numbering from - share one for this course and remap.")
+        + " (A neighbouring course inside the query radius looks the same and is"
+        + " also not safe to publish.)"
+      );
+    }
   }
 
-  if (expectedHoles && geometry.holesResolved < expectedHoles) {
+  if (!collision.multiLoop && expectedHoles && geometry.holesResolved < expectedHoles) {
     await heartbeatJob(job, { stage: "retry-wider-frame" });
     const widerFrame = expandOsmFrame(osmScopeFrame(scope, course.center), WIDER_RETRY_PAD_M);
     if (widerFrame) {
@@ -292,13 +373,13 @@ async function runMapperJob(job) {
         geometry = widerGeometry;
         payload = widerPayload;
         queryStages.push("wider-retry");
+        diagnostics.osmFeatures = golfFeatureCounts(payload);
       }
     }
   }
 
-  let resolverStatus = null;
-  const numberingIssue = !geometry.holesResolved && hasNumberingIssue({ osmPayload: payload });
-  const shortOfExpected = !!(expectedHoles && geometry.holesResolved < expectedHoles);
+  const numberingIssue = !collision.multiLoop && !geometry.holesResolved && hasNumberingIssue({ osmPayload: payload });
+  const shortOfExpected = !!(!collision.multiLoop && expectedHoles && geometry.holesResolved < expectedHoles);
   if (numberingIssue || shortOfExpected) {
     await heartbeatJob(job, { stage: "geometry-resolver" });
     const result = await resolveCourseGeometryForAutoMapper({
@@ -311,6 +392,7 @@ async function runMapperJob(job) {
       scorecardEvidence: scorecardEvidence || {}
     });
     resolverStatus = { status: result.status, confidence: result.confidence, warnings: result.warnings, hadScorecard: !!scorecardEvidence, trigger: numberingIssue ? "no-osm-numbering" : "short-of-expected" };
+    diagnostics.resolverStatus = resolverStatus;
     const guides = (result.holes || []).map(hole => guideFromResolvedHole(hole, result)).filter(Boolean);
     /* The resolver's numbering (scorecard-derived, OSM refs ignored) only replaces the
        OSM-numbered answer when it genuinely covers MORE holes - a lower-coverage resolver run
@@ -325,7 +407,10 @@ async function runMapperJob(job) {
   }
   if (!geometry.holesResolved) {
     const reason = resolverStatus ? "geometry resolver status: " + resolverStatus.status + (resolverStatus.hadScorecard ? "" : " (no shared scorecard found)") : "no OSM hole geometry within range";
-    throw new Error("no numbered hole geometry found for " + course.courseId + " (" + reason + ")");
+    /* The queried centre rides in the sentence itself: "no hole geometry HERE" is only
+       actionable when the row says where "here" was - north-shore's centre sat in Michigan
+       and nothing surfaced it. */
+    throw fail("no numbered hole geometry found for " + course.courseId + " (" + reason + ") - queried centre " + course.center.lat.toFixed(5) + "," + course.center.lng.toFixed(5));
   }
   if (expectedHoles && geometry.holesResolved < expectedHoles) {
     warnings.push("expected " + expectedHoles + " holes (" + (scorecardHoleCount(scorecardEvidence) ? "shared scorecard" : "OSM holes tag") + ") but resolved " + geometry.holesResolved + " - published incomplete after wider retry" + (resolverStatus ? " and geometry resolver" : ""));
@@ -416,9 +501,13 @@ export default async function courseMapperWorker(req) {
          pass. attempts is carried on the job result, the same counter the stale
          reaper uses, so the two retry paths cannot disagree about how many
          goes a job has had. */
+      /* Whatever the run learned before it died - queried centre, query stages, feature
+         counts, scorecard/resolver state - lands on the job row instead of evaporating.
+         Failed rows used to keep only the error sentence and an attempt counter. */
+      const diagnostics = error && error.diagnostics || null;
       const patch = retryable
-        ? { status: "queued", error: null, result: Object.assign({}, job.result || {}, { attempts, lastTransientError: message }) }
-        : { status: "failed", error: attempts > 1 ? message + " (after " + attempts + " attempts)" : message, result: Object.assign({}, job.result || {}, { attempts }) };
+        ? { status: "queued", error: null, result: Object.assign({}, job.result || {}, { attempts, lastTransientError: message }, diagnostics ? { diagnostics } : {}) }
+        : { status: "failed", error: attempts > 1 ? message + " (after " + attempts + " attempts)" : message, result: Object.assign({}, job.result || {}, { attempts }, diagnostics ? { diagnostics } : {}) };
       await finishJob(job.id, patch).catch(() => {});
     }
     job = await claimJob(null);
@@ -426,4 +515,4 @@ export default async function courseMapperWorker(req) {
   return new Response("ok", { status: 200 });
 }
 
-export const __courseMapperWorkerTest = { claimJob, finishJob, heartbeatJob, reapStaleJobs, runMapperJob, chainVisualSnapshot, transientMapperFailure, MAX_TRANSIENT_ATTEMPTS };
+export const __courseMapperWorkerTest = { claimJob, finishJob, heartbeatJob, reapStaleJobs, runMapperJob, chainVisualSnapshot, transientMapperFailure, golfFeatureCounts, MAX_TRANSIENT_ATTEMPTS };
