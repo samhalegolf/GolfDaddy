@@ -1006,7 +1006,14 @@
     return Object.keys(found).map(function(key){return Number(key);}).filter(Boolean).sort(function(a,b){return a-b;});
   }
   function buildDebugSnapshot(courseOrId){
-    var active=courseOrId||activeCourseFromApp()||"course";
+    /* "course" is slug()'s fallback stem, not a course. Seeding the snapshot
+       with it made an empty monitor render COURSE: course / COURSE KEY: course
+       and a full row of zeros, which reads like a scan that ran and found
+       nothing rather than the truth - no course is open in this browser.
+       hasActiveCourse carries that distinction to the panel. */
+    var resolved=courseOrId||activeCourseFromApp()||"";
+    var hasActiveCourse=!!resolved;
+    var active=resolved||"course";
     var course=getCoursePlayState(active);
     var frames=getCoursePlayFrameIndex(course)||[];
     var frameByHole={};
@@ -1045,8 +1052,9 @@
     return {
       generatedAt:now(),
       storageKeys:{pipeline:STORE_KEY,frameIndex:FRAME_INDEX_KEY,syncQueue:SYNC_QUEUE_KEY,debugLog:DEBUG_LOG_KEY},
-      activeCourseKey:course.courseKey||course.courseId,
-      activeCourseName:course.courseName,
+      hasActiveCourse:hasActiveCourse,
+      activeCourseKey:hasActiveCourse?(course.courseKey||course.courseId):"",
+      activeCourseName:hasActiveCourse?course.courseName:"",
       activeHole:activeHoleFromApp(),
       automapperStatus:automapperStatus,
       holesScanned:Number(adapter.holesChecked||0)||rows.length,

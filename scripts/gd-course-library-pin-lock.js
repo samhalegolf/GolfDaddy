@@ -4056,7 +4056,7 @@
 	      const published=publishedCourses().find(course=>keys.some(key=>courseMatchesIdentity(course,key,request.courseName,request.course)))||null;
 	      const readiness=published?courseDataMapReadiness(published,request.hole,request.wholeCourse):null;
 	      if(published){
-	        recordMappingDebug(request.debugRunId,{source:'cloud-map',phase:readiness&&readiness.ready?'completed':'partial',event:readiness&&readiness.ready?'course-map-cloud-loaded':'course-map-cloud-incomplete',summary:readiness&&readiness.ready?'Course map loaded from cloud':'Course map cloud data incomplete',details:{courseKey:published.courseId,lookup:'published-course-maps',publishedCourseId:published.id,pulled:Object.keys(maps&&maps.courses||{}).length,persistedObjects:Object.keys(published.objects||{}).length,holes:readiness&&readiness.coverage&&readiness.coverage.holes||[],playableHoleCount:readiness&&readiness.coverage&&readiness.coverage.count||0,expectedHoleCount:readiness&&readiness.coverage&&readiness.coverage.expected||0,missingHoles:readiness&&readiness.coverage&&readiness.coverage.missing||[],resolutionKey:request.resolutionKey,attemptToken:request.attemptToken}});
+	        recordMappingDebug(request.debugRunId,{source:'cloud-map',phase:readiness&&readiness.ready?'completed':'progress',event:readiness&&readiness.ready?'course-map-cloud-loaded':'course-map-cloud-incomplete',summary:readiness&&readiness.ready?'Course map loaded from cloud':'Course map cloud data incomplete',details:{courseKey:published.courseId,lookup:'published-course-maps',publishedCourseId:published.id,pulled:Object.keys(maps&&maps.courses||{}).length,persistedObjects:Object.keys(published.objects||{}).length,holes:readiness&&readiness.coverage&&readiness.coverage.holes||[],playableHoleCount:readiness&&readiness.coverage&&readiness.coverage.count||0,expectedHoleCount:readiness&&readiness.coverage&&readiness.coverage.expected||0,missingHoles:readiness&&readiness.coverage&&readiness.coverage.missing||[],resolutionKey:request.resolutionKey,attemptToken:request.attemptToken}});
 	        recordCoursePlayDebug(readiness&&readiness.ready?'course-map-cloud-loaded':'course-map-cloud-incomplete',request.course,request.hole,{courseKey:published.courseId,lookup:'published-course-maps',publishedCourseId:published.id,pulled:Object.keys(maps&&maps.courses||{}).length,persistedObjects:Object.keys(published.objects||{}).length,holes:readiness&&readiness.coverage&&readiness.coverage.holes||[],playable:!!(readiness&&readiness.ready),resolutionKey:request.resolutionKey,attemptToken:request.attemptToken});
 	        return {attempted:true,found:true,key:published.courseId,result:maps,persisted:{saved:0,holes:readiness&&readiness.coverage&&readiness.coverage.holes||[]},readiness,published};
 	      }
@@ -4407,7 +4407,14 @@
     }catch(e){}
     try{if(typeof window.gdApplyGpsMapVisibilityOwner==='function')window.gdApplyGpsMapVisibilityOwner('interactive-green-fallback');}catch(e){}
     const mapEl=(map&&map.getContainer&&map.getContainer())||document.getElementById('map');
-    if(!mapEl)return {playable:false,fallback:'interactive-green',armed:false};
+    if(!mapEl){
+      /* The phase:'fallback' event above has already fired and closed the
+         run as "Manual green fallback opened". Without this the log claimed
+         a fallback was waiting for a tap that could never be delivered,
+         because no map element means no click handler was ever attached. */
+      recordMappingDebug(debugRunId,{source:'manual-fallback',phase:'failed',event:'manual-fallback-not-armed',summary:'Manual fallback could not arm: no map element',details:{hole:h,reason:'map-element-missing',resolutionKey:key,attemptToken}});
+      return {playable:false,fallback:'interactive-green',armed:false,reason:'map-element-missing'};
+    }
     const handler=event=>{
       if(!interactiveGreenFallbackState||interactiveGreenFallbackState.mapEl!==mapEl)return;
       if(interactiveGreenBlockedTarget(event))return;
@@ -4635,7 +4642,15 @@
 	    const opts=Object.assign({},input||{});
 	    const selectedAt=opts.selectedAt||nowIso();
 	    const c=mappingCourseSnapshot(sessionCourse(opts.course||courseObj()),Object.assign({},opts,{selectedAt}));
-	    if(!c||isManualGpsCourse(c))return {playable:false,reason:'manual-course'};
+	    if(!c||isManualGpsCourse(c)){
+	      /* Silent until now. "I pressed Play and nothing scanned" is a real
+	         report, and this is one of its two answers - no run was ever
+	         started because there is no course to scan. No debugRunId exists
+	         yet at this point, so it attaches to the active run if one is
+	         open and stands alone if not. */
+	      recordMappingDebug(opts.debugRunId||'',{source:'course-loader',phase:'skipped',event:'mapping-attempt-skipped-manual-course',summary:'No scan: manual GPS course',details:{reason:'manual-course',requestedReason:opts.reason||'course-selected',courseName:courseName(c)||'',hole:validHoleNumber(opts.hole)||1}});
+	      return {playable:false,reason:'manual-course'};
+	    }
 	    if(opts.acceptPartialGeneratedMap)clearInteractiveGreenFallback('generated-scan-started',{courseId:courseId(c),courseName:courseName(c)});
     const h=validHoleNumber(opts.hole)||1;
     const key=opts.resolutionKey||coursePlayResolverKey(c,h);
@@ -4644,7 +4659,13 @@
       recordMappingDebug(activeFallback.debugRunId||opts.debugRunId||'',{source:'manual-fallback',phase:'skipped',event:'manual-fallback-terminal-reentry-blocked',summary:'Manual fallback blocked automatic re-entry',details:{hole:h,resolutionKey:key,attemptToken:activeFallback.attemptToken||opts.attemptToken||'',requestedReason:opts.reason||'course-selected'}});
       return {playable:false,fallback:'interactive-green',armed:true,terminal:true,debugRunId:activeFallback.debugRunId||opts.debugRunId||'',reason:'manual-fallback-active'};
     }
-    if(coursePlayResolverInFlight[key])return coursePlayResolverInFlight[key];
+    if(coursePlayResolverInFlight[key]){
+      /* The other answer to "nothing scanned": a scan for this exact course
+         and hole is already running and this call joined it. Silent de-dupe
+         looked identical to a dropped request in the log. */
+      recordMappingDebug(opts.debugRunId||'',{source:'course-loader',phase:'skipped',event:'mapping-attempt-joined-in-flight',summary:'Scan already running for this course',details:{reason:'already-in-flight',resolutionKey:key,hole:h,requestedReason:opts.reason||'course-selected'}});
+      return coursePlayResolverInFlight[key];
+    }
     const attemptToken=opts.attemptToken||newCoursePlayAttemptToken(key);
     const debugRunId=opts.debugRunId||mappingDebugRun(c,{newRun:true,reason:opts.reason||'course-selected',selectedAt,attemptToken,hole:h});
     const revision=coursePlayMapRevisionHash(c);
@@ -4710,6 +4731,7 @@
            result always has, to the native resolver and then manual fallback below. */
         let autoMapResult=null;
         let serverWait=null;
+        let serverWaitError=null;
         try{
           serverWait=await awaitServerCoursePackage(c,{
             budgetMs:opts.serverWaitBudgetMs,
@@ -4725,15 +4747,26 @@
             }
           });
           autoMapResult=serverWait&&serverWait.result||null;
-        }catch(e){serverWait=null;autoMapResult=null;}
+        }catch(e){
+          /* The thrown error used to be discarded here, and the !autoMapResult
+             branch below then reported it as 'server-course-package-pending' -
+             a crash and a genuinely queued job looked identical in the log.
+             Keep it so the failure branch can say which one happened. */
+          serverWaitError=e||null;
+          serverWait=null;
+          autoMapResult=null;
+        }
         if(autoMapResult)recordMappingDebug(debugRunId,{source:'automapper',phase:'completed',event:'server-course-package-hit',summary:serverWait&&serverWait.polls>1?'Server finished mapping while play waited':'Server already had this course mapped',details:{hole:h,resolutionKey:key,attemptToken,serverPackageStatus:autoMapResult.serverPackageStatus,holes:autoMapResult.holes,saved:autoMapResult.saved,polls:serverWait&&serverWait.polls||1}});
         if(!mappingAttemptStillCurrent(request,attempt,'server-course-package'))return {playable:false,stale:true,reason:'superseded-after-server-course-package'};
         if(!autoMapResult){
           const waitStatus=serverWait&&serverWait.status||'unreachable';
           const waitTimedOut=!!(serverWait&&serverWait.timedOut);
-          const waitFailed=waitStatus==='failed';
+          /* A thrown wait is a failure, not a pending job. Without this the
+             status stayed 'unreachable' and the summary said the server had
+             not mapped the course yet, which was not what happened. */
+          const waitFailed=waitStatus==='failed'||!!serverWaitError;
           const serverReason=serverWait&&serverWait.serverReason||null;
-          recordMappingDebug(debugRunId,{source:'automapper',phase:'skipped',event:waitFailed?'server-course-package-failed':waitTimedOut?'server-course-package-wait-timed-out':'server-course-package-pending',summary:waitFailed?('Server mapping failed: '+(serverReason||'no reason recorded')):waitTimedOut?'Server was still mapping when play stopped waiting':'Server has not mapped this course yet',details:{hole:h,resolutionKey:key,attemptToken,serverPackageStatus:waitStatus,serverReason,polls:serverWait&&serverWait.polls||0,timedOut:waitTimedOut,budgetMs:SERVER_PACKAGE_WAIT_MS}});
+          recordMappingDebug(debugRunId,{source:'automapper',phase:'skipped',event:waitFailed?'server-course-package-failed':waitTimedOut?'server-course-package-wait-timed-out':'server-course-package-pending',summary:waitFailed?('Server mapping failed: '+(serverReason||serverWaitError&&serverWaitError.message||'no reason recorded')):waitTimedOut?'Server was still mapping when play stopped waiting':'Server has not mapped this course yet',details:{hole:h,resolutionKey:key,attemptToken,serverPackageStatus:waitStatus,serverReason,polls:serverWait&&serverWait.polls||0,timedOut:waitTimedOut,budgetMs:SERVER_PACKAGE_WAIT_MS,threw:!!serverWaitError},error:serverWaitError?{message:serverWaitError&&serverWaitError.message||String(serverWaitError),status:serverWaitError&&serverWaitError.status||null}:undefined});
           autoMapResult={saved:0,holes:0,polygons:0,fallbacks:0,automapperStatus:waitFailed?'server-failed':waitTimedOut?'server-timed-out':'server-pending',serverPackageStatus:waitStatus,serverReason};
         }
         if(!mappingAttemptStillCurrent(request,attempt,'automapper'))return {playable:false,stale:true,reason:'superseded-after-automapper'};

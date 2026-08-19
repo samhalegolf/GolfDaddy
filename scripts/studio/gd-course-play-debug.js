@@ -149,6 +149,16 @@ function gdRenderCoursePlayPipelineDebug(){
     return;
   }
   const snap=api.buildDebugSnapshot();
+  /* Say so when nothing is open rather than rendering a row of zeros against a
+     blank course. This panel is scoped to the current browser, so a studio tab
+     on a laptop will read empty while a scan runs on a phone - that is correct,
+     and it needs to look correct instead of looking like a scan that failed. */
+  if(!snap.hasActiveCourse){
+    summary.innerHTML='<div class="gdCoursePlayDebugEmpty">No course is open in this browser. This panel shows local scan state only - a scan running on another device will not appear here.</div>';
+    tableHost.innerHTML="";
+    timelineHost.innerHTML="";
+    return;
+  }
   summary.innerHTML=[
     gdCoursePlayDebugMetric("Course",snap.activeCourseName||snap.activeCourseKey||""),
     gdCoursePlayDebugMetric("Course key",snap.activeCourseKey||""),

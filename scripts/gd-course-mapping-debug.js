@@ -20,9 +20,15 @@
     ["fairway-lines", "Fairway Lines"],
     ["number-allocation", "Number Allocation"]
   ];
+  /* Every source the pipeline actually emits must be listed here. cleanSource
+     rewrites anything missing to "unknown", and cloud-map/cloud-scans were
+     absent - a third of all mapping events (10 of 31 call sites) were filed as
+     Unknown, which is why the cloud leg of a failed scan was unreadable. */
   var VALID_SOURCES = {
     "course-loader": 1,
     "saved-map": 1,
+    "cloud-map": 1,
+    "cloud-scans": 1,
     automapper: 1,
     "native-resolver": 1,
     "manual-fallback": 1,
@@ -357,7 +363,16 @@
   function recordEvent(runId, event) {
     event = event || {};
     var explicitRunId = String(runId || event.runId || "").trim();
-    var run = explicitRunId ? ensureRun({ runId: explicitRunId, courseId: event.courseId, courseName: event.courseName, doNotActivate: true }) : ensureRun(event);
+    /* An event that arrives without a run id belongs to whatever run is in
+       flight - it lost its id, it is not a new attempt. Minting a run for it
+       instead (the old behaviour) named it "course" from makeRunId's fallback
+       stem, took over state.activeRunId, and pushed a real run out of the
+       10-deep RECENT_LIMIT. A burst of them erased the trail being debugged.
+       Only when nothing is active is a new run the honest answer. */
+    var attachRunId = explicitRunId || String(state.activeRunId || "").trim();
+    var run = attachRunId
+      ? ensureRun({ runId: attachRunId, courseId: event.courseId, courseName: event.courseName, doNotActivate: true })
+      : ensureRun(event);
     var phase = cleanPhase(event.phase);
     var row = {
       id: String(event.id || uid("map-event")),
@@ -504,6 +519,8 @@
     var labels = {
       "course-loader": "Course loader",
       "saved-map": "Saved map",
+      "cloud-map": "Cloud map",
+      "cloud-scans": "Cloud scans",
       automapper: "AutoMapper",
       "native-resolver": "Native resolver",
       "manual-fallback": "Manual fallback",
