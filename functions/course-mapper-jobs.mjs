@@ -11,6 +11,9 @@
    POST {courseId, kind:"nudge"} (admin only) -> requeues a stalled run.
    GET ?courseId=... -> recent jobs plus a derived mapping state for that course, readable by
    players so the app can poll cheaply while it plays over live tiles + a Lite Geometry Pack.
+   GET with no courseId -> the same derived state for EVERY course, one row each, for the
+   admin list. Same vocabulary as the single-course form so a row and its detail cannot
+   disagree.
 
    The worker itself is functions/course-mapper-worker-background.mjs. */
 
@@ -90,6 +93,79 @@ function hasGeometryPayload(map) {
      running/queued  - a mapping run is in flight; the app plays live tiles with no overlay yet
      failed          - the last run failed and nothing is in flight
      none            - never mapped; a player selecting this course may start one */
+/* Every course's mapping state in one request.
+ *
+ * The admin Course Database lists every course at once and needs to show which
+ * ones failed. Asking /api/course-mapper-jobs per course meant one request per
+ * row, so the screen simply did not ask - and a failed scan was invisible even
+ * though the reason was sitting in course_mapper_jobs the whole time.
+ *
+ * Same vocabulary as mapperBuildState so a row and its detail panel can never
+ * disagree, and derived the same way: what EXISTS beats what the queue last
+ * said, because a course with geometry is playable whatever the queue thinks.
+ *
+ * Jobs are read newest-first and only the first per course is kept, which is
+ * the latest-per-course PostgREST cannot express directly. The cap is a real
+ * limit rather than a formality: a course whose jobs all fall outside it
+ * reports "none" rather than a wrong answer, so it is set well above the
+ * number of courses. */
+const BULK_JOB_SCAN_LIMIT = 2000;
+
+async function mapperBuildStateAll() {
+  const [jobRows, mapRows] = await Promise.all([
+    supabaseFetch(TABLE + "?select=course_id,kind,status,error,mapper_version,created_at,updated_at&order=created_at.desc&limit=" + BULK_JOB_SCAN_LIMIT).catch(() => []),
+    supabaseFetch(MAPS_TABLE + "?select=course_id,published,geometry_version,objects_json,holes_json&limit=2000").catch(() => [])
+  ]);
+  const jobs = Array.isArray(jobRows) ? jobRows : [];
+  const maps = Array.isArray(mapRows) ? mapRows : [];
+
+  const latestByCourse = new Map();
+  const liveByCourse = new Map();
+  jobs.forEach((job) => {
+    const id = String(job && job.course_id || "");
+    if (!id) return;
+    if (!latestByCourse.has(id)) latestByCourse.set(id, job);
+    if ((job.status === "running" || job.status === "queued") && !liveByCourse.has(id)) liveByCourse.set(id, job);
+  });
+
+  const courses = {};
+  const ids = new Set([...latestByCourse.keys()]);
+  maps.forEach((row) => { if (row && row.course_id) ids.add(String(row.course_id)); });
+  const mapById = new Map(maps.map((row) => [String(row && row.course_id || ""), row]));
+
+  ids.forEach((id) => {
+    const latest = latestByCourse.get(id) || null;
+    const live = liveByCourse.get(id) || null;
+    const hasGeometry = hasGeometryPayload(mapById.get(id) || null);
+    let state;
+    if (hasGeometry) state = "geometry-ready";
+    else if (live) state = live.status === "running" ? "running" : "queued";
+    else if (latest && latest.status === "failed") state = "failed";
+    else state = "none";
+    courses[id] = {
+      state,
+      hasGeometry,
+      /* The whole point of the endpoint: the sentence that says what went
+         wrong, in the row, without a second request. */
+      lastError: latest && latest.status === "failed" ? String(latest.error || "").slice(0, 300) : null,
+      lastJobStatus: latest ? String(latest.status || "") : null,
+      lastJobKind: latest ? String(latest.kind || "") : null,
+      lastJobAt: latest ? (latest.updated_at || latest.created_at || null) : null,
+      mapperVersion: latest ? (latest.mapper_version || null) : null,
+      building: !!live
+    };
+  });
+
+  return {
+    courses,
+    counted: ids.size,
+    /* Says so when the scan cap was reached, rather than letting a truncated
+       read look like a complete one. */
+    truncated: jobs.length >= BULK_JOB_SCAN_LIMIT,
+    currentMapperVersion: MAPPER_VERSION
+  };
+}
+
 async function mapperBuildState(courseId) {
   const [jobRows, mapRows] = await Promise.all([
     supabaseFetch(TABLE + "?select=id,kind,status,error,result,mapper_version,created_at,updated_at&course_id=eq." + encodeURIComponent(courseId) + "&order=created_at.desc&limit=8").catch(() => []),
@@ -218,7 +294,10 @@ export default async function courseMapperJobs(req) {
   if (req.method === "GET") {
     const url = new URL(req.url);
     const courseId = slug(url.searchParams.get("courseId") || url.searchParams.get("course_id"));
-    if (!courseId) return json(400, { error: "courseId required" });
+    /* No courseId now means "all of them" rather than an error. The admin list
+       needs every course's state at once; asking per row is what stopped it
+       asking at all. */
+    if (!courseId) return json(200, await mapperBuildStateAll());
     return json(200, Object.assign({ courseId }, await mapperBuildState(courseId)));
   }
 

@@ -63,6 +63,66 @@ let gdAdminCourseDbCloudUpdatedAt="";     // the DB's own updatedAt
 let gdAdminCourseDbCloudState="idle";     // idle | loading | ready | error
 let gdAdminCourseDbCloudError="";
 let gdAdminCourseDbCloudInflight=null;
+/* Mapping state for every course, from /api/course-mapper-jobs with no
+   courseId. Loaded once alongside the course list rather than per row - asking
+   per row is why the screen never showed a failure reason at all. Absent data
+   is not an error: the list still renders, it just cannot explain a course
+   with no geometry until this lands. */
+let gdAdminCourseDbJobs={};
+let gdAdminCourseDbJobsAt=0;
+let gdAdminCourseDbJobsInflight=null;
+function gdAdminCourseDbJobState(courseId){
+  return gdAdminCourseDbJobs[String(courseId||"")]||null;
+}
+function gdLoadAdminCourseDbJobs(opts){
+  opts=opts||{};
+  if(typeof fetch!=="function")return Promise.resolve(null);
+  if(gdAdminCourseDbJobsInflight&&!opts.force)return gdAdminCourseDbJobsInflight;
+  if(!opts.force&&gdAdminCourseDbJobsAt&&Date.now()-gdAdminCourseDbJobsAt<20000)return Promise.resolve(gdAdminCourseDbJobs);
+  gdAdminCourseDbJobsInflight=fetch("/api/course-mapper-jobs",{headers:{Accept:"application/json"},cache:"no-store"})
+    .then(res=>res.ok?res.json():null)
+    .then(data=>{
+      gdAdminCourseDbJobs=data&&data.courses||{};
+      gdAdminCourseDbJobsAt=Date.now();
+      return gdAdminCourseDbJobs;
+    })
+    .catch(()=>gdAdminCourseDbJobs)
+    .finally(()=>{gdAdminCourseDbJobsInflight=null;});
+  return gdAdminCourseDbJobsInflight;
+}
+/* What the course itself proves, before the queue is consulted. Geometry is the
+   only evidence a course is playable, so it is the only thing that earns
+   "published". */
+function gdAdminCourseDbBaseStatus(course){
+  const holes=Object.keys(course&&course.holes||{}).length;
+  const objects=Object.keys(course&&course.objects||{}).length;
+  return holes>0?"published":objects>0?"partial":"empty";
+}
+/* The status a row displays. Geometry wins; the mapper queue only gets to
+   speak for a course that has none, which is exactly the case the old default
+   was hiding. Vocabulary matches functions/course-mapper-jobs.mjs so this
+   screen and that endpoint can never disagree. */
+function gdAdminCourseDbStatusFor(item){
+  const base=item&&item.status||"unknown";
+  if(base==="published"||base==="partial")return base;
+  const job=gdAdminCourseDbJobState(item&&item.id);
+  if(!job)return base;
+  if(job.state==="running"||job.state==="queued")return "mapping";
+  if(job.state==="failed")return "failed";
+  return base;
+}
+/* One plain sentence for why a course is not playable. "" when it is. */
+function gdAdminCourseDbStatusWhy(item){
+  const status=gdAdminCourseDbStatusFor(item);
+  const job=gdAdminCourseDbJobState(item&&item.id);
+  if(status==="published")return "";
+  if(status==="partial")return "Some geometry landed but no complete holes were built.";
+  if(status==="mapping")return "A mapping run is in flight. This course has no geometry yet.";
+  if(status==="failed")return job&&job.lastError?job.lastError:"The last mapping run failed and gave no reason.";
+  if(status==="empty")return job?"No geometry, and no mapping run has been recorded for this course.":"No geometry yet. Mapping state has not loaded.";
+  return "";
+}
+
 function gdMapCloudMapsToAdminStore(maps){
   const store={courses:{},updatedAt:maps&&maps.updatedAt||"",storage:maps&&maps.storage||"supabase"};
   const courses=maps&&maps.courses||{};
@@ -73,7 +133,14 @@ function gdMapCloudMapsToAdminStore(maps){
       courseId:courseId,
       courseKey:courseId,
       courseName:c.courseName||c.name||courseId,
-      status:c.status||"published",
+      /* NOT a default of "published". Every cloud row used to be labelled
+         published on arrival, so a course with zero holes and a failed mapping
+         run displayed exactly like a fully mapped one - which is how North
+         Shore showed "published 0/0". The row carries no status column; what a
+         course actually is has to be read off its geometry, and off the mapper
+         queue for the courses that have none. gdAdminCourseDbStatusFor does
+         both. */
+      status:c.status||gdAdminCourseDbBaseStatus(c),
       syncStatus:"cloud",
       source:"supabase",
       holes:c.holes||{},
@@ -2233,12 +2300,55 @@ function gdAdminCourseDbSetHTML(el,html){
   el.__gdLastHTML=html;
   el.innerHTML=html;
 }
+let gdAdminCourseDbExpanded="";
+/* Click a row to open it in place. The full tabbed panel is still one click
+   further in - this answers "what happened to this course" without leaving the
+   list, which is the question the list itself was raising and not answering. */
+function gdAdminCourseDbToggleRow(courseId){
+  const next=String(courseId||"");
+  gdAdminCourseDbExpanded=gdAdminCourseDbExpanded===next?"":next;
+  if(gdAdminCourseDbExpanded)gdLoadAdminCourseDbJobs().then(()=>gdRenderAdminCourseDatabase());
+  gdRenderAdminCourseDatabase();
+  return false;
+}
+function gdAdminCourseDbDiagRow(label,value){
+  return `<div class="gdAdminCourseDiagRow"><span>${gdEscapeHTML(label)}</span><strong>${gdEscapeHTML(value==null||value===""?"—":String(value))}</strong></div>`;
+}
+function gdAdminCourseDbExpandedRow(item){
+  const status=gdAdminCourseDbStatusFor(item);
+  const why=gdAdminCourseDbStatusWhy(item);
+  const job=gdAdminCourseDbJobState(item.id);
+  const course=item.course||{};
+  const lat=course.courseLat,lng=course.courseLng;
+  const place=[course.region,course.country].filter(Boolean).join(", ");
+  const totals=item.objectTotals||{tees:0,greens:0,fairways:0};
+  /* A failure gets the reason first and in full. Everything else is the same
+     block so a working course and a broken one are read the same way. */
+  const banner=why?`<div class="gdAdminCourseDiagWhy ${status==="failed"?"bad":"warn"}">${gdEscapeHTML(why)}</div>`:"";
+  const diag=[
+    gdAdminCourseDbDiagRow("Status",status),
+    gdAdminCourseDbDiagRow("Course key",item.key),
+    gdAdminCourseDbDiagRow("Holes built",item.holeCount),
+    gdAdminCourseDbDiagRow("Play ready",item.playReadyCount+"/"+(item.holeCount||0)),
+    gdAdminCourseDbDiagRow("Geometry objects",(totals.tees||0)+" tees, "+(totals.greens||0)+" greens, "+(totals.fairways||0)+" fairways"),
+    gdAdminCourseDbDiagRow("Location",Number.isFinite(Number(lat))&&Number.isFinite(Number(lng))?Number(lat).toFixed(5)+", "+Number(lng).toFixed(5)+(place?"  ("+place+")":""):"not set"),
+    gdAdminCourseDbDiagRow("Last mapping run",job?(job.lastJobStatus||job.state)+(job.lastJobKind?" ("+job.lastJobKind+")":""):"none recorded"),
+    gdAdminCourseDbDiagRow("Run finished",job&&job.lastJobAt?gdCoursePlayDebugTime(job.lastJobAt):"—"),
+    gdAdminCourseDbDiagRow("Mapper version",job&&job.mapperVersion),
+    gdAdminCourseDbDiagRow("Updated",gdCoursePlayDebugTime(item.updatedAt)||"unknown")
+  ].join("");
+  return `<tr class="gdAdminCourseDiagRowHost"><td colspan="7"><div class="gdAdminCourseDiag">${banner}<div class="gdAdminCourseDiagGrid">${diag}</div>${gdAdminCourseDbActionRail(item)}</div></td></tr>`;
+}
+
 function gdRenderAdminCourseDatabase(){
   const summary=document.getElementById("gdAdminCourseDbSummary");
   const list=document.getElementById("gdAdminCourseDbList");
   const detail=document.getElementById("gdAdminCourseDbDetail");
   if(!summary||!list||!detail)return;
   if(gdAdminCourseDbCloudState==="idle")gdLoadAdminCourseDbCloud();
+  /* Cheap and cached for 20s. Without it a course with no geometry can only be
+     described as "empty" - the queue is the only thing that knows it failed. */
+  if(!gdAdminCourseDbJobsAt&&!gdAdminCourseDbJobsInflight)gdLoadAdminCourseDbJobs().then(()=>gdRenderAdminCourseDatabase());
   gdAdminCourseDbSetHTML(summary,gdAdminCourseDbCloudStatusMarkup());
   const all=gdAdminCourseDbSummaries();
   const search=String(document.getElementById("gdAdminCourseDbSearch")?.value||"").trim().toLowerCase();
@@ -2257,16 +2367,21 @@ function gdRenderAdminCourseDatabase(){
   }
   gdAdminCourseDbSetHTML(list,filtered.length?`<div class="gdAdminCourseTableWrap"><table class="gdAdminCourseTable"><thead><tr><th>Course</th><th>Status</th><th>Sync</th><th>Holes</th><th>Play</th><th>Visual Engine</th><th>Updated</th></tr></thead><tbody>${filtered.map(item=>{
     const visual=gdAdminCourseDbVisualState(item.id);
-    const statusTone=gdAdminCourseDbStatusTone(item.status,["ready","play_data_ready","mapped_geometry_ready"]);
+    /* The displayed status, not the stored one - see gdAdminCourseDbStatusFor. */
+    const status=gdAdminCourseDbStatusFor(item);
+    const statusTone=gdAdminCourseDbStatusTone(status,["published","ready","play_data_ready","mapped_geometry_ready"]);
     const syncTone=gdAdminCourseDbStatusTone(item.syncStatus,["synced","cloud","ready"]);
     const active=item.id===gdAdminCourseDatabaseSelected?" active":"";
-    return `<tr class="${active}" onclick="return gdAdminCourseDbOpen(${gdAdminJsArg(item.id)} ,'overview')"><td class="gdAdminCourseNameCell" title="${gdEscapeHTML(item.key)}">${gdEscapeHTML(item.name)}</td><td><span class="gdAdminCourseStatusDot ${statusTone}">${gdEscapeHTML(item.status)}</span></td><td><span class="gdAdminCourseStatusDot ${syncTone}">${gdEscapeHTML(item.syncStatus)}</span></td><td>${gdEscapeHTML(item.holeCount)}</td><td>${gdEscapeHTML(item.playReadyCount)}/${gdEscapeHTML(item.holeCount||0)}</td><td><span class="gdAdminCourseStatusDot ${visual.tone}">${gdEscapeHTML(visual.label)}</span></td><td>${gdEscapeHTML(gdCoursePlayDebugTime(item.updatedAt)||"unknown")}</td></tr>`;
+    const open=item.id===gdAdminCourseDbExpanded;
+    const caret=open?"▾":"▸";
+    const row=`<tr class="${active}${open?" expanded":""}" onclick="return gdAdminCourseDbToggleRow(${gdAdminJsArg(item.id)})"><td class="gdAdminCourseNameCell" title="${gdEscapeHTML(item.key)}"><span class="gdAdminCourseCaret">${caret}</span> ${gdEscapeHTML(item.name)}</td><td><span class="gdAdminCourseStatusDot ${statusTone}">${gdEscapeHTML(status)}</span></td><td><span class="gdAdminCourseStatusDot ${syncTone}">${gdEscapeHTML(item.syncStatus)}</span></td><td>${gdEscapeHTML(item.holeCount)}</td><td>${gdEscapeHTML(item.playReadyCount)}/${gdEscapeHTML(item.holeCount||0)}</td><td><span class="gdAdminCourseStatusDot ${visual.tone}">${gdEscapeHTML(visual.label)}</span></td><td>${gdEscapeHTML(gdCoursePlayDebugTime(item.updatedAt)||"unknown")}</td></tr>`;
+    return open?row+gdAdminCourseDbExpandedRow(item):row;
   }).join("")}</tbody></table></div>`:'<div class="gdCoursePlayDebugEmpty">No course records match the current search.</div>');
   const selected=filtered.find(item=>item.id===gdAdminCourseDatabaseSelected);
   if(!selected){gdAdminCourseDbSetHTML(detail,"");return;}
   const rows=selected.rows||[];
   const payload=gdAdminCourseDbPayload(selected.id);
-  const header=`<div class="gdAdminCourseActionHead"><div><h4>${gdEscapeHTML(selected.name)}</h4><span>${gdEscapeHTML(selected.key)} · ${gdEscapeHTML(selected.status)} · ${gdEscapeHTML(selected.syncStatus)} · ${gdEscapeHTML(selected.source)}</span></div>${gdAdminCourseDbActionRail(selected)}</div>`;
+  const header=`<div class="gdAdminCourseActionHead"><div><h4>${gdEscapeHTML(selected.name)}</h4><span>${gdEscapeHTML(selected.key)} · ${gdEscapeHTML(gdAdminCourseDbStatusFor(selected))} · ${gdEscapeHTML(selected.syncStatus)} · ${gdEscapeHTML(selected.source)}</span></div>${gdAdminCourseDbActionRail(selected)}</div>`;
   if(gdAdminCourseDatabaseTab==="visuals"){
     gdAdminCourseDbSetHTML(detail,`<div class="gdAdminCourseActionPanel">${header}${gdAdminCourseVisualMarkup(selected)}</div>`);
     return;
@@ -2306,6 +2421,7 @@ function gdRenderAdminCourseDatabase(){
 }
 
 window.gdRenderAdminCourseDatabase=gdRenderAdminCourseDatabase;
+window.gdAdminCourseDbToggleRow=gdAdminCourseDbToggleRow;
 window.gdAdminCourseDbOpen=gdAdminCourseDbOpen;
 window.gdAdminCourseDbShowGeometry=gdAdminCourseDbShowGeometry;
 window.gdAdminCourseDbShowDebug=gdAdminCourseDbShowDebug;

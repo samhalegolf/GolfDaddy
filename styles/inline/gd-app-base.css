@@ -420,6 +420,18 @@
     .gdAdminCourseStatusDot.ok:before{background:#1fd36d;box-shadow:0 0 0 2px rgba(31,211,109,.15)}
     .gdAdminCourseStatusDot.warn:before{background:#ffd287;box-shadow:0 0 0 2px rgba(255,210,135,.13)}
     .gdAdminCourseStatusDot.bad:before{background:#ff7d7d;box-shadow:0 0 0 2px rgba(255,125,125,.13)}
+    .gdAdminCourseCaret{display:inline-block;width:9px;color:rgba(255,255,255,.4);font-size:9px}
+    .gdAdminCourseTable tr.expanded{background:rgba(31,211,109,.075)}
+    .gdAdminCourseTable tr.expanded .gdAdminCourseCaret{color:#1fd36d}
+    .gdAdminCourseTable tr.gdAdminCourseDiagRowHost{cursor:default;background:rgba(0,0,0,.22)}
+    .gdAdminCourseTable tr.gdAdminCourseDiagRowHost:hover{background:rgba(0,0,0,.22)}
+    .gdAdminCourseTable tr.gdAdminCourseDiagRowHost>td{padding:0}
+    .gdAdminCourseDiag{display:grid;gap:9px;padding:11px 13px 13px;border-top:1px solid rgba(255,255,255,.07)}
+    .gdAdminCourseDiagWhy{border-radius:10px;padding:9px 11px;font:800 11.5px/1.45 Inter,system-ui,sans-serif;border:1px solid rgba(255,210,135,.22);background:rgba(255,210,135,.08);color:#ffd287}
+    .gdAdminCourseDiagWhy.bad{border-color:rgba(255,125,125,.26);background:rgba(255,125,125,.09);color:#ff9d9d}
+    .gdAdminCourseDiagGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:5px 16px}
+    .gdAdminCourseDiagRow{display:flex;justify-content:space-between;gap:10px;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.05);font:700 10.5px/1.4 Inter,system-ui,sans-serif;color:rgba(255,255,255,.5)}
+    .gdAdminCourseDiagRow strong{color:#fff;font-weight:850;text-align:right;word-break:break-word}
     .gdAdminCourseActionPanel{display:grid;gap:10px;margin-top:10px;padding:10px;border-radius:14px;background:rgba(0,0,0,.14);border:1px solid rgba(255,255,255,.07)}
     .gdAdminCourseActionHead{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
     .gdAdminCourseActionHead h4{margin:0;color:#fff;font-size:15px;font-weight:950}

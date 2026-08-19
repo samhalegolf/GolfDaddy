@@ -273,8 +273,19 @@
 	    course.databaseCourseId=raw?.id||course.courseId;
 	    return course.name&&!/^manual gps$/i.test(course.name)?course:null;
 	  }
+	  /* A course_maps row is not proof of a map.
+	
+	     functions/course-mapper-jobs.mjs writes a stub row - identity and centre
+	     only, published:true - before the mapper runs, so the worker has a point
+	     to query Overpass from. When the run then fails, nothing clears it. Those
+	     stubs were being served here as database courses, which ranks them ABOVE
+	     search results, so a player could pick a course that has no geometry and
+	     cannot be played. Holes are the only evidence that matters. */
+	  function databaseCourseHasMap(raw){
+	    return Object.keys(raw&&raw.holes||{}).length>0;
+	  }
 	  function databaseCoursesFromMaps(maps){
-	    return Object.values(maps?.courses||{}).map(databaseCoursePayload).filter(Boolean);
+	    return Object.values(maps?.courses||{}).filter(databaseCourseHasMap).map(databaseCoursePayload).filter(Boolean);
 	  }
 	  function loadDatabaseCourses(opts={}){
 	    if(typeof fetch!=="function")return Promise.resolve(databaseCourseCache.slice());
