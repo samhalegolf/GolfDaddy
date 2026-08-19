@@ -146,6 +146,39 @@ test("a course with no holes is never offered to a player", () => {
   );
 });
 
+test("deleting a course clears its mapping history", () => {
+  /* deriveCoursePackageState makes a course whose last mapper job failed
+     permanently "failed" - /api/course-package answers failed on every poll and
+     never enqueues again. That is deliberate and correct (it stopped a
+     mis-matched course burning five identical jobs in forty seconds and
+     starving two real courses of any job at all).
+  
+     But it made delete a lie. The jobs live in course_mapper_jobs, so the
+     failure survived deleting the course_maps row and the course could never be
+     mapped again - it went straight to manual with nothing reaching the
+     database, and deleting and re-adding could not clear it. Deleting the
+     course is the deliberate retry the design intends; it has to clear the
+     history it is retrying past. */
+  const fs = require("fs");
+  const mapsSrc = fs.readFileSync(path.join(ROOT, "functions", "course-maps.mjs"), "utf8");
+  assert.ok(/async function deleteMapperJobs\(courseId\)/.test(mapsSrc), "a job-clearing helper must exist");
+  assert.ok(
+    /course_mapper_jobs\?course_id=eq\./.test(mapsSrc),
+    "it must delete by course_id from the jobs table"
+  );
+  const del = mapsSrc.slice(mapsSrc.indexOf("async function deleteSupabaseCourse(courseId)"));
+  assert.ok(
+    del.indexOf("await deleteMapperJobs(courseId);") !== -1 &&
+    del.indexOf("await deleteMapperJobs(courseId);") < del.indexOf("\n}"),
+    "the course delete must clear the jobs, not just the map row"
+  );
+  const helper = mapsSrc.slice(mapsSrc.indexOf("async function deleteMapperJobs(courseId)"));
+  assert.ok(
+    /catch \(error\)/.test(helper.slice(0, 700)),
+    "best effort - a course that is gone must not come back because its history would not delete"
+  );
+});
+
 (async () => {
   let failed = 0;
   for (const t of tests) {

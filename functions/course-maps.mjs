@@ -364,7 +364,40 @@ async function deleteSupabaseCourse(courseId) {
     method: "DELETE",
     headers: { Prefer: "return=representation" }
   });
+  await deleteMapperJobs(courseId);
   return (Array.isArray(byCourseId) ? byCourseId.length : 0) + (Array.isArray(byId) ? byId.length : 0);
+}
+
+/* Deleting a course has to delete its mapping history too, or "delete" does not
+   mean what it says.
+ *
+ * deriveCoursePackageState treats a course whose last mapper job failed as
+ * permanently "failed" and /api/course-package then answers failed on every
+ * poll without ever enqueuing again. That is deliberate and stays - it is the
+ * fix for a real incident where a mis-matched course burned five identical
+ * failed jobs in forty seconds and starved two other courses of any job at all
+ * (see gd-course-package-shape.mjs). Retrying is meant to be a deliberate act.
+ *
+ * Deleting the course IS that deliberate act, but it only ever removed the
+ * course_maps row. The jobs live in another table, so the failure survived the
+ * delete and the course stayed unmappable forever - it went straight to manual
+ * with nothing reaching the database, and no amount of deleting and re-adding
+ * could clear it.
+ *
+ * Best effort on purpose: a course that is gone must not come back because its
+ * job history would not delete. The count is logged, not returned, because the
+ * caller reports rows of course removed, not rows of history. */
+async function deleteMapperJobs(courseId) {
+  try {
+    const removed = await supabaseFetch(
+      "course_mapper_jobs?course_id=eq." + encodeURIComponent(courseId),
+      { method: "DELETE", headers: { Prefer: "return=representation" } }
+    );
+    return Array.isArray(removed) ? removed.length : 0;
+  } catch (error) {
+    console.warn("course-maps: could not clear mapper jobs for", courseId, error && error.message || error);
+    return 0;
+  }
 }
 
 function mapsFromSupabaseRows(rows) {
