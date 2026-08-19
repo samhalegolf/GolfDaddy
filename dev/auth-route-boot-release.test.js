@@ -136,6 +136,24 @@ async function launchBrowser(playwright) {
     assert.ok(gated.includes("SCORE_SET"), "keeping score is account-based and must stay gated");
   });
 
+  /* The bubble is the shop window: free, ghost-bag driven, and what a player
+     pays to personalise. Gating the draw would hide the thing being sold. */
+  check("the bubble is not gated on the play surface", () => {
+    const painter = fs.readFileSync(path.join(ROOT, "app", "js", "painter.js"), "utf8");
+    const idx = painter.indexOf("function drawShot(");
+    const head = painter.slice(idx, idx + 600);
+    assert.ok(
+      !/app\.access/.test(head),
+      "drawShot must not check access - the bubble is free, the bag behind it is not"
+    );
+    const bag = fs.readFileSync(path.join(ROOT, "app", "js", "bag.js"), "utf8");
+    assert.ok(/function canEdit\(\)/.test(bag), "bag.js must gate editing");
+    assert.ok(
+      !/clarity:bag:v1/.test(bag.slice(bag.indexOf("(function ()"))),
+      "the second bag store is retired; bag.js reads the profile bag"
+    );
+  });
+
   check("a failed membership check downgrades rather than refuses", () => {
     const picker = fs.readFileSync(path.join(ROOT, "scripts", "inline", "gd-course-picker-search-v2.js"), "utf8");
     const fn = picker.slice(picker.indexOf("function enterGpsPlay("), picker.indexOf("function navigateToAppPlay("));

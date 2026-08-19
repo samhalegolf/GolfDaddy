@@ -493,6 +493,10 @@ body.ball-dragging #surfaceStage { transition: none !important; }
 .setRow .toggle[aria-pressed="true"] { background: #1fd36d; color: #06110b; border-color: #1fd36d; }
 
 .bagList { display: flex; flex-direction: column; gap: 8px; }
+/* Says which numbers are on screen — the player's own, or the standard set
+   behind the free bubble. An empty club list would have said neither. */
+.bagNotice { padding: 10px 12px; border-radius: 10px; background: rgba(31, 211, 109, .12); border: 1px solid rgba(31, 211, 109, .28); color: #dff3e6; font-size: 13px; line-height: 1.35; }
+.bagNotice.hiddenState { display: none; }
 .bagRow { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 10px; background: rgba(255, 255, 255, .06); }
 .bagRow input[type="text"] { width: 64px; }
 .bagRow input[type="number"] { width: 64px; }

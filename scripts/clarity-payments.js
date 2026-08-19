@@ -1235,6 +1235,19 @@
     accessLabel: accessLabel,
     accessBadgeHTML: accessBadgeHTML,
     showSettings: function () { return showSection("payments"); },
+    /* The one membership question for every member-only action. True means
+       carry on; false means the membership panel is now open and the caller
+       should stop.
+       The line it enforces: the bubble and the ghost bag behind it are FREE -
+       what costs is making them yours. Setting your own club distances, and
+       adopting a bubble out of your own practice or course data, are the two
+       ways to do that, so they are the two things that ask. */
+    requireAccess: function (what) {
+      if (hasActiveAccess()) return true;
+      safe(function () { return window.toast && window.toast("A Clarity membership is needed to " + what + "."); });
+      showSection("payments");
+      return false;
+    },
     reloadAdminSettings: loadAdminSettings,
     seedDefaults: function () { return adminAction("seedDefaults", {}); },
     toggleProduct: function (key, active) { return adminAction("setProductActive", { productKey: key, active: !!active }); },

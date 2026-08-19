@@ -65,28 +65,55 @@ around `window.openStats` and friends, because wrappers do not survive here —
 directly. A wrapper installed at boot is both overwritten and bypassed.
 
 **Needs a membership:** keeping score, logging where shots finish, the round
-record, resume, and the bubble. A player without one is no longer refused entry —
-they get the rangefinder, and `app/js/access.js` withholds the rest. Signed-in
-and signed-out unentitled players get the same free rangefinder, so signing up
-never makes the app worse.
+record in Course Data, and resume. Plus the two ways to personalise the bubble —
+setting your own club distances, and adopting a bubble from your own practice or
+course data. A player without a membership is no longer refused entry to a round;
+they get the rangefinder and the bubble, and `app/js/access.js` withholds the
+rest. Signed-in and signed-out unentitled players get exactly the same free tier,
+so signing up never makes the app worse.
 
-`app/js/access.js` is the single place that decides which signals write round
-history. Everything absent from its `GATED_SIGNALS` map — `FIX_RECEIVED`,
-`PLACED`, `BALL_MOVED`, `LOCK`, `UNLOCK`, hole navigation — is the rangefinder
-and stays open. `LOCK` is deliberately not gated: locking a shot is how you
-choose the point distances are measured from.
+Wind and plays-like are deliberately free. They are part of the distance answer,
+not the round record. Competitors put plays-like behind their paywall; this does
+not.
 
-Defence in depth: the marshal effects in `boot.js` refuse to persist anything in
-rangefinder mode regardless of what reached them, and `access.js` re-reads the
-account itself rather than trusting `?rangefinder=1` from the URL. The worst a
-forged URL achieves is a free rangefinder.
+### The bubble is the shop window
 
-### Deliberately fails closed
+The bubble renders for everyone, driven by the engine's ghost bag
+(`GD_DEFAULT_CLUB_CARRY_M` in `app/js/bubble-engine.js`). A free player watches
+their dispersion work on real distances and pays to make it theirs. The single
+membership question in the shell is `ClarityPayments.requireAccess(what)`, asked
+by `gdBagPersistRows` (every write to the player's own club distances funnels
+through it), `gdPracticeApplyBagSuggestions`, `gdPracticeAdoptBubbleFromAction`,
+`gdPracticeSaveBubbleFromAction` and `gdBubbleOffsetSave`. Seeding is exempt:
+`gdEnsureDefaultBagCells` writes the stand-in set with `bagSeededDefault=true`
+and never goes through `gdBagPersistRows`, so the ghost survives. `gdClearMyBubble`
+is deliberately NOT gated — a lapsed member must be able to revert.
 
-A membership check that cannot complete still lands in rangefinder mode — a check
-that did not finish is not evidence of access. It now says so ("Couldn't check
-your membership - distances only for this round") instead of refusing the round,
-which is strictly better than the old behaviour on patchy course signal.
+## One bag (was two)
+
+Separate from the App Store work, and the more serious bug of the two.
+
+There were two bag stores that never met. The shell's Bag panel wrote
+`profile.bag` in `gd_player_profiles_v27` — cloud-synced, backed up, fed by
+practice data, visible to a coach. The in-round rail bag wrote `clarity:bag:v1`
+in localStorage, with one writer and nothing else reading it. And
+`app/js/bubble-engine.js` read **only** `clarity:bag:v1`.
+
+So a player who adopted their practice bag distances in the Shot System saw no
+change at all to the bubble on the course. The feature looked like it worked.
+
+`clarity:bag:v1` is retired. `app/js/bag.js` now reads and writes the profile
+bag, using the same active-profile resolver as `my-bubble.js` — two different
+answers to "which profile is active" is how the split happened in the first
+place. It also mirrors `gdBagPersistRows`'s three flags (`bagSlotsTouched`,
+`bagSeededDefault`, `placeholderProfile`) because they have to move together or
+the ghost/real distinction breaks on the next read. No migration: anyone with
+clubs only in the old key re-enters them once.
+
+The other duplicate — `PLACEHOLDER_PLAYER_PROFILE` in both `bubble-engine.js:14`
+and `gd-app-core.js:18063` — is intentional and was left alone.
+`app/js/bubble-engine.js` is machine-generated from gd-app-core by
+`dev/generate-bubble-engine-client.js`, and the two pages never load together.
 
 ## Still to do
 

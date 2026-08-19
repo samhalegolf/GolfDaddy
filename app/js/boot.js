@@ -67,18 +67,16 @@
         holeEntered: function (hole, rec) {
           if (app.pin) app.pin.startHole(hole);
           if (app.undo) app.undo.clear();
-          if (!roundFeatures()) return;
-          if (app.resume) app.resume.setHole(hole);
+          /* The bubble is free; resume is the round record, so it is not. */
           if (window.GDBubbleEngine && rec) {
             window.GDBubbleEngine.setHoleContext({
               hole: hole, tee: rec.tee, green: rec.green, route: rec.route
             });
           }
+          if (roundFeatures() && app.resume) app.resume.setHole(hole);
         },
         shotChanged: function (start, target) {
-          /* The bubble is a member feature; wind is part of the distance
-             answer, so it keeps running either way. */
-          if (window.GDBubbleEngine && roundFeatures()) window.GDBubbleEngine.setShot(start || null, target || null);
+          if (window.GDBubbleEngine) window.GDBubbleEngine.setShot(start || null, target || null);
           /* Wind is per shot. A different start point — or no shot at all —
              is the next shot, and it starts calm (wind.js reset). Dragging
              the aim only moves the TARGET, so a drag never lands here; a new

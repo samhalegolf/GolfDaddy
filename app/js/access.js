@@ -7,10 +7,15 @@
  * reads an account or an entitlement. Build 740 was rejected because the auth
  * gate locked them anyway.
  *
+ * The bubble is free too (decided 19 Aug), driven by the engine's ghost bag.
+ * That is the shop window: a player with no membership sees their dispersion
+ * working, and pays to replace the ghost bag with their own club distances.
+ * So app/js/bag.js asks this module before it lets anything be edited.
+ *
  * What DOES belong to an account is everything that writes something the
- * player comes back to: the scorecard, the round record in Course Data,
- * resume, and the bubble. Those stay gated, and this module is the one place
- * that decides which is which.
+ * player comes back to: the scorecard, the round record in Course Data, and
+ * resume. Those stay gated, and this module is the one place that decides
+ * which is which.
  *
  * Two ways to land in rangefinder-only mode:
  *   - no account at all               -> always, whatever the URL says

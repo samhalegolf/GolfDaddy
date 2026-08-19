@@ -23615,6 +23615,13 @@ function gdBagToggleQuick(){const panel=document.getElementById('gdBagQuickPanel
 function gdBagSortRows(rows){return (Array.isArray(rows)?rows:[]).map(gdNormaliseBagRow).filter(Boolean).sort((a,b)=>gdTotalM(b)-gdTotalM(a))}
 function gdBagPersistRows(rows,{silent=false,render=true}={}){
   const p=gdShotActiveProfile()||ensureProfile();
+  /* Every write to the player's own club distances funnels through here, which
+     makes it the one place the bag has to ask. Seeding is exempt on purpose:
+     gdEnsureDefaultBagCells writes the stand-in set with bagSeededDefault=true
+     and never comes through this function, so a free player keeps the ghost bag
+     driving their bubble. */
+  if(window.ClarityPayments&&typeof window.ClarityPayments.requireAccess==="function"
+     &&!window.ClarityPayments.requireAccess("set your own club distances"))return Array.isArray(p.bag)?p.bag:[];
   GD_PROFILE_STATE.activeId=p.id;
   p.placeholderProfile=false;
   p.bag=gdBagSortRows(rows);

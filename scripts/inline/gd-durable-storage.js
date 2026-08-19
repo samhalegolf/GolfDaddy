@@ -44,7 +44,6 @@
     "gd_player_profiles_v27",           /* profiles, bag, handicap - user-entered */
     "gd_gps_resume_round_v1",           /* the round being played right now */
     "clarity:scorecard:v1",             /* the live scorecard - user-entered, unrecoverable */
-    "clarity:bag:v1",                   /* /app/ bag: clubs and carries, user-entered */
     "gd_bag_total_firmness_v1",         /* bag firmness preset, read by the bubble engine */
     "clarity:gps-settings:v1",          /* units, aim line, shot-up frame, lock tightness */
     "clarity:nines:v1",                 /* which nines are paired for a multi-nine course */
@@ -83,7 +82,6 @@
     "clarity:supabase-auth-session:v1",
     "gd_accounts_v1",
     "gd_player_profiles_v27",
-    "clarity:bag:v1",
     "clarity:gps-settings:v1"
   ];
   var RELOAD_GUARD = "gd_durable_restore_reloaded_v1";

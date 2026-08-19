@@ -652,7 +652,11 @@
 
   /* The engine's cluster, the aim line, the wind drift line and the layup
      guides — all of them gated on scene.bubble.show, which is the Marshal
-     saying you asked for a shot view. Nothing here decides. */
+     saying you asked for a shot view. Nothing here decides.
+
+     The bubble itself is free (decided 19 Aug): a player with no membership sees
+     it driven by the engine's ghost bag. What costs is replacing that ghost bag
+     with your own clubs - see app/js/bag.js. */
   function drawShot(scene, proj) {
     var svg = el("bubbleSvg");
     var bubble = el("aimBubble");
