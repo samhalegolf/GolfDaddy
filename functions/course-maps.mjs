@@ -341,7 +341,7 @@ async function writeBlobMaps(maps) {
 
 async function readSupabaseMaps() {
   const rows = await supabaseFetch(
-    TABLE + "?select=id,course_id,course_name,course_lat,course_lng,finder_lat,finder_lng,locality,country,country_code,published,published_at,published_by_json,objects_json,holes_json,assets_json,course_json,created_at,updated_at&published=eq.true&order=updated_at.desc&limit=500",
+    TABLE + "?select=id,course_id,course_name,course_lat,course_lng,finder_lat,finder_lng,region,country,country_code,published,published_at,published_by_json,objects_json,holes_json,assets_json,course_json,created_at,updated_at&published=eq.true&order=updated_at.desc&limit=500",
     { method: "GET" }
   );
   return mapsFromSupabaseRows(rows);
@@ -392,7 +392,7 @@ function courseToSupabaseRow(course) {
        read the subtitle without unpacking a payload per course, and so the
        backfill can find the rows it still has to visit. Null when unknown -
        an empty string would read as "resolved to nothing" and be skipped. */
-    locality: text(course && course.locality, 120) || null,
+    region: text(course && course.region, 120) || null,
     country: text(course && course.country, 80) || null,
     country_code: text(course && course.countryCode, 8).toUpperCase() || null,
     published: true,
@@ -423,7 +423,7 @@ function courseFromSupabaseRow(row) {
     finderLng: finite(row.finder_lng ?? base.finderLng ?? base.courseFinderLng),
     courseFinderLat: finite(row.finder_lat ?? base.courseFinderLat ?? base.finderLat),
     courseFinderLng: finite(row.finder_lng ?? base.courseFinderLng ?? base.finderLng),
-    locality: text(row.locality ?? base.locality, 120),
+    region: text(row.region ?? base.region, 120),
     country: text(row.country ?? base.country, 80),
     countryCode: text(row.country_code ?? base.countryCode, 8).toUpperCase(),
     published: true,
@@ -601,10 +601,10 @@ function sanitizeCourse(input, actor) {
     } : undefined,
     courseLocationSource: text(input.courseLocationSource || input.courseLocation && input.courseLocation.source, 120),
     courseLocationConfirmed: locationConfirmed,
-    /* Town and country as words. Taken from the client when it already knows
+    /* Region and country as words. Taken from the client when it already knows
        (a course picked out of search carries what the geocoder said), and
        filled in from the coordinates otherwise - see ensureCoursePlace. */
-    locality: text(place && place.locality, 120),
+    region: text(place && place.region, 120),
     country: text(place && place.country, 80),
     countryCode: text(place && place.countryCode, 8).toUpperCase(),
     courseLocationUpdatedAt: text(input.courseLocationUpdatedAt || input.courseLocation && input.courseLocation.updatedAt, 80),
@@ -632,8 +632,8 @@ function sanitizeCourse(input, actor) {
   return course;
 }
 
-/* Fill in a course's town and country from its coordinates when the client did
-   not send them.
+/* Fill in a course's region and country from its coordinates when the client
+   did not send them.
  *
  * Doing this on the server rather than trusting the client is what makes the
  * subtitle actually appear on every saved course. A course reaches this
@@ -652,7 +652,7 @@ async function ensureCoursePlace(course) {
     course.courseLng ?? course.finderLng
   );
   if (!place) return course;
-  course.locality = text(place.locality, 120);
+  course.region = text(place.region, 120);
   course.country = text(place.country, 80);
   course.countryCode = text(place.countryCode, 8).toUpperCase();
   return course;

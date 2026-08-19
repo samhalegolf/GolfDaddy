@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* Fill in town and country for course maps published before those columns
+/* Fill in region and country for course maps published before those columns
  * existed.
  *
  * Every course saved from now on gets its place resolved as it is written
@@ -104,7 +104,7 @@ async function main() {
         method: "PATCH",
         headers: { Prefer: "return=minimal" },
         body: JSON.stringify({
-          locality: place.locality || null,
+          region: place.region || null,
           country: place.country || null,
           country_code: place.countryCode || null
         })

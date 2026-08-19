@@ -1,10 +1,10 @@
-/* Town and country on a course.
+/* Region and country on a course.
  *
  * The subtitle exists to tell two clubs with the same name apart, so the
  * things worth guarding are: that a place is only claimed when it is actually
  * known, that the client and the server read the geocoder the same way (two
- * copies of the settlement-key list would drift into two different subtitles
- * for the same course), and that a course with no place renders no subtitle
+ * copies of the region-key list would drift into two different subtitles for
+ * the same course), and that a course with no place renders no subtitle
  * rather than a stray comma.
  *
  * The picker is a browser IIFE with no module boundary, so its functions are
@@ -36,38 +36,42 @@ function loadPickerFns(startSignature, endSignature, names) {
 }
 
 const picker = loadPickerFns(
-  "const PLACE_SETTLEMENT_KEYS",
+  "const PLACE_REGION_KEYS",
   "function distance(a,b)",
-  ["PLACE_SETTLEMENT_KEYS", "placeFromAddress", "placeLabel"]
+  ["PLACE_REGION_KEYS", "placeFromAddress", "placeLabel"]
 );
 
 const tests = [];
 function test(name, fn) { tests.push({ name: name, fn: fn }); }
 
-test("a Nominatim address becomes a town and a country", () => {
+test("a Nominatim address becomes a region and a country", () => {
   const place = picker.placeFromAddress({
-    town: "Papakura",
+    state: "Auckland",
     country: "New Zealand",
     country_code: "nz"
   });
-  assert.deepStrictEqual(place, { locality: "Papakura", country: "New Zealand", countryCode: "NZ" });
+  assert.deepStrictEqual(place, { region: "Auckland", country: "New Zealand", countryCode: "NZ" });
 });
 
-test("the largest settlement present wins", () => {
-  /* Nominatim returns several at once for a metro course. "Auckland" is what a
-     player recognises; "Epsom" is not. */
+test("the state beats the settlement fields", () => {
+  /* The whole reason this is region rather than town. These are the real
+     values Nominatim returned for Takapuna Golf Course: the council name is
+     accurate and useless, the state is what a player recognises. */
   const place = picker.placeFromAddress({
-    suburb: "Epsom",
-    city: "Auckland",
+    city: "Kaipatiki",
+    state: "Auckland",
     country: "New Zealand",
     country_code: "nz"
   });
-  assert.strictEqual(place.locality, "Auckland");
+  assert.strictEqual(place.region, "Auckland");
+  assert.strictEqual(picker.placeLabel(place), "Auckland, New Zealand");
 });
 
-test("a rural course with only a hamlet still gets a subtitle", () => {
-  const place = picker.placeFromAddress({ hamlet: "Kaiwaka", country: "New Zealand", country_code: "nz" });
-  assert.strictEqual(picker.placeLabel(place), "Kaiwaka, New Zealand");
+test("a place with no state falls back to a settlement", () => {
+  /* City-states have no state field. Something recognisable still beats an
+     empty subtitle. */
+  const place = picker.placeFromAddress({ city: "Singapore", country: "Singapore", country_code: "sg" });
+  assert.strictEqual(picker.placeLabel(place), "Singapore, Singapore");
 });
 
 test("an address with no country is not a place", () => {
@@ -76,10 +80,10 @@ test("an address with no country is not a place", () => {
   assert.strictEqual(picker.placeFromAddress("Auckland"), null);
 });
 
-test("a country with no town labels as the country alone", () => {
+test("a country with no region labels as the country alone", () => {
   assert.strictEqual(
-    picker.placeLabel({ locality: "", country: "Scotland", countryCode: "GB" }),
-    "Scotland"
+    picker.placeLabel({ region: "", country: "United Kingdom", countryCode: "GB" }),
+    "United Kingdom"
   );
 });
 
@@ -90,7 +94,7 @@ test("a course with no place renders no subtitle, not a stray separator", () => 
 });
 
 test("the country code carries a course geocoded before names were stored", () => {
-  assert.strictEqual(picker.placeLabel({ locality: "Melbourne", countryCode: "au" }), "Melbourne, AU");
+  assert.strictEqual(picker.placeLabel({ region: "Victoria", countryCode: "au" }), "Victoria, AU");
 });
 
 test("client and server read the geocoder identically", () => {
@@ -98,22 +102,23 @@ test("client and server read the geocoder identically", () => {
      different subtitles for the same course depending on which path filled it
      in. If one side changes, this fails and the other side changes too. */
   const serverKeys = serverSrc
-    .slice(serverSrc.indexOf("const SETTLEMENT_KEYS"), serverSrc.indexOf("];", serverSrc.indexOf("const SETTLEMENT_KEYS")))
+    .slice(serverSrc.indexOf("const REGION_KEYS"), serverSrc.indexOf("];", serverSrc.indexOf("const REGION_KEYS")))
     .match(/"[a-z_]+"/g)
     .map(function (s) { return s.replace(/"/g, ""); });
   assert.deepStrictEqual(
-    picker.PLACE_SETTLEMENT_KEYS,
+    picker.PLACE_REGION_KEYS,
     serverKeys,
-    "gd-course-place.mjs and the picker must agree on settlement precedence"
+    "gd-course-place.mjs and the picker must agree on region precedence"
   );
+  assert.strictEqual(serverKeys[0], "state", "state is the intended answer, not a fallback");
 });
 
 test("the server labels a place the same way the picker does", async () => {
   const server = await import("../functions/lib/gd-course-place.mjs");
   [
-    { locality: "Auckland", country: "New Zealand", countryCode: "NZ" },
-    { locality: "", country: "Scotland", countryCode: "GB" },
-    { locality: "Melbourne", country: "", countryCode: "AU" },
+    { region: "Auckland", country: "New Zealand", countryCode: "NZ" },
+    { region: "", country: "United Kingdom", countryCode: "GB" },
+    { region: "Victoria", country: "", countryCode: "AU" },
     {}
   ].forEach(function (place) {
     assert.strictEqual(server.placeLabel(place), picker.placeLabel(place));
@@ -123,14 +128,22 @@ test("the server labels a place the same way the picker does", async () => {
 test("the server accepts place fields under any spelling a caller uses", async () => {
   const server = await import("../functions/lib/gd-course-place.mjs");
   assert.deepStrictEqual(
-    server.placeFromCourse({ locality: "Auckland", country: "New Zealand", country_code: "nz" }),
-    { locality: "Auckland", country: "New Zealand", countryCode: "NZ" }
+    server.placeFromCourse({ region: "Auckland", country: "New Zealand", country_code: "nz" }),
+    { region: "Auckland", country: "New Zealand", countryCode: "NZ" }
   );
   assert.deepStrictEqual(
-    server.placeFromCourse({ courseLocality: "Sydney", courseCountry: "Australia", countryCode: "AU" }),
-    { locality: "Sydney", country: "Australia", countryCode: "AU" }
+    server.placeFromCourse({ courseRegion: "New South Wales", courseCountry: "Australia", countryCode: "AU" }),
+    { region: "New South Wales", country: "Australia", countryCode: "AU" }
   );
   assert.strictEqual(server.placeFromCourse({ courseName: "Akarana" }), null);
+});
+
+test("the reverse lookup pins language and detail level", () => {
+  /* Without accept-language the country comes back as "New Zealand / Aotearoa";
+     zoom=10 is where the state field is reliably populated. Both were found by
+     running this against the real database, so both are load-bearing. */
+  assert.ok(/accept-language=en/.test(serverSrc), "country name must not vary by locale");
+  assert.ok(/zoom=10/.test(serverSrc), "detail level must be the one state is populated at");
 });
 
 test("a bad coordinate never reaches the geocoder", async () => {
@@ -140,9 +153,9 @@ test("a bad coordinate never reaches the geocoder", async () => {
 });
 
 test("place columns are written and read on the Supabase row", () => {
-  assert.ok(/locality: text\(course && course\.locality/.test(mapsSrc), "row write must include locality");
+  assert.ok(/region: text\(course && course\.region/.test(mapsSrc), "row write must include region");
   assert.ok(/country_code: text\(course && course\.countryCode/.test(mapsSrc), "row write must include country_code");
-  assert.ok(/locality: text\(row\.locality/.test(mapsSrc), "row read must include locality");
+  assert.ok(/region: text\(row\.region/.test(mapsSrc), "row read must include region");
   assert.ok(/select=[^"]*country_code/.test(mapsSrc), "the read query must select the place columns");
 });
 
@@ -161,7 +174,7 @@ test("a publish resolves the place when the client did not send one", () => {
 
 test("the migration adds nullable columns and leaves existing rows alone", () => {
   const sql = fs.readFileSync(MIGRATION, "utf8");
-  ["locality", "country", "country_code"].forEach(function (column) {
+  ["region", "country", "country_code"].forEach(function (column) {
     assert.ok(
       new RegExp("add column if not exists " + column + " text").test(sql),
       "missing column: " + column

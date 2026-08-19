@@ -44,35 +44,37 @@
   function keyForName(name){return slug(cleanName(name)||name)}
   /* Where a course is, in words. "Riverside" is four different clubs in four
      different countries, so a name on its own is not an identification - the
-     town and country under it are what let a player pick the right one.
+     region and country under it are what let a player pick the right one.
 
-     Settlement keys are tried largest first because Nominatim names the
-     settlement by how the place is administered, not by size: a rural club may
-     only have a village or hamlet, a metro one has both city and suburb, and
-     the largest present is the one a player recognises. Matches
+     Region, not town. Nominatim's settlement fields answer "which body
+     administers this point", not "what do people call here": reverse geocoding
+     the real course database returned Kaipatiki for Takapuna and Puketapapa for
+     Akarana, correct local-board names no golfer uses. The state/region field
+     gave Auckland, Otago, Waikato, California, Scotland - recognisable, and
+     present on every course tried. Matches the key order in
      functions/lib/gd-course-place.mjs, which does the same job server-side. */
-  const PLACE_SETTLEMENT_KEYS=["city","town","municipality","village","hamlet","suburb","county"];
+  const PLACE_REGION_KEYS=["state","region","state_district","county","city","town","municipality","village"];
   function placeFromAddress(address){
     if(!address||typeof address!=="object")return null;
     const country=String(address.country||"").trim().slice(0,80);
     const countryCode=String(address.country_code||"").trim().slice(0,8).toUpperCase();
     if(!country&&!countryCode)return null;
-    let locality="";
-    for(const key of PLACE_SETTLEMENT_KEYS){
-      locality=String(address[key]||"").trim().slice(0,120);
-      if(locality)break;
+    let region="";
+    for(const key of PLACE_REGION_KEYS){
+      region=String(address[key]||"").trim().slice(0,120);
+      if(region)break;
     }
-    return {locality,country,countryCode};
+    return {region,country,countryCode};
   }
-  /* "Auckland, New Zealand", or just the country when the town is unknown, or
+  /* "Auckland, New Zealand", or just the country when the region is unknown, or
      "" when nothing is known - callers render "" as no subtitle rather than a
      stray separator. Falls back to the country code so a course geocoded
      before country names were stored still says something. */
   function placeLabel(course){
     if(!course||typeof course!=="object")return "";
-    const locality=String(course.locality||"").trim();
+    const region=String(course.region||"").trim();
     const country=String(course.country||"").trim()||String(course.countryCode||"").trim().toUpperCase();
-    return [locality,country].filter(Boolean).join(", ");
+    return [region,country].filter(Boolean).join(", ");
   }
   function distance(a,b){
     const lat1=Number(a?.lat),lng1=Number(a?.lng),lat2=Number(b?.lat),lng2=Number(b?.lng);
@@ -186,7 +188,7 @@
     return Object.assign({},src,{
       name,
       courseName:name,
-      locality:String(src.locality||"").trim(),
+      region:String(src.region||"").trim(),
       country:String(src.country||"").trim(),
       countryCode:String(src.countryCode||src.country_code||"").trim().toUpperCase(),
       courseId:src.courseId||src.id||canonicalKey,
@@ -217,7 +219,7 @@
         /* Absent on rows written before the subtitle existed. Those show no
            subtitle until the course is picked again, which is honest - we do
            not know where they are and will not guess. */
-        locality:raw.locality,
+        region:raw.region,
         country:raw.country,
         countryCode:raw.countryCode,
         source:"recent-course"
@@ -237,7 +239,7 @@
       canonicalKey:course.canonicalKey||keyForName(course.name),
       lat:Number.isFinite(Number(course.lat))?Number(course.lat):null,
       lng:Number.isFinite(Number(course.lng))?Number(course.lng):null,
-      locality:course.locality||"",
+      region:course.region||"",
       country:course.country||"",
       countryCode:course.countryCode||"",
       pickedAt:new Date().toISOString(),
@@ -262,7 +264,7 @@
 	      courseLng:raw?.courseLng??raw?.lng,
 	      finderLat:raw?.finderLat??raw?.courseFinderLat,
 	      finderLng:raw?.finderLng??raw?.courseFinderLng,
-	      locality:raw?.locality,
+	      region:raw?.region,
 	      country:raw?.country,
 	      countryCode:raw?.countryCode??raw?.country_code,
 	      source:"database-course"
@@ -322,7 +324,7 @@
            town, and a duplicate that knows nothing must not blank out one that
            does. */
         if(!existing.country&&!existing.countryCode&&(course.country||course.countryCode)){
-          existing.locality=course.locality;
+          existing.region=course.region;
           existing.country=course.country;
           existing.countryCode=course.countryCode;
         }
@@ -374,9 +376,9 @@
         if(!/golf|course|club|links/i.test(text))return null;
         /* addressdetails=1 was already on the request but the address was being
            thrown away - this is the only place in the app that gets a course's
-           town and country for free, so it is where they enter the system. */
+           region and country for free, so it is where they enter the system. */
         const place=placeFromAddress(item.address)||{};
-        return basePayload({name:label,lat,lng,locality:place.locality,country:place.country,countryCode:place.countryCode,source:"remote-search"});
+        return basePayload({name:label,lat,lng,region:place.region,country:place.country,countryCode:place.countryCode,source:"remote-search"});
       }).filter(Boolean);
     }catch(e){return []}
     finally{clearTimeout(timer)}
@@ -407,7 +409,7 @@
   }
   function metaText(course){
     const parts=[];
-	    /* Town and country lead the line. It is the part that identifies the
+	    /* Region and country lead the line. It is the part that identifies the
 	       course rather than describing our relationship to it, and it is what a
 	       player scans for when two results share a name. */
 	    const place=placeLabel(course);

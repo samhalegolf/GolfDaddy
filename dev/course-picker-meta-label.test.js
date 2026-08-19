@@ -17,7 +17,7 @@ const PICKER = path.join(ROOT, "scripts", "inline", "gd-course-picker-search-v2.
 const src = fs.readFileSync(PICKER, "utf8");
 
 /* Run the real metaText against course fixtures. placeLabel comes along with
-   it because metaText calls it for the town/country subtitle - lifting metaText
+   it because metaText calls it for the region/country subtitle - lifting metaText
    on its own would throw on the first call instead of testing anything. */
 function loadMetaText() {
   const idx = src.indexOf("function metaText(course)");
@@ -59,14 +59,14 @@ test("distance is still shown for a database course", () => {
   assert.strictEqual(metaText({ hasDatabaseMap: true, distanceM: 2400 }), "2.4km away");
 });
 
-test("town and country lead the line when they are known", () => {
+test("region and country lead the line when they are known", () => {
   assert.strictEqual(
-    metaText({ source: "database-course", locality: "Auckland", country: "New Zealand", distanceM: 850 }),
+    metaText({ source: "database-course", region: "Auckland", country: "New Zealand", distanceM: 850 }),
     "Auckland, New Zealand · 850m away"
   );
   assert.strictEqual(
-    metaText({ source: "remote-search", locality: "St Andrews", country: "United Kingdom" }),
-    "St Andrews, United Kingdom · search result"
+    metaText({ source: "remote-search", region: "Scotland", country: "United Kingdom" }),
+    "Scotland, United Kingdom · search result"
   );
 });
 
