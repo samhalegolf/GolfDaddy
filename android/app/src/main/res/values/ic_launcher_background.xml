@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_background">#FFFFFF</color>
+    <!-- Matches the brand mark's field and capacitor.config.json backgroundColor.
+         This was #FFFFFF (the Capacitor default), which put the white half of the
+         logo on a white adaptive-icon background. -->
+    <color name="ic_launcher_background">#050806</color>
 </resources>
