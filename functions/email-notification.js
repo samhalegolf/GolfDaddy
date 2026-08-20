@@ -20,7 +20,7 @@ exports.handler = async function(event){
     ctaLabel: text(payload.ctaLabel, 80) || "Open Clarity",
     ctaUrl: safeUrl(payload.ctaUrl, siteUrl),
     eventType: text(payload.eventType, 80) || "account_activity",
-    logoUrl: safeUrl(payload.logoUrl, siteUrl) || new URL("/assets/brand/cg-logo-white-g.png?v=f3bf5530", siteUrl).toString()
+    logoUrl: safeUrl(payload.logoUrl, siteUrl) || new URL("/assets/brand/cg-logo-white-g.png?v=1e5a26e2", siteUrl).toString()
   };
 
   try{
@@ -150,7 +150,7 @@ async function sendCompedAccessEmail(options){
     recipientName: text(options.recipientName, 120) || "there",
     actorName: text(options.issuedByName, 120) || "Clarity Golf",
     eventType: "comped_access_granted",
-    logoUrl: new URL("/assets/brand/cg-logo-white-g.png?v=f3bf5530", siteUrl).toString(),
+    logoUrl: new URL("/assets/brand/cg-logo-white-g.png?v=1e5a26e2", siteUrl).toString(),
     ctaLabel: "Open Clarity",
     ctaUrl: siteUrl,
     title: "You've been given " + periodLabel + " of " + giftLabel

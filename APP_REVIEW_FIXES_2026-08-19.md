@@ -24,6 +24,21 @@ One related fix: `android/.../values/ic_launcher_background.xml` was `#FFFFFF`,
 which put the white half of the logo on a white adaptive-icon background. It is
 now `#050806`, matching `capacitor.config.json`.
 
+**Update (2026-08-20):** the app icon became its own brand mark, separate from
+the header/email logo, so the "one master" description above no longer holds.
+`dev/generate-app-icons.py` was split in two:
+
+- `dev/generate-app-icons-clarity-caddy.py` — the iOS icon and Android
+  launcher icons (legacy, round, adaptive foreground + background colour),
+  from `dev/image-originals/brand-clarity-app-icon.png`.
+- `dev/generate-splash-screens.py` — both splash sets only, from
+  `dev/image-originals/brand-cg-logo-white-g.png` (also the source for the
+  in-app header/auth/email logo).
+
+Run both after changing either mark. Running only one no longer touches the
+other's output, which is the point — the drift this doc describes fixing
+came from two things secretly sharing one master; now each has its own.
+
 ## 5.1.1(v) — login wall on features that are not account based
 
 ### What was wrong

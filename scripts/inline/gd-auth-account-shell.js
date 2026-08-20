@@ -996,7 +996,7 @@
       <div class="wrap">
         <div class="heading authHeading">
           <div class="authBrand">
-            <span class="authMark" aria-hidden="true"><img src="assets/brand/cg-logo-white-g.png?v=f3bf5530" alt=""></span>
+            <span class="authMark" aria-hidden="true"><img src="assets/brand/cg-logo-white-g.png?v=1e5a26e2" alt=""></span>
             <div class="authTitle">Clarity Caddy</div>
           </div>
 	          <div class="authMode">${authMode === 'signup' ? 'Create account' : (authMode === 'reset' ? (isAccountSetupRoute() ? 'Set up account' : 'Set password') : 'Sign in')}</div>
@@ -1015,7 +1015,7 @@
         <div class="heading">
           <div class="kicker">Clarity Golf Systems</div>
           <div class="coachPortalTitle">
-            <span class="coachTitleMark" aria-hidden="true"><img src="assets/brand/cg-logo-white-g.png?v=f3bf5530" alt=""></span>
+            <span class="coachTitleMark" aria-hidden="true"><img src="assets/brand/cg-logo-white-g.png?v=1e5a26e2" alt=""></span>
             <h1>Coaching Portal</h1>
           </div>
           <p>${esc(`Signed in as ${account.name || 'Coach'}.`)} Select a player to open their profile and edit shot data.</p>
