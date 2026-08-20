@@ -5,6 +5,14 @@
 	  const COURSE_MAPS_API="/api/course-maps";
 	  const NEARBY_M=5200;
 	  const REMOTE_LIMIT=12;
+	  const COURSES_NEAR_API="/api/courses-near";
+	  /* Two search results belong to the same place when they are within this of
+	     each other. Uncritical by nature: the thing it separates is "St Andrews,
+	     Scotland" from "St Andrews, Iowa", which are thousands of km apart, so
+	     anything from 10km to 50km behaves identically. It is deliberately far
+	     wider than NEARBY_M - that one decides what is on ONE list, this one
+	     decides how many lists there are. */
+	  const AREA_M=25000;
   const KNOWN=[
     {name:"Akarana Golf Club",courseId:"akarana-golf-club",lat:-36.9174953,lng:174.7400425,source:"known-course",aliases:["akarana golf course","akarana gc"]},
     {name:"Maungakiekie Golf Club",courseId:"maungakiekie-golf-club",lat:-36.9229754,lng:174.7254871,source:"known-course",aliases:["maungakeikei golf club","maungakiekie golf course","maunga gc"]}
@@ -657,6 +665,27 @@
         if(state.activeToken!==token)return Object.assign({},result,{stale:true});
         state.lastResult=result||null;
         setMappingStatus(result);
+        /* The ONLY thing that puts a pin screen in front of a player. The pin is
+           no longer a gate on the way in - the search result's own coordinate is
+           trusted and mapped from - so this is the repair path, reached only
+           when the mapper came back and said that coordinate was clearly wrong.
+
+           "ground" means we mapped the wrong place, or two places at once: stop
+           and ask. "coverage" means the right place with fewer holes than the
+           scorecard claims, which is as often a bad scrape as a bad pin - so a
+           map that plays is allowed to play, or one wrong scorecard would lock a
+           course out of the app for good. */
+        const fit=result&&result.fit;
+        if(fit&&fit.trusted===false&&(fit.scope==="ground"||!(result&&result.playable))){
+          const showPin=bridge().showPin;
+          if(typeof showPin==="function"){
+            return showPin(Object.assign({},course,{
+              gdCourseFitTrusted:false,
+              gdCourseFitReason:fit.reason||"",
+              gdCourseFitMessage:fit.message||""
+            }));
+          }
+        }
         if(result&&result.playable)enterGpsPlay(course,result,opts);
         return result;
       })
@@ -749,6 +778,121 @@
       count.textContent=courses.length?(recentOnly?`${courses.length} recent`:`${courses.length} found`):"Search";
     }
   }
+  /* Group results that sit near each other into ONE place to choose.
+     Searching "st andrews" returns the Old Course, the Jubilee, the clubhouse
+     and a course in Iowa; the player is not trying to choose between the first
+     three, they are trying to say which St Andrews on Earth they mean. So the
+     unit of choice is the area, not the result.
+
+     Single-link clustering, the same shape the automapper uses on hole loops -
+     a result joins the first cluster it is within AREA_M of, otherwise it
+     starts one. Results with no coordinates cannot be placed and are left for
+     the flat list. */
+  function clusterAreas(courses){
+    const areas=[];
+    (Array.isArray(courses)?courses:[]).forEach(course=>{
+      if(!finitePoint(course))return;
+      const point={lat:Number(course.lat),lng:Number(course.lng)};
+      const near=areas.find(area=>area.members.some(m=>metresBetween(m,point)<=AREA_M));
+      if(near)near.members.push(Object.assign({},point,{course}));
+      else areas.push({members:[Object.assign({},point,{course})]});
+    });
+    return areas.map(area=>{
+      /* The first member is the best-ranked result in this area, so it is the
+         anchor: rank already put the closest name match first, and any point
+         inside the area is an equally good seed for "what is near here". */
+      const lead=area.members[0].course;
+      const labelled=area.members.map(m=>m.course).find(c=>placeLabel(c))||lead;
+      return {
+        label:placeLabel(labelled)||String(lead.name||"").trim()||"This area",
+        lat:area.members[0].lat,
+        lng:area.members[0].lng,
+        region:labelled.region||"",
+        country:labelled.country||"",
+        countryCode:labelled.countryCode||"",
+        count:area.members.length,
+        lead:lead
+      };
+    });
+  }
+  function metresBetween(a,b){
+    if(!a||!b)return Infinity;
+    const lat=(Number(a.lat)+Number(b.lat))*Math.PI/360;
+    const dy=(Number(b.lat)-Number(a.lat))*111320;
+    const dx=(Number(b.lng)-Number(a.lng))*111320*Math.cos(lat);
+    return Math.hypot(dx,dy);
+  }
+  /* What is actually at that point. Deliberately does NOT carry the search term:
+     "st andrews" has to surface Craigtoun, Balgove, Jubilee and Eden, none of
+     which are named St Andrews anything. The term found the place; the place
+     finds the courses. */
+  async function coursesNear(point){
+    if(!finitePoint(point))return null;
+    const controller=new AbortController();
+    const timer=setTimeout(()=>controller.abort(),6000);
+    try{
+      const res=await fetch(`${COURSES_NEAR_API}?lat=${encodeURIComponent(point.lat)}&lng=${encodeURIComponent(point.lng)}`,
+        {signal:controller.signal,headers:{Accept:"application/json"}});
+      if(!res.ok)return null;
+      const body=await res.json();
+      const list=Array.isArray(body&&body.courses)?body.courses:[];
+      return list.length?{courses:list,partial:!!(body&&body.partial)}:null;
+    }catch(e){return null}
+    finally{clearTimeout(timer)}
+  }
+  /* Nothing here says these courses belong to each other - only that they are
+     near the same point, which is a distance we measured. The row renders that
+     distance and never a parent, because proximity is a fact and ownership
+     would be a guess. */
+  function nearbyPayloads(list,area){
+    return (Array.isArray(list)?list:[]).map(course=>basePayload({
+      name:course.name,
+      lat:course.lat,
+      lng:course.lng,
+      courseId:course.courseId||undefined,
+      /* Reuse the two states the picker already renders rather than inventing a
+         third: one we hold a map for behaves exactly like a database course. */
+      source:course.hasMap?"database-course":"remote-search",
+      hasDatabaseMap:!!course.hasMap,
+      region:area&&area.region||"",
+      country:area&&area.country||"",
+      countryCode:area&&area.countryCode||""
+    }));
+  }
+  function renderAreasOwner(areas,fallback,run){
+    const list=byId("courseList");
+    if(!list)return;
+    renderNearby();
+    list.innerHTML="";
+    areas.forEach(area=>{
+      const row=document.createElement("div");
+      row.className="course";
+      row.innerHTML=`<div><div class="name">${esc(area.label)}</div><div class="meta">${esc(area.count===1?"1 result":`${area.count} results`)}</div></div><button class="play" type="button">Show</button>`;
+      row.addEventListener("click",()=>showArea(area,fallback,run));
+      list.appendChild(row);
+    });
+    const count=byId("countLine");
+    if(count)count.textContent="Which one?";
+  }
+  /* Falls back to the flat ranked list whenever the nearby lookup gives nothing
+     - offline, Overpass busy, or a place with no mapped courses around it. A
+     coverage gap degrades to today's behaviour rather than an empty screen. */
+  function showArea(area,fallback,run){
+    const count=byId("countLine");
+    if(count)count.textContent="Searching";
+    coursesNear(area).then(result=>{
+      if(run!==searchRun)return;
+      if(!result){
+        renderCoursesOwner(fallback);
+        if(count)count.textContent=fallback.length?`${fallback.length} found`:"No course found";
+        return;
+      }
+      const payloads=nearbyPayloads(result.courses,area);
+      renderCoursesOwner(payloads);
+      if(count)count.textContent=result.partial?`${payloads.length} found · list may be short`:`${payloads.length} nearby`;
+    });
+    return false;
+  }
   function searchOwner(query){
     const q=byId("searchInput")?.value.trim()||"";
     const requested=query==null?q:String(query||"").trim();
@@ -775,6 +919,13 @@
 	      const results=rank(localMatches(requested).concat(remote),requested).slice(0,12);
 	      renderCoursesOwner(results);
 	      if(count)count.textContent=results.length?`${results.length} found`:"No course found";
+	      /* One rule, no branch: a result names a PLACE, and a place expands to
+	         the courses on it. More than one place worth the name asks which
+	         first. One place goes straight there - that is not a special case,
+	         it is not asking a question with one answer. */
+	      const areas=clusterAreas(results);
+	      if(areas.length>1)renderAreasOwner(areas,results,run);
+	      else if(areas.length===1)showArea(areas[0],results,run);
 	    });
     return false;
   }

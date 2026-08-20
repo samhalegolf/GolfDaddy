@@ -104,7 +104,7 @@ async function loadCoursePackageRows(courseId) {
     supabaseFetch(MAPS_TABLE + "?select=course_id,course_name,published,geometry_version,published_at,updated_at,objects_json,holes_json&course_id=eq." + encodeURIComponent(courseId) + "&published=eq.true&limit=1").catch(() => []),
     supabaseFetch(VISUALS_TABLE + "?select=published_version,current_version,status,diagnostics,uploaded_assets,updated_at&course_id=eq." + encodeURIComponent(courseId) + "&limit=1").catch(() => []),
     supabaseFetch(VISUAL_JOBS_TABLE + "?select=id,kind,status,created_at,updated_at&course_id=eq." + encodeURIComponent(courseId) + "&order=created_at.desc&limit=5").catch(() => []),
-    supabaseFetch(MAPPER_JOBS_TABLE + "?select=id,kind,status,error,created_at,updated_at&course_id=eq." + encodeURIComponent(courseId) + "&order=created_at.desc&limit=5").catch(() => [])
+    supabaseFetch(MAPPER_JOBS_TABLE + "?select=id,kind,status,error,result,created_at,updated_at&course_id=eq." + encodeURIComponent(courseId) + "&order=created_at.desc&limit=5").catch(() => [])
   ]);
   return {
     map: Array.isArray(mapRows) ? mapRows[0] || null : null,
@@ -114,13 +114,29 @@ async function loadCoursePackageRows(courseId) {
   };
 }
 
+/* Whether the coordinate the mapper was given held up, from the last run that
+   actually reached a verdict. This is the ONLY thing that puts the pin screen in
+   front of a player: the picker trusts the search result's own coordinate and
+   asks for a pin only when this says it was clearly wrong. Absent means trusted
+   - a course mapped before this existed, or one whose job row has aged out, must
+   not start demanding pins. */
+function fitFromMapperJobs(mapperJobs) {
+  const job = (Array.isArray(mapperJobs) ? mapperJobs : []).find(j => j && j.result && j.result.fit);
+  return job ? job.result.fit : null;
+}
+
 export async function buildCoursePackage(courseId) {
   const rows = await loadCoursePackageRows(courseId);
   const state = deriveCoursePackageState(rows);
-  if (state === "full-map-ready") return shapeFullPackage(rows.map, rows.visual);
+  const fit = fitFromMapperJobs(rows.mapperJobs);
+  /* Only attached when it has something to say. A package carrying
+     `fit:{trusted:true}` and one carrying no fit at all mean the same thing, and
+     the client reads both as "do not ask". */
+  const withFit = (pkg) => (fit && fit.trusted === false ? Object.assign({}, pkg, { fit }) : pkg);
+  if (state === "full-map-ready") return withFit(shapeFullPackage(rows.map, rows.visual));
   if (state === "lite-geo-ready") {
     const liveVisualJob = rows.visualJobs.find(j => j.status === "running" || j.status === "queued");
-    return shapeLitePackage(rows.map, liveVisualJob ? liveVisualJob.status : "none");
+    return withFit(shapeLitePackage(rows.map, liveVisualJob ? liveVisualJob.status : "none"));
   }
   if (state === "manual-required") {
     const lastMapperJob = rows.mapperJobs[0] || null;

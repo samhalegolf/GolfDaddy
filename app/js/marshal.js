@@ -113,7 +113,7 @@
 
     function emptyState() {
       return {
-        round: { courseKey: null, pkg: null, centre: null, nines: null, open: false },
+        round: { courseKey: null, pkg: null, centre: null, open: false },
         atCourse: false,
         viewHole: 0,
         /* liveHole is set by Play and cleared by End Round. NOTHING ELSE
@@ -250,8 +250,16 @@
       return out;
     }
 
+    /* Every hole the site has, in physical order. More than 18 is not a special
+       case and needs no pairing UI: North Shore Golf Club is numbered 1-27, and
+       its three named courses (Blue 1-18, Gold 19-27+1-9, Red 10-18+19-27) are
+       play ORDERS over those same holes, not separately named nines. So the
+       round presents every hole and the picker lets the player start and move
+       wherever the club actually sent them. Hole 20 means one thing here, which
+       is why nothing has to qualify it.
+
+       The 18 fallback covers only a round opened before any package arrived. */
     function holesInPlay() {
-      if (S.round.nines && Array.isArray(S.round.nines.holesInPlay)) return S.round.nines.holesInPlay;
       var holes = (S.round.pkg && Array.isArray(S.round.pkg.holes)) ? S.round.pkg.holes : [];
       var max = holes.reduce(function (m, h) { return Math.max(m, Number(h && h.holeNumber) || 0); }, 0);
       var out = [];
@@ -318,7 +326,6 @@
           courseKey: p.courseKey || null,
           pkg: p.pkg || null,
           centre: pt(p.centre) || packageCentre(p.pkg),
-          nines: p.nines || null,
           open: true
         };
         enterHole(p.hole || holesInPlay()[0] || 1);
@@ -638,21 +645,7 @@
         if (!p || !p.pkg) return false;
         S.round.pkg = p.pkg;
         if (!S.round.centre) S.round.centre = packageCentre(p.pkg);
-        if (p.nines) S.round.nines = p.nines;
         enterHole(S.viewHole);
-        return true;
-      },
-
-      /* The scorecard's nine picker. Jumps to the new pairing's first hole only
-         when the current one fell outside it. */
-      SET_NINES: function (p) {
-        if (!p || !p.nines) return false;
-        S.round.nines = p.nines;
-        var list = holesInPlay();
-        if (list.indexOf(S.viewHole) === -1) {
-          if (S.live.hole !== null) S.live = { hole: list[0], mode: "track", awayFixes: 0 };
-          enterHole(list[0]);
-        }
         return true;
       },
 
@@ -892,14 +885,13 @@
       /* The small, purposeful reads the tool modules need. Deliberately not a
          general "give me the state" — each of these is a question something
          actually asks (wind wants a point to look up, the scorecard wants the
-         nines, Course Data wants the course key), and keeping them named means
+         holes in play, Course Data wants the course key), and keeping them means
          a new caller has to say what it wants rather than helping itself. */
       round: function () {
         return {
           courseKey: S.round.courseKey,
           hole: S.viewHole,
           liveHole: S.live.hole,
-          nines: S.round.nines,
           holesInPlay: holesInPlay()
         };
       },

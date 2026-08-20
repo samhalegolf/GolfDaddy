@@ -46,7 +46,6 @@
     "clarity:scorecard:v1",             /* the live scorecard - user-entered, unrecoverable */
     "gd_bag_total_firmness_v1",         /* bag firmness preset, read by the bubble engine */
     "clarity:gps-settings:v1",          /* units, aim line, shot-up frame, lock tightness */
-    "clarity:nines:v1",                 /* which nines are paired for a multi-nine course */
     /* Course Data's raw shot snapshots. The most irreplaceable thing the app
        holds: a shot is a measurement of a moment that cannot be taken again,
        and the intake writes each one exactly once. The derived analyses beside
@@ -76,8 +75,8 @@
      value at module load (`var clubs = load()`, `var state = load()`), so a
      restore that lands afterwards is invisible until the page runs again. The
      other /app/ keys read lazily - the scorecard when the panel opens, the
-     firmness preset when the engine asks, the nines pairing when a hole changes
-     - so like the resume key they restore into a running app for free. */
+     firmness preset when the engine asks - so like the resume key they restore
+     into a running app for free. */
   var RELOAD_REQUIRED_KEYS = [
     "clarity:supabase-auth-session:v1",
     "gd_accounts_v1",

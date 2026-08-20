@@ -609,7 +609,7 @@ check("every signal the concept lists has a handler", () => {
     "VIEW_HOLE_CHANGED", "PLACED", "LOCK", "UNLOCK", "AIM_DRAGGED", "SHOT_END",
     "FINISH_OPENED", "BALL_MOVED", "FINISH_LOGGED", "SCORE_SET", "BACK",
     "NEXT_HOLE", "PREV_HOLE", "ADVANCE_TO_HOLE", "LOG_OPENED",
-    "PACKAGE_UPDATED", "SET_NINES"].forEach((name) => {
+    "PACKAGE_UPDATED"].forEach((name) => {
       // A handler exists if the signal is not reported as unknown. Unknown and
       // inert both answer false, so probe the scene subscription instead.
       let sawUnknown = false;

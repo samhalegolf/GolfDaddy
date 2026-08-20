@@ -15941,21 +15941,50 @@ function gdCoursePickerMapCenterPoint(){
 function gdCoursePickerPinPointForPayload(payload){
   return gdCoursePickerMapCenterPoint()||gdCoursePickerFinitePoint(payload)||gdCoursePickerDefaultPoint();
 }
+/* Does this player have to place a pin before we can map their course?
+ *
+ * Almost never. This used to answer TRUE by default - anything without a stored
+ * map or an already-confirmed pin got a map to drag before it got a round - so
+ * the pin screen ran on every new course search. That is backwards: a search
+ * result already carries a coordinate, from Nominatim or from course_maps, and
+ * it is right nearly every time.
+ *
+ * So the answer is now NO unless the mapper has come back and said the
+ * coordinate it was given is clearly wrong: more than one course on the ground,
+ * fewer holes than the club's own scorecard, or holes too far apart to be one
+ * course. See functions/lib/gd-course-fit-core.mjs for what "clearly wrong"
+ * means; nothing else may put this screen in front of a player.
+ *
+ * Note what is NOT here any more. "No database map yet" and "no confirmed pin
+ * yet" are the normal state of every course nobody has played, and neither is
+ * evidence of anything. */
 function gdCoursePickerNeedsCoursePin(payload){
   const mark=reason=>{try{document.body.dataset.gdCoursePinDecision=reason;}catch(e){}};
   if(gdCoursePayloadIsManual(payload)){mark("manual-course");return false;}
-		  if(payload?.gdDatabaseMapAvailable===true){mark("database-map");return false;}
-  const owner=window.GDCourseLocation;
-  const resolved=owner&&typeof owner.get==="function"?owner.get(payload):null;
-  if(resolved&&resolved.centre&&resolved.confirmed){mark("confirmed-course-location");return false;}
-		  if(window.__gdCoursePickerBypassPinOnce){
-		    window.__gdCoursePickerBypassPinOnce=false;
-		    mark("bypass-once");
-	    return false;
-	  }
-	  mark("needs-pin");
-	  return true;
-	}
+  /* Checked before the verdict so that pinning ends the conversation. The
+     payload still carries the failing verdict from the run that asked for the
+     pin, and will until a remap replaces it. */
+  if(gdCoursePickerConsumePinBypass(payload)){mark("bypass-once");return false;}
+  if(payload&&payload.gdCourseFitTrusted===false){
+    mark("course-fit-"+(payload.gdCourseFitReason||"unknown"));
+    return true;
+  }
+  mark("trusted-search-pin");
+  return false;
+}
+/* Keyed rather than a bare boolean. As a boolean this leaked: gdConfirmCoursePin
+   set it and, if the re-entry bailed early (a superseded database-map check),
+   nothing cleared it - so it silently suppressed the pin prompt for the NEXT,
+   unrelated course. Tying it to a course means a stale flag can only ever
+   affect the course it was set for. */
+function gdCoursePickerConsumePinBypass(payload){
+  const pending=window.__gdCoursePickerBypassPinOnce;
+  if(!pending)return false;
+  const key=gdStoredCourseSessionKey(payload);
+  if(pending!==true&&pending!==key)return false;
+  try{window.__gdCoursePickerBypassPinOnce=null;}catch(e){}
+  return true;
+}
 function gdCoursePickerUsesPinSeed(payload){
   return !!(payload&&!gdCoursePayloadIsManual(payload)&&payload.courseLocationConfirmed===true&&gdCoursePickerFinitePoint(payload));
 }
@@ -16026,7 +16055,7 @@ function gdEnsureCoursePinScreen(){
   panel=document.createElement("div");
   panel.id="gdCoursePinScreen";
   panel.className="gdCoursePinScreen hidden";
-  panel.innerHTML='<div class="gdCoursePinCrosshair" aria-hidden="true"></div><div class="gdCoursePinPanel" role="dialog" aria-live="polite" aria-labelledby="gdCoursePinTitle"><div class="gdCoursePinKicker">GPS not available</div><div class="gdCoursePinTitle" id="gdCoursePinTitle">Pin course</div><div class="gdCoursePinText" id="gdCoursePinText">Move the map over the course, then pin it.</div><div class="gdCoursePinActions"><button type="button" class="gdCoursePinSecondary" onclick="gdCancelCoursePin(event)">Back</button><button type="button" class="gdCoursePinPrimary" onclick="gdConfirmCoursePin(event)">Pin Course</button></div></div>';
+  panel.innerHTML='<div class="gdCoursePinCrosshair" aria-hidden="true"></div><div class="gdCoursePinPanel" role="dialog" aria-live="polite" aria-labelledby="gdCoursePinTitle"><div class="gdCoursePinKicker" id="gdCoursePinKicker">Check the course</div><div class="gdCoursePinTitle" id="gdCoursePinTitle">Pin course</div><div class="gdCoursePinText" id="gdCoursePinText">Move the map over the course, then pin it.</div><div class="gdCoursePinActions"><button type="button" class="gdCoursePinSecondary" onclick="gdCancelCoursePin(event)">Back</button><button type="button" class="gdCoursePinPrimary" onclick="gdConfirmCoursePin(event)">Pin Course</button></div></div>';
   (document.getElementById("courseScreen")||document.body).appendChild(panel);
   return panel;
 }
@@ -16075,8 +16104,15 @@ function gdShowCoursePinScreen(payload){
   const panel=gdEnsureCoursePinScreen();
   const title=panel.querySelector("#gdCoursePinTitle");
   const text=panel.querySelector("#gdCoursePinText");
+  const kicker=panel.querySelector("#gdCoursePinKicker");
   if(title)title.textContent=`Pin ${payload.name||"course"}`;
-  if(text)text.textContent="Move the map over the course, then pin it.";
+  /* This screen is now only ever a repair - the picker trusts the search
+     result's coordinate until the mapper reports it was clearly wrong - so it
+     leads with what went wrong rather than the old blanket "GPS not available",
+     which was never the reason and is now never true. */
+  const fitMessage=payload&&payload.gdCourseFitMessage?String(payload.gdCourseFitMessage):"";
+  if(kicker)kicker.textContent=fitMessage?"We could not place this course":"Check the course";
+  if(text)text.textContent=fitMessage?`${fitMessage} Move the map over it, then pin it.`:"Move the map over the course, then pin it.";
   gdSetCoursePickerPinMode(true);
   panel.classList.remove("hidden");
   gdCenterCoursePinMap(payload);
@@ -16132,7 +16168,7 @@ function gdConfirmCoursePin(event){
     gdTrustedCoursePin:true
   }));
   gdHideCoursePinScreen();
-  try{window.__gdPendingCoursePinPayload=null;window.__gdCoursePickerBypassPinOnce=true;}catch(e){}
+  try{window.__gdPendingCoursePinPayload=null;window.__gdCoursePickerBypassPinOnce=gdStoredCourseSessionKey(pinned)||true;}catch(e){}
   return gdOpenCoursePickerCourse(pinned);
 }
 window.gdCoursePickerNeedsCoursePin=gdCoursePickerNeedsCoursePin;

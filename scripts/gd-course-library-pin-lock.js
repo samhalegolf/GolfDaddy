@@ -4516,7 +4516,10 @@
 	        if(bend&&saveCourseObject({userId:userId(),courseId:cid,courseName:name,course,type:'fairway',position:bend,source:'server-course-package',holeNumber:h,confirmed:true,maxDedupeDistanceM:4}))saved++;
 	      });
 	    });
-	    return {saved,holes:holes.length,polygons,fallbacks,automapperStatus:'success',serverPackageStatus:pkg.status};
+	    /* fit is the server's verdict on the coordinate this run was given. It rides
+	       all the way to the picker, which is the only thing that may put a pin
+	       screen in front of a player. Absent means the pin held up. */
+	    return {saved,holes:holes.length,polygons,fallbacks,automapperStatus:'success',serverPackageStatus:pkg.status,fit:pkg&&pkg.fit||null};
 	  }
 	  async function resolveGeometryFromServerPackage(course){
 	    const pkg=await fetchServerCoursePackage(course);
@@ -4790,7 +4793,7 @@
 	          await syncGeneratedCourseMapToCloud(request,'automapper',opts);
 	          finishMappingDebug(debugRunId,{status:'completed',outcome:'automapper map ready'});
 	          const shown=await showResolvedCoursePlayHole(c,h,'automapper',opts);
-	          return Object.assign(shown,{partial:autoAccepted&&!autoReady,readiness:autoState,persisted:autoMapResult,holes:autoMapResult&&autoMapResult.holes||0,saved:autoMapResult&&autoMapResult.saved||0});
+	          return Object.assign(shown,{partial:autoAccepted&&!autoReady,readiness:autoState,persisted:autoMapResult,holes:autoMapResult&&autoMapResult.holes||0,saved:autoMapResult&&autoMapResult.saved||0,fit:autoMapResult&&autoMapResult.fit||null});
 	        }
         /* The server worker tries both OSM-numbered geometry AND the Native Geometry
            Resolver fallback before giving up (functions/course-mapper-worker-background.mjs) -

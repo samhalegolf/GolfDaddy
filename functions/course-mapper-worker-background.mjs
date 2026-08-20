@@ -25,6 +25,7 @@
    counter, which made "wrong centre coordinates" indistinguishable from "course not in OSM". */
 
 import { fetchOverpass } from "./lib/gd-overpass-client.mjs";
+import { courseFitVerdict, courseFitMessage } from "./lib/gd-course-fit-core.mjs";
 import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoObjects, classifyCourseRelationship, courseFootprintFrame, osmCourseHoleCountTag, detectHoleNumberCollision, scopeContainsFrame, osmScopeFrame, expandOsmFrame, MAPPER_VERSION } from "./lib/gd-automapper-core.mjs";
 import { hasNumberingIssue, resolveCourseGeometryForAutoMapper, guideFromResolvedHole } from "./lib/gd-geometry-resolver-core.mjs";
 import { courseBoundsFor } from "./lib/gd-visual-plan-core.mjs";
@@ -416,8 +417,27 @@ async function runMapperJob(job) {
     warnings.push("expected " + expectedHoles + " holes (" + (scorecardHoleCount(scorecardEvidence) ? "shared scorecard" : "OSM holes tag") + ") but resolved " + geometry.holesResolved + " - published incomplete after wider retry" + (resolverStatus ? " and geometry resolver" : ""));
   }
   await saveResolvedGeometry(course.courseId, geometry);
+  /* Same bounds the visual planner computes, needed twice now - once below for
+     the visual chain, once here to judge whether these holes can plausibly be
+     one course. */
+  const courseBounds = courseBoundsFor({ courseId: course.courseId, objects: geometry.objects, holes: geometry.holes });
+  /* Whether the coordinate this run was given can be trusted, decided from what
+     the run actually found. The player is only asked to drag a pin when this
+     says the answer is clearly wrong - see lib/gd-course-fit-core.mjs. */
+  const fit = courseFitVerdict({
+    collision,
+    expectedHoles,
+    holesResolved: geometry.holesResolved,
+    courseBounds
+  });
+  /* Carried rather than rebuilt client-side: the player is being asked to do
+     work, so the sentence explaining why lives next to the rule that decided
+     it. */
+  if (!fit.trusted) fit.message = courseFitMessage(fit);
+  diagnostics.fit = fit;
   return {
     courseId: course.courseId,
+    fit,
     mapperVersion: MAPPER_VERSION,
     guidesFound: geometry.guidesFound,
     greensFound: geometry.greensFound,
@@ -429,10 +449,10 @@ async function runMapperJob(job) {
     expectedHoles,
     warnings: warnings.length ? warnings : undefined,
     resolverStatus,
-    /* Same bounds the visual planner would compute for this geometry - carried on the result
-       so chainVisualSnapshot below can run the licensing check without re-reading the row it
-       just wrote, and so a job's record shows what ground the mapper actually covered. */
-    courseBounds: courseBoundsFor({ courseId: course.courseId, objects: geometry.objects, holes: geometry.holes })
+    /* Carried on the result so chainVisualSnapshot below can run the licensing check without
+       re-reading the row it just wrote, and so a job's record shows what ground the mapper
+       actually covered. */
+    courseBounds
   };
 }
 

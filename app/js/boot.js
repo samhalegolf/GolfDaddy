@@ -118,8 +118,7 @@
       courseKey: app.courseKey(course.courseId),
       pkg: pkg || null,
       centre: Number.isFinite(course.courseLat) && Number.isFinite(course.courseLng)
-        ? { lat: course.courseLat, lng: course.courseLng } : null,
-      nines: app.nines ? app.nines.forPackage(app.courseKey(course.courseId), pkg) : null
+        ? { lat: course.courseLat, lng: course.courseLng } : null
     });
   }
 

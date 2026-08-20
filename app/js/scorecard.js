@@ -77,9 +77,11 @@
     return { value: sum, relative: relative };
   }
 
+  /* Every hole the round has, which for a 27-hole club is 27 rows. The Marshal
+     owns that list; 18 here is only the no-package fallback. */
   function holesToRender() {
-    var nines = app.marshal && app.marshal.round().nines;
-    if (nines) return nines.holesInPlay;
+    var round = app.marshal && app.marshal.round();
+    if (round && Array.isArray(round.holesInPlay) && round.holesInPlay.length) return round.holesInPlay;
     var out = [];
     for (var hole = 1; hole <= 18; hole++) out.push(hole);
     return out;
@@ -89,7 +91,6 @@
     var totalEl = document.getElementById("scoreTotal");
     var list = document.getElementById("scoreList");
     if (!list) return;
-    renderNinePicker();
     var t = total();
     if (totalEl) {
       totalEl.textContent = t
@@ -101,42 +102,6 @@
     list.textContent = "";
     holesToRender().forEach(function (hole) {
       list.appendChild(renderRow(hole, strokes[hole] || 0, hole === currentHole));
-    });
-  }
-
-  /* Only courses with more than two nines (e.g. a 27-hole club) get a
-     picker — the common two-nine course has nothing to choose and
-     marshal.round().nines is null for it. */
-  function renderNinePicker() {
-    var row = document.getElementById("ninePicker");
-    if (!row) return;
-    var nines = app.marshal && app.marshal.round().nines;
-    if (!nines || nines.available.length <= 2) {
-      row.classList.add("hiddenState");
-      row.textContent = "";
-      return;
-    }
-    row.classList.remove("hiddenState");
-    row.textContent = "";
-    nines.available.forEach(function (nine) {
-      var btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "nineBtn" + (nines.selected.indexOf(nine.id) !== -1 ? " active" : "");
-      btn.textContent = nine.label;
-      btn.addEventListener("click", function () {
-        var current = nines.selected;
-        var next;
-        if (current.indexOf(nine.id) !== -1) {
-          if (current.length <= 1) return;   // keep at least one selected
-          next = current.filter(function (id) { return id !== nine.id; });
-        } else {
-          next = current.length >= 2 ? [current[1], nine.id] : current.concat([nine.id]);
-        }
-        if (next.length !== 2) return;
-        applyNineSelection(next);
-        render();
-      });
-      row.appendChild(btn);
     });
   }
 
@@ -193,18 +158,6 @@
     row.appendChild(parEl);
     row.appendChild(strokesEl);
     return row;
-  }
-
-  /* The nine picker hands its new pairing to the Marshal rather than acting on
-     it: which holes are in play changes what hole you are on, and that is the
-     Marshal's to decide. */
-  function applyNineSelection(ids) {
-    if (!app.marshal || !app.nines) return null;
-    var round = app.marshal.round();
-    var updated = app.nines.select(round.courseKey, app.marshal.state().round.pkg, ids);
-    if (!updated) return null;
-    app.marshal.signal("SET_NINES", { nines: updated });
-    return updated;
   }
 
   app.scorecard = {

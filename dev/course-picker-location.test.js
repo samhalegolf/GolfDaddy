@@ -35,14 +35,19 @@ assert(appCore.includes("function gdResetCoursePickerPresentationReadiness(paylo
 assert(appCore.includes("if(!gdCoursePickerHasMappedPlayData(payload,1))return false;"), "course picker only opens mapped start when the selected course has mapped play data");
 assert(pickerSearch.includes('document.body.dataset.gdCourseNeedsPin=result&&result.fallback?"active":result&&result.playable?"no":"pending";'), "course picker records when the pin fallback owns unresolved courses");
 assert(appCore.includes("function gdCoursePickerNeedsCoursePin(payload)"), "course picker can detect when a no-GPS course pick needs a pin screen");
-assert(appCore.includes("payload?.gdDatabaseMapAvailable===true"), "published database maps beat the pin prompt");
+/* "A published map beats the pin prompt" used to be a branch in the gate. It is
+   now the default for every course, mapped or not: the pin prompt is a repair
+   reached only from a failed mapper verdict, so having a map is no longer a
+   special case that needs its own escape hatch. */
+assert(appCore.includes('if(payload&&payload.gdCourseFitTrusted===false){'), "only a failed mapper fit verdict may demand a pin");
 assert(!appCore.includes('mark("stored-pin");return false;'), "stored pins prefill the pin screen but do not bypass it");
 assert(!appCore.includes('mark("recent-live-gps");return false;'), "recent GPS does not bypass the no-database-map pin screen");
 assert(appCore.includes("function gdCoursePickerCheckDatabaseThenOpen(payload)"), "course picker checks the database map before deciding whether to pin");
 assert(!appCore.includes("published-course-visual"), "course visuals do not count as database maps for the picker pin gate");
 assert(appCore.includes("if(!payload.gdDatabaseMapChecked&&!gdCoursePayloadIsManual(payload))return gdCoursePickerCheckDatabaseThenOpen(payload);"), "course picker gates non-manual course opens behind a database map check");
 assert(appCore.includes("if(gdCoursePickerNeedsCoursePin(payload))return gdShowCoursePinScreen(payload);"), "no-GPS course picks show the pin screen before course play opens");
-assert(appCore.includes('mark("needs-pin")'), "pin decision writes a DOM breadcrumb for live QA");
+assert(appCore.includes('mark("trusted-search-pin")'), "pin decision writes a DOM breadcrumb for live QA");
+assert(appCore.includes('mark("course-fit-"'), "the breadcrumb names which fit check demanded the pin");
 assert(appCore.includes("const usePinSeed=!payload.gdDatabaseMapAvailable&&gdCoursePickerUsesPinSeed(payload);"), "database maps win over stored pin scanner seeds");
 assert(pickerSearch.includes('reason:pinSeed?"course-picker-pin":"course-picker"'), "confirmed pins feed the course scanner as the mapping reason");
 assert(pickerSearch.includes("courseCentre:pinnedCentre||undefined"), "confirmed pins feed the course scanner as the mapping centre");

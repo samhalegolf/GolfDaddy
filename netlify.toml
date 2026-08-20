@@ -89,6 +89,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/courses-near"
+  to = "/.netlify/functions/courses-near"
+  status = 200
+
+[[redirects]]
   from = "/api/course-package"
   to = "/.netlify/functions/course-package"
   status = 200

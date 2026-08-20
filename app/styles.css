@@ -510,10 +510,7 @@ body.ball-dragging #surfaceStage { transition: none !important; }
 .bagFirmnessRow button[aria-pressed="true"] { background: #1fd36d; color: #06110b; font-weight: 700; }
 
 .scoreTotal { font-size: 22px; font-weight: 800; text-align: center; }
-.ninePicker { display: flex; gap: 6px; margin: 10px 0; flex-wrap: wrap; }
-.ninePicker.hiddenState { display: none; }
-.nineBtn { flex: 1 1 auto; min-width: 64px; height: 34px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, .14); background: rgba(255, 255, 255, .06); color: #f2f7f2; font-weight: 800; font-size: 12px; }
-.nineBtn.active { background: #1fd36d; color: #071008; border-color: #1fd36d; }
+
 .scoreList { display: flex; flex-direction: column; gap: 6px; }
 .scoreRow { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; background: rgba(255, 255, 255, .06); }
 .scoreRow.currentHole { background: rgba(31, 211, 109, .14); }

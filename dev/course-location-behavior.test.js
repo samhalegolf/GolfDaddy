@@ -59,7 +59,17 @@ before(index, "scripts/gd-course-location.js?v=course-location-owner-20260719", 
 assert(core.includes("owner&&typeof owner.get===\"function\""), "core stored pin lookup delegates to GDCourseLocation.get");
 assert(core.includes("owner&&typeof owner.confirm===\"function\""), "core pin confirmation delegates to GDCourseLocation.confirm");
 assert(core.includes("owner&&typeof owner.attachToCourse===\"function\""), "core selected-course identity delegates to GDCourseLocation.attachToCourse");
-assert(core.includes('mark("confirmed-course-location");return false;'), "confirmed owner location can bypass the picker pin prompt");
+/* The gate used to consult GDCourseLocation.get() to decide whether to SHOW the
+   pin screen: a confirmed location bypassed it, everything else got asked. That
+   whole branch is gone - the gate now trusts the search result's coordinate by
+   default and only asks when the mapper reports it was clearly wrong
+   (see dev/course-pin-trust.test.js). The owner is still the pin's home; it is
+   just no longer the thing that decides a player has to place one. */
+const pinGate = core.slice(core.indexOf("function gdCoursePickerNeedsCoursePin(payload){"));
+const pinGateBody = pinGate.slice(0, pinGate.indexOf("\nfunction gdCoursePickerConsumePinBypass"));
+assert(!pinGateBody.includes("GDCourseLocation"), "the pin gate must not depend on a stored location any more");
+assert(pinGateBody.includes('mark("trusted-search-pin")'), "the gate's default answer must be to trust the search pin");
+assert(core.includes("gdCoursePickerUsesPinSeed"), "a confirmed pin must still seed the mapper once one exists");
 assert(adminDb.includes("gdAdminCourseLocationMarkup(selected,payload)"), "Course Database/admin overview displays course-location status");
 assert(index.includes('data-gd-surface="studio" src="scripts/studio/gd-admin-course-db.js'), "the admin Course Database loads as a studio-only script");
 assert(adminDb.includes("window.gdAdminCourseLocationEdit=gdAdminCourseLocationEdit"), "Course Database/admin exposes edit location action");
