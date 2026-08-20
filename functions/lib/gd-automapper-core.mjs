@@ -364,18 +364,25 @@ export function detectHoleNumberCollision(payload) {
   let loops = 1;
   let widestSeparationM = 0;
   const collidedHoles = [];
+  /* The clusters ARE the neighbouring courses. This used to compute them, take a
+     count off them and drop them on the floor, which meant the one piece of
+     evidence that could separate a 27-hole site from its neighbour never left
+     the function - see selectNearestLoop below, which is the whole reason to
+     keep them. */
+  const clusters = [];
   byNumber.forEach((centres, number) => {
     /* Single-link clustering: a centre joins the first cluster it is within
        LOOP_SEPARATION_M of, otherwise it starts one. */
-    const clusters = [];
+    const numberClusters = [];
     centres.forEach(centre => {
-      const near = clusters.find(cluster => cluster.some(member => distance(member, centre) <= LOOP_SEPARATION_M));
-      if (near) near.push(centre); else clusters.push([centre]);
+      const near = numberClusters.find(cluster => cluster.some(member => distance(member, centre) <= LOOP_SEPARATION_M));
+      if (near) near.push(centre); else numberClusters.push([centre]);
     });
-    if (clusters.length < 2) return;
+    clusters.push({ number, centres: numberClusters.map(centroidOfPoints).filter(Boolean) });
+    if (numberClusters.length < 2) return;
     collidedHoles.push(number);
-    loops = Math.max(loops, clusters.length);
-    clusters.forEach((a, i) => clusters.slice(i + 1).forEach(b => {
+    loops = Math.max(loops, numberClusters.length);
+    numberClusters.forEach((a, i) => numberClusters.slice(i + 1).forEach(b => {
       widestSeparationM = Math.max(widestSeparationM, Math.round(distance(a[0], b[0])));
     }));
   });
@@ -384,12 +391,88 @@ export function detectHoleNumberCollision(payload) {
   return {
     multiLoop: loops > 1,
     loops,
+    /* Per hole number, where in the world that number was found. One entry means
+       one course; six means the query radius covered six. */
+    clusters,
     collidedHoles,
     widestSeparationM,
     /* What the course would publish as if this went unnoticed - the count that
        made Royal Auckland look like a finished 9-hole course. */
     distinctNumbers: byNumber.size,
     holeFeatures: [...byNumber.values()].reduce((sum, list) => sum + list.length, 0)
+  };
+}
+
+/* Tighten onto the one course the player asked for.
+ *
+ * A 1400m sweep at St Andrews Links returns SIX courses, every one of them with
+ * holes numbered 1-18, and the mapper's only answer was to refuse - which is
+ * what the Balgove run did. But the payload already contains everything needed
+ * to tell them apart: detectHoleNumberCollision clusters each hole number by
+ * location, and those clusters are the six courses.
+ *
+ * So instead of refetching at a smaller radius - another call on a shared,
+ * goodwill-funded API, with a radius nobody can pick correctly in advance -
+ * keep the payload and drop the loops that are not ours. For each hole number,
+ * ours is the cluster nearest the course centre. Same effect as tightening,
+ * deterministic, and free.
+ *
+ * The pin is the whole discriminator, which is the honest limitation: a pin in
+ * the wrong place picks the wrong cluster for every hole and produces a course
+ * assembled from six. The caller must check the result is spatially coherent
+ * before publishing it - see courseFitVerdict's holes-scattered rule - and ask
+ * the player to place a pin when it is not. */
+export function selectNearestLoop(payload, centre) {
+  const elements = (payload && payload.elements) || [];
+  /* Both coordinates, and null/"" rejected before Number() sees them: Number(null)
+     is 0 and Number.isFinite(0) is true, so a centre-less course would have
+     clustered against Null Island and kept whichever loop happened to be nearest
+     the Gulf of Guinea. */
+  const at = centre ? [centre.lat, centre.lng] : [];
+  if (at.length !== 2 || at.some(v => v === null || v === undefined || v === "" || !Number.isFinite(Number(v)))) return null;
+
+  const byNumber = new Map();
+  const passthrough = [];
+  elements.forEach(element => {
+    const tags = (element && element.tags) || {};
+    const number = String(tags.golf || "").toLowerCase() === "hole" ? osmGuideHoleRef(tags.ref || tags.name) : null;
+    const point = number ? centroidOfPoints(osmGuidePointsFromElement(element)) : null;
+    if (!number || !point) { passthrough.push(element); return; }
+    if (!byNumber.has(number)) byNumber.set(number, []);
+    byNumber.get(number).push({ element, point });
+  });
+
+  const kept = [];
+  const siblingCentres = [];
+  let dropped = 0;
+  byNumber.forEach(entries => {
+    const clusters = [];
+    entries.forEach(entry => {
+      const near = clusters.find(cluster => cluster.some(member => distance(member.point, entry.point) <= LOOP_SEPARATION_M));
+      if (near) near.push(entry); else clusters.push([entry]);
+    });
+    if (clusters.length < 2) { clusters.forEach(cluster => cluster.forEach(e => kept.push(e.element))); return; }
+    const scored = clusters.map(cluster => ({ cluster, centre: centroidOfPoints(cluster.map(e => e.point)) }));
+    let best = null;
+    scored.forEach(entry => {
+      const away = entry.centre ? distance(centre, entry.centre) : Infinity;
+      if (!best || away < best.away) best = { away, entry };
+    });
+    scored.forEach(entry => {
+      if (entry === best.entry) entry.cluster.forEach(e => kept.push(e.element));
+      else { dropped += entry.cluster.length; if (entry.centre) siblingCentres.push(entry.centre); }
+    });
+  });
+
+  if (!dropped) return null;
+  return {
+    payload: Object.assign({}, payload, { elements: passthrough.concat(kept) }),
+    keptHoleFeatures: kept.length,
+    droppedHoleFeatures: dropped,
+    /* Deduped loosely - many hole numbers contribute a centre for the same
+       neighbouring course, and chooseAutoMapGuides only needs somewhere to
+       measure towards. */
+    siblingCentres
   };
 }
 

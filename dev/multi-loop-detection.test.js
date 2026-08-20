@@ -123,16 +123,25 @@ test("the separation threshold sits between a green's span and a loop's gap", as
 test("the worker refuses to publish rather than saving a short course", () => {
   const fs = require("fs");
   const src = fs.readFileSync(path.join(ROOT, "functions", "course-mapper-worker-background.mjs"), "utf8");
-  const idx = src.indexOf("const collision = detectHoleNumberCollision(payload);");
+  const idx = src.indexOf("let collision = detectHoleNumberCollision(payload);");
   assert.notStrictEqual(idx, -1, "the worker must run the detector");
-  assert.ok(/if \(collision\.multiLoop\) \{\s*throw new Error\(/.test(src.slice(idx)),
-    "a colliding course must not reach the save");
+  /* The refusal used to be immediate. It is now the LAST resort: a 1400m sweep
+     at St Andrews returns six courses and refusing outright was the Balgove
+     failure, so the worker first tries keeping only the loop nearest the course
+     centre (selectNearestLoop) and refuses only if that cannot separate them.
+     `collision` is reassigned after tightening, hence `let`. */
+  const after = src.slice(idx);
+  const tightenAt = after.indexOf("selectNearestLoop(payload, course.center)");
+  const refuseAt = after.indexOf("throw fail(");
+  assert.notStrictEqual(tightenAt, -1, "the worker must try to separate the loops before giving up");
+  assert.notStrictEqual(refuseAt, -1, "the refusal must survive for the cases tightening cannot fix");
+  assert.ok(tightenAt < refuseAt, "refusing before trying to separate is the bug this replaced");
   /* Execution order, not file order: saveResolvedGeometry is DEFINED earlier in
      the file than runMapperJob, so comparing against its definition would pass
      for the wrong reason. What matters is that inside runMapperJob the check
      comes before the call that writes. */
   const body = src.slice(src.indexOf("async function runMapperJob(job) {"));
-  const checkAt = body.indexOf("const collision = detectHoleNumberCollision(payload);");
+  const checkAt = body.indexOf("let collision = detectHoleNumberCollision(payload);");
   const writeAt = body.indexOf("await saveResolvedGeometry(");
   assert.notStrictEqual(writeAt, -1, "runMapperJob must still write geometry somewhere");
   assert.ok(checkAt !== -1 && checkAt < writeAt,

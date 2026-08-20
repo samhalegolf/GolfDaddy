@@ -4576,7 +4576,10 @@
 	        if(result&&result.holes)return {result,status,polls,timedOut:false};
 	        return {result:null,status,polls,timedOut:false,reason:'ready-but-empty'};
 	      }
-	      if(status==='none'||status==='manual-required'||status==='failed')return {result:null,status,polls,timedOut:false,serverReason:pkg&&pkg.reason||null};
+	      /* fit rides off a terminal package too. A refusal is exactly when the
+	         player should be offered a pin - "there are six courses here" - and
+	         dropping it here is why the Balgove failure asked for nothing. */
+	      if(status==='none'||status==='manual-required'||status==='failed')return {result:null,status,polls,timedOut:false,serverReason:pkg&&pkg.reason||null,fit:pkg&&pkg.fit||null};
 	      if(status==='processing')consecutiveMisses=0;
 	      else{
 	        consecutiveMisses++;
@@ -4770,7 +4773,7 @@
           const waitFailed=waitStatus==='failed'||!!serverWaitError;
           const serverReason=serverWait&&serverWait.serverReason||null;
           recordMappingDebug(debugRunId,{source:'automapper',phase:'skipped',event:waitFailed?'server-course-package-failed':waitTimedOut?'server-course-package-wait-timed-out':'server-course-package-pending',summary:waitFailed?('Server mapping failed: '+(serverReason||serverWaitError&&serverWaitError.message||'no reason recorded')):waitTimedOut?'Server was still mapping when play stopped waiting':'Server has not mapped this course yet',details:{hole:h,resolutionKey:key,attemptToken,serverPackageStatus:waitStatus,serverReason,polls:serverWait&&serverWait.polls||0,timedOut:waitTimedOut,budgetMs:SERVER_PACKAGE_WAIT_MS,threw:!!serverWaitError},error:serverWaitError?{message:serverWaitError&&serverWaitError.message||String(serverWaitError),status:serverWaitError&&serverWaitError.status||null}:undefined});
-          autoMapResult={saved:0,holes:0,polygons:0,fallbacks:0,automapperStatus:waitFailed?'server-failed':waitTimedOut?'server-timed-out':'server-pending',serverPackageStatus:waitStatus,serverReason};
+          autoMapResult={saved:0,holes:0,polygons:0,fallbacks:0,automapperStatus:waitFailed?'server-failed':waitTimedOut?'server-timed-out':'server-pending',serverPackageStatus:waitStatus,serverReason,fit:serverWait&&serverWait.fit||null};
         }
         if(!mappingAttemptStillCurrent(request,attempt,'automapper'))return {playable:false,stale:true,reason:'superseded-after-automapper'};
         try{
@@ -4805,7 +4808,13 @@
         const unresolvedReason=autoMapResult&&autoMapResult.automapperStatus==='server-timed-out'?'server-map-timed-out':'server-map-not-ready';
         recordMappingDebug(debugRunId,{source:'automapper',phase:'failed',event:'automapper-failed',summary:'Server has no playable map for this course yet',details:{hole:h,resolutionKey:key,attemptToken,saved:autoMapResult&&autoMapResult.saved||0,serverPackageStatus:autoMapResult&&autoMapResult.serverPackageStatus||'',reason:unresolvedReason}});
         recordCoursePlayDebug('course-mapping-automatic-unresolved',c,h,{reason:unresolvedReason,resolutionKey:key,attemptToken});
-        return beginInteractiveGreenFallback(c,h,unresolvedReason,{resolutionKey:key,activeResolutionKey:key,attemptToken,debugRunId,selectedAt,debugAttemptContext:attempt,callerFunction:'runCourseMappingAttempt',source:'mapping-controller',serverPackageStatus:autoMapResult&&autoMapResult.serverPackageStatus||''});
+        /* The green-tap fallback is what a player gets when mapping could not
+           finish. When the server said WHY - and the why is "we could not tell
+           which course this is" - the picker offers a pin instead, which beats
+           asking someone to tap a green on a map of six overlapping courses. */
+        const unresolvedFit=autoMapResult&&autoMapResult.fit||null;
+        const fellBack=beginInteractiveGreenFallback(c,h,unresolvedReason,{resolutionKey:key,activeResolutionKey:key,attemptToken,debugRunId,selectedAt,debugAttemptContext:attempt,callerFunction:'runCourseMappingAttempt',source:'mapping-controller',serverPackageStatus:autoMapResult&&autoMapResult.serverPackageStatus||''});
+        return unresolvedFit?Object.assign({},fellBack,{fit:unresolvedFit}):fellBack;
       }catch(error){
         try{console.warn('[Clarity Caddy] course mapping attempt failed',error);}catch(e){}
         recordCoursePlayDebug('course-mapping-attempt-error',c,h,{reason:error&&error.message||'mapping-controller-error',resolutionKey:key,attemptToken});

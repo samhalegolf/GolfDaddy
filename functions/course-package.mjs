@@ -121,8 +121,16 @@ async function loadCoursePackageRows(courseId) {
    - a course mapped before this existed, or one whose job row has aged out, must
    not start demanding pins. */
 function fitFromMapperJobs(mapperJobs) {
-  const job = (Array.isArray(mapperJobs) ? mapperJobs : []).find(j => j && j.result && j.result.fit);
-  return job ? job.result.fit : null;
+  /* Two homes, because a run can end two ways. A successful run puts the verdict
+     on result.fit; a refusal throws, and the worker's catch handler saves what it
+     had learned under result.diagnostics. The refusal is the case that matters
+     most - "there are six courses here" is precisely when a player should be
+     asked to point at one - so missing it would leave the pin unreachable in the
+     only situation it exists for. */
+  const jobs = Array.isArray(mapperJobs) ? mapperJobs : [];
+  const job = jobs.find(j => j && j.result && (j.result.fit || (j.result.diagnostics && j.result.diagnostics.fit)));
+  if (!job) return null;
+  return job.result.fit || job.result.diagnostics.fit;
 }
 
 export async function buildCoursePackage(courseId) {
@@ -140,7 +148,7 @@ export async function buildCoursePackage(courseId) {
   }
   if (state === "manual-required") {
     const lastMapperJob = rows.mapperJobs[0] || null;
-    return { courseId, status: "manual-required", reason: (lastMapperJob && lastMapperJob.error) || "manual correction required" };
+    return withFit({ courseId, status: "manual-required", reason: (lastMapperJob && lastMapperJob.error) || "manual correction required" });
   }
   /* Terminal like manual-required, and for the same reason: the server has already tried and
      said why it could not. Answering "none" here instead made buildCoursePackageWithTrigger
@@ -149,7 +157,7 @@ export async function buildCoursePackage(courseId) {
      instead of nothing. */
   if (state === "failed") {
     const lastMapperJob = rows.mapperJobs[0] || null;
-    return { courseId, status: "failed", reason: (lastMapperJob && lastMapperJob.error) || "mapping run failed" };
+    return withFit({ courseId, status: "failed", reason: (lastMapperJob && lastMapperJob.error) || "mapping run failed" });
   }
   if (state === "processing") {
     const live = rows.mapperJobs.find(j => j.status === "running" || j.status === "queued") || rows.visualJobs.find(j => j.status === "running" || j.status === "queued");

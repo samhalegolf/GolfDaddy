@@ -21,6 +21,7 @@
     "test:practice": "npm run test:practice-parser && npm run test:practice-csv && npm run test:practice-adapter && npm run test:practice-graph && npm run test:practice-scanner && npm run test:practice-email && npm run test:table-ocr && npm run test:practice-email-admin && npm run test:bubble-geometry",
     "test:courses-near": "node dev/courses-near.test.js",
   "test:course-pin-trust": "node dev/course-pin-trust.test.js",
+  "test:nearest-loop": "node dev/nearest-loop-tightening.test.js",
   "build:app": "node scripts/clarity-deploy-build.js --app-only",
     "demo:list": "node demo/run-demo.mjs --list",
     "demo:capture": "node demo/run-demo.mjs",

@@ -26,7 +26,7 @@
 
 import { fetchOverpass } from "./lib/gd-overpass-client.mjs";
 import { courseFitVerdict, courseFitMessage } from "./lib/gd-course-fit-core.mjs";
-import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoObjects, classifyCourseRelationship, courseFootprintFrame, osmCourseHoleCountTag, detectHoleNumberCollision, scopeContainsFrame, osmScopeFrame, expandOsmFrame, MAPPER_VERSION } from "./lib/gd-automapper-core.mjs";
+import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoObjects, classifyCourseRelationship, courseFootprintFrame, osmCourseHoleCountTag, detectHoleNumberCollision, selectNearestLoop, scopeContainsFrame, osmScopeFrame, expandOsmFrame, MAPPER_VERSION } from "./lib/gd-automapper-core.mjs";
 import { hasNumberingIssue, resolveCourseGeometryForAutoMapper, guideFromResolvedHole } from "./lib/gd-geometry-resolver-core.mjs";
 import { courseBoundsFor } from "./lib/gd-visual-plan-core.mjs";
 import { resolveImagerySource, unscannableReason } from "./lib/gd-imagery-sources.mjs";
@@ -318,7 +318,7 @@ async function runMapperJob(job) {
    * answer when that path cannot work: no shared scorecard, or a resolver
    * answer that cannot beat the collapsed count - a partial course presented
    * as a whole one is still worse than no course. */
-  const collision = detectHoleNumberCollision(payload);
+  let collision = detectHoleNumberCollision(payload);
   let resolverStatus = null;
   if (collision.multiLoop) {
     diagnostics.collision = {
@@ -328,6 +328,39 @@ async function runMapperJob(job) {
       distinctNumbers: collision.distinctNumbers,
       holeFeatures: collision.holeFeatures
     };
+    /* Before refusing, try keeping only the loop nearest the course centre.
+       A 1400m sweep at St Andrews returns six courses all numbered 1-18 and the
+       Balgove run died on exactly that - but the payload in hand already
+       separates them, so this costs no second Overpass call. The pin is the
+       discriminator; if it is wrong the result will not be spatially coherent
+       and courseFitVerdict below refuses it and asks the player to place one. */
+    const tightened = selectNearestLoop(payload, course.center);
+    if (tightened) {
+      const afterTightening = detectHoleNumberCollision(tightened.payload);
+      const tightGeometry = afterTightening.multiLoop ? null : resolveCourseGeometry(
+        tightened.payload, course.courseId, course.center, existingObjects,
+        siblingCentres.concat(tightened.siblingCentres)
+      );
+      /* Adopted whenever it resolved anything, NOT when it beat the untightened
+         count. The untightened run can happily report 18 holes assembled from
+         six different courses - one guide per number, each picked from whichever
+         loop happened to win - and that number is meaningless. One unambiguous
+         loop beats a confident average of six. */
+      if (tightGeometry && tightGeometry.holesResolved > 0) {
+        geometry = tightGeometry;
+        payload = tightened.payload;
+        collision = afterTightening;
+        queryStages.push("tightened-to-nearest-loop");
+        diagnostics.tightened = {
+          keptHoleFeatures: tightened.keptHoleFeatures,
+          droppedHoleFeatures: tightened.droppedHoleFeatures,
+          holesResolved: tightGeometry.holesResolved
+        };
+        diagnostics.osmFeatures = golfFeatureCounts(payload);
+      }
+    }
+  }
+  if (collision.multiLoop) {
     await heartbeatJob(job, { stage: "geometry-resolver" });
     const result = await resolveCourseGeometryForAutoMapper({
       osmPayload: payload,
@@ -348,6 +381,14 @@ async function runMapperJob(job) {
       const merged = resolveGuidesIntoObjects(guides, course.courseId, resolverGreens, existingObjects);
       geometry = Object.assign({}, geometry, merged, { holesResolved: guides.length });
     } else {
+      /* The verdict rides on the failure too. Without it the picker sees only
+         status:"failed" and a sentence, never learns the coordinate was the
+         problem, and never offers the one thing that would fix it. This IS the
+         case the pin exists for. */
+      diagnostics.fit = Object.assign(
+        courseFitVerdict({ collision, expectedHoles, holesResolved: 0, courseBounds: null }),
+        { message: courseFitMessage({ trusted: false, reason: "multiple-courses", detail: { loops: collision.loops } }) }
+      );
       throw fail(
         "multi-loop course: hole number" + (collision.collidedHoles.length === 1 ? " " : "s ")
         + collision.collidedHoles.join(", ")
