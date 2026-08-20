@@ -41,6 +41,14 @@ async function loadTests() {
   assert.strictEqual(rawBaseline.settings.visualTools.fairwayAirbrush, false);
   assert.strictEqual(rawBaseline.settings.turf.greenStrength, 0);
 
+  const libraryRecipe = worker.recipeFromLibraryRow({
+    preset_id: "clarity-course-natural-v1",
+    course_overrides: { lighting: { brightnessTarget: 61 } }
+  });
+  assert.strictEqual(libraryRecipe.presetId, "clarity-course-natural-v1");
+  assert.strictEqual(libraryRecipe.settings.lighting.brightnessTarget, 61);
+  assert.strictEqual(libraryRecipe.settings.visualTools.fairwayAirbrush, true);
+
   const exportFailed = jobs.deriveCourseBuildStateFromRows({
     visual: null,
     jobs: [

@@ -1033,6 +1033,29 @@
     var store=loadStore();
     return attachTransientAssets(clone(store.records[slug(courseId)]||emptyRecord(courseId)));
   }
+  function escapeRegex(value){
+    return String(value||"").replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+  }
+  function rewriteCourseVisualPath(value,fromCourseId,toCourseId){
+    value=text(value,640);
+    if(!value)return value;
+    var from=slug(fromCourseId),to=slug(toCourseId);
+    if(!from||!to||from===to)return value;
+    return value
+      .replace(new RegExp("(^|/)course-visuals/"+escapeRegex(from)+"(?=/|$)","g"),function(match,prefix){
+        return (prefix||"")+"course-visuals/"+to;
+      })
+      .replace(new RegExp("^"+escapeRegex(from)+"(?=/|$)"),to);
+  }
+  function clonedSandboxAsset(asset,fromCourseId,toCourseId){
+    if(!asset||typeof asset!=="object")return null;
+    var copy=clone(asset);
+    copy.path=rewriteCourseVisualPath(copy.path,fromCourseId,toCourseId);
+    if(copy.storagePath)copy.storagePath=rewriteCourseVisualPath(copy.storagePath,fromCourseId,toCourseId);
+    if(copy.url)copy.url=rewriteCourseVisualPath(copy.url,fromCourseId,toCourseId);
+    if(copy.publicUrl)copy.publicUrl=rewriteCourseVisualPath(copy.publicUrl,fromCourseId,toCourseId);
+    return copy;
+  }
   function putRecord(record,opts){
     opts=opts||{};
     var store=loadStore();
@@ -2714,6 +2737,58 @@
     recordEvent(record,"course-visual-settings-saved",{reset:"global-preset",presetId:preset.id,presetVersion:preset.version});
     return putRecord(record);
   }
+  function cloneCourseVisualSandbox(sourceCourseId,targetCourseId,opts){
+    opts=opts||{};
+    var source=getRecord(sourceCourseId);
+    var targetId=slug(targetCourseId||"recipe-lab");
+    if(!source||!source.courseId)return putRecord(emptyRecord(targetId),{skipCloudSync:true});
+    var target=emptyRecord(targetId);
+    var requestedHole=Math.max(0,Math.round(Number(opts.holeNumber)||0));
+    var targetPreset=getPreset(opts.presetId||source.presetId||defaultPreset().id);
+    var holeFrames=(Array.isArray(source.holeFrameVisuals)?source.holeFrameVisuals:[]).map(function(asset){
+      return clonedSandboxAsset(asset,source.courseId,targetId);
+    }).filter(Boolean);
+    var exampleHole=holeFrames.filter(function(asset){
+      return requestedHole&&Math.round(Number(asset&&asset.holeNumber))===requestedHole;
+    })[0]||clonedSandboxAsset(source.exampleHoleVisual,source.courseId,targetId)||holeFrames[0]||null;
+    target.courseName=text(opts.courseName||source.courseName||"Recipe Lab",160)||"Recipe Lab";
+    target.input=clone(source.input||null);
+    if(target.input){
+      target.input.courseId=target.courseId;
+      target.input.courseName=target.courseName;
+    }
+    target.objects=clone(source.objects||[]);
+    target.captureRefs=clone(source.captureRefs||[]);
+    target.rawMaster=clonedSandboxAsset(source.rawMaster,source.courseId,targetId);
+    target.basicVisual=clonedSandboxAsset(source.basicVisual,source.courseId,targetId);
+    target.exampleHoleVisual=exampleHole;
+    target.holeFrameVisuals=holeFrames;
+    target.previewVisual=null;
+    target.singleHolePreviewVisual=null;
+    target.holeFramePreviewVisuals=[];
+    target.publishedVisual=null;
+    target.singleHolePublishedVisual=null;
+    target.holeFramePublishedVisuals=[];
+    target.versions=[];
+    target.presetId=targetPreset.id;
+    target.presetVersion=targetPreset.version;
+    target.courseOverrides=clone(opts.courseOverrides||{});
+    target.currentVersion=0;
+    target.publishedVersion=0;
+    target.settingsDirty=true;
+    target.lastError=null;
+    target.status=target.basicVisual?"basic-ready":target.rawMaster?"working":"unavailable";
+    target.diagnostics=Object.assign({},clone(source.diagnostics||{})||{},{
+      sandbox:{
+        sourceCourseId:source.courseId,
+        sourceCourseName:source.courseName||source.courseId,
+        sourceHoleNumber:requestedHole||exampleHole&&exampleHole.holeNumber||null,
+        clonedAt:now()
+      }
+    });
+    recordEvent(target,"course-visual-sandbox-cloned",{sourceCourseId:source.courseId,sourceHoleNumber:requestedHole||exampleHole&&exampleHole.holeNumber||null});
+    return putRecord(target,{skipCloudSync:true});
+  }
   function assetListForOutput(list,includeData){
     return (Array.isArray(list)?list:[]).filter(Boolean).map(function(asset){
       var out={path:asset.path,url:asset.url||asset.publicUrl||asset.public_url||"",publicUrl:asset.publicUrl||asset.public_url||asset.url||"",storagePath:asset.storagePath||asset.storage_path||"",contentType:asset.contentType||asset.content_type||"",version:asset.version,presetId:asset.presetId,presetVersion:asset.presetVersion,holeNumber:asset.holeNumber,width:asset.width,height:asset.height,bounds:asset.bounds,sourceCaptureIds:asset.sourceCaptureIds,metadata:asset.metadata};
@@ -3528,6 +3603,7 @@
     resetCourseVisualWorkingState:resetCourseVisualWorkingState,
     resetCourseVisualRecipe:resetCourseVisualRecipe,
     resetToGlobalPreset:resetToGlobalPreset,
+    cloneCourseVisualSandbox:cloneCourseVisualSandbox,
     resolveCourseVisual:resolveCourseVisual,
     outputForRecord:outputForRecord,
     getRecord:getRecord,

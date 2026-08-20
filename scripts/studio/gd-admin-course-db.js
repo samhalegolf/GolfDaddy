@@ -471,6 +471,126 @@ async function gdAdminCourseDbAccessToken(){
     return String(session&&(session.access_token||session.accessToken)||"");
   }catch(error){return "";}
 }
+const GD_VISUAL_RECIPE_API="/api/course-visual-recipes";
+const GD_VISUAL_RECIPE_LAB_ID="recipe-lab";
+const GD_VISUAL_RECIPE_LAB_DONOR_KEY="gd_course_visual_recipe_lab_donor_v1";
+const gdAdminCourseVisualRecipeCache={fetchedAt:0,recipes:[],activeRecipe:null,loading:null};
+const gdAdminCourseVisualRecipeLabPending={};
+function gdAdminCourseVisualRecipeState(){
+  if(typeof fetch==="function"&&!gdAdminCourseVisualRecipeCache.loading&&(!gdAdminCourseVisualRecipeCache.fetchedAt||Date.now()-gdAdminCourseVisualRecipeCache.fetchedAt>20000)){
+    gdAdminCourseVisualRecipeCache.loading=fetch(GD_VISUAL_RECIPE_API,{headers:{Accept:"application/json"},cache:"no-store"})
+      .then(res=>res.ok?res.json():null)
+      .then(data=>{
+        gdAdminCourseVisualRecipeCache.recipes=Array.isArray(data&&data.recipes)?data.recipes:[];
+        gdAdminCourseVisualRecipeCache.activeRecipe=data&&data.activeRecipe||gdAdminCourseVisualRecipeCache.recipes.find(recipe=>recipe&&recipe.isActive)||null;
+        gdAdminCourseVisualRecipeCache.fetchedAt=Date.now();
+      })
+      .catch(()=>{})
+      .finally(()=>{
+        gdAdminCourseVisualRecipeCache.loading=null;
+        gdRenderAdminCourseDatabase();
+      });
+  }
+  return {recipes:gdAdminCourseVisualRecipeCache.recipes.slice(),activeRecipe:gdAdminCourseVisualRecipeCache.activeRecipe||null};
+}
+function gdAdminCourseVisualRecipeById(id){
+  id=String(id||"");
+  return gdAdminCourseVisualRecipeState().recipes.find(recipe=>recipe&&String(recipe.id||"")===id)||null;
+}
+function gdAdminCourseVisualRecipeSample(courseId){
+  if(String(courseId||"")===GD_VISUAL_RECIPE_LAB_ID){
+    const donor=gdAdminCourseRecipeLabSelected().donor;
+    return {courseId:String(donor&&donor.courseId||""),holeNumber:Number(gdAdminCoursePreviewHoleByCourse[GD_VISUAL_RECIPE_LAB_ID])||Number(donor&&donor.holeNumber)||null};
+  }
+  return {courseId:String(courseId||""),holeNumber:Number(gdAdminCoursePreviewHoleByCourse[courseId])||null};
+}
+async function gdAdminCourseVisualRecipeWrite(body){
+  const token=await gdAdminCourseDbAccessToken();
+  if(!token)throw new Error("No signed-in Supabase session — sign in again to manage shared recipes");
+  const res=await fetch(GD_VISUAL_RECIPE_API,{
+    method:"POST",
+    headers:{"Content-Type":"application/json",Accept:"application/json",Authorization:"Bearer "+token},
+    body:JSON.stringify(body||{})
+  });
+  const data=await res.json().catch(()=>null);
+  if(!res.ok)throw new Error((data&&data.error)||("HTTP "+res.status));
+  gdAdminCourseVisualRecipeCache.recipes=Array.isArray(data&&data.recipes)?data.recipes:[];
+  gdAdminCourseVisualRecipeCache.activeRecipe=data&&data.activeRecipe||gdAdminCourseVisualRecipeCache.recipes.find(recipe=>recipe&&recipe.isActive)||null;
+  gdAdminCourseVisualRecipeCache.fetchedAt=Date.now();
+  return data||{};
+}
+function gdAdminCourseRecipeLabStoredDonor(){
+  try{
+    const parsed=JSON.parse(localStorage.getItem(GD_VISUAL_RECIPE_LAB_DONOR_KEY)||"null");
+    if(!parsed||typeof parsed!=="object")return null;
+    return {courseId:String(parsed.courseId||""),holeNumber:Math.max(1,Number(parsed.holeNumber)||1)};
+  }catch(e){return null;}
+}
+function gdAdminCourseRecipeLabSelected(){
+  const state=gdAdminCourseVisualRecipeState();
+  const stored=gdAdminCourseRecipeLabStoredDonor();
+  const active=state.activeRecipe||null;
+  const candidates=gdAdminCourseDbSummaries();
+  function donorFrom(courseId,holeNumber){
+    const item=candidates.find(entry=>entry&&entry.id===courseId);
+    if(!item)return null;
+    const record=gdAdminCourseVisualRecord(courseId)||window.GDCourseVisualEngine&&window.GDCourseVisualEngine.getRecord&&window.GDCourseVisualEngine.getRecord(courseId)||null;
+    const holes=gdAdminCoursePreviewCapturedHoles(record,courseId);
+    if(!holes.length)return null;
+    const selectedHole=holes.indexOf(Number(holeNumber))>=0?Number(holeNumber):holes[0];
+    return {courseId:item.id,courseName:item.name,holeNumber:selectedHole,capturedHoles:holes};
+  }
+  const donor=
+    donorFrom(stored&&stored.courseId,stored&&stored.holeNumber)||
+    donorFrom(active&&active.sampleCourseId||active&&active.sample_course_id,active&&active.sampleHoleNumber||active&&active.sample_hole_number)||
+    candidates.map(item=>donorFrom(item&&item.id,null)).find(Boolean)||
+    null;
+  return {id:GD_VISUAL_RECIPE_LAB_ID,name:"Recipe Lab",key:"shared-active-recipe",isRecipeLab:true,donor:donor,activeRecipe:active};
+}
+function gdAdminCourseOpenRecipeLab(){
+  gdAdminCourseDatabaseSelected="";
+  gdAdminCourseDatabaseTab="preview";
+  gdRenderAdminCourseDatabase();
+  return false;
+}
+function gdAdminCourseRecipeLabSetDonor(courseId,holeNumber,opts){
+  try{localStorage.setItem(GD_VISUAL_RECIPE_LAB_DONOR_KEY,JSON.stringify({courseId:String(courseId||""),holeNumber:Math.max(1,Number(holeNumber)||1)}));}catch(e){}
+  if(opts&&opts.openLab)return gdAdminCourseOpenRecipeLab();
+  gdRenderAdminCourseDatabase();
+  return false;
+}
+function gdAdminCourseRecipeLabUseCurrentHole(courseId,holeNumber){
+  return gdAdminCourseRecipeLabSetDonor(courseId,holeNumber,{openLab:true});
+}
+function gdAdminCourseRecipeLabEnsureSandbox(selected){
+  const donor=selected&&selected.donor;
+  const engine=window.GDCourseVisualEngine;
+  if(!donor||!engine||typeof engine.cloneCourseVisualSandbox!=="function")return;
+  const active=gdAdminCourseVisualRecipeState().activeRecipe||{presetId:"clarity-course-natural-v1",courseOverrides:{}};
+  const presetId=String(active.presetId||active.preset_id||"clarity-course-natural-v1");
+  const overrides=active.courseOverrides||active.course_overrides||{};
+  const recipeKey=[donor.courseId,donor.holeNumber,presetId,JSON.stringify(overrides||{})].join("::");
+  const existing=gdAdminCourseVisualRecord(GD_VISUAL_RECIPE_LAB_ID)||engine.getRecord&&engine.getRecord(GD_VISUAL_RECIPE_LAB_ID)||null;
+  const sandbox=existing&&existing.diagnostics&&existing.diagnostics.sandbox||{};
+  const bakedHole=(Array.isArray(existing&&existing.holeFramePreviewVisuals)?existing.holeFramePreviewVisuals:[]).find(asset=>Number(asset&&asset.holeNumber)===Number(donor.holeNumber));
+  const currentKey=[sandbox.sourceCourseId||"",sandbox.sourceHoleNumber||"",existing&&existing.presetId||"",JSON.stringify(existing&&existing.courseOverrides||{})].join("::");
+  if(bakedHole&&currentKey===recipeKey)return;
+  if(gdAdminCourseVisualRecipeLabPending[recipeKey])return;
+  gdAdminCourseVisualRecipeLabPending[recipeKey]=true;
+  gdAdminCoursePreviewHoleByCourse[GD_VISUAL_RECIPE_LAB_ID]=Number(donor.holeNumber)||1;
+  Promise.resolve(engine.hydrateCourseVisualAssets&&engine.hydrateCourseVisualAssets(donor.courseId))
+    .catch(()=>null)
+    .then(()=>engine.cloneCourseVisualSandbox(donor.courseId,GD_VISUAL_RECIPE_LAB_ID,{holeNumber:donor.holeNumber,courseName:"Recipe Lab",presetId:presetId,courseOverrides:overrides}))
+    .then(()=>{
+      engine.saveCourseVisualSettings(GD_VISUAL_RECIPE_LAB_ID,overrides,{presetId:presetId});
+      return engine.buildCourseVisualPreview(GD_VISUAL_RECIPE_LAB_ID,presetId,overrides,{holeNumber:donor.holeNumber});
+    })
+    .catch(()=>{})
+    .finally(()=>{
+      delete gdAdminCourseVisualRecipeLabPending[recipeKey];
+      gdRenderAdminCourseDatabase();
+    });
+}
 async function gdAdminCourseDbDeleteFromCloud(courseId,courseName){
   const token=await gdAdminCourseDbAccessToken();
   if(!token)throw new Error("No signed-in Supabase session — sign in again to delete from the database");
@@ -910,6 +1030,18 @@ function gdAdminCoursePreviewPhoneFrameMarkup(markup,frameBox){
   return `<div class="gdAdminPhoneFrameCrop" data-frame-source="${gdEscapeHTML(frameBox.source||"gps-play-frame")}" style="${style}">${markup}</div>`;
 }
 function gdAdminCoursePreviewMarkup(selected){
+  if(selected&&selected.isRecipeLab){
+    const donor=selected&&selected.donor;
+    const active=gdAdminCourseVisualRecipeState().activeRecipe;
+    if(!donor){
+      return `<div class="gdAdminPhonePreviewShell"><div class="gdAdminPhoneInfo"><strong>Recipe Lab</strong><span>No captured sample is available yet. Open any course that already has captured holes, then borrow one into the lab, or run a fresh course visual build first.</span></div></div>`;
+    }
+    gdAdminCourseRecipeLabEnsureSandbox(selected);
+    gdAdminCoursePreviewHoleByCourse[GD_VISUAL_RECIPE_LAB_ID]=Number(donor.holeNumber)||1;
+    const activeLabel=active?`${active.name||"Recipe"} · ${active.presetId||active.preset_id||"custom"}`:"Natural fallback";
+    const shell=gdAdminCoursePreviewMarkup({id:GD_VISUAL_RECIPE_LAB_ID,name:"Recipe Lab"});
+    return `<div class="gdAdminCourseVisualNotice"><strong>Recipe Lab</strong><div class="gdAdminCourseStageLine"><span class="ready">System active recipe: ${gdEscapeHTML(activeLabel)}</span><span>Borrowed sample: ${gdEscapeHTML(donor.courseName)} · Hole ${gdEscapeHTML(donor.holeNumber)}</span><button type="button" class="gdAdminInlineLink" onclick="return gdAdminCourseDbOpen('${gdEscapeHTML(donor.courseId)}','preview')">Open donor course</button></div><div class="gdAdminCourseStageLine"><span>Changes here stay inside the lab until you save a recipe and make it active.</span></div></div>${shell}`;
+  }
   const engine=window.GDCourseVisualEngine;
   const record=gdAdminCourseVisualRecord(selected.id)||engine?.getRecord?.(selected.id)||null;
   const cloudState=gdAdminCourseBuildState(selected.id);
@@ -963,7 +1095,7 @@ function gdAdminCoursePreviewMarkup(selected){
   // painting it again on top double-applied the look.
   const effects=gdAdminCourseVisualActiveEffects(record);
   const dock=window.GDCourseVisualEngine?gdAdminCourseVisualControls(record,selected.id):"";
-  return `<div class="gdAdminPhonePreviewShell gdAdminPhonePreviewTuned"><div class="gdAdminPhoneInfo"><strong>${gdEscapeHTML(selected.name)} · Hole ${gdEscapeHTML(current)}</strong><span>Sandbox: dial a setting and release it — the recipe re-bakes for this hole so you see the real result, terrain and all. Build course visual re-captures the course and the server automatically applies the normal recipe; Publish recipe is the advanced export-only action for the settings you have locked in here.</span><div class="gdAdminPhoneControls"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev hole</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next hole</button>${scanButton}<button type="button" onclick="return gdAdminCourseVisualResetRecipe(${id})">Reset recipe</button><button type="button" onclick="return gdAdminCourseVisualSaveRecipe(${id})">Save recipe</button><button type="button" class="primary" onclick="return gdAdminCourseVisualPublish(${id})">Publish recipe</button></div><div class="gdAdminCourseStageLine"><span class="${assetKind==="local-styled"||assetKind==="cloud-frame"?"ready":"warn"}">${gdEscapeHTML(assetKind==="local-styled"?"surface ready":assetKind==="cloud-frame"?"cloud frame":assetKind==="local-base"?"original capture":"hydrating")}</span><span>H${gdEscapeHTML(current)} · ${gdEscapeHTML(captured.length)}/${gdEscapeHTML(count)} captured</span><span>${gdEscapeHTML(cloudFrame?String(cloudFrame.path).split("/").slice(-3).join("/"):asset&&asset.path?String(asset.path).split("/").slice(-3).join("/"):"")}</span>${gdAdminCourseCloudJobChip(selected.id)}</div><div class="gdAdminCourseStageLine">${(assetKind==="local-base"?["Original capture - no effects"]:(effects.length?effects:["No effects active"])).map(label=>`<span class="${assetKind==="local-base"?"":"ready"}">${gdEscapeHTML(label)}</span>`).join("")}</div></div><div class="gdAdminPhoneStage"><div class="gdAdminPhone"><div class="gdAdminPhoneScreen"><div class="gdAdminPhoneHud"><span>Clarity Play</span><b>H${gdEscapeHTML(current)}</b></div>${frame}<div class="gdAdminPhoneNav"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next</button></div></div></div>${dock}</div></div>`;
+  return `<div class="gdAdminPhonePreviewShell gdAdminPhonePreviewTuned"><div class="gdAdminPhoneInfo"><strong>${gdEscapeHTML(selected.name)} · Hole ${gdEscapeHTML(current)}</strong><span>Sandbox: dial a setting and release it — the recipe re-bakes for this hole so you see the real result, terrain and all. Build course visual re-captures the course and the server automatically applies the active recipe; Publish recipe is the advanced export-only action for the settings you have locked in here.</span><div class="gdAdminPhoneControls"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev hole</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next hole</button>${scanButton}<button type="button" onclick="return gdAdminCourseVisualResetRecipe(${id})">Reset recipe</button><button type="button" onclick="return gdAdminCourseVisualSaveRecipe(${id})">Save recipe</button><button type="button" onclick="return gdAdminCourseRecipeLabUseCurrentHole('${gdEscapeHTML(selected.id)}',${Number(current)||1})">Borrow for Recipe Lab</button><button type="button" class="primary" onclick="return gdAdminCourseVisualPublish(${id})">Publish recipe</button></div><div class="gdAdminCourseStageLine"><span class="${assetKind==="local-styled"||assetKind==="cloud-frame"?"ready":"warn"}">${gdEscapeHTML(assetKind==="local-styled"?"surface ready":assetKind==="cloud-frame"?"cloud frame":assetKind==="local-base"?"original capture":"hydrating")}</span><span>H${gdEscapeHTML(current)} · ${gdEscapeHTML(captured.length)}/${gdEscapeHTML(count)} captured</span><span>${gdEscapeHTML(cloudFrame?String(cloudFrame.path).split("/").slice(-3).join("/"):asset&&asset.path?String(asset.path).split("/").slice(-3).join("/"):"")}</span>${gdAdminCourseCloudJobChip(selected.id)}</div><div class="gdAdminCourseStageLine">${(assetKind==="local-base"?["Original capture - no effects"]:(effects.length?effects:["No effects active"])).map(label=>`<span class="${assetKind==="local-base"?"":"ready"}">${gdEscapeHTML(label)}</span>`).join("")}</div></div><div class="gdAdminPhoneStage"><div class="gdAdminPhone"><div class="gdAdminPhoneScreen"><div class="gdAdminPhoneHud"><span>Clarity Play</span><b>H${gdEscapeHTML(current)}</b></div>${frame}<div class="gdAdminPhoneNav"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next</button></div></div></div>${dock}</div></div>`;
 }
 function gdAdminCourseDebugMarkup(selected){
   return `<div class="gdAdminCourseDebugWindow"><div class="gdCoursePlayDebug" id="gdCoursePlayDebugPanel"><div class="gdCoursePlayDebugHead"><div><h3>Live scan feedback</h3><p>Local scan, frame-cache, sync, and runtime events on this browser. This is browser state, not the database.</p></div><div class="gdCoursePlayDebugActions"><button type="button" onclick="return gdAdminCourseDebugRefresh()">Refresh</button><button type="button" onclick="gdClearCoursePlayPipelineDebug();return gdAdminCourseDebugRefresh()">Clear log</button></div></div><div id="gdCoursePlayDebugSummary" class="gdCoursePlayDebugSummary"></div><div id="gdCoursePlayDebugTable"></div><div id="gdCoursePlayDebugTimeline" class="gdCoursePlayDebugTimeline"></div></div><div class="gdCoursePlayDebug gdCourseMappingDebug" id="gdCourseMappingDebugPanel"></div><details class="gdAdminCourseSettings"><summary>Visual engine internals</summary><div class="gdAdminCourseSettingsBody">${gdAdminCourseVisualMarkup(selected)}</div></details></div>`;
@@ -1570,49 +1702,79 @@ function gdAdminCourseVisualResetRecipe(courseId){
   }
   return false;
 }
-/* Named recipe library (local, per browser). Save the current stack under a name, apply a
-   saved stack to any course. Longer term the export worker takes one of these by name so
-   automation can run "from natural" (off baseline) or from a chosen recipe. */
-const GD_VISUAL_RECIPES_KEY="gd_course_visual_recipes_v1";
+/* Shared recipe library. Saved recipes live in Supabase so the worker and Studio point at the
+   same list, and the active one becomes the default for fresh automatic builds. */
 function gdVisualRecipesLoad(){
-  try{const parsed=JSON.parse(localStorage.getItem(GD_VISUAL_RECIPES_KEY)||"null");return parsed&&Array.isArray(parsed.recipes)?parsed:{version:1,recipes:[]};}catch(e){return {version:1,recipes:[]};}
+  return {version:2,recipes:gdAdminCourseVisualRecipeState().recipes};
 }
-function gdVisualRecipesSave(store){
-  try{localStorage.setItem(GD_VISUAL_RECIPES_KEY,JSON.stringify({version:1,recipes:(store.recipes||[]).slice(0,48)}));}catch(e){}
+function gdVisualRecipesSave(){
+  return false;
 }
-function gdAdminCourseVisualSaveRecipe(courseId){
+async function gdAdminCourseVisualSaveRecipe(courseId){
   const name=String(window.prompt&&window.prompt("Recipe name","")||"").trim().slice(0,60);
   if(!name)return false;
-  const presetId=String(document.getElementById("gdCourseVisualPreset")?.value||"");
-  const overrides=gdAdminCourseVisualOverridesFromForm();
-  const store=gdVisualRecipesLoad();
-  store.recipes=store.recipes.filter(recipe=>recipe&&recipe.name!==name);
-  store.recipes.unshift({id:"recipe-"+Date.now().toString(36),name:name,presetId:presetId,overrides:overrides,createdAt:new Date().toISOString()});
-  gdVisualRecipesSave(store);
-  gdAdminCourseVisualToast('Recipe "'+name+'" saved');
-  gdRenderAdminCourseDatabase();
+  try{
+    const sample=gdAdminCourseVisualRecipeSample(courseId);
+    await gdAdminCourseVisualRecipeWrite({
+      action:"save",
+      recipe:{
+        name:name,
+        presetId:String(document.getElementById("gdCourseVisualPreset")?.value||""),
+        courseOverrides:gdAdminCourseVisualOverridesFromForm(),
+        sampleCourseId:sample.courseId,
+        sampleHoleNumber:sample.holeNumber
+      }
+    });
+    gdAdminCourseVisualToast('Recipe "'+name+'" saved');
+    gdRenderAdminCourseDatabase();
+  }catch(error){
+    gdAdminCourseVisualToast(error&&error.message?error.message:"Recipe save failed");
+  }
   return false;
 }
 function gdAdminCourseVisualApplyRecipe(courseId){
   const select=document.getElementById("gdCourseVisualRecipeSelect");
   const id=String(select&&select.value||"");
   if(!id)return false;
-  const recipe=gdVisualRecipesLoad().recipes.find(item=>item&&item.id===id);
+  const recipe=gdAdminCourseVisualRecipeById(id);
   if(!recipe){gdAdminCourseVisualToast("Recipe not found");return false;}
   const engine=window.GDCourseVisualEngine;
   if(!engine)return false;
   try{
-    engine.saveCourseVisualSettings(courseId,recipe.overrides||{},{presetId:recipe.presetId||""});
+    const presetId=String(recipe.presetId||recipe.preset_id||"");
+    const overrides=recipe.courseOverrides||recipe.course_overrides||{};
+    engine.saveCourseVisualSettings(courseId,overrides,{presetId:presetId});
     gdAdminCourseVisualToast('Recipe "'+recipe.name+'" applied');
     gdRenderAdminCourseDatabase();
     const hole=Number(gdAdminCoursePreviewHoleByCourse[courseId])||0;
     if(hole&&typeof engine.buildCourseVisualPreview==="function"){
-      engine.buildCourseVisualPreview(courseId,recipe.presetId||"",recipe.overrides||{},{holeNumber:hole})
+      engine.buildCourseVisualPreview(courseId,presetId,overrides,{holeNumber:hole})
         .then(()=>{if(gdAdminCourseDatabaseSelected===courseId&&gdAdminCourseDatabaseTab==="preview")gdRenderAdminCourseDatabase();})
         .catch(()=>{});
     }
   }catch(error){
     gdAdminCourseVisualToast(error&&error.message?error.message:"Recipe apply failed");
+  }
+  return false;
+}
+function gdAdminCourseVisualApplyActiveRecipe(courseId){
+  const active=gdAdminCourseVisualRecipeState().activeRecipe;
+  if(!active){gdAdminCourseVisualToast("No active recipe yet");return false;}
+  const select=document.getElementById("gdCourseVisualRecipeSelect");
+  if(select)select.value=String(active.id||"");
+  return gdAdminCourseVisualApplyRecipe(courseId);
+}
+async function gdAdminCourseVisualSetActiveRecipe(courseId){
+  const select=document.getElementById("gdCourseVisualRecipeSelect");
+  const recipeId=String(select&&select.value||"");
+  if(!recipeId){gdAdminCourseVisualToast("Choose a saved recipe first");return false;}
+  try{
+    const data=await gdAdminCourseVisualRecipeWrite({action:"activate",recipeId:recipeId});
+    gdAdminCourseVisualToast('Active recipe set to "'+((data&&data.recipe&&data.recipe.name)||"recipe")+'"');
+    if(String(courseId||"")===GD_VISUAL_RECIPE_LAB_ID)gdAdminCourseRecipeLabEnsureSandbox(gdAdminCourseRecipeLabSelected());
+    gdRenderAdminCourseDatabase();
+  }catch(error){
+    gdAdminCourseVisualToast(error&&error.message?error.message:"Active recipe update failed");
   }
   return false;
 }
@@ -1954,8 +2116,9 @@ function gdAdminCourseVisualSelectTool(group){
   /* The relief panel renders with no picture in it - opening the tab is what asks for one.
      Fired after the toggle above, and only when Terrain ended up open, so closing the tab
      or switching to Turf never spends a shade request. */
-  if(gdAdminCourseVisualActiveTool==="terrain"&&gdAdminCourseDatabaseSelected){
-    setTimeout(()=>gdAdminCourseVisualReliefRefresh(gdAdminCourseDatabaseSelected),0);
+  const activeCourseId=gdAdminCourseDatabaseSelected||(document.querySelector('.gdAdminCourseVisualControls[data-course-id="'+GD_VISUAL_RECIPE_LAB_ID+'"]')?GD_VISUAL_RECIPE_LAB_ID:"");
+  if(gdAdminCourseVisualActiveTool==="terrain"&&activeCourseId){
+    setTimeout(()=>gdAdminCourseVisualReliefRefresh(activeCourseId),0);
   }
   return false;
 }
@@ -1991,8 +2154,12 @@ function gdAdminCourseVisualControls(record,courseId){
   const key=gdEscapeHTML(courseId||record&&record.courseId||"");
   const presetField=`<label>Preset<select id="gdCourseVisualPreset" oninput="return gdAdminCourseVisualPresetChanged('${key}')" onchange="return gdAdminCourseVisualPresetChanged('${key}')">${presets.map(p=>`<option value="${gdEscapeHTML(p&&p.id||p&&p.mode||p&&p.name||"")}" ${preset===(p&&p.id)?"selected":""}>${gdEscapeHTML(p&&p.name||p&&p.mode||p&&p.id||"Preset")}</option>`).join("")}</select></label>`;
   const presetRail=`<div class="gdAdminCourseVisualPresetRail">${presets.map(p=>{const id=p&&p.id||p&&p.mode||p&&p.name||"";return `<button type="button" data-preset-id="${gdEscapeHTML(id)}" class="${preset===id?"active":""}" onclick="return gdAdminCourseVisualPresetButtonChanged('${key}','${gdEscapeHTML(id)}')">${gdEscapeHTML(p&&p.name||p&&p.mode||id||"Preset")}</button>`;}).join("")}</div>`;
-  const savedRecipes=gdVisualRecipesLoad().recipes;
-  const recipeField=`<label>Saved recipes<select id="gdCourseVisualRecipeSelect">${savedRecipes.length?savedRecipes.map(recipe=>`<option value="${gdEscapeHTML(recipe.id)}">${gdEscapeHTML(recipe.name)}</option>`).join(""):'<option value="">No saved recipes yet</option>'}</select></label><div class="gdAdminCourseVisualActions"><button type="button" onclick="return gdAdminCourseVisualApplyRecipe('${key}')"${savedRecipes.length?"":" disabled"}>Apply recipe</button><button type="button" onclick="return gdAdminCourseVisualSaveRecipe('${key}')">Save current as recipe</button></div>`;
+  const recipeState=gdAdminCourseVisualRecipeState();
+  const savedRecipes=recipeState.recipes;
+  const activeRecipe=recipeState.activeRecipe;
+  const activeRecipeLabel=activeRecipe?`${activeRecipe.name||"Recipe"} · ${activeRecipe.presetId||activeRecipe.preset_id||"custom"}`:"Natural fallback";
+  const activeRecipeBlock=`<div class="gdAdminCourseStageLine"><span class="ready">Active recipe: ${gdEscapeHTML(activeRecipeLabel)}</span>${activeRecipe?`<button type="button" class="gdAdminInlineLink" onclick="return gdAdminCourseVisualApplyActiveRecipe('${key}')">Apply active here</button>`:""}</div>`;
+  const recipeField=activeRecipeBlock+`<label>Saved recipes<select id="gdCourseVisualRecipeSelect">${savedRecipes.length?savedRecipes.map(recipe=>`<option value="${gdEscapeHTML(recipe.id)}" ${activeRecipe&&String(activeRecipe.id||"")===String(recipe.id||"")?"selected":""}>${gdEscapeHTML(recipe.name)}</option>`).join(""):'<option value="">No saved recipes yet</option>'}</select></label><div class="gdAdminCourseVisualActions"><button type="button" onclick="return gdAdminCourseVisualApplyRecipe('${key}')"${savedRecipes.length?"":" disabled"}>Apply recipe</button><button type="button" onclick="return gdAdminCourseVisualSetActiveRecipe('${key}')"${savedRecipes.length?"":" disabled"}>Set selected active</button><button type="button" onclick="return gdAdminCourseVisualSaveRecipe('${key}')">Save current as recipe</button></div>`;
   function rangeField(id,label,hint,value,min,max,step){
     return `<label>${label}${hint?` <small>${hint}</small>`:""}<input id="${id}" type="range" min="${min}" max="${max}" step="${step}" value="${value}" oninput="return gdAdminCourseVisualControlChanged('${key}')" onchange="return gdAdminCourseVisualControlCommitted('${key}')"></label>`;
   }
@@ -2444,7 +2611,11 @@ function gdRenderAdminCourseDatabase(){
     return open?row+gdAdminCourseDbExpandedRow(item):row;
   }).join("")}</tbody></table></div>`:'<div class="gdCoursePlayDebugEmpty">No course records match the current search.</div>');
   const selected=filtered.find(item=>item.id===gdAdminCourseDatabaseSelected);
-  if(!selected){gdAdminCourseDbSetHTML(detail,"");return;}
+  if(!selected){
+    const recipeLab=gdAdminCourseRecipeLabSelected();
+    gdAdminCourseDbSetHTML(detail,`<div class="gdAdminCourseActionPanel"><div class="gdAdminCourseActionHead"><div><h4>Recipe Lab</h4><span>Open with no course selected · shared active recipe control</span></div><div class="gdAdminCourseVisualActions"><button type="button" onclick="return gdAdminCourseOpenRecipeLab()">Refresh lab</button></div></div>${gdAdminCoursePreviewMarkup(recipeLab)}</div>`);
+    return;
+  }
   const rows=selected.rows||[];
   const payload=gdAdminCourseDbPayload(selected.id);
   const header=`<div class="gdAdminCourseActionHead"><div><h4>${gdEscapeHTML(selected.name)}</h4><span>${gdEscapeHTML(selected.key)} · ${gdEscapeHTML(gdAdminCourseDbStatusFor(selected))} · ${gdEscapeHTML(selected.syncStatus)} · ${gdEscapeHTML(selected.source)}</span></div>${gdAdminCourseDbActionRail(selected)}</div>`;

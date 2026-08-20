@@ -34,6 +34,7 @@ import { reliefFromTerrainRgb, cropByBounds, reliefAzimuthForPlayAxis, RELIEF_DE
 
 const JOBS_TABLE = "course_visual_jobs";
 const MAPS_TABLE = "course_maps";
+const RECIPES_TABLE = "course_visual_recipes";
 const BUCKET = "course-visuals";
 /* Tile fetching is what a snapshot spends its time on: measured on Jacks Point, 13.1s per
    capture against composites that take a fraction of that, so this number sets the wall clock.
@@ -622,16 +623,35 @@ function recipeFromPublishedRow(row) {
   return { presetId, courseOverrides, settings: mergeSettings(builtInPresetSettings(presetId), courseOverrides) };
 }
 
+function recipeFromLibraryRow(row) {
+  const presetId = String(row && (row.preset_id || row.presetId) || "");
+  const rawOverrides = row && (row.course_overrides || row.courseOverrides);
+  const courseOverrides = rawOverrides && typeof rawOverrides === "object" ? rawOverrides : {};
+  return normalizeRecipe({ presetId, courseOverrides });
+}
+
+async function activeLibraryRecipe() {
+  try {
+    const rows = await supabaseFetch(RECIPES_TABLE + "?select=preset_id,course_overrides&is_active=eq.true&order=updated_at.desc&limit=1");
+    const row = Array.isArray(rows) ? rows[0] : null;
+    return row ? recipeFromLibraryRow(row) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
 /* Hybrid publish model: after every successful snapshot the worker re-exports frames with the
-   course's last PUBLISHED recipe (or the canonical Natural preset if it has never been
-   published), so players never see frames baked from stale captures. A manual Publish is the
-   only thing that changes which recipe is live. */
+   course's last PUBLISHED recipe, otherwise the shared active recipe, otherwise the canonical
+   Natural preset, so players never see frames baked from stale captures. A manual Publish is
+   still the only thing that changes a course-specific recipe. */
 async function latestPublishedRecipe(courseId) {
   try {
     const rows = await supabaseFetch("course_visuals?select=preset_id,course_overrides&course_id=eq." + encodeURIComponent(courseId) + "&order=updated_at.desc&limit=1");
     const row = Array.isArray(rows) ? rows[0] : null;
     if (row) return recipeFromPublishedRow(row);
-  } catch (e) { /* fall through to Natural */ }
+  } catch (e) { /* fall through to shared active recipe */ }
+  const shared = await activeLibraryRecipe();
+  if (shared) return shared;
   return normalizeRecipe({ presetId: NATURAL_PRESET_ID, courseOverrides: {} });
 }
 
@@ -1041,5 +1061,6 @@ export const __test = {
   RAW_BASELINE_OVERRIDES,
   builtInPresetSettings,
   normalizeRecipe,
-  recipeFromPublishedRow
+  recipeFromPublishedRow,
+  recipeFromLibraryRow
 };
