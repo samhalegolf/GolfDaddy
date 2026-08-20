@@ -1,4 +1,6 @@
 import { placeFromCourse, reverseGeocodePlace } from "./lib/gd-course-place.mjs";
+import { resolveImagerySource, unscannableReason } from "./lib/gd-imagery-sources.mjs";
+import { courseBoundsFromObjects } from "./lib/gd-course-package-shape.mjs";
 
 const STORE_NAME = "clarity-course-maps";
 const STORE_KEY = "published-course-maps-v1";
@@ -180,9 +182,25 @@ function visualSnapshotCourseId(course) {
   return String(raw || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 }
 
+/* Where a course sits decides whether a Clarity map is even possible: the visual
+   worker refuses outright when no licensed imagery covers the bounds, and there
+   is no imagery source for Great Britain, so every St Andrews course is in that
+   position.
+ *
+ * The mapper's own chainVisualSnapshot has always checked this before queueing,
+ * for exactly this reason. This path did not - so publishing Balgove created a
+ * job whose only possible outcome was failure, it failed two seconds later, and
+ * Studio painted the course red. Takapuna, in the same practical state, reads
+ * "live map" because no job row exists for it.
+ *
+ * An unlicensed region is a known limit, not a fault. The course keeps its
+ * geometry and plays on live tiles either way; the only difference the job made
+ * was the colour of a badge. */
 async function enqueueVisualSnapshot(course, req) {
   const id = visualSnapshotCourseId(course);
   if (!id || !hasSupabase()) return;
+  const bounds = courseBoundsFromObjects(course && course.objects_json);
+  if (bounds && !resolveImagerySource(bounds)) return { skipped: "imagery-source-unavailable: " + unscannableReason(bounds) };
   const existing = await supabaseFetch("course_visual_jobs?select=id&course_id=eq." + encodeURIComponent(id) + "&kind=eq.snapshot&status=in.(queued,running)&limit=1");
   if (Array.isArray(existing) && existing.length) return;
   await supabaseFetch("course_visual_jobs", {

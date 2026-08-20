@@ -362,9 +362,12 @@ function gdAdminCourseDbStatusTone(value,okValues){
 /* Visual engine lifecycle: live map (no engine record - GPS uses the live
    basemap, a valid state, not an error) -> working -> preview -> published.
    Red is reserved for an actual engine failure. */
-/* A course is 18 hole images in the database. So "published" is a fact about the DATABASE, and
-   the cloud build state answers it directly - it is not something to infer from what this
-   particular browser happens to have in its local store.
+/* "Published" is a fact about the DATABASE - one frame per hole, however many holes the course
+   has - and the cloud build state answers it directly. It is not something to infer from what
+   this particular browser happens to have in its local store. (This used to say "a course is 18
+   hole images"; North Shore is 27 and Balgove is 9. The visual planner never assumed 18 - it
+   iterates whatever holes the package carries - but the comment implied a rule that does not
+   exist.)
 
    That inference is what put Jacks Point on "preview" while the database held 18 published
    frames at version 5: a local scan in this browser had left a previewVisual behind, and no
@@ -373,12 +376,29 @@ function gdAdminCourseDbStatusTone(value,okValues){
 
    The local record is still consulted, but only BELOW the cloud answer and only for states the
    cloud has no opinion on - a local sandbox bake that has not been published anywhere. */
+/* The visual worker's own words when it refuses for want of licensed imagery:
+   `imagery-source-unavailable: <reason>`. Matched on the prefix rather than the
+   full sentence, because the reason half varies - no coverage at all, a draft
+   entry, ShareAlike, a missing API key - and every one of them means the same
+   thing to a player: no Clarity map, live tiles instead. */
+function gdAdminVisualUnlicensed(lastError){
+  return /^imagery-source-unavailable/.test(String(lastError||"").trim());
+}
+function gdAdminVisualUnlicensedTitle(lastError){
+  const reason=String(lastError||"").replace(/^imagery-source-unavailable:\s*/,"").trim();
+  return "No Clarity map here - "+(reason||"no licensed imagery source covers this course")+". Geometry is published and the course plays on live tiles.";
+}
 function gdAdminCourseDbVisualState(courseId){
   const cloud=gdAdminCourseBuildState(courseId);
   if(cloud){
     if(cloud.framesReady)return {label:"published",tone:"ok"};
     if(cloud.building)return {label:cloud.activeKind==="export"?"baking":"scanning",tone:"warn"};
     if(cloud.state==="captures-ready")return {label:"captures only",tone:"warn"};
+    /* An unlicensed region is not a failure. There is no imagery source covering
+       Great Britain, so every St Andrews course lands here - with working
+       geometry that plays on live tiles, which is exactly what "live map"
+       means. Red is reserved for a build that could have worked and did not. */
+    if(cloud.state==="failed"&&gdAdminVisualUnlicensed(cloud.lastError))return {label:"live map",tone:"",title:gdAdminVisualUnlicensedTitle(cloud.lastError)};
     if(cloud.state==="failed")return {label:"build failed",tone:"bad"};
   }
   const record=gdAdminCourseVisualRecord(courseId);
@@ -1691,6 +1711,7 @@ function gdAdminCourseCloudJobChip(courseId){
   }
   if(state.state==="frames-ready")return `<span class="ready">cloud frames v${gdEscapeHTML(state.framesVersion||1)}</span>`;
   if(state.state==="captures-ready")return `<span class="warn" title="Snapshot landed, frames did not - re-run Publish or nudge">captures only, no frames</span>${nudge}`;
+  if(state.state==="failed"&&gdAdminVisualUnlicensed(state.lastError))return `<span title="${gdEscapeHTML(gdAdminVisualUnlicensedTitle(state.lastError))}">live map only</span>`;
   if(state.state==="failed")return `<span class="warn" title="${gdEscapeHTML(String(state.lastError||"").slice(0,180))}">build failed</span>${nudge}`;
   return `<span>not built</span>`;
 }

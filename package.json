@@ -22,6 +22,7 @@
     "test:courses-near": "node dev/courses-near.test.js",
   "test:course-pin-trust": "node dev/course-pin-trust.test.js",
   "test:nearest-loop": "node dev/nearest-loop-tightening.test.js",
+  "test:unlicensed-region": "node dev/unlicensed-region-live-map.test.js",
   "build:app": "node scripts/clarity-deploy-build.js --app-only",
     "demo:list": "node demo/run-demo.mjs --list",
     "demo:capture": "node demo/run-demo.mjs",
