@@ -96,16 +96,19 @@ test("a genuine build failure is still red", () => {
   ].forEach((e) => assert.strictEqual(unlicensed(e), false, "must not swallow: " + e));
 });
 
-test("both places Studio says 'build failed' check for it first", () => {
-  const src = fs.readFileSync(STUDIO, "utf8");
-  const sites = src.split("\n")
-    .map((line, i) => ({ line, i }))
-    .filter(({ line }) => /build failed/.test(line) && !/console\.warn/.test(line));
-  assert.strictEqual(sites.length, 2, "expected the badge and the build-bar; found " + sites.length);
-  sites.forEach(({ line, i }) => {
-    const prev = src.split("\n")[i - 1];
-    assert.ok(/gdAdminVisualUnlicensed/.test(prev),
-      "line " + (i + 1) + " reports a failure without first ruling out an unlicensed region:\n  " + line.trim());
+test("both Studio failure surfaces rule out unlicensed regions before showing a red status", () => {
+  const visualState = studioFn("function gdAdminCourseDbVisualState(courseId){");
+  const chip = studioFn("function gdAdminCourseCloudJobChip(courseId){");
+  [visualState, chip].forEach((body) => {
+    const unlicensedAt = Math.max(
+      body.indexOf("gdAdminVisualUnlicensed(state.lastError)"),
+      body.indexOf("gdAdminVisualUnlicensed(cloud.lastError)")
+    );
+    const visualFailedAt = body.indexOf("visual treatment failed");
+    const captureFailedAt = body.indexOf("capture failed");
+    assert.ok(unlicensedAt !== -1, "the unlicensed guard must exist before failure labels");
+    assert.ok(visualFailedAt === -1 || unlicensedAt < visualFailedAt, "visual treatment failures must come after the unlicensed guard");
+    assert.ok(captureFailedAt === -1 || unlicensedAt < captureFailedAt, "capture failures must come after the unlicensed guard");
   });
 });
 

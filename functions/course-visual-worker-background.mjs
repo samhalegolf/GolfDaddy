@@ -10,6 +10,9 @@
    side, once, and browsers stop needing tile access at all. Export (recipe compose) is
    Phase 2 and reads these captures back down. */
 
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 import sharp from "sharp";
 
 /* libvips caches decoded images and operation results so a repeated pipeline is cheap. This
@@ -62,12 +65,15 @@ const KEEP_FULL_RES_MASTER = true;
    square of this). Changing it MUST come with a bump to the out tag in runExportJob's version
    hash, or already-uploaded frames at the old size get resumed as if they were current. */
 const EXPORT_RENDITION_PX = 3072;
+const NATURAL_PRESET_ID = "clarity-course-natural-v1";
 
 /* Stamps the relief lighting into cache keys. Bump it whenever the shading constants in
    gd-relief-core.mjs change: stored terrain captures hold shaded pixels, so a new
    exaggeration or light angle makes every one of them stale, and neither the plan ids nor
    the recipe hash would notice. */
 const RELIEF_STAMP = "relief2-perhole-x" + RELIEF_DEFAULTS.exaggeration + "-az" + RELIEF_DEFAULTS.azimuth + "-al" + RELIEF_DEFAULTS.altitude;
+const ENGINE_SOURCE_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../scripts/gd-course-visual-engine.js");
+let presetHelpersCache = null;
 
 function env(name) { return process.env[name] || ""; }
 function supabaseBase() { return env("SUPABASE_URL").replace(/\/+$/, ""); }
@@ -497,8 +503,8 @@ async function sweepOldFrameVersions(courseId, liveVersion) {
   return { staleDirs: staleDirs.length, removed };
 }
 
-/* Natural baseline: every effect off. Mirrors GD_VISUAL_OFF_OVERRIDES in the admin UI. */
-const NATURAL_OVERRIDES = {
+/* Raw baseline: every effect off. Mirrors GD_VISUAL_OFF_OVERRIDES in the admin UI. */
+const RAW_BASELINE_OVERRIDES = {
   turf: { greenStrength: 0, greenTone: 0 },
   lighting: { brightnessTarget: 52, contrastTarget: 1 },
   readability: { sharpness: 0, fairwaySeparation: 0 },
@@ -507,17 +513,126 @@ const NATURAL_OVERRIDES = {
   floodlight: { enabled: false }
 };
 
+function cloneJson(value) {
+  return value == null ? value : JSON.parse(JSON.stringify(value));
+}
+
+function mergeSettings(base, patch) {
+  const out = cloneJson(base) || {};
+  (function walk(target, next) {
+    Object.keys(next || {}).forEach((key) => {
+      const value = next[key];
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        target[key] = target[key] && typeof target[key] === "object" && !Array.isArray(target[key]) ? target[key] : {};
+        walk(target[key], value);
+      } else {
+        target[key] = value;
+      }
+    });
+  })(out, patch || {});
+  return out;
+}
+
+function extractEngineFunction(source, name) {
+  const marker = "function " + name + "(";
+  const start = source.indexOf(marker);
+  if (start < 0) throw new Error("Could not find " + name + " in gd-course-visual-engine.js");
+  let depth = 0;
+  let started = false;
+  for (let i = start; i < source.length; i++) {
+    const ch = source[i];
+    if (ch === "{") { depth += 1; started = true; }
+    else if (ch === "}") {
+      depth -= 1;
+      if (started && depth === 0) return source.slice(start, i + 1);
+    }
+  }
+  throw new Error("Unbalanced braces while reading " + name + " from gd-course-visual-engine.js");
+}
+
+function extractEngineVar(source, name) {
+  const match = source.match(new RegExp("\\bvar\\s+" + name + "\\s*=\\s*([^;]+);"));
+  if (!match) throw new Error("Could not find " + name + " in gd-course-visual-engine.js");
+  return "var " + name + " = " + match[1] + ";";
+}
+
+function loadPresetHelpers() {
+  if (presetHelpersCache) return presetHelpersCache;
+  const source = fs.readFileSync(ENGINE_SOURCE_PATH, "utf8");
+  const helperNames = ["baseCourseVisualPreset", "defaultPreset", "presetSpec", "builtInPresetSpecs"];
+  const code = [
+    'function clone(value) { return value == null ? value : JSON.parse(JSON.stringify(value)); }',
+    extractEngineVar(source, "PRESET_VERSION")
+  ]
+    .concat(helperNames.map((name) => extractEngineFunction(source, name)))
+    .join("\n\n") + `
+function mergePreset(base, patch) {
+  var out = clone(base || defaultPreset());
+  (function walk(target, next) {
+    Object.keys(next || {}).forEach(function (key) {
+      var value = next[key];
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        target[key] = target[key] && typeof target[key] === "object" && !Array.isArray(target[key]) ? target[key] : {};
+        walk(target[key], value);
+      } else {
+        target[key] = value;
+      }
+    });
+  })(out, patch || {});
+  return out;
+}
+function builtInPresetMap() {
+  var out = {};
+  builtInPresetSpecs().forEach(function (spec) {
+    out[spec.id] = mergePreset(defaultPreset(), spec.patch || {});
+  });
+  return out;
+}
+return {
+  getPreset: function (presetId) {
+    var presets = builtInPresetMap();
+    return clone(presets[presetId] || presets[defaultPreset().id] || defaultPreset());
+  }
+};`;
+  presetHelpersCache = new Function(code)();
+  return presetHelpersCache;
+}
+
+function builtInPresetSettings(presetId) {
+  return loadPresetHelpers().getPreset(String(presetId || NATURAL_PRESET_ID));
+}
+
+function normalizeRecipe(input) {
+  const recipe = input && typeof input === "object" ? input : {};
+  const presetId = String(recipe.presetId || recipe.preset_id || "");
+  const courseOverrides = recipe.courseOverrides || recipe.course_overrides || recipe.overrides || {};
+  if (recipe.settings && typeof recipe.settings === "object") {
+    return { presetId, courseOverrides, settings: cloneJson(recipe.settings) };
+  }
+  if (presetId) {
+    return { presetId, courseOverrides, settings: mergeSettings(builtInPresetSettings(presetId), courseOverrides) };
+  }
+  return { presetId: "", courseOverrides, settings: mergeSettings(RAW_BASELINE_OVERRIDES, courseOverrides) };
+}
+
+function recipeFromPublishedRow(row) {
+  const presetId = String(row && row.preset_id || "");
+  const courseOverrides = row && row.course_overrides && typeof row.course_overrides === "object" ? row.course_overrides : {};
+  if (!presetId) return { presetId: "", courseOverrides, settings: mergeSettings(RAW_BASELINE_OVERRIDES, courseOverrides) };
+  return { presetId, courseOverrides, settings: mergeSettings(builtInPresetSettings(presetId), courseOverrides) };
+}
+
 /* Hybrid publish model: after every successful snapshot the worker re-exports frames with the
-   course's last PUBLISHED recipe (or the natural/off baseline if it has never been published),
-   so players never see frames baked from stale captures. A manual Publish is the only thing
-   that changes which recipe is live. */
+   course's last PUBLISHED recipe (or the canonical Natural preset if it has never been
+   published), so players never see frames baked from stale captures. A manual Publish is the
+   only thing that changes which recipe is live. */
 async function latestPublishedRecipe(courseId) {
   try {
     const rows = await supabaseFetch("course_visuals?select=preset_id,course_overrides&course_id=eq." + encodeURIComponent(courseId) + "&order=updated_at.desc&limit=1");
     const row = Array.isArray(rows) ? rows[0] : null;
-    if (row) return { presetId: row.preset_id || "", overrides: row.course_overrides || NATURAL_OVERRIDES };
-  } catch (e) { /* fall through to natural */ }
-  return { presetId: "", overrides: NATURAL_OVERRIDES };
+    if (row) return recipeFromPublishedRow(row);
+  } catch (e) { /* fall through to Natural */ }
+  return normalizeRecipe({ presetId: NATURAL_PRESET_ID, courseOverrides: {} });
 }
 
 async function enqueueFollowUpExport(courseId) {
@@ -584,7 +699,7 @@ async function writeCourseVisualRow(job, pkg, framesIndex, recipe) {
     source_capture_ids: (framesIndex.holes || []).map(h => "h" + h.holeNumber),
     preset_id: recipe.presetId || null,
     preset_version: 0,
-    course_overrides: recipe.overrides || {},
+    course_overrides: recipe.courseOverrides || {},
     current_version: versionNumber,
     published_version: versionNumber,
     last_error: {},
@@ -646,14 +761,16 @@ async function runExportJob(job, deadlineAt) {
   const capturesIndex = JSON.parse((await storageDownload(job.course_id + "/captures/index.json")).toString("utf8"));
   const entries = Array.isArray(capturesIndex && capturesIndex.captures) ? capturesIndex.captures : [];
   if (!entries.length) throw new Error("no captures in index - run a snapshot job first");
-  const recipe = job.recipe && (job.recipe.presetId || job.recipe.overrides || job.recipe.courseOverrides) ? job.recipe : await latestPublishedRecipe(job.course_id);
+  const recipe = job.recipe && (job.recipe.presetId || job.recipe.preset_id || job.recipe.overrides || job.recipe.courseOverrides || job.recipe.settings)
+    ? normalizeRecipe(job.recipe)
+    : await latestPublishedRecipe(job.course_id);
   const presetId = String(recipe.presetId || "");
-  const overrides = recipe.overrides || recipe.courseOverrides || {};
+  const settings = cloneJson(recipe.settings || {});
   /* out tag bumped to iz1 when captureZoom went integer-only (gd-visual-export-core): old
      fractional-zoom frames must NOT be resumed/reused, so the version dir has to change.
      RELIEF_STAMP rides along for the same reason - relief changes published pixels, and
      without it every already-exported frame resumes as current and nothing re-renders. */
-  const version = "r" + hashText(JSON.stringify({ presetId, overrides, snapshot: capturesIndex.generatedAt, out: "mercator-" + EXPORT_RENDITION_PX + "-iz1-" + RELIEF_STAMP }));
+  const version = "r" + hashText(JSON.stringify({ presetId, settings, snapshot: capturesIndex.generatedAt, out: "mercator-" + EXPORT_RENDITION_PX + "-iz1-" + RELIEF_STAMP }));
   const framesDir = pkg.courseId + "/frames/" + version;
   const holeData = packageHoleData(pkg);
   const terrainEntry = entries.find(e => e.role === "terrain-reference");
@@ -771,7 +888,7 @@ async function runExportJob(job, deadlineAt) {
       /* North-up mercator surface: the geometry the v19 GPS pipeline consumes natively
          (originPx + captureZoom + one image). The runtime does the play-axis framing, same
          as it does for locally captured surfaces. */
-      const frame = await renderHoleSurfaceMercator({ pins, captures, terrain, settings: overrides, maxDim: EXPORT_RENDITION_PX });
+      const frame = await renderHoleSurfaceMercator({ pins, captures, terrain, settings, maxDim: EXPORT_RENDITION_PX });
       await storageUpload(path, frame.jpeg, "image/jpeg");
       width = frame.width; height = frame.height; bytes = frame.jpeg.length;
       playSurface = {
@@ -812,7 +929,7 @@ async function runExportJob(job, deadlineAt) {
       const overview = await renderOverview({
         backdrop: { entry: backdropEntry, buffer: await bufferFor(backdropEntry) },
         terrain: terrainEntry ? { entry: terrainEntry, buffer: await bufferFor(terrainEntry) } : null,
-        settings: overrides
+        settings
       });
       await storageUpload(overviewPath, overview.jpeg, "image/jpeg");
       framesIndex.overview = { path: overviewPath, width: overview.width, height: overview.height, bytes: overview.jpeg.length, bounds: backdropEntry.bounds };
@@ -830,7 +947,7 @@ async function runExportJob(job, deadlineAt) {
     ? framesIndex.holes.reduce((sum, h) => sum + Number(h.bytes), 0) + Number(framesIndex.overview && framesIndex.overview.bytes || 0)
     : null;
   await storageUpload(pkg.courseId + "/frames/index.json", Buffer.from(JSON.stringify(framesIndex)), "application/json");
-  await writeCourseVisualRow(job, pkg, framesIndex, { presetId, overrides });
+  await writeCourseVisualRow(job, pkg, framesIndex, recipe);
   /* Index + row now point at this version, so every OTHER frame dir is dead. Retire them.
      Best-effort: a sweep failure must never fail an otherwise-good export. */
   let swept = null;
@@ -918,3 +1035,11 @@ export default async function courseVisualWorker(req) {
   }
   return new Response("ok", { status: 200 });
 }
+
+export const __test = {
+  NATURAL_PRESET_ID,
+  RAW_BASELINE_OVERRIDES,
+  builtInPresetSettings,
+  normalizeRecipe,
+  recipeFromPublishedRow
+};

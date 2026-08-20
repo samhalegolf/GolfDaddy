@@ -393,13 +393,14 @@ function gdAdminCourseDbVisualState(courseId){
   if(cloud){
     if(cloud.framesReady)return {label:"published",tone:"ok"};
     if(cloud.building)return {label:cloud.activeKind==="export"?"baking":"scanning",tone:"warn"};
-    if(cloud.state==="captures-ready")return {label:"captures only",tone:"warn"};
+    if(cloud.state==="captures-ready")return {label:"capture ready",tone:"warn"};
     /* An unlicensed region is not a failure. There is no imagery source covering
        Great Britain, so every St Andrews course lands here - with working
        geometry that plays on live tiles, which is exactly what "live map"
        means. Red is reserved for a build that could have worked and did not. */
     if(cloud.state==="failed"&&gdAdminVisualUnlicensed(cloud.lastError))return {label:"live map",tone:"",title:gdAdminVisualUnlicensedTitle(cloud.lastError)};
-    if(cloud.state==="failed")return {label:"build failed",tone:"bad"};
+    if(cloud.state==="failed"&&cloud.failedStage==="export")return {label:"visual treatment failed",tone:"bad"};
+    if(cloud.state==="failed")return {label:"capture failed",tone:"bad"};
   }
   const record=gdAdminCourseVisualRecord(courseId);
   if(!record)return {label:"live map",tone:""};
@@ -911,6 +912,7 @@ function gdAdminCoursePreviewPhoneFrameMarkup(markup,frameBox){
 function gdAdminCoursePreviewMarkup(selected){
   const engine=window.GDCourseVisualEngine;
   const record=gdAdminCourseVisualRecord(selected.id)||engine?.getRecord?.(selected.id)||null;
+  const cloudState=gdAdminCourseBuildState(selected.id);
   gdAdminCourseVisualScheduleHydration(selected.id,record);
   /* The preview IS the visual engine's home screen: opening it schedules the
      same auto-build the old Visuals tab ran, so a fresh course starts baking
@@ -920,10 +922,15 @@ function gdAdminCoursePreviewMarkup(selected){
   gdAdminCourseVisualScheduleAutoBuild(selected.id,record,sourceStatus);
   if(!autoBuildNeeded)gdAdminCourseVisualSchedulePipeline(selected.id,record,sourceStatus);
   const scanId=gdAdminJsArg(selected.id);
-  const scanButton=`<button type="button" class="primary" onclick="return gdAdminCourseVisualRecapture(${scanId})">Scan course</button>`;
+  const buildLabel=cloudState&&(cloudState.state==="captures-ready"||cloudState.failedStage==="export")
+    ?"Retry visual treatment"
+    :cloudState&&cloudState.framesReady
+      ?"Rebuild course visual"
+      :"Build course visual";
+  const scanButton=`<button type="button" class="primary" onclick="return gdAdminCourseVisualBuild(${scanId})">${gdEscapeHTML(buildLabel)}</button>`;
   const captured=gdAdminCoursePreviewCapturedHoles(record,selected.id);
   if(!captured.length){
-    return `<div class="gdAdminPhonePreviewShell"><div class="gdAdminPhoneInfo"><strong>${gdEscapeHTML(selected.name)}</strong><span>No natively captured holes yet. Scan runs the capture protocol over the course geometry and bakes every hole — the preview fills in as holes complete.</span><div class="gdAdminPhoneControls">${scanButton}</div></div></div>`;
+    return `<div class="gdAdminPhonePreviewShell"><div class="gdAdminPhoneInfo"><strong>${gdEscapeHTML(selected.name)}</strong><span>No captured holes yet. Build course visual runs capture first, then the server automatically applies the Natural treatment and publishes the frames.</span><div class="gdAdminPhoneControls">${scanButton}</div></div></div>`;
   }
   const count=gdAdminCoursePreviewHoleCount(selected,record);
   let current=Math.min(count,Math.max(1,Number(gdAdminCoursePreviewHoleByCourse[selected.id])||1));
@@ -956,7 +963,7 @@ function gdAdminCoursePreviewMarkup(selected){
   // painting it again on top double-applied the look.
   const effects=gdAdminCourseVisualActiveEffects(record);
   const dock=window.GDCourseVisualEngine?gdAdminCourseVisualControls(record,selected.id):"";
-  return `<div class="gdAdminPhonePreviewShell gdAdminPhonePreviewTuned"><div class="gdAdminPhoneInfo"><strong>${gdEscapeHTML(selected.name)} · Hole ${gdEscapeHTML(current)}</strong><span>Sandbox: dial a setting and release it — the recipe re-bakes for this hole so you see the real result, terrain and all. Scan re-runs the capture protocol; Publish applies the locked-in recipe to every hole.</span><div class="gdAdminPhoneControls"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev hole</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next hole</button>${scanButton}<button type="button" onclick="return gdAdminCourseVisualResetRecipe(${id})">Reset recipe</button><button type="button" onclick="return gdAdminCourseVisualSaveRecipe(${id})">Save recipe</button><button type="button" class="primary" onclick="return gdAdminCourseVisualPublish(${id})">Publish recipe</button></div><div class="gdAdminCourseStageLine"><span class="${assetKind==="local-styled"||assetKind==="cloud-frame"?"ready":"warn"}">${gdEscapeHTML(assetKind==="local-styled"?"surface ready":assetKind==="cloud-frame"?"cloud frame":assetKind==="local-base"?"original capture":"hydrating")}</span><span>H${gdEscapeHTML(current)} · ${gdEscapeHTML(captured.length)}/${gdEscapeHTML(count)} captured</span><span>${gdEscapeHTML(cloudFrame?String(cloudFrame.path).split("/").slice(-3).join("/"):asset&&asset.path?String(asset.path).split("/").slice(-3).join("/"):"")}</span>${gdAdminCourseCloudJobChip(selected.id)}</div><div class="gdAdminCourseStageLine">${(assetKind==="local-base"?["Original capture — no effects"]:(effects.length?effects:["No effects active"])).map(label=>`<span class="${assetKind==="local-base"?"":"ready"}">${gdEscapeHTML(label)}</span>`).join("")}</div></div><div class="gdAdminPhoneStage"><div class="gdAdminPhone"><div class="gdAdminPhoneScreen"><div class="gdAdminPhoneHud"><span>Clarity Play</span><b>H${gdEscapeHTML(current)}</b></div>${frame}<div class="gdAdminPhoneNav"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next</button></div></div></div>${dock}</div></div>`;
+  return `<div class="gdAdminPhonePreviewShell gdAdminPhonePreviewTuned"><div class="gdAdminPhoneInfo"><strong>${gdEscapeHTML(selected.name)} · Hole ${gdEscapeHTML(current)}</strong><span>Sandbox: dial a setting and release it — the recipe re-bakes for this hole so you see the real result, terrain and all. Build course visual re-captures the course and the server automatically applies the normal recipe; Publish recipe is the advanced export-only action for the settings you have locked in here.</span><div class="gdAdminPhoneControls"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev hole</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next hole</button>${scanButton}<button type="button" onclick="return gdAdminCourseVisualResetRecipe(${id})">Reset recipe</button><button type="button" onclick="return gdAdminCourseVisualSaveRecipe(${id})">Save recipe</button><button type="button" class="primary" onclick="return gdAdminCourseVisualPublish(${id})">Publish recipe</button></div><div class="gdAdminCourseStageLine"><span class="${assetKind==="local-styled"||assetKind==="cloud-frame"?"ready":"warn"}">${gdEscapeHTML(assetKind==="local-styled"?"surface ready":assetKind==="cloud-frame"?"cloud frame":assetKind==="local-base"?"original capture":"hydrating")}</span><span>H${gdEscapeHTML(current)} · ${gdEscapeHTML(captured.length)}/${gdEscapeHTML(count)} captured</span><span>${gdEscapeHTML(cloudFrame?String(cloudFrame.path).split("/").slice(-3).join("/"):asset&&asset.path?String(asset.path).split("/").slice(-3).join("/"):"")}</span>${gdAdminCourseCloudJobChip(selected.id)}</div><div class="gdAdminCourseStageLine">${(assetKind==="local-base"?["Original capture - no effects"]:(effects.length?effects:["No effects active"])).map(label=>`<span class="${assetKind==="local-base"?"":"ready"}">${gdEscapeHTML(label)}</span>`).join("")}</div></div><div class="gdAdminPhoneStage"><div class="gdAdminPhone"><div class="gdAdminPhoneScreen"><div class="gdAdminPhoneHud"><span>Clarity Play</span><b>H${gdEscapeHTML(current)}</b></div>${frame}<div class="gdAdminPhoneNav"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next</button></div></div></div>${dock}</div></div>`;
 }
 function gdAdminCourseDebugMarkup(selected){
   return `<div class="gdAdminCourseDebugWindow"><div class="gdCoursePlayDebug" id="gdCoursePlayDebugPanel"><div class="gdCoursePlayDebugHead"><div><h3>Live scan feedback</h3><p>Local scan, frame-cache, sync, and runtime events on this browser. This is browser state, not the database.</p></div><div class="gdCoursePlayDebugActions"><button type="button" onclick="return gdAdminCourseDebugRefresh()">Refresh</button><button type="button" onclick="gdClearCoursePlayPipelineDebug();return gdAdminCourseDebugRefresh()">Clear log</button></div></div><div id="gdCoursePlayDebugSummary" class="gdCoursePlayDebugSummary"></div><div id="gdCoursePlayDebugTable"></div><div id="gdCoursePlayDebugTimeline" class="gdCoursePlayDebugTimeline"></div></div><div class="gdCoursePlayDebug gdCourseMappingDebug" id="gdCourseMappingDebugPanel"></div><details class="gdAdminCourseSettings"><summary>Visual engine internals</summary><div class="gdAdminCourseSettingsBody">${gdAdminCourseVisualMarkup(selected)}</div></details></div>`;
@@ -1686,6 +1693,28 @@ function gdAdminCourseBuildProgress(state){
   if(!Number.isFinite(done)||!Number.isFinite(total)||total<=0)return null;
   return {done,total,pct:Math.max(0,Math.min(100,Math.round(done/total*100))),stage:String(p.stage||""),rssMb:Number(p.rssMb)||0};
 }
+function gdAdminCourseBuildCheckpointLines(state){
+  const progress=gdAdminCourseBuildProgress(state);
+  const captureLine=state&&state.activeKind==="snapshot"
+    ? `Checkpoint 1 - Capture imagery & terrain: ${progress?`${progress.done}/${progress.total}`:"running"}`
+    : state&&state.failedStage==="capture"
+      ? "Checkpoint 1 - Capture imagery & terrain: failed"
+      : state&&(state.snapshotReady||state.framesReady||state.activeKind==="export")
+        ? "Checkpoint 1 - Capture imagery & terrain: complete"
+        : "Checkpoint 1 - Capture imagery & terrain: waiting";
+  const exportLine=state&&state.activeKind==="export"
+    ? `Checkpoint 2 - Apply visual treatment: ${progress&&progress.stage?progress.stage:(progress?`${progress.done}/${progress.total}`:"running")}`
+    : state&&state.failedStage==="export"
+      ? `Checkpoint 2 - Apply visual treatment: failed${state.lastError?` (${String(state.lastError).slice(0,80)})`:""}`
+      : state&&state.framesReady
+        ? "Checkpoint 2 - Apply visual treatment: complete"
+        : state&&state.state==="captures-ready"
+          ? "Checkpoint 2 - Apply visual treatment: queued"
+          : state&&state.snapshotReady
+            ? "Checkpoint 2 - Apply visual treatment: waiting"
+            : "Checkpoint 2 - Apply visual treatment: waiting for capture";
+  return [captureLine,exportLine];
+}
 /* The build bar. One line that answers: is this course built, is it building, how far, and has
    it stopped moving. Rendered wherever the published/live area is shown. */
 function gdAdminCourseCloudJobChip(courseId){
@@ -1704,15 +1733,17 @@ function gdAdminCourseCloudJobChip(courseId){
     const pct=progress?progress.pct:0;
     const detail=progress?`${progress.done}/${progress.total}`:"starting";
     const stall=stalled?` · <span class="warn">stalled ${Math.round((state.stalledSeconds||0)/60)}m</span>`:"";
+    const checkpoints=gdAdminCourseBuildCheckpointLines(state).map(line=>`<span style="display:block">${gdEscapeHTML(line)}</span>`).join("");
     return `<span class="gdAdminBuildBar${stalled?" gdAdminBuildBarStalled":""}" title="${gdEscapeHTML(progress&&progress.stage||"")}">`
       +`<span class="gdAdminBuildBarFill" style="width:${pct}%"></span>`
       +`<span class="gdAdminBuildBarText">${gdEscapeHTML(kind||"building")} ${gdEscapeHTML(detail)} · ${pct}%${stall}</span>`
-      +`</span>${stalled?nudge:""}`;
+      +`</span><span style="display:block;margin-top:4px">${checkpoints}</span>${stalled?nudge:""}`;
   }
   if(state.state==="frames-ready")return `<span class="ready">cloud frames v${gdEscapeHTML(state.framesVersion||1)}</span>`;
-  if(state.state==="captures-ready")return `<span class="warn" title="Snapshot landed, frames did not - re-run Publish or nudge">captures only, no frames</span>${nudge}`;
+  if(state.state==="captures-ready")return `<span class="warn" title="Capture completed. Visual treatment is queued or waiting to be retried.">capture complete - waiting for visual treatment</span>${nudge}`;
   if(state.state==="failed"&&gdAdminVisualUnlicensed(state.lastError))return `<span title="${gdEscapeHTML(gdAdminVisualUnlicensedTitle(state.lastError))}">live map only</span>`;
-  if(state.state==="failed")return `<span class="warn" title="${gdEscapeHTML(String(state.lastError||"").slice(0,180))}">build failed</span>${nudge}`;
+  if(state.state==="failed"&&state.failedStage==="export")return `<span class="warn" title="${gdEscapeHTML(String(state.lastError||"").slice(0,180))}">visual treatment failed</span>${nudge}`;
+  if(state.state==="failed")return `<span class="warn" title="${gdEscapeHTML(String(state.lastError||"").slice(0,180))}">capture failed</span>${nudge}`;
   return `<span>not built</span>`;
 }
 async function gdAdminCourseBuildNudge(courseId){
@@ -2169,6 +2200,19 @@ async function gdAdminCourseVisualEnqueueCloudJob(courseId,kind,recipe){
 function gdAdminCourseVisualEnqueueCloudSnapshot(courseId){
   return gdAdminCourseVisualEnqueueCloudJob(courseId,"snapshot",null);
 }
+function gdAdminCourseVisualRetryExport(courseId){
+  return gdAdminCourseVisualEnqueueCloudJob(courseId,"export",null);
+}
+async function gdAdminCourseVisualBuild(courseId){
+  const cloudState=gdAdminCourseBuildState(courseId);
+  if(cloudState&&(cloudState.state==="captures-ready"||cloudState.failedStage==="export")) {
+    const data=await gdAdminCourseVisualRetryExport(courseId);
+    gdAdminCourseVisualToast(data&&data.job?"Retrying visual treatment":"Could not queue visual treatment retry");
+    gdRenderAdminCourseDatabase();
+    return false;
+  }
+  return gdAdminCourseVisualRecapture(courseId);
+}
 async function gdAdminCourseVisualRecapture(courseId){
   const engine=window.GDCourseVisualEngine;
   if(!engine){gdAdminCourseVisualToast("Course Visual Engine not loaded");return false;}
@@ -2287,7 +2331,8 @@ function gdAdminCourseVisualMarkup(selected){
   const cloudState=gdAdminCourseBuildState(selected.id);
   const lifecycleStage=cloudState&&cloudState.framesReady?"published"
     :cloudState&&cloudState.activeKind==="export"?"bake"
-    :cloudState&&(cloudState.building||cloudState.state==="captures-ready")?"scan"
+    :cloudState&&(cloudState.state==="captures-ready"||cloudState.failedStage==="export")?"bake"
+    :cloudState&&cloudState.building?"scan"
     :record&&record.publishedVisual?"published"
     :record&&record.previewVisual?"bake"
     :record&&(record.rawMaster||record.basicVisual)?"scan":"geometry";

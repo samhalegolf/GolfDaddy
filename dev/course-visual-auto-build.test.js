@@ -151,7 +151,7 @@ test("a recipe smuggled into an auto body is stored as null", async () => {
   const calls = stubFetch(unbuiltCourse());
   await call(post({ courseId: "pupuke", kind: "auto", recipe: { presetId: "twilight", overrides: { mowingVisibility: "Prominent" } } }, "player-token"));
   const row = jobInserts(calls)[0].rows[0];
-  assert.strictEqual(row.recipe, null, "automatic exports bake the natural baseline, never a passed recipe");
+  assert.strictEqual(row.recipe, null, "automatic exports bake the default Natural preset, never a passed recipe");
 });
 
 test("an admin keeps the explicit export path, recipe and all", async () => {
@@ -215,15 +215,30 @@ test("the status read is public and derives the build state", async () => {
   const ready = await call(get("pupuke"));
   assert.strictEqual(ready.status, 200);
   assert.strictEqual(ready.body.state, "captures-ready", "snapshot landed, export did not - retrying needs an export only");
+  assert.strictEqual(ready.body.snapshotReady, true);
+  assert.strictEqual(ready.body.exportReady, false);
+  assert.strictEqual(ready.body.checkpoint.stage, "export");
 
   stubFetch(unbuiltCourse({ visuals: [{ published_version: 2 }], jobs: [{ id: "j1", kind: "export", status: "failed", error: "boom" }] }));
   const framed = await call(get("pupuke"));
   assert.strictEqual(framed.body.state, "frames-ready", "published frames outrank a failed rebuild - the course is playable");
   assert.strictEqual(framed.body.framesReady, true);
 
+  stubFetch(unbuiltCourse({ jobs: [
+    { id: "j2", kind: "export", status: "failed", error: "render h16 failed" },
+    { id: "j1", kind: "snapshot", status: "done" }
+  ] }));
+  const exportFailed = await call(get("pupuke"));
+  assert.strictEqual(exportFailed.body.state, "failed");
+  assert.strictEqual(exportFailed.body.failedStage, "export");
+  assert.strictEqual(exportFailed.body.snapshotReady, true);
+  assert.strictEqual(exportFailed.body.exportReady, false);
+  assert.ok(String(exportFailed.body.lastError).includes("render h16"));
+
   stubFetch(unbuiltCourse({ jobs: [{ id: "j1", kind: "snapshot", status: "failed", error: "tile coverage incomplete" }] }));
   const failed = await call(get("pupuke"));
   assert.strictEqual(failed.body.state, "failed");
+  assert.strictEqual(failed.body.failedStage, "capture");
   assert.ok(String(failed.body.lastError).includes("tile coverage"));
 
   stubFetch(unbuiltCourse());

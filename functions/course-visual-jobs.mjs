@@ -72,6 +72,57 @@ async function supabaseFetch(path, options = {}) {
 
 function slug(value) { return String(value || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 90); }
 
+function latestJob(jobs, predicate) {
+  return (Array.isArray(jobs) ? jobs : []).find(predicate) || null;
+}
+
+function summarizeCheckpoint(kind, status) {
+  if (kind === "snapshot") {
+    if (status === "done") return { stage: "capture", label: "Capture imagery & terrain", complete: true };
+    if (status === "failed") return { stage: "capture", label: "Capture imagery & terrain", failed: true };
+    return { stage: "capture", label: "Capture imagery & terrain" };
+  }
+  if (status === "done") return { stage: "export", label: "Apply visual treatment", complete: true };
+  if (status === "failed") return { stage: "export", label: "Apply visual treatment", failed: true };
+  return { stage: "export", label: "Apply visual treatment" };
+}
+
+function deriveCourseBuildStateFromRows({ jobs, visual }) {
+  const orderedJobs = Array.isArray(jobs) ? jobs : [];
+  const live = latestJob(orderedJobs, job => job.status === "running") || latestJob(orderedJobs, job => job.status === "queued");
+  const latestTerminal = latestJob(orderedJobs, job => (job.kind === "snapshot" || job.kind === "export") && (job.status === "done" || job.status === "failed"));
+  const latestSnapshotSuccess = latestJob(orderedJobs, job => job.kind === "snapshot" && job.status === "done");
+  const latestExportSuccess = latestJob(orderedJobs, job => job.kind === "export" && job.status === "done");
+  const framesReady = !!(visual && Number(visual.published_version) > 0);
+  const snapshotReady = !!latestSnapshotSuccess;
+  const exportReady = framesReady || !!latestExportSuccess;
+  const failedJob = latestTerminal && latestTerminal.status === "failed" ? latestTerminal : null;
+  const failedStage = failedJob ? (failedJob.kind === "snapshot" ? "capture" : "export") : null;
+  let state = "none";
+  if (framesReady) state = "frames-ready";
+  if (live) state = live.status === "running" ? "running" : "queued";
+  else if (!framesReady && failedJob) state = "failed";
+  else if (snapshotReady && !exportReady) state = "captures-ready";
+  return {
+    state,
+    live,
+    framesReady,
+    snapshotReady,
+    exportReady,
+    failedJob,
+    failedStage,
+    checkpoint: live
+      ? summarizeCheckpoint(live.kind, live.status)
+      : failedJob
+        ? summarizeCheckpoint(failedJob.kind, failedJob.status)
+        : snapshotReady && !exportReady
+          ? summarizeCheckpoint("export", "queued")
+          : framesReady
+            ? summarizeCheckpoint("export", "done")
+            : null
+  };
+}
+
 /* One word for "where is this course up to", derived from what actually EXISTS rather than
    from job bookkeeping wherever the two could disagree: published frames win over any job
    history, because a course with frames is playable no matter what the queue says.
@@ -92,14 +143,9 @@ async function courseBuildState(courseId) {
   ]);
   const jobs = Array.isArray(jobRows) ? jobRows : [];
   const visual = Array.isArray(visualRows) ? visualRows[0] : null;
-  const live = jobs.find(job => job.status === "running") || jobs.find(job => job.status === "queued");
-  const framesReady = !!(visual && Number(visual.published_version) > 0);
-  let state;
-  if (framesReady) state = "frames-ready";
-  else if (live) state = live.status === "running" ? "running" : "queued";
-  else if (jobs.some(job => job.kind === "snapshot" && job.status === "done")) state = "captures-ready";
-  else if (jobs.length && jobs[0].status === "failed") state = "failed";
-  else state = "none";
+  const derived = deriveCourseBuildStateFromRows({ jobs, visual });
+  const live = derived.live;
+  let state = derived.state;
   /* "none" while the AutoMapper is still resolving this course is unfinished truth: the
      mapper worker chains the snapshot itself when geometry lands (chainVisualSnapshot in
      course-mapper-worker-background.mjs), so a client that hears "mapping" keeps its watch
@@ -120,14 +166,19 @@ async function courseBuildState(courseId) {
     state,
     hasGeometry: Array.isArray(mapRows) && mapRows.length > 0,
     /* Reported even while a rebuild runs: frames stay playable during a re-export. */
-    framesReady,
+    framesReady: derived.framesReady,
     framesVersion: visual ? Number(visual.published_version) || null : null,
     building: !!live,
     activeKind: live ? live.kind : null,
+    checkpoint: derived.checkpoint,
+    snapshotReady: derived.snapshotReady,
+    exportReady: derived.exportReady,
+    failedStage: derived.failedStage,
+    failedKind: derived.failedJob ? derived.failedJob.kind : null,
     stalledSeconds,
     stalled: live && live.status === "running" && stalledSeconds != null && stalledSeconds > STALL_SECONDS,
     progress: live && live.result && live.result.progress || null,
-    lastError: !live && jobs.length && jobs[0].status === "failed" ? String(jobs[0].error || "").slice(0, 300) : null,
+    lastError: !live && derived.failedJob ? String(derived.failedJob.error || "").slice(0, 300) : null,
     jobs
   };
 }
@@ -256,6 +307,11 @@ async function pingWorker(req, jobId) {
 
 export const config = {
   path: "/api/course-visual-jobs",
+};
+
+export const __test = {
+  summarizeCheckpoint,
+  deriveCourseBuildStateFromRows
 };
 
 function json(status, body) {
