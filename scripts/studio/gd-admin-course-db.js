@@ -1091,9 +1091,10 @@ function gdAdminCoursePreviewMarkup(selected){
   if(captured.indexOf(current)<0)current=captured.find(n=>n>=current)??captured[captured.length-1];
   gdAdminCoursePreviewHoleByCourse[selected.id]=current;
   setTimeout(()=>gdAdminCoursePreviewEnsureHoleBake(selected.id,current),0);
-  /* Frame preference: a fresh local styled bake wins (that's the sandbox showing your
-     current recipe), then the server-exported cloud frame, then the local base capture.
-     Never the course-wide mosaic - that made empty holes look captured. */
+  /* Frame preference: terrain-transient (when Terrain tool is open and has a fresh
+     server-rendered relief) → fresh local styled bake → server-exported cloud frame
+     → local base capture. Never the course-wide mosaic — that made empty holes look
+     captured. */
   const styledLists=[record&&record.holeFramePreviewVisuals];
   const baseLists=[record&&record.holeFramePublishedVisuals,record&&record.holeFrameVisuals];
   let asset=null,assetKind="";
@@ -1106,18 +1107,22 @@ function gdAdminCoursePreviewMarkup(selected){
     const match=(Array.isArray(list)?list:[]).find(item=>Number(item&&item.holeNumber)===current);
     if(match){asset=match;assetKind=match.dataUrl?"local-base":"hydrating";break;}
   }
+  // When Terrain is the active tool, prefer the transient server-rendered relief preview
+  // over all other local sources (it still falls back to cloud frame if not yet available).
+  const terrainKey=gdAdminCourseTerrainPreviewKey(selected.id,current);
+  const terrainTransient=gdAdminCourseVisualActiveTool==="terrain"?gdAdminCourseTerrainTransientPreview[terrainKey]:null;
   const src=asset&&asset.dataUrl||"";
   const inline=gdAdminCourseVisualInlineSvg(src,`Hole ${current} play preview`,{preserveImages:true});
   const id=gdAdminJsArg(selected.id);
-  const cloudSrc=cloudFrame?"/api/course-visual-assets?path="+encodeURIComponent(cloudFrame.path):"";
-  const imageMarkup=cloudSrc?`<img src="${gdEscapeHTML(cloudSrc)}" alt="Hole ${gdEscapeHTML(current)} cloud frame" loading="eager" decoding="async" style="width:100%;height:100%;object-fit:cover">`:(inline||src?inline||`<img src="${gdEscapeHTML(src)}" alt="Hole ${gdEscapeHTML(current)} play preview" loading="lazy" decoding="async">`:"");
-  const frame=imageMarkup?gdAdminCoursePreviewPhoneFrameMarkup(imageMarkup,cloudSrc?null:gdAdminCoursePreviewFrameBox(src)):`<div class="gdAdminPhoneEmpty">Hydrating hole capture…</div>`;
-  if(cloudFrame)assetKind="cloud-frame";
+  const cloudSrc=!terrainTransient&&cloudFrame?"/api/course-visual-assets?path="+encodeURIComponent(cloudFrame.path):"";
+  const imageMarkup=terrainTransient?`<img src="${gdEscapeHTML(terrainTransient.blobUrl)}" alt="Hole ${gdEscapeHTML(current)} terrain preview" loading="eager" decoding="async" style="width:100%;height:100%;object-fit:cover">`:cloudSrc?`<img src="${gdEscapeHTML(cloudSrc)}" alt="Hole ${gdEscapeHTML(current)} cloud frame" loading="eager" decoding="async" style="width:100%;height:100%;object-fit:cover">`:(inline||src?inline||`<img src="${gdEscapeHTML(src)}" alt="Hole ${gdEscapeHTML(current)} play preview" loading="lazy" decoding="async">`:"");
+  const frame=imageMarkup?gdAdminCoursePreviewPhoneFrameMarkup(imageMarkup,terrainTransient||cloudSrc?null:gdAdminCoursePreviewFrameBox(src)):`<div class="gdAdminPhoneEmpty">Hydrating hole capture…</div>`;
+  if(terrainTransient)assetKind="terrain-preview";else if(cloudFrame)assetKind="cloud-frame";
   // No CSS recipe is layered on the phone: the surface below is already the baked recipe, so
   // painting it again on top double-applied the look.
   const effects=gdAdminCourseVisualActiveEffects(record);
   const dock=window.GDCourseVisualEngine?gdAdminCourseVisualControls(record,selected.id):"";
-  return `<div class="gdAdminPhonePreviewShell gdAdminPhonePreviewTuned"><div class="gdAdminPhoneInfo"><strong>${gdEscapeHTML(selected.name)} · Hole ${gdEscapeHTML(current)}</strong><span>Sandbox: dial a setting and release it — the recipe re-bakes for this hole so you see the real result, terrain and all. Build course visual re-captures the course and the server automatically applies the active recipe; Publish recipe is the advanced export-only action for the settings you have locked in here.</span><div class="gdAdminPhoneControls"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev hole</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next hole</button>${scanButton}<button type="button" onclick="return gdAdminCourseVisualResetRecipe(${id})">Reset recipe</button><button type="button" onclick="return gdAdminCourseVisualSaveRecipe(${id})">Save recipe</button><button type="button" onclick="return gdAdminCourseRecipeLabUseCurrentHole('${gdEscapeHTML(selected.id)}',${Number(current)||1})">Borrow for Recipe Lab</button><button type="button" class="primary" onclick="return gdAdminCourseVisualPublish(${id})">Publish recipe</button></div><div class="gdAdminCourseStageLine"><span class="${assetKind==="local-styled"||assetKind==="cloud-frame"?"ready":"warn"}">${gdEscapeHTML(assetKind==="local-styled"?"surface ready":assetKind==="cloud-frame"?"cloud frame":assetKind==="local-base"?"original capture":"hydrating")}</span><span>H${gdEscapeHTML(current)} · ${gdEscapeHTML(captured.length)}/${gdEscapeHTML(count)} captured</span><span>${gdEscapeHTML(cloudFrame?String(cloudFrame.path).split("/").slice(-3).join("/"):asset&&asset.path?String(asset.path).split("/").slice(-3).join("/"):"")}</span>${gdAdminCourseCloudJobChip(selected.id)}</div><div class="gdAdminCourseStageLine">${(assetKind==="local-base"?["Original capture - no effects"]:(effects.length?effects:["No effects active"])).map(label=>`<span class="${assetKind==="local-base"?"":"ready"}">${gdEscapeHTML(label)}</span>`).join("")}</div></div><div class="gdAdminPhoneStage"><div class="gdAdminPhone"><div class="gdAdminPhoneScreen"><div class="gdAdminPhoneHud"><span>Clarity Play</span><b>H${gdEscapeHTML(current)}</b></div>${frame}<div class="gdAdminPhoneNav"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next</button></div></div></div>${dock}</div></div>`;
+  return `<div class="gdAdminPhonePreviewShell gdAdminPhonePreviewTuned"><div class="gdAdminPhoneInfo"><strong>${gdEscapeHTML(selected.name)} · Hole ${gdEscapeHTML(current)}</strong><span>Sandbox: dial a setting and release it — the recipe re-bakes for this hole so you see the real result, terrain and all. Build course visual re-captures the course and the server automatically applies the active recipe; Publish recipe is the advanced export-only action for the settings you have locked in here.</span><div class="gdAdminPhoneControls"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev hole</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next hole</button>${scanButton}<button type="button" onclick="return gdAdminCourseVisualResetRecipe(${id})">Reset recipe</button><button type="button" onclick="return gdAdminCourseVisualSaveRecipe(${id})">Save recipe</button><button type="button" onclick="return gdAdminCourseRecipeLabUseCurrentHole('${gdEscapeHTML(selected.id)}',${Number(current)||1})">Borrow for Recipe Lab</button><button type="button" class="primary" onclick="return gdAdminCourseVisualPublish(${id})">Publish recipe</button></div><div class="gdAdminCourseStageLine"><span class="${assetKind==="local-styled"||assetKind==="cloud-frame"||assetKind==="terrain-preview"?"ready":"warn"}">${gdEscapeHTML(assetKind==="terrain-preview"?"terrain preview":assetKind==="local-styled"?"surface ready":assetKind==="cloud-frame"?"cloud frame":assetKind==="local-base"?"original capture":"hydrating")}</span><span>H${gdEscapeHTML(current)} · ${gdEscapeHTML(captured.length)}/${gdEscapeHTML(count)} captured</span><span>${gdEscapeHTML(cloudFrame?String(cloudFrame.path).split("/").slice(-3).join("/"):asset&&asset.path?String(asset.path).split("/").slice(-3).join("/"):"")}</span>${gdAdminCourseCloudJobChip(selected.id)}</div><div class="gdAdminCourseStageLine">${(assetKind==="local-base"?["Original capture - no effects"]:(effects.length?effects:["No effects active"])).map(label=>`<span class="${assetKind==="local-base"?"":"ready"}">${gdEscapeHTML(label)}</span>`).join("")}</div></div><div class="gdAdminPhoneStage"><div class="gdAdminPhone"><div class="gdAdminPhoneScreen"><div class="gdAdminPhoneHud"><span>Clarity Play</span><b>H${gdEscapeHTML(current)}</b></div>${frame}<div class="gdAdminPhoneNav"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next</button></div></div></div>${dock}</div></div>`;
 }
 function gdAdminCourseDebugMarkup(selected){
   return `<div class="gdAdminCourseDebugWindow"><div class="gdCoursePlayDebug" id="gdCoursePlayDebugPanel"><div class="gdCoursePlayDebugHead"><div><h3>Live scan feedback</h3><p>Local scan, frame-cache, sync, and runtime events on this browser. This is browser state, not the database.</p></div><div class="gdCoursePlayDebugActions"><button type="button" onclick="return gdAdminCourseDebugRefresh()">Refresh</button><button type="button" onclick="gdClearCoursePlayPipelineDebug();return gdAdminCourseDebugRefresh()">Clear log</button></div></div><div id="gdCoursePlayDebugSummary" class="gdCoursePlayDebugSummary"></div><div id="gdCoursePlayDebugTable"></div><div id="gdCoursePlayDebugTimeline" class="gdCoursePlayDebugTimeline"></div></div><div class="gdCoursePlayDebug gdCourseMappingDebug" id="gdCourseMappingDebugPanel"></div><details class="gdAdminCourseSettings"><summary>Visual engine internals</summary><div class="gdAdminCourseSettingsBody">${gdAdminCourseVisualMarkup(selected)}</div></details></div>`;
@@ -1640,6 +1645,13 @@ function gdAdminCourseVisualProductFilterAttrs(record){
    picture, and it collapses a drag into one or two renders instead of forty. */
 let gdAdminReliefTimer=null;
 let gdAdminReliefSeq=0;
+/* Transient terrain preview: keyed by courseId:hHoleNumber, holds a blob URL for the
+   most-recent successful /api/relief-preview response. Studio-only, never persisted or
+   published. Cleared on Reset Recipe. */
+const gdAdminCourseTerrainTransientPreview={};
+function gdAdminCourseTerrainPreviewKey(courseId,holeNumber){
+  return `${String(courseId||"")}:h${Number(holeNumber)||0}`;
+}
 function gdAdminCourseVisualReliefSrc(courseId){
   const val=(id,fb)=>{const el=document.getElementById(id);const n=el?Number(el.value):NaN;return Number.isFinite(n)?n:fb;};
   const hole=Math.max(1,Number(gdAdminCoursePreviewHoleByCourse[courseId])||1);
@@ -1681,10 +1693,20 @@ function gdAdminCourseVisualReliefRefresh(courseId){
       }
       const blob=await r.blob();
       if(seq!==gdAdminReliefSeq)return;
+      // Small terrain preview (existing)
       const old=img.getAttribute("src");
       img.src=URL.createObjectURL(blob);
       if(old&&old.startsWith("blob:"))URL.revokeObjectURL(old);
       if(status)status.textContent="Hole "+req.hole+" \u00b7 "+(r.headers.get("X-Relief-Elevation")||"")+" \u00b7 "+(r.headers.get("X-Relief-Shade")||"");
+      // Transient terrain preview for the main phone screen.
+      // A second blob URL from the same blob keeps the lifecycles independent.
+      const key=gdAdminCourseTerrainPreviewKey(courseId,req.hole);
+      const prev=gdAdminCourseTerrainTransientPreview[key];
+      if(prev&&prev.blobUrl)URL.revokeObjectURL(prev.blobUrl);
+      gdAdminCourseTerrainTransientPreview[key]={courseId,holeNumber:req.hole,blobUrl:URL.createObjectURL(blob)};
+      if(gdAdminCourseDatabaseSelected===courseId&&(gdAdminCourseDatabaseTab==="preview"||gdAdminCourseDatabaseTab==="visuals")){
+        gdRenderAdminCourseDatabase();
+      }
     }).catch(()=>{
       if(seq!==gdAdminReliefSeq)return;
       if(status)status.textContent="Relief preview failed to load";
@@ -1714,10 +1736,22 @@ function gdAdminCourseVisualResetRecipe(courseId){
   if(!engine||typeof engine.resetCourseVisualRecipe!=="function"){gdAdminCourseVisualToast("Reset unavailable");return false;}
   try{
     engine.resetCourseVisualRecipe(courseId,null,GD_VISUAL_OFF_OVERRIDES);
-    gdAdminCourseCloudFramesSuppressed[String(courseId||"")]=true;
+    // Do NOT suppress cloud frames here: on cloud-backed courses that have no local raw
+    // frame, suppressing leaves the phone stuck on "Hydrating…". The cloud frame is the
+    // right fallback while the local styled outputs are freshly cleared.
+    // Clear any stale transient terrain preview so the reset is visually clean.
+    const cid=String(courseId||"");
+    const prefix=cid+":h";
+    Object.keys(gdAdminCourseTerrainTransientPreview).forEach(k=>{
+      if(k.startsWith(prefix)){
+        const entry=gdAdminCourseTerrainTransientPreview[k];
+        if(entry&&entry.blobUrl)URL.revokeObjectURL(entry.blobUrl);
+        delete gdAdminCourseTerrainTransientPreview[k];
+      }
+    });
     const select=document.getElementById("gdCourseVisualPreset");
     if(select&&engine.defaultPreset)select.value=String(engine.defaultPreset().id||"");
-    gdAdminCourseVisualToast("Recipe reset — all effects off, showing original capture");
+    gdAdminCourseVisualToast("Recipe reset — all effects off");
     gdRenderAdminCourseDatabase();
   }catch(error){
     gdAdminCourseVisualToast(error&&error.message?error.message:"Recipe reset failed");
@@ -1988,6 +2022,12 @@ const gdAdminCourseVisualBakePending={};
 function gdAdminCourseVisualControlCommitted(courseId){
   gdAdminCourseVisualControlChanged(courseId);
   gdAdminCourseVisualSaveRecipeFromForm(courseId);
+  // Terrain controls use the /api/relief-preview server endpoint instead of the local
+  // pixel-bake, which cannot produce Terrain on cloud-backed courses.
+  if(gdAdminCourseVisualActiveTool==="terrain"){
+    gdAdminCourseVisualReliefRefresh(courseId);
+    return false;
+  }
   const engine=window.GDCourseVisualEngine;
   if(!engine||typeof engine.buildCourseVisualPreview!=="function")return false;
   if(gdAdminCourseVisualBakePending[courseId])return false;
