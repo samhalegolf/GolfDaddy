@@ -474,24 +474,32 @@ async function gdAdminCourseDbAccessToken(){
 const GD_VISUAL_RECIPE_API="/api/course-visual-recipes";
 const GD_VISUAL_RECIPE_LAB_ID="recipe-lab";
 const GD_VISUAL_RECIPE_LAB_DONOR_KEY="gd_course_visual_recipe_lab_donor_v1";
-const gdAdminCourseVisualRecipeCache={fetchedAt:0,recipes:[],activeRecipe:null,loading:null};
+const gdAdminCourseVisualRecipeCache={fetchedAt:0,recipes:[],activeRecipe:null,loading:null,lastError:""};
 const gdAdminCourseVisualRecipeLabPending={};
 function gdAdminCourseVisualRecipeState(){
   if(typeof fetch==="function"&&!gdAdminCourseVisualRecipeCache.loading&&(!gdAdminCourseVisualRecipeCache.fetchedAt||Date.now()-gdAdminCourseVisualRecipeCache.fetchedAt>20000)){
+    let changed=false;
     gdAdminCourseVisualRecipeCache.loading=fetch(GD_VISUAL_RECIPE_API,{headers:{Accept:"application/json"},cache:"no-store"})
-      .then(res=>res.ok?res.json():null)
+      .then(async res=>{
+        if(!res.ok)throw new Error("HTTP "+res.status);
+        return res.json().catch(()=>null);
+      })
       .then(data=>{
         gdAdminCourseVisualRecipeCache.recipes=Array.isArray(data&&data.recipes)?data.recipes:[];
         gdAdminCourseVisualRecipeCache.activeRecipe=data&&data.activeRecipe||gdAdminCourseVisualRecipeCache.recipes.find(recipe=>recipe&&recipe.isActive)||null;
-        gdAdminCourseVisualRecipeCache.fetchedAt=Date.now();
+        gdAdminCourseVisualRecipeCache.lastError="";
+        changed=true;
       })
-      .catch(()=>{})
+      .catch(error=>{
+        gdAdminCourseVisualRecipeCache.lastError=error&&error.message||"Recipe library unavailable";
+      })
       .finally(()=>{
+        gdAdminCourseVisualRecipeCache.fetchedAt=Date.now();
         gdAdminCourseVisualRecipeCache.loading=null;
-        gdRenderAdminCourseDatabase();
+        if(changed)gdRenderAdminCourseDatabase();
       });
   }
-  return {recipes:gdAdminCourseVisualRecipeCache.recipes.slice(),activeRecipe:gdAdminCourseVisualRecipeCache.activeRecipe||null};
+  return {recipes:gdAdminCourseVisualRecipeCache.recipes.slice(),activeRecipe:gdAdminCourseVisualRecipeCache.activeRecipe||null,lastError:gdAdminCourseVisualRecipeCache.lastError||""};
 }
 function gdAdminCourseVisualRecipeById(id){
   id=String(id||"");
