@@ -20,6 +20,7 @@
     "test:practice-email-admin": "node dev/practice-email-admin.test.js",
     "test:table-ocr": "node dev/table-ocr-boxes.test.js && node dev/table-ocr-split.test.js && node dev/table-ocr-semantics.test.js && node dev/table-ocr-words.test.js && node dev/table-ocr-strips.test.js && node dev/table-ocr-deepscan.test.js",
     "test:practice": "npm run test:practice-parser && npm run test:practice-csv && npm run test:practice-adapter && npm run test:practice-graph && npm run test:practice-scanner && npm run test:practice-email && npm run test:table-ocr && npm run test:practice-email-admin && npm run test:bubble-geometry && npm run test:manual-practice",
+    "test:studio-preview-truth": "node dev/studio-preview-truth.test.js",
     "test:courses-near": "node dev/courses-near.test.js",
   "test:course-pin-trust": "node dev/course-pin-trust.test.js",
   "test:nearest-loop": "node dev/nearest-loop-tightening.test.js",

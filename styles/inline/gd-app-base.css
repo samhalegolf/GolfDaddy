@@ -506,6 +506,26 @@
     .gdAdminPhoneHud b{font-size:15px}
     .gdAdminPhoneNav{position:absolute;left:10px;right:10px;bottom:10px;display:flex;justify-content:space-between;gap:8px;z-index:2}
     .gdAdminPhoneNav button{border-radius:999px;padding:8px 11px;background:rgba(0,0,0,.62);border:1px solid rgba(255,255,255,.18);color:#fff;font-size:10px;font-weight:950}
+    .gdAdminPhoneFrameHost{position:absolute;inset:0}
+    /* Preview status strip. The operator needs one place that says whether the control
+       they just released has reached the picture in front of them, and the bar is the
+       proof that anything at all is happening between the two. */
+    .gdAdminVisualPreviewStatus{display:grid;gap:5px;padding:7px 9px;border-radius:10px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08)}
+    .gdAdminVisualPreviewStatusText{color:rgba(255,255,255,.72);font-size:10px;font-weight:950;letter-spacing:.03em}
+    .gdAdminVisualPreviewBar{display:block;height:3px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden}
+    .gdAdminVisualPreviewBar>i{display:block;height:100%;width:0;border-radius:999px;background:rgba(31,211,109,.55);transition:width .16s linear}
+    .gdAdminVisualPreviewStatus[data-state="rendering"] .gdAdminVisualPreviewStatusText{color:#cfe3cf}
+    .gdAdminVisualPreviewStatus[data-state="displayed"] .gdAdminVisualPreviewStatusText{color:#83ffb7}
+    .gdAdminVisualPreviewStatus[data-state="displayed"] .gdAdminVisualPreviewBar>i{background:rgba(31,211,109,.75)}
+    .gdAdminVisualPreviewStatus[data-state="failed"] .gdAdminVisualPreviewStatusText,
+    .gdAdminVisualPreviewStatus[data-state="timed-out"] .gdAdminVisualPreviewStatusText{color:#ffd287}
+    .gdAdminVisualPreviewStatus[data-state="failed"] .gdAdminVisualPreviewBar>i,
+    .gdAdminVisualPreviewStatus[data-state="timed-out"] .gdAdminVisualPreviewBar>i{background:rgba(255,210,135,.6)}
+    /* Ingredient chips. Green is reserved for "provably in the frame on screen"; work in
+       progress is neutral-bright, unconfirmed is dim. Nothing here is green by intent. */
+    .gdAdminVisualIngredients span.work{background:rgba(140,200,255,.14);color:#bfe0ff}
+    .gdAdminVisualIngredients span.wait{background:rgba(255,255,255,.06);color:rgba(255,255,255,.5)}
+    @media (prefers-reduced-motion:reduce){.gdAdminVisualPreviewBar>i{transition:none}}
     .gdAdminPhoneEmpty{display:grid;place-items:center;width:100%;height:100%;padding:18px;box-sizing:border-box;color:rgba(255,255,255,.52);font-size:11px;font-weight:850;text-align:center}
     .gdAdminPhoneScreen .gdAdminPhoneFrameCrop{transition:transform .42s cubic-bezier(.2,.7,.2,1)}
     .gdAdminPhoneScreen.gdAdminPhoneTilted .gdAdminPhoneFrameCrop{transform:perspective(560px) rotateX(var(--gd-phone-tilt,34deg)) scale(.99);transform-origin:50% 98%}

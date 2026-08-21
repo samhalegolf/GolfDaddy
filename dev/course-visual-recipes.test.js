@@ -57,15 +57,15 @@ const root = path.join(__dirname, "..");
   }
 
   // 2. Successful terrain relief response updates the transient preview used by the main phone.
-  assert.ok(studio.includes("gdAdminCourseTerrainTransientPreview[key]={courseId,holeNumber:req.hole,blobUrl:URL.createObjectURL(blob)}"), "relief refresh must store a blob URL for the main phone transient preview");
+  assert.ok(studio.includes("gdAdminCourseTerrainTransientPreview[key]={courseId,holeNumber:req.hole,blobUrl:URL.createObjectURL(blob),requestId:Number(request&&request.requestId)||0}"), "relief refresh must store a blob URL, and the request that produced it, for the main phone transient preview");
 
   // 3. Stale-request protection: older response cannot overwrite a newer one.
   //    The seq guard appears before the transient cache write.
   {
-    const refresh=studio.slice(studio.indexOf("function gdAdminCourseVisualReliefRefresh("));
-    const seqGuard=refresh.indexOf("if(seq!==gdAdminReliefSeq)return;",refresh.indexOf("const blob=await r.blob()"));
+    const refresh=studio.slice(studio.indexOf("function gdAdminCourseVisualReliefFetch("));
+    const seqGuard=refresh.indexOf("if(seq!==gdAdminReliefSeq)return",refresh.indexOf("const blob=await r.blob()"));
     const cacheWrite=refresh.indexOf("gdAdminCourseTerrainTransientPreview[key]=");
-    assert.ok(seqGuard>-1,"seq guard must appear after blob read in gdAdminCourseVisualReliefRefresh");
+    assert.ok(seqGuard>-1,"seq guard must appear after blob read in gdAdminCourseVisualReliefFetch");
     assert.ok(cacheWrite>seqGuard,"transient cache write must be after the seq guard, not before");
   }
 
@@ -81,11 +81,9 @@ const root = path.join(__dirname, "..");
   // 5. Terrain preview changes must not enqueue snapshot or export jobs:
   //    gdAdminCourseVisualReliefRefresh must contain neither enqueueSnapshot nor enqueueExport.
   {
-    const refresh=studio.slice(studio.indexOf("function gdAdminCourseVisualReliefRefresh("));
-    const nextFn=refresh.indexOf("\nfunction ",1);
-    const refreshBody=nextFn>-1?refresh.slice(0,nextFn):refresh.slice(0,2000);
-    assert.ok(!refreshBody.includes("enqueueSnapshot"),"terrain relief refresh must not enqueue snapshot jobs");
-    assert.ok(!refreshBody.includes("enqueueExport"),"terrain relief refresh must not enqueue export jobs");
+    const refresh=studio.slice(studio.indexOf("function gdAdminCourseVisualReliefRefresh("),studio.indexOf("function gdAdminCourseVisualControlChanged("));
+    assert.ok(!refresh.includes("enqueueSnapshot"),"terrain relief refresh must not enqueue snapshot jobs");
+    assert.ok(!refresh.includes("enqueueExport"),"terrain relief refresh must not enqueue export jobs");
   }
 
   console.log("course-visual-recipes passed");

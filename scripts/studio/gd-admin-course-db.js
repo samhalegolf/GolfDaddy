@@ -840,12 +840,19 @@ function gdAdminCoursePreviewEnsureHoleBake(courseId,holeNumber){
   const baked=(record.holeFramePreviewVisuals||[]).some(asset=>Number(asset&&asset.holeNumber)===hole);
   const hasBase=(record.holeFrameVisuals||[]).some(asset=>Number(asset&&asset.holeNumber)===hole);
   if(baked||!hasBase)return;
-  if(gdAdminCourseVisualBakePending[courseId])return;
-  gdAdminCourseVisualBakePending[courseId]=true;
-  engine.buildCourseVisualPreview(courseId,record.presetId,undefined,{holeNumber:hole})
-    .then(()=>{if(gdAdminCourseDatabaseSelected===courseId&&gdAdminCourseDatabaseTab==="preview")gdRenderAdminCourseDatabase();})
-    .catch(error=>{console.warn("[GolfDaddy] hole preview bake failed",error);})
-    .finally(()=>{delete gdAdminCourseVisualBakePending[courseId];});
+  /* This one IS droppable while something is in flight - it is a convenience bake of
+     a hole nobody has adjusted, and the request that is running will supersede it
+     anyway. A committed adjustment never takes this branch; it goes through
+     gdAdminCourseVisualCommitBake, which queues instead of dropping. */
+  const truth=gdAdminCourseVisualTruth;
+  if(truth&&(truth.active(courseId)||truth.queued(courseId)))return;
+  gdAdminCourseVisualCommitBake(courseId,{
+    presetId:String(record.presetId||""),
+    overrides:record.courseOverrides||{},
+    holeNumber:hole,
+    control:"hole-preview",
+    label:"Hole "+hole+" preview"
+  });
 }
 function gdAdminCoursePreviewStep(courseId,delta){
   courseId=String(courseId||gdAdminCourseDatabaseSelected||"");
@@ -1091,10 +1098,41 @@ function gdAdminCoursePreviewMarkup(selected){
   if(captured.indexOf(current)<0)current=captured.find(n=>n>=current)??captured[captured.length-1];
   gdAdminCoursePreviewHoleByCourse[selected.id]=current;
   setTimeout(()=>gdAdminCoursePreviewEnsureHoleBake(selected.id,current),0);
-  /* Frame preference: terrain-transient (when Terrain tool is open and has a fresh
-     server-rendered relief) → fresh local styled bake → server-exported cloud frame
-     → local base capture. Never the course-wide mosaic — that made empty holes look
-     captured. */
+  const view=gdAdminCoursePreviewFrameState(selected,record,current);
+  const asset=view.asset,assetKind=view.assetKind,cloudFrame=view.cloudFrame;
+  const frame=view.frameHtml;
+  const id=gdAdminJsArg(selected.id);
+  /* The frame that has just been written into the DOM is the authority on what the
+     Studio may claim is applied - but only once it is actually in the document, which
+     is after this markup is inserted. */
+  setTimeout(()=>{gdAdminCoursePreviewNoteDisplayedFrame(selected.id,view);gdAdminCourseVisualSyncPreviewChrome(selected.id,view.assetKind);},0);
+  const dock=window.GDCourseVisualEngine?gdAdminCourseVisualControls(record,selected.id):"";
+  return `<div class="gdAdminPhonePreviewShell gdAdminPhonePreviewTuned"><div class="gdAdminPhoneInfo"><strong>${gdEscapeHTML(selected.name)} · Hole ${gdEscapeHTML(current)}</strong><span>Sandbox: dial a setting and release it — the recipe re-bakes for this hole so you see the real result, terrain and all. Build course visual re-captures the course and the server automatically applies the active recipe; Publish recipe is the advanced export-only action for the settings you have locked in here.</span><div class="gdAdminPhoneControls"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev hole</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next hole</button>${scanButton}<button type="button" onclick="return gdAdminCourseVisualResetRecipe(${id})">Reset recipe</button><button type="button" onclick="return gdAdminCourseVisualSaveRecipe(${id})">Save recipe</button><button type="button" onclick="return gdAdminCourseRecipeLabUseCurrentHole('${gdEscapeHTML(selected.id)}',${Number(current)||1})">Borrow for Recipe Lab</button><button type="button" class="primary" onclick="return gdAdminCourseVisualPublish(${id})">Publish recipe</button></div><div class="gdAdminCourseStageLine" id="gdVisualFrameSourceLine">${gdAdminCoursePreviewSourceLine(selected,view,captured.length,count)}</div>${gdAdminCourseVisualStatusMarkup(selected.id,record,assetKind)}</div><div class="gdAdminPhoneStage"><div class="gdAdminPhone"><div class="gdAdminPhoneScreen"><div class="gdAdminPhoneHud"><span>Clarity Play</span><b>H${gdEscapeHTML(current)}</b></div><div class="gdAdminPhoneFrameHost" id="gdVisualPhoneFrameHost" data-course-id="${gdEscapeHTML(selected.id)}" data-asset-kind="${gdEscapeHTML(assetKind)}" data-captured-count="${gdEscapeHTML(captured.length)}" data-hole-count="${gdEscapeHTML(count)}">${frame}</div><div class="gdAdminPhoneNav"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next</button></div></div></div>${dock}</div></div>`;
+}
+/* Where the picture in the phone came from. Repainted with the frame itself - it used
+   to be built once with the panel, so after a bake swapped the image it still said
+   "original capture" and named the base capture's path. */
+function gdAdminCoursePreviewSourceLine(selected,view,capturedCount,holeCount){
+  const kind=view&&view.assetKind||"";
+  const tone=kind==="local-styled"||kind==="cloud-frame"||kind==="terrain-preview"?"ready":"warn";
+  const label=kind==="terrain-preview"?"terrain preview":kind==="local-styled"?"surface ready"
+    :kind==="cloud-frame"?"cloud frame":kind==="local-base"?"original capture":"hydrating";
+  const path=view&&view.cloudFrame?String(view.cloudFrame.path)
+    :view&&view.asset&&view.asset.path?String(view.asset.path):"";
+  const counts=capturedCount==null||capturedCount===""?"":`<span>H${gdEscapeHTML(view&&view.holeNumber||"")} · ${gdEscapeHTML(capturedCount)}/${gdEscapeHTML(holeCount)} captured</span>`;
+  return `<span class="${tone}">${gdEscapeHTML(label)}</span>${counts}`
+    +`<span>${gdEscapeHTML(path?path.split("/").slice(-3).join("/"):"")}</span>`
+    +gdAdminCourseCloudJobChip(selected&&selected.id||"");
+}
+/* Frame preference: terrain-transient (when Terrain tool is open and has a fresh
+   server-rendered relief) -> fresh local styled bake -> server-exported cloud frame
+   -> local base capture. Never the course-wide mosaic, which made empty holes look
+   captured.
+
+   Lifted out of gdAdminCoursePreviewMarkup so the phone image can be repainted on
+   its own when a bake completes, without rebuilding the tuning dock around it. */
+function gdAdminCoursePreviewFrameState(selected,record,current){
+  const courseId=String(selected&&selected.id||"");
   const styledLists=[record&&record.holeFramePreviewVisuals];
   const baseLists=[record&&record.holeFramePublishedVisuals,record&&record.holeFrameVisuals];
   let asset=null,assetKind="";
@@ -1102,27 +1140,23 @@ function gdAdminCoursePreviewMarkup(selected){
     const match=(Array.isArray(list)?list:[]).find(item=>Number(item&&item.holeNumber)===current&&item.dataUrl);
     if(match){asset=match;assetKind="local-styled";break;}
   }
-  const cloudFrame=asset||gdAdminCourseCloudFramesSuppressed[selected.id]?null:gdAdminCourseCloudFrameFor(selected.id,current);
+  const cloudFrame=asset||gdAdminCourseCloudFramesSuppressed[courseId]?null:gdAdminCourseCloudFrameFor(courseId,current);
   if(!asset&&!cloudFrame)for(const list of styledLists.concat(baseLists)){
     const match=(Array.isArray(list)?list:[]).find(item=>Number(item&&item.holeNumber)===current);
     if(match){asset=match;assetKind=match.dataUrl?"local-base":"hydrating";break;}
   }
   // When Terrain is the active tool, prefer the transient server-rendered relief preview
   // over all other local sources (it still falls back to cloud frame if not yet available).
-  const terrainKey=gdAdminCourseTerrainPreviewKey(selected.id,current);
+  const terrainKey=gdAdminCourseTerrainPreviewKey(courseId,current);
   const terrainTransient=gdAdminCourseVisualActiveTool==="terrain"?gdAdminCourseTerrainTransientPreview[terrainKey]:null;
   const src=asset&&asset.dataUrl||"";
   const inline=gdAdminCourseVisualInlineSvg(src,`Hole ${current} play preview`,{preserveImages:true});
-  const id=gdAdminJsArg(selected.id);
   const cloudSrc=!terrainTransient&&cloudFrame?"/api/course-visual-assets?path="+encodeURIComponent(cloudFrame.path):"";
   const imageMarkup=terrainTransient?`<img src="${gdEscapeHTML(terrainTransient.blobUrl)}" alt="Hole ${gdEscapeHTML(current)} terrain preview" loading="eager" decoding="async" style="width:100%;height:100%;object-fit:cover">`:cloudSrc?`<img src="${gdEscapeHTML(cloudSrc)}" alt="Hole ${gdEscapeHTML(current)} cloud frame" loading="eager" decoding="async" style="width:100%;height:100%;object-fit:cover">`:(inline||src?inline||`<img src="${gdEscapeHTML(src)}" alt="Hole ${gdEscapeHTML(current)} play preview" loading="lazy" decoding="async">`:"");
-  const frame=imageMarkup?gdAdminCoursePreviewPhoneFrameMarkup(imageMarkup,terrainTransient||cloudSrc?null:gdAdminCoursePreviewFrameBox(src)):`<div class="gdAdminPhoneEmpty">Hydrating hole capture…</div>`;
+  const frameHtml=imageMarkup?gdAdminCoursePreviewPhoneFrameMarkup(imageMarkup,terrainTransient||cloudSrc?null:gdAdminCoursePreviewFrameBox(src)):`<div class="gdAdminPhoneEmpty">Hydrating hole capture…</div>`;
   if(terrainTransient)assetKind="terrain-preview";else if(cloudFrame)assetKind="cloud-frame";
-  // No CSS recipe is layered on the phone: the surface below is already the baked recipe, so
-  // painting it again on top double-applied the look.
-  const effects=gdAdminCourseVisualActiveEffects(record);
-  const dock=window.GDCourseVisualEngine?gdAdminCourseVisualControls(record,selected.id):"";
-  return `<div class="gdAdminPhonePreviewShell gdAdminPhonePreviewTuned"><div class="gdAdminPhoneInfo"><strong>${gdEscapeHTML(selected.name)} · Hole ${gdEscapeHTML(current)}</strong><span>Sandbox: dial a setting and release it — the recipe re-bakes for this hole so you see the real result, terrain and all. Build course visual re-captures the course and the server automatically applies the active recipe; Publish recipe is the advanced export-only action for the settings you have locked in here.</span><div class="gdAdminPhoneControls"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev hole</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next hole</button>${scanButton}<button type="button" onclick="return gdAdminCourseVisualResetRecipe(${id})">Reset recipe</button><button type="button" onclick="return gdAdminCourseVisualSaveRecipe(${id})">Save recipe</button><button type="button" onclick="return gdAdminCourseRecipeLabUseCurrentHole('${gdEscapeHTML(selected.id)}',${Number(current)||1})">Borrow for Recipe Lab</button><button type="button" class="primary" onclick="return gdAdminCourseVisualPublish(${id})">Publish recipe</button></div><div class="gdAdminCourseStageLine"><span class="${assetKind==="local-styled"||assetKind==="cloud-frame"||assetKind==="terrain-preview"?"ready":"warn"}">${gdEscapeHTML(assetKind==="terrain-preview"?"terrain preview":assetKind==="local-styled"?"surface ready":assetKind==="cloud-frame"?"cloud frame":assetKind==="local-base"?"original capture":"hydrating")}</span><span>H${gdEscapeHTML(current)} · ${gdEscapeHTML(captured.length)}/${gdEscapeHTML(count)} captured</span><span>${gdEscapeHTML(cloudFrame?String(cloudFrame.path).split("/").slice(-3).join("/"):asset&&asset.path?String(asset.path).split("/").slice(-3).join("/"):"")}</span>${gdAdminCourseCloudJobChip(selected.id)}</div><div class="gdAdminCourseStageLine">${(assetKind==="local-base"?["Original capture - no effects"]:(effects.length?effects:["No effects active"])).map(label=>`<span class="${assetKind==="local-base"?"":"ready"}">${gdEscapeHTML(label)}</span>`).join("")}</div></div><div class="gdAdminPhoneStage"><div class="gdAdminPhone"><div class="gdAdminPhoneScreen"><div class="gdAdminPhoneHud"><span>Clarity Play</span><b>H${gdEscapeHTML(current)}</b></div>${frame}<div class="gdAdminPhoneNav"><button type="button" onclick="return gdAdminCoursePreviewStep(${id},-1)">Prev</button><button type="button" onclick="return gdAdminCoursePreviewStep(${id},1)">Next</button></div></div></div>${dock}</div></div>`;
+  return {asset:asset,assetKind:assetKind,cloudFrame:cloudFrame,terrainTransient:terrainTransient,
+    src:src,frameHtml:frameHtml,holeNumber:current,courseId:courseId};
 }
 function gdAdminCourseDebugMarkup(selected){
   return `<div class="gdAdminCourseDebugWindow"><div class="gdCoursePlayDebug" id="gdCoursePlayDebugPanel"><div class="gdCoursePlayDebugHead"><div><h3>Live scan feedback</h3><p>Local scan, frame-cache, sync, and runtime events on this browser. This is browser state, not the database.</p></div><div class="gdCoursePlayDebugActions"><button type="button" onclick="return gdAdminCourseDebugRefresh()">Refresh</button><button type="button" onclick="gdClearCoursePlayPipelineDebug();return gdAdminCourseDebugRefresh()">Clear log</button></div></div><div id="gdCoursePlayDebugSummary" class="gdCoursePlayDebugSummary"></div><div id="gdCoursePlayDebugTable"></div><div id="gdCoursePlayDebugTimeline" class="gdCoursePlayDebugTimeline"></div></div><div class="gdCoursePlayDebug gdCourseMappingDebug" id="gdCourseMappingDebugPanel"></div><details class="gdAdminCourseSettings"><summary>Visual engine internals</summary><div class="gdAdminCourseSettingsBody">${gdAdminCourseVisualMarkup(selected)}</div></details></div>`;
@@ -1630,6 +1664,412 @@ function gdAdminCourseVisualMergedSettings(presetId,overrides){
 function gdAdminCourseVisualProductFilterAttrs(record){
   return `class="gdAdminCourseVisualProducts"`;
 }
+/* ===========================================================================
+   PREVIEW TRUTH
+   ===========================================================================
+
+   The controls describe what the operator WANTS. The phone shows what we HAVE.
+   Those are two different recipes for as long as a bake takes, and every lie the
+   Studio used to tell came from treating them as one:
+
+     - a committed adjustment was dropped whenever another bake was in flight
+       (`if(bakePending[courseId])return false`), so the controls described a
+       picture that was never rendered;
+     - the ingredient chips were computed from the settings, so an effect went
+       green the instant it was switched on rather than when it reached the image;
+     - a bake that failed resolved anyway (the engine records failures on the
+       record instead of rejecting), so nothing ever said so;
+     - a bake finishing rebuilt the whole panel from the saved recipe, which
+       yanked any slider the operator had moved since back to its old value.
+
+   gd-studio-preview-truth.js owns the lifecycle; this section is the wiring:
+   what a request actually runs, what counts as the displayed frame, and which
+   parts of the DOM are allowed to be touched when one completes. */
+const gdAdminCourseVisualTruth=(function(){
+  const api=typeof window!=="undefined"?window.GDStudioPreviewTruth:null;
+  if(!api||typeof api.createPreviewTruth!=="function"){
+    try{console.warn("[GolfDaddy] gd-studio-preview-truth.js missing - Studio preview status disabled");}catch(e){}
+    return null;
+  }
+  return api.createPreviewTruth({
+    onChange:function(courseId,reason){gdAdminCourseVisualPreviewChanged(courseId,reason);},
+    /* One line per transition, and never any frame data - a dataUrl in the console
+       is a megabyte of base64 that hides the thing you opened it to read. */
+    log:function(line){
+      try{
+        console.debug("[VisualPreview] request="+line.requestId
+          +" course="+line.courseId
+          +" hole="+line.hole
+          +(line.control?" control="+line.control:"")
+          +" kind="+line.kind
+          +" overrideHash="+line.overrideHash
+          +" state="+line.state
+          +(line.duration?" duration="+(line.duration/1000).toFixed(2)+"s":"")
+          +(line.error?" error="+line.error:"")
+          +(line.note?" note="+line.note:"")
+          +(line.supersededBy?" supersededBy="+line.supersededBy:""));
+      }catch(e){}
+    }
+  });
+})();
+function gdAdminCourseVisualOverrideHash(overrides){
+  const api=typeof window!=="undefined"?window.GDStudioPreviewTruth:null;
+  return api&&typeof api.overrideHash==="function"?api.overrideHash(overrides||{}):"";
+}
+/* Every control the tuning dock owns. Used to carry live values across a full panel
+   rebuild - see gdAdminCourseVisualFormSnapshot. */
+const GD_VISUAL_CONTROL_IDS=[
+  "gdCourseVisualPreset","gdCourseVisualRecipeSelect",
+  "gdCourseVisualHueMin","gdCourseVisualHueMax","gdCourseVisualSatMin","gdCourseVisualSatMax",
+  "gdCourseVisualLumMin","gdCourseVisualLumMax","gdCourseVisualTargetPull",
+  "gdCourseVisualBrightness","gdCourseVisualShadowFloor","gdCourseVisualHighlightCeiling","gdCourseVisualContrast",
+  "gdCourseVisualFloodOn","gdCourseVisualFloodAmbient","gdCourseVisualFloodLit","gdCourseVisualFloodThrow",
+  "gdCourseVisualFloodSpread","gdCourseVisualFloodGreenPool","gdCourseVisualFloodGreenRadius","gdCourseVisualFloodMask",
+  "gdCourseVisualTerrainStrength","gdCourseVisualMowing",
+  "gdReliefExaggeration","gdReliefAutoAzimuth","gdReliefAzimuth","gdReliefAltitude","gdReliefAmbient","gdReliefShadeOnly"
+];
+/* A full panel rebuild reconstructs every control from the SAVED recipe. Do that
+   while a slider is under the operator's finger - or while a second slider has been
+   moved but not yet released - and the control jumps back to the value the last
+   bake started from. Two guards, because the 38 call sites of the full render
+   include cloud-job polls and hydration callbacks that fire on their own schedule:
+
+     1. a full render is DEFERRED while a control is being interacted with;
+     2. any full render that does happen puts the live control values back after.
+
+   Reseeding (Apply preset, Apply recipe, Reset recipe) opts out of (2) - there the
+   whole point is that the controls take new values. */
+let gdAdminCourseVisualInteractionActive=false;
+let gdAdminCourseVisualInteractionAt=0;
+let gdAdminCourseVisualDeferredRenderTimer=null;
+let gdAdminCourseVisualFormReseed=false;
+function gdAdminCourseVisualReseedControls(){gdAdminCourseVisualFormReseed=true;}
+function gdAdminCourseVisualControlsBusy(){
+  const since=gdAdminCourseVisualInteractionAt?Date.now()-gdAdminCourseVisualInteractionAt:Infinity;
+  /* A pointerdown with no release - a gesture the browser never finished, a drag
+     interrupted by a dialog - must not be able to hold every render off forever. */
+  if(gdAdminCourseVisualInteractionActive)return since<5000;
+  /* A short tail after release: `change` fires, the commit runs, and the operator is
+     usually already on the next control by the time the bake reports back. */
+  return since<400;
+}
+function gdAdminCourseVisualNoteInteraction(active){
+  gdAdminCourseVisualInteractionActive=!!active;
+  gdAdminCourseVisualInteractionAt=Date.now();
+}
+/* Deferral has to reschedule itself. Hanging the pending render off the next
+   interaction event meant a render deferred AFTER the last pointer event - a Reset
+   pressed straight after a slider release, say - was never run at all, and the
+   controls kept the values the reset had just thrown away. */
+function gdAdminCourseVisualDeferRender(){
+  if(gdAdminCourseVisualDeferredRenderTimer)return;
+  gdAdminCourseVisualDeferredRenderTimer=setTimeout(()=>{
+    gdAdminCourseVisualDeferredRenderTimer=null;
+    gdRenderAdminCourseDatabase();
+  },220);
+}
+function gdAdminCourseVisualFormSnapshot(){
+  if(typeof document==="undefined"||!document.getElementById)return null;
+  if(!document.querySelector||!document.querySelector(".gdAdminCourseVisualControls"))return null;
+  const values={};
+  GD_VISUAL_CONTROL_IDS.forEach(id=>{
+    const el=document.getElementById(id);
+    if(!el)return;
+    values[id]=el.type==="checkbox"?{checked:!!el.checked}:{value:el.value};
+  });
+  const focus=document.activeElement;
+  return {values:values,focusId:focus&&focus.id&&values[focus.id]?focus.id:""};
+}
+function gdAdminCourseVisualRestoreForm(snapshot){
+  if(!snapshot||typeof document==="undefined")return;
+  Object.keys(snapshot.values).forEach(id=>{
+    const el=document.getElementById(id);
+    if(!el)return;
+    const saved=snapshot.values[id];
+    if(Object.prototype.hasOwnProperty.call(saved,"checked")){
+      if(el.checked!==saved.checked)el.checked=saved.checked;
+    }else if(String(el.value)!==String(saved.value)){
+      el.value=saved.value;
+    }
+  });
+  if(snapshot.focusId){
+    const el=document.getElementById(snapshot.focusId);
+    if(el&&document.activeElement!==el&&typeof el.focus==="function"){
+      try{el.focus({preventScroll:true});}catch(e){try{el.focus();}catch(e2){}}
+    }
+  }
+}
+function gdAdminCoursePreviewSelectedFor(courseId){
+  const id=String(courseId||"");
+  if(!id)return null;
+  if(id===GD_VISUAL_RECIPE_LAB_ID)return {id:id,name:"Recipe Lab"};
+  try{return gdAdminCourseDbSummaries().find(item=>item.id===id)||null;}catch(e){return null;}
+}
+/* The recipe the controls are asking for. The last COMMIT, not the live DOM: a
+   half-dragged slider has not asked for anything yet, and reading the DOM here
+   would make the ingredient list flicker during a drag. */
+function gdAdminCourseVisualCurrentSettings(courseId,record){
+  const want=gdAdminCourseVisualTruth&&gdAdminCourseVisualTruth.desired(courseId);
+  if(want)return gdAdminCourseVisualMergedSettings(want.presetId,want.overrides);
+  return gdAdminCourseVisualMergedSettings(record&&record.presetId,record&&record.courseOverrides);
+}
+/* The recipe that produced the frame currently painted in the phone, or null when
+   it cannot be identified - a cloud frame baked server-side, a raw capture, or a
+   styled frame left over from a previous session under a recipe we no longer hold.
+   Null is an honest answer and the ingredient list says so; it never guesses. */
+function gdAdminCourseVisualDisplayedSettings(courseId,record){
+  if(!gdAdminCourseVisualTruth)return null;
+  const frame=gdAdminCourseVisualTruth.displayed(courseId);
+  if(!frame||frame.kind==="terrain"||frame.recipeKnown===false||!frame.overrideHash)return null;
+  /* Anything this session has rendered is identified exactly, by hash. This is what
+     keeps the other ingredients honest after a change that moves the recipe hash
+     without moving the local bake - terrain strength, which is applied by the cloud
+     export rather than the sandbox. */
+  const known=gdAdminCourseVisualTruth.recipeFor(courseId,frame.presetId,frame.overrideHash);
+  if(known)return gdAdminCourseVisualMergedSettings(frame.presetId,known);
+  /* Resolved when the frame was painted, before any commit could move the saved
+     recipe out from under it. */
+  if(frame.overrides)return gdAdminCourseVisualMergedSettings(frame.presetId,frame.overrides);
+  /* Nothing in this session produced it - but if it carries the hash of the saved
+     recipe, the saved recipe is what produced it. That is the ordinary page-load
+     case, and it is the only inference allowed here. */
+  const saved=record&&record.courseOverrides||null;
+  if(saved&&String(gdAdminCourseVisualOverrideHash(saved))===String(frame.overrideHash)
+    &&String((record&&record.presetId)||"")===String(frame.presetId||"")){
+    return gdAdminCourseVisualMergedSettings(record.presetId,saved);
+  }
+  return null;
+}
+function gdAdminCourseVisualIngredients(courseId,record,assetKind){
+  const api=typeof window!=="undefined"?window.GDStudioPreviewTruth:null;
+  if(!api||typeof api.ingredientStates!=="function")return [];
+  const truth=gdAdminCourseVisualTruth;
+  return api.ingredientStates({
+    current:gdAdminCourseVisualCurrentSettings(courseId,record),
+    /* A raw capture has had nothing done to it, so no ingredient can be confirmed
+       against it - the same answer as "recipe unknown", reached honestly. */
+    displayed:assetKind==="local-base"?null:gdAdminCourseVisualDisplayedSettings(courseId,record),
+    pipeline:truth?truth.status(courseId):{state:"idle"},
+    terrain:{confirmed:truth?truth.terrainConfirmed(courseId):false}
+  });
+}
+function gdAdminCourseVisualIngredientMarkup(courseId,record,assetKind){
+  const items=gdAdminCourseVisualIngredients(courseId,record,assetKind);
+  const tone={confirmed:"ready",applying:"work",waiting:"wait",failed:"warn","timed-out":"warn",unconfirmed:"wait",off:"off"};
+  const glyph={confirmed:"✓ ",applying:"",waiting:"",failed:"✕ ","timed-out":"⚠ ",unconfirmed:"",off:""};
+  const shown=items.filter(item=>item.state!=="off");
+  const head=assetKind==="local-base"?`<span class="warn">Original capture - no effects</span>`:"";
+  if(!shown.length)return head||`<span>No effects active</span>`;
+  return head+shown.map(item=>
+    `<span class="${tone[item.state]||""}" data-ingredient="${gdEscapeHTML(item.id)}" data-state="${gdEscapeHTML(item.state)}">${gdEscapeHTML((glyph[item.state]||"")+item.text)}</span>`
+  ).join("");
+}
+/* The compact status strip beside the phone: what is happening, and how long it has
+   been happening for. */
+function gdAdminCourseVisualStatusMarkup(courseId,record,assetKind){
+  const key=gdEscapeHTML(String(courseId||""));
+  const truth=gdAdminCourseVisualTruth;
+  const state=truth?truth.status(courseId).state:"idle";
+  const text=truth?truth.statusText(courseId):"";
+  return `<div class="gdAdminVisualPreviewStatus" id="gdVisualPreviewStatus" data-course-id="${key}" data-state="${gdEscapeHTML(state)}">`
+    +`<span class="gdAdminVisualPreviewStatusText" id="gdVisualPreviewStatusText">${gdEscapeHTML(text||"Preview idle")}</span>`
+    +`<span class="gdAdminVisualPreviewBar"><i id="gdVisualPreviewBarFill"></i></span>`
+    +`</div>`
+    +`<div class="gdAdminCourseStageLine gdAdminVisualIngredients" id="gdVisualIngredients">${gdAdminCourseVisualIngredientMarkup(courseId,record,assetKind)}</div>`;
+}
+let gdAdminCourseVisualStatusTimer=null;
+function gdAdminCourseVisualEnsureStatusTicker(){
+  if(typeof document==="undefined")return;
+  const tick=()=>{
+    const host=document.getElementById("gdVisualPreviewStatus");
+    const id=host&&host.getAttribute("data-course-id")||"";
+    if(!id||!gdAdminCourseVisualTruth||!gdAdminCourseVisualTruth.status(id).busy){
+      if(gdAdminCourseVisualStatusTimer){clearInterval(gdAdminCourseVisualStatusTimer);gdAdminCourseVisualStatusTimer=null;}
+      if(id)gdAdminCourseVisualSyncPreviewChrome(id);
+      return;
+    }
+    gdAdminCourseVisualSyncPreviewChrome(id);
+  };
+  if(gdAdminCourseVisualStatusTimer)return;
+  const host=document.getElementById("gdVisualPreviewStatus");
+  const id=host&&host.getAttribute("data-course-id")||"";
+  if(!id||!gdAdminCourseVisualTruth||!gdAdminCourseVisualTruth.status(id).busy)return;
+  gdAdminCourseVisualStatusTimer=setInterval(tick,120);
+}
+/* Updates ONLY the status strip, the progress bar and the ingredient chips. Nothing
+   here goes near the controls. */
+function gdAdminCourseVisualSyncPreviewChrome(courseId,assetKind){
+  if(typeof document==="undefined")return false;
+  const host=document.getElementById("gdVisualPreviewStatus");
+  if(!host)return false;
+  const id=String(host.getAttribute("data-course-id")||"");
+  if(id!==String(courseId||""))return false;
+  const truth=gdAdminCourseVisualTruth;
+  const status=truth?truth.status(id):{state:"idle",busy:false};
+  host.setAttribute("data-state",String(status.state||"idle"));
+  const textEl=document.getElementById("gdVisualPreviewStatusText");
+  const text=(truth?truth.statusText(id):"")||"Preview idle";
+  if(textEl&&textEl.textContent!==text)textEl.textContent=text;
+  const fill=document.getElementById("gdVisualPreviewBarFill");
+  if(fill){
+    /* Elapsed against the request's own budget. Not a fake percentage of work done -
+       it is the timer, drawn, which is the only honest quantity available. */
+    const budget=Math.max(1,Number(status.timeoutMs)||15000);
+    const pct=status.state==="rendering"?Math.min(97,6+(Number(status.elapsedMs)||0)/budget*94)
+      :status.state==="requested"?4
+        :status.state==="displayed"?100:0;
+    fill.style.width=pct.toFixed(1)+"%";
+  }
+  const chips=document.getElementById("gdVisualIngredients");
+  if(chips){
+    const kind=assetKind||document.getElementById("gdVisualPhoneFrameHost")?.getAttribute("data-asset-kind")||"";
+    const record=gdAdminCourseVisualRecord(id);
+    const html=gdAdminCourseVisualIngredientMarkup(id,record,kind);
+    if(chips.__gdIngredientHtml!==html){chips.__gdIngredientHtml=html;chips.innerHTML=html;}
+  }
+  gdAdminCourseVisualEnsureStatusTicker();
+  return true;
+}
+/* Repaints the phone image from the record, and tells the truth model what is now
+   on screen. The previous image stays until this swaps it, so a bake in flight never
+   blanks the phone. */
+function gdAdminCoursePreviewRefreshFrame(courseId){
+  if(typeof document==="undefined")return false;
+  const host=document.getElementById("gdVisualPhoneFrameHost");
+  if(!host||String(host.getAttribute("data-course-id")||"")!==String(courseId||""))return false;
+  const selected=gdAdminCoursePreviewSelectedFor(courseId);
+  if(!selected)return false;
+  const record=gdAdminCourseVisualRecord(selected.id);
+  const current=Math.max(1,Number(gdAdminCoursePreviewHoleByCourse[selected.id])||1);
+  const view=gdAdminCoursePreviewFrameState(selected,record,current);
+  if(host.__gdFrameHtml!==view.frameHtml){
+    host.__gdFrameHtml=view.frameHtml;
+    host.innerHTML=view.frameHtml;
+  }
+  host.setAttribute("data-asset-kind",view.assetKind||"");
+  const sourceLine=document.getElementById("gdVisualFrameSourceLine");
+  if(sourceLine){
+    /* The hole counts belong to the panel, not the frame, so they are parked on the
+       host at render time rather than parsed back out of the line's own text. */
+    const html=gdAdminCoursePreviewSourceLine(selected,view,
+      host.getAttribute("data-captured-count"),host.getAttribute("data-hole-count"));
+    if(sourceLine.__gdSourceHtml!==html){sourceLine.__gdSourceHtml=html;sourceLine.innerHTML=html;}
+  }
+  gdAdminCoursePreviewNoteDisplayedFrame(selected.id,view);
+  gdAdminCourseVisualSyncPreviewChrome(selected.id,view.assetKind);
+  return true;
+}
+/* The single gate that is allowed to turn an ingredient green. */
+function gdAdminCoursePreviewNoteDisplayedFrame(courseId,view){
+  if(!gdAdminCourseVisualTruth||!view)return;
+  gdAdminCourseVisualTruth.noteDisplayedFrame(courseId,
+    gdAdminCoursePreviewFrameDescriptor(view,gdAdminCourseVisualRecord(courseId)));
+}
+function gdAdminCoursePreviewFrameDescriptor(view,record){
+  if(!view||!view.assetKind)return null;
+  if(view.assetKind==="terrain-preview"){
+    return {kind:"terrain",requestId:Number(view.terrainTransient&&view.terrainTransient.requestId)||0,
+      holeNumber:view.holeNumber,source:"relief-preview"};
+  }
+  if(view.assetKind==="local-styled"){
+    const asset=view.asset||{};
+    /* Resolve the frame's recipe HERE, while it is still resolvable. A frame baked in a
+       previous session can only be identified by matching its hash against the saved
+       recipe - and the very next control commit overwrites that saved recipe, so a
+       first adjustment after a page load would otherwise turn every ingredient into
+       "not in displayed frame". Reading it at paint time is also the truthful moment:
+       this is the recipe that produced the picture going on screen. */
+    const saved=record&&record.courseOverrides||null;
+    const resolved=saved
+      &&String(gdAdminCourseVisualOverrideHash(saved))===String(asset.overrideHash||"")
+      &&String((record&&record.presetId)||"")===String(asset.presetId||"")
+      ?saved:null;
+    return {kind:"bake",presetId:String(asset.presetId||""),overrideHash:String(asset.overrideHash||""),
+      holeNumber:Number(asset.holeNumber)||view.holeNumber,source:"local-styled",overrides:resolved};
+  }
+  /* A cloud frame or a raw capture is a real picture but not one whose recipe this
+     browser can vouch for, so it can never confirm an ingredient. */
+  return {kind:"bake",presetId:"",overrideHash:"",holeNumber:view.holeNumber,
+    source:view.assetKind,recipeKnown:false};
+}
+let gdAdminCourseVisualPreviewChangeDepth=0;
+function gdAdminCourseVisualPreviewChanged(courseId,reason){
+  if(typeof document==="undefined")return;
+  if(gdAdminCourseVisualPreviewChangeDepth>3)return;
+  gdAdminCourseVisualPreviewChangeDepth++;
+  try{
+    /* "stale" is an abandoned render arriving late - it has probably just written a
+       frame onto the record, so the phone has to be looked at again. */
+    if(reason==="rendered"||reason==="displayed"||reason==="failed"||reason==="timed-out"||reason==="stale"){
+      gdAdminCoursePreviewRefreshFrame(courseId);
+    }
+    gdAdminCourseVisualSyncPreviewChrome(courseId);
+  }catch(error){
+    try{console.warn("[GolfDaddy] preview chrome update failed",error);}catch(e){}
+  }finally{
+    gdAdminCourseVisualPreviewChangeDepth--;
+  }
+  if(gdAdminCourseVisualPreviewChangeDepth===0&&reason==="stale"){
+    gdAdminCourseVisualReconcile(courseId);
+  }
+}
+/* A bake that timed out is abandoned, not cancelled - the engine has no cancel - so
+   it can still land on the record afterwards and leave the phone showing an older
+   recipe than the controls. Nothing else will notice, so notice here: once per
+   recipe, re-render what is actually wanted. */
+function gdAdminCourseVisualReconcile(courseId){
+  const truth=gdAdminCourseVisualTruth;
+  if(!truth||!truth.needsReconcile(courseId))return false;
+  const want=truth.desired(courseId);
+  if(!want)return false;
+  truth.markReconciled(courseId);
+  gdAdminCourseVisualCommitBake(courseId,{
+    presetId:want.presetId,overrides:want.overrides,holeNumber:want.holeNumber,
+    control:want.control,label:want.label
+  });
+  return true;
+}
+/* Every non-terrain preview goes through here: slider release, preset, recipe apply,
+   reset, on-demand hole bake and reconcile alike. One queue, latest-request-wins. */
+function gdAdminCourseVisualCommitBake(courseId,spec){
+  spec=spec||{};
+  const truth=gdAdminCourseVisualTruth;
+  const engine=window.GDCourseVisualEngine;
+  if(!engine||typeof engine.buildCourseVisualPreview!=="function")return null;
+  const presetId=String(spec.presetId||"");
+  const overrides=spec.overrides||{};
+  const holeNumber=Math.max(0,Number(spec.holeNumber)||0);
+  const overrideHash=gdAdminCourseVisualOverrideHash(overrides);
+  if(!truth){
+    /* No truth model (script missing): fall back to the plain bake rather than
+       leaving the operator with dead controls. */
+    return engine.buildCourseVisualPreview(courseId,presetId,overrides,holeNumber?{holeNumber:holeNumber}:undefined)
+      .then(()=>gdRenderAdminCourseDatabase()).catch(()=>{});
+  }
+  return truth.commit({
+    courseId:courseId,holeNumber:holeNumber,presetId:presetId,overrides:overrides,
+    overrideHash:overrideHash,control:String(spec.control||""),label:String(spec.label||spec.control||"Preview"),
+    kind:"bake",
+    run:function(request){
+      return Promise.resolve()
+        .then(()=>engine.buildCourseVisualPreview(courseId,request.presetId,request.overrides,
+          request.holeNumber?{holeNumber:request.holeNumber}:undefined))
+        .then(()=>{
+          /* buildCourseVisualPreview RESOLVES on failure - it writes the fault onto
+             the record instead of rejecting - so a resolved promise proves nothing.
+             The proof is a frame carrying this request's recipe. */
+          const record=gdAdminCourseVisualRecord(courseId);
+          if(!request.holeNumber)return {ok:!(record&&record.status==="failed")};
+          const frame=((record&&record.holeFramePreviewVisuals)||[])
+            .find(item=>Number(item&&item.holeNumber)===request.holeNumber&&item.dataUrl);
+          if(frame&&String(frame.overrideHash||"")===String(request.overrideHash)
+            &&String(frame.presetId||"")===String(request.presetId||""))return {ok:true};
+          const error=record&&record.lastError||null;
+          return {ok:false,error:{message:error&&error.message||"The bake produced no frame for this recipe"}};
+        });
+    }
+  });
+}
 // While a control is still moving: touch NOTHING heavy. Saving to the engine per input tick
 // meant two full JSON clones of a record carrying every baked frame's pixels - hundreds of MB
 // of string copying per tick once captures became owned rasters, which froze the sliders.
@@ -1677,42 +2117,60 @@ function gdAdminCourseVisualReliefRefresh(courseId){
   if(!img)return false;
   if(gdAdminReliefTimer)clearTimeout(gdAdminReliefTimer);
   gdAdminReliefTimer=setTimeout(()=>{
-    const seq=++gdAdminReliefSeq;
     const req=gdAdminCourseVisualReliefSrc(courseId);
-    if(status)status.textContent="Shading hole "+req.hole+"\u2026";
-    fetch(req.url).then(async r=>{
-      /* Out-of-order responses would otherwise leave the picture showing an older setting
-         than the sliders claim. */
-      if(seq!==gdAdminReliefSeq)return;
-      if(!r.ok){
-        let detail="";
-        try{const j=await r.json();detail=j.detail||j.error||"";}catch(e){}
-        if(status)status.textContent="Hole "+req.hole+": "+(detail||("relief unavailable ("+r.status+")"));
-        img.removeAttribute("src");
-        return;
-      }
-      const blob=await r.blob();
-      if(seq!==gdAdminReliefSeq)return;
-      // Small terrain preview (existing)
-      const old=img.getAttribute("src");
-      img.src=URL.createObjectURL(blob);
-      if(old&&old.startsWith("blob:"))URL.revokeObjectURL(old);
-      if(status)status.textContent="Hole "+req.hole+" \u00b7 "+(r.headers.get("X-Relief-Elevation")||"")+" \u00b7 "+(r.headers.get("X-Relief-Shade")||"");
-      // Transient terrain preview for the main phone screen.
-      // A second blob URL from the same blob keeps the lifecycles independent.
-      const key=gdAdminCourseTerrainPreviewKey(courseId,req.hole);
-      const prev=gdAdminCourseTerrainTransientPreview[key];
-      if(prev&&prev.blobUrl)URL.revokeObjectURL(prev.blobUrl);
-      gdAdminCourseTerrainTransientPreview[key]={courseId,holeNumber:req.hole,blobUrl:URL.createObjectURL(blob)};
-      if(gdAdminCourseDatabaseSelected===courseId&&(gdAdminCourseDatabaseTab==="preview"||gdAdminCourseDatabaseTab==="visuals")){
-        gdRenderAdminCourseDatabase();
-      }
-    }).catch(()=>{
-      if(seq!==gdAdminReliefSeq)return;
-      if(status)status.textContent="Relief preview failed to load";
-    });
+    /* Terrain does not go through the local pixel bake - it cannot, on a cloud-backed
+       course - but it gets the same transaction, the same queue and the same
+       confirmation rule. The small diagnostic preview updating is NOT confirmation:
+       only the main phone showing this request's blob is. */
+    return gdAdminCourseVisualCommitTerrain(courseId,req,img,status);
   },180);
   return false;
+}
+function gdAdminCourseVisualCommitTerrain(courseId,req,img,status){
+  const truth=gdAdminCourseVisualTruth;
+  const presetId=String(document.getElementById("gdCourseVisualPreset")?.value||"");
+  const overrides=gdAdminCourseVisualOverridesFromForm(courseId);
+  const run=(request)=>gdAdminCourseVisualReliefFetch(courseId,req,img,status,request);
+  if(!truth)return run({requestId:0,holeNumber:req.hole});
+  return truth.commit({
+    courseId:courseId,holeNumber:req.hole,presetId:presetId,overrides:overrides,
+    overrideHash:gdAdminCourseVisualOverrideHash(overrides),
+    control:"terrain",label:"Terrain",kind:"terrain",run:run
+  });
+}
+function gdAdminCourseVisualReliefFetch(courseId,req,img,status,request){
+  const seq=++gdAdminReliefSeq;
+  if(status)status.textContent="Shading hole "+req.hole+"\u2026";
+  return fetch(req.url).then(async r=>{
+    /* Out-of-order responses would otherwise leave the picture showing an older setting
+       than the sliders claim. */
+    if(seq!==gdAdminReliefSeq)return {ok:false,error:{message:"Superseded by a newer terrain request"}};
+    if(!r.ok){
+      let detail="";
+      try{const j=await r.json();detail=j.detail||j.error||"";}catch(e){}
+      if(status)status.textContent="Hole "+req.hole+": "+(detail||("relief unavailable ("+r.status+")"));
+      img.removeAttribute("src");
+      return {ok:false,error:{message:detail||("relief unavailable ("+r.status+")")}};
+    }
+    const blob=await r.blob();
+    if(seq!==gdAdminReliefSeq)return {ok:false,error:{message:"Superseded by a newer terrain request"}};
+    // Small terrain preview (existing)
+    const old=img.getAttribute("src");
+    img.src=URL.createObjectURL(blob);
+    if(old&&old.startsWith("blob:"))URL.revokeObjectURL(old);
+    if(status)status.textContent="Hole "+req.hole+" \u00b7 "+(r.headers.get("X-Relief-Elevation")||"")+" \u00b7 "+(r.headers.get("X-Relief-Shade")||"");
+    // Transient terrain preview for the main phone screen.
+    // A second blob URL from the same blob keeps the lifecycles independent.
+    const key=gdAdminCourseTerrainPreviewKey(courseId,req.hole);
+    const prev=gdAdminCourseTerrainTransientPreview[key];
+    if(prev&&prev.blobUrl)URL.revokeObjectURL(prev.blobUrl);
+    gdAdminCourseTerrainTransientPreview[key]={courseId,holeNumber:req.hole,blobUrl:URL.createObjectURL(blob),requestId:Number(request&&request.requestId)||0};
+    return {ok:true};
+  }).catch(error=>{
+    if(seq!==gdAdminReliefSeq)return {ok:false,error:{message:"Superseded by a newer terrain request"}};
+    if(status)status.textContent="Relief preview failed to load";
+    return {ok:false,error:{message:error&&error.message||"Relief preview failed to load"}};
+  });
 }
 function gdAdminCourseVisualControlChanged(courseId){
   return false;
@@ -1727,7 +2185,7 @@ const GD_VISUAL_OFF_OVERRIDES={
   turf:{greenStrength:0,greenTone:0},
   lighting:{brightnessTarget:52,contrastTarget:1},
   readability:{sharpness:0,fairwaySeparation:0},
-  mowingVisibility:0,
+  mowingVisibility:"Unknown",
   visualTools:{holeTerrainStrength:0,courseTerrainStrength:0,fairwayAirbrush:false},
   floodlight:{enabled:false}
 };
@@ -1752,7 +2210,21 @@ function gdAdminCourseVisualResetRecipe(courseId){
     const select=document.getElementById("gdCourseVisualPreset");
     if(select&&engine.defaultPreset)select.value=String(engine.defaultPreset().id||"");
     gdAdminCourseVisualToast("Recipe reset — all effects off");
+    /* The controls are rebuilt from the reset recipe, so the live values must NOT be
+       carried across this render. */
+    gdAdminCourseVisualReseedControls();
     gdRenderAdminCourseDatabase();
+    /* Reset is an adjustment like any other: it goes through the same queue and is
+       not finished until a frame carrying the reset recipe reaches the phone. Without
+       this the panel showed reset controls, a reset ingredient list, and the previous
+       image, with nothing saying so. */
+    const record=gdAdminCourseVisualRecord(courseId);
+    gdAdminCourseVisualCommitBake(courseId,{
+      presetId:String(record&&record.presetId||(engine.defaultPreset?engine.defaultPreset().id:"")||""),
+      overrides:record&&record.courseOverrides||GD_VISUAL_OFF_OVERRIDES,
+      holeNumber:Number(gdAdminCoursePreviewHoleByCourse[courseId])||0,
+      control:"reset",label:"Reset recipe"
+    });
   }catch(error){
     gdAdminCourseVisualToast(error&&error.message?error.message:"Recipe reset failed");
   }
@@ -1776,7 +2248,7 @@ async function gdAdminCourseVisualSaveRecipe(courseId){
       recipe:{
         name:name,
         presetId:String(document.getElementById("gdCourseVisualPreset")?.value||""),
-        courseOverrides:gdAdminCourseVisualOverridesFromForm(),
+        courseOverrides:gdAdminCourseVisualOverridesFromForm(courseId),
         sampleCourseId:sample.courseId,
         sampleHoleNumber:sample.holeNumber
       }
@@ -1801,13 +2273,14 @@ function gdAdminCourseVisualApplyRecipe(courseId){
     const overrides=recipe.courseOverrides||recipe.course_overrides||{};
     engine.saveCourseVisualSettings(courseId,overrides,{presetId:presetId});
     gdAdminCourseVisualToast('Recipe "'+recipe.name+'" applied');
+    /* The recipe rewrites the controls, so this render seeds them from the record. */
+    gdAdminCourseVisualReseedControls();
     gdRenderAdminCourseDatabase();
-    const hole=Number(gdAdminCoursePreviewHoleByCourse[courseId])||0;
-    if(hole&&typeof engine.buildCourseVisualPreview==="function"){
-      engine.buildCourseVisualPreview(courseId,presetId,overrides,{holeNumber:hole})
-        .then(()=>{if(gdAdminCourseDatabaseSelected===courseId&&gdAdminCourseDatabaseTab==="preview")gdRenderAdminCourseDatabase();})
-        .catch(()=>{});
-    }
+    gdAdminCourseVisualCommitBake(courseId,{
+      presetId:presetId,overrides:overrides,
+      holeNumber:Number(gdAdminCoursePreviewHoleByCourse[courseId])||0,
+      control:"recipe",label:'Recipe "'+String(recipe.name||"recipe")+'"'
+    });
   }catch(error){
     gdAdminCourseVisualToast(error&&error.message?error.message:"Recipe apply failed");
   }
@@ -1986,40 +2459,42 @@ async function gdAdminCourseBuildNudge(courseId){
   }catch(e){gdAdminCourseVisualToast("Nudge failed");}
   return false;
 }
-/* Human-readable feedback of what the current recipe actually has switched on. */
-function gdAdminCourseVisualActiveEffects(record){
-  const settings=gdAdminCourseVisualMergedSettings(record&&record.presetId,record&&record.courseOverrides)||{};
-  const turf=settings.turf||{},lighting=settings.lighting||{},tools=settings.visualTools||{};
-  const chips=[];
-  const terrain=tools.holeTerrainStrength!=null?Number(tools.holeTerrainStrength):.9;
-  /* Relief is baked by the cloud export from LINZ elevation, not by the local sandbox bake,
-     so the chip has to say where it will show up. It used to just say "Terrain relief" at any
-     strength above zero, which read as "this is on in front of you" while the effect was in
-     fact wired to nothing at all. */
-  if(terrain>.02)chips.push("Terrain relief (on publish)");
-  if(settings.floodlight&&settings.floodlight.enabled===true)chips.push("Floodlight");
-  const greenStrength=turf.greenStrength!=null?Number(turf.greenStrength):.35;
-  if(greenStrength>.05)chips.push("Turf tone");
-  const contrast=lighting.contrastTarget!=null?Number(lighting.contrastTarget):1;
-  if(Math.abs(contrast-1)>.03)chips.push("Contrast");
-  const brightness=lighting.brightnessTarget!=null?Number(lighting.brightnessTarget):52;
-  if(Math.abs(brightness-52)>2)chips.push("Brightness");
-  if(Number(settings.mowingVisibility||0)>.02)chips.push("Mow lines");
-  return chips;
-}
+/* The ingredient list used to live here, computed straight off the current recipe.
+   That made a chip green the moment a setting was switched on - before the bake, and
+   whether or not the bake ever succeeded. It also tested mowing visibility with
+   Number("Clear") > .02, which is NaN > .02, so mow lines never appeared at all.
+
+   Ingredient truth now comes from gdAdminCourseVisualIngredients, which compares the
+   recipe the controls are asking for against the recipe that produced the frame the
+   phone is actually painting. See the PREVIEW TRUTH section. */
 function gdAdminCourseVisualSaveRecipeFromForm(courseId){
   const engine=window.GDCourseVisualEngine;
   if(!engine||typeof engine.saveCourseVisualSettings!=="function")return;
   try{
     const presetId=String(document.getElementById("gdCourseVisualPreset")?.value||"");
-    engine.saveCourseVisualSettings(courseId,gdAdminCourseVisualOverridesFromForm(),{presetId});
+    engine.saveCourseVisualSettings(courseId,gdAdminCourseVisualOverridesFromForm(courseId),{presetId});
   }catch(e){}
 }
 // On release (change): bake the recipe once so every control - terrain included - shows its real
 // effect. This only re-renders the recipe from captures already on disk; it never re-captures
 // tiles, which was the genuinely heavy part of the old per-keystroke rebuild.
-const gdAdminCourseVisualBakePending={};
-function gdAdminCourseVisualControlCommitted(courseId){
+/* Human labels for the status strip, so it says "Applying Brightness" rather than
+   naming a DOM id. */
+const GD_VISUAL_CONTROL_LABELS={
+  gdCourseVisualPreset:"Preset",gdCourseVisualBrightness:"Brightness",gdCourseVisualContrast:"Contrast",
+  gdCourseVisualShadowFloor:"Shadow floor",gdCourseVisualHighlightCeiling:"Highlight ceiling",
+  gdCourseVisualHueMin:"Turf hue",gdCourseVisualHueMax:"Turf hue",gdCourseVisualSatMin:"Turf saturation",
+  gdCourseVisualSatMax:"Turf saturation",gdCourseVisualLumMin:"Turf brightness",gdCourseVisualLumMax:"Turf brightness",
+  gdCourseVisualTargetPull:"Turf target",gdCourseVisualFloodOn:"Floodlight",gdCourseVisualFloodAmbient:"Floodlight ambient",
+  gdCourseVisualFloodLit:"Floodlight level",gdCourseVisualFloodThrow:"Floodlight falloff",
+  gdCourseVisualFloodSpread:"Floodlight spread",gdCourseVisualFloodGreenPool:"Green pool",
+  gdCourseVisualFloodGreenRadius:"Green pool size",gdCourseVisualFloodMask:"Object mask",
+  gdCourseVisualTerrainStrength:"Terrain",gdCourseVisualMowing:"Mow lines"
+};
+function gdAdminCourseVisualControlLabel(controlId){
+  return GD_VISUAL_CONTROL_LABELS[String(controlId||"")]||"Preview";
+}
+function gdAdminCourseVisualControlCommitted(courseId,controlId){
   gdAdminCourseVisualControlChanged(courseId);
   gdAdminCourseVisualSaveRecipeFromForm(courseId);
   // Terrain controls use the /api/relief-preview server endpoint instead of the local
@@ -2030,23 +2505,17 @@ function gdAdminCourseVisualControlCommitted(courseId){
   }
   const engine=window.GDCourseVisualEngine;
   if(!engine||typeof engine.buildCourseVisualPreview!=="function")return false;
-  if(gdAdminCourseVisualBakePending[courseId])return false;
-  gdAdminCourseVisualBakePending[courseId]=true;
   const presetId=String(document.getElementById("gdCourseVisualPreset")?.value||"");
-  const overrides=gdAdminCourseVisualOverridesFromForm();
+  const overrides=gdAdminCourseVisualOverridesFromForm(courseId);
   /* Slider releases on the preview bake only the visible hole - a full-course bake over
      owned-pixel frames freezes the page for minutes. Apply preset / Publish still bake all. */
   const scopedHole=gdAdminCourseDatabaseTab==="preview"?Number(gdAdminCoursePreviewHoleByCourse[courseId])||0:0;
-  Promise.resolve()
-    .then(()=>engine.buildCourseVisualPreview(courseId,presetId,overrides,scopedHole?{holeNumber:scopedHole}:undefined))
-    .then(()=>{
-      if(gdAdminCourseDatabaseSelected===courseId&&(gdAdminCourseDatabaseTab==="preview"||gdAdminCourseDatabaseTab==="visuals"))gdRenderAdminCourseDatabase();
-    })
-    .catch(error=>{
-      console.warn("[GolfDaddy] course visual recipe bake failed",error);
-      gdAdminCourseVisualToast(error&&error.message?error.message:"Course visual recipe bake failed");
-    })
-    .finally(()=>{delete gdAdminCourseVisualBakePending[courseId];});
+  /* No bake-pending drop here. A commit that arrives while another render is in flight
+     is QUEUED - latest wins, intermediates may be skipped, the newest is never lost. */
+  gdAdminCourseVisualCommitBake(courseId,{
+    presetId:presetId,overrides:overrides,holeNumber:scopedHole,
+    control:String(controlId||""),label:gdAdminCourseVisualControlLabel(controlId)
+  });
   return false;
 }
 function gdAdminCourseVisualPresetChanged(courseId){
@@ -2090,7 +2559,7 @@ function gdAdminCourseVisualPresetChanged(courseId){
     const mowing=document.getElementById("gdCourseVisualMowing");
     if(mowing)mowing.value=String(preset.mowingVisibility||"Unknown");
   }
-  return gdAdminCourseVisualControlCommitted(courseId);
+  return gdAdminCourseVisualControlCommitted(courseId,"gdCourseVisualPreset");
 }
 function gdAdminCourseVisualSyncPresetButtons(presetId){
   document.querySelectorAll(".gdAdminCourseVisualPresetRail button[data-preset-id]").forEach(button=>{
@@ -2113,27 +2582,64 @@ function gdAdminCourseVisualPresetButtonEvent(event){
   const courseId=controls&&controls.getAttribute("data-course-id")||gdAdminCourseDatabaseSelected||"";
   gdAdminCourseVisualPresetButtonChanged(courseId,button.getAttribute("data-preset-id")||"");
 }
+/* The recipe controls. This delegated listener is their ONLY handler - the inline
+   oninput/onchange attributes these fields used to carry fired a second time after
+   it (a document capture listener runs before the target's own attribute handler,
+   and this one does not stop propagation), so every release committed twice. The
+   old `if(bakePending) return false` guard hid that by throwing the second one away,
+   which is also how it threw away real adjustments. */
+const GD_VISUAL_RECIPE_CONTROL_IDS=["gdCourseVisualHueMin","gdCourseVisualHueMax","gdCourseVisualSatMin","gdCourseVisualSatMax","gdCourseVisualLumMin","gdCourseVisualLumMax","gdCourseVisualTargetPull","gdCourseVisualBrightness","gdCourseVisualShadowFloor","gdCourseVisualHighlightCeiling","gdCourseVisualContrast","gdCourseVisualTerrainStrength","gdCourseVisualFloodOn","gdCourseVisualFloodAmbient","gdCourseVisualFloodLit","gdCourseVisualFloodThrow","gdCourseVisualFloodSpread","gdCourseVisualFloodGreenPool","gdCourseVisualFloodGreenRadius","gdCourseVisualFloodMask","gdCourseVisualMowing"];
 function gdAdminCourseVisualControlEvent(event){
   const target=event&&event.target;
   if(!target||!target.id)return;
   const controls=target.closest&&target.closest(".gdAdminCourseVisualControls");
   if(!controls)return;
   const courseId=controls.getAttribute("data-course-id")||gdAdminCourseDatabaseSelected||"";
+  const type=String(event.type||"");
   if(target.id==="gdCourseVisualPreset"){
-    gdAdminCourseVisualPresetChanged(courseId);
+    /* A select fires input AND change for one choice - commit on change only. */
+    if(type==="change")gdAdminCourseVisualPresetChanged(courseId);
     return;
   }
-  if(["gdCourseVisualHueMin","gdCourseVisualHueMax","gdCourseVisualSatMin","gdCourseVisualSatMax","gdCourseVisualLumMin","gdCourseVisualLumMax","gdCourseVisualTargetPull","gdCourseVisualBrightness","gdCourseVisualShadowFloor","gdCourseVisualHighlightCeiling","gdCourseVisualContrast","gdCourseVisualTerrainStrength","gdCourseVisualFloodOn","gdCourseVisualFloodAmbient","gdCourseVisualFloodLit","gdCourseVisualFloodThrow","gdCourseVisualFloodSpread","gdCourseVisualFloodGreenPool","gdCourseVisualFloodGreenRadius","gdCourseVisualFloodMask","gdCourseVisualMowing"].includes(target.id)){
-    // "input" fires while the control is still moving; "change" fires on release - bake then.
-    if(String(event.type)==="change")gdAdminCourseVisualControlCommitted(courseId);
-    else gdAdminCourseVisualControlChanged(courseId);
+  if(!GD_VISUAL_RECIPE_CONTROL_IDS.includes(target.id))return;
+  // "input" fires while the control is still moving; "change" fires on release - bake then.
+  if(type==="change"){
+    gdAdminCourseVisualNoteInteraction(false);
+    gdAdminCourseVisualControlCommitted(courseId,target.id);
+    return;
   }
+  /* Still moving. Nothing heavy, and no full render allowed to land on top of it. */
+  gdAdminCourseVisualNoteInteraction(true);
+  gdAdminCourseVisualControlChanged(courseId);
+  /* Terrain is the exception that shades live: the relief endpoint is debounced and
+     the small diagnostic preview is what the operator is reading while dragging. */
+  if(target.id==="gdCourseVisualTerrainStrength"&&gdAdminCourseVisualActiveTool==="terrain"){
+    gdAdminCourseVisualReliefRefresh(courseId);
+  }
+}
+function gdAdminCourseVisualPointerEvent(event){
+  const type=String(event&&event.type||"");
+  /* Release always clears, wherever it lands. A drag that ends outside the dock -
+     pointer capture lost, a gesture cancelled - would otherwise leave the Studio
+     believing a control is still under the finger and defer every render forever. */
+  if(type!=="pointerdown"){
+    if(gdAdminCourseVisualInteractionActive)gdAdminCourseVisualNoteInteraction(false);
+    return;
+  }
+  const target=event&&event.target;
+  if(!target||!target.closest||!target.closest(".gdAdminCourseVisualControls"))return;
+  gdAdminCourseVisualNoteInteraction(true);
 }
 if(!window.__gdAdminCourseVisualControlsBound){
   window.__gdAdminCourseVisualControlsBound=true;
   document.addEventListener("click",gdAdminCourseVisualPresetButtonEvent,true);
   document.addEventListener("input",gdAdminCourseVisualControlEvent,true);
   document.addEventListener("change",gdAdminCourseVisualControlEvent,true);
+  /* Pointer down anywhere in the dock means a control is being worked: full panel
+     rebuilds wait until it is released. */
+  document.addEventListener("pointerdown",gdAdminCourseVisualPointerEvent,true);
+  document.addEventListener("pointerup",gdAdminCourseVisualPointerEvent,true);
+  document.addEventListener("pointercancel",gdAdminCourseVisualPointerEvent,true);
 }
 function gdAdminCourseVisualProductCard(product){
   const visual=product.native||(!product.suppressPublishedFallback?product.published:null)||product.base||null;
@@ -2214,7 +2720,7 @@ function gdAdminCourseVisualControls(record,courseId){
   const brightness=gdAdminCourseVisualClampedNumber(settings.lighting&&settings.lighting.brightnessTarget,0,100,52);
   const contrast=gdAdminCourseVisualClampedNumber(settings.lighting&&settings.lighting.contrastTarget,.55,2.2,1.04);
   const key=gdEscapeHTML(courseId||record&&record.courseId||"");
-  const presetField=`<label>Preset<select id="gdCourseVisualPreset" oninput="return gdAdminCourseVisualPresetChanged('${key}')" onchange="return gdAdminCourseVisualPresetChanged('${key}')">${presets.map(p=>`<option value="${gdEscapeHTML(p&&p.id||p&&p.mode||p&&p.name||"")}" ${preset===(p&&p.id)?"selected":""}>${gdEscapeHTML(p&&p.name||p&&p.mode||p&&p.id||"Preset")}</option>`).join("")}</select></label>`;
+  const presetField=`<label>Preset<select id="gdCourseVisualPreset">${presets.map(p=>`<option value="${gdEscapeHTML(p&&p.id||p&&p.mode||p&&p.name||"")}" ${preset===(p&&p.id)?"selected":""}>${gdEscapeHTML(p&&p.name||p&&p.mode||p&&p.id||"Preset")}</option>`).join("")}</select></label>`;
   const presetRail=`<div class="gdAdminCourseVisualPresetRail">${presets.map(p=>{const id=p&&p.id||p&&p.mode||p&&p.name||"";return `<button type="button" data-preset-id="${gdEscapeHTML(id)}" class="${preset===id?"active":""}" onclick="return gdAdminCourseVisualPresetButtonChanged('${key}','${gdEscapeHTML(id)}')">${gdEscapeHTML(p&&p.name||p&&p.mode||id||"Preset")}</button>`;}).join("")}</div>`;
   const recipeState=gdAdminCourseVisualRecipeState();
   const savedRecipes=recipeState.recipes;
@@ -2223,7 +2729,7 @@ function gdAdminCourseVisualControls(record,courseId){
   const activeRecipeBlock=`<div class="gdAdminCourseStageLine"><span class="ready">Active recipe: ${gdEscapeHTML(activeRecipeLabel)}</span>${activeRecipe?`<button type="button" class="gdAdminInlineLink" onclick="return gdAdminCourseVisualApplyActiveRecipe('${key}')">Apply active here</button>`:""}</div>`;
   const recipeField=activeRecipeBlock+`<label>Saved recipes<select id="gdCourseVisualRecipeSelect">${savedRecipes.length?savedRecipes.map(recipe=>`<option value="${gdEscapeHTML(recipe.id)}" ${activeRecipe&&String(activeRecipe.id||"")===String(recipe.id||"")?"selected":""}>${gdEscapeHTML(recipe.name)}</option>`).join(""):'<option value="">No saved recipes yet</option>'}</select></label><div class="gdAdminCourseVisualActions"><button type="button" onclick="return gdAdminCourseVisualApplyRecipe('${key}')"${savedRecipes.length?"":" disabled"}>Apply recipe</button><button type="button" onclick="return gdAdminCourseVisualSetActiveRecipe('${key}')"${savedRecipes.length?"":" disabled"}>Set selected active</button><button type="button" onclick="return gdAdminCourseVisualSaveRecipe('${key}')">Save current as recipe</button></div>`;
   function rangeField(id,label,hint,value,min,max,step){
-    return `<label>${label}${hint?` <small>${hint}</small>`:""}<input id="${id}" type="range" min="${min}" max="${max}" step="${step}" value="${value}" oninput="return gdAdminCourseVisualControlChanged('${key}')" onchange="return gdAdminCourseVisualControlCommitted('${key}')"></label>`;
+    return `<label>${label}${hint?` <small>${hint}</small>`:""}<input id="${id}" type="range" min="${min}" max="${max}" step="${step}" value="${value}"></label>`;
   }
   const turfFields=
     rangeField("gdCourseVisualHueMin","Turf hue min","green band",hueMin,40,200,1)+
@@ -2234,7 +2740,7 @@ function gdAdminCourseVisualControls(record,courseId){
     rangeField("gdCourseVisualLumMax","Turf brightness max","",lumMax,0,100,1)+
     rangeField("gdCourseVisualTargetPull","Hold to range","how firmly out-of-range turf is pulled in",targetPull,0,1,.05)+
     `<span class="gdAdminPhoneTiltNote">Turf already inside these ranges is left untouched — only out-of-range pixels are pulled in.</span>`;
-  const terrainField=`<label>Hole terrain<input id="gdCourseVisualTerrainStrength" type="range" min="0" max="1.6" step="0.05" value="${Number.isFinite(terrain)?terrain:.9}" oninput="return gdAdminCourseVisualReliefRefresh('${key}')" onchange="return gdAdminCourseVisualControlCommitted('${key}')"></label>`;
+  const terrainField=`<label>Hole terrain<input id="gdCourseVisualTerrainStrength" type="range" min="0" max="1.6" step="0.05" value="${Number.isFinite(terrain)?terrain:.9}"></label>`;
   /* Relief is computed from elevation by /api/relief-preview, live, for one hole. The knobs
      below it are NOT saved: they exist to find the numbers, and the numbers that win get
      written into RELIEF_DEFAULTS in functions/lib/gd-relief-core.mjs and baked. Only "Hole
@@ -2257,14 +2763,14 @@ function gdAdminCourseVisualControls(record,courseId){
       `<span class="gdAdminPhoneTiltNote">Live from LINZ elevation for the hole selected in the preview \u2014 no bake needed. Only <b>Hole terrain</b> is saved with the recipe; the rest are for finding the numbers to bake in.</span>`+
     `</div>`;
   const floodlightFields=
-    `<label class="gdAdminCourseVisualCheck"><input id="gdCourseVisualFloodOn" type="checkbox" ${floodOn?"checked":""} onchange="return gdAdminCourseVisualControlCommitted('${key}')"><span>Floodlight</span></label>`+
+    `<label class="gdAdminCourseVisualCheck"><input id="gdCourseVisualFloodOn" type="checkbox" ${floodOn?"checked":""}><span>Floodlight</span></label>`+
     rangeField("gdCourseVisualFloodAmbient","Ambient level","everything off the line drops to here",floodAmbient,0,100,1)+
     rangeField("gdCourseVisualFloodLit","Lit level","the playing line is brought back to here",floodLit,0,100,1)+
     rangeField("gdCourseVisualFloodThrow","Edge falloff","how softly the light dies at the corridor edge",floodThrow,0,1,.05)+
     rangeField("gdCourseVisualFloodSpread","Beam spread","width of the lit corridor",floodSpread,.05,1,.05)+
     rangeField("gdCourseVisualFloodGreenPool","Green pool","own light at the green so falloff can't lose it",floodGreenPool,0,1,.05)+
     rangeField("gdCourseVisualFloodGreenRadius","Green pool size","",floodGreenRadius,.05,1,.01)+
-    `<label class="gdAdminCourseVisualCheck"><input id="gdCourseVisualFloodMask" type="checkbox" ${floodMask?"checked":""} onchange="return gdAdminCourseVisualControlCommitted('${key}')"><span>Use object mask</span></label>`+
+    `<label class="gdAdminCourseVisualCheck"><input id="gdCourseVisualFloodMask" type="checkbox" ${floodMask?"checked":""}><span>Use object mask</span></label>`+
     `<span class="gdAdminPhoneTiltNote">Aimed down the play axis, so it works on every hole. Levels are absolute because the image is normalised first. Object mask refines the beam to mapped fairway/green geometry \u2014 off for now.</span>`;
   const lightingFields=
     rangeField("gdCourseVisualBrightness","Brightness target","image mean is driven here",brightness,0,100,1)+
@@ -2272,7 +2778,7 @@ function gdAdminCourseVisualControls(record,courseId){
     rangeField("gdCourseVisualHighlightCeiling","Highlight ceiling","brightest point",highlightCeiling,40,100,1)+
     rangeField("gdCourseVisualContrast","Contrast","",contrast,.55,2.2,.01)+
     `<span class="gdAdminPhoneTiltNote">Exposure is normalised: whatever the capture's real range is, it's mapped between floor and ceiling and its mean driven to the target.</span>`;
-  const mowingField=`<label>Mowing visibility<select id="gdCourseVisualMowing" onchange="return gdAdminCourseVisualControlCommitted('${key}')">${["Unknown","Low","Clear","Prominent"].map(value=>`<option value="${value}" ${mowing===value?"selected":""}>${value}</option>`).join("")}</select></label>`;
+  const mowingField=`<label>Mowing visibility<select id="gdCourseVisualMowing">${["Unknown","Low","Clear","Prominent"].map(value=>`<option value="${value}" ${mowing===value?"selected":""}>${value}</option>`).join("")}</select></label>`;
   const actionsField=`<div class="gdAdminCourseVisualActions"><button type="button" onclick="return gdAdminCourseRemap('${key}')">Remap from OSM</button><button type="button" onclick="return gdAdminCourseVisualBuildBasic('${key}')">Build base</button><button type="button" onclick="return gdAdminCourseVisualBuildPreview('${key}')">Apply preset</button><button type="button" onclick="return gdAdminCourseVisualRecapture('${key}')">Re-run captures</button><button class="primary" type="button" onclick="return gdAdminCourseVisualPublish('${key}')">Publish Clarity map</button></div>`;
   const groups=[
     {id:"preset",icon:"🎨",label:"Preset",body:presetField+presetRail+recipeField},
@@ -2288,7 +2794,30 @@ function gdAdminCourseVisualControls(record,courseId){
   const flyout=`<div class="gdAdminPhoneToolFlyout">${groups.map(g=>`<div class="gdAdminPhoneToolPanel${g.id===active?" active":""}" data-tool-group="${g.id}"${g.id===active?"":" hidden"}><h4>${gdEscapeHTML(g.label)}</h4>${g.body}</div>`).join("")}</div>`;
   return `<div class="gdAdminCourseVisualControls gdAdminPhoneToolDock${active?" gdAdminPhoneToolDockOpen":""}" data-course-id="${key}">${rail}${flyout}</div>`;
 }
-function gdAdminCourseVisualOverridesFromForm(){
+/* saveCourseVisualSettings REPLACES courseOverrides wholesale, so any override with
+   no control in the dock is dropped by the next slider release and silently reverts
+   to the preset's value. That is how a Reset ("every effect explicitly off") grew its
+   turf tone back the moment brightness was touched, with nothing on screen to explain
+   it. These are the recipe fields the dock does not expose; they are carried across
+   verbatim from whatever is already saved. */
+const GD_VISUAL_UNCONTROLLED_OVERRIDES=[
+  ["turf","greenStrength"],["turf","greenTone"],
+  ["readability","sharpness"],["readability","fairwaySeparation"],["readability","localContrast"],
+  ["visualTools","courseTerrainStrength"],["visualTools","fairwayAirbrush"]
+];
+function gdAdminCourseVisualCarryUncontrolled(overrides,courseId){
+  const record=gdAdminCourseVisualRecord(courseId||gdAdminCourseDatabaseSelected||"");
+  const saved=record&&record.courseOverrides||null;
+  if(!saved)return overrides;
+  GD_VISUAL_UNCONTROLLED_OVERRIDES.forEach(([group,field])=>{
+    const value=saved[group]?saved[group][field]:undefined;
+    if(value===undefined)return;
+    overrides[group]=overrides[group]||{};
+    if(overrides[group][field]===undefined)overrides[group][field]=value;
+  });
+  return overrides;
+}
+function gdAdminCourseVisualOverridesFromForm(courseId){
   const num=(id,min,max,fallback)=>gdAdminCourseVisualClampedNumber(document.getElementById(id)?.value,min,max,fallback);
   const hueMin=num("gdCourseVisualHueMin",40,200,86);
   const hueMax=num("gdCourseVisualHueMax",40,200,142);
@@ -2296,7 +2825,7 @@ function gdAdminCourseVisualOverridesFromForm(){
   const satMax=num("gdCourseVisualSatMax",0,100,66);
   const lumMin=num("gdCourseVisualLumMin",0,100,30);
   const lumMax=num("gdCourseVisualLumMax",0,100,72);
-  return {
+  const out={
     // Ranges the normaliser holds turf inside; min/max are ordered so a dragged pair can't invert.
     turf:{
       hueMin:Math.min(hueMin,hueMax),hueMax:Math.max(hueMin,hueMax),
@@ -2323,6 +2852,7 @@ function gdAdminCourseVisualOverridesFromForm(){
     visualTools:{holeTerrainStrength:num("gdCourseVisualTerrainStrength",0,1.6,.9)},
     mowingVisibility:String(document.getElementById("gdCourseVisualMowing")?.value||"Unknown")
   };
+  return gdAdminCourseVisualCarryUncontrolled(out,courseId);
 }
 function gdAdminCourseVisualToast(text){
   try{toast(text);}catch(e){console.log(text);}
@@ -2334,7 +2864,7 @@ async function gdAdminCourseVisualBuildBasic(courseId){
   const engine=window.GDCourseVisualEngine;
   if(!engine){gdAdminCourseVisualToast("Course Visual Engine not loaded");return false;}
   const presetId=String(document.getElementById("gdCourseVisualPreset")?.value||"");
-  const overrides=gdAdminCourseVisualOverridesFromForm();
+  const overrides=gdAdminCourseVisualOverridesFromForm(courseId);
   engine.saveCourseVisualSettings(courseId,overrides,{presetId});
   gdAdminCourseVisualToast("Building visual captures");
   await engine.buildFromCourseDatabase(courseId);
@@ -2345,7 +2875,7 @@ async function gdAdminCourseVisualBuildPreview(courseId){
   const engine=window.GDCourseVisualEngine;
   if(!engine){gdAdminCourseVisualToast("Course Visual Engine not loaded");return false;}
   const presetId=String(document.getElementById("gdCourseVisualPreset")?.value||"");
-  const overrides=gdAdminCourseVisualOverridesFromForm();
+  const overrides=gdAdminCourseVisualOverridesFromForm(courseId);
   engine.saveCourseVisualSettings(courseId,overrides,{presetId});
   await engine.buildCourseVisualPreview(courseId,presetId,overrides);
   gdRenderAdminCourseDatabase();
@@ -2449,7 +2979,7 @@ async function gdAdminCourseVisualRecapture(courseId){
     gdAdminCourseVisualEnsurePipelineCourse(courseId);
     gdAdminCourseVisualEnqueueCloudSnapshot(courseId);
     const presetId=String(document.getElementById("gdCourseVisualPreset")?.value||"");
-    const overrides=gdAdminCourseVisualOverridesFromForm();
+    const overrides=gdAdminCourseVisualOverridesFromForm(courseId);
     if(typeof engine.deleteCloudCourseVisual==="function")await engine.deleteCloudCourseVisual(courseId,{silent:true});
     if(typeof engine.resetCourseVisualWorkingState==="function")engine.resetCourseVisualWorkingState(courseId,{keepPublished:false});
     engine.saveCourseVisualSettings(courseId,overrides,{presetId});
@@ -2491,7 +3021,7 @@ function gdAdminCourseVisualPublish(courseId){
   (async()=>{
     try{
       const presetId=String(document.getElementById("gdCourseVisualPreset")?.value||"");
-      const overrides=gdAdminCourseVisualOverridesFromForm();
+      const overrides=gdAdminCourseVisualOverridesFromForm(courseId);
       engine.saveCourseVisualSettings(courseId,overrides,{presetId});
       /* Publish = lock the recipe and hand it to the WORKER - the only publish path. The
          worker bakes all frames server-side from the cloud captures and writes the
@@ -2635,7 +3165,30 @@ function gdAdminCourseDbExpandedRow(item){
   return `<tr class="gdAdminCourseDiagRowHost"><td colspan="7"><div class="gdAdminCourseDiag">${banner}<div class="gdAdminCourseDiagGrid">${diag}</div>${gdAdminCourseDbActionRail(item)}</div></td></tr>`;
 }
 
+/* A full panel rebuild reconstructs the whole detail pane, tuning dock included,
+   from the SAVED recipe. Thirty-odd call sites reach it, several of them async
+   (cloud-job polls, hydration callbacks, bake completions) and none of them aware
+   that a slider might be mid-drag. This is the one place that can defend against
+   that, so it does:
+
+     - while a control is being worked, the render is deferred rather than run;
+     - otherwise the live control values are lifted before and put back after, so a
+       rebuild cannot move a control the operator has already moved.
+
+   Reseeding callers (Apply preset, Apply recipe, Reset recipe) opt out of the second
+   guard - there the controls are meant to take new values. */
 function gdRenderAdminCourseDatabase(){
+  if(gdAdminCourseVisualControlsBusy()){
+    gdAdminCourseVisualDeferRender();
+    return;
+  }
+  const reseed=gdAdminCourseVisualFormReseed;
+  gdAdminCourseVisualFormReseed=false;
+  const snapshot=reseed?null:gdAdminCourseVisualFormSnapshot();
+  gdRenderAdminCourseDatabaseNow();
+  if(snapshot)gdAdminCourseVisualRestoreForm(snapshot);
+}
+function gdRenderAdminCourseDatabaseNow(){
   const summary=document.getElementById("gdAdminCourseDbSummary");
   const list=document.getElementById("gdAdminCourseDbList");
   const detail=document.getElementById("gdAdminCourseDbDetail");
