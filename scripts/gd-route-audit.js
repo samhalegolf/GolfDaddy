@@ -470,6 +470,9 @@
     }),null);
   }
   function gdPracticeDisplayAnalysis(opts={}){
+    const manualApi=window.GolfDaddyManualPracticeData;
+    const manualAnalysis=safe(()=>typeof manualApi?.getDisplayAnalysis==="function"?manualApi.getDisplayAnalysis():null,null);
+    if(manualAnalysis)return manualAnalysis;
     const api=window.GolfDaddyLaunchMonitorData;
     if(typeof api?.analyzeDisplay!=="function"){
       if(!opts.quiet)gdPracticeHydrateDisplayAnalysis();
@@ -7934,14 +7937,17 @@
 			    const result=byId("gdPracticeDataResult");
 			    const evidenceList=byId("gdPracticeEvidenceList");
 			    const api=window.GolfDaddyLaunchMonitorData;
-			    if(visualTitle)visualTitle.textContent=`${gdShotDataPlayerLabel()} - Practice Data`;
+			    const manualApi=window.GolfDaddyManualPracticeData;
+    const manualAnalysis=safe(()=>typeof manualApi?.getDisplayAnalysis==="function"?manualApi.getDisplayAnalysis():null,null);
+		    if(visualTitle)visualTitle.textContent=`${gdShotDataPlayerLabel()} - ${manualAnalysis?"Manual Practice":"Practice Data"}`;
 		    if(result)gdRenderPracticeAutoFlow(null);
 	    gdRenderPracticeMasterTolerance();
     gdRenderPracticeAdminChrome();
     gdRenderPracticeImportPanel();
     gdRenderNativePracticeImportLane();
+    safe(()=>typeof manualApi?.renderLane==="function"&&manualApi.renderLane(byId("gdManualPracticeLane")));
     gdSyncPracticeSampleImportButton();
-	    if(!api||typeof api.analyze!=="function"){
+	    if((!api||typeof api.analyze!=="function")&&!manualAnalysis){
 	      if(visual)visual.innerHTML=gdPracticeVisualHTML(practiceSvg({acceptedShots:[],recommendation:{status:"module loading",offsetDeg:0}}),null);
 	      if(evidenceList)evidenceList.innerHTML="";
 	      gdRenderPracticeProjectionControls(null);
@@ -7949,6 +7955,7 @@
 	      gdRenderPracticeAutoFlow(null);
 	      gdRenderPracticeImportPanel();
 	      gdRenderNativePracticeImportLane();
+              safe(()=>typeof manualApi?.renderLane==="function"&&manualApi.renderLane(byId("gdManualPracticeLane")));
 		      if(!skipTolerances&&gdPracticeAdminIsOpen())gdRenderPracticeToleranceControls();
 		      return;
 		    }
@@ -7969,11 +7976,13 @@
 	      const visualSource=totals.rawShots?visualAnalysis:{acceptedShots:[],recommendation:{status:"no practice data",offsetDeg:0}};
 	      visual.innerHTML=gdPracticeVisualHTML(practiceSvg(visualSource),visualSource);
 	    }
-    gdRenderPracticeEvidenceList(analysis);
+    if(manualAnalysis&&typeof manualApi?.renderEvidenceList==="function")manualApi.renderEvidenceList(evidenceList,analysis);
+    else gdRenderPracticeEvidenceList(analysis);
     gdRenderPracticeRecommendations(analysis);
 	    gdRenderPracticeMasterTolerance();
     gdRenderPracticeAdminChrome();
     gdRenderNativePracticeImportLane();
+    safe(()=>typeof manualApi?.renderLane==="function"&&manualApi.renderLane(byId("gdManualPracticeLane")));
     gdRenderPracticeExtractionCheckpoint();
     if(!skipTolerances&&gdPracticeAdminIsOpen())gdRenderPracticeToleranceControls();
   }
