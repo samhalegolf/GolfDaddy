@@ -38,6 +38,10 @@ const root = path.join(__dirname, "..");
   assert.ok(studio.includes("Recipe Lab"), "studio recipe lab entry should be present");
   assert.ok(studio.includes("/api/course-visual-recipes"), "studio should read the shared recipe endpoint");
   assert.ok(studio.includes("Set selected active"), "studio should expose active recipe selection");
+  assert.ok(studio.includes("gdAdminCourseVisualRecipeLabAttempted[recipeKey]"), "recipe lab should attempt each donor and recipe combination only once");
+  assert.ok(studio.includes("if(!isRecipeLab)gdAdminCourseVisualScheduleHydration"), "recipe lab should not enter the normal course hydration pipeline");
+  assert.ok(studio.includes("if(!isRecipeLab){\n    gdAdminCourseVisualScheduleAutoBuild"), "recipe lab should not enter the normal automatic course build pipeline");
+  assert.ok(studio.includes("gdAdminCourseDbJobsAt=Date.now();\n      gdAdminCourseDbJobsInflight=null;"), "failed mapper-status reads should cool down instead of redrawing into another request");
 
   console.log("course-visual-recipes passed");
 })().catch((error) => {

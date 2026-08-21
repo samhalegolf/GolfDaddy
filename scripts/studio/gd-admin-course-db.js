@@ -83,11 +83,16 @@ function gdLoadAdminCourseDbJobs(opts){
     .then(res=>res.ok?res.json():null)
     .then(data=>{
       gdAdminCourseDbJobs=data&&data.courses||{};
-      gdAdminCourseDbJobsAt=Date.now();
       return gdAdminCourseDbJobs;
     })
     .catch(()=>gdAdminCourseDbJobs)
-    .finally(()=>{gdAdminCourseDbJobsInflight=null;});
+    .finally(()=>{
+      /* A network failure must cool down too. The renderer waits for this promise
+         and redraws; leaving JobsAt at zero made that redraw immediately fetch
+         again forever whenever the endpoint was unreachable. */
+      gdAdminCourseDbJobsAt=Date.now();
+      gdAdminCourseDbJobsInflight=null;
+    });
   return gdAdminCourseDbJobsInflight;
 }
 /* What the course itself proves, before the queue is consulted. Geometry is the
@@ -476,6 +481,7 @@ const GD_VISUAL_RECIPE_LAB_ID="recipe-lab";
 const GD_VISUAL_RECIPE_LAB_DONOR_KEY="gd_course_visual_recipe_lab_donor_v1";
 const gdAdminCourseVisualRecipeCache={fetchedAt:0,recipes:[],activeRecipe:null,loading:null,lastError:""};
 const gdAdminCourseVisualRecipeLabPending={};
+const gdAdminCourseVisualRecipeLabAttempted={};
 function gdAdminCourseVisualRecipeState(){
   if(typeof fetch==="function"&&!gdAdminCourseVisualRecipeCache.loading&&(!gdAdminCourseVisualRecipeCache.fetchedAt||Date.now()-gdAdminCourseVisualRecipeCache.fetchedAt>20000)){
     let changed=false;
@@ -556,6 +562,7 @@ function gdAdminCourseRecipeLabSelected(){
   return {id:GD_VISUAL_RECIPE_LAB_ID,name:"Recipe Lab",key:"shared-active-recipe",isRecipeLab:true,donor:donor,activeRecipe:active};
 }
 function gdAdminCourseOpenRecipeLab(){
+  Object.keys(gdAdminCourseVisualRecipeLabAttempted).forEach(key=>delete gdAdminCourseVisualRecipeLabAttempted[key]);
   gdAdminCourseDatabaseSelected="";
   gdAdminCourseDatabaseTab="preview";
   gdRenderAdminCourseDatabase();
@@ -582,9 +589,13 @@ function gdAdminCourseRecipeLabEnsureSandbox(selected){
   const sandbox=existing&&existing.diagnostics&&existing.diagnostics.sandbox||{};
   const bakedHole=(Array.isArray(existing&&existing.holeFramePreviewVisuals)?existing.holeFramePreviewVisuals:[]).find(asset=>Number(asset&&asset.holeNumber)===Number(donor.holeNumber));
   const currentKey=[sandbox.sourceCourseId||"",sandbox.sourceHoleNumber||"",existing&&existing.presetId||"",JSON.stringify(existing&&existing.courseOverrides||{})].join("::");
-  if(bakedHole&&currentKey===recipeKey)return;
-  if(gdAdminCourseVisualRecipeLabPending[recipeKey])return;
+  if(bakedHole&&currentKey===recipeKey){
+    gdAdminCourseVisualRecipeLabAttempted[recipeKey]=true;
+    return;
+  }
+  if(gdAdminCourseVisualRecipeLabPending[recipeKey]||gdAdminCourseVisualRecipeLabAttempted[recipeKey])return;
   gdAdminCourseVisualRecipeLabPending[recipeKey]=true;
+  gdAdminCourseVisualRecipeLabAttempted[recipeKey]=true;
   gdAdminCoursePreviewHoleByCourse[GD_VISUAL_RECIPE_LAB_ID]=Number(donor.holeNumber)||1;
   Promise.resolve(engine.hydrateCourseVisualAssets&&engine.hydrateCourseVisualAssets(donor.courseId))
     .catch(()=>null)
@@ -1052,15 +1063,18 @@ function gdAdminCoursePreviewMarkup(selected){
   }
   const engine=window.GDCourseVisualEngine;
   const record=gdAdminCourseVisualRecord(selected.id)||engine?.getRecord?.(selected.id)||null;
-  const cloudState=gdAdminCourseBuildState(selected.id);
-  gdAdminCourseVisualScheduleHydration(selected.id,record);
+  const isRecipeLab=String(selected.id||"")===GD_VISUAL_RECIPE_LAB_ID;
+  const cloudState=isRecipeLab?null:gdAdminCourseBuildState(selected.id);
+  if(!isRecipeLab)gdAdminCourseVisualScheduleHydration(selected.id,record);
   /* The preview IS the visual engine's home screen: opening it schedules the
      same auto-build the old Visuals tab ran, so a fresh course starts baking
      without a detour through the debug internals. */
   const sourceStatus=gdAdminCourseVisualSourceStatus(selected);
   const autoBuildNeeded=gdAdminCourseVisualNeedsAutoBuild(record,sourceStatus);
-  gdAdminCourseVisualScheduleAutoBuild(selected.id,record,sourceStatus);
-  if(!autoBuildNeeded)gdAdminCourseVisualSchedulePipeline(selected.id,record,sourceStatus);
+  if(!isRecipeLab){
+    gdAdminCourseVisualScheduleAutoBuild(selected.id,record,sourceStatus);
+    if(!autoBuildNeeded)gdAdminCourseVisualSchedulePipeline(selected.id,record,sourceStatus);
+  }
   const scanId=gdAdminJsArg(selected.id);
   const buildLabel=cloudState&&(cloudState.state==="captures-ready"||cloudState.failedStage==="export")
     ?"Retry visual treatment"
