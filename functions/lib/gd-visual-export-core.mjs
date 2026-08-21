@@ -22,6 +22,166 @@ import sharp from "sharp";
 function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, Number(v))); }
 function num(v, fb) { const n = Number(v); return Number.isFinite(n) ? n : fb; }
 
+/* ---- source-aware tone + turf targeting -------------------------------------------------
+
+   A recipe target ("brightnessTarget: 52") means "move the measured source mean to 52", not
+   "multiply everything by a number derived from 52". recipeFilter below is the OLD model - a
+   flat multiplier from settings alone, blind to the source - and it stays only for the one
+   thing it still legitimately owns: turf.greenStrength's decorative colour-pop, which was
+   never a measured target. Brightness/contrast/turf-hue-range ownership moves here.
+
+   This mirrors measureSurfacePixels/toneCurveLut/normaliseSurfacePixels in
+   scripts/gd-course-visual-engine.js almost formula-for-formula, but is NOT shared code with
+   it: that runs on canvas ImageData in the browser, this runs on Sharp raw buffers in Node,
+   same split this file already has for recipeFilter vs filterForSettings. Byte-identical
+   output isn't the goal - the same measured source moving toward the same targets is. */
+function rgbToHsl(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
+  let h = 0, s = 0; const l = (max + min) / 2;
+  if (d > 1e-9) {
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    if (max === r) h = (g - b) / d + (g < b ? 6 : 0);
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h *= 60;
+  }
+  return { h, s: s * 100, l: l * 100 };
+}
+function hueChannel(p, q, t) {
+  if (t < 0) t += 1;
+  if (t > 1) t -= 1;
+  if (t < 1 / 6) return p + (q - p) * 6 * t;
+  if (t < 1 / 2) return q;
+  if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+  return p;
+}
+function hslToRgb(h, s, l) {
+  h = (((Number(h) || 0) % 360) + 360) % 360 / 360; s = clamp(s, 0, 100) / 100; l = clamp(l, 0, 100) / 100;
+  if (s <= 1e-9) { const v = Math.round(l * 255); return [v, v, v]; }
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s, p = 2 * l - q;
+  return [Math.round(hueChannel(p, q, h + 1 / 3) * 255), Math.round(hueChannel(p, q, h) * 255), Math.round(hueChannel(p, q, h - 1 / 3) * 255)];
+}
+function histogramPercentile(hist, total, fraction) {
+  if (!total) return 0;
+  const target = total * clamp(fraction, 0, 1); let run = 0;
+  for (let i = 0; i < hist.length; i++) { run += hist[i]; if (run >= target) return i; }
+  return hist.length - 1;
+}
+function turfBand(settings) {
+  const turf = settings && settings.turf || {};
+  const lo = num(turf.hueMin, 86), hi = num(turf.hueMax, 142);
+  /* Measure across a band wider than the target so off-target turf is still caught and pulled in. */
+  const pad = Math.max(24, (hi - lo) * 0.8);
+  return { min: Math.max(0, lo - pad), max: Math.min(360, hi + pad) };
+}
+/* Sampled histogram pass, not a full one - the correction pass below still touches every
+   pixel, but measuring only needs a representative distribution, and this file's images run
+   up to EXPORT_RENDITION_PX square. Stride grows with image size so a 3072x3072 export costs
+   about the same measurement work as a 1024x1024 preview. */
+function measureSurfaceBuffer(buffer, width, height, channels, band) {
+  const step = Math.max(1, Math.round(Math.sqrt(Math.max(1, width * height)) / 800)) * channels;
+  const lum = new Array(101).fill(0), turfHue = new Array(361).fill(0), turfSat = new Array(101).fill(0), turfLum = new Array(101).fill(0);
+  let total = 0, turfTotal = 0, lumSum = 0, turfHueSum = 0;
+  for (let i = 0; i + channels - 1 < buffer.length; i += step) {
+    const hsl = rgbToHsl(buffer[i], buffer[i + 1], buffer[i + 2]);
+    const li = Math.round(clamp(hsl.l, 0, 100));
+    lum[li]++; total++; lumSum += hsl.l;
+    if (hsl.h >= band.min && hsl.h <= band.max && hsl.s >= 8) {
+      turfHue[Math.round(clamp(hsl.h, 0, 360))]++;
+      turfSat[Math.round(clamp(hsl.s, 0, 100))]++;
+      turfLum[li]++;
+      turfTotal++; turfHueSum += hsl.h;
+    }
+  }
+  const span = (hist, count) => ({ p50: histogramPercentile(hist, count, 0.5) });
+  return {
+    sampled: total,
+    luma: { mean: total ? lumSum / total : 0, p1: histogramPercentile(lum, total, 0.01), p99: histogramPercentile(lum, total, 0.99) },
+    turf: {
+      coverage: total ? turfTotal / total : 0,
+      sampled: turfTotal,
+      hue: Object.assign({ mean: turfTotal ? turfHueSum / turfTotal : 0 }, span(turfHue, turfTotal)),
+      saturation: span(turfSat, turfTotal),
+      luma: span(turfLum, turfTotal)
+    }
+  };
+}
+/* Tone curve in LUMINANCE space (0-100), not per channel - per-channel clipping wrecks colour
+   on saturated pixels. H/S pass through untouched; only L moves. */
+function toneCurveLut(stats, settings) {
+  const lighting = settings && settings.lighting || {};
+  const shadowFloor = clamp(num(lighting.shadowFloor, 14), 0, 60);
+  const highlightCeiling = clamp(num(lighting.highlightCeiling, 92), shadowFloor + 5, 100);
+  const brightnessTarget = clamp(num(lighting.brightnessTarget, 52), shadowFloor, highlightCeiling);
+  const contrast = clamp(num(lighting.contrastTarget, 1.04), 0.55, 2.2);
+  const black = clamp(stats.luma.p1 || 0, 0, 100);
+  const white = clamp(stats.luma.p99 || 100, black + 1, 100);
+  const mean = clamp(stats.luma.mean || 50, black, white);
+  const wanted = clamp((brightnessTarget - shadowFloor) / Math.max(1e-6, highlightCeiling - shadowFloor), 0.02, 0.98);
+  const actual = clamp((mean - black) / Math.max(1e-6, white - black), 0.02, 0.98);
+  let gamma = Math.log(wanted) / Math.log(actual);
+  if (!Number.isFinite(gamma) || gamma <= 0) gamma = 1;
+  gamma = clamp(gamma, 0.35, 3);
+  const lut = new Array(101);
+  /* A flat/near-flat source has no range to stretch - shift it onto the target instead. */
+  if (white - black < 2) {
+    const shift = brightnessTarget - mean;
+    for (let i = 0; i <= 100; i++) lut[i] = clamp(i + shift, 0, 100);
+    return { lut, blackPoint: black, whitePoint: white, measuredMean: mean, gamma: 1, shadowFloor, highlightCeiling, brightnessTarget, contrast };
+  }
+  for (let i = 0; i <= 100; i++) {
+    const x = clamp((i - black) / Math.max(1e-6, white - black), 0, 1);
+    let y = Math.pow(x, gamma);
+    y = 0.5 + (y - 0.5) * contrast;
+    lut[i] = clamp(shadowFloor + clamp(y, 0, 1) * (highlightCeiling - shadowFloor), 0, 100);
+  }
+  return { lut, blackPoint: black, whitePoint: white, measuredMean: mean, gamma, shadowFloor, highlightCeiling, brightnessTarget, contrast };
+}
+/* Range guardrail, not a stretch - turf already inside [lo,hi] is left exactly as it is;
+   pull=1 sits out-of-range values on the boundary, pull<1 keeps some of the excursion. */
+function constrainToRange(value, lo, hi, pull) {
+  if (lo > hi) { const s = lo; lo = hi; hi = s; }
+  if (value >= lo && value <= hi) return value;
+  const edge = value < lo ? lo : hi;
+  return edge + (value - edge) * (1 - clamp(pull, 0, 1));
+}
+/* Measure once, then a single pass: tone-map L, and where the pixel is turf drag H/S/L onto the
+   recipe's authored targets. Mutates `buffer` in place and returns the plan for diagnostics -
+   compact summary stats only, never pixel arrays. */
+function normaliseSurfaceBuffer(buffer, width, height, channels, settings) {
+  const band = turfBand(settings);
+  const before = measureSurfaceBuffer(buffer, width, height, channels, band);
+  const tone = toneCurveLut(before, settings);
+  const lut = tone.lut;
+  const toneMap = l => lut[Math.round(clamp(l, 0, 100))];
+  const turfCfg = settings && settings.turf || {};
+  const hueMin = num(turfCfg.hueMin, 86), hueMax = num(turfCfg.hueMax, 142);
+  const satMin = num(turfCfg.saturationMin, 28), satMax = num(turfCfg.saturationMax, 66);
+  const lumMin = num(turfCfg.brightnessMin, 30), lumMax = num(turfCfg.brightnessMax, 72);
+  const pull = clamp(num(turfCfg.targetPull, 1), 0, 1);
+  const hasTurf = !!(before.turf && before.turf.sampled);
+  for (let i = 0; i + channels - 1 < buffer.length; i += channels) {
+    const hsl = rgbToHsl(buffer[i], buffer[i + 1], buffer[i + 2]);
+    let h = hsl.h, s = hsl.s, l = toneMap(hsl.l);
+    if (hasTurf && hsl.h >= band.min && hsl.h <= band.max && hsl.s >= 8) {
+      h = constrainToRange(h, hueMin, hueMax, pull);
+      s = constrainToRange(s, satMin, satMax, pull);
+      l = constrainToRange(l, lumMin, lumMax, pull);
+    }
+    const rgb = hslToRgb(h, clamp(s, 0, 100), clamp(l, 0, 100));
+    buffer[i] = rgb[0]; buffer[i + 1] = rgb[1]; buffer[i + 2] = rgb[2];
+  }
+  const after = measureSurfaceBuffer(buffer, width, height, channels, band);
+  return {
+    tone: { blackPoint: +tone.blackPoint.toFixed(2), whitePoint: +tone.whitePoint.toFixed(2), measuredMean: +tone.measuredMean.toFixed(2), gamma: +tone.gamma.toFixed(3), shadowFloor: tone.shadowFloor, highlightCeiling: tone.highlightCeiling, brightnessTarget: tone.brightnessTarget, contrast: tone.contrast },
+    turf: hasTurf ? { applied: true, hue: [hueMin, hueMax], saturation: [satMin, satMax], luma: [lumMin, lumMax], pull: +pull.toFixed(3), coverage: +before.turf.coverage.toFixed(3) } : { applied: false, reason: "no-turf-pixels" },
+    before: { luma: before.luma, turf: { coverage: before.turf.coverage, hue: before.turf.hue, saturation: before.turf.saturation, luma: before.turf.luma } },
+    after: { luma: after.luma, turf: { coverage: after.turf.coverage, hue: after.turf.hue, saturation: after.turf.saturation, luma: after.turf.luma } },
+    model: "measure-and-drag-to-target"
+  };
+}
+
 /* Normalized web-mercator world (0..1), identical to the engine's projectLatLng. */
 function world(pt) {
   if (!pt) return null;
@@ -113,19 +273,28 @@ function applyRelief(rgb, mask, opacity, channels) {
   return rgb;
 }
 
-/* Flatten imagery, lay relief on the ground, then draw the overlays on top. One helper so
-   the three renderers cannot drift apart on ordering, which is exactly how the old multiply
-   ended up in three slightly different shapes. */
-async function flattenWithRelief({ width, height, background, composites, relief, overlays, quality }) {
-  let surface = sharp({ create: { width, height, channels: 3, background }, limitInputPixels: false })
+/* Flatten imagery, measure + normalise it toward the recipe's targets, lay relief on the
+   normalised ground, then draw the overlays on top. One helper so the renderers cannot drift
+   apart on ordering - measure the real aerial pixels BEFORE anything artificial (relief, mow
+   lines, floodlight) touches them, exactly like the browser engine's pipeline.
+
+   The raw-buffer roundtrip used to be conditional on `relief` being present; now it always
+   happens, because normalisation needs the real flattened pixels regardless. Relief - when
+   present - runs on the SAME buffer normalisation just wrote, no extra full-res allocation. */
+async function flattenWithRelief({ width, height, background, composites, relief, settings, overlays, quality }) {
+  const surface = sharp({ create: { width, height, channels: 3, background }, limitInputPixels: false })
     .composite(composites);
-  if (relief) {
-    const flat = await surface.raw().toBuffer({ resolveWithObject: true });
-    applyRelief(flat.data, relief.data, relief.opacity, flat.info.channels);
-    surface = sharp(flat.data, { raw: { width: flat.info.width, height: flat.info.height, channels: flat.info.channels }, limitInputPixels: false });
-  }
-  if (overlays && overlays.length) surface = surface.composite(overlays);
-  return surface.jpeg({ quality }).toBuffer();
+  const flat = await surface.raw().toBuffer({ resolveWithObject: true });
+  const diagnostics = normaliseSurfaceBuffer(flat.data, flat.info.width, flat.info.height, flat.info.channels, settings);
+  if (relief) applyRelief(flat.data, relief.data, relief.opacity, flat.info.channels);
+  let out = sharp(flat.data, { raw: { width: flat.info.width, height: flat.info.height, channels: flat.info.channels }, limitInputPixels: false });
+  /* greenStrength is a decorative colour-pop, not a measured target - it stays a flat
+     modulate, applied after normalisation/relief so it never fights the tone curve. */
+  const fRecipe = recipeFilter(settings);
+  out = out.modulate({ saturation: fRecipe.saturation });
+  if (overlays && overlays.length) out = out.composite(overlays);
+  const jpeg = await out.jpeg({ quality }).toBuffer();
+  return { jpeg, diagnostics };
 }
 
 function mowingOpacity(value) {
@@ -229,7 +398,6 @@ export async function renderHoleSurfaceMercator({ pins, captures, terrain, setti
   const originPx = { x: merged.left * scalePx, y: merged.top * scalePx };
   const W = Math.max(64, Math.round((merged.right - merged.left) * scalePx));
   const H = Math.max(64, Math.round((merged.bottom - merged.top) * scalePx));
-  const fRecipe = recipeFilter(settings);
   const composites = [];
   rects.sort((a, b) => (num(a.item.entry.stitchLayer, 10) - num(b.item.entry.stitchLayer, 10)) || (num(a.item.entry.segmentIndex, 999) - num(b.item.entry.segmentIndex, 999)));
   for (const { item, pb } of rects) {
@@ -241,9 +409,10 @@ export async function renderHoleSurfaceMercator({ pins, captures, terrain, setti
     const visW = Math.min(w - cropLeft, W - Math.max(0, left));
     const visH = Math.min(h - cropTop, H - Math.max(0, top));
     if (visW <= 0 || visH <= 0) continue;
-    let layer = sharp(item.buffer, { limitInputPixels: false }).resize({ width: w, height: h, fit: "fill" })
-      .linear(fRecipe.contrast, 255 * ((fRecipe.brightness - 1) / 2))
-      .modulate({ saturation: fRecipe.saturation });
+    /* No colour/tone transform here anymore - tiles composite in raw, and the WHOLE flattened
+       surface gets measured and moved toward the recipe's targets in flattenWithRelief, once,
+       instead of every tile getting the same blind multiplier regardless of its own exposure. */
+    let layer = sharp(item.buffer, { limitInputPixels: false }).resize({ width: w, height: h, fit: "fill" });
     if (cropLeft || cropTop || visW < w || visH < h) layer = sharp(await layer.raw().toBuffer(), { raw: { width: w, height: h, channels: 3 }, limitInputPixels: false }).extract({ left: cropLeft, top: cropTop, width: visW, height: visH });
     const buf = await layer.raw().toBuffer({ resolveWithObject: true });
     composites.push({ input: buf.data, raw: { width: buf.info.width, height: buf.info.height, channels: buf.info.channels }, left: Math.max(0, left), top: Math.max(0, top) });
@@ -281,37 +450,43 @@ export async function renderHoleSurfaceMercator({ pins, captures, terrain, setti
   if (mow > 0) overlays.push({ input: mowSvg(W, H, mow), blend: "over" });
   const flood = floodlightSettings(settings);
   if (flood.enabled) overlays.push({ input: floodlightSvg({ width: W, height: H }, pins, flood, mercProject), blend: "over" });
-  const toneChannel = v => Math.round(Math.min(255, Math.max(0, v * fRecipe.contrast + 255 * ((fRecipe.brightness - 1) / 2))));
-  const jpeg = await flattenWithRelief({
+  /* The "void" behind any capture that doesn't reach the hole window. Same dark near-black-green
+     ratio as before, now scaled off the recipe's shadow floor target instead of a blind
+     brightness multiplier - unchanged at the old default (shadowFloor 14 -> scale 1). */
+  const lighting = settings && settings.lighting || {};
+  const voidScale = clamp(num(lighting.shadowFloor, 14), 0, 60) / 14;
+  const background = { r: Math.round(clamp(16 * voidScale, 0, 255)), g: Math.round(clamp(19 * voidScale, 0, 255)), b: Math.round(clamp(15 * voidScale, 0, 255)) };
+  const frame = await flattenWithRelief({
     width: W, height: H,
-    background: { r: toneChannel(16), g: toneChannel(19), b: toneChannel(15) },
-    composites, relief: reliefMask, overlays, quality
+    background,
+    composites, relief: reliefMask, settings, overlays, quality
   });
   const nw = unworld(merged.left, merged.top);
   const se = unworld(merged.right, merged.bottom);
   return {
-    jpeg,
+    jpeg: frame.jpeg,
     width: W,
     height: H,
     captureZoom,
     originPx,
-    bounds: { north: nw.lat, west: nw.lng, south: se.lat, east: se.lng }
+    bounds: { north: nw.lat, west: nw.lng, south: se.lat, east: se.lng },
+    diagnostics: frame.diagnostics
   };
 }
 
 export async function renderOverview({ backdrop, terrain, settings, width = 1440, quality = 80 }) {
-  /* Everything happens AT the output size. sharp applies resize before composite regardless
-     of call order, so mixing them in one pipeline shrank the base under a full-size overlay
-     ("image to composite must have same dimensions or smaller"). Downscaling first also makes
-     every subsequent op cheaper. */
+  /* Everything happens AT the output size - downscaling first makes every subsequent op
+     cheaper, and gives normalisation the same pixel count the published frame will actually
+     have rather than measuring detail that gets thrown away anyway. */
   const f = recipeFilter(settings);
-  const baseSmall = await sharp(backdrop.buffer, { limitInputPixels: false })
+  const resized = await sharp(backdrop.buffer, { limitInputPixels: false })
     .resize({ width, withoutEnlargement: true })
-    .linear(f.contrast, 255 * ((f.brightness - 1) / 2))
-    .modulate({ saturation: f.saturation })
-    .jpeg({ quality: 95 }).toBuffer();
-  const bMeta = await sharp(baseSmall).metadata();
-  let base = sharp(baseSmall, { limitInputPixels: false });
+    .raw().toBuffer({ resolveWithObject: true });
+  const diagnostics = normaliseSurfaceBuffer(resized.data, resized.info.width, resized.info.height, resized.info.channels, settings);
+  const bMeta = { width: resized.info.width, height: resized.info.height };
+  /* greenStrength is decorative, not a measured target - flat modulate, after normalisation. */
+  let base = sharp(resized.data, { raw: { width: resized.info.width, height: resized.info.height, channels: resized.info.channels }, limitInputPixels: false })
+    .modulate({ saturation: f.saturation });
   const terrainCfg = terrainParams(settings);
   if (terrain && terrainCfg.strength > 0.02) {
     const shaded = await sharp(terrain.buffer, { limitInputPixels: false })
@@ -324,5 +499,5 @@ export async function renderOverview({ backdrop, terrain, settings, width = 1440
     base = sharp(flat.data, { raw: { width: flat.info.width, height: flat.info.height, channels: flat.info.channels }, limitInputPixels: false });
   }
   const jpeg = await base.jpeg({ quality }).toBuffer();
-  return { jpeg, width: bMeta.width, height: bMeta.height };
+  return { jpeg, width: bMeta.width, height: bMeta.height, diagnostics };
 }

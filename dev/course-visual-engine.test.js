@@ -882,6 +882,48 @@ function payload() {
   assert.equal(plain.imageData, null, "un-flattened captures are left alone by hydration");
   assert.ok(svgText(engine.__test.stitchSvg([plain], { courseId: "cromwell" }).dataUrl).indexOf("tiles.test") >= 0, "un-flattened captures still render from tiles");
 
+  // Recipe preset schema: targetPull is now a persisted field, not just a runtime fallback.
+  assert.equal(engine.defaultPreset().turf.targetPull, 1, "targetPull ships as a first-class preset field, defaulting to fully-held");
+
+  // nativeVisualAsset's "already normalised" contract: when the caller has already dragged the
+  // source pixels onto the recipe's targets (nativeVisualAssetAsync's job), the SVG filter must
+  // not ALSO apply brightness/contrast - that would double the correction. meta.toneNormalised is
+  // the signal, and it must only neutralise the local filter, never leak into settings (which
+  // Floodlight reads for its own absolute reference level).
+  const doubleApplySettings = { lighting: { brightnessTarget: 80, contrastTarget: 1.6 } };
+  const unNormalisedAsset = engine.__test.nativeVisualAsset({ dataUrl: "data:image/jpeg;base64,QQ==", width: 40, height: 40 }, doubleApplySettings, { role: "test" });
+  const unNormalisedFilter = svgText(unNormalisedAsset.dataUrl).match(/feFuncR type="linear" slope="([^"]+)" intercept="([^"]+)"/);
+  assert.ok(unNormalisedFilter, "the relative filter is present when the source has not been normalised");
+  assert.notEqual(Number(unNormalisedFilter[1]), 1, "contrast slope reflects the setting when nothing normalised the source first, got " + unNormalisedFilter[1]);
+  assert.notEqual(Number(unNormalisedFilter[2]), 0, "brightness intercept reflects the setting when nothing normalised the source first, got " + unNormalisedFilter[2]);
+
+  const normalisedAsset = engine.__test.nativeVisualAsset({ dataUrl: "data:image/jpeg;base64,QQ==", width: 40, height: 40 }, doubleApplySettings, { role: "test", toneNormalised: true });
+  const normalisedFilter = svgText(normalisedAsset.dataUrl).match(/feFuncR type="linear" slope="([^"]+)" intercept="([^"]+)"/);
+  assert.ok(normalisedFilter, "the (now identity) filter is still emitted when toneNormalised is set");
+  assert.equal(Number(normalisedFilter[1]), 1, "contrast slope goes to identity once the pixels were already normalised, got " + normalisedFilter[1]);
+  assert.equal(Number(normalisedFilter[2]), 0, "brightness intercept goes to identity once the pixels were already normalised, got " + normalisedFilter[2]);
+
+  // normalisedSourceAsset / nativeVisualAssetAsync fall back cleanly with no `document` global
+  // (this Node test environment, exactly like every other existing test that touches
+  // buildCourseVisualPreview) - applied:false, a reason, and the original asset untouched.
+  assert.equal(typeof document, "undefined", "sanity check: this suite runs without a DOM");
+  const rasterAsset = { dataUrl: "data:image/jpeg;base64,QQ==", width: 40, height: 40 };
+  const fallbackResult = await engine.normalisedSourceAsset(rasterAsset, doubleApplySettings);
+  assert.equal(fallbackResult.applied, false, "no document -> normalisation cannot run, so it reports applied:false");
+  assert.equal(fallbackResult.asset, rasterAsset, "the fallback path returns the original asset object unchanged");
+  assert.ok(fallbackResult.diagnostics && fallbackResult.diagnostics.reason, "the fallback carries a reason for diagnostics");
+
+  const svgManifestAsset = { dataUrl: "data:image/svg+xml," + encodeURIComponent("<svg><image href=\"https://tiles.test/1.png\"/></svg>"), width: 40, height: 40 };
+  const svgFallback = await engine.normalisedSourceAsset(svgManifestAsset, doubleApplySettings);
+  assert.equal(svgFallback.applied, false, "a tile-manifest SVG source is never pixel-decoded (would taint a real canvas on cross-origin tiles)");
+
+  // And nativeVisualAssetAsync must fall all the way through to nativeVisualAsset's existing
+  // relative-filter output in that same no-document environment - proving every existing
+  // Node-based caller of buildCourseVisualPreview keeps working exactly as before this change.
+  const asyncNative = await engine.nativeVisualAssetAsync(rasterAsset, doubleApplySettings, { role: "test" });
+  assert.equal(asyncNative.dataUrl, unNormalisedAsset.dataUrl, "with normalisation unavailable, nativeVisualAssetAsync reproduces the plain sync render exactly");
+  assert.equal(asyncNative.metadata.normalisation.applied, false, "the async result still carries normalisation diagnostics for the caller to inspect");
+
   console.log("course visual engine tests passed");
 })().catch((error) => {
   console.error(error);

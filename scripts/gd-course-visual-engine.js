@@ -626,7 +626,7 @@
       version:PRESET_VERSION,
       mode:"Natural",
       description:"Balanced aerial map tone for general course overviews.",
-      turf:{hueMin:86,hueMax:142,saturationMin:28,saturationMax:66,brightnessMin:30,brightnessMax:72,greenStrength:.35},
+      turf:{hueMin:86,hueMax:142,saturationMin:28,saturationMax:66,brightnessMin:30,brightnessMax:72,greenStrength:.35,targetPull:1},
       lighting:{brightnessTarget:52,shadowFloor:14,highlightCeiling:92,contrastTarget:1.04},
       readability:{fairwaySeparation:.18,greenSeparation:.16,bunkerBrightness:.08,localContrast:.08,sharpness:.1},
       visualTools:{fairwayAirbrush:true,fairwayAirbrushStrength:.18,fairwayAirbrushWidthMeters:44,greenSurroundAirbrush:true,greenSurroundAirbrushStrength:.18,greenSurroundAirbrushWidthMeters:24,holeTerrainStrength:.75},
@@ -1949,6 +1949,13 @@
     var source=visualAssetSourceMarkup(asset,dims.width,dims.height);
     if(!source)throw Object.assign(new Error("Base visual is not available"),{code:"base-visual-missing"});
     var f=filterForSettings(settings);
+    /* When the source has already been measured and dragged onto the recipe's targets
+       (normalisedSourceAsset ran first - see nativeVisualAssetAsync), brightness/contrast are
+       owned by that pixel-level correction. Leaving the SVG filter's relative multipliers in
+       place too would apply the recipe twice. Saturation/green tint stay - they are the
+       independent decorative greenStrength/greenTone controls, not part of the measured-target
+       system, so there is nothing to double up. */
+    if(meta.toneNormalised){f=Object.assign({},f,{brightness:1,contrast:1});}
     var overlay=nativeReadabilityOverlay(settings);
     var mow=mowingOpacity(settings&&settings.mowingVisibility);
     var role=text(meta.role,80)||"native-visuals";
@@ -1968,6 +1975,16 @@
     delete metaOut.objects;
     delete metaOut.airbrushObjects;
     return {dataUrl:dataUrl("image/svg+xml",svg),width:dims.width,height:dims.height,bounds:assetBounds,sourceCaptureIds:asset&&asset.sourceCaptureIds||[],metadata:Object.assign({},inherited,{rendererVersion:RENDERER_VERSION,format:"image/svg+xml",role:role,stage:stage,inputRole:asset&&asset.metadata&&asset.metadata.role||"",inputStage:asset&&asset.metadata&&asset.metadata.stage||"",outputDimensions:dims,filter:f,fairwayAirbrush:airbrush.metadata,greenSurroundAirbrush:greenAirbrush.metadata},metaOut)};
+  }
+  /* The real render entry point: measure + normalise the source first (normalisedSourceAsset -
+     cached, so this is free unless the source or a target field actually changed), then hand the
+     corrected asset to the same synchronous nativeVisualAsset every existing caller already
+     understands. meta.toneNormalised tells it not to double-apply brightness/contrast. */
+  function nativeVisualAssetAsync(asset,settings,meta){
+    return normalisedSourceAsset(asset,settings).then(function(result){
+      var m=Object.assign({},meta,{toneNormalised:result.applied,normalisation:result.diagnostics});
+      return nativeVisualAsset(result.asset,settings,m);
+    });
   }
   function playViewportAsset(asset,meta){
     meta=meta||{};
@@ -2372,6 +2389,90 @@
     };
   }
   /* ---------------------------------------------------------------------------
+     Wiring normaliseSurfacePixels into the actual render path. nativeVisualAsset builds an SVG
+     that references the source asset by data URL and used to lean on an SVG filter (relative
+     brightness/contrast/saturation) because an SVG filter cannot measure an image. This bridges
+     that gap: decode the source raster to pixels on a canvas, run the same pure normaliser the
+     tests already exercise, re-encode, and cache the result per (source, target-fields) so a
+     slider change to Floodlight or Mow lines - which do not feed normaliseSurfacePixels - never
+     re-decodes or re-measures anything.
+
+     Browser-only. In Node (tests, or any non-browser embed) and for non-raster sources (the
+     tile-manifest SVG fallback, which may reference cross-origin tiles a canvas cannot read
+     back from) this resolves {asset,applied:false}, and nativeVisualAsset keeps today's
+     relative-filter behaviour unchanged - a deliberate, inert fallback, not a broken path.
+     --------------------------------------------------------------------------- */
+  var normalisedSurfaceCache={},normalisedSurfaceCacheOrder=[],NORMALISED_SURFACE_CACHE_LIMIT=60;
+  function normalisationCacheKey(asset,width,height,settings){
+    var turf=settings&&settings.turf||{},lighting=settings&&settings.lighting||{};
+    return hashString({
+      href:asset&&asset.dataUrl||"",
+      w:width,h:height,
+      turf:{hueMin:turf.hueMin,hueMax:turf.hueMax,saturationMin:turf.saturationMin,saturationMax:turf.saturationMax,brightnessMin:turf.brightnessMin,brightnessMax:turf.brightnessMax,targetPull:turf.targetPull},
+      lighting:{brightnessTarget:lighting.brightnessTarget,shadowFloor:lighting.shadowFloor,highlightCeiling:lighting.highlightCeiling,contrastTarget:lighting.contrastTarget}
+    });
+  }
+  function cacheNormalisedSurface(key,value){
+    normalisedSurfaceCache[key]=value;
+    normalisedSurfaceCacheOrder.push(key);
+    while(normalisedSurfaceCacheOrder.length>NORMALISED_SURFACE_CACHE_LIMIT){
+      delete normalisedSurfaceCache[normalisedSurfaceCacheOrder.shift()];
+    }
+  }
+  function decodeRasterAssetPixels(dataUrl,width,height){
+    if(typeof document==="undefined"||typeof Image==="undefined"||!dataUrl)return Promise.resolve(null);
+    if(/^data:image\/svg\+xml/i.test(dataUrl))return Promise.resolve(null);
+    return new Promise(function(resolve){
+      try{
+        var img=new Image();
+        img.onload=function(){
+          try{
+            var canvas=document.createElement("canvas");
+            canvas.width=Math.max(1,Math.round(width||img.naturalWidth||img.width||1));
+            canvas.height=Math.max(1,Math.round(height||img.naturalHeight||img.height||1));
+            var ctx=canvas.getContext("2d");
+            ctx.drawImage(img,0,0,canvas.width,canvas.height);
+            var data=ctx.getImageData(0,0,canvas.width,canvas.height);
+            resolve({pixels:data.data,width:canvas.width,height:canvas.height});
+          }catch(e){resolve(null);}
+        };
+        img.onerror=function(){resolve(null);};
+        img.src=dataUrl;
+      }catch(e){resolve(null);}
+    });
+  }
+  function encodeSurfacePixelsToDataUrl(pixels,width,height){
+    var canvas=document.createElement("canvas");
+    canvas.width=width;canvas.height=height;
+    var ctx=canvas.getContext("2d");
+    ctx.putImageData(new ImageData(pixels,width,height),0,0);
+    return canvas.toDataURL("image/jpeg",.92);
+  }
+  /* asset in, {asset,applied,diagnostics} out. On every fallback path `asset` is returned
+     unchanged so callers never need a separate branch for "normalisation didn't happen". */
+  function normalisedSourceAsset(asset,settings){
+    var dims=visualAssetDimensions(asset);
+    var key=normalisationCacheKey(asset,dims.width,dims.height,settings);
+    var cached=normalisedSurfaceCache[key];
+    if(cached)return Promise.resolve(cached);
+    return decodeRasterAssetPixels(asset&&asset.dataUrl,dims.width,dims.height).then(function(decoded){
+      var result;
+      if(!decoded){
+        result={asset:asset,applied:false,diagnostics:{applied:false,reason:"non-raster-or-undecodable-source"}};
+      }else{
+        try{
+          var plan=normaliseSurfacePixels(decoded.pixels,settings);
+          var normalisedDataUrl=encodeSurfacePixelsToDataUrl(decoded.pixels,decoded.width,decoded.height);
+          result={asset:Object.assign({},asset,{dataUrl:normalisedDataUrl}),applied:true,diagnostics:plan};
+        }catch(e){
+          result={asset:asset,applied:false,diagnostics:{applied:false,reason:"normalisation-failed",error:e&&e.message||String(e)}};
+        }
+      }
+      cacheNormalisedSurface(key,result);
+      return result;
+    });
+  }
+  /* ---------------------------------------------------------------------------
      Floodlight - drop the ambient level, then bring light back down the playing line, as if a
      big light sat behind the player shining at the green.
 
@@ -2545,13 +2646,17 @@
         record.status="rendering";
         recordEvent(record,"course-visual-preview-started",{presetId:preset.id,presetVersion:preset.version,scopedHole:scopedHole});
         putRecord(record);
-        try{
-          var scopedVersion=(Number(record.currentVersion)||0)+1;
-          var scopedHash=hashString(courseOverrides);
-          var scopedAirbrush=Array.isArray(record.objects)?record.objects:[];
-          var baseFrame=(Array.isArray(record.holeFrameVisuals)?record.holeFrameVisuals:[]).find(function(frame){return frame&&frame.dataUrl&&Math.round(Number(frame.holeNumber))===scopedHole;});
-          if(!baseFrame)throw Object.assign(new Error("No base frame for hole "+scopedHole),{code:"hole-frame-missing"});
-          var scopedNative=nativeVisualAsset(baseFrame,settings,{role:"hole-frame-native-visuals",stage:"native-visuals",version:scopedVersion,product:"hole-frame",holeNumber:scopedHole,presetId:preset.id,presetVersion:preset.version,overrideHash:scopedHash,airbrushObjects:scopedAirbrush,visualAssemblyUnderlayPath:record.basicVisual&&record.basicVisual.path||""});
+        var scopedVersion=(Number(record.currentVersion)||0)+1;
+        var scopedHash=hashString(courseOverrides);
+        var scopedAirbrush=Array.isArray(record.objects)?record.objects:[];
+        var baseFrame=(Array.isArray(record.holeFrameVisuals)?record.holeFrameVisuals:[]).find(function(frame){return frame&&frame.dataUrl&&Math.round(Number(frame.holeNumber))===scopedHole;});
+        if(!baseFrame){
+          record.status="failed";
+          record.lastError={code:"hole-frame-missing",message:"No base frame for hole "+scopedHole};
+          recordEvent(record,"course-visual-build-failed",record.lastError);
+          return putRecord(record);
+        }
+        return nativeVisualAssetAsync(baseFrame,settings,{role:"hole-frame-native-visuals",stage:"native-visuals",version:scopedVersion,product:"hole-frame",holeNumber:scopedHole,presetId:preset.id,presetVersion:preset.version,overrideHash:scopedHash,airbrushObjects:scopedAirbrush,visualAssemblyUnderlayPath:record.basicVisual&&record.basicVisual.path||""}).then(function(scopedNative){
           var scopedPreview={path:"course-visuals/"+record.courseId+"/holes/h"+scopedHole+"/preview/"+scopedVersion+".svg",dataUrl:scopedNative.dataUrl,version:scopedVersion,width:scopedNative.width,height:scopedNative.height,bounds:scopedNative.bounds,captureId:baseFrame.captureId,holeNumber:scopedHole,sourceCaptureIds:scopedNative.sourceCaptureIds&&scopedNative.sourceCaptureIds.length?scopedNative.sourceCaptureIds:baseFrame.sourceCaptureIds,presetId:preset.id,presetVersion:preset.version,overrideHash:scopedHash,metadata:Object.assign({},scopedNative.metadata||{},{playSurface:Object.assign({},baseFrame.metadata&&baseFrame.metadata.playSurface||{},{fallbackUnderlay:"live-gps",fallbackPolicy:"live-gps-only"})})};
           record.holeFramePreviewVisuals=(Array.isArray(record.holeFramePreviewVisuals)?record.holeFramePreviewVisuals:[]).filter(function(frame){return Math.round(Number(frame&&frame.holeNumber))!==scopedHole;}).concat([scopedPreview]);
           record.currentVersion=scopedVersion;
@@ -2559,12 +2664,13 @@
           record.settingsDirty=false;
           record.lastError=null;
           recordEvent(record,"course-visual-preview-ready",{version:scopedVersion,presetId:preset.id,presetVersion:preset.version,scopedHole:scopedHole});
-        }catch(error){
+          return putRecord(record);
+        }).catch(function(error){
           record.status="failed";
           record.lastError={code:error&&error.code||"preview-failed",message:error&&error.message||String(error)};
           recordEvent(record,"course-visual-build-failed",record.lastError);
-        }
-        return putRecord(record);
+          return putRecord(record);
+        });
       }
       record.presetId=preset.id;
       record.presetVersion=preset.version;
@@ -2573,56 +2679,76 @@
       record.status="rendering";
       recordEvent(record,"course-visual-preview-started",{presetId:preset.id,presetVersion:preset.version});
       putRecord(record);
-      try{
-        var version=(Number(record.currentVersion)||0)+1;
-        var overrideHash=hashString(courseOverrides);
-        var overviewBase=record.rawMaster&&record.rawMaster.dataUrl?record.rawMaster:record.basicVisual&&record.basicVisual.dataUrl?Object.assign({},record.basicVisual,{width:record.rawMaster&&record.rawMaster.width,height:record.rawMaster&&record.rawMaster.height,bounds:record.rawMaster&&record.rawMaster.bounds}):null;
-        if(!overviewBase)throw Object.assign(new Error("Raw master is not available"),{code:"raw-master-missing"});
-        var airbrushObjects=Array.isArray(record.objects)?record.objects:[];
-        var overviewNative=nativeVisualAsset(overviewBase,settings,{role:"overview-native-visuals",stage:"native-visuals",version:version,product:"course-overview",presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash,airbrushObjects:airbrushObjects});
+      var version=(Number(record.currentVersion)||0)+1;
+      var overrideHash=hashString(courseOverrides);
+      var overviewBase=record.rawMaster&&record.rawMaster.dataUrl?record.rawMaster:record.basicVisual&&record.basicVisual.dataUrl?Object.assign({},record.basicVisual,{width:record.rawMaster&&record.rawMaster.width,height:record.rawMaster&&record.rawMaster.height,bounds:record.rawMaster&&record.rawMaster.bounds}):null;
+      if(!overviewBase){
+        record.status="failed";
+        record.lastError={code:"raw-master-missing",message:"Raw master is not available"};
+        recordEvent(record,"course-visual-build-failed",record.lastError);
+        return putRecord(record);
+      }
+      var airbrushObjects=Array.isArray(record.objects)?record.objects:[];
+      return nativeVisualAssetAsync(overviewBase,settings,{role:"overview-native-visuals",stage:"native-visuals",version:version,product:"course-overview",presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash,airbrushObjects:airbrushObjects}).then(function(overviewNative){
         record.previewVisual={path:"course-visuals/"+record.courseId+"/preview/"+version+".svg",dataUrl:overviewNative.dataUrl,version:version,width:overviewNative.width,height:overviewNative.height,bounds:overviewNative.bounds,presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash,metadata:overviewNative.metadata};
-        if(record.exampleHoleVisual&&record.exampleHoleVisual.dataUrl){
-          var holeNative=nativeVisualAsset(record.exampleHoleVisual,settings,{role:"single-hole-native-visuals",stage:"native-visuals",version:version,product:"single-hole",holeNumber:record.exampleHoleVisual.holeNumber,presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash,airbrushObjects:airbrushObjects});
-          record.singleHolePreviewVisual={path:"course-visuals/"+record.courseId+"/single-hole/preview/"+version+".svg",dataUrl:holeNative.dataUrl,version:version,width:holeNative.width,height:holeNative.height,bounds:holeNative.bounds,captureId:record.exampleHoleVisual.captureId,holeNumber:record.exampleHoleVisual.holeNumber,presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash,metadata:holeNative.metadata};
-        }
-        /* skipHoleFrames: the automatic pipeline bakes only overview + single hole; per-hole
-           frames bake on demand (scoped) and in full on Publish. Existing baked frames are
-           kept rather than wiped. */
-        if(!opts.skipHoleFrames){
-        record.holeFramePreviewVisuals=[];
-        }
-        (opts.skipHoleFrames?[]:(Array.isArray(record.holeFrameVisuals)?record.holeFrameVisuals:[])).forEach(function(frame){
-          if(!frame||!frame.dataUrl)return;
-          var holeNumber=Math.max(0,Math.round(Number(frame.holeNumber)||0));
-          if(!holeNumber)return;
-          var frameNative=nativeVisualAsset(frame,settings,{role:"hole-frame-native-visuals",stage:"native-visuals",version:version,product:"hole-frame",holeNumber:holeNumber,presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash,airbrushObjects:airbrushObjects,visualAssemblyUnderlayPath:record.basicVisual&&record.basicVisual.path||""});
-          var framePreview={path:"course-visuals/"+record.courseId+"/holes/h"+holeNumber+"/preview/"+version+".svg",dataUrl:frameNative.dataUrl,version:version,width:frameNative.width,height:frameNative.height,bounds:frameNative.bounds,captureId:frame.captureId,holeNumber:holeNumber,sourceCaptureIds:frameNative.sourceCaptureIds&&frameNative.sourceCaptureIds.length?frameNative.sourceCaptureIds:frame.sourceCaptureIds,presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash,metadata:Object.assign({},frameNative.metadata||{},{playSurface:Object.assign({},frame.metadata&&frame.metadata.playSurface||{},{fallbackUnderlay:"live-gps",fallbackPolicy:"live-gps-only"})})};
-          record.holeFramePreviewVisuals.push(framePreview);
-        });
-        var visibleHoleNumber=record.exampleHoleVisual&&record.exampleHoleVisual.holeNumber;
-        var holeViewportSource=primaryHoleAsset(record.holeFramePreviewVisuals,visibleHoleNumber);
-        if(!record.singleHolePreviewVisual&&holeViewportSource){
-          var holeViewport=playViewportAsset(holeViewportSource,{role:"single-hole-native-visuals",stage:"native-visuals",version:version,product:"single-hole",holeNumber:holeViewportSource.holeNumber,presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash});
-          if(holeViewport){
-            record.singleHolePreviewVisual={path:"course-visuals/"+record.courseId+"/single-hole/preview/"+version+".svg",dataUrl:holeViewport.dataUrl,version:version,width:holeViewport.width,height:holeViewport.height,bounds:holeViewport.bounds,captureId:holeViewport.captureId||holeViewportSource.captureId,holeNumber:holeViewport.holeNumber||holeViewportSource.holeNumber,presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash,metadata:holeViewport.metadata};
+        var holeNativePromise=record.exampleHoleVisual&&record.exampleHoleVisual.dataUrl
+          ?nativeVisualAssetAsync(record.exampleHoleVisual,settings,{role:"single-hole-native-visuals",stage:"native-visuals",version:version,product:"single-hole",holeNumber:record.exampleHoleVisual.holeNumber,presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash,airbrushObjects:airbrushObjects})
+          :Promise.resolve(null);
+        return holeNativePromise.then(function(holeNative){
+          if(holeNative){
+            record.singleHolePreviewVisual={path:"course-visuals/"+record.courseId+"/single-hole/preview/"+version+".svg",dataUrl:holeNative.dataUrl,version:version,width:holeNative.width,height:holeNative.height,bounds:holeNative.bounds,captureId:record.exampleHoleVisual.captureId,holeNumber:record.exampleHoleVisual.holeNumber,presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash,metadata:holeNative.metadata};
           }
-        }
-        record.presetId=preset.id;
-        record.presetVersion=preset.version;
-        record.courseOverrides=courseOverrides;
-        record.currentVersion=version;
-        record.status="preview-ready";
-        record.settingsDirty=false;
-        record.lastError=null;
-        record.diagnostics=Object.assign({},record.diagnostics||{},{preview:{rendererVersion:RENDERER_VERSION,outputFormat:"image/svg+xml",outputDimensions:{width:record.previewVisual&&record.previewVisual.width,height:record.previewVisual&&record.previewVisual.height},presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash,products:{overview:{native:!!record.previewVisual},singleHole:{base:!!record.exampleHoleVisual,native:!!record.singleHolePreviewVisual},holeFrames:{base:(record.holeFrameVisuals||[]).length,native:record.holeFramePreviewVisuals.length}}}});
-        record.versions=(record.versions||[]).concat([{version:version,type:"preview",previewImagePath:record.previewVisual.path,singleHolePreviewPath:record.singleHolePreviewVisual&&record.singleHolePreviewVisual.path||null,holeFramePreviewPaths:record.holeFramePreviewVisuals.map(function(asset){return asset.path;}),presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash,createdAt:now(),metadata:{rendererVersion:RENDERER_VERSION,outputFormat:"image/svg+xml",products:["course-overview","single-hole","hole-frames"],stages:["native-visuals"]}}]);
-        recordEvent(record,"course-visual-preview-ready",{version:version,presetId:preset.id,presetVersion:preset.version,holeFramePreviewCount:record.holeFramePreviewVisuals.length});
-      }catch(error){
+          /* skipHoleFrames: the automatic pipeline bakes only overview + single hole; per-hole
+             frames bake on demand (scoped) and in full on Publish. Existing baked frames are
+             kept rather than wiped. */
+          if(!opts.skipHoleFrames){
+          record.holeFramePreviewVisuals=[];
+          }
+          var frames=(opts.skipHoleFrames?[]:(Array.isArray(record.holeFrameVisuals)?record.holeFrameVisuals:[])).filter(function(frame){
+            if(!frame||!frame.dataUrl)return false;
+            return Math.max(0,Math.round(Number(frame.holeNumber)||0))>0;
+          });
+          /* Promise.all preserves input order in the resolved array regardless of which frame
+             finishes decoding+normalising first, so pushing after it resolves reproduces the
+             same holeFramePreviewVisuals order the old sequential forEach produced. */
+          return Promise.all(frames.map(function(frame){
+            var holeNumber=Math.max(0,Math.round(Number(frame.holeNumber)||0));
+            return nativeVisualAssetAsync(frame,settings,{role:"hole-frame-native-visuals",stage:"native-visuals",version:version,product:"hole-frame",holeNumber:holeNumber,presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash,airbrushObjects:airbrushObjects,visualAssemblyUnderlayPath:record.basicVisual&&record.basicVisual.path||""}).then(function(frameNative){
+              return {frame:frame,holeNumber:holeNumber,frameNative:frameNative};
+            });
+          })).then(function(built){
+            built.forEach(function(item){
+              var frame=item.frame,holeNumber=item.holeNumber,frameNative=item.frameNative;
+              var framePreview={path:"course-visuals/"+record.courseId+"/holes/h"+holeNumber+"/preview/"+version+".svg",dataUrl:frameNative.dataUrl,version:version,width:frameNative.width,height:frameNative.height,bounds:frameNative.bounds,captureId:frame.captureId,holeNumber:holeNumber,sourceCaptureIds:frameNative.sourceCaptureIds&&frameNative.sourceCaptureIds.length?frameNative.sourceCaptureIds:frame.sourceCaptureIds,presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash,metadata:Object.assign({},frameNative.metadata||{},{playSurface:Object.assign({},frame.metadata&&frame.metadata.playSurface||{},{fallbackUnderlay:"live-gps",fallbackPolicy:"live-gps-only"})})};
+              record.holeFramePreviewVisuals.push(framePreview);
+            });
+            var visibleHoleNumber=record.exampleHoleVisual&&record.exampleHoleVisual.holeNumber;
+            var holeViewportSource=primaryHoleAsset(record.holeFramePreviewVisuals,visibleHoleNumber);
+            if(!record.singleHolePreviewVisual&&holeViewportSource){
+              var holeViewport=playViewportAsset(holeViewportSource,{role:"single-hole-native-visuals",stage:"native-visuals",version:version,product:"single-hole",holeNumber:holeViewportSource.holeNumber,presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash});
+              if(holeViewport){
+                record.singleHolePreviewVisual={path:"course-visuals/"+record.courseId+"/single-hole/preview/"+version+".svg",dataUrl:holeViewport.dataUrl,version:version,width:holeViewport.width,height:holeViewport.height,bounds:holeViewport.bounds,captureId:holeViewport.captureId||holeViewportSource.captureId,holeNumber:holeViewport.holeNumber||holeViewportSource.holeNumber,presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash,metadata:holeViewport.metadata};
+              }
+            }
+            record.presetId=preset.id;
+            record.presetVersion=preset.version;
+            record.courseOverrides=courseOverrides;
+            record.currentVersion=version;
+            record.status="preview-ready";
+            record.settingsDirty=false;
+            record.lastError=null;
+            record.diagnostics=Object.assign({},record.diagnostics||{},{preview:{rendererVersion:RENDERER_VERSION,outputFormat:"image/svg+xml",outputDimensions:{width:record.previewVisual&&record.previewVisual.width,height:record.previewVisual&&record.previewVisual.height},presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash,products:{overview:{native:!!record.previewVisual},singleHole:{base:!!record.exampleHoleVisual,native:!!record.singleHolePreviewVisual},holeFrames:{base:(record.holeFrameVisuals||[]).length,native:record.holeFramePreviewVisuals.length}}}});
+            record.versions=(record.versions||[]).concat([{version:version,type:"preview",previewImagePath:record.previewVisual.path,singleHolePreviewPath:record.singleHolePreviewVisual&&record.singleHolePreviewVisual.path||null,holeFramePreviewPaths:record.holeFramePreviewVisuals.map(function(asset){return asset.path;}),presetId:preset.id,presetVersion:preset.version,overrideHash:overrideHash,createdAt:now(),metadata:{rendererVersion:RENDERER_VERSION,outputFormat:"image/svg+xml",products:["course-overview","single-hole","hole-frames"],stages:["native-visuals"]}}]);
+            recordEvent(record,"course-visual-preview-ready",{version:version,presetId:preset.id,presetVersion:preset.version,holeFramePreviewCount:record.holeFramePreviewVisuals.length});
+            return putRecord(record);
+          });
+        });
+      }).catch(function(error){
         record.status="failed";
         record.lastError={code:error&&error.code||"preview-failed",message:error&&error.message||String(error)};
         recordEvent(record,"course-visual-build-failed",record.lastError);
-      }
-      return putRecord(record);
+        return putRecord(record);
+      });
       });
     });
   }
@@ -3578,6 +3704,8 @@
     greenToneHex:greenToneHex,
     measureSurfacePixels:measureSurfacePixels,
     normaliseSurfacePixels:normaliseSurfacePixels,
+    nativeVisualAssetAsync:nativeVisualAssetAsync,
+    normalisedSourceAsset:normalisedSourceAsset,
     applyFloodlightPixels:applyFloodlightPixels,
     captureImagePath:captureImagePath,
     saveCaptureImage:saveCaptureImage,
@@ -3612,6 +3740,6 @@
     pullCourseVisual:pullCourseVisual,
     buildFromCourseDatabase:buildFromCourseDatabase,
     hydrateCourseVisualAssets:hydrateCourseVisualAssets,
-    __test:{emptyStore:emptyStore,stitchSvg:stitchSvg,hashString:hashString,captureSignature:captureSignature,metadataForCloud:metadataForCloud,loadAssetData:loadAssetData,saveAssetData:saveAssetData,filterForSettings:filterForSettings,greenToneHex:greenToneHex,hslToHex:hslToHex,capturePolicy:capturePolicy}
+    __test:{emptyStore:emptyStore,stitchSvg:stitchSvg,hashString:hashString,captureSignature:captureSignature,metadataForCloud:metadataForCloud,loadAssetData:loadAssetData,saveAssetData:saveAssetData,filterForSettings:filterForSettings,greenToneHex:greenToneHex,hslToHex:hslToHex,capturePolicy:capturePolicy,nativeVisualAsset:nativeVisualAsset}
   };
 });

@@ -909,6 +909,12 @@ async function runExportJob(job, deadlineAt) {
          (originPx + captureZoom + one image). The runtime does the play-axis framing, same
          as it does for locally captured surfaces. */
       const frame = await renderHoleSurfaceMercator({ pins, captures, terrain, settings, maxDim: EXPORT_RENDITION_PX });
+      if (frame.diagnostics) {
+        const t = frame.diagnostics.tone, tf = frame.diagnostics.turf;
+        console.log("[visual-worker] normalise h" + holeNumber + " mean " + t.measuredMean.toFixed(1) + "->target " + t.brightnessTarget +
+          " black/white " + t.blackPoint.toFixed(1) + ".." + t.whitePoint.toFixed(1) + " gamma " + t.gamma +
+          " turf " + (tf.applied ? "pull " + tf.pull + " coverage " + tf.coverage : "not applied (" + tf.reason + ")"));
+      }
       await storageUpload(path, frame.jpeg, "image/jpeg");
       width = frame.width; height = frame.height; bytes = frame.jpeg.length;
       playSurface = {
@@ -951,6 +957,12 @@ async function runExportJob(job, deadlineAt) {
         terrain: terrainEntry ? { entry: terrainEntry, buffer: await bufferFor(terrainEntry) } : null,
         settings
       });
+      if (overview.diagnostics) {
+        const t = overview.diagnostics.tone, tf = overview.diagnostics.turf;
+        console.log("[visual-worker] normalise overview mean " + t.measuredMean.toFixed(1) + "->target " + t.brightnessTarget +
+          " black/white " + t.blackPoint.toFixed(1) + ".." + t.whitePoint.toFixed(1) + " gamma " + t.gamma +
+          " turf " + (tf.applied ? "pull " + tf.pull + " coverage " + tf.coverage : "not applied (" + tf.reason + ")"));
+      }
       await storageUpload(overviewPath, overview.jpeg, "image/jpeg");
       framesIndex.overview = { path: overviewPath, width: overview.width, height: overview.height, bytes: overview.jpeg.length, bounds: backdropEntry.bounds };
     } else {
