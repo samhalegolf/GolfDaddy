@@ -120,6 +120,14 @@
       }
     },
     {
+      id: "shadowlift", label: "Shadow lift",
+      on: function (s) { return num((s.lighting || {}).shadowLiftStrength, 0) > 0.02; },
+      sig: function (s) {
+        var l = s.lighting || {};
+        return [num(l.shadowLiftStrength, 0), num(l.shadowLiftThreshold, 30)].join("/");
+      }
+    },
+    {
       id: "turf", label: "Turf tone",
       on: function (s) { return num((s.turf || {}).greenStrength, 0.35) > 0.05; },
       sig: turfSignature

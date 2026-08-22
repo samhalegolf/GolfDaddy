@@ -115,6 +115,14 @@ function toneCurveLut(stats, settings) {
   const highlightCeiling = clamp(num(lighting.highlightCeiling, 92), shadowFloor + 5, 100);
   const brightnessTarget = clamp(num(lighting.brightnessTarget, 52), shadowFloor, highlightCeiling);
   const contrast = clamp(num(lighting.contrastTarget, 1.04), 0.55, 2.2);
+  /* Shadow lift - mirrors the engine's toneCurveLut exactly (see that comment): pixels
+     landing below the threshold are raised toward it, everything else untouched, and
+     strength 0 is exact identity so pre-existing recipes render unchanged. */
+  const shadowLiftStrength = clamp(num(lighting.shadowLiftStrength, 0), 0, 1);
+  const shadowLiftThreshold = clamp(num(lighting.shadowLiftThreshold, 30), 0, 60);
+  const liftShadows = (value) => (shadowLiftStrength <= 0 || value >= shadowLiftThreshold)
+    ? value
+    : shadowLiftThreshold * shadowLiftStrength + value * (1 - shadowLiftStrength);
   const black = clamp(stats.luma.p1 || 0, 0, 100);
   const white = clamp(stats.luma.p99 || 100, black + 1, 100);
   const mean = clamp(stats.luma.mean || 50, black, white);
@@ -127,16 +135,16 @@ function toneCurveLut(stats, settings) {
   /* A flat/near-flat source has no range to stretch - shift it onto the target instead. */
   if (white - black < 2) {
     const shift = brightnessTarget - mean;
-    for (let i = 0; i <= 100; i++) lut[i] = clamp(i + shift, 0, 100);
-    return { lut, blackPoint: black, whitePoint: white, measuredMean: mean, gamma: 1, shadowFloor, highlightCeiling, brightnessTarget, contrast };
+    for (let i = 0; i <= 100; i++) lut[i] = clamp(liftShadows(clamp(i + shift, 0, 100)), 0, 100);
+    return { lut, blackPoint: black, whitePoint: white, measuredMean: mean, gamma: 1, shadowFloor, highlightCeiling, brightnessTarget, contrast, shadowLiftThreshold, shadowLiftStrength };
   }
   for (let i = 0; i <= 100; i++) {
     const x = clamp((i - black) / Math.max(1e-6, white - black), 0, 1);
     let y = Math.pow(x, gamma);
     y = 0.5 + (y - 0.5) * contrast;
-    lut[i] = clamp(shadowFloor + clamp(y, 0, 1) * (highlightCeiling - shadowFloor), 0, 100);
+    lut[i] = clamp(liftShadows(clamp(shadowFloor + clamp(y, 0, 1) * (highlightCeiling - shadowFloor), 0, 100)), 0, 100);
   }
-  return { lut, blackPoint: black, whitePoint: white, measuredMean: mean, gamma, shadowFloor, highlightCeiling, brightnessTarget, contrast };
+  return { lut, blackPoint: black, whitePoint: white, measuredMean: mean, gamma, shadowFloor, highlightCeiling, brightnessTarget, contrast, shadowLiftThreshold, shadowLiftStrength };
 }
 /* Range guardrail, not a stretch - turf already inside [lo,hi] is left exactly as it is;
    pull=1 sits out-of-range values on the boundary, pull<1 keeps some of the excursion. */

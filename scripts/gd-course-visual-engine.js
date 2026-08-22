@@ -2316,6 +2316,19 @@
     var highlightCeiling=clamp(finite(lighting.highlightCeiling)==null?92:lighting.highlightCeiling,shadowFloor+5,100);
     var brightnessTarget=clamp(finite(lighting.brightnessTarget)==null?52:lighting.brightnessTarget,shadowFloor,highlightCeiling);
     var contrast=clamp(finite(lighting.contrastTarget)==null?1.04:lighting.contrastTarget,.55,2.2);
+    /* Shadow lift: pixels that would land darker than the threshold are raised toward
+       it; everything at or above the threshold is untouched. This is the thresholded
+       shadow control the floor/ceiling band cannot express - the band remaps EVERY
+       tone, and its mean-pinning gamma makes either end move the whole image. Applied
+       to the FINISHED lut value so it composes with (never fights) the band and the
+       gamma: strength 0 is exact identity, so every recipe and baked frame from before
+       this field existed renders byte-identically. */
+    var shadowLiftStrength=clamp(finite(lighting.shadowLiftStrength)==null?0:lighting.shadowLiftStrength,0,1);
+    var shadowLiftThreshold=clamp(finite(lighting.shadowLiftThreshold)==null?30:lighting.shadowLiftThreshold,0,60);
+    function liftShadows(value){
+      if(shadowLiftStrength<=0||value>=shadowLiftThreshold)return value;
+      return shadowLiftThreshold*shadowLiftStrength+value*(1-shadowLiftStrength);
+    }
     var black=clamp(stats&&stats.luma&&stats.luma.p1||0,0,100);
     var white=clamp(stats&&stats.luma&&stats.luma.p99||100,black+1,100);
     var mean=clamp(stats&&stats.luma&&stats.luma.mean||50,black,white);
@@ -2330,16 +2343,16 @@
     // onto the shadow floor. Shift it onto the target instead and leave the (absent) contrast be.
     if(white-black<2){
       var shift=brightnessTarget-mean;
-      for(i=0;i<=100;i++)lut[i]=clamp(i+shift,0,100);
-      return {lut:lut,blackPoint:+black.toFixed(2),whitePoint:+white.toFixed(2),measuredMean:+mean.toFixed(2),gamma:1,degenerateRange:true,shadowFloor:shadowFloor,highlightCeiling:highlightCeiling,brightnessTarget:brightnessTarget,contrast:contrast};
+      for(i=0;i<=100;i++)lut[i]=clamp(liftShadows(clamp(i+shift,0,100)),0,100);
+      return {lut:lut,blackPoint:+black.toFixed(2),whitePoint:+white.toFixed(2),measuredMean:+mean.toFixed(2),gamma:1,degenerateRange:true,shadowFloor:shadowFloor,highlightCeiling:highlightCeiling,brightnessTarget:brightnessTarget,contrast:contrast,shadowLiftThreshold:shadowLiftThreshold,shadowLiftStrength:shadowLiftStrength};
     }
     for(i=0;i<=100;i++){
       var x=clamp((i-black)/Math.max(1e-6,white-black),0,1);
       var y=Math.pow(x,gamma);
       y=.5+(y-.5)*contrast;
-      lut[i]=clamp(shadowFloor+clamp(y,0,1)*(highlightCeiling-shadowFloor),0,100);
+      lut[i]=clamp(liftShadows(clamp(shadowFloor+clamp(y,0,1)*(highlightCeiling-shadowFloor),0,100)),0,100);
     }
-    return {lut:lut,blackPoint:+black.toFixed(2),whitePoint:+white.toFixed(2),measuredMean:+mean.toFixed(2),gamma:+gamma.toFixed(3),shadowFloor:shadowFloor,highlightCeiling:highlightCeiling,brightnessTarget:brightnessTarget,contrast:contrast};
+    return {lut:lut,blackPoint:+black.toFixed(2),whitePoint:+white.toFixed(2),measuredMean:+mean.toFixed(2),gamma:+gamma.toFixed(3),shadowFloor:shadowFloor,highlightCeiling:highlightCeiling,brightnessTarget:brightnessTarget,contrast:contrast,shadowLiftThreshold:shadowLiftThreshold,shadowLiftStrength:shadowLiftStrength};
   }
   /* Measure once, then a single pass: tone-map L, and where the pixel is turf drag H/S/L onto the
      preset's authored targets. Mutates pixels in place and returns the plan for diagnostics.
@@ -2409,7 +2422,11 @@
       href:asset&&asset.dataUrl||"",
       w:width,h:height,
       turf:{hueMin:turf.hueMin,hueMax:turf.hueMax,saturationMin:turf.saturationMin,saturationMax:turf.saturationMax,brightnessMin:turf.brightnessMin,brightnessMax:turf.brightnessMax,targetPull:turf.targetPull},
-      lighting:{brightnessTarget:lighting.brightnessTarget,shadowFloor:lighting.shadowFloor,highlightCeiling:lighting.highlightCeiling,contrastTarget:lighting.contrastTarget}
+      /* Every field toneCurveLut reads MUST appear here - a field the key omits makes a
+         changed recipe hit the cache and render the old pixels while the frame's
+         overrideHash claims the new ones. Shadow lift shipped with exactly that bug for
+         one commit. */
+      lighting:{brightnessTarget:lighting.brightnessTarget,shadowFloor:lighting.shadowFloor,highlightCeiling:lighting.highlightCeiling,contrastTarget:lighting.contrastTarget,shadowLiftStrength:lighting.shadowLiftStrength,shadowLiftThreshold:lighting.shadowLiftThreshold}
     });
   }
   function cacheNormalisedSurface(key,value){

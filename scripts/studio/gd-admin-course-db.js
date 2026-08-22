@@ -1869,7 +1869,7 @@ const GD_VISUAL_CONTROL_IDS=[
   "gdCourseVisualPreset","gdCourseVisualRecipeSelect",
   "gdCourseVisualHueMin","gdCourseVisualHueMax","gdCourseVisualSatMin","gdCourseVisualSatMax",
   "gdCourseVisualLumMin","gdCourseVisualLumMax","gdCourseVisualTargetPull",
-  "gdCourseVisualBrightness","gdCourseVisualShadowFloor","gdCourseVisualHighlightCeiling","gdCourseVisualContrast",
+  "gdCourseVisualBrightness","gdCourseVisualShadowFloor","gdCourseVisualHighlightCeiling","gdCourseVisualContrast","gdCourseVisualShadowLift","gdCourseVisualShadowDark",
   "gdCourseVisualFloodOn","gdCourseVisualFloodAmbient","gdCourseVisualFloodLit","gdCourseVisualFloodThrow",
   "gdCourseVisualFloodSpread","gdCourseVisualFloodGreenPool","gdCourseVisualFloodGreenRadius","gdCourseVisualFloodMask",
   "gdCourseVisualTerrainStrength","gdCourseVisualMowing",
@@ -2596,7 +2596,7 @@ const gdAdminCourseCloudFramesSuppressed={};
    carries. Reset = raw capture; the recipe is then built up one layer at a time. */
 const GD_VISUAL_OFF_OVERRIDES={
   turf:{greenStrength:0,greenTone:0},
-  lighting:{brightnessTarget:52,contrastTarget:1},
+  lighting:{brightnessTarget:52,contrastTarget:1,shadowLiftStrength:0},
   readability:{sharpness:0,fairwaySeparation:0},
   mowingVisibility:"Unknown",
   visualTools:{holeTerrainStrength:0,courseTerrainStrength:0,fairwayAirbrush:false},
@@ -2896,6 +2896,7 @@ function gdAdminCourseVisualSaveRecipeFromForm(courseId){
 const GD_VISUAL_CONTROL_LABELS={
   gdCourseVisualPreset:"Preset",gdCourseVisualBrightness:"Brightness",gdCourseVisualContrast:"Contrast",
   gdCourseVisualShadowFloor:"Shadow floor",gdCourseVisualHighlightCeiling:"Highlight ceiling",
+  gdCourseVisualShadowLift:"Shadow lift",gdCourseVisualShadowDark:"Shadow lift",
   gdCourseVisualHueMin:"Turf hue",gdCourseVisualHueMax:"Turf hue",gdCourseVisualSatMin:"Turf saturation",
   gdCourseVisualSatMax:"Turf saturation",gdCourseVisualLumMin:"Turf brightness",gdCourseVisualLumMax:"Turf brightness",
   gdCourseVisualTargetPull:"Turf target",gdCourseVisualFloodOn:"Floodlight",gdCourseVisualFloodAmbient:"Floodlight ambient",
@@ -2958,6 +2959,8 @@ function gdAdminCourseVisualPresetChanged(courseId){
     set("gdCourseVisualShadowFloor",lighting.shadowFloor,14);
     set("gdCourseVisualHighlightCeiling",lighting.highlightCeiling,92);
     set("gdCourseVisualContrast",lighting.contrastTarget,1.04);
+    set("gdCourseVisualShadowLift",lighting.shadowLiftStrength,0);
+    set("gdCourseVisualShadowDark",lighting.shadowLiftThreshold,30);
     set("gdCourseVisualTerrainStrength",tools.holeTerrainStrength,.9);
     const floodP=preset.floodlight||{};
     set("gdCourseVisualFloodAmbient",floodP.ambientLevel,24);
@@ -3003,7 +3006,7 @@ function gdAdminCourseVisualPresetButtonEvent(event){
    and this one does not stop propagation), so every release committed twice. The
    old `if(bakePending) return false` guard hid that by throwing the second one away,
    which is also how it threw away real adjustments. */
-const GD_VISUAL_RECIPE_CONTROL_IDS=["gdCourseVisualHueMin","gdCourseVisualHueMax","gdCourseVisualSatMin","gdCourseVisualSatMax","gdCourseVisualLumMin","gdCourseVisualLumMax","gdCourseVisualTargetPull","gdCourseVisualBrightness","gdCourseVisualShadowFloor","gdCourseVisualHighlightCeiling","gdCourseVisualContrast","gdCourseVisualTerrainStrength","gdCourseVisualFloodAmbient","gdCourseVisualFloodLit","gdCourseVisualFloodThrow","gdCourseVisualFloodSpread","gdCourseVisualFloodGreenPool","gdCourseVisualFloodGreenRadius","gdCourseVisualFloodMask","gdCourseVisualMowing"];
+const GD_VISUAL_RECIPE_CONTROL_IDS=["gdCourseVisualHueMin","gdCourseVisualHueMax","gdCourseVisualSatMin","gdCourseVisualSatMax","gdCourseVisualLumMin","gdCourseVisualLumMax","gdCourseVisualTargetPull","gdCourseVisualBrightness","gdCourseVisualShadowFloor","gdCourseVisualHighlightCeiling","gdCourseVisualContrast","gdCourseVisualShadowLift","gdCourseVisualShadowDark","gdCourseVisualTerrainStrength","gdCourseVisualFloodAmbient","gdCourseVisualFloodLit","gdCourseVisualFloodThrow","gdCourseVisualFloodSpread","gdCourseVisualFloodGreenPool","gdCourseVisualFloodGreenRadius","gdCourseVisualFloodMask","gdCourseVisualMowing"];
 /* gdCourseVisualFloodOn is deliberately NOT in this list - all five effect switches
    route through gdAdminCourseVisualEffectToggled instead. */
 function gdAdminCourseVisualControlEvent(event){
@@ -3118,7 +3121,7 @@ function gdAdminCourseVisualEffectIsOn(group,settings){
   /* The same predicates the ingredient chips use - the switch and the chip must never
      disagree about what "on" means. */
   if(group==="turf")return gdAdminCourseVisualClampedNumber(turf.targetPull,0,1,1)>0||gdAdminCourseVisualClampedNumber(turf.greenStrength,0,1,.35)>.05;
-  if(group==="lighting")return Math.abs(gdAdminCourseVisualClampedNumber(lighting.brightnessTarget,0,100,52)-52)>2||Math.abs(gdAdminCourseVisualClampedNumber(lighting.contrastTarget,.55,2.2,1)-1)>.03;
+  if(group==="lighting")return Math.abs(gdAdminCourseVisualClampedNumber(lighting.brightnessTarget,0,100,52)-52)>2||Math.abs(gdAdminCourseVisualClampedNumber(lighting.contrastTarget,.55,2.2,1)-1)>.03||gdAdminCourseVisualClampedNumber(lighting.shadowLiftStrength,0,1,0)>.02;
   if(group==="floodlight")return !!(settings.floodlight&&settings.floodlight.enabled===true);
   if(group==="terrain")return gdAdminCourseVisualClampedNumber(tools.holeTerrainStrength,0,1.6,.9)>.02;
   if(group==="mowing"){
@@ -3140,7 +3143,7 @@ function gdAdminCourseVisualEffectBody(on,fields){
 function gdAdminCourseVisualEffectApplyOff(group){
   const set=(id,value)=>{const el=document.getElementById(id);if(el)el.value=String(value);};
   if(group==="turf"){set("gdCourseVisualTargetPull",0);return {turf:{greenStrength:0,greenTone:0}};}
-  if(group==="lighting"){set("gdCourseVisualBrightness",52);set("gdCourseVisualContrast",1);return null;}
+  if(group==="lighting"){set("gdCourseVisualBrightness",52);set("gdCourseVisualContrast",1);set("gdCourseVisualShadowLift",0);return null;}
   if(group==="floodlight"){const el=document.getElementById("gdCourseVisualFloodOn");if(el)el.checked=false;return null;}
   if(group==="terrain"){set("gdCourseVisualTerrainStrength",0);return null;}
   if(group==="mowing"){set("gdCourseVisualMowing","Unknown");return null;}
@@ -3164,6 +3167,8 @@ function gdAdminCourseVisualEffectApplyOn(group,stash,presetId){
     const lighting=stash&&stash.lighting||preset.lighting||{};
     set("gdCourseVisualBrightness",lighting.brightnessTarget,56);
     set("gdCourseVisualContrast",lighting.contrastTarget,1.04);
+    set("gdCourseVisualShadowLift",lighting.shadowLiftStrength,0);
+    set("gdCourseVisualShadowDark",lighting.shadowLiftThreshold,30);
     return null;
   }
   if(group==="floodlight"){const el=document.getElementById("gdCourseVisualFloodOn");if(el)el.checked=true;return null;}
@@ -3273,6 +3278,8 @@ function gdAdminCourseVisualControls(record,courseId){
   const terrain=gdAdminCourseVisualClampedNumber(settings.visualTools&&settings.visualTools.holeTerrainStrength,0,1.6,.9);
   const brightness=gdAdminCourseVisualClampedNumber(settings.lighting&&settings.lighting.brightnessTarget,0,100,52);
   const contrast=gdAdminCourseVisualClampedNumber(settings.lighting&&settings.lighting.contrastTarget,.55,2.2,1.04);
+  const shadowLift=gdAdminCourseVisualClampedNumber(settings.lighting&&settings.lighting.shadowLiftStrength,0,1,0);
+  const shadowDark=gdAdminCourseVisualClampedNumber(settings.lighting&&settings.lighting.shadowLiftThreshold,0,60,30);
   const key=gdEscapeHTML(courseId||record&&record.courseId||"");
   const presetField=`<label>Preset<select id="gdCourseVisualPreset">${presets.map(p=>`<option value="${gdEscapeHTML(p&&p.id||p&&p.mode||p&&p.name||"")}" ${preset===(p&&p.id)?"selected":""}>${gdEscapeHTML(p&&p.name||p&&p.mode||p&&p.id||"Preset")}</option>`).join("")}</select></label>`;
   const presetRail=`<div class="gdAdminCourseVisualPresetRail">${presets.map(p=>{const id=p&&p.id||p&&p.mode||p&&p.name||"";return `<button type="button" data-preset-id="${gdEscapeHTML(id)}" class="${preset===id?"active":""}" onclick="return gdAdminCourseVisualPresetButtonChanged('${key}','${gdEscapeHTML(id)}')">${gdEscapeHTML(p&&p.name||p&&p.mode||id||"Preset")}</button>`;}).join("")}</div>`;
@@ -3336,7 +3343,9 @@ function gdAdminCourseVisualControls(record,courseId){
     rangeField("gdCourseVisualShadowFloor","Shadow floor","darkest point",shadowFloor,0,60,1)+
     rangeField("gdCourseVisualHighlightCeiling","Highlight ceiling","brightest point",highlightCeiling,40,100,1)+
     rangeField("gdCourseVisualContrast","Contrast","",contrast,.55,2.2,.01)+
-    `<span class="gdAdminPhoneTiltNote">Exposure is normalised: whatever the capture's real range is, it's mapped between floor and ceiling and its mean driven to the target.</span>`;
+    rangeField("gdCourseVisualShadowLift","Shadow lift","how aggressively dark pixels are raised",shadowLift,0,1,.05)+
+    rangeField("gdCourseVisualShadowDark","Counts as dark","pixels below this are lifted toward it; nothing above it is touched",shadowDark,0,60,1)+
+    `<span class="gdAdminPhoneTiltNote">Exposure is normalised: whatever the capture's real range is, it's mapped between floor and ceiling and its mean driven to the target. Shadow lift then raises only the pixels darker than "counts as dark" — the rest of the image is left alone.</span>`;
   const lightingPanel=gdAdminCourseVisualEffectHeader("lighting","Lighting",lightingOn)+gdAdminCourseVisualEffectBody(lightingOn,lightingFields);
   /* "Unknown" is the recipe's off value; the switch owns it now, so the visible level
      choices are only the real levels. The hidden option keeps the select honest while
@@ -3401,7 +3410,9 @@ function gdAdminCourseVisualOverridesFromForm(courseId){
       brightnessTarget:num("gdCourseVisualBrightness",0,100,52),
       shadowFloor:num("gdCourseVisualShadowFloor",0,60,14),
       highlightCeiling:num("gdCourseVisualHighlightCeiling",40,100,92),
-      contrastTarget:num("gdCourseVisualContrast",.55,2.2,1.04)
+      contrastTarget:num("gdCourseVisualContrast",.55,2.2,1.04),
+      shadowLiftStrength:num("gdCourseVisualShadowLift",0,1,0),
+      shadowLiftThreshold:num("gdCourseVisualShadowDark",0,60,30)
     },
     floodlight:{
       enabled:document.getElementById("gdCourseVisualFloodOn")?.checked===true,

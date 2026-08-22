@@ -6,7 +6,7 @@
 
    The phone reads course visual records and caches capture pixels; it does not
    author them. Authoring - masters, previews, presets, stitching, floodlight
-   rendering, publishing, cloud sync - is 185KB of
+   rendering, publishing, cloud sync - is 198KB of
    gd-course-visual-engine.js that only the studio needs, and published frames
    are rendered server-side by the worker anyway.
 
@@ -247,7 +247,7 @@
       version:PRESET_VERSION,
       mode:"Natural",
       description:"Balanced aerial map tone for general course overviews.",
-      turf:{hueMin:86,hueMax:142,saturationMin:28,saturationMax:66,brightnessMin:30,brightnessMax:72,greenStrength:.35},
+      turf:{hueMin:86,hueMax:142,saturationMin:28,saturationMax:66,brightnessMin:30,brightnessMax:72,greenStrength:.35,targetPull:1},
       lighting:{brightnessTarget:52,shadowFloor:14,highlightCeiling:92,contrastTarget:1.04},
       readability:{fairwaySeparation:.18,greenSeparation:.16,bunkerBrightness:.08,localContrast:.08,sharpness:.1},
       visualTools:{fairwayAirbrush:true,fairwayAirbrushStrength:.18,fairwayAirbrushWidthMeters:44,greenSurroundAirbrush:true,greenSurroundAirbrushStrength:.18,greenSurroundAirbrushWidthMeters:24,holeTerrainStrength:.75},
