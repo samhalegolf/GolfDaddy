@@ -21,6 +21,40 @@ import sharp from "sharp";
 
 function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, Number(v))); }
 function num(v, fb) { const n = Number(v); return Number.isFinite(n) ? n : fb; }
+function legacyEffectToggleState(group, settings) {
+  settings = settings || {};
+  const turf = settings.turf || {}, lighting = settings.lighting || {}, tools = settings.visualTools || {};
+  if (group === "turf") return Object.keys(turf).length > 0 || clamp(num(turf.targetPull, 1), 0, 1) > 0 || clamp(num(turf.greenStrength, 0.35), 0, 3.5) > 0.05;
+  if (group === "lighting") return Object.keys(lighting).length > 0
+    || Math.abs(clamp(num(lighting.brightnessTarget, 52), 0, 100) - 52) > 2
+    || Math.abs(clamp(num(lighting.contrastTarget, 1), 0.55, 2.2) - 1) > 0.03
+    || clamp(num(lighting.shadowLiftStrength, 0), 0, 1) > 0.02;
+  if (group === "floodlight") return !!(settings.floodlight && settings.floodlight.enabled === true);
+  if (group === "terrain") return clamp(num(tools.holeTerrainStrength, 0.9), 0, 1.6) > 0.02;
+  if (group === "mowing") {
+    const mowing = String(settings.mowingVisibility || "Unknown");
+    return mowing === "Low" || mowing === "Clear" || mowing === "Prominent";
+  }
+  return false;
+}
+function visualEffectTogglesForSettings(settings) {
+  settings = settings || {};
+  const toggles = settings.effectToggles && typeof settings.effectToggles === "object" ? settings.effectToggles : {};
+  return {
+    turf: Object.prototype.hasOwnProperty.call(toggles, "turf") ? toggles.turf === true : legacyEffectToggleState("turf", settings),
+    lighting: Object.prototype.hasOwnProperty.call(toggles, "lighting") ? toggles.lighting === true : legacyEffectToggleState("lighting", settings),
+    floodlight: Object.prototype.hasOwnProperty.call(toggles, "floodlight") ? toggles.floodlight === true : legacyEffectToggleState("floodlight", settings),
+    terrain: Object.prototype.hasOwnProperty.call(toggles, "terrain") ? toggles.terrain === true : legacyEffectToggleState("terrain", settings),
+    mowing: Object.prototype.hasOwnProperty.call(toggles, "mowing") ? toggles.mowing === true : legacyEffectToggleState("mowing", settings)
+  };
+}
+function isSourceModeSettings(settings) {
+  settings = settings || {};
+  if (settings.sourceMode === true) return true;
+  if (settings.processing && settings.processing.sourceMode === true) return true;
+  const toggles = visualEffectTogglesForSettings(settings);
+  return !toggles.turf && !toggles.lighting && !toggles.floodlight && !toggles.terrain && !toggles.mowing;
+}
 
 /* ---- source-aware tone + turf targeting -------------------------------------------------
 
@@ -245,17 +279,30 @@ function shadowSurroundFill(pixels, width, height, channels, settings) {
   return { applied: true, model: "surround-fill", threshold, strength: +strength.toFixed(3), cell, darkCoverage: total ? +(darkCount / total).toFixed(3) : 0 };
 }
 function normaliseSurfaceBuffer(buffer, width, height, channels, settings) {
+  const toggles = visualEffectTogglesForSettings(settings);
   const band = turfBand(settings);
   const before = measureSurfaceBuffer(buffer, width, height, channels, band);
+  if (isSourceModeSettings(settings)) {
+    return {
+      shadowFill: { applied: false, reason: "source-mode" },
+      tone: { applied: false, reason: "source-mode" },
+      turf: { applied: false, reason: "source-mode" },
+      before: { luma: before.luma, turf: { coverage: before.turf.coverage, hue: before.turf.hue, saturation: before.turf.saturation, luma: before.turf.luma } },
+      after: { luma: before.luma, turf: { coverage: before.turf.coverage, hue: before.turf.hue, saturation: before.turf.saturation, luma: before.turf.luma } },
+      model: "source-identity",
+      sourceMode: true,
+      effectToggles: toggles
+    };
+  }
   const tone = toneCurveLut(before, settings);
   const lut = tone.lut;
-  const toneMap = l => lut[Math.round(clamp(l, 0, 100))];
+  const toneMap = l => toggles.lighting ? lut[Math.round(clamp(l, 0, 100))] : clamp(l, 0, 100);
   const turfCfg = settings && settings.turf || {};
   const hueMin = num(turfCfg.hueMin, 86), hueMax = num(turfCfg.hueMax, 142);
   const satMin = num(turfCfg.saturationMin, 28), satMax = num(turfCfg.saturationMax, 66);
   const lumMin = num(turfCfg.brightnessMin, 30), lumMax = num(turfCfg.brightnessMax, 72);
   const pull = clamp(num(turfCfg.targetPull, 1), 0, 1);
-  const hasTurf = !!(before.turf && before.turf.sampled);
+  const hasTurf = !!(before.turf && before.turf.sampled) && toggles.turf;
   for (let i = 0; i + channels - 1 < buffer.length; i += channels) {
     const hsl = rgbToHsl(buffer[i], buffer[i + 1], buffer[i + 2]);
     let h = hsl.h, s = hsl.s, l = toneMap(hsl.l);
@@ -267,15 +314,21 @@ function normaliseSurfaceBuffer(buffer, width, height, channels, settings) {
     const rgb = hslToRgb(h, clamp(s, 0, 100), clamp(l, 0, 100));
     buffer[i] = rgb[0]; buffer[i + 1] = rgb[1]; buffer[i + 2] = rgb[2];
   }
-  const shadowFill = shadowSurroundFill(buffer, width, height, channels, settings);
+  const shadowFill = toggles.lighting
+    ? shadowSurroundFill(buffer, width, height, channels, settings)
+    : { applied: false, reason: "lighting-disabled" };
   const after = measureSurfaceBuffer(buffer, width, height, channels, band);
   return {
     shadowFill,
-    tone: { blackPoint: +tone.blackPoint.toFixed(2), whitePoint: +tone.whitePoint.toFixed(2), measuredMean: +tone.measuredMean.toFixed(2), gamma: +tone.gamma.toFixed(3), shadowFloor: tone.shadowFloor, highlightCeiling: tone.highlightCeiling, brightnessTarget: tone.brightnessTarget, contrast: tone.contrast },
-    turf: hasTurf ? { applied: true, hue: [hueMin, hueMax], saturation: [satMin, satMax], luma: [lumMin, lumMax], pull: +pull.toFixed(3), coverage: +before.turf.coverage.toFixed(3) } : { applied: false, reason: "no-turf-pixels" },
+    tone: toggles.lighting
+      ? { applied: true, blackPoint: +tone.blackPoint.toFixed(2), whitePoint: +tone.whitePoint.toFixed(2), measuredMean: +tone.measuredMean.toFixed(2), gamma: +tone.gamma.toFixed(3), shadowFloor: tone.shadowFloor, highlightCeiling: tone.highlightCeiling, brightnessTarget: tone.brightnessTarget, contrast: tone.contrast }
+      : { applied: false, reason: "lighting-disabled", measuredMean: +tone.measuredMean.toFixed(2) },
+    turf: hasTurf ? { applied: true, hue: [hueMin, hueMax], saturation: [satMin, satMax], luma: [lumMin, lumMax], pull: +pull.toFixed(3), coverage: +before.turf.coverage.toFixed(3) } : { applied: false, reason: toggles.turf ? "no-turf-pixels" : "turf-disabled" },
     before: { luma: before.luma, turf: { coverage: before.turf.coverage, hue: before.turf.hue, saturation: before.turf.saturation, luma: before.turf.luma } },
     after: { luma: after.luma, turf: { coverage: after.turf.coverage, hue: after.turf.hue, saturation: after.turf.saturation, luma: after.turf.luma } },
-    model: "measure-and-drag-to-target"
+    model: "measure-and-drag-to-target",
+    sourceMode: false,
+    effectToggles: toggles
   };
 }
 
@@ -297,15 +350,17 @@ function projectedBounds(bounds) {
 /* ---- recipe ----------------------------------------------------------------------------- */
 
 export function recipeFilter(settings) {
+  const toggles = visualEffectTogglesForSettings(settings);
+  if (isSourceModeSettings(settings)) return { saturation: 1, brightness: 1, contrast: 1 };
   const turf = settings && settings.turf || {};
   const lighting = settings && settings.lighting || {};
   const green = clamp(num(turf.greenStrength, 0.35), 0, 3.5);
   const brightnessTarget = clamp(num(lighting.brightnessTarget, 52), 5, 115);
   const contrast = clamp(num(lighting.contrastTarget, 1), 0.55, 2.2);
   return {
-    saturation: 1 + green * 0.55,
-    brightness: clamp(1 + (brightnessTarget - 52) / 90, 0.45, 1.75),
-    contrast
+    saturation: toggles.turf ? 1 + green * 0.55 : 1,
+    brightness: toggles.lighting ? clamp(1 + (brightnessTarget - 52) / 90, 0.45, 1.75) : 1,
+    contrast: toggles.lighting ? contrast : 1
   };
 }
 /* Relief strength, as one number.
@@ -321,8 +376,10 @@ export function recipeFilter(settings) {
    The ramp is linear from zero rather than starting at 0.26: a slider nudged just off the
    stop should show a hint of relief, not snap straight to a quarter strength. */
 function terrainParams(settings) {
+  if (isSourceModeSettings(settings)) return { strength: 0, opacity: 0 };
+  const toggles = visualEffectTogglesForSettings(settings);
   const tools = settings && settings.visualTools || {};
-  const strength = clamp(num(tools.holeTerrainStrength, 0.9), 0, 1.6);
+  const strength = toggles.terrain ? clamp(num(tools.holeTerrainStrength, 0.9), 0, 1.6) : 0;
   return { strength, opacity: clamp(strength * 0.6, 0, 0.96) };
 }
 /* Lay relief onto flattened pixels with soft-light.
@@ -382,6 +439,21 @@ async function flattenWithRelief({ width, height, background, composites, relief
   const surface = sharp({ create: { width, height, channels: 3, background }, limitInputPixels: false })
     .composite(composites);
   const flat = await surface.raw().toBuffer({ resolveWithObject: true });
+  if (isSourceModeSettings(settings)) {
+    const jpeg = await sharp(flat.data, { raw: { width: flat.info.width, height: flat.info.height, channels: flat.info.channels }, limitInputPixels: false })
+      .jpeg({ quality }).toBuffer();
+    return {
+      jpeg,
+      diagnostics: {
+        shadowFill: { applied: false, reason: "source-mode" },
+        tone: { applied: false, reason: "source-mode" },
+        turf: { applied: false, reason: "source-mode" },
+        model: "source-identity",
+        sourceMode: true,
+        effectToggles: visualEffectTogglesForSettings(settings)
+      }
+    };
+  }
   const diagnostics = normaliseSurfaceBuffer(flat.data, flat.info.width, flat.info.height, flat.info.channels, settings);
   if (relief) applyRelief(flat.data, relief.data, relief.opacity, flat.info.channels);
   let out = sharp(flat.data, { raw: { width: flat.info.width, height: flat.info.height, channels: flat.info.channels }, limitInputPixels: false });
@@ -403,9 +475,11 @@ function mowingOpacity(value) {
   return Number.isFinite(n) ? clamp(n, 0, 0.6) : 0;
 }
 function floodlightSettings(settings) {
+  if (isSourceModeSettings(settings)) return { enabled: false, ambientLevel: 24, litLevel: 64, throwOff: 0.35, spread: 0.45, greenPool: 0.8, greenPoolRadius: 0.22 };
+  const toggles = visualEffectTogglesForSettings(settings);
   const f = settings && settings.floodlight || {};
   return {
-    enabled: f.enabled === true,
+    enabled: toggles.floodlight && f.enabled === true,
     ambientLevel: clamp(num(f.ambientLevel, 24), 0, 100),
     litLevel: clamp(num(f.litLevel, 64), 0, 100),
     throwOff: clamp(num(f.throwOff, 0.35), 0, 1),

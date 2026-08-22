@@ -227,4 +227,95 @@ async function meanLuma(jpeg) {
   console.log("10. renderOverview is source-aware too: dark -> %s, bright -> %s", darkMean.toFixed(1), brightMean.toFixed(1));
 }
 
+// ---- 11. Natural remains a processed preset, not raw --------------------------------------------
+{
+  const natural = engine.getPreset("clarity-course-natural-v1");
+  const filter = engine.__test.filterForSettings(natural);
+  assert.equal(engine.__test.isSourceModeSettings(natural), false, "Natural must remain a processed preset");
+  assert.ok(filter.saturation !== 1 || filter.brightness !== 1 || filter.contrast !== 1,
+    "Natural still carries authored treatment, not identity");
+  console.log("11. Natural stays processed: sat %s, bright %s, contrast %s", filter.saturation, filter.brightness, filter.contrast);
+}
+
+// ---- 12. Raw Source is a true identity output ---------------------------------------------------
+{
+  const source = await solidCapture([92, 131, 84]);
+  const rawSettings = { effectToggles: { turf: false, lighting: false, floodlight: false, terrain: false, mowing: false }, sourceMode: true };
+  const out = await render(source, rawSettings);
+  const sourceMean = await meanLuma(source);
+  const outMean = await meanLuma(out.jpeg);
+  assert.equal(out.diagnostics.sourceMode, true, "raw render is marked as source mode");
+  assert.ok(Math.abs(outMean - sourceMean) < 2.5, "raw output stays at source luminance, got " + sourceMean.toFixed(1) + " -> " + outMean.toFixed(1));
+  console.log("12. Raw Source stays near identity: %s -> %s", sourceMean.toFixed(1), outMean.toFixed(1));
+}
+
+// ---- 13. All toggles OFF auto-resolves to Raw Source --------------------------------------------
+{
+  const source = await solidCapture([92, 131, 84]);
+  const explicitRaw = await render(source, { effectToggles: { turf: false, lighting: false, floodlight: false, terrain: false, mowing: false }, sourceMode: true });
+  const allOff = await render(source, { effectToggles: { turf: false, lighting: false, floodlight: false, terrain: false, mowing: false } });
+  const rawBuf = await sharp(explicitRaw.jpeg).raw().toBuffer();
+  const offBuf = await sharp(allOff.jpeg).raw().toBuffer();
+  let diff = 0;
+  for (let i = 0; i < rawBuf.length; i += 503) diff += Math.abs(rawBuf[i] - offBuf[i]);
+  assert.equal(allOff.diagnostics.sourceMode, true, "all toggles off auto-enters source mode");
+  assert.ok(diff < 40, "all toggles off matches explicit raw closely, sampled diff " + diff);
+  console.log("13. All-off matches Raw Source: sampled diff %s", diff);
+}
+
+// ---- 14. Turf OFF skips turf targeting even when the preset would change it ---------------------
+{
+  const dryTurf = await solidCapture([170, 160, 60]);
+  const natural = engine.getPreset("clarity-course-natural-v1");
+  const off = await render(dryTurf, Object.assign({}, natural, { effectToggles: { turf: false, lighting: true, floodlight: false, terrain: false, mowing: false } }));
+  const beforeHue = off.diagnostics.before.turf.hue.mean;
+  const afterHue = off.diagnostics.after.turf.hue.mean;
+  assert.equal(off.diagnostics.turf.applied, false, "turf diagnostics report the pass as disabled");
+  assert.ok(Math.abs(afterHue - beforeHue) < 2, "turf off leaves hue alone, got " + beforeHue.toFixed(1) + " -> " + afterHue.toFixed(1));
+  console.log("14. Turf OFF leaves hue unchanged: %s -> %s", beforeHue.toFixed(1), afterHue.toFixed(1));
+}
+
+// ---- 15. Lighting OFF leaves luminance unchanged -------------------------------------------------
+{
+  const dark = await solidCapture([28, 36, 30]);
+  const settings = {
+    lighting: { brightnessTarget: 80, contrastTarget: 1.6, shadowLiftStrength: 0.6 },
+    mowingVisibility: "Unknown",
+    effectToggles: { turf: false, lighting: false, floodlight: false, terrain: false, mowing: true }
+  };
+  const out = await render(dark, settings);
+  const sourceMean = await meanLuma(dark);
+  const outMean = await meanLuma(out.jpeg);
+  assert.equal(out.diagnostics.tone.applied, false, "lighting diagnostics report the pass as disabled");
+  assert.ok(Math.abs(outMean - sourceMean) < 2.5, "lighting off leaves source luminance alone, got " + sourceMean.toFixed(1) + " -> " + outMean.toFixed(1));
+  console.log("15. Lighting OFF leaves luminance unchanged: %s -> %s", sourceMean.toFixed(1), outMean.toFixed(1));
+}
+
+// ---- 16. Terrain OFF isolates the base colour treatment -----------------------------------------
+{
+  const base = await solidCapture([90, 140, 80]);
+  const enc = (hgt) => { const v = Math.round((hgt + 10000) / 0.1); return [(v >> 16) & 255, (v >> 8) & 255, v & 255]; };
+  const demRaw = Buffer.alloc(D * D * 3);
+  for (let y = 0; y < D; y++) for (let x = 0; x < D; x++) {
+    const dx = (x - D / 2) * 1.9, dy = (y - D / 2) * 1.9;
+    const hgt = 40 + 9 * Math.exp(-(dx * dx + dy * dy) / 8000);
+    const [a, b, c] = enc(hgt);
+    const i = (y * D + x) * 3; demRaw[i] = a; demRaw[i + 1] = b; demRaw[i + 2] = c;
+  }
+  const { reliefFromTerrainRgb } = await import("../functions/lib/gd-relief-core.mjs");
+  const demPng = await sharp(demRaw, { raw: { width: D, height: D, channels: 3 } }).png().toBuffer();
+  const relief = await reliefFromTerrainRgb(demPng, { latitude: -36.752, zoom: 16 });
+  const terrain = { entry: { role: "terrain-reference", bounds, width: relief.width, height: relief.height }, buffer: relief.png };
+  const natural = engine.getPreset("clarity-course-natural-v1");
+  const off = await render(base, Object.assign({}, natural, { effectToggles: { turf: true, lighting: true, floodlight: false, terrain: false, mowing: false } }), { terrain });
+  const on = await render(base, Object.assign({}, natural, { effectToggles: { turf: true, lighting: true, floodlight: false, terrain: true, mowing: false } }), { terrain });
+  const offBuf = await sharp(off.jpeg).raw().toBuffer();
+  const onBuf = await sharp(on.jpeg).raw().toBuffer();
+  let diff = 0;
+  for (let i = 0; i < offBuf.length; i += 997) diff += Math.abs(offBuf[i] - onBuf[i]);
+  assert.ok(diff > 0, "terrain on still changes pixels relative to terrain off");
+  assert.ok(off.diagnostics.sourceMode !== true, "terrain-off test remains in the normal recipe pipeline");
+  console.log("16. Terrain OFF isolates the base treatment: sampled diff to Terrain ON %s", diff);
+}
+
 console.log("course-visual-export-normalisation passed");

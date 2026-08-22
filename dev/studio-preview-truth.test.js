@@ -740,8 +740,24 @@ test("every effect group has an explicit on/off switch plus its adjustments", ()
   assert.ok(offFn.includes('set("gdCourseVisualBrightness",52)') && offFn.includes('set("gdCourseVisualContrast",1)'), "lighting off");
   assert.ok(offFn.includes('set("gdCourseVisualTerrainStrength",0)'), "terrain off");
   assert.ok(offFn.includes('set("gdCourseVisualMowing","Unknown")'), "mow lines off");
+  assert.ok(STUDIO_SRC.includes("effectToggles:{turf:false,lighting:false,floodlight:false,terrain:false,mowing:false}")
+    && STUDIO_SRC.includes("sourceMode:true"),
+    "Reset stores explicit toggle-off state and source mode");
   /* And the switch state is read with the SAME predicates the ingredient chips use. */
   assert.ok(STUDIO_SRC.includes("function gdAdminCourseVisualEffectIsOn("), "switch state is derived from the recipe, not stored separately");
+});
+
+test("raw-source preview never lets an old styled or published frame pretend to be current raw", () => {
+  const frameState = STUDIO_SRC.slice(STUDIO_SRC.indexOf("function gdAdminCoursePreviewFrameState("), STUDIO_SRC.indexOf("function gdAdminCourseDebugMarkup("));
+  assert.ok(frameState.includes("const sourceModeDesired=gdAdminCourseVisualSourceModeDesired(courseId,record);"),
+    "preview selection must know when the requested state is raw/source");
+  assert.ok(frameState.includes("item&&item.metadata&&item.metadata.sourceMode"),
+    "raw mode must only trust a local styled frame if that frame itself is marked raw");
+  assert.ok(frameState.includes("if(!asset&&localBase){asset=localBase;assetKind=\"local-base\";}"),
+    "raw mode must prefer a genuine local base capture over a published cloud frame");
+  const sourceLine = STUDIO_SRC.slice(STUDIO_SRC.indexOf("function gdAdminCoursePreviewSourceLine("), STUDIO_SRC.indexOf("function gdAdminCoursePreviewFrameState("));
+  assert.ok(sourceLine.includes("Published cloud frame fallback"),
+    "when raw is unavailable the fallback must be labeled as a published frame, not implied raw");
 });
 
 test("the Recipe Lab's terrain preview shades the donor's hole, not 'recipe-lab'", () => {

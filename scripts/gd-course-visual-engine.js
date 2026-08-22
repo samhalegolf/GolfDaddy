@@ -76,6 +76,7 @@
     return !!(bounds&&Number.isFinite(Number(bounds.south))&&Number.isFinite(Number(bounds.west))&&Number.isFinite(Number(bounds.north))&&Number.isFinite(Number(bounds.east))&&Number(bounds.north)>=Number(bounds.south)&&Number(bounds.east)>=Number(bounds.west));
   }
   function clamp(value,min,max){value=Number(value);return Math.min(max,Math.max(min,Number.isFinite(value)?value:min));}
+  function bool(value){return value===true;}
   function svgNum(value){var n=Number(value);return Number.isFinite(n)?Number(n.toFixed(3)).toString():"0";}
   function median(list){
     var values=(Array.isArray(list)?list:[]).map(Number).filter(function(value){return Number.isFinite(value)&&value>0;}).sort(function(a,b){return a-b;});
@@ -1787,6 +1788,7 @@
     return String(meta&&meta.product||"")!=="course-overview";
   }
   function fairwayAirbrushSettings(settings){
+    if(isSourceModeSettings(settings))return null;
     var tools=settings&&settings.visualTools||{};
     if(tools.fairwayAirbrush===false)return null;
     var readability=settings&&settings.readability||{};
@@ -1853,6 +1855,7 @@
     return 0;
   }
   function nativeReadabilityOverlay(settings){
+    if(isSourceModeSettings(settings))return {top:0,bottom:0,opacity:0};
     var readability=settings&&settings.readability||{};
     var local=clamp(Number(readability.localContrast)||.08,0,.65);
     var top=clamp(.025+local*.22,.02,.16);
@@ -1948,6 +1951,8 @@
     var dims=visualAssetDimensions(asset,meta.width,meta.height);
     var source=visualAssetSourceMarkup(asset,dims.width,dims.height);
     if(!source)throw Object.assign(new Error("Base visual is not available"),{code:"base-visual-missing"});
+    var sourceMode=isSourceModeSettings(settings);
+    var toggles=visualEffectTogglesForSettings(settings);
     var f=filterForSettings(settings);
     /* When the source has already been measured and dragged onto the recipe's targets
        (normalisedSourceAsset ran first - see nativeVisualAssetAsync), brightness/contrast are
@@ -1957,30 +1962,53 @@
        system, so there is nothing to double up. */
     if(meta.toneNormalised){f=Object.assign({},f,{brightness:1,contrast:1});}
     var overlay=nativeReadabilityOverlay(settings);
-    var mow=mowingOpacity(settings&&settings.mowingVisibility);
     var role=text(meta.role,80)||"native-visuals";
     var stage=text(meta.stage,80)||"native-visuals";
     var version=meta.version!=null?String(meta.version):"";
     var assetBounds=visualAssetBounds(asset,meta.bounds);
     var inherited=inheritedSurfaceMetadata(asset);
     var effectMeta=Object.assign({},inherited,meta);
-    var airbrush=fairwayAirbrushMarkup(source,dims,assetBounds,settings,effectMeta);
+    var airbrush=sourceMode?{defs:"",layer:"",metadata:{enabled:false,reason:"source-mode"}}:fairwayAirbrushMarkup(source,dims,assetBounds,settings,effectMeta);
     var greenAirbrush=greenSurroundAirbrushMarkup(source,dims,assetBounds,settings,effectMeta);
-    var flood=floodlightMarkup(dims,assetBounds,settings,effectMeta);
+    var flood=sourceMode?{defs:"",layer:""}:floodlightMarkup(dims,assetBounds,settings,effectMeta);
     var greenLayer=f.greenBias?'<g data-role="green-strength" data-strength="'+svgNum(f.greenBias)+'" data-tone="'+svgNum(f.greenTone)+'"><rect width="100%" height="100%" fill="'+f.greenHex+'" opacity="'+svgNum(f.greenBias)+'" style="mix-blend-mode:hue"/><rect width="100%" height="100%" fill="#5fbe70" opacity="'+svgNum(f.greenBias*.42)+'" style="mix-blend-mode:saturation"/><rect width="100%" height="100%" fill="rgba(52,126,54,.18)" opacity="'+svgNum(f.greenBias*.32)+'" style="mix-blend-mode:soft-light"/></g>':"";
+    var mow=sourceMode||!toggles.mowing?0:mowingOpacity(settings&&settings.mowingVisibility);
     var mowingPattern=mow?'<pattern id="cvMowingStripe" width="24" height="24" patternUnits="userSpaceOnUse" patternTransform="rotate(108)"><path d="M0 0 L0 24" stroke="rgba(255,255,255,.20)" stroke-width="1"/></pattern>':"";
     var mowingLayer=mow?'<rect width="100%" height="100%" fill="url(#cvMowingStripe)" opacity="'+mow+'"/>':"";
     var svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+dims.width+'" height="'+dims.height+'" viewBox="0 0 '+dims.width+" "+dims.height+'" data-renderer="'+escapeXml(RENDERER_VERSION)+'" data-role="'+escapeXml(role)+'" data-stage="'+escapeXml(stage)+'"'+(version?' data-version="'+escapeXml(version)+'"':"")+'><defs><filter id="cvNative"><feColorMatrix type="saturate" values="'+f.saturation+'"/><feComponentTransfer><feFuncR type="linear" slope="'+f.contrast+'" intercept="'+((f.brightness-1)/2)+'"/><feFuncG type="linear" slope="'+f.contrast+'" intercept="'+((f.brightness-1)/2)+'"/><feFuncB type="linear" slope="'+f.contrast+'" intercept="'+((f.brightness-1)/2)+'"/></feComponentTransfer></filter><linearGradient id="cvNativeReadability" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="rgba(255,255,255,'+overlay.top+')"/><stop offset=".55" stop-color="rgba(255,255,255,0)"/><stop offset="1" stop-color="rgba(0,0,0,'+overlay.bottom+')"/></linearGradient>'+mowingPattern+(airbrush.defs||"")+(greenAirbrush.defs||"")+(flood.defs||"")+'</defs><rect width="100%" height="100%" fill="#10130f"/><g filter="url(#cvNative)">'+source+'</g>'+greenLayer+(airbrush.layer||"")+(greenAirbrush.layer||"")+'<rect width="100%" height="100%" fill="url(#cvNativeReadability)" opacity="'+overlay.opacity+'"/>'+mowingLayer+(flood.layer||"")+'</svg>';
     var metaOut=Object.assign({},meta);
     delete metaOut.objects;
     delete metaOut.airbrushObjects;
-    return {dataUrl:dataUrl("image/svg+xml",svg),width:dims.width,height:dims.height,bounds:assetBounds,sourceCaptureIds:asset&&asset.sourceCaptureIds||[],metadata:Object.assign({},inherited,{rendererVersion:RENDERER_VERSION,format:"image/svg+xml",role:role,stage:stage,inputRole:asset&&asset.metadata&&asset.metadata.role||"",inputStage:asset&&asset.metadata&&asset.metadata.stage||"",outputDimensions:dims,filter:f,fairwayAirbrush:airbrush.metadata,greenSurroundAirbrush:greenAirbrush.metadata},metaOut)};
+    return {dataUrl:dataUrl("image/svg+xml",svg),width:dims.width,height:dims.height,bounds:assetBounds,sourceCaptureIds:asset&&asset.sourceCaptureIds||[],metadata:Object.assign({},inherited,{rendererVersion:RENDERER_VERSION,format:"image/svg+xml",role:role,stage:stage,inputRole:asset&&asset.metadata&&asset.metadata.role||"",inputStage:asset&&asset.metadata&&asset.metadata.stage||"",outputDimensions:dims,filter:f,fairwayAirbrush:airbrush.metadata,greenSurroundAirbrush:greenAirbrush.metadata,sourceMode:sourceMode,effectToggles:toggles},metaOut)};
   }
   /* The real render entry point: measure + normalise the source first (normalisedSourceAsset -
      cached, so this is free unless the source or a target field actually changed), then hand the
      corrected asset to the same synchronous nativeVisualAsset every existing caller already
      understands. meta.toneNormalised tells it not to double-apply brightness/contrast. */
   function nativeVisualAssetAsync(asset,settings,meta){
+    if(isSourceModeSettings(settings)){
+      var inherited=inheritedSurfaceMetadata(asset);
+      var dims=visualAssetDimensions(asset,meta&&meta.width,meta&&meta.height);
+      return Promise.resolve({
+        dataUrl:asset&&asset.dataUrl||"",
+        width:dims.width,
+        height:dims.height,
+        bounds:visualAssetBounds(asset,meta&&meta.bounds),
+        sourceCaptureIds:asset&&asset.sourceCaptureIds||[],
+        metadata:Object.assign({},inherited,meta||{},{
+          rendererVersion:RENDERER_VERSION,
+          format:asset&&asset.metadata&&asset.metadata.format||"",
+          role:text(meta&&meta.role,80)||"native-visuals",
+          stage:"source-raw",
+          inputRole:asset&&asset.metadata&&asset.metadata.role||"",
+          inputStage:asset&&asset.metadata&&asset.metadata.stage||"",
+          outputDimensions:dims,
+          sourceMode:true,
+          effectToggles:visualEffectTogglesForSettings(settings),
+          normalisation:{applied:false,reason:"source-mode"}
+        })
+      });
+    }
     return normalisedSourceAsset(asset,settings).then(function(result){
       var m=Object.assign({},meta,{toneNormalised:result.applied,normalisation:result.diagnostics});
       return nativeVisualAsset(result.asset,settings,m);
@@ -2201,6 +2229,40 @@
     tone=clamp(finite(tone)==null?0:tone,-1,1);
     var hue=138-tone*34;
     return hslToHex(hue,.49,.46);
+  }
+  function legacyEffectToggleState(group,settings){
+    settings=settings||{};
+    var turf=settings.turf||{},lighting=settings.lighting||{},tools=settings.visualTools||{};
+    if(group==="turf")return Object.keys(turf).length>0||clamp(finite(turf.targetPull)==null?1:turf.targetPull,0,1)>0||clamp(finite(turf.greenStrength)==null?.35:turf.greenStrength,0,3.5)>.05;
+    if(group==="lighting")return Object.keys(lighting).length>0
+      ||Math.abs(clamp(finite(lighting.brightnessTarget)==null?52:lighting.brightnessTarget,0,100)-52)>2
+      ||Math.abs(clamp(finite(lighting.contrastTarget)==null?1:lighting.contrastTarget,.55,2.2)-1)>.03
+      ||clamp(finite(lighting.shadowLiftStrength)==null?0:lighting.shadowLiftStrength,0,1)>.02;
+    if(group==="floodlight")return !!(settings.floodlight&&settings.floodlight.enabled===true);
+    if(group==="terrain")return clamp(finite(tools.holeTerrainStrength)==null?.9:tools.holeTerrainStrength,0,1.6)>.02;
+    if(group==="mowing"){
+      var mowing=String(settings.mowingVisibility||"Unknown");
+      return mowing==="Low"||mowing==="Clear"||mowing==="Prominent";
+    }
+    return false;
+  }
+  function visualEffectTogglesForSettings(settings){
+    settings=settings||{};
+    var toggles=settings.effectToggles&&typeof settings.effectToggles==="object"?settings.effectToggles:{};
+    return {
+      turf:Object.prototype.hasOwnProperty.call(toggles,"turf")?bool(toggles.turf):legacyEffectToggleState("turf",settings),
+      lighting:Object.prototype.hasOwnProperty.call(toggles,"lighting")?bool(toggles.lighting):legacyEffectToggleState("lighting",settings),
+      floodlight:Object.prototype.hasOwnProperty.call(toggles,"floodlight")?bool(toggles.floodlight):legacyEffectToggleState("floodlight",settings),
+      terrain:Object.prototype.hasOwnProperty.call(toggles,"terrain")?bool(toggles.terrain):legacyEffectToggleState("terrain",settings),
+      mowing:Object.prototype.hasOwnProperty.call(toggles,"mowing")?bool(toggles.mowing):legacyEffectToggleState("mowing",settings)
+    };
+  }
+  function isSourceModeSettings(settings){
+    settings=settings||{};
+    if(settings.sourceMode===true)return true;
+    if(settings.processing&&settings.processing.sourceMode===true)return true;
+    var toggles=visualEffectTogglesForSettings(settings);
+    return !toggles.turf&&!toggles.lighting&&!toggles.floodlight&&!toggles.terrain&&!toggles.mowing;
   }
   /* ---------------------------------------------------------------------------
      Normalisation - drag the actual pixels onto the preset targets.
@@ -2452,12 +2514,26 @@
      moves L - hue and saturation are untouched by it, so they need no adjustment. */
   function normaliseSurfacePixels(pixels,settings,opts){
     opts=opts||{};
+    var toggles=visualEffectTogglesForSettings(settings);
     var band=turfBand(settings);
     var sampleStep=Math.max(1,Math.round(finite(opts.sampleStep)||2));
     var before=measureSurfacePixels(pixels,{band:band,sampleStep:sampleStep});
+    if(isSourceModeSettings(settings)){
+      return {
+        band:band,
+        before:before,
+        after:before,
+        shadowFill:{applied:false,reason:"source-mode"},
+        tone:{applied:false,reason:"source-mode"},
+        turf:{applied:false,reason:"source-mode"},
+        model:"source-identity",
+        sourceMode:true,
+        effectToggles:toggles
+      };
+    }
     var tone=toneCurveLut(before,settings);
     var toneLut=tone.lut;
-    function toneMap(l){return toneLut[Math.round(clamp(l,0,100))];}
+    function toneMap(l){return toggles.lighting?toneLut[Math.round(clamp(l,0,100))]:clamp(l,0,100);}
     var turfCfg=settings&&settings.turf||{};
     var hueMin=finite(turfCfg.hueMin)==null?86:turfCfg.hueMin;
     var hueMax=finite(turfCfg.hueMax)==null?142:turfCfg.hueMax;
@@ -2470,7 +2546,7 @@
     if(pull==null)pull=1;
     pull=clamp(pull,0,1);
     var m=before.turf,satFloor=8;
-    var hasTurf=!!(m&&m.sampled);
+    var hasTurf=!!(m&&m.sampled)&&toggles.turf;
     for(var i=0;i+3<pixels.length;i+=4){
       if(pixels[i+3]<8)continue;
       var hsl=rgbToHsl(pixels[i],pixels[i+1],pixels[i+2]);
@@ -2483,16 +2559,22 @@
       var rgb=hslToRgb(h,clamp(s,0,100),clamp(l,0,100));
       pixels[i]=rgb[0];pixels[i+1]=rgb[1];pixels[i+2]=rgb[2];
     }
-    var shadowFill=shadowSurroundFill(pixels,Math.max(0,Math.round(finite(opts.width)||0)),Math.max(0,Math.round(finite(opts.height)||0)),4,settings);
+    var shadowFill=toggles.lighting
+      ?shadowSurroundFill(pixels,Math.max(0,Math.round(finite(opts.width)||0)),Math.max(0,Math.round(finite(opts.height)||0)),4,settings)
+      :{applied:false,reason:"lighting-disabled"};
     var after=measureSurfacePixels(pixels,{band:band,sampleStep:sampleStep});
     return {
       band:band,
       before:before,
       after:after,
       shadowFill:shadowFill,
-      tone:{blackPoint:tone.blackPoint,whitePoint:tone.whitePoint,measuredMean:tone.measuredMean,gamma:tone.gamma,shadowFloor:tone.shadowFloor,highlightCeiling:tone.highlightCeiling,brightnessTarget:tone.brightnessTarget,contrast:tone.contrast},
-      turf:hasTurf?{applied:true,hue:[hueMin,hueMax],saturation:[satMin,satMax],luma:[lumMin,lumMax],pull:+pull.toFixed(3),coverage:+m.coverage.toFixed(3)}:{applied:false,reason:"no-turf-pixels"},
-      model:"measure-and-drag-to-target"
+      tone:toggles.lighting
+        ?{applied:true,blackPoint:tone.blackPoint,whitePoint:tone.whitePoint,measuredMean:tone.measuredMean,gamma:tone.gamma,shadowFloor:tone.shadowFloor,highlightCeiling:tone.highlightCeiling,brightnessTarget:tone.brightnessTarget,contrast:tone.contrast}
+        :{applied:false,reason:"lighting-disabled",measuredMean:tone.measuredMean},
+      turf:hasTurf?{applied:true,hue:[hueMin,hueMax],saturation:[satMin,satMax],luma:[lumMin,lumMax],pull:+pull.toFixed(3),coverage:+m.coverage.toFixed(3)}:{applied:false,reason:toggles.turf?"no-turf-pixels":"turf-disabled"},
+      model:"measure-and-drag-to-target",
+      sourceMode:false,
+      effectToggles:toggles
     };
   }
   /* ---------------------------------------------------------------------------
@@ -2562,6 +2644,13 @@
   /* asset in, {asset,applied,diagnostics} out. On every fallback path `asset` is returned
      unchanged so callers never need a separate branch for "normalisation didn't happen". */
   function normalisedSourceAsset(asset,settings){
+    if(isSourceModeSettings(settings)){
+      return Promise.resolve({
+        asset:asset,
+        applied:false,
+        diagnostics:{applied:false,reason:"source-mode",sourceMode:true,effectToggles:visualEffectTogglesForSettings(settings)}
+      });
+    }
     var dims=visualAssetDimensions(asset);
     var key=normalisationCacheKey(asset,dims.width,dims.height,settings);
     var cached=normalisedSurfaceCache[key];
@@ -2598,6 +2687,8 @@
      default so this works everywhere.
      --------------------------------------------------------------------------- */
   function floodlightSettings(settings){
+    if(isSourceModeSettings(settings))return {enabled:false,ambientLevel:24,litLevel:64,throwOff:.35,spread:.45,greenPool:.8,greenPoolRadius:.22,useObjectMask:false};
+    var toggles=visualEffectTogglesForSettings(settings);
     var f=settings&&settings.floodlight||{};
     var ambient=finite(f.ambientLevel);
     var lit=finite(f.litLevel);
@@ -2606,7 +2697,7 @@
     var greenPool=finite(f.greenPool);
     var greenPoolRadius=finite(f.greenPoolRadius);
     return {
-      enabled:f.enabled===true,
+      enabled:toggles.floodlight&&f.enabled===true,
       ambientLevel:clamp(ambient==null?24:ambient,0,100),
       litLevel:clamp(lit==null?64:lit,0,100),
       throwOff:clamp(throwOff==null?.35:throwOff,0,1),
@@ -2689,6 +2780,8 @@
     return {applied:true,ambientLevel:cfg.ambientLevel,litLevel:cfg.litLevel,throwOff:cfg.throwOff,spread:cfg.spread,greenPool:cfg.greenPool,greenPoolRadiusPx:Math.round(greenRadius),referenceLevel:reference,halfWidthPx:Math.round(halfWidth),useObjectMask:cfg.useObjectMask,maskApplied:false,model:"play-axis-floodlight"};
   }
   function filterForSettings(settings){
+    var toggles=visualEffectTogglesForSettings(settings);
+    if(isSourceModeSettings(settings))return {saturation:1,brightness:1,contrast:1,sharpness:0,greenBias:0,greenTone:0,greenHex:greenToneHex(0)};
     var turf=settings&&settings.turf||{};
     var lighting=settings&&settings.lighting||{};
     var readability=settings&&settings.readability||{};
@@ -2704,9 +2797,11 @@
     var contrast=finite(lighting.contrastTarget);
     if(contrast==null)contrast=1;
     contrast=clamp(contrast,.55,2.2);
-    var saturation=1+green*.55;
+    var saturation=toggles.turf?1+green*.55:1;
     var greenBias=clamp(green*.2,0,.62);
-    var brightness=clamp(1+(brightnessTarget-52)/90,.45,1.75);
+    if(!toggles.turf)greenBias=0;
+    var brightness=toggles.lighting?clamp(1+(brightnessTarget-52)/90,.45,1.75):1;
+    if(!toggles.lighting)contrast=1;
     var sharp=clamp(Number(readability.sharpness)||0,0,.8);
     return {saturation:+saturation.toFixed(3),brightness:+brightness.toFixed(3),contrast:+contrast.toFixed(3),sharpness:+sharp.toFixed(3),greenBias:+greenBias.toFixed(3),greenTone:+greenTone.toFixed(3),greenHex:greenToneHex(greenTone)};
   }
@@ -3813,6 +3908,8 @@
     ensureCourseFrames:ensureCourseFrames,
     defaultPreset:defaultPreset,
     greenToneHex:greenToneHex,
+    visualEffectTogglesForSettings:visualEffectTogglesForSettings,
+    isSourceModeSettings:isSourceModeSettings,
     measureSurfacePixels:measureSurfacePixels,
     normaliseSurfacePixels:normaliseSurfacePixels,
     nativeVisualAssetAsync:nativeVisualAssetAsync,
@@ -3851,6 +3948,6 @@
     pullCourseVisual:pullCourseVisual,
     buildFromCourseDatabase:buildFromCourseDatabase,
     hydrateCourseVisualAssets:hydrateCourseVisualAssets,
-    __test:{emptyStore:emptyStore,stitchSvg:stitchSvg,hashString:hashString,captureSignature:captureSignature,metadataForCloud:metadataForCloud,loadAssetData:loadAssetData,saveAssetData:saveAssetData,filterForSettings:filterForSettings,greenToneHex:greenToneHex,hslToHex:hslToHex,capturePolicy:capturePolicy,nativeVisualAsset:nativeVisualAsset}
+    __test:{emptyStore:emptyStore,stitchSvg:stitchSvg,hashString:hashString,captureSignature:captureSignature,metadataForCloud:metadataForCloud,loadAssetData:loadAssetData,saveAssetData:saveAssetData,filterForSettings:filterForSettings,greenToneHex:greenToneHex,hslToHex:hslToHex,capturePolicy:capturePolicy,nativeVisualAsset:nativeVisualAsset,visualEffectTogglesForSettings:visualEffectTogglesForSettings,isSourceModeSettings:isSourceModeSettings}
   };
 });

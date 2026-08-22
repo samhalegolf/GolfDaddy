@@ -1256,9 +1256,11 @@ function gdAdminCoursePreviewMarkup(selected){
 function gdAdminCoursePreviewSourceLine(selected,view,capturedCount,holeCount){
   const kind=view&&view.assetKind||"";
   const tone=kind==="local-styled"||kind==="cloud-frame"||kind==="terrain-preview"?"ready":"warn";
-  const label=kind==="terrain-preview"?"terrain preview"
-    :kind==="local-styled"?(view&&view.baseSource==="cloud-frame"?"cloud frame · re-styled":"surface ready")
-    :kind==="cloud-frame"?"cloud frame":kind==="local-base"?"original capture":"hydrating";
+  const rawStyled=!!(view&&view.asset&&view.asset.metadata&&view.asset.metadata.sourceMode);
+  const label=kind==="terrain-preview"?"Terrain preview"
+    :kind==="local-styled"?(rawStyled?"Raw capture":(view&&view.baseSource==="cloud-frame"?"Local recipe preview · cloud-backed":"Local recipe preview"))
+    :kind==="cloud-frame"?(view&&view.isSourceFallback?"Published cloud frame fallback":"Published cloud frame")
+    :kind==="local-base"?"Raw capture":"Loading source…";
   const path=view&&view.cloudFrame?String(view.cloudFrame.path)
     :view&&view.asset&&view.asset.path?String(view.asset.path):"";
   const counts=capturedCount==null||capturedCount===""?"":`<span>H${gdEscapeHTML(view&&view.holeNumber||"")} · ${gdEscapeHTML(capturedCount)}/${gdEscapeHTML(holeCount)} captured</span>`;
@@ -1275,12 +1277,25 @@ function gdAdminCoursePreviewSourceLine(selected,view,capturedCount,holeCount){
    its own when a bake completes, without rebuilding the tuning dock around it. */
 function gdAdminCoursePreviewFrameState(selected,record,current){
   const courseId=String(selected&&selected.id||"");
+  const sourceModeDesired=gdAdminCourseVisualSourceModeDesired(courseId,record);
   const styledLists=[record&&record.holeFramePreviewVisuals];
   const baseLists=[record&&record.holeFramePublishedVisuals,record&&record.holeFrameVisuals];
   let asset=null,assetKind="";
   for(const list of styledLists){
-    const match=(Array.isArray(list)?list:[]).find(item=>Number(item&&item.holeNumber)===current&&item.dataUrl);
+    const match=(Array.isArray(list)?list:[]).find(item=>{
+      if(Number(item&&item.holeNumber)!==current||!item.dataUrl)return false;
+      if(!sourceModeDesired)return true;
+      return !!(item&&item.metadata&&item.metadata.sourceMode);
+    });
     if(match){asset=match;assetKind="local-styled";break;}
+  }
+  let localBase=null;
+  if(sourceModeDesired){
+    for(const list of baseLists){
+      const match=(Array.isArray(list)?list:[]).find(item=>Number(item&&item.holeNumber)===current&&item.dataUrl);
+      if(match){localBase=match;break;}
+    }
+    if(!asset&&localBase){asset=localBase;assetKind="local-base";}
   }
   const cloudFrame=asset||gdAdminCourseCloudFramesSuppressed[courseId]?null:gdAdminCourseCloudFrameFor(courseId,current);
   if(!asset&&!cloudFrame)for(const list of styledLists.concat(baseLists)){
@@ -1303,7 +1318,7 @@ function gdAdminCoursePreviewFrameState(selected,record,current){
     .find(frame=>frame&&Math.round(Number(frame.holeNumber))===current)):null;
   const baseSource=baseForHole&&baseForHole.metadata&&baseForHole.metadata.baseSource||"";
   return {asset:asset,assetKind:assetKind,cloudFrame:cloudFrame,terrainTransient:terrainTransient,
-    src:src,frameHtml:frameHtml,holeNumber:current,courseId:courseId,baseSource:baseSource};
+    src:src,frameHtml:frameHtml,holeNumber:current,courseId:courseId,baseSource:baseSource,isSourceFallback:sourceModeDesired&&!asset&&!!cloudFrame};
 }
 function gdAdminCourseDebugMarkup(selected){
   return `<div class="gdAdminCourseDebugWindow"><div class="gdCoursePlayDebug" id="gdCoursePlayDebugPanel"><div class="gdCoursePlayDebugHead"><div><h3>Live scan feedback</h3><p>Local scan, frame-cache, sync, and runtime events on this browser. This is browser state, not the database.</p></div><div class="gdCoursePlayDebugActions"><button type="button" onclick="return gdAdminCourseDebugRefresh()">Refresh</button><button type="button" onclick="gdClearCoursePlayPipelineDebug();return gdAdminCourseDebugRefresh()">Clear log</button></div></div><div id="gdCoursePlayDebugSummary" class="gdCoursePlayDebugSummary"></div><div id="gdCoursePlayDebugTable"></div><div id="gdCoursePlayDebugTimeline" class="gdCoursePlayDebugTimeline"></div></div><div class="gdCoursePlayDebug gdCourseMappingDebug" id="gdCourseMappingDebugPanel"></div><details class="gdAdminCourseSettings"><summary>Visual engine internals</summary><div class="gdAdminCourseSettingsBody">${gdAdminCourseVisualMarkup(selected)}</div></details></div>`;
@@ -1989,6 +2004,12 @@ function gdAdminCourseVisualDisplayedSettings(courseId,record){
   }
   return null;
 }
+function gdAdminCourseVisualSourceModeDesired(courseId,record){
+  const engine=window.GDCourseVisualEngine;
+  const settings=gdAdminCourseVisualCurrentSettings(courseId,record);
+  try{return !!(engine&&typeof engine.isSourceModeSettings==="function"&&engine.isSourceModeSettings(settings));}catch(e){}
+  return !!(settings&&settings.sourceMode===true);
+}
 function gdAdminCourseVisualIngredients(courseId,record,assetKind){
   const api=typeof window!=="undefined"?window.GDStudioPreviewTruth:null;
   if(!api||typeof api.ingredientStates!=="function")return [];
@@ -2230,6 +2251,9 @@ function gdAdminCoursePreviewFrameDescriptor(view,record){
   }
   if(view.assetKind==="local-styled"){
     const asset=view.asset||{};
+    if(asset.metadata&&asset.metadata.sourceMode){
+      return {kind:"bake",presetId:"",overrideHash:"",holeNumber:Number(asset.holeNumber)||view.holeNumber,source:"raw-capture",recipeKnown:false};
+    }
     /* Resolve the frame's recipe HERE, while it is still resolvable. A frame baked in a
        previous session can only be identified by matching its hash against the saved
        recipe - and the very next control commit overwrites that saved recipe, so a
@@ -2247,7 +2271,7 @@ function gdAdminCoursePreviewFrameDescriptor(view,record){
   /* A cloud frame or a raw capture is a real picture but not one whose recipe this
      browser can vouch for, so it can never confirm an ingredient. */
   return {kind:"bake",presetId:"",overrideHash:"",holeNumber:view.holeNumber,
-    source:view.assetKind,recipeKnown:false};
+    source:view.assetKind==="local-base"?"raw-capture":"published-cloud-frame",recipeKnown:false};
 }
 let gdAdminCourseVisualPreviewChangeDepth=0;
 function gdAdminCourseVisualPreviewChanged(courseId,reason){
@@ -2607,7 +2631,9 @@ const GD_VISUAL_OFF_OVERRIDES={
   readability:{sharpness:0,fairwaySeparation:0},
   mowingVisibility:"Unknown",
   visualTools:{holeTerrainStrength:0,courseTerrainStrength:0,fairwayAirbrush:false},
-  floodlight:{enabled:false}
+  floodlight:{enabled:false},
+  effectToggles:{turf:false,lighting:false,floodlight:false,terrain:false,mowing:false},
+  sourceMode:true
 };
 function gdAdminCourseVisualResetRecipe(courseId){
   const engine=window.GDCourseVisualEngine;
@@ -2991,6 +3017,13 @@ function gdAdminCourseVisualPresetChanged(courseId){
 
     const mowing=document.getElementById("gdCourseVisualMowing");
     if(mowing)mowing.value=String(preset.mowingVisibility||"Unknown");
+    const toggleState=(group)=>gdAdminCourseVisualEffectIsOn(group,preset);
+    const setToggle=(id,on)=>{const el=document.getElementById(id);if(el)el.checked=!!on;};
+    setToggle("gdCourseVisualTurfOn",toggleState("turf"));
+    setToggle("gdCourseVisualLightingOn",toggleState("lighting"));
+    setToggle("gdCourseVisualFloodOn",toggleState("floodlight"));
+    setToggle("gdCourseVisualTerrainOn",toggleState("terrain"));
+    setToggle("gdCourseVisualMowingOn",toggleState("mowing"));
   }
   return gdAdminCourseVisualControlCommitted(courseId,"gdCourseVisualPreset");
 }
@@ -3144,6 +3177,13 @@ const GD_VISUAL_EFFECT_TOGGLE_IDS={
 const gdAdminCourseVisualEffectStash={};
 function gdAdminCourseVisualEffectIsOn(group,settings){
   settings=settings||{};
+  const engine=window.GDCourseVisualEngine;
+  try{
+    if(engine&&typeof engine.visualEffectTogglesForSettings==="function"){
+      const toggles=engine.visualEffectTogglesForSettings(settings);
+      if(Object.prototype.hasOwnProperty.call(toggles,group))return !!toggles[group];
+    }
+  }catch(e){}
   const turf=settings.turf||{},lighting=settings.lighting||{},tools=settings.visualTools||{};
   /* The same predicates the ingredient chips use - the switch and the chip must never
      disagree about what "on" means. */
@@ -3463,6 +3503,14 @@ function gdAdminCourseVisualOverridesFromForm(courseId){
     visualTools:{holeTerrainStrength:num("gdCourseVisualTerrainStrength",0,1.6,.9)},
     mowingVisibility:String(document.getElementById("gdCourseVisualMowing")?.value||"Unknown")
   };
+  out.effectToggles={
+    turf:document.getElementById("gdCourseVisualTurfOn")?.checked===true,
+    lighting:document.getElementById("gdCourseVisualLightingOn")?.checked===true,
+    floodlight:document.getElementById("gdCourseVisualFloodOn")?.checked===true,
+    terrain:document.getElementById("gdCourseVisualTerrainOn")?.checked===true,
+    mowing:document.getElementById("gdCourseVisualMowingOn")?.checked===true
+  };
+  out.sourceMode=!out.effectToggles.turf&&!out.effectToggles.lighting&&!out.effectToggles.floodlight&&!out.effectToggles.terrain&&!out.effectToggles.mowing;
   return gdAdminCourseVisualCarryUncontrolled(out,courseId);
 }
 function gdAdminCourseVisualToast(text){

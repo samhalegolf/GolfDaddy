@@ -511,7 +511,9 @@ const RAW_BASELINE_OVERRIDES = {
   readability: { sharpness: 0, fairwaySeparation: 0 },
   mowingVisibility: 0,
   visualTools: { holeTerrainStrength: 0, courseTerrainStrength: 0, fairwayAirbrush: false },
-  floodlight: { enabled: false }
+  floodlight: { enabled: false },
+  effectToggles: { turf: false, lighting: false, floodlight: false, terrain: false, mowing: false },
+  sourceMode: true
 };
 
 function cloneJson(value) {
